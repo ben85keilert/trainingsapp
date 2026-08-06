@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Abhängigkeiten installieren
+        # Nur was ohne Bildschirm gebraucht wird. flet selbst ist für die Tests
+        # nicht nötig — genau das ist der Sinn der Importregel.
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pytest ruff mypy
+
+      - name: Linter
+        run: ruff check .
+
+      - name: Formatierung
+        run: ruff format --check .
+
+      - name: Tests
+        run: pytest -q
+        env:
+          PYTHONPATH: src
+
+      - name: Doctests
+        run: |
+          pytest --doctest-modules -q \
+            src/trainingsapp/core \
+            src/trainingsapp/hrv_core \
+            src/trainingsapp/devices \
+            src/trainingsapp/config.py
+        env:
+          PYTHONPATH: src
+
+      - name: Beispiele des Lernpfads
+        # Wenn ein Beispiel nicht mehr läuft, ist der Lernpfad kaputt —
+        # und das soll auffallen, bevor jemand daran sitzt.
+        run: |
+          for f in docs/tutorial/L01_werkzeuge/beispiel_03.py \
+                   docs/tutorial/L02b_aufs_handy/pruefe_ble.py \
+                   docs/tutorial/L04_daten_und_sqlite/beispiel_01.py \
+                   docs/tutorial/L04_daten_und_sqlite/beispiel_02.py \
+                   docs/tutorial/L04_daten_und_sqlite/beispiel_03.py; do
+            echo "--- $f"
+            python "$f" > /dev/null
+          done
+        env:
+          PYTHONPATH: src

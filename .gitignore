@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/dist/
+dist/
+.venv/
+venv/
+.env
+
+# Werkzeuge
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Flet-Builds
+/build/*/
+!/build/*.toml
+*.apk
+*.aab
+*.ipa
+
+# Lokale Daten — NIEMALS committen (Gesundheitsdaten!)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+/daten/
+/messungen/
+sensor_*.json
+!tests/golden/rr/sensor_*.json
+
+# Betriebssystem / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,22 @@
+# Build-Profil: Edition A — autark, alles bleibt auf dem Gerät.
+#
+#   flet build apk --template-data build/solo.toml
+#
+# Kein Netzwerkpfad, keine Serververbindung.
+
+[app]
+edition = "solo"
+name = "Trainingsassistent"
+description = "Bewegungsübungen dokumentieren, mit begleitender HRV-Messung"
+bundle_id = "de.praxis-ebert.trainingsassistent"
+
+[android]
+permissions = [
+    "android.permission.BLUETOOTH_SCAN",
+    "android.permission.BLUETOOTH_CONNECT",
+]
+# INTERNET wird in dieser Edition nur zum Nachladen der Erklärvideos gebraucht.
+# Wer sie nicht braucht, kann die Berechtigung entfernen.
+
+[ios]
+bluetooth_usage = "Zum Verbinden mit deinem Herzfrequenzsensor während des Trainings."

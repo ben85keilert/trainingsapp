@@ -1,0 +1,25 @@
+# Build-Profil: Edition B — Anbindung an die Praxisdatenbank.
+#
+#   flet build apk --template-data build/praxis.toml
+#
+# ACHTUNG: Vor der Auslieferung müssen die Dokumente in docs/recht/ ausgefüllt
+# und geprüft sein — insbesondere 00_zweckbestimmung.md, 30_avv.md und
+# 50_dsfa.md. Ohne unterzeichneten Auftragsverarbeitungsvertrag darf kein
+# Patientendatensatz auf den Server.
+
+[app]
+edition = "praxis"
+name = "Trainingsassistent Praxis"
+description = "Übungen und Trainingsverlauf gemeinsam mit deiner Praxis"
+bundle_id = "de.praxis-ebert.trainingsassistent.praxis"
+
+[android]
+permissions = [
+    "android.permission.BLUETOOTH_SCAN",
+    "android.permission.BLUETOOTH_CONNECT",
+    "android.permission.INTERNET",
+    "android.permission.POST_NOTIFICATIONS",
+]
+
+[ios]
+bluetooth_usage = "Zum Verbinden mit deinem Herzfrequenzsensor während des Trainings."

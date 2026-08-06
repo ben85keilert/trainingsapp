@@ -1,0 +1,93 @@
+[project]
+name = "trainingsapp"
+version = "0.1.0"
+description = "Trainingsassistent für Bewegungsübungen mit begleitender HRV-Messung"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+
+# Laufzeitabhängigkeiten bewusst minimal.
+#
+# numpy ist die einzige binäre Abhängigkeit — sie ist als vorgebautes Wheel für
+# Android und iOS über pypi.flet.dev verfügbar. scipy ist es NICHT; deshalb
+# implementiert hrv_core/ Welch, Lomb-Scargle, DFA und SampEn selbst.
+# Siehe docs/hrv_algorithmen.md.
+dependencies = [
+    "flet==0.86.*",
+    "flet-charts==0.86.*",
+    "flet-video==0.86.*",
+    "flet-permission-handler==0.86.*",
+    "numpy>=2.1",
+]
+
+[project.optional-dependencies]
+# Nur für die Desktop-Entwicklung: bleak funktioniert auf Windows/macOS/Linux,
+# aber nicht in Flet-Android-Builds (serious_python statt python-for-android).
+# Mobile BLE kommt über eine eigene Flet-Extension — siehe docs/architektur.md.
+desktop = ["bleak>=0.22"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+trainingsapp = ["data/migrations/*.sql", "data/seed/*.json"]
+
+# ---------------------------------------------------------------------------
+# Flet-Build
+# ---------------------------------------------------------------------------
+# Die editionsspezifischen Werte (App-Name, Bundle-ID, Icon) stehen in
+# build/solo.toml und build/praxis.toml und werden beim Bauen übergeben.
+[tool.flet]
+org = "de.praxis-ebert"
+product = "Trainingsassistent"
+company = "Praxis Ebert"
+copyright = "Copyright (C) 2026 Benjamin Ebert"
+
+[tool.flet.app]
+path = "src/trainingsapp/ui"
+
+[tool.flet.android.permission]
+"android.permission.BLUETOOTH_SCAN" = true
+"android.permission.BLUETOOTH_CONNECT" = true
+"android.permission.INTERNET" = true
+
+# ---------------------------------------------------------------------------
+# Werkzeuge
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+# Markdown enthält Lehrbeispiele, deren Ausrichtung absichtlich so ist.
+# ruff soll sie nicht umformatieren.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "RUF001",  # deutsche Umlaute/Sonderzeichen in Strings sind gewollt
+    "RUF002",
+    "RUF003",
+]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["trainingsapp"]
+mypy_path = "src"
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"

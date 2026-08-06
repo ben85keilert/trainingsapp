@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "hinweis": "Startkatalog. Wird beim ersten Start eingespielt. Eigene Übungen entstehen daneben und werden hier nie überschrieben.",
+  "exercises": [
+    {
+      "key": "atem_4_7_8",
+      "name": "4-7-8-Atmung",
+      "category": "Atmung",
+      "description": "Vier Sekunden einatmen, sieben halten, acht ausatmen. Beruhigt und ist gut als Einstieg in eine HRV-Messung geeignet.",
+      "icon_key": "air",
+      "spec": "halten",
+      "tags": ["Atmung", "Entspannung", "HRV"],
+      "media": [
+        {"kind": "video", "source": "url", "uri": "", "title": "Erklärvideo (noch zu ergänzen)"}
+      ],
+      "limit_spec": {"rules": [{"type": "timer", "seconds": 300}]}
+    },
+    {
+      "key": "kohaerenzatmung",
+      "name": "Kohärenzatmung (6/min)",
+      "category": "Atmung",
+      "description": "Gleichmäßig fünf Sekunden ein, fünf Sekunden aus. Erzeugt einen deutlichen Ausschlag im LF-Band und eignet sich gut, um die HRV-Messung zu prüfen.",
+      "icon_key": "waves",
+      "spec": "halten",
+      "tags": ["Atmung", "HRV"],
+      "limit_spec": {"rules": [{"type": "timer", "seconds": 300}]}
+    },
+    {
+      "key": "luft_anhalten",
+      "name": "Luft anhalten",
+      "category": "Benchmark",
+      "description": "Nach normaler Ausatmung so lange wie angenehm möglich anhalten. Nicht bis zur Grenze — der Wert soll vergleichbar sein, nicht maximal.",
+      "icon_key": "timer",
+      "spec": "benchmark_zeit",
+      "tags": ["Benchmark", "Atmung"]
+    },
+    {
+      "key": "schulter_aussenrotation",
+      "name": "Schulter-Außenrotation",
+      "category": "Schulter",
+      "description": "Oberarm am Körper, Unterarm nach außen drehen. Bewegung aus der Schulter, nicht aus dem Rumpf.",
+      "icon_key": "accessibility",
+      "spec": "saetze_wdh",
+      "tags": ["Schulter", "Kräftigung"]
+    },
+    {
+      "key": "schulter_beweglichkeit",
+      "name": "Schulterbeweglichkeit messen",
+      "category": "Schulter",
+      "description": "Erreichbarer Winkel bei der Abduktion. Immer gleich messen, sonst ist der Verlauf wertlos.",
+      "icon_key": "straighten",
+      "spec": "winkel",
+      "tags": ["Schulter", "Beweglichkeit", "Benchmark"]
+    },
+    {
+      "key": "nacken_dehnung",
+      "name": "Nackendehnung seitlich",
+      "category": "Nacken",
+      "description": "Kopf zur Seite neigen, Gegenschulter bewusst nach unten ziehen. Ohne Zug am Kopf.",
+      "icon_key": "self_improvement",
+      "spec": "halten",
+      "tags": ["Nacken", "Dehnung"]
+    },
+    {
+      "key": "brustwirbel_mobilisation",
+      "name": "Brustwirbelsäule mobilisieren",
+      "category": "Rücken",
+      "description": "Im Vierfüßlerstand abwechselnd Rundrücken und Hohlkreuz, langsam und über die ganze Bewegungsbahn.",
+      "icon_key": "sync_alt",
+      "spec": "saetze_wdh",
+      "tags": ["Rücken", "Mobilisation"]
+    },
+    {
+      "key": "hueftbeuger_dehnung",
+      "name": "Hüftbeuger dehnen",
+      "category": "Hüfte",
+      "description": "Ausfallschritt, Becken aufrichten, Gesäß anspannen. Der Zug gehört vorn in die Hüfte, nicht in den Rücken.",
+      "icon_key": "directions_walk",
+      "spec": "halten",
+      "tags": ["Hüfte", "Dehnung"]
+    },
+    {
+      "key": "beinachsentraining",
+      "name": "Beinachsentraining",
+      "category": "Knie",
+      "description": "Einbeinige Kniebeuge in kleinem Bewegungsumfang. Knie bleibt über dem Fuß, kippt nicht nach innen.",
+      "icon_key": "airline_seat_legroom_extra",
+      "spec": "saetze_wdh",
+      "tags": ["Knie", "Kräftigung", "Koordination"]
+    },
+    {
+      "key": "wadenheben",
+      "name": "Wadenheben",
+      "category": "Fuß",
+      "description": "Langsam auf die Fußballen, oben kurz halten, noch langsamer ablassen.",
+      "icon_key": "fitness_center",
+      "spec": "saetze_wdh",
+      "tags": ["Fuß", "Kräftigung"]
+    },
+    {
+      "key": "einbeinstand",
+      "name": "Einbeinstand",
+      "category": "Gleichgewicht",
+      "description": "Frei stehen, Blick geradeaus. Steigerung: Augen schließen.",
+      "icon_key": "balance",
+      "spec": "halten",
+      "tags": ["Gleichgewicht", "Benchmark"]
+    },
+    {
+      "key": "unterarmstuetz",
+      "name": "Unterarmstütz",
+      "category": "Rumpf",
+      "description": "Gerade Linie von Kopf bis Ferse. Lieber kürzer und sauber als lang und durchhängend.",
+      "icon_key": "horizontal_rule",
+      "spec": "halten",
+      "tags": ["Rumpf", "Kräftigung", "Benchmark"]
+    },
+    {
+      "key": "hrv_ruhemessung",
+      "name": "HRV-Ruhemessung",
+      "category": "Messung",
+      "description": "Fünf Minuten ruhig sitzen oder liegen, gleichmäßig atmen, nicht sprechen. Möglichst immer zur gleichen Tageszeit.",
+      "icon_key": "monitor_heart",
+      "spec": "halten",
+      "tags": ["HRV", "Messung"],
+      "limit_spec": {"rules": [{"type": "timer", "seconds": 300}]}
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+# L02 — Übung
+
+## Aufgabe 1: update() begreifen
+
+Starte `beispiel_02.py` und klick beide Zähler mehrfach, dann „Wahrheit zeigen".
+
+**Fragen:**
+1. Was genau ist beim linken Zähler passiert — und was nicht?
+2. Warum hat Flet dieses Verhalten? Was wäre der Nachteil, wenn jede Zuweisung
+   sofort übertragen würde?
+3. In `beispiel_02.py` steht `page.update()`. Es ginge auch `anzeige_mit.update()`.
+   Wann ist welches besser?
+
+## Aufgabe 2: Karte lesen
+
+Öffne `beispiel_03.py` und zeichne den Control-Baum von `uebungskarte()` auf
+Papier.
+
+**Fragen:**
+1. Warum hat die mittlere `Column` ein `expand=True`?
+2. Was passiert, wenn du es entfernst? Probier es aus.
+3. Was bewirken `max_lines=2` und `overflow=ELLIPSIS`? Lösch sie testweise und
+   schau dir eine Übung mit langer Beschreibung an.
+
+## Aufgabe 3: Karte erweitern
+
+Ergänze `uebungskarte()` um die **Kategorie** als kleine Markierung
+(z. B. „Atmung", „Schulter"). Sie steht in `uebung["category"]`.
+
+Anforderungen:
+- klein und dezent, sie darf den Namen nicht erschlagen
+- eigene Hintergrundfarbe aus dem Theme
+- sie soll sich auch im Dunkelmodus richtig verhalten
+
+Tipp: ein `Container` mit `padding`, `border_radius` und `bgcolor` um einen
+kleinen `Text`. Zum Prüfen `page.theme_mode` auf `ft.ThemeMode.DARK` stellen.
+
+## Aufgabe 4: Ein Zähler zum Training
+
+Schreibe `wiederholungen.py`: ein Zähler für Wiederholungen während einer Übung.
+
+- große Zahl in der Mitte
+- ein großer „+1"-Knopf (er wird beim Training getroffen, nicht in Ruhe)
+- ein kleiner „−1" für Vertipper
+- ein „Zurücksetzen"
+- unter der Zahl das Ziel: „von 15"
+- **wenn das Ziel erreicht ist, wird die Zahl grün**
+
+Das ist die Vorstufe dessen, was in M3 wirklich gebraucht wird.
+
+Tipp für die Farbe:
+
+```python
+anzeige.color = ft.Colors.PRIMARY if stand >= ziel else None
+```
+
+## Zum Nachdenken
+
+Der Übungskatalog wird später 200 Einträge haben.
+
+1. Was wäre schlecht daran, bei jeder Änderung `page.update()` aufzurufen?
+2. `beispiel_03.py` benutzt `ft.ListView` statt `ft.Column`. Warum wohl?
+
+[Lösungen](loesung/)

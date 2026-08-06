@@ -1,0 +1,174 @@
+# Architektur
+
+## Die eine Regel
+
+> `core/`, `data/`, `hrv_core/` und `devices/` importieren **niemals** `flet`.
+> `hrv_core/` zusätzlich **niemals** `scipy`.
+
+`tests/test_import_regel.py` erzwingt das. Zwei Gründe:
+
+1. **Testbarkeit.** Die gesamte Domäne — Datenmodell, HRV-Mathematik, Regeln,
+   Sensorprotokolle — läuft ohne Oberfläche. 81 Tests brauchen keinen Bildschirm.
+2. **Flet 1.0 kommt.** Version 1.0 bringt ein neues, deklaratives Modell. Wenn
+   Logik in `ui/` steckt, zieht sich die Umstellung durch die halbe Anwendung.
+   So bleibt sie lokal.
+
+`scipy` ist gesondert verboten, weil es auf Android und iOS schlicht nicht
+existiert — `pypi.flet.dev` liefert numpy und pandas, aber kein scipy. Ein
+`import scipy` fiele sonst erst beim Bauen der App auf.
+
+---
+
+## Aufbau
+
+```
+src/trainingsapp/
+├─ config.py      Edition, Funktionsschalter, Speicherorte
+├─ core/          Domäne — Modelle, Notation, Limit-Regeln, Einheiten
+├─ data/          SQLite, Migrationen, Repositories, Seed-Daten
+├─ hrv_core/      HRV-Mathematik und das Austauschformat raw-v1
+├─ devices/       Sensor-Port, Geräteprofile, Simulator, BLE
+└─ ui/            Flet — dünn, keine Rechenlogik
+```
+
+Abhängigkeiten zeigen **nur nach innen**:
+
+```
+ui  →  core, data, hrv_core, devices
+devices  →  hrv_core
+data  →  core
+core  →  (nichts)
+hrv_core  →  (nur numpy)
+```
+
+---
+
+## Speicherung: die Datei ist die Wahrheit
+
+HRV-Rohdaten liegen **nicht** in der Datenbank, sondern als `raw-v1`-JSON-Dateien —
+byte-kompatibel zu praxis_gui. Die Datenbank hält nur den Verweis
+(`hrv_recording.file_path`) und einen Kennzahlen-Cache (`hrv_metrics_cache`).
+
+Der Grund ist nicht Größe. Eine Stunde bei 70 bpm sind rund 4200 Schläge; bei
+20 Sitzungen im Monat wären das etwa eine Million Zeilen im Jahr — das schafft
+SQLite mühelos. Ausschlaggebend ist:
+
+- Der Kompatibilitätsvertrag hinge sonst an einer Übersetzungsschicht, die
+  auseinanderdriften kann. So ist Export ein Dateikopiervorgang.
+- Während der Live-Messung wäre es ein `INSERT` pro Herzschlag, gleichzeitig zu
+  Rechnen und Zeichnen. Eine Datei alle 15 Sekunden atomar zu schreiben ist
+  robuster gegen Absturz und leeren Akku.
+- Jede Neuanalyse müsste 4200 Zeilen wieder zu einem numpy-Array zusammenbauen.
+
+Der Cache trägt eine `algo_version`. Ändert sich die Rechenvorschrift, gilt er
+als veraltet und wird aus den Dateien neu berechnet — die Rohdaten bleiben
+unangetastet.
+
+---
+
+## Sensoren
+
+`devices/base.py` definiert einen **pull-basierten** Port:
+
+```python
+async def scan(timeout) -> list[DeviceInfo]
+async def connect(device_id) / async def disconnect()
+def stream()  -> AsyncIterator[Sample]        # Messwerte
+def status()  -> AsyncIterator[DeviceStatus]  # Batterie, Kontakt, Verbindung
+```
+
+Dahinter passen drei sehr verschiedene Dinge — bleak auf dem Desktop, eine
+Flet-Extension auf Mobilgeräten, ein Simulator. Alle drei *pushen*; der Konsument
+will *pullen*. Dazwischen liegt eine `asyncio.Queue` mit Obergrenze.
+
+**Messwerte und Status laufen getrennt.** Batteriemeldungen dürfen den
+RR-Strom nicht verstopfen.
+
+### Der kritische Pfad: BLE auf Mobilgeräten
+
+`bleak` deckt Windows, macOS und Linux ab. Sein Android-Backend setzt
+`python-for-android` voraus — Flet baut aber mit `serious_python`. Auf iOS gibt
+es gar nichts. Und eine fertige Flet-BLE-Extension existiert nicht.
+
+Also bauen wir eine: eine Flet-Extension um `flutter_blue_plus`, die auf Android
+und iOS läuft und in der auch das Polar-PMD-Protokoll steckt. Dazu gehört der
+**Foreground Service** — ohne ihn beendet Android die Messung im Hintergrund.
+`flet-permission-handler` deckt das nicht ab.
+
+Das wird früh als Spike geprüft (L02b), nicht erst wenn viel darauf aufbaut.
+
+### Der Sensor-Prüfstand
+
+Ob ein Gerät RR-Intervalle sendet, steht in Bit 4 des Flags-Bytes — und ist bei
+Uhren von Modell und Firmware abhängig, ohne verlässliche Dokumentation.
+
+Statt Herstellerangaben zu glauben, misst die App nach: verbinden, zehn Sekunden
+aufzeichnen, Flags auswerten, RR pro Paket zählen, Drift zwischen Herzuhr und
+Wanduhr prüfen. Das Ergebnis stuft das Gerät ein (`profil_verfeinern`) und
+landet in der Tabelle `device`.
+
+So wächst die Kompatibilitätsliste empirisch mit jedem Patienten.
+
+---
+
+## Datenqualitätsstufen
+
+Verfügbarkeit schlägt Präzision: die wenigsten Patienten haben einen Brustgurt.
+Deshalb wird alles aufgezeichnet — aber gekennzeichnet.
+
+| Stufe | Quelle | HRV |
+|---|---|---|
+| `rr_ekg` | Brustgurt (RR aus EKG) | vollständig |
+| `ppi_optisch` | optischer Sensor, Polar-Uhr | vollständig, Schwelle 0.30, Frequenzwerte mit Vorbehalt |
+| `bpm_only` | Uhr sendet nur Herzfrequenz | keine HRV, nur Pulsverlauf |
+
+Die Stufe wird abgeleitet, wenn sie nicht ausdrücklich gesetzt ist
+(`Recording.effektive_qualitaet()`) — enthält eine Messung keinen einzigen
+RR-Wert, ist sie `bpm_only`, egal was das Geräteprofil versprochen hat.
+
+---
+
+## Zwei Editionen aus einem Quelltext
+
+`config.py` kennt die Edition und beantwortet Fragen der Form
+„darf ich synchronisieren?" statt „bin ich Edition B?".
+
+| Funktion | solo | praxis |
+|---|---|---|
+| `hrv_rohdaten`, `export` | ✓ | ✓ |
+| `sync`, `nachrichten`, `zugewiesene_plaene` | – | ✓ |
+| `physiologische_steuerung` | – | ✓ |
+
+Der letzte Punkt ist rechtlich begründet, nicht technisch: eine App, die aus
+Messwerten eine Handlungsempfehlung ableitet, trifft eine medizinische Aussage.
+Siehe `docs/recht/00_zweckbestimmung.md`.
+
+Die Synchronisationsfelder (`outbox`, `external_ref`, `origin_device_id`,
+`deleted_at`) existieren ab der ersten Migration, obwohl Edition A sie nicht
+nutzt — sie nachträglich einzuführen wäre eine Migration über den gesamten
+Bestand.
+
+### Konflikte vermeiden statt auflösen
+
+`hrv_recording` und `session_entry` sind **unveränderlich**. Eine Korrektur
+entsteht als neuer Eintrag, der den alten über `replaces_entry_id` ersetzt.
+Damit gibt es nichts, was zwei Geräte gleichzeitig ändern könnten — Konflikte
+sind strukturell ausgeschlossen.
+
+Nur veränderliche Metadaten (Notiz, Übungsdefinition) brauchen eine Auflösung.
+Dort gilt „letzter Schreiber gewinnt" mit einer **serverseitig vergebenen**
+Revision — Client-Zeitstempel taugen dafür nicht, weil Uhren auseinanderlaufen.
+
+Statt eines `dirty`-Flags gibt es eine `outbox`: reihenfolgetreu, Wiederholung
+ist trivial, und Ausstehendes findet sich ohne Full-Table-Scan.
+
+---
+
+## Medien
+
+Erklärvideos werden **nicht** ins App-Paket gelegt. Google Play deckelt das
+Basis-APK bei 150 MB; wenige Minuten Video sprengen das. Sie werden bei Bedarf
+geladen und gecacht (`exercise_media.source = 'url'`).
+
+Selbst aufgenommene Fotos und Videos liegen im app-privaten Verzeichnis
+(Scoped Storage), erreichbar über `config.medienverzeichnis()`.

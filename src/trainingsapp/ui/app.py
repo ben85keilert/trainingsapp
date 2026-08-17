@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import flet as ft
 
-from ..config import edition, ist_aktiv
-from .theme import dark_theme, light_theme
+from trainingsapp.config import edition, ist_aktiv
+from trainingsapp.ui.theme import dark_theme, light_theme
 
 ZIELE = [
     ("Heute", ft.Icons.TODAY, ft.Icons.TODAY_OUTLINED),
@@ -25,7 +25,7 @@ def platzhalter(titel: str, text: str, lektion: str) -> ft.Control:
     """Was diese Ansicht später kann — und in welcher Lektion sie entsteht."""
     return ft.Container(
         expand=True,
-        alignment=ft.alignment.center,
+        alignment=ft.Alignment.CENTER,
         padding=32,
         content=ft.Column(
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -35,7 +35,7 @@ def platzhalter(titel: str, text: str, lektion: str) -> ft.Control:
                 ft.Text(text, text_align=ft.TextAlign.CENTER, opacity=0.8),
                 ft.Container(height=8),
                 ft.Container(
-                    padding=ft.padding.symmetric(8, 14),
+                    padding=ft.Padding.symmetric(vertical=8, horizontal=14),
                     border_radius=8,
                     bgcolor=ft.Colors.SECONDARY_CONTAINER,
                     content=ft.Text(f"entsteht in {lektion}", size=12),
@@ -92,7 +92,7 @@ def main(page: ft.Page) -> None:
                     bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
                     actions=[
                         ft.Container(
-                            padding=ft.padding.only(right=16),
+                            padding=ft.Padding.only(right=16),
                             content=ft.Text(
                                 f"Edition {edition().value}"
                                 + ("  ·  Sync aktiv" if ist_aktiv("sync") else ""),

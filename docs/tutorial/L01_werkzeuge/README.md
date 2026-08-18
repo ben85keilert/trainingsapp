@@ -81,12 +81,19 @@ winzig.
 Dann:
 
 ```bash
-flet run docs/tutorial/L01_werkzeuge/beispiel_02.py
+flet run -d docs/tutorial/L01_werkzeuge/beispiel_02.py
 ```
 
 `flet run` kann **Hot Reload**: ändere den Text im Editor, speichere, und das
 Fenster aktualisiert sich. Probier das aus, es verändert das Arbeitsgefühl
 erheblich.
+
+Die Option `-d` (Verzeichnis beobachten) ist wichtig: Ohne sie löst `flet
+run` einen Reload nur aus, wenn das Dateisystem-Ereignis exakt den
+Skriptpfad als Quelle meldet. Editoren mit atomarem Speichern (erst eine
+temporäre Datei schreiben, dann über die Zieldatei verschieben — z. B.
+VS Code unter Linux) melden dabei einen anderen Pfad, wodurch der Reload
+ausbleibt und du die Änderung erst nach einem Neustart siehst.
 
 ---
 

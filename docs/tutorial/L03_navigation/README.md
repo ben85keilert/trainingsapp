@@ -120,7 +120,7 @@ jetzt so schreibt, hat die Umstellung fast hinter sich.
 
 ```bash
 flet run docs/tutorial/L03_navigation/beispiel_01.py   # Leiste unten
-flet run docs/tutorial/L03_navigation/beispiel_02.py   # Routen und Stapel
+flet run -d docs/tutorial/L03_navigation/beispiel_02.py   # Routen und Stapel
 flet run docs/tutorial/L03_navigation/beispiel_03.py   # Zustand überlebt
 ```
 

@@ -175,7 +175,7 @@ Flet leitet daraus ein vollständiges, in sich stimmiges Schema ab — siehe
 
 ```bash
 flet run docs/tutorial/L02_flet_modell/beispiel_01.py   # Control-Baum
-flet run docs/tutorial/L02_flet_modell/beispiel_02.py   # update() sichtbar gemacht
+flet run -d docs/tutorial/L02_flet_modell/beispiel_02.py   # update() sichtbar gemacht
 flet run docs/tutorial/L02_flet_modell/beispiel_03.py   # eine Übungskarte
 ```
 

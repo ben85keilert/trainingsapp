@@ -1,10 +1,18 @@
 """L01, Beispiel 2 — Hot Reload ausprobieren.
 
-Start:  flet run docs/tutorial/L01_werkzeuge/beispiel_02.py
+Start:  flet run -d docs/tutorial/L01_werkzeuge/beispiel_02.py
 
 Ändere unten den Text, speichere die Datei, und beobachte das Fenster.
 Mit `python beispiel_02.py` funktioniert das NICHT — Hot Reload kann nur
 `flet run`.
+
+Warum `-d`: Ohne diese Option beobachtet `flet run` zwar das Verzeichnis,
+löst einen Reload aber nur aus, wenn der exakte Skriptpfad als Quelle des
+Dateisystem-Ereignisses gemeldet wird. Editoren, die beim Speichern atomar
+schreiben (erst eine temporäre Datei anlegen, dann über die Zieldatei
+verschieben — z. B. VS Code unter Linux), melden dabei einen anderen
+Quellpfad, wodurch der Reload ausbleibt. `-d` lässt jede Änderung im
+Verzeichnis einen Reload auslösen und umgeht das Problem.
 """
 
 import flet as ft

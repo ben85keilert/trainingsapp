@@ -14,7 +14,7 @@ Alle drei müssen ohne Fehler durchlaufen.
 
 ## Aufgabe 2: Hot Reload erleben
 
-Starte `flet run docs/tutorial/L01_werkzeuge/beispiel_02.py` und ändere bei
+Starte `flet run -d docs/tutorial/L01_werkzeuge/beispiel_02.py` und ändere bei
 laufendem Fenster:
 
 - den Text der Überschrift

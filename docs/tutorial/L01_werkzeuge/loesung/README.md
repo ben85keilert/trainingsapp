@@ -52,7 +52,7 @@ def main(page: ft.Page) -> None:
     )
 
 
-ft.app(target=main)
+ft.run(main)
 ```
 
 Varianten, die genauso richtig sind: `ft.ListView` statt `Column` (scrollt bei

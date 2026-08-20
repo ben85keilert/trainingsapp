@@ -211,7 +211,7 @@ def main(page: ft.Page) -> None:
     page.go("/")
 
 
-ft.app(target=main)
+ft.run(main)
 ```
 
 Beachte: `wechseln` ruft `page.go("/")` auf, statt den Inhalt direkt zu tauschen.

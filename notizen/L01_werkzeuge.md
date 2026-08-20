@@ -51,14 +51,14 @@ Zeichens.
 
 ### Was `page: ft.Page` konkret bringt
 
-`ft.app(target=main)` ruft `main` später selbst auf und reicht dabei das Fenster-Objekt
+`ft.run(main)` ruft `main` später selbst auf und reicht dabei das Fenster-Objekt
 herein — **wir** rufen `main` nie direkt auf. Ohne Annotation wüsste also niemand, was
 `page` ist:
 
 - **Editor:** kennt durch `ft.Page` alle Attribute und Methoden → Autovervollständigung
   für `page.title`, `page.add(…)`, `page.theme_mode`; Tippfehler wie `page.titel` werden
   markiert. Ohne Annotation ist `page` ein anonymes Objekt und der Editor schweigt.
-- **Leser:** sieht in der Signatur, womit die Funktion arbeitet, ohne `ft.app`
+- **Leser:** sieht in der Signatur, womit die Funktion arbeitet, ohne `ft.run`
   nachschlagen zu müssen.
 - **mypy:** kann Aufrufe gegen die echte Flet-API prüfen.
 
@@ -128,3 +128,75 @@ Merksatz: `python beispiel_02.py` kann **nie** Hot Reload — das kann nur `flet
 Erzwungen durch `tests/test_import_regel.py`. Grund: Domäne bleibt ohne Bildschirm
 testbar, spätere Umstellung auf Flet 1.0 betrifft nur `ui/`; scipy gibt es nicht auf
 Android/iOS.
+
+### „Abhängigkeiten zeigen nur nach innen"
+
+Nicht die *Tests* zeigen nach innen, sondern die **Abhängigkeiten** — also wer wen
+importieren darf:
+
+```
+ui → core, data, hrv_core, devices
+devices → hrv_core
+data → core
+core → (nichts)
+hrv_core → (nur numpy)
+```
+
+Gelesen als Schichten von **außen** (Bildschirm) nach **innen** (Domäne): eine äußere
+Schicht darf eine innere kennen, **nie umgekehrt**. Würde `core` etwas aus `ui`
+importieren, entstünde ein Zirkelbezug und die Domäne wäre nicht mehr ohne Flet ladbar.
+
+`hrv_core → (nur numpy)` ist die engste Zeile: `hrv_core` darf **nichts** aus dem
+eigenen Projekt importieren, auch nicht `core`. Bewusst so eng, weil `hrv_core` auf
+Android/iOS läuft und dort so eigenständig wie möglich bleiben soll.
+
+**Wenn `hrv_core` doch etwas aus `core` bräuchte** — es gibt keinen sauberen Import-Weg
+dafür. Die Optionen wären:
+
+1. die Definition **nach `hrv_core` verschieben**, wenn sie eigentlich zur HRV-Domäne
+   gehört,
+2. sie **duplizieren**, wenn sie klein und stabil ist,
+3. die Abhängigkeit **umdrehen**: `core` importiert von `hrv_core` (wäre erlaubt, ist
+   aktuell aber nicht vorgesehen).
+
+**Wichtig — was der Test *nicht* prüft:** `tests/test_import_regel.py` erzwingt nur die
+`flet`/`scipy`-Verbote aus dem `VERBOTEN`-Dict. Der **komplette Abhängigkeitsgraph** oben
+ist damit *nicht* abgedeckt: ein `devices`-Modul, das versehentlich `core` importiert,
+fiele diesem Test **nicht** auf. Das ist bislang nur dokumentierte Konvention.
+
+### Zweiter Grund für den Test: CI hat gar kein flet
+
+`.github/workflows/ci.yml` installiert nur `numpy pytest ruff mypy` — **kein `flet`**.
+Ein `import flet` in `core/units.py` würde in CI deshalb nicht nur den Architektur-Test
+kippen, sondern schon beim Import mit `ModuleNotFoundError` abstürzen. Das ist die
+härtere Antwort auf „Warum ein Test statt einer Notiz in der Doku?": die Umgebung, in der
+die Domäne laufen soll (CI heute, Android später), **hat `flet` schlicht nicht**.
+
+## CI (`.github/workflows/ci.yml`)
+
+CI = *Continuous Integration*: bei jedem Push/PR laufen die Prüfungen automatisch auf
+einem **frischen Rechner bei GitHub** — nicht lokal. Statt „lief bei mir" gilt „läuft auf
+einer leeren Maschine".
+
+| Zeile | Bedeutung |
+|---|---|
+| `on: push: branches: [main, "claude/**"]` | läuft bei Push auf `main` und alle `claude/…`-Branches |
+| `on: pull_request:` | leerer Wert = **Standard**, nicht „kein Eintrag": jeder PR (opened/synchronize/reopened) |
+| `runs-on: ubuntu-latest` | GitHub startet eine **neue, leere Ubuntu-VM** in der Cloud |
+| `matrix: python-version: ["3.12","3.13"]` | der ganze Job läuft **zweimal**, je einmal pro Python-Version |
+| `fail-fast: false` | fällt 3.12 durch, läuft 3.13 trotzdem zu Ende (man sieht beide Ergebnisse) |
+| `actions/checkout@v4` | klont das Repo in die VM |
+| `actions/setup-python@v5` + `cache: pip` | installiert Python; cacht die pip-**Downloads** zwischen Läufen |
+
+Danach die Schritte in dieser Reihenfolge: `ruff check .` → `ruff format --check .` →
+`pytest -q` → Doctests → die Lernpfad-Beispiele einzeln ausführen.
+
+**Warum `pip install` bei *jedem* Lauf?** Weil die VM jedes Mal neu und leer ist — sie
+existiert nur für diesen einen Lauf und wird danach weggeworfen. Genau das ist der Sinn:
+gäbe es einen dauerhaften Rechner, würde sich dort mit der Zeit Zustand ansammeln
+(Reste alter Installationen), und „grün" hieße nicht mehr „läuft von Null an". `cache:
+pip` beschleunigt nur das **Herunterladen** der Pakete, das **Installieren** passiert
+weiterhin jedes Mal.
+
+`PYTHONPATH: src` bei den Testschritten ersetzt das lokale `pip install -e .` — die CI
+installiert das Projekt selbst nicht, sondern zeigt Python nur, wo `trainingsapp/` liegt.

@@ -93,4 +93,4 @@ def main(page: ft.Page) -> None:
     page.go("/")
 
 
-ft.app(target=main)
+ft.run(main)

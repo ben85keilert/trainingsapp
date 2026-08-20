@@ -32,6 +32,7 @@ htmlcov/
 /messungen/
 sensor_*.json
 !tests/golden/rr/sensor_*.json
+temp.py
 
 # Betriebssystem / Editor
 .DS_Store

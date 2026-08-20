@@ -58,4 +58,4 @@ def main(page: ft.Page) -> None:
     page.add(ft.Row(spacing=24, controls=[links, rechts]))
 
 
-ft.app(target=main)
+ft.run(main)

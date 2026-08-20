@@ -14,6 +14,6 @@ def main(page: ft.Page) -> None:
     page.add(ft.Text("Hallo Trainingsassistent"))
 
 
-# ft.app startet die Flutter-Seite und ruft `main` auf, sobald sie bereit ist.
+# ft.run startet die Flutter-Seite und ruft `main` auf, sobald sie bereit ist.
 # Der Aufruf blockiert, bis das Fenster geschlossen wird.
-ft.app(target=main)
+ft.run(main)

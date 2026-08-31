@@ -55,6 +55,19 @@ uv run pytest                                  # Tests
 uv run ruff check .                            # Linter
 ```
 
+Alternativ lässt sich die Umgebung klassisch aktivieren — dann entfällt das
+`uv run`-Präfix:
+
+```bash
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+flet run src/trainingsapp/ui/app.py
+```
+
+Der Unterschied: `uv run` prüft vor jedem Aufruf, ob die Umgebung noch zu
+`uv.lock` passt, und synct bei Bedarf automatisch nach. Im aktivierten venv
+entfällt diese Prüfung — ändert sich `uv.lock` (z. B. durch `git pull`), muss
+man selbst an `uv sync` denken.
+
 ---
 
 ## Wo was liegt

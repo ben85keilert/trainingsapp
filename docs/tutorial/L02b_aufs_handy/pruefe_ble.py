@@ -2,8 +2,8 @@
 
 Läuft auf zwei Wegen:
 
-    python docs/tutorial/L02b_aufs_handy/pruefe_ble.py     (Terminal)
-    flet run docs/tutorial/L02b_aufs_handy/pruefe_ble.py   (Fenster)
+    uv run python docs/tutorial/L02b_aufs_handy/pruefe_ble.py     (Terminal)
+    uv run flet run docs/tutorial/L02b_aufs_handy/pruefe_ble.py   (Fenster)
 
 Für den Test auf dem Handy vorübergehend als src/trainingsapp/ui/app.py
 einsetzen, `flet build apk` und installieren.

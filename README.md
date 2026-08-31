@@ -44,14 +44,15 @@ erklärt.
 
 ## Schnellstart
 
-```bash
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+Benötigt [uv](https://docs.astral.sh/uv/) — es kümmert sich um Python-Version,
+virtuelle Umgebung und Abhängigkeiten (gepinnt in `uv.lock`).
 
-flet run src/trainingsapp/ui/app.py     # Desktop-Vorschau
-pytest                                   # Tests
-ruff check .                             # Linter
+```bash
+uv sync                                        # Umgebung anlegen + alles installieren
+
+uv run flet run src/trainingsapp/ui/app.py     # Desktop-Vorschau
+uv run pytest                                  # Tests
+uv run ruff check .                            # Linter
 ```
 
 ---

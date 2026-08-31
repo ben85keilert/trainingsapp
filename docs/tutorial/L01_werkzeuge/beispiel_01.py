@@ -1,6 +1,6 @@
 """L01, Beispiel 1 — das kleinstmögliche Flet-Programm.
 
-Start:  python docs/tutorial/L01_werkzeuge/beispiel_01.py
+Start:  uv run python docs/tutorial/L01_werkzeuge/beispiel_01.py
 
 Drei Zeilen Substanz. Mehr braucht ein Fenster nicht.
 """

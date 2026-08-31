@@ -1,6 +1,6 @@
 """L02, Beispiel 1 — der Control-Baum.
 
-Start:  flet run docs/tutorial/L02_flet_modell/beispiel_01.py
+Start:  uv run flet run docs/tutorial/L02_flet_modell/beispiel_01.py
 
 Links siehst du die Oberfläche, rechts den Baum, aus dem sie besteht.
 Vergleiche beides mit dem Quelltext unten.

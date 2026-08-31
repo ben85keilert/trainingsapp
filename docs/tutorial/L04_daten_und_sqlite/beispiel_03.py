@@ -1,6 +1,6 @@
 """L04, Beispiel 3 — Fremdschlüssel und die üblichen Fallen.
 
-Start:  python docs/tutorial/L04_daten_und_sqlite/beispiel_03.py
+Start:  uv run python docs/tutorial/L04_daten_und_sqlite/beispiel_03.py
 """
 
 import sqlite3

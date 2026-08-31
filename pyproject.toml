@@ -25,12 +25,34 @@ dependencies = [
 # aber nicht in Flet-Android-Builds (serious_python statt python-for-android).
 # Mobile BLE kommt über eine eigene Flet-Extension — siehe docs/architektur.md.
 desktop = ["bleak>=0.22"]
+
+# Entwicklungswerkzeuge als Dependency-Groups (PEP 735): `uv sync` installiert
+# `dev` automatisch mit. Die Gruppe `ci` existiert, damit die CI mit
+# `uv sync --only-group ci` testen kann, OHNE flet zu installieren — genau das
+# ist der Sinn der Importregel (siehe .github/workflows/ci.yml).
+[dependency-groups]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
     "mypy>=1.11",
 ]
+# flet-cli liefert den `flet`-Befehl, flet-desktop den Desktop-Client für
+# `flet run`. Eigene Gruppe statt Teil von `dev`, weil `ci` die Gruppe `dev`
+# einschließt und flet-frei bleiben muss (flet-cli hängt von flet ab). In die
+# App-Builds gehört ohnehin nur das schlanke `flet` aus den Laufzeitabhängigkeiten.
+flet-dev = [
+    "flet-cli==0.86.*",
+    "flet-desktop==0.86.*",
+]
+ci = [
+    "numpy>=2.1",
+    { include-group = "dev" },
+]
+
+[tool.uv]
+# `uv sync` ohne weitere Optionen ergibt eine vollständige Entwicklungsumgebung.
+default-groups = ["dev", "flet-dev"]
 
 [build-system]
 requires = ["setuptools>=68"]

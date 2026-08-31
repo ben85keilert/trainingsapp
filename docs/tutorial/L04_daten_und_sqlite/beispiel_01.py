@@ -1,6 +1,6 @@
 """L04, Beispiel 1 — Migrationen.
 
-Start:  python docs/tutorial/L04_daten_und_sqlite/beispiel_01.py
+Start:  uv run python docs/tutorial/L04_daten_und_sqlite/beispiel_01.py
 
 Zeigt, wie eine leere Datei zum vollständigen Schema wird und warum ein zweiter
 Lauf nichts mehr tut.

@@ -44,24 +44,30 @@ Klickt jemand darauf, geht das Ereignis den Weg zurück zu deiner Python-Funktio
 
 ## 2. Umgebung einrichten
 
+Das Projekt benutzt [uv](https://docs.astral.sh/uv/) — ein Werkzeug, das drei
+Dinge auf einmal erledigt: die richtige Python-Version besorgen
+(`.python-version`), eine virtuelle Umgebung anlegen (`.venv/`) und alle
+Abhängigkeiten exakt so installieren, wie sie in `uv.lock` festgeschrieben sind.
+Dadurch hat jeder, der das Projekt auscheckt, dieselbe Umgebung.
+
 ```bash
 cd trainingsapp
-
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-
-pip install -e ".[dev]"
+uv sync
 ```
 
-`-e` heißt „editierbar": Python benutzt direkt `src/`, statt eine Kopie zu
-installieren. Du änderst eine Datei, der nächste Aufruf sieht die Änderung.
+Das Projekt selbst wird dabei „editierbar" installiert: Python benutzt direkt
+`src/`, statt eine Kopie zu machen. Du änderst eine Datei, der nächste Aufruf
+sieht die Änderung.
+
+Befehle startest du mit `uv run` davor — das sorgt dafür, dass sie in der
+Projektumgebung laufen, ohne dass du sie erst aktivieren musst.
 
 Prüfen:
 
 ```bash
-python -c "import flet; print(flet.__version__)"
-pytest -q
-ruff check .
+uv run python -c "import flet; print(flet.__version__)"
+uv run pytest -q
+uv run ruff check .
 ```
 
 `pytest` muss grün sein. Ist es das nicht, stimmt etwas an der Installation —
@@ -72,7 +78,7 @@ melde dich, bevor du weitermachst.
 ## 3. Das erste Programm
 
 ```bash
-python docs/tutorial/L01_werkzeuge/beispiel_01.py
+uv run python docs/tutorial/L01_werkzeuge/beispiel_01.py
 ```
 
 Es öffnet sich ein Fenster. Schau dir den Quelltext an — er ist absichtlich
@@ -81,7 +87,7 @@ winzig.
 Dann:
 
 ```bash
-flet run -d docs/tutorial/L01_werkzeuge/beispiel_02.py
+uv run flet run -d docs/tutorial/L01_werkzeuge/beispiel_02.py
 ```
 
 `flet run` kann **Hot Reload**: ändere den Text im Editor, speichere, und das
@@ -150,14 +156,14 @@ nicht wiederherstellbar wäre.
 
 ## Stolperfallen
 
-**`flet: command not found`** — die virtuelle Umgebung ist nicht aktiv.
-`which python` muss auf `.venv/bin/python` zeigen.
+**`flet: command not found`** — der Befehl wurde ohne `uv run` gestartet und
+damit außerhalb der Projektumgebung. `uv run flet …` benutzen.
 
-**`ModuleNotFoundError: trainingsapp`** — `pip install -e ".[dev]"` wurde nicht
-ausgeführt, oder in der falschen Umgebung.
+**`ModuleNotFoundError: trainingsapp`** — `uv sync` wurde noch nicht
+ausgeführt, oder der Befehl lief ohne `uv run` in der falschen Umgebung.
 
 **Auf Linux öffnet sich kein Fenster** — Flet braucht GTK-Bibliotheken. Zur Not
-`flet run --web docs/...` , das läuft im Browser.
+`uv run flet run --web docs/...` , das läuft im Browser.
 
 **Hot Reload greift nicht** — es funktioniert nur mit `flet run`, nicht mit
 `python datei.py`.

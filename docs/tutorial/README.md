@@ -17,7 +17,7 @@ Grund auf erklärt.
 ```
 L04_daten_und_sqlite/
 ├─ README.md        Erklärung, Hintergrund, Stolperfallen
-├─ beispiel_01.py   lauffähig:  python docs/tutorial/L04.../beispiel_01.py
+├─ beispiel_01.py   lauffähig:  uv run python docs/tutorial/L04.../beispiel_01.py
 ├─ uebung.md        Aufgabe
 ├─ loesung/         erst nach dem eigenen Versuch öffnen
 └─ checkliste.md    „Das kann ich jetzt" + was wir als Nächstes bauen
@@ -90,7 +90,8 @@ leichte Lektion mit einem sehr sichtbaren Ergebnis.
 
 ## Wenn etwas nicht funktioniert
 
-1. Läuft die virtuelle Umgebung? `which python` muss auf `.venv` zeigen.
-2. `pip install -e ".[dev]"` erneut ausführen.
-3. `pytest` — sind alle Tests grün? Wenn nein, liegt es meist dort.
+1. `uv sync` erneut ausführen — das bringt die Umgebung wieder auf den Stand
+   von `uv.lock`.
+2. Lief der Befehl mit `uv run` davor? Ohne läuft er in der falschen Umgebung.
+3. `uv run pytest` — sind alle Tests grün? Wenn nein, liegt es meist dort.
 4. In der Lektion nachsehen: unter „Stolperfallen" steht, was üblicherweise schiefgeht.

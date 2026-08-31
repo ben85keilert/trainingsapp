@@ -1,6 +1,6 @@
 """L02, Beispiel 2 — warum page.update() nötig ist.
 
-Start:  flet run -d docs/tutorial/L02_flet_modell/beispiel_02.py
+Start:  uv run flet run -d docs/tutorial/L02_flet_modell/beispiel_02.py
 
 DAS IST DIE WICHTIGSTE LEKTION DIESES KAPITELS.
 

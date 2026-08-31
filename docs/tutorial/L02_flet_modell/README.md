@@ -174,9 +174,9 @@ Flet leitet daraus ein vollständiges, in sich stimmiges Schema ab — siehe
 ## 6. Beispiele
 
 ```bash
-flet run docs/tutorial/L02_flet_modell/beispiel_01.py   # Control-Baum
-flet run -d docs/tutorial/L02_flet_modell/beispiel_02.py   # update() sichtbar gemacht
-flet run docs/tutorial/L02_flet_modell/beispiel_03.py   # eine Übungskarte
+uv run flet run docs/tutorial/L02_flet_modell/beispiel_01.py   # Control-Baum
+uv run flet run -d docs/tutorial/L02_flet_modell/beispiel_02.py   # update() sichtbar gemacht
+uv run flet run docs/tutorial/L02_flet_modell/beispiel_03.py   # eine Übungskarte
 ```
 
 **Beispiel 2 ist das wichtigste.** Es zeigt nebeneinander, was mit und ohne

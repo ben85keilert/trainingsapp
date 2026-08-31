@@ -76,7 +76,7 @@ Flet es beim ersten `flet build` selbst — das dauert dann entsprechend.
 ## 3. Bauen
 
 ```bash
-flet build apk --verbose
+uv run flet build apk --verbose
 ```
 
 Der erste Lauf dauert lange (20–40 Minuten sind normal), spätere sind deutlich
@@ -85,7 +85,7 @@ schneller. Ergebnis liegt in `build/apk/`.
 Kleiner und schneller wird es mit einer Architektur:
 
 ```bash
-flet build apk --split-per-abi
+uv run flet build apk --split-per-abi
 ```
 
 Erzeugt getrennte APKs für `arm64-v8a`, `armeabi-v7a` und `x86_64`. Für ein
@@ -121,8 +121,8 @@ ehrlich, was dabei herauskommt.
 Auf dem Desktop:
 
 ```bash
-pip install "bleak>=0.22"
-python docs/tutorial/L02b_aufs_handy/pruefe_ble.py
+uv sync --extra desktop          # installiert zusätzlich bleak
+uv run python docs/tutorial/L02b_aufs_handy/pruefe_ble.py
 ```
 
 Erwartung: Es findet Geräte. Falls du einen Brustgurt oder eine Uhr hast —

@@ -1,6 +1,6 @@
 """L04, Beispiel 2 — ein Repository von Hand.
 
-Start:  python docs/tutorial/L04_daten_und_sqlite/beispiel_02.py
+Start:  uv run python docs/tutorial/L04_daten_und_sqlite/beispiel_02.py
 
 Genau dieses Muster wandert in Aufgabe 3 nach src/trainingsapp/data/repositories.py.
 """

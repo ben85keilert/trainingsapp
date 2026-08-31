@@ -11,22 +11,26 @@ Kompatibilität, nicht Konsistenz. Neuer Text (Antworten, Commit-Messages) auf D
 
 ## Befehle
 
-```bash
-pip install -e ".[dev,desktop]"        # Entwicklungsumgebung (desktop = bleak für BLE)
+Das Projekt wird mit [uv](https://docs.astral.sh/uv/) verwaltet (`uv.lock` ist die
+Wahrheit, `.python-version` pinnt Python).
 
-flet run src/trainingsapp/ui/app.py    # Desktop-Vorschau der Oberfläche
-pytest                                  # alle Tests
-pytest tests/test_hrv_core.py           # eine Datei
-pytest tests/test_hrv_core.py::test_name -q   # ein einzelner Test
-pytest --doctest-modules src/trainingsapp/core src/trainingsapp/hrv_core   # Doctests (laufen in CI)
-ruff check . && ruff format --check .   # Linter + Formatprüfung
-mypy                                    # Typprüfung (Paket ist in pyproject konfiguriert)
+```bash
+uv sync --extra desktop                # Entwicklungsumgebung (desktop = bleak für BLE)
+
+uv run flet run src/trainingsapp/ui/app.py    # Desktop-Vorschau der Oberfläche
+uv run pytest                                  # alle Tests
+uv run pytest tests/test_hrv_core.py           # eine Datei
+uv run pytest tests/test_hrv_core.py::test_name -q   # ein einzelner Test
+uv run pytest --doctest-modules src/trainingsapp/core src/trainingsapp/hrv_core   # Doctests (laufen in CI)
+uv run ruff check . && uv run ruff format --check .   # Linter + Formatprüfung
+uv run mypy                                    # Typprüfung (Paket ist in pyproject konfiguriert)
 ```
 
-Vor jedem Pull Request muss laufen: `ruff check . && ruff format --check . && pytest`.
+Vor jedem Pull Request muss laufen:
+`uv run ruff check . && uv run ruff format --check . && uv run pytest`.
 
-`TRAININGSAPP_EDITION=praxis pytest …` bzw. `TRAININGSAPP_DATA_DIR=…` setzen Edition und
-Datenpfad zur Laufzeit (siehe `config.py`).
+`TRAININGSAPP_EDITION=praxis uv run pytest …` bzw. `TRAININGSAPP_DATA_DIR=…` setzen
+Edition und Datenpfad zur Laufzeit (siehe `config.py`).
 
 ## Die eine Architekturregel
 

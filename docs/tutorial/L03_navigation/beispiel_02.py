@@ -1,6 +1,6 @@
 """L03, Beispiel 2 — Routen und der Ansichtsstapel.
 
-Start:  flet run -d docs/tutorial/L03_navigation/beispiel_02.py
+Start:  uv run flet run -d docs/tutorial/L03_navigation/beispiel_02.py
 
 Tippe eine Übung an: eine Detailansicht legt sich obenauf. Der Zurück-Knopf
 nimmt sie wieder herunter — auf Android tut das auch die Zurück-Taste.

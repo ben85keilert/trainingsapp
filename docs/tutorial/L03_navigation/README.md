@@ -119,9 +119,9 @@ jetzt so schreibt, hat die Umstellung fast hinter sich.
 ## 4. Beispiele
 
 ```bash
-flet run docs/tutorial/L03_navigation/beispiel_01.py   # Leiste unten
-flet run -d docs/tutorial/L03_navigation/beispiel_02.py   # Routen und Stapel
-flet run docs/tutorial/L03_navigation/beispiel_03.py   # Zustand überlebt
+uv run flet run docs/tutorial/L03_navigation/beispiel_01.py   # Leiste unten
+uv run flet run -d docs/tutorial/L03_navigation/beispiel_02.py   # Routen und Stapel
+uv run flet run docs/tutorial/L03_navigation/beispiel_03.py   # Zustand überlebt
 ```
 
 **Beispiel 3 ist das wichtigste.** Es zeigt zwei Zähler nebeneinander: einer

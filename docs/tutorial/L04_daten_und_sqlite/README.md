@@ -180,9 +180,9 @@ pytest -x                       # beim ersten Fehler abbrechen
 ## 7. Beispiele
 
 ```bash
-python docs/tutorial/L04_daten_und_sqlite/beispiel_01.py   # Migrationen
-python docs/tutorial/L04_daten_und_sqlite/beispiel_02.py   # Repository
-python docs/tutorial/L04_daten_und_sqlite/beispiel_03.py   # Fremdschlüssel & Fallen
+uv run python docs/tutorial/L04_daten_und_sqlite/beispiel_01.py   # Migrationen
+uv run python docs/tutorial/L04_daten_und_sqlite/beispiel_02.py   # Repository
+uv run python docs/tutorial/L04_daten_und_sqlite/beispiel_03.py   # Fremdschlüssel & Fallen
 ```
 
 ---

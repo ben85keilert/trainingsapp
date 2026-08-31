@@ -1,6 +1,6 @@
 """L01, Beispiel 2 — Hot Reload ausprobieren.
 
-Start:  flet run -d docs/tutorial/L01_werkzeuge/beispiel_02.py
+Start:  uv run flet run -d docs/tutorial/L01_werkzeuge/beispiel_02.py
 
 Ändere unten den Text, speichere die Datei, und beobachte das Fenster.
 Mit `python beispiel_02.py` funktioniert das NICHT — Hot Reload kann nur

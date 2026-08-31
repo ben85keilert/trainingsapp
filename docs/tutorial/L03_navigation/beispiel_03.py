@@ -1,6 +1,6 @@
 """L03, Beispiel 3 — Zustand, der den Ansichtswechsel überlebt.
 
-Start:  flet run docs/tutorial/L03_navigation/beispiel_03.py
+Start:  uv run flet run docs/tutorial/L03_navigation/beispiel_03.py
 
 Zwei Zähler. Der linke liegt in der Ansichtsfunktion, der rechte im AppState.
 Zähl beide hoch, wechsle auf „Andere Ansicht" und zurück.

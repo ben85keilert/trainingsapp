@@ -1,6 +1,6 @@
 """L03, Beispiel 1 — Navigationsleiste unten.
 
-Start:  flet run docs/tutorial/L03_navigation/beispiel_01.py
+Start:  uv run flet run docs/tutorial/L03_navigation/beispiel_01.py
 
 Der einfache Weg: ein Container, dessen Inhalt ausgetauscht wird.
 Genau so ist die Hülle der App aufgebaut.

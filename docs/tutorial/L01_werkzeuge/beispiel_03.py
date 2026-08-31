@@ -1,6 +1,6 @@
 """L01, Beispiel 3 — die Domäne läuft ohne Oberfläche.
 
-Start:  python docs/tutorial/L01_werkzeuge/beispiel_03.py
+Start:  uv run python docs/tutorial/L01_werkzeuge/beispiel_03.py
 
 Das hier ist der Beweis für die Importregel: kein `import flet` weit und breit,
 und trotzdem passiert etwas Nützliches. Genau deshalb sind unsere Tests schnell

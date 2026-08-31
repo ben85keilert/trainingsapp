@@ -1,6 +1,6 @@
 """L02, Beispiel 3 — eine Übungskarte.
 
-Start:  flet run docs/tutorial/L02_flet_modell/beispiel_03.py
+Start:  uv run flet run docs/tutorial/L02_flet_modell/beispiel_03.py
 
 Das erste Stück, das später wirklich in der App landet: eine Karte, wie sie im
 Übungskatalog stehen wird. Die Daten kommen aus dem echten Seed-Katalog —

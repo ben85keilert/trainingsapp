@@ -44,35 +44,50 @@ Es gibt vier Sorten, und mehr braucht man am Anfang nicht:
 |---|---|---|
 | **Anzeige** | `Text`, `Icon`, `Image`, `ProgressBar` | zeigt etwas |
 | **Eingabe** | `TextField`, `Checkbox`, `Slider`, `Dropdown` | nimmt etwas entgegen |
-| **Aktion** | `ElevatedButton`, `IconButton`, `FloatingActionButton` | löst etwas aus |
+| **Aktion** | `Button`, `IconButton`, `FloatingActionButton` | löst etwas aus |
 | **Anordnung** | `Column`, `Row`, `Container`, `Stack`, `ListView` | ordnet andere an |
 
 ---
 
-## 2. Die Sache mit `page.update()`
+## 2. Die Sache mit `update()`
 
-Das ist **die** Stolperfalle. Sie kostet fast jeden Flet-Anfänger einen
-verlorenen Nachmittag.
+Zwischen Python und Flutter liegt eine Brücke. Eine Zuweisung wie
+`text.value = "neu"` ändert **nur das Python-Objekt** — sichtbar wird sie erst,
+wenn die Änderung über die Brücke geschickt wird. Das erledigt `update()`:
 
 ```python
 text = ft.Text("alt")
 page.add(text)
 
-text.value = "neu"     # ← ändert nur das Python-Objekt.
-                       #   Auf dem Bildschirm steht weiterhin "alt".
-page.update()          # ← JETZT geht die Änderung über die Brücke
+text.value = "neu"     # ← ändert nur das Python-Objekt
+page.update()          # ← schickt alle gesammelten Änderungen über die Brücke
 ```
 
-**Warum ist das so?** Zwischen Python und Flutter liegt eine Brücke. Jede
-Übertragung kostet. Würde Flet bei jeder Zuweisung sofort übertragen, wäre das
-Ändern von zehn Werten zehn Übertragungen. So sammelst du die Änderungen und
-schickst sie in einer.
+**Warum wird gesammelt?** Jede Übertragung kostet. Würde Flet bei jeder
+Zuweisung sofort übertragen, wäre das Ändern von zehn Werten zehn
+Übertragungen. So gehen sie in einer.
 
-Bei Ereignis-Handlern gilt: **am Ende `page.update()`.** Wenn du eine Änderung
-siehst, aber nicht auf dem Bildschirm — das ist es fast immer.
+**Die gute Nachricht:** In den beiden häufigsten Fällen ruft Flet `update()`
+inzwischen selbst auf — nach `main()` und nach jedem Ereignis-Handler
+(„Auto-Update", Standard seit der neuen Flet-Generation, im Projekt 0.86).
+Der Klassiker aus älteren Flet-Tutorials — „Wert geändert, Bildschirm bleibt
+alt, halber Nachmittag weg" — tritt in Handlern deshalb nicht mehr auf.
 
-Feiner geht es auch: `text.update()` aktualisiert nur dieses eine Control. Bei
-langen Listen macht das einen spürbaren Unterschied.
+**Wo du `update()` weiterhin selbst brauchst:** überall, wo Code *außerhalb*
+eines Ereignis-Handlers läuft — Hintergrund-Tasks (`page.run_task`), Threads
+(`page.run_thread`), alles, was kontinuierlich Daten schiebt. Flet weiß dort
+nicht, wann du „fertig" bist. Genau das ist unser wichtigster Fall: die
+Live-Messung, bei der jede Sekunde ein Pulswert eintrifft.
+
+Drei Dinge dazu im Kopf behalten:
+
+- `control.update()` schickt nur dieses eine Control über die Brücke —
+  bei einem Live-Wert in einem großen Baum der richtige Griff.
+- Ein explizites `page.update()` im Handler schadet nicht; Flet merkt sich
+  dann, dass du selbst übertragen hast, und lässt das Auto-Update aus.
+  Bestehender Code mit `page.update()` bleibt also korrekt.
+- Wer das alte, rein manuelle Verhalten will:
+  `ft.context.disable_auto_update()`.
 
 ---
 
@@ -81,10 +96,10 @@ langen Listen macht das einen spürbaren Unterschied.
 ```python
 def gedrueckt(e: ft.ControlEvent) -> None:
     zaehler.value = str(int(zaehler.value) + 1)
-    page.update()  # nicht vergessen
+    # kein update() nötig — nach dem Handler übernimmt das Auto-Update
 
 
-ft.ElevatedButton("Wiederholung", on_click=gedrueckt)
+ft.Button("Wiederholung", on_click=gedrueckt)
 ```
 
 `e` ist das Ereignis. `e.control` ist das Control, das es ausgelöst hat — sehr
@@ -179,16 +194,24 @@ uv run flet run -d docs/tutorial/L02_flet_modell/beispiel_02.py   # update() sic
 uv run flet run docs/tutorial/L02_flet_modell/beispiel_03.py   # eine Übungskarte
 ```
 
-**Beispiel 2 ist das wichtigste.** Es zeigt nebeneinander, was mit und ohne
-`update()` passiert. Wenn dir das einmal klar ist, verlierst du den Nachmittag nicht.
+**Beispiel 2 ist das wichtigste.** Es zeigt beides: einen Handler, der ganz
+ohne `update()` funktioniert (Auto-Update) — und einen Hintergrund-Task, in dem
+dieselbe Zuweisung ohne `update()` einfriert. Wenn dir dieser Unterschied
+einmal klar ist, verlierst du bei der Live-Messung keinen Nachmittag.
 
 ---
 
 ## Stolperfallen
 
-**Die Änderung erscheint nicht** — `page.update()` fehlt. Zu 90 % ist es das.
+**Die Änderung aus einem Hintergrund-Task erscheint nicht** — dort fehlt
+`update()`; das Auto-Update greift nur nach `main()` und nach Ereignis-Handlern.
 
-**`AssertionError: Control must be added to the page first`** — du rufst
+**Die Änderung erscheint erst beim nächsten Klick** — dasselbe Problem, anders
+verkleidet: Die liegengebliebene Änderung wird vom Auto-Update des *nächsten*
+Ereignisses mitgespült. Wenn sich deine Oberfläche „erst beim Klicken"
+aktualisiert, fehlt in einem Task ein `update()`.
+
+**`RuntimeError: Control must be added to the page first`** — du rufst
 `control.update()` auf, bevor es im Baum hängt. Erst `page.add(...)`, dann updaten.
 
 **`expand=True` bewirkt nichts** — der Elternteil hat selbst keine feste Größe.

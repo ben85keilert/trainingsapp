@@ -2,13 +2,18 @@
 
 ## Aufgabe 1: update() begreifen
 
-Starte `beispiel_02.py` und klick beide Zähler mehrfach, dann „Wahrheit zeigen".
+Starte `beispiel_02.py`. Klick erst den Zähler oben ein paarmal, dann starte
+die Messung und schau beiden Anzeigen eine Weile zu. Klick zum Schluss — bei
+laufender Messung — noch einmal irgendeinen Knopf.
 
 **Fragen:**
-1. Was genau ist beim linken Zähler passiert — und was nicht?
-2. Warum hat Flet dieses Verhalten? Was wäre der Nachteil, wenn jede Zuweisung
-   sofort übertragen würde?
-3. In `beispiel_02.py` steht `page.update()`. Es ginge auch `anzeige_mit.update()`.
+1. Der Handler des Zählers ruft kein `update()` auf. Warum funktioniert er
+   trotzdem?
+2. Der Hintergrund-Task setzt **beide** Anzeigen auf denselben Wert — warum
+   friert nur eine ein?
+3. Warum springt die eingefrorene Anzeige auf den aktuellen Wert, sobald du
+   irgendeinen Knopf klickst?
+4. Im Task steht `anzeige_mit.update()`. Es ginge auch `page.update()`.
    Wann ist welches besser?
 
 ## Aufgabe 2: Karte lesen

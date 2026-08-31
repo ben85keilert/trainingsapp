@@ -79,7 +79,7 @@ def main(page: ft.Page) -> None:
     def gewaehlt(e: ft.ControlEvent) -> None:
         name = next(u["name"] for u in uebungen if u["key"] == e.control.data)
         ausgewaehlt.value = f"Gewählt: {name}"
-        page.update()
+        # kein update() — Ereignis-Handler, das Auto-Update übernimmt (L02, Kap. 2)
 
     page.add(
         ft.Column(

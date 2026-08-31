@@ -132,7 +132,9 @@ liegt in der Ansicht, einer im Zustand. Wechsle hin und her — nur einer
 
 ## Stolperfallen
 
-**Nach `page.views.append(...)` passiert nichts** — `page.update()` fehlt.
+**Nach `page.views.append(...)` passiert nichts** — der Code läuft außerhalb
+eines Ereignis-Handlers (z. B. in einem Task), und dort fehlt `page.update()`.
+In Handlern übernimmt das Auto-Update (siehe L02).
 
 **Der Zurück-Knopf erscheint nicht** — er kommt nur, wenn mehr als eine Ansicht
 auf dem Stapel liegt. Die Wurzelansicht muss immer unten liegen bleiben.

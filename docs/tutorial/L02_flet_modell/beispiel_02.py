@@ -1,56 +1,67 @@
-"""L02, Beispiel 2 — warum page.update() nötig ist.
+"""L02, Beispiel 2 — wann update() nötig ist (und wann nicht).
 
 Start:  uv run flet run -d docs/tutorial/L02_flet_modell/beispiel_02.py
 
 DAS IST DIE WICHTIGSTE LEKTION DIESES KAPITELS.
 
-Zwei Zähler, gleicher Code — nur einer ruft update() auf. Klick beide an.
-Der linke scheint kaputt zu sein. Ist er nicht: sein Wert ändert sich sehr wohl,
-nur erfährt der Bildschirm nichts davon.
+Oben ein Zähler, dessen Handler KEIN update() aufruft — er funktioniert
+trotzdem, weil Flet nach jedem Ereignis-Handler automatisch aktualisiert
+(Auto-Update).
 
-Der Knopf unten beweist es.
+Unten ein simulierter Live-Puls aus einem Hintergrund-Task: zwei Anzeigen,
+derselbe Schleifendurchlauf — nur eine ruft update() auf. Die andere friert
+ein, denn im Hintergrund-Task gibt es kein Auto-Update. Klick während der
+Messung auf irgendeinen Knopf: Das Auto-Update dieses Klicks spült die
+liegengebliebenen Änderungen mit durch — die eingefrorene Anzeige springt.
+Genau so entstehen die „mal geht's, mal nicht"-Fehler.
 """
+
+import asyncio
+import random
 
 import flet as ft
 
 
 def main(page: ft.Page) -> None:
-    page.title = "page.update()"
+    page.title = "Wann braucht es update()?"
     page.padding = 30
     page.theme = ft.Theme(color_scheme_seed="#2E7D6E", use_material3=True)
 
-    stand_ohne = 0
-    anzeige_ohne = ft.Text("0", size=48, weight=ft.FontWeight.BOLD)
-    anzeige_mit = ft.Text("0", size=48, weight=ft.FontWeight.BOLD)
+    # --- Teil 1: Ereignis-Handler — Auto-Update übernimmt --------------------
 
-    def ohne_update(e: ft.ControlEvent) -> None:
-        nonlocal stand_ohne
-        stand_ohne += 1
-        anzeige_ohne.value = str(stand_ohne)
-        # Hier fehlt page.update() — mit voller Absicht.
+    zaehler = ft.Text("0", size=48, weight=ft.FontWeight.BOLD)
 
-    def mit_update(e: ft.ControlEvent) -> None:
-        anzeige_mit.value = str(int(anzeige_mit.value) + 1)
-        page.update()
+    def zaehlen(e: ft.ControlEvent) -> None:
+        zaehler.value = str(int(zaehler.value) + 1)
+        # Kein update() — nach dem Handler aktualisiert Flet von selbst.
 
-    def wahrheit_zeigen(e: ft.ControlEvent) -> None:
-        beweis.value = (
-            f"Der linke Zähler steht in Python auf {stand_ohne}. "
-            "Der Bildschirm wusste es nur nicht."
-        )
-        page.update()
+    # --- Teil 2: Hintergrund-Task — hier gibt es KEIN Auto-Update ------------
 
-    def zuruecksetzen(e: ft.ControlEvent) -> None:
-        nonlocal stand_ohne
-        stand_ohne = 0
-        anzeige_ohne.value = "0"
-        anzeige_mit.value = "0"
-        beweis.value = ""
-        page.update()
+    laeuft = False
+    anzeige_mit = ft.Text("—", size=48, weight=ft.FontWeight.BOLD)
+    anzeige_ohne = ft.Text("—", size=48, weight=ft.FontWeight.BOLD)
 
-    beweis = ft.Text("", italic=True, color=ft.Colors.PRIMARY)
+    async def puls_simulieren() -> None:
+        while laeuft:
+            wert = str(random.randint(58, 72))
 
-    def saeule(titel: str, anzeige: ft.Text, handler, farbe: str) -> ft.Container:
+            anzeige_mit.value = wert
+            anzeige_mit.update()  # ← nur mit dieser Zeile tickt die Anzeige
+
+            anzeige_ohne.value = wert
+            # Hier fehlt update() — mit voller Absicht. Der Wert ändert sich
+            # in Python, aber der Bildschirm erfährt nichts davon.
+
+            await asyncio.sleep(1)
+
+    def start_stop(e: ft.ControlEvent) -> None:
+        nonlocal laeuft
+        laeuft = not laeuft
+        e.control.content = "Messung stoppen" if laeuft else "Messung starten"
+        if laeuft:
+            page.run_task(puls_simulieren)
+
+    def saeule(titel: str, anzeige: ft.Text, farbe: str) -> ft.Container:
         return ft.Container(
             expand=True,
             padding=20,
@@ -59,11 +70,7 @@ def main(page: ft.Page) -> None:
             content=ft.Column(
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 spacing=12,
-                controls=[
-                    ft.Text(titel, weight=ft.FontWeight.BOLD),
-                    anzeige,
-                    ft.ElevatedButton("Zählen", on_click=handler),
-                ],
+                controls=[ft.Text(titel, weight=ft.FontWeight.BOLD), anzeige],
             ),
         )
 
@@ -71,26 +78,32 @@ def main(page: ft.Page) -> None:
         ft.Column(
             spacing=20,
             controls=[
-                ft.Text("Klick beide Knöpfe mehrmals.", size=18),
+                ft.Text("Teil 1 — im Ereignis-Handler", size=18, weight=ft.FontWeight.BOLD),
+                ft.Row(
+                    spacing=20,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        zaehler,
+                        ft.Button("Zählen (Handler ohne update)", on_click=zaehlen),
+                    ],
+                ),
+                ft.Divider(),
+                ft.Text("Teil 2 — im Hintergrund-Task", size=18, weight=ft.FontWeight.BOLD),
                 ft.Row(
                     spacing=20,
                     controls=[
-                        saeule(
-                            "OHNE update()", anzeige_ohne, ohne_update, ft.Colors.ERROR_CONTAINER
-                        ),
-                        saeule(
-                            "MIT update()", anzeige_mit, mit_update, ft.Colors.SECONDARY_CONTAINER
-                        ),
+                        saeule("MIT update()", anzeige_mit, ft.Colors.SECONDARY_CONTAINER),
+                        saeule("OHNE update()", anzeige_ohne, ft.Colors.ERROR_CONTAINER),
                     ],
                 ),
-                ft.Row(
-                    spacing=12,
-                    controls=[
-                        ft.OutlinedButton("Wahrheit zeigen", on_click=wahrheit_zeigen),
-                        ft.TextButton("Zurücksetzen", on_click=zuruecksetzen),
-                    ],
+                ft.Button("Messung starten", on_click=start_stop),
+                ft.Text(
+                    "Rechts friert ein. Klick trotzdem mal einen Knopf: Das "
+                    "Auto-Update des Klicks nimmt die liegengebliebene Änderung "
+                    "mit — die Anzeige springt. Deshalb wirken solche Fehler "
+                    "launisch.",
+                    italic=True,
                 ),
-                beweis,
             ],
         )
     )

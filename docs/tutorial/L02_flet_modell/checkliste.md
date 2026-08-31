@@ -3,7 +3,9 @@
 ## Das kann ich jetzt
 
 - [ ] Ich kann einen Control-Baum aus fertigem Code herauslesen
-- [ ] Ich weiß, warum `page.update()` nötig ist — und wann `control.update()` besser ist
+- [ ] Ich weiß, wann Flet von selbst aktualisiert (nach `main()` und nach
+      Ereignis-Handlern) — und wo ich `update()` selbst aufrufen muss
+      (Hintergrund-Tasks); dazu, wann `control.update()` besser ist als `page.update()`
 - [ ] Ich kann `Column`, `Row` und `Container` benutzen und weiß, was `expand` tut
 - [ ] Ich verwende Farben aus dem Theme statt fester Werte
 - [ ] Ich kann Ereignisse behandeln und über `e.control.data` unterscheiden,

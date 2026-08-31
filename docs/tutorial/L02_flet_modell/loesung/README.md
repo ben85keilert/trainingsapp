@@ -2,30 +2,29 @@
 
 ## Aufgabe 1: update()
 
-**1. Was ist passiert?**
+**1. Warum funktioniert der Zähler ohne `update()`?**
 
-`stand_ohne` wurde erhöht, und `anzeige_ohne.value` wurde auf den neuen Wert
-gesetzt. In Python ist alles korrekt. Nur wurde die Änderung nie über die Brücke
-zu Flutter geschickt — und Flutter zeichnet, was es zuletzt gehört hat.
+Weil Flet nach jedem Ereignis-Handler automatisch aktualisiert (Auto-Update).
+Der Handler ändert `zaehler.value`, der Handler endet, Flet schickt die
+gesammelten Änderungen über die Brücke. In Handlern (und in `main()`) musst du
+an `update()` nicht mehr denken.
 
-Deshalb der Knopf „Wahrheit zeigen": er beweist, dass der Wert stimmt.
+**2. Warum friert nur eine Anzeige ein?**
 
-**2. Warum dieses Verhalten?**
+Der Task läuft **außerhalb** eines Ereignis-Handlers — dort gibt es kein
+Auto-Update. `anzeige_ohne.value = wert` ändert nur das Python-Objekt; die
+Änderung wird nie über die Brücke geschickt, und Flutter zeichnet, was es
+zuletzt gehört hat. `anzeige_mit` bekommt ihr `update()` explizit — deshalb
+tickt sie.
 
-Jede Übertragung über die Brücke kostet. Ohne Sammeln wäre das hier vier
-Übertragungen:
+**3. Warum springt sie beim nächsten Klick?**
 
-```python
-titel.value = "..."
-untertitel.value = "..."
-fortschritt.value = 0.5
-knopf.disabled = True
-page.update()  # so: eine einzige
-```
+Der Klick ist ein Ereignis, und nach dem Handler läuft das Auto-Update — das
+überträgt den aktuellen Zustand, einschließlich der liegengebliebenen
+Änderungen aus dem Task. Deshalb wirken solche Fehler launisch: Die Oberfläche
+ist nicht kaputt, sie hinkt nur hinterher, bis irgendein Ereignis sie einholt.
 
-Bei einer Liste mit 200 Einträgen ist der Unterschied nicht mehr theoretisch.
-
-**3. `page.update()` oder `control.update()`?**
+**4. `page.update()` oder `control.update()`?**
 
 - `page.update()` — der Normalfall. Prüft den ganzen Baum auf Änderungen.
   Bequem und für kleine Oberflächen völlig ausreichend.
@@ -35,6 +34,19 @@ Bei einer Liste mit 200 Einträgen ist der Unterschied nicht mehr theoretisch.
 
 Faustregel: `page.update()`, bis es spürbar langsam wird. Vorzeitige
 Optimierung kostet Lesbarkeit ohne Gegenwert.
+
+Und warum wird überhaupt gesammelt statt sofort übertragen? Jede Übertragung
+über die Brücke kostet. Ohne Sammeln wären das hier vier Übertragungen:
+
+```python
+titel.value = "..."
+untertitel.value = "..."
+fortschritt.value = 0.5
+knopf.disabled = True
+# eine einzige Übertragung — durchs Auto-Update oder ein page.update()
+```
+
+Bei einer Liste mit 200 Einträgen ist der Unterschied nicht mehr theoretisch.
 
 ## Aufgabe 2: Die Karte
 
@@ -130,7 +142,7 @@ def main(page: ft.Page) -> None:
                 ziel_text,
                 ft.Container(height=20),
                 # Groß, weil er beim Training getroffen werden muss.
-                ft.ElevatedButton(
+                ft.Button(
                     "+1",
                     on_click=plus,
                     height=72,

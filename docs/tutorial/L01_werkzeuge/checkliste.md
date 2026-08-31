@@ -19,9 +19,10 @@ welcher Punkt hakt.
 **Nichts.** L01 ist Vorbereitung.
 
 Aber in **L02** wird es konkret: dort lernst du, wie Flet-Oberflächen wirklich
-aufgebaut sind — der Control-Baum, Ereignisse, und die eine Sache, die
-Flet-Anfänger am häufigsten stolpern lässt (`page.update()`). Danach bauen wir
-die Hülle der App: Navigation, Farbschema, die vier Hauptansichten.
+aufgebaut sind — der Control-Baum, Ereignisse, und wann die Oberfläche sich
+aktualisiert (Stichwort `update()` — nach Ereignissen automatisch, in
+Hintergrund-Tasks von Hand). Danach bauen wir die Hülle der App: Navigation,
+Farbschema, die vier Hauptansichten.
 
 **Direkt danach kommt L02b** — wir bauen die App einmal aufs Handy. Sehr früh,
 mit Absicht: Wenn dabei etwas grundsätzlich nicht funktioniert, wollen wir es

@@ -5,6 +5,7 @@ Ausgabe lesen und mit dem Text in asyncio.md vergleichen.
 """
 
 import asyncio
+import inspect
 import time
 
 # ---------------------------------------------------------------- 1. Generator
@@ -19,6 +20,7 @@ def zaehler():
 
 
 print("1. Generator")
+print("  vom Compiler markiert:", inspect.isgeneratorfunction(zaehler))
 g = zaehler()
 print("  erzeugt — bisher ist nichts gedruckt worden")
 print("  next ->", next(g))
@@ -48,8 +50,14 @@ async def toast():
 
 async def main():
     print("\n2. Coroutine")
+    print("  vom Compiler markiert:", inspect.iscoroutinefunction(kaffee))
     c = kaffee()
     print("  erzeugt:", type(c).__name__, "— läuft noch nicht")
+    try:
+        for _ in c:
+            pass
+    except TypeError as e:
+        print("  for-Schleife darüber:", e)
     print("  jetzt await:")
     ergebnis = await c
     print("  ergebnis:", ergebnis)
@@ -58,7 +66,7 @@ async def main():
     start = time.perf_counter()
     t1 = asyncio.create_task(kaffee())
     t2 = asyncio.create_task(toast())
-    print("  beide eingeplant:", type(t1).__name__)
+    print("  beide eingeplant:", type(t1).__name__, "— main() läuft sofort weiter")
     print("  gesammelt:", await t1, "+", await t2)
     dauer = time.perf_counter() - start
     print(f"  dauer: {dauer:.2f} s — nicht 0.5, weil beide Wartezeiten überlappen")

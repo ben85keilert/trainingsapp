@@ -5,8 +5,8 @@ Läuft auf zwei Wegen:
     uv run python docs/tutorial/L02b_aufs_handy/pruefe_ble.py     (Terminal)
     uv run flet run docs/tutorial/L02b_aufs_handy/pruefe_ble.py   (Fenster)
 
-Für den Test auf dem Handy vorübergehend als src/trainingsapp/ui/app.py
-einsetzen, `flet build apk` und installieren.
+Für den Test auf dem Handy vorübergehend als src/main.py einsetzen (das Original
+vorher beiseitelegen), `flet build apk` und installieren.
 
 Die Frage, um die es geht: Kommt Python auf diesem Gerät an einen
 Bluetooth-Sensor? Auf dem Desktop lautet die Antwort ja. Auf Android und iOS
@@ -16,6 +16,7 @@ erwarten wir ein Nein — und wollen wissen, *wie* genau es scheitert.
 from __future__ import annotations
 
 import asyncio
+import os
 import platform
 import sys
 
@@ -156,4 +157,17 @@ def main(page) -> None:  # type: ignore[no-untyped-def]
 
 
 if __name__ == "__main__":
-    main_terminal()
+    # `flet run` und die gebaute App setzen eine dieser Variablen — dann wartet ein
+    # Fenster auf uns. `python pruefe_ble.py` setzt keine: Ausgabe ins Terminal.
+    flet_host = (
+        "FLET_PLATFORM",  # gebaute App (Android/iOS/Desktop)
+        "FLET_SERVER_UDS_PATH",  # flet run auf Linux/macOS
+        "FLET_SERVER_PORT",  # flet run auf Windows / --web
+        "FLET_DART_BRIDGE_PORT",
+    )
+    if any(os.getenv(name) for name in flet_host):
+        import flet as ft
+
+        ft.run(main)
+    else:
+        main_terminal()

@@ -70,13 +70,19 @@ trainingsapp = ["data/migrations/*.sql", "data/seed/*.json"]
 # Die editionsspezifischen Werte (App-Name, Bundle-ID, Icon) stehen in
 # build/solo.toml und build/praxis.toml und werden beim Bauen übergeben.
 [tool.flet]
-org = "de.praxis-ebert"
+# Kein Bindestrich: der Wert wird zum Android-Paketnamen und muss ein gültiger
+# Java-Bezeichner sein.
+org = "de.praxisebert"
 product = "Trainingsassistent"
 company = "Praxis Ebert"
 copyright = "Copyright (C) 2026 Benjamin Ebert"
 
+# `flet build` packt genau dieses Verzeichnis in die App und startet dort `main.py`.
+# Es muss `src` sein (nicht `src/trainingsapp/ui`), damit das Paket `trainingsapp`
+# mitsamt Migrationen und Seed-Daten in die APK wandert — das Projekt selbst wird
+# vom Build nicht als Abhängigkeit installiert.
 [tool.flet.app]
-path = "src/trainingsapp/ui"
+path = "src"
 
 [tool.flet.android.permission]
 "android.permission.BLUETOOTH_SCAN" = true

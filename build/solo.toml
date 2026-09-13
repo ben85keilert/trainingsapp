@@ -8,7 +8,7 @@
 edition = "solo"
 name = "Trainingsassistent"
 description = "Bewegungsübungen dokumentieren, mit begleitender HRV-Messung"
-bundle_id = "de.praxis-ebert.trainingsassistent"
+bundle_id = "de.praxisebert.trainingsassistent"
 
 [android]
 permissions = [

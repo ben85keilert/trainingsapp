@@ -75,6 +75,12 @@ Flet es beim ersten `flet build` selbst — das dauert dann entsprechend.
 
 ## 3. Bauen
 
+`flet build` packt das Verzeichnis aus `[tool.flet.app] path` (in
+`pyproject.toml`) in die App und startet dort eine `main.py`. Bei uns ist das
+`src/` — so wandert das ganze Paket `trainingsapp` mitsamt Migrationen und
+Seed-Daten in die APK. `src/main.py` ist nur ein Dreizeiler, der
+`trainingsapp.ui.app.main` startet; die Oberfläche bleibt, wo sie ist.
+
 ```bash
 uv run flet build apk --verbose
 ```
@@ -128,9 +134,16 @@ uv run python docs/tutorial/L02b_aufs_handy/pruefe_ble.py
 Erwartung: Es findet Geräte. Falls du einen Brustgurt oder eine Uhr hast —
 Übertragung einschalten und schauen, ob sie auftaucht.
 
-Für den Test auf dem Handy: `pruefe_ble.py` vorübergehend als
-`src/trainingsapp/ui/app.py` einsetzen, bauen, installieren, starten. Die App
-zeigt das Ergebnis auf dem Bildschirm.
+Für den Test auf dem Handy: `pruefe_ble.py` vorübergehend als `src/main.py`
+einsetzen (das Original vorher beiseitelegen), bauen, installieren, starten.
+Die App zeigt das Ergebnis auf dem Bildschirm.
+
+```bash
+mv src/main.py src/main.py.orig
+cp docs/tutorial/L02b_aufs_handy/pruefe_ble.py src/main.py
+uv run flet build apk --verbose
+mv src/main.py.orig src/main.py        # danach wieder zurück!
+```
 
 **Erwartung: es scheitert.** Wichtig ist *wie* — die Meldung sagt uns, ob es an
 der Bibliothek, an Berechtigungen oder an etwas anderem liegt.
@@ -156,6 +169,13 @@ Notiere für unser weiteres Vorgehen:
 `--verbose` sieht man, dass es weitergeht.
 
 **Kein Java gefunden** — JDK 17 nötig, neuere Versionen machen Probleme.
+
+**„is not a valid Java package name"** — `org` in `pyproject.toml` wird zum
+Android-Paketnamen; Bindestriche und andere Sonderzeichen sind dort verboten.
+
+**Kotlin-Syntaxfehler in `build/flutter/…/MainActivity.kt` nach Änderung von
+`org`** — Flet erzeugt das Flutter-Projekt in `build/flutter` neu, räumt alte
+Dateien aber nicht weg. `rm -rf build/flutter` und neu bauen.
 
 **APK installiert nicht** — „Unbekannte Quellen" erlauben. Bei einer vorher
 installierten Version mit anderer Signatur: erst deinstallieren.

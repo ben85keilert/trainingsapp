@@ -11,7 +11,7 @@
 edition = "praxis"
 name = "Trainingsassistent Praxis"
 description = "Übungen und Trainingsverlauf gemeinsam mit deiner Praxis"
-bundle_id = "de.praxis-ebert.trainingsassistent.praxis"
+bundle_id = "de.praxisebert.trainingsassistent.praxis"
 
 [android]
 permissions = [

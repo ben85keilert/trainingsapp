@@ -16,8 +16,8 @@ venv/
 .coverage
 htmlcov/
 
-# Flet-Builds
-/build/*/
+# Flet-Builds (flet build legt dort auch .hash und .python-version ab)
+/build/*
 !/build/*.toml
 *.apk
 *.aab

@@ -95,7 +95,7 @@ def zaehler_ansicht(page: ft.Page, state: AppState) -> ft.Control:
 def andere_ansicht(state: AppState) -> ft.Control:
     return ft.Container(
         padding=20,
-        alignment=ft.alignment.center,
+        alignment=ft.Alignment.CENTER,
         content=ft.Column(
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=8,

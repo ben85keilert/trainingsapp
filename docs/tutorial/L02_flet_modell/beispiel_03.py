@@ -31,7 +31,7 @@ def uebungskarte(uebung: dict, on_click) -> ft.Control:
         on_click=on_click,
         data=uebung["key"],
         padding=14,
-        margin=ft.margin.only(bottom=8),
+        margin=ft.Margin.only(bottom=8),
         border_radius=12,
         bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
         content=ft.Row(
@@ -43,7 +43,7 @@ def uebungskarte(uebung: dict, on_click) -> ft.Control:
                     height=44,
                     border_radius=22,
                     bgcolor=ft.Colors.SECONDARY_CONTAINER,
-                    alignment=ft.alignment.center,
+                    alignment=ft.Alignment.CENTER,
                     content=ft.Icon(uebung.get("icon_key") or "fitness_center"),
                 ),
                 # expand=True nimmt den Platz zwischen Icon und Chevron ein.

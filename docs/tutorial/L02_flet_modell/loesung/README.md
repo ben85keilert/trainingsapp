@@ -69,7 +69,7 @@ die Höhe, `ELLIPSIS` hängt „…" an statt hart abzuschneiden.
 ```python
 def kategorie_chip(text: str) -> ft.Control:
     return ft.Container(
-        padding=ft.padding.symmetric(2, 8),
+        padding=ft.Padding.symmetric(vertical=2, horizontal=8),
         border_radius=10,
         bgcolor=ft.Colors.TERTIARY_CONTAINER,
         content=ft.Text(text, size=10, color=ft.Colors.ON_TERTIARY_CONTAINER),

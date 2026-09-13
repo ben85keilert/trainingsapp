@@ -19,7 +19,7 @@ ZIELE = [
 def ansicht(titel: str, text: str) -> ft.Control:
     return ft.Container(
         expand=True,
-        alignment=ft.alignment.center,
+        alignment=ft.Alignment.CENTER,
         content=ft.Column(
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=8,

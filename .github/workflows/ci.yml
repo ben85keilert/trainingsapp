@@ -56,7 +56,8 @@ jobs:
                    docs/tutorial/L02b_aufs_handy/pruefe_ble.py \
                    docs/tutorial/L04_daten_und_sqlite/beispiel_01.py \
                    docs/tutorial/L04_daten_und_sqlite/beispiel_02.py \
-                   docs/tutorial/L04_daten_und_sqlite/beispiel_03.py; do
+                   docs/tutorial/L04_daten_und_sqlite/beispiel_03.py \
+                   docs/tutorial/Z_grundlagen/beispiel_asyncio.py; do
             echo "--- $f"
             uv run --no-sync python "$f" > /dev/null
           done

@@ -70,6 +70,13 @@ Die Beispiele sind eigenständig ausführbar. Verändere sie ruhig — dafür si
 Diese beiden entstehen, wenn wir dort ankommen. Vorher wüssten wir noch nicht
 genau genug, wogegen sie geschrieben werden.
 
+### Zusatz — Grundlagen zum Nachlesen
+
+Kein Teil des Lernpfads, sondern Hintergrund, wenn ein Begriff unklar ist.
+
+- [Generator, Coroutine, Task](Z_grundlagen/asyncio.md) — was `async`/`await`
+  eigentlich tut; hilfreich vor L07 und L10.
+
 ---
 
 ## Warum die Reihenfolge so ist

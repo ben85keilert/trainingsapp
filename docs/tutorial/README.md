@@ -95,3 +95,5 @@ leichte Lektion mit einem sehr sichtbaren Ergebnis.
 2. Lief der Befehl mit `uv run` davor? Ohne läuft er in der falschen Umgebung.
 3. `uv run pytest` — sind alle Tests grün? Wenn nein, liegt es meist dort.
 4. In der Lektion nachsehen: unter „Stolperfallen" steht, was üblicherweise schiefgeht.
+5. Für Icon-Namen, Flet-Docs und andere externe Quellen:
+   [`docs/nachschlagen.md`](../nachschlagen.md).

@@ -85,6 +85,7 @@ docs/
   datenmodell.md       Datenbankschema
   hrv_algorithmen.md   Formeln, Konstanten, Fallstricke
   roadmap.md           Meilensteine
+  nachschlagen.md      externe Links (Flet-Icons, Docs, Spezifikationen)
   recht/               DSGVO, MDR, Store-Freigaben
   tutorial/            der Lernpfad
 ```

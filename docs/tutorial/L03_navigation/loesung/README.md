@@ -150,7 +150,7 @@ def platzhalter(titel: str, lektion: str) -> ft.Control:
     )
 
 
-async def main(page: ft.Page) -> None:
+def main(page: ft.Page) -> None:
     page.title = "Trainingsassistent"
     page.padding = 0
     page.theme = ft.Theme(color_scheme_seed="#2E7D6E", use_material3=True)
@@ -199,7 +199,7 @@ async def main(page: ft.Page) -> None:
             ],
         )
 
-    def route_gewechselt(e):
+    def route_gewechselt():
         page.views.clear()
         page.views.append(haupt())
         if page.route.startswith("/uebung/"):
@@ -212,7 +212,7 @@ async def main(page: ft.Page) -> None:
 
     page.on_route_change = route_gewechselt
     page.on_view_pop = zurueck
-    await page.push_route("/")
+    route_gewechselt()  # beim Start ist die Route schon "/", push_route("/") löst nichts aus
 
 
 ft.run(main)

@@ -22,7 +22,7 @@ SEED = (
 UEBUNGEN = {u["key"]: u for u in json.loads(SEED.read_text(encoding="utf-8"))["exercises"]}
 
 
-async def main(page: ft.Page) -> None:
+def main(page: ft.Page) -> None:
     page.title = "Routen"
     page.theme = ft.Theme(color_scheme_seed="#2E7D6E", use_material3=True)
 
@@ -81,7 +81,9 @@ async def main(page: ft.Page) -> None:
             ],
         )
 
-    def route_gewechselt(e: ft.RouteChangeEvent) -> None:
+    # Ohne Parameter, damit wir den Handler beim Start selbst aufrufen können:
+    # Flet-Handler dürfen das Ereignis weglassen, wenn sie es nicht brauchen.
+    def route_gewechselt() -> None:
         page.views.clear()
         page.views.append(liste())  # Wurzel bleibt immer unten
         if page.route.startswith("/uebung/"):
@@ -97,7 +99,9 @@ async def main(page: ft.Page) -> None:
 
     page.on_route_change = route_gewechselt
     page.on_view_pop = zurueck
-    await page.push_route("/")
+    # Beim Start steht die Route schon auf "/" — push_route("/") löst dann KEIN
+    # Ereignis aus (Flet verwirft Wechsel auf dieselbe Route). Also einmal selbst.
+    route_gewechselt()
 
 
 ft.run(main)

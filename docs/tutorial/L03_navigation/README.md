@@ -46,7 +46,9 @@ Zwei Flet-0.86-Eigenheiten: Bei `ft.View` ist `controls` das erste
 Positionsargument, nicht `route` — deshalb beide als Schlüsselwort, sonst zeigt
 die Ansicht stillschweigend nichts an. Und `push_route` ist eine Coroutine;
 aus einem Lambda oder einem synchronen Handler heraus startet man sie mit
-`page.run_task(page.push_route, "/…")`.
+`page.run_task(page.push_route, "/…")`. Und beim Start ruft man den Handler
+einmal **direkt** auf: Die Route steht da schon auf `/`, und Flet verwirft
+einen Wechsel auf dieselbe Route — `push_route("/")` würde nichts auslösen.
 
 `page.views` ist ein **Stapel**. Die oberste Ansicht ist sichtbar, darunter
 liegen die vorherigen. Der Zurück-Knopf nimmt die oberste herunter.

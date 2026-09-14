@@ -31,16 +31,22 @@ eine Handy-App mit fester Leiste unten reicht das oft völlig.
 ```python
 def route_wechsel(e: ft.RouteChangeEvent):
     page.views.clear()
-    page.views.append(ft.View("/", [heute_ansicht()]))
+    page.views.append(ft.View(route="/", controls=[heute_ansicht()]))
     if page.route.startswith("/uebung/"):
         uebung_id = page.route.split("/")[-1]
-        page.views.append(ft.View(page.route, [detail_ansicht(uebung_id)]))
+        page.views.append(ft.View(route=page.route, controls=[detail_ansicht(uebung_id)]))
     page.update()
 
 
 page.on_route_change = route_wechsel
-page.go("/uebung/abc123")
+await page.push_route("/uebung/abc123")
 ```
+
+Zwei Flet-0.86-Eigenheiten: Bei `ft.View` ist `controls` das erste
+Positionsargument, nicht `route` — deshalb beide als Schlüsselwort, sonst zeigt
+die Ansicht stillschweigend nichts an. Und `push_route` ist eine Coroutine;
+aus einem Lambda oder einem synchronen Handler heraus startet man sie mit
+`page.run_task(page.push_route, "/…")`.
 
 `page.views` ist ein **Stapel**. Die oberste Ansicht ist sichtbar, darunter
 liegen die vorherigen. Der Zurück-Knopf nimmt die oberste herunter.

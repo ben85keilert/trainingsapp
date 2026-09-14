@@ -57,12 +57,12 @@ Dasselbe Muster wie beim Zähler — und aus demselben Grund.
 def video(key: str) -> ft.View:
     u = UEBUNGEN[key]
     return ft.View(
-        f"/uebung/{key}/video",
-        [
+        route=f"/uebung/{key}/video",
+        controls=[
             ft.AppBar(title=ft.Text(f"{u['name']} — Video")),
             ft.Container(
                 expand=True,
-                alignment=ft.alignment.center,
+                alignment=ft.Alignment.CENTER,
                 content=ft.Column(
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
@@ -128,7 +128,7 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
                 title=ft.Text(u["name"]),
                 subtitle=ft.Text(u["category"], size=12),
                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
-                on_click=lambda e, k=u["key"]: page.go(f"/uebung/{k}"),
+                on_click=lambda e, k=u["key"]: page.run_task(page.push_route, f"/uebung/{k}"),
             )
             for u in state.uebungen
         ],
@@ -138,7 +138,7 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
 def platzhalter(titel: str, lektion: str) -> ft.Control:
     return ft.Container(
         expand=True,
-        alignment=ft.alignment.center,
+        alignment=ft.Alignment.CENTER,
         content=ft.Column(
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=8,
@@ -150,7 +150,7 @@ def platzhalter(titel: str, lektion: str) -> ft.Control:
     )
 
 
-def main(page: ft.Page) -> None:
+async def main(page: ft.Page) -> None:
     page.title = "Trainingsassistent"
     page.padding = 0
     page.theme = ft.Theme(color_scheme_seed="#2E7D6E", use_material3=True)
@@ -167,13 +167,13 @@ def main(page: ft.Page) -> None:
         return platzhalter("Verlauf", "L12")
 
     def haupt() -> ft.View:
-        def wechseln(e):
+        async def wechseln(e):
             state.nav_index = e.control.selected_index
-            page.go("/")  # Stapel neu aufbauen
+            await page.push_route("/")  # Stapel neu aufbauen
 
         return ft.View(
-            "/",
-            [
+            route="/",
+            controls=[
                 ft.AppBar(title=ft.Text("Trainingsassistent")),
                 ft.Container(expand=True, content=inhalt()),
                 ft.NavigationBar(
@@ -192,8 +192,8 @@ def main(page: ft.Page) -> None:
     def detail(key: str) -> ft.View:
         u = next(x for x in state.uebungen if x["key"] == key)
         return ft.View(
-            f"/uebung/{key}",
-            [
+            route=f"/uebung/{key}",
+            controls=[
                 ft.AppBar(title=ft.Text(u["name"])),
                 ft.Container(padding=20, content=ft.Text(u["description"])),
             ],
@@ -206,15 +206,19 @@ def main(page: ft.Page) -> None:
             page.views.append(detail(page.route.rsplit("/", 1)[-1]))
         page.update()
 
+    async def zurueck(e):
+        page.views.pop()
+        await page.push_route(page.views[-1].route)
+
     page.on_route_change = route_gewechselt
-    page.on_view_pop = lambda e: (page.views.pop(), page.go(page.views[-1].route))
-    page.go("/")
+    page.on_view_pop = zurueck
+    await page.push_route("/")
 
 
 ft.run(main)
 ```
 
-Beachte: `wechseln` ruft `page.go("/")` auf, statt den Inhalt direkt zu tauschen.
+Beachte: `wechseln` ruft `page.push_route("/")` auf, statt den Inhalt direkt zu tauschen.
 So läuft alles über **einen** Weg — den Routen-Handler. Das ist konsistenter und
 verhindert, dass Leiste und Stapel auseinanderlaufen.
 

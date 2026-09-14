@@ -22,14 +22,16 @@ SEED = (
 UEBUNGEN = {u["key"]: u for u in json.loads(SEED.read_text(encoding="utf-8"))["exercises"]}
 
 
-def main(page: ft.Page) -> None:
+async def main(page: ft.Page) -> None:
     page.title = "Routen"
     page.theme = ft.Theme(color_scheme_seed="#2E7D6E", use_material3=True)
 
     def liste() -> ft.View:
+        # Seit Flet 0.80 ist `controls` das erste Positionsargument, nicht mehr
+        # `route` — darum beide als Schlüsselwort, sonst landet "/" in `controls`.
         return ft.View(
-            "/",
-            [
+            route="/",
+            controls=[
                 ft.AppBar(title=ft.Text("Übungen")),
                 ft.ListView(
                     expand=True,
@@ -38,8 +40,12 @@ def main(page: ft.Page) -> None:
                             title=ft.Text(u["name"]),
                             subtitle=ft.Text(u["category"], size=12),
                             trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
-                            # page.go setzt die Route — der Rest passiert im Handler.
-                            on_click=lambda e, k=key: page.go(f"/uebung/{k}"),
+                            # push_route setzt die Route — der Rest passiert im Handler.
+                            # Es ist eine Coroutine; aus einem Lambda heraus startet
+                            # run_task sie als Task auf der Ereignisschleife der Seite.
+                            on_click=lambda e, k=key: page.run_task(
+                                page.push_route, f"/uebung/{k}"
+                            ),
                         )
                         for key, u in UEBUNGEN.items()
                     ],
@@ -50,8 +56,8 @@ def main(page: ft.Page) -> None:
     def detail(key: str) -> ft.View:
         u = UEBUNGEN[key]
         return ft.View(
-            f"/uebung/{key}",
-            [
+            route=f"/uebung/{key}",
+            controls=[
                 # Weil diese Ansicht ÜBER der Liste liegt, zeigt Flet
                 # automatisch einen Zurück-Pfeil.
                 ft.AppBar(title=ft.Text(u["name"])),
@@ -84,13 +90,14 @@ def main(page: ft.Page) -> None:
                 page.views.append(detail(key))
         page.update()
 
-    def zurueck(e: ft.ViewPopEvent) -> None:
+    # Ereignisbehandler dürfen Coroutinen sein — dann kann man push_route awaiten.
+    async def zurueck(e: ft.ViewPopEvent) -> None:
         page.views.pop()
-        page.go(page.views[-1].route)
+        await page.push_route(page.views[-1].route)
 
     page.on_route_change = route_gewechselt
     page.on_view_pop = zurueck
-    page.go("/")
+    await page.push_route("/")
 
 
 ft.run(main)

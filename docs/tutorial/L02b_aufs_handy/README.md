@@ -56,7 +56,7 @@ vorgebautes Wheel für Android.** Flet betreibt dafür einen eigenen Index,
 | cryptography | ✅ | wichtig für Edition B |
 | Pillow | ✅ | |
 | **scipy** | ❌ | **Welch und Lomb-Scargle selbst bauen** |
-| **bleak** | ❌ | **eigene Extension nötig** |
+| **bleak** | ❌ | Wheel ist reines Python und installiert sich — aber das Android-Backend setzt python-for-android voraus. **Eigene Extension nötig** |
 
 Reines Python (ohne kompilierten Anteil) läuft immer.
 
@@ -107,8 +107,12 @@ modernes Gerät reicht `arm64-v8a`.
 **Per Kabel:**
 
 ```bash
-adb install build/apk/app-arm64-v8a-release.apk
+adb install -r build/apk/trainingsapp.apk
 ```
+
+Mit `--split-per-abi` steht die Architektur im Dateinamen. Ist `adb` nicht im
+PATH: es liegt im Android SDK unter `platform-tools/` (bei einem von Flet
+installierten SDK `~/Android/sdk/platform-tools/adb`).
 
 **Ohne Kabel:** APK auf das Handy kopieren, im Dateimanager antippen,
 „Installation aus unbekannten Quellen" erlauben.
@@ -134,19 +138,43 @@ uv run python docs/tutorial/L02b_aufs_handy/pruefe_ble.py
 Erwartung: Es findet Geräte. Falls du einen Brustgurt oder eine Uhr hast —
 Übertragung einschalten und schauen, ob sie auftaucht.
 
-Für den Test auf dem Handy: `pruefe_ble.py` vorübergehend als `src/main.py`
-einsetzen (das Original vorher beiseitelegen), bauen, installieren, starten.
-Die App zeigt das Ergebnis auf dem Bildschirm.
+Für den Test auf dem Handy sind zwei Dinge vorübergehend nötig:
+
+1. `pruefe_ble.py` als `src/main.py` einsetzen (das Original vorher
+   beiseitelegen).
+2. `bleak` in die APK bekommen. `flet build` packt nur `project.dependencies`
+   und `tool.flet.<plattform>.dependencies` ein — das Extra `desktop` bleibt
+   draußen. Ohne diesen Schritt meldet die App nur `ModuleNotFoundError`, und
+   das sagt nichts über die Bibliothek aus. Also in `pyproject.toml`:
+
+   ```toml
+   # nur für diesen Test, danach wieder entfernen
+   [tool.flet.android]
+   dependencies = ["bleak>=0.22"]
+   ```
+
+Dann bauen, installieren, starten — die App zeigt das Ergebnis auf dem
+Bildschirm.
 
 ```bash
 mv src/main.py src/main.py.orig
 cp docs/tutorial/L02b_aufs_handy/pruefe_ble.py src/main.py
 uv run flet build apk --verbose
+ls build/site-packages/arm64-v8a | grep bleak   # muss etwas ausgeben
 mv src/main.py.orig src/main.py        # danach wieder zurück!
+# … und den [tool.flet.android]-Eintrag aus pyproject.toml entfernen
 ```
 
-**Erwartung: es scheitert.** Wichtig ist *wie* — die Meldung sagt uns, ob es an
-der Bibliothek, an Berechtigungen oder an etwas anderem liegt.
+**Erwartung: der Import gelingt, der Scan scheitert.** `bleak` ist reines
+Python und lässt sich installieren. Sein Android-Backend schaltet es aber nur
+frei, wenn die Umgebungsvariable `P4A_BOOTSTRAP` gesetzt ist — das tut
+python-for-android, nicht serious_python. Es bleibt bei
+`BleakError: Unsupported platform: Android`. Wichtig ist der genaue Wortlaut:
+Er belegt, dass es an der Bibliothek liegt, nicht an Berechtigungen oder an
+der Paketierung.
+
+Gemessen am 2026-09-14 mit Flet 0.86.5 und Python 3.14.7 auf Android: genau
+diese Meldung. numpy und `hrv_core` liefen dabei einwandfrei.
 
 ---
 
@@ -157,7 +185,8 @@ Notiere für unser weiteres Vorgehen:
 - [ ] APK ist gebaut — Größe? Bauzeit?
 - [ ] App startet auf dem Gerät und zeigt die Navigation
 - [ ] `import numpy` funktioniert in der App
-- [ ] `import bleak` — geht es? Wenn nein: welche Meldung genau?
+- [ ] `import bleak` in der App — erwartet: geht (reines Python)
+- [ ] `BleakScanner.discover` in der App — welche Meldung genau?
 - [ ] BLE-Scan auf dem Desktop — werden Geräte gefunden?
 - [ ] Falls vorhanden: taucht dein Sensor/deine Uhr auf?
 
@@ -182,6 +211,10 @@ installierten Version mit anderer Signatur: erst deinstallieren.
 
 **App startet und schließt sofort** — `adb logcat | grep -i python` zeigt den
 Python-Fehler.
+
+**Titel liegt unter der Statusleiste** — `page.padding` kennt die Safe Area
+des Geräts nicht. Den Inhalt in `ft.SafeArea(content=…)` legen; das kommt in
+L03 beim Seitengerüst wieder.
 
 **Berechtigungen fehlen** — Bluetooth-Berechtigungen stehen in `pyproject.toml`
 unter `[tool.flet.android.permission]`. Ab Android 12 müssen sie zusätzlich

@@ -6,7 +6,9 @@ Läuft auf zwei Wegen:
     uv run flet run docs/tutorial/L02b_aufs_handy/pruefe_ble.py   (Fenster)
 
 Für den Test auf dem Handy vorübergehend als src/main.py einsetzen (das Original
-vorher beiseitelegen), `flet build apk` und installieren.
+vorher beiseitelegen) und bleak in pyproject.toml unter
+[tool.flet.android] dependencies eintragen — sonst landet es gar nicht in der
+APK. Dann `flet build apk` und installieren. Beides danach zurücknehmen.
 
 Die Frage, um die es geht: Kommt Python auf diesem Gerät an einen
 Bluetooth-Sensor? Auf dem Desktop lautet die Antwort ja. Auf Android und iOS
@@ -115,19 +117,25 @@ def main(page) -> None:  # type: ignore[no-untyped-def]
     page.theme = ft.Theme(color_scheme_seed="#2E7D6E", use_material3=True)
 
     liste = ft.Column(spacing=8)
+    status = ft.Text("Prüfung läuft …", opacity=0.6)
+    # SafeArea: auf dem Handy läge der Titel sonst unter der Statusleiste.
     page.add(
-        ft.Column(
-            controls=[
-                ft.Text("Was kann dieses Gerät?", size=22, weight=ft.FontWeight.BOLD),
-                ft.Text("Prüfung läuft …", opacity=0.6),
-                ft.Divider(),
-                liste,
-            ]
+        ft.SafeArea(
+            content=ft.Column(
+                controls=[
+                    ft.Text("Was kann dieses Gerät?", size=22, weight=ft.FontWeight.BOLD),
+                    status,
+                    ft.Divider(),
+                    liste,
+                ]
+            )
         )
     )
 
     async def laufen() -> None:
-        for name, ok, details in await pruefe():
+        ergebnisse = await pruefe()
+        status.value = "Fertig — Ergebnis notieren (Abschnitt 6 im README)."
+        for name, ok, details in ergebnisse:
             liste.controls.append(
                 ft.Container(
                     padding=10,

@@ -31,6 +31,12 @@ def wechseln(e: ft.ControlEvent) -> None:  # der Handler
 ft.NavigationBar(on_change=wechseln, ...)  # das Anhängen
 ```
 
+Flet ruft den Handler mit **genau einem** Positionsargument auf — dem Ereignis.
+Der erste Parameter fängt es, egal wie er heißt; `e` ist nur Konvention. Die
+Typannotation `e: ft.ControlEvent` hilft beim Lesen und dem Type-Checker, sie
+bindet nichts. Flet „weiß" also nicht, dass `e` das Ereignis ist — es steckt
+es einfach in den ersten Parameter.
+
 Ein Handler darf das Ereignis-Argument weglassen, wenn er es nicht braucht
 (`def route_gewechselt() -> None`). Dann lässt er sich auch ganz normal von
 Hand aufrufen — das nutzen wir beim Start von Beispiel 2.
@@ -47,6 +53,16 @@ liegen in `page.views`.
 ```python
 ft.View(route="/uebung/kniebeuge", controls=[ft.AppBar(...), ft.Text(...)])
 ```
+
+**`ft.AppBar`** — Die Titelleiste oben in einer View: Titel, optional Icons und
+Aktionen. In der Regel das erste Control in `controls`. Liegt die View nicht
+ganz unten auf dem Stapel, zeichnet Flet in ihrer `AppBar` von selbst den
+Zurück-Pfeil — dafür ist nichts zu konfigurieren.
+
+**`ft.ListView`** — Eine scrollbare Liste. `ft.Column` scrollt nicht und läuft
+bei zu vielen Einträgen einfach über; `ListView` übernimmt das Scrollen selbst
+und ist für lange, gleichförmige Listen gedacht. `expand=True` lässt sie den
+Platz unter der `AppBar` ausfüllen.
 
 **Route** — Eine Adresse für eine Ansicht, geschrieben wie ein Pfad: `/`,
 `/uebung/kniebeuge`. Sie steht in `page.route`. Die Wurzel `/` ist so etwas wie
@@ -75,15 +91,35 @@ Stapel nehmen": Zurück-Pfeil in der `AppBar` oder die Zurück-Taste auf Android
 Flet nimmt die View **nicht** selbst herunter — das tut der Handler, und er
 setzt danach die Route auf die jetzt oberste View.
 
-**Coroutine / `page.run_task`** — Eine mit `async def` definierte Funktion.
-Man kann sie nur mit `await` aus einer anderen Coroutine heraus aufrufen. Aus
-einem Lambda oder einem synchronen Handler geht das nicht — dort startet
-`page.run_task(coroutine, *args)` sie als Task auf der Ereignisschleife der
-Seite. Handler dürfen selbst `async def` sein; dann darf man darin awaiten.
+**Ereignisschleife (Event Loop)** — Der Motor von `asyncio` und damit von
+Flet: eine Endlosschleife, die laufend prüft, welche Aufgabe gerade weiterkann,
+und sie bis zu ihrem nächsten `await` laufen lässt. Es läuft immer nur ein
+Stück Code gleichzeitig; Warten (auf Netzwerk, Gerät, einen Klick) blockiert
+das Programm aber nicht, weil die Schleife währenddessen andere Aufgaben
+bedient. Jede `page` hat ihre eigene.
+
+**Coroutine** — Was der Aufruf einer `async def`-Funktion zurückgibt: ein noch
+nicht gestartetes Rezept. `page.push_route("/")` ohne `await` tut **nichts** —
+es erzeugt nur das Coroutine-Objekt, und Python warnt später: „coroutine was
+never awaited". Erst `await` oder ein Task treiben es an.
+
+**Task** — Eine Coroutine, die die Ereignisschleife eingeplant hat und von
+selbst weiterlaufen lässt. `await task` heißt „warte, bis er fertig ist", nicht
+„starte ihn" — gestartet ist er schon. Merksatz: Coroutine = Rezept, Task =
+Rezept im Ofen.
+
+**`page.run_task(fn, *args)`** — Macht aus einer Coroutine-Funktion und ihren
+Argumenten einen Task auf der Ereignisschleife der Seite, intern etwa
+`asyncio.create_task(fn(*args))`. Die Funktion wird **ohne** Klammern
+übergeben, ihre Argumente folgen dahinter. Gedacht für synchrone Stellen, an
+denen kein `await` möglich ist — allen voran Lambdas: Python kennt keine
+async-Lambdas, `lambda e: await …` ist ein `SyntaxError`. Handler dürfen
+dagegen selbst `async def` sein; dann plant Flet sie beim Ereignis von sich aus
+als Task ein, und im Handler darf man awaiten.
 
 ```python
-on_click=lambda e: page.run_task(page.push_route, "/uebung/abc")  # synchron
-async def zurueck(e): await page.push_route("/")                    # Coroutine
+on_click=lambda e: page.run_task(page.push_route, "/uebung/abc")  # synchron → Task
+async def zurueck(e): await page.push_route("/")                    # Coroutine → await
 ```
 
 **Zustand (State)** — Alles, was die App sich merken muss: geladene Übungen,
@@ -157,8 +193,53 @@ ft.ListTile(
 ```
 
 Der Klick auf einen Eintrag tut nur eines: die Route setzen. Was daraus wird,
-entscheidet der Routen-Handler. (`k=key` im Lambda friert den Schleifenwert
-ein — ohne das bekämen alle Einträge den letzten `key`.)
+entscheidet der Routen-Handler. Die Lambda-Zeile ist trotzdem die dichteste
+der ganzen Lektion — drei Dinge stecken darin.
+
+**`e`** ist das Ereignis. Flet ruft den Handler mit genau einem
+Positionsargument auf, der erste Parameter fängt es. Hier wird es nicht einmal
+benutzt — es muss nur da sein, damit der Aufruf passt.
+
+**`k=key`** kommt **nicht** von Flet, sondern ist ein gewöhnlicher
+Python-Default. Das Lambda steht in einer Schleife (`for key, u in
+UEBUNGEN.items()`), und eine Closure schlägt Namen aus ihrer Umgebung erst beim
+**Aufruf** nach — „späte Bindung". Beim Klick ist die Schleife längst durch,
+`key` zeigt für jeden Eintrag auf den letzten Wert. `k=key` wertet `key`
+dagegen sofort bei der **Definition** aus und speichert das Ergebnis als
+Default: Jedes Lambda bekommt sein eigenes `k`. Und weil `k` einen Default
+hat, stört es nicht, dass Flet nur ein Argument liefert.
+
+```python
+handler = [lambda e: print(i) for i in range(3)]       # späte Bindung
+[h(None) for h in handler]                               # 2 2 2
+
+handler = [lambda e, i=i: print(i) for i in range(3)]  # eingefroren
+[h(None) for h in handler]                               # 0 1 2
+```
+
+**`page.run_task(page.push_route, f"/uebung/{k}")`** — `push_route` ist eine
+Coroutine, und ein Lambda kann nicht awaiten. `run_task` bekommt die Funktion
+(ohne Klammern) und ihr Argument getrennt, baut daraus die Coroutine und
+startet sie als Task. Der f-String wird beim Klick ausgewertet, mit dem
+eingefrorenen `k`.
+
+Ohne Lambda ginge es auch: eine Fabrik, die je Übung einen `async`-Handler
+baut, den Flet dann selbst einplant.
+
+```python
+def oeffnen(k: str):
+    async def handler(e):
+        await page.push_route(f"/uebung/{k}")
+
+    return handler
+
+
+ft.ListTile(..., on_click=oeffnen(key))
+```
+
+Die Fabrik friert `k` als Parameter ein — dasselbe Prinzip wie `k=key`, nur
+ohne Default-Trick. Beispiel 2 nimmt das Lambda, weil es kürzer ist; wer die
+Fabrik klarer findet, nimmt die.
 
 **Der Routen-Handler.**
 
@@ -354,13 +435,23 @@ auf dem Stapel liegt. Die Wurzelansicht muss immer unten liegen bleiben.
 erste Positionsargument. `route=` und `controls=` immer als Schlüsselwort.
 
 **`RuntimeWarning: coroutine 'push_route' was never awaited`** — `push_route`
-wurde aus einem synchronen Handler wie eine normale Funktion aufgerufen. Dort
-`page.run_task(page.push_route, "/…")` verwenden oder den Handler `async`
-machen und `await` schreiben.
+wurde aus einem synchronen Handler wie eine normale Funktion aufgerufen. Das
+erzeugt nur das Coroutine-Objekt; niemand führt es aus, die Route bleibt, wie
+sie war. Dort `page.run_task(page.push_route, "/…")` verwenden oder den Handler
+`async` machen und `await` schreiben.
+
+**`SyntaxError: 'await' outside async function`** — `await` steht in einem
+Lambda oder einem synchronen Handler. Python kennt keine async-Lambdas.
+Entweder `page.run_task(...)` nehmen oder den Handler als `async def`
+schreiben — mit Lambda geht das nicht, dann eine Fabrik-Funktion (Abschnitt 1).
+
+**`TypeError: … missing 1 required positional argument`** — der Handler hat
+zwei Pflichtparameter (`lambda e, k: …`), Flet liefert aber nur einen. Der
+zweite braucht einen Default: `lambda e, k=key: …`.
 
 **Alle Listeneinträge öffnen dieselbe Übung** — im Lambda fehlt `k=key`; die
-Schleifenvariable wird erst beim Klick ausgewertet und hat dann den letzten
-Wert.
+Schleifenvariable wird erst beim Klick ausgewertet und hat dann für alle
+Einträge den letzten Wert (späte Bindung, Abschnitt 1).
 
 **Zustand ist nach dem Wechsel weg** — er wurde in der Ansichtsfunktion angelegt
 statt im `AppState`.

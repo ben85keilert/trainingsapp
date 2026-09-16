@@ -76,6 +76,8 @@ Kein Teil des Lernpfads, sondern Hintergrund, wenn ein Begriff unklar ist.
 
 - [Generator, Coroutine, Task](Z_grundlagen/asyncio.md) — was `async`/`await`
   eigentlich tut; hilfreich vor L07 und L10.
+- [Handler](Z_grundlagen/handler.md) — wie `on_click`, `on_change` & Co.
+  funktionieren, welche es gibt und wann ein Handler `async` sein muss; ab L02.
 
 ---
 

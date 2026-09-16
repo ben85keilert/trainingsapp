@@ -346,6 +346,26 @@ def katalog_ansicht(state: AppState) -> ft.Control:
 Der Zustand wird einmal aufgebaut und an die Ansichten übergeben. Sie **lesen**
 daraus und **melden** Änderungen zurück — sie halten nichts Eigenes.
 
+**`field(default_factory=list)` statt `= []`.** Ein Default-Wert wird in
+Python **einmal** ausgewertet, beim Definieren der Klasse — nicht bei jeder
+Instanz. `verlauf: list[str] = []` hieße also: alle `AppState`-Objekte teilen
+sich **dieselbe** Liste; hängt eines etwas an, sehen es alle. Das ist die
+Mutable-Default-Falle, dieselbe wie bei `def f(x=[])`. `dataclasses` kennt sie
+und lehnt `list`, `dict` und `set` als direkten Default ab (`ValueError`).
+`default_factory` bekommt stattdessen eine Funktion **ohne Klammern** — hier
+die Klasse `list` selbst — und ruft sie bei **jeder** neuen Instanz frisch auf:
+`list()` → eine eigene, leere Liste pro `AppState`.
+
+```python
+@dataclass
+class AppState:
+    verlauf: list[str] = []                          # ValueError
+    verlauf: list[str] = field(default_factory=list)  # jede Instanz ihre eigene
+```
+
+Bei unveränderlichen Defaults (`0`, `None`, `""`) braucht es das nicht — sie
+können nicht versehentlich geteilt werden, weil man sie nicht verändern kann.
+
 **Beispiel 3 macht das sichtbar.** `zaehler_ansicht(page, state)` hält zwei
 Zähler: `lokal` ist eine Variable *in der Funktion*, `state.zaehler` ein Feld
 des `AppState`, der in `main()` genau einmal angelegt wird. Der Handler
@@ -455,6 +475,11 @@ Einträge den letzten Wert (späte Bindung, Abschnitt 1).
 
 **Zustand ist nach dem Wechsel weg** — er wurde in der Ansichtsfunktion angelegt
 statt im `AppState`.
+
+**`ValueError: mutable default <class 'list'> for field … is not allowed: use
+default_factory`** — im `AppState` steht `= []`, `= {}` oder `= set()`. Der
+Default würde von allen Instanzen geteilt; `field(default_factory=list)`
+schreiben (Abschnitt 2).
 
 **Die Leiste unten springt zurück** — `selected_index` wird beim Neuaufbau nicht
 mitgeführt. Er gehört ebenfalls in den Zustand.

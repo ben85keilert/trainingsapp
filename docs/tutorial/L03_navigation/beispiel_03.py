@@ -23,6 +23,8 @@ class AppState:
     """
 
     zaehler: int = 0
+    # `= []` wäre hier ein ValueError: Ein Listen-Default würde von ALLEN
+    # AppState-Instanzen geteilt. default_factory ruft `list()` je Instanz neu auf.
     verlauf: list[str] = field(default_factory=list)
 
 

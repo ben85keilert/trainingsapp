@@ -63,3 +63,23 @@ jobs:
           done
         env:
           PYTHONPATH: src
+
+  flet-beispiele:
+    # Eigener Job, weil `test` absichtlich ohne flet läuft. Hier wird genau das
+    # installiert, was auch in eine gebaute App kommt (Laufzeitabhängigkeiten,
+    # keine Dev-Gruppen), und jedes Flet-Skript des Lernpfads ohne Bildschirm
+    # ausgeführt — so fällt eine von Flet entfernte API sofort auf.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Abhängigkeiten installieren
+        run: uv sync --locked --no-default-groups
+
+      - name: Flet-Beispiele des Lernpfads
+        run: uv run --no-sync python scripts/pruefe_flet_beispiele.py

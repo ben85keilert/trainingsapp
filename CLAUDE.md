@@ -24,6 +24,7 @@ uv run pytest tests/test_hrv_core.py::test_name -q   # ein einzelner Test
 uv run pytest --doctest-modules src/trainingsapp/core src/trainingsapp/hrv_core   # Doctests (laufen in CI)
 uv run ruff check . && uv run ruff format --check .   # Linter + Formatprüfung
 uv run mypy                                    # Typprüfung (Paket ist in pyproject konfiguriert)
+uv run python scripts/pruefe_flet_beispiele.py   # Flet-Skripte des Lernpfads ohne Bildschirm (CI)
 ```
 
 Vor jedem Pull Request muss laufen:
@@ -128,4 +129,7 @@ String-Interpolation.
 
 Die App entsteht entlang eines Lernpfads (`docs/tutorial/`); `ui/` ist bewusst noch eine
 Hülle mit Platzhalteransichten. Die Tutorial-Beispielskripte laufen in CI mit — wenn ein
-Beispiel bricht, ist der Lernpfad kaputt.
+Beispiel bricht, ist der Lernpfad kaputt. Flet-freie Beispiele stehen als Liste im Job
+`test`; jedes Skript, das `flet` importiert, findet `scripts/pruefe_flet_beispiele.py` im
+eigenen Job `flet-beispiele` selbst (Control-Baum mit `page`-Attrappe, `DeprecationWarning`
+= Fehler). Ereignis-Handler und Code in `.md`-Dateien prüft es nicht.

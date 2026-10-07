@@ -241,7 +241,8 @@ und Typprüfung — bei einem Dictionary weiß niemand, was drinstehen darf.
 Funktioniert, ist aber unsauber:
 
 - `page` gehört Flet. Eigene Attribute daran können mit künftigen Versionen
-  kollidieren — gerade bei Flet 1.0 ein reales Risiko.
+  kollidieren — Flet hat seine API zwischen 0.28, 0.80 und 1.0 mehrfach
+  umgebaut, das Risiko ist real.
 - Der Zustand wäre an die Oberfläche gebunden. Genau das wollen wir nicht: er
   soll in Tests ohne `page` funktionieren.
 - Typprüfer kennen `page.state` nicht und können nicht helfen.

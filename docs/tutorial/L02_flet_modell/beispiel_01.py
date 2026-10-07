@@ -15,7 +15,7 @@ BAUM = """Page
     │   ├── Container
     │   │   └── Text  "3x15"
     │   └── Row
-    │       ├── ElevatedButton
+    │       ├── Button
     │       └── IconButton
     └── Container                 (rechte Seite)
         └── Text  (dieser Text)
@@ -40,7 +40,7 @@ def main(page: ft.Page) -> None:
             ft.Row(
                 spacing=8,
                 controls=[
-                    ft.ElevatedButton("Fertig", icon=ft.Icons.CHECK),
+                    ft.Button("Fertig", icon=ft.Icons.CHECK),
                     ft.IconButton(ft.Icons.EDIT, tooltip="Bearbeiten"),
                 ],
             ),

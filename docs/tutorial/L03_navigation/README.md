@@ -302,7 +302,7 @@ ist er ohne Ereignis-Parameter definiert, und darum steht in ihm ein
 | Tipp auf Übung | `push_route("/uebung/x")` → Route ändert sich → `on_route_change` → Stapel = `[liste, detail(x)]` → Zurück-Pfeil erscheint |
 | Zurück | `on_view_pop` → `views.pop()` → `push_route("/")` → `on_route_change` → Stapel = `[liste]` |
 
-Zwei Flet-0.86-Eigenheiten: Bei `ft.View` ist `controls` das erste
+Zwei Eigenheiten der neuen Flet-Generation (seit 0.80, auch in 1.0): Bei `ft.View` ist `controls` das erste
 Positionsargument, nicht `route` — deshalb beide als Schlüsselwort, sonst zeigt
 die Ansicht stillschweigend nichts an. Und `push_route` ist eine Coroutine;
 aus einem Lambda oder einem synchronen Handler heraus startet man sie mit
@@ -419,8 +419,11 @@ Das ist dieselbe Idee wie beim Routing in Abschnitt 1: Dort ist die Route der
 Zustand, und `route_gewechselt` ist das `zeichnen()`, das den Stapel daraus
 ableitet.
 
-Das ist übrigens genau die Idee, die Flet 1.0 zum Standard macht. Wer schon
-jetzt so schreibt, hat die Umstellung fast hinter sich.
+Das ist übrigens genau die Idee hinter Flets deklarativem Modell
+(`@ft.component`, `ft.use_state`): Dort schreibt man nur noch `zeichnen()`,
+und Flet ruft es bei jeder Zustandsänderung selbst auf. Das Modell ist
+freiwillig — der bisherige Stil funktioniert auch in Flet 1.0 weiter. Wer
+aber schon jetzt so trennt, kann jederzeit wechseln.
 
 ---
 

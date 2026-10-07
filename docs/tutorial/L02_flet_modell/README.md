@@ -69,7 +69,7 @@ Zuweisung sofort übertragen, wäre das Ändern von zehn Werten zehn
 
 **Die gute Nachricht:** In den beiden häufigsten Fällen ruft Flet `update()`
 inzwischen selbst auf — nach `main()` und nach jedem Ereignis-Handler
-(„Auto-Update", Standard seit der neuen Flet-Generation, im Projekt 0.86).
+(„Auto-Update", Standard seit der neuen Flet-Generation, im Projekt 1.0).
 Der Klassiker aus älteren Flet-Tutorials — „Wert geändert, Bildschirm bleibt
 alt, halber Nachmittag weg" — tritt in Handlern deshalb nicht mehr auf.
 

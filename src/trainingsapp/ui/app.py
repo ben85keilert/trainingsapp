@@ -77,7 +77,7 @@ def main(page: ft.Page) -> None:
 
     körper = ft.Container(expand=True, content=inhalte[0])
 
-    def wechseln(e: ft.ControlEvent) -> None:
+    def wechseln(e: ft.Event[ft.NavigationBar]) -> None:
         körper.content = inhalte[e.control.selected_index]
         page.update()
 

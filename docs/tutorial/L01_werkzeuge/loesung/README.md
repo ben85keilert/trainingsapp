@@ -65,8 +65,9 @@ vielen Einträgen), oder eine Schleife über eine Liste statt drei einzelner
 
 - **Tests.** 81 Tests laufen in 0,3 Sekunden. Mit Oberfläche bräuchten sie einen
   Bildschirm, wären langsam und unzuverlässig.
-- **Flet 1.0 kommt.** Es bringt ein neues, deklaratives Modell. Was in `ui/`
-  steht, muss dann angefasst werden. Was in `core/` und `hrv_core/` steht, nicht.
+- **Flet ändert sich.** Zwischen den Versionen hat Flet seine API mehrfach
+  umgebaut. Was in `ui/` steht, muss dann angefasst werden. Was in `core/` und
+  `hrv_core/` steht, nicht.
 - **Wiederverwendung.** `hrv_core` könnte später auch in `praxis_gui` laufen
   oder in einem Auswertungsskript — beide haben keine Flet-Oberfläche.
 - **Denken.** Die Trennung zwingt zu der Frage „was ist hier eigentlich die

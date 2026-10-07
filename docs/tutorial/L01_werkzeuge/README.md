@@ -120,8 +120,8 @@ src/trainingsapp/
 > `core/`, `data/`, `hrv_core/` und `devices/` importieren **niemals** `flet`.
 
 Das klingt nach Bürokratie, ist aber der Grund, warum 81 Tests ohne Bildschirm
-laufen. Und wenn Flet 1.0 kommt — es bringt ein völlig neues Modell mit — müssen
-wir nur `ui/` anfassen.
+laufen. Und wenn Flet seine API umbaut — das ist zwischen den Versionen
+mehrfach passiert —, müssen wir nur `ui/` anfassen.
 
 Ein Test erzwingt die Regel. Probier es aus:
 

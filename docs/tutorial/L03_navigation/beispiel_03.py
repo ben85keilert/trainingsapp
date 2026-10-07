@@ -58,7 +58,7 @@ def zaehler_ansicht(page: ft.Page, state: AppState) -> ft.Control:
                 controls=[
                     ft.Text(titel, weight=ft.FontWeight.BOLD),
                     anzeige,
-                    ft.ElevatedButton("+1", on_click=handler),
+                    ft.Button("+1", on_click=handler),
                     ft.Text(fussnote, size=11, opacity=0.7, text_align=ft.TextAlign.CENTER),
                 ],
             ),

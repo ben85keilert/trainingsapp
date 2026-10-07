@@ -9,9 +9,11 @@
 
 1. **Testbarkeit.** Die gesamte Domäne — Datenmodell, HRV-Mathematik, Regeln,
    Sensorprotokolle — läuft ohne Oberfläche. 81 Tests brauchen keinen Bildschirm.
-2. **Flet 1.0 kommt.** Version 1.0 bringt ein neues, deklaratives Modell. Wenn
-   Logik in `ui/` steckt, zieht sich die Umstellung durch die halbe Anwendung.
-   So bleibt sie lokal.
+2. **Flet-Versionswechsel bleiben lokal.** Flet hat seine API zwischen 0.28,
+   0.80 und 1.0 mehrfach umgebaut und bietet mit `@ft.component` zusätzlich ein
+   deklaratives Modell an. Steckt Logik in `ui/`, zieht sich jede Umstellung
+   durch die halbe Anwendung. So bleibt sie lokal — beim Umstieg von 0.86 auf
+   1.0 musste außerhalb von `ui/` und dem Lernpfad keine Zeile geändert werden.
 
 `scipy` ist gesondert verboten, weil es auf Android und iOS schlicht nicht
 existiert — `pypi.flet.dev` liefert numpy und pandas, aber kein scipy. Ein

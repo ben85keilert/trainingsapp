@@ -29,6 +29,12 @@ uv run mypy                                    # Typprüfung (Paket ist in pypro
 Vor jedem Pull Request muss laufen:
 `uv run ruff check . && uv run ruff format --check . && uv run pytest`.
 
+**Flet-API nachschlagen:** `.mcp.json` registriert den MCP-Server `flet` (`uv run flet mcp`,
+Paket `flet-mcp` in der Gruppe `flet-dev`). Er kennt die API der installierten Flet-Version —
+vor dem Schreiben von `ui/`- oder Tutorial-Code dort prüfen statt aus dem Gedächtnis, denn
+Flet hat zwischen 0.28, 0.80 und 1.0 viel umbenannt und entfernt. `flet-mcp` immer in
+derselben Version wie `flet` halten.
+
 `TRAININGSAPP_EDITION=praxis uv run pytest …` bzw. `TRAININGSAPP_DATA_DIR=…` setzen
 Edition und Datenpfad zur Laufzeit (siehe `config.py`).
 
@@ -39,9 +45,10 @@ Edition und Datenpfad zur Laufzeit (siehe `config.py`).
 per AST-Scan — es ist kein Stilhinweis, sondern ein grüner Test, der brechen muss, wenn
 man dagegen verstößt.
 
-Gründe: Die Domäne bleibt ohne Bildschirm testbar, und ein späterer Umstieg auf Flet 1.0
-(deklaratives Modell) betrifft nur `ui/`. `scipy` existiert auf Android/iOS nicht — darum
-implementiert `hrv_core/` Welch, Lomb-Scargle, DFA und SampEn selbst in reinem numpy.
+Gründe: Die Domäne bleibt ohne Bildschirm testbar, und Flet-Versionswechsel (zuletzt
+0.86 → 1.0) oder ein Umstieg auf das deklarative Modell betreffen nur `ui/`. `scipy`
+existiert auf Android/iOS nicht — darum implementiert `hrv_core/` Welch, Lomb-Scargle,
+DFA und SampEn selbst in reinem numpy.
 
 Abhängigkeiten zeigen **nur nach innen**: `ui → core, data, hrv_core, devices`;
 `devices → hrv_core`; `data → core`; `core → (nichts)`; `hrv_core → (nur numpy)`.

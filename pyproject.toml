@@ -13,10 +13,10 @@ license = { file = "LICENSE" }
 # implementiert hrv_core/ Welch, Lomb-Scargle, DFA und SampEn selbst.
 # Siehe docs/hrv_algorithmen.md.
 dependencies = [
-    "flet==0.86.*",
-    "flet-charts==0.86.*",
-    "flet-video==0.86.*",
-    "flet-permission-handler==0.86.*",
+    "flet==1.0.*",
+    "flet-charts==1.0.*",
+    "flet-video==1.0.*",
+    "flet-permission-handler==1.0.*",
     "numpy>=2.1",
 ]
 
@@ -41,9 +41,13 @@ dev = [
 # `flet run`. Eigene Gruppe statt Teil von `dev`, weil `ci` die Gruppe `dev`
 # einschließt und flet-frei bleiben muss (flet-cli hängt von flet ab). In die
 # App-Builds gehört ohnehin nur das schlanke `flet` aus den Laufzeitabhängigkeiten.
+# flet-mcp ist der MCP-Server mit dem API-Index der installierten Flet-Version
+# (`flet mcp`, eingetragen in .mcp.json) — er gibt KI-Assistenten die echte API
+# statt veralteten Trainingswissens. Version immer im Gleichschritt mit flet.
 flet-dev = [
-    "flet-cli==0.86.*",
-    "flet-desktop==0.86.*",
+    "flet-cli==1.0.*",
+    "flet-desktop==1.0.*",
+    "flet-mcp==1.0.*",
 ]
 ci = [
     "numpy>=2.1",

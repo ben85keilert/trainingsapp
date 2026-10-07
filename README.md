@@ -92,8 +92,8 @@ docs/
 
 **Die wichtigste Regel des Projekts:** `core/`, `data/`, `hrv_core/` und
 `devices/` importieren **niemals** `flet`. Ein Test erzwingt das. Dadurch
-bleibt alles ohne Oberfläche testbar, und ein späterer Umstieg auf Flet 1.0
-betrifft nur `ui/`.
+bleibt alles ohne Oberfläche testbar, und Flet-Versionswechsel betreffen nur
+`ui/`.
 
 ---
 

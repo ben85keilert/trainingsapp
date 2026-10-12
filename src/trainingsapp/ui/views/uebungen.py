@@ -7,11 +7,12 @@ wechselt mit: links „Neue Übung", rechts „Neuer Plan".
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 import flet as ft
 
 from trainingsapp.core.models import Plan
+from trainingsapp.core.plaene import tage_text
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.katalog import katalog
 
@@ -30,9 +31,8 @@ def neuen_plan_anlegen(page: ft.Page, state: AppState) -> Callable[[], None]:
             return
         plan = Plan(name=(name.value or "").strip(), subject_id=state.profil.id)
         state.plaene.speichern(plan)
-        state.plan_bearbeiten.add(plan.id)
         page.pop_dialog()
-        await page.push_route(f"/plan/{plan.id}")
+        await page.push_route(f"/plaene/{plan.id}")
 
     dialog = ft.AlertDialog(
         modal=True,
@@ -52,26 +52,58 @@ def neuen_plan_anlegen(page: ft.Page, state: AppState) -> Callable[[], None]:
     return handler
 
 
-def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
-    plaene = state.plaene.alle(state.profil.id)
-    anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, state.heute())
+def heute_trainieren(page: ft.Page, state: AppState, plan_id: str) -> Callable[[], Awaitable[None]]:
+    """Nimmt einen Plan für heute auf und öffnet ihn zum Üben.
 
-    def oeffner(plan_id: str) -> Callable[[], object]:
+    Aufgenommen heißt: Es gibt eine Session dieses Plans an diesem Tag. Damit
+    erscheint er auf „Heute", auch wenn er laut Zeitplan nicht ansteht.
+    Zurück führt auf „Heute", denn dort wird geübt.
+    """
+
+    async def handler() -> None:
+        state.sitzungen.session_fuer(state.profil.id, plan_id, state.heute())
+        state.nav_index = 0
+        await page.push_route(f"/plan/{plan_id}")
+
+    return handler
+
+
+def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
+    """Die Planverwaltung: Antippen öffnet zum Bearbeiten, „Trainieren" zum Üben."""
+    plaene = state.plaene.alle(state.profil.id)
+    heute = state.heute()
+    anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute)
+
+    def oeffner(plan_id: str) -> Callable[[], Awaitable[None]]:
         async def handler() -> None:
-            await page.push_route(f"/plan/{plan_id}")
+            await page.push_route(f"/plaene/{plan_id}")
 
         return handler
 
     def zeile(plan: Plan) -> ft.Control:
         gemacht = sum(1 for item in plan.items if anzahl.get(item.exercise_id))
-        stand = f"{len(plan.items)} Übungen" if plan.items else "noch leer"
+        teile = [f"{len(plan.items)} Übungen" if plan.items else "noch leer"]
+        teile.append(tage_text(plan.wochentage) if plan.aktiv else "deaktiviert")
+        if plan.steht_an(heute):
+            teile.append("heute dran")
         if gemacht:
-            stand += f"  ·  {gemacht} heute gemacht"
+            teile.append(f"{gemacht} heute gemacht")
         return ft.ListTile(
-            leading=ft.Icon(ft.Icons.LIST_ALT_OUTLINED),
-            title=ft.Text(plan.name),
-            subtitle=ft.Text(stand, size=12),
-            trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),
+            leading=ft.Icon(
+                ft.Icons.LIST_ALT if plan.aktiv else ft.Icons.PAUSE_CIRCLE_OUTLINE,
+                opacity=1 if plan.aktiv else 0.5,
+            ),
+            title=ft.Text(plan.name, opacity=1 if plan.aktiv else 0.6),
+            subtitle=ft.Text("  ·  ".join(teile), size=12),
+            trailing=ft.FilledTonalButton(
+                content=ft.Row(
+                    tight=True,
+                    spacing=4,
+                    controls=[ft.Icon(ft.Icons.PLAY_ARROW, size=18), ft.Text("Trainieren")],
+                ),
+                tooltip="Heute trainieren — auch wenn der Plan heute nicht ansteht",
+                on_click=heute_trainieren(page, state, plan.id),
+            ),
             on_click=oeffner(plan.id),
         )
 
@@ -84,8 +116,19 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
                 opacity=0.7,
             ),
         )
+    hinweis = ft.Container(
+        padding=ft.Padding.only(left=16, right=16, top=10, bottom=4),
+        content=ft.Text(
+            "Antippen = bearbeiten (Übungen, Ziele, aktiv, Wochentage). "
+            "„Trainieren“ nimmt den Plan für heute auf und öffnet ihn zum Üben.",
+            size=12,
+            opacity=0.6,
+        ),
+    )
     return ft.ListView(
-        expand=True, padding=ft.Padding.only(bottom=88), controls=[zeile(p) for p in plaene]
+        expand=True,
+        padding=ft.Padding.only(bottom=88),
+        controls=[hinweis, *[zeile(p) for p in plaene]],
     )
 
 
@@ -118,4 +161,4 @@ def uebungen(page: ft.Page, state: AppState) -> ft.Control:
     )
 
 
-__all__ = ["neuen_plan_anlegen", "plaene_liste", "uebungen"]
+__all__ = ["heute_trainieren", "neuen_plan_anlegen", "plaene_liste", "uebungen"]

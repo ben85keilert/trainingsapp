@@ -874,3 +874,55 @@ def test_satz_ohne_winkel_haengt_nicht_an_winkel_eintrag(welt) -> None:
     e = repo.satz_anhaengen(sitzung, wandsitz, "hold", 60, heute, {})
     assert e.result == {"hold": [60]}
     assert len(repo.eintraege(sitzung.id)) == 2
+
+
+# ---------------------------------------------------------------------------
+# Zeitplan der Pläne: aktiv, Wochentage, für einen Tag aufnehmen
+# ---------------------------------------------------------------------------
+
+
+def test_plan_aktiv_und_wochentage(con) -> None:
+    plaene = PlanRepo(con)
+    plan = Plan(name="Dehnung")
+    plaene.speichern(plan)
+    geladen = plaene.laden(plan.id)
+    assert geladen.aktiv is True and geladen.wochentage == [0, 1, 2, 3, 4, 5, 6]
+
+    plaene.aktiv_setzen(plan.id, False)
+    plaene.wochentage_setzen(plan.id, [4, 0, 2, 2, 9])  # doppelt und ungültig fallen weg
+    geladen = plaene.laden(plan.id)
+    assert geladen.aktiv is False and geladen.wochentage == [0, 2, 4]
+
+    # speichern() überschreibt den Zeitplan nicht mit Standardwerten
+    geladen.name = "Dehnen"
+    plaene.speichern(geladen)
+    assert plaene.laden(plan.id).wochentage == [0, 2, 4]
+    assert plaene.laden(plan.id).aktiv is False
+
+
+def test_plan_fuer_einen_tag_aufnehmen_und_entfernen(welt) -> None:
+    con, repo, ich, _sitzung = welt
+    plaene = PlanRepo(con)
+    plan = Plan(name="Pause", subject_id=ich.id, aktiv=False)
+    plaene.speichern(plan)
+    heute = lokaler_tag(jetzt())
+
+    assert plan.id not in repo.plaene_am_tag(ich.id, heute)
+    s = repo.session_fuer(ich.id, plan.id, heute)
+    assert repo.plaene_am_tag(ich.id, heute) == {plan.id: 0}
+
+    # Mit Eintrag bleibt er stehen
+    repo.erledigt(s, _wadenheben(con))
+    assert repo.plaene_am_tag(ich.id, heute) == {plan.id: 1}
+    assert repo.aus_tag_nehmen(ich.id, plan.id, heute) is False
+    assert plan.id in repo.plaene_am_tag(ich.id, heute)
+
+    # Ein anderer, leer aufgenommener Plan lässt sich entfernen
+    leer = Plan(name="Leer", subject_id=ich.id)
+    plaene.speichern(leer)
+    repo.session_fuer(ich.id, leer.id, heute)
+    assert repo.aus_tag_nehmen(ich.id, leer.id, heute) is True
+    assert leer.id not in repo.plaene_am_tag(ich.id, heute)
+    # … und wieder aufnehmen
+    repo.session_fuer(ich.id, leer.id, heute)
+    assert repo.plaene_am_tag(ich.id, heute)[leer.id] == 0

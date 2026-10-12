@@ -62,8 +62,6 @@ class AppState:
     uebungen_tab: int = 0
     #: Ordnung der Tagesansicht: "plan", "zeit" oder "uebung"
     tag_ordnung: str = "plan"
-    #: Pläne, die gerade im Bearbeiten-Modus stehen (überlebt den Routenwechsel)
-    plan_bearbeiten: set[str] = field(default_factory=set)
     #: Verlauf: angezeigter Monat (erster Tag), gewählte Kennzahl, X-Achse
     verlauf_monat: date = field(default_factory=lambda: lokaler_tag(jetzt()).replace(day=1))
     verlauf_metrik: str | None = None

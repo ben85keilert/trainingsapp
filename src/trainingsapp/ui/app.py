@@ -8,10 +8,12 @@ Navigationsleiste. Die Ansichten selbst stehen in `views/`.
 Routen:
 
     /                               Hauptansicht mit vier Reitern
-    /plan/<id>                      Planansicht: abhaken oder bearbeiten
+    /plan/<id>                      Plan üben (von „Heute" aus)
     /plan/<id>/uebung/<item_id>     Eintrag mit eigenen Werten und Notiz
-    /plan/<id>/ziel/<item_id>       Planübung einstellen: Stufe, Chips, Ziel
-    /plan/<id>/hinzufuegen          Übungen in den Plan aufnehmen
+    /plan/<id>/bearbeiten[/…]       Plan bearbeiten, aus dem Üben heraus
+    /plaene/<id>                    Plan bearbeiten (aus „Übungen" → „Pläne")
+    <bearbeiten>/ziel/<item_id>     Planübung einstellen: Stufe, Chips, Ziel
+    <bearbeiten>/hinzufuegen        Übungen in den Plan aufnehmen
     /tag/<YYYY-MM-DD>               Tagesansicht eines beliebigen Tages
     /eintrag/<id>                   Ein Eintrag: ansehen, löschen
     /eintrag/<id>/korrigieren       Korrektur als neuer Eintrag
@@ -217,20 +219,34 @@ def main(page: ft.Page) -> None:
     browser = ft.UrlLauncher()
     page.services.append(browser)
 
+    def planuebung(teile: list[str], index: int) -> tuple[PlanItem, Exercise] | None:
+        if len(teile) <= index:
+            return None
+        item = state.plaene.item_laden(teile[index])
+        uebung = state.uebungen.laden(item.exercise_id) if item else None
+        return (item, uebung) if item is not None and uebung is not None else None
+
+    def bearbeiten_routen(plan: Plan, basis: str, fertig: str, rest: list[str]) -> None:
+        """Bearbeiten eines Plans — unter `/plaene/<id>` oder `/plan/<id>/bearbeiten`."""
+        page.views.append(plan_view(page, state, plan, bearbeiten=True, basis=basis, fertig=fertig))
+        if rest[:1] == ["hinzufuegen"]:
+            page.views.append(plan_hinzufuegen_view(page, state, plan, basis=basis))
+        elif rest[:1] == ["ziel"] and (paar := planuebung(rest, 1)) is not None:
+            page.views.append(plan_einstellen(page, state, plan, *paar, basis=basis))
+
     def plan_routen(teile: list[str]) -> None:
         plan = state.plaene.laden(teile[1])
         if plan is None:
             return
-        page.views.append(plan_view(page, state, plan))
-        if teile[2:3] == ["hinzufuegen"]:
-            page.views.append(plan_hinzufuegen_view(page, state, plan))
-        elif teile[2:3] in (["uebung"], ["ziel"]) and len(teile) >= 4:
-            item = state.plaene.item_laden(teile[3])
-            uebung = state.uebungen.laden(item.exercise_id) if item else None
-            if item is None or uebung is None:
-                return
-            bauer = formular_eintrag if teile[2] == "uebung" else plan_einstellen
-            page.views.append(bauer(page, state, plan, item, uebung))
+        if teile[0] == "plaene":  # aus der Planverwaltung: nur bearbeiten
+            bearbeiten_routen(plan, f"/plaene/{plan.id}", "/", teile[2:])
+            return
+        page.views.append(plan_view(page, state, plan))  # üben
+        if teile[2:3] == ["bearbeiten"]:
+            basis = f"/plan/{plan.id}/bearbeiten"
+            bearbeiten_routen(plan, basis, f"/plan/{plan.id}", teile[3:])
+        elif teile[2:3] == ["uebung"] and (paar := planuebung(teile, 3)) is not None:
+            page.views.append(formular_eintrag(page, state, plan, *paar))
 
     def eintrag_routen(teile: list[str]) -> None:
         eintrag = state.sitzungen.eintrag_laden(teile[1])
@@ -263,7 +279,7 @@ def main(page: ft.Page) -> None:
                 page.views.append(uebung_detail(page, state, uebung, browser))
                 if teile[2:] == ["bearbeiten"]:
                     page.views.append(uebung_bearbeiten(page, state, uebung))
-        elif teile[:1] == ["plan"] and len(teile) >= 2:
+        elif teile[:1] in (["plan"], ["plaene"]) and len(teile) >= 2:
             plan_routen(teile)
         elif teile[:1] == ["tag"] and len(teile) >= 2:
             with suppress(ValueError):  # kein Datum → Hauptansicht

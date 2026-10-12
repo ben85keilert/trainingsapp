@@ -40,8 +40,15 @@ from trainingsapp.ui.views.uebung_bearbeiten import chips_lesen, chips_text
 
 
 def plan_einstellen(
-    page: ft.Page, state: AppState, plan: Plan, item: PlanItem, uebung: Exercise
+    page: ft.Page,
+    state: AppState,
+    plan: Plan,
+    item: PlanItem,
+    uebung: Exercise,
+    basis: str | None = None,
 ) -> ft.View:
+    """``basis`` ist die Bearbeiten-Route des Plans, zu der es danach zurückgeht."""
+    basis = basis or f"/plaene/{plan.id}"
     stufe = ft.SegmentedButton(
         selected=[item.input_mode],
         segments=[
@@ -83,16 +90,16 @@ def plan_einstellen(
         state.plaene.ziel_setzen(item.id, ziel())
         modus = stufe.selected[0] if stufe.selected else EINGABE_CHIPS
         state.plaene.eingabe_setzen(item.id, modus, quick_lesen())
-        await page.push_route(f"/plan/{plan.id}")
+        await page.push_route(basis)
 
     async def ziel_loeschen() -> None:
         state.plaene.ziel_setzen(item.id, {})
         modus = stufe.selected[0] if stufe.selected else EINGABE_CHIPS
         state.plaene.eingabe_setzen(item.id, modus, quick_lesen())
-        await page.push_route(f"/plan/{plan.id}")
+        await page.push_route(basis)
 
     async def abbrechen() -> None:
-        await page.push_route(f"/plan/{plan.id}")
+        await page.push_route(basis)
 
     def eingestellt() -> PlanItem:
         """Die Planübung, wie sie gerade im Formular steht."""
@@ -109,12 +116,12 @@ def plan_einstellen(
         page.show_dialog(
             ft.SnackBar(ft.Text(f"Standard von „{uebung.name}“ übernommen — gilt für neue Pläne"))
         )
-        await page.push_route(f"/plan/{plan.id}")
+        await page.push_route(basis)
 
     async def standard_uebernehmen() -> None:
         state.plaene.item_speichern(vom_standard(uebung, item))
         page.show_dialog(ft.SnackBar(ft.Text("Standard der Übung übernommen")))
-        await page.push_route(f"/plan/{plan.id}")
+        await page.push_route(basis)
 
     def abschnitt(text: str) -> ft.Control:
         return ft.Text(text, size=11, weight=ft.FontWeight.BOLD, opacity=0.6)
@@ -195,7 +202,7 @@ def plan_einstellen(
         ]
     )
     return ft.View(
-        route=f"/plan/{plan.id}/ziel/{item.id}",
+        route=f"{basis}/ziel/{item.id}",
         appbar=ft.AppBar(title=ft.Text(f"Einstellen: {uebung.name}")),
         scroll=ft.ScrollMode.AUTO,
         padding=20,

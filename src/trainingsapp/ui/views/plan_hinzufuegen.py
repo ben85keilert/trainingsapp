@@ -17,7 +17,11 @@ from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
 
 
-def plan_hinzufuegen_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
+def plan_hinzufuegen_view(
+    page: ft.Page, state: AppState, plan: Plan, basis: str | None = None
+) -> ft.View:
+    """``basis`` ist die Bearbeiten-Route des Plans, zu der „Fertig" zurückführt."""
+    basis = basis or f"/plaene/{plan.id}"
     liste = ft.ListView(expand=True)
     suchtext = ""
     enthalten = {item.exercise_id for item in plan.items}
@@ -55,11 +59,11 @@ def plan_hinzufuegen_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View
         ]
 
     async def fertig() -> None:
-        await page.push_route(f"/plan/{plan.id}")
+        await page.push_route(basis)
 
     zeichnen()
     return ft.View(
-        route=f"/plan/{plan.id}/hinzufuegen",
+        route=f"{basis}/hinzufuegen",
         appbar=ft.AppBar(
             title=ft.Text(f"Zu „{plan.name}“ hinzufügen"),
             actions=[ft.IconButton(ft.Icons.CHECK, tooltip="Fertig", on_click=fertig)],

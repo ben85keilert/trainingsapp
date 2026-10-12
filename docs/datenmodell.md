@@ -57,6 +57,13 @@ Varianten eine Kachel; ihre Mengen werden addiert und je Variante ausgewiesen
 (`core/tagesbilanz.py`). Eine Kopie ist zunächst Variante, im Editor lässt sie
 sich eigenständig machen.
 
+**Zeitplan eines Plans** (Migration 008): `plan.active` und `plan.weekdays_json`
+(0 = Montag … 6 = Sonntag, Standard alle). Ein Plan erscheint auf „Heute", wenn er
+aktiv ist und der Wochentag passt (`Plan.steht_an`), oder wenn es an dem Tag eine
+Session dieses Plans gibt — so wird ein nicht anstehender Plan „für heute
+aufgenommen", ohne eigene Tabelle (`core/plaene.py`, `SessionRepo.plaene_am_tag`).
+Eine aufgenommene Session ohne Eintrag lässt sich wieder entfernen.
+
 **Der Tag ist die Bezugsgröße.** Zeitstempel sind UTC, aber „heute" ist ein
 lokaler Kalendertag. `core.models.tagesgrenzen()` rechnet die lokale
 Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,

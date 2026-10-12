@@ -281,6 +281,22 @@ class Plan:
     items: list[PlanItem] = field(default_factory=list)
     #: Im Papierkorb seit — ``None`` = nicht gelöscht
     deleted_at: datetime | None = None
+    #: Deaktiviert: erscheint nicht auf „Heute", bleibt aber in der Planverwaltung
+    aktiv: bool = True
+    #: Wochentage, an denen der Plan ansteht — 0 = Montag … 6 = Sonntag
+    wochentage: list[int] = field(default_factory=lambda: list(range(7)))
+
+    def steht_an(self, tag: date) -> bool:
+        """Ob der Plan an diesem Tag von sich aus auf „Heute" erscheint.
+
+        >>> Plan(wochentage=[0, 2, 4]).steht_an(date(2026, 10, 12))  # ein Montag
+        True
+        >>> Plan(wochentage=[0, 2, 4]).steht_an(date(2026, 10, 13))
+        False
+        >>> Plan(aktiv=False).steht_an(date(2026, 10, 12))
+        False
+        """
+        return self.aktiv and tag.weekday() in self.wochentage
 
 
 # ---------------------------------------------------------------------------

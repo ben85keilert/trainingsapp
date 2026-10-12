@@ -148,8 +148,10 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
     state, plan, item, uebung, eintrag = welt
     assert heute(page, state) is not None
     assert plan_view(page, state, plan).route == f"/plan/{plan.id}"
-    state.plan_bearbeiten.add(plan.id)
-    assert plan_view(page, state, plan) is not None
+    assert plan_view(page, state, plan, bearbeiten=True).route == f"/plaene/{plan.id}"
+    basis = f"/plan/{plan.id}/bearbeiten"
+    assert plan_view(page, state, plan, bearbeiten=True, basis=basis).route == basis
+    assert plan_hinzufuegen_view(page, state, plan, basis=basis).route == f"{basis}/hinzufuegen"
     assert plan_hinzufuegen_view(page, state, plan).route.endswith("/hinzufuegen")
     assert formular_eintrag(page, state, plan, item, uebung).route.endswith(f"/uebung/{item.id}")
     assert plan_einstellen(page, state, plan, item, uebung).route.endswith(f"/ziel/{item.id}")
@@ -341,3 +343,40 @@ def test_variante_mit_geloeschtem_original_und_formular_mit_winkel(page, welt) -
 
     state.auspraegung_wahl[item.id] = {"angle": 45}
     assert formular_eintrag(page, state, plan, item, variante) is not None
+
+
+def test_heute_zeigt_nur_anstehende_und_aufgenommene_plaene(page, welt) -> None:
+    """Deaktiviert oder nicht an diesem Wochentag: nicht auf Heute — außer aufgenommen."""
+    from trainingsapp.core.models import Plan
+    from trainingsapp.core.plaene import heutige_plaene
+    from trainingsapp.ui.views.heute import heute
+    from trainingsapp.ui.views.tag import tagesansicht
+    from trainingsapp.ui.views.uebungen import plaene_liste
+
+    state, _plan, _, _, _ = welt
+    tag = state.heute()
+    ruhe = Plan(name="Ruhetag", subject_id=state.profil.id, wochentage=[(tag.weekday() + 1) % 7])
+    pause = Plan(name="Pause", subject_id=state.profil.id, aktiv=False)
+    state.plaene.speichern(ruhe)
+    state.plaene.speichern(pause)
+
+    def namen() -> list[tuple[str, bool]]:
+        aufgenommen = state.sitzungen.plaene_am_tag(state.profil.id, tag)
+        return [
+            (p.name, x)
+            for p, x in heutige_plaene(state.plaene.alle(state.profil.id), tag, aufgenommen)
+        ]
+
+    assert namen() == [("Dehnung", False)]
+    assert heute(page, state) is not None
+    assert plaene_liste(page, state) is not None
+
+    # „Heute trainieren" = eine Session dieses Plans heute
+    state.sitzungen.session_fuer(state.profil.id, pause.id, tag)
+    assert namen() == [("Dehnung", False), ("Pause", True)]
+    assert heute(page, state) is not None
+    assert tagesansicht(page, state, tag) is not None
+
+    # Ohne Eintrag lässt er sich wieder entfernen
+    assert state.sitzungen.aus_tag_nehmen(state.profil.id, pause.id, tag) is True
+    assert namen() == [("Dehnung", False)]

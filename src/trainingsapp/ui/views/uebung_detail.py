@@ -158,7 +158,7 @@ def uebung_detail(
 
     def plan_oeffner(plan_id: str) -> Callable[[], object]:
         async def handler() -> None:
-            await page.push_route(f"/plan/{plan_id}")
+            await page.push_route(f"/plaene/{plan_id}")
 
         return handler
 

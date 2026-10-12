@@ -540,13 +540,16 @@ class PlanRepo:
         with transaktion(self.con):
             self.con.execute(
                 """
-                INSERT INTO plan (id, name, description, subject_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO plan (id, name, description, subject_id, created_at, updated_at,
+                                  active, weekdays_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
                     subject_id = excluded.subject_id,
                     updated_at = excluded.updated_at,
+                    active = excluded.active,
+                    weekdays_json = excluded.weekdays_json,
                     revision = revision + 1
                 """,
                 (
@@ -556,6 +559,8 @@ class PlanRepo:
                     plan.subject_id,
                     plan.created_at.isoformat(),
                     stempel,
+                    int(plan.aktiv),
+                    json.dumps(sorted(set(plan.wochentage))),
                 ),
             )
             self.con.execute(
@@ -627,6 +632,21 @@ class PlanRepo:
     def umbenennen(self, plan_id: str, name: str) -> None:
         with transaktion(self.con):
             self.con.execute("UPDATE plan SET name = ? WHERE id = ?", (name.strip(), plan_id))
+            self._beruehrt(plan_id)
+
+    def aktiv_setzen(self, plan_id: str, aktiv: bool) -> None:
+        """Deaktiviert erscheint ein Plan nicht mehr auf „Heute"."""
+        with transaktion(self.con):
+            self.con.execute("UPDATE plan SET active = ? WHERE id = ?", (int(aktiv), plan_id))
+            self._beruehrt(plan_id)
+
+    def wochentage_setzen(self, plan_id: str, wochentage: list[int]) -> None:
+        """An welchen Tagen der Plan ansteht (0 = Montag … 6 = Sonntag)."""
+        tage = sorted({t for t in wochentage if 0 <= t <= 6})
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE plan SET weekdays_json = ? WHERE id = ?", (json.dumps(tage), plan_id)
+            )
             self._beruehrt(plan_id)
 
     def loeschen(self, plan_id: str) -> None:
@@ -794,6 +814,8 @@ class PlanRepo:
             subject_id=r["subject_id"],
             created_at=datetime.fromisoformat(r["created_at"]),
             deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
+            aktiv=bool(r["active"]),
+            wochentage=json.loads(r["weekdays_json"]),
         )
 
 
@@ -861,6 +883,44 @@ class SessionRepo:
         session = Session(subject_id=subject_id, plan_id=plan_id, started_at=start)
         self.anlegen(session)
         return session
+
+    def plaene_am_tag(self, subject_id: str, tag: date) -> dict[str, int]:
+        """Pläne mit einer Session an diesem Tag → Zahl ihrer gültigen Einträge.
+
+        Eine Session ohne Eintrag heißt: für heute aufgenommen, noch nichts gemacht.
+        """
+        von, bis = tagesgrenzen(tag)
+        return {
+            r["plan_id"]: r["n"]
+            for r in self.con.execute(
+                """
+                SELECT s.plan_id,
+                       (SELECT COUNT(*) FROM session_entry e
+                        WHERE e.session_id = s.id AND e.deleted_at IS NULL
+                          AND NOT EXISTS (SELECT 1 FROM session_entry n
+                                          WHERE n.replaces_entry_id = e.id)) AS n
+                FROM session s
+                WHERE s.subject_id = ? AND s.deleted_at IS NULL AND s.plan_id IS NOT NULL
+                  AND s.started_at >= ? AND s.started_at < ?
+                """,
+                (subject_id, von.isoformat(), bis.isoformat()),
+            )
+        }
+
+    def aus_tag_nehmen(self, subject_id: str, plan_id: str, tag: date) -> bool:
+        """Nimmt einen aufgenommenen Plan wieder vom Tag — nur, solange nichts eingetragen ist.
+
+        Gibt ``False`` zurück, wenn an diesem Tag schon mit dem Plan trainiert wurde.
+        """
+        if self.plaene_am_tag(subject_id, tag).get(plan_id, 0):
+            return False
+        von, bis = tagesgrenzen(tag)
+        self.con.execute(
+            "UPDATE session SET deleted_at = ? WHERE subject_id = ? AND plan_id = ? "
+            "AND deleted_at IS NULL AND started_at >= ? AND started_at < ?",
+            (jetzt().isoformat(), subject_id, plan_id, von.isoformat(), bis.isoformat()),
+        )
+        return True
 
     def session_laden(self, session_id: str) -> Session | None:
         r = self.con.execute("SELECT * FROM session WHERE id = ?", (session_id,)).fetchone()

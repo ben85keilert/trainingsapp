@@ -41,6 +41,7 @@ from trainingsapp.core.models import (
     SessionEntry,
 )
 from trainingsapp.core.parameter import kontextfelder, leistungsfelder
+from trainingsapp.core.plaene import WOCHENTAGE_KURZ, tage_text
 from trainingsapp.core.result_spec import FieldSpec, FieldType, format_wert, ist_leer
 from trainingsapp.core.tagesbilanz import buendeln
 from trainingsapp.core.units import parse_dauer, parse_sets
@@ -85,8 +86,21 @@ def _knopf(
     )
 
 
-def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
-    bearbeiten = plan.id in state.plan_bearbeiten
+def plan_view(
+    page: ft.Page,
+    state: AppState,
+    plan: Plan,
+    bearbeiten: bool = False,
+    basis: str | None = None,
+    fertig: str = "/",
+) -> ft.View:
+    """Üben (`/plan/<id>`) oder Bearbeiten.
+
+    Bearbeitet wird unter ``basis`` — `/plaene/<id>` aus der Planverwaltung,
+    `/plan/<id>/bearbeiten` aus der Übungsansicht heraus. ``fertig`` ist das
+    Ziel des Hakens oben rechts.
+    """
+    route = (basis or f"/plaene/{plan.id}") if bearbeiten else f"/plan/{plan.id}"
     heute = state.heute()
     anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute)
     tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute)]
@@ -247,12 +261,19 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
 
         return handler
 
-    def modus_wechseln() -> None:
-        if bearbeiten:
-            state.plan_bearbeiten.discard(plan.id)
-        else:
-            state.plan_bearbeiten.add(plan.id)
+    async def modus_wechseln() -> None:
+        await page.push_route(fertig if bearbeiten else f"/plan/{plan.id}/bearbeiten")
+
+    def aktiv_wechseln(e: ft.Event[ft.Switch]) -> None:
+        state.plaene.aktiv_setzen(plan.id, bool(e.control.value))
         state.neu_zeichnen()
+
+    def tag_schalter(tag_nr: int) -> Callable[[], None]:
+        def handler() -> None:
+            state.plaene.wochentage_setzen(plan.id, sorted(set(plan.wochentage) ^ {tag_nr}))
+            state.neu_zeichnen()
+
+        return handler
 
     def umbenennen(e: ft.Event[ft.TextField]) -> None:
         name = (e.control.value or "").strip()
@@ -268,7 +289,6 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
 
     async def loeschen() -> None:
         state.plaene.loeschen(plan.id)
-        state.plan_bearbeiten.discard(plan.id)
         page.pop_dialog()
         page.show_dialog(
             ft.SnackBar(ft.Text(f"Plan „{plan.name}“ liegt im Papierkorb — Einträge bleiben."))
@@ -495,9 +515,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
                     spacing=8,
                     run_spacing=6,
                     controls=[
-                        _knopf(
-                            "Einstellen", ft.Icons.TUNE, oeffner(f"/plan/{plan.id}/ziel/{item.id}")
-                        ),
+                        _knopf("Einstellen", ft.Icons.TUNE, oeffner(f"{route}/ziel/{item.id}")),
                         ft.TextButton(
                             "Entfernen",
                             icon=ft.Icons.REMOVE_CIRCLE_OUTLINE,
@@ -548,14 +566,40 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
     liste = scroll_merken(
         page,
         state,
-        f"/plan/{plan.id}",
+        route,
         ft.ListView(expand=True, controls=[block(item) for item in plan.items]),
     )
 
     kopf: list[ft.Control]
     if bearbeiten:
+        tage = ft.Row(
+            wrap=True,
+            spacing=4,
+            run_spacing=4,
+            controls=[
+                ft.Chip(
+                    label=ft.Text(kurz),
+                    selected=nr in plan.wochentage,
+                    show_checkmark=False,
+                    on_click=tag_schalter(nr),
+                )
+                for nr, kurz in enumerate(WOCHENTAGE_KURZ)
+            ],
+        )
         kopf = [
             ft.TextField(label="Name des Plans", value=plan.name, on_blur=umbenennen),
+            ft.Switch(
+                label="Aktiv — erscheint auf „Heute“" if plan.aktiv else "Deaktiviert",
+                value=plan.aktiv,
+                on_change=aktiv_wechseln,
+            ),
+            tage,
+            ft.Text(
+                f"Steht an: {tage_text(plan.wochentage)}. An anderen Tagen erscheint er nicht "
+                "auf „Heute“, lässt sich aber über „Heute trainieren“ aufnehmen.",
+                size=12,
+                opacity=0.7,
+            ),
             ft.Text("„Einstellen“ legt Ziel und Eingabe je Übung fest.", size=12, opacity=0.7),
         ]
     else:
@@ -575,7 +619,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
             ft.FilledButton(
                 "Übung hinzufügen",
                 icon=ft.Icons.ADD,
-                on_click=oeffner(f"/plan/{plan.id}/hinzufuegen"),
+                on_click=oeffner(f"{route}/hinzufuegen"),
             ),
             ft.TextButton("Plan löschen", icon=ft.Icons.DELETE_OUTLINE, on_click=loeschen_fragen),
         ]
@@ -583,7 +627,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
         fuss = [ft.FilledButton("Übungen hinzufügen", icon=ft.Icons.EDIT, on_click=modus_wechseln)]
 
     return ft.View(
-        route=f"/plan/{plan.id}",
+        route=route,
         appbar=ft.AppBar(
             title=ft.Text(plan.name),
             actions=[

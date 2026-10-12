@@ -27,6 +27,7 @@ from datetime import date, timedelta
 import flet as ft
 
 from trainingsapp.core.models import Session, SessionEntry
+from trainingsapp.core.plaene import heutige_plaene
 from trainingsapp.core.tagesbilanz import (
     Buendel,
     Planstand,
@@ -197,7 +198,11 @@ def tagesansicht(page: ft.Page, state: AppState, tag: date) -> ft.Control:
 
     # -- Tagesbilanz -------------------------------------------------------------
 
-    plaene = [p for p in state.plaene.alle(state.profil.id) if p.items]
+    # Nur Pläne, die an diesem Tag anstehen oder aufgenommen wurden — ein
+    # deaktivierter Plan soll nicht als „offen" in der Bilanz stehen.
+    aufgenommen = state.sitzungen.plaene_am_tag(state.profil.id, tag)
+    alle_plaene = state.plaene.alle(state.profil.id)
+    plaene = [p for p, _ in heutige_plaene(alle_plaene, tag, aufgenommen) if p.items]
     staende = [planstand(p.id, p.name, [i.exercise_id for i in p.items], gemacht) for p in plaene]
 
     def bilanz() -> ft.Control:

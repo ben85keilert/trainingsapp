@@ -66,4 +66,3 @@ def test_repos_und_tag_vorhanden(state) -> None:
     assert state.tagesnotizen.lesen(state.profil.id, state.heute()) == ""
     assert isinstance(state.heute(), date)
     assert state.verlauf_monat.day == 1
-    assert state.plan_bearbeiten == set()

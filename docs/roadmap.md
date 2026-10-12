@@ -78,6 +78,10 @@ einem sichtbaren Fortschritt in der App.
 - Parameterwahl in der Ausführung statt Vorlagen; Standard der Übung ↔ Planübung per
   Knopf (Migration 006); Varianten mit gemeinsamer Kachel (Migration 007)
 - Verlauf: „Letzte Tage“ je Kachel, Kurve der Tagessummen je Kachel (`/verlauf/<id>`)
+- Pläne mit Zeitplan (Migration 008): aktiv/deaktiviert und Wochentage; „Heute“
+  zeigt, was ansteht, plus Pläne, die man für heute aufnimmt („Trainieren“ in der
+  Planverwaltung oder „Anderen Plan heute trainieren“). Übungen → Pläne öffnet zum
+  Bearbeiten (`/plaene/<id>`), „Heute“ zum Üben (`/plan/<id>`)
 - Noch nicht: Timer (**L07**), Messung (**L10/L11**), Spec-Editor für Felder
   außerhalb des Vorrats
 

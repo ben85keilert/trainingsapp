@@ -13,14 +13,20 @@ from datetime import timedelta
 import flet as ft
 
 from trainingsapp.core.models import Plan
+from trainingsapp.core.plaene import heutige_plaene, warum_nicht
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.tag import tag_titel, tagesansicht
+from trainingsapp.ui.views.uebungen import heute_trainieren
 
 
 def heute(page: ft.Page, state: AppState) -> ft.Control:
     tag = state.heute()
-    plaene = state.plaene.alle(state.profil.id)
+    alle = state.plaene.alle(state.profil.id)
+    aufgenommen = state.sitzungen.plaene_am_tag(state.profil.id, tag)
+    plaene = heutige_plaene(alle, tag, aufgenommen)
+    gezeigt = {p.id for p, _ in plaene}
+    andere = [p for p in alle if p.id not in gezeigt]
     anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, tag)
 
     def oeffner(pfad: str) -> Callable[[], object]:
@@ -29,12 +35,26 @@ def heute(page: ft.Page, state: AppState) -> ft.Control:
 
         return handler
 
-    def plan_zeile(plan: Plan) -> ft.Control:
+    def entferner(plan_id: str) -> Callable[[], None]:
+        def handler() -> None:
+            state.sitzungen.aus_tag_nehmen(state.profil.id, plan_id, tag)
+            state.neu_zeichnen()
+
+        return handler
+
+    def plan_zeile(plan: Plan, zusaetzlich: bool) -> ft.Control:
         gemacht = sum(1 for item in plan.items if anzahl.get(item.exercise_id))
         if not plan.items:
             stand = "noch leer — antippen und Übungen hinzufügen"
         else:
             stand = f"{gemacht} von {len(plan.items)} heute"
+        if zusaetzlich:
+            stand += "  ·  zusätzlich heute"
+        rechts: ft.Control = ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4)
+        if zusaetzlich and not aufgenommen.get(plan.id, 0):
+            rechts = ft.IconButton(
+                ft.Icons.CLOSE, tooltip="Für heute wieder entfernen", on_click=entferner(plan.id)
+            )
         return ft.ListTile(
             leading=ft.Icon(
                 ft.Icons.CHECK_CIRCLE if gemacht else ft.Icons.LIST_ALT_OUTLINED,
@@ -42,13 +62,54 @@ def heute(page: ft.Page, state: AppState) -> ft.Control:
             ),
             title=ft.Text(plan.name),
             subtitle=ft.Text(stand, size=12),
-            trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),
+            trailing=rechts,
             on_click=oeffner(f"/plan/{plan.id}"),
         )
 
+    def auswahl_oeffnen() -> None:
+        page.show_dialog(auswahl)
+
+    def auswahl_schliessen() -> None:
+        page.pop_dialog()
+
+    def waehler(plan_id: str) -> Callable[[], object]:
+        trainieren = heute_trainieren(page, state, plan_id)
+
+        async def handler() -> None:
+            page.pop_dialog()
+            await trainieren()
+
+        return handler
+
+    auswahl = ft.AlertDialog(
+        title=ft.Text("Plan heute trainieren"),
+        scrollable=True,
+        content=ft.Column(
+            tight=True,
+            spacing=0,
+            controls=[
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.PLAY_ARROW),
+                    title=ft.Text(p.name),
+                    subtitle=ft.Text(warum_nicht(p, tag), size=12),
+                    on_click=waehler(p.id),
+                )
+                for p in andere
+            ],
+        ),
+        actions=[ft.TextButton("Abbrechen", on_click=auswahl_schliessen)],
+    )
+
     plan_block: list[ft.Control]
     if plaene:
-        plan_block = [plan_zeile(p) for p in plaene]
+        plan_block = [plan_zeile(p, extra) for p, extra in plaene]
+    elif alle:
+        plan_block = [
+            ft.Container(
+                padding=ft.Padding.symmetric(horizontal=16, vertical=8),
+                content=ft.Text("Heute steht kein Plan an.", opacity=0.7),
+            )
+        ]
     else:
         plan_block = [
             ft.Container(
@@ -58,6 +119,17 @@ def heute(page: ft.Page, state: AppState) -> ft.Control:
                 ),
             )
         ]
+    if andere:
+        plan_block.append(
+            ft.Container(
+                padding=ft.Padding.only(left=8),
+                content=ft.TextButton(
+                    "Anderen Plan heute trainieren",
+                    icon=ft.Icons.PLAYLIST_ADD,
+                    on_click=auswahl_oeffnen,
+                ),
+            )
+        )
 
     def ueberschrift(text: str, rechts: ft.Control | None = None) -> ft.Control:
         return ft.Container(

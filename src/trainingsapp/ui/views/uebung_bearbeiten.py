@@ -34,9 +34,11 @@ from trainingsapp.core.result_spec import (
     Layout,
     ResultSpec,
 )
+from trainingsapp.core.standards import ziel_bereinigen, ziel_spec
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL, symbol
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.state import AppState
 
 #: Auswahlwert „keine Variante" — ein leerer Schlüssel ist im Dropdown heikel
@@ -228,6 +230,20 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         expand=True,
     )
 
+    # Das Standard-Ziel bezieht sich auf die *gespeicherten* Parameter — wer
+    # oben Schalter umlegt, sieht das Ziel dafür nach dem Speichern.
+    ziel_form = (
+        SpecForm(ziel_spec(uebung.result_spec), dict(uebung.default_target), page=page)
+        if uebung is not None and uebung.result_spec.fields
+        else None
+    )
+
+    def ziel_lesen(spec: ResultSpec) -> dict[str, Any]:
+        """Nur Werte, die es in der neuen Spezifikation noch gibt und die etwas sagen."""
+        if ziel_form is None:
+            return ziel_bereinigen(dict(uebung.default_target) if uebung else {}, spec)
+        return ziel_bereinigen(ziel_form.werte(), spec)
+
     # -- Symbolauswahl -------------------------------------------------------
 
     gewaehlt: str = uebung.icon_key if uebung and uebung.icon_key else AUSWAHL[0]
@@ -338,6 +354,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             eingabe_standard.selected[0] if eingabe_standard.selected else EINGABE_CHIPS
         )
         ziel.result_spec = spec_bauen(felder_lesen())
+        ziel.default_target = ziel_lesen(ziel.result_spec)
         extra = [t.strip() for t in (weitere_tags.value or "").split(",") if t.strip()]
         ziel.tags = [r for r in REGIONEN if r in tags_aktiv] + [
             t for t in extra if t not in REGIONEN
@@ -422,11 +439,19 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                         abschnitt("STANDARD FÜR PLÄNE"),
                         eingabe_standard,
                         ft.Text(
-                            "So wird die Übung in einem neuen Plan eingegeben. Ein Ziel setzt "
-                            "du in einer Planübung und schiebst es dort mit „Als Standard der "
-                            "Übung setzen“ hierher.",
+                            "So wird die Übung in einem neuen Plan eingegeben. Ziel (optional): "
+                            "Das übernimmt eine neue Planübung als „Wie geplant“. Leer lassen "
+                            "heißt kein Ziel. Auch aus einem Plan heraus lässt sich das Ziel "
+                            "mit „Als Standard der Übung setzen“ hierher schieben.",
                             size=12,
                             opacity=0.7,
+                        ),
+                        ziel_form.control
+                        if ziel_form is not None
+                        else ft.Text(
+                            "Ein Ziel lässt sich nach dem ersten Speichern festlegen.",
+                            size=12,
+                            opacity=0.6,
                         ),
                         abschnitt("SYMBOL"),
                         symbole,

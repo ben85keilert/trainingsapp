@@ -20,8 +20,39 @@ der Aufrufer.
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any
 
 from .models import Exercise, PlanItem
+from .parameter import BEIWERK, rolle
+from .result_spec import ResultSpec, ist_leer
+
+
+def ziel_spec(spec: ResultSpec) -> ResultSpec:
+    """Die Felder, aus denen ein Ziel besteht — ohne Vorgabewerte und ohne Beiwerk.
+
+    Ein leeres Zielformular soll „kein Ziel“ heißen. Mit den Vorgabewerten
+    der Übung (etwa 3x15) würde schon das Speichern der Eingabestufe ein Ziel
+    setzen, das niemand gewollt hat. Skala, Freitext und Ja/Nein sind kein Ziel.
+
+    >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    >>> [(f.key, f.default) for f in ziel_spec(SPEC_SAETZE_WDH).fields]
+    [('reps', None)]
+    """
+    return replace(
+        spec,
+        fields=[replace(f, default=None) for f in spec.fields if rolle(f) != BEIWERK],
+    )
+
+
+def ziel_bereinigen(werte: dict[str, Any], spec: ResultSpec) -> dict[str, Any]:
+    """Nur Werte, die zur Spezifikation gehören und etwas aussagen.
+
+    >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    >>> ziel_bereinigen({"reps": [15, 15], "alt": 3, "x": []}, SPEC_SAETZE_WDH)
+    {'reps': [15, 15]}
+    """
+    keys = {f.key for f in spec.fields}
+    return {k: v for k, v in werte.items() if k in keys and not ist_leer(v)}
 
 
 def eigene_chips(item: PlanItem, uebung: Exercise) -> dict[str, list]:
@@ -94,4 +125,11 @@ def vom_standard(uebung: Exercise, item: PlanItem) -> PlanItem:
     )
 
 
-__all__ = ["abweichungen", "als_standard", "eigene_chips", "vom_standard"]
+__all__ = [
+    "abweichungen",
+    "als_standard",
+    "eigene_chips",
+    "vom_standard",
+    "ziel_bereinigen",
+    "ziel_spec",
+]

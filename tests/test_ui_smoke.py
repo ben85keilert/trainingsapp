@@ -299,3 +299,27 @@ def test_verlauf_mit_varianten_und_kachelkurve(page, welt) -> None:
     # Eine Kachel nur mit „gemacht“ zeichnet keine Kurve, sondern erklärt das.
     andere = plan.items[1].exercise_id
     assert verlauf_kachel_view(page, state, andere) is not None
+
+
+def test_standardziel_im_editor_und_im_plan(page, welt) -> None:
+    """Das Zielformular beginnt leer — leer heißt „kein Ziel“, nicht die Vorgabe 3x15."""
+    from trainingsapp.ui.views.plan_einstellen import plan_einstellen
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+
+    state, plan, item, uebung, _ = welt
+    uebung.default_target = {"hold": [30, 30]}
+    state.uebungen.speichern(uebung)
+    assert uebung_bearbeiten(page, state, state.uebungen.laden(uebung.id)) is not None
+
+    state.plaene.ziel_setzen(item.id, {})
+    leer = state.plaene.item_laden(item.id)
+    assert plan_einstellen(page, state, plan, leer, uebung) is not None
+
+
+def test_leeres_zielformular_ergibt_kein_ziel() -> None:
+    from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    from trainingsapp.core.standards import ziel_spec
+    from trainingsapp.ui.components.spec_form import SpecForm
+
+    assert SPEC_SAETZE_WDH.defaults()  # die Übung hat Vorgaben …
+    assert SpecForm(ziel_spec(SPEC_SAETZE_WDH), {}).werte() == {}  # … das Ziel nicht

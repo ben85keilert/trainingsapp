@@ -25,7 +25,13 @@ from trainingsapp.core.models import (
     PlanItem,
 )
 from trainingsapp.core.result_spec import FieldType
-from trainingsapp.core.standards import abweichungen, als_standard, vom_standard
+from trainingsapp.core.standards import (
+    abweichungen,
+    als_standard,
+    vom_standard,
+    ziel_bereinigen,
+    ziel_spec,
+)
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.spec_form import SpecForm
@@ -54,7 +60,10 @@ def plan_einstellen(
             hint_text=f"wie die Übung: {chips_text(f.quick)}" if f.quick else "z. B. 10, 15, 20",
             dense=True,
         )
-    form = SpecForm(uebung.result_spec, dict(item.target) or None, page=page)
+    form = SpecForm(ziel_spec(uebung.result_spec), dict(item.target), page=page)
+
+    def ziel() -> dict[str, Any]:
+        return ziel_bereinigen(form.werte(), uebung.result_spec)
 
     def quick_lesen() -> dict[str, list[Any]]:
         quick: dict[str, list[Any]] = {}
@@ -71,7 +80,7 @@ def plan_einstellen(
         if form.pruefen():
             page.update()
             return
-        state.plaene.ziel_setzen(item.id, form.werte())
+        state.plaene.ziel_setzen(item.id, ziel())
         modus = stufe.selected[0] if stufe.selected else EINGABE_CHIPS
         state.plaene.eingabe_setzen(item.id, modus, quick_lesen())
         await page.push_route(f"/plan/{plan.id}")
@@ -88,7 +97,7 @@ def plan_einstellen(
     def eingestellt() -> PlanItem:
         """Die Planübung, wie sie gerade im Formular steht."""
         modus = stufe.selected[0] if stufe.selected else EINGABE_CHIPS
-        return replace(item, target=form.werte(), input_mode=modus, quick=quick_lesen())
+        return replace(item, target=ziel(), input_mode=modus, quick=quick_lesen())
 
     async def als_standard_setzen() -> None:
         if form.pruefen():

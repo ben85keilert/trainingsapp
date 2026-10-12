@@ -207,6 +207,88 @@ def kachel(uebung: Exercise | None, exercise_id: str) -> str:
 
 
 @dataclass(slots=True)
+class Kachel:
+    """Eine Kachel im Verlauf: alle Varianten einer Übung, alle Ausprägungen.
+
+    Die Teile sind die Bündel je Übung + Ausprägung. Die Kachel addiert ihre
+    Mengen (je Feld, Varianten teilen sich die Feldschlüssel aus dem
+    Feldvorrat) und weist die Teile einzeln aus, wenn es mehrere gibt —
+    „marginale Abweichungen werden notiert“.
+    """
+
+    kachel_id: str
+    teile: list[Buendel] = field(default_factory=list)
+
+    @property
+    def summen(self) -> dict[str, float]:
+        ergebnis: dict[str, float] = {}
+        for b in self.teile:
+            for key, wert in b.summen.items():
+                ergebnis[key] = ergebnis.get(key, 0.0) + wert
+        return ergebnis
+
+    @property
+    def leistungen(self) -> int:
+        return sum(len(b.leistungen) for b in self.teile)
+
+    @property
+    def abgehakt(self) -> int:
+        return sum(len(b.abgehakt) for b in self.teile)
+
+    def feld(self, key: str) -> FieldSpec | None:
+        """Beschriftung eines Mengenfelds — aus irgendeinem Teil, der es kennt."""
+        for b in self.teile:
+            if b.spec is not None and (f := b.spec.field_by_key(key)) is not None:
+                return f
+        return None
+
+    def zusammenfassung(self) -> str:
+        """„150 Wdh. · zusätzlich 2× abgehakt“ — über alle Varianten."""
+        teile = [
+            menge_text(f, summe)
+            for key, summe in self.summen.items()
+            if (f := self.feld(key)) is not None
+        ]
+        if not teile and self.leistungen:
+            teile = [b.einzelwerte_text() for b in self.teile if b.leistungen]
+        if self.abgehakt:
+            wort = "abgehakt" if self.abgehakt == 1 else f"{self.abgehakt}× abgehakt"
+            teile.append(f"zusätzlich {wort}" if teile else wort)
+        return " · ".join(t for t in teile if t)
+
+    def aufschluesselung(self, namen: dict[str, str]) -> str:
+        """Woraus die Kachel besteht, wenn mehr als eine Variante/Ausprägung dabei ist.
+
+        ``namen`` bildet Übungs-IDs auf Namen ab.
+        """
+        if len(self.teile) < 2:
+            return ""
+        zeilen = []
+        for b in self.teile:
+            name = namen.get(b.exercise_id, "?")
+            if zusatz := b.auspraegung_text():
+                name += f" {zusatz}"
+            zeilen.append(f"{name}: {b.zusammenfassung()}")
+        return "davon " + " · ".join(zeilen)
+
+
+def kacheln(eintraege: Iterable[SessionEntry], kachel_von: Callable[[str], str]) -> list[Kachel]:
+    """Einträge zu Kacheln — Varianten zusammen, Teile je Übung + Ausprägung.
+
+    >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    >>> e = [SessionEntry(exercise_id=x, result={"reps": [n]}, spec_snapshot=SPEC_SAETZE_WDH)
+    ...      for x, n in (("eng", 20), ("weit", 30), ("eng", 10))]
+    >>> (k,) = kacheln(e, lambda _: "liegestuetz")
+    >>> k.summen, k.aufschluesselung({"eng": "eng", "weit": "weit"})
+    ({'reps': 60.0}, 'davon eng: 30 Wdh. aus 2 Einträgen · weit: 30 Wdh.')
+    """
+    nach_kachel: dict[str, list[SessionEntry]] = {}
+    for e in eintraege:
+        nach_kachel.setdefault(kachel_von(e.exercise_id), []).append(e)
+    return [Kachel(kachel_id=k, teile=buendeln(liste)) for k, liste in nach_kachel.items()]
+
+
+@dataclass(slots=True)
 class Planstand:
     """Wie weit ein Plan an einem Tag gekommen ist."""
 
@@ -235,10 +317,12 @@ def planstand(plan_id: str, name: str, exercise_ids: Iterable[str], gemacht: set
 
 __all__ = [
     "Buendel",
+    "Kachel",
     "Planstand",
     "buendeln",
     "ist_leistung",
     "kachel",
+    "kacheln",
     "menge_text",
     "mengen",
     "planstand",

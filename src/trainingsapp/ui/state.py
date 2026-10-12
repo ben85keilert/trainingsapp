@@ -69,6 +69,9 @@ class AppState:
     verlauf_metrik: str | None = None
     verlauf_modus: str = MODUS_NUMMER
     verlauf_uebung: str | None = None
+    #: Kachel-Kurve: welches Mengenfeld, welche Variante (None = alle zusammen)
+    verlauf_feld: str | None = None
+    verlauf_variante: str | None = None
     #: Scrollposition je scrollbarer Fläche (Schlüssel meist die Route) — damit
     #: der Neubau nach einem Tipp nicht wieder oben beginnt
     scroll_offsets: dict[str, float] = field(default_factory=dict)

@@ -29,6 +29,10 @@ Anzeige: `3x15`, `30` oder `15/15/20`, dazu die Summe.
 **Einzelwerte**: Gewicht `40` oder `40kg`, Strecke `500` (m) oder `2km`, Winkel `45`,
 Skala `0` bis `10`. Dezimal mit Punkt oder Komma (`12,5`). In Satzlisten trennt
 der Schrägstrich sicherer als das Komma.
+
+**Menge oder Ausprägung**: Wiederholungen und Zeiten werden addiert (3 × 50 = 150).
+Winkel, Gewicht und Seite wählst du vorher aus — sie trennen: Wandsitz 45° ist
+nicht Wandsitz 90°. „Gemacht“ ohne Werte zählt als *abgehakt* (leerer Haken).
 """
 
 

@@ -72,6 +72,12 @@ einem sichtbaren Fortschritt in der App.
   eigenen Chips und Ziel (Migration 004); Kurve mit Summe und Maximum je Satzfeld
 - Übungen archivieren oder löschen: Papierkorb mit Wiederherstellen, automatischem
   Leeren nach 30 Tagen und Rückfrage bei Verlauf (Migration 005)
+- Bessere Sortierung: Tagesbilanz mit „x von n“ und offenen Planübungen; Tagesansicht
+  „Nach Plan“, „Nach Übung“ (gebündelt, Mengen addiert, Ausprägungen getrennt),
+  „Chronologisch“; „abgehakt“ sichtbar getrennt von Leistungen
+- Parameterwahl in der Ausführung statt Vorlagen; Standard der Übung ↔ Planübung per
+  Knopf (Migration 006); Varianten mit gemeinsamer Kachel (Migration 007)
+- Verlauf: „Letzte Tage“ je Kachel, Kurve der Tagessummen je Kachel (`/verlauf/<id>`)
 - Noch nicht: Timer (**L07**), Messung (**L10/L11**), Spec-Editor für Felder
   außerhalb des Vorrats
 

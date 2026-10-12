@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -1009,6 +1010,37 @@ class SessionRepo:
                 assert session is not None
                 sessions[eintrag.session_id] = session
             ergebnis.append((eintrag, sessions[eintrag.session_id]))
+        return ergebnis
+
+    def eintraege_zwischen(
+        self,
+        subject_id: str,
+        von: date | None,
+        bis: date,
+        exercise_ids: Iterable[str] | None = None,
+    ) -> list[tuple[date, SessionEntry]]:
+        """Gültige Einträge mit ihrem lokalen Tag, zeitlich sortiert (``bis`` inklusive).
+
+        ``von=None`` heißt „seit Beginn" — für die Kurve einer Kachel.
+        """
+        _, ende = tagesgrenzen(bis)
+        sql = f"{_GUELTIGE} AND s.subject_id = ? AND e.started_at < ?"
+        params: list[object] = [subject_id, ende.isoformat()]
+        if von is not None:
+            start, _ = tagesgrenzen(von)
+            sql += " AND e.started_at >= ?"
+            params.append(start.isoformat())
+        if exercise_ids is not None:
+            ids = list(exercise_ids)
+            if not ids:
+                return []
+            sql += f" AND e.exercise_id IN ({','.join('?' * len(ids))})"
+            params.extend(ids)
+        ergebnis: list[tuple[date, SessionEntry]] = []
+        for r in self.con.execute(sql + " ORDER BY e.started_at, e.rowid", params):
+            eintrag = self._zeile(r)
+            if eintrag.started_at is not None:
+                ergebnis.append((lokaler_tag(eintrag.started_at), eintrag))
         return ergebnis
 
     def anzahl_am_tag(self, subject_id: str, tag: date) -> dict[str, int]:

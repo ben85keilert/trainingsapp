@@ -18,6 +18,7 @@ Routen:
     /uebung/neu, /uebung/<id>, /uebung/<id>/bearbeiten   Katalog
     /einstellungen                  Profile und App-Einstellungen
     /archiv, /papierkorb            Archivierte und gelöschte Übungen (und Pläne)
+    /verlauf/<kachel_id>            Kurve der Tagessummen einer Kachel (mit Varianten)
 
 Der Routen-Handler baut bei jedem Wechsel den **ganzen** Stapel neu auf
 (L03). Dadurch funktioniert der Zurück-Knopf auch nach einem Neustart auf
@@ -49,6 +50,7 @@ from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 from trainingsapp.ui.views.uebung_detail import uebung_detail
 from trainingsapp.ui.views.uebungen import neuen_plan_anlegen, uebungen
 from trainingsapp.ui.views.verlauf import verlauf
+from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
 
 REITER = [
     ("Heute", ft.Icons.TODAY),
@@ -249,6 +251,8 @@ def main(page: ft.Page) -> None:
             page.views.append(archiv_view(page, state))
         elif teile[:1] == ["papierkorb"]:
             page.views.append(papierkorb_view(page, state))
+        elif teile[:1] == ["verlauf"] and len(teile) >= 2:
+            page.views.append(verlauf_kachel_view(page, state, teile[1]))
         elif teile[:1] == ["uebung"] and len(teile) >= 2:
             if teile[1] == "neu":
                 page.views.append(uebung_bearbeiten(page, state, None))

@@ -271,3 +271,31 @@ def test_archiv_und_papierkorb_ansichten(page, welt) -> None:
     assert papierkorb_view(page, state) is not None
     assert katalog(page, state) is not None
     assert rest_tage(None) == 30
+
+
+def test_verlauf_mit_varianten_und_kachelkurve(page, welt) -> None:
+    """Variante + Original an einem Tag: eine Kachel, Kurve der Tagessummen."""
+    from dataclasses import replace
+
+    from trainingsapp.core.models import new_id
+    from trainingsapp.ui.views.verlauf import letzte_tage, verlauf
+    from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
+
+    state, plan, _item, uebung, _ = welt
+    variante = replace(uebung, id=new_id(), name="Variante", family_id=uebung.id, media=[])
+    state.uebungen.speichern(variante)
+    session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
+    state.sitzungen.eintrag_anlegen(session, variante, {"hold": [30]})
+
+    eintraege = state.sitzungen.eintraege_zwischen(
+        state.profil.id, None, state.heute(), [uebung.id, variante.id]
+    )
+    assert len(eintraege) == 2
+    assert letzte_tage(page, state) is not None
+    assert verlauf(page, state) is not None
+    assert verlauf_kachel_view(page, state, uebung.id).route == f"/verlauf/{uebung.id}"
+    state.verlauf_variante = variante.id
+    assert verlauf_kachel_view(page, state, uebung.id) is not None
+    # Eine Kachel nur mit „gemacht“ zeichnet keine Kurve, sondern erklärt das.
+    andere = plan.items[1].exercise_id
+    assert verlauf_kachel_view(page, state, andere) is not None

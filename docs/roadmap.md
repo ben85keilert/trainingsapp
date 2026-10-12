@@ -8,12 +8,12 @@ einem sichtbaren Fortschritt in der App.
 | **M0** | Repo, Kompatibilitätsvertrag, Schema, Verträge, CI | — | **fertig** |
 | **M1** | Flet-Hülle: Navigation, Theme, Ansichten — einmal aufs Handy gebaut | L03 | **fertig** |
 | **M2** | Übungskatalog aus der Datenbank, Suche, Detailansicht, Videoverweise | L05 | **fertig** |
-| M3 | Training dokumentieren: spec-getriebene Eingabe, „Wie zuletzt", Sitzungen | L07 | offen |
+| **M3** | Pläne anlegen und abarbeiten, Tagesansicht, Tagebuch auf drei Ebenen, Kalender und Kurve | L06 | **fertig** |
 | M4 | `hrv_core` vollständig + Simulator, Golden-Tests grün | L09 | teilweise |
 | M5 | Echte Geräte auf dem Desktop + Sensor-Prüfstand | L10 | offen |
 | M6 | Live-Messung mit Diagrammen, Aufzeichnung nach `raw-v1` | L11 | offen |
 | M7 | Limits und Trainingssteuerung | L11 | teilweise |
-| M8 | Auswertung, Benchmarks, Verlaufsdiagramme, Export-Round-Trip | L12 | offen |
+| M8 | Auswertung, Benchmarks, Export-Round-Trip (Kalender und Kurve je Übung sind mit M3 vorgezogen) | L12 | teilweise |
 | M9 | Eigene Flet-Extension: BLE und Foreground Service auf Android | Ausblick A | offen |
 | M10 | Medien: eigene Übungen mit Foto, Dokumentationsvideos | — | offen |
 | M11 | Edition B: Outbox-Sync, Anmeldung, Nachrichten, Übungszuweisung | Ausblick B | offen |
@@ -49,7 +49,24 @@ einem sichtbaren Fortschritt in der App.
 - Seed-IDs deterministisch (UUIDv5), damit mitgelieferte Übungen auf jedem
   Gerät dieselbe ID haben
 - Noch nicht: Video-Download zum Offline-Ansehen und Fotos für eigene Übungen
-  (**M10**), Tags (Schema vorhanden, keine Ansicht), Spec-Editor (**L06**)
+  (**M10**), Tags (Schema vorhanden, keine Ansicht), Spec-Editor für eigene Felder
+
+## Was in M3 steht
+
+- Pläne in beiden Editionen (`ist_aktiv("plaene")`): anlegen, Übungen schnell
+  hinzufügen und entfernen, Ziel je Übung, umbenennen, löschen — Einträge
+  bleiben dabei immer erhalten
+- Abhaken: Tipp = „gemacht" (leeres Ergebnis), Ziel-Chip = wie geplant,
+  Formular für eigene Werte und Notiz; Vorbelegung Ziel → letzter Eintrag → Standard
+- Der Tag ist die Bezugsgröße: Session = ein Plan an einem Tag, entsteht
+  automatisch; Tagesgrenzen lokal (`core.models.tagesgrenzen`), Zeit in UTC
+- Tagebuch auf drei Ebenen: Tagesnotiz (`day_note`, Migration 003),
+  Trainingsnotiz, Notiz je Eintrag — Diktat über die Systemtastatur
+- Tagesansicht nach Plan, Zeit oder Übung; Korrektur = neuer Eintrag,
+  Löschen weich mit Rückfrage
+- Verlauf: Kalender mit Farbmarken (Übungsfilter: „an welchen Tagen geplankt"),
+  Kurve je Kennzahl mit X-Achse Trainingsnummer oder Zeit
+- Noch nicht: Timer (**L07**), Messung (**L10/L11**)
 
 ## Bewusst nicht eingeplant
 

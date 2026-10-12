@@ -19,9 +19,26 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime, time
+from typing import Any
 
-from ..core.models import Exercise, Media, MediaKind, MediaSource, Subject, jetzt, new_id
+from ..core.models import (
+    DayNote,
+    Exercise,
+    Measurement,
+    Media,
+    MediaKind,
+    MediaSource,
+    Plan,
+    PlanItem,
+    Session,
+    SessionEntry,
+    Subject,
+    jetzt,
+    lokaler_tag,
+    new_id,
+    tagesgrenzen,
+)
 from ..core.result_spec import ResultSpec
 from .db import transaktion
 
@@ -297,4 +314,548 @@ class SettingRepo:
         self.con.execute("DELETE FROM app_setting WHERE key = ?", (key,))
 
 
-__all__ = ["ExerciseRepo", "SettingRepo", "SubjectRepo", "new_id"]
+# ---------------------------------------------------------------------------
+# Pläne
+# ---------------------------------------------------------------------------
+
+
+class PlanRepo:
+    """Übungspläne — ein Rahmen, in dem man variiert.
+
+    Ein Plan bündelt Übungen mit optionalem Ziel. Was gemacht wurde, steht in
+    `session_entry` und verweist nur auf die Übung, nie auf den Plan-Eintrag.
+    Deshalb darf `uebung_entfernen()` hart löschen: Es geht nichts verloren.
+    """
+
+    def __init__(self, con: sqlite3.Connection) -> None:
+        self.con = con
+
+    # -- Schreiben ---------------------------------------------------------
+
+    def speichern(self, plan: Plan) -> None:
+        """Legt an oder aktualisiert; die Übungsliste wird komplett ersetzt."""
+        stempel = jetzt().isoformat()
+        with transaktion(self.con):
+            self.con.execute(
+                """
+                INSERT INTO plan (id, name, description, subject_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    description = excluded.description,
+                    subject_id = excluded.subject_id,
+                    updated_at = excluded.updated_at,
+                    revision = revision + 1
+                """,
+                (
+                    plan.id,
+                    plan.name,
+                    plan.description,
+                    plan.subject_id,
+                    plan.created_at.isoformat(),
+                    stempel,
+                ),
+            )
+            self.con.execute("DELETE FROM plan_item WHERE plan_id = ?", (plan.id,))
+            for reihenfolge, item in enumerate(plan.items):
+                item.plan_id = plan.id
+                item.order = reihenfolge
+                self._item_schreiben(item)
+
+    def uebung_hinzufuegen(
+        self, plan_id: str, exercise_id: str, target: dict[str, Any] | None = None
+    ) -> PlanItem:
+        """Hängt eine Übung ans Ende des Plans — schnell, ohne den Plan neu zu laden."""
+        naechste = self.con.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM plan_item WHERE plan_id = ?",
+            (plan_id,),
+        ).fetchone()[0]
+        item = PlanItem(
+            plan_id=plan_id, exercise_id=exercise_id, order=naechste, target=target or {}
+        )
+        with transaktion(self.con):
+            self._item_schreiben(item)
+            self._beruehrt(plan_id)
+        return item
+
+    def uebung_entfernen(self, item_id: str) -> None:
+        zeile = self.con.execute(
+            "SELECT plan_id FROM plan_item WHERE id = ?", (item_id,)
+        ).fetchone()
+        if zeile is None:
+            return
+        with transaktion(self.con):
+            self.con.execute("DELETE FROM plan_item WHERE id = ?", (item_id,))
+            self._beruehrt(zeile["plan_id"])
+
+    def ziel_setzen(self, item_id: str, target: dict[str, Any]) -> None:
+        self.con.execute(
+            "UPDATE plan_item SET target_json = ? WHERE id = ?",
+            (json.dumps(target, ensure_ascii=False), item_id),
+        )
+
+    def umbenennen(self, plan_id: str, name: str) -> None:
+        with transaktion(self.con):
+            self.con.execute("UPDATE plan SET name = ? WHERE id = ?", (name.strip(), plan_id))
+            self._beruehrt(plan_id)
+
+    def loeschen(self, plan_id: str) -> None:
+        """Weich: Sitzungen zeigen weiter auf den Plan, er taucht nur nicht mehr auf."""
+        self.con.execute(
+            "UPDATE plan SET deleted_at = ?, updated_at = ? WHERE id = ?",
+            (jetzt().isoformat(), jetzt().isoformat(), plan_id),
+        )
+
+    # -- Lesen -------------------------------------------------------------
+
+    def laden(self, plan_id: str) -> Plan | None:
+        r = self.con.execute(
+            "SELECT * FROM plan WHERE id = ? AND deleted_at IS NULL", (plan_id,)
+        ).fetchone()
+        if r is None:
+            return None
+        return self._mit_items([self._zeile(r)])[0]
+
+    def alle(self, subject_id: str) -> list[Plan]:
+        """Pläne des Profils plus profilfreie (etwa mitgelieferte)."""
+        zeilen = self.con.execute(
+            "SELECT * FROM plan WHERE deleted_at IS NULL "
+            "AND (subject_id = ? OR subject_id IS NULL) ORDER BY created_at",
+            (subject_id,),
+        )
+        return self._mit_items([self._zeile(r) for r in zeilen])
+
+    def item_laden(self, item_id: str) -> PlanItem | None:
+        r = self.con.execute("SELECT * FROM plan_item WHERE id = ?", (item_id,)).fetchone()
+        return self._item_zeile(r) if r else None
+
+    # -- intern --------------------------------------------------------------
+
+    def _beruehrt(self, plan_id: str) -> None:
+        self.con.execute(
+            "UPDATE plan SET updated_at = ?, revision = revision + 1 WHERE id = ?",
+            (jetzt().isoformat(), plan_id),
+        )
+
+    def _item_schreiben(self, item: PlanItem) -> None:
+        self.con.execute(
+            "INSERT INTO plan_item (id, plan_id, exercise_id, sort_order, target_json, note) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                item.id,
+                item.plan_id,
+                item.exercise_id,
+                item.order,
+                json.dumps(item.target, ensure_ascii=False),
+                item.note,
+            ),
+        )
+
+    def _mit_items(self, plaene: list[Plan]) -> list[Plan]:
+        if not plaene:
+            return plaene
+        ids = [p.id for p in plaene]
+        platzhalter = ",".join("?" * len(ids))
+        nach_plan: dict[str, list[PlanItem]] = defaultdict(list)
+        for r in self.con.execute(
+            f"SELECT * FROM plan_item WHERE plan_id IN ({platzhalter}) "
+            "ORDER BY plan_id, sort_order",
+            ids,
+        ):
+            nach_plan[r["plan_id"]].append(self._item_zeile(r))
+        for p in plaene:
+            p.items = nach_plan.get(p.id, [])
+        return plaene
+
+    @staticmethod
+    def _item_zeile(r: sqlite3.Row) -> PlanItem:
+        return PlanItem(
+            id=r["id"],
+            plan_id=r["plan_id"],
+            exercise_id=r["exercise_id"],
+            order=r["sort_order"],
+            target=json.loads(r["target_json"]),
+            note=r["note"],
+        )
+
+    @staticmethod
+    def _zeile(r: sqlite3.Row) -> Plan:
+        return Plan(
+            id=r["id"],
+            name=r["name"],
+            description=r["description"],
+            subject_id=r["subject_id"],
+            created_at=datetime.fromisoformat(r["created_at"]),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Trainingseinheiten und Einträge
+# ---------------------------------------------------------------------------
+
+#: Gültige Einträge: nicht gelöscht und nicht durch eine Korrektur ersetzt.
+_GUELTIGE = """
+    SELECT e.* FROM session_entry e
+    JOIN session s ON s.id = e.session_id
+    WHERE e.deleted_at IS NULL AND s.deleted_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM session_entry n WHERE n.replaces_entry_id = e.id)
+"""
+
+
+class SessionRepo:
+    """Trainingseinheiten und ihre Einträge. Einträge sind unveränderlich.
+
+    Eine Session ist „ein Plan an einem Tag" (oder die planfreien Einträge
+    eines Tages). Sie entsteht beim ersten Tipp über `session_fuer()` — ohne
+    Start- und Stopp-Knopf. Der **Tag** ist die Bezugsgröße: Tagesabfragen
+    laufen über `session_entry.started_at` innerhalb lokaler Tagesgrenzen.
+    """
+
+    def __init__(self, con: sqlite3.Connection) -> None:
+        self.con = con
+
+    # -- Sitzungen ---------------------------------------------------------
+
+    def anlegen(self, session: Session) -> None:
+        self.con.execute(
+            "INSERT INTO session (id, subject_id, plan_id, started_at, note, mood) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                session.id,
+                session.subject_id,
+                session.plan_id,
+                session.started_at.isoformat(),
+                session.note,
+                session.mood,
+            ),
+        )
+
+    def session_fuer(self, subject_id: str, plan_id: str | None, tag: date) -> Session:
+        """Die Session dieses Plans an diesem Tag — angelegt, falls es sie nicht gibt."""
+        von, bis = tagesgrenzen(tag)
+        plan_bedingung = "plan_id IS NULL" if plan_id is None else "plan_id = ?"
+        params: list[object] = [subject_id, von.isoformat(), bis.isoformat()]
+        if plan_id is not None:
+            params.append(plan_id)
+        r = self.con.execute(
+            f"SELECT * FROM session WHERE subject_id = ? AND deleted_at IS NULL "
+            f"AND started_at >= ? AND started_at < ? AND {plan_bedingung} "
+            "ORDER BY started_at LIMIT 1",
+            params,
+        ).fetchone()
+        if r is not None:
+            return self._session_zeile(r)
+        # Heute: jetzt. Ein anderer Tag (Nachtrag): Mittag dieses Tages, damit
+        # die Session innerhalb seiner Grenzen liegt.
+        start = (
+            jetzt() if tag == lokaler_tag(jetzt()) else datetime.combine(tag, time(12)).astimezone()
+        )
+        session = Session(subject_id=subject_id, plan_id=plan_id, started_at=start)
+        self.anlegen(session)
+        return session
+
+    def session_laden(self, session_id: str) -> Session | None:
+        r = self.con.execute("SELECT * FROM session WHERE id = ?", (session_id,)).fetchone()
+        return self._session_zeile(r) if r else None
+
+    def beenden(self, session_id: str) -> None:
+        self.con.execute(
+            "UPDATE session SET ended_at = ? WHERE id = ?", (jetzt().isoformat(), session_id)
+        )
+
+    def notiz_setzen(self, session_id: str, text: str) -> None:
+        self.con.execute("UPDATE session SET note = ? WHERE id = ?", (text.strip(), session_id))
+
+    # -- Einträge ----------------------------------------------------------
+
+    def eintrag_anlegen(
+        self, session: Session, uebung: Exercise, result: dict[str, Any], note: str = ""
+    ) -> SessionEntry:
+        """Ein Eintrag — IMMER mit Kopie der Spezifikation und mit Zeitpunkt."""
+        eintrag = SessionEntry(
+            session_id=session.id,
+            exercise_id=uebung.id,
+            order=len(self.eintraege(session.id)),
+            result=result,
+            spec_snapshot=uebung.result_spec,
+            note=note.strip(),
+            started_at=jetzt(),
+        )
+        with transaktion(self.con):
+            self._eintrag_schreiben(eintrag, ersetzt=None)
+            self._kennzahlen_schreiben(session, eintrag)
+        return eintrag
+
+    def erledigt(self, session: Session, uebung: Exercise, note: str = "") -> SessionEntry:
+        """Nur „gemacht": leeres Ergebnis, keine Kennzahl — zählt für Häufigkeit und Kalender."""
+        return self.eintrag_anlegen(session, uebung, {}, note)
+
+    def eintrag_korrigieren(
+        self, alter_eintrag_id: str, result: dict[str, Any], note: str | None = None
+    ) -> SessionEntry:
+        """Korrektur = neuer Eintrag mit Verweis; übernimmt die Kopie des ALTEN."""
+        alt = self.eintrag_laden(alter_eintrag_id)
+        if alt is None:
+            raise KeyError(alter_eintrag_id)
+        session = self.session_laden(alt.session_id)
+        assert session is not None
+        neu = SessionEntry(
+            session_id=alt.session_id,
+            exercise_id=alt.exercise_id,
+            order=alt.order,
+            result=result,
+            spec_snapshot=alt.spec_snapshot,
+            note=alt.note if note is None else note.strip(),
+            started_at=alt.started_at,
+            ended_at=alt.ended_at,
+        )
+        with transaktion(self.con):
+            self._eintrag_schreiben(neu, ersetzt=alt.id)
+            self.con.execute("DELETE FROM measurement WHERE session_entry_id = ?", (alt.id,))
+            self._kennzahlen_schreiben(session, neu)
+        return neu
+
+    def eintrag_loeschen(self, eintrag_id: str) -> None:
+        """Weich löschen — samt der Einträge, die dieser korrigiert hat.
+
+        Kennzahlen sind abgeleitet und verschwinden hart; der Eintrag selbst
+        bleibt als Grabstein für die Synchronisation (`deleted_at`).
+        """
+        stempel = jetzt().isoformat()
+        with transaktion(self.con):
+            aktuell: str | None = eintrag_id
+            while aktuell is not None:
+                r = self.con.execute(
+                    "SELECT replaces_entry_id FROM session_entry WHERE id = ?", (aktuell,)
+                ).fetchone()
+                if r is None:
+                    break
+                self.con.execute(
+                    "UPDATE session_entry SET deleted_at = ? WHERE id = ?", (stempel, aktuell)
+                )
+                self.con.execute("DELETE FROM measurement WHERE session_entry_id = ?", (aktuell,))
+                aktuell = r["replaces_entry_id"]
+
+    def eintrag_laden(self, eintrag_id: str) -> SessionEntry | None:
+        r = self.con.execute(
+            "SELECT * FROM session_entry WHERE id = ? AND deleted_at IS NULL", (eintrag_id,)
+        ).fetchone()
+        return self._zeile(r) if r else None
+
+    def eintraege(self, session_id: str) -> list[SessionEntry]:
+        return [
+            self._zeile(r)
+            for r in self.con.execute(
+                f"{_GUELTIGE} AND e.session_id = ? ORDER BY e.sort_order, e.rowid", (session_id,)
+            )
+        ]
+
+    def eintraege_am_tag(self, subject_id: str, tag: date) -> list[tuple[SessionEntry, Session]]:
+        """Alle gültigen Einträge eines lokalen Tages, zeitlich sortiert, mit ihrer Session."""
+        von, bis = tagesgrenzen(tag)
+        zeilen = self.con.execute(
+            f"{_GUELTIGE} AND s.subject_id = ? AND e.started_at >= ? AND e.started_at < ? "
+            "ORDER BY e.started_at, e.rowid",
+            (subject_id, von.isoformat(), bis.isoformat()),
+        ).fetchall()
+        sessions: dict[str, Session] = {}
+        ergebnis: list[tuple[SessionEntry, Session]] = []
+        for r in zeilen:
+            eintrag = self._zeile(r)
+            if eintrag.session_id not in sessions:
+                session = self.session_laden(eintrag.session_id)
+                assert session is not None
+                sessions[eintrag.session_id] = session
+            ergebnis.append((eintrag, sessions[eintrag.session_id]))
+        return ergebnis
+
+    def anzahl_am_tag(self, subject_id: str, tag: date) -> dict[str, int]:
+        """Wie oft jede Übung an diesem Tag dran war — planunabhängig."""
+        von, bis = tagesgrenzen(tag)
+        return {
+            r["exercise_id"]: r["n"]
+            for r in self.con.execute(
+                "SELECT exercise_id, COUNT(*) AS n FROM ("
+                + _GUELTIGE
+                + " AND s.subject_id = ? AND e.started_at >= ? AND e.started_at < ?) "
+                "GROUP BY exercise_id",
+                (subject_id, von.isoformat(), bis.isoformat()),
+            )
+        }
+
+    def letzter_eintrag(self, subject_id: str, exercise_id: str) -> SessionEntry | None:
+        """Grundlage für „Wie zuletzt"."""
+        r = self.con.execute(
+            f"{_GUELTIGE} AND e.exercise_id = ? AND s.subject_id = ? "
+            "ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1",
+            (exercise_id, subject_id),
+        ).fetchone()
+        return self._zeile(r) if r else None
+
+    def tage_mit_eintraegen(
+        self, subject_id: str, von: date, bis: date, exercise_id: str | None = None
+    ) -> dict[date, int]:
+        """Für den Kalender: je lokalem Tag die Anzahl Einträge (inklusive `bis`)."""
+        start, _ = tagesgrenzen(von)
+        _, ende = tagesgrenzen(bis)
+        sql = f"{_GUELTIGE} AND s.subject_id = ? AND e.started_at >= ? AND e.started_at < ?"
+        params: list[object] = [subject_id, start.isoformat(), ende.isoformat()]
+        if exercise_id is not None:
+            sql += " AND e.exercise_id = ?"
+            params.append(exercise_id)
+        zaehler: dict[date, int] = defaultdict(int)
+        for r in self.con.execute(sql, params):
+            if r["started_at"]:
+                zaehler[lokaler_tag(datetime.fromisoformat(r["started_at"]))] += 1
+        return dict(zaehler)
+
+    # -- Kennzahlen ----------------------------------------------------------
+
+    def verlauf(self, subject_id: str, metric_key: str) -> list[Measurement]:
+        return [
+            Measurement(
+                id=r["id"],
+                subject_id=r["subject_id"],
+                metric_key=r["metric_key"],
+                value=r["value"],
+                unit=r["unit"],
+                recorded_at=datetime.fromisoformat(r["recorded_at"]),
+                session_id=r["session_id"],
+                session_entry_id=r["session_entry_id"],
+                source=r["source"],
+            )
+            for r in self.con.execute(
+                "SELECT * FROM measurement WHERE subject_id = ? AND metric_key = ? "
+                "AND deleted_at IS NULL ORDER BY recorded_at",
+                (subject_id, metric_key),
+            )
+        ]
+
+    def metriken(self, subject_id: str) -> list[str]:
+        """Alle Kennzahlen, zu denen es Werte gibt."""
+        return [
+            r["metric_key"]
+            for r in self.con.execute(
+                "SELECT DISTINCT metric_key FROM measurement WHERE subject_id = ? "
+                "AND deleted_at IS NULL ORDER BY metric_key",
+                (subject_id,),
+            )
+        ]
+
+    # -- intern --------------------------------------------------------------
+
+    def _eintrag_schreiben(self, e: SessionEntry, ersetzt: str | None) -> None:
+        assert e.spec_snapshot is not None, "Eintrag ohne Kopie der Spezifikation"
+        self.con.execute(
+            "INSERT INTO session_entry (id, session_id, exercise_id, sort_order, result_json, "
+            "spec_snapshot_json, note, started_at, ended_at, replaces_entry_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                e.id,
+                e.session_id,
+                e.exercise_id,
+                e.order,
+                json.dumps(e.result, ensure_ascii=False),
+                json.dumps(e.spec_snapshot.to_dict(), ensure_ascii=False),
+                e.note,
+                e.started_at.isoformat() if e.started_at else None,
+                e.ended_at.isoformat() if e.ended_at else None,
+                ersetzt,
+            ),
+        )
+
+    def _kennzahlen_schreiben(self, session: Session, e: SessionEntry) -> None:
+        """chart_metrics → measurement: eine Zeile je Kennzahl mit Wert."""
+        spec = e.spec_snapshot
+        assert spec is not None
+        zeitpunkt = e.started_at or session.started_at
+        for key in spec.chart_metrics:
+            if (wert := e.result.get(key)) is None:
+                continue
+            feld = spec.field_by_key(key)
+            self.con.execute(
+                "INSERT INTO measurement (id, subject_id, metric_key, value, unit, recorded_at, "
+                "session_id, session_entry_id, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'exercise')",
+                (
+                    new_id(),
+                    session.subject_id,
+                    f"{e.exercise_id}:{key}",
+                    float(wert),
+                    (feld.unit if feld else None) or "",
+                    zeitpunkt.isoformat(),
+                    session.id,
+                    e.id,
+                ),
+            )
+
+    @staticmethod
+    def _session_zeile(r: sqlite3.Row) -> Session:
+        return Session(
+            id=r["id"],
+            subject_id=r["subject_id"],
+            started_at=datetime.fromisoformat(r["started_at"]),
+            ended_at=datetime.fromisoformat(r["ended_at"]) if r["ended_at"] else None,
+            plan_id=r["plan_id"],
+            note=r["note"],
+            mood=r["mood"],
+        )
+
+    @staticmethod
+    def _zeile(r: sqlite3.Row) -> SessionEntry:
+        return SessionEntry(
+            id=r["id"],
+            session_id=r["session_id"],
+            exercise_id=r["exercise_id"],
+            order=r["sort_order"],
+            result=json.loads(r["result_json"]),
+            spec_snapshot=ResultSpec.from_dict(json.loads(r["spec_snapshot_json"])),
+            note=r["note"],
+            started_at=datetime.fromisoformat(r["started_at"]) if r["started_at"] else None,
+            ended_at=datetime.fromisoformat(r["ended_at"]) if r["ended_at"] else None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tagesnotizen
+# ---------------------------------------------------------------------------
+
+
+class DayNoteRepo:
+    """Die Notiz zum Tag (Migration 003). Je Profil und Tag genau eine."""
+
+    def __init__(self, con: sqlite3.Connection) -> None:
+        self.con = con
+
+    def lesen(self, subject_id: str, tag: date) -> str:
+        r = self.con.execute(
+            "SELECT text FROM day_note WHERE subject_id = ? AND date = ? AND deleted_at IS NULL",
+            (subject_id, tag.isoformat()),
+        ).fetchone()
+        return r["text"] if r else ""
+
+    def setzen(self, subject_id: str, tag: date, text: str) -> None:
+        stempel = jetzt().isoformat()
+        notiz = DayNote(subject_id=subject_id, date=tag, text=text.strip())
+        self.con.execute(
+            """
+            INSERT INTO day_note (id, subject_id, date, text, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(subject_id, date) DO UPDATE SET
+                text = excluded.text,
+                updated_at = excluded.updated_at,
+                deleted_at = NULL,
+                revision = revision + 1
+            """,
+            (notiz.id, notiz.subject_id, notiz.date.isoformat(), notiz.text, stempel, stempel),
+        )
+
+
+__all__ = [
+    "DayNoteRepo",
+    "ExerciseRepo",
+    "PlanRepo",
+    "SessionRepo",
+    "SettingRepo",
+    "SubjectRepo",
+    "new_id",
+]

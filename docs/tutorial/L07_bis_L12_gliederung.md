@@ -22,7 +22,7 @@ beenden.
 - `contextlib.AsyncExitStack` zum Aufräumen
 - **Warum ein hängender Task die App am Beenden hindert**
 
-**Danach:** M3 — Trainingseinheiten mit Timer.
+**Danach:** Timer in der Planansicht — Übungen mit Haltezeit laufen ab, statt nur abgehakt zu werden.
 
 ---
 

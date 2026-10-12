@@ -14,7 +14,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -42,6 +42,35 @@ def new_id() -> str:
 
 def jetzt() -> datetime:
     return datetime.now(UTC)
+
+
+def lokaler_tag(zeit: datetime) -> date:
+    """Der Kalendertag, zu dem ein Zeitpunkt in der Zeitzone des Geräts gehört.
+
+    Zeitstempel liegen in UTC vor (`jetzt()`); „heute" ist aber ein lokaler
+    Tag. Ein Training um 23:30 Ortszeit gehört zu diesem Tag, auch wenn es in
+    UTC schon der nächste ist.
+    """
+    return zeit.astimezone().date()
+
+
+def tagesgrenzen(tag: date) -> tuple[datetime, datetime]:
+    """Anfang und Ende eines lokalen Kalendertags als UTC-Zeitpunkte.
+
+    Alle Tagesabfragen laufen hierüber — nie über ``date.today()`` in SQL.
+    Das Ende ist die nächste lokale Mitternacht (exklusiv), damit auch
+    Tage mit Zeitumstellung 23 oder 25 Stunden lang sind, nicht 24.
+
+    >>> von, bis = tagesgrenzen(date(2026, 10, 12))
+    >>> (bis - von).total_seconds() in (82800.0, 86400.0, 90000.0)
+    True
+    >>> lokaler_tag(von) == date(2026, 10, 12)
+    True
+    """
+    mitternacht = datetime.min.time()
+    start = datetime.combine(tag, mitternacht).astimezone()
+    ende = datetime.combine(tag + timedelta(days=1), mitternacht).astimezone()
+    return start.astimezone(UTC), ende.astimezone(UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -183,8 +212,23 @@ class Measurement:
     source: str = "manual"  # manual | exercise | hrv | import
 
 
+@dataclass(slots=True)
+class DayNote:
+    """Die Notiz zu einem Tag — die oberste Ebene des Tagebuchs.
+
+    Darunter liegen die Notizen je Training (`Session.note`) und je Übung
+    (`SessionEntry.note`). Das Tagebuch ist keine eigene Tabelle, sondern
+    eine Abfrage über diese drei Quellen.
+    """
+
+    id: str = field(default_factory=new_id)
+    subject_id: str = ""
+    date: date = field(default_factory=lambda: lokaler_tag(jetzt()))
+    text: str = ""
+
+
 # ---------------------------------------------------------------------------
-# Pläne (Grundlage für Edition B: Therapeut stellt zusammen)
+# Pläne — in beiden Editionen; in Edition B zusätzlich vom Therapeuten zugewiesen
 # ---------------------------------------------------------------------------
 
 

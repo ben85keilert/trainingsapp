@@ -110,6 +110,11 @@ def test_spec_form_rundlauf() -> None:
 
 ## Aufgabe 4: `SessionRepo`
 
+Die fertige Fassung steht in `src/trainingsapp/data/repositories.py` — sie
+hat zusätzlich `session_fuer()`, `erledigt()`, `eintrag_loeschen()`,
+`eintraege_am_tag()`, `anzahl_am_tag()` und `tage_mit_eintraegen()`, die M3
+braucht. Der Kern ist dieser:
+
 ```python
 class SessionRepo:
     """Trainingseinheiten und ihre Einträge. Einträge sind unveränderlich."""
@@ -268,8 +273,13 @@ _GUELTIGE = """
 """
 ```
 
-Zwei Entscheidungen darin:
+Drei Entscheidungen darin:
 
+- **Der Tag ist lokal, die Zeit ist UTC.** `tagesgrenzen(tag)` rechnet die
+  lokale Mitternacht nach UTC um; Tagesabfragen vergleichen `started_at` mit
+  diesen Grenzen. So gehört ein Training um 23:30 Ortszeit zum richtigen Tag,
+  und beim Wechsel der Zeitzone verschiebt sich höchstens ein Tag — keine
+  Daten.
 - **Die Korrektur übernimmt die Kopie des alten Eintrags**, nicht die aktuelle
   Spezifikation der Übung. Der Eintrag beschreibt, was damals gemacht wurde —
   mit der Notation von damals. Hätte sich die Übung inzwischen geändert, wäre

@@ -24,7 +24,15 @@ exercise ──┬── exercise_media
 device        external_ref     outbox     tombstone
 
 app_setting   (gerätelokal, Migration 002 — wird nie synchronisiert)
+day_note      (Tagesnotiz je Profil und lokalem Tag, Migration 003)
 ```
+
+**Der Tag ist die Bezugsgröße.** Zeitstempel sind UTC, aber „heute" ist ein
+lokaler Kalendertag. `core.models.tagesgrenzen()` rechnet die lokale
+Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,
+„x von n heute") vergleichen `session_entry.started_at` mit diesen Grenzen.
+`day_note.date` speichert den lokalen Tag als `YYYY-MM-DD`. Eine Session ist
+„ein Plan an einem Tag" und entsteht beim ersten Eintrag automatisch.
 
 ## Die wichtigen Entscheidungen
 

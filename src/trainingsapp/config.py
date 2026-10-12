@@ -47,7 +47,9 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     "sync": {Edition.PRAXIS},
     # Nachrichten zwischen Therapeut und Patient
     "nachrichten": {Edition.PRAXIS},
-    # Übungspläne, die jemand anderes zusammenstellt
+    # Eigene Übungspläne anlegen und abarbeiten — der Kern beider Editionen
+    "plaene": {Edition.SOLO, Edition.PRAXIS},
+    # Übungspläne, die jemand anderes zusammenstellt (Therapeut → Patient)
     "zugewiesene_plaene": {Edition.PRAXIS},
     # Regeln, die aus Puls oder HRV eine Handlungsempfehlung ableiten.
     # In Edition A bewusst gesperrt — das wäre eine medizinische Aussage.

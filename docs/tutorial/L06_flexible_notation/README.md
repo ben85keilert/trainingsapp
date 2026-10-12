@@ -131,15 +131,23 @@ zur echten `ui/components/spec_form.py`.
 Hier liegt die eigentliche Erkenntnis. Es gibt drei Wege, Eingabe zu
 beschleunigen — und ihre Reihenfolge ist nicht beliebig.
 
-### 1. Vorbelegung aus dem letzten Eintrag, Knopf „Wie zuletzt"
+### 1. Vorbelegung: Ziel aus dem Plan, sonst wie zuletzt
 
 Wer dreimal pro Woche Wadenheben macht, macht fast immer dasselbe wie beim
-letzten Mal. Das Formular öffnet sich mit den Werten von damals, und ein Knopf
-speichert sie unverändert. **Null Tipper.** Das ist der 80-%-Fall, und er
-kostet nichts außer einer Datenbankabfrage: der letzte `session_entry` dieser
-Übung für dieses Profil.
+letzten Mal — oder genau das, was im Plan steht. Deshalb hat die Vorbelegung
+drei Stufen, in dieser Reihenfolge:
 
-Erst wenn es keinen letzten Eintrag gibt, greift `spec.defaults()`.
+1. **Das Ziel aus dem Plan** (`plan_item.target`), wenn eines gesetzt ist.
+   In der Planansicht ist das Ziel ein Chip: ein Tipp darauf trägt genau diese
+   Werte ein. **Null Tipper** für das Formular, einer für den Eintrag.
+2. **Der letzte Eintrag** dieser Übung für dieses Profil
+   (`SessionRepo.letzter_eintrag()`), wenn es kein Ziel gibt.
+3. **`spec.defaults()`**, wenn es auch keinen letzten Eintrag gibt.
+
+Und noch davor steht die nullte Stufe: Ein Tipp auf die Zeile im Plan ist
+„gemacht" — ein Eintrag mit leerem Ergebnis, ohne Formular. Er zählt für die
+Häufigkeit und den Kalender, nicht für die Kurve. Wer nur abhaken will, sieht
+nie ein Formular.
 
 ### 2. Chips aus `quick`, numerische Tastatur
 

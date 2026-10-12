@@ -10,7 +10,14 @@ from trainingsapp.core.limits import (
     auswerten,
     verfuegbare_regeln,
 )
-from trainingsapp.core.models import Exercise, SessionEntry, new_id
+from trainingsapp.core.models import (
+    Exercise,
+    Measurement,
+    SessionEntry,
+    lokaler_tag,
+    new_id,
+    tagesgrenzen,
+)
 from trainingsapp.core.result_spec import (
     SPEC_SAETZE_WDH,
     FieldSpec,
@@ -18,6 +25,7 @@ from trainingsapp.core.result_spec import (
     ResultSpec,
 )
 from trainingsapp.core.units import format_dauer, parse_dauer, parse_shorthand
+from trainingsapp.core.verlauf import kurve_punkte
 from trainingsapp.data.db import migrieren, oeffnen, schema_version
 
 # ---------------------------------------------------------------------------
@@ -194,7 +202,7 @@ def test_unbekannte_regel_legt_nichts_lahm() -> None:
 
 def test_migration_erzeugt_das_schema(tmp_path) -> None:
     con = oeffnen(tmp_path / "test.db")
-    assert schema_version(con) == 2
+    assert schema_version(con) == 3
 
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     for erwartet in (
@@ -213,6 +221,7 @@ def test_migration_erzeugt_das_schema(tmp_path) -> None:
         "tombstone",
         "consent",
         "app_setting",
+        "day_note",
     ):
         assert erwartet in tabellen, f"Tabelle fehlt: {erwartet}"
     con.close()
@@ -222,8 +231,8 @@ def test_migration_ist_wiederholbar(tmp_path) -> None:
     """Ein zweiter Lauf darf nichts tun und nicht scheitern."""
     pfad = tmp_path / "test.db"
     con = oeffnen(pfad)
-    assert migrieren(con) == 2
-    assert migrieren(con) == 2
+    assert migrieren(con) == 3
+    assert migrieren(con) == 3
     con.close()
 
 
@@ -251,3 +260,35 @@ def test_hrv_recording_verweist_auf_die_datei(tmp_path) -> None:
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "rr_sample" not in tabellen
     con.close()
+
+
+# ---------------------------------------------------------------------------
+# Tagesgrenzen und Verlauf
+# ---------------------------------------------------------------------------
+
+
+def test_tagesgrenzen_umschliessen_den_lokalen_tag() -> None:
+    from datetime import date, timedelta
+
+    tag = date(2026, 3, 29)  # Tag der Zeitumstellung in Europa — 23 Stunden
+    von, bis = tagesgrenzen(tag)
+    assert lokaler_tag(von) == tag
+    assert lokaler_tag(bis - timedelta(seconds=1)) == tag
+    assert lokaler_tag(bis) == tag + timedelta(days=1)
+    assert (bis - von).total_seconds() in (82800.0, 86400.0, 90000.0)
+
+
+def test_kurve_punkte_beide_achsen() -> None:
+    from datetime import UTC, datetime
+
+    m = [
+        Measurement(value=12, recorded_at=datetime(2026, 1, 8, 10, tzinfo=UTC)),
+        Measurement(value=10, recorded_at=datetime(2026, 1, 1, 10, tzinfo=UTC)),
+        Measurement(value=15, recorded_at=datetime(2026, 1, 22, 10, tzinfo=UTC)),
+    ]
+    nummer = kurve_punkte(m, "nummer")
+    assert [(x, y) for x, y, _ in nummer] == [(1.0, 10.0), (2.0, 12.0), (3.0, 15.0)]
+    zeit = kurve_punkte(m, "zeit")
+    assert [(x, y) for x, y, _ in zeit] == [(0.0, 10.0), (7.0, 12.0), (21.0, 15.0)]
+    assert nummer[0][2] == "01.01."
+    assert kurve_punkte([]) == []

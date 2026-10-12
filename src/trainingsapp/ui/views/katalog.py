@@ -113,7 +113,7 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
                     value=state.suchtext,
                     hint_text="Übung suchen",
                     prefix_icon=ft.Icons.SEARCH,
-                    border_radius=12,
+                    border=ft.OutlineInputBorder(border_radius=12),
                     on_change=suchen,
                 ),
             ),

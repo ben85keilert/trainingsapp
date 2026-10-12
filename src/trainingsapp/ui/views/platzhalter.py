@@ -36,12 +36,4 @@ def messung() -> ft.Control:
     )
 
 
-def verlauf() -> ft.Control:
-    return platzhalter(
-        "Verlauf",
-        "Diagramme über Wochen und Monate — Übungsergebnisse und HRV-Kennzahlen.",
-        "L12",
-    )
-
-
-__all__ = ["messung", "platzhalter", "verlauf"]
+__all__ = ["messung", "platzhalter"]

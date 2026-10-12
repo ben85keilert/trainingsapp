@@ -52,9 +52,12 @@ class SessionRepo:
     def __init__(self, con: sqlite3.Connection) -> None: ...
 
     def anlegen(self, session: Session) -> None: ...
-    def beenden(self, session_id: str) -> None: ...
+    def session_fuer(self, subject_id: str, plan_id: str | None,
+                     tag: date) -> Session: ...          # get-or-create: ein Plan an einem Tag
     def eintrag_anlegen(self, session: Session, uebung: Exercise,
                         result: dict[str, Any], note: str = "") -> SessionEntry: ...
+    def erledigt(self, session: Session, uebung: Exercise,
+                 note: str = "") -> SessionEntry: ...     # nur „gemacht": leeres Ergebnis
     def eintrag_korrigieren(self, alter_eintrag_id: str,
                             result: dict[str, Any]) -> SessionEntry: ...
     def letzter_eintrag(self, subject_id: str, exercise_id: str) -> SessionEntry | None: ...
@@ -72,6 +75,10 @@ Anforderungen:
 - `eintraege` und `letzter_eintrag` liefern nur gültige Einträge — ersetzte
   nicht
 - `letzter_eintrag` ist die Grundlage für „Wie zuletzt"
+- `session_fuer` liefert beim zweiten Aufruf am selben Tag dieselbe Session;
+  der Tag ist ein **lokaler** Kalendertag (`core.models.tagesgrenzen`), die
+  Zeitstempel bleiben UTC
+- `erledigt` setzt `started_at`, schreibt aber keine `measurement`-Zeile
 - alles in Transaktionen, alles mit Platzhaltern
 
 Tests in `tests/test_repositories.py`:
@@ -82,6 +89,8 @@ Tests in `tests/test_repositories.py`:
 - Korrektur: `eintraege()` liefert nur den neuen, `verlauf()` enthält den
   alten Wert nicht mehr
 - eine Übung ohne `chart_metrics` erzeugt keine `measurement`-Zeile
+- `erledigt()` erzeugt keine Kennzahl, zählt aber in `anzahl_am_tag()`
+- zwei Einträge um 23:30 und 00:30 Ortszeit liegen an zwei verschiedenen Tagen
 
 ## Zum Nachdenken
 

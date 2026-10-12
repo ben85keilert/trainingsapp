@@ -26,19 +26,18 @@ wurde, bleibt so lesbar, wie es erfasst wurde.
 
 ## Was wir als Nächstes bauen
 
-Noch nicht M3 — dafür fehlt **L07**: async in Flet. Ein Timer, der pausiert,
-weiterläuft und sauber abgebrochen wird, ist die Voraussetzung für Übungen mit
-Haltezeit.
-
-Mit L06 und L07 zusammen entsteht dann **M3 — Training dokumentieren**:
+**M3 — Pläne, Abarbeiten, Tagebuch.** Der Kern der App:
 
 | Datei | Inhalt |
 |---|---|
 | `ui/components/spec_form.py` | aus Aufgabe 3 |
-| `data/repositories.py` | `SessionRepo` aus Aufgabe 4 |
-| `ui/views/training.py` | Sitzung starten, Übung wählen, Formular, „Wie zuletzt" |
-| `ui/views/heute.py` | zeigt die letzten Einträge statt Kacheln |
-| `core/limits.py` | Timer-Regeln, die L07 zum Laufen bringt |
+| `data/repositories.py` | `PlanRepo`, `SessionRepo` (Aufgabe 4), `DayNoteRepo` |
+| `ui/views/heute.py` | Pläne mit „x von n heute", darunter der Tag |
+| `ui/views/plan.py` | abhaken (Tipp = gemacht, Ziel-Chip = wie geplant), bearbeiten |
+| `ui/views/tag.py` | Tagesansicht: nach Plan, Zeit oder Übung; Notizen je Ebene |
+| `ui/views/eintrag.py` | ansehen, korrigieren, löschen mit Rückfrage |
+| `ui/views/verlauf.py` | Kalender mit Farbmarken, Kurve je Kennzahl |
 
-Wer die Übungen 3 und 4 gemacht hat, hat die Hälfte von M3 bereits im
-Repository.
+Kein Timer — der kommt mit **L07** (async) als eigener Schritt in die
+Planansicht. Wer die Übungen 3 und 4 gemacht hat, hat die Datenschicht von
+M3 bereits im Repository.

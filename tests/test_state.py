@@ -56,3 +56,14 @@ def test_profil_wechseln_unbekannt(state) -> None:
 def test_profil_umbenennen(state) -> None:
     state.profil_umbenennen("  Benjamin ")
     assert state.profile.laden(state.profil.id).name == "Benjamin"
+
+
+def test_repos_und_tag_vorhanden(state) -> None:
+    from datetime import date
+
+    assert state.plaene.alle(state.profil.id) == []
+    assert state.sitzungen.anzahl_am_tag(state.profil.id, state.heute()) == {}
+    assert state.tagesnotizen.lesen(state.profil.id, state.heute()) == ""
+    assert isinstance(state.heute(), date)
+    assert state.verlauf_monat.day == 1
+    assert state.plan_bearbeiten == set()

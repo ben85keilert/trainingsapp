@@ -9,6 +9,7 @@ from __future__ import annotations
 import flet as ft
 
 from trainingsapp.core.models import SessionEntry, lokaler_tag
+from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
 
 
@@ -63,23 +64,26 @@ def eintrag_view(page: ft.Page, state: AppState, eintrag: SessionEntry) -> ft.Vi
         scroll=ft.ScrollMode.AUTO,
         padding=20,
         controls=[
-            ft.Column(
-                spacing=20,
-                controls=[
-                    ft.Text(
-                        eintrag.shorthand() if eintrag.result else "gemacht",
-                        size=32,
-                        weight=ft.FontWeight.BOLD,
-                    ),
-                    _abschnitt("Wann", ft.Text(zeit)),
-                    _abschnitt("Plan", ft.Text(plan.name if plan else "ohne Plan")),
-                    _abschnitt("Notiz", ft.Text(eintrag.note or "—")),
-                    ft.Text(
-                        "Korrigieren legt einen neuen Eintrag an; der alte bleibt als Historie.",
-                        size=12,
-                        opacity=0.6,
-                    ),
-                ],
+            sicher(
+                ft.Column(
+                    spacing=20,
+                    controls=[
+                        ft.Text(
+                            eintrag.shorthand() if eintrag.result else "gemacht",
+                            size=32,
+                            weight=ft.FontWeight.BOLD,
+                        ),
+                        _abschnitt("Wann", ft.Text(zeit)),
+                        _abschnitt("Plan", ft.Text(plan.name if plan else "ohne Plan")),
+                        _abschnitt("Notiz", ft.Text(eintrag.note or "—")),
+                        ft.Text(
+                            "Korrigieren legt einen neuen Eintrag an, der alte bleibt erhalten.",
+                            size=12,
+                            opacity=0.6,
+                        ),
+                    ],
+                ),
+                expand=False,
             )
         ],
     )

@@ -63,7 +63,10 @@ def test_hauptansicht(page, state) -> None:
     state.nav_index = 1
     ansicht = hauptansicht(page, state)
     assert ansicht.route == "/"
-    assert ansicht.floating_action_button is not None
+    assert ansicht.navigation_bar is not None
+    assert ansicht.floating_action_button.tooltip == "Neue Übung"
+    state.uebungen_tab = 1
+    assert hauptansicht(page, state).floating_action_button.tooltip == "Neuer Plan"
 
     state.nav_index = 2  # Messung: kein Knopf
     assert hauptansicht(page, state).floating_action_button is None
@@ -164,10 +167,13 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
     assert tag_view(page, state, state.heute()).route.startswith("/tag/")
     assert verlauf(page, state) is not None  # mit Kurve, weil "hold" eine Kennzahl ist
 
-    state.nav_index = 3
-    assert hauptansicht(page, state).floating_action_button is None
-    state.nav_index = 0
-    assert hauptansicht(page, state).floating_action_button is not None
+    from trainingsapp.ui.views.uebungen import plaene_liste, uebungen
+
+    assert uebungen(page, state) is not None
+    assert plaene_liste(page, state) is not None
+    for nav in (0, 3):
+        state.nav_index = nav
+        assert hauptansicht(page, state).floating_action_button is None
 
 
 def test_verlauf_ohne_werte(page, state) -> None:

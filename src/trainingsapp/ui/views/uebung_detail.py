@@ -8,6 +8,7 @@ import flet as ft
 
 from trainingsapp.core.models import Exercise, Media
 from trainingsapp.ui.components.icons import symbol
+from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
 
 
@@ -136,7 +137,7 @@ def uebung_detail(
         ),
         scroll=ft.ScrollMode.AUTO,
         padding=20,
-        controls=[ft.Column(spacing=22, controls=abschnitte)],
+        controls=[sicher(ft.Column(spacing=22, controls=abschnitte), expand=False)],
     )
 
 

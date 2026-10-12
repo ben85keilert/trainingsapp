@@ -14,6 +14,7 @@ import flet as ft
 from trainingsapp.core.models import Exercise, Media, MediaKind, MediaSource
 from trainingsapp.data.seed import SPECS
 from trainingsapp.ui.components.icons import AUSWAHL, symbol
+from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
 
 #: Kurzname der Vorlage → Beschriftung im Dropdown
@@ -185,28 +186,35 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         scroll=ft.ScrollMode.AUTO,
         padding=20,
         controls=[
-            ft.Column(
-                spacing=18,
-                controls=[
-                    name,
-                    kategorie,
-                    beschreibung,
-                    ft.Row(controls=[vorlage]),
-                    ft.Text("Symbol", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                    symbole,
-                    ft.Text("Videos", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                    medien_spalte,
-                    ft.TextButton(
-                        "Video-Link hinzufügen", icon=ft.Icons.ADD_LINK, on_click=link_hinzufuegen
-                    ),
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.END,
-                        controls=[
-                            ft.TextButton("Abbrechen", on_click=abbrechen),
-                            ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=speichern),
-                        ],
-                    ),
-                ],
+            sicher(
+                ft.Column(
+                    spacing=18,
+                    controls=[
+                        name,
+                        kategorie,
+                        beschreibung,
+                        ft.Row(controls=[vorlage]),
+                        ft.Text("Symbol", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                        symbole,
+                        ft.Text("Videos", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                        medien_spalte,
+                        ft.TextButton(
+                            "Video-Link hinzufügen",
+                            icon=ft.Icons.ADD_LINK,
+                            on_click=link_hinzufuegen,
+                        ),
+                        ft.Row(
+                            alignment=ft.MainAxisAlignment.END,
+                            controls=[
+                                ft.TextButton("Abbrechen", on_click=abbrechen),
+                                ft.FilledButton(
+                                    "Speichern", icon=ft.Icons.CHECK, on_click=speichern
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+                expand=False,
             )
         ],
     )

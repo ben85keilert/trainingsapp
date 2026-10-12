@@ -9,11 +9,27 @@
       "description": "Vier Sekunden einatmen, sieben halten, acht ausatmen. Beruhigt und ist gut als Einstieg in eine HRV-Messung geeignet.",
       "icon_key": "air",
       "spec": "halten",
-      "tags": ["Atmung", "Entspannung", "HRV"],
-      "media": [
-        {"kind": "video", "source": "url", "uri": "", "title": "Erklärvideo (noch zu ergänzen)"}
+      "tags": [
+        "Atmung",
+        "Entspannung",
+        "HRV"
       ],
-      "limit_spec": {"rules": [{"type": "timer", "seconds": 300}]}
+      "media": [
+        {
+          "kind": "video",
+          "source": "url",
+          "uri": "",
+          "title": "Erklärvideo (noch zu ergänzen)"
+        }
+      ],
+      "limit_spec": {
+        "rules": [
+          {
+            "type": "timer",
+            "seconds": 300
+          }
+        ]
+      }
     },
     {
       "key": "kohaerenzatmung",
@@ -22,8 +38,18 @@
       "description": "Gleichmäßig fünf Sekunden ein, fünf Sekunden aus. Erzeugt einen deutlichen Ausschlag im LF-Band und eignet sich gut, um die HRV-Messung zu prüfen.",
       "icon_key": "waves",
       "spec": "halten",
-      "tags": ["Atmung", "HRV"],
-      "limit_spec": {"rules": [{"type": "timer", "seconds": 300}]}
+      "tags": [
+        "Atmung",
+        "HRV"
+      ],
+      "limit_spec": {
+        "rules": [
+          {
+            "type": "timer",
+            "seconds": 300
+          }
+        ]
+      }
     },
     {
       "key": "luft_anhalten",
@@ -32,7 +58,10 @@
       "description": "Nach normaler Ausatmung so lange wie angenehm möglich anhalten. Nicht bis zur Grenze — der Wert soll vergleichbar sein, nicht maximal.",
       "icon_key": "timer",
       "spec": "benchmark_zeit",
-      "tags": ["Benchmark", "Atmung"]
+      "tags": [
+        "Benchmark",
+        "Atmung"
+      ]
     },
     {
       "key": "schulter_aussenrotation",
@@ -41,7 +70,10 @@
       "description": "Oberarm am Körper, Unterarm nach außen drehen. Bewegung aus der Schulter, nicht aus dem Rumpf.",
       "icon_key": "accessibility",
       "spec": "saetze_wdh",
-      "tags": ["Schulter", "Kräftigung"]
+      "tags": [
+        "Schulter",
+        "Kräftigung"
+      ]
     },
     {
       "key": "schulter_beweglichkeit",
@@ -50,7 +82,11 @@
       "description": "Erreichbarer Winkel bei der Abduktion. Immer gleich messen, sonst ist der Verlauf wertlos.",
       "icon_key": "straighten",
       "spec": "winkel",
-      "tags": ["Schulter", "Beweglichkeit", "Benchmark"]
+      "tags": [
+        "Schulter",
+        "Beweglichkeit",
+        "Benchmark"
+      ]
     },
     {
       "key": "nacken_dehnung",
@@ -59,7 +95,10 @@
       "description": "Kopf zur Seite neigen, Gegenschulter bewusst nach unten ziehen. Ohne Zug am Kopf.",
       "icon_key": "self_improvement",
       "spec": "halten",
-      "tags": ["Nacken", "Dehnung"]
+      "tags": [
+        "Nacken",
+        "Dehnung"
+      ]
     },
     {
       "key": "brustwirbel_mobilisation",
@@ -68,7 +107,10 @@
       "description": "Im Vierfüßlerstand abwechselnd Rundrücken und Hohlkreuz, langsam und über die ganze Bewegungsbahn.",
       "icon_key": "sync_alt",
       "spec": "saetze_wdh",
-      "tags": ["Rücken", "Mobilisation"]
+      "tags": [
+        "Rücken",
+        "Mobilisation"
+      ]
     },
     {
       "key": "hueftbeuger_dehnung",
@@ -77,7 +119,10 @@
       "description": "Ausfallschritt, Becken aufrichten, Gesäß anspannen. Der Zug gehört vorn in die Hüfte, nicht in den Rücken.",
       "icon_key": "directions_walk",
       "spec": "halten",
-      "tags": ["Hüfte", "Dehnung"]
+      "tags": [
+        "Hüfte",
+        "Dehnung"
+      ]
     },
     {
       "key": "beinachsentraining",
@@ -86,7 +131,11 @@
       "description": "Einbeinige Kniebeuge in kleinem Bewegungsumfang. Knie bleibt über dem Fuß, kippt nicht nach innen.",
       "icon_key": "airline_seat_legroom_extra",
       "spec": "saetze_wdh",
-      "tags": ["Knie", "Kräftigung", "Koordination"]
+      "tags": [
+        "Knie",
+        "Kräftigung",
+        "Koordination"
+      ]
     },
     {
       "key": "wadenheben",
@@ -95,7 +144,10 @@
       "description": "Langsam auf die Fußballen, oben kurz halten, noch langsamer ablassen.",
       "icon_key": "fitness_center",
       "spec": "saetze_wdh",
-      "tags": ["Fuß", "Kräftigung"]
+      "tags": [
+        "Fuß",
+        "Kräftigung"
+      ]
     },
     {
       "key": "einbeinstand",
@@ -104,7 +156,10 @@
       "description": "Frei stehen, Blick geradeaus. Steigerung: Augen schließen.",
       "icon_key": "balance",
       "spec": "halten",
-      "tags": ["Gleichgewicht", "Benchmark"]
+      "tags": [
+        "Gleichgewicht",
+        "Benchmark"
+      ]
     },
     {
       "key": "unterarmstuetz",
@@ -113,7 +168,11 @@
       "description": "Gerade Linie von Kopf bis Ferse. Lieber kürzer und sauber als lang und durchhängend.",
       "icon_key": "horizontal_rule",
       "spec": "halten",
-      "tags": ["Rumpf", "Kräftigung", "Benchmark"]
+      "tags": [
+        "Rumpf",
+        "Kräftigung",
+        "Benchmark"
+      ]
     },
     {
       "key": "hrv_ruhemessung",
@@ -122,8 +181,55 @@
       "description": "Fünf Minuten ruhig sitzen oder liegen, gleichmäßig atmen, nicht sprechen. Möglichst immer zur gleichen Tageszeit.",
       "icon_key": "monitor_heart",
       "spec": "halten",
-      "tags": ["HRV", "Messung"],
-      "limit_spec": {"rules": [{"type": "timer", "seconds": 300}]}
+      "tags": [
+        "HRV",
+        "Messung"
+      ],
+      "limit_spec": {
+        "rules": [
+          {
+            "type": "timer",
+            "seconds": 300
+          }
+        ]
+      }
+    },
+    {
+      "key": "liegestuetzen",
+      "name": "Liegestützen",
+      "category": "Kraft",
+      "description": "Hände schulterbreit, Körper in einer Linie. Brust Richtung Boden, kontrolliert hochdrücken. Auch als Halteübung in der Stützposition möglich.",
+      "icon_key": "fitness_center",
+      "spec": "saetze_wdh",
+      "tags": [
+        "Kraft",
+        "Oberkörper"
+      ]
+    },
+    {
+      "key": "kniebeuge",
+      "name": "Kniebeuge",
+      "category": "Kraft",
+      "description": "Füße hüftbreit, Gewicht auf den Fersen, Knie über den Zehen. So tief, wie der Rücken gerade bleibt.",
+      "icon_key": "accessibility_new",
+      "spec": "saetze_wdh",
+      "tags": [
+        "Kraft",
+        "Beine"
+      ]
+    },
+    {
+      "key": "wandsitz",
+      "name": "Wandsitz",
+      "category": "Kraft",
+      "description": "Rücken an der Wand, Knie im rechten Winkel, Oberschenkel waagerecht. Halten — die Zeit ist der Wert.",
+      "icon_key": "airline_seat_legroom_extra",
+      "spec": "halten",
+      "tags": [
+        "Kraft",
+        "Beine",
+        "Isometrie"
+      ]
     }
   ]
 }

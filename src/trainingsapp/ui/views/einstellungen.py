@@ -12,6 +12,7 @@ from collections.abc import Callable
 import flet as ft
 
 from trainingsapp.config import edition, ist_aktiv
+from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
 
 
@@ -78,26 +79,31 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
         scroll=ft.ScrollMode.AUTO,
         padding=20,
         controls=[
-            ft.Column(
-                spacing=18,
-                controls=[
-                    ft.Text("PROFILE", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                    ft.Text("Beim Start wird das zuletzt aktive Profil geladen.", opacity=0.7),
-                    profil_liste,
-                    ft.Row(
-                        spacing=8,
-                        controls=[
-                            neuer_name,
-                            ft.FilledButton("Anlegen", icon=ft.Icons.PERSON_ADD, on_click=anlegen),
-                        ],
-                    ),
-                    umbenennen_feld,
-                    ft.TextButton("Umbenennen", on_click=umbenennen),
-                    ft.Text(hinweis, size=12, opacity=0.6),
-                    ft.Divider(),
-                    ft.Text("APP", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                    ft.Text(f"Edition {edition().value}", opacity=0.7),
-                ],
+            sicher(
+                ft.Column(
+                    spacing=18,
+                    controls=[
+                        ft.Text("PROFILE", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                        ft.Text("Beim Start wird das zuletzt aktive Profil geladen.", opacity=0.7),
+                        profil_liste,
+                        ft.Row(
+                            spacing=8,
+                            controls=[
+                                neuer_name,
+                                ft.FilledButton(
+                                    "Anlegen", icon=ft.Icons.PERSON_ADD, on_click=anlegen
+                                ),
+                            ],
+                        ),
+                        umbenennen_feld,
+                        ft.TextButton("Umbenennen", on_click=umbenennen),
+                        ft.Text(hinweis, size=12, opacity=0.6),
+                        ft.Divider(),
+                        ft.Text("APP", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                        ft.Text(f"Edition {edition().value}", opacity=0.7),
+                    ],
+                ),
+                expand=False,
             )
         ],
     )

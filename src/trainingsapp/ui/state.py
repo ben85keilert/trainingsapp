@@ -52,6 +52,8 @@ class AppState:
     kategorie: str | None = None
     #: Wie viele Übungen der letzte Start neu angelegt hat (für den Startbildschirm)
     neu_eingespielt: int = field(default=0)
+    #: Reiter „Übungen": 0 = Katalog, 1 = Pläne
+    uebungen_tab: int = 0
     #: Ordnung der Tagesansicht: "plan", "zeit" oder "uebung"
     tag_ordnung: str = "plan"
     #: Pläne, die gerade im Bearbeiten-Modus stehen (überlebt den Routenwechsel)

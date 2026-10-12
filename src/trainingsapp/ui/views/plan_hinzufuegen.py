@@ -13,6 +13,7 @@ import flet as ft
 
 from trainingsapp.core.models import Plan
 from trainingsapp.ui.components.icons import symbol
+from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
 
 
@@ -65,21 +66,23 @@ def plan_hinzufuegen_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View
         ),
         padding=0,
         controls=[
-            ft.Column(
-                expand=True,
-                spacing=8,
-                controls=[
-                    ft.Container(
-                        padding=ft.Padding.only(left=16, right=16, top=12),
-                        content=ft.TextField(
-                            hint_text="Übung suchen",
-                            prefix_icon=ft.Icons.SEARCH,
-                            border=ft.OutlineInputBorder(border_radius=12),
-                            on_change=suchen,
+            sicher(
+                ft.Column(
+                    expand=True,
+                    spacing=8,
+                    controls=[
+                        ft.Container(
+                            padding=ft.Padding.only(left=16, right=16, top=12),
+                            content=ft.TextField(
+                                hint_text="Übung suchen",
+                                prefix_icon=ft.Icons.SEARCH,
+                                border=ft.OutlineInputBorder(border_radius=12),
+                                on_change=suchen,
+                            ),
                         ),
-                    ),
-                    liste,
-                ],
+                        liste,
+                    ],
+                )
             )
         ],
     )

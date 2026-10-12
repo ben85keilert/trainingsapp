@@ -37,14 +37,14 @@ from trainingsapp.ui.theme import dark_theme, light_theme
 from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
-from trainingsapp.ui.views.heute import heute, neuen_plan_anlegen
-from trainingsapp.ui.views.katalog import katalog
+from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.plan import plan_view, ziel_text
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
 from trainingsapp.ui.views.platzhalter import messung
 from trainingsapp.ui.views.tag import tag_view
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 from trainingsapp.ui.views.uebung_detail import uebung_detail
+from trainingsapp.ui.views.uebungen import neuen_plan_anlegen, uebungen
 from trainingsapp.ui.views.verlauf import verlauf
 
 REITER = [
@@ -62,7 +62,7 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
         if state.nav_index == 0:
             return heute(page, state)
         if state.nav_index == 1:
-            return katalog(page, state)
+            return uebungen(page, state)
         if state.nav_index == 2:
             return messung()
         return verlauf(page, state)
@@ -96,34 +96,27 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
                 ),
             ],
         ),
-        controls=[
-            ft.Column(
-                expand=True,
-                spacing=0,
-                controls=[
-                    koerper,
-                    ft.NavigationBar(
-                        selected_index=state.nav_index,
-                        on_change=wechseln,
-                        destinations=[
-                            ft.NavigationBarDestination(label=label, icon=icon)
-                            for label, icon in REITER
-                        ],
-                    ),
-                ],
-            )
-        ],
+        # Die Leiste gehört der View, nicht dem Inhalt: So setzt Flutter den
+        # runden Knopf darüber und hält beides aus der Android-Systemleiste.
+        navigation_bar=ft.NavigationBar(
+            selected_index=state.nav_index,
+            on_change=wechseln,
+            destinations=[
+                ft.NavigationBarDestination(label=label, icon=icon) for label, icon in REITER
+            ],
+        ),
+        controls=[koerper],
     )
 
     def hauptansicht_aktualisieren() -> None:
-        # Der runde Knopf wechselt mit dem Reiter: Plan auf „Heute", Übung im Katalog.
-        if state.nav_index == 0:
+        # Der runde Knopf hängt am Reiter: Katalog → neue Übung, Pläne → neuer Plan.
+        if state.nav_index == 1 and state.uebungen_tab == 0:
             ansicht.floating_action_button = ft.FloatingActionButton(
-                icon=ft.Icons.ADD, tooltip="Neuer Plan", on_click=neuen_plan_anlegen(page, state)
+                icon=ft.Icons.ADD, tooltip="Neue Übung", on_click=neue_uebung
             )
         elif state.nav_index == 1:
             ansicht.floating_action_button = ft.FloatingActionButton(
-                icon=ft.Icons.ADD, tooltip="Neue Übung", on_click=neue_uebung
+                icon=ft.Icons.ADD, tooltip="Neuer Plan", on_click=neuen_plan_anlegen(page, state)
             )
         else:
             ansicht.floating_action_button = None

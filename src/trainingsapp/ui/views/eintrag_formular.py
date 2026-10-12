@@ -13,6 +13,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.result_spec import ResultSpec
+from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.spec_form import SpecForm
 
 Speichern = Callable[[dict[str, Any], str], Awaitable[None]]
@@ -69,7 +70,7 @@ def eintrag_formular(
         appbar=ft.AppBar(title=ft.Text(titel)),
         scroll=ft.ScrollMode.AUTO,
         padding=20,
-        controls=[ft.Column(spacing=18, controls=inhalt)],
+        controls=[sicher(ft.Column(spacing=18, controls=inhalt), expand=False)],
     )
 
 

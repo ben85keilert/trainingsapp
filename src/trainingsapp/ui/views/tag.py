@@ -16,6 +16,7 @@ from datetime import date, timedelta
 import flet as ft
 
 from trainingsapp.core.models import Session, SessionEntry
+from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
 
 ORDNUNGEN = [("plan", "Plan"), ("zeit", "Zeit"), ("uebung", "Übung")]
@@ -176,7 +177,7 @@ def tag_view(page: ft.Page, state: AppState, tag: date) -> ft.View:
         ),
         scroll=ft.ScrollMode.AUTO,
         padding=0,
-        controls=[tagesansicht(page, state, tag)],
+        controls=[sicher(tagesansicht(page, state, tag), expand=False)],
     )
 
 

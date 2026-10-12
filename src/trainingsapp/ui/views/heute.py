@@ -17,42 +17,6 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.tag import tag_titel, tagesansicht
 
 
-def neuen_plan_anlegen(page: ft.Page, state: AppState) -> Callable[[], None]:
-    """Gibt den Handler für „Neuer Plan" zurück: Dialog mit Namen, dann Bearbeiten-Modus."""
-    name = ft.TextField(label="Name", hint_text="z. B. Dehnung, Planke", autofocus=True)
-
-    def abbrechen() -> None:
-        page.pop_dialog()
-
-    async def anlegen() -> None:
-        if not (name.value or "").strip():
-            name.error = "Ein Name muss sein."
-            page.update()
-            return
-        plan = Plan(name=(name.value or "").strip(), subject_id=state.profil.id)
-        state.plaene.speichern(plan)
-        state.plan_bearbeiten.add(plan.id)
-        page.pop_dialog()
-        await page.push_route(f"/plan/{plan.id}")
-
-    dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("Neuer Plan"),
-        content=name,
-        actions=[
-            ft.TextButton("Abbrechen", on_click=abbrechen),
-            ft.FilledButton("Anlegen", on_click=anlegen),
-        ],
-    )
-
-    def handler() -> None:
-        name.value = ""
-        name.error = None
-        page.show_dialog(dialog)
-
-    return handler
-
-
 def heute(page: ft.Page, state: AppState) -> ft.Control:
     tag = state.heute()
     plaene = state.plaene.alle(state.profil.id)
@@ -88,18 +52,8 @@ def heute(page: ft.Page, state: AppState) -> ft.Control:
         plan_block = [
             ft.Container(
                 padding=ft.Padding.symmetric(horizontal=16, vertical=8),
-                content=ft.Column(
-                    spacing=8,
-                    controls=[
-                        ft.Text(
-                            "Noch kein Plan. Ein Plan bündelt Übungen, die du abhakst.", opacity=0.7
-                        ),
-                        ft.FilledButton(
-                            "Ersten Plan anlegen",
-                            icon=ft.Icons.ADD,
-                            on_click=neuen_plan_anlegen(page, state),
-                        ),
-                    ],
+                content=ft.Text(
+                    "Noch kein Plan. Pläne legst du unter „Übungen“ → „Pläne“ an.", opacity=0.7
                 ),
             )
         ]
@@ -121,10 +75,6 @@ def heute(page: ft.Page, state: AppState) -> ft.Control:
         scroll=ft.ScrollMode.AUTO,
         spacing=0,
         controls=[
-            ft.Container(
-                padding=ft.Padding.only(left=16, right=16, top=16),
-                content=ft.Text(f"Hallo {state.profil.name}", size=22, weight=ft.FontWeight.BOLD),
-            ),
             ueberschrift("Pläne"),
             *plan_block,
             ueberschrift(
@@ -140,4 +90,4 @@ def heute(page: ft.Page, state: AppState) -> ft.Control:
     )
 
 
-__all__ = ["heute", "neuen_plan_anlegen"]
+__all__ = ["heute"]

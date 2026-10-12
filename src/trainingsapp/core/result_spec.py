@@ -224,14 +224,28 @@ def ist_leer(wert: Any) -> bool:
 
 
 def format_wert(f: FieldSpec, wert: Any) -> str:
-    """Ein Wert in der Schreibweise seines Feldtyps: ``3x15``, ``1:30``, ``40kg``, ``45°``."""
+    """Ein Wert in der Schreibweise seines Feldtyps: ``3x15``, ``1:30``, ``40kg``, ``45°``.
+
+    Stürzt nie ab: Eine Liste in einem Einzelfeld (Kopie und Werte passen nicht
+    zusammen) wird als Satzliste gezeigt, alles Unlesbare als Text.
+
+    >>> format_wert(FieldSpec("hold", FieldType.DURATION, "Haltezeit", unit="s"), [45.0])
+    '45s'
+    """
     if ist_leer(wert):
         return ""
-    if f.type == FieldType.SET_LIST:
-        liste = list(wert) if isinstance(wert, list | tuple) else [float(wert or 0)]
-        return format_sets(liste, zeit=(f.unit == "s"))
+    zeit = f.unit == "s" or f.type == FieldType.DURATION
+    if f.type == FieldType.SET_LIST or isinstance(wert, list | tuple):
+        try:
+            liste = list(wert) if isinstance(wert, list | tuple) else [float(wert)]
+            return format_sets([float(w) for w in liste], zeit=zeit)
+        except (TypeError, ValueError):
+            return str(wert)
     if f.type == FieldType.DURATION:
-        return format_dauer(float(wert))
+        try:
+            return format_dauer(float(wert))
+        except (TypeError, ValueError):
+            return str(wert)
     if f.type == FieldType.BOOL:
         return f.label if wert else f"nicht {f.label}"
     if f.type in (FieldType.TEXT, FieldType.CHOICE):

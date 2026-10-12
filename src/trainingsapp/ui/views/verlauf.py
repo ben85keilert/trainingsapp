@@ -134,10 +134,14 @@ def kurve(page: ft.Page, state: AppState) -> ft.Control:
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
 
     def beschriftung(metric_key: str) -> str:
-        uebung_id, _, feld_key = metric_key.partition(":")
+        """„Wandsitz · Haltezeit (Summe)" statt „<id>:hold:sum"."""
+        uebung_id, _, rest = metric_key.partition(":")
+        feld_key, _, art = rest.partition(":")
         uebung = katalog.get(uebung_id)
         feld = uebung.result_spec.field_by_key(feld_key) if uebung else None
-        return f"{uebung.name if uebung else uebung_id} · {feld.label if feld else feld_key}"
+        text = f"{uebung.name if uebung else uebung_id} · {feld.label if feld else feld_key}"
+        zusatz = {"sum": "Summe", "max": "Maximum je Satz"}.get(art)
+        return f"{text} ({zusatz})" if zusatz else text
 
     if state.verlauf_metrik not in metriken:
         state.verlauf_metrik = metriken[0]

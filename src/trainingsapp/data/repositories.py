@@ -39,7 +39,7 @@ from ..core.models import (
     new_id,
     tagesgrenzen,
 )
-from ..core.result_spec import ResultSpec
+from ..core.result_spec import FieldType, ResultSpec, werte_modernisieren
 from .db import transaktion
 
 # ---------------------------------------------------------------------------
@@ -644,9 +644,18 @@ class SessionRepo:
         return self.eintrag_anlegen(session, uebung, {}, note)
 
     def eintrag_korrigieren(
-        self, alter_eintrag_id: str, result: dict[str, Any], note: str | None = None
+        self,
+        alter_eintrag_id: str,
+        result: dict[str, Any],
+        note: str | None = None,
+        spec: ResultSpec | None = None,
     ) -> SessionEntry:
-        """Korrektur = neuer Eintrag mit Verweis; übernimmt die Kopie des ALTEN."""
+        """Korrektur = neuer Eintrag mit Verweis; übernimmt die Kopie des ALTEN.
+
+        ``spec`` ersetzt die Kopie nur dann, wenn die neuen Werte in einer
+        anderen Notation vorliegen als die alten (siehe `satz_anhaengen`).
+        Kopie und Werte müssen immer zusammenpassen.
+        """
         alt = self.eintrag_laden(alter_eintrag_id)
         if alt is None:
             raise KeyError(alter_eintrag_id)
@@ -657,7 +666,7 @@ class SessionRepo:
             exercise_id=alt.exercise_id,
             order=alt.order,
             result=result,
-            spec_snapshot=alt.spec_snapshot,
+            spec_snapshot=spec or alt.spec_snapshot,
             note=alt.note if note is None else note.strip(),
             started_at=alt.started_at,
             ended_at=alt.ended_at,
@@ -698,9 +707,23 @@ class SessionRepo:
         aktuell = self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
         if aktuell is None or aktuell.session_id != session.id:
             return self.eintrag_anlegen(session, uebung, {feld_key: [wert]})
-        bisher = aktuell.result.get(feld_key)
+
+        # Stammt der heutige Eintrag aus der Zeit vor dem Satzfeld (Kopie mit
+        # „sets" + Einzelwert), bekommt die Korrektur die heutige Spezifikation,
+        # und die alten Werte werden in Satzlisten übersetzt. Sonst passten
+        # Kopie und Werte nicht zusammen.
+        kopie = aktuell.spec_snapshot
+        feld = kopie.field_by_key(feld_key) if kopie is not None else None
+        if feld is None or feld.type != FieldType.SET_LIST:
+            basis, neue_kopie = werte_modernisieren(aktuell.result), uebung.result_spec
+        else:
+            basis, neue_kopie = dict(aktuell.result), None
+
+        bisher = basis.get(feld_key)
         liste = list(bisher) if isinstance(bisher, list) else ([bisher] if bisher else [])
-        return self.eintrag_korrigieren(aktuell.id, {**aktuell.result, feld_key: [*liste, wert]})
+        return self.eintrag_korrigieren(
+            aktuell.id, {**basis, feld_key: [*liste, wert]}, spec=neue_kopie
+        )
 
     def eintrag_loeschen(self, eintrag_id: str) -> None:
         """Weich löschen — samt der Einträge, die dieser korrigiert hat.

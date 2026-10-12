@@ -146,8 +146,9 @@ class SpecForm:
     def _anzeige(f: FieldSpec, wert: Any) -> str:
         if ist_leer(wert):
             return ""
-        if f.type == FieldType.SET_LIST:
-            return format_sets([float(w) for w in wert], zeit=(f.unit == "s"))
+        if f.type == FieldType.SET_LIST or isinstance(wert, list):
+            liste = wert if isinstance(wert, list) else [wert]
+            return format_sets([float(w) for w in liste], zeit=(f.unit == "s"))
         if f.type == FieldType.DURATION:
             return format_dauer(float(wert))
         if isinstance(wert, float) and wert.is_integer():

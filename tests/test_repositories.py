@@ -559,3 +559,123 @@ def test_datenformat_aktualisieren(con) -> None:
         )["fields"][0]["key"]
         == "reps"
     )
+
+
+# ---------------------------------------------------------------------------
+# Übergang vom alten Format: „+X" auf einen Eintrag mit alter Kopie
+# ---------------------------------------------------------------------------
+
+
+def _alte_halten_spec():
+    """So sah SPEC_HALTEN bis M3 aus: Sätze als Zahl, Haltezeit als Einzeldauer."""
+    from trainingsapp.core.result_spec import FieldSpec, FieldType, Layout, ResultSpec
+
+    return ResultSpec(
+        layout=Layout.TIMED,
+        fields=[
+            FieldSpec("sets", FieldType.INT, "Sätze", default=3, quick=[1, 2, 3]),
+            FieldSpec("hold", FieldType.DURATION, "Haltezeit", unit="s", default=30),
+        ],
+        shorthand="{sets}× {hold}s",
+        chart_metrics=["hold"],
+    )
+
+
+def test_satz_anhaengen_an_eintrag_mit_alter_kopie(welt) -> None:
+    """Der Absturz vom 12.10.: „gemacht" vor der Umstellung, danach „+45".
+
+    Die Korrektur darf die alte Kopie nicht mit neuen Werten kombinieren —
+    sonst passt die Spezifikation nicht zum Ergebnis, und die Anzeige stürzt ab.
+    """
+    from trainingsapp.core.result_spec import FieldType
+
+    con, repo, ich, sitzung = welt
+    uebung = ExerciseRepo(con).laden(seed_id("hueftbeuger_dehnung"))
+    damals = replace(uebung, result_spec=_alte_halten_spec())
+    repo.erledigt(sitzung, damals)  # Eintrag mit alter Kopie
+
+    e = repo.satz_anhaengen(sitzung, uebung, "hold", 45, lokaler_tag(jetzt()))
+
+    assert e.spec_snapshot.field_by_key("hold").type == FieldType.SET_LIST
+    assert e.result == {"hold": [45]}
+    assert e.shorthand() == "45s"
+    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:hold:sum")] == [45.0]
+
+
+def test_satz_anhaengen_uebernimmt_alte_werte(welt) -> None:
+    """Alter Eintrag 2× 30s, dann +45 → 30/30/45 in der neuen Notation."""
+    con, repo, _ich, sitzung = welt
+    uebung = ExerciseRepo(con).laden(seed_id("hueftbeuger_dehnung"))
+    damals = replace(uebung, result_spec=_alte_halten_spec())
+    repo.eintrag_anlegen(sitzung, damals, {"sets": 2, "hold": 30})
+
+    e = repo.satz_anhaengen(sitzung, uebung, "hold", 45, lokaler_tag(jetzt()))
+    assert e.result == {"hold": [30, 30, 45]}
+    assert e.shorthand() == "30/30/45s"
+
+
+def test_anzeige_stuerzt_bei_unpassender_kopie_nicht_ab() -> None:
+    """Passt eine Kopie nicht zu den Werten, zeigt die App sie trotzdem an."""
+    from trainingsapp.core.models import SessionEntry
+
+    e = SessionEntry(result={"hold": [45.0]}, spec_snapshot=_alte_halten_spec())
+    assert e.shorthand() == "45s"
+
+
+def test_datenformat_repariert_eintraege_mit_unpassender_kopie(welt) -> None:
+    """Einträge, die der Fehler schon geschrieben hat, bekommen eine passende Kopie."""
+    import json
+
+    from trainingsapp.core.result_spec import FieldType
+    from trainingsapp.data.repositories import SettingRepo
+    from trainingsapp.data.upgrade import datenformat_aktualisieren
+
+    con, repo, ich, sitzung = welt
+    uebung = ExerciseRepo(con).laden(seed_id("hueftbeuger_dehnung"))
+    damals = replace(uebung, result_spec=_alte_halten_spec())
+    alt = repo.erledigt(sitzung, damals)
+    # Genau das hat die fehlerhafte Fassung geschrieben: alte Kopie, neue Werte.
+    kaputt = repo.eintrag_anlegen(sitzung, damals, {})
+    con.execute(
+        "UPDATE session_entry SET result_json = ?, replaces_entry_id = ? WHERE id = ?",
+        (json.dumps({"hold": [45.0]}), alt.id, kaputt.id),
+    )
+    SettingRepo(con).setzen("datenformat", "2")
+
+    assert datenformat_aktualisieren(con) == 1
+    repariert = repo.eintrag_laden(kaputt.id)
+    assert repariert.spec_snapshot.field_by_key("hold").type == FieldType.SET_LIST
+    assert repariert.result == {"hold": [45.0]}  # Werte unangetastet
+    assert repariert.shorthand() == "45s"
+    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:hold:sum")] == [45.0]
+    assert datenformat_aktualisieren(con) == 0
+
+
+def test_datenformat_schreibt_alte_kennzahlen_unter_neue_schluessel(welt) -> None:
+    """3× 15 im alten Format hatte die Kennzahl „reps" = 15; danach reps:sum = 45, reps:max = 15."""
+    from trainingsapp.core.result_spec import FieldSpec, FieldType, ResultSpec
+    from trainingsapp.data.repositories import SettingRepo
+    from trainingsapp.data.upgrade import datenformat_aktualisieren
+
+    con, repo, ich, sitzung = welt
+    uebung = _wadenheben(con)
+    alt_spec = ResultSpec(
+        fields=[
+            FieldSpec("sets", FieldType.INT, "Sätze", default=3),
+            FieldSpec("reps", FieldType.INT, "Wdh.", default=15),
+        ],
+        shorthand="{sets}x{reps}",
+        chart_metrics=["reps"],
+    )
+    e = repo.eintrag_anlegen(
+        sitzung, replace(uebung, result_spec=alt_spec), {"sets": 3, "reps": 15}
+    )
+    assert repo.metriken(ich.id) == [f"{uebung.id}:reps"]
+    SettingRepo(con).setzen("datenformat", "2")
+
+    assert datenformat_aktualisieren(con) == 1
+    assert repo.metriken(ich.id) == [f"{uebung.id}:reps:max", f"{uebung.id}:reps:sum"]
+    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:reps:sum")] == [45.0]
+    unveraendert = repo.eintrag_laden(e.id)
+    assert unveraendert.result == {"sets": 3, "reps": 15}
+    assert unveraendert.shorthand() == "3x15"

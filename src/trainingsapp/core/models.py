@@ -124,6 +124,8 @@ class Exercise:
     archived: bool = False
     created_at: datetime = field(default_factory=jetzt)
     updated_at: datetime = field(default_factory=jetzt)
+    #: Im Papierkorb seit (Migration 005) — ``None`` = nicht gelöscht
+    deleted_at: datetime | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +273,8 @@ class Plan:
     subject_id: str | None = None
     created_at: datetime = field(default_factory=jetzt)
     items: list[PlanItem] = field(default_factory=list)
+    #: Im Papierkorb seit — ``None`` = nicht gelöscht
+    deleted_at: datetime | None = None
 
 
 # ---------------------------------------------------------------------------

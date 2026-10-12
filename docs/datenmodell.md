@@ -35,6 +35,16 @@ mit Notation `3x15`, `30`, `15/15/20` — siehe `docs/notation.md`). Der Plan w�
 im Formular abweichen. Ein „+20" im Plan ist eine Korrektur des heutigen Eintrags
 (`replaces_entry_id`), der Eintrag selbst bleibt unveränderlich.
 
+**Archiv, Papierkorb, endgültig** (Migration 005): `exercise.archived` nimmt eine
+Übung aus dem Katalog, Pläne zeigen sie weiter. `deleted_at` heißt „im
+Papierkorb": Die Übung verschwindet auch aus den Plänen (die Planübung bleibt
+gespeichert und kehrt beim Wiederherstellen zurück). Nach 30 Tagen löscht die App
+endgültig (`purged_at`, abschaltbar über `app_setting.papierkorb_auto`) — aber nur
+Übungen **ohne** Einträge; bei Übungen mit Verlauf fragt sie, ob die Einträge
+bleiben oder mitgehen. Die Zeile bleibt auch nach dem endgültigen Löschen als
+Grabstein stehen, damit alte Einträge ihren Namen behalten und der Seed eine
+mitgelieferte Übung nicht neu anlegt. Pläne funktionieren genauso.
+
 **Der Tag ist die Bezugsgröße.** Zeitstempel sind UTC, aber „heute" ist ein
 lokaler Kalendertag. `core.models.tagesgrenzen()` rechnet die lokale
 Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,

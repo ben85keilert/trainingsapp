@@ -17,6 +17,7 @@ Routen:
     /eintrag/<id>/korrigieren       Korrektur als neuer Eintrag
     /uebung/neu, /uebung/<id>, /uebung/<id>/bearbeiten   Katalog
     /einstellungen                  Profile und App-Einstellungen
+    /archiv, /papierkorb            Archivierte und gelöschte Übungen (und Pläne)
 
 Der Routen-Handler baut bei jedem Wechsel den **ganzen** Stapel neu auf
 (L03). Dadurch funktioniert der Zurück-Knopf auch nach einem Neustart auf
@@ -38,6 +39,7 @@ from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
 from trainingsapp.ui.views.heute import heute
+from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view
 from trainingsapp.ui.views.plan import plan_view, ziel_text
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
@@ -169,7 +171,7 @@ def formular_eintrag(
 
 
 def formular_korrektur(page: ft.Page, state: AppState, eintrag: SessionEntry) -> ft.View:
-    uebung = state.uebungen.laden(eintrag.exercise_id)
+    uebung = state.uebungen.laden(eintrag.exercise_id, mit_geloeschten=True)
     tag = lokaler_tag(eintrag.started_at) if eintrag.started_at else state.heute()
     assert eintrag.spec_snapshot is not None
 
@@ -243,6 +245,10 @@ def main(page: ft.Page) -> None:
 
         if teile[:1] == ["einstellungen"]:
             page.views.append(einstellungen(page, state))
+        elif teile[:1] == ["archiv"]:
+            page.views.append(archiv_view(page, state))
+        elif teile[:1] == ["papierkorb"]:
+            page.views.append(papierkorb_view(page, state))
         elif teile[:1] == ["uebung"] and len(teile) >= 2:
             if teile[1] == "neu":
                 page.views.append(uebung_bearbeiten(page, state, None))

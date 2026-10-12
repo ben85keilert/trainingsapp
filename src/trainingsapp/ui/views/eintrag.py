@@ -21,7 +21,7 @@ def _abschnitt(titel: str, inhalt: ft.Control) -> ft.Control:
 
 
 def eintrag_view(page: ft.Page, state: AppState, eintrag: SessionEntry) -> ft.View:
-    uebung = state.uebungen.laden(eintrag.exercise_id)
+    uebung = state.uebungen.laden(eintrag.exercise_id, mit_geloeschten=True)
     session = state.sitzungen.session_laden(eintrag.session_id)
     plan = state.plaene.laden(session.plan_id) if session and session.plan_id else None
     tag = lokaler_tag(eintrag.started_at) if eintrag.started_at else state.heute()

@@ -35,7 +35,7 @@ def tag_titel(tag: date, heute: date) -> str:
 
 def tagesansicht(page: ft.Page, state: AppState, tag: date) -> ft.Control:
     eintraege = state.sitzungen.eintraege_am_tag(state.profil.id, tag)
-    katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
+    katalog = {u.id: u for u in state.uebungen.alle(mit_geloeschten=True)}
 
     def oeffner(eintrag_id: str) -> Callable[[], object]:
         async def handler() -> None:
@@ -119,7 +119,7 @@ def tagesansicht(page: ft.Page, state: AppState, tag: date) -> ft.Control:
             gruppen[s.id].append(e)
         for session_id, gruppe in gruppen.items():
             s = sessions[session_id]
-            plan = state.plaene.laden(s.plan_id) if s.plan_id else None
+            plan = state.plaene.laden(s.plan_id, mit_geloeschten=True) if s.plan_id else None
             zeilen.append(ueberschrift(plan.name if plan else "Ohne Plan"))
             zeilen.extend(zeile(e) for e in gruppe)
             zeilen.append(trainingsnotiz(s))

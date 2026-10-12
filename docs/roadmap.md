@@ -70,6 +70,8 @@ einem sichtbaren Fortschritt in der App.
   Hilfefenster; Feldvorrat statt fester Vorlagen, Übungen duplizierbar; Katalog
   nach Typ und Region (Tags); Planübungen mit Eingabestufe (abhaken, Chips, frei),
   eigenen Chips und Ziel (Migration 004); Kurve mit Summe und Maximum je Satzfeld
+- Übungen archivieren oder löschen: Papierkorb mit Wiederherstellen, automatischem
+  Leeren nach 30 Tagen und Rückfrage bei Verlauf (Migration 005)
 - Noch nicht: Timer (**L07**), Messung (**L10/L11**), Spec-Editor für Felder
   außerhalb des Vorrats
 

@@ -131,7 +131,7 @@ def kurve(page: ft.Page, state: AppState) -> ft.Control:
             "ein reines „gemacht“ erscheint nur im Kalender.",
             opacity=0.7,
         )
-    katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
+    katalog = {u.id: u for u in state.uebungen.alle(mit_geloeschten=True)}
 
     def beschriftung(metric_key: str) -> str:
         """„Wandsitz · Haltezeit (Summe)" statt „<id>:hold:sum"."""

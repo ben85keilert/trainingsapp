@@ -257,13 +257,18 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
         state.plaene.loeschen(plan.id)
         state.plan_bearbeiten.discard(plan.id)
         page.pop_dialog()
-        page.show_dialog(ft.SnackBar(ft.Text(f"Plan „{plan.name}“ gelöscht — Einträge bleiben.")))
+        page.show_dialog(
+            ft.SnackBar(ft.Text(f"Plan „{plan.name}“ liegt im Papierkorb — Einträge bleiben."))
+        )
         await page.push_route("/")
 
     dialog = ft.AlertDialog(
         modal=True,
         title=ft.Text("Plan löschen?"),
-        content=ft.Text("Der Plan verschwindet. Alles, was du damit dokumentiert hast, bleibt."),
+        content=ft.Text(
+            "Der Plan kommt in den Papierkorb (Übungen → Katalog → Papierkorb). "
+            "Alles, was du damit dokumentiert hast, bleibt."
+        ),
         actions=[
             ft.TextButton("Abbrechen", on_click=abbrechen),
             ft.FilledButton("Löschen", on_click=loeschen),

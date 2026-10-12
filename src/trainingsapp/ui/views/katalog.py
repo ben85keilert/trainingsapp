@@ -42,6 +42,12 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
 
         return handler
 
+    def pfad_oeffner(pfad: str) -> Callable[[], object]:
+        async def handler() -> None:
+            await page.push_route(pfad)
+
+        return handler
+
     def filterer(kategorie: str | None) -> Callable[[], None]:
         def handler() -> None:
             state.kategorie = kategorie
@@ -133,6 +139,31 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
                     content=ft.Text("Keine Übung passt zur Suche.", opacity=0.6),
                 )
             ]
+        liste.controls.extend(ablage_zeilen())
+
+    def ablage_zeilen() -> list[ft.Control]:
+        """Unten im Katalog: Archiv und Papierkorb, wenn dort etwas liegt."""
+        zeilen: list[ft.Control] = []
+        for anzahl, titel, icon, route in (
+            (len(state.uebungen.archivierte()), "Archiv", ft.Icons.ARCHIVE_OUTLINED, "/archiv"),
+            (
+                len(state.uebungen.papierkorb()) + len(state.plaene.papierkorb(state.profil.id)),
+                "Papierkorb",
+                ft.Icons.DELETE_OUTLINE,
+                "/papierkorb",
+            ),
+        ):
+            if anzahl:
+                zeilen.append(
+                    ft.ListTile(
+                        leading=ft.Icon(icon, opacity=0.6),
+                        title=ft.Text(f"{titel} ({anzahl})", opacity=0.8),
+                        trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),
+                        dense=True,
+                        on_click=pfad_oeffner(route),
+                    )
+                )
+        return zeilen
 
     zeichnen()
 

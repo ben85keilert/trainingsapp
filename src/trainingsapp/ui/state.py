@@ -55,6 +55,9 @@ class AppState:
     tag_filter: str | None = None  # Region oder Charakter
     #: Wie viele Übungen der letzte Start neu angelegt hat (für den Startbildschirm)
     neu_eingespielt: int = field(default=0)
+    #: Übungen, deren Papierkorbfrist abgelaufen ist, die aber einen Verlauf
+    #: haben — die Automatik löscht sie nicht, der Papierkorb fragt nach
+    papierkorb_offen: int = 0
     #: Reiter „Übungen": 0 = Katalog, 1 = Pläne
     uebungen_tab: int = 0
     #: Ordnung der Tagesansicht: "plan", "zeit" oder "uebung"
@@ -93,6 +96,7 @@ class AppState:
         profile = SubjectRepo(con)
         einstellungen = SettingRepo(con)
         profil = cls._aktives_profil(profile, einstellungen)
+        offen = cls._papierkorb_aufraeumen(con, einstellungen, profil)
         return cls(
             con=con,
             uebungen=ExerciseRepo(con),
@@ -103,7 +107,19 @@ class AppState:
             tagesnotizen=DayNoteRepo(con),
             profil=profil,
             neu_eingespielt=neu,
+            papierkorb_offen=offen,
         )
+
+    @staticmethod
+    def _papierkorb_aufraeumen(
+        con: sqlite3.Connection, einstellungen: SettingRepo, profil: Subject
+    ) -> int:
+        """Beim Start: Fälliges endgültig löschen, sofern eingeschaltet (Vorgabe: an)."""
+        if einstellungen.lesen(SettingRepo.PAPIERKORB_AUTO, "1") != "1":
+            return 0
+        PlanRepo(con).papierkorb_aufraeumen(profil.id)
+        _, offen = ExerciseRepo(con).papierkorb_aufraeumen()
+        return len(offen)
 
     @staticmethod
     def heute() -> date:

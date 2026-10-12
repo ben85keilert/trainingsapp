@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import defaultdict
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from ..core.models import (
@@ -41,6 +41,9 @@ from ..core.models import (
 )
 from ..core.result_spec import FieldType, ResultSpec, werte_modernisieren
 from .db import transaktion
+
+#: Nach so vielen Tagen leert sich der Papierkorb von selbst (abschaltbar)
+PAPIERKORB_TAGE = 30
 
 # ---------------------------------------------------------------------------
 # Übungen
@@ -146,14 +149,123 @@ class ExerciseRepo:
             (jetzt().isoformat(), uebung_id),
         )
 
-    # -- Lesen -------------------------------------------------------------
+    # -- Papierkorb ----------------------------------------------------------
+    # Drei Stufen: archiviert (aus dem Katalog genommen, jederzeit zurück),
+    # im Papierkorb (`deleted_at`, wiederherstellbar, nach Frist automatisch
+    # endgültig), endgültig gelöscht (`purged_at`, Migration 005).
 
-    def laden(self, uebung_id: str) -> Exercise | None:
-        """``None`` statt Ausnahme — die Ansicht soll das behandeln können."""
-        zeile = self.con.execute(
-            "SELECT * FROM exercise WHERE id = ? AND deleted_at IS NULL",
+    def in_papierkorb(self, uebung_id: str) -> None:
+        stempel = jetzt().isoformat()
+        self.con.execute(
+            "UPDATE exercise SET deleted_at = ?, updated_at = ?, revision = revision + 1 "
+            "WHERE id = ? AND purged_at IS NULL",
+            (stempel, stempel, uebung_id),
+        )
+
+    def aus_papierkorb(self, uebung_id: str) -> None:
+        self.con.execute(
+            "UPDATE exercise SET deleted_at = NULL, archived = 0, updated_at = ?, "
+            "revision = revision + 1 WHERE id = ? AND purged_at IS NULL",
+            (jetzt().isoformat(), uebung_id),
+        )
+
+    def papierkorb(self) -> list[Exercise]:
+        """Was im Papierkorb liegt, zuletzt Gelöschtes zuerst."""
+        zeilen = self.con.execute(
+            "SELECT * FROM exercise WHERE deleted_at IS NOT NULL AND purged_at IS NULL "
+            "ORDER BY deleted_at DESC"
+        )
+        return [self._zeile(r) for r in zeilen]
+
+    def archivierte(self) -> list[Exercise]:
+        zeilen = self.con.execute(
+            "SELECT * FROM exercise WHERE archived = 1 AND deleted_at IS NULL "
+            "ORDER BY name COLLATE NOCASE"
+        )
+        return [self._zeile(r) for r in zeilen]
+
+    def hat_eintraege(self, uebung_id: str) -> bool:
+        """Gibt es Einträge im Verlauf? Dann fragt die App vor dem endgültigen Löschen."""
+        r = self.con.execute(
+            "SELECT 1 FROM session_entry WHERE exercise_id = ? AND deleted_at IS NULL LIMIT 1",
             (uebung_id,),
         ).fetchone()
+        return r is not None
+
+    def endgueltig_loeschen(self, uebung_id: str, mit_verlauf: bool = False) -> None:
+        """Endgültig: verschwindet überall; ``mit_verlauf`` löscht auch die Einträge.
+
+        Ohne ``mit_verlauf`` bleiben die Einträge im Verlauf stehen und zeigen
+        ihre Kopie der Spezifikation. Die Übungszeile bleibt als Grabstein
+        (siehe Migration 005), Planübungen verschwinden.
+        """
+        stempel = jetzt().isoformat()
+        with transaktion(self.con):
+            if mit_verlauf:
+                ids = [
+                    r["id"]
+                    for r in self.con.execute(
+                        "SELECT id FROM session_entry WHERE exercise_id = ? AND deleted_at IS NULL",
+                        (uebung_id,),
+                    )
+                ]
+                for eintrag_id in ids:
+                    self.con.execute(
+                        "UPDATE session_entry SET deleted_at = ? WHERE id = ?",
+                        (stempel, eintrag_id),
+                    )
+                    self.con.execute(
+                        "DELETE FROM measurement WHERE session_entry_id = ?", (eintrag_id,)
+                    )
+            self.con.execute("DELETE FROM plan_item WHERE exercise_id = ?", (uebung_id,))
+            self.con.execute(
+                "UPDATE exercise SET purged_at = ?, deleted_at = COALESCE(deleted_at, ?), "
+                "updated_at = ?, revision = revision + 1 WHERE id = ?",
+                (stempel, stempel, stempel, uebung_id),
+            )
+            self.con.execute(
+                "INSERT OR IGNORE INTO tombstone (entity, entity_id, deleted_at) "
+                "VALUES ('exercise', ?, ?)",
+                (uebung_id, stempel),
+            )
+
+    def faellig(self, tage: int = PAPIERKORB_TAGE) -> list[Exercise]:
+        """Übungen, die länger als ``tage`` im Papierkorb liegen."""
+        grenze = (jetzt() - timedelta(days=tage)).isoformat()
+        return [u for u in self.papierkorb() if u.deleted_at and u.deleted_at.isoformat() <= grenze]
+
+    def papierkorb_aufraeumen(self, tage: int = PAPIERKORB_TAGE) -> tuple[int, list[Exercise]]:
+        """Löscht fällige Übungen ohne Verlauf endgültig.
+
+        Übungen *mit* Einträgen löscht die Automatik nicht — ob der Verlauf
+        bleiben soll, entscheidet der Mensch. Sie kommen als zweiter Wert zurück
+        und bleiben im Papierkorb, bis jemand entscheidet.
+
+        Returns:
+            (Anzahl endgültig gelöscht, fällige Übungen mit Verlauf)
+        """
+        geloescht = 0
+        offen: list[Exercise] = []
+        for u in self.faellig(tage):
+            if self.hat_eintraege(u.id):
+                offen.append(u)
+            else:
+                self.endgueltig_loeschen(u.id)
+                geloescht += 1
+        return geloescht, offen
+
+    # -- Lesen -------------------------------------------------------------
+
+    def laden(self, uebung_id: str, mit_geloeschten: bool = False) -> Exercise | None:
+        """``None`` statt Ausnahme — die Ansicht soll das behandeln können.
+
+        ``mit_geloeschten`` findet auch Übungen im Papierkorb und endgültig
+        gelöschte — für den Verlauf, der ihre Namen weiter braucht.
+        """
+        sql = "SELECT * FROM exercise WHERE id = ?"
+        if not mit_geloeschten:
+            sql += " AND deleted_at IS NULL"
+        zeile = self.con.execute(sql, (uebung_id,)).fetchone()
         if zeile is None:
             return None
         return self._mit_tags(self._mit_medien([self._zeile(zeile)]))[0]
@@ -162,10 +274,18 @@ class ExerciseRepo:
         zeile = self.con.execute("SELECT 1 FROM exercise WHERE id = ?", (uebung_id,)).fetchone()
         return zeile is not None
 
-    def alle(self, kategorie: str | None = None, mit_archivierten: bool = False) -> list[Exercise]:
-        sql = "SELECT * FROM exercise WHERE deleted_at IS NULL"
+    def alle(
+        self,
+        kategorie: str | None = None,
+        mit_archivierten: bool = False,
+        mit_geloeschten: bool = False,
+    ) -> list[Exercise]:
+        """Der Katalog. ``mit_geloeschten`` (schließt Archivierte ein) für den Verlauf."""
+        sql = "SELECT * FROM exercise WHERE 1 = 1"
+        if not mit_geloeschten:
+            sql += " AND deleted_at IS NULL"
         params: list[object] = []
-        if not mit_archivierten:
+        if not (mit_archivierten or mit_geloeschten):
             sql += " AND archived = 0"
         if kategorie:
             sql += " AND category = ?"
@@ -277,6 +397,7 @@ class ExerciseRepo:
             archived=bool(r["archived"]),
             created_at=datetime.fromisoformat(r["created_at"]),
             updated_at=datetime.fromisoformat(r["updated_at"]),
+            deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
         )
 
 
@@ -335,6 +456,8 @@ class SettingRepo:
     """Schlüssel/Wert-Paare, die nur dieses Gerät betreffen (Migration 002)."""
 
     AKTIVES_PROFIL = "aktives_profil"
+    #: "1" (Vorgabe) = Papierkorb nach `PAPIERKORB_TAGE` Tagen automatisch leeren
+    PAPIERKORB_AUTO = "papierkorb_auto"
 
     def __init__(self, con: sqlite3.Connection) -> None:
         self.con = con
@@ -449,18 +572,59 @@ class PlanRepo:
             self._beruehrt(plan_id)
 
     def loeschen(self, plan_id: str) -> None:
-        """Weich: Sitzungen zeigen weiter auf den Plan, er taucht nur nicht mehr auf."""
+        """In den Papierkorb: Sitzungen zeigen weiter auf den Plan, er taucht nur nicht auf."""
         self.con.execute(
-            "UPDATE plan SET deleted_at = ?, updated_at = ? WHERE id = ?",
+            "UPDATE plan SET deleted_at = ?, updated_at = ? WHERE id = ? AND purged_at IS NULL",
             (jetzt().isoformat(), jetzt().isoformat(), plan_id),
         )
 
+    def aus_papierkorb(self, plan_id: str) -> None:
+        self.con.execute(
+            "UPDATE plan SET deleted_at = NULL, updated_at = ? WHERE id = ? AND purged_at IS NULL",
+            (jetzt().isoformat(), plan_id),
+        )
+
+    def papierkorb(self, subject_id: str) -> list[Plan]:
+        zeilen = self.con.execute(
+            "SELECT * FROM plan WHERE deleted_at IS NOT NULL AND purged_at IS NULL "
+            "AND (subject_id = ? OR subject_id IS NULL) ORDER BY deleted_at DESC",
+            (subject_id,),
+        )
+        return self._mit_items([self._zeile(r) for r in zeilen])
+
+    def endgueltig_loeschen(self, plan_id: str) -> None:
+        """Ein Plan hält keine Einträge — die Sitzungen behalten seinen Namen (Grabstein)."""
+        stempel = jetzt().isoformat()
+        with transaktion(self.con):
+            self.con.execute("DELETE FROM plan_item WHERE plan_id = ?", (plan_id,))
+            self.con.execute(
+                "UPDATE plan SET purged_at = ?, deleted_at = COALESCE(deleted_at, ?) WHERE id = ?",
+                (stempel, stempel, plan_id),
+            )
+            self.con.execute(
+                "INSERT OR IGNORE INTO tombstone (entity, entity_id, deleted_at) "
+                "VALUES ('plan', ?, ?)",
+                (plan_id, stempel),
+            )
+
+    def papierkorb_aufraeumen(self, subject_id: str, tage: int = PAPIERKORB_TAGE) -> int:
+        grenze = (jetzt() - timedelta(days=tage)).isoformat()
+        faellige = [
+            p
+            for p in self.papierkorb(subject_id)
+            if p.deleted_at and p.deleted_at.isoformat() <= grenze
+        ]
+        for p in faellige:
+            self.endgueltig_loeschen(p.id)
+        return len(faellige)
+
     # -- Lesen -------------------------------------------------------------
 
-    def laden(self, plan_id: str) -> Plan | None:
-        r = self.con.execute(
-            "SELECT * FROM plan WHERE id = ? AND deleted_at IS NULL", (plan_id,)
-        ).fetchone()
+    def laden(self, plan_id: str, mit_geloeschten: bool = False) -> Plan | None:
+        sql = "SELECT * FROM plan WHERE id = ?"
+        if not mit_geloeschten:
+            sql += " AND deleted_at IS NULL"
+        r = self.con.execute(sql, (plan_id,)).fetchone()
         if r is None:
             return None
         return self._mit_items([self._zeile(r)])[0]
@@ -508,9 +672,12 @@ class PlanRepo:
         ids = [p.id for p in plaene]
         platzhalter = ",".join("?" * len(ids))
         nach_plan: dict[str, list[PlanItem]] = defaultdict(list)
+        # Übungen im Papierkorb blenden sich aus dem Plan aus; holt man sie
+        # zurück, stehen sie wieder an ihrem Platz.
         for r in self.con.execute(
-            f"SELECT * FROM plan_item WHERE plan_id IN ({platzhalter}) "
-            "ORDER BY plan_id, sort_order",
+            f"SELECT pi.* FROM plan_item pi JOIN exercise e ON e.id = pi.exercise_id "
+            f"WHERE pi.plan_id IN ({platzhalter}) AND e.deleted_at IS NULL "
+            "ORDER BY pi.plan_id, pi.sort_order",
             ids,
         ):
             nach_plan[r["plan_id"]].append(self._item_zeile(r))
@@ -539,6 +706,7 @@ class PlanRepo:
             description=r["description"],
             subject_id=r["subject_id"],
             created_at=datetime.fromisoformat(r["created_at"]),
+            deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
         )
 
 
@@ -973,6 +1141,7 @@ class DayNoteRepo:
 
 
 __all__ = [
+    "PAPIERKORB_TAGE",
     "DayNoteRepo",
     "ExerciseRepo",
     "PlanRepo",

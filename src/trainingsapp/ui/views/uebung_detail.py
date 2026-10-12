@@ -70,9 +70,6 @@ def uebung_detail(
         page.show_dialog(ft.SnackBar(ft.Text("Kopie angelegt — jetzt anpassen")))
         await page.push_route(f"/uebung/{kopie.id}/bearbeiten")
 
-    def archivieren_fragen() -> None:
-        page.show_dialog(dialog)
-
     def abbrechen() -> None:
         page.pop_dialog()
 
@@ -82,15 +79,39 @@ def uebung_detail(
         page.show_dialog(ft.SnackBar(ft.Text(f"„{uebung.name}“ archiviert")))
         await page.push_route("/")
 
+    async def loeschen() -> None:
+        state.uebungen.in_papierkorb(uebung.id)
+        page.pop_dialog()
+        page.show_dialog(
+            ft.SnackBar(
+                ft.Text(f"„{uebung.name}“ liegt im Papierkorb"),
+                action="Rückgängig",
+                on_action=rueckgaengig,
+            )
+        )
+        await page.push_route("/")
+
+    def rueckgaengig() -> None:
+        state.uebungen.aus_papierkorb(uebung.id)
+        state.neu_zeichnen()
+
+    def entfernen_fragen() -> None:
+        page.show_dialog(dialog)
+
     dialog = ft.AlertDialog(
         modal=True,
-        title=ft.Text("Übung archivieren?"),
+        title=ft.Text("Übung entfernen?"),
         content=ft.Text(
-            "Sie verschwindet aus dem Katalog. Bereits dokumentierte Einträge "
-            "bleiben erhalten und zeigen weiter auf diese Übung."
+            "Archivieren: verschwindet aus dem Katalog, bleibt in Plänen — jederzeit zurück.\n\n"
+            "Löschen: kommt in den Papierkorb und verschwindet auch aus den Plänen. "
+            "Von dort lässt sie sich wiederherstellen; endgültig weg ist sie erst, "
+            "wenn der Papierkorb geleert wird. Bereits Dokumentiertes bleibt im Verlauf."
         ),
         actions=[
             ft.TextButton("Abbrechen", on_click=abbrechen),
+            ft.TextButton(
+                "Löschen", style=ft.ButtonStyle(color=ft.Colors.ERROR), on_click=loeschen
+            ),
             ft.FilledButton("Archivieren", on_click=archivieren),
         ],
     )
@@ -162,7 +183,9 @@ def uebung_detail(
                 ft.IconButton(ft.Icons.CONTENT_COPY, tooltip="Duplizieren", on_click=duplizieren),
                 ft.IconButton(ft.Icons.EDIT_OUTLINED, tooltip="Bearbeiten", on_click=bearbeiten),
                 ft.IconButton(
-                    ft.Icons.ARCHIVE_OUTLINED, tooltip="Archivieren", on_click=archivieren_fragen
+                    ft.Icons.DELETE_OUTLINE,
+                    tooltip="Archivieren oder löschen",
+                    on_click=entfernen_fragen,
                 ),
             ],
         ),

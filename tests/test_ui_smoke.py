@@ -255,3 +255,19 @@ def test_planansicht_mit_mehreren_parametern(page, welt) -> None:
         state.parameter_wahl[item.id] = "hold"
         assert plan_view(page, state, state.plaene.laden(plan.id)) is not None
     assert state.auspraegung_wahl[item.id] == {"angle": 45}  # aus dem Ziel vorgewählt
+
+
+def test_archiv_und_papierkorb_ansichten(page, welt) -> None:
+    from trainingsapp.ui.views.katalog import katalog
+    from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view, rest_tage
+
+    state, plan, _item, uebung, _ = welt
+    assert papierkorb_view(page, state).route == "/papierkorb"  # leer
+    state.uebungen.archivieren(state.uebungen.alle()[0].id)
+    state.uebungen.in_papierkorb(uebung.id)
+    state.plaene.loeschen(plan.id)
+    state.papierkorb_offen = 1
+    assert archiv_view(page, state).route == "/archiv"
+    assert papierkorb_view(page, state) is not None
+    assert katalog(page, state) is not None
+    assert rest_tage(None) == 30

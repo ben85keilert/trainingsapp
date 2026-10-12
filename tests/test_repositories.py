@@ -701,3 +701,81 @@ def test_datenformat_schreibt_alte_kennzahlen_unter_neue_schluessel(welt) -> Non
     unveraendert = repo.eintrag_laden(e.id)
     assert unveraendert.result == {"sets": 3, "reps": 15}
     assert unveraendert.shorthand() == "3x15"
+
+
+# ---------------------------------------------------------------------------
+# Archiv und Papierkorb
+# ---------------------------------------------------------------------------
+
+
+def _vor_tagen(con, tabelle: str, id_: str, tage: int) -> None:
+    """Verlegt `deleted_at` in die Vergangenheit — die Frist ohne Warten testen."""
+    stempel = (jetzt() - timedelta(days=tage)).isoformat()
+    con.execute(f"UPDATE {tabelle} SET deleted_at = ? WHERE id = ?", (stempel, id_))
+
+
+def test_papierkorb_und_wiederherstellen(welt) -> None:
+    con, _repo, ich, _sitzung = welt
+    uebungen, plaene = ExerciseRepo(con), PlanRepo(con)
+    u = _wadenheben(con)
+    plan = Plan(name="P", subject_id=ich.id)
+    plaene.speichern(plan)
+    plaene.uebung_hinzufuegen(plan.id, u.id)
+
+    uebungen.in_papierkorb(u.id)
+    assert uebungen.laden(u.id) is None
+    assert uebungen.laden(u.id, mit_geloeschten=True) is not None  # für den Verlauf
+    assert [x.id for x in uebungen.papierkorb()] == [u.id]
+    assert plaene.laden(plan.id).items == []  # aus dem Plan ausgeblendet …
+
+    uebungen.aus_papierkorb(u.id)
+    assert [i.exercise_id for i in plaene.laden(plan.id).items] == [u.id]  # … und wieder da
+
+
+def test_endgueltig_loeschen_mit_und_ohne_verlauf(welt) -> None:
+    con, repo, _ich, sitzung = welt
+    uebungen = ExerciseRepo(con)
+    u = _wadenheben(con)
+    repo.eintrag_anlegen(sitzung, u, {"reps": [15]})
+    assert uebungen.hat_eintraege(u.id)
+
+    uebungen.in_papierkorb(u.id)
+    uebungen.endgueltig_loeschen(u.id)  # Verlauf behalten
+    assert uebungen.papierkorb() == []
+    assert len(repo.eintraege(sitzung.id)) == 1
+    assert uebungen.laden(u.id, mit_geloeschten=True).name == u.name
+
+    v = Exercise(name="Kurz")
+    uebungen.speichern(v)
+    repo.eintrag_anlegen(sitzung, v, {})
+    uebungen.endgueltig_loeschen(v.id, mit_verlauf=True)
+    assert [e.exercise_id for e in repo.eintraege(sitzung.id)] == [u.id]
+
+    # Eine mitgelieferte Übung kommt nach dem Löschen nicht per Seed zurück.
+    assert seed_einspielen(con) == 0
+
+
+def test_papierkorb_automatik_fragt_bei_verlauf(welt) -> None:
+    con, repo, ich, sitzung = welt
+    uebungen, plaene = ExerciseRepo(con), PlanRepo(con)
+    ohne = Exercise(name="Ohne Verlauf")
+    mit = Exercise(name="Mit Verlauf")
+    frisch = Exercise(name="Frisch gelöscht")
+    for x in (ohne, mit, frisch):
+        uebungen.speichern(x)
+        uebungen.in_papierkorb(x.id)
+    repo.eintrag_anlegen(sitzung, mit, {})
+    _vor_tagen(con, "exercise", ohne.id, 31)
+    _vor_tagen(con, "exercise", mit.id, 31)
+    plan = Plan(name="Alt", subject_id=ich.id)
+    plaene.speichern(plan)
+    plaene.loeschen(plan.id)
+    _vor_tagen(con, "plan", plan.id, 40)
+
+    geloescht, offen = uebungen.papierkorb_aufraeumen()
+    assert geloescht == 1
+    assert [x.name for x in offen] == ["Mit Verlauf"]  # bleibt liegen, die App fragt
+    assert {x.name for x in uebungen.papierkorb()} == {"Mit Verlauf", "Frisch gelöscht"}
+    assert plaene.papierkorb_aufraeumen(ich.id) == 1
+    assert plaene.papierkorb(ich.id) == []
+    assert plaene.laden(plan.id, mit_geloeschten=True).name == "Alt"  # Name bleibt für den Verlauf

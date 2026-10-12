@@ -118,7 +118,10 @@ class Exercise:
     is_builtin: bool = False
     result_spec: ResultSpec = field(default_factory=ResultSpec)
     limit_spec: dict[str, Any] = field(default_factory=dict)
+    #: Standard für Pläne: Ziel und Eingabestufe, die eine neue Planübung
+    #: übernimmt (Chips stehen je Feld in `result_spec`) — `core/standards.py`
     default_target: dict[str, Any] = field(default_factory=dict)
+    default_input_mode: str = "chips"
     media: list[Media] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     archived: bool = False

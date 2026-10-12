@@ -3,10 +3,15 @@
 Hier wählt der Plan, was er von der Übung übernimmt: die Eingabestufe (nur
 abhaken, Chips, Freieingabe), eigene Chips je Satzfeld und ein Ziel. Alles,
 was hier leer bleibt, kommt von der Übung.
+
+Unten der Abgleich mit dem **Standard der Übung** (`core/standards.py`): Was
+hier geändert wird, bleibt im Plan — außer man schiebt es ausdrücklich per
+Knopf zur Übung („Als Standard setzen“) oder holt den Standard zurück.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import flet as ft
@@ -20,6 +25,7 @@ from trainingsapp.core.models import (
     PlanItem,
 )
 from trainingsapp.core.result_spec import FieldType
+from trainingsapp.core.standards import abweichungen, als_standard, vom_standard
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.spec_form import SpecForm
@@ -79,6 +85,28 @@ def plan_einstellen(
     async def abbrechen() -> None:
         await page.push_route(f"/plan/{plan.id}")
 
+    def eingestellt() -> PlanItem:
+        """Die Planübung, wie sie gerade im Formular steht."""
+        modus = stufe.selected[0] if stufe.selected else EINGABE_CHIPS
+        return replace(item, target=form.werte(), input_mode=modus, quick=quick_lesen())
+
+    async def als_standard_setzen() -> None:
+        if form.pruefen():
+            page.update()
+            return
+        aktuell = eingestellt()
+        state.plaene.item_speichern(aktuell)
+        state.uebungen.speichern(als_standard(aktuell, uebung))
+        page.show_dialog(
+            ft.SnackBar(ft.Text(f"Standard von „{uebung.name}“ übernommen — gilt für neue Pläne"))
+        )
+        await page.push_route(f"/plan/{plan.id}")
+
+    async def standard_uebernehmen() -> None:
+        state.plaene.item_speichern(vom_standard(uebung, item))
+        page.show_dialog(ft.SnackBar(ft.Text("Standard der Übung übernommen")))
+        await page.push_route(f"/plan/{plan.id}")
+
     def abschnitt(text: str) -> ft.Control:
         return ft.Text(text, size=11, weight=ft.FontWeight.BOLD, opacity=0.6)
 
@@ -114,6 +142,45 @@ def plan_einstellen(
                     else ft.Container(),
                     ft.TextButton("Abbrechen", on_click=abbrechen),
                     ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=speichern),
+                ],
+            ),
+        ]
+    )
+    unterschiede = abweichungen(item, uebung)
+    inhalt.extend(
+        [
+            ft.Divider(),
+            abschnitt("STANDARD DER ÜBUNG"),
+            ft.Text(
+                "Diese Planübung entspricht dem Standard der Übung."
+                if not unterschiede
+                else "Weicht vom Standard der Übung ab: " + ", ".join(unterschiede) + ".",
+                size=12,
+                opacity=0.8,
+            ),
+            ft.Text(
+                "Änderungen hier gelten nur für diesen Plan. Mit den Knöpfen schiebst du sie "
+                "bewusst hin und her: Der Standard ist, was ein neuer Plan von der Übung "
+                "übernimmt.",
+                size=12,
+                opacity=0.6,
+            ),
+            ft.Row(
+                wrap=True,
+                spacing=8,
+                run_spacing=6,
+                controls=[
+                    ft.OutlinedButton(
+                        "Als Standard der Übung setzen",
+                        icon=ft.Icons.UPLOAD_OUTLINED,
+                        on_click=als_standard_setzen,
+                    ),
+                    ft.OutlinedButton(
+                        "Standard der Übung übernehmen",
+                        icon=ft.Icons.DOWNLOAD_OUTLINED,
+                        on_click=standard_uebernehmen,
+                        disabled=not unterschiede,
+                    ),
                 ],
             ),
         ]

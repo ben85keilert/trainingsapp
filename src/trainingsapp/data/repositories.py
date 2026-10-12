@@ -23,6 +23,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from ..core.models import (
+    EINGABE_CHIPS,
     DayNote,
     Exercise,
     Measurement,
@@ -71,8 +72,8 @@ class ExerciseRepo:
                 INSERT INTO exercise
                     (id, name, category, description, icon_key, image_path,
                      is_builtin, result_spec_json, limit_spec_json,
-                     default_target_json, archived, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     default_target_json, default_input_mode, archived, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -82,6 +83,7 @@ class ExerciseRepo:
                     result_spec_json = excluded.result_spec_json,
                     limit_spec_json = excluded.limit_spec_json,
                     default_target_json = excluded.default_target_json,
+                    default_input_mode = excluded.default_input_mode,
                     archived = excluded.archived,
                     updated_at = excluded.updated_at,
                     revision = revision + 1
@@ -97,6 +99,7 @@ class ExerciseRepo:
                     json.dumps(uebung.result_spec.to_dict(), ensure_ascii=False),
                     json.dumps(uebung.limit_spec, ensure_ascii=False),
                     json.dumps(uebung.default_target, ensure_ascii=False),
+                    uebung.default_input_mode,
                     int(uebung.archived),
                     uebung.created_at.isoformat(),
                     uebung.updated_at.isoformat(),
@@ -394,6 +397,7 @@ class ExerciseRepo:
             result_spec=ResultSpec.from_dict(json.loads(r["result_spec_json"])),
             limit_spec=json.loads(r["limit_spec_json"]),
             default_target=json.loads(r["default_target_json"]),
+            default_input_mode=r["default_input_mode"],
             archived=bool(r["archived"]),
             created_at=datetime.fromisoformat(r["created_at"]),
             updated_at=datetime.fromisoformat(r["updated_at"]),
@@ -528,13 +532,25 @@ class PlanRepo:
     def uebung_hinzufuegen(
         self, plan_id: str, exercise_id: str, target: dict[str, Any] | None = None
     ) -> PlanItem:
-        """Hängt eine Übung ans Ende des Plans — schnell, ohne den Plan neu zu laden."""
+        """Hängt eine Übung ans Ende des Plans — mit dem Standard der Übung.
+
+        Ziel und Eingabestufe kommen aus der Übung (``target`` überschreibt das
+        Ziel); Chips bleiben leer, also „wie die Übung".
+        """
         naechste = self.con.execute(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM plan_item WHERE plan_id = ?",
             (plan_id,),
         ).fetchone()[0]
+        standard = self.con.execute(
+            "SELECT default_target_json, default_input_mode FROM exercise WHERE id = ?",
+            (exercise_id,),
+        ).fetchone()
         item = PlanItem(
-            plan_id=plan_id, exercise_id=exercise_id, order=naechste, target=target or {}
+            plan_id=plan_id,
+            exercise_id=exercise_id,
+            order=naechste,
+            target=target if target is not None else json.loads(standard[0]) if standard else {},
+            input_mode=standard[1] if standard else EINGABE_CHIPS,
         )
         with transaktion(self.con):
             self._item_schreiben(item)
@@ -637,6 +653,26 @@ class PlanRepo:
             (subject_id,),
         )
         return self._mit_items([self._zeile(r) for r in zeilen])
+
+    def item_speichern(self, item: PlanItem) -> None:
+        """Ziel, Stufe und Chips einer Planübung auf einmal (Standard übernehmen)."""
+        with transaktion(self.con):
+            self.ziel_setzen(item.id, item.target)
+            self.eingabe_setzen(item.id, item.input_mode, item.quick)
+
+    def verwendungen(self, exercise_id: str) -> list[tuple[Plan, PlanItem]]:
+        """In welchen (nicht gelöschten) Plänen steht diese Übung?"""
+        ergebnis: list[tuple[Plan, PlanItem]] = []
+        for r in self.con.execute(
+            "SELECT pi.* FROM plan_item pi JOIN plan p ON p.id = pi.plan_id "
+            "WHERE pi.exercise_id = ? AND p.deleted_at IS NULL ORDER BY p.created_at",
+            (exercise_id,),
+        ):
+            item = self._item_zeile(r)
+            plan = self.laden(item.plan_id)
+            if plan is not None:
+                ergebnis.append((plan, item))
+        return ergebnis
 
     def item_laden(self, item_id: str) -> PlanItem | None:
         r = self.con.execute("SELECT * FROM plan_item WHERE id = ?", (item_id,)).fetchone()

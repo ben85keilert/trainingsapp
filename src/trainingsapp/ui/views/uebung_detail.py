@@ -7,8 +7,17 @@ from dataclasses import replace
 
 import flet as ft
 
-from trainingsapp.core.models import Exercise, Media, new_id
+from trainingsapp.core.models import (
+    EINGABE_CHIPS,
+    EINGABE_FREI,
+    EINGABE_HAKEN,
+    Exercise,
+    Media,
+    PlanItem,
+    new_id,
+)
 from trainingsapp.core.result_spec import format_wert
+from trainingsapp.core.standards import abweichungen, vom_standard
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
@@ -116,6 +125,57 @@ def uebung_detail(
         ],
     )
 
+    # -- Standard für Pläne und Verwendungen -------------------------------------
+
+    def uebertrager(item: PlanItem) -> Callable[[], None]:
+        def handler() -> None:
+            state.plaene.item_speichern(vom_standard(uebung, item))
+            page.show_dialog(ft.SnackBar(ft.Text("Standard in den Plan übertragen")))
+            state.neu_zeichnen()
+
+        return handler
+
+    def plan_oeffner(plan_id: str) -> Callable[[], object]:
+        async def handler() -> None:
+            await page.push_route(f"/plan/{plan_id}")
+
+        return handler
+
+    stufen = {EINGABE_HAKEN: "nur abhaken", EINGABE_CHIPS: "Chips", EINGABE_FREI: "Freieingabe"}
+    ziel = (
+        f"Ziel {uebung.result_spec.format_shorthand(uebung.default_target)}"
+        if uebung.default_target
+        else "kein Ziel"
+    )
+    verwendungen: list[ft.Control] = [
+        ft.Text(
+            f"Neue Planübungen übernehmen: {ziel} · Eingabe "
+            f"{stufen.get(uebung.default_input_mode, uebung.default_input_mode)} · Chips wie oben.",
+            size=13,
+        )
+    ]
+    for plan, item in state.plaene.verwendungen(uebung.id):
+        unterschiede = abweichungen(item, uebung)
+        verwendungen.append(
+            ft.ListTile(
+                leading=ft.Icon(ft.Icons.LIST_ALT_OUTLINED),
+                title=ft.Text(plan.name),
+                subtitle=ft.Text(
+                    "weicht ab: " + ", ".join(unterschiede) if unterschiede else "wie der Standard",
+                    size=12,
+                ),
+                trailing=ft.IconButton(
+                    ft.Icons.DOWNLOAD_OUTLINED,
+                    tooltip="Standard in diesen Plan übertragen",
+                    on_click=uebertrager(item),
+                )
+                if unterschiede
+                else None,
+                on_click=plan_oeffner(plan.id),
+                content_padding=ft.Padding.only(left=0, right=0),
+            )
+        )
+
     videos: list[ft.Control] = [
         ft.ListTile(
             leading=ft.Icon(ft.Icons.PLAY_CIRCLE_OUTLINE),
@@ -158,6 +218,7 @@ def uebung_detail(
             else ft.Text("—"),
         ),
         _abschnitt("Eingabe", _notation(uebung)),
+        _abschnitt("Standard für Pläne", ft.Column(spacing=0, controls=verwendungen)),
         _abschnitt(
             "Videos",
             ft.Column(spacing=0, controls=videos)

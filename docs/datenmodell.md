@@ -45,6 +45,12 @@ bleiben oder mitgehen. Die Zeile bleibt auch nach dem endgültigen Löschen als
 Grabstein stehen, damit alte Einträge ihren Namen behalten und der Seed eine
 mitgelieferte Übung nicht neu anlegt. Pläne funktionieren genauso.
 
+**Standard der Übung ↔ Planübung** (Migration 006): Die Übung trägt einen Standard
+für Pläne — `default_target_json`, `default_input_mode`, Chips je Feld in der
+Spezifikation. `PlanRepo.uebung_hinzufuegen` übernimmt ihn; danach sind Plan und
+Übung unabhängig. Zurück und hin geht es nur ausdrücklich per Knopf
+(`core/standards.py`: `als_standard`, `vom_standard`, `abweichungen`).
+
 **Der Tag ist die Bezugsgröße.** Zeitstempel sind UTC, aber „heute" ist ein
 lokaler Kalendertag. `core.models.tagesgrenzen()` rechnet die lokale
 Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,

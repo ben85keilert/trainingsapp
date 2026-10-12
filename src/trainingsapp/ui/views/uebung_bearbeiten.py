@@ -16,7 +16,17 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.models import REGIONEN, TYPEN, Exercise, Media, MediaKind, MediaSource
+from trainingsapp.core.models import (
+    EINGABE_CHIPS,
+    EINGABE_FREI,
+    EINGABE_HAKEN,
+    REGIONEN,
+    TYPEN,
+    Exercise,
+    Media,
+    MediaKind,
+    MediaSource,
+)
 from trainingsapp.core.result_spec import (
     FELDVORRAT,
     FieldSpec,
@@ -183,6 +193,17 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             )
         )
 
+    # -- Standard für Pläne ----------------------------------------------------
+
+    eingabe_standard = ft.SegmentedButton(
+        selected=[uebung.default_input_mode if uebung else EINGABE_CHIPS],
+        segments=[
+            ft.Segment(value=EINGABE_HAKEN, label=ft.Text("Nur abhaken")),
+            ft.Segment(value=EINGABE_CHIPS, label=ft.Text("Chips")),
+            ft.Segment(value=EINGABE_FREI, label=ft.Text("Frei")),
+        ],
+    )
+
     # -- Symbolauswahl -------------------------------------------------------
 
     gewaehlt: str = uebung.icon_key if uebung and uebung.icon_key else AUSWAHL[0]
@@ -287,6 +308,9 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         ziel.category = (typ.value or "").strip()
         ziel.description = (beschreibung.value or "").strip()
         ziel.icon_key = gewaehlt
+        ziel.default_input_mode = (
+            eingabe_standard.selected[0] if eingabe_standard.selected else EINGABE_CHIPS
+        )
         ziel.result_spec = spec_bauen(felder_lesen())
         extra = [t.strip() for t in (weitere_tags.value or "").split(",") if t.strip()]
         ziel.tags = [r for r in REGIONEN if r in tags_aktiv] + [
@@ -357,6 +381,15 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                             opacity=0.7,
                         ),
                         ft.Column(spacing=6, controls=zeilen),
+                        abschnitt("STANDARD FÜR PLÄNE"),
+                        eingabe_standard,
+                        ft.Text(
+                            "So wird die Übung in einem neuen Plan eingegeben. Ein Ziel setzt "
+                            "du in einer Planübung und schiebst es dort mit „Als Standard der "
+                            "Übung setzen“ hierher.",
+                            size=12,
+                            opacity=0.7,
+                        ),
                         abschnitt("SYMBOL"),
                         symbole,
                         abschnitt("VIDEOS"),

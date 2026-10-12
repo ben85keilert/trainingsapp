@@ -779,3 +779,45 @@ def test_papierkorb_automatik_fragt_bei_verlauf(welt) -> None:
     assert plaene.papierkorb_aufraeumen(ich.id) == 1
     assert plaene.papierkorb(ich.id) == []
     assert plaene.laden(plan.id, mit_geloeschten=True).name == "Alt"  # Name bleibt für den Verlauf
+
+
+# ---------------------------------------------------------------------------
+# Standard der Übung ↔ Planübung
+# ---------------------------------------------------------------------------
+
+
+def test_standard_hin_und_her(con) -> None:
+    from trainingsapp.core.standards import abweichungen, als_standard, vom_standard
+
+    seed_einspielen(con)
+    uebungen, plaene = ExerciseRepo(con), PlanRepo(con)
+    u = uebungen.laden(seed_id("wadenheben"))
+    u.default_target = {"reps": [15, 15, 15]}
+    u.default_input_mode = "frei"
+    uebungen.speichern(u)
+
+    plan = Plan(name="A")
+    plaene.speichern(plan)
+    item = plaene.uebung_hinzufuegen(plan.id, u.id)  # übernimmt den Standard
+    assert (item.target, item.input_mode) == ({"reps": [15, 15, 15]}, "frei")
+    assert abweichungen(item, u) == []
+
+    # Im Plan nachjustiert — die Übung bleibt, wie sie ist …
+    item = replace(item, target={"reps": [20, 20]}, quick={"reps": [20, 25]})
+    plaene.item_speichern(item)
+    assert uebungen.laden(u.id).default_target == {"reps": [15, 15, 15]}
+    assert abweichungen(plaene.item_laden(item.id), u) == ["Ziel", "Chips Wiederholungen"]
+
+    # … bis man es ausdrücklich zum Standard macht.
+    uebungen.speichern(als_standard(item, u))
+    u = uebungen.laden(u.id)
+    assert u.default_target == {"reps": [20, 20]}
+    assert u.result_spec.field_by_key("reps").quick == [20, 25]
+    assert [p.name for p, _ in plaene.verwendungen(u.id)] == ["A"]
+
+    # Und zurück: Ein anderer Plan holt den Standard.
+    b = Plan(name="B")
+    plaene.speichern(b)
+    anders = plaene.uebung_hinzufuegen(b.id, u.id, {"reps": [5]})
+    plaene.item_speichern(vom_standard(u, anders))
+    assert plaene.item_laden(anders.id).target == {"reps": [20, 20]}

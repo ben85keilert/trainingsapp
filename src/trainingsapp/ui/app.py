@@ -149,6 +149,9 @@ def formular_eintrag(
         werte, hinweis = dict(letzter.result), f"Vorbelegt wie zuletzt ({letzter.shorthand()})."
     else:
         werte, hinweis = {}, None
+    # Was im Planblock als Ausprägung gewählt ist (45°), gilt auch im Formular.
+    if gewaehlt := state.auspraegung_wahl.get(item.id):
+        werte = {**werte, **gewaehlt}
 
     async def speichern(ergebnis: dict[str, Any], notiz: str) -> None:
         session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())

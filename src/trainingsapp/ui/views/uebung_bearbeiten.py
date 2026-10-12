@@ -219,6 +219,15 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         for u in state.uebungen.alle(mit_archivierten=True)
         if u.family_id is None and (uebung is None or u.id != uebung.id)
     ]
+    # Liegt das Original im Papierkorb, bleibt es wählbar — sonst zeigte der
+    # Dropdown einen Wert ohne Eintrag.
+    weg = (
+        state.uebungen.laden(uebung.family_id, mit_geloeschten=True)
+        if uebung is not None and uebung.family_id
+        else None
+    )
+    if weg is not None and all(u.id != weg.id for u in originale):
+        originale.append(replace(weg, name=f"{weg.name} (gelöscht)"))
     familie = ft.Dropdown(
         label="Kachel im Verlauf",
         value=uebung.family_id if uebung and uebung.family_id else EIGENSTAENDIG,

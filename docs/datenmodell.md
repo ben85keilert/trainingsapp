@@ -51,6 +51,12 @@ Spezifikation. `PlanRepo.uebung_hinzufuegen` übernimmt ihn; danach sind Plan un
 Übung unabhängig. Zurück und hin geht es nur ausdrücklich per Knopf
 (`core/standards.py`: `als_standard`, `vom_standard`, `abweichungen`).
 
+**Varianten** (Migration 007): `exercise.family_id` zeigt auf das Original einer
+Variantenfamilie (nie auf eine andere Variante). Im Verlauf bilden Original und
+Varianten eine Kachel; ihre Mengen werden addiert und je Variante ausgewiesen
+(`core/tagesbilanz.py`). Eine Kopie ist zunächst Variante, im Editor lässt sie
+sich eigenständig machen.
+
 **Der Tag ist die Bezugsgröße.** Zeitstempel sind UTC, aber „heute" ist ein
 lokaler Kalendertag. `core.models.tagesgrenzen()` rechnet die lokale
 Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,

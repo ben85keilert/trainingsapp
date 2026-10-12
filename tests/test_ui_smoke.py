@@ -323,3 +323,21 @@ def test_leeres_zielformular_ergibt_kein_ziel() -> None:
 
     assert SPEC_SAETZE_WDH.defaults()  # die Übung hat Vorgaben …
     assert SpecForm(ziel_spec(SPEC_SAETZE_WDH), {}).werte() == {}  # … das Ziel nicht
+
+
+def test_variante_mit_geloeschtem_original_und_formular_mit_winkel(page, welt) -> None:
+    from dataclasses import replace
+
+    from trainingsapp.core.models import new_id
+    from trainingsapp.ui.app import formular_eintrag
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+
+    state, plan, item, uebung, _ = welt
+    variante = replace(uebung, id=new_id(), name="V", family_id=uebung.id, media=[])
+    state.uebungen.speichern(variante)
+    state.uebungen.in_papierkorb(uebung.id)
+    ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(variante.id))
+    assert ansicht is not None
+
+    state.auspraegung_wahl[item.id] = {"angle": 45}
+    assert formular_eintrag(page, state, plan, item, variante) is not None

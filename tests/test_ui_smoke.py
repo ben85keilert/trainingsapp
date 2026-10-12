@@ -380,3 +380,65 @@ def test_heute_zeigt_nur_anstehende_und_aufgenommene_plaene(page, welt) -> None:
     # Ohne Eintrag lässt er sich wieder entfernen
     assert state.sitzungen.aus_tag_nehmen(state.profil.id, pause.id, tag) is True
     assert namen() == [("Dehnung", False)]
+
+
+def _knopf_mit_text(wurzel, text: str):
+    """Sucht im Control-Baum den ersten Knopf, dessen Beschriftung ``text`` enthält."""
+    gesehen: set[int] = set()
+
+    def texte(c) -> list[str]:
+        if isinstance(c, ft.Text):
+            return [c.value or ""]
+        inhalt = getattr(c, "content", None)
+        kinder = list(getattr(c, "controls", None) or []) + ([inhalt] if inhalt else [])
+        return [t for k in kinder if isinstance(k, ft.Control) for t in texte(k)]
+
+    def suchen(c):
+        if id(c) in gesehen or not isinstance(c, ft.Control):
+            return None
+        gesehen.add(id(c))
+        if (
+            getattr(c, "on_click", None)
+            and not isinstance(c, ft.ListTile)
+            and any(text in t for t in texte(c))
+        ):
+            return c
+        for name in ("controls", "content", "trailing", "leading", "title"):
+            wert = getattr(c, name, None)
+            for k in wert if isinstance(wert, list) else [wert]:
+                if (treffer := suchen(k)) is not None:
+                    return treffer
+        return None
+
+    return suchen(wurzel)
+
+
+def test_einzelne_uebung_trainieren_ohne_plan(page, state) -> None:
+    """„Trainieren“ im Katalog: ein Block, Einträge in der planlosen Session des Tages."""
+    import asyncio
+
+    from trainingsapp.data.seed import seed_id
+    from trainingsapp.ui.app import formular_eintrag
+    from trainingsapp.ui.views.katalog import katalog
+    from trainingsapp.ui.views.plan import einzel_plan, plan_view
+
+    page.show_dialog = lambda _d: None
+    page.update = lambda: None
+    uebung = state.uebungen.laden(seed_id("wandsitz"))
+    einzel = einzel_plan(uebung)
+    ansicht = plan_view(page, state, einzel, einzel=True)
+    assert ansicht.route == f"/training/{uebung.id}"
+    assert len(einzel.items) == 1 and einzel.items[0].exercise_id == uebung.id
+    form = formular_eintrag(page, state, einzel, einzel.items[0], uebung, einzel=True)
+    assert form.route == f"/training/{uebung.id}/formular"
+    assert katalog(page, state) is not None
+
+    gemacht = _knopf_mit_text(ansicht, "Gemacht")
+    assert gemacht is not None
+    ergebnis = gemacht.on_click()
+    if asyncio.iscoroutine(ergebnis):
+        asyncio.run(ergebnis)
+
+    eintraege = state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+    assert [(e.exercise_id, s.plan_id) for e, s in eintraege] == [(uebung.id, None)]
+    assert state.plaene.alle(state.profil.id) == []  # der Einzelplan wird nie gespeichert

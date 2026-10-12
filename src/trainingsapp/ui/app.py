@@ -12,6 +12,7 @@ Routen:
     /plan/<id>/uebung/<item_id>     Eintrag mit eigenen Werten und Notiz
     /plan/<id>/bearbeiten[/…]       Plan bearbeiten, aus dem Üben heraus
     /plaene/<id>                    Plan bearbeiten (aus „Übungen" → „Pläne")
+    /training/<übung>[/formular]    Eine einzelne Übung üben — ohne Plan (aus dem Katalog)
     <bearbeiten>/ziel/<item_id>     Planübung einstellen: Stufe, Chips, Ziel
     <bearbeiten>/hinzufuegen        Übungen in den Plan aufnehmen
     /tag/<YYYY-MM-DD>               Tagesansicht eines beliebigen Tages
@@ -43,7 +44,7 @@ from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
 from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view
-from trainingsapp.ui.views.plan import plan_view, ziel_text
+from trainingsapp.ui.views.plan import einzel_plan, plan_view, ziel_text
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
 from trainingsapp.ui.views.platzhalter import messung
@@ -138,9 +139,19 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
 
 
 def formular_eintrag(
-    page: ft.Page, state: AppState, plan: Plan, item: PlanItem, uebung: Exercise
+    page: ft.Page,
+    state: AppState,
+    plan: Plan,
+    item: PlanItem,
+    uebung: Exercise,
+    einzel: bool = False,
 ) -> ft.View:
-    """Neuer Eintrag aus dem Plan: Ziel → letzter Eintrag → Standardwerte."""
+    """Neuer Eintrag aus dem Plan: Ziel → letzter Eintrag → Standardwerte.
+
+    Mit ``einzel`` kommt er aus „Trainieren“ im Katalog: ohne Plan, Route
+    `/training/<übung>/formular`.
+    """
+    zurueck = f"/training/{uebung.id}" if einzel else f"/plan/{plan.id}"
     letzter = state.sitzungen.letzter_eintrag(state.profil.id, uebung.id)
     if item.target:
         werte, hinweis = (
@@ -156,17 +167,19 @@ def formular_eintrag(
         werte = {**werte, **gewaehlt}
 
     async def speichern(ergebnis: dict[str, Any], notiz: str) -> None:
-        session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
+        session = state.sitzungen.session_fuer(
+            state.profil.id, None if einzel else plan.id, state.heute()
+        )
         state.sitzungen.eintrag_anlegen(session, uebung, ergebnis, notiz)
         page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name} eingetragen")))
-        await page.push_route(f"/plan/{plan.id}")
+        await page.push_route(zurueck)
 
     async def abbrechen() -> None:
-        await page.push_route(f"/plan/{plan.id}")
+        await page.push_route(zurueck)
 
     return eintrag_formular(
         page,
-        route=f"/plan/{plan.id}/uebung/{item.id}",
+        route=f"{zurueck}/formular" if einzel else f"/plan/{plan.id}/uebung/{item.id}",
         titel=uebung.name,
         spec=uebung.result_spec,
         werte=werte,
@@ -281,6 +294,14 @@ def main(page: ft.Page) -> None:
                     page.views.append(uebung_bearbeiten(page, state, uebung))
         elif teile[:1] in (["plan"], ["plaene"]) and len(teile) >= 2:
             plan_routen(teile)
+        elif teile[:1] == ["training"] and len(teile) >= 2:
+            if (uebung := state.uebungen.laden(teile[1])) is not None:
+                einzel = einzel_plan(uebung)
+                page.views.append(plan_view(page, state, einzel, einzel=True))
+                if teile[2:3] == ["formular"]:
+                    page.views.append(
+                        formular_eintrag(page, state, einzel, einzel.items[0], uebung, einzel=True)
+                    )
         elif teile[:1] == ["tag"] and len(teile) >= 2:
             with suppress(ValueError):  # kein Datum → Hauptansicht
                 page.views.append(tag_view(page, state, date.fromisoformat(teile[1])))

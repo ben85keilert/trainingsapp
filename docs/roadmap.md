@@ -82,6 +82,8 @@ einem sichtbaren Fortschritt in der App.
   zeigt, was ansteht, plus Pläne, die man für heute aufnimmt („Trainieren“ in der
   Planverwaltung oder „Anderen Plan heute trainieren“). Übungen → Pläne öffnet zum
   Bearbeiten (`/plaene/<id>`), „Heute“ zum Üben (`/plan/<id>`)
+- „Trainieren“ auch im Katalog: eine einzelne Übung mit denselben Knöpfen wie im
+  Plan üben (`/training/<übung>`), Einträge landen unter „Ohne Plan“
 - Noch nicht: Timer (**L07**), Messung (**L10/L11**), Spec-Editor für Felder
   außerhalb des Vorrats
 

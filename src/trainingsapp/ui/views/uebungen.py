@@ -14,7 +14,7 @@ import flet as ft
 from trainingsapp.core.models import Plan
 from trainingsapp.core.plaene import tage_text
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.views.katalog import katalog
+from trainingsapp.ui.views.katalog import katalog, trainieren_knopf
 
 
 def neuen_plan_anlegen(page: ft.Page, state: AppState) -> Callable[[], None]:
@@ -95,14 +95,9 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
             ),
             title=ft.Text(plan.name, opacity=1 if plan.aktiv else 0.6),
             subtitle=ft.Text("  ·  ".join(teile), size=12),
-            trailing=ft.FilledTonalButton(
-                content=ft.Row(
-                    tight=True,
-                    spacing=4,
-                    controls=[ft.Icon(ft.Icons.PLAY_ARROW, size=18), ft.Text("Trainieren")],
-                ),
-                tooltip="Heute trainieren — auch wenn der Plan heute nicht ansteht",
-                on_click=heute_trainieren(page, state, plan.id),
+            trailing=trainieren_knopf(
+                heute_trainieren(page, state, plan.id),
+                "Heute trainieren — auch wenn der Plan heute nicht ansteht",
             ),
             on_click=oeffner(plan.id),
         )

@@ -86,6 +86,27 @@ def _knopf(
     )
 
 
+def einzel_plan(uebung: Exercise) -> Plan:
+    """Ein Plan, der nur in der Ansicht existiert: genau diese Übung, mit ihrem Standard.
+
+    Für „Trainieren“ aus dem Katalog. Er wird nie gespeichert; die Einträge
+    landen in der planlosen Session des Tages („Ohne Plan“). Die feste
+    Planübungs-ID hält die gewählte Ausprägung über den Neubau der Ansicht.
+    """
+    return Plan(
+        id=f"einzel-{uebung.id}",
+        name=uebung.name,
+        items=[
+            PlanItem(
+                id=f"einzel-{uebung.id}",
+                exercise_id=uebung.id,
+                target=dict(uebung.default_target),
+                input_mode=uebung.default_input_mode,
+            )
+        ],
+    )
+
+
 def plan_view(
     page: ft.Page,
     state: AppState,
@@ -93,14 +114,23 @@ def plan_view(
     bearbeiten: bool = False,
     basis: str | None = None,
     fertig: str = "/",
+    einzel: bool = False,
 ) -> ft.View:
-    """Üben (`/plan/<id>`) oder Bearbeiten.
+    """Üben (`/plan/<id>`) oder Bearbeiten — oder eine einzelne Übung üben.
 
     Bearbeitet wird unter ``basis`` — `/plaene/<id>` aus der Planverwaltung,
     `/plan/<id>/bearbeiten` aus der Übungsansicht heraus. ``fertig`` ist das
-    Ziel des Hakens oben rechts.
+    Ziel des Hakens oben rechts. Mit ``einzel`` ist ``plan`` ein
+    `einzel_plan()`: Route `/training/<übung>`, Einträge ohne Plan.
     """
-    route = (basis or f"/plaene/{plan.id}") if bearbeiten else f"/plan/{plan.id}"
+    if einzel:
+        route = f"/training/{plan.items[0].exercise_id}"
+    elif bearbeiten:
+        route = basis or f"/plaene/{plan.id}"
+    else:
+        route = f"/plan/{plan.id}"
+    #: In welcher Session die Einträge landen — ``None`` = die planlose des Tages
+    sitzungsplan = None if einzel else plan.id
     heute = state.heute()
     anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute)
     tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute)]
@@ -152,12 +182,12 @@ def plan_view(
 
     def eintragen(item: PlanItem, result: dict[str, Any]) -> None:
         uebung = katalog[item.exercise_id]
-        session = state.sitzungen.session_fuer(state.profil.id, plan.id, heute)
+        session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
         melden(uebung, state.sitzungen.eintrag_anlegen(session, uebung, result))
 
     def anhaengen(item: PlanItem, feld: FieldSpec, werte: list[float]) -> None:
         uebung = katalog[item.exercise_id]
-        session = state.sitzungen.session_fuer(state.profil.id, plan.id, heute)
+        session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
         eintrag = None
         for wert in werte:
             eintrag = state.sitzungen.satz_anhaengen(
@@ -541,7 +571,9 @@ def plan_view(
                     "Mehr …",
                     icon=ft.Icons.EDIT_NOTE_OUTLINED,
                     tooltip="Formular mit allen Feldern und Notiz",
-                    on_click=oeffner(f"/plan/{plan.id}/uebung/{item.id}"),
+                    on_click=oeffner(
+                        f"{route}/formular" if einzel else f"/plan/{plan.id}/uebung/{item.id}"
+                    ),
                 )
             )
             inhalt.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=erste))
@@ -602,6 +634,20 @@ def plan_view(
             ),
             ft.Text("„Einstellen“ legt Ziel und Eingabe je Übung fest.", size=12, opacity=0.7),
         ]
+    elif einzel:
+        kopf = [
+            ft.Text(
+                "Ohne Plan — der Eintrag erscheint auf „Heute“ unter „Ohne Plan“.",
+                size=13,
+                opacity=0.7,
+            ),
+            ft.Text(
+                "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · +Zahl = Satz anhängen · "
+                "Mehr = Formular mit Notiz",
+                size=11,
+                opacity=0.55,
+            ),
+        ]
     else:
         kopf = [
             stand,
@@ -630,7 +676,9 @@ def plan_view(
         route=route,
         appbar=ft.AppBar(
             title=ft.Text(plan.name),
-            actions=[
+            actions=[hilfe_knopf(page)]
+            if einzel
+            else [
                 hilfe_knopf(page),
                 ft.IconButton(
                     ft.Icons.CHECK if bearbeiten else ft.Icons.EDIT_OUTLINED,
@@ -663,4 +711,4 @@ def plan_view(
     )
 
 
-__all__ = ["STUFEN", "hauptfeld", "plan_view", "ziel_text"]
+__all__ = ["STUFEN", "einzel_plan", "hauptfeld", "plan_view", "ziel_text"]

@@ -23,6 +23,19 @@ def _beispiel(uebung: Exercise) -> str:
     return spec.format_shorthand(werte) if werte else ""
 
 
+def trainieren_knopf(on_click: Callable[[], object], tooltip: str) -> ft.Control:
+    """Der Knopf „Trainieren“ — gleich in der Übungs- und in der Planliste."""
+    return ft.FilledTonalButton(
+        content=ft.Row(
+            tight=True,
+            spacing=4,
+            controls=[ft.Icon(ft.Icons.PLAY_ARROW, size=18), ft.Text("Trainieren")],
+        ),
+        tooltip=tooltip,
+        on_click=on_click,
+    )
+
+
 def katalog(page: ft.Page, state: AppState) -> ft.Control:
     liste = ft.ListView(expand=True, spacing=0, padding=ft.Padding.only(bottom=88))
     chips = ft.Row(wrap=True, spacing=6, run_spacing=0)  # Typ
@@ -39,6 +52,12 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
     def oeffner(uebung_id: str) -> Callable[[], object]:
         async def handler() -> None:
             await page.push_route(f"/uebung/{uebung_id}")
+
+        return handler
+
+    def trainierer(uebung_id: str) -> Callable[[], object]:
+        async def handler() -> None:
+            await page.push_route(f"/training/{uebung_id}")
 
         return handler
 
@@ -126,7 +145,9 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
                         "  ·  ".join(t for t in (u.category, ", ".join(u.tags), _beispiel(u)) if t),
                         size=12,
                     ),
-                    trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                    trailing=trainieren_knopf(
+                        trainierer(u.id), "Diese Übung jetzt trainieren — ohne Plan"
+                    ),
                     on_click=oeffner(u.id),
                 )
                 for u in treffer
@@ -188,4 +209,4 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
     )
 
 
-__all__ = ["katalog"]
+__all__ = ["katalog", "trainieren_knopf"]

@@ -37,15 +37,18 @@ Die Beispiele sind eigenständig ausführbar. Verändere sie ruhig — dafür si
 | **L02** | [Das Flet-Modell](L02_flet_modell/) | M1 |
 | **L02b** | [Rauchtest: aufs Handy bauen](L02b_aufs_handy/) | — |
 | **L03** | [Navigation und Zustand](L03_navigation/) | M1 |
-| **L04** | [Datenmodell und SQLite](L04_daten_und_sqlite/) | M2 |
+| **L04** | [Datenmodell und SQLite](L04_daten_und_sqlite/) | M1, M2 |
 
 ### Stufe 2 — Die App füllt sich
 
-| | Lektion | danach |
+| | Lektion | danach bauen wir |
 |---|---|---|
-| L05 | Übungskatalog: Seed-Daten, Suche, Filter, Medien | M2 |
-| L06 | Flexible Notation: Formulare aus einer Spezifikation | M3 |
+| **L05** | [Übungskatalog](L05_uebungskatalog/) — der Code von M2, erklärt | — |
+| **L06** | [Flexible Notation](L06_flexible_notation/) | M3 |
 | L07 | async in Flet: Timer, Aufgaben, sauberes Abbrechen | M3 |
+
+Die Lektionen ab L07 sind noch Gliederung:
+[L07_bis_L12_gliederung.md](L07_bis_L12_gliederung.md).
 
 ### Stufe 3 — HRV
 

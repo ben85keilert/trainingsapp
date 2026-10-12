@@ -1,4 +1,4 @@
-# L05–L12 — Gliederung
+# L07–L12 — Gliederung
 
 Diese Lektionen entstehen ausgearbeitet, wenn wir dort ankommen. Der Grund ist
 nicht Bequemlichkeit: Eine Lektion, die den Code erklärt, den wir gerade
@@ -6,42 +6,6 @@ geschrieben haben, ist genauer als eine, die ihn vorwegnimmt.
 
 Was hier steht, ist der Rahmen — Lernziele, Inhalte, und was danach in der App
 entsteht.
-
----
-
-## L05 — Übungskatalog
-
-**Lernziele:** Seed-Daten einspielen, Listen mit Suche und Filter, Medien
-verweisen statt bündeln, `ListView` bei vielen Einträgen.
-
-**Inhalte**
-- `seed_einspielen()`: fehlende Übungen anlegen, vorhandene unangetastet lassen
-- Suche über Name und Beschreibung, Namenstreffer zuerst
-- Filter nach Kategorie als Chip-Leiste
-- Detailansicht mit Beschreibung, Symbol und Videoverweis
-- Eigene Übung anlegen: Symbolauswahl oder Foto
-- **Warum Videos nicht ins App-Paket gehören** — Google Play deckelt bei 150 MB
-
-**Danach:** M2 — der Katalog ist benutzbar.
-
----
-
-## L06 — Flexible Notation
-
-**Lernziele:** Eingabemasken aus einer Spezifikation erzeugen; verstehen, was
-Eingabe wirklich schnell macht.
-
-**Inhalte**
-- `ResultSpec` und `FieldSpec` (bereits in `core/result_spec.py`)
-- `spec_form.py`: aus der Spezifikation Widgets bauen
-- **Die Reihenfolge der Beschleunigung**, und warum sie so ist:
-  1. Vorbelegung aus dem letzten Eintrag + Knopf „Wie zuletzt" — der 80-%-Fall
-  2. Chips aus `quick`, `input_mode="numeric"`
-  3. Kurzschrift-Parser — auf einer Handytastatur der langsamste Weg
-- `spec_snapshot_json`: warum alte Einträge ihre eigene Spezifikation behalten
-- `chart_metrics` → Zeilen in `measurement`
-
-**Danach:** Training dokumentieren.
 
 ---
 

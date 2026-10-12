@@ -213,7 +213,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     # Eine Variante zeigt auf ein Original; wer selbst Varianten hat, ist ein
     # Original und kann nicht gleichzeitig Variante sein (keine Ketten).
 
-    eigene_varianten = state.uebungen.varianten(uebung.id) if uebung else []
+    eigene_varianten = state.uebungen.varianten(uebung.id, mit_papierkorb=True) if uebung else []
     originale = [
         u
         for u in state.uebungen.alle(mit_archivierten=True)

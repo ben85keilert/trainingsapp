@@ -124,7 +124,10 @@ def papierkorb_view(page: ft.Page, state: AppState) -> ft.View:
             page.pop_dialog()
             text = "samt Verlauf gelöscht" if mit_verlauf else "gelöscht — Verlauf bleibt"
             page.show_dialog(ft.SnackBar(ft.Text(f"{len(auswahl)} Übung(en) {text}")))
-            state.papierkorb_offen = 0
+            # Nur so viele Hinweise, wie wirklich noch auf eine Entscheidung warten
+            state.papierkorb_offen = sum(
+                1 for u in state.uebungen.faellig() if state.uebungen.hat_eintraege(u.id)
+            )
             state.neu_zeichnen()
 
         return handler

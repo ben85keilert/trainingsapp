@@ -41,6 +41,7 @@ from ..core.models import (
     new_id,
     tagesgrenzen,
 )
+from ..core.parameter import kontextfelder
 from ..core.result_spec import FieldType, ResultSpec, werte_modernisieren
 from .db import transaktion
 
@@ -170,11 +171,21 @@ class ExerciseRepo:
         )
 
     def aus_papierkorb(self, uebung_id: str) -> None:
-        self.con.execute(
-            "UPDATE exercise SET deleted_at = NULL, archived = 0, updated_at = ?, "
-            "revision = revision + 1 WHERE id = ? AND purged_at IS NULL",
-            (jetzt().isoformat(), uebung_id),
-        )
+        """Zurückholen. Ist das Original inzwischen selbst Variante geworden,
+        hängt sich die Übung an dessen Original — Ketten gibt es nicht."""
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE exercise SET deleted_at = NULL, archived = 0, updated_at = ?, "
+                "revision = revision + 1 WHERE id = ? AND purged_at IS NULL",
+                (jetzt().isoformat(), uebung_id),
+            )
+            self.con.execute(
+                "UPDATE exercise SET family_id = "
+                "(SELECT o.family_id FROM exercise o WHERE o.id = exercise.family_id) "
+                "WHERE id = ? AND family_id IN "
+                "(SELECT id FROM exercise WHERE family_id IS NOT NULL)",
+                (uebung_id,),
+            )
 
     def papierkorb(self) -> list[Exercise]:
         """Was im Papierkorb liegt, zuletzt Gelöschtes zuerst."""
@@ -191,10 +202,15 @@ class ExerciseRepo:
         )
         return [self._zeile(r) for r in zeilen]
 
-    def varianten(self, uebung_id: str) -> list[Exercise]:
-        """Die Varianten eines Originals (ohne das Original selbst)."""
+    def varianten(self, uebung_id: str, mit_papierkorb: bool = False) -> list[Exercise]:
+        """Die Varianten eines Originals (ohne das Original selbst).
+
+        ``mit_papierkorb`` zählt auch Varianten im Papierkorb mit — sie können
+        zurückkommen, also bleibt ihr Original ein Original.
+        """
+        bedingung = "purged_at IS NULL" if mit_papierkorb else "deleted_at IS NULL"
         zeilen = self.con.execute(
-            "SELECT * FROM exercise WHERE family_id = ? AND deleted_at IS NULL "
+            f"SELECT * FROM exercise WHERE family_id = ? AND {bedingung} "
             "ORDER BY name COLLATE NOCASE",
             (uebung_id,),
         )
@@ -247,8 +263,8 @@ class ExerciseRepo:
 
     def faellig(self, tage: int = PAPIERKORB_TAGE) -> list[Exercise]:
         """Übungen, die länger als ``tage`` im Papierkorb liegen."""
-        grenze = (jetzt() - timedelta(days=tage)).isoformat()
-        return [u for u in self.papierkorb() if u.deleted_at and u.deleted_at.isoformat() <= grenze]
+        grenze = jetzt() - timedelta(days=tage)
+        return [u for u in self.papierkorb() if u.deleted_at and u.deleted_at <= grenze]
 
     def papierkorb_aufraeumen(self, tage: int = PAPIERKORB_TAGE) -> tuple[int, list[Exercise]]:
         """Löscht fällige Übungen ohne Verlauf endgültig.
@@ -514,7 +530,12 @@ class PlanRepo:
     # -- Schreiben ---------------------------------------------------------
 
     def speichern(self, plan: Plan) -> None:
-        """Legt an oder aktualisiert; die Übungsliste wird komplett ersetzt."""
+        """Legt an oder aktualisiert; die sichtbare Übungsliste wird komplett ersetzt.
+
+        Planübungen, deren Übung im Papierkorb liegt, lädt `laden()` nicht mit —
+        sie bleiben hier unangetastet stehen, damit sie beim Wiederherstellen
+        der Übung zurückkehren. Die neuen Einträge reihen sich dahinter ein.
+        """
         stempel = jetzt().isoformat()
         with transaktion(self.con):
             self.con.execute(
@@ -537,8 +558,15 @@ class PlanRepo:
                     stempel,
                 ),
             )
-            self.con.execute("DELETE FROM plan_item WHERE plan_id = ?", (plan.id,))
-            for reihenfolge, item in enumerate(plan.items):
+            self.con.execute(
+                "DELETE FROM plan_item WHERE plan_id = ? AND exercise_id NOT IN "
+                "(SELECT id FROM exercise WHERE deleted_at IS NOT NULL)",
+                (plan.id,),
+            )
+            versteckt = self.con.execute(
+                "SELECT COUNT(*) FROM plan_item WHERE plan_id = ?", (plan.id,)
+            ).fetchone()[0]
+            for reihenfolge, item in enumerate(plan.items, start=versteckt):
                 item.plan_id = plan.id
                 item.order = reihenfolge
                 self._item_schreiben(item)
@@ -614,12 +642,14 @@ class PlanRepo:
             (jetzt().isoformat(), plan_id),
         )
 
-    def papierkorb(self, subject_id: str) -> list[Plan]:
-        zeilen = self.con.execute(
-            "SELECT * FROM plan WHERE deleted_at IS NOT NULL AND purged_at IS NULL "
-            "AND (subject_id = ? OR subject_id IS NULL) ORDER BY deleted_at DESC",
-            (subject_id,),
-        )
+    def papierkorb(self, subject_id: str | None) -> list[Plan]:
+        """Gelöschte Pläne des Profils (plus profilfreie); ``None`` = aller Profile."""
+        sql = "SELECT * FROM plan WHERE deleted_at IS NOT NULL AND purged_at IS NULL"
+        params: list[object] = []
+        if subject_id is not None:
+            sql += " AND (subject_id = ? OR subject_id IS NULL)"
+            params.append(subject_id)
+        zeilen = self.con.execute(sql + " ORDER BY deleted_at DESC", params)
         return self._mit_items([self._zeile(r) for r in zeilen])
 
     def endgueltig_loeschen(self, plan_id: str) -> None:
@@ -637,12 +667,13 @@ class PlanRepo:
                 (plan_id, stempel),
             )
 
-    def papierkorb_aufraeumen(self, subject_id: str, tage: int = PAPIERKORB_TAGE) -> int:
-        grenze = (jetzt() - timedelta(days=tage)).isoformat()
+    def papierkorb_aufraeumen(
+        self, subject_id: str | None = None, tage: int = PAPIERKORB_TAGE
+    ) -> int:
+        """Löscht Pläne, die länger als ``tage`` im Papierkorb liegen — aller Profile."""
+        grenze = jetzt() - timedelta(days=tage)
         faellige = [
-            p
-            for p in self.papierkorb(subject_id)
-            if p.deleted_at and p.deleted_at.isoformat() <= grenze
+            p for p in self.papierkorb(subject_id) if p.deleted_at and p.deleted_at <= grenze
         ]
         for p in faellige:
             self.endgueltig_loeschen(p.id)
@@ -674,14 +705,20 @@ class PlanRepo:
             self.ziel_setzen(item.id, item.target)
             self.eingabe_setzen(item.id, item.input_mode, item.quick)
 
-    def verwendungen(self, exercise_id: str) -> list[tuple[Plan, PlanItem]]:
-        """In welchen (nicht gelöschten) Plänen steht diese Übung?"""
+    def verwendungen(
+        self, exercise_id: str, subject_id: str | None = None
+    ) -> list[tuple[Plan, PlanItem]]:
+        """In welchen (nicht gelöschten) Plänen steht diese Übung — je Profil, wenn angegeben?"""
         ergebnis: list[tuple[Plan, PlanItem]] = []
-        for r in self.con.execute(
+        sql = (
             "SELECT pi.* FROM plan_item pi JOIN plan p ON p.id = pi.plan_id "
-            "WHERE pi.exercise_id = ? AND p.deleted_at IS NULL ORDER BY p.created_at",
-            (exercise_id,),
-        ):
+            "WHERE pi.exercise_id = ? AND p.deleted_at IS NULL"
+        )
+        params: list[object] = [exercise_id]
+        if subject_id is not None:
+            sql += " AND (p.subject_id = ? OR p.subject_id IS NULL)"
+            params.append(subject_id)
+        for r in self.con.execute(sql + " ORDER BY p.created_at", params):
             item = self._item_zeile(r)
             plan = self.laden(item.plan_id)
             if plan is not None:
@@ -934,10 +971,13 @@ class SessionRepo:
         """
         kontext = kontext or {}
         aktuell = self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+        # Verglichen werden alle Ausprägungsfelder: Ein Satz ohne Winkel gehört
+        # nicht an einen Eintrag mit 45° — und umgekehrt.
+        felder = {f.key for f in kontextfelder(uebung.result_spec)} | set(kontext)
         if (
             aktuell is None
             or aktuell.session_id != session.id
-            or any(aktuell.result.get(k) != v for k, v in kontext.items())
+            or any(aktuell.result.get(k) != kontext.get(k) for k in felder)
         ):
             return self.eintrag_anlegen(session, uebung, {**kontext, feld_key: [wert]})
 

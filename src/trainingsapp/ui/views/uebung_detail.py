@@ -175,7 +175,7 @@ def uebung_detail(
             size=13,
         )
     ]
-    for plan, item in state.plaene.verwendungen(uebung.id):
+    for plan, item in state.plaene.verwendungen(uebung.id, state.profil.id):
         unterschiede = abweichungen(item, uebung)
         verwendungen.append(
             ft.ListTile(

@@ -99,7 +99,7 @@ class AppState:
         profile = SubjectRepo(con)
         einstellungen = SettingRepo(con)
         profil = cls._aktives_profil(profile, einstellungen)
-        offen = cls._papierkorb_aufraeumen(con, einstellungen, profil)
+        offen = cls._papierkorb_aufraeumen(con, einstellungen)
         return cls(
             con=con,
             uebungen=ExerciseRepo(con),
@@ -114,13 +114,11 @@ class AppState:
         )
 
     @staticmethod
-    def _papierkorb_aufraeumen(
-        con: sqlite3.Connection, einstellungen: SettingRepo, profil: Subject
-    ) -> int:
+    def _papierkorb_aufraeumen(con: sqlite3.Connection, einstellungen: SettingRepo) -> int:
         """Beim Start: Fälliges endgültig löschen, sofern eingeschaltet (Vorgabe: an)."""
         if einstellungen.lesen(SettingRepo.PAPIERKORB_AUTO, "1") != "1":
             return 0
-        PlanRepo(con).papierkorb_aufraeumen(profil.id)
+        PlanRepo(con).papierkorb_aufraeumen()  # alle Profile, nicht nur das aktive
         _, offen = ExerciseRepo(con).papierkorb_aufraeumen()
         return len(offen)
 

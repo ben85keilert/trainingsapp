@@ -821,3 +821,56 @@ def test_standard_hin_und_her(con) -> None:
     anders = plaene.uebung_hinzufuegen(b.id, u.id, {"reps": [5]})
     plaene.item_speichern(vom_standard(u, anders))
     assert plaene.item_laden(anders.id).target == {"reps": [20, 20]}
+
+
+# ---------------------------------------------------------------------------
+# Funde der Durchsicht: ausgeblendete Planübungen, Ketten, Ausprägung beim Anhängen
+# ---------------------------------------------------------------------------
+
+
+def test_plan_speichern_behaelt_ausgeblendete_uebungen(welt) -> None:
+    con, _repo, ich, _sitzung = welt
+    uebungen, plaene = ExerciseRepo(con), PlanRepo(con)
+    a, b = _wadenheben(con), uebungen.laden(seed_id("unterarmstuetz"))
+    plan = Plan(name="P", subject_id=ich.id)
+    plaene.speichern(plan)
+    plaene.uebung_hinzufuegen(plan.id, a.id)
+    plaene.uebung_hinzufuegen(plan.id, b.id)
+
+    uebungen.in_papierkorb(a.id)
+    geladen = plaene.laden(plan.id)
+    assert [i.exercise_id for i in geladen.items] == [b.id]
+    plaene.speichern(geladen)  # speichert nur, was sichtbar ist …
+    uebungen.aus_papierkorb(a.id)
+    assert {i.exercise_id for i in plaene.laden(plan.id).items} == {a.id, b.id}  # … a bleibt
+
+
+def test_wiederhergestellte_variante_bildet_keine_kette(con) -> None:
+    uebungen = ExerciseRepo(con)
+    c, o = Exercise(name="C"), Exercise(name="O")
+    uebungen.speichern(c)
+    uebungen.speichern(o)
+    v = Exercise(name="V", family_id=o.id)
+    uebungen.speichern(v)
+
+    uebungen.in_papierkorb(v.id)
+    assert [x.id for x in uebungen.varianten(o.id, mit_papierkorb=True)] == [v.id]
+    o.family_id = c.id  # O wird doch Variante von C
+    uebungen.speichern(o)
+    uebungen.aus_papierkorb(v.id)
+    assert uebungen.laden(v.id).family_id == c.id  # V hängt am Original, nicht an O
+
+
+def test_satz_ohne_winkel_haengt_nicht_an_winkel_eintrag(welt) -> None:
+    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+
+    con, repo, _ich, sitzung = welt
+    wandsitz = Exercise(
+        name="Wandsitz", result_spec=ResultSpec(fields=[vorrat_feld("hold"), vorrat_feld("angle")])
+    )
+    ExerciseRepo(con).speichern(wandsitz)
+    heute = lokaler_tag(jetzt())
+    repo.satz_anhaengen(sitzung, wandsitz, "hold", 30, heute, {"angle": 45})
+    e = repo.satz_anhaengen(sitzung, wandsitz, "hold", 60, heute, {})
+    assert e.result == {"hold": [60]}
+    assert len(repo.eintraege(sitzung.id)) == 2

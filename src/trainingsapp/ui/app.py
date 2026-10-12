@@ -260,6 +260,8 @@ def main(page: ft.Page) -> None:
         page.update()
 
     async def zurueck() -> None:
+        # Wer eine Ansicht verlässt, beginnt beim nächsten Öffnen wieder oben.
+        state.scroll_offsets.pop(page.views[-1].route, None)
         page.views.pop()
         await page.push_route(page.views[-1].route)
 

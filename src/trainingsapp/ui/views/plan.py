@@ -11,8 +11,13 @@ bestimmt die Eingabestufe der Planübung (`PlanItem.input_mode`):
   Beschreibung und Videos der Übung.
 
 Bearbeiten (Stift in der Leiste): einstellen, entfernen, hinzufügen,
-umbenennen, löschen. Der Modus liegt im `AppState`, weil die Ansicht nach
-jedem Tipp neu gebaut wird.
+umbenennen, löschen. Der Modus liegt im `AppState`, weil die Ansicht beim
+Routenwechsel neu gebaut wird.
+
+Ein Eintrag (Gemacht, Chip, Freieingabe) baut dagegen nur die Blöcke in der
+bestehenden Liste neu (`auffrischen`) — so bleibt die Scrollposition, und man
+verliert in einem langen Plan nicht die Orientierung. Kommt man aus einem
+Formular zurück, stellt `scroll_merken` die Position wieder her.
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ from trainingsapp.core.units import parse_dauer, parse_sets
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
 
 ECKEN = ft.RoundedRectangleBorder(radius=12)
@@ -82,10 +88,19 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
 
     # -- Handler ---------------------------------------------------------------
 
+    def auffrischen() -> None:
+        """Stand neu lesen und die Blöcke in derselben Liste ersetzen."""
+        nonlocal anzahl, gemacht
+        anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute)
+        gemacht = sum(1 for item in plan.items if anzahl.get(item.exercise_id))
+        stand.value = stand_text()
+        liste.controls = [block(item) for item in plan.items]
+        page.update()
+
     def melden(uebung: Exercise, eintrag: SessionEntry) -> None:
         text = eintrag.shorthand() if eintrag.result else "gemacht"
         page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name}: {text}")))
-        state.neu_zeichnen()
+        auffrischen()
 
     def eintragen(item: PlanItem, result: dict[str, Any]) -> None:
         uebung = katalog[item.exercise_id]
@@ -391,6 +406,17 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
 
     # -- Aufbau ----------------------------------------------------------------
 
+    def stand_text() -> str:
+        return f"{gemacht} von {len(plan.items)} heute" if plan.items else "Noch keine Übungen"
+
+    stand = ft.Text(stand_text(), size=13, opacity=0.7)
+    liste = scroll_merken(
+        page,
+        state,
+        f"/plan/{plan.id}",
+        ft.ListView(expand=True, controls=[block(item) for item in plan.items]),
+    )
+
     kopf: list[ft.Control]
     if bearbeiten:
         kopf = [
@@ -399,11 +425,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
         ]
     else:
         kopf = [
-            ft.Text(
-                f"{gemacht} von {len(plan.items)} heute" if plan.items else "Noch keine Übungen",
-                size=13,
-                opacity=0.7,
-            ),
+            stand,
             ft.Text(
                 "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · +Zahl = Satz anhängen · "
                 "Mehr = Formular mit Notiz",
@@ -449,7 +471,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
                             padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
                             content=ft.Column(spacing=6, controls=kopf),
                         ),
-                        ft.ListView(expand=True, controls=[block(item) for item in plan.items]),
+                        liste,
                         ft.Container(
                             padding=16, content=ft.Row(spacing=8, wrap=True, controls=fuss)
                         )

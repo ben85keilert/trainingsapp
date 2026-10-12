@@ -213,3 +213,22 @@ def test_uebung_editor_und_katalogfilter(page, welt) -> None:
     assert chips_lesen("10, 15, 20", reps) == [10, 15, 20]
     spec = spec_bauen([reps, vorrat_feld("note")])
     assert spec.chart_metrics == ["reps"] and str(spec.layout) == "sets"
+
+
+def test_scrollposition_ueberlebt_den_neubau(page, welt) -> None:
+    """Die Planansicht merkt sich ihre Position im Zustand, nicht im Control."""
+    from types import SimpleNamespace
+
+    from trainingsapp.ui.views.plan import plan_view
+
+    state, plan, *_ = welt
+    gestartet = []
+    page.run_task = lambda f: gestartet.append(f)
+    ansicht = plan_view(page, state, plan)
+    liste = next(c for c in ansicht.controls[0].content.controls if isinstance(c, ft.ListView))
+    assert not gestartet  # noch keine Position gemerkt → kein Sprung
+
+    liste.on_scroll(SimpleNamespace(pixels=420.0))
+    assert state.scroll_offsets[f"/plan/{plan.id}"] == 420.0
+    plan_view(page, state, plan)
+    assert len(gestartet) == 1  # der Neubau springt zur gemerkten Stelle

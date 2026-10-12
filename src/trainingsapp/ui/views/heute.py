@@ -13,6 +13,7 @@ from datetime import timedelta
 import flet as ft
 
 from trainingsapp.core.models import Plan
+from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.tag import tag_titel, tagesansicht
 
@@ -70,7 +71,7 @@ def heute(page: ft.Page, state: AppState) -> ft.Control:
             ),
         )
 
-    return ft.Column(
+    spalte = ft.Column(
         expand=True,
         scroll=ft.ScrollMode.AUTO,
         spacing=0,
@@ -88,6 +89,7 @@ def heute(page: ft.Page, state: AppState) -> ft.Control:
             tagesansicht(page, state, tag),
         ],
     )
+    return scroll_merken(page, state, "heute", spalte)
 
 
 __all__ = ["heute"]

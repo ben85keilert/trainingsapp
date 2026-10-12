@@ -17,6 +17,7 @@ import flet as ft
 
 from trainingsapp.core.models import Session, SessionEntry
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
 
 ORDNUNGEN = [("plan", "Plan"), ("zeit", "Zeit"), ("uebung", "Übung")]
@@ -158,7 +159,7 @@ def tag_view(page: ft.Page, state: AppState, tag: date) -> ft.View:
 
         return handler
 
-    return ft.View(
+    ansicht = ft.View(
         route=f"/tag/{tag.isoformat()}",
         appbar=ft.AppBar(
             title=ft.Text(tag_titel(tag, state.heute())),
@@ -179,6 +180,7 @@ def tag_view(page: ft.Page, state: AppState, tag: date) -> ft.View:
         padding=0,
         controls=[sicher(tagesansicht(page, state, tag), expand=False)],
     )
+    return scroll_merken(page, state, ansicht.route, ansicht)
 
 
 __all__ = ["tag_titel", "tag_view", "tagesansicht"]

@@ -126,6 +126,16 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
         keys = {f.key for f in felder}
         return {k: v for k, v in state.auspraegung_wahl[item.id].items() if k in keys}
 
+    def ziel_ohne_kontext(item: PlanItem) -> dict[str, Any]:
+        """Das Ziel ohne Ausprägungen — die bestimmt allein die Auswahl im Block.
+
+        Sonst gewänne beim Eintragen der Winkel aus dem Ziel (90°) gegen den
+        gerade gewählten (45°), und eine aufgehobene Auswahl käme über das Ziel
+        zurück.
+        """
+        keys = {f.key for f in kontextfelder(katalog[item.exercise_id].result_spec)}
+        return {k: v for k, v in item.target.items() if k not in keys}
+
     def eintragen(item: PlanItem, result: dict[str, Any]) -> None:
         uebung = katalog[item.exercise_id]
         session = state.sitzungen.session_fuer(state.profil.id, plan.id, heute)
@@ -150,7 +160,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
 
     def ziel_erlediger(item: PlanItem) -> Callable[[], None]:
         def handler() -> None:
-            eintragen(item, {**kontext(item, katalog[item.exercise_id]), **item.target})
+            eintragen(item, {**ziel_ohne_kontext(item), **kontext(item, katalog[item.exercise_id])})
 
         return handler
 
@@ -160,7 +170,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
                 anhaengen(item, feld, [float(wert)])
             else:
                 zusatz = kontext(item, katalog[item.exercise_id])
-                eintragen(item, {**item.target, **zusatz, feld.key: wert})
+                eintragen(item, {**ziel_ohne_kontext(item), **zusatz, feld.key: wert})
 
         return handler
 
@@ -205,7 +215,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
                 if text.startswith("+"):
                     anhaengen(item, feld, werte)
                 else:
-                    eintragen(item, {**item.target, **zusatz, feld.key: werte})
+                    eintragen(item, {**ziel_ohne_kontext(item), **zusatz, feld.key: werte})
                 return
             if feld.type == FieldType.DURATION:
                 wert: Any = parse_dauer(text)
@@ -219,7 +229,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
                 eingabe.error = "Ungültig"
                 page.update()
                 return
-            eintragen(item, {**item.target, **zusatz, feld.key: wert})
+            eintragen(item, {**ziel_ohne_kontext(item), **zusatz, feld.key: wert})
 
         return handler
 

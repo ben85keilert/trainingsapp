@@ -56,6 +56,10 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     # Zugriff auf die Rohdaten einer HRV-Messung
     "hrv_rohdaten": {Edition.SOLO, Edition.PRAXIS},
     "export": {Edition.SOLO, Edition.PRAXIS},
+    # Profilwechsel nur nach PIN oder Fingerabdruck. In Edition A gibt es
+    # nichts zu schützen, was der Gerätebesitzer nicht ohnehin sieht; in
+    # Edition B liegen fremde Gesundheitsdaten auf dem Gerät des Therapeuten.
+    "profil_sperre": {Edition.PRAXIS},
 }
 
 

@@ -1,48 +1,114 @@
 """Einstiegspunkt der Oberfläche.
 
-Start:  ``flet run src/trainingsapp/ui/app.py``
+Start:  ``uv run flet run src/trainingsapp/ui/app.py``
 
-Noch eine Hülle: Navigation, Theme und leere Ansichten. Die Ansichten füllen
-wir entlang des Lernpfads (`docs/tutorial/`).
+Hier liegt nur das Gerüst: Zustand anlegen, Routen auf Ansichten abbilden,
+Navigationsleiste. Die Ansichten selbst stehen in `views/`.
+
+Routen:
+
+    /                           Hauptansicht mit vier Reitern
+    /uebung/neu                 neue Übung anlegen
+    /uebung/<id>                Detailansicht
+    /uebung/<id>/bearbeiten     Übung bearbeiten
+    /einstellungen              Profile und App-Einstellungen
+
+Der Routen-Handler baut bei jedem Wechsel den **ganzen** Stapel neu auf
+(L03). Dadurch funktioniert der Zurück-Knopf auch nach einem Neustart auf
+einer tiefen Route.
 """
 
 from __future__ import annotations
 
 import flet as ft
 
-from trainingsapp.config import edition, ist_aktiv
+from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import dark_theme, light_theme
+from trainingsapp.ui.views.einstellungen import einstellungen
+from trainingsapp.ui.views.heute import heute
+from trainingsapp.ui.views.katalog import katalog
+from trainingsapp.ui.views.platzhalter import messung, verlauf
+from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+from trainingsapp.ui.views.uebung_detail import uebung_detail
 
-ZIELE = [
-    ("Heute", ft.Icons.TODAY, ft.Icons.TODAY_OUTLINED),
-    ("Übungen", ft.Icons.FITNESS_CENTER, ft.Icons.FITNESS_CENTER_OUTLINED),
-    ("Messung", ft.Icons.MONITOR_HEART, ft.Icons.MONITOR_HEART_OUTLINED),
-    ("Verlauf", ft.Icons.SHOW_CHART, ft.Icons.SHOW_CHART_OUTLINED),
+REITER = [
+    ("Heute", ft.Icons.TODAY),
+    ("Übungen", ft.Icons.FITNESS_CENTER),
+    ("Messung", ft.Icons.MONITOR_HEART),
+    ("Verlauf", ft.Icons.SHOW_CHART),
 ]
 
 
-def platzhalter(titel: str, text: str, lektion: str) -> ft.Control:
-    """Was diese Ansicht später kann — und in welcher Lektion sie entsteht."""
-    return ft.Container(
-        expand=True,
-        alignment=ft.Alignment.CENTER,
-        padding=32,
-        content=ft.Column(
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12,
-            controls=[
-                ft.Text(titel, size=24, weight=ft.FontWeight.BOLD),
-                ft.Text(text, text_align=ft.TextAlign.CENTER, opacity=0.8),
-                ft.Container(height=8),
+def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
+    """Die Ansicht hinter `/`: Leiste, Inhalt des aktiven Reiters, Navigation."""
+
+    def inhalt() -> ft.Control:
+        if state.nav_index == 0:
+            return heute(page, state)
+        if state.nav_index == 1:
+            return katalog(page, state)
+        if state.nav_index == 2:
+            return messung()
+        return verlauf()
+
+    def wechseln(e: ft.Event[ft.NavigationBar]) -> None:
+        state.nav_index = e.control.selected_index
+        koerper.content = inhalt()
+        hauptansicht_aktualisieren()
+        page.update()
+
+    async def zu_einstellungen() -> None:
+        await page.push_route("/einstellungen")
+
+    async def neue_uebung() -> None:
+        await page.push_route("/uebung/neu")
+
+    koerper = ft.Container(expand=True, content=inhalt())
+    ansicht = ft.View(
+        route="/",
+        padding=0,
+        appbar=ft.AppBar(
+            title=ft.Text("Trainingsassistent"),
+            center_title=False,
+            actions=[
                 ft.Container(
-                    padding=ft.Padding.symmetric(vertical=8, horizontal=14),
-                    border_radius=8,
-                    bgcolor=ft.Colors.SECONDARY_CONTAINER,
-                    content=ft.Text(f"entsteht in {lektion}", size=12),
+                    padding=ft.Padding.only(right=4),
+                    content=ft.Text(state.profil.name, size=13, opacity=0.8),
+                ),
+                ft.IconButton(
+                    ft.Icons.SETTINGS_OUTLINED, tooltip="Einstellungen", on_click=zu_einstellungen
                 ),
             ],
         ),
+        controls=[
+            ft.Column(
+                expand=True,
+                spacing=0,
+                controls=[
+                    koerper,
+                    ft.NavigationBar(
+                        selected_index=state.nav_index,
+                        on_change=wechseln,
+                        destinations=[
+                            ft.NavigationBarDestination(label=label, icon=icon)
+                            for label, icon in REITER
+                        ],
+                    ),
+                ],
+            )
+        ],
     )
+
+    def hauptansicht_aktualisieren() -> None:
+        # Der Knopf „Neue Übung" gehört nur zum Katalog.
+        ansicht.floating_action_button = (
+            ft.FloatingActionButton(icon=ft.Icons.ADD, tooltip="Neue Übung", on_click=neue_uebung)
+            if state.nav_index == 1
+            else None
+        )
+
+    hauptansicht_aktualisieren()
+    return ansicht
 
 
 def main(page: ft.Page) -> None:
@@ -52,68 +118,36 @@ def main(page: ft.Page) -> None:
     page.theme_mode = ft.ThemeMode.SYSTEM
     page.padding = 0
 
-    inhalte = [
-        platzhalter(
-            "Heute",
-            "Der Trainingsplan für heute und die zuletzt dokumentierten Einheiten.",
-            "L05",
-        ),
-        platzhalter(
-            "Übungen",
-            "Der Übungskatalog mit Suche, Filter und Erklärvideos.",
-            "L05",
-        ),
-        platzhalter(
-            "Messung",
-            "Live-HRV-Messung: Sensor verbinden, aufzeichnen, Rohdaten ansehen.",
-            "L10/L11",
-        ),
-        platzhalter(
-            "Verlauf",
-            "Diagramme über Wochen und Monate — Übungsergebnisse und HRV-Kennzahlen.",
-            "L12",
-        ),
-    ]
+    state = AppState.starten()
+    # Dienste sind Controls ohne Darstellung; sie müssen an der Seite hängen.
+    browser = ft.UrlLauncher()
+    page.services.append(browser)
 
-    körper = ft.Container(expand=True, content=inhalte[0])
+    def zeige_route() -> None:
+        """Baut den Ansichtsstapel passend zu `page.route` auf."""
+        page.views.clear()
+        page.views.append(hauptansicht(page, state))
+        teile = [t for t in page.route.split("/") if t]  # "/uebung/abc" → ["uebung", "abc"]
 
-    def wechseln(e: ft.Event[ft.NavigationBar]) -> None:
-        körper.content = inhalte[e.control.selected_index]
+        if teile[:1] == ["einstellungen"]:
+            page.views.append(einstellungen(page, state))
+        elif teile[:1] == ["uebung"] and len(teile) >= 2:
+            if teile[1] == "neu":
+                page.views.append(uebung_bearbeiten(page, state, None))
+            elif (uebung := state.uebungen.laden(teile[1])) is not None:
+                page.views.append(uebung_detail(page, state, uebung, browser))
+                if teile[2:] == ["bearbeiten"]:
+                    page.views.append(uebung_bearbeiten(page, state, uebung))
+            # unbekannte ID: Stapel endet bei der Hauptansicht
         page.update()
 
-    page.add(
-        ft.Column(
-            expand=True,
-            spacing=0,
-            controls=[
-                ft.AppBar(
-                    title=ft.Text("Trainingsassistent"),
-                    center_title=False,
-                    bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-                    actions=[
-                        ft.Container(
-                            padding=ft.Padding.only(right=16),
-                            content=ft.Text(
-                                f"Edition {edition().value}"
-                                + ("  ·  Sync aktiv" if ist_aktiv("sync") else ""),
-                                size=12,
-                                opacity=0.7,
-                            ),
-                        )
-                    ],
-                ),
-                körper,
-                ft.NavigationBar(
-                    selected_index=0,
-                    on_change=wechseln,
-                    destinations=[
-                        ft.NavigationBarDestination(label=label, icon=aktiv, selected_icon=aktiv)
-                        for label, aktiv, _ in ZIELE
-                    ],
-                ),
-            ],
-        )
-    )
+    async def zurueck() -> None:
+        page.views.pop()
+        await page.push_route(page.views[-1].route)
+
+    page.on_route_change = zeige_route
+    page.on_view_pop = zurueck
+    zeige_route()  # beim Start ist die Route schon gesetzt — der Handler feuert nicht von selbst
 
 
 if __name__ == "__main__":

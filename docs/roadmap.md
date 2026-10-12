@@ -6,8 +6,8 @@ einem sichtbaren Fortschritt in der App.
 | M | Inhalt | nach Lektion | Stand |
 |---|---|---|---|
 | **M0** | Repo, Kompatibilitätsvertrag, Schema, Verträge, CI | — | **fertig** |
-| M1 | Flet-Hülle: Navigation, Theme, Ansichten — einmal aufs Handy gebaut | L03 | offen |
-| M2 | Übungskatalog aus der Datenbank, Suche, Detailansicht, Videoverweise | L05 | offen |
+| **M1** | Flet-Hülle: Navigation, Theme, Ansichten — einmal aufs Handy gebaut | L03 | **fertig** |
+| **M2** | Übungskatalog aus der Datenbank, Suche, Detailansicht, Videoverweise | L05 | **fertig** |
 | M3 | Training dokumentieren: spec-getriebene Eingabe, „Wie zuletzt", Sitzungen | L07 | offen |
 | M4 | `hrv_core` vollständig + Simulator, Golden-Tests grün | L09 | teilweise |
 | M5 | Echte Geräte auf dem Desktop + Sensor-Prüfstand | L10 | offen |
@@ -33,9 +33,23 @@ einem sichtbaren Fortschritt in der App.
 
 - `hrv_core/frequency.py` — Welch und Lomb-Scargle in numpy (**L09**)
 - `hrv_core/nonlinear.py` — DFA α1 und Sample Entropy (**L09**)
-- `data/repositories.py` — Lesen und Schreiben der Domänenobjekte (**L04**)
 - `devices/bleak_source.py` — Desktop-BLE (**L10**)
-- Alle Ansichten in `ui/views/` (**ab L03**)
+- `ui/views/` — Messung und Verlauf sind noch Platzhalter (**L11**, **L12**)
+
+## Was in M1 und M2 steht
+
+- `ui/state.py`: `AppState.starten()` öffnet die Datenbank, spielt den Seed ein
+  und lädt das zuletzt aktive Profil (`app_setting`, Migration 002)
+- Profile: anlegen, wechseln, umbenennen — ohne PIN in Edition A
+  (`ist_aktiv("profil_sperre")`)
+- Katalog aus der Datenbank: Suche über Name und Beschreibung, Kategorie-Chips,
+  Detailansicht, mehrere Videolinks je Übung (öffnen im Browser)
+- Eigene Übungen: Name, Kategorie, Beschreibung, Symbol aus kuratierter Liste,
+  Notation aus den vier Vorlagen; Archivieren statt Löschen
+- Seed-IDs deterministisch (UUIDv5), damit mitgelieferte Übungen auf jedem
+  Gerät dieselbe ID haben
+- Noch nicht: Video-Download zum Offline-Ansehen und Fotos für eigene Übungen
+  (**M10**), Tags (Schema vorhanden, keine Ansicht), Spec-Editor (**L06**)
 
 ## Bewusst nicht eingeplant
 

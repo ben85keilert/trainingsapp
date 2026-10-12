@@ -283,109 +283,68 @@ def test_aktualisieren_erhoeht_revision(repo):
 
 ## Aufgabe 4: Seed
 
+Die spannende Frage ist nicht das Einlesen, sondern: **Woran erkennt der Seed
+beim zweiten Start, was schon da ist?** Das Schema hat keine Spalte für den
+Seed-Schlüssel, und die IDs sind zufällig.
+
+Drei Wege:
+
+1. Den Schlüssel irgendwo unterbringen, etwa in `default_target_json`. Geht,
+   ist aber ein Notbehelf — ein Feld, das für etwas anderes gedacht ist.
+2. Eine Migration `002` mit Spalte `seed_key`. Sauber, kostet eine Migration.
+3. **Die ID aus dem Schlüssel ableiten.** UUIDv5 erzeugt aus einem Namensraum
+   und einem Text immer dieselbe UUID. „wadenheben" hat damit auf jedem Gerät
+   dieselbe ID — ohne Zusatzspalte, und mit einem Nebeneffekt, der später in
+   Edition B Gold wert ist: Der Praxisserver und das Handy meinen mit
+   derselben ID dieselbe Übung.
+
+So steht es in `src/trainingsapp/data/seed.py`:
+
 ```python
-"""Startkatalog einspielen."""
+SEED_NAMENSRAUM = uuid.UUID("6f1c2b3a-7d4e-4a5b-9c8d-1e2f3a4b5c6d")
 
-from __future__ import annotations
 
-import json
-import sqlite3
-from pathlib import Path
-
-from ..core.models import Exercise, Media, MediaKind, MediaSource, new_id
-from ..core.result_spec import (
-    SPEC_BENCHMARK_ZEIT,
-    SPEC_HALTEN,
-    SPEC_SAETZE_WDH,
-    SPEC_WINKEL,
-    ResultSpec,
-)
-from .repositories import ExerciseRepo
-
-SEED_DATEI = Path(__file__).parent / "seed" / "exercises.json"
-
-SPECS: dict[str, ResultSpec] = {
-    "saetze_wdh": SPEC_SAETZE_WDH,
-    "halten": SPEC_HALTEN,
-    "winkel": SPEC_WINKEL,
-    "benchmark_zeit": SPEC_BENCHMARK_ZEIT,
-}
+def seed_id(key: str) -> str:
+    return str(uuid.uuid5(SEED_NAMENSRAUM, key))
 
 
 def seed_einspielen(con: sqlite3.Connection, datei: Path = SEED_DATEI) -> int:
-    """Legt fehlende Übungen an. Vorhandene bleiben unangetastet.
-
-    Der Nutzer könnte eine mitgelieferte Übung angepasst haben — ein Update
-    darf ihm das nicht überschreiben. Deshalb wird `seed_key` als Kennung
-    geführt und nur bei Abwesenheit angelegt.
-    """
-    daten = json.loads(datei.read_text(encoding="utf-8"))
     repo = ExerciseRepo(con)
-
-    vorhanden = {
-        r["seed_key"]
-        for r in con.execute(
-            "SELECT json_extract(default_target_json, '$.seed_key') AS seed_key "
-            "FROM exercise WHERE is_builtin = 1"
-        )
-        if r["seed_key"]
-    }
-
     neu = 0
-    for eintrag in daten["exercises"]:
-        if eintrag["key"] in vorhanden:
-            continue
-
-        uebung = Exercise(
-            name=eintrag["name"],
-            category=eintrag.get("category", ""),
-            description=eintrag.get("description", ""),
-            icon_key=eintrag.get("icon_key"),
-            is_builtin=True,
-            result_spec=SPECS.get(eintrag.get("spec", ""), SPEC_SAETZE_WDH),
-            limit_spec=eintrag.get("limit_spec", {}),
-            # Kennung, um beim nächsten Start zu erkennen, was schon da ist
-            default_target={"seed_key": eintrag["key"]},
-        )
+    for uebung in seed_laden(datei):      # baut Exercise-Objekte mit seed_id()
+        if repo.existiert(uebung.id):
+            continue                       # vorhanden → unangetastet lassen
         repo.speichern(uebung)
-        _medien_speichern(con, uebung.id, eintrag.get("media", []))
         neu += 1
-
     return neu
-
-
-def _medien_speichern(con: sqlite3.Connection, exercise_id: str, medien: list[dict]) -> None:
-    for i, m in enumerate(medien):
-        if not m.get("uri"):
-            continue  # leere Platzhalter überspringen
-        con.execute(
-            "INSERT INTO exercise_media "
-            "(id, exercise_id, kind, source, uri, title, license, sort_order) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                new_id(),
-                exercise_id,
-                m.get("kind", "video"),
-                m.get("source", "url"),
-                m["uri"],
-                m.get("title", ""),
-                m.get("license", ""),
-                i,
-            ),
-        )
 ```
 
-Test:
+Der Namensraum darf sich **nie** ändern — sonst bekämen alle mitgelieferten
+Übungen beim nächsten Start neue IDs und würden ein zweites Mal angelegt.
+
+`seed_laden()` ist bewusst von der Datenbank getrennt: Es liest das JSON und
+baut Domänenobjekte. So lässt sich der Katalog testen, ohne eine Datenbank
+anzulegen, und `seed_einspielen()` bleibt drei Zeilen Logik.
+
+Tests dazu in `tests/test_repositories.py`:
 
 ```python
-def test_seed_ist_wiederholbar(tmp_path):
-    con = oeffnen(tmp_path / "test.db")
+def test_seed_ist_wiederholbar(con) -> None:
     erste = seed_einspielen(con)
     assert erste > 0
+    assert seed_einspielen(con) == 0           # nichts Neues
+    assert len(ExerciseRepo(con).alle()) == erste
 
-    zweite = seed_einspielen(con)
-    assert zweite == 0  # nichts Neues
-    assert len(ExerciseRepo(con).alle()) == erste  # keine Duplikate
+
+def test_seed_ueberschreibt_keine_aenderungen(con) -> None:
+    seed_einspielen(con)
+    repo = ExerciseRepo(con)
+    u = repo.laden(seed_id("wadenheben"))
+    u.description = "Meine eigene Beschreibung"
+    repo.speichern(u)
+
+    seed_einspielen(con)
+    assert repo.laden(u.id).description == "Meine eigene Beschreibung"
 ```
 
 ## Zum Nachdenken

@@ -22,6 +22,8 @@ exercise ──┬── exercise_media
            └── exercise_tag ──── tag
 
 device        external_ref     outbox     tombstone
+
+app_setting   (gerätelokal, Migration 002 — wird nie synchronisiert)
 ```
 
 ## Die wichtigen Entscheidungen
@@ -57,6 +59,11 @@ Entspricht in praxis_gui `Dokumentation_Skalen_Werte`.
 | `outbox` | reihenfolgetreue Ausgangswarteschlange statt eines `dirty`-Flags |
 | `tombstone` | Grabsteine gelöschter Datensätze |
 | `consent` | Einwilligungen je Datenart |
+
+**Nicht synchronisiert** wird `app_setting`: Schlüssel/Wert-Paare, die nur
+dieses Gerät betreffen — das zuletzt aktive Profil, später Anzeige- und
+Geräteeinstellungen. Was auf einem anderen Gerät wertlos wäre, gehört dorthin
+und nirgends sonst.
 
 Dazu auf allen synchronisierten Tabellen: `origin_device_id` (Mehrgerätebetrieb),
 `revision` (serverseitig vergeben), `deleted_at` (Soft-Delete).

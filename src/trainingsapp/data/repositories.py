@@ -697,16 +697,31 @@ class SessionRepo:
         return self._zeile(zeilen[0])
 
     def satz_anhaengen(
-        self, session: Session, uebung: Exercise, feld_key: str, wert: float, tag: date
+        self,
+        session: Session,
+        uebung: Exercise,
+        feld_key: str,
+        wert: float,
+        tag: date,
+        kontext: dict[str, Any] | None = None,
     ) -> SessionEntry:
         """„+20": hängt einen Satz an den heutigen Eintrag an — oder legt ihn an.
 
         Jedes Plus ist eine Korrektur mit Verweis auf den vorherigen Stand; der
         Eintrag bleibt unveränderlich, die Historie zeigt jeden Satz.
+
+        ``kontext`` sind gewählte Ausprägungen (``{"angle": 45}``). Weicht der
+        heutige Eintrag darin ab, beginnt ein neuer — Wandsitz bei 45° wird
+        nicht an Wandsitz bei 90° angehängt.
         """
+        kontext = kontext or {}
         aktuell = self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
-        if aktuell is None or aktuell.session_id != session.id:
-            return self.eintrag_anlegen(session, uebung, {feld_key: [wert]})
+        if (
+            aktuell is None
+            or aktuell.session_id != session.id
+            or any(aktuell.result.get(k) != v for k, v in kontext.items())
+        ):
+            return self.eintrag_anlegen(session, uebung, {**kontext, feld_key: [wert]})
 
         # Stammt der heutige Eintrag aus der Zeit vor dem Satzfeld (Kopie mit
         # „sets" + Einzelwert), bekommt die Korrektur die heutige Spezifikation,

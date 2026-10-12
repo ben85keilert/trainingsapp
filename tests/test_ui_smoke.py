@@ -232,3 +232,26 @@ def test_scrollposition_ueberlebt_den_neubau(page, welt) -> None:
     assert state.scroll_offsets[f"/plan/{plan.id}"] == 420.0
     plan_view(page, state, plan)
     assert len(gestartet) == 1  # der Neubau springt zur gemerkten Stelle
+
+
+def test_planansicht_mit_mehreren_parametern(page, welt) -> None:
+    """Wdh. + Haltezeit + Winkel: Parameterwahl oben, Winkel als Kontext."""
+    from trainingsapp.core.models import Exercise
+    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+    from trainingsapp.ui.views.plan import plan_view
+
+    state, plan, *_ = welt
+    wandsitz = Exercise(
+        name="Wandsitz",
+        result_spec=ResultSpec(
+            fields=[vorrat_feld("reps"), vorrat_feld("hold"), vorrat_feld("angle")]
+        ),
+    )
+    state.uebungen.speichern(wandsitz)
+    item = state.plaene.uebung_hinzufuegen(plan.id, wandsitz.id, {"angle": 45})
+    plan = state.plaene.laden(plan.id)
+    for stufe in ("chips", "frei"):
+        state.plaene.eingabe_setzen(item.id, stufe)
+        state.parameter_wahl[item.id] = "hold"
+        assert plan_view(page, state, state.plaene.laden(plan.id)) is not None
+    assert state.auspraegung_wahl[item.id] == {"angle": 45}  # aus dem Ziel vorgewählt

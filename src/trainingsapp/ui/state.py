@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from trainingsapp.config import datenbankpfad
 from trainingsapp.core.models import Subject, jetzt, lokaler_tag
@@ -68,6 +69,10 @@ class AppState:
     #: Scrollposition je scrollbarer Fläche (Schlüssel meist die Route) — damit
     #: der Neubau nach einem Tipp nicht wieder oben beginnt
     scroll_offsets: dict[str, float] = field(default_factory=dict)
+    #: Planansicht: je Planübung der gewählte Parameter („reps", „hold" …) und
+    #: die gewählten Ausprägungen ({"angle": 45}) — nur für diese Sitzung
+    parameter_wahl: dict[str, str] = field(default_factory=dict)
+    auspraegung_wahl: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: Baut den Ansichtsstapel zur aktuellen Route neu — setzt `app.main()`.
     #: Views rufen es nach Änderungen, die die Route nicht wechseln (ein Tipp
     #: auf „gemacht" bleibt auf derselben Planansicht).

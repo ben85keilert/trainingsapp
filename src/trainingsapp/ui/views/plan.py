@@ -7,6 +7,10 @@ bestimmt die Eingabestufe der Planübung (`PlanItem.input_mode`):
 - immer: „Gemacht“ (nur abhaken) und, wenn ein Ziel gesetzt ist, „Wie geplant“.
 - Chips: ``+10 +15 +20`` hängen einen Satz an den heutigen Eintrag an.
 - Frei: ein Feld in der Notation (``3x15``, ``+20``) mit „Eintragen“.
+- Liefert die Übung mehrere Parameter (Wiederholungen *und* Haltezeit), wählt
+  man oben den Parameter; darunter erscheinen dessen Chips bzw. das Feld.
+  Ausprägungen (Winkel, Gewicht, Seite) wählt man vorher als Kontext — sie
+  wandern in jeden Eintrag und trennen ihn (45° ≠ 90°, siehe `core/parameter.py`).
 - immer: „Mehr …" für das volle Formular mit Notiz, und das Info-Symbol für
   Beschreibung und Videos der Übung.
 
@@ -36,7 +40,8 @@ from trainingsapp.core.models import (
     PlanItem,
     SessionEntry,
 )
-from trainingsapp.core.result_spec import FieldSpec, FieldType, format_wert
+from trainingsapp.core.parameter import kontextfelder, leistungsfelder
+from trainingsapp.core.result_spec import FieldSpec, FieldType, format_wert, ist_leer
 from trainingsapp.core.units import parse_dauer, parse_sets
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
@@ -102,6 +107,22 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
         page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name}: {text}")))
         auffrischen()
 
+    def kontext(item: PlanItem, uebung: Exercise) -> dict[str, Any]:
+        """Gewählte Ausprägungen — sonst aus dem Ziel, sonst wie beim letzten Mal."""
+        felder = kontextfelder(uebung.result_spec)
+        if not felder:
+            return {}
+        if item.id not in state.auspraegung_wahl:
+            quelle = item.target
+            if not any(not ist_leer(item.target.get(f.key)) for f in felder):
+                letzter = state.sitzungen.letzter_eintrag(state.profil.id, uebung.id)
+                quelle = letzter.result if letzter is not None else {}
+            state.auspraegung_wahl[item.id] = {
+                f.key: quelle[f.key] for f in felder if not ist_leer(quelle.get(f.key))
+            }
+        keys = {f.key for f in felder}
+        return {k: v for k, v in state.auspraegung_wahl[item.id].items() if k in keys}
+
     def eintragen(item: PlanItem, result: dict[str, Any]) -> None:
         uebung = katalog[item.exercise_id]
         session = state.sitzungen.session_fuer(state.profil.id, plan.id, heute)
@@ -112,19 +133,21 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
         session = state.sitzungen.session_fuer(state.profil.id, plan.id, heute)
         eintrag = None
         for wert in werte:
-            eintrag = state.sitzungen.satz_anhaengen(session, uebung, feld.key, wert, heute)
+            eintrag = state.sitzungen.satz_anhaengen(
+                session, uebung, feld.key, wert, heute, kontext(item, uebung)
+            )
         if eintrag is not None:
             melden(uebung, eintrag)
 
     def erlediger(item: PlanItem) -> Callable[[], None]:
         def handler() -> None:
-            eintragen(item, {})
+            eintragen(item, kontext(item, katalog[item.exercise_id]))
 
         return handler
 
     def ziel_erlediger(item: PlanItem) -> Callable[[], None]:
         def handler() -> None:
-            eintragen(item, dict(item.target))
+            eintragen(item, {**kontext(item, katalog[item.exercise_id]), **item.target})
 
         return handler
 
@@ -133,7 +156,28 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
             if feld.type == FieldType.SET_LIST:
                 anhaengen(item, feld, [float(wert)])
             else:
-                eintragen(item, {**item.target, feld.key: wert})
+                zusatz = kontext(item, katalog[item.exercise_id])
+                eintragen(item, {**item.target, **zusatz, feld.key: wert})
+
+        return handler
+
+    def parameter_waehler(item: PlanItem, key: str) -> Callable[[], None]:
+        def handler() -> None:
+            state.parameter_wahl[item.id] = key
+            auffrischen()
+
+        return handler
+
+    def auspraegung_waehler(item: PlanItem, key: str, wert: Any) -> Callable[[], None]:
+        """Ein Tipp wählt die Ausprägung, ein zweiter hebt die Wahl auf."""
+
+        def handler() -> None:
+            gewaehlt = state.auspraegung_wahl.setdefault(item.id, {})
+            if gewaehlt.get(key) == wert:
+                gewaehlt.pop(key)
+            else:
+                gewaehlt[key] = wert
+            auffrischen()
 
         return handler
 
@@ -148,6 +192,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
                 eingabe.error = "Wert?"
                 page.update()
                 return
+            zusatz = kontext(item, katalog[item.exercise_id])
             if feld.type == FieldType.SET_LIST:
                 werte = parse_sets(text, zeit=(feld.unit == "s"))
                 if werte is None:
@@ -157,7 +202,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
                 if text.startswith("+"):
                     anhaengen(item, feld, werte)
                 else:
-                    eintragen(item, {**item.target, feld.key: werte})
+                    eintragen(item, {**item.target, **zusatz, feld.key: werte})
                 return
             if feld.type == FieldType.DURATION:
                 wert: Any = parse_dauer(text)
@@ -171,7 +216,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
                 eingabe.error = "Ungültig"
                 page.update()
                 return
-            eintragen(item, {**item.target, feld.key: wert})
+            eintragen(item, {**item.target, **zusatz, feld.key: wert})
 
         return handler
 
@@ -274,15 +319,79 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
             ],
         )
 
+    def gewaehltes_feld(item: PlanItem, uebung: Exercise) -> FieldSpec | None:
+        """Der Parameter, dessen Chips gerade unten stehen."""
+        leistung = leistungsfelder(uebung.result_spec)
+        if not leistung:
+            return None
+        nach_key = {f.key: f for f in leistung}
+        if (key := state.parameter_wahl.get(item.id)) in nach_key:
+            return nach_key[key]
+        haupt = hauptfeld(uebung)
+        return nach_key.get(haupt.key, leistung[0]) if haupt else leistung[0]
+
+    def auswahl_chip(text: str, gewaehlt: bool, on_click: Callable[[], None]) -> ft.Control:
+        return ft.Chip(
+            label=ft.Text(text, weight=ft.FontWeight.W_600 if gewaehlt else None),
+            selected=gewaehlt,
+            show_checkmark=False,
+            on_click=on_click,
+        )
+
+    def auswahl_zeilen(item: PlanItem, uebung: Exercise, feld: FieldSpec) -> list[ft.Control]:
+        """Oben: welcher Parameter? Darunter: welche Ausprägung (45° / 90°)?"""
+        zeilen: list[ft.Control] = []
+        leistung = leistungsfelder(uebung.result_spec)
+        if len(leistung) > 1:
+            zeilen.append(
+                ft.Row(
+                    wrap=True,
+                    spacing=6,
+                    run_spacing=6,
+                    controls=[
+                        ft.Text("Eintragen als:", size=12, opacity=0.7),
+                        *[
+                            auswahl_chip(f.label, f.key == feld.key, parameter_waehler(item, f.key))
+                            for f in leistung
+                        ],
+                    ],
+                )
+            )
+        gewaehlt = kontext(item, uebung)
+        for f in kontextfelder(uebung.result_spec):
+            optionen = item.quick.get(f.key) or f.quick
+            if not optionen:
+                continue
+            zeilen.append(
+                ft.Row(
+                    wrap=True,
+                    spacing=6,
+                    run_spacing=6,
+                    controls=[
+                        ft.Text(f"{f.label}:", size=12, opacity=0.7),
+                        *[
+                            auswahl_chip(
+                                chip_text(f, q),
+                                gewaehlt.get(f.key) == q,
+                                auspraegung_waehler(item, f.key, q),
+                            )
+                            for q in optionen
+                        ],
+                    ],
+                )
+            )
+        return zeilen
+
     def eingabe_knoepfe(item: PlanItem, uebung: Exercise) -> list[ft.Control]:
-        """Die zweite Reihe: je nach Stufe Chips oder Feld."""
-        feld = hauptfeld(uebung)
+        """Unter den Knöpfen: Parameterwahl, Ausprägung, dann Chips oder Feld."""
+        feld = gewaehltes_feld(item, uebung)
         if feld is None or item.input_mode == EINGABE_HAKEN:
             return []
+        auswahl = auswahl_zeilen(item, uebung, feld)
         if item.input_mode == EINGABE_CHIPS:
             werte = item.quick.get(feld.key) or feld.quick
             if not werte:
-                return []
+                return auswahl
             praefix = "+" if feld.type == FieldType.SET_LIST else ""
             beschriftung = (
                 f"{feld.label} je Satz anhängen:"
@@ -290,6 +399,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
                 else f"{feld.label} eintragen:"
             )
             return [
+                *auswahl,
                 ft.Text(beschriftung, size=12, opacity=0.7),
                 ft.Row(
                     wrap=True,
@@ -327,6 +437,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
         if feld.type == FieldType.SET_LIST:
             reihe.append(hilfe_knopf(page))
         return [
+            *auswahl,
             ft.Text(
                 f"{feld.label}{' je Satz' if feld.type == FieldType.SET_LIST else ''}:",
                 size=12,

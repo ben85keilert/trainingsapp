@@ -497,6 +497,28 @@ def test_satz_anhaengen_nach_gemacht(welt) -> None:
     assert len(repo.eintraege(sitzung.id)) == 1
 
 
+def test_satz_anhaengen_trennt_nach_auspraegung(welt) -> None:
+    """Wandsitz bei 45° wird nicht an Wandsitz bei 90° angehängt."""
+    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+
+    con, repo, _ich, sitzung = welt
+    wandsitz = Exercise(
+        name="Wandsitz",
+        result_spec=ResultSpec(fields=[vorrat_feld("hold"), vorrat_feld("angle")]),
+    )
+    ExerciseRepo(con).speichern(wandsitz)
+    heute = lokaler_tag(jetzt())
+    repo.satz_anhaengen(sitzung, wandsitz, "hold", 30, heute, {"angle": 90})
+    repo.satz_anhaengen(sitzung, wandsitz, "hold", 40, heute, {"angle": 90})
+    e = repo.satz_anhaengen(sitzung, wandsitz, "hold", 60, heute, {"angle": 45})
+
+    assert e.result == {"angle": 45, "hold": [60]}
+    assert sorted(str(x.result) for x in repo.eintraege(sitzung.id)) == [
+        "{'angle': 45, 'hold': [60]}",
+        "{'angle': 90, 'hold': [30, 40]}",
+    ]
+
+
 def test_tags_speichern_und_laden(repo, con) -> None:
     u = Exercise(name="A", tags=["Arm", "Rumpf"])
     repo.speichern(u)

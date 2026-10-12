@@ -1,10 +1,11 @@
 """Übung anlegen oder bearbeiten — Route `/uebung/neu` bzw. `/uebung/<id>/bearbeiten`.
 
-Die Felder einer Übung kommen aus dem **Feldvorrat** (`core/result_spec.py`):
+Die Parameter einer Übung kommen aus dem **Feldvorrat** (`core/result_spec.py`):
 Jedes Feld bringt Typ und Einheit mit, hier schaltet man es ein und legt die
-Chips fest. Vorlagen sind ein Schnellstart, der die Schalter setzt. Felder,
-die eine Übung aus früheren Zeiten trägt und die nicht im Vorrat stehen,
-bleiben erhalten.
+Chips fest. Was eingeschaltet ist, kann man in der Ausführung als geleistet
+antippen. (Vorlagen gibt es im Editor nicht mehr — die Schalter sind schneller
+als ein Umweg.) Felder, die eine Übung aus früheren Zeiten trägt und die nicht
+im Vorrat stehen, bleiben erhalten.
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ import flet as ft
 from trainingsapp.core.models import REGIONEN, TYPEN, Exercise, Media, MediaKind, MediaSource
 from trainingsapp.core.result_spec import (
     FELDVORRAT,
-    VORLAGEN,
     FieldSpec,
     FieldType,
     Layout,
@@ -77,6 +77,8 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     neu = uebung is None
     route = "/uebung/neu" if uebung is None else f"/uebung/{uebung.id}/bearbeiten"
     vorhanden = {f.key: f for f in (uebung.result_spec.fields if uebung else [])}
+    # Eine neue Übung beginnt mit Wiederholungen — der häufigste Fall.
+    eingeschaltet = set(vorhanden) if uebung is not None else {"reps"}
 
     # -- Stammdaten --------------------------------------------------------
 
@@ -141,7 +143,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         return handler
 
     for vorlage in FELDVORRAT:
-        aktiv = vorlage.key in vorhanden
+        aktiv = vorlage.key in eingeschaltet
         quelle = vorhanden.get(vorlage.key, vorlage)
         schalter[vorlage.key] = ft.Switch(
             label=f"{vorlage.label}{f' ({vorlage.unit})' if vorlage.unit else ''}",
@@ -180,24 +182,6 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                 opacity=0.6,
             )
         )
-
-    def vorlage_laden(e: ft.Event[ft.Dropdown]) -> None:
-        _, spec = VORLAGEN[e.control.value or "saetze_wdh"]
-        keys = {f.key: f for f in spec.fields}
-        for key, sw in schalter.items():
-            sw.value = key in keys
-            if key in keys:
-                chipfelder[key].value = chips_text(keys[key].quick)
-            if key in chipfelder and schalter[key].label:
-                sichtbarkeit(key)()
-        page.update()
-
-    vorlage_auswahl = ft.Dropdown(
-        label="Vorlage laden (setzt die Schalter)",
-        options=[ft.DropdownOption(key=k, text=t) for k, (t, _) in VORLAGEN.items()],
-        on_select=vorlage_laden,
-        expand=True,
-    )
 
     # -- Symbolauswahl -------------------------------------------------------
 
@@ -364,8 +348,14 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                             controls=list(region_chips.values()),
                         ),
                         weitere_tags,
-                        abschnitt("WAS WIRD EINGEGEBEN?", hilfe_knopf(page)),
-                        ft.Row(controls=[vorlage_auswahl]),
+                        abschnitt("PARAMETER — WAS KANN MAN LEISTEN?", hilfe_knopf(page)),
+                        ft.Text(
+                            "Eingeschaltete Parameter tippst du beim Training als geleistet an. "
+                            "Winkel, Gewicht und Seite beschreiben die Ausführung und trennen "
+                            "Einträge (45° ≠ 90°); Wiederholungen und Zeiten werden addiert.",
+                            size=12,
+                            opacity=0.7,
+                        ),
                         ft.Column(spacing=6, controls=zeilen),
                         abschnitt("SYMBOL"),
                         symbole,

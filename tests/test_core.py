@@ -204,7 +204,7 @@ def test_unbekannte_regel_legt_nichts_lahm() -> None:
 
 def test_migration_erzeugt_das_schema(tmp_path) -> None:
     con = oeffnen(tmp_path / "test.db")
-    assert schema_version(con) == 6
+    assert schema_version(con) == 7
 
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     for erwartet in (
@@ -233,8 +233,8 @@ def test_migration_ist_wiederholbar(tmp_path) -> None:
     """Ein zweiter Lauf darf nichts tun und nicht scheitern."""
     pfad = tmp_path / "test.db"
     con = oeffnen(pfad)
-    assert migrieren(con) == 6
-    assert migrieren(con) == 6
+    assert migrieren(con) == 7
+    assert migrieren(con) == 7
     con.close()
 
 
@@ -294,3 +294,58 @@ def test_kurve_punkte_beide_achsen() -> None:
     assert [(x, y) for x, y, _ in zeit] == [(0.0, 10.0), (7.0, 12.0), (21.0, 15.0)]
     assert nummer[0][2] == "01.01."
     assert kurve_punkte([]) == []
+
+
+# ---------------------------------------------------------------------------
+# Tagesbilanz: bündeln, addieren, abgehakt getrennt
+# ---------------------------------------------------------------------------
+
+
+def test_dreimal_fuenfzig_sind_hundertfuenfzig() -> None:
+    from trainingsapp.core.models import SessionEntry
+    from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    from trainingsapp.core.tagesbilanz import buendeln
+
+    eintraege = [
+        SessionEntry(exercise_id="lgs", result={"reps": [50]}, spec_snapshot=SPEC_SAETZE_WDH)
+        for _ in range(3)
+    ]
+    (b,) = buendeln(eintraege)
+    assert b.summen == {"reps": 150.0}
+    assert b.leistung_text() == "150 Wdh."
+    assert b.einzelwerte_text() == "50 · 50 · 50"
+
+
+def test_auspraegung_trennt_und_abgehakt_bleibt_getrennt() -> None:
+    from trainingsapp.core.models import SessionEntry
+    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+    from trainingsapp.core.tagesbilanz import buendeln
+
+    spec = ResultSpec(fields=[vorrat_feld("hold"), vorrat_feld("angle")])
+
+    def e(**werte):
+        return SessionEntry(exercise_id="wandsitz", result=werte, spec_snapshot=spec)
+
+    neunzig, fuenfundvierzig = buendeln(
+        [e(hold=[30], angle=90), e(hold=[45], angle=45), e(hold=[40], angle=90), e(angle=90)]
+    )
+    assert neunzig.auspraegung_text() == "90°"
+    assert neunzig.summen == {"hold": 70.0}
+    assert len(neunzig.leistungen) == 2 and len(neunzig.abgehakt) == 1
+    assert neunzig.zusammenfassung() == "1:10 Haltezeit aus 2 Einträgen · zusätzlich abgehakt"
+    assert fuenfundvierzig.summen == {"hold": 45.0}
+
+    (nur,) = buendeln([e(), e()])
+    assert nur.zusammenfassung() == "2× abgehakt"
+
+
+def test_kachel_fasst_varianten_zusammen() -> None:
+    from trainingsapp.core.models import Exercise
+    from trainingsapp.core.tagesbilanz import kachel
+
+    original = Exercise(name="Liegestütz")
+    variante = Exercise(name="Liegestütz eng", family_id=original.id)
+    eigen = Exercise(name="Liegestütz einarmig")
+    assert kachel(variante, variante.id) == kachel(original, original.id) == original.id
+    assert kachel(eigen, eigen.id) == eigen.id
+    assert kachel(None, "weg") == "weg"

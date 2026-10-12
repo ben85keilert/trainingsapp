@@ -52,3 +52,28 @@ das und wählt je Übung die Stufe — nur abhaken, Chips, Freieingabe — und d
 Chips und Ziel setzen. Der **Eintrag** übernimmt den Plan und darf im Formular
 wieder abweichen. Was unten anders gemacht wurde, sieht man hinterher und kann
 den Plan anpassen.
+Plan und Übung tauschen sich nur ausdrücklich aus: „Als Standard der Übung
+setzen“ und „Standard der Übung übernehmen“ in der Planübung (`core/standards.py`).
+
+## Menge, Ausprägung, Bündeln
+
+Jedes Feld hat eine Rolle (`core/parameter.py`):
+
+| Rolle | Felder | Wirkung |
+|---|---|---|
+| **Menge** | Wiederholungen, Haltezeit, Zeit gesamt, Strecke | wird addiert: 3 × 50 Liegestütze = 150 |
+| **Ausprägung** | Winkel, Gewicht, Seite | trennt: Wandsitz 45° ≠ Wandsitz 90° |
+| **Beiwerk** | Skala, Freitext, Ja/Nein | wird mitgeschrieben, weder addiert noch trennend |
+
+Im Plan wählt man Ausprägungen *vor* dem Eintragen (Chips „Winkel: 45° 90°“);
+sie wandern in jeden Eintrag. Ein „+30“ bei 45° hängt nie an den 90°-Eintrag an.
+
+Die Tagesansicht bündelt „Nach Plan“ und „Nach Übung“ je **Übung + Ausprägung**
+und addiert die Mengen (`core/tagesbilanz.py`). Ein Eintrag ohne Menge ist
+**abgehakt** (leerer Haken) und wird getrennt ausgewiesen: „150 Wdh. aus 3
+Einträgen · zusätzlich abgehakt“. „Chronologisch“ zeigt jeden Eintrag einzeln.
+
+**Varianten** (Migration 007): Eine Kopie einer Übung ist eine Variante
+(`exercise.family_id`) und teilt sich im Verlauf die Kachel des Originals. Wer
+eine Variante getrennt führen will (Liegestütz einarmig), macht sie im Editor
+eigenständig.

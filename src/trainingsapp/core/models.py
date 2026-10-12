@@ -129,6 +129,9 @@ class Exercise:
     updated_at: datetime = field(default_factory=jetzt)
     #: Im Papierkorb seit (Migration 005) — ``None`` = nicht gelöscht
     deleted_at: datetime | None = None
+    #: Variante von … (Migration 007): gleiche Kachel im Verlauf; ``None`` =
+    #: eigene Kachel. Zeigt immer auf das Original, nie auf eine andere Variante.
+    family_id: str | None = None
 
 
 # ---------------------------------------------------------------------------

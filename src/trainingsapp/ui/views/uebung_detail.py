@@ -65,18 +65,26 @@ def uebung_detail(
         await page.push_route(f"/uebung/{uebung.id}/bearbeiten")
 
     async def duplizieren() -> None:
-        """Kopie als eigene Übung — für „links/rechts“ oder eine abweichende Variante."""
+        """Kopie als Variante — für „links/rechts“, 45° statt 90° und Ähnliches.
+
+        Eine Kopie gehört zur Kachel des Originals: Im Verlauf addieren sich ihre
+        Mengen, die Variante wird ausgewiesen. Im Editor lässt sie sich
+        eigenständig machen (Liegestütz einarmig ist eine eigene Liste wert).
+        """
         kopie = replace(
             uebung,
             id=new_id(),
-            name=f"{uebung.name} (Kopie)",
+            name=f"{uebung.name} (Variante)",
             is_builtin=False,
             media=[replace(m, id=new_id()) for m in uebung.media],
             tags=list(uebung.tags),
             archived=False,
+            family_id=uebung.family_id or uebung.id,
         )
         state.uebungen.speichern(kopie)
-        page.show_dialog(ft.SnackBar(ft.Text("Kopie angelegt — jetzt anpassen")))
+        page.show_dialog(
+            ft.SnackBar(ft.Text("Variante angelegt — gleiche Kachel im Verlauf. Jetzt anpassen."))
+        )
         await page.push_route(f"/uebung/{kopie.id}/bearbeiten")
 
     def abbrechen() -> None:
@@ -124,6 +132,19 @@ def uebung_detail(
             ft.FilledButton("Archivieren", on_click=archivieren),
         ],
     )
+
+    def familien_text() -> str:
+        if uebung.family_id:
+            original = state.uebungen.laden(uebung.family_id, mit_geloeschten=True)
+            name = original.name if original else "?"
+            return (
+                f"Variante von „{name}“ — im Verlauf eine Kachel, Mengen werden addiert, "
+                "die Variante wird ausgewiesen."
+            )
+        varianten = state.uebungen.varianten(uebung.id)
+        if varianten:
+            return "Varianten in derselben Kachel: " + ", ".join(v.name for v in varianten)
+        return "Eigene Kachel. Eine Kopie (oben) wird zur Variante dieser Übung."
 
     # -- Standard für Pläne und Verwendungen -------------------------------------
 
@@ -218,6 +239,7 @@ def uebung_detail(
             else ft.Text("—"),
         ),
         _abschnitt("Eingabe", _notation(uebung)),
+        _abschnitt("Varianten", ft.Text(familien_text())),
         _abschnitt("Standard für Pläne", ft.Column(spacing=0, controls=verwendungen)),
         _abschnitt(
             "Videos",
@@ -241,7 +263,9 @@ def uebung_detail(
         appbar=ft.AppBar(
             title=ft.Text(uebung.name),
             actions=[
-                ft.IconButton(ft.Icons.CONTENT_COPY, tooltip="Duplizieren", on_click=duplizieren),
+                ft.IconButton(
+                    ft.Icons.CONTENT_COPY, tooltip="Variante anlegen (Kopie)", on_click=duplizieren
+                ),
                 ft.IconButton(ft.Icons.EDIT_OUTLINED, tooltip="Bearbeiten", on_click=bearbeiten),
                 ft.IconButton(
                     ft.Icons.DELETE_OUTLINE,

@@ -72,8 +72,9 @@ class ExerciseRepo:
                 INSERT INTO exercise
                     (id, name, category, description, icon_key, image_path,
                      is_builtin, result_spec_json, limit_spec_json,
-                     default_target_json, default_input_mode, archived, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     default_target_json, default_input_mode, archived, created_at, updated_at,
+                     family_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -85,6 +86,7 @@ class ExerciseRepo:
                     default_target_json = excluded.default_target_json,
                     default_input_mode = excluded.default_input_mode,
                     archived = excluded.archived,
+                    family_id = excluded.family_id,
                     updated_at = excluded.updated_at,
                     revision = revision + 1
                 """,
@@ -103,6 +105,7 @@ class ExerciseRepo:
                     int(uebung.archived),
                     uebung.created_at.isoformat(),
                     uebung.updated_at.isoformat(),
+                    uebung.family_id,
                 ),
             )
             # Medien: alle Verweise neu schreiben. Einfacher als Abgleich, und
@@ -184,6 +187,15 @@ class ExerciseRepo:
         zeilen = self.con.execute(
             "SELECT * FROM exercise WHERE archived = 1 AND deleted_at IS NULL "
             "ORDER BY name COLLATE NOCASE"
+        )
+        return [self._zeile(r) for r in zeilen]
+
+    def varianten(self, uebung_id: str) -> list[Exercise]:
+        """Die Varianten eines Originals (ohne das Original selbst)."""
+        zeilen = self.con.execute(
+            "SELECT * FROM exercise WHERE family_id = ? AND deleted_at IS NULL "
+            "ORDER BY name COLLATE NOCASE",
+            (uebung_id,),
         )
         return [self._zeile(r) for r in zeilen]
 
@@ -402,6 +414,7 @@ class ExerciseRepo:
             created_at=datetime.fromisoformat(r["created_at"]),
             updated_at=datetime.fromisoformat(r["updated_at"]),
             deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
+            family_id=r["family_id"],
         )
 
 

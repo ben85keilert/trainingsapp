@@ -42,6 +42,7 @@ from trainingsapp.core.models import (
 )
 from trainingsapp.core.parameter import kontextfelder, leistungsfelder
 from trainingsapp.core.result_spec import FieldSpec, FieldType, format_wert, ist_leer
+from trainingsapp.core.tagesbilanz import buendeln
 from trainingsapp.core.units import parse_dauer, parse_sets
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
@@ -88,6 +89,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
     bearbeiten = plan.id in state.plan_bearbeiten
     heute = state.heute()
     anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute)
+    tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute)]
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
     gemacht = sum(1 for item in plan.items if anzahl.get(item.exercise_id))
 
@@ -95,8 +97,9 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
 
     def auffrischen() -> None:
         """Stand neu lesen und die Blöcke in derselben Liste ersetzen."""
-        nonlocal anzahl, gemacht
+        nonlocal anzahl, gemacht, tages_eintraege
         anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute)
+        tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute)]
         gemacht = sum(1 for item in plan.items if anzahl.get(item.exercise_id))
         stand.value = stand_text()
         liste.controls = [block(item) for item in plan.items]
@@ -277,27 +280,33 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
 
     # -- Blöcke ----------------------------------------------------------------
 
-    def status_heute(uebung: Exercise, item: PlanItem, n: int) -> ft.Control:
-        """„heute: 15/15/20 · 50 Wdh. in 3 Sätzen“ oder „heute 2× gemacht“."""
-        if not n:
+    def status_heute(uebung: Exercise) -> ft.Control:
+        """Was heute schon da ist — gebündelt wie in der Tagesansicht.
+
+        „heute: 150 Wdh. aus 3 Einträgen“, je Ausprägung eine Zeile; Abgehaktes
+        ohne Werte steht getrennt dahinter, damit man Leistung und Haken
+        auseinanderhält.
+        """
+        buendel = buendeln(e for e in tages_eintraege if e.exercise_id == uebung.id)
+        if not buendel:
             return ft.Container()
-        eintrag = state.sitzungen.heutiger_eintrag(state.profil.id, uebung.id, heute, plan.id)
-        text = f"{n}× gemacht" if n > 1 else "gemacht"
-        if eintrag is not None and eintrag.result:
-            text = eintrag.shorthand()
-            if (
-                zusatz := eintrag.spec_snapshot.zusammenfassung(eintrag.result)
-                if eintrag.spec_snapshot
-                else ""
-            ):
-                text += f"  ·  {zusatz}"
-            if n > 1:
-                text += f"  ·  {n} Einträge"
+        zeilen: list[ft.Control] = []
+        for b in buendel:
+            text = b.zusammenfassung()
+            if zusatz := b.auspraegung_text():
+                text = f"{zusatz}: {text}"
+            zeilen.append(ft.Text(f"heute: {text}", size=13, color=ft.Colors.PRIMARY))
+        leistung = any(b.leistungen for b in buendel)
         return ft.Row(
             spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.START,
             controls=[
-                ft.Icon(ft.Icons.CHECK_CIRCLE, color=ft.Colors.PRIMARY, size=18),
-                ft.Text(f"heute: {text}", size=13, color=ft.Colors.PRIMARY, expand=True),
+                ft.Icon(
+                    ft.Icons.CHECK_CIRCLE if leistung else ft.Icons.CHECK_CIRCLE_OUTLINE,
+                    color=ft.Colors.PRIMARY,
+                    size=18,
+                ),
+                ft.Column(spacing=0, expand=True, controls=zeilen),
             ],
         )
 
@@ -489,7 +498,7 @@ def plan_view(page: ft.Page, state: AppState, plan: Plan) -> ft.View:
                 )
             )
         else:
-            inhalt.append(status_heute(uebung, item, n))
+            inhalt.append(status_heute(uebung))
             erste: list[ft.Control] = [
                 _knopf("Gemacht", ft.Icons.CHECK, erlediger(item), betont=not ziel)
             ]

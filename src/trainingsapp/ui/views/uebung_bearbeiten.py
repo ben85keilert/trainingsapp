@@ -39,6 +39,9 @@ from trainingsapp.ui.components.icons import AUSWAHL, symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
 
+#: Auswahlwert „keine Variante" — ein leerer Schlüssel ist im Dropdown heikel
+EIGENSTAENDIG = "eigenstaendig"
+
 KENNZAHL_TYPEN = {
     FieldType.SET_LIST,
     FieldType.INT,
@@ -204,6 +207,27 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         ],
     )
 
+    # -- Kachel im Verlauf -----------------------------------------------------
+    # Eine Variante zeigt auf ein Original; wer selbst Varianten hat, ist ein
+    # Original und kann nicht gleichzeitig Variante sein (keine Ketten).
+
+    eigene_varianten = state.uebungen.varianten(uebung.id) if uebung else []
+    originale = [
+        u
+        for u in state.uebungen.alle(mit_archivierten=True)
+        if u.family_id is None and (uebung is None or u.id != uebung.id)
+    ]
+    familie = ft.Dropdown(
+        label="Kachel im Verlauf",
+        value=uebung.family_id if uebung and uebung.family_id else EIGENSTAENDIG,
+        options=[
+            ft.DropdownOption(key=EIGENSTAENDIG, text="Eigenständig (eigene Liste)"),
+            *[ft.DropdownOption(key=u.id, text=f"Variante von „{u.name}“") for u in originale],
+        ],
+        disabled=bool(eigene_varianten),
+        expand=True,
+    )
+
     # -- Symbolauswahl -------------------------------------------------------
 
     gewaehlt: str = uebung.icon_key if uebung and uebung.icon_key else AUSWAHL[0]
@@ -308,6 +332,8 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         ziel.category = (typ.value or "").strip()
         ziel.description = (beschreibung.value or "").strip()
         ziel.icon_key = gewaehlt
+        if not eigene_varianten:
+            ziel.family_id = None if familie.value in (None, EIGENSTAENDIG) else familie.value
         ziel.default_input_mode = (
             eingabe_standard.selected[0] if eingabe_standard.selected else EINGABE_CHIPS
         )
@@ -381,6 +407,18 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                             opacity=0.7,
                         ),
                         ft.Column(spacing=6, controls=zeilen),
+                        abschnitt("VERLAUF"),
+                        ft.Row(controls=[familie]),
+                        ft.Text(
+                            "Varianten (Wandsitz 45° und 90°) teilen sich eine Kachel: Mengen "
+                            "werden addiert, die Variante wird dazugeschrieben. Weicht eine "
+                            "Variante stark ab (Liegestütz einarmig), mach sie eigenständig."
+                            if not eigene_varianten
+                            else "Diese Übung ist das Original ihrer Varianten: "
+                            + ", ".join(v.name for v in eigene_varianten),
+                            size=12,
+                            opacity=0.7,
+                        ),
                         abschnitt("STANDARD FÜR PLÄNE"),
                         eingabe_standard,
                         ft.Text(

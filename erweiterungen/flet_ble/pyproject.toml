@@ -1,0 +1,23 @@
+[project]
+name = "flet-ble"
+version = "0.1.0"
+description = "Flet-Erweiterung: Bluetooth Low Energy (flutter_blue_plus 1.36.8) als Flet-Service, rohe Bytes nach Python"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Praxis Ebert" }]
+# Nur flet — der BLE-Teil ist Dart. Version im Gleichschritt mit der App (flet==1.0.*).
+dependencies = ["flet>=1.0.3"]
+
+# Aus der Flet-Vorlage (flet create --template extension, wie praxis_mobil/flet_dokumentscanner):
+# der Flutter-Teil landet im Wheel unter flutter/flet_ble, wo serious_python beim
+# `flet build` Erweiterungen sucht. Versteckte Dateien (.dart_tool/, .flutter-plugins*)
+# erfasst das Glob nicht.
+[tool.setuptools.package-data]
+"flutter.flet_ble" = ["**/*"]
+
+[tool.setuptools]
+license-files = []
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

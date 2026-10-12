@@ -1,0 +1,200 @@
+"""Eine laufende Messung: Quelle → Live-Fenster, während der Aufnahme auch → Aufnahme.
+
+Der `Messlauf` lebt im `AppState`, nicht in einer Ansicht (L03): Er liest den
+Datenstrom der Quelle (`HeartRateSource.stream()`) und ihren Status parallel,
+füttert immer das `LiveFenster` und während einer Aufnahme zusätzlich die
+`Aufnahme`, sichert alle 15 s ein Backup und meldet der Oberfläche über einen
+Beobachter, dass es Neues gibt. Er rechnet nichts selbst — das tun `hrv_core`
+(Aufnahme, Live-Kennzahlen) und die Quelle (Protokoll).
+
+Kein flet-Import: Der Messlauf ist ohne Bildschirm testbar (Simulator).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import hashlib
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from pathlib import Path
+
+from ..hrv_core.aufnahme import Aufnahme
+from ..hrv_core.live import LiveFenster
+from ..hrv_core.recording import Recording, messordner
+from ..hrv_core.segments import abdeckung, luecken_finden
+from .base import DeviceStatus, HeartRateSource, Messwert, PpiPaket, Verbindung
+from .profiles import GeraeteProfil, profil_fuer_namen
+
+#: Alle so viele Sekunden schreibt die Aufnahme ein Backup (praxis_gui: 15 s).
+BACKUP_S = 15.0
+
+
+@dataclass(frozen=True, slots=True)
+class Gespeichert:
+    """Was nach „Stopp & speichern" für den Datenbankeintrag gebraucht wird."""
+
+    pfad: Path
+    recording: Recording
+    sha1: str
+    started_at: datetime
+    dauer_s: float
+    abdeckung_pct: float
+    n_luecken: int
+
+
+def _sha1(pfad: Path) -> str:
+    return hashlib.sha1(pfad.read_bytes()).hexdigest()  # Prüfsumme, keine Sicherheitsfunktion
+
+
+class Messlauf:
+    """Verbindet eine Quelle mit Live-Anzeige und Aufnahme."""
+
+    def __init__(
+        self,
+        quelle: HeartRateSource,
+        *,
+        jetzt_utc: Callable[[], datetime] = lambda: datetime.now(UTC),
+        backup_basis: Path | None = None,
+    ) -> None:
+        self.quelle = quelle
+        # Die Uhr der Quelle — beim Simulator läuft sie ``tempo``-fach, bei echten
+        # Geräten ist sie time.monotonic(). t_capture der Messwerte passt dazu.
+        self._uhr: Callable[[], float] = getattr(quelle, "jetzt", time.monotonic)
+        self._jetzt_utc = jetzt_utc
+        self._backup_basis = backup_basis
+        self.live = LiveFenster()
+        self.aufnahme: Aufnahme | None = None
+        self.status = DeviceStatus(verbindung=Verbindung.GETRENNT)
+        self.device_id = ""
+        self.geraet_name = ""
+        self.profil: GeraeteProfil | None = None
+        self.simulation = False
+        #: Nullpunkt der Live-Achse (Verbindungsbeginn), monotonic
+        self.start_mono = self._uhr()
+        self._letztes_backup = 0.0
+        #: Wird mit ``layout=True`` gerufen, wenn sich die Verbindung ändert,
+        #: sonst nach neuen Messwerten. Fehler im Beobachter stoppen nichts.
+        self.beobachter: Callable[[bool], None] | None = None
+
+    # -- Zeit ------------------------------------------------------------------
+
+    def jetzt_s(self) -> float:
+        """Sekunden seit Verbindungsbeginn — die x-Achse der Live-Kurven."""
+        return self._uhr() - self.start_mono
+
+    @property
+    def verbunden(self) -> bool:
+        return self.status.verbindung in (Verbindung.VERBUNDEN, Verbindung.VERBINDE)
+
+    # -- Verbinden und Lesen ---------------------------------------------------------
+
+    async def verbinden(self, device_id: str, name: str | None = None) -> None:
+        self.device_id = device_id
+        self.geraet_name = name or device_id
+        self.simulation = device_id.startswith("sim:")
+        self.profil = profil_fuer_namen(name or "")
+        self.live.leeren()
+        self.status = DeviceStatus(verbindung=Verbindung.VERBINDE, meldung="Verbinde …")
+        await self.quelle.connect(device_id, name)
+        self.profil = self.quelle.profil or self.profil
+        self.start_mono = self._uhr()
+        self.status = self.quelle.aktueller_status
+
+    async def laufen(self) -> None:
+        """Liest, bis die Quelle endet — über `page.run_task` starten."""
+        status_task = asyncio.create_task(self._status_lesen())
+        try:
+            async for wert in self.quelle.stream():
+                if isinstance(wert, PpiPaket):
+                    if self.aufnahme is not None:
+                        self.aufnahme.ppi_paket(
+                            wert.t_capture, wert.ppi_ms, wert.fehler_ms, wert.blocker, wert.kontakt
+                        )
+                    continue
+                if not isinstance(wert, Messwert):
+                    continue
+                self.live.hinzufuegen(wert.t_capture - self.start_mono, wert.rr_ms, wert.hf_bpm)
+                if self.aufnahme is not None:
+                    self.aufnahme.schlag(wert.rr_ms, wert.hf_bpm, wert.t_capture, wert.tw_src)
+                    self._backup_wenn_faellig()
+                self._melden(False)
+        finally:
+            status_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await status_task
+            self.status = replace(self.status, verbindung=Verbindung.GETRENNT)
+            self._melden(True)
+
+    async def _status_lesen(self) -> None:
+        async for s in self.quelle.status():
+            vorher = self.status.verbindung
+            self.status = s
+            if self.aufnahme is not None and s.batterie_prozent is not None:
+                self.aufnahme.batterie_prozent = s.batterie_prozent
+            self._melden(s.verbindung != vorher)
+
+    def _melden(self, layout: bool) -> None:
+        if self.beobachter is None:
+            return
+        # Die Anzeige darf die Messung nie stoppen.
+        with contextlib.suppress(Exception):
+            self.beobachter(layout)
+
+    # -- Aufnahme -----------------------------------------------------------------
+
+    def aufnahme_starten(self) -> None:
+        if self.aufnahme is not None:
+            return
+        profil = self.profil
+        self.aufnahme = Aufnahme(
+            geraet=self.geraet_name,
+            geraet_profil=profil.id if profil else "ble_generic",
+            intervall_quelle=profil.intervall_quelle if profil else "ekg_rr",
+            start_mono=self._uhr(),
+            start_utc=self._jetzt_utc(),
+            ppi=bool(profil and profil.kann("pmd_ppi")),
+            simulation=self.simulation,
+        )
+        self.aufnahme.batterie_prozent = self.status.batterie_prozent
+        self._letztes_backup = self._uhr()
+
+    def aufnahme_dauer_s(self) -> float:
+        return self.aufnahme.dauer_s() if self.aufnahme is not None else 0.0
+
+    def _ordner(self, basis: Path) -> Path:
+        geraeteordner = self.profil.ordner if self.profil else "Unbekannt"
+        return messordner(basis, geraeteordner, simulation=self.simulation)
+
+    def _backup_wenn_faellig(self) -> None:
+        if self.aufnahme is None or self._backup_basis is None:
+            return
+        if self._uhr() - self._letztes_backup < BACKUP_S:
+            return
+        self._letztes_backup = self._uhr()
+        with contextlib.suppress(OSError):
+            self.aufnahme.backup(self._ordner(self._backup_basis))
+
+    def aufnahme_stoppen(self, basis: Path) -> Gespeichert | None:
+        """Speichert atomar und beendet die Aufnahme. ``None``, wenn nichts aufgezeichnet wurde."""
+        aufnahme, self.aufnahme = self.aufnahme, None
+        if aufnahme is None or not aufnahme.beats:
+            return None
+        pfad = aufnahme.speichern(self._ordner(basis))
+        rec = aufnahme.recording()
+        deckung = abdeckung(rec.beats, luecken_finden(rec.beats))
+        return Gespeichert(
+            pfad=pfad,
+            recording=rec,
+            sha1=_sha1(pfad),
+            started_at=aufnahme.start_utc,
+            dauer_s=aufnahme.dauer_s(),
+            abdeckung_pct=float(deckung.get("coverage_pct", 100.0)),
+            n_luecken=int(deckung.get("n_gaps", 0)),
+        )
+
+    async def trennen(self) -> None:
+        await self.quelle.disconnect()
+        self.status = replace(self.status, verbindung=Verbindung.GETRENNT)

@@ -52,6 +52,11 @@ class GeraeteProfil:
     ersttelegramm_s: float = 30.0
     hinweis_kein_signal: str = "Kein Signal — sitzt der Sensor richtig?"
     ausreisser_schwelle: float = MALIK_THRESHOLD_EKG
+    #: Verlangt das Gerät eine Bluetooth-Kopplung (Bonding)? Der Verity Sense
+    #: schickt direkt nach dem Verbinden eine Sicherheitsanfrage; ohne Kopplung
+    #: trennt er nach wenigen Sekunden. `PolarQuelle` ruft dafür
+    #: ``BleTransport.bond()`` (Android: ``createBond``). Wie in praxis_gui.
+    kopplung_noetig: bool = False
     hinweise: tuple[str, ...] = field(default_factory=tuple)
 
     def kann(self, *caps: str) -> bool:
@@ -109,6 +114,7 @@ VERITY_SENSE = GeraeteProfil(
         "Sitzt das Armband fest genug? Der optische Sensor braucht Hautkontakt ohne Luftspalt."
     ),
     ausreisser_schwelle=MALIK_THRESHOLD_PPI,
+    kopplung_noetig=True,
     hinweise=(
         "Puls-zu-Puls-Intervalle sind nicht dasselbe wie RR aus dem EKG: die "
         "Pulswellenlaufzeit schwankt mit Blutdruck und Gefäßtonus.",
@@ -224,6 +230,12 @@ def profil_fuer_namen(name: str) -> GeraeteProfil:
 
     >>> profil_fuer_namen("Polar H10 A1B2C3").id
     'polar_h10'
+    >>> profil_fuer_namen("Polar H10 ABC123").id
+    'polar_h10'
+    >>> profil_fuer_namen("Polar Sense ABC123").id    # so meldet sich der Verity Sense
+    'verity_sense'
+    >>> profil_fuer_namen("Polar Verity Sense 1A2B3C4D").kopplung_noetig
+    True
     >>> profil_fuer_namen("Forerunner 955").id
     'watch_broadcast'
     >>> profil_fuer_namen("Irgendein Gurt").id

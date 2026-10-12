@@ -926,3 +926,49 @@ def test_plan_fuer_einen_tag_aufnehmen_und_entfernen(welt) -> None:
     # … und wieder aufnehmen
     repo.session_fuer(ich.id, leer.id, heute)
     assert repo.plaene_am_tag(ich.id, heute)[leer.id] == 0
+
+
+# ---------------------------------------------------------------------------
+# HRV-Aufzeichnungen (Verweise auf Messdateien)
+# ---------------------------------------------------------------------------
+
+
+def test_hrv_repo_anlegen_listen_laden(con, tmp_path) -> None:
+    from trainingsapp.core.models import HrvRecording
+    from trainingsapp.data.repositories import HrvRepo, datei_sha1
+
+    ich = Subject(name="Ich")
+    SubjectRepo(con).speichern(ich)
+    datei = tmp_path / "sensor.json"
+    datei.write_text('{"schema": "raw-v1"}', encoding="utf-8")
+    repo = HrvRepo(con)
+    alt = HrvRecording(
+        subject_id=ich.id,
+        file_path="PolarH10/sensor_a.json",
+        sha1=datei_sha1(datei),
+        geraet="Polar H10 ABC",
+        geraet_profil="polar_h10",
+        started_at=datetime(2026, 10, 12, 7, 0, tzinfo=UTC),
+        duration_s=300.0,
+    )
+    neu = HrvRecording(
+        subject_id=ich.id,
+        file_path="VeritySense/sensor_b.json",
+        geraet_profil="verity_sense",
+        intervall_quelle="ppg_ppi",
+        datenqualitaet="ppi_optisch",
+        started_at=datetime(2026, 10, 13, 7, 0, tzinfo=UTC),
+    )
+    repo.anlegen(alt)
+    repo.anlegen(neu)
+
+    assert [a.file_path for a in repo.alle(ich.id)] == [neu.file_path, alt.file_path]
+    geladen = repo.laden(alt.id)
+    assert geladen.geraet_profil == "polar_h10" and geladen.duration_s == 300.0
+    assert len(geladen.sha1) == 40
+
+    repo.notiz_setzen(alt.id, " Atemübung 6/min ")
+    assert repo.laden(alt.id).note == "Atemübung 6/min"
+    repo.loeschen(neu.id)
+    assert [a.id for a in repo.alle(ich.id)] == [alt.id]
+    assert repo.laden(neu.id) is None

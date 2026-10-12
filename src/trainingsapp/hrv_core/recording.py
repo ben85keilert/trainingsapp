@@ -8,6 +8,7 @@ Abweichungen gilt das Dokument, und der Code ist zu korrigieren.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -29,8 +30,11 @@ DATEINAME_MUSTER = re.compile(r"^sensor_\d{4}-\d{2}-\d{2}_\d{6}\.json$")
 _ZEITFORMAT_UTC = "%Y-%m-%dT%H:%M:%SZ"
 
 # Endungen, die zwar mit `sensor_` beginnen, aber keine Messdateien sind.
-_KEINE_MESSDATEI = ("_analyzed.json", "_ecg.json", "_truth.json")
+_KEINE_MESSDATEI = ("_analyzed.json", "_ecg.json", "_ppg.json", "_truth.json")
 _KORRIGIERT_MUSTER = re.compile(r"__c\d+$")
+
+#: Unterordner unter ``Messungen/`` für synthetische Daten (Vertrag, Abschnitt 6).
+GENERATOR_ORDNER: str = "Generator"
 
 
 @dataclass(slots=True)
@@ -110,6 +114,14 @@ class Recording:
     # Beim Lesen: alles, was wir nicht kennen. Bleibt beim Schreiben erhalten,
     # damit ein Round-Trip keine fremden Felder verliert.
     extra: dict[str, Any] = field(default_factory=dict)
+    # Lokales Datum der Messung. None heißt: aus `start_utc` ableiten. Beim Lesen
+    # wird es übernommen — kurz nach Mitternacht Ortszeit weicht es vom
+    # UTC-Datum ab, und ein Round-Trip darf die Messung nicht umdatieren.
+    datum: str | None = None
+    ppg_aufzeichnung: bool = False
+    # Rohe PPI-Pakete optischer Sensoren (Vertrag, Abschnitt 3b). None heißt:
+    # Gerät ohne PPI — dann fehlt der Schlüssel in der Datei, wie bei praxis_gui.
+    ppi_pakete: list[dict[str, Any]] | None = None
 
     # -- abgeleitet ---------------------------------------------------------
 
@@ -148,15 +160,25 @@ class Recording:
     def to_dict(self) -> dict[str, Any]:
         """Erzeugt das `raw-v1`-Dokument.
 
-        Feldreihenfolge wie im Schreiber von praxis_gui. Bewusst **ohne**
+        Feldreihenfolge wie im Schreiber von praxis_gui (`_save_recording`);
+        unsere Erweiterung `datenqualitaet` steht hinter `intervall_quelle`,
+        `ppi_pakete` nur bei Geräten mit PPI vor `titel`. Bewusst **ohne**
         `hrv`- und `quality`-Block: Rohdatei bleibt Rohdatei, die Nachberechnung
         setzt `analyzed` und legt das Sidecar an.
+
+        >>> doc = Recording(geraet="Polar H10").to_dict()
+        >>> list(doc)[4:7]
+        ['geraet_profil', 'intervall_quelle', 'datenqualitaet']
+        >>> list(doc)[-6:]
+        ['ecg_aufzeichnung', 'ppg_aufzeichnung', 'titel', 'notiz', 'ereignisse', 'messungen']
+        >>> "ppi_pakete" in doc
+        False
         """
         start = self.start_utc or datetime.now(UTC)
         doc: dict[str, Any] = {
             "behandlung_id": self.behandlung_id,
             "patient_id": self.patient_id,
-            "datum": start.strftime("%Y-%m-%d"),
+            "datum": self.datum or start.strftime("%Y-%m-%d"),
             "geraet": self.geraet,
             "geraet_profil": self.geraet_profil,
             "intervall_quelle": self.intervall_quelle,
@@ -168,11 +190,14 @@ class Recording:
             "start_utc": start.strftime(_ZEITFORMAT_UTC),
             "batterie_prozent": self.batterie_prozent,
             "ecg_aufzeichnung": bool(self.ecg_aufzeichnung),
-            "titel": self.titel,
-            "notiz": self.notiz,
-            "ereignisse": self.ereignisse,
-            "messungen": [b.to_dict() for b in self.beats],
+            "ppg_aufzeichnung": bool(self.ppg_aufzeichnung),
         }
+        if self.ppi_pakete is not None:
+            doc["ppi_pakete"] = self.ppi_pakete
+        doc["titel"] = self.titel
+        doc["notiz"] = self.notiz
+        doc["ereignisse"] = self.ereignisse
+        doc["messungen"] = [b.to_dict() for b in self.beats]
         # Unbekannte Felder aus einer gelesenen Datei erhalten, aber nie
         # bekannte überschreiben.
         for k, v in self.extra.items():
@@ -201,6 +226,8 @@ class Recording:
             "start_utc",
             "batterie_prozent",
             "ecg_aufzeichnung",
+            "ppg_aufzeichnung",
+            "ppi_pakete",
             "titel",
             "notiz",
             "ereignisse",
@@ -234,6 +261,9 @@ class Recording:
             notiz=str(doc.get("notiz") or ""),
             ereignisse=list(doc.get("ereignisse") or []),
             extra={k: v for k, v in doc.items() if k not in bekannt},
+            datum=(str(d) if (d := doc.get("datum")) else None),
+            ppg_aufzeichnung=bool(doc.get("ppg_aufzeichnung")),
+            ppi_pakete=(list(pp) if isinstance(pp := doc.get("ppi_pakete"), list) else None),
         )
 
 
@@ -250,10 +280,19 @@ def _qualitaet_raten(intervall_quelle: str, beats: list[Beat]) -> str:
 
 
 def ist_messdatei(pfad: Path | str) -> bool:
-    """Ob praxis_gui diese Datei als Messung erkennen würde.
+    """Ob diese Datei eine Rohmessung ist.
 
-    Der Name entscheidet: `sensor_*.json`, aber keine Analyse-, EKG-, Wahrheits-
-    oder Korrekturdatei.
+    Der Name entscheidet: `sensor_*.json`, aber keine Analyse-, EKG-, PPG-,
+    Wahrheits- oder Korrekturdatei. Crash-Backups (`.backup_*`) und
+    Zwischenstände (`*.tmp`) fallen schon durch Präfix bzw. Endung heraus.
+    Vertrag: docs/kompatibilitaet.md, Abschnitt 2.
+
+    >>> ist_messdatei("sensor_2026-05-23_125422.json")
+    True
+    >>> ist_messdatei("sensor_2026-05-23_125422_ppg.json")
+    False
+    >>> ist_messdatei(".backup_2026-05-23_125422.json")
+    False
     """
     name = Path(pfad).name
     if not name.startswith("sensor_") or not name.endswith(".json"):
@@ -269,25 +308,68 @@ def laden(pfad: Path | str) -> Recording:
         return Recording.from_dict(json.load(f))
 
 
-def speichern(rec: Recording, ordner: Path | str, dateiname: str | None = None) -> Path:
-    """Schreibt eine Messung als `raw-v1` und liefert den Pfad zurück.
+def json_atomar_schreiben(pfad: Path | str, doc: Any, *, kompakt: bool = False) -> Path:
+    """Schreibt JSON so, dass nie eine halbe Datei entsteht.
 
-    Simulationen landen zwingend unter `Generator/` — sonst könnte Synthetik
-    unbemerkt in einer Patientenakte auftauchen.
+    Erst ``<pfad>.tmp`` vollständig schreiben und auf den Datenträger zwingen,
+    dann mit `os.replace` an die Zielstelle tauschen — das ist auf allen
+    Plattformen ein atomarer Schritt. Bricht das Schreiben ab, bleibt die alte
+    Datei unverändert und der Zwischenstand wird entfernt.
+
+    Args:
+        kompakt: ohne Einrückung (für das 15-s-Backup, das bei langen Messungen
+            sonst unnötig groß wird).
     """
-    ordner = Path(ordner)
-    ordner.mkdir(parents=True, exist_ok=True)
-    ziel = ordner / (dateiname or rec.dateiname())
-    with open(ziel, "w", encoding="utf-8") as f:
-        json.dump(rec.to_dict(), f, ensure_ascii=False, indent=2)
+    ziel = Path(pfad)
+    tmp = ziel.with_name(ziel.name + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            if kompakt:
+                json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
+            else:
+                json.dump(doc, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, ziel)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return ziel
 
 
+def messordner(basis: Path | str, geraeteordner: str, *, simulation: bool = False) -> Path:
+    """Zielordner einer Messung: ``<basis>/Messungen/<Geräteordner>``.
+
+    Simulationen landen zwingend unter ``Generator`` — sonst könnte Synthetik
+    unbemerkt zwischen echten Messungen auftauchen.
+
+    >>> messordner("/daten", "PolarH10").as_posix()
+    '/daten/Messungen/PolarH10'
+    >>> messordner("/daten", "PolarH10", simulation=True).as_posix()
+    '/daten/Messungen/Generator'
+    """
+    return Path(basis) / "Messungen" / (GENERATOR_ORDNER if simulation else geraeteordner)
+
+
+def speichern(rec: Recording, ordner: Path | str, dateiname: str | None = None) -> Path:
+    """Schreibt eine Messung atomar als `raw-v1` und liefert den Pfad zurück.
+
+    Den Ordner bestimmt der Aufrufer — für Simulationen `messordner(...,
+    simulation=True)`, sonst könnte Synthetik in einer Patientenakte landen.
+    """
+    ordner = Path(ordner)
+    ordner.mkdir(parents=True, exist_ok=True)
+    return json_atomar_schreiben(ordner / (dateiname or rec.dateiname()), rec.to_dict())
+
+
 __all__ = [
+    "GENERATOR_ORDNER",
     "SCHEMA_RAW",
     "Beat",
     "Recording",
     "ist_messdatei",
+    "json_atomar_schreiben",
     "laden",
+    "messordner",
     "speichern",
 ]

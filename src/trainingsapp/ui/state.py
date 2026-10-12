@@ -24,6 +24,7 @@ from trainingsapp.data.db import oeffnen
 from trainingsapp.data.repositories import (
     DayNoteRepo,
     ExerciseRepo,
+    HrvRepo,
     PlanRepo,
     SessionRepo,
     SettingRepo,
@@ -46,6 +47,7 @@ class AppState:
     plaene: PlanRepo
     sitzungen: SessionRepo
     tagesnotizen: DayNoteRepo
+    hrv: HrvRepo
     profil: Subject
     #: Welcher Reiter der Navigationsleiste aktiv ist
     nav_index: int = 0
@@ -77,6 +79,15 @@ class AppState:
     #: die gewählten Ausprägungen ({"angle": 45}) — nur für diese Sitzung
     parameter_wahl: dict[str, str] = field(default_factory=dict)
     auspraegung_wahl: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Laufende HRV-Messung — lebt hier, nicht in der Ansicht, damit sie den
+    #: Reiterwechsel überlebt (L03). Typ: `devices.messlauf.Messlauf`.
+    messlauf: Any = None
+    #: Bluetooth-Zugang (nur Android, `ui.geraete.FletBleTransport`); hält den
+    #: Flet-Service stark referenziert, sonst räumt Flet ihn ab.
+    ble_transport: Any = None
+    #: Live-Ansicht: Zeitfenster der Kurven in s, korrigierte oder rohe Kurve
+    messung_fenster_s: int = 120
+    messung_korrigiert: bool = True
     #: Baut den Ansichtsstapel zur aktuellen Route neu — setzt `app.main()`.
     #: Views rufen es nach Änderungen, die die Route nicht wechseln (ein Tipp
     #: auf „gemacht" bleibt auf derselben Planansicht).
@@ -106,6 +117,7 @@ class AppState:
             plaene=PlanRepo(con),
             sitzungen=SessionRepo(con),
             tagesnotizen=DayNoteRepo(con),
+            hrv=HrvRepo(con),
             profil=profil,
             neu_eingespielt=neu,
             papierkorb_offen=offen,

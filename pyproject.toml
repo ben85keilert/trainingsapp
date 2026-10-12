@@ -18,6 +18,11 @@ dependencies = [
     "flet-video==1.0.*",
     "flet-permission-handler==1.0.*",
     "numpy>=2.1",
+    # Eigene Flet-Erweiterung im Repo: BLE auf Android über flutter_blue_plus
+    # (erweiterungen/flet_ble). Quelle für uv: [tool.uv.sources], für `flet build`:
+    # [tool.flet.dev_packages]. Die CI (`uv sync --only-group ci`) installiert
+    # Projektabhängigkeiten nicht und bleibt damit flet-frei.
+    "flet-ble",
 ]
 
 [project.optional-dependencies]
@@ -58,6 +63,10 @@ ci = [
 # `uv sync` ohne weitere Optionen ergibt eine vollständige Entwicklungsumgebung.
 default-groups = ["dev", "flet-dev"]
 
+[tool.uv.sources]
+# Editierbar aus dem Repo — Änderungen am Python-Teil wirken ohne Neuinstallation.
+flet-ble = { path = "erweiterungen/flet_ble", editable = true }
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -88,10 +97,37 @@ copyright = "Copyright (C) 2026 Benjamin Ebert"
 [tool.flet.app]
 path = "src"
 
+[tool.flet.dev_packages]
+# `flet build` nimmt Python- und Flutter-Teil der Erweiterung von hier (statt aus PyPI).
+# Der Schlüssel muss wörtlich so heißen wie in `dependencies`; der Pfad ist relativ
+# zum Projektordner.
+flet-ble = "erweiterungen/flet_ble"
+
+# Inline-Tabellen werden zu Attributen am <uses-permission> (android:<schlüssel>="…").
+# - neverForLocation: Scan-Ergebnisse werden nicht zur Ortung benutzt. Ohne das Flag
+#   filtert Android 12+ die Ergebnisse, solange keine Standortberechtigung erteilt ist.
+# - Android ≤ 11 (API 30) kennt SCAN/CONNECT nicht: dort BLUETOOTH, BLUETOOTH_ADMIN
+#   und Standort. flet-permission-handler meldet `bluetoothScan` auf ≤ 11 nur dann
+#   als erteilt, wenn BLUETOOTH im Manifest steht.
+# Die Laufzeitabfrage übernimmt flutter_blue_plus beim ersten Scan bzw. Verbinden.
 [tool.flet.android.permission]
-"android.permission.BLUETOOTH_SCAN" = true
+"android.permission.BLUETOOTH_SCAN" = { usesPermissionFlags = "neverForLocation" }
 "android.permission.BLUETOOTH_CONNECT" = true
+"android.permission.BLUETOOTH" = { maxSdkVersion = 30 }
+"android.permission.BLUETOOTH_ADMIN" = { maxSdkVersion = 30 }
+"android.permission.ACCESS_FINE_LOCATION" = { maxSdkVersion = 30 }
 "android.permission.INTERNET" = true
+
+[tool.flet.android.feature]
+# BLE ist nötig für Messungen, aber kein Installationshindernis (required="false").
+"android.hardware.bluetooth_le" = false
+
+# Die Flet-Vorlage 1.0.3 zwingt jni auf 1.0.0; jni_flutter 1.0.4+1 (über
+# path_provider_android 2.3.1) verlangt jni ^1.1.0 → „Constant evaluation error …
+# expect package:jni ^1.1.0“ beim Build. 1.0.3 passt zu jni 1.0.0 (gleiche Abhilfe
+# wie in praxis_mobil, 2026-10-06). Wegnehmen, sobald eine Flet-Vorlage jni ≥ 1.1 zulässt.
+[tool.flet.flutter.pubspec.dependency_overrides]
+jni_flutter = "1.0.3"
 
 # ---------------------------------------------------------------------------
 # Werkzeuge

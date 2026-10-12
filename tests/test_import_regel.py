@@ -1,7 +1,7 @@
 """Erzwingt die wichtigste Architekturregel des Projekts.
 
-`core/`, `data/`, `hrv_core/` und `devices/` dürfen **kein** `flet` importieren,
-und `hrv_core/` zusätzlich **kein** `scipy`.
+`core/`, `data/`, `hrv_core/` und `devices/` dürfen **kein** `flet` importieren
+(auch nicht die Erweiterung `flet_ble`), und `hrv_core/` zusätzlich **kein** `scipy`.
 
 Warum als Test und nicht als Konvention: Konventionen erodieren. Ein einzelner
 `import flet` in `core/models.py` würde die gesamte Domäne untestbar machen und
@@ -19,12 +19,15 @@ import pytest
 
 SRC = Path(__file__).parent.parent / "src" / "trainingsapp"
 
-# Paket -> Module, die es nicht importieren darf
+# Paket -> Module, die es nicht importieren darf.
+# `flet_ble` (eigene Erweiterung, erweiterungen/flet_ble) importiert selbst flet —
+# und der Scan vergleicht nur die Wurzel des Modulnamens, `flet_ble` fiele also
+# nicht unter `flet`. Darum steht es ausdrücklich dabei: der Adapter gehört nach ui/.
 VERBOTEN: dict[str, set[str]] = {
-    "core": {"flet"},
-    "data": {"flet"},
-    "hrv_core": {"flet", "scipy"},
-    "devices": {"flet"},
+    "core": {"flet", "flet_ble"},
+    "data": {"flet", "flet_ble"},
+    "hrv_core": {"flet", "flet_ble", "scipy"},
+    "devices": {"flet", "flet_ble"},
 }
 
 

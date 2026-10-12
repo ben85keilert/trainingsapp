@@ -1,0 +1,7 @@
+# Flutter/Dart-Artefakte aus `flutter pub get` / `dart analyze`
+# (Bibliotheken versionieren kein pubspec.lock)
+/pubspec.lock
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies

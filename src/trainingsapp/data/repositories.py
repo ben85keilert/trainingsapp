@@ -16,17 +16,20 @@ Konventionen:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import Any
 
 from ..core.models import (
     EINGABE_CHIPS,
     DayNote,
     Exercise,
+    HrvRecording,
     Measurement,
     Media,
     MediaKind,
@@ -1321,10 +1324,113 @@ class DayNoteRepo:
         )
 
 
+# ---------------------------------------------------------------------------
+# HRV-Aufzeichnungen
+# ---------------------------------------------------------------------------
+
+
+def datei_sha1(pfad: Path) -> str:
+    """SHA-1 einer Messdatei — erkennt, ob sie sich nach dem Eintragen geändert hat."""
+    h = hashlib.sha1()  # Prüfsumme, keine Sicherheitsfunktion
+    with pfad.open("rb") as f:
+        for block in iter(lambda: f.read(65536), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+class HrvRepo:
+    """Verweise auf HRV-Messdateien — **die Datei ist die Wahrheit**, nicht diese Zeile.
+
+    ``file_path`` steht relativ zum Messungsordner (`config.messungenverzeichnis()`),
+    etwa ``PolarH10/sensor_2026-10-13_071500.json``. So bleibt eine Aufzeichnung
+    auffindbar, wenn der Datenordner umzieht (Desktop ↔ App-Speicher).
+    """
+
+    def __init__(self, con: sqlite3.Connection) -> None:
+        self.con = con
+
+    def anlegen(self, a: HrvRecording) -> None:
+        self.con.execute(
+            "INSERT INTO hrv_recording (id, subject_id, file_path, sha1, device_id, geraet, "
+            "geraet_profil, intervall_quelle, datenqualitaet, started_at, duration_s, "
+            "coverage_pct, n_gaps, session_id, session_entry_id, note) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                a.id,
+                a.subject_id,
+                a.file_path,
+                a.sha1,
+                a.device_id,
+                a.geraet,
+                a.geraet_profil,
+                a.intervall_quelle,
+                a.datenqualitaet,
+                a.started_at.isoformat(),
+                a.duration_s,
+                a.coverage_pct,
+                a.n_gaps,
+                a.session_id,
+                a.session_entry_id,
+                a.note,
+            ),
+        )
+
+    def laden(self, recording_id: str) -> HrvRecording | None:
+        r = self.con.execute(
+            "SELECT * FROM hrv_recording WHERE id = ? AND deleted_at IS NULL", (recording_id,)
+        ).fetchone()
+        return self._zeile(r) if r else None
+
+    def alle(self, subject_id: str) -> list[HrvRecording]:
+        """Neueste zuerst."""
+        return [
+            self._zeile(r)
+            for r in self.con.execute(
+                "SELECT * FROM hrv_recording WHERE subject_id = ? AND deleted_at IS NULL "
+                "ORDER BY started_at DESC",
+                (subject_id,),
+            )
+        ]
+
+    def notiz_setzen(self, recording_id: str, text: str) -> None:
+        self.con.execute(
+            "UPDATE hrv_recording SET note = ? WHERE id = ?", (text.strip(), recording_id)
+        )
+
+    def loeschen(self, recording_id: str) -> None:
+        """Nur der Verweis verschwindet aus der Liste — die Messdatei bleibt liegen."""
+        self.con.execute(
+            "UPDATE hrv_recording SET deleted_at = ? WHERE id = ?",
+            (jetzt().isoformat(), recording_id),
+        )
+
+    @staticmethod
+    def _zeile(r: sqlite3.Row) -> HrvRecording:
+        return HrvRecording(
+            id=r["id"],
+            subject_id=r["subject_id"],
+            file_path=r["file_path"],
+            sha1=r["sha1"],
+            device_id=r["device_id"],
+            geraet=r["geraet"],
+            geraet_profil=r["geraet_profil"],
+            intervall_quelle=r["intervall_quelle"],
+            datenqualitaet=r["datenqualitaet"],
+            started_at=datetime.fromisoformat(r["started_at"]),
+            duration_s=r["duration_s"],
+            coverage_pct=r["coverage_pct"],
+            n_gaps=r["n_gaps"],
+            session_id=r["session_id"],
+            session_entry_id=r["session_entry_id"],
+            note=r["note"],
+        )
+
+
 __all__ = [
     "PAPIERKORB_TAGE",
     "DayNoteRepo",
     "ExerciseRepo",
+    "HrvRepo",
     "PlanRepo",
     "SessionRepo",
     "SettingRepo",

@@ -75,7 +75,7 @@ unangetastet.
 ```python
 async def scan(timeout) -> list[DeviceInfo]
 async def connect(device_id) / async def disconnect()
-def stream()  -> AsyncIterator[Sample]        # Messwerte
+def stream()  -> AsyncIterator[Messwert | PpiPaket]   # Messwerte (+ Verity-Rohpakete)
 def status()  -> AsyncIterator[DeviceStatus]  # Batterie, Kontakt, Verbindung
 ```
 
@@ -92,10 +92,14 @@ RR-Strom nicht verstopfen.
 `python-for-android` voraus — Flet baut aber mit `serious_python`. Auf iOS gibt
 es gar nichts. Und eine fertige Flet-BLE-Extension existiert nicht.
 
-Also bauen wir eine: eine Flet-Extension um `flutter_blue_plus`, die auf Android
-und iOS läuft und in der auch das Polar-PMD-Protokoll steckt. Dazu gehört der
-**Foreground Service** — ohne ihn beendet Android die Messung im Hintergrund.
-`flet-permission-handler` deckt das nicht ab.
+Also bauen wir eine: die Flet-Extension `flet_ble` um `flutter_blue_plus`, die
+auf Android und iOS läuft. Sie bleibt bewusst dumm — suchen, verbinden, koppeln,
+Dienste, lesen, schreiben, abonnieren — und reicht nur **rohe Bytes** samt
+Empfangszeit durch. Das Polar-Protokoll (0x2A37, PMD/PPI, Antwortprüfung,
+Watchdog) wird **in Python geparst** (`devices/pmd.py`, `devices/polar.py`) und
+ist so ohne Gerät testbar; die Naht dazwischen ist `devices/gatt.BleTransport`.
+Dazu gehört der **Foreground Service** — ohne ihn beendet Android die Messung im
+Hintergrund. `flet-permission-handler` deckt das nicht ab.
 
 Das wird früh als Spike geprüft (L02b), nicht erst wenn viel darauf aufbaut.
 

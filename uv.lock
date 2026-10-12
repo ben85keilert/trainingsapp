@@ -739,6 +739,17 @@ wheels = [
 ]
 
 [[package]]
+name = "flet-ble"
+version = "0.1.0"
+source = { editable = "erweiterungen/flet_ble" }
+dependencies = [
+    { name = "flet" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "flet", specifier = ">=1.0.3" }]
+
+[[package]]
 name = "flet-charts"
 version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2325,6 +2336,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "flet" },
+    { name = "flet-ble" },
     { name = "flet-charts" },
     { name = "flet-permission-handler" },
     { name = "flet-video" },
@@ -2360,6 +2372,7 @@ flet-dev = [
 requires-dist = [
     { name = "bleak", marker = "extra == 'desktop'", specifier = ">=0.22" },
     { name = "flet", specifier = "==1.0.*" },
+    { name = "flet-ble", editable = "erweiterungen/flet_ble" },
     { name = "flet-charts", specifier = "==1.0.*" },
     { name = "flet-permission-handler", specifier = "==1.0.*" },
     { name = "flet-video", specifier = "==1.0.*" },

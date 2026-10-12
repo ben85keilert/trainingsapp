@@ -1,0 +1,23 @@
+name: flet_ble
+description: Flet-Service um flutter_blue_plus (Bluetooth Low Energy, Android) — rohe Bytes nach Python
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: ">=3.44.0"
+
+dependencies:
+  flet: ^1.0.3
+  flutter:
+    sdk: flutter
+  # EXAKT gepinnt: 1.36.8 ist die letzte Version unter BSD-3-Clause und pinnt ihre
+  # Plattformpakete selbst exakt auf 7.0.x (ebenfalls BSD-3). Ab 2.0.0 gilt die
+  # proprietäre „FlutterBluePlus License" (kostenpflichtig für jede gewinnorientierte
+  # Nutzung, Build-Telemetrie). Nicht auf ^ umstellen — siehe README.
+  flutter_blue_plus: 1.36.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0

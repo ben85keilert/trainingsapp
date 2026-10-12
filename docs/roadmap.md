@@ -11,10 +11,10 @@ einem sichtbaren Fortschritt in der App.
 | **M3** | Pläne anlegen und abarbeiten, Tagesansicht, Tagebuch auf drei Ebenen, Kalender und Kurve | L06 | **fertig** |
 | M4 | `hrv_core` vollständig + Simulator, Golden-Tests grün | L09 | teilweise |
 | M5 | Echte Geräte auf dem Desktop + Sensor-Prüfstand | L10 | offen |
-| M6 | Live-Messung mit Diagrammen, Aufzeichnung nach `raw-v1` | L11 | offen |
+| M6 | Live-Messung mit Diagrammen, Aufzeichnung nach `raw-v1` | L11 | teilweise |
 | M7 | Limits und Trainingssteuerung | L11 | teilweise |
 | M8 | Auswertung, Benchmarks, Export-Round-Trip (Kalender und Kurve je Übung sind mit M3 vorgezogen) | L12 | teilweise |
-| M9 | Eigene Flet-Extension: BLE und Foreground Service auf Android | Ausblick A | offen |
+| M9 | Eigene Flet-Extension: BLE und Foreground Service auf Android | Ausblick A | teilweise |
 | M10 | Medien: eigene Übungen mit Foto, Dokumentationsvideos | — | offen |
 | M11 | Edition B: Outbox-Sync, Anmeldung, Nachrichten, Übungszuweisung | Ausblick B | offen |
 
@@ -86,6 +86,22 @@ einem sichtbaren Fortschritt in der App.
   Plan üben (`/training/<übung>`), Einträge landen unter „Ohne Plan“
 - Noch nicht: Timer (**L07**), Messung (**L10/L11**), Spec-Editor für Felder
   außerhalb des Vorrats
+
+## Was für die HRV-Messung steht (vorgezogen, 2026-10-12)
+
+- `erweiterungen/flet_ble`: eigene Flet-Erweiterung um `flutter_blue_plus` **1.36.8**
+  (letzte BSD-Version; ab 2.0 kostenpflichtige Lizenz und Telemetrie) — reicht nur
+  rohe Bytes durch. Ohne Foreground Service: Bildschirm während der Messung anlassen.
+- `devices/`: `PolarQuelle` für Polar H10 (0x2A37, RR) und Verity Sense (PMD-PPI,
+  Bonding), Watchdog und Reconnect, `BleTransport`-Protokoll, Simulator mit H10- und
+  Verity-Modus, `Messlauf` (Quelle → Live-Fenster und Aufnahme, Backup alle 15 s)
+- `hrv_core/`: `Aufnahme` (raw-v1 wie praxis_gui inkl. `ppi_pakete`, atomar),
+  `LiveFenster` (Artefakte markieren, RMSSD 30 s, SDNN 60 s, Schwankung 60 s),
+  `korrektur` (Ketten, analysis-v1-Teilmenge; Nullen sind „kein Schlag")
+- Oberfläche: Reiter „Messung" mit Live-Kurven RR und HF, `/messung/<id>` mit Kurven
+  roh/korrigiert, Kennzahlen und Korrekturketten
+- Noch nicht: Desktop-BLE (bleak), Frequenzbereich, Mehrgerätebetrieb, Foreground
+  Service, Datenbank-Eintrag `device`
 
 ## Bewusst nicht eingeplant
 

@@ -319,6 +319,7 @@ class HrvRecording:
     sha1: str = ""
     device_id: str | None = None
     geraet: str = ""
+    geraet_profil: str = "ble_generic"
     intervall_quelle: str = "ekg_rr"
     datenqualitaet: str = "rr_ekg"
     started_at: datetime = field(default_factory=jetzt)

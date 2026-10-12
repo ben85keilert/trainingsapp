@@ -12,6 +12,7 @@ Routen:
     /plan/<id>/uebung/<item_id>     Eintrag mit eigenen Werten und Notiz
     /plan/<id>/bearbeiten[/…]       Plan bearbeiten, aus dem Üben heraus
     /plaene/<id>                    Plan bearbeiten (aus „Übungen" → „Pläne")
+    /messung/<id>                   Eine HRV-Aufzeichnung: Kurven, Kennzahlen, Korrektur
     /training/<übung>[/formular]    Eine einzelne Übung üben — ohne Plan (aus dem Katalog)
     <bearbeiten>/ziel/<item_id>     Planübung einstellen: Stufe, Chips, Ziel
     <bearbeiten>/hinzufuegen        Übungen in den Plan aufnehmen
@@ -43,11 +44,12 @@ from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
 from trainingsapp.ui.views.heute import heute
+from trainingsapp.ui.views.messung import messung
+from trainingsapp.ui.views.messung_detail import messung_detail_view
 from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view
 from trainingsapp.ui.views.plan import einzel_plan, plan_view, ziel_text
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
-from trainingsapp.ui.views.platzhalter import messung
 from trainingsapp.ui.views.tag import tag_view
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 from trainingsapp.ui.views.uebung_detail import uebung_detail
@@ -72,7 +74,7 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
         if state.nav_index == 1:
             return uebungen(page, state)
         if state.nav_index == 2:
-            return messung()
+            return messung(page, state)
         return verlauf(page, state)
 
     def wechseln(e: ft.Event[ft.NavigationBar]) -> None:
@@ -228,6 +230,15 @@ def main(page: ft.Page) -> None:
     page.padding = 0
 
     state = AppState.starten()
+    # Bluetooth nur in der App auf Android — am Rechner gibt es die Erweiterung
+    # nicht (flet run nutzt einen fertigen Client ohne eigene Erweiterungen).
+    if page.platform == ft.PagePlatform.ANDROID:
+        try:
+            from trainingsapp.ui.geraete.flet_ble_transport import FletBleTransport
+
+            state.ble_transport = FletBleTransport(page)
+        except ImportError:
+            state.ble_transport = None
     # Dienste sind Controls ohne Darstellung; sie müssen an der Seite hängen.
     browser = ft.UrlLauncher()
     page.services.append(browser)
@@ -294,6 +305,9 @@ def main(page: ft.Page) -> None:
                     page.views.append(uebung_bearbeiten(page, state, uebung))
         elif teile[:1] in (["plan"], ["plaene"]) and len(teile) >= 2:
             plan_routen(teile)
+        elif teile[:1] == ["messung"] and len(teile) >= 2:
+            if (aufzeichnung := state.hrv.laden(teile[1])) is not None:
+                page.views.append(messung_detail_view(page, state, aufzeichnung))
         elif teile[:1] == ["training"] and len(teile) >= 2:
             if (uebung := state.uebungen.laden(teile[1])) is not None:
                 einzel = einzel_plan(uebung)

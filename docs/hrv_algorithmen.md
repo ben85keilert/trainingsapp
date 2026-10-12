@@ -31,6 +31,7 @@ Golden-Daten.
 | | Wert | Warum |
 |---|---|---|
 | `RR_MIN_MS` / `RR_MAX_MS` | 250 / 2000 | entspricht 30–240 bpm |
+| `AUFNAHME_RR_MIN_MS` / `…_MAX_MS` | 300 / 2000 | Herzuhr `t_s` der Datei und Live-Markierung — so schreibt praxis_gui |
 | `MIN_BEATS_TIME` | 2 | RMSSD braucht mindestens zwei Intervalle |
 | `MIN_BEATS_NONLINEAR` | 30 | SD1/SD2 werden erst darüber stabil |
 | `MIN_BEATS_FREQUENCY` | 60 (empfohlen 180) | ~1 min bei 60 bpm |
@@ -102,6 +103,90 @@ die Pulswellenlaufzeit schwankt physiologisch stärker.
 
 Die Indizes der korrigierten Stellen werden aufbewahrt — die Korrektur bleibt
 nachvollziehbar und rücknehmbar.
+
+---
+
+### Nachträgliche Korrektur in Ketten (`hrv_core/korrektur.py`)
+
+Vorlage ist die Workbench von praxis_gui; gespeichert wird im Sidecar
+`sensor_<ts>_analyzed.json` (`analysis-v1`, Vertrag: `docs/kompatibilitaet.md`,
+Abschnitt 9). Die Rohdatei bleibt unangetastet.
+
+1. **Kandidaten:** `rr_ms = 0` (Paket ohne RR), Werte außerhalb 250–2000 ms und
+   Malik-Ausreißer (Schwelle 0.20, optisch 0.30).
+2. **Ketten:** Kandidaten, die höchstens zwei gute Schläge trennen, gehören
+   zusammen. Vor einem Ausfall liegt oft eine Zerfallszone, deren Werte den
+   Schwellenfilter noch passieren — ohne Verschmelzen würde sie interpoliert.
+3. **Vorschlag:** bis 2 Schläge interpolieren, bis 5 interpolieren *unsicher*,
+   länger — oder mehr als 3 s ungedeckte Wanduhrzeit (Spanne minus Summe der
+   RR) — ausschließen. Interpoliert wird linear zwischen den nächsten
+   **gültigen** Nachbarn, als Rampe, nie als Plateau.
+
+Auf der Golden-Datei liefert das dieselben neun Ketten und Kennzahlen wie
+praxis_gui (RMSSD 44,816 ms, SDNN 90,123 ms — `tests/test_korrektur.py`).
+
+**Abweichung von praxis_gui:** Malik rechnet auf der Reihe, in der Nullen und
+implausible Werte schon überbrückt sind. Auf der Rohreihe ist das gleitende
+Mittel über einer Nullfolge selbst 0 — die Nullen in ihrer Mitte gelten dann als
+unauffällig, gesunde Nachbarn dagegen als Ausreißer. Bei einzelnen Nullen ist
+das Ergebnis identisch.
+
+**Nullen sind keine Artefakte (Standard, Abweichung von praxis_gui).** Eine
+Null beim H10 heißt „in dieser Sekunde endete kein Schlag" (Puls unter 60 bpm).
+Sie zu interpolieren fügte einen Schlag ein, den es nicht gab — auf der
+Golden-Datei wären es 9 erfundene Schläge bei 305 echten. Deshalb schlägt
+`automatisch()` Nullen nicht vor, und Malik rechnet nur auf der Folge echter
+Schläge; ein wirklicher Aussetzer zeigt sich am langen Folgeintervall.
+`kennzahlen` verwirft Nullen ohnehin (als Naht). Das praxis_gui-Verhalten gibt
+es mit `automatisch(..., nullen=True)`; der Golden-Test prüft beide Wege, und
+`corrections_meta.interpolate_zeros` hält fest, welcher galt.
+
+---
+
+## Live-Kennzahlen (`hrv_core/live.py`)
+
+Während der Messung wird **nichts an den Rohdaten verändert.** `LiveFenster` hält
+die letzten 300 s, markiert Artefakte und liefert eine interpolierte Kurve nur
+für die Anzeige. Gespeichert wird immer der Rohwert.
+
+| Wert | Rechnung |
+|---|---|
+| Artefakt | außerhalb 300–2000 ms (wie die Herzuhr der Aufnahme) oder Malik-Ausreißer im Fenster |
+| `rr_korr` | Rohwert, bei Artefakt linear aus den guten Nachbarn; `None` bei `rr = 0` |
+| `rmssd_30s`, `sdnn_60s` | Rohwerte der letzten 30 / 60 s; Artefakte wirken als **Naht** (Boundary-Skip), nicht als interpolierter Wert |
+| `hf_mittel_60s` | Mittel der vom Gerät gemeldeten Herzfrequenz |
+| `schwankung_60s` | siehe unten |
+
+Unter fünf guten Schlägen im Fenster ist ein Wert `None`. Am rechten Rand fehlen
+Malik die Nachfolger — ein frischer Ausreißer wird oft erst ein, zwei Schläge
+später markiert.
+
+`rr = 0` ist kein Artefakt, sondern *kein Wert*: nicht markiert, keine Kurve,
+in den Kennzahlen eine Naht.
+
+### „Schwankung"
+
+```
+HF_i = 60000 / RR_i        (nur gute Schläge; ohne RR: gemeldete Herzfrequenz)
+Teilfenster k = 0…5: die letzten 60 s in Stücken zu 10 s, vom jüngsten Punkt aus
+schwankung_60s = Mittel über alle Teilfenster mit ≥ 3 Werten von (max HF − min HF)
+                 — mindestens zwei solche Teilfenster, sonst None
+```
+
+Das ist eine **Näherung der RSA-Amplitude** (Peak-to-Trough der
+Herzfrequenz): bei sechs Atemzügen pro Minute deckt ein Teilfenster genau einen
+Atemzug ab. Auf einem Sinus `70 ± A bpm` mit 0,1 Hz liefert sie `2·A` auf 5 %
+genau (`tests/test_korrektur.py`). Bei schnellerer Atmung enthält ein
+Teilfenster mehrere Atemzüge — die Spannweite bleibt eine Spannweite.
+
+Die vom Gerät gemeldete Herzfrequenz eignet sich dafür nicht: sie ist geglättet,
+beim Verity Sense nur alle 5 s aktualisiert.
+
+> **Keine Bewertung.** Die Schwankung ist ein beschreibender Wert wie die
+> Herzfrequenz selbst. Eine Aussage wie „gut", „Kohärenz erreicht" oder eine
+> Empfehlung daraus wäre eine Handlungsempfehlung aus Messwerten — der Schalter
+> `physiologische_steuerung` bleibt in der Edition `solo` gesperrt
+> (`docs/recht/00_zweckbestimmung.md`).
 
 ---
 

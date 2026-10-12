@@ -26,6 +26,14 @@ ALGO_VERSION: Final[int] = 1
 RR_MIN_MS: Final[float] = 250.0
 RR_MAX_MS: Final[float] = 2000.0
 
+# Herzuhr der Aufnahme (`t_s` in raw-v1): sie wächst nur bei 300–2000 ms.
+# Das ist das Verhalten des praxis_gui-Schreibers (`widget.py`, `_on_hr_received`)
+# und bewusst NICHT `RR_MIN_MS` — sonst entstünde `t_s` anders als in praxis_gui.
+# Dieselben Grenzen gelten für die Artefaktmarkierung der Live-Anzeige.
+# Vertrag: docs/kompatibilitaet.md, Abschnitt 3a.
+AUFNAHME_RR_MIN_MS: Final[int] = 300
+AUFNAHME_RR_MAX_MS: Final[int] = 2000
+
 # ---------------------------------------------------------------------------
 # Mindestanzahl Schläge je Kennzahlengruppe
 # ---------------------------------------------------------------------------
@@ -66,6 +74,18 @@ MALIK_THRESHOLD_EKG: Final[float] = 0.20
 MALIK_THRESHOLD_PPI: Final[float] = 0.30
 MALIK_WINDOW: Final[int] = 5  # Fensterbreite des gleitenden Mittels
 
+# Ketten der nachträglichen Korrektur (praxis_gui: `[hrv_gaps]`-Vorgaben).
+# Kandidaten, die höchstens MERGE_GAP gute Schläge trennen, bilden eine Kette.
+# Kurze Ketten werden interpoliert, mittlere ebenfalls — aber als „unsicher"
+# markiert —, lange werden zum Ausschluss vorgeschlagen: interpolierte Schläge
+# tragen keine echte Variabilität. Unabhängig von der Länge wird nie über mehr
+# als MAX_INTERP_GAP_S ungedeckte Wanduhrzeit interpoliert — dahinter steckt
+# ein Sensorausfall, kein Ausreißer.
+KETTE_MERGE_GAP: Final[int] = 2
+KETTE_AUTO_MAX: Final[int] = 2
+KETTE_UNSICHER_MAX: Final[int] = 5
+KETTE_MAX_INTERP_GAP_S: Final[float] = 3.0
+
 # ---------------------------------------------------------------------------
 # Spektralanalyse
 # ---------------------------------------------------------------------------
@@ -93,6 +113,16 @@ SAMPEN_MAX_BEATS_LIVE: Final[int] = 500
 # Zeitbereich
 # ---------------------------------------------------------------------------
 PNN_THRESHOLD_MS: Final[float] = 50.0  # pNN50; parametrierbar für pNNx
+
+# ---------------------------------------------------------------------------
+# Live-Anzeige (nur Darstellung, keine gespeicherte Kennzahl)
+# ---------------------------------------------------------------------------
+LIVE_FENSTER_S: Final[float] = 300.0  # so viel hält der Live-Puffer
+LIVE_RMSSD_S: Final[float] = 30.0
+LIVE_SDNN_S: Final[float] = 60.0
+LIVE_HF_S: Final[float] = 60.0  # mittlere Herzfrequenz und Schwankung
+LIVE_SCHWANKUNG_TEIL_S: Final[float] = 10.0  # Teilfenster der Schwankung
+LIVE_MIN_SCHLAEGE: Final[int] = 5  # darunter liefert ein Live-Wert None
 
 # ---------------------------------------------------------------------------
 # Lückenpolitik

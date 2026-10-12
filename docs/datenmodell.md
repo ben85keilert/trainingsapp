@@ -27,6 +27,14 @@ app_setting   (gerätelokal, Migration 002 — wird nie synchronisiert)
 day_note      (Tagesnotiz je Profil und lokalem Tag, Migration 003)
 ```
 
+**Eingabe ist dreistufig** (Migration 004): Die Übung legt in `result_spec_json`
+ihre Felder und Standard-Chips fest (Feldvorrat in `core/result_spec.py`, Satzfeld
+mit Notation `3x15`, `30`, `15/15/20` — siehe `docs/notation.md`). Der Plan wählt je
+Übung in `plan_item.input_mode` die Stufe (`haken`, `chips`, `frei`), eigene Chips
+(`quick_json`) und ein Ziel (`target_json`). Der Eintrag übernimmt den Plan und darf
+im Formular abweichen. Ein „+20" im Plan ist eine Korrektur des heutigen Eintrags
+(`replaces_entry_id`), der Eintrag selbst bleibt unveränderlich.
+
 **Der Tag ist die Bezugsgröße.** Zeitstempel sind UTC, aber „heute" ist ein
 lokaler Kalendertag. `core.models.tagesgrenzen()` rechnet die lokale
 Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,

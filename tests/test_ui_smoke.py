@@ -97,12 +97,12 @@ def test_spec_form_rundlauf() -> None:
         assert form.werte() == spec.defaults()
 
     form = SpecForm(SPEC_SAETZE_WDH)
-    form.setzen({"sets": 5, "reps": 12}, aktualisieren=False)
-    assert form.werte() == {"sets": 5, "reps": 12}
+    form.setzen({"reps": [12, 12, 12, 12, 12]}, aktualisieren=False)
+    assert form.werte() == {"reps": [12.0] * 5}
     assert form.pruefen() == []
 
-    halten = SpecForm(SPEC_HALTEN, {"hold": 90})
-    assert halten.werte()["hold"] == 90.0  # "1:30" → 90 Sekunden
+    halten = SpecForm(SPEC_HALTEN, {"hold": [90, 45]})
+    assert halten.werte()["hold"] == [90.0, 45.0]  # "1:30/45s" → Sekunden
 
 
 def test_spec_form_pruefen_markiert() -> None:
@@ -114,7 +114,7 @@ def test_spec_form_pruefen_markiert() -> None:
 
     kaputt = SpecForm(SPEC_SAETZE_WDH)
     kaputt._widgets["reps"].value = "abc"
-    assert kaputt.pruefen() == ["Wdh."]
+    assert kaputt.pruefen() == ["Wiederholungen"]
     assert "reps" not in kaputt.werte()
 
 
@@ -126,27 +126,21 @@ def welt(state):
 
     plan = Plan(name="Dehnung", subject_id=state.profil.id)
     state.plaene.speichern(plan)
-    item = state.plaene.uebung_hinzufuegen(
-        plan.id, seed_id("nacken_dehnung"), {"sets": 2, "hold": 45}
-    )
+    item = state.plaene.uebung_hinzufuegen(plan.id, seed_id("nacken_dehnung"), {"hold": [45, 45]})
     state.plaene.uebung_hinzufuegen(plan.id, seed_id("unterarmstuetz"))
     uebung = state.uebungen.laden(seed_id("nacken_dehnung"))
     session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
-    eintrag = state.sitzungen.eintrag_anlegen(session, uebung, {"sets": 2, "hold": 45}, "gut")
+    eintrag = state.sitzungen.eintrag_anlegen(session, uebung, {"hold": [45, 45]}, "gut")
     state.sitzungen.erledigt(session, state.uebungen.laden(seed_id("unterarmstuetz")))
     return state, state.plaene.laden(plan.id), item, uebung, eintrag
 
 
 def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
-    from trainingsapp.ui.app import (
-        formular_eintrag,
-        formular_korrektur,
-        formular_ziel,
-        hauptansicht,
-    )
+    from trainingsapp.ui.app import formular_eintrag, formular_korrektur, hauptansicht
     from trainingsapp.ui.views.eintrag import eintrag_view
     from trainingsapp.ui.views.heute import heute
     from trainingsapp.ui.views.plan import plan_view
+    from trainingsapp.ui.views.plan_einstellen import plan_einstellen
     from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
     from trainingsapp.ui.views.tag import tag_view, tagesansicht
     from trainingsapp.ui.views.verlauf import verlauf
@@ -158,7 +152,7 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
     assert plan_view(page, state, plan) is not None
     assert plan_hinzufuegen_view(page, state, plan).route.endswith("/hinzufuegen")
     assert formular_eintrag(page, state, plan, item, uebung).route.endswith(f"/uebung/{item.id}")
-    assert formular_ziel(page, state, plan, item, uebung).route.endswith(f"/ziel/{item.id}")
+    assert plan_einstellen(page, state, plan, item, uebung).route.endswith(f"/ziel/{item.id}")
     assert formular_korrektur(page, state, eintrag).route.endswith("/korrigieren")
     assert eintrag_view(page, state, eintrag).route == f"/eintrag/{eintrag.id}"
     for ordnung in ("plan", "zeit", "uebung"):
@@ -181,3 +175,41 @@ def test_verlauf_ohne_werte(page, state) -> None:
 
     state.verlauf_uebung = "gibt-es-nicht"
     assert verlauf(page, state) is not None
+
+
+def test_planansicht_alle_eingabestufen(page, welt) -> None:
+    """Jede Stufe baut einen anderen Block — nur abhaken, Chips, Freieingabe."""
+    from trainingsapp.ui.views.plan import hauptfeld, plan_view
+
+    state, plan, item, uebung, _ = welt
+    assert hauptfeld(uebung).key == "hold"
+    for stufe in ("haken", "chips", "frei"):
+        state.plaene.eingabe_setzen(
+            item.id, stufe, {"hold": [20, 40]} if stufe == "chips" else None
+        )
+        plan = state.plaene.laden(plan.id)
+        assert plan_view(page, state, plan) is not None
+
+
+def test_uebung_editor_und_katalogfilter(page, welt) -> None:
+    from trainingsapp.ui.views.katalog import katalog
+    from trainingsapp.ui.views.uebung_bearbeiten import chips_lesen, spec_bauen, uebung_bearbeiten
+    from trainingsapp.ui.views.uebung_detail import uebung_detail
+
+    state, _plan, _item, uebung, _ = welt
+    assert uebung_bearbeiten(page, state, uebung) is not None
+    assert uebung_bearbeiten(page, state, None) is not None
+    assert uebung_detail(page, state, uebung, ft.UrlLauncher()) is not None
+
+    state.tag_filter = "Nacken"
+    assert katalog(page, state) is not None
+    state.tag_filter = "gibt es nicht"
+    katalog(page, state)
+    assert state.tag_filter is None
+
+    from trainingsapp.core.result_spec import vorrat_feld
+
+    reps = vorrat_feld("reps")
+    assert chips_lesen("10, 15, 20", reps) == [10, 15, 20]
+    spec = spec_bauen([reps, vorrat_feld("note")])
+    assert spec.chart_metrics == ["reps"] and str(spec.layout) == "sets"

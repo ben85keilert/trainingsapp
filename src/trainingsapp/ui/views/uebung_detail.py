@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
 import flet as ft
 
-from trainingsapp.core.models import Exercise, Media
+from trainingsapp.core.models import Exercise, Media, new_id
+from trainingsapp.core.result_spec import format_wert
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
@@ -24,12 +26,19 @@ def _abschnitt(titel: str, inhalt: ft.Control) -> ft.Control:
 
 def _notation(uebung: Exercise) -> ft.Control:
     spec = uebung.result_spec
-    felder = ", ".join(f"{f.label}{f' ({f.unit})' if f.unit else ''}" for f in spec.fields)
-    beispiel = spec.format_shorthand(spec.defaults()) if spec.defaults() else ""
-    text = felder or "keine Felder"
-    if beispiel:
-        text += f"   ·   z. B. {beispiel}"
-    return ft.Text(text)
+    if not spec.fields:
+        return ft.Text("Keine Felder — nur „gemacht“.")
+    zeilen: list[ft.Control] = []
+    for f in spec.fields:
+        chips = ", ".join(str(q) for q in f.quick)
+        beispiel = format_wert(f, f.default) if f.default is not None else ""
+        text = f"{f.label}{f' ({f.unit})' if f.unit else ''}"
+        if chips:
+            text += f"  ·  Chips {chips}"
+        if beispiel:
+            text += f"  ·  z. B. {beispiel}"
+        zeilen.append(ft.Text(text))
+    return ft.Column(spacing=2, controls=zeilen)
 
 
 def uebung_detail(
@@ -46,6 +55,21 @@ def uebung_detail(
     async def bearbeiten() -> None:
         await page.push_route(f"/uebung/{uebung.id}/bearbeiten")
 
+    async def duplizieren() -> None:
+        """Kopie als eigene Übung — für „links/rechts“ oder eine abweichende Variante."""
+        kopie = replace(
+            uebung,
+            id=new_id(),
+            name=f"{uebung.name} (Kopie)",
+            is_builtin=False,
+            media=[replace(m, id=new_id()) for m in uebung.media],
+            tags=list(uebung.tags),
+            archived=False,
+        )
+        state.uebungen.speichern(kopie)
+        page.show_dialog(ft.SnackBar(ft.Text("Kopie angelegt — jetzt anpassen")))
+        await page.push_route(f"/uebung/{kopie.id}/bearbeiten")
+
     def archivieren_fragen() -> None:
         page.show_dialog(dialog)
 
@@ -55,7 +79,7 @@ def uebung_detail(
     async def archivieren() -> None:
         state.uebungen.archivieren(uebung.id)
         page.pop_dialog()
-        page.show_dialog(ft.SnackBar(ft.Text(f'„{uebung.name}" archiviert')))
+        page.show_dialog(ft.SnackBar(ft.Text(f"„{uebung.name}“ archiviert")))
         await page.push_route("/")
 
     dialog = ft.AlertDialog(
@@ -106,7 +130,13 @@ def uebung_detail(
             ],
         ),
         _abschnitt("Beschreibung", ft.Text(uebung.description or "—")),
-        _abschnitt("Notation", _notation(uebung)),
+        _abschnitt(
+            "Regionen und Tags",
+            ft.Row(wrap=True, spacing=6, controls=[ft.Chip(label=ft.Text(t)) for t in uebung.tags])
+            if uebung.tags
+            else ft.Text("—"),
+        ),
+        _abschnitt("Eingabe", _notation(uebung)),
         _abschnitt(
             "Videos",
             ft.Column(spacing=0, controls=videos)
@@ -129,6 +159,7 @@ def uebung_detail(
         appbar=ft.AppBar(
             title=ft.Text(uebung.name),
             actions=[
+                ft.IconButton(ft.Icons.CONTENT_COPY, tooltip="Duplizieren", on_click=duplizieren),
                 ft.IconButton(ft.Icons.EDIT_OUTLINED, tooltip="Bearbeiten", on_click=bearbeiten),
                 ft.IconButton(
                     ft.Icons.ARCHIVE_OUTLINED, tooltip="Archivieren", on_click=archivieren_fragen

@@ -20,13 +20,7 @@ import uuid
 from pathlib import Path
 
 from ..core.models import Exercise, Media, MediaKind, MediaSource
-from ..core.result_spec import (
-    SPEC_BENCHMARK_ZEIT,
-    SPEC_HALTEN,
-    SPEC_SAETZE_WDH,
-    SPEC_WINKEL,
-    ResultSpec,
-)
+from ..core.result_spec import SPEC_SAETZE_WDH, VORLAGEN, ResultSpec
 from .repositories import ExerciseRepo
 
 SEED_DATEI = Path(__file__).parent / "seed" / "exercises.json"
@@ -36,12 +30,7 @@ SEED_DATEI = Path(__file__).parent / "seed" / "exercises.json"
 SEED_NAMENSRAUM = uuid.UUID("6f1c2b3a-7d4e-4a5b-9c8d-1e2f3a4b5c6d")
 
 #: Kurzname im JSON → Vorlage aus `core/result_spec.py`
-SPECS: dict[str, ResultSpec] = {
-    "saetze_wdh": SPEC_SAETZE_WDH,
-    "halten": SPEC_HALTEN,
-    "winkel": SPEC_WINKEL,
-    "benchmark_zeit": SPEC_BENCHMARK_ZEIT,
-}
+SPECS: dict[str, ResultSpec] = {key: spec for key, (_, spec) in VORLAGEN.items()}
 
 
 def seed_id(key: str) -> str:

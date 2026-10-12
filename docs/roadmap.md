@@ -66,7 +66,12 @@ einem sichtbaren Fortschritt in der App.
   Löschen weich mit Rückfrage
 - Verlauf: Kalender mit Farbmarken (Übungsfilter: „an welchen Tagen geplankt"),
   Kurve je Kennzahl mit X-Achse Trainingsnummer oder Zeit
-- Noch nicht: Timer (**L07**), Messung (**L10/L11**)
+- Notation „je Satz" (`3x15`, `30`, `15/15/20`, `+20`; `docs/notation.md`) mit
+  Hilfefenster; Feldvorrat statt fester Vorlagen, Übungen duplizierbar; Katalog
+  nach Typ und Region (Tags); Planübungen mit Eingabestufe (abhaken, Chips, frei),
+  eigenen Chips und Ziel (Migration 004); Kurve mit Summe und Maximum je Satzfeld
+- Noch nicht: Timer (**L07**), Messung (**L10/L11**), Spec-Editor für Felder
+  außerhalb des Vorrats
 
 ## Bewusst nicht eingeplant
 

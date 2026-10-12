@@ -12,6 +12,7 @@ from collections.abc import Callable
 import flet as ft
 
 from trainingsapp.config import edition, ist_aktiv
+from trainingsapp.ui.components.hilfe import hilfe_oeffner
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
 
@@ -100,6 +101,12 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
                         ft.Text(hinweis, size=12, opacity=0.6),
                         ft.Divider(),
                         ft.Text("APP", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                        ft.ListTile(
+                            leading=ft.Icon(ft.Icons.HELP_OUTLINE),
+                            title=ft.Text("Notation — so wird eingegeben"),
+                            subtitle=ft.Text("3x15, 30, 15/15/20, +20, 1:30", size=12),
+                            on_click=hilfe_oeffner(page),
+                        ),
                         ft.Text(f"Edition {edition().value}", opacity=0.7),
                     ],
                 ),

@@ -94,7 +94,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
 
 - **ResultSpec = flexible Notation.** Jede Übung bringt eine `ResultSpec`
   (`core/result_spec.py`) mit, aus der die Eingabemaske erzeugt wird — „3x15", „45°",
-  „30 s halten" sind derselbe Mechanismus. Jeder `SessionEntry` speichert eine Kopie der
+  „30 s halten" sind derselbe Mechanismus. Felder kommen aus dem `FELDVORRAT`; das
+  Satzfeld (`SET_LIST`) speichert eine Liste je Satz und nimmt die Notation aus
+  `docs/notation.md` entgegen (`3x15`, `30`, `15/15/20`, `+20`). Hierarchie: Übung →
+  Plan (`plan_item.input_mode`, Chips, Ziel) → Eintrag. Jeder `SessionEntry` speichert eine Kopie der
   Spec, mit der er erfasst wurde (`spec_snapshot_json`); angezeigt wird **immer** mit der
   Kopie, nie mit der aktuellen Definition. Neuer `FieldType` → hier ergänzen und in
   `ui/components/spec_form.py` ein Widget registrieren.

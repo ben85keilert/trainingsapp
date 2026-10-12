@@ -118,6 +118,18 @@ class ExerciseRepo:
                         reihenfolge,
                     ),
                 )
+            # Tags: je Name genau eine Zeile in `tag`, Zuordnung komplett ersetzen.
+            self.con.execute("DELETE FROM exercise_tag WHERE exercise_id = ?", (uebung.id,))
+            for name in dict.fromkeys(t.strip() for t in uebung.tags if t.strip()):
+                self.con.execute(
+                    "INSERT INTO tag (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING",
+                    (new_id(), name),
+                )
+                tag_id = self.con.execute("SELECT id FROM tag WHERE name = ?", (name,)).fetchone()
+                self.con.execute(
+                    "INSERT INTO exercise_tag (exercise_id, tag_id) VALUES (?, ?)",
+                    (uebung.id, tag_id["id"]),
+                )
 
     def archivieren(self, uebung_id: str) -> None:
         """Aus den Listen nehmen, nicht löschen — alte Einträge verweisen darauf."""
@@ -144,7 +156,7 @@ class ExerciseRepo:
         ).fetchone()
         if zeile is None:
             return None
-        return self._mit_medien([self._zeile(zeile)])[0]
+        return self._mit_tags(self._mit_medien([self._zeile(zeile)]))[0]
 
     def existiert(self, uebung_id: str) -> bool:
         zeile = self.con.execute("SELECT 1 FROM exercise WHERE id = ?", (uebung_id,)).fetchone()
@@ -159,7 +171,7 @@ class ExerciseRepo:
             sql += " AND category = ?"
             params.append(kategorie)
         zeilen = self.con.execute(sql + " ORDER BY name COLLATE NOCASE", params)
-        return self._mit_medien([self._zeile(r) for r in zeilen])
+        return self._mit_tags(self._mit_medien([self._zeile(r) for r in zeilen]))
 
     def suchen(self, text: str, kategorie: str | None = None) -> list[Exercise]:
         """Volltextsuche über Name und Beschreibung, Namenstreffer zuerst.
@@ -181,7 +193,7 @@ class ExerciseRepo:
             sql += " AND category = ?"
             params.append(kategorie)
         zeilen = self.con.execute(sql + " ORDER BY rang, name COLLATE NOCASE", params)
-        return self._mit_medien([self._zeile(r) for r in zeilen])
+        return self._mit_tags(self._mit_medien([self._zeile(r) for r in zeilen]))
 
     def kategorien(self) -> list[str]:
         return [
@@ -193,7 +205,35 @@ class ExerciseRepo:
             )
         ]
 
+    def tags(self) -> list[str]:
+        """Alle Tags, die an mindestens einer aktiven Übung hängen."""
+        return [
+            r["name"]
+            for r in self.con.execute(
+                "SELECT DISTINCT t.name FROM tag t JOIN exercise_tag et ON et.tag_id = t.id "
+                "JOIN exercise e ON e.id = et.exercise_id "
+                "WHERE e.deleted_at IS NULL AND e.archived = 0 ORDER BY t.name COLLATE NOCASE"
+            )
+        ]
+
     # -- Umwandlung --------------------------------------------------------
+
+    def _mit_tags(self, uebungen: list[Exercise]) -> list[Exercise]:
+        """Hängt die Tags an — eine Abfrage für alle, in Einfügereihenfolge."""
+        if not uebungen:
+            return uebungen
+        ids = [u.id for u in uebungen]
+        platzhalter = ",".join("?" * len(ids))
+        nach_uebung: dict[str, list[str]] = defaultdict(list)
+        for r in self.con.execute(
+            f"SELECT et.exercise_id, t.name FROM exercise_tag et JOIN tag t ON t.id = et.tag_id "
+            f"WHERE et.exercise_id IN ({platzhalter}) ORDER BY et.rowid",
+            ids,
+        ):
+            nach_uebung[r["exercise_id"]].append(r["name"])
+        for u in uebungen:
+            u.tags = nach_uebung.get(u.id, [])
+        return uebungen
 
     def _mit_medien(self, uebungen: list[Exercise]) -> list[Exercise]:
         """Hängt die Medienverweise an — eine Abfrage für alle, nicht eine je Übung."""
@@ -394,6 +434,15 @@ class PlanRepo:
             (json.dumps(target, ensure_ascii=False), item_id),
         )
 
+    def eingabe_setzen(
+        self, item_id: str, input_mode: str, quick: dict[str, list[Any]] | None = None
+    ) -> None:
+        """Stufe und eigene Chips einer Planübung."""
+        self.con.execute(
+            "UPDATE plan_item SET input_mode = ?, quick_json = ? WHERE id = ?",
+            (input_mode, json.dumps(quick or {}, ensure_ascii=False), item_id),
+        )
+
     def umbenennen(self, plan_id: str, name: str) -> None:
         with transaktion(self.con):
             self.con.execute("UPDATE plan SET name = ? WHERE id = ?", (name.strip(), plan_id))
@@ -439,8 +488,8 @@ class PlanRepo:
 
     def _item_schreiben(self, item: PlanItem) -> None:
         self.con.execute(
-            "INSERT INTO plan_item (id, plan_id, exercise_id, sort_order, target_json, note) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO plan_item (id, plan_id, exercise_id, sort_order, target_json, note, "
+            "input_mode, quick_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 item.id,
                 item.plan_id,
@@ -448,6 +497,8 @@ class PlanRepo:
                 item.order,
                 json.dumps(item.target, ensure_ascii=False),
                 item.note,
+                item.input_mode,
+                json.dumps(item.quick, ensure_ascii=False),
             ),
         )
 
@@ -476,6 +527,8 @@ class PlanRepo:
             order=r["sort_order"],
             target=json.loads(r["target_json"]),
             note=r["note"],
+            input_mode=r["input_mode"],
+            quick=json.loads(r["quick_json"]),
         )
 
     @staticmethod
@@ -614,6 +667,40 @@ class SessionRepo:
             self.con.execute("DELETE FROM measurement WHERE session_entry_id = ?", (alt.id,))
             self._kennzahlen_schreiben(session, neu)
         return neu
+
+    def heutiger_eintrag(
+        self, subject_id: str, exercise_id: str, tag: date, plan_id: str | None = None
+    ) -> SessionEntry | None:
+        """Der jüngste gültige Eintrag dieser Übung an diesem Tag — bevorzugt aus diesem Plan."""
+        von, bis = tagesgrenzen(tag)
+        zeilen = self.con.execute(
+            f"{_GUELTIGE} AND s.subject_id = ? AND e.exercise_id = ? "
+            "AND e.started_at >= ? AND e.started_at < ? ORDER BY e.started_at DESC, e.rowid DESC",
+            (subject_id, exercise_id, von.isoformat(), bis.isoformat()),
+        ).fetchall()
+        if not zeilen:
+            return None
+        if plan_id is not None:
+            for r in zeilen:
+                session = self.session_laden(r["session_id"])
+                if session is not None and session.plan_id == plan_id:
+                    return self._zeile(r)
+        return self._zeile(zeilen[0])
+
+    def satz_anhaengen(
+        self, session: Session, uebung: Exercise, feld_key: str, wert: float, tag: date
+    ) -> SessionEntry:
+        """„+20": hängt einen Satz an den heutigen Eintrag an — oder legt ihn an.
+
+        Jedes Plus ist eine Korrektur mit Verweis auf den vorherigen Stand; der
+        Eintrag bleibt unveränderlich, die Historie zeigt jeden Satz.
+        """
+        aktuell = self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+        if aktuell is None or aktuell.session_id != session.id:
+            return self.eintrag_anlegen(session, uebung, {feld_key: [wert]})
+        bisher = aktuell.result.get(feld_key)
+        liste = list(bisher) if isinstance(bisher, list) else ([bisher] if bisher else [])
+        return self.eintrag_korrigieren(aktuell.id, {**aktuell.result, feld_key: [*liste, wert]})
 
     def eintrag_loeschen(self, eintrag_id: str) -> None:
         """Weich löschen — samt der Einträge, die dieser korrigiert hat.
@@ -765,23 +852,20 @@ class SessionRepo:
         )
 
     def _kennzahlen_schreiben(self, session: Session, e: SessionEntry) -> None:
-        """chart_metrics → measurement: eine Zeile je Kennzahl mit Wert."""
+        """chart_metrics → measurement: je Kennzahl eine Zeile (Satzfelder: Summe und Maximum)."""
         spec = e.spec_snapshot
         assert spec is not None
         zeitpunkt = e.started_at or session.started_at
-        for key in spec.chart_metrics:
-            if (wert := e.result.get(key)) is None:
-                continue
-            feld = spec.field_by_key(key)
+        for kennzahl, wert, einheit in spec.kennzahlen(e.result):
             self.con.execute(
                 "INSERT INTO measurement (id, subject_id, metric_key, value, unit, recorded_at, "
                 "session_id, session_entry_id, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'exercise')",
                 (
                     new_id(),
                     session.subject_id,
-                    f"{e.exercise_id}:{key}",
-                    float(wert),
-                    (feld.unit if feld else None) or "",
+                    f"{e.exercise_id}:{kennzahl}",
+                    wert,
+                    einheit,
                     zeitpunkt.isoformat(),
                     session.id,
                     e.id,

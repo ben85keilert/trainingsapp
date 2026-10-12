@@ -49,15 +49,12 @@ def eintrag_anlegen(
             ),
         )
         # chart_metrics → measurement: eine Zeile je Kennzahl
-        for key in uebung.result_spec.chart_metrics:
-            if (wert := result.get(key)) is None:
-                continue
-            feld = uebung.result_spec.field_by_key(key)
+        for kennzahl, wert, einheit in uebung.result_spec.kennzahlen(result):
             m = Measurement(
                 subject_id=session.subject_id,
-                metric_key=f"{exercise_id}:{key}",
-                value=float(wert),
-                unit=(feld.unit if feld else None) or "",
+                metric_key=f"{exercise_id}:{kennzahl}",
+                value=wert,
+                unit=einheit,
                 recorded_at=session.started_at,
                 session_id=session.id,
                 session_entry_id=eintrag.id,
@@ -100,7 +97,7 @@ with tempfile.TemporaryDirectory() as ordner:
             "INSERT INTO session (id, subject_id, started_at) VALUES (?, ?, ?)",
             (s.id, s.subject_id, s.started_at.isoformat()),
         )
-        eintrag = eintrag_anlegen(con, s, wadenheben, {"sets": 3, "reps": reps})
+        eintrag = eintrag_anlegen(con, s, wadenheben, {"reps": [reps, reps, reps]})
         einheiten.append((s, eintrag))
         print(f"Eintrag {eintrag.shorthand():6}  am {s.started_at:%d.%m.}")
     print()
@@ -108,7 +105,7 @@ with tempfile.TemporaryDirectory() as ordner:
     # 2. Der letzte Eintrag war ein Tippfehler: es waren 3x20. Korrektur = neuer Eintrag.
     letzte_session, falsch = einheiten[-1]
     richtig = eintrag_anlegen(
-        con, letzte_session, wadenheben, {"sets": 3, "reps": 20}, ersetzt=falsch.id
+        con, letzte_session, wadenheben, {"reps": [20, 20, 20]}, ersetzt=falsch.id
     )
     print(f"Korrektur: {falsch.shorthand()} → {richtig.shorthand()}")
     print("(replaces_entry_id zeigt auf den alten Eintrag)")
@@ -135,10 +132,10 @@ with tempfile.TemporaryDirectory() as ordner:
     print()
 
     # 4. Der Verlauf kommt aus measurement — eine Tabelle, eine Abfrage, sortierbar.
-    print("Verlauf 'reps' (aus measurement):")
+    print("Verlauf 'reps:sum' (aus measurement):")
     for r in con.execute(
         "SELECT recorded_at, value FROM measurement WHERE metric_key = ? ORDER BY recorded_at",
-        (f"{wadenheben}:reps",),
+        (f"{wadenheben}:reps:sum",),
     ):
         print(f"   {r['recorded_at'][:10]}  {r['value']:.0f}")
     print("Korrigierte Werte sind ersetzt, nicht doppelt.")

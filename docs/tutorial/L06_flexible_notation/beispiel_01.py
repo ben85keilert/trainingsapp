@@ -28,8 +28,10 @@ print()
 
 # 2. Vorbelegung und kompakte Anzeige kommen aus der Spezifikation.
 print("defaults():        ", SPEC_SAETZE_WDH.defaults())
-print("format_shorthand():", SPEC_SAETZE_WDH.format_shorthand({"sets": 3, "reps": 15}))
-print("Haltezeit:         ", SPEC_HALTEN.format_shorthand({"sets": 3, "hold": 45}))
+print("format_shorthand():", SPEC_SAETZE_WDH.format_shorthand({"reps": [15, 15, 15]}))
+print("ungleiche Sätze:   ", SPEC_SAETZE_WDH.format_shorthand({"reps": [15, 15, 20]}))
+print("Haltezeit:         ", SPEC_HALTEN.format_shorthand({"hold": [45, 45, 45]}))
+print("Zusammenfassung:   ", SPEC_SAETZE_WDH.zusammenfassung({"reps": [15, 15, 20]}))
 print()
 
 # 3. Die Kurzschrift zerlegt Text in Feldwerte — was nicht erkannt wird, fehlt.
@@ -37,17 +39,25 @@ for text in ("3x15", "3x12 @40kg", "45°", "1:30", "irgendwas"):
     print(f"parse_shorthand({text!r:14}) → {parse_shorthand(text)}")
 print()
 
-# 4. Das Szenario: Ein Jahr lang "3x15" dokumentiert …
+# 4. Das Szenario: Ein Jahr lang "3x15" dokumentiert — mit der Spezifikation,
+#    wie sie damals aussah (zwei Zahlen, eine Vorlage für die Anzeige) …
+damals = ResultSpec(
+    fields=[
+        FieldSpec("sets", FieldType.INT, "Sätze", default=3),
+        FieldSpec("reps", FieldType.INT, "Wdh.", default=15),
+    ],
+    shorthand="{sets}x{reps}",
+)
 alter_eintrag = SessionEntry(
     result={"sets": 3, "reps": 15},
-    spec_snapshot=SPEC_SAETZE_WDH,  # die Kopie von damals
+    spec_snapshot=damals,  # die Kopie von damals
 )
 
 # … dann bekommt die Übung ein Gewichtsfeld und eine neue Kurzschrift.
 neue_spec = replace(
-    SPEC_SAETZE_WDH,
+    damals,
     fields=[
-        *SPEC_SAETZE_WDH.fields,
+        *damals.fields,
         FieldSpec("weight", FieldType.WEIGHT, "Gewicht", unit="kg", default=0),
     ],
     shorthand="{sets}x{reps} @{weight}kg",

@@ -29,6 +29,7 @@ from trainingsapp.data.repositories import (
     SubjectRepo,
 )
 from trainingsapp.data.seed import seed_einspielen
+from trainingsapp.data.upgrade import datenformat_aktualisieren
 
 STANDARD_PROFILNAME = "Ich"
 
@@ -49,7 +50,8 @@ class AppState:
     nav_index: int = 0
     #: Suchtext und Kategoriefilter des Katalogs — überleben den Ansichtswechsel
     suchtext: str = ""
-    kategorie: str | None = None
+    kategorie: str | None = None  # Typ: Dehnung, Kräftigung, …
+    tag_filter: str | None = None  # Region oder Charakter
     #: Wie viele Übungen der letzte Start neu angelegt hat (für den Startbildschirm)
     neu_eingespielt: int = field(default=0)
     #: Reiter „Übungen": 0 = Katalog, 1 = Pläne
@@ -79,6 +81,7 @@ class AppState:
         """
         con = oeffnen(db_pfad if db_pfad is not None else datenbankpfad())
         neu = seed_einspielen(con)
+        datenformat_aktualisieren(con)
         profile = SubjectRepo(con)
         einstellungen = SettingRepo(con)
         profil = cls._aktives_profil(profile, einstellungen)

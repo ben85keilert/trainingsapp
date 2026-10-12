@@ -4,6 +4,10 @@ Entstanden in L06 (Beispiel 2). ``control`` zeigt man an, ``werte()`` liest,
 ``setzen()`` füllt vor, ``pruefen()`` meldet Pflichtfelder und ungültige
 Eingaben. Ein neuer `FieldType` braucht genau hier einen Zweig in
 ``_widget``, ``_lesen`` und ``_anzeige`` — sonst nirgends.
+
+Satzfelder (`SET_LIST`) sind Textfelder mit der Notation aus
+`docs/notation.md`: ``3x15``, ``30``, ``15/15/20``; die Chips hängen einen
+Satz an (``+15``). Ein Fragezeichen daneben öffnet die Hilfe.
 """
 
 from __future__ import annotations
@@ -13,8 +17,9 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.result_spec import FieldSpec, FieldType, ResultSpec
-from trainingsapp.core.units import format_dauer, parse_dauer
+from trainingsapp.core.result_spec import FieldSpec, FieldType, ResultSpec, ist_leer
+from trainingsapp.core.units import format_dauer, format_sets, parse_dauer, parse_sets
+from trainingsapp.ui.components.hilfe import hilfe_knopf
 
 ZAHLENARTIG = {
     FieldType.INT,
@@ -27,8 +32,17 @@ ZAHLENARTIG = {
 
 
 class SpecForm:
-    def __init__(self, spec: ResultSpec, werte: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        spec: ResultSpec,
+        werte: dict[str, Any] | None = None,
+        page: ft.Page | None = None,
+        quick: dict[str, list[Any]] | None = None,
+    ) -> None:
+        """``quick`` überschreibt je Feld die Chips der Spezifikation (Plan → Eintrag)."""
         self.spec = spec
+        self._page = page
+        self._quick = quick or {}
         self._widgets: dict[str, ft.Control] = {}
         self._chips: dict[str, list[ft.Chip]] = {}
         zeilen: list[ft.Control] = []
@@ -52,8 +66,23 @@ class SpecForm:
             return ft.Slider(
                 min=lo, max=hi, divisions=schritte, value=float(wert or lo), label="{value}"
             )
+        if f.type == FieldType.CHOICE:
+            return ft.SegmentedButton(
+                selected=[str(wert)] if wert not in (None, "") else [],
+                allow_empty_selection=True,
+                segments=[ft.Segment(value=str(q), label=ft.Text(str(q))) for q in f.quick],
+            )
         if f.type == FieldType.TEXT:
             return ft.TextField(label=f.label, value=str(wert or ""), multiline=True, min_lines=2)
+        if f.type == FieldType.SET_LIST:
+            return ft.TextField(
+                label=f"{f.label} je Satz",
+                value=self._anzeige(f, wert),
+                hint_text="3x15 · 30 · 15/15/20",
+                width=200,
+                keyboard_type=ft.KeyboardType.TEXT,
+                suffix=ft.Text(f.unit) if f.unit else None,
+            )
         return ft.TextField(
             label=f.label,
             value=self._anzeige(f, wert),
@@ -64,39 +93,49 @@ class SpecForm:
         )
 
     def _zeile(self, f: FieldSpec, widget: ft.Control) -> ft.Control:
-        if f.type in (FieldType.BOOL, FieldType.TEXT):
+        if f.type in (FieldType.BOOL, FieldType.TEXT, FieldType.CHOICE):
             return widget
         if f.type == FieldType.SCALE:
             return ft.Column(spacing=0, controls=[ft.Text(f.label, size=12, opacity=0.7), widget])
 
+        chips_werte = self._quick.get(f.key) or f.quick
+
         def setzer(wert: Any) -> Callable[[], None]:
             def handler() -> None:
-                widget.value = self._anzeige(f, wert)  # type: ignore[attr-defined]
+                if f.type == FieldType.SET_LIST:
+                    # Ein Chip hängt einen Satz an — „+15"
+                    bisher = parse_sets(str(widget.value or ""), zeit=(f.unit == "s")) or []  # type: ignore[attr-defined]
+                    widget.value = format_sets([*bisher, float(wert)], zeit=(f.unit == "s"))  # type: ignore[attr-defined]
+                else:
+                    widget.value = self._anzeige(f, wert)  # type: ignore[attr-defined]
                 self._chips_abgleichen(f)
                 self.control.update()
 
             return handler
 
+        praefix = "+" if f.type == FieldType.SET_LIST else ""
         chips: list[ft.Chip] = [
-            ft.Chip(label=ft.Text(str(q)), show_checkmark=False, on_click=setzer(q))
-            for q in f.quick
+            ft.Chip(label=ft.Text(f"{praefix}{q}"), show_checkmark=False, on_click=setzer(q))
+            for q in chips_werte
         ]
-        chip_controls: list[ft.Control] = list(chips)
         self._chips[f.key] = chips
         self._chips_abgleichen(f)
+        rechts: list[ft.Control] = list(chips)
+        if f.type == FieldType.SET_LIST and self._page is not None:
+            rechts.append(hilfe_knopf(self._page))
         return ft.Row(
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=12,
             controls=[
                 widget,
-                ft.Container(
-                    expand=True, content=ft.Row(wrap=True, spacing=6, controls=chip_controls)
-                ),
+                ft.Container(expand=True, content=ft.Row(wrap=True, spacing=6, controls=rechts)),
             ],
         )
 
     def _chips_abgleichen(self, f: FieldSpec) -> None:
-        """Der Chip mit dem aktuellen Wert erscheint ausgewählt."""
+        """Bei Einzelwerten erscheint der Chip mit dem aktuellen Wert ausgewählt."""
+        if f.type == FieldType.SET_LIST:
+            return
         aktuell = str(self._widgets[f.key].value or "").strip()  # type: ignore[attr-defined]
         for chip in self._chips.get(f.key, []):
             chip.selected = chip.label.value == aktuell  # type: ignore[union-attr]
@@ -105,8 +144,10 @@ class SpecForm:
 
     @staticmethod
     def _anzeige(f: FieldSpec, wert: Any) -> str:
-        if wert is None:
+        if ist_leer(wert):
             return ""
+        if f.type == FieldType.SET_LIST:
+            return format_sets([float(w) for w in wert], zeit=(f.unit == "s"))
         if f.type == FieldType.DURATION:
             return format_dauer(float(wert))
         if isinstance(wert, float) and wert.is_integer():
@@ -120,11 +161,16 @@ class SpecForm:
         if f.type == FieldType.SCALE:
             wert = float(widget.value or 0)  # type: ignore[attr-defined]
             return int(wert) if float(f.step or 1).is_integer() else wert
+        if f.type == FieldType.CHOICE:
+            auswahl = list(widget.selected or [])  # type: ignore[attr-defined]
+            return auswahl[0] if auswahl else None
         text = str(widget.value or "").strip()  # type: ignore[attr-defined]
         if f.type == FieldType.TEXT:
             return text
         if not text:
             return None
+        if f.type == FieldType.SET_LIST:
+            return parse_sets(text, zeit=(f.unit == "s"))
         if f.type == FieldType.DURATION:
             return parse_dauer(text)
         try:
@@ -152,6 +198,8 @@ class SpecForm:
                 widget.value = bool(werte[f.key])  # type: ignore[attr-defined]
             elif f.type == FieldType.SCALE:
                 widget.value = float(werte[f.key])  # type: ignore[attr-defined]
+            elif f.type == FieldType.CHOICE:
+                widget.selected = [str(werte[f.key])] if werte[f.key] else []  # type: ignore[attr-defined]
             else:
                 widget.value = self._anzeige(f, werte[f.key])  # type: ignore[attr-defined]
             self._chips_abgleichen(f)
@@ -165,7 +213,12 @@ class SpecForm:
             widget = self._widgets[f.key]
             wert = self._lesen(f, widget)
             text = str(getattr(widget, "value", "") or "").strip()
-            ungueltig = f.type in ZAHLENARTIG and wert is None and text != ""
+            # Bei Satzfeldern ist "0" erlaubt und heißt „ohne Angabe"
+            ungueltig = (
+                (f.type in ZAHLENARTIG or f.type == FieldType.SET_LIST)
+                and wert is None
+                and text not in ("", "0")
+            )
             fehlt = f.required and (wert is None or wert == "")
             if isinstance(widget, ft.TextField):
                 widget.error = "Ungültig" if ungueltig else ("Pflichtfeld" if fehlt else None)

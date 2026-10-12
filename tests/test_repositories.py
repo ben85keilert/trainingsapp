@@ -56,7 +56,7 @@ def test_speichern_und_laden(repo) -> None:
     zurueck = repo.laden(u.id)
     assert zurueck is not None
     assert zurueck.name == "Testübung"
-    assert zurueck.result_spec.shorthand == "{sets}x{reps}"
+    assert zurueck.result_spec.format_shorthand({"reps": [15, 15, 15]}) == "3x15"
     assert zurueck.created_at == u.created_at
 
 
@@ -238,7 +238,7 @@ def _wadenheben(con) -> Exercise:
 
 def test_eintrag_mit_kopie(welt) -> None:
     con, repo, _ich, sitzung = welt
-    repo.eintrag_anlegen(sitzung, _wadenheben(con), {"sets": 3, "reps": 15})
+    repo.eintrag_anlegen(sitzung, _wadenheben(con), {"reps": [15, 15, 15]})
     eintraege = repo.eintraege(sitzung.id)
     assert [e.shorthand() for e in eintraege] == ["3x15"]
     assert eintraege[0].started_at is not None
@@ -248,7 +248,7 @@ def test_eintrag_ueberlebt_aenderung_der_uebung(welt) -> None:
     con, repo, _ich, sitzung = welt
     uebungen = ExerciseRepo(con)
     uebung = _wadenheben(con)
-    repo.eintrag_anlegen(sitzung, uebung, {"sets": 3, "reps": 15})
+    repo.eintrag_anlegen(sitzung, uebung, {"reps": [15, 15, 15]})
 
     uebung.result_spec = SPEC_HALTEN  # die Übung wird umgebaut
     uebungen.speichern(uebung)
@@ -292,7 +292,7 @@ def test_tagesgrenze_trennt_eintraege(welt) -> None:
     for zeit in (spaet, frueh):
         s = Session(subject_id=ich.id, started_at=zeit.astimezone(UTC))
         repo.anlegen(s)
-        e = repo.eintrag_anlegen(s, uebung, {"sets": 3, "reps": 15})
+        e = repo.eintrag_anlegen(s, uebung, {"reps": [15, 15, 15]})
         con.execute(
             "UPDATE session_entry SET started_at = ? WHERE id = ?",
             (zeit.astimezone(UTC).isoformat(), e.id),
@@ -312,7 +312,7 @@ def test_anzahl_am_tag_zaehlt_mehrfach(welt) -> None:
     uebung = _wadenheben(con)
     repo.erledigt(sitzung, uebung)
     repo.erledigt(sitzung, uebung)
-    repo.eintrag_anlegen(sitzung, uebung, {"sets": 2, "reps": 10})
+    repo.eintrag_anlegen(sitzung, uebung, {"reps": [10, 10]})
     assert repo.anzahl_am_tag(ich.id, lokaler_tag(jetzt()))[uebung.id] == 3
     assert len(repo.eintraege_am_tag(ich.id, lokaler_tag(jetzt()))) == 3
 
@@ -320,38 +320,38 @@ def test_anzahl_am_tag_zaehlt_mehrfach(welt) -> None:
 def test_letzter_eintrag_ueber_sitzungen(welt) -> None:
     con, repo, ich, sitzung = welt
     uebung = _wadenheben(con)
-    repo.eintrag_anlegen(sitzung, uebung, {"sets": 3, "reps": 12})
+    repo.eintrag_anlegen(sitzung, uebung, {"reps": [12, 12, 12]})
     spaeter = Session(subject_id=ich.id, started_at=jetzt() + timedelta(days=1))
     repo.anlegen(spaeter)
-    repo.eintrag_anlegen(spaeter, uebung, {"sets": 3, "reps": 20})
+    repo.eintrag_anlegen(spaeter, uebung, {"reps": [20, 20, 20]})
 
-    assert repo.letzter_eintrag(ich.id, uebung.id).result["reps"] == 20
+    assert repo.letzter_eintrag(ich.id, uebung.id).result["reps"] == [20, 20, 20]
     assert repo.letzter_eintrag(ich.id, "gibt-es-nicht") is None
 
 
 def test_korrektur_ersetzt(welt) -> None:
     con, repo, ich, sitzung = welt
     uebung = _wadenheben(con)
-    alt = repo.eintrag_anlegen(sitzung, uebung, {"sets": 3, "reps": 15}, note="Tippfehler")
-    neu = repo.eintrag_korrigieren(alt.id, {"sets": 3, "reps": 20})
+    alt = repo.eintrag_anlegen(sitzung, uebung, {"reps": [15, 15, 15]}, note="Tippfehler")
+    neu = repo.eintrag_korrigieren(alt.id, {"reps": [20, 20, 20]})
 
     assert [e.id for e in repo.eintraege(sitzung.id)] == [neu.id]
     assert neu.note == "Tippfehler"  # Notiz bleibt, wenn keine neue kommt
-    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:reps")] == [20.0]
+    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:reps:sum")] == [60.0]
     assert con.execute("SELECT COUNT(*) FROM session_entry").fetchone()[0] == 2
-    assert repo.metriken(ich.id) == [f"{uebung.id}:reps"]
+    assert repo.metriken(ich.id) == [f"{uebung.id}:reps:max", f"{uebung.id}:reps:sum"]
 
 
 def test_loeschen_ist_weich_und_nimmt_kennzahlen_mit(welt) -> None:
     con, repo, ich, sitzung = welt
     uebung = _wadenheben(con)
-    alt = repo.eintrag_anlegen(sitzung, uebung, {"sets": 3, "reps": 15})
-    neu = repo.eintrag_korrigieren(alt.id, {"sets": 3, "reps": 20})
+    alt = repo.eintrag_anlegen(sitzung, uebung, {"reps": [15, 15, 15]})
+    neu = repo.eintrag_korrigieren(alt.id, {"reps": [20, 20, 20]})
     repo.eintrag_loeschen(neu.id)
 
     assert repo.eintraege(sitzung.id) == []
     assert repo.eintraege_am_tag(ich.id, lokaler_tag(jetzt())) == []
-    assert repo.verlauf(ich.id, f"{uebung.id}:reps") == []
+    assert repo.verlauf(ich.id, f"{uebung.id}:reps:sum") == []
     assert repo.eintrag_laden(neu.id) is None
     # Grabsteine bleiben für die Synchronisation
     assert (
@@ -364,7 +364,7 @@ def test_ohne_chart_metrics_keine_kennzahl(welt) -> None:
     con, repo, _ich, sitzung = welt
     uebung = _wadenheben(con)
     uebung.result_spec = replace(uebung.result_spec, chart_metrics=[])
-    repo.eintrag_anlegen(sitzung, uebung, {"sets": 3, "reps": 15})
+    repo.eintrag_anlegen(sitzung, uebung, {"reps": [15, 15, 15]})
     assert con.execute("SELECT COUNT(*) FROM measurement").fetchone()[0] == 0
 
 
@@ -386,7 +386,7 @@ def test_plan_speichern_und_laden(con) -> None:
         name="Dehnung",
         items=[
             PlanItem(exercise_id=seed_id("nacken_dehnung")),
-            PlanItem(exercise_id=seed_id("hueftbeuger_dehnung"), target={"sets": 2, "hold": 45}),
+            PlanItem(exercise_id=seed_id("hueftbeuger_dehnung"), target={"hold": [45, 45]}),
         ],
     )
     plaene.speichern(plan)
@@ -395,7 +395,7 @@ def test_plan_speichern_und_laden(con) -> None:
         seed_id("nacken_dehnung"),
         seed_id("hueftbeuger_dehnung"),
     ]
-    assert geladen.items[1].target == {"sets": 2, "hold": 45}
+    assert geladen.items[1].target == {"hold": [45, 45]}
     assert plaene.laden("fehlt") is None
 
 
@@ -409,8 +409,8 @@ def test_plan_schnell_aendern(con) -> None:
     zweites = plaene.uebung_hinzufuegen(plan.id, seed_id("einbeinstand"))
     assert [i.order for i in plaene.laden(plan.id).items] == [0, 1]
 
-    plaene.ziel_setzen(item.id, {"sets": 1, "hold": 420})
-    assert plaene.item_laden(item.id).target == {"sets": 1, "hold": 420}
+    plaene.ziel_setzen(item.id, {"hold": [420]})
+    assert plaene.item_laden(item.id).target == {"hold": [420]}
 
     plaene.uebung_entfernen(zweites.id)
     assert [i.id for i in plaene.laden(plan.id).items] == [item.id]
@@ -463,3 +463,99 @@ def test_tagesnotiz(con) -> None:
     notizen.setzen(ich.id, tag, "Zweiter Versuch")
     assert notizen.lesen(ich.id, tag) == "Zweiter Versuch"
     assert con.execute("SELECT COUNT(*) FROM day_note").fetchone()[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# Satzfeld: anhängen, Kennzahlen, Tags, Datenformat
+# ---------------------------------------------------------------------------
+
+
+def test_satz_anhaengen_baut_den_eintrag_auf(welt) -> None:
+    """+15, +15, +20 → ein Eintrag 15/15/20 mit Historie, Summe 50 im Verlauf."""
+    con, repo, ich, sitzung = welt
+    uebung = _wadenheben(con)
+    heute = lokaler_tag(jetzt())
+    repo.satz_anhaengen(sitzung, uebung, "reps", 15, heute)
+    repo.satz_anhaengen(sitzung, uebung, "reps", 15, heute)
+    e = repo.satz_anhaengen(sitzung, uebung, "reps", 20, heute)
+
+    assert e.result == {"reps": [15, 15, 20]}
+    assert e.shorthand() == "15/15/20"
+    assert len(repo.eintraege(sitzung.id)) == 1  # ein gültiger Eintrag …
+    assert con.execute("SELECT COUNT(*) FROM session_entry").fetchone()[0] == 3  # … mit Historie
+    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:reps:sum")] == [50.0]
+    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:reps:max")] == [20.0]
+
+
+def test_satz_anhaengen_nach_gemacht(welt) -> None:
+    """Erst „gemacht", dann +20: aus dem leeren Eintrag wird 20."""
+    con, repo, _ich, sitzung = welt
+    uebung = _wadenheben(con)
+    repo.erledigt(sitzung, uebung)
+    e = repo.satz_anhaengen(sitzung, uebung, "reps", 20, lokaler_tag(jetzt()))
+    assert e.result == {"reps": [20]}
+    assert len(repo.eintraege(sitzung.id)) == 1
+
+
+def test_tags_speichern_und_laden(repo, con) -> None:
+    u = Exercise(name="A", tags=["Arm", "Rumpf"])
+    repo.speichern(u)
+    repo.speichern(Exercise(name="B", tags=["Rumpf"]))
+    assert repo.laden(u.id).tags == ["Arm", "Rumpf"]
+    assert con.execute("SELECT COUNT(*) FROM tag").fetchone()[0] == 2
+    assert repo.tags() == ["Arm", "Rumpf"]
+
+    u.tags = ["Rumpf"]
+    repo.speichern(u)
+    assert repo.laden(u.id).tags == ["Rumpf"]
+    assert [x.tags for x in repo.alle()] == [["Rumpf"], ["Rumpf"]]
+
+
+def test_plan_item_eingabestufe(con) -> None:
+    seed_einspielen(con)
+    plaene = PlanRepo(con)
+    plan = Plan(name="P")
+    plaene.speichern(plan)
+    item = plaene.uebung_hinzufuegen(plan.id, seed_id("wadenheben"))
+    assert plaene.item_laden(item.id).input_mode == "chips"
+    plaene.eingabe_setzen(item.id, "frei", {"reps": [5, 10]})
+    geladen = plaene.item_laden(item.id)
+    assert (geladen.input_mode, geladen.quick) == ("frei", {"reps": [5, 10]})
+
+
+def test_datenformat_aktualisieren(con) -> None:
+    """Alte Spezifikation {sets, reps} und altes Ziel werden einmalig umgestellt."""
+    import json
+
+    from trainingsapp.core.result_spec import FieldSpec, FieldType, ResultSpec
+    from trainingsapp.data.upgrade import datenformat_aktualisieren
+
+    alt = ResultSpec(
+        fields=[
+            FieldSpec("sets", FieldType.INT, "Sätze", default=3),
+            FieldSpec("reps", FieldType.INT, "Wdh.", default=15, quick=[10, 15]),
+        ],
+        shorthand="{sets}x{reps}",
+        chart_metrics=["reps"],
+    )
+    repo = ExerciseRepo(con)
+    u = Exercise(name="Alt", category="Knie", result_spec=alt)
+    repo.speichern(u)
+    plaene = PlanRepo(con)
+    plan = Plan(name="P")
+    plaene.speichern(plan)
+    item = plaene.uebung_hinzufuegen(plan.id, u.id, {"sets": 3, "reps": 15})
+
+    assert datenformat_aktualisieren(con) > 0
+    neu = repo.laden(u.id)
+    assert [str(f.type) for f in neu.result_spec.fields] == ["set_list"]
+    assert neu.result_spec.fields[0].default == [15, 15, 15]
+    assert neu.category == "Kräftigung" and neu.tags == ["Bein"]
+    assert plaene.item_laden(item.id).target == {"reps": [15, 15, 15]}
+    assert datenformat_aktualisieren(con) == 0  # nur einmal
+    assert (
+        json.loads(
+            con.execute("SELECT result_spec_json FROM exercise WHERE id = ?", (u.id,)).fetchone()[0]
+        )["fields"][0]["key"]
+        == "reps"
+    )

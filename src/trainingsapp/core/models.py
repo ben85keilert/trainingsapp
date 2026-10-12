@@ -232,14 +232,35 @@ class DayNote:
 # ---------------------------------------------------------------------------
 
 
+#: Typ einer Übung — genau einer je Übung (`Exercise.category`).
+TYPEN = ["Dehnung", "Kräftigung", "Ausdauer", "Gleichgewicht", "Atmung", "Benchmark", "Messung"]
+#: Körperregionen — als Tags, beliebig viele je Übung.
+REGIONEN = ["Nacken", "Schulter", "Arm", "Hand", "Rumpf", "Rücken", "Hüfte", "Bein", "Fuß"]
+
+#: Eingabestufen einer Planübung (Migration 004)
+EINGABE_HAKEN = "haken"
+EINGABE_CHIPS = "chips"
+EINGABE_FREI = "frei"
+
+
 @dataclass(slots=True)
 class PlanItem:
+    """Eine Übung im Plan: mit Ziel, Eingabestufe und eigenen Chips.
+
+    Hierarchie: Die Übung gibt Felder und Standard-Chips vor, der Plan
+    übernimmt sie und darf sie überschreiben, der Eintrag übernimmt den Plan
+    und darf wiederum abweichen.
+    """
+
     id: str = field(default_factory=new_id)
     plan_id: str = ""
     exercise_id: str = ""
     order: int = 0
     target: dict[str, Any] = field(default_factory=dict)
     note: str = ""
+    input_mode: str = EINGABE_CHIPS
+    #: Chips je Feld, die die der Übung ersetzen — leer heißt „wie die Übung"
+    quick: dict[str, list[Any]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

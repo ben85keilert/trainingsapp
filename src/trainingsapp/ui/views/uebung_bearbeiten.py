@@ -1,52 +1,92 @@
 """Übung anlegen oder bearbeiten — Route `/uebung/neu` bzw. `/uebung/<id>/bearbeiten`.
 
-Noch ohne eigenen Spec-Editor: Die Notation wird aus den vier Vorlagen
-gewählt. Ein Editor für eigene Felder kommt in L06, wenn `spec_form.py`
-existiert und wir wissen, wie eine Spezifikation sich beim Eingeben anfühlt.
+Die Felder einer Übung kommen aus dem **Feldvorrat** (`core/result_spec.py`):
+Jedes Feld bringt Typ und Einheit mit, hier schaltet man es ein und legt die
+Chips fest. Vorlagen sind ein Schnellstart, der die Schalter setzt. Felder,
+die eine Übung aus früheren Zeiten trägt und die nicht im Vorrat stehen,
+bleiben erhalten.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
+from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.models import Exercise, Media, MediaKind, MediaSource
-from trainingsapp.data.seed import SPECS
+from trainingsapp.core.models import REGIONEN, TYPEN, Exercise, Media, MediaKind, MediaSource
+from trainingsapp.core.result_spec import (
+    FELDVORRAT,
+    VORLAGEN,
+    FieldSpec,
+    FieldType,
+    Layout,
+    ResultSpec,
+)
+from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL, symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
 
-#: Kurzname der Vorlage → Beschriftung im Dropdown
-VORLAGEN: dict[str, str] = {
-    "saetze_wdh": "Sätze × Wiederholungen  (3x15)",
-    "halten": "Sätze × Haltezeit  (3× 30s)",
-    "winkel": "Winkel  (45°)",
-    "benchmark_zeit": "Zeit als Benchmark  (62s)",
+KENNZAHL_TYPEN = {
+    FieldType.SET_LIST,
+    FieldType.INT,
+    FieldType.FLOAT,
+    FieldType.DURATION,
+    FieldType.DEGREES,
+    FieldType.WEIGHT,
+    FieldType.DISTANCE,
+    FieldType.SCALE,
 }
 
 
-def _vorlage_von(uebung: Exercise | None) -> str:
-    """Welche Vorlage die Übung heute benutzt — erkannt an der Kurzschrift."""
-    if uebung is None:
-        return "saetze_wdh"
-    for key, spec in SPECS.items():
-        if spec.shorthand == uebung.result_spec.shorthand:
-            return key
-    return "saetze_wdh"
+def chips_text(werte: list[Any]) -> str:
+    return ", ".join(
+        str(int(w)) if isinstance(w, float) and w.is_integer() else str(w) for w in werte
+    )
+
+
+def chips_lesen(text: str, f: FieldSpec) -> list[Any]:
+    """„10, 15, 20“ → Zahlen; bei Auswahlfeldern Texte."""
+    teile = [t.strip() for t in text.replace(";", ",").split(",") if t.strip()]
+    if f.type in (FieldType.CHOICE, FieldType.TEXT):
+        return teile
+    werte: list[Any] = []
+    for t in teile:
+        try:
+            zahl = float(t.replace(",", "."))
+        except ValueError:
+            continue
+        werte.append(int(zahl) if zahl.is_integer() else zahl)
+    return werte
+
+
+def spec_bauen(felder: list[FieldSpec]) -> ResultSpec:
+    """Aus den eingeschalteten Feldern die Spezifikation — Kennzahlen automatisch."""
+    keys = [f.key for f in felder]
+    layout = Layout.SETS if "reps" in keys else Layout.TIMED if "hold" in keys else Layout.SINGLE
+    return ResultSpec(
+        layout=layout,
+        fields=felder,
+        chart_metrics=[f.key for f in felder if f.type in KENNZAHL_TYPEN],
+    )
 
 
 def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -> ft.View:
     neu = uebung is None
     route = "/uebung/neu" if uebung is None else f"/uebung/{uebung.id}/bearbeiten"
+    vorhanden = {f.key: f for f in (uebung.result_spec.fields if uebung else [])}
 
-    # -- Felder ------------------------------------------------------------
+    # -- Stammdaten --------------------------------------------------------
 
     name = ft.TextField(label="Name", value=uebung.name if uebung else "", autofocus=neu)
-    kategorie = ft.TextField(
-        label="Kategorie",
-        value=uebung.category if uebung else "",
-        hint_text=", ".join(state.uebungen.kategorien()[:4]) or "z. B. Schulter",
+    typ_wert = uebung.category if uebung and uebung.category else TYPEN[1]
+    typ = ft.Dropdown(
+        label="Typ",
+        value=typ_wert,
+        options=[ft.DropdownOption(key=t, text=t) for t in dict.fromkeys([*TYPEN, typ_wert])],
+        expand=True,
     )
     beschreibung = ft.TextField(
         label="Beschreibung",
@@ -55,17 +95,111 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         min_lines=3,
         max_lines=8,
     )
-    vorlage = ft.Dropdown(
-        label="Notation",
-        value=_vorlage_von(uebung),
-        options=[ft.DropdownOption(key=k, text=t) for k, t in VORLAGEN.items()],
+
+    # -- Regionen und Tags ---------------------------------------------------
+
+    tags_aktiv: set[str] = set(uebung.tags) if uebung else set()
+    region_chips: dict[str, ft.Chip] = {}
+
+    def region_schalter(region: str) -> Callable[[], None]:
+        def handler() -> None:
+            if region in tags_aktiv:
+                tags_aktiv.discard(region)
+            else:
+                tags_aktiv.add(region)
+            region_chips[region].selected = region in tags_aktiv
+            page.update()
+
+        return handler
+
+    for region in REGIONEN:
+        region_chips[region] = ft.Chip(
+            label=ft.Text(region),
+            selected=region in tags_aktiv,
+            show_checkmark=False,
+            on_click=region_schalter(region),
+        )
+    weitere_tags = ft.TextField(
+        label="Weitere Tags (mit Komma)",
+        value=", ".join(t for t in tags_aktiv if t not in REGIONEN),
+        dense=True,
+    )
+
+    # -- Felder aus dem Vorrat ---------------------------------------------
+    # Je Vorratsfeld ein Schalter und ein Chip-Feld. Eingeschaltet, wenn die
+    # Übung das Feld schon hat; Chips aus der Übung, sonst aus dem Vorrat.
+
+    schalter: dict[str, ft.Switch] = {}
+    chipfelder: dict[str, ft.TextField] = {}
+    zeilen: list[ft.Control] = []
+
+    def sichtbarkeit(key: str) -> Callable[[], None]:
+        def handler() -> None:
+            chipfelder[key].visible = bool(schalter[key].value)
+            page.update()
+
+        return handler
+
+    for vorlage in FELDVORRAT:
+        aktiv = vorlage.key in vorhanden
+        quelle = vorhanden.get(vorlage.key, vorlage)
+        schalter[vorlage.key] = ft.Switch(
+            label=f"{vorlage.label}{f' ({vorlage.unit})' if vorlage.unit else ''}",
+            value=aktiv,
+            on_change=sichtbarkeit(vorlage.key),
+        )
+        chipfelder[vorlage.key] = ft.TextField(
+            label="Chips" if vorlage.type != FieldType.CHOICE else "Optionen",
+            value=chips_text(quelle.quick),
+            dense=True,
+            width=200,
+            visible=aktiv,
+        )
+        if vorlage.type in (FieldType.BOOL, FieldType.TEXT, FieldType.SCALE):
+            chipfelder[vorlage.key].visible = False
+            zeilen.append(schalter[vorlage.key])
+        else:
+            zeilen.append(
+                ft.Row(
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=12,
+                    controls=[
+                        ft.Container(width=210, content=schalter[vorlage.key]),
+                        chipfelder[vorlage.key],
+                    ],
+                )
+            )
+    # Felder, die nicht im Vorrat stehen (ältere oder besondere), bleiben erhalten.
+    fremde = [f for key, f in vorhanden.items() if key not in schalter]
+    if fremde:
+        zeilen.append(
+            ft.Text(
+                "Weitere Felder dieser Übung bleiben erhalten: "
+                + ", ".join(f.label for f in fremde),
+                size=12,
+                opacity=0.6,
+            )
+        )
+
+    def vorlage_laden(e: ft.Event[ft.Dropdown]) -> None:
+        _, spec = VORLAGEN[e.control.value or "saetze_wdh"]
+        keys = {f.key: f for f in spec.fields}
+        for key, sw in schalter.items():
+            sw.value = key in keys
+            if key in keys:
+                chipfelder[key].value = chips_text(keys[key].quick)
+            if key in chipfelder and schalter[key].label:
+                sichtbarkeit(key)()
+        page.update()
+
+    vorlage_auswahl = ft.Dropdown(
+        label="Vorlage laden (setzt die Schalter)",
+        options=[ft.DropdownOption(key=k, text=t) for k, (t, _) in VORLAGEN.items()],
+        on_select=vorlage_laden,
         expand=True,
     )
 
     # -- Symbolauswahl -------------------------------------------------------
-    # Ein Raster aus Containern; der gewählte ist eingefärbt. Die Auswahl steht
-    # in einer Variablen der umgebenden Funktion, die Handler ändern sie per
-    # `nonlocal` — dasselbe Muster wie der Zähler in L03.
 
     gewaehlt: str = uebung.icon_key if uebung and uebung.icon_key else AUSWAHL[0]
     kacheln: dict[str, ft.Container] = {}
@@ -94,15 +228,13 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     symbole = ft.Row(wrap=True, spacing=4, run_spacing=4, controls=list(kacheln.values()))
 
     # -- Videolinks ----------------------------------------------------------
-    # Eine Zeile je Link: Titel, Adresse, Entfernen. Die Zeilen leben in einer
-    # Liste; `medien_zeichnen()` leitet die Anzeige daraus ab.
 
-    zeilen: list[tuple[ft.TextField, ft.TextField]] = []
+    medien_zeilen: list[tuple[ft.TextField, ft.TextField]] = []
     medien_spalte = ft.Column(spacing=6)
 
     def entferner(zeile: tuple[ft.TextField, ft.TextField]) -> Callable[[], None]:
         def handler() -> None:
-            zeilen.remove(zeile)
+            medien_zeilen.remove(zeile)
             medien_zeichnen()
             page.update()
 
@@ -120,20 +252,21 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                     ),
                 ],
             )
-            for titel, adresse in zeilen
+            for titel, adresse in medien_zeilen
         ]
 
     def zeile_anlegen(medium: Media | None = None) -> None:
-        zeile = (
-            ft.TextField(label="Titel", value=medium.title if medium else "", dense=True),
-            ft.TextField(
-                label="Adresse (https://…)",
-                value=medium.uri if medium else "",
-                dense=True,
-                keyboard_type=ft.KeyboardType.URL,
-            ),
+        medien_zeilen.append(
+            (
+                ft.TextField(label="Titel", value=medium.title if medium else "", dense=True),
+                ft.TextField(
+                    label="Adresse (https://…)",
+                    value=medium.uri if medium else "",
+                    dense=True,
+                    keyboard_type=ft.KeyboardType.URL,
+                ),
+            )
         )
-        zeilen.append(zeile)
         medien_zeichnen()
 
     def link_hinzufuegen() -> None:
@@ -145,14 +278,36 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
 
     # -- Speichern -------------------------------------------------------------
 
+    def felder_lesen() -> list[FieldSpec]:
+        felder: list[FieldSpec] = []
+        for vorlage_feld in FELDVORRAT:
+            if not schalter[vorlage_feld.key].value:
+                continue
+            alt = vorhanden.get(vorlage_feld.key)
+            chips = chips_lesen(chipfelder[vorlage_feld.key].value or "", vorlage_feld)
+            felder.append(
+                replace(
+                    vorlage_feld,
+                    quick=chips
+                    if chips or vorlage_feld.type == FieldType.CHOICE
+                    else vorlage_feld.quick,
+                    default=alt.default if alt is not None else vorlage_feld.default,
+                )
+            )
+        felder.extend(fremde)
+        return felder
+
     def eingelesen() -> Exercise:
-        """Baut aus den Feldern das Domänenobjekt — neu oder das vorhandene."""
         ziel = uebung if uebung is not None else Exercise()
         ziel.name = (name.value or "").strip()
-        ziel.category = (kategorie.value or "").strip()
+        ziel.category = (typ.value or "").strip()
         ziel.description = (beschreibung.value or "").strip()
         ziel.icon_key = gewaehlt
-        ziel.result_spec = SPECS[vorlage.value or "saetze_wdh"]
+        ziel.result_spec = spec_bauen(felder_lesen())
+        extra = [t.strip() for t in (weitere_tags.value or "").split(",") if t.strip()]
+        ziel.tags = [r for r in REGIONEN if r in tags_aktiv] + [
+            t for t in extra if t not in REGIONEN
+        ]
         ziel.media = [
             Media(
                 kind=MediaKind.VIDEO,
@@ -160,7 +315,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                 uri=(adresse.value or "").strip(),
                 title=(titel.value or "").strip(),
             )
-            for titel, adresse in zeilen
+            for titel, adresse in medien_zeilen
             if (adresse.value or "").strip()
         ]
         return ziel
@@ -174,11 +329,19 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         ziel = eingelesen()
         state.uebungen.speichern(ziel)
         page.show_dialog(ft.SnackBar(ft.Text("Gespeichert")))
-        # Zurück zur Detailansicht — über die Route, damit der Stapel stimmt.
         await page.push_route(f"/uebung/{ziel.id}")
 
     async def abbrechen() -> None:
         await page.push_route("/" if uebung is None else f"/uebung/{uebung.id}")
+
+    def abschnitt(text: str, rechts: ft.Control | None = None) -> ft.Control:
+        return ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            controls=[
+                ft.Text(text, size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                rechts or ft.Container(),
+            ],
+        )
 
     return ft.View(
         route=route,
@@ -191,12 +354,22 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                     spacing=18,
                     controls=[
                         name,
-                        kategorie,
+                        ft.Row(controls=[typ]),
                         beschreibung,
-                        ft.Row(controls=[vorlage]),
-                        ft.Text("Symbol", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                        abschnitt("REGIONEN"),
+                        ft.Row(
+                            wrap=True,
+                            spacing=6,
+                            run_spacing=4,
+                            controls=list(region_chips.values()),
+                        ),
+                        weitere_tags,
+                        abschnitt("WAS WIRD EINGEGEBEN?", hilfe_knopf(page)),
+                        ft.Row(controls=[vorlage_auswahl]),
+                        ft.Column(spacing=6, controls=zeilen),
+                        abschnitt("SYMBOL"),
                         symbole,
-                        ft.Text("Videos", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                        abschnitt("VIDEOS"),
                         medien_spalte,
                         ft.TextButton(
                             "Video-Link hinzufügen",
@@ -220,4 +393,4 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     )
 
 
-__all__ = ["VORLAGEN", "uebung_bearbeiten"]
+__all__ = ["chips_lesen", "spec_bauen", "uebung_bearbeiten"]

@@ -121,7 +121,7 @@ with tempfile.TemporaryDirectory() as tmp:
     print("Alle Übungen")
     print("-" * 60)
     for u in repo.alle():
-        beispiel = u.result_spec.format_shorthand({"sets": 3, "reps": 15, "hold": 30})
+        beispiel = u.result_spec.format_shorthand({"reps": [15, 15, 15], "hold": [30, 30, 30]})
         print(f"  {u.name:28} {u.category:10} → {beispiel}")
 
     print()

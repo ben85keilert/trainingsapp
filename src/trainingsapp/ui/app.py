@@ -10,7 +10,7 @@ Routen:
     /                               Hauptansicht mit vier Reitern
     /plan/<id>                      Planansicht: abhaken oder bearbeiten
     /plan/<id>/uebung/<item_id>     Eintrag mit eigenen Werten und Notiz
-    /plan/<id>/ziel/<item_id>       Ziel einer Planübung setzen
+    /plan/<id>/ziel/<item_id>       Planübung einstellen: Stufe, Chips, Ziel
     /plan/<id>/hinzufuegen          Übungen in den Plan aufnehmen
     /tag/<YYYY-MM-DD>               Tagesansicht eines beliebigen Tages
     /eintrag/<id>                   Ein Eintrag: ansehen, löschen
@@ -39,6 +39,7 @@ from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
 from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.plan import plan_view, ziel_text
+from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
 from trainingsapp.ui.views.platzhalter import messung
 from trainingsapp.ui.views.tag import tag_view
@@ -161,34 +162,7 @@ def formular_eintrag(
         spec=uebung.result_spec,
         werte=werte,
         hinweis=hinweis,
-        on_speichern=speichern,
-        on_abbrechen=abbrechen,
-    )
-
-
-def formular_ziel(
-    page: ft.Page, state: AppState, plan: Plan, item: PlanItem, uebung: Exercise
-) -> ft.View:
-    async def speichern(ergebnis: dict[str, Any], notiz: str) -> None:
-        state.plaene.ziel_setzen(item.id, ergebnis)
-        await page.push_route(f"/plan/{plan.id}")
-
-    async def ziel_loeschen() -> None:
-        state.plaene.ziel_setzen(item.id, {})
-        await page.push_route(f"/plan/{plan.id}")
-
-    async def abbrechen() -> None:
-        await page.push_route(f"/plan/{plan.id}")
-
-    return eintrag_formular(
-        page,
-        route=f"/plan/{plan.id}/ziel/{item.id}",
-        titel=f"Ziel: {uebung.name}",
-        spec=uebung.result_spec,
-        werte=dict(item.target) or None,
-        hinweis="Ein Tipp auf das Ziel in der Planansicht trägt genau diese Werte ein.",
-        mit_notiz=False,
-        extra=[ft.TextButton("Ziel löschen", on_click=ziel_loeschen)] if item.target else None,
+        quick=item.quick,
         on_speichern=speichern,
         on_abbrechen=abbrechen,
     )
@@ -248,7 +222,7 @@ def main(page: ft.Page) -> None:
             uebung = state.uebungen.laden(item.exercise_id) if item else None
             if item is None or uebung is None:
                 return
-            bauer = formular_eintrag if teile[2] == "uebung" else formular_ziel
+            bauer = formular_eintrag if teile[2] == "uebung" else plan_einstellen
             page.views.append(bauer(page, state, plan, item, uebung))
 
     def eintrag_routen(teile: list[str]) -> None:

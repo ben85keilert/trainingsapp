@@ -32,8 +32,9 @@ def eintrag_formular(
     mit_notiz: bool = True,
     hinweis: str | None = None,
     extra: list[ft.Control] | None = None,
+    quick: dict[str, list[Any]] | None = None,
 ) -> ft.View:
-    form = SpecForm(spec, werte)
+    form = SpecForm(spec, werte, page=page, quick=quick)
     notizfeld = ft.TextField(
         label="Notiz",
         value=notiz,

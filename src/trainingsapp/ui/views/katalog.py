@@ -25,7 +25,8 @@ def _beispiel(uebung: Exercise) -> str:
 
 def katalog(page: ft.Page, state: AppState) -> ft.Control:
     liste = ft.ListView(expand=True, spacing=0, padding=ft.Padding.only(bottom=88))
-    chips = ft.Row(wrap=True, spacing=6, run_spacing=0)
+    chips = ft.Row(wrap=True, spacing=6, run_spacing=0)  # Typ
+    tag_chips = ft.Row(wrap=True, spacing=6, run_spacing=0)  # Region / Charakter
 
     # -- Handler ---------------------------------------------------------------
     # Die Liste wird in einer Schleife gebaut; jeder Eintrag braucht einen
@@ -44,6 +45,14 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
     def filterer(kategorie: str | None) -> Callable[[], None]:
         def handler() -> None:
             state.kategorie = kategorie
+            zeichnen()
+            page.update()
+
+        return handler
+
+    def tag_filterer(tag: str | None) -> Callable[[], None]:
+        def handler() -> None:
+            state.tag_filter = tag
             zeichnen()
             page.update()
 
@@ -78,14 +87,38 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
             ],
         ]
 
+        tags = state.uebungen.tags()
+        if state.tag_filter not in (None, *tags):
+            state.tag_filter = None
+        tag_chips.controls = [
+            ft.Chip(
+                label=ft.Text("Alle Regionen"),
+                selected=state.tag_filter is None,
+                show_checkmark=False,
+                on_click=tag_filterer(None),
+            ),
+            *[
+                ft.Chip(
+                    label=ft.Text(t),
+                    selected=state.tag_filter == t,
+                    show_checkmark=False,
+                    on_click=tag_filterer(t),
+                )
+                for t in tags
+            ],
+        ]
+
         treffer = state.uebungen.suchen(state.suchtext, state.kategorie)
+        if state.tag_filter:
+            treffer = [u for u in treffer if state.tag_filter in u.tags]
         if treffer:
             liste.controls = [
                 ft.ListTile(
                     leading=ft.Icon(symbol(u.icon_key)),
                     title=ft.Text(u.name),
                     subtitle=ft.Text(
-                        "  ·  ".join(t for t in (u.category, _beispiel(u)) if t), size=12
+                        "  ·  ".join(t for t in (u.category, ", ".join(u.tags), _beispiel(u)) if t),
+                        size=12,
                     ),
                     trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
                     on_click=oeffner(u.id),
@@ -118,6 +151,7 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
                 ),
             ),
             ft.Container(padding=ft.Padding.symmetric(horizontal=16), content=chips),
+            ft.Container(padding=ft.Padding.symmetric(horizontal=16), content=tag_chips),
             liste,
         ],
     )

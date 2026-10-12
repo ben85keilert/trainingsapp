@@ -35,7 +35,7 @@ verschiedenen Daten.
 ```python
 @dataclass(slots=True)
 class FieldSpec:
-    key: str              # Schlüssel im Ergebnis-Dict: "sets"
+    key: str              # Schlüssel im Ergebnis-Dict: "reps"
     type: FieldType       # int, float, duration, degrees, scale, bool, text …
     label: str            # Beschriftung: "Sätze"
     unit: str | None      # "s", "°", "kg"
@@ -52,20 +52,27 @@ class ResultSpec:
     chart_metrics: list[str]       # welche Felder in den Verlauf wandern
 ```
 
-Ein Ergebnis ist ein einfaches Dict: `{"sets": 3, "reps": 15}`. Die
+Ein Ergebnis ist ein einfaches Dict: `{"reps": [15, 15, 15]}`. Die
 Spezifikation sagt, wie man es eingibt (`fields`), wie man es anzeigt
 (`shorthand`) und was davon im Verlauf landet (`chart_metrics`).
 
 ```python
->>> SPEC_SAETZE_WDH.format_shorthand({"sets": 3, "reps": 15})
+>>> SPEC_SAETZE_WDH.format_shorthand({"reps": [15, 15, 15]})
 '3x15'
 >>> SPEC_HALTEN.defaults()
-{'sets': 3, 'hold': 30}
+{'hold': [30, 30, 30]}
 ```
 
-Vier Vorlagen gibt es schon: `SPEC_SAETZE_WDH`, `SPEC_HALTEN`, `SPEC_WINKEL`,
-`SPEC_BENCHMARK_ZEIT`. Die Übung in L05 hat sie im Dropdown benutzt. Eigene
-Spezifikationen mit beliebigen Feldern sind dasselbe Format — nur ohne Vorlage.
+Das wichtigste Feld ist das **Satzfeld** (`FieldType.SET_LIST`): Es speichert
+eine Liste je Satz — `[15, 15, 15]` — und nimmt die Notation `3x15`, `30`
+oder `15/15/20` entgegen ([docs/notation.md](../../notation.md)). Mit
+`unit="s"` sind es Haltezeiten. Eine Übung wie Liegestützen trägt beide
+Felder, Wiederholungen und Haltezeit; man füllt, was zutrifft.
+
+Fünf Vorlagen gibt es: `SPEC_SAETZE_WDH`, `SPEC_HALTEN`, `SPEC_WDH_ODER_HALTEN`,
+`SPEC_WINKEL`, `SPEC_BENCHMARK_ZEIT`. Beim Anlegen einer Übung dienen sie als
+Schnellstart; danach wählt man Felder aus dem **Feldvorrat** (`FELDVORRAT`),
+jedes bringt Typ und Einheit mit, die Übung legt nur die Chips fest.
 
 `to_dict()` / `from_dict()` sind der Weg in die Datenbank (`result_spec_json`)
 und zurück. Beispiel 1 zeigt den Rundlauf.
@@ -82,7 +89,7 @@ Beides zusammen nennen wir `SpecForm`:
 form = SpecForm(spec, werte=letzter_eintrag)
 page.add(form.control)          # anzeigen
 ...
-ergebnis = form.werte()         # {"sets": 3, "reps": 15}
+ergebnis = form.werte()         # {"reps": [15, 15, 15]}
 ```
 
 Innen steckt eine **Registrierung je Feldtyp**: ein Dict von `FieldType` auf
@@ -159,7 +166,7 @@ statt der vollen.
 
 ### 3. Kurzschrift-Parser
 
-`core/units.py` kann `"3x12 @40kg"` in `{"sets": 3, "reps": 12, "weight": 40.0}`
+`core/units.py` kann `"3x12 @40kg"` in `{"reps": [12, 12, 12], "weight": 40.0}`
 zerlegen. Das klingt nach dem schnellsten Weg — und ist auf einer
 **Handytastatur der langsamste**: `3`, Umschalten auf Buchstaben, `x`,
 Umschalten zurück, `1`, `2`. Sechs Tipper mit zwei Tastaturwechseln, für etwas,

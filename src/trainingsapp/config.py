@@ -49,6 +49,9 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     "nachrichten": {Edition.PRAXIS},
     # Eigene Übungspläne anlegen und abarbeiten — der Kern beider Editionen
     "plaene": {Edition.SOLO, Edition.PRAXIS},
+    # Übungen selbst anlegen und ändern. In der Praxis-Edition aus Organisations-
+    # gründen später eingeschränkt; der Schalter ist vorbereitet.
+    "uebungen_bearbeiten": {Edition.SOLO, Edition.PRAXIS},
     # Übungspläne, die jemand anderes zusammenstellt (Therapeut → Patient)
     "zugewiesene_plaene": {Edition.PRAXIS},
     # Regeln, die aus Puls oder HRV eine Handlungsempfehlung ableiten.

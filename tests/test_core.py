@@ -48,7 +48,8 @@ def test_uuid7_ist_zeitsortiert() -> None:
 
 
 def test_kurzschrift_anzeige() -> None:
-    assert SPEC_SAETZE_WDH.format_shorthand({"sets": 3, "reps": 15}) == "3x15"
+    assert SPEC_SAETZE_WDH.format_shorthand({"reps": [15, 15, 15]}) == "3x15"
+    assert SPEC_SAETZE_WDH.format_shorthand({"reps": [15, 15, 20]}) == "15/15/20"
 
 
 def test_kurzschrift_faellt_zurueck_wenn_werte_fehlen() -> None:
@@ -61,9 +62,10 @@ def test_kurzschrift_faellt_zurueck_wenn_werte_fehlen() -> None:
 def test_spec_round_trip() -> None:
     zurueck = ResultSpec.from_dict(SPEC_SAETZE_WDH.to_dict())
     assert zurueck.layout == SPEC_SAETZE_WDH.layout
-    assert [f.key for f in zurueck.fields] == ["sets", "reps"]
-    assert zurueck.shorthand == "{sets}x{reps}"
-    assert zurueck.field_by_key("reps").quick == [8, 10, 12, 15, 20]  # type: ignore[union-attr]
+    assert [f.key for f in zurueck.fields] == ["reps"]
+    assert zurueck.shorthand is None  # Satzfelder brauchen keine Vorlage
+    assert zurueck.field_by_key("reps").quick == [10, 15, 20]  # type: ignore[union-attr]
+    assert zurueck.format_shorthand(zurueck.defaults()) == "3x15"
 
 
 def test_spec_snapshot_haelt_alte_eintraege_lesbar() -> None:
@@ -79,7 +81,7 @@ def test_spec_snapshot_haelt_alte_eintraege_lesbar() -> None:
     eintrag = SessionEntry(result={"reps": 12}, spec_snapshot=alt)
 
     uebung = Exercise(name="Test", result_spec=SPEC_SAETZE_WDH)  # inzwischen geändert
-    assert uebung.result_spec.shorthand == "{sets}x{reps}"
+    assert uebung.result_spec.format_shorthand({"reps": [12]}) == "12"
 
     # Der Eintrag zeigt weiterhin die alte Darstellung.
     assert eintrag.shorthand() == "12 Wdh."
@@ -114,12 +116,12 @@ def test_dauer_formatieren(text: str, erwartet: str) -> None:
 
 
 def test_kurzschrift_saetze() -> None:
-    assert parse_shorthand("3x15") == {"sets": 3, "reps": 15}
-    assert parse_shorthand("3 × 12") == {"sets": 3, "reps": 12}
+    assert parse_shorthand("3x15") == {"reps": [15.0, 15.0, 15.0]}
+    assert parse_shorthand("3 × 12") == {"reps": [12.0, 12.0, 12.0]}
 
 
 def test_kurzschrift_mit_gewicht() -> None:
-    assert parse_shorthand("3x12 @40kg") == {"sets": 3, "reps": 12, "weight": 40.0}
+    assert parse_shorthand("3x12 @40kg") == {"reps": [12.0, 12.0, 12.0], "weight": 40.0}
 
 
 def test_kurzschrift_winkel() -> None:
@@ -202,7 +204,7 @@ def test_unbekannte_regel_legt_nichts_lahm() -> None:
 
 def test_migration_erzeugt_das_schema(tmp_path) -> None:
     con = oeffnen(tmp_path / "test.db")
-    assert schema_version(con) == 3
+    assert schema_version(con) == 4
 
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     for erwartet in (
@@ -231,8 +233,8 @@ def test_migration_ist_wiederholbar(tmp_path) -> None:
     """Ein zweiter Lauf darf nichts tun und nicht scheitern."""
     pfad = tmp_path / "test.db"
     con = oeffnen(pfad)
-    assert migrieren(con) == 3
-    assert migrieren(con) == 3
+    assert migrieren(con) == 4
+    assert migrieren(con) == 4
     con.close()
 
 

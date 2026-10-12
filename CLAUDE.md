@@ -18,6 +18,7 @@ Wahrheit, `.python-version` pinnt Python).
 uv sync --extra desktop                # Entwicklungsumgebung (desktop = bleak für BLE)
 
 uv run flet run src/trainingsapp/ui/app.py    # Desktop-Vorschau der Oberfläche
+uv run flet run --android src/trainingsapp/ui/app.py   # Vorschau auf dem Handy (Flet-App aus dem Play Store, gleiches WLAN, QR-Code)
 uv run pytest                                  # alle Tests
 uv run pytest tests/test_hrv_core.py           # eine Datei
 uv run pytest tests/test_hrv_core.py::test_name -q   # ein einzelner Test

@@ -51,9 +51,19 @@ virtuelle Umgebung und Abhängigkeiten (gepinnt in `uv.lock`).
 uv sync                                        # Umgebung anlegen + alles installieren
 
 uv run flet run src/trainingsapp/ui/app.py     # Desktop-Vorschau
+uv run flet run --android src/trainingsapp/ui/app.py   # auf dem Smartphone (siehe unten)
 uv run pytest                                  # Tests
 uv run ruff check .                            # Linter
 ```
+
+**Auf dem Smartphone testen, ohne APK zu bauen:** Auf dem Android-Gerät die
+App „Flet" aus dem Play Store installieren, Handy und Rechner ins selbe WLAN,
+dann `uv run flet run --android src/trainingsapp/ui/app.py`. Im Terminal
+erscheint ein QR-Code; den mit der Flet-App scannen. Der Python-Code läuft
+dabei auf dem Rechner, das Handy zeigt nur die Oberfläche — Änderungen am
+Code sind nach Neustart des Befehls sofort sichtbar (mit `-d` auch ohne). Für
+Bluetooth und einen echten Build braucht es weiterhin `flet build apk`
+(Lernpfad L02b).
 
 Alternativ lässt sich die Umgebung klassisch aktivieren — dann entfällt das
 `uv run`-Präfix:

@@ -105,7 +105,8 @@ def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
         default_input_mode=item.input_mode,
         result_spec=replace(uebung.result_spec, fields=felder),
         media=list(uebung.media),
-        tags=list(uebung.tags),
+        typen=list(uebung.typen),
+        regionen=list(uebung.regionen),
     )
 
 

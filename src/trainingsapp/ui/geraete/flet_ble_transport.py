@@ -7,6 +7,8 @@ Die Erweiterung reicht nur rohe Bytes durch; das Polar-Protokoll steckt in
 - Notification-Ereignisse → die Empfänger, die `subscribe()` registriert hat,
   mit der Empfangszeit in der Python-`time.monotonic()`-Domäne
 - Verbindungsereignisse → der Rückruf aus `connect()`
+- `hintergrund()` → Vordergrunddienst, damit die Messung bei ausgeschaltetem
+  Display weiterläuft
 
 **Lebensdauer:** Der Service muss stark referenziert bleiben (im `AppState`),
 sonst räumt Flet ihn ab, und die Dart-Seite beendet alle Abos.
@@ -73,7 +75,10 @@ class FletBleTransport:
         return int(await self.ble.connect(device_id) or 0)
 
     async def bond(self, device_id: str) -> None:
-        await self.ble.bond(device_id)
+        zustand = await self.ble.bond(device_id)
+        # Still gescheitert („none") soll im Diagnoseprotokoll auftauchen.
+        if zustand not in ("bonded", "nicht_noetig"):
+            raise RuntimeError(f"Kopplung nicht zustande gekommen (Zustand: {zustand})")
 
     async def disconnect(self, device_id: str) -> None:
         self._bei_trennung.pop(device_id, None)
@@ -102,6 +107,23 @@ class FletBleTransport:
     ) -> None:
         self._empfaenger[_schluessel(device_id, service, characteristic)] = empfaenger
         await self.ble.subscribe(device_id, service, characteristic)
+
+    # -- Hintergrund (kein Teil von BleTransport) ------------------------------------
+
+    async def hintergrund(self, an: bool, titel: str = "", text: str = "") -> str | None:
+        """Vordergrunddienst an/aus. Liefert eine Fehlermeldung oder ``None``.
+
+        Wirft nie: Scheitert der Dienst, läuft die Messung trotzdem — nur eben
+        nicht verlässlich bei ausgeschaltetem Display.
+        """
+        try:
+            if an:
+                await self.ble.hintergrund_starten(titel, text)
+            else:
+                await self.ble.hintergrund_beenden()
+        except Exception as fehler:
+            return str(fehler) or type(fehler).__name__
+        return None
 
 
 __all__ = ["FletBleTransport"]

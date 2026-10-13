@@ -25,6 +25,14 @@ if verfuegbar(page):                   # nur in der gebauten Android-App
     await ble.subscribe(treffer[0].id, "180d", "2a37")
 ```
 
+**Messen im Hintergrund:** `await ble.hintergrund_starten("HRV-Messung läuft", "Verbunden mit …")`
+startet einen Android-Vordergrunddienst (`android/…/MessDienst.java`, Typ `connectedDevice`) mit
+dauerhafter Benachrichtigung und Wake-Lock; `hintergrund_beenden()` stoppt ihn, erneutes
+`hintergrund_starten` ändert nur den Text. Dafür ist das Flutter-Paket zugleich ein
+**Android-Plugin** (Java, `FletBlePlugin`, Kanal `flet_ble/hintergrund`) — nur so landet der
+`<service>`-Eintrag samt Berechtigungen per Manifest-Merger in der App; die Flet-Vorlage kann
+keine Dienste eintragen. Nur aus dem Vordergrund starten (Android 12+).
+
 Stolperfallen:
 
 - **Referenz halten.** Flet entfernt Dienste, auf die in Python niemand mehr zeigt, nach dem

@@ -64,14 +64,14 @@ def seed_laden(datei: Path = SEED_DATEI) -> list[Exercise]:
             Exercise(
                 id=seed_id(eintrag["key"]),
                 name=eintrag["name"],
-                category=eintrag.get("category", ""),
                 description=eintrag.get("description", ""),
                 icon_key=eintrag.get("icon_key"),
                 is_builtin=True,
                 result_spec=SPECS.get(eintrag.get("spec", ""), SPEC_SAETZE_WDH),
                 limit_spec=eintrag.get("limit_spec", {}),
                 media=medien,
-                tags=list(eintrag.get("tags", [])),
+                typen=list(eintrag.get("typen", [])),
+                regionen=list(eintrag.get("regionen", [])),
             )
         )
     return uebungen

@@ -77,7 +77,8 @@ def uebung_detail(
             name=f"{uebung.name} (Variante)",
             is_builtin=False,
             media=[replace(m, id=new_id()) for m in uebung.media],
-            tags=list(uebung.tags),
+            typen=list(uebung.typen),
+            regionen=list(uebung.regionen),
             archived=False,
             family_id=uebung.family_id or uebung.id,
         )
@@ -226,16 +227,18 @@ def uebung_detail(
                     expand=True,
                     controls=[
                         ft.Text(uebung.name, size=22, weight=ft.FontWeight.BOLD),
-                        ft.Text(uebung.category or "ohne Kategorie", opacity=0.7),
+                        ft.Text(", ".join(uebung.typen) or "ohne Typ", opacity=0.7),
                     ],
                 ),
             ],
         ),
         _abschnitt("Beschreibung", ft.Text(uebung.description or "—")),
         _abschnitt(
-            "Regionen und Tags",
-            ft.Row(wrap=True, spacing=6, controls=[ft.Chip(label=ft.Text(t)) for t in uebung.tags])
-            if uebung.tags
+            "Regionen",
+            ft.Row(
+                wrap=True, spacing=6, controls=[ft.Chip(label=ft.Text(t)) for t in uebung.regionen]
+            )
+            if uebung.regionen
             else ft.Text("—"),
         ),
         _abschnitt("Eingabe", _notation(uebung)),

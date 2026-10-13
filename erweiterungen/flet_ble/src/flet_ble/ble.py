@@ -321,6 +321,24 @@ class FletBle(ft.Service):
         args = self._ziel(device_id, service, characteristic)
         await self._rufe("unsubscribe", args, _FRIST_GATT)
 
+    # -- Hintergrund --------------------------------------------------------
+
+    async def hintergrund_starten(self, titel: str, text: str = "") -> bool:
+        """Vordergrunddienst mit Benachrichtigung starten (oder ihren Text ändern).
+
+        Hält die App am Leben, solange gemessen wird — auch bei ausgeschaltetem
+        Display oder in einer anderen App. Nur aus dem Vordergrund aufrufen
+        (Android 12+ verbietet den Start aus dem Hintergrund). Fragt auf
+        Android 13+ einmal nach der Erlaubnis für Benachrichtigungen. Liefert
+        ``False`` außerhalb von Android.
+        """
+        args = {"titel": titel, "text": text}
+        return bool(await self._rufe("hintergrund_starten", args, _FRIST_KURZ))
+
+    async def hintergrund_beenden(self) -> None:
+        """Vordergrunddienst beenden; ohne laufenden Dienst ein No-op."""
+        await self._rufe("hintergrund_beenden", None, _FRIST_KURZ)
+
 
 def verfuegbar(page: ft.Page) -> bool:
     """Nur die gebaute Android-App enthält den Dart-Teil.

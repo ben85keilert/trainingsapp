@@ -1,0 +1,101 @@
+name: APK
+
+# Baut eine Android-APK zum Herunterladen — mit denselben Schritten wie lokal
+# (`uv run python scripts/apk_bauen.py`).
+#
+# - Von Hand: Reiter „Actions" → „APK" → „Run workflow". Die APK liegt danach
+#   als Artefakt „trainingsapp-apk" am Lauf (Download nur mit GitHub-Anmeldung,
+#   als ZIP, 30 Tage aufbewahrt).
+# - Mit einem Tag `v*` (z. B. `git tag v0.1.0 && git push origin v0.1.0`):
+#   zusätzlich ein Release, dessen APK sich direkt am Handy laden lässt.
+#
+# Signiert wird mit dem festen Schlüssel aus den Repository-Secrets
+# ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD und ANDROID_KEY_ALIAS
+# (anlegen mit `scripts/signierschluessel.py`). Nur mit demselben Schlüssel lässt
+# sich ein Update über die installierte App spielen, ohne ihre Daten zu verlieren.
+# Fehlen die Secrets, entsteht eine Debug-APK (Dateiname endet auf -debug).
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    branches: [ccr-57fabde8-fnxxas] # VORÜBERGEHEND: Probelauf vor dem Merge
+
+permissions:
+  contents: write # nur für das Release beim Tag
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Platz schaffen
+        # Der Build (Flutter, NDK, Gradle, R8) braucht mehr als die ~14 GB, die
+        # der Runner frei hat — der erste Probelauf scheiterte an R8 mit
+        # „No space left on device". Das Android SDK unter /usr/local/lib/android
+        # bleibt, es wird gebraucht.
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/share/swift \
+            /usr/local/lib/node_modules /opt/microsoft /opt/google/chrome
+          sudo docker image prune --all --force > /dev/null || true
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Build-Nummer = Zahl der Commits
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Abhängigkeiten installieren
+        run: uv sync
+
+      - name: Signierschlüssel bereitstellen
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::Kein Signierschlüssel in den Secrets — es entsteht eine Debug-APK."
+            echo "APK_OPTIONEN=--debug" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload-keystore.jks"
+          {
+            echo "FLET_ANDROID_SIGNING_KEY_STORE=$RUNNER_TEMP/upload-keystore.jks"
+            echo "FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "FLET_ANDROID_SIGNING_KEY_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "FLET_ANDROID_SIGNING_KEY_ALIAS=${KEY_ALIAS:-upload}"
+          } >> "$GITHUB_ENV"
+
+      - name: APK bauen
+        # Flutter lädt `flet build` beim ersten Lauf selbst (--yes im Skript).
+        run: uv run python scripts/apk_bauen.py $APK_OPTIONEN
+
+      - name: Schlüssel entfernen
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload-keystore.jks"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trainingsapp-apk
+          path: dist/*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Release anlegen
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.apk
+          prerelease: true

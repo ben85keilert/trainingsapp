@@ -1,18 +1,19 @@
 {
   "version": 1,
-  "hinweis": "Startkatalog. Wird beim ersten Start eingespielt. category = Typ (Dehnung, Kräftigung, …), tags = Regionen und Charakter. Eigene Übungen entstehen daneben und werden hier nie überschrieben.",
+  "hinweis": "Startkatalog. Wird beim ersten Start eingespielt. typen = Typ-Tags (Dehnung, Kräftigung, …), regionen = Region-Tags (Nacken, Bein, …), beide optional. Eigene Übungen entstehen daneben und werden hier nie überschrieben.",
   "exercises": [
     {
       "key": "atem_4_7_8",
       "name": "4-7-8-Atmung",
-      "category": "Atmung",
-      "description": "Vier Sekunden einatmen, sieben halten, acht ausatmen. Beruhigt und ist gut als Einstieg in eine HRV-Messung geeignet.",
-      "icon_key": "air",
-      "spec": "halten",
-      "tags": [
+      "typen": [
+        "Atmung",
         "Entspannung",
         "HRV"
       ],
+      "description": "Vier Sekunden einatmen, sieben halten, acht ausatmen. Beruhigt und ist gut als Einstieg in eine HRV-Messung geeignet.",
+      "icon_key": "air",
+      "spec": "halten",
+      "regionen": [],
       "media": [
         {
           "kind": "video",
@@ -33,13 +34,14 @@
     {
       "key": "kohaerenzatmung",
       "name": "Kohärenzatmung (6/min)",
-      "category": "Atmung",
+      "typen": [
+        "Atmung",
+        "HRV"
+      ],
       "description": "Gleichmäßig fünf Sekunden ein, fünf Sekunden aus. Erzeugt einen deutlichen Ausschlag im LF-Band und eignet sich gut, um die HRV-Messung zu prüfen.",
       "icon_key": "waves",
       "spec": "halten",
-      "tags": [
-        "HRV"
-      ],
+      "regionen": [],
       "limit_spec": {
         "rules": [
           {
@@ -52,22 +54,25 @@
     {
       "key": "luft_anhalten",
       "name": "Luft anhalten",
-      "category": "Benchmark",
+      "typen": [
+        "Benchmark",
+        "Atmung"
+      ],
       "description": "Nach normaler Ausatmung so lange wie angenehm möglich anhalten. Nicht bis zur Grenze — der Wert soll vergleichbar sein, nicht maximal.",
       "icon_key": "timer",
       "spec": "benchmark_zeit",
-      "tags": [
-        "Atmung"
-      ]
+      "regionen": []
     },
     {
       "key": "schulter_aussenrotation",
       "name": "Schulter-Außenrotation",
-      "category": "Kräftigung",
+      "typen": [
+        "Kräftigung"
+      ],
       "description": "Oberarm am Körper, Unterarm nach außen drehen. Bewegung aus der Schulter, nicht aus dem Rumpf.",
       "icon_key": "accessibility",
       "spec": "saetze_wdh",
-      "tags": [
+      "regionen": [
         "Schulter",
         "Arm"
       ]
@@ -75,66 +80,78 @@
     {
       "key": "schulter_beweglichkeit",
       "name": "Schulterbeweglichkeit messen",
-      "category": "Benchmark",
+      "typen": [
+        "Benchmark"
+      ],
       "description": "Erreichbarer Winkel bei der Abduktion. Immer gleich messen, sonst ist der Verlauf wertlos.",
       "icon_key": "straighten",
       "spec": "winkel",
-      "tags": [
+      "regionen": [
         "Schulter"
       ]
     },
     {
       "key": "nacken_dehnung",
       "name": "Nackendehnung seitlich",
-      "category": "Dehnung",
+      "typen": [
+        "Dehnung"
+      ],
       "description": "Kopf zur Seite neigen, Gegenschulter bewusst nach unten ziehen. Ohne Zug am Kopf.",
       "icon_key": "self_improvement",
       "spec": "halten",
-      "tags": [
+      "regionen": [
         "Nacken"
       ]
     },
     {
       "key": "brustwirbel_mobilisation",
       "name": "Brustwirbelsäule mobilisieren",
-      "category": "Dehnung",
+      "typen": [
+        "Dehnung"
+      ],
       "description": "Im Vierfüßlerstand abwechselnd Rundrücken und Hohlkreuz, langsam und über die ganze Bewegungsbahn.",
       "icon_key": "sync_alt",
       "spec": "saetze_wdh",
-      "tags": [
+      "regionen": [
         "Rücken"
       ]
     },
     {
       "key": "hueftbeuger_dehnung",
       "name": "Hüftbeuger dehnen",
-      "category": "Dehnung",
+      "typen": [
+        "Dehnung"
+      ],
       "description": "Ausfallschritt, Becken aufrichten, Gesäß anspannen. Der Zug gehört vorn in die Hüfte, nicht in den Rücken.",
       "icon_key": "directions_walk",
       "spec": "halten",
-      "tags": [
+      "regionen": [
         "Hüfte"
       ]
     },
     {
       "key": "beinachsentraining",
       "name": "Beinachsentraining",
-      "category": "Kräftigung",
+      "typen": [
+        "Kräftigung"
+      ],
       "description": "Einbeinige Kniebeuge in kleinem Bewegungsumfang. Knie bleibt über dem Fuß, kippt nicht nach innen.",
       "icon_key": "airline_seat_legroom_extra",
       "spec": "saetze_wdh",
-      "tags": [
+      "regionen": [
         "Bein"
       ]
     },
     {
       "key": "wadenheben",
       "name": "Wadenheben",
-      "category": "Kräftigung",
+      "typen": [
+        "Kräftigung"
+      ],
       "description": "Langsam auf die Fußballen, oben kurz halten, noch langsamer ablassen.",
       "icon_key": "fitness_center",
       "spec": "saetze_wdh",
-      "tags": [
+      "regionen": [
         "Bein",
         "Fuß"
       ]
@@ -142,11 +159,13 @@
     {
       "key": "einbeinstand",
       "name": "Einbeinstand",
-      "category": "Gleichgewicht",
+      "typen": [
+        "Gleichgewicht"
+      ],
       "description": "Frei stehen, Blick geradeaus. Steigerung: Augen schließen.",
       "icon_key": "balance",
       "spec": "halten",
-      "tags": [
+      "regionen": [
         "Bein",
         "Fuß"
       ]
@@ -154,25 +173,28 @@
     {
       "key": "unterarmstuetz",
       "name": "Unterarmstütz",
-      "category": "Kräftigung",
+      "typen": [
+        "Kräftigung",
+        "Isometrie"
+      ],
       "description": "Gerade Linie von Kopf bis Ferse. Lieber kürzer und sauber als lang und durchhängend.",
       "icon_key": "horizontal_rule",
       "spec": "halten",
-      "tags": [
-        "Rumpf",
-        "Isometrie"
+      "regionen": [
+        "Rumpf"
       ]
     },
     {
       "key": "hrv_ruhemessung",
       "name": "HRV-Ruhemessung",
-      "category": "Messung",
+      "typen": [
+        "Messung",
+        "HRV"
+      ],
       "description": "Fünf Minuten ruhig sitzen oder liegen, gleichmäßig atmen, nicht sprechen. Möglichst immer zur gleichen Tageszeit.",
       "icon_key": "monitor_heart",
       "spec": "halten",
-      "tags": [
-        "HRV"
-      ],
+      "regionen": [],
       "limit_spec": {
         "rules": [
           {
@@ -185,11 +207,13 @@
     {
       "key": "liegestuetzen",
       "name": "Liegestützen",
-      "category": "Kräftigung",
+      "typen": [
+        "Kräftigung"
+      ],
       "description": "Hände schulterbreit, Körper in einer Linie. Brust Richtung Boden, kontrolliert hochdrücken. Auch als Halteübung in der Stützposition möglich.",
       "icon_key": "fitness_center",
       "spec": "wdh_oder_halten",
-      "tags": [
+      "regionen": [
         "Arm",
         "Rumpf"
       ]
@@ -197,24 +221,28 @@
     {
       "key": "kniebeuge",
       "name": "Kniebeuge",
-      "category": "Kräftigung",
+      "typen": [
+        "Kräftigung"
+      ],
       "description": "Füße hüftbreit, Gewicht auf den Fersen, Knie über den Zehen. So tief, wie der Rücken gerade bleibt.",
       "icon_key": "accessibility_new",
       "spec": "saetze_wdh",
-      "tags": [
+      "regionen": [
         "Bein"
       ]
     },
     {
       "key": "wandsitz",
       "name": "Wandsitz",
-      "category": "Kräftigung",
+      "typen": [
+        "Kräftigung",
+        "Isometrie"
+      ],
       "description": "Rücken an der Wand, Knie im rechten Winkel, Oberschenkel waagerecht. Halten — die Zeit ist der Wert.",
       "icon_key": "airline_seat_legroom_extra",
       "spec": "halten",
-      "tags": [
-        "Bein",
-        "Isometrie"
+      "regionen": [
+        "Bein"
       ]
     }
   ]

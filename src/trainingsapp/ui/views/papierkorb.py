@@ -62,7 +62,7 @@ def archiv_view(page: ft.Page, state: AppState) -> ft.View:
         ft.ListTile(
             leading=ft.Icon(symbol(u.icon_key)),
             title=ft.Text(u.name),
-            subtitle=ft.Text(u.category, size=12),
+            subtitle=ft.Text(", ".join(u.typen), size=12),
             trailing=ft.Row(
                 tight=True,
                 spacing=0,

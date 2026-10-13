@@ -54,6 +54,25 @@ def _diagnose(zeilen: list[str]) -> ft.Control:
     )
 
 
+async def _hintergrund(state: AppState, lauf: Messlauf, an: bool, text: str = "") -> None:
+    """Vordergrunddienst an/aus — nur in der Android-App (über `FletBleTransport`).
+
+    Solange er läuft, misst und zeichnet die App auch bei ausgeschaltetem
+    Display oder in einer anderen App weiter. Ein Fehler stoppt die Messung
+    nicht; er landet im Diagnoseprotokoll.
+    """
+    transport = state.ble_transport
+    if transport is None or not hasattr(transport, "hintergrund"):
+        return
+    fehler = await transport.hintergrund(an, "HRV-Messung läuft", text)
+    protokoll = getattr(lauf.quelle, "protokoll", None)
+    if protokoll is not None:
+        zeile = f"Hintergrunddienst {'gestartet' if an else 'beendet'}"
+        protokoll.append(
+            f"{time.strftime('%H:%M:%S')} " + (f"{zeile} — FEHLER: {fehler}" if fehler else zeile)
+        )
+
+
 def _uhr(sekunden: float) -> str:
     s = int(sekunden)
     return f"{s // 60}:{s % 60:02d}"
@@ -140,7 +159,15 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             diagnose.content = _diagnose(_protokoll(quelle))
             page.update()
             return
-        page.run_task(lauf.laufen)
+        await _hintergrund(state, lauf, True, f"Verbunden mit {lauf.geraet_name}")
+
+        async def laufen() -> None:
+            try:
+                await lauf.laufen()
+            finally:
+                await _hintergrund(state, lauf, False)
+
+        page.run_task(laufen)
         state.neu_zeichnen()
 
     async def suchen() -> None:
@@ -250,9 +277,11 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     async def aufnahme_starten() -> None:
         lauf.aufnahme_starten()
         aktualisieren(erzwingen=True)
+        await _hintergrund(state, lauf, True, f"Aufnahme läuft · {lauf.geraet_name}")
 
     async def aufnahme_stoppen() -> None:
         ergebnis = lauf.aufnahme_stoppen(datenverzeichnis())
+        await _hintergrund(state, lauf, True, f"Verbunden mit {lauf.geraet_name}")
         if ergebnis is None:
             aktualisieren(erzwingen=True)
             return

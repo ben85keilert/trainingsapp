@@ -51,10 +51,12 @@ class AppState:
     profil: Subject
     #: Welcher Reiter der Navigationsleiste aktiv ist
     nav_index: int = 0
-    #: Suchtext und Kategoriefilter des Katalogs — überleben den Ansichtswechsel
+    #: Suchtext und Tag-Filter des Katalogs — überleben den Ansichtswechsel.
+    #: Innerhalb einer Art genügt ein Treffer (oder), zwischen den Arten müssen
+    #: beide passen (und). Leer = kein Filter.
     suchtext: str = ""
-    kategorie: str | None = None  # Typ: Dehnung, Kräftigung, …
-    tag_filter: str | None = None  # Region oder Charakter
+    typ_filter: set[str] = field(default_factory=set)  # Kräftigung, Dehnung, …
+    region_filter: set[str] = field(default_factory=set)  # Nacken, Bein, …
     #: Wie viele Übungen der letzte Start neu angelegt hat (für den Startbildschirm)
     neu_eingespielt: int = field(default=0)
     #: Übungen, deren Papierkorbfrist abgelaufen ist, die aber einen Verlauf

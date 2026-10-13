@@ -111,6 +111,8 @@ class Exercise:
 
     id: str = field(default_factory=new_id)
     name: str = ""
+    #: Der erste Typ — beim Speichern aus `typen` abgeleitet. Wer nur ihn
+    #: setzt (Altbestand, Tutorial), bekommt ihn als einzigen Typ.
     category: str = ""
     description: str = ""
     icon_key: str | None = None
@@ -123,7 +125,10 @@ class Exercise:
     default_target: dict[str, Any] = field(default_factory=dict)
     default_input_mode: str = "chips"
     media: list[Media] = field(default_factory=list)
-    tags: list[str] = field(default_factory=list)
+    #: Typ-Tags: was für eine Übung das ist (Kräftigung, Dehnung, Kung-Fu, …) — optional
+    typen: list[str] = field(default_factory=list)
+    #: Region-Tags: welche Körperregion (Nacken, Bein, …) — optional
+    regionen: list[str] = field(default_factory=list)
     archived: bool = False
     created_at: datetime = field(default_factory=jetzt)
     updated_at: datetime = field(default_factory=jetzt)
@@ -132,6 +137,11 @@ class Exercise:
     #: Variante von … (Migration 007): gleiche Kachel im Verlauf; ``None`` =
     #: eigene Kachel. Zeigt immer auf das Original, nie auf eine andere Variante.
     family_id: str | None = None
+
+    def __post_init__(self) -> None:
+        # Wer nur `category` angibt (Altbestand, Tutorial), bekommt sie als Typ.
+        if self.category and not self.typen:
+            self.typen = [self.category]
 
 
 # ---------------------------------------------------------------------------
@@ -240,10 +250,35 @@ class DayNote:
 # ---------------------------------------------------------------------------
 
 
-#: Typ einer Übung — genau einer je Übung (`Exercise.category`).
+#: Vorschläge für Typ-Tags (`Exercise.typen`) — eigene kommen dazu.
 TYPEN = ["Dehnung", "Kräftigung", "Ausdauer", "Gleichgewicht", "Atmung", "Benchmark", "Messung"]
-#: Körperregionen — als Tags, beliebig viele je Übung.
+#: Vorschläge für Region-Tags (`Exercise.regionen`) — eigene kommen dazu.
 REGIONEN = ["Nacken", "Schulter", "Arm", "Hand", "Rumpf", "Rücken", "Hüfte", "Bein", "Fuß"]
+#: Arten in der Tabelle `tag` (Spalte ``kind``, Migration 009)
+TAG_TYP = "typ"
+TAG_REGION = "region"
+
+
+def passt_zum_filter(uebung: Exercise, typen: set[str], regionen: set[str]) -> bool:
+    """Katalogfilter: innerhalb einer Tag-Art genügt ein Treffer, beide Arten müssen passen.
+
+    Ein leerer Filter lässt alles durch. Wer nach Region filtert, sieht keine
+    Übungen ohne Region (HRV-Messung) — die haben ja keine.
+
+    >>> u = Exercise(typen=["Kräftigung", "Isometrie"], regionen=["Bein"])
+    >>> passt_zum_filter(u, set(), set())
+    True
+    >>> passt_zum_filter(u, {"Dehnung", "Isometrie"}, set())
+    True
+    >>> passt_zum_filter(u, {"Kräftigung"}, {"Nacken"})
+    False
+    >>> passt_zum_filter(Exercise(typen=["Messung"]), set(), {"Bein"})
+    False
+    """
+    return (not typen or bool(typen & set(uebung.typen))) and (
+        not regionen or bool(regionen & set(uebung.regionen))
+    )
+
 
 #: Eingabestufen einer Planübung (Migration 004)
 EINGABE_HAKEN = "haken"

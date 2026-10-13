@@ -17,6 +17,7 @@ Unter Namen gespeicherte Kurvenansichten bleiben beim Zurücksetzen erhalten.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import Any
 
@@ -68,16 +69,25 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
             setattr(e, name, wert)
         state.hrv_einstellungen_setzen(e)
 
+    schalter_je_name: dict[str, ft.Switch] = {}
+
     def schalter(name: str, label: str, untertitel: str = "", **extra: Any) -> ft.Control:
+        # Kein Neuaufbau der Seite: der würde nach oben springen. Nur was vom
+        # Schalter abhängt, wird nachgezogen.
         def handler(ev: ft.Event[ft.Switch]) -> None:
             setzen(**{name: bool(ev.control.value)})
-            state.neu_zeichnen()  # Abhängiges (z. B. optisch) neu einblenden
+            if name == "nichtlinear" and (optisch := schalter_je_name.get("nichtlinear_optisch")):
+                optisch.disabled = not e.nichtlinear
+                with contextlib.suppress(Exception):
+                    optisch.update()
 
+        knopf = ft.Switch(label=label, value=getattr(e, name), on_change=handler, **extra)
+        schalter_je_name[name] = knopf
         return ft.Column(
             spacing=0,
             tight=True,
             controls=[
-                ft.Switch(label=label, value=getattr(e, name), on_change=handler, **extra),
+                knopf,
                 ft.Container(
                     padding=ft.Padding.only(left=60, bottom=4),
                     content=hinweis(untertitel),
@@ -88,12 +98,17 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
 
     # -- Kacheln ---------------------------------------------------------------
 
+    kachel_chips: dict[str, ft.Chip] = {}
+
     def kachel_umschalter(key: str) -> Callable[[], None]:
         def handler() -> None:
             gewaehlt = set(e.kacheln) ^ {key}
             # Reihenfolge wie im Katalog: große Kacheln zuerst
             setzen(kacheln=[k for _, keys in GRUPPEN for k in keys if k in gewaehlt])
-            state.neu_zeichnen()
+            chip = kachel_chips[key]
+            chip.selected = key in gewaehlt
+            with contextlib.suppress(Exception):
+                chip.update()
 
         return handler
 
@@ -101,7 +116,7 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
         art = KACHELN[key]
         farbe = FARBEN.get(art.kennzahl or "")
         # Mit Farbpunkt zeigt die Tönung die Wahl — ein Haken läge über dem Punkt.
-        return ft.Chip(
+        kachel_chips[key] = ft.Chip(
             label=ft.Text(art.titel, size=12),
             leading=ft.Container(width=10, height=10, border_radius=5, bgcolor=farbe)
             if farbe
@@ -112,6 +127,7 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
             selected_color=ft.Colors.with_opacity(0.3, farbe) if farbe else None,
             tooltip=art.erklaerung or None,
         )
+        return kachel_chips[key]
 
     kachel_gruppen: list[ft.Control] = []
     for gruppe, keys in GRUPPEN:

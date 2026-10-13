@@ -172,10 +172,12 @@ def kachel_werte(
                 )
             )
     if k.verworfen:
-        einheit = (
-            "selbst geprüft" if lauf.regeln.selbst_pruefen else f"von {k.schlaege + k.verworfen}"
+        zusatz = (
+            "vom Sensor · selbst geprüft"
+            if lauf.regeln.selbst_pruefen
+            else f"vom Sensor · von {k.schlaege + k.verworfen}"
         )
-        out.append(KachelWert("Vom Sensor verworfen", str(k.verworfen), einheit))
+        out.append(KachelWert("Verworfen", str(k.verworfen), zusatz=zusatz))
     return out
 
 

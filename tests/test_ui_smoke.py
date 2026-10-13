@@ -60,7 +60,7 @@ def test_ansichten_lassen_sich_bauen(page, state) -> None:
 def test_hauptansicht(page, state) -> None:
     from trainingsapp.ui.app import hauptansicht
 
-    state.nav_index = 1
+    state.reiter = "uebungen"
     ansicht = hauptansicht(page, state)
     assert ansicht.route == "/"
     assert ansicht.navigation_bar is not None
@@ -68,8 +68,21 @@ def test_hauptansicht(page, state) -> None:
     state.uebungen_tab = 1
     assert hauptansicht(page, state).floating_action_button.tooltip == "Neuer Plan"
 
-    state.nav_index = 2  # Messung: kein Knopf
-    assert hauptansicht(page, state).floating_action_button is None
+    state.reiter = "messung"  # Messung: kein Knopf
+    ansicht = hauptansicht(page, state)
+    assert ansicht.floating_action_button is None
+    assert len(ansicht.navigation_bar.destinations) == 4
+    assert ansicht.navigation_bar.selected_index == 2
+
+    # Ohne Gerät ausgeblendet: drei Reiter, „Verlauf" rückt nach
+    e = state.hrv_einstellungen()
+    e.messung_anzeigen = False
+    state.hrv_einstellungen_setzen(e)
+    ansicht = hauptansicht(page, state)
+    assert [d.label for d in ansicht.navigation_bar.destinations] == ["Heute", "Übungen", "Verlauf"]
+    assert state.reiter == "heute"  # der ausgeblendete Reiter war aktiv
+    state.reiter = "verlauf"
+    assert hauptansicht(page, state).navigation_bar.selected_index == 2
 
 
 def test_katalog_filter_ueberlebt_den_aufbau(page, state) -> None:
@@ -163,8 +176,8 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
 
     assert uebungen(page, state) is not None
     assert plaene_liste(page, state) is not None
-    for nav in (0, 3):
-        state.nav_index = nav
+    for reiter in ("heute", "verlauf"):
+        state.reiter = reiter
         assert hauptansicht(page, state).floating_action_button is None
 
 

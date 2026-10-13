@@ -1,13 +1,25 @@
-"""Reiter „Messung": Gerät verbinden, live sehen, aufzeichnen.
+"""Reiter „Messung": oben „Live" und „Aufzeichnungen".
+
+**Live.** Ohne Verbindung: Gerät suchen (oder den Simulator nehmen). Mit
+Verbindung, von oben nach unten:
+
+1. Status — Gerät, Akku und der Aufnahmeknopf, damit man nicht erst scrollen muss.
+2. Kacheln — welche, stellt man unter Einstellungen → HRV-Messung ein.
+3. Hauptkurve (RR- bzw. PPI-Tachogramm) mit Fensterbreite, „korrigiert",
+   Korrekturregeln und den Notizen.
+4. Analyse — Zeit ↔ Frequenz ↔ Nichtlinear (`components.analyse`).
 
 Die laufende Messung liegt im `AppState` (`state.messlauf`), nicht in dieser
 Ansicht — sonst risse sie bei jedem Reiterwechsel ab (L03). Die Ansicht
 schaut nur zu: `Messlauf` meldet neue Werte über einen Beobachter, und die
-Ansicht frischt Kennzahlen und Kurven auf.
+Ansicht frischt Kacheln und Kurven auf (höchstens zweimal je Sekunde).
 
 Live wird nichts an den Rohdaten verändert. Artefakte werden markiert (rote
 Punkte), die korrigierte Kurve ist eine Anzeige; gespeichert werden immer
 die Rohwerte. Korrigiert wird nachträglich in der Aufzeichnung.
+
+**Aufzeichnungen.** Die gespeicherten Messungen des Profils, neueste zuerst,
+und „Alle exportieren".
 """
 
 from __future__ import annotations
@@ -20,6 +32,8 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
+from trainingsapp.core.hrv_ansicht import Ansicht
+from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, HrvEinstellungen
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.devices.base import DeviceInfo, Verbindung
 from trainingsapp.devices.messlauf import Messlauf
@@ -27,16 +41,19 @@ from trainingsapp.devices.profiles import profil_fuer_namen
 from trainingsapp.devices.simulated import SIM_PPI, SIM_PREFIX, SIM_SYNTH, SimulatedSource
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
 from trainingsapp.hrv_core.regeln import Korrekturregeln
-from trainingsapp.hrv_core.trends import KENNZAHLEN, verlauf
+from trainingsapp.hrv_core.trends import KENNZAHLEN, aktuell, titel
+from trainingsapp.ui.components.analyse import Analyse
+from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, raster, zahl
+from trainingsapp.ui.components.karte import hinweis, karte
+from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
-from trainingsapp.ui.components.notizen import Notizfeld
-from trainingsapp.ui.components.verlauf import ansicht_menue, chips, diagramme
+from trainingsapp.ui.components.notizen import Notizfeld, uebungsquellen
+from trainingsapp.ui.components.verlauf import FARBEN, fenster_text
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
 from trainingsapp.ui.state import AppState
 
-FENSTER = [(60, "1 min"), (120, "2 min"), (300, "5 min"), (600, "10 min")]
 ROT = ft.Colors.RED_400
 
 
@@ -103,34 +120,63 @@ def _uhr(sekunden: float) -> str:
     return f"{s // 60}:{s % 60:02d}"
 
 
-def _zahl(wert: float | int | None, nachkomma: int = 0) -> str:
-    if wert is None:
-        return "–"
-    return f"{wert:.{nachkomma}f}"
+def ohne_rr() -> list[str]:
+    """Bei einem reinen Pulsgeber lässt sich aus RR nichts rechnen — nur „HF Gerät"."""
+    return [k for k in KENNZAHLEN if k != "hf_geraet"]
 
 
-def _kachel(titel: str, wert: str, einheit: str = "", gross: bool = False) -> ft.Control:
-    return ft.Container(
-        padding=ft.Padding.symmetric(horizontal=10, vertical=6),
-        border_radius=10,
-        bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-        content=ft.Column(
-            spacing=0,
-            tight=True,
-            controls=[
-                ft.Text(titel, size=11, opacity=0.65),
-                ft.Row(
-                    spacing=3,
-                    tight=True,
-                    vertical_alignment=ft.CrossAxisAlignment.END,
-                    controls=[
-                        ft.Text(wert, size=26 if gross else 18, weight=ft.FontWeight.BOLD),
-                        ft.Text(einheit, size=11, opacity=0.65),
-                    ],
-                ),
-            ],
-        ),
-    )
+# ---------------------------------------------------------------------------
+# Kacheln
+# ---------------------------------------------------------------------------
+
+
+def kachel_werte(
+    lauf: Messlauf, einst: HrvEinstellungen, ansicht: Ansicht, verity: bool
+) -> list[KachelWert]:
+    """Die eingestellten Kacheln mit den aktuellen Live-Werten.
+
+    Kacheln einer Verlaufskurve rechnen mit deren Fenster — der Wert ist der
+    letzte Punkt der Kurve. Vom Sensor verworfene Intervalle (Verity Sense)
+    erscheinen von selbst, sobald es welche gibt.
+    """
+    k = lauf.live.kennzahlen()
+    t, rr, naht = lauf.live.verlaufsreihe()
+    out: list[KachelWert] = []
+    for key in einst.kacheln:
+        art = KACHELN.get(key)
+        if art is None:
+            continue
+        if key == "hf":
+            hf = k.hf_bpm if k.hf_bpm is not None else lauf.status.hf_bpm
+            out.append(KachelWert("Herzfrequenz", zahl(hf), "bpm", gross=True))
+        elif key == "rr":
+            out.append(KachelWert("PPI" if verity else "RR", zahl(k.rr_ms), "ms", gross=True))
+        elif key == "artefakte":
+            out.append(KachelWert("Artefakte", str(k.artefakte), f"von {k.schlaege}"))
+        elif key == "schwankung":
+            out.append(KachelWert(art.titel, zahl(k.schwankung_60s, 1), "bpm"))
+        elif art.kennzahl is not None:
+            kz = KENNZAHLEN[art.kennzahl]
+            fenster = ansicht.fenster_fuer(art.kennzahl, kz.fenster_s)
+            wert = (
+                aktuell(t, rr, naht, art.kennzahl, fenster, pnn_ms=ansicht.pnn_ms)
+                if t.size
+                else None
+            )
+            out.append(
+                KachelWert(
+                    f"{titel(art.kennzahl, ansicht.pnn_ms)} {fenster_text(fenster)}",
+                    zahl(wert, kz.nachkomma),
+                    kz.einheit,
+                    farbe=FARBEN[art.kennzahl],
+                )
+            )
+    if k.verworfen:
+        einheit = (
+            "selbst geprüft" if lauf.regeln.selbst_pruefen else f"von {k.schlaege + k.verworfen}"
+        )
+        out.append(KachelWert("Vom Sensor verworfen", str(k.verworfen), einheit))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +186,7 @@ def _kachel(titel: str, wert: str, einheit: str = "", gross: bool = False) -> ft
 
 def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
     ergebnisse = ft.Column(spacing=0)
-    hinweis = ft.Text("", size=12, opacity=0.7)
+    hinweis_text = ft.Text("", size=12, opacity=0.7)
     ring = ft.ProgressRing(width=18, height=18, stroke_width=2, visible=False)
 
     def zeile(info: DeviceInfo) -> ft.Control:
@@ -162,7 +208,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
         return handler
 
     async def verbinden(device_id: str, name: str | None) -> None:
-        hinweis.value = f"Verbinde mit {name or device_id} …"
+        hinweis_text.value = f"Verbinde mit {name or device_id} …"
         ring.visible = True
         page.update()
         if device_id.startswith(SIM_PREFIX):
@@ -180,7 +226,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
         except Exception as fehler:  # Gerät weg, Bluetooth aus, Berechtigung fehlt …
             state.messlauf = None
             ring.visible = False
-            hinweis.value = f"Verbinden fehlgeschlagen: {fehler}"
+            hinweis_text.value = f"Verbinden fehlgeschlagen: {fehler}"
             diagnose.content = _diagnose(page, lauf)
             page.update()
             return
@@ -197,7 +243,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
 
     async def suchen() -> None:
         if state.ble_transport is None:
-            hinweis.value = (
+            hinweis_text.value = (
                 "Bluetooth gibt es nur in der App auf dem Handy. "
                 "Am Rechner zeigt der Simulator, wie es aussieht."
             )
@@ -206,16 +252,16 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
         from trainingsapp.devices.polar import PolarQuelle
 
         ring.visible = True
-        hinweis.value = "Suche Geräte (8 s) — Gurt anfeuchten bzw. Sensor einschalten …"
+        hinweis_text.value = "Suche Geräte (8 s) — Gurt anfeuchten bzw. Sensor einschalten …"
         ergebnisse.controls = []
         page.update()
         try:
             gefunden = await PolarQuelle(state.ble_transport).scan(8.0)
         except Exception as fehler:
             gefunden = []
-            hinweis.value = f"Suche fehlgeschlagen: {fehler}"
+            hinweis_text.value = f"Suche fehlgeschlagen: {fehler}"
         else:
-            hinweis.value = (
+            hinweis_text.value = (
                 f"{len(gefunden)} Gerät(e) gefunden."
                 if gefunden
                 else "Nichts gefunden. Ist Bluetooth an und der Sensor in der Nähe?"
@@ -232,11 +278,10 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
 
     diagnose = ft.Container()
 
-    return ft.Container(
-        padding=16,
-        content=ft.Column(
-            spacing=10,
-            controls=[
+    return ft.Column(
+        spacing=12,
+        controls=[
+            karte(
                 ft.Text("Gerät verbinden", size=18, weight=ft.FontWeight.W_600),
                 ft.Text(
                     "Polar H10 (Brustgurt, RR-Intervalle) oder Polar Verity Sense "
@@ -251,10 +296,12 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
                         ring,
                     ],
                 ),
-                hinweis,
+                hinweis_text,
                 ergebnisse,
                 diagnose,
-                ft.Text("Ohne Gerät ausprobieren:", size=12, opacity=0.7),
+            ),
+            karte(
+                kartentitel("Ohne Gerät ausprobieren"),
                 ft.Row(
                     wrap=True,
                     spacing=4,
@@ -271,8 +318,8 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
                         ),
                     ],
                 ),
-            ],
-        ),
+            ),
+        ],
     )
 
 
@@ -282,30 +329,38 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
 
 
 def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
+    meine_nummer = state.live_ansicht
+    einst = state.hrv_einstellungen()
     status_box = ft.Container()
-    zahlen_box = ft.Container()
+    kacheln_box = ft.Container()
     rr_box = ft.Container()
-    verlauf_box = ft.Column(spacing=4)
-    chips_box = ft.Container()
     lage_box = ft.Container()
-    aufnahme_box = ft.Container()
     diagnose_box = ft.Container()
     letzte = 0.0
-    fenster = Fenster(state.messung_fenster_s, state.messung_ende_s)
+    fenster = Fenster(einst.fenster_s, state.messung_ende_s)
     verity = bool(lauf.profil and lauf.profil.kann("pmd_ppi"))
 
     def anfang() -> float:
         """Ältester Punkt im Live-Puffer — weiter zurück geht es nicht."""
         return max(0.0, lauf.jetzt_s() - lauf.live.max_s)
 
+    def einstellung_merken(**werte: Any) -> None:
+        """Fensterbreite und „korrigiert" gelten auch beim nächsten Mal."""
+        for name, wert in werte.items():
+            setattr(einst, name, wert)
+        aktuell_ = state.hrv_einstellungen()
+        for name, wert in werte.items():
+            setattr(aktuell_, name, wert)
+        state.hrv_einstellungen_setzen(aktuell_)
+
     def fenster_wechseln(e: ft.Event[ft.SegmentedButton]) -> None:
         if e.control.selected:
-            state.messung_fenster_s = int(e.control.selected[0])
-            fenster.breite_s = state.messung_fenster_s
+            fenster.breite_s = int(e.control.selected[0])
+            einstellung_merken(fenster_s=int(fenster.breite_s))
             aktualisieren(erzwingen=True)
 
     def korrigiert_wechseln(e: ft.Event[ft.Switch]) -> None:
-        state.messung_korrigiert = bool(e.control.value)
+        einstellung_merken(korrigiert=bool(e.control.value))
         aktualisieren(erzwingen=True)
 
     def zur_gegenwart() -> None:
@@ -329,25 +384,6 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             )
         )
 
-    def kurve_umschalten(kennzahl: str) -> None:
-        ansicht = state.ansicht()
-        ansicht.umschalten(kennzahl)
-        state.ansicht_setzen(ansicht)
-        ansicht_neu()
-
-    def ansicht_neu() -> None:
-        chips_box.content = verlauf_kopf()
-        aktualisieren(erzwingen=True)
-
-    def verlauf_kopf() -> ft.Control:
-        return ft.Row(
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Container(expand=True, content=chips(state.ansicht(), kurve_umschalten)),
-                ansicht_menue(page, state, ansicht_neu),
-            ],
-        )
-
     def zeigen(x: float) -> None:
         """Die Kurve auf eine Zeit rücken — nahe der Gegenwart folgt sie wieder."""
         fenster.ende_s = None
@@ -360,6 +396,9 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     def notizen_offen(offen: bool) -> None:
         state.notizen_offen = offen
 
+    def uebungen_merken(offen: bool, quelle: str | None) -> None:
+        state.notiz_uebungen_offen, state.notiz_uebungen_quelle = offen, quelle
+
     notizfeld = Notizfeld(
         zeitbezug=lauf.notiz_zeitbezug,
         ereignisse=lambda: list(lauf.aufnahme.ereignisse) if lauf.aufnahme is not None else [],
@@ -370,6 +409,25 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         jetzt=lauf.jetzt_s,
         offen=state.notizen_offen,
         offen_merken=notizen_offen,
+        uebungen=(lambda: uebungsquellen(state)) if einst.notiz_uebungen else None,
+        uebungen_offen=state.notiz_uebungen_offen,
+        quelle=state.notiz_uebungen_quelle,
+        uebungen_merken=uebungen_merken,
+    )
+
+    def ohne() -> list[str]:
+        return [] if lauf.live.kennzahlen().rr_ms else ohne_rr()
+
+    analyse = Analyse(
+        page,
+        state,
+        bereiche=einst.bereiche(optisch=verity),
+        reihe=lauf.live.verlaufsreihe,
+        hf_geraet=lauf.live.hf_reihe,
+        ohne=ohne,
+        neu_zeichnen=lambda: aktualisieren(erzwingen=True),
+        wischen=lambda c: wischbar(c, fenster, lauf.jetzt_s, gewischt, anfang=anfang),
+        optisch=verity,
     )
 
     async def aufnahme_starten() -> None:
@@ -411,7 +469,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         state.messlauf = None
         state.neu_zeichnen()
 
-    def status_zeile() -> ft.Control:
+    def status_karte() -> ft.Control:
         s = lauf.status
         farbe = {
             Verbindung.VERBUNDEN: ft.Colors.GREEN_400,
@@ -423,50 +481,51 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             teile.append(f"Akku {s.batterie_prozent} %")
         if s.hautkontakt is False:
             teile.append("kein Hautkontakt")
-        return ft.Column(
-            spacing=2,
-            controls=[
-                ft.Row(
-                    spacing=8,
-                    controls=[
-                        ft.Icon(ft.Icons.CIRCLE, size=12, color=farbe),
-                        ft.Text("  ·  ".join(teile), size=13, expand=True),
-                    ],
-                ),
-                ft.Text(s.meldung, size=12, opacity=0.7) if s.meldung else ft.Container(),
-            ],
-        )
-
-    def zahlen() -> ft.Control:
-        k = lauf.live.kennzahlen()
-        hf = k.hf_bpm if k.hf_bpm is not None else lauf.status.hf_bpm
-        # Nur bei Sensoren, die selbst verwerfen (Verity Sense)
-        verworfen = []
-        if k.verworfen:
-            einheit = (
-                "selbst geprüft"
-                if lauf.regeln.selbst_pruefen
-                else f"von {k.schlaege + k.verworfen}"
+        if lauf.aufnahme is None:
+            aktion: ft.Control = ft.Row(
+                spacing=8,
+                wrap=True,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.FilledButton(
+                        "Aufnahme starten",
+                        icon=ft.Icons.FIBER_MANUAL_RECORD,
+                        on_click=aufnahme_starten,
+                    ),
+                    ft.TextButton("Trennen", icon=ft.Icons.BLUETOOTH_DISABLED, on_click=trennen),
+                ],
             )
-            verworfen = [_kachel("Vom Sensor verworfen", f"{k.verworfen}", einheit)]
-        return ft.Row(
-            wrap=True,
-            spacing=8,
-            run_spacing=8,
-            controls=[
-                _kachel("Herzfrequenz", _zahl(hf), "bpm", gross=True),
-                _kachel("RR", _zahl(k.rr_ms), "ms", gross=True),
-                _kachel("RMSSD 30 s", _zahl(k.rmssd_30s, 1), "ms"),
-                _kachel("SDNN 60 s", _zahl(k.sdnn_60s, 1), "ms"),
-                _kachel("Schwankung 60 s", _zahl(k.schwankung_60s, 1), "bpm"),
-                _kachel("Artefakte", f"{k.artefakte}", f"von {k.schlaege}"),
-                *verworfen,
-            ],
+        else:
+            aktion = ft.Row(
+                spacing=10,
+                wrap=True,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Icon(ft.Icons.FIBER_MANUAL_RECORD, color=ROT, size=16),
+                    ft.Text(
+                        f"Aufnahme {_uhr(lauf.aufnahme_dauer_s())}",
+                        size=15,
+                        weight=ft.FontWeight.W_600,
+                    ),
+                    ft.FilledButton(
+                        "Stopp & speichern", icon=ft.Icons.STOP, on_click=aufnahme_stoppen
+                    ),
+                ],
+            )
+        return karte(
+            ft.Row(
+                spacing=8,
+                controls=[
+                    ft.Icon(ft.Icons.CIRCLE, size=12, color=farbe),
+                    ft.Text("  ·  ".join(teile), size=13, expand=True),
+                ],
+            ),
+            ft.Text(s.meldung, size=12, opacity=0.7, visible=bool(s.meldung)),
+            aktion,
+            abstand=8,
         )
 
-    def kurven() -> tuple[ft.Control, list[ft.Control]]:
-        jetzt = lauf.jetzt_s()
-        x_von, x_bis = fenster.bereich(jetzt, anfang())
+    def hauptkurve(x_von: float, x_bis: float) -> ft.Control:
         punkte = [p for p in lauf.live.punkte(seit_s=x_von) if p.t_s <= x_bis]
         mit_rr = [p for p in punkte if p.rr_ms > 0]
         # Grau: alles, was der Sensor geliefert hat — auch vom Gerät verworfene
@@ -481,7 +540,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 grau_naehte.append(len(grau))
             if 250 < p.rr_ms < 2200:
                 grau.append((p.t_s, float(p.rr_ms)))
-            wert = p.rr_korr if state.messung_korrigiert else float(p.rr_ms)
+            wert = p.rr_korr if einst.korrigiert else float(p.rr_ms)
             if p.verworfen or wert is None:
                 offen = True
                 continue
@@ -490,7 +549,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             offen = False
             rr_linie.append((p.t_s, wert))
         artefakte = [(p.t_s, float(p.rr_ms)) for p in mit_rr if p.artefakt and 250 < p.rr_ms < 2200]
-        rr = kurve(
+        return kurve(
             [
                 Reihe(grau, farbe=ft.Colors.OUTLINE, breite=1, naehte=grau_naehte, skala=False),
                 Reihe(rr_linie, farbe=ft.Colors.PRIMARY, naehte=rr_naehte),
@@ -502,16 +561,6 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             x_bis=x_bis,
             y_spanne_min=RR_SPANNE_MIN_MS,
         )
-        t, werte, naht = lauf.live.verlaufsreihe()
-
-        def daten(kennzahl: str, fenster_s: int) -> list[tuple[float, float]]:
-            if kennzahl == "hf_geraet":
-                return [(x, h) for x, h in lauf.live.hf_reihe() if x_von <= x <= x_bis]
-            return verlauf(t, werte, naht, kennzahl, fenster_s, von=x_von, bis=x_bis)
-
-        # Reiner Pulsgeber: Aus RR lässt sich nichts rechnen — dann nur „HF Gerät".
-        ohne = [] if lauf.live.kennzahlen().rr_ms else [k for k in KENNZAHLEN if k != "hf_geraet"]
-        return rr, diagramme(state.ansicht(), daten, x_von=x_von, x_bis=x_bis, ohne=ohne)
 
     def lage() -> ft.Control:
         """Zurückgeblättert: wie weit, und zurück zur Gegenwart."""
@@ -527,43 +576,21 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             ],
         )
 
-    def aufnahme_teil() -> ft.Control:
-        if lauf.aufnahme is None:
-            return ft.Row(
-                wrap=True,
-                spacing=8,
-                controls=[
-                    ft.FilledButton(
-                        "Aufnahme starten",
-                        icon=ft.Icons.FIBER_MANUAL_RECORD,
-                        on_click=aufnahme_starten,
-                    ),
-                    ft.TextButton("Trennen", icon=ft.Icons.BLUETOOTH_DISABLED, on_click=trennen),
-                ],
-            )
-        n = len(lauf.aufnahme.beats)
-        return ft.Row(
-            wrap=True,
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Icon(ft.Icons.FIBER_MANUAL_RECORD, color=ROT, size=16),
-                ft.Text(f"Aufnahme {_uhr(lauf.aufnahme_dauer_s())} · {n} Zeilen", size=14),
-                ft.FilledButton("Stopp & speichern", icon=ft.Icons.STOP, on_click=aufnahme_stoppen),
-            ],
-        )
-
     def fuellen() -> None:
         state.messung_ende_s = fenster.ende_s
-        status_box.content = status_zeile()
-        zahlen_box.content = zahlen()
-        rr_box.content, verlauf_box.controls = kurven()
+        # Ein Zeitpunkt für alle Kurven — sonst rückte jede ein Stück weiter.
+        x_von, x_bis = fenster.bereich(lauf.jetzt_s(), anfang())
+        status_box.content = status_karte()
+        kacheln_box.content = raster(kachel_werte(lauf, einst, state.ansicht(), verity))
+        rr_box.content = hauptkurve(x_von, x_bis)
         lage_box.content = lage()
-        aufnahme_box.content = aufnahme_teil()
+        analyse.zeichnen(x_von, x_bis)
 
     def aktualisieren(erzwingen: bool = False) -> None:
         """Vom Messlauf nach neuen Werten gerufen — höchstens zweimal je Sekunde."""
         nonlocal letzte
+        if state.live_ansicht != meine_nummer:
+            return  # nicht mehr zu sehen (anderer Reiter) — nichts rechnen
         jetzt = time.monotonic()
         if not erzwingen and jetzt - letzte < 0.5:
             return
@@ -582,53 +609,42 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         else:
             aktualisieren(erzwingen=layout)
 
+    haupt_karte = karte(
+        kartentitel(
+            "PPI-Tachogramm" if verity else "RR-Tachogramm",
+            regler_knopf(regeln_oeffnen),
+        ),
+        ft.SegmentedButton(
+            selected=[str(fenster.breite_s if fenster.breite_s in LIVE_FENSTER else 120)],
+            show_selected_icon=False,
+            segments=[
+                ft.Segment(value=str(s), label=ft.Text(fenster_text(s))) for s in LIVE_FENSTER
+            ],
+            on_change=fenster_wechseln,
+        ),
+        ft.Switch(
+            label="korrigiert (Artefakte überbrückt)",
+            value=einst.korrigiert,
+            on_change=korrigiert_wechseln,
+        ),
+        lage_box,
+        wischbar(rr_box, fenster, lauf.jetzt_s, gewischt, anfang=anfang, tippen=notizfeld.tippen),
+        notizfeld.control,
+        hinweis(
+            "Grau: alle Rohwerte, auch vom Sensor verworfene · Farbig: gewertet · Rote "
+            "Punkte: Artefakte (markiert, nicht verändert) · Gelb: Notizen. Waagrecht "
+            "wischen blättert zurück. Gespeichert werden immer die Rohwerte; korrigiert "
+            "wird in der Aufzeichnung."
+        ),
+    )
     spalte = ft.Column(
         spacing=12,
-        controls=[
-            status_box,
-            zahlen_box,
-            ft.Row(
-                wrap=True,
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.SegmentedButton(
-                        selected=[str(state.messung_fenster_s)],
-                        segments=[ft.Segment(value=str(s), label=ft.Text(t)) for s, t in FENSTER],
-                        on_change=fenster_wechseln,
-                    ),
-                    ft.Switch(
-                        label="korrigiert",
-                        value=state.messung_korrigiert,
-                        on_change=korrigiert_wechseln,
-                    ),
-                    regler_knopf(regeln_oeffnen),
-                ],
-            ),
-            lage_box,
-            wischbar(
-                rr_box, fenster, lauf.jetzt_s, gewischt, anfang=anfang, tippen=notizfeld.tippen
-            ),
-            notizfeld.control,
-            wischbar(verlauf_box, fenster, lauf.jetzt_s, gewischt, anfang=anfang),
-            chips_box,
-            ft.Text(
-                "Grau: alle Rohwerte, auch vom Sensor verworfene · Farbig: gewertet · "
-                "Rote Punkte: Artefakte (markiert, nicht verändert) · Gelb: Notizen. "
-                "Waagrecht wischen blättert zurück. Gespeichert werden immer die "
-                "Rohwerte; korrigiert wird in der Aufzeichnung.",
-                size=11,
-                opacity=0.55,
-            ),
-            aufnahme_box,
-            diagnose_box,
-        ],
+        controls=[status_box, kacheln_box, haupt_karte, analyse.control, diagnose_box],
     )
     # Erstbefüllung ohne update() — die Spalte hängt noch nicht an der Seite.
-    chips_box.content = verlauf_kopf()
     fuellen()
     lauf.beobachter = beobachten
-    return ft.Container(padding=16, content=spalte)
+    return spalte
 
 
 # ---------------------------------------------------------------------------
@@ -655,60 +671,94 @@ def _liste(page: ft.Page, state: AppState) -> ft.Control:
         daten = export_zip(dateien, datenverzeichnis())
         await weitergeben(page, f"messungen_{zeitstempel()}.zip", daten, "application/zip")
 
+    if not eintraege:
+        return ft.Container(
+            padding=24,
+            content=ft.Text(
+                "Noch keine Aufzeichnung. Unter „Live“ ein Gerät verbinden und "
+                "„Aufnahme starten“ tippen.",
+                opacity=0.7,
+            ),
+        )
     zeilen: list[ft.Control] = [
         ft.Container(
             padding=ft.Padding.only(left=16, right=8, top=8),
             content=ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 controls=[
-                    ft.Text("AUFZEICHNUNGEN", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                    ft.Text(f"{len(eintraege)} Aufzeichnungen", size=12, opacity=0.7),
                     ft.TextButton(
-                        "Alle exportieren",
-                        icon=ft.Icons.SHARE,
-                        on_click=alle_exportieren,
-                        visible=bool(eintraege),
+                        "Alle exportieren", icon=ft.Icons.SHARE, on_click=alle_exportieren
                     ),
                 ],
             ),
         )
     ]
-    if not eintraege:
-        zeilen.append(
-            ft.Container(
-                padding=ft.Padding.symmetric(horizontal=16, vertical=4),
-                content=ft.Text("Noch keine Aufzeichnung.", opacity=0.6),
-            )
-        )
     for a in eintraege:
         lokal = a.started_at.astimezone()
-        teile = [f"{lokal:%d.%m. %H:%M}", _uhr(a.duration_s), a.geraet or a.geraet_profil]
+        unten = [a.geraet or a.geraet_profil]
         if a.note:
-            teile.append(a.note[:40])
+            unten.append(a.note[:40])
         zeilen.append(
             ft.ListTile(
                 leading=ft.Icon(ft.Icons.MONITOR_HEART_OUTLINED),
-                title=ft.Text("  ·  ".join(teile[:2])),
-                subtitle=ft.Text("  ·  ".join(teile[2:]), size=12),
+                title=ft.Text(f"{lokal:%d.%m.%Y  %H:%M}  ·  {_uhr(a.duration_s)}"),
+                subtitle=ft.Text("  ·  ".join(unten), size=12),
                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),
                 on_click=oeffner(a.id),
             )
         )
-    return ft.Column(spacing=0, controls=zeilen)
+    return ft.ListView(expand=True, padding=ft.Padding.only(bottom=24), controls=zeilen)
 
 
 def messung(page: ft.Page, state: AppState) -> ft.Control:
+    """Reiter oben: „Live" und „Aufzeichnungen" — umschalten baut nur den Inhalt neu."""
     lauf = state.messlauf
-    oben = (
-        _live_teil(page, state, lauf)
-        if lauf is not None and lauf.status.verbindung != Verbindung.GETRENNT
-        else _verbinden_teil(page, state)
-    )
-    return ft.Column(
+    state.live_ansicht += 1  # eine ältere Live-Ansicht hört auf zu rechnen
+    verbunden = lauf is not None and lauf.status.verbindung != Verbindung.GETRENNT
+
+    def wechseln(e: ft.Event[ft.Tabs]) -> None:
+        state.messung_tab = e.control.selected_index or 0
+        state.neu_zeichnen()
+
+    if state.messung_tab == 1:
+        inhalt: ft.Control = _liste(page, state)
+        if lauf is not None:
+            # Die Liste braucht keine Live-Werte; nur ein Abriss baut neu.
+            lauf.beobachter = lambda layout: state.neu_zeichnen() if layout else None
+    else:
+        teil = _live_teil(page, state, lauf) if verbunden else _verbinden_teil(page, state)
+        inhalt = ft.ListView(
+            expand=True,
+            padding=ft.Padding.only(left=12, right=12, top=12, bottom=24),
+            controls=[teil],
+        )
+    anzahl = len(state.hrv.alle(state.profil.id))
+    return ft.Tabs(
+        length=2,
+        selected_index=state.messung_tab,
+        on_change=wechseln,
         expand=True,
-        scroll=ft.ScrollMode.AUTO,
-        spacing=0,
-        controls=[oben, ft.Divider(height=1), _liste(page, state)],
+        content=ft.Column(
+            expand=True,
+            spacing=0,
+            controls=[
+                ft.TabBar(
+                    tabs=[
+                        ft.Tab(
+                            label="Live",
+                            icon=ft.Icons.SENSORS if verbunden else ft.Icons.BLUETOOTH_SEARCHING,
+                        ),
+                        ft.Tab(
+                            label=f"Aufzeichnungen ({anzahl})" if anzahl else "Aufzeichnungen",
+                            icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+                        ),
+                    ]
+                ),
+                ft.Container(expand=True, content=inhalt),
+            ],
+        ),
     )
 
 
-__all__ = ["messung"]
+__all__ = ["kachel_werte", "messung", "ohne_rr"]

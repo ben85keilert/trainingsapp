@@ -62,7 +62,7 @@ def heute_trainieren(page: ft.Page, state: AppState, plan_id: str) -> Callable[[
 
     async def handler() -> None:
         state.sitzungen.session_fuer(state.profil.id, plan_id, state.heute())
-        state.nav_index = 0
+        state.reiter = "heute"
         await page.push_route(f"/plan/{plan_id}")
 
     return handler

@@ -15,12 +15,19 @@ Marken stehen immer in der Hauptkurve (`marken`). Gespeichert wird das
 praxis_gui-Format mit Anker (`hrv_core.ereignisse`); wohin, entscheidet der
 Aufrufer (``speichern``): live in die laufende Aufnahme, nachträglich als
 Metadaten in die Messdatei.
+
+**Übungen antippen.** „Übungen" in der Eingabe blendet die Übungen eines Plans
+als kleine Namen ein (zuerst die heute anstehenden Pläne, zuletzt alle
+Übungen); ein Tipp setzt den Namen in den Notiztext. Gespeichert wird nur Text
+— das Format der Messdatei bleibt, wie praxis_gui es kennt.
 """
 
 from __future__ import annotations
 
 import contextlib
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import flet as ft
 
@@ -31,6 +38,56 @@ FARBE_NOTIZ = ft.Colors.AMBER_400
 FARBE_NEU = ft.Colors.ORANGE_600
 #: Schritte zum Verschieben (s)
 SCHRITTE = (-5, -1, 1, 5)
+
+
+#: Quelle „Alle Übungen" in der Auswahl
+ALLE = "alle"
+
+
+@dataclass(frozen=True, slots=True)
+class UebungsQuelle:
+    """Woraus man Übungsnamen in die Notiz tippt: ein Plan oder der Katalog."""
+
+    id: str
+    name: str
+    uebungen: list[str]
+
+
+def uebungsquellen(state: Any) -> list[UebungsQuelle]:
+    """Heute anstehende Pläne zuerst, dann die übrigen, zuletzt alle Übungen.
+
+    Pläne ohne (noch vorhandene) Übungen fallen weg. ``state`` ist der `AppState`.
+    """
+    heute = state.heute()
+    katalog = {u.id: u.name for u in state.uebungen.alle(mit_archivierten=True)}
+    plaene = state.plaene.alle(state.profil.id)
+    sortiert_ = [p for p in plaene if p.steht_an(heute)] + [
+        p for p in plaene if not p.steht_an(heute)
+    ]
+    quellen = []
+    for plan in sortiert_:
+        namen = list(
+            dict.fromkeys(katalog[i.exercise_id] for i in plan.items if i.exercise_id in katalog)
+        )
+        if namen:
+            quellen.append(UebungsQuelle(plan.id, plan.name, namen))
+    alle = sorted((u.name for u in state.uebungen.alle()), key=str.casefold)
+    if alle:
+        quellen.append(UebungsQuelle(ALLE, "Alle Übungen", alle))
+    return quellen
+
+
+def einfuegen(text: str, name: str) -> str:
+    """Den Namen an den Notiztext anhängen — mit Komma, wo schon etwas steht.
+
+    >>> einfuegen("", "Planke"), einfuegen("Start", "Planke"), einfuegen("Start ", "Planke")
+    ('Planke', 'Start, Planke', 'Start Planke')
+    """
+    if not text.strip():
+        return name
+    if text.endswith((" ", "\n")):
+        return text + name
+    return f"{text}, {name}"
 
 
 def _uhr(sekunden: float) -> str:
@@ -50,6 +107,9 @@ class Notizfeld:
         mitte: Zeit in der Mitte des sichtbaren Fensters (Vorgabe nachträglich).
         jetzt: live die aktuelle Zeit der Kurvenachse, sonst ``None``.
         offen, offen_merken: Klappzustand, überlebt den Neuaufbau der Ansicht.
+        uebungen: liefert die `UebungsQuelle`-n zum Antippen; ``None`` = aus.
+        uebungen_offen, quelle, uebungen_merken: ob die Namen eingeblendet sind
+            und aus welcher Quelle — überleben den Neuaufbau (``(offen, quelle)``).
     """
 
     def __init__(
@@ -64,6 +124,10 @@ class Notizfeld:
         jetzt: Callable[[], float] | None = None,
         offen: bool = False,
         offen_merken: Callable[[bool], None] = lambda _: None,
+        uebungen: Callable[[], list[UebungsQuelle]] | None = None,
+        uebungen_offen: bool = False,
+        quelle: str | None = None,
+        uebungen_merken: Callable[[bool, str | None], None] = lambda *_: None,
     ) -> None:
         self._zeitbezug = zeitbezug
         self._ereignisse = ereignisse
@@ -73,6 +137,10 @@ class Notizfeld:
         self._mitte = mitte
         self._jetzt = jetzt
         self._offen_merken = offen_merken
+        self._uebungen = uebungen
+        self._uebungen_merken = uebungen_merken
+        self.uebungen_offen = uebungen_offen
+        self.quelle = quelle
         self.offen = offen
         #: ``None`` = keine Eingabe offen, ``-1`` = neue Notiz, sonst Index
         self.bearbeite: int | None = None
@@ -204,6 +272,22 @@ class Notizfeld:
         self.bearbeite = None
         self._aendern(kurve=True)
 
+    def uebungen_umschalten(self) -> None:
+        self.uebungen_offen = not self.uebungen_offen
+        self._uebungen_merken(self.uebungen_offen, self.quelle)
+        self._aendern()
+
+    def quelle_waehlen(self, quelle: str) -> None:
+        self.quelle = quelle
+        self._uebungen_merken(self.uebungen_offen, self.quelle)
+        self._aendern()
+
+    def uebung_einsetzen(self, name: str) -> None:
+        """Ein Tipp auf einen Übungsnamen: ab in den Notiztext."""
+        self._text.value = einfuegen(self._text.value or "", name)
+        with contextlib.suppress(Exception):
+            self._text.update()
+
     def _klappen(self, offen: bool | None = None) -> None:
         self.offen = (not self.offen) if offen is None else offen
         self._offen_merken(self.offen)
@@ -316,6 +400,28 @@ class Notizfeld:
             )
         knoepfe.append(self._waehlen_knopf)
         knoepfe += [_schritt(d, self.verschieben) for d in SCHRITTE]
+        self._uebungen_knopf = ft.TextButton(
+            "Übungen",
+            icon=ft.Icons.FITNESS_CENTER,
+            tooltip="Übungen eines Plans zum Antippen einblenden",
+            on_click=lambda: self.uebungen_umschalten(),
+            visible=self._uebungen is not None,
+        )
+        knoepfe.append(self._uebungen_knopf)
+        self._quelle_wahl = ft.Dropdown(
+            dense=True,
+            text_size=13,
+            width=240,
+            on_select=lambda e: self.quelle_waehlen(str(e.control.value or ALLE)),
+        )
+        self._uebungs_namen = ft.Row(wrap=True, spacing=6, run_spacing=6)
+        self._uebungs_box = ft.Container(
+            visible=False,
+            padding=ft.Padding.only(top=2, bottom=6, right=4),
+            content=ft.Column(
+                spacing=6, tight=True, controls=[self._quelle_wahl, self._uebungs_namen]
+            ),
+        )
         self._loeschen_knopf = ft.IconButton(
             ft.Icons.DELETE_OUTLINE, tooltip="Löschen", on_click=lambda: self.loeschen()
         )
@@ -339,6 +445,7 @@ class Notizfeld:
                         ],
                     ),
                     ft.Row(spacing=0, wrap=True, controls=knoepfe),
+                    self._uebungs_box,
                     ft.Row(
                         spacing=0,
                         vertical_alignment=ft.CrossAxisAlignment.END,
@@ -390,6 +497,7 @@ class Notizfeld:
                 else None
             )
             self._loeschen_knopf.visible = self.bearbeite is not None and self.bearbeite >= 0
+            self._uebungen_fuellen()
 
         self._hinweis.visible = self.offen and (not verfuegbar or not liste)
         self._hinweis.value = (
@@ -401,6 +509,23 @@ class Notizfeld:
         self._liste.controls = (
             [self._zeile(i, e, zb) for i, e in enumerate(liste)] if zb is not None else []
         )
+
+    def _uebungen_fuellen(self) -> None:
+        """Die Namen der gewählten Quelle — klein und dicht, damit zehn Übungen passen."""
+        self._uebungen_knopf.icon = (
+            ft.Icons.EXPAND_LESS if self.uebungen_offen else ft.Icons.FITNESS_CENTER
+        )
+        quellen = self._uebungen() if self._uebungen is not None and self.uebungen_offen else []
+        self._uebungs_box.visible = bool(quellen)
+        if not quellen:
+            return
+        gewaehlt = next((q for q in quellen if q.id == self.quelle), quellen[0])
+        self._quelle_wahl.options = [ft.DropdownOption(key=q.id, text=q.name) for q in quellen]
+        self._quelle_wahl.value = gewaehlt.id
+        self._quelle_wahl.visible = len(quellen) > 1
+        self._uebungs_namen.controls = [
+            _name_knopf(n, self.uebung_einsetzen) for n in gewaehlt.uebungen
+        ]
 
     def _zeile(self, i: int, e: dict, zb: Zeitbezug) -> ft.Control:
         x = zb.x(e)
@@ -422,6 +547,18 @@ class Notizfeld:
                 ],
             ),
         )
+
+
+def _name_knopf(name: str, einsetzen: Callable[[str], None]) -> ft.Control:
+    """Ein Übungsname als kleine Pille — kompakter als ein Chip."""
+    return ft.Container(
+        padding=ft.Padding.symmetric(horizontal=10, vertical=5),
+        border_radius=14,
+        border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+        ink=True,
+        on_click=lambda _=None: einsetzen(name),
+        content=ft.Text(name, size=12),
+    )
 
 
 def _schritt(delta: int, verschieben: Callable[[float], None]) -> ft.Control:
@@ -450,4 +587,12 @@ def _senkrecht(xs: list[float], farbe: str, breite: float, *, gestrichelt: bool)
     )
 
 
-__all__ = ["FARBE_NEU", "FARBE_NOTIZ", "Notizfeld"]
+__all__ = [
+    "ALLE",
+    "FARBE_NEU",
+    "FARBE_NOTIZ",
+    "Notizfeld",
+    "UebungsQuelle",
+    "einfuegen",
+    "uebungsquellen",
+]

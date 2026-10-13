@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from trainingsapp.core.hrv_ansicht import MAX_KURVEN, Ansicht, ansichten_lesen
+from trainingsapp.core.hrv_ansicht import BLOCK, Ansicht, ansichten_lesen
 from trainingsapp.hrv_core.korrektur import (
     Korrektur,
     analyse_laden,
@@ -289,7 +289,7 @@ def test_verlauf_gleich_compute_time_domain_je_fenster() -> None:
     naht = np.zeros(400, dtype=bool)
     naht[200] = True
     rr[100] = np.nan
-    for kennzahl, schluessel in (("rmssd", "rmssd"), ("sdnn", "sdnn"), ("pnn50", "pnn50")):
+    for kennzahl, schluessel in (("rmssd", "rmssd"), ("sdnn", "sdnn"), ("pnnx", "pnn50")):
         for te, wert in verlauf(t, rr, naht, kennzahl, 30, schritt_s=20):
             maske = (t > te - 30) & (t <= te)
             idx = np.flatnonzero(maske)
@@ -321,15 +321,27 @@ def test_verlauf_luecke_statt_erfundener_zahl() -> None:
 
 def test_ansicht_umschalten_und_gruppen() -> None:
     a = Ansicht(kurven=[])
-    for k in ("rmssd", "hf_rr", "sdnn", "pnn50", "hf_geraet"):
+    for k in ("rmssd", "hf_rr", "sdnn", "pnnx", "hf_geraet"):
         a.umschalten(k)
-    assert a.kurven == ["rmssd", "hf_rr", "sdnn", "pnn50"]  # höchstens MAX_KURVEN
-    assert len(a.kurven) == MAX_KURVEN
-    einheit = {"rmssd": "ms", "sdnn": "ms", "hf_rr": "bpm", "pnn50": "%"}.get
-    assert a.gruppen(einheit) == [["rmssd", "sdnn"], ["hf_rr"], ["pnn50"]]
+    assert a.kurven == ["rmssd", "hf_rr", "sdnn", "pnnx", "hf_geraet"]  # keine Höchstzahl mehr
+    achse = {"rmssd": "var", "sdnn": "var", "hf_rr": "bpm", "pnnx": "%", "hf_geraet": "bpm"}.get
+    assert a.gruppen(achse) == [["rmssd", "sdnn"], ["hf_rr", "hf_geraet"], ["pnnx"]]
     a.umschalten("rmssd")
-    assert a.gruppen(einheit) == [["hf_rr"], ["sdnn"], ["pnn50"]]
+    assert a.gruppen(achse) == [["hf_rr", "hf_geraet"], ["sdnn"], ["pnnx"]]
+    assert a.gruppen(achse, nur=["sdnn", "pnnx"]) == [["sdnn"], ["pnnx"]]
     assert ansichten_lesen("kaputt") == [] and ansichten_lesen('[{"name": 1}, 3]')[0].name == "1"
+
+
+def test_ansicht_alt_wird_ergaenzt_und_neu_bleibt() -> None:
+    """Ansichten von vor Version 2: pNN50 heißt pnnx, neue Bereiche kommen dazu."""
+    alt = Ansicht.aus_dict({"name": "Alt", "kurven": ["pnn50"], "fenster": {"pnn50": 60}})
+    assert alt.kurven[0] == "pnnx" and alt.fenster == {"pnnx": 60}
+    assert "lf_power" in alt.kurven and "dfa_alpha1" in alt.kurven
+    neu = Ansicht("Neu", ["rmssd"], modus={"rmssd": BLOCK, "sdnn": "quatsch"}, pnn_ms=20)
+    zurueck = Ansicht.aus_dict(neu.als_dict())
+    assert zurueck.kurven == ["rmssd"] and zurueck.pnn_ms == 20
+    assert zurueck.modus == {"rmssd": BLOCK}
+    assert Ansicht.aus_dict({"pnn_ms": 9999}).pnn_ms == 50
 
 
 def test_state_speichert_regeln_und_ansichten(tmp_path: Path) -> None:

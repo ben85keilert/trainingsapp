@@ -12,18 +12,26 @@ standardmäßig selbst (`korrektur.analysebasis`).
 
 Alle Kurven teilen ein Zeitfenster (Breite wählen, waagrecht wischen); die
 Lupe an einer Kette zoomt auf ihre Stelle.
+
+Aufbau wie live: Kacheln (Werte der ganzen Messung, korrigiert), Hauptkurve,
+darunter die Analyse (Zeit ↔ Frequenz ↔ Nichtlinear) mit einer Zusammenfassung
+der ganzen Messung je Bereich — Zeitbereich roh und korrigiert, Frequenzbänder
+mit Sperrgrund (Task-Force-Mindestdauer), Poincaré, DFA α1 und SampEn.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
+from typing import Any
 
 import flet as ft
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.models import HrvRecording
+from trainingsapp.hrv_core.constants import BAND_OK
 from trainingsapp.hrv_core.ereignisse import Zeitbezug, metadaten_schreiben
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
+from trainingsapp.hrv_core.frequency import frequenzbereich
 from trainingsapp.hrv_core.korrektur import (
     Kette,
     Korrektur,
@@ -33,24 +41,31 @@ from trainingsapp.hrv_core.korrektur import (
     analyse_speichern,
     analysebasis,
     anwenden,
-    kennzahlen,
     korr_zeiten,
     rohfolge,
     vorauswahl,
     vorschlaege,
 )
+from trainingsapp.hrv_core.nonlinear import compute_dfa_alpha1, compute_poincare, compute_sampen
 from trainingsapp.hrv_core.ppi import ppi_verworfen, schlagzeiten
 from trainingsapp.hrv_core.recording import Recording, laden
 from trainingsapp.hrv_core.regeln import Korrekturregeln
-from trainingsapp.hrv_core.trends import KENNZAHLEN, reihe, verlauf
+from trainingsapp.hrv_core.segments import filter_rr
+from trainingsapp.hrv_core.time_domain import compute_time_domain
+from trainingsapp.hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
+from trainingsapp.ui.components.analyse import Analyse
+from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, raster, zahl
+from trainingsapp.ui.components.karte import hinweis, karte
+from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.notizen import Notizfeld
-from trainingsapp.ui.components.verlauf import ansicht_menue, chips, diagramme
+from trainingsapp.ui.components.notizen import Notizfeld, uebungsquellen
+from trainingsapp.ui.components.verlauf import FARBEN
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.messung import ohne_rr
 
 ROT = ft.Colors.RED_400
 QUALITAET = {
@@ -130,8 +145,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 ],
             ),
             scroll=ft.ScrollMode.AUTO,
-            padding=16,
-            controls=[sicher(ft.Column(spacing=14, controls=inhalt), expand=False)],
+            padding=12,
+            controls=[sicher(ft.Column(spacing=12, controls=inhalt), expand=False)],
         )
 
     # -- Exportieren -----------------------------------------------------------
@@ -183,6 +198,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     rec = laden(pfad)
     verworfen = ppi_verworfen(rec)
     verity = rec.ppi_pakete is not None
+    einst = state.hrv_einstellungen()
 
     # -- Zustand: Regeln → Basis → Vorschläge → Auswahl -------------------------
     # Regeln der gespeicherten Korrektur, sonst die gerätelokale Vorgabe.
@@ -199,51 +215,96 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     kopf_text = ft.Text(size=13, opacity=0.8)
     hinweis_text = ft.Text(size=12, color=ROT)
-    kennzahlen_box = ft.Container()
+    kacheln_box = ft.Container()
     rr_box = ft.Container()
-    verlauf_box = ft.Column(spacing=4)
-    chips_box = ft.Container()
     ketten_box = ft.Column(spacing=0)
     breite_wahl = ft.SegmentedButton(
         selected=["0"],
+        show_selected_icon=False,
         segments=[ft.Segment(value=str(s), label=ft.Text(t)) for s, t in BREITEN],
     )
     speichern_knopf = ft.FilledButton("Korrektur speichern", icon=ft.Icons.SAVE, disabled=True)
 
-    def tabelle(korr_werte: dict | None) -> ft.Control:
-        zeilen = [
-            ("Ø Herzfrequenz", "mean_bpm", "bpm", 0),
-            ("RMSSD", "rmssd", "ms", 1),
-            ("SDNN", "sdnn", "ms", 1),
-            ("pNN50", "pnn50", "%", 1),
-            ("Schläge", "n", "", 0),
-        ]
-        return ft.Column(
-            spacing=2,
-            controls=[
-                ft.Row(
-                    controls=[
-                        ft.Text("", expand=2),
-                        ft.Text("roh", size=12, opacity=0.6, expand=1),
-                        ft.Text("korrigiert", size=12, opacity=0.6, expand=1),
-                    ]
-                ),
-                *[
-                    ft.Row(
-                        controls=[
-                            ft.Text(titel, expand=2),
-                            ft.Text(f"{_wert(z.roh, key, n)} {einheit}", expand=1),
-                            ft.Text(
-                                f"{_wert(korr_werte, key, n)} {einheit}",
-                                expand=1,
-                                weight=ft.FontWeight.BOLD,
-                            ),
-                        ]
-                    )
-                    for titel, key, einheit, n in zeilen
-                ],
-            ],
+    # -- Kennzahlen der ganzen Messung (korrigiert) --------------------------------
+
+    def zeitbereich(korrigiert: bool) -> dict[str, Any] | None:
+        """Ø HF, Ø RR, RMSSD, SDNN, pNNx — roh oder korrigiert, Nähte übersprungen."""
+        korr = z.korrigiert() if korrigiert else z.roh_korr()
+        return compute_time_domain(
+            korr.rr_ms, pnn_threshold_ms=state.ansicht().pnn_ms, breaks=korr.breaks
         )
+
+    def frequenz() -> dict[str, Any] | None:
+        korr = z.korrigiert()
+        return z.merken("frequenz", lambda: frequenzbereich(korr.rr_ms, korr.t_s, korr.breaks))
+
+    def nichtlinear() -> dict[str, Any]:
+        def rechnen() -> dict[str, Any]:
+            korr = z.korrigiert()
+            valide = filter_rr(korr.rr_ms)
+            poincare = compute_poincare(korr.rr_ms, korr.breaks) or {}
+            dfa = (
+                compute_dfa_alpha1(valide, window_n=int(valide.size))
+                if valide.size >= DFA_MIN_SCHLAEGE
+                else None
+            )
+            # SampEn ist quadratisch — über sehr lange Messungen zu teuer
+            sampen = compute_sampen(valide) if valide.size <= 3000 else None
+            return {
+                **poincare,
+                "dfa_alpha1": dfa["dfa_alpha1"] if dfa else None,
+                "sampen": sampen,
+                "n": int(valide.size),
+            }
+
+        return z.merken("nichtlinear", rechnen)
+
+    def kachel_werte() -> list[KachelWert]:
+        """Dieselben Kacheln wie live, mit den Werten der ganzen Messung."""
+        a = state.ansicht()
+        td = zeitbereich(True) or {}
+        korr = z.korrigiert()
+        out: list[KachelWert] = []
+        for key in einst.kacheln:
+            art = KACHELN.get(key)
+            if art is None or key == "schwankung":
+                continue
+            if key == "hf":
+                out.append(
+                    KachelWert("Ø Herzfrequenz", zahl(td.get("mean_bpm")), "bpm", gross=True)
+                )
+            elif key == "rr":
+                out.append(
+                    KachelWert(
+                        "Ø PPI" if verity else "Ø RR", zahl(td.get("mean_rr")), "ms", gross=True
+                    )
+                )
+            elif key == "artefakte":
+                out.append(
+                    KachelWert(
+                        "Korrigiert",
+                        str(korr.interpoliert + korr.entfernt),
+                        f"von {len(rec.beats)}",
+                    )
+                )
+            elif art.kennzahl is not None:
+                k = art.kennzahl
+                kz = KENNZAHLEN[k]
+                out.append(
+                    KachelWert(
+                        titel(k, a.pnn_ms),
+                        *_gesamtwert(k, td, frequenz, nichtlinear, kz.nachkomma),
+                        farbe=FARBEN[k],
+                    )
+                )
+        return out
+
+    def tabelle(bereich: str) -> ft.Control | None:
+        if bereich == "frequenz":
+            return _frequenz_tabelle(frequenz())
+        if bereich == "nichtlinear":
+            return _nichtlinear_tabelle(nichtlinear(), verity)
+        return _zeit_tabelle(zeitbereich(False), zeitbereich(True), state.ansicht().pnn_ms)
 
     def kopf() -> None:
         teile = [
@@ -267,6 +328,14 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             "oder ein lockerer Sitz. Die Kennzahlen beruhen auf Bruchstücken; für "
             "HRV ruhig sitzen bzw. liegen und den Sensor fest anlegen."
         )
+
+    def analyse_reihe() -> tuple[Any, Any, Any]:
+        korr = z.korrigiert()
+        return z.merken("reihe", lambda: reihe(korr_zeiten(korr, z.achse), korr.rr_ms, korr.breaks))
+
+    def hf_geraet() -> list[tuple[float, float]]:
+        beats = z.basis.rec.beats
+        return [(x, float(b.hf_bpm)) for x, b in zip(z.achse, beats, strict=True) if b.hf_bpm]
 
     def kurven() -> None:
         x_von, x_bis = fenster.bereich(dauer)
@@ -304,22 +373,12 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             x_bis=x_bis,
             y_spanne_min=RR_SPANNE_MIN_MS,
         )
-        t, werte, naht = reihe(zeiten, korr.rr_ms, korr.breaks)
-        hf_punkte = [(x, float(b.hf_bpm)) for x, b in zip(z.achse, beats, strict=True) if b.hf_bpm]
-
-        def daten(kennzahl: str, fenster_s: int) -> list[tuple[float, float]]:
-            if kennzahl == "hf_geraet":
-                return [(x, h) for x, h in hf_punkte if x_von <= x <= x_bis]
-            return verlauf(t, werte, naht, kennzahl, fenster_s, von=x_von, bis=x_bis)
-
-        ohne = [] if rec.hat_rr else [k for k in KENNZAHLEN if k != "hf_geraet"]
-        verlauf_box.controls = diagramme(
-            state.ansicht(), daten, x_von=x_von, x_bis=x_bis, hoehe=130, ohne=ohne
-        )
+        analyse.zeichnen(x_von, x_bis)
 
     def zeichnen(aktualisieren: bool = True) -> None:
         kopf()
-        kennzahlen_box.content = tabelle(kennzahlen(z.korrigiert()))
+        kacheln_box.content = raster(kachel_werte())
+        analyse.aufbauen()
         kurven()
         ketten_box.controls = [ketten_zeile(i, k) for i, k in enumerate(z.ketten)] or [
             ft.Text("Keine Auffälligkeiten gefunden.", opacity=0.7)
@@ -364,6 +423,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     def notizen_offen(offen: bool) -> None:
         state.notizen_offen = offen
 
+    def uebungen_merken(offen: bool, quelle: str | None) -> None:
+        state.notiz_uebungen_offen, state.notiz_uebungen_quelle = offen, quelle
+
     notizfeld = Notizfeld(
         zeitbezug=lambda: Zeitbezug(lambda: rec.beats, rec.start_utc, achse=lambda: zeilen_achse),
         ereignisse=lambda: list(rec.ereignisse),
@@ -373,6 +435,10 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         mitte=lambda: sum(fenster.bereich(dauer)) / 2,
         offen=state.notizen_offen,
         offen_merken=notizen_offen,
+        uebungen=(lambda: uebungsquellen(state)) if einst.notiz_uebungen else None,
+        uebungen_offen=state.notiz_uebungen_offen,
+        quelle=state.notiz_uebungen_quelle,
+        uebungen_merken=uebungen_merken,
     )
 
     def breite_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
@@ -380,6 +446,20 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             breite_setzen(float(e.control.selected[0]))
 
     breite_wahl.on_change = breite_gewaehlt
+
+    analyse = Analyse(
+        page,
+        state,
+        bereiche=einst.bereiche(optisch=verity),
+        reihe=analyse_reihe,
+        hf_geraet=hf_geraet,
+        ohne=lambda: [] if rec.hat_rr else ohne_rr(),
+        neu_zeichnen=lambda: zeichnen(),
+        wischen=lambda c: wischbar(c, fenster, lambda: dauer, nur_kurven),
+        tabelle=tabelle,
+        optisch=verity,
+        hoehe=130,
+    )
 
     # -- Korrektur ---------------------------------------------------------------
 
@@ -465,27 +545,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 ft.Icons.ZOOM_IN, tooltip="In der Kurve zeigen", on_click=hinsehen(i)
             ),
             on_click=schalter(i),
-        )
-
-    # -- Verlaufskurven ------------------------------------------------------------
-
-    def kurve_umschalten(kennzahl: str) -> None:
-        a = state.ansicht()
-        a.umschalten(kennzahl)
-        state.ansicht_setzen(a)
-        ansicht_neu()
-
-    def ansicht_neu() -> None:
-        chips_box.content = verlauf_kopf()
-        nur_kurven()
-
-    def verlauf_kopf() -> ft.Control:
-        return ft.Row(
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Container(expand=True, content=chips(state.ansicht(), kurve_umschalten)),
-                ansicht_menue(page, state, ansicht_neu),
-            ],
+            content_padding=ft.Padding.only(left=0, right=0),
         )
 
     async def notiz_speichern(e: ft.Event[ft.TextField]) -> None:
@@ -499,79 +559,209 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             except (OSError, ValueError):
                 pass
 
-    chips_box.content = verlauf_kopf()
     zeichnen(aktualisieren=False)
     return ansicht(
         [
-            kopf_text,
-            hinweis_text,
-            kennzahlen_box,
-            ft.Row(
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                controls=[
-                    ft.Text(
-                        "PPI-TACHOGRAMM" if verity else "RR-TACHOGRAMM",
-                        size=11,
-                        weight=ft.FontWeight.BOLD,
-                        opacity=0.6,
-                    ),
-                ],
+            ft.Container(
+                padding=ft.Padding.symmetric(horizontal=4),
+                content=ft.Column(spacing=4, controls=[kopf_text, hinweis_text]),
             ),
-            breite_wahl,
-            wischbar(rr_box, fenster, lambda: dauer, nur_kurven, tippen=notizfeld.tippen),
-            notizfeld.control,
-            wischbar(verlauf_box, fenster, lambda: dauer, nur_kurven),
-            chips_box,
-            ft.Text(
-                (
-                    "Grau: alle Intervalle des Sensors, auch verworfene · Farbig: gewertet "
-                    "(korrigiert) · Rot: auffällige Schläge"
-                )
-                if verworfen
-                else "Grau: Rohwerte · Farbig: korrigiert · Rot: auffällige Schläge",
-                size=11,
-                opacity=0.55,
+            kacheln_box,
+            karte(
+                kartentitel("PPI-Tachogramm" if verity else "RR-Tachogramm"),
+                breite_wahl,
+                wischbar(rr_box, fenster, lambda: dauer, nur_kurven, tippen=notizfeld.tippen),
+                notizfeld.control,
+                hinweis(
+                    (
+                        "Grau: alle Intervalle des Sensors, auch verworfene · Farbig: gewertet "
+                        "(korrigiert) · Rot: auffällige Schläge"
+                    )
+                    if verworfen
+                    else "Grau: Rohwerte · Farbig: korrigiert · Rot: auffällige Schläge"
+                ),
             ),
-            ft.Row(
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                controls=[
-                    ft.Row(
-                        spacing=0,
-                        controls=[
-                            ft.Text("KORREKTUR", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                            regler_knopf(regeln_oeffnen, "Was automatische Korrektur heißt"),
-                        ],
-                    ),
-                    ft.Row(
-                        spacing=0,
-                        controls=[
-                            ft.TextButton("Alle", on_click=alle_uebernehmen),
-                            ft.TextButton("Keine", on_click=keine),
-                        ],
-                    ),
-                ],
+            analyse.control,
+            karte(
+                kartentitel(
+                    "Korrektur",
+                    regler_knopf(regeln_oeffnen, "Was automatische Korrektur heißt"),
+                    ft.TextButton("Alle", on_click=alle_uebernehmen),
+                    ft.TextButton("Keine", on_click=keine),
+                ),
+                hinweis(
+                    "Vorschläge der Automatik: kurze Ketten werden interpoliert, lange "
+                    "ausgeschlossen. Antippen übernimmt oder verwirft, die Lupe zeigt die "
+                    "Stelle in der Kurve."
+                ),
+                ketten_box,
+                speichern_knopf,
             ),
-            ft.Text(
-                "Vorschläge der Automatik: kurze Ketten werden interpoliert, lange "
-                "ausgeschlossen. Antippen übernimmt oder verwirft, die Lupe zeigt die "
-                "Stelle in der Kurve.",
-                size=12,
-                opacity=0.7,
-            ),
-            ketten_box,
-            speichern_knopf,
-            ft.TextField(
-                label="Allgemeine Notiz",
-                value=eintrag.note or rec.notiz,
-                multiline=True,
-                min_lines=1,
-                max_lines=5,
-                hint_text="z. B. Atemübung 6/min, Liegestütz",
-                on_blur=notiz_speichern,
+            karte(
+                kartentitel("Notiz zur Messung"),
+                ft.TextField(
+                    value=eintrag.note or rec.notiz,
+                    multiline=True,
+                    min_lines=1,
+                    max_lines=5,
+                    hint_text="z. B. Atemübung 6/min, Liegestütz",
+                    on_blur=notiz_speichern,
+                ),
             ),
             ft.Text(f"Datei: {eintrag.file_path}", size=11, opacity=0.5, selectable=True),
         ]
     )
+
+
+# ---------------------------------------------------------------------------
+# Zusammenfassungen der ganzen Messung
+# ---------------------------------------------------------------------------
+
+
+def _gesamtwert(
+    kennzahl: str,
+    td: dict[str, Any],
+    frequenz: Callable[[], dict[str, Any] | None],
+    nichtlinear: Callable[[], dict[str, Any]],
+    nachkomma: int,
+) -> tuple[str, str, str]:
+    """``(Wert, Einheit, Zusatz)`` einer Kachel über die ganze Messung."""
+    einheit = KENNZAHLEN[kennzahl].einheit
+    zeit = {
+        "hf_rr": "mean_bpm",
+        "mean_rr": "mean_rr",
+        "rmssd": "rmssd",
+        "sdnn": "sdnn",
+        "pnnx": "pnn50",
+    }
+    if kennzahl in zeit:
+        return zahl(td.get(zeit[kennzahl]), nachkomma), einheit, ""
+    if kennzahl in ("lf_power", "hf_power", "lf_hf", "gipfel"):
+        f = frequenz() or {}
+        if kennzahl == "gipfel":
+            g = f.get("gipfel_hz")
+            return zahl(g * 60 if g else None, 1), einheit, ""
+        band = {"lf_power": "lf", "hf_power": "hf", "lf_hf": "lf"}[kennzahl]
+        wert = f.get({"lf_power": "lf", "hf_power": "hf", "lf_hf": "lf_hf"}[kennzahl])
+        if wert is None and f.get("band_status", {}).get(band) not in (None, BAND_OK):
+            return "gesperrt", "", _kurzgrund(f["band_reason"].get(band, ""))
+        return zahl(wert, nachkomma), einheit, ""
+    n = nichtlinear()
+    return zahl(n.get(kennzahl), nachkomma), einheit, ""
+
+
+def _kurzgrund(grund: str) -> str:
+    """„kein Teilstück ≥ 5 min (…)" → „< 5 min" — passt in eine Kachel."""
+    if "≥" in grund:
+        return "< " + grund.split("≥", 1)[1].split("(")[0].strip()
+    return grund[:24]
+
+
+def _zeilen_tabelle(
+    kopf: list[str], zeilen: list[tuple[str, list[str]]], hinweis_text: str = ""
+) -> ft.Control:
+    """Eine kleine Tabelle: erste Spalte Name, dann Werte (rechts fett)."""
+    breit = len(kopf) > 1
+    inhalt: list[ft.Control] = []
+    if breit:
+        inhalt.append(
+            ft.Row(
+                controls=[
+                    ft.Text("", expand=2),
+                    *[ft.Text(k, size=12, opacity=0.6, expand=1) for k in kopf],
+                ]
+            )
+        )
+    for name, werte in zeilen:
+        inhalt.append(
+            ft.Row(
+                controls=[
+                    ft.Text(name, expand=2),
+                    *[
+                        ft.Text(
+                            w,
+                            expand=1,
+                            weight=ft.FontWeight.BOLD if i == len(werte) - 1 else None,
+                        )
+                        for i, w in enumerate(werte)
+                    ],
+                ]
+            )
+        )
+    if hinweis_text:
+        inhalt.append(hinweis(hinweis_text))
+    return ft.Container(
+        padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+        border_radius=10,
+        bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+        content=ft.Column(spacing=4, tight=True, controls=inhalt),
+    )
+
+
+def _zeit_tabelle(
+    roh: dict[str, Any] | None, korr: dict[str, Any] | None, pnn_ms: int
+) -> ft.Control:
+    zeilen = [
+        ("Ø Herzfrequenz", "mean_bpm", "bpm", 0),
+        ("Ø RR", "mean_rr", "ms", 0),
+        ("RMSSD", "rmssd", "ms", 1),
+        ("SDNN", "sdnn", "ms", 1),
+        (f"pNN{pnn_ms}", "pnn50", "%", 1),
+        ("Schläge", "n", "", 0),
+    ]
+    return _zeilen_tabelle(
+        ["roh", "korrigiert"],
+        [
+            (titel_, [f"{_wert(roh, k, n)} {e}".strip(), f"{_wert(korr, k, n)} {e}".strip()])
+            for titel_, k, e, n in zeilen
+        ],
+        "Ganze Messung. Über Nähte (Lücken, Ausschlüsse) wird keine Differenz gebildet.",
+    )
+
+
+def _frequenz_tabelle(f: dict[str, Any] | None) -> ft.Control:
+    if f is None:
+        return _zeilen_tabelle(
+            [], [], "Für die Frequenzanalyse fehlen gute Schläge (mindestens 60)."
+        )
+
+    def band(key: str) -> str:
+        if f.get(key) is not None:
+            return f"{zahl(f[key])} ms²"
+        return "gesperrt" if f["band_status"].get(key) != BAND_OK else "–"
+
+    gipfel = f.get("gipfel_hz")
+    zeilen = [
+        ("VLF 0,003–0,04 Hz", [band("vlf")]),
+        ("LF 0,04–0,15 Hz", [band("lf")]),
+        ("HF 0,15–0,40 Hz", [band("hf")]),
+        ("LF/HF", [zahl(f.get("lf_hf"), 2)]),
+        ("LF n.u. / HF n.u.", [f"{zahl(f.get('lf_n'))} / {zahl(f.get('hf_n'))} %"]),
+        ("Gipfel", [f"{zahl(gipfel, 3)} Hz · {zahl(gipfel * 60, 1)}/min" if gipfel else "–"]),
+    ]
+    gruende = [
+        f"{b.upper()}: {f['band_reason'][b]}" for b in ("vlf", "lf", "hf") if b in f["band_reason"]
+    ]
+    text = "Ganze Messung (korrigiert), Lomb-Scargle je lückenfreiem Teilstück."
+    if gruende:
+        text += " Gesperrt — " + "; ".join(gruende) + "."
+    return _zeilen_tabelle(["ganze Messung"], zeilen, text)
+
+
+def _nichtlinear_tabelle(n: dict[str, Any], optisch: bool) -> ft.Control:
+    zeilen = [
+        ("SD1", [f"{zahl(n.get('sd1'), 1)} ms"]),
+        ("SD2", [f"{zahl(n.get('sd2'), 1)} ms"]),
+        ("SD1/SD2", [zahl(n.get("sd1_sd2"), 2)]),
+        ("DFA α1", [zahl(n.get("dfa_alpha1"), 2)]),
+        ("SampEn", [zahl(n.get("sampen"), 2)]),
+    ]
+    text = (
+        "Ganze Messung (korrigiert). Nichtlineare Werte brauchen genaue Schlagzeiten: "
+        "beim 130-Hz-EKG des H10 als Trend lesbar"
+        + (", bei optischen Pulsintervallen nicht belastbar." if optisch else ".")
+    )
+    return _zeilen_tabelle(["ganze Messung"], zeilen, text)
 
 
 class _Zustand:
@@ -589,10 +779,11 @@ class _Zustand:
 
     def _basis_bauen(self, regeln: Korrekturregeln) -> None:
         self._korr: tuple[frozenset[int], Korrigiert] | None = None
+        self._gemerkt: dict[str, tuple[frozenset[int], Any]] = {}
         self.regeln = regeln
         self.basis = analysebasis(self.rec, regeln)
         self.ketten: list[Kette] = vorschlaege(self.basis.rec, regeln)
-        self.roh = kennzahlen(anwenden(self.basis.rec, []))
+        self._roh = anwenden(self.basis.rec, [])
         # Zeitachse: Herzuhr aller Intervalle — bei der Verity Sense samt der vom
         # Sensor verworfenen, sonst schrumpfte die Messung um deren Dauer.
         self.achse = schlagzeiten(self.basis.rec)
@@ -625,6 +816,18 @@ class _Zustand:
         if self._korr is None or self._korr[0] != schluessel:
             self._korr = (schluessel, anwenden(self.basis.rec, self.korrekturen()))
         return self._korr[1]
+
+    def roh_korr(self) -> Korrigiert:
+        """Die Reihe ohne jede Korrektur (nur die Nähte der Messung)."""
+        return self._roh
+
+    def merken(self, name: str, rechnen: Callable[[], Any]) -> Any:
+        """Ergebnis zur aktuellen Auswahl — Spektrum und DFA nur bei Änderungen neu."""
+        schluessel = frozenset(self.uebernommen)
+        alt = self._gemerkt.get(name)
+        if alt is None or alt[0] != schluessel:
+            self._gemerkt[name] = (schluessel, rechnen())
+        return self._gemerkt[name][1]
 
     def geaendert(self, gespeicherte_regeln: Korrekturregeln | None) -> bool:
         """Weicht die Auswahl oder die Regel vom Gespeicherten ab?"""

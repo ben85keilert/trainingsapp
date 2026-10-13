@@ -536,6 +536,11 @@ class SettingRepo:
     #: HRV: aktuelle Ansicht der Verlaufskurven und gespeicherte Ansichten (JSON)
     HRV_ANSICHT = "hrv_ansicht"
     HRV_ANSICHTEN = "hrv_ansichten"
+    #: HRV: Einstellungen der Messung — Kacheln, Fenster, Bereiche (JSON, `core.hrv_einstellungen`)
+    HRV_EINSTELLUNGEN = "hrv_einstellungen"
+    #: Timer: Profile (JSON, `core.timer`) und das zuletzt benutzte
+    TIMER_PROFILE = "timer_profile"
+    TIMER_AKTIV = "timer_aktiv"
 
     def __init__(self, con: sqlite3.Connection) -> None:
         self.con = con

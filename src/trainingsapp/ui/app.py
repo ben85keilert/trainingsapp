@@ -23,6 +23,8 @@ Routen:
     /einstellungen                  Profile und App-Einstellungen
     /archiv, /papierkorb            Archivierte und gelöschte Übungen (und Pläne)
     /verlauf/<kachel_id>            Kurve der Tagessummen einer Kachel (mit Varianten)
+    /einstellungen/hrv              Einstellungen der HRV-Messung
+    <jede Route>/timer[/bearbeiten[/<id>]]   Timer über der aktuellen Ansicht
 
 Der Routen-Handler baut bei jedem Wechsel den **ganzen** Stapel neu auf
 (L03). Dadurch funktioniert der Zurück-Knopf auch nach einem Neustart auf
@@ -41,6 +43,7 @@ from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lok
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import dark_theme, light_theme
 from trainingsapp.ui.views.einstellungen import einstellungen
+from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
 from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
 from trainingsapp.ui.views.heute import heute
@@ -51,34 +54,51 @@ from trainingsapp.ui.views.plan import einzel_plan, plan_view, ziel_text
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
 from trainingsapp.ui.views.tag import tag_view
+from trainingsapp.ui.views.timer import timer_bearbeiten_view, timer_knopf, timer_view
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 from trainingsapp.ui.views.uebung_detail import uebung_detail
 from trainingsapp.ui.views.uebungen import neuen_plan_anlegen, uebungen
 from trainingsapp.ui.views.verlauf import verlauf
 from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
 
+#: Reiter der Navigationsleiste: Schlüssel, Beschriftung, Symbol
 REITER = [
-    ("Heute", ft.Icons.TODAY),
-    ("Übungen", ft.Icons.FITNESS_CENTER),
-    ("Messung", ft.Icons.MONITOR_HEART),
-    ("Verlauf", ft.Icons.SHOW_CHART),
+    ("heute", "Heute", ft.Icons.TODAY),
+    ("uebungen", "Übungen", ft.Icons.FITNESS_CENTER),
+    ("messung", "Messung", ft.Icons.MONITOR_HEART),
+    ("verlauf", "Verlauf", ft.Icons.SHOW_CHART),
 ]
+
+
+def sichtbare_reiter(state: AppState) -> list[tuple[str, str, ft.IconData]]:
+    """Ohne Gerät lässt sich „Messung" ausblenden (Einstellungen → HRV-Messung).
+
+    Läuft gerade eine Messung, bleibt der Reiter — sonst wäre sie unerreichbar.
+    """
+    zeigen = state.hrv_einstellungen().messung_anzeigen or state.messlauf is not None
+    return [r for r in REITER if r[0] != "messung" or zeigen]
 
 
 def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
     """Die Ansicht hinter `/`: Leiste, Inhalt des aktiven Reiters, Navigation."""
+    reiter = sichtbare_reiter(state)
+    schluessel = [r[0] for r in reiter]
+    if state.reiter not in schluessel:
+        state.reiter = "heute"
 
     def inhalt() -> ft.Control:
-        if state.nav_index == 0:
+        if state.reiter != "messung":
+            state.live_ansicht += 1  # eine Live-Ansicht im Hintergrund rechnet nicht weiter
+        if state.reiter == "heute":
             return heute(page, state)
-        if state.nav_index == 1:
+        if state.reiter == "uebungen":
             return uebungen(page, state)
-        if state.nav_index == 2:
+        if state.reiter == "messung":
             return messung(page, state)
         return verlauf(page, state)
 
     def wechseln(e: ft.Event[ft.NavigationBar]) -> None:
-        state.nav_index = e.control.selected_index
+        state.reiter = schluessel[e.control.selected_index]
         koerper.content = inhalt()
         hauptansicht_aktualisieren()
         page.update()
@@ -97,8 +117,9 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
             title=ft.Text("Trainingsassistent"),
             center_title=False,
             actions=[
+                timer_knopf(page, state, "leiste"),
                 ft.Container(
-                    padding=ft.Padding.only(right=4),
+                    padding=ft.Padding.only(left=4, right=4),
                     content=ft.Text(state.profil.name, size=13, opacity=0.8),
                 ),
                 ft.IconButton(
@@ -109,10 +130,10 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
         # Die Leiste gehört der View, nicht dem Inhalt: So setzt Flutter den
         # runden Knopf darüber und hält beides aus der Android-Systemleiste.
         navigation_bar=ft.NavigationBar(
-            selected_index=state.nav_index,
+            selected_index=schluessel.index(state.reiter),
             on_change=wechseln,
             destinations=[
-                ft.NavigationBarDestination(label=label, icon=icon) for label, icon in REITER
+                ft.NavigationBarDestination(label=label, icon=icon) for _, label, icon in reiter
             ],
         ),
         controls=[koerper],
@@ -120,11 +141,11 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
 
     def hauptansicht_aktualisieren() -> None:
         # Der runde Knopf hängt am Reiter: Katalog → neue Übung, Pläne → neuer Plan.
-        if state.nav_index == 1 and state.uebungen_tab == 0:
+        if state.reiter == "uebungen" and state.uebungen_tab == 0:
             ansicht.floating_action_button = ft.FloatingActionButton(
                 icon=ft.Icons.ADD, tooltip="Neue Übung", on_click=neue_uebung
             )
-        elif state.nav_index == 1:
+        elif state.reiter == "uebungen":
             ansicht.floating_action_button = ft.FloatingActionButton(
                 icon=ft.Icons.ADD, tooltip="Neuer Plan", on_click=neuen_plan_anlegen(page, state)
             )
@@ -242,6 +263,9 @@ def main(page: ft.Page) -> None:
     # Dienste sind Controls ohne Darstellung; sie müssen an der Seite hängen.
     browser = ft.UrlLauncher()
     page.services.append(browser)
+    haptik = ft.HapticFeedback()  # Vibration beim Abschnittswechsel des Timers
+    page.services.append(haptik)
+    state.haptik = haptik
 
     def planuebung(teile: list[str], index: int) -> tuple[PlanItem, Exercise] | None:
         if len(teile) <= index:
@@ -287,9 +311,25 @@ def main(page: ft.Page) -> None:
         page.views.clear()
         page.views.append(hauptansicht(page, state))
         teile = [t for t in page.route.split("/") if t]  # "/plan/abc" → ["plan", "abc"]
+        # Der Timer legt sich über jede Ansicht: erst deren Stapel, dann er.
+        if "timer" in teile:
+            i = teile.index("timer")
+            stapel(teile[:i])
+            basis = "/" + "/".join(teile[:i])
+            page.views.append(timer_view(page, state, basis))
+            if teile[i + 1 : i + 2] == ["bearbeiten"]:
+                profil_id = teile[i + 2] if len(teile) > i + 2 else None
+                page.views.append(timer_bearbeiten_view(page, state, profil_id, basis))
+        else:
+            stapel(teile)
+        page.update()
 
+    def stapel(teile: list[str]) -> None:
+        """Die Ansichten über der Hauptansicht für die Routenteile."""
         if teile[:1] == ["einstellungen"]:
             page.views.append(einstellungen(page, state))
+            if teile[1:2] == ["hrv"]:
+                page.views.append(einstellungen_hrv(page, state))
         elif teile[:1] == ["archiv"]:
             page.views.append(archiv_view(page, state))
         elif teile[:1] == ["papierkorb"]:
@@ -321,7 +361,6 @@ def main(page: ft.Page) -> None:
                 page.views.append(tag_view(page, state, date.fromisoformat(teile[1])))
         elif teile[:1] == ["eintrag"] and len(teile) >= 2:
             eintrag_routen(teile)
-        page.update()
 
     async def zurueck() -> None:
         # Wer eine Ansicht verlässt, beginnt beim nächsten Öffnen wieder oben.

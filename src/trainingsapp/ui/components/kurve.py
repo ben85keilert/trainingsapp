@@ -1,14 +1,15 @@
-"""Kurven für die Messung: RR-Tachogramm und Herzfrequenz.
+"""Kurven für die Messung: Tachogramm, Verlaufskurven, Spektrum, Poincaré.
 
 Ein dünner Wrapper um `flet_charts.LineChart`. Er nimmt fertige Punktlisten
 entgegen und rechnet nichts — was eine Kurve zeigt, entscheiden `hrv_core`
-und die Ansicht.
+und die Ansicht. Die x-Achse ist meist die Zeit; Spektrum (Hz) und
+Poincaré-Wolke (ms) geben eigene Beschriftung und Schritte mit.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -29,7 +30,13 @@ RR_SPANNE_MIN_MS = 100
 HF_SPANNE_MIN_BPM = 10
 
 #: Runde Schrittweiten der Werteachse und höchstens so viele Beschriftungen.
-Y_SCHRITTE = (1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000)
+#: Unter 1 nur für Kennzahlen, die es brauchen (DFA α1, LF/HF): `y_raster(schritt_min=…)`.
+Y_SCHRITTE = (
+    0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5,
+    1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500,
+    1000, 2000, 2500, 5000, 10000, 20000, 25000, 50000,
+    100000, 200000, 250000, 500000, 1000000,
+)  # fmt: skip
 Y_MAX_LABELS = 5
 
 
@@ -51,6 +58,8 @@ class Reihe:
     skala: bool = True
     #: Senkrechte Marke (Notiz): zählt für keine Achse, auch nicht ersatzweise
     marke: bool = False
+    #: Fläche unter der Linie in dieser Farbe (Bänder im Spektrum)
+    flaeche: str | None = None
 
 
 def ausduennen(punkte: Sequence[tuple[float, float]], maximal: int = MAX_PUNKTE) -> list:
@@ -92,21 +101,24 @@ def abschnitte(
     return teile
 
 
-def x_schritt(spanne: float) -> int:
+def x_schritt(spanne: float, schritte: Sequence[float] = X_SCHRITTE) -> float:
     """Kleinste Schrittweite, mit der höchstens `X_MAX_LABELS` Zeitmarken entstehen.
 
     >>> x_schritt(120), x_schritt(60), x_schritt(214), x_schritt(900)
     (15, 10, 30, 120)
     """
-    return next((s for s in X_SCHRITTE if spanne / s <= X_MAX_LABELS), X_SCHRITTE[-1])
+    return next((s for s in schritte if spanne / s <= X_MAX_LABELS), schritte[-1])
 
 
-def y_raster(lo: float, hi: float, spanne_min: float = 0.0) -> tuple[float, float, int]:
+def y_raster(
+    lo: float, hi: float, spanne_min: float = 0.0, schritt_min: float = 1.0
+) -> tuple[float, float, float]:
     """``(unten, oben, schritt)``: Bereich um ``lo``–``hi`` mit etwas Rand, Marken auf Vielfachen.
 
     Beschriftet werden nur runde Vielfache von ``schritt`` — höchstens
     `Y_MAX_LABELS`. Die krummen Grenzen selbst (861,8) bleiben unbeschriftet;
     ``spanne_min`` verhindert, dass wenige ms Rauschen die ganze Höhe füllen.
+    ``schritt_min``: feinster Schritt (Vorgabe 1; DFA α1 braucht 0,1).
 
     >>> y_raster(647.2, 861.8)
     (641.8, 867.2, 50)
@@ -116,29 +128,56 @@ def y_raster(lo: float, hi: float, spanne_min: float = 0.0) -> tuple[float, floa
     (750.5, 855.5, 20)
     >>> y_raster(75, 75)
     (74.0, 76.0, 1)
+    >>> y_raster(0.9, 1.1, spanne_min=0.5, schritt_min=0.01)
+    (0.738, 1.262, 0.1)
     """
     mitte = (lo + hi) / 2
-    halb = max((hi - lo) / 2, spanne_min / 2, 1.0) * 1.05  # Rand: keine Linie am Rahmen
-    unten, oben = round(mitte - halb, 1), round(mitte + halb, 1)
+    # Rand: keine Linie am Rahmen
+    halb = max((hi - lo) / 2, spanne_min / 2, schritt_min) * 1.05
+    stellen = 1 if schritt_min >= 1 else 3
+    unten, oben = round(mitte - halb, stellen), round(mitte + halb, stellen)
     schritt = next(
-        (s for s in Y_SCHRITTE if len(_vielfache(unten, oben, s)) <= Y_MAX_LABELS),
+        (
+            s
+            for s in Y_SCHRITTE
+            if s >= schritt_min and len(_vielfache(unten, oben, s)) <= Y_MAX_LABELS
+        ),
         Y_SCHRITTE[-1],
     )
     return unten, oben, schritt
 
 
-def _vielfache(unten: float, oben: float, schritt: int) -> list[int]:
-    return [k * schritt for k in range(math.ceil(unten / schritt), math.floor(oben / schritt) + 1)]
+def _vielfache(unten: float, oben: float, schritt: float) -> list[float]:
+    erster, letzter = math.ceil(unten / schritt - 1e-9), math.floor(oben / schritt + 1e-9)
+    return [round(k * schritt, 6) for k in range(erster, letzter + 1)]
 
 
-def _achse_x(von: float, bis: float) -> fc.ChartAxis:
-    schritt = x_schritt(max(bis - von, 1.0))
-    erster = math.floor(von / schritt + 1) * schritt
-    # Eine Marke am rechten Rand würde abgeschnitten („2:0").
+def zahl_text(wert: float) -> str:
+    """Beschriftung einer Achse: ganze Zahlen ohne Komma, große mit „k“.
+
+    >>> zahl_text(800), zahl_text(0.5), zahl_text(25000), zahl_text(1.25)
+    ('800', '0,5', '25k', '1,25')
+    """
+    if abs(wert) >= 10000:
+        return f"{wert / 1000:g}k"
+    if float(wert).is_integer():
+        return str(int(wert))
+    return f"{wert:g}".replace(".", ",")
+
+
+def _achse_x(
+    von: float,
+    bis: float,
+    text: Callable[[float], str],
+    schritte: Sequence[float],
+) -> fc.ChartAxis:
+    schritt = x_schritt(max(bis - von, 1e-9), schritte)
+    # Keine Marke auf dem linken Rand, und eine am rechten würde abgeschnitten („2:0").
     letzter = bis - 0.04 * (bis - von)
     labels = [
-        fc.ChartAxisLabel(value=x, label=ft.Text(_zeit(x), size=10))
-        for x in range(erster, math.floor(letzter) + 1, schritt)
+        fc.ChartAxisLabel(value=x, label=ft.Text(text(x), size=10))
+        for x in _vielfache(von, letzter, schritt)
+        if x > von + 1e-9
     ]
     return fc.ChartAxis(
         labels=labels,
@@ -150,11 +189,11 @@ def _achse_x(von: float, bis: float) -> fc.ChartAxis:
     )
 
 
-def _achse_y(unten: float, oben: float, schritt: int, einheit: str) -> fc.ChartAxis:
+def _achse_y(unten: float, oben: float, schritt: float, einheit: str) -> fc.ChartAxis:
     # Flet fragt die Beschriftung nur an Vielfachen von label_spacing ab; die
     # Ränder (show_min/show_max) wären krumme Werte und überlappten.
     labels = [
-        fc.ChartAxisLabel(value=wert, label=ft.Text(str(wert), size=10))
+        fc.ChartAxisLabel(value=wert, label=ft.Text(zahl_text(wert), size=10))
         for wert in _vielfache(unten, oben, schritt)
     ]
     return fc.ChartAxis(
@@ -184,12 +223,16 @@ def kurve(
     y_von: float | None = None,
     y_bis: float | None = None,
     y_spanne_min: float = 0.0,
+    y_schritt_min: float = 1.0,
+    x_text: Callable[[float], str] | None = None,
+    x_schritte: Sequence[float] = X_SCHRITTE,
 ) -> ft.Control:
-    """Ein Liniendiagramm mit Zeit (s) auf der x-Achse.
+    """Ein Liniendiagramm, auf der x-Achse meist die Zeit (s).
 
     Die Werteachse richtet sich nach den Reihen mit ``skala=True``; Punkte der
     übrigen Reihen werden auf ihren Bereich begrenzt (Flet schneidet nicht ab,
-    sie lägen sonst über den Beschriftungen).
+    sie lägen sonst über den Beschriftungen). ``x_text``/``x_schritte``:
+    Beschriftung und runde Schritte einer anderen x-Achse (Hz, ms).
     """
     alle = [p for r in reihen if not r.marke for p in r.punkte]
     if not alle:
@@ -208,6 +251,7 @@ def kurve(
         y_von if y_von is not None else min(ys),
         y_bis if y_bis is not None else max(ys),
         y_spanne_min,
+        y_schritt_min,
     )
     serien = []
     for r in reihen:
@@ -231,6 +275,7 @@ def kurve(
                     )
                     if als_punkt
                     else False,
+                    below_line_bgcolor=r.flaeche,
                 )
             )
     return fc.LineChart(
@@ -240,7 +285,7 @@ def kurve(
         min_y=unten,
         max_y=oben,
         left_axis=_achse_y(unten, oben, schritt, einheit),
-        bottom_axis=_achse_x(x0, x1),
+        bottom_axis=_achse_x(x0, x1, x_text or _zeit, x_schritte),
         horizontal_grid_lines=fc.ChartGridLines(
             color=ft.Colors.with_opacity(0.15, ft.Colors.ON_SURFACE), width=1, interval=schritt
         ),
@@ -261,4 +306,5 @@ __all__ = [
     "kurve",
     "x_schritt",
     "y_raster",
+    "zahl_text",
 ]

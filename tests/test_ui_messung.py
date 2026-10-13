@@ -15,6 +15,7 @@ from trainingsapp.devices.simulated import SIM_SYNTH, SimulatedSource  # noqa: E
 from trainingsapp.hrv_core.korrektur import analyse_laden  # noqa: E402
 from trainingsapp.hrv_core.recording import Beat, Recording, speichern  # noqa: E402
 from trainingsapp.hrv_core.regeln import Korrekturregeln  # noqa: E402
+from trainingsapp.ui.components.kacheln import KACHELN  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.messung import messung  # noqa: E402
 from trainingsapp.ui.views.messung_detail import messung_detail_view  # noqa: E402
@@ -65,8 +66,11 @@ def test_messung_ohne_geraet(daten) -> None:
     state, _ = daten
     texte = _baum_texte(messung(_seite(), state))
     assert "Gerät verbinden" in texte
-    assert "Ohne Gerät ausprobieren:" in texte
-    assert "Noch keine Aufzeichnung." in texte
+    assert "OHNE GERÄT AUSPROBIEREN" in texte
+    state.messung_tab = 1  # Reiter „Aufzeichnungen"
+    assert any(
+        t.startswith("Noch keine Aufzeichnung.") for t in _baum_texte(messung(_seite(), state))
+    )
 
 
 async def test_messung_live_mit_simulator(daten) -> None:
@@ -87,9 +91,27 @@ async def test_messung_live_mit_simulator(daten) -> None:
     assert lauf.beobachter is not None
     lauf.beobachter(False)  # Auffrischen ohne Seite darf nichts werfen
     for fenster in (60, 120, 300):
-        state.messung_fenster_s = fenster
-        state.messung_korrigiert = fenster != 120
+        e = state.hrv_einstellungen()
+        e.fenster_s, e.korrigiert = fenster, fenster != 120
+        state.hrv_einstellungen_setzen(e)
         assert messung(seite, state) is not None
+    # Alle Analysebereiche und alle Kacheln einmal durchrechnen
+    e = state.hrv_einstellungen()
+    e.kacheln = list(KACHELN)
+    state.hrv_einstellungen_setzen(e)
+    for bereich in ("zeit", "frequenz", "nichtlinear"):
+        a = state.ansicht()
+        a.bereich = bereich
+        a.modus = {"rmssd": "block", "lf_power": "block"}
+        state.ansicht_setzen(a)
+        texte = _baum_texte(messung(seite, state))
+        assert "DFA α1 2 min" in texte and "LF-Band 2 min" in texte  # Kacheln
+    # Ein anderer Reiter: die alte Live-Ansicht rechnet nicht weiter
+    nummer = state.live_ansicht
+    state.messung_tab = 1
+    messung(seite, state)
+    assert state.live_ansicht == nummer + 1
+    state.messung_tab = 0
 
     ergebnis = lauf.aufnahme_stoppen(tmp_path)
     await lauf.trennen()
@@ -134,6 +156,7 @@ def test_detailansicht_mit_artefakt_korrigieren_und_speichern(daten) -> None:
     assert pfad.read_text(encoding="utf-8").count('"rr_ms": 1650') == 1  # Rohdatei unverändert
 
     # Liste im Reiter zeigt die Aufzeichnung — und bietet den Export an
+    state.messung_tab = 1
     liste = messung(seite, state)
     assert "Noch keine Aufzeichnung." not in _baum_texte(liste)
     export = [
@@ -389,7 +412,7 @@ async def test_messung_live_verity_mit_verlauf_und_wischen(daten) -> None:
         if isinstance(c, ft.Chip) and getattr(c.label, "value", "") == "SDNN"
     )
     chip.on_select()
-    assert state.ansicht().kurven == ["hf_rr", "rmssd", "sdnn"]
+    assert state.ansicht().kurven[-1] == "sdnn"
     charts = [c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)]
     assert len(charts) == 3 and len(charts[2].data_series) >= 2
 
@@ -454,7 +477,7 @@ def test_detailansicht_regeln_je_messung_und_lupe(daten) -> None:
     texte = _baum_texte(ansicht)
     assert any("26 davon selbst geprüft" in x for x in texte)
     i = texte.index("Schläge")
-    assert texte[i + 1 : i + 3] == ["300 ", "300 "]  # Vorauswahl: interpoliert, nichts entfernt
+    assert texte[i + 1 : i + 3] == ["300", "300"]  # Vorauswahl: interpoliert, nichts entfernt
 
     # Lupe zoomt auf die Kette (Intervall 150, Sensor unsicher)
     lupe = next(
@@ -648,3 +671,113 @@ async def test_live_notiz_eingefroren_und_jetzt(daten) -> None:
     assert [x["text"] for x in ergebnis.recording.ereignisse] == ["Liegestütz", "Ende"]
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
+
+
+def test_notiz_uebungen_aus_plan_einsetzen(daten) -> None:
+    """„Übungen" blendet die Übungen eines Plans ein; ein Tipp setzt den Namen in die Notiz."""
+    import shutil
+    from pathlib import Path
+
+    from trainingsapp.core.models import Plan, PlanItem
+    from trainingsapp.hrv_core.recording import laden
+    from trainingsapp.ui.components.notizen import ALLE, uebungsquellen
+
+    state, tmp_path = daten
+    katalog = state.uebungen.alle()
+    plan = Plan(
+        name="Dehnung",
+        subject_id=state.profil.id,
+        items=[PlanItem(exercise_id=u.id) for u in katalog[:3]],
+    )
+    state.plaene.speichern(plan)
+    quellen = uebungsquellen(state)
+    assert quellen[0].name == "Dehnung" and quellen[0].uebungen == [u.name for u in katalog[:3]]
+    assert quellen[-1].id == ALLE and len(quellen[-1].uebungen) == len(katalog)
+
+    ordner = tmp_path / "Messungen" / "PolarH10"
+    ordner.mkdir(parents=True)
+    golden = Path(__file__).parent / "golden" / "rr" / "sensor_2026-05-23_125422.json"
+    pfad = ordner / golden.name
+    shutil.copy(golden, pfad)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    ansicht = messung_detail_view(_seite(), state, eintrag)
+    _knopf(ansicht, "Notiz").on_click()
+    _knopf(ansicht, "Übungen").on_click()
+    assert state.notiz_uebungen_offen  # überlebt den Neuaufbau
+    namen = [
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.Container)
+        and c.on_click is not None
+        and _baum_texte(c) in ([katalog[0].name], [katalog[1].name])
+    ]
+    assert len(namen) == 2
+    namen[0].on_click()
+    namen[1].on_click()
+    feld = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.TextField) and c.multiline and c.shift_enter
+    )
+    assert feld.value == f"{katalog[0].name}, {katalog[1].name}"
+    _symbol(ansicht, ft.Icons.CHECK, "Speichern").on_click()
+    (e,) = laden(pfad).ereignisse
+    assert e["text"] == f"{katalog[0].name}, {katalog[1].name}"
+
+    # Ausgeschaltet in den Einstellungen: kein Knopf „Übungen"
+    einst = state.hrv_einstellungen()
+    einst.notiz_uebungen = False
+    state.hrv_einstellungen_setzen(einst)
+    ansicht = messung_detail_view(_seite(), state, eintrag)
+    knopf = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.TextButton) and c.content == "Übungen"
+    )
+    assert not knopf.visible
+
+
+def test_detailansicht_alle_bereiche_und_kacheln(daten) -> None:
+    """Frequenz und Nichtlinear: Tabellen der ganzen Messung, gesperrte Bänder mit Grund."""
+    import shutil
+    from pathlib import Path
+
+    state, tmp_path = daten
+    ordner = tmp_path / "Messungen" / "PolarH10"
+    ordner.mkdir(parents=True)
+    golden = Path(__file__).parent / "golden" / "rr" / "sensor_synth_ruhe_sitzend_11.json"
+    pfad = ordner / golden.name
+    shutil.copy(golden, pfad)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    e = state.hrv_einstellungen()
+    e.kacheln = list(KACHELN)
+    state.hrv_einstellungen_setzen(e)
+    for bereich, erwartet in (
+        ("zeit", "pNN50"),
+        ("frequenz", "LF 0,04–0,15 Hz"),
+        ("nichtlinear", "DFA α1"),
+    ):
+        a = state.ansicht()
+        a.bereich = bereich
+        state.ansicht_setzen(a)
+        texte = _baum_texte(messung_detail_view(_seite(), state, eintrag))
+        assert erwartet in texte, bereich
+        assert "Ø Herzfrequenz" in texte and "LF-Band" in texte  # Kacheln der ganzen Messung
+    # 6 min: LF und HF rechenbar, VLF gesperrt (braucht 20 min)
+    texte = _baum_texte(messung_detail_view(_seite(), state, eintrag))
+    assert any(t.startswith("Ganze Messung") for t in texte)
+    a = state.ansicht()
+    a.bereich = "frequenz"
+    state.ansicht_setzen(a)
+    texte = _baum_texte(messung_detail_view(_seite(), state, eintrag))
+    assert "gesperrt" in texte and any("VLF: kein Teilstück ≥ 20 min" in t for t in texte)

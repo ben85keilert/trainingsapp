@@ -25,7 +25,13 @@ from trainingsapp.core.hrv_ansicht import (
     ansichten_lesen,
     ansichten_schreiben,
 )
+from trainingsapp.core.hrv_einstellungen import (
+    HrvEinstellungen,
+    einstellungen_lesen,
+    einstellungen_schreiben,
+)
 from trainingsapp.core.models import Subject, jetzt, lokaler_tag
+from trainingsapp.core.timer import TimerProfil, timer_profile_lesen, timer_profile_schreiben
 from trainingsapp.core.verlauf import MODUS_NUMMER
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.repositories import (
@@ -57,8 +63,9 @@ class AppState:
     tagesnotizen: DayNoteRepo
     hrv: HrvRepo
     profil: Subject
-    #: Welcher Reiter der Navigationsleiste aktiv ist
-    nav_index: int = 0
+    #: Welcher Reiter der Navigationsleiste aktiv ist — als Schlüssel, nicht als
+    #: Index: der Reiter „Messung" lässt sich ausblenden (`app.REITER`)
+    reiter: str = "heute"
     #: Suchtext und Tag-Filter des Katalogs — überleben den Ansichtswechsel.
     #: Innerhalb einer Art genügt ein Treffer (oder), zwischen den Arten müssen
     #: beide passen (und). Leer = kein Filter.
@@ -95,13 +102,28 @@ class AppState:
     #: Bluetooth-Zugang (nur Android, `ui.geraete.FletBleTransport`); hält den
     #: Flet-Service stark referenziert, sonst räumt Flet ihn ab.
     ble_transport: Any = None
-    #: Live-Ansicht: Zeitfenster der Kurven in s, korrigierte oder rohe Kurve
-    messung_fenster_s: int = 120
-    messung_korrigiert: bool = True
+    #: Reiter „Messung": 0 = Live, 1 = Aufzeichnungen
+    messung_tab: int = 0
+    #: Zählt jeden Aufbau der Hauptansicht hoch; eine Live-Ansicht, deren Nummer
+    #: nicht mehr stimmt, ist nicht zu sehen und rechnet nichts mehr
+    live_ansicht: int = 0
     #: Live-Ansicht zurückgeblättert: rechter Rand in s; None = folgt der Messung
     messung_ende_s: float | None = None
     #: Klappfeld „Notizen" unter der Hauptkurve aufgeklappt
     notizen_offen: bool = False
+    #: Notizen: Übungen zum Antippen eingeblendet, und aus welchem Plan
+    #: (Plan-ID; ``None`` = der erste anstehende, „alle" = der ganze Katalog)
+    notiz_uebungen_offen: bool = False
+    notiz_uebungen_quelle: str | None = None
+    #: Laufender Timer (`core.timer.TimerLauf`) — lebt hier, damit er den
+    #: Ansichtswechsel überlebt; die Aufgabe, die ihn ticken lässt
+    timer: Any = None
+    timer_aufgabe: Any = None
+    #: Vibration (Flet-Dienst `HapticFeedback`), setzt `app.main()`
+    haptik: Any = None
+    #: Wer bei jedem Tick des Timers aufgefrischt wird (Name → Funktion);
+    #: Ansichten tragen sich beim Bauen ein und ersetzen ihren alten Eintrag
+    timer_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
     #: Baut den Ansichtsstapel zur aktuellen Route neu — setzt `app.main()`.
     #: Views rufen es nach Änderungen, die die Route nicht wechseln (ein Tipp
     #: auf „gemacht" bleibt auf derselben Planansicht).
@@ -218,6 +240,45 @@ class AppState:
     def ansicht_loeschen(self, name: str) -> None:
         rest = [a for a in self.ansichten() if a.name != name]
         self.einstellungen.setzen(SettingRepo.HRV_ANSICHTEN, ansichten_schreiben(rest))
+
+    def hrv_einstellungen(self) -> HrvEinstellungen:
+        """Was die Messung zeigt — Kacheln, Fenster, Analysebereiche."""
+        return einstellungen_lesen(self.einstellungen.lesen(SettingRepo.HRV_EINSTELLUNGEN))
+
+    def hrv_einstellungen_setzen(self, e: HrvEinstellungen) -> None:
+        self.einstellungen.setzen(SettingRepo.HRV_EINSTELLUNGEN, einstellungen_schreiben(e))
+
+    def hrv_zuruecksetzen(self) -> None:
+        """Einstellungen, aktuelle Ansicht und Korrekturregeln auf die Vorgaben.
+
+        Unter Namen gespeicherte Ansichten bleiben — sie sind Arbeit des Nutzers.
+        """
+        for schluessel in (
+            SettingRepo.HRV_EINSTELLUNGEN,
+            SettingRepo.HRV_ANSICHT,
+            SettingRepo.HRV_KORREKTUR,
+        ):
+            self.einstellungen.loeschen(schluessel)
+        if self.messlauf is not None:
+            self.messlauf.regeln_setzen(Korrekturregeln())
+
+    # -- Timer -------------------------------------------------------------------
+
+    def timer_profile(self) -> list[TimerProfil]:
+        """Gespeicherte Profile; ohne eigene die zwei Vorlagen."""
+        return timer_profile_lesen(self.einstellungen.lesen(SettingRepo.TIMER_PROFILE))
+
+    def timer_profile_setzen(self, profile: list[TimerProfil]) -> None:
+        self.einstellungen.setzen(SettingRepo.TIMER_PROFILE, timer_profile_schreiben(profile))
+
+    def timer_profil(self) -> TimerProfil:
+        """Das zuletzt benutzte Profil — fehlt es, das erste."""
+        profile = self.timer_profile()
+        gemerkt = self.einstellungen.lesen(SettingRepo.TIMER_AKTIV)
+        return next((p for p in profile if p.id == gemerkt), profile[0])
+
+    def timer_profil_waehlen(self, profil_id: str) -> None:
+        self.einstellungen.setzen(SettingRepo.TIMER_AKTIV, profil_id)
 
     def profil_umbenennen(self, name: str) -> None:
         self.profil.name = name.strip()

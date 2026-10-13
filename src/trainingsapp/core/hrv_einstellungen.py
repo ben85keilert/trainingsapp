@@ -1,0 +1,146 @@
+"""Einstellungen der HRV-Messung — was man sieht, mit sinnvollen Vorgaben.
+
+Die App richtet sich an Patienten und Kunden, die sich selbst überprüfen. Sie
+soll ohne jede Einstellung brauchbar sein; wer mehr will, stellt es unter
+Einstellungen → HRV-Messung ein und kann jederzeit auf die Vorgaben
+zurücksetzen (`HrvEinstellungen()`).
+
+Was hier steht, gilt gerätelokal (``app_setting``, Schlüssel
+``hrv_einstellungen``). Welche Verlaufskurven mit welchen Fenstern zu sehen
+sind, ist die `Ansicht` (`core.hrv_ansicht`) — sie lässt sich zusätzlich unter
+Namen speichern. Was „automatische Korrektur" heißt, sind die
+`Korrekturregeln` (`hrv_core.regeln`).
+
+Kein Wissen über die Kennzahlen selbst: Kachel-Schlüssel sind Text, die
+Bedeutung kennt die Oberfläche. Dieses Modul importiert nichts aus anderen
+Schichten.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from typing import Any, Final
+
+#: Kacheln über der Kurve, wenn nichts eingestellt ist — wie bis Oktober 2026
+STANDARD_KACHELN: Final[tuple[str, ...]] = (
+    "hf",
+    "rr",
+    "rmssd",
+    "sdnn",
+    "schwankung",
+    "artefakte",
+)
+
+#: Wählbare Breiten des Live-Zeitfensters (s)
+LIVE_FENSTER: Final[tuple[int, ...]] = (60, 120, 300, 600)
+
+#: Analysebereiche unter der Hauptkurve
+BEREICH_ZEIT: Final[str] = "zeit"
+BEREICH_FREQUENZ: Final[str] = "frequenz"
+BEREICH_NICHTLINEAR: Final[str] = "nichtlinear"
+
+
+@dataclass
+class HrvEinstellungen:
+    """Gerätelokale Einstellungen der HRV-Messung.
+
+    >>> e = HrvEinstellungen(kacheln=["hf", "rr"], fenster_s=300)
+    >>> HrvEinstellungen.aus_dict(e.als_dict()) == e
+    True
+    >>> HrvEinstellungen.aus_dict({"fenster_s": 7, "kacheln": "kaputt"}) == HrvEinstellungen()
+    True
+    >>> HrvEinstellungen().bereiche(optisch=True)
+    ['zeit', 'frequenz']
+    """
+
+    #: Reiter „Messung" in der Navigationsleiste — ohne Gerät spart Ausblenden Platz
+    messung_anzeigen: bool = True
+    #: Kacheln über der Hauptkurve, in dieser Reihenfolge
+    kacheln: list[str] = field(default_factory=lambda: list(STANDARD_KACHELN))
+    #: Breite des Live-Zeitfensters (s)
+    fenster_s: int = 120
+    #: Live die korrigierte Kurve (Artefakte überbrückt) statt der rohen
+    korrigiert: bool = True
+    #: Analysebereiche unter der Hauptkurve: Frequenz und Nichtlinear anbieten
+    frequenz: bool = True
+    nichtlinear: bool = True
+    #: Nichtlineares auch bei optischen Pulsintervallen (Verity Sense) — nicht
+    #: empfohlen: DFA und SampEn brauchen präzise Schlagzeiten
+    nichtlinear_optisch: bool = False
+    #: In Notizen zur Messung die Übungen aus Plänen zum Antippen anbieten
+    notiz_uebungen: bool = True
+
+    def bereiche(self, *, optisch: bool) -> list[str]:
+        """Welche Analysebereiche die Ansicht anbietet (Zeit immer)."""
+        out = [BEREICH_ZEIT]
+        if self.frequenz:
+            out.append(BEREICH_FREQUENZ)
+        if self.nichtlinear and (self.nichtlinear_optisch or not optisch):
+            out.append(BEREICH_NICHTLINEAR)
+        return out
+
+    # -- Serialisierung --------------------------------------------------------
+
+    def als_dict(self) -> dict[str, Any]:
+        return {
+            "messung_anzeigen": self.messung_anzeigen,
+            "kacheln": list(self.kacheln),
+            "fenster_s": self.fenster_s,
+            "korrigiert": self.korrigiert,
+            "frequenz": self.frequenz,
+            "nichtlinear": self.nichtlinear,
+            "nichtlinear_optisch": self.nichtlinear_optisch,
+            "notiz_uebungen": self.notiz_uebungen,
+        }
+
+    @classmethod
+    def aus_dict(cls, d: Any) -> HrvEinstellungen:
+        """Defensiv: Unbrauchbares fällt auf die Vorgabe zurück, nie eine Ausnahme."""
+        vorgabe = cls()
+        if not isinstance(d, dict):
+            return vorgabe
+
+        def schalter(name: str) -> bool:
+            wert = d.get(name)
+            return wert if isinstance(wert, bool) else getattr(vorgabe, name)
+
+        kacheln = d.get("kacheln")
+        if isinstance(kacheln, list) and all(isinstance(k, str) for k in kacheln):
+            kacheln = list(dict.fromkeys(kacheln))
+        else:
+            kacheln = list(vorgabe.kacheln)
+        fenster = d.get("fenster_s")
+        return cls(
+            messung_anzeigen=schalter("messung_anzeigen"),
+            kacheln=kacheln,
+            fenster_s=fenster if fenster in LIVE_FENSTER else vorgabe.fenster_s,
+            korrigiert=schalter("korrigiert"),
+            frequenz=schalter("frequenz"),
+            nichtlinear=schalter("nichtlinear"),
+            nichtlinear_optisch=schalter("nichtlinear_optisch"),
+            notiz_uebungen=schalter("notiz_uebungen"),
+        )
+
+
+def einstellungen_lesen(text: str | None) -> HrvEinstellungen:
+    try:
+        return HrvEinstellungen.aus_dict(json.loads(text or ""))
+    except (TypeError, ValueError):
+        return HrvEinstellungen()
+
+
+def einstellungen_schreiben(e: HrvEinstellungen) -> str:
+    return json.dumps(e.als_dict(), ensure_ascii=False)
+
+
+__all__ = [
+    "BEREICH_FREQUENZ",
+    "BEREICH_NICHTLINEAR",
+    "BEREICH_ZEIT",
+    "LIVE_FENSTER",
+    "STANDARD_KACHELN",
+    "HrvEinstellungen",
+    "einstellungen_lesen",
+    "einstellungen_schreiben",
+]

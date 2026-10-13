@@ -1,8 +1,10 @@
 """Einstellungen — Route `/einstellungen`.
 
-Vorerst nur die Profile: wechseln, anlegen, umbenennen. Eine Sperre per PIN
-oder Fingerabdruck gibt es in Edition A nicht (`ist_aktiv("profil_sperre")`);
-die Ansicht fragt den Schalter, damit Edition B ihn hier einhängen kann.
+Profile (wechseln, anlegen, umbenennen), der Weg zu den Einstellungen der
+HRV-Messung (`/einstellungen/hrv`) und zum Timer, dazu Hilfe und Edition. Eine
+Sperre per PIN oder Fingerabdruck gibt es in Edition A nicht
+(`ist_aktiv("profil_sperre")`); die Ansicht fragt den Schalter, damit Edition B
+ihn hier einhängen kann.
 """
 
 from __future__ import annotations
@@ -13,14 +15,17 @@ import flet as ft
 
 from trainingsapp.config import edition, ist_aktiv
 from trainingsapp.ui.components.hilfe import hilfe_oeffner
+from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
 
 
 def einstellungen(page: ft.Page, state: AppState) -> ft.View:
     profil_liste = ft.Column(spacing=0)
-    neuer_name = ft.TextField(label="Name", dense=True, expand=True)
-    umbenennen_feld = ft.TextField(label="Aktives Profil umbenennen", value=state.profil.name)
+    neuer_name = ft.TextField(label="Neues Profil", dense=True, expand=True)
+    umbenennen_feld = ft.TextField(
+        label="Aktives Profil umbenennen", value=state.profil.name, dense=True, expand=True
+    )
 
     def wechsler(profil_id: str) -> Callable[[], None]:
         def handler() -> None:
@@ -61,53 +66,100 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
                 title=ft.Text(p.name),
                 subtitle=ft.Text(f"Jahrgang {p.birth_year}", size=12) if p.birth_year else None,
                 on_click=wechsler(p.id),
+                content_padding=ft.Padding.only(left=0, right=0),
             )
             for p in state.profile.alle()
         ]
 
+    def oeffner(route: str) -> Callable[[], object]:
+        async def handler() -> None:
+            await page.push_route(route)
+
+        return handler
+
     zeichnen()
 
-    hinweis = (
+    sperre = (
         "Profilwechsel ist durch PIN geschützt."
         if ist_aktiv("profil_sperre")
         else "Kein PIN: In der Solo-Edition gibt es nichts zu verbergen, was der "
         "Gerätebesitzer nicht ohnehin sieht."
+    )
+    e = state.hrv_einstellungen()
+    hrv_text = f"{len(e.kacheln)} Kacheln · Reiter „Messung“ " + (
+        "sichtbar" if e.messung_anzeigen else "ausgeblendet"
     )
 
     return ft.View(
         route="/einstellungen",
         appbar=ft.AppBar(title=ft.Text("Einstellungen")),
         scroll=ft.ScrollMode.AUTO,
-        padding=20,
+        padding=16,
         controls=[
             sicher(
                 ft.Column(
-                    spacing=18,
+                    spacing=14,
                     controls=[
-                        ft.Text("PROFILE", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                        ft.Text("Beim Start wird das zuletzt aktive Profil geladen.", opacity=0.7),
-                        profil_liste,
-                        ft.Row(
-                            spacing=8,
-                            controls=[
-                                neuer_name,
-                                ft.FilledButton(
-                                    "Anlegen", icon=ft.Icons.PERSON_ADD, on_click=anlegen
+                        karte(
+                            titel("Profile"),
+                            hinweis("Beim Start wird das zuletzt aktive Profil geladen."),
+                            profil_liste,
+                            ft.Row(
+                                spacing=8,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    neuer_name,
+                                    ft.FilledTonalButton(
+                                        "Anlegen", icon=ft.Icons.PERSON_ADD, on_click=anlegen
+                                    ),
+                                ],
+                            ),
+                            ft.Row(
+                                spacing=8,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    umbenennen_feld,
+                                    ft.TextButton("Umbenennen", on_click=umbenennen),
+                                ],
+                            ),
+                            hinweis(sperre),
+                        ),
+                        karte(
+                            titel("Messung und Werkzeuge"),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.MONITOR_HEART_OUTLINED),
+                                title=ft.Text("HRV-Messung"),
+                                subtitle=ft.Text(
+                                    f"Kacheln, Kurven, Analyse, Korrektur · {hrv_text}", size=12
                                 ),
-                            ],
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/hrv"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.TIMER_OUTLINED),
+                                title=ft.Text("Timer"),
+                                subtitle=ft.Text(
+                                    "Profile mit Abschnitten · zuletzt "
+                                    f"„{state.timer_profil().name}“",
+                                    size=12,
+                                ),
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/timer"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
                         ),
-                        umbenennen_feld,
-                        ft.TextButton("Umbenennen", on_click=umbenennen),
-                        ft.Text(hinweis, size=12, opacity=0.6),
-                        ft.Divider(),
-                        ft.Text("APP", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                        ft.ListTile(
-                            leading=ft.Icon(ft.Icons.HELP_OUTLINE),
-                            title=ft.Text("Notation — so wird eingegeben"),
-                            subtitle=ft.Text("3x15, 30, 15/15/20, +20, 1:30", size=12),
-                            on_click=hilfe_oeffner(page),
+                        karte(
+                            titel("App"),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.HELP_OUTLINE),
+                                title=ft.Text("Notation — so wird eingegeben"),
+                                subtitle=ft.Text("3x15, 30, 15/15/20, +20, 1:30", size=12),
+                                on_click=hilfe_oeffner(page),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
+                            hinweis(f"Edition {edition().value}"),
                         ),
-                        ft.Text(f"Edition {edition().value}", opacity=0.7),
                     ],
                 ),
                 expand=False,

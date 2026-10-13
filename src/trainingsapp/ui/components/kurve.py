@@ -60,6 +60,8 @@ class Reihe:
     marke: bool = False
     #: Fläche unter der Linie in dieser Farbe (Bänder im Spektrum)
     flaeche: str | None = None
+    #: Radius der Punkte bei ``nur_punkte`` (Poincaré-Wolke kleiner)
+    radius: float = 3.5
 
 
 def ausduennen(punkte: Sequence[tuple[float, float]], maximal: int = MAX_PUNKTE) -> list:
@@ -271,7 +273,7 @@ def kurve(
                     stroke_width=0 if r.nur_punkte else r.breite,
                     dash_pattern=[4, 4] if r.gestrichelt else None,
                     point=fc.ChartCirclePoint(
-                        radius=3.5 if r.nur_punkte else r.breite, color=r.farbe, stroke_width=0
+                        radius=r.radius if r.nur_punkte else r.breite, color=r.farbe, stroke_width=0
                     )
                     if als_punkt
                     else False,

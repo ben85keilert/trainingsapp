@@ -57,7 +57,9 @@ class SpecForm:
             zeilen.append(self._zeile(f, widget))
         if not zeilen:
             zeilen.append(ft.Text("Diese Übung hat keine Felder, nur „gemacht“.", opacity=0.6))
-        self.control = ft.Column(spacing=22, controls=zeilen)
+        self.control = ft.Column(
+            spacing=22, horizontal_alignment=ft.CrossAxisAlignment.STRETCH, controls=zeilen
+        )
 
     # -- Bauen -------------------------------------------------------------
 

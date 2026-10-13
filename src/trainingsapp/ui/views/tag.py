@@ -303,14 +303,20 @@ def tagesansicht(page: ft.Page, state: AppState, tag: date) -> ft.Control:
             *zeilen,
             ft.Container(
                 padding=ft.Padding.only(left=16, right=16, top=10, bottom=16),
-                content=ft.TextField(
-                    label="Notiz zum Tag",
-                    value=state.tagesnotizen.lesen(state.profil.id, tag),
-                    multiline=True,
-                    min_lines=2,
-                    max_lines=10,
-                    hint_text="Wie lief der Tag? Tippen oder diktieren.",
-                    on_blur=tagesnotiz_speichern,
+                # In einer Zeile mit expand: das Feld nimmt die ganze Breite
+                content=ft.Row(
+                    controls=[
+                        ft.TextField(
+                            label="Notiz zum Tag",
+                            value=state.tagesnotizen.lesen(state.profil.id, tag),
+                            multiline=True,
+                            min_lines=2,
+                            max_lines=10,
+                            hint_text="Wie lief der Tag? Tippen oder diktieren.",
+                            on_blur=tagesnotiz_speichern,
+                            expand=True,
+                        )
+                    ]
                 ),
             ),
         ],

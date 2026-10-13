@@ -21,7 +21,14 @@ def karte(*inhalt: ft.Control, padding: int = 14, abstand: int = 12) -> ft.Contr
         border_radius=16,
         bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
         border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE)),
-        content=ft.Column(spacing=abstand, tight=True, controls=list(inhalt)),
+        # Gestreckt: Textfelder und Umschalter füllen die Karte, statt bei
+        # ihrer Eigenbreite stehen zu bleiben.
+        content=ft.Column(
+            spacing=abstand,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            controls=list(inhalt),
+        ),
     )
 
 

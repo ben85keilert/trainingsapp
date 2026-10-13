@@ -50,6 +50,7 @@ from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.timer import timer_knopf
 
 ECKEN = ft.RoundedRectangleBorder(radius=12)
 STUFEN = {EINGABE_HAKEN: "nur abhaken", EINGABE_CHIPS: "Chips", EINGABE_FREI: "Freieingabe"}
@@ -678,9 +679,10 @@ def plan_view(
         route=route,
         appbar=ft.AppBar(
             title=ft.Text(plan.name),
-            actions=[hilfe_knopf(page)]
+            actions=[timer_knopf(page, state, "plan"), hilfe_knopf(page)]
             if einzel
             else [
+                *([] if bearbeiten else [timer_knopf(page, state, "plan")]),
                 hilfe_knopf(page),
                 ft.IconButton(
                     ft.Icons.CHECK if bearbeiten else ft.Icons.EDIT_OUTLINED,

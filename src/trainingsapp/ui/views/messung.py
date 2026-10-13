@@ -185,8 +185,8 @@ def kachel_werte(
 
 
 def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
-    ergebnisse = ft.Column(spacing=0)
-    hinweis_text = ft.Text("", size=12, opacity=0.7)
+    ergebnisse = ft.Column(spacing=0, visible=False)
+    hinweis_text = ft.Text("", size=12, opacity=0.7, visible=False)
     ring = ft.ProgressRing(width=18, height=18, stroke_width=2, visible=False)
 
     def zeile(info: DeviceInfo) -> ft.Control:
@@ -209,6 +209,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
 
     async def verbinden(device_id: str, name: str | None) -> None:
         hinweis_text.value = f"Verbinde mit {name or device_id} …"
+        hinweis_text.visible = True
         ring.visible = True
         page.update()
         if device_id.startswith(SIM_PREFIX):
@@ -228,6 +229,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             ring.visible = False
             hinweis_text.value = f"Verbinden fehlgeschlagen: {fehler}"
             diagnose.content = _diagnose(page, lauf)
+            diagnose.visible = True
             page.update()
             return
         await _hintergrund(state, lauf, True, f"Verbunden mit {lauf.geraet_name}")
@@ -247,12 +249,14 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
                 "Bluetooth gibt es nur in der App auf dem Handy. "
                 "Am Rechner zeigt der Simulator, wie es aussieht."
             )
+            hinweis_text.visible = True
             page.update()
             return
         from trainingsapp.devices.polar import PolarQuelle
 
         ring.visible = True
         hinweis_text.value = "Suche Geräte (8 s) — Gurt anfeuchten bzw. Sensor einschalten …"
+        hinweis_text.visible = True
         ergebnisse.controls = []
         page.update()
         try:
@@ -268,6 +272,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             )
         ring.visible = False
         ergebnisse.controls = [zeile(i) for i in gefunden]
+        ergebnisse.visible = bool(gefunden)
         page.update()
 
     def simulator(device_id: str, name: str) -> Callable[[], Any]:
@@ -276,7 +281,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
 
         return handler
 
-    diagnose = ft.Container()
+    diagnose = ft.Container(visible=False)
 
     return ft.Column(
         spacing=12,

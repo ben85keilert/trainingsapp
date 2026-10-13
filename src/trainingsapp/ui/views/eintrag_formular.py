@@ -71,7 +71,16 @@ def eintrag_formular(
         appbar=ft.AppBar(title=ft.Text(titel)),
         scroll=ft.ScrollMode.AUTO,
         padding=20,
-        controls=[sicher(ft.Column(spacing=18, controls=inhalt), expand=False)],
+        controls=[
+            sicher(
+                ft.Column(
+                    spacing=18,
+                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                    controls=inhalt,
+                ),
+                expand=False,
+            )
+        ],
     )
 
 

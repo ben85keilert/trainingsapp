@@ -100,6 +100,7 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
     def kachel_chip(key: str) -> ft.Control:
         art = KACHELN[key]
         farbe = FARBEN.get(art.kennzahl or "")
+        # Mit Farbpunkt zeigt die Tönung die Wahl — ein Haken läge über dem Punkt.
         return ft.Chip(
             label=ft.Text(art.titel, size=12),
             leading=ft.Container(width=10, height=10, border_radius=5, bgcolor=farbe)
@@ -107,7 +108,8 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
             else None,
             selected=key in e.kacheln,
             on_select=kachel_umschalter(key),
-            show_checkmark=True,
+            show_checkmark=farbe is None,
+            selected_color=ft.Colors.with_opacity(0.3, farbe) if farbe else None,
             tooltip=art.erklaerung or None,
         )
 

@@ -4,6 +4,10 @@ Beide zeigen, was gerade im Zeitfenster der Hauptkurve liegt: Wer zoomt oder
 wischt, sieht das Spektrum bzw. die Wolke genau dieses Ausschnitts. Die Linie
 des Spektrums ist neutral; nur die Bänder sind getönt — eine Bewertung („gut",
 „kohärent") gibt es nicht (wie praxis_gui seit „Live-PSD ohne Urteil").
+
+Die Höhe richtet sich nach LF und HF; VLF wird am oberen Rand abgeschnitten.
+praxis_gui zeigt dafür eine logarithmische Achse — am Handy ist eine lineare
+für Laien lesbarer.
 """
 
 from __future__ import annotations
@@ -68,6 +72,9 @@ def spektrum_kurve(fs: Fensterspektrum | None, *, hoehe: int = 150) -> ft.Contro
                 farbe=ft.Colors.ON_SURFACE_VARIANT,
                 breite=1.5,
                 flaeche=ft.Colors.with_opacity(0.35, farbe) if farbe else None,
+                # VLF (langsame Drift) bestimmt die Höhe nicht — sonst wären LF und
+                # HF über einer langen Messung nur ein Strich am Boden.
+                skala=lo >= FREQ_BANDS["lf"][0],
             )
         )
     gipfel = fs.werte.get("gipfel_hz")
@@ -165,7 +172,12 @@ def poincare_kurve(paare: Sequence[tuple[float, float]], *, hoehe: int = 240) ->
                 gestrichelt=True,
                 skala=False,
             ),
-            Reihe(list(paare), farbe=FARBEN["sd1"], nur_punkte=True),
+            Reihe(
+                list(paare),
+                farbe=ft.Colors.with_opacity(0.75, FARBEN["sd1"]),
+                nur_punkte=True,
+                radius=2.5 if len(paare) > 200 else 3.0,
+            ),
         ],
         einheit="RR n+1 (ms)",
         hoehe=hoehe,

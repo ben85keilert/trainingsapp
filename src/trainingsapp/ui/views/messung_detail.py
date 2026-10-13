@@ -83,7 +83,7 @@ def _uhr(sekunden: float) -> str:
 def _wert(d: dict | None, key: str, nachkomma: int = 1) -> str:
     if not d or d.get(key) is None:
         return "–"
-    return f"{d[key]:.{nachkomma}f}"
+    return zahl(d[key], nachkomma)
 
 
 def _linie(
@@ -737,7 +737,7 @@ def _frequenz_tabelle(f: dict[str, Any] | None) -> ft.Control:
         ("HF 0,15–0,40 Hz", [band("hf")]),
         ("LF/HF", [zahl(f.get("lf_hf"), 2)]),
         ("LF n.u. / HF n.u.", [f"{zahl(f.get('lf_n'))} / {zahl(f.get('hf_n'))} %"]),
-        ("Gipfel", [f"{zahl(gipfel, 3)} Hz · {zahl(gipfel * 60, 1)}/min" if gipfel else "–"]),
+        ("Gipfel", [f"{zahl(gipfel, 2)} Hz · {zahl(gipfel * 60)}/min" if gipfel else "–"]),
     ]
     gruende = [
         f"{b.upper()}: {f['band_reason'][b]}" for b in ("vlf", "lf", "hf") if b in f["band_reason"]

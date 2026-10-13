@@ -268,9 +268,11 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         def rechnen() -> dict[str, Any]:
             t, rr, _ = analyse_reihe()
             modus = ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE
+            # Alle 15 s ein Minutenfenster — über Stunden höchstens 2000 Fenster
+            schritt = max(15.0, float(t[-1] - t[0]) / 2000.0) if t.size else 15.0
             fenster = [
                 atemfrequenz(t, rr, ende - 60.0, ende, modus=modus)
-                for ende in (np.arange(t[0] + 60.0, t[-1] + 1e-9, 15.0) if t.size else [])
+                for ende in (np.arange(t[0] + 60.0, t[-1] + 1e-9, schritt) if t.size else [])
             ]
             gueltig = [a for a in fenster if a.gueltig]
             gruende = Counter(g for a in fenster if not a.gueltig for g in a.gruende[:1])
@@ -303,6 +305,18 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             elif key == "rr":
                 titel_rr = "Ø PPI" if verity else "Ø RR"
                 out.append(KachelWert(titel_rr, zahl(td.get("mean_rr")), "ms", gross=g))
+            elif key == "ulf":
+                f = frequenz() or {}
+                gesperrt = f.get("band_status", {}).get("ulf") not in (None, BAND_OK)
+                out.append(
+                    KachelWert(
+                        art.titel,
+                        zahl(f.get("ulf"), 0),
+                        "ms²",
+                        gross=g,
+                        grund="braucht 4 h Messung" if gesperrt else "",
+                    )
+                )
             elif key == "artefakte":
                 out.append(
                     KachelWert(
@@ -682,13 +696,15 @@ def _gesamtwert(
     }
     if kennzahl in zeit:
         return zahl(td.get(zeit[kennzahl]), nachkomma), einheit, ""
-    if kennzahl in ("lf_power", "hf_power", "lf_hf", "gipfel"):
+    if kennzahl in ("lf_power", "hf_power", "lf_hf", "gipfel", "vlf_power"):
         f = frequenz() or {}
         if kennzahl == "gipfel":
             g = f.get("gipfel_hz")
             return zahl(g * 60 if g else None, 1), einheit, ""
-        band = {"lf_power": "lf", "hf_power": "hf", "lf_hf": "lf"}[kennzahl]
-        wert = f.get({"lf_power": "lf", "hf_power": "hf", "lf_hf": "lf_hf"}[kennzahl])
+        band = {"lf_power": "lf", "hf_power": "hf", "lf_hf": "lf", "vlf_power": "vlf"}[kennzahl]
+        wert = f.get(
+            {"lf_power": "lf", "hf_power": "hf", "lf_hf": "lf_hf", "vlf_power": "vlf"}[kennzahl]
+        )
         if wert is None and f.get("band_status", {}).get(band) not in (None, BAND_OK):
             return "gesperrt", "", _kurzgrund(f["band_reason"].get(band, ""))
         return zahl(wert, nachkomma), einheit, ""
@@ -778,6 +794,7 @@ def _frequenz_tabelle(f: dict[str, Any] | None) -> ft.Control:
 
     gipfel = f.get("gipfel_hz")
     zeilen = [
+        ("ULF unter 0,003 Hz", [band("ulf")]),
         ("VLF 0,003–0,04 Hz", [band("vlf")]),
         ("LF 0,04–0,15 Hz", [band("lf")]),
         ("HF 0,15–0,40 Hz", [band("hf")]),
@@ -786,9 +803,16 @@ def _frequenz_tabelle(f: dict[str, Any] | None) -> ft.Control:
         ("Gipfel", [f"{zahl(gipfel, 2)} Hz · {zahl(gipfel * 60)}/min" if gipfel else "–"]),
     ]
     gruende = [
-        f"{b.upper()}: {f['band_reason'][b]}" for b in ("vlf", "lf", "hf") if b in f["band_reason"]
+        f"{b.upper()}: {f['band_reason'][b]}"
+        for b in ("ulf", "vlf", "lf", "hf")
+        if b in f["band_reason"]
     ]
     text = "Ganze Messung (korrigiert), Lomb-Scargle je lückenfreiem Teilstück."
+    if f.get("strategy") == "lang":
+        text += (
+            " Lange Messung: LF/HF als Mittel von 5-min-Spektren, VLF von 30-min-Spektren, "
+            "ULF über die ganze Länge."
+        )
     if gruende:
         text += " Gesperrt — " + "; ".join(gruende) + "."
     return _zeilen_tabelle(["ganze Messung"], zeilen, text)

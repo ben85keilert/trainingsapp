@@ -248,3 +248,47 @@ def test_fensterspektrum_findet_atemgipfel_und_verweigert_duenne_fenster() -> No
     rr_loch = rr.copy()
     rr_loch[-60:] = np.nan
     assert fensterspektrum(t, rr_loch, t[-1] - 120, t[-1]) is None
+
+
+def _lange_reihe(stunden: float, seed: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    """RR mit bekannten Bändern (ms²): ULF 0,0015 Hz 1800, VLF 0,01 Hz 312, LF 450, HF 800."""
+    zufall = np.random.default_rng(seed)
+    n = int(stunden * 3600 / 0.92)
+    rr = np.empty(n)
+    t = np.empty(n)
+    jetzt = 0.0
+    for i in range(n):
+        rr[i] = (
+            920
+            + 40 * np.sin(2 * np.pi * 0.25 * jetzt)
+            + 30 * np.sin(2 * np.pi * 0.1 * jetzt)
+            + 25 * np.sin(2 * np.pi * 0.01 * jetzt)
+            + 60 * np.sin(2 * np.pi * 0.0015 * jetzt)
+            + zufall.normal(0, 8)
+        )
+        jetzt += rr[i] / 1000
+        t[i] = jetzt
+    return rr, t
+
+
+@pytest.mark.parametrize("stunden", [1.5, 6.0])
+def test_lange_messung_trifft_alle_baender(stunden: float) -> None:
+    """Über `LANG_AB_S` (≈ 67 min) rechnet das Spektrum in drei Teilen — vorher
+    deckelte das Raster, und LF/HF lagen bei 4 h um das 3,6-Fache zu hoch."""
+    import time
+
+    rr, t = _lange_reihe(stunden)
+    start = time.perf_counter()
+    from trainingsapp.hrv_core.frequency import frequenzbereich
+
+    fd = frequenzbereich(rr, t)
+    dauer = time.perf_counter() - start
+    assert fd is not None and fd["strategy"] == "lang"
+    assert fd["lf"] == pytest.approx(463, rel=0.1)  # 450 + Rauschen im Band
+    assert fd["hf"] == pytest.approx(845, rel=0.1)
+    assert fd["vlf"] == pytest.approx(316, rel=0.15)
+    if stunden >= 4:
+        assert fd["ulf"] == pytest.approx(1800, rel=0.1)
+    else:
+        assert fd["ulf"] is None and fd["band_status"]["ulf"] != "ok"  # unter 4 h gesperrt
+    assert dauer < 10  # 6 h: rund eine Sekunde

@@ -28,7 +28,13 @@ from typing import Final
 #   mit den eigenen Regeln geprüft (`korrektur.analysebasis`, `Korrekturregeln`).
 #   Die Verity Sense verwarf in Ruhe 37 % brauchbarer Intervalle; die Kennzahlen
 #   rechnen jetzt auf allen (13.10.: 1119 statt 719 Schläge, RMSSD 50,0 statt 47,6 ms).
-ALGO_VERSION: Final[int] = 4
+# 5 (2026-10-14): Lange Messungen (ein Teilstück über `LANG_AB_S`, gut eine
+#   Stunde) rechnen ihr Spektrum in drei Teilen (`frequency.spektrum`): LF/HF als
+#   Mittel von 5-min-Spektren, VLF von 30-min-Spektren aus 2-s-Mitteln, ULF auf
+#   voller Länge aus 30-s-Mitteln. Vorher
+#   deckelte `MAX_GRID_BINS` das Raster, und LF/HF lagen bei 4 h um das
+#   3,6-Fache, bei 8 h um das 7-Fache zu hoch. Kürzere Messungen: unverändert.
+ALGO_VERSION: Final[int] = 5
 
 # ---------------------------------------------------------------------------
 # Plausibilitätsgrenzen für RR-Intervalle
@@ -110,6 +116,17 @@ KETTE_MAX_INTERP_GAP_S: Final[float] = 3.0
 RESAMPLE_FS_HZ: Final[float] = 4.0  # Kubios/Task-Force-Konvention
 F_MAX_HZ: Final[float] = 0.5
 MAX_GRID_BINS: Final[int] = 2000  # Deckel gegen Speicherexplosion bei Lomb
+#: Ab dieser Länge eines Teilstücks (s) bräuchte df = 1/T mehr als
+#: `MAX_GRID_BINS` Stützstellen — dann rechnet `frequency.spektrum` zweigeteilt.
+LANG_AB_S: Final[float] = MAX_GRID_BINS / F_MAX_HZ
+#: Langer Weg, oben (LF, HF ab 0,04 Hz): Mittel der Spektren über Fenster dieser Länge (s)
+LANG_FENSTER_S: Final[float] = 300.0
+#: Langer Weg, VLF (0,003–0,04 Hz): Mittel über 30-min-Fenster aus 2-s-Mitteln
+VLF_FENSTER_S: Final[float] = 1800.0
+VLF_MITTEL_S: Final[float] = 2.0
+#: Langer Weg, ULF (unter 0,003 Hz): ganze Länge aus 30-s-Mitteln, df = 1/T
+ULF_MITTEL_S: Final[float] = 30.0
+ULF_MAX_BINS: Final[int] = 4000
 WELCH_NPERSEG: Final[int] = 256
 WELCH_OVERLAP: Final[float] = 0.5
 

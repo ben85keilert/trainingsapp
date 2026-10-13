@@ -54,7 +54,13 @@ KACHELN: dict[str, KachelArt] = {
     ),
     **{k: _aus_kurve(k) for k in ("atemfrequenz", "rsa")},
     **{k: _aus_kurve(k) for k in ("hf_rr", "mean_rr", "rmssd", "sdnn", "pnnx")},
-    **{k: _aus_kurve(k) for k in ("lf_power", "hf_power", "lf_hf", "gipfel")},
+    **{k: _aus_kurve(k) for k in ("lf_power", "hf_power", "lf_hf", "gipfel", "vlf_power")},
+    # ULF braucht Stunden (mindestens 4 h) — nur als Wert der ganzen Aufzeichnung
+    "ulf": KachelArt(
+        "ULF-Band",
+        erklaerung="Leistung unter 0,003 Hz — Tagesrhythmus. Erst ab 4 h Messung, "
+        "nur in der Aufzeichnung.",
+    ),
     **{k: _aus_kurve(k) for k in ("sd1", "sd2", "dfa_alpha1")},
 }
 
@@ -63,7 +69,7 @@ GRUPPEN: list[tuple[str, list[str]]] = [
     ("Grundwerte", ["hf", "rr", "artefakte"]),
     ("Atmung", ["atemfrequenz", "rsa", "schwankung"]),
     ("Zeit", ["hf_rr", "mean_rr", "rmssd", "sdnn", "pnnx"]),
-    ("Frequenz", ["lf_power", "hf_power", "lf_hf", "gipfel"]),
+    ("Frequenz", ["lf_power", "hf_power", "lf_hf", "gipfel", "vlf_power", "ulf"]),
     ("Nichtlinear", ["sd1", "sd2", "dfa_alpha1"]),
 ]
 

@@ -39,6 +39,25 @@ und dann dokumentiert hat:
   (wie praxis_gui ``enforce_min_dauer=False``); ein Band unter seiner
   Mindestdauer ist nur als Orientierung zu lesen (``band_reif``).
 
+**Lange Messungen** (ein Teilstück über `LANG_AB_S` ≈ 67 min): Mit
+``df = 1/T`` bräuchte das Raster mehr als `MAX_GRID_BINS` Stützstellen; der
+Deckel macht ``df`` gröber als die Gipfelbreite ``1/T``, und die Trapezregel
+überschätzt jeden schmalen Gipfel um ``df · T`` (gemessen: LF/HF bei 4 h ×3,6,
+bei 8 h ×7 — praxis_gui hat denselben Deckel). Deshalb in drei Teilen, wie
+bei 24-h-Messungen üblich — jedes Band mit der Auflösung, die es braucht:
+
+- **LF, HF** (ab 0,04 Hz): Mittel der Lomb-Spektren über 5-min-Fenster (halb
+  überlappend), Raster 1/300 Hz.
+- **VLF** (0,003–0,04 Hz): Mittel über 30-min-Fenster (mit Hann-Fenster gegen
+  Leckage aus starken ULF-Wellen) aus 2-s-Mitteln der RR-Werte (Dämpfung bei
+  0,04 Hz unter 2 %), Raster 1/1800 Hz.
+- **ULF** (unter 0,003 Hz): ein Lomb über die ganze Länge aus 30-s-Mitteln,
+  Raster ``df = 1/T``.
+
+Die Rechenzeit wächst so nur linear mit der Länge. Gemessen (synthetisch,
+Soll ULF 1800 / VLF 312 / LF 450 / HF 832 ms²) treffen 1,2 bis 24 h alle
+Bänder auf wenige Prozent.
+
 Genauigkeit der Verfahren, gemessen in praxis_gui gegen ein Referenzsignal mit
 LF 1200 ms², HF 600 ms², Soll-LF/HF 2,00 über 15 Minuten:
 
@@ -65,6 +84,8 @@ from .constants import (
     BAND_OK,
     F_MAX_HZ,
     FREQ_BANDS,
+    LANG_AB_S,
+    LANG_FENSTER_S,
     MAX_GAP_S,
     MAX_GRID_BINS,
     MAX_MISSING_PCT,
@@ -72,6 +93,10 @@ from .constants import (
     MIN_BEATS_SEGMENT,
     MIN_COVERAGE_PCT,
     RESAMPLE_FS_HZ,
+    ULF_MAX_BINS,
+    ULF_MITTEL_S,
+    VLF_FENSTER_S,
+    VLF_MITTEL_S,
     WELCH_NPERSEG,
 )
 from .segments import Segment, gueltig_maske
@@ -379,6 +404,8 @@ class Spektrum:
     dauer_s: list[float]
     n_schlaege: list[int]
     methode: str
+    #: Langer Weg (`_spektrum_lang`): Raster unten fein, oben 1/300 Hz
+    lang: bool = False
 
     @property
     def df_hz(self) -> float:
@@ -421,9 +448,128 @@ def _teilspektrum(
     return np.interp(raster, f, p, left=0.0, right=0.0)
 
 
+def _mittelreihe(t: np.ndarray, y: np.ndarray, breite_s: float) -> tuple[np.ndarray, np.ndarray]:
+    """Mittel je Zeitfach (``breite_s``): Zeit und Wert gemittelt, leere Fächer fallen weg.
+
+    Lomb braucht kein gleichmäßiges Raster — die mittlere Zeit der Schläge im
+    Fach ist genauer als seine Mitte.
+
+    >>> t, y = _mittelreihe(np.array([0.1, 0.9, 1.2, 5.1]), np.array([1.0, 3.0, 5.0, 7.0]), 1.0)
+    >>> [round(float(x), 3) for x in t], y.tolist()
+    ([0.5, 1.2, 5.1], [2.0, 5.0, 7.0])
+    """
+    if t.size == 0:
+        return np.array([]), np.array([])
+    fach = np.floor((t - t[0]) / breite_s).astype(int)
+    anzahl = np.bincount(fach)
+    belegt = anzahl > 0
+    zeit = np.bincount(fach, weights=t)[belegt] / anzahl[belegt]
+    return zeit, np.bincount(fach, weights=y)[belegt] / anzahl[belegt]
+
+
+def _lomb_hann(t: np.ndarray, y: np.ndarray, raster: np.ndarray) -> np.ndarray:
+    """Lomb mit Hann-Fenster über die Zeit — weniger Leckage aus starken tiefen Wellen.
+
+    Ohne Fenster streut eine starke ULF-Welle in einem 30-min-Fenster einige
+    Prozent ihrer Leistung ins VLF-Band (gemessen +17 %). Die Leistung wird um
+    den Energieverlust des Fensters (Mittel von w²) korrigiert.
+    """
+    spanne = float(t[-1] - t[0])
+    if spanne <= 0:
+        return np.zeros_like(raster)
+    w = 0.5 - 0.5 * np.cos(2.0 * np.pi * (t - t[0]) / spanne)
+    return lomb_psd(t, (y - y.mean()) * w, raster) / float(np.mean(w * w))
+
+
+def _gemittelt(
+    t: np.ndarray,
+    y: np.ndarray,
+    raster: np.ndarray,
+    fenster_s: float,
+    min_n: int,
+    *,
+    hann: bool = False,
+) -> np.ndarray | None:
+    """Mittel der Lomb-Spektren über halb überlappende Fenster, nach Dauer gewichtet.
+
+    Kürzer als ein Fenster: das ganze Stück als ein Fenster.
+    """
+    rechnen = _lomb_hann if hann else lomb_psd
+    anfang, ende = float(t[0]), float(t[-1])
+    if ende - anfang <= fenster_s:
+        return rechnen(t, y, raster) if t.size >= min_n else None
+    summe = np.zeros_like(raster)
+    gewicht = 0.0
+    for von in np.arange(anfang, ende - fenster_s + 1e-9, fenster_s / 2.0):
+        im = (t >= von) & (t < von + fenster_s)
+        if int(im.sum()) < min_n:
+            continue
+        spanne = float(t[im][-1] - t[im][0])
+        summe += spanne * rechnen(t[im], y[im], raster)
+        gewicht += spanne
+    return summe / gewicht if gewicht > 0 else None
+
+
+def _teilspektrum_lang(seg: Segment, raster: tuple[np.ndarray, ...]) -> np.ndarray | None:
+    """Langer Weg je Teilstück — ULF, VLF und LF/HF je auf eigene Weise (Moduldocstring)."""
+    if seg.n < MIN_BEATS_SEGMENT:
+        return None
+    raster_ulf, raster_vlf, raster_hoch = raster
+    t_mitte = seg.t_s - seg.rr_ms / 2000.0
+    t_ulf, y_ulf = _mittelreihe(t_mitte, seg.rr_ms, ULF_MITTEL_S)
+    ulf = lomb_psd(t_ulf, y_ulf, raster_ulf) if t_ulf.size >= 2 else None
+    t_vlf, y_vlf = _mittelreihe(t_mitte, seg.rr_ms, VLF_MITTEL_S)
+    vlf = _gemittelt(t_vlf, y_vlf, raster_vlf, VLF_FENSTER_S, 2, hann=True)
+    hoch = _gemittelt(t_mitte, seg.rr_ms, raster_hoch, LANG_FENSTER_S, MIN_BEATS_SEGMENT)
+    if hoch is None:
+        return None
+    return np.concatenate(
+        [
+            ulf if ulf is not None else np.zeros_like(raster_ulf),
+            vlf if vlf is not None else np.zeros_like(raster_vlf),
+            hoch,
+        ]
+    )
+
+
+def _spektrum_lang(brauchbar: Sequence[Segment]) -> Spektrum | None:
+    """Spektrum langer Messungen in drei Teilen — siehe Moduldocstring."""
+    laengste = max(spanne_s(s) for s in brauchbar)
+    grenze_ulf, grenze_vlf = FREQ_BANDS["ulf"][1], FREQ_BANDS["vlf"][1]
+    df_ulf = max(1.0 / laengste, grenze_ulf / ULF_MAX_BINS)
+    raster = (
+        np.arange(df_ulf, grenze_ulf - df_ulf / 2.0, df_ulf),
+        np.arange(grenze_ulf, grenze_vlf - 1e-12, 1.0 / VLF_FENSTER_S),
+        np.arange(grenze_vlf, F_MAX_HZ + 1e-9, 1.0 / LANG_FENSTER_S),
+    )
+    spektren, behalten = [], []
+    for seg in brauchbar:
+        p = _teilspektrum_lang(seg, raster)
+        if p is not None:
+            spektren.append(p)
+            behalten.append(seg)
+    if not spektren:
+        return None
+    return Spektrum(
+        freqs=np.concatenate(raster),
+        teilspektren=spektren,
+        dauer_s=[spanne_s(s) for s in behalten],
+        n_schlaege=[s.n for s in behalten],
+        methode="lomb",
+        lang=True,
+    )
+
+
 def spektrum(segmente: Sequence[Segment], methode: PSDMethode = "lomb") -> Spektrum | None:
-    """Je Teilstück (ab `MIN_BEATS_SEGMENT` Schlägen) ein Spektrum auf gemeinsamem Raster."""
+    """Je Teilstück (ab `MIN_BEATS_SEGMENT` Schlägen) ein Spektrum auf gemeinsamem Raster.
+
+    Ist ein Teilstück länger als `LANG_AB_S`, rechnet Lomb zweigeteilt
+    (`_spektrum_lang`) — sonst deckelte `MAX_GRID_BINS` das Raster, und die
+    Bandwerte lägen um ein Vielfaches zu hoch.
+    """
     brauchbar = [s for s in segmente if s.n >= MIN_BEATS_SEGMENT]
+    if methode == "lomb" and brauchbar and max(spanne_s(s) for s in brauchbar) > LANG_AB_S:
+        return _spektrum_lang(brauchbar)
     raster = frequenzraster(brauchbar)
     if raster.size < 2:
         return None
@@ -584,7 +730,7 @@ def compute_frequency_domain(
         "hf_gipfel_hz": gipfel_hz(sp.freqs, psd, FREQ_BANDS["hf"]),
         "n": n,
         "psd_method": methode,
-        "strategy": "teilspektren",
+        "strategy": "lang" if sp.lang else "teilspektren",
         "band_status": status,
         "band_reason": politik["band_reason"],
         "band_reif": {b: gesamt >= BAND_MIN_DAUER_S[b] for b in BAENDER},
@@ -729,6 +875,46 @@ def fensterspektrum(
     return Fensterspektrum(freqs=freqs, psd=psd, dauer_s=dauer, n=n, werte=werte)
 
 
+def vlf_fenster(
+    t_s: Sequence[float] | np.ndarray,
+    rr_ms: Sequence[float] | np.ndarray,
+    von: float,
+    bis: float,
+    *,
+    min_abdeckung_pct: float = FENSTER_MIN_ABDECKUNG_PCT,
+) -> float | None:
+    """VLF-Leistung (ms²) eines Zeitfensters — sparsam für Verlaufskurven über Stunden.
+
+    Wie der lange Weg (`_teilspektrum_lang`): 2-s-Mittel, Hann-Fenster, Raster
+    nur 0,003–0,04 Hz mit ``df = 1/Fensterdauer``. Ein 20-min-Fenster kostet so
+    ~600 × 45 statt ~1300 × 600 Rechenschritte.
+
+    >>> t = np.cumsum(np.full(2000, 900.0)) / 1000
+    >>> rr = 900 + 30 * np.sin(2 * np.pi * 0.01 * t)
+    >>> round(vlf_fenster(t, rr, 0.0, 1200.0) / 450, 1)  # Varianz 30²/2 = 450 ms²
+    1.0
+    """
+    t = np.asarray(t_s, dtype=float)
+    rr = np.asarray(rr_ms, dtype=float)
+    dauer = float(bis - von)
+    if dauer <= 0 or t.size == 0:
+        return None
+    im = (t > von) & (t <= bis) & np.isfinite(rr)
+    im &= gueltig_maske(rr)
+    if int(im.sum()) < FENSTER_MIN_SCHLAEGE:
+        return None
+    if float(rr[im].sum()) / 1000.0 / dauer * 100.0 < min_abdeckung_pct:
+        return None
+    t_mitte, y = _mittelreihe(t[im] - rr[im] / 2000.0, rr[im], VLF_MITTEL_S)
+    if t_mitte.size < 8:
+        return None
+    lo, hi = FREQ_BANDS["vlf"]
+    raster = np.arange(lo, hi + 1e-12, 1.0 / dauer)
+    if raster.size < 2:
+        return None
+    return integriere_band(raster, _lomb_hann(t_mitte, y, raster), lo, hi)
+
+
 __all__ = [
     "BAENDER",
     "BAND_MIN_DAUER_S",
@@ -751,5 +937,6 @@ __all__ = [
     "spanne_s",
     "spektrum",
     "teilstuecke",
+    "vlf_fenster",
     "welch_psd",
 ]

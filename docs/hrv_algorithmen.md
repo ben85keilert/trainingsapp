@@ -541,6 +541,43 @@ gemeinsamen Raster rechnen und **längengewichtet** mitteln:
 Gegenprobe in praxis_gui: eine lückenfreie 113-Minuten-Reihe künstlich in
 2/4/8/16 Stücke zerlegt reproduziert die Bandwerte der Gesamtreihe auf 1–4 %.
 
+### Lange Messungen (ALGO_VERSION 5, 14.10.2026)
+
+Messungen können Stunden laufen. Ab einem Teilstück über `LANG_AB_S`
+(`MAX_GRID_BINS / F_MAX_HZ` = 4000 s ≈ 67 min) bräuchte das Raster ``df = 1/T``
+mehr als 2000 Stützstellen. Der Deckel machte ``df`` dann gröber als die
+Gipfelbreite ``1/T`` — die Trapezregel überschätzt jeden schmalen Gipfel um
+``df · T``. **praxis_gui hat denselben Deckel** (`spectrum.py`, `MAX_GRID_BINS`)
+und damit denselben Fehler.
+
+Deshalb rechnet `frequency.spektrum` lange Messungen in drei Teilen — jedes
+Band mit der Auflösung, die es braucht (wie bei 24-h-Messungen üblich):
+
+| Band | Rechnung | Raster |
+|---|---|---|
+| LF, HF (ab 0,04 Hz) | Mittel der Lomb-Spektren über 5-min-Fenster, halb überlappend | 1/300 Hz |
+| VLF (0,003–0,04 Hz) | Mittel über 30-min-Fenster aus 2-s-Mitteln, mit Hann-Fenster | 1/1800 Hz |
+| ULF (unter 0,003 Hz) | ein Lomb über die ganze Länge aus 30-s-Mitteln | 1/T |
+
+Das Hann-Fenster beim VLF verhindert, dass eine starke ULF-Welle in einem
+30-min-Fenster ins VLF-Band streut (ohne: +17 %). Gemessen auf einer
+synthetischen Reihe mit bekannten Bändern (ULF 1800, VLF ≈ 316, LF ≈ 463,
+HF ≈ 845 ms² inklusive Rauschen):
+
+| Länge | vorher (LF / HF) | jetzt ULF / VLF / LF / HF | Rechenzeit |
+|---|---|---|---|
+| 1 h | 473 / 845 (exakt, unverändert) | – / 323 / 473 / 845 | 0,7 s |
+| 4 h | 1671 / 2998 | – / 325 / 490 / 841 | 0,5 s |
+| 8 h | 3317 / 5863 | 1791 / 322 / 485 / 841 | 1,0 s |
+| 24 h | – | 1793 / 323 / 486 / 840 | 2,4 s |
+
+Kürzere Messungen rechnen unverändert (Golden-Tests). Die **VLF-Kurve**
+(`vlf_power`, Fenster 20/30/60 min) rechnet je Fenster ebenso sparsam
+(`frequency.vlf_fenster`: 2-s-Mittel, Hann, Raster nur 0,003–0,04 Hz); **ULF**
+gibt es nur als Wert der ganzen Aufzeichnung (ab 4 h). Über Stunden zeichnet die
+Poincaré-Wolke höchstens 2500 Punkte (gerechnet wird mit allen), und die
+Atemfrequenz der Aufzeichnung nimmt höchstens 2000 Minutenfenster.
+
 ### Bänder sperren statt raten
 
 Reicht Messdauer oder Abdeckung nicht, liefert das Band **`None`** plus einen

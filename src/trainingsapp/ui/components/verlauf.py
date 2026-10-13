@@ -30,6 +30,7 @@ FARBEN: dict[str, str] = {
     "sdnn": ft.Colors.PURPLE_300,
     "pnnx": ft.Colors.LIGHT_GREEN_400,
     "atemfrequenz": ft.Colors.BLUE_400,
+    "vlf_power": ft.Colors.BLUE_GREY_400,
     "rsa": ft.Colors.LIGHT_BLUE_300,
     "lf_power": ft.Colors.ORANGE_400,
     "hf_power": ft.Colors.TEAL_400,

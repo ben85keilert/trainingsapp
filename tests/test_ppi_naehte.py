@@ -44,7 +44,7 @@ def _rmssd(diffs: list[int]) -> float:
 
 
 def test_algo_version_gezaehlt() -> None:
-    assert ALGO_VERSION == 4  # 4: vom Sensor verworfene Intervalle selbst prüfen
+    assert ALGO_VERSION == 5  # 5: lange Messungen in drei Teilen (4: verworfene selbst prüfen)
 
 
 def test_golden_rmssd_nur_ueber_echte_nachbarn() -> None:

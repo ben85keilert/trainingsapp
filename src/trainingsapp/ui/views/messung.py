@@ -168,6 +168,10 @@ def kachel_werte(
             )
         elif key == "schwankung":
             out.append(KachelWert(art.titel, zahl(k.schwankung_60s, 1), "bpm", gross=g))
+        elif key == "ulf":
+            out.append(
+                KachelWert(art.titel, "–", "ms²", gross=g, grund="ab 4 h, in der Aufzeichnung")
+            )
         elif key in ("atemfrequenz", "rsa"):
             kz = KENNZAHLEN[key]
             fenster = ansicht.fenster_fuer(key, kz.fenster_s)

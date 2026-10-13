@@ -50,7 +50,7 @@ from .constants import (
     RR_MAX_MS,
     RR_MIN_MS,
 )
-from .frequency import fensterspektrum
+from .frequency import fensterspektrum, vlf_fenster
 from .nonlinear import compute_dfa_alpha1
 
 ZEIT: Final[str] = "zeit"
@@ -62,6 +62,8 @@ BEREICHE: Final[tuple[str, ...]] = (ZEIT, FREQUENZ, NICHTLINEAR)
 FENSTER_WAHL: Final[tuple[int, ...]] = (10, 15, 30, 60, 120, 300)
 FENSTER_MITTEL: Final[tuple[int, ...]] = (3, 5, 10, 15, 30, 60)
 FENSTER_FREQUENZ: Final[tuple[int, ...]] = (60, 120, 180, 300, 600)
+#: VLF braucht lange Fenster (Mindestdauer 20 min) — für lange Messungen
+FENSTER_VLF: Final[tuple[int, ...]] = (1200, 1800, 3600)
 FENSTER_POINCARE: Final[tuple[int, ...]] = (30, 60, 120, 180, 300)
 FENSTER_DFA: Final[tuple[int, ...]] = (60, 120, 180, 300)
 FENSTER_ATMUNG: Final[tuple[int, ...]] = (60, 90, 120)
@@ -200,6 +202,18 @@ KENNZAHLEN: Final[dict[str, Kennzahl]] = {
         fenster_wahl=FENSTER_FREQUENZ,
         nachkomma=0,
         erklaerung="Leistung 0,15–0,40 Hz — atemgebundene Schwankung bei normaler Atmung.",
+    ),
+    "vlf_power": Kennzahl(
+        "VLF-Band",
+        "ms²",
+        1200.0,
+        100.0,
+        bereich=FREQUENZ,
+        achse="ms2",
+        fenster_wahl=FENSTER_VLF,
+        nachkomma=0,
+        erklaerung="Leistung 0,003–0,04 Hz — sehr langsame Schwingungen (Temperatur, "
+        "Hormone). Braucht Fenster ab 20 min, also lange Messungen.",
     ),
     "lf_hf": Kennzahl(
         "LF/HF",
@@ -501,6 +515,8 @@ def _frequenzwert(
     hi = int(np.searchsorted(t, grenzen[1], side="right"))
     stueck = rr[lo:hi]
     gut = stueck[np.isfinite(stueck)]
+    if kennzahl == "vlf_power":  # eigene, sparsame Rechnung — Fenster ab 20 min
+        return vlf_fenster(t, rr, grenzen[0], grenzen[1])
     schluessel = ("frequenz", *grenzen, int(gut.size), round(float(gut.sum()), 3))
     if zwischenspeicher is not None and schluessel in zwischenspeicher:
         werte = zwischenspeicher[schluessel]

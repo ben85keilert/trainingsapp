@@ -34,7 +34,7 @@ def test_jeder_bereich_hat_kennzahlen_mit_eigener_achse() -> None:
         "atemfrequenz",
         "rsa",
     ]
-    assert im_bereich("frequenz") == ["lf_power", "hf_power", "lf_hf", "gipfel"]
+    assert im_bereich("frequenz") == ["lf_power", "hf_power", "vlf_power", "lf_hf", "gipfel"]
     assert im_bereich("nichtlinear") == ["sd1", "sd2", "dfa_alpha1"]
     # Ø RR (≈ 900 ms) teilt sich keine Achse mit RMSSD (≈ 40 ms)
     assert KENNZAHLEN["mean_rr"].achse_schluessel != KENNZAHLEN["rmssd"].achse_schluessel
@@ -134,3 +134,21 @@ def test_atemfrequenz_als_kurve_nur_bei_deutlicher_atmung() -> None:
     assert verlauf(t, rr, naht, "atemfrequenz", 90) == []
     langsam = verlauf(t, rr, naht, "atemfrequenz", 90, atem_modus="atemuebung")
     assert langsam and all(w == pytest.approx(6.0, abs=0.5) for _, w in langsam)
+
+
+def test_vlf_kurve_ueber_lange_messung_mit_eigener_rechnung(monkeypatch) -> None:
+    """VLF in 20-min-Fenstern: eigene, sparsame Rechnung — nicht das volle Fensterspektrum."""
+    zufall = np.random.default_rng(2)
+    n = 4000  # ≈ 1 h
+    t = np.empty(n)
+    rr = np.empty(n)
+    jetzt = 0.0
+    for i in range(n):
+        rr[i] = 900 + 30 * np.sin(2 * np.pi * 0.01 * jetzt) + zufall.normal(0, 5)
+        jetzt += rr[i] / 1000
+        t[i] = jetzt
+    teuer = []
+    monkeypatch.setattr(trends, "fensterspektrum", lambda *a, **k: teuer.append(a))
+    punkte = verlauf(t, rr, np.zeros(n, dtype=bool), "vlf_power", 1200)
+    assert not teuer and punkte
+    assert all(w == pytest.approx(450, rel=0.2) for _, w in punkte)  # Varianz 30²/2

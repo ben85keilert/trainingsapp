@@ -46,6 +46,9 @@ from trainingsapp.ui.components.verlauf import (
 
 Reihe3 = tuple[np.ndarray, np.ndarray, np.ndarray]
 
+#: So viele Punkte zeigt die Poincaré-Wolke höchstens
+POINCARE_PUNKTE = 2500
+
 HINWEISE = {
     "zeit": "Werte im gleitenden Fenster bzw. je Block. Wo die Kurve abreißt, gab es zu "
     "wenige gute Schläge — bei der Atemfrequenz: keine deutliche Atmung.",
@@ -211,7 +214,9 @@ class Analyse:
                 spacing=8,
                 tight=True,
                 controls=[
-                    poincare_kurve(paare),
+                    # Über Stunden wären es zehntausende Punkte — gezeichnet wird
+                    # eine gleichmäßige Auswahl, gerechnet mit allen
+                    poincare_kurve(paare[:: max(1, len(paare) // POINCARE_PUNKTE)]),
                     self._poincare_werte(t, rr, naht, x_von, x_bis, len(paare)),
                 ],
             )

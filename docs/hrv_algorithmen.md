@@ -164,6 +164,28 @@ später markiert.
 `rr = 0` ist kein Artefakt, sondern *kein Wert*: nicht markiert, keine Kurve,
 in den Kennzahlen eine Naht.
 
+Die Malik-Schwelle folgt der Intervallquelle des Geräts: 0.20 für EKG-RR,
+0.30 für optische PPI (`constants.malik_threshold`) — live wie in der
+nachträglichen Korrektur. Bis Oktober 2026 galt live und in der Detailansicht
+für jedes Gerät 0.20; bei der Verity Sense wurden dadurch gesunde Schläge rot.
+
+### Zeitachse gebündelter PPI-Pakete (`hrv_core/zeitachse.py`)
+
+Die Verity Sense schickt alle ~5 s rund fünf Intervalle, mit 0–1 s Streuung in
+der Zustellung. Aus der Ankunft zurückgerechnet (wie `t_wall_s` in der Datei)
+liegen die Paketgrenzen um bis zu eine Sekunde daneben, und gelegentlich liegt
+der erste Schlag eines Pakets **vor** dem letzten des vorigen. Live wurde er
+dann auf 1 ms hinter den Vorgänger geschoben: senkrechte Zacken, die die Kurve
+deutlich unruhiger aussehen ließen als beim H10, obwohl die Intervalle selbst
+in Ordnung waren.
+
+Die x-Achse der Live-Kurve nimmt darum die **Kontinuitätsuhr** aus praxis_gui:
+Schlagzeit = laufende Summe aller Intervalle (auch blockierter) + Anker; Anker
+= kleinstes (Ankunft − Summe) der letzten 60 Pakete, denn ein Schlag liegt nie
+nach seiner Zustellung. Steigt (Ankunft − Summe) um mehr als 3 s, fehlen
+Intervalle (Abriss) — dann wird neu verankert, damit die Lücke sichtbar bleibt.
+Die Datei behält die Ankunftsachse; die Rohzutaten stehen in `ppi_pakete`.
+
 ### „Schwankung"
 
 ```

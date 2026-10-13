@@ -14,6 +14,7 @@ import flet as ft
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.models import HrvRecording
+from trainingsapp.hrv_core.constants import malik_threshold
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
 from trainingsapp.hrv_core.korrektur import (
     Kette,
@@ -119,7 +120,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         )
 
     rec = laden(pfad)
-    ketten: list[Kette] = automatisch(rec)
+    # Optische Intervalle (Verity Sense) streuen mehr: 0.30 statt 0.20 (Vertrag, Abschnitt 5).
+    malik = malik_threshold(rec.intervall_quelle)
+    ketten: list[Kette] = automatisch(rec, malik=malik)
     gespeichert = analyse_laden(pfad)
     gespeicherte_indizes = {k.beat_index for k in gespeichert}
     uebernommen: set[int] = {
@@ -220,7 +223,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         zeichnen()
 
     async def speichern() -> None:
-        analyse_speichern(pfad, rec, korrekturen())
+        analyse_speichern(pfad, rec, korrekturen(), malik=malik)
         gespeichert[:] = korrekturen()
         page.show_dialog(
             ft.SnackBar(ft.Text("Korrektur gespeichert — die Rohdatei bleibt unverändert."))

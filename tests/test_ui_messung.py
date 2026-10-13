@@ -170,3 +170,33 @@ def _alle_controls(wurzel) -> list:
 
     lauf(wurzel)
     return alle
+
+
+@pytest.mark.parametrize(
+    ("profil", "quelle", "markiert"),
+    [
+        ("polar_h10", "ekg_rr", True),
+        ("verity_sense", "ppg_ppi", False),
+    ],
+)
+def test_detailansicht_schwelle_nach_intervallquelle(daten, profil, quelle, markiert) -> None:
+    """Sprung um ein gutes Viertel: bei EKG ein Artefakt (0.20), optisch nicht (0.30)."""
+    state, tmp_path = daten
+    rr = [800 + (10 if i % 2 else -10) for i in range(120)]
+    rr[60] = 1100
+    beats, t = [], 0.0
+    for x in rr:
+        t += x / 1000
+        beats.append(Beat(t_s=round(t, 3), rr_ms=x, hf_bpm=75, t_wall_s=round(t, 3)))
+    rec = Recording(beats=beats, geraet="TEST", geraet_profil=profil, intervall_quelle=quelle)
+    pfad = speichern(rec, tmp_path / "Messungen" / "Test")
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet="TEST",
+        geraet_profil=profil,
+        intervall_quelle=quelle,
+    )
+    state.hrv.anlegen(eintrag)
+    texte = _baum_texte(messung_detail_view(_seite(), state, eintrag))
+    assert any("Malik" in x for x in texte) is markiert

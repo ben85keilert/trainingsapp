@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import hashlib
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -23,10 +24,12 @@ from pathlib import Path
 
 from .. import __version__
 from ..hrv_core.aufnahme import Aufnahme
+from ..hrv_core.constants import malik_threshold
 from ..hrv_core.export import diagnose_pfad, diagnose_text
 from ..hrv_core.live import LiveFenster
 from ..hrv_core.recording import Recording, messordner
 from ..hrv_core.segments import abdeckung, luecken_finden
+from ..hrv_core.zeitachse import Kontinuitaetsuhr
 from .base import DeviceStatus, HeartRateSource, Messwert, PpiPaket, Verbindung
 from .profiles import GeraeteProfil, profil_fuer_namen
 
@@ -68,6 +71,10 @@ class Messlauf:
         self._jetzt_utc = jetzt_utc
         self._backup_basis = backup_basis
         self.live = LiveFenster()
+        # Live-x-Achse gebündelter PPI-Pakete (Verity Sense): Schlagzeiten aus der
+        # Intervallsumme statt aus der streuenden Ankunft (`hrv_core.zeitachse`).
+        self._ppi_uhr = Kontinuitaetsuhr()
+        self._schlagzeiten: deque[tuple[int, float]] = deque()
         self.aufnahme: Aufnahme | None = None
         self.status = DeviceStatus(verbindung=Verbindung.GETRENNT)
         self.device_id = ""
@@ -101,7 +108,14 @@ class Messlauf:
         self.live.leeren()
         self.status = DeviceStatus(verbindung=Verbindung.VERBINDE, meldung="Verbinde …")
         await self.quelle.connect(device_id, name)
+        # Das Profil steht erst nach dem Verbinden fest (ohne Namen: aus den
+        # PMD-Features). Optische Intervalle streuen mehr — die EKG-Schwelle
+        # markierte bei der Verity Sense gesunde Schläge als Artefakt.
         self.profil = self.quelle.profil or self.profil
+        quelle = self.profil.intervall_quelle if self.profil else ""
+        self.live = LiveFenster(malik=malik_threshold(quelle))
+        self._ppi_uhr = Kontinuitaetsuhr()
+        self._schlagzeiten.clear()
         self.start_mono = self._uhr()
         self.status = self.quelle.aktueller_status
 
@@ -115,10 +129,22 @@ class Messlauf:
                         self.aufnahme.ppi_paket(
                             wert.t_capture, wert.ppi_ms, wert.fehler_ms, wert.blocker, wert.kontakt
                         )
+                    self._schlagzeiten = deque(
+                        self._ppi_uhr.paket(
+                            wert.t_capture,
+                            wert.ppi_ms,
+                            [
+                                not b and p > 0
+                                for p, b in zip(wert.ppi_ms, wert.blocker, strict=True)
+                            ],
+                        )
+                    )
                     continue
                 if not isinstance(wert, Messwert):
                     continue
-                self.live.hinzufuegen(wert.t_capture - self.start_mono, wert.rr_ms, wert.hf_bpm)
+                self.live.hinzufuegen(
+                    self._live_zeit(wert) - self.start_mono, wert.rr_ms, wert.hf_bpm
+                )
                 if self.aufnahme is not None:
                     self.aufnahme.schlag(wert.rr_ms, wert.hf_bpm, wert.t_capture, wert.tw_src)
                     self._backup_wenn_faellig()
@@ -129,6 +155,19 @@ class Messlauf:
                 await status_task
             self.status = replace(self.status, verbindung=Verbindung.GETRENNT)
             self._melden(True)
+
+    def _live_zeit(self, wert: Messwert) -> float:
+        """Anzeigezeit eines Schlags: Kontinuitätsuhr, falls er zum letzten PPI-Paket gehört.
+
+        Die Quelle schickt das Paket vor seinen Schlägen. Passt das Intervall
+        nicht zum nächsten erwarteten (fremder Schlag), gilt die Ankunft. Die
+        Datei bekommt immer die Ankunftszeit (``aufnahme.schlag``).
+        """
+        if self._schlagzeiten:
+            if self._schlagzeiten[0][0] == wert.rr_ms:
+                return self._schlagzeiten.popleft()[1]
+            self._schlagzeiten.clear()
+        return wert.t_capture
 
     async def _status_lesen(self) -> None:
         async for s in self.quelle.status():

@@ -21,6 +21,11 @@ einmal, in Reihenfolge.
   den neuen Schlüsseln (``reps:sum``, ``reps:max`` statt ``reps``), damit eine
   Übung im Verlauf eine Kurve hat und nicht zwei. Kennzahlen sind abgeleitet;
   die Einträge selbst bleiben dabei unverändert.
+- **Schritt 4** — Zwei Tag-Arten (Migration 009): Tags, die keine Region aus
+  `REGIONEN` sind („Entspannung", „HRV", „Isometrie", …), werden Typ-Tags,
+  und die bisherige `exercise.category` wird der erste Typ-Tag ihrer Übung.
+  Eigene Regionen, die ein Nutzer als Tag angelegt hatte, landen dabei bei den
+  Typen — im Editor lassen sie sich umsortieren.
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from ..core.models import new_id
+from ..core.models import REGIONEN, TAG_TYP, new_id
 from ..core.result_spec import (
     FieldType,
     ResultSpec,
@@ -41,7 +46,7 @@ from .db import transaktion
 from .repositories import SettingRepo
 
 SCHLUESSEL = "datenformat"
-AKTUELL = 3
+AKTUELL = 4
 
 #: Alte Seed-Kategorien (Region) → Typ und Region als Tag
 _KATEGORIEN_ALT: dict[str, tuple[str, str | None]] = {
@@ -71,6 +76,8 @@ def datenformat_aktualisieren(con: sqlite3.Connection) -> int:
             geaendert += _schritt_2_satzfeld(con)
         if stand < 3:
             geaendert += _schritt_3_kopien_reparieren(con)
+        if stand < 4:
+            geaendert += _schritt_4_tag_arten(con)
         einstellungen.setzen(SCHLUESSEL, str(AKTUELL))
     return geaendert
 
@@ -88,6 +95,12 @@ def _schritt_2_satzfeld(con: sqlite3.Connection) -> int:
         if r["category"] in _KATEGORIEN_ALT:
             typ, region = _KATEGORIEN_ALT[r["category"]]
             con.execute("UPDATE exercise SET category = ? WHERE id = ?", (typ, r["id"]))
+            # Die alte Kategorie war eine Region, kein Typ — als Tag darf sie nicht bleiben.
+            con.execute(
+                "DELETE FROM exercise_tag WHERE exercise_id = ? "
+                "AND tag_id IN (SELECT id FROM tag WHERE name = ?)",
+                (r["id"], r["category"]),
+            )
             if region:
                 con.execute(
                     "INSERT INTO tag (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING",
@@ -108,6 +121,41 @@ def _schritt_2_satzfeld(con: sqlite3.Connection) -> int:
                 (json.dumps(neu, ensure_ascii=False), r["id"]),
             )
             geaendert += 1
+    return geaendert
+
+
+def _schritt_4_tag_arten(con: sqlite3.Connection) -> int:
+    """Typ-Tags aus Nicht-Regionen und aus `exercise.category` (Kategorie zuerst)."""
+    platzhalter = ",".join("?" * len(REGIONEN))
+    con.execute(f"UPDATE tag SET kind = ? WHERE name NOT IN ({platzhalter})", (TAG_TYP, *REGIONEN))
+    geaendert = 0
+    for r in con.execute("SELECT id, category FROM exercise WHERE category != ''").fetchall():
+        typ = r["category"].strip()
+        if not typ:
+            continue
+        con.execute(
+            "INSERT INTO tag (id, name, kind) VALUES (?, ?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET kind = excluded.kind",
+            (new_id(), typ, TAG_TYP),
+        )
+        tag_id = con.execute("SELECT id FROM tag WHERE name = ?", (typ,)).fetchone()["id"]
+        # Zuordnungen in der Reihenfolge Kategorie, übrige Tags neu schreiben —
+        # die Reihenfolge ergibt sich aus der rowid.
+        bisher = [
+            z["tag_id"]
+            for z in con.execute(
+                "SELECT tag_id FROM exercise_tag WHERE exercise_id = ? ORDER BY rowid", (r["id"],)
+            )
+        ]
+        neu = [tag_id, *(t for t in bisher if t != tag_id)]
+        if neu == bisher:
+            continue
+        con.execute("DELETE FROM exercise_tag WHERE exercise_id = ?", (r["id"],))
+        con.executemany(
+            "INSERT INTO exercise_tag (exercise_id, tag_id) VALUES (?, ?)",
+            [(r["id"], t) for t in neu],
+        )
+        geaendert += 1
     return geaendert
 
 

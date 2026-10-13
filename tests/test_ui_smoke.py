@@ -74,13 +74,9 @@ def test_hauptansicht(page, state) -> None:
 
 def test_katalog_filter_ueberlebt_den_aufbau(page, state) -> None:
     state.suchtext = "atmung"
-    state.kategorie = "Atmung"
+    state.typ_filter = {"Atmung", "gibt es nicht"}
     katalog(page, state)
-    assert state.kategorie == "Atmung"
-
-    state.kategorie = "gibt es nicht"
-    katalog(page, state)
-    assert state.kategorie is None
+    assert state.typ_filter == {"Atmung"}  # Filter auf verschwundene Tags fallen weg
 
 
 def test_spec_form_rundlauf() -> None:
@@ -203,11 +199,11 @@ def test_uebung_editor_und_katalogfilter(page, welt) -> None:
     assert uebung_bearbeiten(page, state, None) is not None
     assert uebung_detail(page, state, uebung, ft.UrlLauncher()) is not None
 
-    state.tag_filter = "Nacken"
+    state.region_filter = {"Nacken"}
     assert katalog(page, state) is not None
-    state.tag_filter = "gibt es nicht"
+    state.region_filter = {"gibt es nicht"}
     katalog(page, state)
-    assert state.tag_filter is None
+    assert state.region_filter == set()
 
     from trainingsapp.core.result_spec import vorrat_feld
 

@@ -371,7 +371,9 @@ def plan_view(
         )
 
     def kopfzeile(uebung: Exercise) -> ft.Control:
-        untertitel = "  ·  ".join(t for t in (uebung.category, ", ".join(uebung.tags)) if t)
+        untertitel = "  ·  ".join(
+            t for t in (", ".join(uebung.typen), ", ".join(uebung.regionen)) if t
+        )
         return ft.Row(
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.START,

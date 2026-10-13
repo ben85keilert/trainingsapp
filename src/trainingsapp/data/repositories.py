@@ -27,6 +27,8 @@ from typing import Any
 
 from ..core.models import (
     EINGABE_CHIPS,
+    TAG_REGION,
+    TAG_TYP,
     DayNote,
     Exercise,
     HrvRecording,
@@ -56,6 +58,25 @@ PAPIERKORB_TAGE = 30
 # ---------------------------------------------------------------------------
 
 
+#: Filter „hat diesen Typ-Tag" für ``alle``/``suchen``
+_MIT_TYP = (
+    " AND EXISTS (SELECT 1 FROM exercise_tag et JOIN tag t ON t.id = et.tag_id"
+    " WHERE et.exercise_id = exercise.id AND t.kind = 'typ' AND t.name = ?)"
+)
+
+
+def _bereinigt(namen: list[str]) -> list[str]:
+    """Leerzeichen weg, Leeres und Doppeltes raus, Reihenfolge bleibt."""
+    return list(dict.fromkeys(n.strip() for n in namen if n.strip()))
+
+
+def _tags_mit_art(uebung: Exercise) -> list[tuple[str, str]]:
+    """Typen, dann Regionen — ein Name, der in beiden steht, zählt als Typ."""
+    paare = [(n, TAG_TYP) for n in uebung.typen]
+    paare += [(n, TAG_REGION) for n in uebung.regionen if n not in uebung.typen]
+    return paare
+
+
 class ExerciseRepo:
     """Übungen samt ihrer Medienverweise."""
 
@@ -71,6 +92,9 @@ class ExerciseRepo:
         vorhanden: Der Aufrufer muss nicht wissen, ob es die Übung schon gibt.
         """
         uebung.updated_at = jetzt()
+        uebung.typen = _bereinigt(uebung.typen)
+        uebung.regionen = _bereinigt(uebung.regionen)
+        uebung.category = uebung.typen[0] if uebung.typen else ""
         with transaktion(self.con):
             self.con.execute(
                 """
@@ -133,15 +157,17 @@ class ExerciseRepo:
                     ),
                 )
             # Tags: je Name genau eine Zeile in `tag`, Zuordnung komplett ersetzen.
+            # Erst die Typen, dann die Regionen — die Reihenfolge bleibt erhalten.
             self.con.execute("DELETE FROM exercise_tag WHERE exercise_id = ?", (uebung.id,))
-            for name in dict.fromkeys(t.strip() for t in uebung.tags if t.strip()):
+            for name, art in _tags_mit_art(uebung):
                 self.con.execute(
-                    "INSERT INTO tag (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING",
-                    (new_id(), name),
+                    "INSERT INTO tag (id, name, kind) VALUES (?, ?, ?) "
+                    "ON CONFLICT(name) DO NOTHING",
+                    (new_id(), name, art),
                 )
                 tag_id = self.con.execute("SELECT id FROM tag WHERE name = ?", (name,)).fetchone()
                 self.con.execute(
-                    "INSERT INTO exercise_tag (exercise_id, tag_id) VALUES (?, ?)",
+                    "INSERT OR IGNORE INTO exercise_tag (exercise_id, tag_id) VALUES (?, ?)",
                     (uebung.id, tag_id["id"]),
                 )
 
@@ -323,7 +349,7 @@ class ExerciseRepo:
         if not (mit_archivierten or mit_geloeschten):
             sql += " AND archived = 0"
         if kategorie:
-            sql += " AND category = ?"
+            sql += _MIT_TYP
             params.append(kategorie)
         zeilen = self.con.execute(sql + " ORDER BY name COLLATE NOCASE", params)
         return self._mit_tags(self._mit_medien([self._zeile(r) for r in zeilen]))
@@ -345,29 +371,32 @@ class ExerciseRepo:
         """
         params: list[object] = [muster, muster, muster]
         if kategorie:
-            sql += " AND category = ?"
+            sql += _MIT_TYP
             params.append(kategorie)
         zeilen = self.con.execute(sql + " ORDER BY rang, name COLLATE NOCASE", params)
         return self._mit_tags(self._mit_medien([self._zeile(r) for r in zeilen]))
 
     def kategorien(self) -> list[str]:
-        return [
-            r["category"]
-            for r in self.con.execute(
-                "SELECT DISTINCT category FROM exercise "
-                "WHERE deleted_at IS NULL AND archived = 0 AND category != '' "
-                "ORDER BY category COLLATE NOCASE"
-            )
-        ]
+        """Alle Typ-Tags, die an mindestens einer aktiven Übung hängen."""
+        return self._tags(TAG_TYP)
 
-    def tags(self) -> list[str]:
-        """Alle Tags, die an mindestens einer aktiven Übung hängen."""
+    def typen(self) -> list[str]:
+        """Alle Typ-Tags, die an mindestens einer aktiven Übung hängen."""
+        return self._tags(TAG_TYP)
+
+    def regionen(self) -> list[str]:
+        """Alle Region-Tags, die an mindestens einer aktiven Übung hängen."""
+        return self._tags(TAG_REGION)
+
+    def _tags(self, art: str) -> list[str]:
         return [
             r["name"]
             for r in self.con.execute(
                 "SELECT DISTINCT t.name FROM tag t JOIN exercise_tag et ON et.tag_id = t.id "
                 "JOIN exercise e ON e.id = et.exercise_id "
-                "WHERE e.deleted_at IS NULL AND e.archived = 0 ORDER BY t.name COLLATE NOCASE"
+                "WHERE e.deleted_at IS NULL AND e.archived = 0 AND t.kind = ? "
+                "ORDER BY t.name COLLATE NOCASE",
+                (art,),
             )
         ]
 
@@ -379,15 +408,22 @@ class ExerciseRepo:
             return uebungen
         ids = [u.id for u in uebungen]
         platzhalter = ",".join("?" * len(ids))
-        nach_uebung: dict[str, list[str]] = defaultdict(list)
+        typen: dict[str, list[str]] = defaultdict(list)
+        regionen: dict[str, list[str]] = defaultdict(list)
         for r in self.con.execute(
-            f"SELECT et.exercise_id, t.name FROM exercise_tag et JOIN tag t ON t.id = et.tag_id "
+            f"SELECT et.exercise_id, t.name, t.kind FROM exercise_tag et "
+            f"JOIN tag t ON t.id = et.tag_id "
             f"WHERE et.exercise_id IN ({platzhalter}) ORDER BY et.rowid",
             ids,
         ):
-            nach_uebung[r["exercise_id"]].append(r["name"])
+            ziel = typen if r["kind"] == TAG_TYP else regionen
+            ziel[r["exercise_id"]].append(r["name"])
         for u in uebungen:
-            u.tags = nach_uebung.get(u.id, [])
+            u.typen = typen.get(u.id, [])
+            u.regionen = regionen.get(u.id, [])
+            # Altbestand vor Schritt 4 (data/upgrade.py): Typ nur in der Spalte
+            if not u.typen and u.category:
+                u.typen = [u.category]
         return uebungen
 
     def _mit_medien(self, uebungen: list[Exercise]) -> list[Exercise]:

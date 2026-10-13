@@ -98,13 +98,6 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     # -- Stammdaten --------------------------------------------------------
 
     name = ft.TextField(label="Name", value=uebung.name if uebung else "", autofocus=neu)
-    typ_wert = uebung.category if uebung and uebung.category else TYPEN[1]
-    typ = ft.Dropdown(
-        label="Typ",
-        value=typ_wert,
-        options=[ft.DropdownOption(key=t, text=t) for t in dict.fromkeys([*TYPEN, typ_wert])],
-        expand=True,
-    )
     beschreibung = ft.TextField(
         label="Beschreibung",
         value=uebung.description if uebung else "",
@@ -113,33 +106,50 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         max_lines=8,
     )
 
-    # -- Regionen und Tags ---------------------------------------------------
+    # -- Typen und Regionen ------------------------------------------------
+    # Zwei Tag-Arten, beide optional und mehrfach: Chips für die Vorschläge
+    # und alles, was es im Katalog schon gibt, dazu ein Feld für Neues.
 
-    tags_aktiv: set[str] = set(uebung.tags) if uebung else set()
-    region_chips: dict[str, ft.Chip] = {}
+    def tag_auswahl(
+        vorschlaege: list[str], aktiv: list[str], label: str
+    ) -> tuple[ft.Control, ft.TextField, Callable[[], list[str]]]:
+        gewaehlt = set(aktiv)
+        angebot = list(dict.fromkeys([*vorschlaege, *aktiv]))
+        chips: dict[str, ft.Chip] = {}
 
-    def region_schalter(region: str) -> Callable[[], None]:
-        def handler() -> None:
-            if region in tags_aktiv:
-                tags_aktiv.discard(region)
-            else:
-                tags_aktiv.add(region)
-            region_chips[region].selected = region in tags_aktiv
-            page.update()
+        def schalter(name: str) -> Callable[[], None]:
+            def handler() -> None:
+                gewaehlt.symmetric_difference_update({name})
+                chips[name].selected = name in gewaehlt
+                page.update()
 
-        return handler
+            return handler
 
-    for region in REGIONEN:
-        region_chips[region] = ft.Chip(
-            label=ft.Text(region),
-            selected=region in tags_aktiv,
-            show_checkmark=False,
-            on_click=region_schalter(region),
-        )
-    weitere_tags = ft.TextField(
-        label="Weitere Tags (mit Komma)",
-        value=", ".join(t for t in tags_aktiv if t not in REGIONEN),
-        dense=True,
+        for name in angebot:
+            chips[name] = ft.Chip(
+                label=ft.Text(name),
+                selected=name in gewaehlt,
+                show_checkmark=False,
+                on_click=schalter(name),
+            )
+        weitere = ft.TextField(label=label, dense=True)
+
+        def lesen() -> list[str]:
+            extra = [t.strip() for t in (weitere.value or "").split(",") if t.strip()]
+            return [n for n in angebot if n in gewaehlt] + [t for t in extra if t not in angebot]
+
+        reihe = ft.Row(wrap=True, spacing=6, run_spacing=4, controls=list(chips.values()))
+        return reihe, weitere, lesen
+
+    typ_chips, weitere_typen, typen_lesen = tag_auswahl(
+        list(dict.fromkeys([*TYPEN, *state.uebungen.typen()])),
+        list(uebung.typen) if uebung else [],
+        "Weitere Typen (mit Komma, z. B. Kung-Fu)",
+    )
+    region_chips, weitere_regionen, regionen_lesen = tag_auswahl(
+        list(dict.fromkeys([*REGIONEN, *state.uebungen.regionen()])),
+        list(uebung.regionen) if uebung else [],
+        "Weitere Regionen (mit Komma)",
     )
 
     # -- Felder aus dem Vorrat ---------------------------------------------
@@ -354,7 +364,8 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     def eingelesen() -> Exercise:
         ziel = uebung if uebung is not None else Exercise()
         ziel.name = (name.value or "").strip()
-        ziel.category = (typ.value or "").strip()
+        ziel.typen = typen_lesen()
+        ziel.category = ziel.typen[0] if ziel.typen else ""
         ziel.description = (beschreibung.value or "").strip()
         ziel.icon_key = gewaehlt
         if not eigene_varianten:
@@ -364,10 +375,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         )
         ziel.result_spec = spec_bauen(felder_lesen())
         ziel.default_target = ziel_lesen(ziel.result_spec)
-        extra = [t.strip() for t in (weitere_tags.value or "").split(",") if t.strip()]
-        ziel.tags = [r for r in REGIONEN if r in tags_aktiv] + [
-            t for t in extra if t not in REGIONEN
-        ]
+        ziel.regionen = regionen_lesen()
         ziel.media = [
             Media(
                 kind=MediaKind.VIDEO,
@@ -414,16 +422,13 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                     spacing=18,
                     controls=[
                         name,
-                        ft.Row(controls=[typ]),
                         beschreibung,
-                        abschnitt("REGIONEN"),
-                        ft.Row(
-                            wrap=True,
-                            spacing=6,
-                            run_spacing=4,
-                            controls=list(region_chips.values()),
-                        ),
-                        weitere_tags,
+                        abschnitt("TYP — WAS IST DAS FÜR EINE ÜBUNG? (OPTIONAL)"),
+                        typ_chips,
+                        weitere_typen,
+                        abschnitt("REGION (OPTIONAL)"),
+                        region_chips,
+                        weitere_regionen,
                         abschnitt("PARAMETER — WAS KANN MAN LEISTEN?", hilfe_knopf(page)),
                         ft.Text(
                             "Eingeschaltete Parameter tippst du beim Training als geleistet an. "

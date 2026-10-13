@@ -1,8 +1,10 @@
-"""Übungskatalog: Suche, Kategoriefilter, Liste.
+"""Übungskatalog: Suche, Filter nach Typ und Region, Liste.
 
-Die Daten kommen aus dem Repository, die Ansicht sortiert und filtert nicht
-selbst. Suchtext und Filter liegen im `AppState`, damit sie den Wechsel auf
-einen anderen Reiter überleben.
+Die Daten kommen aus dem Repository, gefiltert wird mit
+`core.models.passt_zum_filter`. Beide Tag-Arten stecken in *einem* Filterknopf
+neben der Suche (Mehrfachauswahl im Menü) statt in Chipreihen — das spart auf
+dem Handy fünf, sechs Zeilen. Suchtext und Filter liegen im `AppState`, damit
+sie den Wechsel auf einen anderen Reiter überleben.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ from collections.abc import Callable
 
 import flet as ft
 
-from trainingsapp.core.models import Exercise
+from trainingsapp.core.models import Exercise, passt_zum_filter
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.state import AppState
 
@@ -38,8 +40,8 @@ def trainieren_knopf(on_click: Callable[[], object], tooltip: str) -> ft.Control
 
 def katalog(page: ft.Page, state: AppState) -> ft.Control:
     liste = ft.ListView(expand=True, spacing=0, padding=ft.Padding.only(bottom=88))
-    chips = ft.Row(wrap=True, spacing=6, run_spacing=0)  # Typ
-    tag_chips = ft.Row(wrap=True, spacing=6, run_spacing=0)  # Region / Charakter
+    filter_platz = ft.Container()  # der Filterknopf samt Menü
+    filter_zeile = ft.Container()  # nur bei aktivem Filter: was gerade gilt
 
     # -- Handler ---------------------------------------------------------------
     # Die Liste wird in einer Schleife gebaut; jeder Eintrag braucht einen
@@ -67,82 +69,136 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
 
         return handler
 
-    def filterer(kategorie: str | None) -> Callable[[], None]:
-        def handler() -> None:
-            state.kategorie = kategorie
-            zeichnen()
-            page.update()
-
-        return handler
-
-    def tag_filterer(tag: str | None) -> Callable[[], None]:
-        def handler() -> None:
-            state.tag_filter = tag
-            zeichnen()
-            page.update()
-
-        return handler
-
     def suchen(e: ft.Event[ft.TextField]) -> None:
         state.suchtext = e.control.value or ""
         zeichnen()
         page.update()
 
+    def filter_leeren() -> None:
+        state.typ_filter = set()
+        state.region_filter = set()
+        zeichnen()
+        page.update()
+
+    # -- Filtermenü ------------------------------------------------------------
+    # Ein Knopf öffnet ein Menü mit beiden Tag-Arten zum Ankreuzen. Ankreuzen
+    # lässt das Menü offen (close_on_click=False); „OK" oben oder ein Tipp
+    # daneben schließt es — erst dann gilt die Auswahl (on_close).
+
+    def filter_menue() -> ft.Control:
+        typen = state.uebungen.typen()
+        regionen = state.uebungen.regionen()
+        # Filter auf Tags, die es nicht mehr gibt, fallen weg.
+        state.typ_filter &= set(typen)
+        state.region_filter &= set(regionen)
+        auswahl_typ = set(state.typ_filter)
+        auswahl_region = set(state.region_filter)
+
+        def haken(an: bool) -> ft.Icon:
+            return ft.Icon(ft.Icons.CHECK_BOX if an else ft.Icons.CHECK_BOX_OUTLINE_BLANK)
+
+        def eintrag(name: str, auswahl: set[str]) -> ft.Control:
+            knopf = ft.MenuItemButton(
+                content=ft.Text(name), leading=haken(name in auswahl), close_on_click=False
+            )
+
+            def umschalten() -> None:
+                auswahl.symmetric_difference_update({name})
+                knopf.leading = haken(name in auswahl)
+                knopf.update()
+
+            knopf.on_click = umschalten
+            return knopf
+
+        def ueberschrift(text: str) -> ft.Control:
+            return ft.Container(
+                padding=ft.Padding.only(left=12, top=10, bottom=2),
+                content=ft.Text(text, size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+            )
+
+        def uebernehmen() -> None:
+            state.typ_filter = set(auswahl_typ)
+            state.region_filter = set(auswahl_region)
+            zeichnen()
+            page.update()
+
+        def alles_abwaehlen() -> None:
+            auswahl_typ.clear()
+            auswahl_region.clear()  # das Schließen übernimmt die leere Auswahl
+
+        anzahl = len(auswahl_typ) + len(auswahl_region)
+        return ft.MenuBar(
+            style=ft.MenuStyle(
+                bgcolor=ft.Colors.TRANSPARENT,
+                shadow_color=ft.Colors.TRANSPARENT,
+                elevation=0,
+                padding=0,
+            ),
+            controls=[
+                ft.SubmenuButton(
+                    content=ft.Text(f"Filter · {anzahl}" if anzahl else "Filter"),
+                    leading=ft.Icon(ft.Icons.FILTER_LIST),
+                    on_close=uebernehmen,
+                    controls=[
+                        ft.MenuItemButton(
+                            content=ft.Text("OK", weight=ft.FontWeight.BOLD),
+                            leading=ft.Icon(ft.Icons.CHECK),
+                            on_click=lambda: None,  # schließt; on_close übernimmt
+                        ),
+                        ft.MenuItemButton(
+                            content=ft.Text("Alle anzeigen"),
+                            leading=ft.Icon(ft.Icons.FILTER_LIST_OFF),
+                            on_click=alles_abwaehlen,
+                        ),
+                        ueberschrift("TYP"),
+                        *[eintrag(t, auswahl_typ) for t in typen],
+                        ueberschrift("REGION"),
+                        *[eintrag(r, auswahl_region) for r in regionen],
+                    ],
+                )
+            ],
+        )
+
     # -- Anzeige aus dem Zustand ableiten -------------------------------------
 
     def zeichnen() -> None:
-        kategorien = state.uebungen.kategorien()
-        if state.kategorie not in (None, *kategorien):
-            state.kategorie = None  # Filter zeigt auf eine Kategorie, die es nicht mehr gibt
-        chips.controls = [
-            ft.Chip(
-                label=ft.Text("Alle"),
-                selected=state.kategorie is None,
-                show_checkmark=False,
-                on_click=filterer(None),
-            ),
-            *[
-                ft.Chip(
-                    label=ft.Text(k),
-                    selected=state.kategorie == k,
-                    show_checkmark=False,
-                    on_click=filterer(k),
-                )
-                for k in kategorien
-            ],
-        ]
+        filter_platz.content = filter_menue()
+        aktiv = sorted(state.typ_filter) + sorted(state.region_filter)
+        filter_zeile.content = (
+            ft.Row(
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text(", ".join(aktiv), size=12, opacity=0.75, expand=True),
+                    ft.IconButton(
+                        ft.Icons.CLOSE,
+                        icon_size=18,
+                        tooltip="Filter aufheben",
+                        on_click=filter_leeren,
+                    ),
+                ],
+            )
+            if aktiv
+            else None
+        )
+        filter_zeile.visible = bool(aktiv)
 
-        tags = state.uebungen.tags()
-        if state.tag_filter not in (None, *tags):
-            state.tag_filter = None
-        tag_chips.controls = [
-            ft.Chip(
-                label=ft.Text("Alle Regionen"),
-                selected=state.tag_filter is None,
-                show_checkmark=False,
-                on_click=tag_filterer(None),
-            ),
-            *[
-                ft.Chip(
-                    label=ft.Text(t),
-                    selected=state.tag_filter == t,
-                    show_checkmark=False,
-                    on_click=tag_filterer(t),
-                )
-                for t in tags
-            ],
+        treffer = [
+            u
+            for u in state.uebungen.suchen(state.suchtext)
+            if passt_zum_filter(u, state.typ_filter, state.region_filter)
         ]
-
-        treffer = state.uebungen.suchen(state.suchtext, state.kategorie)
-        if state.tag_filter:
-            treffer = [u for u in treffer if state.tag_filter in u.tags]
         if treffer:
             liste.controls = [
                 ft.ListTile(
                     leading=ft.Icon(symbol(u.icon_key)),
                     title=ft.Text(u.name),
                     subtitle=ft.Text(
-                        "  ·  ".join(t for t in (u.category, ", ".join(u.tags), _beispiel(u)) if t),
+                        "  ·  ".join(
+                            t
+                            for t in (", ".join(u.typen), ", ".join(u.regionen), _beispiel(u))
+                            if t
+                        ),
                         size=12,
                     ),
                     trailing=trainieren_knopf(
@@ -157,7 +213,7 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
                 ft.Container(
                     padding=32,
                     alignment=ft.Alignment.CENTER,
-                    content=ft.Text("Keine Übung passt zur Suche.", opacity=0.6),
+                    content=ft.Text("Keine Übung passt zu Suche und Filter.", opacity=0.6),
                 )
             ]
         liste.controls.extend(ablage_zeilen())
@@ -193,17 +249,24 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
         spacing=8,
         controls=[
             ft.Container(
-                padding=ft.Padding.only(left=16, right=16, top=12),
-                content=ft.TextField(
-                    value=state.suchtext,
-                    hint_text="Übung suchen",
-                    prefix_icon=ft.Icons.SEARCH,
-                    border=ft.OutlineInputBorder(border_radius=12),
-                    on_change=suchen,
+                padding=ft.Padding.only(left=16, right=8, top=12),
+                content=ft.Row(
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.TextField(
+                            value=state.suchtext,
+                            hint_text="Übung suchen",
+                            prefix_icon=ft.Icons.SEARCH,
+                            border=ft.OutlineInputBorder(border_radius=12),
+                            on_change=suchen,
+                            expand=True,
+                        ),
+                        filter_platz,
+                    ],
                 ),
             ),
-            ft.Container(padding=ft.Padding.symmetric(horizontal=16), content=chips),
-            ft.Container(padding=ft.Padding.symmetric(horizontal=16), content=tag_chips),
+            ft.Container(padding=ft.Padding.only(left=20, right=8), content=filter_zeile),
             liste,
         ],
     )

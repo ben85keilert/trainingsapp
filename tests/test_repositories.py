@@ -520,17 +520,51 @@ def test_satz_anhaengen_trennt_nach_auspraegung(welt) -> None:
 
 
 def test_tags_speichern_und_laden(repo, con) -> None:
-    u = Exercise(name="A", tags=["Arm", "Rumpf"])
+    u = Exercise(name="A", typen=["Kräftigung", "Kung-Fu"], regionen=["Arm", "Rumpf"])
     repo.speichern(u)
-    repo.speichern(Exercise(name="B", tags=["Rumpf"]))
-    assert repo.laden(u.id).tags == ["Arm", "Rumpf"]
-    assert con.execute("SELECT COUNT(*) FROM tag").fetchone()[0] == 2
-    assert repo.tags() == ["Arm", "Rumpf"]
+    repo.speichern(Exercise(name="B", regionen=["Rumpf"]))  # ohne Typ
+    geladen = repo.laden(u.id)
+    assert (geladen.typen, geladen.regionen) == (["Kräftigung", "Kung-Fu"], ["Arm", "Rumpf"])
+    assert geladen.category == "Kräftigung"  # der erste Typ
+    assert con.execute("SELECT COUNT(*) FROM tag").fetchone()[0] == 4
+    assert repo.typen() == ["Kräftigung", "Kung-Fu"]
+    assert repo.regionen() == ["Arm", "Rumpf"]
+    assert [x.name for x in repo.alle(kategorie="Kung-Fu")] == ["A"]
 
-    u.tags = ["Rumpf"]
+    u.typen, u.regionen = [], ["Rumpf"]
     repo.speichern(u)
-    assert repo.laden(u.id).tags == ["Rumpf"]
-    assert [x.tags for x in repo.alle()] == [["Rumpf"], ["Rumpf"]]
+    geladen = repo.laden(u.id)
+    assert (geladen.typen, geladen.regionen, geladen.category) == ([], ["Rumpf"], "")
+    assert [x.regionen for x in repo.alle()] == [["Rumpf"], ["Rumpf"]]
+    assert repo.typen() == []
+
+
+def test_nur_category_gesetzt_wird_der_einzige_typ(repo) -> None:
+    u = Exercise(name="Alt", category="Atmung")
+    repo.speichern(u)
+    assert repo.laden(u.id).typen == ["Atmung"]
+
+
+def test_datenformat_schritt_4_trennt_typen_und_regionen(con) -> None:
+    """Altbestand: Kategorie in der Spalte, Charakter-Tags zwischen den Regionen."""
+    from trainingsapp.data.repositories import SettingRepo
+    from trainingsapp.data.upgrade import datenformat_aktualisieren
+
+    repo = ExerciseRepo(con)
+    u = Exercise(name="Wandsitz", regionen=["Bein"])
+    repo.speichern(u)
+    # Zustand vor Migration 009 nachstellen: Kategorie nur in der Spalte,
+    # „Isometrie" als Tag der (damals einzigen) Art.
+    con.execute("UPDATE exercise SET category = 'Kräftigung' WHERE id = ?", (u.id,))
+    con.execute("INSERT INTO tag (id, name) VALUES ('t-iso', 'Isometrie')")
+    con.execute("INSERT INTO exercise_tag (exercise_id, tag_id) VALUES (?, 't-iso')", (u.id,))
+    SettingRepo(con).setzen("datenformat", "3")
+
+    assert datenformat_aktualisieren(con) == 1
+    geladen = repo.laden(u.id)
+    assert geladen.typen == ["Kräftigung", "Isometrie"]
+    assert geladen.regionen == ["Bein"]
+    assert datenformat_aktualisieren(con) == 0
 
 
 def test_plan_item_eingabestufe(con) -> None:
@@ -572,7 +606,8 @@ def test_datenformat_aktualisieren(con) -> None:
     neu = repo.laden(u.id)
     assert [str(f.type) for f in neu.result_spec.fields] == ["set_list"]
     assert neu.result_spec.fields[0].default == [15, 15, 15]
-    assert neu.category == "Kräftigung" and neu.tags == ["Bein"]
+    assert neu.category == "Kräftigung" and neu.regionen == ["Bein"]
+    assert neu.typen == ["Kräftigung"]
     assert plaene.item_laden(item.id).target == {"reps": [15, 15, 15]}
     assert datenformat_aktualisieren(con) == 0  # nur einmal
     assert (

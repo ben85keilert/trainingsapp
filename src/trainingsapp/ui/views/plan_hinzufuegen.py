@@ -49,7 +49,7 @@ def plan_hinzufuegen_view(
             ft.ListTile(
                 leading=ft.Icon(symbol(u.icon_key)),
                 title=ft.Text(u.name),
-                subtitle=ft.Text(u.category, size=12) if u.category else None,
+                subtitle=ft.Text(", ".join(u.typen), size=12) if u.typen else None,
                 trailing=ft.Icon(ft.Icons.CHECK, color=ft.Colors.PRIMARY)
                 if u.id in enthalten
                 else ft.Icon(ft.Icons.ADD_CIRCLE_OUTLINE, opacity=0.6),

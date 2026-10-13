@@ -1,0 +1,68 @@
+name: APK
+
+# Baut eine Android-APK zum Herunterladen.
+#
+# - Von Hand: Reiter „Actions" → „APK" → „Run workflow". Die APK liegt danach
+#   als Artefakt „trainingsapp-apk" am Lauf (Download nur mit GitHub-Anmeldung,
+#   als ZIP, 30 Tage aufbewahrt).
+# - Mit einem Tag `v*` (z. B. `git tag v0.1.0 && git push origin v0.1.0`):
+#   zusätzlich ein Release, dessen APK sich direkt am Handy laden lässt.
+#
+# Signiert ist die APK mit einem Debug-Schlüssel, den jeder Lauf neu erzeugt.
+# Installieren geht, ein Update über eine ältere Version aber nicht — vorher
+# deinstallieren (dabei gehen die lokalen Daten der App verloren!).
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    branches: [ccr-57fabde8-fnxxas] # VORÜBERGEHEND: Probelauf vor dem Merge
+
+permissions:
+  contents: write # nur für das Release beim Tag
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Abhängigkeiten installieren
+        run: uv sync
+
+      - name: APK bauen
+        # Flutter und Android SDK lädt `flet build` beim ersten Lauf selbst
+        # (--yes beantwortet die Rückfrage dazu).
+        run: |
+          uv run flet build apk --yes --no-rich-output --verbose \
+            --build-number ${{ github.run_number }}
+
+      - name: APK umbenennen
+        run: |
+          ls -l build/apk
+          mkdir -p ausgabe
+          cp build/apk/*.apk "ausgabe/trainingsapp-${GITHUB_REF_NAME//\//-}-${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trainingsapp-apk
+          path: ausgabe/*.apk
+          retention-days: 30
+
+      - name: Release anlegen
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ausgabe/*.apk
+          prerelease: true

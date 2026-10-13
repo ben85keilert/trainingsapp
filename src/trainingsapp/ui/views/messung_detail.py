@@ -8,7 +8,7 @@ Die Rohdatei bleibt unangetastet. Korrekturen sind Vorschläge der Automatik
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 
 import flet as ft
 
@@ -24,7 +24,9 @@ from trainingsapp.hrv_core.korrektur import (
     anwenden,
     automatisch,
     kennzahlen,
+    naehte,
 )
+from trainingsapp.hrv_core.ppi import ppi_verworfen
 from trainingsapp.hrv_core.recording import laden
 from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
@@ -48,6 +50,39 @@ def _wert(d: dict | None, key: str, nachkomma: int = 1) -> str:
     if not d or d.get(key) is None:
         return "–"
     return f"{d[key]:.{nachkomma}f}"
+
+
+def _linie(
+    paare: Iterable[tuple[float, float]],
+    naht_vor: Iterable[int],
+    unten: float = 0.0,
+    oben: float = float("inf"),
+) -> tuple[list[tuple[float, float]], list[int]]:
+    """Punkte im Bereich ``(unten, oben)`` und die Nähte als Indizes in diese Liste.
+
+    ``naht_vor`` zählt in ``paare``; fällt ein Punkt heraus, rutscht seine Naht
+    auf den nächsten sichtbaren.
+    """
+    vor = set(naht_vor)
+    punkte: list[tuple[float, float]] = []
+    idx: list[int] = []
+    offen = False
+    for i, (t, r) in enumerate(paare):
+        offen = offen or i in vor
+        if not unten < r < oben:
+            continue
+        if offen and punkte:
+            idx.append(len(punkte))
+        offen = False
+        punkte.append((t, r))
+    return punkte, idx
+
+
+def _verworfen_text(rec_verworfen: tuple[int, int] | None) -> Sequence[str]:
+    """Anteil der vom Sensor verworfenen Intervalle — leer ohne PPI-Rohdaten."""
+    if not rec_verworfen or not rec_verworfen[1] or not rec_verworfen[0]:
+        return []
+    return [f"{round(100 * rec_verworfen[0] / rec_verworfen[1])} % vom Sensor verworfen"]
 
 
 def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -> ft.View:
@@ -131,6 +166,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         if any(v.beat_index in gespeicherte_indizes for v in k.vorschlag)
     }
     roh = kennzahlen(anwenden(rec, []))
+    roh_naehte = naehte(rec)
+    verworfen = ppi_verworfen(rec)
 
     kennzahlen_box = ft.Container()
     rr_box = ft.Container()
@@ -178,21 +215,21 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     def zeichnen(aktualisieren: bool = True) -> None:
         korr = anwenden(rec, korrekturen())
         kennzahlen_box.content = tabelle(kennzahlen(korr))
-        roh_punkte = [(b.t_s, float(b.rr_ms)) for b in rec.beats if b.rr_ms]
         markiert = {v.beat_index for k in ketten for v in k.vorschlag}
         art = [
             (rec.beats[i].t_s, float(rec.beats[i].rr_ms))
             for i in sorted(markiert)
             if i < len(rec.beats) and 0 < rec.beats[i].rr_ms < 2600
         ]
-        sichtbar = [p for p in roh_punkte if 200 < p[1] < 2600]
+        # Nähte (Messlücke, vom Sensor verworfene Intervalle): die Linie reißt ab.
+        sichtbar, sichtbar_naehte = _linie(
+            ((b.t_s, float(b.rr_ms)) for b in rec.beats), roh_naehte, 200, 2600
+        )
+        korr_linie, korr_naehte = _linie(zip(korr.t_s, korr.rr_ms, strict=True), korr.breaks)
         rr_box.content = kurve(
             [
-                Reihe(sichtbar, farbe=ft.Colors.OUTLINE, breite=1),
-                Reihe(
-                    [(t, r) for t, r in zip(korr.t_s, korr.rr_ms, strict=True) if r > 0],
-                    farbe=ft.Colors.PRIMARY,
-                ),
+                Reihe(sichtbar, farbe=ft.Colors.OUTLINE, breite=1, naehte=sichtbar_naehte),
+                Reihe(korr_linie, farbe=ft.Colors.PRIMARY, naehte=korr_naehte),
                 Reihe(art, farbe=ROT, nur_punkte=True),
             ],
             einheit="RR ms",
@@ -256,11 +293,22 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         rec.geraet or eintrag.geraet,
         _uhr(rec.dauer_s),
         QUALITAET.get(rec.effektive_qualitaet(), rec.effektive_qualitaet()),
+        *_verworfen_text(verworfen),
     ]
+    # Mehr als die Hälfte verworfen: Die Zahlen beruhen auf Bruchstücken.
+    viel_verworfen = bool(verworfen and verworfen[1] and verworfen[0] * 2 > verworfen[1])
     zeichnen(aktualisieren=False)
     return ansicht(
         [
             ft.Text("  ·  ".join(t for t in kopf if t), size=13, opacity=0.8),
+            ft.Text(
+                "Der Sensor hat die meisten Intervalle selbst verworfen — meist Bewegung "
+                "oder ein lockerer Sitz. Die Kennzahlen beruhen auf Bruchstücken; für "
+                "HRV ruhig sitzen bzw. liegen und den Sensor fest anlegen.",
+                size=12,
+                color=ROT,
+                visible=viel_verworfen,
+            ),
             kennzahlen_box,
             ft.Text("RR-TACHOGRAMM", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
             rr_box,

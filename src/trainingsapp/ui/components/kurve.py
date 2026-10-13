@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 
 import flet as ft
 import flet_charts as fc
@@ -27,6 +28,9 @@ class Reihe:
     #: Nur Punkte, keine Linie (z. B. markierte Artefakte)
     nur_punkte: bool = False
     gestrichelt: bool = False
+    #: Indizes in ``punkte``, vor denen die Linie abreißt (Naht: davor fehlen
+    #: Schläge — eine Verbindungslinie täuschte einen Sprung vor)
+    naehte: Sequence[int] = ()
 
 
 def ausduennen(punkte: Sequence[tuple[float, float]], maximal: int = MAX_PUNKTE) -> list:
@@ -42,6 +46,30 @@ def ausduennen(punkte: Sequence[tuple[float, float]], maximal: int = MAX_PUNKTE)
     if dichter[-1] != punkte[-1]:
         dichter.append(punkte[-1])
     return dichter
+
+
+def abschnitte(
+    punkte: Sequence[tuple[float, float]], naehte: Sequence[int], maximal: int = MAX_PUNKTE
+) -> list[list[tuple[float, float]]]:
+    """Punkte an den Nähten zerteilen und gemeinsam ausdünnen.
+
+    >>> abschnitte([(0, 1), (1, 2), (2, 3), (3, 4)], [2])
+    [[(0, 1), (1, 2)], [(2, 3), (3, 4)]]
+    >>> sum(map(len, abschnitte([(i, i) for i in range(5000)], [2500], 1000))) <= 1002
+    True
+    """
+    grenzen = sorted({0, len(punkte), *(i for i in naehte if 0 < i < len(punkte))})
+    schritt = max(1, -(-len(punkte) // maximal))
+    teile = []
+    for a, b in pairwise(grenzen):
+        teil = list(punkte[a:b])
+        if schritt > 1:
+            dichter = teil[::schritt]
+            if dichter[-1] != teil[-1]:
+                dichter.append(teil[-1])
+            teil = dichter
+        teile.append(teil)
+    return teile
 
 
 def _achse_x(von: float, bis: float) -> fc.ChartAxis:
@@ -91,17 +119,23 @@ def kurve(
     for r in reihen:
         if not r.punkte:
             continue
-        serien.append(
-            fc.LineChartData(
-                points=[fc.LineChartDataPoint(x=x, y=y) for x, y in ausduennen(r.punkte)],
-                color=r.farbe,
-                stroke_width=0 if r.nur_punkte else r.breite,
-                dash_pattern=[4, 4] if r.gestrichelt else None,
-                point=fc.ChartCirclePoint(radius=3.5, color=r.farbe, stroke_width=0)
-                if r.nur_punkte
-                else False,
+        teile = [ausduennen(r.punkte)] if r.nur_punkte else abschnitte(r.punkte, r.naehte)
+        for teil in teile:
+            # Ein einzelner Punkt zwischen zwei Nähten hat keine Linie — als Punkt zeigen.
+            als_punkt = r.nur_punkte or len(teil) == 1
+            serien.append(
+                fc.LineChartData(
+                    points=[fc.LineChartDataPoint(x=x, y=y) for x, y in teil],
+                    color=r.farbe,
+                    stroke_width=0 if r.nur_punkte else r.breite,
+                    dash_pattern=[4, 4] if r.gestrichelt else None,
+                    point=fc.ChartCirclePoint(
+                        radius=3.5 if r.nur_punkte else r.breite, color=r.farbe, stroke_width=0
+                    )
+                    if als_punkt
+                    else False,
+                )
             )
-        )
     return fc.LineChart(
         data_series=serien,
         min_x=x0,
@@ -122,4 +156,4 @@ def kurve(
     )
 
 
-__all__ = ["MAX_PUNKTE", "Reihe", "ausduennen", "kurve"]
+__all__ = ["MAX_PUNKTE", "Reihe", "abschnitte", "ausduennen", "kurve"]

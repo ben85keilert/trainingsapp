@@ -37,9 +37,16 @@ def _rr_reihe(n: int, seed: int = 1) -> list[int]:
 class _VerityAttrappe(HeartRateSource):
     """Liefert PPI-Bündel wie die Verity Sense: ~5 Intervalle, Zustellung 0–1 s verspätet."""
 
-    def __init__(self, rr: list[int], profil: GeraeteProfil = VERITY_SENSE, seed: int = 4) -> None:
+    def __init__(
+        self,
+        rr: list[int],
+        profil: GeraeteProfil = VERITY_SENSE,
+        seed: int = 4,
+        blockiert: frozenset[int] = frozenset(),
+    ) -> None:
         super().__init__()
         self._rr = rr
+        self._blockiert = blockiert
         self._profil = profil
         self._zufall = random.Random(seed)
         self._t = 0.0
@@ -68,15 +75,20 @@ class _VerityAttrappe(HeartRateSource):
             buendel = self._rr[i : i + 5]
             herz += sum(buendel) / 1000
             self._t = herz + self._zufall.uniform(0.0, 1.0)
-            proben = [PpiProbe(70, x, 5, False, True, True) for x in buendel]
+            proben = [
+                PpiProbe(70, x, 5, i + k in self._blockiert, True, True)
+                for k, x in enumerate(buendel)
+            ]
             paket, werte = ppi_messwerte("verity", proben, self._t)
             self._push_messwert(paket)
             for w in werte:
                 self._push_messwert(w)
 
 
-async def _live(rr: list[int], profil: GeraeteProfil = VERITY_SENSE) -> Messlauf:
-    quelle = _VerityAttrappe(rr, profil)
+async def _live(
+    rr: list[int], profil: GeraeteProfil = VERITY_SENSE, blockiert: frozenset[int] = frozenset()
+) -> Messlauf:
+    quelle = _VerityAttrappe(rr, profil, blockiert=blockiert)
     lauf = Messlauf(quelle)
     await lauf.verbinden("verity", "Polar Sense TEST")
     quelle.alles_senden()
@@ -126,3 +138,32 @@ def test_uhr_verankert_nach_verlust_neu() -> None:
     zeiten = [t for _, t in uhr.paket(40.0, [1000] * 5, [True] * 5)]
     assert zeiten[-1] == pytest.approx(40.0)
     assert zeiten[0] - 5.0 > NEU_ANKERN_S  # die Lücke bleibt sichtbar
+
+
+@pytest.mark.asyncio
+async def test_verworfene_intervalle_werden_live_zur_naht() -> None:
+    """Blocker vor Index 7 (im selben Paket) und 9–11 (über die Paketgrenze bei 10)."""
+    rr = _rr_reihe(40)
+    lauf = await _live(rr, blockiert=frozenset({7, 9, 10, 11}))
+    punkte = lauf.live.punkte()
+    erwartet = [x for i, x in enumerate(rr) if i not in {7, 9, 10, 11}]
+    assert [p.rr_ms for p in punkte] == erwartet
+    # Naht vor dem Schlag nach 7 (Index 8) und nach 9–11 (Index 12)
+    assert [i for i, p in enumerate(punkte) if p.naht_davor] == [7, 8]
+
+
+def test_live_kennzahlen_differenzieren_nicht_ueber_die_naht() -> None:
+    from trainingsapp.hrv_core.live import LiveFenster
+    from trainingsapp.hrv_core.time_domain import compute_time_domain
+
+    f = LiveFenster()
+    werte = [800, 820, 800, 820, 800, 1000, 1020, 1000, 1020, 1000]
+    for i, rr in enumerate(werte):
+        if i == 5:
+            f.naht()  # davor verwarf der Sensor Intervalle
+        f.hinzufuegen(i * 0.9, rr, 70)
+    kz = f.kennzahlen()
+    erwartet = compute_time_domain(werte, breaks=[5])
+    assert erwartet is not None and kz.rmssd_30s == pytest.approx(erwartet["rmssd"])
+    assert kz.rmssd_30s == pytest.approx(20.0)  # ohne Naht: der 200-ms-Sprung zählte mit
+    assert [p.naht_davor for p in f.punkte()] == [False] * 5 + [True] + [False] * 4

@@ -200,3 +200,68 @@ def test_detailansicht_schwelle_nach_intervallquelle(daten, profil, quelle, mark
     state.hrv.anlegen(eintrag)
     texte = _baum_texte(messung_detail_view(_seite(), state, eintrag))
     assert any("Malik" in x for x in texte) is markiert
+
+
+def test_detailansicht_meldet_verworfene_intervalle(daten) -> None:
+    """Golden-PPI-Datei (9 % verworfen) und eine in Bewegung (75 %): Kopfzeile, Hinweis."""
+    import shutil
+    from pathlib import Path
+
+    state, tmp_path = daten
+    golden = Path(__file__).parent / "golden" / "rr" / "sensor_2026-10-13_000000.json"
+    ordner = tmp_path / "Messungen" / "VeritySense"
+    ordner.mkdir(parents=True)
+    pfad = ordner / golden.name
+    shutil.copy(golden, pfad)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet="Polar Sense SYNTH",
+        geraet_profil="verity_sense",
+        intervall_quelle="ppg_ppi",
+    )
+    state.hrv.anlegen(eintrag)
+    ansicht = messung_detail_view(_seite(), state, eintrag)
+    texte = _baum_texte(ansicht)
+    assert any("9 % vom Sensor verworfen" in x for x in texte)
+    hinweis = [
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.Text) and "Bruchstücken" in (c.value or "")
+    ]
+    assert len(hinweis) == 1 and not hinweis[0].visible
+
+    # Dieselbe Folge, aber drei von vier Intervallen verworfen
+    rec = Recording(
+        beats=[
+            Beat(t_s=0.8 * (i + 1), rr_ms=800, hf_bpm=75, t_wall_s=3.2 * (i + 1)) for i in range(30)
+        ],
+        geraet_profil="verity_sense",
+        intervall_quelle="ppg_ppi",
+        ppi_pakete=[
+            {
+                "t_wall_s": 3.2 * (i + 1),
+                "ppi_ms": [800] * 4,
+                "fehler_ms": [10] * 4,
+                "blocker": [1, 1, 1, 0],
+                "kontakt": [1] * 4,
+            }
+            for i in range(30)
+        ],
+    )
+    pfad2 = speichern(rec, ordner)
+    eintrag2 = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad2.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet_profil="verity_sense",
+        intervall_quelle="ppg_ppi",
+    )
+    state.hrv.anlegen(eintrag2)
+    ansicht2 = messung_detail_view(_seite(), state, eintrag2)
+    assert any("75 % vom Sensor verworfen" in x for x in _baum_texte(ansicht2))
+    hinweis2 = [
+        c
+        for c in _alle_controls(ansicht2)
+        if isinstance(c, ft.Text) and "Bruchstücken" in (c.value or "")
+    ]
+    assert hinweis2[0].visible

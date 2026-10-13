@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from bisect import bisect_left
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,11 +47,14 @@ from .constants import (
     KETTE_UNSICHER_MAX,
     MALIK_THRESHOLD_EKG,
     MALIK_WINDOW,
+    PPI_FEHLER_MAX_MS,
     QUALITAET_BPM_ONLY,
     RR_MAX_MS,
     RR_MIN_MS,
 )
+from .ppi import ppi_naehte, ppi_zeilen
 from .recording import Recording, json_atomar_schreiben
+from .segments import luecken_finden
 from .time_domain import compute_time_domain
 
 SCHEMA_ANALYSE: str = "analysis-v1"
@@ -240,8 +244,9 @@ def automatisch(
 
     text_null = "kein RR"
     text_schwelle = f"außerhalb {rr_min}–{rr_max} ms"
+    text_fehler = f"Sensor unsicher (> {PPI_FEHLER_MAX_MS} ms)"
     text_malik = f"Malik {round(malik * 100)} %"
-    reihenfolge = (text_null, text_schwelle, text_malik)
+    reihenfolge = (text_null, text_schwelle, text_fehler, text_malik)
 
     gruende: dict[int, set[str]] = {}
     ohne_rr: set[int] = set()
@@ -253,6 +258,12 @@ def automatisch(
                 ohne_rr.add(i)
         elif x < rr_min or x > rr_max:
             gruende.setdefault(i, set()).add(text_schwelle)
+    # Optische Intervalle, bei denen das Gerät selbst einen großen Fehler schätzt
+    # (Verity Sense: ppi_pakete[].fehler_ms) — vor Malik, damit sie dessen
+    # gleitendes Mittel nicht verziehen.
+    for i, zeile in enumerate(ppi_zeilen(rec) or []):
+        if zeile.fehler_ms > PPI_FEHLER_MAX_MS:
+            gruende.setdefault(i, set()).add(text_fehler)
     # Malik auf der Reihe, in der die Schwellen-Kandidaten schon überbrückt
     # sind. Auf der Rohreihe hätte eine Nullfolge das gleitende Mittel 0 — die
     # Nullen in ihrer Mitte gälten als unauffällig, gesunde Nachbarn dagegen
@@ -388,12 +399,27 @@ def _interpolationswerte(
     return werte
 
 
+def naehte(rec: Recording) -> list[int]:
+    """Rohindizes, vor denen keine Schlag-zu-Schlag-Differenz gebildet wird.
+
+    Zwei Quellen, beide unabhängig von jeder Korrektur:
+
+    - **Messlücken** aus der Divergenz von Wand- und Herzuhr
+      (`segments.luecken_finden`) — z. B. ein Verbindungsabriss.
+    - **Vom Gerät verworfene Intervalle** (Verity Sense, Blocker-Bit): Sie
+      fehlen in ``messungen``, ihre Nachbarn sind keine (`ppi.ppi_naehte`).
+    """
+    return sorted(set(luecken_finden(rec.beats)) | set(ppi_naehte(rec)))
+
+
 def anwenden(rec: Recording, korrekturen: list[Korrektur]) -> Korrigiert:
     """Wendet Korrekturen auf die Rohreihe an (ein Durchlauf, wie praxis_gui `_apply`).
 
     Gibt es mehrere Korrekturen für denselben Schlag, gilt die letzte.
     ``delete`` und ``exclude_range`` hinterlassen eine Naht (``breaks``): über
-    sie wird keine Schlag-zu-Schlag-Differenz gebildet. Nicht korrigierte
+    sie wird keine Schlag-zu-Schlag-Differenz gebildet. Dasselbe gilt immer —
+    auch ohne Korrektur — für Messlücken und vom Gerät verworfene Intervalle
+    (`naehte`). Nicht korrigierte
     Nullen und implausible Werte bleiben stehen — `kennzahlen` verwirft sie
     über den Plausibilitätsfilter.
 
@@ -471,6 +497,13 @@ def anwenden(rec: Recording, korrekturen: list[Korrektur]) -> Korrigiert:
         else:  # pragma: no cover — durch OPS-Filter ausgeschlossen
             out.append(float(rr[i]))
             roh.append(i)
+
+    # Nähte der Messung selbst: Rohindex → erster korrigierter Wert ab dort.
+    # ``roh`` steigt monoton (split wiederholt einen Index, merge überspringt).
+    for i in naehte(rec):
+        j = bisect_left(roh, i)
+        if 0 < j < len(out):
+            breaks.append(j)
 
     # Doppelte Nähte (mehrere Löschungen hintereinander) zusammenfassen.
     breaks = sorted(set(breaks))

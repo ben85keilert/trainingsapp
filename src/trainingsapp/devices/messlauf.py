@@ -74,7 +74,9 @@ class Messlauf:
         # Live-x-Achse gebündelter PPI-Pakete (Verity Sense): Schlagzeiten aus der
         # Intervallsumme statt aus der streuenden Ankunft (`hrv_core.zeitachse`).
         self._ppi_uhr = Kontinuitaetsuhr()
-        self._schlagzeiten: deque[tuple[int, float]] = deque()
+        #: Erwartete Schläge des letzten PPI-Pakets: (rr_ms, Anzeigezeit, Naht davor)
+        self._schlagzeiten: deque[tuple[int, float, bool]] = deque()
+        self._ppi_verworfen = False  # verworfene Intervalle seit dem letzten brauchbaren
         self.aufnahme: Aufnahme | None = None
         self.status = DeviceStatus(verbindung=Verbindung.GETRENNT)
         self.device_id = ""
@@ -116,6 +118,7 @@ class Messlauf:
         self.live = LiveFenster(malik=malik_threshold(quelle))
         self._ppi_uhr = Kontinuitaetsuhr()
         self._schlagzeiten.clear()
+        self._ppi_verworfen = False
         self.start_mono = self._uhr()
         self.status = self.quelle.aktueller_status
 
@@ -129,16 +132,7 @@ class Messlauf:
                         self.aufnahme.ppi_paket(
                             wert.t_capture, wert.ppi_ms, wert.fehler_ms, wert.blocker, wert.kontakt
                         )
-                    self._schlagzeiten = deque(
-                        self._ppi_uhr.paket(
-                            wert.t_capture,
-                            wert.ppi_ms,
-                            [
-                                not b and p > 0
-                                for p, b in zip(wert.ppi_ms, wert.blocker, strict=True)
-                            ],
-                        )
-                    )
+                    self._ppi_paket_erwarten(wert)
                     continue
                 if not isinstance(wert, Messwert):
                     continue
@@ -156,16 +150,38 @@ class Messlauf:
             self.status = replace(self.status, verbindung=Verbindung.GETRENNT)
             self._melden(True)
 
+    def _ppi_paket_erwarten(self, paket: PpiPaket) -> None:
+        """Anzeigezeiten und Nähte für die Schläge eines PPI-Pakets vormerken.
+
+        Hat das Gerät vor einem brauchbaren Intervall welche verworfen (auch im
+        vorigen Paket), sind die beiden Schläge keine Nachbarn: Naht.
+        """
+        brauchbar = [not b and p > 0 for p, b in zip(paket.ppi_ms, paket.blocker, strict=True)]
+        zeiten = iter(self._ppi_uhr.paket(paket.t_capture, paket.ppi_ms, brauchbar))
+        erwartet: deque[tuple[int, float, bool]] = deque()
+        for ok in brauchbar:
+            if not ok:
+                self._ppi_verworfen = True
+                continue
+            rr, t = next(zeiten)
+            erwartet.append((rr, t, self._ppi_verworfen))
+            self._ppi_verworfen = False
+        self._schlagzeiten = erwartet
+
     def _live_zeit(self, wert: Messwert) -> float:
         """Anzeigezeit eines Schlags: Kontinuitätsuhr, falls er zum letzten PPI-Paket gehört.
 
         Die Quelle schickt das Paket vor seinen Schlägen. Passt das Intervall
         nicht zum nächsten erwarteten (fremder Schlag), gilt die Ankunft. Die
-        Datei bekommt immer die Ankunftszeit (``aufnahme.schlag``).
+        Datei bekommt immer die Ankunftszeit (``aufnahme.schlag``). Lagen davor
+        verworfene Intervalle, bekommt das Live-Fenster eine Naht.
         """
         if self._schlagzeiten:
             if self._schlagzeiten[0][0] == wert.rr_ms:
-                return self._schlagzeiten.popleft()[1]
+                _, t, naht = self._schlagzeiten.popleft()
+                if naht:
+                    self.live.naht()
+                return t
             self._schlagzeiten.clear()
         return wert.t_capture
 

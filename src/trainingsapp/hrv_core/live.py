@@ -16,6 +16,10 @@ Markiert wird ein Schlag, wenn er
 Wert. Solche Punkte sind **nicht** markiert, haben keine korrigierte Kurve
 (``rr_korr = None``) und wirken in den Kennzahlen wie eine Naht.
 
+`naht` meldet, dass vor dem nächsten Schlag Intervalle fehlen (Verity Sense:
+vom Gerät verworfen). Der Punkt trägt dann ``naht_davor`` — keine Differenz
+in den Kennzahlen, keine Linie in der Kurve.
+
 Die Malik-Bewertung wird bei jeder Abfrage über das ganze Fenster neu gerechnet
 (O(n), höchstens einige hundert Schläge). Am rechten Rand fehlen ihr die
 Nachfolger; ein frischer Ausreißer wird darum oft erst ein, zwei Schläge später
@@ -63,6 +67,7 @@ class LivePunkt:
     hf_bpm: int
     artefakt: bool  # implausibel oder Malik-Ausreißer im Fenster
     rr_korr: float | None  # Wert der korrigierten Kurve; None bei rr=0
+    naht_davor: bool = False  # davor fehlen Intervalle — nicht verbinden
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +109,8 @@ class LiveFenster:
         self._t: deque[float] = deque()
         self._rr: deque[int] = deque()
         self._hf: deque[int] = deque()
+        self._naht: deque[bool] = deque()
+        self._naht_offen = False
         self._cache: tuple[np.ndarray, np.ndarray] | None = None
 
     # -- Befüllen -----------------------------------------------------------
@@ -121,17 +128,26 @@ class LiveFenster:
         self._t.append(t)
         self._rr.append(int(rr_ms))
         self._hf.append(int(hf_bpm))
+        self._naht.append(self._naht_offen)
+        self._naht_offen = False
         grenze = t - self._max_s
         while self._t and self._t[0] < grenze:
             self._t.popleft()
             self._rr.popleft()
             self._hf.popleft()
+            self._naht.popleft()
         self._cache = None
+
+    def naht(self) -> None:
+        """Vor dem nächsten Punkt fehlen Intervalle: dort keine Differenz, keine Linie."""
+        self._naht_offen = True
 
     def leeren(self) -> None:
         self._t.clear()
         self._rr.clear()
         self._hf.clear()
+        self._naht.clear()
+        self._naht_offen = False
         self._cache = None
 
     # -- Auswerten ----------------------------------------------------------
@@ -161,7 +177,9 @@ class LiveFenster:
         """Alle Punkte im Puffer, oder nur die ab ``seit_s`` (Wanduhr)."""
         artefakt, rr_korr = self._bewerten()
         out: list[LivePunkt] = []
-        for i, (t, rr, hf) in enumerate(zip(self._t, self._rr, self._hf, strict=True)):
+        for i, (t, rr, hf, naht) in enumerate(
+            zip(self._t, self._rr, self._hf, self._naht, strict=True)
+        ):
             if seit_s is not None and t < seit_s:
                 continue
             korr = float(rr_korr[i])
@@ -172,6 +190,7 @@ class LiveFenster:
                     hf_bpm=hf,
                     artefakt=bool(artefakt[i]),
                     rr_korr=None if np.isnan(korr) else korr,
+                    naht_davor=naht,
                 )
             )
         return out
@@ -193,9 +212,17 @@ class LiveFenster:
         gut = (rr > 0) & ~artefakt
         t_ende = float(t[-1])
 
+        naht = np.asarray(self._naht, dtype=bool)
+
         def rr_im_fenster(dauer_s: float) -> list[float | None]:
+            """Gute Werte; ``None`` trennt (Artefakt, kein RR, Naht davor)."""
             maske = t >= t_ende - dauer_s
-            return [float(r) if g else None for r, g in zip(rr[maske], gut[maske], strict=True)]
+            werte: list[float | None] = []
+            for r, g, n in zip(rr[maske], gut[maske], naht[maske], strict=True):
+                if n:
+                    werte.append(None)
+                werte.append(float(r) if g else None)
+            return werte
 
         rmssd = _zeitbereich(rr_im_fenster(LIVE_RMSSD_S), "rmssd", min_diffs=2)
         sdnn = _zeitbereich(rr_im_fenster(LIVE_SDNN_S), "sdnn", min_diffs=0)

@@ -380,14 +380,19 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         punkte = lauf.live.punkte(seit_s=max(0.0, jetzt - fenster))
         x_von, x_bis = max(0.0, jetzt - fenster), max(jetzt, float(fenster))
         mit_rr = [p for p in punkte if p.rr_ms > 0]
-        if state.messung_korrigiert:
-            rr_linie = [(p.t_s, p.rr_korr) for p in mit_rr if p.rr_korr is not None]
-        else:
-            rr_linie = [(p.t_s, float(p.rr_ms)) for p in mit_rr]
+        rr_linie: list[tuple[float, float]] = []
+        rr_naehte: list[int] = []  # davor hat der Sensor Intervalle verworfen
+        for p in mit_rr:
+            wert = p.rr_korr if state.messung_korrigiert else float(p.rr_ms)
+            if wert is None:
+                continue
+            if p.naht_davor and rr_linie:
+                rr_naehte.append(len(rr_linie))
+            rr_linie.append((p.t_s, wert))
         artefakte = [(p.t_s, float(p.rr_ms)) for p in mit_rr if p.artefakt and 250 < p.rr_ms < 2200]
         rr = kurve(
             [
-                Reihe(rr_linie, farbe=ft.Colors.PRIMARY),
+                Reihe(rr_linie, farbe=ft.Colors.PRIMARY, naehte=rr_naehte),
                 Reihe(artefakte, farbe=ROT, nur_punkte=True),
             ],
             einheit="RR ms",

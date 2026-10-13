@@ -70,6 +70,26 @@ guter Testanker (`tests/test_hrv_core.py`).
 
 Implementierung: `hrv_core/segments.py::segment_diffs`.
 
+### Woher die Nähte kommen (`korrektur.naehte`, ALGO_VERSION 2)
+
+Außer verworfenen Werten in der Reihe selbst gibt es zwei Nähte, die man der
+Reihe nicht ansieht — beide gelten immer, auch in der Rohspalte ohne Korrektur:
+
+- **Messlücken** (`segments.luecken_finden`, nächster Abschnitt) — etwa ein
+  Verbindungsabriss beim H10.
+- **Vom Sensor verworfene Intervalle** (Verity Sense, Blocker-Bit). Sie stehen
+  nicht in `messungen` (wie bei praxis_gui), ihre Nachbarn sind dort aber
+  aufeinanderfolgende Zeilen. Wo verworfen wurde, verrät nur `ppi_pakete`
+  (`hrv_core/ppi.py`). Ergibt der Block nicht genau die Folge der Zeilen
+  (beschnittene, fremde Datei), wird nicht geraten.
+
+Gemessen am 13.10.2026: eine kurze Ruhemessung (37 % verworfen) RMSSD 36,5 statt
+41,8 ms; eine 15-min-Messung in Bewegung (80 % verworfen) roh 102 statt 158 ms.
+Bis ALGO_VERSION 1 wurde über beide Nahtarten hinweg differenziert.
+
+Live meldet der `Messlauf` dieselbe Naht an das `LiveFenster` (`naht()`); die
+Kurven reißen an Nähten ab, statt einen Sprung vorzutäuschen.
+
 ---
 
 ## Die zwei Uhren und die Lückenerkennung
@@ -103,6 +123,13 @@ die Pulswellenlaufzeit schwankt physiologisch stärker.
 
 Die Indizes der korrigierten Stellen werden aufbewahrt — die Korrektur bleibt
 nachvollziehbar und rücknehmbar.
+
+**Fehlerschätzung des Sensors.** Die Verity Sense schätzt je Intervall ihren
+Fehler (`ppi_pakete[].fehler_ms`). In Ruhe liegt er bei 7–30 ms; in Bewegung
+gab es Intervalle ohne Blocker-Bit mit 100–650 ms geschätztem Fehler. Ab
+`PPI_FEHLER_MAX_MS` = 50 ms schlägt die Automatik ein Intervall zur Korrektur
+vor („Sensor unsicher") — vor Malik, damit es dessen Mittel nicht verzieht.
+Eigene Festlegung; praxis_gui wertet die Schätzung nicht aus.
 
 ---
 

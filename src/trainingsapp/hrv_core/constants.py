@@ -17,7 +17,11 @@ from typing import Final
 # ---------------------------------------------------------------------------
 # Wird in jeden Cache-Eintrag geschrieben. Steigt sie, gelten alle
 # gecachten Kennzahlen als veraltet und werden aus den Rohdateien neu berechnet.
-ALGO_VERSION: Final[int] = 1
+#
+# 2 (2026-10-13): Nähte an erkannten Messlücken und an den von der Verity Sense
+#   verworfenen Intervallen (`ppi.ppi_naehte`) — vorher wurde über beide hinweg
+#   differenziert, RMSSD optischer Messungen in Bewegung lag bis 60 % zu hoch.
+ALGO_VERSION: Final[int] = 2
 
 # ---------------------------------------------------------------------------
 # Plausibilitätsgrenzen für RR-Intervalle
@@ -73,6 +77,13 @@ BAND_MIN_DAUER_S: Final[dict[str, float]] = {
 MALIK_THRESHOLD_EKG: Final[float] = 0.20
 MALIK_THRESHOLD_PPI: Final[float] = 0.30
 MALIK_WINDOW: Final[int] = 5  # Fensterbreite des gleitenden Mittels
+
+# Fehlerschätzung der Verity Sense je PPI-Intervall (`ppi_pakete[].fehler_ms`).
+# In Ruhe liegt sie bei 7–30 ms; darüber hinaus (gemessen bis 650 ms auf einem
+# 800-ms-Intervall) ist das Intervall geraten, auch ohne Blocker-Bit. Die
+# Automatik schlägt solche Intervalle zur Korrektur vor. Eigene Festlegung,
+# praxis_gui wertet die Schätzung nicht aus.
+PPI_FEHLER_MAX_MS: Final[int] = 50
 
 # Ketten der nachträglichen Korrektur (praxis_gui: `[hrv_gaps]`-Vorgaben).
 # Kandidaten, die höchstens MERGE_GAP gute Schläge trennen, bilden eine Kette.

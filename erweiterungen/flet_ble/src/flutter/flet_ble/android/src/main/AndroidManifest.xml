@@ -1,0 +1,17 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Messung im Hintergrund (Display aus, andere App im Vordergrund): ein
+         Vordergrunddienst mit Benachrichtigung hält den Prozess am Leben, die
+         Wake-Lock die CPU. Der Manifest-Merger trägt das in die App ein — die
+         Flet-Vorlage selbst kann keine <service>-Einträge anlegen. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+        <service
+            android:name="de.praxisebert.flet_ble.MessDienst"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+    </application>
+</manifest>

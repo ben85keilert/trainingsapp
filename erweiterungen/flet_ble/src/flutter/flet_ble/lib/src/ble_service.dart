@@ -2,13 +2,14 @@ import 'dart:async';
 
 import 'package:flet/flet.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 /// Flet-Service „FletBle": generisches BLE über flutter_blue_plus 1.36.8.
 ///
 /// Methoden (Python → Dart, über `invokeMethod`): scan, stop_scan, connect,
 /// disconnect, bond, bond_state, discover_services, request_mtu, read, write,
-/// subscribe, unsubscribe, adapter_state.
+/// subscribe, unsubscribe, adapter_state, hintergrund_starten, hintergrund_beenden.
 ///
 /// Ereignisse (Dart → Python, nur wenn `on_<name>` in Python gesetzt ist):
 /// - `notification`     {device_id, service, characteristic, value (Uint8List → bytes),
@@ -32,6 +33,10 @@ class FletBleService extends FletService {
   /// "verbindung|<device>" für den Verbindungszustand.
   final Map<String, StreamSubscription<dynamic>> _abos = {};
   StreamSubscription<BluetoothAdapterState>? _adapterAbo;
+
+  /// Vordergrunddienst (android/…/MessDienst.java) — Messung bei Display aus.
+  static const MethodChannel _hintergrund =
+      MethodChannel("flet_ble/hintergrund");
 
   static bool get _istAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -113,6 +118,16 @@ class FletBleService extends FletService {
         return null;
       case "subscribe":
         await _subscribe(a);
+        return null;
+      case "hintergrund_starten":
+        if (!_istAndroid) return false;
+        return await _hintergrund.invokeMethod<bool>("starten", {
+              "titel": a["titel"] as String? ?? "Messung läuft",
+              "text": a["text"] as String? ?? "",
+            }) ??
+            false;
+      case "hintergrund_beenden":
+        if (_istAndroid) await _hintergrund.invokeMethod<void>("beenden");
         return null;
       case "unsubscribe":
         await _abos.remove(_key(a))?.cancel();
@@ -260,6 +275,12 @@ class FletBleService extends FletService {
     }
     _abos.clear();
     _adapterAbo?.cancel();
+    if (_istAndroid) {
+      unawaited(
+          _hintergrund.invokeMethod<void>("beenden").catchError((Object e) {
+        debugPrint("FletBleService: Hintergrunddienst nicht beendet: $e");
+      }));
+    }
     for (final d in FlutterBluePlus.connectedDevices) {
       unawaited(d.disconnect().catchError((Object e) {
         debugPrint("FletBleService: Trennen beim Aufräumen fehlgeschlagen: $e");

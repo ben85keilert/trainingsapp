@@ -17,6 +17,15 @@ dependencies:
   # Nutzung, Build-Telemetrie). Nicht auf ^ umstellen — siehe README.
   flutter_blue_plus: 1.36.8
 
+# Android-Plugin: nur der Vordergrunddienst für Messungen im Hintergrund
+# (android/, Java). BLE selbst läuft weiter über flutter_blue_plus.
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: de.praxisebert.flet_ble
+        pluginClass: FletBlePlugin
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

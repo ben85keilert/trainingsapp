@@ -21,7 +21,9 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .. import __version__
 from ..hrv_core.aufnahme import Aufnahme
+from ..hrv_core.export import diagnose_pfad, diagnose_text
 from ..hrv_core.live import LiveFenster
 from ..hrv_core.recording import Recording, messordner
 from ..hrv_core.segments import abdeckung, luecken_finden
@@ -136,6 +138,31 @@ class Messlauf:
                 self.aufnahme.batterie_prozent = s.batterie_prozent
             self._melden(s.verbindung != vorher)
 
+    def diagnose(self, **zusatz: str) -> str:
+        """Kopf und Verbindungsprotokoll der Quelle als Text — zum Teilen und Ablegen.
+
+        Leer, wenn die Quelle kein Protokoll führt (Simulator). ``zusatz`` hängt
+        weitere Kopfzeilen an (z. B. die Eckdaten einer Aufnahme).
+        """
+        zeilen = list(getattr(self.quelle, "protokoll", []))
+        if not zeilen:
+            return ""
+        s = self.status
+        status = [s.verbindung.value]
+        if s.batterie_prozent is not None:
+            status.append(f"Akku {s.batterie_prozent} %")
+        if s.meldung:
+            status.append(s.meldung)
+        kopf = {
+            "App": f"Trainingsassistent {__version__}",
+            "Gerät": f"{self.geraet_name} [{self.device_id}]",
+            "Profil": self.profil.id if self.profil else "–",
+            "Status": " · ".join(status),
+            "Stand": self._jetzt_utc().astimezone().isoformat(timespec="seconds"),
+            **zusatz,
+        }
+        return diagnose_text(kopf, zeilen)
+
     def _melden(self, layout: bool) -> None:
         if self.beobachter is None:
             return
@@ -184,6 +211,14 @@ class Messlauf:
             return None
         pfad = aufnahme.speichern(self._ordner(basis))
         rec = aufnahme.recording()
+        # Das Verbindungsprotokoll gehört zur Messung: Ohne adb ist es die einzige
+        # Spur, warum ein Sensor (Verity Sense) Lücken oder keine Intervalle hatte.
+        text = self.diagnose(
+            Aufnahme=f"{pfad.name}, {len(rec.beats)} Zeilen, {len(rec.ppi_pakete or [])} PPI-Pakete"
+        )
+        if text:
+            with contextlib.suppress(OSError):
+                diagnose_pfad(pfad).write_text(text, encoding="utf-8")
         deckung = abdeckung(rec.beats, luecken_finden(rec.beats))
         return Gespeichert(
             pfad=pfad,

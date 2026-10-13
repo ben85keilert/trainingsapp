@@ -132,8 +132,19 @@ def test_detailansicht_mit_artefakt_korrigieren_und_speichern(daten) -> None:
     assert [k.beat_index for k in analyse_laden(pfad)] == [60]
     assert pfad.read_text(encoding="utf-8").count('"rr_ms": 1650') == 1  # Rohdatei unverändert
 
-    # Liste im Reiter zeigt die Aufzeichnung
-    assert "Noch keine Aufzeichnung." not in _baum_texte(messung(seite, state))
+    # Liste im Reiter zeigt die Aufzeichnung — und bietet den Export an
+    liste = messung(seite, state)
+    assert "Noch keine Aufzeichnung." not in _baum_texte(liste)
+    export = [
+        c
+        for c in _alle_controls(liste)
+        if isinstance(c, ft.TextButton) and c.content == "Alle exportieren"
+    ]
+    assert len(export) == 1 and export[0].visible
+    assert any(
+        isinstance(c, ft.IconButton) and c.tooltip == "Exportieren (ZIP)"
+        for c in ansicht.appbar.actions
+    )
 
 
 def test_detailansicht_ohne_datei(daten) -> None:

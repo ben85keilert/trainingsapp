@@ -12,8 +12,9 @@ from collections.abc import Callable
 
 import flet as ft
 
-from trainingsapp.config import messungenverzeichnis
+from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.models import HrvRecording
+from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
 from trainingsapp.hrv_core.korrektur import (
     Kette,
     Korrektur,
@@ -26,6 +27,7 @@ from trainingsapp.hrv_core.korrektur import (
 from trainingsapp.hrv_core.recording import laden
 from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.state import AppState
 
 ROT = ft.Colors.RED_400
@@ -58,14 +60,28 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 title=ft.Text(f"Messung {eintrag.started_at.astimezone():%d.%m. %H:%M}"),
                 actions=[
                     ft.IconButton(
+                        ft.Icons.SHARE, tooltip="Exportieren (ZIP)", on_click=exportieren
+                    ),
+                    ft.IconButton(
                         ft.Icons.DELETE_OUTLINE, tooltip="Aus der Liste entfernen", on_click=fragen
-                    )
+                    ),
                 ],
             ),
             scroll=ft.ScrollMode.AUTO,
             padding=16,
             controls=[sicher(ft.Column(spacing=14, controls=inhalt), expand=False)],
         )
+
+    # -- Exportieren -----------------------------------------------------------
+
+    async def exportieren() -> None:
+        """Rohdatei samt Korrektur und Diagnoseprotokoll als ZIP herausgeben."""
+        dateien = zugehoerige_dateien(pfad)
+        if not dateien:
+            page.show_dialog(ft.SnackBar(ft.Text("Keine Dateien zu dieser Messung gefunden.")))
+            return
+        daten = export_zip(dateien, datenverzeichnis())
+        await weitergeben(page, f"{pfad.stem}.zip", daten, "application/zip")
 
     # -- Entfernen -------------------------------------------------------------
 

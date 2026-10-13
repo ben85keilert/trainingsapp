@@ -72,6 +72,7 @@ Abweichung ist für praxis_gui folgenlos.
 | `sensor_*_ppg.json` | optisches Rohsignal (PPG) |
 | `sensor_*_truth.json` | Wahrheitsdatei des Generators (`truth-v1`) |
 | `sensor_*__c01.json` | korrigierte Fassung (`corrected-v1`) |
+| `sensor_*_diagnose.txt` | Verbindungsprotokoll der trainingsapp (Text, nur zur Fehlersuche). Kein JSON, darum für praxis_gui unsichtbar — dort bleibt es beim Löschen einer Messung liegen |
 | `.backup_<start>.json` | Crash-Backup, kein Analyse-Artefakt (Abschnitt 6a) |
 | `*.json.tmp` | Zwischenstand eines atomaren Schreibvorgangs |
 | `Messungen/Sitzungen/sitzung_*.json` | Mehrgeräte-Sitzung (`sitzung-v1`), nur lesen |
@@ -90,6 +91,14 @@ Abweichung ist für praxis_gui folgenlos.
 - `.backup_*` und `*.tmp` (fallen schon durch Präfix bzw. Endung heraus).
 
 praxis_gui zählt `__cNN` als Messdatei mit; wir zeigen nur die Rohdatei.
+
+### Export
+
+Ein Export packt die Rohdatei mit allem, was an ihrem Stamm hängt
+(`sensor_<ts>.json`, `sensor_<ts>_*`, `sensor_<ts>__c*`), in ein ZIP — Pfade
+relativ zum Datenverzeichnis, also `Messungen/<Geräteordner>/…`. Ausgepackt in
+einen Patientenordner liegt alles dort, wo praxis_gui es sucht. Die Dateien
+werden byte-genau kopiert, nicht neu geschrieben (`hrv_core.export`).
 Die übrigen Ausschlüsse sind deckungsgleich.
 
 ---

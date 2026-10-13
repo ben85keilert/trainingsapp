@@ -25,29 +25,48 @@ from trainingsapp.devices.base import DeviceInfo, Verbindung
 from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.devices.profiles import profil_fuer_namen
 from trainingsapp.devices.simulated import SIM_PPI, SIM_PREFIX, SIM_SYNTH, SimulatedSource
+from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
 from trainingsapp.ui.components.kurve import Reihe, kurve
+from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.state import AppState
 
 FENSTER = [(60, "1 min"), (120, "2 min"), (300, "5 min")]
 ROT = ft.Colors.RED_400
 
 
-def _protokoll(lauf_oder_quelle: Any, zeilen: int = 20) -> list[str]:
+def _protokoll(lauf: Messlauf, zeilen: int = 20) -> list[str]:
     """Die letzten Diagnosezeilen der Quelle (PolarQuelle führt sie mit)."""
-    quelle = getattr(lauf_oder_quelle, "quelle", lauf_oder_quelle)
-    return list(getattr(quelle, "protokoll", []))[-zeilen:]
+    return list(getattr(lauf.quelle, "protokoll", []))[-zeilen:]
 
 
-def _diagnose(zeilen: list[str]) -> ft.Control:
-    """Aufklappbar — für Screenshots, wenn am Handy etwas nicht klappt."""
+def _diagnose(page: ft.Page, lauf: Messlauf) -> ft.Control:
+    """Aufklappbar — die letzten Zeilen zum Ansehen, das ganze Protokoll zum Teilen."""
+    zeilen = _protokoll(lauf)
+
+    async def teilen() -> None:
+        text = lauf.diagnose()
+        if not text:
+            page.show_dialog(ft.SnackBar(ft.Text("Noch keine Einträge im Protokoll.")))
+            return
+        await weitergeben(page, f"diagnose_{zeitstempel()}.txt", text.encode("utf-8"), "text/plain")
+
     return ft.ExpansionTile(
         title=ft.Text("Diagnose", size=13),
         subtitle=ft.Text(zeilen[-1] if zeilen else "noch keine Einträge", size=11, opacity=0.6),
         controls=[
             ft.Container(
                 padding=ft.Padding.only(left=12, right=12, bottom=8),
-                content=ft.Text(
-                    "\n".join(zeilen) or "–", size=11, selectable=True, font_family="monospace"
+                content=ft.Column(
+                    spacing=4,
+                    controls=[
+                        ft.Text(
+                            "\n".join(zeilen) or "–",
+                            size=11,
+                            selectable=True,
+                            font_family="monospace",
+                        ),
+                        ft.TextButton("Protokoll teilen", icon=ft.Icons.SHARE, on_click=teilen),
+                    ],
                 ),
             )
         ],
@@ -156,7 +175,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             state.messlauf = None
             ring.visible = False
             hinweis.value = f"Verbinden fehlgeschlagen: {fehler}"
-            diagnose.content = _diagnose(_protokoll(quelle))
+            diagnose.content = _diagnose(page, lauf)
             page.update()
             return
         await _hintergrund(state, lauf, True, f"Verbunden mit {lauf.geraet_name}")
@@ -423,7 +442,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         rr_box.content, hf_box.content = kurven()
         aufnahme_box.content = aufnahme_teil()
         if not lauf.simulation:
-            diagnose_box.content = _diagnose(_protokoll(lauf))
+            diagnose_box.content = _diagnose(page, lauf)
         # Ansicht nicht (mehr) auf der Seite — beim nächsten Aufbau geht es weiter.
         with contextlib.suppress(Exception):
             spalte.update()
@@ -491,10 +510,31 @@ def _liste(page: ft.Page, state: AppState) -> ft.Control:
 
         return handler
 
+    async def alle_exportieren() -> None:
+        """Alle Aufzeichnungen dieses Profils samt Beiwerk als ein ZIP."""
+        basis = messungenverzeichnis()
+        dateien = [d for a in eintraege for d in zugehoerige_dateien(basis / a.file_path)]
+        if not dateien:
+            page.show_dialog(ft.SnackBar(ft.Text("Keine Messdateien gefunden.")))
+            return
+        daten = export_zip(dateien, datenverzeichnis())
+        await weitergeben(page, f"messungen_{zeitstempel()}.zip", daten, "application/zip")
+
     zeilen: list[ft.Control] = [
         ft.Container(
-            padding=ft.Padding.only(left=16, top=8),
-            content=ft.Text("AUFZEICHNUNGEN", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+            padding=ft.Padding.only(left=16, right=8, top=8),
+            content=ft.Row(
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                controls=[
+                    ft.Text("AUFZEICHNUNGEN", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                    ft.TextButton(
+                        "Alle exportieren",
+                        icon=ft.Icons.SHARE,
+                        on_click=alle_exportieren,
+                        visible=bool(eintraege),
+                    ),
+                ],
+            ),
         )
     ]
     if not eintraege:

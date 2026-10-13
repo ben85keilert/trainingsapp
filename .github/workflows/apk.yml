@@ -19,7 +19,6 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
-    branches: [ccr-57fabde8-fnxxas] # VORÜBERGEHEND: Probelauf vor dem Merge
 
 permissions:
   contents: write # nur für das Release beim Tag

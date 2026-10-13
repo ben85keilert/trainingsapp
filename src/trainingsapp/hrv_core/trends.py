@@ -4,7 +4,8 @@ Unter der Hauptkurve zeigt die App wählbare Verlaufskurven aus drei Bereichen �
 live und in der Aufzeichnung, mit derselben Rechnung:
 
 - **Zeit:** Ø HF und Ø RR aus den Intervallen, RMSSD, SDNN, pNNx (Schwelle
-  wählbar, üblich 50 ms) und die vom Gerät gemeldete Herzfrequenz.
+  wählbar, üblich 50 ms), die vom Gerät gemeldete Herzfrequenz sowie
+  Atemfrequenz und Atemschwankung (`atmung`, nur bei deutlicher Atmung).
 - **Frequenz:** Leistung im LF- und HF-Band, LF/HF und die Lage des stärksten
   Gipfels (`frequency.fensterspektrum`, ein Lomb je Fenster).
 - **Nichtlinear:** SD1, SD2 (Poincaré) und DFA α1.
@@ -41,6 +42,7 @@ from typing import Any, Final
 
 import numpy as np
 
+from .atmung import RUHE, Atmung, atemfrequenz
 from .constants import (
     LIVE_MIN_SCHLAEGE,
     MIN_BEATS_NONLINEAR,
@@ -62,6 +64,7 @@ FENSTER_MITTEL: Final[tuple[int, ...]] = (3, 5, 10, 15, 30, 60)
 FENSTER_FREQUENZ: Final[tuple[int, ...]] = (60, 120, 180, 300, 600)
 FENSTER_POINCARE: Final[tuple[int, ...]] = (30, 60, 120, 180, 300)
 FENSTER_DFA: Final[tuple[int, ...]] = (60, 120, 180, 300)
+FENSTER_ATMUNG: Final[tuple[int, ...]] = (60, 90, 120)
 
 #: DFA α1 im Fenster: so viele gute Schläge mindestens (bei 60 bpm 100 s)
 DFA_MIN_SCHLAEGE: Final[int] = 100
@@ -153,6 +156,28 @@ KENNZAHLEN: Final[dict[str, Kennzahl]] = {
         30.0,
         10.0,
         erklaerung="Anteil der Nachbardifferenzen über der Schwelle (üblich: 50 ms).",
+    ),
+    "atemfrequenz": Kennzahl(
+        "Atemfrequenz",
+        "/min",
+        60.0,
+        4.0,
+        achse="permin",
+        fenster_wahl=FENSTER_ATMUNG,
+        min_schlaege=30,
+        erklaerung="Atemzüge je Minute aus der Atemschwankung des Herzschlags — nur, "
+        "wenn sie deutlich ist; sonst keine Zahl.",
+    ),
+    "rsa": Kennzahl(
+        "Atemschwankung",
+        "bpm",
+        60.0,
+        4.0,
+        achse="rsa",
+        fenster_wahl=FENSTER_ATMUNG,
+        min_schlaege=30,
+        erklaerung="Wie stark die Herzfrequenz je Atemzug steigt und fällt (Spitze–Tal) — "
+        "nur bei deutlicher Atmung.",
     ),
     "lf_power": Kennzahl(
         "LF-Band",
@@ -277,6 +302,7 @@ def verlauf(
     block: bool = False,
     pnn_ms: float = PNN_THRESHOLD_MS,
     zwischenspeicher: dict[Any, Any] | None = None,
+    atem_modus: str = RUHE,
 ) -> list[tuple[float, float]]:
     """``[(t_e, wert)]`` einer Kennzahl — gleitend oder in Blöcken.
 
@@ -289,6 +315,7 @@ def verlauf(
         von, bis: Zeitbereich des Rasters (Vorgabe: die Daten).
         block: nicht überlappende Blöcke statt gleitend; ``t_e`` ist das Blockende.
         pnn_ms: Schwelle für ``pnnx``.
+        atem_modus: ``ruhe`` oder ``atemuebung`` (`atmung.atemfrequenz`).
         zwischenspeicher: ein Dict für teure Fenster (Spektrum, DFA). LF, HF,
             LF/HF und Gipfel teilen sich ein Spektrum je Fenster; live darf es
             zwischen zwei Zeichnungen bleiben: Der Schlüssel enthält Grenzen,
@@ -342,6 +369,7 @@ def verlauf(
             (round(float(te) - fenster_s, 3), round(float(te), 3)),
             pnn_ms,
             zwischenspeicher,
+            atem_modus,
         )
         if wert is not None and np.isfinite(wert):
             out.append((round(float(te), 3), float(wert)))
@@ -357,6 +385,7 @@ def aktuell(
     *,
     ende: float | None = None,
     pnn_ms: float = PNN_THRESHOLD_MS,
+    atem_modus: str = RUHE,
 ) -> float | None:
     """Der Wert über das letzte Fenster bis ``ende`` (Vorgabe: letzter Schlag) — für Kacheln.
 
@@ -372,8 +401,30 @@ def aktuell(
     te = float(t_arr[-1]) if ende is None else float(ende)
     hi = int(np.searchsorted(t_arr, te, side="right"))
     lo = int(np.searchsorted(t_arr, te - fenster_s, side="right"))
-    wert = _wert(t_arr, rr_arr, naht_arr, lo, hi, kennzahl, (te - fenster_s, te), pnn_ms, None)
+    wert = _wert(
+        t_arr, rr_arr, naht_arr, lo, hi, kennzahl, (te - fenster_s, te), pnn_ms, None, atem_modus
+    )
     return None if wert is None or not np.isfinite(wert) else float(wert)
+
+
+def atmung_aktuell(
+    t: Sequence[float] | np.ndarray,
+    rr: Sequence[float] | np.ndarray,
+    fenster_s: float,
+    *,
+    ende: float | None = None,
+    atem_modus: str = RUHE,
+) -> Atmung:
+    """Atemfrequenz samt Gründen über das letzte Fenster — für die Übersicht.
+
+    >>> atmung_aktuell([], [], 60).gueltig
+    False
+    """
+    t_arr = np.asarray(t, dtype=float)
+    if t_arr.size == 0:
+        return atemfrequenz([], [])
+    te = float(t_arr[-1]) if ende is None else float(ende)
+    return atemfrequenz(t_arr, np.asarray(rr, dtype=float), te - fenster_s, te, modus=atem_modus)
 
 
 def _wert(
@@ -386,12 +437,15 @@ def _wert(
     grenzen: tuple[float, float],
     pnn_ms: float,
     zwischenspeicher: dict[Any, Any] | None,
+    atem_modus: str = RUHE,
 ) -> float | None:
     k = KENNZAHLEN.get(kennzahl)
     if k is None or not k.rechnet:
         raise ValueError(f"unbekannte Kennzahl {kennzahl!r}")
     if k.bereich == FREQUENZ:
         return _frequenzwert(t, rr_alle, kennzahl, grenzen, zwischenspeicher)
+    if kennzahl in ("atemfrequenz", "rsa"):
+        return _atemwert(t, rr_alle, kennzahl, grenzen, zwischenspeicher, atem_modus)
     rr = rr_alle[lo:hi]
     naht = naht_alle[lo:hi]
     gut = ~np.isnan(rr)
@@ -463,6 +517,31 @@ def _frequenzwert(
     return float(wert) * 60.0 if kennzahl == "gipfel" else float(wert)
 
 
+def _atemwert(
+    t: np.ndarray,
+    rr: np.ndarray,
+    kennzahl: str,
+    grenzen: tuple[float, float],
+    zwischenspeicher: dict[Any, Any] | None,
+    atem_modus: str,
+) -> float | None:
+    """Atemfrequenz oder -schwankung eines Fensters — nur, wenn die Atmung deutlich ist."""
+    lo = int(np.searchsorted(t, grenzen[0], side="right"))
+    hi = int(np.searchsorted(t, grenzen[1], side="right"))
+    stueck = rr[lo:hi]
+    gut = stueck[np.isfinite(stueck)]
+    schluessel = ("atmung", *grenzen, int(gut.size), round(float(gut.sum()), 3), atem_modus)
+    if zwischenspeicher is not None and schluessel in zwischenspeicher:
+        a = zwischenspeicher[schluessel]
+    else:
+        a = atemfrequenz(t[lo:hi], stueck, grenzen[0], grenzen[1], modus=atem_modus)
+        if zwischenspeicher is not None:
+            zwischenspeicher[schluessel] = a
+    if not a.gueltig:
+        return None
+    return a.rate_pro_min if kennzahl == "atemfrequenz" else a.rsa_bpm
+
+
 def treppe(
     punkte: Sequence[tuple[float, float]],
     fenster_s: float,
@@ -525,6 +604,7 @@ __all__ = [
     "ZEIT",
     "Kennzahl",
     "aktuell",
+    "atmung_aktuell",
     "im_bereich",
     "reihe",
     "schritt_fuer",

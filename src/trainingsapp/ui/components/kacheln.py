@@ -1,14 +1,20 @@
-"""Kacheln über der Hauptkurve — welche, einstellbar unter Einstellungen → HRV-Messung.
+"""Werte über der Hauptkurve — als ruhige Übersicht (Vorgabe) oder als Kacheln.
 
-Zwei große Kacheln (Herzfrequenz, RR) stehen nebeneinander, alle übrigen zu
-dritt in einem Raster mit gleichem Abstand. Kacheln einer Verlaufskurve tragen
-deren Farbe als Streifen — so findet man den Wert in der Kurve wieder — und
-rechnen mit demselben Fenster wie die Kurve (`core.hrv_ansicht.Ansicht`).
-Gerechnet wird nicht hier: Die Werte kommen fertig herein (`KachelWert`).
+Welche Werte, in welcher Reihenfolge und welche groß hervorgehoben sind, stellt
+man unter Einstellungen → HRV-Messung ein — vollständig. Werte einer
+Verlaufskurve tragen deren Farbe (Punkt bzw. Streifen) und rechnen mit
+demselben Fenster wie die Kurve (`core.hrv_ansicht.Ansicht`). Gerechnet wird
+nicht hier: Die Werte kommen fertig herein (`KachelWert`).
+
+**Übersicht:** Die großen Werte stehen oben in einer Reihe, die übrigen
+darunter als Liste — Name links, Wert rechts, feine Linien dazwischen. Gibt es
+keinen Wert (Atemfrequenz bei undeutlicher Atmung), steht der Grund klein unter
+dem Namen; manchmal mit einem Knopf, der weiterhilft („Atemübung").
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import flet as ft
@@ -22,12 +28,10 @@ HOEHE_GROSS = 90
 
 @dataclass(frozen=True, slots=True)
 class KachelArt:
-    """Eine wählbare Kachel."""
+    """Ein wählbarer Wert."""
 
     titel: str
-    #: Große Kachel (halbe Breite) statt eines Drittels
-    gross: bool = False
-    #: Schlüssel der Verlaufskurve, deren aktuellen Wert sie zeigt
+    #: Schlüssel der Verlaufskurve, deren aktuellen Wert er zeigt
     kennzahl: str | None = None
     erklaerung: str = ""
 
@@ -37,10 +41,10 @@ def _aus_kurve(kennzahl: str) -> KachelArt:
     return KachelArt(k.titel, kennzahl=kennzahl, erklaerung=k.erklaerung)
 
 
-#: Alle Kacheln. Schlüssel bleiben stabil — sie stehen in den Einstellungen.
+#: Alle Werte. Schlüssel bleiben stabil — sie stehen in den Einstellungen.
 KACHELN: dict[str, KachelArt] = {
-    "hf": KachelArt("Herzfrequenz", gross=True, erklaerung="Zuletzt vom Gerät gemeldet."),
-    "rr": KachelArt("RR", gross=True, erklaerung="Letzter Abstand zweier Herzschläge."),
+    "hf": KachelArt("Herzfrequenz", erklaerung="Zuletzt vom Gerät gemeldet."),
+    "rr": KachelArt("RR", erklaerung="Letzter Abstand zweier Herzschläge."),
     "artefakte": KachelArt(
         "Artefakte", erklaerung="Markierte Schläge im Puffer bzw. korrigierte in der Messung."
     ),
@@ -48,6 +52,7 @@ KACHELN: dict[str, KachelArt] = {
         "Schwankung 60 s",
         erklaerung="Mittlere Spannweite der Herzfrequenz je 10 s — beschreibend, keine Bewertung.",
     ),
+    **{k: _aus_kurve(k) for k in ("atemfrequenz", "rsa")},
     **{k: _aus_kurve(k) for k in ("hf_rr", "mean_rr", "rmssd", "sdnn", "pnnx")},
     **{k: _aus_kurve(k) for k in ("lf_power", "hf_power", "lf_hf", "gipfel")},
     **{k: _aus_kurve(k) for k in ("sd1", "sd2", "dfa_alpha1")},
@@ -55,7 +60,8 @@ KACHELN: dict[str, KachelArt] = {
 
 #: Gruppen für die Auswahl in den Einstellungen
 GRUPPEN: list[tuple[str, list[str]]] = [
-    ("Grundwerte", ["hf", "rr", "artefakte", "schwankung"]),
+    ("Grundwerte", ["hf", "rr", "artefakte"]),
+    ("Atmung", ["atemfrequenz", "rsa", "schwankung"]),
     ("Zeit", ["hf_rr", "mean_rr", "rmssd", "sdnn", "pnnx"]),
     ("Frequenz", ["lf_power", "hf_power", "lf_hf", "gipfel"]),
     ("Nichtlinear", ["sd1", "sd2", "dfa_alpha1"]),
@@ -64,7 +70,7 @@ GRUPPEN: list[tuple[str, list[str]]] = [
 
 @dataclass(frozen=True, slots=True)
 class KachelWert:
-    """Was eine Kachel zeigt."""
+    """Was ein Wert der Übersicht (oder eine Kachel) zeigt."""
 
     titel: str
     wert: str
@@ -72,6 +78,10 @@ class KachelWert:
     zusatz: str = ""
     farbe: str | None = None
     gross: bool = False
+    #: Warum es keinen Wert gibt („Atemschwankung zu schwach")
+    grund: str = ""
+    #: Ein Knopf, der weiterhilft: (Beschriftung, Handler)
+    aktion: tuple[str, Callable[[], object]] | None = None
 
 
 def zahl(wert: float | int | None, nachkomma: int = 0) -> str:
@@ -105,7 +115,13 @@ def kachel(w: KachelWert) -> ft.Control:
                         ft.Text(w.einheit, size=11, opacity=0.65),
                     ],
                 ),
-                ft.Text(w.zusatz, size=10, opacity=0.6, max_lines=1, visible=bool(w.zusatz)),
+                ft.Text(
+                    w.zusatz or w.grund,
+                    size=10,
+                    opacity=0.6,
+                    max_lines=1,
+                    visible=bool(w.zusatz or w.grund),
+                ),
             ],
         ),
     )
@@ -133,4 +149,126 @@ def raster(werte: list[KachelWert]) -> ft.Control:
     return ft.ResponsiveRow(spacing=10, run_spacing=10, controls=[kachel(w) for w in werte])
 
 
-__all__ = ["GRUPPEN", "KACHELN", "KachelArt", "KachelWert", "kachel", "raster", "zahl"]
+def uebersicht(werte: list[KachelWert]) -> ft.Control:
+    """Große Werte oben in einer Reihe, die übrigen als ruhige Liste darunter."""
+    if not werte:
+        return ft.Container()
+    gross = [w for w in werte if w.gross]
+    liste = [w for w in werte if not w.gross]
+    teile: list[ft.Control] = []
+    if gross:
+        teile.append(
+            ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+                controls=[_hauptwert(w) for w in gross],
+            )
+        )
+    for i, w in enumerate(liste):
+        if teile or i:
+            teile.append(
+                ft.Divider(
+                    height=1,
+                    thickness=0.5,
+                    color=ft.Colors.with_opacity(0.15, ft.Colors.ON_SURFACE),
+                )
+            )
+        teile.append(_zeile(w))
+    return ft.Container(
+        padding=ft.Padding.symmetric(horizontal=16, vertical=12),
+        border_radius=16,
+        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE)),
+        content=ft.Column(spacing=6, tight=True, controls=teile),
+    )
+
+
+def _hauptwert(w: KachelWert) -> ft.Control:
+    return ft.Container(
+        expand=True,
+        padding=ft.Padding.only(bottom=4),
+        content=ft.Column(
+            spacing=0,
+            tight=True,
+            controls=[
+                ft.Row(
+                    spacing=4,
+                    tight=True,
+                    vertical_alignment=ft.CrossAxisAlignment.END,
+                    controls=[
+                        ft.Text(w.wert, size=34, weight=ft.FontWeight.BOLD, color=w.farbe),
+                        ft.Text(w.einheit, size=13, opacity=0.65),
+                    ],
+                ),
+                ft.Text(w.titel, size=12, opacity=0.7, max_lines=1),
+                ft.Text(
+                    w.grund or w.zusatz,
+                    size=11,
+                    opacity=0.55,
+                    max_lines=2,
+                    visible=bool(w.grund or w.zusatz),
+                ),
+            ],
+        ),
+    )
+
+
+def _zeile(w: KachelWert) -> ft.Control:
+    links: list[ft.Control] = [
+        ft.Text(w.titel, size=14, max_lines=1),
+    ]
+    if w.grund:
+        links.append(ft.Text(w.grund, size=11, opacity=0.6, max_lines=2))
+    rechts: list[ft.Control] = []
+    if w.aktion is not None:
+        text, handler = w.aktion
+        rechts.append(
+            ft.TextButton(
+                text,
+                on_click=handler,
+                style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=8)),
+            )
+        )
+    rechts.append(
+        ft.Row(
+            spacing=3,
+            tight=True,
+            vertical_alignment=ft.CrossAxisAlignment.END,
+            controls=[
+                ft.Text(w.wert, size=17, weight=ft.FontWeight.W_600),
+                ft.Text(f"{w.einheit} {w.zusatz}".strip(), size=12, opacity=0.65),
+            ],
+        )
+    )
+    return ft.Row(
+        spacing=10,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[
+            ft.Container(
+                width=8,
+                height=8,
+                border_radius=4,
+                bgcolor=w.farbe or ft.Colors.TRANSPARENT,
+            ),
+            ft.Column(spacing=0, tight=True, expand=True, controls=links),
+            *rechts,
+        ],
+    )
+
+
+def anzeige(werte: list[KachelWert], darstellung: str) -> ft.Control:
+    """Übersicht oder Kacheln — wie eingestellt."""
+    return raster(werte) if darstellung == "kacheln" else uebersicht(werte)
+
+
+__all__ = [
+    "GRUPPEN",
+    "KACHELN",
+    "KachelArt",
+    "KachelWert",
+    "anzeige",
+    "kachel",
+    "raster",
+    "uebersicht",
+    "zahl",
+]

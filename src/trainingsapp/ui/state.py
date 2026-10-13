@@ -31,7 +31,14 @@ from trainingsapp.core.hrv_einstellungen import (
     einstellungen_schreiben,
 )
 from trainingsapp.core.models import Subject, jetzt, lokaler_tag
-from trainingsapp.core.timer import TimerProfil, timer_profile_lesen, timer_profile_schreiben
+from trainingsapp.core.timer import (
+    TimerProfil,
+    TimerSignale,
+    timer_profile_lesen,
+    timer_profile_schreiben,
+    timer_signale_lesen,
+    timer_signale_schreiben,
+)
 from trainingsapp.core.verlauf import MODUS_NUMMER
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.repositories import (
@@ -121,6 +128,13 @@ class AppState:
     timer_aufgabe: Any = None
     #: Vibration (Flet-Dienst `HapticFeedback`), setzt `app.main()`
     haptik: Any = None
+    #: Signaltöne (`flet_ton.FletTon`, nur in der gebauten App) und ob sie geladen sind
+    ton: Any = None
+    toene_geladen: bool = False
+    #: Bildschirm anlassen, solange der Timer läuft (Flet-Dienst `Wakelock`)
+    wach: Any = None
+    #: Wer erfährt, dass der Timer Notizen in die laufende Messung geschrieben hat
+    notiz_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
     #: Wer bei jedem Tick des Timers aufgefrischt wird (Name → Funktion);
     #: Ansichten tragen sich beim Bauen ein und ersetzen ihren alten Eintrag
     timer_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
@@ -279,6 +293,13 @@ class AppState:
 
     def timer_profil_waehlen(self, profil_id: str) -> None:
         self.einstellungen.setzen(SettingRepo.TIMER_AKTIV, profil_id)
+
+    def timer_signale(self) -> TimerSignale:
+        """Ton, Countdown, Vibration, Bildschirm an, Notizen — alles an, wenn nichts gespeichert."""
+        return timer_signale_lesen(self.einstellungen.lesen(SettingRepo.TIMER_SIGNALE))
+
+    def timer_signale_setzen(self, signale: TimerSignale) -> None:
+        self.einstellungen.setzen(SettingRepo.TIMER_SIGNALE, timer_signale_schreiben(signale))
 
     def profil_umbenennen(self, name: str) -> None:
         self.profil.name = name.strip()

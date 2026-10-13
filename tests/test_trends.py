@@ -24,7 +24,16 @@ def atemreihe(n: int = 600, f_hz: float = 0.1, amp: float = 40.0, rr0: float = 9
 
 
 def test_jeder_bereich_hat_kennzahlen_mit_eigener_achse() -> None:
-    assert im_bereich("zeit") == ["hf_rr", "hf_geraet", "mean_rr", "rmssd", "sdnn", "pnnx"]
+    assert im_bereich("zeit") == [
+        "hf_rr",
+        "hf_geraet",
+        "mean_rr",
+        "rmssd",
+        "sdnn",
+        "pnnx",
+        "atemfrequenz",
+        "rsa",
+    ]
     assert im_bereich("frequenz") == ["lf_power", "hf_power", "lf_hf", "gipfel"]
     assert im_bereich("nichtlinear") == ["sd1", "sd2", "dfa_alpha1"]
     # Ø RR (≈ 900 ms) teilt sich keine Achse mit RMSSD (≈ 40 ms)
@@ -112,3 +121,16 @@ def test_frequenz_vor_dem_ersten_vollen_fenster_kein_wert() -> None:
 def test_hf_geraet_wird_nicht_gerechnet() -> None:
     with pytest.raises(ValueError):
         verlauf([1.0, 2.0], [800.0, 800.0], [False, False], "hf_geraet", 10)
+
+
+def test_atemfrequenz_als_kurve_nur_bei_deutlicher_atmung() -> None:
+    t, rr, naht = atemreihe(400, f_hz=0.25, amp=30.0)  # 15/min, deutlich
+    punkte = verlauf(t, rr, naht, "atemfrequenz", 60)
+    assert punkte and all(w == pytest.approx(15.0, abs=0.5) for _, w in punkte)
+    rsa = aktuell(t, rr, naht, "rsa", 60)
+    assert rsa is not None and rsa > 3
+    # Langsames Atmen (6/min): in Ruhe keine Kurve, als Atemübung schon
+    t, rr, naht = atemreihe(300, f_hz=0.1, amp=120.0)
+    assert verlauf(t, rr, naht, "atemfrequenz", 90) == []
+    langsam = verlauf(t, rr, naht, "atemfrequenz", 90, atem_modus="atemuebung")
+    assert langsam and all(w == pytest.approx(6.0, abs=0.5) for _, w in langsam)

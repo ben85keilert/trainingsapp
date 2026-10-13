@@ -21,13 +21,16 @@ mit Sperrgrund (Task-Force-Mindestdauer), Poincaré, DFA α1 und SampEn.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 import flet as ft
+import numpy as np
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.models import HrvRecording
+from trainingsapp.hrv_core.atmung import ATEMUEBUNG, RUHE, atemfrequenz, kurzgrund
 from trainingsapp.hrv_core.constants import BAND_OK
 from trainingsapp.hrv_core.ereignisse import Zeitbezug, metadaten_schreiben
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
@@ -54,13 +57,13 @@ from trainingsapp.hrv_core.segments import filter_rr
 from trainingsapp.hrv_core.time_domain import compute_time_domain
 from trainingsapp.hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
 from trainingsapp.ui.components.analyse import Analyse
-from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, raster, zahl
+from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, anzeige, zahl
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.notizen import Notizfeld, uebungsquellen
+from trainingsapp.ui.components.notizen import Notizfeld, uebungs_katalog, uebungsquellen
 from trainingsapp.ui.components.verlauf import FARBEN
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
@@ -259,32 +262,73 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
         return z.merken("nichtlinear", rechnen)
 
+    def atmung() -> dict[str, Any]:
+        """Atemfrequenz der ganzen Messung: Median der gültigen 60-s-Fenster."""
+
+        def rechnen() -> dict[str, Any]:
+            t, rr, _ = analyse_reihe()
+            modus = ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE
+            fenster = [
+                atemfrequenz(t, rr, ende - 60.0, ende, modus=modus)
+                for ende in (np.arange(t[0] + 60.0, t[-1] + 1e-9, 15.0) if t.size else [])
+            ]
+            gueltig = [a for a in fenster if a.gueltig]
+            gruende = Counter(g for a in fenster if not a.gueltig for g in a.gruende[:1])
+            return {
+                "rate": float(np.median([a.rate_pro_min for a in gueltig])) if gueltig else None,
+                "rsa": float(np.median([a.rsa_bpm for a in gueltig])) if gueltig else None,
+                "gueltig": len(gueltig),
+                "fenster": len(fenster),
+                "grund": kurzgrund([gruende.most_common(1)[0][0]]) if gruende else "",
+            }
+
+        return z.merken(
+            "atmung" + ("_uebung" if state.hrv_einstellungen().atemuebung else ""), rechnen
+        )
+
     def kachel_werte() -> list[KachelWert]:
-        """Dieselben Kacheln wie live, mit den Werten der ganzen Messung."""
+        """Dieselben Werte wie live, für die ganze Messung."""
         a = state.ansicht()
         td = zeitbereich(True) or {}
         korr = z.korrigiert()
+        gross = set(einst.gross)
         out: list[KachelWert] = []
         for key in einst.kacheln:
             art = KACHELN.get(key)
             if art is None or key == "schwankung":
                 continue
+            g = key in gross
             if key == "hf":
-                out.append(
-                    KachelWert("Ø Herzfrequenz", zahl(td.get("mean_bpm")), "bpm", gross=True)
-                )
+                out.append(KachelWert("Ø Herzfrequenz", zahl(td.get("mean_bpm")), "bpm", gross=g))
             elif key == "rr":
-                out.append(
-                    KachelWert(
-                        "Ø PPI" if verity else "Ø RR", zahl(td.get("mean_rr")), "ms", gross=True
-                    )
-                )
+                titel_rr = "Ø PPI" if verity else "Ø RR"
+                out.append(KachelWert(titel_rr, zahl(td.get("mean_rr")), "ms", gross=g))
             elif key == "artefakte":
                 out.append(
                     KachelWert(
                         "Korrigiert",
                         str(korr.interpoliert + korr.entfernt),
-                        f"von {len(rec.beats)}",
+                        zusatz=f"von {len(rec.beats)}",
+                        gross=g,
+                    )
+                )
+            elif key in ("atemfrequenz", "rsa"):
+                at = atmung()
+                kz = KENNZAHLEN[key]
+                wert = at["rate"] if key == "atemfrequenz" else at["rsa"]
+                hinweis_atmung = (
+                    f"{at['gueltig']} von {at['fenster']} Minutenfenstern deutlich"
+                    if at["gueltig"]
+                    else at["grund"]
+                )
+                out.append(
+                    KachelWert(
+                        kz.titel,
+                        zahl(wert, kz.nachkomma),
+                        kz.einheit,
+                        farbe=FARBEN[key],
+                        gross=g,
+                        grund=hinweis_atmung if key == "atemfrequenz" else "",
                     )
                 )
             elif art.kennzahl is not None:
@@ -295,6 +339,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                         titel(k, a.pnn_ms),
                         *_gesamtwert(k, td, frequenz, nichtlinear, kz.nachkomma),
                         farbe=FARBEN[k],
+                        gross=g,
                     )
                 )
         return out
@@ -377,7 +422,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     def zeichnen(aktualisieren: bool = True) -> None:
         kopf()
-        kacheln_box.content = raster(kachel_werte())
+        kacheln_box.content = anzeige(kachel_werte(), einst.darstellung)
         analyse.aufbauen()
         kurven()
         ketten_box.controls = [ketten_zeile(i, k) for i, k in enumerate(z.ketten)] or [
@@ -439,6 +484,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         uebungen_offen=state.notiz_uebungen_offen,
         quelle=state.notiz_uebungen_quelle,
         uebungen_merken=uebungen_merken,
+        katalog=(lambda: uebungs_katalog(state)) if einst.notiz_uebungen else None,
     )
 
     def breite_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:

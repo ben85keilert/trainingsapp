@@ -25,6 +25,7 @@ from typing import Any
 import flet as ft
 import numpy as np
 
+from trainingsapp.hrv_core.atmung import ATEMUEBUNG, RUHE
 from trainingsapp.hrv_core.frequency import fensterspektrum
 from trainingsapp.hrv_core.trends import aktuell, verlauf
 from trainingsapp.ui.components.kacheln import zahl
@@ -47,7 +48,7 @@ Reihe3 = tuple[np.ndarray, np.ndarray, np.ndarray]
 
 HINWEISE = {
     "zeit": "Werte im gleitenden Fenster bzw. je Block. Wo die Kurve abreißt, gab es zu "
-    "wenige gute Schläge.",
+    "wenige gute Schläge — bei der Atemfrequenz: keine deutliche Atmung.",
     "frequenz": "Spektrum des sichtbaren Ausschnitts: VLF grau, LF orange (0,04–0,15 Hz), "
     "HF türkis (0,15–0,40 Hz), Punkt = stärkster Gipfel. Atmet man ruhig 6-mal je "
     "Minute, liegt der Gipfel bei 0,1 Hz — im LF-Band.",
@@ -174,6 +175,7 @@ class Analyse:
         """Spektrum bzw. Poincaré und die Verlaufskurven für den Ausschnitt neu rechnen."""
         t, rr, naht = self._reihe()
         ansicht = self._state.ansicht()
+        atem_modus = ATEMUEBUNG if self._state.hrv_einstellungen().atemuebung else RUHE
         bereich = self.bereich
         hf_punkte = self._hf_geraet
         if list(self._ohne()) != self._ohne_chips:
@@ -193,6 +195,7 @@ class Analyse:
                 block=block,
                 pnn_ms=ansicht.pnn_ms,
                 zwischenspeicher=self._speicher,
+                atem_modus=atem_modus,
             )
 
         if bereich == "frequenz":

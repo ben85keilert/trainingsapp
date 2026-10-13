@@ -39,16 +39,17 @@ from trainingsapp.devices.base import DeviceInfo, Verbindung
 from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.devices.profiles import profil_fuer_namen
 from trainingsapp.devices.simulated import SIM_PPI, SIM_PREFIX, SIM_SYNTH, SimulatedSource
+from trainingsapp.hrv_core.atmung import ATEMUEBUNG, RUHE, kurzgrund
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
 from trainingsapp.hrv_core.regeln import Korrekturregeln
-from trainingsapp.hrv_core.trends import KENNZAHLEN, aktuell, titel
+from trainingsapp.hrv_core.trends import KENNZAHLEN, aktuell, atmung_aktuell, titel
 from trainingsapp.ui.components.analyse import Analyse
-from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, raster, zahl
+from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, anzeige, zahl
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
-from trainingsapp.ui.components.notizen import Notizfeld, uebungsquellen
+from trainingsapp.ui.components.notizen import Notizfeld, uebungs_katalog, uebungsquellen
 from trainingsapp.ui.components.verlauf import FARBEN, fenster_text
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
@@ -131,30 +132,66 @@ def ohne_rr() -> list[str]:
 
 
 def kachel_werte(
-    lauf: Messlauf, einst: HrvEinstellungen, ansicht: Ansicht, verity: bool
+    lauf: Messlauf,
+    einst: HrvEinstellungen,
+    ansicht: Ansicht,
+    verity: bool,
+    atemuebung_an: Callable[[], object] | None = None,
 ) -> list[KachelWert]:
-    """Die eingestellten Kacheln mit den aktuellen Live-Werten.
+    """Die eingestellten Werte der Übersicht mit den aktuellen Live-Werten.
 
-    Kacheln einer Verlaufskurve rechnen mit deren Fenster — der Wert ist der
-    letzte Punkt der Kurve. Vom Sensor verworfene Intervalle (Verity Sense)
-    erscheinen von selbst, sobald es welche gibt.
+    Werte einer Verlaufskurve rechnen mit deren Fenster — der Wert ist der
+    letzte Punkt der Kurve. Die Atemfrequenz gibt es nur bei deutlicher Atmung;
+    sonst steht der Grund da (bei langsamer Schwingung mit dem Knopf
+    „Atemübung", ``atemuebung_an``). Vom Sensor verworfene Intervalle (Verity
+    Sense) erscheinen von selbst, sobald es welche gibt.
     """
     k = lauf.live.kennzahlen()
     t, rr, naht = lauf.live.verlaufsreihe()
+    modus = ATEMUEBUNG if einst.atemuebung else RUHE
+    gross = set(einst.gross)
+    atmung = None
     out: list[KachelWert] = []
     for key in einst.kacheln:
         art = KACHELN.get(key)
         if art is None:
             continue
+        g = key in gross
         if key == "hf":
             hf = k.hf_bpm if k.hf_bpm is not None else lauf.status.hf_bpm
-            out.append(KachelWert("Herzfrequenz", zahl(hf), "bpm", gross=True))
+            out.append(KachelWert("Herzfrequenz", zahl(hf), "bpm", gross=g))
         elif key == "rr":
-            out.append(KachelWert("PPI" if verity else "RR", zahl(k.rr_ms), "ms", gross=True))
+            out.append(KachelWert("PPI" if verity else "RR", zahl(k.rr_ms), "ms", gross=g))
         elif key == "artefakte":
-            out.append(KachelWert("Artefakte", str(k.artefakte), f"von {k.schlaege}"))
+            out.append(
+                KachelWert("Artefakte", str(k.artefakte), zusatz=f"von {k.schlaege}", gross=g)
+            )
         elif key == "schwankung":
-            out.append(KachelWert(art.titel, zahl(k.schwankung_60s, 1), "bpm"))
+            out.append(KachelWert(art.titel, zahl(k.schwankung_60s, 1), "bpm", gross=g))
+        elif key in ("atemfrequenz", "rsa"):
+            kz = KENNZAHLEN[key]
+            fenster = ansicht.fenster_fuer(key, kz.fenster_s)
+            if atmung is None:
+                atmung = atmung_aktuell(t, rr, fenster, atem_modus=modus)
+            wert = atmung.rate_pro_min if key == "atemfrequenz" else atmung.rsa_bpm
+            grund = "" if atmung.gueltig else kurzgrund(atmung.gruende)
+            aktion = None
+            if key == "atemfrequenz" and atemuebung_an is not None:
+                if einst.atemuebung:
+                    aktion = ("Atemübung aus", atemuebung_an)
+                elif "langsame Schwingung" in grund:
+                    aktion = ("Atemübung", atemuebung_an)
+            out.append(
+                KachelWert(
+                    f"{kz.titel} {fenster_text(fenster)}",
+                    zahl(wert if atmung.gueltig else None, kz.nachkomma),
+                    kz.einheit,
+                    farbe=FARBEN[key],
+                    gross=g,
+                    grund=grund,
+                    aktion=aktion,
+                )
+            )
         elif art.kennzahl is not None:
             kz = KENNZAHLEN[art.kennzahl]
             fenster = ansicht.fenster_fuer(art.kennzahl, kz.fenster_s)
@@ -169,6 +206,7 @@ def kachel_werte(
                     zahl(wert, kz.nachkomma),
                     kz.einheit,
                     farbe=FARBEN[art.kennzahl],
+                    gross=g,
                 )
             )
     if k.verworfen:
@@ -374,6 +412,21 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         fenster.ende_s = None
         aktualisieren(erzwingen=True)
 
+    def atemuebung_an() -> None:
+        """„Atemübung" in der Übersicht umschalten — langsames Atmen auswerten oder nicht."""
+        an = not einst.atemuebung
+        einstellung_merken(atemuebung=an)
+        page.show_dialog(
+            ft.SnackBar(
+                ft.Text(
+                    "Atemübung: Auch langsames Atmen wird ausgewertet."
+                    if an
+                    else "Atemübung aus: Atemfrequenz erst ab 8/min."
+                )
+            )
+        )
+        aktualisieren(erzwingen=True)
+
     def gewischt() -> None:
         aktualisieren(erzwingen=True)
 
@@ -420,7 +473,15 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         uebungen_offen=state.notiz_uebungen_offen,
         quelle=state.notiz_uebungen_quelle,
         uebungen_merken=uebungen_merken,
+        katalog=(lambda: uebungs_katalog(state)) if einst.notiz_uebungen else None,
     )
+
+    def timer_notizen() -> None:
+        """Der Timer hat Abschnitte als Notizen in die Aufnahme geschrieben."""
+        notizfeld.auffrischen()
+        aktualisieren(erzwingen=True)
+
+    state.notiz_beobachter["live"] = timer_notizen
 
     def ohne() -> list[str]:
         return [] if lauf.live.kennzahlen().rr_ms else ohne_rr()
@@ -588,7 +649,8 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         # Ein Zeitpunkt für alle Kurven — sonst rückte jede ein Stück weiter.
         x_von, x_bis = fenster.bereich(lauf.jetzt_s(), anfang())
         status_box.content = status_karte()
-        kacheln_box.content = raster(kachel_werte(lauf, einst, state.ansicht(), verity))
+        werte = kachel_werte(lauf, einst, state.ansicht(), verity, atemuebung_an)
+        kacheln_box.content = anzeige(werte, einst.darstellung)
         rr_box.content = hauptkurve(x_von, x_bis)
         lage_box.content = lage()
         analyse.zeichnen(x_von, x_bis)

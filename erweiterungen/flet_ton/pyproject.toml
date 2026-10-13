@@ -1,0 +1,21 @@
+[project]
+name = "flet-ton"
+version = "0.1.0"
+description = "Flet-Erweiterung: kurze Signaltöne (audioplayers), die Musik nur kurz leiser machen statt sie anzuhalten"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Praxis Ebert" }]
+# Nur flet — das Abspielen ist Dart. Version im Gleichschritt mit der App (flet==1.0.*).
+dependencies = ["flet>=1.0.3"]
+
+# Wie flet_ble: der Flutter-Teil landet im Wheel unter flutter/flet_ton, wo
+# serious_python beim `flet build` Erweiterungen sucht.
+[tool.setuptools.package-data]
+"flutter.flet_ton" = ["**/*"]
+
+[tool.setuptools]
+license-files = []
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

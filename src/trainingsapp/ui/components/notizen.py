@@ -18,8 +18,10 @@ Metadaten in die Messdatei.
 
 **Übungen antippen.** „Übungen" in der Eingabe blendet die Übungen eines Plans
 als kleine Namen ein (zuerst die heute anstehenden Pläne, zuletzt alle
-Übungen); ein Tipp setzt den Namen in den Notiztext. Gespeichert wird nur Text
-— das Format der Messdatei bleibt, wie praxis_gui es kennt.
+Übungen); ein Tipp setzt den Namen in den Notiztext. Beim Speichern bekommt die
+Notiz die Kurzcodes der Übungen, deren Namen im Text stehen (Feld ``uebungen``,
+6 Zeichen je Übung — `core.kurzcode`, Vertrag Abschnitt 4); praxis_gui behält
+das Feld. Notizen mit Übung tragen in der Liste ein kleines Hantelsymbol.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core.kurzcode import genannte, kurzcode
 from trainingsapp.hrv_core.ereignisse import Zeitbezug, notiz, sortiert
 from trainingsapp.ui.components.kurve import Reihe
 
@@ -75,6 +78,11 @@ def uebungsquellen(state: Any) -> list[UebungsQuelle]:
     if alle:
         quellen.append(UebungsQuelle(ALLE, "Alle Übungen", alle))
     return quellen
+
+
+def uebungs_katalog(state: Any) -> dict[str, str]:
+    """Name → Kurzcode aller Übungen (auch archivierter) — für ``uebungen`` in Notizen."""
+    return {u.name: kurzcode(u.id) for u in state.uebungen.alle(mit_archivierten=True)}
 
 
 def einfuegen(text: str, name: str) -> str:
@@ -128,6 +136,7 @@ class Notizfeld:
         uebungen_offen: bool = False,
         quelle: str | None = None,
         uebungen_merken: Callable[[bool, str | None], None] = lambda *_: None,
+        katalog: Callable[[], dict[str, str]] | None = None,
     ) -> None:
         self._zeitbezug = zeitbezug
         self._ereignisse = ereignisse
@@ -139,6 +148,7 @@ class Notizfeld:
         self._offen_merken = offen_merken
         self._uebungen = uebungen
         self._uebungen_merken = uebungen_merken
+        self._katalog = katalog
         self.uebungen_offen = uebungen_offen
         self.quelle = quelle
         self.offen = offen
@@ -253,7 +263,8 @@ class Notizfeld:
             return
         liste = list(self._ereignisse())
         alt = liste[self.bearbeite] if 0 <= self.bearbeite < len(liste) else None
-        eintrag = notiz(text, zb.anker(self._x_der_eingabe()), zb.start_utc, alt)
+        codes = genannte(text, self._katalog()) if self._katalog is not None else None
+        eintrag = notiz(text, zb.anker(self._x_der_eingabe()), zb.start_utc, alt, codes)
         if alt is not None:
             liste[self.bearbeite] = eintrag
         else:
@@ -544,6 +555,13 @@ class Notizfeld:
                     ft.Container(width=3, height=16, bgcolor=FARBE_NOTIZ, border_radius=2),
                     ft.Text(zeit, size=12, opacity=0.7, width=96),
                     ft.Text(str(e.get("text") or ""), size=13, expand=True),
+                    ft.Icon(
+                        ft.Icons.FITNESS_CENTER,
+                        size=14,
+                        opacity=0.6,
+                        tooltip="Nennt Übungen aus dem Katalog",
+                        visible=bool(e.get("uebungen")),
+                    ),
                 ],
             ),
         )
@@ -594,5 +612,6 @@ __all__ = [
     "Notizfeld",
     "UebungsQuelle",
     "einfuegen",
+    "uebungs_katalog",
     "uebungsquellen",
 ]

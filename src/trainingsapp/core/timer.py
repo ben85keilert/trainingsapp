@@ -9,8 +9,17 @@ Der **Ablauf** (`TimerLauf`) rechnet auf einer monotonen Uhr und zählt keine
 Ticks: Wie weit der Timer ist, ergibt sich aus der vergangenen Laufzeit. So
 driftet er nicht, wenn die Oberfläche einmal stockt, und eine angehaltene App
 zeigt nach dem Aufwachen sofort den richtigen Stand. Die Oberfläche fragt
-`TimerLauf.stand` nur ab — mehrmals je Sekunde — und erkennt Abschnittswechsel
-mit `wechsel`.
+`TimerLauf.stand` nur ab — mehrmals je Sekunde — und erfährt aus `signal`,
+ob ein Ton fällig ist (Countdown 3-2-1, Wechsel, Ende).
+
+**Abschnitte als Notizen.** Läuft eine HRV-Aufnahme, wird jeder
+Abschnittsanfang eine Notiz in der Messung (`TimerLauf.neue_marken`). Die Marke
+trägt den Zeitpunkt, zu dem der Abschnitt wirklich begann — auch wenn die
+Oberfläche ihn erst später abfragt. Die Notizen sind gewöhnliche Notizen:
+Nachträglich lassen sie sich umbenennen, verschieben und löschen.
+
+Wie sich der Timer meldet (Ton, Countdown, Vibration, Bildschirm an, Notizen),
+steht in `TimerSignale` — gerätelokal, für alle Profile.
 
 Dieses Modul importiert nichts aus anderen Schichten (Architekturregel) und
 lässt sich ohne Bildschirm testen.
@@ -21,7 +30,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Final
 
 from .models import new_id
@@ -30,6 +39,13 @@ from .models import new_id
 MAX_ABSCHNITT_S: Final[int] = 99 * 60 + 59
 #: Höchstens so viele Runden
 MAX_RUNDEN: Final[int] = 99
+#: Countdown: ein kurzer Ton bei so vielen Sekunden Rest
+COUNTDOWN_S: Final[tuple[int, ...]] = (3, 2, 1)
+
+#: Signale (`signal`)
+COUNTDOWN: Final[str] = "countdown"
+WECHSEL: Final[str] = "wechsel"
+ENDE: Final[str] = "ende"
 
 
 def dauer_text(sekunden: float) -> str:
@@ -205,6 +221,55 @@ def timer_profile_schreiben(profile: Iterable[TimerProfil]) -> str:
     return json.dumps([p.als_dict() for p in profile], ensure_ascii=False)
 
 
+@dataclass
+class TimerSignale:
+    """Wie sich der Timer meldet — gerätelokal, für alle Profile; alles an.
+
+    >>> TimerSignale.aus_dict({"ton": False, "countdown": "kaputt"}) == TimerSignale(ton=False)
+    True
+    >>> timer_signale_lesen(timer_signale_schreiben(TimerSignale(wach=False))).wach
+    False
+    """
+
+    #: Töne beim Abschnittswechsel und am Ende
+    ton: bool = True
+    #: Kurze Töne 3, 2, 1 s vor jedem Abschnittsende (nur mit ``ton``)
+    countdown: bool = True
+    #: Vibrieren beim Wechsel, doppelt am Ende (Android)
+    vibration: bool = True
+    #: Bildschirm bleibt an, solange der Timer läuft — sonst legt Android die App
+    #: schlafen, und Töne und Vibration bleiben aus
+    wach: bool = True
+    #: Läuft eine HRV-Aufnahme, wird jeder Abschnittsanfang eine Notiz
+    notizen: bool = True
+
+    def als_dict(self) -> dict[str, bool]:
+        return asdict(self)
+
+    @classmethod
+    def aus_dict(cls, d: Any) -> TimerSignale:
+        """Defensiv: Unbrauchbares fällt auf die Vorgabe zurück."""
+        vorgabe = cls()
+        if not isinstance(d, dict):
+            return vorgabe
+        werte = {
+            f.name: d[f.name] if isinstance(d.get(f.name), bool) else getattr(vorgabe, f.name)
+            for f in fields(cls)
+        }
+        return cls(**werte)
+
+
+def timer_signale_lesen(text: str | None) -> TimerSignale:
+    try:
+        return TimerSignale.aus_dict(json.loads(text or ""))
+    except (TypeError, ValueError):
+        return TimerSignale()
+
+
+def timer_signale_schreiben(signale: TimerSignale) -> str:
+    return json.dumps(signale.als_dict())
+
+
 # ---------------------------------------------------------------------------
 # Ablauf
 # ---------------------------------------------------------------------------
@@ -231,6 +296,40 @@ class TimerStand:
         if self.abschnitt_s <= 0:
             return 1.0
         return min(max(1.0 - self.rest_s / self.abschnitt_s, 0.0), 1.0)
+
+
+def signal(alt: TimerStand | None, neu: TimerStand) -> str | None:
+    """Welcher Ton zwischen zwei Abfragen fällig wurde — höchstens einer.
+
+    Ende vor Wechsel vor Countdown. Der Countdown tönt, wenn die Restzeit 3, 2
+    und 1 s unterschreitet — im selben Abschnitt und nur, wenn er länger dauert.
+
+    >>> def s(nummer, rest, fertig=False, dauer=30):
+    ...     return TimerStand(1, 0, "A", dauer, rest, rest, not fertig, fertig, nummer)
+    >>> signal(s(0, 3.1), s(0, 2.9)), signal(s(0, 2.9), s(0, 2.7)), signal(s(0, 0.1), s(1, 29.9))
+    ('countdown', None, 'wechsel')
+    >>> signal(s(1, 0.1), s(2, 0.0, fertig=True)), signal(None, s(0, 2.0))
+    ('ende', None)
+    >>> signal(s(0, 3.0, dauer=3), s(0, 2.8, dauer=3))  # 3-s-Abschnitt: kein Ton bei 3
+    """
+    if alt is None:
+        return None
+    if neu.fertig and not alt.fertig:
+        return ENDE
+    if neu.nummer != alt.nummer:
+        return WECHSEL
+    if neu.laeuft and any(neu.rest_s <= k < alt.rest_s for k in COUNTDOWN_S if k < neu.abschnitt_s):
+        return COUNTDOWN
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class Marke:
+    """Ein Abschnittsanfang (oder das Ende) für eine Notiz."""
+
+    text: str
+    #: Wie lange es bei der Abfrage her war (s) — die Notiz steht dort, nicht „jetzt"
+    vor_s: float
 
 
 def wechsel(alt: TimerStand | None, neu: TimerStand) -> bool:
@@ -279,6 +378,8 @@ class TimerLauf:
         for _, _, a in self._folge:
             summe += a.dauer_s
             self._enden.append(summe)
+        #: Laufende Nummer des zuletzt gemeldeten Abschnittsanfangs (`neue_marken`)
+        self._gemeldet: int | None = None
 
     @property
     def gesamt_s(self) -> float:
@@ -320,6 +421,7 @@ class TimerLauf:
     def zuruecksetzen(self) -> None:
         self._basis_s = 0.0
         self._start = None
+        self._gemeldet = None  # der nächste Start meldet den ersten Abschnitt wieder
 
     def weiter(self) -> None:
         """Zum Anfang des nächsten Abschnitts — im letzten: ans Ende."""
@@ -337,6 +439,65 @@ class TimerLauf:
         self._basis_s = ziel
         if self._start is not None:
             self._start = self._uhr()
+
+    # -- Marken für Notizen -------------------------------------------------------
+
+    def anfang_s(self, nummer: int) -> float:
+        """Laufzeit, zu der Abschnitt ``nummer`` beginnt (``nummer`` = Anzahl: das Ende)."""
+        return self._enden[min(nummer, len(self._enden)) - 1] if nummer > 0 else 0.0
+
+    def markentext(self, nummer: int) -> str:
+        """„Belastung (Runde 2/8)"; der erste Anfang nennt das Profil, das Ende „Timer fertig"."""
+        if nummer >= len(self._folge):
+            return "Timer fertig"
+        runde, index, a = self._folge[nummer]
+        text = a.name or f"Abschnitt {index + 1}"
+        if self.profil.runden > 1:
+            text += f" (Runde {runde}/{self.profil.runden})"
+        return f"Timer „{self.profil.name}“: {text}" if nummer == 0 else text
+
+    def neue_marken(self) -> list[Marke]:
+        """Abschnittsanfänge seit der letzten Abfrage — jeder genau einmal.
+
+        Vorwärts kommt jeder Anfang mit dem Zeitpunkt, zu dem er wirklich war —
+        auch mehrere, wenn die App geschlafen hat. Zurück (oder neu gestartet)
+        nur der jetzige Abschnitt. Angehalten meldet nichts: Ein übersprungener
+        Abschnitt beginnt, wenn es weitergeht.
+
+        >>> t = [0.0]
+        >>> p = TimerProfil(name="P", abschnitte=[Abschnitt("A", 10), Abschnitt("B", 5)], runden=2)
+        >>> lauf = TimerLauf(p, uhr=lambda: t[0])
+        >>> lauf.neue_marken()
+        []
+        >>> lauf.start(); [(m.text, m.vor_s) for m in lauf.neue_marken()]
+        [('Timer „P“: A (Runde 1/2)', 0.0)]
+        >>> t[0] = 24.0; [(m.text, m.vor_s) for m in lauf.neue_marken()]
+        [('B (Runde 1/2)', 14.0), ('A (Runde 2/2)', 9.0)]
+        >>> t[0] = 99.0; [(m.text, m.vor_s) for m in lauf.neue_marken()]
+        [('B (Runde 2/2)', 74.0), ('Timer fertig', 69.0)]
+        >>> lauf.neue_marken(), lauf.start(), [m.text for m in lauf.neue_marken()]
+        ([], None, ['Timer „P“: A (Runde 1/2)'])
+        """
+        if not self.begonnen:
+            self._gemeldet = None  # zurückgesetzt: der nächste Start meldet wieder
+            return []
+        stand = self.stand()
+        if not (stand.laeuft or stand.fertig) or stand.nummer == self._gemeldet:
+            return []
+        jetzt = self._uhr()
+        if self._gemeldet is None or stand.nummer < self._gemeldet:
+            nummern = [stand.nummer]
+        else:
+            nummern = list(range(self._gemeldet + 1, stand.nummer + 1))
+        self._gemeldet = stand.nummer
+        return [Marke(self.markentext(k), round(jetzt - self._uhr_bei(k), 3)) for k in nummern]
+
+    def _uhr_bei(self, nummer: int) -> float:
+        """Wann Abschnitt ``nummer`` begann — seit dem letzten Start genau, sonst jetzt."""
+        laufzeit = self.anfang_s(nummer)
+        if self._start is None or laufzeit < self._basis_s:
+            return self._uhr()
+        return self._start + (laufzeit - self._basis_s)
 
     # -- Abfrage ---------------------------------------------------------------
 
@@ -365,16 +526,25 @@ class TimerLauf:
 
 
 __all__ = [
+    "COUNTDOWN",
+    "COUNTDOWN_S",
+    "ENDE",
     "MAX_ABSCHNITT_S",
     "MAX_RUNDEN",
+    "WECHSEL",
     "Abschnitt",
+    "Marke",
     "TimerLauf",
     "TimerProfil",
+    "TimerSignale",
     "TimerStand",
     "dauer_lesen",
     "dauer_text",
+    "signal",
     "standard_profile",
     "timer_profile_lesen",
     "timer_profile_schreiben",
+    "timer_signale_lesen",
+    "timer_signale_schreiben",
     "wechsel",
 ]

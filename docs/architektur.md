@@ -103,6 +103,19 @@ Hintergrund. `flet-permission-handler` deckt das nicht ab.
 
 Das wird früh als Spike geprüft (L02b), nicht erst wenn viel darauf aufbaut.
 
+### Töne: eine zweite, kleine Erweiterung
+
+Der Timer piept (Countdown, Abschnittswechsel, Ende). `flet-audio` hätte das
+gekonnt, übernimmt aber den Audiokontext-Standard von audioplayers: Android
+`AUDIOFOCUS_GAIN`, Nutzung „Medien". Jeder Piep nähme Musik-Apps den Fokus
+dauerhaft — wer zur Musik trainiert, hätte nach dem ersten Signal Stille.
+`erweiterungen/flet_ton` (Dart, audioplayers) fordert den Fokus nur kurz und
+duckend an (`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`, Nutzung „Sonifikation"): Die
+Musik wird für den Ton leiser und spielt weiter. Die Klänge erzeugt
+`core/klang.py` als WAV-Bytes — keine Asset-Dateien, die `flet run` und
+`flet build` an verschiedenen Orten suchten. Wie `flet_ble` gibt es den Dienst
+nur in der gebauten App; am Rechner bleibt der Timer still.
+
 ### Der Sensor-Prüfstand
 
 Ob ein Gerät RR-Intervalle sendet, steht in Bit 4 des Flags-Bytes — und ist bei

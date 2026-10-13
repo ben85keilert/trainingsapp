@@ -18,11 +18,12 @@ gerätelokal (`core/hrv_einstellungen.py`, `app_setting: hrv_einstellungen`):
 | Einstellung | Vorgabe |
 |---|---|
 | Reiter „Messung" anzeigen | an — ausgeblendet bleibt er, solange eine Messung läuft |
-| Kacheln über der Kurve | Herzfrequenz, RR, RMSSD, SDNN, Schwankung, Artefakte (wie bisher) |
+| Werte über der Kurve | **Übersicht** (seit 14.10.; Kacheln wählbar): Herzfrequenz und RR groß, darunter Atemfrequenz, RMSSD, SDNN, Schwankung, Artefakte |
 | Zeitfenster live | 2 min |
 | korrigierte Kurve live | an |
 | pNNx-Schwelle | 50 ms |
-| Analyse: Frequenz / Nichtlinear | an / an |
+| Analyse: Frequenz / Nichtlinear | aus / aus (seit 14.10. — für Laien uninteressant) |
+| Atemübung (langsames Atmen auswerten) | aus |
 | Nichtlinear bei optischen Sensoren | aus (nicht empfohlen) |
 | Übungen in Notizen anbieten | an |
 | Automatische Korrektur | Regeln wie bisher (`Korrekturregeln()`) |
@@ -166,6 +167,40 @@ Bildschirmen passen (getestet in 412 px Breite im Browser).
 - **Offen:** „Heute" fasst Pläne doppelt zusammen (Bilanz oben, Plan darunter).
   Welche Stellen Ben noch als gedrängt empfindet, wäre am besten mit
   Bildschirmfotos zu klären.
+
+---
+
+## Nachtrag 14.10.: Bens Antworten, umgesetzt
+
+- **Übersicht statt Kacheln** (Vorgabe): große Werte oben in einer Reihe,
+  darunter eine ruhige Liste — Name links, Wert rechts, Farbpunkt der Kurve.
+  Komplett einstellbar (Einstellungen → HRV-Messung): ziehen ordnet um, der
+  Stern hebt groß hervor, × entfernt, „+" fügt hinzu; „Kacheln" bleibt wählbar.
+- **Frequenz und Nichtlinear standardmäßig aus** — wer sie einschaltet, hat
+  LF/HF als Wert und als Verlaufskurve (Vorgabe in der Kurvenansicht).
+- **Atemfrequenz** nur bei deutlicher Atemschwankung, gemeinsam mit praxis_gui
+  (`hrv_core/atmung.py`, byteidentisch; Messwerte in `docs/hrv_algorithmen.md`).
+  Ohne deutliche Atmung steht der Grund in der Übersicht; bei langsamer
+  Schwingung mit Knopf „Atemübung". praxis_gui ist umgestellt (Arbeitskopie,
+  **noch nicht committet** — Bens Freigabe).
+- **Timer-Ton** über die eigene Erweiterung `flet_ton` (Musik wird geduckt,
+  nicht angehalten): Countdown 3-2-1, zwei Töne beim Wechsel, vier am Ende.
+  Karte „Signale" im Timer: Ton, Countdown, Vibration, Bildschirm anlassen,
+  Abschnitte in die HRV-Messung — alles an, alles abschaltbar.
+- **Abschnittswechsel als Notizen** (Weg A): Läuft eine Aufnahme, wird jeder
+  Abschnittsanfang eine Notiz („Timer „Intervall 30/15“: Belastung (Runde 1/8)",
+  … „Timer fertig") — an der Stelle, an der er wirklich war, auch wenn die App
+  kurz schlief. Gewöhnliche Notizen: nachträglich umbenennen, verschieben,
+  löschen.
+- **Übungs-ID → Kurzcode:** 6 Zeichen (SHA-1 der UUID, 30 Bit, Crockford-
+  Base32) im Feld `uebungen` der Notiz, aus den Namen im Text ermittelt
+  (Vertrag Abschnitt 4). Im Text steht weiter nur der Name.
+
+**Als Nächstes (Bens Liste vom 14.10.):** Profile verwalten, bekannte
+Bluetooth-Geräte, Zeit/Frequenz-Einstellung, Timer-Knopf mit Text, Plan-
+Bearbeitung scrollbar, Parameter-Auswahl der Planübung, Zeitfelder und
+Einheiten, Übersicht der Leistungen, freie Skalen, Crop, Segmente, ULF/VLF bei
+langen Messungen.
 
 ---
 

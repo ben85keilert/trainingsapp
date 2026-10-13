@@ -29,6 +29,8 @@ FARBEN: dict[str, str] = {
     "rmssd": ft.Colors.AMBER_400,
     "sdnn": ft.Colors.PURPLE_300,
     "pnnx": ft.Colors.LIGHT_GREEN_400,
+    "atemfrequenz": ft.Colors.BLUE_400,
+    "rsa": ft.Colors.LIGHT_BLUE_300,
     "lf_power": ft.Colors.ORANGE_400,
     "hf_power": ft.Colors.TEAL_400,
     "lf_hf": ft.Colors.PINK_300,

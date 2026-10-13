@@ -25,7 +25,7 @@ from pathlib import Path
 from .. import __version__
 from ..hrv_core.aufnahme import Aufnahme
 from ..hrv_core.constants import malik_threshold
-from ..hrv_core.ereignisse import Zeitbezug
+from ..hrv_core.ereignisse import Zeitbezug, notiz
 from ..hrv_core.export import diagnose_pfad, diagnose_text
 from ..hrv_core.live import LiveFenster
 from ..hrv_core.ppi import messluecken
@@ -276,6 +276,21 @@ class Messlauf:
             aufnahme.start_utc,
             wand_versatz=aufnahme.start_mono - self.start_mono,
         )
+
+    def notiz_hinzufuegen(self, text: str, vor_s: float = 0.0) -> dict | None:
+        """Notiz in die laufende Aufnahme, ``vor_s`` Sekunden vor jetzt — ohne Aufnahme ``None``.
+
+        Für den Timer: Jeder Abschnittsanfang wird eine Notiz an der Stelle, an der
+        er war (`core.timer.TimerLauf.neue_marken`). Verankert wie „+ Notiz" →
+        „Jetzt" über die Wanduhr. Angehängt, nicht einsortiert: So verrutscht keine
+        Notiz, die gerade jemand bearbeitet (das Notizfeld merkt sich den Index).
+        """
+        zb = self.notiz_zeitbezug()
+        if zb is None or self.aufnahme is None:
+            return None
+        eintrag = notiz(text, zb.anker(self.jetzt_s() - max(vor_s, 0.0)), zb.start_utc)
+        self.aufnahme.ereignisse.append(eintrag)
+        return eintrag
 
     def aufnahme_dauer_s(self) -> float:
         return self.aufnahme.dauer_s() if self.aufnahme is not None else 0.0

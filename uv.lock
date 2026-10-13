@@ -831,6 +831,17 @@ wheels = [
 ]
 
 [[package]]
+name = "flet-ton"
+version = "0.1.0"
+source = { editable = "erweiterungen/flet_ton" }
+dependencies = [
+    { name = "flet" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "flet", specifier = ">=1.0.3" }]
+
+[[package]]
 name = "flet-video"
 version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2339,6 +2350,7 @@ dependencies = [
     { name = "flet-ble" },
     { name = "flet-charts" },
     { name = "flet-permission-handler" },
+    { name = "flet-ton" },
     { name = "flet-video" },
     { name = "numpy" },
 ]
@@ -2375,6 +2387,7 @@ requires-dist = [
     { name = "flet-ble", editable = "erweiterungen/flet_ble" },
     { name = "flet-charts", specifier = "==1.0.*" },
     { name = "flet-permission-handler", specifier = "==1.0.*" },
+    { name = "flet-ton", editable = "erweiterungen/flet_ton" },
     { name = "flet-video", specifier = "==1.0.*" },
     { name = "numpy", specifier = ">=2.1" },
 ]

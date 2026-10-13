@@ -22,15 +22,21 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-#: Kacheln über der Kurve, wenn nichts eingestellt ist — wie bis Oktober 2026
+#: Werte der Übersicht über der Kurve, wenn nichts eingestellt ist (Reihenfolge zählt)
 STANDARD_KACHELN: Final[tuple[str, ...]] = (
     "hf",
     "rr",
+    "atemfrequenz",
     "rmssd",
     "sdnn",
     "schwankung",
     "artefakte",
 )
+#: Davon groß hervorgehoben
+STANDARD_GROSS: Final[tuple[str, ...]] = ("hf", "rr")
+#: Darstellung der Werte: eine ruhige Übersicht (Liste) oder Kacheln
+UEBERSICHT: Final[str] = "uebersicht"
+KACHELN: Final[str] = "kacheln"
 
 #: Wählbare Breiten des Live-Zeitfensters (s)
 LIVE_FENSTER: Final[tuple[int, ...]] = (60, 120, 300, 600)
@@ -50,26 +56,35 @@ class HrvEinstellungen:
     True
     >>> HrvEinstellungen.aus_dict({"fenster_s": 7, "kacheln": "kaputt"}) == HrvEinstellungen()
     True
-    >>> HrvEinstellungen().bereiche(optisch=True)
+    >>> HrvEinstellungen(frequenz=True, nichtlinear=True).bereiche(optisch=True)
     ['zeit', 'frequenz']
+    >>> HrvEinstellungen().bereiche(optisch=False)
+    ['zeit']
     """
 
     #: Reiter „Messung" in der Navigationsleiste — ohne Gerät spart Ausblenden Platz
     messung_anzeigen: bool = True
-    #: Kacheln über der Hauptkurve, in dieser Reihenfolge
+    #: Werte über der Hauptkurve, in dieser Reihenfolge (Übersicht oder Kacheln)
     kacheln: list[str] = field(default_factory=lambda: list(STANDARD_KACHELN))
+    #: Davon groß hervorgehoben (Übersicht: oben in einer Reihe; Kacheln: halbe Breite)
+    gross: list[str] = field(default_factory=lambda: list(STANDARD_GROSS))
+    #: `UEBERSICHT` oder `KACHELN`
+    darstellung: str = UEBERSICHT
     #: Breite des Live-Zeitfensters (s)
     fenster_s: int = 120
     #: Live die korrigierte Kurve (Artefakte überbrückt) statt der rohen
     korrigiert: bool = True
-    #: Analysebereiche unter der Hauptkurve: Frequenz und Nichtlinear anbieten
-    frequenz: bool = True
-    nichtlinear: bool = True
+    #: Analysebereiche unter der Hauptkurve: Frequenz und Nichtlinear anbieten. Für
+    #: Laien uninteressant — deshalb aus; wer es braucht, schaltet es ein.
+    frequenz: bool = False
+    nichtlinear: bool = False
     #: Nichtlineares auch bei optischen Pulsintervallen (Verity Sense) — nicht
     #: empfohlen: DFA und SampEn brauchen präzise Schlagzeiten
     nichtlinear_optisch: bool = False
     #: In Notizen zur Messung die Übungen aus Plänen zum Antippen anbieten
     notiz_uebungen: bool = True
+    #: Atemübung: auch langsames Atmen (unter 8/min) auswerten (`hrv_core.atmung`)
+    atemuebung: bool = False
 
     def bereiche(self, *, optisch: bool) -> list[str]:
         """Welche Analysebereiche die Ansicht anbietet (Zeit immer)."""
@@ -86,12 +101,15 @@ class HrvEinstellungen:
         return {
             "messung_anzeigen": self.messung_anzeigen,
             "kacheln": list(self.kacheln),
+            "gross": list(self.gross),
+            "darstellung": self.darstellung,
             "fenster_s": self.fenster_s,
             "korrigiert": self.korrigiert,
             "frequenz": self.frequenz,
             "nichtlinear": self.nichtlinear,
             "nichtlinear_optisch": self.nichtlinear_optisch,
             "notiz_uebungen": self.notiz_uebungen,
+            "atemuebung": self.atemuebung,
         }
 
     @classmethod
@@ -105,21 +123,28 @@ class HrvEinstellungen:
             wert = d.get(name)
             return wert if isinstance(wert, bool) else getattr(vorgabe, name)
 
-        kacheln = d.get("kacheln")
-        if isinstance(kacheln, list) and all(isinstance(k, str) for k in kacheln):
-            kacheln = list(dict.fromkeys(kacheln))
-        else:
-            kacheln = list(vorgabe.kacheln)
+        def liste(name: str) -> list[str]:
+            wert = d.get(name)
+            if isinstance(wert, list) and all(isinstance(k, str) for k in wert):
+                return list(dict.fromkeys(wert))
+            return list(getattr(vorgabe, name))
+
+        kacheln = liste("kacheln")
+        gross = liste("gross")
+        darstellung = d.get("darstellung")
         fenster = d.get("fenster_s")
         return cls(
             messung_anzeigen=schalter("messung_anzeigen"),
             kacheln=kacheln,
+            gross=gross,
+            darstellung=darstellung if darstellung in (UEBERSICHT, KACHELN) else UEBERSICHT,
             fenster_s=fenster if fenster in LIVE_FENSTER else vorgabe.fenster_s,
             korrigiert=schalter("korrigiert"),
             frequenz=schalter("frequenz"),
             nichtlinear=schalter("nichtlinear"),
             nichtlinear_optisch=schalter("nichtlinear_optisch"),
             notiz_uebungen=schalter("notiz_uebungen"),
+            atemuebung=schalter("atemuebung"),
         )
 
 
@@ -138,8 +163,11 @@ __all__ = [
     "BEREICH_FREQUENZ",
     "BEREICH_NICHTLINEAR",
     "BEREICH_ZEIT",
+    "KACHELN",
     "LIVE_FENSTER",
+    "STANDARD_GROSS",
     "STANDARD_KACHELN",
+    "UEBERSICHT",
     "HrvEinstellungen",
     "einstellungen_lesen",
     "einstellungen_schreiben",

@@ -10,12 +10,18 @@ Rundenzahl (`core.timer.TimerProfil`). Das zuletzt benutzte ist beim Öffnen
 aktiv. Ohne eigene Profile gibt es zwei Vorlagen.
 
 Der Ablauf rechnet auf der monotonen Uhr (`core.timer.TimerLauf`); diese
-Ansicht fragt nur ab. Ein Abschnittswechsel vibriert (Android), das Ende
-vibriert doppelt. Zwei Grenzen, die man kennen sollte:
+Ansicht fragt nur ab. Signale (`core.timer.signal`): kurze Töne 3-2-1 vor jedem
+Abschnittsende, zwei Töne beim Wechsel, vier am Ende; dazu Vibration. Die Töne
+spielt die Erweiterung ``flet_ton`` — Musik anderer Apps wird dabei nur kurz
+leiser (nur in der gebauten App; am Rechner bleibt es still).
 
-- Töne gibt es noch nicht — dafür bräuchte die App das Paket ``flet-audio``.
-- Schaltet Android bei dunklem Display die App schlafen, bleibt die Vibration
-  aus; die Zeit stimmt beim Aufwachen trotzdem (Uhr statt gezählter Ticks).
+Solange der Timer läuft, bleibt der Bildschirm an (``Wakelock``): Schläft die
+App, bleiben Töne und Vibration aus — die Zeit stimmt beim Aufwachen trotzdem.
+
+**Abschnitte als Notizen.** Läuft eine HRV-Aufnahme, wird jeder
+Abschnittsanfang eine Notiz in der Messung, an der Stelle, an der er wirklich
+war. Es sind gewöhnliche Notizen: umbenennen, verschieben, löschen — live und
+nachträglich in der Aufzeichnung. Alles abschaltbar unter „Signale".
 """
 
 from __future__ import annotations
@@ -27,15 +33,20 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core.klang import toene
 from trainingsapp.core.timer import (
+    COUNTDOWN,
+    ENDE,
     MAX_RUNDEN,
     Abschnitt,
+    Marke,
     TimerLauf,
     TimerProfil,
+    TimerSignale,
     TimerStand,
     dauer_lesen,
     dauer_text,
-    wechsel,
+    signal,
 )
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
@@ -69,39 +80,85 @@ def lauf_fuer(state: AppState, profil: TimerProfil) -> TimerLauf:
     return lauf
 
 
-async def _signal(state: AppState, ende: bool) -> None:
-    """Vibrieren — nur, wo es geht (Android); sonst still."""
-    haptik = getattr(state, "haptik", None)
-    if haptik is None:
+async def toene_laden(state: AppState) -> None:
+    """Die Signaltöne einmal in den Tondienst legen (beim App-Start)."""
+    if state.ton is None:
         return
     with contextlib.suppress(Exception):
-        await haptik.vibrate()
-        if ende:
-            await asyncio.sleep(0.35)
+        for name, daten in toene().items():
+            await state.ton.laden(name, daten)
+        state.toene_geladen = True
+
+
+async def _melden(state: AppState, art: str, signale: TimerSignale) -> None:
+    """Ton und Vibration zu einem Signal — wie eingestellt und wo es geht."""
+    if art == COUNTDOWN and not signale.countdown:
+        return
+    if signale.ton and state.ton is not None and state.toene_geladen:
+        with contextlib.suppress(Exception):
+            await state.ton.spielen(art)
+    haptik = state.haptik
+    if signale.vibration and haptik is not None and art != COUNTDOWN:
+        with contextlib.suppress(Exception):
             await haptik.vibrate()
+            if art == ENDE:
+                await asyncio.sleep(0.35)
+                await haptik.vibrate()
+
+
+async def _wach(state: AppState, an: bool) -> None:
+    """Bildschirm anlassen (oder wieder freigeben) — still, wo es nicht geht."""
+    if state.wach is None:
+        return
+    with contextlib.suppress(Exception):
+        await (state.wach.enable() if an else state.wach.disable())
+
+
+def _in_messung(state: AppState, marken: list[Marke], signale: TimerSignale) -> None:
+    """Abschnittsanfänge als Notizen in die laufende HRV-Aufnahme — wenn eingestellt."""
+    messlauf = state.messlauf
+    if not marken or not signale.notizen or messlauf is None:
+        return
+    neu = [messlauf.notiz_hinzufuegen(m.text, m.vor_s) for m in marken]
+    if any(e is not None for e in neu):
+        for beobachter in list(state.notiz_beobachter.values()):
+            with contextlib.suppress(Exception):
+                beobachter()
 
 
 def ticker_starten(page: Any, state: AppState) -> None:
-    """Eine Aufgabe, die läuft, solange der Timer läuft — nie zwei zugleich."""
+    """Eine Aufgabe, die läuft, solange der Timer läuft — nie zwei zugleich.
+
+    Je Abfrage: Signal fällig? Abschnittsanfänge für Notizen? Beobachter
+    auffrischen. Der Bildschirm bleibt an, solange sie läuft (wenn eingestellt).
+    """
     if state.timer_aufgabe:
         return
 
     async def ticken() -> None:
         alt: TimerStand | None = None
+        wach = False
         try:
-            while state.timer is not None:
-                stand = state.timer.stand()
-                if wechsel(alt, stand):
-                    await _signal(state, stand.fertig)
+            while (lauf := state.timer) is not None:
+                stand = lauf.stand()
+                if (art := signal(alt, stand)) is not None:
+                    await _melden(state, art, state.timer_signale())
+                if marken := lauf.neue_marken():
+                    _in_messung(state, marken, state.timer_signale())
                 alt = stand
                 for beobachter in list(state.timer_beobachter.values()):
                     with contextlib.suppress(Exception):
                         beobachter()
                 if not stand.laeuft:
                     break
+                if not wach and state.timer_signale().wach:
+                    await _wach(state, True)
+                    wach = True
                 await asyncio.sleep(TICK_S)
         finally:
             state.timer_aufgabe = None
+            if wach:
+                await _wach(state, False)
 
     state.timer_aufgabe = True
     page.run_task(ticken)
@@ -330,9 +387,10 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 abstand=10,
             ),
             karte(kartentitel("Ablauf"), ablauf, abstand=6),
+            _signale_karte(page, state),
             hinweis(
                 "Der Timer läuft weiter, wenn du die Ansicht verlässt — oben in der Leiste "
-                "steht dann die Restzeit. Beim Wechsel eines Abschnitts vibriert das Handy."
+                "steht dann die Restzeit."
             ),
         ],
     )
@@ -345,6 +403,65 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         padding=16,
         controls=[sicher(inhalt, expand=False)],
     )
+
+
+#: Schalter der Karte „Signale": Feld in `TimerSignale`, Titel, Erklärung
+SIGNAL_SCHALTER: list[tuple[str, str, str]] = [
+    ("ton", "Ton", "Zwei Töne beim Wechsel, vier am Ende. Musik wird dabei nur kurz leiser."),
+    ("countdown", "Countdown 3 – 2 – 1", "Kurze Töne in den letzten drei Sekunden."),
+    ("vibration", "Vibration", "Beim Wechsel einmal, am Ende zweimal."),
+    (
+        "wach",
+        "Bildschirm anlassen",
+        "Solange der Timer läuft. Schläft das Handy, bleiben Töne und Vibration aus.",
+    ),
+    (
+        "notizen",
+        "Abschnitte in die HRV-Messung",
+        "Läuft eine Aufnahme, wird jeder Abschnitt eine Notiz in der Messung — "
+        "nachträglich umbenennen, verschieben oder löschen wie jede Notiz.",
+    ),
+]
+
+
+def _signale_karte(page: Any, state: AppState) -> ft.Control:
+    """Wie sich der Timer meldet — Schalter, sofort gespeichert."""
+    signale = state.timer_signale()
+
+    def umschalter(feld: str) -> Callable[[ft.Event[ft.Switch]], None]:
+        def handler(ev: ft.Event[ft.Switch]) -> None:
+            aktuell = state.timer_signale()
+            setattr(aktuell, feld, bool(ev.control.value))
+            state.timer_signale_setzen(aktuell)
+            lauf: TimerLauf | None = state.timer
+            if feld == "wach" and lauf is not None and lauf.laeuft:
+                page.run_task(_wach, state, aktuell.wach)
+
+        return handler
+
+    zeilen: list[ft.Control] = [kartentitel("Signale")]
+    for feld, titel, erklaerung in SIGNAL_SCHALTER:
+        zeilen.append(
+            ft.Row(
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+                controls=[
+                    ft.Column(
+                        spacing=0,
+                        tight=True,
+                        expand=True,
+                        controls=[
+                            ft.Text(titel, size=14),
+                            ft.Text(erklaerung, size=11, opacity=0.65),
+                        ],
+                    ),
+                    ft.Switch(value=getattr(signale, feld), on_change=umschalter(feld)),
+                ],
+            )
+        )
+    if state.ton is None:
+        zeilen.append(hinweis("Töne gibt es nur in der installierten App, nicht in der Vorschau."))
+    return karte(*zeilen, abstand=10)
 
 
 def _knopf_inhalt(icon: ft.IconData, text: str) -> ft.Control:

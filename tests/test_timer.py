@@ -6,13 +6,17 @@ from types import SimpleNamespace
 
 import pytest
 
+from trainingsapp.core.klang import toene
 from trainingsapp.core.timer import (
     Abschnitt,
     TimerLauf,
     TimerProfil,
+    TimerSignale,
     dauer_lesen,
+    signal,
     timer_profile_lesen,
     timer_profile_schreiben,
+    timer_signale_lesen,
     wechsel,
 )
 
@@ -93,6 +97,68 @@ def test_wechsel_meldet_abschnitt_und_ende() -> None:
     uhr.t += 5
     c = lauf.stand()
     assert wechsel(a, b) and wechsel(b, c) and not wechsel(c, c)
+
+
+def test_signale_ueber_einen_ganzen_lauf() -> None:
+    """Abfragen alle 0,2 s: 3-2-1 vor jedem Abschnittsende, Wechsel, Ende — je genau einmal."""
+    uhr = Uhr()
+    p = TimerProfil(abschnitte=[Abschnitt("A", 5), Abschnitt("B", 4)], runden=2)
+    lauf = TimerLauf(p, uhr=uhr)
+    lauf.start()
+    alt, folge = None, []
+    while True:
+        stand = lauf.stand()
+        if (art := signal(alt, stand)) is not None:
+            folge.append(art)
+        alt = stand
+        if stand.fertig:
+            break
+        uhr.t += 0.2
+    runde = ["countdown"] * 3 + ["wechsel"]
+    assert folge == runde * 3 + ["countdown"] * 3 + ["ende"]
+
+
+def test_marken_beim_anhalten_ueberspringen_und_zuruecksetzen() -> None:
+    uhr = Uhr()
+    lauf = TimerLauf(profil(), uhr=uhr)
+    lauf.start()
+    assert [m.text for m in lauf.neue_marken()] == ["Timer „Intervall“: Belastung (Runde 1/3)"]
+    uhr.t += 10
+    lauf.pause()
+    lauf.weiter()  # angehalten übersprungen: „Pause" beginnt erst beim Weiterlaufen
+    assert lauf.neue_marken() == []
+    uhr.t += 100
+    lauf.fortsetzen()
+    marken = lauf.neue_marken()
+    assert [(m.text, m.vor_s) for m in marken] == [("Pause (Runde 1/3)", 0.0)]
+    uhr.t += 3
+    lauf.pause()
+    lauf.zuruecksetzen()  # angehalten zurückgesetzt: der Neustart meldet wieder den Anfang
+    lauf.start()
+    assert [m.text for m in lauf.neue_marken()] == ["Timer „Intervall“: Belastung (Runde 1/3)"]
+
+
+def test_abschnitte_werden_notizen_in_der_aufnahme() -> None:
+    """Messlauf.notiz_hinzufuegen: Anker über die Wanduhr, ``vor_s`` zurück."""
+    from trainingsapp.devices.messlauf import Messlauf
+    from trainingsapp.devices.simulated import SimulatedSource
+
+    lauf = Messlauf(SimulatedSource())
+    assert lauf.notiz_hinzufuegen("A") is None  # ohne Aufnahme keine Notiz
+    lauf.aufnahme_starten()
+    assert lauf.aufnahme is not None
+    eintrag = lauf.notiz_hinzufuegen("Belastung", vor_s=0.0)
+    assert eintrag is not None and eintrag["text"] == "Belastung"
+    assert lauf.aufnahme.ereignisse == [eintrag]
+    assert list(eintrag)[:6] == ["beat_index", "dt_s", "t_wall_s", "t_s", "wall_time", "text"]
+
+
+def test_signale_und_toene() -> None:
+    assert timer_signale_lesen(None) == TimerSignale()
+    assert timer_signale_lesen('{"ton": false}').ton is False
+    daten = toene()
+    assert set(daten) == {"countdown", "wechsel", "ende"}
+    assert all(d[:4] == b"RIFF" and len(d) < 60_000 for d in daten.values())
 
 
 @pytest.mark.parametrize(

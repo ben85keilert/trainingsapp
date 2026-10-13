@@ -728,6 +728,14 @@ def test_notiz_uebungen_aus_plan_einsetzen(daten) -> None:
     _symbol(ansicht, ft.Icons.CHECK, "Speichern").on_click()
     (e,) = laden(pfad).ereignisse
     assert e["text"] == f"{katalog[0].name}, {katalog[1].name}"
+    # Die Notiz kennt die Übungen über ihre Kurzcodes (6 Zeichen statt UUID)
+    from trainingsapp.core.kurzcode import katalog_aufloesen, kurzcode
+
+    assert e["uebungen"] == [kurzcode(katalog[0].id), kurzcode(katalog[1].id)]
+    assert katalog_aufloesen(e["uebungen"], [u.id for u in katalog]) == [
+        katalog[0].id,
+        katalog[1].id,
+    ]
 
     # Ausgeschaltet in den Einstellungen: kein Knopf „Übungen"
     einst = state.hrv_einstellungen()
@@ -761,6 +769,7 @@ def test_detailansicht_alle_bereiche_und_kacheln(daten) -> None:
     state.hrv.anlegen(eintrag)
     e = state.hrv_einstellungen()
     e.kacheln = list(KACHELN)
+    e.frequenz = e.nichtlinear = True  # für Laien standardmäßig aus
     state.hrv_einstellungen_setzen(e)
     for bereich, erwartet in (
         ("zeit", "pNN50"),
@@ -773,6 +782,10 @@ def test_detailansicht_alle_bereiche_und_kacheln(daten) -> None:
         texte = _baum_texte(messung_detail_view(_seite(), state, eintrag))
         assert erwartet in texte, bereich
         assert "Ø Herzfrequenz" in texte and "LF-Band" in texte  # Kacheln der ganzen Messung
+    # Atemfrequenz der ganzen Messung: Median der Minutenfenster (Wahrheit 14,55/min)
+    texte = _baum_texte(messung_detail_view(_seite(), state, eintrag))
+    i = texte.index("Atemfrequenz")
+    assert texte[i + 1] == "20 von 20 Minutenfenstern deutlich" and texte[i + 2] in ("14,5", "14,6")
     # 6 min: LF und HF rechenbar, VLF gesperrt (braucht 20 min)
     texte = _baum_texte(messung_detail_view(_seite(), state, eintrag))
     assert any(t.startswith("Ganze Messung") for t in texte)

@@ -1,0 +1,20 @@
+name: flet_ton
+description: Flet-Service für kurze Signaltöne (audioplayers) — Musik wird geduckt, nicht angehalten
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: ">=3.44.0"
+
+dependencies:
+  flet: ^1.0.3
+  flutter:
+    sdk: flutter
+  # Dieselbe Hauptversion wie flet-audio 1.0 (MIT-Lizenz)
+  audioplayers: ^6.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0

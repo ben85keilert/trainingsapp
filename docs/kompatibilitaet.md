@@ -288,6 +288,32 @@ identisch):
 - `wall_time` ist die lokale Uhrzeit aus `start_utc + t_wall_s`; unbekannte
   Felder eines Ereignisses aus praxis_gui bleiben beim Bearbeiten erhalten.
 
+### Unsere Erweiterung: `uebungen` im Ereignis (seit 14.10.2026)
+
+Nennt eine Notiz Übungen aus dem Katalog der App (meist per Tipp eingesetzt),
+steht hinter `text` die Liste ihrer **Kurzcodes**:
+
+```json
+{ "beat_index": 731, "dt_s": 0.35, "t_wall_s": 631.42, "t_s": 612.0,
+  "wall_time": "10:42:11", "text": "Kniebeuge, dann Planke",
+  "uebungen": ["7DQ2MA", "C3XN0P"] }
+```
+
+- **Kurzcode** = die ersten 30 Bit des SHA-1 der Übungs-ID (UUID in
+  Kleinschrift, UTF-8) als 6 Zeichen Crockford-Base32 (`core/kurzcode.py`).
+  Die UUID selbst (36 Zeichen) wäre unnötig lang; 6 Zeichen genügen, weil die
+  App einen Code nur gegen den eigenen Katalog auflöst — bei 1 000 Übungen
+  liegt die Chance einer Doppelung unter 0,05 %.
+- **Welche Übungen** eine Notiz nennt, ergibt sich beim Speichern aus dem Text:
+  ganze Namen des Katalogs, längere zuerst („Kniebeuge einbeinig" vor
+  „Kniebeuge"), in der Reihenfolge im Text. Wer den Namen löscht, löscht den
+  Verweis. Ist „Übungen in Notizen" ausgeschaltet, bleibt ein vorhandenes Feld
+  unverändert.
+- Nennt die Notiz keine Übung, **fehlt** das Feld.
+- **praxis_gui** liest das Feld nicht und behält es beim Bearbeiten
+  (`events_widget._on_save` kopiert das ganze Ereignis) — der Vertrag bleibt
+  unverletzt.
+
 ---
 
 ## 5. Geräteprofile

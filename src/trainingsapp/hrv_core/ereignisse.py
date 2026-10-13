@@ -256,21 +256,37 @@ def uhrzeit(start_utc: datetime | None, t_wall_s: float | None) -> str:
         return ""
 
 
-def notiz(text: str, anker: dict, start_utc: datetime | None, alt: dict | None = None) -> dict:
+def notiz(
+    text: str,
+    anker: dict,
+    start_utc: datetime | None,
+    alt: dict | None = None,
+    uebungen: Sequence[str] | None = None,
+) -> dict:
     """Ein Ereignis wie praxis_gui: Anker, ``wall_time``, ``text``.
 
     ``alt``: bestehendes Ereignis — unbekannte Felder (aus praxis_gui) bleiben.
+    ``uebungen``: Kurzcodes der genannten Übungen (unsere Erweiterung, Vertrag
+    Abschnitt 4) — ``None`` lässt ein vorhandenes Feld stehen, eine leere Liste
+    entfernt es.
 
     >>> s = datetime(2026, 10, 13, 16, 0, tzinfo=UTC)
     >>> e = notiz("Atemübung", {"beat_index": 3, "dt_s": 0.2, "t_wall_s": 3.4, "t_s": 3.1}, s)
     >>> list(e), e["text"]
     (['beat_index', 'dt_s', 't_wall_s', 't_s', 'wall_time', 'text'], 'Atemübung')
+    >>> mit = notiz("Planke", {"beat_index": 3}, s, alt={"x": 1}, uebungen=["2ATPZC"])
+    >>> list(mit)[5:], mit["uebungen"]
+    (['text', 'uebungen', 'x'], ['2ATPZC'])
+    >>> "uebungen" in notiz("Pause", {"beat_index": 3}, s, alt=mit, uebungen=[])
+    False
     """
     out: dict[str, Any] = {k: anker.get(k) for k in ANKER_FELDER}
     out["wall_time"] = uhrzeit(start_utc, anker.get("t_wall_s")) or (alt or {}).get("wall_time", "")
     out["text"] = text.strip()
+    if uebungen:
+        out["uebungen"] = list(uebungen)
     for k, v in (alt or {}).items():
-        if k not in out:
+        if k not in out and not (k == "uebungen" and uebungen is not None):
             out[k] = v
     return out
 

@@ -18,6 +18,10 @@ from trainingsapp.hrv_core.regeln import Korrekturregeln
 def test_vorgaben_und_bereiche() -> None:
     e = HrvEinstellungen()
     assert e.kacheln == list(STANDARD_KACHELN) and e.messung_anzeigen
+    assert e.gross == ["hf", "rr"] and e.darstellung == "uebersicht" and not e.atemuebung
+    # Für Laien: nur der Zeitbereich — Frequenz und Nichtlinear schaltet man ein
+    assert e.bereiche(optisch=False) == ["zeit"]
+    e.frequenz = e.nichtlinear = True
     assert e.bereiche(optisch=False) == ["zeit", "frequenz", "nichtlinear"]
     assert e.bereiche(optisch=True) == ["zeit", "frequenz"]  # Verity: nicht empfohlen
     e.nichtlinear_optisch = True
@@ -90,14 +94,31 @@ def test_einstellungsseiten_bauen_und_schalten(tmp_path) -> None:
         )
         schalter.on_change(SimpleNamespace(control=SimpleNamespace(value=False)))
         assert not state.hrv_einstellungen().messung_anzeigen
+        # Hinzufügen per Chip, groß per Stern, umordnen, entfernen
         chip = next(
             c
             for c in controls
             if isinstance(c, ft.Chip) and getattr(c.label, "value", "") == "DFA α1"
         )
-        chip.on_select()
+        chip.on_click()
         assert state.hrv_einstellungen().kacheln[-1] == "dfa_alpha1"
-        chip.on_select()
+        liste = next(c for c in alle(ansicht) if isinstance(c, ft.ReorderableListView))
+        sterne = [
+            c
+            for c in alle(liste)
+            if isinstance(c, ft.IconButton) and c.icon in (ft.Icons.STAR, ft.Icons.STAR_BORDER)
+        ]
+        sterne[-1].on_click()  # DFA α1 groß
+        assert "dfa_alpha1" in state.hrv_einstellungen().gross
+        letzte = len(state.hrv_einstellungen().kacheln) - 1
+        liste.on_reorder(SimpleNamespace(old_index=letzte, new_index=0))
+        assert state.hrv_einstellungen().kacheln[0] == "dfa_alpha1"
+        weg = next(
+            c
+            for c in alle(liste.controls[0])
+            if isinstance(c, ft.IconButton) and c.icon == ft.Icons.CLOSE
+        )
+        weg.on_click()
         assert "dfa_alpha1" not in state.hrv_einstellungen().kacheln
         zurueck = next(
             c

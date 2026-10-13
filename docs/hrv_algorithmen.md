@@ -385,6 +385,65 @@ beim Verity Sense nur alle 5 s aktualisiert.
 > `physiologische_steuerung` bleibt in der Edition `solo` gesperrt
 > (`docs/recht/00_zweckbestimmung.md`).
 
+### Atemfrequenz (`hrv_core/atmung.py`, ATEM_VERSION 1)
+
+**Gemeinsames Modul mit praxis_gui** — byteidentisch in beiden Projekten
+(`praxislab/sensors/polar_h10/atmung.py`); je ein Test vergleicht die Bytes
+(`PRAXIS_GUI_PFAD` hier, `TRAININGSAPP_PFAD` dort). Nur numpy.
+
+**Prüfung statt Schätzung.** Der höchste Gipfel im Atemband ist im Sitzen oft
+die Mayer-Welle der Blutdruckregulation (0,1 Hz ≙ 6/min). praxis_gui lag damit
+auf seinem Generator-Korpus im Median 7–10/min daneben und nahm mit seiner
+Konfidenz (Gipfel gegen Median) auch Vorhofflimmern an. Eine Rate gibt es
+deshalb nur, wenn alles passt — sonst steht der Grund da:
+
+| Prüfung | Schwelle | Grund, wenn nicht |
+|---|---|---|
+| gute Schläge, Dauer, Abdeckung, Lücken | ≥ 30, ≥ 30 s, ≥ 80 %, ≤ 3 s | „zu wenige gute Schläge", „Lücke im Fenster" … |
+| Puls | ≤ 110 bpm | „Puls zu hoch" |
+| Abtastung | ≥ 3 Schläge je Atemzug | „Atmung zu schnell für den Puls" |
+| Glätte (Leistung unter der Atemgrenze / bis HF/2) | ≥ 0,92 | „unruhiger Herzrhythmus" (VHF, viele Extrasystolen) |
+| Gipfelanteil am Atemband | ≥ 0,40 | „kein deutlicher Atemgipfel" |
+| Zyklen im gefilterten Signal | ≥ 3, Rate ±1/min bzw. ±10 % zum Gipfel | „Atemzüge passen nicht zum Gipfel" |
+| Gleichmäßigkeit der Zyklen | CV ≤ 0,30 | „unregelmäßige Atmung" |
+| Atemschwankung (RSA, Spitze–Tal, Median) | ≥ 1 bpm | „Atemschwankung zu schwach" |
+
+**Zwei Modi.** `RUHE` (Vorgabe): nur ab 8/min — eine langsamere, stärkere
+Schwingung ist ein Grund („langsame Schwingung unter 8/min — Atmung oder
+Blutdruckwelle"), keine Zahl. `ATEMUEBUNG` (Einstellungen → HRV → Atmung, oder
+der Knopf „Atemübung" in der Übersicht): Langsames Atmen zählt, wenn sein Gipfel
+klar dominiert (Anteil ≥ 0,70) und die Schwankung spürbar ist (≥ 50 ms
+Spitze–Tal). Aus RR allein ist nicht zu unterscheiden, ob bei 6/min die Atmung
+oder die Blutdruckwelle schwingt — das sagt nur der Zusammenhang.
+
+**Wo es steht:** Wert der Übersicht (Fenster 60 s, wählbar 60/90/120 s),
+Verlaufskurve „Atemfrequenz" (Lücken, wo keine Atmung deutlich ist) und
+„Atemschwankung" (RSA in bpm), Aufzeichnung: Median der gültigen
+Minutenfenster mit „n von m Minutenfenstern deutlich". praxis_gui: `rest` und
+`auto` → RUHE, `deep` → ATEMUEBUNG; live die letzten 60 s.
+
+**Gemessen** auf dem praxis_gui-Generator-Korpus (Wahrheit bekannt, 38
+Aufnahmen, Fenster 60 s, Schritt 15 s; Fehler = Median |Rate − Wahrheit|):
+
+| Szenario | gültige Fenster (Ruhe) | Fehler | Atemübung |
+|---|---|---|---|
+| Ruhe sitzend/liegend, HRV-arm, Seufzer, Apnoe-Episoden | 83–100 % | 0,18–0,29/min | gleich |
+| BLE-Aussetzer/-Stau, Wiederverbinden, schlechter Gurtkontakt | 68–92 % | 0,21–0,23 | gleich |
+| Belastung/Erholung, Orthostase | 67–98 % | 0,20–0,33 | Orthostase: Mayer-Welle teils als Atmung (bis 14 von 56 Fenstern daneben) |
+| Kohärenzatmung 6/min | **0 %** (richtig: unter 8/min) | — | 100 %, 0,04–0,08 |
+| Vorhofflimmern normofrequent/tachykard | 0–1 von 36 | (1 Fehlgriff) | gleich |
+| häufige SVES / VES-Bigeminus / einzelne VES | 0 / 25 % / 11 % | 0,07–0,45 | gleich |
+| periodische Atmung | 80 % | 1,07, 13 Fenster > 1,5/min | — |
+| tiefe und flache Atmung im Wechsel | 0–10 % | 0,4–0,7 | im Modus Atemübung oft daneben (1,3–6/min) |
+
+Auf reinem Rauschen nimmt die Prüfung 0,7 % der Fenster an; echte Atmung
+(9–28/min, 20–80 ms) zu 97 %, mit 10 ms Rauschen zu 85 %. Grenzen:
+periodische Atmung (wechselnde Rate) und der Modus Atemübung außerhalb einer
+Atemübung — darum ist er aus und schaltet man ihn nur dafür ein.
+
+> **Keine Bewertung.** Die Atemfrequenz beschreibt, wie man atmet; „gut" oder
+> „zu schnell" sagt die App nicht (`physiologische_steuerung`, solo gesperrt).
+
 ---
 
 ## Frequenzbereich (`hrv_core/frequency.py`)

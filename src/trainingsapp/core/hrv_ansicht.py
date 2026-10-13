@@ -29,16 +29,20 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-#: Vorgabe je Bereich: ruhige Herzfrequenz aus den Intervallen und die
-#: Kurzzeitvariabilität; LF und HF; SD1 und DFA α1
+#: Vorgabe je Bereich: ruhige Herzfrequenz, Kurzzeitvariabilität und Atmung; LF,
+#: HF und LF/HF (wer Frequenz will, will LF/HF); SD1 und DFA α1
 STANDARD_KURVEN: Final[tuple[str, ...]] = (
     "hf_rr",
     "rmssd",
+    "atemfrequenz",
     "lf_power",
     "hf_power",
+    "lf_hf",
     "sd1",
     "dfa_alpha1",
 )
+#: Mit Formatstand 3 neu hinzugekommene Vorgaben — ältere Ansichten bekommen sie dazu
+NEU_IN_3: Final[tuple[str, ...]] = ("atemfrequenz", "lf_hf")
 #: Darstellung einer Kurve: gleitendes Fenster oder Blöcke ohne Überlappung
 GLEITEND: Final[str] = "gleitend"
 BLOCK: Final[str] = "block"
@@ -46,7 +50,7 @@ BLOCK: Final[str] = "block"
 PNN_WAHL: Final[tuple[int, ...]] = (10, 20, 30, 40, 50, 100)
 PNN_STANDARD: Final[int] = 50
 #: Formatstand der gespeicherten Ansicht; ältere werden beim Lesen ergänzt
-VERSION: Final[int] = 2
+VERSION: Final[int] = 3
 
 
 @dataclass
@@ -140,15 +144,20 @@ class Ansicht:
 
         >>> alt = Ansicht.aus_dict({"name": "Alt", "kurven": ["pnn50", "rmssd"]})
         >>> alt.kurven
-        ['pnnx', 'rmssd', 'lf_power', 'hf_power', 'sd1', 'dfa_alpha1']
+        ['pnnx', 'rmssd', 'lf_power', 'hf_power', 'sd1', 'dfa_alpha1', 'atemfrequenz', 'lf_hf']
         """
         if not isinstance(d, dict):
             return cls()
         kurven = [_neu(k) for k in d.get("kurven") or [] if isinstance(k, str)]
+        v = d.get("v")
+        stand = v if isinstance(v, int) else 1
         if "kurven" not in d:
             kurven = list(STANDARD_KURVEN)
-        elif d.get("v") != VERSION:
-            kurven += [k for k in STANDARD_KURVEN[2:] if k not in kurven]
+        else:
+            if stand < 2:
+                kurven += [k for k in STANDARD_KURVEN[2:] if k not in kurven and k not in NEU_IN_3]
+            if stand < 3:
+                kurven += [k for k in NEU_IN_3 if k not in kurven]
         fenster: dict[str, int] = {}
         roh = d.get("fenster")
         for k, v in roh.items() if isinstance(roh, dict) else []:

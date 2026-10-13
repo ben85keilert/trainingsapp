@@ -54,7 +54,12 @@ from trainingsapp.ui.views.plan import einzel_plan, plan_view, ziel_text
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
 from trainingsapp.ui.views.tag import tag_view
-from trainingsapp.ui.views.timer import timer_bearbeiten_view, timer_knopf, timer_view
+from trainingsapp.ui.views.timer import (
+    timer_bearbeiten_view,
+    timer_knopf,
+    timer_view,
+    toene_laden,
+)
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 from trainingsapp.ui.views.uebung_detail import uebung_detail
 from trainingsapp.ui.views.uebungen import neuen_plan_anlegen, uebungen
@@ -266,6 +271,19 @@ def main(page: ft.Page) -> None:
     haptik = ft.HapticFeedback()  # Vibration beim Abschnittswechsel des Timers
     page.services.append(haptik)
     state.haptik = haptik
+    wach = ft.Wakelock()  # Bildschirm an, solange der Timer läuft
+    page.services.append(wach)
+    state.wach = wach
+    # Signaltöne nur in der gebauten App — flet run kennt die Erweiterung nicht
+    try:
+        from flet_ton import FletTon
+        from flet_ton import verfuegbar as ton_verfuegbar
+    except ImportError:
+        ton_verfuegbar = None
+    if ton_verfuegbar is not None and ton_verfuegbar(page):
+        state.ton = FletTon()
+        page.services.append(state.ton)
+        page.run_task(toene_laden, state)
 
     def planuebung(teile: list[str], index: int) -> tuple[PlanItem, Exercise] | None:
         if len(teile) <= index:

@@ -43,9 +43,15 @@ Automatik schlägt nur 150/151 (Fehlerschätzung) zur Interpolation vor; RMSSD
 **21,8946 ms** über alle 299 Nachbardifferenzen. Dem Sensor folgend bleiben es
 21,7432 ms.
 
-## Was noch fehlt
+## `sensor_synth_ruhe_sitzend_11.json`, `sensor_synth_kohaerente_atmung_7.json`
 
-Für die HRV-Kennzahlen in L09 brauchen wir Sollwerte. Die liefert
-`praxis_gui/tools/generate_hrv_dataset.py --corpus`: 15 synthetische Szenarien
-mit Wahrheitsdatei (`truth-v1`), also bekannten LF-, HF-, RMSSD- und
-SDNN-Werten. Synthetisch erzeugt, damit ohne jeden Personenbezug.
+**Synthetisch**, ohne Personenbezug, erzeugt am 2026-10-13 mit
+`praxis_gui/tools/generate_hrv_dataset.py -s ruhe_sitzend -m 6 --seed 11` bzw.
+`-s kohaerente_atmung -m 6 --seed 7`: je 6 min H10-artige RR-Reihe ohne Lücken.
+Die Wahrheitsdateien (`truth-v1`) liegen nicht im Repo; ihre Bandleistungen
+stehen in `tests/test_frequenz.py` (Ruhe: LF 832,3 / HF 285,7 ms²;
+Kohärenzatmung 6/min: LF 4718,9 / HF 65,5 ms², Gipfel bei 0,1 Hz).
+
+Sollwerte für Frequenzbereich, DFA α1 und SampEn hat praxis_gui auf denselben
+Dateien gerechnet (scipy 1.18.1, neurokit2 0.2.12) — `tests/test_frequenz.py`,
+`tests/test_nichtlinear.py`.

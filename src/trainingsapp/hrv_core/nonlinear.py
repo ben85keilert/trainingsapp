@@ -1,7 +1,9 @@
 """Nichtlineare HRV-Kennzahlen: Poincaré, DFA α1, Sample Entropy.
 
-Poincaré ist implementiert — die Formeln sind kurz und die Werte werden von der
-Live-Ansicht gebraucht. DFA und SampEn folgen in Lektion L09.
+Poincaré, DFA α1 und Sample Entropy — alle in reinem numpy. DFA rechnet wie
+``neurokit2.fractal_dfa``, SampEn wie praxis_gui; die Golden-Tests
+(`tests/test_nichtlinear.py`) vergleichen mit Werten, die praxis_gui auf
+denselben Daten liefert.
 
 **Fachlicher Vorbehalt, der in jede Auswertung gehört:** Nichtlineare Kennzahlen
 setzen eine präzise R-Zacken-Erkennung voraus. Bei der 130-Hz-EKG-Ableitung des
@@ -21,6 +23,8 @@ from .constants import (
     DFA_SCALE_MIN,
     DFA_WINDOW_N,
     MIN_BEATS_NONLINEAR,
+    RR_MAX_MS,
+    RR_MIN_MS,
     SAMPEN_M,
     SAMPEN_R_FACTOR,
 )
@@ -79,31 +83,73 @@ def compute_dfa_alpha1(
     scale_min: int = DFA_SCALE_MIN,
     scale_max: int = DFA_SCALE_MAX,
 ) -> dict[str, Any] | None:
-    """Detrended Fluctuation Analysis, Kurzzeit-Exponent α1.
+    """Detrended Fluctuation Analysis, Kurzzeit-Exponent α1, über die letzten ``window_n`` Schläge.
 
-    > **Status: Gerüst.** Implementierung in L09.
-
-    Verfahren:
+    Verfahren wie ``neurokit2.fractal_dfa`` (das praxis_gui nutzt):
 
     1. Integrierte Reihe ``Y(k) = cumsum(rr − mean(rr))``.
-    2. Für jede Skala ``n`` in ``scale_min..scale_max``: die Reihe in Boxen der
-       Länge ``n`` teilen, in jeder Box eine Gerade abziehen (``np.polyfit``,
-       Grad 1), die Wurzel des mittleren quadratischen Residuums bilden → ``F(n)``.
-    3. ``α1`` ist die Steigung der Regressionsgeraden von ``log F(n)`` über ``log n``.
+    2. Für jede Skala ``n`` in ``scale_min..scale_max``: Boxen der Länge ``n``,
+       um ``n // 2`` versetzt (50 % Überlappung), in jeder Box eine Gerade
+       abziehen; ``F(n) = √(Mittel der Box-Varianzen)``.
+    3. ``α1`` ist die Steigung von ``log₂ F(n)`` über ``log₂ n``.
 
-    Klinische Einordnung (aus praxis_gui):
+    Plausibel sind nur Werte 300–2000 ms (wie praxis_gui); weniger als
+    ``window_n`` solche Schläge → ``None``. praxis_gui korrigiert vorher mit
+    dem Kubios-Verfahren (neurokit2) — das gibt es mobil nicht. Hier rechnet
+    α1 auf dem, was der Aufrufer liefert (live: die guten Rohwerte, in der
+    Aufzeichnung: die korrigierte Reihe); ``korrektur`` sagt das dazu.
 
-    - ``α1 ≈ 0.5`` — unkorreliertes Rauschen, starke Erschöpfung
-    - ``α1 0.75–1.0`` — 1/f-Rauschen, gesunde autonome Regulation in Ruhe
-    - ``α1 > 1.0`` — Brownsche Bewegung, typisch unter Belastung
-    - ``α1 < 0.75`` wird als aerobe Schwelle zur Belastungssteuerung verwendet
+    Einordnung aus der Literatur (beschreibend, **keine Bewertung** in der App):
+    α1 ≈ 0,5 unkorreliert, 0,75–1,0 in Ruhe üblich, > 1,0 unter Belastung.
 
-    praxis_gui korrigiert vorher mit dem Kubios-Verfahren aus `neurokit2`. Das
-    gibt es auf Mobilgeräten nicht; wir nutzen die Malik-Korrektur aus
-    `hrv_core.artifacts` und kennzeichnen das Ergebnis entsprechend im Feld
-    ``korrektur``.
+    >>> rng = np.random.default_rng(1)
+    >>> r = compute_dfa_alpha1(800 + rng.normal(0, 20, 400), window_n=200)
+    >>> 0.3 < r["dfa_alpha1"] < 0.7, r["n"]
+    (True, 200)
     """
-    raise NotImplementedError("L09")
+    arr = np.asarray([v for v in rr_ms if v is not None], dtype=float)
+    arr = arr[(arr >= 300) & (arr <= 2000)]
+    if arr.size < window_n:
+        return None
+    fenster = arr[-window_n:]
+    skalen = list(range(max(int(scale_min), 2), int(scale_max) + 1))
+    if len(skalen) < 2 or max(skalen) >= fenster.size:
+        return None
+    alpha, fluktuation = _dfa(fenster, skalen)
+    if alpha is None:
+        return None
+    return {
+        "dfa_alpha1": alpha,
+        "n": int(fenster.size),
+        "scales": skalen,
+        "fluctuations": fluktuation,
+        "korrektur": "malik",
+    }
+
+
+def _dfa(x: np.ndarray, skalen: list[int]) -> tuple[float | None, list[float]]:
+    """Steigung und F(n) — Rechnung wie ``neurokit2.fractal_dfa`` (Überlappung, Grad 1)."""
+    n = x.size
+    profil = np.cumsum(x - x.mean())
+    fluktuation: list[float] = []
+    for s in skalen:
+        anfaenge = np.arange(0, n - s, s // 2)
+        if anfaenge.size == 0:
+            fluktuation.append(float("nan"))
+            continue
+        boxen = np.stack([profil[i : i + s] for i in anfaenge])  # (Boxen, s)
+        xs = np.arange(s, dtype=float)
+        steigung, achse = np.polyfit(xs, boxen.T, 1)
+        rest = boxen - (np.outer(steigung, xs) + achse[:, None])
+        var = rest.var(axis=1)
+        var = var[var > 1e-08]
+        fluktuation.append(float(np.sqrt(var.mean())) if var.size else float("nan"))
+    f = np.asarray(fluktuation)
+    gut = np.isfinite(f) & (f > 0)
+    if int(gut.sum()) < 2:
+        return None, fluktuation
+    steigung = np.polyfit(np.log2(np.asarray(skalen, dtype=float)[gut]), np.log2(f[gut]), 1)[0]
+    return float(steigung), fluktuation
 
 
 def compute_sampen(
@@ -113,18 +159,44 @@ def compute_sampen(
 ) -> float | None:
     """Sample Entropy — Maß für die Regelmäßigkeit der Reihe.
 
-    > **Status: Gerüst.** Implementierung in L09.
+    Wie praxis_gui ``compute_sampen``: Werte 250–2000 ms, Toleranz
+    ``r = r_factor · SD`` (``ddof=0``), Chebyshev-Abstand; gezählt werden alle
+    Paare ``i < j`` von Vorlagen der Länge ``m`` und ``m + 1`` (je ``n − dim + 1``
+    Vorlagen). Ergebnis ``−ln(A / B)``; ohne Übereinstimmung ``None``.
 
-    Verfahren: Für Einbettungsdimension ``m`` und ``m+1`` zählen, wie viele
-    Vektorpaare einen Chebyshev-Abstand ``<= r`` haben, mit ``r = r_factor · SD``.
-    Ergebnis ist ``-ln(A / B)``.
+    **Aufwand:** O(N²) — zeilenweise statt als Vollmatrix gerechnet (bei 4000
+    Schlägen wären das 1,6·10⁷ Paare); live auf `SAMPEN_MAX_BEATS_LIVE`
+    Schläge begrenzen.
 
-    **Aufwand beachten:** O(N²). Bei 4000 Schlägen sind das 1,6·10⁷
-    Paarvergleiche — als Vollmatrix nicht speicherbar. Blockweise rechnen
-    (``sliding_window_view`` plus Schleife über die Zeilen), und live auf
-    ``SAMPEN_MAX_BEATS_LIVE`` Schläge begrenzen.
+    >>> round(compute_sampen([800, 820, 800, 820, 800, 820, 800, 820, 810, 830] * 3), 4)
+    0.3093
     """
-    raise NotImplementedError("L09")
+    rr = np.asarray(
+        [v for v in rr_ms if v is not None and RR_MIN_MS <= v <= RR_MAX_MS], dtype=float
+    )
+    n = rr.size
+    if n < m + 2:
+        return None
+    r = float(r_factor * rr.std(ddof=0))
+    if r <= 0:
+        return None
+
+    def treffer(dim: int) -> int:
+        anzahl = n - dim + 1
+        if anzahl < 2:
+            return 0
+        vorlagen = np.lib.stride_tricks.sliding_window_view(rr, dim)[:anzahl]
+        summe = 0
+        for i in range(anzahl - 1):
+            abstand = np.max(np.abs(vorlagen[i + 1 :] - vorlagen[i]), axis=1)
+            summe += int(np.count_nonzero(abstand <= r))
+        return summe
+
+    b = treffer(m)
+    a = treffer(m + 1)
+    if a == 0 or b == 0:
+        return None
+    return float(-np.log(a / b))
 
 
 __all__ = [

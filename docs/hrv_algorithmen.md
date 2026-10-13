@@ -343,9 +343,47 @@ beim Verity Sense nur alle 5 s aktualisiert.
 
 ---
 
-## Frequenzbereich
+## Frequenzbereich (`hrv_core/frequency.py`)
 
-> Status: Gerüst, Implementierung in L09.
+Umgesetzt am 2026-10-13 — Lomb-Scargle, Welch und Periodogramm in reinem numpy,
+Rechnung für Rechnung wie scipy 1.18 und praxis_gui (`spectrum.py`,
+`hrv_compute.compute_frequency_domain`, Strategie „subspectra"). Golden-Test
+`tests/test_frequenz.py`: Bandwerte und Spektrum auf drei Dateien (echte
+H10-Messung, zwei synthetische aus dem praxis_gui-Generator) stimmen mit
+praxis_gui auf wenige ppm überein — die Abweichung ist deren Rundung auf drei
+Nachkommastellen; die Spektralkurve stimmt auf alle Stellen.
+
+**Zwei Rechenwege, eine Mathematik:**
+
+| | ganze Aufzeichnung | Fenster (Kurven, Live) |
+|---|---|---|
+| Funktion | `frequenzbereich` → `compute_frequency_domain` | `fensterspektrum` |
+| Zerlegung | Teilstücke an Nähten und unplausiblen Werten, je eines ab 60 Schlägen | keine — ein Lomb über alle guten Schläge des Fensters |
+| Mittelung | nach Dauer gewichtet, je Band nur taugliche Teilstücke | — |
+| Mindestdauer je Band | ja (sonst gesperrt) | nein, die Fensterlänge wählt der Anwender (`reif` sagt, ob sie reicht) |
+| Mindestbelegung | Bandpolitik (≥ 50 % durch taugliche Teilstücke) | ≥ 30 gute Schläge und ≥ 70 % der Fensterzeit belegt |
+
+Lomb braucht kein gleichmäßiges Raster: Im Fenster sind Artefakte und
+fehlende Schläge fehlende Stützstellen; die Normierung `2T/N` mit dem echten
+`N` hält die Bandleistung dabei stabil (`test_lomb_vertraegt_fehlende_schlaege`:
+20 % fehlend, Abweichung < 8 %). praxis_gui rechnet gefensterte Kurven über
+Teilstücke (je ≥ 60 Schläge) — bei Fenstern von 1–2 min fiele dort jedes
+Fenster mit einem Artefakt aus.
+
+**Nullen trennen nicht (Abweichung von praxis_gui).** Eine Null beim H10
+heißt „in dieser Sekunde endete kein Schlag" — die Nachbarn sind echte
+Nachbarn. Als Naht zerlegten Nullen eine Ruhemessung unter 60 bpm in kurze
+Teilstücke: Auf der Golden-Datei (5 min, 9 Nullen) blieben 76 und 85 s, alle
+Bänder gesperrt. `ohne_nullen` nimmt sie vor der Zerlegung heraus
+(`nullen_trennen=True` rechnet wie praxis_gui ohne `interpolate_zeros`). Der
+Zeitbereich behandelt Nullen weiter als Naht (unverändert, ALGO_VERSION 4).
+
+**Kennzahlen** wie praxis_gui: ULF, VLF, LF, HF (ms²), `total_power` = Summe
+der verfügbaren VLF + LF + HF, LF/HF, `lf_n`/`hf_n` = LF bzw. HF / (LF + HF).
+Zusätzlich die Lage des stärksten Gipfels 0,04–0,40 Hz (`gipfel_hz`, je Band
+`lf_gipfel_hz`/`hf_gipfel_hz`) — beschreibend: bei ruhiger, gleichmäßiger
+Atmung meist die Atemfrequenz. Das Detrending ist, wie in praxis_gui, nur der
+Mittelwertabzug.
 
 ### Bänder
 
@@ -432,9 +470,13 @@ SD2 = √(2·SDNN² − SD1²)
 
 Die zweite Formel kann durch Rundung minimal negativ werden — bei 0 abschneiden.
 
-### DFA α1 (Gerüst, L09)
+### DFA α1 (`nonlinear.compute_dfa_alpha1`)
 
-Skalen 4–16 Schläge, Fenster 200 Schläge, Boxen à 10 für das Detrending.
+Skalen 4–16 Schläge, Fenster 200 Schläge. Rechnung wie `neurokit2.fractal_dfa`
+(das praxis_gui nutzt): Profil `cumsum(rr − mean)`, Boxen um `n // 2` versetzt
+(50 % Überlappung), je Box eine Gerade abziehen, `F(n) = √(Mittel der
+Varianzen)`, α1 = Steigung von `log₂ F` über `log₂ n`. Golden-Test gegen
+neurokit2 auf 12 Stellen (`tests/test_nichtlinear.py`).
 
 ```
 α1 ≈ 0.5     unkorreliertes Rauschen — starke Erschöpfung
@@ -446,11 +488,11 @@ Skalen 4–16 Schläge, Fenster 200 Schläge, Boxen à 10 für das Detrending.
 praxis_gui korrigiert vorher mit dem Kubios-Verfahren aus neurokit2. Das gibt es
 mobil nicht — wir nutzen die Malik-Korrektur und kennzeichnen das Ergebnis.
 
-### Sample Entropy (Gerüst, L09)
+### Sample Entropy (`nonlinear.compute_sampen`)
 
-`m = 2`, `r = 0.2 · SD`, Chebyshev-Abstand. **O(N²)** — bei 4000 Schlägen sind
-das 1,6·10⁷ Paarvergleiche, als Vollmatrix nicht speicherbar. Blockweise rechnen
-und live auf 500 Schläge begrenzen.
+`m = 2`, `r = 0.2 · SD` (`ddof=0`), Chebyshev-Abstand, wie praxis_gui: je
+Dimension alle `n − dim + 1` Vorlagen, Paare `i < j`. **O(N²)** — zeilenweise
+gerechnet statt als Vollmatrix, live auf 500 Schläge begrenzt.
 
 ---
 
@@ -467,8 +509,10 @@ Das gehört in jede Darstellung dieser Werte, nicht nur in diese Datei.
 
 ## Golden-Tests
 
-`tests/golden/rr/` enthält eine echte Messdatei aus `praxis_gui/Data/RR/`.
-
-Für Kennzahlen liefert `praxis_gui/tools/generate_hrv_dataset.py --corpus`
-15 Szenarien mit Wahrheitsdatei (`truth-v1`) — bekannte Sollwerte für LF, HF,
-RMSSD und SDNN. Das ist die Referenz, gegen die `hrv_core` in L09 validiert wird.
+`tests/golden/rr/` enthält eine echte Messdatei aus `praxis_gui/Data/RR/`, eine
+synthetische Verity-Datei und zwei synthetische Messungen aus
+`praxis_gui/tools/generate_hrv_dataset.py` (Ruhe sitzend, Kohärenzatmung 6/min)
+mit bekannter Bandleistung. Frequenzbereich, DFA α1 und SampEn sind gegen
+praxis_gui auf denselben Dateien geprüft (`tests/test_frequenz.py`,
+`tests/test_nichtlinear.py`); den ganzen Korpus (15 Szenarien) liefert
+`generate_hrv_dataset.py --corpus`.

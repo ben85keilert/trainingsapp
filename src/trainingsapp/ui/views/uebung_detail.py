@@ -34,20 +34,52 @@ def _abschnitt(titel: str, inhalt: ft.Control) -> ft.Control:
 
 
 def _notation(uebung: Exercise) -> ft.Control:
+    """Je Parameter ein eigener Block: Name und Einheit, darunter Chips und Beispiel.
+
+    Früher stand alles in einer Zeile („Wiederholungen (Wdh.) · Chips 10, 15 ·
+    z. B. 3x15") — bei mehreren Parametern war nicht zu erkennen, was wozu gehört.
+    """
     spec = uebung.result_spec
     if not spec.fields:
         return ft.Text("Keine Felder — nur „gemacht“.")
-    zeilen: list[ft.Control] = []
+    bloecke: list[ft.Control] = []
     for f in spec.fields:
-        chips = ", ".join(str(q) for q in f.quick)
         beispiel = format_wert(f, f.default) if f.default is not None else ""
-        text = f"{f.label}{f' ({f.unit})' if f.unit else ''}"
-        if chips:
-            text += f"  ·  Chips {chips}"
+        unten: list[ft.Control] = [
+            ft.Container(
+                padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+                border_radius=8,
+                border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+                content=ft.Text(str(q), size=12),
+            )
+            for q in f.quick
+        ]
         if beispiel:
-            text += f"  ·  z. B. {beispiel}"
-        zeilen.append(ft.Text(text))
-    return ft.Column(spacing=2, controls=zeilen)
+            unten.append(ft.Text(f"z. B. {beispiel}", size=12, opacity=0.65))
+        bloecke.append(
+            ft.Container(
+                padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                border_radius=10,
+                bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                content=ft.Column(
+                    spacing=6,
+                    tight=True,
+                    controls=[
+                        ft.Row(
+                            spacing=6,
+                            controls=[
+                                ft.Text(f.label, weight=ft.FontWeight.W_600),
+                                ft.Text(f.unit or "", size=12, opacity=0.65),
+                            ],
+                        ),
+                        ft.Row(wrap=True, spacing=6, run_spacing=6, controls=unten)
+                        if unten
+                        else ft.Container(),
+                    ],
+                ),
+            )
+        )
+    return ft.Column(spacing=8, controls=bloecke)
 
 
 def uebung_detail(

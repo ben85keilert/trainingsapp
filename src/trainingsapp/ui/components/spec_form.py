@@ -8,6 +8,10 @@ Eingaben. Ein neuer `FieldType` braucht genau hier einen Zweig in
 Satzfelder (`SET_LIST`) sind Textfelder mit der Notation aus
 `docs/notation.md`: ``3x15``, ``30``, ``15/15/20``; die Chips hängen einen
 Satz an (``+15``). Ein Fragezeichen daneben öffnet die Hilfe.
+
+Jedes Feld steht in voller Breite, seine Chips **darunter** — nebeneinander
+quetschten sich Feld und Chips am Handy, und welcher Chip zu welchem Feld
+gehörte, war nicht mehr zu sehen.
 """
 
 from __future__ import annotations
@@ -53,7 +57,7 @@ class SpecForm:
             zeilen.append(self._zeile(f, widget))
         if not zeilen:
             zeilen.append(ft.Text("Diese Übung hat keine Felder, nur „gemacht“.", opacity=0.6))
-        self.control = ft.Column(spacing=14, controls=zeilen)
+        self.control = ft.Column(spacing=22, controls=zeilen)
 
     # -- Bauen -------------------------------------------------------------
 
@@ -79,14 +83,12 @@ class SpecForm:
                 label=f"{f.label} je Satz",
                 value=self._anzeige(f, wert),
                 hint_text="3x15 · 30 · 15/15/20",
-                width=200,
                 keyboard_type=ft.KeyboardType.TEXT,
                 suffix=ft.Text(f.unit) if f.unit else None,
             )
         return ft.TextField(
             label=f.label,
             value=self._anzeige(f, wert),
-            width=150,
             keyboard_type=ft.KeyboardType.NUMBER,
             suffix=ft.Text(f.unit) if f.unit else None,
             text_align=ft.TextAlign.END,
@@ -120,15 +122,36 @@ class SpecForm:
         ]
         self._chips[f.key] = chips
         self._chips_abgleichen(f)
-        rechts: list[ft.Control] = list(chips)
+        unten: list[ft.Control] = list(chips)
         if f.type == FieldType.SET_LIST and self._page is not None:
-            rechts.append(hilfe_knopf(self._page))
-        return ft.Row(
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12,
+            unten.append(hilfe_knopf(self._page))
+        if not unten:
+            return widget
+        # Feld oben in voller Breite, Chips darunter — eingerückt, damit sie
+        # sichtbar zu ihrem Feld gehören.
+        return ft.Column(
+            spacing=6,
             controls=[
                 widget,
-                ft.Container(expand=True, content=ft.Row(wrap=True, spacing=6, controls=rechts)),
+                ft.Container(
+                    padding=ft.Padding.only(left=4),
+                    content=ft.Row(
+                        wrap=True,
+                        spacing=6,
+                        run_spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Text(
+                                "Satz anhängen:"
+                                if f.type == FieldType.SET_LIST
+                                else "Schnellwahl:",
+                                size=12,
+                                opacity=0.65,
+                            ),
+                            *unten,
+                        ],
+                    ),
+                ),
             ],
         )
 

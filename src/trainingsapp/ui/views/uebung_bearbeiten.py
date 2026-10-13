@@ -162,7 +162,12 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
 
     def sichtbarkeit(key: str) -> Callable[[], None]:
         def handler() -> None:
-            chipfelder[key].visible = bool(schalter[key].value)
+            vorlage = next(f for f in FELDVORRAT if f.key == key)
+            chipfelder[key].visible = bool(schalter[key].value) and vorlage.type not in (
+                FieldType.BOOL,
+                FieldType.TEXT,
+                FieldType.SCALE,
+            )
             page.update()
 
         return handler
@@ -176,23 +181,26 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             on_change=sichtbarkeit(vorlage.key),
         )
         chipfelder[vorlage.key] = ft.TextField(
-            label="Chips" if vorlage.type != FieldType.CHOICE else "Optionen",
+            label="Chips (mit Komma)" if vorlage.type != FieldType.CHOICE else "Optionen",
             value=chips_text(quelle.quick),
             dense=True,
-            width=200,
             visible=aktiv,
         )
         if vorlage.type in (FieldType.BOOL, FieldType.TEXT, FieldType.SCALE):
             chipfelder[vorlage.key].visible = False
             zeilen.append(schalter[vorlage.key])
         else:
+            # Schalter oben, Chips darunter eingerückt — nebeneinander passte
+            # beides am Handy nicht, das Chip-Feld lief über den Rand.
             zeilen.append(
-                ft.Row(
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=12,
+                ft.Column(
+                    spacing=4,
                     controls=[
-                        ft.Container(width=210, content=schalter[vorlage.key]),
-                        chipfelder[vorlage.key],
+                        schalter[vorlage.key],
+                        ft.Container(
+                            padding=ft.Padding.only(left=56, bottom=6),
+                            content=chipfelder[vorlage.key],
+                        ),
                     ],
                 )
             )

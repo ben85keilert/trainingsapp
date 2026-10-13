@@ -25,6 +25,22 @@ def _beispiel(uebung: Exercise) -> str:
     return spec.format_shorthand(werte) if werte else ""
 
 
+def _untertitel(uebung: Exercise) -> ft.Control | None:
+    """Zwei Zeilen statt einer: was es ist (Typ · Region), darunter wie man einträgt.
+
+    In einer Zeile („Kräftigung · Bein · 3x15") liefen Einordnung und Notation
+    ineinander; man konnte „3x15" für eine Region halten.
+    """
+    was = "  ·  ".join(t for t in (", ".join(uebung.typen), ", ".join(uebung.regionen)) if t)
+    beispiel = _beispiel(uebung)
+    zeilen: list[ft.Control] = []
+    if was:
+        zeilen.append(ft.Text(was, size=12))
+    if beispiel:
+        zeilen.append(ft.Text(f"Eingabe z. B. {beispiel}", size=11, opacity=0.6))
+    return ft.Column(spacing=1, tight=True, controls=zeilen) if zeilen else None
+
+
 def trainieren_knopf(on_click: Callable[[], object], tooltip: str) -> ft.Control:
     """Der Knopf „Trainieren“ — gleich in der Übungs- und in der Planliste."""
     return ft.FilledTonalButton(
@@ -193,14 +209,7 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
                 ft.ListTile(
                     leading=ft.Icon(symbol(u.icon_key)),
                     title=ft.Text(u.name),
-                    subtitle=ft.Text(
-                        "  ·  ".join(
-                            t
-                            for t in (", ".join(u.typen), ", ".join(u.regionen), _beispiel(u))
-                            if t
-                        ),
-                        size=12,
-                    ),
+                    subtitle=_untertitel(u),
                     trailing=trainieren_knopf(
                         trainierer(u.id), "Diese Übung jetzt trainieren — ohne Plan"
                     ),

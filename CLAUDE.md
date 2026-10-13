@@ -78,6 +78,9 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `hrv_core/constants.py`), gilt der Cache als veraltet und wird aus den Dateien neu
   berechnet — Rohdaten bleiben unangetastet. Export = Dateikopie. Vertrag:
   `docs/kompatibilitaet.md` — Formatänderungen brauchen dort zuerst einen Eintrag.
+  Ausnahme wie in praxis_gui: Metadaten (`titel`, `notiz`, `ereignisse` = Notizen mit
+  Anker) werden in die Messdatei zurückgeschrieben (`hrv_core.ereignisse`), nie die
+  Messwerte.
 
 - **Zwei Editionen aus einem Quelltext.** `config.ist_aktiv("funktion")` beantwortet
   „darf ich X?" statt „bin ich Edition B?". Ein Schalter je Fähigkeit, nicht je

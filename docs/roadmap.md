@@ -104,6 +104,9 @@ einem sichtbaren Fortschritt in der App.
   Aufzeichnung); vom Sensor verworfene Intervalle werden selbst geprüft
   (ALGO_VERSION 4); Verlaufskurven RMSSD/SDNN/pNN50/Ø HF als speicherbare
   Ansichten; Zeitfenster zoomen und wischen, live 30 min zurück
+- Notizen (`ereignisse` mit Anker wie praxis_gui): Klappfeld unter der Hauptkurve,
+  Zeitpunkt beim Öffnen eingefroren, „Jetzt", in die Kurve tippen, ±1/±5 s;
+  live in die Aufnahme, nachträglich als Metadaten in die Messdatei
 - Noch nicht: Desktop-BLE (bleak), Frequenzbereich (Spektrum) und DFA α1 (L09,
   dann als eigene Reiter der Aufzeichnung), Mehrgerätebetrieb, Foreground
   Service, Datenbank-Eintrag `device`

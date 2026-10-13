@@ -64,11 +64,14 @@ def wischbar(
     jetzt_s: Callable[[], float],
     neu_zeichnen: Callable[[], None],
     anfang: Callable[[], float] = lambda: 0.0,
+    tippen: Callable[[float], None] | None = None,
 ) -> ft.Control:
     """``inhalt`` (die Kurvenspalte) waagrecht wischbar machen.
 
     Nach rechts wischen blättert zurück (wie in einer Bildergalerie); ``anfang``
-    liefert den frühesten Zeitpunkt (Live: Beginn des Puffers). Gezeichnet
+    liefert den frühesten Zeitpunkt (Live: Beginn des Puffers). ``tippen``
+    bekommt bei einem Tipp die Zeit unter dem Finger (Notiz in die Kurve setzen).
+    Gezeichnet
     wird höchstens `_WISCH_HZ`-mal je Sekunde und am Ende der Geste.
     """
     stand = {"breite_px": _BREITE_VORGABE, "zuletzt": 0.0}
@@ -89,11 +92,30 @@ def wischbar(
     def ende(_: ft.DragEndEvent) -> None:
         neu_zeichnen()
 
+    def tipp(e: ft.TapEvent) -> None:
+        if tippen is None or e.local_position is None:
+            return
+        tippen(zeit_unter(e.local_position.x, fenster, jetzt_s(), anfang(), stand["breite_px"]))
+
     return ft.GestureDetector(
         content=ft.Container(content=inhalt, on_size_change=groesse),
         on_horizontal_drag_update=ziehen,
         on_horizontal_drag_end=ende,
+        on_tap_down=tipp if tippen is not None else None,
     )
 
 
-__all__ = ["Fenster", "wischbar"]
+def zeit_unter(
+    x_px: float, fenster: Fenster, jetzt_s: float, anfang: float, breite_px: float
+) -> float:
+    """Zeit unter einer waagrechten Position (px) — links liegt die y-Beschriftung.
+
+    >>> zeit_unter(52 + 160, Fenster(60, None), 200.0, 0.0, 320.0)
+    170.0
+    """
+    von, bis = fenster.bereich(jetzt_s, anfang)
+    anteil = min(max((x_px - _ACHSE_PX) / max(breite_px, 1.0), 0.0), 1.0)
+    return round(von + anteil * (bis - von), 3)
+
+
+__all__ = ["Fenster", "wischbar", "zeit_unter"]

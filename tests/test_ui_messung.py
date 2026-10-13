@@ -493,3 +493,158 @@ def test_detailansicht_regeln_je_messung_und_lupe(daten) -> None:
     assert not any(
         "selbst geprüft" in x for x in _baum_texte(messung_detail_view(seite, state, eintrag))
     )
+
+
+# ---------------------------------------------------------------------------
+# Notizen
+# ---------------------------------------------------------------------------
+
+
+def _knopf(wurzel, text: str):
+    return next(
+        c
+        for c in _alle_controls(wurzel)
+        if isinstance(c, ft.TextButton | ft.FilledButton) and c.content == text
+    )
+
+
+def _symbol(wurzel, icon, tooltip: str | None = None):
+    return next(
+        c
+        for c in _alle_controls(wurzel)
+        if isinstance(c, ft.IconButton)
+        and c.icon == icon
+        and (tooltip is None or c.tooltip == tooltip)
+    )
+
+
+def test_detailansicht_notiz_setzen_verschieben_loeschen(daten) -> None:
+    """Notiz in die Kurve tippen, ±5 s, speichern — landet als ``ereignisse`` in der Datei."""
+    import json
+    import shutil
+    from pathlib import Path
+
+    import flet_charts as fc
+
+    from trainingsapp.hrv_core.ereignisse import herz_position
+    from trainingsapp.hrv_core.recording import laden
+
+    state, tmp_path = daten
+    ordner = tmp_path / "Messungen" / "PolarH10"
+    ordner.mkdir(parents=True)
+    golden = Path(__file__).parent / "golden" / "rr" / "sensor_2026-05-23_125422.json"
+    pfad = ordner / golden.name
+    shutil.copy(golden, pfad)
+    messwerte = json.loads(pfad.read_text(encoding="utf-8"))["messungen"]
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    seite = _seite()
+    ansicht = messung_detail_view(seite, state, eintrag)
+    assert "NOTIZEN" in _baum_texte(ansicht)
+
+    _knopf(ansicht, "Notiz").on_click()
+    assert "eingefroren" not in _baum_texte(ansicht)  # nachträglich: kein Live-Zustand
+    _knopf(ansicht, "In Kurve").on_click()
+    assert "Tippe in die Kurve" in _baum_texte(ansicht)
+    wisch = next(c for c in _alle_controls(ansicht) if isinstance(c, ft.GestureDetector))
+    breite = 320.0
+    wisch.on_tap_down(SimpleNamespace(local_position=SimpleNamespace(x=52 + breite / 4, y=10)))
+    rr = next(c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart))
+    dauer = rr.max_x
+    soll = round(dauer / 4, 3)
+    # Marke der offenen Eingabe steht in der Hauptkurve (gestrichelt)
+    assert any(s.dash_pattern and s.points[0].x == pytest.approx(soll) for s in rr.data_series)
+    _knopf(ansicht, "+5 s").on_click()
+    feld = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.TextField) and c.multiline and c.shift_enter
+    )
+    feld.value = "Atemübung 6/min"
+    _symbol(ansicht, ft.Icons.CHECK, "Speichern").on_click()
+
+    rec = laden(pfad)
+    (e,) = rec.ereignisse
+    assert e["text"] == "Atemübung 6/min"
+    assert herz_position(rec.beats, e) == pytest.approx(soll + 5, abs=1.0)
+    assert json.loads(pfad.read_text(encoding="utf-8"))["messungen"] == messwerte
+    assert state.hrv.laden(eintrag.id).sha1 != ""
+    assert any("Atemübung 6/min" in x for x in _baum_texte(ansicht))
+
+    # Wieder geöffnet: Notiz in Liste und Kurve; antippen, verschieben, löschen
+    ansicht2 = messung_detail_view(seite, state, eintrag)
+    zeile = next(
+        c
+        for c in _alle_controls(ansicht2)
+        if isinstance(c, ft.Container)
+        and c.on_click is not None
+        and "Atemübung 6/min" in _baum_texte(c)
+    )
+    zeile.on_click()
+    _knopf(ansicht2, "−1 s").on_click()
+    _symbol(ansicht2, ft.Icons.CHECK, "Speichern").on_click()
+    (e2,) = laden(pfad).ereignisse
+    assert herz_position(rec.beats, e2) == pytest.approx(herz_position(rec.beats, e) - 1, abs=0.5)
+    zeile = next(
+        c
+        for c in _alle_controls(ansicht2)
+        if isinstance(c, ft.Container)
+        and c.on_click is not None
+        and "Atemübung 6/min" in _baum_texte(c)
+    )
+    zeile.on_click()
+    _symbol(ansicht2, ft.Icons.DELETE_OUTLINE, "Löschen").on_click()
+    assert laden(pfad).ereignisse == []
+
+
+async def test_live_notiz_eingefroren_und_jetzt(daten) -> None:
+    state, tmp_path = daten
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    state.messlauf = lauf
+    while lauf.jetzt_s() < 20:
+        await asyncio.sleep(0.01)
+
+    seite = _seite()
+    ansicht = messung(seite, state)
+    assert _knopf(ansicht, "Notiz").disabled  # ohne Aufnahme keine Notiz
+    await _knopf(ansicht, "Aufnahme starten").on_click()
+    while lauf.aufnahme_dauer_s() < 30:
+        await asyncio.sleep(0.01)
+
+    _knopf(ansicht, "Notiz").on_click()
+    assert "eingefroren" in _baum_texte(ansicht)
+    eingefroren_bei = lauf.aufnahme_dauer_s()
+    while lauf.aufnahme_dauer_s() < eingefroren_bei + 20:
+        await asyncio.sleep(0.01)
+    feld = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.TextField) and c.multiline and c.shift_enter
+    )
+    feld.value = "Liegestütz"
+    feld.on_submit(None)
+    (e,) = lauf.aufnahme.ereignisse
+    # Der Zeitpunkt ist der von „+ Notiz", nicht der des Speicherns
+    assert e["t_wall_s"] == pytest.approx(eingefroren_bei, abs=2.0)
+
+    # Zweite Notiz: mitlaufen lassen, dann „Jetzt"
+    _knopf(ansicht, "Notiz").on_click()
+    _symbol(ansicht, ft.Icons.PLAY_CIRCLE_OUTLINE).on_click()
+    assert "läuft mit" in _baum_texte(ansicht)
+    _knopf(ansicht, "Jetzt").on_click()
+    assert "eingefroren" in _baum_texte(ansicht)
+    feld.value = "Ende"
+    _symbol(ansicht, ft.Icons.CHECK, "Speichern").on_click()
+    assert [x["text"] for x in lauf.aufnahme.ereignisse] == ["Liegestütz", "Ende"]
+
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    assert ergebnis is not None
+    assert [x["text"] for x in ergebnis.recording.ereignisse] == ["Liegestütz", "Ende"]
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)

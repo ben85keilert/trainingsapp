@@ -1438,6 +1438,13 @@ class HrvRepo:
             "UPDATE hrv_recording SET note = ? WHERE id = ?", (text.strip(), recording_id)
         )
 
+    def sha1_setzen(self, recording_id: str, sha1: str) -> None:
+        """Nach einer eigenen Metadaten-Änderung (Notizen) die Prüfsumme nachführen.
+
+        ``sha1`` soll fremde Änderungen an der Datei verraten — nicht die eigenen.
+        """
+        self.con.execute("UPDATE hrv_recording SET sha1 = ? WHERE id = ?", (sha1, recording_id))
+
     def loeschen(self, recording_id: str) -> None:
         """Nur der Verweis verschwindet aus der Liste — die Messdatei bleibt liegen."""
         self.con.execute(

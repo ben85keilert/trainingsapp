@@ -100,6 +100,8 @@ class AppState:
     messung_korrigiert: bool = True
     #: Live-Ansicht zurückgeblättert: rechter Rand in s; None = folgt der Messung
     messung_ende_s: float | None = None
+    #: Klappfeld „Notizen" unter der Hauptkurve aufgeklappt
+    notizen_offen: bool = False
     #: Baut den Ansichtsstapel zur aktuellen Route neu — setzt `app.main()`.
     #: Views rufen es nach Änderungen, die die Route nicht wechseln (ein Tipp
     #: auf „gemacht" bleibt auf derselben Planansicht).

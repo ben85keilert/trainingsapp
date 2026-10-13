@@ -25,6 +25,7 @@ from pathlib import Path
 from .. import __version__
 from ..hrv_core.aufnahme import Aufnahme
 from ..hrv_core.constants import malik_threshold
+from ..hrv_core.ereignisse import Zeitbezug
 from ..hrv_core.export import diagnose_pfad, diagnose_text
 from ..hrv_core.live import LiveFenster
 from ..hrv_core.ppi import messluecken
@@ -260,6 +261,21 @@ class Messlauf:
         )
         self.aufnahme.batterie_prozent = self.status.batterie_prozent
         self._letztes_backup = self._uhr()
+
+    def notiz_zeitbezug(self) -> Zeitbezug | None:
+        """Zeitbezug der Live-Achse für Notizen — nur während einer Aufnahme.
+
+        Die Live-Achse zählt ab Verbindungsbeginn, die Wanduhr der Aufnahme ab
+        deren Start; der Unterschied ist ``wand_versatz``.
+        """
+        aufnahme = self.aufnahme
+        if aufnahme is None:
+            return None
+        return Zeitbezug(
+            lambda: aufnahme.beats,
+            aufnahme.start_utc,
+            wand_versatz=aufnahme.start_mono - self.start_mono,
+        )
 
     def aufnahme_dauer_s(self) -> float:
         return self.aufnahme.dauer_s() if self.aufnahme is not None else 0.0

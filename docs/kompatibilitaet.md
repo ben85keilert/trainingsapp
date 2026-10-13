@@ -271,6 +271,23 @@ setzen.
 
 Altes Format (nur lesen): `{"t_s": …, "chart_x": …, "wall_time": …, "text": …}`.
 
+**Wir schreiben Ereignisse** im neuen Format, Feldfolge
+`beat_index, dt_s, t_wall_s, t_s, wall_time, text` (`hrv_core/ereignisse.py`,
+Portierung von praxis_gui `event_anchor.py`; gegen das Original auf den
+Golden-Dateien und einer echten Verity-Messung geprüft, 36 000 Fälle
+identisch):
+
+- `dt_s` ist auf das folgende Schlagintervall der **Herzuhr der Datei**
+  begrenzt — eine Notiz rutscht nie über den nächsten Schlag hinaus; in einer
+  Lücke landet sie an deren Beginn, `t_wall_s` behält den echten Zeitpunkt.
+- **Live** ankert „jetzt" über die Wanduhr (`anker_aus_wand`) auf den bisher
+  geschriebenen Zeilen; die Ereignisse stehen in Backup und Messdatei.
+- **Nachträglich** (Tippen in die Kurve, Verschieben) ankert die Position auf
+  der Zeitachse der Kurve (`anker_aus_achse`; bei der Verity Sense die
+  Herzuhr aller Intervalle, `ppi.schlagzeiten`) über dieselbe Rechnung.
+- `wall_time` ist die lokale Uhrzeit aus `start_utc + t_wall_s`; unbekannte
+  Felder eines Ereignisses aus praxis_gui bleiben beim Bearbeiten erhalten.
+
 ---
 
 ## 5. Geräteprofile
@@ -324,6 +341,15 @@ Notifications ohne RR-Feld selbst schreibt.
    mitten im Schreiben hinterlässt so nie eine halbe Messdatei. (praxis_gui
    schreibt die endgültige Datei nicht atomar — für den Leser ist das gleich.)
 9. Die Schreibregeln je Schlag aus Abschnitt 3a gelten ohne Ausnahme.
+10. **Nachträglich nur Metadaten.** `titel`, `notiz` und `ereignisse` dürfen
+    in einer gespeicherten Messdatei geändert werden — wie praxis_gui
+    (`workbench._write_raw_metadata`). Die Datei wird als JSON gelesen und mit
+    unveränderter Schlüsselfolge zurückgeschrieben (`indent=2`,
+    `ensure_ascii=False`, atomar); `messungen`, `ppi_pakete` und alle übrigen
+    Felder bleiben Wert für Wert. Danach bekommt ein vorhandenes Sidecar die
+    neue Prüfsumme (`source_file_sha1`, wie `analysis_io.refresh_sidecar_sha1`),
+    und `hrv_recording.sha1` wird nachgeführt. Alles andere bleibt
+    unveränderlich (`hrv_core.ereignisse.metadaten_schreiben` weist es ab).
 
 ### 6a. Crash-Backup `.backup_<start>.json`
 

@@ -22,6 +22,7 @@ import flet as ft
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.models import HrvRecording
+from trainingsapp.hrv_core.ereignisse import Zeitbezug, metadaten_schreiben
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
 from trainingsapp.hrv_core.korrektur import (
     Kette,
@@ -45,6 +46,7 @@ from trainingsapp.hrv_core.trends import KENNZAHLEN, reihe, verlauf
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.notizen import Notizfeld
 from trainingsapp.ui.components.verlauf import ansicht_menue, chips, diagramme
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
@@ -192,6 +194,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     dauer = max((t for t, _ in z.roh_punkte), default=0.0)
     fenster = Fenster(dauer or 1.0, None)
+    # Notizen hängen an den Zeilen der Rohdatei; die Kurve hat ihre eigene Zeitachse
+    zeilen_achse = schlagzeiten(rec)
 
     kopf_text = ft.Text(size=13, opacity=0.8)
     hinweis_text = ft.Text(size=12, color=ROT)
@@ -292,6 +296,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 ),
                 Reihe(korr_linie, farbe=ft.Colors.PRIMARY, naehte=korr_naehte),
                 Reihe(art, farbe=ROT, nur_punkte=True, skala=False),
+                *notizfeld.marken(x_von, x_bis),
             ],
             einheit="PPI ms" if verity else "RR ms",
             hoehe=220,
@@ -338,6 +343,37 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             fenster.verschieben(mitte + fenster.breite_s / 2 - dauer, dauer)
         breite_wahl.selected = [str(int(breite_s))] if breite_s in dict(BREITEN) else []
         nur_kurven()
+
+    def zentrieren(x: float) -> None:
+        """Die Kurve auf eine Zeit rücken (Notiz antippen); bei „Alles" bleibt sie."""
+        fenster.ende_s = None
+        fenster.verschieben(x + fenster.breite_s / 2 - dauer, dauer)
+
+    # -- Notizen ---------------------------------------------------------------
+
+    def notizen_speichern(liste: list[dict]) -> None:
+        """Als Metadaten in die Messdatei — wie praxis_gui; die Messwerte bleiben."""
+        try:
+            sha1 = metadaten_schreiben(pfad, ereignisse=liste)
+        except (OSError, ValueError) as fehler:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Notiz nicht gespeichert: {fehler}")))
+            return
+        rec.ereignisse = list(liste)
+        state.hrv.sha1_setzen(eintrag.id, sha1)
+
+    def notizen_offen(offen: bool) -> None:
+        state.notizen_offen = offen
+
+    notizfeld = Notizfeld(
+        zeitbezug=lambda: Zeitbezug(lambda: rec.beats, rec.start_utc, achse=lambda: zeilen_achse),
+        ereignisse=lambda: list(rec.ereignisse),
+        speichern=notizen_speichern,
+        neu_zeichnen=nur_kurven,
+        zeigen=zentrieren,
+        mitte=lambda: sum(fenster.bereich(dauer)) / 2,
+        offen=state.notizen_offen,
+        offen_merken=notizen_offen,
+    )
 
     def breite_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
         if e.control.selected:
@@ -453,7 +489,15 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         )
 
     async def notiz_speichern(e: ft.Event[ft.TextField]) -> None:
-        state.hrv.notiz_setzen(eintrag.id, e.control.value or "")
+        """Allgemeine Notiz: Datenbank (Liste) und ``notiz`` der Messdatei (praxis_gui)."""
+        text = (e.control.value or "").strip()
+        state.hrv.notiz_setzen(eintrag.id, text)
+        if text != (rec.notiz or "").strip():
+            try:
+                state.hrv.sha1_setzen(eintrag.id, metadaten_schreiben(pfad, notiz=text))
+                rec.notiz = text
+            except (OSError, ValueError):
+                pass
 
     chips_box.content = verlauf_kopf()
     zeichnen(aktualisieren=False)
@@ -474,12 +518,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 ],
             ),
             breite_wahl,
-            wischbar(
-                ft.Column(spacing=8, controls=[rr_box, verlauf_box]),
-                fenster,
-                lambda: dauer,
-                nur_kurven,
-            ),
+            wischbar(rr_box, fenster, lambda: dauer, nur_kurven, tippen=notizfeld.tippen),
+            notizfeld.control,
+            wischbar(verlauf_box, fenster, lambda: dauer, nur_kurven),
             chips_box,
             ft.Text(
                 (
@@ -520,8 +561,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             ketten_box,
             speichern_knopf,
             ft.TextField(
-                label="Notiz",
-                value=eintrag.note,
+                label="Allgemeine Notiz",
+                value=eintrag.note or rec.notiz,
                 multiline=True,
                 min_lines=1,
                 max_lines=5,

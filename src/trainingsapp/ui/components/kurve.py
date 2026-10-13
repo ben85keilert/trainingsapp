@@ -49,6 +49,8 @@ class Reihe:
     #: Bestimmt die Werteachse mit. ``False`` (graue Rohwerte): Ausreißer
     #: stauchen die Kurve nicht, sie werden am Rand abgeschnitten.
     skala: bool = True
+    #: Senkrechte Marke (Notiz): zählt für keine Achse, auch nicht ersatzweise
+    marke: bool = False
 
 
 def ausduennen(punkte: Sequence[tuple[float, float]], maximal: int = MAX_PUNKTE) -> list:
@@ -189,7 +191,7 @@ def kurve(
     übrigen Reihen werden auf ihren Bereich begrenzt (Flet schneidet nicht ab,
     sie lägen sonst über den Beschriftungen).
     """
-    alle = [p for r in reihen for p in r.punkte]
+    alle = [p for r in reihen if not r.marke for p in r.punkte]
     if not alle:
         return ft.Container(
             height=hoehe,

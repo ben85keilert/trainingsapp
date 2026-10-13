@@ -30,6 +30,7 @@ from trainingsapp.hrv_core.regeln import Korrekturregeln
 from trainingsapp.hrv_core.trends import KENNZAHLEN, verlauf
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
+from trainingsapp.ui.components.notizen import Notizfeld
 from trainingsapp.ui.components.verlauf import ansicht_menue, chips, diagramme
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
@@ -347,8 +348,33 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             ],
         )
 
+    def zeigen(x: float) -> None:
+        """Die Kurve auf eine Zeit rücken — nahe der Gegenwart folgt sie wieder."""
+        fenster.ende_s = None
+        fenster.verschieben(x + fenster.breite_s / 2 - lauf.jetzt_s(), lauf.jetzt_s(), anfang())
+
+    def notizen_speichern(liste: list[dict]) -> None:
+        if lauf.aufnahme is not None:
+            lauf.aufnahme.ereignisse = liste  # landet mit Backup und Messdatei
+
+    def notizen_offen(offen: bool) -> None:
+        state.notizen_offen = offen
+
+    notizfeld = Notizfeld(
+        zeitbezug=lauf.notiz_zeitbezug,
+        ereignisse=lambda: list(lauf.aufnahme.ereignisse) if lauf.aufnahme is not None else [],
+        speichern=notizen_speichern,
+        neu_zeichnen=lambda: aktualisieren(erzwingen=True),
+        zeigen=zeigen,
+        mitte=lambda: sum(fenster.bereich(lauf.jetzt_s(), anfang())) / 2,
+        jetzt=lauf.jetzt_s,
+        offen=state.notizen_offen,
+        offen_merken=notizen_offen,
+    )
+
     async def aufnahme_starten() -> None:
         lauf.aufnahme_starten()
+        notizfeld.auffrischen()
         aktualisieren(erzwingen=True)
         await _hintergrund(state, lauf, True, f"Aufnahme läuft · {lauf.geraet_name}")
 
@@ -469,6 +495,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 Reihe(grau, farbe=ft.Colors.OUTLINE, breite=1, naehte=grau_naehte, skala=False),
                 Reihe(rr_linie, farbe=ft.Colors.PRIMARY, naehte=rr_naehte),
                 Reihe(artefakte, farbe=ROT, nur_punkte=True, skala=False),
+                *notizfeld.marken(x_von, x_bis),
             ],
             einheit="PPI ms" if verity else "RR ms",
             x_von=x_von,
@@ -542,6 +569,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             return
         letzte = jetzt
         fuellen()
+        notizfeld.tick()
         if not lauf.simulation:
             diagnose_box.content = _diagnose(page, lauf)
         # Ansicht nicht (mehr) auf der Seite — beim nächsten Aufbau geht es weiter.
@@ -579,18 +607,16 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             ),
             lage_box,
             wischbar(
-                ft.Column(spacing=8, controls=[rr_box, verlauf_box]),
-                fenster,
-                lauf.jetzt_s,
-                gewischt,
-                anfang=anfang,
+                rr_box, fenster, lauf.jetzt_s, gewischt, anfang=anfang, tippen=notizfeld.tippen
             ),
+            notizfeld.control,
+            wischbar(verlauf_box, fenster, lauf.jetzt_s, gewischt, anfang=anfang),
             chips_box,
             ft.Text(
                 "Grau: alle Rohwerte, auch vom Sensor verworfene · Farbig: gewertet · "
-                "Rote Punkte: Artefakte (markiert, nicht verändert). Waagrecht wischen "
-                "blättert zurück. Gespeichert werden immer die Rohwerte; korrigiert wird "
-                "in der Aufzeichnung.",
+                "Rote Punkte: Artefakte (markiert, nicht verändert) · Gelb: Notizen. "
+                "Waagrecht wischen blättert zurück. Gespeichert werden immer die "
+                "Rohwerte; korrigiert wird in der Aufzeichnung.",
                 size=11,
                 opacity=0.55,
             ),

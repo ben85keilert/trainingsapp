@@ -567,16 +567,53 @@ def test_datenformat_schritt_4_trennt_typen_und_regionen(con) -> None:
     assert datenformat_aktualisieren(con) == 0
 
 
-def test_plan_item_eingabestufe(con) -> None:
+def test_plan_item_parameter_und_chips(con) -> None:
+    """Parameter der Planübung (Migration 010): keiner = nur abhaken, Stufe folgt."""
     seed_einspielen(con)
     plaene = PlanRepo(con)
     plan = Plan(name="P")
     plaene.speichern(plan)
     item = plaene.uebung_hinzufuegen(plan.id, seed_id("wadenheben"))
-    assert plaene.item_laden(item.id).input_mode == "chips"
-    plaene.eingabe_setzen(item.id, "frei", {"reps": [5, 10]})
+    neu = plaene.item_laden(item.id)
+    assert (neu.input_mode, neu.felder) == ("chips", None)  # wie die Übung
+    plaene.eingabe_setzen(item.id, "chips", {"reps": [5, 10]}, ["reps"])
     geladen = plaene.item_laden(item.id)
-    assert (geladen.input_mode, geladen.quick) == ("frei", {"reps": [5, 10]})
+    assert (geladen.felder, geladen.quick) == (["reps"], {"reps": [5, 10]})
+    plaene.eingabe_setzen(item.id, "chips", {"reps": []}, [])  # keiner: nur abhaken
+    geladen = plaene.item_laden(item.id)
+    assert (geladen.input_mode, geladen.felder, geladen.quick) == ("haken", [], {"reps": []})
+    plaene.eingabe_setzen(item.id, "haken")  # alter Aufruf: „haken" heißt keiner
+    assert plaene.item_laden(item.id).felder == []
+
+
+def test_migration_010_macht_haken_zu_keinem_parameter(tmp_path) -> None:
+    """Planübungen mit der alten Stufe „nur abhaken" haben danach keinen Parameter."""
+    import shutil
+
+    from trainingsapp.data.db import MIGRATIONS_DIR, migrieren, verbinden
+
+    bis9 = tmp_path / "bis9"
+    bis9.mkdir()
+    for datei in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if int(datei.name[:3]) <= 9:
+            shutil.copy(datei, bis9 / datei.name)
+    con = verbinden(tmp_path / "alt.db")  # ohne die Migrationen ab 010
+    assert migrieren(con, bis9) == 9
+    # Von Hand, wie ein Stand vor 010 sie hatte — die Repositories kennen schon 010
+    con.execute(
+        "INSERT INTO exercise (id, name, created_at, updated_at) VALUES ('u', 'U', 'x', 'x')"
+    )
+    con.execute("INSERT INTO plan (id, name, created_at, updated_at) VALUES ('p', 'P', 'x', 'x')")
+    for modus in ("haken", "chips", "frei"):
+        con.execute(
+            "INSERT INTO plan_item (id, plan_id, exercise_id, input_mode) VALUES (?, 'p', 'u', ?)",
+            (modus, modus),
+        )
+    con.commit()
+    assert migrieren(con) == 10
+    felder = dict(con.execute("SELECT id, fields_json FROM plan_item").fetchall())
+    assert felder == {"haken": "[]", "chips": None, "frei": None}
+    con.close()
 
 
 def test_datenformat_aktualisieren(con) -> None:
@@ -828,13 +865,12 @@ def test_standard_hin_und_her(con) -> None:
     uebungen, plaene = ExerciseRepo(con), PlanRepo(con)
     u = uebungen.laden(seed_id("wadenheben"))
     u.default_target = {"reps": [15, 15, 15]}
-    u.default_input_mode = "frei"
     uebungen.speichern(u)
 
     plan = Plan(name="A")
     plaene.speichern(plan)
     item = plaene.uebung_hinzufuegen(plan.id, u.id)  # übernimmt den Standard
-    assert (item.target, item.input_mode) == ({"reps": [15, 15, 15]}, "frei")
+    assert (item.target, item.input_mode, item.felder) == ({"reps": [15, 15, 15]}, "chips", None)
     assert abweichungen(item, u) == []
 
     # Im Plan nachjustiert — die Übung bleibt, wie sie ist …
@@ -1007,3 +1043,25 @@ def test_hrv_repo_anlegen_listen_laden(con, tmp_path) -> None:
     repo.loeschen(neu.id)
     assert [a.id for a in repo.alle(ich.id)] == [alt.id]
     assert repo.laden(neu.id) is None
+
+
+def test_wert_setzen_landet_im_heutigen_eintrag(welt) -> None:
+    """Skala nach der Übung: in den Eintrag von eben, kein eigener — bei anderer Ausprägung neu."""
+    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+
+    con, repo, _ich, sitzung = welt
+    u = Exercise(
+        name="Wandsitz",
+        result_spec=ResultSpec(
+            fields=[vorrat_feld("hold"), vorrat_feld("angle"), vorrat_feld("scale")]
+        ),
+    )
+    ExerciseRepo(con).speichern(u)
+    tag = lokaler_tag(jetzt())
+    repo.satz_anhaengen(sitzung, u, "hold", 30, tag, {"angle": 45})
+    e = repo.wert_setzen(sitzung, u, "scale", 4, tag, {"angle": 45})
+    assert e.result == {"angle": 45, "hold": [30], "scale": 4}
+    e = repo.wert_setzen(sitzung, u, "scale", 6, tag, {"angle": 45})  # ersetzt den Wert
+    assert e.result["scale"] == 6
+    neu = repo.wert_setzen(sitzung, u, "scale", 2, tag, {"angle": 90})  # andere Ausprägung
+    assert neu.result == {"angle": 90, "scale": 2} and neu.id != e.id

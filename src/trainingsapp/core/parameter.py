@@ -69,6 +69,66 @@ def kontextfelder(spec: ResultSpec) -> list[FieldSpec]:
     return auspraegungsfelder(spec) if mengenfelder(spec) else []
 
 
+# ---------------------------------------------------------------------------
+# Parameter im Plan (Migration 010)
+# ---------------------------------------------------------------------------
+
+
+def planbare_felder(spec: ResultSpec) -> list[FieldSpec]:
+    """Was ein Plan zum Antippen anbieten kann — alles außer Ja/Nein und Freitext.
+
+    Die beiden stehen im Formular („Mehr …"); als Knopf im Plan helfen sie nicht.
+
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> spec = ResultSpec(fields=[vorrat_feld(k) for k in ("reps", "scale", "done", "note")])
+    >>> [f.key for f in planbare_felder(spec)]
+    ['reps', 'scale']
+    """
+    return [f for f in spec.fields if f.type not in (FieldType.BOOL, FieldType.TEXT)]
+
+
+def gewaehlte_felder(
+    spec: ResultSpec, felder: list[str] | None, standard: list[str] | None = None
+) -> list[FieldSpec]:
+    """Die Parameter, die ein Plan anbietet — in der Reihenfolge der Übung.
+
+    ``felder`` ist die Wahl der Planübung, ``standard`` die der Übung; ``None``
+    heißt jeweils „wie darüber", ganz oben „alle". ``[]`` heißt: keiner, nur
+    abhaken.
+
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> spec = ResultSpec(fields=[vorrat_feld(k) for k in ("reps", "hold", "scale")])
+    >>> [f.key for f in gewaehlte_felder(spec, None)], gewaehlte_felder(spec, [])
+    (['reps', 'hold', 'scale'], [])
+    >>> [f.key for f in gewaehlte_felder(spec, None, ["scale", "reps"])]
+    ['reps', 'scale']
+    """
+    wahl = felder if felder is not None else standard
+    planbar = planbare_felder(spec)
+    return planbar if wahl is None else [f for f in planbar if f.key in wahl]
+
+
+def modus_aus_felder(felder: list[str] | None) -> str:
+    """Die alte Eingabestufe aus den Parametern — ``haken`` bei keinem, sonst ``chips``.
+
+    >>> modus_aus_felder([]), modus_aus_felder(None), modus_aus_felder(["reps"])
+    ('haken', 'chips', 'chips')
+    """
+    return "haken" if felder == [] else "chips"
+
+
+def chips_sortiert(werte: list[Any]) -> list[Any]:
+    """Zahlen aufsteigend, doppelte weg; Texte (Seite: links, rechts) wie angegeben.
+
+    >>> chips_sortiert([20, 10, 15, 10]), chips_sortiert(["rechts", "links"])
+    ([10, 15, 20], ['rechts', 'links'])
+    """
+    einmal = list(dict.fromkeys(werte))
+    if all(isinstance(w, int | float) and not isinstance(w, bool) for w in einmal):
+        return sorted(einmal)
+    return einmal
+
+
 def auspraegung(spec: ResultSpec | None, werte: dict[str, Any]) -> tuple[tuple[str, Any], ...]:
     """Die trennenden Werte eines Eintrags, sortiert — Teil des Bündelschlüssels.
 
@@ -105,8 +165,12 @@ __all__ = [
     "MENGEN_TYPEN",
     "auspraegung",
     "auspraegungsfelder",
+    "chips_sortiert",
+    "gewaehlte_felder",
     "kontextfelder",
     "leistungsfelder",
     "mengenfelder",
+    "modus_aus_felder",
+    "planbare_felder",
     "rolle",
 ]

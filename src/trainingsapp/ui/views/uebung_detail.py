@@ -8,14 +8,12 @@ from dataclasses import replace
 import flet as ft
 
 from trainingsapp.core.models import (
-    EINGABE_CHIPS,
-    EINGABE_FREI,
-    EINGABE_HAKEN,
     Exercise,
     Media,
     PlanItem,
     new_id,
 )
+from trainingsapp.core.parameter import gewaehlte_felder
 from trainingsapp.core.result_spec import format_wert
 from trainingsapp.core.standards import abweichungen, vom_standard
 from trainingsapp.ui.components.icons import symbol
@@ -195,7 +193,12 @@ def uebung_detail(
 
         return handler
 
-    stufen = {EINGABE_HAKEN: "nur abhaken", EINGABE_CHIPS: "Chips", EINGABE_FREI: "Freieingabe"}
+    standard_felder = gewaehlte_felder(uebung.result_spec, uebung.default_felder)
+    parameter = (
+        "Parameter " + ", ".join(f.label for f in standard_felder)
+        if standard_felder
+        else "nur abhaken"
+    )
     ziel = (
         f"Ziel {uebung.result_spec.format_shorthand(uebung.default_target)}"
         if uebung.default_target
@@ -203,8 +206,7 @@ def uebung_detail(
     )
     verwendungen: list[ft.Control] = [
         ft.Text(
-            f"Neue Planübungen übernehmen: {ziel} · Eingabe "
-            f"{stufen.get(uebung.default_input_mode, uebung.default_input_mode)} · Chips wie oben.",
+            f"Neue Planübungen übernehmen: {ziel} · {parameter} · Chips wie oben.",
             size=13,
         )
     ]

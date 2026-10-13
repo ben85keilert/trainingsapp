@@ -17,9 +17,6 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import (
-    EINGABE_CHIPS,
-    EINGABE_FREI,
-    EINGABE_HAKEN,
     REGIONEN,
     TYPEN,
     Exercise,
@@ -27,12 +24,16 @@ from trainingsapp.core.models import (
     MediaKind,
     MediaSource,
 )
+from trainingsapp.core.parameter import chips_sortiert, modus_aus_felder
 from trainingsapp.core.result_spec import (
     FELDVORRAT,
     FieldSpec,
     FieldType,
     Layout,
     ResultSpec,
+    skala_bereich_text,
+    skala_lesen,
+    vorrat_feld,
 )
 from trainingsapp.core.standards import ziel_bereinigen, ziel_spec
 from trainingsapp.ui.components.hilfe import hilfe_knopf
@@ -159,6 +160,18 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     schalter: dict[str, ft.Switch] = {}
     chipfelder: dict[str, ft.TextField] = {}
     zeilen: list[ft.Control] = []
+    # Skala: eigener Bereich statt fest 0–10 — auch negativ, Kommazahlen als solche
+    skala_alt = vorhanden.get("scale")
+    skala_bereich = ft.TextField(
+        label="Bereich",
+        value=skala_bereich_text(
+            skala_alt or vorrat_feld("scale") or FieldSpec("scale", FieldType.SCALE, "Skala")
+        ),
+        hint_text="0 - 10 · -5 - 5 · 0.0 - 10.0",
+        helper="Kommazahlen so: 0.0 - 10.0",
+        dense=True,
+        visible="scale" in eingeschaltet,
+    )
 
     def sichtbarkeit(key: str) -> Callable[[], None]:
         def handler() -> None:
@@ -168,6 +181,8 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                 FieldType.TEXT,
                 FieldType.SCALE,
             )
+            if key == "scale":
+                skala_bereich.visible = bool(schalter[key].value)
             page.update()
 
         return handler
@@ -176,7 +191,9 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         aktiv = vorlage.key in eingeschaltet
         quelle = vorhanden.get(vorlage.key, vorlage)
         schalter[vorlage.key] = ft.Switch(
-            label=f"{vorlage.label}{f' ({vorlage.unit})' if vorlage.unit else ''}",
+            label="Skala"
+            if vorlage.type == FieldType.SCALE
+            else f"{vorlage.label}{f' ({vorlage.unit})' if vorlage.unit else ''}",
             value=aktiv,
             on_change=sichtbarkeit(vorlage.key),
         )
@@ -186,7 +203,20 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             dense=True,
             visible=aktiv,
         )
-        if vorlage.type in (FieldType.BOOL, FieldType.TEXT, FieldType.SCALE):
+        if vorlage.type == FieldType.SCALE:
+            chipfelder[vorlage.key].visible = False
+            zeilen.append(
+                ft.Column(
+                    spacing=4,
+                    controls=[
+                        schalter[vorlage.key],
+                        ft.Container(
+                            padding=ft.Padding.only(left=56, bottom=6), content=skala_bereich
+                        ),
+                    ],
+                )
+            )
+        elif vorlage.type in (FieldType.BOOL, FieldType.TEXT):
             chipfelder[vorlage.key].visible = False
             zeilen.append(schalter[vorlage.key])
         else:
@@ -218,13 +248,12 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
 
     # -- Standard für Pläne ----------------------------------------------------
 
-    eingabe_standard = ft.SegmentedButton(
-        selected=[uebung.default_input_mode if uebung else EINGABE_CHIPS],
-        segments=[
-            ft.Segment(value=EINGABE_HAKEN, label=ft.Text("Nur abhaken")),
-            ft.Segment(value=EINGABE_CHIPS, label=ft.Text("Chips")),
-            ft.Segment(value=EINGABE_FREI, label=ft.Text("Frei")),
-        ],
+    # Welche Parameter ein neuer Plan anbietet: alle — oder keinen (nur abhaken).
+    # Eine feinere Wahl trifft man im Plan („Einstellen") und schiebt sie per
+    # „Als Standard der Übung setzen" hierher.
+    nur_abhaken = ft.Switch(
+        label="In Plänen nur abhaken (keine Werte)",
+        value=bool(uebung is not None and uebung.default_felder == []),
     )
 
     # -- Kachel im Verlauf -----------------------------------------------------
@@ -357,15 +386,25 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                 continue
             alt = vorhanden.get(vorlage_feld.key)
             chips = chips_lesen(chipfelder[vorlage_feld.key].value or "", vorlage_feld)
-            felder.append(
-                replace(
-                    vorlage_feld,
-                    quick=chips
-                    if chips or vorlage_feld.type == FieldType.CHOICE
-                    else vorlage_feld.quick,
-                    default=alt.default if alt is not None else vorlage_feld.default,
-                )
+            feld = replace(
+                vorlage_feld,
+                quick=chips_sortiert(chips)
+                if chips or vorlage_feld.type == FieldType.CHOICE
+                else vorlage_feld.quick,
+                default=alt.default if alt is not None else vorlage_feld.default,
             )
+            if feld.type == FieldType.SCALE:
+                lo, hi, schritt = skala_lesen(skala_bereich.value or "") or (0.0, 10.0, 1.0)
+                ganz = float(schritt).is_integer()
+                feld = replace(
+                    feld,
+                    label="Skala",
+                    min=int(lo) if ganz else lo,
+                    max=int(hi) if ganz else hi,
+                    step=int(schritt) if ganz else schritt,
+                    default=None,
+                )
+            felder.append(feld)
         felder.extend(fremde)
         return felder
 
@@ -378,9 +417,11 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         ziel.icon_key = gewaehlt
         if not eigene_varianten:
             ziel.family_id = None if familie.value in (None, EIGENSTAENDIG) else familie.value
-        ziel.default_input_mode = (
-            eingabe_standard.selected[0] if eingabe_standard.selected else EINGABE_CHIPS
-        )
+        if nur_abhaken.value:
+            ziel.default_felder = []
+        elif ziel.default_felder == []:
+            ziel.default_felder = None  # wieder alle
+        ziel.default_input_mode = modus_aus_felder(ziel.default_felder)
         ziel.result_spec = spec_bauen(felder_lesen())
         ziel.default_target = ziel_lesen(ziel.result_spec)
         ziel.regionen = regionen_lesen()
@@ -402,6 +443,11 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             page.update()
             return
         name.error = None
+        if schalter["scale"].value and skala_lesen(skala_bereich.value or "") is None:
+            skala_bereich.error = "z. B. 0 - 10 oder -5 - 5 oder 0.0 - 10.0"
+            page.update()
+            return
+        skala_bereich.error = None
         ziel = eingelesen()
         state.uebungen.speichern(ziel)
         page.show_dialog(ft.SnackBar(ft.Text("Gespeichert")))
@@ -459,12 +505,13 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                             opacity=0.7,
                         ),
                         abschnitt("STANDARD FÜR PLÄNE"),
-                        eingabe_standard,
+                        nur_abhaken,
                         ft.Text(
-                            "So wird die Übung in einem neuen Plan eingegeben. Ziel (optional): "
-                            "Das übernimmt eine neue Planübung als „Wie geplant“. Leer lassen "
-                            "heißt kein Ziel. Auch aus einem Plan heraus lässt sich das Ziel "
-                            "mit „Als Standard der Übung setzen“ hierher schieben.",
+                            "Ein neuer Plan bietet alle Parameter oben an — oder, mit dem "
+                            "Schalter, keinen (nur abhaken). Welche genau und mit welchen "
+                            "Chips, stellt man im Plan ein und schiebt es mit „Als Standard "
+                            "der Übung setzen“ hierher. Ziel (optional): das übernimmt eine "
+                            "neue Planübung als „Wie geplant“; leer heißt kein Ziel.",
                             size=12,
                             opacity=0.7,
                         ),

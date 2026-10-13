@@ -28,6 +28,7 @@ import flet as ft
 
 from trainingsapp.core.models import Session, SessionEntry
 from trainingsapp.core.plaene import heutige_plaene
+from trainingsapp.core.result_spec import parameter_werte
 from trainingsapp.core.tagesbilanz import (
     Buendel,
     Planstand,
@@ -37,6 +38,7 @@ from trainingsapp.core.tagesbilanz import (
 )
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.scroll import scroll_merken
+from trainingsapp.ui.components.werte import wert_zeilen
 from trainingsapp.ui.state import AppState
 
 ORDNUNGEN = [("plan", "Nach Plan"), ("uebung", "Nach Übung"), ("zeit", "Chronologisch")]
@@ -108,28 +110,43 @@ def tagesansicht(page: ft.Page, state: AppState, tag: date) -> ft.Control:
         )
 
     def zeile(e: SessionEntry, mit_zeit: bool = True) -> ft.Control:
-        """Ein einzelner Eintrag — chronologisch und in aufgeklappten Bündeln."""
-        text = eintrag_text(e)
-        untertitel = text if not e.note else f"{text}  ·  {e.note[:60]}"
+        """Ein einzelner Eintrag — chronologisch und in aufgeklappten Bündeln.
+
+        Je Parameter eine eigene Zeile mit Namen; ohne Werte „abgehakt".
+        """
         zeit = f"{e.started_at.astimezone():%H:%M}" if e.started_at else "–"
+        werte = parameter_werte(e.spec_snapshot, e.result) if e.result else []
+        teile: list[ft.Control] = []
+        if zusatz := buendeln([e])[0].auspraegung_text():
+            teile.append(ft.Text(zusatz, size=12, opacity=0.75))
+        teile.append(wert_zeilen(werte, 12) if werte else ft.Text("abgehakt", size=12))
+        if e.note:
+            teile.append(ft.Text(e.note[:80], size=11, opacity=0.6, italic=True))
         return ft.ListTile(
             leading=ft.Text(zeit, size=13) if mit_zeit else haken(ist_leistung(e)),
             title=ft.Text(name(e.exercise_id) if mit_zeit else zeit),
-            subtitle=ft.Text(untertitel, size=12),
+            subtitle=ft.Column(spacing=2, tight=True, controls=teile),
             trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),
             dense=True,
             on_click=oeffner(f"/eintrag/{e.id}"),
         )
 
     def buendel_zeile(b: Buendel) -> ft.Control:
-        """Ein Bündel: Summe auf einen Blick, aufklappbar zu den Einzeleinträgen."""
+        """Ein Bündel: Überschrift = Übung, darunter Ausprägung und je Parameter eine Zeile.
+
+        Aufklappbar zu den Einzeleinträgen, wenn es mehrere sind.
+        """
         titel = name(b.exercise_id)
+        zeilen: list[ft.Control] = []
         if zusatz := b.auspraegung_text():
-            titel += f" · {zusatz}"
-        zeilen: list[ft.Control] = [ft.Text(b.zusammenfassung() or "abgehakt", size=12)]
-        if len(b.leistungen) > 1 and (einzeln := b.einzelwerte_text()):
-            zeilen.append(ft.Text(f"= {einzeln}", size=11, opacity=0.6))
-        untertitel = ft.Column(spacing=0, controls=zeilen)
+            zeilen.append(ft.Text(zusatz, size=12, opacity=0.75))
+        werte = b.parameter_zeilen()
+        if werte:
+            zeilen.append(wert_zeilen(werte, 12))
+        else:
+            n = len(b.abgehakt)
+            zeilen.append(ft.Text("abgehakt" if n <= 1 else f"{n}× abgehakt", size=12))
+        untertitel = ft.Column(spacing=2, tight=True, controls=zeilen)
         if len(b.eintraege) == 1:
             return ft.ListTile(
                 leading=haken(bool(b.leistungen)),

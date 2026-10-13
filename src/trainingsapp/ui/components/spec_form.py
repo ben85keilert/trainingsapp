@@ -21,7 +21,14 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.result_spec import FieldSpec, FieldType, ResultSpec, ist_leer
+from trainingsapp.core.result_spec import (
+    FieldSpec,
+    FieldType,
+    ResultSpec,
+    ist_leer,
+    skala_titel,
+    skala_wert,
+)
 from trainingsapp.core.units import format_dauer, format_sets, parse_dauer, parse_sets
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 
@@ -33,6 +40,12 @@ ZAHLENARTIG = {
     FieldType.DISTANCE,
     FieldType.DURATION,
 }
+
+
+def _stellen(schritt: float) -> int:
+    """Nachkommastellen für die Anzeige des Reglers: 1 → 0, 0.1 → 1."""
+    text = f"{schritt:g}"
+    return len(text.split(".")[1]) if "." in text else 0
 
 
 class SpecForm:
@@ -67,10 +80,19 @@ class SpecForm:
         if f.type == FieldType.BOOL:
             return ft.Switch(label=f.label, value=bool(wert))
         if f.type == FieldType.SCALE:
-            lo, hi = f.min or 0, f.max or 10
-            schritte = max(1, int((hi - lo) / (f.step or 1)))
+            # Jeder Bereich, auch negativ und mit Kommastellen (`skala_lesen`)
+            lo = f.min if f.min is not None else 0
+            hi = f.max if f.max is not None else 10
+            schritt = f.step or 1
+            schritte = max(1, round((hi - lo) / schritt))
+            start = float(wert) if wert is not None else float(lo)
             return ft.Slider(
-                min=lo, max=hi, divisions=schritte, value=float(wert or lo), label="{value}"
+                min=lo,
+                max=hi,
+                divisions=schritte,
+                value=min(max(start, lo), hi),
+                label="{value}",
+                round=_stellen(schritt),
             )
         if f.type == FieldType.CHOICE:
             return ft.SegmentedButton(
@@ -107,7 +129,9 @@ class SpecForm:
         if f.type in (FieldType.BOOL, FieldType.TEXT, FieldType.CHOICE):
             return widget
         if f.type == FieldType.SCALE:
-            return ft.Column(spacing=0, controls=[ft.Text(f.label, size=12, opacity=0.7), widget])
+            return ft.Column(
+                spacing=0, controls=[ft.Text(skala_titel(f), size=12, opacity=0.7), widget]
+            )
 
         chips_werte = self._quick.get(f.key) or f.quick
 
@@ -192,8 +216,7 @@ class SpecForm:
         if f.type == FieldType.BOOL:
             return bool(widget.value)  # type: ignore[attr-defined]
         if f.type == FieldType.SCALE:
-            wert = float(widget.value or 0)  # type: ignore[attr-defined]
-            return int(wert) if float(f.step or 1).is_integer() else wert
+            return skala_wert(f, float(widget.value or 0))  # type: ignore[attr-defined]
         if f.type == FieldType.CHOICE:
             auswahl = list(widget.selected or [])  # type: ignore[attr-defined]
             return auswahl[0] if auswahl else None

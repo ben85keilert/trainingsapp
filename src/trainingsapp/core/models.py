@@ -124,6 +124,8 @@ class Exercise:
     #: übernimmt (Chips stehen je Feld in `result_spec`) — `core/standards.py`
     default_target: dict[str, Any] = field(default_factory=dict)
     default_input_mode: str = "chips"
+    #: Standard der Parameter für neue Planübungen — ``None`` = alle, ``[]`` = nur abhaken
+    default_felder: list[str] | None = None
     media: list[Media] = field(default_factory=list)
     #: Typ-Tags: was für eine Übung das ist (Kräftigung, Dehnung, Kung-Fu, …) — optional
     typen: list[str] = field(default_factory=list)
@@ -301,9 +303,15 @@ class PlanItem:
     order: int = 0
     target: dict[str, Any] = field(default_factory=dict)
     note: str = ""
+    #: Abgeleitet aus `felder` (``haken`` bei keinem Parameter, sonst ``chips``) —
+    #: bleibt für ältere Stände und die Synchronisation (Migration 010)
     input_mode: str = EINGABE_CHIPS
-    #: Chips je Feld, die die der Übung ersetzen — leer heißt „wie die Übung"
+    #: Chips je Feld, die die der Übung ersetzen — fehlt ein Feld, gelten die
+    #: der Übung; eine leere Liste heißt „keine Chips, nur das freie Feld"
     quick: dict[str, list[Any]] = field(default_factory=dict)
+    #: Welche Parameter der Plan anbietet (Feldschlüssel) — ``None`` = wie die
+    #: Übung, ``[]`` = keiner, nur abhaken (`core.parameter.aktive_felder`)
+    felder: list[str] | None = None
 
 
 @dataclass(slots=True)

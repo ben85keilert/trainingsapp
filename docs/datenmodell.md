@@ -27,13 +27,19 @@ app_setting   (gerätelokal, Migration 002 — wird nie synchronisiert)
 day_note      (Tagesnotiz je Profil und lokalem Tag, Migration 003)
 ```
 
-**Eingabe ist dreistufig** (Migration 004): Die Übung legt in `result_spec_json`
-ihre Felder und Standard-Chips fest (Feldvorrat in `core/result_spec.py`, Satzfeld
-mit Notation `3x15`, `30`, `15/15/20` — siehe `docs/notation.md`). Der Plan wählt je
-Übung in `plan_item.input_mode` die Stufe (`haken`, `chips`, `frei`), eigene Chips
-(`quick_json`) und ein Ziel (`target_json`). Der Eintrag übernimmt den Plan und darf
-im Formular abweichen. Ein „+20" im Plan ist eine Korrektur des heutigen Eintrags
-(`replaces_entry_id`), der Eintrag selbst bleibt unveränderlich.
+**Parameter im Plan** (Migration 004, seit Migration 010 so): Die Übung legt in
+`result_spec_json` ihre Felder und Standard-Chips fest (Feldvorrat in
+`core/result_spec.py`, Satzfeld mit Notation `3x15`, `30`, `15/15/20` — siehe
+`docs/notation.md`). Der Plan wählt je Übung in `plan_item.fields_json`, welche
+**Parameter** er anbietet (`NULL` = wie die Übung, `[]` = keiner → nur abhaken),
+je Parameter eigene Chips (`quick_json`; eine leere Liste heißt „keine Chips,
+nur das freie Feld") und ein Ziel (`target_json`). Das freie Feld gibt es beim
+Üben für jeden Messwert ohnehin. Die alte Stufe `plan_item.input_mode`
+(`haken`, `chips`, `frei`) bleibt für ältere Stände stehen und folgt den
+Parametern (`haken` bei `[]`, sonst `chips`). Der Eintrag übernimmt den Plan und
+darf im Formular abweichen. Ein „+20" im Plan ist eine Korrektur des heutigen
+Eintrags (`replaces_entry_id`), der Eintrag selbst bleibt unveränderlich; ebenso
+ein Skalenwert nach der Übung (`SitzungRepo.wert_setzen`).
 
 **Archiv, Papierkorb, endgültig** (Migration 005): `exercise.archived` nimmt eine
 Übung aus dem Katalog, Pläne zeigen sie weiter. `deleted_at` heißt „im
@@ -46,8 +52,8 @@ Grabstein stehen, damit alte Einträge ihren Namen behalten und der Seed eine
 mitgelieferte Übung nicht neu anlegt. Pläne funktionieren genauso.
 
 **Standard der Übung ↔ Planübung** (Migration 006): Die Übung trägt einen Standard
-für Pläne — `default_target_json`, `default_input_mode`, Chips je Feld in der
-Spezifikation. `PlanRepo.uebung_hinzufuegen` übernimmt ihn; danach sind Plan und
+für Pläne — `default_target_json`, `default_fields_json` (Parameter, seit 010;
+`default_input_mode` folgt), Chips je Feld in der Spezifikation. `PlanRepo.uebung_hinzufuegen` übernimmt ihn; danach sind Plan und
 Übung unabhängig. Zurück und hin geht es nur ausdrücklich per Knopf
 (`core/standards.py`: `als_standard`, `vom_standard`, `abweichungen`).
 

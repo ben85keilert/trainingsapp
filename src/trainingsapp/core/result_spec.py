@@ -27,6 +27,7 @@ alte Einträge nicht mehr sauber darstellbar. Deshalb speichert jeder
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
@@ -259,6 +260,187 @@ def format_wert(f: FieldSpec, wert: Any) -> str:
     return f"{zahl} {einheit}".strip()
 
 
+_ZAHL = r"[-−]?\d+(?:[.,]\d+)?"
+_SKALA = re.compile(rf"^\s*({_ZAHL})\s*(?:–|—|-|bis|\.\.)\s*({_ZAHL})\s*$", re.IGNORECASE)
+
+
+def skala_lesen(text: str) -> tuple[float, float, float] | None:
+    """Bereich einer Skala aus Text → (min, max, Schritt); ``None`` bei Unsinn.
+
+    Jeder Zahlenbereich geht, auch negativ. Kommazahlen schreibt man als
+    solche: Die meisten Nachkommastellen bestimmen den Schritt.
+
+    >>> skala_lesen("0 - 10"), skala_lesen("-5 bis 5"), skala_lesen("6–20")
+    ((0.0, 10.0, 1.0), (-5.0, 5.0, 1.0), (6.0, 20.0, 1.0))
+    >>> skala_lesen("0.0 - 10.0"), skala_lesen("0,00 - 1")
+    ((0.0, 10.0, 0.1), (0.0, 1.0, 0.01))
+    >>> skala_lesen("-10 - -2"), skala_lesen("10 - 0"), skala_lesen("abc")
+    ((-10.0, -2.0, 1.0), None, None)
+    """
+    m = _SKALA.match(text or "")
+    if m is None:
+        return None
+    teile = [g.replace("−", "-").replace(",", ".") for g in m.groups()]
+    lo, hi = float(teile[0]), float(teile[1])
+    if not lo < hi:
+        return None
+    stellen = max(len(t.split(".")[1]) if "." in t else 0 for t in teile)
+    return lo, hi, round(10.0**-stellen, stellen)
+
+
+def _skala_zahl(wert: float, stellen: int) -> str:
+    return f"{wert:.{stellen}f}" if stellen else f"{wert:g}"
+
+
+def _stellen(schritt: float | None) -> int:
+    """Nachkommastellen eines Schritts: 1 → 0, 0.1 → 1, 0.05 → 2."""
+    text = f"{schritt or 1:g}"
+    return len(text.split(".")[1]) if "." in text else 0
+
+
+def skala_bereich_text(f: FieldSpec) -> str:
+    """„0 bis 10", „−5 bis 5", „0.0 bis 10.0" — so wie man ihn eingibt.
+
+    >>> skala_bereich_text(FieldSpec("s", FieldType.SCALE, "Skala", min=0, max=10, step=1))
+    '0 bis 10'
+    >>> skala_bereich_text(FieldSpec("s", FieldType.SCALE, "Skala", min=-5, max=5, step=0.5))
+    '-5.0 bis 5.0'
+    """
+    stellen = _stellen(f.step)
+    lo = f.min if f.min is not None else 0
+    hi = f.max if f.max is not None else 10
+    return f"{_skala_zahl(lo, stellen)} bis {_skala_zahl(hi, stellen)}"
+
+
+def skala_wert(f: FieldSpec, zahl: float) -> float | int | None:
+    """Ein eingetippter Skalenwert: im Bereich und auf den Schritt gerundet, sonst ``None``.
+
+    >>> f = FieldSpec("s", FieldType.SCALE, "Skala", min=0, max=10, step=0.1)
+    >>> skala_wert(f, 3.14), skala_wert(f, 11), skala_wert(f, 4.0)
+    (3.1, None, 4)
+    """
+    lo = f.min if f.min is not None else 0
+    hi = f.max if f.max is not None else 10
+    if not lo - 1e-9 <= zahl <= hi + 1e-9:
+        return None
+    wert = round(zahl, _stellen(f.step))
+    return int(wert) if float(wert).is_integer() else wert
+
+
+def skala_passt(f: FieldSpec, zahl: float) -> bool:
+    return skala_wert(f, zahl) is not None
+
+
+def skala_titel(f: FieldSpec) -> str:
+    """Bezeichnung einer Skala mit Bereich: „Skala (0 bis 10)".
+
+    Alte Übungen heißen „Skala 0–10" — der Bereich steckt dann schon im Namen.
+
+    >>> skala_titel(FieldSpec("s", FieldType.SCALE, "Skala 0–10", min=0, max=10, step=1))
+    'Skala (0 bis 10)'
+    """
+    return f"{basis_label(f)} ({skala_bereich_text(f)})"
+
+
+def skala_werte(f: FieldSpec, hoechstens: int = 11) -> list[Any]:
+    """Alle Stufen einer Skala zum Antippen — nur bei wenigen (≤ ``hoechstens``).
+
+    >>> skala_werte(FieldSpec("s", FieldType.SCALE, "Skala", min=0, max=10, step=1))
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    >>> skala_werte(FieldSpec("s", FieldType.SCALE, "Skala", min=0, max=1, step=0.1))[:3]
+    [0, 0.1, 0.2]
+    >>> skala_werte(FieldSpec("s", FieldType.SCALE, "Borg", min=6, max=20, step=1))
+    []
+    """
+    lo = f.min if f.min is not None else 0
+    hi = f.max if f.max is not None else 10
+    schritt = f.step or 1
+    n = round((hi - lo) / schritt) + 1
+    if n < 2 or n > hoechstens:
+        return []
+    werte = [round(lo + i * schritt, 6) for i in range(n)]
+    return [int(w) if float(w).is_integer() else w for w in werte]
+
+
+# ---------------------------------------------------------------------------
+# Anzeige: je Parameter eine Zeile
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterWert:
+    """Ein Parameter eines Ergebnisses zum Anzeigen — „Wiederholungen: 3x15 (45 gesamt)"."""
+
+    label: str
+    wert: str
+    zusatz: str = ""
+
+
+def basis_label(f: FieldSpec) -> str:
+    """Der Name ohne angehängten Bereich: „Skala 0–10" → „Skala"."""
+    return re.sub(rf"\s*{_ZAHL}\s*[–—-]\s*{_ZAHL}\s*$", "", f.label).strip() or f.label
+
+
+def wert_text(f: FieldSpec, wert: Any) -> str:
+    """Ein Wert ohne Namen, gut lesbar: „3x15", „1:30", „20 kg", „45°", „6", „ja".
+
+    >>> wert_text(vorrat_feld("weight"), 20), wert_text(vorrat_feld("angle"), 45)
+    ('20 kg', '45°')
+    >>> wert_text(vorrat_feld("hold"), [30, 30]), wert_text(vorrat_feld("done"), True)
+    ('2x30s', 'ja')
+    """
+    if f.type == FieldType.BOOL:
+        return "ja" if wert else "nein"
+    if f.type == FieldType.SCALE:
+        try:
+            zahl = float(wert)
+        except (TypeError, ValueError):
+            return str(wert)
+        return _skala_zahl(zahl, _stellen(f.step)) if not zahl.is_integer() else f"{zahl:g}"
+    text = format_wert(f, wert)
+    if f.unit in ("kg", "m", "km") and text.endswith(f.unit) and not isinstance(wert, list):
+        return f"{text[: -len(f.unit)]} {f.unit}"
+    return text
+
+
+def parameter_werte(spec: ResultSpec | None, werte: dict[str, Any]) -> list[ParameterWert]:
+    """Je ausgefülltem Parameter eine Zeile — in der Reihenfolge der Übung.
+
+    Satzlisten bekommen die Summe dazu, die Skala ihren Bereich: Eine 6 allein
+    sagt niemandem etwas.
+
+    >>> spec = ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("scale")])
+    >>> [(z.label, z.wert, z.zusatz) for z in parameter_werte(spec, {"reps": [15, 15], "scale": 6})]
+    [('Wiederholungen', '2x15', '30 gesamt'), ('Skala', '6', '0 bis 10')]
+    >>> parameter_werte(spec, {})
+    []
+    """
+    zeilen: list[ParameterWert] = []
+    bekannt = set()
+    for f in spec.fields if spec is not None else []:
+        bekannt.add(f.key)
+        wert = werte.get(f.key)
+        if (
+            f.type != FieldType.BOOL
+            and ist_leer(wert)
+            and not (f.type == FieldType.SCALE and wert == 0)
+        ):
+            continue
+        if f.type == FieldType.BOOL and wert is None:
+            continue
+        zusatz = ""
+        if f.type == FieldType.SET_LIST and isinstance(wert, list) and len(wert) > 1:
+            summe = satz_summe([float(w) for w in wert if isinstance(w, int | float)])
+            zusatz = f"{format_dauer(summe) if f.unit == 's' else f'{summe:g}'} gesamt"
+        elif f.type == FieldType.SCALE:
+            zusatz = skala_bereich_text(f)
+        zeilen.append(ParameterWert(basis_label(f), wert_text(f, wert), zusatz))
+    for key, wert in werte.items():  # Werte aus einer älteren Spezifikation
+        if key not in bekannt and not ist_leer(wert):
+            zeilen.append(ParameterWert(key, str(wert)))
+    return zeilen
+
+
 # ---------------------------------------------------------------------------
 # Der Feldvorrat — woraus eine Übung ihre Felder wählt
 # ---------------------------------------------------------------------------
@@ -436,11 +618,21 @@ __all__ = [
     "FieldSpec",
     "FieldType",
     "Layout",
+    "ParameterWert",
     "ResultSpec",
+    "basis_label",
     "format_wert",
     "ist_altes_satzformat",
     "ist_leer",
     "modernisieren",
+    "parameter_werte",
+    "skala_bereich_text",
+    "skala_lesen",
+    "skala_passt",
+    "skala_titel",
+    "skala_wert",
+    "skala_werte",
     "vorrat_feld",
+    "wert_text",
     "werte_modernisieren",
 ]

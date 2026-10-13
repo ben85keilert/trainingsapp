@@ -26,7 +26,17 @@ from typing import Any
 
 from .models import Exercise, SessionEntry
 from .parameter import MENGE, auspraegung, rolle
-from .result_spec import FieldSpec, FieldType, ResultSpec, format_wert, ist_leer
+from .result_spec import (
+    FieldSpec,
+    FieldType,
+    ParameterWert,
+    ResultSpec,
+    basis_label,
+    format_wert,
+    ist_leer,
+    skala_bereich_text,
+    wert_text,
+)
 from .units import format_dauer, satz_summe
 
 
@@ -116,6 +126,61 @@ class Buendel:
     def einzelwerte_text(self) -> str:
         """Woraus sich die Summe zusammensetzt: „50 · 50 · 50“ oder „3x15 · 20“."""
         return " · ".join(e.shorthand() for e in self.leistungen if e.result)
+
+    def parameter_zeilen(self) -> list[ParameterWert]:
+        """Je Parameter eine Zeile: Mengen als Summe, alles andere mit seinen Werten.
+
+        Mengen (Wiederholungen, Haltezeit, Strecke) stehen addiert da, dahinter
+        woraus sie bestehen; Skala & Co. mit jedem Wert des Tages („4 · 6").
+        Die Ausprägung (45°) gehört in die Überschrift, nicht hierher.
+
+        >>> from trainingsapp.core.result_spec import vorrat_feld
+        >>> spec = ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("scale")])
+        >>> eintraege = [SessionEntry(exercise_id="x", result={"reps": [15, 15], "scale": 4},
+        ...                           spec_snapshot=spec),
+        ...              SessionEntry(exercise_id="x", result={"reps": [20]}, spec_snapshot=spec)]
+        >>> [(z.label, z.wert, z.zusatz) for z in buendeln(eintraege)[0].parameter_zeilen()]
+        [('Wiederholungen', '50', '2x15 + 20'), ('Skala', '4', '0 bis 10')]
+        """
+        if self.spec is None:
+            return []
+        zeilen: list[ParameterWert] = []
+        kontext = {k for k, _ in self.auspraegung}
+        for f in self.spec.fields:
+            if f.key in kontext:
+                continue
+            if f.key in self.summen:
+                summe = self.summen[f.key]
+                wert = (
+                    format_dauer(summe)
+                    if f.unit == "s" or f.type == FieldType.DURATION
+                    else f"{summe:g}"
+                )
+                einzeln = [
+                    wert_text(f, e.result[f.key])
+                    for e in self.leistungen
+                    if not ist_leer(e.result.get(f.key))
+                ]
+                zusatz = " + ".join(einzeln) if 1 < len(einzeln) <= 6 else ""
+                if len(einzeln) == 1 and isinstance(self.leistungen[0].result.get(f.key), list):
+                    zusatz = wert_text(f, self.leistungen[0].result[f.key])
+                    zusatz = "" if zusatz == wert else zusatz
+                zeilen.append(ParameterWert(basis_label(f), wert, zusatz))
+                continue
+            werte = [
+                e.result[f.key]
+                for e in self.leistungen
+                if f.key in e.result and (not ist_leer(e.result[f.key]) or e.result[f.key] == 0)
+            ]
+            if not werte or f.type == FieldType.TEXT:
+                continue
+            zusatz = skala_bereich_text(f) if f.type == FieldType.SCALE else ""
+            zeilen.append(
+                ParameterWert(basis_label(f), " · ".join(wert_text(f, w) for w in werte), zusatz)
+            )
+        if self.abgehakt and self.leistungen:
+            zeilen.append(ParameterWert("Abgehakt", f"{len(self.abgehakt)}×", "ohne Werte"))
+        return zeilen
 
     def zusammenfassung(self) -> str:
         """Die eine Zeile für die Tagesansicht.

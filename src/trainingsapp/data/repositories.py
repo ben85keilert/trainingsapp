@@ -27,6 +27,7 @@ from typing import Any
 
 from ..core.models import (
     EINGABE_CHIPS,
+    EINGABE_HAKEN,
     TAG_REGION,
     TAG_TYP,
     DayNote,
@@ -46,7 +47,7 @@ from ..core.models import (
     new_id,
     tagesgrenzen,
 )
-from ..core.parameter import kontextfelder
+from ..core.parameter import kontextfelder, modus_aus_felder
 from ..core.result_spec import FieldType, ResultSpec, werte_modernisieren
 from .db import transaktion
 
@@ -102,8 +103,8 @@ class ExerciseRepo:
                     (id, name, category, description, icon_key, image_path,
                      is_builtin, result_spec_json, limit_spec_json,
                      default_target_json, default_input_mode, archived, created_at, updated_at,
-                     family_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     family_id, default_fields_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -114,6 +115,7 @@ class ExerciseRepo:
                     limit_spec_json = excluded.limit_spec_json,
                     default_target_json = excluded.default_target_json,
                     default_input_mode = excluded.default_input_mode,
+                    default_fields_json = excluded.default_fields_json,
                     archived = excluded.archived,
                     family_id = excluded.family_id,
                     updated_at = excluded.updated_at,
@@ -130,11 +132,12 @@ class ExerciseRepo:
                     json.dumps(uebung.result_spec.to_dict(), ensure_ascii=False),
                     json.dumps(uebung.limit_spec, ensure_ascii=False),
                     json.dumps(uebung.default_target, ensure_ascii=False),
-                    uebung.default_input_mode,
+                    modus_aus_felder(uebung.default_felder),
                     int(uebung.archived),
                     uebung.created_at.isoformat(),
                     uebung.updated_at.isoformat(),
                     uebung.family_id,
+                    _felder_json(uebung.default_felder),
                 ),
             )
             # Medien: alle Verweise neu schreiben. Einfacher als Abgleich, und
@@ -466,6 +469,7 @@ class ExerciseRepo:
             limit_spec=json.loads(r["limit_spec_json"]),
             default_target=json.loads(r["default_target_json"]),
             default_input_mode=r["default_input_mode"],
+            default_felder=_felder_lesen(r["default_fields_json"]),
             archived=bool(r["archived"]),
             created_at=datetime.fromisoformat(r["created_at"]),
             updated_at=datetime.fromisoformat(r["updated_at"]),
@@ -477,6 +481,22 @@ class ExerciseRepo:
 # ---------------------------------------------------------------------------
 # Profile
 # ---------------------------------------------------------------------------
+
+
+def _felder_json(felder: list[str] | None) -> str | None:
+    """Parameter einer Planübung bzw. Standard der Übung → Spalte (NULL = wie die Übung)."""
+    return None if felder is None else json.dumps(list(felder), ensure_ascii=False)
+
+
+def _felder_lesen(text: str | None) -> list[str] | None:
+    """Spalte → Parameter; Kaputtes gilt als „wie die Übung"."""
+    if text is None:
+        return None
+    try:
+        roh = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return [str(k) for k in roh] if isinstance(roh, list) else None
 
 
 class SubjectRepo:
@@ -655,7 +675,8 @@ class PlanRepo:
             (plan_id,),
         ).fetchone()[0]
         standard = self.con.execute(
-            "SELECT default_target_json, default_input_mode FROM exercise WHERE id = ?",
+            "SELECT default_target_json, default_input_mode, default_fields_json "
+            "FROM exercise WHERE id = ?",
             (exercise_id,),
         ).fetchone()
         item = PlanItem(
@@ -664,6 +685,7 @@ class PlanRepo:
             order=naechste,
             target=target if target is not None else json.loads(standard[0]) if standard else {},
             input_mode=standard[1] if standard else EINGABE_CHIPS,
+            felder=_felder_lesen(standard[2]) if standard else None,
         )
         with transaktion(self.con):
             self._item_schreiben(item)
@@ -687,12 +709,27 @@ class PlanRepo:
         )
 
     def eingabe_setzen(
-        self, item_id: str, input_mode: str, quick: dict[str, list[Any]] | None = None
+        self,
+        item_id: str,
+        input_mode: str,
+        quick: dict[str, list[Any]] | None = None,
+        felder: list[str] | None = None,
     ) -> None:
-        """Stufe und eigene Chips einer Planübung."""
+        """Parameter und eigene Chips einer Planübung — die Stufe folgt den Parametern.
+
+        ``input_mode`` zählt nur noch für ältere Aufrufer: ``haken`` ohne
+        Parameterwahl heißt „keiner" (``felder=[]``).
+        """
+        if felder is None and input_mode == EINGABE_HAKEN:
+            felder = []
         self.con.execute(
-            "UPDATE plan_item SET input_mode = ?, quick_json = ? WHERE id = ?",
-            (input_mode, json.dumps(quick or {}, ensure_ascii=False), item_id),
+            "UPDATE plan_item SET input_mode = ?, quick_json = ?, fields_json = ? WHERE id = ?",
+            (
+                modus_aus_felder(felder),
+                json.dumps(quick or {}, ensure_ascii=False),
+                _felder_json(felder),
+                item_id,
+            ),
         )
 
     def umbenennen(self, plan_id: str, name: str) -> None:
@@ -789,7 +826,7 @@ class PlanRepo:
         """Ziel, Stufe und Chips einer Planübung auf einmal (Standard übernehmen)."""
         with transaktion(self.con):
             self.ziel_setzen(item.id, item.target)
-            self.eingabe_setzen(item.id, item.input_mode, item.quick)
+            self.eingabe_setzen(item.id, item.input_mode, item.quick, item.felder)
 
     def verwendungen(
         self, exercise_id: str, subject_id: str | None = None
@@ -826,7 +863,7 @@ class PlanRepo:
     def _item_schreiben(self, item: PlanItem) -> None:
         self.con.execute(
             "INSERT INTO plan_item (id, plan_id, exercise_id, sort_order, target_json, note, "
-            "input_mode, quick_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "input_mode, quick_json, fields_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 item.id,
                 item.plan_id,
@@ -834,8 +871,9 @@ class PlanRepo:
                 item.order,
                 json.dumps(item.target, ensure_ascii=False),
                 item.note,
-                item.input_mode,
+                modus_aus_felder(item.felder),
                 json.dumps(item.quick, ensure_ascii=False),
+                _felder_json(item.felder),
             ),
         )
 
@@ -869,6 +907,7 @@ class PlanRepo:
             note=r["note"],
             input_mode=r["input_mode"],
             quick=json.loads(r["quick_json"]),
+            felder=_felder_lesen(r["fields_json"]),
         )
 
     @staticmethod
@@ -1123,6 +1162,37 @@ class SessionRepo:
         return self.eintrag_korrigieren(
             aktuell.id, {**basis, feld_key: [*liste, wert]}, spec=neue_kopie
         )
+
+    def wert_setzen(
+        self,
+        session: Session,
+        uebung: Exercise,
+        feld_key: str,
+        wert: Any,
+        tag: date,
+        kontext: dict[str, Any] | None = None,
+    ) -> SessionEntry:
+        """Einen Einzelwert (Skala, Gewicht …) in den heutigen Eintrag setzen — oder anlegen.
+
+        Wie `satz_anhaengen`: Die Skala nach der Übung („Schmerz 3") gehört zur
+        Übung von eben, nicht in einen eigenen Eintrag. Gibt es heute noch keinen
+        passenden (gleiche Session, gleiche Ausprägung), beginnt einer.
+        """
+        kontext = kontext or {}
+        aktuell = self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+        felder = {f.key for f in kontextfelder(uebung.result_spec)} | set(kontext)
+        if (
+            aktuell is None
+            or aktuell.session_id != session.id
+            or any(aktuell.result.get(k) != kontext.get(k) for k in felder)
+        ):
+            return self.eintrag_anlegen(session, uebung, {**kontext, feld_key: wert})
+        basis = werte_modernisieren(aktuell.result)
+        kopie = aktuell.spec_snapshot
+        neue_kopie = (
+            None if kopie is not None and kopie.field_by_key(feld_key) else uebung.result_spec
+        )
+        return self.eintrag_korrigieren(aktuell.id, {**basis, feld_key: wert}, spec=neue_kopie)
 
     def eintrag_loeschen(self, eintrag_id: str) -> None:
         """Weich löschen — samt der Einträge, die dieser korrigiert hat.

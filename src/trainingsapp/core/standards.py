@@ -1,6 +1,7 @@
 """Standard der Übung ↔ Planübung: Änderungen gezielt hin- und herschieben.
 
-Die Übung hat einen Standard für Pläne — Ziel, Eingabestufe, Chips je Feld.
+Die Übung hat einen Standard für Pläne — Ziel, Parameter (welche Felder der
+Plan anbietet; keiner = nur abhaken), Chips je Feld.
 Nimmt ein Plan die Übung auf, übernimmt die Planübung diesen Standard
 (`PlanRepo.uebung_hinzufuegen`). Danach sind beide unabhängig: Wer im Plan
 nachjustiert, ändert nicht stillschweigend jede andere Verwendung.
@@ -23,8 +24,8 @@ from dataclasses import replace
 from typing import Any
 
 from .models import Exercise, PlanItem
-from .parameter import BEIWERK, rolle
-from .result_spec import ResultSpec, ist_leer
+from .parameter import BEIWERK, chips_sortiert, gewaehlte_felder, modus_aus_felder, rolle
+from .result_spec import FieldSpec, FieldType, ResultSpec, ist_leer, skala_werte
 
 
 def ziel_spec(spec: ResultSpec) -> ResultSpec:
@@ -55,12 +56,46 @@ def ziel_bereinigen(werte: dict[str, Any], spec: ResultSpec) -> dict[str, Any]:
     return {k: v for k, v in werte.items() if k in keys and not ist_leer(v)}
 
 
+def aktive_felder(item: PlanItem, uebung: Exercise) -> list[FieldSpec]:
+    """Die Parameter, die diese Planübung anbietet — leer heißt nur abhaken.
+
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> u = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("scale")]))
+    >>> [f.key for f in aktive_felder(PlanItem(), u)], aktive_felder(PlanItem(felder=[]), u)
+    (['reps', 'scale'], [])
+    """
+    return gewaehlte_felder(uebung.result_spec, item.felder, uebung.default_felder)
+
+
+def aktive_keys(item: PlanItem, uebung: Exercise) -> list[str]:
+    return [f.key for f in aktive_felder(item, uebung)]
+
+
+def chips_fuer(item: PlanItem, f: FieldSpec) -> list:
+    """Die Chips eines Parameters im Plan: eigene, sonst die der Übung — sortiert.
+
+    Eine leere eigene Liste heißt „keine Chips, nur das freie Feld".
+
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> reps = vorrat_feld("reps")
+    >>> chips_fuer(PlanItem(), reps), chips_fuer(PlanItem(quick={"reps": [20, 5]}), reps)
+    ([10, 15, 20], [5, 20])
+    >>> chips_fuer(PlanItem(quick={"reps": []}), reps)
+    []
+    """
+    if f.key in item.quick:
+        return chips_sortiert(list(item.quick[f.key]))
+    if f.type == FieldType.SCALE and not f.quick:
+        return skala_werte(f)  # wenige Stufen: alle zum Antippen
+    return chips_sortiert(list(f.quick))
+
+
 def eigene_chips(item: PlanItem, uebung: Exercise) -> dict[str, list]:
-    """Nur die Chips, die wirklich von der Übung abweichen."""
+    """Nur die Chips, die wirklich von der Übung abweichen (auch „keine")."""
     ergebnis = {}
     for key, werte in item.quick.items():
         f = uebung.result_spec.field_by_key(key)
-        if f is not None and werte and list(werte) != list(f.quick):
+        if f is not None and chips_sortiert(list(werte)) != chips_fuer(PlanItem(), f):
             ergebnis[key] = list(werte)
     return ergebnis
 
@@ -68,17 +103,20 @@ def eigene_chips(item: PlanItem, uebung: Exercise) -> dict[str, list]:
 def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
     """Worin die Planübung vom Standard der Übung abweicht — leer = gleich.
 
-    >>> u = Exercise(default_target={"reps": [15, 15]})
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> u = Exercise(default_target={"reps": [15, 15]},
+    ...              result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("scale")]))
     >>> abweichungen(PlanItem(target={"reps": [15, 15]}), u)
     []
-    >>> abweichungen(PlanItem(target={"reps": [20]}, input_mode="frei"), u)
-    ['Ziel', 'Eingabe']
+    >>> abweichungen(PlanItem(target={"reps": [20]}, felder=["reps"], quick={"reps": []}), u)
+    ['Ziel', 'Parameter', 'Chips Wiederholungen']
     """
     teile = []
     if dict(item.target) != dict(uebung.default_target):
         teile.append("Ziel")
-    if item.input_mode != uebung.default_input_mode:
-        teile.append("Eingabe")
+    standard = gewaehlte_felder(uebung.result_spec, uebung.default_felder)
+    if aktive_felder(item, uebung) != standard:
+        teile.append("Parameter")
     teile.extend(
         f"Chips {f.label}"
         for key in eigene_chips(item, uebung)
@@ -90,19 +128,25 @@ def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
 def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
     """Die Planübung wird zum Standard der Übung — Chips wandern in die Felder.
 
-    >>> u = als_standard(PlanItem(target={"reps": [20]}, input_mode="frei"), Exercise())
-    >>> u.default_target, u.default_input_mode
-    ({'reps': [20]}, 'frei')
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> u0 = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
+    >>> u = als_standard(PlanItem(target={"reps": [20]}, felder=[], quick={"reps": [5]}), u0)
+    >>> u.default_target, u.default_felder, u.default_input_mode, u.result_spec.fields[0].quick
+    ({'reps': [20]}, [], 'haken', [5])
     """
     chips = eigene_chips(item, uebung)
     felder = [
-        replace(f, quick=list(chips[f.key])) if f.key in chips else f
+        replace(f, quick=chips_sortiert(list(chips[f.key]))) if f.key in chips else f
         for f in uebung.result_spec.fields
     ]
+    gewaehlt = None if item.felder is None else aktive_keys(item, uebung)
     return replace(
         uebung,
         default_target=dict(item.target),
-        default_input_mode=item.input_mode,
+        default_felder=gewaehlt if gewaehlt is not None else uebung.default_felder,
+        default_input_mode=modus_aus_felder(
+            gewaehlt if gewaehlt is not None else uebung.default_felder
+        ),
         result_spec=replace(uebung.result_spec, fields=felder),
         media=list(uebung.media),
         typen=list(uebung.typen),
@@ -111,24 +155,29 @@ def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
 
 
 def vom_standard(uebung: Exercise, item: PlanItem) -> PlanItem:
-    """Die Planübung übernimmt wieder den Standard der Übung.
+    """Die Planübung übernimmt wieder den Standard der Übung („zurücksetzen").
 
-    >>> u = Exercise(default_target={"hold": [30]}, default_input_mode="haken")
-    >>> neu = vom_standard(u, PlanItem(target={"hold": [60]}, quick={"hold": [10]}))
-    >>> neu.target, neu.input_mode, neu.quick
-    ({'hold': [30]}, 'haken', {})
+    >>> u = Exercise(default_target={"hold": [30]}, default_felder=[])
+    >>> alt = PlanItem(target={"hold": [60]}, quick={"hold": [10]}, felder=["hold"])
+    >>> neu = vom_standard(u, alt)
+    >>> neu.target, neu.felder, neu.quick, neu.input_mode
+    ({'hold': [30]}, None, {}, 'haken')
     """
     return replace(
         item,
         target=dict(uebung.default_target),
-        input_mode=uebung.default_input_mode,
+        felder=None,
+        input_mode=modus_aus_felder(uebung.default_felder),
         quick={},
     )
 
 
 __all__ = [
     "abweichungen",
+    "aktive_felder",
+    "aktive_keys",
     "als_standard",
+    "chips_fuer",
     "eigene_chips",
     "vom_standard",
     "ziel_bereinigen",

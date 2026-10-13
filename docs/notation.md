@@ -36,8 +36,13 @@ auf der Kurve.
 
 ## Einzelwerte
 
-Gewicht `40` oder `40kg`, Strecke `500` (Meter) oder `2km`, Winkel `45`,
-Skala `0` bis `10`. Dezimalzahlen mit Punkt oder Komma, `12,5` wird 12.5.
+Gewicht `40` oder `40kg`, Strecke `500` (Meter) oder `2km`, Winkel `45`.
+Dezimalzahlen mit Punkt oder Komma, `12,5` wird 12.5.
+
+**Skala:** Standard `0` bis `10`; jeder Bereich geht, auch negativ (`-5 - 5`)
+oder mit Kommastellen — die schreibt man im Bereich als solche: `0.0 - 10.0`
+erlaubt `3.5`, `0 - 10` nur ganze Zahlen. Wenige Stufen (bis 11) stehen im
+Plan zum Antippen da, sonst tippt man den Wert ein.
 In Satzlisten trennt deshalb der Schrägstrich sicherer als das Komma.
 
 ## Das Plus im Plan
@@ -53,8 +58,9 @@ jeden Satz.
 
 Die **Übung** legt fest, welche Felder es gibt (aus dem Feldvorrat in
 `core/result_spec.py`) und welche Chips Standard sind. Der **Plan** übernimmt
-das und wählt je Übung die Stufe — nur abhaken, Chips, Freieingabe — und darf
-Chips und Ziel setzen. Der **Eintrag** übernimmt den Plan und darf im Formular
+das und wählt je Übung, welche Parameter er anbietet (keiner = nur abhaken),
+welche Chips je Parameter (keiner = nur das freie Feld, das es ohnehin immer
+gibt) und ein Ziel. Der **Eintrag** übernimmt den Plan und darf im Formular
 wieder abweichen. Was unten anders gemacht wurde, sieht man hinterher und kann
 den Plan anpassen.
 Plan und Übung tauschen sich nur ausdrücklich aus: „Als Standard der Übung

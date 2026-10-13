@@ -9,7 +9,9 @@ from __future__ import annotations
 import flet as ft
 
 from trainingsapp.core.models import SessionEntry, lokaler_tag
+from trainingsapp.core.result_spec import parameter_werte
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.werte import wert_kacheln
 from trainingsapp.ui.state import AppState
 
 
@@ -68,11 +70,11 @@ def eintrag_view(page: ft.Page, state: AppState, eintrag: SessionEntry) -> ft.Vi
                 ft.Column(
                     spacing=20,
                     controls=[
-                        ft.Text(
-                            eintrag.shorthand() if eintrag.result else "gemacht",
-                            size=32,
-                            weight=ft.FontWeight.BOLD,
-                        ),
+                        # Je Parameter eine Kachel mit Namen — „3x15 · 6" allein sagte
+                        # nicht, dass die 6 die Skala ist
+                        wert_kacheln(werte)
+                        if (werte := parameter_werte(eintrag.spec_snapshot, eintrag.result))
+                        else ft.Text("gemacht", size=32, weight=ft.FontWeight.BOLD),
                         _abschnitt("Wann", ft.Text(zeit)),
                         _abschnitt("Plan", ft.Text(plan.name if plan else "ohne Plan")),
                         _abschnitt("Notiz", ft.Text(eintrag.note or "—")),

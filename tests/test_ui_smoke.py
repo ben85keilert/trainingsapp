@@ -242,6 +242,81 @@ def test_planansicht_alle_eingabestufen(page, welt) -> None:
         assert plan_view(page, state, plan) is not None
 
 
+def _alle(c):
+    """Alle Controls eines Baums — für Knöpfe und Felder in Ansichten."""
+    yield c
+    for name in ("content", "controls", "title", "subtitle", "leading", "trailing"):
+        kind = getattr(c, name, None)
+        for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
+            if hasattr(k, "__dict__"):
+                yield from _alle(k)
+
+
+def test_planuebung_parameter_und_chips_einstellen(page, welt) -> None:
+    """Parameter an/aus, Chips wählen, eigener Chip, Zurücksetzen nur bei Abweichung."""
+    import asyncio
+
+    from trainingsapp.core.models import Exercise
+    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+    from trainingsapp.ui.views.plan_einstellen import plan_einstellen
+
+    state, plan, *_ = welt
+    u = Exercise(
+        name="Kniebeuge",
+        result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("scale")]),
+    )
+    state.uebungen.speichern(u)
+    item = state.plaene.uebung_hinzufuegen(plan.id, u.id)
+    gesprungen: list[str] = []
+
+    async def push_route(r: str) -> None:
+        gesprungen.append(r)
+
+    page.push_route = push_route
+    page.update = lambda: None
+    page.show_dialog = lambda d: None
+    ansicht = plan_einstellen(page, state, plan, item, u)
+
+    knopfarten = ft.FilledTonalButton | ft.OutlinedButton | ft.FilledButton
+
+    def knopf(text: str):
+        """Knopf mit diesem Text — als Inhalt oder als Text in einer Zeile."""
+        return next(
+            c
+            for v in ansicht.controls
+            for c in _alle(v)
+            if isinstance(c, knopfarten)
+            and (c.content == text or any(getattr(t, "value", None) == text for t in _alle(c)))
+        )
+
+    zuruecksetzen = next(
+        c
+        for v in ansicht.controls
+        for c in _alle(v)
+        if isinstance(c, ft.OutlinedButton) and c.content == "Standard der Übung übernehmen"
+    )
+    assert zuruecksetzen.disabled  # entspricht dem Standard
+    knopf("Skala").on_click()  # Skala aus → nur Wiederholungen
+    assert not zuruecksetzen.disabled
+    chip_15 = next(
+        c
+        for v in ansicht.controls
+        for c in _alle(v)
+        if isinstance(c, ft.Chip) and getattr(c.label, "value", "") == "+15"
+    )
+    chip_15.on_select()  # 15 abwählen
+    asyncio.run(knopf("Speichern").on_click())
+    gespeichert = state.plaene.item_laden(item.id)
+    assert gespeichert.felder == ["reps"] and gespeichert.quick == {"reps": [10, 20]}
+    assert gesprungen
+
+    # Nichts an: nur abhaken — die Planansicht baut ohne Eingabefelder
+    state.plaene.eingabe_setzen(item.id, "chips", {}, [])
+    from trainingsapp.ui.views.plan import plan_view
+
+    assert plan_view(page, state, state.plaene.laden(plan.id)) is not None
+
+
 def test_uebung_editor_und_katalogfilter(page, welt) -> None:
     from trainingsapp.ui.views.katalog import katalog
     from trainingsapp.ui.views.uebung_bearbeiten import chips_lesen, spec_bauen, uebung_bearbeiten

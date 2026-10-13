@@ -29,6 +29,7 @@ from ..hrv_core.export import diagnose_pfad, diagnose_text
 from ..hrv_core.live import LiveFenster
 from ..hrv_core.ppi import messluecken
 from ..hrv_core.recording import Recording, messordner
+from ..hrv_core.regeln import Korrekturregeln
 from ..hrv_core.segments import abdeckung
 from ..hrv_core.zeitachse import Kontinuitaetsuhr
 from .base import DeviceStatus, HeartRateSource, Messwert, PpiPaket, Verbindung
@@ -64,8 +65,11 @@ class Messlauf:
         *,
         jetzt_utc: Callable[[], datetime] = lambda: datetime.now(UTC),
         backup_basis: Path | None = None,
+        regeln: Korrekturregeln | None = None,
     ) -> None:
         self.quelle = quelle
+        #: Erkennungsregeln der Live-Anzeige (`regeln_setzen`)
+        self.regeln = regeln or Korrekturregeln()
         # Die Uhr der Quelle — beim Simulator läuft sie ``tempo``-fach, bei echten
         # Geräten ist sie time.monotonic(). t_capture der Messwerte passt dazu.
         self._uhr: Callable[[], float] = getattr(quelle, "jetzt", time.monotonic)
@@ -75,9 +79,8 @@ class Messlauf:
         # Live-x-Achse gebündelter PPI-Pakete (Verity Sense): Schlagzeiten aus der
         # Intervallsumme statt aus der streuenden Ankunft (`hrv_core.zeitachse`).
         self._ppi_uhr = Kontinuitaetsuhr()
-        #: Erwartete Schläge des letzten PPI-Pakets: (rr_ms, Anzeigezeit, Naht davor)
-        # Anzeigezeiten des letzten PPI-Pakets: (rr_ms, t, verworfen) in Folge
-        self._schlagzeiten: deque[tuple[int, float, bool]] = deque()
+        #: Anzeigezeiten des letzten PPI-Pakets: (rr_ms, t, verworfen, fehler_ms) in Folge
+        self._schlagzeiten: deque[tuple[int, float, bool, int]] = deque()
         self.aufnahme: Aufnahme | None = None
         self.status = DeviceStatus(verbindung=Verbindung.GETRENNT)
         self.device_id = ""
@@ -117,10 +120,16 @@ class Messlauf:
         self.profil = self.quelle.profil or self.profil
         quelle = self.profil.intervall_quelle if self.profil else ""
         self.live = LiveFenster(malik=malik_threshold(quelle))
+        self.live.regeln_setzen(self.regeln, quelle)
         self._ppi_uhr = Kontinuitaetsuhr()
         self._schlagzeiten.clear()
         self.start_mono = self._uhr()
         self.status = self.quelle.aktueller_status
+
+    def regeln_setzen(self, regeln: Korrekturregeln) -> None:
+        """Neue Erkennungsregeln — wirken sofort auf den ganzen Live-Puffer."""
+        self.regeln = regeln
+        self.live.regeln_setzen(regeln, self.profil.intervall_quelle if self.profil else "")
 
     async def laufen(self) -> None:
         """Liest, bis die Quelle endet — über `page.run_task` starten."""
@@ -136,8 +145,9 @@ class Messlauf:
                     continue
                 if not isinstance(wert, Messwert):
                     continue
+                t_live, fehler = self._live_zeit(wert)
                 self.live.hinzufuegen(
-                    self._live_zeit(wert) - self.start_mono, wert.rr_ms, wert.hf_bpm
+                    t_live - self.start_mono, wert.rr_ms, wert.hf_bpm, fehler_ms=fehler
                 )
                 self._verworfene_zeigen()
                 if self.aufnahme is not None:
@@ -162,33 +172,36 @@ class Messlauf:
         self._verworfene_zeigen()
         gueltig = [p > 0 for p in paket.ppi_ms]
         zeiten = iter(self._ppi_uhr.paket(paket.t_capture, paket.ppi_ms, gueltig))
-        erwartet: deque[tuple[int, float, bool]] = deque()
-        for rr, blocker in zip(paket.ppi_ms, paket.blocker, strict=True):
+        erwartet: deque[tuple[int, float, bool, int]] = deque()
+        fehler_je = list(paket.fehler_ms) + [0] * (len(paket.ppi_ms) - len(paket.fehler_ms))
+        for rr, blocker, fehler in zip(paket.ppi_ms, paket.blocker, fehler_je, strict=False):
             if rr <= 0:
                 continue
             _, t = next(zeiten)
-            erwartet.append((rr, t, bool(blocker)))
+            erwartet.append((rr, t, bool(blocker), int(fehler)))
         self._schlagzeiten = erwartet
         self._verworfene_zeigen()
 
     def _verworfene_zeigen(self) -> None:
         """Verworfene Intervalle vorn in der Warteschlange ins Live-Fenster schreiben."""
         while self._schlagzeiten and self._schlagzeiten[0][2]:
-            rr, t, _ = self._schlagzeiten.popleft()
-            self.live.hinzufuegen(t - self.start_mono, rr, 0, verworfen=True)
+            rr, t, _, fehler = self._schlagzeiten.popleft()
+            self.live.hinzufuegen(t - self.start_mono, rr, 0, verworfen=True, fehler_ms=fehler)
 
-    def _live_zeit(self, wert: Messwert) -> float:
+    def _live_zeit(self, wert: Messwert) -> tuple[float, int]:
         """Anzeigezeit eines Schlags: Kontinuitätsuhr, falls er zum letzten PPI-Paket gehört.
 
         Die Quelle schickt das Paket vor seinen Schlägen. Passt das Intervall
         nicht zum nächsten erwarteten (fremder Schlag), gilt die Ankunft. Die
-        Datei bekommt immer die Ankunftszeit (``aufnahme.schlag``).
+        Datei bekommt immer die Ankunftszeit (``aufnahme.schlag``). Dazu die
+        Fehlerschätzung des Geräts für dieses Intervall (0 = keine).
         """
         if self._schlagzeiten:
             if self._schlagzeiten[0][0] == wert.rr_ms:
-                return self._schlagzeiten.popleft()[1]
+                _, t, _, fehler = self._schlagzeiten.popleft()
+                return t, fehler
             self._schlagzeiten.clear()
-        return wert.t_capture
+        return wert.t_capture, 0
 
     async def _status_lesen(self) -> None:
         async for s in self.quelle.status():

@@ -17,10 +17,18 @@ Wert. Solche Punkte sind **nicht** markiert, haben keine korrigierte Kurve
 (``rr_korr = None``) und wirken in den Kennzahlen wie eine Naht.
 
 Vom Gerät verworfene Intervalle (Verity Sense, Blocker-Bit) kommen mit
-``verworfen=True`` in den Puffer: Sie haben gedauert und gehören in die Kurve
-(grau), zählen aber nirgends mit — keine Bewertung, keine Kennzahl, und über
-sie hinweg keine Differenz. Bei 44 % verworfenen Intervallen in Ruhe
-(13.10.2026) bestand die Kurve ohne sie nur aus Bruchstücken.
+``verworfen=True`` in den Puffer — sie haben gedauert und gehören in die
+Kurve. Was mit ihnen geschieht, sagen die `Korrekturregeln`
+(`LiveFenster.regeln_setzen`):
+
+- ``"selbst"`` (Vorgabe in der App): Sie werden wie jedes andere Intervall
+  bewertet — Grenzen, Malik, Fehlerschätzung. Was davon durchkommt, zählt.
+- ``"sensor"`` (Vorgabe ohne Regeln, bis ALGO_VERSION 3): Sie zählen nirgends
+  mit — keine Bewertung, keine Kennzahl, und über sie hinweg keine Differenz.
+
+Die Umschaltung wirkt sofort auf den ganzen Puffer: gespeichert ist das
+Blocker-Bit, nicht das Urteil. Ebenso die Fehlerschätzung des Sensors
+(``fehler_ms``): Liegt sie über der Schwelle, ist der Schlag ein Artefakt.
 
 `naht` meldet, dass vor dem nächsten Schlag Intervalle fehlen, die nicht im
 Puffer stehen. Der Punkt trägt dann ``naht_davor`` — keine Differenz in den
@@ -57,6 +65,7 @@ from .constants import (
     MALIK_THRESHOLD_EKG,
     MALIK_WINDOW,
 )
+from .regeln import Korrekturregeln
 from .time_domain import compute_time_domain
 
 #: Kleinster Abstand, um den die Anzeigezeit eines Punkts nach seinem
@@ -74,7 +83,8 @@ class LivePunkt:
     artefakt: bool  # implausibel oder Malik-Ausreißer im Fenster
     rr_korr: float | None  # Wert der korrigierten Kurve; None bei rr=0 und verworfen
     naht_davor: bool = False  # davor fehlen Intervalle — nicht verbinden
-    verworfen: bool = False  # vom Gerät verworfen: nur zeigen, nie werten
+    verworfen: bool = False  # vom Gerät verworfen und so belassen: nur zeigen, nie werten
+    sensor_verworfen: bool = False  # Blocker-Bit des Geräts, gleich wie geurteilt wird
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,8 +98,8 @@ class LiveKennzahlen:
     hf_mittel_60s: float | None  # Mittel der gemeldeten Herzfrequenz
     schwankung_60s: float | None  # Ø(max−min HF) je 10-s-Teilfenster, bpm
     artefakte: int  # markierte Schläge im Puffer
-    schlaege: int  # Schläge mit RR im Puffer (ohne verworfene)
-    verworfen: int = 0  # vom Gerät verworfene Intervalle im Puffer
+    schlaege: int  # gewertete Schläge mit RR im Puffer
+    verworfen: int = 0  # vom Gerät verworfene Intervalle im Puffer (Blocker-Bit)
 
 
 class LiveFenster:
@@ -99,6 +109,9 @@ class LiveFenster:
         max_s: Pufferlänge in Sekunden (Wanduhr).
         malik: Malik-Schwelle — 0.20 für EKG-RR, 0.30 für optische PPI
             (`constants.malik_threshold`).
+
+    Ohne `regeln_setzen` gelten 300–2000 ms (die Grenze der Herzuhr), Malik
+    mit ``malik``, keine Fehlerschätzung, und Verworfenes zählt nicht.
 
     >>> f = LiveFenster()
     >>> for i, rr in enumerate([800, 810, 790, 805, 1650, 800, 795, 810, 805]):
@@ -113,24 +126,49 @@ class LiveFenster:
         if max_s <= 0:
             raise ValueError("max_s muss positiv sein")
         self._max_s = float(max_s)
-        self._malik = float(malik)
+        self._malik: float | None = float(malik)
+        self._rr_min: float = AUFNAHME_RR_MIN_MS
+        self._rr_max: float = AUFNAHME_RR_MAX_MS
+        self._fehler_max: int | None = None
+        self._sensor_folgen = True
         self._t: deque[float] = deque()
         self._rr: deque[int] = deque()
         self._hf: deque[int] = deque()
         self._naht: deque[bool] = deque()
         self._verworfen: deque[bool] = deque()
+        self._fehler: deque[int] = deque()
         self._naht_offen = False
         self._cache: tuple[np.ndarray, np.ndarray] | None = None
 
+    def regeln_setzen(self, regeln: Korrekturregeln, intervall_quelle: str) -> None:
+        """Die Erkennungsregeln (Grenzen, Malik, Fehlerschätzung, Verworfenes) übernehmen.
+
+        Wirkt sofort auf den ganzen Puffer — nur die Bewertung ändert sich,
+        nie ein gespeicherter Wert.
+        """
+        self._malik = regeln.malik_fuer(intervall_quelle) if regeln.malik_an else None
+        self._rr_min, self._rr_max = float(regeln.rr_min), float(regeln.rr_max)
+        self._fehler_max = regeln.fehler_max_ms if regeln.fehler_an else None
+        self._sensor_folgen = not regeln.selbst_pruefen
+        self._cache = None
+
+    @property
+    def max_s(self) -> float:
+        """Pufferlänge in Sekunden — so weit lässt sich live zurückblättern."""
+        return self._max_s
+
     # -- Befüllen -----------------------------------------------------------
 
-    def hinzufuegen(self, t_s: float, rr_ms: int, hf_bpm: int, verworfen: bool = False) -> None:
+    def hinzufuegen(
+        self, t_s: float, rr_ms: int, hf_bpm: int, verworfen: bool = False, fehler_ms: int = 0
+    ) -> None:
         """Einen Messwert anhängen und alles Ältere als ``max_s`` verwerfen.
 
         Die Anzeigezeit läuft nie zurück: liegt ``t_s`` nicht nach dem
         Vorgänger (gleiche Paketankunft, gebündelte PPI-Pakete), wird er um
         1 ms dahinter gesetzt. Das betrifft nur die x-Achse, nie die Datei.
-        ``verworfen``: vom Gerät als unbrauchbar markiert — nur für die Kurve.
+        ``verworfen``: vom Gerät als unbrauchbar markiert (Blocker-Bit);
+        ``fehler_ms``: Fehlerschätzung des Geräts, 0 = keine.
         """
         t = float(t_s)
         if self._t and t <= self._t[-1]:
@@ -140,6 +178,7 @@ class LiveFenster:
         self._hf.append(int(hf_bpm))
         self._naht.append(self._naht_offen)
         self._verworfen.append(bool(verworfen))
+        self._fehler.append(int(fehler_ms))
         self._naht_offen = False
         grenze = t - self._max_s
         while self._t and self._t[0] < grenze:
@@ -148,6 +187,7 @@ class LiveFenster:
             self._hf.popleft()
             self._naht.popleft()
             self._verworfen.popleft()
+            self._fehler.popleft()
         self._cache = None
 
     def naht(self) -> None:
@@ -160,21 +200,30 @@ class LiveFenster:
         self._hf.clear()
         self._naht.clear()
         self._verworfen.clear()
+        self._fehler.clear()
         self._naht_offen = False
         self._cache = None
 
     # -- Auswerten ----------------------------------------------------------
+
+    def _gewertet(self) -> np.ndarray:
+        """Maske der Punkte, über die geurteilt wird — Verworfenes nur bei „selbst"."""
+        verworfen = np.asarray(self._verworfen, dtype=bool)
+        return ~verworfen if self._sensor_folgen else np.ones(verworfen.size, dtype=bool)
 
     def _bewerten(self) -> tuple[np.ndarray, np.ndarray]:
         """(artefakt-Maske, rr_korr mit NaN für „kein Wert")."""
         if self._cache is not None:
             return self._cache
         rr = np.asarray(self._rr, dtype=float)
-        gewertet = ~np.asarray(self._verworfen, dtype=bool)
-        plausibel = (rr >= AUFNAHME_RR_MIN_MS) & (rr <= AUFNAHME_RR_MAX_MS) & gewertet
+        gewertet = self._gewertet()
+        unsicher = np.zeros(rr.size, dtype=bool)
+        if self._fehler_max is not None:
+            unsicher = np.asarray(self._fehler, dtype=float) > self._fehler_max
+        plausibel = (rr >= self._rr_min) & (rr <= self._rr_max) & gewertet & ~unsicher
         artefakt = (rr > 0) & ~plausibel & gewertet
         idx_p = np.flatnonzero(plausibel)
-        if idx_p.size >= MALIK_WINDOW:
+        if self._malik is not None and idx_p.size >= MALIK_WINDOW:
             _, ausreisser = clean_rr(rr[idx_p], threshold=self._malik)
             artefakt[idx_p[ausreisser]] = True
 
@@ -190,6 +239,7 @@ class LiveFenster:
     def punkte(self, seit_s: float | None = None) -> list[LivePunkt]:
         """Alle Punkte im Puffer, oder nur die ab ``seit_s`` (Wanduhr)."""
         artefakt, rr_korr = self._bewerten()
+        gewertet = self._gewertet()
         out: list[LivePunkt] = []
         for i, (t, rr, hf, naht, verworfen) in enumerate(
             zip(self._t, self._rr, self._hf, self._naht, self._verworfen, strict=True)
@@ -205,7 +255,8 @@ class LiveFenster:
                     artefakt=bool(artefakt[i]),
                     rr_korr=None if np.isnan(korr) else korr,
                     naht_davor=naht,
-                    verworfen=verworfen,
+                    verworfen=not gewertet[i],
+                    sensor_verworfen=verworfen,
                 )
             )
         return out
@@ -224,8 +275,8 @@ class LiveFenster:
         t = np.asarray(self._t, dtype=float)
         rr = np.asarray(self._rr, dtype=float)
         hf = np.asarray(self._hf, dtype=float)
-        verworfen = np.asarray(self._verworfen, dtype=bool)
-        gut = (rr > 0) & ~artefakt & ~verworfen
+        gewertet = self._gewertet()
+        gut = (rr > 0) & ~artefakt & gewertet
         t_ende = float(t[-1])
 
         naht = np.asarray(self._naht, dtype=bool)
@@ -246,8 +297,8 @@ class LiveFenster:
         im_hf = (t >= t_ende - LIVE_HF_S) & (hf > 0)
         hf_mittel = float(hf[im_hf].mean()) if im_hf.any() else None
 
-        gewertet = rr[(rr > 0) & ~verworfen]
-        letzte_rr = int(gewertet[-1]) if gewertet.size else None
+        rr_gewertet = rr[(rr > 0) & gewertet]
+        letzte_rr = int(rr_gewertet[-1]) if rr_gewertet.size else None
         letzte_hf = next((int(h) for h in reversed(self._hf) if h > 0), None)
 
         return LiveKennzahlen(
@@ -258,9 +309,25 @@ class LiveFenster:
             hf_mittel_60s=hf_mittel,
             schwankung_60s=_schwankung(t, rr, hf, gut, t_ende),
             artefakte=int(artefakt.sum()),
-            schlaege=int(((rr > 0) & ~verworfen).sum()),
-            verworfen=int(verworfen.sum()),
+            schlaege=int(((rr > 0) & gewertet).sum()),
+            verworfen=int(np.asarray(self._verworfen, dtype=bool).sum()),
         )
+
+    def verlaufsreihe(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """``(t, rr, naht_davor)`` für Verlaufskurven (`trends.verlauf`).
+
+        ``rr`` ist NaN, wo kein guter Wert steht (Artefakt, kein RR, nicht
+        gewertet) — dort trennt der Wert wie eine Naht, genau wie in `kennzahlen`.
+        """
+        artefakt, _ = self._bewerten()
+        t = np.asarray(self._t, dtype=float)
+        rr = np.asarray(self._rr, dtype=float)
+        gut = (rr > 0) & ~artefakt & self._gewertet()
+        return t, np.where(gut, rr, np.nan), np.asarray(self._naht, dtype=bool)
+
+    def hf_reihe(self) -> list[tuple[float, float]]:
+        """Die vom Gerät gemeldete Herzfrequenz, ohne Nullen."""
+        return [(t, float(h)) for t, h in zip(self._t, self._hf, strict=True) if h > 0]
 
 
 def _zeitbereich(werte: list[float | None], schluessel: str, *, min_diffs: int) -> float | None:

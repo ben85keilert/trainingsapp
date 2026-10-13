@@ -100,7 +100,12 @@ einem sichtbaren Fortschritt in der App.
   `korrektur` (Ketten, analysis-v1-Teilmenge; Nullen sind „kein Schlag")
 - Oberfläche: Reiter „Messung" mit Live-Kurven RR und HF, `/messung/<id>` mit Kurven
   roh/korrigiert, Kennzahlen und Korrekturketten
-- Noch nicht: Desktop-BLE (bleak), Frequenzbereich, Mehrgerätebetrieb, Foreground
+- Korrektur einstellbar (`Korrekturregeln`, Regler-Symbol live und in der
+  Aufzeichnung); vom Sensor verworfene Intervalle werden selbst geprüft
+  (ALGO_VERSION 4); Verlaufskurven RMSSD/SDNN/pNN50/Ø HF als speicherbare
+  Ansichten; Zeitfenster zoomen und wischen, live 30 min zurück
+- Noch nicht: Desktop-BLE (bleak), Frequenzbereich (Spektrum) und DFA α1 (L09,
+  dann als eigene Reiter der Aufzeichnung), Mehrgerätebetrieb, Foreground
   Service, Datenbank-Eintrag `device`
 
 ## Bewusst nicht eingeplant

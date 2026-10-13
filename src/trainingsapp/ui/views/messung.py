@@ -26,11 +26,16 @@ from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.devices.profiles import profil_fuer_namen
 from trainingsapp.devices.simulated import SIM_PPI, SIM_PREFIX, SIM_SYNTH, SimulatedSource
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
-from trainingsapp.ui.components.kurve import HF_SPANNE_MIN_BPM, RR_SPANNE_MIN_MS, Reihe, kurve
+from trainingsapp.hrv_core.regeln import Korrekturregeln
+from trainingsapp.hrv_core.trends import KENNZAHLEN, verlauf
+from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
+from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
+from trainingsapp.ui.components.verlauf import ansicht_menue, chips, diagramme
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
+from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
 from trainingsapp.ui.state import AppState
 
-FENSTER = [(60, "1 min"), (120, "2 min"), (300, "5 min")]
+FENSTER = [(60, "1 min"), (120, "2 min"), (300, "5 min"), (600, "10 min")]
 ROT = ft.Colors.RED_400
 
 
@@ -167,7 +172,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             quelle = PolarQuelle(state.ble_transport)
         else:
             return
-        lauf = Messlauf(quelle, backup_basis=datenverzeichnis())
+        lauf = Messlauf(quelle, backup_basis=datenverzeichnis(), regeln=state.korrekturregeln())
         state.messlauf = lauf
         try:
             await lauf.verbinden(device_id, name)
@@ -279,19 +284,68 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     status_box = ft.Container()
     zahlen_box = ft.Container()
     rr_box = ft.Container()
-    hf_box = ft.Container()
+    verlauf_box = ft.Column(spacing=4)
+    chips_box = ft.Container()
+    lage_box = ft.Container()
     aufnahme_box = ft.Container()
     diagnose_box = ft.Container()
     letzte = 0.0
+    fenster = Fenster(state.messung_fenster_s, state.messung_ende_s)
+    verity = bool(lauf.profil and lauf.profil.kann("pmd_ppi"))
+
+    def anfang() -> float:
+        """Ältester Punkt im Live-Puffer — weiter zurück geht es nicht."""
+        return max(0.0, lauf.jetzt_s() - lauf.live.max_s)
 
     def fenster_wechseln(e: ft.Event[ft.SegmentedButton]) -> None:
         if e.control.selected:
             state.messung_fenster_s = int(e.control.selected[0])
+            fenster.breite_s = state.messung_fenster_s
             aktualisieren(erzwingen=True)
 
     def korrigiert_wechseln(e: ft.Event[ft.Switch]) -> None:
         state.messung_korrigiert = bool(e.control.value)
         aktualisieren(erzwingen=True)
+
+    def zur_gegenwart() -> None:
+        fenster.ende_s = None
+        aktualisieren(erzwingen=True)
+
+    def gewischt() -> None:
+        aktualisieren(erzwingen=True)
+
+    def regeln_oeffnen() -> None:
+        def aendern(regeln: Korrekturregeln) -> None:
+            state.korrekturregeln_setzen(regeln)  # wirkt sofort auf den Messlauf
+            aktualisieren(erzwingen=True)
+
+        page.show_dialog(
+            korrektur_blatt(
+                state.korrekturregeln(),
+                aendern,
+                verity=verity,
+                schliessen=page.pop_dialog,
+            )
+        )
+
+    def kurve_umschalten(kennzahl: str) -> None:
+        ansicht = state.ansicht()
+        ansicht.umschalten(kennzahl)
+        state.ansicht_setzen(ansicht)
+        ansicht_neu()
+
+    def ansicht_neu() -> None:
+        chips_box.content = verlauf_kopf()
+        aktualisieren(erzwingen=True)
+
+    def verlauf_kopf() -> ft.Control:
+        return ft.Row(
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Container(expand=True, content=chips(state.ansicht(), kurve_umschalten)),
+                ansicht_menue(page, state, ansicht_neu),
+            ],
+        )
 
     async def aufnahme_starten() -> None:
         lauf.aufnahme_starten()
@@ -361,11 +415,14 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         k = lauf.live.kennzahlen()
         hf = k.hf_bpm if k.hf_bpm is not None else lauf.status.hf_bpm
         # Nur bei Sensoren, die selbst verwerfen (Verity Sense)
-        verworfen = (
-            [_kachel("Vom Sensor verworfen", f"{k.verworfen}", f"von {k.schlaege + k.verworfen}")]
-            if k.verworfen
-            else []
-        )
+        verworfen = []
+        if k.verworfen:
+            einheit = (
+                "selbst geprüft"
+                if lauf.regeln.selbst_pruefen
+                else f"von {k.schlaege + k.verworfen}"
+            )
+            verworfen = [_kachel("Vom Sensor verworfen", f"{k.verworfen}", einheit)]
         return ft.Row(
             wrap=True,
             spacing=8,
@@ -381,11 +438,10 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             ],
         )
 
-    def kurven() -> tuple[ft.Control, ft.Control]:
-        fenster = state.messung_fenster_s
+    def kurven() -> tuple[ft.Control, list[ft.Control]]:
         jetzt = lauf.jetzt_s()
-        punkte = lauf.live.punkte(seit_s=max(0.0, jetzt - fenster))
-        x_von, x_bis = max(0.0, jetzt - fenster), max(jetzt, float(fenster))
+        x_von, x_bis = fenster.bereich(jetzt, anfang())
+        punkte = [p for p in lauf.live.punkte(seit_s=x_von) if p.t_s <= x_bis]
         mit_rr = [p for p in punkte if p.rr_ms > 0]
         # Grau: alles, was der Sensor geliefert hat — auch vom Gerät verworfene
         # Intervalle; so bleibt die Kurve durchgehend (Verity Sense).
@@ -414,21 +470,35 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 Reihe(rr_linie, farbe=ft.Colors.PRIMARY, naehte=rr_naehte),
                 Reihe(artefakte, farbe=ROT, nur_punkte=True, skala=False),
             ],
-            einheit="RR ms",
+            einheit="PPI ms" if verity else "RR ms",
             x_von=x_von,
             x_bis=x_bis,
             y_spanne_min=RR_SPANNE_MIN_MS,
         )
-        hf_punkte = [(p.t_s, float(p.hf_bpm)) for p in punkte if p.hf_bpm > 0]
-        hf = kurve(
-            [Reihe(hf_punkte, farbe=ft.Colors.TERTIARY)],
-            einheit="HF bpm",
-            hoehe=130,
-            x_von=x_von,
-            x_bis=x_bis,
-            y_spanne_min=HF_SPANNE_MIN_BPM,
+        t, werte, naht = lauf.live.verlaufsreihe()
+
+        def daten(kennzahl: str, fenster_s: int) -> list[tuple[float, float]]:
+            if kennzahl == "hf_geraet":
+                return [(x, h) for x, h in lauf.live.hf_reihe() if x_von <= x <= x_bis]
+            return verlauf(t, werte, naht, kennzahl, fenster_s, von=x_von, bis=x_bis)
+
+        # Reiner Pulsgeber: Aus RR lässt sich nichts rechnen — dann nur „HF Gerät".
+        ohne = [] if lauf.live.kennzahlen().rr_ms else [k for k in KENNZAHLEN if k != "hf_geraet"]
+        return rr, diagramme(state.ansicht(), daten, x_von=x_von, x_bis=x_bis, ohne=ohne)
+
+    def lage() -> ft.Control:
+        """Zurückgeblättert: wie weit, und zurück zur Gegenwart."""
+        if fenster.ende_s is None:
+            return ft.Container()
+        zurueck = lauf.jetzt_s() - fenster.bereich(lauf.jetzt_s(), anfang())[1]
+        return ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Text(f"−{_uhr(zurueck)} zurück", size=12, opacity=0.7),
+                ft.TextButton("Live", icon=ft.Icons.SKIP_NEXT, on_click=zur_gegenwart),
+            ],
         )
-        return rr, hf
 
     def aufnahme_teil() -> ft.Control:
         if lauf.aufnahme is None:
@@ -456,6 +526,14 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             ],
         )
 
+    def fuellen() -> None:
+        state.messung_ende_s = fenster.ende_s
+        status_box.content = status_zeile()
+        zahlen_box.content = zahlen()
+        rr_box.content, verlauf_box.controls = kurven()
+        lage_box.content = lage()
+        aufnahme_box.content = aufnahme_teil()
+
     def aktualisieren(erzwingen: bool = False) -> None:
         """Vom Messlauf nach neuen Werten gerufen — höchstens zweimal je Sekunde."""
         nonlocal letzte
@@ -463,10 +541,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         if not erzwingen and jetzt - letzte < 0.5:
             return
         letzte = jetzt
-        status_box.content = status_zeile()
-        zahlen_box.content = zahlen()
-        rr_box.content, hf_box.content = kurven()
-        aufnahme_box.content = aufnahme_teil()
+        fuellen()
         if not lauf.simulation:
             diagnose_box.content = _diagnose(page, lauf)
         # Ansicht nicht (mehr) auf der Seite — beim nächsten Aufbau geht es weiter.
@@ -486,7 +561,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             zahlen_box,
             ft.Row(
                 wrap=True,
-                spacing=12,
+                spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     ft.SegmentedButton(
@@ -499,14 +574,23 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                         value=state.messung_korrigiert,
                         on_change=korrigiert_wechseln,
                     ),
+                    regler_knopf(regeln_oeffnen),
                 ],
             ),
-            rr_box,
-            hf_box,
+            lage_box,
+            wischbar(
+                ft.Column(spacing=8, controls=[rr_box, verlauf_box]),
+                fenster,
+                lauf.jetzt_s,
+                gewischt,
+                anfang=anfang,
+            ),
+            chips_box,
             ft.Text(
-                "Grau: Rohwerte, auch vom Sensor verworfene · Rote Punkte: Artefakte (markiert, "
-                "nicht verändert). Gespeichert werden immer die Rohwerte; korrigiert wird in "
-                "der Aufzeichnung.",
+                "Grau: alle Rohwerte, auch vom Sensor verworfene · Farbig: gewertet · "
+                "Rote Punkte: Artefakte (markiert, nicht verändert). Waagrecht wischen "
+                "blättert zurück. Gespeichert werden immer die Rohwerte; korrigiert wird "
+                "in der Aufzeichnung.",
                 size=11,
                 opacity=0.55,
             ),
@@ -515,10 +599,8 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         ],
     )
     # Erstbefüllung ohne update() — die Spalte hängt noch nicht an der Seite.
-    status_box.content = status_zeile()
-    zahlen_box.content = zahlen()
-    rr_box.content, hf_box.content = kurven()
-    aufnahme_box.content = aufnahme_teil()
+    chips_box.content = verlauf_kopf()
+    fuellen()
     lauf.beobachter = beobachten
     return ft.Container(padding=16, content=spalte)
 

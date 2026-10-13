@@ -70,6 +70,66 @@ guter Testanker (`tests/test_hrv_core.py`).
 
 Implementierung: `hrv_core/segments.py::segment_diffs`.
 
+### Vom Sensor verworfene Intervalle selbst prüfen (ALGO_VERSION 4)
+
+Die Verity Sense markiert Intervalle als unbrauchbar (Blocker-Bit) — auch in
+Ruhe viele brauchbare. Messung vom 13.10.2026, 15 min in Ruhe, 1140 Intervalle,
+37 % verworfen:
+
+| | behalten | verworfen |
+|---|---|---|
+| Fehlerschätzung des Sensors, Median | 11 ms | 12 ms |
+| relative Nachbardifferenz, Median / 75 % / 90 % | 3,2 / 5,5 / 8,8 % | 3,5 / 5,9 / 10,6 % |
+| relative Nachbardifferenz, 99 % | 16 % | 40 % |
+
+Die Masse ist nicht zu unterscheiden; nur der Rand ist breiter — ein paar echte
+Störungen (Einschwingen am Anfang mit 1625–2064 ms, eine Störung mit bis zu
+500 ms Fehlerschätzung). Das kann das Programm selbst finden.
+
+Mit `Korrekturregeln.sensor_verwerfung = "selbst"` (Vorgabe) rechnet die
+Auswertung darum auf **allen** Intervallen (`ppi.ohne_verwerfung`,
+`korrektur.analysebasis`): Zeilen der Rohdatei bleiben, wie sie sind;
+wieder aufgenommene Intervalle bekommen die Wanduhr ihres Pakets nach
+Vertrag 3a.4 (auf der Messung vom 13.10. für alle 719 Zeilen bit-gleich mit
+dem Schreiber) und die Herzfrequenz der Zeile davor. Über sie urteilen
+dieselben Regeln wie über jedes andere Intervall: Grenzen, Fehlerschätzung,
+Malik, Ketten.
+
+Ergebnis am 13.10.: Die Automatik schlägt genau zwei Ausschlüsse vor (die
+beiden Störungen); danach **1119 statt 719 Schläge, RMSSD 50,0 statt
+47,6 ms**, SDNN 93,2 statt 92,4 ms. Golden-Test:
+`tests/test_korrektur_regeln.py` (synthetisch, RMSSD 21,8946 ms über alle 299
+Nachbardifferenzen, unabhängig nachgerechnet).
+
+Live gilt dasselbe (`LiveFenster.regeln_setzen`): Gespeichert ist je Punkt das
+Blocker-Bit, nicht das Urteil — Umschalten wirkt sofort auf den ganzen Puffer.
+
+`"sensor"` stellt das Verhalten bis ALGO_VERSION 3 wieder her (wie praxis_gui).
+
+### Einstellbare Korrektur (`hrv_core/regeln.py`)
+
+`Korrekturregeln` bündelt, was „automatische Korrektur" heißt — praxis_gui
+verteilt es auf `[hrv]`, `[hrv_gaps]` und `metric_params.malik`:
+
+| Regel | Vorgabe | praxis_gui |
+|---|---|---|
+| `sensor_verwerfung` | `selbst` | — (folgt immer dem Sensor) |
+| `malik_an`, `malik` | an, nach Intervallquelle (0.20 / 0.30) | Malik-Schwelle je Sitzung, 0.20 |
+| `rr_min`, `rr_max` | 250 / 2000 ms | `[hrv] rr_min_ms`, `rr_max_ms` |
+| `fehler_an`, `fehler_max_ms` | an, 50 ms | — |
+| `nullen` | aus | `[hrv] interpolate_zeros` (an) |
+| `merge_gap`, `auto_max`, `unsicher_max`, `max_luecke_s` | 2, 2, 5, 3 s | `[hrv_gaps]` |
+| `vorauswahl` | `sicher` | — |
+
+`vorauswahl` sagt, welche Vorschläge beim Öffnen einer Aufzeichnung ohne
+gespeicherte Korrektur übernommen sind: `sicher` = alles außer unsicheren
+Interpolationen. Ein Ausschluss erfindet nichts; eine Interpolation über 3–5
+Schläge erfände Variabilität.
+
+Gerätelokal liegt die Vorgabe in `app_setting` (`hrv_korrektur`); je Messung
+stehen die Regeln im Sidecar (`corrections_meta.regeln`, Vertrag 9a) — eine
+Aufzeichnung öffnet mit den Regeln, mit denen sie korrigiert wurde.
+
 ### Woher die Nähte kommen (`korrektur.naehte`, ALGO_VERSION 2)
 
 Außer verworfenen Werten in der Reihe selbst gibt es zwei Nähte, die man der
@@ -195,12 +255,14 @@ es mit `automatisch(..., nullen=True)`; der Golden-Test prüft beide Wege, und
 ## Live-Kennzahlen (`hrv_core/live.py`)
 
 Während der Messung wird **nichts an den Rohdaten verändert.** `LiveFenster` hält
-die letzten 300 s, markiert Artefakte und liefert eine interpolierte Kurve nur
-für die Anzeige. Gespeichert wird immer der Rohwert.
+die letzten 30 min (so weit lässt sich live zurückblättern), markiert Artefakte
+und liefert eine interpolierte Kurve nur für die Anzeige. Gespeichert wird
+immer der Rohwert. Grenzen, Malik, Fehlerschätzung und der Umgang mit
+Verworfenem folgen den `Korrekturregeln` (live ohne Ketten).
 
 | Wert | Rechnung |
 |---|---|
-| Artefakt | außerhalb 300–2000 ms (wie die Herzuhr der Aufnahme) oder Malik-Ausreißer im Fenster |
+| Artefakt | außerhalb der Grenzen (ohne Regeln 300–2000 ms wie die Herzuhr der Aufnahme), Fehlerschätzung über der Schwelle oder Malik-Ausreißer im Fenster |
 | `rr_korr` | Rohwert, bei Artefakt linear aus den guten Nachbarn; `None` bei `rr = 0` |
 | `rmssd_30s`, `sdnn_60s` | Rohwerte der letzten 30 / 60 s; Artefakte wirken als **Naht** (Boundary-Skip), nicht als interpolierter Wert |
 | `hf_mittel_60s` | Mittel der vom Gerät gemeldeten Herzfrequenz |
@@ -234,6 +296,26 @@ Schlagzeit = laufende Summe aller Intervalle (auch blockierter) + Anker; Anker
 nach seiner Zustellung. Steigt (Ankunft − Summe) um mehr als 3 s, fehlen
 Intervalle (Abriss) — dann wird neu verankert, damit die Lücke sichtbar bleibt.
 Die Datei behält die Ankunftsachse; die Rohzutaten stehen in `ppi_pakete`.
+
+### Verlaufskurven (`hrv_core/trends.py`)
+
+Unter dem Tachogramm — live und in der Aufzeichnung — stehen wählbare
+Verlaufskurven: RMSSD (30 s), SDNN (60 s), pNN50 (30 s), Ø HF aus RR (10 s)
+und die Herzfrequenz des Geräts. Je Rasterpunkt `t_e` gehen die Schläge mit
+`t_e − Fenster < t ≤ t_e` ein, Definitionen wie `time_domain`; NaN und Nähte
+trennen, unter fünf guten Schlägen bleibt eine Lücke. Live rechnen sie auf den
+guten Rohwerten (Artefakte als Naht, wie `kennzahlen`), in der Aufzeichnung auf
+der korrigierten Reihe.
+
+**Ø HF aus RR statt gemeldeter Herzfrequenz.** Die Verity Sense meldet ihre
+Herzfrequenz nur etwa alle 5 s neu und springt dabei (13.10.: Stufen zwischen
+60 und 85 bpm, bei gleichmäßigen Intervallen). `60000 / Ø RR` über 10 s folgt
+dem Puls ruhig. praxis_gui bietet dasselbe als „Ø BPM" (30 s).
+
+Gleiche Einheit teilt sich ein Diagramm (RMSSD und SDNN), verschiedene stehen
+untereinander mit derselben Zeitachse — zwei y-Achsen sind am Handy nicht
+lesbar. Die Auswahl samt Fenstern ist eine `core.hrv_ansicht.Ansicht`,
+speicherbar unter einem Namen (praxis_gui: „Vorlagen").
 
 ### „Schwankung"
 

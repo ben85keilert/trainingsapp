@@ -531,6 +531,11 @@ class SettingRepo:
     AKTIVES_PROFIL = "aktives_profil"
     #: "1" (Vorgabe) = Papierkorb nach `PAPIERKORB_TAGE` Tagen automatisch leeren
     PAPIERKORB_AUTO = "papierkorb_auto"
+    #: HRV: Regeln der automatischen Korrektur (JSON, `hrv_core.regeln`)
+    HRV_KORREKTUR = "hrv_korrektur"
+    #: HRV: aktuelle Ansicht der Verlaufskurven und gespeicherte Ansichten (JSON)
+    HRV_ANSICHT = "hrv_ansicht"
+    HRV_ANSICHTEN = "hrv_ansichten"
 
     def __init__(self, con: sqlite3.Connection) -> None:
         self.con = con

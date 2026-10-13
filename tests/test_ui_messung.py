@@ -14,6 +14,7 @@ from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
 from trainingsapp.devices.simulated import SIM_SYNTH, SimulatedSource  # noqa: E402
 from trainingsapp.hrv_core.korrektur import analyse_laden  # noqa: E402
 from trainingsapp.hrv_core.recording import Beat, Recording, speichern  # noqa: E402
+from trainingsapp.hrv_core.regeln import Korrekturregeln  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.messung import messung  # noqa: E402
 from trainingsapp.ui.views.messung_detail import messung_detail_view  # noqa: E402
@@ -227,7 +228,7 @@ def test_detailansicht_meldet_verworfene_intervalle(daten) -> None:
     hinweis = [
         c
         for c in _alle_controls(ansicht)
-        if isinstance(c, ft.Text) and "Bruchstücken" in (c.value or "")
+        if isinstance(c, ft.Text) and "die meisten Intervalle" in (c.value or "")
     ]
     assert len(hinweis) == 1 and not hinweis[0].visible
 
@@ -262,9 +263,22 @@ def test_detailansicht_meldet_verworfene_intervalle(daten) -> None:
     hinweis2 = [
         c
         for c in _alle_controls(ansicht2)
-        if isinstance(c, ft.Text) and "Bruchstücken" in (c.value or "")
+        if isinstance(c, ft.Text) and "die meisten Intervalle" in (c.value or "")
     ]
     assert hinweis2[0].visible
+    # Vorgabe „selbst": wieder aufgenommen, kein Bruchstück-Hinweis
+    assert "wieder aufgenommen" in (hinweis2[0].value or "")
+    assert any("90 davon selbst geprüft" in x for x in _baum_texte(ansicht2))
+
+    # Wer dem Sensor folgt, bekommt den alten Hinweis
+    state.korrekturregeln_setzen(Korrekturregeln(sensor_verwerfung="sensor"))
+    ansicht3 = messung_detail_view(_seite(), state, eintrag2)
+    hinweis3 = [
+        c
+        for c in _alle_controls(ansicht3)
+        if isinstance(c, ft.Text) and "die meisten Intervalle" in (c.value or "")
+    ]
+    assert "Bruchstücken" in (hinweis3[0].value or "")
 
 
 def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None:
@@ -296,10 +310,13 @@ def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None
     assert folge is not None
     dauer = folge[-1].t_s
 
-    rr_kurve, hf_kurve = [c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)]
+    # Tachogramm, darunter die Vorgabe-Ansicht: Ø HF aus RR, RMSSD
+    rr_kurve, hf_kurve, rmssd_kurve = [
+        c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)
+    ]
     grau = rr_kurve.data_series[0]
     assert len(grau.points) == 300  # alle Intervalle, eine durchgehende Linie
-    assert rr_kurve.max_x == hf_kurve.max_x == pytest.approx(dauer)
+    assert rr_kurve.max_x == hf_kurve.max_x == rmssd_kurve.max_x == pytest.approx(dauer)
     texte = _baum_texte(ansicht)
     assert any(f"{int(dauer) // 60}:{int(dauer) % 60:02d}" in x for x in texte)
     assert any("auch verworfene" in x for x in texte)
@@ -307,3 +324,172 @@ def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None
         achse = kurve.left_axis
         assert not achse.show_min and not achse.show_max
         assert all(label.value % achse.label_spacing == 0 for label in achse.labels)
+
+
+# ---------------------------------------------------------------------------
+# Einstellblatt, Verlaufskurven, Zeitfenster
+# ---------------------------------------------------------------------------
+
+
+def test_korrektur_blatt_aendert_regeln() -> None:
+    from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt
+
+    stand: list[Korrekturregeln] = []
+    blatt = korrektur_blatt(Korrekturregeln(), stand.append, erweitert=True, verity=True)
+    alle = _alle_controls(blatt)
+    texte = _baum_texte(blatt)
+    assert "Automatische Korrektur" in texte and "KETTEN" in texte
+
+    schalter = {c.label: c for c in alle if isinstance(c, ft.Switch)}
+    schalter["Verworfene Intervalle selbst prüfen"].on_change(_ereignis(False))
+    assert stand[-1].sensor_verwerfung == "sensor"
+
+    auswahl = {c.label: c for c in _alle_controls(blatt) if isinstance(c, ft.Dropdown)}
+    auswahl["Schwelle"].on_select(_ereignis("0.25"))
+    assert stand[-1].malik == 0.25 and stand[-1].sensor_verwerfung == "sensor"
+    auswahl = {c.label: c for c in _alle_controls(blatt) if isinstance(c, ft.Dropdown)}
+    auswahl["Schwelle"].on_select(_ereignis("auto"))
+    assert stand[-1].malik is None
+    auswahl["Sicher bis"].on_select(_ereignis("3"))
+    assert stand[-1].auto_max == 3
+
+    # Live: nur die Erkennung, ohne Verity auch ohne Sensor-Teil
+    live = _baum_texte(korrektur_blatt(Korrekturregeln(), stand.append))
+    assert "KETTEN" not in live and "SENSOR" not in live and "AUSREISSER" in live
+
+
+def _ereignis(wert) -> SimpleNamespace:
+    return SimpleNamespace(control=SimpleNamespace(value=wert, selected=[wert]))
+
+
+async def test_messung_live_verity_mit_verlauf_und_wischen(daten) -> None:
+    import flet_charts as fc
+
+    from trainingsapp.devices.simulated import SIM_PPI
+
+    state, tmp_path = daten
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_PPI, "Simulator Verity")
+    task = asyncio.create_task(lauf.laufen())
+    state.messlauf = lauf
+    while lauf.jetzt_s() < 150:
+        await asyncio.sleep(0.01)
+
+    seite = _seite()
+    ansicht = messung(seite, state)
+    charts = [c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)]
+    assert len(charts) == 3  # PPI, Ø HF aus RR, RMSSD
+    assert charts[0].left_axis.title.value == "PPI ms"
+    assert len({c.max_x for c in charts}) == 1
+
+    # Chip SDNN dazu: teilt sich mit RMSSD das ms-Diagramm
+    chip = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.Chip) and getattr(c.label, "value", "") == "SDNN"
+    )
+    chip.on_select()
+    assert state.ansicht().kurven == ["hf_rr", "rmssd", "sdnn"]
+    charts = [c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)]
+    assert len(charts) == 3 and len(charts[2].data_series) >= 2
+
+    # Waagrecht wischen blättert zurück, „Live" kehrt zurück
+    wisch = next(c for c in _alle_controls(ansicht) if isinstance(c, ft.GestureDetector))
+    ende_vorher = charts[0].max_x
+    wisch.on_horizontal_drag_update(SimpleNamespace(primary_delta=160.0, local_delta=None))
+    wisch.on_horizontal_drag_end(None)
+    assert state.messung_ende_s is not None
+    charts = [c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)]
+    assert charts[0].max_x < ende_vorher
+    live = next(
+        c for c in _alle_controls(ansicht) if isinstance(c, ft.TextButton) and c.content == "Live"
+    )
+    live.on_click()
+    assert state.messung_ende_s is None
+
+    # Regler: Blatt öffnet sich, Umschalten wirkt auf den Messlauf
+    regler = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.TUNE
+    )
+    regler.on_click()
+    blatt = seite.aufrufe[-1]
+    assert isinstance(blatt, ft.BottomSheet)
+    sensor = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.Switch) and c.label == "Verworfene Intervalle selbst prüfen"
+    )
+    sensor.on_change(_ereignis(False))
+    assert not lauf.regeln.selbst_pruefen and not state.korrekturregeln().selbst_pruefen
+
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+
+
+def test_detailansicht_regeln_je_messung_und_lupe(daten) -> None:
+    import shutil
+    from pathlib import Path
+
+    import flet_charts as fc
+
+    from trainingsapp.hrv_core.korrektur import analyse_regeln
+
+    state, tmp_path = daten
+    golden = Path(__file__).parent / "golden" / "rr" / "sensor_2026-10-13_000000.json"
+    ordner = tmp_path / "Messungen" / "VeritySense"
+    ordner.mkdir(parents=True)
+    pfad = ordner / golden.name
+    shutil.copy(golden, pfad)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet_profil="verity_sense",
+        intervall_quelle="ppg_ppi",
+    )
+    state.hrv.anlegen(eintrag)
+    seite = _seite()
+    ansicht = messung_detail_view(seite, state, eintrag)
+    texte = _baum_texte(ansicht)
+    assert any("26 davon selbst geprüft" in x for x in texte)
+    i = texte.index("Schläge")
+    assert texte[i + 1 : i + 3] == ["300 ", "300 "]  # Vorauswahl: interpoliert, nichts entfernt
+
+    # Lupe zoomt auf die Kette (Intervall 150, Sensor unsicher)
+    lupe = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.IconButton) and c.tooltip == "In der Kurve zeigen"
+    )
+    lupe.on_click()
+    rr = next(c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart))
+    assert rr.max_x - rr.min_x == pytest.approx(60)
+
+    # Regeln je Messung: dem Sensor folgen, speichern — die Vorgabe bleibt
+    next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.TUNE
+    ).on_click()
+    sensor = next(
+        c
+        for c in _alle_controls(seite.aufrufe[-1])
+        if isinstance(c, ft.Switch) and c.label == "Verworfene Intervalle selbst prüfen"
+    )
+    sensor.on_change(_ereignis(False))
+    texte = _baum_texte(ansicht)
+    assert not any("selbst geprüft" in x for x in texte)
+    knopf = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.FilledButton) and c.content == "Korrektur speichern"
+    )
+    assert not knopf.disabled
+    asyncio.run(knopf.on_click())
+    assert analyse_regeln(pfad) is not None and not analyse_regeln(pfad).selbst_pruefen
+    assert state.korrekturregeln().selbst_pruefen
+    # Wieder geöffnet: mit den Regeln der Messung
+    assert not any(
+        "selbst geprüft" in x for x in _baum_texte(messung_detail_view(seite, state, eintrag))
+    )

@@ -407,12 +407,34 @@ unangetastet.**
 
 | Feld | Regel |
 |---|---|
-| `corrections[]` | sortiert nach `beat_index` (Index im **rohen** `messungen`-Array). Wir erzeugen `interpolate`, `delete`, `exclude_range`; gelesen und angewendet werden auch praxis_gui-Einträge `set_value` (`value_ms`), `split` (`n_parts`), `merge` (`with_next`) |
+| `corrections[]` | sortiert nach `beat_index` (Index im **rohen** `messungen`-Array; Erweiterung für die Folge aller PPI-Intervalle: Abschnitt 9a). Wir erzeugen `interpolate`, `delete`, `exclude_range`; gelesen und angewendet werden auch praxis_gui-Einträge `set_value` (`value_ms`), `split` (`n_parts`), `merge` (`with_next`) |
 | `t_s` | 3 Nachkommastellen; `original_value_ms` 1 Nachkommastelle, fehlt bei praxis_gui-`exclude_range` |
 | `unsicher` | nur geschrieben, wenn `true` |
 | `beat_index_end` | nur bei `exclude_range`, einschließlich |
 | `rr_corrected[]` | die korrigierte Reihe: `t_s` = Onset + kumulierte korrigierte RR (4 Stellen), `rr_ms` gerundet, `flag ∈ orig, interp, set, split, merge` |
 | `source_file_sha1` | SHA1 der Rohdatei — daran erkennt praxis_gui ein veraltetes Sidecar |
+
+### 9a. Unsere Erweiterung: Regeln und `corrections_ppi`
+
+Zwei zusätzliche Schlüssel, die praxis_gui nicht kennt (und als unbekannte
+Felder übergeht):
+
+| Feld | Regel |
+|---|---|
+| `corrections_meta.regeln` | die `Korrekturregeln`, mit denen die Korrektur entstand (`hrv_core/regeln.py`): `sensor_verwerfung` (`selbst`/`sensor`), `malik_an`, `malik` (`null` = nach Intervallquelle), `rr_min`, `rr_max`, `fehler_an`, `fehler_max_ms`, `nullen`, `merge_gap`, `auto_max`, `unsicher_max`, `max_luecke_s`, `vorauswahl`. `malik_threshold`, `rr_min_ms`, `rr_max_ms`, `interpolate_zeros` stehen weiterhin daneben — mit den daraus wirksamen Werten |
+| `corrections_ppi[]` | nur bei `sensor_verwerfung = "selbst"` mit wieder aufgenommenen Intervallen: dieselben Einträge wie `corrections`, aber `beat_index` zählt in der Folge **aller** Intervalle aus `ppi_pakete` mit `ppi_ms > 0` (auch der vom Gerät verworfenen) |
+
+Ist `corrections_ppi` geschrieben, steht unter `corrections` (und
+`rr_corrected`) seine Abbildung auf die Zeilen von `messungen`
+(`korrektur.auf_zeilen`): Korrekturen nur an verworfenen Intervallen entfallen
+dort, ein Ausschluss schrumpft auf die enthaltenen Zeilen. praxis_gui sieht
+also eine gültige, vollständige Korrektur seiner eigenen Reihe.
+
+Beim Lesen gilt `corrections_ppi` nur, solange seine Abbildung genau
+`corrections` ergibt. Hat praxis_gui die Korrekturen inzwischen geändert,
+gelten dessen `corrections`, übertragen auf die Folge aller Intervalle
+(`korrektur.von_zeilen`). Ein Sidecar ohne `regeln` (praxis_gui, ältere
+Fassungen) liefert Malik-Schwelle, Grenzen und Nullen aus `corrections_meta`.
 
 **Bestehende Sidecars werden fortgeschrieben, nicht ersetzt:** alle Felder, die
 wir nicht kennen (`segments`, `metric_params`, `derived_metrics`,

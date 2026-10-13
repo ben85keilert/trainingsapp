@@ -37,6 +37,12 @@ nachgerechnet): RMSSD **21,7432 ms** über 269 echte Nachbardifferenzen;
 über die verworfenen Intervalle hinweg wären es 22,9058 ms (ALGO_VERSION 1).
 Ein echter Verity-Datensatz fehlt noch — er braucht eine anonymisierte Kopie.
 
+Seit ALGO_VERSION 4 werden die verworfenen Intervalle standardmäßig wieder
+aufgenommen und selbst geprüft (`tests/test_korrektur_regeln.py`): Die
+Automatik schlägt nur 150/151 (Fehlerschätzung) zur Interpolation vor; RMSSD
+**21,8946 ms** über alle 299 Nachbardifferenzen. Dem Sensor folgend bleiben es
+21,7432 ms.
+
 ## Was noch fehlt
 
 Für die HRV-Kennzahlen in L09 brauchen wir Sollwerte. Die liefert

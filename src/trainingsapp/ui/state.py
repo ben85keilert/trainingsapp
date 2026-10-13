@@ -10,6 +10,7 @@ Oberfläche funktionieren, und genau das prüft ``tests/test_state.py``.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -18,6 +19,12 @@ from pathlib import Path
 from typing import Any
 
 from trainingsapp.config import datenbankpfad
+from trainingsapp.core.hrv_ansicht import (
+    Ansicht,
+    ansicht_lesen,
+    ansichten_lesen,
+    ansichten_schreiben,
+)
 from trainingsapp.core.models import Subject, jetzt, lokaler_tag
 from trainingsapp.core.verlauf import MODUS_NUMMER
 from trainingsapp.data.db import oeffnen
@@ -32,6 +39,7 @@ from trainingsapp.data.repositories import (
 )
 from trainingsapp.data.seed import seed_einspielen
 from trainingsapp.data.upgrade import datenformat_aktualisieren
+from trainingsapp.hrv_core.regeln import Korrekturregeln
 
 STANDARD_PROFILNAME = "Ich"
 
@@ -90,6 +98,10 @@ class AppState:
     #: Live-Ansicht: Zeitfenster der Kurven in s, korrigierte oder rohe Kurve
     messung_fenster_s: int = 120
     messung_korrigiert: bool = True
+    #: Live-Ansicht zurückgeblättert: rechter Rand in s; None = folgt der Messung
+    messung_ende_s: float | None = None
+    #: Klappfeld „Notizen" unter der Hauptkurve aufgeklappt
+    notizen_offen: bool = False
     #: Baut den Ansichtsstapel zur aktuellen Route neu — setzt `app.main()`.
     #: Views rufen es nach Änderungen, die die Route nicht wechseln (ein Tipp
     #: auf „gemacht" bleibt auf derselben Planansicht).
@@ -172,6 +184,40 @@ class AppState:
         profil = Subject(name=name.strip(), birth_year=birth_year)
         self.profile.speichern(profil)
         return self.profil_wechseln(profil.id)
+
+    # -- HRV: Korrekturregeln und Ansichten -----------------------------------
+
+    def korrekturregeln(self) -> Korrekturregeln:
+        """Gerätelokale Vorgabe der automatischen Korrektur."""
+        return Korrekturregeln.aus_json(self.einstellungen.lesen(SettingRepo.HRV_KORREKTUR))
+
+    def korrekturregeln_setzen(self, regeln: Korrekturregeln) -> None:
+        self.einstellungen.setzen(SettingRepo.HRV_KORREKTUR, regeln.als_json())
+        if self.messlauf is not None:
+            self.messlauf.regeln_setzen(regeln)
+
+    def ansicht(self) -> Ansicht:
+        """Die aktuelle Ansicht der Verlaufskurven (live und in der Aufzeichnung)."""
+        return ansicht_lesen(self.einstellungen.lesen(SettingRepo.HRV_ANSICHT))
+
+    def ansicht_setzen(self, ansicht: Ansicht) -> None:
+        self.einstellungen.setzen(SettingRepo.HRV_ANSICHT, json.dumps(ansicht.als_dict()))
+
+    def ansichten(self) -> list[Ansicht]:
+        """Gespeicherte Ansichten, nach Namen."""
+        gespeichert = ansichten_lesen(self.einstellungen.lesen(SettingRepo.HRV_ANSICHTEN))
+        return sorted(gespeichert, key=lambda a: a.name.casefold())
+
+    def ansicht_speichern(self, ansicht: Ansicht) -> None:
+        """Unter ihrem Namen speichern — eine gleichnamige wird ersetzt."""
+        andere = [a for a in self.ansichten() if a.name != ansicht.name]
+        self.einstellungen.setzen(
+            SettingRepo.HRV_ANSICHTEN, ansichten_schreiben([*andere, ansicht])
+        )
+
+    def ansicht_loeschen(self, name: str) -> None:
+        rest = [a for a in self.ansichten() if a.name != name]
+        self.einstellungen.setzen(SettingRepo.HRV_ANSICHTEN, ansichten_schreiben(rest))
 
     def profil_umbenennen(self, name: str) -> None:
         self.profil.name = name.strip()

@@ -24,7 +24,11 @@ from typing import Final
 # 3 (2026-10-13): Messlücken bei PPI auf der Herzuhr aller Intervalle
 #   (`ppi.messluecken`) — auf ``t_s`` sah jeder längere Blocker-Lauf wie ein
 #   Verbindungsabriss aus und setzte eine zusätzliche Naht.
-ALGO_VERSION: Final[int] = 3
+# 4 (2026-10-13): Vom Sensor verworfene Intervalle werden wieder aufgenommen und
+#   mit den eigenen Regeln geprüft (`korrektur.analysebasis`, `Korrekturregeln`).
+#   Die Verity Sense verwarf in Ruhe 37 % brauchbarer Intervalle; die Kennzahlen
+#   rechnen jetzt auf allen (13.10.: 1119 statt 719 Schläge, RMSSD 50,0 statt 47,6 ms).
+ALGO_VERSION: Final[int] = 4
 
 # ---------------------------------------------------------------------------
 # Plausibilitätsgrenzen für RR-Intervalle
@@ -131,7 +135,9 @@ PNN_THRESHOLD_MS: Final[float] = 50.0  # pNN50; parametrierbar für pNNx
 # ---------------------------------------------------------------------------
 # Live-Anzeige (nur Darstellung, keine gespeicherte Kennzahl)
 # ---------------------------------------------------------------------------
-LIVE_FENSTER_S: Final[float] = 300.0  # so viel hält der Live-Puffer
+# So viel hält der Live-Puffer — und so weit lässt sich live zurückblättern.
+# 30 min sind rund 2400 Schläge; die Bewertung über den Puffer bleibt O(n).
+LIVE_FENSTER_S: Final[float] = 1800.0
 LIVE_RMSSD_S: Final[float] = 30.0
 LIVE_SDNN_S: Final[float] = 60.0
 LIVE_HF_S: Final[float] = 60.0  # mittlere Herzfrequenz und Schwankung

@@ -20,6 +20,7 @@ from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.devices.pmd import PpiProbe, ppi_messwerte
 from trainingsapp.devices.profiles import POLAR_H10, VERITY_SENSE, GeraeteProfil
 from trainingsapp.hrv_core.constants import MALIK_THRESHOLD_EKG, MALIK_THRESHOLD_PPI
+from trainingsapp.hrv_core.regeln import Korrekturregeln
 from trainingsapp.hrv_core.zeitachse import NEU_ANKERN_S, Kontinuitaetsuhr
 
 
@@ -86,10 +87,13 @@ class _VerityAttrappe(HeartRateSource):
 
 
 async def _live(
-    rr: list[int], profil: GeraeteProfil = VERITY_SENSE, blockiert: frozenset[int] = frozenset()
+    rr: list[int],
+    profil: GeraeteProfil = VERITY_SENSE,
+    blockiert: frozenset[int] = frozenset(),
+    regeln: Korrekturregeln | None = None,
 ) -> Messlauf:
     quelle = _VerityAttrappe(rr, profil, blockiert=blockiert)
-    lauf = Messlauf(quelle)
+    lauf = Messlauf(quelle, regeln=regeln)
     await lauf.verbinden("verity", "Polar Sense TEST")
     quelle.alles_senden()
     await quelle.disconnect()
@@ -148,7 +152,7 @@ async def test_verworfene_intervalle_stehen_live_in_der_kurve() -> None:
     blieben von der Kurve nur Bruchstücke mit Zeitlücken dazwischen.
     """
     rr = _rr_reihe(40)
-    lauf = await _live(rr, blockiert=frozenset({7, 9, 10, 11}))
+    lauf = await _live(rr, blockiert=frozenset({7, 9, 10, 11}), regeln=_SENSOR)
     punkte = lauf.live.punkte()
     assert [p.rr_ms for p in punkte] == rr
     assert [i for i, p in enumerate(punkte) if p.verworfen] == [7, 9, 10, 11]
@@ -158,6 +162,38 @@ async def test_verworfene_intervalle_stehen_live_in_der_kurve() -> None:
     assert (np.abs(abweichung) > 100).sum() <= 2
     kz = lauf.live.kennzahlen()
     assert (kz.schlaege, kz.verworfen) == (36, 4)
+
+
+_SENSOR = Korrekturregeln(sensor_verwerfung="sensor")
+
+
+@pytest.mark.asyncio
+async def test_verworfene_intervalle_werden_live_selbst_geprueft() -> None:
+    """Vorgabe „selbst": Verworfenes zählt, wenn es die eigenen Prüfungen besteht."""
+    rr = _rr_reihe(40)
+    lauf = await _live(rr, blockiert=frozenset({7, 9, 10, 11}))
+    punkte = lauf.live.punkte()
+    assert [i for i, p in enumerate(punkte) if p.sensor_verworfen] == [7, 9, 10, 11]
+    assert not any(p.verworfen or p.artefakt for p in punkte)
+    assert all(p.rr_korr == p.rr_ms for p in punkte)
+    kz = lauf.live.kennzahlen()
+    assert (kz.schlaege, kz.verworfen) == (40, 4)
+    # Umschalten wirkt sofort auf den ganzen Puffer
+    lauf.regeln_setzen(_SENSOR)
+    assert [i for i, p in enumerate(lauf.live.punkte()) if p.verworfen] == [7, 9, 10, 11]
+    assert lauf.live.kennzahlen().schlaege == 36
+
+
+def test_live_fehlerschaetzung_markiert_artefakt() -> None:
+    from trainingsapp.hrv_core.live import LiveFenster
+
+    f = LiveFenster()
+    f.regeln_setzen(Korrekturregeln(), "ppg_ppi")
+    for i in range(10):
+        f.hinzufuegen(i * 0.8, 800 + (i % 2) * 10, 70, fehler_ms=120 if i == 4 else 10)
+    assert [p.artefakt for p in f.punkte()] == [i == 4 for i in range(10)]
+    f.regeln_setzen(Korrekturregeln(fehler_an=False), "ppg_ppi")
+    assert not any(p.artefakt for p in f.punkte())
 
 
 def test_live_kennzahlen_differenzieren_nicht_ueber_verworfene() -> None:

@@ -44,7 +44,7 @@ def _rmssd(diffs: list[int]) -> float:
 
 
 def test_algo_version_gezaehlt() -> None:
-    assert ALGO_VERSION == 3  # 3: Messlücken auf der Herzuhr aller Intervalle
+    assert ALGO_VERSION == 4  # 4: vom Sensor verworfene Intervalle selbst prüfen
 
 
 def test_golden_rmssd_nur_ueber_echte_nachbarn() -> None:

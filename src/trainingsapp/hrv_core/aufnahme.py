@@ -93,6 +93,9 @@ class Aufnahme:
         # Lokales Datum wie bei praxis_gui (`datetime.now()`), nicht das UTC-Datum.
         self.datum = self.start_utc.astimezone().strftime("%Y-%m-%d")
 
+        #: Notizen während der Aufnahme (`hrv_core.ereignisse`), Anker auf `beats`
+        self.ereignisse: list[dict[str, Any]] = []
+
         self._ppi = bool(ppi)
         self._beats: list[Beat] = []
         self._ppi_pakete: list[dict[str, Any]] = []
@@ -185,6 +188,7 @@ class Aufnahme:
             simulation=self.simulation,
             titel=titel or self.titel,
             notiz=notiz or self.notiz,
+            ereignisse=[dict(e) for e in self.ereignisse],
             datum=self.datum,
             ppg_aufzeichnung=False,
             ppi_pakete=[dict(p) for p in self._ppi_pakete] if self._ppi else None,

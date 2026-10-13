@@ -271,6 +271,23 @@ setzen.
 
 Altes Format (nur lesen): `{"t_s": …, "chart_x": …, "wall_time": …, "text": …}`.
 
+**Wir schreiben Ereignisse** im neuen Format, Feldfolge
+`beat_index, dt_s, t_wall_s, t_s, wall_time, text` (`hrv_core/ereignisse.py`,
+Portierung von praxis_gui `event_anchor.py`; gegen das Original auf den
+Golden-Dateien und einer echten Verity-Messung geprüft, 36 000 Fälle
+identisch):
+
+- `dt_s` ist auf das folgende Schlagintervall der **Herzuhr der Datei**
+  begrenzt — eine Notiz rutscht nie über den nächsten Schlag hinaus; in einer
+  Lücke landet sie an deren Beginn, `t_wall_s` behält den echten Zeitpunkt.
+- **Live** ankert „jetzt" über die Wanduhr (`anker_aus_wand`) auf den bisher
+  geschriebenen Zeilen; die Ereignisse stehen in Backup und Messdatei.
+- **Nachträglich** (Tippen in die Kurve, Verschieben) ankert die Position auf
+  der Zeitachse der Kurve (`anker_aus_achse`; bei der Verity Sense die
+  Herzuhr aller Intervalle, `ppi.schlagzeiten`) über dieselbe Rechnung.
+- `wall_time` ist die lokale Uhrzeit aus `start_utc + t_wall_s`; unbekannte
+  Felder eines Ereignisses aus praxis_gui bleiben beim Bearbeiten erhalten.
+
 ---
 
 ## 5. Geräteprofile
@@ -324,6 +341,15 @@ Notifications ohne RR-Feld selbst schreibt.
    mitten im Schreiben hinterlässt so nie eine halbe Messdatei. (praxis_gui
    schreibt die endgültige Datei nicht atomar — für den Leser ist das gleich.)
 9. Die Schreibregeln je Schlag aus Abschnitt 3a gelten ohne Ausnahme.
+10. **Nachträglich nur Metadaten.** `titel`, `notiz` und `ereignisse` dürfen
+    in einer gespeicherten Messdatei geändert werden — wie praxis_gui
+    (`workbench._write_raw_metadata`). Die Datei wird als JSON gelesen und mit
+    unveränderter Schlüsselfolge zurückgeschrieben (`indent=2`,
+    `ensure_ascii=False`, atomar); `messungen`, `ppi_pakete` und alle übrigen
+    Felder bleiben Wert für Wert. Danach bekommt ein vorhandenes Sidecar die
+    neue Prüfsumme (`source_file_sha1`, wie `analysis_io.refresh_sidecar_sha1`),
+    und `hrv_recording.sha1` wird nachgeführt. Alles andere bleibt
+    unveränderlich (`hrv_core.ereignisse.metadaten_schreiben` weist es ab).
 
 ### 6a. Crash-Backup `.backup_<start>.json`
 
@@ -407,12 +433,34 @@ unangetastet.**
 
 | Feld | Regel |
 |---|---|
-| `corrections[]` | sortiert nach `beat_index` (Index im **rohen** `messungen`-Array). Wir erzeugen `interpolate`, `delete`, `exclude_range`; gelesen und angewendet werden auch praxis_gui-Einträge `set_value` (`value_ms`), `split` (`n_parts`), `merge` (`with_next`) |
+| `corrections[]` | sortiert nach `beat_index` (Index im **rohen** `messungen`-Array; Erweiterung für die Folge aller PPI-Intervalle: Abschnitt 9a). Wir erzeugen `interpolate`, `delete`, `exclude_range`; gelesen und angewendet werden auch praxis_gui-Einträge `set_value` (`value_ms`), `split` (`n_parts`), `merge` (`with_next`) |
 | `t_s` | 3 Nachkommastellen; `original_value_ms` 1 Nachkommastelle, fehlt bei praxis_gui-`exclude_range` |
 | `unsicher` | nur geschrieben, wenn `true` |
 | `beat_index_end` | nur bei `exclude_range`, einschließlich |
 | `rr_corrected[]` | die korrigierte Reihe: `t_s` = Onset + kumulierte korrigierte RR (4 Stellen), `rr_ms` gerundet, `flag ∈ orig, interp, set, split, merge` |
 | `source_file_sha1` | SHA1 der Rohdatei — daran erkennt praxis_gui ein veraltetes Sidecar |
+
+### 9a. Unsere Erweiterung: Regeln und `corrections_ppi`
+
+Zwei zusätzliche Schlüssel, die praxis_gui nicht kennt (und als unbekannte
+Felder übergeht):
+
+| Feld | Regel |
+|---|---|
+| `corrections_meta.regeln` | die `Korrekturregeln`, mit denen die Korrektur entstand (`hrv_core/regeln.py`): `sensor_verwerfung` (`selbst`/`sensor`), `malik_an`, `malik` (`null` = nach Intervallquelle), `rr_min`, `rr_max`, `fehler_an`, `fehler_max_ms`, `nullen`, `merge_gap`, `auto_max`, `unsicher_max`, `max_luecke_s`, `vorauswahl`. `malik_threshold`, `rr_min_ms`, `rr_max_ms`, `interpolate_zeros` stehen weiterhin daneben — mit den daraus wirksamen Werten |
+| `corrections_ppi[]` | nur bei `sensor_verwerfung = "selbst"` mit wieder aufgenommenen Intervallen: dieselben Einträge wie `corrections`, aber `beat_index` zählt in der Folge **aller** Intervalle aus `ppi_pakete` mit `ppi_ms > 0` (auch der vom Gerät verworfenen) |
+
+Ist `corrections_ppi` geschrieben, steht unter `corrections` (und
+`rr_corrected`) seine Abbildung auf die Zeilen von `messungen`
+(`korrektur.auf_zeilen`): Korrekturen nur an verworfenen Intervallen entfallen
+dort, ein Ausschluss schrumpft auf die enthaltenen Zeilen. praxis_gui sieht
+also eine gültige, vollständige Korrektur seiner eigenen Reihe.
+
+Beim Lesen gilt `corrections_ppi` nur, solange seine Abbildung genau
+`corrections` ergibt. Hat praxis_gui die Korrekturen inzwischen geändert,
+gelten dessen `corrections`, übertragen auf die Folge aller Intervalle
+(`korrektur.von_zeilen`). Ein Sidecar ohne `regeln` (praxis_gui, ältere
+Fassungen) liefert Malik-Schwelle, Grenzen und Nullen aus `corrections_meta`.
 
 **Bestehende Sidecars werden fortgeschrieben, nicht ersetzt:** alle Felder, die
 wir nicht kennen (`segments`, `metric_params`, `derived_metrics`,

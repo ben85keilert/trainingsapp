@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from .recording import Recording
+from .recording import Beat, Recording
 from .segments import luecken_finden
 
 
@@ -175,6 +175,96 @@ def messluecken(rec: Recording) -> list[int]:
     return luecken_finden([replace(b, t_s=t) for b, t in zip(rec.beats, achse, strict=True)])
 
 
+@dataclass(frozen=True, slots=True)
+class Wiederaufnahme:
+    """Eine Messung, in der die Verwerfungen des Sensors aufgehoben sind."""
+
+    #: Alle Intervalle aus ``ppi_pakete`` mit ``ppi_ms > 0`` als Zeilen
+    rec: Recording
+    #: Je Zeile von ``rec``: Zeile der Rohdatei — ``None`` = vom Sensor verworfen
+    zeile: list[int | None]
+
+    @property
+    def aufgenommen(self) -> int:
+        """Wie viele vom Sensor verworfene Intervalle wieder aufgenommen sind."""
+        return sum(z is None for z in self.zeile)
+
+
+def ohne_verwerfung(rec: Recording) -> Wiederaufnahme | None:
+    """Die Messung mit **allen** Intervallen des Sensors — oder ``None`` ohne `ppi_folge`.
+
+    Die Verity Sense verwirft Intervalle, die sich in Verteilung und
+    Fehlerschätzung nicht von den behaltenen unterscheiden (13.10.2026: 37 %
+    in Ruhe). Hier kommen sie zurück — als ganz normale Zeilen, über die die
+    Automatik (`korrektur.automatisch`) wie über jede andere urteilt.
+
+    - Zeilen der Rohdatei bleiben, wie sie sind; nur ``t_s`` ist die Herzuhr
+      aller Intervalle (`schlagzeiten`).
+    - Wieder aufgenommene Intervalle bekommen die Wanduhr ihres Pakets nach
+      Regel 3a.4 (Ankunft für das letzte, rückwärts gerechnet für frühere)
+      und die Herzfrequenz der Zeile davor.
+    - ``ppi_pakete`` trägt keine Blocker mehr: Die Zuordnung (`ppi_zeilen`)
+      passt auf die neuen Zeilen, Nähte gibt es nur noch an ``ppi_ms = 0``.
+
+    >>> pakete = [{"t_wall_s": 3.0, "ppi_ms": [800, 810, 820], "fehler_ms": [5, 9, 7],
+    ...            "blocker": [0, 1, 0], "kontakt": [1, 1, 1]}]
+    >>> rec = Recording(beats=[Beat(0.8, 800, 70, 1.37, "r"), Beat(1.62, 820, 71, 3.0)],
+    ...                 ppi_pakete=pakete)
+    >>> w = ohne_verwerfung(rec)
+    >>> [(b.t_s, b.rr_ms, b.hf_bpm, b.t_wall_s, b.tw_src) for b in w.rec.beats]
+    [(0.8, 800, 70, 1.37, 'r'), (1.61, 810, 70, 2.18, 'r'), (2.43, 820, 71, 3.0, 'm')]
+    >>> w.zeile, w.aufgenommen, ppi_naehte(w.rec)
+    ([0, None, 1], 1, [])
+    """
+    folge = ppi_folge(rec)
+    if folge is None or rec.ppi_pakete is None:
+        return None
+    wand = _wanduhr(rec.ppi_pakete)
+    beats: list[Beat] = []
+    zeile: list[int | None] = []
+    r = 0
+    hf = rec.beats[0].hf_bpm
+    for j, p in enumerate(folge):
+        if p.brauchbar:
+            b = rec.beats[r]
+            beats.append(replace(b, t_s=p.t_s))
+            zeile.append(r)
+            hf = b.hf_bpm
+            r += 1
+        elif p.ppi_ms > 0:
+            t_wand, quelle = wand[j] if j < len(wand) else (None, "r")
+            beats.append(Beat(p.t_s, p.ppi_ms, hf, t_wand, quelle))
+            zeile.append(None)
+    pakete = [
+        {**paket, "blocker": [0] * len(paket.get("ppi_ms") or [])} for paket in rec.ppi_pakete
+    ]
+    return Wiederaufnahme(replace(rec, beats=beats, ppi_pakete=pakete), zeile)
+
+
+def _wanduhr(pakete: list[dict]) -> list[tuple[float | None, str]]:
+    """Wanduhr je Intervall aus ``ppi_pakete`` — wie der Schreiber (Vertrag 3a.4).
+
+    Das letzte Intervall eines Pakets bekommt die Ankunft (``"m"``), frühere
+    die Ankunft minus die Summe der späteren (``"r"``), verworfene inklusive.
+    """
+    out: list[tuple[float | None, str]] = []
+    for paket in pakete:
+        werte = [max(int(x or 0), 0) for x in paket.get("ppi_ms") or []]
+        ankunft = paket.get("t_wall_s")
+        rest = 0
+        teil: list[tuple[float | None, str]] = []
+        for k in range(len(werte) - 1, -1, -1):
+            if ankunft is None:
+                teil.append((None, "r"))
+            else:
+                teil.append(
+                    (round(float(ankunft) - rest / 1000.0, 3), "m" if k == len(werte) - 1 else "r")
+                )
+            rest += werte[k]
+        out += reversed(teil)
+    return out
+
+
 def ppi_verworfen(rec: Recording) -> tuple[int, int] | None:
     """``(verworfen, gesamt)`` über alle Intervalle in ``ppi_pakete`` — ``None`` ohne Block.
 
@@ -190,7 +280,9 @@ def ppi_verworfen(rec: Recording) -> tuple[int, int] | None:
 __all__ = [
     "PpiIntervall",
     "PpiZeile",
+    "Wiederaufnahme",
     "messluecken",
+    "ohne_verwerfung",
     "ppi_folge",
     "ppi_naehte",
     "ppi_verworfen",

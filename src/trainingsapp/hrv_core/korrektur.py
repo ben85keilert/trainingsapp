@@ -33,7 +33,7 @@ import hashlib
 import json
 from bisect import bisect_left
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -53,8 +53,17 @@ from .constants import (
     RR_MAX_MS,
     RR_MIN_MS,
 )
-from .ppi import messluecken, ppi_folge, ppi_naehte, ppi_zeilen, schlagzeiten
+from .ppi import (
+    Wiederaufnahme,
+    messluecken,
+    ohne_verwerfung,
+    ppi_folge,
+    ppi_naehte,
+    ppi_zeilen,
+    schlagzeiten,
+)
 from .recording import Recording, json_atomar_schreiben
+from .regeln import Korrekturregeln
 from .time_domain import compute_time_domain
 
 SCHEMA_ANALYSE: str = "analysis-v1"
@@ -214,11 +223,19 @@ def automatisch(
     *,
     rr_min: int = int(RR_MIN_MS),
     rr_max: int = int(RR_MAX_MS),
-    malik: float = MALIK_THRESHOLD_EKG,
+    malik: float | None = MALIK_THRESHOLD_EKG,
     merge_gap: int = KETTE_MERGE_GAP,
     nullen: bool = False,
+    fehler_max_ms: int | None = PPI_FEHLER_MAX_MS,
+    auto_max: int = KETTE_AUTO_MAX,
+    unsicher_max: int = KETTE_UNSICHER_MAX,
+    max_luecke_s: float = KETTE_MAX_INTERP_GAP_S,
 ) -> list[Kette]:
     """Schlägt Korrekturketten vor. Wendet nichts an.
+
+    ``malik=None`` schaltet die Malik-Erkennung ab, ``fehler_max_ms=None`` die
+    Auswertung der Fehlerschätzung des Sensors. Alle Stellschrauben auf einmal
+    setzt `vorschlaege` aus `Korrekturregeln`.
 
     ``nullen`` — Zeilen ohne RR (``rr_ms == 0``) als Artefakt behandeln und
     interpolieren, wie praxis_gui (`interpolate_zeros`). **Standard aus:** Beim
@@ -250,8 +267,8 @@ def automatisch(
 
     text_null = "kein RR"
     text_schwelle = f"außerhalb {rr_min}–{rr_max} ms"
-    text_fehler = f"Sensor unsicher (> {PPI_FEHLER_MAX_MS} ms)"
-    text_malik = f"Malik {round(malik * 100)} %"
+    text_fehler = f"Sensor unsicher (> {fehler_max_ms} ms)"
+    text_malik = f"Malik {round((malik or 0) * 100)} %"
     reihenfolge = (text_null, text_schwelle, text_fehler, text_malik)
 
     gruende: dict[int, set[str]] = {}
@@ -267,8 +284,8 @@ def automatisch(
     # Optische Intervalle, bei denen das Gerät selbst einen großen Fehler schätzt
     # (Verity Sense: ppi_pakete[].fehler_ms) — vor Malik, damit sie dessen
     # gleitendes Mittel nicht verziehen.
-    for i, zeile in enumerate(ppi_zeilen(rec) or []):
-        if zeile.fehler_ms > PPI_FEHLER_MAX_MS:
+    for i, zeile in enumerate((ppi_zeilen(rec) or []) if fehler_max_ms is not None else []):
+        if zeile.fehler_ms > fehler_max_ms:  # type: ignore[operator]
             gruende.setdefault(i, set()).add(text_fehler)
     # Malik auf der Reihe, in der die Schwellen-Kandidaten schon überbrückt
     # sind. Auf der Rohreihe hätte eine Nullfolge das gleitende Mittel 0 — die
@@ -277,7 +294,7 @@ def automatisch(
     # Zeilen ohne RR sind keine Schläge — Malik sieht nur die echte Schlagfolge.
     # Fehlt wirklich ein Schlag, ist das Folgeintervall lang, und genau das fällt auf.
     rumpf = np.array([i for i in range(n) if i not in ohne_rr], dtype=int)
-    if rumpf.size >= MALIK_WINDOW:
+    if malik is not None and rumpf.size >= MALIK_WINDOW:
         reihe = rr[rumpf].copy()
         gueltig = np.array([int(i) not in gruende for i in rumpf])
         if gueltig.sum() >= 2:
@@ -307,11 +324,9 @@ def automatisch(
         luecke = _ungedeckt_s(t_wand, rr, lo, hi, verworfen)
         alle = set().union(*(gruende[i] for i in indizes))
         grund = ", ".join(g for g in reihenfolge if g in alle)
-        if n_schlaege > KETTE_UNSICHER_MAX or luecke > KETTE_MAX_INTERP_GAP_S:
+        if n_schlaege > unsicher_max or luecke > max_luecke_s:
             zusatz = (
-                f"Lücke {_komma(luecke)} s"
-                if luecke > KETTE_MAX_INTERP_GAP_S
-                else f"{n_schlaege} Schläge"
+                f"Lücke {_komma(luecke)} s" if luecke > max_luecke_s else f"{n_schlaege} Schläge"
             )
             ketten.append(
                 Kette(
@@ -327,7 +342,7 @@ def automatisch(
                 )
             )
             continue
-        unsicher = n_schlaege > KETTE_AUTO_MAX
+        unsicher = n_schlaege > auto_max
         ketten.append(
             Kette(
                 start=lo,
@@ -343,6 +358,109 @@ def automatisch(
             )
         )
     return ketten
+
+
+def vorschlaege(rec: Recording, regeln: Korrekturregeln) -> list[Kette]:
+    """`automatisch` mit allen Stellschrauben aus ``regeln``.
+
+    ``rec`` ist die Reihe, auf der korrigiert wird — bei ``"selbst"`` die aus
+    `analysebasis`, sonst die Rohdatei.
+    """
+    return automatisch(
+        rec,
+        rr_min=regeln.rr_min,
+        rr_max=regeln.rr_max,
+        malik=regeln.malik_fuer(rec.intervall_quelle) if regeln.malik_an else None,
+        merge_gap=regeln.merge_gap,
+        nullen=regeln.nullen,
+        fehler_max_ms=regeln.fehler_max_ms if regeln.fehler_an else None,
+        auto_max=regeln.auto_max,
+        unsicher_max=regeln.unsicher_max,
+        max_luecke_s=regeln.max_luecke_s,
+    )
+
+
+def analysebasis(rec: Recording, regeln: Korrekturregeln) -> Wiederaufnahme:
+    """Die Reihe, auf der korrigiert und gerechnet wird.
+
+    Mit ``sensor_verwerfung = "selbst"`` und einem passenden ``ppi_pakete``
+    alle Intervalle des Sensors (`ppi.ohne_verwerfung`), sonst die Zeilen der
+    Rohdatei selbst — dann ist ``zeile`` die Identität.
+
+    >>> from trainingsapp.hrv_core.recording import Beat
+    >>> pakete = [{"ppi_ms": [800, 810, 820], "blocker": [0, 1, 0]}]
+    >>> rec = Recording(beats=[Beat(0.8, 800), Beat(1.62, 820)], ppi_pakete=pakete)
+    >>> analysebasis(rec, Korrekturregeln()).zeile
+    [0, None, 1]
+    >>> analysebasis(rec, Korrekturregeln(sensor_verwerfung="sensor")).zeile
+    [0, 1]
+    """
+    if regeln.selbst_pruefen:
+        basis = ohne_verwerfung(rec)
+        if basis is not None:
+            return basis
+    return Wiederaufnahme(rec, list(range(len(rec.beats))))
+
+
+def vorauswahl(ketten: Sequence[Kette], modus: str) -> set[int]:
+    """Indizes der Ketten, die ohne gespeicherte Korrektur übernommen sind.
+
+    ``"sicher"``: alles außer Ketten mit dem Vermerk *unsicher*. Ein
+    Ausschluss erfindet nichts, er nimmt nur weg — die Verity Sense hatte
+    solche Stellen ohnehin verworfen. Unsichere Interpolationen (3–5 Schläge)
+    erfänden Variabilität; sie bleiben eine bewusste Entscheidung.
+    """
+    if modus == "alle":
+        return set(range(len(ketten)))
+    if modus == "sicher":
+        return {i for i, k in enumerate(ketten) if not k.unsicher}
+    return set()
+
+
+def auf_zeilen(
+    korrekturen: Sequence[Korrektur], basis: Wiederaufnahme, rec: Recording
+) -> list[Korrektur]:
+    """Korrekturen der Analysebasis auf die Zeilen der Rohdatei abbilden (für praxis_gui).
+
+    Was nur wieder aufgenommene Intervalle betrifft, hat in der Rohdatei keine
+    Zeile und entfällt; ein Ausschluss schrumpft auf die enthaltenen Zeilen.
+
+    >>> from trainingsapp.hrv_core.recording import Beat
+    >>> rec = Recording(beats=[Beat(0.8, 800), Beat(1.62, 820), Beat(2.4, 780)])
+    >>> basis = Wiederaufnahme(rec, [0, None, 1, None, 2])
+    >>> [(k.op, k.beat_index, k.beat_index_end) for k in auf_zeilen(
+    ...     [Korrektur("interpolate", 1, 0, 9.0), Korrektur("interpolate", 2, 0, 9.0),
+    ...      Korrektur("exclude_range", 3, 0, 9.0, beat_index_end=4)], basis, rec)]
+    [('interpolate', 1, None), ('exclude_range', 2, 2)]
+    """
+    out: list[Korrektur] = []
+    for k in korrekturen:
+        lo, hi = k.span()
+        zeilen = [z for z in basis.zeile[lo : hi + 1] if z is not None]
+        if not zeilen:
+            continue
+        r = zeilen[0]
+        ende = zeilen[-1] if k.op == "exclude_range" else None
+        out.append(replace(k, beat_index=r, beat_index_end=ende, t_s=rec.beats[r].t_s))
+    return out
+
+
+def von_zeilen(korrekturen: Sequence[Korrektur], basis: Wiederaufnahme) -> list[Korrektur]:
+    """Korrekturen auf Zeilen der Rohdatei in die Analysebasis übertragen.
+
+    So bleibt ein Sidecar aus praxis_gui (oder von vor ALGO_VERSION 4) gültig,
+    wenn verworfene Intervalle wieder aufgenommen werden.
+    """
+    nach_zeile = {z: j for j, z in enumerate(basis.zeile) if z is not None}
+    out: list[Korrektur] = []
+    for k in korrekturen:
+        lo, hi = k.span()
+        if lo not in nach_zeile:
+            continue
+        j = nach_zeile[lo]
+        ende = nach_zeile.get(hi, j) if k.op == "exclude_range" else None
+        out.append(replace(k, beat_index=j, beat_index_end=ende, t_s=basis.rec.beats[j].t_s))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -628,6 +746,15 @@ def _json_lesen(pfad: Path) -> dict[str, Any] | None:
     return doc if isinstance(doc, dict) else None
 
 
+def _eindeutig(korrekturen: Sequence[Korrektur], n: int) -> list[Korrektur]:
+    """Je Schlag die letzte Korrektur, nach Index sortiert."""
+    eindeutig: dict[int, Korrektur] = {}
+    for k in korrekturen:
+        if k.op in OPS and 0 <= k.beat_index < n:
+            eindeutig[k.beat_index] = k
+    return [eindeutig[i] for i in sorted(eindeutig)]
+
+
 def analyse_speichern(
     rec_pfad: Path,
     rec: Recording,
@@ -637,44 +764,63 @@ def analyse_speichern(
     rr_min: int = int(RR_MIN_MS),
     rr_max: int = int(RR_MAX_MS),
     nullen: bool = False,
+    regeln: Korrekturregeln | None = None,
+    basis: Wiederaufnahme | None = None,
 ) -> Path:
     """Schreibt die Korrekturen atomar ins Sidecar und liefert dessen Pfad.
 
     Ein vorhandenes Sidecar (z. B. aus praxis_gui) wird fortgeschrieben: nur
     ``schema``, ``source_file``, ``corrections``, ``corrections_meta``,
-    ``rr_corrected``, ``source_file_sha1`` und ``updated_utc`` werden ersetzt,
-    alles andere bleibt erhalten. ``malik``/``rr_min``/``rr_max`` landen nur
-    als Angabe in ``corrections_meta``.
+    ``rr_corrected``, ``source_file_sha1`` und ``updated_utc`` werden ersetzt
+    (dazu unsere Erweiterung ``corrections_ppi``), alles andere bleibt
+    erhalten. ``malik``/``rr_min``/``rr_max`` landen nur als Angabe in
+    ``corrections_meta``; mit ``regeln`` stammen sie von dort, und die Regeln
+    selbst stehen unter ``corrections_meta.regeln``.
+
+    ``basis`` (aus `analysebasis`): Sind darin vom Sensor verworfene
+    Intervalle wieder aufgenommen, zählen die Indizes von ``korrekturen`` in
+    dieser Basis. Dann steht dort, wo praxis_gui liest (``corrections``,
+    ``rr_corrected``), ihre Abbildung auf die Zeilen der Rohdatei
+    (`auf_zeilen`), und vollständig unter ``corrections_ppi``.
     """
     rec_pfad = Path(rec_pfad)
     ziel = analyse_pfad(rec_pfad)
-    n = len(rec.beats)
+    if regeln is not None:
+        malik = regeln.malik_fuer(rec.intervall_quelle)
+        rr_min, rr_max, nullen = regeln.rr_min, regeln.rr_max, regeln.nullen
 
-    eindeutig: dict[int, Korrektur] = {}
-    for k in korrekturen:
-        if k.op in OPS and 0 <= k.beat_index < n:
-            eindeutig[k.beat_index] = k
-    sortiert = [eindeutig[i] for i in sorted(eindeutig)]
+    erweitert = basis is not None and basis.aufgenommen > 0
+    ppi_liste: list[Korrektur] = []
+    if erweitert:
+        assert basis is not None
+        ppi_liste = _eindeutig(korrekturen, len(basis.rec.beats))
+        sortiert = _eindeutig(auf_zeilen(ppi_liste, basis, rec), len(rec.beats))
+    else:
+        sortiert = _eindeutig(korrekturen, len(rec.beats))
     korr = anwenden(rec, sortiert)
 
     nach_op: dict[str, int] = {}
     for k in sortiert:
         nach_op[k.op] = nach_op.get(k.op, 0) + 1
 
+    meta: dict[str, Any] = {
+        "malik_threshold": float(malik),
+        "corrections_total": len(sortiert),
+        "corrections_by_op": nach_op,
+        "rr_min_ms": int(rr_min),
+        "rr_max_ms": int(rr_max),
+        "interpolate_zeros": bool(nullen),
+    }
+    if regeln is not None:
+        meta["regeln"] = regeln.als_dict()
     doc = _json_lesen(ziel) or {}
+    doc.pop("corrections_ppi", None)
     doc.update(
         {
             "schema": SCHEMA_ANALYSE,
             "source_file": rec_pfad.name,
             "corrections": [k.to_dict() for k in sortiert],
-            "corrections_meta": {
-                "malik_threshold": float(malik),
-                "corrections_total": len(sortiert),
-                "corrections_by_op": nach_op,
-                "rr_min_ms": int(rr_min),
-                "rr_max_ms": int(rr_max),
-                "interpolate_zeros": bool(nullen),
-            },
+            "corrections_meta": meta,
             "rr_corrected": [
                 {"t_s": t, "rr_ms": round(x), "flag": f}
                 for t, x, f in zip(korr.t_s, korr.rr_ms, korr.flag, strict=True)
@@ -683,21 +829,14 @@ def analyse_speichern(
             "updated_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
     )
+    if erweitert:
+        doc["corrections_ppi"] = [k.to_dict() for k in ppi_liste]
     return json_atomar_schreiben(ziel, doc)
 
 
-def analyse_laden(rec_pfad: Path) -> list[Korrektur]:
-    """Die gespeicherten Korrekturen einer Messung; ``[]`` ohne (lesbares) Sidecar.
-
-    Einträge mit unbekannter Operation oder ohne gültigen Index werden
-    übergangen — ein Sidecar aus einer neueren praxis_gui-Fassung soll lesbar
-    bleiben.
-    """
-    doc = _json_lesen(analyse_pfad(Path(rec_pfad)))
-    if not doc:
-        return []
+def _korrekturen_lesen(eintraege: Any) -> list[Korrektur]:
     out: list[Korrektur] = []
-    for d in doc.get("corrections") or []:
+    for d in eintraege or []:
         if not isinstance(d, dict) or d.get("op") not in OPS:
             continue
         try:
@@ -709,6 +848,69 @@ def analyse_laden(rec_pfad: Path) -> list[Korrektur]:
     return sorted(out, key=lambda k: k.beat_index)
 
 
+def analyse_laden(rec_pfad: Path, basis: Wiederaufnahme | None = None) -> list[Korrektur]:
+    """Die gespeicherten Korrekturen einer Messung; ``[]`` ohne (lesbares) Sidecar.
+
+    Einträge mit unbekannter Operation oder ohne gültigen Index werden
+    übergangen — ein Sidecar aus einer neueren praxis_gui-Fassung soll lesbar
+    bleiben.
+
+    Ohne ``basis`` zählen die Indizes in der Rohdatei. Mit ``basis`` zählen
+    sie in der Analysebasis: ``corrections_ppi``, sofern sie noch zu
+    ``corrections`` passt — hat praxis_gui die Korrekturen inzwischen
+    geändert, gelten dessen ``corrections``, übertragen mit `von_zeilen`.
+    """
+    doc = _json_lesen(analyse_pfad(Path(rec_pfad)))
+    if not doc:
+        return []
+    zeilen = _korrekturen_lesen(doc.get("corrections"))
+    if basis is None or basis.aufgenommen == 0:
+        return zeilen
+    ppi = [
+        k for k in _korrekturen_lesen(doc.get("corrections_ppi")) if k.beat_index < len(basis.zeile)
+    ]
+    if ppi:
+        n = sum(z is not None for z in basis.zeile)
+        projektion = _eindeutig(auf_zeilen(ppi, basis, _zeilen_rec(basis, n)), n)
+        if [_schluessel(k) for k in projektion] == [_schluessel(k) for k in zeilen]:
+            return ppi
+    return von_zeilen(zeilen, basis)
+
+
+def _zeilen_rec(basis: Wiederaufnahme, n: int) -> Recording:
+    """Stellvertreter der Rohdatei mit ``n`` Zeilen — `auf_zeilen` braucht nur ``t_s``."""
+    beats = [b for b, z in zip(basis.rec.beats, basis.zeile, strict=True) if z is not None]
+    return replace(basis.rec, beats=beats[:n])
+
+
+def _schluessel(k: Korrektur) -> tuple[Any, ...]:
+    return (k.op, k.beat_index, k.span()[1])
+
+
+def analyse_regeln(rec_pfad: Path) -> Korrekturregeln | None:
+    """Die Regeln, mit denen die gespeicherte Korrektur entstand — ``None`` ohne Angabe.
+
+    Ein Sidecar aus praxis_gui hat keine; dann gelten Malik-Schwelle und
+    Grenzen aus ``corrections_meta``, der Rest nach Vorgabe.
+    """
+    doc = _json_lesen(analyse_pfad(Path(rec_pfad)))
+    if not doc:
+        return None
+    meta = doc.get("corrections_meta")
+    if not isinstance(meta, dict):
+        return None
+    if isinstance(meta.get("regeln"), dict):
+        return Korrekturregeln.aus_dict(meta["regeln"])
+    return Korrekturregeln.aus_dict(
+        {
+            "malik": meta.get("malik_threshold"),
+            "rr_min": meta.get("rr_min_ms", int(RR_MIN_MS)),
+            "rr_max": meta.get("rr_max_ms", int(RR_MAX_MS)),
+            "nullen": bool(meta.get("interpolate_zeros", False)),
+        }
+    )
+
+
 __all__ = [
     "OPS",
     "SCHEMA_ANALYSE",
@@ -717,11 +919,17 @@ __all__ = [
     "Korrigiert",
     "analyse_laden",
     "analyse_pfad",
+    "analyse_regeln",
     "analyse_speichern",
+    "analysebasis",
     "anwenden",
+    "auf_zeilen",
     "automatisch",
     "kennzahlen",
     "korr_zeiten",
     "naehte",
     "rohfolge",
+    "von_zeilen",
+    "vorauswahl",
+    "vorschlaege",
 ]

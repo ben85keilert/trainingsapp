@@ -531,6 +531,11 @@ class SettingRepo:
     AKTIVES_PROFIL = "aktives_profil"
     #: "1" (Vorgabe) = Papierkorb nach `PAPIERKORB_TAGE` Tagen automatisch leeren
     PAPIERKORB_AUTO = "papierkorb_auto"
+    #: HRV: Regeln der automatischen Korrektur (JSON, `hrv_core.regeln`)
+    HRV_KORREKTUR = "hrv_korrektur"
+    #: HRV: aktuelle Ansicht der Verlaufskurven und gespeicherte Ansichten (JSON)
+    HRV_ANSICHT = "hrv_ansicht"
+    HRV_ANSICHTEN = "hrv_ansichten"
 
     def __init__(self, con: sqlite3.Connection) -> None:
         self.con = con
@@ -1432,6 +1437,13 @@ class HrvRepo:
         self.con.execute(
             "UPDATE hrv_recording SET note = ? WHERE id = ?", (text.strip(), recording_id)
         )
+
+    def sha1_setzen(self, recording_id: str, sha1: str) -> None:
+        """Nach einer eigenen Metadaten-Änderung (Notizen) die Prüfsumme nachführen.
+
+        ``sha1`` soll fremde Änderungen an der Datei verraten — nicht die eigenen.
+        """
+        self.con.execute("UPDATE hrv_recording SET sha1 = ? WHERE id = ?", (sha1, recording_id))
 
     def loeschen(self, recording_id: str) -> None:
         """Nur der Verweis verschwindet aus der Liste — die Messdatei bleibt liegen."""

@@ -299,23 +299,67 @@ Die Datei behält die Ankunftsachse; die Rohzutaten stehen in `ppi_pakete`.
 
 ### Verlaufskurven (`hrv_core/trends.py`)
 
-Unter dem Tachogramm — live und in der Aufzeichnung — stehen wählbare
-Verlaufskurven: RMSSD (30 s), SDNN (60 s), pNN50 (30 s), Ø HF aus RR (10 s)
-und die Herzfrequenz des Geräts. Je Rasterpunkt `t_e` gehen die Schläge mit
-`t_e − Fenster < t ≤ t_e` ein, Definitionen wie `time_domain`; NaN und Nähte
-trennen, unter fünf guten Schlägen bleibt eine Lücke. Live rechnen sie auf den
-guten Rohwerten (Artefakte als Naht, wie `kennzahlen`), in der Aufzeichnung auf
-der korrigierten Reihe.
+Unter der Hauptkurve — live und in der Aufzeichnung — schaltet man zwischen drei
+Bereichen um; je Bereich gibt es wählbare Verlaufskurven (Schlüssel wie
+praxis_gui, Vertrag Abschnitt 10):
+
+| Bereich | Kurven (Vorgabe-Fenster) | Mindestens gute Schläge im Fenster |
+|---|---|---|
+| Zeit | Ø HF (10 s), Ø RR (10 s), RMSSD (30 s), SDNN (60 s), pNNx (30 s), HF Gerät | 1 (Mittelwerte), sonst 5 |
+| Frequenz | LF-Band, HF-Band, LF/HF, Gipfel /min (je 2 min) | 30, und 70 % der Fensterzeit belegt |
+| Nichtlinear | SD1 (60 s), SD2 (3 min), DFA α1 (2 min) | 30 bzw. 100 (DFA) |
+
+Je Rasterpunkt `t_e` gehen die Schläge mit `t_e − Fenster < t ≤ t_e` ein,
+Definitionen wie `time_domain`; NaN und Nähte trennen, unter der Mindestzahl
+bleibt eine Lücke. Live rechnen die Kurven auf den guten Rohwerten (Artefakte
+als Naht, wie `kennzahlen`), in der Aufzeichnung auf der korrigierten Reihe.
+
+- **Ø HF und Ø RR ab 3-s-Fenstern.** Für einen Mittelwert genügt ein Schlag im
+  Fenster; die Fenster 3 und 5 s zeigen den Puls fast Schlag für Schlag
+  (praxis_gui: ab 5 s).
+- **pNNx** statt pNN50: Schwelle 10–100 ms, Vorgabe 50 (`Ansicht.pnn_ms`),
+  gezählt strikt größer. Der Schlüssel älterer Ansichten (`pnn50`) wird beim
+  Lesen auf `pnnx` abgebildet.
+- **Gleitend oder in Blöcken.** Gleitend: Raster an Vielfachen eines Schritts
+  (ein Zehntel des Fensters, 1–10 s). Blöcke: nicht überlappende Fenster an
+  Vielfachen der Fensterlänge, ein Wert je Block, nur vollständige Blöcke — als
+  Stufe gezeichnet (`treppe`), damit man sieht, wofür der Wert gilt (praxis_gui:
+  „Block"). praxis_gui erzwingt bei Frequenzkurven Blöcke (Rechenaufwand);
+  hier ist beides möglich, weil teure Fenster zwischengespeichert werden.
+- **Frequenz im Fenster** ist ein Lomb über alle guten Schläge des Fensters
+  (`frequency.fensterspektrum`); LF, HF, LF/HF und Gipfel teilen sich das
+  Spektrum je Fenster. Die Mindestdauer je Band gilt nicht (das Fenster wählt
+  der Anwender), die Ansicht weist aber darauf hin.
+- **Zwischenspeicher.** Spektren und DFA je Fenster merkt sich die Ansicht über
+  Zeichnungen hinweg; der Schlüssel enthält Grenzen, Zahl und Summe der guten
+  Werte. Wird live ein Schlag nachträglich zum Artefakt, ändert sich die Summe,
+  und das Fenster wird neu gerechnet.
 
 **Ø HF aus RR statt gemeldeter Herzfrequenz.** Die Verity Sense meldet ihre
 Herzfrequenz nur etwa alle 5 s neu und springt dabei (13.10.: Stufen zwischen
-60 und 85 bpm, bei gleichmäßigen Intervallen). `60000 / Ø RR` über 10 s folgt
-dem Puls ruhig. praxis_gui bietet dasselbe als „Ø BPM" (30 s).
+60 und 85 bpm, bei gleichmäßigen Intervallen). `60000 / Ø RR` folgt dem Puls
+ruhig. praxis_gui bietet dasselbe als „Ø BPM" (30 s).
 
-Gleiche Einheit teilt sich ein Diagramm (RMSSD und SDNN), verschiedene stehen
-untereinander mit derselben Zeitachse — zwei y-Achsen sind am Handy nicht
-lesbar. Die Auswahl samt Fenstern ist eine `core.hrv_ansicht.Ansicht`,
-speicherbar unter einem Namen (praxis_gui: „Vorlagen").
+**Achsen statt Einheiten.** Kurven derselben Achse teilen sich ein Diagramm
+(RMSSD, SDNN, SD1, SD2; LF und HF), verschiedene stehen untereinander mit
+derselben Zeitachse — zwei y-Achsen sind am Handy nicht lesbar. Ø RR hat zwar
+die Einheit ms, bekommt aber eine eigene Achse: bei 900 ms neben 40 ms wäre
+RMSSD eine flache Linie. Eine Höchstzahl gleichzeitiger Kurven gibt es nicht
+mehr (bis Oktober 2026 vier — eine eigene Festlegung für kleine Bildschirme).
+Die Auswahl samt Fenstern ist eine `core.hrv_ansicht.Ansicht`, speicherbar
+unter einem Namen (praxis_gui: „Vorlagen").
+
+**Spektrum und Poincaré des Ausschnitts.** Im Bereich Frequenz steht über den
+Kurven das Spektrum dessen, was die Hauptkurve gerade zeigt (zoomen und wischen
+ändern es), mit getönten Bändern und dem stärksten Gipfel; die Höhe richtet sich
+nach LF und HF. Im Bereich Nichtlinear die Poincaré-Wolke des Ausschnitts mit
+SD1, SD2 und DFA α1. Keine Bewertung (kein „kohärent", keine Ampel) — wie
+praxis_gui seit „Live-PSD ohne Urteil".
+
+**Optische Sensoren.** Nichtlinear ist bei Pulsintervallen (Verity Sense)
+standardmäßig ausgeblendet (`HrvEinstellungen.nichtlinear_optisch`); die
+praxis_gui-Doku stuft DFA dort als „nein" ein. Frequenzwerte bekommen einen
+Vorbehalt („mit Vorsicht").
 
 ### „Schwankung"
 

@@ -9,7 +9,7 @@ einem sichtbaren Fortschritt in der App.
 | **M1** | Flet-Hülle: Navigation, Theme, Ansichten — einmal aufs Handy gebaut | L03 | **fertig** |
 | **M2** | Übungskatalog aus der Datenbank, Suche, Detailansicht, Videoverweise | L05 | **fertig** |
 | **M3** | Pläne anlegen und abarbeiten, Tagesansicht, Tagebuch auf drei Ebenen, Kalender und Kurve | L06 | **fertig** |
-| M4 | `hrv_core` vollständig + Simulator, Golden-Tests grün | L09 | teilweise |
+| M4 | `hrv_core` vollständig + Simulator, Golden-Tests grün | L09 | **Rechenkern fertig** (Lektion L09 offen) |
 | M5 | Echte Geräte auf dem Desktop + Sensor-Prüfstand | L10 | offen |
 | M6 | Live-Messung mit Diagrammen, Aufzeichnung nach `raw-v1` | L11 | teilweise |
 | M7 | Limits und Trainingssteuerung | L11 | teilweise |
@@ -31,10 +31,10 @@ einem sichtbaren Fortschritt in der App.
 
 ## Teilweise: was noch fehlt
 
-- `hrv_core/frequency.py` — Welch und Lomb-Scargle in numpy (**L09**)
-- `hrv_core/nonlinear.py` — DFA α1 und Sample Entropy (**L09**)
 - `devices/bleak_source.py` — Desktop-BLE (**L10**)
-- `ui/views/` — Messung und Verlauf sind noch Platzhalter (**L11**, **L12**)
+- `hrv_metrics_cache` — die Tabelle steht, gefüllt wird sie noch nicht (Verlauf
+  der Kennzahlen über viele Messungen, **L12**)
+- Lektionen L07 (Timer) und L09 (Frequenz, DFA) erklären Code, der schon steht
 
 ## Was in M1 und M2 steht
 
@@ -107,9 +107,26 @@ einem sichtbaren Fortschritt in der App.
 - Notizen (`ereignisse` mit Anker wie praxis_gui): Klappfeld unter der Hauptkurve,
   Zeitpunkt beim Öffnen eingefroren, „Jetzt", in die Kurve tippen, ±1/±5 s;
   live in die Aufnahme, nachträglich als Metadaten in die Messdatei
-- Noch nicht: Desktop-BLE (bleak), Frequenzbereich (Spektrum) und DFA α1 (L09,
-  dann als eigene Reiter der Aufzeichnung), Mehrgerätebetrieb, Foreground
-  Service, Datenbank-Eintrag `device`
+- Noch nicht: Desktop-BLE (bleak), Mehrgerätebetrieb, Datenbank-Eintrag `device`
+
+## Was am 13./14.10.2026 dazukam (Planung: `docs/plan_hrv_timer.md`)
+
+- `hrv_core/frequency.py` vollständig: Lomb-Scargle, Welch, Periodogramm in
+  numpy, Teilspektren, Bandpolitik; `nonlinear.py`: DFA α1 und SampEn —
+  Golden-Tests gegen praxis_gui (scipy, neurokit2) auf wenige ppm
+- Messung neu geordnet: Reiter „Live | Aufzeichnungen", Status mit Aufnahmeknopf
+  oben, Kacheln als Raster, Hauptkurve und Analyse in Karten; unter der
+  Hauptkurve Zeit ↔ Frequenz ↔ Nichtlinear mit Spektrum und Poincaré-Wolke des
+  sichtbaren Ausschnitts; die Aufzeichnung fasst je Bereich die ganze Messung
+  zusammen (Frequenzbänder mit Sperrgrund)
+- Verlaufskurven: Ø RR, pNNx, LF, HF, LF/HF, Gipfel, SD1, SD2, DFA α1; Ø HF ab
+  3-s-Fenstern; gleitend oder in Blöcken; keine Höchstzahl mehr
+- Einstellungen → HRV-Messung: Reiter ausblendbar, Kacheln, Fenster, Bereiche,
+  Korrektur, alles zurücksetzbar
+- Timer als Werkzeug (Symbol oben in der Leiste): Profile mit benannten
+  Abschnitten und Runden, Restzeit in der Leiste, Vibration
+- Notizen zur Messung: Übungen eines Plans zum Antippen
+- Formulare und Übungsansichten: Felder untereinander statt nebeneinander
 
 ## Bewusst nicht eingeplant
 

@@ -24,6 +24,12 @@ beenden.
 
 **Danach:** Timer in der Planansicht — Übungen mit Haltezeit laufen ab, statt nur abgehakt zu werden.
 
+> **Stand 14.10.2026:** Der Timer ist vorab entstanden — als Werkzeug über
+> jeder Ansicht (`core/timer.py`, `ui/views/timer.py`). Er rechnet auf der
+> monotonen Uhr statt Ticks zu zählen; die Anzeige frischt eine Aufgabe auf
+> (`page.run_task`), die sich selbst beendet, wenn der Timer steht. Die Lektion
+> erklärt diesen Code; die Kopplung an Planübungen ist der Übungsteil.
+
 ---
 
 ## L08 — HRV I: RR-Intervalle
@@ -61,6 +67,11 @@ Teile in der Übung nach.
 - Validierung gegen `praxis_gui/tools/generate_hrv_dataset.py --corpus`
 
 **Danach:** M4 — vollständige HRV-Auswertung.
+
+> **Stand 14.10.2026:** `hrv_core/frequency.py` und `nonlinear.py` sind
+> umgesetzt und gegen praxis_gui geprüft (`tests/test_frequenz.py`,
+> `tests/test_nichtlinear.py`). Die Lektion liest diesen Code und baut Lomb und
+> Welch in der Übung nach.
 
 ---
 

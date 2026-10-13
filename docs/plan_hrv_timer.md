@@ -1,0 +1,176 @@
+# Planung: HRV-Messung, Timer, Ordnung (13./14.10.2026)
+
+Bens Auftrag vom 13.10. abends, sieben Punkte. Leitlinie: Die App ist für
+Patienten und Kunden zur Selbstüberprüfung — nicht kompliziert, sinnvolle
+Vorgaben, alles zurücksetzbar. Hier steht, was umgesetzt ist, welche
+Entscheidungen dabei ohne Ben gefallen sind und was er entscheiden sollte.
+
+Commits: `2e7a6b8` (Rechenkern), `a3b6e62` (Übungen), `75b7308` (Messung,
+Einstellungen, Timer, Notizen), `2a50795` (Feinschliff).
+
+---
+
+## 1) Einstellungen der HRV-Messung — umgesetzt
+
+**Einstellungen → HRV-Messung** (`ui/views/einstellungen_hrv.py`), gespeichert
+gerätelokal (`core/hrv_einstellungen.py`, `app_setting: hrv_einstellungen`):
+
+| Einstellung | Vorgabe |
+|---|---|
+| Reiter „Messung" anzeigen | an — ausgeblendet bleibt er, solange eine Messung läuft |
+| Kacheln über der Kurve | Herzfrequenz, RR, RMSSD, SDNN, Schwankung, Artefakte (wie bisher) |
+| Zeitfenster live | 2 min |
+| korrigierte Kurve live | an |
+| pNNx-Schwelle | 50 ms |
+| Analyse: Frequenz / Nichtlinear | an / an |
+| Nichtlinear bei optischen Sensoren | aus (nicht empfohlen) |
+| Übungen in Notizen anbieten | an |
+| Automatische Korrektur | Regeln wie bisher (`Korrekturregeln()`) |
+
+„Alles auf Standard zurücksetzen" setzt Einstellungen, Kurvenansicht und
+Korrekturregeln zurück; **unter Namen gespeicherte Ansichten bleiben** (das
+ist Arbeit des Nutzers). Die kleinen Knöpfe in der Messung (Fensterbreite,
+„korrigiert", Regler, Kurvenmenü) ändern dieselben Werte.
+
+Kacheln stehen in fester Reihenfolge (Katalog: Grundwerte, Zeit, Frequenz,
+Nichtlinear); Kacheln einer Kurve rechnen mit deren Fenster und tragen ihre
+Farbe. In der Aufzeichnung zeigen dieselben Kacheln die Werte der ganzen
+Messung.
+
+**Zu entscheiden:** Soll man die Reihenfolge der Kacheln selbst bestimmen
+können (Ziehen)? Bisher nicht — bewusst einfach.
+
+## 2) Übungen in Notizen — umgesetzt
+
+In der Notizeingabe blendet „Übungen" die Übungen eines Plans als kleine Namen
+ein (heute anstehende Pläne zuerst, zuletzt „Alle Übungen"); ein Tipp setzt den
+Namen in den Text, mehrere mit Komma. Der Zustand (offen, welcher Plan) bleibt.
+
+**Entscheidung ohne Ben:** Gespeichert wird nur Text. Ein Verweis auf die
+Übung (`uebung_id` im Ereignis) wäre für spätere Auswertungen schön, ist aber
+eine Formatänderung von `raw-v1` und braucht zuerst einen Eintrag im Vertrag
+(`docs/kompatibilitaet.md`). **Zu entscheiden:** Wollen wir das?
+
+## 3) Timer als Werkzeug — umgesetzt (einfach)
+
+Symbol oben in der Leiste (Hauptansicht und Planansicht), öffnet sich über der
+aktuellen Ansicht (`<route>/timer`, „Zurück" führt dorthin zurück). Profile aus
+benannten Abschnitten (`mm:ss`, auch `1,5` = 1,5 min) und Runden; das zuletzt
+benutzte ist aktiv; zwei Vorlagen (Intervall 30/15, Halten 3 × 1 min), die nach
+dem Löschen aller eigenen wiederkommen. Läuft er, steht die Restzeit in der
+Leiste. Abschnittswechsel vibriert (Android), das Ende doppelt.
+
+Der Ablauf rechnet auf der monotonen Uhr (`core/timer.py`), nicht mit
+gezählten Ticks: Er driftet nicht und stimmt nach dem Aufwachen sofort.
+
+**Zu entscheiden:**
+
+- **Ton.** Für Training ohne Blick aufs Handy wichtig. Braucht das Paket
+  `flet-audio` (Flutter `audioplayers`) — neue Abhängigkeit, APK-Build prüfen.
+- **Hintergrund.** Bei dunklem Display kann Android die App schlafen legen;
+  dann fehlt die Vibration (die Zeit stimmt trotzdem). Abhilfe wäre der
+  Vordergrunddienst, den die HRV-Messung schon nutzt.
+- **Kopplung mit HRV-Messung und Plan** — drei Wege, aufeinander aufbauend:
+  - A: Läuft eine Aufnahme, setzt jeder Abschnittswechsel automatisch eine
+    Notiz („Belastung", „Pause") in die Messung — ohne Formatänderung, sofort
+    möglich. Dann zeigen Kurven und Blöcke (je Abschnitt!) den Verlauf.
+  - B: Eine Planübung bekommt ein Timer-Profil (z. B. Planke „Halten 3 × 1 min");
+    „Gemacht" mit dem Timer trägt die Haltezeiten ein. Braucht eine Tabelle
+    statt `app_setting` (Sync, Praxis-Edition).
+  - C: Ein Messprofil startet Timer und Aufnahme zusammen (z. B. „5 min Ruhe,
+    3 min Atmung 6/min, 5 min Ruhe") — der Weg zu Benchmarks.
+
+  Vorschlag: A zuerst (klein, sofort nützlich), B mit L07, C mit den Benchmarks (M8).
+
+## 4) Frequenzanalyse — umgesetzt, live und nachträglich
+
+`hrv_core/frequency.py` ist kein Gerüst mehr: Lomb-Scargle, Welch und
+Periodogramm in numpy, Rechnung für Rechnung wie scipy und praxis_gui. Golden-
+Tests auf drei Dateien stimmen auf wenige ppm (`tests/test_frequenz.py`).
+Dazu DFA α1 (wie neurokit2) und SampEn (wie praxis_gui).
+
+**Einbau:** Unter der Hauptkurve schaltet man **Zeit ↔ Frequenz ↔
+Nichtlinear** um; die Hauptkurve läuft oben weiter. Frequenz zeigt das Spektrum
+des *sichtbaren Ausschnitts* (zoomen und wischen ändern es) mit getönten
+Bändern und dem stärksten Gipfel, dazu LF, HF, LF/HF und Gipfel als Zahlen und
+als Verlaufskurven. Nichtlinear zeigt die Poincaré-Wolke, SD1, SD2, DFA α1. Die
+Aufzeichnung fasst je Bereich die ganze Messung zusammen. Ein- und ausschalten:
+Einstellungen → HRV-Messung → Analyse.
+
+**Entscheidungen ohne Ben (mit Begründung):**
+
+- **Lomb ist der Standard** (wie praxis_gui): kein Resampling, verträgt
+  Lücken, trifft LF/HF am besten. Welch und Periodogramm sind gebaut und
+  getestet, aber nicht wählbar — das wäre eine Einstellung für Fachleute.
+- **Zwei Rechenwege.** Ganze Aufzeichnung wie praxis_gui (Teilspektren, Bänder
+  unter ihrer Mindestdauer gesperrt: HF 3 min, LF 5 min, VLF 20 min). Fenster
+  (Kurven, Live) als ein Lomb über alle guten Schläge mit echter Zeit — sonst
+  fiele jedes 2-min-Fenster mit einem Artefakt aus. Live wird nicht gesperrt,
+  aber auf die Mindestdauer hingewiesen (praxis_gui: „Vorläufig").
+- **Nullen trennen das Spektrum nicht** (Abweichung von praxis_gui): Eine Null
+  beim H10 ist „kein Schlag", keine Lücke. Als Naht zerlegten sie eine
+  Ruhemessung unter 60 bpm — auf der Golden-Datei wären alle Bänder gesperrt.
+- **„Gipfel" statt „Atemfrequenz".** Die Lage des stärksten Gipfels
+  (0,04–0,4 Hz, auch je Minute) ist beschreibend; praxis_gui berechnet eine
+  Atemfrequenz mit Konfidenz (`respiration.py`) — das ist mehr Arbeit und näher
+  an einer Aussage.
+- **Keine Bewertung**, keine Ampel, keine „Kohärenz" (Zweckbestimmung, solo).
+- **Optische Sensoren (Verity):** Nichtlinear standardmäßig aus, in den
+  Einstellungen freischaltbar; Frequenzwerte mit Vorbehalt. praxis_gui sperrt
+  nichts, seine Doku stuft Bänder „mit Vorsicht", DFA als „nein" ein.
+- **Lineare y-Achse** im Spektrum (praxis_gui: logarithmisch); VLF wird oben
+  abgeschnitten, damit LF und HF sichtbar bleiben.
+
+**Zu entscheiden:**
+
+- Atemfrequenz und RSA-Amplitude wie praxis_gui (mit Konfidenz)? Für
+  Atemübungen der natürliche nächste Schritt.
+- Methode (Lomb/Welch) oder logarithmische Achse in den Einstellungen anbieten?
+- LF/HF wird viel überinterpretiert (bei Atmung 6/min liegt der Gipfel im
+  LF-Band, LF/HF wird groß, obwohl der Zustand vagal ist). Der Hinweis steht
+  in der Ansicht; soll LF/HF für Laien ganz ausgeblendet sein?
+
+## 5) Zeitanalyse — umgesetzt
+
+- **Ø HF bis 3 s:** Ø HF und Ø RR haben Fenster 3, 5, 10, 15, 30, 60 s; ein
+  Schlag im Fenster genügt.
+- **Gleitend oder Blöcke** je Kurve (Kurvenmenü → Fenster & Darstellung).
+  Blöcke: ein Wert je Fenster ohne Überlappung, als Stufe gezeichnet, nur
+  vollständige Blöcke. Für alle gerechneten Kurven möglich, nicht für „HF Gerät".
+- **Warum nur vier Kurven?** Das war meine eigene Festlegung vom 13.10. für
+  kleine Bildschirme, keine fachliche. Sie ist weg: Je Bereich stehen nur
+  dessen Kurven, und gleiche Achsen teilen sich ein Diagramm.
+- **Ø RR** ist neu und hat eine eigene Achse (900 ms neben 40 ms RMSSD wäre eine
+  flache Linie).
+- **pNN50 → pNNx**, Schwelle 10–100 ms (Kurvenmenü oder Einstellungen), Titel
+  passt sich an („pNN20").
+
+## 6) Optik der Messung — umgesetzt
+
+- Reiter oben **„Live | Aufzeichnungen (n)"** statt der Liste unter allem.
+- Status mit **Aufnahmeknopf ganz oben** (bisher unter allen Kurven).
+- **Kacheln als Raster:** groß zu zweit, sonst zu dritt, gleiche Höhe, Abstand,
+  Farbstreifen der Kurve.
+- **Karten** für Hauptkurve (mit Fensterwahl, „korrigiert", Notizen) und
+  Analyse; Chips mit Farbpunkt und Abstand statt dichter Kästchen.
+
+**Zu prüfen am Handy:** Größen, Farben, ob die Kacheln zu dritt bei kleinen
+Bildschirmen passen (getestet in 412 px Breite im Browser).
+
+## 7) Ordnung in der App — teilweise
+
+- **Übungen:** Formular (Eintrag, Ziel) — jedes Feld in voller Breite, Chips
+  darunter; Übung bearbeiten — Chip-Feld unter dem Schalter; Übungsdetail — je
+  Parameter ein Block; Katalog — Einordnung und Notation in zwei Zeilen.
+- **Einstellungen** in Karten; Notizfelder in voller Breite.
+- **Offen:** „Heute" fasst Pläne doppelt zusammen (Bilanz oben, Plan darunter).
+  Welche Stellen Ben noch als gedrängt empfindet, wäre am besten mit
+  Bildschirmfotos zu klären.
+
+---
+
+## Ausprobieren
+
+- Am Rechner: `uv run flet run src/trainingsapp/ui/app.py` → Messung → „Simulator
+  wie H10" (atmet 6/min: Gipfel bei 0,1 Hz im Spektrum).
+- Bluetooth nur in der APK (`uv run python scripts/apk_bauen.py`).

@@ -110,6 +110,19 @@ dieses Gerät betreffen — das zuletzt aktive Profil, später Anzeige- und
 Geräteeinstellungen. Was auf einem anderen Gerät wertlos wäre, gehört dorthin
 und nirgends sonst.
 
+| Schlüssel | Inhalt |
+|---|---|
+| `aktives_profil` | ID des zuletzt aktiven Profils |
+| `papierkorb_auto` | „1" = Papierkorb nach 30 Tagen leeren |
+| `hrv_einstellungen` | Kacheln, Fenster, Analysebereiche der Messung (JSON, `core.hrv_einstellungen`) |
+| `hrv_ansicht`, `hrv_ansichten` | aktuelle und gespeicherte Kurvenansichten (JSON, `core.hrv_ansicht`) |
+| `hrv_korrektur` | Vorgabe der automatischen Korrektur (JSON, `hrv_core.regeln`) |
+| `timer_profile`, `timer_aktiv` | Timer-Profile (JSON, `core.timer`) und das zuletzt benutzte |
+
+Timer-Profile liegen hier, solange sie ein Werkzeug des Geräts sind. Hängen sie
+später an Planübungen (Planung: `docs/plan_hrv_timer.md`), brauchen sie eine
+eigene Tabelle mit Sync-Feldern.
+
 Dazu auf allen synchronisierten Tabellen: `origin_device_id` (Mehrgerätebetrieb),
 `revision` (serverseitig vergeben), `deleted_at` (Soft-Delete).
 

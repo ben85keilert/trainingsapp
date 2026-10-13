@@ -91,6 +91,7 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
         inhalt.append(
             ft.SegmentedButton(
                 selected=[feld] if feld else [],
+                allow_empty_selection=True,
                 segments=[ft.Segment(value=k, label=ft.Text(t)) for k, t in felder.items()],
                 on_change=feld_waehlen,
             )

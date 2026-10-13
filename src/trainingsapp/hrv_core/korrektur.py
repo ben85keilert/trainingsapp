@@ -677,6 +677,31 @@ def anwenden(rec: Recording, korrekturen: list[Korrektur]) -> Korrigiert:
     )
 
 
+def zuschneiden(korr: Korrigiert, zeiten: Sequence[float], von: float, bis: float) -> Korrigiert:
+    """Nur die Werte mit ``von ≤ zeit ≤ bis`` — für Kennzahlen eines Ausschnitts.
+
+    ``zeiten`` je korrigiertem Wert (`korr_zeiten`). Für Crop und Abschnitte
+    (`hrv_core.ausschnitte`): Die Rohdatei und die Korrektur bleiben, gerechnet
+    wird auf dem Ausschnitt. Nähte darin bleiben Nähte.
+
+    >>> k = Korrigiert([1.0, 2.0, 3.0, 4.0], [800.0, 810, 820, 830], ["orig"] * 4, [3], 0, 0)
+    >>> teil = zuschneiden(k, [1.0, 2.0, 3.0, 4.0], 2.0, 4.0)
+    >>> teil.rr_ms, teil.breaks
+    ([810, 820, 830], [2])
+    """
+    idx = [i for i, x in enumerate(zeiten) if von <= x <= bis and i < len(korr.rr_ms)]
+    neu = {alt: k for k, alt in enumerate(idx)}
+    return Korrigiert(
+        t_s=[korr.t_s[i] for i in idx],
+        rr_ms=[korr.rr_ms[i] for i in idx],
+        flag=[korr.flag[i] for i in idx],
+        breaks=sorted(neu[b] for b in korr.breaks if b in neu and neu[b] > 0),
+        entfernt=korr.entfernt,
+        interpoliert=sum(1 for i in idx if korr.flag[i] != "orig"),
+        roh_index=[korr.roh_index[i] for i in idx] if korr.roh_index else [],
+    )
+
+
 def korr_zeiten(korr: Korrigiert, achse: Sequence[float]) -> list[float]:
     """Zeit je korrigiertem Wert auf einer Zeitachse der Rohschläge — für die Kurve.
 
@@ -932,4 +957,5 @@ __all__ = [
     "von_zeilen",
     "vorauswahl",
     "vorschlaege",
+    "zuschneiden",
 ]

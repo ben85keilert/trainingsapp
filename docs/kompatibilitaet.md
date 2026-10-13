@@ -503,9 +503,38 @@ gelten dessen `corrections`, übertragen auf die Folge aller Intervalle
 (`korrektur.von_zeilen`). Ein Sidecar ohne `regeln` (praxis_gui, ältere
 Fassungen) liefert Malik-Schwelle, Grenzen und Nullen aus `corrections_meta`.
 
+### 9b. Crop und Abschnitte (seit 14.10.2026)
+
+Zuschneiden und eigene Abschnitte einer fertigen Messung schreiben wir in die
+Felder, die praxis_gui selbst dafür nutzt (`hrv_core/ausschnitte.py`):
+
+```json
+"active_crop": { "t_start_s": 65.152, "t_end_s": 358.835 },
+"segments": [
+  { "id": "seg-bd39a79e", "name": "Pause (Runde 1/3)", "t_start_s": 84.848,
+    "t_end_s": 134.848, "color": "#e67e22", "metrics": null,
+    "computed_utc": null, "active": true, "visible": true }
+]
+```
+
+- **Zeitbasis wie praxis_gui:** Sekunden auf der Herzuhr der Rohdatei; Abschnitte
+  bei aktivem Crop **relativ zu dessen Anfang**. Die App rechnet auf ihrer
+  Kurvenachse und rechnet um (`achsen_umrechnung` — beim Brustgurt gleich, bei
+  der Verity Sense über die Zeilen der Rohdatei).
+- `metrics: null` — die Werte rechnen beide Programme selbst. Den Abschnitt
+  „gesamt", den praxis_gui anlegt, lassen wir stehen.
+- Abschnitte **zwischen Notizen** bildet die App bei jedem Öffnen aus den Notizen
+  (sie wandern mit, wenn man eine Notiz verschiebt) — sie werden nicht gespeichert.
+- Gibt es noch kein Sidecar, entsteht ein knappes (`schema`, `source_file`,
+  `source_file_sha1`, die beiden Felder, `updated_utc`).
+- Achtung, umgekehrt: praxis_gui schreibt das Sidecar beim Speichern aus seiner
+  Sitzung neu und behält nur ihm bekannte Felder — `active_crop` und `segments`
+  gehören dazu, unsere Erweiterungen aus 9a (`corrections_ppi`,
+  `corrections_meta.regeln`) **nicht**.
+
 **Bestehende Sidecars werden fortgeschrieben, nicht ersetzt:** alle Felder, die
-wir nicht kennen (`segments`, `metric_params`, `derived_metrics`,
-`frequency_summary`, `active_crop` …), bleiben erhalten. Abgeleitete Werte von
+wir nicht kennen (`metric_params`, `derived_metrics`, `frequency_summary` …),
+bleiben erhalten. Abgeleitete Werte von
 praxis_gui können danach zu alten Korrekturen gehören — praxis_gui hält es beim
 eigenen Speichern genauso.
 

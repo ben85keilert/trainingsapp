@@ -794,3 +794,37 @@ def test_detailansicht_alle_bereiche_und_kacheln(daten) -> None:
     state.ansicht_setzen(a)
     texte = _baum_texte(messung_detail_view(_seite(), state, eintrag))
     assert "gesperrt" in texte and any("VLF: kein Teilstück ≥ 20 min" in t for t in texte)
+
+
+def test_aufzeichnung_zuschneiden_und_abschnitte(daten) -> None:
+    """Crop aus dem Sidecar: Kopf nennt ihn, Abschnitte entstehen aus den Notizen."""
+    import shutil
+    from pathlib import Path
+
+    from trainingsapp.hrv_core.ausschnitte import zusatz_speichern
+    from trainingsapp.hrv_core.ereignisse import anker_aus_herz, metadaten_schreiben, notiz
+    from trainingsapp.hrv_core.recording import laden
+
+    state, tmp_path = daten
+    ordner = tmp_path / "Messungen" / "PolarH10"
+    ordner.mkdir(parents=True)
+    golden = Path(__file__).parent / "golden" / "rr" / "sensor_2026-05-23_125422.json"
+    pfad = ordner / golden.name
+    shutil.copy(golden, pfad)
+    rec = laden(pfad)
+    notizen = [
+        notiz(text, anker_aus_herz(rec.beats, t), rec.start_utc)
+        for t, text in ((60, "Belastung"), (150, "Pause"))
+    ]
+    metadaten_schreiben(pfad, ereignisse=notizen)
+    zusatz_speichern(pfad, (30.0, 300.0), [], float)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    texte = _baum_texte(messung_detail_view(_seite(), state, eintrag))
+    assert any("zugeschnitten 0:30–5:00" in t for t in texte)
+    assert "Belastung" in texte and "Pause" in texte and "Anfang" in texte
+    assert "Zwischen Notizen" in texte

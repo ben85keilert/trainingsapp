@@ -336,11 +336,11 @@ class Notizfeld:
             x = zb.x(e)
             if x is not None and x_von <= x <= x_bis and i != self.bearbeite:
                 notizen.append(x)
-        reihen = [_senkrecht(notizen, FARBE_NOTIZ, 1.5, gestrichelt=False)]
+        reihen = [senkrechte(notizen, FARBE_NOTIZ, 1.5, gestrichelt=False)]
         if self.bearbeite is not None:
             x = self._x_der_eingabe()
             if x_von <= x <= x_bis:
-                reihen.append(_senkrecht([x], FARBE_NEU, 2.0, gestrichelt=True))
+                reihen.append(senkrechte([x], FARBE_NEU, 2.0, gestrichelt=True))
         return [r for r in reihen if r.punkte]
 
     # -- Aufbau ------------------------------------------------------------------
@@ -587,7 +587,8 @@ def _schritt(delta: int, verschieben: Callable[[float], None]) -> ft.Control:
     )
 
 
-def _senkrecht(xs: list[float], farbe: str, breite: float, *, gestrichelt: bool) -> Reihe:
+def senkrechte(xs: list[float], farbe: str, breite: float, *, gestrichelt: bool) -> Reihe:
+    """Senkrechte Linien über die ganze Höhe der Kurve — Notizen, Crop, Abschnitte."""
     punkte: list[tuple[float, float]] = []
     naehte: list[int] = []
     for x in sorted(xs):
@@ -612,6 +613,7 @@ __all__ = [
     "Notizfeld",
     "UebungsQuelle",
     "einfuegen",
+    "senkrechte",
     "uebungs_katalog",
     "uebungsquellen",
 ]

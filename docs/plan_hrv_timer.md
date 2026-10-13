@@ -196,11 +196,37 @@ Bildschirmen passen (getestet in 412 px Breite im Browser).
   Base32) im Feld `uebungen` der Notiz, aus den Namen im Text ermittelt
   (Vertrag Abschnitt 4). Im Text steht weiter nur der Name.
 
-**Als Nächstes (Bens Liste vom 14.10.):** Profile verwalten, bekannte
-Bluetooth-Geräte, Zeit/Frequenz-Einstellung, Timer-Knopf mit Text, Plan-
-Bearbeitung scrollbar, Parameter-Auswahl der Planübung, Zeitfelder und
-Einheiten, Übersicht der Leistungen, freie Skalen, Crop, Segmente, ULF/VLF bei
-langen Messungen.
+## Nachtrag 14.10., zweiter Teil: Bens Liste, umgesetzt
+
+1. **Profile:** Auswahl vorn in den Einstellungen; anlegen, umbenennen, löschen
+   (Rückfrage, das letzte bleibt) unter „Profile verwalten". PIN-Hinweis nur in
+   der Praxis-Edition.
+2. **Bluetooth:** „Brustgurt" nur, wenn es sicher ist (Name/Profil);
+   Standardprofil heißt „Herzfrequenz-Sensor"; optische Armbänder eigenes
+   Profil (PPG). Zuletzt verbundene Geräte: ein Tipp verbindet direkt.
+3. **„Fenster & Darstellung"** blieb unsichtbar (nur der Bildschirm wurde dunkel)
+   — jetzt ein Blatt von unten.
+4. **Timer-Knopf** mit Beschriftung.
+5. **Plan bearbeiten:** alles scrollt, nur die Leiste steht.
+6./7. **Parameter statt Eingabestufe:** je Parameter ein Knopf, darunter seine
+   Chips; keiner = nur abhaken, kein Chip = freies Feld (das es beim Üben immer
+   gibt). Zurücksetzen wird bei Abweichung sofort aktiv. *Antwort auf die Frage
+   nach „nur abhaken / Chips / frei":* Die drei Knöpfe waren redundant — „nur
+   abhaken" heißt jetzt „kein Parameter", für lange Abhak-Pläne schaltet man
+   die Parameter je Übung aus (oder im Übungsstandard „In Plänen nur abhaken").
+8. **Zeiten:** „1:00s" wurde als 0 gelesen (daher „+60 → 0") — behoben; kein
+   doppeltes „s" mehr.
+9. **Leistungen beschriftet:** je Parameter eine Zeile („Skala 6 · 0 bis 10"),
+   im Eintrag als Kacheln.
+10. **Skala frei:** „0 - 10", „-5 - 5", „0.0 - 10.0".
+11. **Crop:** Schere in der Aufzeichnung; Bereich wählen, alle Kennzahlen nur
+   daraus; Rohdatei bleibt; praxis_gui-Feld `active_crop`.
+12. **Abschnitte:** automatisch zwischen Notizen (Timer!), eigene über
+   „Sichtbaren markieren" (rasten an Notizen ein); Werte je Abschnitt (Ø HF,
+   RMSSD, SDNN, Atem, LF/HF); praxis_gui-Feld `segments`.
+13. **ULF/VLF bei langen Messungen** — dabei einen Fehler gefunden: Ab ~67 min
+   lagen LF/HF um ein Vielfaches zu hoch (Rasterdeckel; **praxis_gui hat ihn
+   auch**). Jetzt Spektrum in drei Teilen, bis 24 h geprüft, 24 h in 2,4 s.
 
 ---
 

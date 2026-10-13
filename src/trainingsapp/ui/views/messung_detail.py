@@ -31,6 +31,16 @@ import numpy as np
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.hrv_core.atmung import ATEMUEBUNG, RUHE, atemfrequenz, kurzgrund
+from trainingsapp.hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
+from trainingsapp.hrv_core.ausschnitte import (
+    Abschnitt,
+    abschnitt_werte,
+    achsen_umrechnung,
+    aus_notizen,
+    einrasten,
+    zusatz_lesen,
+    zusatz_speichern,
+)
 from trainingsapp.hrv_core.constants import BAND_OK
 from trainingsapp.hrv_core.ereignisse import Zeitbezug, metadaten_schreiben
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
@@ -48,6 +58,7 @@ from trainingsapp.hrv_core.korrektur import (
     rohfolge,
     vorauswahl,
     vorschlaege,
+    zuschneiden,
 )
 from trainingsapp.hrv_core.nonlinear import compute_dfa_alpha1, compute_poincare, compute_sampen
 from trainingsapp.hrv_core.ppi import ppi_verworfen, schlagzeiten
@@ -63,7 +74,12 @@ from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.notizen import Notizfeld, uebungs_katalog, uebungsquellen
+from trainingsapp.ui.components.notizen import (
+    Notizfeld,
+    senkrechte,
+    uebungs_katalog,
+    uebungsquellen,
+)
 from trainingsapp.ui.components.verlauf import FARBEN
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
@@ -140,6 +156,11 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 title=ft.Text(f"Messung {eintrag.started_at.astimezone():%d.%m. %H:%M}"),
                 actions=[
                     ft.IconButton(
+                        ft.Icons.CONTENT_CUT,
+                        tooltip="Zuschneiden",
+                        on_click=lambda: crop_oeffnen(),
+                    ),
+                    ft.IconButton(
                         ft.Icons.SHARE, tooltip="Exportieren (ZIP)", on_click=exportieren
                     ),
                     ft.IconButton(
@@ -215,6 +236,10 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     fenster = Fenster(dauer or 1.0, None)
     # Notizen hängen an den Zeilen der Rohdatei; die Kurve hat ihre eigene Zeitachse
     zeilen_achse = schlagzeiten(rec)
+    # Crop und eigene Abschnitte stehen im Sidecar auf der Herzuhr der Rohdatei
+    nach_datei, nach_achse = achsen_umrechnung(zeilen_achse, [b.t_s for b in rec.beats])
+    z.ausschnitt, eigene = zusatz_lesen(pfad, nach_achse)
+    zeitbezug = Zeitbezug(lambda: rec.beats, rec.start_utc, achse=lambda: zeilen_achse)
 
     kopf_text = ft.Text(size=13, opacity=0.8)
     hinweis_text = ft.Text(size=12, color=ROT)
@@ -223,6 +248,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     ketten_box = ft.Column(spacing=0)
     breite_wahl = ft.SegmentedButton(
         selected=["0"],
+        # Ein Abschnitt kann jede Breite haben — dann ist keine Taste gewählt
+        allow_empty_selection=True,
         show_selected_icon=False,
         segments=[ft.Segment(value=str(s), label=ft.Text(t)) for s, t in BREITEN],
     )
@@ -232,18 +259,18 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     def zeitbereich(korrigiert: bool) -> dict[str, Any] | None:
         """Ø HF, Ø RR, RMSSD, SDNN, pNNx — roh oder korrigiert, Nähte übersprungen."""
-        korr = z.korrigiert() if korrigiert else z.roh_korr()
+        korr = z.analyse_korr(roh=not korrigiert)
         return compute_time_domain(
             korr.rr_ms, pnn_threshold_ms=state.ansicht().pnn_ms, breaks=korr.breaks
         )
 
     def frequenz() -> dict[str, Any] | None:
-        korr = z.korrigiert()
+        korr = z.analyse_korr()
         return z.merken("frequenz", lambda: frequenzbereich(korr.rr_ms, korr.t_s, korr.breaks))
 
     def nichtlinear() -> dict[str, Any]:
         def rechnen() -> dict[str, Any]:
-            korr = z.korrigiert()
+            korr = z.analyse_korr()
             valide = filter_rr(korr.rr_ms)
             poincare = compute_poincare(korr.rr_ms, korr.breaks) or {}
             dfa = (
@@ -374,6 +401,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         ]
         if z.basis.aufgenommen:
             teile.append(f"{z.basis.aufgenommen} davon selbst geprüft")
+        if z.ausschnitt is not None:
+            lo, hi = z.ausschnitt
+            teile.append(f"zugeschnitten {_uhr(lo)}–{_uhr(hi)}")
         kopf_text.value = "  ·  ".join(t for t in teile if t)
         # Mehr als die Hälfte verworfen: Folgt man dem Sensor, bleiben Bruchstücke.
         viel = bool(verworfen and verworfen[1] and verworfen[0] * 2 > verworfen[1])
@@ -390,7 +420,15 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     def analyse_reihe() -> tuple[Any, Any, Any]:
         korr = z.korrigiert()
-        return z.merken("reihe", lambda: reihe(korr_zeiten(korr, z.achse), korr.rr_ms, korr.breaks))
+
+        def rechnen() -> tuple[Any, Any, Any]:
+            t, rr, naht = reihe(korr_zeiten(korr, z.achse), korr.rr_ms, korr.breaks)
+            if z.ausschnitt is not None:  # Crop: Kurven nur im Ausschnitt
+                im = (t >= z.ausschnitt[0]) & (t <= z.ausschnitt[1])
+                t, rr, naht = t[im], rr[im], naht[im]
+            return t, rr, naht
+
+        return z.merken("reihe", rechnen)
 
     def hf_geraet() -> list[tuple[float, float]]:
         beats = z.basis.rec.beats
@@ -425,6 +463,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 Reihe(korr_linie, farbe=ft.Colors.PRIMARY, naehte=korr_naehte),
                 Reihe(art, farbe=ROT, nur_punkte=True, skala=False),
                 *notizfeld.marken(x_von, x_bis),
+                *grenz_linien(x_von, x_bis),
             ],
             einheit="PPI ms" if verity else "RR ms",
             hoehe=220,
@@ -434,8 +473,265 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         )
         analyse.zeichnen(x_von, x_bis)
 
+    def grenz_linien(x_von: float, x_bis: float) -> list[Reihe]:
+        """Crop gestrichelt grau, eigene Abschnitte in ihrer Farbe."""
+        linien = []
+        if z.ausschnitt is not None:
+            xs = [x for x in z.ausschnitt if x_von <= x <= x_bis]
+            if xs:
+                linien.append(senkrechte(xs, ft.Colors.OUTLINE, 2.0, gestrichelt=True))
+        for a in eigene:
+            xs = [x for x in (a.von_s, a.bis_s) if x_von <= x <= x_bis]
+            if xs:
+                linien.append(senkrechte(xs, a.farbe, 1.5, gestrichelt=True))
+        return linien
+
+    # -- Abschnitte (Werte je Teil der Messung) ---------------------------------
+
+    abschnitte_box = ft.Column(spacing=2)
+
+    def notiz_punkte() -> list[tuple[float, str]]:
+        punkte = []
+        for e in rec.ereignisse:
+            x = zeitbezug.x(e)
+            if x is not None:
+                punkte.append((x, str(e.get("text") or "Notiz")))
+        return sorted(punkte)
+
+    def grenzen() -> tuple[float, float]:
+        return z.ausschnitt if z.ausschnitt is not None else (0.0, dauer)
+
+    def werte_von(a: Abschnitt) -> dict[str, Any]:
+        lo, hi = grenzen()
+        von, bis = max(a.von_s, lo), min(a.bis_s, hi)
+        korr = z.korrigiert()
+        return z.merken(
+            f"abschnitt:{a.id}:{von:.3f}:{bis:.3f}",
+            lambda: abschnitt_werte(
+                korr,
+                korr_zeiten(korr, z.achse),
+                von,
+                bis,
+                pnn_ms=state.ansicht().pnn_ms,
+                frequenz=einst.frequenz,
+                atem_modus=ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE,
+            ),
+        )
+
+    def abschnitt_zeile(a: Abschnitt) -> ft.Control:
+        w = werte_von(a)
+        teile = [f"Ø HF {zahl(w['mean_bpm'])}", f"RMSSD {zahl(w['rmssd'])}"]
+        teile.append(f"SDNN {zahl(w['sdnn'])}")
+        if w["atem"] is not None:
+            teile.append(f"Atem {zahl(w['atem'], 1)}/min")
+        if w["lf_hf"] is not None:
+            teile.append(f"LF/HF {zahl(w['lf_hf'], 2)}")
+        rechts: list[ft.Control] = [
+            ft.IconButton(ft.Icons.ZOOM_IN, tooltip="In der Kurve zeigen", on_click=zeiger(a))
+        ]
+        if not a.automatisch:
+            rechts.append(
+                ft.IconButton(ft.Icons.CLOSE, tooltip="Abschnitt löschen", on_click=loescher(a))
+            )
+        return ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Container(width=4, height=36, border_radius=2, bgcolor=a.farbe),
+                ft.Column(
+                    spacing=0,
+                    tight=True,
+                    expand=True,
+                    controls=[
+                        ft.Text(a.name, size=13, weight=ft.FontWeight.W_600, max_lines=1),
+                        ft.Text(
+                            f"{_uhr(a.von_s)}–{_uhr(a.bis_s)} ({_uhr(a.dauer_s)})  ·  "
+                            + "  ·  ".join(teile),
+                            size=12,
+                            opacity=0.75,
+                        ),
+                    ],
+                ),
+                *rechts,
+            ],
+        )
+
+    def abschnitte_zeichnen() -> None:
+        lo, hi = grenzen()
+        auto = aus_notizen(notiz_punkte(), lo, hi)
+        zeilen: list[ft.Control] = []
+        if eigene:
+            zeilen.append(ft.Text("Eigene", size=12, opacity=0.7))
+            zeilen += [abschnitt_zeile(a) for a in eigene]
+        if auto:
+            zeilen.append(ft.Text("Zwischen Notizen", size=12, opacity=0.7))
+            zeilen += [abschnitt_zeile(a) for a in auto]
+        if not zeilen:
+            zeilen.append(
+                hinweis(
+                    "Noch keine Abschnitte: Notizen teilen die Messung von selbst (der Timer "
+                    "setzt sie je Abschnitt), oder markiere den sichtbaren Bereich."
+                )
+            )
+        abschnitte_box.controls = zeilen
+
+    def zeiger(a: Abschnitt) -> Callable[[], None]:
+        def handler() -> None:
+            breite_setzen(max(a.dauer_s, 10.0), (a.von_s + a.bis_s) / 2)
+
+        return handler
+
+    def zusatz_sichern() -> None:
+        try:
+            zusatz_speichern(pfad, z.ausschnitt, eigene, nach_datei)
+        except OSError as fehler:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
+
+    def loescher(a: Abschnitt) -> Callable[[], None]:
+        def handler() -> None:
+            eigene[:] = [b for b in eigene if b.id != a.id]
+            zusatz_sichern()
+            zeichnen()
+
+        return handler
+
+    def abschnitt_markieren() -> None:
+        """Sichtbaren Bereich als Abschnitt — Grenzen rasten an nahen Notizen ein."""
+        x_von, x_bis = fenster.bereich(dauer)
+        lo, hi = grenzen()
+        punkte = notiz_punkte()
+        toleranz = max(2.0, 0.05 * (x_bis - x_von))
+        von = max(einrasten(x_von, [x for x, _ in punkte], toleranz), lo)
+        bis = min(einrasten(x_bis, [x for x, _ in punkte], toleranz), hi)
+        if bis - von < 5:
+            page.show_dialog(ft.SnackBar(ft.Text("Der sichtbare Bereich ist zu kurz.")))
+            return
+        vorschlag = next((t for x, t in punkte if abs(x - von) < 1e-6), "")
+        name = ft.TextField(
+            label="Name", value=vorschlag or f"Abschnitt {len(eigene) + 1}", autofocus=True
+        )
+
+        def anlegen() -> None:
+            eigene.append(
+                Abschnitt(
+                    (name.value or "").strip() or f"Abschnitt {len(eigene) + 1}",
+                    von,
+                    bis,
+                    farbe=ABSCHNITT_FARBEN[len(eigene) % len(ABSCHNITT_FARBEN)],
+                )
+            )
+            zusatz_sichern()
+            page.pop_dialog()
+            zeichnen()
+
+        name.on_submit = lambda _: anlegen()
+        page.show_dialog(
+            ft.AlertDialog(
+                title=ft.Text("Abschnitt markieren"),
+                content=ft.Column(
+                    tight=True,
+                    controls=[
+                        ft.Text(f"{_uhr(von)} bis {_uhr(bis)} ({_uhr(bis - von)})", size=13),
+                        name,
+                    ],
+                ),
+                actions=[
+                    ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                    ft.FilledButton("Anlegen", on_click=anlegen),
+                ],
+            )
+        )
+
+    # -- Crop ------------------------------------------------------------------
+
+    def crop_oeffnen() -> None:
+        """Zuschneiden: nur dieser Bereich zählt — die Rohdatei bleibt, wie sie ist."""
+        lo, hi = z.ausschnitt or (0.0, dauer)
+        regler = ft.RangeSlider(
+            min=0.0,
+            max=max(dauer, 1.0),
+            start_value=lo,
+            end_value=hi,
+            divisions=max(1, min(2000, int(dauer))),
+        )
+        text = ft.Text(size=14, weight=ft.FontWeight.W_600)
+
+        def beschriften() -> None:
+            a, b = float(regler.start_value), float(regler.end_value)
+            text.value = f"{_uhr(a)} bis {_uhr(b)}  ·  {_uhr(b - a)}"
+
+        def geaendert() -> None:
+            beschriften()
+            text.update()
+
+        def sichtbar() -> None:
+            a, b = fenster.bereich(dauer)
+            regler.start_value, regler.end_value = max(a, 0.0), min(b, dauer)
+            beschriften()
+            page.update()
+
+        def setzen(neu: tuple[float, float] | None) -> None:
+            z.ausschnitt = neu
+            zusatz_sichern()
+            page.pop_dialog()
+            page.show_dialog(
+                ft.SnackBar(
+                    ft.Text(
+                        "Zugeschnitten — Kennzahlen nur aus diesem Bereich, die Rohdatei bleibt."
+                        if neu
+                        else "Wieder die ganze Messung."
+                    )
+                )
+            )
+            zeichnen()
+
+        def uebernehmen() -> None:
+            a, b = float(regler.start_value), float(regler.end_value)
+            ganz = a <= 0.5 and b >= dauer - 0.5
+            setzen(None if ganz or b - a < 10 else (a, b))
+
+        regler.on_change = geaendert
+        beschriften()
+        page.show_dialog(
+            ft.BottomSheet(
+                show_drag_handle=True,
+                content=ft.Container(
+                    padding=ft.Padding.only(left=16, right=16, bottom=16),
+                    content=ft.Column(
+                        tight=True,
+                        spacing=10,
+                        controls=[
+                            ft.Text("Zuschneiden", size=18, weight=ft.FontWeight.W_600),
+                            ft.Text(
+                                "Nur der gewählte Bereich zählt für alle Kennzahlen, Kurven "
+                                "und Abschnitte — etwa ohne die erste Minute, bis der Gurt "
+                                "saß. Die Rohdatei bleibt unverändert; praxis_gui zeigt den "
+                                "Zuschnitt ebenso.",
+                                size=12,
+                                opacity=0.7,
+                            ),
+                            text,
+                            regler,
+                            ft.Row(
+                                wrap=True,
+                                alignment=ft.MainAxisAlignment.END,
+                                controls=[
+                                    ft.TextButton("Sichtbarer Bereich", on_click=sichtbar),
+                                    ft.TextButton("Ganze Messung", on_click=lambda: setzen(None)),
+                                    ft.FilledButton(
+                                        "Übernehmen", icon=ft.Icons.CHECK, on_click=uebernehmen
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+                ),
+            )
+        )
+
     def zeichnen(aktualisieren: bool = True) -> None:
         kopf()
+        abschnitte_zeichnen()
         kacheln_box.content = anzeige(kachel_werte(), einst.darstellung)
         analyse.aufbauen()
         kurven()
@@ -486,7 +782,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         state.notiz_uebungen_offen, state.notiz_uebungen_quelle = offen, quelle
 
     notizfeld = Notizfeld(
-        zeitbezug=lambda: Zeitbezug(lambda: rec.beats, rec.start_utc, achse=lambda: zeilen_achse),
+        zeitbezug=lambda: zeitbezug,
         ereignisse=lambda: list(rec.ereignisse),
         speichern=notizen_speichern,
         neu_zeichnen=nur_kurven,
@@ -639,6 +935,22 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                     )
                     if verworfen
                     else "Grau: Rohwerte · Farbig: korrigiert · Rot: auffällige Schläge"
+                ),
+            ),
+            karte(
+                kartentitel(
+                    "Abschnitte",
+                    ft.TextButton(
+                        "Sichtbaren markieren",
+                        icon=ft.Icons.ADD,
+                        on_click=abschnitt_markieren,
+                    ),
+                ),
+                abschnitte_box,
+                hinweis(
+                    "Werte je Abschnitt — so lassen sich Belastung und Pause oder Übungen "
+                    "vergleichen. Zwischen Notizen entstehen sie von selbst und wandern mit, "
+                    "wenn man eine Notiz verschiebt; eigene rasten an nahen Notizen ein."
                 ),
             ),
             analyse.control,
@@ -845,11 +1157,13 @@ class _Zustand:
         self.rec = rec
         self.gespeichert: list[Korrektur] = []
         self.uebernommen: set[int] = set()
+        #: Crop auf der Kurvenachse — ``None`` = die ganze Messung zählt
+        self.ausschnitt: tuple[float, float] | None = None
         self._basis_bauen(regeln)
 
     def _basis_bauen(self, regeln: Korrekturregeln) -> None:
         self._korr: tuple[frozenset[int], Korrigiert] | None = None
-        self._gemerkt: dict[str, tuple[frozenset[int], Any]] = {}
+        self._gemerkt: dict[str, tuple[Any, Any]] = {}
         self.regeln = regeln
         self.basis = analysebasis(self.rec, regeln)
         self.ketten: list[Kette] = vorschlaege(self.basis.rec, regeln)
@@ -891,9 +1205,16 @@ class _Zustand:
         """Die Reihe ohne jede Korrektur (nur die Nähte der Messung)."""
         return self._roh
 
+    def analyse_korr(self, roh: bool = False) -> Korrigiert:
+        """Die Reihe für Kennzahlen — bei Crop nur dessen Ausschnitt (`zuschneiden`)."""
+        korr = self.roh_korr() if roh else self.korrigiert()
+        if self.ausschnitt is None:
+            return korr
+        return zuschneiden(korr, korr_zeiten(korr, self.achse), *self.ausschnitt)
+
     def merken(self, name: str, rechnen: Callable[[], Any]) -> Any:
-        """Ergebnis zur aktuellen Auswahl — Spektrum und DFA nur bei Änderungen neu."""
-        schluessel = frozenset(self.uebernommen)
+        """Ergebnis zu Auswahl und Crop — Spektrum und DFA nur bei Änderungen neu."""
+        schluessel = (frozenset(self.uebernommen), self.ausschnitt)
         alt = self._gemerkt.get(name)
         if alt is None or alt[0] != schluessel:
             self._gemerkt[name] = (schluessel, rechnen())

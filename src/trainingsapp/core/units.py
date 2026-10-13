@@ -22,7 +22,9 @@ _GEWICHT = re.compile(r"[@]\s*(\d+(?:[.,]\d+)?)\s*(kg|g|lb)?", re.IGNORECASE)
 # 45°  ·  45 grad
 _WINKEL = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:°|grad\b)", re.IGNORECASE)
 # 1:30  ·  90s  ·  2min
-_DAUER_MMSS = re.compile(r"\b(\d+):([0-5]\d)\b")
+# Rechts keine Wortgrenze: „1:00s" (so stand es bis Oktober 2026 in der
+# Anzeige) ist 1 min — mit \b dahinter las der Parser „00s" und lieferte 0.
+_DAUER_MMSS = re.compile(r"(?<!\d)(\d+):([0-5]\d)(?!\d)")
 _DAUER_EINHEIT = re.compile(r"(\d+(?:[.,]\d+)?)\s*(s|sek|sec|min|m)\b", re.IGNORECASE)
 
 
@@ -37,10 +39,12 @@ def parse_dauer(text: str) -> float | None:
     120.0
     >>> parse_dauer("45")
     45.0
+    >>> parse_dauer("1:00s"), parse_dauer("+60")  # Einheit hinter mm:ss, Plus davor
+    (60.0, 60.0)
     >>> parse_dauer("keine Ahnung") is None
     True
     """
-    text = text.strip()
+    text = text.strip().lstrip("+").strip()
     if not text:
         return None
 
@@ -79,6 +83,8 @@ def parse_sets(text: str, zeit: bool = False) -> list[float] | None:
     [90.0, 45.0]
     >>> parse_sets("0") is None and parse_sets("") is None and parse_sets("abc") is None
     True
+    >>> parse_sets("+60", zeit=True), parse_sets("3x1:00s", zeit=True)  # was angezeigt wurde
+    ([60.0], [60.0, 60.0, 60.0])
     """
     text = text.strip().lstrip("+").strip()
     if not text:
@@ -109,7 +115,11 @@ def _zahl(text: str) -> float | None:
 
 
 def format_sets(werte: list[float] | None, zeit: bool = False) -> str:
-    """Eine Satzliste kompakt: ``3x15``, ``30``, ``15/15/20``; Zeiten mit Einheit.
+    """Eine Satzliste kompakt: ``3x15``, ``30``, ``15/15/20``.
+
+    Zeiten: alle unter einer Minute als Sekunden mit einem „s" am Ende
+    („3x30s", „30/30/45s"), sonst alle als m:ss („1:00", „1:30/0:45") — nie
+    „1:00s" (das las der Parser früher als 0 s).
 
     >>> format_sets([15, 15, 15])
     '3x15'
@@ -117,22 +127,24 @@ def format_sets(werte: list[float] | None, zeit: bool = False) -> str:
     '30'
     >>> format_sets([15, 15, 20])
     '15/15/20'
-    >>> format_sets([30, 30, 30], zeit=True)
-    '3x30s'
-    >>> format_sets([90, 45], zeit=True)
-    '1:30/45s'
+    >>> format_sets([30, 30, 30], zeit=True), format_sets([30, 30, 45], zeit=True)
+    ('3x30s', '30/30/45s')
+    >>> [format_sets(w, zeit=True) for w in ([90, 45], [60], [60, 60])]
+    ['1:30/0:45', '1:00', '2x1:00']
     >>> format_sets([])
     ''
     """
     if not werte:
         return ""
+    minuten = zeit and any(round(w) >= 60 for w in werte)
 
     def einzel(w: float) -> str:
-        if zeit:
-            return format_dauer(w).rstrip("s")
+        if minuten:
+            sek = round(w)
+            return f"{sek // 60}:{sek % 60:02d}"
         return str(int(w)) if float(w).is_integer() else f"{w:g}"
 
-    einheit = "s" if zeit else ""
+    einheit = "s" if zeit and not minuten else ""
     if len(werte) > 1 and all(w == werte[0] for w in werte):
         return f"{len(werte)}x{einzel(werte[0])}{einheit}"
     return "/".join(einzel(w) for w in werte) + einheit

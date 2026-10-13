@@ -57,6 +57,46 @@ def test_ansichten_lassen_sich_bauen(page, state) -> None:
     assert uebung_bearbeiten(page, state, None).route == "/uebung/neu"
 
 
+def test_profile_verwalten_mit_rueckfrage(page, state) -> None:
+    """Umbenennen, anlegen, löschen nach Rückfrage — das letzte Profil bleibt."""
+    from trainingsapp.ui.views.profile import profile_view
+
+    dialoge: list = []
+    page.show_dialog = dialoge.append
+    page.pop_dialog = lambda: None
+    ansicht = profile_view(page, state)
+    assert ansicht.route == "/einstellungen/profile"
+
+    def controls(c):
+        yield c
+        for name in ("content", "controls"):
+            kind = getattr(c, name, None)
+            for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
+                yield from controls(k)
+
+    def alle():
+        return [c for v in ansicht.controls for c in controls(v)]
+
+    neu = next(c for c in alle() if isinstance(c, ft.TextField) and c.label == "Neues Profil")
+    neu.value = "Anna"
+    next(c for c in alle() if isinstance(c, ft.FilledTonalButton)).on_click()
+    assert state.profil.name == "Anna"
+    loeschen = [
+        c for c in alle() if isinstance(c, ft.IconButton) and c.icon == ft.Icons.DELETE_OUTLINE
+    ]
+    assert len(loeschen) == 2 and not any(k.disabled for k in loeschen)
+    loeschen[1].on_click()  # „Anna" — erst die Rückfrage
+    frage = dialoge[-1]
+    assert isinstance(frage, ft.AlertDialog) and "Anna" in frage.title.value
+    assert state.profil.name == "Anna"
+    frage.actions[1].on_click()  # „Löschen"
+    assert [p.name for p in state.profile.alle()] == [state.profil.name] != ["Anna"]
+    letzter = [
+        c for c in alle() if isinstance(c, ft.IconButton) and c.icon == ft.Icons.DELETE_OUTLINE
+    ]
+    assert len(letzter) == 1 and letzter[0].disabled
+
+
 def test_hauptansicht(page, state) -> None:
     from trainingsapp.ui.app import hauptansicht
 

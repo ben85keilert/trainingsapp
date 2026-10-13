@@ -515,6 +515,19 @@ class SubjectRepo:
             )
         ]
 
+    def loeschen(self, profil_id: str) -> None:
+        """Ausblenden (``deleted_at``) — Einträge und Messungen zeigen weiter darauf.
+
+        Wie überall in der App wird nichts hart gelöscht: Sitzungen und
+        Messungen sind unveränderlich und verweisen auf das Profil (Sync).
+        """
+        stempel = jetzt().isoformat()
+        self.con.execute(
+            "UPDATE subject SET deleted_at = ?, updated_at = ?, revision = revision + 1 "
+            "WHERE id = ? AND deleted_at IS NULL",
+            (stempel, stempel, profil_id),
+        )
+
     @staticmethod
     def _zeile(r: sqlite3.Row) -> Subject:
         return Subject(id=r["id"], name=r["name"], birth_year=r["birth_year"], note=r["note"])
@@ -543,6 +556,8 @@ class SettingRepo:
     TIMER_PROFILE = "timer_profile"
     TIMER_AKTIV = "timer_aktiv"
     TIMER_SIGNALE = "timer_signale"
+    #: Bluetooth: Geräte, mit denen die App schon verbunden war (JSON, `devices.bekannte`)
+    BEKANNTE_GERAETE = "bekannte_geraete"
 
     def __init__(self, con: sqlite3.Connection) -> None:
         self.con = con

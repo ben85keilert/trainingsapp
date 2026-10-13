@@ -26,6 +26,11 @@ Im Verlauf gibt es je Satzfeld zwei Kennzahlen: **Summe** (Standard) und
 `30` sind Sekunden, `1:30` sind 90 Sekunden, `2min` geht auch. Je Satz
 dieselbe Schreibweise: `3x30`, `45/60/30`, `1:30/45s`.
 
+Angezeigt wird kompakt: alle Sätze unter einer Minute in Sekunden mit einem
+„s" am Ende (`3x30s`, `30/30/45s`), sonst alle als m:ss (`1:00`, `1:30/0:45`).
+Ein „s" hinter m:ss (`1:00s`) liest die App ebenfalls richtig als eine Minute —
+bis Oktober 2026 wurde daraus 0 (Fehler im Parser, behoben).
+
 Eine `0` oder ein leeres Feld heißt **ohne Zeit**: gemacht, aber kein Punkt
 auf der Kurve.
 

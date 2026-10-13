@@ -37,7 +37,7 @@ from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, HrvEinstellungen
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.devices.base import DeviceInfo, Verbindung
 from trainingsapp.devices.messlauf import Messlauf
-from trainingsapp.devices.profiles import profil_fuer_namen
+from trainingsapp.devices.profiles import geraeteart
 from trainingsapp.devices.simulated import SIM_PPI, SIM_PREFIX, SIM_SYNTH, SimulatedSource
 from trainingsapp.hrv_core.atmung import ATEMUEBUNG, RUHE, kurzgrund
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
@@ -226,12 +226,13 @@ def kachel_werte(
 
 def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
     ergebnisse = ft.Column(spacing=0, visible=False)
+    bekannte = ft.Column(spacing=0)
     hinweis_text = ft.Text("", size=12, opacity=0.7, visible=False)
     ring = ft.ProgressRing(width=18, height=18, stroke_width=2, visible=False)
 
     def zeile(info: DeviceInfo) -> ft.Control:
-        profil = profil_fuer_namen(info.name)
-        teile = [profil.name if profil else "unbekanntes Gerät"]
+        # Ehrlich: „Brustgurt" nur, wenn Name oder Profil es sicher sagen
+        teile = [geraeteart(info.name, info.profil_id)]
         if info.rssi is not None:
             teile.append(f"{info.rssi} dBm")
         return ft.ListTile(
@@ -240,6 +241,45 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             subtitle=ft.Text("  ·  ".join(teile), size=12),
             trailing=ft.FilledTonalButton("Verbinden", on_click=verbinder(info)),
         )
+
+    def bekannte_zeichnen() -> None:
+        """„Zuletzt verbunden" — ein Tipp verbindet direkt, ohne Suche."""
+        geraete = state.bekannte_geraete()
+        bekannte.controls = []
+        if geraete:
+            bekannte.controls.append(ft.Text("Zuletzt verbunden", size=12, opacity=0.75))
+        for g in geraete:
+            teile = [geraeteart(g.name, g.profil_id)]
+            if g.zuletzt_text():
+                teile.append(f"zuletzt {g.zuletzt_text()}")
+            bekannte.controls.append(
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.BLUETOOTH_CONNECTED),
+                    title=ft.Text(g.name),
+                    subtitle=ft.Text("  ·  ".join(teile), size=12),
+                    on_click=bekannt_verbinder(g.id, g.name),
+                    trailing=ft.IconButton(
+                        ft.Icons.CLOSE,
+                        tooltip="Aus der Liste nehmen",
+                        on_click=vergesser(g.id),
+                    ),
+                    content_padding=ft.Padding.only(left=0, right=0),
+                )
+            )
+
+    def bekannt_verbinder(geraet_id: str, name: str) -> Callable[[], Any]:
+        async def handler() -> None:
+            await verbinden(geraet_id, name)
+
+        return handler
+
+    def vergesser(geraet_id: str) -> Callable[[], None]:
+        def handler() -> None:
+            state.geraet_vergessen(geraet_id)
+            bekannte_zeichnen()
+            page.update()
+
+        return handler
 
     def verbinder(info: DeviceInfo) -> Callable[[], Any]:
         async def handler() -> None:
@@ -259,6 +299,9 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
 
             quelle = PolarQuelle(state.ble_transport)
         else:
+            ring.visible = False
+            hinweis_text.value = "Bluetooth gibt es nur in der App auf dem Handy."
+            page.update()
             return
         lauf = Messlauf(quelle, backup_basis=datenverzeichnis(), regeln=state.korrekturregeln())
         state.messlauf = lauf
@@ -267,11 +310,16 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
         except Exception as fehler:  # Gerät weg, Bluetooth aus, Berechtigung fehlt …
             state.messlauf = None
             ring.visible = False
-            hinweis_text.value = f"Verbinden fehlgeschlagen: {fehler}"
+            hinweis_text.value = (
+                f"Verbinden fehlgeschlagen: {fehler}. Ist das Gerät an und in der Nähe? "
+                "Sonst hilft „Geräte suchen“."
+            )
             diagnose.content = _diagnose(page, lauf)
             diagnose.visible = True
             page.update()
             return
+        if not device_id.startswith(SIM_PREFIX):
+            state.geraet_merken(device_id, name or device_id, lauf.profil.id if lauf.profil else "")
         await _hintergrund(state, lauf, True, f"Verbunden mit {lauf.geraet_name}")
 
         async def laufen() -> None:
@@ -322,6 +370,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
         return handler
 
     diagnose = ft.Container(visible=False)
+    bekannte_zeichnen()
 
     return ft.Column(
         spacing=12,
@@ -334,6 +383,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
                     size=12,
                     opacity=0.7,
                 ),
+                bekannte,
                 ft.Row(
                     spacing=10,
                     controls=[

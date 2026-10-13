@@ -81,18 +81,25 @@ class SpecForm:
         if f.type == FieldType.TEXT:
             return ft.TextField(label=f.label, value=str(wert or ""), multiline=True, min_lines=2)
         if f.type == FieldType.SET_LIST:
+            # Ohne Einheit dahinter: Das Label sagt „Wiederholungen", Zeiten
+            # tragen ihre Schreibweise selbst („45s", „1:30") — ein „s" dahinter
+            # war doppelt („1:30 s" sind keine 90 Sekunden-Sekunden).
+            zeit = f.unit == "s"
             return ft.TextField(
                 label=f"{f.label} je Satz",
                 value=self._anzeige(f, wert),
-                hint_text="3x15 · 30 · 15/15/20",
+                hint_text="3x30 · 1:30 · 45/60" if zeit else "3x15 · 30 · 15/15/20",
                 keyboard_type=ft.KeyboardType.TEXT,
-                suffix=ft.Text(f.unit) if f.unit else None,
             )
         return ft.TextField(
             label=f.label,
             value=self._anzeige(f, wert),
-            keyboard_type=ft.KeyboardType.NUMBER,
-            suffix=ft.Text(f.unit) if f.unit else None,
+            hint_text="1:30 oder 90" if f.type == FieldType.DURATION else None,
+            keyboard_type=ft.KeyboardType.TEXT
+            if f.type == FieldType.DURATION
+            else ft.KeyboardType.NUMBER,
+            # Zeit („1:30") trägt ihre Schreibweise selbst; kg, m und ° nicht
+            suffix=ft.Text(f.unit) if f.unit and f.type != FieldType.DURATION else None,
             text_align=ft.TextAlign.END,
         )
 

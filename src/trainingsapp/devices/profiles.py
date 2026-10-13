@@ -124,10 +124,14 @@ VERITY_SENSE = GeraeteProfil(
 
 BLE_GENERIC = GeraeteProfil(
     id="ble_generic",
-    name="Brustgurt (Standardprofil)",
-    kurz="Gurt",
+    # Bis Oktober 2026 „Brustgurt (Standardprofil)" — aber hierher fällt jedes
+    # Gerät mit Herzfrequenz-Dienst, dessen Namen wir nicht kennen. Ob es ein
+    # Gurt ist, sagt `geraeteart`; Ordner und Quelle bleiben wie in praxis_gui.
+    name="Herzfrequenz-Sensor (Standardprofil)",
+    kurz="Sensor",
     # Bequemlichkeit für die Vorauswahl, keine Zulassungsliste — jedes Gerät
-    # mit RR-Intervallen läuft, auch ohne Eintrag.
+    # mit RR-Intervallen läuft, auch ohne Eintrag. Alles hier sind Brustgurte;
+    # optische Armbänder stehen in `OPTISCH_GENERISCH`.
     muster=(
         "tickr",
         "wahoo",
@@ -137,7 +141,6 @@ BLE_GENERIC = GeraeteProfil(
         "kalenji",
         "geonaute",
         "magene",
-        "scosche",
     ),
     intervall_quelle=QUELLE_EKG_RR,
     datenqualitaet=QUALITAET_RR_EKG,
@@ -147,8 +150,32 @@ BLE_GENERIC = GeraeteProfil(
 )
 
 # ---------------------------------------------------------------------------
-# Unsere Ergänzungen: Uhren
+# Unsere Ergänzungen: optische Armbänder und Uhren
 # ---------------------------------------------------------------------------
+
+OPTISCH_GENERISCH = GeraeteProfil(
+    id="ble_optisch",
+    name="Optischer Sensor (Armband)",
+    kurz="Optisch",
+    # Armbänder mit Herzfrequenz-Dienst. Steht vor `BLE_GENERIC`: „TICKR FIT"
+    # ist ein Armband, „TICKR" ein Gurt.
+    muster=("tickr fit", "scosche", "rhythm", "polar oh1", "oh1", "hw807", "hw706", "armband"),
+    intervall_quelle=QUELLE_PPG_PPI,
+    datenqualitaet=QUALITAET_PPI_OPTISCH,
+    faehigkeiten=frozenset({CAP_HR_RR}),
+    # praxis_gui durchsucht nur seine Gerätordner — optisch heißt dort VeritySense
+    ordner="VeritySense",
+    ersttelegramm_s=45.0,
+    hinweis_kein_signal=(
+        "Sitzt das Armband fest genug? Der optische Sensor braucht Hautkontakt ohne Luftspalt."
+    ),
+    ausreisser_schwelle=MALIK_THRESHOLD_PPI,
+    hinweise=(
+        "Ob das Armband Schlag-zu-Schlag-Intervalle sendet, zeigt sich erst beim "
+        "Messen; ohne sie gibt es nur den Pulsverlauf.",
+        "Puls-zu-Puls-Intervalle sind nicht dasselbe wie RR aus dem EKG.",
+    ),
+)
 
 POLAR_UHR = GeraeteProfil(
     id="polar_watch",
@@ -213,6 +240,7 @@ PROFILE: tuple[GeraeteProfil, ...] = (
     POLAR_H9,
     VERITY_SENSE,
     POLAR_UHR,
+    OPTISCH_GENERISCH,
     UHR_BROADCAST,
     BLE_GENERIC,
 )
@@ -248,6 +276,44 @@ def profil_fuer_namen(name: str) -> GeraeteProfil:
     return DEFAULT_PROFIL
 
 
+#: Geräteart für die Anzeige — nur so genau, wie Name und Profil es verraten
+ART_BRUSTGURT = "Brustgurt"
+ART_OPTISCH = "Optischer Sensor"
+ART_UHR = "Uhr"
+ART_SENSOR = "Herzfrequenz-Sensor"
+ART_UNBEKANNT = "Unbekanntes Gerät"
+#: Wörter im Namen, die einen Gurt verraten (zusätzlich zu `BLE_GENERIC.muster`)
+_GURT_WOERTER = ("gurt", "strap", "belt", "chest")
+
+
+def geraeteart(name: str, profil_id: str) -> str:
+    """Was für ein Gerät — ehrlich: „Brustgurt" nur, wenn es das sicher ist.
+
+    ``profil_id`` wie in `polar.profil_zuordnen` (leer: weder Name noch
+    Herzfrequenz-Dienst verraten etwas).
+
+    >>> geraeteart("Polar H10 A1B2C3", "polar_h10"), geraeteart("TICKR 1A2B", "ble_generic")
+    ('Brustgurt', 'Brustgurt')
+    >>> geraeteart("TICKR FIT 1A2B", "ble_optisch"), geraeteart("Forerunner 955", "watch_broadcast")
+    ('Optischer Sensor', 'Uhr')
+    >>> geraeteart("HR 4711", "ble_generic"), geraeteart("Fernseher", "")
+    ('Herzfrequenz-Sensor', 'Unbekanntes Gerät')
+    """
+    if not profil_id:
+        return ART_UNBEKANNT
+    profil = profil_nach_id(profil_id)
+    if profil in (POLAR_H10, POLAR_H9):
+        return ART_BRUSTGURT
+    if profil in (VERITY_SENSE, OPTISCH_GENERISCH):
+        return ART_OPTISCH
+    if profil in (POLAR_UHR, UHR_BROADCAST):
+        return ART_UHR
+    klein = (name or "").lower()
+    if any(m in klein for m in (*BLE_GENERIC.muster, *_GURT_WOERTER)):
+        return ART_BRUSTGURT
+    return ART_SENSOR
+
+
 def profil_verfeinern(profil: GeraeteProfil, *, rr_gesehen: bool) -> GeraeteProfil:
     """Korrigiert die Einstufung anhand dessen, was tatsächlich ankommt.
 
@@ -281,6 +347,11 @@ def _mit_qualitaet(profil: GeraeteProfil, qualitaet: str, zusatz_caps: set[str])
 
 
 __all__ = [
+    "ART_BRUSTGURT",
+    "ART_OPTISCH",
+    "ART_SENSOR",
+    "ART_UHR",
+    "ART_UNBEKANNT",
     "BLE_GENERIC",
     "CAP_HR_ONLY",
     "CAP_HR_RR",
@@ -289,6 +360,7 @@ __all__ = [
     "CAP_PMD_PPG",
     "CAP_PMD_PPI",
     "DEFAULT_PROFIL",
+    "OPTISCH_GENERISCH",
     "POLAR_H9",
     "POLAR_H10",
     "POLAR_UHR",
@@ -296,6 +368,7 @@ __all__ = [
     "UHR_BROADCAST",
     "VERITY_SENSE",
     "GeraeteProfil",
+    "geraeteart",
     "profil_fuer_namen",
     "profil_nach_id",
     "profil_verfeinern",

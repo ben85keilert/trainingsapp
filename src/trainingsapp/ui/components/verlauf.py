@@ -217,7 +217,7 @@ def ansicht_menue(page: Any, state: Any, geaendert: Callable[[], None]) -> ft.Co
         ft.PopupMenuItem(
             content="Fenster & Darstellung …",
             icon=ft.Icons.TUNE,
-            on_click=lambda: page.show_dialog(darstellung_dialog(page, state, geaendert)),
+            on_click=lambda: page.show_dialog(darstellung_blatt(page, state, geaendert)),
         ),
         ft.PopupMenuItem(
             content="Als Ansicht speichern …",
@@ -256,8 +256,13 @@ def ansicht_menue(page: Any, state: Any, geaendert: Callable[[], None]) -> ft.Co
     )
 
 
-def darstellung_dialog(page: Any, state: Any, geaendert: Callable[[], None]) -> ft.AlertDialog:
-    """Je gewählter Kurve des Bereichs: Fenster, gleitend oder Blöcke; pNNx-Schwelle."""
+def darstellung_blatt(page: Any, state: Any, geaendert: Callable[[], None]) -> ft.BottomSheet:
+    """Je gewählter Kurve des Bereichs: Fenster, gleitend oder Blöcke; pNNx-Schwelle.
+
+    Ein Blatt von unten, kein Dialog: Ein ``AlertDialog`` misst seinen Inhalt
+    vorab (intrinsische Größe), und das können Auswahllisten (``Dropdown``) nicht
+    — der Dialog blieb unsichtbar, nur der Bildschirm wurde dunkel (14.10.).
+    """
     ansicht = state.ansicht()
     gewaehlt = [
         k for k in im_bereich(ansicht.bereich) if k in ansicht.kurven and KENNZAHLEN[k].rechnet
@@ -364,10 +369,21 @@ def darstellung_dialog(page: Any, state: Any, geaendert: Callable[[], None]) -> 
             opacity=0.65,
         ),
     ]
-    return ft.AlertDialog(
-        title=ft.Text("Fenster & Darstellung"),
-        content=ft.Column(spacing=16, tight=True, scroll=ft.ScrollMode.AUTO, controls=zeilen),
-        actions=[ft.TextButton("Fertig", on_click=lambda: page.pop_dialog())],
+    kopf = ft.Row(
+        controls=[
+            ft.Text("Fenster & Darstellung", size=18, weight=ft.FontWeight.W_600, expand=True),
+            ft.TextButton("Fertig", on_click=lambda: page.pop_dialog()),
+        ]
+    )
+    return ft.BottomSheet(
+        content=ft.Container(
+            padding=ft.Padding.only(left=16, top=4, right=16, bottom=16),
+            content=ft.Column(
+                spacing=16, tight=True, scroll=ft.ScrollMode.AUTO, controls=[kopf, *zeilen]
+            ),
+        ),
+        scrollable=True,
+        show_drag_handle=True,
     )
 
 
@@ -409,7 +425,7 @@ __all__ = [
     "bereich_wahl",
     "bezeichnung",
     "chips",
-    "darstellung_dialog",
+    "darstellung_blatt",
     "diagramme",
     "fenster_text",
     "speichern_dialog",

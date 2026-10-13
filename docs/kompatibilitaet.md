@@ -330,9 +330,24 @@ steht hinter `text` die Liste ihrer **Kurzcodes**:
 > die Schwelle tatsächlich. Kennzahlen optischer Messungen nach Korrektur
 > können deshalb leicht von praxis_gui abweichen.
 
-Wir ergänzen weitere Profile (Polar-Uhren, Uhren-Broadcast) — sie ordnen sich
-denselben beiden `intervall_quelle`-Werten unter. Optische Sensoren sind immer
-`ppg_ppi`. Unbekannte Profil-IDs behandelt praxis_gui wie `ble_generic`.
+Wir ergänzen weitere Profile (Polar-Uhren, Uhren-Broadcast, optische
+Armbänder) — sie ordnen sich denselben beiden `intervall_quelle`-Werten unter.
+Optische Sensoren sind immer `ppg_ppi`. Unbekannte Profil-IDs behandelt
+praxis_gui wie `ble_generic`.
+
+| ID (unsere) | Name | `intervall_quelle` | Ordner | Schwelle |
+|---|---|---|---|---|
+| `polar_watch` | Polar-Uhr (PMD) | `ppg_ppi` | `VeritySense` | 0.30 |
+| `ble_optisch` | Optischer Sensor (Armband): TICKR FIT, Scosche Rhythm, Polar OH1, Coospo HW807 … (seit 14.10.2026) | `ppg_ppi` | `VeritySense` | 0.30 |
+| `watch_broadcast` | Uhr (Herzfrequenz-Übertragung) | `ppg_ppi` | `Uhr` ⚠️ | 0.30 |
+
+`ble_generic` heißt in der App seit 14.10.2026 **„Herzfrequenz-Sensor
+(Standardprofil)"**: Hierher fällt jedes Gerät mit Herzfrequenz-Dienst, dessen
+Namen wir nicht kennen — ob es ein Gurt ist, wissen wir nicht. ID, Ordner und
+`ekg_rr` bleiben wie in praxis_gui. Als „Brustgurt" bezeichnet die Oberfläche
+ein Gerät nur, wenn Profil oder Name es sicher sagen (`profiles.geraeteart`).
+⚠️ `Uhr` gehört nicht zu den Ordnern, die praxis_gui durchsucht (Abschnitt 2) —
+Messungen reiner Pulsuhren erscheinen dort nicht.
 
 ### Unsere Erweiterung: `datenqualitaet`
 

@@ -170,19 +170,25 @@ def ticker_starten(page: Any, state: AppState) -> None:
 
 
 def timer_knopf(page: Any, state: AppState, name: str) -> ft.Control:
-    """Timer-Symbol für eine AppBar; läuft der Timer, steht die Restzeit daneben.
+    """„Timer" als Knopf für eine AppBar — läuft der Timer, steht dort die Restzeit.
 
-    ``name`` unterscheidet die Leisten — jede trägt sich als Beobachter ein und
-    ersetzt dabei ihren alten Eintrag.
+    Symbol und Beschriftung in einer umrandeten Pille: ein Symbol allein sagt
+    nicht, was es tut. Läuft der Timer, ersetzt die Restzeit das Wort (gleiche
+    Breite, die Leiste springt nicht). ``name`` unterscheidet die Leisten — jede
+    trägt sich als Beobachter ein und ersetzt dabei ihren alten Eintrag.
     """
-    restzeit = ft.Text("", size=13, weight=ft.FontWeight.W_600)
+    text = ft.Text("Timer", size=13, weight=ft.FontWeight.W_600)
 
-    def auffrischen() -> None:
+    def beschriften() -> bool:
         lauf: TimerLauf | None = state.timer
         stand = lauf.stand() if lauf is not None else None
         aktiv = stand is not None and lauf is not None and lauf.begonnen and not stand.fertig
-        restzeit.value = dauer_text(stand.rest_s) if aktiv and stand else ""
-        restzeit.visible = aktiv
+        text.value = dauer_text(-(-stand.rest_s // 1)) if aktiv and stand else "Timer"
+        return aktiv
+
+    def auffrischen() -> None:
+        aktiv = beschriften()
+        knopf.bgcolor = ft.Colors.with_opacity(0.12, ft.Colors.PRIMARY) if aktiv else None
         with contextlib.suppress(Exception):
             knopf.update()
 
@@ -192,23 +198,25 @@ def timer_knopf(page: Any, state: AppState, name: str) -> ft.Control:
         await page.push_route(timer_route(page.route))
 
     knopf = ft.Container(
-        padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+        padding=ft.Padding.symmetric(horizontal=12, vertical=6),
+        margin=ft.Margin.symmetric(horizontal=4),
         border_radius=18,
+        border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
         ink=True,
-        tooltip="Timer",
+        tooltip="Timer öffnen",
         on_click=oeffnen,
         content=ft.Row(
-            spacing=4,
+            spacing=6,
             tight=True,
-            controls=[ft.Icon(ft.Icons.TIMER_OUTLINED, size=22), restzeit],
+            controls=[
+                ft.Icon(ft.Icons.TIMER_OUTLINED, size=20),
+                ft.Container(width=40, content=text),
+            ],
         ),
     )
     state.timer_beobachter[name] = auffrischen
-    restzeit.visible = False
-    lauf: TimerLauf | None = state.timer
-    if lauf is not None and lauf.begonnen and not lauf.fertig:
-        stand = lauf.stand()
-        restzeit.value, restzeit.visible = dauer_text(stand.rest_s), True
+    if beschriften():
+        knopf.bgcolor = ft.Colors.with_opacity(0.12, ft.Colors.PRIMARY)
     return knopf
 
 

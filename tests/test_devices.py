@@ -891,3 +891,38 @@ async def test_simulator_ppi_modus_mit_blockern() -> None:
         assert paket is not None
         assert w.rr_ms in paket.ppi_ms and w.t_capture <= paket.t_capture
         assert (w.tw_src == "m") == (w.t_capture == paket.t_capture)
+
+
+def test_geraeteart_ehrlich_und_armbaender_optisch() -> None:
+    """„Brustgurt" nur, wenn es sicher ist; optische Armbänder sind PPG, nicht EKG."""
+    from trainingsapp.devices.profiles import (
+        OPTISCH_GENERISCH,
+        geraeteart,
+        profil_fuer_namen,
+    )
+
+    for name in ("TICKR FIT 1A2B", "Scosche Rhythm+ 2.0", "Polar OH1 12345678", "HW807 4711"):
+        profil = profil_fuer_namen(name)
+        assert profil is OPTISCH_GENERISCH, name
+        assert profil.intervall_quelle == "ppg_ppi" and profil.ordner == "VeritySense"
+    assert profil_fuer_namen("TICKR 1A2B").id == "ble_generic"
+    assert geraeteart("TICKR 1A2B", "ble_generic") == "Brustgurt"
+    assert geraeteart("HR Sensor 12", "ble_generic") == "Herzfrequenz-Sensor"
+    assert geraeteart("Fernseher", "") == "Unbekanntes Gerät"
+
+
+def test_bekannte_geraete_im_zustand(tmp_path) -> None:
+    from trainingsapp.ui.state import AppState
+
+    state = AppState.starten(tmp_path / "app.db")
+    try:
+        assert state.bekannte_geraete() == []
+        state.geraet_merken("AA:BB", "Polar H10 1A2B", "polar_h10")
+        state.geraet_merken("CC:DD", "Polar Sense 3C4D", "verity_sense")
+        state.geraet_merken("AA:BB", "Polar H10 1A2B", "polar_h10")
+        assert [g.id for g in state.bekannte_geraete()] == ["AA:BB", "CC:DD"]
+        assert state.bekannte_geraete()[0].zuletzt_text()
+        state.geraet_vergessen("CC:DD")
+        assert [g.name for g in state.bekannte_geraete()] == ["Polar H10 1A2B"]
+    finally:
+        state.schliessen()

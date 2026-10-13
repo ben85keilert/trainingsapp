@@ -1,10 +1,14 @@
 """Einstellungen — Route `/einstellungen`.
 
-Profile (wechseln, anlegen, umbenennen), der Weg zu den Einstellungen der
-HRV-Messung (`/einstellungen/hrv`) und zum Timer, dazu Hilfe und Edition. Eine
-Sperre per PIN oder Fingerabdruck gibt es in Edition A nicht
-(`ist_aktiv("profil_sperre")`); die Ansicht fragt den Schalter, damit Edition B
-ihn hier einhängen kann.
+Vorn das aktive Profil wählen; anlegen, umbenennen und löschen in einer eigenen
+Ansicht (`/einstellungen/profile`). Dazu der Weg zu den Einstellungen der
+HRV-Messung (`/einstellungen/hrv`) und zum Timer, Hilfe und Edition.
+
+Eine Sperre per PIN gibt es nur in der Praxis-Edition
+(`ist_aktiv("profil_sperre")`): Dort teilen sich mehrere Personen ein Gerät,
+und der Hinweis „Profilwechsel ist durch PIN geschützt" erscheint. In der
+Solo-Edition steht dazu nichts — es gibt nichts zu verbergen, was der
+Gerätebesitzer nicht ohnehin sieht.
 """
 
 from __future__ import annotations
@@ -22,38 +26,14 @@ from trainingsapp.ui.state import AppState
 
 def einstellungen(page: ft.Page, state: AppState) -> ft.View:
     profil_liste = ft.Column(spacing=0)
-    neuer_name = ft.TextField(label="Neues Profil", dense=True, expand=True)
-    umbenennen_feld = ft.TextField(
-        label="Aktives Profil umbenennen", value=state.profil.name, dense=True, expand=True
-    )
 
     def wechsler(profil_id: str) -> Callable[[], None]:
         def handler() -> None:
             state.profil_wechseln(profil_id)
-            umbenennen_feld.value = state.profil.name
             zeichnen()
             page.update()
 
         return handler
-
-    def anlegen() -> None:
-        if not (neuer_name.value or "").strip():
-            neuer_name.error = "Ein Name muss sein."
-            page.update()
-            return
-        neuer_name.error = None
-        state.profil_anlegen(neuer_name.value or "")
-        neuer_name.value = ""
-        umbenennen_feld.value = state.profil.name
-        zeichnen()
-        page.update()
-
-    def umbenennen() -> None:
-        if not (umbenennen_feld.value or "").strip():
-            return
-        state.profil_umbenennen(umbenennen_feld.value or "")
-        zeichnen()
-        page.update()
 
     def zeichnen() -> None:
         profil_liste.controls = [
@@ -79,11 +59,9 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
 
     zeichnen()
 
+    # Nur die Praxis-Edition sperrt den Profilwechsel per PIN (Modul-Docstring)
     sperre = (
-        "Profilwechsel ist durch PIN geschützt."
-        if ist_aktiv("profil_sperre")
-        else "Kein PIN: In der Solo-Edition gibt es nichts zu verbergen, was der "
-        "Gerätebesitzer nicht ohnehin sieht."
+        [hinweis("Profilwechsel ist durch PIN geschützt.")] if ist_aktiv("profil_sperre") else []
     )
     e = state.hrv_einstellungen()
     hrv_text = f"{len(e.kacheln)} Kacheln · Reiter „Messung“ " + (
@@ -101,28 +79,18 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
                     spacing=14,
                     controls=[
                         karte(
-                            titel("Profile"),
+                            titel("Profil"),
                             hinweis("Beim Start wird das zuletzt aktive Profil geladen."),
                             profil_liste,
-                            ft.Row(
-                                spacing=8,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                controls=[
-                                    neuer_name,
-                                    ft.FilledTonalButton(
-                                        "Anlegen", icon=ft.Icons.PERSON_ADD, on_click=anlegen
-                                    ),
-                                ],
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.MANAGE_ACCOUNTS_OUTLINED),
+                                title=ft.Text("Profile verwalten"),
+                                subtitle=ft.Text("Anlegen, umbenennen, löschen", size=12),
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/profile"),
+                                content_padding=ft.Padding.only(left=0, right=0),
                             ),
-                            ft.Row(
-                                spacing=8,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                controls=[
-                                    umbenennen_feld,
-                                    ft.TextButton("Umbenennen", on_click=umbenennen),
-                                ],
-                            ),
-                            hinweis(sperre),
+                            *sperre,
                         ),
                         karte(
                             titel("Messung und Werkzeuge"),

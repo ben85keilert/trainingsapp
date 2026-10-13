@@ -24,6 +24,7 @@ Routen:
     /archiv, /papierkorb            Archivierte und gelöschte Übungen (und Pläne)
     /verlauf/<kachel_id>            Kurve der Tagessummen einer Kachel (mit Varianten)
     /einstellungen/hrv              Einstellungen der HRV-Messung
+    /einstellungen/profile          Profile anlegen, umbenennen, löschen
     <jede Route>/timer[/bearbeiten[/<id>]]   Timer über der aktuellen Ansicht
 
 Der Routen-Handler baut bei jedem Wechsel den **ganzen** Stapel neu auf
@@ -53,6 +54,7 @@ from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view
 from trainingsapp.ui.views.plan import einzel_plan, plan_view, ziel_text
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
+from trainingsapp.ui.views.profile import profile_view
 from trainingsapp.ui.views.tag import tag_view
 from trainingsapp.ui.views.timer import (
     timer_bearbeiten_view,
@@ -348,6 +350,8 @@ def main(page: ft.Page) -> None:
             page.views.append(einstellungen(page, state))
             if teile[1:2] == ["hrv"]:
                 page.views.append(einstellungen_hrv(page, state))
+            elif teile[1:2] == ["profile"]:
+                page.views.append(profile_view(page, state))
         elif teile[:1] == ["archiv"]:
             page.views.append(archiv_view(page, state))
         elif teile[:1] == ["papierkorb"]:

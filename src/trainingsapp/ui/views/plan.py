@@ -147,7 +147,7 @@ def plan_view(
         tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute)]
         gemacht = sum(1 for item in plan.items if anzahl.get(item.exercise_id))
         stand.value = stand_text()
-        liste.controls = [block(item) for item in plan.items]
+        liste.controls = listeninhalt()
         page.update()
 
     def melden(uebung: Exercise, eintrag: SessionEntry) -> None:
@@ -493,18 +493,18 @@ def plan_view(
             ]
         # Freieingabe
         if feld.type == FieldType.SET_LIST:
-            hinweis, breite = "3x15 oder +20", 150
+            hinweis = "3x30 oder +45" if feld.unit == "s" else "3x15 oder +20"
+            breite = 150
         else:
-            hinweis, breite = feld.label, 110
+            hinweis, breite = ("1:30" if feld.type == FieldType.DURATION else feld.label), 110
+        ohne_einheit = feld.type in (FieldType.SET_LIST, FieldType.DURATION)
         eingabe = ft.TextField(
             width=breite,
             height=48,
             dense=True,
             hint_text=hinweis,
-            suffix=ft.Text(feld.unit) if feld.unit and feld.type != FieldType.SET_LIST else None,
-            keyboard_type=ft.KeyboardType.TEXT
-            if feld.type == FieldType.SET_LIST
-            else ft.KeyboardType.NUMBER,
+            suffix=ft.Text(feld.unit) if feld.unit and not ohne_einheit else None,
+            keyboard_type=ft.KeyboardType.TEXT if ohne_einheit else ft.KeyboardType.NUMBER,
             border=ft.OutlineInputBorder(border_radius=12),
         )
         reihe: list[ft.Control] = [
@@ -598,12 +598,6 @@ def plan_view(
         return f"{gemacht} von {len(plan.items)} heute" if plan.items else "Noch keine Übungen"
 
     stand = ft.Text(stand_text(), size=13, opacity=0.7)
-    liste = scroll_merken(
-        page,
-        state,
-        route,
-        ft.ListView(expand=True, controls=[block(item) for item in plan.items]),
-    )
 
     kopf: list[ft.Control]
     if bearbeiten:
@@ -675,6 +669,20 @@ def plan_view(
     elif not plan.items:
         fuss = [ft.FilledButton("Übungen hinzufügen", icon=ft.Icons.EDIT, on_click=modus_wechseln)]
 
+    # Kopf (Name, aktiv, Tage …) und Fuß scrollen mit den Übungen — nur die
+    # Leiste oben bleibt stehen. Fest stehend nahm der Kopf beim Bearbeiten den
+    # halben Bildschirm, für die Übungen blieb kaum Platz (Ben, 14.10.).
+    kopf_box = ft.Container(
+        padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
+        content=ft.Column(spacing=6, controls=kopf),
+    )
+    fuss_box = ft.Container(padding=16, content=ft.Row(spacing=8, wrap=True, controls=fuss))
+
+    def listeninhalt() -> list[ft.Control]:
+        return [kopf_box, *(block(item) for item in plan.items), *([fuss_box] if fuss else [])]
+
+    liste = scroll_merken(page, state, route, ft.ListView(expand=True, controls=listeninhalt()))
+
     return ft.View(
         route=route,
         appbar=ft.AppBar(
@@ -692,26 +700,7 @@ def plan_view(
             ],
         ),
         padding=0,
-        controls=[
-            sicher(
-                ft.Column(
-                    expand=True,
-                    spacing=0,
-                    controls=[
-                        ft.Container(
-                            padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
-                            content=ft.Column(spacing=6, controls=kopf),
-                        ),
-                        liste,
-                        ft.Container(
-                            padding=16, content=ft.Row(spacing=8, wrap=True, controls=fuss)
-                        )
-                        if fuss
-                        else ft.Container(),
-                    ],
-                )
-            )
-        ],
+        controls=[sicher(ft.Column(expand=True, spacing=0, controls=[liste]))],
     )
 
 

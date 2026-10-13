@@ -52,6 +52,13 @@ from trainingsapp.data.repositories import (
 )
 from trainingsapp.data.seed import seed_einspielen
 from trainingsapp.data.upgrade import datenformat_aktualisieren
+from trainingsapp.devices.bekannte import (
+    BekanntesGeraet,
+    bekannte_lesen,
+    bekannte_schreiben,
+    merken,
+    vergessen,
+)
 from trainingsapp.hrv_core.regeln import Korrekturregeln
 
 STANDARD_PROFILNAME = "Ich"
@@ -221,6 +228,29 @@ class AppState:
         self.profile.speichern(profil)
         return self.profil_wechseln(profil.id)
 
+    def profil_loeschen(self, profil_id: str) -> None:
+        """Ein Profil ausblenden; war es aktiv, wird das erste übrige aktiv.
+
+        Das letzte Profil bleibt — ohne Profil gäbe es nichts, wem Einträge
+        gehören (`ValueError`).
+        """
+        andere = [p for p in self.profile.alle() if p.id != profil_id]
+        if not andere:
+            raise ValueError("Das letzte Profil lässt sich nicht löschen.")
+        self.profile.loeschen(profil_id)
+        if self.profil.id == profil_id:
+            self.profil_wechseln(andere[0].id)
+
+    def profil_umbenennen_id(self, profil_id: str, name: str) -> None:
+        """Ein beliebiges Profil umbenennen (nicht nur das aktive)."""
+        profil = self.profile.laden(profil_id)
+        if profil is None or not name.strip():
+            return
+        profil.name = name.strip()
+        self.profile.speichern(profil)
+        if self.profil.id == profil_id:
+            self.profil = profil
+
     # -- HRV: Korrekturregeln und Ansichten -----------------------------------
 
     def korrekturregeln(self) -> Korrekturregeln:
@@ -300,6 +330,21 @@ class AppState:
 
     def timer_signale_setzen(self, signale: TimerSignale) -> None:
         self.einstellungen.setzen(SettingRepo.TIMER_SIGNALE, timer_signale_schreiben(signale))
+
+    # -- Bluetooth: bekannte Geräte ------------------------------------------------
+
+    def bekannte_geraete(self) -> list[BekanntesGeraet]:
+        """Zuletzt verbundene Geräte, die neuesten zuerst."""
+        return bekannte_lesen(self.einstellungen.lesen(SettingRepo.BEKANNTE_GERAETE))
+
+    def geraet_merken(self, geraet_id: str, name: str, profil_id: str) -> None:
+        neu = BekanntesGeraet(geraet_id, name or geraet_id, profil_id, jetzt().isoformat())
+        liste = merken(self.bekannte_geraete(), neu)
+        self.einstellungen.setzen(SettingRepo.BEKANNTE_GERAETE, bekannte_schreiben(liste))
+
+    def geraet_vergessen(self, geraet_id: str) -> None:
+        liste = vergessen(self.bekannte_geraete(), geraet_id)
+        self.einstellungen.setzen(SettingRepo.BEKANNTE_GERAETE, bekannte_schreiben(liste))
 
     def profil_umbenennen(self, name: str) -> None:
         self.profil.name = name.strip()

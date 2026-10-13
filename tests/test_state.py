@@ -58,6 +58,19 @@ def test_profil_umbenennen(state) -> None:
     assert state.profile.laden(state.profil.id).name == "Benjamin"
 
 
+def test_profil_loeschen_wechselt_und_das_letzte_bleibt(state) -> None:
+    ich = state.profil
+    anna = state.profil_anlegen("Anna")
+    state.profil_umbenennen_id(ich.id, "Ben")
+    assert state.profile.laden(ich.id).name == "Ben" and state.profil.id == anna.id
+    state.profil_loeschen(anna.id)  # aktives Profil → das erste übrige wird aktiv
+    assert state.profil.id == ich.id
+    assert [p.name for p in state.profile.alle()] == ["Ben"]
+    assert state.profile.laden(anna.id) is None
+    with pytest.raises(ValueError):
+        state.profil_loeschen(ich.id)
+
+
 def test_repos_und_tag_vorhanden(state) -> None:
     from datetime import date
 

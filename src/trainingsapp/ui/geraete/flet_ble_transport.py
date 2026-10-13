@@ -73,7 +73,10 @@ class FletBleTransport:
         return int(await self.ble.connect(device_id) or 0)
 
     async def bond(self, device_id: str) -> None:
-        await self.ble.bond(device_id)
+        zustand = await self.ble.bond(device_id)
+        # Still gescheitert („none") soll im Diagnoseprotokoll auftauchen.
+        if zustand not in ("bonded", "nicht_noetig"):
+            raise RuntimeError(f"Kopplung nicht zustande gekommen (Zustand: {zustand})")
 
     async def disconnect(self, device_id: str) -> None:
         self._bei_trennung.pop(device_id, None)

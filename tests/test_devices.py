@@ -125,6 +125,8 @@ class FakeTransport:
         self.bei_trennung: Callable[[str | None], None] | None = None
         self.connect_fehler: list[Exception] = []
         self.bond_fehler: Exception | None = None
+        #: je Characteristic: Fehler, die die nächsten Abos werfen (einer je Aufruf)
+        self.subscribe_fehler: dict[str, list[Exception]] = {}
         self.scan_ergebnis: list[DeviceInfo] = []
 
     async def scan(self, timeout_s: float = 8.0) -> list[DeviceInfo]:
@@ -179,6 +181,8 @@ class FakeTransport:
         empfaenger: Callable[[bytes, float], None],
     ) -> None:
         self.aufrufe.append(("subscribe", characteristic))
+        if fehler := self.subscribe_fehler.get(characteristic):
+            raise fehler.pop(0)
         self.abos[characteristic] = empfaenger
 
     async def bond(self, device_id: str) -> None:
@@ -399,6 +403,7 @@ async def test_verity_verbindungsablauf_mit_kopplung_und_ppi_start() -> None:
         ("connect", "AA:BB"),
         ("bond", "AA:BB"),
         ("discover", "AA:BB"),
+        ("read", PMD_CONTROL_UUID),  # Featuremaske: bietet das Gerät PPI an?
         ("subscribe", HR_MEASUREMENT_UUID),
         ("read", BATTERY_LEVEL_UUID),
         ("subscribe", PMD_CONTROL_UUID),
@@ -496,6 +501,65 @@ async def test_pmd_antwort_laeuft_bereits_ist_kein_fehler() -> None:
     )
     assert not any("lehnt ab" in s.meldung for s in statusverlauf(quelle))
     await quelle.disconnect()
+
+
+async def test_pmd_antwort_laeuft_bereits_startet_ppi_einmal_neu() -> None:
+    quelle, transport, zeit, _s = await verbinde(
+        VERITY_NAME, VERITY_DIENSTE, control_antwort=bytes([0xF0, 0x02, 0x03, 0x06])
+    )
+    await zeit.vorspulen(1)
+    assert transport.anzahl("write", PMD_CONTROL_UUID, pmd.PPI_STOP, True) == 1
+    assert transport.ppi_starts() == 2  # Start, nach dem Stopp noch einmal — nicht öfter
+    await zeit.vorspulen(5)
+    assert transport.ppi_starts() == 2
+    await quelle.disconnect()
+
+
+async def test_ohne_ppi_werte_wird_ppi_einmal_neu_gestartet() -> None:
+    quelle, transport, zeit, _s = await verbinde(VERITY_NAME, VERITY_DIENSTE)
+    for _ in range(50):  # 0x2A37 läuft, PPI bleibt aus
+        transport.senden(HR_MEASUREMENT_UUID, bytes([0x06, 70]), zeit.t)
+        await zeit.vorspulen(1)
+    assert transport.anzahl("connect") == 1  # kein Verbindungsproblem
+    assert transport.anzahl("write", PMD_CONTROL_UUID, pmd.PPI_STOP, True) == 1
+    assert transport.ppi_starts() == 2
+    assert "Keine PPI-Werte seit" in quelle.aktueller_status.meldung
+    await quelle.disconnect()
+
+
+async def test_sdk_modus_ohne_ppi_wird_klar_gemeldet() -> None:
+    # Featuremaske ohne PPI-Bit (Verity Sense im SDK-Modus: PPG, ACC, …)
+    quelle, transport, _zeit, sammler = await verbinde(
+        VERITY_NAME, VERITY_DIENSTE, features=bytes([0x0F, 0b0000_0110])
+    )
+    assert transport.anzahl("write") == 0
+    assert "SDK-Modus" in quelle.aktueller_status.meldung
+    transport.senden(HR_MEASUREMENT_UUID, bytes([0x06, 70]), 1.0)
+    await _ruhe()
+    assert sammler.messwerte == [Messwert("AA:BB", 0, 70, 1.0, "m")]  # wenigstens der Puls
+    await quelle.disconnect()
+
+
+async def test_pmd_abo_scheitert_waehrend_kopplung_wird_nur_pmd_wiederholt() -> None:
+    transport = FakeTransport(VERITY_DIENSTE)
+    transport.subscribe_fehler[PMD_CONTROL_UUID] = [
+        OSError("GATT_INSUFFICIENT_AUTHENTICATION"),
+        OSError("GATT_INSUFFICIENT_AUTHENTICATION"),
+    ]
+    quelle = PolarQuelle(transport, uhr=FakeZeit().uhr, schlafen=sofort)
+    await quelle.connect("AA:BB", VERITY_NAME)
+    assert quelle.verbunden
+    assert transport.anzahl("connect") == 1  # die Verbindung blieb stehen
+    assert transport.anzahl("subscribe", PMD_CONTROL_UUID) == 3
+    assert transport.ppi_starts() == 1
+    await quelle.disconnect()
+
+
+def test_python_wartet_auf_die_kopplung_laenger_als_dart() -> None:
+    from trainingsapp.devices import polar
+
+    # Dart (ble_service.dart, createBond) wartet 60 s, die Brücke (flet_ble) 75 s.
+    assert 60.0 < polar.TIMEOUT_KOPPELN_S < 75.0
 
 
 async def test_kopplungsfehler_bricht_nicht_ab() -> None:

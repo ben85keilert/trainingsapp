@@ -11,9 +11,19 @@ Ablauf je Verbindungsaufbau (auch nach jedem Reconnect):
    ein Fehler wird gemeldet, bricht aber nicht ab
 3. ``discover``; ohne Namen ggf. Profil aus der PMD-Featuremaske ableiten
 4. 0x2A37 abonnieren, Batterie lesen (danach alle 300 s)
-5. PMD-Dienst da und Profil mit ``pmd_ppi``: Control (…81) und Data (…82)
+5. PMD-Dienst da und Profil mit ``pmd_ppi``: Featuremaske lesen (bietet das
+   Gerät PPI überhaupt an? Im SDK-Modus nicht), Control (…81) und Data (…82)
    abonnieren, ``02 03`` mit Antwort auf Control schreiben; die Antwort
-   ``[F0, op, typ, err]`` wird geprüft, ``err ≠ 0`` → Statusmeldung
+   ``[F0, op, typ, err]`` wird geprüft, ``err ≠ 0`` → Statusmeldung. Scheitert
+   ein Schritt (typisch: Android koppelt gerade noch, die verschlüsselten
+   PMD-Characteristics lehnen ab), wird nur die PMD-Einrichtung wiederholt,
+   nicht die ganze Verbindung.
+
+PPI neu starten (``03 03``, dann ``02 03``) — je Verbindung höchstens einmal:
+
+- Antwort „läuft bereits“: Der Strom gehört womöglich noch zur vorigen
+  Verbindung; ein frischer Start ist harmlos und stellt die Zustellung sicher.
+- ``ersttelegramm_s`` lang kein PPI-Rahmen, obwohl 0x2A37 läuft.
 
 Daten (Regeln aus praxis_gui):
 
@@ -61,10 +71,12 @@ from .gatt import BleTransport, Empfaenger
 from .pmd import (
     FEHLER_LAEUFT_BEREITS,
     MEAS_PPI,
+    OP_START,
     PMD_CONTROL_UUID,
     PMD_DATA_UUID,
     PMD_SERVICE_UUID,
     PPI_START,
+    PPI_STOP,
     parse_control_antwort,
     parse_feature_antwort,
     parse_pmd_rahmen,
@@ -97,7 +109,14 @@ BATTERIE_INTERVALL_S = 300.0
 #: Versuche beim ersten `connect()`; danach (Reconnect) unbegrenzt
 ERSTE_VERBINDUNG_VERSUCHE = 3
 TIMEOUT_VERBINDEN_S = 20.0
-TIMEOUT_KOPPELN_S = 30.0
+#: Länger als die Dart-Seite wartet (60 s, ``ble_service.dart``) und kürzer als
+#: die Frist der Brücke (75 s): Der Nutzer muss die Kopplungsanfrage evtl. erst
+#: bestätigen. Gäbe Python früher auf, liefe die PMD-Einrichtung in eine noch
+#: laufende Kopplung, scheiterte, und jeder Neuversuch koppelte von vorn.
+TIMEOUT_KOPPELN_S = 70.0
+#: Versuche für die PMD-Einrichtung innerhalb einer Verbindung, mit Pause dazwischen
+PMD_VERSUCHE = 3
+PMD_PAUSE_S = 2.0
 TIMEOUT_GATT_S = 10.0
 TIMEOUT_TRENNEN_S = 3.0
 #: Länge des Diagnoseprotokolls (`PolarQuelle.protokoll`)
@@ -207,6 +226,8 @@ class PolarQuelle(HeartRateSource):
         self._ppi_gesehen = False
         self._ppi_bezug = 0.0  # PPI-Start bzw. letztes PPI-Paket (Uhr)
         self._ppi_gewarnt = False
+        self._ppi_neugestartet = False  # je Verbindung höchstens ein Neustart
+        self._ppi_neustart: asyncio.Task[None] | None = None
         self._rr_ignoriert_gemeldet = False
 
         self._letzte_daten = 0.0
@@ -341,6 +362,9 @@ class PolarQuelle(HeartRateSource):
         self._neuverbinden.set()  # weckt die Überwachung, damit sie endet
         aktuell = asyncio.current_task()
         tasks = [t for t in self._tasks if t is not aktuell]
+        if self._ppi_neustart is not None and self._ppi_neustart is not aktuell:
+            tasks.append(self._ppi_neustart)
+        self._ppi_neustart = None
         self._tasks = []
         for t in tasks:
             t.cancel()
@@ -365,6 +389,7 @@ class PolarQuelle(HeartRateSource):
         self._ppi_aktiv = False
         self._ppi_gesehen = False
         self._ppi_gewarnt = False
+        self._ppi_neugestartet = False
         self._daten_gesehen = False
         self._gewarnt = False
         self._letzte_daten = self._uhr()
@@ -388,12 +413,20 @@ class PolarQuelle(HeartRateSource):
         hat_pmd = PMD_SERVICE_UUID in self._dienste
         if HR_SERVICE_UUID not in self._dienste:
             self._log("WARNUNG: kein Heart-Rate-Dienst gemeldet — versuche es trotzdem")
+        typen: frozenset[str] | None = None
         if hat_pmd and not (profil.kann(CAP_PMD_PPI) or profil.kann(CAP_PMD_ECG)):
-            profil = await self._profil_aus_pmd(profil)
+            profil, typen = await self._profil_aus_pmd(profil)
+        elif hat_pmd and profil.kann(CAP_PMD_PPI):
+            # Vor dem Abo lesen: flutter_blue_plus reicht auch Leseergebnisse an
+            # die Abonnenten weiter — danach sähe die Antwort wie eine Indication aus.
+            typen = await self._pmd_features()
 
-        self._ppi_modus = hat_pmd and profil.kann(CAP_PMD_PPI)
+        ohne_ppi = typen is not None and "ppi" not in typen and bool(typen)
+        self._ppi_modus = hat_pmd and profil.kann(CAP_PMD_PPI) and not ohne_ppi
         if profil.kann(CAP_PMD_PPI) and not hat_pmd:
             self._log("WARNUNG: PPI-Profil, aber kein PMD-Dienst gemeldet")
+        if profil.kann(CAP_PMD_PPI) and ohne_ppi:
+            self._log("WARNUNG: Gerät bietet kein PPI an (SDK-Modus?)")
 
         await self._gatt(
             self._transport.subscribe(
@@ -404,27 +437,7 @@ class PolarQuelle(HeartRateSource):
         await self._batterie_lesen()
 
         if self._ppi_modus:
-            await self._gatt(
-                self._transport.subscribe(
-                    dev,
-                    PMD_SERVICE_UUID,
-                    PMD_CONTROL_UUID,
-                    self._empfaenger(self._control_empfangen, gen),
-                )
-            )
-            await self._gatt(
-                self._transport.subscribe(
-                    dev, PMD_SERVICE_UUID, PMD_DATA_UUID, self._empfaenger(self._pmd_empfangen, gen)
-                )
-            )
-            await self._gatt(
-                self._transport.write(
-                    dev, PMD_SERVICE_UUID, PMD_CONTROL_UUID, PPI_START, mit_antwort=True
-                )
-            )
-            self._ppi_aktiv = True
-            self._ppi_bezug = self._uhr()
-            self._log("PPI-Start gesendet (02 03)")
+            await self._ppi_einrichten(gen)
 
         if self._getrennt_gemeldet:
             raise ConnectionError("Gerät hat während des Verbindungsaufbaus getrennt")
@@ -435,6 +448,13 @@ class PolarQuelle(HeartRateSource):
         if self._ppi_modus:
             self._meldung_warten = f"Warte auf erste PPI-Werte (bis {profil.ersttelegramm_s:.0f} s)"
             meldung = self._meldung_warten
+        elif profil.kann(CAP_PMD_PPI) and ohne_ppi:
+            # Bleibt stehen: so kommen von diesem Gerät keine Intervalle.
+            self._meldung_warten = ""
+            meldung = (
+                "Gerät bietet keine Pulsintervalle an — SDK-Modus aktiv? "
+                "In Polar Flow bzw. Polar Sensor Logger ausschalten. Bis dahin nur Puls."
+            )
         elif profil.kann(CAP_PMD_PPI):
             # Bleibt stehen: ohne PMD kommen von diesem Gerät keine Intervalle.
             self._meldung_warten = ""
@@ -444,10 +464,88 @@ class PolarQuelle(HeartRateSource):
             meldung = self._meldung_warten
         self._status_aendern(verbindung=Verbindung.VERBUNDEN, meldung=meldung)
 
+    async def _ppi_einrichten(self, gen: int) -> None:
+        """PMD-Control und -Data abonnieren, PPI starten — bei Fehlern mehrmals.
+
+        Die PMD-Characteristics der Verity Sense verlangen eine verschlüsselte
+        Verbindung. Läuft die Kopplung noch (oder stößt Android sie erst jetzt
+        an), lehnt das Gerät das Abo ab. Ein paar Sekunden später klappt es —
+        ohne die Verbindung abzubauen, die das Koppeln sonst wieder abbräche.
+        """
+        dev = self._device_id
+        for versuch in range(1, PMD_VERSUCHE + 1):
+            try:
+                await self._gatt(
+                    self._transport.subscribe(
+                        dev,
+                        PMD_SERVICE_UUID,
+                        PMD_CONTROL_UUID,
+                        self._empfaenger(self._control_empfangen, gen),
+                    )
+                )
+                await self._gatt(
+                    self._transport.subscribe(
+                        dev,
+                        PMD_SERVICE_UUID,
+                        PMD_DATA_UUID,
+                        self._empfaenger(self._pmd_empfangen, gen),
+                    )
+                )
+                await self._ppi_start_senden()
+                return
+            except Exception as e:
+                if versuch == PMD_VERSUCHE or self._getrennt_gemeldet or not self._laeuft:
+                    raise
+                self._log(f"PMD-Einrichtung {versuch}/{PMD_VERSUCHE} gescheitert: {e!r}")
+                self._status_aendern(meldung=f"Pulsintervalle einrichten … ({_kurz(e)})")
+                await self._schlafen(PMD_PAUSE_S)
+
+    async def _ppi_start_senden(self) -> None:
+        await self._gatt(
+            self._transport.write(
+                self._device_id, PMD_SERVICE_UUID, PMD_CONTROL_UUID, PPI_START, mit_antwort=True
+            )
+        )
+        self._ppi_aktiv = True
+        self._ppi_bezug = self._uhr()
+        self._log("PPI-Start gesendet (02 03)")
+
+    def _ppi_neu_starten(self, grund: str) -> None:
+        """PPI stoppen und neu starten — je Verbindung höchstens einmal."""
+        if self._ppi_neugestartet or not self._ppi_modus or not self._laeuft:
+            return
+        self._ppi_neugestartet = True
+        self._log(f"PPI neu starten: {grund}")
+        gen = self._generation
+
+        async def neustart() -> None:
+            try:
+                await self._gatt(
+                    self._transport.write(
+                        self._device_id,
+                        PMD_SERVICE_UUID,
+                        PMD_CONTROL_UUID,
+                        PPI_STOP,
+                        mit_antwort=True,
+                    )
+                )
+                await self._schlafen(0.5)
+                if gen == self._generation and self._laeuft:
+                    await self._ppi_start_senden()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._log(f"PPI-Neustart gescheitert: {e!r}")
+
+        self._ppi_neustart = asyncio.get_running_loop().create_task(
+            neustart(), name="polar-ppi-neustart"
+        )
+
     async def _koppeln(self) -> None:
         bond = getattr(self._transport, "bond", None)
         if bond is None:
             return
+        self._status_aendern(meldung="Kopple … ggf. die Kopplungsanfrage auf dem Handy bestätigen")
         try:
             await asyncio.wait_for(bond(self._device_id), timeout=TIMEOUT_KOPPELN_S)
             self._log("Kopplung bestätigt")
@@ -458,22 +556,31 @@ class PolarQuelle(HeartRateSource):
                 "Bluetooth-Einstellungen koppeln hilft"
             )
 
-    async def _profil_aus_pmd(self, profil: GeraeteProfil) -> GeraeteProfil:
-        """Ohne verwertbaren Namen: die PMD-Featuremaske entscheidet."""
+    async def _pmd_features(self) -> frozenset[str] | None:
+        """Die PMD-Featuremaske — ``None``, wenn sie sich nicht lesen ließ."""
         try:
             daten = await self._gatt(
                 self._transport.read(self._device_id, PMD_SERVICE_UUID, PMD_CONTROL_UUID)
             )
         except Exception as e:
             self._log(f"PMD-Features nicht lesbar: {e!r}")
-            return profil
+            return None
         typen = parse_feature_antwort(daten)
-        self._log(f"PMD-Features: {', '.join(sorted(typen)) or '—'}")
+        self._log(f"PMD-Features: {', '.join(sorted(typen)) or '—'} ({bytes(daten).hex(' ')})")
+        return typen
+
+    async def _profil_aus_pmd(
+        self, profil: GeraeteProfil
+    ) -> tuple[GeraeteProfil, frozenset[str] | None]:
+        """Ohne verwertbaren Namen: die PMD-Featuremaske entscheidet."""
+        typen = await self._pmd_features()
+        if typen is None:
+            return profil, None
         neu = VERITY_SENSE if "ppi" in typen else POLAR_H10 if "ecg" in typen else profil
         if neu is not profil:
             self._log(f"Profil aus PMD-Features: {neu.id}")
             self._profil = neu
-        return neu
+        return neu, typen
 
     async def _batterie_lesen(self) -> None:
         if self._dienste and BATTERY_SERVICE_UUID not in self._dienste:
@@ -539,6 +646,7 @@ class PolarQuelle(HeartRateSource):
                 )
                 self._log(self._meldung_ppi)
                 self._status_aendern(meldung=self._meldung_ppi)
+                self._ppi_neu_starten("keine PPI-Werte")
 
     async def _batterie_schleife(self) -> None:
         while self._laeuft:
@@ -674,8 +782,13 @@ class PolarQuelle(HeartRateSource):
         if antwort is None:
             self._log(f"PMD-Control: unerwartete Antwort {daten.hex(' ')}")
             return
-        if antwort.ok or antwort.fehler == FEHLER_LAEUFT_BEREITS:
+        if antwort.ok:
             self._log(f"PMD-Control ok: {antwort.text}")
+            return
+        if antwort.fehler == FEHLER_LAEUFT_BEREITS:
+            self._log(f"PMD-Control: {antwort.text}")
+            if antwort.opcode == OP_START and antwort.typ == MEAS_PPI:
+                self._ppi_neu_starten("Gerät meldet „läuft bereits“")
             return
         self._log(f"PMD-Control FEHLER: {antwort.text}")
         self._status_aendern(meldung=f"Gerät lehnt ab — {antwort.text}")

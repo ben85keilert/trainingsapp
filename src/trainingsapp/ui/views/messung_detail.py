@@ -24,11 +24,12 @@ from trainingsapp.hrv_core.korrektur import (
     anwenden,
     automatisch,
     kennzahlen,
-    naehte,
+    korr_zeiten,
+    rohfolge,
 )
-from trainingsapp.hrv_core.ppi import ppi_verworfen
+from trainingsapp.hrv_core.ppi import ppi_verworfen, schlagzeiten
 from trainingsapp.hrv_core.recording import laden
-from trainingsapp.ui.components.kurve import Reihe, kurve
+from trainingsapp.ui.components.kurve import HF_SPANNE_MIN_BPM, RR_SPANNE_MIN_MS, Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.state import AppState
@@ -166,8 +167,12 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         if any(v.beat_index in gespeicherte_indizes for v in k.vorschlag)
     }
     roh = kennzahlen(anwenden(rec, []))
-    roh_naehte = naehte(rec)
     verworfen = ppi_verworfen(rec)
+    # Zeitachse: Herzuhr aller Intervalle — bei der Verity Sense samt der vom
+    # Sensor verworfenen, sonst schrumpfte die Messung um deren Dauer.
+    achse = schlagzeiten(rec)
+    roh_punkte, roh_naehte = rohfolge(rec)
+    dauer = max((t for t, _ in roh_punkte), default=0.0)
 
     kennzahlen_box = ft.Container()
     rr_box = ft.Container()
@@ -217,23 +222,33 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         kennzahlen_box.content = tabelle(kennzahlen(korr))
         markiert = {v.beat_index for k in ketten for v in k.vorschlag}
         art = [
-            (rec.beats[i].t_s, float(rec.beats[i].rr_ms))
+            (achse[i], float(rec.beats[i].rr_ms))
             for i in sorted(markiert)
             if i < len(rec.beats) and 0 < rec.beats[i].rr_ms < 2600
         ]
-        # Nähte (Messlücke, vom Sensor verworfene Intervalle): die Linie reißt ab.
-        sichtbar, sichtbar_naehte = _linie(
-            ((b.t_s, float(b.rr_ms)) for b in rec.beats), roh_naehte, 200, 2600
+        # Grau reißt nur an Messlücken ab; farbig auch an vom Sensor verworfenen
+        # Intervallen und Ausschlüssen — dort gibt es keine Schlag-zu-Schlag-Differenz.
+        sichtbar, sichtbar_naehte = _linie(roh_punkte, roh_naehte, 200, 2600)
+        korr_linie, korr_naehte = _linie(
+            zip(korr_zeiten(korr, achse), korr.rr_ms, strict=True), korr.breaks
         )
-        korr_linie, korr_naehte = _linie(zip(korr.t_s, korr.rr_ms, strict=True), korr.breaks)
         rr_box.content = kurve(
             [
-                Reihe(sichtbar, farbe=ft.Colors.OUTLINE, breite=1, naehte=sichtbar_naehte),
+                Reihe(
+                    sichtbar,
+                    farbe=ft.Colors.OUTLINE,
+                    breite=1,
+                    naehte=sichtbar_naehte,
+                    skala=False,
+                ),
                 Reihe(korr_linie, farbe=ft.Colors.PRIMARY, naehte=korr_naehte),
-                Reihe(art, farbe=ROT, nur_punkte=True),
+                Reihe(art, farbe=ROT, nur_punkte=True, skala=False),
             ],
             einheit="RR ms",
             hoehe=220,
+            x_von=0.0,
+            x_bis=dauer,
+            y_spanne_min=RR_SPANNE_MIN_MS,
         )
         ketten_box.controls = [ketten_zeile(i, k) for i, k in enumerate(ketten)] or [
             ft.Text("Keine Auffälligkeiten gefunden.", opacity=0.7)
@@ -271,7 +286,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     def ketten_zeile(i: int, k: Kette) -> ft.Control:
         an = i in uebernommen
-        t = rec.beats[k.start].t_s if k.start < len(rec.beats) else 0.0
+        t = achse[k.start] if k.start < len(achse) else 0.0
         anzahl = k.ende - k.start + 1
         was = "interpolieren" if k.art == "interpolieren" else "ausschließen"
         return ft.ListTile(
@@ -288,10 +303,10 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     async def notiz_speichern(e: ft.Event[ft.TextField]) -> None:
         state.hrv.notiz_setzen(eintrag.id, e.control.value or "")
 
-    hf_punkte = [(b.t_s, float(b.hf_bpm)) for b in rec.beats if b.hf_bpm]
+    hf_punkte = [(t, float(b.hf_bpm)) for t, b in zip(achse, rec.beats, strict=True) if b.hf_bpm]
     kopf = [
         rec.geraet or eintrag.geraet,
-        _uhr(rec.dauer_s),
+        _uhr(dauer),
         QUALITAET.get(rec.effektive_qualitaet(), rec.effektive_qualitaet()),
         *_verworfen_text(verworfen),
     ]
@@ -313,12 +328,24 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             ft.Text("RR-TACHOGRAMM", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
             rr_box,
             ft.Text(
-                "Grau: Rohwerte · Farbig: korrigiert · Rot: auffällige Schläge",
+                (
+                    "Grau: alle Intervalle des Sensors, auch verworfene · Farbig: gewertet "
+                    "(korrigiert) · Rot: auffällige Schläge"
+                )
+                if verworfen
+                else "Grau: Rohwerte · Farbig: korrigiert · Rot: auffällige Schläge",
                 size=11,
                 opacity=0.55,
             ),
             ft.Text("HERZFREQUENZ", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-            kurve([Reihe(hf_punkte, farbe=ft.Colors.TERTIARY)], einheit="HF bpm", hoehe=140),
+            kurve(
+                [Reihe(hf_punkte, farbe=ft.Colors.TERTIARY)],
+                einheit="HF bpm",
+                hoehe=140,
+                x_von=0.0,
+                x_bis=dauer,
+                y_spanne_min=HF_SPANNE_MIN_BPM,
+            ),
             ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 controls=[

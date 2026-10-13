@@ -141,15 +141,38 @@ def test_uhr_verankert_nach_verlust_neu() -> None:
 
 
 @pytest.mark.asyncio
-async def test_verworfene_intervalle_werden_live_zur_naht() -> None:
-    """Blocker vor Index 7 (im selben Paket) und 9–11 (über die Paketgrenze bei 10)."""
+async def test_verworfene_intervalle_stehen_live_in_der_kurve() -> None:
+    """Blocker bei Index 7 (mitten im Paket) und 9–11 (über die Paketgrenze bei 10).
+
+    Vorher fehlten sie im Live-Fenster ganz; bei 44 % verworfenen Intervallen
+    blieben von der Kurve nur Bruchstücke mit Zeitlücken dazwischen.
+    """
     rr = _rr_reihe(40)
     lauf = await _live(rr, blockiert=frozenset({7, 9, 10, 11}))
     punkte = lauf.live.punkte()
-    erwartet = [x for i, x in enumerate(rr) if i not in {7, 9, 10, 11}]
-    assert [p.rr_ms for p in punkte] == erwartet
-    # Naht vor dem Schlag nach 7 (Index 8) und nach 9–11 (Index 12)
-    assert [i for i, p in enumerate(punkte) if p.naht_davor] == [7, 8]
+    assert [p.rr_ms for p in punkte] == rr
+    assert [i for i, p in enumerate(punkte) if p.verworfen] == [7, 9, 10, 11]
+    assert all(p.rr_korr is None and not p.artefakt for p in punkte if p.verworfen)
+    # Die Zeit läuft mit den Intervallen weiter — auch über die verworfenen.
+    abweichung = np.diff([p.t_s for p in punkte]) * 1000 - np.array(rr[1:])
+    assert (np.abs(abweichung) > 100).sum() <= 2
+    kz = lauf.live.kennzahlen()
+    assert (kz.schlaege, kz.verworfen) == (36, 4)
+
+
+def test_live_kennzahlen_differenzieren_nicht_ueber_verworfene() -> None:
+    from trainingsapp.hrv_core.live import LiveFenster
+    from trainingsapp.hrv_core.time_domain import compute_time_domain
+
+    f = LiveFenster()
+    werte = [800, 820, 800, 820, 800, 1000, 1020, 1000, 1020, 1000]
+    for i, rr in enumerate(werte):
+        f.hinzufuegen(i * 0.9, rr, 70, verworfen=i == 5)
+    kz = f.kennzahlen()
+    erwartet = compute_time_domain([*werte[:5], None, *werte[6:]])
+    assert erwartet is not None and kz.rmssd_30s == pytest.approx(erwartet["rmssd"])
+    assert kz.rmssd_30s == pytest.approx(20.0)  # über den Verworfenen hinweg: 220 ms Sprung
+    assert kz.rr_ms == 1000 and kz.verworfen == 1
 
 
 def test_live_kennzahlen_differenzieren_nicht_ueber_die_naht() -> None:

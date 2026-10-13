@@ -265,3 +265,45 @@ def test_detailansicht_meldet_verworfene_intervalle(daten) -> None:
         if isinstance(c, ft.Text) and "Bruchstücken" in (c.value or "")
     ]
     assert hinweis2[0].visible
+
+
+def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None:
+    """Graue Linie über alle Intervalle, auch verworfene; Dauer und Achse inklusive."""
+    import shutil
+    from pathlib import Path
+
+    import flet_charts as fc
+
+    from trainingsapp.hrv_core.ppi import ppi_folge
+    from trainingsapp.hrv_core.recording import laden
+
+    state, tmp_path = daten
+    golden = Path(__file__).parent / "golden" / "rr" / "sensor_2026-10-13_000000.json"
+    ordner = tmp_path / "Messungen" / "VeritySense"
+    ordner.mkdir(parents=True)
+    pfad = ordner / golden.name
+    shutil.copy(golden, pfad)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet="Polar Sense SYNTH",
+        geraet_profil="verity_sense",
+        intervall_quelle="ppg_ppi",
+    )
+    state.hrv.anlegen(eintrag)
+    ansicht = messung_detail_view(_seite(), state, eintrag)
+    folge = ppi_folge(laden(pfad))
+    assert folge is not None
+    dauer = folge[-1].t_s
+
+    rr_kurve, hf_kurve = [c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)]
+    grau = rr_kurve.data_series[0]
+    assert len(grau.points) == 300  # alle Intervalle, eine durchgehende Linie
+    assert rr_kurve.max_x == hf_kurve.max_x == pytest.approx(dauer)
+    texte = _baum_texte(ansicht)
+    assert any(f"{int(dauer) // 60}:{int(dauer) % 60:02d}" in x for x in texte)
+    assert any("auch verworfene" in x for x in texte)
+    for kurve in (rr_kurve, hf_kurve):
+        achse = kurve.left_axis
+        assert not achse.show_min and not achse.show_max
+        assert all(label.value % achse.label_spacing == 0 for label in achse.labels)

@@ -27,8 +27,9 @@ from ..hrv_core.aufnahme import Aufnahme
 from ..hrv_core.constants import malik_threshold
 from ..hrv_core.export import diagnose_pfad, diagnose_text
 from ..hrv_core.live import LiveFenster
+from ..hrv_core.ppi import messluecken
 from ..hrv_core.recording import Recording, messordner
-from ..hrv_core.segments import abdeckung, luecken_finden
+from ..hrv_core.segments import abdeckung
 from ..hrv_core.zeitachse import Kontinuitaetsuhr
 from .base import DeviceStatus, HeartRateSource, Messwert, PpiPaket, Verbindung
 from .profiles import GeraeteProfil, profil_fuer_namen
@@ -75,8 +76,8 @@ class Messlauf:
         # Intervallsumme statt aus der streuenden Ankunft (`hrv_core.zeitachse`).
         self._ppi_uhr = Kontinuitaetsuhr()
         #: Erwartete Schläge des letzten PPI-Pakets: (rr_ms, Anzeigezeit, Naht davor)
+        # Anzeigezeiten des letzten PPI-Pakets: (rr_ms, t, verworfen) in Folge
         self._schlagzeiten: deque[tuple[int, float, bool]] = deque()
-        self._ppi_verworfen = False  # verworfene Intervalle seit dem letzten brauchbaren
         self.aufnahme: Aufnahme | None = None
         self.status = DeviceStatus(verbindung=Verbindung.GETRENNT)
         self.device_id = ""
@@ -118,7 +119,6 @@ class Messlauf:
         self.live = LiveFenster(malik=malik_threshold(quelle))
         self._ppi_uhr = Kontinuitaetsuhr()
         self._schlagzeiten.clear()
-        self._ppi_verworfen = False
         self.start_mono = self._uhr()
         self.status = self.quelle.aktueller_status
 
@@ -139,6 +139,7 @@ class Messlauf:
                 self.live.hinzufuegen(
                     self._live_zeit(wert) - self.start_mono, wert.rr_ms, wert.hf_bpm
                 )
+                self._verworfene_zeigen()
                 if self.aufnahme is not None:
                     self.aufnahme.schlag(wert.rr_ms, wert.hf_bpm, wert.t_capture, wert.tw_src)
                     self._backup_wenn_faellig()
@@ -151,37 +152,41 @@ class Messlauf:
             self._melden(True)
 
     def _ppi_paket_erwarten(self, paket: PpiPaket) -> None:
-        """Anzeigezeiten und Nähte für die Schläge eines PPI-Pakets vormerken.
+        """Anzeigezeiten aller Intervalle eines PPI-Pakets vormerken.
 
-        Hat das Gerät vor einem brauchbaren Intervall welche verworfen (auch im
-        vorigen Paket), sind die beiden Schläge keine Nachbarn: Naht.
+        Die brauchbaren kommen gleich als `Messwert` hinterher und holen sich
+        ihre Zeit in `_live_zeit`. Die vom Gerät verworfenen gehen direkt ins
+        Live-Fenster (`_verworfene_zeigen`), jeweils an ihrer Stelle in der
+        Folge — dort trennen sie die Kennzahlen und füllen die Kurve.
         """
-        brauchbar = [not b and p > 0 for p, b in zip(paket.ppi_ms, paket.blocker, strict=True)]
-        zeiten = iter(self._ppi_uhr.paket(paket.t_capture, paket.ppi_ms, brauchbar))
+        self._verworfene_zeigen()
+        gueltig = [p > 0 for p in paket.ppi_ms]
+        zeiten = iter(self._ppi_uhr.paket(paket.t_capture, paket.ppi_ms, gueltig))
         erwartet: deque[tuple[int, float, bool]] = deque()
-        for ok in brauchbar:
-            if not ok:
-                self._ppi_verworfen = True
+        for rr, blocker in zip(paket.ppi_ms, paket.blocker, strict=True):
+            if rr <= 0:
                 continue
-            rr, t = next(zeiten)
-            erwartet.append((rr, t, self._ppi_verworfen))
-            self._ppi_verworfen = False
+            _, t = next(zeiten)
+            erwartet.append((rr, t, bool(blocker)))
         self._schlagzeiten = erwartet
+        self._verworfene_zeigen()
+
+    def _verworfene_zeigen(self) -> None:
+        """Verworfene Intervalle vorn in der Warteschlange ins Live-Fenster schreiben."""
+        while self._schlagzeiten and self._schlagzeiten[0][2]:
+            rr, t, _ = self._schlagzeiten.popleft()
+            self.live.hinzufuegen(t - self.start_mono, rr, 0, verworfen=True)
 
     def _live_zeit(self, wert: Messwert) -> float:
         """Anzeigezeit eines Schlags: Kontinuitätsuhr, falls er zum letzten PPI-Paket gehört.
 
         Die Quelle schickt das Paket vor seinen Schlägen. Passt das Intervall
         nicht zum nächsten erwarteten (fremder Schlag), gilt die Ankunft. Die
-        Datei bekommt immer die Ankunftszeit (``aufnahme.schlag``). Lagen davor
-        verworfene Intervalle, bekommt das Live-Fenster eine Naht.
+        Datei bekommt immer die Ankunftszeit (``aufnahme.schlag``).
         """
         if self._schlagzeiten:
             if self._schlagzeiten[0][0] == wert.rr_ms:
-                _, t, naht = self._schlagzeiten.popleft()
-                if naht:
-                    self.live.naht()
-                return t
+                return self._schlagzeiten.popleft()[1]
             self._schlagzeiten.clear()
         return wert.t_capture
 
@@ -274,7 +279,7 @@ class Messlauf:
         if text:
             with contextlib.suppress(OSError):
                 diagnose_pfad(pfad).write_text(text, encoding="utf-8")
-        deckung = abdeckung(rec.beats, luecken_finden(rec.beats))
+        deckung = abdeckung(rec.beats, messluecken(rec))
         return Gespeichert(
             pfad=pfad,
             recording=rec,

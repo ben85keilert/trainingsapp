@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 from bisect import bisect_left
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,9 +53,8 @@ from .constants import (
     RR_MAX_MS,
     RR_MIN_MS,
 )
-from .ppi import ppi_naehte, ppi_zeilen
+from .ppi import messluecken, ppi_folge, ppi_naehte, ppi_zeilen, schlagzeiten
 from .recording import Recording, json_atomar_schreiben
-from .segments import luecken_finden
 from .time_domain import compute_time_domain
 
 SCHEMA_ANALYSE: str = "analysis-v1"
@@ -186,16 +186,22 @@ def _zeitachse(rec: Recording) -> list[float]:
     return [float(b.t_s) for b in rec.beats]
 
 
-def _ungedeckt_s(t: list[float], rr: np.ndarray, lo: int, hi: int) -> float:
+def _ungedeckt_s(
+    t: list[float], rr: np.ndarray, lo: int, hi: int, verworfen: list[float] | None = None
+) -> float:
     """Wanduhr-Spanne einer Kette minus Summe ihrer RR — die echte Lückendauer.
 
     Wie praxis_gui `range_excess_s`: Spanne vom Schlag ``lo`` bis zum Schlag
     nach der Kette. Normal getaktete Artefakt-Schläge überspannen Sekunden,
     ohne dass etwas fehlt; erst der Überschuss zeigt einen Sensorausfall.
+    ``verworfen`` (kumuliert je Schlag, s) zieht die Dauer der vom Gerät
+    verworfenen Intervalle ab — auch sie haben die Zeit gefüllt.
     """
     n = len(t)
     b = min(n - 1, hi + 1)
     spanne = max(0.0, round(t[b] - t[lo], 2))
+    if verworfen is not None:
+        spanne -= verworfen[b] - verworfen[lo]
     return max(0.0, round(spanne - float(rr[lo : hi + 1].sum()) / 1000.0, 2))
 
 
@@ -292,11 +298,13 @@ def automatisch(
 
     t_wand = _zeitachse(rec)
     t_herz = [b.t_s for b in rec.beats]
+    # Dauer der bis zu jedem Schlag verworfenen Intervalle (0 ohne ppi_pakete)
+    verworfen = [v - h for v, h in zip(schlagzeiten(rec), t_herz, strict=True)]
     ketten: list[Kette] = []
     for lo, hi in laeufe:
         indizes = [i for i in range(lo, hi + 1) if i in gruende]
         n_schlaege = hi - lo + 1
-        luecke = _ungedeckt_s(t_wand, rr, lo, hi)
+        luecke = _ungedeckt_s(t_wand, rr, lo, hi, verworfen)
         alle = set().union(*(gruende[i] for i in indizes))
         grund = ", ".join(g for g in reihenfolge if g in alle)
         if n_schlaege > KETTE_UNSICHER_MAX or luecke > KETTE_MAX_INTERP_GAP_S:
@@ -405,11 +413,33 @@ def naehte(rec: Recording) -> list[int]:
     Zwei Quellen, beide unabhängig von jeder Korrektur:
 
     - **Messlücken** aus der Divergenz von Wand- und Herzuhr
-      (`segments.luecken_finden`) — z. B. ein Verbindungsabriss.
+      (`ppi.messluecken`) — z. B. ein Verbindungsabriss.
     - **Vom Gerät verworfene Intervalle** (Verity Sense, Blocker-Bit): Sie
       fehlen in ``messungen``, ihre Nachbarn sind keine (`ppi.ppi_naehte`).
     """
-    return sorted(set(luecken_finden(rec.beats)) | set(ppi_naehte(rec)))
+    return sorted(set(messluecken(rec)) | set(ppi_naehte(rec)))
+
+
+def rohfolge(rec: Recording) -> tuple[list[tuple[float, float]], list[int]]:
+    """Rohwerte für die Kurve: ``[(zeit_s, ms)]`` und die Nähte (Indizes davor).
+
+    Mit ``ppi_pakete`` sind das **alle** Intervalle des Geräts, auch die
+    verworfenen, auf der Herzuhr aller Intervalle — eine durchgehende Linie,
+    die nur an Messlücken abreißt. Ohne sie die Zeilen von ``messungen`` mit
+    ihren `naehte`. Die Kennzahlen rechnen nie auf dieser Folge.
+
+    >>> from trainingsapp.hrv_core.recording import Beat
+    >>> pakete = [{"ppi_ms": [800, 810, 820], "blocker": [0, 1, 0]}]
+    >>> rohfolge(Recording(beats=[Beat(0.8, 800), Beat(1.62, 820)], ppi_pakete=pakete))
+    ([(0.8, 800.0), (1.61, 810.0), (2.43, 820.0)], [])
+    """
+    folge = ppi_folge(rec)
+    if folge is None:
+        return [(float(b.t_s), float(b.rr_ms)) for b in rec.beats], naehte(rec)
+    zeile = [j for j, p in enumerate(folge) if p.brauchbar]
+    # Lücke vor Zeile i: die Linie reißt direkt hinter Zeile i − 1 ab.
+    luecken = [zeile[i - 1] + 1 for i in messluecken(rec) if 0 < i < len(zeile)]
+    return [(p.t_s, float(p.ppi_ms)) for p in folge], luecken
 
 
 def anwenden(rec: Recording, korrekturen: list[Korrektur]) -> Korrigiert:
@@ -527,6 +557,38 @@ def anwenden(rec: Recording, korrekturen: list[Korrektur]) -> Korrigiert:
         interpoliert=sum(f == "interp" for f in flags),
         roh_index=roh,
     )
+
+
+def korr_zeiten(korr: Korrigiert, achse: Sequence[float]) -> list[float]:
+    """Zeit je korrigiertem Wert auf einer Zeitachse der Rohschläge — für die Kurve.
+
+    ``achse`` hat je Rohschlag einen Wert (``t_s`` oder `ppi.schlagzeiten`).
+    Ein korrigierter Wert steht am Ende seines Rohschlags, so liegen roh und
+    korrigiert übereinander. ``korr.t_s`` taugt dafür nicht: Es summiert die
+    korrigierten Werte und rückt hinter ausgeschlossenen Schlägen um deren
+    Dauer nach vorn. Teilstücke (``split``) teilen ihren Rohschlag anteilig,
+    ``merge`` endet mit dem zweiten Schlag.
+
+    >>> from trainingsapp.hrv_core.recording import Beat
+    >>> rec = Recording(beats=[Beat(t_s=0.8 * (i + 1), rr_ms=800) for i in range(5)])
+    >>> k = anwenden(rec, [Korrektur("exclude_range", 1, 1.6, 800.0, beat_index_end=2)])
+    >>> k.t_s, korr_zeiten(k, [b.t_s for b in rec.beats])
+    ([0.8, 1.6, 2.4], [0.8, 3.2, 4.0])
+    >>> korr_zeiten(anwenden(rec, [Korrektur("split", 1, 1.6, 800.0, n_parts=2)]), [1, 2, 3, 4, 5])
+    [1, 1.6, 2, 3, 4, 5]
+    """
+    n = len(achse)
+    zeiten = [0.0] * len(korr.rr_ms)
+    rest = 0.0  # Dauer der folgenden Teilstücke desselben Rohschlags (s)
+    for j in range(len(korr.rr_ms) - 1, -1, -1):
+        ri = korr.roh_index[j]
+        if j + 1 < len(korr.rr_ms) and korr.roh_index[j + 1] == ri:
+            rest += korr.rr_ms[j + 1] / 1000.0
+        else:
+            rest = 0.0
+        ende = achse[min(ri + 1, n - 1)] if korr.flag[j] == "merge" else achse[ri]
+        zeiten[j] = round(ende - rest, 4) if rest else ende
+    return zeiten
 
 
 def kennzahlen(korr: Korrigiert) -> dict[str, Any] | None:
@@ -659,4 +721,7 @@ __all__ = [
     "anwenden",
     "automatisch",
     "kennzahlen",
+    "korr_zeiten",
+    "naehte",
+    "rohfolge",
 ]

@@ -21,7 +21,10 @@ from typing import Final
 # 2 (2026-10-13): Nähte an erkannten Messlücken und an den von der Verity Sense
 #   verworfenen Intervallen (`ppi.ppi_naehte`) — vorher wurde über beide hinweg
 #   differenziert, RMSSD optischer Messungen in Bewegung lag bis 60 % zu hoch.
-ALGO_VERSION: Final[int] = 2
+# 3 (2026-10-13): Messlücken bei PPI auf der Herzuhr aller Intervalle
+#   (`ppi.messluecken`) — auf ``t_s`` sah jeder längere Blocker-Lauf wie ein
+#   Verbindungsabriss aus und setzte eine zusätzliche Naht.
+ALGO_VERSION: Final[int] = 3
 
 # ---------------------------------------------------------------------------
 # Plausibilitätsgrenzen für RR-Intervalle

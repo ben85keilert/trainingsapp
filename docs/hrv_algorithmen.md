@@ -75,7 +75,7 @@ Implementierung: `hrv_core/segments.py::segment_diffs`.
 Außer verworfenen Werten in der Reihe selbst gibt es zwei Nähte, die man der
 Reihe nicht ansieht — beide gelten immer, auch in der Rohspalte ohne Korrektur:
 
-- **Messlücken** (`segments.luecken_finden`, nächster Abschnitt) — etwa ein
+- **Messlücken** (`ppi.messluecken`, nächster Abschnitt) — etwa ein
   Verbindungsabriss beim H10.
 - **Vom Sensor verworfene Intervalle** (Verity Sense, Blocker-Bit). Sie stehen
   nicht in `messungen` (wie bei praxis_gui), ihre Nachbarn sind dort aber
@@ -87,8 +87,19 @@ Gemessen am 13.10.2026: eine kurze Ruhemessung (37 % verworfen) RMSSD 36,5 statt
 41,8 ms; eine 15-min-Messung in Bewegung (80 % verworfen) roh 102 statt 158 ms.
 Bis ALGO_VERSION 1 wurde über beide Nahtarten hinweg differenziert.
 
-Live meldet der `Messlauf` dieselbe Naht an das `LiveFenster` (`naht()`); die
-Kurven reißen an Nähten ab, statt einen Sprung vorzutäuschen.
+Live schreibt der `Messlauf` die verworfenen Intervalle mit ``verworfen=True``
+ins `LiveFenster`: Sie trennen die Kennzahlen wie eine Naht, werden aber
+gezeichnet.
+
+**Kurven.** Grau steht alles, was der Sensor geliefert hat — bei der Verity
+Sense **alle** Intervalle aus `ppi_pakete`, auch die verworfenen
+(`korrektur.rohfolge`); die Linie reißt nur an Messlücken ab. Farbig steht, was
+gewertet wird, und reißt an jeder Naht ab. Am 13.10.2026 verwarf die Verity
+Sense in Ruhe 44 % der Intervalle — ohne die graue Linie bestand die Kurve aus
+37 Bruchstücken. Gewertet werden sie trotzdem nicht: Differenzen, an denen ein
+verworfenes Intervall beteiligt ist, hatten RMSSD 43 ms, die übrigen 20 ms.
+Die Werteachse richtet sich nur nach der farbigen Linie; graue Ausreißer werden
+am Rand abgeschnitten, statt die Kurve zu stauchen.
 
 ---
 
@@ -100,6 +111,17 @@ Die **Divergenz** `D(i) = t_wall_s − t_s` wächst genau dann, wenn Schläge fe
 Erkannt wird über ein Fenster von ±5 Schlägen, nicht über Einzeldifferenzen:
 rekonstruierte Zeitstempel (`tw_src == "r"`) sind systematisch etwas zu früh und
 erzeugen einzeln betrachtet eine Scheindrift von Minuten.
+
+**Verity Sense (ALGO_VERSION 3).** `t_s` summiert nur die brauchbaren
+Intervalle; die Divergenz wüchse mit jedem verworfenen, und ein Blocker-Lauf
+von wenigen Sekunden sähe aus wie ein Verbindungsabriss (13.10.2026: 11
+Scheinlücken in 3½ min Ruhe). `ppi.messluecken` rechnet darum auf der
+**Herzuhr aller Intervalle** (`ppi.schlagzeiten`, die Summe aller Intervalle
+aus `ppi_pakete`). Aus demselben Grund zieht die Kettenplanung der Automatik
+die Dauer verworfener Intervalle von der „ungedeckten" Zeit ab — sonst schlug
+sie Ketten über einen Blocker-Lauf zum Ausschluss vor statt zur Interpolation.
+Dieselbe Herzuhr ist die x-Achse der Detailkurve: Die Messung dauert dort so
+lange, wie sie gedauert hat.
 
 Ohne Wanduhr ist keine Lückenerkennung möglich. `luecken_finden` gibt dann eine
 leere Liste zurück, statt etwas zu erfinden.

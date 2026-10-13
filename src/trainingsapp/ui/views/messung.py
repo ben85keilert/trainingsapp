@@ -26,7 +26,7 @@ from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.devices.profiles import profil_fuer_namen
 from trainingsapp.devices.simulated import SIM_PPI, SIM_PREFIX, SIM_SYNTH, SimulatedSource
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
-from trainingsapp.ui.components.kurve import Reihe, kurve
+from trainingsapp.ui.components.kurve import HF_SPANNE_MIN_BPM, RR_SPANNE_MIN_MS, Reihe, kurve
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.state import AppState
 
@@ -360,6 +360,12 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     def zahlen() -> ft.Control:
         k = lauf.live.kennzahlen()
         hf = k.hf_bpm if k.hf_bpm is not None else lauf.status.hf_bpm
+        # Nur bei Sensoren, die selbst verwerfen (Verity Sense)
+        verworfen = (
+            [_kachel("Vom Sensor verworfen", f"{k.verworfen}", f"von {k.schlaege + k.verworfen}")]
+            if k.verworfen
+            else []
+        )
         return ft.Row(
             wrap=True,
             spacing=8,
@@ -371,6 +377,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 _kachel("SDNN 60 s", _zahl(k.sdnn_60s, 1), "ms"),
                 _kachel("Schwankung 60 s", _zahl(k.schwankung_60s, 1), "bpm"),
                 _kachel("Artefakte", f"{k.artefakte}", f"von {k.schlaege}"),
+                *verworfen,
             ],
         )
 
@@ -380,24 +387,37 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         punkte = lauf.live.punkte(seit_s=max(0.0, jetzt - fenster))
         x_von, x_bis = max(0.0, jetzt - fenster), max(jetzt, float(fenster))
         mit_rr = [p for p in punkte if p.rr_ms > 0]
+        # Grau: alles, was der Sensor geliefert hat — auch vom Gerät verworfene
+        # Intervalle; so bleibt die Kurve durchgehend (Verity Sense).
+        grau: list[tuple[float, float]] = []
+        grau_naehte: list[int] = []
         rr_linie: list[tuple[float, float]] = []
-        rr_naehte: list[int] = []  # davor hat der Sensor Intervalle verworfen
+        rr_naehte: list[int] = []  # davor verworfen oder Lücke: Linie reißt ab
+        offen = False
         for p in mit_rr:
+            if p.naht_davor and grau:
+                grau_naehte.append(len(grau))
+            if 250 < p.rr_ms < 2200:
+                grau.append((p.t_s, float(p.rr_ms)))
             wert = p.rr_korr if state.messung_korrigiert else float(p.rr_ms)
-            if wert is None:
+            if p.verworfen or wert is None:
+                offen = True
                 continue
-            if p.naht_davor and rr_linie:
+            if (offen or p.naht_davor) and rr_linie:
                 rr_naehte.append(len(rr_linie))
+            offen = False
             rr_linie.append((p.t_s, wert))
         artefakte = [(p.t_s, float(p.rr_ms)) for p in mit_rr if p.artefakt and 250 < p.rr_ms < 2200]
         rr = kurve(
             [
+                Reihe(grau, farbe=ft.Colors.OUTLINE, breite=1, naehte=grau_naehte, skala=False),
                 Reihe(rr_linie, farbe=ft.Colors.PRIMARY, naehte=rr_naehte),
-                Reihe(artefakte, farbe=ROT, nur_punkte=True),
+                Reihe(artefakte, farbe=ROT, nur_punkte=True, skala=False),
             ],
             einheit="RR ms",
             x_von=x_von,
             x_bis=x_bis,
+            y_spanne_min=RR_SPANNE_MIN_MS,
         )
         hf_punkte = [(p.t_s, float(p.hf_bpm)) for p in punkte if p.hf_bpm > 0]
         hf = kurve(
@@ -406,6 +426,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             hoehe=130,
             x_von=x_von,
             x_bis=x_bis,
+            y_spanne_min=HF_SPANNE_MIN_BPM,
         )
         return rr, hf
 
@@ -483,8 +504,9 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             rr_box,
             hf_box,
             ft.Text(
-                "Rote Punkte: Artefakte (markiert, nicht verändert). Gespeichert werden immer "
-                "die Rohwerte; korrigiert wird in der Aufzeichnung.",
+                "Grau: Rohwerte, auch vom Sensor verworfene · Rote Punkte: Artefakte (markiert, "
+                "nicht verändert). Gespeichert werden immer die Rohwerte; korrigiert wird in "
+                "der Aufzeichnung.",
                 size=11,
                 opacity=0.55,
             ),

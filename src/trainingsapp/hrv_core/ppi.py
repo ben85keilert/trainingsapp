@@ -10,13 +10,19 @@ blockiert) stieg RMSSD dadurch von 100 auf 158 ms.
 Die vollständige Folge steht in ``ppi_pakete`` (Vertrag, Abschnitt 3b): alle
 Intervalle samt Blocker-Bit und Fehlerschätzung. Daraus entsteht je Zeile
 `PpiZeile` — ob davor verworfen wurde und wie sicher das Gerät sich war.
+
+Für die Kurve liefert `ppi_folge` dieselbe Folge mit Zeit: Die Summe **aller**
+Intervalle ist die Herzuhr des Geräts. ``t_s`` in ``messungen`` summiert nur
+die brauchbaren — bei 44 % verworfenen Intervallen (13.10.2026, in Ruhe) zeigte
+die Kurve 2:00 statt der gemessenen 3:34, und jede Lücke war zugeschoben.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .recording import Recording
+from .segments import luecken_finden
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +33,18 @@ class PpiZeile:
     verworfen_davor: int
     #: Fehlerschätzung des Geräts für dieses Intervall (ms)
     fehler_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class PpiIntervall:
+    """Ein Intervall aus ``ppi_pakete`` auf der Herzuhr des Geräts."""
+
+    #: Ende des Intervalls: Beginn der Messung + Summe aller Intervalle bis hier (s)
+    t_s: float
+    ppi_ms: int
+    fehler_ms: int
+    #: Wie beim Schreiben: kein Blocker und ``ppi_ms > 0`` — steht in ``messungen``
+    brauchbar: bool
 
 
 def ppi_zeilen(rec: Recording) -> list[PpiZeile] | None:
@@ -102,6 +120,61 @@ def ppi_naehte(rec: Recording) -> list[int]:
     return [i for i, z in enumerate(zeilen) if i > 0 and z.verworfen_davor > 0]
 
 
+def ppi_folge(rec: Recording) -> list[PpiIntervall] | None:
+    """Alle Intervalle in Folge, mit Zeit auf der Herzuhr des Geräts — oder ``None``.
+
+    ``None`` unter denselben Bedingungen wie `ppi_zeilen`: Nur wenn die
+    brauchbaren Intervalle genau die Zeilen von ``messungen`` sind, gehören die
+    Zeiten zu ihnen. Die Uhr beginnt beim Beginn des ersten Zeilenintervalls
+    (wie ``t_s``); davor Verworfenes verschiebt die Zeilen nach hinten.
+
+    >>> from trainingsapp.hrv_core.recording import Beat
+    >>> pakete = [{"t_wall_s": 3.0, "ppi_ms": [800, 810, 820], "fehler_ms": [5, 9, 7],
+    ...            "blocker": [0, 1, 0], "kontakt": [1, 1, 1]}]
+    >>> rec = Recording(beats=[Beat(0.8, 800), Beat(1.62, 820)], ppi_pakete=pakete)
+    >>> [(p.t_s, p.ppi_ms, p.brauchbar) for p in ppi_folge(rec)]
+    [(0.8, 800, True), (1.61, 810, False), (2.43, 820, True)]
+    """
+    paare = _intervalle(rec)
+    if paare is None or ppi_zeilen(rec) is None or not rec.beats:
+        return None
+    t = float(rec.beats[0].t_s) - float(rec.beats[0].rr_ms) / 1000.0
+    folge: list[PpiIntervall] = []
+    for wert, fehler, blocker in paare:
+        t += max(wert, 0) / 1000.0
+        folge.append(PpiIntervall(round(t, 4), wert, fehler, not blocker and wert > 0))
+    return folge
+
+
+def schlagzeiten(rec: Recording) -> list[float]:
+    """Zeit je Zeile von ``messungen`` — auf der Herzuhr aller Intervalle, sonst ``t_s``.
+
+    >>> from trainingsapp.hrv_core.recording import Beat
+    >>> pakete = [{"ppi_ms": [800, 810, 820], "blocker": [0, 1, 0]}]
+    >>> schlagzeiten(Recording(beats=[Beat(0.8, 800), Beat(1.62, 820)], ppi_pakete=pakete))
+    [0.8, 2.43]
+    >>> schlagzeiten(Recording(beats=[Beat(0.8, 800), Beat(1.62, 820)]))
+    [0.8, 1.62]
+    """
+    folge = ppi_folge(rec)
+    if folge is None:
+        return [float(b.t_s) for b in rec.beats]
+    return [p.t_s for p in folge if p.brauchbar]
+
+
+def messluecken(rec: Recording) -> list[int]:
+    """Messlücken (`segments.luecken_finden`) — bei PPI auf der Herzuhr aller Intervalle.
+
+    Die Lückenerkennung vergleicht Wanduhr und Herzuhr. ``t_s`` zählt die vom
+    Gerät verworfenen Intervalle nicht mit, die Divergenz wüchse mit jedem
+    davon, und ein Blocker-Lauf von 4 s sähe aus wie ein Verbindungsabriss —
+    13.10.2026: 11 Scheinlücken in 3½ Minuten Ruhemessung. Ohne ``ppi_pakete``
+    ist es `luecken_finden` auf den Zeilen.
+    """
+    achse = schlagzeiten(rec)
+    return luecken_finden([replace(b, t_s=t) for b, t in zip(rec.beats, achse, strict=True)])
+
+
 def ppi_verworfen(rec: Recording) -> tuple[int, int] | None:
     """``(verworfen, gesamt)`` über alle Intervalle in ``ppi_pakete`` — ``None`` ohne Block.
 
@@ -114,4 +187,13 @@ def ppi_verworfen(rec: Recording) -> tuple[int, int] | None:
     return sum(1 for wert, _, blocker in paare if blocker or wert <= 0), len(paare)
 
 
-__all__ = ["PpiZeile", "ppi_naehte", "ppi_verworfen", "ppi_zeilen"]
+__all__ = [
+    "PpiIntervall",
+    "PpiZeile",
+    "messluecken",
+    "ppi_folge",
+    "ppi_naehte",
+    "ppi_verworfen",
+    "ppi_zeilen",
+    "schlagzeiten",
+]

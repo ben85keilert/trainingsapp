@@ -16,9 +16,15 @@ Markiert wird ein Schlag, wenn er
 Wert. Solche Punkte sind **nicht** markiert, haben keine korrigierte Kurve
 (``rr_korr = None``) und wirken in den Kennzahlen wie eine Naht.
 
-`naht` meldet, dass vor dem nächsten Schlag Intervalle fehlen (Verity Sense:
-vom Gerät verworfen). Der Punkt trägt dann ``naht_davor`` — keine Differenz
-in den Kennzahlen, keine Linie in der Kurve.
+Vom Gerät verworfene Intervalle (Verity Sense, Blocker-Bit) kommen mit
+``verworfen=True`` in den Puffer: Sie haben gedauert und gehören in die Kurve
+(grau), zählen aber nirgends mit — keine Bewertung, keine Kennzahl, und über
+sie hinweg keine Differenz. Bei 44 % verworfenen Intervallen in Ruhe
+(13.10.2026) bestand die Kurve ohne sie nur aus Bruchstücken.
+
+`naht` meldet, dass vor dem nächsten Schlag Intervalle fehlen, die nicht im
+Puffer stehen. Der Punkt trägt dann ``naht_davor`` — keine Differenz in den
+Kennzahlen, keine Linie in der Kurve.
 
 Die Malik-Bewertung wird bei jeder Abfrage über das ganze Fenster neu gerechnet
 (O(n), höchstens einige hundert Schläge). Am rechten Rand fehlen ihr die
@@ -66,8 +72,9 @@ class LivePunkt:
     rr_ms: int  # Rohwert (0 = kein RR)
     hf_bpm: int
     artefakt: bool  # implausibel oder Malik-Ausreißer im Fenster
-    rr_korr: float | None  # Wert der korrigierten Kurve; None bei rr=0
+    rr_korr: float | None  # Wert der korrigierten Kurve; None bei rr=0 und verworfen
     naht_davor: bool = False  # davor fehlen Intervalle — nicht verbinden
+    verworfen: bool = False  # vom Gerät verworfen: nur zeigen, nie werten
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +88,8 @@ class LiveKennzahlen:
     hf_mittel_60s: float | None  # Mittel der gemeldeten Herzfrequenz
     schwankung_60s: float | None  # Ø(max−min HF) je 10-s-Teilfenster, bpm
     artefakte: int  # markierte Schläge im Puffer
-    schlaege: int  # Schläge mit RR im Puffer
+    schlaege: int  # Schläge mit RR im Puffer (ohne verworfene)
+    verworfen: int = 0  # vom Gerät verworfene Intervalle im Puffer
 
 
 class LiveFenster:
@@ -110,17 +118,19 @@ class LiveFenster:
         self._rr: deque[int] = deque()
         self._hf: deque[int] = deque()
         self._naht: deque[bool] = deque()
+        self._verworfen: deque[bool] = deque()
         self._naht_offen = False
         self._cache: tuple[np.ndarray, np.ndarray] | None = None
 
     # -- Befüllen -----------------------------------------------------------
 
-    def hinzufuegen(self, t_s: float, rr_ms: int, hf_bpm: int) -> None:
+    def hinzufuegen(self, t_s: float, rr_ms: int, hf_bpm: int, verworfen: bool = False) -> None:
         """Einen Messwert anhängen und alles Ältere als ``max_s`` verwerfen.
 
         Die Anzeigezeit läuft nie zurück: liegt ``t_s`` nicht nach dem
         Vorgänger (gleiche Paketankunft, gebündelte PPI-Pakete), wird er um
         1 ms dahinter gesetzt. Das betrifft nur die x-Achse, nie die Datei.
+        ``verworfen``: vom Gerät als unbrauchbar markiert — nur für die Kurve.
         """
         t = float(t_s)
         if self._t and t <= self._t[-1]:
@@ -129,6 +139,7 @@ class LiveFenster:
         self._rr.append(int(rr_ms))
         self._hf.append(int(hf_bpm))
         self._naht.append(self._naht_offen)
+        self._verworfen.append(bool(verworfen))
         self._naht_offen = False
         grenze = t - self._max_s
         while self._t and self._t[0] < grenze:
@@ -136,6 +147,7 @@ class LiveFenster:
             self._rr.popleft()
             self._hf.popleft()
             self._naht.popleft()
+            self._verworfen.popleft()
         self._cache = None
 
     def naht(self) -> None:
@@ -147,6 +159,7 @@ class LiveFenster:
         self._rr.clear()
         self._hf.clear()
         self._naht.clear()
+        self._verworfen.clear()
         self._naht_offen = False
         self._cache = None
 
@@ -157,14 +170,15 @@ class LiveFenster:
         if self._cache is not None:
             return self._cache
         rr = np.asarray(self._rr, dtype=float)
-        plausibel = (rr >= AUFNAHME_RR_MIN_MS) & (rr <= AUFNAHME_RR_MAX_MS)
-        artefakt = (rr > 0) & ~plausibel
+        gewertet = ~np.asarray(self._verworfen, dtype=bool)
+        plausibel = (rr >= AUFNAHME_RR_MIN_MS) & (rr <= AUFNAHME_RR_MAX_MS) & gewertet
+        artefakt = (rr > 0) & ~plausibel & gewertet
         idx_p = np.flatnonzero(plausibel)
         if idx_p.size >= MALIK_WINDOW:
             _, ausreisser = clean_rr(rr[idx_p], threshold=self._malik)
             artefakt[idx_p[ausreisser]] = True
 
-        gut = (rr > 0) & ~artefakt
+        gut = (rr > 0) & ~artefakt & gewertet
         rr_korr = np.where(gut, rr, np.nan)
         idx_gut = np.flatnonzero(gut)
         idx_art = np.flatnonzero(artefakt)
@@ -177,8 +191,8 @@ class LiveFenster:
         """Alle Punkte im Puffer, oder nur die ab ``seit_s`` (Wanduhr)."""
         artefakt, rr_korr = self._bewerten()
         out: list[LivePunkt] = []
-        for i, (t, rr, hf, naht) in enumerate(
-            zip(self._t, self._rr, self._hf, self._naht, strict=True)
+        for i, (t, rr, hf, naht, verworfen) in enumerate(
+            zip(self._t, self._rr, self._hf, self._naht, self._verworfen, strict=True)
         ):
             if seit_s is not None and t < seit_s:
                 continue
@@ -191,6 +205,7 @@ class LiveFenster:
                     artefakt=bool(artefakt[i]),
                     rr_korr=None if np.isnan(korr) else korr,
                     naht_davor=naht,
+                    verworfen=verworfen,
                 )
             )
         return out
@@ -198,9 +213,9 @@ class LiveFenster:
     def kennzahlen(self) -> LiveKennzahlen:
         """Anzeigewerte über die jüngsten Teilfenster des Puffers.
 
-        RMSSD und SDNN rechnen auf den **Rohwerten**, markierte Schläge wirken
-        als Naht (Boundary-Skip) — interpolierte Werte trügen keine echte
-        Variabilität und würden RMSSD drücken.
+        RMSSD und SDNN rechnen auf den **Rohwerten**, markierte und verworfene
+        Schläge wirken als Naht (Boundary-Skip) — interpolierte Werte trügen
+        keine echte Variabilität und würden RMSSD drücken.
         """
         n = len(self._t)
         if n == 0:
@@ -209,7 +224,8 @@ class LiveFenster:
         t = np.asarray(self._t, dtype=float)
         rr = np.asarray(self._rr, dtype=float)
         hf = np.asarray(self._hf, dtype=float)
-        gut = (rr > 0) & ~artefakt
+        verworfen = np.asarray(self._verworfen, dtype=bool)
+        gut = (rr > 0) & ~artefakt & ~verworfen
         t_ende = float(t[-1])
 
         naht = np.asarray(self._naht, dtype=bool)
@@ -230,8 +246,9 @@ class LiveFenster:
         im_hf = (t >= t_ende - LIVE_HF_S) & (hf > 0)
         hf_mittel = float(hf[im_hf].mean()) if im_hf.any() else None
 
-        letzte_rr = next((int(r) for r in reversed(self._rr) if r > 0), None)
-        letzte_hf = int(self._hf[-1]) if self._hf[-1] > 0 else None
+        gewertet = rr[(rr > 0) & ~verworfen]
+        letzte_rr = int(gewertet[-1]) if gewertet.size else None
+        letzte_hf = next((int(h) for h in reversed(self._hf) if h > 0), None)
 
         return LiveKennzahlen(
             hf_bpm=letzte_hf,
@@ -241,7 +258,8 @@ class LiveFenster:
             hf_mittel_60s=hf_mittel,
             schwankung_60s=_schwankung(t, rr, hf, gut, t_ende),
             artefakte=int(artefakt.sum()),
-            schlaege=int((rr > 0).sum()),
+            schlaege=int(((rr > 0) & ~verworfen).sum()),
+            verworfen=int(verworfen.sum()),
         )
 
 

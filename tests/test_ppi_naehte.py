@@ -16,7 +16,7 @@ import pytest
 
 from trainingsapp.hrv_core.constants import ALGO_VERSION, MALIK_THRESHOLD_PPI
 from trainingsapp.hrv_core.korrektur import anwenden, automatisch, kennzahlen, naehte
-from trainingsapp.hrv_core.ppi import ppi_naehte, ppi_verworfen, ppi_zeilen
+from trainingsapp.hrv_core.ppi import messluecken, ppi_naehte, ppi_verworfen, ppi_zeilen
 from trainingsapp.hrv_core.recording import Beat, Recording, laden
 from trainingsapp.hrv_core.segments import luecken_finden
 
@@ -44,7 +44,7 @@ def _rmssd(diffs: list[int]) -> float:
 
 
 def test_algo_version_gezaehlt() -> None:
-    assert ALGO_VERSION == 2
+    assert ALGO_VERSION == 3  # 3: Messlücken auf der Herzuhr aller Intervalle
 
 
 def test_golden_rmssd_nur_ueber_echte_nachbarn() -> None:
@@ -63,9 +63,12 @@ def test_golden_rmssd_nur_ueber_echte_nachbarn() -> None:
 
 def test_golden_naehte_aus_blockern_und_luecke() -> None:
     rec = laden(GOLDEN_PPI)
-    # Blocker vor Zeile 3 (3 Intervalle), 37 (1), 96 (20 — zugleich Messlücke), 176 (2)
+    # Blocker vor Zeile 3 (3 Intervalle), 37 (1), 96 (20), 176 (2)
     assert ppi_naehte(rec) == [3, 37, 96, 176]
+    # Auf t_s sehen die 20 verworfenen wie eine Messlücke aus, auf der Herzuhr
+    # aller Intervalle nicht (ALGO_VERSION 3) — die Naht bei 96 bleibt ohnehin.
     assert luecken_finden(rec.beats) == [96]
+    assert messluecken(rec) == []
     assert naehte(rec) == [3, 37, 96, 176]
     assert ppi_verworfen(rec) == (26, 300)
 

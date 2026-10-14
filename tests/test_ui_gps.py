@@ -52,6 +52,32 @@ def test_ansicht_laesst_sich_bauen(state) -> None:
     assert state.gps_quelle is not None and state.gps_quelle.name == "Simulator"
 
 
+async def test_kein_test_waehrend_eines_trainings(state) -> None:
+    """Training und Test teilen die eine Ortungsquelle — der Test wartet, bis das Training endet."""
+    meldungen: list = []
+    page = SimpleNamespace(route="/einstellungen/gps-test", views=[], show_dialog=meldungen.append)
+    state.ausdauer = SimpleNamespace(fertig=False)
+    view = gps_test_view(page, state)
+
+    def alle(c):
+        yield c
+        for name in ("content", "controls"):
+            kind = getattr(c, name, None)
+            for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
+                if isinstance(k, ft.Control):
+                    yield from alle(k)
+
+    knopf = next(
+        c
+        for v in view.controls
+        for c in alle(v)
+        if isinstance(c, ft.OutlinedButton) and c.content == "Dauertest starten"
+    )
+    await knopf.on_click()
+    assert state.gps_test is None
+    assert "Ausdauertraining" in meldungen[-1].content.value
+
+
 async def test_akkutest_laeuft_durch_und_berichtet(state) -> None:
     quelle = GpsSimulator(beschleunigung=2000, rauschen_m=2.0)
     state.ble_transport = Transport(quelle)

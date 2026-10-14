@@ -313,6 +313,13 @@ def gps_test_view(page: ft.Page, state: AppState) -> ft.View:
     # -- Starten und Beenden ------------------------------------------------------
 
     async def starten(art: str, plan: Sequence[tuple[float | None, float | None]]) -> None:
+        # Eine Ortungsquelle, eine Sitzung: Der Test begänne eine neue, und das
+        # laufende Ausdauertraining bekäme still keine Punkte mehr.
+        if state.ausdauer is not None and not state.ausdauer.fertig:
+            page.show_dialog(
+                ft.SnackBar(ft.Text("Erst das Ausdauertraining beenden — beide brauchen das GPS."))
+            )
+            return
         quelle = quelle_holen(page, state)
         berechtigung = getattr(quelle, "berechtigung", None)
         if berechtigung is not None:

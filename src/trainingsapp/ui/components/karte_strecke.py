@@ -19,7 +19,7 @@ from collections.abc import Sequence
 import flet as ft
 import flet_map as fm
 
-from trainingsapp.core.strecke import Punkt
+from trainingsapp.core.strecke import Punkt, ausgeduennt
 
 OSM_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 OSM_LIZENZ = "https://www.openstreetmap.org/copyright"
@@ -111,4 +111,71 @@ class StreckenKarte:
         await self.karte.center_on(_ort(punkt), zoom=None)
 
 
-__all__ = ["OSM_LIZENZ", "OSM_URL", "USER_AGENT_PAKET", "StreckenKarte", "osm_ebenen"]
+def ganze_strecke(teilstuecke: Sequence[Sequence[Punkt]], *, hoehe: float = 300) -> ft.Control:
+    """Die ganze Strecke, eingepasst — für die Auswertung; Start grün, Ziel rot.
+
+    Für die Linie reicht ein Punkt je 5 m; eine Stunde Laufen hat sonst 3600.
+    """
+    teile = [ausgeduennt(teil, 5.0) for teil in teilstuecke if teil]
+    alle = [p for teil in teile for p in teil]
+    if not alle:
+        return ft.Container(
+            height=80,
+            alignment=ft.Alignment.CENTER,
+            content=ft.Text("Ohne GPS aufgezeichnet — keine Strecke.", opacity=0.6),
+        )
+    sued, nord = min(p.lat for p in alle), max(p.lat for p in alle)
+    west, ost = min(p.lon for p in alle), max(p.lon for p in alle)
+    return fm.Map(
+        height=hoehe,
+        initial_center=fm.MapLatitudeLongitude((sued + nord) / 2, (west + ost) / 2),
+        initial_zoom=15,
+        initial_camera_fit=fm.CameraFit(
+            bounds=fm.MapLatitudeLongitudeBounds(
+                fm.MapLatitudeLongitude(sued, west), fm.MapLatitudeLongitude(nord, ost)
+            ),
+            padding=ft.Padding.all(28),
+            max_zoom=17,
+        ),
+        layers=[
+            osm_ebenen()[0],
+            fm.PolylineLayer(
+                polylines=[
+                    fm.PolylineMarker(
+                        coordinates=[_ort(p) for p in teil], color=LINIE, stroke_width=4
+                    )
+                    for teil in teile
+                    if len(teil) > 1
+                ]
+            ),
+            fm.CircleLayer(
+                circles=[
+                    fm.CircleMarker(
+                        coordinates=_ort(alle[0]),
+                        radius=7,
+                        color=ft.Colors.GREEN_600,
+                        border_color=ft.Colors.WHITE,
+                        border_stroke_width=2,
+                    ),
+                    fm.CircleMarker(
+                        coordinates=_ort(alle[-1]),
+                        radius=7,
+                        color=ft.Colors.RED_600,
+                        border_color=ft.Colors.WHITE,
+                        border_stroke_width=2,
+                    ),
+                ]
+            ),
+            osm_ebenen()[1],
+        ],
+    )
+
+
+__all__ = [
+    "OSM_LIZENZ",
+    "OSM_URL",
+    "USER_AGENT_PAKET",
+    "StreckenKarte",
+    "ganze_strecke",
+    "osm_ebenen",
+]

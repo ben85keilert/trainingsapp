@@ -25,7 +25,9 @@ Routen:
     /verlauf/<kachel_id>            Kurve der Tagessummen einer Kachel (mit Varianten)
     /einstellungen/hrv              Einstellungen der HRV-Messung
     /einstellungen/profile          Profile anlegen, umbenennen, löschen
-    /einstellungen/gps-test         GPS-Vorabtest: Strecke und Akku (docs/plan_gps.md)
+    /einstellungen/gps-test         GPS-Vorabtest: Strecke und Dauertest (docs/plan_gps.md)
+    /ausdauer                       Ausdauertraining mit GPS: starten, live
+    /ausdauer/<id>                  Auswertung eines Trainings: Karte, km, DFA α1
     <jede Route>/timer[/bearbeiten[/<id>]]   Timer über der aktuellen Ansicht
 
 Der Routen-Handler baut bei jedem Wechsel den **ganzen** Stapel neu auf
@@ -44,6 +46,7 @@ import flet as ft
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import dark_theme, light_theme
+from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view
 from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
 from trainingsapp.ui.views.eintrag import eintrag_view
@@ -392,6 +395,11 @@ def main(page: ft.Page) -> None:
                     page.views.append(uebung_bearbeiten(page, state, uebung))
         elif teile[:1] in (["plan"], ["plaene"]) and len(teile) >= 2:
             plan_routen(teile)
+        elif teile[:1] == ["ausdauer"]:
+            if len(teile) == 1:
+                page.views.append(ausdauer_view(page, state))
+            elif (strecke := state.strecken.laden(teile[1])) is not None:
+                page.views.append(ausdauer_detail_view(page, state, strecke))
         elif teile[:1] == ["messung"] and len(teile) >= 2:
             if (aufzeichnung := state.hrv.laden(teile[1])) is not None:
                 page.views.append(messung_detail_view(page, state, aufzeichnung))

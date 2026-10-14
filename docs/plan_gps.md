@@ -5,7 +5,8 @@ OpenStreetMap-Karte zeigen — **gleichzeitig mit der HRV-Messung**. Gründlich
 planen, das **Herunterladen der Karte vorbereiten**, keine GPS-Daten teilen,
 DFA α1 als Überblick (ohne Empfehlung), Strom sparen. Zielgerät: Pixel 10.
 
-Stand: nur Planung. Quellen am Ende (Abschnitt 11); was ich selbst gerechnet
+Stand 14.10.2026: **Phasen 0–4 gebaut** (Abschnitt 8); Phase 5 (Offline-Karte)
+offen. Quellen am Ende (Abschnitt 11); was ich selbst gerechnet
 oder geschätzt habe, steht kursiv.
 
 ---
@@ -110,7 +111,9 @@ data/karten.py          Kartenquellen (URL, Namensnennung, User-Agent, ob offlin
                         erlaubt, Höchstmenge je Download), Gebietsrechnung
                         (Kacheln für Ausschnitt oder Korridor, Größe) — Abschnitt 5
 ui/geraete/flet_gps.py  Adapter flet-geolocator → GpsQuelle (wie FletBleTransport)
-ui/views/training.py    Live-Ansicht Ausdauer; ui/components/karte_strecke.py
+ui/views/ausdauer.py    Live-Ansicht und Auswertung (Route /ausdauer, die Route
+                        /training gehört dem Einzeltraining einer Übung);
+                        ui/components/karte_strecke.py
 ```
 
 **Zeitbasis.** GPS-Punkte tragen UTC-Zeitstempel und die monotone
@@ -311,11 +314,11 @@ eine aktuelle Messung „1 s gegen 5 s" hat die Recherche nicht gefunden.
 
 | Phase | Inhalt | Aufwand |
 |---|---|---|
-| 0 · Vorab-Test (APK) | **gebaut 14.10.:** Einstellungen → GPS-Test. Strecke (1/3/10 s, Karte, Bildschirm an/aus) und Akkutest (4 × 15 min: 1 s, 3 s, 10 s, ohne GPS; Strom aus dem Ladestandsmesser in µAh); Bericht ohne Orte; GPX-Export | ½–1 Tag + Ben am Pixel |
-| 1 · Kern | `core/strecke.py`, `devices/gps.py` mit `GpxWiedergabe`, Speichern (Ordner `Strecken/`, Migration), Regel-0-Test, `data/karten.py` (Quellen, Gebietsrechnung) | 1½ Tage |
-| 2 · Live | Trainingsansicht, Karte, km-Signal und -Notiz, Auto-Pause, Benachrichtigung | 1½ Tage |
-| 3 · Aufzeichnung | Karte, km-Tabelle, Kurven, Tagebuch-Eintrag | 1 Tag |
-| 4 · DFA-α1-Überblick | 5-s-Schritt, Artefakt-Grau, Zeit je Bereich, Werte je km | ½ Tag |
+| 0 · Vorab-Test (APK) | **gebaut 14.10.:** Einstellungen → GPS-Test. Strecke (1/3/10 s, Karte, Bildschirm an/aus) und **Dauertest 30 min** (15 min 1 s, 15 min 3/5/10 s; Genauigkeit je 5 min, Strom aus dem Ladestandsmesser); Bericht ohne Orte; GPX-Export | ½–1 Tag + Ben am Pixel |
+| 1 · Kern | **gebaut 14.10.:** `core/strecke.StreckenRechner` (10-m-Schritt, Sprünge, Auto-Pause, Splits, Höhe), `devices/gps.PunktWiedergabe`, Tabelle `strecke` (Migration 012), Ordner `Strecken/`, Regel-0-Test (`tests/test_ausdauer.py`), `data/karten.py` | 1½ Tage |
+| 2 · Live | **gebaut 14.10.:** `/ausdauer` — Sportart, mit/ohne GPS, große Zahlen, Karte, Auto-Pause, km-Ton, Vibration und Notiz „km N" (wird Abschnitt), Benachrichtigung, HRV-Aufnahme läuft mit | 1½ Tage |
+| 3 · Aufzeichnung | **gebaut 14.10.:** `/ausdauer/<id>` — Karte (eingepasst, Start/Ziel), km-Tabelle mit Ø HF und DFA α1, GPX-Export mit Herzfrequenz, Tagebucheintrag (Übung „Gehen"/„Laufen"/„Radfahren"), Liste unter Messung → Aufzeichnungen | 1 Tag |
+| 4 · DFA-α1-Überblick | **gebaut 14.10.:** 2-min-Fenster alle 5 s, Fenster mit ≥ 3 % korrigierten Schlägen leer, Zeit je Wertebereich (neutral), Werte je km — nur mit EKG-Gurt | ½ Tag |
 | 5 · Karte offline | eigene Karten-Erweiterung (Vektor, PMTiles), Gebiet laden | 3–5 Tage, nach Entscheidung |
 
 Phasen 0–4: **etwa 5–6 Arbeitstage**. Phase 5 kommt dazu, wenn offline
@@ -411,6 +414,21 @@ erst, wenn ein sauberer Akkutest einen Gewinn zeigt (Handy liegt still am
 Fenster, Bildschirm aus, unbenutzt).
 
 **Noch offen:** der Gang mit ausgeschaltetem Bildschirm (macht Ben selbst).
+
+**Entschieden (Ben, 14.10.2026):** GPS im Sekundentakt — keine Sparstufe. Statt
+eines weiteren Akkutests über eine Stunde gibt es den **Dauertest (30 min)**:
+15 min 1 s, dann 15 min seltener, nebenher beim Laufen; er zeigt, ob die
+Genauigkeit bei längerem GPS nachlässt (Median je 5 min), und den Strom.
+
+**Nach dem Bau aufgefallen:**
+
+- Die Höhe wird vor der 5-m-Schwelle über 15 Ortungen geglättet (Median) —
+  simuliert, 10 min ebenerdig mit 3 m Rauschen: ohne Median 431 m „Anstieg",
+  mit 15 keiner; ein echter Anstieg von 30 m bleibt 33 m.
+- **Verity Sense beim Training:** Die App startet sie weiter im PPI-Modus — dort
+  bleibt ihre Herzfrequenz bei Bewegung stehen. Die Ansicht rät deshalb zum
+  H10. Ein HF-Modus ohne PPI fürs Training braucht einen Test am Gerät
+  (PPI stoppen, danach wieder starten) — noch offen.
 
 ---
 

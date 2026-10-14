@@ -1702,10 +1702,10 @@ __all__ = [
     "DayNoteRepo",
     "ExerciseRepo",
     "HrvRepo",
-    "StreckeRepo",
     "PlanRepo",
     "SessionRepo",
     "SettingRepo",
+    "StreckeRepo",
     "SubjectRepo",
     "new_id",
 ]

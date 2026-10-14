@@ -38,7 +38,7 @@ from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, HrvEinstellungen
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.core.models import jetzt as utc_jetzt
 from trainingsapp.devices.base import DeviceInfo, Verbindung
-from trainingsapp.devices.messlauf import Messlauf
+from trainingsapp.devices.messlauf import Gespeichert, Messlauf
 from trainingsapp.devices.profiles import geraeteart
 from trainingsapp.devices.simulated import SIM_PPI, SIM_PREFIX, SIM_SYNTH, SimulatedSource
 from trainingsapp.hrv_core.atmung import ATEMUEBUNG, RUHE, kurzgrund
@@ -234,6 +234,27 @@ def kachel_werte(
 # ---------------------------------------------------------------------------
 # Verbinden
 # ---------------------------------------------------------------------------
+
+
+def aufnahme_eintragen(state: AppState, ergebnis: Gespeichert) -> HrvRecording:
+    """Eine gespeicherte Aufnahme in die Liste eintragen — auch fürs Ausdauertraining."""
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=ergebnis.pfad.relative_to(messungenverzeichnis()).as_posix(),
+        sha1=ergebnis.sha1,
+        geraet=ergebnis.recording.geraet,
+        geraet_profil=ergebnis.recording.geraet_profil or "ble_generic",
+        intervall_quelle=ergebnis.recording.intervall_quelle or "ekg_rr",
+        datenqualitaet=ergebnis.recording.effektive_qualitaet(),
+        started_at=ergebnis.started_at,
+        duration_s=ergebnis.dauer_s,
+        coverage_pct=ergebnis.abdeckung_pct,
+        n_gaps=ergebnis.n_luecken,
+        note=ergebnis.recording.notiz,
+        title=ergebnis.recording.titel,
+    )
+    state.hrv.anlegen(eintrag)
+    return eintrag
 
 
 def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
@@ -606,22 +627,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         if ergebnis is None:
             aktualisieren(erzwingen=True)
             return
-        eintrag = HrvRecording(
-            subject_id=state.profil.id,
-            file_path=ergebnis.pfad.relative_to(messungenverzeichnis()).as_posix(),
-            sha1=ergebnis.sha1,
-            geraet=ergebnis.recording.geraet,
-            geraet_profil=ergebnis.recording.geraet_profil or "ble_generic",
-            intervall_quelle=ergebnis.recording.intervall_quelle or "ekg_rr",
-            datenqualitaet=ergebnis.recording.effektive_qualitaet(),
-            started_at=ergebnis.started_at,
-            duration_s=ergebnis.dauer_s,
-            coverage_pct=ergebnis.abdeckung_pct,
-            n_gaps=ergebnis.n_luecken,
-            note=ergebnis.recording.notiz,
-            title=ergebnis.recording.titel,
-        )
-        state.hrv.anlegen(eintrag)
+        eintrag = aufnahme_eintragen(state, ergebnis)
         page.show_dialog(ft.SnackBar(ft.Text(f"Gespeichert: {ergebnis.pfad.name}")))
         await page.push_route(f"/messung/{eintrag.id}")
 
@@ -877,16 +883,30 @@ def _liste(page: ft.Page, state: AppState) -> ft.Control:
         daten = export_zip(dateien, datenverzeichnis())
         await weitergeben(page, f"messungen_{zeitstempel()}.zip", daten, "application/zip")
 
-    if not eintraege:
+    from trainingsapp.ui.views.ausdauer import strecken_zeilen
+
+    trainings = strecken_zeilen(page, state)
+    if not eintraege and not trainings:
         return ft.Container(
             padding=24,
             content=ft.Text(
                 "Noch keine Aufzeichnung. Unter „Live“ ein Gerät verbinden und "
-                "„Aufnahme starten“ tippen.",
+                "„Aufnahme starten“ tippen — oder ein Ausdauertraining starten.",
                 opacity=0.7,
             ),
         )
-    zeilen: list[ft.Control] = [
+    zeilen: list[ft.Control] = []
+    if trainings:
+        zeilen.append(
+            ft.Container(
+                padding=ft.Padding.only(left=16, top=12),
+                content=ft.Text("AUSDAUER", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+            )
+        )
+        zeilen += trainings
+    if not eintraege:
+        return ft.ListView(expand=True, padding=ft.Padding.only(bottom=24), controls=zeilen)
+    zeilen += [
         ft.Container(
             padding=ft.Padding.only(left=16, right=8, top=8),
             content=ft.Row(
@@ -936,11 +956,14 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
             # Die Liste braucht keine Live-Werte; nur ein Abriss baut neu.
             lauf.beobachter = lambda layout: state.neu_zeichnen() if layout else None
     else:
+        from trainingsapp.ui.views.ausdauer import ausdauer_karte
+
         teil = _live_teil(page, state, lauf) if verbunden else _verbinden_teil(page, state)
         inhalt = ft.ListView(
             expand=True,
             padding=ft.Padding.only(left=12, right=12, top=12, bottom=24),
-            controls=[teil],
+            spacing=12,
+            controls=[ausdauer_karte(page, state), teil],
         )
     anzahl = len(state.hrv.alle(state.profil.id))
     return ft.Tabs(
@@ -970,4 +993,4 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
     )
 
 
-__all__ = ["kachel_werte", "messung", "ohne_rr"]
+__all__ = ["aufnahme_eintragen", "kachel_werte", "messung", "ohne_rr"]

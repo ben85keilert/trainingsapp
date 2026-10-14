@@ -155,12 +155,42 @@ def zeit_je_bereich(
     return [(name, round(minuten[name], 2)) for name, _, _ in DFA_BEREICHE]
 
 
+def hf_je_zeit(
+    rec: Recording, zeiten_s: Sequence[float], fenster_s: float = 5.0
+) -> dict[float, int]:
+    """Herzfrequenz zu Zeitpunkten der Wanduhr (s seit ``start_utc``) — für den GPX-Export.
+
+    Mittel der RR-Werte im Fenster um den Zeitpunkt; ohne Schlag dort kein Eintrag.
+
+    >>> from trainingsapp.hrv_core.recording import Beat
+    >>> rec = Recording(beats=[Beat(i * 0.8, 800, 75, i * 0.8) for i in range(1, 40)])
+    >>> hf_je_zeit(rec, [10.0, 100.0])
+    {10.0: 75}
+    """
+    wand = np.array(
+        [b.t_wall_s if b.t_wall_s is not None else np.nan for b in rec.beats], dtype=float
+    )
+    rr = np.array([float(b.rr_ms) for b in rec.beats], dtype=float)
+    gut = (rr >= 250) & (rr <= 2000) & np.isfinite(wand)
+    wand, rr = wand[gut], rr[gut]
+    ordnung = np.argsort(wand)
+    wand, rr = wand[ordnung], rr[ordnung]
+    out: dict[float, int] = {}
+    for z in zeiten_s:
+        a = np.searchsorted(wand, z - fenster_s / 2)
+        b = np.searchsorted(wand, z + fenster_s / 2, "right")
+        if b > a:
+            out[float(z)] = round(60000.0 / float(rr[a:b].mean()))
+    return out
+
+
 __all__ = [
     "ARTEFAKT_GRENZE",
     "DFA_BEREICHE",
     "DFA_FENSTER_S",
     "DFA_SCHRITT_S",
     "dfa_verlauf",
+    "hf_je_zeit",
     "wanduhr",
     "werte_zwischen",
     "zeit_je_bereich",

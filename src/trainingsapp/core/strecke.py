@@ -28,6 +28,8 @@ genauso: Genauigkeit, Sprünge, Auto-Pause, Splits je km, Höhe nur in Bewegung.
 from __future__ import annotations
 
 import math
+import statistics
+from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
@@ -60,6 +62,10 @@ SPRUNG_M: Final[float] = 200.0
 STILLSTAND_S: Final[float] = 10.0
 #: Höhenänderungen darunter zählen nicht (m) — im Stand gar keine
 HOEHE_SCHWELLE_M: Final[float] = 5.0
+#: Die GPS-Höhe wird vorher über so viele Ortungen geglättet (Median). Simuliert,
+#: 10 min Gehen mit 3 m Rauschen: ohne Median 431 m „Anstieg", mit 7 noch 21 m,
+#: mit 15 keiner — ein echter Anstieg von 30 m bleibt 33 m.
+HOEHE_MEDIAN: Final[int] = 15
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,7 +247,9 @@ class StreckenRechner:
     - Mehr als `SPRUNG_M` oder `LUECKE_S` zur letzten Ortung: neues Teilstück,
       keine Strecke dazwischen.
     - `STILLSTAND_S` ohne Bewegung: Auto-Pause — die Bewegungszeit steht.
-    - Höhe nur in Bewegung, Änderungen ab `HOEHE_SCHWELLE_M`.
+    - Höhe nur in Bewegung: Median der letzten `HOEHE_MEDIAN` Ortungen,
+      Änderungen ab `HOEHE_SCHWELLE_M` (im Akkutest kamen roh im Stand 76 m
+      Anstieg in 15 min zusammen).
 
     >>> r = StreckenRechner()
     >>> neu = [r.hinzufuegen(Punkt(i * 2.0, 52.0 + i * 0.0001, 13.0, 4.0, tempo_ms=5.5))
@@ -281,6 +289,7 @@ class StreckenRechner:
         self._letzter: Punkt | None = None
         self._letzte_bewegung: float | None = None
         self._hoehe_bezug: float | None = None
+        self._hoehen: deque[float] = deque(maxlen=HOEHE_MEDIAN)
         self._split_anfang: tuple[float, float, float, float] | None = None
 
     # -- Ortungen ----------------------------------------------------------------
@@ -344,16 +353,18 @@ class StreckenRechner:
     def _hoehe(self, p: Punkt) -> None:
         if p.hoehe_m is None:
             return
+        self._hoehen.append(p.hoehe_m)
+        hoehe = statistics.median(self._hoehen)
         if self._hoehe_bezug is None or self.pausiert:
-            self._hoehe_bezug = p.hoehe_m  # im Stand nichts zählen, nur nachziehen
+            self._hoehe_bezug = hoehe  # im Stand nichts zählen, nur nachziehen
             return
-        d = p.hoehe_m - self._hoehe_bezug
+        d = hoehe - self._hoehe_bezug
         if abs(d) >= self.hoehe_schwelle_m:
             if d > 0:
                 self.hoehe_auf_m += d
             else:
                 self.hoehe_ab_m -= d
-            self._hoehe_bezug = p.hoehe_m
+            self._hoehe_bezug = hoehe
 
     def _split_schliessen(self, t: float, distanz: float) -> Split:
         t0, bewegt0, auf0, ab0 = self._split_anfang or (t, 0.0, 0.0, 0.0)
@@ -426,6 +437,7 @@ def rechnen(punkte: Iterable[Punkt], sportart: str = LAUFEN) -> StreckenRechner:
 __all__ = [
     "ERDRADIUS_M",
     "GEHEN",
+    "HOEHE_MEDIAN",
     "HOEHE_SCHWELLE_M",
     "LAUFEN",
     "LUECKE_S",
@@ -440,12 +452,12 @@ __all__ = [
     "Punkt",
     "Split",
     "StreckenRechner",
-    "rechnen",
-    "split_laenge_m",
     "abstand_m",
     "ausgeduennt",
     "distanz_m",
     "doppler_distanz_m",
     "genaue",
     "hoehenmeter",
+    "rechnen",
+    "split_laenge_m",
 ]

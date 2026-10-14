@@ -113,7 +113,7 @@ def import_rueckfrage(
     knopf = "Wieder installieren" if wieder else "Importieren"
     return ft.AlertDialog(
         modal=True,
-        on_dismiss=nachher,
+        on_dismiss=nachher.bei_schliessen,
         title=ft.Text(
             f"„{inhalt.paket.name}“ {'wieder installieren' if wieder else 'importieren'}?"
         ),
@@ -348,7 +348,7 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
         page.show_dialog(
             ft.AlertDialog(
                 modal=True,
-                on_dismiss=nachher,
+                on_dismiss=nachher.bei_schliessen,
                 title=ft.Text(titel_text),
                 content=ft.Text(text),
                 actions=[

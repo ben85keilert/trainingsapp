@@ -210,7 +210,7 @@ def uebung_detail(
         page.show_dialog(
             ft.AlertDialog(
                 modal=True,
-                on_dismiss=nachher,
+                on_dismiss=nachher.bei_schliessen,
                 title=ft.Text("Auf Paketstand zurücksetzen?"),
                 content=ft.Text(
                     f"„{uebung.name}“ bekommt wieder den Stand aus dem Paket. Verloren geht "

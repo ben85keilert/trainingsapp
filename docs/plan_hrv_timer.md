@@ -192,7 +192,7 @@ Bildschirmen passen (getestet in 412 px Breite im Browser).
   … „Timer fertig") — an der Stelle, an der er wirklich war, auch wenn die App
   kurz schlief. Gewöhnliche Notizen: nachträglich umbenennen, verschieben,
   löschen.
-- **Übungs-ID → Kurzcode:** 6 Zeichen (SHA-1 der UUID, 30 Bit, Crockford-
+- **Übungs-ID → Kurzcode:** 8 Zeichen (SHA-1 der UUID, 40 Bit, Crockford-
   Base32) im Feld `uebungen` der Notiz, aus den Namen im Text ermittelt
   (Vertrag Abschnitt 4). Im Text steht weiter nur der Name.
 

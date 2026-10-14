@@ -2,6 +2,13 @@
 
     uv run python scripts/apk_bauen.py            # signiert, wenn ein Schlüssel eingerichtet ist
     uv run python scripts/apk_bauen.py --debug    # bewusst mit Debug-Schlüssel
+    uv run python scripts/apk_bauen.py --alle-architekturen   # auch armeabi-v7a und x86_64
+
+**Nur arm64** (Ben, 14.10.2026): vorerst baut das Skript nur für arm64-v8a — das
+Pixel 10 und praktisch jedes Handy seit 2017. Mit allen drei Architekturen war
+die APK 225 MB groß (x86_64 80 MB, armeabi-v7a 59 MB, arm64 70 MB an nativem
+Code); nur arm64 spart rund 140 MB. Die anderen kommen später dazu
+(``--alle-architekturen``, für die Play-Store-Fassung eher ein App Bundle).
 
 Ergebnis: ``dist/trainingsapp-<version>-<build>.apk``.
 
@@ -36,6 +43,8 @@ SIGNIERUNG = PROJEKT / "signierung.toml"
 AUSGABE = PROJEKT / "dist"
 
 UMGEBUNG_SCHLUESSEL = "FLET_ANDROID_SIGNING_KEY_STORE"
+#: Vorerst nur diese Architektur (Pixel 10) — siehe Moduldocstring
+ARCHITEKTUR = "arm64-v8a"
 
 
 def version() -> str:
@@ -77,6 +86,11 @@ def signier_umgebung() -> dict[str, str] | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
+        "--alle-architekturen",
+        action="store_true",
+        help="auch armeabi-v7a und x86_64 (Vorgabe: nur arm64-v8a)",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="ohne festen Schlüssel bauen (Update über eine signierte APK geht dann nicht)",
@@ -108,9 +122,13 @@ def main() -> None:
         "--build-number",
         str(nummer),
     ]
+    if not args.alle_architekturen:
+        befehl += ["--arch", ARCHITEKTUR]
     if os.environ.get("CI"):
         befehl.append("--verbose")
-    print(f"Baue Version {version()} (Build {nummer}), {'Debug' if args.debug else 'signiert'}")
+    arch = "alle Architekturen" if args.alle_architekturen else ARCHITEKTUR
+    art = "Debug" if args.debug else "signiert"
+    print(f"Baue Version {version()} (Build {nummer}), {art}, {arch}")
     subprocess.run(befehl, cwd=PROJEKT, env=umgebung, check=True)
 
     apks = sorted((PROJEKT / "build" / "apk").glob("*.apk"))

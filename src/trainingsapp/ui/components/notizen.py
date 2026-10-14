@@ -20,7 +20,7 @@ Metadaten in die Messdatei.
 als kleine Namen ein (zuerst die heute anstehenden Pläne, zuletzt alle
 Übungen); ein Tipp setzt den Namen in den Notiztext. Beim Speichern bekommt die
 Notiz die Kurzcodes der Übungen, deren Namen im Text stehen (Feld ``uebungen``,
-6 Zeichen je Übung — `core.kurzcode`, Vertrag Abschnitt 4); praxis_gui behält
+8 Zeichen je Übung — `core.kurzcode`, Vertrag Abschnitt 4); praxis_gui behält
 das Feld. Notizen mit Übung tragen in der Liste ein kleines Hantelsymbol.
 """
 

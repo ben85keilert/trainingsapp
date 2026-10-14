@@ -173,11 +173,13 @@ def timer_knopf(page: Any, state: AppState, name: str) -> ft.Control:
     """„Timer" als Knopf für eine AppBar — läuft der Timer, steht dort die Restzeit.
 
     Symbol und Beschriftung in einer umrandeten Pille: ein Symbol allein sagt
-    nicht, was es tut. Läuft der Timer, ersetzt die Restzeit das Wort (gleiche
-    Breite, die Leiste springt nicht). ``name`` unterscheidet die Leisten — jede
-    trägt sich als Beobachter ein und ersetzt dabei ihren alten Eintrag.
+    nicht, was es tut. Läuft der Timer, ersetzt die Restzeit das Wort — immer in
+    einer Zeile. ``name`` unterscheidet die Leisten — jede trägt sich als
+    Beobachter ein und ersetzt dabei ihren alten Eintrag.
     """
-    text = ft.Text("Timer", size=13, weight=ft.FontWeight.W_600)
+    # Eine Zeile, auch bei großer Systemschrift — eine feste Breite brach „Timer"
+    # am Pixel um (14.10.)
+    text = ft.Text("Timer", size=13, weight=ft.FontWeight.W_600, no_wrap=True, max_lines=1)
 
     def beschriften() -> bool:
         lauf: TimerLauf | None = state.timer
@@ -208,10 +210,7 @@ def timer_knopf(page: Any, state: AppState, name: str) -> ft.Control:
         content=ft.Row(
             spacing=6,
             tight=True,
-            controls=[
-                ft.Icon(ft.Icons.TIMER_OUTLINED, size=20),
-                ft.Container(width=40, content=text),
-            ],
+            controls=[ft.Icon(ft.Icons.TIMER_OUTLINED, size=20), text],
         ),
     )
     state.timer_beobachter[name] = auffrischen

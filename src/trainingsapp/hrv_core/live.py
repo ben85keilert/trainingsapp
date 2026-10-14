@@ -21,10 +21,11 @@ Vom Gerät verworfene Intervalle (Verity Sense, Blocker-Bit) kommen mit
 Kurve. Was mit ihnen geschieht, sagen die `Korrekturregeln`
 (`LiveFenster.regeln_setzen`):
 
-- ``"selbst"`` (Vorgabe in der App): Sie werden wie jedes andere Intervall
-  bewertet — Grenzen, Malik, Fehlerschätzung. Was davon durchkommt, zählt.
-- ``"sensor"`` (Vorgabe ohne Regeln, bis ALGO_VERSION 3): Sie zählen nirgends
-  mit — keine Bewertung, keine Kennzahl, und über sie hinweg keine Differenz.
+- ``"sensor"`` (Vorgabe): Sie zählen nirgends mit — keine Bewertung, keine
+  Kennzahl, und über sie hinweg keine Differenz.
+- ``"selbst"``: Sie werden wie jedes andere Intervall bewertet — Grenzen,
+  Malik, Fehlerschätzung. Was davon durchkommt, zählt. Nur in Ruhe sinnvoll;
+  in Bewegung sind sie meist falsch (docs/korrektur.md).
 
 Die Umschaltung wirkt sofort auf den ganzen Puffer: gespeichert ist das
 Blocker-Bit, nicht das Urteil. Ebenso die Fehlerschätzung des Sensors

@@ -7,8 +7,9 @@ Die Rohdatei bleibt unangetastet. Korrekturen sind Vorschläge der Automatik
 
 Was „automatisch" heißt, stellt das Regler-Symbol neben „Korrektur" ein
 (`Korrekturregeln`) — je Messung, auf Wunsch als Vorgabe gemerkt. Bei der
-Verity Sense prüft das Programm die vom Sensor verworfenen Intervalle
-standardmäßig selbst (`korrektur.analysebasis`).
+Verity Sense zählt standardmäßig nur, was der Sensor nicht verworfen hat; auf
+Wunsch prüft das Programm das Verworfene selbst (`korrektur.analysebasis`).
+Die Regeln und ihre Gründe: docs/korrektur.md.
 
 Alle Kurven teilen ein Zeitfenster (Breite wählen, waagrecht wischen); die
 Lupe an einer Kette zoomt auf ihre Stelle.
@@ -459,13 +460,15 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         viel = bool(verworfen and verworfen[1] and verworfen[0] * 2 > verworfen[1])
         hinweis_text.visible = viel
         hinweis_text.value = (
-            "Der Sensor hat die meisten Intervalle verworfen — meist Bewegung oder ein "
-            "lockerer Sitz. Sie sind wieder aufgenommen und nach den eigenen Regeln "
-            "geprüft; was nicht passt, steht unten in der Korrektur."
+            "Der Sensor hat die meisten Intervalle verworfen — meist Bewegung, auch "
+            "bei festem Sitz. Sie sind wieder aufgenommen und nach den eigenen Regeln "
+            "geprüft. Vorsicht: In Bewegung sind sie meist falsch, RMSSD liegt dann "
+            "leicht um ein Mehrfaches zu hoch."
             if z.basis.aufgenommen
-            else "Der Sensor hat die meisten Intervalle verworfen — meist Bewegung "
-            "oder ein lockerer Sitz. Die Kennzahlen beruhen auf Bruchstücken; für "
-            "HRV ruhig sitzen bzw. liegen und den Sensor fest anlegen."
+            else "Der Sensor hat die meisten Intervalle verworfen — meist Bewegung, "
+            "auch bei festem Sitz. Gewertet wird nur, was er sicher gemessen hat; "
+            "die Kennzahlen beruhen auf Bruchstücken. Für HRV ruhig sitzen oder "
+            "liegen — in Bewegung misst ein Brustgurt (H10) zuverlässig."
         )
 
     def analyse_reihe() -> tuple[Any, Any, Any]:

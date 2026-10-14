@@ -289,19 +289,22 @@ def test_detailansicht_meldet_verworfene_intervalle(daten) -> None:
         if isinstance(c, ft.Text) and "die meisten Intervalle" in (c.value or "")
     ]
     assert hinweis2[0].visible
-    # Vorgabe „selbst": wieder aufgenommen, kein Bruchstück-Hinweis
-    assert "wieder aufgenommen" in (hinweis2[0].value or "")
-    assert any("90 davon selbst geprüft" in x for x in _baum_texte(ansicht2))
+    # Vorgabe: dem Sensor folgen — Bruchstücke, Rat zum Brustgurt
+    assert "Bruchstücken" in (hinweis2[0].value or "")
+    assert "H10" in (hinweis2[0].value or "")
+    assert not any("selbst geprüft" in x for x in _baum_texte(ansicht2))
 
-    # Wer dem Sensor folgt, bekommt den alten Hinweis
-    state.korrekturregeln_setzen(Korrekturregeln(sensor_verwerfung="sensor"))
+    # Wer selbst prüfen lässt, bekommt die Warnung
+    state.korrekturregeln_setzen(Korrekturregeln(sensor_verwerfung="selbst"))
     ansicht3 = messung_detail_view(_seite(), state, eintrag2)
     hinweis3 = [
         c
         for c in _alle_controls(ansicht3)
         if isinstance(c, ft.Text) and "die meisten Intervalle" in (c.value or "")
     ]
-    assert "Bruchstücken" in (hinweis3[0].value or "")
+    assert "wieder aufgenommen" in (hinweis3[0].value or "")
+    assert "Vorsicht" in (hinweis3[0].value or "")
+    assert any("90 davon selbst geprüft" in x for x in _baum_texte(ansicht3))
 
 
 def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None:
@@ -364,12 +367,13 @@ def test_korrektur_blatt_aendert_regeln() -> None:
     assert "Automatische Korrektur" in texte and "KETTEN" in texte
 
     schalter = {c.label: c for c in alle if isinstance(c, ft.Switch)}
-    schalter["Verworfene Intervalle selbst prüfen"].on_change(_ereignis(False))
-    assert stand[-1].sensor_verwerfung == "sensor"
+    assert not schalter["Verworfene Intervalle selbst prüfen"].value  # Vorgabe: aus
+    schalter["Verworfene Intervalle selbst prüfen"].on_change(_ereignis(True))
+    assert stand[-1].sensor_verwerfung == "selbst"
 
     auswahl = {c.label: c for c in _alle_controls(blatt) if isinstance(c, ft.Dropdown)}
     auswahl["Schwelle"].on_select(_ereignis("0.25"))
-    assert stand[-1].malik == 0.25 and stand[-1].sensor_verwerfung == "sensor"
+    assert stand[-1].malik == 0.25 and stand[-1].sensor_verwerfung == "selbst"
     auswahl = {c.label: c for c in _alle_controls(blatt) if isinstance(c, ft.Dropdown)}
     auswahl["Schwelle"].on_select(_ereignis("auto"))
     assert stand[-1].malik is None
@@ -444,8 +448,9 @@ async def test_messung_live_verity_mit_verlauf_und_wischen(daten) -> None:
         for c in _alle_controls(blatt)
         if isinstance(c, ft.Switch) and c.label == "Verworfene Intervalle selbst prüfen"
     )
-    sensor.on_change(_ereignis(False))
-    assert not lauf.regeln.selbst_pruefen and not state.korrekturregeln().selbst_pruefen
+    assert not lauf.regeln.selbst_pruefen  # Vorgabe: dem Sensor folgen
+    sensor.on_change(_ereignis(True))
+    assert lauf.regeln.selbst_pruefen and state.korrekturregeln().selbst_pruefen
 
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
@@ -472,6 +477,8 @@ def test_detailansicht_regeln_je_messung_und_lupe(daten) -> None:
         intervall_quelle="ppg_ppi",
     )
     state.hrv.anlegen(eintrag)
+    # Gemerkte Vorgabe „selbst prüfen" (nicht die Werksvorgabe)
+    state.korrekturregeln_setzen(Korrekturregeln(sensor_verwerfung="selbst"))
     seite = _seite()
     ansicht = messung_detail_view(seite, state, eintrag)
     texte = _baum_texte(ansicht)

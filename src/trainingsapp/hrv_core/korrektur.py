@@ -390,9 +390,9 @@ def analysebasis(rec: Recording, regeln: Korrekturregeln) -> Wiederaufnahme:
     >>> from trainingsapp.hrv_core.recording import Beat
     >>> pakete = [{"ppi_ms": [800, 810, 820], "blocker": [0, 1, 0]}]
     >>> rec = Recording(beats=[Beat(0.8, 800), Beat(1.62, 820)], ppi_pakete=pakete)
-    >>> analysebasis(rec, Korrekturregeln()).zeile
+    >>> analysebasis(rec, Korrekturregeln(sensor_verwerfung="selbst")).zeile
     [0, None, 1]
-    >>> analysebasis(rec, Korrekturregeln(sensor_verwerfung="sensor")).zeile
+    >>> analysebasis(rec, Korrekturregeln()).zeile  # Vorgabe: dem Sensor folgen
     [0, 1]
     """
     if regeln.selbst_pruefen:
@@ -405,10 +405,11 @@ def analysebasis(rec: Recording, regeln: Korrekturregeln) -> Wiederaufnahme:
 def vorauswahl(ketten: Sequence[Kette], modus: str) -> set[int]:
     """Indizes der Ketten, die ohne gespeicherte Korrektur übernommen sind.
 
-    ``"sicher"``: alles außer Ketten mit dem Vermerk *unsicher*. Ein
-    Ausschluss erfindet nichts, er nimmt nur weg — die Verity Sense hatte
-    solche Stellen ohnehin verworfen. Unsichere Interpolationen (3–5 Schläge)
-    erfänden Variabilität; sie bleiben eine bewusste Entscheidung.
+    ``"alle"`` (Vorgabe): Kein erkanntes Artefakt bleibt roh stehen. Eine nicht
+    übernommene Kette heißt: Der Rohwert zählt. ``"sicher"``: alles außer
+    Ketten mit dem Vermerk *unsicher* (3–5 Schläge interpoliert) — die bleiben
+    dann roh, und am 14.10.2026 hob genau das RMSSD von 30 auf 39 ms
+    (docs/korrektur.md). ``"keine"``: nichts.
     """
     if modus == "alle":
         return set(range(len(ketten)))

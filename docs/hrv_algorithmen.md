@@ -70,7 +70,13 @@ guter Testanker (`tests/test_hrv_core.py`).
 
 Implementierung: `hrv_core/segments.py::segment_diffs`.
 
-### Vom Sensor verworfene Intervalle selbst prüfen (ALGO_VERSION 4)
+### Vom Sensor verworfene Intervalle selbst prüfen (ALGO_VERSION 4, seit 6 wählbar)
+
+> **Seit ALGO_VERSION 6 nicht mehr Vorgabe.** In Bewegung sind die verworfenen
+> Intervalle falsch, auch bei kleiner Fehlerschätzung (14.10.2026, 73 min bei
+> der Arbeit: RMSSD 98 statt 30 ms). Die geltenden Regeln und die Messungen
+> dahinter: [korrektur.md](korrektur.md). Der Abschnitt hier beschreibt, wie
+> „selbst prüfen“ funktioniert.
 
 Die Verity Sense markiert Intervalle als unbrauchbar (Blocker-Bit) — auch in
 Ruhe viele brauchbare. Messung vom 13.10.2026, 15 min in Ruhe, 1140 Intervalle,
@@ -86,8 +92,8 @@ Die Masse ist nicht zu unterscheiden; nur der Rand ist breiter — ein paar echt
 Störungen (Einschwingen am Anfang mit 1625–2064 ms, eine Störung mit bis zu
 500 ms Fehlerschätzung). Das kann das Programm selbst finden.
 
-Mit `Korrekturregeln.sensor_verwerfung = "selbst"` (Vorgabe) rechnet die
-Auswertung darum auf **allen** Intervallen (`ppi.ohne_verwerfung`,
+Mit `Korrekturregeln.sensor_verwerfung = "selbst"` rechnet die
+Auswertung auf **allen** Intervallen (`ppi.ohne_verwerfung`,
 `korrektur.analysebasis`): Zeilen der Rohdatei bleiben, wie sie sind;
 wieder aufgenommene Intervalle bekommen die Wanduhr ihres Pakets nach
 Vertrag 3a.4 (auf der Messung vom 13.10. für alle 719 Zeilen bit-gleich mit
@@ -104,27 +110,15 @@ Nachbardifferenzen, unabhängig nachgerechnet).
 Live gilt dasselbe (`LiveFenster.regeln_setzen`): Gespeichert ist je Punkt das
 Blocker-Bit, nicht das Urteil — Umschalten wirkt sofort auf den ganzen Puffer.
 
-`"sensor"` stellt das Verhalten bis ALGO_VERSION 3 wieder her (wie praxis_gui).
+`"sensor"` (Vorgabe seit ALGO_VERSION 6) ist das Verhalten bis ALGO_VERSION 3,
+wie praxis_gui.
 
 ### Einstellbare Korrektur (`hrv_core/regeln.py`)
 
 `Korrekturregeln` bündelt, was „automatische Korrektur" heißt — praxis_gui
-verteilt es auf `[hrv]`, `[hrv_gaps]` und `metric_params.malik`:
-
-| Regel | Vorgabe | praxis_gui |
-|---|---|---|
-| `sensor_verwerfung` | `selbst` | — (folgt immer dem Sensor) |
-| `malik_an`, `malik` | an, nach Intervallquelle (0.20 / 0.30) | Malik-Schwelle je Sitzung, 0.20 |
-| `rr_min`, `rr_max` | 250 / 2000 ms | `[hrv] rr_min_ms`, `rr_max_ms` |
-| `fehler_an`, `fehler_max_ms` | an, 50 ms | — |
-| `nullen` | aus | `[hrv] interpolate_zeros` (an) |
-| `merge_gap`, `auto_max`, `unsicher_max`, `max_luecke_s` | 2, 2, 5, 3 s | `[hrv_gaps]` |
-| `vorauswahl` | `sicher` | — |
-
-`vorauswahl` sagt, welche Vorschläge beim Öffnen einer Aufzeichnung ohne
-gespeicherte Korrektur übernommen sind: `sicher` = alles außer unsicheren
-Interpolationen. Ein Ausschluss erfindet nichts; eine Interpolation über 3–5
-Schläge erfände Variabilität.
+verteilt es auf `[hrv]`, `[hrv_gaps]` und `metric_params.malik`. Welche Regeln
+gelten, ihre Vorgaben und die Messungen, mit denen sie begründet sind, stehen
+in [korrektur.md](korrektur.md).
 
 Gerätelokal liegt die Vorgabe in `app_setting` (`hrv_korrektur`); je Messung
 stehen die Regeln im Sidecar (`corrections_meta.regeln`, Vertrag 9a) — eine

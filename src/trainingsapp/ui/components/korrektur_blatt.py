@@ -126,9 +126,9 @@ def korrektur_blatt(
                     lambda an: setzen(
                         sensor_verwerfung=VERWERFUNG_SELBST if an else VERWERFUNG_SENSOR
                     ),
-                    "Die Verity Sense verwirft viele brauchbare Intervalle. An: Das "
-                    "Programm prüft sie mit den Regeln unten. Aus: Was der Sensor "
-                    "verwirft, zählt nicht.",
+                    "Aus (Vorgabe): Was der Sensor verwirft, zählt nicht. An: Das "
+                    "Programm prüft das Verworfene mit den Regeln unten — nur in Ruhe "
+                    "sinnvoll, in Bewegung ist es meist falsch.",
                 ),
                 ft.Row(
                     controls=[
@@ -142,7 +142,7 @@ def korrektur_blatt(
                 ft.Row(
                     controls=[
                         auswahl(
-                            "Unsicher ab",
+                            "Unsicher über",
                             r.fehler_max_ms,
                             [(x, f"{x} ms") for x in FEHLER_WAHL],
                             "fehler_max_ms",
@@ -251,8 +251,9 @@ def korrektur_blatt(
                     ),
                 ),
                 ft.Text(
-                    "Gilt für Aufzeichnungen ohne gespeicherte Korrektur. „Sichere“: "
-                    "alles außer unsicheren Interpolationen.",
+                    "Gilt für Aufzeichnungen ohne gespeicherte Korrektur. „Alle“ "
+                    "(Vorgabe): Kein erkanntes Artefakt bleibt roh. „Sichere“: "
+                    "unsichere Interpolationen bleiben roh.",
                     size=11,
                     opacity=0.65,
                 ),

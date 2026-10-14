@@ -34,7 +34,12 @@ from typing import Final
 #   voller Länge aus 30-s-Mitteln. Vorher
 #   deckelte `MAX_GRID_BINS` das Raster, und LF/HF lagen bei 4 h um das
 #   3,6-Fache, bei 8 h um das 7-Fache zu hoch. Kürzere Messungen: unverändert.
-ALGO_VERSION: Final[int] = 5
+# 6 (2026-10-14): Vorgaben der Korrektur (`Korrekturregeln`, docs/korrektur.md):
+#   Was die Verity Sense verwirft, zählt wieder nicht (``sensor_verwerfung =
+#   "sensor"``), und beim Öffnen sind alle Vorschläge übernommen (``vorauswahl =
+#   "alle"``). 14.10.: 73 min bei der Arbeit, 62 % verworfen — wieder
+#   aufgenommen lag RMSSD bei 98 statt 30 ms; unsichere Ketten roh: 39 statt 30 ms.
+ALGO_VERSION: Final[int] = 6
 
 # ---------------------------------------------------------------------------
 # Plausibilitätsgrenzen für RR-Intervalle
@@ -95,7 +100,9 @@ MALIK_WINDOW: Final[int] = 5  # Fensterbreite des gleitenden Mittels
 # In Ruhe liegt sie bei 7–30 ms; darüber hinaus (gemessen bis 650 ms auf einem
 # 800-ms-Intervall) ist das Intervall geraten, auch ohne Blocker-Bit. Die
 # Automatik schlägt solche Intervalle zur Korrektur vor. Eigene Festlegung,
-# praxis_gui wertet die Schätzung nicht aus.
+# praxis_gui wertet die Schätzung nicht aus. 14.10.2026 (73 min bei der Arbeit):
+# Ob 30, 50, 150 ms oder aus, gewertet wurden 36–38 % — die Schwelle trifft fast
+# nur Intervalle in Bewegungsphasen, deren Nachbarn ohnehin verworfen sind.
 PPI_FEHLER_MAX_MS: Final[int] = 50
 
 # Ketten der nachträglichen Korrektur (praxis_gui: `[hrv_gaps]`-Vorgaben).

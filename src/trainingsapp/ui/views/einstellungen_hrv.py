@@ -42,8 +42,8 @@ def regeln_text(r: Korrekturregeln) -> str:
     ...     print(teil)
     Malik nach Sensor (EKG 20 %, optisch 30 %)
     250–2000 ms
-    Sensor-Fehler ab 50 ms
-    Verworfenes selbst prüfen
+    Sensor-Fehler über 50 ms
+    dem Sensor folgen
     """
     teile = []
     if r.malik_an:
@@ -56,7 +56,7 @@ def regeln_text(r: Korrekturregeln) -> str:
         teile.append("Malik aus")
     teile.append(f"{r.rr_min}–{r.rr_max} ms")
     if r.fehler_an:
-        teile.append(f"Sensor-Fehler ab {r.fehler_max_ms} ms")
+        teile.append(f"Sensor-Fehler über {r.fehler_max_ms} ms")
     teile.append("Verworfenes selbst prüfen" if r.selbst_pruefen else "dem Sensor folgen")
     return " · ".join(teile)
 

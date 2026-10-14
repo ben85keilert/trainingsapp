@@ -135,7 +135,9 @@ String-Interpolation.
 
 Änderungen an der HRV-Mathematik brauchen einen **Golden-Test** (Referenzdaten unter
 `tests/golden/rr/`). Formeln, Konstanten und Fallstricke stehen in
-`docs/hrv_algorithmen.md`.
+`docs/hrv_algorithmen.md`. Die automatische Korrektur folgt einem Grundsatz —
+**lieber eine Lücke als ein falscher Wert** —, ihre Regeln und die Messungen
+dahinter stehen in `docs/korrektur.md`; wer eine Vorgabe ändert, belegt es dort.
 
 ## Lernprojekt
 

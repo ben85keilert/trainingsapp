@@ -6,14 +6,19 @@ Nullen, den Umgang mit vom Sensor verworfenen Intervallen und die
 Kettenplanung (praxis_gui: ``[hrv]`` und ``[hrv_gaps]`` in ``local.ini``).
 Live gilt nur der erste Teil (Erkennung), nachträglich alles.
 
-Die Vorgaben sind die Konstanten aus `constants` — mit einer Ausnahme, die
-praxis_gui nicht kennt: ``sensor_verwerfung = "selbst"``. Die Verity Sense
-verwirft in Ruhe 37–44 % der Intervalle, die sich in Verteilung und
-Fehlerschätzung nicht von den behaltenen unterscheiden (13.10.2026: Median der
-Fehlerschätzung 12 gegen 11 ms, Median der relativen Nachbardifferenz 3,5 gegen
-3,2 %). Das Programm nimmt sie darum wieder auf und prüft sie selbst — mit
-denselben Regeln wie jedes andere Intervall. Wer dem Sensor folgen will,
-stellt ``"sensor"`` ein (Verhalten bis ALGO_VERSION 3).
+Die Vorgaben sind die Konstanten aus `constants`. Grundsatz: **lieber eine
+Lücke als ein falscher Wert** — die Regeln samt Begründung stehen in
+``docs/korrektur.md``. Zwei Vorgaben gehen auf Messungen zurück (ALGO_VERSION 6):
+
+- ``sensor_verwerfung = "sensor"``: Was die Verity Sense verwirft, zählt nicht.
+  In Bewegung sind die verworfenen Intervalle falsch, auch bei kleiner
+  Fehlerschätzung (14.10.2026, 73 min bei der Arbeit, 62 % verworfen: RMSSD
+  98 statt 30 ms, wenn man sie wieder aufnimmt). ``"selbst"`` nimmt sie wieder
+  auf und prüft sie mit denselben Regeln wie jedes andere Intervall — nur für
+  Ruhemessungen (13.10.2026: dort kaum ein Unterschied, RMSSD 50,0 statt 47,6 ms).
+- ``vorauswahl = "alle"``: Kein erkanntes Artefakt bleibt roh stehen. Mit
+  ``"sicher"`` blieben unsichere Ketten (3–5 Schläge) unkorrigiert — am
+  14.10. hob das RMSSD von 30 auf 39 ms.
 
 Gespeichert wird als JSON (gerätelokal in ``app_setting``, je Messung in
 ``corrections_meta`` des Sidecars). Gelesen wird defensiv: Unbekanntes wird
@@ -71,8 +76,8 @@ class Korrekturregeln:
     0.5
     """
 
-    #: ``"selbst"`` oder ``"sensor"`` — nur bei Sensoren mit Blocker-Bit (Verity Sense)
-    sensor_verwerfung: str = VERWERFUNG_SELBST
+    #: ``"sensor"`` oder ``"selbst"`` — nur bei Sensoren mit Blocker-Bit (Verity Sense)
+    sensor_verwerfung: str = VERWERFUNG_SENSOR
     #: Malik-Erkennung an/aus
     malik_an: bool = True
     #: Malik-Schwelle; ``None`` = nach Intervallquelle (0.20 EKG, 0.30 optisch)
@@ -91,7 +96,7 @@ class Korrekturregeln:
     unsicher_max: int = KETTE_UNSICHER_MAX
     max_luecke_s: float = KETTE_MAX_INTERP_GAP_S
     #: Vorschläge, die beim Öffnen ohne gespeicherte Korrektur übernommen sind
-    vorauswahl: str = "sicher"
+    vorauswahl: str = "alle"
 
     # -- abgeleitet ------------------------------------------------------------
 

@@ -165,13 +165,14 @@ async def test_verworfene_intervalle_stehen_live_in_der_kurve() -> None:
 
 
 _SENSOR = Korrekturregeln(sensor_verwerfung="sensor")
+_SELBST = Korrekturregeln(sensor_verwerfung="selbst")
 
 
 @pytest.mark.asyncio
 async def test_verworfene_intervalle_werden_live_selbst_geprueft() -> None:
-    """Vorgabe „selbst": Verworfenes zählt, wenn es die eigenen Prüfungen besteht."""
+    """„Selbst prüfen": Verworfenes zählt, wenn es die eigenen Prüfungen besteht."""
     rr = _rr_reihe(40)
-    lauf = await _live(rr, blockiert=frozenset({7, 9, 10, 11}))
+    lauf = await _live(rr, blockiert=frozenset({7, 9, 10, 11}), regeln=_SELBST)
     punkte = lauf.live.punkte()
     assert [i for i, p in enumerate(punkte) if p.sensor_verworfen] == [7, 9, 10, 11]
     assert not any(p.verworfen or p.artefakt for p in punkte)

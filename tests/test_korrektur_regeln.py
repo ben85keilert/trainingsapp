@@ -1,9 +1,12 @@
-"""Einstellbare Korrektur und vom Sensor verworfene Intervalle selbst prüfen (ALGO_VERSION 4).
+"""Einstellbare Korrektur und vom Sensor verworfene Intervalle selbst prüfen.
 
 Golden-Datensatz ``sensor_2026-10-13_000000.json`` (synthetisch, siehe
 ``tests/golden/rr/README.md``): 300 Intervalle, 26 vom Sensor verworfen,
 Intervall 150/151 mit 120 ms Fehlerschätzung. Die Sollwerte rechnet der Test
 aus ``ppi_pakete`` selbst nach, ohne den Produktivcode.
+
+Vorgaben (ALGO_VERSION 6, docs/korrektur.md): dem Sensor folgen, alle
+Vorschläge übernehmen. „Selbst prüfen" (ALGO_VERSION 4) bleibt wählbar.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ from trainingsapp.hrv_core.trends import reihe, verlauf
 
 GOLDEN_PPI = Path(__file__).parent / "golden" / "rr" / "sensor_2026-10-13_000000.json"
 SENSOR = Korrekturregeln(sensor_verwerfung="sensor")
+SELBST = Korrekturregeln(sensor_verwerfung="selbst")
 
 
 def _alle_intervalle() -> tuple[list[int], list[int]]:
@@ -54,7 +58,7 @@ def _alle_intervalle() -> tuple[list[int], list[int]]:
 
 def test_golden_selbst_pruefen_nimmt_alle_intervalle_auf() -> None:
     rec = laden(GOLDEN_PPI)
-    basis = analysebasis(rec, Korrekturregeln())
+    basis = analysebasis(rec, SELBST)
     ppi, _ = _alle_intervalle()
     assert [b.rr_ms for b in basis.rec.beats] == ppi
     assert basis.aufgenommen == 26
@@ -82,7 +86,7 @@ def test_golden_selbst_pruefen_kennzahlen_unabhaengig_nachgerechnet() -> None:
     diffs = [x[i] - x[i - 1] for i in range(1, len(x))]
     soll = math.sqrt(sum(d * d for d in diffs) / len(diffs))
 
-    regeln = Korrekturregeln()
+    regeln = SELBST
     basis = analysebasis(laden(GOLDEN_PPI), regeln)
     ketten = vorschlaege(basis.rec, regeln)
     assert [(k.start, k.ende, k.art) for k in ketten] == [(150, 151, "interpolieren")]
@@ -99,6 +103,79 @@ def test_dem_sensor_folgen_wie_bis_algo_version_3() -> None:
     assert basis.rec is rec and basis.zeile == list(range(274)) and basis.aufgenommen == 0
     kz = kennzahlen(anwenden(rec, []))
     assert kz is not None and kz["rmssd"] == pytest.approx(21.7432, abs=1e-4)
+
+
+def test_golden_vorgabe_kennzahlen_unabhaengig_nachgerechnet() -> None:
+    """Vorgabe: nur die nicht verworfenen Intervalle, Naht hinter jedem verworfenen,
+    die beiden mit 120 ms Fehlerschätzung als Rampe interpoliert (ALGO_VERSION 6)."""
+    doc = json.loads(GOLDEN_PPI.read_text(encoding="utf-8"))
+    zeilen: list[float] = []
+    fehler: list[int] = []
+    naehte: set[int] = set()
+    verworfen_davor = False
+    for paket in doc["ppi_pakete"]:
+        for wert, f, blocker in zip(
+            paket["ppi_ms"], paket["fehler_ms"], paket["blocker"], strict=True
+        ):
+            if blocker:
+                verworfen_davor = True
+                continue
+            if verworfen_davor and zeilen:
+                naehte.add(len(zeilen))
+            zeilen.append(float(wert))
+            fehler.append(f)
+            verworfen_davor = False
+    unsicher = [i for i, f in enumerate(fehler) if f > 50]
+    assert unsicher == [126, 127] and not naehte & {126, 127, 128}
+    x = zeilen
+    x[126] = x[125] + (x[128] - x[125]) / 3
+    x[127] = x[125] + (x[128] - x[125]) * 2 / 3
+    diffs = [x[i] - x[i - 1] for i in range(1, len(x)) if i not in naehte]
+    soll = math.sqrt(sum(d * d for d in diffs) / len(diffs))
+
+    regeln = Korrekturregeln()
+    assert (regeln.sensor_verwerfung, regeln.vorauswahl) == ("sensor", "alle")
+    rec = laden(GOLDEN_PPI)
+    basis = analysebasis(rec, regeln)
+    ketten = vorschlaege(basis.rec, regeln)
+    assert [(k.start, k.ende, k.art) for k in ketten] == [(126, 127, "interpolieren")]
+    gewaehlt = vorauswahl(ketten, regeln.vorauswahl)
+    kz = kennzahlen(anwenden(basis.rec, [v for i in gewaehlt for v in ketten[i].vorschlag]))
+    assert kz is not None
+    assert kz["n_diffs"] == len(diffs) == 269
+    assert kz["rmssd"] == pytest.approx(soll, abs=1e-9)
+    assert kz["rmssd"] == pytest.approx(21.7375, abs=1e-4)
+
+
+def test_vorgabe_verworfenes_in_bewegung_zaehlt_nicht() -> None:
+    """Was der Sensor in Bewegung verwirft, ist oft falsch — auch bei kleiner
+    Fehlerschätzung (14.10.2026). Nach Vorgabe zählt es nicht; „selbst" nähme
+    das Gezappel auf und RMSSD stiege um ein Vielfaches."""
+    ruhig = [800 + (8 if i % 2 else -8) for i in range(60)]
+    zappel = [800 + (150 if i % 2 else -150) for i in range(30)]
+    werte = ruhig[:30] + zappel + ruhig[30:]
+    blocker = [0] * 30 + [1] * 30 + [0] * 30
+    pakete = [
+        {"t_wall_s": 1.0 + i, "ppi_ms": [w], "fehler_ms": [12], "blocker": [b]}
+        for i, (w, b) in enumerate(zip(werte, blocker, strict=True))
+    ]
+    beats, t = [], 0.0
+    for w, b in zip(werte, blocker, strict=True):
+        t += w / 1000
+        if not b:
+            beats.append(Beat(round(t, 3), w, 75, None))
+    rec = Recording(beats=beats, intervall_quelle="ppg_ppi", ppi_pakete=pakete)
+
+    def rmssd(regeln: Korrekturregeln) -> float:
+        basis = analysebasis(rec, regeln)
+        ketten = vorschlaege(basis.rec, regeln)
+        gewaehlt = vorauswahl(ketten, regeln.vorauswahl)
+        kz = kennzahlen(anwenden(basis.rec, [v for i in gewaehlt for v in ketten[i].vorschlag]))
+        assert kz is not None
+        return float(kz["rmssd"])
+
+    assert rmssd(Korrekturregeln()) == pytest.approx(16.0)
+    assert rmssd(SELBST) > 5 * rmssd(Korrekturregeln())
 
 
 def test_ohne_ppi_pakete_ist_die_basis_die_rohdatei() -> None:
@@ -118,7 +195,7 @@ def test_verworfene_ausreisser_werden_selbst_erkannt() -> None:
         t += w / 1000
         beats.append(Beat(round(t, 3), w, 70, None))
     rec = Recording(beats=beats, intervall_quelle="ppg_ppi", ppi_pakete=pakete)
-    regeln = Korrekturregeln()
+    regeln = SELBST
     basis = analysebasis(rec, regeln)
     ketten = vorschlaege(basis.rec, regeln)
     assert [(k.start, k.ende, k.art) for k in ketten] == [(3, 3, "interpolieren")]
@@ -175,15 +252,16 @@ def test_vorauswahl() -> None:
         ("ausschliessen", False),
     ]
     assert vorauswahl(ketten, "keine") == set()
-    assert vorauswahl(ketten, "sicher") == {0, 2}  # Ausschluss erfindet nichts
-    assert vorauswahl(ketten, "alle") == {0, 1, 2}
+    assert vorauswahl(ketten, "sicher") == {0, 2}  # unsichere Kette bliebe roh
+    assert vorauswahl(ketten, "alle") == {0, 1, 2}  # Vorgabe: kein Artefakt bleibt roh
+    assert Korrekturregeln().vorauswahl == "alle"
 
 
 def test_regeln_lesen_defensiv() -> None:
     r = Korrekturregeln.aus_dict(
         {"sensor_verwerfung": "quatsch", "vorauswahl": 3, "rr_min": 900, "rr_max": 100}
     )
-    assert r.sensor_verwerfung == "selbst" and r.vorauswahl == "sicher"
+    assert r.sensor_verwerfung == "sensor" and r.vorauswahl == "alle"
     assert (r.rr_min, r.rr_max) == (500, 800)  # auf die Grenzen beschnitten
     assert Korrekturregeln.aus_json("kaputt") == Korrekturregeln()
     assert Korrekturregeln.aus_dict({"malik_an": "ja"}).malik_an is True  # kein bool: Vorgabe
@@ -203,7 +281,7 @@ def _golden_kopie(tmp_path: Path) -> Path:
 def test_sidecar_mit_wiederaufnahme(tmp_path: Path) -> None:
     pfad = _golden_kopie(tmp_path)
     rec = laden(pfad)
-    regeln = Korrekturregeln()
+    regeln = SELBST
     basis = analysebasis(rec, regeln)
     # Eine Korrektur an einer Zeile, eine an einem wieder aufgenommenen Intervall,
     # ein Ausschluss über einen Blocker-Lauf (Intervalle 3–5 verworfen)
@@ -242,12 +320,12 @@ def test_sidecar_von_praxis_geaendert_gilt_praxis(tmp_path: Path) -> None:
     """Passt ``corrections_ppi`` nicht mehr zu ``corrections``, zählt praxis_gui."""
     pfad = _golden_kopie(tmp_path)
     rec = laden(pfad)
-    basis = analysebasis(rec, Korrekturregeln())
+    basis = analysebasis(rec, SELBST)
     analyse_speichern(
         pfad,
         rec,
         [Korrektur("interpolate", 150, 0.0, 850.0)],
-        regeln=Korrekturregeln(),
+        regeln=SELBST,
         basis=basis,
     )
     doc = json.loads(analyse_pfad(pfad).read_text(encoding="utf-8"))
@@ -262,7 +340,7 @@ def test_altes_sidecar_auf_die_basis_uebertragen(tmp_path: Path) -> None:
     rec = laden(pfad)
     analyse_speichern(pfad, rec, [Korrektur("exclude_range", 90, 0.0, 850.0, beat_index_end=100)])
     assert analyse_regeln(pfad) == Korrekturregeln(malik=0.2)  # aus corrections_meta
-    basis = analysebasis(rec, Korrekturregeln())
+    basis = analysebasis(rec, SELBST)
     (k,) = analyse_laden(pfad, basis)
     assert (basis.zeile[k.beat_index], basis.zeile[k.span()[1]]) == (90, 100)
     # Hin und zurück ergibt dieselben Zeilen
@@ -350,7 +428,7 @@ def test_state_speichert_regeln_und_ansichten(tmp_path: Path) -> None:
     state = AppState.starten(tmp_path / "app.db")
     try:
         assert state.korrekturregeln() == Korrekturregeln()
-        state.korrekturregeln_setzen(Korrekturregeln(malik=0.25, sensor_verwerfung="sensor"))
+        state.korrekturregeln_setzen(Korrekturregeln(malik=0.25, sensor_verwerfung="selbst"))
         a = Ansicht("Atemübung", ["rmssd", "sdnn"], {"rmssd": 60}, gemeinsam=False)
         state.ansicht_setzen(a)
         state.ansicht_speichern(a)
@@ -361,7 +439,7 @@ def test_state_speichert_regeln_und_ansichten(tmp_path: Path) -> None:
     state = AppState.starten(tmp_path / "app.db")
     try:
         assert state.korrekturregeln().malik == 0.25
-        assert not state.korrekturregeln().selbst_pruefen
+        assert state.korrekturregeln().selbst_pruefen
         assert state.ansicht() == a
         assert [x.name for x in state.ansichten()] == ["Atemübung", "Belastung"]
         state.ansicht_loeschen("Atemübung")

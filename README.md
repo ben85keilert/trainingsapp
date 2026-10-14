@@ -144,6 +144,7 @@ docs/
   architektur.md       Aufbau und Leitregeln
   datenmodell.md       Datenbankschema
   hrv_algorithmen.md   Formeln, Konstanten, Fallstricke
+  korrektur.md         automatische Korrektur: was zählt und warum
   roadmap.md           Meilensteine
   nachschlagen.md      externe Links (Flet-Icons, Docs, Spezifikationen)
   recht/               DSGVO, MDR, Store-Freigaben

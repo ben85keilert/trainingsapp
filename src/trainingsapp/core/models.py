@@ -377,6 +377,31 @@ class HrvRecording:
     title: str = ""
 
 
+@dataclass(slots=True)
+class Strecke:
+    """Ein Ausdauertraining (Gehen, Laufen, Rad) — nur Ortsfreies (Migration 012).
+
+    Die Ortungen liegen als Datei unter ``Strecken/`` (``file_path`` relativ
+    dazu; leer = ohne GPS). **GPS-Daten werden nie geteilt** (`docs/plan_gps.md`,
+    Abschnitt 0): Diese Zeile kennt keine Koordinate und wird nie synchronisiert.
+    """
+
+    id: str = field(default_factory=new_id)
+    subject_id: str = ""
+    sportart: str = "laufen"
+    started_at: datetime = field(default_factory=jetzt)
+    ended_at: datetime | None = None
+    file_path: str = ""
+    distanz_m: float = 0.0
+    dauer_s: float = 0.0
+    bewegt_s: float = 0.0
+    hoehe_auf_m: float = 0.0
+    hoehe_ab_m: float = 0.0
+    hrv_recording_id: str | None = None
+    session_entry_id: str | None = None
+    title: str = ""
+
+
 __all__ = [
     "Exercise",
     "HrvRecording",

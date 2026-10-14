@@ -118,6 +118,12 @@ def streckenverzeichnis() -> Path:
     return datenverzeichnis() / "Strecken"
 
 
+def kartenverzeichnis() -> Path:
+    """Heruntergeladene Karten (später, `data/karten.py`) — wie Strecken nie geteilt:
+    keine persönlichen Daten, aber die Wahl des Gebiets verrät den Wohnort."""
+    return datenverzeichnis() / "Karten"
+
+
 def messungenverzeichnis() -> Path:
     """Wurzel der HRV-Messdateien.
 
@@ -144,6 +150,7 @@ __all__ = [
     "datenverzeichnis",
     "edition",
     "ist_aktiv",
+    "kartenverzeichnis",
     "medienverzeichnis",
     "messungenverzeichnis",
     "streckenverzeichnis",

@@ -5,9 +5,11 @@ Zwei Tests, beide mit einem Bericht ohne Orte (`core.gps_vorabtest`):
 - **Strecke:** gehen oder laufen, GPS alle 1, 3 oder 10 s, Karte und
   Kennzahlen live. Die Strecke bleibt auf dem Gerät (``Strecken/``); hinaus
   geht sie nur per ausdrücklichem GPX-Export.
-- **Akkutest:** vier Phasen à 15 min — GPS 1 s, 3 s, 10 s, ohne GPS — bei
-  ausgeschaltetem Display; Strom je Phase aus dem Ladestandsmesser des Akkus.
-  Am Ende ein Ton.
+- **Dauertest:** 30 min, nebenher beim Laufen (Ben, 14.10.2026) — 15 min GPS
+  jede Sekunde, dann 15 min seltener (3, 5 oder 10 s). Lässt die Genauigkeit
+  bei längerem GPS nach (Median je 5 min)? Was kostet der Akku (Strom je Phase
+  aus dem Ladestandsmesser)? Am Ende ein Ton. Der erste, einstündige Akkutest
+  (vier Phasen) war nicht auswertbar: Das Handy wurde nebenher benutzt.
 
 Bei ausgeschaltetem Display hält der Vordergrunddienst (Typ ``location``) die
 App am Leben; die Benachrichtigung zeigt den Stand. Läuft gleichzeitig eine
@@ -28,11 +30,12 @@ import flet as ft
 from trainingsapp import __version__
 from trainingsapp.config import streckenverzeichnis
 from trainingsapp.core.gps_vorabtest import (
-    AKKUTEST,
+    DAUERTEST_ZWEITE,
     AkkuProbe,
     Phase,
     akku_auswerten,
     bericht,
+    dauertest,
     phasenname,
 )
 from trainingsapp.core.strecke import Punkt, ausgeduennt, distanz_m, genaue
@@ -182,7 +185,7 @@ class GpsTestLauf:
         if self.bildschirm_an:
             await _wach(self.state, False)
         kopf = [
-            f"GPS-Vorabtest · {'Akkutest' if self.art == 'akku' else 'Strecke'}"
+            f"GPS-Vorabtest · {'Dauertest' if self.art == 'akku' else 'Strecke'}"
             f" · Trainingsassistent {__version__}",
             f"Gestartet {self.gestartet:%d.%m.%Y %H:%M} · Quelle {self.quelle.name}"
             + (" · Bildschirm an" if self.bildschirm_an else ""),
@@ -339,7 +342,7 @@ def gps_test_view(page: ft.Page, state: AppState) -> ft.View:
         await starten("strecke", [(state.gps_test_intervall, None)])
 
     async def akku_starten() -> None:
-        await starten("akku", AKKUTEST)
+        await starten("akku", dauertest(state.gps_test_zweite_s))
 
     async def beenden() -> None:
         lauf = lauf_jetzt()
@@ -436,6 +439,20 @@ def gps_test_view(page: ft.Page, state: AppState) -> ft.View:
 
     # -- Aufbau -------------------------------------------------------------------
 
+    def zweite_wahl() -> ft.Control:
+        def gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+            if e.control.selected:
+                state.gps_test_zweite_s = float(next(iter(e.control.selected)))
+
+        return ft.SegmentedButton(
+            selected=[str(state.gps_test_zweite_s)],
+            show_selected_icon=False,
+            segments=[
+                ft.Segment(value=str(x), label=ft.Text(f"{x:g} s")) for x in DAUERTEST_ZWEITE
+            ],
+            on_change=gewaehlt,
+        )
+
     def intervall_wahl() -> ft.Control:
         def gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
             state.gps_test_intervall = float(next(iter(e.control.selected)))
@@ -476,12 +493,13 @@ def gps_test_view(page: ft.Page, state: AppState) -> ft.View:
         lauf = lauf_jetzt()
         if lauf is not None and not lauf.fertig:
             titel_text = (
-                f"Akkutest · {lauf.phase.name if lauf.phase else phasenname(None)}"
+                f"Dauertest · {lauf.phase.name if lauf.phase else phasenname(None)}"
                 if lauf.art == "akku"
                 else "Strecke läuft"
             )
             erklaerung = (
-                "Display ausschalten, Handy liegen lassen, nicht laden. Nach 60 min kommt ein Ton."
+                "Display aus, nicht laden — laufen oder gehen, wie du magst. Nach 30 min "
+                "kommt ein Ton."
                 if lauf.art == "akku"
                 else "Display darf aus sein — GPS läuft im Hintergrund weiter."
                 " Am Ende 1 min stehen bleiben."
@@ -516,14 +534,18 @@ def gps_test_view(page: ft.Page, state: AppState) -> ft.View:
                 ),
             ),
             karte(
-                titel("Akkutest"),
+                titel("Dauertest (30 min)"),
                 hinweis(
-                    "60 min in vier Phasen: GPS jede Sekunde, alle 3 s, alle 10 s und ohne GPS."
-                    " Display aus, Handy draußen oder ans Fenster legen, nicht laden."
-                    " Am Ende kommt ein Ton."
+                    "15 min GPS jede Sekunde, dann 15 min seltener — nebenher beim Laufen "
+                    "oder Gehen. Der Bericht zeigt die Genauigkeit je 5 min (lässt sie nach?) "
+                    "und den Strom je Phase. Display aus, nicht laden; der Strom ist nur "
+                    "vergleichbar, wenn du das Handy in beiden Phasen gleich benutzt. Am "
+                    "Ende kommt ein Ton."
                 ),
+                ft.Text("Zweite Phase: GPS alle", size=13),
+                zweite_wahl(),
                 ft.OutlinedButton(
-                    "Akkutest starten", icon=ft.Icons.BATTERY_STD, on_click=akku_starten
+                    "Dauertest starten", icon=ft.Icons.BATTERY_STD, on_click=akku_starten
                 ),
             ),
             *([bericht_karte(lauf)] if lauf is not None and lauf.fertig else []),

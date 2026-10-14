@@ -32,13 +32,32 @@ from .strecke import (
     hoehenmeter,
 )
 
-#: Akkutest: (GPS-Intervall in s oder None = GPS aus, Dauer in s) je Phase
+#: Akkutest: (GPS-Intervall in s oder None = GPS aus, Dauer in s) je Phase.
+#: Der erste Lauf am 14.10.2026 war nicht auswertbar — das Handy wurde nebenher
+#: benutzt, und alle Phasen zogen 430–540 mA, auch ohne GPS.
 AKKUTEST: Final[tuple[tuple[float | None, float], ...]] = (
     (1.0, 15 * 60),
     (3.0, 15 * 60),
     (10.0, 15 * 60),
     (None, 15 * 60),
 )
+
+#: Dauertest (Ben, 14.10.2026): 30 min, nebenher beim Laufen — 15 min GPS jede
+#: Sekunde, dann 15 min seltener. Lässt die Genauigkeit bei längerem GPS nach?
+#: Was kostet der Akku? Zur Wahl für die zweite Phase (s):
+DAUERTEST_ZWEITE: Final[tuple[float, ...]] = (3.0, 5.0, 10.0)
+#: Die Genauigkeit wird je so langem Block ausgewiesen (s)
+GENAUIGKEIT_BLOCK_S: Final[float] = 5 * 60
+
+
+def dauertest(zweite_s: float = 10.0, dauer_s: float = 15 * 60) -> list[tuple[float | None, float]]:
+    """Die zwei Phasen des Dauertests.
+
+    >>> dauertest(5.0)
+    [(1.0, 900), (5.0, 900)]
+    """
+    return [(1.0, dauer_s), (zweite_s, dauer_s)]
+
 
 #: Ortungen schlechter als das zählen in den gefilterten Distanzen nicht (m)
 MAX_GENAUIGKEIT_M: Final[float] = 30.0
@@ -181,6 +200,9 @@ class GpsErgebnis:
     tempo_median_ms: float | None
     #: Hysterese → (Anstieg, Abstieg) in m
     hoehe: dict[str, tuple[float, float]]
+    #: Median der Genauigkeit je `GENAUIGKEIT_BLOCK_S` seit Beginn der Phase (m) —
+    #: lässt sie bei längerem GPS nach?
+    genauigkeit_bloecke: tuple[float | None, ...] = ()
 
 
 def gps_auswerten(phase: Phase) -> GpsErgebnis:
@@ -249,7 +271,28 @@ def gps_auswerten(phase: Phase) -> GpsErgebnis:
             "3 m": hoehenmeter(p, 3.0),
             "5 m": hoehenmeter(p, 5.0),
         },
+        genauigkeit_bloecke=_bloecke(phase),
     )
+
+
+def _bloecke(phase: Phase) -> tuple[float | None, ...]:
+    """Median der Genauigkeit je `GENAUIGKEIT_BLOCK_S` ab Beginn der Phase.
+
+    >>> ph = Phase(1.0, start=0.0, ende=600.0, punkte=[
+    ...     Punkt(i, 0, 0, genauigkeit_m=3.0 if i < 300 else 6.0, t_empfang=float(i))
+    ...     for i in range(600)])
+    >>> _bloecke(ph)
+    (3.0, 6.0)
+    """
+    werte: dict[int, list[float]] = {}
+    for x in phase.punkte:
+        if x.t_empfang is None or x.genauigkeit_m is None:
+            continue
+        block = int((x.t_empfang - phase.start) // GENAUIGKEIT_BLOCK_S)
+        werte.setdefault(max(block, 0), []).append(x.genauigkeit_m)
+    if not werte:
+        return ()
+    return tuple(_quantil(werte.get(i, []), 0.5) for i in range(max(werte) + 1))
 
 
 def hintergrund_s(wechsel: Sequence[tuple[float, bool]], start: float, ende: float) -> float:
@@ -305,22 +348,26 @@ def bericht(
                 stroeme[ph.name] = akku.strom_ma
             kapazitaet = kapazitaet or akku.kapazitaet_mah
         zeilen.append("")
-    basis = stroeme.get(phasenname(None))
-    if basis is not None and len(stroeme) > 1:
+    # Bezug: „ohne GPS", sonst die erste Phase (Dauertest: GPS 1 s)
+    bezug = phasenname(None) if phasenname(None) in stroeme else next(iter(stroeme), None)
+    basis = stroeme.get(bezug) if bezug is not None else None
+    if bezug is not None and basis is not None and len(stroeme) > 1:
         teile = [
             f"{name} {_vorzeichen(strom - basis)} mA"
             for name, strom in stroeme.items()
-            if name != phasenname(None)
+            if name != bezug
         ]
-        zeilen.append(f"Mehrverbrauch gegenüber „ohne GPS“ ({_z(basis, 1)} mA):")
+        art = "Mehrverbrauch" if bezug == phasenname(None) else "Unterschied"
+        zeilen.append(f"{art} gegenüber „{bezug}“ ({_z(basis, 1)} mA):")
         zeilen.append("  " + " · ".join(teile))
         if kapazitaet:
             je_stunde = [
                 f"{name} {_vorzeichen((strom - basis) / kapazitaet * 100, 2)} %/h"
                 for name, strom in stroeme.items()
-                if name != phasenname(None)
+                if name != bezug
             ]
             zeilen.append(f"  Akku ({_z(kapazitaet)} mAh): " + " · ".join(je_stunde))
+        zeilen.append("  Vergleichbar nur, wenn das Handy in allen Phasen gleich benutzt wurde.")
     return "\n".join(zeilen).rstrip() + "\n"
 
 
@@ -338,6 +385,12 @@ def _gps_zeilen(e: GpsErgebnis) -> list[str]:
         f" · über {_z(MAX_GENAUIGKEIT_M)} m {_prozent(e.ungenau_anteil)}",
         "  Distanz " + " · ".join(f"{k} {_z(v)} m" for k, v in e.distanzen.items()),
     ]
+    if len(e.genauigkeit_bloecke) > 1:
+        minuten = round(GENAUIGKEIT_BLOCK_S / 60)
+        zeilen.append(
+            f"  Genauigkeit je {minuten} min (Median): "
+            + " · ".join(f"{_z(g, 1)} m" for g in e.genauigkeit_bloecke)
+        )
     if e.zittern_roh_m_min is not None:
         zeilen.append(
             f"  Stand {_uhr(e.stand_s)} min: Zittern roh {_z(e.zittern_roh_m_min, 1)} m/min"
@@ -419,6 +472,8 @@ def _uhr(sekunden: float) -> str:
 
 __all__ = [
     "AKKUTEST",
+    "DAUERTEST_ZWEITE",
+    "GENAUIGKEIT_BLOCK_S",
     "GENAU_M",
     "MAX_GENAUIGKEIT_M",
     "AkkuErgebnis",
@@ -427,6 +482,7 @@ __all__ = [
     "Phase",
     "akku_auswerten",
     "bericht",
+    "dauertest",
     "gps_auswerten",
     "hintergrund_s",
     "phasenname",

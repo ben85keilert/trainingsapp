@@ -41,6 +41,7 @@ from ..core.models import (
     PlanItem,
     Session,
     SessionEntry,
+    Strecke,
     Subject,
     jetzt,
     lokaler_tag,
@@ -1609,11 +1610,99 @@ class HrvRepo:
         )
 
 
+class StreckeRepo:
+    """Ausdauertrainings — die Ortungen liegen als Datei unter ``Strecken/``.
+
+    **Nie synchronisiert, nie exportiert** (Regel 0, `docs/plan_gps.md`): keine
+    outbox, und die Messungs-Exporte sehen diese Tabelle nicht.
+    """
+
+    def __init__(self, con: sqlite3.Connection) -> None:
+        self.con = con
+
+    def anlegen(self, s: Strecke) -> None:
+        self.con.execute(
+            "INSERT INTO strecke (id, subject_id, sportart, started_at, ended_at, file_path, "
+            "distanz_m, dauer_s, bewegt_s, hoehe_auf_m, hoehe_ab_m, hrv_recording_id, "
+            "session_entry_id, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                s.id,
+                s.subject_id,
+                s.sportart,
+                s.started_at.isoformat(),
+                s.ended_at.isoformat() if s.ended_at else None,
+                s.file_path,
+                s.distanz_m,
+                s.dauer_s,
+                s.bewegt_s,
+                s.hoehe_auf_m,
+                s.hoehe_ab_m,
+                s.hrv_recording_id,
+                s.session_entry_id,
+                s.title,
+            ),
+        )
+
+    def laden(self, strecke_id: str) -> Strecke | None:
+        r = self.con.execute(
+            "SELECT * FROM strecke WHERE id = ? AND deleted_at IS NULL", (strecke_id,)
+        ).fetchone()
+        return self._zeile(r) if r else None
+
+    def alle(self, subject_id: str) -> list[Strecke]:
+        """Neueste zuerst."""
+        return [
+            self._zeile(r)
+            for r in self.con.execute(
+                "SELECT * FROM strecke WHERE subject_id = ? AND deleted_at IS NULL "
+                "ORDER BY started_at DESC",
+                (subject_id,),
+            )
+        ]
+
+    def zur_hrv(self, recording_id: str) -> Strecke | None:
+        """Das Training, zu dem eine HRV-Aufnahme gehört — falls eines."""
+        r = self.con.execute(
+            "SELECT * FROM strecke WHERE hrv_recording_id = ? AND deleted_at IS NULL",
+            (recording_id,),
+        ).fetchone()
+        return self._zeile(r) if r else None
+
+    def titel_setzen(self, strecke_id: str, titel: str) -> None:
+        self.con.execute("UPDATE strecke SET title = ? WHERE id = ?", (titel.strip(), strecke_id))
+
+    def loeschen(self, strecke_id: str) -> None:
+        """Nur der Verweis verschwindet — die Datei mit den Ortungen bleibt liegen."""
+        self.con.execute(
+            "UPDATE strecke SET deleted_at = ? WHERE id = ?", (jetzt().isoformat(), strecke_id)
+        )
+
+    @staticmethod
+    def _zeile(r: sqlite3.Row) -> Strecke:
+        return Strecke(
+            id=r["id"],
+            subject_id=r["subject_id"],
+            sportart=r["sportart"],
+            started_at=datetime.fromisoformat(r["started_at"]),
+            ended_at=datetime.fromisoformat(r["ended_at"]) if r["ended_at"] else None,
+            file_path=r["file_path"],
+            distanz_m=r["distanz_m"],
+            dauer_s=r["dauer_s"],
+            bewegt_s=r["bewegt_s"],
+            hoehe_auf_m=r["hoehe_auf_m"],
+            hoehe_ab_m=r["hoehe_ab_m"],
+            hrv_recording_id=r["hrv_recording_id"],
+            session_entry_id=r["session_entry_id"],
+            title=r["title"],
+        )
+
+
 __all__ = [
     "PAPIERKORB_TAGE",
     "DayNoteRepo",
     "ExerciseRepo",
     "HrvRepo",
+    "StreckeRepo",
     "PlanRepo",
     "SessionRepo",
     "SettingRepo",

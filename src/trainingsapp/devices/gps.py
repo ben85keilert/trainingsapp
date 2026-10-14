@@ -170,4 +170,47 @@ class GpsSimulator(GpsQuelle):
         )
 
 
-__all__ = ["GpsQuelle", "GpsSimulator"]
+class PunktWiedergabe(GpsQuelle):
+    """Spielt gespeicherte Ortungen ab — im Takt ihrer Zeitstempel, ``beschleunigung``-fach.
+
+    Für Tests und die Vorschau: eine bekannte Strecke statt eines Kreises.
+    Das Intervall von `starten` zählt nicht — es kommen die Ortungen, die da
+    sind. Danach endet der Strom.
+    """
+
+    name = "Wiedergabe"
+
+    def __init__(self, punkte: list[Punkt], *, beschleunigung: float = 1.0) -> None:
+        super().__init__()
+        self._punkte = list(punkte)
+        self.beschleunigung = beschleunigung
+        self._m0 = time.monotonic()
+        self._aufgabe: asyncio.Task[None] | None = None
+
+    def jetzt(self) -> float:
+        return (time.monotonic() - self._m0) * self.beschleunigung
+
+    async def starten(self, intervall_s: float) -> None:
+        await self.beenden()
+        self._sitzung_beginnen()
+        self._aufgabe = asyncio.create_task(self._laufen())
+
+    async def beenden(self) -> None:
+        if self._aufgabe is not None:
+            self._aufgabe.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._aufgabe
+            self._aufgabe = None
+        self._sitzung_beenden()
+
+    async def _laufen(self) -> None:
+        vorher: Punkt | None = None
+        for p in self._punkte:
+            if vorher is not None and p.t > vorher.t:
+                await asyncio.sleep((p.t - vorher.t) / self.beschleunigung)
+            self._einreihen(p)
+            vorher = p
+        self._sitzung_beenden()
+
+
+__all__ = ["GpsQuelle", "GpsSimulator", "PunktWiedergabe"]

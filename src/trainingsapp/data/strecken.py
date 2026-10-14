@@ -79,6 +79,15 @@ class StreckenSchreiber:
         self.schliessen()
 
 
+def dateiname(start: datetime) -> str:
+    """Name der Datei eines Trainings — wie die Messdateien nach der Startzeit (lokal).
+
+    >>> dateiname(datetime(2026, 10, 18, 9, 5, 7, tzinfo=UTC)).startswith("strecke_2026-10-18_")
+    True
+    """
+    return f"strecke_{start.astimezone():%Y-%m-%d_%H%M%S}.jsonl"
+
+
 def jsonl_lesen(pfad: Path) -> list[Punkt]:
     """Alle Ortungen einer ``.jsonl``-Datei; eine abgebrochene letzte Zeile fällt weg."""
     punkte: list[Punkt] = []
@@ -154,4 +163,4 @@ def _zeit(t: float) -> str:
     return d.strftime("%Y-%m-%dT%H:%M:%S.") + f"{d.microsecond // 1000:03d}Z"
 
 
-__all__ = ["GPX_SPORTART", "StreckenSchreiber", "gpx", "jsonl_lesen"]
+__all__ = ["GPX_SPORTART", "StreckenSchreiber", "dateiname", "gpx", "jsonl_lesen"]

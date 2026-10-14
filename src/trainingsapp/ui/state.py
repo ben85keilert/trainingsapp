@@ -48,6 +48,7 @@ from trainingsapp.data.repositories import (
     PlanRepo,
     SessionRepo,
     SettingRepo,
+    StreckeRepo,
     SubjectRepo,
 )
 from trainingsapp.data.seed import seed_einspielen
@@ -76,6 +77,8 @@ class AppState:
     sitzungen: SessionRepo
     tagesnotizen: DayNoteRepo
     hrv: HrvRepo
+    #: Ausdauertrainings mit GPS (Migration 012) — nie synchronisiert
+    strecken: StreckeRepo
     profil: Subject
     #: Welcher Reiter der Navigationsleiste aktiv ist — als Schlüssel, nicht als
     #: Index: der Reiter „Messung" lässt sich ausblenden (`app.REITER`)
@@ -149,6 +152,8 @@ class AppState:
     gps_test: Any = None
     gps_test_ansicht: int = 0
     gps_test_intervall: float = 1.0
+    #: Dauertest: Takt der zweiten Phase (s) — die erste läuft immer mit 1 s
+    gps_test_zweite_s: float = 10.0
     gps_test_karte: bool = True
     gps_test_wach: bool = False
     #: App sichtbar? Display aus oder andere App → False (Lebenszyklus in `app.py`)
@@ -188,6 +193,7 @@ class AppState:
             sitzungen=SessionRepo(con),
             tagesnotizen=DayNoteRepo(con),
             hrv=HrvRepo(con),
+            strecken=StreckeRepo(con),
             profil=profil,
             neu_eingespielt=neu,
             papierkorb_offen=offen,

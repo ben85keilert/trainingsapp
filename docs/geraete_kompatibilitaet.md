@@ -4,7 +4,7 @@ Welche Brustgurte, Sensoren, Uhren und Wearables sich über die **bestehende
 BLE-Verbindung** mit der Trainingsapp (Android) und mit `praxis_gui` (Desktop)
 nutzen lassen — und welche nicht.
 
-- **Stand:** 2026-10-13
+- **Stand:** 2026-10-14 (Garmin vívoactive ergänzt)
 - **Am Gerät getestet:** nur Polar H10 und Polar Verity Sense. Alles andere ist
   eine Einstufung nach Aktenlage (Web-Recherche vom 13.10.2026: Herstellerseiten,
   Kompatibilitätslisten von HRV-Apps, Tests von DC Rainmaker, the5krunner, Marco
@@ -143,8 +143,12 @@ Zusatzmarken:
 | HRM-Dual | Brustgurt EKG · BLE, ANT+ | 🔵 | 🔵 | widersprüchlich: Garmin „HRV über Bluetooth", DCR 2019 „BLE: keine RR", Welltory/Elite HRV: kompatibel; 2 Verbindungen | [DCR](https://www.dcrainmaker.com/2019/01/garmin-hrm-dual-heart-rate-strap-in-depth-review.html), [Welltory](https://help.welltory.com/articles/4998580) |
 | HRM-Fit | Brustgurt (Sport-BH) · BLE, ANT+ | 🔵 | 🔵 | nur Herstellerangabe „HRV über Bluetooth" | [Händler](https://www.mantel.com/be-en/garmin-hrm-fit-heart-rate-monitor) |
 | HRM 200 | Brustgurt EKG · BLE, ANT+ | 🔵 | 🔵 | Modus **open** nötig (LED blinkt 3×) | [Garmin](https://www8.garmin.com/manuals-apac/webhelp/hrm200/EN-SG/GUID-34D4135C-679D-4240-8E89-BC430147E018-5637.html) |
-| Uhren mit BLE-Broadcast (Forerunner 245/745/945 und neuer, fēnix 6+, Epix, Venu 2+, MARQ; Instinct/Enduro/vívoactive 5–6 ungeprüft) | Uhr optisch · BLE, ANT+ | 🟠 | 🟠 | „Herzfrequenz übertragen" einschalten. RR fehlen (für FR745 belegt, für die übrigen angenommen) | [DCR](https://dcrainmaker.com/2020/04/garmin-wearable-broadcasting.html), [Garmin-Forum FR745](https://forums.garmin.com/sports-fitness/running-multisport/f/forerunner-745/243411/broadcast-heart-rate-r-r-intervals) |
-| ältere Uhren (FR 235/645/735/935, vívoactive 3/4, Venu 1, vívosmart 4) | Uhr · nur ANT+-Broadcast | 🔴 | 🔴 | — | [DCR](https://dcrainmaker.com/2020/04/garmin-wearable-broadcasting.html) |
+| Uhren mit BLE-Broadcast (Forerunner 245/745/945 und neuer, fēnix 6+, Epix, Venu 2+, MARQ; Instinct/Enduro ungeprüft) | Uhr optisch · BLE, ANT+ | 🟠 | 🟠 | „Herzfrequenz übertragen" einschalten. RR fehlen (für FR745 belegt, für die übrigen angenommen) | [DCR](https://dcrainmaker.com/2020/04/garmin-wearable-broadcasting.html), [Garmin-Forum FR745](https://forums.garmin.com/sports-fitness/running-multisport/f/forerunner-745/243411/broadcast-heart-rate-r-r-intervals) |
+| ältere Uhren (FR 235/645/735/935, Venu 1, vívosmart 4) | Uhr · nur ANT+-Broadcast | 🔴 | 🔴 | — | [DCR](https://dcrainmaker.com/2020/04/garmin-wearable-broadcasting.html) |
+| vívoactive 6 | Uhr optisch (Elevate Gen 4) · BLE, ANT+ | 🟠 | 🟠 | „Herzfrequenz übertragen" (Steuerung oder Einstellungen → Uhrsensoren → Herzfrequenz am Handgelenk); im Handbuch stehen für das Senden ein Bluetooth- und ein ANT+-Symbol. RR angenommen fehlend wie bei den übrigen Garmin-Uhren | [Garmin-Handbuch](https://www8.garmin.com/manuals/webhelp/GUID-8C2C402F-55AC-431F-9CF2-1442B89CE149/EN-US/vivoactive_6_OM_EN-US.pdf) (S. 7, 67) |
+| vívoactive 5 | Uhr optisch (Elevate Gen 4) · BLE, ANT+ | 🟠 | 🟠 | wie vívoactive 6. BLE-Broadcast nur durch eine Liste eines Drittanbieters belegt, die sich auf Garmin beruft; das Handbuch nennt den Funk nicht | [Pulsoid](https://blog.pulsoid.net/post/garmin-devices-supported-by-pulsoid), [Garmin-Handbuch](https://www8.garmin.com/manuals/webhelp/GUID-5D183A14-BB43-4A9B-B441-5F824214CE40/EN-US/GUID-E224D0CC-A96C-4F5A-B0EB-83691D7BF923.html) |
+| vívoactive 4/4S, vívoactive 3 (auch Music/LTE), vívoactive HR | Uhr optisch · nur ANT+-Broadcast | 🔴 | 🔴 | Handbuch: Kopplung mit einem „ANT+-kompatiblen Gerät" | [Garmin-Handbuch vívoactive 4](https://www8.garmin.com/manuals/webhelp/vivoactive4_4S/EN-US/GUID-8EC8B7FE-2AC2-46E9-94FC-06416FF1E2ED.html), [DCR](https://dcrainmaker.com/2020/04/garmin-wearable-broadcasting.html) |
+| vívoactive (1. Generation, 2015) | Uhr · kein Pulssensor | 🔴 | 🔴 | — | — |
 | HRM-Run, HRM-Run2, HRM-Tri, HRM-Swim, HRM Premium/Soft Strap (HRM3-SS), HRM Standard | Brustgurt · nur ANT+ | 🔴 | 🔴 | — | [Garmin-Blog](https://www.garmin.com/cs-CZ/blog/?p=543) |
 | Index Sleep Monitor | optisch Oberarm · BLE nur zur Connect-App | 🔴 | 🔴 | kein Sportsensor | [the5krunner](https://the5krunner.com/2025/06/05/garmin-index-sleep-monitor-lots-of-images-and-a-video/) |
 
@@ -304,7 +308,7 @@ Zeichen auf ✅ (oder ehrlich auf 🟠/🔴) setzen.
 
 **Priorität 3 — Uhren-Broadcast, voraussichtlich nur Puls**
 
-- [ ] eine Garmin-Uhr (Forerunner/fēnix)
+- [ ] eine Garmin-Uhr (Forerunner/fēnix oder vívoactive 5/6) — kommt BLE-Broadcast an, enthält er RR?
 - [ ] Fitbit Charge 6 / Pixel Watch — Kopplung, RR?
 - [ ] Amazfit Helio Strap
 - [ ] Huawei Watch GT / Xiaomi Band 8–10

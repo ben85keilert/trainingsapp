@@ -2,7 +2,8 @@
 
 Vorn das aktive Profil wählen; anlegen, umbenennen und löschen in einer eigenen
 Ansicht (`/einstellungen/profile`). Dazu die eigene Einteilung der Übungen
-(`/einstellungen/tags`: Typen und Regionen) und wie sie im Plan aussehen
+(`/einstellungen/tags`: Typen und Regionen), die Übungspakete
+(`/einstellungen/pakete`: importieren, exportieren) und wie sie im Plan aussehen
 (`ui.state.PLAN_DARSTELLUNGEN`), der Weg zu den Einstellungen der
 HRV-Messung (`/einstellungen/hrv`), zum Timer, zum GPS-Vorabtest
 (`/einstellungen/gps-test`), Hilfe und Edition.
@@ -71,6 +72,8 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
     )
     e = state.hrv_einstellungen()
     tag_text = f"{len(state.tags.namen('typ'))} Typen · {len(state.tags.namen('region'))} Regionen"
+    pakete = len(state.pakete.alle())
+    paket_text = "1 Paket installiert" if pakete == 1 else f"{pakete} Pakete installiert"
     hrv_text = f"{len(e.kacheln)} Kacheln · Reiter „Messung“ " + (
         "sichtbar" if e.messung_anzeigen else "ausgeblendet"
     )
@@ -110,6 +113,16 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
                                 ),
                                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
                                 on_click=oeffner("/einstellungen/tags"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.INVENTORY_2_OUTLINED),
+                                title=ft.Text("Übungspakete"),
+                                subtitle=ft.Text(
+                                    f"Importieren, exportieren · {paket_text}", size=12
+                                ),
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/pakete"),
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
                             ft.Dropdown(
@@ -170,6 +183,16 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
                                 title=ft.Text("Notation — so wird eingegeben"),
                                 subtitle=ft.Text("3x15, 30, 15/15/20, +20, 1:30", size=12),
                                 on_click=hilfe_oeffner(page),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.HELP_OUTLINE),
+                                title=ft.Text("Varianten und Pakete"),
+                                subtitle=ft.Text(
+                                    "Eine Kachel für Wandsitz 45° und 90° · woher Übungen kommen",
+                                    size=12,
+                                ),
+                                on_click=hilfe_oeffner(page, "uebungen"),
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
                             hinweis(f"Edition {edition().value}"),

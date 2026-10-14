@@ -553,7 +553,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                             opacity=0.7,
                         ),
                         ft.Column(spacing=6, controls=zeilen),
-                        abschnitt("VERLAUF"),
+                        abschnitt("VERLAUF", hilfe_knopf(page, thema="uebungen")),
                         ft.Row(controls=[familie]),
                         ft.Text(
                             "Varianten (Wandsitz 45° und 90°) teilen sich eine Kachel: Mengen "

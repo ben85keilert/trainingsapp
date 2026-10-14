@@ -1,6 +1,13 @@
 {
+  "format": "trainingsapp-uebungspaket",
   "version": 1,
-  "hinweis": "Startkatalog. Wird beim ersten Start eingespielt. typen = Typ-Tags (Dehnung, Kräftigung, …), regionen = Region-Tags (Nacken, Bein, …), beide optional. Eigene Übungen entstehen daneben und werden hier nie überschrieben.",
+  "paket": {
+    "id": "2c1194ea-67ba-536d-aa7d-bf74bc3c73d4",
+    "name": "Grundausstattung",
+    "beschreibung": "Die Übungen, die mit der App kommen: Atmung, Dehnung, Kräftigung und Benchmarks zum Vergleichen.",
+    "version": 1
+  },
+  "hinweis": "Paket „Grundausstattung“ — die mitgelieferten Übungen (Format: docs/uebungspakete.md). Beim ersten Start installiert; danach kommen nur fehlende Übungen dazu. Steigt paket.version, aktualisiert der nächste Start alle Übungen dieses Pakets — Änderungen, die jemand daran gemacht hat, gehen dabei verloren. typen = Typ-Tags (Dehnung, Kräftigung, …), regionen = Region-Tags (Nacken, Bein, …), beide optional. Eigene Übungen entstehen daneben und werden hier nie überschrieben.",
   "exercises": [
     {
       "key": "atem_4_7_8",

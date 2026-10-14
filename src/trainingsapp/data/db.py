@@ -88,11 +88,19 @@ def oeffnen(pfad: Path | str) -> sqlite3.Connection:
 def transaktion(con: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     """Führt einen Block als Transaktion aus.
 
+    Läuft schon eine, macht der Block darin mit — so kann ein Import viele
+    `ExerciseRepo.speichern` (je eine Transaktion) in *einer* zusammenfassen.
+    Ein Fehler rollt dann die äußere zurück.
+
     >>> import sqlite3
     >>> con = oeffnen(":memory:")
     >>> with transaktion(con) as c:
-    ...     _ = c.execute("SELECT 1")
+    ...     with transaktion(c):
+    ...         _ = c.execute("SELECT 1")
     """
+    if con.in_transaction:
+        yield con
+        return
     con.execute("BEGIN")
     try:
         yield con

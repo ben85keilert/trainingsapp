@@ -1,7 +1,10 @@
-"""Das Hilfefenster zur Notation — überall dieselbe Tabelle.
+"""Hilfefenster — überall derselbe Text je Thema.
 
-Der Text ist Markdown und steht auch in `docs/notation.md`; wer die Notation
-ändert, ändert beide Stellen.
+- **Notation** (`NOTATION_MD`): steht auch in `docs/notation.md`; wer die
+  Notation ändert, ändert beide Stellen.
+- **Varianten und Pakete** (`UEBUNGEN_MD`): die allgemeine Erklärung, die
+  früher in jeder Übung stand (Ben, 14.10.2026: dort redundant). Ausführlich
+  in `docs/datenmodell.md` (Varianten) und `docs/uebungspakete.md`.
 """
 
 from __future__ import annotations
@@ -41,30 +44,75 @@ nicht Wandsitz 90°. „Gemacht“ ohne Werte zählt als *abgehakt* (leerer Hake
 """
 
 
-def notation_dialog() -> ft.AlertDialog:
+UEBUNGEN_MD = """\
+**Varianten** — Wandsitz 45° und Wandsitz 90°, Liegestütz eng und weit: eigene
+Übungen mit eigener Eingabe, im Verlauf aber **eine Kachel**. Die Mengen werden
+addiert, die Variante wird dazugeschrieben.
+
+Eine Variante entsteht als Kopie (Knopf oben in den Übungsdetails) und gehört
+zur Kachel ihres Originals. Im Editor unter „Verlauf“ machst du sie
+eigenständig — sinnvoll, wenn sie stark abweicht (Liegestütz einarmig) — oder
+hängst eine Übung an ein anderes Original.
+
+**Pakete** — Übungen kommen über Pakete. Die mitgelieferten stehen im Paket
+„Grundausstattung“, weitere (Qigong, Pilates, Yoga, eine Sammlung von jemand
+anderem) importierst du unter *Einstellungen → Übungspakete*. Aus welchem Paket
+eine Übung stammt, steht klein hinter ihrer Beschreibung.
+
+Was du selbst anlegst oder kopierst, ist eine **eigene Übung** und gehört zu
+keinem Paket — ein Import ändert sie nie.
+
+Ein **Import** legt neue Übungen an und bringt die Übungen desselben Pakets auf
+den Stand der Datei; was du an ihnen geändert hast, geht dabei verloren. Fehlende
+Typen und Regionen kommen mit. Einträge im Verlauf bleiben immer, wie sie sind.
+
+Ein **Export** schreibt ausgewählte Übungen in eine Paketdatei zum Teilen — ohne
+Einträge, Messungen oder Strecken.
+"""
+
+#: Thema → (Titel, Text, Tooltip des Knopfs)
+THEMEN: dict[str, tuple[str, str, str]] = {
+    "notation": ("So wird eingegeben", NOTATION_MD, "Wie gebe ich ein?"),
+    "uebungen": ("Varianten und Pakete", UEBUNGEN_MD, "Varianten und Pakete"),
+}
+
+
+def hilfe_dialog(thema: str = "notation") -> ft.AlertDialog:
+    titel, text, _ = THEMEN[thema]
     return ft.AlertDialog(
-        title=ft.Text("So wird eingegeben"),
-        content=ft.Container(width=420, content=ft.Markdown(NOTATION_MD)),
+        title=ft.Text(titel),
+        content=ft.Container(width=420, content=ft.Markdown(text)),
         scrollable=True,
     )
 
 
-def hilfe_knopf(page: ft.Page, groesse: int = 20) -> ft.Control:
-    """Ein Fragezeichen, das das Hilfefenster öffnet."""
+def notation_dialog() -> ft.AlertDialog:
+    return hilfe_dialog("notation")
 
-    def oeffnen() -> None:
-        page.show_dialog(notation_dialog())
 
+def hilfe_knopf(page: ft.Page, groesse: int = 20, thema: str = "notation") -> ft.Control:
+    """Ein Fragezeichen, das das Hilfefenster zum Thema öffnet."""
     return ft.IconButton(
-        ft.Icons.HELP_OUTLINE, icon_size=groesse, tooltip="Wie gebe ich ein?", on_click=oeffnen
+        ft.Icons.HELP_OUTLINE,
+        icon_size=groesse,
+        tooltip=THEMEN[thema][2],
+        on_click=hilfe_oeffner(page, thema),
     )
 
 
-def hilfe_oeffner(page: ft.Page) -> Callable[[], None]:
+def hilfe_oeffner(page: ft.Page, thema: str = "notation") -> Callable[[], None]:
     def oeffnen() -> None:
-        page.show_dialog(notation_dialog())
+        page.show_dialog(hilfe_dialog(thema))
 
     return oeffnen
 
 
-__all__ = ["NOTATION_MD", "hilfe_knopf", "hilfe_oeffner", "notation_dialog"]
+__all__ = [
+    "NOTATION_MD",
+    "THEMEN",
+    "UEBUNGEN_MD",
+    "hilfe_dialog",
+    "hilfe_knopf",
+    "hilfe_oeffner",
+    "notation_dialog",
+]

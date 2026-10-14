@@ -1,4 +1,10 @@
-"""Detailansicht einer Übung — eine Route auf dem Stapel (`/uebung/<id>`)."""
+"""Detailansicht einer Übung — eine Route auf dem Stapel (`/uebung/<id>`).
+
+Aus welchem Paket die Übung kommt, steht unscheinbar in Klammern hinter der
+Beschreibung (Ben, 14.10.2026) — „eigene Übung“, wenn sie hier angelegt oder
+kopiert wurde. Die Erklärung der Varianten stand früher in jeder Übung; sie
+steht jetzt allgemein in der Hilfe (`ui/components/hilfe.UEBUNGEN_MD`).
+"""
 
 from __future__ import annotations
 
@@ -19,6 +25,21 @@ from trainingsapp.core.standards import abweichungen, vom_standard
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
+
+
+def _beschreibung(uebung: Exercise, herkunft: str) -> ft.Control:
+    """Die Beschreibung, dahinter leise die Herkunft: „(Paket „Grundausstattung“)“."""
+    return ft.Text(
+        uebung.description or "—",
+        spans=[
+            ft.TextSpan(
+                f"  ({herkunft})",
+                style=ft.TextStyle(
+                    size=12, color=ft.Colors.with_opacity(0.55, ft.Colors.ON_SURFACE)
+                ),
+            )
+        ],
+    )
 
 
 def _abschnitt(titel: str, inhalt: ft.Control) -> ft.Control:
@@ -100,12 +121,14 @@ def uebung_detail(
         Eine Kopie gehört zur Kachel des Originals: Im Verlauf addieren sich ihre
         Mengen, die Variante wird ausgewiesen. Im Editor lässt sie sich
         eigenständig machen (Liegestütz einarmig ist eine eigene Liste wert).
+        Sie ist eine eigene Übung — kein Paket-Update ändert sie.
         """
         kopie = replace(
             uebung,
             id=new_id(),
             name=f"{uebung.name} (Variante)",
             is_builtin=False,
+            package_id=None,
             media=[replace(m, id=new_id()) for m in uebung.media],
             typen=list(uebung.typen),
             regionen=list(uebung.regionen),
@@ -164,18 +187,8 @@ def uebung_detail(
         ],
     )
 
-    def familien_text() -> str:
-        if uebung.family_id:
-            original = state.uebungen.laden(uebung.family_id, mit_geloeschten=True)
-            name = original.name if original else "?"
-            return (
-                f"Variante von „{name}“ — im Verlauf eine Kachel, Mengen werden addiert, "
-                "die Variante wird ausgewiesen."
-            )
-        varianten = state.uebungen.varianten(uebung.id)
-        if varianten:
-            return "Varianten in derselben Kachel: " + ", ".join(v.name for v in varianten)
-        return "Eigene Kachel. Eine Kopie (oben) wird zur Variante dieser Übung."
+    paket = state.pakete.laden(uebung.package_id) if uebung.package_id else None
+    herkunft = f"Paket „{paket.name}“" if paket is not None else "eigene Übung"
 
     # -- Standard für Pläne und Verwendungen -------------------------------------
 
@@ -266,7 +279,7 @@ def uebung_detail(
                 ),
             ],
         ),
-        _abschnitt("Beschreibung", ft.Text(uebung.description or "—")),
+        _abschnitt("Beschreibung", _beschreibung(uebung, herkunft)),
         _abschnitt(
             "Regionen",
             ft.Row(
@@ -276,7 +289,6 @@ def uebung_detail(
             else ft.Text("—"),
         ),
         _abschnitt("Eingabe", _notation(uebung)),
-        _abschnitt("Varianten", ft.Text(familien_text())),
         _abschnitt("Standard für Pläne", ft.Column(spacing=0, controls=verwendungen)),
         _abschnitt(
             "Videos",
@@ -285,15 +297,6 @@ def uebung_detail(
             else ft.Text("Noch keine Videos hinterlegt.", opacity=0.6),
         ),
     ]
-    if uebung.is_builtin:
-        abschnitte.append(
-            ft.Text(
-                "Mitgelieferte Übung. Du kannst sie ändern — ein Update der App "
-                "überschreibt deine Änderungen nicht.",
-                size=12,
-                opacity=0.6,
-            )
-        )
 
     return ft.View(
         route=f"/uebung/{uebung.id}",

@@ -41,6 +41,7 @@ from trainingsapp.core.timer import (
 )
 from trainingsapp.core.verlauf import MODUS_NUMMER
 from trainingsapp.data.db import oeffnen
+from trainingsapp.data.pakete import PaketRepo
 from trainingsapp.data.repositories import (
     DayNoteRepo,
     ExerciseRepo,
@@ -94,6 +95,8 @@ class AppState:
     strecken: StreckeRepo
     #: Typen und Regionen (Migration 013) — Einstellungen → Typen und Regionen
     tags: TagRepo
+    #: Übungspakete (Migration 014) — importieren, exportieren, Herkunft
+    pakete: PaketRepo
     profil: Subject
     #: Welcher Reiter der Navigationsleiste aktiv ist — als Schlüssel, nicht als
     #: Index: der Reiter „Messung" lässt sich ausblenden (`app.REITER`)
@@ -104,6 +107,9 @@ class AppState:
     suchtext: str = ""
     typ_filter: set[str] = field(default_factory=set)  # Kräftigung, Dehnung, …
     region_filter: set[str] = field(default_factory=set)  # Nacken, Bein, …
+    #: „Übung hinzufügen“ im Plan: Typ- und Region-Filter (`ui/components/tagwahl.py`)
+    hinzufuegen_typen: set[str] = field(default_factory=set)
+    hinzufuegen_regionen: set[str] = field(default_factory=set)
     #: Wie viele Übungen der letzte Start neu angelegt hat (für den Startbildschirm)
     neu_eingespielt: int = field(default=0)
     #: Übungen, deren Papierkorbfrist abgelaufen ist, die aber einen Verlauf
@@ -217,6 +223,7 @@ class AppState:
             hrv=HrvRepo(con),
             strecken=StreckeRepo(con),
             tags=TagRepo(con),
+            pakete=PaketRepo(con),
             profil=profil,
             neu_eingespielt=neu,
             papierkorb_offen=offen,

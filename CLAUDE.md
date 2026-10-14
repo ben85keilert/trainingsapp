@@ -111,6 +111,13 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Kopie, nie mit der aktuellen Definition. Neuer `FieldType` → hier ergänzen und in
   `ui/components/spec_form.py` ein Widget registrieren.
 
+- **Übungen kommen über Pakete** (Ben, 14.10.2026). Der mitgelieferte Katalog ist
+  das Paket „Grundausstattung“ (`data/seed/exercises.json`, IDs weiter per UUIDv5
+  aus dem Schlüssel); weitere kommen per Import, der Export schreibt nur Übungen.
+  `exercise.package_id` = Herkunft, `NULL` = eigene Übung (auch Kopien). Ein Import
+  aktualisiert nur die Übungen desselben Pakets — Änderungen daran gehen verloren
+  (gewollt); eigene Übungen ändert er nie. Vertrag: `docs/uebungspakete.md`.
+
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`
   über eine begrenzte `asyncio.Queue`. Messwerte und Status laufen getrennt — Batterie

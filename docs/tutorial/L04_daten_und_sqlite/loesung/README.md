@@ -322,6 +322,13 @@ def seed_einspielen(con: sqlite3.Connection, datei: Path = SEED_DATEI) -> int:
 Der Namensraum darf sich **nie** ändern — sonst bekämen alle mitgelieferten
 Übungen beim nächsten Start neue IDs und würden ein zweites Mal angelegt.
 
+> **Nachtrag (14.10.2026):** Inzwischen ist der Startkatalog ein *Übungspaket*
+> („Grundausstattung“, `docs/uebungspakete.md`). Das Prinzip ist geblieben —
+> dieselben UUIDv5-IDs, Vorhandenes bleibt unangetastet —, nur steckt die
+> Schleife jetzt in `PaketRepo.importieren` (`data/pakete.py`). Neu ist eine
+> Ausnahme: Steigt die Version im Paketkopf, aktualisiert der nächste Start die
+> Übungen der Grundausstattung, und Änderungen daran gehen verloren.
+
 `seed_laden()` ist bewusst von der Datenbank getrennt: Es liest das JSON und
 baut Domänenobjekte. So lässt sich der Katalog testen, ohne eine Datenbank
 anzulegen, und `seed_einspielen()` bleibt drei Zeilen Logik.

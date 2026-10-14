@@ -139,6 +139,9 @@ class Exercise:
     #: Variante von … (Migration 007): gleiche Kachel im Verlauf; ``None`` =
     #: eigene Kachel. Zeigt immer auf das Original, nie auf eine andere Variante.
     family_id: str | None = None
+    #: Aus welchem Paket die Übung kam (Migration 014, `core/pakete.py`);
+    #: ``None`` = eigene Übung — hier angelegt oder kopiert.
+    package_id: str | None = None
 
     def __post_init__(self) -> None:
         # Wer nur `category` angibt (Altbestand, Tutorial), bekommt sie als Typ.

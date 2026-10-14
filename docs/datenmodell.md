@@ -19,7 +19,8 @@ subject ──┬── session ──── session_entry ──── entry_me
 
 exercise ──┬── exercise_media
            ├── exercise_spec_version
-           └── exercise_tag ──── tag
+           ├── exercise_tag ──── tag
+           └── package       (Herkunft: aus welchem Übungspaket, Migration 014)
 
 device        external_ref     outbox     tombstone
 
@@ -62,6 +63,13 @@ Variantenfamilie (nie auf eine andere Variante). Im Verlauf bilden Original und
 Varianten eine Kachel; ihre Mengen werden addiert und je Variante ausgewiesen
 (`core/tagesbilanz.py`). Eine Kopie ist zunächst Variante, im Editor lässt sie
 sich eigenständig machen.
+
+**Übungspakete** (Migration 014): `exercise.package_id` zeigt auf das Paket, aus
+dem die Übung auf dieses Gerät kam (`package`: Name, Beschreibung, Version);
+`NULL` = eigene Übung, hier angelegt oder kopiert. Ein Import aktualisiert nur die
+Übungen *desselben* Pakets — eigene, fremde und endgültig gelöschte bleiben. Der
+mitgelieferte Katalog ist das Paket „Grundausstattung“ und behält seine
+UUIDv5-IDs. Format und Regeln: `docs/uebungspakete.md`.
 
 **Zeitplan eines Plans** (Migration 008): `plan.active` und `plan.weekdays_json`
 (0 = Montag … 6 = Sonntag, Standard alle). Ein Plan erscheint auf „Heute", wenn er

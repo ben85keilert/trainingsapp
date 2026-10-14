@@ -108,8 +108,8 @@ class ExerciseRepo:
                     (id, name, category, description, icon_key, image_path,
                      is_builtin, result_spec_json, limit_spec_json,
                      default_target_json, default_input_mode, archived, created_at, updated_at,
-                     family_id, default_fields_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     family_id, default_fields_json, package_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -123,6 +123,7 @@ class ExerciseRepo:
                     default_fields_json = excluded.default_fields_json,
                     archived = excluded.archived,
                     family_id = excluded.family_id,
+                    package_id = excluded.package_id,
                     updated_at = excluded.updated_at,
                     revision = revision + 1
                 """,
@@ -143,6 +144,7 @@ class ExerciseRepo:
                     uebung.updated_at.isoformat(),
                     uebung.family_id,
                     _felder_json(uebung.default_felder),
+                    uebung.package_id,
                 ),
             )
             # Medien: alle Verweise neu schreiben. Einfacher als Abgleich, und
@@ -481,6 +483,7 @@ class ExerciseRepo:
             updated_at=datetime.fromisoformat(r["updated_at"]),
             deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
             family_id=r["family_id"],
+            package_id=r["package_id"],
         )
 
 

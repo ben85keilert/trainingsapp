@@ -116,7 +116,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   aus dem Schlüssel); weitere kommen per Import, der Export schreibt nur Übungen.
   `exercise.package_id` = Herkunft, `NULL` = eigene Übung (auch Kopien). Ein Import
   aktualisiert nur die Übungen desselben Pakets — Änderungen daran gehen verloren
-  (gewollt); eigene Übungen ändert er nie. Vertrag: `docs/uebungspakete.md`.
+  (gewollt); eigene Übungen ändert er nie. Paketmanager: Jede Paketübung trägt ihren
+  Paketstand (`package_standard_json`) für „Auf Paketstand setzen“; Entfernen legt die
+  Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück. Vertrag:
+  `docs/uebungspakete.md`.
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`

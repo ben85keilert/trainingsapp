@@ -193,3 +193,81 @@ def test_export_ueber_die_oberflaeche(page, state, monkeypatch) -> None:
     roh = json.loads(daten)
     assert roh["paket"]["name"] == "Für Anna"
     assert [u["name"] for u in roh["exercises"]] == ["Meine Übung"]
+
+
+def test_paketmanager_auf_standard_entfernen_wieder_installieren(page, state) -> None:
+    import asyncio
+
+    from trainingsapp.ui.views.pakete import paket_view
+
+    dialoge: list = []
+    page.show_dialog = dialoge.append
+    page.pop_dialog = lambda: None
+
+    async def push_route(route: str) -> None:
+        page.route = route
+
+    page.push_route = push_route
+    wade = state.uebungen.laden(seed_id("wadenheben"))
+    wade.description = "Meine Fassung"
+    state.uebungen.speichern(wade)
+
+    ansicht = paket_view(page, state, "/pakete", state.pakete.laden(GRUNDAUSSTATTUNG))
+    assert ansicht.route == f"/pakete/{GRUNDAUSSTATTUNG}"
+    assert "geändert: Beschreibung" in texte(ansicht)
+    zurueck = next(
+        c
+        for v in ansicht.controls
+        for c in alle(v)
+        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.RESTORE
+    )
+    zurueck.on_click()  # erst die Rückfrage
+    assert state.uebungen.laden(wade.id).description == "Meine Fassung"
+    dialoge[-1].actions[1].on_click()
+    assert state.uebungen.laden(wade.id).description != "Meine Fassung"
+
+    entfernen = next(
+        c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.OutlinedButton)
+    )
+    entfernen.on_click()
+    frage = dialoge[-1]
+    frage.actions[1].on_click()
+    assert state.pakete.alle() == [] and state.uebungen.alle() == []
+    asyncio.run(frage.on_dismiss(None))  # Flutter meldet: Dialog zu — erst dann zurück
+    assert page.route == "/pakete"
+
+    manager = pakete_view(page, state)
+    assert "ENTFERNT" in texte(manager)
+    wieder = next(
+        c
+        for v in manager.controls
+        for c in alle(v)
+        if isinstance(c, ft.OutlinedButton) and c.content == "Wieder installieren"
+    )
+    wieder.on_click()
+    frage = dialoge[-1]
+    assert frage.title.value == "„Grundausstattung“ wieder installieren?"
+    frage.actions[1].on_click()
+    assert [p.name for p, _ in state.pakete.alle()] == ["Grundausstattung"]
+    assert state.uebungen.laden(wade.id) is not None
+
+
+def test_uebung_zeigt_geaendert_und_setzt_zurueck(page, state) -> None:
+    dialoge: list = []
+    page.show_dialog = dialoge.append
+    page.pop_dialog = lambda: None
+    wade = state.uebungen.laden(seed_id("wadenheben"))
+    wade.description = "Meine Fassung"
+    state.uebungen.speichern(wade)
+
+    ansicht = uebung_detail(page, state, wade, ft.UrlLauncher())
+    assert "  (Paket „Grundausstattung“, geändert)" in texte(ansicht)
+    knopf = next(
+        c
+        for v in ansicht.controls
+        for c in alle(v)
+        if isinstance(c, ft.TextButton) and c.content == "Auf Paketstand zurücksetzen"
+    )
+    knopf.on_click()
+    dialoge[-1].actions[1].on_click()
+    assert state.pakete.abweichungen(state.uebungen.laden(wade.id)) == []

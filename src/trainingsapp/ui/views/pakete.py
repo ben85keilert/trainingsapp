@@ -1,11 +1,16 @@
-"""Übungspakete — Route `/pakete` (aus dem Katalog) bzw. `/einstellungen/pakete`.
+"""Der Paketmanager — Route `/pakete` (aus dem Katalog) bzw. `/einstellungen/pakete`.
 
 Übungen kommen über Pakete (Ben, 14.10.2026). Oben „Importieren“ und
-„Exportieren“, darunter die installierten Pakete und die eigenen Übungen, die
-zu keinem Paket gehören.
+„Exportieren“, darunter die installierten Pakete, die eigenen Übungen (die zu
+keinem Paket gehören) und, falls es welche gibt, die entfernten Pakete.
 
 - **Importieren** liest eine Paketdatei und fragt mit einer Vorschau nach
   (`Vorschau.zusammenfassung`), bevor es schreibt.
+- **Ein Paket** (`<basis>/<paket-id>`): seine Übungen mit Stand („wie im
+  Paket“, „geändert: …“), „Auf Paketstand setzen“ einzeln oder für alle,
+  „Paket entfernen“ (Übungen in den Papierkorb).
+- **Wieder installieren** holt ein entferntes Paket zurück — ohne Datei, aus
+  dem Paketstand, den jede seiner Übungen trägt.
 - **Exportieren** (`<basis>/export[/<paket-id>]`) schreibt ausgewählte Übungen
   in eine Paketdatei und gibt sie weiter (Teilen bzw. Speichern unter).
 
@@ -16,6 +21,7 @@ Regeln: `data/pakete.py`; Format: `core/pakete.py`; beides in
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 import flet as ft
@@ -31,8 +37,10 @@ from trainingsapp.core.pakete import (
     paket_json,
     paket_lesen,
 )
-from trainingsapp.data.pakete import Status, Vorschau
+from trainingsapp.data.pakete import ARCHIV, KATALOG, PAPIERKORB, Status, Uebungsstand, Vorschau
+from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.hilfe import hilfe_knopf
+from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.weitergeben import weitergeben
@@ -48,9 +56,15 @@ def uebungen_zahl(n: int) -> str:
     return "keine Übung" if n == 0 else "1 Übung" if n == 1 else f"{n} Übungen"
 
 
+def _datum(zeit: datetime | None) -> str:
+    return f"{zeit.astimezone():%d.%m.%Y}" if zeit is not None else ""
+
+
 def _versionstext(vorschau: Vorschau) -> str:
-    """„Neu“, „Version 2 — installiert ist Version 1“, „schon installiert“ …"""
+    """„Neues Paket“, „Version 2 — installiert ist Version 1“, „war entfernt“ …"""
     neu, alt = vorschau.paket, vorschau.installiert
+    if vorschau.entfernt is not None:
+        return "War entfernt — wird wieder installiert"
     if alt is None:
         return f"Neues Paket · Version {neu.version}" if neu.version else "Neues Paket"
     if neu.version is not None and alt.version is not None and neu.version != alt.version:
@@ -58,9 +72,64 @@ def _versionstext(vorschau: Vorschau) -> str:
     return "Schon installiert — der Import aktualisiert es"
 
 
+def import_rueckfrage(
+    page: ft.Page, state: AppState, inhalt: Paketinhalt, vorschau: Vorschau
+) -> ft.AlertDialog:
+    """Die Rückfrage vor dem Schreiben: was der Import tut — auch für „Wieder installieren“."""
+    wieder = vorschau.entfernt is not None
+    nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
+
+    def ausfuehren() -> None:
+        ergebnis = state.pakete.importieren(inhalt)
+        nachher.danach(state.neu_zeichnen)
+        page.pop_dialog()
+        teile = [
+            f"{n} {was}"
+            for n, was in (
+                (ergebnis.anzahl(Status.NEU), "neu"),
+                (ergebnis.anzahl(Status.ZURUECK), "zurück"),
+                (ergebnis.anzahl(Status.GEAENDERT), "aktualisiert"),
+            )
+            if n
+        ]
+        was = "wieder installiert" if wieder else "importiert"
+        text = f"„{inhalt.paket.name}“ {was}: " + (", ".join(teile) or "nichts geändert")
+        page.show_dialog(ft.SnackBar(ft.Text(text)))
+
+    zeilen: list[ft.Control] = [
+        ft.Text(
+            f"{uebungen_zahl(len(inhalt.uebungen))} · {_versionstext(vorschau)}",
+            size=12,
+            opacity=0.7,
+        )
+    ]
+    if inhalt.paket.beschreibung:
+        zeilen.append(ft.Text(inhalt.paket.beschreibung, size=13, italic=True))
+    zeilen += [ft.Text(f"• {z}") for z in vorschau.zusammenfassung()]
+    if vorschau.anzahl(Status.GEAENDERT, Status.ZURUECK):
+        zeilen.append(hinweis("Einträge im Verlauf bleiben, wie sie sind."))
+    if not vorschau.zu_tun:
+        zeilen.append(ft.Text("Es gibt nichts zu importieren.", weight=ft.FontWeight.W_600))
+    knopf = "Wieder installieren" if wieder else "Importieren"
+    return ft.AlertDialog(
+        modal=True,
+        on_dismiss=nachher,
+        title=ft.Text(
+            f"„{inhalt.paket.name}“ {'wieder installieren' if wieder else 'importieren'}?"
+        ),
+        content=ft.Column(tight=True, spacing=8, controls=zeilen),
+        actions=[
+            ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+            ft.FilledButton(knopf, icon=ft.Icons.DOWNLOAD, on_click=ausfuehren),
+        ]
+        if vorschau.zu_tun
+        else [ft.TextButton("OK", on_click=lambda: page.pop_dialog())],
+    )
+
+
 def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.View:
-    """``basis`` ist die eigene Route: aus dem Katalog `/pakete`, aus den Einstellungen
-    `/einstellungen/pakete` — so führt „zurück“ dorthin, woher man kam."""
+    """Der Paketmanager. ``basis`` ist die eigene Route: aus dem Katalog `/pakete`, aus
+    den Einstellungen `/einstellungen/pakete` — so führt „zurück“ dorthin, woher man kam."""
 
     def melden(text: str) -> None:
         page.show_dialog(ft.SnackBar(ft.Text(text)))
@@ -101,82 +170,116 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
                 )
             )
             return
-        page.show_dialog(_rueckfrage(inhalt, state.pakete.vorschau(inhalt)))
+        page.show_dialog(import_rueckfrage(page, state, inhalt, state.pakete.vorschau(inhalt)))
 
-    def _rueckfrage(inhalt: Paketinhalt, vorschau: Vorschau) -> ft.AlertDialog:
-        def ausfuehren() -> None:
-            ergebnis = state.pakete.importieren(inhalt)
-            page.pop_dialog()
-            teile = [
-                f"{n} {was}"
-                for n, was in (
-                    (ergebnis.anzahl(Status.NEU), "neu"),
-                    (ergebnis.anzahl(Status.GEAENDERT), "aktualisiert"),
-                )
-                if n
-            ]
-            melden(f"„{inhalt.paket.name}“ importiert: " + (", ".join(teile) or "nichts geändert"))
-            state.neu_zeichnen()
+    def wieder_installieren(paket_id: str) -> Callable[[], None]:
+        """Ohne Datei: aus dem Paketstand, den jede Übung des Pakets trägt."""
 
-        zeilen: list[ft.Control] = [
-            ft.Text(
-                f"{uebungen_zahl(len(inhalt.uebungen))} · {_versionstext(vorschau)}",
-                size=12,
-                opacity=0.7,
-            )
-        ]
-        if inhalt.paket.beschreibung:
-            zeilen.append(ft.Text(inhalt.paket.beschreibung, size=13, italic=True))
-        zeilen += [ft.Text(f"• {z}") for z in vorschau.zusammenfassung()]
-        if vorschau.anzahl(Status.GEAENDERT):
-            zeilen.append(hinweis("Einträge im Verlauf bleiben, wie sie sind."))
-        if not vorschau.zu_tun:
-            zeilen.append(ft.Text("Es gibt nichts zu importieren.", weight=ft.FontWeight.W_600))
-        return ft.AlertDialog(
-            modal=True,
-            title=ft.Text(f"„{inhalt.paket.name}“ importieren?"),
-            content=ft.Column(tight=True, spacing=8, controls=zeilen),
-            actions=[
-                ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
-                ft.FilledButton("Importieren", icon=ft.Icons.DOWNLOAD, on_click=ausfuehren),
-            ]
-            if vorschau.zu_tun
-            else [ft.TextButton("OK", on_click=lambda: page.pop_dialog())],
-        )
+        def handler() -> None:
+            inhalt = state.pakete.inhalt(paket_id)
+            if inhalt is None:
+                melden("Für dieses Paket ist kein Stand gespeichert — bitte die Datei importieren.")
+                return
+            page.show_dialog(import_rueckfrage(page, state, inhalt, state.pakete.vorschau(inhalt)))
+
+        return handler
 
     # -- Liste -------------------------------------------------------------------
 
-    def exportknopf(ziel: str, tooltip: str) -> ft.Control:
-        return ft.IconButton(ft.Icons.IOS_SHARE, tooltip=tooltip, on_click=oeffner(ziel))
-
     def zeile(paket: Paket, n: int) -> ft.Control:
+        geaendert = sum(1 for z in state.pakete.uebersicht(paket.id) if z.geaendert)
         teile = [uebungen_zahl(n)]
+        if geaendert:
+            teile.append(f"{geaendert} geändert")
         if paket.version is not None:
             teile.append(f"Version {paket.version}")
-        if paket.aktualisiert is not None:
-            teile.append(f"Stand {paket.aktualisiert.astimezone():%d.%m.%Y}")
         texte: list[ft.Control] = [
             ft.Text(paket.name, size=15),
             ft.Text("  ·  ".join(teile), size=11, opacity=0.6),
         ]
         if paket.beschreibung:
             texte.append(ft.Text(paket.beschreibung, size=12, opacity=0.75))
+        return ft.Container(
+            ink=True,
+            border_radius=10,
+            padding=ft.Padding.symmetric(horizontal=4, vertical=6),
+            on_click=oeffner(f"{basis}/{paket.id}"),
+            content=ft.Row(
+                spacing=4,
+                controls=[
+                    ft.Column(spacing=1, expand=True, controls=texte),
+                    ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                ],
+            ),
+        )
+
+    def entfernt_zeile(paket: Paket, n: int) -> ft.Control:
         return ft.Row(
-            spacing=0,
-            vertical_alignment=ft.CrossAxisAlignment.START,
+            spacing=8,
             controls=[
-                ft.Column(spacing=1, expand=True, controls=texte),
-                exportknopf(f"{basis}/export/{paket.id}", "Dieses Paket als Datei exportieren"),
+                ft.Column(
+                    spacing=1,
+                    expand=True,
+                    controls=[
+                        ft.Text(paket.name, size=15, opacity=0.8),
+                        ft.Text(
+                            f"entfernt am {_datum(paket.entfernt)}  ·  {uebungen_zahl(n)}",
+                            size=11,
+                            opacity=0.6,
+                        ),
+                    ],
+                ),
+                ft.OutlinedButton(
+                    "Wieder installieren",
+                    icon=ft.Icons.RESTORE,
+                    on_click=wieder_installieren(paket.id),
+                ),
             ],
         )
 
     installiert = state.pakete.alle()
+    entfernt = state.pakete.entfernte()
     eigene = state.pakete.anzahl_eigene()
+    karten: list[ft.Control] = [
+        karte(
+            titel("Installiert"),
+            *([zeile(p, n) for p, n in installiert] or [hinweis("Noch kein Paket installiert.")]),
+        ),
+        karte(
+            titel("Eigene Übungen"),
+            ft.Row(
+                spacing=0,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+                controls=[
+                    ft.Column(
+                        spacing=1,
+                        expand=True,
+                        controls=[
+                            ft.Text(uebungen_zahl(eigene), size=15),
+                            ft.Text(
+                                "Selbst angelegt oder kopiert. Sie gehören zu keinem Paket; "
+                                "ein Import ändert sie nie.",
+                                size=12,
+                                opacity=0.75,
+                            ),
+                        ],
+                    ),
+                    ft.IconButton(
+                        ft.Icons.IOS_SHARE,
+                        tooltip="Eigene Übungen als Paket exportieren",
+                        on_click=oeffner(f"{basis}/export"),
+                    ),
+                ],
+            ),
+        ),
+    ]
+    if entfernt:
+        karten.append(karte(titel("Entfernt"), *[entfernt_zeile(p, n) for p, n in entfernt]))
 
     return ft.View(
         route=basis,
         appbar=ft.AppBar(
-            title=ft.Text("Übungspakete"),
+            title=ft.Text("Paketmanager"),
             actions=[hilfe_knopf(page, thema="uebungen")],
         ),
         scroll=ft.ScrollMode.AUTO,
@@ -190,7 +293,8 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
                             "Übungen kommen über Pakete. Ein Import legt neue Übungen an "
                             "und bringt die Übungen desselben Pakets auf den Stand der "
                             "Datei — was du an ihnen geändert hast, geht dabei verloren. "
-                            "Eigene Übungen ändert er nie."
+                            "Eigene Übungen ändert er nie. Antippen öffnet ein Paket: "
+                            "Übungen auf den Paketstand setzen oder das Paket entfernen."
                         ),
                         ft.Row(
                             spacing=10,
@@ -208,37 +312,194 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
                                 ),
                             ],
                         ),
-                        karte(
-                            titel("Installiert"),
-                            *(
-                                [zeile(p, n) for p, n in installiert]
-                                or [hinweis("Noch kein Paket installiert.")]
-                            ),
+                        *karten,
+                    ],
+                ),
+                expand=False,
+            )
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ein Paket
+# ---------------------------------------------------------------------------
+
+
+def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.View:
+    """Ein installiertes Paket (`<basis>/<paket-id>`): Übungen mit Stand, „Auf
+    Paketstand setzen“ (einzeln oder alle), „Paket entfernen“, Export."""
+    staende = state.pakete.uebersicht(paket.id)
+    geaendert = [z for z in staende if z.geaendert]
+    nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
+
+    def melden(text: str) -> None:
+        page.show_dialog(ft.SnackBar(ft.Text(text)))
+
+    def oeffner(route: str) -> Callable[[], object]:
+        async def handler() -> None:
+            await page.push_route(route)
+
+        return handler
+
+    def fragen(
+        titel_text: str, text: str, knopf: str, aktion: Callable[[], object], warnend: bool = False
+    ) -> None:
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                on_dismiss=nachher,
+                title=ft.Text(titel_text),
+                content=ft.Text(text),
+                actions=[
+                    ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                    ft.FilledButton(
+                        knopf,
+                        on_click=aktion,
+                        style=ft.ButtonStyle(bgcolor=ft.Colors.ERROR, color=ft.Colors.ON_ERROR)
+                        if warnend
+                        else None,
+                    ),
+                ],
+            )
+        )
+
+    def zuruecksetzer(staende_: list[Uebungsstand]) -> Callable[[], None]:
+        """„Auf Paketstand setzen“ für eine Übung oder alle geänderten — nach Rückfrage."""
+
+        def ausfuehren() -> None:
+            n = state.pakete.zuruecksetzen([z.uebung.id for z in staende_])
+            nachher.danach(state.neu_zeichnen)
+            page.pop_dialog()
+            melden(f"{uebungen_zahl(n)} auf den Paketstand gesetzt")
+
+        def handler() -> None:
+            if len(staende_) == 1:
+                z = staende_[0]
+                text = (
+                    f"„{z.uebung.name}“ bekommt wieder den Stand des Pakets. "
+                    f"Verloren geht deine Änderung an: {', '.join(z.abweichungen or [])}."
+                )
+            else:
+                text = (
+                    f"{uebungen_zahl(len(staende_))} bekommen wieder den Stand des Pakets; "
+                    "was du an ihnen geändert hast, geht verloren."
+                )
+            text += " Einträge bleiben."
+            fragen("Auf Paketstand setzen?", text, "Zurücksetzen", ausfuehren)
+
+        return handler
+
+    def entfernen() -> None:
+        n = state.pakete.entfernen(paket.id)
+        nachher.danach(lambda: page.push_route(basis))
+        page.pop_dialog()
+        melden(f"„{paket.name}“ entfernt — {uebungen_zahl(n)} im Papierkorb")
+
+    def entfernen_fragen() -> None:
+        fragen(
+            f"„{paket.name}“ entfernen?",
+            f"{uebungen_zahl(len(staende))} des Pakets kommen in den Papierkorb und "
+            "verschwinden aus Katalog und Plänen. Einträge im Verlauf bleiben. Zurück geht "
+            "es im Paketmanager mit „Wieder installieren“ oder mit einem neuen Import.",
+            "Entfernen",
+            entfernen,
+            warnend=True,
+        )
+
+    def zeile(z: Uebungsstand) -> ft.Control:
+        if z.abweichungen is None:
+            info = "Paketstand unbekannt — die Paketdatei erneut importieren"
+        elif z.abweichungen:
+            info = "geändert: " + ", ".join(z.abweichungen)
+        else:
+            info = "wie im Paket"
+        info += {ARCHIV: "  ·  im Archiv", PAPIERKORB: "  ·  im Papierkorb"}.get(z.ort, "")
+        return ft.Row(
+            spacing=10,
+            controls=[
+                ft.Icon(symbol(z.uebung.icon_key), opacity=0.5 if z.ort != KATALOG else 1),
+                ft.Column(
+                    spacing=0,
+                    expand=True,
+                    controls=[
+                        ft.Text(z.uebung.name, size=15),
+                        ft.Text(
+                            info,
+                            size=11,
+                            opacity=0.8 if z.geaendert else 0.6,
+                            color=ft.Colors.PRIMARY if z.geaendert else None,
+                        ),
+                    ],
+                ),
+                ft.IconButton(
+                    ft.Icons.RESTORE,
+                    tooltip="Auf Paketstand setzen",
+                    on_click=zuruecksetzer([z]),
+                )
+                if z.geaendert
+                else ft.Container(width=40),
+            ],
+        )
+
+    teile = [uebungen_zahl(len(staende))]
+    if paket.version is not None:
+        teile.append(f"Version {paket.version}")
+    teile.append(f"installiert {_datum(paket.installiert)}")
+    if paket.aktualisiert is not None and paket.aktualisiert != paket.installiert:
+        teile.append(f"Stand {_datum(paket.aktualisiert)}")
+    kopf: list[ft.Control] = []
+    if paket.beschreibung:
+        kopf.append(ft.Text(paket.beschreibung))
+    kopf.append(ft.Text("  ·  ".join(teile), size=12, opacity=0.7))
+
+    return ft.View(
+        route=f"{basis}/{paket.id}",
+        appbar=ft.AppBar(
+            title=ft.Text(paket.name),
+            actions=[
+                ft.IconButton(
+                    ft.Icons.IOS_SHARE,
+                    tooltip="Als Datei exportieren",
+                    on_click=oeffner(f"{basis}/export/{paket.id}"),
+                )
+            ],
+        ),
+        scroll=ft.ScrollMode.AUTO,
+        padding=16,
+        controls=[
+            sicher(
+                ft.Column(
+                    spacing=14,
+                    controls=[
+                        *kopf,
+                        ft.Row(
+                            spacing=10,
+                            wrap=True,
+                            controls=[
+                                ft.FilledTonalButton(
+                                    f"Alle auf Paketstand ({len(geaendert)})",
+                                    icon=ft.Icons.RESTORE,
+                                    disabled=not geaendert,
+                                    on_click=zuruecksetzer(geaendert),
+                                ),
+                                ft.OutlinedButton(
+                                    "Paket entfernen",
+                                    icon=ft.Icons.DELETE_OUTLINE,
+                                    style=ft.ButtonStyle(color=ft.Colors.ERROR),
+                                    on_click=entfernen_fragen,
+                                ),
+                            ],
+                        ),
+                        hinweis(
+                            "Jede Übung kennt ihren Stand aus dem Paket: Beschreibung, "
+                            "Parameter mit Chips, Ziel, Planparameter, Typen, Regionen, "
+                            "Videos. „Auf Paketstand“ holt ihn zurück; was du geändert hast, "
+                            "geht dabei verloren. Pläne behalten ihre Einstellungen."
                         ),
                         karte(
-                            titel("Eigene Übungen"),
-                            ft.Row(
-                                spacing=0,
-                                vertical_alignment=ft.CrossAxisAlignment.START,
-                                controls=[
-                                    ft.Column(
-                                        spacing=1,
-                                        expand=True,
-                                        controls=[
-                                            ft.Text(uebungen_zahl(eigene), size=15),
-                                            ft.Text(
-                                                "Selbst angelegt oder kopiert. Sie gehören "
-                                                "zu keinem Paket; ein Import ändert sie nie.",
-                                                size=12,
-                                                opacity=0.75,
-                                            ),
-                                        ],
-                                    ),
-                                    exportknopf(
-                                        f"{basis}/export", "Eigene Übungen als Paket exportieren"
-                                    ),
-                                ],
-                            ),
+                            titel("Übungen"),
+                            *([zeile(z) for z in staende] or [hinweis("Keine Übungen.")]),
                         ),
                     ],
                 ),
@@ -395,4 +656,4 @@ def paket_export_view(
     )
 
 
-__all__ = ["paket_export_view", "pakete_view", "uebungen_zahl"]
+__all__ = ["import_rueckfrage", "paket_export_view", "paket_view", "pakete_view", "uebungen_zahl"]

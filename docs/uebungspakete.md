@@ -5,13 +5,38 @@
 Qigong, Pilates, Yoga, die Sammlung von jemand anderem — kommen per Import dazu,
 und ausgewählte Übungen gehen per Export als Datei hinaus.
 
-In der App: *Einstellungen → Übungspakete* oder unten im Übungskatalog. Aus welchem
-Paket eine Übung stammt, steht klein in Klammern hinter ihrer Beschreibung; was
-man selbst anlegt oder kopiert, ist eine **eigene Übung**.
+In der App: der **Paketmanager** unter *Einstellungen* oder unten im Übungskatalog.
+Aus welchem Paket eine Übung stammt, steht klein in Klammern hinter ihrer
+Beschreibung (mit „geändert“, wenn sie vom Paketstand abweicht); was man selbst
+anlegt oder kopiert, ist eine **eigene Übung**.
 
-Code: Format in `core/pakete.py`, Import-Regeln in `data/pakete.py`, Seed in
-`data/seed.py`, Oberfläche in `ui/views/pakete.py`. Tabelle `package` und Spalte
-`exercise.package_id` seit Migration 014.
+Code: Format in `core/pakete.py`, Paketmanager und Import-Regeln in
+`data/pakete.py`, Seed in `data/seed.py`, Oberfläche in `ui/views/pakete.py`.
+Tabelle `package` und Spalte `exercise.package_id` seit Migration 014,
+`exercise.package_standard_json` und `package.removed_at` seit Migration 015.
+
+## Paketmanager
+
+| Ansicht | Was man dort tut |
+|---|---|
+| Liste | importieren, exportieren; installierte Pakete („16 Übungen · 2 geändert“), eigene Übungen, entfernte Pakete mit „Wieder installieren“ |
+| ein Paket | seine Übungen mit Stand („wie im Paket“, „geändert: Beschreibung, Parameter“, im Archiv/Papierkorb); „Auf Paketstand“ je Übung oder „Alle auf Paketstand“; „Paket entfernen“; Export |
+| eine Übung | „Paket „…“, geändert“ hinter der Beschreibung; unten „Auf Paketstand zurücksetzen“ |
+
+**Paketstand.** Jede Übung eines Pakets trägt ihre Standardwerte aus dem Paket
+(`package_standard_json`, genau die Felder des Dateiformats unten: Beschreibung,
+Parameter samt Chips, Ziel, Planparameter, Typen, Regionen, Videos, Variante).
+Jeder Import frischt ihn auf, die Grundausstattung jeder Start. „Auf Paketstand
+setzen“ schreibt ihn zurück — was man geändert hat, geht verloren; der Ort
+(Katalog, Archiv, Papierkorb) bleibt, Pläne behalten ihre eigenen Einstellungen,
+Einträge bleiben.
+
+**Entfernen.** Alle Übungen des Pakets kommen in den Papierkorb — wie beim
+Löschen einer Übung: raus aus Katalog und Plänen, Einträge bleiben, nach der Frist
+endgültig (nur ohne Einträge). Das Paket steht danach unter „Entfernt“.
+„Wieder installieren“ (ohne Datei, aus dem Paketstand) oder ein neuer Import holt
+**alles** zurück, auch was inzwischen endgültig gelöscht war. Eine entfernte
+Grundausstattung legt der Start nicht nach.
 
 ## Regeln beim Import
 
@@ -21,7 +46,8 @@ Code: Format in `core/pakete.py`, Import-Regeln in `data/pakete.py`, Seed in
 | gehört zu **diesem** Paket | bekommt den Stand der Datei — **eigene Änderungen daran gehen verloren** (gewollt) |
 | ist eine **eigene Übung** | bleibt, wie sie ist — ein Paket „Eigene“ gibt es nicht |
 | gehört zu einem **anderen** Paket | bleibt, wie sie ist — sie folgt ihrem Paket |
-| wurde **endgültig gelöscht** | bleibt weg (Grabstein) |
+| wurde **endgültig gelöscht** | bleibt weg (Grabstein) — außer das Paket war entfernt |
+| gehört zu diesem Paket, und das Paket war **entfernt** | kommt zurück (aus Papierkorb oder Grabstein) |
 
 - Archivierte Übungen und solche im Papierkorb werden aktualisiert, bleiben aber dort.
 - Einträge im Verlauf ändert ein Import nie — sie tragen ihre eigene Kopie der Parameter.

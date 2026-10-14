@@ -26,7 +26,7 @@ Routen:
     /einstellungen/hrv              Einstellungen der HRV-Messung
     /einstellungen/profile          Profile anlegen, umbenennen, löschen
     /einstellungen/tags             Typen und Regionen der Übungen: anlegen, umbenennen, löschen
-    /pakete[/export[/<id>]]         Übungspakete: importieren, exportieren (auch /einstellungen/…)
+    /pakete[/<id>|/export[/<id>]]   Paketmanager: Pakete, ein Paket, Export (auch /einstellungen/…)
     /einstellungen/gps-test         GPS-Vorabtest: Strecke und Dauertest (docs/plan_gps.md)
     /ausdauer                       Ausdauertraining mit GPS: starten, live
     /ausdauer/<id>                  Auswertung eines Trainings: Karte, km, DFA α1
@@ -59,7 +59,7 @@ from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.messung import messung
 from trainingsapp.ui.views.messung_detail import messung_detail_view
-from trainingsapp.ui.views.pakete import paket_export_view, pakete_view
+from trainingsapp.ui.views.pakete import paket_export_view, paket_view, pakete_view
 from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view
 from trainingsapp.ui.views.plan import einzel_plan, plan_view, ziel_text
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
@@ -357,11 +357,13 @@ def main(page: ft.Page) -> None:
             page.views.append(formular_eintrag(page, state, plan, *paar))
 
     def paket_routen(basis: str, rest: list[str]) -> None:
-        """Übungspakete — aus dem Katalog (`/pakete`) oder den Einstellungen."""
+        """Der Paketmanager — aus dem Katalog (`/pakete`) oder den Einstellungen."""
         page.views.append(pakete_view(page, state, basis))
         if rest[:1] == ["export"]:
             auswahl = rest[1] if len(rest) > 1 else None
             page.views.append(paket_export_view(page, state, basis, auswahl))
+        elif rest and (paket := state.pakete.laden(rest[0])) is not None and not paket.entfernt:
+            page.views.append(paket_view(page, state, basis, paket))
 
     def eintrag_routen(teile: list[str]) -> None:
         eintrag = state.sitzungen.eintrag_laden(teile[1])

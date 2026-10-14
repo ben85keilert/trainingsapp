@@ -2,8 +2,10 @@
 
 Aus welchem Paket die Übung kommt, steht unscheinbar in Klammern hinter der
 Beschreibung (Ben, 14.10.2026) — „eigene Übung“, wenn sie hier angelegt oder
-kopiert wurde. Die Erklärung der Varianten stand früher in jeder Übung; sie
-steht jetzt allgemein in der Hilfe (`ui/components/hilfe.UEBUNGEN_MD`).
+kopiert wurde. Weicht eine Paketübung von ihrem Paketstand ab, steht dort
+„geändert“, und ganz unten führt „Auf Paketstand zurücksetzen“ zurück
+(`PaketRepo.zuruecksetzen`). Die Erklärung der Varianten stand früher in jeder
+Übung; sie steht jetzt allgemein in der Hilfe (`ui/components/hilfe.UEBUNGEN_MD`).
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from trainingsapp.core.models import (
 from trainingsapp.core.parameter import gewaehlte_felder
 from trainingsapp.core.result_spec import format_wert
 from trainingsapp.core.standards import abweichungen, vom_standard
+from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
@@ -188,7 +191,37 @@ def uebung_detail(
     )
 
     paket = state.pakete.laden(uebung.package_id) if uebung.package_id else None
-    herkunft = f"Paket „{paket.name}“" if paket is not None else "eigene Übung"
+    geaendert = state.pakete.abweichungen(uebung) if paket is not None else None
+    herkunft = (
+        f"Paket „{paket.name}“" + (", geändert" if geaendert else "")
+        if paket is not None
+        else "eigene Übung"
+    )
+
+    nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
+
+    def zuruecksetzen() -> None:
+        state.pakete.zuruecksetzen([uebung.id])
+        nachher.danach(state.neu_zeichnen)
+        page.pop_dialog()
+        page.show_dialog(ft.SnackBar(ft.Text("Auf den Paketstand gesetzt")))
+
+    def zuruecksetzen_fragen() -> None:
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                on_dismiss=nachher,
+                title=ft.Text("Auf Paketstand zurücksetzen?"),
+                content=ft.Text(
+                    f"„{uebung.name}“ bekommt wieder den Stand aus dem Paket. Verloren geht "
+                    f"deine Änderung an: {', '.join(geaendert or [])}. Einträge bleiben."
+                ),
+                actions=[
+                    ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                    ft.FilledButton("Zurücksetzen", on_click=zuruecksetzen),
+                ],
+            )
+        )
 
     # -- Standard für Pläne und Verwendungen -------------------------------------
 
@@ -297,6 +330,26 @@ def uebung_detail(
             else ft.Text("Noch keine Videos hinterlegt.", opacity=0.6),
         ),
     ]
+    if paket is not None and geaendert:
+        abschnitte.append(
+            _abschnitt(
+                "Paket",
+                ft.Column(
+                    spacing=2,
+                    controls=[
+                        ft.Text(
+                            f"Weicht vom Paket „{paket.name}“ ab: {', '.join(geaendert)}.",
+                            size=13,
+                        ),
+                        ft.TextButton(
+                            "Auf Paketstand zurücksetzen",
+                            icon=ft.Icons.RESTORE,
+                            on_click=zuruecksetzen_fragen,
+                        ),
+                    ],
+                ),
+            )
+        )
 
     return ft.View(
         route=f"/uebung/{uebung.id}",

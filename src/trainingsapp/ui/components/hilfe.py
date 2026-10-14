@@ -56,8 +56,8 @@ hängst eine Übung an ein anderes Original.
 
 **Pakete** — Übungen kommen über Pakete. Die mitgelieferten stehen im Paket
 „Grundausstattung“, weitere (Qigong, Pilates, Yoga, eine Sammlung von jemand
-anderem) importierst du unter *Einstellungen → Übungspakete*. Aus welchem Paket
-eine Übung stammt, steht klein hinter ihrer Beschreibung.
+anderem) importierst du im *Paketmanager* (Einstellungen oder unten im Katalog).
+Aus welchem Paket eine Übung stammt, steht klein hinter ihrer Beschreibung.
 
 Was du selbst anlegst oder kopierst, ist eine **eigene Übung** und gehört zu
 keinem Paket — ein Import ändert sie nie.
@@ -65,6 +65,14 @@ keinem Paket — ein Import ändert sie nie.
 Ein **Import** legt neue Übungen an und bringt die Übungen desselben Pakets auf
 den Stand der Datei; was du an ihnen geändert hast, geht dabei verloren. Fehlende
 Typen und Regionen kommen mit. Einträge im Verlauf bleiben immer, wie sie sind.
+
+**Auf Paketstand setzen** — Jede Übung eines Pakets kennt ihren Stand aus dem
+Paket. Hast du sie geändert, steht hinter der Beschreibung „geändert“; unten in
+der Übung holst du den Paketstand zurück, im Paketmanager auch für alle.
+
+**Entfernen** — Im Paketmanager entfernst du ein Paket wieder: Seine Übungen
+kommen in den Papierkorb und verschwinden aus den Plänen, Einträge bleiben.
+„Wieder installieren“ oder ein neuer Import holt alles zurück.
 
 Ein **Export** schreibt ausgewählte Übungen in eine Paketdatei zum Teilen — ohne
 Einträge, Messungen oder Strecken.

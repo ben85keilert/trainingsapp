@@ -69,7 +69,11 @@ dem die Übung auf dieses Gerät kam (`package`: Name, Beschreibung, Version);
 `NULL` = eigene Übung, hier angelegt oder kopiert. Ein Import aktualisiert nur die
 Übungen *desselben* Pakets — eigene, fremde und endgültig gelöschte bleiben. Der
 mitgelieferte Katalog ist das Paket „Grundausstattung“ und behält seine
-UUIDv5-IDs. Format und Regeln: `docs/uebungspakete.md`.
+UUIDv5-IDs. Seit Migration 015 trägt jede Paketübung ihren Paketstand
+(`exercise.package_standard_json`, schreibt nur der Import — `ExerciseRepo.speichern`
+lässt ihn stehen) für „Auf Paketstand setzen“; `package.removed_at` heißt entfernt
+(Übungen im Papierkorb, „Wieder installieren“ holt sie zurück). Format und Regeln:
+`docs/uebungspakete.md`.
 
 **Zeitplan eines Plans** (Migration 008): `plan.active` und `plan.weekdays_json`
 (0 = Montag … 6 = Sonntag, Standard alle). Ein Plan erscheint auf „Heute", wenn er

@@ -312,3 +312,120 @@ def test_export_und_import_auf_einem_anderen_geraet(con, tmp_path) -> None:
     # Nur Übungen — keine Einträge, Profile, Messungen oder Strecken
     assert set(json.loads(datei)) == {"format", "version", "paket", "exportiert", "exercises"}
     anderes.close()
+
+
+# ---------------------------------------------------------------------------
+# Paketmanager: Paketstand, Auf Paketstand setzen, Entfernen, Wieder installieren
+# ---------------------------------------------------------------------------
+
+
+def test_import_merkt_sich_den_paketstand(con) -> None:
+    pakete = PaketRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    baum = ExerciseRepo(con).laden(inhalt.uebungen[0].id)
+    assert pakete.standard(baum.id)["description"] == "Knie weich, Scheitel nach oben."
+    assert pakete.standard(baum.id)["typen"] == ["Qigong", "Dehnung"]  # wie hier geschrieben
+    assert pakete.abweichungen(baum) == []
+    assert pakete.abweichungen(Exercise(name="eigene")) is None
+
+
+def test_auf_standard_setzen(con) -> None:
+    """Ben: In den Übungen sind die Standardwerte aus dem Paket vorhanden."""
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    pakete.importieren(paket_lesen(qigong()))
+    baum = repo.laden(paket_lesen(qigong()).uebungen[0].id)
+    baum.description = "Meine Fassung"
+    baum.result_spec.fields[0].quick = [5]
+    baum.default_target = {"hold": [60]}
+    baum.archived = True
+    repo.speichern(baum)
+    assert pakete.abweichungen(repo.laden(baum.id)) == ["Beschreibung", "Parameter", "Ziel"]
+
+    assert pakete.zuruecksetzen([baum.id]) == 1
+    baum = repo.laden(baum.id)
+    assert baum.description == "Knie weich, Scheitel nach oben."
+    assert baum.result_spec.fields[0].quick == [15, 30, 45, 60]
+    assert baum.default_target == {}
+    assert baum.archived  # der Ort bleibt
+    assert pakete.abweichungen(baum) == []
+    assert pakete.zuruecksetzen([baum.id]) == 0  # nichts mehr zu tun
+
+
+def test_grundausstattung_hat_ihren_paketstand(con) -> None:
+    """Jeder Start frischt ihn auf — auch Datenbanken von vor Migration 015."""
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    con.execute("UPDATE exercise SET package_standard_json = NULL")
+    seed_einspielen(con)
+    wade = repo.laden(seed_id("wadenheben"))
+    assert pakete.abweichungen(wade) == []
+    original = wade.description
+    wade.description = "Meine Fassung"
+    repo.speichern(wade)
+    assert pakete.abweichungen(repo.laden(wade.id)) == ["Beschreibung"]
+    assert pakete.zuruecksetzen([wade.id]) == 1
+    assert repo.laden(wade.id).description == original
+
+
+def test_eigene_uebungen_haben_keinen_paketstand(con) -> None:
+    pakete = PaketRepo(con)
+    eigene = Exercise(name="Meine")
+    ExerciseRepo(con).speichern(eigene)
+    assert pakete.standard(eigene.id) is None
+    assert pakete.zuruecksetzen([eigene.id]) == 0
+
+
+def test_entfernen_und_wieder_installieren(con) -> None:
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    baum, tief = inhalt.uebungen
+
+    assert pakete.entfernen(inhalt.paket.id) == 2
+    assert [p.name for p, _ in pakete.alle()] == ["Grundausstattung"]
+    assert [(p.name, n) for p, n in pakete.entfernte()] == [("Qigong", 2)]
+    assert repo.laden(baum.id) is None  # im Papierkorb
+    assert {u.id for u in repo.papierkorb()} >= {baum.id, tief.id}
+
+    # Ohne Datei: aus dem Paketstand der Übungen
+    zurueck = pakete.inhalt(inhalt.paket.id)
+    vorschau = pakete.vorschau(zurueck)
+    assert vorschau.entfernt is not None and vorschau.installiert is None
+    assert vorschau.anzahl(Status.ZURUECK) == 2
+    pakete.importieren(zurueck)
+    assert repo.laden(baum.id) is not None
+    assert repo.laden(tief.id).family_id == baum.id
+    assert [p.name for p, _ in pakete.alle()] == ["Grundausstattung", "Qigong"]
+    assert pakete.entfernte() == []
+
+
+def test_wieder_installieren_holt_auch_endgueltig_geloeschte(con) -> None:
+    """Der Papierkorb leert sich nach 30 Tagen — danach muss das Paket trotzdem zurückkommen."""
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    baum = inhalt.uebungen[0]
+    pakete.entfernen(inhalt.paket.id)
+    repo.endgueltig_loeschen(baum.id)
+    assert con.execute("SELECT 1 FROM tombstone WHERE entity_id = ?", (baum.id,)).fetchone()
+
+    vorschau = pakete.importieren(paket_lesen(qigong()))  # neuer Import der Datei
+    assert vorschau.status[baum.id] == Status.ZURUECK
+    assert repo.laden(baum.id).description == "Knie weich, Scheitel nach oben."
+    assert not con.execute("SELECT 1 FROM tombstone WHERE entity_id = ?", (baum.id,)).fetchone()
+
+
+def test_entfernte_grundausstattung_kommt_beim_start_nicht_zurueck(con) -> None:
+    pakete = PaketRepo(con)
+    n = pakete.entfernen(GRUNDAUSSTATTUNG)
+    assert n == len(seed_inhalt().uebungen)
+    assert seed_einspielen(con) == 0
+    assert ExerciseRepo(con).alle() == []
+    assert pakete.alle() == []
+
+    pakete.importieren(pakete.inhalt(GRUNDAUSSTATTUNG))  # „Wieder installieren“
+    assert len(ExerciseRepo(con).alle()) == n

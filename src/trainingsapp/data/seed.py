@@ -6,7 +6,10 @@ das Paket installiert, bei späteren Starts kommen nur Übungen dazu, die noch
 fehlen. Vorhandene bleiben unangetastet — der Nutzer könnte sie geändert haben.
 Erst wenn die Version im Paketkopf steigt, aktualisiert der nächste Start alle
 Übungen der Grundausstattung; Änderungen daran gehen dann verloren, wie bei
-jedem Paket-Update (Ben, 14.10.2026). Endgültig gelöschte kommen nie zurück.
+jedem Paket-Update (Ben, 14.10.2026). Endgültig gelöschte kommen nie zurück,
+und wer die Grundausstattung im Paketmanager entfernt, bekommt beim Start
+nichts nachgelegt — zurück kommt sie dort mit „Wieder installieren“. Den
+Paketstand je Übung (für „Auf Paketstand setzen“) frischt jeder Start auf.
 
 **Wie erkennt der Seed, was schon da ist?** Über die ID. Jede Seed-Übung
 bekommt eine *deterministische* ID aus ihrem Schlüssel (UUIDv5), keine
@@ -60,7 +63,8 @@ def seed_laden(datei: Path = SEED_DATEI) -> list[Exercise]:
 def seed_einspielen(con: sqlite3.Connection, datei: Path = SEED_DATEI) -> int:
     """Installiert die Grundausstattung bzw. legt fehlende Übungen an.
 
-    Vorhandene bleiben unangetastet, solange die Paketversion gleich bleibt.
+    Vorhandene bleiben unangetastet, solange die Paketversion gleich bleibt;
+    ist die Grundausstattung entfernt, passiert nichts.
 
     Returns:
         Wie viele Übungen neu angelegt wurden.
@@ -68,6 +72,8 @@ def seed_einspielen(con: sqlite3.Connection, datei: Path = SEED_DATEI) -> int:
     inhalt = seed_inhalt(datei)
     pakete = PaketRepo(con)
     vorher = pakete.laden(inhalt.paket.id)
+    if vorher is not None and vorher.entfernt is not None:
+        return 0
     update = vorher is not None and (inhalt.paket.version or 0) > (vorher.version or 0)
     with transaktion(con):
         pakete.herkunft_nachtragen(inhalt)  # Datenbanken von vor den Paketen

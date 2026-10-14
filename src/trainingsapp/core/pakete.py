@@ -75,6 +75,8 @@ class Paket:
     version: int | None = None
     installiert: datetime | None = None
     aktualisiert: datetime | None = None
+    #: Im Paketmanager entfernt (Migration 015) — die Übungen liegen im Papierkorb
+    entfernt: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -354,6 +356,49 @@ def stand(u: Exercise) -> dict[str, Any]:
     return d
 
 
+def aus_stand(uebung_id: str, paket: str, standard: dict[str, Any]) -> Exercise:
+    """Die Übung so, wie das Paket sie festlegt — das Gegenstück zu `stand`.
+
+    Für „Auf Paketstand setzen“ und „Wieder installieren“: Der Paketstand liegt je
+    Übung in der Datenbank (Migration 015).
+
+    >>> u = Exercise(name="Baum", description="Knie weich.", typen=["Qigong"])
+    >>> zurueck = aus_stand(u.id, "p1", stand(u))
+    >>> (zurueck.id == u.id, zurueck.description, zurueck.package_id)
+    (True, 'Knie weich.', 'p1')
+    """
+    return _uebung_lesen({**standard, "id": uebung_id}, paket)[0]
+
+
+#: Feld im Paketstand → wie es in der App heißt (Reihenfolge = Anzeige)
+FELDNAMEN: dict[str, str] = {
+    "name": "Name",
+    "description": "Beschreibung",
+    "icon_key": "Symbol",
+    "typen": "Typen",
+    "regionen": "Regionen",
+    "result_spec": "Parameter",
+    "default_target": "Ziel",
+    "default_felder": "Planparameter",
+    "limit_spec": "Limits",
+    "media": "Videos",
+    "variante_von": "Variante",
+}
+
+
+def abweichungen(u: Exercise, standard: dict[str, Any]) -> list[str]:
+    """Was an der Übung anders ist als im Paket — in Worten, leer = wie im Paket.
+
+    >>> u = Exercise(name="Baum", description="Knie weich.")
+    >>> standard = stand(u)
+    >>> u.description = "Meine Fassung"
+    >>> abweichungen(u, standard)
+    ['Beschreibung']
+    """
+    jetzt = stand(u)
+    return [text for feld, text in FELDNAMEN.items() if jetzt.get(feld) != standard.get(feld)]
+
+
 def paket_bauen(
     paket: Paket, uebungen: list[Exercise], exportiert: datetime | None = None
 ) -> dict[str, Any]:
@@ -400,6 +445,7 @@ def dateiname(paket: Paket) -> str:
 
 
 __all__ = [
+    "FELDNAMEN",
     "FORMAT",
     "FORMAT_VERSION",
     "GRUNDAUSSTATTUNG",
@@ -407,6 +453,8 @@ __all__ = [
     "Paket",
     "PaketFehler",
     "Paketinhalt",
+    "abweichungen",
+    "aus_stand",
     "dateiname",
     "name_pruefen",
     "paket_bauen",

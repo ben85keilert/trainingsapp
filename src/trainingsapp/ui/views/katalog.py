@@ -228,12 +228,14 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
         liste.controls.extend(ablage_zeilen())
 
     def ablage_zeilen() -> list[ft.Control]:
-        """Unten im Katalog: die Übungspakete, dazu Archiv und Papierkorb, wenn dort etwas liegt."""
+        """Unten im Katalog: der Paketmanager, dazu Archiv und Papierkorb, wenn dort etwas liegt."""
         zeilen: list[ft.Control] = [
             ft.ListTile(
                 leading=ft.Icon(ft.Icons.INVENTORY_2_OUTLINED, opacity=0.6),
-                title=ft.Text("Übungspakete", opacity=0.8),
-                subtitle=ft.Text("Importieren, exportieren", size=11, opacity=0.6),
+                title=ft.Text("Paketmanager", opacity=0.8),
+                subtitle=ft.Text(
+                    "Übungspakete importieren, exportieren, entfernen", size=11, opacity=0.6
+                ),
                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),
                 dense=True,
                 on_click=pfad_oeffner("/pakete"),

@@ -2,10 +2,10 @@
 
 Vorn das aktive Profil wählen; anlegen, umbenennen und löschen in einer eigenen
 Ansicht (`/einstellungen/profile`). Dazu die eigene Einteilung der Übungen
-(`/einstellungen/tags`: Typen und Regionen), die Übungspakete
-(`/einstellungen/pakete`: importieren, exportieren) und wie sie im Plan aussehen
-(`ui.state.PLAN_DARSTELLUNGEN`), Farbprofil und Hell/Dunkel des Profils
-(`einstellungen_darstellung`), der Weg zu den Einstellungen der
+(`/einstellungen/tags`: Typen und Regionen), der Paketmanager
+(`/einstellungen/pakete`: Übungspakete importieren, exportieren, entfernen), wie
+sie im Plan aussehen (`ui.state.PLAN_DARSTELLUNGEN`), Farbprofil und Hell/Dunkel
+des Profils (`einstellungen_darstellung`), der Weg zu den Einstellungen der
 HRV-Messung (`/einstellungen/hrv`), zum Timer, zum GPS-Vorabtest
 (`/einstellungen/gps-test`), Hilfe und Edition.
 
@@ -121,9 +121,11 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
                             ),
                             ft.ListTile(
                                 leading=ft.Icon(ft.Icons.INVENTORY_2_OUTLINED),
-                                title=ft.Text("Übungspakete"),
+                                title=ft.Text("Paketmanager"),
                                 subtitle=ft.Text(
-                                    f"Importieren, exportieren · {paket_text}", size=12
+                                    f"Übungspakete importieren, exportieren, entfernen · "
+                                    f"{paket_text}",
+                                    size=12,
                                 ),
                                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
                                 on_click=oeffner("/einstellungen/pakete"),

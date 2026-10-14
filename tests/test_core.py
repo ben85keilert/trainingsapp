@@ -204,7 +204,7 @@ def test_unbekannte_regel_legt_nichts_lahm() -> None:
 
 def test_migration_erzeugt_das_schema(tmp_path) -> None:
     con = oeffnen(tmp_path / "test.db")
-    assert schema_version(con) == 14
+    assert schema_version(con) == 15
 
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     for erwartet in (
@@ -234,8 +234,8 @@ def test_migration_ist_wiederholbar(tmp_path) -> None:
     """Ein zweiter Lauf darf nichts tun und nicht scheitern."""
     pfad = tmp_path / "test.db"
     con = oeffnen(pfad)
-    assert migrieren(con) == 14
-    assert migrieren(con) == 14
+    assert migrieren(con) == 15
+    assert migrieren(con) == 15
     con.close()
 
 

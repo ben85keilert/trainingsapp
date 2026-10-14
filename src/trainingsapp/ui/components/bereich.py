@@ -8,7 +8,9 @@ ist, verschiebt Ziehen die Grenze statt der Kurve; Zoom und Lage wechselt man
 
 Notizen sind **Rastpunkte** (`hrv_core.ausschnitte.einrasten`): Eine Grenze in
 ihrer Nähe springt auf die Notiz. „An Notiz" setzt die Grenze direkt auf eine,
-±1/±5 s justieren nach (ohne Einrasten).
+±1/±5 s justieren nach (ohne Einrasten). Die Pfeile links und rechts setzen den
+Anfang an den Beginn, das Ende an den Schluss der Messung (bzw. des
+Zuschnitts) — bei langen Messungen erspart das das Ziehen bis an den Rand.
 """
 
 from __future__ import annotations
@@ -142,6 +144,13 @@ class BereichEditor:
         self.rast = text
         self._aendern()
 
+    def an_rand(self, welche: str) -> None:
+        """Anfang an den Beginn bzw. Ende an den Schluss — wählt die Grenze, die Kurve rückt mit."""
+        self.aktiv = welche
+        self._setzen(self.anfang if welche == ANFANG else self.ende, rasten=False)
+        self._zeigen(self.grenze)
+        self._aendern()
+
     def _setzen(self, x: float, *, rasten: bool = True) -> None:
         x = min(max(x, self.anfang), self.ende)
         self.rast = ""
@@ -211,6 +220,17 @@ class BereichEditor:
     def _an_notiz(self, x: float, text: str) -> Callable[[], None]:
         return lambda: self.an_notiz(x, text)
 
+    def _pfeil(self, welche: str) -> ft.Control:
+        return ft.IconButton(
+            ft.Icons.FIRST_PAGE if welche == ANFANG else ft.Icons.LAST_PAGE,
+            icon_size=20,
+            visual_density=ft.VisualDensity.COMPACT,
+            tooltip="Anfang an den Beginn der Messung"
+            if welche == ANFANG
+            else "Ende an den Schluss der Messung",
+            on_click=lambda: self.an_rand(welche),
+        )
+
     def _aufbauen(self) -> ft.Control:
         notizen = sorted(self._notizen())
         menue: list[ft.Control] = []
@@ -239,7 +259,16 @@ class BereichEditor:
             spacing=6,
             tight=True,
             controls=[
-                ft.Row(spacing=8, controls=[self._knoepfe[ANFANG], self._knoepfe[ENDE]]),
+                ft.Row(
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        self._pfeil(ANFANG),
+                        self._knoepfe[ANFANG],
+                        self._knoepfe[ENDE],
+                        self._pfeil(ENDE),
+                    ],
+                ),
                 ft.Row(
                     spacing=0,
                     wrap=True,

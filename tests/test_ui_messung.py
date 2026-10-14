@@ -976,6 +976,52 @@ def test_abschnitt_anlegen_umbenennen_verschieben(daten) -> None:
     assert neu["id"] == ruhe["id"]
 
 
+def test_bereich_pfeile_setzen_grenzen_an_den_rand() -> None:
+    """|◀ setzt den Anfang an den Beginn, ▶| das Ende an den Schluss; die Kurve rückt mit."""
+    from trainingsapp.ui.components.bereich import ANFANG, ENDE, BereichEditor
+
+    gezeigt: list[float] = []
+    geaendert: list[int] = []
+    editor = BereichEditor(
+        von=600.0,
+        bis=900.0,
+        anfang=0.0,
+        ende=4200.0,
+        notizen=lambda: [(3.0, "Start")],
+        geaendert=lambda: geaendert.append(1),
+        zeigen=gezeigt.append,
+        breite=lambda: 60.0,
+    )
+    editor.waehlen(ENDE)
+    _symbol(editor.control, ft.Icons.FIRST_PAGE, "Anfang an den Beginn der Messung").on_click()
+    assert (editor.aktiv, editor.von, editor.bis) == (ANFANG, 0.0, 900.0)
+    assert editor.rast == ""  # kein Einrasten an der Notiz bei 3 s
+    _symbol(editor.control, ft.Icons.LAST_PAGE, "Ende an den Schluss der Messung").on_click()
+    assert (editor.aktiv, editor.von, editor.bis) == (ENDE, 0.0, 4200.0)
+    assert gezeigt[-2:] == [0.0, 4200.0] and len(geaendert) == 3
+    assert "70:00" in _baum_texte(editor.control)
+
+
+def test_abschnitt_ueber_die_ganze_messung_per_pfeil(daten) -> None:
+    """Im Abschnitts-Editor der Aufzeichnung: beide Pfeile → Abschnitt über die ganze Messung."""
+    import json
+
+    from trainingsapp.hrv_core.korrektur import analyse_pfad
+
+    state, tmp_path = daten
+    eintrag, pfad = _golden_eintrag(state, tmp_path)
+    view = messung_detail_view(_seite(), state, eintrag)
+    _knopf(view, "Abschnitt").on_click()
+    _symbol(view, ft.Icons.FIRST_PAGE).on_click()
+    _symbol(view, ft.Icons.LAST_PAGE).on_click()
+    _knopf(view, "Speichern").on_click()
+    (seg,) = json.loads(analyse_pfad(pfad).read_text())["segments"]
+    schlaege = json.loads(pfad.read_text())["messungen"]
+    # vom ersten bis zum letzten Schlag der Datei (Herzuhr)
+    assert seg["t_start_s"] == pytest.approx(schlaege[0]["t_s"], abs=0.01)
+    assert seg["t_end_s"] == pytest.approx(schlaege[-1]["t_s"], abs=0.01)
+
+
 def test_ablesen_zeigt_alle_werte_an_einer_stelle(daten) -> None:
     """„Ablesen" zeigt einen Strich und darunter RR, HF und die Verlaufskurven an dieser Stelle."""
     state, tmp_path = daten

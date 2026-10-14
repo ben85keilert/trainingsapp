@@ -256,10 +256,15 @@ selbst.
 
 ## Offen
 
-**Eichung gegen das EKG.** Alle Zahlen oben vergleichen den Sensor mit sich
-selbst. Eine gleichzeitige Messung mit H10 und Verity Sense, in Ruhe und in
-Bewegung, würde zeigen, ob verworfene Intervalle in Ruhe doch zählen dürfen
-und ob die Fehlerschwelle bei 30 ms (Polar) oder 50 ms besser liegt.
+**Eichung gegen das EKG.** In Ruhe gibt es sie für die Vorgabe schon:
+praxis_gui folgt immer dem Blocker-Bit, und drei gleichzeitige Messungen mit
+dem H10 (19./20.09.2026, je rund 5 min Ruhe, soweit gemessen 7–10 % verworfen) ergaben RMSSD
+84,2 / 33,2 / 45,2 ms gegen 84,8 / 30,2 / 42,1 ms beim H10, je Schlag Bias
+unter 1 ms bei 7,5–12,8 ms Streuung (praxis_gui
+`docs/verity_sense/messprotokoll.md`). In Bewegung fehlt der Vergleich; die
+Zahlen vom 14.10. vergleichen den Sensor mit sich selbst. Offen bleibt auch,
+ob verworfene Intervalle in Ruhe doch zählen dürften und ob die
+Fehlerschwelle bei 30 ms (Polar) oder 50 ms besser liegt.
 
 ---
 

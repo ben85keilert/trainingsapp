@@ -15,7 +15,6 @@ ft = pytest.importorskip("flet")
 from trainingsapp.core.models import Exercise, Plan  # noqa: E402
 from trainingsapp.core.pakete import GRUNDAUSSTATTUNG  # noqa: E402
 from trainingsapp.data.seed import seed_id  # noqa: E402
-from trainingsapp.ui.components.tagwahl import TagWahl  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.pakete import paket_export_view, pakete_view  # noqa: E402
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view  # noqa: E402
@@ -32,12 +31,6 @@ def state(tmp_path):
 @pytest.fixture
 def page():
     return SimpleNamespace(route="/", views=[], update=lambda: None, show_dialog=lambda d: None)
-
-
-@pytest.fixture
-def ohne_fenster(monkeypatch):
-    """`update()` braucht sonst eine echte Seite."""
-    monkeypatch.setattr(ft.Control, "update", lambda self: None)
 
 
 def alle(wurzel):
@@ -87,39 +80,6 @@ def test_herkunft_steht_klein_hinter_der_beschreibung(page, state) -> None:
     eigene = Exercise(name="Meine Übung")
     state.uebungen.speichern(eigene)
     assert "  (eigene Übung)" in texte(uebung_detail(page, state, eigene, browser))
-
-
-def test_tagwahl_uebernimmt_erst_beim_schliessen(ohne_fenster) -> None:
-    gemeldet: list[tuple[set[str], set[str]]] = []
-    wahl = TagWahl(
-        ["Atmung", "Dehnung"],
-        ["Bein"],
-        {"Dehnung", "gibt es nicht mehr"},
-        set(),
-        on_change=lambda t, r: gemeldet.append((t, r)),
-    )
-    assert wahl.typen == {"Dehnung"}  # Verwaistes fällt weg
-    typ, region = (
-        next(c for c in alle(k) if isinstance(c, ft.SubmenuButton)) for k in wahl.control.controls
-    )
-    zeilen = {
-        c.content.value: c
-        for c in alle(typ)
-        if isinstance(c, ft.MenuItemButton) and isinstance(c.content, ft.Text)
-    }
-    zeilen["Atmung"].on_click()
-    assert gemeldet == []  # angekreuzt, noch nicht übernommen
-    typ.on_close()  # „Akzeptieren“ oder Tipp daneben
-    assert gemeldet == [({"Atmung", "Dehnung"}, set())]
-    assert typ.content.controls[0].value == "Typ · 2"
-    assert typ.content.controls[1].value == "Atmung, Dehnung"
-
-    zeilen["Liste leeren"].on_click()
-    typ.on_close()
-    assert gemeldet[-1] == (set(), set())
-    assert typ.content.controls[1].value == "alle"
-    region.on_close()  # nichts geändert → keine Meldung
-    assert len(gemeldet) == 2
 
 
 def test_hinzufuegen_filtert_nach_typ(page, state) -> None:

@@ -1,10 +1,11 @@
 """Übungskatalog: Suche, Filter nach Typ und Region, Liste.
 
 Die Daten kommen aus dem Repository, gefiltert wird mit
-`core.models.passt_zum_filter`. Beide Tag-Arten stecken in *einem* Filterknopf
-neben der Suche (Mehrfachauswahl im Menü) statt in Chipreihen — das spart auf
-dem Handy fünf, sechs Zeilen. Suchtext und Filter liegen im `AppState`, damit
-sie den Wechsel auf einen anderen Reiter überleben.
+`core.models.passt_zum_filter`. Unter der Suche stehen die zwei Kästen
+Typ | Region (`ui/components/tagwahl.py`, dieselbe Auswahl wie in „Übung
+hinzufügen“ und im Editor); die Liste reagiert schon beim Ankreuzen. Suchtext
+und Filter liegen im `AppState`, damit sie den Wechsel auf einen anderen Reiter
+überleben.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import flet as ft
 
 from trainingsapp.core.models import Exercise, passt_zum_filter
 from trainingsapp.ui.components.icons import symbol
+from trainingsapp.ui.components.tagwahl import TagWahl
 from trainingsapp.ui.state import AppState
 
 
@@ -56,8 +58,6 @@ def trainieren_knopf(on_click: Callable[[], object], tooltip: str) -> ft.Control
 
 def katalog(page: ft.Page, state: AppState) -> ft.Control:
     liste = ft.ListView(expand=True, spacing=0, padding=ft.Padding.only(bottom=88))
-    filter_platz = ft.Container()  # der Filterknopf samt Menü
-    filter_zeile = ft.Container()  # nur bei aktivem Filter: was gerade gilt
 
     # -- Handler ---------------------------------------------------------------
     # Die Liste wird in einer Schleife gebaut; jeder Eintrag braucht einen
@@ -90,115 +90,9 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
         zeichnen()
         page.update()
 
-    def filter_leeren() -> None:
-        state.typ_filter = set()
-        state.region_filter = set()
-        zeichnen()
-        page.update()
-
-    # -- Filtermenü ------------------------------------------------------------
-    # Ein Knopf öffnet ein Menü mit beiden Tag-Arten zum Ankreuzen. Ankreuzen
-    # lässt das Menü offen (close_on_click=False); „OK" oben oder ein Tipp
-    # daneben schließt es — erst dann gilt die Auswahl (on_close).
-
-    def filter_menue() -> ft.Control:
-        typen = state.uebungen.typen()
-        regionen = state.uebungen.regionen()
-        # Filter auf Tags, die es nicht mehr gibt, fallen weg.
-        state.typ_filter &= set(typen)
-        state.region_filter &= set(regionen)
-        auswahl_typ = set(state.typ_filter)
-        auswahl_region = set(state.region_filter)
-
-        def haken(an: bool) -> ft.Icon:
-            return ft.Icon(ft.Icons.CHECK_BOX if an else ft.Icons.CHECK_BOX_OUTLINE_BLANK)
-
-        def eintrag(name: str, auswahl: set[str]) -> ft.Control:
-            knopf = ft.MenuItemButton(
-                content=ft.Text(name), leading=haken(name in auswahl), close_on_click=False
-            )
-
-            def umschalten() -> None:
-                auswahl.symmetric_difference_update({name})
-                knopf.leading = haken(name in auswahl)
-                knopf.update()
-
-            knopf.on_click = umschalten
-            return knopf
-
-        def ueberschrift(text: str) -> ft.Control:
-            return ft.Container(
-                padding=ft.Padding.only(left=12, top=10, bottom=2),
-                content=ft.Text(text, size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-            )
-
-        def uebernehmen() -> None:
-            state.typ_filter = set(auswahl_typ)
-            state.region_filter = set(auswahl_region)
-            zeichnen()
-            page.update()
-
-        def alles_abwaehlen() -> None:
-            auswahl_typ.clear()
-            auswahl_region.clear()  # das Schließen übernimmt die leere Auswahl
-
-        anzahl = len(auswahl_typ) + len(auswahl_region)
-        return ft.MenuBar(
-            style=ft.MenuStyle(
-                bgcolor=ft.Colors.TRANSPARENT,
-                shadow_color=ft.Colors.TRANSPARENT,
-                elevation=0,
-                padding=0,
-            ),
-            controls=[
-                ft.SubmenuButton(
-                    content=ft.Text(f"Filter · {anzahl}" if anzahl else "Filter"),
-                    leading=ft.Icon(ft.Icons.FILTER_LIST),
-                    on_close=uebernehmen,
-                    controls=[
-                        ft.MenuItemButton(
-                            content=ft.Text("OK", weight=ft.FontWeight.BOLD),
-                            leading=ft.Icon(ft.Icons.CHECK),
-                            on_click=lambda: None,  # schließt; on_close übernimmt
-                        ),
-                        ft.MenuItemButton(
-                            content=ft.Text("Alle anzeigen"),
-                            leading=ft.Icon(ft.Icons.FILTER_LIST_OFF),
-                            on_click=alles_abwaehlen,
-                        ),
-                        ueberschrift("TYP"),
-                        *[eintrag(t, auswahl_typ) for t in typen],
-                        ueberschrift("REGION"),
-                        *[eintrag(r, auswahl_region) for r in regionen],
-                    ],
-                )
-            ],
-        )
-
     # -- Anzeige aus dem Zustand ableiten -------------------------------------
 
     def zeichnen() -> None:
-        filter_platz.content = filter_menue()
-        aktiv = sorted(state.typ_filter) + sorted(state.region_filter)
-        filter_zeile.content = (
-            ft.Row(
-                spacing=4,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Text(", ".join(aktiv), size=12, opacity=0.75, expand=True),
-                    ft.IconButton(
-                        ft.Icons.CLOSE,
-                        icon_size=18,
-                        tooltip="Filter aufheben",
-                        on_click=filter_leeren,
-                    ),
-                ],
-            )
-            if aktiv
-            else None
-        )
-        filter_zeile.visible = bool(aktiv)
-
         treffer = [
             u
             for u in state.uebungen.suchen(state.suchtext)
@@ -262,31 +156,41 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
                 )
         return zeilen
 
+    # -- Filter: zwei Kästen Typ | Region, sofort wirksam ----------------------
+    # Nur die Liste wird neu gezeichnet, nie die Kästen — sonst schlösse das
+    # offene Menü. Filter auf Tags, die es nicht mehr gibt, fallen weg.
+
+    def filtern(typen: list[str], regionen: list[str]) -> None:
+        state.typ_filter, state.region_filter = set(typen), set(regionen)
+        zeichnen()
+        page.update()
+
+    tagwahl = TagWahl(
+        state.uebungen.typen(),
+        state.uebungen.regionen(),
+        sorted(state.typ_filter),
+        sorted(state.region_filter),
+        on_change=filtern,
+    )
+    state.typ_filter, state.region_filter = set(tagwahl.typen), set(tagwahl.regionen)
     zeichnen()
 
     return ft.Column(
         expand=True,
         spacing=8,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,  # Suche so breit wie die Kästen
         controls=[
             ft.Container(
-                padding=ft.Padding.only(left=16, right=8, top=12),
-                content=ft.Row(
-                    spacing=4,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.TextField(
-                            value=state.suchtext,
-                            hint_text="Übung suchen",
-                            prefix_icon=ft.Icons.SEARCH,
-                            border=ft.OutlineInputBorder(border_radius=12),
-                            on_change=suchen,
-                            expand=True,
-                        ),
-                        filter_platz,
-                    ],
+                padding=ft.Padding.only(left=16, right=16, top=12),
+                content=ft.TextField(
+                    value=state.suchtext,
+                    hint_text="Übung suchen",
+                    prefix_icon=ft.Icons.SEARCH,
+                    border=ft.OutlineInputBorder(border_radius=12),
+                    on_change=suchen,
                 ),
             ),
-            ft.Container(padding=ft.Padding.only(left=20, right=8), content=filter_zeile),
+            ft.Container(padding=ft.Padding.symmetric(horizontal=16), content=tagwahl.control),
             liste,
         ],
     )

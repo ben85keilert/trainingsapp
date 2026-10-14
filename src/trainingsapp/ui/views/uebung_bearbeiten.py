@@ -8,9 +8,10 @@ als ein Umweg.) Felder, die eine Übung aus früheren Zeiten trägt und die nich
 im Vorrat stehen, bleiben erhalten. Die Skala trägt einen eigenen Namen
 (Vorgabe „Skala“) und einen Bereich.
 
-Typen und Regionen: Chips aus der eigenen Liste (Einstellungen → Typen und
-Regionen); ein neuer kommt über das Feld mit „+“ dazu und steht oben — keine
-Kommaliste mehr.
+Typen und Regionen: dieselbe Auswahl wie im Katalog (`ui/components/tagwahl.py`,
+Ben 15.10.2026) — zwei Kästen, Mehrfachauswahl in der Reihenfolge des
+Antippens (der erste Typ ist die Kategorie); „Neuer Typ …“ bzw. „Neue Region …“
+steht unten in der Liste, ein neuer Tag steht oben und ist gleich gewählt.
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ from trainingsapp.ui.components.icons import AUSWAHL, symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.parameter_wahl import parameter_wahl
 from trainingsapp.ui.components.spec_form import SpecForm
+from trainingsapp.ui.components.tagwahl import TagWahl
 from trainingsapp.ui.state import AppState
 
 #: Auswahlwert „keine Variante" — ein leerer Schlüssel ist im Dropdown heikel
@@ -110,93 +112,27 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     )
 
     # -- Typen und Regionen ------------------------------------------------
-    # Zwei Tag-Arten, beide optional und mehrfach: Chips aus der eigenen Liste
-    # (Einstellungen → Typen und Regionen), dazu ein Feld mit „+“ für einen
-    # neuen — er steht oben und ist gleich gewählt. Angelegt wird er erst beim
-    # Speichern; wer abbricht, hinterlässt nichts.
+    # Die Tag-Auswahl wie im Katalog: zwei Kästen, Mehrfachauswahl in der
+    # Reihenfolge des Antippens — der erste Typ ist die Kategorie. Was die Übung
+    # trägt, steht immer zur Wahl (auch Tags, die es in der Liste nicht mehr
+    # gibt). Ein neuer Tag wird erst beim Speichern angelegt; wer abbricht,
+    # hinterlässt nichts.
 
-    def tag_auswahl(
-        art: str, aktiv: list[str], beschriftung: str
-    ) -> tuple[ft.Control, Callable[[], list[str]]]:
-        # In der Reihenfolge des Antippens: Der erste Typ ist die Kategorie.
-        gewaehlt = list(aktiv)
-        angebot = list(dict.fromkeys([*state.tags.namen(art), *aktiv]))
-        andere_art = state.tags.namen(TAG_REGION if art == TAG_TYP else TAG_TYP)
-        reihe = ft.Row(wrap=True, spacing=6, run_spacing=4)
-        feld = ft.TextField(
-            label=beschriftung,
-            dense=True,
-            expand=True,
-            capitalization=ft.TextCapitalization.SENTENCES,
-        )
-
-        def schalter(name: str) -> Callable[[], None]:
-            def handler() -> None:
-                if name in gewaehlt:
-                    gewaehlt.remove(name)
-                else:
-                    gewaehlt.append(name)
-                zeichnen()
-                page.update()
-
-            return handler
-
-        def zeichnen() -> None:
-            reihe.controls = [
-                ft.Chip(
-                    label=ft.Text(name),
-                    selected=name in gewaehlt,
-                    show_checkmark=False,
-                    on_click=schalter(name),
-                )
-                for name in angebot
-            ]
-
-        def hinzufuegen() -> None:
-            text = (feld.value or "").strip()
-            gleich = [n for n in angebot if n.casefold() == text.casefold()]
-            fremd = [n for n in andere_art if n.casefold() == text.casefold()]
-            if not text:
-                feld.error = "Name?"
-            elif fremd:
-                andere = "eine Region" if art == TAG_TYP else "ein Typ"
-                feld.error = f"„{fremd[0]}“ ist schon {andere}."
-            else:
-                name = gleich[0] if gleich else text
-                if not gleich:
-                    angebot.insert(0, name)  # neu: oben
-                if name not in gewaehlt:
-                    gewaehlt.append(name)
-                feld.value, feld.error = "", None
-                zeichnen()
-            page.update()
-
-        feld.on_submit = lambda _: hinzufuegen()
-        zeichnen()
-        bereich = ft.Column(
-            spacing=8,
-            controls=[
-                reihe,
-                ft.Row(
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        feld,
-                        ft.FilledTonalIconButton(
-                            ft.Icons.ADD, tooltip=f"{beschriftung} anlegen", on_click=hinzufuegen
-                        ),
-                    ],
-                ),
-            ],
-        )
-        return bereich, lambda: [n for n in gewaehlt if n in angebot]
-
-    typ_auswahl, typen_lesen = tag_auswahl(
-        TAG_TYP, list(uebung.typen) if uebung else [], "Neuer Typ"
+    tagwahl = TagWahl(
+        [*state.tags.namen(TAG_TYP), *(uebung.typen if uebung else [])],
+        [*state.tags.namen(TAG_REGION), *(uebung.regionen if uebung else [])],
+        uebung.typen if uebung else [],
+        uebung.regionen if uebung else [],
+        on_change=lambda _typen, _regionen: None,  # gelesen wird beim Speichern
+        neu_anlegen=True,
+        page=page,
     )
-    region_auswahl, regionen_lesen = tag_auswahl(
-        TAG_REGION, list(uebung.regionen) if uebung else [], "Neue Region"
-    )
+
+    def typen_lesen() -> list[str]:
+        return list(tagwahl.typen)
+
+    def regionen_lesen() -> list[str]:
+        return list(tagwahl.regionen)
 
     # -- Felder aus dem Vorrat ---------------------------------------------
     # Je Vorratsfeld ein Schalter und ein Chip-Feld. Eingeschaltet, wenn die
@@ -563,12 +499,11 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                     controls=[
                         name,
                         beschreibung,
-                        abschnitt("TYP — WAS IST DAS FÜR EINE ÜBUNG? (OPTIONAL)"),
-                        typ_auswahl,
-                        abschnitt("REGION (OPTIONAL)"),
-                        region_auswahl,
+                        abschnitt("TYP UND REGION (OPTIONAL)"),
+                        tagwahl.control,
                         ft.Text(
-                            "Umbenennen und Löschen: in den Einstellungen unter "
+                            "Der erste Typ ist die Kategorie. Neue unten in der Liste; "
+                            "umbenennen und löschen in den Einstellungen unter "
                             "„Typen und Regionen“.",
                             size=12,
                             opacity=0.6,

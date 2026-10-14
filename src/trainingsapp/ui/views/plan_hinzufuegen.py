@@ -80,9 +80,9 @@ def plan_hinzufuegen_view(
     # Typ | Region (Ben, 14.10.2026): zwei Kästen unter der Suche, Mehrfachauswahl
     # mit „Akzeptieren“ / „Liste leeren“ (`ui/components/tagwahl.py`). Die Wahl
     # liegt im AppState und übersteht so das Hin und Her zwischen Plan und Liste.
-    def filtern(typen: set[str], regionen: set[str]) -> None:
-        state.hinzufuegen_typen, state.hinzufuegen_regionen = typen, regionen
-        zeichnen()
+    def filtern(typen: list[str], regionen: list[str]) -> None:
+        state.hinzufuegen_typen, state.hinzufuegen_regionen = set(typen), set(regionen)
+        zeichnen()  # nur die Liste — ein neu gebauter Kasten schlösse das offene Menü
         page.update()
 
     tagwahl = TagWahl(
@@ -92,7 +92,7 @@ def plan_hinzufuegen_view(
         state.hinzufuegen_regionen,
         on_change=filtern,
     )
-    state.hinzufuegen_typen, state.hinzufuegen_regionen = tagwahl.typen, tagwahl.regionen
+    state.hinzufuegen_typen, state.hinzufuegen_regionen = set(tagwahl.typen), set(tagwahl.regionen)
     zeichnen()
     return ft.View(
         route=f"{basis}/hinzufuegen",

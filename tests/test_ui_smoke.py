@@ -769,26 +769,31 @@ def test_editor_typ_mit_plus_und_skala_mit_namen(page, welt) -> None:
 
     page.push_route = push_route
     page.update = lambda: None
-    page.show_dialog = lambda _d: None
+    dialoge: list = []
+    page.show_dialog = dialoge.append
+    page.pop_dialog = lambda: None
     vorher = list(uebung.typen)
     ansicht = uebung_bearbeiten(page, state, uebung)
     alle = [c for v in ansicht.controls for c in _alle(v)]
     assert not any(isinstance(c, ft.TextField) and "Kung-Fu" in (c.label or "") for c in alle)
 
-    neu = next(c for c in alle if isinstance(c, ft.TextField) and c.label == "Neuer Typ")
-    plus = next(
+    # Neuer Typ über die Tag-Auswahl (Ben, 15.10.2026): unten in der Liste, Name im Dialog
+    typ = next(c for c in alle if isinstance(c, ft.SubmenuButton))
+    neu = next(
         c
-        for c in alle
-        if isinstance(c, ft.FilledTonalIconButton) and c.tooltip == "Neuer Typ anlegen"
+        for c in _alle(typ)
+        if isinstance(c, ft.MenuItemButton)
+        and isinstance(c.content, ft.Text)
+        and c.content.value == "Neuer Typ …"
     )
-    neu.value = "Qigong"
-    plus.on_click()
-    chips = [c for v in ansicht.controls for c in _alle(v) if isinstance(c, ft.Chip)]
-    erster = next(c for c in chips if c.label.value == "Qigong")
-    assert erster.selected and neu.value == ""
-    neu.value = "bein"  # gibt es als Region
-    plus.on_click()
-    assert neu.error == "„Bein“ ist schon eine Region."
+    neu.on_click()
+    dialoge[-1].content.value = "Qigong"
+    dialoge[-1].actions[1].on_click()
+    assert "Qigong" in typ.content.controls[1].value  # gleich gewählt
+    neu.on_click()
+    dialoge[-1].content.value = "bein"  # gibt es als Region
+    dialoge[-1].actions[1].on_click()
+    assert dialoge[-1].content.error == "„Bein“ ist schon eine Region."
 
     # Skala einschalten und benennen
     skala = next(c for c in alle if isinstance(c, ft.Switch) and c.label == "Skala")

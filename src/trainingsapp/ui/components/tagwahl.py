@@ -1,12 +1,21 @@
 """Platzsparende Tag-Auswahl: zwei Kästen nebeneinander — Typ | Region.
 
-Ben, 14.10.2026 (erst in „Übung hinzufügen“; auf andere Bereiche erst nach
-seiner Rückmeldung): Jeder Kasten zeigt, was gewählt ist („alle“ oder
-„Dehnung, Kräftigung“), ein Tipp klappt die Liste darunter auf. Ankreuzen
-lässt sie offen, mehrere gehen. Oben in der Liste stehen fest — sie scrollen
-nicht mit — „Akzeptieren“ und „Liste leeren“. Ein Tipp daneben übernimmt die
-Auswahl ebenso (Fokuswechsel = akzeptiert); erst dann ändert sich die Liste
-dahinter.
+Eine Komponente für alle Stellen, an denen Typen und Regionen gewählt werden
+(Ben, 15.10.2026: „Übertrage die Tag-Auswahl auf die anderen Bereiche“):
+Katalogfilter, „Übung hinzufügen“ im Plan und der Übungs-Editor. Wer sie
+ändert, ändert sie überall.
+
+Jeder Kasten zeigt, was gewählt ist („alle“ oder „Dehnung, Kräftigung“), ein
+Tipp klappt die Liste darunter auf. Ankreuzen lässt sie offen, mehrere gehen,
+und **die Auswahl wirkt sofort** — die Liste dahinter reagiert schon beim
+Ankreuzen (Ben, 15.10.2026). Oben in der Liste stehen fest — sie scrollen nicht
+mit — „Akzeptieren“ (schließt) und „Liste leeren“. Ein Tipp daneben schließt
+ebenso.
+
+Die Reihenfolge des Antippens bleibt: Im Editor ist der erste Typ die
+Kategorie der Übung. Mit ``neu_anlegen`` steht am Ende der Liste „Neuer Typ …“
+bzw. „Neue Region …“ — ein kleiner Dialog fragt den Namen; angelegt wird der
+Tag erst, wenn die Übung gespeichert wird.
 
 Technik (Flet 1.0, per Web-Foto erprobt):
 
@@ -18,11 +27,14 @@ Technik (Flet 1.0, per Web-Foto erprobt):
   kürzt der Text mit „…“.
 - Die Liste liegt in einem eigenen Scrollbereich fester Höhe unter der
   Kopfzeile — so bleiben die beiden Knöpfe stehen.
+- Wer die Auswahl verwendet, zeichnet nur seine Liste neu, nie die Kästen:
+  Ein neu gebauter Kasten schlösse das offene Menü.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import contextlib
+from collections.abc import Callable, Iterable
 
 import flet as ft
 
@@ -32,94 +44,193 @@ LISTE_BREITE = 260
 ZEILE = 40
 LISTE_HOEHE = 280
 
+TYP, REGION = "Typ", "Region"
+#: Kasten → (andere Art, „Neuer Typ“, „eine Region“)
+_ARTEN = {
+    TYP: (REGION, "Neuer Typ", "eine Region"),
+    REGION: (TYP, "Neue Region", "ein Typ"),
+}
 
-def wahl_text(namen: list[str], wahl: set[str]) -> str:
-    """Was im Kasten steht: die gewählten in der Reihenfolge der Liste, sonst „alle“.
 
-    >>> wahl_text(["Dehnung", "Kräftigung", "Atmung"], {"Atmung", "Dehnung"})
+def wahl_text(wahl: list[str]) -> str:
+    """Was im Kasten steht: die gewählten in der Reihenfolge des Antippens, sonst „alle“.
+
+    >>> wahl_text(["Dehnung", "Atmung"])
     'Dehnung, Atmung'
-    >>> wahl_text(["Dehnung"], set())
+    >>> wahl_text([])
     'alle'
     """
-    return ", ".join(n for n in namen if n in wahl) or "alle"
+    return ", ".join(wahl) or "alle"
+
+
+def neuer_name(
+    text: str, gleiche: list[str], andere: list[str], andere_art: str = "eine Region"
+) -> tuple[str | None, str | None]:
+    """Prüft einen neuen Tag-Namen: (Name, None) oder (None, Fehlertext).
+
+    Groß und klein trennen keine Tags — wer „dehnung“ tippt, bekommt „Dehnung“.
+
+    >>> neuer_name(" Qigong ", ["Dehnung"], ["Bein"])
+    ('Qigong', None)
+    >>> neuer_name("dehnung", ["Dehnung"], [])
+    ('Dehnung', None)
+    >>> neuer_name("bein", [], ["Bein"])
+    (None, '„Bein“ ist schon eine Region.')
+    >>> neuer_name("  ", [], [])
+    (None, 'Name?')
+    """
+    text = " ".join(text.split())
+    if not text:
+        return None, "Name?"
+    if fremd := [n for n in andere if n.casefold() == text.casefold()]:
+        return None, f"„{fremd[0]}“ ist schon {andere_art}."
+    gleich = [n for n in gleiche if n.casefold() == text.casefold()]
+    return (gleich[0] if gleich else text), None
 
 
 class TagWahl:
-    """Zwei Kästen Typ | Region. ``on_change(typen, regionen)`` nach dem Akzeptieren.
+    """Zwei Kästen Typ | Region; ``on_change(typen, regionen)`` bei jeder Änderung.
 
-    Gewählte Tags, die es nicht mehr gibt, fallen weg. ``control`` kommt in die
-    Ansicht; ``typen`` und ``regionen`` sind die übernommene Auswahl.
+    ``typen``/``regionen`` sind die Namen zur Auswahl (Reihenfolge = Liste),
+    ``typ_wahl``/``region_wahl`` das bisher Gewählte. Gewählte Namen, die nicht
+    in der Liste stehen, fallen weg — wer sie behalten will (Editor), gibt sie
+    mit in die Liste. ``control`` kommt in die Ansicht; ``typen`` und
+    ``regionen`` am Objekt sind die aktuelle Auswahl in Antipp-Reihenfolge.
+
+    ``page`` braucht nur, wer ``neu_anlegen`` will (für den Namensdialog).
     """
 
     def __init__(
         self,
         typen: list[str],
         regionen: list[str],
-        typ_wahl: set[str],
-        region_wahl: set[str],
-        on_change: Callable[[set[str], set[str]], None],
+        typ_wahl: Iterable[str],
+        region_wahl: Iterable[str],
+        on_change: Callable[[list[str], list[str]], None],
+        *,
+        neu_anlegen: bool = False,
+        page: ft.Page | None = None,
     ) -> None:
-        self.typen = typ_wahl & set(typen)
-        self.regionen = region_wahl & set(regionen)
+        self._namen = {TYP: list(dict.fromkeys(typen)), REGION: list(dict.fromkeys(regionen))}
+        self.typen = [n for n in dict.fromkeys(typ_wahl) if n in self._namen[TYP]]
+        self.regionen = [n for n in dict.fromkeys(region_wahl) if n in self._namen[REGION]]
         self._on_change = on_change
+        self._page = page
+        self._neu_anlegen = neu_anlegen and page is not None
         self.control = ft.Row(
             spacing=10,
-            controls=[
-                self._kasten("Typ", typen, self.typen),
-                self._kasten("Region", regionen, self.regionen),
-            ],
+            controls=[self._kasten(TYP, self.typen), self._kasten(REGION, self.regionen)],
         )
 
-    def _kasten(self, titel: str, namen: list[str], wahl: set[str]) -> ft.Control:
-        entwurf = set(wahl)  # angekreuzt, aber noch nicht übernommen
+    def _melden(self) -> None:
+        self._on_change(list(self.typen), list(self.regionen))
+
+    def _kasten(self, titel: str, wahl: list[str]) -> ft.Control:
+        namen = self._namen[titel]
         beschriftung = ft.Text(size=11, opacity=0.7)
         wert = ft.Text(size=14, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+        zeilen: dict[str, ft.MenuItemButton] = {}
+        spalte = ft.Column(scroll=ft.ScrollMode.AUTO, spacing=0)
+        flaeche = ft.Container(width=LISTE_BREITE, content=spalte)
+
+        def aktualisieren(*controls: ft.Control) -> None:
+            for c in controls:
+                with contextlib.suppress(RuntimeError):  # vor dem ersten Anzeigen
+                    c.update()
 
         def kasten_text() -> None:
             beschriftung.value = f"{titel} · {len(wahl)}" if len(wahl) > 1 else titel
-            wert.value = wahl_text(namen, wahl)
+            wert.value = wahl_text(wahl)
 
         def haken(an: bool) -> ft.Icon:
             return ft.Icon(ft.Icons.CHECK_BOX if an else ft.Icons.CHECK_BOX_OUTLINE_BLANK)
 
-        zeilen: dict[str, ft.MenuItemButton] = {}
+        def geaendert(*zeilen_neu: ft.MenuItemButton) -> None:
+            """Kasten und angetippte Zeilen auffrischen, dann melden — sofort."""
+            kasten_text()
+            aktualisieren(beschriftung, wert, *zeilen_neu)
+            self._melden()
 
         def umschalter(name: str) -> Callable[[], None]:
             def handler() -> None:
-                entwurf.symmetric_difference_update({name})
-                zeilen[name].leading = haken(name in entwurf)
-                zeilen[name].update()
+                if name in wahl:
+                    wahl.remove(name)
+                else:
+                    wahl.append(name)
+                zeilen[name].leading = haken(name in wahl)
+                geaendert(zeilen[name])
 
             return handler
 
-        for name in namen:
-            zeilen[name] = ft.MenuItemButton(
-                content=ft.Text(name),
-                leading=haken(name in entwurf),
-                close_on_click=False,
-                on_click=umschalter(name),
-            )
-
         def leeren() -> None:
-            entwurf.clear()
+            wahl.clear()
             for zeile in zeilen.values():
                 zeile.leading = haken(False)
-                zeile.update()
+            geaendert(*zeilen.values())
 
-        def uebernehmen() -> None:
-            """Beim Schließen — per „Akzeptieren“ oder Tipp daneben."""
-            if entwurf == wahl:
-                return
-            wahl.clear()
-            wahl.update(entwurf)
-            kasten_text()
-            beschriftung.update()
-            wert.update()
-            self._on_change(set(self.typen), set(self.regionen))
+        def liste_bauen() -> None:
+            for name in namen:
+                if name not in zeilen:
+                    zeilen[name] = ft.MenuItemButton(
+                        content=ft.Text(name),
+                        close_on_click=False,
+                        on_click=umschalter(name),
+                    )
+                zeilen[name].leading = haken(name in wahl)
+            inhalt: list[ft.Control] = [zeilen[n] for n in namen] or [
+                ft.MenuItemButton(content=ft.Text(f"Noch keine {titel}-Tags", opacity=0.6))
+            ]
+            if self._neu_anlegen:
+                inhalt.append(
+                    ft.MenuItemButton(
+                        content=ft.Text(f"{_ARTEN[titel][1]} …"),
+                        leading=ft.Icon(ft.Icons.ADD),
+                        on_click=neu_fragen,  # schließt die Liste, öffnet den Dialog
+                    )
+                )
+            spalte.controls = inhalt
+            flaeche.height = min(len(inhalt) * ZEILE + 8, LISTE_HOEHE)
 
-        liste: list[ft.Control] = list(zeilen.values()) or [
-            ft.MenuItemButton(content=ft.Text(f"Noch keine {titel}-Tags", opacity=0.6))
-        ]
+        def neu_fragen() -> None:
+            assert self._page is not None
+            page = self._page
+            andere = self._namen[_ARTEN[titel][0]]
+            feld = ft.TextField(
+                label=_ARTEN[titel][1],
+                autofocus=True,
+                capitalization=ft.TextCapitalization.SENTENCES,
+            )
+
+            def anlegen() -> None:
+                name, fehler = neuer_name(feld.value or "", namen, andere, _ARTEN[titel][2])
+                if name is None:
+                    feld.error = fehler
+                    aktualisieren(feld)
+                    return
+                if name not in namen:
+                    namen.insert(0, name)  # neu: oben
+                if name not in wahl:
+                    wahl.append(name)
+                liste_bauen()
+                page.pop_dialog()
+                aktualisieren(flaeche)
+                geaendert()
+
+            feld.on_submit = lambda _: anlegen()
+            page.show_dialog(
+                ft.AlertDialog(
+                    modal=True,
+                    title=ft.Text(_ARTEN[titel][1]),
+                    content=feld,
+                    actions=[
+                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                        ft.FilledButton("Anlegen", on_click=anlegen),
+                    ],
+                )
+            )
+
+        liste_bauen()
+        kasten_text()
         knopf = ft.SubmenuButton(
             width=150,  # bis die Messung unten die echte Breite liefert
             content=ft.Column(spacing=0, tight=True, controls=[beschriftung, wert]),
@@ -129,7 +240,6 @@ class TagWahl:
                 side=ft.BorderSide(1, ft.Colors.OUTLINE),
                 padding=ft.Padding.symmetric(horizontal=12, vertical=6),
             ),
-            on_close=uebernehmen,
             controls=[
                 ft.Container(
                     padding=ft.Padding.symmetric(horizontal=8, vertical=4),
@@ -143,7 +253,7 @@ class TagWahl:
                                     bgcolor=ft.Colors.PRIMARY_CONTAINER,
                                     shape=ft.StadiumBorder(),
                                 ),
-                                on_click=lambda: None,  # schließt; on_close übernimmt
+                                on_click=lambda: None,  # schließt nur — gewählt ist schon
                             ),
                             ft.MenuItemButton(
                                 content=ft.Text("Liste leeren"),
@@ -155,14 +265,9 @@ class TagWahl:
                         ],
                     ),
                 ),
-                ft.Container(
-                    width=LISTE_BREITE,
-                    height=min(len(liste) * ZEILE + 8, LISTE_HOEHE),
-                    content=ft.Column(scroll=ft.ScrollMode.AUTO, spacing=0, controls=liste),
-                ),
+                flaeche,
             ],
         )
-        kasten_text()
 
         def breite(e: ft.LayoutSizeChangeEvent) -> None:
             if e.width and abs((knopf.width or 0) - e.width) >= 1:
@@ -184,4 +289,4 @@ class TagWahl:
         )
 
 
-__all__ = ["TagWahl", "wahl_text"]
+__all__ = ["REGION", "TYP", "TagWahl", "neuer_name", "wahl_text"]

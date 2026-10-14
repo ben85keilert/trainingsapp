@@ -21,9 +21,9 @@ Daneben die Summe, etwa „50 Wdh. in 3 Sätzen".
 **Zahlentastatur** (Ben, 14.10.2026: „wenn ohnehin Zahlen eingegeben werden,
 braucht es die Zahlentastatur“): Zahlenfelder öffnen am Handy die
 Zahlentastatur, Zeiten die für Uhrzeiten (Ziffern und `:`); Text gibt es nur
-in Textfeldern. Auf diesen Tastaturen fehlt das `x` — im Formular trennt
-dann das Komma die Sätze (`15,15,20`), im Plan gibt es dafür zwei Felder
-„Sätze × Wert“ (siehe unten). Wer `3x15` tippen kann (Desktop), darf es
+in Textfeldern. Auf diesen Tastaturen fehlt das `x` — im Formular (Eintrag
+korrigieren) trennt dann das Komma die Sätze (`15,15,20`), im Plan gibt es
+dafür zwei Felder „Sätze × Wert“ (siehe unten). Wer `3x15` tippen kann (Desktop), darf es
 weiterhin.
 
 Im Verlauf gibt es je Satzfeld zwei Kennzahlen: **Summe** (Standard) und
@@ -73,9 +73,13 @@ Die **Übung** legt fest, welche Felder es gibt (aus dem Feldvorrat in
 `core/result_spec.py`) und welche Chips Standard sind. Der **Plan** übernimmt
 das und wählt je Übung, welche Parameter er anbietet (keiner = nur abhaken),
 welche Chips je Parameter (keiner = nur das freie Feld, das es ohnehin immer
-gibt) und ein Ziel. Der **Eintrag** übernimmt den Plan und darf im Formular
-wieder abweichen. Was unten anders gemacht wurde, sieht man hinterher und kann
-den Plan anpassen.
+gibt) und ein Ziel. Die Planübung darf dabei **mehr** anbieten als die Übung:
+Beim Üben holt das i-Symbol jeden Parameter heran, auch aus dem Feldvorrat
+(Gewicht bei Liegestützen) — gespeichert nur in der Planübung, die Einträge
+tragen die erweiterte Spec (`core.standards.plan_spec`; Ben, 14.10.2026). Der
+**Eintrag** übernimmt den Plan; korrigiert wird über die Tafel „Heute
+geleistet“. Was unten anders gemacht wurde, sieht man hinterher und kann den
+Plan anpassen.
 Plan und Übung tauschen sich nur ausdrücklich aus: „Als Standard der Übung
 setzen“ und „Standard der Übung übernehmen“ in der Planübung (`core/standards.py`).
 

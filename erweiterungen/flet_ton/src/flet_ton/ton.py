@@ -36,11 +36,20 @@ class FletTon(ft.Service):
             timeout=_FRIST_LADEN,
         )
 
-    async def spielen(self, name: str, lautstaerke: float = 1.0) -> None:
-        """Ton ``name`` von vorn abspielen (``lautstaerke`` 0…1)."""
+    async def spielen(self, name: str, lautstaerke: float = 1.0, quelle: str = "medien") -> None:
+        """Ton ``name`` von vorn abspielen (``lautstaerke`` 0…1 des gewählten Reglers).
+
+        ``quelle`` wählt auf Android den Lautstärkeregler: ``medien`` (Vorgabe),
+        ``wecker`` oder ``klingelton`` (Klingelton-/Systemlautstärke). Auf iOS
+        gibt es für Apps nur einen Regler.
+        """
         await self._invoke_method(
             "spielen",
-            {"name": name, "lautstaerke": min(max(float(lautstaerke), 0.0), 1.0)},
+            {
+                "name": name,
+                "lautstaerke": min(max(float(lautstaerke), 0.0), 1.0),
+                "quelle": quelle,
+            },
             timeout=_FRIST_SPIELEN,
         )
 

@@ -9,11 +9,12 @@ Routen:
 
     /                               Hauptansicht mit vier Reitern
     /plan/<id>                      Plan üben (von „Heute" aus)
-    /plan/<id>/uebung/<item_id>     Eintrag mit eigenen Werten und Notiz
+    /plan/<id>/info/<item_id>       i-Symbol beim Üben: Parameter herholen, Beschreibung, Videos
+    /plan/<id>/eintrag/<id>[/korrigieren]   Eintrag von heute aus dem Plan heraus
     /plan/<id>/bearbeiten[/…]       Plan bearbeiten, aus dem Üben heraus
     /plaene/<id>                    Plan bearbeiten (aus „Übungen" → „Pläne")
     /messung/<id>                   Eine HRV-Aufzeichnung: Kurven, Kennzahlen, Korrektur
-    /training/<übung>[/formular]    Eine einzelne Übung üben — ohne Plan (aus dem Katalog)
+    /training/<übung>[/info|/eintrag/<id>]   Eine einzelne Übung üben — ohne Plan (Katalog)
     <bearbeiten>/ziel/<item_id>     Planübung einstellen: Stufe, Chips, Ziel
     <bearbeiten>/hinzufuegen        Übungen in den Plan aufnehmen
     /tag/<YYYY-MM-DD>               Tagesansicht eines beliebigen Tages
@@ -31,6 +32,7 @@ Routen:
     /ausdauer                       Ausdauertraining mit GPS: starten, live
     /ausdauer/<id>                  Auswertung eines Trainings: Karte, km, DFA α1
     <jede Route>/timer[/bearbeiten[/<id>]]   Timer über der aktuellen Ansicht
+    <jede Route>/timer/signale      Signale des Timers (Ton, Vibration …)
 
 Der Routen-Handler baut bei jedem Wechsel den **ganzen** Stapel neu auf
 (L03). Dadurch funktioniert der Zurück-Knopf auch nach einem Neustart auf
@@ -61,14 +63,16 @@ from trainingsapp.ui.views.messung import messung
 from trainingsapp.ui.views.messung_detail import messung_detail_view
 from trainingsapp.ui.views.pakete import paket_export_view, paket_view, pakete_view
 from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view
-from trainingsapp.ui.views.plan import einzel_plan, plan_view, ziel_text
+from trainingsapp.ui.views.plan import einzel_plan, plan_view
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
+from trainingsapp.ui.views.plan_info import plan_info_view
 from trainingsapp.ui.views.profile import profile_view
 from trainingsapp.ui.views.tag import tag_view
 from trainingsapp.ui.views.timer import (
     timer_bearbeiten_view,
     timer_knopf,
+    timer_signale_view,
     timer_view,
     toene_laden,
 )
@@ -178,59 +182,10 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
 # ---------------------------------------------------------------------------
 
 
-def formular_eintrag(
-    page: ft.Page,
-    state: AppState,
-    plan: Plan,
-    item: PlanItem,
-    uebung: Exercise,
-    einzel: bool = False,
+def formular_korrektur(
+    page: ft.Page, state: AppState, eintrag: SessionEntry, basis: str = ""
 ) -> ft.View:
-    """Neuer Eintrag aus dem Plan: Ziel → letzter Eintrag → Standardwerte.
-
-    Mit ``einzel`` kommt er aus „Trainieren“ im Katalog: ohne Plan, Route
-    `/training/<übung>/formular`.
-    """
-    zurueck = f"/training/{uebung.id}" if einzel else f"/plan/{plan.id}"
-    letzter = state.sitzungen.letzter_eintrag(state.profil.id, uebung.id)
-    if item.target:
-        werte, hinweis = (
-            dict(item.target),
-            f"Vorbelegt mit dem Ziel {ziel_text(uebung, item.target)}.",
-        )
-    elif letzter is not None and letzter.result:
-        werte, hinweis = dict(letzter.result), f"Vorbelegt wie zuletzt ({letzter.shorthand()})."
-    else:
-        werte, hinweis = {}, None
-    # Was im Planblock als Ausprägung gewählt ist (45°), gilt auch im Formular.
-    if gewaehlt := state.auspraegung_wahl.get(item.id):
-        werte = {**werte, **gewaehlt}
-
-    async def speichern(ergebnis: dict[str, Any], notiz: str) -> None:
-        session = state.sitzungen.session_fuer(
-            state.profil.id, None if einzel else plan.id, state.heute()
-        )
-        state.sitzungen.eintrag_anlegen(session, uebung, ergebnis, notiz)
-        page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name} eingetragen")))
-        await page.push_route(zurueck)
-
-    async def abbrechen() -> None:
-        await page.push_route(zurueck)
-
-    return eintrag_formular(
-        page,
-        route=f"{zurueck}/formular" if einzel else f"/plan/{plan.id}/uebung/{item.id}",
-        titel=uebung.name,
-        spec=uebung.result_spec,
-        werte=werte,
-        hinweis=hinweis,
-        quick=item.quick,
-        on_speichern=speichern,
-        on_abbrechen=abbrechen,
-    )
-
-
-def formular_korrektur(page: ft.Page, state: AppState, eintrag: SessionEntry) -> ft.View:
+    """``basis`` wie bei `eintrag_view`: der Plan darunter, leer = der Tag."""
     uebung = state.uebungen.laden(eintrag.exercise_id, mit_geloeschten=True)
     tag = lokaler_tag(eintrag.started_at) if eintrag.started_at else state.heute()
     assert eintrag.spec_snapshot is not None
@@ -238,14 +193,14 @@ def formular_korrektur(page: ft.Page, state: AppState, eintrag: SessionEntry) ->
     async def speichern(ergebnis: dict[str, Any], notiz: str) -> None:
         state.sitzungen.eintrag_korrigieren(eintrag.id, ergebnis, notiz)
         page.show_dialog(ft.SnackBar(ft.Text("Korrigiert")))
-        await page.push_route(f"/tag/{tag.isoformat()}")
+        await page.push_route(basis or f"/tag/{tag.isoformat()}")
 
     async def abbrechen() -> None:
-        await page.push_route(f"/eintrag/{eintrag.id}")
+        await page.push_route(f"{basis}/eintrag/{eintrag.id}")
 
     return eintrag_formular(
         page,
-        route=f"/eintrag/{eintrag.id}/korrigieren",
+        route=f"{basis}/eintrag/{eintrag.id}/korrigieren",
         titel=f"Korrigieren: {uebung.name if uebung else 'Eintrag'}",
         spec=eintrag.spec_snapshot,  # die Notation von damals, nicht die heutige
         werte=dict(eintrag.result),
@@ -353,8 +308,22 @@ def main(page: ft.Page) -> None:
         if teile[2:3] == ["bearbeiten"]:
             basis = f"/plan/{plan.id}/bearbeiten"
             bearbeiten_routen(plan, basis, f"/plan/{plan.id}", teile[3:])
-        elif teile[2:3] == ["uebung"] and (paar := planuebung(teile, 3)) is not None:
-            page.views.append(formular_eintrag(page, state, plan, *paar))
+        elif teile[2:3] == ["info"] and (paar := planuebung(teile, 3)) is not None:
+            item, uebung = paar
+            page.views.append(
+                plan_info_view(page, state, f"/plan/{plan.id}", uebung, browser, item)
+            )
+        elif teile[2:3] == ["eintrag"]:
+            eintrag_unter(f"/plan/{plan.id}", teile[3:])
+
+    def eintrag_unter(basis: str, rest: list[str]) -> None:
+        """Ein Eintrag über einer Übungsansicht — Zurück führt wieder dorthin."""
+        eintrag = state.sitzungen.eintrag_laden(rest[0]) if rest else None
+        if eintrag is None:
+            return
+        page.views.append(eintrag_view(page, state, eintrag, basis))
+        if rest[1:2] == ["korrigieren"]:
+            page.views.append(formular_korrektur(page, state, eintrag, basis))
 
     def paket_routen(basis: str, rest: list[str]) -> None:
         """Der Paketmanager — aus dem Katalog (`/pakete`) oder den Einstellungen."""
@@ -391,6 +360,8 @@ def main(page: ft.Page) -> None:
             if teile[i + 1 : i + 2] == ["bearbeiten"]:
                 profil_id = teile[i + 2] if len(teile) > i + 2 else None
                 page.views.append(timer_bearbeiten_view(page, state, profil_id, basis))
+            elif teile[i + 1 : i + 2] == ["signale"]:
+                page.views.append(timer_signale_view(page, state, basis))
         else:
             stapel(teile)
         hintergrund_setzen(page, darstellung)
@@ -439,10 +410,11 @@ def main(page: ft.Page) -> None:
             if (uebung := state.uebungen.laden(teile[1])) is not None:
                 einzel = einzel_plan(uebung)
                 page.views.append(plan_view(page, state, einzel, einzel=True))
-                if teile[2:3] == ["formular"]:
-                    page.views.append(
-                        formular_eintrag(page, state, einzel, einzel.items[0], uebung, einzel=True)
-                    )
+                basis = f"/training/{uebung.id}"
+                if teile[2:3] == ["info"]:
+                    page.views.append(plan_info_view(page, state, basis, uebung, browser))
+                elif teile[2:3] == ["eintrag"]:
+                    eintrag_unter(basis, teile[3:])
         elif teile[:1] == ["tag"] and len(teile) >= 2:
             with suppress(ValueError):  # kein Datum → Hauptansicht
                 page.views.append(tag_view(page, state, date.fromisoformat(teile[1])))

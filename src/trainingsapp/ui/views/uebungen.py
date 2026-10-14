@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 import flet as ft
 
 from trainingsapp.core.models import Plan
-from trainingsapp.core.plaene import tage_text
+from trainingsapp.core.plaene import erledigte, tage_text
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.katalog import katalog, trainieren_knopf
 
@@ -81,7 +81,7 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
         return handler
 
     def zeile(plan: Plan) -> ft.Control:
-        gemacht = sum(1 for item in plan.items if anzahl.get(item.exercise_id))
+        gemacht = len(erledigte(plan.items, anzahl))
         teile = [f"{len(plan.items)} Übungen" if plan.items else "noch leer"]
         teile.append(tage_text(plan.wochentage) if plan.aktiv else "deaktiviert")
         if plan.steht_an(heute):

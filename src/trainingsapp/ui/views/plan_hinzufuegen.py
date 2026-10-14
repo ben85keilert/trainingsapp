@@ -1,12 +1,15 @@
 """Übungen in einen Plan aufnehmen — Route `/plan/<id>/hinzufuegen`.
 
 Eine Liste wie der Katalog, ein Tipp nimmt die Übung auf. Die Ansicht bleibt
-offen, damit man mehrere nacheinander hinzufügt; was schon im Plan ist, wird
-markiert und nicht doppelt aufgenommen.
+offen, damit man mehrere nacheinander hinzufügt. Was schon im Plan ist, trägt
+die Anzahl („2×“); ein weiterer Tipp nimmt es noch einmal auf — eine Übung
+darf mehrmals im Plan stehen (Ben, 14.10.2026: Rumpfbeuge am Anfang und
+später wieder). Neues kommt ans Ende; umordnen lässt es sich im Plan.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 
 import flet as ft
@@ -25,15 +28,18 @@ def plan_hinzufuegen_view(
     basis = basis or f"/plaene/{plan.id}"
     liste = ft.ListView(expand=True)
     suchtext = ""
-    enthalten = {item.exercise_id for item in plan.items}
+    enthalten = Counter(item.exercise_id for item in plan.items)
 
     def hinzufueger(uebung_id: str, name: str) -> Callable[[], None]:
         def handler() -> None:
-            if uebung_id in enthalten:
-                return
             state.plaene.uebung_hinzufuegen(plan.id, uebung_id)
-            enthalten.add(uebung_id)
-            page.show_dialog(ft.SnackBar(ft.Text(f"{name} aufgenommen")))
+            enthalten[uebung_id] += 1
+            n = enthalten[uebung_id]
+            page.show_dialog(
+                ft.SnackBar(
+                    ft.Text(f"{name} aufgenommen" + (f" — jetzt {n}× im Plan" if n > 1 else ""))
+                )
+            )
             zeichnen()
             page.update()
 
@@ -56,9 +62,7 @@ def plan_hinzufuegen_view(
                 leading=ft.Icon(symbol(u.icon_key)),
                 title=ft.Text(u.name),
                 subtitle=ft.Text(was, size=12) if (was := _einordnung(u)) else None,
-                trailing=ft.Icon(ft.Icons.CHECK, color=ft.Colors.PRIMARY)
-                if u.id in enthalten
-                else ft.Icon(ft.Icons.ADD_CIRCLE_OUTLINE, opacity=0.6),
+                trailing=_anzahl_marke(enthalten[u.id]),
                 on_click=hinzufueger(u.id, u.name),
             )
             for u in treffer
@@ -129,6 +133,21 @@ def plan_hinzufuegen_view(
 def _einordnung(u: Exercise) -> str:
     """„Kräftigung · Bein“ — Typ und Region, damit man sieht, warum der Filter passt."""
     return "  ·  ".join(t for t in (", ".join(u.typen), ", ".join(u.regionen)) if t)
+
+
+def _anzahl_marke(n: int) -> ft.Control:
+    """Rechts in der Zeile: Plus für neu, sonst Haken mit Anzahl und Plus für „noch einmal“."""
+    if not n:
+        return ft.Icon(ft.Icons.ADD_CIRCLE_OUTLINE, opacity=0.6)
+    return ft.Row(
+        tight=True,
+        spacing=4,
+        controls=[
+            ft.Icon(ft.Icons.CHECK, color=ft.Colors.PRIMARY, size=20),
+            ft.Text(f"{n}×", color=ft.Colors.PRIMARY, weight=ft.FontWeight.W_600),
+            ft.Icon(ft.Icons.ADD, opacity=0.5, size=18),
+        ],
+    )
 
 
 __all__ = ["plan_hinzufuegen_view"]

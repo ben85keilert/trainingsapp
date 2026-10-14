@@ -9,10 +9,10 @@ auch wenn er inzwischen deaktiviert ist.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 
-from .models import Plan
+from .models import Plan, PlanItem
 
 WOCHENTAGE_KURZ = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
@@ -73,4 +73,73 @@ def warum_nicht(plan: Plan, tag: date) -> str:
     return ""
 
 
-__all__ = ["WOCHENTAGE_KURZ", "heutige_plaene", "tage_text", "warum_nicht"]
+# ---------------------------------------------------------------------------
+# Reihenfolge und Mehrfachaufnahme (Ben, 14.10.2026: „am Anfang Rumpfbeuge
+# und später wieder")
+# ---------------------------------------------------------------------------
+#
+# Eine Übung darf mehrmals im Plan stehen. Einträge verweisen nur auf die
+# Übung, nicht auf die Stelle im Plan — der Tag ist die Bezugsgröße. Darum
+# gilt die k-te Stelle einer Übung als erledigt, sobald es heute k Einträge
+# dieser Übung gibt: Wer die Rumpfbeuge zu Beginn macht, hakt die erste
+# Stelle ab; die zweite wartet, bis sie ein zweites Mal dran war.
+
+
+def vorkommen(items: Iterable[PlanItem]) -> dict[str, int]:
+    """Die wievielte Stelle ihrer Übung jede Planübung ist (ab 1).
+
+    >>> a, b, c = (PlanItem(exercise_id=x) for x in "ABA")
+    >>> [vorkommen([a, b, c])[i.id] for i in (a, b, c)]
+    [1, 1, 2]
+    """
+    gezaehlt: dict[str, int] = {}
+    ergebnis: dict[str, int] = {}
+    for item in items:
+        gezaehlt[item.exercise_id] = gezaehlt.get(item.exercise_id, 0) + 1
+        ergebnis[item.id] = gezaehlt[item.exercise_id]
+    return ergebnis
+
+
+def erledigte(items: Sequence[PlanItem], anzahl: Mapping[str, int]) -> set[str]:
+    """IDs der Planübungen, die heute erledigt sind — ``anzahl`` = Einträge je Übung.
+
+    >>> a, b, c = (PlanItem(exercise_id=x) for x in "ABA")
+    >>> sorted(i.exercise_id for i in (a, b, c) if i.id in erledigte([a, b, c], {"A": 1}))
+    ['A']
+    >>> erledigte([a, b, c], {"A": 1}) == {a.id}
+    True
+    >>> len(erledigte([a, b, c], {"A": 3, "B": 1}))
+    3
+    """
+    stelle = vorkommen(items)
+    return {i.id for i in items if stelle[i.id] <= anzahl.get(i.exercise_id, 0)}
+
+
+def verschoben(ids: Sequence[str], alt: int, neu: int) -> list[str]:
+    """Die Reihenfolge, nachdem das Element an ``alt`` nach ``neu`` gewandert ist.
+
+    ``neu`` ist die Endposition (so meldet sie `ReorderableListView`);
+    außerhalb der Liste wird sie an den Rand gesetzt.
+
+    >>> verschoben(["a", "b", "c", "d"], 0, 2)
+    ['b', 'c', 'a', 'd']
+    >>> verschoben(["a", "b", "c"], 2, 0), verschoben(["a", "b", "c"], 1, 9)
+    (['c', 'a', 'b'], ['a', 'c', 'b'])
+    """
+    liste = list(ids)
+    if not 0 <= alt < len(liste):
+        return liste
+    element = liste.pop(alt)
+    liste.insert(min(max(neu, 0), len(liste)), element)
+    return liste
+
+
+__all__ = [
+    "WOCHENTAGE_KURZ",
+    "erledigte",
+    "heutige_plaene",
+    "tage_text",
+    "verschoben",
+    "vorkommen",
+    "warum_nicht",
+]

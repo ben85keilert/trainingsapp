@@ -5,7 +5,10 @@ Von oben nach unten (Ben, 14.10.2026):
 1. **Parameter** — je Feld der Übung ein Knopf, alle nebeneinander: Was
    eingeschaltet ist, bietet der Plan beim Üben an. Keiner heißt **nur
    abhaken** (ein Knopf „Gemacht"). Die frühere Eingabestufe „nur abhaken /
-   Chips / frei" ist darin aufgegangen.
+   Chips / frei" ist darin aufgegangen. Darunter der übrige **Feldvorrat**:
+   Felder, die die Übung nicht hat, die diese Planübung aber anbieten darf
+   (`core.standards.plan_spec`). Dieselben Knöpfe stehen beim Üben hinter dem
+   i-Symbol (`plan_info.py`) und in der Übung (`components/parameter_wahl.py`).
 2. **Chips** — unter jedem eingeschalteten Parameter seine Chips zum Antippen,
    aufsteigend; eigene Werte lassen sich ergänzen. **Kein Chip heißt freies
    Feld** — das gibt es beim Üben für jeden Messwert ohnehin.
@@ -28,12 +31,10 @@ from trainingsapp.core.parameter import (
     chips_sortiert,
     gewaehlte_felder,
     modus_aus_felder,
-    planbare_felder,
 )
 from trainingsapp.core.result_spec import (
     FieldSpec,
     FieldType,
-    basis_label,
     skala_titel,
     skala_werte,
 )
@@ -42,12 +43,15 @@ from trainingsapp.core.standards import (
     aktive_keys,
     als_standard,
     chips_fuer,
+    plan_spec,
     vom_standard,
+    waehlbare_felder,
     ziel_bereinigen,
     ziel_spec,
 )
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.parameter_wahl import parameter_wahl
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.uebung_bearbeiten import chips_lesen
@@ -71,8 +75,10 @@ def plan_einstellen(
 ) -> ft.View:
     """``basis`` ist die Bearbeiten-Route des Plans, zu der es danach zurückgeht."""
     basis = basis or f"/plaene/{plan.id}"
-    spec = uebung.result_spec
-    planbar = planbare_felder(spec)
+    spec = plan_spec(item, uebung)
+    eigene, vorrat = waehlbare_felder(uebung)
+    #: Alles, was die Planübung einschalten kann — Felder der Übung, dann der Feldvorrat
+    planbar = [*eigene, *vorrat]
     aktiv: set[str] = set(aktive_keys(item, uebung))
     #: Je Parameter: welche Chips zur Wahl stehen und welche der Plan anbietet
     kandidaten: dict[str, list[Any]] = {
@@ -88,7 +94,7 @@ def plan_einstellen(
     gewaehlt: dict[str, list[Any]] = {f.key: chips_fuer(item, f) for f in planbar}
 
     form = SpecForm(ziel_spec(spec), dict(item.target), page=page)
-    parameter_reihe = ft.Row(wrap=True, spacing=8, run_spacing=8)
+    parameter_reihe = ft.Container()
     chips_bereich = ft.Column(spacing=16)
     stand_text = ft.Text(size=12, opacity=0.8)
     zuruecksetzen_knopf = ft.OutlinedButton(
@@ -103,7 +109,7 @@ def plan_einstellen(
     def eingestellt() -> PlanItem:
         """Die Planübung, wie sie gerade auf dem Bildschirm steht."""
         felder = [f.key for f in planbar if f.key in aktiv]
-        standard = [f.key for f in gewaehlte_felder(spec, uebung.default_felder)]
+        standard = [f.key for f in gewaehlte_felder(uebung.result_spec, uebung.default_felder)]
         quick = {
             f.key: chips_sortiert(gewaehlt[f.key])
             for f in planbar
@@ -120,7 +126,7 @@ def plan_einstellen(
     # -- Aufbau ------------------------------------------------------------------
 
     def zeichnen() -> None:
-        parameter_reihe.controls = [parameter_knopf(f) for f in planbar]
+        parameter_reihe.content = parameter_wahl(eigene, aktiv, umschalten, vorrat)
         chips_bereich.controls = [chips_block(f) for f in planbar if f.key in aktiv]
         if not aktiv:
             chips_bereich.controls = [
@@ -146,25 +152,9 @@ def plan_einstellen(
         zeichnen()
         page.update()
 
-    def parameter_knopf(f: FieldSpec) -> ft.Control:
-        an = f.key in aktiv
-        inhalt = ft.Row(
-            tight=True,
-            spacing=6,
-            controls=[
-                ft.Icon(ft.Icons.CHECK if an else ft.Icons.ADD, size=16),
-                ft.Text(basis_label(f)),
-            ],
-        )
-        klasse = ft.FilledTonalButton if an else ft.OutlinedButton
-        return klasse(content=inhalt, on_click=umschalter(f.key))
-
-    def umschalter(key: str) -> Callable[[], None]:
-        def handler() -> None:
-            aktiv.symmetric_difference_update({key})
-            neu()
-
-        return handler
+    def umschalten(key: str) -> None:
+        aktiv.symmetric_difference_update({key})
+        neu()
 
     def chip_schalter(key: str, wert: Any) -> Callable[[], None]:
         def handler() -> None:
@@ -175,6 +165,25 @@ def plan_einstellen(
         return handler
 
     def chips_block(f: FieldSpec) -> ft.Control:
+        if f.type in (FieldType.BOOL, FieldType.TEXT):
+            return ft.Container(
+                padding=ft.Padding.only(left=12, top=8, right=8, bottom=10),
+                border_radius=12,
+                bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                content=ft.Column(
+                    spacing=4,
+                    controls=[
+                        ft.Text(f.label, weight=ft.FontWeight.W_600),
+                        ft.Text(
+                            "Beim Üben ein Schalter zum Antippen."
+                            if f.type == FieldType.BOOL
+                            else "Beim Üben ein Textfeld.",
+                            size=11,
+                            opacity=0.65,
+                        ),
+                    ],
+                ),
+            )
         eigener = ft.TextField(
             hint_text="eigener",
             dense=True,

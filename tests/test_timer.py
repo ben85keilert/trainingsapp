@@ -157,8 +157,40 @@ def test_signale_und_toene() -> None:
     assert timer_signale_lesen(None) == TimerSignale()
     assert timer_signale_lesen('{"ton": false}').ton is False
     daten = toene()
-    assert set(daten) == {"countdown", "wechsel", "ende"}
-    assert all(d[:4] == b"RIFF" and len(d) < 60_000 for d in daten.values())
+    assert {"countdown", "wechsel", "ende", "glocke1", "glocke2", "glocke3"} <= set(daten)
+    # Klein genug für die Brücke (Base64) — die Glocken klingen bis zu 2,4 s nach
+    assert all(d[:4] == b"RIFF" and len(d) < 120_000 for d in daten.values())
+
+
+def test_klang_je_abschnitt_runde_und_ende_bleibt_gespeichert() -> None:
+    """Glocke 1 für Belastung, Glocke 3 für Pause, Gong zur neuen Runde (Ben, 14.10.2026)."""
+    from trainingsapp.core.timer import klang_fuer, timer_profile_lesen, timer_profile_schreiben
+
+    p = TimerProfil(
+        name="Glocken",
+        abschnitte=[Abschnitt("Belastung", 20, "glocke1"), Abschnitt("Pause", 10, "glocke3")],
+        runden=2,
+        runden_klang="gong",
+        ende_klang="glocke2",
+    )
+    wieder = timer_profile_lesen(timer_profile_schreiben([p]))[0]
+    assert wieder == p
+    # Ältere Profile ohne Klänge lesen sich wie vorher
+    alt = timer_profile_lesen('[{"name": "Alt", "abschnitte": [{"name": "A", "dauer_s": 5}]}]')
+    assert alt[0].abschnitte[0].klang == "" and alt[0].ende_klang == ""
+
+    t = [0.0]
+    lauf = TimerLauf(p, uhr=lambda: t[0])
+    lauf.start()
+    gehoert = []
+    alt_stand = lauf.stand()
+    while t[0] < 61:
+        t[0] += 0.25
+        neu = lauf.stand()
+        if (art := signal(alt_stand, neu)) is not None and art != "countdown":
+            gehoert.append(klang_fuer(art, neu, p, TimerSignale()))
+        alt_stand = neu
+    assert gehoert == ["glocke3", "gong", "glocke3", "glocke2"]
 
 
 @pytest.mark.parametrize(

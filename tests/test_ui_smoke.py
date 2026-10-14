@@ -185,12 +185,15 @@ def welt(state):
 
 
 def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
-    from trainingsapp.ui.app import formular_eintrag, formular_korrektur, hauptansicht
+    from types import SimpleNamespace as Dienst
+
+    from trainingsapp.ui.app import formular_korrektur, hauptansicht
     from trainingsapp.ui.views.eintrag import eintrag_view
     from trainingsapp.ui.views.heute import heute
     from trainingsapp.ui.views.plan import plan_view
     from trainingsapp.ui.views.plan_einstellen import plan_einstellen
     from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
+    from trainingsapp.ui.views.plan_info import plan_info_view
     from trainingsapp.ui.views.tag import tag_view, tagesansicht
     from trainingsapp.ui.views.verlauf import verlauf
 
@@ -202,10 +205,16 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
     assert plan_view(page, state, plan, bearbeiten=True, basis=basis).route == basis
     assert plan_hinzufuegen_view(page, state, plan, basis=basis).route == f"{basis}/hinzufuegen"
     assert plan_hinzufuegen_view(page, state, plan).route.endswith("/hinzufuegen")
-    assert formular_eintrag(page, state, plan, item, uebung).route.endswith(f"/uebung/{item.id}")
+    browser = Dienst(launch_url=None)
+    info = plan_info_view(page, state, f"/plan/{plan.id}", uebung, browser, item)
+    assert info.route == f"/plan/{plan.id}/info/{item.id}"
     assert plan_einstellen(page, state, plan, item, uebung).route.endswith(f"/ziel/{item.id}")
     assert formular_korrektur(page, state, eintrag).route.endswith("/korrigieren")
     assert eintrag_view(page, state, eintrag).route == f"/eintrag/{eintrag.id}"
+    unter_plan = eintrag_view(page, state, eintrag, f"/plan/{plan.id}")
+    assert unter_plan.route == f"/plan/{plan.id}/eintrag/{eintrag.id}"
+    korrektur = formular_korrektur(page, state, eintrag, f"/plan/{plan.id}")
+    assert korrektur.route == f"/plan/{plan.id}/eintrag/{eintrag.id}/korrigieren"
     for ordnung in ("plan", "zeit", "uebung"):
         state.tag_ordnung = ordnung
         assert tagesansicht(page, state, state.heute()) is not None
@@ -455,7 +464,7 @@ def test_variante_mit_geloeschtem_original_und_formular_mit_winkel(page, welt) -
     from dataclasses import replace
 
     from trainingsapp.core.models import new_id
-    from trainingsapp.ui.app import formular_eintrag
+    from trainingsapp.ui.views.plan import plan_view
     from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 
     state, plan, item, uebung, _ = welt
@@ -466,7 +475,7 @@ def test_variante_mit_geloeschtem_original_und_formular_mit_winkel(page, welt) -
     assert ansicht is not None
 
     state.auspraegung_wahl[item.id] = {"angle": 45}
-    assert formular_eintrag(page, state, plan, item, variante) is not None
+    assert plan_view(page, state, plan) is not None
 
 
 def test_heute_zeigt_nur_anstehende_und_aufgenommene_plaene(page, welt) -> None:
@@ -542,11 +551,12 @@ def _knopf_mit_text(wurzel, text: str):
 def test_einzelne_uebung_trainieren_ohne_plan(page, state) -> None:
     """„Trainieren“ im Katalog: ein Block, Einträge in der planlosen Session des Tages."""
     import asyncio
+    from types import SimpleNamespace as Dienst
 
     from trainingsapp.data.seed import seed_id
-    from trainingsapp.ui.app import formular_eintrag
     from trainingsapp.ui.views.katalog import katalog
     from trainingsapp.ui.views.plan import einzel_plan, plan_view
+    from trainingsapp.ui.views.plan_info import plan_info_view
 
     page.show_dialog = lambda _d: None
     page.update = lambda: None
@@ -555,8 +565,8 @@ def test_einzelne_uebung_trainieren_ohne_plan(page, state) -> None:
     ansicht = plan_view(page, state, einzel, einzel=True)
     assert ansicht.route == f"/training/{uebung.id}"
     assert len(einzel.items) == 1 and einzel.items[0].exercise_id == uebung.id
-    form = formular_eintrag(page, state, einzel, einzel.items[0], uebung, einzel=True)
-    assert form.route == f"/training/{uebung.id}/formular"
+    info = plan_info_view(page, state, ansicht.route, uebung, Dienst(launch_url=None))
+    assert info.route == f"/training/{uebung.id}/info"
     assert katalog(page, state) is not None
 
     gemacht = _knopf_mit_text(ansicht, "Gemacht")
@@ -878,3 +888,220 @@ def test_spec_form_skala_mit_zahlenfeld_und_tastaturen() -> None:
     form.setzen({"scale": 3}, aktualisieren=False)
     assert form._regler["scale"].value == 3.0 and form.werte()["scale"] == 3
     assert "Anstrengung (0 bis 10)" in _texte(form.control)
+
+
+# -- Reihenfolge, Mehrfachaufnahme, Timer-Signale (Ben, 14.10.2026) ------------
+
+
+def test_plan_bearbeiten_ordnet_um_und_nimmt_doppelt_auf(page, welt) -> None:
+    from trainingsapp.ui.views.plan import plan_view
+    from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
+
+    state, plan, _item, uebung, _ = welt
+    page.show_dialog = lambda _d: None
+    page.update = lambda: None
+    # Dieselbe Übung ein zweites Mal aufnehmen — der Tipp wird nicht mehr verweigert
+    ansicht = plan_hinzufuegen_view(page, state, plan)
+    liste = next(c for c in _alle(ansicht) if isinstance(c, ft.ListView))
+    zeile = next(z for z in liste.controls if uebung.name in _texte(z))
+    assert "1×" in _texte(zeile)
+    zeile.on_click()
+    plan = state.plaene.laden(plan.id)
+    assert [i.exercise_id for i in plan.items].count(uebung.id) == 2
+
+    ansicht = plan_view(page, state, plan, bearbeiten=True)
+    liste = next(c for c in _alle(ansicht) if isinstance(c, ft.ReorderableListView))
+    assert len(liste.controls) == 3 and liste.header is not None
+    assert any(isinstance(c, ft.ReorderableDragHandle) for c in _alle(liste))
+    assert any(t.endswith("2. Mal im Plan") for t in _texte(liste))
+
+    # Ziehen: das letzte (die zweite Nackendehnung) nach vorn
+    alt = [i.id for i in plan.items]
+    liste.on_reorder(SimpleNamespace(old_index=2, new_index=0))
+    assert [i.id for i in state.plaene.laden(plan.id).items] == [alt[2], alt[0], alt[1]]
+
+
+def test_zweite_stelle_wartet_auf_den_zweiten_eintrag(page, welt) -> None:
+    """Ein Eintrag heute erledigt nur die erste Stelle der Übung."""
+    from trainingsapp.ui.views.plan import plan_view
+
+    state, plan, _item, uebung, _ = welt
+    state.plaene.uebung_hinzufuegen(plan.id, uebung.id)
+    plan = state.plaene.laden(plan.id)
+    stand = next(t for t in _texte(plan_view(page, state, plan)) if " von " in t)
+    assert stand == "2 von 3 heute"  # Nackendehnung (1. Stelle) und Unterarmstütz
+
+
+def test_timer_signale_eigene_seite(page, state) -> None:
+    from trainingsapp.ui.views.timer import timer_signale_view, timer_view
+
+    ansicht = timer_view(page, state, "/")
+    assert not any(isinstance(c, ft.Switch) for c in _alle(ansicht))
+    assert "Piep (Medien 100 %) mit 3-2-1 · Vibration · Bildschirm an · Abschnitte in HRV" in (
+        _texte(ansicht)
+    )
+    assert any(
+        isinstance(c, ft.IconButton) and c.icon == ft.Icons.SETTINGS_OUTLINED
+        for c in _alle(ansicht)
+    )
+    seite = timer_signale_view(page, state, "/plan/abc")
+    assert seite.route == "/plan/abc/timer/signale"
+    assert sum(isinstance(c, ft.Switch) for c in _alle(seite)) == 5
+
+
+def test_timer_klang_und_lautstaerke(page, state) -> None:
+    """Klang wählen, Regler wählen, Klang je Abschnitt im Profil (Ben, 14.10.2026)."""
+    import asyncio
+
+    from trainingsapp.ui.views.timer import timer_bearbeiten_view, timer_signale_view
+
+    gespielt: list[tuple[str, float, str]] = []
+
+    class Ton:
+        async def spielen(self, name, lautstaerke=1.0, quelle="medien"):
+            gespielt.append((name, lautstaerke, quelle))
+
+    state.ton, state.toene_geladen = Ton(), True
+    page.run_task = lambda f, *a: asyncio.run(f(*a))
+    page.show_dialog = lambda _d: None
+
+    seite = timer_signale_view(page, state, "/")
+    chips = [c for c in _alle(seite) if isinstance(c, ft.Chip)]
+    glocke = next(c for c in chips if c.label.value.startswith("Glocke 1"))
+    glocke.on_select()
+    assert state.timer_signale().klang == "glocke1" and gespielt[-1] == ("glocke1", 1.0, "medien")
+
+    wahl = next(c for c in _alle(seite) if isinstance(c, ft.SegmentedButton))
+    wahl.on_change(SimpleNamespace(control=SimpleNamespace(selected=["wecker"])))
+    regler = next(c for c in _alle(seite) if isinstance(c, ft.Slider))
+    regler.on_change_end(SimpleNamespace(control=SimpleNamespace(value=60)))
+    assert (state.timer_signale().quelle, state.timer_signale().lautstaerke) == ("wecker", 60)
+    assert gespielt[-1] == ("glocke1", 0.6, "wecker")
+
+    # Profil: je Abschnitt ein Klang, dazu Runden- und Endklang
+    profil = state.timer_profil()
+    ansicht = timer_bearbeiten_view(page, state, profil.id, "/")
+    wahlen = [c for c in _alle(ansicht) if isinstance(c, ft.Dropdown)]
+    assert len(wahlen) == len(profil.abschnitte) + 2
+    wahlen[0].value = "glocke2"
+    wahlen[-1].value = "gong"
+    page.push_route = lambda _r: asyncio.sleep(0)
+    asyncio.run(_knopf_mit_text(ansicht, "Speichern").on_click())
+    gespeichert = state.timer_profil()
+    assert gespeichert.abschnitte[0].klang == "glocke2" and gespeichert.ende_klang == "gong"
+    assert gespeichert.abschnitte[1].klang == "" and gespeichert.runden_klang == ""
+
+
+# -- Parameter herholen, Notiz statt „Mehr …“ (Ben, 14.10.2026) -----------------
+
+
+def test_i_symbol_holt_parameter_aus_dem_feldvorrat(page, welt) -> None:
+    """Gewicht hat die Nackendehnung nicht — die Planübung holt es trotzdem heran."""
+    import asyncio
+
+    from trainingsapp.ui.views.plan import plan_view
+    from trainingsapp.ui.views.plan_info import plan_info_view
+
+    state, plan, item, uebung, _ = welt
+    page.show_dialog = lambda _d: None
+    page.update = lambda: None
+    gesprungen: list[str] = []
+
+    async def push_route(r: str) -> None:
+        gesprungen.append(r)
+
+    page.push_route = push_route
+    block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
+    assert not any("Mehr" in t for t in _texte(block))  # „Mehr …“ ist weg
+    info = next(
+        c for c in _alle(block) if isinstance(c, ft.IconButton) and c.icon == ft.Icons.INFO_OUTLINE
+    )
+    asyncio.run(info.on_click())
+    assert gesprungen[-1] == f"/plan/{plan.id}/info/{item.id}"
+
+    seite = plan_info_view(page, state, f"/plan/{plan.id}", uebung, SimpleNamespace(), item)
+    assert "Aus dem Feldvorrat — nur für diese Planübung" in _texte(seite)
+    gewicht = _knopf_mit_text(seite, "Gewicht")
+    gewicht.on_click()
+    assert "weight" in state.plaene.item_laden(item.id).felder
+    assert state.uebungen.laden(uebung.id).result_spec.field_by_key("weight") is None
+
+    # Zurück im Plan: Gewicht steht als Ausführung im Block — Chip wählen, Satz anhängen
+    plan = state.plaene.laden(plan.id)
+    block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
+
+    def chip(text: str):
+        return next(c for c in _alle(block) if isinstance(c, ft.Chip) and c.label.value == text)
+
+    chip("5kg").on_click()
+    block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
+    chip("+30").on_click()
+    heute = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
+    neu = [e for e in heute if e.result.get("weight") == 5]
+    assert neu and neu[0].spec_snapshot.field_by_key("weight") is not None
+
+
+def test_notiz_knopf_und_tafel_oeffnet_eintrag(page, welt) -> None:
+    import asyncio
+
+    from trainingsapp.ui.views.plan import plan_view
+
+    state, plan, _item, uebung, eintrag = welt
+    dialoge: list = []
+    page.show_dialog = dialoge.append
+    page.pop_dialog = lambda: None
+    page.update = lambda: None
+    gesprungen: list[str] = []
+
+    async def push_route(r: str) -> None:
+        gesprungen.append(r)
+
+    page.push_route = push_route
+    block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
+    assert "„gut“" in _texte(block)  # die Notiz des Eintrags steht in der Tafel
+
+    _knopf_mit_text(block, "Notiz").on_click()
+    dialog = next(d for d in dialoge if isinstance(d, ft.AlertDialog))
+    assert dialog.content.value == "gut"  # weiterschreiben, nicht neu anfangen
+    dialog.content.value = "gut, links enger"
+    dialog.actions[-1].on_click()
+    heute = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
+    assert [e.note for e in heute if e.exercise_id == uebung.id] == ["gut, links enger"]
+
+    block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
+    gruppe = next(
+        c
+        for c in _alle(block)
+        if isinstance(c, ft.Container) and c.tooltip == "Eintrag ansehen, korrigieren oder löschen"
+    )
+    asyncio.run(gruppe.on_click())
+    assert gesprungen[-1].startswith(f"/plan/{plan.id}/eintrag/")
+    assert eintrag.id not in gesprungen[-1]  # der korrigierte, nicht der alte
+
+
+def test_uebung_standard_fuer_plaene_mit_parameterknoepfen(page, welt) -> None:
+    """Gleiche Knöpfe wie in der Planübung: Skala aus → default_felder nur Wiederholungen."""
+    import asyncio
+
+    from trainingsapp.core.models import Exercise
+    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+
+    state, *_ = welt
+    u = Exercise(
+        name="Kniebeuge",
+        result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("scale")]),
+    )
+    state.uebungen.speichern(u)
+    page.update = lambda: None
+    page.show_dialog = lambda _d: None
+    page.push_route = lambda _r: asyncio.sleep(0)
+    ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(u.id))
+    skala = next(
+        c
+        for c in _alle(ansicht)
+        if isinstance(c, ft.FilledTonalButton) and getattr(c, "data", None) == "scale"
+    )
+    skala.on_click()
+    asyncio.run(_knopf_mit_text(ansicht, "Speichern").on_click())
+    assert state.uebungen.laden(u.id).default_felder == ["reps"]

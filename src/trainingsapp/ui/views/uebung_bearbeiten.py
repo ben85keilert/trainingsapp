@@ -29,7 +29,12 @@ from trainingsapp.core.models import (
     MediaKind,
     MediaSource,
 )
-from trainingsapp.core.parameter import chips_sortiert, modus_aus_felder
+from trainingsapp.core.parameter import (
+    chips_sortiert,
+    gewaehlte_felder,
+    modus_aus_felder,
+    planbare_felder,
+)
 from trainingsapp.core.result_spec import (
     FELDVORRAT,
     FieldSpec,
@@ -37,6 +42,7 @@ from trainingsapp.core.result_spec import (
     Layout,
     ResultSpec,
     basis_label,
+    kennzahl_keys,
     skala_bereich_text,
     skala_lesen,
     vorrat_feld,
@@ -45,22 +51,12 @@ from trainingsapp.core.standards import ziel_bereinigen, ziel_spec
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL, symbol
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.parameter_wahl import parameter_wahl
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.state import AppState
 
 #: Auswahlwert „keine Variante" — ein leerer Schlüssel ist im Dropdown heikel
 EIGENSTAENDIG = "eigenstaendig"
-
-KENNZAHL_TYPEN = {
-    FieldType.SET_LIST,
-    FieldType.INT,
-    FieldType.FLOAT,
-    FieldType.DURATION,
-    FieldType.DEGREES,
-    FieldType.WEIGHT,
-    FieldType.DISTANCE,
-    FieldType.SCALE,
-}
 
 
 def chips_text(werte: list[Any]) -> str:
@@ -91,7 +87,7 @@ def spec_bauen(felder: list[FieldSpec]) -> ResultSpec:
     return ResultSpec(
         layout=layout,
         fields=felder,
-        chart_metrics=[f.key for f in felder if f.type in KENNZAHL_TYPEN],
+        chart_metrics=kennzahl_keys(felder),
     )
 
 
@@ -245,6 +241,12 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             )
             if key == "scale":
                 skala_felder.visible = bool(schalter[key].value)
+            # Ein neues Feld kommt in den Plan-Standard, solange der „alle“ heißt
+            if not schalter[key].value:
+                plan_wahl.discard(key)
+            elif standard_alle["ja"] and vorlage.type not in (FieldType.BOOL, FieldType.TEXT):
+                plan_wahl.add(key)
+            standard_zeichnen()
             page.update()
 
         return handler
@@ -305,13 +307,41 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
 
     # -- Standard für Pläne ----------------------------------------------------
 
-    # Welche Parameter ein neuer Plan anbietet: alle — oder keinen (nur abhaken).
-    # Eine feinere Wahl trifft man im Plan („Einstellen") und schiebt sie per
-    # „Als Standard der Übung setzen" hierher.
-    nur_abhaken = ft.Switch(
-        label="In Plänen nur abhaken (keine Werte)",
-        value=bool(uebung is not None and uebung.default_felder == []),
+    # Welche Parameter ein neuer Plan anbietet — dieselben Knöpfe wie in der
+    # Planübung (Ben, 14.10.2026: Übung und Planübung vereinheitlichen). Keiner
+    # heißt nur abhaken. Die Planübung übernimmt das beim Aufnehmen und weicht
+    # danach nach Belieben ab; „Als Standard setzen“ schiebt zurück.
+    plan_wahl: set[str] = (
+        {f.key for f in gewaehlte_felder(uebung.result_spec, uebung.default_felder)}
+        if uebung is not None
+        else {"reps"}
     )
+    #: Heißt der Standard „alle“? Dann kommt ein neu eingeschaltetes Feld dazu.
+    standard_alle = {"ja": uebung is None or uebung.default_felder is None}
+    standard_wahl = ft.Container()
+
+    def eingeschaltete_felder() -> list[FieldSpec]:
+        return [
+            *(f for f in FELDVORRAT if schalter[f.key].value),
+            *fremde,
+        ]
+
+    def standard_umschalten(key: str) -> None:
+        plan_wahl.symmetric_difference_update({key})
+        planbar = {f.key for f in planbare_felder(ResultSpec(fields=eingeschaltete_felder()))}
+        standard_alle["ja"] = plan_wahl == planbar
+        standard_zeichnen()
+        page.update()
+
+    def standard_zeichnen() -> None:
+        felder = eingeschaltete_felder()
+        standard_wahl.content = (
+            parameter_wahl(felder, plan_wahl, standard_umschalten)
+            if felder
+            else ft.Text("Erst oben Felder einschalten.", size=12, opacity=0.6)
+        )
+
+    standard_zeichnen()
 
     # -- Kachel im Verlauf -----------------------------------------------------
     # Eine Variante zeigt auf ein Original; wer selbst Varianten hat, ist ein
@@ -474,12 +504,11 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         ziel.icon_key = gewaehlt
         if not eigene_varianten:
             ziel.family_id = None if familie.value in (None, EIGENSTAENDIG) else familie.value
-        if nur_abhaken.value:
-            ziel.default_felder = []
-        elif ziel.default_felder == []:
-            ziel.default_felder = None  # wieder alle
-        ziel.default_input_mode = modus_aus_felder(ziel.default_felder)
         ziel.result_spec = spec_bauen(felder_lesen())
+        im_plan = [f.key for f in ziel.result_spec.fields if f.key in plan_wahl]
+        alle = [f.key for f in planbare_felder(ziel.result_spec)]
+        ziel.default_felder = None if im_plan == alle else im_plan
+        ziel.default_input_mode = modus_aus_felder(ziel.default_felder)
         ziel.default_target = ziel_lesen(ziel.result_spec)
         ziel.regionen = regionen_lesen()
         ziel.media = [
@@ -566,13 +595,18 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                             opacity=0.7,
                         ),
                         abschnitt("STANDARD FÜR PLÄNE"),
-                        nur_abhaken,
                         ft.Text(
-                            "Ein neuer Plan bietet alle Parameter oben an — oder, mit dem "
-                            "Schalter, keinen (nur abhaken). Welche genau und mit welchen "
-                            "Chips, stellt man im Plan ein und schiebt es mit „Als Standard "
-                            "der Übung setzen“ hierher. Ziel (optional): das übernimmt eine "
-                            "neue Planübung als „Wie geplant“; leer heißt kein Ziel.",
+                            "Welche Parameter ein neuer Plan anbietet — keiner heißt nur "
+                            "abhaken. Im Plan lässt sich das je Planübung ändern, auch beim "
+                            "Üben über das i-Symbol; „Als Standard der Übung setzen“ schiebt "
+                            "es hierher zurück.",
+                            size=12,
+                            opacity=0.7,
+                        ),
+                        standard_wahl,
+                        ft.Text(
+                            "Ziel (optional): das übernimmt eine neue Planübung als „Wie "
+                            "geplant“; leer heißt kein Ziel.",
                             size=12,
                             opacity=0.7,
                         ),

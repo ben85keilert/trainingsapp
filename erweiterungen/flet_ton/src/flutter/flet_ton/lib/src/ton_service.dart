@@ -7,31 +7,42 @@ import 'package:flutter/foundation.dart';
 /// Flet-Service „FletTon": kurze Signaltöne über audioplayers.
 ///
 /// Methoden (Python → Dart): `laden` {name, daten (Base64-WAV)},
-/// `spielen` {name, lautstaerke}.
+/// `spielen` {name, lautstaerke, quelle}.
 ///
 /// Ein Spieler je Ton, Quelle bleibt geladen (ReleaseMode.stop) — ein Ton
 /// startet sofort und lässt sich beliebig oft wiederholen. Der Audiokontext
 /// fordert den Fokus nur kurz und duckend an: Musik anderer Apps wird für
 /// den Ton leiser und spielt danach weiter (Vorgabe von audioplayers wäre
 /// AUDIOFOCUS_GAIN — Musik-Apps hielten an).
+///
+/// `quelle` wählt den Lautstärkeregler (Android: die „Usage" des Tons):
+/// `medien` → Medienlautstärke (Vorgabe), `wecker` → Weckerlautstärke,
+/// `klingelton` → Klingelton-/Systemlautstärke (bis 0.1.0 die einzige).
+/// iOS kennt für Apps nur einen Regler; dort bleibt es bei `ambient`
+/// (mischt sich mit Musik, schweigt bei Stummschalter).
 class FletTonService extends FletService {
   FletTonService({required super.control});
 
   final Map<String, AudioPlayer> _spieler = {};
+  final Map<String, String> _quelleJeSpieler = {};
 
-  static final AudioContext _kontext = AudioContext(
-    android: const AudioContextAndroid(
-      isSpeakerphoneOn: false,
-      stayAwake: false,
-      contentType: AndroidContentType.sonification,
-      usageType: AndroidUsageType.assistanceSonification,
-      audioFocus: AndroidAudioFocus.gainTransientMayDuck,
-    ),
-    iOS: AudioContextIOS(
-      category: AVAudioSessionCategory.ambient,
-      options: const {},
-    ),
-  );
+  static AudioContext _kontext(String quelle) => AudioContext(
+        android: AudioContextAndroid(
+          isSpeakerphoneOn: false,
+          stayAwake: false,
+          contentType: AndroidContentType.sonification,
+          usageType: switch (quelle) {
+            "wecker" => AndroidUsageType.alarm,
+            "klingelton" => AndroidUsageType.assistanceSonification,
+            _ => AndroidUsageType.media,
+          },
+          audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+        ),
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.ambient,
+          options: const {},
+        ),
+      );
 
   @override
   void init() {
@@ -49,7 +60,8 @@ class FletTonService extends FletService {
         final alt = _spieler.remove(schluessel);
         await alt?.dispose();
         final spieler = AudioPlayer();
-        await spieler.setAudioContext(_kontext);
+        await spieler.setAudioContext(_kontext("medien"));
+        _quelleJeSpieler[schluessel] = "medien";
         await spieler.setReleaseMode(ReleaseMode.stop);
         await spieler.setSourceBytes(daten, mimeType: "audio/wav");
         _spieler[schluessel] = spieler;
@@ -60,7 +72,12 @@ class FletTonService extends FletService {
           throw Exception("Ton ${a["name"]} ist nicht geladen");
         }
         final lautstaerke = (a["lautstaerke"] as num?)?.toDouble() ?? 1.0;
+        final quelle = (a["quelle"] as String?) ?? "medien";
         await spieler.stop();
+        if (_quelleJeSpieler[a["name"]] != quelle) {
+          await spieler.setAudioContext(_kontext(quelle));
+          _quelleJeSpieler[a["name"] as String] = quelle;
+        }
         await spieler.setVolume(lautstaerke);
         await spieler.resume();
         return null;
@@ -77,6 +94,7 @@ class FletTonService extends FletService {
       spieler.dispose();
     }
     _spieler.clear();
+    _quelleJeSpieler.clear();
     super.dispose();
   }
 }

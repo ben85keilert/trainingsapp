@@ -1,4 +1,5 @@
-"""Timer als Werkzeug — Route `<irgendwo>/timer`, Profil bearbeiten `…/timer/bearbeiten[/<id>]`.
+"""Timer als Werkzeug — Route `<irgendwo>/timer`, Profil bearbeiten `…/timer/bearbeiten[/<id>]`,
+Signale einstellen `…/timer/signale`.
 
 Der Timer ist von überall erreichbar (Symbol oben in der Leiste) und legt sich
 über die aktuelle Ansicht: „Zurück" führt dorthin, wo man war — aus einem
@@ -22,6 +23,16 @@ App, bleiben Töne und Vibration aus — die Zeit stimmt beim Aufwachen trotzdem
 Abschnittsanfang eine Notiz in der Messung, an der Stelle, an der er wirklich
 war. Es sind gewöhnliche Notizen: umbenennen, verschieben, löschen — live und
 nachträglich in der Aufzeichnung. Alles abschaltbar unter „Signale".
+
+Die Signale haben eine eigene Seite (Ben, 14.10.2026): Unter dem Timer steht
+knapp, was eingeschaltet ist (`core.timer.signale_kurz`), das Zahnrad in der
+Ecke öffnet die Schalter. Auf dem Timer selbst bleibt so nur, was man beim
+Trainieren braucht. Dort auch: **Klang** beim Wechsel (Piep, Glocke 1–3, Gong,
+Klangholz, Fanfare — antippen spielt ihn vor) und **Lautstärke**: über welchen
+Regler des Systems die Töne laufen (Medien als Vorgabe, Wecker, Klingelton;
+`core.timer.QUELLEN`) und wie viel davon. Ein Abschnitt kann im Profil einen
+eigenen Klang haben, das Profil einen für jede neue Runde und fürs Ende
+(`core.timer.klang_fuer`).
 """
 
 from __future__ import annotations
@@ -33,11 +44,12 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.klang import toene
+from trainingsapp.core.klang import GLOCKEN, KLAENGE, TOENE, glocke, wav
 from trainingsapp.core.timer import (
     COUNTDOWN,
     ENDE,
     MAX_RUNDEN,
+    QUELLEN,
     Abschnitt,
     Marke,
     TimerLauf,
@@ -46,7 +58,9 @@ from trainingsapp.core.timer import (
     TimerStand,
     dauer_lesen,
     dauer_text,
+    klang_fuer,
     signal,
+    signale_kurz,
 )
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
@@ -81,22 +95,41 @@ def lauf_fuer(state: AppState, profil: TimerProfil) -> TimerLauf:
 
 
 async def toene_laden(state: AppState) -> None:
-    """Die Signaltöne einmal in den Tondienst legen (beim App-Start)."""
+    """Die Signaltöne einmal in den Tondienst legen (beim App-Start).
+
+    Erst die drei Signale (schnell erzeugt) — danach ist der Timer
+    hörbereit —, dann die Glocken. Die rechnen auf dem Handy eine Weile und
+    tun das in einem eigenen Thread, damit die Oberfläche nicht stockt.
+    """
     if state.ton is None:
         return
     with contextlib.suppress(Exception):
-        for name, daten in toene().items():
-            await state.ton.laden(name, daten)
+        for name, folge in TOENE.items():
+            await state.ton.laden(name, wav(folge))
         state.toene_geladen = True
+        for name, (teiltoene, grund, dauer) in GLOCKEN.items():
+            daten = await asyncio.to_thread(glocke, teiltoene, grund, dauer)
+            await state.ton.laden(name, daten)
 
 
-async def _melden(state: AppState, art: str, signale: TimerSignale) -> None:
+async def ton_spielen(state: AppState, klang: str, signale: TimerSignale | None = None) -> bool:
+    """Einen Klang mit Regler und Lautstärke der Signale spielen — ``False``, wo es nicht geht."""
+    signale = signale or state.timer_signale()
+    if state.ton is None or not state.toene_geladen:
+        return False
+    try:
+        await state.ton.spielen(klang, signale.lautstaerke / 100, signale.quelle)
+    except Exception:
+        return False
+    return True
+
+
+async def _melden(state: AppState, art: str, signale: TimerSignale, klang: str) -> None:
     """Ton und Vibration zu einem Signal — wie eingestellt und wo es geht."""
     if art == COUNTDOWN and not signale.countdown:
         return
-    if signale.ton and state.ton is not None and state.toene_geladen:
-        with contextlib.suppress(Exception):
-            await state.ton.spielen(art)
+    if signale.ton:
+        await ton_spielen(state, klang, signale)
     haptik = state.haptik
     if signale.vibration and haptik is not None and art != COUNTDOWN:
         with contextlib.suppress(Exception):
@@ -145,7 +178,9 @@ def ticker_starten(page: Any, state: AppState) -> None:
             while (lauf := state.timer) is not None:
                 stand = lauf.stand()
                 if (art := signal(alt, stand)) is not None:
-                    await _melden(state, art, state.timer_signale())
+                    signale = state.timer_signale()
+                    klang = klang_fuer(art, stand, lauf.profil, signale)
+                    await _melden(state, art, signale, klang)
                 if marken := lauf.neue_marken():
                     _in_messung(state, marken, state.timer_signale())
                 alt = stand
@@ -345,6 +380,9 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
     async def bearbeiten() -> None:
         await page.push_route(f"{route}/bearbeiten/{profil.id}")
 
+    async def signale_oeffnen() -> None:
+        await page.push_route(f"{route}/signale")
+
     profil_chips = ft.Row(
         wrap=True,
         spacing=8,
@@ -396,8 +434,8 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 steuerung,
                 abstand=10,
             ),
+            _signale_vermerk(state, signale_oeffnen),
             karte(kartentitel("Ablauf"), ablauf, abstand=6),
-            _signale_karte(page, state),
             hinweis(
                 "Der Timer läuft weiter, wenn du die Ansicht verlässt — oben in der Leiste "
                 "steht dann die Restzeit."
@@ -432,6 +470,188 @@ SIGNAL_SCHALTER: list[tuple[str, str, str]] = [
         "nachträglich umbenennen, verschieben oder löschen wie jede Notiz.",
     ),
 ]
+
+
+def _signale_vermerk(state: AppState, oeffnen: Callable[[], object]) -> ft.Control:
+    """Knapp unter dem Timer: welche Signale an sind — rechts das Zahnrad."""
+    return ft.Container(
+        padding=ft.Padding.only(left=12, right=0),
+        content=ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(ft.Icons.NOTIFICATIONS_OUTLINED, size=16, opacity=0.6),
+                ft.Text(signale_kurz(state.timer_signale()), size=12, opacity=0.7, expand=True),
+                ft.IconButton(
+                    ft.Icons.SETTINGS_OUTLINED,
+                    icon_size=20,
+                    tooltip="Signale einstellen",
+                    on_click=oeffnen,
+                ),
+            ],
+        ),
+    )
+
+
+def timer_signale_view(page: Any, state: AppState, basis: str) -> ft.View:
+    """Eigene Seite für die Signale — Route `<basis>/timer/signale`."""
+    return ft.View(
+        route=f"{timer_route(basis)}/signale",
+        appbar=ft.AppBar(title=ft.Text("Timer-Signale")),
+        scroll=ft.ScrollMode.AUTO,
+        padding=16,
+        controls=[
+            sicher(
+                ft.Column(
+                    spacing=14,
+                    controls=[
+                        _klang_karte(page, state),
+                        _lautstaerke_karte(page, state),
+                        _signale_karte(page, state),
+                        hinweis("Gilt für alle Timer-Profile auf diesem Gerät."),
+                    ],
+                ),
+                expand=False,
+            )
+        ],
+    )
+
+
+def _vorspielen(page: Any, state: AppState, klang: str) -> None:
+    """Einen Klang zur Probe — mit Regler und Lautstärke, wie eingestellt."""
+
+    async def spielen() -> None:
+        if not await ton_spielen(state, klang):
+            with contextlib.suppress(Exception):
+                page.show_dialog(ft.SnackBar(ft.Text("Töne gibt es nur in der installierten App.")))
+
+    with contextlib.suppress(Exception):
+        page.run_task(spielen)
+
+
+def _klang_karte(page: Any, state: AppState) -> ft.Control:
+    """Der Standardklang beim Abschnittswechsel — antippen wählt und spielt vor."""
+    reihe = ft.Row(wrap=True, spacing=8, run_spacing=8)
+
+    def zeichnen() -> None:
+        aktuell = state.timer_signale().klang
+        reihe.controls = [
+            ft.Chip(
+                label=ft.Text(text),
+                leading=ft.Icon(ft.Icons.MUSIC_NOTE_OUTLINED, size=16),
+                selected=key == aktuell,
+                show_checkmark=False,
+                on_select=waehler(key),
+            )
+            for key, text in KLAENGE.items()
+        ]
+
+    def waehler(key: str) -> Callable[[], None]:
+        def handler() -> None:
+            signale = state.timer_signale()
+            signale.klang = key
+            state.timer_signale_setzen(signale)
+            _vorspielen(page, state, key)
+            zeichnen()
+            with contextlib.suppress(Exception):
+                reihe.update()
+
+        return handler
+
+    zeichnen()
+    return karte(
+        kartentitel("Klang beim Wechsel"),
+        reihe,
+        hinweis(
+            "Antippen wählt und spielt vor. Eigene Klänge je Abschnitt, für jede neue Runde "
+            "und fürs Ende stellst du im Timer-Profil ein (Stift beim Profil)."
+        ),
+        abstand=10,
+    )
+
+
+#: Erklärung je Lautstärkeregler (Android)
+QUELLE_HINWEIS: dict[str, str] = {
+    "medien": "Wie Musik und Videos — die Lautstärketasten regeln ihn in der App, "
+    "mit Kopfhörern kommt der Ton dort an. Bei stummen Medien bleibt es still.",
+    "wecker": "Tönt auch, wenn Medien leise sind, immer auch über den Lautsprecher. "
+    "Gut, wenn das Handy beim Training weiter weg liegt.",
+    "klingelton": "Folgt dem Klingelton-/Systemregler (so war es bisher). "
+    "Ist das Handy lautlos, bleibt es still.",
+}
+
+
+def _lautstaerke_karte(page: Any, state: AppState) -> ft.Control:
+    """Welcher Regler des Systems und wie viel davon."""
+    signale = state.timer_signale()
+    ios = getattr(page, "platform", None) == ft.PagePlatform.IOS
+    erklaerung = hinweis(QUELLE_HINWEIS[signale.quelle])
+    prozent = ft.Text(f"{signale.lautstaerke} %", width=52, text_align=ft.TextAlign.END)
+
+    def quelle_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+        aktuell = state.timer_signale()
+        aktuell.quelle = next(iter(e.control.selected or []), aktuell.quelle)
+        state.timer_signale_setzen(aktuell)
+        erklaerung.value = QUELLE_HINWEIS[aktuell.quelle]
+        with contextlib.suppress(Exception):
+            erklaerung.update()
+        _vorspielen(page, state, aktuell.klang)
+
+    def gezogen(e: ft.Event[ft.Slider]) -> None:
+        prozent.value = f"{round(e.control.value or 0)} %"
+        with contextlib.suppress(Exception):
+            prozent.update()
+
+    def losgelassen(e: ft.Event[ft.Slider]) -> None:
+        aktuell = state.timer_signale()
+        aktuell.lautstaerke = round(e.control.value or 100)
+        state.timer_signale_setzen(aktuell)
+        _vorspielen(page, state, aktuell.klang)
+
+    regler = ft.Row(
+        spacing=4,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[
+            ft.Icon(ft.Icons.VOLUME_DOWN_OUTLINED, size=20, opacity=0.7),
+            ft.Slider(
+                min=10,
+                max=100,
+                divisions=9,
+                value=signale.lautstaerke,
+                expand=True,
+                on_change=gezogen,
+                on_change_end=losgelassen,
+            ),
+            prozent,
+        ],
+    )
+    zeilen: list[ft.Control] = [kartentitel("Lautstärke")]
+    if ios:
+        zeilen.append(
+            hinweis(
+                "Auf dem iPhone folgen die Töne der Medienlautstärke — einen anderen Regler "
+                "gibt es für Apps nicht. Mit Stummschalter bleiben sie still."
+            )
+        )
+    else:
+        zeilen += [
+            ft.SegmentedButton(
+                selected=[signale.quelle],
+                segments=[
+                    ft.Segment(value=key, label=ft.Text(text)) for key, text in QUELLEN.items()
+                ],
+                on_change=quelle_gewaehlt,
+            ),
+            erklaerung,
+        ]
+    zeilen += [
+        regler,
+        hinweis(
+            "Anteil des Reglers: 100 % = so laut, wie das Handy gerade eingestellt ist. "
+            "Loslassen spielt den Klang vor."
+        ),
+    ]
+    return karte(*zeilen, abstand=10)
 
 
 def _signale_karte(page: Any, state: AppState) -> ft.Control:
@@ -474,6 +694,37 @@ def _signale_karte(page: Any, state: AppState) -> ft.Control:
     return karte(*zeilen, abstand=10)
 
 
+#: Schlüssel der Auswahl „wie vorgegeben" (ein leerer Schlüssel taugt im Dropdown nicht)
+_VORGABE = "vorgabe"
+
+
+def _klang_wahl(page: Any, state: AppState, wert: str, vorgabe: str) -> ft.Dropdown:
+    """Klang für einen Abschnitt, die Runde oder das Ende — Auswählen spielt ihn vor."""
+
+    def gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
+        klang = e.control.value or _VORGABE
+        if klang != _VORGABE:
+            _vorspielen(page, state, klang)
+
+    return ft.Dropdown(
+        value=wert or _VORGABE,
+        options=[
+            ft.DropdownOption(key=_VORGABE, text=vorgabe),
+            *(ft.DropdownOption(key=k, text=t) for k, t in KLAENGE.items()),
+        ],
+        leading_icon=ft.Icons.MUSIC_NOTE_OUTLINED,
+        dense=True,
+        width=240,
+        on_select=gewaehlt,
+    )
+
+
+def _klang_wert(wahl: ft.Dropdown) -> str:
+    """Der gewählte Klang — leer für „wie vorgegeben“."""
+    wert = wahl.value or ""
+    return "" if wert == _VORGABE or wert not in KLAENGE else wert
+
+
 def _knopf_inhalt(icon: ft.IconData, text: str) -> ft.Control:
     return ft.Row(
         tight=True,
@@ -495,7 +746,7 @@ def _leisten_auffrischen(state: AppState) -> None:
 
 
 def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, basis: str) -> ft.View:
-    """Name, Abschnitte (Name + mm:ss), Runden — anlegen oder ändern."""
+    """Name, Abschnitte (Name, mm:ss, Klang), Runden und ihre Klänge — anlegen oder ändern."""
     zurueck_route = timer_route(basis)
     profile = state.timer_profile()
     vorhanden = next((p for p in profile if p.id == profil_id), None)
@@ -505,8 +756,10 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
     route = f"{zurueck_route}/bearbeiten" + (f"/{vorhanden.id}" if vorhanden else "")
 
     name = ft.TextField(label="Name", value=profil.name, hint_text="z. B. Intervall, Planke")
-    zeilen: list[tuple[ft.TextField, ft.TextField]] = []
-    zeilen_spalte = ft.Column(spacing=8)
+    zeilen: list[tuple[ft.TextField, ft.TextField, ft.Dropdown]] = []
+    zeilen_spalte = ft.Column(spacing=14)
+    runden_klang = _klang_wahl(page, state, profil.runden_klang, "wie Abschnitt 1")
+    ende_klang = _klang_wahl(page, state, profil.ende_klang, "Fanfare")
     runden = {"n": profil.runden}
     runden_text = ft.Text(
         str(profil.runden),
@@ -518,26 +771,32 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
     gesamt_text = ft.Text(size=13, opacity=0.75)
 
     def gesamt() -> None:
-        summe = sum(dauer_lesen(d.value or "") or 0 for _, d in zeilen)
+        summe = sum(dauer_lesen(d.value or "") or 0 for _, d, _ in zeilen)
         gesamt_text.value = f"Gesamt {dauer_text(summe * runden['n'])}"
 
     def zeichnen() -> None:
         zeilen_spalte.controls = [
-            ft.Row(
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ft.Column(
+                spacing=6,
                 controls=[
-                    ft.Container(expand=True, content=n),
-                    ft.Container(width=96, content=d),
-                    ft.IconButton(
-                        ft.Icons.REMOVE_CIRCLE_OUTLINE,
-                        tooltip="Abschnitt entfernen",
-                        on_click=entferner(i),
-                        disabled=len(zeilen) <= 1,
+                    ft.Row(
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Container(expand=True, content=n),
+                            ft.Container(width=96, content=d),
+                            ft.IconButton(
+                                ft.Icons.REMOVE_CIRCLE_OUTLINE,
+                                tooltip="Abschnitt entfernen",
+                                on_click=entferner(i),
+                                disabled=len(zeilen) <= 1,
+                            ),
+                        ],
                     ),
+                    k,
                 ],
             )
-            for i, (n, d) in enumerate(zeilen)
+            for i, (n, d, k) in enumerate(zeilen)
         ]
         gesamt()
 
@@ -546,7 +805,7 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
         with contextlib.suppress(Exception):
             gesamt_text.update()
 
-    def zeile(a: Abschnitt) -> tuple[ft.TextField, ft.TextField]:
+    def zeile(a: Abschnitt) -> tuple[ft.TextField, ft.TextField, ft.Dropdown]:
         return (
             ft.TextField(label="Abschnitt", value=a.name, dense=True),
             ft.TextField(
@@ -557,6 +816,7 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
                 text_align=ft.TextAlign.END,
                 on_change=lambda _: dauer_geaendert(),
             ),
+            _klang_wahl(page, state, a.klang, "Standardklang"),
         )
 
     def entferner(i: int) -> Callable[[], None]:
@@ -585,12 +845,12 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
     async def speichern() -> None:
         abschnitte: list[Abschnitt] = []
         fehler = False
-        for n, d in zeilen:
+        for n, d, k in zeilen:
             dauer = dauer_lesen(d.value or "")
             d.error = None if dauer else "z. B. 0:30"
             fehler = fehler or dauer is None
             if dauer:
-                abschnitte.append(Abschnitt((n.value or "").strip(), dauer))
+                abschnitte.append(Abschnitt((n.value or "").strip(), dauer, _klang_wert(k)))
         if fehler or not abschnitte:
             page.update()
             return
@@ -599,6 +859,8 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
             name=(name.value or "").strip() or "Timer",
             abschnitte=abschnitte,
             runden=runden["n"],
+            runden_klang=_klang_wert(runden_klang),
+            ende_klang=_klang_wert(ende_klang),
         )
         andere = [p for p in state.timer_profile() if p.id != neu.id]
         if vorhanden is not None:
@@ -662,7 +924,11 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
                         name,
                         karte(
                             kartentitel("Abschnitte"),
-                            hinweis("Je Abschnitt ein Name und die Dauer in Minuten:Sekunden."),
+                            hinweis(
+                                "Je Abschnitt ein Name, die Dauer in Minuten:Sekunden und der "
+                                "Klang, mit dem er beginnt — etwa Glocke 1 für Belastung, "
+                                "Glocke 3 für die Pause."
+                            ),
                             zeilen_spalte,
                             ft.TextButton(
                                 "Abschnitt hinzufügen", icon=ft.Icons.ADD, on_click=hinzufuegen
@@ -682,6 +948,18 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
                                 ],
                             ),
                             hinweis("Alle Abschnitte so oft nacheinander."),
+                        ),
+                        karte(
+                            kartentitel("Klänge"),
+                            ft.Text("Zu Beginn jeder neuen Runde", size=13),
+                            runden_klang,
+                            ft.Text("Am Ende", size=13),
+                            ende_klang,
+                            hinweis(
+                                "Auswählen spielt den Klang vor. Regler und Lautstärke: "
+                                "Zahnrad unter dem Timer."
+                            ),
+                            abstand=8,
                         ),
                         ft.Row(
                             alignment=ft.MainAxisAlignment.END,
@@ -706,5 +984,6 @@ __all__ = [
     "timer_bearbeiten_view",
     "timer_knopf",
     "timer_route",
+    "timer_signale_view",
     "timer_view",
 ]

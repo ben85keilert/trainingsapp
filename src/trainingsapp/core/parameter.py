@@ -75,9 +75,11 @@ def kontextfelder(spec: ResultSpec) -> list[FieldSpec]:
 
 
 def planbare_felder(spec: ResultSpec) -> list[FieldSpec]:
-    """Was ein Plan zum Antippen anbieten kann — alles außer Ja/Nein und Freitext.
+    """Was ein Plan von sich aus anbietet — alles außer Ja/Nein und Freitext.
 
-    Die beiden stehen im Formular („Mehr …"); als Knopf im Plan helfen sie nicht.
+    Die beiden kommen nur in den Plan, wenn man sie ausdrücklich einschaltet
+    (`gewaehlte_felder` mit Wahl) — sonst stünde bei jeder Übung mit Notizfeld
+    ein Textfeld im Block.
 
     >>> from trainingsapp.core.result_spec import vorrat_feld
     >>> spec = ResultSpec(fields=[vorrat_feld(k) for k in ("reps", "scale", "done", "note")])
@@ -93,8 +95,9 @@ def gewaehlte_felder(
     """Die Parameter, die ein Plan anbietet — in der Reihenfolge der Übung.
 
     ``felder`` ist die Wahl der Planübung, ``standard`` die der Übung; ``None``
-    heißt jeweils „wie darüber", ganz oben „alle". ``[]`` heißt: keiner, nur
-    abhaken.
+    heißt jeweils „wie darüber", ganz oben „alle planbaren". ``[]`` heißt:
+    keiner, nur abhaken. Eine ausdrückliche Wahl darf auch Ja/Nein und
+    Freitext enthalten.
 
     >>> from trainingsapp.core.result_spec import vorrat_feld
     >>> spec = ResultSpec(fields=[vorrat_feld(k) for k in ("reps", "hold", "scale")])
@@ -102,10 +105,16 @@ def gewaehlte_felder(
     (['reps', 'hold', 'scale'], [])
     >>> [f.key for f in gewaehlte_felder(spec, None, ["scale", "reps"])]
     ['reps', 'scale']
+    >>> notiz = ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("note")])
+    >>> [f.key for f in gewaehlte_felder(notiz, None)]
+    ['reps']
+    >>> [f.key for f in gewaehlte_felder(notiz, ["note"])]
+    ['note']
     """
     wahl = felder if felder is not None else standard
-    planbar = planbare_felder(spec)
-    return planbar if wahl is None else [f for f in planbar if f.key in wahl]
+    if wahl is None:
+        return planbare_felder(spec)
+    return [f for f in spec.fields if f.key in wahl]
 
 
 def modus_aus_felder(felder: list[str] | None) -> str:

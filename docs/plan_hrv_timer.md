@@ -185,8 +185,15 @@ Bildschirmen passen (getestet in 412 px Breite im Browser).
   **noch nicht committet** — Bens Freigabe).
 - **Timer-Ton** über die eigene Erweiterung `flet_ton` (Musik wird geduckt,
   nicht angehalten): Countdown 3-2-1, zwei Töne beim Wechsel, vier am Ende.
-  Karte „Signale" im Timer: Ton, Countdown, Vibration, Bildschirm anlassen,
-  Abschnitte in die HRV-Messung — alles an, alles abschaltbar.
+  Signale: Ton, Countdown, Vibration, Bildschirm anlassen, Abschnitte in die
+  HRV-Messung — alles an, alles abschaltbar. Seit 14.10. auf eigener Seite
+  (`…/timer/signale`): unter dem Timer steht knapp, was an ist, das Zahnrad
+  öffnet die Schalter. Dort auch **Klang** (Piep, Glocke 1–3, Gong, Klangholz,
+  Fanfare) und **Lautstärke**: Regler Medien (Vorgabe, statt bisher
+  Klingelton/System), Wecker oder Klingelton, dazu ein Anteil 10–100 %. Im
+  Timer-Profil hat jeder Abschnitt einen eigenen Klang, dazu einer für jede
+  neue Runde und einer fürs Ende (`core.timer.klang_fuer`). Braucht eine neu
+  gebaute App (Dart-Teil von `flet_ton`).
 - **Abschnittswechsel als Notizen** (Weg A): Läuft eine Aufnahme, wird jeder
   Abschnittsanfang eine Notiz („Timer „Intervall 30/15“: Belastung (Runde 1/8)",
   … „Timer fertig") — an der Stelle, an der er wirklich war, auch wenn die App

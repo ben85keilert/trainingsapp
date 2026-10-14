@@ -14,6 +14,13 @@ verändert den Blick auf die Übung —, gibt es zwei ausdrückliche Wege:
 
 `abweichungen` sagt, ob und worin die beiden auseinanderliegen.
 
+**Die Planübung darf mehr können als die Übung** (Ben, 14.10.2026): Beim Üben
+holt man über das i-Symbol jeden Parameter heran — auch einen aus dem
+Feldvorrat, den die Übung gar nicht hat (Gewicht bei Liegestützen). Sein
+Schlüssel steht nur in ``PlanItem.felder``; `plan_spec` ergänzt die Spec der
+Übung um ihn. Einträge speichern diese erweiterte Spec als Kopie, also stimmen
+Anzeige und Verlauf. In die Übung gelangt das Feld erst mit `als_standard`.
+
 Reine Funktionen ohne Datenbank: Sie geben neue Objekte zurück, speichern tut
 der Aufrufer.
 """
@@ -25,7 +32,16 @@ from typing import Any
 
 from .models import Exercise, PlanItem
 from .parameter import BEIWERK, chips_sortiert, gewaehlte_felder, modus_aus_felder, rolle
-from .result_spec import FieldSpec, FieldType, ResultSpec, ist_leer, skala_werte
+from .result_spec import (
+    FELDVORRAT,
+    FieldSpec,
+    FieldType,
+    ResultSpec,
+    ist_leer,
+    kennzahl_keys,
+    skala_werte,
+    vorrat_feld,
+)
 
 
 def ziel_spec(spec: ResultSpec) -> ResultSpec:
@@ -56,15 +72,74 @@ def ziel_bereinigen(werte: dict[str, Any], spec: ResultSpec) -> dict[str, Any]:
     return {k: v for k, v in werte.items() if k in keys and not ist_leer(v)}
 
 
+def zusatzfelder(item: PlanItem, uebung: Exercise) -> list[FieldSpec]:
+    """Felder aus dem Feldvorrat, die die Planübung anbietet, die Übung aber nicht hat.
+
+    >>> u = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
+    >>> [f.key for f in zusatzfelder(PlanItem(felder=["reps", "weight", "gibts_nicht"]), u)]
+    ['weight']
+    """
+    spec = uebung.result_spec
+    return [
+        f
+        for key in item.felder or []
+        if spec.field_by_key(key) is None and (f := vorrat_feld(key)) is not None
+    ]
+
+
+def plan_spec(item: PlanItem, uebung: Exercise) -> ResultSpec:
+    """Die Spec, mit der diese Planübung erfasst wird: die der Übung plus Zusatzfelder.
+
+    Zusatzfelder mit Zahlenwert werden Kennzahlen — so bekommt das Gewicht
+    seine Kurve im Verlauf.
+
+    >>> u = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps")], chart_metrics=["reps"]))
+    >>> s = plan_spec(PlanItem(felder=["reps", "weight"]), u)
+    >>> [f.key for f in s.fields], s.chart_metrics
+    (['reps', 'weight'], ['reps', 'weight'])
+    >>> plan_spec(PlanItem(), u) is u.result_spec
+    True
+    """
+    zusatz = zusatzfelder(item, uebung)
+    if not zusatz:
+        return uebung.result_spec
+    spec = uebung.result_spec
+    return replace(
+        spec,
+        fields=[*spec.fields, *zusatz],
+        chart_metrics=[*spec.chart_metrics, *kennzahl_keys(zusatz)],
+    )
+
+
+def mit_plan_spec(item: PlanItem, uebung: Exercise) -> Exercise:
+    """Die Übung, wie die Planübung sie sieht — Einträge bekommen so die erweiterte Kopie."""
+    spec = plan_spec(item, uebung)
+    return uebung if spec is uebung.result_spec else replace(uebung, result_spec=spec)
+
+
+def waehlbare_felder(uebung: Exercise) -> tuple[list[FieldSpec], list[FieldSpec]]:
+    """Was eine Planübung einschalten kann: die Felder der Übung — und der übrige Feldvorrat.
+
+    >>> u = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
+    >>> eigene, vorrat = waehlbare_felder(u)
+    >>> [f.key for f in eigene], [f.key for f in vorrat][:3]
+    (['hold'], ['reps', 'weight', 'distance'])
+    """
+    eigene = list(uebung.result_spec.fields)
+    keys = {f.key for f in eigene}
+    return eigene, [replace(f) for f in FELDVORRAT if f.key not in keys]
+
+
 def aktive_felder(item: PlanItem, uebung: Exercise) -> list[FieldSpec]:
     """Die Parameter, die diese Planübung anbietet — leer heißt nur abhaken.
 
-    >>> from trainingsapp.core.result_spec import vorrat_feld
     >>> u = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("scale")]))
     >>> [f.key for f in aktive_felder(PlanItem(), u)], aktive_felder(PlanItem(felder=[]), u)
     (['reps', 'scale'], [])
+    >>> [f.key for f in aktive_felder(PlanItem(felder=["weight", "reps"]), u)]
+    ['reps', 'weight']
     """
-    return gewaehlte_felder(uebung.result_spec, item.felder, uebung.default_felder)
+    return gewaehlte_felder(plan_spec(item, uebung), item.felder, uebung.default_felder)
 
 
 def aktive_keys(item: PlanItem, uebung: Exercise) -> list[str]:
@@ -93,8 +168,9 @@ def chips_fuer(item: PlanItem, f: FieldSpec) -> list:
 def eigene_chips(item: PlanItem, uebung: Exercise) -> dict[str, list]:
     """Nur die Chips, die wirklich von der Übung abweichen (auch „keine")."""
     ergebnis = {}
+    spec = plan_spec(item, uebung)
     for key, werte in item.quick.items():
-        f = uebung.result_spec.field_by_key(key)
+        f = spec.field_by_key(key)
         if f is not None and chips_sortiert(list(werte)) != chips_fuer(PlanItem(), f):
             ergebnis[key] = list(werte)
     return ergebnis
@@ -110,6 +186,8 @@ def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
     []
     >>> abweichungen(PlanItem(target={"reps": [20]}, felder=["reps"], quick={"reps": []}), u)
     ['Ziel', 'Parameter', 'Chips Wiederholungen']
+    >>> abweichungen(PlanItem(target={"reps": [15, 15]}, felder=["reps", "scale", "weight"]), u)
+    ['Parameter']
     """
     teile = []
     if dict(item.target) != dict(uebung.default_target):
@@ -117,10 +195,11 @@ def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
     standard = gewaehlte_felder(uebung.result_spec, uebung.default_felder)
     if aktive_felder(item, uebung) != standard:
         teile.append("Parameter")
+    spec = plan_spec(item, uebung)
     teile.extend(
         f"Chips {f.label}"
         for key in eigene_chips(item, uebung)
-        if (f := uebung.result_spec.field_by_key(key)) is not None
+        if (f := spec.field_by_key(key)) is not None
     )
     return teile
 
@@ -128,16 +207,21 @@ def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
 def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
     """Die Planübung wird zum Standard der Übung — Chips wandern in die Felder.
 
-    >>> from trainingsapp.core.result_spec import vorrat_feld
+    Zusatzfelder (aus dem Feldvorrat geholt) werden dabei Felder der Übung.
+
     >>> u0 = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
     >>> u = als_standard(PlanItem(target={"reps": [20]}, felder=[], quick={"reps": [5]}), u0)
     >>> u.default_target, u.default_felder, u.default_input_mode, u.result_spec.fields[0].quick
     ({'reps': [20]}, [], 'haken', [5])
+    >>> u = als_standard(PlanItem(felder=["reps", "weight"], quick={"weight": [8]}), u0)
+    >>> [(f.key, f.quick) for f in u.result_spec.fields], u.default_felder
+    ([('reps', [10, 15, 20]), ('weight', [8])], ['reps', 'weight'])
     """
     chips = eigene_chips(item, uebung)
+    spec = plan_spec(item, uebung)
     felder = [
         replace(f, quick=chips_sortiert(list(chips[f.key]))) if f.key in chips else f
-        for f in uebung.result_spec.fields
+        for f in spec.fields
     ]
     gewaehlt = None if item.felder is None else aktive_keys(item, uebung)
     return replace(
@@ -147,7 +231,7 @@ def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
         default_input_mode=modus_aus_felder(
             gewaehlt if gewaehlt is not None else uebung.default_felder
         ),
-        result_spec=replace(uebung.result_spec, fields=felder),
+        result_spec=replace(spec, fields=felder),
         media=list(uebung.media),
         typen=list(uebung.typen),
         regionen=list(uebung.regionen),
@@ -156,6 +240,8 @@ def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
 
 def vom_standard(uebung: Exercise, item: PlanItem) -> PlanItem:
     """Die Planübung übernimmt wieder den Standard der Übung („zurücksetzen").
+
+    Zusatzfelder fallen dabei weg — sie stehen nur in ``felder``.
 
     >>> u = Exercise(default_target={"hold": [30]}, default_felder=[])
     >>> alt = PlanItem(target={"hold": [60]}, quick={"hold": [10]}, felder=["hold"])
@@ -179,7 +265,11 @@ __all__ = [
     "als_standard",
     "chips_fuer",
     "eigene_chips",
+    "mit_plan_spec",
+    "plan_spec",
     "vom_standard",
+    "waehlbare_felder",
     "ziel_bereinigen",
     "ziel_spec",
+    "zusatzfelder",
 ]

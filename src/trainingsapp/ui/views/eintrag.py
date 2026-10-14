@@ -1,5 +1,8 @@
 """Ein Eintrag — Route `/eintrag/<id>`: ansehen, korrigieren, löschen.
 
+Aus dem Plan heraus (Tafel „Heute geleistet“ antippen) hängt er unter dem Plan:
+`/plan/<id>/eintrag/<id>` — dann führen Zurück, Korrigieren und Löschen dorthin.
+
 Korrigieren legt einen neuen Eintrag an, der auf diesen zeigt. Löschen ist
 weich und fragt nach — gemachte Daten verschwinden nie stillschweigend.
 """
@@ -22,14 +25,15 @@ def _abschnitt(titel: str, inhalt: ft.Control) -> ft.Control:
     )
 
 
-def eintrag_view(page: ft.Page, state: AppState, eintrag: SessionEntry) -> ft.View:
+def eintrag_view(page: ft.Page, state: AppState, eintrag: SessionEntry, basis: str = "") -> ft.View:
+    """``basis`` ist die Ansicht darunter (ein Plan); leer = der Tag des Eintrags."""
     uebung = state.uebungen.laden(eintrag.exercise_id, mit_geloeschten=True)
     session = state.sitzungen.session_laden(eintrag.session_id)
     plan = state.plaene.laden(session.plan_id) if session and session.plan_id else None
     tag = lokaler_tag(eintrag.started_at) if eintrag.started_at else state.heute()
 
     async def korrigieren() -> None:
-        await page.push_route(f"/eintrag/{eintrag.id}/korrigieren")
+        await page.push_route(f"{basis}/eintrag/{eintrag.id}/korrigieren")
 
     def loeschen_fragen() -> None:
         page.show_dialog(dialog)
@@ -41,7 +45,7 @@ def eintrag_view(page: ft.Page, state: AppState, eintrag: SessionEntry) -> ft.Vi
         state.sitzungen.eintrag_loeschen(eintrag.id)
         page.pop_dialog()
         page.show_dialog(ft.SnackBar(ft.Text("Eintrag gelöscht")))
-        await page.push_route(f"/tag/{tag.isoformat()}")
+        await page.push_route(basis or f"/tag/{tag.isoformat()}")
 
     dialog = ft.AlertDialog(
         modal=True,
@@ -55,7 +59,7 @@ def eintrag_view(page: ft.Page, state: AppState, eintrag: SessionEntry) -> ft.Vi
 
     zeit = f"{eintrag.started_at.astimezone():%d.%m.%Y, %H:%M}" if eintrag.started_at else "–"
     return ft.View(
-        route=f"/eintrag/{eintrag.id}",
+        route=f"{basis}/eintrag/{eintrag.id}",
         appbar=ft.AppBar(
             title=ft.Text(uebung.name if uebung else "Eintrag"),
             actions=[

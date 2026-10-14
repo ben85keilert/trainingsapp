@@ -716,6 +716,29 @@ class PlanRepo:
             self.con.execute("DELETE FROM plan_item WHERE id = ?", (item_id,))
             self._beruehrt(zeile["plan_id"])
 
+    def reihenfolge_setzen(self, plan_id: str, item_ids: list[str]) -> None:
+        """Ordnet die Planübungen in der Reihenfolge von ``item_ids``.
+
+        Was nicht in der Liste steht — etwa Planübungen, deren Übung im
+        Papierkorb liegt —, reiht sich in bisheriger Folge dahinter ein.
+        """
+        alle = [
+            r["id"]
+            for r in self.con.execute(
+                "SELECT id FROM plan_item WHERE plan_id = ? ORDER BY sort_order, rowid",
+                (plan_id,),
+            )
+        ]
+        bekannt = set(alle)
+        vorne = [i for i in dict.fromkeys(item_ids) if i in bekannt]
+        folge = vorne + [i for i in alle if i not in set(vorne)]
+        with transaktion(self.con):
+            for reihenfolge, item_id in enumerate(folge):
+                self.con.execute(
+                    "UPDATE plan_item SET sort_order = ? WHERE id = ?", (reihenfolge, item_id)
+                )
+            self._beruehrt(plan_id)
+
     def ziel_setzen(self, item_id: str, target: dict[str, Any]) -> None:
         self.con.execute(
             "UPDATE plan_item SET target_json = ? WHERE id = ?",
@@ -1160,6 +1183,7 @@ class SessionRepo:
         wert: float,
         tag: date,
         kontext: dict[str, Any] | None = None,
+        neu: bool = False,
     ) -> SessionEntry:
         """„+20": hängt einen Satz an den heutigen Eintrag an — oder legt ihn an.
 
@@ -1169,9 +1193,16 @@ class SessionRepo:
         ``kontext`` sind gewählte Ausprägungen (``{"angle": 45}``). Weicht der
         heutige Eintrag darin ab, beginnt ein neuer — Wandsitz bei 45° wird
         nicht an Wandsitz bei 90° angehängt.
+
+        ``neu`` beginnt in jedem Fall einen Eintrag — für die zweite Stelle
+        derselben Übung im Plan, die nicht an die erste anhängen soll.
         """
         kontext = kontext or {}
-        aktuell = self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+        aktuell = (
+            None
+            if neu
+            else self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+        )
         # Verglichen werden alle Ausprägungsfelder: Ein Satz ohne Winkel gehört
         # nicht an einen Eintrag mit 45° — und umgekehrt.
         felder = {f.key for f in kontextfelder(uebung.result_spec)} | set(kontext)
@@ -1207,15 +1238,21 @@ class SessionRepo:
         wert: Any,
         tag: date,
         kontext: dict[str, Any] | None = None,
+        neu: bool = False,
     ) -> SessionEntry:
         """Einen Einzelwert (Skala, Gewicht …) in den heutigen Eintrag setzen — oder anlegen.
 
         Wie `satz_anhaengen`: Die Skala nach der Übung („Schmerz 3") gehört zur
         Übung von eben, nicht in einen eigenen Eintrag. Gibt es heute noch keinen
-        passenden (gleiche Session, gleiche Ausprägung), beginnt einer.
+        passenden (gleiche Session, gleiche Ausprägung), beginnt einer — mit
+        ``neu`` immer (wie bei `satz_anhaengen`).
         """
         kontext = kontext or {}
-        aktuell = self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+        aktuell = (
+            None
+            if neu
+            else self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+        )
         felder = {f.key for f in kontextfelder(uebung.result_spec)} | set(kontext)
         if (
             aktuell is None
@@ -1229,6 +1266,30 @@ class SessionRepo:
             None if kopie is not None and kopie.field_by_key(feld_key) else uebung.result_spec
         )
         return self.eintrag_korrigieren(aktuell.id, {**basis, feld_key: wert}, spec=neue_kopie)
+
+    def eintrag_notiz_setzen(
+        self,
+        session: Session,
+        uebung: Exercise,
+        text: str,
+        tag: date,
+        neu: bool = False,
+    ) -> SessionEntry:
+        """Eine Notiz an den heutigen Eintrag der Übung — oder „gemacht" mit Notiz.
+
+        Wie `wert_setzen`: Gibt es heute in dieser Session schon einen Eintrag,
+        bekommt er die Notiz als Korrektur (eine vorhandene wird ersetzt — der
+        Dialog zeigt sie zum Weiterschreiben). Sonst entsteht ein leerer
+        Eintrag („gemacht") mit Notiz. ``neu`` beginnt immer einen eigenen.
+        """
+        aktuell = (
+            None
+            if neu
+            else self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+        )
+        if aktuell is None or aktuell.session_id != session.id:
+            return self.eintrag_anlegen(session, uebung, {}, text)
+        return self.eintrag_korrigieren(aktuell.id, dict(aktuell.result), note=text)
 
     def eintrag_loeschen(self, eintrag_id: str) -> None:
         """Weich löschen — samt der Einträge, die dieser korrigiert hat.

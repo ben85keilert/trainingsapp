@@ -28,8 +28,8 @@ Anzeige: `3x15`, `30` oder `15/15/20`, dazu die Summe.
 
 **Im Plan** tippst du nur Zahlen: Chips wie `+15` hängen einen Satz an, darunter
 **Sätze × Wert** (`3` × `15`) — leer bei Sätze heißt einer. Die Handy-Tastatur
-für Zahlen hat kein „x“; im Formular („Mehr …“) trennt dort das Komma die
-Sätze: `15,15,20`.
+für Zahlen hat kein „x“; beim Korrigieren eines Eintrags (Tafel „Heute
+geleistet“ antippen) trennt dort das Komma die Sätze: `15,15,20`.
 
 **Zeiten**: `30` = 30 s, `1:30` = 90 s, `2min`. Je Satz wie oben: `3x30`, `45/60/30`.
 `0` oder leer = ohne Zeit — gemacht, aber kein Punkt auf der Kurve.

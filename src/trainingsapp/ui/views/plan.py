@@ -6,7 +6,8 @@ nicht auf Tippen, das war auf dem Handy zu unsicher. Von oben nach unten
 Anzeige und die Eingabemöglichkeiten besser ab“):
 
 - **Heute geleistet** — eine eigene Fläche, je Parameter groß der Wert
-  (gebündelt wie in der Tagesansicht, je Ausprägung eine Gruppe).
+  (gebündelt wie in der Tagesansicht, je Ausprägung eine Gruppe), darunter die
+  Notizen. Antippen öffnet den Eintrag: ansehen, korrigieren, löschen.
 - die Knöpfe „Gemacht“ (abhaken) und, wenn ein Ziel gesetzt ist, „Wie geplant“.
   Ohne Parameter bleibt es dabei — nur abhaken.
 - **Eintragen** — je Parameter ein umrandeter Abschnitt mit Überschrift, was
@@ -22,15 +23,26 @@ Anzeige und die Eingabemöglichkeiten besser ab“):
   - Skala: Regler und Zahlenfeld in einer Zeile, der Name darüber; der Regler
     schreibt ins Feld, abgeschickt wird mit dem Haken. Der Wert landet im
     heutigen Eintrag der Übung (`SitzungRepo.wert_setzen`), nicht in einem eigenen.
+  - Ja/Nein und Freitext, wenn man sie hergeholt hat — ebenso in den heutigen
+    Eintrag.
 
   Wie die Abschnitte stehen, bestimmt die Darstellung (`ui.state.PLAN_DARSTELLUNGEN`,
   umschaltbar oben im Plan): alle untereinander, einer zum Umschalten,
   oder aufgeklappt nur in einer Übung.
-- „Mehr …" für das volle Formular mit Notiz, und das Info-Symbol für
-  Beschreibung und Videos der Übung.
+- „Notiz“ — ein Satz ins Erfahrungstagebuch, am heutigen Eintrag der Übung.
+- Das **i-Symbol** holt Parameter heran (`plan_info.py`): jedes Feld der Übung
+  und des Feldvorrats, gespeichert in der Planübung — die Übung bleibt, wie sie
+  ist (`core.standards.plan_spec`). Dort auch Beschreibung und Videos.
+
+Das frühere „Mehr …“ (volles Formular) ist darin aufgegangen (Ben, 14.10.2026):
+Notiz → „Notiz“, Ja/Nein und Freitext → herholen, Korrigieren → Tafel.
 
 Bearbeiten (Stift in der Leiste): einstellen, entfernen, hinzufügen,
-umbenennen, löschen. Der Modus liegt im `AppState`, weil die Ansicht beim
+umbenennen, löschen — und umordnen: am Griff ziehen oder mit den Pfeilen um
+eine Stelle. Eine Übung darf mehrmals im Plan stehen (Rumpfbeuge am Anfang und
+am Ende); die k-te Stelle ist erledigt, wenn die Übung heute k-mal dran war
+(`core.plaene.erledigte`), und ihr erster Eintrag hängt nicht an den der
+früheren Stelle an. Der Modus liegt im `AppState`, weil die Ansicht beim
 Routenwechsel neu gebaut wird.
 
 Ein Eintrag (Gemacht, Chip, Zahlenfeld) baut dagegen nur die Blöcke in der
@@ -56,7 +68,13 @@ from trainingsapp.core.models import (
     SessionEntry,
 )
 from trainingsapp.core.parameter import BEIWERK, kontextfelder, leistungsfelder, rolle
-from trainingsapp.core.plaene import WOCHENTAGE_KURZ, tage_text
+from trainingsapp.core.plaene import (
+    WOCHENTAGE_KURZ,
+    erledigte,
+    tage_text,
+    verschoben,
+    vorkommen,
+)
 from trainingsapp.core.result_spec import (
     FieldSpec,
     FieldType,
@@ -67,9 +85,10 @@ from trainingsapp.core.result_spec import (
     skala_bereich_text,
     skala_wert,
 )
-from trainingsapp.core.standards import aktive_felder, chips_fuer
+from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tagesbilanz import buendeln
 from trainingsapp.core.units import parse_dauer
+from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import ohne_auto_update, sicher
@@ -232,22 +251,25 @@ def plan_view(
     anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute)
     tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute)]
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
-    gemacht = sum(1 for item in plan.items if anzahl.get(item.exercise_id))
+    #: Die wievielte Stelle ihrer Übung jede Planübung ist — und was heute erledigt ist
+    stelle = vorkommen(plan.items)
+    fertig_ids = erledigte(plan.items, anzahl)
+    gemacht = len(fertig_ids)
+    mehrfach = {i.exercise_id for i in plan.items if stelle[i.id] > 1}
     darstellung = state.plan_darstellung()
     # Aufklappen: Ist keine Übung dieses Plans offen, die erste, die heute noch fehlt
     if state.plan_offen not in {item.id for item in plan.items}:
-        state.plan_offen = next(
-            (item.id for item in plan.items if not anzahl.get(item.exercise_id)), None
-        )
+        state.plan_offen = next((item.id for item in plan.items if item.id not in fertig_ids), None)
 
     # -- Handler ---------------------------------------------------------------
 
     def auffrischen() -> None:
         """Stand neu lesen und die Blöcke in derselben Liste ersetzen."""
-        nonlocal anzahl, gemacht, tages_eintraege
+        nonlocal anzahl, gemacht, tages_eintraege, fertig_ids
         anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute)
         tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute)]
-        gemacht = sum(1 for item in plan.items if anzahl.get(item.exercise_id))
+        fertig_ids = erledigte(plan.items, anzahl)
+        gemacht = len(fertig_ids)
         stand.value = stand_text()
         liste.controls = listeninhalt()
         page.update()
@@ -256,6 +278,17 @@ def plan_view(
         text = eintrag.shorthand() if eintrag.result else "gemacht"
         page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name}: {text}")))
         auffrischen()
+
+    def uebung_fuer(item: PlanItem) -> Exercise:
+        """Die Übung, wie diese Planübung sie sieht — mit hergeholten Zusatzfeldern.
+
+        Einträge bekommen so die erweiterte Spec als Kopie (`core.standards.plan_spec`).
+        """
+        return mit_plan_spec(item, katalog[item.exercise_id])
+
+    def eigener_eintrag(item: PlanItem) -> bool:
+        """Spätere Stelle einer Übung, die heute noch offen ist: neuer Eintrag statt anhängen."""
+        return stelle[item.id] > 1 and item.id not in fertig_ids
 
     def teilspec(item: PlanItem, uebung: Exercise) -> Any:
         """Die Spezifikation, beschränkt auf die Parameter, die der Plan anbietet."""
@@ -284,43 +317,45 @@ def plan_view(
         gerade gewählten (45°), und eine aufgehobene Auswahl käme über das Ziel
         zurück.
         """
-        keys = {f.key for f in kontextfelder(katalog[item.exercise_id].result_spec)}
+        keys = {f.key for f in kontextfelder(uebung_fuer(item).result_spec)}
         return {k: v for k, v in item.target.items() if k not in keys}
 
     def eintragen(item: PlanItem, result: dict[str, Any]) -> None:
-        uebung = katalog[item.exercise_id]
+        uebung = uebung_fuer(item)
         session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
         melden(uebung, state.sitzungen.eintrag_anlegen(session, uebung, result))
 
     def anhaengen(item: PlanItem, feld: FieldSpec, werte: list[float]) -> None:
-        uebung = katalog[item.exercise_id]
+        uebung = uebung_fuer(item)
         session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
         eintrag = None
+        neu = eigener_eintrag(item)
         for wert in werte:
             eintrag = state.sitzungen.satz_anhaengen(
-                session, uebung, feld.key, wert, heute, kontext(item, uebung)
+                session, uebung, feld.key, wert, heute, kontext(item, uebung), neu=neu
             )
+            neu = False
         if eintrag is not None:
             melden(uebung, eintrag)
 
     def erlediger(item: PlanItem) -> Callable[[], None]:
         def handler() -> None:
-            eintragen(item, kontext(item, katalog[item.exercise_id]))
+            eintragen(item, kontext(item, uebung_fuer(item)))
 
         return handler
 
     def ziel_erlediger(item: PlanItem) -> Callable[[], None]:
         def handler() -> None:
-            eintragen(item, {**ziel_ohne_kontext(item), **kontext(item, katalog[item.exercise_id])})
+            eintragen(item, {**ziel_ohne_kontext(item), **kontext(item, uebung_fuer(item))})
 
         return handler
 
     def wert_setzer(item: PlanItem, feld: FieldSpec, wert: Any) -> None:
         """Skala & Co.: in den heutigen Eintrag der Übung, nicht in einen eigenen."""
-        uebung = katalog[item.exercise_id]
+        uebung = uebung_fuer(item)
         session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
         eintrag = state.sitzungen.wert_setzen(
-            session, uebung, feld.key, wert, heute, kontext(item, uebung)
+            session, uebung, feld.key, wert, heute, kontext(item, uebung), neu=eigener_eintrag(item)
         )
         melden(uebung, eintrag)
 
@@ -360,7 +395,7 @@ def plan_view(
             elif rolle(feld) == BEIWERK:
                 wert_setzer(item, feld, wert)
             else:
-                zusatz = kontext(item, katalog[item.exercise_id])
+                zusatz = kontext(item, uebung_fuer(item))
                 eintragen(item, {**ziel_ohne_kontext(item), **zusatz, feld.key: wert})
 
         return handler
@@ -418,7 +453,7 @@ def plan_view(
                 eingabe.error = "Wert?" if not (eingabe.value or "").strip() else "Ungültig"
                 page.update()
                 return
-            zusatz = kontext(item, katalog[item.exercise_id])
+            zusatz = kontext(item, uebung_fuer(item))
             eintragen(item, {**ziel_ohne_kontext(item), **zusatz, feld.key: wert})
 
         return handler
@@ -457,6 +492,23 @@ def plan_view(
             state.neu_zeichnen()
 
         return handler
+
+    def ordnen(item_ids: list[str]) -> None:
+        state.plaene.reihenfolge_setzen(plan.id, item_ids)
+        state.neu_zeichnen()
+
+    def schieber(index: int, richtung: int) -> Callable[[], None]:
+        """Pfeil hoch/runter: eine Stelle weiter — für kurze Wege genauer als Ziehen."""
+
+        def handler() -> None:
+            ordnen(verschoben([i.id for i in plan.items], index, index + richtung))
+
+        return handler
+
+    def gezogen(e: ft.OnReorderEvent) -> None:
+        if e.old_index is None or e.new_index is None or e.old_index == e.new_index:
+            return
+        ordnen(verschoben([i.id for i in plan.items], e.old_index, e.new_index))
 
     async def modus_wechseln() -> None:
         await page.push_route(fertig if bearbeiten else f"/plan/{plan.id}/bearbeiten")
@@ -510,7 +562,7 @@ def plan_view(
     # die Knöpfe; dann, abgesetzt unter „EINTRAGEN“, je Parameter ein umrandeter
     # Abschnitt mit Überschrift — man sieht, wo etwas anfängt und aufhört.
 
-    def geleistet_tafel(uebung: Exercise) -> ft.Control:
+    def geleistet_tafel(uebung: Exercise, item: PlanItem) -> ft.Control:
         """Was heute schon da ist — je Parameter groß der Wert.
 
         Gebündelt wie in der Tagesansicht: je Ausprägung (45°, 90°) eine Gruppe,
@@ -518,16 +570,37 @@ def plan_view(
         Tages. Nur Abgehaktes steht als „Abgehakt 1×“.
         """
         inhalt: list[ft.Control] = []
-        for b in buendeln(e for e in tages_eintraege if e.exercise_id == uebung.id):
+        eigene = [e for e in tages_eintraege if e.exercise_id == uebung.id]
+        for b in buendeln(eigene):
             zeilen = b.parameter_zeilen()
             if not zeilen:
                 n = len(b.leistungen) or len(b.abgehakt)
                 zeilen = [ParameterWert("Eingetragen" if b.leistungen else "Abgehakt", f"{n}×")]
+            gruppe: list[ft.Control] = []
             if zusatz := b.auspraegung_text():
-                inhalt.append(ft.Text(zusatz, size=13, weight=ft.FontWeight.W_600))
-            inhalt.append(wert_leiste(zeilen))
+                gruppe.append(ft.Text(zusatz, size=13, weight=ft.FontWeight.W_600))
+            gruppe.append(wert_leiste(zeilen))
+            # Antippen öffnet den jüngsten Eintrag der Gruppe — korrigieren, löschen
+            juengster = max(b.eintraege, key=lambda e: (e.started_at is not None, e.started_at))
+            inhalt.append(
+                ft.Container(
+                    border_radius=8,
+                    ink=True,
+                    tooltip="Eintrag ansehen, korrigieren oder löschen",
+                    on_click=oeffner(f"{route}/eintrag/{juengster.id}"),
+                    content=ft.Column(spacing=6, controls=gruppe),
+                )
+            )
+        inhalt += [
+            ft.Text(f"„{e.note}“", size=12, italic=True, opacity=0.75) for e in eigene if e.note
+        ]
+        # Spätere Stelle einer doppelten Übung: Was dasteht, stammt von früher am Tag
+        if inhalt and uebung.id in mehrfach and item.id not in fertig_ids:
+            titel = f"HEUTE BISHER — DAS {stelle[item.id]}. MAL STEHT NOCH AUS"
+        else:
+            titel = "HEUTE GELEISTET" if inhalt else "Heute noch nichts eingetragen"
         kopf = ft.Text(
-            "HEUTE GELEISTET" if inhalt else "Heute noch nichts eingetragen",
+            titel,
             size=11,
             weight=ft.FontWeight.BOLD if inhalt else None,
             opacity=0.65 if inhalt else 0.55,
@@ -536,17 +609,35 @@ def plan_view(
             padding=ft.Padding.symmetric(horizontal=12, vertical=10),
             border_radius=12,
             bgcolor=ft.Colors.SURFACE,
-            content=ft.Column(spacing=6, controls=[kopf, *inhalt]),
+            # Gestreckt: jede Gruppe ist auf voller Breite antippbar
+            content=ft.Column(
+                spacing=6,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                controls=[kopf, *inhalt],
+            ),
         )
 
-    def kopfzeile(uebung: Exercise) -> ft.Control:
-        untertitel = "  ·  ".join(
-            t for t in (", ".join(uebung.typen), ", ".join(uebung.regionen)) if t
+    def kopfzeile(uebung: Exercise, item: PlanItem) -> ft.Control:
+        teile = [", ".join(uebung.typen), ", ".join(uebung.regionen)]
+        if uebung.id in mehrfach:
+            teile.append(f"{stelle[item.id]}. Mal im Plan")
+        untertitel = "  ·  ".join(t for t in teile if t)
+        # Beim Bearbeiten zieht man am Griff (statt am ganzen Block, der Knöpfe trägt)
+        griff: list[ft.Control] = (
+            [
+                ft.ReorderableDragHandle(
+                    content=ft.Icon(ft.Icons.DRAG_HANDLE, size=24, opacity=0.7),
+                    mouse_cursor=ft.MouseCursor.GRAB,
+                )
+            ]
+            if bearbeiten
+            else []
         )
         return ft.Row(
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.START,
             controls=[
+                *griff,
                 ft.Icon(symbol(uebung.icon_key), size=24, opacity=0.8),
                 ft.Column(
                     spacing=0,
@@ -558,8 +649,10 @@ def plan_view(
                 ),
                 ft.IconButton(
                     ft.Icons.INFO_OUTLINE,
-                    tooltip="Beschreibung und Videos",
-                    on_click=oeffner(f"/uebung/{uebung.id}"),
+                    tooltip="Beschreibung und Videos"
+                    if bearbeiten
+                    else "Parameter herholen, Beschreibung, Videos",
+                    on_click=oeffner(info_route(item)),
                 ),
             ],
         )
@@ -794,7 +887,64 @@ def plan_view(
             for f in aktive_felder(item, uebung)
             if rolle(f) == BEIWERK and f.type == FieldType.SCALE
         ]
+        teile += [
+            (f.key, basis_label(f), partial(janein_abschnitt, item, uebung, f))
+            for f in aktive_felder(item, uebung)
+            if f.type == FieldType.BOOL
+        ]
+        teile += [
+            (f.key, basis_label(f), partial(text_abschnitt, item, uebung, f))
+            for f in aktive_felder(item, uebung)
+            if f.type == FieldType.TEXT
+        ]
         return teile
+
+    def janein_abschnitt(item: PlanItem, uebung: Exercise, feld: FieldSpec) -> ft.Control:
+        """Ja/Nein — zwei Chips, der heutige Wert ist markiert; ein Tipp trägt ein."""
+        bisher = heutiger_wert(uebung, feld)
+        return abschnitt(
+            feld.label,
+            ft.Row(
+                spacing=6,
+                controls=[
+                    auswahl_chip(text, bisher is wert, wert_chip(item, feld, wert))
+                    for text, wert in (("ja", True), ("nein", False))
+                ],
+            ),
+        )
+
+    def wert_chip(item: PlanItem, feld: FieldSpec, wert: Any) -> Callable[[], None]:
+        return lambda: wert_setzer(item, feld, wert)
+
+    def text_abschnitt(item: PlanItem, uebung: Exercise, feld: FieldSpec) -> ft.Control:
+        """Freitext — ein Feld mit Haken; der Text kommt in den heutigen Eintrag."""
+        bisher = heutiger_wert(uebung, feld)
+        eingabe = ft.TextField(
+            value="" if bisher is None else str(bisher),
+            dense=True,
+            expand=True,
+            multiline=True,
+            max_lines=4,
+        )
+
+        def absenden() -> None:
+            text = (eingabe.value or "").strip()
+            if text:
+                wert_setzer(item, feld, text)
+
+        return abschnitt(
+            feld.label,
+            ft.Row(
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    eingabe,
+                    ft.FilledTonalIconButton(
+                        ft.Icons.CHECK, tooltip=f"{feld.label} eintragen", on_click=absenden
+                    ),
+                ],
+            ),
+        )
 
     def eingabe_bereich(item: PlanItem, uebung: Exercise) -> list[ft.Control]:
         """Unter „EINTRAGEN“: Ausführung, dann die Parameter — wie die Darstellung sagt."""
@@ -836,25 +986,88 @@ def plan_view(
             bereich += [bauen() for _, _, bauen in teile]
         return bereich
 
-    def mehr_knopf(item: PlanItem) -> ft.Control:
+    def info_route(item: PlanItem) -> str:
+        """Beim Üben die Infoseite unter dem Plan (Zurück führt hierher), sonst die Übung."""
+        if bearbeiten:
+            return f"/uebung/{item.exercise_id}"
+        return f"{route}/info" if einzel else f"{route}/info/{item.id}"
+
+    def notiz_knopf(item: PlanItem) -> ft.Control:
         return ft.TextButton(
-            "Mehr …",
+            "Notiz",
             icon=ft.Icons.EDIT_NOTE_OUTLINED,
-            tooltip="Formular mit allen Feldern und Notiz",
-            on_click=oeffner(
-                f"{route}/formular" if einzel else f"/plan/{plan.id}/uebung/{item.id}"
-            ),
+            tooltip="Ein Satz ins Tagebuch — am heutigen Eintrag",
+            on_click=notiz_fragen(item),
         )
 
-    def block(item: PlanItem) -> ft.Control:
-        uebung = katalog.get(item.exercise_id)
-        if uebung is None:
-            return ft.Container(
-                padding=12, content=ft.Text("(Übung nicht mehr vorhanden)", opacity=0.5)
+    def notiz_fragen(item: PlanItem) -> Callable[[], None]:
+        """Ein Dialog mit Textfeld; die Notiz von heute steht schon drin zum Weiterschreiben."""
+
+        def handler() -> None:
+            uebung = uebung_fuer(item)
+            heutig = (
+                None
+                if eigener_eintrag(item)
+                else state.sitzungen.heutiger_eintrag(
+                    state.profil.id, uebung.id, heute, sitzungsplan
+                )
             )
-        n = anzahl.get(item.exercise_id, 0)
+            feld = ft.TextField(
+                value=heutig.note if heutig is not None else "",
+                hint_text="Wie ging es? (Diktat über die Tastatur)",
+                multiline=True,
+                min_lines=3,
+                max_lines=8,
+                autofocus=True,
+            )
+
+            # Neu zeichnen erst, wenn der Dialog wirklich zu ist (`components/dialoge.py`)
+            nachher = Nachher()
+
+            def gespeichert() -> None:
+                page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name}: Notiz gespeichert")))
+                auffrischen()
+
+            async def geschlossen(e: object) -> None:
+                # Eine echte async-Funktion: eine Instanz mit async ``__call__``
+                # erkennt Flet nicht als Koroutine und ruft sie nie zu Ende
+                await nachher(e)
+
+            def speichern() -> None:
+                text = (feld.value or "").strip()
+                if text or heutig is not None:
+                    session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
+                    state.sitzungen.eintrag_notiz_setzen(
+                        session, uebung, text, heute, neu=eigener_eintrag(item)
+                    )
+                    nachher.danach(gespeichert)
+                page.pop_dialog()
+
+            page.show_dialog(
+                ft.AlertDialog(
+                    on_dismiss=geschlossen,
+                    title=ft.Text(f"Notiz: {uebung.name}"),
+                    content=feld,
+                    actions=[
+                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                        ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=speichern),
+                    ],
+                )
+            )
+
+        return handler
+
+    def block(index: int, item: PlanItem) -> ft.Control:
+        if item.exercise_id not in katalog:
+            return ft.Container(
+                key=item.id,
+                padding=12,
+                content=ft.Text("(Übung nicht mehr vorhanden)", opacity=0.5),
+            )
+        uebung = uebung_fuer(item)
+        n = item.id in fertig_ids
         ziel = ziel_text(uebung, item.target)
-        inhalt: list[ft.Control] = [kopfzeile(uebung)]
+        inhalt: list[ft.Control] = [kopfzeile(uebung, item)]
 
         if bearbeiten:
             aktive = aktive_felder(item, uebung)
@@ -870,18 +1083,43 @@ def plan_view(
                     opacity=0.7,
                 )
             )
+            # Knöpfe links (dürfen umbrechen), die Pfeile fest rechts — ein dehnbarer
+            # Platzhalter in einer umbrechenden Zeile brach das Layout
             inhalt.append(
                 ft.Row(
-                    wrap=True,
-                    spacing=8,
-                    run_spacing=6,
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
-                        _knopf("Einstellen", ft.Icons.TUNE, oeffner(f"{route}/ziel/{item.id}")),
-                        ft.TextButton(
-                            "Entfernen",
-                            icon=ft.Icons.REMOVE_CIRCLE_OUTLINE,
-                            style=ft.ButtonStyle(color=ft.Colors.ERROR),
-                            on_click=entferner(item),
+                        ft.Row(
+                            wrap=True,
+                            expand=True,
+                            spacing=8,
+                            run_spacing=6,
+                            controls=[
+                                _knopf(
+                                    "Einstellen",
+                                    ft.Icons.TUNE,
+                                    oeffner(f"{route}/ziel/{item.id}"),
+                                ),
+                                ft.TextButton(
+                                    "Entfernen",
+                                    icon=ft.Icons.REMOVE_CIRCLE_OUTLINE,
+                                    style=ft.ButtonStyle(color=ft.Colors.ERROR),
+                                    on_click=entferner(item),
+                                ),
+                            ],
+                        ),
+                        ft.IconButton(
+                            ft.Icons.ARROW_UPWARD,
+                            tooltip="Eine Stelle nach oben",
+                            disabled=index == 0,
+                            on_click=schieber(index, -1),
+                        ),
+                        ft.IconButton(
+                            ft.Icons.ARROW_DOWNWARD,
+                            tooltip="Eine Stelle nach unten",
+                            disabled=index == len(plan.items) - 1,
+                            on_click=schieber(index, 1),
                         ),
                     ],
                 )
@@ -915,18 +1153,14 @@ def plan_view(
                         on_click=aufklapper(item),
                     )
                 )
-            else:
-                knoepfe.append(mehr_knopf(item))
-            inhalt.append(geleistet_tafel(uebung))
+            knoepfe.append(notiz_knopf(item))
+            inhalt.append(geleistet_tafel(uebung, item))
             inhalt.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=knoepfe))
             if offen:
                 inhalt.extend(eingabe_bereich(item, uebung))
-                if klappbar:
-                    inhalt.append(
-                        ft.Row(alignment=ft.MainAxisAlignment.END, controls=[mehr_knopf(item)])
-                    )
 
         return ft.Container(
+            key=item.id,
             padding=ft.Padding.only(left=14, right=10, top=12, bottom=12),
             margin=ft.Margin.only(left=12, right=12, bottom=12),
             border_radius=14,
@@ -1000,7 +1234,12 @@ def plan_view(
                 size=12,
                 opacity=0.7,
             ),
-            ft.Text("„Einstellen“ legt Ziel und Eingabe je Übung fest.", size=12, opacity=0.7),
+            ft.Text(
+                "„Einstellen“ legt Ziel und Eingabe je Übung fest. Reihenfolge: am Griff ziehen "
+                "oder mit den Pfeilen. Eine Übung darf mehrmals im Plan stehen.",
+                size=12,
+                opacity=0.7,
+            ),
         ]
     elif einzel:
         kopf = [
@@ -1012,7 +1251,7 @@ def plan_view(
             menue,
             ft.Text(
                 "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · +Zahl = Satz anhängen · "
-                "Eintragen = Sätze × Wert · Mehr = Formular mit Notiz",
+                "Eintragen = Sätze × Wert · Notiz = ins Tagebuch · i = Parameter herholen",
                 size=11,
                 opacity=0.55,
             ),
@@ -1026,7 +1265,7 @@ def plan_view(
             ),
             ft.Text(
                 "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · +Zahl = Satz anhängen · "
-                "Eintragen = Sätze × Wert · Mehr = Formular mit Notiz",
+                "Eintragen = Sätze × Wert · Notiz = ins Tagebuch · i = Parameter herholen",
                 size=11,
                 opacity=0.55,
             ),
@@ -1055,9 +1294,24 @@ def plan_view(
     fuss_box = ft.Container(padding=16, content=ft.Row(spacing=8, wrap=True, controls=fuss))
 
     def listeninhalt() -> list[ft.Control]:
-        return [kopf_box, *(block(item) for item in plan.items), *([fuss_box] if fuss else [])]
+        bloecke = [block(i, item) for i, item in enumerate(plan.items)]
+        if bearbeiten:
+            return bloecke  # Kopf und Fuß sind Kopf- und Fußzeile der ziehbaren Liste
+        return [kopf_box, *bloecke, *([fuss_box] if fuss else [])]
 
-    liste = scroll_merken(page, state, route, ft.ListView(expand=True, controls=listeninhalt()))
+    liste: ft.ListView
+    if bearbeiten:
+        liste = ft.ReorderableListView(
+            expand=True,
+            header=kopf_box,
+            footer=fuss_box,
+            show_default_drag_handles=False,
+            on_reorder=gezogen,
+            controls=listeninhalt(),
+        )
+    else:
+        liste = ft.ListView(expand=True, controls=listeninhalt())
+    liste = scroll_merken(page, state, route, liste)
 
     return ft.View(
         route=route,

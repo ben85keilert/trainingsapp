@@ -46,6 +46,7 @@ from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.timer import ton_spielen
 
 #: Wählbare GPS-Intervalle der Strecke (s)
 INTERVALLE = (1.0, 3.0, 10.0)
@@ -227,10 +228,8 @@ async def _wach(state: AppState, an: bool) -> None:
 
 
 async def _signal(state: AppState) -> None:
-    """Ton und Vibration: Der Akkutest ist fertig."""
-    if state.ton is not None and state.toene_geladen:
-        with contextlib.suppress(Exception):
-            await state.ton.spielen("ende")
+    """Ton und Vibration: Der Akkutest ist fertig — Regler und Lautstärke wie beim Timer."""
+    await ton_spielen(state, "ende")
     if state.haptik is not None:
         with contextlib.suppress(Exception):
             await state.haptik.vibrate()

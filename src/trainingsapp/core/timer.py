@@ -18,8 +18,20 @@ trägt den Zeitpunkt, zu dem der Abschnitt wirklich begann — auch wenn die
 Oberfläche ihn erst später abfragt. Die Notizen sind gewöhnliche Notizen:
 Nachträglich lassen sie sich umbenennen, verschieben und löschen.
 
-Wie sich der Timer meldet (Ton, Countdown, Vibration, Bildschirm an, Notizen),
-steht in `TimerSignale` — gerätelokal, für alle Profile.
+Wie sich der Timer meldet (Ton, Countdown, Vibration, Bildschirm an, Notizen,
+Lautstärke und Standardklang), steht in `TimerSignale` — gerätelokal, für alle
+Profile. **Welcher Klang** bei einem Wechsel spielt, bestimmt `klang_fuer`:
+Ein Abschnitt kann einen eigenen haben (Glocke 1 für Belastung, Glocke 3 für
+die Pause), das Profil einen für den Beginn jeder neuen Runde und einen fürs
+Ende (Ben, 14.10.2026).
+
+**Lautstärke** (`QUELLEN`): Auf Android läuft jeder Ton über einen der
+Lautstärkeregler des Systems. Vorgabe ist **Medien** — der Regler, den die
+Lautstärketasten in der App bedienen und über den auch Musik läuft (Kopfhörer
+inklusive). „Wecker" tönt auch, wenn Medien leise sind; „Klingelton" folgt
+dem Klingelton-/Systemregler (so war es bis 14.10.). Auf dem iPhone gibt es
+für Apps nur einen Regler, die Wahl entfällt dort. `TimerSignale.lautstaerke`
+ist ein Anteil davon (10–100 %).
 
 Dieses Modul importiert nichts aus anderen Schichten (Architekturregel) und
 lässt sich ohne Bildschirm testen.
@@ -34,6 +46,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Final
 
+from .klang import KLAENGE
 from .models import new_id
 
 #: Längster Abschnitt (s) — 99:59, mehr passt nicht in mm:ss
@@ -50,6 +63,16 @@ COUNTDOWN_S: Final[tuple[int, ...]] = (3, 2, 1)
 COUNTDOWN: Final[str] = "countdown"
 WECHSEL: Final[str] = "wechsel"
 ENDE: Final[str] = "ende"
+
+#: Klang beim Abschnittswechsel, wenn nichts anderes eingestellt ist (Piep)
+STANDARD_KLANG: Final[str] = WECHSEL
+
+#: Über welchen Lautstärkeregler des Systems die Töne laufen (Android)
+QUELLEN: Final[dict[str, str]] = {
+    "medien": "Medien",
+    "wecker": "Wecker",
+    "klingelton": "Klingelton",
+}
 
 
 def dauer_text(sekunden: float) -> str:
@@ -104,10 +127,12 @@ def dauer_lesen(text: str) -> int | None:
 
 @dataclass
 class Abschnitt:
-    """Ein benannter Zeitabschnitt."""
+    """Ein benannter Zeitabschnitt — mit eigenem Klang zu Beginn, wenn ``klang`` gesetzt."""
 
     name: str
     dauer_s: int
+    #: Schlüssel aus `core.klang.KLAENGE`; leer = Standardklang der Signale
+    klang: str = ""
 
 
 @dataclass
@@ -126,6 +151,10 @@ class TimerProfil:
     name: str = "Timer"
     abschnitte: list[Abschnitt] = field(default_factory=list)
     runden: int = 1
+    #: Klang zu Beginn jeder weiteren Runde; leer = wie der erste Abschnitt
+    runden_klang: str = ""
+    #: Klang am Ende; leer = Fanfare
+    ende_klang: str = ""
 
     def gesamt_s(self) -> int:
         return sum(a.dauer_s for a in self.abschnitte) * max(self.runden, 1)
@@ -144,12 +173,21 @@ class TimerProfil:
     # -- Serialisierung --------------------------------------------------------
 
     def als_dict(self) -> dict[str, Any]:
-        return {
+        """Klänge nur, wenn gesetzt — ältere Profile bleiben, wie sie waren."""
+        d: dict[str, Any] = {
             "id": self.id,
             "name": self.name,
             "runden": self.runden,
-            "abschnitte": [{"name": a.name, "dauer_s": a.dauer_s} for a in self.abschnitte],
+            "abschnitte": [
+                {"name": a.name, "dauer_s": a.dauer_s, **({"klang": a.klang} if a.klang else {})}
+                for a in self.abschnitte
+            ],
         }
+        if self.runden_klang:
+            d["runden_klang"] = self.runden_klang
+        if self.ende_klang:
+            d["ende_klang"] = self.ende_klang
+        return d
 
     @classmethod
     def aus_dict(cls, d: Any) -> TimerProfil | None:
@@ -165,7 +203,9 @@ class TimerProfil:
             except (TypeError, ValueError):
                 continue
             if 0 < dauer <= MAX_ABSCHNITT_S:
-                abschnitte.append(Abschnitt(str(a.get("name") or ""), dauer))
+                abschnitte.append(
+                    Abschnitt(str(a.get("name") or ""), dauer, _klang_lesen(a.get("klang")))
+                )
         if not abschnitte:
             return None
         try:
@@ -177,7 +217,18 @@ class TimerProfil:
             name=str(d.get("name") or "Timer"),
             abschnitte=abschnitte,
             runden=min(max(runden, 1), MAX_RUNDEN),
+            runden_klang=_klang_lesen(d.get("runden_klang")),
+            ende_klang=_klang_lesen(d.get("ende_klang")),
         )
+
+
+def _klang_lesen(wert: Any) -> str:
+    """Ein bekannter Klang oder leer (= Vorgabe) — Unbekanntes fällt weg.
+
+    >>> _klang_lesen("glocke2"), _klang_lesen("trompete"), _klang_lesen(None)
+    ('glocke2', '', '')
+    """
+    return wert if isinstance(wert, str) and wert in KLAENGE else ""
 
 
 def standard_profile() -> list[TimerProfil]:
@@ -246,20 +297,43 @@ class TimerSignale:
     wach: bool = True
     #: Läuft eine HRV-Aufnahme, wird jeder Abschnittsanfang eine Notiz
     notizen: bool = True
+    #: Lautstärkeregler des Systems (`QUELLEN`, nur Android)
+    quelle: str = "medien"
+    #: Anteil davon in Prozent (10–100)
+    lautstaerke: int = 100
+    #: Klang beim Abschnittswechsel, wenn Abschnitt und Profil keinen eigenen haben
+    klang: str = STANDARD_KLANG
 
-    def als_dict(self) -> dict[str, bool]:
+    def als_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def aus_dict(cls, d: Any) -> TimerSignale:
-        """Defensiv: Unbrauchbares fällt auf die Vorgabe zurück."""
+        """Defensiv: Unbrauchbares fällt auf die Vorgabe zurück.
+
+        >>> s = TimerSignale.aus_dict({"quelle": "laut", "lautstaerke": 250, "klang": "gong"})
+        >>> s.quelle, s.lautstaerke, s.klang
+        ('medien', 100, 'gong')
+        >>> TimerSignale.aus_dict({"lautstaerke": True, "klang": ""}).lautstaerke
+        100
+        """
         vorgabe = cls()
         if not isinstance(d, dict):
             return vorgabe
-        werte = {
-            f.name: d[f.name] if isinstance(d.get(f.name), bool) else getattr(vorgabe, f.name)
-            for f in fields(cls)
-        }
+        werte: dict[str, Any] = {}
+        for f in fields(cls):
+            alt, neu = getattr(vorgabe, f.name), d.get(f.name)
+            if isinstance(alt, bool):
+                werte[f.name] = neu if isinstance(neu, bool) else alt
+            elif f.name == "lautstaerke":
+                if isinstance(neu, int | float) and not isinstance(neu, bool):
+                    werte[f.name] = min(max(round(neu), 10), 100)
+                else:
+                    werte[f.name] = alt
+            elif f.name == "quelle":
+                werte[f.name] = neu if neu in QUELLEN else alt
+            else:
+                werte[f.name] = _klang_lesen(neu) or alt
         return cls(**werte)
 
 
@@ -272,6 +346,35 @@ def timer_signale_lesen(text: str | None) -> TimerSignale:
 
 def timer_signale_schreiben(signale: TimerSignale) -> str:
     return json.dumps(signale.als_dict())
+
+
+def signale_kurz(signale: TimerSignale) -> str:
+    """Die eingeschalteten Signale in einer Zeile — für den Vermerk unter dem Timer.
+
+    Der Countdown ist ein Ton und zählt nur mit ``ton``.
+
+    >>> signale_kurz(TimerSignale())
+    'Piep (Medien 100 %) mit 3-2-1 · Vibration · Bildschirm an · Abschnitte in HRV'
+    >>> signale_kurz(TimerSignale(countdown=False, klang="glocke1", lautstaerke=60))
+    'Glocke 1 · hell (Medien 60 %) · Vibration · Bildschirm an · Abschnitte in HRV'
+    >>> signale_kurz(TimerSignale(ton=False, notizen=False))
+    'Vibration · Bildschirm an'
+    >>> signale_kurz(TimerSignale(False, False, False, False, False))
+    'Keine Signale'
+    """
+    teile: list[str] = []
+    if signale.ton:
+        teile.append(
+            f"{KLAENGE.get(signale.klang, 'Ton')} ({QUELLEN[signale.quelle]} "
+            f"{signale.lautstaerke} %)" + (" mit 3-2-1" if signale.countdown else "")
+        )
+    if signale.vibration:
+        teile.append("Vibration")
+    if signale.wach:
+        teile.append("Bildschirm an")
+    if signale.notizen:
+        teile.append("Abschnitte in HRV")
+    return " · ".join(teile) or "Keine Signale"
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +428,36 @@ def signal(alt: TimerStand | None, neu: TimerStand) -> str | None:
     if neu.laeuft and any(neu.rest_s <= k < alt.rest_s for k in COUNTDOWN_S if k < neu.abschnitt_s):
         return COUNTDOWN
     return None
+
+
+def klang_fuer(art: str, stand: TimerStand, profil: TimerProfil, signale: TimerSignale) -> str:
+    """Welcher Klang zu einem Signal (`signal`) spielt.
+
+    Countdown bleibt der kurze Ton. Beim Wechsel: Beginnt eine neue Runde und
+    hat das Profil einen Rundenklang, der; sonst der Klang des Abschnitts,
+    sonst der Standardklang. Am Ende der Endklang des Profils, sonst Fanfare.
+
+    >>> p = TimerProfil(abschnitte=[Abschnitt("Belastung", 30, "glocke1"),
+    ...                 Abschnitt("Pause", 15)], runden=3, runden_klang="gong")
+    >>> def st(runde, index):
+    ...     return TimerStand(runde, index, "", 30, 30, 0, True, False)
+    >>> s = TimerSignale(klang="glocke3")
+    >>> klang_fuer("wechsel", st(1, 1), p, s), klang_fuer("wechsel", st(2, 0), p, s)
+    ('glocke3', 'gong')
+    >>> p.runden_klang = ""; klang_fuer("wechsel", st(2, 0), p, s)
+    'glocke1'
+    >>> klang_fuer("ende", st(3, 1), p, s), klang_fuer("countdown", st(1, 0), p, s)
+    ('ende', 'countdown')
+    """
+    if art == COUNTDOWN:
+        return COUNTDOWN
+    if art == ENDE:
+        return profil.ende_klang or ENDE
+    if stand.index == 0 and stand.runde > 1 and profil.runden_klang:
+        return profil.runden_klang
+    if 0 <= stand.index < len(profil.abschnitte) and profil.abschnitte[stand.index].klang:
+        return profil.abschnitte[stand.index].klang
+    return signale.klang or STANDARD_KLANG
 
 
 @dataclass(frozen=True, slots=True)
@@ -563,6 +696,8 @@ __all__ = [
     "ENDE",
     "MAX_ABSCHNITT_S",
     "MAX_RUNDEN",
+    "QUELLEN",
+    "STANDARD_KLANG",
     "WECHSEL",
     "Abschnitt",
     "Marke",
@@ -572,7 +707,9 @@ __all__ = [
     "TimerStand",
     "dauer_lesen",
     "dauer_text",
+    "klang_fuer",
     "signal",
+    "signale_kurz",
     "standard_profile",
     "timer_profile_lesen",
     "timer_profile_schreiben",

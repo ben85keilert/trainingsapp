@@ -1173,3 +1173,67 @@ def test_seed_tags_stehen_alphabetisch(con) -> None:
     seed_einspielen(con)
     typen = TagRepo(con).namen("typ")
     assert typen == sorted(typen, key=str.casefold)
+
+
+def test_plan_reihenfolge_und_mehrfache_uebung(welt) -> None:
+    """Rumpfbeuge am Anfang und am Ende (Ben, 14.10.2026): umordnen, doppelt aufnehmen."""
+    con, _repo, ich, _sitzung = welt
+    plaene = PlanRepo(con)
+    plan = Plan(name="Morgens", subject_id=ich.id)
+    plaene.speichern(plan)
+    a = plaene.uebung_hinzufuegen(plan.id, seed_id("wadenheben"))
+    b = plaene.uebung_hinzufuegen(plan.id, seed_id("einbeinstand"))
+    c = plaene.uebung_hinzufuegen(plan.id, seed_id("wadenheben"))  # dieselbe noch einmal
+    assert [i.id for i in plaene.laden(plan.id).items] == [a.id, b.id, c.id]
+
+    plaene.reihenfolge_setzen(plan.id, [b.id, c.id, a.id, "gibt-es-nicht"])
+    items = plaene.laden(plan.id).items
+    assert [i.id for i in items] == [b.id, c.id, a.id]
+    assert [i.order for i in items] == [0, 1, 2]
+
+    # Unvollständige Liste: der Rest reiht sich dahinter ein
+    plaene.reihenfolge_setzen(plan.id, [a.id])
+    assert [i.id for i in plaene.laden(plan.id).items] == [a.id, b.id, c.id]
+
+
+def test_satz_anhaengen_neu_beginnt_eigenen_eintrag(welt) -> None:
+    """Zweite Stelle derselben Übung im Plan: nicht an die erste anhängen."""
+    con, repo, _ich, sitzung = welt
+    uebung = _wadenheben(con)
+    heute = lokaler_tag(jetzt())
+    repo.satz_anhaengen(sitzung, uebung, "reps", 15, heute)
+    repo.satz_anhaengen(sitzung, uebung, "reps", 20, heute, neu=True)
+    repo.satz_anhaengen(sitzung, uebung, "reps", 20, heute)  # hängt an den neuesten an
+    assert sorted(e.shorthand() for e in repo.eintraege(sitzung.id)) == ["15", "2x20"]
+    repo.wert_setzen(sitzung, uebung, "reps", [10], heute, neu=True)
+    assert len(repo.eintraege(sitzung.id)) == 3
+
+
+def test_eintrag_mit_zusatzfeld_der_planuebung_und_notiz(welt) -> None:
+    """Gewicht nur in der Planübung (Ben, 14.10.2026): Kopie und Kennzahl stimmen trotzdem."""
+    from trainingsapp.core.standards import mit_plan_spec
+
+    con, repo, ich, sitzung = welt
+    uebung = _wadenheben(con)
+    assert uebung.result_spec.field_by_key("weight") is None
+    plaene = PlanRepo(con)
+    plan = Plan(name="P", subject_id=ich.id)
+    plaene.speichern(plan)
+    item = plaene.uebung_hinzufuegen(plan.id, uebung.id)
+    plaene.eingabe_setzen(item.id, "", {}, ["reps", "weight"])
+    erweitert = mit_plan_spec(plaene.item_laden(item.id), uebung)
+
+    heute = lokaler_tag(jetzt())
+    e = repo.satz_anhaengen(sitzung, erweitert, "reps", 15, heute, {"weight": 10})
+    assert e.spec_snapshot.field_by_key("weight") is not None
+    assert [m.value for m in repo.verlauf(ich.id, f"{uebung.id}:weight")] == [10.0]
+    # Die Übung selbst bleibt unverändert
+    assert ExerciseRepo(con).laden(uebung.id).result_spec.field_by_key("weight") is None
+
+    # Notiz: an den heutigen Eintrag, sonst ein Eintrag „gemacht + Notiz“
+    mit_notiz = repo.eintrag_notiz_setzen(sitzung, erweitert, "Knie gut", heute)
+    assert mit_notiz.note == "Knie gut" and mit_notiz.result == e.result
+    assert len(repo.eintraege(sitzung.id)) == 1
+    andere = ExerciseRepo(con).laden(seed_id("einbeinstand"))
+    neu = repo.eintrag_notiz_setzen(sitzung, andere, "wackelig", heute)
+    assert neu.result == {} and neu.note == "wackelig"

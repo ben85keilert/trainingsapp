@@ -13,7 +13,7 @@ from datetime import timedelta
 import flet as ft
 
 from trainingsapp.core.models import Plan
-from trainingsapp.core.plaene import heutige_plaene, warum_nicht
+from trainingsapp.core.plaene import erledigte, heutige_plaene, warum_nicht
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.tag import tag_titel, tagesansicht
@@ -43,7 +43,7 @@ def heute(page: ft.Page, state: AppState) -> ft.Control:
         return handler
 
     def plan_zeile(plan: Plan, zusaetzlich: bool) -> ft.Control:
-        gemacht = sum(1 for item in plan.items if anzahl.get(item.exercise_id))
+        gemacht = len(erledigte(plan.items, anzahl))
         if not plan.items:
             stand = "noch leer — antippen und Übungen hinzufügen"
         else:

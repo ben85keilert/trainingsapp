@@ -467,6 +467,30 @@ def vorrat_feld(key: str) -> FieldSpec | None:
     return next((replace(f) for f in FELDVORRAT if f.key == key), None)
 
 
+#: Feldtypen, aus denen Kennzahlen (und damit Kurven im Verlauf) entstehen
+KENNZAHL_TYPEN: frozenset[FieldType] = frozenset(
+    {
+        FieldType.SET_LIST,
+        FieldType.INT,
+        FieldType.FLOAT,
+        FieldType.DURATION,
+        FieldType.DEGREES,
+        FieldType.WEIGHT,
+        FieldType.DISTANCE,
+        FieldType.SCALE,
+    }
+)
+
+
+def kennzahl_keys(felder: list[FieldSpec]) -> list[str]:
+    """Welche Felder Kennzahlen liefern — Zahlen ja, Seite/Ja-Nein/Text nicht.
+
+    >>> kennzahl_keys([vorrat_feld(k) for k in ("reps", "side", "weight", "note")])
+    ['reps', 'weight']
+    """
+    return [f.key for f in felder if f.type in KENNZAHL_TYPEN]
+
+
 # ---------------------------------------------------------------------------
 # Häufige Vorlagen — Schnellstart beim Anlegen einer Übung
 # ---------------------------------------------------------------------------
@@ -609,6 +633,7 @@ def werte_modernisieren(werte: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "FELDVORRAT",
+    "KENNZAHL_TYPEN",
     "SPEC_BENCHMARK_ZEIT",
     "SPEC_HALTEN",
     "SPEC_SAETZE_WDH",
@@ -624,6 +649,7 @@ __all__ = [
     "format_wert",
     "ist_altes_satzformat",
     "ist_leer",
+    "kennzahl_keys",
     "modernisieren",
     "parameter_werte",
     "skala_bereich_text",

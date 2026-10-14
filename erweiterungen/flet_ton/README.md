@@ -20,7 +20,16 @@ if verfuegbar(page):                 # nur in der gebauten App (Android)
     page.services.append(ton)
     await ton.laden("piep", wav_bytes)   # einmal: WAV als Bytes
     await ton.spielen("piep")            # beliebig oft, sofort (Quelle bleibt geladen)
+    await ton.spielen("piep", 0.6, "wecker")   # 60 % der Weckerlautstärke
 ```
+
+**Lautstärkeregler** (`quelle`, nur Android): `medien` (Vorgabe — Medienlautstärke, die
+die Lautstärketasten in der App regeln; mit Kopfhörern kommt der Ton dort an), `wecker`
+(Weckerlautstärke, immer auch über den Lautsprecher) oder `klingelton` (Nutzung
+„Sonifikation" → Klingelton-/Systemlautstärke; bis 14.10.2026 die einzige Wahl). Der
+Fokus bleibt in allen Fällen kurz und duckend. `lautstaerke` ist ein Anteil des Reglers.
+iOS kennt für Apps nur einen Regler; dort gilt `ambient` (mischt mit Musik, schweigt bei
+Stummschalter) — und die Erweiterung ist bisher nur für Android gebaut (`verfuegbar`).
 
 Stolperfallen (wie bei flet_ble):
 

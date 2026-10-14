@@ -1,7 +1,7 @@
 """Übungspakete — das Dateiformat.
 
 Übungen kommen über Pakete (Ben, 14.10.2026): Die mitgelieferten stehen im
-Paket „Grundausstattung“ (`data/seed/exercises.json`); weitere — Qigong,
+Paket „Standard“ (`data/seed/standard.toml`); weitere — Qigong,
 Pilates, Yoga, die Sammlung von jemand anderem — kommen per Import dazu, und
 ausgewählte Übungen gehen per Export als Datei hinaus. Eine Paketdatei ist JSON::
 
@@ -20,7 +20,7 @@ Alle Felder: `docs/uebungspakete.md`.
 zweiter Import „dieselbe Übung, neuer Stand“. Exportierte Übungen tragen
 ihre ID (``"id"``). Wer ein Paket von Hand schreibt, gibt stattdessen einen
 Schlüssel an (``"key"``, sonst zählt der Name); die ID folgt per UUIDv5 aus
-Paket und Schlüssel. Die Grundausstattung behält dabei die IDs von vor den
+Paket und Schlüssel. „Standard“ (früher „Grundausstattung“) behält die IDs von vor den
 Paketen (nur aus dem Schlüssel) — sonst stünde jede mitgelieferte Übung nach
 dem Update doppelt da.
 
@@ -50,7 +50,8 @@ FORMAT_VERSION = 1
 #: Einmal gewählt, nie ändern, sonst bekäme jede Übung eine neue ID.
 NAMENSRAUM = uuid.UUID("6f1c2b3a-7d4e-4a5b-9c8d-1e2f3a4b5c6d")
 
-#: Das Paket der mitgelieferten Übungen (= ``paket_id("Grundausstattung")``)
+#: Das Paket der mitgelieferten Übungen, „Standard“ — die ID stammt aus seinem
+#: früheren Namen (= ``paket_id("Grundausstattung")``)
 GRUNDAUSSTATTUNG = "2c1194ea-67ba-536d-aa7d-bf74bc3c73d4"
 
 #: Eingabe ohne Angabe im Paket: Wiederholungen je Satz (wie beim Seed bisher)

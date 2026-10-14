@@ -30,7 +30,7 @@ Papier.
 ## Aufgabe 3: Karte erweitern
 
 Ergänze `uebungskarte()` um die **Kategorie** als kleine Markierung
-(z. B. „Atmung", „Schulter"). Sie steht in `uebung["category"]`.
+(z. B. „Atmung, Entspannung"). Sie steht in `uebung["typen"]` — einer Liste, die du mit `", ".join(…)` zu einem Text machst.
 
 Anforderungen:
 - klein und dezent, sie darf den Namen nicht erschlagen

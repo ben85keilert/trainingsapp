@@ -27,8 +27,8 @@ Regeln (Ben, 14.10.2026; `docs/uebungspakete.md`):
   keine Variante ist (keine Ketten), und wenn die Übung nicht schon Original
   anderer ist.
 
-Der Seed (`data/seed.py`) ist ein Import der Grundausstattung, der Vorhandenes
-nur anfasst, wenn deren Version gestiegen ist — und nichts tut, wenn sie im
+Der Seed (`data/seed.py`) ist ein Import des Pakets „Standard“, der Vorhandenes
+nur anfasst, wenn dessen Version gestiegen ist — und nichts tut, wenn es im
 Paketmanager entfernt wurde.
 """
 
@@ -328,7 +328,7 @@ class PaketRepo:
 
         ``aktualisieren=False`` legt nur Neues an und lässt die Übungen des
         Pakets, die es schon gibt, stehen — so spielt der Seed die
-        Grundausstattung ein, solange ihre Version gleich bleibt. Ihr Paketstand
+        „Standard“ ein, solange seine Version gleich bleibt. Ihr Paketstand
         wird trotzdem aufgefrischt. ``neue_tags_oben`` wie bei `ExerciseRepo.speichern`.
 
         Schreibt der Import keine Übung und ist das Paket nicht installiert

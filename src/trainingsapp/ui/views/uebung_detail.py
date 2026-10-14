@@ -31,7 +31,7 @@ from trainingsapp.ui.state import AppState
 
 
 def _beschreibung(uebung: Exercise, herkunft: str) -> ft.Control:
-    """Die Beschreibung, dahinter leise die Herkunft: „(Paket „Grundausstattung“)“."""
+    """Die Beschreibung, dahinter leise die Herkunft: „(Paket „Standard“)“."""
     return ft.Text(
         uebung.description or "—",
         spans=[

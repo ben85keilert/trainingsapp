@@ -62,7 +62,7 @@ def test_paketansichten_lassen_sich_bauen(page, state) -> None:
     assert pakete_view(page, state).route == "/pakete"
     ansicht = pakete_view(page, state, "/einstellungen/pakete")
     assert ansicht.route == "/einstellungen/pakete"
-    assert "Grundausstattung" in texte(ansicht)
+    assert "Standard" in texte(ansicht)
 
     leer = paket_export_view(page, state, "/pakete")
     assert leer.route == "/pakete/export"
@@ -72,7 +72,7 @@ def test_paketansichten_lassen_sich_bauen(page, state) -> None:
     n = len(state.uebungen.alle())
     assert knopf.content == f"Exportieren ({n} Übungen)" and not knopf.disabled
     name = next(c for v in grund.controls for c in alle(v) if isinstance(c, ft.TextField))
-    assert name.value == "Grundausstattung"
+    assert name.value == "Standard"
 
 
 def test_herkunft_steht_klein_hinter_der_beschreibung(page, state) -> None:
@@ -80,7 +80,7 @@ def test_herkunft_steht_klein_hinter_der_beschreibung(page, state) -> None:
     browser = ft.UrlLauncher()
     seed = state.uebungen.laden(seed_id("wadenheben"))
     inhalt = texte(uebung_detail(page, state, seed, browser))
-    assert "  (Paket „Grundausstattung“)" in inhalt
+    assert "  (Paket „Standard“)" in inhalt
     assert "VARIANTEN" not in inhalt
     assert not any("Mitgelieferte Übung" in t for t in inhalt)
 
@@ -160,7 +160,7 @@ def test_import_ueber_die_oberflaeche(page, state, monkeypatch) -> None:
     assert frage.title.value == "„Qigong“ importieren?"
     assert "• 1 neu" in [c.value for c in frage.content.controls]
     frage.actions[1].on_click()  # „Importieren“
-    assert [p.name for p, _ in state.pakete.alle()] == ["Grundausstattung", "Qigong"]
+    assert [p.name for p, _ in state.pakete.alle()] == ["Standard", "Qigong"]
     assert "1 neu" in dialoge[-1].content.value
 
 
@@ -246,9 +246,9 @@ def test_paketmanager_auf_standard_entfernen_wieder_installieren(page, state) ->
     )
     wieder.on_click()
     frage = dialoge[-1]
-    assert frage.title.value == "„Grundausstattung“ wieder installieren?"
+    assert frage.title.value == "„Standard“ wieder installieren?"
     frage.actions[1].on_click()
-    assert [p.name for p, _ in state.pakete.alle()] == ["Grundausstattung"]
+    assert [p.name for p, _ in state.pakete.alle()] == ["Standard"]
     assert state.uebungen.laden(wade.id) is not None
 
 
@@ -261,7 +261,7 @@ def test_uebung_zeigt_geaendert_und_setzt_zurueck(page, state) -> None:
     state.uebungen.speichern(wade)
 
     ansicht = uebung_detail(page, state, wade, ft.UrlLauncher())
-    assert "  (Paket „Grundausstattung“, geändert)" in texte(ansicht)
+    assert "  (Paket „Standard“, geändert)" in texte(ansicht)
     knopf = next(
         c
         for v in ansicht.controls

@@ -6,20 +6,15 @@ Tippe eine Übung an: eine Detailansicht legt sich obenauf. Der Zurück-Knopf
 nimmt sie wieder herunter — auf Android tut das auch die Zurück-Taste.
 """
 
-import json
+import tomllib
 from pathlib import Path
 
 import flet as ft
 
 SEED = (
-    Path(__file__).resolve().parents[3]
-    / "src"
-    / "trainingsapp"
-    / "data"
-    / "seed"
-    / "exercises.json"
+    Path(__file__).resolve().parents[3] / "src" / "trainingsapp" / "data" / "seed" / "standard.toml"
 )
-UEBUNGEN = {u["key"]: u for u in json.loads(SEED.read_text(encoding="utf-8"))["exercises"]}
+UEBUNGEN = {u["key"]: u for u in tomllib.loads(SEED.read_text(encoding="utf-8"))["exercises"]}
 
 
 def main(page: ft.Page) -> None:
@@ -38,7 +33,7 @@ def main(page: ft.Page) -> None:
                     controls=[
                         ft.ListTile(
                             title=ft.Text(u["name"]),
-                            subtitle=ft.Text(u["category"], size=12),
+                            subtitle=ft.Text(", ".join(u.get("typen", [])), size=12),
                             trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
                             # push_route setzt die Route — der Rest passiert im Handler.
                             # Es ist eine Coroutine; aus einem Lambda heraus startet
@@ -70,7 +65,7 @@ def main(page: ft.Page) -> None:
                                 spacing=10,
                                 controls=[
                                     ft.Icon(u.get("icon_key") or "fitness_center", size=32),
-                                    ft.Text(u["category"], size=16, opacity=0.7),
+                                    ft.Text(", ".join(u.get("typen", [])), size=16, opacity=0.7),
                                 ],
                             ),
                             ft.Divider(),

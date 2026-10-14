@@ -85,7 +85,7 @@ Und in der Karte, in der mittleren `Column`:
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         controls=[
             ft.Text(uebung["name"], weight=ft.FontWeight.BOLD, size=15),
-            kategorie_chip(uebung["category"]),
+            kategorie_chip(", ".join(uebung.get("typen", []))),
         ],
     ),
 )

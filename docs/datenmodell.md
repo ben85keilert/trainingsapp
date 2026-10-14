@@ -68,7 +68,7 @@ sich eigenständig machen.
 dem die Übung auf dieses Gerät kam (`package`: Name, Beschreibung, Version);
 `NULL` = eigene Übung, hier angelegt oder kopiert. Ein Import aktualisiert nur die
 Übungen *desselben* Pakets — eigene, fremde und endgültig gelöschte bleiben. Der
-mitgelieferte Katalog ist das Paket „Grundausstattung“ und behält seine
+mitgelieferte Katalog ist das Paket „Standard“ (früher „Grundausstattung“) und behält seine
 UUIDv5-IDs. Seit Migration 015 trägt jede Paketübung ihren Paketstand
 (`exercise.package_standard_json`, schreibt nur der Import — `ExerciseRepo.speichern`
 lässt ihn stehen) für „Auf Paketstand setzen“; `package.removed_at` heißt entfernt

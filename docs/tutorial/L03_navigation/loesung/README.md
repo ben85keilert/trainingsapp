@@ -97,7 +97,7 @@ nach einem Neustart auf der Videoroute kein Zurück.
 ## Aufgabe 4: mein_geruest.py
 
 ```python
-import json
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -109,7 +109,7 @@ SEED = (
     / "trainingsapp"
     / "data"
     / "seed"
-    / "exercises.json"
+    / "standard.toml"
 )
 
 
@@ -126,7 +126,7 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
         controls=[
             ft.ListTile(
                 title=ft.Text(u["name"]),
-                subtitle=ft.Text(u["category"], size=12),
+                subtitle=ft.Text(", ".join(u.get("typen", [])), size=12),
                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
                 on_click=lambda e, k=u["key"]: page.run_task(page.push_route, f"/uebung/{k}"),
             )
@@ -155,7 +155,7 @@ def main(page: ft.Page) -> None:
     page.padding = 0
     page.theme = ft.Theme(color_scheme_seed="#2E7D6E", use_material3=True)
 
-    state = AppState(uebungen=json.loads(SEED.read_text(encoding="utf-8"))["exercises"])
+    state = AppState(uebungen=tomllib.loads(SEED.read_text(encoding="utf-8"))["exercises"])
 
     def inhalt() -> ft.Control:
         if state.nav_index == 0:

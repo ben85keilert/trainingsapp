@@ -9,6 +9,8 @@ bleiben, wie sie sind.
 from __future__ import annotations
 
 import json
+import re
+import tomllib
 import uuid
 
 import pytest
@@ -69,14 +71,53 @@ def qigong(**aenderungen: object) -> dict:
 
 
 def test_grundausstattung_behaelt_die_ids_von_vor_den_paketen() -> None:
-    """Sonst stünde jede mitgelieferte Übung nach dem Update doppelt da."""
-    roh = json.loads(SEED_DATEI.read_text(encoding="utf-8"))
+    """Sonst stünde jede mitgelieferte Übung nach dem Update doppelt da.
+
+    Das Paket heißt seit 14.10.2026 „Standard“; ID und Übungs-IDs sind die von
+    „Grundausstattung“ geblieben.
+    """
+    roh = tomllib.loads(SEED_DATEI.read_text(encoding="utf-8"))
     inhalt = seed_inhalt()
     assert inhalt.paket.id == GRUNDAUSSTATTUNG == paket_id("Grundausstattung")
-    assert inhalt.paket.name == "Grundausstattung"
+    assert inhalt.paket.name == "Standard"
     erwartet = [str(uuid.uuid5(NAMENSRAUM, e["key"])) for e in roh["exercises"]]
     assert [u.id for u in inhalt.uebungen] == erwartet
     assert all(u.package_id == GRUNDAUSSTATTUNG and u.is_builtin for u in inhalt.uebungen)
+
+
+#: Typen und Regionen, die das Standardpaket verwenden darf — ein Tippfehler
+#: („Kraeftigung“) legte sonst auf jedem Gerät einen neuen Tag an. Neuer Tag
+#: gewollt? Hier ergänzen und in der Kopfzeile von standard.toml.
+STANDARD_TYPEN = {
+    "Atmung", "Entspannung", "HRV", "Mobilisation", "Dehnung", "Kräftigung",
+    "Isometrie", "Gleichgewicht", "Ausdauer", "Benchmark", "Messung",
+}  # fmt: skip
+STANDARD_REGIONEN = {"Nacken", "Schulter", "Arm", "Hand", "Rumpf", "Rücken", "Hüfte", "Bein", "Fuß"}
+
+
+def test_standardpaket_ist_sauber_gepflegt() -> None:
+    """Die Paketdatei wird von Hand gepflegt — hier fallen Tippfehler auf."""
+    from trainingsapp.ui.components.icons import AUSWAHL
+
+    eintraege = tomllib.loads(SEED_DATEI.read_text(encoding="utf-8"))["exercises"]
+    keys = [e.get("key", "") for e in eintraege]
+    assert all(re.fullmatch(r"[a-z0-9_]+", k) for k in keys), "key fehlt oder hat Umlaute"
+    assert len(keys) == len(set(keys)), "key doppelt"
+    for e in eintraege:
+        wo = f"Übung „{e['name']}“"
+        assert e.get("description"), f"{wo}: Beschreibung fehlt"
+        assert e.get("icon_key") in AUSWAHL, f"{wo}: Symbol {e.get('icon_key')!r} unbekannt"
+        assert set(e.get("typen", [])) <= STANDARD_TYPEN, f"{wo}: unbekannter Typ"
+        assert set(e.get("regionen", [])) <= STANDARD_REGIONEN, f"{wo}: unbekannte Region"
+        assert e.get("variante_von", keys[0]) in keys, f"{wo}: Original fehlt"
+    assert len(seed_inhalt().uebungen) == len(eintraege)  # liest sich auch fehlerfrei
+
+
+def test_tippfehler_im_toml_nennt_die_zeile(tmp_path) -> None:
+    datei = tmp_path / "kaputt.toml"
+    datei.write_text('[paket]\nname = "X"\n\n[[exercises]]\nname = "A\n', encoding="utf-8")
+    with pytest.raises(PaketFehler, match=r"kaputt\.toml: .*line 5"):
+        seed_inhalt(datei)
 
 
 def test_schluessel_und_variante_werden_zu_ids() -> None:
@@ -113,13 +154,13 @@ def test_name_aus_dem_dateinamen_wenn_der_kopf_fehlt() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Seed = Paket „Grundausstattung“
+# Seed = Paket „Standard“
 # ---------------------------------------------------------------------------
 
 
 def test_seed_installiert_die_grundausstattung(con) -> None:
     pakete = PaketRepo(con).alle()
-    assert [(p.name, n) for p, n in pakete] == [("Grundausstattung", len(seed_inhalt().uebungen))]
+    assert [(p.name, n) for p, n in pakete] == [("Standard", len(seed_inhalt().uebungen))]
     assert all(u.package_id == GRUNDAUSSTATTUNG for u in ExerciseRepo(con).alle())
 
 
@@ -145,7 +186,7 @@ def test_hoehere_version_aktualisiert_die_grundausstattung(con, tmp_path) -> Non
     u.description = "Meine Fassung"
     repo.speichern(u)
 
-    roh = json.loads(SEED_DATEI.read_text(encoding="utf-8"))
+    roh = tomllib.loads(SEED_DATEI.read_text(encoding="utf-8"))
     datei = tmp_path / "exercises.json"
     datei.write_text(json.dumps(roh), encoding="utf-8")
     seed_einspielen(con, datei)
@@ -236,11 +277,11 @@ def test_eigene_uebungen_aendert_kein_import(con) -> None:
     assert vorschau.status == {eigene.id: Status.EIGENE}
     assert repo.laden(eigene.id).description == "seither geändert"
     assert repo.laden(eigene.id).package_id is None
-    assert [p.name for p, _ in pakete.alle()] == ["Grundausstattung"]
+    assert [p.name for p, _ in pakete.alle()] == ["Standard"]
 
 
 def test_fremde_und_geloeschte_bleiben(con) -> None:
-    """Eine Übung der Grundausstattung in einem anderen Paket: gehört weiter ihrem Paket."""
+    """Eine Übung aus „Standard“ in einem anderen Paket: gehört weiter ihrem Paket."""
     repo = ExerciseRepo(con)
     wade = repo.laden(seed_id("wadenheben"))
     nacken = repo.laden(seed_id("nacken_dehnung"))
@@ -385,7 +426,7 @@ def test_entfernen_und_wieder_installieren(con) -> None:
     baum, tief = inhalt.uebungen
 
     assert pakete.entfernen(inhalt.paket.id) == 2
-    assert [p.name for p, _ in pakete.alle()] == ["Grundausstattung"]
+    assert [p.name for p, _ in pakete.alle()] == ["Standard"]
     assert [(p.name, n) for p, n in pakete.entfernte()] == [("Qigong", 2)]
     assert repo.laden(baum.id) is None  # im Papierkorb
     assert {u.id for u in repo.papierkorb()} >= {baum.id, tief.id}
@@ -398,7 +439,7 @@ def test_entfernen_und_wieder_installieren(con) -> None:
     pakete.importieren(zurueck)
     assert repo.laden(baum.id) is not None
     assert repo.laden(tief.id).family_id == baum.id
-    assert [p.name for p, _ in pakete.alle()] == ["Grundausstattung", "Qigong"]
+    assert [p.name for p, _ in pakete.alle()] == ["Standard", "Qigong"]
     assert pakete.entfernte() == []
 
 

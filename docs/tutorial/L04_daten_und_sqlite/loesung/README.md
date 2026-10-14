@@ -327,7 +327,10 @@ Der Namensraum darf sich **nie** ändern — sonst bekämen alle mitgelieferten
 > dieselben UUIDv5-IDs, Vorhandenes bleibt unangetastet —, nur steckt die
 > Schleife jetzt in `PaketRepo.importieren` (`data/pakete.py`). Neu ist eine
 > Ausnahme: Steigt die Version im Paketkopf, aktualisiert der nächste Start die
-> Übungen der Grundausstattung, und Änderungen daran gehen verloren.
+> Übungen der Grundausstattung, und Änderungen daran gehen verloren. Seit dem
+> Abend heißt das Paket „Standard“ und liegt als TOML vor
+> (`data/seed/standard.toml`, von Hand gepflegt, mit Kommentaren); `seed_laden()`
+> liest es mit `tomllib` aus der Standardbibliothek.
 
 `seed_laden()` ist bewusst von der Datenbank getrennt: Es liest das JSON und
 baut Domänenobjekte. So lässt sich der Katalog testen, ohne eine Datenbank

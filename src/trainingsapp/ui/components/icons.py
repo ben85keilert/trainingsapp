@@ -12,7 +12,7 @@ from __future__ import annotations
 import flet as ft
 
 #: Zur Auswahl angeboten — in dieser Reihenfolge. Die Namen entsprechen den
-#: Material-Icons in Kleinschreibung, so wie sie auch in `exercises.json` stehen.
+#: Material-Icons in Kleinschreibung, so wie sie auch in den Paketdateien stehen.
 AUSWAHL: list[str] = [
     "fitness_center",
     "self_improvement",

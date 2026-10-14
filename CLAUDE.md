@@ -112,7 +112,7 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `ui/components/spec_form.py` ein Widget registrieren.
 
 - **Übungen kommen über Pakete** (Ben, 14.10.2026). Der mitgelieferte Katalog ist
-  das Paket „Grundausstattung“ (`data/seed/exercises.json`, IDs weiter per UUIDv5
+  das Paket „Standard“ (`data/seed/standard.toml` — TOML, weil von Hand gepflegt; IDs per UUIDv5
   aus dem Schlüssel); weitere kommen per Import, der Export schreibt nur Übungen.
   `exercise.package_id` = Herkunft, `NULL` = eigene Übung (auch Kopien). Ein Import
   aktualisiert nur die Übungen desselben Pakets — Änderungen daran gehen verloren

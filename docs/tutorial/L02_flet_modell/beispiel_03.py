@@ -7,18 +7,13 @@ Das erste Stück, das später wirklich in der App landet: eine Karte, wie sie im
 keine erfundenen Beispiele.
 """
 
-import json
+import tomllib
 from pathlib import Path
 
 import flet as ft
 
 SEED = (
-    Path(__file__).resolve().parents[3]
-    / "src"
-    / "trainingsapp"
-    / "data"
-    / "seed"
-    / "exercises.json"
+    Path(__file__).resolve().parents[3] / "src" / "trainingsapp" / "data" / "seed" / "standard.toml"
 )
 
 
@@ -73,7 +68,7 @@ def main(page: ft.Page) -> None:
     page.theme = ft.Theme(color_scheme_seed="#2E7D6E", use_material3=True)
     page.theme_mode = ft.ThemeMode.SYSTEM
 
-    uebungen = json.loads(SEED.read_text(encoding="utf-8"))["exercises"]
+    uebungen = tomllib.loads(SEED.read_text(encoding="utf-8"))["exercises"]
     ausgewaehlt = ft.Text("", italic=True, color=ft.Colors.PRIMARY)
 
     def gewaehlt(e: ft.ControlEvent) -> None:

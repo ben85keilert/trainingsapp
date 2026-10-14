@@ -1,7 +1,8 @@
 # Übungspakete
 
 Übungen kommen über Pakete (Ben, 14.10.2026). Die mitgelieferten stehen im Paket
-**„Grundausstattung“** (`src/trainingsapp/data/seed/exercises.json`); weitere —
+**„Standard“** (`src/trainingsapp/data/seed/standard.toml`, bis 14.10. „Grundausstattung“
+als JSON — siehe [Mitgelieferte Pakete pflegen](#mitgelieferte-pakete-pflegen-toml)); weitere —
 Qigong, Pilates, Yoga, die Sammlung von jemand anderem — kommen per Import dazu,
 und ausgewählte Übungen gehen per Export als Datei hinaus.
 
@@ -26,7 +27,7 @@ Tabelle `package` und Spalte `exercise.package_id` seit Migration 014,
 **Paketstand.** Jede Übung eines Pakets trägt ihre Standardwerte aus dem Paket
 (`package_standard_json`, genau die Felder des Dateiformats unten: Beschreibung,
 Parameter samt Chips, Ziel, Planparameter, Typen, Regionen, Videos, Variante).
-Jeder Import frischt ihn auf, die Grundausstattung jeder Start. „Auf Paketstand
+Jeder Import frischt ihn auf, beim Paket „Standard“ jeder Start. „Auf Paketstand
 setzen“ schreibt ihn zurück — was man geändert hat, geht verloren; der Ort
 (Katalog, Archiv, Papierkorb) bleibt, Pläne behalten ihre eigenen Einstellungen,
 Einträge bleiben.
@@ -35,8 +36,8 @@ Einträge bleiben.
 Löschen einer Übung: raus aus Katalog und Plänen, Einträge bleiben, nach der Frist
 endgültig (nur ohne Einträge). Das Paket steht danach unter „Entfernt“.
 „Wieder installieren“ (ohne Datei, aus dem Paketstand) oder ein neuer Import holt
-**alles** zurück, auch was inzwischen endgültig gelöscht war. Eine entfernte
-Grundausstattung legt der Start nicht nach.
+**alles** zurück, auch was inzwischen endgültig gelöscht war. Ein entferntes
+Paket „Standard“ legt der Start nicht nach.
 
 ## Regeln beim Import
 
@@ -57,9 +58,9 @@ Grundausstattung legt der Start nicht nach.
 - Vor dem Schreiben zeigt die App, was passiert (neu, aktualisiert, unverändert, …).
   Schreibt der Import nichts — etwa der eigene Export, wieder eingelesen —, entsteht
   auch kein Paket.
-- **Grundausstattung:** Beim Start kommen nur fehlende Übungen dazu. Erst wenn
-  `paket.version` in `exercises.json` steigt, aktualisiert der nächste Start alle
-  ihre Übungen — wer die Version erhöht, überschreibt damit Änderungen der Nutzer.
+- **Standard:** Beim Start kommen nur fehlende Übungen dazu. Erst wenn
+  `paket.version` in `standard.toml` steigt, aktualisiert der nächste Start alle
+  seine Übungen — wer die Version erhöht, überschreibt damit Änderungen der Nutzer.
 
 ## Export
 
@@ -137,10 +138,57 @@ Je Übung:
 | `media[]` | nein | `{kind, source, uri, title, license}`; leere `uri` und `source: "local"` fallen weg |
 | `variante_von` | nein | Schlüssel oder ID des Originals (im Paket oder schon auf dem Gerät) |
 
-**IDs der Grundausstattung:** Sie bleiben, wie sie vor den Paketen waren —
-UUIDv5 nur aus dem Schlüssel (`seed_id`). Für alle anderen Pakete gehört die
-Paket-ID in die Ableitung, damit zwei Pakete denselben Schlüssel verwenden dürfen.
+**IDs von „Standard“:** Sie bleiben, wie sie vor den Paketen waren —
+UUIDv5 nur aus dem Schlüssel (`seed_id`); die Paket-ID stammt aus dem früheren
+Namen „Grundausstattung“ (Konstante `GRUNDAUSSTATTUNG`). Für alle anderen Pakete
+gehört die Paket-ID in die Ableitung, damit zwei Pakete denselben Schlüssel
+verwenden dürfen.
 
 **Varianten:** `variante_von` gilt, wenn das Original nach dem Import da ist. Ist
 das Original selbst Variante, hängt die Übung an dessen Original (keine Ketten);
 eine Übung, die Original anderer ist, bleibt eigenständig.
+
+## Mitgelieferte Pakete pflegen (TOML)
+
+Was mit der App kommt, wird von Hand gepflegt — darum steht es nicht als JSON im
+Repository, sondern als **TOML** (Ben, 14.10.2026): eine Übung je
+`[[exercises]]`-Block, Kommentare und Abschnitte zur Übersicht, keine Klammern
+und Kommas, die beim Korrigieren brechen. Die Felder sind **dieselben** wie oben;
+`data/seed.py` liest die Datei mit `tomllib` (Standardbibliothek, läuft also auch
+auf dem Handy) und gibt das Ergebnis an denselben Leser wie ein Import.
+Austauschformat (Import, Export) bleibt JSON.
+
+```toml
+[paket]
+id = "2c1194ea-67ba-536d-aa7d-bf74bc3c73d4"
+name = "Standard"
+version = 1
+
+# ── Dehnung ──────────────────────────────
+[[exercises]]
+key = "waden_dehnung"          # nie ändern — die ID folgt daraus
+name = "Wade dehnen"
+typen = ["Dehnung"]
+regionen = ["Bein", "Fuß"]
+spec = "halten"
+icon_key = "directions_walk"
+description = "Hände an der Wand, ein Bein weit nach hinten. … Je Seite."
+```
+
+- **Neue Übung:** Block kopieren, neuen `key` vergeben — sie kommt beim nächsten
+  Start auf jedes Gerät, ohne Versionswechsel.
+- **Korrektur an einer vorhandenen Übung:** landet sofort im Paketstand („Auf
+  Paketstand setzen“ bietet sie an); überschrieben wird erst, wenn `paket.version`
+  steigt — dann auch Änderungen der Nutzer.
+- **`key` nie ändern:** Ein neuer Schlüssel ist eine neue Übung; die alte bliebe
+  auf allen Geräten stehen.
+- `tests/test_pakete.py` prüft die Datei: Schlüssel eindeutig und ohne Umlaute,
+  Symbol aus `ui/components/icons.py`, Typen und Regionen aus einer festen Liste
+  (Tippfehler legten sonst auf jedem Gerät einen neuen Tag an), Original einer
+  Variante vorhanden. Ein TOML-Syntaxfehler meldet sich mit Zeile und Spalte.
+
+Warum nicht YAML: braucht eine Zusatzbibliothek auf dem Handy, und YAML deutet
+unsere Notation um — `1:30` wird zu `90`, `+20` zu `20`, `no` zu `false`.
+
+Weitere mitgelieferte Pakete (Dehnung, Kräftigung, …) kommen als eigene Datei
+daneben, je Paket eine.

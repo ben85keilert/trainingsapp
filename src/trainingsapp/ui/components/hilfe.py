@@ -55,7 +55,7 @@ eigenständig — sinnvoll, wenn sie stark abweicht (Liegestütz einarmig) — o
 hängst eine Übung an ein anderes Original.
 
 **Pakete** — Übungen kommen über Pakete. Die mitgelieferten stehen im Paket
-„Grundausstattung“, weitere (Qigong, Pilates, Yoga, eine Sammlung von jemand
+„Standard“, weitere (Qigong, Pilates, Yoga, eine Sammlung von jemand
 anderem) importierst du im *Paketmanager* (Einstellungen oder unten im Katalog).
 Aus welchem Paket eine Übung stammt, steht klein hinter ihrer Beschreibung.
 

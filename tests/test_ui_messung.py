@@ -1024,3 +1024,34 @@ async def test_live_titel_landet_in_der_messdatei(daten) -> None:
     )
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
+
+
+def test_titel_vorschlag_ist_der_geuebte_plan(daten) -> None:
+    """Wurde während der Messung aus einem Plan eingetragen, steht er im leeren Titelfeld."""
+    from trainingsapp.core.models import Plan, PlanItem, jetzt, lokaler_tag
+    from trainingsapp.hrv_core.ereignisse import metadaten_schreiben
+
+    state, tmp_path = daten
+    eintrag, pfad = _golden_eintrag(state, tmp_path)
+    metadaten_schreiben(pfad, titel="")
+    uebung = state.uebungen.alle()[0]
+    plan = Plan(name="Beine", subject_id=state.profil.id, items=[PlanItem(exercise_id=uebung.id)])
+    state.plaene.speichern(plan)
+    sitzung = state.sitzungen.session_fuer(state.profil.id, plan.id, lokaler_tag(jetzt()))
+    state.sitzungen.erledigt(sitzung, uebung)
+
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+    kopf = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.Container)
+        and c.on_click is not None
+        and "Titel und Beschreibung hinzufügen" in _baum_texte(c)
+    )
+    kopf.on_click()
+    blatt = seite.aufrufe[-1]
+    titel_feld = next(c for c in _alle_controls(blatt) if isinstance(c, ft.TextField))
+    assert titel_feld.value == "Beine"
+    chips = [c.label.value for c in _alle_controls(blatt) if isinstance(c, ft.Chip)]
+    assert "Beine" in chips  # auch als Vorschlag zum Antippen

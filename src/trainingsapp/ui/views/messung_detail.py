@@ -87,7 +87,12 @@ from trainingsapp.ui.components.notizen import (
     uebungs_katalog,
     uebungsquellen,
 )
-from trainingsapp.ui.components.titel import titel_blatt, titel_kopf, titel_vorschlaege
+from trainingsapp.ui.components.titel import (
+    geuebte_plaene,
+    titel_blatt,
+    titel_kopf,
+    titel_vorschlaege,
+)
 from trainingsapp.ui.components.verlauf import FARBEN
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
@@ -1344,6 +1349,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     def titel_bearbeiten() -> None:
         von = eintrag.started_at
         bis = von + timedelta(seconds=eintrag.duration_s or dauer)
+        plaene = geuebte_plaene(state, von, bis)
         page.show_dialog(
             titel_blatt(
                 rec.titel,
@@ -1351,6 +1357,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 titel_vorschlaege(state, von, bis, rec.ereignisse),
                 titel_speichern,
                 page.pop_dialog,
+                vorgabe=plaene[0] if plaene else "",
             )
         )
 

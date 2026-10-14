@@ -28,6 +28,19 @@ MAX_VORSCHLAEGE = 6
 _TIMER = re.compile(r"^Timer „(.+?)“")
 
 
+def geuebte_plaene(state: Any, von: datetime, bis: datetime) -> list[str]:
+    """Namen der Pläne, aus denen während der Messung (± `RAND`) eingetragen wurde.
+
+    Die meisten Einträge zuerst — der erste ist „der Plan" der Messung.
+    """
+    namen = []
+    for plan_id in state.sitzungen.plaene_waehrend(state.profil.id, von - RAND, bis + RAND):
+        plan = state.plaene.laden(plan_id)
+        if plan is not None:
+            namen.append(plan.name)
+    return namen
+
+
 def titel_vorschlaege(
     state: Any,
     von: datetime,
@@ -39,11 +52,7 @@ def titel_vorschlaege(
     ``state`` ist der `AppState`. Ein Plan zählt, wenn während der Messung
     (± `RAND`) etwas aus ihm eingetragen wurde — die meisten Einträge zuerst.
     """
-    namen: list[str] = []
-    for plan_id in state.sitzungen.plaene_waehrend(state.profil.id, von - RAND, bis + RAND):
-        plan = state.plaene.laden(plan_id)
-        if plan is not None:
-            namen.append(plan.name)
+    namen = geuebte_plaene(state, von, bis)
     for e in ereignisse:
         if m := _TIMER.match(str(e.get("text") or "")):
             namen.append(m.group(1))
@@ -113,11 +122,17 @@ def titel_blatt(
     vorschlaege: Sequence[str],
     speichern: Callable[[str, str], None],
     schliessen: Callable[[], object],
+    *,
+    vorgabe: str = "",
 ) -> ft.BottomSheet:
-    """Blatt zum Bearbeiten — Titel mit Vorschlägen zum Antippen, Beschreibung darunter."""
+    """Blatt zum Bearbeiten — Titel mit Vorschlägen zum Antippen, Beschreibung darunter.
+
+    ``vorgabe`` steht im leeren Titelfeld: der Plan, der während der Messung geübt
+    wurde (Ben: „der Plan gilt als Namensvorschlag").
+    """
     titel_feld = ft.TextField(
         label="Titel",
-        value=titel,
+        value=titel or vorgabe,
         dense=True,
         capitalization=ft.TextCapitalization.SENTENCES,
     )
@@ -183,4 +198,11 @@ def titel_blatt(
     )
 
 
-__all__ = ["MAX_VORSCHLAEGE", "RAND", "titel_blatt", "titel_kopf", "titel_vorschlaege"]
+__all__ = [
+    "MAX_VORSCHLAEGE",
+    "RAND",
+    "geuebte_plaene",
+    "titel_blatt",
+    "titel_kopf",
+    "titel_vorschlaege",
+]

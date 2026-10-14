@@ -51,7 +51,12 @@ from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
 from trainingsapp.ui.components.notizen import Notizfeld, uebungs_katalog, uebungsquellen
-from trainingsapp.ui.components.titel import titel_blatt, titel_kopf, titel_vorschlaege
+from trainingsapp.ui.components.titel import (
+    geuebte_plaene,
+    titel_blatt,
+    titel_kopf,
+    titel_vorschlaege,
+)
 from trainingsapp.ui.components.verlauf import FARBEN, fenster_text
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
@@ -595,6 +600,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             aufnahme.titel, aufnahme.notiz = titel, text
             aktualisieren(erzwingen=True)
 
+        plaene = geuebte_plaene(state, aufnahme.start_utc, utc_jetzt())
         page.show_dialog(
             titel_blatt(
                 aufnahme.titel,
@@ -602,6 +608,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 titel_vorschlaege(state, aufnahme.start_utc, utc_jetzt(), aufnahme.ereignisse),
                 speichern,
                 page.pop_dialog,
+                vorgabe=plaene[0] if plaene else "",
             )
         )
 

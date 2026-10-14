@@ -217,9 +217,11 @@ die Zutaten, aus denen praxis_gui später die „Kontinuitätsuhr" rekonstruiert
 |---|---|
 | `t_wall_s` | Paketankunft, gleicher Nullpunkt wie `messungen[].t_wall_s`, 3 Nachkommastellen |
 | `ppi_ms` | alle Intervalle des Pakets in ms |
-| `fehler_ms` | Fehlerschätzung des Geräts je Intervall in ms |
-| `blocker` | `1` = vom Gerät als unbrauchbar markiert |
-| `kontakt` | `1` = Hautkontakt erkannt |
+| `fehler_ms` | Fehlerschätzung des Geräts je Intervall in ms (Polar `errorEstimate`: erwarteter absoluter Fehler; unter 10 ms sehr genau, über 30 ms meist Bewegung) |
+| `blocker` | `1` = vom Gerät als unbrauchbar markiert (Polar `blockerBit`: Bewegung erkannt) |
+| `kontakt` | `1` = Hautkontakt erkannt — bei Verity Sense und OH1 laut Polar unzuverlässig |
+
+Was die App aus den drei Spalten macht: [korrektur.md](korrektur.md).
 
 Bei einem PPI-Gerät steht der Schlüssel auch dann in der Datei, wenn kein
 einziges Paket ankam (`[]`). Fehlt er in einer Datei, gilt die Ankunftsachse.

@@ -352,6 +352,12 @@ Noch offen:
   Android-Doku sagt, mit Vordergrunddienst nicht — wir folgen Android und
   prüfen es im Vorab-Test (die Hintergrund-Berechtigung ist im Play Store
   schwer zu bekommen).
+- **Verity Sense beim Sport ohne PPI starten** (14.10., Polar SDK): Im
+  PPI-Modus kommt ihre Herzfrequenz nur alle 5 s und bleibt bei Bewegung auf
+  dem letzten verlässlichen Wert stehen. Der Messlauf startet bei der Verity
+  heute immer PPI; für Gehen/Laufen/Rad braucht es den HF-Modus (nur
+  `0x2A37`). Ohne Intervalle gibt es dann kein DFA α1, das bleibt ohnehin
+  dem H10 vorbehalten (Abschnitt 6). Begründung: `docs/korrektur.md`.
 
 ---
 

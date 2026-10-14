@@ -121,7 +121,7 @@ Zusatzmarken:
 | Gerät | Art · Funk | App | praxis_gui | Anforderungen · Besonderheiten | Beleg |
 |---|---|---|---|---|---|
 | **H10** | Brustgurt EKG · BLE, ANT+, 5 kHz | ✅ | ✅ | Elektroden anfeuchten; 2 BLE-Verbindungen erst nach Aktivierung in Polar Beat/Flow. EKG nur in praxis_gui | eigener Test; [Polar](https://support.polar.com/ae-en/can-i-pair-h10-with-several-devices) |
-| **Verity Sense** | optisch Arm · BLE, ANT+ | ✅ | ✅ | **Kopplung nötig**; PPI über PMD (`0x2A37` hat keine RR); SDK-Modus muss **aus** sein | eigener Test (praxis_gui `docs/verity_sense/`) |
+| **Verity Sense** | optisch Arm · BLE, ANT+ | ✅ | ✅ | **Kopplung nötig**; PPI über PMD (`0x2A37` hat keine RR); SDK-Modus muss **aus** sein. Je Intervall Fehlerschätzung und Blocker-Bit ([korrektur.md](korrektur.md)); PPI laut Polar nur in völliger Ruhe, im PPI-Modus HF nur alle 5 s und bei Bewegung eingefroren | eigener Test (praxis_gui `docs/verity_sense/`); [Polar SDK](https://github.com/polarofficial/polar-ble-sdk/blob/master/documentation/products/PolarVeritySense.md) |
 | H9 | Brustgurt EKG · BLE, ANT+, 5 kHz | 🟢 | 🟢 | RR über `0x2A37`, kein PMD; ¹ | [Polar SDK](https://github.com/polarofficial/polar-ble-sdk/blob/master/documentation/products/PolarH9.md) |
 | H7 | Brustgurt EKG · BLE, 5 kHz | 🟢 | 🟢 | eingestellt; per BLE gegen EKG validiert | [HRV4Training](https://www.hrv4training.com/blog2/hardware-for-hrv-what-sensor-should-you-use) |
 | H6 | Brustgurt EKG · BLE | 🔵 | 🔵 | eingestellt | [Mindfield/Kubios](https://mindfield-shop.com/en/product/kubios-hrv-scientific-software-license-1-year/) |

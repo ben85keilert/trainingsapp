@@ -130,14 +130,14 @@ def korrektur_blatt(
                     "Programm prüft das Verworfene mit den Regeln unten — nur in Ruhe "
                     "sinnvoll, in Bewegung ist es meist falsch.",
                 ),
-                ft.Row(
-                    controls=[
-                        ft.Switch(
-                            label="Fehlerschätzung des Sensors",
-                            value=r.fehler_an,
-                            on_change=lambda e: setzen(fehler_an=bool(e.control.value)),
-                        ),
-                    ]
+                schalter(
+                    "Fehlerschätzung des Sensors",
+                    r.fehler_an,
+                    lambda an: setzen(fehler_an=an),
+                    "Die Verity Sense schätzt zu jedem Intervall selbst, wie genau sie den "
+                    "Pulsschlag getroffen hat. Polar: unter 10 ms sehr genau, über 30 ms "
+                    "meist Bewegung oder ein lockerer Sitz. Liegt die Schätzung über "
+                    "„Unsicher über“, gilt das Intervall als Artefakt.",
                 ),
                 ft.Row(
                     controls=[

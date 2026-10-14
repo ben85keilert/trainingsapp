@@ -344,6 +344,39 @@ Noch offen:
 
 ---
 
+## 9a. Vorabtest: Ergebnisse
+
+Berichte ohne Orte, von Ben am Pixel 10.
+
+**1 · Strecke, Gehen, GPS 1 s, 14.10.2026 13:45** (5 min, Bildschirm an, 1 %
+im Hintergrund; wahre Länge noch offen)
+
+| | |
+|---|---|
+| Ortungen | 285, Abstand Median 1,0 s, 95 % 1,4 s, längste Lücke 2,1 s, keine Lücke |
+| erste Ortung | nach 0,1 s, schon ≤ 20 m (Empfänger war warm) |
+| Genauigkeit | Median 3,1 m, 90 % 4,3 m, nie über 30 m |
+| Stand (2:08 min) | Zittern roh 4,7 m/min, mit 5-m-Schritt 0,0 m/min |
+| Gehen (~2:51 min) | Tempo Median 1,37 m/s (4,9 km/h) |
+| Distanz | roh 271 m · ≤ 30 m 271 m · 5-m-Schritt 258 m · 10-m-Schritt 251 m · Doppler 224 m |
+| Höhe | roh 2,9/3,4 m auf/ab, mit 3-m-Schwelle 0/0 m (flach) |
+| Akku | 720 mA — das ganze Handy mit Bildschirm an und Karte, nicht das GPS allein |
+
+**Befunde:**
+
+- Echtes GPS zittert beim Gehen viel weniger als der Simulator (dort 3 m
+  weißes Rauschen: roh 117 statt 36 m). Hier liegen die Positionsrechnungen
+  dicht beieinander (271 → 258 → 251 m), und das Zittern im Stand
+  verschwindet schon mit dem 5-m-Schritt.
+- Die Tempo-Rechnung (Doppler) liegt 10–15 % unter den Positionsrechnungen.
+  Welche stimmt, klärt erst die wahre Länge.
+
+**Noch nötig:** die wahre Länge dieses Weges (auf der Karte nachgemessen);
+ein Gang mit ausgeschaltetem Bildschirm (Hintergrund, Lücken), am besten auf
+bekannter Länge (400-m-Bahn); der Akkutest.
+
+---
+
 ## 10. Was dabei sonst noch auffiel
 
 - `flet-map` setzt `user_agent_package_name` standardmäßig auf `unknown` — wer

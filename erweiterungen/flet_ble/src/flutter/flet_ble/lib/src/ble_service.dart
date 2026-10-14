@@ -9,7 +9,8 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 ///
 /// Methoden (Python → Dart, über `invokeMethod`): scan, stop_scan, connect,
 /// disconnect, bond, bond_state, discover_services, request_mtu, read, write,
-/// subscribe, unsubscribe, adapter_state, hintergrund_starten, hintergrund_beenden.
+/// subscribe, unsubscribe, adapter_state, hintergrund_starten, hintergrund_beenden,
+/// hintergrund_text, akku.
 ///
 /// Ereignisse (Dart → Python, nur wenn `on_<name>` in Python gesetzt ist):
 /// - `notification`     {device_id, service, characteristic, value (Uint8List → bytes),
@@ -124,11 +125,24 @@ class FletBleService extends FletService {
         return await _hintergrund.invokeMethod<bool>("starten", {
               "titel": a["titel"] as String? ?? "Messung läuft",
               "text": a["text"] as String? ?? "",
+              "geraet": a["geraet"] as bool? ?? true,
+              "standort": a["standort"] as bool? ?? false,
             }) ??
             false;
       case "hintergrund_beenden":
         if (_istAndroid) await _hintergrund.invokeMethod<void>("beenden");
         return null;
+      case "hintergrund_text":
+        if (!_istAndroid) return false;
+        return await _hintergrund.invokeMethod<bool>("text", {
+              "titel": a["titel"] as String? ?? "Messung läuft",
+              "text": a["text"] as String? ?? "",
+            }) ??
+            false;
+      case "akku":
+        if (!_istAndroid) return null;
+        final werte = await _hintergrund.invokeMethod<Map>("akku");
+        return werte == null ? null : Map<String, dynamic>.from(werte);
       case "unsubscribe":
         await _abos.remove(_key(a))?.cancel();
         await _chr(a).setNotifyValue(false);

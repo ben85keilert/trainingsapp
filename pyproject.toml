@@ -17,6 +17,9 @@ dependencies = [
     "flet-charts==1.0.*",
     "flet-video==1.0.*",
     "flet-permission-handler==1.0.*",
+    # GPS-Tracking (docs/plan_gps.md): Karte (flutter_map, OSM-Kacheln) und Position
+    "flet-map==1.0.*",
+    "flet-geolocator==1.0.*",
     "numpy>=2.1",
     # Eigene Flet-Erweiterungen im Repo: BLE auf Android über flutter_blue_plus
     # (erweiterungen/flet_ble) und Signaltöne des Timers, die Musik nur kurz
@@ -112,7 +115,7 @@ flet-ton = "erweiterungen/flet_ton"
 # - neverForLocation: Scan-Ergebnisse werden nicht zur Ortung benutzt. Ohne das Flag
 #   filtert Android 12+ die Ergebnisse, solange keine Standortberechtigung erteilt ist.
 # - Android ≤ 11 (API 30) kennt SCAN/CONNECT nicht: dort BLUETOOTH, BLUETOOTH_ADMIN
-#   und Standort. flet-permission-handler meldet `bluetoothScan` auf ≤ 11 nur dann
+#   und Standort (seit dem GPS-Training für alle Versionen eingetragen, siehe unten). flet-permission-handler meldet `bluetoothScan` auf ≤ 11 nur dann
 #   als erteilt, wenn BLUETOOTH im Manifest steht.
 # Die Laufzeitabfrage übernimmt flutter_blue_plus beim ersten Scan bzw. Verbinden.
 [tool.flet.android.permission]
@@ -120,7 +123,11 @@ flet-ton = "erweiterungen/flet_ton"
 "android.permission.BLUETOOTH_CONNECT" = true
 "android.permission.BLUETOOTH" = { maxSdkVersion = 30 }
 "android.permission.BLUETOOTH_ADMIN" = { maxSdkVersion = 30 }
-"android.permission.ACCESS_FINE_LOCATION" = { maxSdkVersion = 30 }
+# GPS-Training: Standort, solange die App sichtbar ist — im Hintergrund hält ihn der
+# Vordergrunddienst vom Typ location (flet_ble/MessDienst); ACCESS_BACKGROUND_LOCATION
+# braucht es dafür nicht (docs/plan_gps.md, Abschnitt 2).
+"android.permission.ACCESS_FINE_LOCATION" = true
+"android.permission.ACCESS_COARSE_LOCATION" = true
 "android.permission.INTERNET" = true
 
 [tool.flet.android.feature]

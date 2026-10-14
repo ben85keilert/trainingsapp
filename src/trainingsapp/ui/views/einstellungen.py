@@ -2,7 +2,8 @@
 
 Vorn das aktive Profil wählen; anlegen, umbenennen und löschen in einer eigenen
 Ansicht (`/einstellungen/profile`). Dazu der Weg zu den Einstellungen der
-HRV-Messung (`/einstellungen/hrv`) und zum Timer, Hilfe und Edition.
+HRV-Messung (`/einstellungen/hrv`), zum Timer, zum GPS-Vorabtest
+(`/einstellungen/gps-test`), Hilfe und Edition.
 
 Eine Sperre per PIN gibt es nur in der Praxis-Edition
 (`ist_aktiv("profil_sperre")`): Dort teilen sich mehrere Personen ein Gerät,
@@ -114,6 +115,17 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
                                 ),
                                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
                                 on_click=oeffner("/einstellungen/timer"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.SATELLITE_ALT),
+                                title=ft.Text("GPS-Test"),
+                                subtitle=ft.Text(
+                                    "Vorabversion: Strecke und Akku prüfen — für das GPS-Training",
+                                    size=12,
+                                ),
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/gps-test"),
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
                         ),

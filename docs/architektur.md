@@ -37,7 +37,7 @@ Abhängigkeiten zeigen **nur nach innen**:
 
 ```
 ui  →  core, data, hrv_core, devices
-devices  →  hrv_core
+devices  →  hrv_core, core      (core nur für GPS-Punkte: core.strecke)
 data  →  core
 core  →  (nichts)
 hrv_core  →  (nur numpy)

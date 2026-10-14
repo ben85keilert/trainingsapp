@@ -25,6 +25,7 @@ Routen:
     /verlauf/<kachel_id>            Kurve der Tagessummen einer Kachel (mit Varianten)
     /einstellungen/hrv              Einstellungen der HRV-Messung
     /einstellungen/profile          Profile anlegen, umbenennen, löschen
+    /einstellungen/gps-test         GPS-Vorabtest: Strecke und Akku (docs/plan_gps.md)
     <jede Route>/timer[/bearbeiten[/<id>]]   Timer über der aktuellen Ansicht
 
 Der Routen-Handler baut bei jedem Wechsel den **ganzen** Stapel neu auf
@@ -47,6 +48,7 @@ from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
 from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
+from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.messung import messung
 from trainingsapp.ui.views.messung_detail import messung_detail_view
@@ -267,6 +269,27 @@ def main(page: ft.Page) -> None:
             state.ble_transport = FletBleTransport(page)
         except ImportError:
             state.ble_transport = None
+        try:
+            from trainingsapp.ui.geraete.flet_gps import FletGpsQuelle
+
+            state.gps_quelle = FletGpsQuelle(page)
+        except ImportError:
+            state.gps_quelle = None
+
+    def lebenszyklus(e: ft.AppLifecycleStateChangeEvent) -> None:
+        """Display aus oder andere App: Live-Ansichten sparen sich das Zeichnen."""
+        vorn = e.state not in (
+            ft.AppLifecycleState.HIDE,
+            ft.AppLifecycleState.PAUSE,
+            ft.AppLifecycleState.DETACH,
+        )
+        if vorn == state.im_vordergrund:
+            return
+        state.im_vordergrund = vorn
+        if state.gps_test is not None and not state.gps_test.fertig:
+            state.gps_test.lebenszeichen(vorn)
+
+    page.on_app_lifecycle_state_change = lebenszyklus
     # Dienste sind Controls ohne Darstellung; sie müssen an der Seite hängen.
     browser = ft.UrlLauncher()
     page.services.append(browser)
@@ -352,6 +375,8 @@ def main(page: ft.Page) -> None:
                 page.views.append(einstellungen_hrv(page, state))
             elif teile[1:2] == ["profile"]:
                 page.views.append(profile_view(page, state))
+            elif teile[1:2] == ["gps-test"]:
+                page.views.append(gps_test_view(page, state))
         elif teile[:1] == ["archiv"]:
             page.views.append(archiv_view(page, state))
         elif teile[:1] == ["papierkorb"]:

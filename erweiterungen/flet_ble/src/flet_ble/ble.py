@@ -323,21 +323,46 @@ class FletBle(ft.Service):
 
     # -- Hintergrund --------------------------------------------------------
 
-    async def hintergrund_starten(self, titel: str, text: str = "") -> bool:
-        """Vordergrunddienst mit Benachrichtigung starten (oder ihren Text ändern).
+    async def hintergrund_starten(
+        self, titel: str, text: str = "", *, geraet: bool = True, standort: bool = False
+    ) -> bool:
+        """Vordergrunddienst mit Benachrichtigung starten (oder Text und Typ ändern).
 
         Hält die App am Leben, solange gemessen wird — auch bei ausgeschaltetem
         Display oder in einer anderen App. Nur aus dem Vordergrund aufrufen
         (Android 12+ verbietet den Start aus dem Hintergrund). Fragt auf
         Android 13+ einmal nach der Erlaubnis für Benachrichtigungen. Liefert
         ``False`` außerhalb von Android.
+
+        ``geraet``: Typ ``connectedDevice`` (Gurt verbunden); ``standort``: Typ
+        ``location`` (GPS läuft) — dafür muss die Standortberechtigung erteilt sein.
         """
-        args = {"titel": titel, "text": text}
+        args = {"titel": titel, "text": text, "geraet": geraet, "standort": standort}
         return bool(await self._rufe("hintergrund_starten", args, _FRIST_KURZ))
 
     async def hintergrund_beenden(self) -> None:
         """Vordergrunddienst beenden; ohne laufenden Dienst ein No-op."""
         await self._rufe("hintergrund_beenden", None, _FRIST_KURZ)
+
+    async def hintergrund_text(self, titel: str, text: str = "") -> bool:
+        """Text der laufenden Benachrichtigung ändern, ohne den Dienst neu zu starten.
+
+        Anders als `hintergrund_starten` auch bei ausgeschaltetem Display
+        erlaubt. ``False``, wenn kein Dienst läuft oder außerhalb von Android.
+        """
+        args = {"titel": titel, "text": text}
+        return bool(await self._rufe("hintergrund_text", args, _FRIST_KURZ))
+
+    async def akku(self) -> dict[str, Any] | None:
+        """Akkustand für Strommessungen — feiner als die Prozentanzeige.
+
+        Schlüssel (fehlt, wenn das Gerät den Wert nicht liefert): ``prozent``,
+        ``ladung_uah`` (Restladung in µAh), ``strom_ua`` (Augenblickswert in µA;
+        negativ = Entladen, je nach Gerät), ``strom_mittel_ua``, ``laedt``.
+        ``None`` außerhalb von Android.
+        """
+        werte = await self._rufe("akku", None, _FRIST_KURZ)
+        return dict(werte) if werte else None
 
 
 def verfuegbar(page: ft.Page) -> bool:

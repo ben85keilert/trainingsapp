@@ -140,6 +140,17 @@ class AppState:
     toene_geladen: bool = False
     #: Bildschirm anlassen, solange der Timer läuft (Flet-Dienst `Wakelock`)
     wach: Any = None
+    #: GPS: Ortungsquelle (`devices.gps.GpsQuelle` — auf Android `FletGpsQuelle`,
+    #: in `app.py` angelegt; sonst beim ersten Bedarf ein Simulator) und der
+    #: laufende Vorabtest (`ui.views.gps_test.GpsTestLauf`) mit seinen Vorgaben
+    gps_quelle: Any = None
+    gps_test: Any = None
+    gps_test_ansicht: int = 0
+    gps_test_intervall: float = 1.0
+    gps_test_karte: bool = True
+    gps_test_wach: bool = False
+    #: App sichtbar? Display aus oder andere App → False (Lebenszyklus in `app.py`)
+    im_vordergrund: bool = True
     #: Wer erfährt, dass der Timer Notizen in die laufende Messung geschrieben hat
     notiz_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
     #: Wer bei jedem Tick des Timers aufgefrischt wird (Name → Funktion);

@@ -28,8 +28,10 @@ Was das für den Bau heißt:
   synchronisierten Datenbankfeldern (`outbox`).
 - **Ortsfreie Werte dürfen mit:** Distanz, Dauer, Tempo, Höhenmeter je km,
   Herzfrequenz je km — sie verraten keinen Ort. Start, Ziel und Route nicht.
-- **Export der eigenen Strecke** (GPX für Strava o. Ä.) gibt es nur, wenn Ben
-  ihn ausdrücklich freigibt — Vorgabe: nicht vorhanden.
+- **Export der eigenen Strecke** ist erlaubt (Ben, 14.10.2026) — aber nur als
+  ausdrückliche Handlung der Person („GPX exportieren"), nie automatisch, nie
+  im Messungs-Export, in der Synchronisation oder im Diagnoseprotokoll.
+  Formate: Abschnitt 5b.
 - **Ein Test sichert es ab:** Export-ZIP und Sync-Outbox einer Messung mit
   Strecke enthalten keine Koordinate.
 
@@ -142,7 +144,11 @@ Vorbild sind die Vorgaben von OpenTracks (Open Source, bewährt):
   Bewegungszeit nicht).
 - **Erst glätten, dann summieren** (gleitender Median über 3–5 Punkte oder ein
   einfacher Kalman-Filter) — sonst zählt das GPS-Zittern im Stand als Strecke;
-  genau dieser Fehler stand im Changelog eines Flutter-Plugins.
+  genau dieser Fehler stand im Changelog eines Flutter-Plugins. Beim **Gehen**
+  (1,4 m/s) ist das Zittern so groß wie der Schritt je Sekunde: Im Simulator
+  mit 3 m weißem Rauschen ergaben 36 m Weg roh 117 m, mit 5-m-Schritt 76 m, mit
+  10-m-Schritt 36 m und aus dem Doppler-Tempo 35 m. Echtes GPS zittert
+  zeitlich glatter — welche Variante trägt, zeigt der Vorabtest.
 - **Distanz:** Haversine zwischen geglätteten Punkten.
 - **Höhenmeter:** GPS-Höhe ist grob — nur Änderungen über eine Hysterese
   (3–5 m) zählen. Ein Barometer bräuchte eine eigene Erweiterung → später.
@@ -214,6 +220,19 @@ für die kommerzielle Praxis-Edition nur mit gekaufter Lizenz → meiden.
 
 So ist der Download später nur noch: Quelle wählen → Gebiet → laden → die
 Karten-Erweiterung zeigt die Datei an.
+
+### 5b. Export — Standardformate
+
+| Format | Was drin steht | Wer es liest |
+|---|---|---|
+| **GPX 1.1** (gebaut) | Strecke, Höhe, Zeit; Herzfrequenz über Garmins `TrackPointExtension`; Sportart nur als freies Feld `<type>` | praktisch alle: Strava, Komoot, Garmin Connect, OsmAnd, Google Earth |
+| TCX (Garmin Training Center) | dazu Runden und Sportart (nur Running/Biking/Other) | Strava, Garmin Connect, TrainingPeaks |
+| FIT (Garmin, binär) | alles, auch **RR-Intervalle** | Garmin Connect, Strava, intervals.icu, Runalyze — die beiden letzten rechnen aus den RR-Intervallen DFA α1 |
+| GeoJSON, KML | nur Geometrie | Karten- und GIS-Programme, nicht für Sport-Apps |
+
+Vorgabe: **GPX 1.1 mit Herzfrequenz** — es deckt fast alles ab. FIT lohnt
+sich später, wenn die RR-Intervalle mit sollen (Auswertung in intervals.icu
+oder Runalyze). TCX bringt gegenüber GPX nur die Runden.
 
 ---
 
@@ -292,7 +311,7 @@ eine aktuelle Messung „1 s gegen 5 s" hat die Recherche nicht gefunden.
 
 | Phase | Inhalt | Aufwand |
 |---|---|---|
-| 0 · Vorab-Test (APK) | flet-geolocator (1 s, Display aus über `MessDienst` Typ `location`), flet-map mit OSM und User-Agent, Akku 30 min (1 s gegen 10 s) | ½–1 Tag + Ben am Pixel |
+| 0 · Vorab-Test (APK) | **gebaut 14.10.:** Einstellungen → GPS-Test. Strecke (1/3/10 s, Karte, Bildschirm an/aus) und Akkutest (4 × 15 min: 1 s, 3 s, 10 s, ohne GPS; Strom aus dem Ladestandsmesser in µAh); Bericht ohne Orte; GPX-Export | ½–1 Tag + Ben am Pixel |
 | 1 · Kern | `core/strecke.py`, `devices/gps.py` mit `GpxWiedergabe`, Speichern (Ordner `Strecken/`, Migration), Regel-0-Test, `data/karten.py` (Quellen, Gebietsrechnung) | 1½ Tage |
 | 2 · Live | Trainingsansicht, Karte, km-Signal und -Notiz, Auto-Pause, Benachrichtigung | 1½ Tage |
 | 3 · Aufzeichnung | Karte, km-Tabelle, Kurven, Tagebuch-Eintrag | 1 Tag |
@@ -304,18 +323,24 @@ gewünscht ist.
 
 ---
 
-## 9. Offene Entscheidungen für Ben
+## 9. Entscheidungen
 
-1. **Offline-Karten:** Vektor über eigene Erweiterung (OpenFreeMap oder
-   Protomaps-Ausschnitt, ~20 MB je 20 × 20 km) — ja, wann? Oder vorerst nur der
-   Zwischenspeicher?
-2. **Eigene Kachelquelle hosten** (Protomaps-Ausschnitt Deutschland) statt
-   OpenFreeMap — unabhängig von deren Bedingungen, kostet wenige €/Monat.
-3. **Export der eigenen Strecke** (GPX) — ganz aus (Vorgabe) oder nur auf
-   ausdrücklichen Knopfdruck?
-4. **Sportarten** am Anfang: nur Laufen, oder gleich Rad/Gehen?
-5. **DFA-α1-Wertebereiche** für die Übersicht (neutral) — die vorgeschlagenen?
-6. **Play Store** später: Vordergrunddienst als `health` statt `location`.
+Ben, 14.10.2026:
+
+1. **Karte:** vorerst nur der Zwischenspeicher von flutter_map (OSM online,
+   gesehene Gegenden auch offline). Vektor-Erweiterung (Phase 5) später.
+2. **Export:** ja — GPX 1.1 auf ausdrücklichen Knopfdruck (Abschnitt 0, 5b).
+3. **Sportarten in dieser Reihenfolge:** **Gehen → Laufen → Rad.** Gehen zuerst
+   heißt: Das GPS-Zittern ist so groß wie der Schritt — die Distanzrechnung
+   (Mindestabstand oder Doppler-Tempo, Abschnitt 4) muss beim Gehen stimmen;
+   der Vorabtest misst genau das.
+4. **Ablauf:** erst der Vorabtest am Pixel, dann Phasen 1–4 in einem Zug.
+
+Noch offen:
+
+- **Eigene Kachelquelle** (Protomaps-Ausschnitt) — erst mit Phase 5.
+- **DFA-α1-Wertebereiche** für die Übersicht (neutral) — die vorgeschlagenen?
+- **Play Store** später: Vordergrunddienst als `health` statt `location`.
 
 ---
 

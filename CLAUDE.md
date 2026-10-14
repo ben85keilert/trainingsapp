@@ -52,7 +52,8 @@ existiert auf Android/iOS nicht — darum implementiert `hrv_core/` Welch, Lomb-
 DFA und SampEn selbst in reinem numpy.
 
 Abhängigkeiten zeigen **nur nach innen**: `ui → core, data, hrv_core, devices`;
-`devices → hrv_core`; `data → core`; `core → (nichts)`; `hrv_core → (nur numpy)`.
+`devices → hrv_core, core` (GPS-Punkte: `core.strecke`); `data → core`; `core → (nichts)`;
+`hrv_core → (nur numpy)`.
 Keine Rechenlogik in `ui/` — Views rufen Funktionen aus den unteren Schichten auf.
 
 ## Aufbau
@@ -84,7 +85,8 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
 
 - **GPS-Daten werden nie geteilt** (Ben, 14.10.2026): Sync, Export-ZIP,
   Teilen, Diagnose — keine Koordinaten. Strecken liegen getrennt von
-  `Messungen/` (`docs/plan_gps.md`, Abschnitt 0).
+  `Messungen/` (`config.streckenverzeichnis()`). Einzige Ausnahme: der
+  GPX-Export, den die Person selbst auslöst (`docs/plan_gps.md`, Abschnitt 0).
 
 - **Zwei Editionen aus einem Quelltext.** `config.ist_aktiv("funktion")` beantwortet
   „darf ich X?" statt „bin ich Edition B?". Ein Schalter je Fähigkeit, nicht je

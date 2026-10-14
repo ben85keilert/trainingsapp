@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 
 import flet as ft
@@ -41,6 +42,8 @@ class FletBleTransport:
         self._empfaenger: dict[tuple[str, str, str], Empfaenger] = {}
         self._bei_trennung: dict[str, Callable[[str | None], None]] = {}
         self._uhr = UhrAbgleich()
+        #: Wer den Vordergrunddienst gerade braucht: Zweck → (Titel, Text)
+        self._zwecke: dict[str, tuple[str, str]] = {}
         self.ble = flet_ble.FletBle(
             on_notification=self._notification,
             on_connection_state=self._verbindung,
@@ -110,20 +113,62 @@ class FletBleTransport:
 
     # -- Hintergrund (kein Teil von BleTransport) ------------------------------------
 
-    async def hintergrund(self, an: bool, titel: str = "", text: str = "") -> str | None:
-        """Vordergrunddienst an/aus. Liefert eine Fehlermeldung oder ``None``.
+    async def hintergrund(
+        self, an: bool, titel: str = "", text: str = "", *, zweck: str = "messung"
+    ) -> str | None:
+        """Vordergrunddienst für einen Zweck an/aus. Liefert eine Fehlermeldung oder ``None``.
+
+        Zwecke teilen sich den einen Dienst: ``messung`` (Gurt, Typ
+        ``connectedDevice``) und ``gps`` (Typ ``location``). Endet einer, läuft
+        der Dienst für den anderen weiter — mit passendem Typ und Text; erst
+        ohne Zweck wird er beendet.
 
         Wirft nie: Scheitert der Dienst, läuft die Messung trotzdem — nur eben
         nicht verlässlich bei ausgeschaltetem Display.
         """
+        if an:
+            self._zwecke[zweck] = (titel, text)
+        else:
+            self._zwecke.pop(zweck, None)
         try:
-            if an:
-                await self.ble.hintergrund_starten(titel, text)
-            else:
+            if not self._zwecke:
                 await self.ble.hintergrund_beenden()
+                return None
+            geraet, standort = "messung" in self._zwecke, "gps" in self._zwecke
+            if geraet and standort:
+                titel_neu = "Training mit Messung läuft"
+                text_neu = " · ".join(t for _, t in self._zwecke.values() if t)
+            else:
+                titel_neu, text_neu = next(iter(self._zwecke.values()))
+            await self.ble.hintergrund_starten(
+                titel_neu, text_neu, geraet=geraet, standort=standort
+            )
         except Exception as fehler:
             return str(fehler) or type(fehler).__name__
         return None
+
+    async def hintergrund_text(self, text: str, *, zweck: str = "messung") -> None:
+        """Text der Benachrichtigung für einen Zweck ändern — auch bei Display aus.
+
+        Startet den Dienst nicht neu (das wäre aus dem Hintergrund verboten);
+        ohne laufenden Dienst passiert nichts. Wirft nie.
+        """
+        if zweck not in self._zwecke:
+            return
+        titel = self._zwecke[zweck][0]
+        self._zwecke[zweck] = (titel, text)
+        if len(self._zwecke) > 1:
+            titel = "Training mit Messung läuft"
+            text = " · ".join(t for _, t in self._zwecke.values() if t)
+        with suppress(Exception):
+            await self.ble.hintergrund_text(titel, text)
+
+    async def akku(self) -> dict[str, Any] | None:
+        """Akkustand für Strommessungen (siehe `flet_ble.FletBle.akku`); ``None`` bei Fehler."""
+        try:
+            return await self.ble.akku()
+        except Exception:
+            return None
 
 
 __all__ = ["FletBleTransport"]

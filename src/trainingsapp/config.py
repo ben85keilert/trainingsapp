@@ -108,6 +108,16 @@ def datenbankpfad() -> Path:
     return datenverzeichnis() / "trainingsapp.db"
 
 
+def streckenverzeichnis() -> Path:
+    """GPS-Strecken — **getrennt** von den Messungen.
+
+    GPS-Daten werden nie geteilt (`docs/plan_gps.md`, Abschnitt 0): praxis_gui
+    liest und synchronisiert ``Messungen/``, und der Export packt alles mit dem
+    Präfix einer Messung ein. Strecken liegen deshalb hier.
+    """
+    return datenverzeichnis() / "Strecken"
+
+
 def messungenverzeichnis() -> Path:
     """Wurzel der HRV-Messdateien.
 
@@ -136,4 +146,5 @@ __all__ = [
     "ist_aktiv",
     "medienverzeichnis",
     "messungenverzeichnis",
+    "streckenverzeichnis",
 ]

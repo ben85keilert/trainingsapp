@@ -5,6 +5,9 @@
          Flet-Vorlage selbst kann keine <service>-Einträge anlegen. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- GPS im Hintergrund (Training): Typ location. geolocator_android trägt die
+         Berechtigung seit 5.1.1 nicht mehr selbst ein. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -12,6 +15,6 @@
         <service
             android:name="de.praxisebert.flet_ble.MessDienst"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="connectedDevice|location" />
     </application>
 </manifest>

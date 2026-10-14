@@ -82,6 +82,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Anker) werden in die Messdatei zurückgeschrieben (`hrv_core.ereignisse`), nie die
   Messwerte.
 
+- **GPS-Daten werden nie geteilt** (Ben, 14.10.2026): Sync, Export-ZIP,
+  Teilen, Diagnose — keine Koordinaten. Strecken liegen getrennt von
+  `Messungen/` (`docs/plan_gps.md`, Abschnitt 0).
+
 - **Zwei Editionen aus einem Quelltext.** `config.ist_aktiv("funktion")` beantwortet
   „darf ich X?" statt „bin ich Edition B?". Ein Schalter je Fähigkeit, nicht je
   Bildschirm. `physiologische_steuerung` ist in `solo` **rechtlich** gesperrt (eine

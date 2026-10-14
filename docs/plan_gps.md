@@ -1,0 +1,372 @@
+# Planung: GPS-Tracking für Ausdauersport (14.10.2026)
+
+Bens Auftrag: Laufen (später Radfahren, Gehen) mit GPS aufzeichnen und auf einer
+OpenStreetMap-Karte zeigen — **gleichzeitig mit der HRV-Messung**. Gründlich
+planen, das **Herunterladen der Karte vorbereiten**, keine GPS-Daten teilen,
+DFA α1 als Überblick (ohne Empfehlung), Strom sparen. Zielgerät: Pixel 10.
+
+Stand: nur Planung. Quellen am Ende (Abschnitt 11); was ich selbst gerechnet
+oder geschätzt habe, steht kursiv.
+
+---
+
+## 0. Verbindliche Regel: GPS-Daten werden nicht geteilt
+
+> **Werden später Daten geteilt — Synchronisation mit der Praxis-Edition,
+> Export-ZIP, Teilen-Menü, Diagnose —, dann niemals GPS-Daten.**
+> (Ben, 14.10.2026)
+
+Was das für den Bau heißt:
+
+- **Eigener Ordner.** Strecken liegen unter `<Datenverzeichnis>/Strecken/`, nie
+  unter `Messungen/`. Grund: praxis_gui liest und synchronisiert die
+  `Messungen`-Ordner, und der Export (`hrv_core/export.zugehoerige_dateien`)
+  packt jede Datei mit dem Präfix `sensor_<ts>_` ins ZIP — eine
+  `sensor_<ts>_gps.gpx` daneben ginge beim Teilen mit.
+- **Keine Koordinaten** in raw-v1, im Sidecar `_analyzed.json`, in Notiztexten
+  (auch nicht in den automatischen „km 3"-Notizen), im Diagnoseprotokoll, in
+  synchronisierten Datenbankfeldern (`outbox`).
+- **Ortsfreie Werte dürfen mit:** Distanz, Dauer, Tempo, Höhenmeter je km,
+  Herzfrequenz je km — sie verraten keinen Ort. Start, Ziel und Route nicht.
+- **Export der eigenen Strecke** (GPX für Strava o. Ä.) gibt es nur, wenn Ben
+  ihn ausdrücklich freigibt — Vorgabe: nicht vorhanden.
+- **Ein Test sichert es ab:** Export-ZIP und Sync-Outbox einer Messung mit
+  Strecke enthalten keine Koordinate.
+
+---
+
+## 1. Was am Ende da sein soll
+
+**Während des Laufs** (große Zahlen, wenig Text):
+
+- Zeit, Distanz, Tempo (aktuell und Ø), Herzfrequenz, optional DFA α1
+- kleine Karte mit Strecke und Position (antippen → groß)
+- Signal je Kilometer (Ton über `flet_ton`, Vibration) und automatische Notiz
+  „km 3" in der HRV-Aufnahme → daraus **Abschnitte je km** (gibt es schon)
+- Auto-Pause bei Stillstand, Display darf aus sein
+- eine Benachrichtigung „Training läuft · 5,2 km · 32:10 · HF 148"
+
+**Danach** (Aufzeichnung):
+
+- Karte mit Strecke (optional nach Herzfrequenz oder Tempo eingefärbt)
+- Tabelle je km: Zeit, Tempo, Ø HF, DFA α1, Höhenmeter
+- Kurven HF, Tempo, DFA α1 über die Zeit (die vorhandenen Verlaufskurven)
+- **DFA-α1-Überblick** (Abschnitt 6) — beschreibend
+- Eintrag im Trainingstagebuch: Übung „Laufen" mit Strecke und Dauer (Felder
+  `distance`/`duration` gibt es im Feldvorrat) → Tagesansicht und Verlauf
+  zeigen die Kilometer je Tag
+- **Laufband/Halle:** dasselbe ohne GPS (nur Zeit und HRV) — kein Strom fürs GPS
+
+---
+
+## 2. Bausteine — was es schon gibt (am Quelltext geprüft)
+
+| Baustein | Paket | Was es kann | Grenze |
+|---|---|---|---|
+| **Karte** | `flet-map` 1.0.4 (flutter_map 8.3, BSD-3) | Kachelschicht, Linien, Marker, Namensnennung, Kamera; seit flutter_map 8.2 **eingebauter Kachel-Zwischenspeicher** (an, ~1 GB, das System darf ihn leeren) | Kacheln nur per URL (`NetworkTileProvider` fest eingebaut) — **keine Vektorkacheln, kein echtes Offline** |
+| **GPS** | `flet-geolocator` 1.0.4 (geolocator 14.0.2) | Positionsstrom; Android: Genauigkeit, **Intervall** (Vorgabe 5 s), Mindestabstand, Höhe über NN (EGM2008), eigene Vordergrund-Benachrichtigung | **keine Bündelung** (`setMaxUpdateDelayMillis`), kein Barometer |
+| **Hintergrund** | unser `MessDienst` (flet_ble) | Vordergrunddienst mit Wake-Lock, Typ `connectedDevice` | für GPS zusätzlich Typ `location` |
+| **HRV** | Messlauf, LiveFenster, DFA α1 je Fenster | alles da | DFA α1 nur mit EKG-Gurt |
+| **Abschnitte** | `hrv_core/ausschnitte.py` | aus Notizen, Werte je Abschnitt | — |
+| **Töne** | `flet_ton` | Signal je km | — |
+
+**Größe:** flutter_map, latlong2 und geolocator sind Dart- bzw. kleine
+Java-Pakete — *zusammen grob 2–4 MB*. Seit 14.10. baut die App nur für arm64
+(Build 71: **85 statt 225 MB**); die Karte fällt daneben nicht ins Gewicht.
+`flet-video` bleibt (Ben braucht es).
+
+**Android-Regeln** (Android 14–16), am Plan ausgerichtet:
+
+- Vordergrunddienst Typ `location` braucht die Berechtigung
+  `FOREGROUND_SERVICE_LOCATION` im Manifest **— die tragen wir selbst ein**
+  (geolocator_android 5.1.1 hat sie wieder entfernt) — und eine erteilte
+  Standortberechtigung.
+- Er muss starten, **während die App sichtbar ist** (Knopf „Start") — dann
+  braucht es **kein** `ACCESS_BACKGROUND_LOCATION`: Der laufende Dienst behält
+  den Zugriff, auch bei Display aus.
+- Mehrere Typen in einem Dienst sind erlaubt (`connectedDevice|location`); der
+  Typ beim Start muss eine Teilmenge des Manifests sein.
+- Für den Play Store später: Typ-Erklärung mit Video; Training gehört dort
+  unter `health` (braucht `ACTIVITY_RECOGNITION` bzw. ab Android 16 die
+  Health-Berechtigung für die Herzfrequenz). Für die APK vorerst unwichtig.
+
+---
+
+## 3. Architektur
+
+Die eine Regel gilt weiter: `core/`, `data/`, `hrv_core/`, `devices/` ohne
+Flet. GPS-Rechnung ist reine Mathematik und gehört nach unten.
+
+```
+devices/gps.py          Port GpsQuelle (pull, wie HeartRateSource) + GpxWiedergabe
+                        (Simulator: spielt eine Strecke ab — Tests, Web-Vorschau)
+core/strecke.py         Punkt, Strecke, Filter, Distanz, Tempo, Splits, Auto-Pause,
+                        Höhenmeter mit Hysterese — ohne Oberfläche, mit Doctests
+data/strecken.py        Datei schreiben/lesen (GPX 1.1 + Crash-Backup .jsonl),
+                        Tabelle `strecke` (Migration), Ordner Strecken/
+data/karten.py          Kartenquellen (URL, Namensnennung, User-Agent, ob offline
+                        erlaubt, Höchstmenge je Download), Gebietsrechnung
+                        (Kacheln für Ausschnitt oder Korridor, Größe) — Abschnitt 5
+ui/geraete/flet_gps.py  Adapter flet-geolocator → GpsQuelle (wie FletBleTransport)
+ui/views/training.py    Live-Ansicht Ausdauer; ui/components/karte_strecke.py
+```
+
+**Zeitbasis.** GPS-Punkte tragen UTC-Zeitstempel und die monotone
+Empfangszeit; die HRV-Aufnahme hat `start_utc` + Wanduhr je Schlag. Beides
+verbindet die Wanduhr — HF und DFA α1 je km entstehen so, ohne dass die
+Strecke in die HRV-Datei muss (Regel 0).
+
+**Verknüpfung.** Ein Training = Session im Tagebuch (Übung „Laufen") +
+optional HRV-Aufnahme + optional Strecke; verbunden über IDs in der Datenbank,
+nicht über Dateinamen im selben Ordner.
+
+**Eine Benachrichtigung.** `MessDienst` bekommt
+`foregroundServiceType="connectedDevice|location"` und startet mit den Typen,
+die gerade laufen (Gurt, GPS oder beides). geolocator bekommt **keine** eigene
+Benachrichtigung — sonst stünden zwei da. Die Android-Doku sagt, dass der
+laufende Dienst den Standortzugriff erhält; die geolocator-Anleitung behauptet
+anderes — **das klärt der Vorab-Test** (Abschnitt 8). Rückfall: die
+Benachrichtigung von geolocator.
+
+---
+
+## 4. Rechnung (core/strecke.py)
+
+Vorbild sind die Vorgaben von OpenTracks (Open Source, bewährt):
+
+- **Genauigkeit:** Punkte mit geschätzter Genauigkeit schlechter als ~30 m
+  verwerfen (OpenTracks: 50 m) — Startphase, Häuserschluchten.
+- **Sprünge:** mehr als 200 m zwischen zwei Punkten → neues Teilstück (Naht),
+  keine Strecke dazwischen.
+- **Stillstand:** 10 s ohne Bewegung → Auto-Pause (Gesamtzeit läuft weiter,
+  Bewegungszeit nicht).
+- **Erst glätten, dann summieren** (gleitender Median über 3–5 Punkte oder ein
+  einfacher Kalman-Filter) — sonst zählt das GPS-Zittern im Stand als Strecke;
+  genau dieser Fehler stand im Changelog eines Flutter-Plugins.
+- **Distanz:** Haversine zwischen geglätteten Punkten.
+- **Höhenmeter:** GPS-Höhe ist grob — nur Änderungen über eine Hysterese
+  (3–5 m) zählen. Ein Barometer bräuchte eine eigene Erweiterung → später.
+- **Splits:** je km (Rad: je 5 km), Tempo min/km, Ø HF und DFA α1 je Split
+  über die Wanduhr der HRV-Aufnahme.
+
+Alles testbar mit aufgezeichneten bzw. erzeugten Strecken (`GpxWiedergabe`).
+
+---
+
+## 5. Karte — online sofort, Offline-Download vorbereitet
+
+### Online (Phase 2)
+
+OSM-Standardkacheln (`tile.openstreetmap.org`) sind für unsere Nutzung
+erlaubt, wenn wir uns an die Regeln halten:
+
+- eigener, eindeutiger **User-Agent** (`user_agent_package_name =
+  "de.praxisebert.trainingsassistent"`) — der Flet-Vorgabewert `unknown` wird
+  blockiert;
+- **Namensnennung sichtbar** auf der Karte (`SimpleAttribution`; die
+  ausklappende `RichAttribution` versteckt sie — das verbietet die Regel);
+- **Zwischenspeicher** nach den Cache-Headern des Servers — das erledigt der
+  eingebaute Speicher von flutter_map; kein eigener Aufwand.
+
+Ohne Netz zeigt die Karte, was zuletzt im Zwischenspeicher lag; die
+**Aufzeichnung selbst braucht nie Netz** — die Strecke ist gespeichert und
+erscheint auf der Karte, sobald Kacheln da sind.
+
+### Offline — was erlaubt ist und was nicht
+
+**Von `tile.openstreetmap.org` ist Offline-Nutzung ausdrücklich verboten**
+(„Download city/country for offline use" — und auch das Bauen von
+`.mbtiles`-Archiven). Wer es tut, wird ohne Warnung gesperrt. Es braucht also
+eine andere Quelle:
+
+| Quelle | Art | Offline erlaubt? | Kosten |
+|---|---|---|---|
+| **OpenFreeMap** | Vektor (OpenMapTiles) | ja, bis 3 000 Kacheln/50 MB je Download, ≤ 4 Anfragen gleichzeitig | kostenlos, auch kommerziell |
+| **Protomaps** (PMTiles) | Vektor | ja — Planet-Datei (ODbL) frei, Ausschnitt per `pmtiles extract` | kostenlos; *eigenes Hosting eines Ausschnitts (z. B. Deutschland) wenige €/Monat* |
+| Thunderforest | Raster | Zwischenspeicher fürs Gerät ja; Gebiets-Download erst im Business-Tarif | 255 $/Monat |
+| Stadia | Raster/Vektor | nur mit Abo, ≤ 100 MB je Gerät; Gratis-Tarif nicht kommerziell | Abo |
+| MapTiler Cloud | beides | nur vorübergehender Speicher, kein Massen-Download | — |
+
+**Größe:** Vektorkacheln sind klein — ein Berliner Ausschnitt (~1 700 km²,
+Zoom 0–15) hat 84 MB, *ein Gebiet von 20 × 20 km also grob 20 MB*. Raster wäre
+für dasselbe Gebiet *100–400 MB* (Zoom 12–17; Stadtkacheln bis 50 KB).
+
+**Der Haken:** flet-map kann keine Vektorkacheln. Dafür braucht es eine
+**eigene Karten-Erweiterung** (wie `flet_ble`): flutter_map + `vector_map_tiles`
+(BSD-3; für flutter_map 8 vorerst nur als Beta) + PMTiles-Leser
+(`flutter_map_pmtiles`/`vector_map_tiles_pmtiles`, MIT). Die verbreitete
+Offline-Bibliothek FMTC ist **GPL-3** — für die Solo-Edition (AGPL) möglich,
+für die kommerzielle Praxis-Edition nur mit gekaufter Lizenz → meiden.
+
+### Was jetzt schon vorbereitet wird (Phase 1, ohne Entscheidung)
+
+- `data/karten.py`: **Kartenquelle** als Datensatz (URL-Vorlage, Art Raster
+  oder Vektor, Namensnennung, User-Agent, `offline_erlaubt`, Höchstmenge je
+  Download, Parallelität) — OSM eingetragen mit `offline_erlaubt=False`, damit
+  der Download-Knopf dort gar nicht erst erscheint.
+- **Gebietsrechnung**: Kacheln für einen Ausschnitt oder einen **Korridor um
+  gelaufene Strecken** (±500 m — viel kleiner als ein Rechteck), Zahl und
+  geschätzte Größe je Zoomstufe, Aufteilung in erlaubte Portionen (OpenFreeMap:
+  ≤ 3 000 Kacheln je Download).
+- **Speicherort** `<Datenverzeichnis>/Karten/` (getrennt von Strecken und
+  Messungen; Karten enthalten keine persönlichen Daten, aber die Wahl des
+  Gebiets verrät den Wohnort → ebenfalls nicht teilen).
+
+So ist der Download später nur noch: Quelle wählen → Gebiet → laden → die
+Karten-Erweiterung zeigt die Datei an.
+
+---
+
+## 6. DFA α1 — Überblick ohne Empfehlung
+
+**Was gezeigt wird** — wie in den bekannten Apps (FatMaxxer, alphaHRV,
+Runalyze):
+
+- DFA α1 als Verlaufskurve: 2-min-Fenster, alle 5 s neu gerechnet (die
+  Kennzahl gibt es, Schrittweite anpassen);
+- Wert je km/Abschnitt;
+- **Artefaktanteil je Fenster**, Fenster mit **≥ 3 % korrigierten Schlägen
+  grau** und ohne Wert in den Zusammenfassungen (ab 6 % verfälschen Artefakte
+  α1 um bis zu 19 %);
+- **Zeit je Wertebereich** (z. B. über 1,0 · 0,75–1,0 · 0,5–0,75 · unter
+  0,5), neutral beschriftet — keine Begriffe wie „aerob/anaerob", keine
+  Zielbereiche, keine Hinweise wie „langsamer laufen".
+
+**Grenzen, die die App nennt** (Info-Text, beschreibend):
+
+- Nur mit **EKG-Gurt** (H10). Für optische Pulsintervalle gibt es unter
+  Belastung keine Validierung („basically no relationship" bei der Verity) —
+  bei der Verity bleibt α1 aus.
+- Auch der H10 streut bei hoher Belastung deutlich (Übereinstimmung mit dem
+  EKG +58/−41 %); der Wert ist ein **Schätzwert**.
+- Ermüdung verschiebt α1 (in Studien um ~12 bpm bei der zugehörigen HF).
+
+In der Literatur werden α1 ≈ 0,75 und ≈ 0,5 mit den ventilatorischen
+Schwellen in Verbindung gebracht — mit breiter Streuung (Übereinstimmung
+±11–13 bpm, je nach Studie mehr). **Das steht in der Doku, nicht in der App**:
+In der App wäre es der erste Schritt zur Empfehlung, und eine
+Intensitätsempfehlung aus Messwerten ist `physiologische_steuerung` — in der
+Solo-Edition gesperrt (`docs/recht/00_zweckbestimmung.md`). Die
+Praxis-Edition kann Schwellen später freischalten.
+
+---
+
+## 7. Strom sparen — macht ein GPS-Intervall von 3–10 s einen Unterschied?
+
+**Kurz: wenig — solange das Display an ist, fast gar nicht.**
+
+- **Größenordnungen** (Googles Modellwerte fürs Pixel 9; fürs Pixel 10 nicht
+  veröffentlicht): GPS 19–104 mW (starkes/schwaches Signal), Display
+  0,36–2,1 W (minimale/maximale Helligkeit). *Das Display braucht 5- bis
+  20-mal so viel wie das GPS.*
+- **Unter ~10 s bleibt der GPS-Empfänger an** (Android schaltet erst ab 10 s
+  Intervall zwischen den Ortungen ab; ein Neustart dauert ~5 s). 1 s → 3 s
+  spart am GPS also wenig, nur etwas Prozessor- und Python-Arbeit.
+- **Bündeln** (Ortungen sammeln, seltener aufwachen) bietet geolocator nicht an
+  — und der H10 weckt den Prozessor ohnehin jede Sekunde.
+- **Dual-Band-GPS** (L1+L5, Pixel 10) kostet am Chip ~2 mW mehr — vernachlässigbar.
+
+**Was dagegen kostet — Genauigkeit:** *Bei 12 km/h (3,33 m/s) verliert eine
+90°-Ecke bei 1 s 0,6 m, bei 5 s 3,1 m, bei 10 s 6,3 m; ein Bogen mit 20 m
+Radius wird bei 5 s um 2,9 %, bei 10 s um 11 % zu kurz.* Studien fanden bei
+1 Hz auf kurvigen Kursen bis 11 % zu wenig.
+
+**Vorschlag:**
+
+| Stufe | Intervall | für |
+|---|---|---|
+| **Genau (Vorgabe)** | 1 s | Laufen, Rad, Intervalle |
+| Sparsam | 10 s | lange Wanderungen — der Empfänger darf zwischendurch schlafen |
+| Ohne GPS | — | Laufband, Halle, Gymnastik |
+
+**Die echten Hebel:** Display aus (die Benachrichtigung zeigt Zeit, Distanz,
+HF; der km-Ton meldet sich), Karte nur zeichnen, wenn sie sichtbar ist,
+Oberfläche höchstens 1×/s auffrischen, im Hintergrund gar nicht; dunkles Design
+hilft nur bei hoher Helligkeit (−39 bis −47 % bei 100 %, bei 30–50 % nur
+3–9 %). **Selbst messen** (Phase 0): 30 min mit 1 s gegen 10 s, Display aus —
+eine aktuelle Messung „1 s gegen 5 s" hat die Recherche nicht gefunden.
+
+---
+
+## 8. Phasen und Aufwand
+
+| Phase | Inhalt | Aufwand |
+|---|---|---|
+| 0 · Vorab-Test (APK) | flet-geolocator (1 s, Display aus über `MessDienst` Typ `location`), flet-map mit OSM und User-Agent, Akku 30 min (1 s gegen 10 s) | ½–1 Tag + Ben am Pixel |
+| 1 · Kern | `core/strecke.py`, `devices/gps.py` mit `GpxWiedergabe`, Speichern (Ordner `Strecken/`, Migration), Regel-0-Test, `data/karten.py` (Quellen, Gebietsrechnung) | 1½ Tage |
+| 2 · Live | Trainingsansicht, Karte, km-Signal und -Notiz, Auto-Pause, Benachrichtigung | 1½ Tage |
+| 3 · Aufzeichnung | Karte, km-Tabelle, Kurven, Tagebuch-Eintrag | 1 Tag |
+| 4 · DFA-α1-Überblick | 5-s-Schritt, Artefakt-Grau, Zeit je Bereich, Werte je km | ½ Tag |
+| 5 · Karte offline | eigene Karten-Erweiterung (Vektor, PMTiles), Gebiet laden | 3–5 Tage, nach Entscheidung |
+
+Phasen 0–4: **etwa 5–6 Arbeitstage**. Phase 5 kommt dazu, wenn offline
+gewünscht ist.
+
+---
+
+## 9. Offene Entscheidungen für Ben
+
+1. **Offline-Karten:** Vektor über eigene Erweiterung (OpenFreeMap oder
+   Protomaps-Ausschnitt, ~20 MB je 20 × 20 km) — ja, wann? Oder vorerst nur der
+   Zwischenspeicher?
+2. **Eigene Kachelquelle hosten** (Protomaps-Ausschnitt Deutschland) statt
+   OpenFreeMap — unabhängig von deren Bedingungen, kostet wenige €/Monat.
+3. **Export der eigenen Strecke** (GPX) — ganz aus (Vorgabe) oder nur auf
+   ausdrücklichen Knopfdruck?
+4. **Sportarten** am Anfang: nur Laufen, oder gleich Rad/Gehen?
+5. **DFA-α1-Wertebereiche** für die Übersicht (neutral) — die vorgeschlagenen?
+6. **Play Store** später: Vordergrunddienst als `health` statt `location`.
+
+---
+
+## 10. Was dabei sonst noch auffiel
+
+- `flet-map` setzt `user_agent_package_name` standardmäßig auf `unknown` — wer
+  es vergisst, bekommt von OSM Sperrkacheln.
+- geolocator verlangt in seiner Anleitung `ACCESS_BACKGROUND_LOCATION`; die
+  Android-Doku sagt, mit Vordergrunddienst nicht — wir folgen Android und
+  prüfen es im Vorab-Test (die Hintergrund-Berechtigung ist im Play Store
+  schwer zu bekommen).
+
+---
+
+## 11. Quellen
+
+OSM-Regeln: https://operations.osmfoundation.org/policies/tiles/ ·
+https://operations.osmfoundation.org/policies/vector/ ·
+https://docs.fleaflet.dev/tile-servers/using-openstreetmap-direct ·
+flutter_map-Cache: https://docs.fleaflet.dev/layers/tile-layer/caching ·
+OpenFreeMap: https://openfreemap.org/tos/ · Protomaps:
+https://docs.protomaps.com/basemaps/downloads ,
+https://docs.protomaps.com/pmtiles/cli ,
+https://pyviz-tutorial.readthedocs.io/en/latest/protomaps/extract.html ·
+Thunderforest: https://www.thunderforest.com/terms/ · Stadia:
+https://stadiamaps.com/pricing/ · MapTiler: https://www.maptiler.com/terms/cloud/ ·
+FMTC: https://pub.dev/packages/flutter_map_tile_caching ·
+Kachelgrößen: https://geofabrik.de/maps/tile-packages.html
+
+Strom: https://developer.android.com/develop/sensors-and-location/location/battery ·
+GnssLocationProvider (10-s-Schwelle):
+https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/location/gnss/GnssLocationProvider.java ·
+Pixel-9-Modellwerte:
+https://android.googlesource.com/device/google/caimito/+/refs/heads/main/tokay/overlay/frameworks/base/core/res/res/xml/power_profile.xml ·
+Dual-Band: https://www.eenewseurope.com/en/7nm-gnss-receiver-for-wearables-cuts-power-by-5x/ ·
+Dunkles Design: https://www.purdue.edu/newsroom/releases/2021/Q3/dark-mode-may-not-save-your-phones-battery-life-as-much-as-you-think,-but-there-are-a-few-silver-linings.html
+
+Android-Hintergrund: https://developer.android.com/develop/background-work/services/fgs/service-types ·
+https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start ·
+https://developer.android.com/develop/sensors-and-location/location/permissions ·
+https://developer.android.com/about/versions/14/changes/fgs-types-required ·
+geolocator: https://github.com/Baseflow/flutter-geolocator/blob/main/geolocator_android/CHANGELOG.md
+
+DFA α1: VT1 https://doi.org/10.3389/fphys.2020.596567 · VT2
+https://doi.org/10.3390/jfmk6020038 · Frauen https://doi.org/10.1007/s00421-022-05050-x ·
+Übersicht https://doi.org/10.1186/s40798-023-00607-2 · Ermüdung
+https://doi.org/10.1080/02640414.2023.2277034 · Artefakte
+https://doi.org/10.3390/s21030821 · H10 gegen EKG https://doi.org/10.3390/s22176536 ·
+Optisch: http://www.muscleoxygentraining.com/2025/09/optical-ppg-and-dfa-a1-intriguing-look.html ·
+Apps: https://doi.org/10.3389/fphys.2022.879071
+
+GPS-Genauigkeit: https://doi.org/10.1123/ijspp.5.4.448 ·
+https://arxiv.org/abs/1504.04504 · OpenTracks-Vorgaben:
+https://github.com/OpenTracksApp/OpenTracks/blob/main/src/main/res/values/settings.xml

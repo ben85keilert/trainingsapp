@@ -1178,9 +1178,14 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         fenster.verschieben(x + fenster.breite_s / 2 - dauer, dauer)
 
     def zentrieren_und_zeichnen(x: float) -> None:
+        """Im Editor: die Kurve zur gewählten Grenze rücken, wenn sie am Rand oder draußen liegt.
+
+        Die Rohkurve zeichnet danach der Editor; die Verlaufskurven ziehen hier mit.
+        """
         x_von, x_bis = fenster.bereich(dauer)
         if not x_von + 0.1 * (x_bis - x_von) <= x <= x_bis - 0.1 * (x_bis - x_von):
             zentrieren(x)
+            analyse.zeichnen(*fenster.bereich(dauer))
 
     # -- Notizen ---------------------------------------------------------------
 

@@ -127,7 +127,7 @@ class Exercise:
     #: Standard der Parameter für neue Planübungen — ``None`` = alle, ``[]`` = nur abhaken
     default_felder: list[str] | None = None
     media: list[Media] = field(default_factory=list)
-    #: Typ-Tags: was für eine Übung das ist (Kräftigung, Dehnung, Kung-Fu, …) — optional
+    #: Typ-Tags: was für eine Übung das ist (Kräftigung, Dehnung, …) — optional
     typen: list[str] = field(default_factory=list)
     #: Region-Tags: welche Körperregion (Nacken, Bein, …) — optional
     regionen: list[str] = field(default_factory=list)
@@ -252,9 +252,10 @@ class DayNote:
 # ---------------------------------------------------------------------------
 
 
-#: Vorschläge für Typ-Tags (`Exercise.typen`) — eigene kommen dazu.
+#: Vorschläge für Typ-Tags (`Exercise.typen`). Migration 013 legt sie als Tags an;
+#: danach verwaltet man sie unter Einstellungen → Typen und Regionen (`TagRepo`).
 TYPEN = ["Dehnung", "Kräftigung", "Ausdauer", "Gleichgewicht", "Atmung", "Benchmark", "Messung"]
-#: Vorschläge für Region-Tags (`Exercise.regionen`) — eigene kommen dazu.
+#: Vorschläge für Region-Tags (`Exercise.regionen`) — wie `TYPEN` ab Migration 013 Tags.
 REGIONEN = ["Nacken", "Schulter", "Arm", "Hand", "Rumpf", "Rücken", "Hüfte", "Bein", "Fuß"]
 #: Arten in der Tabelle `tag` (Spalte ``kind``, Migration 009)
 TAG_TYP = "typ"

@@ -28,6 +28,7 @@ from trainingsapp.data.repositories import (
     SessionRepo,
     SettingRepo,
     SubjectRepo,
+    TagRepo,
 )
 from trainingsapp.data.seed import seed_einspielen, seed_id, seed_laden
 
@@ -67,10 +68,11 @@ def test_unbekannte_id_liefert_none(repo) -> None:
 
 
 def test_nach_kategorie_filtern(repo) -> None:
-    repo.speichern(Exercise(name="A", category="Schulter"))
-    repo.speichern(Exercise(name="B", category="Nacken"))
-    assert [u.name for u in repo.alle(kategorie="Schulter")] == ["A"]
-    assert repo.kategorien() == ["Nacken", "Schulter"]
+    # Namen, die es nicht schon als Region gibt (Migration 013 legt Vorschläge an)
+    repo.speichern(Exercise(name="A", category="Kraft"))
+    repo.speichern(Exercise(name="B", category="Mobilität"))
+    assert [u.name for u in repo.alle(kategorie="Kraft")] == ["A"]
+    assert repo.kategorien() == ["Kraft", "Mobilität"]
 
 
 def test_archivierte_verschwinden_aus_der_liste(repo) -> None:
@@ -526,7 +528,11 @@ def test_tags_speichern_und_laden(repo, con) -> None:
     geladen = repo.laden(u.id)
     assert (geladen.typen, geladen.regionen) == (["Kräftigung", "Kung-Fu"], ["Arm", "Rumpf"])
     assert geladen.category == "Kräftigung"  # der erste Typ
-    assert con.execute("SELECT COUNT(*) FROM tag").fetchone()[0] == 4
+    # je Name genau eine Zeile (die Vorschläge legt Migration 013 schon an)
+    namen = ("Kräftigung", "Kung-Fu", "Arm", "Rumpf")
+    assert (
+        con.execute("SELECT COUNT(*) FROM tag WHERE name IN (?, ?, ?, ?)", namen).fetchone()[0] == 4
+    )
     assert repo.typen() == ["Kräftigung", "Kung-Fu"]
     assert repo.regionen() == ["Arm", "Rumpf"]
     assert [x.name for x in repo.alle(kategorie="Kung-Fu")] == ["A"]
@@ -1093,3 +1099,77 @@ def test_titel_der_aufzeichnung_und_plaene_waehrend(welt) -> None:
     fuenf = timedelta(minutes=5)
     assert sessions.plaene_waehrend(ich.id, jetzt_ - fuenf, jetzt_ + fuenf) == [plan.id]
     assert sessions.plaene_waehrend(ich.id, jetzt_ + fuenf, jetzt_ + 2 * fuenf) == []
+
+
+# -- Typen und Regionen verwalten (Migration 013) -----------------------------
+
+
+def test_vorschlaege_sind_tags_ohne_kung_fu(con) -> None:
+    tags = TagRepo(con)
+    typen = tags.namen("typ")
+    assert "Kräftigung" in typen and "Kung-Fu" not in typen
+    assert typen == sorted(typen, key=str.casefold)  # Altbestand alphabetisch
+    assert "Schulter" in tags.namen("region")
+
+
+def test_neuer_tag_steht_oben_und_doppelte_werden_gemeldet(con) -> None:
+    tags = TagRepo(con)
+    assert tags.anlegen("typ", " Qigong ") is None
+    assert tags.anlegen("typ", "Yoga") is None
+    assert tags.namen("typ")[:2] == ["Yoga", "Qigong"]
+    assert tags.anlegen("typ", "Yoga") == "„Yoga“ gibt es schon."
+    assert tags.anlegen("typ", "Schulter") == "„Schulter“ gibt es schon als Region."
+    assert tags.anlegen("region", "  ") == "Kein Name."
+    assert tags.anlegen("typ", "yoga") == "„Yoga“ gibt es schon."  # Groß/klein egal
+    # ungenutzt: Zahl 0; ein über die Übung neu angelegter Tag kommt ebenfalls oben hin
+    ExerciseRepo(con).speichern(Exercise(name="A", typen=["Pilates"]))
+    assert tags.alle("typ")[:3] == [("Pilates", 1), ("Yoga", 0), ("Qigong", 0)]
+
+
+def test_tag_loeschen_nimmt_ihn_aus_allen_uebungen(con, repo) -> None:
+    tags = TagRepo(con)
+    a = Exercise(name="A", typen=["Kräftigung", "Dehnung"], regionen=["Bein"])
+    b = Exercise(name="B", typen=["Kräftigung"])
+    repo.speichern(a)
+    repo.speichern(b)
+    assert dict(tags.alle("typ"))["Kräftigung"] == 2
+    revision = "SELECT revision FROM exercise WHERE id = ?"
+    vorher = con.execute(revision, (b.id,)).fetchone()[0]
+
+    assert tags.loeschen("typ", "Kräftigung") == 2
+    assert "Kräftigung" not in tags.namen("typ")
+    a2, b2 = repo.laden(a.id), repo.laden(b.id)
+    # Der nächste Typ rückt als Kategorie nach — der gelöschte kommt nicht zurück
+    assert (a2.typen, a2.category, a2.regionen) == (["Dehnung"], "Dehnung", ["Bein"])
+    assert (b2.typen, b2.category) == ([], "")
+    assert con.execute(revision, (b.id,)).fetchone()[0] == vorher + 1  # für den Abgleich
+    assert tags.loeschen("typ", "gibt es nicht") == 0
+
+
+def test_tag_umbenennen_und_zusammenfuehren(con, repo) -> None:
+    tags = TagRepo(con)
+    a = Exercise(name="A", typen=["Kraft", "Dehnung"])
+    b = Exercise(name="B", typen=["Kräftigung"])
+    repo.speichern(a)
+    repo.speichern(b)
+
+    assert tags.umbenennen("typ", "Dehnung", "Mobilität") is None
+    assert repo.laden(a.id).typen == ["Kraft", "Mobilität"]
+    # Vorhandener Name derselben Art: zusammenführen
+    assert tags.umbenennen("typ", "Kraft", "Kräftigung") is None
+    assert "Kraft" not in tags.namen("typ")
+    assert repo.laden(a.id).typen == ["Mobilität", "Kräftigung"]
+    assert repo.laden(a.id).category == "Mobilität"
+    assert dict(tags.alle("typ"))["Kräftigung"] == 2
+    # Name einer Region: abgelehnt, nichts geändert
+    assert tags.umbenennen("typ", "Mobilität", "bein") == "„Bein“ gibt es schon als Region."
+    assert repo.laden(a.id).typen == ["Mobilität", "Kräftigung"]
+    # nur Groß/klein ändern ist ein Umbenennen, kein Zusammenführen mit sich selbst
+    assert tags.umbenennen("typ", "Mobilität", "mobilität") is None
+    assert repo.laden(a.id).typen == ["mobilität", "Kräftigung"]
+
+
+def test_seed_tags_stehen_alphabetisch(con) -> None:
+    seed_einspielen(con)
+    typen = TagRepo(con).namen("typ")
+    assert typen == sorted(typen, key=str.casefold)

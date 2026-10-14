@@ -87,11 +87,15 @@ class ExerciseRepo:
 
     # -- Schreiben ---------------------------------------------------------
 
-    def speichern(self, uebung: Exercise) -> None:
+    def speichern(self, uebung: Exercise, *, neue_tags_oben: bool = True) -> None:
         """Legt an oder aktualisiert. Medien werden komplett ersetzt.
 
         Ein `INSERT … ON CONFLICT DO UPDATE` statt getrennter Pfade für neu und
         vorhanden: Der Aufrufer muss nicht wissen, ob es die Übung schon gibt.
+
+        Unbekannte Typen und Regionen werden angelegt — mit ``neue_tags_oben``
+        (Vorgabe) oben in der Liste wie unter Einstellungen → Typen und
+        Regionen, sonst alphabetisch zwischen den alten (Seed).
         """
         uebung.updated_at = jetzt()
         uebung.typen = _bereinigt(uebung.typen)
@@ -165,9 +169,10 @@ class ExerciseRepo:
             self.con.execute("DELETE FROM exercise_tag WHERE exercise_id = ?", (uebung.id,))
             for name, art in _tags_mit_art(uebung):
                 self.con.execute(
-                    "INSERT INTO tag (id, name, kind) VALUES (?, ?, ?) "
+                    "INSERT INTO tag (id, name, kind, sort) "
+                    "VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort), 0) + 1 FROM tag) * ?) "
                     "ON CONFLICT(name) DO NOTHING",
-                    (new_id(), name, art),
+                    (new_id(), name, art, int(neue_tags_oben)),
                 )
                 tag_id = self.con.execute("SELECT id FROM tag WHERE name = ?", (name,)).fetchone()
                 self.con.execute(
@@ -579,6 +584,8 @@ class SettingRepo:
     TIMER_SIGNALE = "timer_signale"
     #: Bluetooth: Geräte, mit denen die App schon verbunden war (JSON, `devices.bekannte`)
     BEKANNTE_GERAETE = "bekannte_geraete"
+    #: Plan: wie die Übungen beim Training aussehen (`ui.state.PLAN_DARSTELLUNGEN`)
+    PLAN_DARSTELLUNG = "plan_darstellung"
 
     def __init__(self, con: sqlite3.Connection) -> None:
         self.con = con
@@ -1610,6 +1617,144 @@ class HrvRepo:
         )
 
 
+class TagRepo:
+    """Typen und Regionen verwalten — Einstellungen → Typen und Regionen (Migration 013).
+
+    Ein Tag lebt in der Tabelle ``tag``, auch wenn ihn gerade keine Übung trägt.
+    Neue stehen oben (``sort`` absteigend), die übrigen alphabetisch. Löschen
+    und Umbenennen wirken in allen Übungen; bei Typen rückt in der Spalte
+    ``exercise.category`` der nächste Typ nach (sonst käme ein gelöschter über
+    den Altbestand-Rückfall in `ExerciseRepo._mit_tags` zurück).
+    """
+
+    def __init__(self, con: sqlite3.Connection) -> None:
+        self.con = con
+
+    def alle(self, art: str) -> list[tuple[str, int]]:
+        """(Name, Zahl der aktiven Übungen) — neue zuerst, sonst alphabetisch."""
+        return [
+            (r["name"], r["n"])
+            for r in self.con.execute(
+                "SELECT t.name, COUNT(e.id) AS n FROM tag t "
+                "LEFT JOIN exercise_tag et ON et.tag_id = t.id "
+                "LEFT JOIN exercise e ON e.id = et.exercise_id "
+                "AND e.deleted_at IS NULL AND e.archived = 0 "
+                "WHERE t.kind = ? GROUP BY t.id "
+                "ORDER BY t.sort DESC, t.name COLLATE NOCASE",
+                (art,),
+            )
+        ]
+
+    def namen(self, art: str) -> list[str]:
+        """Nur die Namen, in derselben Reihenfolge — die Chips im Übungs-Editor."""
+        return [name for name, _ in self.alle(art)]
+
+    def anlegen(self, art: str, name: str) -> str | None:
+        """Neuer Tag oben in der Liste. Zurück kommt ein Hinweis, falls es ihn schon gibt."""
+        name = name.strip()
+        if not name:
+            return "Kein Name."
+        # „dehnung" ist „Dehnung" — Groß und klein trennen keine Tags
+        r = self.con.execute(
+            "SELECT name, kind FROM tag WHERE name = ? COLLATE NOCASE", (name,)
+        ).fetchone()
+        if r is not None:
+            return (
+                f"„{r['name']}“ gibt es schon."
+                if r["kind"] == art
+                else f"„{r['name']}“ gibt es schon als "
+                f"{'Typ' if r['kind'] == TAG_TYP else 'Region'}."
+            )
+        self.con.execute(
+            "INSERT INTO tag (id, name, kind, sort) "
+            "VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort), 0) + 1 FROM tag))",
+            (new_id(), name, art),
+        )
+        return None
+
+    def umbenennen(self, art: str, alt: str, neu: str) -> str | None:
+        """Neuer Name für einen Tag — in allen Übungen. Zurück kommt ein Hinweis, wenn nicht.
+
+        Gibt es den neuen Namen in derselben Art schon, werden beide zu einem
+        zusammengeführt (die Übungen tragen danach den vorhandenen).
+        """
+        neu = neu.strip()
+        if not neu:
+            return "Kein Name."
+        if neu == alt:
+            return None
+        r = self.con.execute(
+            "SELECT id FROM tag WHERE name = ? AND kind = ?", (alt, art)
+        ).fetchone()
+        if r is None:
+            return f"„{alt}“ gibt es nicht mehr."
+        # Groß und klein trennen keine Tags; „dehnung" → „Dehnung" ist ein Umbenennen
+        ziel = self.con.execute(
+            "SELECT id, name, kind FROM tag WHERE name = ? COLLATE NOCASE AND id != ?",
+            (neu, r["id"]),
+        ).fetchone()
+        if ziel is not None and ziel["kind"] != art:
+            return (
+                f"„{ziel['name']}“ gibt es schon als "
+                f"{'Typ' if ziel['kind'] == TAG_TYP else 'Region'}."
+            )
+        stempel = jetzt().isoformat()
+        with transaktion(self.con):
+            betroffen = [
+                z["exercise_id"]
+                for z in self.con.execute(
+                    "SELECT exercise_id FROM exercise_tag WHERE tag_id = ?", (r["id"],)
+                )
+            ]
+            if ziel is None:
+                self.con.execute("UPDATE tag SET name = ? WHERE id = ?", (neu, r["id"]))
+            else:  # zusammenführen: Zuordnungen auf den vorhandenen Tag, alten löschen
+                self.con.execute(
+                    "INSERT OR IGNORE INTO exercise_tag (exercise_id, tag_id) "
+                    "SELECT exercise_id, ? FROM exercise_tag WHERE tag_id = ?",
+                    (ziel["id"], r["id"]),
+                )
+                self.con.execute("DELETE FROM exercise_tag WHERE tag_id = ?", (r["id"],))
+                self.con.execute("DELETE FROM tag WHERE id = ?", (r["id"],))
+            self._kategorie_nachziehen(betroffen, stempel)
+        return None
+
+    def _kategorie_nachziehen(self, uebung_ids: list[str], stempel: str) -> None:
+        """`exercise.category` = erster Typ — nach Löschen oder Umbenennen eines Tags."""
+        for uebung_id in uebung_ids:
+            erster = self.con.execute(
+                "SELECT t.name FROM exercise_tag et JOIN tag t ON t.id = et.tag_id "
+                "WHERE et.exercise_id = ? AND t.kind = ? ORDER BY et.rowid LIMIT 1",
+                (uebung_id, TAG_TYP),
+            ).fetchone()
+            self.con.execute(
+                "UPDATE exercise SET category = ?, updated_at = ?, revision = revision + 1 "
+                "WHERE id = ?",
+                (erster["name"] if erster else "", stempel, uebung_id),
+            )
+
+    def loeschen(self, art: str, name: str) -> int:
+        """Tag löschen und aus allen Übungen nehmen; zurück: wie viele Übungen ihn trugen."""
+        r = self.con.execute(
+            "SELECT id FROM tag WHERE name = ? AND kind = ?", (name, art)
+        ).fetchone()
+        if r is None:
+            return 0
+        tag_id = r["id"]
+        stempel = jetzt().isoformat()
+        with transaktion(self.con):
+            betroffen = [
+                z["exercise_id"]
+                for z in self.con.execute(
+                    "SELECT exercise_id FROM exercise_tag WHERE tag_id = ?", (tag_id,)
+                )
+            ]
+            self.con.execute("DELETE FROM exercise_tag WHERE tag_id = ?", (tag_id,))
+            self.con.execute("DELETE FROM tag WHERE id = ?", (tag_id,))
+            self._kategorie_nachziehen(betroffen, stempel)
+        return len(betroffen)
+
+
 class StreckeRepo:
     """Ausdauertrainings — die Ortungen liegen als Datei unter ``Strecken/``.
 
@@ -1707,5 +1852,6 @@ __all__ = [
     "SettingRepo",
     "StreckeRepo",
     "SubjectRepo",
+    "TagRepo",
     "new_id",
 ]

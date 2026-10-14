@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import flet as ft
 
 
@@ -15,4 +17,17 @@ def sicher(inhalt: ft.Control, expand: bool = True) -> ft.Control:
     return ft.SafeArea(expand=expand, content=inhalt)
 
 
-__all__ = ["sicher"]
+def ohne_auto_update() -> None:
+    """Nach diesem Ereignis nicht die ganze Seite vergleichen — wer zeichnet, aktualisiert.
+
+    Für Ereignisse, die beim Ziehen dauernd kommen (Wischen, Regler): Flet
+    vergliche sonst nach jedem die ganze Ansicht. Nur innerhalb einer
+    laufenden App — ohne Sitzung (Tests) schaltete der Aufruf das Auto-Update
+    für den ganzen Prozess ab.
+    """
+    with contextlib.suppress(Exception):
+        _ = ft.context.page  # außerhalb einer Sitzung: RuntimeError
+        ft.context.disable_auto_update()
+
+
+__all__ = ["ohne_auto_update", "sicher"]

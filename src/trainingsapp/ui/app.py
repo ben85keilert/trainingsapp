@@ -25,6 +25,7 @@ Routen:
     /verlauf/<kachel_id>            Kurve der Tagessummen einer Kachel (mit Varianten)
     /einstellungen/hrv              Einstellungen der HRV-Messung
     /einstellungen/profile          Profile anlegen, umbenennen, löschen
+    /einstellungen/tags             Typen und Regionen der Übungen: anlegen, umbenennen, löschen
     /einstellungen/gps-test         GPS-Vorabtest: Strecke und Dauertest (docs/plan_gps.md)
     /ausdauer                       Ausdauertraining mit GPS: starten, live
     /ausdauer/<id>                  Auswertung eines Trainings: Karte, km, DFA α1
@@ -49,6 +50,7 @@ from trainingsapp.ui.theme import dark_theme, light_theme
 from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view
 from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
+from trainingsapp.ui.views.einstellungen_tags import einstellungen_tags_view
 from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
 from trainingsapp.ui.views.gps_test import gps_test_view
@@ -378,6 +380,8 @@ def main(page: ft.Page) -> None:
                 page.views.append(einstellungen_hrv(page, state))
             elif teile[1:2] == ["profile"]:
                 page.views.append(profile_view(page, state))
+            elif teile[1:2] == ["tags"]:
+                page.views.append(einstellungen_tags_view(page, state))
             elif teile[1:2] == ["gps-test"]:
                 page.views.append(gps_test_view(page, state))
         elif teile[:1] == ["archiv"]:

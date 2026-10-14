@@ -88,7 +88,8 @@ def seed_einspielen(con: sqlite3.Connection, datei: Path = SEED_DATEI) -> int:
     for uebung in seed_laden(datei):
         if repo.existiert(uebung.id):
             continue
-        repo.speichern(uebung)
+        # Seed-Tags („HRV", „Isometrie") alphabetisch, nicht oben wie selbst angelegte
+        repo.speichern(uebung, neue_tags_oben=False)
         neu += 1
     return neu
 

@@ -21,13 +21,14 @@ jedes wartende Ereignis wieder neu.
 
 from __future__ import annotations
 
-import contextlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 import flet as ft
+
+from trainingsapp.ui.components.layout import ohne_auto_update
 
 #: Höchstens so oft je Sekunde wird beim Wischen neu gezeichnet
 _WISCH_HZ = 8.0
@@ -68,17 +69,6 @@ class Fenster:
         _, bis = self.bereich(jetzt_s, anfang)
         neu = max(bis + delta_s, anfang + self.breite_s)
         self.ende_s = None if neu >= jetzt_s - 0.5 else neu
-
-
-def _ohne_auto_update() -> None:
-    """Nach diesem Ereignis nicht die ganze Seite vergleichen — wer zeichnet, aktualisiert.
-
-    Nur innerhalb einer laufenden App: Ohne Sitzung (Tests) schaltete der
-    Aufruf das Auto-Update für den ganzen Prozess ab.
-    """
-    with contextlib.suppress(Exception):
-        _ = ft.context.page  # außerhalb einer Sitzung: RuntimeError
-        ft.context.disable_auto_update()
 
 
 def wischbar(
@@ -133,13 +123,13 @@ def wischbar(
         return False
 
     def beginn(e: ft.DragStartEvent) -> None:
-        _ohne_auto_update()
+        ohne_auto_update()
         stand["greift"] = None
         if gegriffen(getattr(e, "local_position", None)):
             zeichnen_gedrosselt()
 
     def ziehen(e: ft.DragUpdateEvent) -> None:
-        _ohne_auto_update()
+        ohne_auto_update()
         if gegriffen(getattr(e, "local_position", None)):
             zeichnen_gedrosselt()
             return
@@ -153,7 +143,7 @@ def wischbar(
         zeichnen_gedrosselt()
 
     def ende(_: ft.DragEndEvent) -> None:
-        _ohne_auto_update()
+        ohne_auto_update()
         neu_zeichnen()
         stand["zuletzt"] = time.monotonic()
         stand["greift"] = None

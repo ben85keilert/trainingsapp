@@ -8,6 +8,8 @@ wusste, dass die 6 die Skala ist. Jetzt hat jeder Parameter seinen Namen
   Zusatz klein dahinter („45 gesamt", „0 bis 10").
 - `wert_kacheln` — großzügig, für die Ansicht eines Eintrags: je Parameter eine
   Kachel mit großem Wert.
+- `wert_leiste` — für den Planblock: oben betont, was heute geleistet ist,
+  je Parameter groß der Wert, nebeneinander (Ben, 14.10.2026).
 """
 
 from __future__ import annotations
@@ -68,4 +70,26 @@ def wert_kacheln(zeilen: list[ParameterWert]) -> ft.Control:
     )
 
 
-__all__ = ["wert_kacheln", "wert_zeilen"]
+def wert_leiste(zeilen: list[ParameterWert]) -> ft.Control:
+    """Je Parameter groß der Wert, darunter Name und Zusatz — nebeneinander, umbrechend."""
+    return ft.Row(
+        wrap=True,
+        spacing=24,
+        run_spacing=10,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+        controls=[
+            ft.Column(
+                spacing=0,
+                tight=True,
+                controls=[
+                    ft.Text(z.wert, size=24, weight=ft.FontWeight.BOLD, color=ft.Colors.PRIMARY),
+                    ft.Text(z.label, size=12, opacity=0.8),
+                    ft.Text(z.zusatz, size=11, opacity=0.6, visible=bool(z.zusatz)),
+                ],
+            )
+            for z in zeilen
+        ],
+    )
+
+
+__all__ = ["wert_kacheln", "wert_leiste", "wert_zeilen"]

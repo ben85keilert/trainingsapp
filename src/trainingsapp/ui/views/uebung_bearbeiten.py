@@ -5,7 +5,12 @@ Jedes Feld bringt Typ und Einheit mit, hier schaltet man es ein und legt die
 Chips fest. Was eingeschaltet ist, kann man in der Ausführung als geleistet
 antippen. (Vorlagen gibt es im Editor nicht mehr — die Schalter sind schneller
 als ein Umweg.) Felder, die eine Übung aus früheren Zeiten trägt und die nicht
-im Vorrat stehen, bleiben erhalten.
+im Vorrat stehen, bleiben erhalten. Die Skala trägt einen eigenen Namen
+(Vorgabe „Skala“) und einen Bereich.
+
+Typen und Regionen: Chips aus der eigenen Liste (Einstellungen → Typen und
+Regionen); ein neuer kommt über das Feld mit „+“ dazu und steht oben — keine
+Kommaliste mehr.
 """
 
 from __future__ import annotations
@@ -17,8 +22,8 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import (
-    REGIONEN,
-    TYPEN,
+    TAG_REGION,
+    TAG_TYP,
     Exercise,
     Media,
     MediaKind,
@@ -31,6 +36,7 @@ from trainingsapp.core.result_spec import (
     FieldType,
     Layout,
     ResultSpec,
+    basis_label,
     skala_bereich_text,
     skala_lesen,
     vorrat_feld,
@@ -108,49 +114,92 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     )
 
     # -- Typen und Regionen ------------------------------------------------
-    # Zwei Tag-Arten, beide optional und mehrfach: Chips für die Vorschläge
-    # und alles, was es im Katalog schon gibt, dazu ein Feld für Neues.
+    # Zwei Tag-Arten, beide optional und mehrfach: Chips aus der eigenen Liste
+    # (Einstellungen → Typen und Regionen), dazu ein Feld mit „+“ für einen
+    # neuen — er steht oben und ist gleich gewählt. Angelegt wird er erst beim
+    # Speichern; wer abbricht, hinterlässt nichts.
 
     def tag_auswahl(
-        vorschlaege: list[str], aktiv: list[str], label: str
-    ) -> tuple[ft.Control, ft.TextField, Callable[[], list[str]]]:
-        gewaehlt = set(aktiv)
-        angebot = list(dict.fromkeys([*vorschlaege, *aktiv]))
-        chips: dict[str, ft.Chip] = {}
+        art: str, aktiv: list[str], beschriftung: str
+    ) -> tuple[ft.Control, Callable[[], list[str]]]:
+        # In der Reihenfolge des Antippens: Der erste Typ ist die Kategorie.
+        gewaehlt = list(aktiv)
+        angebot = list(dict.fromkeys([*state.tags.namen(art), *aktiv]))
+        andere_art = state.tags.namen(TAG_REGION if art == TAG_TYP else TAG_TYP)
+        reihe = ft.Row(wrap=True, spacing=6, run_spacing=4)
+        feld = ft.TextField(
+            label=beschriftung,
+            dense=True,
+            expand=True,
+            capitalization=ft.TextCapitalization.SENTENCES,
+        )
 
         def schalter(name: str) -> Callable[[], None]:
             def handler() -> None:
-                gewaehlt.symmetric_difference_update({name})
-                chips[name].selected = name in gewaehlt
+                if name in gewaehlt:
+                    gewaehlt.remove(name)
+                else:
+                    gewaehlt.append(name)
+                zeichnen()
                 page.update()
 
             return handler
 
-        for name in angebot:
-            chips[name] = ft.Chip(
-                label=ft.Text(name),
-                selected=name in gewaehlt,
-                show_checkmark=False,
-                on_click=schalter(name),
-            )
-        weitere = ft.TextField(label=label, dense=True)
+        def zeichnen() -> None:
+            reihe.controls = [
+                ft.Chip(
+                    label=ft.Text(name),
+                    selected=name in gewaehlt,
+                    show_checkmark=False,
+                    on_click=schalter(name),
+                )
+                for name in angebot
+            ]
 
-        def lesen() -> list[str]:
-            extra = [t.strip() for t in (weitere.value or "").split(",") if t.strip()]
-            return [n for n in angebot if n in gewaehlt] + [t for t in extra if t not in angebot]
+        def hinzufuegen() -> None:
+            text = (feld.value or "").strip()
+            gleich = [n for n in angebot if n.casefold() == text.casefold()]
+            fremd = [n for n in andere_art if n.casefold() == text.casefold()]
+            if not text:
+                feld.error = "Name?"
+            elif fremd:
+                andere = "eine Region" if art == TAG_TYP else "ein Typ"
+                feld.error = f"„{fremd[0]}“ ist schon {andere}."
+            else:
+                name = gleich[0] if gleich else text
+                if not gleich:
+                    angebot.insert(0, name)  # neu: oben
+                if name not in gewaehlt:
+                    gewaehlt.append(name)
+                feld.value, feld.error = "", None
+                zeichnen()
+            page.update()
 
-        reihe = ft.Row(wrap=True, spacing=6, run_spacing=4, controls=list(chips.values()))
-        return reihe, weitere, lesen
+        feld.on_submit = lambda _: hinzufuegen()
+        zeichnen()
+        bereich = ft.Column(
+            spacing=8,
+            controls=[
+                reihe,
+                ft.Row(
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        feld,
+                        ft.FilledTonalIconButton(
+                            ft.Icons.ADD, tooltip=f"{beschriftung} anlegen", on_click=hinzufuegen
+                        ),
+                    ],
+                ),
+            ],
+        )
+        return bereich, lambda: [n for n in gewaehlt if n in angebot]
 
-    typ_chips, weitere_typen, typen_lesen = tag_auswahl(
-        list(dict.fromkeys([*TYPEN, *state.uebungen.typen()])),
-        list(uebung.typen) if uebung else [],
-        "Weitere Typen (mit Komma, z. B. Kung-Fu)",
+    typ_auswahl, typen_lesen = tag_auswahl(
+        TAG_TYP, list(uebung.typen) if uebung else [], "Neuer Typ"
     )
-    region_chips, weitere_regionen, regionen_lesen = tag_auswahl(
-        list(dict.fromkeys([*REGIONEN, *state.uebungen.regionen()])),
-        list(uebung.regionen) if uebung else [],
-        "Weitere Regionen (mit Komma)",
+    region_auswahl, regionen_lesen = tag_auswahl(
+        TAG_REGION, list(uebung.regionen) if uebung else [], "Neue Region"
     )
 
     # -- Felder aus dem Vorrat ---------------------------------------------
@@ -162,6 +211,15 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     zeilen: list[ft.Control] = []
     # Skala: eigener Bereich statt fest 0–10 — auch negativ, Kommazahlen als solche
     skala_alt = vorhanden.get("scale")
+    # Name der Skala (Ben, 14.10.2026): Vorgabe „Skala“, frei änderbar —
+    # „Anstrengung“, „Schmerz“, „Stabilität“. Alte heißen „Skala 0–10“.
+    skala_name = ft.TextField(
+        label="Name der Skala",
+        value=basis_label(skala_alt) if skala_alt is not None else "Skala",
+        hint_text="z. B. Anstrengung, Schmerz, Stabilität",
+        dense=True,
+        capitalization=ft.TextCapitalization.SENTENCES,
+    )
     skala_bereich = ft.TextField(
         label="Bereich",
         value=skala_bereich_text(
@@ -170,7 +228,11 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         hint_text="0 - 10 · -5 - 5 · 0.0 - 10.0",
         helper="Kommazahlen so: 0.0 - 10.0",
         dense=True,
+    )
+    skala_felder = ft.Container(
+        padding=ft.Padding.only(left=56, bottom=6),
         visible="scale" in eingeschaltet,
+        content=ft.Column(spacing=12, controls=[skala_name, skala_bereich]),
     )
 
     def sichtbarkeit(key: str) -> Callable[[], None]:
@@ -182,7 +244,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                 FieldType.SCALE,
             )
             if key == "scale":
-                skala_bereich.visible = bool(schalter[key].value)
+                skala_felder.visible = bool(schalter[key].value)
             page.update()
 
         return handler
@@ -208,12 +270,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             zeilen.append(
                 ft.Column(
                     spacing=4,
-                    controls=[
-                        schalter[vorlage.key],
-                        ft.Container(
-                            padding=ft.Padding.only(left=56, bottom=6), content=skala_bereich
-                        ),
-                    ],
+                    controls=[schalter[vorlage.key], skala_felder],
                 )
             )
         elif vorlage.type in (FieldType.BOOL, FieldType.TEXT):
@@ -398,7 +455,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                 ganz = float(schritt).is_integer()
                 feld = replace(
                     feld,
-                    label="Skala",
+                    label=(skala_name.value or "").strip() or "Skala",
                     min=int(lo) if ganz else lo,
                     max=int(hi) if ganz else hi,
                     step=int(schritt) if ganz else schritt,
@@ -478,11 +535,15 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                         name,
                         beschreibung,
                         abschnitt("TYP — WAS IST DAS FÜR EINE ÜBUNG? (OPTIONAL)"),
-                        typ_chips,
-                        weitere_typen,
+                        typ_auswahl,
                         abschnitt("REGION (OPTIONAL)"),
-                        region_chips,
-                        weitere_regionen,
+                        region_auswahl,
+                        ft.Text(
+                            "Umbenennen und Löschen: in den Einstellungen unter "
+                            "„Typen und Regionen“.",
+                            size=12,
+                            opacity=0.6,
+                        ),
                         abschnitt("PARAMETER — WAS KANN MAN LEISTEN?", hilfe_knopf(page)),
                         ft.Text(
                             "Eingeschaltete Parameter tippst du beim Training als geleistet an. "

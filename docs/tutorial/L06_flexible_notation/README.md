@@ -128,6 +128,13 @@ Ungültige Eingaben („abc" in einem Zahlenfeld) ergeben `None`, keinen Absturz
 Das Formular markiert das Feld (`error`), und der Speichern-Knopf prüft
 `required`.
 
+> **So ist es heute in der App** (seit 14.10.2026): Die Skala ist ein Regler
+> **und** ein Zahlenfeld in einer Zeile. Das Feld ist das Widget, gelesen wird
+> es — leer heißt „ohne Wert", auch wenn der Regler am Anfang steht; der Regler
+> schreibt nur hinein (`on_change`). Und jedes Zahlenfeld bekommt die
+> Zahlentastatur (`KeyboardType.NUMBER`), Zeiten die für Uhrzeiten
+> (`KeyboardType.DATETIME`: Ziffern und `:`), Text nur Textfelder.
+
 Beispiel 2 ist eine komplette `SpecForm` zum Anfassen. Sie wird in der Übung
 zur echten `ui/components/spec_form.py`.
 
@@ -281,7 +288,9 @@ die Ansicht.
 
 **`NumbersOnlyInputFilter` blockiert den Doppelpunkt.** Für `duration` darf
 man ihn nicht setzen, sonst geht `1:30` nicht mehr. Lieber die Tastatur
-vorgeben und beim Lesen tolerant sein (`parse_dauer`).
+vorgeben und beim Lesen tolerant sein (`parse_dauer`). Die Tastatur für
+Uhrzeiten (`KeyboardType.DATETIME`) hat den Doppelpunkt, die für Zahlen
+nicht — und keine von beiden ein `x` für `3x15`.
 
 **Chips setzen den Wert, aber die Anzeige bleibt alt.** Nach
 `feld.value = "15"` braucht es `feld.update()` (oder `page.update()`). Flets

@@ -50,6 +50,7 @@ from trainingsapp.data.repositories import (
     SettingRepo,
     StreckeRepo,
     SubjectRepo,
+    TagRepo,
 )
 from trainingsapp.data.seed import seed_einspielen
 from trainingsapp.data.upgrade import datenformat_aktualisieren
@@ -63,6 +64,18 @@ from trainingsapp.devices.bekannte import (
 from trainingsapp.hrv_core.regeln import Korrekturregeln
 
 STANDARD_PROFILNAME = "Ich"
+
+#: Wie die Übungen im Plan beim Training aussehen (Ben, 14.10.2026: „Mache
+#: Vorschläge für verschiedene Layouts“). Umschalten unter Einstellungen →
+#: Übungen oder oben im Plan; gilt für dieses Gerät.
+UNTEREINANDER = "untereinander"
+UMSCHALTEN = "umschalten"
+AUFKLAPPEN = "aufklappen"
+PLAN_DARSTELLUNGEN: dict[str, str] = {
+    UNTEREINANDER: "Alle Parameter untereinander",
+    UMSCHALTEN: "Ein Parameter, umschaltbar",
+    AUFKLAPPEN: "Aufklappen: eine Übung offen",
+}
 
 
 @dataclass
@@ -79,6 +92,8 @@ class AppState:
     hrv: HrvRepo
     #: Ausdauertrainings mit GPS (Migration 012) — nie synchronisiert
     strecken: StreckeRepo
+    #: Typen und Regionen (Migration 013) — Einstellungen → Typen und Regionen
+    tags: TagRepo
     profil: Subject
     #: Welcher Reiter der Navigationsleiste aktiv ist — als Schlüssel, nicht als
     #: Index: der Reiter „Messung" lässt sich ausblenden (`app.REITER`)
@@ -113,6 +128,8 @@ class AppState:
     #: die gewählten Ausprägungen ({"angle": 45}) — nur für diese Sitzung
     parameter_wahl: dict[str, str] = field(default_factory=dict)
     auspraegung_wahl: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Darstellung „Aufklappen": die Planübung, deren Eingabe offen ist
+    plan_offen: str | None = None
     #: Laufende HRV-Messung — lebt hier, nicht in der Ansicht, damit sie den
     #: Reiterwechsel überlebt (L03). Typ: `devices.messlauf.Messlauf`.
     messlauf: Any = None
@@ -199,6 +216,7 @@ class AppState:
             tagesnotizen=DayNoteRepo(con),
             hrv=HrvRepo(con),
             strecken=StreckeRepo(con),
+            tags=TagRepo(con),
             profil=profil,
             neu_eingespielt=neu,
             papierkorb_offen=offen,
@@ -309,6 +327,15 @@ class AppState:
         rest = [a for a in self.ansichten() if a.name != name]
         self.einstellungen.setzen(SettingRepo.HRV_ANSICHTEN, ansichten_schreiben(rest))
 
+    def plan_darstellung(self) -> str:
+        """Wie die Übungen im Plan aussehen — ein Schlüssel aus `PLAN_DARSTELLUNGEN`."""
+        wert = self.einstellungen.lesen(SettingRepo.PLAN_DARSTELLUNG, UNTEREINANDER)
+        return wert if wert in PLAN_DARSTELLUNGEN else UNTEREINANDER
+
+    def plan_darstellung_setzen(self, wert: str) -> None:
+        if wert in PLAN_DARSTELLUNGEN:
+            self.einstellungen.setzen(SettingRepo.PLAN_DARSTELLUNG, wert)
+
     def hrv_einstellungen(self) -> HrvEinstellungen:
         """Was die Messung zeigt — Kacheln, Fenster, Analysebereiche."""
         return einstellungen_lesen(self.einstellungen.lesen(SettingRepo.HRV_EINSTELLUNGEN))
@@ -375,4 +402,11 @@ class AppState:
         self.profile.speichern(self.profil)
 
 
-__all__ = ["STANDARD_PROFILNAME", "AppState"]
+__all__ = [
+    "AUFKLAPPEN",
+    "PLAN_DARSTELLUNGEN",
+    "STANDARD_PROFILNAME",
+    "UMSCHALTEN",
+    "UNTEREINANDER",
+    "AppState",
+]

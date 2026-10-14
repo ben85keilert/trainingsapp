@@ -1,7 +1,9 @@
 """Einstellungen — Route `/einstellungen`.
 
 Vorn das aktive Profil wählen; anlegen, umbenennen und löschen in einer eigenen
-Ansicht (`/einstellungen/profile`). Dazu der Weg zu den Einstellungen der
+Ansicht (`/einstellungen/profile`). Dazu die eigene Einteilung der Übungen
+(`/einstellungen/tags`: Typen und Regionen) und wie sie im Plan aussehen
+(`ui.state.PLAN_DARSTELLUNGEN`), der Weg zu den Einstellungen der
 HRV-Messung (`/einstellungen/hrv`), zum Timer, zum GPS-Vorabtest
 (`/einstellungen/gps-test`), Hilfe und Edition.
 
@@ -22,7 +24,7 @@ from trainingsapp.config import edition, ist_aktiv
 from trainingsapp.ui.components.hilfe import hilfe_oeffner
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.state import AppState
+from trainingsapp.ui.state import PLAN_DARSTELLUNGEN, AppState
 
 
 def einstellungen(page: ft.Page, state: AppState) -> ft.View:
@@ -52,6 +54,9 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
             for p in state.profile.alle()
         ]
 
+    def darstellung_setzen(e: ft.Event[ft.Dropdown]) -> None:
+        state.plan_darstellung_setzen(str(e.control.value))
+
     def oeffner(route: str) -> Callable[[], object]:
         async def handler() -> None:
             await page.push_route(route)
@@ -65,6 +70,7 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
         [hinweis("Profilwechsel ist durch PIN geschützt.")] if ist_aktiv("profil_sperre") else []
     )
     e = state.hrv_einstellungen()
+    tag_text = f"{len(state.tags.namen('typ'))} Typen · {len(state.tags.namen('region'))} Regionen"
     hrv_text = f"{len(e.kacheln)} Kacheln · Reiter „Messung“ " + (
         "sichtbar" if e.messung_anzeigen else "ausgeblendet"
     )
@@ -92,6 +98,34 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
                             *sperre,
+                        ),
+                        karte(
+                            titel("Übungen"),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.SELL_OUTLINED),
+                                title=ft.Text("Typen und Regionen"),
+                                subtitle=ft.Text(
+                                    f"Eigene Einteilung: anlegen, umbenennen, löschen · {tag_text}",
+                                    size=12,
+                                ),
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/tags"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
+                            ft.Dropdown(
+                                label="Übungen im Plan",
+                                value=state.plan_darstellung(),
+                                options=[
+                                    ft.DropdownOption(key=key, text=text)
+                                    for key, text in PLAN_DARSTELLUNGEN.items()
+                                ],
+                                on_select=darstellung_setzen,
+                                expand=True,
+                            ),
+                            hinweis(
+                                "Wie die Eingabe beim Training aussieht — auch oben im Plan "
+                                "umschaltbar."
+                            ),
                         ),
                         karte(
                             titel("Messung und Werkzeuge"),

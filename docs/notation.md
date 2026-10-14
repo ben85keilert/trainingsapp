@@ -18,6 +18,14 @@ Gespeichert wird immer eine Liste je Satz: `[15, 15, 20]`. Angezeigt wird
 kompakt: gleiche Werte als `3x15`, ein Satz als `30`, sonst `15/15/20`.
 Daneben die Summe, etwa „50 Wdh. in 3 Sätzen".
 
+**Zahlentastatur** (Ben, 14.10.2026: „wenn ohnehin Zahlen eingegeben werden,
+braucht es die Zahlentastatur“): Zahlenfelder öffnen am Handy die
+Zahlentastatur, Zeiten die für Uhrzeiten (Ziffern und `:`); Text gibt es nur
+in Textfeldern. Auf diesen Tastaturen fehlt das `x` — im Formular trennt
+dann das Komma die Sätze (`15,15,20`), im Plan gibt es dafür zwei Felder
+„Sätze × Wert“ (siehe unten). Wer `3x15` tippen kann (Desktop), darf es
+weiterhin.
+
 Im Verlauf gibt es je Satzfeld zwei Kennzahlen: **Summe** (Standard) und
 **Maximum je Satz** (`<übung>:reps:sum`, `<übung>:reps:max`).
 
@@ -41,15 +49,20 @@ Dezimalzahlen mit Punkt oder Komma, `12,5` wird 12.5.
 
 **Skala:** Standard `0` bis `10`; jeder Bereich geht, auch negativ (`-5 - 5`)
 oder mit Kommastellen — die schreibt man im Bereich als solche: `0.0 - 10.0`
-erlaubt `3.5`, `0 - 10` nur ganze Zahlen. Wenige Stufen (bis 11) stehen im
-Plan zum Antippen da, sonst tippt man den Wert ein.
-In Satzlisten trennt deshalb der Schrägstrich sicherer als das Komma.
+erlaubt `3.5`, `0 - 10` nur ganze Zahlen. Die Skala hat einen Namen (Vorgabe
+„Skala“, im Übungs-Editor änderbar: „Anstrengung“, „Schmerz“ …). Eingegeben
+wird mit Regler und Zahlenfeld in einer Zeile, der Name darüber: Der Regler
+schreibt seine Zahl ins Feld, abgeschickt wird mit dem Haken. Ein leeres
+Feld heißt „ohne Wert“ — auch im Formular, wo der Regler am Anfang steht.
+In Satzlisten trennt das Komma Sätze — Kommazahlen dort mit Punkt (`12.5`).
 
 ## Das Plus im Plan
 
 Jede Übung mit Satzfeld bekommt im Planblock Chips `+10` `+15` `+20` (aus den
-Chips der Übung, im Plan überschreibbar) und ein Feld für eigene Werte. Jeder
-Tipp hängt einen Satz an den heutigen Eintrag dieser Übung an oder legt ihn an.
+Chips der Übung, im Plan überschreibbar) und darunter zwei Zahlenfelder
+**Sätze × Wert** mit „Eintragen“ (leer bei Sätze heißt einer; Zeiten nehmen
+auch `1:30`). Jeder Tipp hängt Sätze an den heutigen Eintrag dieser Übung an
+oder legt ihn an.
 Technisch ist jedes Plus eine Korrektur mit Verweis auf den vorherigen Stand
 (`replaces_entry_id`); der Eintrag bleibt unveränderlich, die Historie zeigt
 jeden Satz.

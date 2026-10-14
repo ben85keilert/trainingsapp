@@ -514,6 +514,8 @@ def _knopf_mit_text(wurzel, text: str):
         if isinstance(c, ft.Text):
             return [c.value or ""]
         inhalt = getattr(c, "content", None)
+        if isinstance(inhalt, str):  # TextButton("Zuklappen")
+            return [inhalt]
         kinder = list(getattr(c, "controls", None) or []) + ([inhalt] if inhalt else [])
         return [t for k in kinder if isinstance(k, ft.Control) for t in texte(k)]
 
@@ -566,3 +568,313 @@ def test_einzelne_uebung_trainieren_ohne_plan(page, state) -> None:
     eintraege = state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
     assert [(e.exercise_id, s.plan_id) for e, s in eintraege] == [(uebung.id, None)]
     assert state.plaene.alle(state.profil.id) == []  # der Einzelplan wird nie gespeichert
+
+
+# -- Übungsblock im Plan, Editor, Typen und Regionen (Ben, 14.10.2026) --------
+
+
+def _texte(c) -> list[str]:
+    """Alle Texte eines Control-Baums (auch in Knöpfen und Abschnitten)."""
+    return [t.value for t in _alle(c) if isinstance(t, ft.Text) and t.value]
+
+
+@pytest.fixture
+def beinachse(page, welt):
+    """Ein Plan mit Beinachsentraining: Wiederholungen, Haltezeit, eine benannte Skala."""
+    from dataclasses import replace
+
+    from trainingsapp.core.models import Exercise
+    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+
+    state, plan, *_ = welt
+    skala = replace(vorrat_feld("scale"), label="Stabilität", default=None)
+    u = Exercise(
+        name="Beinachsentraining",
+        result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("hold"), skala]),
+    )
+    state.uebungen.speichern(u)
+    item = state.plaene.uebung_hinzufuegen(plan.id, u.id)
+    page.show_dialog = lambda _d: None
+    page.update = lambda: None
+    return state, state.plaene.laden(plan.id), item, u
+
+
+def _block(ansicht, name: str):
+    liste = next(c for c in ansicht.controls[0].content.controls if isinstance(c, ft.ListView))
+    return next(b for b in liste.controls if name in _texte(b))
+
+
+def test_planblock_geleistet_oben_zahlentastatur_und_saetze(page, beinachse) -> None:
+    """Alle Parameter untereinander: eigene Abschnitte, nur Zahlenfelder, Sätze × Wert."""
+    from trainingsapp.ui.state import UNTEREINANDER
+    from trainingsapp.ui.views.plan import plan_view
+
+    state, plan, _item, u = beinachse
+    state.plan_darstellung_setzen(UNTEREINANDER)
+    block = _block(plan_view(page, state, plan), "Beinachsentraining")
+    texte = _texte(block)
+    assert "Heute noch nichts eingetragen" in texte and "EINTRAGEN" in texte
+    assert {"Wiederholungen", "Haltezeit", "Stabilität"} <= set(texte)
+    felder = [c for c in _alle(block) if isinstance(c, ft.TextField)]
+    assert felder and all(
+        f.keyboard_type in (ft.KeyboardType.NUMBER, ft.KeyboardType.DATETIME) for f in felder
+    )
+    assert any(isinstance(c, ft.Slider) for c in _alle(block))
+
+    # 3 × 15 Wiederholungen: Sätze-Feld (×) und Wert, dann „Eintragen“
+    saetze = [f for f in felder if f.label == "Sätze"]
+    anzahl, wert = saetze[0], felder[felder.index(saetze[0]) + 1]
+    assert wert.label == "Wdh."
+    anzahl.value, wert.value = "3", "15"
+    _knopf_mit_text(block, "Eintragen").on_click()
+    heute = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
+    eigene = [e for e in heute if e.exercise_id == u.id]
+    assert [e.result.get("reps") for e in eigene] == [[15.0, 15.0, 15.0]]
+
+    # Danach steht das Geleistete oben: 45 Wiederholungen, 3x15
+    block = _block(plan_view(page, state, plan), "Beinachsentraining")
+    texte = _texte(block)
+    assert "HEUTE GELEISTET" in texte and "45" in texte and "Wiederholungen" in texte
+
+    # Haltezeit als 1:30 — zwei Sätze an denselben Eintrag
+    felder = [c for c in _alle(block) if isinstance(c, ft.TextField)]
+    saetze = [f for f in felder if f.label == "Sätze"]
+    anzahl, wert = saetze[1], felder[felder.index(saetze[1]) + 1]
+    assert wert.keyboard_type == ft.KeyboardType.DATETIME and wert.label == "Sekunden"
+    anzahl.value, wert.value = "2", "1:30"
+    wert.on_submit(None)
+    eigene = [
+        e
+        for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+        if e.exercise_id == u.id
+    ]
+    assert eigene[-1].result["hold"] == [90.0, 90.0]
+
+    # Ungültig: kein Wert → Fehler am Feld, kein Eintrag
+    block = _block(plan_view(page, state, plan), "Beinachsentraining")
+    felder = [c for c in _alle(block) if isinstance(c, ft.TextField)]
+    wert = felder[felder.index(next(f for f in felder if f.label == "Sätze")) + 1]
+    vorher = len(state.sitzungen.eintraege_am_tag(state.profil.id, state.heute()))
+    wert.on_submit(None)
+    assert wert.error == "Wert?"
+    assert len(state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())) == vorher
+
+
+def test_planblock_skala_regler_schreibt_ins_feld(page, beinachse) -> None:
+    """Regler bewegen → Zahl im Feld; erst der Haken trägt ein. Getippt stellt den Regler."""
+    from types import SimpleNamespace
+
+    from trainingsapp.ui.views.plan import plan_view
+
+    state, plan, _item, u = beinachse
+    block = _block(plan_view(page, state, plan), "Beinachsentraining")
+    regler = next(c for c in _alle(block) if isinstance(c, ft.Slider))
+    zeile = next(c for c in _alle(block) if isinstance(c, ft.Row) and regler in (c.controls or []))
+    feld = next(c for c in zeile.controls if isinstance(c, ft.TextField))
+    haken = next(c for c in zeile.controls if isinstance(c, ft.FilledTonalIconButton))
+
+    regler.on_change(SimpleNamespace(control=SimpleNamespace(value=7.0)))
+    assert feld.value == "7"
+    assert not [
+        e
+        for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+        if e.exercise_id == u.id
+    ]  # nur bewegt, noch nichts eingetragen
+    feld.value = "4"
+    feld.on_change(None)
+    assert regler.value == 4.0
+    haken.on_click()
+    eigene = [
+        e
+        for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+        if e.exercise_id == u.id
+    ]
+    assert [e.result.get("scale") for e in eigene] == [4]
+
+    # Neu gebaut: Feld und Regler zeigen den heutigen Wert
+    block = _block(plan_view(page, state, plan), "Beinachsentraining")
+    regler = next(c for c in _alle(block) if isinstance(c, ft.Slider))
+    assert regler.value == 4.0
+    assert "Stabilität" in _texte(block) and "0 bis 10" in _texte(block)
+
+
+def test_planblock_umschalten_und_aufklappen(page, beinachse) -> None:
+    from trainingsapp.ui.state import AUFKLAPPEN, PLAN_DARSTELLUNGEN, UMSCHALTEN
+    from trainingsapp.ui.views.plan import plan_view
+
+    state, plan, item, _u = beinachse
+
+    # Umschalten: Chips für alle drei Parameter, nur einer ist zu sehen
+    state.plan_darstellung_setzen(UMSCHALTEN)
+    block = _block(plan_view(page, state, plan), "Beinachsentraining")
+    chips = [c for c in _alle(block) if isinstance(c, ft.Chip) and c.selected is not None]
+    namen = [c.label.value for c in chips if c.label.value in ("Wiederholungen", "Haltezeit")]
+    assert set(namen) == {"Wiederholungen", "Haltezeit"}
+    assert sum(isinstance(c, ft.Slider) for c in _alle(block)) == 0  # Skala nicht gewählt
+    next(c for c in chips if c.label.value == "Stabilität").on_click()
+    block = _block(plan_view(page, state, plan), "Beinachsentraining")
+    assert sum(isinstance(c, ft.Slider) for c in _alle(block)) == 1
+    assert state.parameter_wahl[item.id] == "scale"
+
+    # Aufklappen: Die erste Übung ohne Eintrag ist offen, die anderen zu
+    state.plan_darstellung_setzen(AUFKLAPPEN)
+    state.plan_offen = None
+    ansicht = plan_view(page, state, plan)
+    offen = [
+        b
+        for b in next(
+            c for c in ansicht.controls[0].content.controls if isinstance(c, ft.ListView)
+        ).controls
+        if "EINTRAGEN" in _texte(b)
+    ]
+    assert len(offen) <= 1
+    block = _block(ansicht, "Beinachsentraining")
+    if "EINTRAGEN" not in _texte(block):
+        _knopf_mit_text(block, "Eintragen").on_click()
+        block = _block(plan_view(page, state, plan), "Beinachsentraining")
+    assert state.plan_offen == item.id and "EINTRAGEN" in _texte(block)
+    _knopf_mit_text(block, "Zuklappen").on_click()
+    assert state.plan_offen is None
+
+    # Das Menü oben im Plan schaltet um und merkt es sich
+    ansicht = plan_view(page, state, plan)
+    menue = next(c for v in ansicht.controls for c in _alle(v) if isinstance(c, ft.PopupMenuButton))
+    assert [i.data for i in menue.items] == list(PLAN_DARSTELLUNGEN)
+    next(i for i in menue.items if i.data == UMSCHALTEN).on_click()
+    assert state.plan_darstellung() == UMSCHALTEN
+    assert [i.checked for i in menue.items] == [k == UMSCHALTEN for k in PLAN_DARSTELLUNGEN]
+    assert PLAN_DARSTELLUNGEN[UMSCHALTEN] in _texte(menue.content)
+
+
+def test_editor_typ_mit_plus_und_skala_mit_namen(page, welt) -> None:
+    import asyncio
+
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+
+    state, _plan, _item, uebung, _ = welt
+    gesprungen: list[str] = []
+
+    async def push_route(r: str) -> None:
+        gesprungen.append(r)
+
+    page.push_route = push_route
+    page.update = lambda: None
+    page.show_dialog = lambda _d: None
+    vorher = list(uebung.typen)
+    ansicht = uebung_bearbeiten(page, state, uebung)
+    alle = [c for v in ansicht.controls for c in _alle(v)]
+    assert not any(isinstance(c, ft.TextField) and "Kung-Fu" in (c.label or "") for c in alle)
+
+    neu = next(c for c in alle if isinstance(c, ft.TextField) and c.label == "Neuer Typ")
+    plus = next(
+        c
+        for c in alle
+        if isinstance(c, ft.FilledTonalIconButton) and c.tooltip == "Neuer Typ anlegen"
+    )
+    neu.value = "Qigong"
+    plus.on_click()
+    chips = [c for v in ansicht.controls for c in _alle(v) if isinstance(c, ft.Chip)]
+    erster = next(c for c in chips if c.label.value == "Qigong")
+    assert erster.selected and neu.value == ""
+    neu.value = "bein"  # gibt es als Region
+    plus.on_click()
+    assert neu.error == "„Bein“ ist schon eine Region."
+
+    # Skala einschalten und benennen
+    skala = next(c for c in alle if isinstance(c, ft.Switch) and c.label == "Skala")
+    skala.value = True
+    skala.on_change()
+    name = next(c for c in alle if isinstance(c, ft.TextField) and c.label == "Name der Skala")
+    assert name.value == "Skala"
+    name.value = "Stabilität"
+    speichern = _knopf_mit_text(ansicht.controls[0], "Speichern")
+    asyncio.run(speichern.on_click())
+
+    gespeichert = state.uebungen.laden(uebung.id)
+    assert gespeichert.typen == [*vorher, "Qigong"]  # neue hinten — der erste bleibt Kategorie
+    assert state.tags.namen("typ")[0] == "Qigong"  # in der Liste oben
+    assert gespeichert.result_spec.field_by_key("scale").label == "Stabilität"
+    assert gesprungen == [f"/uebung/{uebung.id}"]
+
+
+def test_einstellungen_typen_und_regionen(page, welt) -> None:
+    from trainingsapp.ui.views.einstellungen_tags import einstellungen_tags_view
+
+    state, *_ = welt
+    dialoge: list = []
+    page.show_dialog = dialoge.append
+    page.pop_dialog = lambda: None
+    page.update = lambda: None
+    ansicht = einstellungen_tags_view(page, state)
+    assert ansicht.route == "/einstellungen/tags"
+
+    def alle():
+        return [c for v in ansicht.controls for c in _alle(v)]
+
+    feld = next(c for c in alle() if isinstance(c, ft.TextField) and c.label == "Neuer Typ")
+    feld.value = "Yoga"
+    next(
+        c for c in alle() if isinstance(c, ft.FilledIconButton) and "Neuer Typ" in c.tooltip
+    ).on_click()
+    assert state.tags.namen("typ")[0] == "Yoga" and feld.value == ""
+    feld.value = "yoga"
+    next(
+        c for c in alle() if isinstance(c, ft.FilledIconButton) and "Neuer Typ" in c.tooltip
+    ).on_click()
+    assert feld.error == "„Yoga“ gibt es schon."
+
+    def knopf(name: str, icon):
+        zeile = next(
+            c
+            for c in alle()
+            if isinstance(c, ft.Row)
+            and name in [t.value for t in _alle(c) if isinstance(t, ft.Text)]
+            and any(isinstance(k, ft.IconButton) for k in c.controls)
+        )
+        return next(k for k in zeile.controls if isinstance(k, ft.IconButton) and k.icon == icon)
+
+    # Ungenutzt: ohne Rückfrage weg
+    knopf("Yoga", ft.Icons.DELETE_OUTLINE).on_click()
+    assert "Yoga" not in state.tags.namen("typ")
+
+    # Genutzt: erst die Rückfrage, dann aus allen Übungen
+    benutzt = [u for u in state.uebungen.alle() if "Dehnung" in u.typen]
+    assert benutzt
+    knopf("Dehnung", ft.Icons.DELETE_OUTLINE).on_click()
+    frage = dialoge[-1]
+    assert isinstance(frage, ft.AlertDialog) and "Dehnung" in frage.title.value
+    frage.actions[1].on_click()
+    assert "Dehnung" not in state.tags.namen("typ")
+    assert all("Dehnung" not in state.uebungen.laden(u.id).typen for u in benutzt)
+
+    # Umbenennen im Dialog
+    knopf("Kräftigung", ft.Icons.EDIT_OUTLINED).on_click()
+    dialog = dialoge[-1]
+    eingabe = dialog.content.controls[0]
+    eingabe.value = "Kraft"
+    dialog.actions[1].on_click()
+    assert "Kraft" in state.tags.namen("typ") and "Kräftigung" not in state.tags.namen("typ")
+
+
+def test_spec_form_skala_mit_zahlenfeld_und_tastaturen() -> None:
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+    from trainingsapp.ui.components.spec_form import SpecForm
+
+    skala = replace(vorrat_feld("scale"), label="Anstrengung", default=None)
+    spec = ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("hold"), skala])
+    form = SpecForm(spec)
+    assert "scale" not in form.werte()  # leer heißt ohne Wert, auch wenn der Regler steht
+    assert form._widgets["reps"].keyboard_type == ft.KeyboardType.NUMBER
+    assert form._widgets["hold"].keyboard_type == ft.KeyboardType.DATETIME
+    assert form._widgets["scale"].keyboard_type == ft.KeyboardType.NUMBER
+
+    form._regler["scale"].on_change(SimpleNamespace(control=SimpleNamespace(value=6.0)))
+    assert form.werte()["scale"] == 6
+    form._widgets["scale"].value = "11"
+    assert form.pruefen() == ["Anstrengung"]  # außerhalb des Bereichs
+    form.setzen({"scale": 3}, aktualisieren=False)
+    assert form._regler["scale"].value == 3.0 and form.werte()["scale"] == 3
+    assert "Anstrengung (0 bis 10)" in _texte(form.control)

@@ -9,6 +9,14 @@ Satzfelder (`SET_LIST`) sind Textfelder mit der Notation aus
 `docs/notation.md`: ``3x15``, ``30``, ``15/15/20``; die Chips hängen einen
 Satz an (``+15``). Ein Fragezeichen daneben öffnet die Hilfe.
 
+Zahlen bekommen die Zahlentastatur, Zeiten die für Uhrzeiten (Ziffern und
+„:“) — Text nur für Textfelder (Ben, 14.10.2026). Auf der Zahlentastatur
+gibt es kein „x“: Sätze trennt dort das Komma (``15,15,20``).
+
+Die Skala ist ein Regler mit Zahlenfeld in einer Zeile, ihr Name darüber.
+Der Regler schreibt ins Feld, getippte Zahlen stellen den Regler; gelesen
+wird das Feld — leer heißt „ohne Wert“, auch wenn der Regler am Anfang steht.
+
 Jedes Feld steht in voller Breite, seine Chips **darunter** — nebeneinander
 quetschten sich Feld und Chips am Handy, und welcher Chip zu welchem Feld
 gehörte, war nicht mehr zu sehen.
@@ -16,6 +24,7 @@ gehörte, war nicht mehr zu sehen.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import Any
 
@@ -31,6 +40,7 @@ from trainingsapp.core.result_spec import (
 )
 from trainingsapp.core.units import format_dauer, format_sets, parse_dauer, parse_sets
 from trainingsapp.ui.components.hilfe import hilfe_knopf
+from trainingsapp.ui.components.layout import ohne_auto_update
 
 ZAHLENARTIG = {
     FieldType.INT,
@@ -39,6 +49,7 @@ ZAHLENARTIG = {
     FieldType.WEIGHT,
     FieldType.DISTANCE,
     FieldType.DURATION,
+    FieldType.SCALE,
 }
 
 
@@ -62,6 +73,8 @@ class SpecForm:
         self._quick = quick or {}
         self._widgets: dict[str, ft.Control] = {}
         self._chips: dict[str, list[ft.Chip]] = {}
+        #: Skala: der Regler neben dem Zahlenfeld (das Feld ist das Widget)
+        self._regler: dict[str, ft.Slider] = {}
         zeilen: list[ft.Control] = []
         start = {**spec.defaults(), **(werte or {})}
         for f in spec.fields:
@@ -80,19 +93,13 @@ class SpecForm:
         if f.type == FieldType.BOOL:
             return ft.Switch(label=f.label, value=bool(wert))
         if f.type == FieldType.SCALE:
-            # Jeder Bereich, auch negativ und mit Kommastellen (`skala_lesen`)
-            lo = f.min if f.min is not None else 0
-            hi = f.max if f.max is not None else 10
-            schritt = f.step or 1
-            schritte = max(1, round((hi - lo) / schritt))
-            start = float(wert) if wert is not None else float(lo)
-            return ft.Slider(
-                min=lo,
-                max=hi,
-                divisions=schritte,
-                value=min(max(start, lo), hi),
-                label="{value}",
-                round=_stellen(schritt),
+            # Das Zahlenfeld ist das Widget; den Regler daneben baut `_zeile`.
+            return ft.TextField(
+                value="" if wert is None else self._anzeige(f, wert),
+                width=80,
+                dense=True,
+                keyboard_type=ft.KeyboardType.NUMBER,
+                text_align=ft.TextAlign.CENTER,
             )
         if f.type == FieldType.CHOICE:
             return ft.SegmentedButton(
@@ -110,14 +117,14 @@ class SpecForm:
             return ft.TextField(
                 label=f"{f.label} je Satz",
                 value=self._anzeige(f, wert),
-                hint_text="3x30 · 1:30 · 45/60" if zeit else "3x15 · 30 · 15/15/20",
-                keyboard_type=ft.KeyboardType.TEXT,
+                hint_text="45 · 1:30 · Sätze mit Komma: 45,60" if zeit else "15 · 15,15,20",
+                keyboard_type=ft.KeyboardType.DATETIME if zeit else ft.KeyboardType.NUMBER,
             )
         return ft.TextField(
             label=f.label,
             value=self._anzeige(f, wert),
             hint_text="1:30 oder 90" if f.type == FieldType.DURATION else None,
-            keyboard_type=ft.KeyboardType.TEXT
+            keyboard_type=ft.KeyboardType.DATETIME
             if f.type == FieldType.DURATION
             else ft.KeyboardType.NUMBER,
             # Zeit („1:30") trägt ihre Schreibweise selbst; kg, m und ° nicht
@@ -130,7 +137,15 @@ class SpecForm:
             return widget
         if f.type == FieldType.SCALE:
             return ft.Column(
-                spacing=0, controls=[ft.Text(skala_titel(f), size=12, opacity=0.7), widget]
+                spacing=0,
+                controls=[
+                    ft.Text(skala_titel(f), size=12, opacity=0.7),
+                    ft.Row(
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[self._skala_regler(f, widget), widget],
+                    ),
+                ],
             )
 
         chips_werte = self._quick.get(f.key) or f.quick
@@ -188,6 +203,44 @@ class SpecForm:
             ],
         )
 
+    def _skala_regler(self, f: FieldSpec, feld: ft.Control) -> ft.Slider:
+        """Der Regler zur Skala — jeder Bereich, auch negativ und mit Kommastellen."""
+        lo = f.min if f.min is not None else 0
+        hi = f.max if f.max is not None else 10
+        schritt = f.step or 1
+        wert = self._lesen(f, feld)
+        start = float(wert) if wert is not None else float(lo)
+        regler = ft.Slider(
+            min=lo,
+            max=hi,
+            divisions=max(1, round((hi - lo) / schritt)),
+            value=min(max(start, lo), hi),
+            label="{value}",
+            round=_stellen(schritt),
+            expand=True,
+        )
+
+        def gezogen(e: ft.Event[ft.Slider]) -> None:
+            ohne_auto_update()  # kommt beim Ziehen dauernd — nur das Feld neu zeichnen
+            neu = skala_wert(f, float(e.control.value or 0))
+            feld.value = "" if neu is None else str(neu)  # type: ignore[attr-defined]
+            feld.error = None  # type: ignore[attr-defined]
+            with contextlib.suppress(RuntimeError):
+                feld.update()
+
+        def getippt(_: ft.Event[ft.TextField]) -> None:
+            ohne_auto_update()
+            neu = self._lesen(f, feld)
+            if neu is not None:
+                regler.value = float(neu)
+                with contextlib.suppress(RuntimeError):
+                    regler.update()
+
+        regler.on_change = gezogen
+        feld.on_change = getippt  # type: ignore[attr-defined]
+        self._regler[f.key] = regler
+        return regler
+
     def _chips_abgleichen(self, f: FieldSpec) -> None:
         """Bei Einzelwerten erscheint der Chip mit dem aktuellen Wert ausgewählt."""
         if f.type == FieldType.SET_LIST:
@@ -216,7 +269,11 @@ class SpecForm:
         if f.type == FieldType.BOOL:
             return bool(widget.value)  # type: ignore[attr-defined]
         if f.type == FieldType.SCALE:
-            return skala_wert(f, float(widget.value or 0))  # type: ignore[attr-defined]
+            text = str(widget.value or "").strip().replace(",", ".")  # type: ignore[attr-defined]
+            try:
+                return skala_wert(f, float(text)) if text else None
+            except ValueError:
+                return None
         if f.type == FieldType.CHOICE:
             auswahl = list(widget.selected or [])  # type: ignore[attr-defined]
             return auswahl[0] if auswahl else None
@@ -253,7 +310,9 @@ class SpecForm:
             if f.type == FieldType.BOOL:
                 widget.value = bool(werte[f.key])  # type: ignore[attr-defined]
             elif f.type == FieldType.SCALE:
-                widget.value = float(werte[f.key])  # type: ignore[attr-defined]
+                widget.value = self._anzeige(f, werte[f.key])  # type: ignore[attr-defined]
+                if (regler := self._regler.get(f.key)) is not None and werte[f.key] is not None:
+                    regler.value = min(max(float(werte[f.key]), regler.min), regler.max)
             elif f.type == FieldType.CHOICE:
                 widget.selected = [str(werte[f.key])] if werte[f.key] else []  # type: ignore[attr-defined]
             else:

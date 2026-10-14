@@ -23,12 +23,17 @@ NOTATION_MD = """\
 
 Anzeige: `3x15`, `30` oder `15/15/20`, dazu die Summe.
 
+**Im Plan** tippst du nur Zahlen: Chips wie `+15` hängen einen Satz an, darunter
+**Sätze × Wert** (`3` × `15`) — leer bei Sätze heißt einer. Die Handy-Tastatur
+für Zahlen hat kein „x“; im Formular („Mehr …“) trennt dort das Komma die
+Sätze: `15,15,20`.
+
 **Zeiten**: `30` = 30 s, `1:30` = 90 s, `2min`. Je Satz wie oben: `3x30`, `45/60/30`.
 `0` oder leer = ohne Zeit — gemacht, aber kein Punkt auf der Kurve.
 
 **Einzelwerte**: Gewicht `40` oder `40kg`, Strecke `500` (m) oder `2km`, Winkel `45`,
-Skala `0` bis `10`. Dezimal mit Punkt oder Komma (`12,5`). In Satzlisten trennt
-der Schrägstrich sicherer als das Komma.
+Skala `0` bis `10` — Regler oder Zahl, abschicken mit dem Haken. Dezimal mit Punkt
+oder Komma (`12,5`); in Satzlisten trennt das Komma Sätze, also dort `12.5`.
 
 **Menge oder Ausprägung**: Wiederholungen und Zeiten werden addiert (3 × 50 = 150).
 Winkel, Gewicht und Seite wählst du vorher aus — sie trennen: Wandsitz 45° ist

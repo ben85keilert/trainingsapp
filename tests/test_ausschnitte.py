@@ -12,14 +12,19 @@ import pytest
 from trainingsapp.hrv_core.ausschnitte import (
     GESAMT_ID,
     Abschnitt,
+    Grenze,
     abschnitt_werte,
     achsen_umrechnung,
-    aus_notizen,
+    aus_grenzen,
     einrasten,
+    grenzen_speichern,
     zusatz_lesen,
     zusatz_speichern,
 )
+from trainingsapp.hrv_core.ereignisse import Zeitbezug, notiz
 from trainingsapp.hrv_core.korrektur import Korrigiert, analyse_pfad, zuschneiden
+from trainingsapp.hrv_core.ppi import schlagzeiten
+from trainingsapp.hrv_core.recording import laden
 
 GOLDEN = Path(__file__).parent / "golden" / "rr" / "sensor_2026-05-23_125422.json"
 
@@ -35,15 +40,43 @@ def _korrigiert(n: int = 400, atem_hz: float = 0.25) -> tuple[Korrigiert, list[f
     return Korrigiert(t, rr, ["orig"] * n, [], 0, 0, list(range(n))), t
 
 
-def test_abschnitte_zwischen_notizen_und_einrasten() -> None:
-    teile = aus_notizen([(30, "A"), (31, "doppelt"), (90, "B")], 0, 150)
-    assert [(a.name, a.von_s, a.bis_s) for a in teile] == [
-        ("Anfang", 0, 30),
-        ("doppelt", 31, 90),  # 30–31 ist zu kurz und fällt weg
-        ("B", 90, 150),
-    ]
-    assert all(a.automatisch for a in teile)
+def test_abschnitte_aus_gewaehlten_grenzen_und_einrasten() -> None:
+    """Nur gewählte Grenzen teilen — nichts vor der ersten, zu kurze fallen weg."""
+    teile = aus_grenzen([Grenze(30, "A"), Grenze(31, "doppelt"), Grenze(90, "B")], 0, 150)
+    assert [(a.name, a.von_s, a.bis_s) for a in teile] == [("doppelt", 31, 90), ("B", 90, 150)]
+    assert aus_grenzen([], 0, 150) == []
     assert einrasten(88.0, [90.0], 3.0) == 90.0 and einrasten(80.0, [90.0], 3.0) == 80.0
+
+
+def test_timer_legt_beim_speichern_abschnitte_an(tmp_path) -> None:
+    """Die Abschnitte des Timers stehen nach dem Speichern im Sidecar — wie praxis_gui sie liest."""
+    pfad = tmp_path / GOLDEN.name
+    shutil.copy(GOLDEN, pfad)
+    rec = laden(pfad)
+    achse = schlagzeiten(rec)
+    zb = Zeitbezug(lambda: rec.beats, rec.start_utc, achse=lambda: achse)
+
+    def marke(x: float, text: str, ende: bool = False) -> tuple[dict, str, bool]:
+        name = text.removeprefix("Timer „T“: ")
+        return notiz(text, zb.anker(x), rec.start_utc), name, ende
+
+    teile = grenzen_speichern(
+        pfad,
+        rec,
+        [
+            marke(60, "Timer „T“: Belastung (Runde 1/2)"),
+            marke(90, "Pause (Runde 1/2)"),
+            marke(120, "Belastung (Runde 2/2)"),
+            marke(150, "Timer fertig", ende=True),
+        ],
+    )
+    namen = ["Belastung (Runde 1/2)", "Pause (Runde 1/2)", "Belastung (Runde 2/2)"]
+    assert [a.name for a in teile] == namen
+    assert teile[0].farbe == teile[2].farbe != teile[1].farbe
+    ausschnitt, gelesen = zusatz_lesen(pfad, float)
+    assert ausschnitt is None and [a.name for a in gelesen] == namen
+    assert gelesen[0].von_s == pytest.approx(60, abs=1.5)
+    assert gelesen[-1].bis_s == pytest.approx(150, abs=1.5)
 
 
 def test_werte_je_abschnitt() -> None:

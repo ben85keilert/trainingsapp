@@ -81,7 +81,9 @@ Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,
 
 **Es gibt keine Tabelle für einzelne Herzschläge.** `hrv_recording` verweist mit
 `file_path` auf eine `raw-v1`-Datei; `sha1` erkennt nachträgliche Änderungen.
-Begründung in `docs/architektur.md`.
+Begründung in `docs/architektur.md`. `title` und `note` (Migration 011) sind
+Kopien von `titel` und `notiz` der Datei — für die Liste, die sonst jede
+Messdatei lesen müsste; beim Öffnen gleicht die App sie an die Datei an.
 
 **`hrv_metrics_cache` ist reiner Cache.** Er trägt eine `algo_version` und ist
 jederzeit aus den Dateien neu berechenbar.

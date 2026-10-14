@@ -65,29 +65,47 @@ def wischbar(
     neu_zeichnen: Callable[[], None],
     anfang: Callable[[], float] = lambda: 0.0,
     tippen: Callable[[float], None] | None = None,
+    greifen: Callable[[float], bool] | None = None,
 ) -> ft.Control:
     """``inhalt`` (die Kurvenspalte) waagrecht wischbar machen.
 
     Nach rechts wischen blättert zurück (wie in einer Bildergalerie); ``anfang``
     liefert den frühesten Zeitpunkt (Live: Beginn des Puffers). ``tippen``
     bekommt bei einem Tipp die Zeit unter dem Finger (Notiz in die Kurve setzen).
-    Gezeichnet
-    wird höchstens `_WISCH_HZ`-mal je Sekunde und am Ende der Geste.
+    ``greifen`` bekommt beim Ziehen die Zeit unter dem Finger; gibt es ``True``
+    zurück, gehört die Geste ihm (eine Grenze oder der Ablesestrich folgt dem
+    Finger) und die Kurve bleibt stehen. Gezeichnet wird höchstens
+    `_WISCH_HZ`-mal je Sekunde und am Ende der Geste.
     """
     stand = {"breite_px": _BREITE_VORGABE, "zuletzt": 0.0}
 
     def groesse(e: ft.LayoutSizeChangeEvent) -> None:
         stand["breite_px"] = max(float(e.width) - _ACHSE_PX, 100.0)
 
-    def ziehen(e: ft.DragUpdateEvent) -> None:
-        dx = e.primary_delta
-        if dx is None:
-            dx = e.local_delta.x if e.local_delta is not None else 0.0
-        fenster.verschieben(-dx / stand["breite_px"] * fenster.breite_s, jetzt_s(), anfang())
+    def zeichnen_gedrosselt() -> None:
         jetzt = time.monotonic()
         if jetzt - stand["zuletzt"] >= 1.0 / _WISCH_HZ:
             stand["zuletzt"] = jetzt
             neu_zeichnen()
+
+    def gegriffen(position: ft.Offset | None) -> bool:
+        if greifen is None or position is None:
+            return False
+        return greifen(zeit_unter(position.x, fenster, jetzt_s(), anfang(), stand["breite_px"]))
+
+    def beginn(e: ft.DragStartEvent) -> None:
+        if gegriffen(getattr(e, "local_position", None)):
+            zeichnen_gedrosselt()
+
+    def ziehen(e: ft.DragUpdateEvent) -> None:
+        if gegriffen(getattr(e, "local_position", None)):
+            zeichnen_gedrosselt()
+            return
+        dx = e.primary_delta
+        if dx is None:
+            dx = e.local_delta.x if e.local_delta is not None else 0.0
+        fenster.verschieben(-dx / stand["breite_px"] * fenster.breite_s, jetzt_s(), anfang())
+        zeichnen_gedrosselt()
 
     def ende(_: ft.DragEndEvent) -> None:
         neu_zeichnen()
@@ -99,6 +117,7 @@ def wischbar(
 
     return ft.GestureDetector(
         content=ft.Container(content=inhalt, on_size_change=groesse),
+        on_horizontal_drag_start=beginn if greifen is not None else None,
         on_horizontal_drag_update=ziehen,
         on_horizontal_drag_end=ende,
         on_tap_down=tipp if tippen is not None else None,

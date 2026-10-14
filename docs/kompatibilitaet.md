@@ -525,8 +525,13 @@ Felder, die praxis_gui selbst dafür nutzt (`hrv_core/ausschnitte.py`):
   der Verity Sense über die Zeilen der Rohdatei).
 - `metrics: null` — die Werte rechnen beide Programme selbst. Den Abschnitt
   „gesamt", den praxis_gui anlegt, lassen wir stehen.
-- Abschnitte **zwischen Notizen** bildet die App bei jedem Öffnen aus den Notizen
-  (sie wandern mit, wenn man eine Notiz verschiebt) — sie werden nicht gespeichert.
+- **Abschnitte sind eigenständig** (seit 14.10.2026, vorher bildete die App sie
+  bei jedem Öffnen aus allen Notizen): Jeder Abschnitt steht in `segments`, auch
+  die des Timers — die schreibt die App beim Speichern der Aufnahme
+  (`ausschnitte.grenzen_speichern`). Notizen sind nur Rastpunkte für Grenzen;
+  „Aus Notizen …" macht ausgewählte Notizen zu Grenzen und speichert die
+  Abschnitte. Gleiche Grundnamen („Pause (Runde 2/8)" → „Pause") bekommen
+  gleiche Farben.
 - Gibt es noch kein Sidecar, entsteht ein knappes (`schema`, `source_file`,
   `source_file_sha1`, die beiden Felder, `updated_utc`).
 - Achtung, umgekehrt: praxis_gui schreibt das Sidecar beim Speichern aus seiner

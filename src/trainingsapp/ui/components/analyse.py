@@ -30,6 +30,7 @@ from trainingsapp.hrv_core.frequency import fensterspektrum
 from trainingsapp.hrv_core.trends import aktuell, verlauf
 from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.karte import hinweis, karte
+from trainingsapp.ui.components.notizen import senkrechte
 from trainingsapp.ui.components.spektrum import (
     band_leiste,
     poincare_kurve,
@@ -101,6 +102,8 @@ class Analyse:
         self._optisch = optisch
         self._hoehe = hoehe
         self._speicher: dict[Any, Any] = {}
+        #: Zuletzt gezeichnete Verlaufskurven: Kennzahl → (Bezeichnung, Punkte)
+        self.gesehen: dict[str, tuple[str, list[tuple[float, float]]]] = {}
         #: Womit die Chips gebaut sind — live kommt RR erst nach dem Verbinden
         self._ohne_chips: list[str] = []
         self._kopf = ft.Container()
@@ -174,8 +177,27 @@ class Analyse:
         self._tabelle.visible = tabelle is not None
         self._hinweis.value = HINWEISE[bereich]
 
-    def zeichnen(self, x_von: float, x_bis: float) -> None:
-        """Spektrum bzw. Poincaré und die Verlaufskurven für den Ausschnitt neu rechnen."""
+    def werte_bei(self, x: float) -> list[tuple[str, str, float]]:
+        """(Kennzahl, Bezeichnung, Wert) der gezeichneten Verlaufskurven an der Stelle ``x``.
+
+        Je Kurve der nächste Punkt, sofern er nicht weiter als ein Fünfzigstel
+        der Spanne entfernt liegt (sonst ist dort eine Lücke).
+        """
+        out = []
+        for k, (name, punkte) in self.gesehen.items():
+            if len(punkte) < 1:
+                continue
+            spanne = max(punkte[-1][0] - punkte[0][0], 1.0)
+            px, py = min(punkte, key=lambda p: abs(p[0] - x))
+            if abs(px - x) <= max(spanne / 50, 5.0) and np.isfinite(py):
+                out.append((k, name, float(py)))
+        return out
+
+    def zeichnen(self, x_von: float, x_bis: float, strich: float | None = None) -> None:
+        """Spektrum bzw. Poincaré und die Verlaufskurven für den Ausschnitt neu rechnen.
+
+        ``strich``: Ablesestrich an dieser Zeit in allen Verlaufskurven.
+        """
         t, rr, naht = self._reihe()
         ansicht = self._state.ansicht()
         atem_modus = ATEMUEBUNG if self._state.hrv_einstellungen().atemuebung else RUHE
@@ -223,6 +245,12 @@ class Analyse:
         else:
             self._extra.content = None
         self._extra.visible = self._extra.content is not None
+        self.gesehen = {}
+        marken = (
+            [senkrechte([strich], ft.Colors.ON_SURFACE, 1.2, gestrichelt=False)]
+            if strich is not None and x_von <= strich <= x_bis
+            else []
+        )
         self._kurven.controls = diagramme(
             ansicht,
             daten,
@@ -231,6 +259,8 @@ class Analyse:
             hoehe=self._hoehe,
             ohne=list(self._ohne()),
             bereich=bereich,
+            marken=marken,
+            gesehen=self.gesehen,
         ) or [
             ft.Text(
                 "Keine Kurve gewählt — oben einen Chip antippen.",

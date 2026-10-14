@@ -35,6 +35,7 @@ from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.hrv_ansicht import Ansicht
 from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, HrvEinstellungen
 from trainingsapp.core.models import HrvRecording
+from trainingsapp.core.models import jetzt as utc_jetzt
 from trainingsapp.devices.base import DeviceInfo, Verbindung
 from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.devices.profiles import geraeteart
@@ -50,6 +51,7 @@ from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
 from trainingsapp.ui.components.notizen import Notizfeld, uebungs_katalog, uebungsquellen
+from trainingsapp.ui.components.titel import titel_blatt, titel_kopf, titel_vorschlaege
 from trainingsapp.ui.components.verlauf import FARBEN, fenster_text
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
@@ -576,10 +578,32 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             duration_s=ergebnis.dauer_s,
             coverage_pct=ergebnis.abdeckung_pct,
             n_gaps=ergebnis.n_luecken,
+            note=ergebnis.recording.notiz,
+            title=ergebnis.recording.titel,
         )
         state.hrv.anlegen(eintrag)
         page.show_dialog(ft.SnackBar(ft.Text(f"Gespeichert: {ergebnis.pfad.name}")))
         await page.push_route(f"/messung/{eintrag.id}")
+
+    def titel_bearbeiten() -> None:
+        """Titel und Beschreibung schon während der Aufnahme — sie landen in der Datei."""
+        aufnahme = lauf.aufnahme
+        if aufnahme is None:
+            return
+
+        def speichern(titel: str, text: str) -> None:
+            aufnahme.titel, aufnahme.notiz = titel, text
+            aktualisieren(erzwingen=True)
+
+        page.show_dialog(
+            titel_blatt(
+                aufnahme.titel,
+                aufnahme.notiz,
+                titel_vorschlaege(state, aufnahme.start_utc, utc_jetzt(), aufnahme.ereignisse),
+                speichern,
+                page.pop_dialog,
+            )
+        )
 
     async def trennen() -> None:
         if lauf.aufnahme is not None:
@@ -618,19 +642,28 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 ],
             )
         else:
-            aktion = ft.Row(
-                spacing=10,
-                wrap=True,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            aktion = ft.Column(
+                spacing=4,
+                tight=True,
                 controls=[
-                    ft.Icon(ft.Icons.FIBER_MANUAL_RECORD, color=ROT, size=16),
-                    ft.Text(
-                        f"Aufnahme {_uhr(lauf.aufnahme_dauer_s())}",
-                        size=15,
-                        weight=ft.FontWeight.W_600,
+                    ft.Row(
+                        spacing=10,
+                        wrap=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Icon(ft.Icons.FIBER_MANUAL_RECORD, color=ROT, size=16),
+                            ft.Text(
+                                f"Aufnahme {_uhr(lauf.aufnahme_dauer_s())}",
+                                size=15,
+                                weight=ft.FontWeight.W_600,
+                            ),
+                            ft.FilledButton(
+                                "Stopp & speichern", icon=ft.Icons.STOP, on_click=aufnahme_stoppen
+                            ),
+                        ],
                     ),
-                    ft.FilledButton(
-                        "Stopp & speichern", icon=ft.Icons.STOP, on_click=aufnahme_stoppen
+                    titel_kopf(
+                        lauf.aufnahme.titel, lauf.aufnahme.notiz, titel_bearbeiten, klein=True
                     ),
                 ],
             )
@@ -819,14 +852,17 @@ def _liste(page: ft.Page, state: AppState) -> ft.Control:
     ]
     for a in eintraege:
         lokal = a.started_at.astimezone()
+        datum = f"{lokal:%d.%m.%Y  %H:%M}  ·  {_uhr(a.duration_s)}"
         unten = [a.geraet or a.geraet_profil]
+        if a.title:
+            unten.insert(0, datum)
         if a.note:
             unten.append(a.note[:40])
         zeilen.append(
             ft.ListTile(
                 leading=ft.Icon(ft.Icons.MONITOR_HEART_OUTLINED),
-                title=ft.Text(f"{lokal:%d.%m.%Y  %H:%M}  ·  {_uhr(a.duration_s)}"),
-                subtitle=ft.Text("  ·  ".join(unten), size=12),
+                title=ft.Text(a.title or datum, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                subtitle=ft.Text("  ·  ".join(unten), size=12, max_lines=2),
                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),
                 on_click=oeffner(a.id),
             )

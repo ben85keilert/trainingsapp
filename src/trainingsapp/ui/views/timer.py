@@ -115,11 +115,14 @@ async def _wach(state: AppState, an: bool) -> None:
 
 
 def _in_messung(state: AppState, marken: list[Marke], signale: TimerSignale) -> None:
-    """Abschnittsanfänge als Notizen in die laufende HRV-Aufnahme — wenn eingestellt."""
+    """Abschnittsanfänge als Notizen und Abschnitte in die laufende Aufnahme (wenn eingestellt)."""
     messlauf = state.messlauf
     if not marken or not signale.notizen or messlauf is None:
         return
-    neu = [messlauf.notiz_hinzufuegen(m.text, m.vor_s) for m in marken]
+    # Jeder Abschnitt des Timers wird auch ein Abschnitt der Messung (beim Speichern)
+    neu = [
+        messlauf.abschnitt_markieren(m.text, m.vor_s, name=m.abschnitt, ende=m.ende) for m in marken
+    ]
     if any(e is not None for e in neu):
         for beobachter in list(state.notiz_beobachter.values()):
             with contextlib.suppress(Exception):

@@ -7,16 +7,19 @@ Kennzahlen. **Die Rohdatei bleibt unangetastet**; der Crop steht im Sidecar
 
 **Abschnitte** (`segments`): benannte Zeitbereiche, für die die App Werte
 rechnet (Ø HF, RMSSD, SDNN, Atemfrequenz, LF/HF) — etwa Belastung gegen Pause,
-um Trainingsbereiche gegeneinanderzuhalten. Zwei Wege, damit es nicht zu viel
-wird:
+um Trainingsbereiche gegeneinanderzuhalten. Abschnitte sind **eigenständig**
+(Ben, 14.10.2026): gespeichert wie in praxis_gui (`segments`), jederzeit
+verschieb- und löschbar. Notizen sind dafür nicht nötig — eine Notiz kann
+mitten in einer Übung stehen („tiefer atmen"), ohne etwas zu teilen. Notizen
+helfen nur:
 
-- **automatisch zwischen Notizen** (`aus_notizen`): Jede Notiz beginnt einen
-  Abschnitt, benannt nach ihr. Mit dem Timer („Belastung (Runde 2/8)") ergibt
-  das ohne jeden Handgriff die Abschnitte des Trainings. Verschiebt man eine
-  Notiz, wandert der Abschnitt mit — er wird jedes Mal aus den Notizen gebildet.
-- **selbst markiert**: der sichtbare Ausschnitt der Kurve als Abschnitt; seine
-  Grenzen rasten an nahen Notizen ein (`einrasten`). Gespeichert wie in
-  praxis_gui (`segments`), sodass praxis_gui sie zeigt.
+- als **Rastpunkte**: Eine Grenze in ihrer Nähe rastet an ihr ein (`einrasten`);
+- als **gewählte Grenzen**: Wer will, macht ausgewählte Notizen zu Grenzen
+  (`aus_grenzen`) — jede beginnt einen Abschnitt, benannt nach ihr.
+
+Der **Timer** legt seine Abschnitte beim Speichern der Aufnahme selbst an
+(`grenzen_speichern`) — „Belastung (Runde 2/8)", „Pause (Runde 2/8)" … —,
+danach sind es Abschnitte wie alle anderen.
 
 **Zeitachsen.** Die App rechnet auf ihrer Kurvenachse (Sekunden ab Start; bei
 der Verity Sense die Herzuhr aller Intervalle). praxis_gui speichert Zeiten auf
@@ -26,6 +29,7 @@ Die Umrechnung reicht der Aufrufer herein (``nach_datei``/``nach_achse``).
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -37,9 +41,11 @@ from typing import Any
 import numpy as np
 
 from .atmung import RUHE, atemfrequenz
+from .ereignisse import Zeitbezug
 from .frequency import fensterspektrum
 from .korrektur import Korrigiert, _json_lesen, _sha1, analyse_pfad, zuschneiden
-from .recording import json_atomar_schreiben
+from .ppi import schlagzeiten
+from .recording import Recording, json_atomar_schreiben
 from .time_domain import compute_time_domain
 
 #: Farben neuer Abschnitte (wie praxis_gui `SEGMENT_COLORS`, der Reihe nach)
@@ -55,7 +61,7 @@ FARBEN: tuple[str, ...] = (
 )
 #: praxis_gui legt diesen Abschnitt selbst an (ganze Messung) — wir lassen ihn stehen
 GESAMT_ID = "gesamt"
-#: Kürzere Abschnitte zwischen Notizen fallen weg (zwei Notizen kurz hintereinander)
+#: Kürzere Abschnitte aus Grenzen fallen weg (zwei Grenzen kurz hintereinander)
 MIN_ABSCHNITT_S = 10.0
 
 
@@ -68,51 +74,71 @@ class Abschnitt:
     bis_s: float
     id: str = field(default_factory=lambda: f"seg-{uuid.uuid4().hex[:8]}")
     farbe: str = FARBEN[0]
-    #: aus Notizen gebildet (nicht gespeichert) oder selbst markiert
-    automatisch: bool = False
 
     @property
     def dauer_s(self) -> float:
         return self.bis_s - self.von_s
 
 
-def aus_notizen(
-    notizen: Sequence[tuple[float, str]], anfang: float, ende: float
-) -> list[Abschnitt]:
-    """Abschnitte zwischen Notizen — jede Notiz beginnt einen, benannt nach ihr.
+@dataclass(frozen=True, slots=True)
+class Grenze:
+    """Ein gewählter Abschnittsanfang: Zeit auf der Kurvenachse und Name.
 
-    ``notizen``: (Zeit auf der Kurvenachse, Text). Vor der ersten Notiz ein
-    Abschnitt „Anfang" — oder, beginnt der Bereich (Crop) mitten in einem
-    Abschnitt, benannt nach der Notiz davor. Sehr kurze (unter
-    `MIN_ABSCHNITT_S`) fallen weg.
-
-    >>> teile = aus_notizen([(60, "Belastung"), (90, "Pause")], 0, 120)
-    >>> [(a.name, a.von_s, a.bis_s) for a in teile]
-    [('Anfang', 0, 60), ('Belastung', 60, 90), ('Pause', 90, 120)]
-    >>> [a.name for a in aus_notizen([(60, "Belastung"), (90, "Pause")], 65, 120)]
-    ['Belastung', 'Pause']
-    >>> aus_notizen([], 0, 120)
-    []
+    ``schluss``: beendet nur den laufenden Abschnitt und beginnt keinen
+    („Timer fertig").
     """
-    alle = sorted(notizen)
-    punkte = [(x, t) for x, t in alle if anfang <= x < ende]
-    if not punkte:
-        return []
-    davor = [t for x, t in alle if x < anfang]
-    grenzen = [(anfang, davor[-1] if davor else "Anfang"), *punkte, (ende, "")]
+
+    x: float
+    name: str
+    schluss: bool = False
+
+
+def grundname(name: str) -> str:
+    """Der Name ohne Zusatz in Klammern am Ende — gleiche Grundnamen, gleiche Farbe.
+
+    >>> grundname("Pause (Runde 2/8)"), grundname("Belastung")
+    ('Pause', 'Belastung')
+    """
+    return re.sub(r"\s*\([^()]*\)\s*$", "", name).strip() or name
+
+
+def farben_nach_namen(abschnitte: Sequence[Abschnitt], vergeben: int = 0) -> None:
+    """Gleicher Grundname → gleiche Farbe, in der Reihenfolge des ersten Auftretens.
+
+    So stehen beim Timer alle „Belastung" in einer Farbe und alle „Pause" in
+    einer anderen. ``vergeben``: so viele Farben sind schon in Gebrauch.
+    """
+    farbe_von: dict[str, str] = {}
+    for a in abschnitte:
+        g = grundname(a.name)
+        if g not in farbe_von:
+            farbe_von[g] = FARBEN[(vergeben + len(farbe_von)) % len(FARBEN)]
+        a.farbe = farbe_von[g]
+
+
+def aus_grenzen(grenzen: Sequence[Grenze], anfang: float, ende: float) -> list[Abschnitt]:
+    """Abschnitte zwischen gewählten Grenzen — jede beginnt einen, benannt nach ihr.
+
+    Der letzte reicht bis ``ende``, außer eine `Grenze` mit ``schluss`` beendet
+    ihn. Vor der ersten Grenze entsteht nichts; kürzer als `MIN_ABSCHNITT_S`
+    fällt weg. Gleiche Grundnamen bekommen gleiche Farben.
+
+    >>> teile = aus_grenzen(
+    ...     [Grenze(60, "Belastung (Runde 1/2)"), Grenze(90, "Pause (Runde 1/2)"),
+    ...      Grenze(120, "Belastung (Runde 2/2)"), Grenze(150, "fertig", schluss=True)], 0, 200)
+    >>> [(a.von_s, a.bis_s) for a in teile], teile[1].name
+    ([(60, 90), (90, 120), (120, 150)], 'Pause (Runde 1/2)')
+    >>> teile[0].farbe == teile[2].farbe != teile[1].farbe
+    True
+    >>> [(a.name, a.bis_s) for a in aus_grenzen([Grenze(10, "A")], 0, 100)]
+    [('A', 100)]
+    """
+    punkte = sorted((g for g in grenzen if anfang <= g.x <= ende), key=lambda g: g.x)
     out: list[Abschnitt] = []
-    for (von, name), (bis, _) in pairwise(grenzen):
-        if bis - von >= MIN_ABSCHNITT_S:
-            out.append(
-                Abschnitt(
-                    name or "Abschnitt",
-                    von,
-                    bis,
-                    id=f"notiz-{len(out)}",
-                    farbe=FARBEN[len(out) % len(FARBEN)],
-                    automatisch=True,
-                )
-            )
+    for a, b in pairwise([*punkte, Grenze(ende, "", schluss=True)]):
+        if not a.schluss and b.x - a.x >= MIN_ABSCHNITT_S:
+            out.append(Abschnitt(a.name.strip() or "Abschnitt", a.x, b.x))
+    farben_nach_namen(out)
     return out
 
 
@@ -266,10 +292,34 @@ def zusatz_speichern(
             "visible": True,
         }
         for a in abschnitte
-        if not a.automatisch
     ]
     doc["updated_utc"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     return json_atomar_schreiben(ziel, doc)
+
+
+def grenzen_speichern(
+    rec_pfad: Path, rec: Recording, grenzen: Sequence[tuple[dict, str, bool]]
+) -> list[Abschnitt]:
+    """Abschnitte aus Notizen einer frisch gespeicherten Aufnahme ins Sidecar.
+
+    Für den Timer: ``grenzen`` sind (Notiz, Abschnittsname, beendet nur?) — die
+    Notizen, die er beim Abschnittswechsel in die Aufnahme schrieb. Ihre
+    Stelle kommt aus dem Anker der Notiz. Ohne Abschnitte bleibt alles, wie es ist.
+    """
+    achse = schlagzeiten(rec)
+    if not achse:
+        return []
+    nach_datei, _ = achsen_umrechnung(achse, [b.t_s for b in rec.beats])
+    zb = Zeitbezug(lambda: rec.beats, rec.start_utc, achse=lambda: achse)
+    punkte = [
+        Grenze(x, name, schluss)
+        for eintrag, name, schluss in grenzen
+        if (x := zb.x(eintrag)) is not None
+    ]
+    teile = aus_grenzen(punkte, 0.0, float(achse[-1]))
+    if teile:
+        zusatz_speichern(rec_pfad, None, teile, nach_datei)
+    return teile
 
 
 def achsen_umrechnung(
@@ -302,10 +352,14 @@ __all__ = [
     "GESAMT_ID",
     "MIN_ABSCHNITT_S",
     "Abschnitt",
+    "Grenze",
     "abschnitt_werte",
     "achsen_umrechnung",
-    "aus_notizen",
+    "aus_grenzen",
     "einrasten",
+    "farben_nach_namen",
+    "grenzen_speichern",
+    "grundname",
     "zusatz_lesen",
     "zusatz_speichern",
 ]

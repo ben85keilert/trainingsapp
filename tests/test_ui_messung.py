@@ -797,12 +797,15 @@ def test_detailansicht_alle_bereiche_und_kacheln(daten) -> None:
 
 
 def test_aufzeichnung_zuschneiden_und_abschnitte(daten) -> None:
-    """Crop aus dem Sidecar: Kopf nennt ihn, Abschnitte entstehen aus den Notizen."""
+    """Crop aus dem Sidecar steht im Kopf. Abschnitte entstehen nicht mehr von selbst aus
+    Notizen: „Aus Notizen …" macht gewählte Notizen zu Grenzen; Löschen mit Rückgängig."""
+    import json
     import shutil
     from pathlib import Path
 
     from trainingsapp.hrv_core.ausschnitte import zusatz_speichern
     from trainingsapp.hrv_core.ereignisse import anker_aus_herz, metadaten_schreiben, notiz
+    from trainingsapp.hrv_core.korrektur import analyse_pfad
     from trainingsapp.hrv_core.recording import laden
 
     state, tmp_path = daten
@@ -824,7 +827,200 @@ def test_aufzeichnung_zuschneiden_und_abschnitte(daten) -> None:
         geraet_profil="polar_h10",
     )
     state.hrv.anlegen(eintrag)
-    texte = _baum_texte(messung_detail_view(_seite(), state, eintrag))
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+    texte = _baum_texte(view)
     assert any("zugeschnitten 0:30–5:00" in t for t in texte)
-    assert "Belastung" in texte and "Pause" in texte and "Anfang" in texte
-    assert "Zwischen Notizen" in texte
+    loeschknoepfe = [
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.IconButton) and c.tooltip == "Abschnitt löschen"
+    ]
+    assert loeschknoepfe == []  # Notizen teilen nicht von selbst
+    assert any(t.startswith("Noch keine Abschnitte") for t in texte)
+
+    menue = next(
+        c for c in _alle_controls(view) if isinstance(c, ft.PopupMenuButton) and c.tooltip == "Mehr"
+    )
+    next(i for i in menue.items if i.content == "Aus Notizen …").on_click()
+    _knopf(seite.aufrufe[-1], "Anlegen").on_click()
+    texte = _baum_texte(view)
+    assert "Belastung" in texte and "Pause" in texte
+
+    def segmente() -> list[str]:
+        return [s["name"] for s in json.loads(analyse_pfad(pfad).read_text())["segments"]]
+
+    assert segmente() == ["Belastung", "Pause"]
+    _symbol(view, ft.Icons.CLOSE, "Abschnitt löschen").on_click()
+    assert segmente() == ["Pause"]
+    seite.aufrufe[-1].action.on_click()  # Rückgängig
+    assert sorted(segmente()) == ["Belastung", "Pause"]
+
+
+def _golden_eintrag(state, tmp_path) -> tuple[HrvRecording, object]:
+    import shutil
+    from pathlib import Path
+
+    ordner = tmp_path / "Messungen" / "PolarH10"
+    ordner.mkdir(parents=True, exist_ok=True)
+    golden = Path(__file__).parent / "golden" / "rr" / "sensor_2026-05-23_125422.json"
+    pfad = ordner / golden.name
+    shutil.copy(golden, pfad)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet_profil="polar_h10",
+        duration_s=301.0,
+    )
+    state.hrv.anlegen(eintrag)
+    return eintrag, pfad
+
+
+def test_titel_und_beschreibung_in_die_messdatei(daten) -> None:
+    """Kopfzeile antippen → Blatt; Speichern schreibt titel/notiz in die Datei und die Liste."""
+    from trainingsapp.hrv_core.recording import laden
+
+    state, tmp_path = daten
+    eintrag, pfad = _golden_eintrag(state, tmp_path)
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+    assert "Referenzmessung (anonymisiert)" in _baum_texte(view)  # Titel aus der Datei
+    assert state.hrv.laden(eintrag.id).title == "Referenzmessung (anonymisiert)"
+    kopf = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.Container)
+        and c.on_click is not None
+        and "Referenzmessung (anonymisiert)" in _baum_texte(c)
+    )
+    kopf.on_click()
+    blatt = seite.aufrufe[-1]
+    felder = [c for c in _alle_controls(blatt) if isinstance(c, ft.TextField)]
+    felder[0].value, felder[1].value = "Intervalle Beine", "Nach dem Lauf"
+    _knopf(blatt, "Speichern").on_click()
+    rec = laden(pfad)
+    assert (rec.titel, rec.notiz) == ("Intervalle Beine", "Nach dem Lauf")
+    gespeichert = state.hrv.laden(eintrag.id)
+    assert (gespeichert.title, gespeichert.note) == ("Intervalle Beine", "Nach dem Lauf")
+    assert "Intervalle Beine" in _baum_texte(view) and "Nach dem Lauf" in _baum_texte(view)
+
+
+def test_zuschneiden_in_der_kurve(daten) -> None:
+    """✂ öffnet den Bereichseditor in der Rohkurve; ±5 s rückt den Anfang, Übernehmen speichert."""
+    import json
+
+    from trainingsapp.hrv_core.korrektur import analyse_pfad
+
+    state, tmp_path = daten
+    eintrag, pfad = _golden_eintrag(state, tmp_path)
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+    schere = next(a for a in view.appbar.actions if a.icon == ft.Icons.CONTENT_CUT)
+    schere.on_click()
+    assert "ZUSCHNEIDEN" in _baum_texte(view)
+    for _ in range(6):
+        _knopf(view, "+5 s").on_click()
+    _knopf(view, "Übernehmen").on_click()
+    crop = json.loads(analyse_pfad(pfad).read_text())["active_crop"]
+    assert crop["t_start_s"] == pytest.approx(30.0, abs=1.0)
+    assert any("zugeschnitten 0:30–" in t for t in _baum_texte(view))
+    assert "ZUSCHNEIDEN" not in _baum_texte(view)
+
+
+def test_abschnitt_anlegen_umbenennen_verschieben(daten) -> None:
+    """„+ Abschnitt" nimmt den sichtbaren Bereich; antippen öffnet ihn wieder zum Ändern."""
+    import json
+
+    from trainingsapp.hrv_core.korrektur import analyse_pfad
+
+    state, tmp_path = daten
+    eintrag, pfad = _golden_eintrag(state, tmp_path)
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+    _knopf(view, "Abschnitt").on_click()
+    assert "NEUER ABSCHNITT" in _baum_texte(view)
+    name = next(
+        c for c in _alle_controls(view) if isinstance(c, ft.TextField) and c.label == "Name"
+    )
+    name.value = "Ruhe"
+    _knopf(view, "Speichern").on_click()
+
+    def segmente() -> list[dict]:
+        return json.loads(analyse_pfad(pfad).read_text())["segments"]
+
+    (ruhe,) = segmente()
+    assert ruhe["name"] == "Ruhe"
+    zeile = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.Container) and c.on_click is not None and "Ruhe" in _baum_texte(c)
+    )
+    zeile.on_click()  # bearbeiten: Ende 5 s weiter
+    ende = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.Container) and c.on_click is not None and "Ende" in _baum_texte(c)
+    )
+    ende.on_click()
+    _knopf(view, "+5 s").on_click()
+    _knopf(view, "Speichern").on_click()
+    (neu,) = segmente()
+    assert neu["t_end_s"] == pytest.approx(ruhe["t_end_s"] + 5, abs=0.01)
+    assert neu["id"] == ruhe["id"]
+
+
+def test_ablesen_zeigt_alle_werte_an_einer_stelle(daten) -> None:
+    """„Ablesen" zeigt einen Strich und darunter RR, HF und die Verlaufskurven an dieser Stelle."""
+    state, tmp_path = daten
+    eintrag, _ = _golden_eintrag(state, tmp_path)
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+    knopf = _knopf(view, "Ablesen")
+    knopf.on_click()
+    texte = _baum_texte(view)
+    assert "RR" in texte and "HF" in texte and "bpm" in texte
+    assert any(t.startswith("RMSSD") for t in texte)  # Verlaufskurve der Zeitansicht
+    assert any(t.endswith(" Uhr") for t in texte)  # Zeit der Stelle samt Uhrzeit
+    _symbol(view, ft.Icons.CHEVRON_RIGHT, "Ein Schlag weiter").on_click()
+    _symbol(view, ft.Icons.CLOSE, "Ablesen beenden").on_click()
+    assert knopf.style is None  # wieder aus: Ziehen blättert die Kurve
+
+
+async def test_live_titel_landet_in_der_messdatei(daten) -> None:
+    """Während der Aufnahme: „Titel hinzufügen" → Blatt; der Titel steht danach in der Datei."""
+    state, tmp_path = daten
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    state.messlauf = lauf
+    while lauf.jetzt_s() < 10:
+        await asyncio.sleep(0.01)
+    seite = _seite()
+    ansicht = messung(seite, state)
+    await _knopf(ansicht, "Aufnahme starten").on_click()
+    while lauf.aufnahme_dauer_s() < 20:
+        await asyncio.sleep(0.01)
+    ansicht = messung(seite, state)  # der Statusbereich zeigt jetzt die Aufnahme
+    kopf = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.Container)
+        and c.on_click is not None
+        and "Titel hinzufügen" in _baum_texte(c)
+    )
+    kopf.on_click()
+    blatt = seite.aufrufe[-1]
+    titel_feld, beschreibung_feld = [
+        c for c in _alle_controls(blatt) if isinstance(c, ft.TextField)
+    ]
+    titel_feld.value, beschreibung_feld.value = "Morgenmessung", "Gut geschlafen"
+    _knopf(blatt, "Speichern").on_click()
+    assert (lauf.aufnahme.titel, lauf.aufnahme.notiz) == ("Morgenmessung", "Gut geschlafen")
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    assert ergebnis is not None
+    assert (ergebnis.recording.titel, ergebnis.recording.notiz) == (
+        "Morgenmessung",
+        "Gut geschlafen",
+    )
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)

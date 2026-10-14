@@ -371,7 +371,10 @@ class HrvRecording:
     n_gaps: int = 0
     session_id: str | None = None
     session_entry_id: str | None = None
+    #: Beschreibung — Kopie von ``notiz`` der Messdatei
     note: str = ""
+    #: Überschrift — Kopie von ``titel`` der Messdatei (Migration 011)
+    title: str = ""
 
 
 __all__ = [

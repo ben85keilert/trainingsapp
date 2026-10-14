@@ -21,7 +21,7 @@ import json
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -989,6 +989,28 @@ class SessionRepo:
         self.anlegen(session)
         return session
 
+    def plaene_waehrend(self, subject_id: str, von: datetime, bis: datetime) -> list[str]:
+        """Pläne, aus denen zwischen ``von`` und ``bis`` etwas eingetragen wurde.
+
+        Die meisten Einträge zuerst. So erkennt eine HRV-Messung den Plan, der
+        währenddessen geübt wurde — er ist ihr Namensvorschlag.
+        """
+        utc = von.astimezone(UTC).isoformat(), bis.astimezone(UTC).isoformat()
+        return [
+            r["plan_id"]
+            for r in self.con.execute(
+                """
+                SELECT s.plan_id, COUNT(*) AS n, MIN(e.started_at) AS erst
+                FROM session_entry e JOIN session s ON s.id = e.session_id
+                WHERE s.subject_id = ? AND s.plan_id IS NOT NULL
+                  AND s.deleted_at IS NULL AND e.deleted_at IS NULL
+                  AND e.started_at >= ? AND e.started_at <= ?
+                GROUP BY s.plan_id ORDER BY n DESC, erst
+                """,
+                (subject_id, *utc),
+            )
+        ]
+
     def plaene_am_tag(self, subject_id: str, tag: date) -> dict[str, int]:
         """Pläne mit einer Session an diesem Tag → Zahl ihrer gültigen Einträge.
 
@@ -1486,8 +1508,8 @@ class HrvRepo:
         self.con.execute(
             "INSERT INTO hrv_recording (id, subject_id, file_path, sha1, device_id, geraet, "
             "geraet_profil, intervall_quelle, datenqualitaet, started_at, duration_s, "
-            "coverage_pct, n_gaps, session_id, session_entry_id, note) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "coverage_pct, n_gaps, session_id, session_entry_id, note, title) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 a.id,
                 a.subject_id,
@@ -1505,6 +1527,7 @@ class HrvRepo:
                 a.session_id,
                 a.session_entry_id,
                 a.note,
+                a.title,
             ),
         )
 
@@ -1529,6 +1552,25 @@ class HrvRepo:
         self.con.execute(
             "UPDATE hrv_recording SET note = ? WHERE id = ?", (text.strip(), recording_id)
         )
+
+    def titel_setzen(self, recording_id: str, titel: str) -> None:
+        self.con.execute(
+            "UPDATE hrv_recording SET title = ? WHERE id = ?", (titel.strip(), recording_id)
+        )
+
+    def letzte_titel(self, subject_id: str, anzahl: int = 5) -> list[str]:
+        """Zuletzt vergebene Titel, jeder einmal — Vorschläge für eine neue Messung."""
+        titel: list[str] = []
+        for r in self.con.execute(
+            "SELECT title FROM hrv_recording WHERE subject_id = ? AND deleted_at IS NULL "
+            "AND title != '' ORDER BY started_at DESC LIMIT 50",
+            (subject_id,),
+        ):
+            if r["title"] not in titel:
+                titel.append(r["title"])
+            if len(titel) >= anzahl:
+                break
+        return titel
 
     def sha1_setzen(self, recording_id: str, sha1: str) -> None:
         """Nach einer eigenen Metadaten-Änderung (Notizen) die Prüfsumme nachführen.
@@ -1563,6 +1605,7 @@ class HrvRepo:
             session_id=r["session_id"],
             session_entry_id=r["session_entry_id"],
             note=r["note"],
+            title=r["title"],
         )
 
 

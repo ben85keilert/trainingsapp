@@ -221,9 +221,16 @@ Bildschirmen passen (getestet in 412 px Breite im Browser).
 10. **Skala frei:** „0 - 10", „-5 - 5", „0.0 - 10.0".
 11. **Crop:** Schere in der Aufzeichnung; Bereich wählen, alle Kennzahlen nur
    daraus; Rohdatei bleibt; praxis_gui-Feld `active_crop`.
-12. **Abschnitte:** automatisch zwischen Notizen (Timer!), eigene über
-   „Sichtbaren markieren" (rasten an Notizen ein); Werte je Abschnitt (Ø HF,
-   RMSSD, SDNN, Atem, LF/HF); praxis_gui-Feld `segments`.
+12. **Abschnitte:** Werte je Abschnitt (Ø HF, RMSSD, SDNN, Atem, LF/HF);
+   praxis_gui-Feld `segments`. Seit dem späten 14.10. **unabhängig von den
+   Notizen** (Ben): Bereich in der Rohkurve wählen (Anfang/Ende ziehen oder
+   tippen, ±1/±5 s, Stecknadel = auf eine Notiz), Notizen nur als Rastpunkte
+   oder auf Wunsch als Grenzen („Aus Notizen …"); der Timer legt seine
+   Abschnitte beim Speichern selbst an. Jeder Abschnitt lässt sich antippen,
+   verschieben, umbenennen und löschen (mit Rückgängig). Crop genauso in der
+   Kurve (grau = zählt nicht). Dazu **Ablesen** (Strich mit allen Werten) und
+   **Titel/Beschreibung** (`titel`/`notiz` der Messdatei, Vorschlag: der Plan,
+   der währenddessen geübt wurde).
 13. **ULF/VLF bei langen Messungen** — dabei einen Fehler gefunden: Ab ~67 min
    lagen LF/HF um ein Vielfaches zu hoch (Rasterdeckel; **praxis_gui hat ihn
    auch**). Jetzt Spektrum in drei Teilen, bis 24 h geprüft, 24 h in 2,4 s.

@@ -610,7 +610,7 @@ def test_migration_010_macht_haken_zu_keinem_parameter(tmp_path) -> None:
             (modus, modus),
         )
     con.commit()
-    assert migrieren(con) == 10
+    assert migrieren(con) >= 10  # spätere Migrationen laufen mit
     felder = dict(con.execute("SELECT id, fields_json FROM plan_item").fetchall())
     assert felder == {"haken": "[]", "chips": None, "frei": None}
     con.close()
@@ -1065,3 +1065,31 @@ def test_wert_setzen_landet_im_heutigen_eintrag(welt) -> None:
     assert e.result["scale"] == 6
     neu = repo.wert_setzen(sitzung, u, "scale", 2, tag, {"angle": 90})  # andere Ausprägung
     assert neu.result == {"angle": 90, "scale": 2} and neu.id != e.id
+
+
+def test_titel_der_aufzeichnung_und_plaene_waehrend(welt) -> None:
+    """Migration 011: Titel als Kopie in der Zeile; Pläne, die während einer Messung liefen."""
+    from datetime import timedelta
+
+    from trainingsapp.core.models import HrvRecording, Plan, PlanItem
+    from trainingsapp.data.repositories import HrvRepo, PlanRepo
+
+    con, sessions, ich, _ = welt
+    hrv = HrvRepo(con)
+    a = HrvRecording(subject_id=ich.id, file_path="PolarH10/sensor_x.json", title="Morgens")
+    hrv.anlegen(a)
+    hrv.anlegen(HrvRecording(subject_id=ich.id, file_path="PolarH10/sensor_y.json"))
+    assert hrv.laden(a.id).title == "Morgens"
+    hrv.titel_setzen(a.id, "  Intervalle Beine ")
+    assert hrv.laden(a.id).title == "Intervalle Beine"
+    assert hrv.letzte_titel(ich.id) == ["Intervalle Beine"]
+
+    uebung = _wadenheben(con)
+    plan = Plan(name="Beine", subject_id=ich.id, items=[PlanItem(exercise_id=uebung.id)])
+    PlanRepo(con).speichern(plan)
+    jetzt_ = jetzt()
+    s = sessions.session_fuer(ich.id, plan.id, lokaler_tag(jetzt_))
+    sessions.erledigt(s, uebung)
+    fuenf = timedelta(minutes=5)
+    assert sessions.plaene_waehrend(ich.id, jetzt_ - fuenf, jetzt_ + fuenf) == [plan.id]
+    assert sessions.plaene_waehrend(ich.id, jetzt_ + fuenf, jetzt_ + 2 * fuenf) == []

@@ -28,6 +28,7 @@ lässt sich ohne Bildschirm testen.
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, fields
@@ -37,6 +38,9 @@ from .models import new_id
 
 #: Längster Abschnitt (s) — 99:59, mehr passt nicht in mm:ss
 MAX_ABSCHNITT_S: Final[int] = 99 * 60 + 59
+#: Text der Notiz, wenn der Timer durch ist — beendet den letzten Abschnitt
+ENDE_MARKE = "Timer fertig"
+
 #: Höchstens so viele Runden
 MAX_RUNDEN: Final[int] = 99
 #: Countdown: ein kurzer Ton bei so vielen Sekunden Rest
@@ -330,6 +334,19 @@ class Marke:
     text: str
     #: Wie lange es bei der Abfrage her war (s) — die Notiz steht dort, nicht „jetzt"
     vor_s: float
+    #: Name des Abschnitts in der Messung („Pause (Runde 2/8)", ohne Profilnamen)
+    abschnitt: str = ""
+    #: Das Ende des Timers: beendet den letzten Abschnitt, beginnt keinen
+    ende: bool = False
+
+
+def name_aus_notiz(text: str) -> str:
+    """Abschnittsname aus dem Text einer Timer-Notiz — ohne den Profilnamen davor.
+
+    >>> name_aus_notiz("Timer „Tabata“: Belastung (Runde 1/8)"), name_aus_notiz("Pause")
+    ('Belastung (Runde 1/8)', 'Pause')
+    """
+    return re.sub(r"^Timer „[^“]*“:\s*", "", text).strip() or text.strip()
 
 
 def wechsel(alt: TimerStand | None, neu: TimerStand) -> bool:
@@ -449,12 +466,19 @@ class TimerLauf:
     def markentext(self, nummer: int) -> str:
         """„Belastung (Runde 2/8)"; der erste Anfang nennt das Profil, das Ende „Timer fertig"."""
         if nummer >= len(self._folge):
-            return "Timer fertig"
+            return ENDE_MARKE
+        text = self.abschnittsname(nummer)
+        return f"Timer „{self.profil.name}“: {text}" if nummer == 0 else text
+
+    def abschnittsname(self, nummer: int) -> str:
+        """„Belastung (Runde 2/8)" — der Name des Abschnitts in der Messung."""
+        if nummer >= len(self._folge):
+            return ENDE_MARKE
         runde, index, a = self._folge[nummer]
         text = a.name or f"Abschnitt {index + 1}"
         if self.profil.runden > 1:
             text += f" (Runde {runde}/{self.profil.runden})"
-        return f"Timer „{self.profil.name}“: {text}" if nummer == 0 else text
+        return text
 
     def neue_marken(self) -> list[Marke]:
         """Abschnittsanfänge seit der letzten Abfrage — jeder genau einmal.
@@ -490,7 +514,15 @@ class TimerLauf:
         else:
             nummern = list(range(self._gemeldet + 1, stand.nummer + 1))
         self._gemeldet = stand.nummer
-        return [Marke(self.markentext(k), round(jetzt - self._uhr_bei(k), 3)) for k in nummern]
+        return [
+            Marke(
+                self.markentext(k),
+                round(jetzt - self._uhr_bei(k), 3),
+                abschnitt=self.abschnittsname(k),
+                ende=k >= len(self._folge),
+            )
+            for k in nummern
+        ]
 
     def _uhr_bei(self, nummer: int) -> float:
         """Wann Abschnitt ``nummer`` begann — seit dem letzten Start genau, sonst jetzt."""

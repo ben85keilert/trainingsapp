@@ -78,3 +78,41 @@ async def test_stoppen_ohne_schlaege_speichert_nichts(tmp_path) -> None:
     assert lauf.aufnahme_stoppen(tmp_path) is None
     await lauf.trennen()
     assert not list(tmp_path.rglob("sensor_*.json"))
+
+
+@pytest.mark.asyncio
+async def test_timer_abschnitte_entstehen_beim_speichern(tmp_path) -> None:
+    """Der Timer markiert Abschnittsanfänge — beim Stoppen stehen sie als Abschnitte im Sidecar."""
+    from trainingsapp.hrv_core.ausschnitte import zusatz_lesen
+    from trainingsapp.hrv_core.korrektur import analyse_pfad
+
+    quelle = SimulatedSource(tempo=60.0, seed=7)
+    lauf = Messlauf(quelle, backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    marken = [(20, "Timer „T“: Belastung (Runde 1/2)", "Belastung (Runde 1/2)", False)]
+    marken += [(50, "Pause (Runde 1/2)", "Pause (Runde 1/2)", False)]
+    marken += [(80, "Belastung (Runde 2/2)", "Belastung (Runde 2/2)", False)]
+    marken += [(110, "Timer fertig", "Timer fertig", True)]
+    for sekunde, text, name, ende in marken:
+        while lauf.aufnahme_dauer_s() < sekunde:
+            await asyncio.sleep(0.01)
+        assert lauf.abschnitt_markieren(text, 0.0, name=name, ende=ende) is not None
+    while lauf.aufnahme_dauer_s() < 130:
+        await asyncio.sleep(0.01)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+
+    assert ergebnis is not None and analyse_pfad(ergebnis.pfad).exists()
+    rec = laden(ergebnis.pfad)
+    assert len(rec.ereignisse) == 4  # die Notizen bleiben Notizen
+    _, abschnitte = zusatz_lesen(ergebnis.pfad, float)
+    assert [a.name for a in abschnitte] == [
+        "Belastung (Runde 1/2)",
+        "Pause (Runde 1/2)",
+        "Belastung (Runde 2/2)",
+    ]
+    assert abschnitte[0].von_s == pytest.approx(20, abs=3)
+    assert abschnitte[-1].bis_s == pytest.approx(110, abs=3)

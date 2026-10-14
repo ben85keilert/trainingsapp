@@ -24,6 +24,7 @@ from pathlib import Path
 
 from .. import __version__
 from ..hrv_core.aufnahme import Aufnahme
+from ..hrv_core.ausschnitte import grenzen_speichern
 from ..hrv_core.constants import malik_threshold
 from ..hrv_core.ereignisse import Zeitbezug, notiz
 from ..hrv_core.export import diagnose_pfad, diagnose_text
@@ -83,6 +84,8 @@ class Messlauf:
         #: Anzeigezeiten des letzten PPI-Pakets: (rr_ms, t, verworfen, fehler_ms) in Folge
         self._schlagzeiten: deque[tuple[int, float, bool, int]] = deque()
         self.aufnahme: Aufnahme | None = None
+        #: Abschnittsgrenzen des Timers in der laufenden Aufnahme: (Notiz, Name, Ende?)
+        self._grenzen: list[tuple[dict, str, bool]] = []
         self.status = DeviceStatus(verbindung=Verbindung.GETRENNT)
         self.device_id = ""
         self.geraet_name = ""
@@ -260,6 +263,7 @@ class Messlauf:
             simulation=self.simulation,
         )
         self.aufnahme.batterie_prozent = self.status.batterie_prozent
+        self._grenzen = []
         self._letztes_backup = self._uhr()
 
     def notiz_zeitbezug(self) -> Zeitbezug | None:
@@ -292,6 +296,20 @@ class Messlauf:
         self.aufnahme.ereignisse.append(eintrag)
         return eintrag
 
+    def abschnitt_markieren(
+        self, text: str, vor_s: float = 0.0, *, name: str, ende: bool = False
+    ) -> dict | None:
+        """Wie `notiz_hinzufuegen` — und die Notiz wird beim Speichern eine Abschnittsgrenze.
+
+        Für den Timer: Seine Abschnitte werden Abschnitte der Messung (Sidecar wie
+        praxis_gui, `ausschnitte.grenzen_speichern`) — danach unabhängig von den
+        Notizen verschieb- und löschbar. ``ende``: beendet nur den letzten.
+        """
+        eintrag = self.notiz_hinzufuegen(text, vor_s)
+        if eintrag is not None:
+            self._grenzen.append((eintrag, name, ende))
+        return eintrag
+
     def aufnahme_dauer_s(self) -> float:
         return self.aufnahme.dauer_s() if self.aufnahme is not None else 0.0
 
@@ -315,6 +333,10 @@ class Messlauf:
             return None
         pfad = aufnahme.speichern(self._ordner(basis))
         rec = aufnahme.recording()
+        grenzen, self._grenzen = self._grenzen, []
+        if grenzen:  # Abschnitte des Timers — scheitert das, bleibt die Messung
+            with contextlib.suppress(OSError, ValueError):
+                grenzen_speichern(pfad, rec, grenzen)
         # Das Verbindungsprotokoll gehört zur Messung: Ohne adb ist es die einzige
         # Spur, warum ein Sensor (Verity Sense) Lücken oder keine Intervalle hatte.
         text = self.diagnose(

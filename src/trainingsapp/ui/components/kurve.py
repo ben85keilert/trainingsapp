@@ -62,6 +62,10 @@ class Reihe:
     flaeche: str | None = None
     #: Radius der Punkte bei ``nur_punkte`` (Poincaré-Wolke kleiner)
     radius: float = 3.5
+    #: Waagrechter Balken knapp unter dem oberen Rand (Abschnitte) — die y-Werte zählen nicht
+    band: bool = False
+    #: Balken übereinander, wo sich Abschnitte decken: 0 = oben
+    ebene: int = 0
 
 
 def ausduennen(punkte: Sequence[tuple[float, float]], maximal: int = MAX_PUNKTE) -> list:
@@ -260,7 +264,10 @@ def kurve(
         if not r.punkte:
             continue
         punkte = r.punkte
-        if not r.skala:
+        if r.band:
+            y = oben - (0.04 + 0.06 * r.ebene) * (oben - unten)
+            punkte = [(x, y) for x, _ in punkte]
+        elif not r.skala:
             punkte = [(x, min(max(y, unten), oben)) for x, y in punkte]
         teile = [ausduennen(punkte)] if r.nur_punkte else abschnitte(punkte, r.naehte)
         for teil in teile:

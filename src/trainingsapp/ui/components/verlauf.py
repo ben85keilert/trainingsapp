@@ -92,12 +92,16 @@ def diagramme(
     hoehe: int = 120,
     ohne: Sequence[str] = (),
     bereich: str | None = None,
+    marken: Sequence[Reihe] = (),
+    gesehen: dict[str, tuple[str, list[tuple[float, float]]]] | None = None,
 ) -> list[ft.Control]:
     """Je Gruppe gleicher Achse ein Diagramm, darüber die Legende.
 
     ``ohne``: Kurven, die es für diese Messung nicht gibt (z. B. ``hf_rr`` bei
     einem reinen Pulsgeber) — sie bleiben gewählt, werden aber nicht gezeichnet.
-    ``bereich``: nur die Kurven dieses Analysebereichs.
+    ``bereich``: nur die Kurven dieses Analysebereichs. ``marken``: in jedes
+    Diagramm (der Ablesestrich). ``gesehen`` bekommt je Kurve Bezeichnung und
+    Punkte — zum Ablesen an einer Stelle.
     """
     nur = [k for k in (im_bereich(bereich) if bereich else KENNZAHLEN) if k not in ohne]
     out: list[ft.Control] = []
@@ -109,6 +113,8 @@ def diagramme(
             fenster = ansicht.fenster_fuer(k, kz.fenster_s)
             block = kz.rechnet and ansicht.modus_fuer(k) == BLOCK
             punkte = list(daten(k, fenster, block))
+            if gesehen is not None:
+                gesehen[k] = (bezeichnung(k, ansicht), punkte)
             naehte: list[int] = []
             if block:
                 punkte, naehte = treppe(punkte, fenster, x_von, x_bis)
@@ -117,7 +123,7 @@ def diagramme(
         out.append(ft.Row(spacing=14, run_spacing=4, wrap=True, controls=legende))
         out.append(
             kurve(
-                reihen,
+                [*reihen, *marken],
                 einheit=KENNZAHLEN[gruppe[0]].einheit or KENNZAHLEN[gruppe[0]].titel,
                 hoehe=hoehe,
                 x_von=x_von,

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from trainingsapp.config import datenbankpfad
+from trainingsapp.core.darstellung import Darstellung, darstellung_lesen, darstellung_schreiben
 from trainingsapp.core.hrv_ansicht import (
     Ansicht,
     ansicht_lesen,
@@ -342,6 +343,16 @@ class AppState:
     def plan_darstellung_setzen(self, wert: str) -> None:
         if wert in PLAN_DARSTELLUNGEN:
             self.einstellungen.setzen(SettingRepo.PLAN_DARSTELLUNG, wert)
+
+    def darstellung(self, profil_id: str | None = None) -> Darstellung:
+        """Farbprofil, Hell/Dunkel und Verlauf eines Profils (Vorgabe: das aktive)."""
+        schluessel = f"{SettingRepo.DARSTELLUNG}:{profil_id or self.profil.id}"
+        return darstellung_lesen(self.einstellungen.lesen(schluessel))
+
+    def darstellung_setzen(self, d: Darstellung) -> None:
+        """Gilt für das aktive Profil."""
+        schluessel = f"{SettingRepo.DARSTELLUNG}:{self.profil.id}"
+        self.einstellungen.setzen(schluessel, darstellung_schreiben(d))
 
     def hrv_einstellungen(self) -> HrvEinstellungen:
         """Was die Messung zeigt — Kacheln, Fenster, Analysebereiche."""

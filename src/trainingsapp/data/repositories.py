@@ -589,6 +589,9 @@ class SettingRepo:
     BEKANNTE_GERAETE = "bekannte_geraete"
     #: Plan: wie die Übungen beim Training aussehen (`ui.state.PLAN_DARSTELLUNGEN`)
     PLAN_DARSTELLUNG = "plan_darstellung"
+    #: Farbprofil, Hell/Dunkel, Verlauf (JSON, `core.darstellung`) — **je Profil**:
+    #: Schlüssel `darstellung:<profil-id>`, damit man am Hintergrund sieht, wer dran ist
+    DARSTELLUNG = "darstellung"
 
     def __init__(self, con: sqlite3.Connection) -> None:
         self.con = con

@@ -63,8 +63,6 @@ from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
 from trainingsapp.ui.state import AppState
 
-ROT = ft.Colors.RED_400
-
 
 def _protokoll(lauf: Messlauf, zeilen: int = 20) -> list[str]:
     """Die letzten Diagnosezeilen der Quelle (PolarQuelle führt sie mit)."""
@@ -668,7 +666,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         farbe = {
             Verbindung.VERBUNDEN: ft.Colors.GREEN_400,
             Verbindung.VERBINDE: ft.Colors.AMBER_400,
-            Verbindung.FEHLER: ROT,
+            Verbindung.FEHLER: FARBEN["rot"],
         }.get(s.verbindung, ft.Colors.OUTLINE)
         teile = [lauf.geraet_name or "Gerät"]
         if s.batterie_prozent is not None:
@@ -699,7 +697,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                         wrap=True,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
-                            ft.Icon(ft.Icons.FIBER_MANUAL_RECORD, color=ROT, size=16),
+                            ft.Icon(ft.Icons.FIBER_MANUAL_RECORD, color=FARBEN["rot"], size=16),
                             ft.Text(
                                 f"Aufnahme {_uhr(lauf.aufnahme_dauer_s())}",
                                 size=15,
@@ -756,7 +754,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             [
                 Reihe(grau, farbe=ft.Colors.OUTLINE, breite=1, naehte=grau_naehte, skala=False),
                 Reihe(rr_linie, farbe=ft.Colors.PRIMARY, naehte=rr_naehte),
-                Reihe(artefakte, farbe=ROT, nur_punkte=True, skala=False),
+                Reihe(artefakte, farbe=FARBEN["rot"], nur_punkte=True, skala=False),
                 *notizfeld.marken(x_von, x_bis),
             ],
             einheit="PPI ms" if verity else "RR ms",

@@ -36,9 +36,8 @@ import flet as ft
 from trainingsapp.core.kurzcode import genannte, kurzcode
 from trainingsapp.hrv_core.ereignisse import Zeitbezug, notiz, sortiert
 from trainingsapp.ui.components.kurve import Reihe
+from trainingsapp.ui.farben import FARBEN
 
-FARBE_NOTIZ = ft.Colors.AMBER_400
-FARBE_NEU = ft.Colors.ORANGE_600
 #: Schritte zum Verschieben (s)
 SCHRITTE = (-5, -1, 1, 5)
 
@@ -336,11 +335,11 @@ class Notizfeld:
             x = zb.x(e)
             if x is not None and x_von <= x <= x_bis and i != self.bearbeite:
                 notizen.append(x)
-        reihen = [senkrechte(notizen, FARBE_NOTIZ, 1.5, gestrichelt=False)]
+        reihen = [senkrechte(notizen, FARBEN["notiz"], 1.5, gestrichelt=False)]
         if self.bearbeite is not None:
             x = self._x_der_eingabe()
             if x_von <= x <= x_bis:
-                reihen.append(senkrechte([x], FARBE_NEU, 2.0, gestrichelt=True))
+                reihen.append(senkrechte([x], FARBEN["notiz_neu"], 2.0, gestrichelt=True))
         return [r for r in reihen if r.punkte]
 
     # -- Aufbau ------------------------------------------------------------------
@@ -449,7 +448,7 @@ class Notizfeld:
                         spacing=6,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
-                            ft.Icon(ft.Icons.SCHEDULE, size=16, color=FARBE_NEU),
+                            ft.Icon(ft.Icons.SCHEDULE, size=16, color=FARBEN["notiz_neu"]),
                             self._zeit,
                             self._zustand,
                             self._einfrieren,
@@ -503,7 +502,7 @@ class Notizfeld:
                 ft.Icons.TOUCH_APP if self.waehlen else ft.Icons.TOUCH_APP_OUTLINED
             )
             self._waehlen_knopf.style = (
-                ft.ButtonStyle(bgcolor=ft.Colors.with_opacity(0.15, FARBE_NEU))
+                ft.ButtonStyle(bgcolor=ft.Colors.with_opacity(0.15, FARBEN["notiz_neu"]))
                 if self.waehlen
                 else None
             )
@@ -547,12 +546,12 @@ class Notizfeld:
             on_click=(lambda _=None, i=i: self.bearbeiten(i)),
             padding=ft.Padding.symmetric(vertical=4, horizontal=6),
             border_radius=8,
-            bgcolor=ft.Colors.with_opacity(0.12, FARBE_NOTIZ) if i == self.bearbeite else None,
+            bgcolor=ft.Colors.with_opacity(0.12, FARBEN["notiz"]) if i == self.bearbeite else None,
             content=ft.Row(
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.START,
                 controls=[
-                    ft.Container(width=3, height=16, bgcolor=FARBE_NOTIZ, border_radius=2),
+                    ft.Container(width=3, height=16, bgcolor=FARBEN["notiz"], border_radius=2),
                     ft.Text(zeit, size=12, opacity=0.7, width=96),
                     ft.Text(str(e.get("text") or ""), size=13, expand=True),
                     ft.Icon(
@@ -608,8 +607,6 @@ def senkrechte(xs: list[float], farbe: str, breite: float, *, gestrichelt: bool)
 
 __all__ = [
     "ALLE",
-    "FARBE_NEU",
-    "FARBE_NOTIZ",
     "Notizfeld",
     "UebungsQuelle",
     "einfuegen",

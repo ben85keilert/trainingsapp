@@ -54,6 +54,7 @@ def profile_view(page: ft.Page, state: AppState) -> ft.View:
                 return
             page.show_dialog(ft.SnackBar(ft.Text(f"Profil „{profil.name}“ gelöscht")))
             zeichnen()
+            state.neu_zeichnen()  # war es aktiv, gilt jetzt ein anderes Farbprofil
 
         def fragen() -> None:
             page.show_dialog(
@@ -110,6 +111,7 @@ def profile_view(page: ft.Page, state: AppState) -> ft.View:
         neuer_name.value = ""
         page.show_dialog(ft.SnackBar(ft.Text(f"„{name}“ angelegt und aktiv")))
         zeichnen()
+        state.neu_zeichnen()  # das neue Profil beginnt mit der Vorgabe-Darstellung
         with contextlib.suppress(Exception):
             neuer_name.update()
 

@@ -20,26 +20,7 @@ import flet as ft
 from trainingsapp.core.hrv_ansicht import BLOCK, GLEITEND, PNN_WAHL, Ansicht
 from trainingsapp.hrv_core.trends import KENNZAHLEN, im_bereich, titel, treppe
 from trainingsapp.ui.components.kurve import Reihe, kurve
-
-#: Feste Farbe je Kurve — in Diagrammen, Legende, Chips und Kacheln dieselbe
-FARBEN: dict[str, str] = {
-    "hf_rr": ft.Colors.TERTIARY,
-    "hf_geraet": ft.Colors.BLUE_GREY_300,
-    "mean_rr": ft.Colors.CYAN_400,
-    "rmssd": ft.Colors.AMBER_400,
-    "sdnn": ft.Colors.PURPLE_300,
-    "pnnx": ft.Colors.LIGHT_GREEN_400,
-    "atemfrequenz": ft.Colors.BLUE_400,
-    "vlf_power": ft.Colors.BLUE_GREY_400,
-    "rsa": ft.Colors.LIGHT_BLUE_300,
-    "lf_power": ft.Colors.ORANGE_400,
-    "hf_power": ft.Colors.TEAL_400,
-    "lf_hf": ft.Colors.PINK_300,
-    "gipfel": ft.Colors.INDIGO_300,
-    "sd1": ft.Colors.DEEP_ORANGE_300,
-    "sd2": ft.Colors.BROWN_300,
-    "dfa_alpha1": ft.Colors.LIME_600,
-}
+from trainingsapp.ui.farben import FARBEN  # feste Farbe je Kurve, hell/dunkel
 
 BEREICH_TITEL = {"zeit": "Zeit", "frequenz": "Frequenz", "nichtlinear": "Nichtlinear"}
 

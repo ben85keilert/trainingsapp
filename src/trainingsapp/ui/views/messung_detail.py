@@ -112,7 +112,6 @@ from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.messung import ohne_rr
 
-ROT = ft.Colors.RED_400
 QUALITAET = {
     "rr_ekg": "RR aus EKG (volle HRV)",
     "ppi_optisch": "Pulsintervalle optisch (Frequenzwerte mit Vorbehalt)",
@@ -331,7 +330,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     zeitbezug = Zeitbezug(lambda: rec.beats, rec.start_utc, achse=lambda: zeilen_achse)
 
     kopf_text = ft.Text(size=13, opacity=0.8)
-    hinweis_text = ft.Text(size=12, color=ROT)
+    hinweis_text = ft.Text(size=12, color=FARBEN["rot"])
     titel_box = ft.Container()
     # Die Datei ist die Wahrheit — die Zeile hält nur Kopien für die Liste
     if rec.titel != eintrag.title:
@@ -579,7 +578,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                     skala=False,
                 ),
                 Reihe(korr_linie, farbe=ft.Colors.PRIMARY, naehte=korr_naehte),
-                Reihe(art, farbe=ROT, nur_punkte=True, skala=False),
+                Reihe(art, farbe=FARBEN["rot"], nur_punkte=True, skala=False),
                 *notizfeld.marken(x_von, x_bis),
                 *(m.editor.reihen(x_von, x_bis) if m.editor is not None else []),
                 *(

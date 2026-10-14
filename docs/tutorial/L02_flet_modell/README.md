@@ -181,8 +181,10 @@ page.theme = ft.Theme(color_scheme_seed="#2E7D6E", use_material3=True)
 page.theme_mode = ft.ThemeMode.SYSTEM  # SYSTEM | LIGHT | DARK
 ```
 
-Flet leitet daraus ein vollständiges, in sich stimmiges Schema ab — siehe
-`src/trainingsapp/ui/theme.py`.
+Flet leitet daraus ein vollständiges, in sich stimmiges Schema ab. Die App
+geht einen Schritt weiter: Jedes Farbprofil (`src/trainingsapp/core/darstellung.py`)
+ersetzt die Flächenstufen durch eigene, getönte — `src/trainingsapp/ui/theme.py`
+zeigt, wie man dazu `ft.ColorScheme` und einen Verlauf als `View.decoration` setzt.
 
 ---
 

@@ -4,7 +4,8 @@ Vorn das aktive Profil wählen; anlegen, umbenennen und löschen in einer eigene
 Ansicht (`/einstellungen/profile`). Dazu die eigene Einteilung der Übungen
 (`/einstellungen/tags`: Typen und Regionen), die Übungspakete
 (`/einstellungen/pakete`: importieren, exportieren) und wie sie im Plan aussehen
-(`ui.state.PLAN_DARSTELLUNGEN`), der Weg zu den Einstellungen der
+(`ui.state.PLAN_DARSTELLUNGEN`), Farbprofil und Hell/Dunkel des Profils
+(`einstellungen_darstellung`), der Weg zu den Einstellungen der
 HRV-Messung (`/einstellungen/hrv`), zum Timer, zum GPS-Vorabtest
 (`/einstellungen/gps-test`), Hilfe und Edition.
 
@@ -25,7 +26,9 @@ from trainingsapp.config import edition, ist_aktiv
 from trainingsapp.ui.components.hilfe import hilfe_oeffner
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import PLAN_DARSTELLUNGEN, AppState
+from trainingsapp.ui.views.einstellungen_darstellung import darstellung_karte
 
 
 def einstellungen(page: ft.Page, state: AppState) -> ft.View:
@@ -36,6 +39,7 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
             state.profil_wechseln(profil_id)
             zeichnen()
             page.update()
+            state.neu_zeichnen()  # jedes Profil bringt sein Farbprofil mit
 
         return handler
 
@@ -78,7 +82,7 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
         "sichtbar" if e.messung_anzeigen else "ausgeblendet"
     )
 
-    return ft.View(
+    ansicht = ft.View(
         route="/einstellungen",
         appbar=ft.AppBar(title=ft.Text("Einstellungen")),
         scroll=ft.ScrollMode.AUTO,
@@ -140,6 +144,7 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
                                 "umschaltbar."
                             ),
                         ),
+                        darstellung_karte(page, state),
                         karte(
                             titel("Messung und Werkzeuge"),
                             ft.ListTile(
@@ -203,6 +208,8 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
             )
         ],
     )
+    # Eine Farbwahl baut alles neu — die Position bleibt, statt nach oben zu springen
+    return scroll_merken(page, state, "/einstellungen", ansicht)
 
 
 __all__ = ["einstellungen"]

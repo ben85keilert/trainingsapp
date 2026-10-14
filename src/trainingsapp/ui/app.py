@@ -45,9 +45,10 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.theme import dark_theme, light_theme
+from trainingsapp.ui.theme import anwenden, hintergrund_setzen
 from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view
 from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
@@ -261,12 +262,21 @@ def formular_korrektur(page: ft.Page, state: AppState, eintrag: SessionEntry) ->
 
 def main(page: ft.Page) -> None:
     page.title = "Trainingsassistent"
-    page.theme = light_theme()
-    page.dark_theme = dark_theme()
-    page.theme_mode = ft.ThemeMode.SYSTEM
     page.padding = 0
 
     state = AppState.starten()
+    # Farbprofil des aktiven Profils (`core.darstellung`); gesetzt wird es bei
+    # jedem Routenwechsel, denn ein Profilwechsel bringt ein anderes mit.
+    angewandt: tuple[object, ...] | None = None
+
+    def darstellung_anwenden() -> Darstellung:
+        nonlocal angewandt
+        d = state.darstellung()
+        if (d, page.platform_brightness) != angewandt:
+            anwenden(page, d)
+            angewandt = (d, page.platform_brightness)
+        return d
+
     # Bluetooth nur in der App auf Android — am Rechner gibt es die Erweiterung
     # nicht (flet run nutzt einen fertigen Client ohne eigene Erweiterungen).
     if page.platform == ft.PagePlatform.ANDROID:
@@ -365,6 +375,8 @@ def main(page: ft.Page) -> None:
 
     def zeige_route() -> None:
         """Baut den Ansichtsstapel passend zu `page.route` auf."""
+        # Thema und Kurvenfarben zuerst — die Ansichten lesen sie beim Bauen
+        darstellung = darstellung_anwenden()
         page.views.clear()
         page.views.append(hauptansicht(page, state))
         teile = [t for t in page.route.split("/") if t]  # "/plan/abc" → ["plan", "abc"]
@@ -379,6 +391,7 @@ def main(page: ft.Page) -> None:
                 page.views.append(timer_bearbeiten_view(page, state, profil_id, basis))
         else:
             stapel(teile)
+        hintergrund_setzen(page, darstellung)
         page.update()
 
     def stapel(teile: list[str]) -> None:
@@ -443,6 +456,8 @@ def main(page: ft.Page) -> None:
     state.neu_zeichnen = zeige_route
     page.on_route_change = zeige_route
     page.on_view_pop = zurueck
+    # Bei „System“ wechseln Thema, Verlauf und Kurvenfarben mit dem Telefon
+    page.on_platform_brightness_change = zeige_route
     zeige_route()  # beim Start ist die Route schon gesetzt — der Handler feuert nicht von selbst
 
 

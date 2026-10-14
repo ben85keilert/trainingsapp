@@ -24,13 +24,18 @@ from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.components.verlauf import FARBEN
 
-#: Bänder im Bild: (von, bis, Farbe der Fläche) — VLF grau, LF und HF wie ihre Kurven
-BAND_FARBEN = (
-    (FREQ_BANDS["vlf"][0], FREQ_BANDS["vlf"][1], ft.Colors.OUTLINE),
-    (FREQ_BANDS["lf"][0], FREQ_BANDS["lf"][1], FARBEN["lf_power"]),
-    (FREQ_BANDS["hf"][0], FREQ_BANDS["hf"][1], FARBEN["hf_power"]),
-    (FREQ_BANDS["hf"][1], 0.5, None),
-)
+
+def band_farben() -> tuple[tuple[float, float, str | None], ...]:
+    """Bänder im Bild: (von, bis, Farbe der Fläche) — VLF grau, LF und HF wie ihre Kurven.
+
+    Eine Funktion, keine Konstante: Die Kurvenfarben hängen von Hell/Dunkel ab.
+    """
+    return (
+        (FREQ_BANDS["vlf"][0], FREQ_BANDS["vlf"][1], ft.Colors.OUTLINE),
+        (FREQ_BANDS["lf"][0], FREQ_BANDS["lf"][1], FARBEN["lf_power"]),
+        (FREQ_BANDS["hf"][0], FREQ_BANDS["hf"][1], FARBEN["hf_power"]),
+        (FREQ_BANDS["hf"][1], 0.5, None),
+    )
 
 
 def hz_text(f: float) -> str:
@@ -58,7 +63,7 @@ def spektrum_kurve(fs: Fensterspektrum | None, *, hoehe: int = 150) -> ft.Contro
         )
     freqs, psd = np.asarray(fs.freqs), np.asarray(fs.psd)
     reihen: list[Reihe] = []
-    for lo, hi, farbe in BAND_FARBEN:
+    for lo, hi, farbe in band_farben():
         maske = (freqs >= lo) & (freqs <= hi)
         # Den nächsten Punkt mitnehmen, damit die Bänder lückenlos aneinanderstoßen
         idx = np.flatnonzero(maske)

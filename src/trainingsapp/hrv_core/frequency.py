@@ -826,6 +826,33 @@ class Fensterspektrum:
         """Ob die Fensterlänge die empfohlene Mindestdauer je Band erreicht."""
         return {b: self.dauer_s >= BAND_MIN_DAUER_S[b] for b in ("lf", "hf")}
 
+    @classmethod
+    def aus_frequenzbereich(cls, d: dict[str, Any] | None) -> Fensterspektrum | None:
+        """Das Spektrum der ganzen Messung (`frequenzbereich`) in derselben Form.
+
+        So zeigt die Analyse für „Alles“ genau die Kurve und die Bandwerte der
+        Tabelle darüber — ohne zweite Rechnung über die ganze Messung (70 min:
+        ein Lomb über alle Schläge kostete 1,1 s).
+
+        >>> t = np.cumsum(np.full(400, 800.0)) / 1000
+        >>> rr = 800 + 30 * np.sin(2 * np.pi * 0.25 * t)
+        >>> fs = Fensterspektrum.aus_frequenzbereich(frequenzbereich(rr, t))
+        >>> round(fs.werte["gipfel_hz"], 2), fs.n, fs.psd.shape == fs.freqs.shape
+        (0.25, 400, True)
+        >>> Fensterspektrum.aus_frequenzbereich(None) is None
+        True
+        """
+        if not d or d.get("freqs") is None or d.get("psd") is None:
+            return None
+        schluessel = ("vlf", "lf", "hf", "total_power", "lf_hf", "lf_n", "hf_n", "gipfel_hz")
+        return cls(
+            freqs=np.asarray(d["freqs"], dtype=float),
+            psd=np.asarray(d["psd"], dtype=float),
+            dauer_s=float(d.get("dauer_s") or 0.0),
+            n=int(d.get("n") or 0),
+            werte={k: d.get(k) for k in schluessel},
+        )
+
 
 def fensterspektrum(
     t_s: Sequence[float] | np.ndarray,

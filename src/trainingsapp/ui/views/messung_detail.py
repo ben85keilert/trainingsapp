@@ -12,7 +12,15 @@ Wunsch prüft das Programm das Verworfene selbst (`korrektur.analysebasis`).
 Die Regeln und ihre Gründe: docs/korrektur.md.
 
 Alle Kurven teilen ein Zeitfenster (Breite wählen, waagrecht wischen); die
-Lupe an einer Kette zoomt auf ihre Stelle.
+Lupe an einer Kette zoomt auf ihre Stelle. Die Ansicht öffnet mit den ersten
+2 Minuten (`START_BREITE_S`) — „Alles" rechnete beim Öffnen sofort über die
+ganze Messung.
+
+Spektrum, Poincaré und DFA gelten für das **Analysefenster**: die ganze
+Messung (Vorgabe), einen Abschnitt oder ein Band fester Länge, das man in der
+Rohkurve greift und schiebt. Gerechnet wird beim Loslassen, nach einer kurzen
+Latenz (Einstellungen → Erweitert), falls noch eine Bewegung nachkommt
+(`docs/plan_analyse_leistung.md`).
 
 Aufbau wie live: Kacheln (Werte der ganzen Messung, korrigiert), Hauptkurve,
 darunter die Analyse (Zeit ↔ Frequenz ↔ Nichtlinear) mit einer Zusammenfassung
@@ -22,6 +30,9 @@ mit Sperrgrund (Task-Force-Mindestdauer), Poincaré, DFA α1 und SampEn.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+from bisect import bisect_left
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -32,6 +43,7 @@ import flet as ft
 import numpy as np
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
+from trainingsapp.core.hrv_einstellungen import ANALYSE_LAENGEN
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.core.timer import ENDE_MARKE
 from trainingsapp.core.timer import name_aus_notiz as abschnittsname
@@ -51,7 +63,7 @@ from trainingsapp.hrv_core.ausschnitte import (
 from trainingsapp.hrv_core.constants import BAND_OK
 from trainingsapp.hrv_core.ereignisse import Zeitbezug, metadaten_schreiben
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
-from trainingsapp.hrv_core.frequency import frequenzbereich
+from trainingsapp.hrv_core.frequency import Fensterspektrum, frequenzbereich
 from trainingsapp.hrv_core.korrektur import (
     Kette,
     Korrektur,
@@ -74,7 +86,7 @@ from trainingsapp.hrv_core.regeln import Korrekturregeln
 from trainingsapp.hrv_core.segments import filter_rr
 from trainingsapp.hrv_core.time_domain import compute_time_domain
 from trainingsapp.hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
-from trainingsapp.ui.components.analyse import Analyse
+from trainingsapp.ui.components.analyse import Analyse, Analysefenster
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten
 from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, anzeige, zahl
 from trainingsapp.ui.components.karte import hinweis, karte
@@ -94,7 +106,7 @@ from trainingsapp.ui.components.titel import (
     titel_kopf,
     titel_vorschlaege,
 )
-from trainingsapp.ui.components.verlauf import FARBEN
+from trainingsapp.ui.components.verlauf import FARBEN, fenster_text
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
 from trainingsapp.ui.state import AppState
@@ -157,10 +169,36 @@ def _verworfen_text(rec_verworfen: tuple[int, int] | None) -> Sequence[str]:
 
 #: Breiten des Zeitfensters (s); 0 = die ganze Messung
 BREITEN = [(60, "1 min"), (120, "2 min"), (300, "5 min"), (0, "Alles")]
+#: So breit öffnet die Aufzeichnung — am Anfang der Messung (Ben, 14.10.2026)
+START_BREITE_S = 120
+
+#: Analysefenster: wofür Spektrum, Poincaré und DFA gerechnet werden
+AW_ALLES = "alles"
+AW_ABSCHNITT = "abschnitt"
+AW_BAND = "band"
 
 
 CROP = "crop"
 ABSCHNITT = "abschnitt"
+#: Farbe des verschiebbaren Analysefensters in der Rohkurve
+BAND_FARBE = ft.Colors.TERTIARY
+
+
+@dataclass
+class _Analysewahl:
+    """Das gewählte Analysefenster und, beim Band, ob es gerade gezogen wird."""
+
+    art: str = AW_ALLES
+    abschnitt_id: str | None = None
+    laenge_s: int = 300
+    #: Beginn des Bands auf der Kurvenachse — ``None`` = mitten im sichtbaren Ausschnitt
+    von: float | None = None
+    #: Band gegriffen: Abstand Finger − Beginn (s)
+    griff: float | None = None
+    #: Losgelassen, das Nachrechnen ist geplant
+    wartet: bool = False
+    #: Laufende Nummer des Nachrechnen-Auftrags — nur der letzte rechnet
+    auftrag: int = 0
 
 
 @dataclass
@@ -279,7 +317,12 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     z.auswahl_aus(z.gespeichert, ohne_sidecar=gespeicherte_regeln is None)
 
     dauer = max((t for t, _ in z.roh_punkte), default=0.0)
-    fenster = Fenster(dauer or 1.0, None)
+    start_breite = START_BREITE_S if dauer > START_BREITE_S else 0
+    fenster = (
+        Fenster(float(start_breite), float(start_breite))
+        if start_breite
+        else Fenster(dauer or 1.0, None)
+    )
     # Notizen hängen an den Zeilen der Rohdatei; die Kurve hat ihre eigene Zeitachse
     zeilen_achse = schlagzeiten(rec)
     # Crop und eigene Abschnitte stehen im Sidecar auf der Herzuhr der Rohdatei
@@ -298,7 +341,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     rr_box = ft.Container()
     ketten_box = ft.Column(spacing=0)
     breite_wahl = ft.SegmentedButton(
-        selected=["0"],
+        selected=[str(start_breite)],
         # Ein Abschnitt kann jede Breite haben — dann ist keine Taste gewählt
         allow_empty_selection=True,
         show_selected_icon=False,
@@ -487,6 +530,10 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         beats = z.basis.rec.beats
         return [(x, float(b.hf_bpm)) for x, b in zip(z.achse, beats, strict=True) if b.hf_bpm]
 
+    def zeiten_korr() -> list[float]:
+        """Zeit je korrigiertem Wert — einmal je Auswahl, nicht bei jedem Neuzeichnen."""
+        return z.merken("korr_zeiten", lambda: korr_zeiten(z.korrigiert(), z.achse))
+
     # -- Modus der Rohkurve: normal · Bereich wählen · Ablesen --------------------
     # Normal blättert Ziehen die Kurve, ein Tipp gehört den Notizen („In Kurve").
     # Mit offenem Bereichseditor (Zuschneiden, Abschnitt) zieht der Finger die
@@ -515,7 +562,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         # Grau reißt nur an Messlücken ab; farbig auch an Nähten und Ausschlüssen —
         # dort gibt es keine Schlag-zu-Schlag-Differenz.
         sichtbar, sichtbar_naehte = _linie(z.roh_punkte, z.roh_naehte, 200, 2600, x_von, x_bis)
-        zeiten = korr_zeiten(korr, z.achse)
+        zeiten = zeiten_korr()
         korr_linie, korr_naehte = _linie(
             zip(zeiten, korr.rr_ms, strict=True), korr.breaks, x_von=x_von, x_bis=x_bis
         )
@@ -523,6 +570,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         rr_box.content = kurve(
             [
                 *bereich_reihen(x_von, x_bis),
+                *band_reihen(x_von, x_bis),
                 Reihe(
                     sichtbar,
                     farbe=ft.Colors.OUTLINE,
@@ -591,7 +639,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         if m.ablesen:
             strich_setzen(x, zeichnen=False)
             return True
-        return False
+        return band_greifen(x)
 
     def analyse_tippen(x: float) -> None:
         if m.ablesen:
@@ -619,13 +667,21 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         ablese_box.visible = m.ablesen
         nur_kurven()
 
+    def naechster(zeiten: Sequence[float], x: float) -> int:
+        """Index der Zeit, die ``x`` am nächsten liegt (``zeiten`` aufsteigend)."""
+        i = bisect_left(zeiten, x)
+        if i <= 0:
+            return 0
+        if i >= len(zeiten):
+            return len(zeiten) - 1
+        return i if zeiten[i] - x < x - zeiten[i - 1] else i - 1
+
     def schlag_bei(x: float) -> float:
         """Der korrigierte Schlag, der ``x`` am nächsten liegt — dort steht der Strich."""
-        zeiten = korr_zeiten(z.korrigiert(), z.achse)
+        zeiten = zeiten_korr()
         if not zeiten:
             return x
-        i = min(range(len(zeiten)), key=lambda j: abs(zeiten[j] - x))
-        return float(zeiten[i])
+        return float(zeiten[naechster(zeiten, x)])
 
     def strich_setzen(x: float, *, zeichnen: bool = True) -> None:
         m.strich = schlag_bei(min(max(x, 0.0), dauer))
@@ -634,11 +690,11 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     def strich_schritt(richtung: int) -> None:
         """Ein Schlag vor oder zurück; die Kurve rückt mit, wenn der Strich hinausläuft."""
-        zeiten = korr_zeiten(z.korrigiert(), z.achse)
+        zeiten = zeiten_korr()
         jetzt = m.strich
         if not zeiten or jetzt is None:
             return
-        i = min(range(len(zeiten)), key=lambda j: abs(zeiten[j] - jetzt))
+        i = naechster(zeiten, jetzt)
         m.strich = float(zeiten[min(max(i + richtung, 0), len(zeiten) - 1)])
         x_von, x_bis = fenster.bereich(dauer)
         if not x_von <= m.strich <= x_bis:
@@ -650,10 +706,10 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         if x is None:
             return
         korr = z.korrigiert()
-        zeiten = korr_zeiten(korr, z.achse)
+        zeiten = zeiten_korr()
         werte: list[tuple[str | None, str, str, str]] = []
         if zeiten:
-            i = min(range(len(zeiten)), key=lambda j: abs(zeiten[j] - x))
+            i = naechster(zeiten, x)
             rr = korr.rr_ms[i]
             zusatz = " (interpoliert)" if korr.flag[i] != "orig" else ""
             werte.append(
@@ -1161,6 +1217,23 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         kurven(mit_analyse)
         page.update()
 
+    def wisch_zeichnen(mit_analyse: bool = True) -> None:
+        """Beim Wischen und Ziehen: nur Rohkurve und Analyse aktualisieren, nicht die Seite.
+
+        Wird das Band gezogen, ändert sich an der Analyse nichts — sie rechnet
+        erst nach dem Loslassen.
+        """
+        mit_analyse = mit_analyse and aw.griff is None
+        kurven(mit_analyse)
+        geaendert: list[ft.Control] = [rr_box]
+        if mit_analyse:
+            geaendert.append(analyse.control)
+            if ablese_box.visible:
+                geaendert.append(ablese_box)
+        for c in geaendert:
+            with contextlib.suppress(Exception):
+                c.update()
+
     # -- Zeitfenster -------------------------------------------------------------
 
     def breite_setzen(breite_s: float, mitte: float | None = None) -> None:
@@ -1230,6 +1303,214 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     breite_wahl.on_change = breite_gewaehlt
 
+    # -- Analysefenster: wofür Spektrum, Poincaré und DFA gelten --------------------
+    # Die ganze Messung (Vorgabe), ein Abschnitt oder ein Band fester Länge. Das Band
+    # greift man in der Rohkurve und schiebt es; gerechnet wird nach dem Loslassen,
+    # wenn innerhalb der Latenz (Einstellungen → Erweitert) nichts nachkommt.
+
+    aw = _Analysewahl(
+        laenge_s=einst.analyse_laenge_s if einst.analyse_laenge_s in ANALYSE_LAENGEN else 300
+    )
+
+    def band_sichtbar() -> bool:
+        return aw.art == AW_BAND and analyse.bereich in ("frequenz", "nichtlinear")
+
+    def band_bereich() -> tuple[float, float]:
+        lo, hi = grenzen()
+        laenge = min(float(aw.laenge_s), hi - lo)
+        if aw.von is None:
+            aw.von = sum(fenster.bereich(dauer)) / 2 - laenge / 2
+        aw.von = min(max(aw.von, lo), hi - laenge)
+        return aw.von, aw.von + laenge
+
+    def band_reihen(x_von: float, x_bis: float) -> list[Reihe]:
+        """Das Band in der Rohkurve: getönt, mit Kanten."""
+        if not band_sichtbar():
+            return []
+        von, bis = band_bereich()
+        if bis < x_von or von > x_bis:
+            return []
+        kanten = [x for x in (von, bis) if x_von <= x <= x_bis]
+        return [
+            schatten(max(von, x_von), min(bis, x_bis), ft.Colors.with_opacity(0.14, BAND_FARBE)),
+            *([senkrechte(kanten, BAND_FARBE, 2.0, gestrichelt=False)] if kanten else []),
+        ]
+
+    def band_greifen(x: float) -> bool:
+        """Ein Finger auf dem Band nimmt es mit; daneben blättert er die Kurve."""
+        if not band_sichtbar():
+            return False
+        von, bis = band_bereich()
+        if aw.griff is None:
+            if not von <= x <= bis:
+                return False
+            aw.griff = x - von
+            return True
+        aw.von = x - aw.griff
+        band_bereich()  # an die Grenzen der Messung
+        return True
+
+    def rr_losgelassen() -> None:
+        if aw.griff is not None:
+            aw.griff = None
+            nachrechnen_planen()
+            # Bis gerechnet ist: das letzte Ergebnis, blass, mit Hinweis
+            analyse.zeichnen(*fenster.bereich(dauer), strich=m.strich if m.ablesen else None)
+            with contextlib.suppress(Exception):
+                analyse.control.update()
+
+    def nachrechnen_planen() -> None:
+        """Nach der Latenz rechnen — kommt vorher noch eine Bewegung, gilt nur die letzte."""
+        aw.wartet = True
+        aw.auftrag += 1
+        nummer = aw.auftrag
+
+        async def spaeter() -> None:
+            await asyncio.sleep(state.hrv_einstellungen().nachrechnen_ms / 1000)
+            if nummer != aw.auftrag:
+                return
+            aw.wartet = False
+            analyse.zeichnen(*fenster.bereich(dauer), strich=m.strich if m.ablesen else None)
+            with contextlib.suppress(Exception):
+                analyse.control.update()
+
+        page.run_task(spaeter)
+
+    def band_schieben(richtung: int) -> Callable[[], None]:
+        def handler() -> None:
+            von, bis = band_bereich()
+            aw.von = von + richtung * (bis - von) / 2
+            band_bereich()
+            nachrechnen_planen()
+            mitte = sum(band_bereich()) / 2
+            x_von, x_bis = fenster.bereich(dauer)
+            if not x_von <= mitte <= x_bis:
+                zentrieren(mitte)
+            nur_kurven()
+
+        return handler
+
+    def laenge_gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
+        neu = int(e.control.value or aw.laenge_s)
+        mitte = sum(band_bereich()) / 2
+        aw.laenge_s = neu
+        aw.von = mitte - neu / 2
+        einst.analyse_laenge_s = neu
+        gespeichert_ = state.hrv_einstellungen()
+        gespeichert_.analyse_laenge_s = neu
+        state.hrv_einstellungen_setzen(gespeichert_)
+        nachrechnen_planen()
+        nur_kurven()
+
+    def art_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+        if not e.control.selected:
+            return
+        aw.art = str(e.control.selected[0])
+        if aw.art == AW_ABSCHNITT and not any(a.id == aw.abschnitt_id for a in eigene):
+            aw.abschnitt_id = eigene[0].id if eigene else None
+        if aw.art == AW_BAND:
+            aw.von = None  # mitten in den sichtbaren Ausschnitt
+        nur_kurven()
+
+    def abschnitt_gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
+        aw.abschnitt_id = e.control.value
+        nur_kurven()
+
+    def analysefenster() -> Analysefenster:
+        if aw.art == AW_ABSCHNITT:
+            a = next((a for a in eigene if a.id == aw.abschnitt_id), None)
+            if a is not None:
+                lo, hi = grenzen()
+                von, bis = max(a.von_s, lo), min(a.bis_s, hi)
+                return Analysefenster(
+                    f"abschnitt:{a.id}:{von:.3f}:{bis:.3f}",
+                    von,
+                    bis,
+                    f"Abschnitt „{a.name}“ · {_uhr(von)}–{_uhr(bis)}",
+                )
+        if aw.art == AW_BAND:
+            von, bis = band_bereich()
+            return Analysefenster(
+                f"band:{von:.2f}:{bis:.2f}",
+                von,
+                bis,
+                f"{fenster_text(round(bis - von))} · {_uhr(von)}–{_uhr(bis)}",
+            )
+        lo, hi = grenzen()
+        return Analysefenster(
+            AW_ALLES,
+            lo,
+            hi,
+            "Ganze Messung" if z.ausschnitt is None else f"Zuschnitt {_uhr(lo)}–{_uhr(hi)}",
+            ganzes=lambda: Fensterspektrum.aus_frequenzbereich(frequenz()),
+        )
+
+    def fenster_kopf() -> ft.Control:
+        """Wahl des Analysefensters über Spektrum bzw. Poincaré."""
+        zeilen: list[ft.Control] = [
+            ft.SegmentedButton(
+                selected=[aw.art],
+                show_selected_icon=False,
+                segments=[
+                    ft.Segment(value=AW_ALLES, label=ft.Text("Alles")),
+                    ft.Segment(value=AW_ABSCHNITT, label=ft.Text("Abschnitt")),
+                    ft.Segment(value=AW_BAND, label=ft.Text("Fenster")),
+                ],
+                on_change=art_gewaehlt,
+            )
+        ]
+        if aw.art == AW_ABSCHNITT:
+            if eigene:
+                zeilen.append(
+                    ft.Dropdown(
+                        label="Abschnitt",
+                        value=aw.abschnitt_id,
+                        dense=True,
+                        options=[
+                            ft.DropdownOption(
+                                key=a.id, text=f"{a.name} · {_uhr(a.von_s)}–{_uhr(a.bis_s)}"
+                            )
+                            for a in eigene
+                        ],
+                        on_select=abschnitt_gewaehlt,
+                    )
+                )
+            else:
+                zeilen.append(hinweis("Noch keine Abschnitte — oben unter „Abschnitte“ anlegen."))
+        elif aw.art == AW_BAND:
+            zeilen.append(
+                ft.Row(
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Dropdown(
+                            label="Länge",
+                            value=str(aw.laenge_s),
+                            dense=True,
+                            width=120,
+                            options=[
+                                ft.DropdownOption(key=str(x), text=fenster_text(x))
+                                for x in ANALYSE_LAENGEN
+                            ],
+                            on_select=laenge_gewaehlt,
+                        ),
+                        ft.IconButton(
+                            ft.Icons.CHEVRON_LEFT,
+                            tooltip="Fenster ein halbes zurück",
+                            on_click=band_schieben(-1),
+                        ),
+                        ft.IconButton(
+                            ft.Icons.CHEVRON_RIGHT,
+                            tooltip="Fenster ein halbes weiter",
+                            on_click=band_schieben(1),
+                        ),
+                    ],
+                )
+            )
+            zeilen.append(hinweis("Das Band in der Rohkurve greifen und schieben."))
+        zeilen.append(ft.Text(analysefenster().titel, size=12, weight=ft.FontWeight.W_600))
+        return ft.Column(spacing=6, tight=True, controls=zeilen)
+
     analyse = Analyse(
         page,
         state,
@@ -1239,11 +1520,19 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         ohne=lambda: [] if rec.hat_rr else ohne_rr(),
         neu_zeichnen=lambda: zeichnen(),
         wischen=lambda c: wischbar(
-            c, fenster, lambda: dauer, nur_kurven, tippen=analyse_tippen, greifen=analyse_greifen
+            c,
+            fenster,
+            lambda: dauer,
+            wisch_zeichnen,
+            tippen=analyse_tippen,
+            greifen=analyse_greifen,
         ),
         tabelle=tabelle,
         optisch=verity,
         hoehe=130,
+        analysefenster=analysefenster,
+        fenster_kopf=fenster_kopf,
+        warten=lambda: aw.griff is not None or aw.wartet,
     )
 
     # -- Korrektur ---------------------------------------------------------------
@@ -1385,9 +1674,10 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                     rr_box,
                     fenster,
                     lambda: dauer,
-                    lambda: nur_kurven(mit_analyse=m.editor is None),
+                    lambda: wisch_zeichnen(mit_analyse=m.editor is None),
                     tippen=kurve_tippen,
                     greifen=kurve_greifen,
+                    losgelassen=rr_losgelassen,
                 ),
                 ablese_box,
                 editor_box,

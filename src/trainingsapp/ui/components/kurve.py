@@ -16,8 +16,15 @@ from itertools import pairwise
 import flet as ft
 import flet_charts as fc
 
-#: Mehr Punkte zeichnet das Handy nicht flüssig; darüber wird ausgedünnt.
-MAX_PUNKTE = 1200
+#: Mehr Punkte je Linie schickt die Kurve nicht ans Handy; darüber wird
+#: ausgedünnt — je Abschnitt Minimum und Maximum, so bleiben Ausreißer
+#: sichtbar. Jeder Punkt ist ein eigenes Flet-Control: Bau, Vergleich und
+#: Übertragung wachsen mit der Zahl (14.10.2026: bis 5200 Punkte je
+#: Neuzeichnen, 130–230 ms nur für Vergleich und Kodierung).
+MAX_PUNKTE = 500
+#: So viele Bildpunkte breit ist eine Kurve am Handy ungefähr — Lücken, die
+#: schmaler als einer sind, sieht man nicht; dort reißt die Linie nicht ab.
+BREITE_PX = 400
 
 #: Schrittweiten der Zeitachse (s) und höchstens so viele Beschriftungen —
 #: bei 2 Minuten 15 s; dichter überlappen die Zahlen am Handy.
@@ -69,42 +76,74 @@ class Reihe:
 
 
 def ausduennen(punkte: Sequence[tuple[float, float]], maximal: int = MAX_PUNKTE) -> list:
-    """Jeden n-ten Punkt behalten, den letzten immer — für lange Aufzeichnungen.
+    """Höchstens ``maximal`` Punkte: je Abschnitt Minimum und Maximum, in Zeitfolge.
 
-    >>> len(ausduennen([(i, i) for i in range(5000)], 1000)) <= 1001
-    True
+    Jeden n-ten Punkt zu nehmen, verlöre einzelne Ausreißer — gerade die will
+    man in einer Rohkurve sehen. Erster und letzter Punkt bleiben immer.
+
+    >>> zacken = [(i, 800.0) for i in range(5000)]
+    >>> zacken[2501] = (2501, 1600.0)
+    >>> dichter = ausduennen(zacken, 500)
+    >>> len(dichter) <= 502, (2501, 1600.0) in dichter, dichter[-1] == zacken[-1]
+    (True, True, True)
     """
-    if len(punkte) <= maximal:
-        return list(punkte)
-    schritt = -(-len(punkte) // maximal)
-    dichter = list(punkte[::schritt])
-    if dichter[-1] != punkte[-1]:
-        dichter.append(punkte[-1])
-    return dichter
+    return _min_max(list(punkte), _eimer(len(punkte), maximal))
+
+
+def _eimer(n: int, maximal: int) -> int:
+    """Punkte je Abschnitt, damit mit Minimum und Maximum je Abschnitt ``maximal`` reichen."""
+    return 1 if n <= maximal else -(-2 * n // max(maximal, 2))
+
+
+def _min_max(punkte: list[tuple[float, float]], eimer: int) -> list[tuple[float, float]]:
+    if eimer <= 2 or len(punkte) <= 2:
+        return punkte
+    out: list[tuple[float, float]] = []
+    for a in range(0, len(punkte), eimer):
+        teil = punkte[a : a + eimer]
+        lo = min(range(len(teil)), key=lambda i: teil[i][1])
+        hi = max(range(len(teil)), key=lambda i: teil[i][1])
+        out.extend(teil[i] for i in sorted({lo, hi}))
+    if out[0] != punkte[0]:
+        out.insert(0, punkte[0])
+    if out[-1] != punkte[-1]:
+        out.append(punkte[-1])
+    return out
 
 
 def abschnitte(
-    punkte: Sequence[tuple[float, float]], naehte: Sequence[int], maximal: int = MAX_PUNKTE
+    punkte: Sequence[tuple[float, float]],
+    naehte: Sequence[int],
+    maximal: int = MAX_PUNKTE,
+    *,
+    min_luecke: float = 0.0,
 ) -> list[list[tuple[float, float]]]:
-    """Punkte an den Nähten zerteilen und gemeinsam ausdünnen.
+    """Punkte an den Nähten zerteilen und gemeinsam ausdünnen (Minimum und Maximum).
+
+    ``min_luecke``: Nähte, über die hinweg weniger Zeit fehlt, trennen nicht —
+    eine Lücke schmaler als ein Bildpunkt sieht man nicht, und jede getrennte
+    Linie ist eine eigene Reihe (die Verity Sense brachte es auf 264).
 
     >>> abschnitte([(0, 1), (1, 2), (2, 3), (3, 4)], [2])
     [[(0, 1), (1, 2)], [(2, 3), (3, 4)]]
-    >>> sum(map(len, abschnitte([(i, i) for i in range(5000)], [2500], 1000))) <= 1002
+    >>> abschnitte([(0, 1), (1, 2), (2, 3), (3, 4)], [2], min_luecke=1.5)
+    [[(0, 1), (1, 2), (2, 3), (3, 4)]]
+    >>> sum(map(len, abschnitte([(i, i) for i in range(5000)], [2500], 1000))) <= 1004
     True
     """
-    grenzen = sorted({0, len(punkte), *(i for i in naehte if 0 < i < len(punkte))})
-    schritt = max(1, -(-len(punkte) // maximal))
-    teile = []
-    for a, b in pairwise(grenzen):
-        teil = list(punkte[a:b])
-        if schritt > 1:
-            dichter = teil[::schritt]
-            if dichter[-1] != teil[-1]:
-                dichter.append(teil[-1])
-            teil = dichter
-        teile.append(teil)
-    return teile
+    grenzen = sorted(
+        {
+            0,
+            len(punkte),
+            *(
+                i
+                for i in naehte
+                if 0 < i < len(punkte) and punkte[i][0] - punkte[i - 1][0] > min_luecke
+            ),
+        }
+    )
+    eimer = _eimer(len(punkte), maximal)
+    return [_min_max(list(punkte[a:b]), eimer) for a, b in pairwise(grenzen)]
 
 
 def x_schritt(spanne: float, schritte: Sequence[float] = X_SCHRITTE) -> float:
@@ -146,11 +185,24 @@ def y_raster(
         (
             s
             for s in Y_SCHRITTE
-            if s >= schritt_min and len(_vielfache(unten, oben, s)) <= Y_MAX_LABELS
+            if s >= schritt_min and _anzahl_vielfache(unten, oben, s) <= Y_MAX_LABELS
         ),
         Y_SCHRITTE[-1],
     )
     return unten, oben, schritt
+
+
+def _anzahl_vielfache(unten: float, oben: float, schritt: float) -> int:
+    """Wie viele Vielfache von ``schritt`` zwischen ``unten`` und ``oben`` liegen — gerechnet.
+
+    Aufzählen kostete beim Spektrum (Werte bis Millionen ms²/Hz) Millionen
+    Rundungen je Zeichnung: 607 ms über 70 min, mehr als das Spektrum selbst.
+
+    >>> _anzahl_vielfache(0, 2_500_000, 0.01), _anzahl_vielfache(641.8, 867.2, 50)
+    (250000001, 5)
+    """
+    erster, letzter = math.ceil(unten / schritt - 1e-9), math.floor(oben / schritt + 1e-9)
+    return max(letzter - erster + 1, 0)
 
 
 def _vielfache(unten: float, oben: float, schritt: float) -> list[float]:
@@ -269,7 +321,11 @@ def kurve(
             punkte = [(x, y) for x, _ in punkte]
         elif not r.skala:
             punkte = [(x, min(max(y, unten), oben)) for x, y in punkte]
-        teile = [ausduennen(punkte)] if r.nur_punkte else abschnitte(punkte, r.naehte)
+        teile = (
+            [ausduennen(punkte)]
+            if r.nur_punkte
+            else abschnitte(punkte, r.naehte, min_luecke=(x1 - x0) / BREITE_PX)
+        )
         for teil in teile:
             # Ein einzelner Punkt zwischen zwei Nähten hat keine Linie — als Punkt zeigen.
             als_punkt = r.nur_punkte or len(teil) == 1

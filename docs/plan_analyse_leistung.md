@@ -1,6 +1,6 @@
 # Plan: HRV-Analyse ohne Ruckeln
 
-Stand 14.10.2026. Anlass (Ben): Die Analyse einer Aufzeichnung ist zäh,
+Stand 14.10.2026, umgesetzt (Abschnitt 4). Anlass (Ben): Die Analyse einer Aufzeichnung ist zäh,
 besonders wenn man im 1-, 2- oder 10-min-Fenster mit dem Reiter „Frequenz“
 durch die Messung wischt. Das Spektrum wird dabei laufend neu gerechnet.
 
@@ -150,12 +150,59 @@ Ereignissen, Öffnen, Live mit 15 min Puffer).
 
 ---
 
-## 3. Zu entscheiden (Ben)
+## 3. Entscheidungen (Ben, 14.10.2026)
 
-1. **Analysefenster** wie in Stufe 2 (ganze Messung · Abschnitt · gleitendes
-   Fenster)?
-2. **Wann rechnen:** automatisch beim Loslassen des Fensters (Vorschlag) oder
-   nur per Knopf? Als Einstellung, mit welcher Vorgabe?
-3. **Startansicht:** zuletzt benutzter Zoom, Vorgabe 5 min?
-4. **Reihenfolge:** Stufe 1 zuerst und einzeln ausliefern (schneller
-   spürbarer Gewinn), dann Stufe 2 und 3?
+1. **Analysefenster** zuerst „Alles“ (ganze Messung); dazu Abschnitt und
+   verschiebbares Fenster.
+2. **Neu rechnen beim Loslassen**, mit kurzer Latenz, falls noch etwas
+   nachkommt. Die Latenz ist eine Einstellung unter **Erweitert** (Vorgabe
+   0,5 s) — die Einstellungen teilen sich in normal und Erweitert; langfristig
+   werden das Profi-Einstellungen.
+3. **Live-Spektrum** nur alle **15 s** (Erweitert, 5–60 s): „So genau braucht
+   man das nicht. Wer es genauer braucht, muss es nachstellen.“
+4. **Startansicht der Aufzeichnung:** 2 min (live war schon 2 min).
+5. Stufen 1–3 zusammen umsetzen.
+
+---
+
+## 4. Umgesetzt (14.10.2026)
+
+- **Stufe 1:** `drag_interval` 50 ms; Auto-Update in den Ziehhandlern aus,
+  beim Wischen aktualisieren nur Rohkurve und Analysekarte (live: Kurve, Lage,
+  Analyse); Drossel ab dem Ende des Neuzeichnens; bewegt sich das Fenster
+  nicht (Rand, „Alles“), wird nicht gezeichnet; Achsenraster gerechnet
+  (`kurve._anzahl_vielfache`); höchstens 500 Punkte je Linie, je Abschnitt
+  Minimum und Maximum (Ausreißer bleiben sichtbar); Nähte schmaler als ein
+  Bildpunkt trennen die Linie nicht. Entscheidung „greifen oder blättern“
+  einmal je Geste, am Anfang (`zeitfenster.wischbar`).
+- **Stufe 2:** `analyse.Analysefenster` — „Alles“ zeigt das Spektrum der
+  Zusammenfassung (`Fensterspektrum.aus_frequenzbereich`, keine zweite
+  Rechnung), Abschnitt und Band werden einmal gerechnet und gemerkt (24
+  Fenster). Das Band greift man in der Rohkurve; während des Ziehens ruht die
+  Analyse, nach dem Loslassen steht das alte Ergebnis blass mit Hinweis da,
+  bis nach der Latenz gerechnet ist — kommt vorher eine neue Bewegung, gilt
+  nur der letzte Auftrag. ‹ › schieben um eine halbe Länge.
+- **Stufe 3:** Start mit 2 min; abgeleitete PPI-Reihen je Messung gemerkt
+  (`ppi._gemerkt`, 6–18 ms → unter 2 ms je Aufruf); korrigierte Zeiten je
+  Auswahl gemerkt; Ablesen per Bisektion; live Spektrum und Poincaré im
+  Takt (`HrvEinstellungen.live_spektrum_s`), nach dem Wischen erst nach der
+  Latenz neu.
+- **Einstellungen → HRV-Messung:** Teil „Erweitert“ (zugeklappt) mit Rechnen
+  (Latenz, Live-Spektrum), Kennzahlen (pNNx) und automatischer Korrektur.
+
+**Nachgemessen** (Desktop, dieselben Messungen; 1 s Wischen, jetzt 20 statt 60
+Ereignisse, Flet vergleicht nur, was der Handler aktualisiert):
+
+| Messung, Reiter | 2 min | 5 min | „Alles“ |
+|---|---|---|---|
+| H10 70 min, Zeit | 1,4 s → **0,08 s** | 4,8 s → **0,13 s** | 18,8 s → **0,37 s** |
+| H10 70 min, Frequenz | 1,7 s → **0,07 s** | 8,0 s → **0,08 s** | 129 s → **0,59 s** |
+| Verity 73 min, Zeit / Frequenz | 0,6–0,7 s → **0,04 s** | 1,2–1,4 s → **0,10 s** | 12–15 s → **0,23–0,26 s** |
+
+Öffnen: H10 im Frequenz-Reiter 2,8 s → 0,52 s, im Zeit-Reiter 0,44 s; Verity
+0,5–0,8 s → 0,16–0,22 s. Achsenraster eines Spektrums: bis 607 ms → 0,01 ms.
+
+**Nicht umgesetzt:** Charts an Ort und Stelle aktualisieren statt neu bauen
+(mit 500 Punkten je Linie kaum noch nötig); Kacheln der ganzen Messung
+(Atemfrequenz über alle Minutenfenster, ~0,3 s bei 70 min) rechnen weiter
+beim Öffnen.

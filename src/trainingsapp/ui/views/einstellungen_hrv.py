@@ -5,12 +5,16 @@ sinnvollen Vorgaben und einem Knopf, der alles auf diese Vorgaben zurücksetzt.
 Die kleinen Knöpfe in der Messansicht (Fensterbreite, „korrigiert", Regler,
 Kurvenmenü) ändern dieselben Werte; was man dort einstellt, steht auch hier.
 
+Zwei Teile (Ben, 14.10.2026): **normal** für alle, **Erweitert** (zugeklappt)
+für Fachleute — langfristig werden das Profi-Einstellungen.
+
 - Anzeige: Reiter „Messung" ein/aus — ohne Gerät spart das Platz.
 - Kacheln über der Kurve, nach Bereichen gruppiert.
-- Kurven: Live-Fenster, „korrigiert", pNNx-Schwelle, Kurvenansicht.
+- Kurven: Live-Fenster, „korrigiert", Kurvenansicht.
 - Analyse: Frequenz und Nichtlinear anbieten (bei optischen Sensoren aus).
 - Notizen: Übungen aus Plänen anbieten.
-- Automatische Korrektur: die Regeln (`hrv_core.regeln`).
+- Erweitert: Rechnen (Latenz vor dem Nachrechnen, Takt des Live-Spektrums),
+  Kennzahlen (pNNx-Schwelle), automatische Korrektur (`hrv_core.regeln`).
 
 Unter Namen gespeicherte Kurvenansichten bleiben beim Zurücksetzen erhalten.
 """
@@ -25,7 +29,13 @@ import flet as ft
 
 from trainingsapp.core.hrv_ansicht import PNN_WAHL, Ansicht
 from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
-from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, UEBERSICHT, HrvEinstellungen
+from trainingsapp.core.hrv_einstellungen import (
+    LIVE_FENSTER,
+    LIVE_SPEKTRUM_S,
+    NACHRECHNEN_MS,
+    UEBERSICHT,
+    HrvEinstellungen,
+)
 from trainingsapp.hrv_core.regeln import Korrekturregeln
 from trainingsapp.ui.components.kacheln import GRUPPEN, KACHELN
 from trainingsapp.ui.components.karte import hinweis, karte, titel
@@ -294,6 +304,135 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
             )
         )
 
+    # -- Erweitert (zugeklappt): Rechnen, Kennzahlen, Korrektur ------------------------
+
+    def auswahl(
+        name: str, label: str, werte: tuple[int, ...], text: Callable[[int], str]
+    ) -> ft.Control:
+        def gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
+            if ev.control.value is not None:
+                setzen(**{name: int(ev.control.value)})
+
+        return ft.Dropdown(
+            label=label,
+            value=str(getattr(e, name)),
+            options=[ft.DropdownOption(key=str(x), text=text(x)) for x in werte],
+            on_select=gewaehlt,
+            dense=True,
+            width=260,
+        )
+
+    def ms_text(ms: int) -> str:
+        return "sofort" if ms == 0 else f"{ms / 1000:g} s".replace(".", ",")
+
+    erweitert_teil = ft.Column(
+        spacing=14,
+        visible=state.hrv_erweitert_offen,
+        controls=[
+            karte(
+                titel("Rechnen"),
+                auswahl(
+                    "nachrechnen_ms",
+                    "Nachrechnen nach dem Loslassen",
+                    NACHRECHNEN_MS,
+                    ms_text,
+                ),
+                hinweis(
+                    "Wie lange Spektrum und Poincaré nach dem Loslassen des Analysefensters "
+                    "(oder live nach dem Wischen) warten, bevor sie rechnen — kommt in dieser "
+                    f"Zeit noch eine Bewegung nach, wird erst danach gerechnet. Vorgabe "
+                    f"{ms_text(HrvEinstellungen().nachrechnen_ms)}."
+                ),
+                auswahl(
+                    "live_spektrum_s",
+                    "Live-Spektrum neu rechnen alle",
+                    LIVE_SPEKTRUM_S,
+                    lambda s: f"{s} s",
+                ),
+                hinweis(
+                    f"Vorgabe {HrvEinstellungen().live_spektrum_s} s — so genau braucht man "
+                    "es selten. Kürzer kostet am Handy Rechenzeit, auch für den Empfang der "
+                    "Messwerte."
+                ),
+            ),
+            karte(
+                titel("Kennzahlen"),
+                ft.Dropdown(
+                    label="Schwelle für pNNx",
+                    value=str(ansicht.pnn_ms),
+                    options=[ft.DropdownOption(key=str(x), text=f"{x} ms") for x in PNN_WAHL],
+                    on_select=pnn_gewaehlt,
+                    dense=True,
+                    width=200,
+                ),
+                hinweis(
+                    "Üblich ist pNN50: Anteil der Nachbarschläge, die mehr als 50 ms "
+                    "auseinanderliegen."
+                ),
+            ),
+            karte(
+                titel("Automatische Korrektur"),
+                regeln_zeile,
+                ft.Row(
+                    wrap=True,
+                    spacing=8,
+                    controls=[
+                        ft.FilledTonalButton(
+                            "Regeln …", icon=ft.Icons.TUNE, on_click=regeln_oeffnen
+                        ),
+                        ft.TextButton(
+                            "Auf Vorgabe", icon=ft.Icons.RESTART_ALT, on_click=regeln_zuruecksetzen
+                        ),
+                    ],
+                ),
+                hinweis(
+                    "Gilt live und für neue Aufzeichnungen. Eine Aufzeichnung öffnet mit den "
+                    "Regeln, mit denen sie korrigiert wurde."
+                ),
+            ),
+        ],
+    )
+    erweitert_pfeil = ft.Icon(
+        ft.Icons.EXPAND_LESS if state.hrv_erweitert_offen else ft.Icons.EXPAND_MORE
+    )
+
+    def erweitert_umschalten() -> None:
+        state.hrv_erweitert_offen = not state.hrv_erweitert_offen
+        erweitert_teil.visible = state.hrv_erweitert_offen
+        erweitert_pfeil.icon = (
+            ft.Icons.EXPAND_LESS if state.hrv_erweitert_offen else ft.Icons.EXPAND_MORE
+        )
+        with contextlib.suppress(Exception):
+            erweitert_teil.update()
+            erweitert_pfeil.update()
+
+    erweitert_kopf = ft.Container(
+        on_click=lambda: erweitert_umschalten(),
+        border_radius=10,
+        padding=ft.Padding.symmetric(horizontal=8, vertical=10),
+        content=ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(ft.Icons.TUNE, opacity=0.7),
+                ft.Column(
+                    spacing=0,
+                    tight=True,
+                    expand=True,
+                    controls=[
+                        ft.Text("Erweitert", size=16, weight=ft.FontWeight.W_600),
+                        ft.Text(
+                            "Für Fachleute: Rechenzeiten, Kennzahlen, automatische Korrektur",
+                            size=12,
+                            opacity=0.7,
+                        ),
+                    ],
+                ),
+                erweitert_pfeil,
+            ],
+        ),
+    )
+
     standard = HrvEinstellungen()
     inhalt = ft.Column(
         spacing=14,
@@ -355,14 +494,6 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                     "Artefakte überbrückt — nur die Anzeige; gespeichert werden immer "
                     "die Rohwerte.",
                 ),
-                ft.Dropdown(
-                    label="Schwelle für pNNx",
-                    value=str(ansicht.pnn_ms),
-                    options=[ft.DropdownOption(key=str(x), text=f"{x} ms") for x in PNN_WAHL],
-                    on_select=pnn_gewaehlt,
-                    dense=True,
-                    width=200,
-                ),
                 hinweis(
                     "Welche Verlaufskurven mit welchem Fenster zu sehen sind, stellt man in "
                     "der Messung über das Kurvenmenü ein (Fenster, gleitend oder Blöcke)."
@@ -409,26 +540,8 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                     "In der Notiz die Übungen eines Plans als Namen zum Antippen einblenden.",
                 ),
             ),
-            karte(
-                titel("Automatische Korrektur"),
-                regeln_zeile,
-                ft.Row(
-                    wrap=True,
-                    spacing=8,
-                    controls=[
-                        ft.FilledTonalButton(
-                            "Regeln …", icon=ft.Icons.TUNE, on_click=regeln_oeffnen
-                        ),
-                        ft.TextButton(
-                            "Auf Vorgabe", icon=ft.Icons.RESTART_ALT, on_click=regeln_zuruecksetzen
-                        ),
-                    ],
-                ),
-                hinweis(
-                    "Gilt live und für neue Aufzeichnungen. Eine Aufzeichnung öffnet mit den "
-                    "Regeln, mit denen sie korrigiert wurde."
-                ),
-            ),
+            erweitert_kopf,
+            erweitert_teil,
             ft.OutlinedButton(
                 "Alles auf Standard zurücksetzen",
                 icon=ft.Icons.SETTINGS_BACKUP_RESTORE,

@@ -24,6 +24,7 @@ und „Alle exportieren".
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import time
 from collections.abc import Callable
@@ -443,6 +444,9 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     lage_box = ft.Container()
     diagnose_box = ft.Container()
     letzte = 0.0
+    #: Wischen läuft (bis zum Nachrechnen nach dem Loslassen): Spektrum bleibt stehen
+    wischt = False
+    wisch_auftrag = 0
     fenster = Fenster(einst.fenster_s, state.messung_ende_s)
     verity = bool(lauf.profil and lauf.profil.kann("pmd_ppi"))
 
@@ -489,7 +493,34 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         aktualisieren(erzwingen=True)
 
     def gewischt() -> None:
-        aktualisieren(erzwingen=True)
+        """Beim Wischen nur Kurve, Lage und Analyse — nicht die ganze Spalte."""
+        nonlocal wischt
+        wischt = True
+        state.messung_ende_s = fenster.ende_s
+        x_von, x_bis = fenster.bereich(lauf.jetzt_s(), anfang())
+        rr_box.content = hauptkurve(x_von, x_bis)
+        lage_box.content = lage()
+        analyse.zeichnen(x_von, x_bis)
+        for c in (rr_box, lage_box, analyse.control):
+            with contextlib.suppress(Exception):
+                c.update()
+
+    def wisch_ende() -> None:
+        """Nach dem Loslassen und der Latenz: Spektrum für den neuen Ausschnitt."""
+        nonlocal wisch_auftrag
+        wisch_auftrag += 1
+        nummer = wisch_auftrag
+
+        async def spaeter() -> None:
+            nonlocal wischt
+            await asyncio.sleep(state.hrv_einstellungen().nachrechnen_ms / 1000)
+            if nummer != wisch_auftrag:
+                return
+            wischt = False
+            analyse.nachrechnen()
+            aktualisieren(erzwingen=True)
+
+        page.run_task(spaeter)
 
     def regeln_oeffnen() -> None:
         def aendern(regeln: Korrekturregeln) -> None:
@@ -555,8 +586,12 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         hf_geraet=lauf.live.hf_reihe,
         ohne=ohne,
         neu_zeichnen=lambda: aktualisieren(erzwingen=True),
-        wischen=lambda c: wischbar(c, fenster, lauf.jetzt_s, gewischt, anfang=anfang),
+        wischen=lambda c: wischbar(
+            c, fenster, lauf.jetzt_s, gewischt, anfang=anfang, losgelassen=wisch_ende
+        ),
         optisch=verity,
+        warten=lambda: wischt,
+        live_intervall_s=lambda: float(state.hrv_einstellungen().live_spektrum_s),
     )
 
     async def aufnahme_starten() -> None:
@@ -791,7 +826,15 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             on_change=korrigiert_wechseln,
         ),
         lage_box,
-        wischbar(rr_box, fenster, lauf.jetzt_s, gewischt, anfang=anfang, tippen=notizfeld.tippen),
+        wischbar(
+            rr_box,
+            fenster,
+            lauf.jetzt_s,
+            gewischt,
+            anfang=anfang,
+            tippen=notizfeld.tippen,
+            losgelassen=wisch_ende,
+        ),
         notizfeld.control,
         hinweis(
             "Grau: alle Rohwerte, auch vom Sensor verworfene · Farbig: gewertet · Rote "

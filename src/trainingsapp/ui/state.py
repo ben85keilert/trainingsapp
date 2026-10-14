@@ -125,6 +125,8 @@ class AppState:
     messung_ende_s: float | None = None
     #: Klappfeld „Notizen" unter der Hauptkurve aufgeklappt
     notizen_offen: bool = False
+    #: Einstellungen → HRV-Messung: Teil „Erweitert" aufgeklappt
+    hrv_erweitert_offen: bool = False
     #: Notizen: Übungen zum Antippen eingeblendet, und aus welchem Plan
     #: (Plan-ID; ``None`` = der erste anstehende, „alle" = der ganze Katalog)
     notiz_uebungen_offen: bool = False

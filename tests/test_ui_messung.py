@@ -336,6 +336,12 @@ def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None
     assert folge is not None
     dauer = folge[-1].t_s
 
+    # Die Aufzeichnung öffnet mit den ersten 2 Minuten …
+    rr_kurve = next(c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart))
+    assert (rr_kurve.min_x, rr_kurve.max_x) == (0.0, 120.0)
+    # … „Alles" zeigt die ganze Messung
+    _breiten_wahl(ansicht).on_change(_ereignis("0"))
+
     # Tachogramm, darunter die Vorgabe-Ansicht: Ø HF aus RR, RMSSD
     rr_kurve, hf_kurve, rmssd_kurve = [
         c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)
@@ -387,6 +393,15 @@ def test_korrektur_blatt_aendert_regeln() -> None:
 
 def _ereignis(wert) -> SimpleNamespace:
     return SimpleNamespace(control=SimpleNamespace(value=wert, selected=[wert]))
+
+
+def _breiten_wahl(wurzel) -> ft.SegmentedButton:
+    """Die Breitenwahl der Aufzeichnung (1 min … Alles)."""
+    return next(
+        c
+        for c in _alle_controls(wurzel)
+        if isinstance(c, ft.SegmentedButton) and any(s.value == "0" for s in c.segments)
+    )
 
 
 async def test_messung_live_verity_mit_verlauf_und_wischen(daten) -> None:

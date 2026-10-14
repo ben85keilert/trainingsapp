@@ -41,6 +41,16 @@ KACHELN: Final[str] = "kacheln"
 #: Wählbare Breiten des Live-Zeitfensters (s)
 LIVE_FENSTER: Final[tuple[int, ...]] = (60, 120, 300, 600)
 
+#: Erweitert — Latenz, nach der ein losgelassenes Analysefenster neu rechnet (ms).
+#: Kommt in dieser Zeit noch eine Bewegung nach, wird erst danach gerechnet.
+NACHRECHNEN_MS: Final[tuple[int, ...]] = (0, 250, 500, 800, 1200)
+#: Erweitert — so oft rechnet das Live-Spektrum neu (s). Ben, 14.10.2026: alle
+#: 15 s genügen; wer es genauer braucht, stellt es nach.
+LIVE_SPEKTRUM_S: Final[tuple[int, ...]] = (5, 10, 15, 30, 60)
+#: Längen des verschiebbaren Analysefensters in der Aufzeichnung (s); 5 min ist
+#: die übliche Dauer einer Kurzzeit-HRV
+ANALYSE_LAENGEN: Final[tuple[int, ...]] = (60, 120, 300, 600)
+
 #: Analysebereiche unter der Hauptkurve
 BEREICH_ZEIT: Final[str] = "zeit"
 BEREICH_FREQUENZ: Final[str] = "frequenz"
@@ -56,6 +66,9 @@ class HrvEinstellungen:
     True
     >>> HrvEinstellungen.aus_dict({"fenster_s": 7, "kacheln": "kaputt"}) == HrvEinstellungen()
     True
+    >>> e = HrvEinstellungen.aus_dict({"live_spektrum_s": 30, "nachrechnen_ms": 7})
+    >>> e.live_spektrum_s, e.nachrechnen_ms
+    (30, 500)
     >>> HrvEinstellungen(frequenz=True, nichtlinear=True).bereiche(optisch=True)
     ['zeit', 'frequenz']
     >>> HrvEinstellungen().bereiche(optisch=False)
@@ -85,6 +98,12 @@ class HrvEinstellungen:
     notiz_uebungen: bool = True
     #: Atemübung: auch langsames Atmen (unter 8/min) auswerten (`hrv_core.atmung`)
     atemuebung: bool = False
+    #: Erweitert: Latenz vor dem Nachrechnen eines losgelassenen Analysefensters (ms)
+    nachrechnen_ms: int = 500
+    #: Erweitert: Live-Spektrum (und Poincaré) nur so oft neu rechnen (s)
+    live_spektrum_s: int = 15
+    #: Zuletzt gewählte Länge des verschiebbaren Analysefensters (s)
+    analyse_laenge_s: int = 300
 
     def bereiche(self, *, optisch: bool) -> list[str]:
         """Welche Analysebereiche die Ansicht anbietet (Zeit immer)."""
@@ -110,6 +129,9 @@ class HrvEinstellungen:
             "nichtlinear_optisch": self.nichtlinear_optisch,
             "notiz_uebungen": self.notiz_uebungen,
             "atemuebung": self.atemuebung,
+            "nachrechnen_ms": self.nachrechnen_ms,
+            "live_spektrum_s": self.live_spektrum_s,
+            "analyse_laenge_s": self.analyse_laenge_s,
         }
 
     @classmethod
@@ -129,6 +151,12 @@ class HrvEinstellungen:
                 return list(dict.fromkeys(wert))
             return list(getattr(vorgabe, name))
 
+        def auswahl(name: str, erlaubt: tuple[int, ...]) -> int:
+            wert = d.get(name)
+            if isinstance(wert, int) and not isinstance(wert, bool) and wert in erlaubt:
+                return wert
+            return int(getattr(vorgabe, name))
+
         kacheln = liste("kacheln")
         gross = liste("gross")
         darstellung = d.get("darstellung")
@@ -145,6 +173,9 @@ class HrvEinstellungen:
             nichtlinear_optisch=schalter("nichtlinear_optisch"),
             notiz_uebungen=schalter("notiz_uebungen"),
             atemuebung=schalter("atemuebung"),
+            nachrechnen_ms=auswahl("nachrechnen_ms", NACHRECHNEN_MS),
+            live_spektrum_s=auswahl("live_spektrum_s", LIVE_SPEKTRUM_S),
+            analyse_laenge_s=auswahl("analyse_laenge_s", ANALYSE_LAENGEN),
         )
 
 
@@ -160,11 +191,14 @@ def einstellungen_schreiben(e: HrvEinstellungen) -> str:
 
 
 __all__ = [
+    "ANALYSE_LAENGEN",
     "BEREICH_FREQUENZ",
     "BEREICH_NICHTLINEAR",
     "BEREICH_ZEIT",
     "KACHELN",
     "LIVE_FENSTER",
+    "LIVE_SPEKTRUM_S",
+    "NACHRECHNEN_MS",
     "STANDARD_GROSS",
     "STANDARD_KACHELN",
     "UEBERSICHT",

@@ -19,10 +19,44 @@ die Kurve 2:00 statt der gemessenen 3:34, und jede Lücke war zugeschoben.
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Any
 
 from .recording import Beat, Recording
 from .segments import luecken_finden
+
+#: Abgeleitete Reihen je Messung (`_gemerkt`) — so viele Messungen merkt sich das Modul
+_MERK_MAX = 4
+_merk: OrderedDict[int, tuple[Recording, tuple[int, ...], dict[str, Any]]] = OrderedDict()
+
+
+def _gemerkt[T](rec: Recording, name: str, rechnen: Callable[[], T]) -> T:
+    """``rechnen()`` einmal je Messung — beim Öffnen einer Verity-Aufzeichnung entstanden
+    dieselben Reihen 6- bis 18-mal (14.10.2026: zusammen ~0,27 s bei 73 min).
+
+    Gemerkt wird je Objekt (Identität, kein Vergleich der Inhalte); ändern sich
+    ``ppi_pakete`` oder ``beats`` (anderes Objekt, andere Länge), gilt es als neu.
+    """
+    stempel = (
+        id(rec.ppi_pakete),
+        len(rec.ppi_pakete) if rec.ppi_pakete is not None else -1,
+        id(rec.beats),
+        len(rec.beats),
+    )
+    eintrag = _merk.get(id(rec))
+    if eintrag is None or eintrag[0] is not rec or eintrag[1] != stempel:
+        eintrag = (rec, stempel, {})
+        _merk[id(rec)] = eintrag
+        while len(_merk) > _MERK_MAX:
+            _merk.popitem(last=False)
+    else:
+        _merk.move_to_end(id(rec))
+    werte = eintrag[2]
+    if name not in werte:
+        werte[name] = rechnen()
+    return werte[name]
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +98,11 @@ def ppi_zeilen(rec: Recording) -> list[PpiZeile] | None:
     >>> ppi_zeilen(Recording(beats=[Beat(0.8, 800)], ppi_pakete=pakete)) is None
     True
     """
+    zeilen = _gemerkt(rec, "zeilen", lambda: _ppi_zeilen(rec))
+    return None if zeilen is None else list(zeilen)
+
+
+def _ppi_zeilen(rec: Recording) -> list[PpiZeile] | None:
     paare = _intervalle(rec)
     if paare is None:
         return None
@@ -86,7 +125,12 @@ def _intervalle(rec: Recording) -> list[tuple[int, int, int]] | None:
     """Alle Intervalle aus ``ppi_pakete`` als ``(ppi_ms, fehler_ms, blocker)``, in Folge.
 
     Defensiv: Fehlt eine Spalte, gilt 0; ist der Block kaputt, ``None``.
+    Gemerkt je Messung (`_gemerkt`); niemand verändert die Liste.
     """
+    return _gemerkt(rec, "intervalle", lambda: _intervalle_lesen(rec))
+
+
+def _intervalle_lesen(rec: Recording) -> list[tuple[int, int, int]] | None:
     if not rec.ppi_pakete:
         return None
     out: list[tuple[int, int, int]] = []
@@ -135,6 +179,11 @@ def ppi_folge(rec: Recording) -> list[PpiIntervall] | None:
     >>> [(p.t_s, p.ppi_ms, p.brauchbar) for p in ppi_folge(rec)]
     [(0.8, 800, True), (1.61, 810, False), (2.43, 820, True)]
     """
+    folge = _gemerkt(rec, "folge", lambda: _ppi_folge(rec))
+    return None if folge is None else list(folge)
+
+
+def _ppi_folge(rec: Recording) -> list[PpiIntervall] | None:
     paare = _intervalle(rec)
     if paare is None or ppi_zeilen(rec) is None or not rec.beats:
         return None
@@ -156,6 +205,10 @@ def schlagzeiten(rec: Recording) -> list[float]:
     >>> schlagzeiten(Recording(beats=[Beat(0.8, 800), Beat(1.62, 820)]))
     [0.8, 1.62]
     """
+    return list(_gemerkt(rec, "schlagzeiten", lambda: _schlagzeiten(rec)))
+
+
+def _schlagzeiten(rec: Recording) -> list[float]:
     folge = ppi_folge(rec)
     if folge is None:
         return [float(b.t_s) for b in rec.beats]

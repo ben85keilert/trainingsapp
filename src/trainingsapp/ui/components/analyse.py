@@ -4,29 +4,41 @@ Die Hauptkurve (RR bzw. PPI) läuft oben immer weiter; darunter steht diese
 Karte. Oben wählt man den Bereich, darunter stehen
 
 - im Detail die Zusammenfassung der ganzen Messung (``tabelle``),
-- bei Frequenz das Spektrum, bei Nichtlinear die Poincaré-Wolke — beide für
-  den sichtbaren Ausschnitt,
+- bei Frequenz das Spektrum, bei Nichtlinear die Poincaré-Wolke samt SD1, SD2
+  und DFA α1 — für das **Analysefenster**,
 - die Chips des Bereichs und seine Verlaufskurven (wischbar wie die Hauptkurve).
 
 Welche Bereiche es gibt, sagen die Einstellungen (`HrvEinstellungen.bereiche`):
 Nichtlineares ist bei optischen Pulsintervallen standardmäßig aus.
 
+**Analysefenster** (14.10.2026, `docs/plan_analyse_leistung.md`): Spektrum,
+Poincaré und DFA folgen nicht mehr jedem Wischen — das rechnete über 70 min
+bei jedem Neuzeichnen einen Lomb über alle Schläge. In der Aufzeichnung gibt
+die Ansicht ein `Analysefenster` vor (ganze Messung, ein Abschnitt oder ein
+verschiebbares Band); jedes Ergebnis wird einmal gerechnet und gemerkt.
+Solange ``warten`` gilt (das Band wird gezogen), bleibt das letzte Ergebnis
+stehen; gerechnet wird, wenn die Ansicht nach dem Loslassen neu zeichnet.
+Live gilt der sichtbare Ausschnitt, aber neu gerechnet wird höchstens alle
+``live_intervall_s`` (Vorgabe 15 s) und wenn sich die Breite ändert.
+
 Live und in der Aufzeichnung dieselbe Karte; die Daten kommen über Funktionen
-herein (``reihe``: Zeit, RR mit NaN für schlechte Werte, Nähte). Teure Fenster
-(Spektren, DFA) merkt sich die Karte zwischen zwei Zeichnungen
-(`trends.verlauf`, ``zwischenspeicher``).
+herein (``reihe``: Zeit, RR mit NaN für schlechte Werte, Nähte). Verlaufskurven
+merkt sich `trends.verlauf` (``zwischenspeicher``).
 """
 
 from __future__ import annotations
 
+import time
+from collections import OrderedDict
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import flet as ft
 import numpy as np
 
 from trainingsapp.hrv_core.atmung import ATEMUEBUNG, RUHE
-from trainingsapp.hrv_core.frequency import fensterspektrum
+from trainingsapp.hrv_core.frequency import Fensterspektrum, fensterspektrum
 from trainingsapp.hrv_core.trends import aktuell, verlauf
 from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.karte import hinweis, karte
@@ -49,11 +61,39 @@ Reihe3 = tuple[np.ndarray, np.ndarray, np.ndarray]
 
 #: So viele Punkte zeigt die Poincaré-Wolke höchstens
 POINCARE_PUNKTE = 2500
+#: So viele Analysefenster merkt sich die Karte (Band hin und her, Abschnitte)
+FENSTER_SPEICHER = 24
+
+
+@dataclass(frozen=True)
+class Analysefenster:
+    """Wofür Spektrum, Poincaré und DFA gerechnet werden — vorgegeben von der Ansicht.
+
+    ``schluessel`` benennt das Fenster für den Zwischenspeicher (gleiche
+    Schlüssel, gleiches Ergebnis). ``ganzes`` liefert für die ganze Messung das
+    schon gerechnete Spektrum der Zusammenfassung.
+    """
+
+    schluessel: str
+    von: float
+    bis: float
+    titel: str = ""
+    ganzes: Callable[[], Fensterspektrum | None] | None = None
+
+
+@dataclass
+class _Nichtlinear:
+    paare: list[tuple[float, float]]
+    sd1: float | None
+    sd2: float | None
+    dfa: float | None
+
 
 HINWEISE = {
     "zeit": "Werte im gleitenden Fenster bzw. je Block. Wo die Kurve abreißt, gab es zu "
     "wenige gute Schläge — bei der Atemfrequenz: keine deutliche Atmung.",
-    "frequenz": "Spektrum des sichtbaren Ausschnitts: VLF grau, LF orange (0,04–0,15 Hz), "
+    "frequenz": "Spektrum des Analysefensters (live: des sichtbaren Ausschnitts): VLF grau, "
+    "LF orange (0,04–0,15 Hz), "
     "HF türkis (0,15–0,40 Hz), Punkt = stärkster Gipfel. Atmet man ruhig 6-mal je "
     "Minute, liegt der Gipfel bei 0,1 Hz — im LF-Band.",
     "nichtlinear": "Poincaré: jeder Punkt ein Intervall gegen das nächste; die Breite der "
@@ -67,6 +107,11 @@ class Analyse:
 
     Args:
         bereiche: angebotene Bereiche (Zeit immer zuerst).
+        analysefenster: wofür Spektrum und Poincaré gelten (Aufzeichnung);
+            ``None`` als Rückgabe oder ohne Funktion: der sichtbare Ausschnitt (live).
+        fenster_kopf: Wahl des Analysefensters über dem Spektrum (Aufzeichnung).
+        warten: solange ``True``, wird nichts Fehlendes gerechnet (Band wird gezogen).
+        live_intervall_s: live das Spektrum nur so oft neu (s).
         reihe: ``(t, rr, naht)`` aller Daten (Live-Puffer bzw. korrigierte Reihe).
         hf_geraet: gemeldete Herzfrequenz als ``(t, bpm)``.
         ohne: Kennzahlen, die es für diese Messung nicht gibt.
@@ -90,6 +135,10 @@ class Analyse:
         tabelle: Callable[[str], ft.Control | None] | None = None,
         optisch: bool = False,
         hoehe: int = 120,
+        analysefenster: Callable[[], Analysefenster | None] | None = None,
+        fenster_kopf: Callable[[], ft.Control | None] | None = None,
+        warten: Callable[[], bool] = lambda: False,
+        live_intervall_s: Callable[[], float] | None = None,
     ) -> None:
         self._page = page
         self._state = state
@@ -102,6 +151,18 @@ class Analyse:
         self._optisch = optisch
         self._hoehe = hoehe
         self._speicher: dict[Any, Any] = {}
+        self._analysefenster = analysefenster
+        self._fenster_kopf = fenster_kopf
+        self._warten = warten
+        self._live_intervall_s = live_intervall_s
+        #: Ergebnisse je (Bereich, Fensterschlüssel) — gilt für eine Reihe (``_reihe_von``)
+        self._fenster_speicher: OrderedDict[tuple[str, str], Any] = OrderedDict()
+        self._reihe_von: Any = None
+        #: Zuletzt gezeigtes Ergebnis je Bereich (bleibt stehen, solange gewartet wird)
+        self._zuletzt: dict[str, Any] = {}
+        #: Live: je Bereich (Zeitpunkt, Breite, Ergebnis) der letzten Rechnung
+        self._live: dict[str, tuple[float, float, Any]] = {}
+        self._erzwingen = False
         #: Zuletzt gezeichnete Verlaufskurven: Kennzahl → (Bezeichnung, Punkte)
         self.gesehen: dict[str, tuple[str, list[tuple[float, float]]]] = {}
         #: Womit die Chips gebaut sind — live kommt RR erst nach dem Verbinden
@@ -223,25 +284,8 @@ class Analyse:
                 atem_modus=atem_modus,
             )
 
-        if bereich == "frequenz":
-            fs = fensterspektrum(t, rr, x_von, x_bis) if t.size else None
-            self._extra.content = ft.Column(
-                spacing=8,
-                tight=True,
-                controls=[spektrum_kurve(fs), band_leiste(fs, self._optisch)],
-            )
-        elif bereich == "nichtlinear":
-            paare = poincare_paare(t, rr, naht, x_von, x_bis) if t.size else []
-            self._extra.content = ft.Column(
-                spacing=8,
-                tight=True,
-                controls=[
-                    # Über Stunden wären es zehntausende Punkte — gezeichnet wird
-                    # eine gleichmäßige Auswahl, gerechnet mit allen
-                    poincare_kurve(paare[:: max(1, len(paare) // POINCARE_PUNKTE)]),
-                    self._poincare_werte(t, rr, naht, x_von, x_bis, len(paare)),
-                ],
-            )
+        if bereich in ("frequenz", "nichtlinear"):
+            self._extra.content = self._extra_bauen(bereich, t, rr, naht, x_von, x_bis)
         else:
             self._extra.content = None
         self._extra.visible = self._extra.content is not None
@@ -269,16 +313,128 @@ class Analyse:
             )
         ]
 
-    def _poincare_werte(
-        self, t: np.ndarray, rr: np.ndarray, naht: np.ndarray, x_von: float, x_bis: float, n: int
+    # -- Analysefenster -----------------------------------------------------------
+
+    def nachrechnen(self) -> None:
+        """Beim nächsten `zeichnen` neu rechnen — live nach dem Wischen."""
+        self._erzwingen = True
+
+    def _extra_bauen(
+        self,
+        bereich: str,
+        t: np.ndarray,
+        rr: np.ndarray,
+        naht: np.ndarray,
+        x_von: float,
+        x_bis: float,
     ) -> ft.Control:
-        """SD1, SD2, SD1/SD2 und DFA α1 des Ausschnitts — gerechnet in `trends.aktuell`."""
-        breite = x_bis - x_von
+        fenster = self._analysefenster() if self._analysefenster is not None else None
+        veraltet = False
+        if fenster is None:
+            ergebnis, veraltet = self._live_ergebnis(bereich, t, rr, naht, x_von, x_bis)
+        else:
+            if t is not self._reihe_von:  # andere Korrektur oder Zuschnitt
+                self._fenster_speicher.clear()
+                self._reihe_von = t
+            schluessel = (bereich, fenster.schluessel)
+            if schluessel in self._fenster_speicher:
+                self._fenster_speicher.move_to_end(schluessel)
+                ergebnis = self._fenster_speicher[schluessel]
+            elif self._warten() and bereich in self._zuletzt:
+                ergebnis, veraltet = self._zuletzt[bereich], True
+            else:
+                ergebnis = self._rechnen(bereich, fenster, t, rr, naht)
+                self._fenster_speicher[schluessel] = ergebnis
+                while len(self._fenster_speicher) > FENSTER_SPEICHER:
+                    self._fenster_speicher.popitem(last=False)
+        self._zuletzt[bereich] = ergebnis
+        teile: list[ft.Control] = []
+        kopf = self._fenster_kopf() if self._fenster_kopf is not None else None
+        if kopf is not None:
+            teile.append(kopf)
+        if veraltet:
+            teile.append(
+                ft.Text(
+                    "Wird nach dem Loslassen neu gerechnet …",
+                    size=11,
+                    italic=True,
+                    opacity=0.6,
+                )
+            )
+        if bereich == "frequenz":
+            teile += [spektrum_kurve(ergebnis), band_leiste(ergebnis, self._optisch)]
+        else:
+            nl: _Nichtlinear = ergebnis
+            teile += [
+                # Über Stunden wären es zehntausende Punkte — gezeichnet wird
+                # eine gleichmäßige Auswahl, gerechnet mit allen
+                poincare_kurve(nl.paare[:: max(1, len(nl.paare) // POINCARE_PUNKTE)]),
+                self._poincare_werte(nl),
+            ]
+        return ft.Column(spacing=8, tight=True, opacity=0.55 if veraltet else 1.0, controls=teile)
+
+    def _rechnen(
+        self,
+        bereich: str,
+        fenster: Analysefenster,
+        t: np.ndarray,
+        rr: np.ndarray,
+        naht: np.ndarray,
+    ) -> Any:
+        if bereich == "frequenz":
+            if fenster.ganzes is not None:
+                return fenster.ganzes()
+            return fensterspektrum(t, rr, fenster.von, fenster.bis) if t.size else None
+        return self._nichtlinear(t, rr, naht, fenster.von, fenster.bis)
+
+    def _live_ergebnis(
+        self,
+        bereich: str,
+        t: np.ndarray,
+        rr: np.ndarray,
+        naht: np.ndarray,
+        x_von: float,
+        x_bis: float,
+    ) -> tuple[Any, bool]:
+        """Live: der sichtbare Ausschnitt — höchstens alle ``live_intervall_s`` neu gerechnet."""
+        jetzt = time.monotonic()
+        breite = round(x_bis - x_von, 1)
+        alt = self._live.get(bereich)
+        intervall = self._live_intervall_s() if self._live_intervall_s is not None else 0.0
+        frisch = (
+            alt is not None
+            and alt[1] == breite
+            and jetzt - alt[0] < intervall
+            and not self._erzwingen
+        )
+        if alt is not None and (frisch or self._warten()):
+            return alt[2], not frisch
+        if bereich == "frequenz":
+            ergebnis: Any = fensterspektrum(t, rr, x_von, x_bis) if t.size else None
+        else:
+            ergebnis = self._nichtlinear(t, rr, naht, x_von, x_bis)
+        self._live[bereich] = (jetzt, breite, ergebnis)
+        self._erzwingen = False
+        return ergebnis, False
+
+    @staticmethod
+    def _nichtlinear(
+        t: np.ndarray, rr: np.ndarray, naht: np.ndarray, von: float, bis: float
+    ) -> _Nichtlinear:
+        """Poincaré-Paare, SD1, SD2 und DFA α1 des Fensters — gerechnet in `trends.aktuell`."""
+        if not t.size:
+            return _Nichtlinear([], None, None, None)
 
         def wert(k: str) -> float | None:
-            return aktuell(t, rr, naht, k, breite, ende=x_bis) if t.size else None
+            return aktuell(t, rr, naht, k, bis - von, ende=bis)
 
-        sd1, sd2, dfa = wert("sd1"), wert("sd2"), wert("dfa_alpha1")
+        return _Nichtlinear(
+            poincare_paare(t, rr, naht, von, bis), wert("sd1"), wert("sd2"), wert("dfa_alpha1")
+        )
+
+    def _poincare_werte(self, nl: _Nichtlinear) -> ft.Control:
+        """SD1, SD2, SD1/SD2 und DFA α1 des Fensters in einer Zeile."""
+        sd1, sd2, dfa, n = nl.sd1, nl.sd2, nl.dfa, len(nl.paare)
         teile = [
             ("SD1", zahl(sd1, 1), "ms", FARBEN["sd1"]),
             ("SD2", zahl(sd2, 1), "ms", FARBEN["sd2"]),
@@ -308,4 +464,4 @@ class Analyse:
         )
 
 
-__all__ = ["HINWEISE", "Analyse"]
+__all__ = ["FENSTER_SPEICHER", "HINWEISE", "Analyse", "Analysefenster"]

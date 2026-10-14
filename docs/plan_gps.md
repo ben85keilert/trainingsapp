@@ -375,8 +375,42 @@ im Hintergrund; wahre Länge laut Karte **etwa 252 m**)
   Ortungen über 30 m Ungenauigkeit verworfen. Ein einzelner, flacher Weg —
   der Gang mit ausgeschaltetem Bildschirm prüft es nach.
 
-**Noch nötig:** ein Gang mit ausgeschaltetem Bildschirm (Hintergrund,
-Lücken; macht Ben selbst), der Akkutest (läuft).
+**2 · Akkutest, 14.10.2026 13:54** (4 × 15 min; Ben war unterwegs: je Phase
+5–9 min Stand, sonst Gehen; die App 86–98 % im Hintergrund)
+
+| | GPS 1 s | GPS 3 s | GPS 10 s | ohne GPS |
+|---|---|---|---|---|
+| Ortungen | 784 (87 %) | 282 | 89 | – |
+| Abstand 95 % / längste Lücke | 1,9 s / 7,7 s (2 Lücken) | 4,6 s / 7,4 s | 14,6 s / 15,9 s | – |
+| Genauigkeit Median / 90 % | 3,0 / 11,2 m | 3,4 / 7,4 m | **7,3** / 14,7 m | – |
+| Distanz roh · 5 m · 10 m · Doppler | 830 · 736 · 674 · 649 m | 696 · 585 · 549 · 545 m | 743 · 646 · 586 · 633 m | – |
+| Zittern im Stand roh / 5-m-Schritt | 7,9 / 6,0 m/min | 10,7 / 4,1 m/min | 10,8 / 11,0 m/min | – |
+| Höhe auf/ab roh · 3 m · 5 m | 76/73 · 34/29 · 18/17 m | 15/18 · 0/3 · 0/0 m | 19/18 · 9/9 · 5/5 m | – |
+| Strom (Ladestandsmesser) | 430 mA | 530 mA | 540 mA | 480 mA |
+
+**Befunde:**
+
+- **Strom: nicht auswertbar.** Ohne GPS zog das Handy 480 mA (rund 11 %/h);
+  die Phasen mit GPS lagen 50 mA darunter bis 60 mA darüber. Was das GPS
+  kostet (erwartet 5–25 mA), geht darin unter — die Nutzung des Handys
+  bestimmt den Verbrauch. Offen: War der Bildschirm an? Wenn nicht, verbraucht
+  die App im Hintergrund zu viel (prüfen, bevor Phase 2 steht).
+- **Hintergrund geht:** mit dem Vordergrunddienst (Typ location) kamen bei 3 s
+  und 10 s alle Ortungen, bei 1 s 87 % mit zwei Lücken bis 7,7 s.
+- **10 s ist ungenauer:** Median 7,3 statt 3,0 m — der Empfänger schläft
+  zwischen den Ortungen. Für Strecken taugt das nicht.
+- **10-m-Schritt bestätigt:** Er liegt bei 1 s und 3 s auf 4 % beim
+  Doppler-Tempo; roh liegt 20–27 % darüber. Im Stand (teils drinnen,
+  90 % Genauigkeit bis 11 m) ließ der 5-m-Schritt noch 4–6 m/min Zittern durch.
+- **Höhe nur in Bewegung zählen:** Im Stand kamen roh 76 m Anstieg in 15 min
+  zusammen, mit 5-m-Schwelle noch 18 m. Höhenmeter also nur bei Bewegung und
+  mit 5-m-Schwelle; besser später das Barometer des Pixel.
+
+**Vorschlag:** GPS 1 s als einzige Stufe (plus „ohne GPS“); „Sparsam 10 s“
+erst, wenn ein sauberer Akkutest einen Gewinn zeigt (Handy liegt still am
+Fenster, Bildschirm aus, unbenutzt).
+
+**Noch offen:** der Gang mit ausgeschaltetem Bildschirm (macht Ben selbst).
 
 ---
 

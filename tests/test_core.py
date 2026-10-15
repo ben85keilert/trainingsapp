@@ -24,7 +24,16 @@ from trainingsapp.core.result_spec import (
     FieldType,
     ResultSpec,
 )
-from trainingsapp.core.units import format_dauer, parse_dauer, parse_shorthand
+from trainingsapp.core.units import (
+    MAX_DAUER_S,
+    MAX_SAETZE,
+    format_dauer,
+    format_sets,
+    parse_anzahl,
+    parse_dauer,
+    parse_sets,
+    parse_shorthand,
+)
 from trainingsapp.core.verlauf import kurve_punkte
 from trainingsapp.data.db import migrieren, oeffnen, schema_version
 
@@ -113,6 +122,45 @@ def test_dauer_formatieren(text: str, erwartet: str) -> None:
     sek = parse_dauer(text)
     assert sek is not None
     assert format_dauer(sek) == erwartet
+
+
+@pytest.mark.parametrize("text", ["1e400", "inf", "nan", "-5", "49:00:00", "2881min", "172801"])
+def test_dauer_ausserhalb_der_grenzen(text: str) -> None:
+    """Unendlich, negativ oder über 48 h ist kein Wert — er käme sonst in die DB
+    und ließe jede Ansicht des Tages mit OverflowError abstürzen (15.10.2026)."""
+    assert parse_dauer(text) is None
+
+
+def test_dauer_mit_stunden() -> None:
+    assert parse_dauer("1:30:00") == 5400.0
+    assert parse_dauer("48:00:00") == MAX_DAUER_S
+
+
+@pytest.mark.parametrize(
+    "text", ["101x1", "999999999x1", "60x1/41x1", "100001", "1e400", "3xinf", "1x-3"]
+)
+def test_saetze_ausserhalb_der_grenzen(text: str) -> None:
+    """Satzzahl und Werte sind gedeckelt — „999999999x1“ baute sonst 10⁹ Einträge."""
+    assert parse_sets(text) is None
+
+
+def test_saetze_an_der_grenze() -> None:
+    assert parse_sets("100x1") == [1.0] * MAX_SAETZE
+    assert parse_sets("60x1/40x2") == [1.0] * 60 + [2.0] * 40
+    assert parse_sets("100000") == [100000.0]
+
+
+def test_anzahl_parsen() -> None:
+    assert parse_anzahl("3") == 3 and parse_anzahl("100") == 100
+    for text in ("0", "101", "²", "①", "x", "", "1.5"):
+        assert parse_anzahl(text) is None, text
+
+
+def test_anzeige_vertraegt_altbestand_mit_unendlich() -> None:
+    """Was vor den Grenzen gespeichert wurde, darf die Ansicht nicht mehr stürzen."""
+    assert format_dauer(float("inf")) == "–"
+    assert format_sets([float("inf"), 3.0]) == "–"
+    assert format_sets([float("nan")], zeit=True) == "–"
 
 
 def test_kurzschrift_saetze() -> None:

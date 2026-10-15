@@ -25,6 +25,7 @@ gehörte, war nicht mehr zu sehen.
 from __future__ import annotations
 
 import contextlib
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -38,7 +39,7 @@ from trainingsapp.core.result_spec import (
     skala_titel,
     skala_wert,
 )
-from trainingsapp.core.units import format_dauer, format_sets, parse_dauer, parse_sets
+from trainingsapp.core.units import MAX_WERT, format_dauer, format_sets, parse_dauer, parse_sets
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import ohne_auto_update
 
@@ -290,6 +291,8 @@ class SpecForm:
             zahl = float(text.replace(",", "."))
         except ValueError:
             return None
+        if not math.isfinite(zahl) or not 0 <= zahl <= MAX_WERT:
+            return None  # dieselbe Grenze wie in der Notation
         return int(zahl) if f.type == FieldType.INT else zahl
 
     def werte(self) -> dict[str, Any]:

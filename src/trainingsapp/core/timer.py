@@ -40,6 +40,7 @@ lässt sich ohne Bildschirm testen.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from collections.abc import Callable, Iterable
@@ -103,9 +104,12 @@ def dauer_lesen(text: str) -> int | None:
         return None
     if "," in text:
         try:
-            sekunden = round(float(text.replace(",", ".")) * 60)
+            minuten = float(text.replace(",", "."))
         except ValueError:
             return None
+        if not math.isfinite(minuten):
+            return None  # „1,e400“ wäre inf — round() stürzte ab
+        sekunden = round(minuten * 60)
         return sekunden if 0 < sekunden <= MAX_ABSCHNITT_S else None
     teile = text.split(":")
     try:

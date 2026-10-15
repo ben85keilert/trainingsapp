@@ -31,8 +31,11 @@ Anzeige: `3x15`, `30` oder `15/15/20`, dazu die Summe.
 für Zahlen hat kein „x“; beim Korrigieren eines Eintrags (Tafel „Heute
 geleistet“ antippen) trennt dort das Komma die Sätze: `15,15,20`.
 
-**Zeiten**: `30` = 30 s, `1:30` = 90 s, `2min`. Je Satz wie oben: `3x30`, `45/60/30`.
-`0` oder leer = ohne Zeit — gemacht, aber kein Punkt auf der Kurve.
+**Zeiten**: `30` = 30 s, `1:30` = 90 s, `2min`, `1:30:00` mit Stunden. Je Satz wie
+oben: `3x30`, `45/60/30`. `0` oder leer = ohne Zeit — gemacht, aber kein Punkt auf der Kurve.
+
+**Grenzen**: höchstens 100 Sätze, Zeiten bis 48 h, Werte bis 100 000 — darüber
+meldet das Feld einen Fehler.
 
 **Einzelwerte**: Gewicht `40` oder `40kg`, Strecke `500` (m) oder `2km`, Winkel `45`,
 Skala `0` bis `10` — Regler oder Zahl, abschicken mit dem Haken. Dezimal mit Punkt

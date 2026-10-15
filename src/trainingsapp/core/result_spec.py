@@ -240,12 +240,12 @@ def format_wert(f: FieldSpec, wert: Any) -> str:
         try:
             liste = list(wert) if isinstance(wert, list | tuple) else [float(wert)]
             return format_sets([float(w) for w in liste], zeit=zeit)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return str(wert)
     if f.type == FieldType.DURATION:
         try:
             return format_dauer(float(wert))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return str(wert)
     if f.type == FieldType.BOOL:
         return f.label if wert else f"nicht {f.label}"

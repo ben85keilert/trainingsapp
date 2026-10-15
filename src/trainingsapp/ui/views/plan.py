@@ -54,6 +54,7 @@ Formular zurück, stellt `scroll_merken` die Position wieder her.
 from __future__ import annotations
 
 import contextlib
+import math
 from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
@@ -87,7 +88,7 @@ from trainingsapp.core.result_spec import (
 )
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tagesbilanz import buendeln
-from trainingsapp.core.units import parse_dauer
+from trainingsapp.core.units import MAX_SAETZE, MAX_WERT, parse_anzahl, parse_dauer
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
@@ -130,6 +131,8 @@ def _zahl_lesen(feld: FieldSpec, text: str) -> Any:
         zahl = float(text.replace(",", "."))
     except ValueError:
         return None
+    if not math.isfinite(zahl) or not 0 <= zahl <= MAX_WERT:
+        return None  # „1e400“ ist inf — und ließe jede Ansicht des Tages abstürzen
     if feld.type == FieldType.SCALE:
         return skala_wert(feld, zahl)
     return int(zahl) if zahl.is_integer() else zahl
@@ -432,10 +435,10 @@ def plan_view(
             text = (wert_feld.value or "").strip()
             wert = parse_dauer(text) if feld.unit == "s" else _zahl_lesen(feld, text)
             n_text = (anzahl_feld.value or "").strip()
-            anzahl = int(n_text) if n_text.isdigit() else 0 if n_text else 1
+            anzahl = parse_anzahl(n_text) if n_text else 1
             wert_feld.error = None if wert is not None and wert > 0 else "Wert?"
-            anzahl_feld.error = None if 1 <= anzahl <= 50 else "1–50"
-            if wert_feld.error or anzahl_feld.error or wert is None:
+            anzahl_feld.error = None if anzahl is not None else f"1–{MAX_SAETZE}"
+            if wert_feld.error or anzahl_feld.error or wert is None or anzahl is None:
                 page.update()
                 return
             anhaengen(item, feld, [float(wert)] * anzahl)

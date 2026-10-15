@@ -8,8 +8,15 @@ Geübte und auf dem Desktop.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
+
+#: Grenzen der Notation (Ben, 15.10.2026) — darüber ist es ein Tippfehler, kein Wert.
+#: Sie gelten für Plan-Eingabe und Kurzschrift gleichermaßen.
+MAX_SAETZE = 100
+MAX_DAUER_S = 48 * 3600  # auch ein ganzer Messtag passt
+MAX_WERT = 100_000  # kg, Wiederholungen, Meter
 
 # 3x15  ·  3 x 15  ·  3×15
 _SAETZE = re.compile(r"^\s*(\d+)\s*[x×*]\s*(\d+)\s*", re.IGNORECASE)
@@ -25,11 +32,36 @@ _WINKEL = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:°|grad\b)", re.IGNORECASE)
 # Rechts keine Wortgrenze: „1:00s" (so stand es bis Oktober 2026 in der
 # Anzeige) ist 1 min — mit \b dahinter las der Parser „00s" und lieferte 0.
 _DAUER_MMSS = re.compile(r"(?<!\d)(\d+):([0-5]\d)(?!\d)")
+# 1:30:00 — Stunden, wenn ein ganzer Tag gemessen wurde
+_DAUER_HHMMSS = re.compile(r"(?<!\d)(\d+):([0-5]\d):([0-5]\d)(?!\d)")
 _DAUER_EINHEIT = re.compile(r"(\d+(?:[.,]\d+)?)\s*(s|sek|sec|min|m)\b", re.IGNORECASE)
 
 
+def _gueltig(wert: float, hoechstens: float = MAX_WERT) -> bool:
+    """Endlich, nicht negativ und innerhalb der Grenze — ``inf``, ``nan`` und
+    ``1e400`` (= ``inf``) sind keine Werte, sondern Tippfehler."""
+    return math.isfinite(wert) and 0 <= wert <= hoechstens
+
+
+def parse_anzahl(text: str) -> int | None:
+    """Satzzahl aus dem Feld „Sätze“: ganze Zahl von 1 bis `MAX_SAETZE`, sonst ``None``.
+
+    ``isdecimal`` statt ``isdigit``: „²“ ist eine Ziffer, aber keine Zahl.
+
+    >>> parse_anzahl("3"), parse_anzahl(" 100 ")
+    (3, 100)
+    >>> parse_anzahl("0"), parse_anzahl("101"), parse_anzahl("²"), parse_anzahl("x")
+    (None, None, None, None)
+    """
+    text = text.strip()
+    if not text.isdecimal():
+        return None
+    anzahl = int(text)
+    return anzahl if 1 <= anzahl <= MAX_SAETZE else None
+
+
 def parse_dauer(text: str) -> float | None:
-    """Sekunden aus einer Dauerangabe.
+    """Sekunden aus einer Dauerangabe — höchstens `MAX_DAUER_S` (48 h).
 
     >>> parse_dauer("1:30")
     90.0
@@ -43,10 +75,20 @@ def parse_dauer(text: str) -> float | None:
     (60.0, 60.0)
     >>> parse_dauer("keine Ahnung") is None
     True
+    >>> [parse_dauer(t) for t in ("1e400", "inf", "49:00:00")]  # über 48 h oder unendlich
+    [None, None, None]
     """
+    wert = _dauer_roh(text)
+    return wert if wert is not None and _gueltig(wert, MAX_DAUER_S) else None
+
+
+def _dauer_roh(text: str) -> float | None:
     text = text.strip().lstrip("+").strip()
     if not text:
         return None
+
+    if (m := _DAUER_HHMMSS.search(text)) is not None:
+        return float(int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)))
 
     if (m := _DAUER_MMSS.search(text)) is not None:
         return float(int(m.group(1)) * 60 + int(m.group(2)))
@@ -85,6 +127,10 @@ def parse_sets(text: str, zeit: bool = False) -> list[float] | None:
     True
     >>> parse_sets("+60", zeit=True), parse_sets("3x1:00s", zeit=True)  # was angezeigt wurde
     ([60.0], [60.0, 60.0, 60.0])
+    >>> parse_sets("101x1") is None and parse_sets("60x1/41x1") is None  # über MAX_SAETZE
+    True
+    >>> parse_sets("100001") is None and parse_sets("1e400") is None
+    True
     """
     text = text.strip().lstrip("+").strip()
     if not text:
@@ -98,6 +144,8 @@ def parse_sets(text: str, zeit: bool = False) -> list[float] | None:
         if m is None:
             return None
         anzahl = int(m.group(1)) if m.group(1) else 1
+        if anzahl > MAX_SAETZE or len(werte) + anzahl > MAX_SAETZE:
+            return None
         wert = parse_dauer(m.group(2)) if zeit else _zahl(m.group(2))
         if wert is None:
             return None
@@ -109,9 +157,10 @@ def parse_sets(text: str, zeit: bool = False) -> list[float] | None:
 
 def _zahl(text: str) -> float | None:
     try:
-        return float(text.strip().replace(",", "."))
+        wert = float(text.strip().replace(",", "."))
     except ValueError:
         return None
+    return wert if _gueltig(wert) else None
 
 
 def format_sets(werte: list[float] | None, zeit: bool = False) -> str:
@@ -133,9 +182,13 @@ def format_sets(werte: list[float] | None, zeit: bool = False) -> str:
     ['1:30/0:45', '1:00', '2x1:00']
     >>> format_sets([])
     ''
+    >>> format_sets([float("inf")])  # Altbestand, der die Grenzen noch nicht kannte
+    '–'
     """
     if not werte:
         return ""
+    if not all(math.isfinite(w) for w in werte):
+        return "–"
     minuten = zeit and any(round(w) >= 60 for w in werte)
 
     def einzel(w: float) -> str:
@@ -162,7 +215,11 @@ def format_dauer(sekunden: float) -> str:
     '1:30'
     >>> format_dauer(45)
     '45s'
+    >>> format_dauer(float("nan"))
+    '–'
     """
+    if not math.isfinite(sekunden):
+        return "–"
     sekunden = round(sekunden)
     if sekunden < 60:
         return f"{sekunden}s"
@@ -191,7 +248,8 @@ def parse_shorthand(text: str) -> dict[str, Any]:
     rest = text
 
     if (m := _SAETZE.search(rest)) is not None:
-        werte["reps"] = [float(m.group(2))] * int(m.group(1))
+        if (reps := parse_sets(m.group(0))) is not None:
+            werte["reps"] = reps
         rest = rest[m.end() :]
 
     if (m := _GEWICHT.search(rest)) is not None:
@@ -225,4 +283,16 @@ def format_bpm(rr_ms: float) -> float:
     return 60000.0 / rr_ms if rr_ms > 0 else 0.0
 
 
-__all__ = ["format_bpm", "format_dauer", "parse_dauer", "parse_shorthand"]
+__all__ = [
+    "MAX_DAUER_S",
+    "MAX_SAETZE",
+    "MAX_WERT",
+    "format_bpm",
+    "format_dauer",
+    "format_sets",
+    "parse_anzahl",
+    "parse_dauer",
+    "parse_sets",
+    "parse_shorthand",
+    "satz_summe",
+]

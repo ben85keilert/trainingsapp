@@ -26,6 +26,12 @@ korrigieren) trennt dann das Komma die Sätze (`15,15,20`), im Plan gibt es
 dafür zwei Felder „Sätze × Wert“ (siehe unten). Wer `3x15` tippen kann (Desktop), darf es
 weiterhin.
 
+**Grenzen** (Ben, 15.10.2026): höchstens **100 Sätze** je Eintrag, Zeiten bis
+**48 h** (`48:00:00`), Zahlenwerte bis **100 000**. Darüber — und bei `inf`,
+`nan`, `1e400` — zeigt das Feld einen Fehler und speichert nichts
+(`core/units.py`: `MAX_SAETZE`, `MAX_DAUER_S`, `MAX_WERT`). Bis 15.10. kam
+`1e400` als Unendlich in die Datenbank und ließ jede Ansicht des Tages abstürzen.
+
 Im Verlauf gibt es je Satzfeld zwei Kennzahlen: **Summe** (Standard) und
 **Maximum je Satz** (`<übung>:reps:sum`, `<übung>:reps:max`).
 

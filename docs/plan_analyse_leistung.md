@@ -202,6 +202,11 @@ Ereignisse, Flet vergleicht nur, was der Handler aktualisiert):
 Öffnen: H10 im Frequenz-Reiter 2,8 s → 0,52 s, im Zeit-Reiter 0,44 s; Verity
 0,5–0,8 s → 0,16–0,22 s. Achsenraster eines Spektrums: bis 607 ms → 0,01 ms.
 
+**Nachtrag 15.10.2026 — Wischweg:** Flets Drossel verwirft Zwischenereignisse ohne
+Aufsummieren; `primary_delta` ist nur der letzte Touch-Frame (≈ ⅙ der Bewegung bei
+120 Hz und 50 ms). Seitdem zählt `local_delta` (Weg seit dem letzten gesendeten
+Ereignis) — eine Fingerbreite blättert eine Fensterbreite (`zeitfenster.wischbar`).
+
 **Nicht umgesetzt:** Charts an Ort und Stelle aktualisieren statt neu bauen
 (mit 500 Punkten je Linie kaum noch nötig); Kacheln der ganzen Messung
 (Atemfrequenz über alle Minutenfenster, ~0,3 s bei 70 min) rechnen weiter

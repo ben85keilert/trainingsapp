@@ -190,6 +190,24 @@ def test_wischen_greifen_wird_am_anfang_entschieden() -> None:
     assert len(gefragt) == 2 and fenster.ende_s == 60.0  # gegriffen: die Kurve steht
 
 
+def test_wischen_nimmt_den_ganzen_weg_seit_dem_letzten_ereignis() -> None:
+    """Mit `drag_interval` verwirft Flet Zwischenereignisse: `primary_delta` ist nur der
+    letzte Touch-Frame, `local_delta` der ganze Weg seit dem letzten gesendeten Ereignis.
+    Eine halbe Breite Finger (160 px von 320) blättert eine halbe Fensterbreite (30 s)."""
+    fenster = Fenster(60, 600.0)
+    gd = wischbar(ft.Container(), fenster, lambda: 600.0, lambda: None)
+    ereignis = SimpleNamespace(
+        local_position=SimpleNamespace(x=200.0, y=10.0),
+        primary_delta=10.0,  # der letzte Frame — darf nicht zählen
+        local_delta=SimpleNamespace(x=160.0, y=0.0),
+    )
+    gd.on_horizontal_drag_update(ereignis)
+    assert fenster.ende_s == pytest.approx(570.0)
+    # Ohne local_delta (ältere Ereignisse, Tests) bleibt primary_delta der Rückfall
+    gd.on_horizontal_drag_update(_drag(100.0, dx=32.0))
+    assert fenster.ende_s == pytest.approx(564.0)
+
+
 # ---------------------------------------------------------------------------
 # Analysefenster in der Aufzeichnung
 # ---------------------------------------------------------------------------

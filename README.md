@@ -146,6 +146,7 @@ docs/
   hrv_algorithmen.md   Formeln, Konstanten, Fallstricke
   korrektur.md         automatische Korrektur: was zählt und warum
   roadmap.md           Meilensteine
+  offene_fragen.md     Katalog offener Entscheidungen und Befunde
   nachschlagen.md      externe Links (Flet-Icons, Docs, Spezifikationen)
   recht/               DSGVO, MDR, Store-Freigaben
   tutorial/            der Lernpfad

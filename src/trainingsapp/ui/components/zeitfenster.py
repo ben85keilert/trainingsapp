@@ -17,6 +17,13 @@ kommen Ziehereignisse höchstens alle `_ZIEH_MS`, das Auto-Update ist in den
 Ziehhandlern aus (wer neu zeichnet, aktualisiert selbst), und die Drossel
 zählt ab dem **Ende** des letzten Neuzeichnens — sonst zeichnete unter Last
 jedes wartende Ereignis wieder neu.
+
+**Fallstrick der Drossel** (Flet 1.0.3, `gesture_detector.dart`): Verworfene
+Zwischenereignisse werden nicht aufsummiert. `primary_delta` ist Flutters
+``details.primaryDelta`` — nur der Weg des *letzten* Touch-Frames (bei 120 Hz
+und 50 ms Drossel ein Sechstel der Bewegung). `local_delta` rechnet Flet
+dagegen gegen die Lage beim letzten *gesendeten* Ereignis (am Gestenbeginn
+zurückgesetzt) — das ist der ganze Weg. Darum zählt hier `local_delta`.
 """
 
 from __future__ import annotations
@@ -133,9 +140,12 @@ def wischbar(
         if gegriffen(getattr(e, "local_position", None)):
             zeichnen_gedrosselt()
             return
-        dx = e.primary_delta
+        # ``local_delta`` = Weg seit dem letzten *gesendeten* Ereignis; ``primary_delta``
+        # ist nur der Weg des letzten Touch-Frames — mit `drag_interval` ginge
+        # der Rest der Bewegung verloren (Finger 300 px, Kurve 50 px).
+        dx = e.local_delta.x if getattr(e, "local_delta", None) is not None else None
         if dx is None:
-            dx = e.local_delta.x if e.local_delta is not None else 0.0
+            dx = e.primary_delta if e.primary_delta is not None else 0.0
         vorher = fenster.ende_s
         fenster.verschieben(-dx / stand["breite_px"] * fenster.breite_s, jetzt_s(), anfang())
         if fenster.ende_s == vorher:

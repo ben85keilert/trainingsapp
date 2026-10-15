@@ -262,7 +262,7 @@ def test_physiologische_steuerung_nur_in_der_praxis(monkeypatch) -> None:
 
 def test_migration_erzeugt_das_schema(tmp_path) -> None:
     con = oeffnen(tmp_path / "test.db")
-    assert schema_version(con) == 15
+    assert schema_version(con) == 16
 
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     for erwartet in (
@@ -292,8 +292,8 @@ def test_migration_ist_wiederholbar(tmp_path) -> None:
     """Ein zweiter Lauf darf nichts tun und nicht scheitern."""
     pfad = tmp_path / "test.db"
     con = oeffnen(pfad)
-    assert migrieren(con) == 15
-    assert migrieren(con) == 15
+    assert migrieren(con) == 16
+    assert migrieren(con) == 16
     con.close()
 
 
@@ -308,21 +308,21 @@ def test_kaputte_migration_laesst_nichts_zurueck(tmp_path) -> None:
     ordner.mkdir()
     for datei in MIGRATIONS_DIR.glob("*.sql"):
         shutil.copy(datei, ordner / datei.name)
-    kaputt = ordner / "016_kaputt.sql"
+    kaputt = ordner / "017_kaputt.sql"
     kaputt.write_text(
         "CREATE TABLE halb (id TEXT PRIMARY KEY);\nALTER TABLE gibt_es_nicht ADD COLUMN x TEXT;\n",
         encoding="utf-8",
     )
     con = verbinden(tmp_path / "test.db")
-    with pytest.raises(RuntimeError, match="016_kaputt"):
+    with pytest.raises(RuntimeError, match="017_kaputt"):
         migrieren(con, ordner)
     assert not con.in_transaction
-    assert schema_version(con) == 15
+    assert schema_version(con) == 16
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "halb" not in tabellen
     # Repariert läuft sie durch — der nächste Start scheitert nicht an „schon vorhanden"
     kaputt.write_text("CREATE TABLE halb (id TEXT PRIMARY KEY);\n", encoding="utf-8")
-    assert migrieren(con, ordner) == 16
+    assert migrieren(con, ordner) == 17
     con.close()
 
 

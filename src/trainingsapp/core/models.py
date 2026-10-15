@@ -81,6 +81,8 @@ def tagesgrenzen(tag: date) -> tuple[datetime, datetime]:
 class MediaKind(StrEnum):
     VIDEO = "video"
     IMAGE = "image"
+    #: Nur an Kurskapiteln (`core/kurse.py`) — `exercise_media` kennt nur Video und Bild
+    AUDIO = "audio"
 
 
 class MediaSource(StrEnum):
@@ -358,6 +360,9 @@ class Plan:
     aktiv: bool = True
     #: Wochentage, an denen der Plan ansteht — 0 = Montag … 6 = Sonntag
     wochentage: list[int] = field(default_factory=lambda: list(range(7)))
+    #: Von welchem Kurskapitel der Plan angelegt wurde (Migration 016, `core/kurse.py`);
+    #: beim Abschluss des Kapitels wird er deaktiviert, nicht gelöscht. ``None`` = eigener Plan
+    kurs_kapitel_id: str | None = None
 
     def steht_an(self, tag: date) -> bool:
         """Ob der Plan an diesem Tag von sich aus auf „Heute" erscheint.

@@ -346,3 +346,160 @@ spec = "halten"
 icon_key = "monitor_heart"
 limit_spec = { rules = [{ type = "timer", seconds = 300 }] }
 description = "Fünf Minuten ruhig sitzen oder liegen, gleichmäßig atmen, nicht sprechen. Möglichst immer zur gleichen Tageszeit."
+
+
+# ── Kurse ───────────────────────────────────────────────────────────────────
+#
+# Ein Kurs = ein [[kurse]]-Block mit Kapiteln ([[kurse.kapitel]]), die von oben
+# nach unten durchgearbeitet werden (docs/plan_kurse.md). Je Kapitel:
+#   key          nie ändern — die Kapitel-ID folgt daraus, und am Kapitel hängt
+#                der Fortschritt der Nutzer
+#   titel, text  Pflicht bzw. Markdown-Erklärtext
+#   bedingung    { art = "gelesen" } (Vorgabe) · { art = "summe", uebung = key,
+#                feld = "reps", soll = 100 } · { art = "tage", soll = 3 } ·
+#                { art = "messung", soll = 5 } (Minuten)
+#   plaene       Plan-Vorlagen, die das Kapitel beim Erreichen anlegt:
+#                { name, wochentage = [0..6], uebungen = [{ uebung = key }] }
+#   media        wie bei Übungen, zusätzlich kind = "audio"
+# Kurs-Felder: key, name, beschreibung, freischaltung (frei | rueckfrage | streng).
+# Der Text erklärt — er gibt keine Empfehlung aus Messwerten (docs/recht).
+
+[[kurse]]
+key = "hrv_einfuehrung"
+name = "HRV-Messung verstehen"
+beschreibung = "Was die Herzratenvariabilität ist, wie du den Sensor verbindest, misst und die Kurve liest — Schritt für Schritt."
+freischaltung = "rueckfrage"
+
+[[kurse.kapitel]]
+key = "was_ist_hrv"
+titel = "Was ist Herzratenvariabilität?"
+text = """
+Das Herz schlägt nicht wie ein Metronom. Der Abstand von einem Schlag zum
+nächsten — das **RR-Intervall**, gemessen in Millisekunden — schwankt von Schlag
+zu Schlag. Diese Schwankung heißt **Herzratenvariabilität (HRV)**.
+
+Sie entsteht, weil das vegetative Nervensystem das Herz laufend nachregelt:
+Beim Einatmen wird der Puls etwas schneller, beim Ausatmen langsamer. Wie stark
+das ausgeprägt ist, hängt von vielem ab — Alter, Tageszeit, Schlaf, Atmung,
+Anstrengung, Koffein. Darum vergleicht man HRV-Werte am besten **mit sich
+selbst** unter gleichen Bedingungen, nie mit anderen Menschen.
+
+Die App zeigt dir Kennzahlen wie **RMSSD** (wie stark aufeinanderfolgende
+Schläge voneinander abweichen) und **SDNN** (die Streuung aller Schläge im
+Fenster). Sie zeigt Werte und Verläufe — eine Bewertung oder Empfehlung leitet
+sie daraus nicht ab.
+
+Im nächsten Kapitel geht es um den Sensor.
+"""
+
+[[kurse.kapitel]]
+key = "sensor"
+titel = "Sensor anlegen und verbinden"
+text = """
+Für eine HRV-Messung braucht die App die einzelnen Schlagabstände. Ein
+**Brustgurt** (etwa Polar H10) misst sie elektrisch wie ein EKG — das ist die
+beste Datenqualität. Ein optischer Sensor am Arm (Polar Verity Sense) liefert
+Pulsabstände, die für Frequenzwerte nur mit Vorbehalt taugen; die App zeigt das
+an. Eine Uhr, die nur den Puls sendet, reicht für die HRV nicht.
+
+**Brustgurt anlegen:** die Elektroden anfeuchten, den Gurt eng unter der Brust
+tragen, Sensor vorn in der Mitte. Trocken sitzende Elektroden sind die häufigste
+Ursache für Aussetzer in der Kurve.
+
+**Verbinden:** Bluetooth am Handy einschalten, in der App den Reiter
+**Messung** öffnen und oben „Verbinden“ antippen. Die App merkt sich den Sensor;
+beim nächsten Mal findet sie ihn von selbst. Sobald Werte ankommen, siehst du
+oben Herzfrequenz und RR-Abstand und darunter die laufende Kurve.
+"""
+
+[[kurse.kapitel]]
+key = "erste_messung"
+titel = "Die erste Messung"
+text = """
+Jetzt wird gemessen. Setz oder leg dich bequem hin, atme ruhig und sprich
+nicht. Fünf Minuten sind ein guter Anfang — kürzere Messungen sind für die
+Kennzahlen zu kurz, längere nicht nötig.
+
+1. Reiter **Messung**, Sensor verbunden.
+2. Oben auf **Aufnahme** tippen. Die Aufnahme läuft, das Display bleibt an.
+3. Nach fünf Minuten die Aufnahme beenden. Sie erscheint unter
+   **Aufzeichnungen**, gespeichert als Datei auf dem Gerät.
+
+Dieses Kapitel gilt als abgeschlossen, sobald eine Aufzeichnung von mindestens
+fünf Minuten vorliegt. Wenn du gerade keinen Sensor hast, kannst du es auch
+freischalten — die App fragt einmal nach.
+"""
+bedingung = { art = "messung", soll = 5 }
+
+[[kurse.kapitel]]
+key = "kurve_lesen"
+titel = "Die Kurve lesen"
+text = """
+Öffne deine Aufzeichnung. Die **Hauptkurve** zeigt die RR-Abstände über die
+Zeit, die zweite Kurve die Herzfrequenz. Eine ruhige Messung sieht aus wie ein
+Wellenband: Die Atmung lässt die Abstände regelmäßig länger und kürzer werden.
+
+**Ausreißer** — einzelne Spitzen weit außerhalb des Bandes — sind meist keine
+Herzschläge, sondern Aussetzer des Sensors oder Bewegung. Die App markiert sie
+und rechnet die Kennzahlen ohne sie (**korrigierte Kurve**). Was sie verworfen
+hat, siehst du in den Korrekturketten unter der Kurve. Der Grundsatz dabei:
+lieber eine Lücke als ein falscher Wert.
+
+Mit zwei Fingern ziehst du das **Zeitfenster** auf oder zu und wischst darin;
+die Kacheln über der Kurve zeigen die Kennzahlen des sichtbaren Ausschnitts.
+"""
+
+[[kurse.kapitel]]
+key = "notizen"
+titel = "Notizen und Abschnitte"
+text = """
+Eine Messung ohne Zusammenhang sagt wenig. Darum kannst du in jede Messung
+**Notizen mit Zeitanker** schreiben — live während der Aufnahme („Kaffee“,
+„Tür geklingelt“) oder später, indem du in die Kurve tippst. Die Notiz steht an
+genau dieser Stelle.
+
+**Abschnitte** teilen die Messung in Bereiche, zum Beispiel „Ruhe“ und
+„Atemübung“. Jeder Abschnitt bekommt eigene Kennzahlen, sodass du Phasen
+innerhalb einer Messung vergleichen kannst. Der **Timer** kann Abschnitte
+automatisch setzen, wenn du mit ihm durch eine Übung gehst.
+
+Titel und Notizen werden in die Messdatei zurückgeschrieben; die Messwerte
+selbst bleiben immer unverändert.
+"""
+
+[[kurse.kapitel]]
+key = "ruhig_atmen"
+titel = "Ruhig atmen"
+text = """
+Die Atmung ist der Hebel, den du am deutlichsten in der Kurve siehst. Bei
+gleichmäßigen sechs Atemzügen pro Minute — fünf Sekunden ein, fünf Sekunden
+aus — schwingt der Herzschlag sichtbar mit.
+
+Dieses Kapitel legt dir einen kleinen **Plan** an: die Kohärenzatmung, täglich
+fünf Minuten. Er erscheint auf „Heute“. Starte die Übung dort, lass den Timer
+mitlaufen und miss nach Lust und Laune dabei. Nach drei Übungstagen geht es
+weiter — oder du schaltest das nächste Kapitel vorher frei.
+"""
+bedingung = { art = "tage", soll = 3 }
+
+[[kurse.kapitel.plaene]]
+name = "Kurs: Ruhig atmen"
+wochentage = [0, 1, 2, 3, 4, 5, 6]
+uebungen = [{ uebung = "kohaerenzatmung" }]
+
+[[kurse.kapitel]]
+key = "einstellungen"
+titel = "Einstellungen, Export und wie es weitergeht"
+text = """
+Unter **Einstellungen → HRV-Messung** stellst du ein, welche Kacheln über der
+Kurve stehen, wie breit das Zeitfenster ist und ob die **Frequenzanalyse**
+(Spektrum, LF/HF) und die nichtlinearen Kennzahlen gerechnet werden. Für den
+Anfang sind sie aus — die Zeitbereichswerte reichen.
+
+Jede Messung liegt als Datei auf dem Gerät. Mit **Exportieren** gibst du sie als
+ZIP weiter oder sicherst sie; das Format ist dasselbe wie in der Praxisanwendung.
+GPS-Daten eines Trainings gehen dabei nie mit.
+
+Damit hast du das Wichtigste gesehen. Miss am besten regelmäßig zur gleichen
+Tageszeit — erst der Verlauf über Wochen macht die Zahlen für dich lesbar.
+"""

@@ -180,6 +180,7 @@ def test_herkunft_wird_fuer_alte_datenbanken_nachgetragen(con) -> None:
     u.description = "Meine Fassung"
     repo.speichern(u)
     con.execute("UPDATE exercise SET package_id = NULL")
+    con.execute("DELETE FROM course")  # Kurse gab es damals auch nicht
     con.execute("DELETE FROM package")
 
     assert seed_einspielen(con) == 0

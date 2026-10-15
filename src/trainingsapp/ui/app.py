@@ -13,6 +13,7 @@ Routen:
     /plan/<id>/eintrag/<id>[/korrigieren]   Eintrag von heute aus dem Plan heraus
     /plan/<id>/bearbeiten[/…]       Plan bearbeiten, aus dem Üben heraus
     /plaene/<id>                    Plan bearbeiten (aus „Übungen" → „Pläne")
+    /kurse/<id>[/<kapitel_id>]      Ein Kurs mit seinen Kapiteln; ein Kapitel (Text, Pläne, Weiter)
     /messung/<id>                   Eine HRV-Aufzeichnung: Kurven, Kennzahlen, Korrektur
     /training/<übung>[/info|/eintrag/<id>]   Eine einzelne Übung üben — ohne Plan (Katalog)
     <bearbeiten>/ziel/<item_id>     Planübung einstellen: Stufe, Chips, Ziel
@@ -60,6 +61,7 @@ from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
 from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
+from trainingsapp.ui.views.kurse import kapitel_view, kurs_view
 from trainingsapp.ui.views.live_vollbild import live_vollbild_view
 from trainingsapp.ui.views.messung import messung
 from trainingsapp.ui.views.messung_detail import messung_detail_view
@@ -163,12 +165,13 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
     )
 
     def hauptansicht_aktualisieren() -> None:
-        # Der runde Knopf hängt am Reiter: Katalog → neue Übung, Pläne → neuer Plan.
+        # Der runde Knopf hängt am Reiter: Katalog → neue Übung, Pläne → neuer Plan,
+        # Kurse → keiner (sie kommen über Pakete; ein Editor ist Zukunft).
         if state.reiter == "uebungen" and state.uebungen_tab == 0:
             ansicht.floating_action_button = ft.FloatingActionButton(
                 icon=ft.Icons.ADD, tooltip="Neue Übung", on_click=neue_uebung
             )
-        elif state.reiter == "uebungen":
+        elif state.reiter == "uebungen" and state.uebungen_tab == 1:
             ansicht.floating_action_button = ft.FloatingActionButton(
                 icon=ft.Icons.ADD, tooltip="Neuer Plan", on_click=neuen_plan_anlegen(page, state)
             )
@@ -412,6 +415,11 @@ def main(page: ft.Page) -> None:
                     page.views.append(uebung_bearbeiten(page, state, uebung))
         elif teile[:1] in (["plan"], ["plaene"]) and len(teile) >= 2:
             plan_routen(teile)
+        elif teile[:1] == ["kurse"] and len(teile) >= 2:
+            if (kurs := state.kurse.laden(teile[1])) is not None:
+                page.views.append(kurs_view(page, state, kurs))
+                if len(teile) >= 3 and (kapitel := kurs.kapitel_mit(teile[2])) is not None:
+                    page.views.append(kapitel_view(page, state, kurs, kapitel, browser))
         elif teile[:1] == ["live"]:
             page.views.append(live_vollbild_view(page, state))
         elif teile[:1] == ["ausdauer"]:

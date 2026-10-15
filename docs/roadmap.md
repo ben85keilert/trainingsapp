@@ -17,6 +17,7 @@ einem sichtbaren Fortschritt in der App.
 | M9 | Eigene Flet-Extension: BLE und Foreground Service auf Android | Ausblick A | teilweise |
 | M10 | Medien: eigene Übungen mit Foto, Dokumentationsvideos | — | offen |
 | M11 | Edition B: Outbox-Sync, Anmeldung, Nachrichten, Übungszuweisung | Ausblick B | offen |
+| M12 | Kurse: Kapitel mit Freischaltbedingungen, Pläne aus Kapiteln, Einführungskurs HRV (`docs/plan_kurse.md`) | — | **Phasen 0–3 fertig** (15.10.), Editor und Medien offen |
 
 ## Was in M0 bereits steht
 

@@ -85,6 +85,15 @@ Session dieses Plans gibt — so wird ein nicht anstehender Plan „für heute
 aufgenommen", ohne eigene Tabelle (`core/plaene.py`, `SessionRepo.plaene_am_tag`).
 Eine aufgenommene Session ohne Eintrag lässt sich wieder entfernen.
 
+**Kurse** (Migration 016, `docs/plan_kurse.md`): `course` (Name, Freischaltmodus,
+Herkunft `package_id` + Paketstand wie bei Übungen), `course_chapter` (Reihenfolge,
+Titel, Markdown-Text, `gate_json` = Bedingung, `plans_json` = Plan-Vorlagen,
+`media_json`), `course_progress` (je Profil und Kapitel: erreicht, abgeschlossen,
+übersprungen; `UNIQUE(subject_id, chapter_id)`). Pläne, die ein Kapitel anlegt,
+tragen `plan.course_chapter_id` und werden beim Abschluss des Kapitels deaktiviert,
+nie gelöscht. Bedingungen rechnen aus `session_entry` und `hrv_recording`, nie aus
+Messwerten (`core/kurse.py`, `data/kurse.py`).
+
 **Der Tag ist die Bezugsgröße.** Zeitstempel sind UTC, aber „heute" ist ein
 lokaler Kalendertag. `core.models.tagesgrenzen()` rechnet die lokale
 Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,

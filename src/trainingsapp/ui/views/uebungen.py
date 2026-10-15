@@ -1,8 +1,10 @@
-"""Reiter „Übungen": links der Katalog, rechts die Pläne — wischbar.
+"""Reiter „Übungen": Katalog, Pläne und Kurse — wischbar.
 
-Der Katalog ist die Vorratskammer, der Plan der Rahmen, in dem man variiert.
-Beides gehört zusammen, deshalb liegen sie nebeneinander. Der runde Knopf
-wechselt mit: links „Neue Übung", rechts „Neuer Plan".
+Der Katalog ist die Vorratskammer, der Plan der Rahmen, in dem man variiert,
+der Kurs der Weg Kapitel für Kapitel (`views/kurse.py`). Alles drei gehört
+zusammen, deshalb liegt es nebeneinander. Der runde Knopf wechselt mit: links
+„Neue Übung", in der Mitte „Neuer Plan", bei den Kursen keiner (Kurse kommen
+über Pakete).
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from trainingsapp.core.models import Plan
 from trainingsapp.core.plaene import erledigte, tage_text
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.katalog import katalog, trainieren_knopf
+from trainingsapp.ui.views.kurse import kurse_liste
 
 
 def neuen_plan_anlegen(page: ft.Page, state: AppState) -> Callable[[], None]:
@@ -133,7 +136,7 @@ def uebungen(page: ft.Page, state: AppState) -> ft.Control:
         state.neu_zeichnen()  # der runde Knopf hängt am Reiter
 
     return ft.Tabs(
-        length=2,
+        length=3,
         selected_index=state.uebungen_tab,
         on_change=wechseln,
         expand=True,
@@ -145,11 +148,16 @@ def uebungen(page: ft.Page, state: AppState) -> ft.Control:
                     tabs=[
                         ft.Tab(label="Übungen", icon=ft.Icons.FITNESS_CENTER),
                         ft.Tab(label="Pläne", icon=ft.Icons.LIST_ALT),
+                        ft.Tab(label="Kurse", icon=ft.Icons.SCHOOL_OUTLINED),
                     ]
                 ),
                 ft.TabBarView(
                     expand=True,
-                    controls=[katalog(page, state), plaene_liste(page, state)],
+                    controls=[
+                        katalog(page, state),
+                        plaene_liste(page, state),
+                        kurse_liste(page, state),
+                    ],
                 ),
             ],
         ),

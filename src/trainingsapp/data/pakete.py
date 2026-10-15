@@ -27,6 +27,12 @@ Regeln (Ben, 14.10.2026; `docs/uebungspakete.md`):
   keine Variante ist (keine Ketten), und wenn die Übung nicht schon Original
   anderer ist.
 
+- **Kurse** (Ben, 15.10.2026; `core/kurse.py`) folgen denselben Regeln wie
+  Übungen: neue werden angelegt, Kurse desselben Pakets bekommen den Stand der
+  Datei (Kapitel-IDs bleiben, der Fortschritt hängt daran), fremde und eigene
+  bleiben. Entfernen nimmt die Kurse des Pakets aus der Liste (weich); der
+  Fortschritt bleibt für „Wieder installieren“.
+
 Der Seed (`data/seed.py`) ist ein Import des Pakets „Standard“, der Vorhandenes
 nur anfasst, wenn dessen Version gestiegen ist — und nichts tut, wenn es im
 Paketmanager entfernt wurde.
@@ -42,10 +48,12 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
+from ..core.kurse import Kurs
 from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, PlanItem, jetzt, new_id
-from ..core.pakete import Paket, Paketinhalt, aus_stand, stand
+from ..core.pakete import Paket, Paketinhalt, aus_stand, kurs_aus_stand, kurs_stand, stand
 from ..core.pakete import abweichungen as _abweichungen
 from .db import transaktion
+from .kurse import KursRepo
 from .repositories import ExerciseRepo, PlanRepo
 
 
@@ -81,14 +89,19 @@ class Vorschau:
     status: dict[str, Status] = field(default_factory=dict)
     neue_typen: list[str] = field(default_factory=list)
     neue_regionen: list[str] = field(default_factory=list)
+    #: Kurs-ID → Status (Formatversion 2)
+    kurse: dict[str, Status] = field(default_factory=dict)
 
     def anzahl(self, *stati: Status) -> int:
         return sum(1 for s in self.status.values() if s in stati)
 
+    def anzahl_kurse(self, *stati: Status) -> int:
+        return sum(1 for s in self.kurse.values() if s in stati)
+
     @property
     def zu_tun(self) -> bool:
-        """Schreibt der Import überhaupt eine Übung?"""
-        return self.anzahl(*SCHREIBT) > 0
+        """Schreibt der Import überhaupt eine Übung oder einen Kurs?"""
+        return self.anzahl(*SCHREIBT) > 0 or self.anzahl_kurse(*SCHREIBT) > 0
 
     def zusammenfassung(self) -> list[str]:
         """Was passiert, in Worten — eine Zeile je Fall, für die Rückfrage vor dem Import.
@@ -116,6 +129,16 @@ class Vorschau:
             zeilen.append(f"{n} {was} zu einem anderen Paket — {wie}")
         if n := self.anzahl(Status.GELOESCHT):
             zeilen.append(f"{n} endgültig gelöscht — {'bleibt' if n == 1 else 'bleiben'} weg")
+        for s, was in (
+            (Status.NEU, "neu"),
+            (Status.ZURUECK, "zurück — das Paket war entfernt"),
+            (Status.GEAENDERT, "aktualisiert — der Fortschritt bleibt"),
+            (Status.UNVERAENDERT, "schon auf dem Stand"),
+            (Status.FREMD, "aus einem anderen Paket — bleibt"),
+            (Status.EIGENE, "eigener Kurs — bleibt"),
+        ):
+            if n := self.anzahl_kurse(s):
+                zeilen.append(f"{'1 Kurs' if n == 1 else f'{n} Kurse'} {was}")
         if self.neue_typen:
             zeilen.append("Neue Typen: " + ", ".join(self.neue_typen))
         if self.neue_regionen:
@@ -237,7 +260,21 @@ class PaketRepo:
                 uebungen.append(aus_stand(r["id"], paket_id, json.loads(r[1])))
             except (KeyError, TypeError, ValueError):
                 continue  # unlesbarer Stand: diese Übung bleibt, wo sie ist
-        return Paketinhalt(paket, uebungen) if uebungen else None
+        kurse: list[Kurs] = []
+        for r in self.con.execute(
+            "SELECT id, package_standard_json FROM course "
+            "WHERE package_id = ? AND package_standard_json IS NOT NULL ORDER BY created_at",
+            (paket_id,),
+        ).fetchall():
+            try:
+                kurse.append(kurs_aus_stand(r["id"], paket_id, json.loads(r[1])))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return Paketinhalt(paket, uebungen, kurse) if uebungen or kurse else None
+
+    def kurse(self, paket_id: str) -> list[Kurs]:
+        """Die Kurse eines Pakets, die in der Liste stehen (nicht entfernt)."""
+        return [k for k in KursRepo(self.con).des_pakets(paket_id) if k.deleted_at is None]
 
     # -- Paketmanager --------------------------------------------------------
 
@@ -310,6 +347,9 @@ class PaketRepo:
             for uebung_id in ids:
                 self.con.execute("DELETE FROM plan_item WHERE exercise_id = ?", (uebung_id,))
                 repo.in_papierkorb(uebung_id)
+            kurse = KursRepo(self.con)
+            for kurs in kurse.des_pakets(paket_id):
+                kurse.loeschen(kurs.id)
             self.con.execute(
                 "UPDATE package SET removed_at = ? WHERE id = ?", (jetzt().isoformat(), paket_id)
             )
@@ -386,13 +426,17 @@ class PaketRepo:
         Schreibt der Import keine Übung und ist das Paket nicht installiert
         (der eigene Export, wieder eingelesen), bleibt alles, wie es ist.
         """
-        vorschau, ziele, staende = self._planen(inhalt, aktualisieren=aktualisieren)
+        vorschau, ziele, staende, kurs_ziele = self._planen(inhalt, aktualisieren=aktualisieren)
         if vorschau.installiert is None and not vorschau.zu_tun:
             return vorschau
         repo = ExerciseRepo(self.con)
+        kurse = KursRepo(self.con)
         stempel = jetzt().isoformat()
         with transaktion(self.con):
             self._eintragen(inhalt.paket, geschrieben=vorschau.zu_tun)
+            for kurs in kurs_ziele:
+                kurs.deleted_at = None  # ZURUECK: wieder in der Liste
+                kurse.speichern(kurs, package_standard=kurs_stand(kurs))
             # Originale zuerst: Eine Variante darf nur auf Vorhandenes zeigen.
             for u in sorted(ziele, key=lambda u: u.family_id is not None):
                 repo.speichern(u, neue_tags_oben=neue_tags_oben)
@@ -441,8 +485,9 @@ class PaketRepo:
 
     def _planen(
         self, inhalt: Paketinhalt, aktualisieren: bool
-    ) -> tuple[Vorschau, list[Exercise], dict[str, dict[str, Any]]]:
-        """Status je Übung, die Übungen so, wie der Import sie schreibt, und ihr Paketstand."""
+    ) -> tuple[Vorschau, list[Exercise], dict[str, dict[str, Any]], list[Kurs]]:
+        """Status je Übung, die Übungen so, wie der Import sie schreibt, ihr Paketstand —
+        und die Kurse, die er schreibt."""
         paket = inhalt.paket
         da_ist = self.laden(paket.id)
         entfernt = da_ist is not None and da_ist.entfernt is not None
@@ -542,7 +587,37 @@ class PaketRepo:
             for name, art in neue:
                 (vorschau.neue_typen if art == TAG_TYP else vorschau.neue_regionen).append(name)
             ziele.append(ziel)
-        return vorschau, ziele, staende
+
+        # 4. Kurse: dieselben Regeln, verglichen mit dem gespeicherten Paketstand.
+        kurs_zeilen = {
+            r["id"]: r
+            for r in self.con.execute(
+                "SELECT id, package_id, deleted_at, package_standard_json FROM course"
+            )
+        }
+        kurs_ziele: list[Kurs] = []
+        for k in inhalt.kurse:
+            r = kurs_zeilen.get(k.id)
+            if r is None:
+                s = Status.NEU
+            elif r["package_id"] is None:
+                s = Status.EIGENE
+            elif r["package_id"] != paket.id:
+                s = Status.FREMD
+            elif entfernt and r["deleted_at"] is not None:
+                s = Status.ZURUECK
+            elif not aktualisieren:
+                s = Status.UNVERAENDERT
+            else:
+                try:
+                    alt = json.loads(r["package_standard_json"] or "null")
+                except ValueError:
+                    alt = None
+                s = Status.UNVERAENDERT if alt == kurs_stand(k) else Status.GEAENDERT
+            vorschau.kurse[k.id] = s
+            if s in SCHREIBT:
+                kurs_ziele.append(k)
+        return vorschau, ziele, staende, kurs_ziele
 
     def _bekannte_tags(self) -> dict[str, tuple[str, str]]:
         """casefold → (Name, Art) aller Tags — für `_tags_angleichen`."""

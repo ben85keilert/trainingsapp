@@ -54,6 +54,10 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     "uebungen_bearbeiten": {Edition.SOLO, Edition.PRAXIS},
     # Übungspläne, die jemand anderes zusammenstellt (Therapeut → Patient)
     "zugewiesene_plaene": {Edition.PRAXIS},
+    # Kurse: Kapitel der Reihe nach, mit Freischaltbedingungen (core/kurse.py)
+    "kurse": {Edition.SOLO, Edition.PRAXIS},
+    # Kurse, die jemand anderes zuweist — dann ohne Überspringen („streng“)
+    "zugewiesene_kurse": {Edition.PRAXIS},
     # Regeln, die aus Puls oder HRV eine Handlungsempfehlung ableiten.
     # In Edition A bewusst gesperrt — das wäre eine medizinische Aussage.
     # Siehe docs/recht/00_zweckbestimmung.md.

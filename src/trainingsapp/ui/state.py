@@ -42,6 +42,7 @@ from trainingsapp.core.timer import (
 )
 from trainingsapp.core.verlauf import MODUS_NUMMER
 from trainingsapp.data.db import oeffnen
+from trainingsapp.data.kurse import KursRepo
 from trainingsapp.data.pakete import PaketRepo
 from trainingsapp.data.repositories import (
     DayNoteRepo,
@@ -99,6 +100,8 @@ class AppState:
     tags: TagRepo
     #: Übungspakete (Migration 014) — importieren, exportieren, Herkunft
     pakete: PaketRepo
+    #: Kurse (Migration 016) — Kapitel, Fortschritt je Profil, Pläne aus Kapiteln
+    kurse: KursRepo
     profil: Subject
     #: Welcher Reiter der Navigationsleiste aktiv ist — als Schlüssel, nicht als
     #: Index: der Reiter „Messung" lässt sich ausblenden (`app.REITER`)
@@ -246,6 +249,7 @@ class AppState:
             verwaiste_strecken=verwaist,
             tags=TagRepo(con),
             pakete=PaketRepo(con),
+            kurse=KursRepo(con),
             profil=profil,
             neu_eingespielt=neu,
             papierkorb_offen=offen,

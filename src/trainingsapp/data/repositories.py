@@ -645,8 +645,8 @@ class PlanRepo:
             self.con.execute(
                 """
                 INSERT INTO plan (id, name, description, subject_id, created_at, updated_at,
-                                  active, weekdays_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                  active, weekdays_json, course_chapter_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -654,6 +654,7 @@ class PlanRepo:
                     updated_at = excluded.updated_at,
                     active = excluded.active,
                     weekdays_json = excluded.weekdays_json,
+                    course_chapter_id = excluded.course_chapter_id,
                     revision = revision + 1
                 """,
                 (
@@ -665,6 +666,7 @@ class PlanRepo:
                     stempel,
                     int(plan.aktiv),
                     json.dumps(sorted(set(plan.wochentage))),
+                    plan.kurs_kapitel_id,
                 ),
             )
             self.con.execute(
@@ -976,6 +978,7 @@ class PlanRepo:
             deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
             aktiv=bool(r["active"]),
             wochentage=json.loads(r["weekdays_json"]),
+            kurs_kapitel_id=r["course_chapter_id"],
         )
 
 

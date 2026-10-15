@@ -24,9 +24,15 @@ Paket und Schlüssel. „Standard“ (früher „Grundausstattung“) behält di
 Paketen (nur aus dem Schlüssel) — sonst stünde jede mitgelieferte Übung nach
 dem Update doppelt da.
 
-**Was nicht hineinkommt:** Einträge, Messungen, Strecken, Pläne — ein Paket
-beschreibt Übungen, nicht Training. Eigene Fotos und Videos (``local``) liegen
-nur auf dem Gerät und bleiben draußen; Video-Links kommen mit.
+**Kurse** (Ben, 15.10.2026; `core/kurse.py`) kommen seit Formatversion 2 im
+Feld ``kurse`` mit: Kapitel mit Text, Medien, Plan-Vorlagen und Bedingung. Übungen
+darin heißen wie im Paket (``key``) oder tragen eine ID. Ein Paket darf auch nur
+Kurse enthalten.
+
+**Was nicht hineinkommt:** Einträge, Messungen, Strecken, eigene Pläne, der
+Kursfortschritt — ein Paket beschreibt Übungen und Kurse, nicht Training. Eigene
+Fotos und Videos (``local``) liegen nur auf dem Gerät und bleiben draußen;
+Video-Links kommen mit.
 """
 
 from __future__ import annotations
@@ -35,17 +41,30 @@ import json
 import math
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from .kurse import (
+    BEDINGUNGEN,
+    FREISCHALTUNGEN,
+    RUECKFRAGE,
+    Bedingung,
+    Kapitel,
+    Kurs,
+    PlanVorlage,
+    medien_from_list,
+    medien_to_list,
+)
 from .models import Exercise, Media, MediaKind, MediaSource, jetzt
 from .result_spec import VORLAGEN, ResultSpec
 
 #: Kennung im Feld ``format`` — andere JSON-Dateien (Messungen) sind kein Paket
 FORMAT = "trainingsapp-uebungspaket"
-#: Höchste Formatversion, die diese App liest
-FORMAT_VERSION = 1
+#: Höchste Formatversion, die diese App liest — 2 seit es Kurse gibt (``kurse``);
+#: eine Datei ohne Kurse wird weiter als Version 1 geschrieben
+FORMAT_VERSION = 2
 
 #: Namensraum der UUIDv5-IDs — derselbe wie für den Seed vor den Paketen.
 #: Einmal gewählt, nie ändern, sonst bekäme jede Übung eine neue ID.
@@ -95,6 +114,8 @@ class Paketinhalt:
 
     paket: Paket
     uebungen: list[Exercise] = field(default_factory=list)
+    #: Kurse des Pakets (Formatversion 2) — jeder trägt ``package_id`` = Paket
+    kurse: list[Kurs] = field(default_factory=list)
 
 
 def paket_id(name: str) -> str:
@@ -123,6 +144,21 @@ def uebung_id(paket: str, key: str) -> str:
     if paket == GRUNDAUSSTATTUNG:  # die IDs von vor den Paketen
         return str(uuid.uuid5(NAMENSRAUM, key))
     return str(uuid.uuid5(NAMENSRAUM, f"{paket}/{key}"))
+
+
+def kurs_id(paket: str, key: str) -> str:
+    """Die ID eines Kurses, der im Paket nur einen Schlüssel hat.
+
+    >>> kurs_id("p1", "hrv") != uebung_id("p1", "hrv")
+    True
+    """
+    return str(uuid.uuid5(NAMENSRAUM, f"{paket}/kurs:{key}"))
+
+
+def kapitel_id(kurs: str, key: str) -> str:
+    """Die ID eines Kapitels aus Kurs-ID und Schlüssel (oder Nummer) — der
+    Fortschritt hängt daran, darum muss sie auf jedem Gerät gleich sein."""
+    return str(uuid.uuid5(NAMENSRAUM, f"{kurs}/kapitel:{key}"))
 
 
 def name_pruefen(name: str) -> str | None:
@@ -182,10 +218,13 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
         raise PaketFehler("Das ist keine Paketdatei (Formatversion unlesbar).")
     if version > FORMAT_VERSION:
         raise PaketFehler("Das Paket ist neuer als diese App — bitte die App aktualisieren.")
-    eintraege = roh.get("exercises")
+    eintraege = roh.get("exercises", [])
     if not isinstance(eintraege, list):
         raise PaketFehler("Das ist keine Paketdatei (keine Übungsliste).")
-    if not eintraege:
+    kurs_eintraege = roh.get("kurse", [])
+    if not isinstance(kurs_eintraege, list):
+        raise PaketFehler("Das ist keine Paketdatei (Kursliste unlesbar).")
+    if not eintraege and not kurs_eintraege:
         raise PaketFehler("Das Paket enthält keine Übungen.")
 
     kopf = roh.get("paket", {})
@@ -230,7 +269,95 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
             u.family_id = schluessel.get(u.family_id, u.family_id)
             if u.family_id == u.id:
                 u.family_id = None
-    return Paketinhalt(paket, uebungen)
+
+    kurse: list[Kurs] = []
+    kurs_ids: set[str] = set()
+    for nr, eintrag in enumerate(kurs_eintraege, start=1):
+        try:
+            kurs = _kurs_lesen(eintrag, paket.id, schluessel)
+        except (KeyError, TypeError, ValueError) as grund:
+            titel = eintrag.get("name") if isinstance(eintrag, dict) else None
+            probleme.append(f"Kurs {nr}{f' („{titel}“)' if titel else ''}: {grund}")
+            continue
+        if kurs.id in kurs_ids:
+            probleme.append(f"Kurs {nr} („{kurs.name}“) steht doppelt im Paket.")
+            continue
+        kurs_ids.add(kurs.id)
+        kurse.append(kurs)
+    if probleme:
+        rest = len(probleme) - 3
+        raise PaketFehler("\n".join(probleme[:3]) + (f"\n… und {rest} weitere" if rest > 0 else ""))
+    return Paketinhalt(paket, uebungen, kurse)
+
+
+def _kurs_lesen(eintrag: Any, paket: str, schluessel: Mapping[str, str]) -> Kurs:
+    """Ein Kurs aus der Datei. ``schluessel`` löst Übungsschlüssel des Pakets in IDs auf."""
+    if not isinstance(eintrag, dict):
+        raise ValueError("kein Eintrag mit Feldern")
+    name = " ".join(str(eintrag.get("name") or "").split())
+    if not name:
+        raise ValueError("der Name fehlt")
+    key = str(eintrag.get("key") or "").strip()
+    kid = str(eintrag.get("id") or "").strip() or kurs_id(paket, key or name)
+    freischaltung = str(eintrag.get("freischaltung") or RUECKFRAGE)
+    if freischaltung not in FREISCHALTUNGEN:
+        raise ValueError(f"unbekannte Freischaltung „{freischaltung}“")
+    kapitel: list[Kapitel] = []
+    ids: set[str] = set()
+    for nr, roh in enumerate(_liste(eintrag.get("kapitel", []), "kapitel"), start=1):
+        if not isinstance(roh, dict):
+            raise ValueError(f"Kapitel {nr} ist kein Eintrag mit Feldern")
+        titel = " ".join(str(roh.get("titel") or roh.get("title") or "").split())
+        if not titel:
+            raise ValueError(f"Kapitel {nr}: der Titel fehlt")
+        kkey = str(roh.get("key") or "").strip() or str(nr)
+        k = Kapitel(
+            id=str(roh.get("id") or "").strip() or kapitel_id(kid, kkey),
+            kurs_id=kid,
+            order=nr - 1,
+            titel=titel,
+            text=str(roh.get("text") or ""),
+            media=medien_from_list(_liste(roh.get("media", []), "media")),
+            plaene=[_vorlage_lesen(v, schluessel) for v in _liste(roh.get("plaene", []), "plaene")],
+            bedingung=_bedingung_lesen(roh.get("bedingung", {}), schluessel),
+        )
+        if k.id in ids:
+            raise ValueError(f"Kapitel {nr} („{titel}“) steht doppelt")
+        ids.add(k.id)
+        kapitel.append(k)
+    if not kapitel:
+        raise ValueError("der Kurs hat kein Kapitel")
+    return Kurs(
+        id=kid,
+        name=name,
+        beschreibung=str(eintrag.get("beschreibung") or "").strip(),
+        freischaltung=freischaltung,
+        kapitel=kapitel,
+        package_id=paket,
+    )
+
+
+def _vorlage_lesen(roh: Any, schluessel: Mapping[str, str]) -> PlanVorlage:
+    vorlage = PlanVorlage.from_dict(_objekt(roh, "plaene"))
+    if not vorlage.items:
+        raise ValueError(f"Plan „{vorlage.name}“ hat keine Übung")
+    for item in vorlage.items:
+        item.exercise_id = schluessel.get(item.exercise_id, item.exercise_id)
+        _werte_pruefen(item.target, "ziel")
+    return vorlage
+
+
+def _bedingung_lesen(roh: Any, schluessel: Mapping[str, str]) -> Bedingung:
+    b = Bedingung.from_dict(_objekt(roh, "bedingung"))
+    art = str(roh.get("art") or "gelesen") if isinstance(roh, dict) else "gelesen"
+    if art not in BEDINGUNGEN:
+        raise ValueError(f"unbekannte Bedingung „{art}“")
+    if art != "gelesen" and b.soll <= 0:
+        raise ValueError(f"Bedingung „{art}“ braucht ein Soll größer 0")
+    if art == "summe" and not b.exercise_id:
+        raise ValueError("Bedingung „summe“ braucht eine Übung")
+    b.exercise_id = schluessel.get(b.exercise_id, b.exercise_id)
+    return b
 
 
 def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
@@ -349,6 +476,8 @@ def _medium(roh: Any) -> Media | None:
         art = MediaKind(roh.get("kind", "video"))
     except ValueError:
         raise ValueError(f"Medium „{uri}“: unbekannte Art oder Quelle") from None
+    if art == MediaKind.AUDIO:
+        raise ValueError(f"Medium „{uri}“: Ton gibt es nur an Kurskapiteln")
     if not uri or quelle == MediaSource.LOCAL:
         return None
     return Media(
@@ -477,33 +606,85 @@ def abweichungen(u: Exercise, standard: dict[str, Any]) -> list[str]:
     return [text for feld, text in FELDNAMEN.items() if jetzt.get(feld) != standard.get(feld)]
 
 
+def kurs_stand(k: Kurs) -> dict[str, Any]:
+    """Was ein Paket über einen Kurs festlegt — ohne ID, Herkunft und Zustand.
+
+    Kapitel tragen ihre ID: Daran hängt der Fortschritt, sie muss ein Update
+    überleben.
+
+    >>> k = Kurs(name="HRV", kapitel=[Kapitel(titel="Was ist das?")])
+    >>> kurs_stand(k)["kapitel"][0]["titel"]
+    'Was ist das?'
+    """
+    d: dict[str, Any] = {"name": k.name}
+    if k.beschreibung:
+        d["beschreibung"] = k.beschreibung
+    d["freischaltung"] = k.freischaltung
+    kapitel: list[dict[str, Any]] = []
+    for kap in k.kapitel:
+        e: dict[str, Any] = {"id": kap.id, "titel": kap.titel}
+        if kap.text:
+            e["text"] = kap.text
+        if medien := medien_to_list(kap.media):
+            e["media"] = medien
+        if kap.plaene:
+            e["plaene"] = [p.to_dict() for p in kap.plaene]
+        e["bedingung"] = kap.bedingung.to_dict()
+        kapitel.append(e)
+    d["kapitel"] = kapitel
+    return d
+
+
+def kurs_aus_stand(kurs_id: str, paket: str, standard: dict[str, Any]) -> Kurs:
+    """Der Kurs so, wie das Paket ihn festlegt — Gegenstück zu `kurs_stand`.
+
+    >>> k = Kurs(name="HRV", kapitel=[Kapitel(titel="A")])
+    >>> zurueck = kurs_aus_stand(k.id, "p1", kurs_stand(k))
+    >>> (zurueck.id == k.id, zurueck.kapitel[0].id == k.kapitel[0].id, zurueck.package_id)
+    (True, True, 'p1')
+    """
+    return _kurs_lesen({**standard, "id": kurs_id}, paket, {})
+
+
 def paket_bauen(
-    paket: Paket, uebungen: list[Exercise], exportiert: datetime | None = None
+    paket: Paket,
+    uebungen: list[Exercise],
+    exportiert: datetime | None = None,
+    kurse: list[Kurs] | None = None,
 ) -> dict[str, Any]:
     """Die Paketdatei als Wörterbuch — `paket_json` macht Bytes daraus.
+
+    Ohne Kurse bleibt die Datei Formatversion 1 — ältere Apps lesen sie weiter.
 
     >>> u = Exercise(name="Baum", typen=["Qigong"])
     >>> zurueck = paket_lesen(paket_bauen(Paket(id="p1", name="Qigong"), [u])).uebungen[0]
     >>> (zurueck.id == u.id, zurueck.name, zurueck.typen, zurueck.package_id)
     (True, 'Baum', ['Qigong'], 'p1')
+    >>> k = Kurs(name="HRV", kapitel=[Kapitel(titel="A")])
+    >>> roh = paket_bauen(Paket(id="p1", name="Qigong"), [u], kurse=[k])
+    >>> roh["version"], paket_lesen(roh).kurse[0].name
+    (2, 'HRV')
     """
     kopf: dict[str, Any] = {"id": paket.id, "name": paket.name}
     if paket.beschreibung:
         kopf["beschreibung"] = paket.beschreibung
     if paket.version is not None:
         kopf["version"] = paket.version
-    return {
+    roh: dict[str, Any] = {
         "format": FORMAT,
-        "version": FORMAT_VERSION,
+        "version": FORMAT_VERSION if kurse else 1,
         "paket": kopf,
         "exportiert": (exportiert or jetzt()).isoformat(timespec="seconds"),
         "exercises": [{"id": u.id, **stand(u)} for u in uebungen],
     }
+    if kurse:
+        roh["kurse"] = [{"id": k.id, **kurs_stand(k)} for k in kurse]
+    return roh
 
 
-def paket_json(paket: Paket, uebungen: list[Exercise]) -> bytes:
+def paket_json(paket: Paket, uebungen: list[Exercise], kurse: list[Kurs] | None = None) -> bytes:
     """Die Datei zum Weitergeben: lesbar eingerückt, Umlaute im Klartext."""
-    roh = paket_bauen(paket, uebungen)
+    roh = paket_bauen(paket, uebungen, kurse=kurse)
     return (json.dumps(roh, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
@@ -534,6 +715,10 @@ __all__ = [
     "abweichungen",
     "aus_stand",
     "dateiname",
+    "kapitel_id",
+    "kurs_aus_stand",
+    "kurs_id",
+    "kurs_stand",
     "name_pruefen",
     "paket_bauen",
     "paket_id",

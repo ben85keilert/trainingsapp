@@ -81,7 +81,9 @@ zurück.
 Man wählt Übungen (gruppiert nach Paket und „Eigene Übungen“) und gibt dem Paket
 einen Namen. Die Datei enthält **nur Übungen**: Beschreibung, Parameter, Ziel,
 Typen, Regionen, Video-Links. Keine Einträge, Messungen, Strecken, Pläne, Profile.
-Eigene Fotos und Videos (`local`) bleiben auf dem Gerät.
+Eigene Fotos und Videos (`local`) bleiben auf dem Gerät. Kurse exportiert der Dialog
+noch nicht (sie kommen bisher nur mitgeliefert oder per Import; `paket_bauen` kann
+sie schreiben — der Kurseditor bringt den Export mit).
 
 - Gleicher Name wie ein installiertes Paket → dessen ID und Version; sonst folgt die
   ID aus dem Namen (`paket_id`). Ein späterer Export unter demselben Namen
@@ -91,7 +93,8 @@ Eigene Fotos und Videos (`local`) bleiben auf dem Gerät.
 
 ## Dateiformat
 
-JSON, UTF-8. Version 1:
+JSON, UTF-8. Version 1 (Übungen); **Version 2** fügt `kurse[]` hinzu — eine Datei
+ohne Kurse wird weiter als Version 1 geschrieben, ältere Apps lesen sie:
 
 ```json
 {
@@ -134,7 +137,8 @@ JSON, UTF-8. Version 1:
 | `paket.beschreibung` | nein | ein Satz, erscheint in der Paketliste und beim Import |
 | `paket.version` | nein | ganze Zahl, vom Autor gepflegt |
 | `exportiert` | nein | Zeitpunkt des Exports, nur zur Information |
-| `exercises[]` | ja | mindestens eine Übung |
+| `exercises[]` | ja* | Übungen — *darf fehlen, wenn `kurse[]` da ist |
+| `kurse[]` | nein | Kurse (Version 2, `docs/plan_kurse.md`) — Felder unten |
 
 Je Übung:
 
@@ -151,6 +155,29 @@ Je Übung:
 | `default_felder` | nein | Parameter neuer Planübungen; `[]` = nur abhaken, fehlt = alle |
 | `media[]` | nein | `{kind, source, uri, title, license}`; leere `uri` und `source: "local"` fallen weg |
 | `variante_von` | nein | Schlüssel oder ID des Originals (im Paket oder schon auf dem Gerät) |
+
+Je Kurs (`kurse[]`, Formatversion 2):
+
+| Feld | Pflicht | Bedeutung |
+|---|---|---|
+| `name` | ja | |
+| `id` / `key` | nein | wie bei Übungen: ID = UUIDv5 aus Paket-ID und `kurs:<key>` |
+| `beschreibung` | nein | |
+| `freischaltung` | nein | `frei`, `rueckfrage` (Vorgabe), `streng` |
+| `kapitel[]` | ja | mindestens eines, in dieser Reihenfolge |
+
+Je Kapitel: `titel` (Pflicht), `key` (nie ändern — die Kapitel-ID folgt daraus und
+der **Fortschritt der Nutzer hängt daran**; ohne `key` zählt die Nummer), `text`
+(Markdown), `media[]` (wie bei Übungen, zusätzlich `kind: "audio"`), `plaene[]`
+(`{name, wochentage: [0..6], uebungen: [{uebung: <key|id>, ziel?, felder?}]}`) und
+`bedingung` (`{art: "gelesen"}` Vorgabe · `{art: "summe", uebung, feld, soll}` ·
+`{art: "tage", soll}` · `{art: "messung", soll}` in Minuten). `uebung` ist der
+Schlüssel einer Übung desselben Pakets oder eine ID.
+
+Import: Kurse folgen den Regeln der Übungen (neu → anlegen; gleiches Paket →
+Stand der Datei, Kapitel gleicher ID behalten den Fortschritt; eigene/fremde →
+bleiben). Entfernen nimmt die Kurse aus der Liste, „Wieder installieren“ holt sie
+aus dem Paketstand (`course.package_standard_json`) zurück.
 
 **IDs von „Standard“:** Sie bleiben, wie sie vor den Paketen waren —
 UUIDv5 nur aus dem Schlüssel (`seed_id`); die Paket-ID stammt aus dem früheren

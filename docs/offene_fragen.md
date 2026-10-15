@@ -34,6 +34,12 @@ Schönheit, Wartung.
 | P13 | Praxis-Edition | PIN-Sperre beim Profilwechsel (`ist_aktiv("profil_sperre")`) ist bisher nur ein Hinweistext — Umsetzung mit oder ohne Fingerabdruck? | Erst mit Edition B. |
 | P14 | M10 | Video-Download (hängt am Hosting), Fotos für eigene Übungen. Rahmen entschieden 15.10. (lokal **und** Fremdquelle); Umsetzung hängt an K-F6 (Abschnitt 4). | Offen. |
 | P15 | Live-Wischen, 15.10. | Nach dem Fix (ganzer Fingerweg zählt, siehe Befund H-Wischen) ist 1 Fingerbreite = 1 Fensterbreite. Reicht das, oder zusätzlich Schwung (Fling über `primary_velocity`) bzw. ein Faktor > 1? | Erst am Handy probieren. |
+| P16 | Kurse, `plan_kurse.md` § 2 | **Pläne im Kurs:** gebaut sind mehrere Pläne je Kapitel, Wochentage am Plan. Bens Alternative: Wochentage je Planübung (ein Plan mit „Atmung Mo/Mi/Fr, Kräftigung Di/Do“) — allgemein einbauen? | Vorschlag: so lassen; Planübung ohne Wochentag. |
+| P17 | Kurse, § 4 | **Rückfrage beim Überspringen:** einmal (gebaut) oder zweimal? Modus `streng` nur für zugewiesene Kurse (Edition B)? | Einmal. |
+| P18 | Kurse, § 3 | **Zählung der Bedingung:** ab Kapitelstart (gebaut — „100 Liegestützen seit du das Kapitel geöffnet hast“) oder gesamt über die ganze Zeit? | Ab Kapitelstart. |
+| P19 | Kurse, § 5 | **Ort in der Oberfläche:** dritter Unterreiter unter „Übungen“ (gebaut) oder eigener Hauptreiter? Kurszeile auf „Heute“ („Kurs HRV, Kapitel 3 von 7“)? | Unterreiter; Heute-Zeile später. |
+| P20 | Kurse, § 5 | **Ton in Kapiteln:** Medien sind Links; für Ton fehlt ein Spieler (flet-audio wegen Audiofokus abgelehnt, `flet_ton` nur kurze WAV). Welcher Weg — eigene Erweiterung, Systemplayer per Link, gar nicht? | Mit K-F6 entscheiden. |
+| P21 | Kurse, `standard.toml` | **Inhalte des ersten Kurses** „HRV-Messung verstehen“ (7 Kapitel) sind ein erster Entwurf — durchsehen, kürzen, Bilder/Videos ergänzen? Kapitel-`key`s dabei nicht ändern (Fortschritt hängt daran). | Durchsicht durch Ben. |
 
 Noch offene Fragen aus der Durchsicht vom 15.10. (Details beim jeweiligen Befund in
 Abschnitt 3; die beantworteten stehen unter „Entschieden“):
@@ -57,6 +63,8 @@ Abschnitt 3; die beantworteten stehen unter „Entschieden“):
 | N-F8 | Darstellung (N15) | `app_setting darstellung:<profil-id>` nach Profil-Löschen belassen? | Belassen (Profile nur ausgeblendet). |
 
 ## 2. Am Gerät zu prüfen (Ben)
+
+- **T13** (Kurse, 15.10.): Übungen → Kurse → „HRV-Messung verstehen“: Kapitel lesen, Markdown-Darstellung, „Weiter“, Kapitel 3 ohne Messung → „Trotzdem freischalten“, Kapitel 6 legt den Plan „Kurs: Ruhig atmen“ auf „Heute“; nach Abschluss ist er deaktiviert. „Von vorn beginnen“ im Menü.
 
 | # | Woher | Was | Stand |
 |---|---|---|---|
@@ -174,6 +182,7 @@ Ben (15.10.): gesondert besprechen wegen Rechten, Sicherheit und Injections. Sta
 - Detail `ui/views/uebung_detail.py:112-116`: `launch_url(medium.uri)` ohne Prüfung; die Liste unterscheidet nicht nach `kind`/`source`.
 - `image_path` wird in `ui/` nirgends gelesen oder gesetzt; LOCAL-Medien legt kein Code an — beides existiert nur im Datenmodell (seit 15.10. überleben sie Update/Reset).
 - Zu entscheiden: erlaubte Schemata (nur `https`? YouTube-App-Links?), Lizenz-/Rechtefeld im Paket (Pflicht?), Ablage lokaler Dateien (Datenverzeichnis, Größe, Export?), Streaming von der Praxis (P12: Solo speichert nichts auf dem Server), Anzeige von Fotos in Beschreibung und Tagebuch.
+- Seit 15.10. betrifft das auch **Kurskapitel** (`course_chapter.media_json`, zusätzlich `kind = audio`): dieselben Links, dieselbe Anzeige (`ui/views/kurse.py`), dieselben offenen Fragen — plus P20 (Tonspieler).
 
 ## 5. Export und Import — Inventar (Ben, 15.10.: „wir kümmern uns gesondert darum“)
 
@@ -186,6 +195,8 @@ Anlass: Wer Inhalte in ein anderes Profil will, soll exportieren und dort import
 | Strecken | nur GPX per Knopf (`ausdauer.py:749`, `gps_test.py:401`) | — |
 | Übungen | Paket (`pakete.py:517-623`) | Paket |
 | Pläne, Planparameter | — | — |
+| Kurse (ohne Fortschritt) | Paket (`kurse[]`, Formatversion 2) — nur mitgelieferte/importierte, kein Export-Dialog | Paket |
+| Kursfortschritt | — | — |
 | Tagebuch (Sitzungen, Einträge, Notizen, Tagesnotizen) | — | — |
 | Timer-Profile und Signale | — | — |
 | HRV-Einstellungen, Korrekturregeln, Ansichten | — | — |

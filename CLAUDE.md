@@ -121,6 +121,14 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück. Vertrag:
   `docs/uebungspakete.md`.
 
+- **Kurse** (Ben, 15.10.2026): dritte Kategorie neben Übungen und Plänen —
+  Kapitel linear, je Kapitel eine Bedingung (`gelesen`, `summe`, `tage`, `messung`),
+  Plan-Vorlagen werden beim Erreichen zu echten Plänen (`plan.course_chapter_id`,
+  beim Abschluss deaktiviert, nie gelöscht), Überspringen nur auf Rückfrage.
+  Bedingungen rechnen aus Einträgen und Messdauer, **nie aus Messwerten**
+  (rechtlich wie `physiologische_steuerung`). Kurse reisen in Paketen
+  (`kurse[]`, Formatversion 2). Vertrag: `docs/plan_kurse.md`.
+
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`
   über eine begrenzte `asyncio.Queue`. Messwerte und Status laufen getrennt — Batterie

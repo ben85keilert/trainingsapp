@@ -50,6 +50,7 @@ Abschnitt 3; die beantworteten stehen unter „Entschieden“):
 | H-F5 | HRV (H7) | `hrv_metrics_cache` ungenutzt lassen (Doku anpassen) oder für die Öffnungszeit nutzen? | — |
 | H-F6 | HRV (H8) | Rechnen beim Öffnen synchron (Plan: akzeptiert) oder per `asyncio.to_thread`? | Am Handy messen. |
 | H-F7 | HRV (H6) | Beschreibung: DB-Kopie als Rückfall oder strikt Datei? | Strikt Datei. |
+| H-F8 | HRV-Einstellungen | Die Frequenzanalyse ist seit 14.10. ein Schalter unter Einstellungen → HRV-Messung (`HrvEinstellungen.frequenz`, **Vorgabe aus**; ebenso „Nichtlinear“). Ben fragte am 15.10., ob sie „rausgefallen“ sei. Soll die Vorgabe **an** sein, zumindest für Brustgurt-Messungen? | Vorschlag: an für `rr_ekg`, aus für optisch. |
 | N-F3 | Tags (N5) | „dehnung“ = „Dehnung“ überall (UNIQUE `COLLATE NOCASE`) oder nirgends? | Überall. |
 | N-F5 | Pläne (N6) | `plan.revision` als Sync-Anker für Items oder eigene Item-Revision? | Erst mit Edition B. |
 | N-F6 | Timer (N7) | Timer-Profil bearbeiten, während der Timer läuft: warnen, blockieren, weiterlaufen? | Weiterlaufen, neues Profil beim nächsten Start. |
@@ -88,13 +89,8 @@ Keine offenen Befunde (D1 behoben, siehe 3.6).
 | K1 | `ui/views/uebung_detail.py:112-116`, `core/pakete.py:293-311`, `uebung_bearbeiten.py:450-459` | Video-URIs aus fremden Paketen (und aus dem Editor) werden ohne Schema-Prüfung übernommen und per `launch_url` geöffnet — `intent://`, `file://`, `tel:`, im Web `javascript:`. **Vertagt (K-F6):** Ben will Medien gesondert besprechen (Rechte, Sicherheit, Injections) — Fakten in Abschnitt 4. Bis dahin unverändert. | mittel |
 | K5 | `core/pakete.py:95-105, 249`, `data/pakete.py` | Paket-ID = UUIDv5 aus dem Namen, Übungs-ID aus Paket-ID + `key`: zwei fremde Pakete „Yoga“ mit `key` „baum“ gelten als dasselbe Paket. **Entschieden (K-F2, K-F3):** Paketkennung mit Kürzel (siehe „Offene Arbeiten“ A1); Standard bleibt offen, Rückfrage ist gebaut. | niedrig (Vertrag) |
 | K6 | `data/pakete.py` (`_planen`, `_eintragen`) | Kein Versionsvergleich: eine ältere Paketdatei überschreibt eine neuere Installation (Downgrade), die Version wird zurückgesetzt. **Entschieden (K-F7): nachfragen** — kommt mit der Paketkennung (A1). | niedrig |
-| K7 | `core/pakete.py:166-168`, `ui/views/pakete.py:158, 162-172` | `json.loads` wirft bei tief verschachtelter Datei `RecursionError` (kein `ValueError`) → nicht als `PaketFehler` gefangen; `read_bytes()` ohne `OSError`-Fang; Dateigröße ungedeckelt. | niedrig |
-| K8 | `core/pakete.py:237-244, 255-256` | Innenwerte von `result_spec` (`min`, `max`, `step`, `quick`, `default`), `limit_spec`, `default_target` werden nur auf Objekt/Liste geprüft, nicht typisiert (`"seconds": "abc"`) → landen in der DB, Absturz erst in Eingabemaske/Timer (`core/limits.py:144`). | niedrig |
-| K9 | `ui/views/pakete.py:82-97`, `uebung_detail.py:203-206` | `importieren()`/`zuruecksetzen()` ohne `try`: ein sqlite-Fehler lässt den Dialog offen, ohne Rückmeldung. | niedrig |
 | K10 | `ui/views/pakete.py:190, 332` | Paketliste lädt je Übung einzeln (~4·N Abfragen je Paket), nur um „n geändert“ zu zählen. Bei 33 Übungen harmlos. | niedrig |
-| K11 | `ui/components/tagwahl.py:66-88` | `neuer_name` dupliziert die Namensprüfung aus `TagRepo.anlegen` (casefold, Art-Kollision) in `ui/`. | niedrig |
 | K12 | `ui/views/pakete.py:526` | Archivierte Paketübungen sind nicht exportierbar (`alle()` ohne Archiv). **Frage K-F8:** gewollt? | niedrig |
-| K13 | Doku | `uebungspakete.md:72` „gleicher Name wie ein *installiertes* Paket“ ↔ `mit_namen` nimmt auch entfernte; `:27-29` Paketstand umfasst auch Name, Symbol, Limits; `014_pakete.sql:2-3` nennt noch `exercises.json`; `einstellungen_tags.py:9-10` „Später bringen Pakete …“ veraltet. | niedrig |
 
 Geprüft und in Ordnung: SQL nur mit Platzhaltern; Export-Dateiname bereinigt; eigene Übungen (`package_id IS NULL`) werden nie angefasst; zweiter Start überschreibt nichts; UUIDv5-Stabilität; Flet-API der Pakete-Ansichten; keine `flet`-Importe in `core/`/`data/`.
 
@@ -107,14 +103,10 @@ Eine Ausnahme ist nicht geregelt:
 | # | Stelle | Befund | Schwere |
 |---|---|---|---|
 | G8 | `ui/views/ausdauer.py:767-771`, `repositories.py:1886-1890`, `gps_test.py:340` | „Entfernen“ ist Soft-Delete, die Koordinatendatei bleibt unbegrenzt; kein Papierkorb, kein endgültiges Löschen (HRV hat `PAPIERKORB_TAGE`). Vorabtest-Dateien `vorabtest_*.jsonl` werden nie gelistet oder gelöscht. **Frage G-F5.** | niedrig |
-| G9 | `core/strecke.py:311, 324-328, 346-347` | Genauigkeit `None` passiert den Filter als perfekt (0.0 wird seit 15.10. zu `None`); nach Sprung/Lücke werden `_hoehen` und `_letzte_bewegung` nicht zurückgesetzt; beim Übergang in die Auto-Pause zählt der ganze `dt` samt 10 s Stillstand zur Bewegungszeit (im Test als bekannt vermerkt). | niedrig |
+| G9 | `core/strecke.py:311` | Genauigkeit `None` passiert den Filter als perfekt — ohne Angabe gibt es nichts zu filtern; bleibt so. (Rücksetzen nach Sprung und Stehzeit vor der Auto-Pause seit 15.10. behoben.) | niedrig |
 | G10 | `ui/geraete/flet_gps.py:75-79`, `strecken.py:141-142` | `use_msl_altitude` nicht gesetzt → Ellipsoidhöhe; `<ele>` im GPX liegt in Deutschland ≈ 45 m über NN. Höhenmeter (Differenzen) unberührt. **Frage G-F7:** MSL einschalten? | niedrig |
-| G11 | `ui/geraete/flet_gps.py:73-84`, `gps.py:68-71` | Zweites `starten` ohne `beenden` ersetzt die Queue, der alte Konsument hängt; heute nur durch UI-Sperren verhindert. | niedrig |
 | G12 | `data/strecken.py` (`StreckenSchreiber.schreiben`) | `flush()` ohne `fsync` — übersteht App-Absturz, nicht Stromausfall. (Typprüfung beim Lesen seit 15.10. behoben.) | niedrig |
-| G13 | `ui/views/ausdauer.py:847-856`, `app.py:406-408` | „HRV-Auswertung öffnen“ prüft nur `hrv_recording_id`, nicht ob die Aufnahme noch existiert; nach Soft-Delete führt die Route ins Leere. | niedrig |
-| G14 | `ui/views/ausdauer.py:234, 301-313` | Datei wird vor dem ersten Fix angelegt; bleibt der Fix aus, bleibt eine leere Datei (`file_path=""`). | niedrig |
 | G15 | `ui/views/ausdauer.py:172-332`, `gps_test.py:59-203` | `AusdauerLauf`/`GpsTestLauf` (Dateischreiben, DB-Zeile, Tagebucheintrag, Übungsanlage) liegen in `ui/views`; das Pendant `Messlauf` liegt in `devices/`. Ohne flet nicht testbar (`importorskip`). | niedrig |
-| G16 | `ui/views/ausdauer.py:444-476, 568`, `karte_strecke.py:88, 91` | Jede Sekunde neue `_gross`-Container statt Textwerte setzen; `rechner.punkte` baut die ganze Liste je Tick; `osm_ebenen()` zweimal aufgerufen. O(n) je Tick, bei 1 h vernachlässigbar. | niedrig |
 | G17 | `uv.lock` ↔ `build/site-packages` | Entwicklung auf Flet 1.0.3, APK-Build auf 1.0.4; CLAUDE.md verlangt Gleichstand mit `flet-mcp`. | niedrig |
 | G18 | `repositories.py:1883` | `strecke.title` + `titel_setzen` ohne Oberfläche — geplant oder Rest? **Frage G-F8.** Ebenso: Live-Karte folgt jede Sekunde, Wegwischen unmöglich — gewollt? **Frage G-F6.** | niedrig |
 
@@ -134,13 +126,9 @@ leere Messungen sind in allen Rechenwegen geschützt. Kein `flet`/`scipy` in
 | H6 | `ui/views/messung_detail.py:338` | `beschreibung = rec.notiz or eintrag.note`: eine in der Datei (praxis_gui) geleerte Notiz wird von der DB-Kopie überdeckt — „Datei ist die Wahrheit“ hier nicht ganz. Titel wird dagegen gespiegelt. **Frage H-F7.** | niedrig |
 | H7 | `hrv_metrics_cache` | Wird im Code **nirgends** gelesen oder geschrieben (nur Migration 001); alle Kennzahlen werden bei jedem Öffnen neu gerechnet. CLAUDE.md beschreibt den Cache als tragendes Element. **Frage H-F5:** ungenutzt lassen (dann Doku anpassen) oder die Öffnungszeit der Detailansicht damit tragen? | niedrig |
 | H8 | `ui/views/messung_detail.py:305-329, 385-409, 375, 1661` | Laden, Vorschläge, Kacheln (Atmung über bis zu 2000 Minutenfenster, SampEn bis 3000 Schläge) laufen synchron im Event-Loop beim Aufbau; laut `plan_analyse_leistung.md` bewusst so belassen. **Frage H-F6:** `hrv_core`-Rechnungen per `asyncio.to_thread` (flet-frei, thread-tauglich)? | niedrig |
-| H9 | `ui/views/messung_detail.py:1361-1376` | `nachrechnen_planen` → `page.run_task(spaeter)` ohne Abbruch beim Verlassen: rechnet nach der Latenz für die tote Ansicht (kein Crash, `update()` unterdrückt). Live-Pendant ist über `state.live_ansicht` abgesichert. | niedrig |
-| H10 | `ui/views/messung_detail.py:798-813` | Cache-Schlüssel der Abschnittswerte enthält weder `atem_modus` noch `pnn_ms`; nach Umschalten der Atemübung zeigt eine offene Ansicht alte Werte. | niedrig |
 | H11 | `ui/views/messung_detail.py:385-409` ↔ `ausschnitte.py:192-198` | Atem-Median über Minutenfenster existiert doppelt (UI adaptiv mit Deckel, `ausschnitte` 15 s fest ohne Deckel). Gehört einmal nach `hrv_core`. | niedrig |
 | H12 | `tests/test_frequenz.py:275` | Langer Spektralweg (ULF/VLF/LF/HF, ALGO 5) hat nur eine synthetische Reihe im Test (Toleranz 10 %), keine Referenzdatei unter `tests/golden/rr/` und keinen Vergleichswert aus praxis_gui/scipy. | niedrig |
 | H13 | `hrv_core/ereignisse.py:337-355` | Jede Notiz liest und schreibt die ganze Rohdatei synchron im Event-Loop (MB bei Stundenmessungen); Absturz zwischen Rohdatei-Write und Sidecar-Update hinterlässt veraltetes `source_file_sha1` (praxis_gui hält Sidecar für veraltet, kein Datenverlust). | niedrig |
-| H14 | `hrv_core/frequency.py:477-481` | `_lomb_hann` bei genau 2 Stützstellen: Hann an beiden Enden 0 → Division durch 0 → NaN im VLF-Teilspektrum (maskiert, kein Crash); durch Bandpolitik faktisch unerreichbar. | niedrig |
-| H15 | Doku | `tests/golden/rr/README.md` („seit ALGO 4 werden verworfene Intervalle wieder aufgenommen“) ist seit ALGO 6 falsch (Vorgabe `sensor`). `messung_detail.py:1143-1145`: `crop_oeffnen` zeichnet doppelt. | niedrig |
 
 ### 3.5 Pläne, Notation, Timer, Profile, App-Hülle
 
@@ -154,13 +142,8 @@ getestet, SQL ohne Nutzereingaben im Text.
 | N5 | `data/repositories.py:172-178` ↔ `:1725-1727` | `ExerciseRepo.speichern` legt Tags mit `ON CONFLICT(name)` (case-sensitiv) an, `TagRepo.anlegen` prüft `COLLATE NOCASE`: über Editor/Paketimport entstehen „dehnung“ und „Dehnung“ nebeneinander. **Frage N-F3:** UNIQUE-Index `COLLATE NOCASE` per Migration? | niedrig |
 | N6 | `data/repositories.py:742-770` | `ziel_setzen`/`eingabe_setzen` erhöhen `plan.revision`/`updated_at` nicht (`_beruehrt` fehlt), anders als `umbenennen`/`aktiv_setzen` — für „letzter Schreiber gewinnt“ unsichtbar. **Frage N-F5:** `plan.revision` als Anker für Items oder eigene Item-Revision? | niedrig |
 | N7 | `ui/views/timer.py:178-186, 91-93` | Timer-Profil bearbeiten und speichern, während der Timer läuft: `lauf_fuer` ersetzt den Lauf, der Ticker vergleicht Stände zweier Läufe (möglicher Geister-Ton), danach stoppt der Timer still. **Frage N-F6:** warnen, blockieren oder weiterlaufen lassen? | niedrig |
-| N8 | `ui/views/timer.py:201-202, 446` | `state.timer_aufgabe = True` vor `page.run_task`; schlägt es fehl, startet bis zum Neustart kein Ticker mehr. `timer_beobachter["ansicht"]` wird beim Verlassen nicht ausgetragen (5×/s Arbeit umsonst, kein Leak). | niedrig |
-| N10 | `ui/views/app.py:424-428` | `zurueck`: `page.views.pop()` und dann `page.views[-1]` — bei nur einer Ansicht `IndexError` (ob Flet `on_view_pop` auf der Wurzel feuert, ungeprüft). | niedrig |
-| N11 | `data/repositories.py:666-677, 928, 901` | `PlanRepo.speichern`: versteckte Items behalten alte `sort_order`, neue ab `versteckt` nummeriert → Duplikate möglich, kein Tiebreak; ein noch im Objekt enthaltenes verstecktes Item → `IntegrityError`. Einziger UI-Aufrufer schreibt leere Pläne. | niedrig |
-| N12 | `data/repositories.py:1263-1268` | `wert_setzen` modernisiert `result`, ersetzt die Spec-Kopie aber nur bei fehlendem `feld_key`; Alt-Einträge vor M3 mit `scale`-Feld geraten in den Zustand, den `satz_anhaengen` vermeidet. | niedrig |
-| N13 | `ui/views/plan.py:122-135, 431-441`, `_stellen` dreifach | Parse-Logik in `ui/` (`_zahl_lesen`, Sätze×Wert-Expansion mit Regel 1–50) dupliziert `core/units.parse_sets`; gehört als `parse_satz_eingabe(...)` nach `core/units` — dann sitzt auch die Obergrenze (N2) an einer Stelle. `timer.py:774` summiert in der UI. | niedrig |
 | N14 | `repositories.py:881-885, 1172-1174`, `tag.py:284`, `plan.py:253`, `tag.py:74` | N+1: `verwendungen` lädt je Item den Plan; `heutiger_eintrag` je Zeile eine Session; Tagesansicht je Gruppe den Plan; Plan/Tag laden bei jedem Aufbau den ganzen Katalog mit Tags und Medien. Bei 33 Übungen egal. | niedrig |
-| N15 | `config.py` | `physiologische_steuerung` wird nirgends abgefragt (korrekt, es gibt keine solche Funktion); ein Test, der `ist_aktiv("physiologische_steuerung")` in `solo` als False fixiert, fehlt. `app_setting darstellung:<profil-id>` bleibt nach Profil-Löschen stehen (**Frage N-F8**). | niedrig |
+| N15 | `app_setting darstellung:<profil-id>` | Bleibt nach Profil-Löschen stehen (**Frage N-F8**, Vorschlag: belassen, Profile werden nur ausgeblendet). Test für `physiologische_steuerung` in solo seit 15.10. vorhanden. | niedrig |
 
 ### 3.6 Behoben am 15.10.2026 (nur zur Einordnung)
 
@@ -174,6 +157,8 @@ Je Paket ein Commit auf `main`; Tests dazu in den genannten Dateien.
 - **H1–H4** (19582e8) — `SidecarFehler` statt stillem Ersatz; Abschnitte über `frequenzbereich` (ALGO 7, Nähte, langer Weg); `ppi._gemerkt` mit Weakrefs.
 - **G1–G7, G12 (Typprüfung), G2** (3cfbcb8) — Kopfzeile + Nachtragen verwaister Strecken; Warnzeile; `abbrechen`; Tempo 0 = fehlt; Karten-Schalter und einmaliger Hinweis; TOMs/Store-Freigaben nachgezogen.
 - **K2, K3, K4, K-F3-Rückfrage** (4fd7a54) — Entfernen mit Plan-Rückfrage und Kopie; Paketstand folgt Tags; Lokales bleibt; Standard-Hinweis beim Import.
+- **Nachtrag HRV** — Abschnitte rechnen auf der Kurvenachse wie das Band (Verity-Abschnitte hatten über den Teilstück-Weg kein Spektrum mehr); H9, H10, H14, H15.
+- **Niedrige Befunde ohne Entscheidung** — K7, K8, K9, K11, K13, G9 (Teile), G11, G13, G14, G16, N8, N10, N11, N12, N13, N15 (Test).
 
 ## 4. Medien an Übungen — Fakten für die vertagte Entscheidung (K-F6, P14)
 

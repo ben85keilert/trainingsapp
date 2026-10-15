@@ -42,11 +42,11 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from ..core.models import TAG_REGION, TAG_TYP, Exercise, jetzt
+from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, PlanItem, jetzt, new_id
 from ..core.pakete import Paket, Paketinhalt, aus_stand, stand
 from ..core.pakete import abweichungen as _abweichungen
 from .db import transaktion
-from .repositories import ExerciseRepo
+from .repositories import ExerciseRepo, PlanRepo
 
 
 class Status(StrEnum):
@@ -241,12 +241,38 @@ class PaketRepo:
 
     # -- Paketmanager --------------------------------------------------------
 
-    def entfernen(self, paket_id: str) -> int:
+    def verwendungen(self, paket_id: str) -> list[tuple[Plan, PlanItem, Exercise]]:
+        """Welche Übungen des Pakets in welchen (nicht gelöschten) Plänen stehen —
+        die Rückfrage vor „Paket entfernen“: kopieren oder aus dem Plan nehmen?"""
+        repo = ExerciseRepo(self.con)
+        plaene = PlanRepo(self.con)
+        ergebnis: list[tuple[Plan, PlanItem, Exercise]] = []
+        ids = [
+            r["id"]
+            for r in self.con.execute(
+                "SELECT DISTINCT e.id FROM exercise e JOIN plan_item pi ON pi.exercise_id = e.id "
+                "JOIN plan p ON p.id = pi.plan_id "
+                "WHERE e.package_id = ? AND e.deleted_at IS NULL AND p.deleted_at IS NULL "
+                "ORDER BY e.name COLLATE NOCASE",
+                (paket_id,),
+            )
+        ]
+        for uebung_id in ids:
+            uebung = repo.laden(uebung_id)
+            if uebung is None:
+                continue
+            ergebnis.extend((plan, item, uebung) for plan, item in plaene.verwendungen(uebung_id))
+        return ergebnis
+
+    def entfernen(self, paket_id: str, kopieren: Iterable[str] = ()) -> int:
         """Paket entfernen: seine Übungen in den Papierkorb, das Paket als entfernt.
 
-        Wie das Löschen einzelner Übungen: Sie verschwinden aus Katalog und
-        Plänen, Einträge bleiben, und nach der Frist löscht die App endgültig
-        (nur Übungen ohne Einträge). Ein neuer Import holt alles zurück.
+        Die Übungen verschwinden aus Katalog **und Plänen** (Ben, 15.10.2026); wer
+        eine im Plan behalten will, lässt sie ``kopieren``: Die Kopie ist eine eigene
+        Übung (``package_id`` NULL, gleicher Name, gleiche Kachel im Verlauf) und
+        übernimmt die Planpositionen. Einträge bleiben; nach der Frist löscht die
+        App endgültig (nur Übungen ohne Einträge). „Wieder installieren“ holt die
+        Übungen zurück — Planpositionen nur über die Kopien.
 
         Returns:
             Wie viele Übungen in den Papierkorb kamen.
@@ -259,8 +285,30 @@ class PaketRepo:
                 (paket_id,),
             ).fetchall()
         ]
+        zu_kopieren = set(kopieren) & set(ids)
         with transaktion(self.con):
+            for uebung_id in zu_kopieren:
+                alt = repo.laden(uebung_id)
+                if alt is None:
+                    continue
+                kopie = replace(
+                    alt,
+                    id=new_id(),
+                    is_builtin=False,
+                    package_id=None,
+                    media=[replace(m, id=new_id()) for m in alt.media],
+                    typen=list(alt.typen),
+                    regionen=list(alt.regionen),
+                    archived=False,
+                    family_id=alt.family_id or alt.id,
+                )
+                repo.speichern(kopie)
+                self.con.execute(
+                    "UPDATE plan_item SET exercise_id = ? WHERE exercise_id = ?",
+                    (kopie.id, uebung_id),
+                )
             for uebung_id in ids:
+                self.con.execute("DELETE FROM plan_item WHERE exercise_id = ?", (uebung_id,))
                 repo.in_papierkorb(uebung_id)
             self.con.execute(
                 "UPDATE package SET removed_at = ? WHERE id = ?", (jetzt().isoformat(), paket_id)
@@ -298,6 +346,7 @@ class PaketRepo:
                 except (KeyError, TypeError, ValueError):
                     continue
                 _tags_angleichen(neu, bekannte)
+                _lokales_behalten(neu, alt)
                 ziel = zeilen.get(neu.family_id) if neu.family_id else None
                 gueltig = (
                     ziel is not None
@@ -329,7 +378,10 @@ class PaketRepo:
         ``aktualisieren=False`` legt nur Neues an und lässt die Übungen des
         Pakets, die es schon gibt, stehen — so spielt der Seed die
         „Standard“ ein, solange seine Version gleich bleibt. Ihr Paketstand
-        wird trotzdem aufgefrischt. ``neue_tags_oben`` wie bei `ExerciseRepo.speichern`.
+        wird dann nur nachgetragen, wo er fehlt (Datenbanken von vor Migration
+        015) — nicht aufgefrischt, sonst stünde nach „Dehnung → Stretching“ bei
+        jedem Start wieder der Name aus der Datei im Stand (15.10.2026).
+        ``neue_tags_oben`` wie bei `ExerciseRepo.speichern`.
 
         Schreibt der Import keine Übung und ist das Paket nicht installiert
         (der eigene Export, wieder eingelesen), bleibt alles, wie es ist.
@@ -402,7 +454,8 @@ class PaketRepo:
         zeilen = {
             r["id"]: r
             for r in self.con.execute(
-                "SELECT id, package_id, deleted_at, purged_at, archived, family_id FROM exercise"
+                "SELECT id, package_id, deleted_at, purged_at, archived, family_id, "
+                "package_standard_json IS NULL AS ohne_stand FROM exercise"
             )
         }
 
@@ -472,14 +525,20 @@ class PaketRepo:
             r = zeilen.get(u.id)
             if r is not None and vorschau.status[u.id] != Status.ZURUECK:
                 ziel.archived = bool(r["archived"])
-            staende[u.id] = stand(ziel)
+            soll = stand(ziel)
+            # Den Stand schreiben, was geschrieben wird oder noch keinen hat; ohne
+            # ``aktualisieren`` (Seed) bleibt ein vorhandener Stand, wie er ist.
+            if aktualisieren or schreibt or r is None or r["ohne_stand"]:
+                staende[u.id] = soll
             if not schreibt:
                 continue
             if vorschau.status[u.id] == Status.GEAENDERT:
                 alt = repo.laden(u.id, mit_geloeschten=True)
-                if alt is not None and stand(alt) == staende[u.id]:
+                if alt is not None and stand(alt) == soll:
                     vorschau.status[u.id] = Status.UNVERAENDERT
                     continue
+                if alt is not None:
+                    _lokales_behalten(ziel, alt)
             for name, art in neue:
                 (vorschau.neue_typen if art == TAG_TYP else vorschau.neue_regionen).append(name)
             ziele.append(ziel)
@@ -529,6 +588,13 @@ class PaketRepo:
             aktualisiert=datetime.fromisoformat(r["updated_at"]),
             entfernt=datetime.fromisoformat(r["removed_at"]) if r["removed_at"] else None,
         )
+
+
+def _lokales_behalten(ziel: Exercise, alt: Exercise) -> None:
+    """Eigene Fotos und lokale Videos einer Paketübung überleben Update und Reset
+    (K-F5, Ben 15.10.2026) — das Paket kennt sie nicht, `stand` zählt sie nicht."""
+    ziel.media = [*ziel.media, *[m for m in alt.media if m.source == MediaSource.LOCAL]]
+    ziel.image_path = alt.image_path
 
 
 def _tags_angleichen(u: Exercise, bekannte: dict[str, tuple[str, str]]) -> list[tuple[str, str]]:

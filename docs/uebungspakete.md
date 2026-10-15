@@ -27,17 +27,30 @@ Tabelle `package` und Spalte `exercise.package_id` seit Migration 014,
 **Paketstand.** Jede Übung eines Pakets trägt ihre Standardwerte aus dem Paket
 (`package_standard_json`, genau die Felder des Dateiformats unten: Beschreibung,
 Parameter samt Chips, Ziel, Planparameter, Typen, Regionen, Videos, Variante).
-Jeder Import frischt ihn auf, beim Paket „Standard“ jeder Start. „Auf Paketstand
+Jeder Import frischt ihn auf; der Start trägt ihn beim Paket „Standard“ nur nach, wo er
+fehlt. Wer einen Typ oder eine Region umbenennt oder löscht, ändert ihn mit — die
+Paketübungen gelten danach nicht als „geändert“ (Ben, 15.10.2026). „Auf Paketstand
 setzen“ schreibt ihn zurück — was man geändert hat, geht verloren; der Ort
 (Katalog, Archiv, Papierkorb) bleibt, Pläne behalten ihre eigenen Einstellungen,
 Einträge bleiben.
 
-**Entfernen.** Alle Übungen des Pakets kommen in den Papierkorb — wie beim
-Löschen einer Übung: raus aus Katalog und Plänen, Einträge bleiben, nach der Frist
-endgültig (nur ohne Einträge). Das Paket steht danach unter „Entfernt“.
-„Wieder installieren“ (ohne Datei, aus dem Paketstand) oder ein neuer Import holt
-**alles** zurück, auch was inzwischen endgültig gelöscht war. Ein entferntes
-Paket „Standard“ legt der Start nicht nach.
+**Entfernen.** Alle Übungen des Pakets kommen in den Papierkorb und fliegen aus den
+Plänen; Einträge bleiben, nach der Frist endgültig gelöscht (nur ohne Einträge). Steht
+eine Übung noch in einem Plan, sagt die Rückfrage „Teil von Plan …“ und bietet an, sie
+zu **kopieren**: Die Kopie ist eine eigene Übung (gleicher Name, gleiche Kachel im
+Verlauf) und übernimmt die Planposition (Ben, 15.10.2026). Das Paket steht danach
+unter „Entfernt“. „Wieder installieren“ (ohne Datei, aus dem Paketstand) oder ein
+neuer Import holt die **Übungen** zurück, auch endgültig gelöschte — Planpositionen
+nur über die Kopien. Ein entferntes Paket „Standard“ legt der Start nicht nach.
+
+**Update und Reset behalten Eigenes an der Übung:** eigene Fotos (`image_path`) und
+lokale Videos (`source = local`) kennt das Paket nicht; sie bleiben, wenn die Übung
+den Paketstand bekommt (Ben, 15.10.2026).
+
+**„Standard“ ist offen** (Ben, 15.10.2026): Eine Datei mit der ID des mitgelieferten
+Pakets darf es ersetzen — die Rückfrage sagt das deutlich und nennt die Zahl der
+überschriebenen Übungen; der eingebaute Stand kommt jederzeit per „Wieder installieren“
+zurück.
 
 ## Regeln beim Import
 

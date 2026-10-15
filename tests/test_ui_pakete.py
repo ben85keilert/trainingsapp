@@ -212,6 +212,44 @@ def test_paketmanager_auf_standard_entfernen_wieder_installieren(page, state) ->
     assert state.uebungen.laden(wade.id) is not None
 
 
+def test_paket_entfernen_fragt_bei_planbezug_und_kopiert(page, state) -> None:
+    """Steht eine Paketübung in einem Plan, zeigt die Rückfrage „Teil von Plan …“ mit
+    Kästchen „kopieren“; angekreuzt bleibt eine eigene Kopie im Plan (Ben, 15.10.2026)."""
+    from trainingsapp.core.models import PlanItem
+    from trainingsapp.ui.views.pakete import paket_view
+
+    dialoge: list = []
+    page.show_dialog = dialoge.append
+    page.pop_dialog = lambda: None
+    wade = state.uebungen.laden(seed_id("wadenheben"))
+    plan = Plan(name="Rücken", items=[PlanItem(exercise_id=wade.id)])
+    state.plaene.speichern(plan)
+
+    ansicht = paket_view(page, state, "/pakete", state.pakete.laden(GRUNDAUSSTATTUNG))
+    entfernen = next(
+        c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.OutlinedButton)
+    )
+    entfernen.on_click()
+    frage = dialoge[-1]
+    kaestchen = [c for c in alle(frage.content) if isinstance(c, ft.Checkbox)]
+    assert len(kaestchen) == 1 and "Teil von Plan „Rücken“" in kaestchen[0].label
+    assert kaestchen[0].value is True
+    frage.actions[1].on_click()
+    assert state.pakete.alle() == []
+    items = state.plaene.laden(plan.id).items
+    assert len(items) == 1 and items[0].exercise_id != wade.id
+    kopie = state.uebungen.laden(items[0].exercise_id)
+    assert kopie.name == wade.name and kopie.package_id is None
+
+    # Beim Import einer Datei mit der Standard-ID sagt die Rückfrage es deutlich
+    from trainingsapp.ui.views.pakete import import_rueckfrage
+
+    state.pakete.importieren(state.pakete.inhalt(GRUNDAUSSTATTUNG))  # wieder installieren
+    inhalt = state.pakete.inhalt(GRUNDAUSSTATTUNG)
+    dialog = import_rueckfrage(page, state, inhalt, state.pakete.vorschau(inhalt))
+    assert any("Ersetzt das mitgelieferte Paket" in t for t in texte(dialog.content))
+
+
 def test_uebung_zeigt_geaendert_und_setzt_zurueck(page, state) -> None:
     dialoge: list = []
     page.show_dialog = dialoge.append

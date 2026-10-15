@@ -20,7 +20,7 @@ Regeln: `data/pakete.py`; Format: `core/pakete.py`; beides in
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -28,6 +28,7 @@ import flet as ft
 
 from trainingsapp.core.models import Exercise
 from trainingsapp.core.pakete import (
+    GRUNDAUSSTATTUNG,
     Paket,
     PaketFehler,
     Paketinhalt,
@@ -106,6 +107,18 @@ def import_rueckfrage(
     if inhalt.paket.beschreibung:
         zeilen.append(ft.Text(inhalt.paket.beschreibung, size=13, italic=True))
     zeilen += [ft.Text(f"• {z}") for z in vorschau.zusammenfassung()]
+    if not wieder and inhalt.paket.id == GRUNDAUSSTATTUNG and vorschau.installiert is not None:
+        # Offen für alle (Ben, 15.10.2026) — aber nie still: Diese Datei ersetzt das
+        # mitgelieferte Paket. Der eingebaute Stand kommt per „Wieder installieren“ zurück.
+        zeilen.append(
+            ft.Text(
+                f"Ersetzt das mitgelieferte Paket „Standard“ — "
+                f"{uebungen_zahl(vorschau.anzahl(Status.GEAENDERT))} "
+                "werden mit dem Stand dieser Datei überschrieben.",
+                weight=ft.FontWeight.W_600,
+                color=ft.Colors.ERROR,
+            )
+        )
     if vorschau.anzahl(Status.GEAENDERT, Status.ZURUECK):
         zeilen.append(hinweis("Einträge im Verlauf bleiben, wie sie sind."))
     if not vorschau.zu_tun:
@@ -390,21 +403,70 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
 
         return handler
 
-    def entfernen() -> None:
-        n = state.pakete.entfernen(paket.id)
+    def entfernen(kopieren: Iterable[str] = ()) -> None:
+        kopieren = set(kopieren)
+        n = state.pakete.entfernen(paket.id, kopieren)
         nachher.danach(lambda: page.push_route(basis))
         page.pop_dialog()
-        melden(f"„{paket.name}“ entfernt — {uebungen_zahl(n)} im Papierkorb")
+        kopiert = f", {uebungen_zahl(len(kopieren))} als eigene kopiert" if kopieren else ""
+        melden(f"„{paket.name}“ entfernt — {uebungen_zahl(n)} im Papierkorb{kopiert}")
 
     def entfernen_fragen() -> None:
-        fragen(
-            f"„{paket.name}“ entfernen?",
+        """Rückfrage; stehen Übungen des Pakets in Plänen, je Übung „kopieren“ (Ben, 15.10.2026:
+        Hinweis „Teil von Plan …“ und Angebot, die Übung als eigene zu kopieren)."""
+        verwendungen = state.pakete.verwendungen(paket.id)
+        text = (
             f"{uebungen_zahl(len(staende))} des Pakets kommen in den Papierkorb und "
             "verschwinden aus Katalog und Plänen. Einträge im Verlauf bleiben. Zurück geht "
-            "es im Paketmanager mit „Wieder installieren“ oder mit einem neuen Import.",
-            "Entfernen",
-            entfernen,
-            warnend=True,
+            "es im Paketmanager mit „Wieder installieren“ oder mit einem neuen Import."
+        )
+        if not verwendungen:
+            fragen(f"„{paket.name}“ entfernen?", text, "Entfernen", entfernen, warnend=True)
+            return
+        plaene_je_uebung: dict[str, tuple[Exercise, list[str]]] = {}
+        for plan, _item, uebung in verwendungen:
+            eintrag = plaene_je_uebung.setdefault(uebung.id, (uebung, []))
+            if plan.name not in eintrag[1]:
+                eintrag[1].append(plan.name)
+        kaestchen = {
+            uebung_id: ft.Checkbox(
+                value=True,
+                label=f"{uebung.name} — Teil von Plan {', '.join(f'„{n}“' for n in namen)}",
+            )
+            for uebung_id, (uebung, namen) in plaene_je_uebung.items()
+        }
+
+        def ausfuehren() -> None:
+            entfernen({uebung_id for uebung_id, k in kaestchen.items() if k.value})
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                on_dismiss=nachher.bei_schliessen,
+                title=ft.Text(f"„{paket.name}“ entfernen?"),
+                content=ft.Column(
+                    tight=True,
+                    spacing=8,
+                    scroll=ft.ScrollMode.AUTO,
+                    controls=[
+                        ft.Text(text),
+                        ft.Text(
+                            "Diese Übungen stehen noch in Plänen. Angekreuzt werden sie als "
+                            "eigene Übung kopiert und bleiben im Plan — sonst fliegen sie raus.",
+                            weight=ft.FontWeight.W_600,
+                        ),
+                        *kaestchen.values(),
+                    ],
+                ),
+                actions=[
+                    ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                    ft.FilledButton(
+                        "Entfernen",
+                        on_click=ausfuehren,
+                        style=ft.ButtonStyle(bgcolor=ft.Colors.ERROR, color=ft.Colors.ON_ERROR),
+                    ),
+                ],
+            )
         )
 
     def zeile(z: Uebungsstand) -> ft.Control:

@@ -48,6 +48,7 @@ from ..core.models import (
     new_id,
     tagesgrenzen,
 )
+from ..core.pakete import stand_tag_nachziehen
 from ..core.parameter import kontextfelder, modus_aus_felder
 from ..core.result_spec import FieldType, ResultSpec, werte_modernisieren
 from .db import transaktion
@@ -1786,7 +1787,29 @@ class TagRepo:
                 self.con.execute("DELETE FROM exercise_tag WHERE tag_id = ?", (r["id"],))
                 self.con.execute("DELETE FROM tag WHERE id = ?", (r["id"],))
             self._kategorie_nachziehen(betroffen, stempel)
+            self._paketstand_nachziehen(art, alt, ziel["name"] if ziel is not None else neu)
         return None
+
+    def _paketstand_nachziehen(self, art: str, alt: str, neu: str | None) -> None:
+        """Der Paketstand (`exercise.package_standard_json`) kennt Tags beim Namen —
+        umbenannt oder gelöscht zieht er mit, sonst gälte jede Paketübung als „geändert“."""
+        feld = "typen" if art == TAG_TYP else "regionen"
+        zeilen = self.con.execute(
+            "SELECT id, package_standard_json FROM exercise WHERE package_standard_json IS NOT NULL"
+        ).fetchall()
+        for z in zeilen:
+            try:
+                standard = json.loads(z["package_standard_json"])
+            except ValueError:
+                continue
+            if not isinstance(standard, dict):
+                continue
+            danach = stand_tag_nachziehen(standard, feld, alt, neu)
+            if danach is not None:
+                self.con.execute(
+                    "UPDATE exercise SET package_standard_json = ? WHERE id = ?",
+                    (json.dumps(danach, ensure_ascii=False, sort_keys=True), z["id"]),
+                )
 
     def _kategorie_nachziehen(self, uebung_ids: list[str], stempel: str) -> None:
         """`exercise.category` = erster Typ — nach Löschen oder Umbenennen eines Tags."""
@@ -1821,6 +1844,7 @@ class TagRepo:
             self.con.execute("DELETE FROM exercise_tag WHERE tag_id = ?", (tag_id,))
             self.con.execute("DELETE FROM tag WHERE id = ?", (tag_id,))
             self._kategorie_nachziehen(betroffen, stempel)
+            self._paketstand_nachziehen(art, name, None)
         return len(betroffen)
 
 

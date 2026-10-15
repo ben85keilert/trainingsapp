@@ -15,7 +15,16 @@ import uuid
 
 import pytest
 
-from trainingsapp.core.models import Exercise, Media
+from trainingsapp.core.models import (
+    TAG_REGION,
+    TAG_TYP,
+    Exercise,
+    Media,
+    MediaKind,
+    MediaSource,
+    Plan,
+    PlanItem,
+)
 from trainingsapp.core.pakete import (
     GRUNDAUSSTATTUNG,
     NAMENSRAUM,
@@ -29,7 +38,7 @@ from trainingsapp.core.pakete import (
 from trainingsapp.core.result_spec import SPEC_WINKEL
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.pakete import PaketRepo, Status
-from trainingsapp.data.repositories import ExerciseRepo, TagRepo
+from trainingsapp.data.repositories import ExerciseRepo, PlanRepo, TagRepo
 from trainingsapp.data.seed import SEED_DATEI, seed_einspielen, seed_id, seed_inhalt
 
 
@@ -441,6 +450,100 @@ def test_entfernen_und_wieder_installieren(con) -> None:
     assert repo.laden(tief.id).family_id == baum.id
     assert [p.name for p, _ in pakete.alle()] == ["Standard", "Qigong"]
     assert pakete.entfernte() == []
+
+
+def test_entfernen_nimmt_uebungen_aus_plaenen_oder_kopiert_sie(con) -> None:
+    """Ben, 15.10.2026: Paket entfernen nimmt die Übungen aus den Plänen; wer sie behalten
+    will, kopiert sie — die Kopie ist eine eigene Übung und übernimmt die Planposition."""
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    plaene = PlanRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    baum, tief = inhalt.uebungen
+    plan = Plan(
+        name="Morgens", items=[PlanItem(exercise_id=baum.id), PlanItem(exercise_id=tief.id)]
+    )
+    plaene.speichern(plan)
+    verwendungen = pakete.verwendungen(inhalt.paket.id)
+    assert [(p.name, u.id) for p, _i, u in verwendungen] == [
+        ("Morgens", baum.id),
+        ("Morgens", tief.id),
+    ]
+
+    assert pakete.entfernen(inhalt.paket.id, kopieren={baum.id}) == 2
+    geladen = plaene.laden(plan.id)
+    assert len(geladen.items) == 1  # „tief" ist raus, „baum" lebt als Kopie weiter
+    kopie = repo.laden(geladen.items[0].exercise_id)
+    assert kopie is not None and kopie.id != baum.id
+    assert kopie.name == baum.name and kopie.package_id is None and kopie.family_id == baum.id
+    assert pakete.standard(kopie.id) is None  # eigene Übung, kein Paketstand
+    assert repo.laden(baum.id) is None  # das Original liegt im Papierkorb
+    assert pakete.verwendungen(inhalt.paket.id) == []
+    # Wieder installieren holt die Übungen zurück, der Plan behält die Kopie
+    pakete.importieren(pakete.inhalt(inhalt.paket.id))
+    assert repo.laden(baum.id) is not None
+    assert [i.exercise_id for i in plaene.laden(plan.id).items] == [kopie.id]
+
+
+def test_tag_umbenennen_und_loeschen_ziehen_den_paketstand_mit(con) -> None:
+    """K-F4 (Ben, 15.10.2026): Nach „Qigong → Qi Gong" gilt keine Paketübung als geändert,
+    und „Auf Paketstand setzen" legt den alten Namen nicht wieder an — auch nicht der Start."""
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    tags = TagRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    baum = inhalt.uebungen[0]
+    assert tags.umbenennen(TAG_TYP, "Qigong", "Qi Gong") is None
+    assert pakete.abweichungen(repo.laden(baum.id)) == []
+    assert pakete.standard(baum.id)["typen"] == ["Qi Gong", "Dehnung"]
+    assert pakete.zuruecksetzen([baum.id]) == 0
+    assert tags.loeschen(TAG_REGION, "Meridiane") == 1
+    assert pakete.abweichungen(repo.laden(baum.id)) == []
+    assert pakete.standard(baum.id)["regionen"] == []
+    # Zusammenführen auf einen vorhandenen Namen: der Stand trägt dann dessen Schreibweise
+    assert tags.umbenennen(TAG_TYP, "Qi Gong", "Dehnung") is None
+    assert pakete.standard(baum.id)["typen"] == ["Dehnung"]
+    assert pakete.abweichungen(repo.laden(baum.id)) == []
+    # Das Standard-Paket beim nächsten Start: der Stand aus dem TOML überschreibt nicht
+    nacken = repo.laden(seed_id("nacken_dehnung"))
+    assert "Dehnung" in nacken.typen
+    assert tags.umbenennen(TAG_TYP, "Dehnung", "Stretching") is None
+    seed_einspielen(con)
+    nacken = repo.laden(seed_id("nacken_dehnung"))
+    assert "Stretching" in nacken.typen and "Dehnung" not in nacken.typen
+    assert pakete.abweichungen(nacken) == []
+    assert pakete.zuruecksetzen([nacken.id]) == 0
+
+
+def test_update_und_reset_behalten_eigene_fotos_und_lokale_videos(con) -> None:
+    """K-F5 (Ben, 15.10.2026): Das Paket kennt lokale Medien nicht — sie bleiben trotzdem."""
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    pakete.importieren(paket_lesen(qigong()))
+    baum = repo.laden(paket_lesen(qigong()).uebungen[0].id)
+    baum.media.append(Media(kind=MediaKind.IMAGE, source=MediaSource.LOCAL, uri="fotos/baum.jpg"))
+    baum.image_path = "fotos/baum.jpg"
+    repo.speichern(baum)
+    assert pakete.abweichungen(repo.laden(baum.id)) == []  # Lokales zählt nicht als Abweichung
+
+    neu = qigong(version=2)
+    neu["exercises"][0]["description"] = "Zweite Fassung."
+    vorschau = pakete.importieren(paket_lesen(neu))
+    assert vorschau.status[baum.id] == Status.GEAENDERT
+    baum = repo.laden(baum.id)
+    assert baum.description == "Zweite Fassung."
+    assert [m.uri for m in baum.media if m.source == MediaSource.LOCAL] == ["fotos/baum.jpg"]
+    assert baum.image_path == "fotos/baum.jpg"
+
+    baum.description = "Meine Fassung"
+    repo.speichern(baum)
+    assert pakete.zuruecksetzen([baum.id]) == 1
+    baum = repo.laden(baum.id)
+    assert baum.description == "Zweite Fassung."
+    assert [m.uri for m in baum.media if m.source == MediaSource.LOCAL] == ["fotos/baum.jpg"]
+    assert baum.image_path == "fotos/baum.jpg"
 
 
 def test_wieder_installieren_holt_auch_endgueltig_geloeschte(con) -> None:

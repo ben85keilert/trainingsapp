@@ -387,6 +387,34 @@ FELDNAMEN: dict[str, str] = {
 }
 
 
+def stand_tag_nachziehen(
+    standard: dict[str, Any], feld: str, alt: str, neu: str | None
+) -> dict[str, Any] | None:
+    """Ein umbenannter (``neu``) oder gelöschter (``None``) Tag im Paketstand.
+
+    ``feld`` ist ``"typen"`` oder ``"regionen"``. Zurück kommt der neue Stand —
+    oder ``None``, wenn der Tag dort nicht vorkam. Sonst zeigte jede Paketübung
+    nach „Dehnung → Stretching“ dauerhaft „geändert: Typen“, und „Auf Paketstand
+    setzen“ legte den alten Namen wieder an (K-F4, Ben 15.10.2026: mitziehen).
+
+    >>> stand_tag_nachziehen({"typen": ["Dehnung", "HRV"]}, "typen", "Dehnung", "Stretching")
+    {'typen': ['Stretching', 'HRV']}
+    >>> stand_tag_nachziehen({"typen": ["HRV", "Dehnung"]}, "typen", "Dehnung", None)
+    {'typen': ['HRV']}
+    >>> stand_tag_nachziehen({"typen": ["HRV"]}, "typen", "Dehnung", None) is None
+    True
+    """
+    namen = standard.get(feld)
+    if not isinstance(namen, list) or alt not in namen:
+        return None
+    danach: list[str] = []
+    for name in namen:
+        ersatz = neu if name == alt else name
+        if ersatz is not None and ersatz not in danach:
+            danach.append(ersatz)
+    return {**standard, feld: danach}
+
+
 def abweichungen(u: Exercise, standard: dict[str, Any]) -> list[str]:
     """Was an der Übung anders ist als im Paket — in Worten, leer = wie im Paket.
 
@@ -463,5 +491,6 @@ __all__ = [
     "paket_json",
     "paket_lesen",
     "stand",
+    "stand_tag_nachziehen",
     "uebung_id",
 ]

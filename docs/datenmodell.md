@@ -3,6 +3,9 @@
 Schema: `src/trainingsapp/data/migrations/001_init.sql`.
 Migrationen sind nummerierte `.sql`-Dateien, die Version steht in
 `PRAGMA user_version`. Kein ORM — `sqlite3` reicht und zeigt, was passiert.
+`data.db.migrieren` legt um jede Datei `BEGIN … PRAGMA user_version … COMMIT`
+— die Dateien selbst enthalten **kein** `BEGIN`/`COMMIT` (Python-`executescript`
+committet eine offene Transaktion sonst still vorher).
 
 IDs sind **UUIDv7** als TEXT: zeitsortiert, dadurch gute Index-Lokalität und
 natürliche Sortierung ohne Zusatzspalte (`core/models.py::new_id`).

@@ -239,6 +239,35 @@ def test_migration_ist_wiederholbar(tmp_path) -> None:
     con.close()
 
 
+def test_kaputte_migration_laesst_nichts_zurueck(tmp_path) -> None:
+    """Scheitert ein Statement mitten im Skript, bleibt nichts davon stehen — auch nicht
+    die Version. `executescript` committet sonst still vorher (Python-sqlite3)."""
+    import shutil
+
+    from trainingsapp.data.db import MIGRATIONS_DIR, verbinden
+
+    ordner = tmp_path / "migrationen"
+    ordner.mkdir()
+    for datei in MIGRATIONS_DIR.glob("*.sql"):
+        shutil.copy(datei, ordner / datei.name)
+    kaputt = ordner / "016_kaputt.sql"
+    kaputt.write_text(
+        "CREATE TABLE halb (id TEXT PRIMARY KEY);\nALTER TABLE gibt_es_nicht ADD COLUMN x TEXT;\n",
+        encoding="utf-8",
+    )
+    con = verbinden(tmp_path / "test.db")
+    with pytest.raises(RuntimeError, match="016_kaputt"):
+        migrieren(con, ordner)
+    assert not con.in_transaction
+    assert schema_version(con) == 15
+    tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "halb" not in tabellen
+    # Repariert läuft sie durch — der nächste Start scheitert nicht an „schon vorhanden"
+    kaputt.write_text("CREATE TABLE halb (id TEXT PRIMARY KEY);\n", encoding="utf-8")
+    assert migrieren(con, ordner) == 16
+    con.close()
+
+
 def test_fremdschluessel_greifen(tmp_path) -> None:
     """Ohne PRAGMA foreign_keys prüft SQLite gar nicht — deshalb dieser Test."""
     import sqlite3

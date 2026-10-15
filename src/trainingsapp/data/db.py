@@ -55,6 +55,13 @@ def migrieren(con: sqlite3.Connection, ordner: Path = MIGRATIONS_DIR) -> int:
     Jede Migration läuft in einer eigenen Transaktion: schlägt eine fehl, bleibt
     die Datenbank auf dem letzten funktionierenden Stand statt halb migriert.
 
+    Fallstrick: ``executescript`` **committet** eine offene Transaktion, bevor es
+    das Skript ausführt — ein ``BEGIN`` davor wäre wirkungslos, und das Skript liefe
+    Statement für Statement im Autocommit. Darum stehen ``BEGIN`` und ``COMMIT``
+    *im* Skript, zusammen mit ``PRAGMA user_version`` (das ist transaktional):
+    Entweder kommt alles an, oder nichts — auch die Versionsnummer. Migrationsdateien
+    enthalten deshalb selbst kein ``BEGIN``/``COMMIT``.
+
     Returns:
         Die Schemaversion nach dem Lauf.
     """
@@ -63,15 +70,13 @@ def migrieren(con: sqlite3.Connection, ordner: Path = MIGRATIONS_DIR) -> int:
         if nummer <= aktuell:
             continue
         sql = datei.read_text(encoding="utf-8")
-        con.execute("BEGIN")
+        skript = f"BEGIN;\n{sql}\n;\nPRAGMA user_version = {nummer};\nCOMMIT;"
         try:
-            con.executescript(sql)
-        except Exception:
-            con.execute("ROLLBACK")
-            raise
-        # executescript beendet eine offene Transaktion selbst; ein COMMIT hier
-        # wäre je nach Skriptinhalt ein Fehler. Version separat setzen.
-        con.execute(f"PRAGMA user_version = {nummer}")
+            con.executescript(skript)
+        except Exception as fehler:
+            if con.in_transaction:
+                con.execute("ROLLBACK")
+            raise RuntimeError(f"Migration {datei.name} fehlgeschlagen: {fehler}") from fehler
         aktuell = nummer
     return aktuell
 

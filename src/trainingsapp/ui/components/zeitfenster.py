@@ -143,9 +143,10 @@ def wischbar(
         # ``local_delta`` = Weg seit dem letzten *gesendeten* Ereignis; ``primary_delta``
         # ist nur der Weg des letzten Touch-Frames — mit `drag_interval` ginge
         # der Rest der Bewegung verloren (Finger 300 px, Kurve 50 px).
-        dx = e.local_delta.x if getattr(e, "local_delta", None) is not None else None
+        weg = getattr(e, "local_delta", None)
+        dx = weg.x if weg is not None else e.primary_delta
         if dx is None:
-            dx = e.primary_delta if e.primary_delta is not None else 0.0
+            dx = 0.0
         vorher = fenster.ende_s
         fenster.verschieben(-dx / stand["breite_px"] * fenster.breite_s, jetzt_s(), anfang())
         if fenster.ende_s == vorher:

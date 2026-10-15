@@ -147,14 +147,17 @@ def uebung_detail(
     def abbrechen() -> None:
         page.pop_dialog()
 
-    async def archivieren() -> None:
+    entfernt = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (`components/dialoge.py`)
+
+    def archivieren() -> None:
         state.uebungen.archivieren(uebung.id)
+        entfernt.danach(lambda: page.push_route("/"))
         page.pop_dialog()
         page.show_dialog(ft.SnackBar(ft.Text(f"„{uebung.name}“ archiviert")))
-        await page.push_route("/")
 
-    async def loeschen() -> None:
+    def loeschen() -> None:
         state.uebungen.in_papierkorb(uebung.id)
+        entfernt.danach(lambda: page.push_route("/"))
         page.pop_dialog()
         page.show_dialog(
             ft.SnackBar(
@@ -163,7 +166,6 @@ def uebung_detail(
                 on_action=rueckgaengig,
             )
         )
-        await page.push_route("/")
 
     def rueckgaengig() -> None:
         state.uebungen.aus_papierkorb(uebung.id)
@@ -174,6 +176,7 @@ def uebung_detail(
 
     dialog = ft.AlertDialog(
         modal=True,
+        on_dismiss=entfernt.bei_schliessen,
         title=ft.Text("Übung entfernen?"),
         content=ft.Text(
             "Archivieren: verschwindet aus dem Katalog, bleibt in Plänen — jederzeit zurück.\n\n"

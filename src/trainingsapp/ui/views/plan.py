@@ -539,16 +539,19 @@ def plan_view(
     def abbrechen() -> None:
         page.pop_dialog()
 
-    async def loeschen() -> None:
+    nachher = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (`components/dialoge.py`)
+
+    def loeschen() -> None:
         state.plaene.loeschen(plan.id)
+        nachher.danach(lambda: page.push_route("/"))
         page.pop_dialog()
         page.show_dialog(
             ft.SnackBar(ft.Text(f"Plan „{plan.name}“ liegt im Papierkorb — Einträge bleiben."))
         )
-        await page.push_route("/")
 
     dialog = ft.AlertDialog(
         modal=True,
+        on_dismiss=nachher.bei_schliessen,
         title=ft.Text("Plan löschen?"),
         content=ft.Text(
             "Der Plan kommt in den Papierkorb (Übungen → Katalog → Papierkorb). "

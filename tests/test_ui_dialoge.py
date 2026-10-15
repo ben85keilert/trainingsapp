@@ -91,6 +91,29 @@ def test_paketdialoge_haben_einen_koroutinen_handler(page, state) -> None:
     assert inspect.iscoroutinefunction(dialog.on_dismiss)
 
 
+def test_profil_loeschen_zeichnet_erst_nach_dem_schliessen(page, state) -> None:
+    """profile.py hatte das 1:1-Muster pop_dialog → neu_zeichnen (Durchsicht 15.10.2026)."""
+    from trainingsapp.ui.views.profile import profile_view
+
+    state.profil_anlegen("Zweites")
+    gezeichnet: list[str] = []
+    state.neu_zeichnen = lambda: gezeichnet.append("neu")  # type: ignore[method-assign]
+    ansicht = profile_view(page, state)
+    knopf = next(
+        c
+        for v in ansicht.controls
+        for c in _alle(v)
+        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.DELETE_OUTLINE and not c.disabled
+    )
+    knopf.on_click()
+    dialog = page.dialoge[-1]
+    assert inspect.iscoroutinefunction(dialog.on_dismiss)
+    dialog.actions[-1].on_click()  # „Löschen"
+    assert gezeichnet == []  # noch nicht — der Dialog ist erst zu, wenn Flutter es sagt
+    asyncio.run(dialog.on_dismiss(None))
+    assert gezeichnet == ["neu"]
+
+
 def _alle(wurzel):
     yield wurzel
     for name in ("content", "controls"):

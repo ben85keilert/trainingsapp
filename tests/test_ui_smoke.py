@@ -91,6 +91,9 @@ def test_profile_verwalten_mit_rueckfrage(page, state) -> None:
     assert state.profil.name == "Anna"
     frage.actions[1].on_click()  # „Löschen"
     assert [p.name for p in state.profile.alle()] == [state.profil.name] != ["Anna"]
+    import asyncio
+
+    asyncio.run(frage.on_dismiss(None))  # neu gezeichnet wird erst, wenn der Dialog zu ist
     letzter = [
         c for c in alle() if isinstance(c, ft.IconButton) and c.icon == ft.Icons.DELETE_OUTLINE
     ]

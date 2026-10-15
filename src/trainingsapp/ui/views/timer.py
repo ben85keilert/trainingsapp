@@ -62,6 +62,7 @@ from trainingsapp.core.timer import (
     signal,
     signale_kurz,
 )
+from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
@@ -872,19 +873,22 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
         page.show_dialog(ft.SnackBar(ft.Text(f"„{neu.name}“ gespeichert")))
         await page.push_route(zurueck_route)
 
-    async def loeschen() -> None:
+    nachher = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (`components/dialoge.py`)
+
+    def loeschen() -> None:
         rest = [p for p in state.timer_profile() if p.id != profil.id]
         state.timer_profile_setzen(rest)
         if state.timer is not None and state.timer.profil.id == profil.id:
             state.timer = None
+        nachher.danach(lambda: page.push_route(zurueck_route))
         page.pop_dialog()
         page.show_dialog(ft.SnackBar(ft.Text(f"„{profil.name}“ gelöscht")))
-        await page.push_route(zurueck_route)
 
     def loeschen_fragen() -> None:
         page.show_dialog(
             ft.AlertDialog(
                 modal=True,
+                on_dismiss=nachher.bei_schliessen,
                 title=ft.Text("Profil löschen?"),
                 content=ft.Text(
                     "Gibt es danach kein eigenes Profil mehr, kommen die zwei Vorlagen zurück."

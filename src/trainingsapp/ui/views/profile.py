@@ -15,6 +15,7 @@ import flet as ft
 
 from trainingsapp.config import ist_aktiv
 from trainingsapp.core.models import Subject
+from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
@@ -45,21 +46,25 @@ def profile_view(page: ft.Page, state: AppState) -> ft.View:
         return handler
 
     def loeschen(profil: Subject) -> Callable[[], None]:
+        nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
+
         def ausfuehren() -> None:
-            page.pop_dialog()
             try:
                 state.profil_loeschen(profil.id)
             except ValueError as fehler:
+                page.pop_dialog()
                 page.show_dialog(ft.SnackBar(ft.Text(str(fehler))))
                 return
+            nachher.danach(zeichnen)
+            nachher.danach(state.neu_zeichnen)  # war es aktiv, gilt jetzt ein anderes Farbprofil
+            page.pop_dialog()
             page.show_dialog(ft.SnackBar(ft.Text(f"Profil „{profil.name}“ gelöscht")))
-            zeichnen()
-            state.neu_zeichnen()  # war es aktiv, gilt jetzt ein anderes Farbprofil
 
         def fragen() -> None:
             page.show_dialog(
                 ft.AlertDialog(
                     modal=True,
+                    on_dismiss=nachher.bei_schliessen,
                     title=ft.Text(f"„{profil.name}“ löschen?"),
                     content=ft.Text(
                         "Das Profil verschwindet aus der App, mit seinen Plänen, "

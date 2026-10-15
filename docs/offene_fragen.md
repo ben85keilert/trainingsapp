@@ -140,6 +140,7 @@ leere Messungen sind in allen Rechenwegen geschützt. Kein `flet`/`scipy` in
 | H8 | `ui/views/messung_detail.py:305-329, 385-409, 375, 1661` | Laden, Vorschläge, Kacheln (Atmung über bis zu 2000 Minutenfenster, SampEn bis 3000 Schläge) laufen synchron im Event-Loop beim Aufbau; laut `plan_analyse_leistung.md` bewusst so belassen. **Frage H-F6:** `hrv_core`-Rechnungen per `asyncio.to_thread` (flet-frei, thread-tauglich)? | niedrig |
 | H11 | `ui/views/messung_detail.py:385-409` ↔ `ausschnitte.py:192-198` | Atem-Median über Minutenfenster existiert doppelt (UI adaptiv mit Deckel, `ausschnitte` 15 s fest ohne Deckel). Gehört einmal nach `hrv_core`. | niedrig |
 | H12 | `tests/test_frequenz.py:275` | Langer Spektralweg (ULF/VLF/LF/HF, ALGO 5) hat nur eine synthetische Reihe im Test (Toleranz 10 %), keine Referenzdatei unter `tests/golden/rr/` und keinen Vergleichswert aus praxis_gui/scipy. | niedrig |
+| H16 | `ui/views/messung.py` `backup_uebernehmen` ↔ `ui/views/ausdauer.py` `verwaiste_uebernehmen` | Endet ein Ausdauertraining mit HRV durch Absturz, werden Strecke und Messung beim Start getrennt nachgetragen, aber nicht verknüpft (`strecke.hrv_recording_id` bleibt leer). Zuordnung über `started_at` (Strecken-Kopf) ↔ `start_utc` (Backup) wäre möglich, die Zeiten liegen nahe, sind aber nicht gleich. Vertagt (15.10.2026). | niedrig |
 | H13 | `hrv_core/ereignisse.py:337-355` | Jede Notiz liest und schreibt die ganze Rohdatei synchron im Event-Loop (MB bei Stundenmessungen); Absturz zwischen Rohdatei-Write und Sidecar-Update hinterlässt veraltetes `source_file_sha1` (praxis_gui hält Sidecar für veraltet, kein Datenverlust). | niedrig |
 
 ### 3.5 Pläne, Notation, Timer, Profile, App-Hülle
@@ -171,6 +172,7 @@ Je Paket ein Commit auf `main`; Tests dazu in den genannten Dateien.
 - **K2, K3, K4, K-F3-Rückfrage** (4fd7a54) — Entfernen mit Plan-Rückfrage und Kopie; Paketstand folgt Tags; Lokales bleibt; Standard-Hinweis beim Import.
 - **Nachtrag HRV** — Abschnitte rechnen auf der Kurvenachse wie das Band (Verity-Abschnitte hatten über den Teilstück-Weg kein Spektrum mehr); H9, H10, H14, H15.
 - **Niedrige Befunde ohne Entscheidung** — K7, K8, K9, K11, K13, G9 (Teile), G11, G13, G14, G16, N8, N10, N11, N12, N13, N15 (Test).
+- **Crash-Backup wiederherstellen** — das 15-s-Backup gab es, aber nichts fand es wieder (Ben: Akku während 4-h-Aufnahme leer, Messung weg). Jetzt: Dialog beim Start, `backup_wiederherstellen`, Profil und Timer-Abschnitte im Backup (`_wiederherstellung`), Sicherung beim Hintergrundwechsel. Offen: H16.
 
 ## 4. Medien an Übungen — Fakten für die vertagte Entscheidung (K-F6, P14)
 

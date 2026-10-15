@@ -413,6 +413,26 @@ Messungen/<Geräteordner>/.backup_<YYYY-MM-DD>_<HHMMSS>.json     # UTC-Startzeit
 - Nach erfolgreichem Speichern der Messdatei wird das Backup gelöscht. Bleibt
   eines liegen, war die Aufnahme nicht ordentlich beendet.
 - Der Punkt am Anfang hält es aus jeder Messungsliste heraus.
+- **Unser Zusatz** (15.10.2026): ein Top-Level-Block `_wiederherstellung`, nur im
+  Backup, nie in der Messdatei:
+  ```json
+  "_wiederherstellung": {"subject_id": "<Profil-ID>", "grenzen": [[<Notiz>, "<Name>", false], …]}
+  ```
+  `subject_id` ist das Profil beim Start der Aufnahme, `grenzen` sind die
+  Abschnittsgrenzen des Timers (Notiz, Abschnittsname, nur Ende?), die sonst nur
+  im Speicher lägen. `hrv_core.aufnahme.backup_lesen` nimmt den Block vor
+  `Recording.from_dict` heraus, damit er nicht über `extra` in die Messdatei
+  gerät. praxis_gui liest Backups nicht; ein Backup ohne den Block (älter oder
+  aus praxis_gui) wird dem aktiven Profil zugeordnet.
+- **Wiederherstellung** (ab 15.10.2026): Beim App-Start sucht
+  `hrv_core.aufnahme.backups_finden` unter `Messungen/*/` nach Backups; der Dialog
+  „Unvollständige Messung gefunden" bietet je Datei Wiederherstellen oder Löschen.
+  `devices.messlauf.backup_wiederherstellen` schreibt `sensor_<start>.json` neben
+  das Backup (gleicher Zeitstempel), trägt die Abschnitte ins Sidecar ein und
+  löscht das Backup erst danach. Liegt die Messdatei schon da, bleibt sie, wie
+  sie ist. Das Diagnoseprotokoll (`_diagnose.txt`) entsteht dabei nicht.
+- Zusätzlich zum 15-s-Takt sichert die App, sobald sie in den Hintergrund geht
+  (`page.on_app_lifecycle_state_change` → `Messlauf.backup_jetzt`).
 
 ## 7. Regeln beim Lesen
 

@@ -18,7 +18,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from trainingsapp.config import datenbankpfad, streckenverzeichnis
+from trainingsapp.config import datenbankpfad, messungenverzeichnis, streckenverzeichnis
 from trainingsapp.core.darstellung import Darstellung, darstellung_lesen, darstellung_schreiben
 from trainingsapp.core.hrv_ansicht import (
     Ansicht,
@@ -65,6 +65,7 @@ from trainingsapp.devices.bekannte import (
     merken,
     vergessen,
 )
+from trainingsapp.hrv_core.aufnahme import backups_finden
 from trainingsapp.hrv_core.regeln import Korrekturregeln
 
 STANDARD_PROFILNAME = "Ich"
@@ -201,6 +202,9 @@ class AppState:
     ausdauer_karte: bool = True
     #: Streckendateien ohne Zeile `strecke` (Prozess-Tod im Training) — beim Start erkannt
     verwaiste_strecken: list[Path] = field(default_factory=list)
+    #: Crash-Backups laufender HRV-Aufnahmen (Akku leer, Absturz) — beim Start erkannt,
+    #: `ui.views.messung.backup_dialog` bietet Wiederherstellen an
+    hrv_backups: list[Path] = field(default_factory=list)
     gps_test_karte: bool = True
     gps_test_wach: bool = False
     #: App sichtbar? Display aus oder andere App → False (Lebenszyklus in `app.py`)
@@ -236,6 +240,10 @@ class AppState:
             verwaist = strecken_verwaiste(streckenverzeichnis(), strecken.dateipfade())
         except OSError:
             verwaist = []
+        try:
+            backups = backups_finden(messungenverzeichnis())
+        except OSError:
+            backups = []
         return cls(
             con=con,
             uebungen=ExerciseRepo(con),
@@ -247,6 +255,7 @@ class AppState:
             hrv=HrvRepo(con),
             strecken=strecken,
             verwaiste_strecken=verwaist,
+            hrv_backups=backups,
             tags=TagRepo(con),
             pakete=PaketRepo(con),
             kurse=KursRepo(con),

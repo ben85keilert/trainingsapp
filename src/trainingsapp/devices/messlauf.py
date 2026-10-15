@@ -7,6 +7,10 @@ füttert immer das `LiveFenster` und während einer Aufnahme zusätzlich die
 Beobachter, dass es Neues gibt. Er rechnet nichts selbst — das tun `hrv_core`
 (Aufnahme, Live-Kennzahlen) und die Quelle (Protokoll).
 
+Bleibt ein Backup liegen (Akku leer, Absturz), macht `backup_wiederherstellen`
+daraus beim nächsten Start die Messdatei, die „Stopp & speichern" geschrieben
+hätte — mit Profil und Timer-Abschnitten, die das Backup dafür mitführt.
+
 Kein flet-Import: Der Messlauf ist ohne Bildschirm testbar (Simulator).
 """
 
@@ -23,14 +27,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .. import __version__
-from ..hrv_core.aufnahme import Aufnahme
+from ..hrv_core.aufnahme import Aufnahme, backup_lesen
 from ..hrv_core.ausschnitte import grenzen_speichern
 from ..hrv_core.constants import malik_threshold
 from ..hrv_core.ereignisse import Zeitbezug, notiz
 from ..hrv_core.export import diagnose_pfad, diagnose_text
 from ..hrv_core.live import LiveFenster
 from ..hrv_core.ppi import messluecken
-from ..hrv_core.recording import Recording, messordner
+from ..hrv_core.recording import Recording, messordner, speichern
 from ..hrv_core.regeln import Korrekturregeln
 from ..hrv_core.segments import abdeckung
 from ..hrv_core.zeitachse import Kontinuitaetsuhr
@@ -52,10 +56,67 @@ class Gespeichert:
     dauer_s: float
     abdeckung_pct: float
     n_luecken: int
+    #: Profil beim Start — nur aus einem wiederhergestellten Backup bekannt;
+    #: ``None`` = das aktive Profil (beim normalen Stopp hält es `Messlauf.subject_id`)
+    subject_id: str | None = None
 
 
 def _sha1(pfad: Path) -> str:
     return hashlib.sha1(pfad.read_bytes()).hexdigest()  # Prüfsumme, keine Sicherheitsfunktion
+
+
+def _gespeichert(
+    pfad: Path, rec: Recording, *, dauer_s: float, subject_id: str | None = None
+) -> Gespeichert:
+    """Kennzahlen für die Datenbankzeile aus der frisch geschriebenen Messdatei."""
+    deckung = abdeckung(rec.beats, messluecken(rec))
+    return Gespeichert(
+        pfad=pfad,
+        recording=rec,
+        sha1=_sha1(pfad),
+        started_at=rec.start_utc or datetime.now(UTC),
+        dauer_s=dauer_s,
+        abdeckung_pct=float(deckung.get("coverage_pct", 100.0)),
+        n_luecken=int(deckung.get("n_gaps", 0)),
+        subject_id=subject_id,
+    )
+
+
+def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
+    """Aus einem liegengebliebenen Crash-Backup die Messdatei machen.
+
+    Schreibt ``sensor_<Start>.json`` neben das Backup (derselbe Zeitstempel,
+    `Recording.dateiname`), trägt die Abschnittsgrenzen des Timers ins Sidecar
+    und löscht das Backup erst danach. Liegt die Messdatei schon da (Speichern
+    lief durch, nur das Aufräumen nicht), bleibt sie unangetastet. Ein Backup
+    ohne einen einzigen Schlag wird gelöscht — ``None``, wie bei
+    `Messlauf.aufnahme_stoppen`. Das Diagnoseprotokoll kommt nicht wieder.
+
+    Raises:
+        ValueError: Backup unlesbar (`hrv_core.aufnahme.backup_lesen`).
+        OSError: Schreiben oder Löschen scheiterte — das Backup bleibt liegen.
+    """
+    rec, zusatz = backup_lesen(backup)
+    if not rec.beats:
+        backup.unlink(missing_ok=True)
+        return None
+    pfad = backup.parent / rec.dateiname()
+    if not pfad.exists():
+        pfad = speichern(rec, backup.parent)
+        grenzen = zusatz.get("grenzen")
+        if isinstance(grenzen, list):  # Abschnitte des Timers — scheitert das, bleibt die Messung
+            with contextlib.suppress(OSError, ValueError, TypeError):
+                grenzen_speichern(
+                    pfad, rec, [(dict(n), str(name), bool(ende)) for n, name, ende in grenzen]
+                )
+    backup.unlink(missing_ok=True)
+    subject_id = zusatz.get("subject_id")
+    return _gespeichert(
+        pfad,
+        rec,
+        dauer_s=rec.dauer_s,
+        subject_id=str(subject_id) if subject_id else None,
+    )
 
 
 class Messlauf:
@@ -322,13 +383,30 @@ class Messlauf:
         return messordner(basis, geraeteordner, simulation=self.simulation)
 
     def _backup_wenn_faellig(self) -> None:
-        if self.aufnahme is None or self._backup_basis is None:
+        if self.aufnahme is None or self._uhr() - self._letztes_backup < BACKUP_S:
             return
-        if self._uhr() - self._letztes_backup < BACKUP_S:
+        self.backup_jetzt()
+
+    def backup_jetzt(self) -> None:
+        """Sofort ein Backup der laufenden Aufnahme — außerhalb des 15-s-Takts.
+
+        Für den Lebenszyklus: Geht die App in den Hintergrund, stehen so auch
+        die letzten Sekunden drin, falls Android sie gleich darauf beendet.
+        Ohne Aufnahme oder Backup-Basis passiert nichts; ein Schreibfehler
+        stoppt die Messung nicht.
+        """
+        if self.aufnahme is None or self._backup_basis is None:
             return
         self._letztes_backup = self._uhr()
         with contextlib.suppress(OSError):
-            self.aufnahme.backup(self._ordner(self._backup_basis))
+            self.aufnahme.backup(self._ordner(self._backup_basis), zusatz=self._zusatz())
+
+    def _zusatz(self) -> dict[str, object]:
+        """Was das Backup über die Datei hinaus braucht (`backup_wiederherstellen`)."""
+        return {
+            "subject_id": self.subject_id,
+            "grenzen": [[eintrag, name, ende] for eintrag, name, ende in self._grenzen],
+        }
 
     def aufnahme_stoppen(self, basis: Path) -> Gespeichert | None:
         """Speichert atomar und beendet die Aufnahme. ``None``, wenn nichts aufgezeichnet wurde."""
@@ -349,16 +427,7 @@ class Messlauf:
         if text:
             with contextlib.suppress(OSError):
                 diagnose_pfad(pfad).write_text(text, encoding="utf-8")
-        deckung = abdeckung(rec.beats, messluecken(rec))
-        return Gespeichert(
-            pfad=pfad,
-            recording=rec,
-            sha1=_sha1(pfad),
-            started_at=aufnahme.start_utc,
-            dauer_s=aufnahme.dauer_s(),
-            abdeckung_pct=float(deckung.get("coverage_pct", 100.0)),
-            n_luecken=int(deckung.get("n_gaps", 0)),
-        )
+        return _gespeichert(pfad, rec, dauer_s=aufnahme.dauer_s())
 
     async def trennen(self) -> None:
         await self.quelle.disconnect()

@@ -18,11 +18,17 @@ Ablauf::
     aufnahme.schlag(rr_ms=812, hf_bpm=74, t_capture=..., tw_src="m")
     aufnahme.backup(ordner)          # alle 15 s
     aufnahme.speichern(ordner)       # beim Stopp — löscht das Backup
+
+Bleibt ein Backup liegen (Akku leer, Absturz), findet `backups_finden` es beim
+nächsten Start und `backup_lesen` macht daraus wieder ein `Recording` — die
+Wiederherstellung selbst (Messdatei schreiben, Eintrag anlegen) macht
+`devices.messlauf.backup_wiederherstellen`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import json
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +37,12 @@ from .constants import AUFNAHME_RR_MAX_MS, AUFNAHME_RR_MIN_MS
 from .recording import Beat, Recording, json_atomar_schreiben
 
 _TW_SRC = ("m", "r", "g")
+
+#: Dateimuster des Crash-Backups (Vertrag, Abschnitt 6a)
+BACKUP_MUSTER = ".backup_*.json"
+#: Block, den nur das Backup trägt — was die App zum Wiederherstellen braucht
+#: (Profil, Abschnittsgrenzen des Timers) und was in keine Messdatei gehört.
+WIEDERHERSTELLUNG = "_wiederherstellung"
 
 
 class Aufnahme:
@@ -200,17 +212,20 @@ class Aufnahme:
         """``.backup_<UTC-Start>.json`` — wie praxis_gui (`_start_backup`)."""
         return f".backup_{self.start_utc.strftime('%Y-%m-%d_%H%M%S')}.json"
 
-    def backup(self, ordner: Path) -> Path:
+    def backup(self, ordner: Path, *, zusatz: Mapping[str, Any] | None = None) -> Path:
         """Crash-Sicherung, atomar und kompakt (Vertrag, Abschnitt 6a).
 
         Gedacht für einen 15-s-Takt. Der Punkt am Anfang hält die Datei aus
-        jeder Messungsliste heraus.
+        jeder Messungsliste heraus. ``zusatz`` wird als Block
+        ``_wiederherstellung`` angehängt — nur im Backup, nie in der Messdatei
+        (`backup_lesen` nimmt ihn wieder heraus).
         """
         ordner = Path(ordner)
         ordner.mkdir(parents=True, exist_ok=True)
-        pfad = json_atomar_schreiben(
-            ordner / self.backup_name(), self.recording().to_dict(), kompakt=True
-        )
+        doc = self.recording().to_dict()
+        if zusatz:
+            doc[WIEDERHERSTELLUNG] = dict(zusatz)
+        pfad = json_atomar_schreiben(ordner / self.backup_name(), doc, kompakt=True)
         self._backup_pfade.add(pfad)
         return pfad
 
@@ -235,4 +250,47 @@ class Aufnahme:
         return pfad
 
 
-__all__ = ["Aufnahme"]
+# -- Liegengebliebene Backups ---------------------------------------------------
+
+
+def backups_finden(messungen: Path | str) -> list[Path]:
+    """Alle Crash-Backups unter ``Messungen/<Geräteordner>/`` — auch ``Generator``.
+
+    Ein Backup, das nach dem Speichern noch da ist, gehört zu einer Aufnahme,
+    die nicht ordentlich beendet wurde (Akku leer, Absturz). Fehlt das
+    Verzeichnis, gibt es nichts.
+
+    >>> import tempfile
+    >>> ordner = tempfile.TemporaryDirectory()
+    >>> backups_finden(Path(ordner.name) / "gibt_es_nicht")
+    []
+    >>> ordner.cleanup()
+    """
+    wurzel = Path(messungen)
+    if not wurzel.is_dir():
+        return []
+    return sorted(p for p in wurzel.glob(f"*/{BACKUP_MUSTER}") if p.is_file())
+
+
+def backup_lesen(pfad: Path | str) -> tuple[Recording, dict[str, Any]]:
+    """Ein Backup als ``(Recording, Zusatz)``.
+
+    Der Block ``_wiederherstellung`` wird **vor** `Recording.from_dict`
+    herausgenommen — sonst landete er in ``extra`` und beim Speichern in der
+    Messdatei. Backups von vor diesem Block liefern ``{}``.
+
+    Raises:
+        ValueError: kein JSON-Objekt (halb geschrieben, von Hand bearbeitet).
+    """
+    with open(pfad, encoding="utf-8") as f:
+        try:
+            doc = json.load(f)
+        except json.JSONDecodeError as fehler:
+            raise ValueError(f"Backup unlesbar: {fehler}") from fehler
+    if not isinstance(doc, dict):
+        raise ValueError("Backup ist kein JSON-Objekt")
+    zusatz = doc.pop(WIEDERHERSTELLUNG, None)
+    return Recording.from_dict(doc), dict(zusatz) if isinstance(zusatz, dict) else {}
+
+
+__all__ = ["BACKUP_MUSTER", "WIEDERHERSTELLUNG", "Aufnahme", "backup_lesen", "backups_finden"]

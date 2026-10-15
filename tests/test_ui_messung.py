@@ -1145,3 +1145,54 @@ def test_titel_vorschlag_ist_der_geuebte_plan(daten) -> None:
     assert titel_feld.value == "Beine"
     chips = [c.label.value for c in _alle_controls(blatt) if isinstance(c, ft.Chip)]
     assert "Beine" in chips  # auch als Vorschlag zum Antippen
+
+
+async def test_crash_backup_wird_beim_start_erkannt_und_wiederhergestellt(daten) -> None:
+    """Akku leer während der Aufnahme (Ben, 15.10.2026): das 15-s-Backup wird beim nächsten
+    Start gefunden, „Wiederherstellen" macht daraus die Messung des Startprofils."""
+    from trainingsapp.config import messungenverzeichnis
+    from trainingsapp.ui.views.messung import backup_dialog, backup_uebernehmen
+
+    state, tmp_path = daten
+    start = state.profil.id
+    lauf = Messlauf(SimulatedSource(tempo=60.0), backup_basis=tmp_path, subject_id=start)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 20:
+        await asyncio.sleep(0.01)
+    await lauf.trennen()  # kein aufnahme_stoppen: so sieht ein Prozess-Tod aus
+    await asyncio.wait_for(task, 5)
+    backups = list(messungenverzeichnis().rglob(".backup_*.json"))
+    assert len(backups) == 1
+
+    zweiter = AppState.starten(tmp_path / "app.db")  # der nächste Start
+    assert zweiter.hrv_backups == backups
+    zweiter.schliessen()
+
+    state.hrv_backups = list(backups)
+    zweites = state.profil_anlegen("Zweites")
+    state.profil_wechseln(zweites.id)  # ein anderes Profil ist aktiv — egal
+    seite = _seite()
+    dialog = backup_dialog(seite, state)
+    assert "Unvollständige Messung gefunden" in _baum_texte(dialog)
+    assert any("Simulator H10 vom" in t for t in _baum_texte(dialog))
+
+    eintrag = backup_uebernehmen(state, backups[0])
+    assert eintrag is not None and eintrag.subject_id == start
+    assert eintrag.file_path.startswith("Generator/sensor_")
+    assert (messungenverzeichnis() / eintrag.file_path).exists()
+    assert not backups[0].exists()
+    assert state.hrv_backups == []
+    assert state.hrv.laden(eintrag.id) is not None
+    assert eintrag.duration_s >= 15
+
+    # Noch einmal dasselbe Backup (Kopie): die Messung steht schon in der Liste
+    backups[0].write_text(
+        (messungenverzeichnis() / eintrag.file_path).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    state.hrv_backups = list(backups)
+    assert backup_uebernehmen(state, backups[0]) is None
+    assert not backups[0].exists()
+    assert len(state.hrv.alle(start)) == 1

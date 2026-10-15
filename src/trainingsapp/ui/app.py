@@ -63,7 +63,7 @@ from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.kurse import kapitel_view, kurs_view
 from trainingsapp.ui.views.live_vollbild import live_vollbild_view
-from trainingsapp.ui.views.messung import messung
+from trainingsapp.ui.views.messung import backup_dialog, messung
 from trainingsapp.ui.views.messung_detail import messung_detail_view
 from trainingsapp.ui.views.pakete import paket_export_view, paket_view, pakete_view
 from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view
@@ -265,6 +265,10 @@ def main(page: ft.Page) -> None:
         state.im_vordergrund = vorn
         if state.gps_test is not None and not state.gps_test.fertig:
             state.gps_test.lebenszeichen(vorn)
+        # In den Hintergrund: sofort sichern — beendet Android die App gleich
+        # darauf (oder der Akku ist leer), fehlen sonst bis zu 15 s.
+        if not vorn and state.messlauf is not None:
+            state.messlauf.backup_jetzt()
 
     page.on_app_lifecycle_state_change = lebenszyklus
     # Dienste sind Controls ohne Darstellung; sie müssen an der Seite hängen.
@@ -458,8 +462,12 @@ def main(page: ft.Page) -> None:
     # Bei „System“ wechseln Thema, Verlauf und Kurvenfarben mit dem Telefon
     page.on_platform_brightness_change = zeige_route
     zeige_route()  # beim Start ist die Route schon gesetzt — der Handler feuert nicht von selbst
+    # Dialoge stapeln sich (`show_dialog`): der zuletzt gezeigte liegt oben,
+    # „Später" legt den darunter frei.
     if state.verwaiste_strecken:  # Training, das Android mitten im Lauf beendet hat
         page.show_dialog(verwaiste_dialog(page, state))
+    if state.hrv_backups:  # Aufnahme, die mit Akku oder App zu Ende ging
+        page.show_dialog(backup_dialog(page, state))
 
 
 if __name__ == "__main__":

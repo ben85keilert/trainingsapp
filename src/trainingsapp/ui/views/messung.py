@@ -28,6 +28,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import flet as ft
@@ -38,14 +39,16 @@ from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, HrvEinstellungen
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.core.models import jetzt as utc_jetzt
 from trainingsapp.devices.base import DeviceInfo, Verbindung
-from trainingsapp.devices.messlauf import Gespeichert, Messlauf
+from trainingsapp.devices.messlauf import Gespeichert, Messlauf, backup_wiederherstellen
 from trainingsapp.devices.profiles import geraeteart
 from trainingsapp.devices.simulated import SIM_PPI, SIM_PREFIX, SIM_SYNTH, SimulatedSource
 from trainingsapp.hrv_core.atmung import ATEMUEBUNG, RUHE, kurzgrund
+from trainingsapp.hrv_core.aufnahme import backup_lesen
 from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
 from trainingsapp.hrv_core.regeln import Korrekturregeln
 from trainingsapp.hrv_core.trends import KENNZAHLEN, aktuell, atmung_aktuell, titel
 from trainingsapp.ui.components.analyse import Analyse
+from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, anzeige, zahl
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
@@ -310,6 +313,122 @@ def aufnahme_eintragen(
     )
     state.hrv.anlegen(eintrag)
     return eintrag
+
+
+# ---------------------------------------------------------------------------
+# Liegengebliebene Crash-Backups (Akku leer, Absturz während der Aufnahme)
+# ---------------------------------------------------------------------------
+
+
+def backup_uebernehmen(state: AppState, pfad: Path) -> HrvRecording | None:
+    """Ein Crash-Backup als Messung nachtragen (Ben, 15.10.2026: Akku während einer
+    4-h-Aufnahme leer, Messung weg). Die Messdatei entsteht neben dem Backup
+    (`devices.messlauf.backup_wiederherstellen`), der Eintrag gehört dem Profil beim
+    Start, falls es das noch gibt — sonst dem aktiven. ``None``: nichts eingetragen
+    (Backup ohne Schlag, oder die Messung stand schon in der Liste)."""
+    ergebnis = backup_wiederherstellen(pfad)
+    state.hrv_backups = [p for p in state.hrv_backups if p != pfad]
+    if ergebnis is None:
+        return None
+    file_path = ergebnis.pfad.relative_to(messungenverzeichnis()).as_posix()
+    if file_path in state.hrv.dateipfade():
+        return None  # Speichern lief durch, nur das Backup blieb liegen
+    subject_id = ergebnis.subject_id
+    if not subject_id or state.profile.laden(subject_id) is None:
+        subject_id = state.profil.id
+    return aufnahme_eintragen(state, ergebnis, subject_id)
+
+
+def _backup_beschriftung(pfad: Path) -> str:
+    """„Polar H10 vom 15.10.2026 08:00, 3 h 58 min" — aus dem Kopf, zur Not aus dem Namen."""
+    try:
+        rec, _ = backup_lesen(pfad)
+    except (OSError, ValueError):
+        return pfad.name
+    geraet = rec.geraet or "Messung"
+    wann = rec.start_utc.astimezone().strftime("%d.%m.%Y %H:%M") if rec.start_utc else "?"
+    minuten = int(rec.dauer_s // 60)
+    dauer = f"{minuten // 60} h {minuten % 60} min" if minuten >= 60 else f"{minuten} min"
+    return f"{geraet} vom {wann}, {dauer}"
+
+
+def backup_dialog(page: ft.Page, state: AppState) -> ft.AlertDialog:
+    """Beim Start: je Backup „Wiederherstellen" oder „Löschen", unten „Später".
+
+    Vorbild `views.ausdauer.verwaiste_dialog`. Nach dem letzten Wiederherstellen
+    öffnet sich die Messung — erst wenn der Dialog wirklich zu ist (`Nachher`).
+    """
+    zeilen = ft.Column(tight=True, spacing=4)
+    nachher = Nachher()
+
+    def melden(text: str) -> None:
+        page.show_dialog(ft.SnackBar(ft.Text(text)))
+
+    def wiederhersteller(pfad: Path) -> Callable[[], None]:
+        def handler() -> None:
+            try:
+                eintrag = backup_uebernehmen(state, pfad)
+            except (OSError, ValueError) as fehler:
+                melden(f"Wiederherstellen fehlgeschlagen: {fehler}")
+                return
+            if eintrag is None:
+                melden("Sicherung war leer oder die Messung stand schon in der Liste.")
+            else:
+                melden("Messung wiederhergestellt.")
+                if not state.hrv_backups:
+                    nachher.danach(lambda: page.push_route(f"/messung/{eintrag.id}"))
+            zeichnen()
+
+        return handler
+
+    def loescher(pfad: Path) -> Callable[[], None]:
+        def handler() -> None:
+            with contextlib.suppress(OSError):
+                pfad.unlink()
+            state.hrv_backups = [p for p in state.hrv_backups if p != pfad]
+            melden("Sicherung gelöscht.")
+            zeichnen()
+
+        return handler
+
+    def zeichnen() -> None:
+        if not state.hrv_backups:
+            page.pop_dialog()
+            return
+        zeilen.controls = [
+            ft.Row(
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                controls=[
+                    ft.Text(_backup_beschriftung(pfad), expand=True),
+                    ft.TextButton("Löschen", on_click=loescher(pfad)),
+                    ft.FilledTonalButton("Wiederherstellen", on_click=wiederhersteller(pfad)),
+                ],
+            )
+            for pfad in state.hrv_backups
+        ]
+        with contextlib.suppress(Exception):
+            zeilen.update()
+
+    zeichnen()
+    return ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Unvollständige Messung gefunden"),
+        content=ft.Column(
+            tight=True,
+            spacing=10,
+            controls=[
+                ft.Text(
+                    "Die App wurde während einer Messung beendet (Akku leer, Absturz). "
+                    "Die Sicherung liegt noch auf dem Handy — als Messung wiederherstellen "
+                    "oder löschen?",
+                    size=13,
+                ),
+                zeilen,
+            ],
+        ),
+        actions=[ft.TextButton("Später", on_click=lambda: page.pop_dialog())],
+        on_dismiss=nachher.bei_schliessen,
+    )
 
 
 def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:

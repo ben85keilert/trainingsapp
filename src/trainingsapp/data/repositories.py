@@ -1635,6 +1635,10 @@ class HrvRepo:
         ).fetchone()
         return self._zeile(r) if r else None
 
+    def dateipfade(self) -> set[str]:
+        """``file_path`` aller Zeilen, auch gelöschter — Abgleich mit dem Messungsordner."""
+        return {r["file_path"] for r in self.con.execute("SELECT file_path FROM hrv_recording")}
+
     def alle(self, subject_id: str) -> list[HrvRecording]:
         """Neueste zuerst."""
         return [

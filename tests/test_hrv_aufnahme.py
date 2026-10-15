@@ -360,3 +360,58 @@ def test_ist_messdatei_schliesst_beiwerk_aus(name: str, erwartet: bool) -> None:
 
 def test_recording_ohne_ppi_bleibt_ohne_schluessel() -> None:
     assert "ppi_pakete" not in Recording().to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Liegengebliebene Backups finden und lesen (Vertrag 6a, Wiederherstellung)
+# ---------------------------------------------------------------------------
+
+
+def test_backup_mit_zusatz_lesen_laesst_messdatei_sauber(tmp_path: Path) -> None:
+    from trainingsapp.hrv_core.aufnahme import WIEDERHERSTELLUNG, backup_lesen
+
+    a = _gefuellt(h10())
+    zusatz = {"subject_id": "p1", "grenzen": [[{"t": 1.0}, "Ruhe", False]]}
+    backup = a.backup(tmp_path, zusatz=zusatz)
+    doc = json.loads(backup.read_text(encoding="utf-8"))
+    assert doc[WIEDERHERSTELLUNG] == zusatz
+    assert list(doc)[-1] == WIEDERHERSTELLUNG  # hinter `messungen`, Kopf unverändert
+
+    rec, gelesen = backup_lesen(backup)
+    assert gelesen == zusatz
+    assert WIEDERHERSTELLUNG not in rec.extra  # darf nie in die Messdatei
+    assert len(rec.beats) == 20 and rec.titel == "Ruhe"
+    assert WIEDERHERSTELLUNG not in rec.to_dict()
+
+    # Ohne Zusatz (älteres Backup, praxis_gui): leerer Zusatz, Daten vollständig
+    ohne = a.backup(tmp_path / "ohne")
+    rec2, leer = backup_lesen(ohne)
+    assert leer == {} and len(rec2.beats) == 20
+
+
+def test_backup_lesen_weist_kaputte_datei_ab(tmp_path: Path) -> None:
+    from trainingsapp.hrv_core.aufnahme import backup_lesen
+
+    kaputt = tmp_path / ".backup_2026-10-12_080000.json"
+    kaputt.write_text('{"schema": "raw-v1", "messungen": [', encoding="utf-8")
+    with pytest.raises(ValueError):
+        backup_lesen(kaputt)
+    kaputt.write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(ValueError):
+        backup_lesen(kaputt)
+
+
+def test_backups_finden_nur_in_geraeteordnern(tmp_path: Path) -> None:
+    from trainingsapp.hrv_core.aufnahme import backups_finden
+
+    messungen = tmp_path / "Messungen"
+    assert backups_finden(messungen) == []  # Verzeichnis fehlt
+    b1 = _gefuellt(h10()).backup(messordner(tmp_path, "PolarH10"))
+    b2 = _gefuellt(verity()).backup(messordner(tmp_path, "VeritySense", simulation=True))
+    fertig = _gefuellt(h10())  # ordentlich gespeichert: Backup wieder weg
+    fertig.backup(messordner(tmp_path, "Brustgurt"))
+    fertig.speichern(messordner(tmp_path, "Brustgurt"))
+    (messungen / "PolarH10" / ".backup_2026-10-12_090000.json.tmp").write_text("{}")
+    (messungen / ".backup_2026-10-12_100000.json").write_text("{}")  # falsche Ebene
+    assert backups_finden(messungen) == sorted([b1, b2])
+    assert all(not ist_messdatei(p) for p in backups_finden(messungen))

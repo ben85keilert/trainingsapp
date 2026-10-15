@@ -116,3 +116,106 @@ async def test_timer_abschnitte_entstehen_beim_speichern(tmp_path) -> None:
     ]
     assert abschnitte[0].von_s == pytest.approx(20, abs=3)
     assert abschnitte[-1].bis_s == pytest.approx(110, abs=3)
+
+
+# ---------------------------------------------------------------------------
+# Crash-Backup wiederherstellen (Ben, 15.10.2026: Akku während 4 h leer, Messung weg)
+# ---------------------------------------------------------------------------
+
+
+async def _abgestuerzt(tmp_path, *, subject_id: str | None = "p1") -> tuple[Messlauf, object]:
+    """Aufnahme mit Backup — und dann kein `aufnahme_stoppen` (Prozess-Tod)."""
+    quelle = SimulatedSource(tempo=60.0, seed=7)
+    lauf = Messlauf(quelle, backup_basis=tmp_path, subject_id=subject_id)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 10:
+        await asyncio.sleep(0.01)
+    lauf.abschnitt_markieren("Ruhe beginnt", name="Ruhe")
+    while lauf.aufnahme_dauer_s() < 40:
+        await asyncio.sleep(0.01)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    return lauf, task
+
+
+async def test_backup_wiederherstellen_schreibt_messdatei_mit_profil_und_abschnitten(
+    tmp_path,
+) -> None:
+    from trainingsapp.devices.messlauf import backup_wiederherstellen
+    from trainingsapp.hrv_core.ausschnitte import zusatz_lesen
+
+    lauf, _ = await _abgestuerzt(tmp_path)
+    backups = list(tmp_path.rglob(".backup_*.json"))
+    assert len(backups) == 1 and backups[0].parent.name == "Generator"
+    beats_im_speicher = len(lauf.aufnahme.beats)
+
+    ergebnis = backup_wiederherstellen(backups[0])
+    assert ergebnis is not None
+    assert ergebnis.subject_id == "p1"
+    assert ergebnis.pfad == backups[0].parent / f"sensor_{backups[0].name[8:-5]}.json"
+    assert not backups[0].exists() and not list(tmp_path.rglob("*.tmp"))
+    rec = laden(ergebnis.pfad)
+    # Das Backup kam im 15-s-Takt: mindestens der Stand von vor ≤ 15 s
+    assert 0 < len(rec.beats) <= beats_im_speicher
+    assert rec.dauer_s >= 15 and ergebnis.dauer_s == rec.dauer_s
+    assert len(ergebnis.sha1) == 40 and ergebnis.started_at == rec.start_utc
+    assert rec.simulation is True
+    assert "_wiederherstellung" not in json.loads(ergebnis.pfad.read_text(encoding="utf-8"))
+    # Timer-Abschnitt aus dem Backup im Sidecar, Notiz in der Datei
+    assert any("Ruhe" in str(e.get("text", "")) for e in rec.ereignisse)
+    _, abschnitte = zusatz_lesen(ergebnis.pfad, float)
+    assert any(t.name == "Ruhe" for t in abschnitte)
+
+
+async def test_backup_ohne_zusatz_und_mit_vorhandener_messdatei(tmp_path) -> None:
+    """Älteres Backup (kein `_wiederherstellung`): Profil unbekannt. Liegt die Messdatei
+    schon da, bleibt sie Byte für Byte, das Backup geht trotzdem weg."""
+    from trainingsapp.devices.messlauf import backup_wiederherstellen
+
+    await _abgestuerzt(tmp_path, subject_id=None)
+    backup = next(tmp_path.rglob(".backup_*.json"))
+    doc = json.loads(backup.read_text(encoding="utf-8"))
+    doc.pop("_wiederherstellung")
+    backup.write_text(json.dumps(doc), encoding="utf-8")
+
+    ergebnis = backup_wiederherstellen(backup)
+    assert ergebnis is not None and ergebnis.subject_id is None
+    vorher = ergebnis.pfad.read_bytes()
+
+    # Zweites Backup daneben, Messdatei existiert schon
+    backup.write_text(json.dumps(doc), encoding="utf-8")
+    nochmal = backup_wiederherstellen(backup)
+    assert nochmal is not None and nochmal.pfad == ergebnis.pfad
+    assert ergebnis.pfad.read_bytes() == vorher and not backup.exists()
+
+
+def test_leeres_backup_wird_geloescht(tmp_path) -> None:
+    from trainingsapp.devices.messlauf import backup_wiederherstellen
+
+    leer = tmp_path / ".backup_2026-10-12_080000.json"
+    leer.write_text(json.dumps({"schema": "raw-v1", "messungen": []}), encoding="utf-8")
+    assert backup_wiederherstellen(leer) is None
+    assert not leer.exists()
+
+
+async def test_backup_jetzt_sichert_sofort(tmp_path) -> None:
+    """Hintergrundwechsel: sofort sichern, nicht erst nach 15 s."""
+    quelle = SimulatedSource(tempo=60.0, seed=7)
+    lauf = Messlauf(quelle, backup_basis=tmp_path, subject_id="p1")
+    lauf.backup_jetzt()  # ohne Aufnahme: nichts
+    assert not list(tmp_path.rglob(".backup_*"))
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 3:
+        await asyncio.sleep(0.01)
+    lauf.backup_jetzt()
+    backups = list(tmp_path.rglob(".backup_*.json"))
+    assert len(backups) == 1
+    doc = json.loads(backups[0].read_text(encoding="utf-8"))
+    assert doc["_wiederherstellung"] == {"subject_id": "p1", "grenzen": []}
+    assert len(doc["messungen"]) == len(lauf.aufnahme.beats)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)

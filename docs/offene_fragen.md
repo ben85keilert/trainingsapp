@@ -68,6 +68,10 @@ Abschnitt 3; die beantworteten stehen unter „Entschieden“):
 | T6 | GPS-Abbruch | App während eines Trainings wegwischen → beim nächsten Start Dialog „Unvollständiges Training gefunden“, Übernehmen trägt Strecke und Tagebuch nach. | offen |
 | T7 | Karte im Training | Schalter „Karte zeigen“, einmaliger Hinweis beim ersten Training mit Karte; rote Warnzeile bei GPS-Fehler/fehlendem Vordergrunddienst. | offen |
 | T8 | Paket entfernen | Rückfrage mit „Teil von Plan …“ und Kästchen „kopieren“ am Handy durchspielen. | offen |
+| T9 | Ausrichtung | Sperre je Ansicht (`ui/ausrichtung.py`): Heute/Pläne bleiben hochkant auch bei Auto-Drehen an; Ausdauer, GPS-Test und Messungs-Auswertung drehen mit; Zurück aus dem Vollbild stellt hochkant wieder her. Tablets ab Android 16 (≥ 600 dp) ignorieren die Sperre — erwartet. | offen |
+| T10 | Live-Vollbild | Knopf an der Tachogramm-Karte dreht quer (auch bei Auto-Drehen aus?), Kurve füllt die Höhe nach dem Drehen (gemessen), ‹ › und Liste blättern, **hoch/runter wischen** blättert ohne das Zeitwischen zu stören; rundes Symbol setzt Marke, Marke mit dem Finger ziehen (Toleranz 2 % der Fensterbreite — zu eng/zu weit?). | offen |
+| T11 | Auswertung quer | Vollbild-Knopf: Editor neben der Kurve (330 px) und scrollbar, Ablesewerte darunter; Systemtaste Zurück verlässt nur das Vollbild (`can_pop`/`on_confirm_pop` — am Handy prüfen, am Rechner nicht testbar); Abschnittsgrenzen und Notizmarken ziehen. | offen |
+| T12 | Ausdauer quer | Laufendes Training gedreht: Zahlen links, Karte rechts in voller Höhe; zurückgedreht wieder untereinander (Umbau über `page.on_resize`, Karte wird neu angelegt — Kacheln laden nach). | offen |
 
 ## 3. Befunde aus der Durchsicht vom 15.10.2026
 
@@ -229,3 +233,8 @@ Offen: Reihenfolge, Format (ein Archiv je Profil?) und was ein Import mit vorhan
 | 15.10.2026 | „abgehakt“ | Eigener Speicherwert, löschbar; bleibt bei Werteeingabe stehen, herausnehmbar. → A2. |
 | 15.10.2026 | P12 | Solo-Edition speichert nichts auf dem Server; einzige Verbindung = Video-Streaming. → A5. |
 | 15.10.2026 | P14 | Eigene Fotos/Videos lokal **und** Streaming/Laden aus Fremdquelle. → A5, Abschnitt 4. |
+| 15.10.2026 | Querformat: Sperre | Hochkant ist die Regel; drehen dürfen Ausdauer (live, Auswertung), GPS-Test, Messungs-Auswertung. `ui/ausrichtung.py`. Gebaut; T9. |
+| 15.10.2026 | Querformat: Live-Vollbild | Knopf erzwingt quer (wie ein Videoplayer), Route `/live`; Kurvenwechsel über Pfeile + Liste **und** hoch/runter wischen (waagrecht bleibt die Zeit); eine Kurve je Seite: Tachogramm, dann je Gruppe der aktiven Verlaufskurven. Gebaut; T10. |
+| 15.10.2026 | Querformat: Notizen | Textansicht nur hochkant; im Querformat Notiz **ohne Text** per rundem Symbol setzen und Marken mit dem Finger ziehen („Modifikation der Notizen und Abschnitte ist eine Hauptaufgabe im Querformat“). Notiz ohne Text steht hochkant als „(ohne Text — antippen)“ in der Liste. Gebaut; T10/T11. |
+| 15.10.2026 | Querformat: Auswertung | Vollbild als Modus in derselben Ansicht (kein Neubau, Editorzustand bleibt): Rohkurve groß, Editor daneben, Ablesewerte darunter; Abschnittsgrenzen und Marken ziehen. Gebaut; T11. |
+| 15.10.2026 | Querformat: Ausdauer | Zahlen links, Karte rechts in voller Höhe. Gebaut; T12. |

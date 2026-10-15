@@ -51,6 +51,7 @@ from trainingsapp.ui.components.spektrum import (
 )
 from trainingsapp.ui.components.verlauf import (
     FARBEN,
+    Daten,
     ansicht_menue,
     bereich_wahl,
     chips,
@@ -100,6 +101,43 @@ HINWEISE = {
     "Wolke ist SD1, die Länge SD2. DFA α1 braucht mindestens 100 Schläge im Fenster. "
     "Bei 130-Hz-EKG und erst recht optisch nur als Trend lesbar.",
 }
+
+
+def verlaufsdaten(
+    reihe: Reihe3,
+    hf_geraet: Sequence[tuple[float, float]],
+    ansicht: Any,
+    atem_modus: str,
+    speicher: dict[Any, Any],
+    x_von: float,
+    x_bis: float,
+) -> Daten:
+    """Die ``daten``-Funktion für `verlauf.diagramme`: Kennzahl, Fenster, Block → Punkte.
+
+    ``hf_geraet`` kommt fertig als ``(t, bpm)``; alles andere rechnet
+    `hrv_core.trends.verlauf` aus ``reihe`` = ``(t, rr, naht)`` mit ``speicher``
+    als Zwischenspeicher. Gemeinsam für die Analysekarte und das Live-Vollbild.
+    """
+    t, rr, naht = reihe
+
+    def daten(k: str, fenster: int, block: bool) -> list[tuple[float, float]]:
+        if k == "hf_geraet":
+            return [(x, h) for x, h in hf_geraet if x_von <= x <= x_bis]
+        return verlauf(
+            t,
+            rr,
+            naht,
+            k,
+            fenster,
+            von=x_von,
+            bis=x_bis,
+            block=block,
+            pnn_ms=ansicht.pnn_ms,
+            zwischenspeicher=speicher,
+            atem_modus=atem_modus,
+        )
+
+    return daten
 
 
 class Analyse:
@@ -263,26 +301,11 @@ class Analyse:
         ansicht = self._state.ansicht()
         atem_modus = ATEMUEBUNG if self._state.hrv_einstellungen().atemuebung else RUHE
         bereich = self.bereich
-        hf_punkte = self._hf_geraet
         if list(self._ohne()) != self._ohne_chips:
             self.aufbauen()  # z. B. die ersten RR-Werte nach dem Verbinden
-
-        def daten(k: str, fenster: int, block: bool) -> list[tuple[float, float]]:
-            if k == "hf_geraet":
-                return [(x, h) for x, h in hf_punkte() if x_von <= x <= x_bis]
-            return verlauf(
-                t,
-                rr,
-                naht,
-                k,
-                fenster,
-                von=x_von,
-                bis=x_bis,
-                block=block,
-                pnn_ms=ansicht.pnn_ms,
-                zwischenspeicher=self._speicher,
-                atem_modus=atem_modus,
-            )
+        daten = verlaufsdaten(
+            (t, rr, naht), self._hf_geraet(), ansicht, atem_modus, self._speicher, x_von, x_bis
+        )
 
         if bereich in ("frequenz", "nichtlinear"):
             self._extra.content = self._extra_bauen(bereich, t, rr, naht, x_von, x_bis)
@@ -464,4 +487,4 @@ class Analyse:
         )
 
 
-__all__ = ["FENSTER_SPEICHER", "HINWEISE", "Analyse", "Analysefenster"]
+__all__ = ["FENSTER_SPEICHER", "HINWEISE", "Analyse", "Analysefenster", "verlaufsdaten"]

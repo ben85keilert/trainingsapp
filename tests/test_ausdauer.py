@@ -175,6 +175,7 @@ async def _training(state, tmp_path, sportart: str = GEHEN, zwischendurch=None):
     punkte = _gang(1200, 2.5, rauschen_m=1.5)  # 3 km
     lauf = AusdauerLauf(state, sportart, PunktWiedergabe(punkte, beschleunigung=2000))
     await lauf.starten()
+    state.ausdauer = lauf  # wie der Start-Knopf der Ansicht
     for _ in range(100):
         await asyncio.sleep(0.05)
         if len(lauf.rechner.punkte) == len(punkte):
@@ -182,6 +183,7 @@ async def _training(state, tmp_path, sportart: str = GEHEN, zwischendurch=None):
     if zwischendurch is not None:
         zwischendurch()
     strecke = await lauf.stoppen()
+    state.ausdauer = None
     await messlauf.trennen()
     await asyncio.wait_for(task, 5)
     return strecke, punkte
@@ -464,3 +466,34 @@ def test_km_tabelle_ordnet_hf_und_dfa_ueber_die_uhrzeit_zu() -> None:
     zeilen = [[c.value for c in reihe.controls] for reihe in tabelle.controls]
     assert zeilen[1][3] == "100" and zeilen[2][3] == "150"
     assert zeilen[1][4] != "–" and zeilen[2][4] != "–"  # α1 je km gerechnet
+
+
+async def test_laufendes_training_quer_zahlen_neben_der_karte(daten) -> None:
+    """Querformat (Ben, 15.10.2026): Zahlen links, Karte rechts in voller Höhe; Drehen baut um."""
+    import flet as ft
+
+    from trainingsapp.ui.views.ausdauer import ausdauer_view
+
+    state, tmp_path = daten
+    gesehen: dict[str, object] = {}
+
+    def waehrend() -> None:
+        quer = SimpleNamespace(**vars(_seite()), width=915, height=412)
+        quer.run_task = lambda f, *a: None
+        view = ausdauer_view(quer, state)
+        reihen = [c for c in _alle(view) if isinstance(c, ft.Row) and len(c.controls) == 2]
+        aussen = next(
+            r
+            for r in reihen
+            if isinstance(r.controls[1], ft.Container) and r.controls[1].expand is True
+        )
+        gesehen["breite"] = aussen.controls[0].width
+        # Drehen auf hochkant: der Beobachter baut um — Zahlen über der Karte
+        quer.width, quer.height = 412, 915
+        state.groesse_beobachter["ausdauer"]()
+        spalte = next(c for c in _alle(view) if isinstance(c, ft.Column) and c.spacing == 14)
+        gesehen["hochkant"] = not any(isinstance(c, ft.Row) for c in spalte.controls)
+
+    await _training(state, tmp_path, zwischendurch=waehrend)
+    assert gesehen["breite"] == pytest.approx(360.0)
+    assert gesehen["hochkant"] is True

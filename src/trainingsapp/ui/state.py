@@ -154,6 +154,13 @@ class AppState:
     live_ansicht: int = 0
     #: Live-Ansicht zurückgeblättert: rechter Rand in s; None = folgt der Messung
     messung_ende_s: float | None = None
+    #: Live-Vollbild (`views.live_vollbild`): Index der gezeigten Kurve (0 = Tachogramm)
+    vollbild_kurve: int = 0
+    #: Zuletzt gesetzte Bildschirmausrichtung (`ui.ausrichtung`), None = noch keine
+    ausrichtung: str | None = None
+    #: Wer erfährt, dass sich die Bildschirmgröße geändert hat (Drehen, Fenster);
+    #: Ansichten tragen sich beim Bauen ein und ersetzen ihren alten Eintrag
+    groesse_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
     #: Klappfeld „Notizen" unter der Hauptkurve aufgeklappt
     notizen_offen: bool = False
     #: Einstellungen → HRV-Messung: Teil „Erweitert" aufgeklappt

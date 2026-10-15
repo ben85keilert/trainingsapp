@@ -49,6 +49,7 @@ import flet as ft
 
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
+from trainingsapp.ui import ausrichtung
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
 from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view, verwaiste_dialog
@@ -59,6 +60,7 @@ from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
 from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
+from trainingsapp.ui.views.live_vollbild import live_vollbild_view
 from trainingsapp.ui.views.messung import messung
 from trainingsapp.ui.views.messung_detail import messung_detail_view
 from trainingsapp.ui.views.pakete import paket_export_view, paket_view, pakete_view
@@ -368,6 +370,16 @@ def main(page: ft.Page) -> None:
             stapel(teile)
         hintergrund_setzen(page, darstellung)
         page.update()
+        # Hochkant ist die Regel; Karten, Kurven und das Live-Vollbild dürfen quer
+        ausrichtung.anwenden(page, state, ausrichtung.modus_fuer_route(page.route))
+
+    def groesse_geaendert(e: ft.PageResizeEvent) -> None:
+        """Drehen oder Fenster ziehen: Ansichten bauen ihr Layout um — kein Neubau des Stapels."""
+        for beobachter in list(state.groesse_beobachter.values()):
+            with suppress(Exception):
+                beobachter()
+
+    page.on_resize = groesse_geaendert
 
     def stapel(teile: list[str]) -> None:
         """Die Ansichten über der Hauptansicht für die Routenteile."""
@@ -400,6 +412,8 @@ def main(page: ft.Page) -> None:
                     page.views.append(uebung_bearbeiten(page, state, uebung))
         elif teile[:1] in (["plan"], ["plaene"]) and len(teile) >= 2:
             plan_routen(teile)
+        elif teile[:1] == ["live"]:
+            page.views.append(live_vollbild_view(page, state))
         elif teile[:1] == ["ausdauer"]:
             if len(teile) == 1:
                 page.views.append(ausdauer_view(page, state))

@@ -127,6 +127,58 @@ def _uhr(sekunden: float) -> str:
     return f"{s // 60}:{s % 60:02d}"
 
 
+def tachogramm(
+    lauf: Messlauf,
+    x_von: float,
+    x_bis: float,
+    *,
+    korrigiert: bool,
+    verity: bool,
+    marken: list[Reihe] = (),  # type: ignore[assignment]
+    hoehe: int = 180,
+) -> ft.Control:
+    """Die Live-Hauptkurve: Rohwerte grau, gewertet farbig, Artefakte rot, dazu ``marken``.
+
+    Gemeinsam für die Live-Ansicht und ihr Vollbild (`views.live_vollbild`).
+    """
+    punkte = [p for p in lauf.live.punkte(seit_s=x_von) if p.t_s <= x_bis]
+    mit_rr = [p for p in punkte if p.rr_ms > 0]
+    # Grau: alles, was der Sensor geliefert hat — auch vom Gerät verworfene
+    # Intervalle; so bleibt die Kurve durchgehend (Verity Sense).
+    grau: list[tuple[float, float]] = []
+    grau_naehte: list[int] = []
+    rr_linie: list[tuple[float, float]] = []
+    rr_naehte: list[int] = []  # davor verworfen oder Lücke: Linie reißt ab
+    offen = False
+    for p in mit_rr:
+        if p.naht_davor and grau:
+            grau_naehte.append(len(grau))
+        if 250 < p.rr_ms < 2200:
+            grau.append((p.t_s, float(p.rr_ms)))
+        wert = p.rr_korr if korrigiert else float(p.rr_ms)
+        if p.verworfen or wert is None:
+            offen = True
+            continue
+        if (offen or p.naht_davor) and rr_linie:
+            rr_naehte.append(len(rr_linie))
+        offen = False
+        rr_linie.append((p.t_s, wert))
+    artefakte = [(p.t_s, float(p.rr_ms)) for p in mit_rr if p.artefakt and 250 < p.rr_ms < 2200]
+    return kurve(
+        [
+            Reihe(grau, farbe=ft.Colors.OUTLINE, breite=1, naehte=grau_naehte, skala=False),
+            Reihe(rr_linie, farbe=ft.Colors.PRIMARY, naehte=rr_naehte),
+            Reihe(artefakte, farbe=FARBEN["rot"], nur_punkte=True, skala=False),
+            *marken,
+        ],
+        einheit="PPI ms" if verity else "RR ms",
+        hoehe=hoehe,
+        x_von=x_von,
+        x_bis=x_bis,
+        y_spanne_min=RR_SPANNE_MIN_MS,
+    )
+
+
 def ohne_rr() -> list[str]:
     """Bei einem reinen Pulsgeber lässt sich aus RR nichts rechnen — nur „HF Gerät"."""
     return [k for k in KENNZAHLEN if k != "hf_geraet"]
@@ -737,41 +789,18 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         )
 
     def hauptkurve(x_von: float, x_bis: float) -> ft.Control:
-        punkte = [p for p in lauf.live.punkte(seit_s=x_von) if p.t_s <= x_bis]
-        mit_rr = [p for p in punkte if p.rr_ms > 0]
-        # Grau: alles, was der Sensor geliefert hat — auch vom Gerät verworfene
-        # Intervalle; so bleibt die Kurve durchgehend (Verity Sense).
-        grau: list[tuple[float, float]] = []
-        grau_naehte: list[int] = []
-        rr_linie: list[tuple[float, float]] = []
-        rr_naehte: list[int] = []  # davor verworfen oder Lücke: Linie reißt ab
-        offen = False
-        for p in mit_rr:
-            if p.naht_davor and grau:
-                grau_naehte.append(len(grau))
-            if 250 < p.rr_ms < 2200:
-                grau.append((p.t_s, float(p.rr_ms)))
-            wert = p.rr_korr if einst.korrigiert else float(p.rr_ms)
-            if p.verworfen or wert is None:
-                offen = True
-                continue
-            if (offen or p.naht_davor) and rr_linie:
-                rr_naehte.append(len(rr_linie))
-            offen = False
-            rr_linie.append((p.t_s, wert))
-        artefakte = [(p.t_s, float(p.rr_ms)) for p in mit_rr if p.artefakt and 250 < p.rr_ms < 2200]
-        return kurve(
-            [
-                Reihe(grau, farbe=ft.Colors.OUTLINE, breite=1, naehte=grau_naehte, skala=False),
-                Reihe(rr_linie, farbe=ft.Colors.PRIMARY, naehte=rr_naehte),
-                Reihe(artefakte, farbe=FARBEN["rot"], nur_punkte=True, skala=False),
-                *notizfeld.marken(x_von, x_bis),
-            ],
-            einheit="PPI ms" if verity else "RR ms",
-            x_von=x_von,
-            x_bis=x_bis,
-            y_spanne_min=RR_SPANNE_MIN_MS,
+        return tachogramm(
+            lauf,
+            x_von,
+            x_bis,
+            korrigiert=einst.korrigiert,
+            verity=verity,
+            marken=notizfeld.marken(x_von, x_bis),
         )
+
+    async def vollbild() -> None:
+        """Die Kurven allein, quer, ohne Leisten (`views.live_vollbild`)."""
+        await page.push_route("/live")
 
     def lage() -> ft.Control:
         """Zurückgeblättert: wie weit, und zurück zur Gegenwart."""
@@ -825,6 +854,11 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         kartentitel(
             "PPI-Tachogramm" if verity else "RR-Tachogramm",
             regler_knopf(regeln_oeffnen),
+            ft.IconButton(
+                ft.Icons.FULLSCREEN,
+                tooltip="Kurven im Vollbild (quer)",
+                on_click=vollbild,
+            ),
         ),
         ft.SegmentedButton(
             selected=[str(fenster.breite_s if fenster.breite_s in LIVE_FENSTER else 120)],

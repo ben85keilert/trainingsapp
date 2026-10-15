@@ -75,6 +75,7 @@ def diagramme(
     bereich: str | None = None,
     marken: Sequence[Reihe] = (),
     gesehen: dict[str, tuple[str, list[tuple[float, float]]]] | None = None,
+    gruppen: Sequence[Sequence[str]] | None = None,
 ) -> list[ft.Control]:
     """Je Gruppe gleicher Achse ein Diagramm, darüber die Legende.
 
@@ -82,11 +83,11 @@ def diagramme(
     einem reinen Pulsgeber) — sie bleiben gewählt, werden aber nicht gezeichnet.
     ``bereich``: nur die Kurven dieses Analysebereichs. ``marken``: in jedes
     Diagramm (der Ablesestrich). ``gesehen`` bekommt je Kurve Bezeichnung und
-    Punkte — zum Ablesen an einer Stelle.
+    Punkte — zum Ablesen an einer Stelle. ``gruppen``: statt aller Gruppen der
+    Ansicht nur diese (das Vollbild zeigt eine).
     """
-    nur = [k for k in (im_bereich(bereich) if bereich else KENNZAHLEN) if k not in ohne]
     out: list[ft.Control] = []
-    for gruppe in ansicht.gruppen(_achse, nur=nur):
+    for gruppe in gruppen if gruppen is not None else kurvengruppen(ansicht, bereich, ohne):
         reihen = []
         legende: list[ft.Control] = []
         for k in gruppe:
@@ -114,6 +115,18 @@ def diagramme(
             )
         )
     return out
+
+
+def kurvengruppen(
+    ansicht: Ansicht, bereich: str | None = None, ohne: Sequence[str] = ()
+) -> list[list[str]]:
+    """Die Diagramme der Ansicht: je Gruppe gleicher Achse die Kennzahlen.
+
+    >>> kurvengruppen(Ansicht(kurven=["hf_rr", "rmssd", "sdnn", "lf_hf"]), "zeit")
+    [['hf_rr'], ['rmssd', 'sdnn']]
+    """
+    nur = [k for k in (im_bereich(bereich) if bereich else KENNZAHLEN) if k not in ohne]
+    return ansicht.gruppen(_achse, nur=nur)
 
 
 def _legende(text: str, farbe: str) -> ft.Control:
@@ -416,5 +429,6 @@ __all__ = [
     "darstellung_blatt",
     "diagramme",
     "fenster_text",
+    "kurvengruppen",
     "speichern_dialog",
 ]

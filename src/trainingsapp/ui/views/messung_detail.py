@@ -88,6 +88,7 @@ from trainingsapp.hrv_core.regeln import Korrekturregeln
 from trainingsapp.hrv_core.segments import filter_rr
 from trainingsapp.hrv_core.time_domain import compute_time_domain
 from trainingsapp.hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
+from trainingsapp.ui import ausrichtung
 from trainingsapp.ui.components.analyse import Analyse, Analysefenster
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten
 from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, anzeige, zahl
@@ -215,6 +216,9 @@ class _Kurvenmodus:
     #: Ablesen: der Strich steht an ``strich`` (s), darunter alle Werte
     ablesen: bool = False
     strich: float | None = None
+    #: Vollbild (quer): nur Rohkurve und Werkzeuge, Kurve in gemessener Höhe (px)
+    vollbild: bool = False
+    hoehe: float = 220.0
 
 
 def _wertchip(farbe: str | None, name: str, wert: str, einheit: str) -> ft.Control:
@@ -234,25 +238,28 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     route = f"/messung/{eintrag.id}"
     pfad = messungenverzeichnis() / eintrag.file_path
 
+    #: Die Leiste der Ansicht — das Vollbild nimmt sie ab und gibt sie zurück
+    leiste: ft.AppBar | None = None
+
     def ansicht(inhalt: list[ft.Control]) -> ft.View:
+        nonlocal leiste
+        leiste = ft.AppBar(
+            title=ft.Text(f"Messung {eintrag.started_at.astimezone():%d.%m. %H:%M}"),
+            actions=[
+                ft.IconButton(
+                    ft.Icons.CONTENT_CUT,
+                    tooltip="Zuschneiden",
+                    on_click=lambda: crop_oeffnen(),
+                ),
+                ft.IconButton(ft.Icons.SHARE, tooltip="Exportieren (ZIP)", on_click=exportieren),
+                ft.IconButton(
+                    ft.Icons.DELETE_OUTLINE, tooltip="Aus der Liste entfernen", on_click=fragen
+                ),
+            ],
+        )
         return ft.View(
             route=route,
-            appbar=ft.AppBar(
-                title=ft.Text(f"Messung {eintrag.started_at.astimezone():%d.%m. %H:%M}"),
-                actions=[
-                    ft.IconButton(
-                        ft.Icons.CONTENT_CUT,
-                        tooltip="Zuschneiden",
-                        on_click=lambda: crop_oeffnen(),
-                    ),
-                    ft.IconButton(
-                        ft.Icons.SHARE, tooltip="Exportieren (ZIP)", on_click=exportieren
-                    ),
-                    ft.IconButton(
-                        ft.Icons.DELETE_OUTLINE, tooltip="Aus der Liste entfernen", on_click=fragen
-                    ),
-                ],
-            ),
+            appbar=leiste,
             scroll=ft.ScrollMode.AUTO,
             padding=12,
             controls=[sicher(ft.Column(spacing=12, controls=inhalt), expand=False)],
@@ -347,6 +354,15 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         allow_empty_selection=True,
         show_selected_icon=False,
         segments=[ft.Segment(value=str(s), label=ft.Text(t)) for s, t in BREITEN],
+    )
+    breite_wahl_voll = ft.SegmentedButton(  # dieselbe Wahl in der Kopfzeile des Vollbilds
+        selected=[str(start_breite)],
+        allow_empty_selection=True,
+        show_selected_icon=False,
+        style=ft.ButtonStyle(
+            visual_density=ft.VisualDensity.COMPACT, padding=ft.Padding.symmetric(horizontal=6)
+        ),
+        segments=[ft.Segment(value=str(s), label=ft.Text(t, size=12)) for s, t in BREITEN],
     )
     speichern_knopf = ft.FilledButton("Korrektur speichern", icon=ft.Icons.SAVE, disabled=True)
 
@@ -549,6 +565,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         tooltip="Werte an einer Stelle der Kurven ablesen",
         on_click=lambda: ablesen_umschalten(),
     )
+    ablesen_knopf_voll = ft.TextButton(
+        "Ablesen", icon=ft.Icons.ADS_CLICK, on_click=lambda: ablesen_umschalten()
+    )
 
     def kurven(mit_analyse: bool = True) -> None:
         x_von, x_bis = fenster.bereich(dauer)
@@ -590,7 +609,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 ),
             ],
             einheit="PPI ms" if verity else "RR ms",
-            hoehe=220,
+            hoehe=int(m.hoehe) if m.vollbild else 220,
             x_von=x_von,
             x_bis=x_bis,
             y_spanne_min=RR_SPANNE_MIN_MS,
@@ -640,7 +659,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         if m.ablesen:
             strich_setzen(x, zeichnen=False)
             return True
-        return band_greifen(x)
+        return notizfeld.greifen(x) or band_greifen(x)  # eine Marke unterm Finger folgt ihm
 
     def analyse_tippen(x: float) -> None:
         if m.ablesen:
@@ -660,11 +679,12 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             m.strich = sum(fenster.bereich(dauer)) / 2
         if m.ablesen:
             m.strich = schlag_bei(m.strich or 0.0)
-        ablesen_knopf.style = (
-            ft.ButtonStyle(bgcolor=ft.Colors.with_opacity(0.16, ft.Colors.PRIMARY))
-            if m.ablesen
-            else None
-        )
+        for knopf in (ablesen_knopf, ablesen_knopf_voll):
+            knopf.style = (
+                ft.ButtonStyle(bgcolor=ft.Colors.with_opacity(0.16, ft.Colors.PRIMARY))
+                if m.ablesen
+                else None
+            )
         ablese_box.visible = m.ablesen
         nur_kurven()
 
@@ -1250,7 +1270,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         else:
             fenster.ende_s = None
             fenster.verschieben(mitte + fenster.breite_s / 2 - dauer, dauer)
-        breite_wahl.selected = [str(int(breite_s))] if breite_s in dict(BREITEN) else []
+        for wahl in (breite_wahl, breite_wahl_voll):
+            wahl.selected = [str(int(breite_s))] if breite_s in dict(BREITEN) else []
         if zeichnen_:
             nur_kurven()
 
@@ -1301,6 +1322,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         quelle=state.notiz_uebungen_quelle,
         uebungen_merken=uebungen_merken,
         katalog=(lambda: uebungs_katalog(state)) if einst.notiz_uebungen else None,
+        breite=lambda: fenster.breite_s,
     )
 
     def breite_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
@@ -1308,6 +1330,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             breite_setzen(float(e.control.selected[0]))
 
     breite_wahl.on_change = breite_gewaehlt
+    breite_wahl_voll.on_change = breite_gewaehlt
 
     # -- Analysefenster: wofür Spektrum, Poincaré und DFA gelten --------------------
     # Die ganze Messung (Vorgabe), ein Abschnitt oder ein Band fester Länge. Das Band
@@ -1357,6 +1380,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         return True
 
     def rr_losgelassen() -> None:
+        notizfeld.loslassen()  # eine gezogene Marke bekommt ihren neuen Anker
         if aw.griff is not None:
             aw.griff = None
             nachrechnen_planen()
@@ -1672,27 +1696,143 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             )
         )
 
+    # -- Vollbild (quer): Rohkurve allein mit Werkzeugen (Ben, 15.10.2026) ----------
+    #
+    # Kein Neubau der Ansicht (der kostete Sekunden und den Editorzustand): dieselbe
+    # View tauscht Leiste und Inhalt. Rohkurve, Ablesewerte und Editor wandern in
+    # eigene Boxen des Vollbilds; `rr_box`, `ablese_box` und `editor_box` zeigen
+    # jeweils auf die sichtbare, damit alle Zeichenwege weiter stimmen.
+    normal_boxen = (rr_box, ablese_box, editor_box)
+    voll_boxen = (ft.Container(), ft.Container(visible=False), ft.Container(visible=False))
+
+    def kurvengeste(box: ft.Container) -> ft.Control:
+        return wischbar(
+            box,
+            fenster,
+            lambda: dauer,
+            lambda: wisch_zeichnen(mit_analyse=m.editor is None),
+            tippen=kurve_tippen,
+            greifen=kurve_greifen,
+            losgelassen=rr_losgelassen,
+        )
+
+    def boxen_umhaengen(nach: tuple[ft.Container, ...]) -> None:
+        nonlocal rr_box, ablese_box, editor_box
+        for alt, neu in zip((rr_box, ablese_box, editor_box), nach, strict=True):
+            neu.content, neu.visible = alt.content, alt.visible
+            alt.content = None
+        rr_box, ablese_box, editor_box = nach
+
+    def vollbild_hoehe(e: ft.LayoutSizeChangeEvent) -> None:
+        """Die wirkliche Höhe der Kurvenfläche — nach dem Drehen anders als geschätzt."""
+        neu = max(120.0, float(e.height))
+        if m.vollbild and abs(neu - m.hoehe) >= 4:
+            m.hoehe = neu
+            nur_kurven()
+
+    def marke_setzen() -> None:
+        """Notiz ohne Text — am Ablesestrich, sonst in der Fenstermitte; Text kommt hochkant."""
+        x = m.strich if m.ablesen and m.strich is not None else sum(fenster.bereich(dauer)) / 2
+        notizfeld.marke_setzen(x)
+
+    def vollbild_umschalten() -> None:
+        m.vollbild = not m.vollbild
+        if m.vollbild:
+            m.hoehe = max(160.0, float(page.height or 480) - 140)
+            boxen_umhaengen(voll_boxen)
+            view.appbar = None
+            view.scroll = None
+            view.padding = ft.Padding.only(left=4, right=4)
+            view.can_pop = False  # Zurück verlässt erst das Vollbild
+            view.controls = [sicher(vollbild_inhalt)]
+            ausrichtung.anwenden(page, state, ausrichtung.QUER)
+        else:
+            boxen_umhaengen(normal_boxen)
+            view.appbar = leiste
+            view.scroll = ft.ScrollMode.AUTO
+            view.padding = 12
+            view.can_pop = True
+            view.controls = [sicher(normal_inhalt, expand=False)]
+            ausrichtung.anwenden(page, state, ausrichtung.modus_fuer_route(route))
+        zeichnen()
+
+    async def zurueck_im_vollbild(e: ft.Event[ft.View]) -> None:
+        """Systemtaste Zurück im Vollbild: nur das Vollbild schließen, die Messung bleibt."""
+        if m.vollbild:
+            vollbild_umschalten()
+        with contextlib.suppress(Exception):
+            await view.confirm_pop(False)
+
+    vollbild_inhalt = ft.Column(
+        spacing=4,
+        expand=True,
+        controls=[
+            ft.Row(
+                spacing=2,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.IconButton(
+                        ft.Icons.FULLSCREEN_EXIT,
+                        tooltip="Vollbild verlassen",
+                        on_click=lambda: vollbild_umschalten(),
+                    ),
+                    breite_wahl_voll,
+                    ablesen_knopf_voll,
+                    ft.TextButton("Abschnitt", icon=ft.Icons.ADD, on_click=abschnitt_neu),
+                    ft.Container(expand=True),
+                    ft.IconButton(
+                        ft.Icons.ADD_COMMENT_OUTLINED,
+                        tooltip="Notiz ohne Text setzen — hier an die Stelle ziehen",
+                        on_click=lambda: marke_setzen(),
+                    ),
+                ],
+            ),
+            # Der Editor steht quer neben der Kurve — unter ihr nähme er ihr die Höhe
+            ft.Row(
+                expand=True,
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+                controls=[
+                    ft.Container(
+                        expand=True,
+                        on_size_change=vollbild_hoehe,
+                        content=kurvengeste(voll_boxen[0]),
+                    ),
+                    # Scrollt für sich: der Editor ist höher als ein quer gehaltenes Handy
+                    ft.Container(
+                        width=330,
+                        content=ft.Column(
+                            expand=True, scroll=ft.ScrollMode.AUTO, controls=[voll_boxen[2]]
+                        ),
+                    ),
+                ],
+            ),
+            voll_boxen[1],
+        ],
+    )
+
     titel_zeichnen()
     zeichnen(aktualisieren=False)
-    return ansicht(
-        [
+    normal_inhalt = ft.Column(
+        spacing=12,
+        controls=[
             ft.Container(
                 padding=ft.Padding.symmetric(horizontal=4),
                 content=ft.Column(spacing=4, controls=[titel_box, kopf_text, hinweis_text]),
             ),
             kacheln_box,
             karte(
-                kartentitel("PPI-Tachogramm" if verity else "RR-Tachogramm", ablesen_knopf),
-                breite_wahl,
-                wischbar(
-                    rr_box,
-                    fenster,
-                    lambda: dauer,
-                    lambda: wisch_zeichnen(mit_analyse=m.editor is None),
-                    tippen=kurve_tippen,
-                    greifen=kurve_greifen,
-                    losgelassen=rr_losgelassen,
+                kartentitel(
+                    "PPI-Tachogramm" if verity else "RR-Tachogramm",
+                    ablesen_knopf,
+                    ft.IconButton(
+                        ft.Icons.FULLSCREEN,
+                        tooltip="Kurve im Vollbild (quer): Abschnitte und Notizen genau setzen",
+                        on_click=lambda: vollbild_umschalten(),
+                    ),
                 ),
+                breite_wahl,
+                kurvengeste(rr_box),
                 ablese_box,
                 editor_box,
                 notizfeld.control,
@@ -1751,8 +1891,11 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 speichern_knopf,
             ),
             ft.Text(f"Datei: {eintrag.file_path}", size=11, opacity=0.5, selectable=True),
-        ]
+        ],
     )
+    view = ansicht([normal_inhalt])
+    view.on_confirm_pop = zurueck_im_vollbild
+    return view
 
 
 # ---------------------------------------------------------------------------

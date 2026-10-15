@@ -136,6 +136,7 @@ class Notizfeld:
         quelle: str | None = None,
         uebungen_merken: Callable[[bool, str | None], None] = lambda *_: None,
         katalog: Callable[[], dict[str, str]] | None = None,
+        breite: Callable[[], float] | None = None,
     ) -> None:
         self._zeitbezug = zeitbezug
         self._ereignisse = ereignisse
@@ -144,6 +145,10 @@ class Notizfeld:
         self._zeigen = zeigen
         self._mitte = mitte
         self._jetzt = jetzt
+        self._breite = breite
+        #: Marke, die gerade mit dem Finger gezogen wird (Index), und wo sie steht
+        self.gezogen: int | None = None
+        self.zieh_x = 0.0
         self._offen_merken = offen_merken
         self._uebungen = uebungen
         self._uebungen_merken = uebungen_merken
@@ -282,6 +287,62 @@ class Notizfeld:
         self.bearbeite = None
         self._aendern(kurve=True)
 
+    # -- Marken ohne Tastatur (Querformat, Ben 15.10.2026) -------------------------
+
+    def marke_setzen(self, x: float | None = None) -> bool:
+        """Eine Notiz ohne Text an ``x`` (sonst jetzt bzw. Fenstermitte) — der Text
+        kommt später hochkant dazu. ``False``: keine Aufnahme, nichts gesetzt."""
+        zb = self._zeitbezug()
+        if zb is None:
+            return False
+        stelle = self._jetzt_x() if x is None else x
+        liste = list(self._ereignisse())
+        liste.append(notiz("", zb.anker(stelle), zb.start_utc))
+        self._speichern(sortiert(liste, zb.beats()))
+        self._aendern(kurve=True)
+        return True
+
+    def _toleranz(self) -> float:
+        """Wie nah der Finger einer Marke sein muss: 2 % der Fensterbreite, mindestens 1 s."""
+        return max(1.0, 0.02 * self._breite()) if self._breite is not None else 1.0
+
+    def greifen(self, x: float) -> bool:
+        """Für `zeitfenster.wischbar`: Eine Marke unter dem Finger folgt ihm.
+
+        Beim ersten Aufruf einer Geste entscheidet die Nähe; danach kommt jede
+        weitere Lage hierher, bis `loslassen`. Die Kurve zeichnet `wischbar`.
+        """
+        if self.gezogen is not None:
+            self.zieh_x = x
+            return True
+        zb = self._zeitbezug()
+        if zb is None:
+            return False
+        beste: tuple[float, int] | None = None
+        for i, e in enumerate(self._ereignisse()):
+            mx = zb.x(e)
+            if mx is None or i == self.bearbeite:
+                continue
+            abstand = abs(mx - x)
+            if abstand <= self._toleranz() and (beste is None or abstand < beste[0]):
+                beste = (abstand, i)
+        if beste is None:
+            return False
+        self.gezogen, self.zieh_x = beste[1], x
+        return True
+
+    def loslassen(self) -> None:
+        """Ende der Geste: die gezogene Marke bekommt ihren neuen Anker."""
+        i, self.gezogen = self.gezogen, None
+        zb = self._zeitbezug()
+        liste = list(self._ereignisse())
+        if i is None or zb is None or not 0 <= i < len(liste):
+            return
+        alt = liste[i]
+        liste[i] = notiz(str(alt.get("text") or ""), zb.anker(self.zieh_x), zb.start_utc, alt)
+        self._speichern(sortiert(liste, zb.beats()))
+        self._aendern(kurve=True)
+
     def uebungen_umschalten(self) -> None:
         self.uebungen_offen = not self.uebungen_offen
         self._uebungen_merken(self.uebungen_offen, self.quelle)
@@ -333,13 +394,15 @@ class Notizfeld:
         notizen: list[float] = []
         for i, e in enumerate(self._ereignisse()):
             x = zb.x(e)
-            if x is not None and x_von <= x <= x_bis and i != self.bearbeite:
+            if x is not None and x_von <= x <= x_bis and i not in (self.bearbeite, self.gezogen):
                 notizen.append(x)
         reihen = [senkrechte(notizen, FARBEN["notiz"], 1.5, gestrichelt=False)]
         if self.bearbeite is not None:
             x = self._x_der_eingabe()
             if x_von <= x <= x_bis:
                 reihen.append(senkrechte([x], FARBEN["notiz_neu"], 2.0, gestrichelt=True))
+        if self.gezogen is not None and x_von <= self.zieh_x <= x_bis:
+            reihen.append(senkrechte([self.zieh_x], FARBEN["notiz_neu"], 2.0, gestrichelt=True))
         return [r for r in reihen if r.punkte]
 
     # -- Aufbau ------------------------------------------------------------------
@@ -553,7 +616,11 @@ class Notizfeld:
                 controls=[
                     ft.Container(width=3, height=16, bgcolor=FARBEN["notiz"], border_radius=2),
                     ft.Text(zeit, size=12, opacity=0.7, width=96),
-                    ft.Text(str(e.get("text") or ""), size=13, expand=True),
+                    ft.Text(str(e.get("text") or ""), size=13, expand=True)
+                    if e.get("text")
+                    else ft.Text(
+                        "(ohne Text — antippen)", size=13, italic=True, opacity=0.6, expand=True
+                    ),
                     ft.Icon(
                         ft.Icons.FITNESS_CENTER,
                         size=14,

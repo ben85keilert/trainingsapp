@@ -77,6 +77,7 @@ from trainingsapp.hrv_core.training import (
     zeit_je_bereich,
 )
 from trainingsapp.hrv_core.trends import aktuell, reihe
+from trainingsapp.ui.ausrichtung import querformat
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.karte_strecke import StreckenKarte, ganze_strecke
 from trainingsapp.ui.components.kurve import Reihe, kurve
@@ -665,12 +666,26 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
             )
         )
 
+    def kartenhoehe() -> float:
+        """Quer: die Karte füllt die Höhe neben den Zahlen; hochkant klein oder groß."""
+        if querformat(page):
+            return max(220.0, float(page.height or 480) - 120)
+        return 460.0 if gross["an"] else 220.0
+
     def karte_umschalten() -> None:
         gross["an"] = not gross["an"]
         if strecken_karte is not None:
-            strecken_karte.karte.height = 460 if gross["an"] else 220
+            strecken_karte.karte.height = kartenhoehe()
             with contextlib.suppress(Exception):
                 strecken_karte.karte.update()
+
+    def umbauen() -> None:
+        """Gedreht (``page.on_resize``): Zahlen und Karte neu anordnen, Karte in neuer Höhe."""
+        if state.ausdauer_ansicht != nummer or lauf_jetzt() is None:
+            return
+        zeichnen()
+        with contextlib.suppress(Exception):
+            page.update()
 
     # -- Live-Werte ----------------------------------------------------------------
 
@@ -718,32 +733,46 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
             werte(lauf)
             strecken_karte = None
             karte_platz.content = None
-            inhalt.controls = [
-                karte(
-                    ft.Row(
-                        controls=[
-                            ft.Icon(SPORT_SYMBOLE[lauf.sportart]),
-                            titel(f"{SPORT_NAMEN[lauf.sportart]} läuft"),
-                            pause_text,
-                        ],
-                    ),
-                    zahlen,
-                    warnung,
-                    ft.FilledButton("Beenden", icon=ft.Icons.STOP, on_click=beenden_fragen),
-                    ft.Switch(
-                        label="Karte zeigen (Kacheln von OpenStreetMap)",
-                        value=state.ausdauer_karte,
-                        on_change=karte_gewaehlt,
-                    )
-                    if lauf.quelle is not None
-                    else ft.Container(),
-                    hinweis(
-                        "Display darf aus sein — die Benachrichtigung zeigt Strecke, Zeit und "
-                        "Herzfrequenz. An jedem Kilometer ein Ton."
-                    ),
+            zahlen_karte = karte(
+                ft.Row(
+                    controls=[
+                        ft.Icon(SPORT_SYMBOLE[lauf.sportart]),
+                        titel(f"{SPORT_NAMEN[lauf.sportart]} läuft"),
+                        pause_text,
+                    ],
                 ),
-                karte_platz,
-            ]
+                zahlen,
+                warnung,
+                ft.FilledButton("Beenden", icon=ft.Icons.STOP, on_click=beenden_fragen),
+                ft.Switch(
+                    label="Karte zeigen (Kacheln von OpenStreetMap)",
+                    value=state.ausdauer_karte,
+                    on_change=karte_gewaehlt,
+                )
+                if lauf.quelle is not None
+                else ft.Container(),
+                hinweis(
+                    "Display darf aus sein — die Benachrichtigung zeigt Strecke, Zeit und "
+                    "Herzfrequenz. An jedem Kilometer ein Ton."
+                ),
+            )
+            if querformat(page) and lauf.quelle is not None and state.ausdauer_karte:
+                # Quer (Ben, 15.10.2026): Zahlen links, die Karte rechts in voller Höhe
+                inhalt.controls = [
+                    ft.Row(
+                        spacing=14,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
+                        controls=[
+                            ft.Container(
+                                width=min(360.0, float(page.width or 900) * 0.42),
+                                content=zahlen_karte,
+                            ),
+                            ft.Container(expand=True, content=karte_platz),
+                        ],
+                    )
+                ]
+            else:
+                inhalt.controls = [zahlen_karte, karte_platz]
             return
         sportwahl = ft.SegmentedButton(
             selected=[state.ausdauer_sportart],
@@ -814,7 +843,7 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
                     strecken_karte = None
                     karte_platz.content = None
                 if punkte and strecken_karte is None and state.ausdauer_karte:
-                    strecken_karte = StreckenKarte(punkte[-1], hoehe=220)
+                    strecken_karte = StreckenKarte(punkte[-1], hoehe=kartenhoehe())
                     karte_platz.content = karte(
                         ft.Row(
                             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -824,6 +853,7 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
                                     ft.Icons.OPEN_IN_FULL,
                                     tooltip="Karte groß oder klein",
                                     on_click=lambda: karte_umschalten(),
+                                    visible=not querformat(page),  # quer ist sie schon groß
                                 ),
                             ],
                         ),
@@ -838,6 +868,7 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
             await asyncio.sleep(1.0)
 
     zeichnen()
+    state.groesse_beobachter["ausdauer"] = umbauen
     if lauf_jetzt() is not None:
         page.run_task(ticker)
     return ft.View(

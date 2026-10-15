@@ -19,6 +19,8 @@ die Kurve 2:00 statt der gemessenen 3:34, und jede Lücke war zugeschoben.
 
 from __future__ import annotations
 
+import functools
+import weakref
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -29,7 +31,17 @@ from .segments import luecken_finden
 
 #: Abgeleitete Reihen je Messung (`_gemerkt`) — so viele Messungen merkt sich das Modul
 _MERK_MAX = 4
-_merk: OrderedDict[int, tuple[Recording, tuple[int, ...], dict[str, Any]]] = OrderedDict()
+_merk: OrderedDict[int, tuple[weakref.ref[Recording], tuple[int, ...], dict[str, Any]]] = (
+    OrderedDict()
+)
+
+
+def _vergessen(schluessel: int) -> None:
+    """Die Messung ist weg (Weakref-Rückruf): ihre Reihen auch — sofern unter dem
+    Schlüssel nicht schon eine neue Messung mit derselben ``id`` liegt."""
+    eintrag = _merk.get(schluessel)
+    if eintrag is not None and eintrag[0]() is None:
+        del _merk[schluessel]
 
 
 def _gemerkt[T](rec: Recording, name: str, rechnen: Callable[[], T]) -> T:
@@ -38,6 +50,8 @@ def _gemerkt[T](rec: Recording, name: str, rechnen: Callable[[], T]) -> T:
 
     Gemerkt wird je Objekt (Identität, kein Vergleich der Inhalte); ändern sich
     ``ppi_pakete`` oder ``beats`` (anderes Objekt, andere Länge), gilt es als neu.
+    Die Messung selbst hält der Speicher nur schwach (`weakref`): Mit der Ansicht
+    verschwinden auch ihre Reihen — bei Stundenmessungen am Handy zweistellige MB.
     """
     stempel = (
         id(rec.ppi_pakete),
@@ -45,14 +59,16 @@ def _gemerkt[T](rec: Recording, name: str, rechnen: Callable[[], T]) -> T:
         id(rec.beats),
         len(rec.beats),
     )
-    eintrag = _merk.get(id(rec))
-    if eintrag is None or eintrag[0] is not rec or eintrag[1] != stempel:
-        eintrag = (rec, stempel, {})
-        _merk[id(rec)] = eintrag
+    schluessel = id(rec)
+    eintrag = _merk.get(schluessel)
+    if eintrag is None or eintrag[0]() is not rec or eintrag[1] != stempel:
+        rueckruf = functools.partial(_vergessen, schluessel)
+        eintrag = (weakref.ref(rec, lambda _r: rueckruf()), stempel, {})
+        _merk[schluessel] = eintrag
         while len(_merk) > _MERK_MAX:
             _merk.popitem(last=False)
     else:
-        _merk.move_to_end(id(rec))
+        _merk.move_to_end(schluessel)
     werte = eintrag[2]
     if name not in werte:
         werte[name] = rechnen()

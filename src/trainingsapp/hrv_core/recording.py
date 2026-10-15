@@ -89,9 +89,10 @@ class Beat:
         )
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, weakref_slot=True)
 class Recording:
-    """Eine Messung im Format `raw-v1`."""
+    """Eine Messung im Format `raw-v1`. ``weakref_slot``: `ppi._gemerkt` merkt sich
+    abgeleitete Reihen je Messung, ohne sie am Leben zu halten."""
 
     beats: list[Beat] = field(default_factory=list)
     geraet: str = "Unbekannt"

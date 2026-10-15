@@ -42,8 +42,15 @@ import numpy as np
 
 from .atmung import RUHE, atemfrequenz
 from .ereignisse import Zeitbezug
-from .frequency import fensterspektrum
-from .korrektur import Korrigiert, _json_lesen, _sha1, analyse_pfad, zuschneiden
+from .frequency import Fensterspektrum, frequenzbereich, teilstuecke
+from .korrektur import (
+    Korrigiert,
+    _json_lesen,
+    _json_lesen_strikt,
+    _sha1,
+    analyse_pfad,
+    zuschneiden,
+)
 from .ppi import schlagzeiten
 from .recording import Recording, json_atomar_schreiben
 from .time_domain import compute_time_domain
@@ -189,17 +196,41 @@ def abschnitt_werte(
         return werte
     t = np.asarray(teil.t_s, dtype=float)
     rr = np.asarray(teil.rr_ms, dtype=float)
+    # Je Teilstück zwischen den Nähten (ALGO 7): ``t_s`` ist die Herzuhr, die hinter
+    # einer ausgeschlossenen Kette oder Messlücke zusammenrückt — ein Minutenfenster
+    # über die Naht hinweg sähe eine Atmung, die es nicht gab.
     raten = [
         float(a.rate_pro_min)
-        for ende in np.arange(t[0] + 60.0, t[-1] + 1e-9, 15.0)
-        if (a := atemfrequenz(t, rr, ende - 60.0, ende, modus=atem_modus)).gueltig
+        for stueck in teilstuecke(rr, t, teil.breaks)
+        for ende in np.arange(stueck.t_s[0] + 60.0, stueck.t_s[-1] + 1e-9, 15.0)
+        if (
+            a := atemfrequenz(stueck.t_s, stueck.rr_ms, ende - 60.0, ende, modus=atem_modus)
+        ).gueltig
         and a.rate_pro_min is not None
     ]
     werte["atem"] = float(np.median(raten)) if raten else None
     if frequenz and t[-1] - t[0] >= 120.0:
-        fs = fensterspektrum(t, rr, float(t[0]) - 1e-6, float(t[-1]))
+        fs = abschnitt_spektrum(teil)
         werte["lf_hf"] = fs.werte.get("lf_hf") if fs is not None else None
     return werte
+
+
+def abschnitt_spektrum(teil: Korrigiert) -> Fensterspektrum | None:
+    """Spektrum eines Abschnitts — gerechnet wie das der ganzen Messung (ALGO 7).
+
+    Teilstücke an den Nähten, ab `LANG_AB_S` der lange Weg (`frequency.spektrum`).
+    Bis 15.10.2026 lief hier ein einzelner Lomb über alle Schläge (`fensterspektrum`):
+    über Nähte hinweg, und bei Abschnitten über gut eine Stunde in den Deckel
+    `MAX_GRID_BINS`, den ALGO 5 für die Gesamtmessung behoben hatte (LF/HF bei
+    4 h um das 3,6-Fache zu hoch). Mindestdauern je Band gelten hier nicht —
+    der Abschnitt ist bewusst gewählt wie das Band in der Analysekarte;
+    `Fensterspektrum.reif` sagt, ob er lang genug ist.
+    """
+    if len(teil.rr_ms) < 2:
+        return None
+    return Fensterspektrum.aus_frequenzbereich(
+        frequenzbereich(teil.rr_ms, teil.t_s, teil.breaks, mindestdauer=False)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +295,7 @@ def zusatz_speichern(
     """
     rec_pfad = Path(rec_pfad)
     ziel = analyse_pfad(rec_pfad)
-    doc = _json_lesen(ziel) or {
+    doc = _json_lesen_strikt(ziel) or {  # unlesbar → SidecarFehler, nichts überschreiben
         "schema": "analysis-v1",
         "source_file": rec_pfad.name,
         "source_file_sha1": _sha1(rec_pfad),
@@ -353,6 +384,7 @@ __all__ = [
     "MIN_ABSCHNITT_S",
     "Abschnitt",
     "Grenze",
+    "abschnitt_spektrum",
     "abschnitt_werte",
     "achsen_umrechnung",
     "aus_grenzen",

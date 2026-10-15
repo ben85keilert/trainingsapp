@@ -23,6 +23,21 @@ from trainingsapp.hrv_core.segments import luecken_finden
 GOLDEN_PPI = Path(__file__).parent / "golden" / "rr" / "sensor_2026-10-13_000000.json"
 
 
+def test_gemerkte_reihen_halten_die_messung_nicht_fest() -> None:
+    """`ppi._gemerkt` hält die Messung nur schwach — mit der Ansicht wird der Speicher frei."""
+    import gc
+
+    from trainingsapp.hrv_core import ppi
+
+    rec = laden(GOLDEN_PPI)
+    schluessel = id(rec)
+    ppi.schlagzeiten(rec)
+    assert schluessel in ppi._merk
+    del rec
+    gc.collect()
+    assert schluessel not in ppi._merk
+
+
 def _nachbar_differenzen(doc: dict) -> tuple[list[int], list[int]]:
     """(nur echte Nachbarn, alle aufeinanderfolgenden Zeilen) — direkt aus der Datei."""
     nachbarn, alle, vorher, verworfen = [], [], None, False
@@ -44,7 +59,7 @@ def _rmssd(diffs: list[int]) -> float:
 
 
 def test_algo_version_gezaehlt() -> None:
-    assert ALGO_VERSION == 6  # 6: Vorgaben der Korrektur (5: lange Messungen in drei Teilen)
+    assert ALGO_VERSION == 7  # 7: Abschnitte je Teilstück (6: Vorgaben der Korrektur)
 
 
 def test_golden_rmssd_nur_ueber_echte_nachbarn() -> None:

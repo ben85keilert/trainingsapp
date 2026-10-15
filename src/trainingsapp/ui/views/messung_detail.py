@@ -52,6 +52,7 @@ from trainingsapp.hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
 from trainingsapp.hrv_core.ausschnitte import (
     Abschnitt,
     Grenze,
+    abschnitt_spektrum,
     abschnitt_werte,
     achsen_umrechnung,
     aus_grenzen,
@@ -68,6 +69,7 @@ from trainingsapp.hrv_core.korrektur import (
     Kette,
     Korrektur,
     Korrigiert,
+    SidecarFehler,
     analyse_laden,
     analyse_regeln,
     analyse_speichern,
@@ -875,7 +877,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     def zusatz_sichern() -> None:
         try:
             zusatz_speichern(pfad, z.ausschnitt, eigene, nach_datei)
-        except OSError as fehler:
+        except (OSError, SidecarFehler) as fehler:
             page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
 
     def abschnitt_loeschen(a: Abschnitt) -> None:
@@ -1421,11 +1423,16 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             if a is not None:
                 lo, hi = grenzen()
                 von, bis = max(a.von_s, lo), min(a.bis_s, hi)
+                korr = z.korrigiert()
                 return Analysefenster(
                     f"abschnitt:{a.id}:{von:.3f}:{bis:.3f}",
                     von,
                     bis,
                     f"Abschnitt „{a.name}“ · {_uhr(von)}–{_uhr(bis)}",
+                    # wie die Abschnittswerte in der Tabelle: Nähte und langer Weg
+                    ganzes=lambda: abschnitt_spektrum(
+                        zuschneiden(korr, korr_zeiten(korr, z.achse), von, bis)
+                    ),
                 )
         if aw.art == AW_BAND:
             von, bis = band_bereich()
@@ -1563,7 +1570,11 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     async def speichern() -> None:
         nonlocal gespeicherte_regeln
-        analyse_speichern(pfad, rec, z.korrekturen(), regeln=z.regeln, basis=z.basis)
+        try:
+            analyse_speichern(pfad, rec, z.korrekturen(), regeln=z.regeln, basis=z.basis)
+        except (OSError, SidecarFehler) as fehler:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
+            return
         z.gespeichert = z.korrekturen()
         gespeicherte_regeln = z.regeln
         page.show_dialog(

@@ -13,6 +13,7 @@ from trainingsapp.hrv_core.ausschnitte import (
     GESAMT_ID,
     Abschnitt,
     Grenze,
+    abschnitt_spektrum,
     abschnitt_werte,
     achsen_umrechnung,
     aus_grenzen,
@@ -21,8 +22,16 @@ from trainingsapp.hrv_core.ausschnitte import (
     zusatz_lesen,
     zusatz_speichern,
 )
+from trainingsapp.hrv_core.constants import LANG_AB_S
 from trainingsapp.hrv_core.ereignisse import Zeitbezug, notiz
-from trainingsapp.hrv_core.korrektur import Korrigiert, analyse_pfad, zuschneiden
+from trainingsapp.hrv_core.frequency import fensterspektrum, frequenzbereich
+from trainingsapp.hrv_core.korrektur import (
+    Korrigiert,
+    SidecarFehler,
+    analyse_pfad,
+    analyse_speichern,
+    zuschneiden,
+)
 from trainingsapp.hrv_core.ppi import schlagzeiten
 from trainingsapp.hrv_core.recording import laden
 
@@ -88,6 +97,57 @@ def test_werte_je_abschnitt() -> None:
     assert w["lf_hf"] is not None and w["lf_hf"] < 1  # Atmung im HF-Band
     teil = zuschneiden(korr, t, 60.0, 300.0)
     assert w["n"] == len(teil.rr_ms)
+
+
+def test_abschnitt_rechnet_je_teilstueck_wie_die_gesamtmessung() -> None:
+    """ALGO 7: Nähte trennen; LF/HF und Atemfrequenz entsprechen der Rechnung auf den Stücken."""
+    a, ta = _korrigiert(200, atem_hz=0.25)
+    b, tb = _korrigiert(200, atem_hz=0.10)
+    # Herzuhr rückt hinter einer Naht zusammen: Stück b hängt direkt an a
+    t_b = [x + ta[-1] for x in tb]
+    korr = Korrigiert(ta + t_b, a.rr_ms + b.rr_ms, ["orig"] * 400, [200], 0, 0)
+    zeiten = ta + [x + 300.0 for x in t_b]  # auf der Kurvenachse liegt eine 5-min-Lücke
+    w = abschnitt_werte(korr, zeiten, 0.0, zeiten[-1], frequenz=True)
+    # Atem: Median aus beiden Stücken (15/min und 6/min), kein Fenster über die Naht
+    assert w["atem"] is not None and 6.0 <= w["atem"] <= 15.0
+    teil = zuschneiden(korr, zeiten, 0.0, zeiten[-1])
+    assert teil.breaks == [200]
+    erwartet = frequenzbereich(teil.rr_ms, teil.t_s, teil.breaks, mindestdauer=False)
+    assert w["lf_hf"] == pytest.approx(erwartet["lf_hf"])
+    assert abschnitt_spektrum(teil).werte["hf"] == pytest.approx(erwartet["hf"])
+
+
+def test_langer_abschnitt_nimmt_den_langen_weg() -> None:
+    """Ein Abschnitt über `LANG_AB_S` rechnet LF/HF als Mittel der 5-min-Spektren —
+    nicht mehr mit dem gedeckelten Raster (ALGO 5 galt vorher nur für die Gesamtmessung)."""
+    korr, t = _korrigiert(5000, atem_hz=0.25)  # ≈ 75 min
+    assert t[-1] - t[0] > LANG_AB_S
+    fs = abschnitt_spektrum(korr)
+    assert fs is not None and fs.werte["hf"] is not None
+    fenster = [
+        fensterspektrum(t, korr.rr_ms, von, von + 300.0)
+        for von in np.arange(t[0], t[-1] - 300.0, 300.0)
+    ]
+    hf_5min = float(np.mean([f.werte["hf"] for f in fenster if f is not None]))
+    assert fs.werte["hf"] == pytest.approx(hf_5min, rel=0.25)
+    assert fs.werte["lf_hf"] < 1
+
+
+def test_unlesbares_sidecar_wird_nicht_ersetzt(tmp_path) -> None:
+    """Ein Sidecar, das nicht lesbar ist, könnte praxis_gui-Korrekturen enthalten —
+    schreiben bricht ab, die Datei bleibt, wie sie ist (15.10.2026)."""
+    pfad = tmp_path / GOLDEN.name
+    shutil.copy(GOLDEN, pfad)
+    sidecar = analyse_pfad(pfad)
+    sidecar.write_text("{ kaputt", encoding="utf-8")
+    with pytest.raises(SidecarFehler, match="nicht lesbar"):
+        zusatz_speichern(pfad, None, [Abschnitt("Pause", 10.0, 50.0)], float)
+    with pytest.raises(SidecarFehler):
+        analyse_speichern(pfad, laden(pfad), [])
+    assert sidecar.read_text(encoding="utf-8") == "{ kaputt"
+    sidecar.unlink()  # ohne Sidecar entsteht wie bisher ein neues
+    zusatz_speichern(pfad, None, [Abschnitt("Pause", 10.0, 50.0)], float)
+    assert json.loads(sidecar.read_text())["segments"][0]["name"] == "Pause"
 
 
 def test_sidecar_wie_praxis_gui(tmp_path) -> None:

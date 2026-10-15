@@ -772,6 +772,29 @@ def _json_lesen(pfad: Path) -> dict[str, Any] | None:
     return doc if isinstance(doc, dict) else None
 
 
+class SidecarFehler(ValueError):
+    """Die Analysedatei existiert, ist aber nicht lesbar — nichts überschreiben.
+
+    Ein kaputtes, halb synchronisiertes oder gesperrtes Sidecar könnte
+    Korrekturen und Abschnitte aus praxis_gui enthalten. Bis 15.10.2026 legte
+    jeder Schreibzugriff dann still ein neues an; jetzt bricht er ab, und die
+    Oberfläche sagt es (lieber eine Lücke als ein stiller Verlust).
+    """
+
+
+def _json_lesen_strikt(pfad: Path) -> dict[str, Any] | None:
+    """Zum **Fortschreiben**: ``None`` nur, wenn es die Datei noch nicht gibt."""
+    if not pfad.exists():
+        return None
+    doc = _json_lesen(pfad)
+    if doc is None:
+        raise SidecarFehler(
+            f"Analysedatei {pfad.name} ist nicht lesbar — nichts gespeichert, "
+            "damit nichts darin verloren geht."
+        )
+    return doc
+
+
 def _eindeutig(korrekturen: Sequence[Korrektur], n: int) -> list[Korrektur]:
     """Je Schlag die letzte Korrektur, nach Index sortiert."""
     eindeutig: dict[int, Korrektur] = {}
@@ -839,7 +862,7 @@ def analyse_speichern(
     }
     if regeln is not None:
         meta["regeln"] = regeln.als_dict()
-    doc = _json_lesen(ziel) or {}
+    doc = _json_lesen_strikt(ziel) or {}
     doc.pop("corrections_ppi", None)
     doc.update(
         {
@@ -943,6 +966,7 @@ __all__ = [
     "Kette",
     "Korrektur",
     "Korrigiert",
+    "SidecarFehler",
     "analyse_laden",
     "analyse_pfad",
     "analyse_regeln",

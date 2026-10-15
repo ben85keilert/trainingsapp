@@ -99,15 +99,22 @@ class FletGpsQuelle(GpsQuelle):
         p = e.position
         if p is None or p.latitude is None or p.longitude is None:
             return
+        # Android meldet „nicht verfügbar" als 0, iOS als negativ: Ein Tempo zählt nur
+        # mit positiver Tempogenauigkeit — sonst stünde der Rechner für immer („steht")
+        # und die Strecke bliebe 0 (15.10.2026). Ohne Tempo rechnet er Weg je Zeit.
+        tempo = _zahl(p.speed)
+        tempo_genau = _zahl(getattr(p, "speed_accuracy", None))
+        tempo_gueltig = tempo is not None and tempo >= 0 and bool(tempo_genau and tempo_genau > 0)
+        genauigkeit = _zahl(p.accuracy)
         self._einreihen(
             Punkt(
                 t=_utc_sekunden(p.timestamp),
                 lat=float(p.latitude),
                 lon=float(p.longitude),
-                genauigkeit_m=_zahl(p.accuracy),
+                genauigkeit_m=genauigkeit if genauigkeit is not None and genauigkeit > 0 else None,
                 hoehe_m=_zahl(p.altitude),
                 hoehe_genauigkeit_m=_zahl(p.altitude_accuracy),
-                tempo_ms=_zahl(p.speed),
+                tempo_ms=tempo if tempo_gueltig else None,
                 richtung_grad=_zahl(p.heading),
                 t_empfang=time.monotonic(),
                 simuliert=bool(p.mocked),
@@ -119,7 +126,7 @@ class FletGpsQuelle(GpsQuelle):
 
 
 def _zahl(wert: Any) -> float | None:
-    """Android meldet fehlende Werte als 0 — Genauigkeit und Tempo 0 sind trotzdem gültig."""
+    """Zahl oder ``None`` — ob 0 „fehlt" heißt, entscheidet der Aufrufer je Feld."""
     return float(wert) if isinstance(wert, int | float) else None
 
 

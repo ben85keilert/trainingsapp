@@ -35,6 +35,14 @@ Was das für den Bau heißt:
   Formate: Abschnitt 5b.
 - **Ein Test sichert es ab:** Export-ZIP und Sync-Outbox einer Messung mit
   Strecke enthalten keine Koordinate.
+- **Die Karte ist die eine Stelle, an der etwas nach außen geht** (Entscheidung 1,
+  Online-Kacheln): Sie lädt Kacheln von `tile.openstreetmap.org`, und damit gehen
+  grobe Kachelkoordinaten (bei Zoom 16/17 einige hundert Meter) an deren Server —
+  jede Sekunde nachgeführt, solange die Karte zu sehen ist. Nicht die Strecke,
+  nicht die genaue Position. Seit 15.10.2026: Schalter „Karte zeigen“ im Training
+  (`AppState.ausdauer_karte`), ein **einmaliger** Hinweis beim ersten Training mit
+  Karte (`SettingRepo.HINWEIS_KARTE`, nicht je Aufzeichnung — Ben), ausführlich
+  später in der Hilfe, Kapitel GPS/Kartenaufzeichnung. Offline-Kacheln: Phase 5.
 
 ---
 
@@ -105,7 +113,7 @@ devices/gps.py          Port GpsQuelle (pull, wie HeartRateSource) + GpxWiederga
                         (Simulator: spielt eine Strecke ab — Tests, Web-Vorschau)
 core/strecke.py         Punkt, Strecke, Filter, Distanz, Tempo, Splits, Auto-Pause,
                         Höhenmeter mit Hysterese — ohne Oberfläche, mit Doctests
-data/strecken.py        Datei schreiben/lesen (GPX 1.1 + Crash-Backup .jsonl),
+data/strecken.py        Datei schreiben/lesen (GPX 1.1 + Crash-Backup .jsonl mit Kopfzeile),
                         Tabelle `strecke` (Migration), Ordner Strecken/
 data/karten.py          Kartenquellen (URL, Namensnennung, User-Agent, ob offline
                         erlaubt, Höchstmenge je Download), Gebietsrechnung
@@ -448,6 +456,27 @@ Genauigkeit bei längerem GPS nachlässt (Median je 5 min), und den Strom.
   dem H10 vorbehalten (Abschnitt 6). Begründung: `docs/korrektur.md`.
 
 ---
+
+## 10a. Nachträge aus der Durchsicht (15.10.2026)
+
+- **Kopfzeile in der Streckendatei.** Die erste Zeile der `.jsonl` ist
+  `{"kopf": {"schema": "strecke-v1", "sportart", "subject_id", "started_at"}}` —
+  keine Koordinate. Grund: Die Zeile `strecke` entstand nur beim Stoppen; tötete
+  Android den Prozess, lag die Datei verwaist. Jetzt findet `AppState.starten`
+  solche Dateien (`data.strecken.verwaiste`), und die App bietet beim Start
+  „Übernehmen“ (Strecke, Zeit, Tagebuch aus der Datei) oder „Löschen“ an
+  (Ben: erkennen und anbieten, nicht still). Alte Dateien ohne Kopf bleiben lesbar.
+- **Tempo 0 heißt „fehlt“.** flet_geolocator meldet ein nicht verfügbares Tempo
+  als 0 (Android) oder negativ (iOS). Ein Tempo zählt nur mit positiver
+  Tempogenauigkeit (`speed_accuracy`); ohne Tempo schätzt der Rechner Bewegung
+  aus Weg je Zeit seit dem Bezugspunkt — die 10-m-Schritte zählen weiter, Stillstand
+  zieht den Bezug dann nicht nach (Zittern bleibt unter 10 m). Vorher blieb die
+  Strecke auf solchen Geräten für immer 0. Am Pixel 10 (liefert Tempo) ändert sich
+  nichts; andere Geräte: am Gerät prüfen (Katalog T-Eintrag).
+- **Fehler sind sichtbar.** GPS-Fehler (`quelle.meldung`), ein nicht gestarteter
+  Vordergrunddienst und Schreibfehler stehen während des Trainings in roter Schrift
+  unter den Zahlen (`AusdauerLauf.warnung`); der Empfangs-Task stirbt nicht mehr still.
+  Scheitert der Start, bleibt kein halber Lauf im `AppState` (`abbrechen`).
 
 ## 11. Quellen
 

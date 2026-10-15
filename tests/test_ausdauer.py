@@ -205,6 +205,108 @@ async def test_profilwechsel_waehrend_des_trainings_haengt_nichts_um(daten) -> N
     assert sitzung.subject_id == start
 
 
+def test_streckendatei_mit_kopf_und_kaputten_zeilen(tmp_path) -> None:
+    """Kopfzeile (ohne Koordinaten) wird gelesen und nicht als Ortung gezählt; von Hand
+    bearbeitete Zeilen ohne lat/lon stürzen das Lesen nicht."""
+    from trainingsapp.data.strecken import StreckenSchreiber, jsonl_lesen, kopf_lesen
+
+    pfad = tmp_path / "strecke_x.jsonl"
+    kopf = {"schema": "strecke-v1", "sportart": "laufen", "started_at": "2026-10-15T08:00:00+00:00"}
+    with StreckenSchreiber(pfad, kopf=kopf) as s:
+        s.schreiben(Punkt(1.0, 52.0, 13.0, genauigkeit_m=4.0))
+    with pfad.open("a", encoding="utf-8") as f:
+        f.write('{"t": 2.0, "lon": 13.0}\n{"t": 3.0, "lat": 52.0, "lo')
+    assert kopf_lesen(pfad) == kopf
+    assert jsonl_lesen(pfad) == [Punkt(1.0, 52.0, 13.0, genauigkeit_m=4.0)]
+    assert "52.0" not in pfad.read_text().splitlines()[0]
+    # ohne Kopf (Dateien von vor dem 15.10.)
+    alt = tmp_path / "strecke_alt.jsonl"
+    with StreckenSchreiber(alt) as s:
+        s.schreiben(Punkt(1.0, 52.0, 13.0))
+    assert kopf_lesen(alt) is None and len(jsonl_lesen(alt)) == 1
+
+
+def test_ohne_doppler_tempo_zaehlt_der_weg_je_zeit() -> None:
+    """Tempo ``None`` (kein Doppler): Strecke per 10-m-Schritt, Bewegung aus Weg je Zeit —
+    vorher galt 0 als „steht", und die Strecke blieb für immer 0 (15.10.2026)."""
+    from dataclasses import replace
+
+    gang = [replace(p, tempo_ms=None) for p in _gang(300, 1.4, rauschen_m=1.5)]
+    r = rechnen(gang, GEHEN)
+    assert r.distanz_m == pytest.approx(420, rel=0.05)
+    assert r.bewegt_s > 250 and not r.pausiert
+    assert r.aktuelles_tempo_ms() == pytest.approx(1.4, abs=0.3)
+    stand = [replace(p, tempo_ms=None) for p in _gang(120, 0.0, rauschen_m=1.5)]
+    r2 = rechnen(stand, GEHEN)
+    assert r2.distanz_m == 0.0 and r2.pausiert
+
+
+async def test_verwaiste_strecke_wird_erkannt_und_nachgetragen(daten) -> None:
+    """Prozess-Tod im Training: Datei mit Kopf, aber ohne Zeile — beim Start erkannt,
+    „Übernehmen" trägt Strecke und Tagebucheintrag nach (Ben, 15.10.2026)."""
+    from trainingsapp.config import streckenverzeichnis
+    from trainingsapp.data.strecken import StreckenSchreiber, verwaiste
+    from trainingsapp.ui.state import AppState
+    from trainingsapp.ui.views.ausdauer import verwaiste_uebernehmen
+
+    state, tmp_path = daten
+    await _training(state, tmp_path)  # ein ordentliches Training daneben
+    pfad = streckenverzeichnis() / "strecke_2026-10-15_080000.jsonl"
+    kopf = {
+        "schema": "strecke-v1",
+        "sportart": "laufen",
+        "subject_id": state.profil.id,
+        "started_at": "2026-10-15T06:00:00+00:00",
+    }
+    with StreckenSchreiber(pfad, kopf=kopf) as s:
+        for p in _gang(600, 2.8):
+            s.schreiben(p)
+    assert verwaiste(streckenverzeichnis(), state.strecken.dateipfade()) == [pfad]
+    zweiter = AppState.starten(tmp_path / "app.db")  # so sieht es der nächste Start
+    assert zweiter.verwaiste_strecken == [pfad]
+    zweiter.schliessen()
+    state.verwaiste_strecken = [pfad]
+    nach = verwaiste_uebernehmen(state, pfad)
+    assert nach is not None and nach.sportart == "laufen"
+    assert nach.distanz_m == pytest.approx(1680, rel=0.03)
+    assert nach.file_path == pfad.name and nach.title and "Nachgetragen" in nach.title
+    assert state.sitzungen.eintrag_laden(nach.session_entry_id) is not None
+    assert state.verwaiste_strecken == []
+    assert verwaiste(streckenverzeichnis(), state.strecken.dateipfade()) == []
+
+
+async def test_abbrechen_und_fehler_im_empfang(daten) -> None:
+    """Scheitert der Start, bleibt nichts zurück; ein Fehler im Empfang steht in der
+    Warnung statt den Task still zu beenden (15.10.2026)."""
+    from trainingsapp.config import streckenverzeichnis
+    from trainingsapp.devices.gps import PunktWiedergabe
+    from trainingsapp.ui.views.ausdauer import AusdauerLauf
+
+    state, _ = daten
+    punkte = _gang(60, 1.4)
+    lauf = AusdauerLauf(state, GEHEN, PunktWiedergabe(punkte, beschleunigung=2000))
+    await lauf.starten()
+    assert lauf.datei_pfad is not None and lauf.datei_pfad.exists()
+    await lauf.abbrechen()
+    assert lauf.fertig and not lauf.datei_pfad.exists()
+    assert state.strecken.alle(state.profil.id) == []
+
+    lauf = AusdauerLauf(state, GEHEN, PunktWiedergabe(punkte, beschleunigung=2000))
+
+    def kaputt(_p):
+        raise RuntimeError("Rechner kaputt")
+
+    lauf.rechner.hinzufuegen = kaputt  # type: ignore[method-assign]
+    await lauf.starten()
+    for _ in range(100):
+        await asyncio.sleep(0.02)
+        if lauf.warnung:
+            break
+    assert lauf.warnung is not None and "abgebrochen" in lauf.warnung
+    strecke = await lauf.stoppen()
+    assert strecke.dauer_s >= 0 and not (streckenverzeichnis() / "x").exists()
+
+
 async def test_training_speichert_strecke_hrv_und_tagebuch(daten) -> None:
     state, tmp_path = daten
     strecke, _punkte = await _training(state, tmp_path)

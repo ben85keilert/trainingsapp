@@ -18,7 +18,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from trainingsapp.config import datenbankpfad
+from trainingsapp.config import datenbankpfad, streckenverzeichnis
 from trainingsapp.core.darstellung import Darstellung, darstellung_lesen, darstellung_schreiben
 from trainingsapp.core.hrv_ansicht import (
     Ansicht,
@@ -55,6 +55,7 @@ from trainingsapp.data.repositories import (
     TagRepo,
 )
 from trainingsapp.data.seed import seed_einspielen
+from trainingsapp.data.strecken import verwaiste as strecken_verwaiste
 from trainingsapp.data.upgrade import datenformat_aktualisieren
 from trainingsapp.devices.bekannte import (
     BekanntesGeraet,
@@ -183,6 +184,10 @@ class AppState:
     ausdauer_ansicht: int = 0
     ausdauer_sportart: str = "gehen"
     ausdauer_gps: bool = True
+    #: Karte im Training zeigen — Kacheln kommen online (einmaliger Hinweis, `HINWEIS_KARTE`)
+    ausdauer_karte: bool = True
+    #: Streckendateien ohne Zeile `strecke` (Prozess-Tod im Training) — beim Start erkannt
+    verwaiste_strecken: list[Path] = field(default_factory=list)
     gps_test_karte: bool = True
     gps_test_wach: bool = False
     #: App sichtbar? Display aus oder andere App → False (Lebenszyklus in `app.py`)
@@ -213,6 +218,11 @@ class AppState:
         einstellungen = SettingRepo(con)
         profil = cls._aktives_profil(profile, einstellungen)
         offen = cls._papierkorb_aufraeumen(con, einstellungen)
+        strecken = StreckeRepo(con)
+        try:
+            verwaist = strecken_verwaiste(streckenverzeichnis(), strecken.dateipfade())
+        except OSError:
+            verwaist = []
         return cls(
             con=con,
             uebungen=ExerciseRepo(con),
@@ -222,7 +232,8 @@ class AppState:
             sitzungen=SessionRepo(con),
             tagesnotizen=DayNoteRepo(con),
             hrv=HrvRepo(con),
-            strecken=StreckeRepo(con),
+            strecken=strecken,
+            verwaiste_strecken=verwaist,
             tags=TagRepo(con),
             pakete=PaketRepo(con),
             profil=profil,

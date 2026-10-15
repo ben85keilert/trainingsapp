@@ -37,9 +37,15 @@ Angaben. Ein gemeinsamer Eintrag wäre für Edition A falsch.
 | `BLUETOOTH_SCAN` (mit `neverForLocation`) | Herzfrequenzsensor finden |
 | `BLUETOOTH_CONNECT` | mit dem Sensor verbinden |
 | Foreground Service (`connectedDevice`) | Messung läuft weiter, wenn der Bildschirm aus ist |
+| `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` (seit 14.10.2026) | Strecke beim Ausdauertraining aufzeichnen (Gehen, Laufen, Rad) — nur während eines Trainings oder GPS-Tests, nur auf dem Gerät gespeichert, nie übertragen |
+| Foreground Service (`location`) | GPS läuft weiter, wenn der Bildschirm aus ist |
+| `INTERNET` | Kartenkacheln (OpenStreetMap) und verlinkte Videos; keine eigenen Daten |
 
-`neverForLocation` ist wichtig: ohne dieses Attribut verlangt Android zusätzlich
-die Standortberechtigung — die wir weder brauchen noch begründen könnten.
+`neverForLocation` bleibt bei Bluetooth: Die Standortberechtigung gilt dem
+Ausdauertraining, nicht dem Sensor. Im Store-Formular „Standort“ ehrlich
+angeben: erhoben, nicht geteilt, nicht zu Werbezwecken, Löschung durch die
+Person. Die Datenschutzerklärung nennt die Kartenkacheln (grobe
+Kachelkoordinaten an OpenStreetMap, abschaltbar).
 
 ### Datenschutzerklärung
 

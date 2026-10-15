@@ -27,8 +27,12 @@
 - Standardmäßig wird **nichts** übertragen. Jede Datenart braucht eine eigene
   Freigabe (`20_einwilligung.md`)
 - Rohdaten der HRV nur bei ausdrücklicher Freigabe — Kennzahlen genügen meist
-- Keine Standortdaten. Auf Android deshalb `neverForLocation` bei der
-  Bluetooth-Berechtigung
+- Standortdaten verlassen das Gerät nicht: Strecken (Ausdauertraining, seit
+  14.10.2026) liegen getrennt von den Messungen und gehen weder in Export,
+  Synchronisation noch Diagnose; hinaus nur per ausdrücklichem GPX-Export der
+  Person (`docs/plan_gps.md`, Regel 0). Bei der Bluetooth-Berechtigung weiter
+  `neverForLocation`. Einzige Verbindung nach außen: die Karte holt Kacheln von
+  OpenStreetMap (grobe Kachelkoordinaten), abschaltbar, mit einmaligem Hinweis.
 
 ## Verfügbarkeit
 

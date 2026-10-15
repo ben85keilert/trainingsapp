@@ -51,7 +51,7 @@ from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
-from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view
+from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view, verwaiste_dialog
 from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
 from trainingsapp.ui.views.einstellungen_tags import einstellungen_tags_view
@@ -433,6 +433,8 @@ def main(page: ft.Page) -> None:
     # Bei „System“ wechseln Thema, Verlauf und Kurvenfarben mit dem Telefon
     page.on_platform_brightness_change = zeige_route
     zeige_route()  # beim Start ist die Route schon gesetzt — der Handler feuert nicht von selbst
+    if state.verwaiste_strecken:  # Training, das Android mitten im Lauf beendet hat
+        page.show_dialog(verwaiste_dialog(page, state))
 
 
 if __name__ == "__main__":

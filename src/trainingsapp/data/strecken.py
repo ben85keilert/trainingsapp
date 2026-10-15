@@ -1,7 +1,11 @@
 """Strecken speichern — eigener Ordner, nie bei den Messungen.
 
 - **Während der Aufzeichnung** eine Zeile JSON je Ortung (``.jsonl``): Jede
-  Zeile ist sofort geschrieben, ein Absturz kostet höchstens die letzte.
+  Zeile ist sofort geschrieben, ein Absturz kostet höchstens die letzte. Die
+  erste Zeile ist seit 15.10.2026 ein **Kopf** (``{"kopf": {…}}``: Schema,
+  Sportart, Profil-ID, Startzeit — keine Koordinate), damit ein Training, das
+  Android mitten im Lauf beendet hat, beim nächsten Start nachgetragen werden
+  kann (`verwaiste`). Dateien ohne Kopf bleiben lesbar.
 - **Export auf ausdrücklichen Wunsch** als GPX 1.1 — das Austauschformat, das
   Strava, Komoot, Garmin Connect, OsmAnd und Google Earth lesen. Die
   Herzfrequenz steht, wenn vorhanden, in Garmins ``TrackPointExtension`` —
@@ -50,10 +54,14 @@ class StreckenSchreiber:
     >>> ordner.cleanup()
     """
 
-    def __init__(self, pfad: Path) -> None:
+    def __init__(self, pfad: Path, kopf: Mapping[str, object] | None = None) -> None:
         self.pfad = pfad
         pfad.parent.mkdir(parents=True, exist_ok=True)
+        neu = not pfad.exists() or pfad.stat().st_size == 0
         self._datei: IO[str] | None = pfad.open("a", encoding="utf-8")
+        if kopf is not None and neu:
+            self._datei.write(json.dumps({"kopf": dict(kopf)}, separators=(",", ":")) + "\n")
+            self._datei.flush()
 
     def schreiben(self, punkt: Punkt) -> None:
         if self._datei is None:
@@ -89,16 +97,56 @@ def dateiname(start: datetime) -> str:
 
 
 def jsonl_lesen(pfad: Path) -> list[Punkt]:
-    """Alle Ortungen einer ``.jsonl``-Datei; eine abgebrochene letzte Zeile fällt weg."""
+    """Alle Ortungen einer ``.jsonl``-Datei; Kopfzeile, eine abgebrochene letzte Zeile
+    und Zeilen ohne ``lat``/``lon`` fallen weg."""
     punkte: list[Punkt] = []
     for zeile in pfad.read_text(encoding="utf-8").splitlines():
         try:
             werte = json.loads(zeile)
         except json.JSONDecodeError:
             continue  # Absturz mitten im Schreiben
-        if isinstance(werte, Mapping):
+        if not isinstance(werte, Mapping) or "kopf" in werte:
+            continue
+        try:
             punkte.append(Punkt(**{k: v for k, v in werte.items() if k in _FELDER}))
+        except TypeError:
+            continue  # von Hand bearbeitet, Pflichtfeld fehlt
     return punkte
+
+
+def kopf_lesen(pfad: Path) -> dict[str, object] | None:
+    """Der Kopf einer Streckendatei (erste Zeile) — ``None`` bei Dateien von vor dem Kopf.
+
+    >>> import tempfile
+    >>> ordner = tempfile.TemporaryDirectory()
+    >>> pfad = Path(ordner.name) / "s.jsonl"
+    >>> with StreckenSchreiber(pfad, kopf={"sportart": "gehen"}) as s:
+    ...     s.schreiben(Punkt(1.5, 52.1, 13.2))
+    >>> kopf_lesen(pfad), len(jsonl_lesen(pfad))
+    ({'sportart': 'gehen'}, 1)
+    >>> ordner.cleanup()
+    """
+    try:
+        with pfad.open(encoding="utf-8") as f:
+            erste = f.readline()
+        werte = json.loads(erste)
+    except (OSError, json.JSONDecodeError):
+        return None
+    kopf = werte.get("kopf") if isinstance(werte, Mapping) else None
+    return dict(kopf) if isinstance(kopf, Mapping) else None
+
+
+def verwaiste(verzeichnis: Path, bekannte: set[str]) -> list[Path]:
+    """Streckendateien ohne Eintrag in der Tabelle ``strecke`` — ein Training, das Android
+    mitten im Lauf beendet hat (die Zeile entsteht erst beim Stoppen). ``bekannte``:
+    die ``file_path``-Werte aller Zeilen, auch gelöschter. Vorabtest-Dateien zählen nicht."""
+    if not verzeichnis.is_dir():
+        return []
+    return sorted(
+        p
+        for p in verzeichnis.glob("strecke_*.jsonl")
+        if p.relative_to(verzeichnis).as_posix() not in bekannte
+    )
 
 
 def gpx(
@@ -163,4 +211,12 @@ def _zeit(t: float) -> str:
     return d.strftime("%Y-%m-%dT%H:%M:%S.") + f"{d.microsecond // 1000:03d}Z"
 
 
-__all__ = ["GPX_SPORTART", "StreckenSchreiber", "dateiname", "gpx", "jsonl_lesen"]
+__all__ = [
+    "GPX_SPORTART",
+    "StreckenSchreiber",
+    "dateiname",
+    "gpx",
+    "jsonl_lesen",
+    "kopf_lesen",
+    "verwaiste",
+]

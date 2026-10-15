@@ -573,6 +573,8 @@ class SettingRepo:
     AKTIVES_PROFIL = "aktives_profil"
     #: "1" (Vorgabe) = Papierkorb nach `PAPIERKORB_TAGE` Tagen automatisch leeren
     PAPIERKORB_AUTO = "papierkorb_auto"
+    #: "1" = der einmalige Hinweis, dass die Karte Kacheln online holt, wurde gezeigt
+    HINWEIS_KARTE = "hinweis_karte_gesehen"
     #: HRV: Regeln der automatischen Korrektur (JSON, `hrv_core.regeln`)
     HRV_KORREKTUR = "hrv_korrektur"
     #: HRV: aktuelle Ansicht der Verlaufskurven und gespeicherte Ansichten (JSON)
@@ -1882,6 +1884,13 @@ class StreckeRepo:
 
     def titel_setzen(self, strecke_id: str, titel: str) -> None:
         self.con.execute("UPDATE strecke SET title = ? WHERE id = ?", (titel.strip(), strecke_id))
+
+    def dateipfade(self) -> set[str]:
+        """``file_path`` aller Zeilen, auch gelöschter — was nicht dabei ist, ist verwaist."""
+        return {
+            r["file_path"]
+            for r in self.con.execute("SELECT file_path FROM strecke WHERE file_path != ''")
+        }
 
     def loeschen(self, strecke_id: str) -> None:
         """Nur der Verweis verschwindet — die Datei mit den Ortungen bleibt liegen."""

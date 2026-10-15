@@ -33,6 +33,7 @@ import contextlib
 import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import flet as ft
@@ -52,8 +53,9 @@ from trainingsapp.core.strecke import (
     rechnen,
     split_laenge_m,
 )
+from trainingsapp.data.repositories import SettingRepo
 from trainingsapp.data.seed import seed_id
-from trainingsapp.data.strecken import StreckenSchreiber, dateiname, gpx, jsonl_lesen
+from trainingsapp.data.strecken import StreckenSchreiber, dateiname, gpx, jsonl_lesen, kopf_lesen
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.gps import GpsQuelle
 from trainingsapp.hrv_core.korrektur import (
@@ -182,6 +184,10 @@ class AusdauerLauf:
         self.start_utc = datetime.now(UTC)
         self._start_mono = time.monotonic()
         self.datei: StreckenSchreiber | None = None
+        #: Pfad der Streckendatei — bleibt, auch wenn das Schreiben scheitert
+        self.datei_pfad: Path | None = None
+        #: Was die Person wissen muss, während es läuft (GPS weg, Dienst fehlt, Datei voll)
+        self.warnung: str | None = None
         self.messlauf = state.messlauf if _verbunden(state) else None
         #: Die HRV-Aufnahme hat dieses Training gestartet (und beendet sie)
         self.hrv_eigen = False
@@ -226,26 +232,47 @@ class AusdauerLauf:
         self._laeuft = True
         transport = self.state.ble_transport
         if transport is not None and hasattr(transport, "hintergrund"):
-            await transport.hintergrund(
+            fehler = await transport.hintergrund(
                 True, f"{SPORT_NAMEN[self.sportart]} läuft", self.text(), zweck=ZWECK
             )
+            if fehler:
+                self.warnung = f"Hintergrunddienst nicht gestartet ({fehler}) — Display anlassen."
         if self.messlauf is not None and self.messlauf.aufnahme is None:
             self.messlauf.subject_id = self.subject_id
             self.messlauf.aufnahme_starten()
             self.hrv_eigen = True
         if self.quelle is not None:
-            self.datei = StreckenSchreiber(streckenverzeichnis() / dateiname(self.start_utc))
+            self.datei_pfad = streckenverzeichnis() / dateiname(self.start_utc)
+            # Kopf ohne Koordinaten: damit ein abgebrochenes Training nachgetragen werden kann
+            self.datei = StreckenSchreiber(
+                self.datei_pfad,
+                kopf={
+                    "schema": "strecke-v1",
+                    "sportart": self.sportart,
+                    "subject_id": self.subject_id,
+                    "started_at": self.start_utc.isoformat(),
+                },
+            )
             await self.quelle.starten(GPS_TAKT_S)
             self._empfang = asyncio.create_task(self._empfangen())
         self._takt = asyncio.create_task(self._takten())
 
     async def _empfangen(self) -> None:
+        """Ortungen entgegennehmen — ein Fehler stoppt nicht still, er steht in `warnung`."""
         assert self.quelle is not None
-        async for punkt in self.quelle.punkte():
-            if self.datei is not None:
-                self.datei.schreiben(punkt)
-            for split in self.rechner.hinzufuegen(punkt):
-                await self._kilometer(split)
+        try:
+            async for punkt in self.quelle.punkte():
+                if self.datei is not None:
+                    try:
+                        self.datei.schreiben(punkt)
+                    except OSError as fehler:  # Speicher voll, Datei weg
+                        self.datei.schliessen()
+                        self.datei = None
+                        self.warnung = f"Strecke wird nicht mehr gespeichert: {fehler}"
+                for split in self.rechner.hinzufuegen(punkt):
+                    await self._kilometer(split)
+        except Exception as fehler:
+            self.warnung = f"GPS-Empfang abgebrochen: {fehler}"
 
     async def _kilometer(self, split: Split) -> None:
         """Ton, Vibration und die Notiz „km N" — die beim Speichern ein Abschnitt wird."""
@@ -265,6 +292,8 @@ class AusdauerLauf:
         transport = self.state.ble_transport
         while self._laeuft:
             await asyncio.sleep(TEXT_ALLE_S)
+            if self.quelle is not None and self.quelle.meldung:
+                self.warnung = f"GPS: {self.quelle.meldung}"
             if self.ekg and self.messlauf is not None:
                 with contextlib.suppress(Exception):
                     t, rr, naht = self.messlauf.live.verlaufsreihe()
@@ -276,15 +305,16 @@ class AusdauerLauf:
             if transport is not None and hasattr(transport, "hintergrund_text"):
                 await transport.hintergrund_text(self.text(), zweck=ZWECK)
 
-    async def stoppen(self) -> Strecke:
-        """Alles beenden und speichern: Strecke, HRV-Aufnahme, Tagebucheintrag."""
+    async def _anhalten(self) -> None:
+        """GPS, Takt, Datei und Vordergrunddienst beenden — ohne zu speichern."""
         self._laeuft = False
         if self._takt is not None:
             self._takt.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._takt
         if self.quelle is not None:
-            await self.quelle.beenden()
+            with contextlib.suppress(Exception):
+                await self.quelle.beenden()
             if self._empfang is not None:
                 with contextlib.suppress(Exception):
                     await self._empfang
@@ -292,7 +322,23 @@ class AusdauerLauf:
             self.datei.schliessen()
         transport = self.state.ble_transport
         if transport is not None and hasattr(transport, "hintergrund"):
-            await transport.hintergrund(False, zweck=ZWECK)
+            with contextlib.suppress(Exception):
+                await transport.hintergrund(False, zweck=ZWECK)
+
+    async def abbrechen(self) -> None:
+        """Start gescheitert: nichts speichern, die angefangene Datei entfernen."""
+        await self._anhalten()
+        if self.hrv_eigen and self.messlauf is not None:
+            with contextlib.suppress(Exception):
+                self.messlauf.aufnahme_stoppen(datenverzeichnis())
+        if self.datei_pfad is not None:
+            with contextlib.suppress(OSError):
+                self.datei_pfad.unlink()
+        self.fertig = True
+
+    async def stoppen(self) -> Strecke:
+        """Alles beenden und speichern: Strecke, HRV-Aufnahme, Tagebucheintrag."""
+        await self._anhalten()
         hrv_id = None
         if self.hrv_eigen and self.messlauf is not None:
             from trainingsapp.ui.views.messung import aufnahme_eintragen
@@ -304,35 +350,182 @@ class AusdauerLauf:
         mit_gps = self.quelle is not None and bool(r.teilstuecke)
         # Wanduhr — mit GPS nie kürzer als die Zeit zwischen erster und letzter Ortung
         dauer = max(self.dauer_s, r.dauer_s) if mit_gps else self.dauer_s
-        strecke = Strecke(
+        strecke = training_eintragen(
+            self.state,
             subject_id=self.subject_id,
             sportart=self.sportart,
             started_at=self.start_utc,
             ended_at=datetime.now(UTC),
             file_path=(
-                self.datei.pfad.relative_to(streckenverzeichnis()).as_posix()
-                if mit_gps and self.datei is not None
+                self.datei_pfad.relative_to(streckenverzeichnis()).as_posix()
+                if mit_gps and self.datei_pfad is not None
                 else ""
             ),
-            distanz_m=r.distanz_m if mit_gps else 0.0,
+            rechner=r if mit_gps else None,
             dauer_s=dauer,
-            bewegt_s=r.bewegt_s if mit_gps else dauer,
-            hoehe_auf_m=r.hoehe_auf_m,
-            hoehe_ab_m=r.hoehe_ab_m,
             hrv_recording_id=hrv_id,
         )
-        ergebnis_feld: dict[str, Any] = {"duration": round(dauer)}
-        if strecke.distanz_m >= 10:
-            ergebnis_feld["distance"] = round(strecke.distanz_m)
-        uebung = uebung_fuer(self.state, self.sportart)
-        sitzung = self.state.sitzungen.session_fuer(
-            self.subject_id, None, lokaler_tag(self.start_utc)
-        )
-        eintrag = self.state.sitzungen.eintrag_anlegen(sitzung, uebung, ergebnis_feld)
-        strecke.session_entry_id = eintrag.id
-        self.state.strecken.anlegen(strecke)
         self.fertig = True
         return strecke
+
+
+def training_eintragen(
+    state: AppState,
+    *,
+    subject_id: str,
+    sportart: str,
+    started_at: datetime,
+    ended_at: datetime,
+    file_path: str,
+    rechner: StreckenRechner | None,
+    dauer_s: float,
+    hrv_recording_id: str | None = None,
+    title: str = "",
+) -> Strecke:
+    """Strecke und Tagebucheintrag anlegen — beim Stoppen und beim Nachtragen.
+
+    ``rechner`` ``None`` heißt ohne GPS (Laufband): Strecke 0, Bewegungszeit = Dauer.
+    """
+    r = rechner
+    strecke = Strecke(
+        subject_id=subject_id,
+        sportart=sportart,
+        started_at=started_at,
+        ended_at=ended_at,
+        file_path=file_path if r is not None else "",
+        distanz_m=r.distanz_m if r is not None else 0.0,
+        dauer_s=dauer_s,
+        bewegt_s=r.bewegt_s if r is not None else dauer_s,
+        hoehe_auf_m=r.hoehe_auf_m if r is not None else 0.0,
+        hoehe_ab_m=r.hoehe_ab_m if r is not None else 0.0,
+        hrv_recording_id=hrv_recording_id,
+        title=title,
+    )
+    ergebnis_feld: dict[str, Any] = {"duration": round(dauer_s)}
+    if strecke.distanz_m >= 10:
+        ergebnis_feld["distance"] = round(strecke.distanz_m)
+    uebung = uebung_fuer(state, sportart)
+    sitzung = state.sitzungen.session_fuer(subject_id, None, lokaler_tag(started_at))
+    eintrag = state.sitzungen.eintrag_anlegen(sitzung, uebung, ergebnis_feld)
+    strecke.session_entry_id = eintrag.id
+    state.strecken.anlegen(strecke)
+    return strecke
+
+
+# ---------------------------------------------------------------------------
+# Verwaiste Streckendateien — Training, das Android mitten im Lauf beendet hat
+# ---------------------------------------------------------------------------
+
+
+def verwaiste_uebernehmen(state: AppState, pfad: Path) -> Strecke | None:
+    """Eine Streckendatei ohne Zeile als Training nachtragen (Ben, 15.10.2026: beim
+    Start erkennen und anbieten). Sportart, Profil und Start kommen aus dem Kopf der
+    Datei; ohne Kopf gilt „Gehen", das aktive Profil und die erste Ortung. Eine Datei
+    ohne Ortung wird gelöscht, nicht eingetragen (``None``)."""
+    punkte = jsonl_lesen(pfad)
+    if not punkte:
+        with contextlib.suppress(OSError):
+            pfad.unlink()
+        state.verwaiste_strecken = [p for p in state.verwaiste_strecken if p != pfad]
+        return None
+    kopf = kopf_lesen(pfad) or {}
+    sportart = str(kopf.get("sportart") or "")
+    if sportart not in SPORTARTEN:
+        sportart = GEHEN
+    subject_id = str(kopf.get("subject_id") or "")
+    if not subject_id or state.profile.laden(subject_id) is None:
+        subject_id = state.profil.id
+    try:
+        started_at = datetime.fromisoformat(str(kopf["started_at"]))
+    except (KeyError, ValueError):
+        started_at = datetime.fromtimestamp(punkte[0].t, UTC)
+    ended_at = datetime.fromtimestamp(punkte[-1].t, UTC)
+    r = rechnen(punkte, sportart)
+    strecke = training_eintragen(
+        state,
+        subject_id=subject_id,
+        sportart=sportart,
+        started_at=started_at,
+        ended_at=ended_at,
+        file_path=pfad.relative_to(streckenverzeichnis()).as_posix(),
+        rechner=r,
+        dauer_s=max(r.dauer_s, (ended_at - started_at).total_seconds()),
+        title="Nachgetragen — die App wurde während des Trainings beendet",
+    )
+    state.verwaiste_strecken = [p for p in state.verwaiste_strecken if p != pfad]
+    return strecke
+
+
+def verwaiste_dialog(page: ft.Page, state: AppState) -> ft.AlertDialog:
+    """Beim Start: je verwaister Datei „Übernehmen" oder „Löschen" (keine Koordinaten)."""
+    zeilen = ft.Column(tight=True, spacing=4)
+
+    def melden(text: str) -> None:
+        page.show_dialog(ft.SnackBar(ft.Text(text)))
+
+    def beschriftung(pfad: Path) -> str:
+        kopf = kopf_lesen(pfad) or {}
+        sport = SPORT_NAMEN.get(str(kopf.get("sportart") or ""), "Training")
+        try:
+            wann = datetime.fromisoformat(str(kopf["started_at"])).astimezone()
+            return f"{sport} vom {wann:%d.%m.%Y %H:%M}"
+        except (KeyError, ValueError):
+            return f"{sport} ({pfad.name})"
+
+    def uebernehmer(pfad: Path) -> Callable[[], None]:
+        def handler() -> None:
+            strecke = verwaiste_uebernehmen(state, pfad)
+            melden("Training nachgetragen — auch im Tagebuch." if strecke else "Datei war leer.")
+            zeichnen()
+
+        return handler
+
+    def loescher(pfad: Path) -> Callable[[], None]:
+        def handler() -> None:
+            with contextlib.suppress(OSError):
+                pfad.unlink()
+            state.verwaiste_strecken = [p for p in state.verwaiste_strecken if p != pfad]
+            melden("Strecke gelöscht.")
+            zeichnen()
+
+        return handler
+
+    def zeichnen() -> None:
+        if not state.verwaiste_strecken:
+            page.pop_dialog()
+            return
+        zeilen.controls = [
+            ft.Row(
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                controls=[
+                    ft.Text(beschriftung(pfad), expand=True),
+                    ft.TextButton("Löschen", on_click=loescher(pfad)),
+                    ft.FilledTonalButton("Übernehmen", on_click=uebernehmer(pfad)),
+                ],
+            )
+            for pfad in state.verwaiste_strecken
+        ]
+        with contextlib.suppress(Exception):
+            zeilen.update()
+
+    zeichnen()
+    return ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Unvollständiges Training gefunden"),
+        content=ft.Column(
+            tight=True,
+            spacing=10,
+            controls=[
+                ft.Text(
+                    "Die App wurde während eines Trainings beendet. Die Strecke liegt noch "
+                    "auf dem Handy — nachtragen (Strecke, Zeit, Tagebuch) oder löschen?",
+                    size=13,
+                ),
+                zeilen,
+            ],
+        ),
+        actions=[ft.TextButton("Später", on_click=lambda: page.pop_dialog())],
+    )
 
 
 def _verbunden(state: AppState) -> bool:
@@ -376,6 +569,7 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
     zahlen = ft.Column(spacing=8)
     karte_platz = ft.Container()
     pause_text = ft.Text("Auto-Pause", size=13, color=ft.Colors.AMBER_800, visible=False)
+    warnung = ft.Text(size=13, color=ft.Colors.ERROR, visible=False)
     strecken_karte: StreckenKarte | None = None
     gross = {"an": False}
 
@@ -406,11 +600,44 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
                 )
                 return
         lauf = AusdauerLauf(state, state.ausdauer_sportart, quelle)
-        state.ausdauer = lauf
-        await lauf.starten()
+        try:
+            await lauf.starten()
+        except Exception as fehler:  # GPS startet nicht, Datei nicht anlegbar …
+            await lauf.abbrechen()
+            page.show_dialog(ft.SnackBar(ft.Text(f"Training nicht gestartet: {fehler}")))
+            return
+        state.ausdauer = lauf  # erst jetzt — ein halb gestarteter Lauf bliebe sonst hängen
         zeichnen()
         page.update()
         page.run_task(ticker)
+        if quelle is not None and state.ausdauer_karte:
+            karten_hinweis_einmal()
+
+    def karten_hinweis_einmal() -> None:
+        """Einmal (nicht je Aufzeichnung, Ben 15.10.2026): Die Karte holt Kacheln online."""
+        if state.einstellungen.lesen(SettingRepo.HINWEIS_KARTE, "0") == "1":
+            return
+
+        def verstanden() -> None:
+            state.einstellungen.setzen(SettingRepo.HINWEIS_KARTE, "1")
+            page.pop_dialog()
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Karte während des Trainings"),
+                content=ft.Text(
+                    "Die Karte lädt ihre Kacheln von OpenStreetMap. Dabei gehen grobe "
+                    "Kachelkoordinaten (einige hundert Meter) an deren Server — die Strecke "
+                    "selbst bleibt auf dem Handy. Wer das nicht will, schaltet „Karte zeigen“ "
+                    "aus; dann wird nichts geladen."
+                ),
+                actions=[ft.FilledButton("Verstanden", on_click=verstanden)],
+            )
+        )
+
+    def karte_gewaehlt(e: ft.Event[ft.Switch]) -> None:
+        state.ausdauer_karte = bool(e.control.value)
 
     def beenden_fragen() -> None:
         async def beenden() -> None:
@@ -478,6 +705,8 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
             reihen.append(ft.Row(spacing=8, controls=hf_zeile))
         zahlen.controls = reihen
         pause_text.visible = lauf.quelle is not None and r.pausiert and r.distanz_m > 0
+        warnung.value = lauf.warnung or ""
+        warnung.visible = bool(lauf.warnung)
 
     def zeichnen() -> None:
         nonlocal strecken_karte
@@ -496,7 +725,15 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
                         ],
                     ),
                     zahlen,
+                    warnung,
                     ft.FilledButton("Beenden", icon=ft.Icons.STOP, on_click=beenden_fragen),
+                    ft.Switch(
+                        label="Karte zeigen (Kacheln von OpenStreetMap)",
+                        value=state.ausdauer_karte,
+                        on_change=karte_gewaehlt,
+                    )
+                    if lauf.quelle is not None
+                    else ft.Container(),
                     hinweis(
                         "Display darf aus sein — die Benachrichtigung zeigt Strecke, Zeit und "
                         "Herzfrequenz. An jedem Kilometer ein Ton."
@@ -530,7 +767,8 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
             hinweis(
                 "Die Strecke bleibt auf dem Handy (Ordner „Strecken“) — nicht im "
                 "Messungs-Export, nie in einer Synchronisation. Hinaus geht sie nur, "
-                "wenn du in der Auswertung „GPX exportieren“ tippst."
+                "wenn du in der Auswertung „GPX exportieren“ tippst. Nur die Karte holt "
+                "ihre Kacheln online (abschaltbar)."
             ),
         ]
 
@@ -569,7 +807,10 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
             if state.im_vordergrund:
                 werte(lauf)
                 punkte = lauf.rechner.punkte
-                if punkte and strecken_karte is None:
+                if not state.ausdauer_karte and strecken_karte is not None:
+                    strecken_karte = None
+                    karte_platz.content = None
+                if punkte and strecken_karte is None and state.ausdauer_karte:
                     strecken_karte = StreckenKarte(punkte[-1], hoehe=220)
                     karte_platz.content = karte(
                         ft.Row(
@@ -951,6 +1192,9 @@ __all__ = [
     "km_text",
     "strecken_zeilen",
     "tempo_text",
+    "training_eintragen",
     "uebung_fuer",
+    "verwaiste_dialog",
+    "verwaiste_uebernehmen",
     "zeit_text",
 ]

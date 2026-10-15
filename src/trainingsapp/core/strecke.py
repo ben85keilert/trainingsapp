@@ -328,16 +328,25 @@ class StreckenRechner:
             return []
         self.teilstuecke[-1].append(p)
 
-        steht = p.tempo_ms is not None and p.tempo_ms < STAND_TEMPO_MS
         neu: list[Split] = []
         schritt = abstand_m(self._gezaehlt, p) if self._gezaehlt is not None else 0.0
+        if p.tempo_ms is not None:
+            steht = p.tempo_ms < STAND_TEMPO_MS
+            bewegt = not steht
+        else:
+            # Kein Doppler-Tempo (Netzwerk-Fix, iOS, Geräte ohne Tempogenauigkeit —
+            # 15.10.2026): Weg je Zeit seit dem Bezugspunkt. Der Bezug wird dann nie
+            # nachgezogen — Zittern bleibt unter `min_schritt_m` und zählt nicht.
+            steht = False
+            seit = p.t - self._gezaehlt.t if self._gezaehlt is not None else 0.0
+            bewegt = seit > 0 and schritt / seit >= STAND_TEMPO_MS
         if steht:
             self._gezaehlt = p  # Zittern im Stand: nicht zählen, Bezug nachziehen
         elif schritt >= self.min_schritt_m:
             self.distanz_m += schritt
             self._gezaehlt = p
             self._letzte_bewegung = p.t
-        if p.tempo_ms is not None and not steht:
+        if bewegt:
             self._letzte_bewegung = p.t
         war_pausiert = self.pausiert
         self.pausiert = (
@@ -395,16 +404,18 @@ class StreckenRechner:
         return self.bewegt_s / (self.distanz_m / 1000.0) if self.distanz_m >= 10 else None
 
     def aktuelles_tempo_ms(self, fenster_s: float = 10.0) -> float | None:
-        """Tempo jetzt: Median des Doppler-Tempos der letzten ``fenster_s`` (m/s)."""
+        """Tempo jetzt: Median des Doppler-Tempos der letzten ``fenster_s`` (m/s) —
+        ohne Doppler der Weg je Zeit über dieses Fenster."""
         letzter = self._letzter
         if letzter is None or self.pausiert:
             return None if letzter is None else 0.0
-        werte = sorted(
-            p.tempo_ms
-            for p in reversed(self.teilstuecke[-1])
-            if p.tempo_ms is not None and letzter.t - p.t <= fenster_s
-        )
-        return werte[len(werte) // 2] if werte else None
+        im_fenster = [p for p in self.teilstuecke[-1] if letzter.t - p.t <= fenster_s]
+        werte = sorted(p.tempo_ms for p in im_fenster if p.tempo_ms is not None)
+        if werte:
+            return werte[len(werte) // 2]
+        if len(im_fenster) >= 2 and letzter.t > im_fenster[0].t:
+            return abstand_m(im_fenster[0], letzter) / (letzter.t - im_fenster[0].t)
+        return None
 
     def splits_mit_rest(self) -> list[Split]:
         """Die vollen Splits und der angefangene letzte (falls ≥ 10 m)."""

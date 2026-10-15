@@ -30,46 +30,29 @@ Schönheit, Wartung.
 | P9 | Verity Sense beim Training | HF-Modus ohne PPI fürs Training (PPI stoppen, danach wieder starten) braucht einen Test am Gerät. | Offen, Test durch Ben. |
 | P10 | Korrektur, `korrektur.md` „Offen“ | Eichung gegen das EKG in Bewegung; dürfen verworfene Intervalle in Ruhe zählen; Fehlerschwelle 30 ms (Polar) oder 50 ms? | Braucht Messungen. |
 | P11 | Recht, `00_zweckbestimmung.md` | Weg A/B/C für Edition B (Dokumentationswerkzeug / Klasse I / IIa) — vor dem Bau von Edition B. | Empfehlung Weg A. |
-| P12 | Recht, `30_avv.md` | Hoster der Praxisdatenbank (EU?) und AVV. | Offen. |
+| P12 | Recht, `30_avv.md` | Hoster der Praxisdatenbank (EU?) und AVV. (Rahmen entschieden 15.10.: Solo speichert nichts auf dem Server, nur Video-Streaming — siehe „Entschieden“.) | Offen. |
 | P13 | Praxis-Edition | PIN-Sperre beim Profilwechsel (`ist_aktiv("profil_sperre")`) ist bisher nur ein Hinweistext — Umsetzung mit oder ohne Fingerabdruck? | Erst mit Edition B. |
-| P14 | M10 | Video-Download (hängt am Hosting), Fotos für eigene Übungen. | Offen. |
+| P14 | M10 | Video-Download (hängt am Hosting), Fotos für eigene Übungen. Rahmen entschieden 15.10. (lokal **und** Fremdquelle); Umsetzung hängt an K-F6 (Abschnitt 4). | Offen. |
 | P15 | Live-Wischen, 15.10. | Nach dem Fix (ganzer Fingerweg zählt, siehe Befund H-Wischen) ist 1 Fingerbreite = 1 Fensterbreite. Reicht das, oder zusätzlich Schwung (Fling über `primary_velocity`) bzw. ein Faktor > 1? | Erst am Handy probieren. |
 
-Fragen aus der Durchsicht vom 15.10. (Details beim jeweiligen Befund in Abschnitt 3):
+Noch offene Fragen aus der Durchsicht vom 15.10. (Details beim jeweiligen Befund in
+Abschnitt 3; die beantworteten stehen unter „Entschieden“):
 
 | # | Bereich | Frage | Vorschlag |
 |---|---|---|---|
-| K-F1 | Pakete (K2) | Paketübungen vom automatischen Papierkorb-Aufräumen ausnehmen, solange das Paket nur „entfernt“ ist, damit „Wieder installieren“ auch Planpositionen zurückbringt? | Ja. |
-| K-F2 | Pakete (K5) | Paket-Identität über den Namen: zwei fremde Pakete gleichen Namens = dasselbe Paket? Alternative: zufällige ID beim ersten Export plus Autor-Kennung, Name nur Anzeige. | Zufällige ID, Vertrag anpassen. |
-| K-F3 | Pakete (K5) | Darf eine beliebige Datei die Standard-ID tragen und so „Standard“ überschreiben? | Nein — Standard-ID beim Import ablehnen. |
-| K-F4 | Pakete (K3) | Tag umbenennen/löschen: Paketstand mitziehen (nie „geändert“) oder als Abweichung werten? | Mitziehen. |
-| K-F5 | Pakete (K4) | Lokale Fotos/Videos an Paketübungen beim Update/Reset behalten? | Behalten. |
-| K-F6 | Pakete (K1) | Video-Links: nur `http(s)` beim Import filtern und im Editor erzwingen, oder auch App-Schemata (`vnd.youtube:`)? | Nur `http(s)`. |
-| K-F7 | Pakete (K6) | Import einer älteren Paketversion über eine neuere: zulassen, warnen, sperren? | Warnen. |
+| K-F6 | Medien (K1) | **Vertagt (Ben, 15.10.):** Rechtefragen, Sicherheit, Injections — gesondert besprechen. Fakten stehen in Abschnitt 4. | Entscheidung folgt. |
 | K-F8 | Pakete (K12) | Archivierte Paketübungen nicht exportierbar — gewollt? | — |
-| G-F1 | GPS (G1) | Online-Karte = Kachelkoordinaten an OSMF: Hinweis in Regel 0 und UI, Schalter „Karte aus“ im Training, Karte erst nach Antippen laden? | Hinweis + Schalter. |
-| G-F2 | GPS (G2) | `docs/recht` (TOMs, Store-Freigaben, Datenschutzerklärung) für Standortberechtigung, INTERNET und Vordergrunddienst `location` nachziehen. | Vor dem nächsten Release. |
-| G-F3 | GPS (G5) | Verhalten ohne Doppler-Tempo (Tempo 0 = „fehlt“): Rückfall auf reinen 10-m-Schritt oder Gerät ablehnen? | Rückfall per `speed_accuracy`. |
-| G-F4 | GPS (G4) | Prozess-Tod im Training: verwaiste `.jsonl` beim Start erkennen und nachträglich anlegen (wie HRV-Backup) oder bewusst verlieren? | Nachträglich anlegen. |
 | G-F5 | GPS (G8) | Strecken löschen: Papierkorb mit endgültigem Löschen der Koordinatendatei wie bei Messungen? Vorabtest-Dateien aufräumen? | Ja, beides. |
 | G-F6 | GPS (G18) | Live-Karte folgt jede Sekunde, Wegwischen unmöglich — bewusst? | „Folgen“ nach Pan aussetzen. |
 | G-F7 | GPS (G10) | GPX-Höhe: MSL (`use_msl_altitude=True`) oder Ellipsoid belassen? | MSL (Strava/Komoot erwarten NN). |
 | G-F8 | GPS (G18) | `strecke.title` + `titel_setzen` ohne Oberfläche — geplant oder Rest? | — |
-| G-F9 | GPS (G6) | GPS-/Vordergrunddienst-Fehler im Training anzeigen (Banner wie im GPS-Test)? | Ja. |
-| H-F1 | HRV (H2) | Abschnitte länger als `LANG_AB_S`: langer Spektralweg auch dort, oder LF/HF sperren? | Langer Weg. |
-| H-F2 | HRV (H1) | Unlesbares Sidecar: neu anlegen (heute) oder Schreiben verweigern mit Hinweis? | Verweigern. |
 | H-F3 | HRV (H5) | praxis_gui-Felder je Segment (`visible`, `active`, `metrics`, `computed_utc`) durchreichen oder normieren? | Durchreichen. |
-| H-F4 | HRV (H3) | Atemfrequenz/LF/HF je Abschnitt über Nähte hinweg oder Nähte respektieren? | Respektieren. |
 | H-F5 | HRV (H7) | `hrv_metrics_cache` ungenutzt lassen (Doku anpassen) oder für die Öffnungszeit nutzen? | — |
 | H-F6 | HRV (H8) | Rechnen beim Öffnen synchron (Plan: akzeptiert) oder per `asyncio.to_thread`? | Am Handy messen. |
 | H-F7 | HRV (H6) | Beschreibung: DB-Kopie als Rückfall oder strikt Datei? | Strikt Datei. |
-| N-F1 | Profile (N3) | Profilwechsel bei laufender Messung: sperren, Profil im `Messlauf` merken oder Rückfrage? | Profil im Messlauf merken + Hinweis. |
-| N-F2 | Notation (N1, N2) | Obergrenzen: maximale Satzzahl (Plan 50, Notation unbegrenzt) und maximaler Wert je Satz/Zeit — eine Zahl für beide Wege? | 50 Sätze, Zeit ≤ 24 h, Werte ≤ 10⁶. |
 | N-F3 | Tags (N5) | „dehnung“ = „Dehnung“ überall (UNIQUE `COLLATE NOCASE`) oder nirgends? | Überall. |
-| N-F4 | Tags (K3) | Gelöschter Typ steckt weiter in `package_standard_json`; Reset/Re-Import legt ihn wieder an — gewollt? | Siehe K-F4. |
 | N-F5 | Pläne (N6) | `plan.revision` als Sync-Anker für Items oder eigene Item-Revision? | Erst mit Edition B. |
 | N-F6 | Timer (N7) | Timer-Profil bearbeiten, während der Timer läuft: warnen, blockieren, weiterlaufen? | Weiterlaufen, neues Profil beim nächsten Start. |
-| N-F7 | Dialoge (N4) | `Nachher` als verbindliches Muster für jeden Bestätigen-Dialog? | Ja. |
 | N-F8 | Darstellung (N15) | `app_setting darstellung:<profil-id>` nach Profil-Löschen belassen? | Belassen (Profile nur ausgeblendet). |
 
 ## 2. Am Gerät zu prüfen (Ben)
@@ -80,6 +63,10 @@ Fragen aus der Durchsicht vom 15.10. (Details beim jeweiligen Befund in Abschnit
 | T2 | Pakete | Import am Handy (FilePicker) und Paket entfernen auf dem Gerät noch nicht getestet. | offen |
 | T3 | GPS-Vorabtest | Gang mit ausgeschaltetem Bildschirm (Verbrauch im Hintergrund), siehe `plan_gps.md` 9a. | offen |
 | T4 | Live-Wischen | Wischweg nach dem Fix vom 15.10. am Handy prüfen (vorher kam nur ~⅙ der Bewegung an). | offen |
+| T5 | GPS ohne Doppler | Training auf einem Gerät ohne Tempogenauigkeit (oder Netzwerk-Fix): zählt die Strecke per 10-m-Schritt, greift die Auto-Pause? Am Pixel 10 kommt Tempo, dort ändert sich nichts. | offen |
+| T6 | GPS-Abbruch | App während eines Trainings wegwischen → beim nächsten Start Dialog „Unvollständiges Training gefunden“, Übernehmen trägt Strecke und Tagebuch nach. | offen |
+| T7 | Karte im Training | Schalter „Karte zeigen“, einmaliger Hinweis beim ersten Training mit Karte; rote Warnzeile bei GPS-Fehler/fehlendem Vordergrunddienst. | offen |
+| T8 | Paket entfernen | Rückfrage mit „Teil von Plan …“ und Kästchen „kopieren“ am Handy durchspielen. | offen |
 
 ## 3. Befunde aus der Durchsicht vom 15.10.2026
 
@@ -92,20 +79,15 @@ Bens Entscheidung vor dem Fix nötig ist.
 
 ### 3.1 Datenbank und Migrationen
 
-| # | Stelle | Befund | Schwere |
-|---|---|---|---|
-| D1 | `data/db.py:66-74` | Migrationen laufen **nicht** in eigener Transaktion: `executescript` committet die mit `BEGIN` eröffnete Transaktion erst und läuft dann im Autocommit. Mehrstatement-Migrationen (013: ALTER + INSERT; 015: 2× ALTER) sind nicht atomar; stirbt die App dazwischen oder zwischen Skript und `PRAGMA user_version`, scheitert jeder weitere Start an „duplicate column“. Der Kommentar in Z. 72 behauptet das Gegenteil. Fix: `BEGIN`/`COMMIT` in die `.sql`-Dateien oder je Statement `execute` in einer Transaktion samt Version. | **hoch** |
+Keine offenen Befunde (D1 behoben, siehe 3.6).
 
 ### 3.2 Übungspakete, Seed, Paketmanager
 
 | # | Stelle | Befund | Schwere |
 |---|---|---|---|
-| K1 | `ui/views/uebung_detail.py:114`, `core/pakete.py:297-311`, `uebung_bearbeiten.py:450-459` | Video-URIs aus fremden Paketen (und aus dem Editor) werden ohne Schema-Prüfung übernommen und per `launch_url` geöffnet — `intent://`, `file://`, `tel:`, im Web `javascript:`. **Frage K-F6:** beim Import auf `http(s)` filtern oder beim Öffnen warnen? Vorschlag: beim Import filtern, Editor nur `http(s)` annehmen. | mittel |
-| K2 | `repositories.py:290`, `data/pakete.py:244-249, 348-357` | „Paket entfernen“ → Papierkorb; nach der Frist löscht das Aufräumen **`plan_item` endgültig**. „Wieder installieren“ holt die Übung zurück, die Planpositionen nicht. `docs/uebungspakete.md:38-40` („holt alles zurück“) stimmt für Pläne nicht. **Frage K-F1:** Paketübungen vom automatischen Aufräumen ausnehmen, solange das Paket nur „entfernt“ ist? | mittel |
-| K3 | `core/pakete.py:400`, `repositories.py:1742-1823`, `data/pakete.py:300, 471` | Tag umbenennen/löschen ändert die Übungs-Tags, nicht den gespeicherten Paketstand → alle Paketübungen zeigen „geändert: Typen“; „Auf Paketstand setzen“ legt den alten Tag-Namen wieder an. Beim Standard-Paket wird der Stand jeden Start aus dem TOML neu berechnet, der alte Name bleibt Referenz. **Frage K-F4:** Paketstand mitziehen (nie „geändert“) oder als Abweichung werten? | mittel |
-| K4 | `repositories.py:112, 140`, `core/pakete.py:351` | Update/Reset läuft über `speichern`: `exercise_media` wird komplett ersetzt, `image_path` auf `None` gesetzt. Eigene lokale Fotos/Videos an einer Paketübung verschwinden still — und weil `stand()` LOCAL ausfiltert, zeigte „geändert“ das vorher nicht an. **Frage K-F5:** lokale Medien beim Update behalten? | mittel |
-| K5 | `core/pakete.py:95-105, 249`, `data/pakete.py:422-427, 512-519` | Paket-ID = UUIDv5 aus dem Namen, Übungs-ID aus Paket-ID + `key`: zwei fremde Pakete „Yoga“ mit `key` „baum“ gelten als dasselbe Paket, der zweite Import überschreibt den ersten. Jede Datei kann die Standard-ID tragen (steht in jedem Export) und so alle Standard-Übungen überschreiben, bekommt sogar `is_builtin=1` (Z. 253). Vertragskonform, aber ohne Autor-Bindung. **Fragen K-F2/K-F3:** zufällige Paket-ID beim ersten Export plus Autor-Kennung, Name nur Anzeige? Darf eine fremde Datei „Standard“ überschreiben? | niedrig (Vertrag) |
-| K6 | `data/pakete.py:390-430` | Kein Versionsvergleich: eine ältere Paketdatei überschreibt eine neuere Installation (Downgrade), die Version wird zurückgesetzt. **Frage K-F7:** zulassen, warnen, sperren? | niedrig |
+| K1 | `ui/views/uebung_detail.py:112-116`, `core/pakete.py:293-311`, `uebung_bearbeiten.py:450-459` | Video-URIs aus fremden Paketen (und aus dem Editor) werden ohne Schema-Prüfung übernommen und per `launch_url` geöffnet — `intent://`, `file://`, `tel:`, im Web `javascript:`. **Vertagt (K-F6):** Ben will Medien gesondert besprechen (Rechte, Sicherheit, Injections) — Fakten in Abschnitt 4. Bis dahin unverändert. | mittel |
+| K5 | `core/pakete.py:95-105, 249`, `data/pakete.py` | Paket-ID = UUIDv5 aus dem Namen, Übungs-ID aus Paket-ID + `key`: zwei fremde Pakete „Yoga“ mit `key` „baum“ gelten als dasselbe Paket. **Entschieden (K-F2, K-F3):** Paketkennung mit Kürzel (siehe „Offene Arbeiten“ A1); Standard bleibt offen, Rückfrage ist gebaut. | niedrig (Vertrag) |
+| K6 | `data/pakete.py` (`_planen`, `_eintragen`) | Kein Versionsvergleich: eine ältere Paketdatei überschreibt eine neuere Installation (Downgrade), die Version wird zurückgesetzt. **Entschieden (K-F7): nachfragen** — kommt mit der Paketkennung (A1). | niedrig |
 | K7 | `core/pakete.py:166-168`, `ui/views/pakete.py:158, 162-172` | `json.loads` wirft bei tief verschachtelter Datei `RecursionError` (kein `ValueError`) → nicht als `PaketFehler` gefangen; `read_bytes()` ohne `OSError`-Fang; Dateigröße ungedeckelt. | niedrig |
 | K8 | `core/pakete.py:237-244, 255-256` | Innenwerte von `result_spec` (`min`, `max`, `step`, `quick`, `default`), `limit_spec`, `default_target` werden nur auf Objekt/Liste geprüft, nicht typisiert (`"seconds": "abc"`) → landen in der DB, Absturz erst in Eingabemaske/Timer (`core/limits.py:144`). | niedrig |
 | K9 | `ui/views/pakete.py:82-97`, `uebung_detail.py:203-206` | `importieren()`/`zuruecksetzen()` ohne `try`: ein sqlite-Fehler lässt den Dialog offen, ohne Rückmeldung. | niedrig |
@@ -124,18 +106,11 @@ Eine Ausnahme ist nicht geregelt:
 
 | # | Stelle | Befund | Schwere |
 |---|---|---|---|
-| G1 | `ui/components/karte_strecke.py:24-27, 40-44`, `ausdauer.py:585-590` | Die **Online-Karte sendet Kachelkoordinaten** (z/x/y, bei Zoom 16/17 ≈ 100–600 m) der Live-Position bzw. der ganzen Strecke an `tile.openstreetmap.org`, jede Sekunde nachgeführt. Von Entscheidung 1 in `plan_gps.md:333` gedeckt, aber Regel 0, der Hinweis „Die Strecke bleibt auf dem Handy“ (`ausdauer.py:527-531, 858-861`) und die Legende verschweigen es; im Training fehlt der Schalter „Karte aus“ (der GPS-Test hat ihn, `gps_test.py:536`). **Frage G-F1:** Hinweis + Schalter, Karte erst nach Antippen laden, oder Offline-Kacheln vorziehen (P7)? | mittel |
-| G2 | `docs/recht/40_toms.md:30`, `80_store_freigaben.md:36-42` | „Keine Standortdaten“ / „Standortberechtigung, die wir weder brauchen noch begründen könnten“ widerspricht dem Stand: `pyproject.toml:129-131` trägt `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `INTERNET`, das Manifest `FOREGROUND_SERVICE_LOCATION`. **Frage G-F2:** Begründungstexte nachziehen (Store, TOMs, Datenschutzerklärung). | mittel (rechtlich) |
-| G3 | `ui/views/ausdauer.py:239-245, 286-287` | `_empfangen` ist ein unbeobachteter Task: wirft `datei.schreiben` (Speicher voll) oder `_kilometer`, stirbt er **still**, die Strecke friert ein, `stoppen` unterdrückt die Ausnahme. | mittel |
-| G4 | `ui/views/ausdauer.py:330` | Die DB-Zeile `strecke` entsteht nur in `stoppen`. Tötet Android den Prozess, liegt die `.jsonl` verwaist, kein Eintrag, keine Wiederherstellung (HRV hat ein Backup). **Frage G-F4:** beim Start verwaiste Dateien erkennen und nachträglich anlegen, oder bewusst verlieren? | mittel |
-| G5 | `ui/geraete/flet_gps.py:121-123`, `core/strecke.py:331-335` | **Tempo 0 gilt als gültig**, aber flet_geolocator meldet „nicht verfügbar“ als `0.0` (auch Genauigkeit/Höhe). Ohne Doppler-Tempo (Netzwerk-Fix, manche Geräte, iOS −1) ist `steht` immer wahr → Strecke bleibt für immer 0. Pixel 10 liefert Tempo, andere Geräte ungeprüft; `speed_accuracy` (0 = fehlt) könnte unterscheiden. **Frage G-F3:** Rückfall auf reinen 10-m-Schritt? | mittel |
-| G6 | `ui/geraete/flet_gps.py:117-118`, `ausdauer.py` | Fehler des Positionsstroms (Standort ausgeschaltet, Berechtigung entzogen) landen in `meldung`; `ausdauer.py` liest sie nie (`gps_test.py:195` schon). Ebenso wird der Fehlertext von `transport.hintergrund(...)` verworfen (`ausdauer.py:227-229`): scheitert der Vordergrunddienst, endet GPS bei Display aus stumm. **Frage G-F9:** Banner wie `warnung` im GPS-Test? | mittel |
-| G7 | `ui/views/ausdauer.py:406-407` | `state.ausdauer = lauf` **vor** `await lauf.starten()`: wirft `starten`, bleibt ein halb gestarteter Lauf ohne `_takt` im State, die Ansicht zeigt „läuft“. | mittel |
 | G8 | `ui/views/ausdauer.py:767-771`, `repositories.py:1886-1890`, `gps_test.py:340` | „Entfernen“ ist Soft-Delete, die Koordinatendatei bleibt unbegrenzt; kein Papierkorb, kein endgültiges Löschen (HRV hat `PAPIERKORB_TAGE`). Vorabtest-Dateien `vorabtest_*.jsonl` werden nie gelistet oder gelöscht. **Frage G-F5.** | niedrig |
-| G9 | `core/strecke.py:311, 324-328, 346-347` | Genauigkeit `None` und `0.0` passieren den Filter als perfekt; nach Sprung/Lücke werden `_hoehen` und `_letzte_bewegung` nicht zurückgesetzt; beim Übergang in die Auto-Pause zählt der ganze `dt` samt 10 s Stillstand zur Bewegungszeit (im Test als bekannt vermerkt). | niedrig |
+| G9 | `core/strecke.py:311, 324-328, 346-347` | Genauigkeit `None` passiert den Filter als perfekt (0.0 wird seit 15.10. zu `None`); nach Sprung/Lücke werden `_hoehen` und `_letzte_bewegung` nicht zurückgesetzt; beim Übergang in die Auto-Pause zählt der ganze `dt` samt 10 s Stillstand zur Bewegungszeit (im Test als bekannt vermerkt). | niedrig |
 | G10 | `ui/geraete/flet_gps.py:75-79`, `strecken.py:141-142` | `use_msl_altitude` nicht gesetzt → Ellipsoidhöhe; `<ele>` im GPX liegt in Deutschland ≈ 45 m über NN. Höhenmeter (Differenzen) unberührt. **Frage G-F7:** MSL einschalten? | niedrig |
 | G11 | `ui/geraete/flet_gps.py:73-84`, `gps.py:68-71` | Zweites `starten` ohne `beenden` ersetzt die Queue, der alte Konsument hängt; heute nur durch UI-Sperren verhindert. | niedrig |
-| G12 | `data/strecken.py:63, 100` | `flush()` ohne `fsync` (übersteht App-Absturz, nicht Stromausfall); `Punkt(**werte)` ohne Typprüfung → TypeError bei handbearbeiteter Zeile. | niedrig |
+| G12 | `data/strecken.py` (`StreckenSchreiber.schreiben`) | `flush()` ohne `fsync` — übersteht App-Absturz, nicht Stromausfall. (Typprüfung beim Lesen seit 15.10. behoben.) | niedrig |
 | G13 | `ui/views/ausdauer.py:847-856`, `app.py:406-408` | „HRV-Auswertung öffnen“ prüft nur `hrv_recording_id`, nicht ob die Aufnahme noch existiert; nach Soft-Delete führt die Route ins Leere. | niedrig |
 | G14 | `ui/views/ausdauer.py:234, 301-313` | Datei wird vor dem ersten Fix angelegt; bleibt der Fix aus, bleibt eine leere Datei (`file_path=""`). | niedrig |
 | G15 | `ui/views/ausdauer.py:172-332`, `gps_test.py:59-203` | `AusdauerLauf`/`GpsTestLauf` (Dateischreiben, DB-Zeile, Tagebucheintrag, Übungsanlage) liegen in `ui/views`; das Pendant `Messlauf` liegt in `devices/`. Ohne flet nicht testbar (`importorskip`). | niedrig |
@@ -155,10 +130,6 @@ leere Messungen sind in allen Rechenwegen geschützt. Kein `flet`/`scipy` in
 
 | # | Stelle | Befund | Schwere |
 |---|---|---|---|
-| H1 | `hrv_core/ausschnitte.py:267`, `korrektur.py:842, 766` | `doc = _json_lesen(ziel) or {…}`: ein vorhandenes, aber gerade **nicht lesbares Sidecar** (defekt, halb synchronisiert, Rechte) wird still durch ein neues ersetzt — Korrekturen/Segmente aus praxis_gui wären weg. `zusatz_sichern` (`messung_detail.py:875`) fängt nur `OSError` und erfährt nichts. **Frage H-F2:** Schreiben verweigern und Hinweis zeigen? | mittel |
-| H2 | `hrv_core/ausschnitte.py:199-201`, `ui/components/analyse.py:387` | LF/HF eines **Abschnitts** bzw. des Analysefensters „Abschnitt“ laufen über `fensterspektrum` → Raster auf `MAX_GRID_BINS` gedeckelt. Für Abschnitte länger als `LANG_AB_S` (≈ 67 min) gilt genau der Fehler, den ALGO 5 für die Gesamtmessung behob (LF/HF ×3,6 bei 4 h), plus ein Lomb über alle Schläge × 2000 Bins (Sekunden am Handy). **Frage H-F1:** langen Spektralweg auch dort, oder LF/HF für lange Abschnitte sperren („lieber Lücke“)? | mittel |
-| H3 | `hrv_core/ausschnitte.py:190-201` | Atemfrequenz und LF/HF je Abschnitt rechnen auf `teil.t_s` (korrigierte Herzuhr, rückt hinter ausgeschlossenen Ketten zusammen) und ignorieren `teil.breaks` — Lücken und Nähte werden zusammengenäht, die Gesamtmessung macht es richtig. **Frage H-F4:** Nähte respektieren wie bei der Gesamtmessung? | mittel |
-| H4 | `hrv_core/ppi.py` (`_gemerkt`) | Modulcache hält bis zu 4 `Recording`-Objekte samt `beats`/`ppi_pakete` stark referenziert, auch nach Verlassen der Ansicht; bei Stundenmessungen am Handy zweistellige MB. | niedrig–mittel |
 | H5 | `hrv_core/ausschnitte.py:282-295, 231-248` | Beim Speichern werden alle Nicht-„gesamt“-Segmente mit `metrics: None, computed_utc: None, active: True, visible: True` neu geschrieben; praxis_gui-eigene Werte dieser Felder gehen verloren, `zusatz_lesen` liest sie nicht. **Frage H-F3:** durchreichen oder bewusst normieren? | niedrig |
 | H6 | `ui/views/messung_detail.py:338` | `beschreibung = rec.notiz or eintrag.note`: eine in der Datei (praxis_gui) geleerte Notiz wird von der DB-Kopie überdeckt — „Datei ist die Wahrheit“ hier nicht ganz. Titel wird dagegen gespiegelt. **Frage H-F7.** | niedrig |
 | H7 | `hrv_metrics_cache` | Wird im Code **nirgends** gelesen oder geschrieben (nur Migration 001); alle Kennzahlen werden bei jedem Öffnen neu gerechnet. CLAUDE.md beschreibt den Cache als tragendes Element. **Frage H-F5:** ungenutzt lassen (dann Doku anpassen) oder die Öffnungszeit der Detailansicht damit tragen? | niedrig |
@@ -180,15 +151,10 @@ getestet, SQL ohne Nutzereingaben im Text.
 
 | # | Stelle | Befund | Schwere |
 |---|---|---|---|
-| N1 | `core/units.py:51-62, 139-150, 166`, `result_spec.py:243` | `parse_dauer("1e400")` und sehr lange Ziffernfolgen liefern `inf`; `format_dauer` wirft dann `OverflowError` (reproduziert). `format_wert` fängt nur `TypeError/ValueError`. Ein solcher Wert im Zeitfeld (Plan, SpecForm) wird **gespeichert**, danach stürzen Plan- und Tagesansicht für diesen Tag bei jedem Aufbau ab, bis der Eintrag gelöscht ist. Gleiches Muster `core/timer.py:104-109` (`dauer_lesen("1,e400")`) → Absturz beim Speichern des Timer-Profils. | **hoch** |
-| N2 | `core/units.py:100-104`, `spec_form.py:286` | `parse_sets("999999999x1")` baut `[wert] * anzahl` ohne Obergrenze (3·10⁶ Sätze in 0,03 s gemessen; 10⁹ ≈ 8 GB → OOM am Handy). Im Planblock gilt 1–50 (`plan.py:437`), in der Notation nicht. **Frage N-F2:** eine Obergrenze (Sätze, Wert, Zeit) für beide Eingabewege? | mittel |
-| N3 | `ui/views/einstellungen.py:37-44`, `messung.py:240` | **Profilwechsel während laufender HRV-Messung** wird nicht verhindert; `aufnahme_eintragen` nimmt `state.profil.id` zum Speicherzeitpunkt → die Aufnahme landet beim neuen Profil. `state.py:267-273` setzt beim Wechsel `auspraegung_wahl`, `parameter_wahl`, `plan_offen`, `verlauf_metrik/_uebung`, `scroll_offsets` nicht zurück (meist harmlos). **Frage N-F1:** sperren, Profil im `Messlauf` merken oder Rückfrage? | mittel |
-| N4 | `ui/views/profile.py:48-57`; ähnlich `plan.py:539-545`, `timer.py:875-882`, `uebung_detail.py:150-166` | `pop_dialog()` direkt gefolgt von `neu_zeichnen()` (dazwischen eine SnackBar) — das Muster, das `components/dialoge.py` als Ursache des „hängenden Dialogs“ beschreibt; der `Nachher`-Weg aus Commit 19b7436 ist hier nicht angewandt (die anderen drei nutzen `push_route`, Wirkung offen). **Frage N-F7:** `Nachher` als Regel für jeden Bestätigen-Dialog? | mittel |
 | N5 | `data/repositories.py:172-178` ↔ `:1725-1727` | `ExerciseRepo.speichern` legt Tags mit `ON CONFLICT(name)` (case-sensitiv) an, `TagRepo.anlegen` prüft `COLLATE NOCASE`: über Editor/Paketimport entstehen „dehnung“ und „Dehnung“ nebeneinander. **Frage N-F3:** UNIQUE-Index `COLLATE NOCASE` per Migration? | niedrig |
 | N6 | `data/repositories.py:742-770` | `ziel_setzen`/`eingabe_setzen` erhöhen `plan.revision`/`updated_at` nicht (`_beruehrt` fehlt), anders als `umbenennen`/`aktiv_setzen` — für „letzter Schreiber gewinnt“ unsichtbar. **Frage N-F5:** `plan.revision` als Anker für Items oder eigene Item-Revision? | niedrig |
 | N7 | `ui/views/timer.py:178-186, 91-93` | Timer-Profil bearbeiten und speichern, während der Timer läuft: `lauf_fuer` ersetzt den Lauf, der Ticker vergleicht Stände zweier Läufe (möglicher Geister-Ton), danach stoppt der Timer still. **Frage N-F6:** warnen, blockieren oder weiterlaufen lassen? | niedrig |
 | N8 | `ui/views/timer.py:201-202, 446` | `state.timer_aufgabe = True` vor `page.run_task`; schlägt es fehl, startet bis zum Neustart kein Ticker mehr. `timer_beobachter["ansicht"]` wird beim Verlassen nicht ausgetragen (5×/s Arbeit umsonst, kein Leak). | niedrig |
-| N9 | `ui/views/plan.py:435` | `"²".isdigit()` ist wahr, `int("²")` wirft → Absturz im Handler „Sätze × Wert“ bei Unicode-Ziffern. | niedrig |
 | N10 | `ui/views/app.py:424-428` | `zurueck`: `page.views.pop()` und dann `page.views[-1]` — bei nur einer Ansicht `IndexError` (ob Flet `on_view_pop` auf der Wurzel feuert, ungeprüft). | niedrig |
 | N11 | `data/repositories.py:666-677, 928, 901` | `PlanRepo.speichern`: versteckte Items behalten alte `sort_order`, neue ab `versteckt` nummeriert → Duplikate möglich, kein Tiebreak; ein noch im Objekt enthaltenes verstecktes Item → `IntegrityError`. Einziger UI-Aufrufer schreibt leere Pläne. | niedrig |
 | N12 | `data/repositories.py:1263-1268` | `wert_setzen` modernisiert `result`, ersetzt die Spec-Kopie aber nur bei fehlendem `feld_key`; Alt-Einträge vor M3 mit `scale`-Feld geraten in den Zustand, den `satz_anhaengen` vermeidet. | niedrig |
@@ -198,7 +164,56 @@ getestet, SQL ohne Nutzereingaben im Text.
 
 ### 3.6 Behoben am 15.10.2026 (nur zur Einordnung)
 
-- **H-Wischen** — `ui/components/zeitfenster.py`: Flets Drossel (`drag_interval`) verwirft Zwischenereignisse ohne Aufsummieren; `primary_delta` war nur der letzte Touch-Frame (≈ ⅙ der Bewegung). Jetzt zählt `local_delta` (Weg seit dem letzten gesendeten Ereignis). Siehe P15/T4.
+Je Paket ein Commit auf `main`; Tests dazu in den genannten Dateien.
+
+- **H-Wischen** (765b4a4) — `zeitfenster.py`: Flets Drossel verwirft Zwischenereignisse; jetzt zählt `local_delta`. Siehe P15/T4.
+- **D1** (df51dfc) — Migrationen laufen in `BEGIN … user_version … COMMIT` im Skript; Test mit kaputter Migration.
+- **N1, N2, N9** (c2b7951) — Notation mit Grenzen 100 Sätze / 48 h / 100 000; `inf`/`nan` abgelehnt; `parse_anzahl` mit `isdecimal`; Altbestand zeigt „–“.
+- **N3** (a965f68) — `Messlauf.subject_id`, `AusdauerLauf.subject_id`; Hinweis beim Profilwechsel.
+- **N4** (1d56acc) — `Nachher` in Profil, Plan, Timer-Profil, Übung entfernen.
+- **H1–H4** (19582e8) — `SidecarFehler` statt stillem Ersatz; Abschnitte über `frequenzbereich` (ALGO 7, Nähte, langer Weg); `ppi._gemerkt` mit Weakrefs.
+- **G1–G7, G12 (Typprüfung), G2** (3cfbcb8) — Kopfzeile + Nachtragen verwaister Strecken; Warnzeile; `abbrechen`; Tempo 0 = fehlt; Karten-Schalter und einmaliger Hinweis; TOMs/Store-Freigaben nachgezogen.
+- **K2, K3, K4, K-F3-Rückfrage** (4fd7a54) — Entfernen mit Plan-Rückfrage und Kopie; Paketstand folgt Tags; Lokales bleibt; Standard-Hinweis beim Import.
+
+## 4. Medien an Übungen — Fakten für die vertagte Entscheidung (K-F6, P14)
+
+Ben (15.10.): gesondert besprechen wegen Rechten, Sicherheit und Injections. Stand des Codes:
+
+- Modell `core/models.py:81-101`: `Media(kind: video|image, source: url|asset|local, uri, title, license)`; `Exercise.image_path`.
+- Import `core/pakete.py` `_medium`: übernimmt jede nicht leere `uri` ohne Schema-Prüfung (`intent://`, `file://`, `tel:`, `javascript:`); `source = local` wird verworfen. Export (`stand`) gibt URL- und ASSET-Medien weiter.
+- Editor `ui/views/uebung_bearbeiten.py:450-459`: baut beim Speichern **alle** Medien als `url`/`video` neu — `source`, `kind`, `license` und die Medien-ID gehen verloren (ein LOCAL-Medium würde zu URL).
+- Detail `ui/views/uebung_detail.py:112-116`: `launch_url(medium.uri)` ohne Prüfung; die Liste unterscheidet nicht nach `kind`/`source`.
+- `image_path` wird in `ui/` nirgends gelesen oder gesetzt; LOCAL-Medien legt kein Code an — beides existiert nur im Datenmodell (seit 15.10. überleben sie Update/Reset).
+- Zu entscheiden: erlaubte Schemata (nur `https`? YouTube-App-Links?), Lizenz-/Rechtefeld im Paket (Pflicht?), Ablage lokaler Dateien (Datenverzeichnis, Größe, Export?), Streaming von der Praxis (P12: Solo speichert nichts auf dem Server), Anzeige von Fotos in Beschreibung und Tagebuch.
+
+## 5. Export und Import — Inventar (Ben, 15.10.: „wir kümmern uns gesondert darum“)
+
+Anlass: Wer Inhalte in ein anderes Profil will, soll exportieren und dort importieren (N-F1).
+
+| Inhalt | Export heute | Import heute |
+|---|---|---|
+| HRV-Messungen (raw-v1 + Sidecar) | ZIP je Messung oder alle (`hrv_core/export.py`, `messung.py:874`, `messung_detail.py:261`) | — (Dateien in `Messungen/` werden beim Start erkannt, kein Knopf) |
+| Diagnoseprotokoll | Teilen (`messung.py:76`) | — |
+| Strecken | nur GPX per Knopf (`ausdauer.py:749`, `gps_test.py:401`) | — |
+| Übungen | Paket (`pakete.py:517-623`) | Paket |
+| Pläne, Planparameter | — | — |
+| Tagebuch (Sitzungen, Einträge, Notizen, Tagesnotizen) | — | — |
+| Timer-Profile und Signale | — | — |
+| HRV-Einstellungen, Korrekturregeln, Ansichten | — | — |
+| Profile, Farbprofile | — | — |
+| Typen/Regionen | nur mit Übungen im Paket | nur mit Übungen im Paket |
+
+Offen: Reihenfolge, Format (ein Archiv je Profil?) und was ein Import mit vorhandenen IDs tut (Konflikt-Regel wie bei Paketen).
+
+## 6. Offene Arbeiten — entschieden, noch zu bauen
+
+| # | Woher | Was | Hinweise |
+|---|---|---|---|
+| A1 | K-F2, K-F7 (15.10.) | **Paketkennung:** gleicher Name = gleiches Paket, dazu ein Kürzel bis 6 Zeichen (`DEH-01`, `KRA-01`); gleicher Name + Kürzel = Update. Namenspolicy festlegen. **Downgrade** (ältere Version über neuere) fragt nach. Policy geänderte Übungen: stark variiert → kopieren (eigene Übung); Material bleibt an der Übungs-ID. | Braucht: Spalte `package.kuerzel` (Migration 016), Kopffeld in `paket_lesen`/`paket_bauen` (`core/pakete.py:182-196, 413-417`), `Paket`-Dataclass, `_eintragen`/`_zeile` (`data/pakete.py`), Eingabe im Export-Dialog, Version beim Export hochzählen, Doku-Tabelle `uebungspakete.md:114-123`. |
+| A2 | Ben, 15.10. | **„abgehakt“ als eigener Speicherwert:** separat gespeichert und löschbar; gibt man Werte ein, bleibt „abgehakt“ stehen, lässt sich aber herausnehmen. | Datenmodell `session_entry` (Flag + Migration), `core/plaene.erledigte`, Tagesbilanz, Planblock („Heute geleistet“), Formular. Heute: „gemacht“ = leerer Eintrag. |
+| A3 | G-F1 (15.10.) | **Hilfedatei** anlegen, Kapitel GPS/Kartenaufzeichnung (Karte holt Kacheln online, Schalter, Regel 0). | Vorhandene Hilfetexte: `ui/components/hilfe.py` (Notation, Varianten und Pakete). |
+| A4 | N-F1 (15.10.) | **Export/Import je Inhalt** (Abschnitt 5) für den Transfer zwischen Profilen. | Reihenfolge und Format offen. |
+| A5 | P12/P14 (15.10.) | Edition B: Solo speichert nichts auf dem Server, einzige Verbindung ist Video-Streaming; eigene Fotos/Videos lokal **und** aus Fremdquelle. | Rahmen für Medien (Abschnitt 4) und `docs/recht`. |
 
 ---
 
@@ -207,3 +222,25 @@ getestet, SQL ohne Nutzereingaben im Text.
 | Datum | Frage | Entscheidung |
 |---|---|---|
 | 14.10.2026 | GPS-Takt | Sekundentakt, keine Sparstufe (Ben). |
+| 15.10.2026 | K-F1 Paket entfernen ↔ Pläne | Übungen fliegen aus den Plänen; Rückfrage zeigt „Teil von Plan …“ und bietet „kopieren“ an, Kopien sind eigene Übungen und übernehmen die Planposition. Gebaut (4fd7a54). |
+| 15.10.2026 | K-F2 Paket-Identität | Gleicher Name = gleiches Paket, mit Kürzel bis 6 Zeichen (`DEH-01`); gleicher Name + Kürzel = Update; Namenspolicy nötig. → A1. |
+| 15.10.2026 | K-F3 Standard-ID | Offen für alle — mit deutlicher Rückfrage beim Import; eingebauter Stand per „Wieder installieren“ zurück. Gebaut. |
+| 15.10.2026 | K-F4 Tags ↔ Paketstand | Mitziehen. Gebaut. |
+| 15.10.2026 | K-F5 Lokale Medien | Behalten bei Update/Reset. Gebaut. |
+| 15.10.2026 | K-F6 Medien-Links | Vertagt — gesondert besprechen (Rechte, Sicherheit, Injections). Fakten in Abschnitt 4. |
+| 15.10.2026 | K-F7 Downgrade | Nachfragen; Policy für geänderte Übungen: stark variiert → kopieren, Material bleibt an der ID. → A1. |
+| 15.10.2026 | N-F1 Profilwechsel in der Messung | Startprofil merken + Hinweis; Transfer zwischen Profilen per Export/Import → Inventar (Abschnitt 5, A4). Gebaut (a965f68). |
+| 15.10.2026 | N-F2 Grenzen der Notation | 100 Sätze, 48 h, Werte ≤ 100 000. Gebaut (c2b7951). |
+| 15.10.2026 | N-F4 Gelöschter Tag im Paketstand | Durch K-F4 erledigt: der Stand verliert den Tag. |
+| 15.10.2026 | N-F7 Dialog-Muster | `Nachher` für jeden Bestätigen-Dialog. Gebaut (1d56acc). |
+| 15.10.2026 | G-F1 Karte online | Schalter „Karte zeigen“, Hinweis **einmal** (nicht je Aufzeichnung), Infotext später in der Hilfe (A3). Gebaut (3cfbcb8). |
+| 15.10.2026 | G-F2 docs/recht | TOMs und Store-Freigaben nachgezogen (3cfbcb8); Datenschutzerklärung folgt mit dem Store-Eintrag. |
+| 15.10.2026 | G-F3 Tempo ohne Doppler | Tempo zählt nur mit Tempogenauigkeit; sonst Weg je Zeit, 10-m-Schritt. Gebaut; T5 am Gerät. |
+| 15.10.2026 | G-F4 Prozess-Tod im Training | Beim Start erkennen und anbieten (Übernehmen/Löschen). Gebaut; T6. |
+| 15.10.2026 | G-F9 Fehler im Training | Rote Warnzeile unter den Zahlen. Gebaut. |
+| 15.10.2026 | H-F1 Lange Abschnitte | Langer Spektralweg wie die Gesamtmessung (ALGO 7). Gebaut (19582e8). |
+| 15.10.2026 | H-F2 Unlesbares Sidecar | Schreiben verweigern, Hinweis zeigen (`SidecarFehler`). Gebaut. |
+| 15.10.2026 | H-F4 Nähte in Abschnitten | Respektieren wie die Gesamtmessung (ALGO 7). Gebaut. |
+| 15.10.2026 | „abgehakt“ | Eigener Speicherwert, löschbar; bleibt bei Werteeingabe stehen, herausnehmbar. → A2. |
+| 15.10.2026 | P12 | Solo-Edition speichert nichts auf dem Server; einzige Verbindung = Video-Streaming. → A5. |
+| 15.10.2026 | P14 | Eigene Fotos/Videos lokal **und** Streaming/Laden aus Fremdquelle. → A5, Abschnitt 4. |

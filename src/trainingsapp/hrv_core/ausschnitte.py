@@ -41,8 +41,9 @@ from typing import Any
 import numpy as np
 
 from .atmung import RUHE, atemfrequenz
+from .constants import LANG_AB_S
 from .ereignisse import Zeitbezug
-from .frequency import Fensterspektrum, frequenzbereich, teilstuecke
+from .frequency import Fensterspektrum, fensterspektrum, frequenzbereich
 from .korrektur import (
     Korrigiert,
     _json_lesen,
@@ -194,40 +195,54 @@ def abschnitt_werte(
     }
     if len(teil.rr_ms) < 2:
         return werte
-    t = np.asarray(teil.t_s, dtype=float)
-    rr = np.asarray(teil.rr_ms, dtype=float)
-    # Je Teilstück zwischen den Nähten (ALGO 7): ``t_s`` ist die Herzuhr, die hinter
-    # einer ausgeschlossenen Kette oder Messlücke zusammenrückt — ein Minutenfenster
-    # über die Naht hinweg sähe eine Atmung, die es nicht gab.
+    # Auf der **Kurvenachse** (echte Zeit, ALGO 7): ``t_s`` ist die Herzuhr, die hinter
+    # einer ausgeschlossenen Kette oder Messlücke zusammenrückt — dort sähe ein
+    # Minutenfenster eine Atmung, die es nicht gab. Auf der echten Zeit bleibt die
+    # Lücke eine Lücke, verworfene Intervalle sind fehlende Stützstellen (NaN).
+    zt, rr = _echte_zeit(teil, zeiten, von, bis)
     raten = [
         float(a.rate_pro_min)
-        for stueck in teilstuecke(rr, t, teil.breaks)
-        for ende in np.arange(stueck.t_s[0] + 60.0, stueck.t_s[-1] + 1e-9, 15.0)
-        if (
-            a := atemfrequenz(stueck.t_s, stueck.rr_ms, ende - 60.0, ende, modus=atem_modus)
-        ).gueltig
+        for ende in np.arange(zt[0] + 60.0, zt[-1] + 1e-9, 15.0)
+        if (a := atemfrequenz(zt, rr, ende - 60.0, ende, modus=atem_modus)).gueltig
         and a.rate_pro_min is not None
     ]
     werte["atem"] = float(np.median(raten)) if raten else None
-    if frequenz and t[-1] - t[0] >= 120.0:
-        fs = abschnitt_spektrum(teil)
+    if frequenz and bis - von >= 120.0:
+        fs = abschnitt_spektrum(korr, zeiten, von, bis)
         werte["lf_hf"] = fs.werte.get("lf_hf") if fs is not None else None
     return werte
 
 
-def abschnitt_spektrum(teil: Korrigiert) -> Fensterspektrum | None:
-    """Spektrum eines Abschnitts — gerechnet wie das der ganzen Messung (ALGO 7).
+def _echte_zeit(
+    teil: Korrigiert, zeiten: Sequence[float], von: float, bis: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Die Werte des Ausschnitts auf der Kurvenachse; Nullen (verworfen) als NaN."""
+    zt = np.asarray([x for x in zeiten if von <= x <= bis], float)[: len(teil.rr_ms)]
+    rr = np.asarray(teil.rr_ms, dtype=float)[: zt.size]
+    return zt, np.where(rr > 0, rr, np.nan)
 
-    Teilstücke an den Nähten, ab `LANG_AB_S` der lange Weg (`frequency.spektrum`).
-    Bis 15.10.2026 lief hier ein einzelner Lomb über alle Schläge (`fensterspektrum`):
-    über Nähte hinweg, und bei Abschnitten über gut eine Stunde in den Deckel
+
+def abschnitt_spektrum(
+    korr: Korrigiert, zeiten: Sequence[float], von: float, bis: float
+) -> Fensterspektrum | None:
+    """Spektrum eines Abschnitts (ALGO 7) — wie das Band in der Analysekarte.
+
+    Bis `LANG_AB_S` ein Lomb auf der **Kurvenachse** (`fensterspektrum`): echte
+    Zeit, Lücken bleiben Lücken, verworfene Intervalle sind fehlende Stützstellen
+    — so zeigen Tabelle und Analysekarte dasselbe, auch bei Verity-Aufnahmen mit
+    vielen Nähten (Teilstücke unter 60 Schlägen ergäben sonst gar nichts).
+    Darüber der lange Weg der Gesamtmessung (`frequenzbereich` mit Nähten,
+    `_spektrum_lang`) — vorher lief ein einzelner Lomb in den Deckel
     `MAX_GRID_BINS`, den ALGO 5 für die Gesamtmessung behoben hatte (LF/HF bei
     4 h um das 3,6-Fache zu hoch). Mindestdauern je Band gelten hier nicht —
-    der Abschnitt ist bewusst gewählt wie das Band in der Analysekarte;
-    `Fensterspektrum.reif` sagt, ob er lang genug ist.
+    der Abschnitt ist bewusst gewählt; `Fensterspektrum.reif` sagt, ob er reicht.
     """
+    teil = zuschneiden(korr, zeiten, von, bis)
     if len(teil.rr_ms) < 2:
         return None
+    if bis - von <= LANG_AB_S:
+        zt, rr = _echte_zeit(teil, zeiten, von, bis)
+        return fensterspektrum(zt, rr, float(von) - 1e-6, float(bis))
     return Fensterspektrum.aus_frequenzbereich(
         frequenzbereich(teil.rr_ms, teil.t_s, teil.breaks, mindestdauer=False)
     )

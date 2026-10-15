@@ -99,22 +99,42 @@ def test_werte_je_abschnitt() -> None:
     assert w["n"] == len(teil.rr_ms)
 
 
-def test_abschnitt_rechnet_je_teilstueck_wie_die_gesamtmessung() -> None:
-    """ALGO 7: Nähte trennen; LF/HF und Atemfrequenz entsprechen der Rechnung auf den Stücken."""
+def test_abschnitt_rechnet_auf_der_echten_zeitachse() -> None:
+    """ALGO 7: Die Herzuhr rückt hinter einer Lücke zusammen; gerechnet wird auf der
+    Kurvenachse — wie das Band: Lücke bleibt Lücke, Tabelle und Karte zeigen dasselbe."""
     a, ta = _korrigiert(200, atem_hz=0.25)
     b, tb = _korrigiert(200, atem_hz=0.10)
-    # Herzuhr rückt hinter einer Naht zusammen: Stück b hängt direkt an a
-    t_b = [x + ta[-1] for x in tb]
+    t_b = [x + ta[-1] for x in tb]  # Herzuhr: Stück b hängt direkt an a
     korr = Korrigiert(ta + t_b, a.rr_ms + b.rr_ms, ["orig"] * 400, [200], 0, 0)
-    zeiten = ta + [x + 300.0 for x in t_b]  # auf der Kurvenachse liegt eine 5-min-Lücke
+    zeiten = ta + [x + 30.0 for x in t_b]  # Kurvenachse: 30-s-Lücke dazwischen
     w = abschnitt_werte(korr, zeiten, 0.0, zeiten[-1], frequenz=True)
-    # Atem: Median aus beiden Stücken (15/min und 6/min), kein Fenster über die Naht
+    # Atem: Median aus beiden Stücken (15/min und 6/min); in der Lücke kein Fenster
     assert w["atem"] is not None and 6.0 <= w["atem"] <= 15.0
-    teil = zuschneiden(korr, zeiten, 0.0, zeiten[-1])
-    assert teil.breaks == [200]
-    erwartet = frequenzbereich(teil.rr_ms, teil.t_s, teil.breaks, mindestdauer=False)
-    assert w["lf_hf"] == pytest.approx(erwartet["lf_hf"])
-    assert abschnitt_spektrum(teil).werte["hf"] == pytest.approx(erwartet["hf"])
+    zt = np.asarray(zeiten)
+    erwartet = fensterspektrum(zt, np.asarray(korr.rr_ms, float), -1e-6, zeiten[-1])
+    assert erwartet is not None
+    assert w["lf_hf"] == pytest.approx(erwartet.werte["lf_hf"])
+    fs = abschnitt_spektrum(korr, zeiten, 0.0, zeiten[-1])
+    assert fs is not None and fs.werte["hf"] == pytest.approx(erwartet.werte["hf"])
+    # Eine 5-min-Lücke deckt weniger als 70 % ab: kein Spektrum — in Tabelle und Karte gleich
+    weit = ta + [x + 300.0 for x in t_b]
+    assert abschnitt_spektrum(korr, weit, 0.0, weit[-1]) is None
+    assert abschnitt_werte(korr, weit, 0.0, weit[-1], frequenz=True)["lf_hf"] is None
+
+
+def test_abschnitt_mit_vielen_naehten_hat_ein_spektrum() -> None:
+    """Verity-Aufnahmen setzen alle paar Schläge eine Naht (verworfene Intervalle):
+    Teilstücke unter 60 Schlägen — über `frequenzbereich` käme nichts, auf der
+    Kurvenachse mit NaN schon (Befund Ben, 15.10.2026: „Frequenzanalyse weg?“)."""
+    korr, t = _korrigiert(300, atem_hz=0.25)
+    rr = list(korr.rr_ms)
+    for i in range(50, 300, 50):
+        rr[i] = 0.0  # verworfen → Null, Naht davor
+    korr = Korrigiert(t, rr, ["orig"] * 300, list(range(50, 300, 50)), 0, 0)
+    assert frequenzbereich(korr.rr_ms, korr.t_s, korr.breaks, mindestdauer=False) is None
+    fs = abschnitt_spektrum(korr, t, 0.0, t[-1])
+    assert fs is not None and fs.werte["hf"] is not None
+    assert abschnitt_werte(korr, t, 0.0, t[-1], frequenz=True)["lf_hf"] is not None
 
 
 def test_langer_abschnitt_nimmt_den_langen_weg() -> None:
@@ -122,7 +142,7 @@ def test_langer_abschnitt_nimmt_den_langen_weg() -> None:
     nicht mehr mit dem gedeckelten Raster (ALGO 5 galt vorher nur für die Gesamtmessung)."""
     korr, t = _korrigiert(5000, atem_hz=0.25)  # ≈ 75 min
     assert t[-1] - t[0] > LANG_AB_S
-    fs = abschnitt_spektrum(korr)
+    fs = abschnitt_spektrum(korr, t, 0.0, t[-1])
     assert fs is not None and fs.werte["hf"] is not None
     fenster = [
         fensterspektrum(t, korr.rr_ms, von, von + 300.0)

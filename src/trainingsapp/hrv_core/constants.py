@@ -40,10 +40,11 @@ from typing import Final
 #   "alle"``). 14.10.: 73 min bei der Arbeit, 62 % verworfen — wieder
 #   aufgenommen lag RMSSD bei 98 statt 30 ms; unsichere Ketten roh: 39 statt 30 ms.
 # 7 (2026-10-15): Abschnitte und das Analysefenster „Abschnitt" rechnen LF/HF und
-#   Atemfrequenz wie die Gesamtmessung (`ausschnitte.abschnitt_spektrum`): je
-#   Teilstück zwischen den Nähten, ab `LANG_AB_S` der lange Weg. Vorher ein
-#   einzelner Lomb über alle Schläge — über Nähte hinweg und bei Abschnitten über
-#   gut eine Stunde wieder im Deckel `MAX_GRID_BINS` (siehe 5).
+#   Atemfrequenz auf der Kurvenachse (echte Zeit) statt auf der Herzuhr, die hinter
+#   Nähten zusammenrückt (`ausschnitte.abschnitt_spektrum`): bis `LANG_AB_S` wie das
+#   Band (`fensterspektrum`), darüber der lange Weg der Gesamtmessung. Vorher ein
+#   einzelner Lomb auf der Herzuhr — über Nähte hinweg und bei Abschnitten über gut
+#   eine Stunde wieder im Deckel `MAX_GRID_BINS` (siehe 5).
 ALGO_VERSION: Final[int] = 7
 
 # ---------------------------------------------------------------------------

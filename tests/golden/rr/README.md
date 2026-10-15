@@ -37,11 +37,12 @@ nachgerechnet): RMSSD **21,7432 ms** über 269 echte Nachbardifferenzen;
 über die verworfenen Intervalle hinweg wären es 22,9058 ms (ALGO_VERSION 1).
 Ein echter Verity-Datensatz fehlt noch — er braucht eine anonymisierte Kopie.
 
-Seit ALGO_VERSION 4 werden die verworfenen Intervalle standardmäßig wieder
-aufgenommen und selbst geprüft (`tests/test_korrektur_regeln.py`): Die
-Automatik schlägt nur 150/151 (Fehlerschätzung) zur Interpolation vor; RMSSD
-**21,8946 ms** über alle 299 Nachbardifferenzen. Dem Sensor folgend bleiben es
-21,7432 ms.
+Mit ALGO_VERSION 4 kamen die verworfenen Intervalle wieder in die Rechnung; seit
+ALGO_VERSION 6 ist die Vorgabe wieder „dem Sensor folgen“ (`sensor_verwerfung =
+"sensor"`, `docs/korrektur.md`): RMSSD **21,7432 ms**. Wer die verworfenen
+Intervalle einschaltet (`tests/test_korrektur_regeln.py`), bekommt 21,8946 ms über
+alle 299 Nachbardifferenzen; die Automatik schlägt dann nur 150/151
+(Fehlerschätzung) zur Interpolation vor.
 
 ## `sensor_synth_ruhe_sitzend_11.json`, `sensor_synth_kohaerente_atmung_7.json`
 

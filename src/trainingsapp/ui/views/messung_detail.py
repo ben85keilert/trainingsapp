@@ -801,16 +801,18 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         lo, hi = grenzen()
         von, bis = max(a.von_s, lo), min(a.bis_s, hi)
         korr = z.korrigiert()
+        pnn_ms = state.ansicht().pnn_ms
+        atem_modus = ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE
         return z.merken(
-            f"abschnitt:{a.id}:{von:.3f}:{bis:.3f}",
+            f"abschnitt:{a.id}:{von:.3f}:{bis:.3f}:{pnn_ms:g}:{atem_modus}:{int(einst.frequenz)}",
             lambda: abschnitt_werte(
                 korr,
                 korr_zeiten(korr, z.achse),
                 von,
                 bis,
-                pnn_ms=state.ansicht().pnn_ms,
+                pnn_ms=pnn_ms,
                 frequenz=einst.frequenz,
-                atem_modus=ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE,
+                atem_modus=atem_modus,
             ),
         )
 
@@ -1143,7 +1145,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     def crop_oeffnen() -> None:
         """Zuschneiden in der Rohkurve — zeigt dafür die ganze Messung."""
         lo, hi = z.ausschnitt or (0.0, dauer)
-        breite_setzen(0)  # „Alles": beide Grenzen im Blick, Zoom über die Breiten
+        breite_setzen(0, zeichnen_=False)  # „Alles": beide Grenzen im Blick; der Editor zeichnet
         editor_oeffnen(CROP, lo, hi, None)
 
     def crop_setzen(neu: tuple[float, float] | None) -> None:
@@ -1237,7 +1239,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     # -- Zeitfenster -------------------------------------------------------------
 
-    def breite_setzen(breite_s: float, mitte: float | None = None) -> None:
+    def breite_setzen(
+        breite_s: float, mitte: float | None = None, *, zeichnen_: bool = True
+    ) -> None:
         fenster.breite_s = breite_s if breite_s > 0 else (dauer or 1.0)
         if mitte is None and m.editor is not None:
             mitte = m.editor.grenze  # im Editor zoomt man auf die gewählte Grenze
@@ -1247,7 +1251,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             fenster.ende_s = None
             fenster.verschieben(mitte + fenster.breite_s / 2 - dauer, dauer)
         breite_wahl.selected = [str(int(breite_s))] if breite_s in dict(BREITEN) else []
-        nur_kurven()
+        if zeichnen_:
+            nur_kurven()
 
     def zentrieren(x: float) -> None:
         """Die Kurve auf eine Zeit rücken (Notiz antippen); bei „Alles" bleibt sie."""
@@ -1365,10 +1370,11 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         aw.wartet = True
         aw.auftrag += 1
         nummer = aw.auftrag
+        route = state.route_nummer  # die Ansicht verlassen → nicht mehr für sie rechnen
 
         async def spaeter() -> None:
             await asyncio.sleep(state.hrv_einstellungen().nachrechnen_ms / 1000)
-            if nummer != aw.auftrag:
+            if nummer != aw.auftrag or route != state.route_nummer:
                 return
             aw.wartet = False
             analyse.zeichnen(*fenster.bereich(dauer), strich=m.strich if m.ablesen else None)
@@ -1430,9 +1436,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                     bis,
                     f"Abschnitt „{a.name}“ · {_uhr(von)}–{_uhr(bis)}",
                     # wie die Abschnittswerte in der Tabelle: Nähte und langer Weg
-                    ganzes=lambda: abschnitt_spektrum(
-                        zuschneiden(korr, korr_zeiten(korr, z.achse), von, bis)
-                    ),
+                    ganzes=lambda: abschnitt_spektrum(korr, korr_zeiten(korr, z.achse), von, bis),
                 )
         if aw.art == AW_BAND:
             von, bis = band_bereich()

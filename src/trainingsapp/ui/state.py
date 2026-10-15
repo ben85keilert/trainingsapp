@@ -132,6 +132,9 @@ class AppState:
     #: Scrollposition je scrollbarer Fläche (Schlüssel meist die Route) — damit
     #: der Neubau nach einem Tipp nicht wieder oben beginnt
     scroll_offsets: dict[str, float] = field(default_factory=dict)
+    #: Zählt jeden Routenwechsel — verzögerte Rechnungen einer verlassenen Ansicht
+    #: erkennen daran, dass sie nicht mehr gebraucht werden
+    route_nummer: int = 0
     #: Planansicht: je Planübung der gewählte Parameter („reps", „hold" …) und
     #: die gewählten Ausprägungen ({"angle": 45}) — nur für diese Sitzung
     parameter_wahl: dict[str, str] = field(default_factory=dict)

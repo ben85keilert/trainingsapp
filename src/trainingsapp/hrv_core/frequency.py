@@ -478,7 +478,10 @@ def _lomb_hann(t: np.ndarray, y: np.ndarray, raster: np.ndarray) -> np.ndarray:
     if spanne <= 0:
         return np.zeros_like(raster)
     w = 0.5 - 0.5 * np.cos(2.0 * np.pi * (t - t[0]) / spanne)
-    return lomb_psd(t, (y - y.mean()) * w, raster) / float(np.mean(w * w))
+    norm = float(np.mean(w * w))
+    if norm <= 0:  # zwei Stützstellen: Hann ist an beiden Enden 0
+        return np.zeros_like(raster)
+    return lomb_psd(t, (y - y.mean()) * w, raster) / norm
 
 
 def _gemittelt(

@@ -575,14 +575,16 @@ Atemfrequenz der Aufzeichnung nimmt höchstens 2000 Minutenfenster.
 ### Abschnitte (ALGO_VERSION 7, 15.10.2026)
 
 Selbst markierte Abschnitte (`hrv_core/ausschnitte.py`) und das Analysefenster
-„Abschnitt“ rechnen LF/HF und Atemfrequenz seit ALGO 7 wie die Gesamtmessung:
-`abschnitt_spektrum` zerlegt den Ausschnitt an seinen Nähten (`teilstuecke`) und
-geht über `frequenzbereich` — damit greift ab `LANG_AB_S` derselbe lange Weg wie
-oben. Die Atemfrequenz nimmt ihre Minutenfenster nur innerhalb eines Teilstücks.
-Bis dahin lief ein einzelner Lomb über alle Schläge auf der Herzuhr (`t_s`), die
-hinter einer ausgeschlossenen Kette oder Messlücke zusammenrückt: Fenster über die
-Naht hinweg sahen eine Atmung, die es nicht gab, und Abschnitte über gut eine
-Stunde liefen wieder in den Deckel `MAX_GRID_BINS`. Mindestdauern je Band gelten
+„Abschnitt“ rechnen LF/HF und Atemfrequenz seit ALGO 7 auf der **Kurvenachse**
+(echte Zeit, `korr_zeiten`) statt auf der Herzuhr `t_s`, die hinter einer
+ausgeschlossenen Kette oder Messlücke zusammenrückt — dort sahen Minutenfenster
+eine Atmung, die es nicht gab. Auf der echten Zeit bleibt die Lücke eine Lücke,
+verworfene Intervalle sind fehlende Stützstellen (NaN): `abschnitt_spektrum` ist
+bis `LANG_AB_S` ein `fensterspektrum` wie das Band in der Analysekarte, damit
+Tabelle und Karte dasselbe zeigen — auch bei Verity-Aufnahmen mit vielen Nähten
+(Teilstücke unter 60 Schlägen ergäben über `frequenzbereich` gar nichts). Längere
+Abschnitte gehen über `frequenzbereich` und damit den langen Weg; vorher lief ein
+einzelner Lomb wieder in den Deckel `MAX_GRID_BINS`. Mindestdauern je Band gelten
 für Abschnitte nicht (`mindestdauer=False`) — sie sind bewusst gewählt wie das
 Band; `Fensterspektrum.reif` zeigt, ob der Abschnitt lang genug ist.
 

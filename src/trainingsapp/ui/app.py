@@ -346,6 +346,8 @@ def main(page: ft.Page) -> None:
 
     def zeige_route() -> None:
         """Baut den Ansichtsstapel passend zu `page.route` auf."""
+        state.route_nummer += 1
+        state.timer_beobachter.pop("ansicht", None)  # die Timer-Ansicht trägt sich neu ein
         # Thema und Kurvenfarben zuerst — die Ansichten lesen sie beim Bauen
         darstellung = darstellung_anwenden()
         page.views.clear()
@@ -424,7 +426,8 @@ def main(page: ft.Page) -> None:
     async def zurueck() -> None:
         # Wer eine Ansicht verlässt, beginnt beim nächsten Öffnen wieder oben.
         state.scroll_offsets.pop(page.views[-1].route, None)
-        page.views.pop()
+        if len(page.views) > 1:
+            page.views.pop()
         await page.push_route(page.views[-1].route)
 
     state.neu_zeichnen = zeige_route

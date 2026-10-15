@@ -234,10 +234,15 @@ def kachel_werte(
 # ---------------------------------------------------------------------------
 
 
-def aufnahme_eintragen(state: AppState, ergebnis: Gespeichert) -> HrvRecording:
-    """Eine gespeicherte Aufnahme in die Liste eintragen — auch fürs Ausdauertraining."""
+def aufnahme_eintragen(
+    state: AppState, ergebnis: Gespeichert, subject_id: str | None = None
+) -> HrvRecording:
+    """Eine gespeicherte Aufnahme in die Liste eintragen — auch fürs Ausdauertraining.
+
+    ``subject_id``: das Profil beim **Start** der Messung (`Messlauf.subject_id`);
+    ohne Angabe das gerade aktive."""
     eintrag = HrvRecording(
-        subject_id=state.profil.id,
+        subject_id=subject_id or state.profil.id,
         file_path=ergebnis.pfad.relative_to(messungenverzeichnis()).as_posix(),
         sha1=ergebnis.sha1,
         geraet=ergebnis.recording.geraet,
@@ -334,7 +339,12 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             hinweis_text.value = "Bluetooth gibt es nur in der App auf dem Handy."
             page.update()
             return
-        lauf = Messlauf(quelle, backup_basis=datenverzeichnis(), regeln=state.korrekturregeln())
+        lauf = Messlauf(
+            quelle,
+            backup_basis=datenverzeichnis(),
+            regeln=state.korrekturregeln(),
+            subject_id=state.profil.id,
+        )
         state.messlauf = lauf
         try:
             await lauf.verbinden(device_id, name)
@@ -625,7 +635,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         if ergebnis is None:
             aktualisieren(erzwingen=True)
             return
-        eintrag = aufnahme_eintragen(state, ergebnis)
+        eintrag = aufnahme_eintragen(state, ergebnis, lauf.subject_id)
         page.show_dialog(ft.SnackBar(ft.Text(f"Gespeichert: {ergebnis.pfad.name}")))
         await page.push_route(f"/messung/{eintrag.id}")
 

@@ -161,7 +161,7 @@ def daten(tmp_path, monkeypatch):
     state.schliessen()
 
 
-async def _training(state, tmp_path, sportart: str = GEHEN):
+async def _training(state, tmp_path, sportart: str = GEHEN, zwischendurch=None):
     from trainingsapp.devices.gps import PunktWiedergabe
     from trainingsapp.devices.messlauf import Messlauf
     from trainingsapp.devices.simulated import SIM_SYNTH, SimulatedSource
@@ -179,10 +179,30 @@ async def _training(state, tmp_path, sportart: str = GEHEN):
         await asyncio.sleep(0.05)
         if len(lauf.rechner.punkte) == len(punkte):
             break
+    if zwischendurch is not None:
+        zwischendurch()
     strecke = await lauf.stoppen()
     await messlauf.trennen()
     await asyncio.wait_for(task, 5)
     return strecke, punkte
+
+
+async def test_profilwechsel_waehrend_des_trainings_haengt_nichts_um(daten) -> None:
+    """Strecke, HRV-Aufnahme und Tagebucheintrag gehören dem Profil beim Start (15.10.2026)."""
+    state, tmp_path = daten
+    start = state.profil.id
+    zweites = state.profil_anlegen("Zweites")  # macht das neue Profil aktiv
+    state.profil_wechseln(start)
+    strecke, _ = await _training(
+        state, tmp_path, zwischendurch=lambda: state.profil_wechseln(zweites.id)
+    )
+    assert state.profil.id == zweites.id
+    assert strecke.subject_id == start
+    assert state.hrv.laden(strecke.hrv_recording_id).subject_id == start
+    sitzung = state.sitzungen.session_laden(
+        state.sitzungen.eintrag_laden(strecke.session_entry_id).session_id
+    )
+    assert sitzung.subject_id == start
 
 
 async def test_training_speichert_strecke_hrv_und_tagebuch(daten) -> None:

@@ -31,12 +31,27 @@ from trainingsapp.ui.state import PLAN_DARSTELLUNGEN, AppState
 from trainingsapp.ui.views.einstellungen_darstellung import darstellung_karte
 
 
+def _messung_laeuft(state: AppState) -> bool:
+    """Läuft gerade eine HRV-Aufnahme oder ein Ausdauertraining?"""
+    messlauf = state.messlauf
+    if messlauf is not None and messlauf.aufnahme is not None:
+        return True
+    ausdauer = state.ausdauer
+    return ausdauer is not None and not ausdauer.fertig
+
+
 def einstellungen(page: ft.Page, state: AppState) -> ft.View:
     profil_liste = ft.Column(spacing=0)
 
     def wechsler(profil_id: str) -> Callable[[], None]:
         def handler() -> None:
+            vorher = state.profil
             state.profil_wechseln(profil_id)
+            if _messung_laeuft(state):
+                # Messlauf und Ausdauerlauf haben sich ihr Startprofil gemerkt
+                page.show_dialog(
+                    ft.SnackBar(ft.Text(f"Die laufende Messung bleibt bei „{vorher.name}“."))
+                )
             zeichnen()
             page.update()
             state.neu_zeichnen()  # jedes Profil bringt sein Farbprofil mit

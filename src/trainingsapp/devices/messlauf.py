@@ -68,8 +68,12 @@ class Messlauf:
         jetzt_utc: Callable[[], datetime] = lambda: datetime.now(UTC),
         backup_basis: Path | None = None,
         regeln: Korrekturregeln | None = None,
+        subject_id: str | None = None,
     ) -> None:
         self.quelle = quelle
+        #: Profil, für das gemessen wird — beim Start gemerkt, damit ein Profilwechsel
+        #: während der Messung die Aufnahme nicht umhängt (Ben, 15.10.2026)
+        self.subject_id = subject_id
         #: Erkennungsregeln der Live-Anzeige (`regeln_setzen`)
         self.regeln = regeln or Korrekturregeln()
         # Die Uhr der Quelle — beim Simulator läuft sie ``tempo``-fach, bei echten

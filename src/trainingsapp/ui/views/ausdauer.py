@@ -174,6 +174,8 @@ class AusdauerLauf:
 
     def __init__(self, state: AppState, sportart: str, quelle: GpsQuelle | None) -> None:
         self.state = state
+        #: Profil beim Start — ein Wechsel während des Trainings hängt nichts um
+        self.subject_id = state.profil.id
         self.sportart = sportart
         self.quelle = quelle
         self.rechner = StreckenRechner(split_m=split_laenge_m(sportart))
@@ -228,6 +230,7 @@ class AusdauerLauf:
                 True, f"{SPORT_NAMEN[self.sportart]} läuft", self.text(), zweck=ZWECK
             )
         if self.messlauf is not None and self.messlauf.aufnahme is None:
+            self.messlauf.subject_id = self.subject_id
             self.messlauf.aufnahme_starten()
             self.hrv_eigen = True
         if self.quelle is not None:
@@ -296,13 +299,13 @@ class AusdauerLauf:
 
             ergebnis = self.messlauf.aufnahme_stoppen(datenverzeichnis())
             if ergebnis is not None:
-                hrv_id = aufnahme_eintragen(self.state, ergebnis).id
+                hrv_id = aufnahme_eintragen(self.state, ergebnis, self.subject_id).id
         r = self.rechner
         mit_gps = self.quelle is not None and bool(r.teilstuecke)
         # Wanduhr — mit GPS nie kürzer als die Zeit zwischen erster und letzter Ortung
         dauer = max(self.dauer_s, r.dauer_s) if mit_gps else self.dauer_s
         strecke = Strecke(
-            subject_id=self.state.profil.id,
+            subject_id=self.subject_id,
             sportart=self.sportart,
             started_at=self.start_utc,
             ended_at=datetime.now(UTC),
@@ -323,7 +326,7 @@ class AusdauerLauf:
             ergebnis_feld["distance"] = round(strecke.distanz_m)
         uebung = uebung_fuer(self.state, self.sportart)
         sitzung = self.state.sitzungen.session_fuer(
-            self.state.profil.id, None, lokaler_tag(self.start_utc)
+            self.subject_id, None, lokaler_tag(self.start_utc)
         )
         eintrag = self.state.sitzungen.eintrag_anlegen(sitzung, uebung, ergebnis_feld)
         strecke.session_entry_id = eintrag.id

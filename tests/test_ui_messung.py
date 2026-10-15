@@ -62,6 +62,28 @@ def _baum_texte(c) -> list[str]:
     return texte
 
 
+async def test_aufnahme_gehoert_dem_profil_beim_start(daten) -> None:
+    """Profilwechsel während der Aufnahme: der Eintrag bleibt beim Startprofil (15.10.2026)."""
+    from trainingsapp.ui.views.messung import aufnahme_eintragen
+
+    state, tmp_path = daten
+    start = state.profil.id
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path, subject_id=start)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 5:
+        await asyncio.sleep(0.01)
+    zweites = state.profil_anlegen("Zweites")
+    state.profil_wechseln(zweites.id)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert ergebnis is not None
+    eintrag = aufnahme_eintragen(state, ergebnis, lauf.subject_id)
+    assert eintrag.subject_id == start != state.profil.id
+
+
 def test_messung_ohne_geraet(daten) -> None:
     state, _ = daten
     texte = _baum_texte(messung(_seite(), state))

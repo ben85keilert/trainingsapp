@@ -1,5 +1,6 @@
 -- Übungspakete (Ben, 14.10.2026): Übungen kommen über Pakete. Die
--- mitgelieferten stehen im Paket „Grundausstattung" (data/seed/exercises.json),
+-- mitgelieferten stehen im Paket „Standard" (data/seed/standard.toml, bis 14.10.
+-- „Grundausstattung" aus exercises.json — die ID blieb),
 -- weitere — Qigong, Pilates, Yoga, eine Sammlung von jemand anderem — kommen
 -- per Import dazu und gehen per Export hinaus. Format: core/pakete.py,
 -- Regeln beim Import: data/pakete.py, beides in docs/uebungspakete.md.

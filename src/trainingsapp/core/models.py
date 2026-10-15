@@ -265,6 +265,32 @@ TAG_TYP = "typ"
 TAG_REGION = "region"
 
 
+def tag_name_pruefen(
+    text: str, gleiche: list[str], andere: list[str], andere_art: str = "eine Region"
+) -> tuple[str | None, str | None]:
+    """Prüft einen neuen Tag-Namen: (Name, None) oder (None, Fehlertext).
+
+    Groß und klein trennen keine Tags — wer „dehnung“ tippt, bekommt „Dehnung“.
+    Eine Stelle für Oberfläche (`ui/components/tagwahl.py`) und `TagRepo.anlegen`.
+
+    >>> tag_name_pruefen(" Qigong ", ["Dehnung"], ["Bein"])
+    ('Qigong', None)
+    >>> tag_name_pruefen("dehnung", ["Dehnung"], [])
+    ('Dehnung', None)
+    >>> tag_name_pruefen("bein", [], ["Bein"])
+    (None, '„Bein“ ist schon eine Region.')
+    >>> tag_name_pruefen("  ", [], [])
+    (None, 'Name?')
+    """
+    text = " ".join(text.split())
+    if not text:
+        return None, "Name?"
+    if fremd := [n for n in andere if n.casefold() == text.casefold()]:
+        return None, f"„{fremd[0]}“ ist schon {andere_art}."
+    gleich = [n for n in gleiche if n.casefold() == text.casefold()]
+    return (gleich[0] if gleich else text), None
+
+
 def passt_zum_filter(uebung: Exercise, typen: set[str], regionen: set[str]) -> bool:
     """Katalogfilter: innerhalb einer Tag-Art genügt ein Treffer, beide Arten müssen passen.
 

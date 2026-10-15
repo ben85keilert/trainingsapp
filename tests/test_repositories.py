@@ -1118,7 +1118,7 @@ def test_neuer_tag_steht_oben_und_doppelte_werden_gemeldet(con) -> None:
     assert tags.anlegen("typ", "Yoga") is None
     assert tags.namen("typ")[:2] == ["Yoga", "Qigong"]
     assert tags.anlegen("typ", "Yoga") == "„Yoga“ gibt es schon."
-    assert tags.anlegen("typ", "Schulter") == "„Schulter“ gibt es schon als Region."
+    assert tags.anlegen("typ", "Schulter") == "„Schulter“ ist schon eine Region."  # wie die UI
     assert tags.anlegen("region", "  ") == "Kein Name."
     assert tags.anlegen("typ", "yoga") == "„Yoga“ gibt es schon."  # Groß/klein egal
     # ungenutzt: Zahl 0; ein über die Übung neu angelegter Tag kommt ebenfalls oben hin

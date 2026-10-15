@@ -250,6 +250,16 @@ def test_unbekannte_regel_legt_nichts_lahm() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_physiologische_steuerung_nur_in_der_praxis(monkeypatch) -> None:
+    """Rechtlich gesperrt in solo (docs/recht/00_zweckbestimmung.md) — der Schalter bleibt so."""
+    from trainingsapp.config import ist_aktiv
+
+    monkeypatch.setenv("TRAININGSAPP_EDITION", "solo")
+    assert not ist_aktiv("physiologische_steuerung")
+    monkeypatch.setenv("TRAININGSAPP_EDITION", "praxis")
+    assert ist_aktiv("physiologische_steuerung")
+
+
 def test_migration_erzeugt_das_schema(tmp_path) -> None:
     con = oeffnen(tmp_path / "test.db")
     assert schema_version(con) == 15

@@ -80,15 +80,16 @@ class StreckenKarte:
             border_color=ft.Colors.with_opacity(0.4, POSITION),
             border_stroke_width=1,
         )
+        kacheln, namensnennung = osm_ebenen()
         self.karte = fm.Map(
             height=hoehe,
             initial_center=_ort(mitte),
             initial_zoom=zoom,
             layers=[
-                osm_ebenen()[0],
+                kacheln,
                 fm.PolylineLayer(polylines=[self.linie]),
                 fm.CircleLayer(circles=[self.genauigkeit, self.position]),
-                osm_ebenen()[1],
+                namensnennung,
             ],
         )
         self._gezeigt = 0

@@ -10,6 +10,7 @@ kopiert wurde. Weicht eine Paketübung von ihrem Paketstand ab, steht dort
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
 
@@ -204,7 +205,12 @@ def uebung_detail(
     nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
 
     def zuruecksetzen() -> None:
-        state.pakete.zuruecksetzen([uebung.id])
+        try:
+            state.pakete.zuruecksetzen([uebung.id])
+        except sqlite3.Error as fehler:
+            page.pop_dialog()
+            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht zurückgesetzt: {fehler}")))
+            return
         nachher.danach(state.neu_zeichnen)
         page.pop_dialog()
         page.show_dialog(ft.SnackBar(ft.Text("Auf den Paketstand gesetzt")))

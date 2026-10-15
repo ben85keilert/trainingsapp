@@ -66,6 +66,8 @@ class GpsQuelle(ABC):
     # -- für Unterklassen -----------------------------------------------------
 
     def _sitzung_beginnen(self) -> None:
+        if self.laeuft:  # zweites `starten` ohne `beenden`: der alte Konsument soll enden
+            self._queue.put_nowait(None)
         self._queue = asyncio.Queue()
         self.laeuft = True
         self.meldung = ""

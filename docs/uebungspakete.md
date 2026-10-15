@@ -25,8 +25,9 @@ Tabelle `package` und Spalte `exercise.package_id` seit Migration 014,
 | eine Übung | „Paket „…“, geändert“ hinter der Beschreibung; unten „Auf Paketstand zurücksetzen“ |
 
 **Paketstand.** Jede Übung eines Pakets trägt ihre Standardwerte aus dem Paket
-(`package_standard_json`, genau die Felder des Dateiformats unten: Beschreibung,
-Parameter samt Chips, Ziel, Planparameter, Typen, Regionen, Videos, Variante).
+(`package_standard_json`, genau die Felder des Dateiformats unten: Name, Beschreibung,
+Symbol, Parameter samt Chips, Ziel, Planparameter, Limits, Typen, Regionen, Videos,
+Variante).
 Jeder Import frischt ihn auf; der Start trägt ihn beim Paket „Standard“ nur nach, wo er
 fehlt. Wer einen Typ oder eine Region umbenennt oder löscht, ändert ihn mit — die
 Paketübungen gelten danach nicht als „geändert“ (Ben, 15.10.2026). „Auf Paketstand

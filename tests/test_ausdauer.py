@@ -89,7 +89,7 @@ def test_gehen_nach_stehen_trifft_die_strecke() -> None:
     stand2 = _gang(60, 0.0, t0=ende, start_m=weg_ende, rauschen_m=3.0, seed=4)
     r = rechnen([*stand1, *gehen, *stand2])
     assert r.distanz_m == pytest.approx(420, rel=0.06)
-    assert 290 <= r.bewegt_s <= 320  # Auto-Pause rechnet bis zu 10 s Stand mit
+    assert 290 <= r.bewegt_s <= 305  # Stehzeit vor der Auto-Pause zählt nicht (15.10.)
     assert r.pausiert
 
 

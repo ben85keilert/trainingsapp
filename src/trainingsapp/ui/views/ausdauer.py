@@ -348,6 +348,9 @@ class AusdauerLauf:
                 hrv_id = aufnahme_eintragen(self.state, ergebnis, self.subject_id).id
         r = self.rechner
         mit_gps = self.quelle is not None and bool(r.teilstuecke)
+        if not mit_gps and self.datei_pfad is not None:  # kein Fix: keine leere Datei lassen
+            with contextlib.suppress(OSError):
+                self.datei_pfad.unlink()
         # Wanduhr — mit GPS nie kürzer als die Zeit zwischen erster und letzter Ortung
         dauer = max(self.dauer_s, r.dauer_s) if mit_gps else self.dauer_s
         strecke = training_eintragen(
@@ -1088,7 +1091,7 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         dfa = _dfa_teil(hrv, strecke.started_at)
         if dfa is not None:
             teile.append(karte(titel("DFA α1 — Überblick"), dfa))
-    if strecke.hrv_recording_id:
+    if eintrag is not None:  # nicht nur die ID — die Aufnahme kann gelöscht sein
         teile.append(
             karte(
                 titel("HRV"),

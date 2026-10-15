@@ -20,6 +20,7 @@ Regeln: `data/pakete.py`; Format: `core/pakete.py`; beides in
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
@@ -81,7 +82,12 @@ def import_rueckfrage(
     nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
 
     def ausfuehren() -> None:
-        ergebnis = state.pakete.importieren(inhalt)
+        try:
+            ergebnis = state.pakete.importieren(inhalt)
+        except sqlite3.Error as fehler:  # Datenbank voll, gesperrt …
+            page.pop_dialog()
+            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht importiert: {fehler}")))
+            return
         nachher.danach(state.neu_zeichnen)
         page.pop_dialog()
         teile = [
@@ -168,7 +174,11 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
         datei = dateien[0]
         daten = datei.bytes
         if daten is None and datei.path:
-            daten = Path(datei.path).read_bytes()
+            try:
+                daten = Path(datei.path).read_bytes()
+            except OSError as fehler:
+                melden(f"Die Datei ließ sich nicht lesen: {fehler}")
+                return
         if daten is None:
             melden("Die Datei ließ sich nicht lesen.")
             return
@@ -381,7 +391,12 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
         """„Auf Paketstand setzen“ für eine Übung oder alle geänderten — nach Rückfrage."""
 
         def ausfuehren() -> None:
-            n = state.pakete.zuruecksetzen([z.uebung.id for z in staende_])
+            try:
+                n = state.pakete.zuruecksetzen([z.uebung.id for z in staende_])
+            except sqlite3.Error as fehler:
+                page.pop_dialog()
+                melden(f"Nicht zurückgesetzt: {fehler}")
+                return
             nachher.danach(state.neu_zeichnen)
             page.pop_dialog()
             melden(f"{uebungen_zahl(n)} auf den Paketstand gesetzt")

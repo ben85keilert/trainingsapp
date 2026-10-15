@@ -325,6 +325,8 @@ class StreckenRechner:
             self.teilstuecke.append([p])
             self._gezaehlt = p
             self._hoehe_bezug = p.hoehe_m
+            self._hoehen.clear()  # Höhen von vor dem Tunnel mischen nicht mehr mit
+            self._letzte_bewegung = None  # Bewegung erst, wenn hier wieder welche ist
             return []
         self.teilstuecke[-1].append(p)
 
@@ -352,7 +354,12 @@ class StreckenRechner:
         self.pausiert = (
             self._letzte_bewegung is None or p.t - self._letzte_bewegung >= self.stillstand_s
         )
-        if not (war_pausiert and self.pausiert):
+        if self.pausiert and not war_pausiert:
+            # Die Auto-Pause greift erst nach `stillstand_s` — die Stehzeit bis dahin war
+            # schon gezählt; sie gehört nicht zur Bewegungszeit (15.10.2026).
+            gestanden = vorher.t - self._letzte_bewegung if self._letzte_bewegung else 0.0
+            self.bewegt_s = max(0.0, self.bewegt_s - max(0.0, gestanden))
+        elif not self.pausiert:
             self.bewegt_s += dt
         self._hoehe(p)
         while self.distanz_m >= (len(self.splits) + 1) * self.split_m:

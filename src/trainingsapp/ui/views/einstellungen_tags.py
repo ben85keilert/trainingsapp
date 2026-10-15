@@ -6,8 +6,9 @@ tragen, steht in der Liste, dazu die bisherigen Vorschläge. Neue legt man mit
 Umbenennen ändert ihn dort mit; heißt der neue Name wie ein vorhandener Tag,
 werden beide zusammengeführt. Die Daten macht `data.repositories.TagRepo`.
 
-Später bringen importierte Übungspakete fehlende Typen und Regionen mit
-(`ExerciseRepo.speichern` legt sie an).
+Importierte Übungspakete bringen fehlende Typen und Regionen mit
+(`ExerciseRepo.speichern` legt sie an); umbenannte oder gelöschte Tags zieht der
+Paketstand der Übungen mit (`TagRepo._paketstand_nachziehen`).
 """
 
 from __future__ import annotations

@@ -25,7 +25,6 @@ gehörte, war nicht mehr zu sehen.
 from __future__ import annotations
 
 import contextlib
-import math
 from collections.abc import Callable
 from typing import Any
 
@@ -35,11 +34,13 @@ from trainingsapp.core.result_spec import (
     FieldSpec,
     FieldType,
     ResultSpec,
+    einzelwert_lesen,
     ist_leer,
     skala_titel,
     skala_wert,
+    stellen,
 )
-from trainingsapp.core.units import MAX_WERT, format_dauer, format_sets, parse_dauer, parse_sets
+from trainingsapp.core.units import format_dauer, format_sets, parse_dauer, parse_sets
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import ohne_auto_update
 
@@ -52,12 +53,6 @@ ZAHLENARTIG = {
     FieldType.DURATION,
     FieldType.SCALE,
 }
-
-
-def _stellen(schritt: float) -> int:
-    """Nachkommastellen für die Anzeige des Reglers: 1 → 0, 0.1 → 1."""
-    text = f"{schritt:g}"
-    return len(text.split(".")[1]) if "." in text else 0
 
 
 class SpecForm:
@@ -217,7 +212,7 @@ class SpecForm:
             divisions=max(1, round((hi - lo) / schritt)),
             value=min(max(start, lo), hi),
             label="{value}",
-            round=_stellen(schritt),
+            round=stellen(schritt),
             expand=True,
         )
 
@@ -270,11 +265,7 @@ class SpecForm:
         if f.type == FieldType.BOOL:
             return bool(widget.value)  # type: ignore[attr-defined]
         if f.type == FieldType.SCALE:
-            text = str(widget.value or "").strip().replace(",", ".")  # type: ignore[attr-defined]
-            try:
-                return skala_wert(f, float(text)) if text else None
-            except ValueError:
-                return None
+            return einzelwert_lesen(f, str(widget.value or ""))  # type: ignore[attr-defined]
         if f.type == FieldType.CHOICE:
             auswahl = list(widget.selected or [])  # type: ignore[attr-defined]
             return auswahl[0] if auswahl else None
@@ -287,13 +278,8 @@ class SpecForm:
             return parse_sets(text, zeit=(f.unit == "s"))
         if f.type == FieldType.DURATION:
             return parse_dauer(text)
-        try:
-            zahl = float(text.replace(",", "."))
-        except ValueError:
-            return None
-        if not math.isfinite(zahl) or not 0 <= zahl <= MAX_WERT:
-            return None  # dieselbe Grenze wie in der Notation
-        return int(zahl) if f.type == FieldType.INT else zahl
+        wert = einzelwert_lesen(f, text)  # dieselben Grenzen wie in der Notation
+        return int(wert) if f.type == FieldType.INT and wert is not None else wert
 
     def werte(self) -> dict[str, Any]:
         """Das Ergebnis-Dict. Felder mit leerer oder unbrauchbarer Eingabe fehlen."""

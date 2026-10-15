@@ -27,12 +27,13 @@ alte Einträge nicht mehr sauber darstellbar. Deshalb speichert jeder
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
-from .units import format_dauer, format_sets, satz_summe
+from .units import MAX_WERT, format_dauer, format_sets, parse_dauer, satz_summe
 
 
 class FieldType(StrEnum):
@@ -292,10 +293,46 @@ def _skala_zahl(wert: float, stellen: int) -> str:
     return f"{wert:.{stellen}f}" if stellen else f"{wert:g}"
 
 
-def _stellen(schritt: float | None) -> int:
-    """Nachkommastellen eines Schritts: 1 → 0, 0.1 → 1, 0.05 → 2."""
+def stellen(schritt: float | None) -> int:
+    """Nachkommastellen eines Schritts: 1 → 0, 0.1 → 1, 0.05 → 2.
+
+    >>> stellen(1), stellen(0.5), stellen(0.01), stellen(None)
+    (0, 1, 2, 0)
+    """
     text = f"{schritt or 1:g}"
     return len(text.split(".")[1]) if "." in text else 0
+
+
+_stellen = stellen
+
+
+def einzelwert_lesen(f: FieldSpec, text: str) -> Any:
+    """Ein eingetippter Einzelwert: Zeit als ``1:30``/``90s``, Skala gerastet, sonst Zahl.
+
+    ``None`` bei Unsinn oder außerhalb der Grenzen der Notation (`units.MAX_WERT`,
+    `units.MAX_DAUER_S`) — „1e400“ käme sonst als Unendlich in die Datenbank.
+    Eine Stelle für Plan („Sätze × Wert“, Chips) und Formular (`SpecForm`).
+
+    >>> f = FieldSpec("w", FieldType.FLOAT, "Gewicht", unit="kg")
+    >>> einzelwert_lesen(f, "12,5"), einzelwert_lesen(f, "40"), einzelwert_lesen(f, "1e400")
+    (12.5, 40, None)
+    >>> einzelwert_lesen(FieldSpec("h", FieldType.DURATION, "Halten", unit="s"), "1:30")
+    90.0
+    """
+    text = text.strip()
+    if not text:
+        return None
+    if f.type == FieldType.DURATION or f.unit == "s":
+        return parse_dauer(text)
+    try:
+        zahl = float(text.replace(",", "."))
+    except ValueError:
+        return None
+    if not math.isfinite(zahl) or not 0 <= zahl <= MAX_WERT:
+        return None
+    if f.type == FieldType.SCALE:
+        return skala_wert(f, zahl)
+    return int(zahl) if zahl.is_integer() else zahl
 
 
 def skala_bereich_text(f: FieldSpec) -> str:
@@ -646,6 +683,7 @@ __all__ = [
     "ParameterWert",
     "ResultSpec",
     "basis_label",
+    "einzelwert_lesen",
     "format_wert",
     "ist_altes_satzformat",
     "ist_leer",
@@ -658,6 +696,7 @@ __all__ = [
     "skala_titel",
     "skala_wert",
     "skala_werte",
+    "stellen",
     "vorrat_feld",
     "wert_text",
     "werte_modernisieren",

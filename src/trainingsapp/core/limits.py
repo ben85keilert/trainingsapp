@@ -30,6 +30,7 @@ Siehe `docs/recht/00_zweckbestimmung.md`.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -138,10 +139,20 @@ def auswerten(
 # ---------------------------------------------------------------------------
 
 
+def _zahl(cfg: dict[str, Any], key: str, vorgabe: float) -> float:
+    """Eine Zahl aus der Regel — Unlesbares (``"abc"``, ``None``) wird zur Vorgabe statt
+    zum Absturz: Eine alte oder fremde Übungsdefinition darf die App nicht lahmlegen."""
+    try:
+        wert = float(cfg.get(key, vorgabe))
+    except (TypeError, ValueError):
+        return vorgabe
+    return wert if math.isfinite(wert) else vorgabe
+
+
 @register("timer")
 def _timer(state: TrainingState, cfg: dict[str, Any]) -> Entscheidung | None:
     """Feste Dauer, vom Nutzer gesetzt."""
-    ziel = float(cfg.get("seconds", 0))
+    ziel = _zahl(cfg, "seconds", 0.0)
     if ziel > 0 and state.elapsed_s >= ziel:
         return Entscheidung(Action.STOP, f"{ziel:.0f} s erreicht", "timer")
     return None
@@ -150,7 +161,7 @@ def _timer(state: TrainingState, cfg: dict[str, Any]) -> Entscheidung | None:
 @register("counter")
 def _counter(state: TrainingState, cfg: dict[str, Any]) -> Entscheidung | None:
     """Feste Wiederholungszahl."""
-    ziel = int(cfg.get("target", 0))
+    ziel = int(_zahl(cfg, "target", 0))
     if ziel > 0 and state.reps >= ziel:
         return Entscheidung(Action.STOP, f"{ziel} Wiederholungen", "counter")
     return None
@@ -159,7 +170,7 @@ def _counter(state: TrainingState, cfg: dict[str, Any]) -> Entscheidung | None:
 @register("rest_timer")
 def _rest_timer(state: TrainingState, cfg: dict[str, Any]) -> Entscheidung | None:
     """Feste Pausendauer zwischen Sätzen."""
-    ziel = float(cfg.get("seconds", 0))
+    ziel = _zahl(cfg, "seconds", 0.0)
     if state.in_pause and ziel > 0 and state.rest_elapsed_s >= ziel:
         return Entscheidung(Action.WEITER, "Pause vorbei", "rest_timer")
     return None
@@ -175,8 +186,8 @@ def _hr_above(state: TrainingState, cfg: dict[str, Any]) -> Entscheidung | None:
     """Pause, wenn der Puls eine Schwelle lange genug überschreitet."""
     if state.hf_bpm is None:
         return None
-    schwelle = float(cfg.get("bpm", 0))
-    halten_s = float(cfg.get("hold_seconds", 0))
+    schwelle = _zahl(cfg, "bpm", 0.0)
+    halten_s = _zahl(cfg, "hold_seconds", 0.0)
     gehalten = state.condition_held_s.get("hr_above", 0.0)
     if schwelle > 0 and state.hf_bpm >= schwelle and gehalten >= halten_s:
         return Entscheidung(Action.PAUSE, f"Puls {state.hf_bpm:.0f} ≥ {schwelle:.0f}", "hr_above")
@@ -192,9 +203,9 @@ def _rest_until_hr_below(state: TrainingState, cfg: dict[str, Any]) -> Entscheid
     """
     if not state.in_pause or state.hf_bpm is None:
         return None
-    schwelle = float(cfg.get("bpm", 0))
-    hysterese = float(cfg.get("hysteresis_bpm", 3))
-    timeout = float(cfg.get("timeout_seconds", 0))
+    schwelle = _zahl(cfg, "bpm", 0.0)
+    hysterese = _zahl(cfg, "hysteresis_bpm", 3.0)
+    timeout = _zahl(cfg, "timeout_seconds", 0.0)
 
     if schwelle > 0 and state.hf_bpm <= schwelle - hysterese:
         return Entscheidung(Action.WEITER, f"Puls {state.hf_bpm:.0f} erholt", "rest_until_hr_below")

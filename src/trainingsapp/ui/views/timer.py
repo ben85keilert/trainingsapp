@@ -200,7 +200,11 @@ def ticker_starten(page: Any, state: AppState) -> None:
                 await _wach(state, False)
 
     state.timer_aufgabe = True
-    page.run_task(ticken)
+    try:
+        page.run_task(ticken)
+    except Exception:  # Seite schon weg — sonst startete bis zum Neustart kein Ticker mehr
+        state.timer_aufgabe = None
+        raise
 
 
 # ---------------------------------------------------------------------------

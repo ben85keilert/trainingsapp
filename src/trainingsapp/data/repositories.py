@@ -46,6 +46,7 @@ from ..core.models import (
     jetzt,
     lokaler_tag,
     new_id,
+    tag_name_pruefen,
     tagesgrenzen,
 )
 from ..core.pakete import stand_tag_nachziehen
@@ -671,12 +672,26 @@ class PlanRepo:
                 "(SELECT id FROM exercise WHERE deleted_at IS NOT NULL)",
                 (plan.id,),
             )
-            versteckt = self.con.execute(
-                "SELECT COUNT(*) FROM plan_item WHERE plan_id = ?", (plan.id,)
-            ).fetchone()[0]
-            for reihenfolge, item in enumerate(plan.items, start=versteckt):
+            # Versteckte (Übung im Papierkorb) lückenlos nach vorn, die Liste dahinter —
+            # sonst gab es doppelte sort_order; ein verstecktes Item, das noch in
+            # ``plan.items`` steckt, wird nicht ein zweites Mal geschrieben.
+            versteckte = [
+                r["id"]
+                for r in self.con.execute(
+                    "SELECT id FROM plan_item WHERE plan_id = ? ORDER BY sort_order", (plan.id,)
+                )
+            ]
+            for reihenfolge, item_id in enumerate(versteckte):
+                self.con.execute(
+                    "UPDATE plan_item SET sort_order = ? WHERE id = ?", (reihenfolge, item_id)
+                )
+            reihenfolge = len(versteckte)
+            for item in plan.items:
+                if item.id in versteckte:
+                    continue
                 item.plan_id = plan.id
                 item.order = reihenfolge
+                reihenfolge += 1
                 self._item_schreiben(item)
 
     def uebung_hinzufuegen(
@@ -1263,11 +1278,13 @@ class SessionRepo:
             or any(aktuell.result.get(k) != kontext.get(k) for k in felder)
         ):
             return self.eintrag_anlegen(session, uebung, {**kontext, feld_key: wert})
-        basis = werte_modernisieren(aktuell.result)
+        # Wie `satz_anhaengen`: Kennt die Kopie das Feld, bleiben Werte und Kopie, wie sie
+        # sind; sonst bekommt der Eintrag die heutige Spezifikation samt übersetzten Werten.
         kopie = aktuell.spec_snapshot
-        neue_kopie = (
-            None if kopie is not None and kopie.field_by_key(feld_key) else uebung.result_spec
-        )
+        if kopie is not None and kopie.field_by_key(feld_key):
+            basis, neue_kopie = dict(aktuell.result), None
+        else:
+            basis, neue_kopie = werte_modernisieren(aktuell.result), uebung.result_spec
         return self.eintrag_korrigieren(aktuell.id, {**basis, feld_key: wert}, spec=neue_kopie)
 
     def eintrag_notiz_setzen(
@@ -1721,20 +1738,20 @@ class TagRepo:
 
     def anlegen(self, art: str, name: str) -> str | None:
         """Neuer Tag oben in der Liste. Zurück kommt ein Hinweis, falls es ihn schon gibt."""
-        name = name.strip()
-        if not name:
-            return "Kein Name."
-        # „dehnung" ist „Dehnung" — Groß und klein trennen keine Tags
-        r = self.con.execute(
-            "SELECT name, kind FROM tag WHERE name = ? COLLATE NOCASE", (name,)
-        ).fetchone()
-        if r is not None:
-            return (
-                f"„{r['name']}“ gibt es schon."
-                if r["kind"] == art
-                else f"„{r['name']}“ gibt es schon als "
-                f"{'Typ' if r['kind'] == TAG_TYP else 'Region'}."
-            )
+        vorhandene = self.con.execute("SELECT name, kind FROM tag").fetchall()
+        gleiche = [r["name"] for r in vorhandene if r["kind"] == art]
+        andere = [r["name"] for r in vorhandene if r["kind"] != art]
+        # „dehnung" ist „Dehnung" — Groß und klein trennen keine Tags (eine Prüfung
+        # für Oberfläche und Datenbank: `core.models.tag_name_pruefen`)
+        geprueft, fehler = tag_name_pruefen(
+            name, gleiche, andere, "ein Typ" if art == TAG_REGION else "eine Region"
+        )
+        if fehler is not None:
+            return "Kein Name." if fehler == "Name?" else fehler
+        assert geprueft is not None
+        if geprueft in gleiche:
+            return f"„{geprueft}“ gibt es schon."
+        name = geprueft
         self.con.execute(
             "INSERT INTO tag (id, name, kind, sort) "
             "VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort), 0) + 1 FROM tag))",

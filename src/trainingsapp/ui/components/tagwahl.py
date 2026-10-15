@@ -38,6 +38,8 @@ from collections.abc import Callable, Iterable
 
 import flet as ft
 
+from trainingsapp.core.models import tag_name_pruefen
+
 #: Breite der aufgeklappten Liste (px) — passt auf jedes Handy
 LISTE_BREITE = 260
 #: Höhe einer Zeile und höchstens sichtbare Höhe der Liste (px)
@@ -63,29 +65,8 @@ def wahl_text(wahl: list[str]) -> str:
     return ", ".join(wahl) or "alle"
 
 
-def neuer_name(
-    text: str, gleiche: list[str], andere: list[str], andere_art: str = "eine Region"
-) -> tuple[str | None, str | None]:
-    """Prüft einen neuen Tag-Namen: (Name, None) oder (None, Fehlertext).
-
-    Groß und klein trennen keine Tags — wer „dehnung“ tippt, bekommt „Dehnung“.
-
-    >>> neuer_name(" Qigong ", ["Dehnung"], ["Bein"])
-    ('Qigong', None)
-    >>> neuer_name("dehnung", ["Dehnung"], [])
-    ('Dehnung', None)
-    >>> neuer_name("bein", [], ["Bein"])
-    (None, '„Bein“ ist schon eine Region.')
-    >>> neuer_name("  ", [], [])
-    (None, 'Name?')
-    """
-    text = " ".join(text.split())
-    if not text:
-        return None, "Name?"
-    if fremd := [n for n in andere if n.casefold() == text.casefold()]:
-        return None, f"„{fremd[0]}“ ist schon {andere_art}."
-    gleich = [n for n in gleiche if n.casefold() == text.casefold()]
-    return (gleich[0] if gleich else text), None
+#: Die Namensprüfung lebt in `core.models.tag_name_pruefen` — hier nur der alte Name
+neuer_name = tag_name_pruefen
 
 
 class TagWahl:

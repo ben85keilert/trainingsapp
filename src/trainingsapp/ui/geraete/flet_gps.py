@@ -71,6 +71,8 @@ class FletGpsQuelle(GpsQuelle):
             self.meldung = str(fehler) or type(fehler).__name__
 
     async def starten(self, intervall_s: float) -> None:
+        if self.laeuft:
+            await self.beenden()
         self._sitzung_beginnen()
         self.geo.configuration = fgl.GeolocatorAndroidConfiguration(
             accuracy=fgl.GeolocatorPositionAccuracy.BEST,

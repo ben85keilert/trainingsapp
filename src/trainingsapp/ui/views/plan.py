@@ -54,7 +54,6 @@ Formular zurück, stellt `scroll_merken` die Position wieder her.
 from __future__ import annotations
 
 import contextlib
-import math
 from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
@@ -81,14 +80,16 @@ from trainingsapp.core.result_spec import (
     FieldType,
     ParameterWert,
     basis_label,
+    einzelwert_lesen,
     format_wert,
     ist_leer,
     skala_bereich_text,
     skala_wert,
+    stellen,
 )
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tagesbilanz import buendeln
-from trainingsapp.core.units import MAX_SAETZE, MAX_WERT, parse_anzahl, parse_dauer
+from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
@@ -118,24 +119,6 @@ def hauptfeld(uebung: Exercise) -> FieldSpec | None:
 def chip_text(feld: FieldSpec, wert: Any) -> str:
     """Satzfelder zeigen den rohen Wert („+15"), andere ihre Schreibweise („45°")."""
     return str(wert) if feld.type == FieldType.SET_LIST else format_wert(feld, wert)
-
-
-def _zahl_lesen(feld: FieldSpec, text: str) -> Any:
-    """Ein eingetippter Einzelwert — Zeit als 1:30, sonst Zahl; ``None`` bei Unsinn."""
-    text = text.strip()
-    if not text:
-        return None
-    if feld.type == FieldType.DURATION:
-        return parse_dauer(text)
-    try:
-        zahl = float(text.replace(",", "."))
-    except ValueError:
-        return None
-    if not math.isfinite(zahl) or not 0 <= zahl <= MAX_WERT:
-        return None  # „1e400“ ist inf — und ließe jede Ansicht des Tages abstürzen
-    if feld.type == FieldType.SCALE:
-        return skala_wert(feld, zahl)
-    return int(zahl) if zahl.is_integer() else zahl
 
 
 def _kleines_feld(feld: FieldSpec) -> ft.TextField:
@@ -174,16 +157,6 @@ def _zahlfeld(
         text_align=ft.TextAlign.CENTER,
         border=ft.OutlineInputBorder(border_radius=12),
     )
-
-
-def _stellen(schritt: float) -> int:
-    """Nachkommastellen eines Schritts: 1 → 0, 0.5 → 1, 0.01 → 2.
-
-    >>> _stellen(1), _stellen(0.5), _stellen(0.01)
-    (0, 1, 2)
-    """
-    text = f"{schritt:g}"
-    return len(text.split(".")[1]) if "." in text else 0
 
 
 def _zeigen(control: ft.Control) -> None:
@@ -366,7 +339,7 @@ def plan_view(
         """Eigener Wert einer Ausprägung (52°) — gilt wie ein angetippter Chip."""
 
         def handler() -> None:
-            wert = _zahl_lesen(feld, eingabe.value or "")
+            wert = einzelwert_lesen(feld, eingabe.value or "")
             if wert is None:
                 eingabe.error = "?"
                 page.update()
@@ -382,7 +355,7 @@ def plan_view(
         """Den Wert im Feld abschicken — der Regler hat ihn dort hineingeschrieben."""
 
         def handler() -> None:
-            wert = _zahl_lesen(feld, eingabe.value or "")
+            wert = einzelwert_lesen(feld, eingabe.value or "")
             if wert is None:
                 eingabe.error = "?" if (eingabe.value or "").strip() else "Wert?"
                 page.update()
@@ -433,7 +406,7 @@ def plan_view(
 
         def handler() -> None:
             text = (wert_feld.value or "").strip()
-            wert = parse_dauer(text) if feld.unit == "s" else _zahl_lesen(feld, text)
+            wert = einzelwert_lesen(feld, text)
             n_text = (anzahl_feld.value or "").strip()
             anzahl = parse_anzahl(n_text) if n_text else 1
             wert_feld.error = None if wert is not None and wert > 0 else "Wert?"
@@ -451,7 +424,7 @@ def plan_view(
         """Ein Einzelwert (Zeit gesamt, Strecke …): ein Eintrag, dazu das übrige Ziel."""
 
         def handler() -> None:
-            wert = _zahl_lesen(feld, eingabe.value or "")
+            wert = einzelwert_lesen(feld, eingabe.value or "")
             if wert is None:
                 eingabe.error = "Wert?" if not (eingabe.value or "").strip() else "Ungültig"
                 page.update()
@@ -837,7 +810,7 @@ def plan_view(
             divisions=max(1, round((hi - lo) / schritt)),
             value=min(max(start, lo), hi),
             label="{value}",
-            round=_stellen(schritt),
+            round=stellen(schritt),
             expand=True,
         )
 
@@ -850,7 +823,7 @@ def plan_view(
 
         def getippt(_: ft.Event[ft.TextField]) -> None:
             ohne_auto_update()
-            wert = _zahl_lesen(feld, eingabe.value or "")
+            wert = einzelwert_lesen(feld, eingabe.value or "")
             if wert is not None:
                 regler.value = float(wert)
                 _zeigen(regler)

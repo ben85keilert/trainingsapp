@@ -32,6 +32,7 @@ nur auf dem Gerät und bleiben draußen; Video-Links kommen mit.
 from __future__ import annotations
 
 import json
+import math
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -59,6 +60,10 @@ STANDARD_SPEC = "saetze_wdh"
 
 #: Kein Paket heißt so — eigene Übungen gehören zu keinem Paket (Ben, 14.10.2026)
 _EIGENE = {"eigene", "eigene übungen"}
+
+
+#: Größer ist kein Übungspaket mehr (33 Übungen = 30 kB; 5 MB lassen Platz für Texte)
+MAX_PAKET_BYTES = 5_000_000
 
 
 class PaketFehler(ValueError):
@@ -162,9 +167,13 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
     if isinstance(daten, dict):
         roh: Any = daten
     else:
+        if len(daten) > MAX_PAKET_BYTES:
+            raise PaketFehler(
+                f"Die Datei ist zu groß für ein Übungspaket ({len(daten) / 1e6:.0f} MB)."
+            )
         try:
             roh = json.loads(daten)
-        except ValueError:  # auch UnicodeDecodeError
+        except (ValueError, RecursionError):  # auch UnicodeDecodeError, tief verschachtelt
             raise PaketFehler("Das ist keine Paketdatei (kein JSON).") from None
     if not isinstance(roh, dict) or roh.get("format", FORMAT) != FORMAT:
         raise PaketFehler("Das ist keine Paketdatei.")
@@ -242,6 +251,11 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
         if kurz not in VORLAGEN:
             raise ValueError(f"unbekannte Eingabe „{kurz}“")
         spec = ResultSpec.from_dict(VORLAGEN[kurz][1].to_dict())  # Kopie, nicht die Vorlage
+    _spec_zahlen_pruefen(spec)
+    limit_spec = _objekt(eintrag.get("limit_spec", {}), "limit_spec")
+    _werte_pruefen(limit_spec, "limit_spec")
+    default_target = _objekt(eintrag.get("default_target", {}), "default_target")
+    _werte_pruefen(default_target, "default_target")
     felder = eintrag.get("default_felder")
     variante = str(eintrag.get("variante_von") or "").strip()
     return (
@@ -252,8 +266,8 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             icon_key=str(eintrag["icon_key"]) if eintrag.get("icon_key") else None,
             is_builtin=paket == GRUNDAUSSTATTUNG,
             result_spec=spec,
-            limit_spec=_objekt(eintrag.get("limit_spec", {}), "limit_spec"),
-            default_target=_objekt(eintrag.get("default_target", {}), "default_target"),
+            limit_spec=limit_spec,
+            default_target=default_target,
             default_felder=None if felder is None else _texte(felder, "default_felder"),
             media=[
                 m
@@ -271,6 +285,41 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
 
 def _ganzzahl(wert: Any) -> bool:
     return isinstance(wert, int) and not isinstance(wert, bool)
+
+
+def _zahl(wert: Any) -> bool:
+    return isinstance(wert, int | float) and not isinstance(wert, bool) and math.isfinite(wert)
+
+
+def _spec_zahlen_pruefen(spec: ResultSpec) -> None:
+    """``min``, ``max``, ``step`` sind Zahlen; ``default`` und ``quick`` Zahlen, Texte oder
+    Satzlisten — ``"seconds": "abc"`` stürzte sonst erst in der Eingabemaske ab (K8)."""
+    for f in spec.fields:
+        for name in ("min", "max", "step"):
+            wert = getattr(f, name)
+            if wert is not None and not _zahl(wert):
+                raise ValueError(f"Parameter „{f.key}“: „{name}“ ist keine Zahl")
+        for wert in [f.default, *f.quick]:
+            if wert is None or isinstance(wert, str | bool) or _zahl(wert):
+                continue
+            if isinstance(wert, list) and all(_zahl(x) for x in wert):
+                continue
+            raise ValueError(f"Parameter „{f.key}“: Vorgabe oder Chip „{wert}“ ist keine Zahl")
+
+
+def _werte_pruefen(obj: Any, feld: str) -> None:
+    """Nur JSON-einfache Werte: Zahlen (endlich), Texte, Wahrheitswerte, Listen, Objekte."""
+    if obj is None or isinstance(obj, str | bool) or _zahl(obj):
+        return
+    if isinstance(obj, list):
+        for x in obj:
+            _werte_pruefen(x, feld)
+        return
+    if isinstance(obj, dict):
+        for x in obj.values():
+            _werte_pruefen(x, feld)
+        return
+    raise ValueError(f"„{feld}“ enthält einen ungültigen Wert: {obj!r}")
 
 
 def _objekt(wert: Any, feld: str) -> dict[str, Any]:

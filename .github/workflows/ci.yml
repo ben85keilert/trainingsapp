@@ -20,13 +20,13 @@ jobs:
         working-directory: trainingsapp
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: trainingsapp
 
       - name: hrv-core (gemeinsame HRV-Bibliothek) auschecken
         # Öffentliches Repo (AGPL-3.0) — kein eigenes Token nötig.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ben85keilert/hrv-core
           path: hrv-core

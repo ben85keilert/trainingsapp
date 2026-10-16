@@ -48,14 +48,14 @@ jobs:
           sudo docker image prune --all --force > /dev/null || true
           df -h /
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: trainingsapp
           fetch-depth: 0 # Build-Nummer = Zahl der Commits
 
       - name: hrv-core (gemeinsame HRV-Bibliothek) auschecken
         # Öffentliches Repo (AGPL-3.0) — kein eigenes Token nötig.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ben85keilert/hrv-core
           path: hrv-core

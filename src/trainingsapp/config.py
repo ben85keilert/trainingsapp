@@ -2,7 +2,9 @@
 
 Zwei Editionen aus einem Quelltext:
 
-- **solo** — autark, alle Daten bleiben auf dem Gerät. Kein Netzwerkpfad.
+- **solo** — autark, alle Daten bleiben auf dem Gerät. Nach außen gehen nur,
+  abschaltbar: Kartenkacheln, Update-Prüfung (App-Release, Paketquellen — nur
+  Versionsnummern), verlinkte Videos.
 - **praxis** — Anbindung an die Praxisdatenbank, Therapeut↔Patient.
 
 Die Edition kommt aus der Umgebungsvariable ``TRAININGSAPP_EDITION`` oder aus
@@ -72,6 +74,9 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     # Update-Hinweis aus den öffentlichen GitHub-Releases (core/update.py). Die
     # Praxis-Edition bekommt ihre APK von der Praxis, nicht von GitHub.
     "update_pruefung": {Edition.SOLO},
+    # Paketquellen (core/paketquelle.py): Übungspakete online auf neue Stände prüfen.
+    # Die Praxis-Edition bekommt ihre Pakete von der Praxis.
+    "paket_quellen": {Edition.SOLO},
 }
 
 

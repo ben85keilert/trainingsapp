@@ -88,6 +88,9 @@ from trainingsapp.ui.views.timer import (
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 from trainingsapp.ui.views.uebung_detail import uebung_detail
 from trainingsapp.ui.views.uebungen import neuen_plan_anlegen, uebungen
+from trainingsapp.ui.views.updates import ROUTE as UPDATES_ROUTE
+from trainingsapp.ui.views.updates import beim_start as updates_beim_start
+from trainingsapp.ui.views.updates import updates_view
 from trainingsapp.ui.views.verlauf import verlauf
 from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
 
@@ -140,6 +143,29 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
         await page.push_route("/uebung/neu")
 
     koerper = ft.Container(expand=True, content=inhalt())
+
+    async def zu_updates() -> None:
+        await page.push_route(UPDATES_ROUTE)
+
+    # Label unter dem Zahnrad (Ben, 16.10.2026): „Updates verfügbar: 2 Pakete, App“ — einmal
+    # je Stand, bis die Seite „Updates“ geöffnet wurde (`AppState.updates_label`).
+    label_text = state.updates_label()
+    label: list[ft.Control] = (
+        [
+            ft.Container(
+                alignment=ft.Alignment.CENTER_RIGHT,
+                padding=ft.Padding.only(right=8),
+                content=ft.TextButton(
+                    label_text,
+                    icon=ft.Icons.SYSTEM_UPDATE,
+                    style=ft.ButtonStyle(text_style=ft.TextStyle(size=12)),
+                    on_click=zu_updates,
+                ),
+            )
+        ]
+        if label_text
+        else []
+    )
     ansicht = ft.View(
         route="/",
         padding=0,
@@ -166,7 +192,7 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
                 ft.NavigationBarDestination(label=label, icon=icon) for _, label, icon in reiter
             ],
         ),
-        controls=[koerper],
+        controls=[*label, koerper],
     )
 
     def hauptansicht_aktualisieren() -> None:
@@ -407,6 +433,8 @@ def main(page: ft.Page) -> None:
                 paket_routen("/einstellungen/pakete", teile[2:])
             elif teile[1:2] == ["gps-test"]:
                 page.views.append(gps_test_view(page, state))
+            elif teile[1:2] == ["updates"]:
+                page.views.append(updates_view(page, state, browser))
         elif teile[:1] == ["pakete"]:
             paket_routen("/pakete", teile[1:])
         elif teile[:1] == ["archiv"]:
@@ -475,6 +503,8 @@ def main(page: ft.Page) -> None:
         page.show_dialog(backup_dialog(page, state))
     for paket, offene_uebungen, offene_kurse in state.entfallene:  # aus dem Paket gefallen
         page.show_dialog(entfallene_dialog(page, state, paket, offene_uebungen, offene_kurse))
+    # Updates im Hintergrund (Paketquellen, App-Release) — blockiert das Zeichnen nicht
+    page.run_task(updates_beim_start, page, state)
 
 
 if __name__ == "__main__":

@@ -31,8 +31,12 @@
   14.10.2026) liegen getrennt von den Messungen und gehen weder in Export,
   Synchronisation noch Diagnose; hinaus nur per ausdrücklichem GPX-Export der
   Person (`docs/plan_gps.md`, Regel 0). Bei der Bluetooth-Berechtigung weiter
-  `neverForLocation`. Einzige Verbindung nach außen: die Karte holt Kacheln von
-  OpenStreetMap (grobe Kachelkoordinaten), abschaltbar, mit einmaligem Hinweis.
+  `neverForLocation`. Verbindungen nach außen, alle abschaltbar und mit einmaligem
+  Hinweis, nie mit eigenen Daten: die Karte holt Kacheln von OpenStreetMap (grobe
+  Kachelkoordinaten); die Update-Prüfung fragt beim Start die GitHub-Releases der
+  App und die eingetragenen Paketquellen (Vorgabe: der Server des Herstellers) nur
+  nach Versionsnummern — übertragen werden IP-Adresse und der Name der App
+  (`docs/uebungspakete.md`, „Paketquellen“; seit 16.10.2026).
 
 ## Verfügbarkeit
 

@@ -140,3 +140,49 @@ def test_ohne_paketordner_passiert_nichts(tmp_path, monkeypatch) -> None:
     s = AppState.starten(tmp_path / "app.db")
     assert s.paketfehler == [f"Paketordner nicht gefunden: {tmp_path / 'gibt_es_nicht'}"]
     s.schliessen()
+
+
+def test_paketquellen_und_update_einstellungen(state) -> None:
+    from trainingsapp.core.paketquelle import QUELLE_VORGABE
+
+    assert state.paketquellen() == ([QUELLE_VORGABE] if QUELLE_VORGABE else [])
+    state.paketquellen_setzen(["https://a.de/i.json", "http://unsicher", "https://b.de/i.json"])
+    assert state.paketquellen() == ["https://a.de/i.json", "https://b.de/i.json"]
+    assert state.update_pruefung() is True
+    state.update_pruefung_setzen(False)
+    assert state.update_pruefung() is False
+    assert state.benachrichtigung() == "updates"
+    state.benachrichtigung_setzen("unsinn")
+    assert state.benachrichtigung() == "updates"
+    state.benachrichtigung_setzen("alles")
+    assert state.benachrichtigung() == "alles"
+
+
+def test_updates_label_zeigt_jeden_stand_einmal(state) -> None:
+    from trainingsapp.core.pakete import Paket
+    from trainingsapp.core.paketquelle import IndexEintrag, PaketUpdate, Pruefung
+    from trainingsapp.core.update import Release
+    from trainingsapp.ui.state import UpdateStand
+
+    assert state.updates_label() is None
+    e = IndexEintrag("p1", "Dehnung", 2, "https://x/d.json", "", 0, "q")
+    neu = IndexEintrag("p2", "Yoga", 1, "https://x/y.json", "", 0, "q")
+    pruefung = Pruefung(
+        updates=[PaketUpdate(e, Paket(id="p1", name="Dehnung", version=1))], neue=[neu]
+    )
+    app = Release("0.3.0", 130, "v0.3.0", "u", "s", "", "")
+    state.updates = UpdateStand(pruefung, app=app, eingespielt=[("p3", "Kräftigung", 4)])
+    assert state.updates_label() == "Updates verfügbar: 1 Paket, App, aktualisiert: Kräftigung"
+    state.benachrichtigung_setzen("alles")
+    assert state.updates_label().endswith(" · 1 neues Paket in den Quellen")
+    state.benachrichtigung_setzen("aus")
+    assert state.updates_label() is None
+    state.benachrichtigung_setzen("updates")
+
+    state.updates_gesehen_markieren()  # Seite „Updates“ geöffnet
+    assert state.updates_label() is None
+    pruefung.updates[0] = PaketUpdate(
+        IndexEintrag("p1", "Dehnung", 3, "https://x/d.json", "", 0, "q"),
+        Paket(id="p1", name="Dehnung", version=1),
+    )
+    assert state.updates_label() == "Updates verfügbar: 1 Paket"  # höhere Version: wieder da

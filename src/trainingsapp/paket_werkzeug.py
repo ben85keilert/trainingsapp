@@ -32,6 +32,7 @@ from trainingsapp.core.pakete import (
     dateiname,
     paket_json,
 )
+from trainingsapp.core.paketquelle import INDEX_FORMAT, INDEX_VERSION
 from trainingsapp.data.seed import seed_inhalt
 
 #: Typen und Regionen des Pakets „Standard“ — ein Paket darf eigene mitbringen
@@ -55,10 +56,6 @@ STANDARD_TYPEN: frozenset[str] = frozenset(
 STANDARD_REGIONEN: frozenset[str] = frozenset(
     {"Nacken", "Schulter", "Arm", "Hand", "Rumpf", "Rücken", "Hüfte", "Bein", "Fuß"}
 )
-#: Kennung des Index einer Paketquelle (Schritt 2: `core/paketquelle.py` liest ihn)
-INDEX_FORMAT = "trainingsapp-paketindex"
-INDEX_VERSION = 1
-
 _KEY = re.compile(r"[a-z0-9_]+")
 
 

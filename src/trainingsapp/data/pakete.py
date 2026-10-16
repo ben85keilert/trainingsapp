@@ -369,6 +369,41 @@ class PaketRepo:
     def aktivieren(self, paket_id: str) -> None:
         self.con.execute("UPDATE package SET disabled_at = NULL WHERE id = ?", (paket_id,))
 
+    # -- Paketquellen (Migration 017) ----------------------------------------
+
+    def verfuegbar_setzen(
+        self, paket_id: str, version: int, url: str, sha256: str, neuigkeiten: str = ""
+    ) -> None:
+        """Was die Quelle meldet — bis `verfuegbar_loeschen` nach dem Einspielen."""
+        self.con.execute(
+            "UPDATE package SET available_version = ?, available_url = ?, "
+            "available_sha256 = ?, available_news = ?, checked_at = ? WHERE id = ?",
+            (version, url, sha256, neuigkeiten, jetzt().isoformat(), paket_id),
+        )
+
+    def verfuegbar_loeschen(self, paket_id: str) -> None:
+        self.con.execute(
+            "UPDATE package SET available_version = NULL, available_url = NULL, "
+            "available_sha256 = NULL, available_news = NULL WHERE id = ?",
+            (paket_id,),
+        )
+
+    def geprueft_setzen(self) -> None:
+        """Alle installierten Pakete: zuletzt geprüft jetzt."""
+        self.con.execute(
+            "UPDATE package SET checked_at = ? WHERE removed_at IS NULL", (jetzt().isoformat(),)
+        )
+
+    def update_modus_setzen(self, paket_id: str, modus: str) -> None:
+        """``"auto"`` (beim Start einspielen) oder ``"manuell"`` (nur vormerken)."""
+        if modus not in ("auto", "manuell"):
+            raise ValueError(f"Unbekannter Update-Modus: {modus!r}")
+        self.con.execute("UPDATE package SET update_mode = ? WHERE id = ?", (modus, paket_id))
+
+    def quelle_setzen(self, paket_id: str, url: str | None) -> None:
+        """Woher das Paket zuletzt kam — nach einem Import aus einer Quelle."""
+        self.con.execute("UPDATE package SET source_url = ? WHERE id = ?", (url, paket_id))
+
     # -- Nicht mehr im Paket (Migration 017) ----------------------------------
 
     def entfallene(self, paket_id: str) -> list[Exercise]:
@@ -917,7 +952,12 @@ class PaketRepo:
             entfernt=datetime.fromisoformat(r["removed_at"]) if r["removed_at"] else None,
             deaktiviert=datetime.fromisoformat(r["disabled_at"]) if r["disabled_at"] else None,
             update_modus=r["update_mode"] or "auto",
+            quelle=r["source_url"],
             verfuegbar=r["available_version"],
+            verfuegbar_url=r["available_url"],
+            verfuegbar_sha256=r["available_sha256"],
+            verfuegbar_neuigkeiten=r["available_news"] or "",
+            geprueft=datetime.fromisoformat(r["checked_at"]) if r["checked_at"] else None,
         )
 
 

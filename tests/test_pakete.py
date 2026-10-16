@@ -763,3 +763,32 @@ def test_groesse_zaehlt_texte_und_lokale_dateien(con, tmp_path) -> None:
     baum.media.append(Media(kind=MediaKind.VIDEO, source=MediaSource.LOCAL, uri="fehlt.mp4"))
     repo.speichern(baum)
     assert pakete.groesse(inhalt.paket.id, tmp_path) == (texte, 6000)
+
+
+def test_quellenfelder_am_paket(con) -> None:
+    pakete = PaketRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    pid = inhalt.paket.id
+    assert pakete.laden(pid).verfuegbar is None and pakete.laden(pid).update_modus == "auto"
+    pakete.verfuegbar_setzen(pid, 2, "https://x/q.json", "ab", "Neu: Lotus")
+    p = pakete.laden(pid)
+    assert (p.verfuegbar, p.verfuegbar_url, p.verfuegbar_sha256, p.verfuegbar_neuigkeiten) == (
+        2,
+        "https://x/q.json",
+        "ab",
+        "Neu: Lotus",
+    )
+    assert p.geprueft is not None
+    pakete.update_modus_setzen(pid, "manuell")
+    assert pakete.laden(pid).update_modus == "manuell"
+    with pytest.raises(ValueError):
+        pakete.update_modus_setzen(pid, "sofort")
+    pakete.quelle_setzen(pid, "https://x/q.json")
+    pakete.verfuegbar_loeschen(pid)
+    p = pakete.laden(pid)
+    assert p.quelle == "https://x/q.json" and p.verfuegbar is None and p.verfuegbar_url is None
+    pakete.importieren(paket_lesen(qigong(version=2)))  # ein Import rührt die Felder nicht an
+    assert pakete.laden(pid).update_modus == "manuell" and pakete.laden(pid).quelle is not None
+    pakete.geprueft_setzen()
+    assert all(p.geprueft is not None for p, _ in pakete.alle())

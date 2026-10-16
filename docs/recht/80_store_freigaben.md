@@ -39,7 +39,7 @@ Angaben. Ein gemeinsamer Eintrag wäre für Edition A falsch.
 | Foreground Service (`connectedDevice`) | Messung läuft weiter, wenn der Bildschirm aus ist |
 | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` (seit 14.10.2026) | Strecke beim Ausdauertraining aufzeichnen (Gehen, Laufen, Rad) — nur während eines Trainings oder GPS-Tests, nur auf dem Gerät gespeichert, nie übertragen |
 | Foreground Service (`location`) | GPS läuft weiter, wenn der Bildschirm aus ist |
-| `INTERNET` | Kartenkacheln (OpenStreetMap) und verlinkte Videos; keine eigenen Daten |
+| `INTERNET` | Kartenkacheln (OpenStreetMap), verlinkte Videos, Update-Prüfung (GitHub-Releases der App, Paketquellen — nur Versionsnummern, abschaltbar, Hinweis beim ersten Mal); keine eigenen Daten |
 
 `neverForLocation` bleibt bei Bluetooth: Die Standortberechtigung gilt dem
 Ausdauertraining, nicht dem Sensor. Im Store-Formular „Standort“ ehrlich

@@ -140,14 +140,17 @@ gh workflow run apk.yml                     # APK als Artefakt am Lauf (ZIP, 30 
    und hängt die APK an das Release (Pre-Release). Download ohne Anmeldung.
 
 
-**Update aus der App heraus (Android):** Einstellungen → App → „Nach Updates
-suchen“ fragt die GitHub-Releases ab (`core/update.py`). Gibt es eine neuere
-Version, öffnet „Herunterladen“ die APK im Browser; antippen installiert sie
-als Update über die bestehende App, die Daten bleiben (gleicher
-Signierschlüssel). Dazu muss die Version in `pyproject.toml` angehoben sein —
-bei gleicher Version entscheidet die Build-Nummer. iOS kennt keinen Weg am App
-Store vorbei; dort bleibt es bei TestFlight/App Store. Download und Installation
-innerhalb der App (Stufe 2) sind vorgemerkt (`docs/offene_fragen.md`, A8).
+**Updates in der App:** Einstellungen → Updates. Beim Start (abschaltbar, mit
+einmaligem Hinweis) prüft die App die GitHub-Releases (`core/update.py`) und die
+eingetragenen Paketquellen (`core/paketquelle.py`); ein kleines Label unter dem
+Zahnrad meldet „Updates verfügbar: 2 Pakete, App“, einmal je Stand. Übungspakete
+im Modus „automatisch“ werden gleich eingespielt, „manuell“ nur vorgemerkt — was
+man an Übungen geändert hat, bleibt. Für die App öffnet „Herunterladen“ die APK im
+Browser (Android); antippen installiert sie als Update über die bestehende App,
+die Daten bleiben (gleicher Signierschlüssel). Dazu muss die Version in
+`pyproject.toml` angehoben sein — bei gleicher Version entscheidet die
+Build-Nummer. iOS kennt keinen Weg am App Store vorbei. Installation innerhalb
+der App (Stufe 2) ist vorgemerkt (`docs/offene_fragen.md`, A8).
 
 ---
 

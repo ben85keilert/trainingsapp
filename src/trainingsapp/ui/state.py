@@ -42,6 +42,7 @@ from trainingsapp.core.hrv_einstellungen import (
 from trainingsapp.core.kurse import Kurs
 from trainingsapp.core.models import Exercise, Subject, jetzt, lokaler_tag
 from trainingsapp.core.pakete import Paket
+from trainingsapp.core.paketquelle import QUELLE_VORGABE, Pruefung, url_pruefen
 from trainingsapp.core.timer import (
     TimerProfil,
     TimerSignale,
@@ -50,6 +51,7 @@ from trainingsapp.core.timer import (
     timer_signale_lesen,
     timer_signale_schreiben,
 )
+from trainingsapp.core.update import Release
 from trainingsapp.core.verlauf import MODUS_NUMMER
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.kurse import KursRepo
@@ -89,6 +91,38 @@ PLAN_DARSTELLUNGEN: dict[str, str] = {
     UMSCHALTEN: "Ein Parameter, umschaltbar",
     AUFKLAPPEN: "Aufklappen: eine Übung offen",
 }
+
+
+#: Benachrichtigung über Updates (Label unter dem Zahnrad): Schlüssel → Anzeige
+BENACHRICHTIGUNGEN: dict[str, str] = {
+    "aus": "Aus",
+    "updates": "Nur Updates",
+    "alles": "Updates und Neuigkeiten",
+}
+
+
+@dataclass
+class UpdateStand:
+    """Was die Prüfung beim Start (oder auf „Jetzt prüfen“) ergab — `AppState.updates`."""
+
+    pruefung: Pruefung
+    #: Neueres App-Release (nur Android, `core.update`)
+    app: Release | None = None
+    #: Pakete, die automatisch eingespielt wurden (Modus „auto“): (ID, Name, Version)
+    eingespielt: list[tuple[str, str, int | None]] = field(default_factory=list)
+
+    def schluessel(self) -> dict[str, str]:
+        """Je Neuigkeit ein Schlüssel mit Stand — so zeigt das Label jede nur einmal."""
+        d: dict[str, str] = {}
+        for u in self.pruefung.updates:
+            d[f"update:{u.eintrag.id}"] = str(u.eintrag.version)
+        for paket_id, _, version in self.eingespielt:
+            d[f"eingespielt:{paket_id}"] = str(version)
+        if self.app is not None:
+            d["app"] = f"{self.app.version}-{self.app.build}"
+        for e in self.pruefung.neue:
+            d[f"neu:{e.id}"] = str(e.version)
+        return d
 
 
 @dataclass
@@ -132,6 +166,8 @@ class AppState:
     #: Meldungen des Entwicklungs-Loaders (`TRAININGSAPP_PAKETE`, nur am Rechner) —
     #: Karte auf „Heute“, damit ein Tippfehler in einer Paketdatei auffällt
     paketfehler: list[str] = field(default_factory=list)
+    #: Ergebnis der Update-Prüfung (`ui/views/updates.py`), ``None`` = noch nicht geprüft
+    updates: UpdateStand | None = None
     #: Übungen, deren Papierkorbfrist abgelaufen ist, die aber einen Verlauf
     #: haben — die Automatik löscht sie nicht, der Papierkorb fragt nach
     papierkorb_offen: int = 0
@@ -404,6 +440,84 @@ class AppState:
         """Gilt für das aktive Profil."""
         schluessel = f"{SettingRepo.DARSTELLUNG}:{self.profil.id}"
         self.einstellungen.setzen(schluessel, darstellung_schreiben(d))
+
+    # -- Paketquellen und Updates (Ben, 16.10.2026) --------------------------
+
+    def paketquellen(self) -> list[str]:
+        """Index-Adressen, in Reihenfolge; ohne Einstellung die Vorgabe (wenn es eine gibt)."""
+        roh = self.einstellungen.lesen(SettingRepo.PAKETQUELLEN)
+        if roh is None:
+            return [QUELLE_VORGABE] if QUELLE_VORGABE else []
+        try:
+            daten = json.loads(roh)
+        except ValueError:
+            return []
+        return [u for u in daten if isinstance(u, str) and url_pruefen(u) is None]
+
+    def paketquellen_setzen(self, urls: list[str]) -> None:
+        self.einstellungen.setzen(SettingRepo.PAKETQUELLEN, json.dumps(urls))
+
+    def update_pruefung(self) -> bool:
+        """Beim Start Quellen und App-Release prüfen? Vorgabe an; abschaltbar."""
+        return self.einstellungen.lesen(SettingRepo.UPDATE_PRUEFUNG, "1") == "1"
+
+    def update_pruefung_setzen(self, an: bool) -> None:
+        self.einstellungen.setzen(SettingRepo.UPDATE_PRUEFUNG, "1" if an else "0")
+
+    def benachrichtigung(self) -> str:
+        wert = self.einstellungen.lesen(SettingRepo.BENACHRICHTIGUNG, "updates")
+        return wert if wert in BENACHRICHTIGUNGEN else "updates"
+
+    def benachrichtigung_setzen(self, wert: str) -> None:
+        if wert in BENACHRICHTIGUNGEN:
+            self.einstellungen.setzen(SettingRepo.BENACHRICHTIGUNG, wert)
+
+    def _updates_gesehen(self) -> dict[str, str]:
+        try:
+            daten = json.loads(self.einstellungen.lesen(SettingRepo.UPDATES_GESEHEN) or "{}")
+        except ValueError:
+            return {}
+        return daten if isinstance(daten, dict) else {}
+
+    def updates_label(self) -> str | None:
+        """Text für das Label unter dem Zahnrad — ``None``, wenn es nichts (Neues) zu sagen gibt.
+
+        Jeder Stand wird nur einmal gezeigt: Was `updates_gesehen_markieren` eingetragen
+        hat, bleibt still, bis eine höhere Version kommt. „aus“ zeigt nie etwas,
+        „updates“ nur Updates (Pakete, App, Eingespieltes), „alles“ auch neue Pakete in
+        den Quellen.
+        """
+        stand = self.updates
+        if stand is None or self.benachrichtigung() == "aus":
+            return None
+        gesehen = self._updates_gesehen()
+        offen = {k: v for k, v in stand.schluessel().items() if gesehen.get(k) != v}
+        teile: list[str] = []
+        pakete = sum(1 for k in offen if k.startswith("update:"))
+        if pakete:
+            teile.append("1 Paket" if pakete == 1 else f"{pakete} Pakete")
+        if "app" in offen:
+            teile.append("App")
+        eingespielt = [n for pid, n, _ in stand.eingespielt if f"eingespielt:{pid}" in offen]
+        if eingespielt:
+            teile.append("aktualisiert: " + ", ".join(eingespielt))
+        text = "Updates verfügbar: " + ", ".join(teile) if teile else ""
+        neue = sum(1 for k in offen if k.startswith("neu:"))
+        if neue and self.benachrichtigung() == "alles":
+            neu_text = (
+                "1 neues Paket in den Quellen"
+                if neue == 1
+                else f"{neue} neue Pakete in den Quellen"
+            )
+            text = f"{text} · {neu_text}" if text else neu_text
+        return text or None
+
+    def updates_gesehen_markieren(self) -> None:
+        """Die Seite „Updates“ wurde geöffnet: der aktuelle Stand gilt als gesehen."""
+        if self.updates is None:
+            return
+        gesehen = self._updates_gesehen() | self.updates.schluessel()
+        self.einstellungen.setzen(SettingRepo.UPDATES_GESEHEN, json.dumps(gesehen))
 
     def hrv_einstellungen(self) -> HrvEinstellungen:
         """Was die Messung zeigt — Kacheln, Fenster, Analysebereiche."""

@@ -152,11 +152,16 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   (rechtlich wie `physiologische_steuerung`). Kurse reisen in Paketen
   (`kurse[]`, Formatversion 2). Vertrag: `docs/plan_kurse.md`.
 
-- **Updates über GitHub-Releases, Stufe 1** (Ben, 16.10.2026): `core/update.py` fragt die
-  öffentlichen Releases ab, vergleicht Version und Build-Nummer mit `config.app_version()`
-  (aus `_build.py`, die `scripts/apk_bauen.py` schreibt) und die Einstellungen öffnen den
-  APK-Link im Browser. Nur Android, nur Solo (`ist_aktiv("update_pruefung")`). Stufe 2
-  (Installation in der App) ist Katalog A8.
+- **Updates** (Ben, 16.10.2026): `core/update.py` fragt die GitHub-Releases der App ab
+  (Version und Build-Nummer gegen `config.app_version()` aus `_build.py`, die
+  `scripts/apk_bauen.py` schreibt; APK-Link im Browser, nur Android). `core/paketquelle.py`
+  fragt **Paketquellen** (Index-JSON per HTTPS, Format von `trainingsapp-paket index`,
+  SHA-256 geprüft, Signaturfeld reserviert). `ui/views/updates.py` macht beides beim Start
+  (abschaltbar, einmaliger Hinweis — jede neue Netzverbindung in Solo braucht Schalter,
+  Hinweis und einen Nachtrag in `docs/recht/40_toms.md`, `80_store_freigaben.md`,
+  `build/solo.toml`), spielt Pakete im Modus „auto“ ein und hängt das Label unter das
+  Zahnrad (`AppState.updates_label`, einmal je Stand). Schalter `update_pruefung` und
+  `paket_quellen` nur Solo. Stufe 2 (Installation in der App) ist Katalog A8.
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`

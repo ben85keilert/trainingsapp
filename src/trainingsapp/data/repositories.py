@@ -608,6 +608,17 @@ class SettingRepo:
     BEKANNTE_GERAETE = "bekannte_geraete"
     #: Plan: wie die Übungen beim Training aussehen (`ui.state.PLAN_DARSTELLUNGEN`)
     PLAN_DARSTELLUNG = "plan_darstellung"
+    #: Paketquellen: JSON-Liste von Index-Adressen (`core.paketquelle`); fehlt der
+    #: Schlüssel, gilt `QUELLE_VORGABE`
+    PAKETQUELLEN = "paketquellen"
+    #: "1" (Vorgabe) = beim Start Paketquellen (und das App-Release) prüfen
+    UPDATE_PRUEFUNG = "update_pruefung_beim_start"
+    #: Label unter dem Zahnrad: "aus" | "updates" (Vorgabe) | "alles" (auch Neuigkeiten)
+    BENACHRICHTIGUNG = "benachrichtigung"
+    #: JSON {schlüssel: stand} — was das Label schon gezeigt hat (`AppState.updates_label`)
+    UPDATES_GESEHEN = "updates_gesehen"
+    #: "1" = der einmalige Hinweis, dass die App beim Start Quellen fragt, wurde gezeigt
+    HINWEIS_UPDATES = "hinweis_updates_gesehen"
     #: Farbprofil, Hell/Dunkel, Verlauf (JSON, `core.darstellung`) — **je Profil**:
     #: Schlüssel `darstellung:<profil-id>`, damit man am Hintergrund sieht, wer dran ist
     DARSTELLUNG = "darstellung"

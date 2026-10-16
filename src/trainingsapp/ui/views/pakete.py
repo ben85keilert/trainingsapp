@@ -168,15 +168,22 @@ def _versionstext(vorschau: Vorschau) -> str:
 
 
 def import_rueckfrage(
-    page: ft.Page, state: AppState, inhalt: Paketinhalt, vorschau: Vorschau
+    page: ft.Page,
+    state: AppState,
+    inhalt: Paketinhalt,
+    vorschau: Vorschau,
+    danach: Callable[[], None] | None = None,
 ) -> ft.AlertDialog:
-    """Die Rückfrage vor dem Schreiben: was der Import tut — auch für „Wieder installieren“."""
+    """Die Rückfrage vor dem Schreiben: was der Import tut — auch für „Wieder installieren“
+    und für Pakete aus einer Quelle (``danach`` läuft nach dem Schreiben, etwa Quelle merken)."""
     wieder = vorschau.entfernt is not None
     nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
 
     def ausfuehren() -> None:
         try:
             ergebnis = state.pakete.importieren(inhalt)
+            if danach is not None:
+                danach()
         except sqlite3.Error as fehler:  # Datenbank voll, gesperrt …
             page.pop_dialog()
             page.show_dialog(ft.SnackBar(ft.Text(f"Nicht importiert: {fehler}")))
@@ -331,6 +338,8 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
             teile.append(f"{entfallen} nicht mehr im Paket")
         if paket.version is not None:
             teile.append(f"Version {paket.version}")
+        if paket.verfuegbar is not None:
+            teile.append(f"verfügbar: Version {paket.verfuegbar}")
         teile.append(groesse_text(*state.pakete.groesse(paket.id, medienverzeichnis())))
         texte: list[ft.Control] = [
             ft.Text(paket.name, size=15),

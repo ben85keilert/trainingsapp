@@ -250,6 +250,37 @@ Hinweise. `index` schreibt den Index einer Paketquelle (ID, Name, Version, URL,
 SHA-256, Größe, Neuigkeiten, reserviertes Feld `signatur`) — das Format, das die App
 für Updates liest (Schritt 2).
 
+## Paketquellen — Updates online (Ben, 16.10.2026)
+
+Eine **Quelle** ist eine HTTPS-Adresse, unter der ein **Index** liegt — die JSON, die
+`trainingsapp-paket index` schreibt: je Paket `id`, `name`, `beschreibung`, `version`,
+`url` (Paketdatei), `sha256`, `bytes`, `uebungen`, `kurse`, `neuigkeiten`,
+`veroeffentlicht`, `signatur` (reserviert, `null`). Kopf: `format =
+"trainingsapp-paketindex"`, `version = 1`, `quelle.name`. Das Format ist bewusst so
+einfach, dass es von jedem Webserver, von GitHub Pages oder aus einem Release kommen
+kann (`core/paketquelle.py`).
+
+- **Quellen** stehen unter Einstellungen → Updates: die Vorgabe (der Server des
+  Herstellers, `QUELLE_VORGABE` — leer, bis die Adresse mit der Homepage feststeht)
+  und eigene, nur `https://` (zum Ausprobieren auch `http://localhost`/`127.0.0.1`,
+  etwa `python -m http.server` im `dist/`-Ordner des Inhalte-Repos).
+- **Prüfung** beim Start (abschaltbar, beim ersten Mal ein Hinweis; nur Versionsnummern,
+  es gehen IP-Adresse und der Name der App hinaus) oder per „Jetzt prüfen“. Nennen
+  zwei Quellen dasselbe Paket, zählt die erste; nur aktive Pakete bekommen Updates,
+  nie nach unten. Ein Paket, das es hier nicht gibt, erscheint unter „Neu in den
+  Quellen“ zum Installieren.
+- **Modus je Paket:** `automatisch` (Vorgabe) spielt ein Update beim Start ein,
+  `manuell` merkt es nur vor (`package.available_*`) — der Pfeil holt es mit der
+  Vorschau des Datei-Imports. Was man an Übungen geändert hat, bleibt (Drei-Wege-
+  Abgleich); Entfallenes fragt nach wie immer.
+- **Sicherheit:** HTTPS sichert die Herkunft, die Prüfsumme den Download (stimmt sie
+  nicht, wird nichts geschrieben), die Datei muss zur ID im Index passen, maximal
+  5 MB. Eine Signatur kommt, wenn Pakete von Dritten kommen.
+- **Label unter dem Zahnrad:** „Updates verfügbar: 2 Pakete, App“ — einmal je Stand,
+  bis die Seite „Updates“ geöffnet wurde. Einstellbar: aus / nur Updates / Updates und
+  Neuigkeiten (dann auch neue Pakete in den Quellen).
+- Edition B bekommt ihre Pakete von der Praxis (`ist_aktiv("paket_quellen")` nur Solo).
+
 ## Mitgelieferte Pakete pflegen (TOML)
 
 Was mit der App kommt, wird von Hand gepflegt — darum steht es nicht als JSON im

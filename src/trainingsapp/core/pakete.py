@@ -108,8 +108,16 @@ class Paket:
     deaktiviert: datetime | None = None
     #: ``"auto"`` (Updates aus der Quelle beim Start einspielen) oder ``"manuell"``
     update_modus: str = "auto"
-    #: Version, die in der Paketquelle liegt (Migration 017) — ``None`` = nichts bekannt
+    #: Woher das Paket zuletzt kam (Adresse der Paketdatei) — ``None`` = Datei/Seed
+    quelle: str | None = None
+    #: Was die Paketquelle zuletzt meldete (Migration 017): Version, Datei, Prüfsumme,
+    #: Neuigkeiten — ``verfuegbar`` ``None`` = nichts Neueres bekannt
     verfuegbar: int | None = None
+    verfuegbar_url: str | None = None
+    verfuegbar_sha256: str | None = None
+    verfuegbar_neuigkeiten: str = ""
+    #: Wann zuletzt eine Quelle gefragt wurde
+    geprueft: datetime | None = None
 
     @property
     def aktiv(self) -> bool:

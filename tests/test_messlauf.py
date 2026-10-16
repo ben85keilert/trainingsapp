@@ -95,9 +95,13 @@ async def test_timer_abschnitte_entstehen_beim_speichern(tmp_path) -> None:
     marken += [(50, "Pause (Runde 1/2)", "Pause (Runde 1/2)", False)]
     marken += [(80, "Belastung (Runde 2/2)", "Belastung (Runde 2/2)", False)]
     marken += [(110, "Timer fertig", "Timer fertig", True)]
+    # Unter Last (CI) kommt die Abfrage spät — darum zählt die tatsächliche Zeit
+    # der Marke, nicht die geplante Sekunde.
+    gesetzt: list[float] = []
     for sekunde, text, name, ende in marken:
         while lauf.aufnahme_dauer_s() < sekunde:
             await asyncio.sleep(0.01)
+        gesetzt.append(lauf.aufnahme_dauer_s())
         assert lauf.abschnitt_markieren(text, 0.0, name=name, ende=ende) is not None
     while lauf.aufnahme_dauer_s() < 130:
         await asyncio.sleep(0.01)
@@ -114,8 +118,8 @@ async def test_timer_abschnitte_entstehen_beim_speichern(tmp_path) -> None:
         "Pause (Runde 1/2)",
         "Belastung (Runde 2/2)",
     ]
-    assert abschnitte[0].von_s == pytest.approx(20, abs=3)
-    assert abschnitte[-1].bis_s == pytest.approx(110, abs=3)
+    assert abschnitte[0].von_s == pytest.approx(gesetzt[0], abs=3)
+    assert abschnitte[-1].bis_s == pytest.approx(gesetzt[3], abs=3)
 
 
 # ---------------------------------------------------------------------------

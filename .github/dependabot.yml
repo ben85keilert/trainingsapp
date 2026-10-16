@@ -18,3 +18,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Ein PR für alle Actions statt einer je Action
+    groups:
+      actions:
+        patterns: ["*"]

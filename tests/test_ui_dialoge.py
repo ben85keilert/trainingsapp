@@ -20,7 +20,11 @@ from trainingsapp.core.pakete import GRUNDAUSSTATTUNG  # noqa: E402
 from trainingsapp.data.seed import seed_id  # noqa: E402
 from trainingsapp.ui.components.dialoge import Nachher  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
-from trainingsapp.ui.views.pakete import import_rueckfrage, paket_view  # noqa: E402
+from trainingsapp.ui.views.pakete import (  # noqa: E402
+    entfallene_dialog,
+    import_rueckfrage,
+    paket_view,
+)
 from trainingsapp.ui.views.uebung_detail import uebung_detail  # noqa: E402
 
 
@@ -81,10 +85,15 @@ def test_paketdialoge_haben_einen_koroutinen_handler(page, state) -> None:
 
     ansicht = paket_view(page, state, "/pakete", state.pakete.laden(GRUNDAUSSTATTUNG))
     entfernen = next(
-        c for v in ansicht.controls for c in _alle(v) if isinstance(c, ft.OutlinedButton)
+        c
+        for v in ansicht.controls
+        for c in _alle(v)
+        if isinstance(c, ft.OutlinedButton) and c.content == "Paket entfernen"
     )
     entfernen.on_click()
     assert inspect.iscoroutinefunction(page.dialoge[-1].on_dismiss)
+    offen = entfallene_dialog(page, state, state.pakete.laden(GRUNDAUSSTATTUNG), [wade], [])
+    assert inspect.iscoroutinefunction(offen.on_dismiss)
 
     inhalt = state.pakete.inhalt(GRUNDAUSSTATTUNG)
     dialog = import_rueckfrage(page, state, inhalt, state.pakete.vorschau(inhalt))

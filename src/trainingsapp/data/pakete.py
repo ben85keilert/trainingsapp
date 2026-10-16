@@ -3,9 +3,20 @@
 Regeln (Ben, 14.10.2026; `docs/uebungspakete.md`):
 
 - Ein Import legt neue Übungen an und **aktualisiert die Übungen desselben
-  Pakets** auf den Stand der Datei. Was man an ihnen geändert hat, geht dabei
-  verloren — das ist so gewollt. Einträge im Verlauf bleiben; sie tragen ihre
-  eigene Kopie der Parameter.
+  Pakets** auf den Stand der Datei. Was man an ihnen geändert hat, **bleibt**
+  (Ben, 16.10.2026): Je Feld gilt — noch wie im alten Paketstand, also nie
+  angefasst → neuer Wert; abweichend, also selbst geändert → bleibt
+  (`core.pakete.zusammenfuehren`). „Auf Paketstand setzen“ holt den neuen Stand
+  jederzeit ganz. Einträge im Verlauf bleiben; sie tragen ihre eigene Kopie der
+  Parameter.
+- **Nicht mehr im Paket** (``package_dropped_at``, Migration 017): Fällt eine Übung
+  oder ein Kurs beim Update aus dem Paket, wird nichts gelöscht — die Person
+  entscheidet im Dialog: als eigene übernehmen (gleiche ID, Verlauf und Pläne
+  bleiben) oder löschen (Papierkorb, raus aus den Plänen).
+- **Deaktivieren** (``disabled_at``, Migration 017) ist zerstörungsfrei: Übungen und
+  Kurse des Pakets verschwinden aus Katalog, Suche, Tags, Kursliste und Plänen,
+  bleiben aber gespeichert; Aktivieren stellt alles her. Seed, Entwicklungs-Loader
+  und Quellen-Updates lassen ein deaktiviertes Paket in Ruhe.
 - **Eigene Übungen** (hier angelegt oder kopiert, ``package_id IS NULL``)
   ändert kein Import: Ein Paket „Eigene“, über das sie von außen kämen, gibt
   es nicht. Wer seinen eigenen Export wieder einliest, ändert also nichts.
@@ -46,11 +57,20 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from ..core.kurse import Kurs
 from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, PlanItem, jetzt, new_id
-from ..core.pakete import Paket, Paketinhalt, aus_stand, kurs_aus_stand, kurs_stand, stand
+from ..core.pakete import (
+    Paket,
+    Paketinhalt,
+    aus_stand,
+    kurs_aus_stand,
+    kurs_stand,
+    stand,
+    zusammenfuehren,
+)
 from ..core.pakete import abweichungen as _abweichungen
 from .db import transaktion
 from .kurse import KursRepo
@@ -67,6 +87,7 @@ class Status(StrEnum):
     EIGENE = "eigene"  # eine eigene Übung trägt die ID → bleibt
     FREMD = "fremd"  # gehört zu einem anderen Paket → bleibt
     GELOESCHT = "geloescht"  # endgültig gelöscht → bleibt weg
+    ENTFAELLT = "entfaellt"  # war im Paket, ist es nicht mehr → bleibt, bis man entscheidet
 
 
 #: Was der Import schreibt
@@ -91,6 +112,10 @@ class Vorschau:
     neue_regionen: list[str] = field(default_factory=list)
     #: Kurs-ID → Status (Formatversion 2)
     kurse: dict[str, Status] = field(default_factory=dict)
+    #: Übungen bzw. Kurse des Pakets, die in der Datei fehlen und noch nicht
+    #: markiert sind — der Import markiert sie (`PaketRepo.entfallene`)
+    entfallen: list[str] = field(default_factory=list)
+    kurse_entfallen: list[str] = field(default_factory=list)
 
     def anzahl(self, *stati: Status) -> int:
         return sum(1 for s in self.status.values() if s in stati)
@@ -117,7 +142,7 @@ class Vorschau:
         if n := self.anzahl(Status.ZURUECK):
             zeilen.append(f"{n} {'kommt' if n == 1 else 'kommen'} zurück — das Paket war entfernt")
         if n := self.anzahl(Status.GEAENDERT):
-            zeilen.append(f"{n} aktualisiert — was du daran geändert hast, geht verloren")
+            zeilen.append(f"{n} aktualisiert — was du daran geändert hast, bleibt")
         if n := self.anzahl(Status.UNVERAENDERT):
             zeilen.append(f"{n} schon auf dem Stand")
         if n := self.anzahl(Status.EIGENE):
@@ -139,6 +164,15 @@ class Vorschau:
         ):
             if n := self.anzahl_kurse(s):
                 zeilen.append(f"{'1 Kurs' if n == 1 else f'{n} Kurse'} {was}")
+        if n := len(self.entfallen):
+            was = (
+                "ist nicht mehr im Paket — bleibt"
+                if n == 1
+                else "sind nicht mehr im Paket — bleiben"
+            )
+            zeilen.append(f"{n} {was}, bis du entscheidest: übernehmen oder löschen")
+        if n := len(self.kurse_entfallen):
+            zeilen.append(f"{'1 Kurs ist' if n == 1 else f'{n} Kurse sind'} nicht mehr im Paket")
         if self.neue_typen:
             zeilen.append("Neue Typen: " + ", ".join(self.neue_typen))
         if self.neue_regionen:
@@ -155,6 +189,8 @@ class Uebungsstand:
     abweichungen: list[str] | None
     #: `KATALOG`, `ARCHIV` oder `PAPIERKORB`
     ort: str
+    #: Beim letzten Update nicht mehr im Paket — wartet auf „übernehmen oder löschen“
+    entfallen: bool = False
 
     @property
     def geaendert(self) -> bool:
@@ -236,13 +272,16 @@ class PaketRepo:
         repo = ExerciseRepo(self.con)
         zeilen: list[Uebungsstand] = []
         for r in self.con.execute(
-            "SELECT id FROM exercise WHERE package_id = ? AND purged_at IS NULL", (paket_id,)
+            "SELECT id, package_dropped_at FROM exercise "
+            "WHERE package_id = ? AND purged_at IS NULL",
+            (paket_id,),
         ).fetchall():
             u = repo.laden(r["id"], mit_geloeschten=True)
             if u is None:
                 continue
             ort = PAPIERKORB if u.deleted_at else ARCHIV if u.archived else KATALOG
-            zeilen.append(Uebungsstand(u, self.abweichungen(u), ort))
+            entfallen = r["package_dropped_at"] is not None
+            zeilen.append(Uebungsstand(u, self.abweichungen(u), ort, entfallen))
         return sorted(zeilen, key=lambda z: z.uebung.name.casefold())
 
     def inhalt(self, paket_id: str) -> Paketinhalt | None:
@@ -253,7 +292,8 @@ class PaketRepo:
         uebungen: list[Exercise] = []
         for r in self.con.execute(
             "SELECT id, package_standard_json FROM exercise "
-            "WHERE package_id = ? AND package_standard_json IS NOT NULL ORDER BY created_at",
+            "WHERE package_id = ? AND package_standard_json IS NOT NULL "
+            "AND package_dropped_at IS NULL ORDER BY created_at",
             (paket_id,),
         ).fetchall():
             try:
@@ -263,7 +303,8 @@ class PaketRepo:
         kurse: list[Kurs] = []
         for r in self.con.execute(
             "SELECT id, package_standard_json FROM course "
-            "WHERE package_id = ? AND package_standard_json IS NOT NULL ORDER BY created_at",
+            "WHERE package_id = ? AND package_standard_json IS NOT NULL "
+            "AND package_dropped_at IS NULL ORDER BY created_at",
             (paket_id,),
         ).fetchall():
             try:
@@ -275,6 +316,154 @@ class PaketRepo:
     def kurse(self, paket_id: str) -> list[Kurs]:
         """Die Kurse eines Pakets, die in der Liste stehen (nicht entfernt)."""
         return [k for k in KursRepo(self.con).des_pakets(paket_id) if k.deleted_at is None]
+
+    def groesse(self, paket_id: str, medien: Path | None = None) -> tuple[int, int]:
+        """``(Bytes der Texte, Bytes eigener Fotos und Videos)`` eines Pakets.
+
+        Texte = die gespeicherten Paketstände der Übungen und Kurse. Dateien = alles
+        Lokale an diesen Übungen (``image_path``, Medien mit ``source = local``);
+        relative Pfade liegen unter ``medien`` (`config.medienverzeichnis`). Was
+        es nicht gibt, zählt nicht.
+        """
+        texte = 0
+        dateien = 0
+        pfade: set[str] = set()
+        for r in self.con.execute(
+            "SELECT e.id, e.image_path, LENGTH(e.package_standard_json) AS n FROM exercise e "
+            "WHERE e.package_id = ? AND e.purged_at IS NULL",
+            (paket_id,),
+        ).fetchall():
+            texte += r["n"] or 0
+            if r["image_path"]:
+                pfade.add(r["image_path"])
+            for m in self.con.execute(
+                "SELECT uri FROM exercise_media WHERE exercise_id = ? AND source = ?",
+                (r["id"], str(MediaSource.LOCAL)),
+            ).fetchall():
+                if m["uri"]:
+                    pfade.add(m["uri"])
+        for r in self.con.execute(
+            "SELECT LENGTH(package_standard_json) AS n FROM course WHERE package_id = ?",
+            (paket_id,),
+        ).fetchall():
+            texte += r["n"] or 0
+        for roh in pfade:
+            pfad = Path(roh)
+            if not pfad.is_absolute() and medien is not None:
+                pfad = medien / pfad
+            try:
+                dateien += pfad.stat().st_size
+            except OSError:
+                continue
+        return texte, dateien
+
+    # -- Deaktivieren (Migration 017) ---------------------------------------
+
+    def deaktivieren(self, paket_id: str) -> None:
+        """Nichts davon sichtbar, alles bleibt — `aktivieren` stellt es her."""
+        self.con.execute(
+            "UPDATE package SET disabled_at = ? WHERE id = ? AND disabled_at IS NULL",
+            (jetzt().isoformat(), paket_id),
+        )
+
+    def aktivieren(self, paket_id: str) -> None:
+        self.con.execute("UPDATE package SET disabled_at = NULL WHERE id = ?", (paket_id,))
+
+    # -- Nicht mehr im Paket (Migration 017) ----------------------------------
+
+    def entfallene(self, paket_id: str) -> list[Exercise]:
+        """Übungen, die beim Update aus dem Paket fielen und auf eine Entscheidung warten."""
+        repo = ExerciseRepo(self.con)
+        ids = [
+            r["id"]
+            for r in self.con.execute(
+                "SELECT id FROM exercise WHERE package_id = ? AND package_dropped_at IS NOT NULL "
+                "AND deleted_at IS NULL AND purged_at IS NULL ORDER BY name COLLATE NOCASE",
+                (paket_id,),
+            ).fetchall()
+        ]
+        return [u for i in ids if (u := repo.laden(i)) is not None]
+
+    def entfallene_kurse(self, paket_id: str) -> list[Kurs]:
+        return [
+            k
+            for k in KursRepo(self.con).des_pakets(paket_id)
+            if k.deleted_at is None
+            and self.con.execute(
+                "SELECT package_dropped_at FROM course WHERE id = ?", (k.id,)
+            ).fetchone()[0]
+            is not None
+        ]
+
+    def entfallene_offen(self) -> list[tuple[Paket, list[Exercise], list[Kurs]]]:
+        """Je Paket, was auf „übernehmen oder löschen“ wartet — für den Dialog beim Start."""
+        offen: list[tuple[Paket, list[Exercise], list[Kurs]]] = []
+        for paket, _ in self.alle():
+            uebungen = self.entfallene(paket.id)
+            kurse = self.entfallene_kurse(paket.id)
+            if uebungen or kurse:
+                offen.append((paket, uebungen, kurse))
+        return offen
+
+    def entfallene_uebernehmen(
+        self, uebungen: Iterable[str] = (), kurse: Iterable[str] = ()
+    ) -> int:
+        """Als eigene Übung bzw. eigener Kurs weiterführen — gleiche ID, Verlauf und
+        Pläne bleiben, nur die Herkunft fällt weg (kein Paketstand mehr)."""
+        n = 0
+        stempel = jetzt().isoformat()
+        with transaktion(self.con):
+            for uebung_id in uebungen:
+                n += self.con.execute(
+                    "UPDATE exercise SET package_id = NULL, package_standard_json = NULL, "
+                    "package_dropped_at = NULL, updated_at = ?, revision = revision + 1 "
+                    "WHERE id = ? AND package_dropped_at IS NOT NULL",
+                    (stempel, uebung_id),
+                ).rowcount
+            for kurs_id in kurse:
+                n += self.con.execute(
+                    "UPDATE course SET package_id = NULL, package_standard_json = NULL, "
+                    "package_dropped_at = NULL, updated_at = ?, revision = revision + 1 "
+                    "WHERE id = ? AND package_dropped_at IS NOT NULL",
+                    (stempel, kurs_id),
+                ).rowcount
+        return n
+
+    def entfallene_loeschen(self, uebungen: Iterable[str] = (), kurse: Iterable[str] = ()) -> int:
+        """In den Papierkorb und aus den Plänen (wie Entfernen) — Einträge bleiben.
+        Die Herkunft fällt weg, damit „Wieder installieren“ sie nicht zurückholt."""
+        repo = ExerciseRepo(self.con)
+        kurs_repo = KursRepo(self.con)
+        n = 0
+        with transaktion(self.con):
+            for uebung_id in uebungen:
+                r = self.con.execute(
+                    "SELECT package_dropped_at FROM exercise WHERE id = ?", (uebung_id,)
+                ).fetchone()
+                if r is None or r[0] is None:
+                    continue
+                self.con.execute("DELETE FROM plan_item WHERE exercise_id = ?", (uebung_id,))
+                repo.in_papierkorb(uebung_id)
+                self.con.execute(
+                    "UPDATE exercise SET package_id = NULL, package_standard_json = NULL, "
+                    "package_dropped_at = NULL WHERE id = ?",
+                    (uebung_id,),
+                )
+                n += 1
+            for kurs_id in kurse:
+                r = self.con.execute(
+                    "SELECT package_dropped_at FROM course WHERE id = ?", (kurs_id,)
+                ).fetchone()
+                if r is None or r[0] is None:
+                    continue
+                kurs_repo.loeschen(kurs_id)
+                self.con.execute(
+                    "UPDATE course SET package_id = NULL, package_standard_json = NULL, "
+                    "package_dropped_at = NULL WHERE id = ?",
+                    (kurs_id,),
+                )
+                n += 1
+        return n
 
     # -- Paketmanager --------------------------------------------------------
 
@@ -453,6 +642,29 @@ class PaketRepo:
                     )
             for uebung_id, standard in staende.items():
                 self._standard_setzen(uebung_id, standard)
+            # Nicht mehr im Paket: markieren, nicht löschen — die Person entscheidet
+            for uebung_id in vorschau.entfallen:
+                self.con.execute(
+                    "UPDATE exercise SET package_dropped_at = ? WHERE id = ?",
+                    (stempel, uebung_id),
+                )
+            for kurs_id in vorschau.kurse_entfallen:
+                self.con.execute(
+                    "UPDATE course SET package_dropped_at = ? WHERE id = ?", (stempel, kurs_id)
+                )
+            # Wieder in der Datei: die Markierung fällt
+            for u in inhalt.uebungen:
+                self.con.execute(
+                    "UPDATE exercise SET package_dropped_at = NULL "
+                    "WHERE id = ? AND package_id = ? AND package_dropped_at IS NOT NULL",
+                    (u.id, inhalt.paket.id),
+                )
+            for k in inhalt.kurse:
+                self.con.execute(
+                    "UPDATE course SET package_dropped_at = NULL "
+                    "WHERE id = ? AND package_id = ? AND package_dropped_at IS NOT NULL",
+                    (k.id, inhalt.paket.id),
+                )
         return vorschau
 
     def herkunft_nachtragen(self, inhalt: Paketinhalt) -> int:
@@ -500,9 +712,22 @@ class PaketRepo:
             r["id"]: r
             for r in self.con.execute(
                 "SELECT id, package_id, deleted_at, purged_at, archived, family_id, "
-                "package_standard_json IS NULL AS ohne_stand FROM exercise"
+                "package_standard_json IS NULL AS ohne_stand, package_dropped_at AS entfallen "
+                "FROM exercise"
             )
         }
+        # Was dieses Paket hier hat, die Datei aber nicht mehr nennt — nur bei einem
+        # installierten Paket; ein entferntes kommt ja gerade erst zurück.
+        if da_ist is not None and not entfernt:
+            im_paket = {u.id for u in inhalt.uebungen}
+            vorschau.entfallen = [
+                i
+                for i, r in zeilen.items()
+                if r["package_id"] == paket.id
+                and r["purged_at"] is None
+                and r["entfallen"] is None
+                and i not in im_paket
+            ]
 
         # 1. Wem gehört die ID hier? Was nicht geschrieben werden kann, steht fest.
         kandidaten: list[Exercise] = []
@@ -583,6 +808,23 @@ class PaketRepo:
                     vorschau.status[u.id] = Status.UNVERAENDERT
                     continue
                 if alt is not None:
+                    # Drei-Wege-Abgleich (Ben, 16.10.2026): Was die Person geändert
+                    # hat, bleibt; der Paketstand (``staende``) wird trotzdem der neue —
+                    # „geändert“ zeigt danach, wo „Auf Paketstand“ Neues brächte.
+                    gemischt = zusammenfuehren(self.standard(u.id), stand(alt), soll)
+                    if gemischt != soll:
+                        try:
+                            gemischt_ziel = aus_stand(u.id, paket.id, gemischt)
+                        except (KeyError, TypeError, ValueError):
+                            gemischt_ziel = None  # unlesbar: der Paketstand gilt
+                        if gemischt_ziel is not None:
+                            ziel = gemischt_ziel
+                            _tags_angleichen(ziel, bekannte)
+                            ziel.family_id = familie
+                            ziel.archived = alt.archived
+                    if stand(ziel) == stand(alt):
+                        vorschau.status[u.id] = Status.UNVERAENDERT
+                        continue
                     _lokales_behalten(ziel, alt)
             for name, art in neue:
                 (vorschau.neue_typen if art == TAG_TYP else vorschau.neue_regionen).append(name)
@@ -592,9 +834,20 @@ class PaketRepo:
         kurs_zeilen = {
             r["id"]: r
             for r in self.con.execute(
-                "SELECT id, package_id, deleted_at, package_standard_json FROM course"
+                "SELECT id, package_id, deleted_at, package_standard_json, "
+                "package_dropped_at AS entfallen FROM course"
             )
         }
+        if da_ist is not None and not entfernt:
+            im_paket = {k.id for k in inhalt.kurse}
+            vorschau.kurse_entfallen = [
+                i
+                for i, r in kurs_zeilen.items()
+                if r["package_id"] == paket.id
+                and r["deleted_at"] is None
+                and r["entfallen"] is None
+                and i not in im_paket
+            ]
         kurs_ziele: list[Kurs] = []
         for k in inhalt.kurse:
             r = kurs_zeilen.get(k.id)
@@ -662,6 +915,9 @@ class PaketRepo:
             installiert=datetime.fromisoformat(r["installed_at"]),
             aktualisiert=datetime.fromisoformat(r["updated_at"]),
             entfernt=datetime.fromisoformat(r["removed_at"]) if r["removed_at"] else None,
+            deaktiviert=datetime.fromisoformat(r["disabled_at"]) if r["disabled_at"] else None,
+            update_modus=r["update_mode"] or "auto",
+            verfuegbar=r["available_version"],
         )
 
 

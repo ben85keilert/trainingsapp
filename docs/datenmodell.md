@@ -75,7 +75,12 @@ mitgelieferte Katalog ist das Paket „Standard“ (früher „Grundausstattung�
 UUIDv5-IDs. Seit Migration 015 trägt jede Paketübung ihren Paketstand
 (`exercise.package_standard_json`, schreibt nur der Import — `ExerciseRepo.speichern`
 lässt ihn stehen) für „Auf Paketstand setzen“; `package.removed_at` heißt entfernt
-(Übungen im Papierkorb, „Wieder installieren“ holt sie zurück). Format und Regeln:
+(Übungen im Papierkorb, „Wieder installieren“ holt sie zurück). Migration 017:
+`package.disabled_at` = deaktiviert (nichts sichtbar, alles bleibt — Filter in
+`ExerciseRepo.alle/suchen/_tags`, `PlanRepo.alle/_mit_items`, `KursRepo.alle`);
+`exercise.package_dropped_at`/`course.package_dropped_at` = beim Update nicht mehr im
+Paket, bis die Person übernimmt oder löscht; `package.update_mode`, `source_url`,
+`available_*`, `checked_at` für Paketquellen (Online-Updates). Format und Regeln:
 `docs/uebungspakete.md`.
 
 **Zeitplan eines Plans** (Migration 008): `plan.active` und `plan.weekdays_json`

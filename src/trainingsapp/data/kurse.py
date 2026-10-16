@@ -155,7 +155,11 @@ class KursRepo:
         """Alle Kurse in der Reihenfolge ihres Anlegens — Kurse gelten für alle Profile."""
         sql = "SELECT * FROM course"
         if not mit_geloeschten:
-            sql += " WHERE deleted_at IS NULL"
+            # Kurse deaktivierter Pakete bleiben gespeichert, aber unsichtbar (Migration 017)
+            sql += (
+                " WHERE deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM package pk"
+                " WHERE pk.id = course.package_id AND pk.disabled_at IS NOT NULL)"
+            )
         zeilen = self.con.execute(sql + " ORDER BY created_at, name COLLATE NOCASE")
         return self._mit_kapiteln([self._zeile(r) for r in zeilen])
 

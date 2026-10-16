@@ -67,6 +67,18 @@ _MIT_TYP = (
     " AND EXISTS (SELECT 1 FROM exercise_tag et JOIN tag t ON t.id = et.tag_id"
     " WHERE et.exercise_id = exercise.id AND t.kind = 'typ' AND t.name = ?)"
 )
+#: Übungen deaktivierter Pakete (Migration 017, `PaketRepo.deaktivieren`) bleiben
+#: gespeichert, verschwinden aber aus Katalog, Suche, Tags und Plänen.
+PAKET_AKTIV = (
+    " AND NOT EXISTS (SELECT 1 FROM package pk WHERE pk.id = exercise.package_id"
+    " AND pk.disabled_at IS NOT NULL)"
+)
+#: Dasselbe für Pläne aus Kurskapiteln eines deaktivierten Pakets
+_PLAN_PAKET_AKTIV = (
+    " AND NOT EXISTS (SELECT 1 FROM course_chapter cc JOIN course c ON c.id = cc.course_id"
+    " JOIN package pk ON pk.id = c.package_id"
+    " WHERE cc.id = plan.course_chapter_id AND pk.disabled_at IS NOT NULL)"
+)
 
 
 def _bereinigt(namen: list[str]) -> list[str]:
@@ -357,7 +369,7 @@ class ExerciseRepo:
         """Der Katalog. ``mit_geloeschten`` (schließt Archivierte ein) für den Verlauf."""
         sql = "SELECT * FROM exercise WHERE 1 = 1"
         if not mit_geloeschten:
-            sql += " AND deleted_at IS NULL"
+            sql += " AND deleted_at IS NULL" + PAKET_AKTIV  # der Verlauf sieht alles
         params: list[object] = []
         if not (mit_archivierten or mit_geloeschten):
             sql += " AND archived = 0"
@@ -382,6 +394,7 @@ class ExerciseRepo:
             WHERE deleted_at IS NULL AND archived = 0
               AND (name LIKE ? OR description LIKE ?)
         """
+        sql += PAKET_AKTIV
         params: list[object] = [muster, muster, muster]
         if kategorie:
             sql += _MIT_TYP
@@ -408,6 +421,8 @@ class ExerciseRepo:
                 "SELECT DISTINCT t.name FROM tag t JOIN exercise_tag et ON et.tag_id = t.id "
                 "JOIN exercise e ON e.id = et.exercise_id "
                 "WHERE e.deleted_at IS NULL AND e.archived = 0 AND t.kind = ? "
+                "AND NOT EXISTS (SELECT 1 FROM package pk WHERE pk.id = e.package_id "
+                "AND pk.disabled_at IS NOT NULL) "
                 "ORDER BY t.name COLLATE NOCASE",
                 (art,),
             )
@@ -874,7 +889,9 @@ class PlanRepo:
         """Pläne des Profils plus profilfreie (etwa mitgelieferte)."""
         zeilen = self.con.execute(
             "SELECT * FROM plan WHERE deleted_at IS NULL "
-            "AND (subject_id = ? OR subject_id IS NULL) ORDER BY created_at",
+            "AND (subject_id = ? OR subject_id IS NULL)"
+            + _PLAN_PAKET_AKTIV
+            + " ORDER BY created_at",
             (subject_id,),
         )
         return self._mit_items([self._zeile(r) for r in zeilen])
@@ -940,11 +957,13 @@ class PlanRepo:
         ids = [p.id for p in plaene]
         platzhalter = ",".join("?" * len(ids))
         nach_plan: dict[str, list[PlanItem]] = defaultdict(list)
-        # Übungen im Papierkorb blenden sich aus dem Plan aus; holt man sie
-        # zurück, stehen sie wieder an ihrem Platz.
+        # Übungen im Papierkorb und aus deaktivierten Paketen blenden sich aus dem
+        # Plan aus; holt man sie zurück, stehen sie wieder an ihrem Platz.
         for r in self.con.execute(
             f"SELECT pi.* FROM plan_item pi JOIN exercise e ON e.id = pi.exercise_id "
             f"WHERE pi.plan_id IN ({platzhalter}) AND e.deleted_at IS NULL "
+            "AND NOT EXISTS (SELECT 1 FROM package pk WHERE pk.id = e.package_id "
+            "AND pk.disabled_at IS NOT NULL) "
             "ORDER BY pi.plan_id, pi.sort_order",
             ids,
         ):

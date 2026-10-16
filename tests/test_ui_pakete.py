@@ -12,7 +12,7 @@ import pytest
 
 ft = pytest.importorskip("flet")
 
-from trainingsapp.core.models import Exercise, Plan  # noqa: E402
+from trainingsapp.core.models import Exercise, Plan, PlanItem  # noqa: E402
 from trainingsapp.core.pakete import GRUNDAUSSTATTUNG  # noqa: E402
 from trainingsapp.data.seed import seed_id  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
@@ -187,7 +187,10 @@ def test_paketmanager_auf_standard_entfernen_wieder_installieren(page, state) ->
     assert state.uebungen.laden(wade.id).description != "Meine Fassung"
 
     entfernen = next(
-        c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.OutlinedButton)
+        c
+        for v in ansicht.controls
+        for c in alle(v)
+        if isinstance(c, ft.OutlinedButton) and c.content == "Paket entfernen"
     )
     entfernen.on_click()
     frage = dialoge[-1]
@@ -227,7 +230,10 @@ def test_paket_entfernen_fragt_bei_planbezug_und_kopiert(page, state) -> None:
 
     ansicht = paket_view(page, state, "/pakete", state.pakete.laden(GRUNDAUSSTATTUNG))
     entfernen = next(
-        c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.OutlinedButton)
+        c
+        for v in ansicht.controls
+        for c in alle(v)
+        if isinstance(c, ft.OutlinedButton) and c.content == "Paket entfernen"
     )
     entfernen.on_click()
     frage = dialoge[-1]
@@ -269,3 +275,93 @@ def test_uebung_zeigt_geaendert_und_setzt_zurueck(page, state) -> None:
     knopf.on_click()
     dialoge[-1].actions[1].on_click()
     assert state.pakete.abweichungen(state.uebungen.laden(wade.id)) == []
+
+
+def test_paket_deaktivieren_und_groesse(page, state) -> None:
+    """Deaktivieren nimmt alles aus Katalog und Plänen, ohne zu löschen; Zeile nennt die Größe."""
+    from trainingsapp.ui.views.pakete import paket_view
+
+    dialoge: list = []
+    page.show_dialog = dialoge.append
+    gezeichnet: list[int] = []
+    state.neu_zeichnen = lambda: gezeichnet.append(1)
+    ansicht = paket_view(page, state, "/pakete", state.pakete.laden(GRUNDAUSSTATTUNG))
+    assert any("kB" in t for t in texte(ansicht))
+    knopf = next(
+        c
+        for v in ansicht.controls
+        for c in alle(v)
+        if isinstance(c, ft.OutlinedButton) and c.content == "Deaktivieren"
+    )
+    knopf.on_click()
+    assert state.uebungen.alle() == [] and gezeichnet == [1]
+    assert state.pakete.laden(GRUNDAUSSTATTUNG).deaktiviert is not None
+    ansicht = paket_view(page, state, "/pakete", state.pakete.laden(GRUNDAUSSTATTUNG))
+    assert "deaktiviert" in " ".join(texte(ansicht))
+    aktivieren = next(
+        c
+        for v in ansicht.controls
+        for c in alle(v)
+        if isinstance(c, ft.OutlinedButton) and c.content == "Aktivieren"
+    )
+    aktivieren.on_click()
+    assert len(state.uebungen.alle()) > 0
+    liste = pakete_view(page, state)
+    assert "Standard" in texte(liste)
+
+
+def test_entfallene_dialog_uebernimmt_oder_loescht(page, state) -> None:
+    import asyncio
+
+    from trainingsapp.core.pakete import paket_lesen
+    from trainingsapp.ui.views.pakete import entfallene_dialog, paket_view
+
+    dialoge: list = []
+    page.show_dialog = dialoge.append
+    page.pop_dialog = lambda: None
+    roh = {
+        "paket": {"name": "Qigong", "version": 1},
+        "exercises": [
+            {"key": "baum", "name": "Baum", "spec": "halten"},
+            {"key": "lotus", "name": "Lotus", "spec": "halten"},
+            {"key": "kranich", "name": "Kranich", "spec": "halten"},
+        ],
+    }
+    inhalt = paket_lesen(roh)
+    state.pakete.importieren(inhalt)
+    baum, lotus, kranich = inhalt.uebungen
+    plan = Plan(name="Morgens", items=[PlanItem(exercise_id=lotus.id)])
+    state.plaene.speichern(plan)
+    roh["paket"]["version"] = 2
+    roh["exercises"] = roh["exercises"][:1]
+    state.pakete.importieren(paket_lesen(roh))
+    paket = state.pakete.laden(inhalt.paket.id)
+
+    ansicht = paket_view(page, state, "/pakete", paket)
+    assert "NICHT MEHR IM PAKET" in texte(ansicht)
+    entscheiden = next(
+        c
+        for v in ansicht.controls
+        for c in alle(v)
+        if isinstance(c, ft.FilledButton) and c.content == "Entscheiden"
+    )
+    entscheiden.on_click()
+    frage = dialoge[-1]
+    kaestchen = [c for c in alle(frage.content) if isinstance(c, ft.Checkbox)]
+    assert [k.label.split(" — ")[0] for k in kaestchen] == ["Kranich", "Lotus"]
+    assert "Teil von Plan „Morgens“" in kaestchen[1].label
+    kaestchen[0].value = False  # Kranich löschen, Lotus übernehmen
+    frage.actions[1].on_click()
+    asyncio.run(frage.on_dismiss(None))
+    assert state.uebungen.laden(kranich.id) is None  # Papierkorb
+    lotus_neu = state.uebungen.laden(lotus.id)
+    assert lotus_neu is not None and lotus_neu.package_id is None
+    assert [i.exercise_id for i in state.plaene.laden(plan.id).items] == [lotus.id]
+    assert state.pakete.entfallene(paket.id) == []
+    assert state.uebungen.laden(baum.id).package_id == paket.id
+
+    # Direkt aufrufbar (Start-Dialog), leer bleibt leer
+    state.entfallene = [(paket, [], [])]
+    dialog = entfallene_dialog(page, state, paket, [], [])
+    dialog.actions[1].on_click()
+    assert state.entfallene == []

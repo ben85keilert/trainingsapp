@@ -98,10 +98,23 @@ class Paket:
     beschreibung: str = ""
     #: Setzt, wer das Paket schreibt (optional). Ein Export übernimmt die installierte.
     version: int | None = None
+    #: Was in dieser Version neu ist — ein kurzer Text für die Seite „Updates“ (optional)
+    neuigkeiten: str = ""
     installiert: datetime | None = None
     aktualisiert: datetime | None = None
     #: Im Paketmanager entfernt (Migration 015) — die Übungen liegen im Papierkorb
     entfernt: datetime | None = None
+    #: Deaktiviert (Migration 017): nichts davon sichtbar, alles bleibt gespeichert
+    deaktiviert: datetime | None = None
+    #: ``"auto"`` (Updates aus der Quelle beim Start einspielen) oder ``"manuell"``
+    update_modus: str = "auto"
+    #: Version, die in der Paketquelle liegt (Migration 017) — ``None`` = nichts bekannt
+    verfuegbar: int | None = None
+
+    @property
+    def aktiv(self) -> bool:
+        """Installiert, nicht entfernt, nicht deaktiviert."""
+        return self.entfernt is None and self.deaktiviert is None
 
 
 @dataclass(slots=True)
@@ -241,6 +254,7 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
         name=name,
         beschreibung=str(kopf.get("beschreibung") or "").strip(),
         version=pversion,
+        neuigkeiten=str(kopf.get("neuigkeiten") or "").strip(),
     )
 
     uebungen: list[Exercise] = []
@@ -606,6 +620,39 @@ def abweichungen(u: Exercise, standard: dict[str, Any]) -> list[str]:
     return [text for feld, text in FELDNAMEN.items() if jetzt.get(feld) != standard.get(feld)]
 
 
+def zusammenfuehren(
+    basis: dict[str, Any] | None, nutzer: dict[str, Any], soll: dict[str, Any]
+) -> dict[str, Any]:
+    """Update einer Paketübung, die jemand geändert hat — je Feld (Ben, 16.10.2026).
+
+    ``basis`` ist der gespeicherte Paketstand (die „Signatur“ dessen, was vom
+    Paket kam), ``nutzer`` der Stand der Übung hier, ``soll`` der neue
+    Paketstand. Ein Feld, das noch so ist wie im alten Paketstand, hat nie
+    jemand angefasst — es bekommt den neuen Wert. Ein Feld, das abweicht, hat
+    die Person geändert — es bleibt. „Auf Paketstand setzen“ holt ``soll``
+    jederzeit ganz. Ohne ``basis`` (Stand unbekannt) gilt ``soll``.
+
+    >>> basis = {"name": "Baum", "description": "Knie weich.", "typen": ["Qigong"]}
+    >>> nutzer = {"name": "Baum", "description": "Meine Fassung", "typen": ["Qigong"]}
+    >>> soll = {"name": "Baum stehen", "description": "Knie weich, Blick geradeaus.",
+    ...         "typen": ["Qigong"], "icon_key": "park"}
+    >>> ergebnis = zusammenfuehren(basis, nutzer, soll)
+    >>> ergebnis["name"], ergebnis["description"], ergebnis["icon_key"]
+    ('Baum stehen', 'Meine Fassung', 'park')
+    >>> zusammenfuehren(None, nutzer, soll) == soll
+    True
+    """
+    if basis is None:
+        return dict(soll)
+    ergebnis: dict[str, Any] = {}
+    for feld in FELDNAMEN:
+        geaendert = nutzer.get(feld) != basis.get(feld)
+        wert = nutzer.get(feld) if geaendert else soll.get(feld)
+        if wert is not None:
+            ergebnis[feld] = wert
+    return ergebnis
+
+
 def kurs_stand(k: Kurs) -> dict[str, Any]:
     """Was ein Paket über einen Kurs festlegt — ohne ID, Herkunft und Zustand.
 
@@ -670,6 +717,8 @@ def paket_bauen(
         kopf["beschreibung"] = paket.beschreibung
     if paket.version is not None:
         kopf["version"] = paket.version
+    if paket.neuigkeiten:
+        kopf["neuigkeiten"] = paket.neuigkeiten
     roh: dict[str, Any] = {
         "format": FORMAT,
         "version": FORMAT_VERSION if kurse else 1,
@@ -727,4 +776,5 @@ __all__ = [
     "stand",
     "stand_tag_nachziehen",
     "uebung_id",
+    "zusammenfuehren",
 ]

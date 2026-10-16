@@ -37,6 +37,7 @@ from trainingsapp.core.pakete import (
 )
 from trainingsapp.core.result_spec import SPEC_WINKEL
 from trainingsapp.data.db import oeffnen
+from trainingsapp.data.kurse import KursRepo
 from trainingsapp.data.pakete import PaketRepo, Status
 from trainingsapp.data.repositories import ExerciseRepo, PlanRepo, TagRepo
 from trainingsapp.data.seed import SEED_DATEI, seed_einspielen, seed_id, seed_inhalt
@@ -199,8 +200,9 @@ def test_herkunft_wird_fuer_alte_datenbanken_nachgetragen(con) -> None:
 
 
 def test_hoehere_version_aktualisiert_die_grundausstattung(con, tmp_path) -> None:
-    """Paket-Update überschreibt Änderungen (Ben: erstmal erwünscht) — gleiche Version nicht."""
+    """Paket-Update bringt neue Paketfelder, lässt Geändertes stehen — gleiche Version nichts."""
     repo = ExerciseRepo(con)
+    pakete = PaketRepo(con)
     u = repo.laden(seed_id("wadenheben"))
     u.description = "Meine Fassung"
     repo.speichern(u)
@@ -212,10 +214,17 @@ def test_hoehere_version_aktualisiert_die_grundausstattung(con, tmp_path) -> Non
     assert repo.laden(u.id).description == "Meine Fassung"
 
     roh["paket"]["version"] += 1
+    wade = next(e for e in roh["exercises"] if e["key"] == "wadenheben")
+    wade["description"] = "Neu im Paket"
+    wade["name"] = "Wadenheben (neu)"
     datei.write_text(json.dumps(roh), encoding="utf-8")
     seed_einspielen(con, datei)
-    assert repo.laden(u.id).description != "Meine Fassung"
-    assert PaketRepo(con).laden(GRUNDAUSSTATTUNG).version == roh["paket"]["version"]
+    u = repo.laden(u.id)
+    assert u.description == "Meine Fassung"  # selbst geändert: bleibt
+    assert u.name == "Wadenheben (neu)"  # nie angefasst: neuer Paketstand
+    assert pakete.standard(u.id)["description"] == "Neu im Paket"  # „Auf Paketstand“ holt es
+    assert pakete.abweichungen(u) == ["Beschreibung"]
+    assert pakete.laden(GRUNDAUSSTATTUNG).version == roh["paket"]["version"]
 
 
 def test_seed_holt_endgueltig_geloeschte_nicht_zurueck(con) -> None:
@@ -261,8 +270,9 @@ def test_erneuter_import_ohne_aenderung_schreibt_nichts(con) -> None:
     assert con.execute("SELECT SUM(revision) FROM exercise").fetchone()[0] == revision
 
 
-def test_update_ueberschreibt_aenderungen_und_laesst_den_ort(con) -> None:
-    """Archiv und Papierkorb bleiben, der Inhalt kommt aus dem Paket."""
+def test_update_behaelt_aenderungen_und_laesst_den_ort(con) -> None:
+    """Drei-Wege-Abgleich (Ben, 16.10.2026): Geändertes bleibt, der Rest kommt aus dem
+    Paket; Archiv und Papierkorb bleiben; der Paketstand ist danach der neue."""
     pakete = PaketRepo(con)
     repo = ExerciseRepo(con)
     inhalt = paket_lesen(qigong())
@@ -273,13 +283,27 @@ def test_update_ueberschreibt_aenderungen_und_laesst_den_ort(con) -> None:
     repo.speichern(baum)
     repo.in_papierkorb(tief.id)
 
+    # Gleiches Paket, nur die Version höher: an „baum“ ist nichts Neues → nichts zu schreiben
     vorschau = pakete.importieren(paket_lesen(qigong(version=2)))
-    assert vorschau.anzahl(Status.GEAENDERT) == 1  # nur „baum“ weicht ab
-    baum = repo.laden(baum.id)
-    assert baum.description == "Knie weich, Scheitel nach oben."
-    assert baum.archived
-    assert repo.laden(tief.id) is None  # weiter im Papierkorb
+    assert vorschau.anzahl(Status.GEAENDERT) == 0
+    assert vorschau.anzahl(Status.UNVERAENDERT) == 2
+    assert repo.laden(baum.id).description == "Meine Notiz"
     assert pakete.laden(inhalt.paket.id).version == 2
+
+    # Das Paket ändert Beschreibung (von mir geändert → bleibt) und Regionen (nie angefasst → neu)
+    roh = qigong(version=3)
+    roh["exercises"][0]["description"] = "Neu aus dem Paket"
+    roh["exercises"][0]["regionen"] = ["Meridiane", "Rumpf"]
+    vorschau = pakete.importieren(paket_lesen(roh))
+    assert vorschau.anzahl(Status.GEAENDERT) == 1  # nur „baum“ bekommt etwas
+    baum = repo.laden(baum.id)
+    assert baum.description == "Meine Notiz"
+    assert baum.regionen == ["Meridiane", "Rumpf"]
+    assert baum.archived
+    assert pakete.abweichungen(baum) == ["Beschreibung"]  # „Auf Paketstand“ holt die neue
+    assert pakete.zuruecksetzen([baum.id]) == 1
+    assert repo.laden(baum.id).description == "Neu aus dem Paket"
+    assert repo.laden(tief.id) is None  # weiter im Papierkorb
 
 
 def test_eigene_uebungen_aendert_kein_import(con) -> None:
@@ -583,3 +607,159 @@ def test_entfernte_grundausstattung_kommt_beim_start_nicht_zurueck(con) -> None:
 
     pakete.importieren(pakete.inhalt(GRUNDAUSSTATTUNG))  # „Wieder installieren“
     assert len(ExerciseRepo(con).alle()) == n
+
+
+# ---------------------------------------------------------------------------
+# Migration 017: nicht mehr im Paket, deaktivieren, Größe (Ben, 16.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def test_entfallene_uebung_bleibt_bis_zur_entscheidung(con) -> None:
+    """Fällt eine Übung aus dem Paket, wird nichts gelöscht: Markierung, dann übernehmen."""
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    plaene = PlanRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    baum, tief = inhalt.uebungen
+    plan = Plan(name="Morgens", subject_id=None)
+    plaene.speichern(plan)
+    plaene.uebung_hinzufuegen(plan.id, tief.id)
+
+    roh = qigong(version=2)
+    roh["exercises"] = roh["exercises"][:1]  # „baum_tief“ fehlt
+    vorschau = pakete.vorschau(paket_lesen(roh))
+    assert vorschau.entfallen == [tief.id]
+    assert any("nicht mehr im Paket" in z for z in vorschau.zusammenfassung())
+    pakete.importieren(paket_lesen(roh))
+    assert [u.id for u in pakete.entfallene(inhalt.paket.id)] == [tief.id]
+    assert repo.laden(tief.id) is not None  # nichts gelöscht
+    assert [i.exercise_id for i in plaene.laden(plan.id).items] == [tief.id]
+    assert all(z.entfallen == (z.uebung.id == tief.id) for z in pakete.uebersicht(inhalt.paket.id))
+    assert [u.id for u in pakete.inhalt(inhalt.paket.id).uebungen] == [baum.id]  # nicht zurück
+    assert [(p.id, [u.id for u in us], ks) for p, us, ks in pakete.entfallene_offen()] == [
+        (inhalt.paket.id, [tief.id], [])
+    ]
+
+    # Wieder in der Datei: die Markierung fällt
+    pakete.importieren(paket_lesen(qigong(version=3)))
+    assert pakete.entfallene(inhalt.paket.id) == []
+    pakete.importieren(paket_lesen(roh | {"paket": {"name": "Qigong", "version": 4}}))
+
+    # Übernehmen: eigene Übung mit derselben ID — Plan und Verlauf hängen daran
+    assert pakete.entfallene_uebernehmen([tief.id]) == 1
+    u = repo.laden(tief.id)
+    assert u.package_id is None and pakete.standard(tief.id) is None
+    assert [i.exercise_id for i in plaene.laden(plan.id).items] == [tief.id]
+    assert pakete.anzahl_eigene() == 1
+    assert pakete.entfallene_uebernehmen([tief.id]) == 0  # nur Markierte
+
+
+def test_entfallene_uebung_loeschen(con) -> None:
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    plaene = PlanRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    baum, tief = inhalt.uebungen
+    plan = Plan(name="Morgens", subject_id=None)
+    plaene.speichern(plan)
+    plaene.uebung_hinzufuegen(plan.id, tief.id)
+    roh = qigong(version=2)
+    roh["exercises"] = roh["exercises"][:1]
+    pakete.importieren(paket_lesen(roh))
+
+    assert pakete.entfallene_loeschen([tief.id, baum.id]) == 1  # „baum“ ist nicht entfallen
+    assert repo.laden(tief.id) is None and repo.laden(tief.id, mit_geloeschten=True) is not None
+    assert plaene.laden(plan.id).items == []
+    assert repo.laden(tief.id, mit_geloeschten=True).package_id is None
+    assert pakete.entfallene(inhalt.paket.id) == []
+    assert [u.id for u in pakete.inhalt(inhalt.paket.id).uebungen] == [baum.id]
+
+
+def test_entfallener_kurs(con) -> None:
+    pakete = PaketRepo(con)
+    kurse = KursRepo(con)
+    roh = qigong()
+    roh["kurse"] = [
+        {"key": "k1", "name": "Kurs A", "kapitel": [{"key": "a", "titel": "A", "text": "x"}]},
+        {"key": "k2", "name": "Kurs B", "kapitel": [{"key": "b", "titel": "B", "text": "y"}]},
+    ]
+    inhalt = paket_lesen(roh)
+    pakete.importieren(inhalt)
+    meine = lambda: [k for k in kurse.alle() if k.package_id == inhalt.paket.id]  # noqa: E731
+    assert len(meine()) == 2
+    roh["kurse"] = roh["kurse"][:1]
+    roh["paket"]["version"] = 2
+    vorschau = pakete.importieren(paket_lesen(roh))
+    kurs_b = inhalt.kurse[1].id
+    assert vorschau.kurse_entfallen == [kurs_b]
+    assert [k.id for k in pakete.entfallene_kurse(inhalt.paket.id)] == [kurs_b]
+    assert len(meine()) == 2  # bleibt sichtbar, bis entschieden ist
+    assert pakete.entfallene_uebernehmen(kurse=[kurs_b]) == 1
+    assert kurse.laden(kurs_b).package_id is None
+    assert pakete.entfallene_loeschen(kurse=[inhalt.kurse[0].id]) == 0  # nicht entfallen
+
+
+def test_deaktivieren_versteckt_alles_und_haelt_die_daten(con) -> None:
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    plaene = PlanRepo(con)
+    kurse = KursRepo(con)
+    roh = qigong()
+    roh["kurse"] = [
+        {"key": "k1", "name": "Kurs A", "kapitel": [{"key": "a", "titel": "A", "text": "x"}]}
+    ]
+    inhalt = paket_lesen(roh)
+    pakete.importieren(inhalt)
+    baum, _tief = inhalt.uebungen
+    plan = Plan(name="Morgens", subject_id=None)
+    plaene.speichern(plan)
+    plaene.uebung_hinzufuegen(plan.id, baum.id)
+    plaene.uebung_hinzufuegen(plan.id, seed_id("wadenheben"))
+    vorher = con.execute("SELECT SUM(revision) FROM exercise").fetchone()[0]
+
+    pakete.deaktivieren(inhalt.paket.id)
+    assert pakete.laden(inhalt.paket.id).deaktiviert is not None
+    assert not pakete.laden(inhalt.paket.id).aktiv
+    assert baum.id not in {u.id for u in repo.alle()}
+    assert repo.suchen("Baum") == []
+    assert "Qigong" not in repo.typen() and "Meridiane" not in repo.regionen()
+    assert [i.exercise_id for i in plaene.laden(plan.id).items] == [seed_id("wadenheben")]
+    assert [k.package_id for k in kurse.alle()] == [GRUNDAUSSTATTUNG]  # nur der Standardkurs
+    assert repo.laden(baum.id) is not None  # Daten da
+    assert baum.id in {u.id for u in repo.alle(mit_geloeschten=True)}  # der Verlauf sieht alles
+    assert [p.name for p, _ in pakete.alle()] == ["Standard", "Qigong"]  # bleibt in der Liste
+    assert pakete.importieren(paket_lesen(qigong(version=2))).installiert is not None
+    assert pakete.laden(inhalt.paket.id).deaktiviert is not None  # ein Import aktiviert nicht
+
+    pakete.aktivieren(inhalt.paket.id)
+    assert baum.id in {u.id for u in repo.alle()}
+    assert [i.exercise_id for i in plaene.laden(plan.id).items] == [baum.id, seed_id("wadenheben")]
+    assert len(kurse.alle()) == 2
+    assert con.execute("SELECT SUM(revision) FROM exercise").fetchone()[0] == vorher
+
+
+def test_seed_laesst_deaktiviertes_standardpaket_in_ruhe(con) -> None:
+    pakete = PaketRepo(con)
+    pakete.deaktivieren(GRUNDAUSSTATTUNG)
+    con.execute("DELETE FROM exercise WHERE id = ?", (seed_id("wadenheben"),))
+    assert seed_einspielen(con) == 0
+    assert ExerciseRepo(con).laden(seed_id("wadenheben")) is None
+
+
+def test_groesse_zaehlt_texte_und_lokale_dateien(con, tmp_path) -> None:
+    pakete = PaketRepo(con)
+    repo = ExerciseRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    texte, dateien = pakete.groesse(inhalt.paket.id, tmp_path)
+    assert texte > 100 and dateien == 0
+    (tmp_path / "foto.jpg").write_bytes(b"x" * 1000)
+    (tmp_path / "clip.mp4").write_bytes(b"y" * 5000)
+    baum = repo.laden(inhalt.uebungen[0].id)
+    baum.image_path = "foto.jpg"
+    baum.media.append(Media(kind=MediaKind.VIDEO, source=MediaSource.LOCAL, uri="clip.mp4"))
+    baum.media.append(Media(kind=MediaKind.VIDEO, source=MediaSource.LOCAL, uri="fehlt.mp4"))
+    repo.speichern(baum)
+    assert pakete.groesse(inhalt.paket.id, tmp_path) == (texte, 6000)

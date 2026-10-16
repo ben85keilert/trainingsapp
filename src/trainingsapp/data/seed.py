@@ -93,7 +93,7 @@ def seed_einspielen(con: sqlite3.Connection, datei: Path = SEED_DATEI) -> int:
     inhalt = seed_inhalt(datei)
     pakete = PaketRepo(con)
     vorher = pakete.laden(inhalt.paket.id)
-    if vorher is not None and vorher.entfernt is not None:
+    if vorher is not None and not vorher.aktiv:  # entfernt oder deaktiviert: nichts nachlegen
         return 0
     update = vorher is not None and (inhalt.paket.version or 0) > (vorher.version or 0)
     with transaktion(con):
@@ -103,4 +103,48 @@ def seed_einspielen(con: sqlite3.Connection, datei: Path = SEED_DATEI) -> int:
     return ergebnis.anzahl(Status.NEU)
 
 
-__all__ = ["SEED_DATEI", "SPECS", "seed_einspielen", "seed_id", "seed_inhalt", "seed_laden"]
+def pakete_aus_ordner(con: sqlite3.Connection, ordner: Path | None) -> list[str]:
+    """Entwicklungs-Loader (``TRAININGSAPP_PAKETE``, `config.paketordner`).
+
+    Jede ``.toml``/``.json`` im Ordner wird beim Start wie ein Import eingespielt —
+    immer auf den Stand der Datei, auch das Paket „Standard“. So startet das
+    Inhalte-Repo die App direkt mit seinen Paketen. Entfernte und deaktivierte
+    Pakete bleiben unangetastet; was aus einer Datei fiel, wird markiert wie bei
+    jedem Update (`PaketRepo.entfallene`).
+
+    Returns:
+        Meldungen zu Dateien, die nicht gingen (leer = alles eingespielt).
+    """
+    if ordner is None:
+        return []
+    if not ordner.is_dir():
+        return [f"Paketordner nicht gefunden: {ordner}"]
+    pakete = PaketRepo(con)
+    meldungen: list[str] = []
+    dateien = sorted(p for p in ordner.iterdir() if p.is_file() and p.suffix in (".toml", ".json"))
+    for datei in dateien:
+        try:
+            inhalt = seed_inhalt(datei)
+        except PaketFehler as fehler:
+            meldungen.append(str(fehler))
+            continue
+        vorher = pakete.laden(inhalt.paket.id)
+        if vorher is not None and not vorher.aktiv:
+            continue
+        try:
+            with transaktion(con):
+                pakete.importieren(inhalt, aktualisieren=True, neue_tags_oben=False)
+        except sqlite3.Error as fehler:
+            meldungen.append(f"{datei.name}: {fehler}")
+    return meldungen
+
+
+__all__ = [
+    "SEED_DATEI",
+    "SPECS",
+    "pakete_aus_ordner",
+    "seed_einspielen",
+    "seed_id",
+    "seed_inhalt",
+    "seed_laden",
+]

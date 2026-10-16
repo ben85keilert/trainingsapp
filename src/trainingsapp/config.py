@@ -147,6 +147,18 @@ def datenbankpfad() -> Path:
     return datenverzeichnis() / "trainingsapp.db"
 
 
+def paketordner() -> Path | None:
+    """Ordner mit Paketdateien (TOML/JSON), die jeder Start wie einen Import einspielt.
+
+    Nur am Rechner, über ``TRAININGSAPP_PAKETE`` — so startet das Inhalte-Repo
+    die App direkt mit seinen Paketen (`docs/uebungspakete.md`, „Inhalte
+    pflegen“). Entfernte und deaktivierte Pakete bleiben unangetastet.
+    """
+    if ordner := os.environ.get("TRAININGSAPP_PAKETE"):
+        return Path(ordner)
+    return None
+
+
 def streckenverzeichnis() -> Path:
     """GPS-Strecken — **getrennt** von den Messungen.
 
@@ -192,5 +204,6 @@ __all__ = [
     "kartenverzeichnis",
     "medienverzeichnis",
     "messungenverzeichnis",
+    "paketordner",
     "streckenverzeichnis",
 ]

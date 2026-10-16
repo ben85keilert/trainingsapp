@@ -38,6 +38,11 @@ dependencies = [
     "flet-ton",
 ]
 
+# Werkzeug fürs Inhalte-Repo: Paketdateien prüfen, bauen, Index schreiben
+# (`uv run trainingsapp-paket …`, auch von außen: `uv run --project ../trainingsapp …`).
+[project.scripts]
+trainingsapp-paket = "trainingsapp.paket_werkzeug:main"
+
 [project.optional-dependencies]
 # Nur für die Desktop-Entwicklung: bleak funktioniert auf Windows/macOS/Linux,
 # aber nicht in Flet-Android-Builds (serious_python statt python-for-android).

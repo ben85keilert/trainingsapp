@@ -65,7 +65,12 @@ from trainingsapp.ui.views.kurse import kapitel_view, kurs_view
 from trainingsapp.ui.views.live_vollbild import live_vollbild_view
 from trainingsapp.ui.views.messung import backup_dialog, messung
 from trainingsapp.ui.views.messung_detail import messung_detail_view
-from trainingsapp.ui.views.pakete import paket_export_view, paket_view, pakete_view
+from trainingsapp.ui.views.pakete import (
+    entfallene_dialog,
+    paket_export_view,
+    paket_view,
+    pakete_view,
+)
 from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view
 from trainingsapp.ui.views.plan import einzel_plan, plan_view
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
@@ -341,7 +346,7 @@ def main(page: ft.Page) -> None:
             auswahl = rest[1] if len(rest) > 1 else None
             page.views.append(paket_export_view(page, state, basis, auswahl))
         elif rest and (paket := state.pakete.laden(rest[0])) is not None and not paket.entfernt:
-            page.views.append(paket_view(page, state, basis, paket))
+            page.views.append(paket_view(page, state, basis, paket))  # auch deaktivierte
 
     def eintrag_routen(teile: list[str]) -> None:
         eintrag = state.sitzungen.eintrag_laden(teile[1])
@@ -468,6 +473,8 @@ def main(page: ft.Page) -> None:
         page.show_dialog(verwaiste_dialog(page, state))
     if state.hrv_backups:  # Aufnahme, die mit Akku oder App zu Ende ging
         page.show_dialog(backup_dialog(page, state))
+    for paket, offene_uebungen, offene_kurse in state.entfallene:  # aus dem Paket gefallen
+        page.show_dialog(entfallene_dialog(page, state, paket, offene_uebungen, offene_kurse))
 
 
 if __name__ == "__main__":

@@ -8,7 +8,12 @@ keinem Paket gehören) und, falls es welche gibt, die entfernten Pakete.
   (`Vorschau.zusammenfassung`), bevor es schreibt.
 - **Ein Paket** (`<basis>/<paket-id>`): seine Übungen mit Stand („wie im
   Paket“, „geändert: …“), „Auf Paketstand setzen“ einzeln oder für alle,
-  „Paket entfernen“ (Übungen in den Papierkorb).
+  „Deaktivieren“ (nichts davon sichtbar, alles bleibt — Ben, 16.10.2026),
+  „Paket entfernen“ (Übungen in den Papierkorb), die Größe samt eigener Fotos
+  und Videos, seine Kurse.
+- **Nicht mehr im Paket**: Fällt beim Update eine Übung oder ein Kurs aus dem
+  Paket, fragt `entfallene_dialog` — als eigene übernehmen (Verlauf und Pläne
+  bleiben) oder löschen. Beim Start für alles, was noch offen ist (`app.py`).
 - **Wieder installieren** holt ein entferntes Paket zurück — ohne Datei, aus
   dem Paketstand, den jede seiner Übungen trägt.
 - **Exportieren** (`<basis>/export[/<paket-id>]`) schreibt ausgewählte Übungen
@@ -27,6 +32,8 @@ from pathlib import Path
 
 import flet as ft
 
+from trainingsapp.config import medienverzeichnis
+from trainingsapp.core.kurse import Kurs
 from trainingsapp.core.models import Exercise
 from trainingsapp.core.pakete import (
     GRUNDAUSSTATTUNG,
@@ -62,6 +69,92 @@ def _datum(zeit: datetime | None) -> str:
     return f"{zeit.astimezone():%d.%m.%Y}" if zeit is not None else ""
 
 
+def _bytes(n: int) -> str:
+    return f"{n / 1e6:.1f} MB" if n >= 1_000_000 else f"{max(1, round(n / 1000))} kB"
+
+
+def groesse_text(texte: int, dateien: int) -> str:
+    """Wie viel ein Paket belegt — Texte, dazu eigene Fotos und Videos, wenn es welche gibt.
+
+    >>> groesse_text(31_000, 0), groesse_text(31_000, 48_000_000)
+    ('31 kB', '31 kB · 48.0 MB Fotos/Videos')
+    """
+    text = _bytes(texte)
+    return f"{text} · {_bytes(dateien)} Fotos/Videos" if dateien else text
+
+
+def entfallene_dialog(
+    page: ft.Page, state: AppState, paket: Paket, uebungen: list[Exercise], kurse: list[Kurs]
+) -> ft.AlertDialog:
+    """„Übung … ist nicht mehr Teil des Pakets — in eigene Übung übernehmen?“ (Ben, 16.10.2026).
+
+    Angekreuzt wird übernommen: gleiche ID, Verlauf und Pläne bleiben. Nicht
+    angekreuzt kommt in den Papierkorb und fliegt aus den Plänen. „Später“ lässt
+    alles, wie es ist — der Dialog kommt beim nächsten Start wieder.
+    """
+    nachher = Nachher()
+    kaestchen: dict[str, ft.Checkbox] = {}
+    for u in uebungen:
+        plaene = sorted({p.name for p, _ in state.plaene.verwendungen(u.id)})
+        label = u.name
+        if plaene:
+            label += " — Teil von Plan " + ", ".join(f"„{n}“" for n in plaene)
+        kaestchen[u.id] = ft.Checkbox(value=True, label=label)
+    kurs_kaestchen = {k.id: ft.Checkbox(value=True, label=f"Kurs „{k.name}“") for k in kurse}
+
+    def ausfuehren() -> None:
+        uebernehmen = [i for i, k in kaestchen.items() if k.value]
+        loeschen = [i for i, k in kaestchen.items() if not k.value]
+        kurse_uebernehmen = [i for i, k in kurs_kaestchen.items() if k.value]
+        kurse_loeschen = [i for i, k in kurs_kaestchen.items() if not k.value]
+        try:
+            n_ueb = state.pakete.entfallene_uebernehmen(uebernehmen, kurse_uebernehmen)
+            n_weg = state.pakete.entfallene_loeschen(loeschen, kurse_loeschen)
+        except sqlite3.Error as fehler:
+            page.pop_dialog()
+            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht übernommen: {fehler}")))
+            return
+        state.entfallene = [e for e in state.entfallene if e[0].id != paket.id]
+        nachher.danach(state.neu_zeichnen)
+        page.pop_dialog()
+        teile = []
+        if n_ueb:
+            teile.append(f"{n_ueb} übernommen")
+        if n_weg:
+            teile.append(f"{n_weg} im Papierkorb")
+        page.show_dialog(ft.SnackBar(ft.Text("„" + paket.name + "“: " + ", ".join(teile))))
+
+    was = (
+        "Übungen"
+        if len(uebungen) + len(kurse) != 1
+        else ("Diese Übung" if uebungen else "Dieser Kurs")
+    )
+    return ft.AlertDialog(
+        modal=True,
+        on_dismiss=nachher.bei_schliessen,
+        title=ft.Text(f"Nicht mehr im Paket „{paket.name}“"),
+        content=ft.Column(
+            tight=True,
+            spacing=8,
+            scroll=ft.ScrollMode.AUTO,
+            controls=[
+                ft.Text(
+                    f"{was} {'ist' if len(uebungen) + len(kurse) == 1 else 'sind'} seit dem "
+                    "Update nicht mehr Teil des Pakets. Angekreuzt bleiben sie als eigene — "
+                    "Verlauf und Pläne bleiben, nur die Herkunft fällt weg. Nicht angekreuzt "
+                    "kommen sie in den Papierkorb und fliegen aus den Plänen."
+                ),
+                *kaestchen.values(),
+                *kurs_kaestchen.values(),
+            ],
+        ),
+        actions=[
+            ft.TextButton("Später", on_click=lambda: page.pop_dialog()),
+            ft.FilledButton("Übernehmen", icon=ft.Icons.CHECK, on_click=ausfuehren),
+        ],
+    )
+
+
 def _versionstext(vorschau: Vorschau) -> str:
     """„Neues Paket“, „Version 2 — installiert ist Version 1“, „war entfernt“ …"""
     neu, alt = vorschau.paket, vorschau.installiert
@@ -89,6 +182,22 @@ def import_rueckfrage(
             page.show_dialog(ft.SnackBar(ft.Text(f"Nicht importiert: {fehler}")))
             return
         nachher.danach(state.neu_zeichnen)
+        if ergebnis.entfallen or ergebnis.kurse_entfallen:
+            # Erst wenn dieser Dialog zu ist: was aus dem Paket fiel — übernehmen oder löschen?
+            def nachfragen() -> None:
+                p = state.pakete.laden(inhalt.paket.id)
+                if p is not None:
+                    page.show_dialog(
+                        entfallene_dialog(
+                            page,
+                            state,
+                            p,
+                            state.pakete.entfallene(p.id),
+                            state.pakete.entfallene_kurse(p.id),
+                        )
+                    )
+
+            nachher.danach(nachfragen)
         page.pop_dialog()
         teile = [
             f"{n} {was}"
@@ -96,6 +205,7 @@ def import_rueckfrage(
                 (ergebnis.anzahl(Status.NEU), "neu"),
                 (ergebnis.anzahl(Status.ZURUECK), "zurück"),
                 (ergebnis.anzahl(Status.GEAENDERT), "aktualisiert"),
+                (len(ergebnis.entfallen), "nicht mehr im Paket"),
             )
             if n
         ]
@@ -120,7 +230,7 @@ def import_rueckfrage(
             ft.Text(
                 f"Ersetzt das mitgelieferte Paket „Standard“ — "
                 f"{uebungen_zahl(vorschau.anzahl(Status.GEAENDERT))} "
-                "werden mit dem Stand dieser Datei überschrieben.",
+                "bekommen den Stand dieser Datei (deine Änderungen bleiben).",
                 weight=ft.FontWeight.W_600,
                 color=ft.Colors.ERROR,
             )
@@ -210,12 +320,18 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
     # -- Liste -------------------------------------------------------------------
 
     def zeile(paket: Paket, n: int) -> ft.Control:
-        geaendert = sum(1 for z in state.pakete.uebersicht(paket.id) if z.geaendert)
-        teile = [uebungen_zahl(n)]
+        staende = state.pakete.uebersicht(paket.id)
+        geaendert = sum(1 for z in staende if z.geaendert)
+        entfallen = sum(1 for z in staende if z.entfallen and z.ort != PAPIERKORB)
+        teile = ["deaktiviert"] if paket.deaktiviert else []
+        teile.append(uebungen_zahl(n))
         if geaendert:
             teile.append(f"{geaendert} geändert")
+        if entfallen:
+            teile.append(f"{entfallen} nicht mehr im Paket")
         if paket.version is not None:
             teile.append(f"Version {paket.version}")
+        teile.append(groesse_text(*state.pakete.groesse(paket.id, medienverzeichnis())))
         texte: list[ft.Control] = [
             ft.Text(paket.name, size=15),
             ft.Text("  ·  ".join(teile), size=11, opacity=0.6),
@@ -226,6 +342,7 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
             ink=True,
             border_radius=10,
             padding=ft.Padding.symmetric(horizontal=4, vertical=6),
+            opacity=0.5 if paket.deaktiviert else 1,
             on_click=oeffner(f"{basis}/{paket.id}"),
             content=ft.Row(
                 spacing=4,
@@ -315,9 +432,9 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
                         hinweis(
                             "Übungen kommen über Pakete. Ein Import legt neue Übungen an "
                             "und bringt die Übungen desselben Pakets auf den Stand der "
-                            "Datei — was du an ihnen geändert hast, geht dabei verloren. "
-                            "Eigene Übungen ändert er nie. Antippen öffnet ein Paket: "
-                            "Übungen auf den Paketstand setzen oder das Paket entfernen."
+                            "Datei — was du an ihnen geändert hast, bleibt. Eigene "
+                            "Übungen ändert er nie. Antippen öffnet ein Paket: auf den "
+                            "Paketstand setzen, deaktivieren oder entfernen."
                         ),
                         ft.Row(
                             spacing=10,
@@ -353,7 +470,10 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
     """Ein installiertes Paket (`<basis>/<paket-id>`): Übungen mit Stand, „Auf
     Paketstand setzen“ (einzeln oder alle), „Paket entfernen“, Export."""
     staende = state.pakete.uebersicht(paket.id)
-    geaendert = [z for z in staende if z.geaendert]
+    geaendert = [z for z in staende if z.geaendert and not z.entfallen]
+    entfallene = state.pakete.entfallene(paket.id)
+    entfallene_kurse = state.pakete.entfallene_kurse(paket.id)
+    kurse = state.pakete.kurse(paket.id)
     nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
 
     def melden(text: str) -> None:
@@ -364,6 +484,19 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
             await page.push_route(route)
 
         return handler
+
+    def umschalten() -> None:
+        """Deaktivieren bzw. Aktivieren — sofort, ohne Rückfrage: nichts geht verloren."""
+        if paket.deaktiviert:
+            state.pakete.aktivieren(paket.id)
+            melden(f"„{paket.name}“ ist wieder aktiv.")
+        else:
+            state.pakete.deaktivieren(paket.id)
+            melden(f"„{paket.name}“ deaktiviert — nichts davon sichtbar, alles bleibt.")
+        state.neu_zeichnen()
+
+    def entscheiden() -> None:
+        page.show_dialog(entfallene_dialog(page, state, paket, entfallene, entfallene_kurse))
 
     def fragen(
         titel_text: str, text: str, knopf: str, aktion: Callable[[], object], warnend: bool = False
@@ -485,7 +618,9 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
         )
 
     def zeile(z: Uebungsstand) -> ft.Control:
-        if z.abweichungen is None:
+        if z.entfallen:
+            info = "nicht mehr im Paket — übernehmen oder löschen?"
+        elif z.abweichungen is None:
             info = "Paketstand unbekannt — die Paketdatei erneut importieren"
         elif z.abweichungen:
             info = "geändert: " + ", ".join(z.abweichungen)
@@ -514,14 +649,41 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
                     tooltip="Auf Paketstand setzen",
                     on_click=zuruecksetzer([z]),
                 )
-                if z.geaendert
+                if z.geaendert and not z.entfallen
                 else ft.Container(width=40),
             ],
         )
 
-    teile = [uebungen_zahl(len(staende))]
+    def kurs_zeile(k: Kurs) -> ft.Control:
+        weg = any(e.id == k.id for e in entfallene_kurse)
+        return ft.Row(
+            spacing=10,
+            controls=[
+                ft.Icon(ft.Icons.SCHOOL_OUTLINED),
+                ft.Column(
+                    spacing=0,
+                    expand=True,
+                    controls=[
+                        ft.Text(k.name, size=15),
+                        ft.Text(
+                            "nicht mehr im Paket — übernehmen oder löschen?"
+                            if weg
+                            else f"{len(k.kapitel)} Kapitel",
+                            size=11,
+                            opacity=0.6,
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+    teile = ["deaktiviert"] if paket.deaktiviert else []
+    teile.append(uebungen_zahl(len(staende)))
+    if kurse:
+        teile.append("1 Kurs" if len(kurse) == 1 else f"{len(kurse)} Kurse")
     if paket.version is not None:
         teile.append(f"Version {paket.version}")
+    teile.append(groesse_text(*state.pakete.groesse(paket.id, medienverzeichnis())))
     teile.append(f"installiert {_datum(paket.installiert)}")
     if paket.aktualisiert is not None and paket.aktualisiert != paket.installiert:
         teile.append(f"Stand {_datum(paket.aktualisiert)}")
@@ -529,6 +691,24 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
     if paket.beschreibung:
         kopf.append(ft.Text(paket.beschreibung))
     kopf.append(ft.Text("  ·  ".join(teile), size=12, opacity=0.7))
+    offen: list[ft.Control] = []
+    if entfallene or entfallene_kurse:
+        n = len(entfallene) + len(entfallene_kurse)
+        offen.append(
+            karte(
+                titel("Nicht mehr im Paket"),
+                ft.Text(
+                    f"{n} {'Eintrag wartet' if n == 1 else 'Einträge warten'} auf deine "
+                    "Entscheidung: als eigene übernehmen (Verlauf und Pläne bleiben) oder löschen."
+                ),
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.END,
+                    controls=[
+                        ft.FilledButton("Entscheiden", icon=ft.Icons.RULE, on_click=entscheiden)
+                    ],
+                ),
+            )
+        )
 
     return ft.View(
         route=f"{basis}/{paket.id}",
@@ -561,6 +741,14 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
                                     on_click=zuruecksetzer(geaendert),
                                 ),
                                 ft.OutlinedButton(
+                                    "Aktivieren" if paket.deaktiviert else "Deaktivieren",
+                                    icon=ft.Icons.VISIBILITY
+                                    if paket.deaktiviert
+                                    else ft.Icons.VISIBILITY_OFF,
+                                    tooltip="Nichts davon sichtbar — alles bleibt gespeichert",
+                                    on_click=umschalten,
+                                ),
+                                ft.OutlinedButton(
                                     "Paket entfernen",
                                     icon=ft.Icons.DELETE_OUTLINE,
                                     style=ft.ButtonStyle(color=ft.Colors.ERROR),
@@ -571,12 +759,20 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
                         hinweis(
                             "Jede Übung kennt ihren Stand aus dem Paket: Beschreibung, "
                             "Parameter mit Chips, Ziel, Planparameter, Typen, Regionen, "
-                            "Videos. „Auf Paketstand“ holt ihn zurück; was du geändert hast, "
-                            "geht dabei verloren. Pläne behalten ihre Einstellungen."
+                            "Videos. Ein Update lässt stehen, was du geändert hast; „Auf "
+                            "Paketstand“ holt den Paketstand ganz zurück. „Deaktivieren“ "
+                            "nimmt alles aus Katalog, Kursen und Plänen, ohne etwas zu "
+                            "löschen. Pläne behalten ihre Einstellungen."
                         ),
+                        *offen,
                         karte(
                             titel("Übungen"),
                             *([zeile(z) for z in staende] or [hinweis("Keine Übungen.")]),
+                        ),
+                        *(
+                            [karte(titel("Kurse"), *[kurs_zeile(k) for k in kurse])]
+                            if kurse
+                            else []
                         ),
                     ],
                 ),
@@ -733,4 +929,12 @@ def paket_export_view(
     )
 
 
-__all__ = ["import_rueckfrage", "paket_export_view", "paket_view", "pakete_view", "uebungen_zahl"]
+__all__ = [
+    "entfallene_dialog",
+    "groesse_text",
+    "import_rueckfrage",
+    "paket_export_view",
+    "paket_view",
+    "pakete_view",
+    "uebungen_zahl",
+]

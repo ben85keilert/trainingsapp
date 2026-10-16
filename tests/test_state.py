@@ -79,3 +79,64 @@ def test_repos_und_tag_vorhanden(state) -> None:
     assert state.tagesnotizen.lesen(state.profil.id, state.heute()) == ""
     assert isinstance(state.heute(), date)
     assert state.verlauf_monat.day == 1
+
+
+def test_paketordner_spielt_pakete_wie_einen_import_ein(tmp_path, monkeypatch) -> None:
+    """TRAININGSAPP_PAKETE (Inhalte-Repo): jede Datei auf den Stand der Datei, Fehler sichtbar."""
+    from trainingsapp.core.pakete import GRUNDAUSSTATTUNG, paket_id
+
+    ordner = tmp_path / "pakete"
+    ordner.mkdir()
+    (ordner / "qigong.toml").write_text(
+        '[paket]\nname = "Qigong"\nversion = 1\n\n[[exercises]]\nkey = "baum"\n'
+        'name = "Baum"\ntypen = ["Qigong"]\nspec = "halten"\n',
+        encoding="utf-8",
+    )
+    (ordner / "kaputt.toml").write_text('[paket]\nname = "X\n', encoding="utf-8")
+    monkeypatch.setenv("TRAININGSAPP_PAKETE", str(ordner))
+    s = AppState.starten(tmp_path / "app.db")
+    assert [p.name for p, _ in s.pakete.alle()] == ["Standard", "Qigong"]
+    assert s.paketfehler and "kaputt.toml" in s.paketfehler[0]
+    assert s.entfallene == []
+    s.schliessen()
+
+    # Datei geändert, Version gleich: trotzdem Stand der Datei (Entwicklungsmodus)
+    (ordner / "qigong.toml").write_text(
+        '[paket]\nname = "Qigong"\nversion = 1\n\n[[exercises]]\nkey = "baum"\n'
+        'name = "Baum, neu"\ntypen = ["Qigong"]\nspec = "halten"\n',
+        encoding="utf-8",
+    )
+    s = AppState.starten(tmp_path / "app.db")
+    assert [u.name for u in s.uebungen.alle() if u.package_id == paket_id("Qigong")] == [
+        "Baum, neu"
+    ]
+    # Deaktiviert: der Loader lässt das Paket in Ruhe; entfallene Übungen landen im Start-Dialog
+    s.pakete.deaktivieren(paket_id("Qigong"))
+    s.schliessen()
+    (ordner / "qigong.toml").write_text(
+        '[paket]\nname = "Qigong"\nversion = 1\n\n[[exercises]]\nkey = "lotus"\n'
+        'name = "Lotus"\ntypen = ["Qigong"]\nspec = "halten"\n',
+        encoding="utf-8",
+    )
+    s = AppState.starten(tmp_path / "app.db")
+    assert [u.name for u in s.uebungen.alle(mit_geloeschten=True) if u.package_id] != []
+    assert "Lotus" not in [u.name for u in s.uebungen.alle(mit_geloeschten=True)]
+    s.pakete.aktivieren(paket_id("Qigong"))
+    s.schliessen()
+    s = AppState.starten(tmp_path / "app.db")
+    assert [(p.id, [u.name for u in us]) for p, us, _ in s.entfallene] == [
+        (paket_id("Qigong"), ["Baum, neu"])
+    ]
+    assert GRUNDAUSSTATTUNG in {p.id for p, _ in s.pakete.alle()}
+    s.schliessen()
+
+
+def test_ohne_paketordner_passiert_nichts(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("TRAININGSAPP_PAKETE", raising=False)
+    s = AppState.starten(tmp_path / "app.db")
+    assert s.paketfehler == [] and s.entfallene == []
+    s.schliessen()
+    monkeypatch.setenv("TRAININGSAPP_PAKETE", str(tmp_path / "gibt_es_nicht"))
+    s = AppState.starten(tmp_path / "app.db")
+    assert s.paketfehler == [f"Paketordner nicht gefunden: {tmp_path / 'gibt_es_nicht'}"]
+    s.schliessen()

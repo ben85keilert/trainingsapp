@@ -20,8 +20,8 @@ Tabelle `package` und Spalte `exercise.package_id` seit Migration 014,
 
 | Ansicht | Was man dort tut |
 |---|---|
-| Liste | importieren, exportieren; installierte Pakete („16 Übungen · 2 geändert“), eigene Übungen, entfernte Pakete mit „Wieder installieren“ |
-| ein Paket | seine Übungen mit Stand („wie im Paket“, „geändert: Beschreibung, Parameter“, im Archiv/Papierkorb); „Auf Paketstand“ je Übung oder „Alle auf Paketstand“; „Paket entfernen“; Export |
+| Liste | importieren, exportieren; installierte Pakete („16 Übungen · 2 geändert · 1 nicht mehr im Paket · Version 2 · 31 kB · 48 MB Fotos/Videos“, deaktivierte ausgegraut), eigene Übungen, entfernte Pakete mit „Wieder installieren“ |
+| ein Paket | seine Übungen mit Stand („wie im Paket“, „geändert: Beschreibung, Parameter“, „nicht mehr im Paket“, im Archiv/Papierkorb) und seine Kurse; „Auf Paketstand“ je Übung oder „Alle auf Paketstand“; „Deaktivieren“/„Aktivieren“; „Paket entfernen“; Export; Karte „Nicht mehr im Paket“ mit „Entscheiden“ |
 | eine Übung | „Paket „…“, geändert“ hinter der Beschreibung; unten „Auf Paketstand zurücksetzen“ |
 
 **Paketstand.** Jede Übung eines Pakets trägt ihre Standardwerte aus dem Paket
@@ -34,6 +34,32 @@ Paketübungen gelten danach nicht als „geändert“ (Ben, 15.10.2026). „Auf 
 setzen“ schreibt ihn zurück — was man geändert hat, geht verloren; der Ort
 (Katalog, Archiv, Papierkorb) bleibt, Pläne behalten ihre eigenen Einstellungen,
 Einträge bleiben.
+
+**Update lässt Geändertes stehen** (Ben, 16.10.2026). Der Paketstand ist die „Signatur“
+dessen, was vom Paket kam. Kommt eine neue Fassung, gilt je Feld
+(`core/pakete.zusammenfuehren`): noch wie im alten Paketstand, also nie angefasst → der
+neue Wert; abweichend, also selbst geändert → bleibt. Der gespeicherte Paketstand wird
+trotzdem der neue; „geändert: Beschreibung“ zeigt danach, wo „Auf Paketstand“ Neues
+brächte. Lokale Fotos und Videos bleiben ohnehin.
+
+**Nicht mehr im Paket** (Migration 017). Fehlt eine Übung oder ein Kurs in der neuen
+Fassung, löscht die App nichts: Sie markiert sie (`package_dropped_at`) und fragt —
+nach dem Import sofort, sonst beim nächsten Start — je Eintrag: **übernehmen** (wird
+eigene Übung mit derselben ID; Verlauf und Pläne bleiben, „Teil von Plan …“ steht
+dabei) oder **löschen** (Papierkorb, raus aus den Plänen). „Wieder installieren“ holt
+Entfallenes nicht zurück. Bis zur Entscheidung zeigt die Paketansicht die Karte
+„Nicht mehr im Paket“.
+
+**Deaktivieren** (Migration 017) ist das Gegenteil von Entfernen: nichts geht in den
+Papierkorb, aber Übungen und Kurse des Pakets verschwinden aus Katalog, Suche,
+Typen/Regionen, Kursliste und Planansichten (die Positionen bleiben im Plan und kommen
+mit „Aktivieren“ zurück); der Verlauf sieht weiter alles. Seed, Entwicklungs-Loader
+und Paketquellen lassen ein deaktiviertes Paket in Ruhe; ein Datei-Import aktualisiert
+es, ohne es zu aktivieren. Gedacht fürs Aufräumen der Ansicht und die Arbeit an
+Inhalten am Rechner.
+
+**Größe.** Die Paketzeile nennt, was das Paket belegt: die Texte (Paketstände) und, wenn
+vorhanden, eigene Fotos und Videos an seinen Übungen (`PaketRepo.groesse`).
 
 **Entfernen.** Alle Übungen des Pakets kommen in den Papierkorb und fliegen aus den
 Plänen; Einträge bleiben, nach der Frist endgültig gelöscht (nur ohne Einträge). Steht
@@ -58,7 +84,7 @@ zurück.
 | Die Übung (gleiche ID) … | Was passiert |
 |---|---|
 | gibt es hier nicht | wird angelegt |
-| gehört zu **diesem** Paket | bekommt den Stand der Datei — **eigene Änderungen daran gehen verloren** (gewollt) |
+| gehört zu **diesem** Paket | bekommt den Stand der Datei — **was man selbst geändert hat, bleibt** (je Feld, siehe oben) |
 | ist eine **eigene Übung** | bleibt, wie sie ist — ein Paket „Eigene“ gibt es nicht |
 | gehört zu einem **anderen** Paket | bleibt, wie sie ist — sie folgt ihrem Paket |
 | wurde **endgültig gelöscht** | bleibt weg (Grabstein) — außer das Paket war entfernt |
@@ -74,7 +100,8 @@ zurück.
   auch kein Paket.
 - **Standard:** Beim Start kommen nur fehlende Übungen dazu. Erst wenn
   `paket.version` in `standard.toml` steigt, aktualisiert der nächste Start alle
-  seine Übungen — wer die Version erhöht, überschreibt damit Änderungen der Nutzer.
+  seine Übungen — Änderungen der Nutzer bleiben dabei (je Feld). Fällt eine Übung aus
+  der Datei, wird sie auch ohne Versionssprung als „nicht mehr im Paket“ markiert.
 
 ## Export
 
@@ -136,6 +163,7 @@ ohne Kurse wird weiter als Version 1 geschrieben, ältere Apps lesen sie:
 | `paket.id` | nein | sonst aus dem Namen (UUIDv5, Groß/klein egal) |
 | `paket.beschreibung` | nein | ein Satz, erscheint in der Paketliste und beim Import |
 | `paket.version` | nein | ganze Zahl, vom Autor gepflegt |
+| `paket.neuigkeiten` | nein | kurzer Text: was in dieser Version neu ist — die App zeigt ihn unter „Updates“ |
 | `exportiert` | nein | Zeitpunkt des Exports, nur zur Information |
 | `exercises[]` | ja* | Übungen — *darf fehlen, wenn `kurse[]` da ist |
 | `kurse[]` | nein | Kurse (Version 2, `docs/plan_kurse.md`) — Felder unten |
@@ -189,6 +217,39 @@ verwenden dürfen.
 das Original selbst Variante, hängt die Übung an dessen Original (keine Ketten);
 eine Übung, die Original anderer ist, bleibt eigenständig.
 
+## Inhalte pflegen (Inhalte-Repo, `TRAININGSAPP_PAKETE`, `trainingsapp-paket`)
+
+Eigene Pakete entstehen im privaten Repo `trainingsapp-inhalte` als TOML wie
+`standard.toml`, eine Datei je Paket. Die App liest sie am Rechner **direkt**: Mit der
+Umgebungsvariable `TRAININGSAPP_PAKETE=<ordner>` spielt jeder Start alle `.toml`/`.json`
+darin wie einen Import ein — immer auf den Stand der Datei, auch für die ID von
+„Standard“ (`data/seed.pakete_aus_ordner`). Entfernte und deaktivierte Pakete bleiben
+unangetastet; was aus einer Datei fiel, fragt der Start wie bei jedem Update. Ging eine
+Datei nicht (Tippfehler), steht die Meldung mit Zeile oben auf „Heute“.
+
+```bash
+cd ../trainingsapp-inhalte
+TRAININGSAPP_DATA_DIR=.daten TRAININGSAPP_PAKETE=pakete \
+  uv run --project ../trainingsapp flet run ../trainingsapp/src/trainingsapp/ui/app.py
+```
+
+Fürs Handy und für Paketquellen braucht es JSON — das Werkzeug `trainingsapp-paket`
+(`src/trainingsapp/paket_werkzeug.py`, kein flet) liegt in der trainingsapp, nicht im
+Inhalte-Repo (öffentliche Repos hängen nie von privaten ab, umgekehrt schon):
+
+```bash
+uv run --project ../trainingsapp trainingsapp-paket pruefen pakete/*.toml
+uv run --project ../trainingsapp trainingsapp-paket bauen pakete/*.toml --ziel dist/
+uv run --project ../trainingsapp trainingsapp-paket index dist/*.json \
+  --ziel dist/index.json --basis-url https://…/pakete/ --quelle "Praxis Ebert"
+```
+
+`pruefen` wendet die Regeln des Standardpakets an (Schlüssel, Beschreibung, Variante,
+Symbol — Symbole nur mit flet); Typen und Regionen außerhalb des Standardpakets sind
+Hinweise. `index` schreibt den Index einer Paketquelle (ID, Name, Version, URL,
+SHA-256, Größe, Neuigkeiten, reserviertes Feld `signatur`) — das Format, das die App
+für Updates liest (Schritt 2).
+
 ## Mitgelieferte Pakete pflegen (TOML)
 
 Was mit der App kommt, wird von Hand gepflegt — darum steht es nicht als JSON im
@@ -218,11 +279,14 @@ description = "Hände an der Wand, ein Bein weit nach hinten. … Je Seite."
 
 - **Neue Übung:** Block kopieren, neuen `key` vergeben — sie kommt beim nächsten
   Start auf jedes Gerät, ohne Versionswechsel.
-- **Korrektur an einer vorhandenen Übung:** landet sofort im Paketstand („Auf
-  Paketstand setzen“ bietet sie an); überschrieben wird erst, wenn `paket.version`
-  steigt — dann auch Änderungen der Nutzer.
-- **`key` nie ändern:** Ein neuer Schlüssel ist eine neue Übung; die alte bliebe
-  auf allen Geräten stehen.
+- **Korrektur an einer vorhandenen Übung:** wirkt erst, wenn `paket.version`
+  steigt — dann je Feld: unveränderte Felder bekommen die Korrektur, selbst
+  geänderte bleiben („Auf Paketstand setzen“ holt die Korrektur ganz).
+- **`key` nie ändern:** Ein neuer Schlüssel ist eine neue Übung; die alte wird auf
+  allen Geräten „nicht mehr im Paket“ und fragt nach „übernehmen oder löschen“.
+- **Übung streichen:** Block löschen — sie wird auf allen Geräten „nicht mehr im
+  Paket“ (siehe Paketmanager); niemand verliert Verlauf oder Pläne.
+- **`neuigkeiten`** im Kopf: ein Satz je Version, was neu ist.
 - `tests/test_pakete.py` prüft die Datei: Schlüssel eindeutig und ohne Umlaute,
   Symbol aus `ui/components/icons.py`, Typen und Regionen aus einer festen Liste
   (Tippfehler legten sonst auf jedem Gerät einen neuen Tag an), Original einer

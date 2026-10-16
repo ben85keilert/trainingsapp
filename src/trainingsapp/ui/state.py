@@ -21,7 +21,12 @@ from typing import Any
 from hrv_core.aufnahme import backups_finden
 from hrv_core.regeln import Korrekturregeln
 
-from trainingsapp.config import datenbankpfad, messungenverzeichnis, streckenverzeichnis
+from trainingsapp.config import (
+    datenbankpfad,
+    messungenverzeichnis,
+    paketordner,
+    streckenverzeichnis,
+)
 from trainingsapp.core.darstellung import Darstellung, darstellung_lesen, darstellung_schreiben
 from trainingsapp.core.hrv_ansicht import (
     Ansicht,
@@ -34,7 +39,9 @@ from trainingsapp.core.hrv_einstellungen import (
     einstellungen_lesen,
     einstellungen_schreiben,
 )
-from trainingsapp.core.models import Subject, jetzt, lokaler_tag
+from trainingsapp.core.kurse import Kurs
+from trainingsapp.core.models import Exercise, Subject, jetzt, lokaler_tag
+from trainingsapp.core.pakete import Paket
 from trainingsapp.core.timer import (
     TimerProfil,
     TimerSignale,
@@ -58,7 +65,7 @@ from trainingsapp.data.repositories import (
     SubjectRepo,
     TagRepo,
 )
-from trainingsapp.data.seed import seed_einspielen
+from trainingsapp.data.seed import pakete_aus_ordner, seed_einspielen
 from trainingsapp.data.strecken import verwaiste as strecken_verwaiste
 from trainingsapp.data.upgrade import datenformat_aktualisieren
 from trainingsapp.devices.bekannte import (
@@ -119,6 +126,12 @@ class AppState:
     hinzufuegen_regionen: set[str] = field(default_factory=set)
     #: Wie viele Übungen der letzte Start neu angelegt hat (für den Startbildschirm)
     neu_eingespielt: int = field(default=0)
+    #: Je Paket, was beim Update aus dem Paket fiel und auf „übernehmen oder löschen“
+    #: wartet (`PaketRepo.entfallene_offen`) — Dialog beim Start
+    entfallene: list[tuple[Paket, list[Exercise], list[Kurs]]] = field(default_factory=list)
+    #: Meldungen des Entwicklungs-Loaders (`TRAININGSAPP_PAKETE`, nur am Rechner) —
+    #: Karte auf „Heute“, damit ein Tippfehler in einer Paketdatei auffällt
+    paketfehler: list[str] = field(default_factory=list)
     #: Übungen, deren Papierkorbfrist abgelaufen ist, die aber einen Verlauf
     #: haben — die Automatik löscht sie nicht, der Papierkorb fragt nach
     papierkorb_offen: int = 0
@@ -231,6 +244,7 @@ class AppState:
         """
         con = oeffnen(db_pfad if db_pfad is not None else datenbankpfad())
         neu = seed_einspielen(con)
+        paketfehler = pakete_aus_ordner(con, paketordner())  # nur mit TRAININGSAPP_PAKETE
         datenformat_aktualisieren(con)
         profile = SubjectRepo(con)
         einstellungen = SettingRepo(con)
@@ -262,6 +276,8 @@ class AppState:
             kurse=KursRepo(con),
             profil=profil,
             neu_eingespielt=neu,
+            entfallene=PaketRepo(con).entfallene_offen(),
+            paketfehler=paketfehler,
             papierkorb_offen=offen,
         )
 

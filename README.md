@@ -199,6 +199,12 @@ einem privaten ab — nicht in `pyproject.toml`, nicht in der CI, nicht in Tests
 Die privaten Repos dürfen umgekehrt auf die öffentlichen aufbauen. Wer die App
 baut, braucht nur dieses Repo und `hrv-core`.
 
+**Inhalte pflegen** (`trainingsapp-inhalte`): Pakete als TOML, die App startet
+direkt damit — `TRAININGSAPP_PAKETE=pakete` liest den Ordner bei jedem Start ein;
+`uv run trainingsapp-paket pruefen|bauen|index` prüft die Dateien, schreibt JSON
+fürs Handy und den Index einer Paketquelle. Details: `docs/uebungspakete.md`,
+„Inhalte pflegen“.
+
 Commit-Nachrichten tragen bei KI-unterstützter Arbeit `Co-Authored-By` und
 einen Link auf die Claude-Code-Sitzung — bewusst sichtbar, damit nachvollziehbar
 bleibt, was wie entstanden ist.

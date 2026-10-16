@@ -143,11 +143,33 @@ def heute(page: ft.Page, state: AppState) -> ft.Control:
             ),
         )
 
+    # Entwicklungs-Loader (TRAININGSAPP_PAKETE): eine Paketdatei ging nicht — sichtbar
+    # machen, sonst sucht man sie im Katalog vergebens.
+    fehler: list[ft.Control] = (
+        [
+            ft.Container(
+                margin=ft.Margin.symmetric(horizontal=12, vertical=8),
+                padding=12,
+                border_radius=12,
+                bgcolor=ft.Colors.ERROR_CONTAINER,
+                content=ft.Column(
+                    spacing=2,
+                    controls=[
+                        ft.Text("Paketdateien (TRAININGSAPP_PAKETE)", weight=ft.FontWeight.BOLD),
+                        *[ft.Text(m, size=12, selectable=True) for m in state.paketfehler],
+                    ],
+                ),
+            )
+        ]
+        if state.paketfehler
+        else []
+    )
     spalte = ft.Column(
         expand=True,
         scroll=ft.ScrollMode.AUTO,
         spacing=0,
         controls=[
+            *fehler,
             ueberschrift("Pläne"),
             *plan_block,
             ueberschrift(

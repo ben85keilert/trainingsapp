@@ -132,10 +132,16 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   das Paket „Standard“ (`data/seed/standard.toml` — TOML, weil von Hand gepflegt; IDs per UUIDv5
   aus dem Schlüssel); weitere kommen per Import, der Export schreibt nur Übungen.
   `exercise.package_id` = Herkunft, `NULL` = eigene Übung (auch Kopien). Ein Import
-  aktualisiert nur die Übungen desselben Pakets — Änderungen daran gehen verloren
-  (gewollt); eigene Übungen ändert er nie. Paketmanager: Jede Paketübung trägt ihren
-  Paketstand (`package_standard_json`) für „Auf Paketstand setzen“; Entfernen legt die
-  Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück. Vertrag:
+  aktualisiert nur die Übungen desselben Pakets — **was die Person geändert hat, bleibt**
+  (Ben, 16.10.2026: Drei-Wege-Abgleich je Feld gegen den Paketstand,
+  `core/pakete.zusammenfuehren`); eigene Übungen ändert er nie. Paketmanager: Jede
+  Paketübung trägt ihren Paketstand (`package_standard_json`) für „Auf Paketstand setzen“;
+  Entfernen legt die Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück;
+  **Deaktivieren** (Migration 017) versteckt alles, ohne zu löschen; was beim Update aus
+  dem Paket fällt, wird nie gelöscht, sondern erfragt (übernehmen = eigene Übung mit
+  gleicher ID, oder löschen). Inhalte entstehen im privaten `trainingsapp-inhalte` als
+  TOML; `TRAININGSAPP_PAKETE=<ordner>` spielt sie beim Start ein, `trainingsapp-paket`
+  (`paket_werkzeug.py`) prüft, baut JSON und schreibt den Quellen-Index. Vertrag:
   `docs/uebungspakete.md`.
 
 - **Kurse** (Ben, 15.10.2026): dritte Kategorie neben Übungen und Plänen —

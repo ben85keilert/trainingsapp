@@ -54,13 +54,11 @@ jobs:
           fetch-depth: 0 # Build-Nummer = Zahl der Commits
 
       - name: hrv-core (gemeinsame HRV-Bibliothek) auschecken
-        # Privates Repo: Secret HRV_CORE_TOKEN (PAT mit Lesezugriff); sobald es
-        # öffentlich ist, reicht das Standard-Token.
+        # Öffentliches Repo (AGPL-3.0) — kein eigenes Token nötig.
         uses: actions/checkout@v4
         with:
           repository: ben85keilert/hrv-core
           path: hrv-core
-          token: ${{ secrets.HRV_CORE_TOKEN || github.token }}
 
       - uses: astral-sh/setup-uv@v6
         with:

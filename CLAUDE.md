@@ -19,7 +19,7 @@ muss als `../hrv-core` neben diesem Ordner liegen — `pyproject.toml` bindet si
 ein (`[tool.uv.sources]`, `[tool.flet.dev_packages]`), die CI checkt beide Repos nebeneinander aus.
 
 ```bash
-git clone git@github.com:ben85keilert/hrv-core.git ../hrv-core   # einmalig, Schwesterordner
+git clone https://github.com/ben85keilert/hrv-core.git ../hrv-core   # einmalig, Schwesterordner (öffentlich, AGPL-3.0)
 uv sync --extra desktop                # Entwicklungsumgebung (desktop = bleak für BLE)
 
 uv run flet run src/trainingsapp/ui/app.py    # Desktop-Vorschau der Oberfläche

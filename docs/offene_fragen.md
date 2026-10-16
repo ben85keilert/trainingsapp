@@ -216,7 +216,7 @@ Offen: Reihenfolge, Format (ein Archiv je Profil?) und was ein Import mit vorhan
 | A3 | G-F1 (15.10.) | **Hilfedatei** anlegen, Kapitel GPS/Kartenaufzeichnung (Karte holt Kacheln online, Schalter, Regel 0). | Vorhandene Hilfetexte: `ui/components/hilfe.py` (Notation, Varianten und Pakete). |
 | A4 | N-F1 (15.10.) | **Export/Import je Inhalt** (Abschnitt 5) für den Transfer zwischen Profilen. | Reihenfolge und Format offen. |
 | A5 | P12/P14 (15.10.) | Edition B: Solo speichert nichts auf dem Server, einzige Verbindung ist Video-Streaming; eigene Fotos/Videos lokal **und** aus Fremdquelle. | Rahmen für Medien (Abschnitt 4) und `docs/recht`. |
-| A6 | Umzug hrv-core (16.10.) | **CI braucht hrv-core:** beide Workflows checken `ben85keilert/hrv-core` als Schwesterordner aus — solange das Repo privat ist, nur mit Secret `HRV_CORE_TOKEN` (feinkörniges PAT, Lesezugriff auf hrv-core); sobald es öffentlich ist, reicht das Standard-Token. Ohne Secret schlägt der erste CI-Lauf auf dem Branch fehl. | `.github/workflows/ci.yml`, `apk.yml`. Erster `flet build apk` mit `hrv-core @ file://…` steht aus (lokal oder CI). |
+| A6 | Umzug hrv-core (16.10.) | **Erster `flet build apk` mit hrv-core** (`hrv-core @ file://…` über `[tool.flet.dev_packages]`) steht aus — lokal oder über den APK-Workflow. | Beide Workflows checken `ben85keilert/hrv-core` (seit 16.10. öffentlich, AGPL-3.0) als Schwesterordner aus. |
 | A7 | Umzug hrv-core (16.10.), H11 | **Rechenlogik aus `ui/views/messung_detail.py`** (`_Zustand`, Atem-Median über Minutenfenster, SampEn-Deckel 3000) in die Bibliothek — gehört nach hrv-core, nicht hierher. | Nach dem Umzug beider Apps; Expertenmodus (Korrekturregeln sichtbar) kommt als Zuschaltung, Automatik bleibt Vorgabe. |
 
 ---
@@ -226,6 +226,7 @@ Offen: Reihenfolge, Format (ein Archiv je Profil?) und was ein Import mit vorhan
 | Datum | Frage | Entscheidung |
 |---|---|---|
 | 14.10.2026 | GPS-Takt | Sekundentakt, keine Sparstufe (Ben). |
+| 16.10.2026 | hrv-core öffentlich, Lizenz | Repo öffentlich; AGPL-3.0 mit CLA wie die trainingsapp (Eigenbedarf frei, geschlossene Kommerzialisierung nur mit Lizenz des Inhabers). Eigene anonymisierte Aufnahmen bleiben als Fixtures, werden nach und nach durch verlässlichere ersetzt. |
 | 16.10.2026 | HRV-Mathematik auslagern | `trainingsapp.hrv_core` wird die Bibliothek `hrv_core` (Schwesterrepo hrv-core, gemeinsam mit praxis_gui). App behält nur `core/hrv_export.py`, `core/hrv_training.py`; Golden-Tests und Algorithmendoku liegen in hrv-core. EKG-Auswertung entfällt (kein neurokit2); Dateinamen bleiben UTC-Start; Automatik bleibt Vorgabe, Expertenmodus zuschaltbar. Gebaut auf `refactor/hrv-core`. |
 | 15.10.2026 | K-F1 Paket entfernen ↔ Pläne | Übungen fliegen aus den Plänen; Rückfrage zeigt „Teil von Plan …“ und bietet „kopieren“ an, Kopien sind eigene Übungen und übernehmen die Planposition. Gebaut (4fd7a54). |
 | 15.10.2026 | K-F2 Paket-Identität | Gleicher Name = gleiches Paket, mit Kürzel bis 6 Zeichen (`DEH-01`); gleicher Name + Kürzel = Update; Namenspolicy nötig. → A1. |

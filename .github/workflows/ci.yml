@@ -25,14 +25,11 @@ jobs:
           path: trainingsapp
 
       - name: hrv-core (gemeinsame HRV-Bibliothek) auschecken
-        # Solange hrv-core privat ist, braucht es ein Token mit Lesezugriff darauf
-        # (Secret HRV_CORE_TOKEN, feinkörniges PAT); ist das Repo öffentlich, reicht
-        # das Standard-Token.
+        # Öffentliches Repo (AGPL-3.0) — kein eigenes Token nötig.
         uses: actions/checkout@v4
         with:
           repository: ben85keilert/hrv-core
           path: hrv-core
-          token: ${{ secrets.HRV_CORE_TOKEN || github.token }}
 
       - uses: astral-sh/setup-uv@v6
         with:

@@ -157,7 +157,7 @@ importieren **niemals** `flet`. Ein Test erzwingt das. Dadurch bleibt alles ohne
 Oberfläche testbar, und Flet-Versionswechsel betreffen nur `ui/`.
 
 Die HRV-Bibliothek hrv-core muss als Schwesterordner `../hrv-core` neben dem
-Projekt liegen (`git clone git@github.com:ben85keilert/hrv-core.git ../hrv-core`),
+Projekt liegen (`git clone https://github.com/ben85keilert/hrv-core.git ../hrv-core`),
 bevor `uv sync` läuft.
 
 ---

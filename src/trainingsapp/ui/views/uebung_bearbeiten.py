@@ -12,6 +12,8 @@ Typen und Regionen: dieselbe Auswahl wie im Katalog (`ui/components/tagwahl.py`,
 Ben 15.10.2026) — zwei Kästen, Mehrfachauswahl in der Reihenfolge des
 Antippens (der erste Typ ist die Kategorie); „Neuer Typ …“ bzw. „Neue Region …“
 steht unten in der Liste, ein neuer Tag steht oben und ist gleich gewählt.
+
+Zurück speichert (Ben, 16.10.2026, `components/zurueck.py`); „Abbrechen“ verwirft.
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.parameter_wahl import parameter_wahl
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.tagwahl import TagWahl
+from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
 
 #: Auswahlwert „keine Variante" — ein leerer Schlüssel ist im Dropdown heikel
@@ -459,21 +462,48 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         ]
         return ziel
 
-    async def speichern() -> None:
+    def stand() -> tuple[Any, ...]:
+        """Alles, was man hier ändern kann — für „Zurück speichert“ (geändert oder nicht)."""
+        return (
+            name.value or "",
+            beschreibung.value or "",
+            typen_lesen(),
+            regionen_lesen(),
+            [(k, bool(s.value), chipfelder[k].value or "") for k, s in schalter.items()],
+            skala_name.value or "",
+            skala_bereich.value or "",
+            familie.value,
+            sorted(plan_wahl),
+            ziel_form.werte() if ziel_form is not None else None,
+            gewaehlt,
+            [(t.value or "", a.value or "") for t, a in medien_zeilen],
+        )
+
+    def sichern() -> str | None:
+        """Prüfen und speichern — ``None`` = gespeichert, sonst warum nicht."""
         if not (name.value or "").strip():
             name.error = "Ein Name muss sein."
             page.update()
-            return
+            return "Ein Name muss sein."
         name.error = None
         if schalter["scale"].value and skala_lesen(skala_bereich.value or "") is None:
             skala_bereich.error = "z. B. 0 - 10 oder -5 - 5 oder 0.0 - 10.0"
             page.update()
-            return
+            return "Der Bereich der Skala ist unlesbar (z. B. 0 - 10)."
         skala_bereich.error = None
         ziel = eingelesen()
         state.uebungen.speichern(ziel)
+        gespeichert["id"] = ziel.id
+        return None
+
+    #: Die ID nach dem ersten Speichern — eine neue Übung hat erst dann eine
+    gespeichert: dict[str, str] = {}
+
+    async def speichern() -> None:
+        if sichern() is not None:
+            return
         page.show_dialog(ft.SnackBar(ft.Text("Gespeichert")))
-        await page.push_route(f"/uebung/{ziel.id}")
+        await page.push_route(f"/uebung/{gespeichert['id']}")
 
     async def abbrechen() -> None:
         await page.push_route("/" if uebung is None else f"/uebung/{uebung.id}")
@@ -487,7 +517,8 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             ],
         )
 
-    return ft.View(
+    anfang = stand()
+    ansicht = ft.View(
         route=route,
         appbar=ft.AppBar(title=ft.Text("Neue Übung" if neu else "Übung bearbeiten")),
         scroll=ft.ScrollMode.AUTO,
@@ -576,6 +607,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             )
         ],
     )
+    return zurueck_speichert(page, ansicht, geaendert=lambda: stand() != anfang, speichern=sichern)
 
 
 __all__ = ["chips_lesen", "spec_bauen", "uebung_bearbeiten"]

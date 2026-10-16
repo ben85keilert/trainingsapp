@@ -9,6 +9,8 @@ Die Erweiterung reicht nur rohe Bytes durch; das Polar-Protokoll steckt in
 - Verbindungsereignisse → der Rückruf aus `connect()`
 - `hintergrund()` → Vordergrunddienst, damit die Messung bei ausgeschaltetem
   Display weiterläuft
+- `anzeigen()` → was gerade läuft, mit Zeiten (`ui.laufend`, Ben 16.10.2026): in der
+  Benachrichtigung des Dienstes oder — läuft nur der Timer — in einer gewöhnlichen
 
 **Lebensdauer:** Der Service muss stark referenziert bleiben (im `AppState`),
 sonst räumt Flet ihn ab, und die Dart-Seite beendet alle Abos.
@@ -23,6 +25,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core.laufend import Benachrichtigung
 from trainingsapp.devices.base import DeviceInfo
 from trainingsapp.devices.gatt import UhrAbgleich
 
@@ -35,6 +38,11 @@ def _schluessel(device_id: str, service: str, characteristic: str) -> tuple[str,
 
 class FletBleTransport:
     """Erfüllt `devices.gatt.BleTransport` mit der Flet-Erweiterung."""
+
+    #: Was gerade läuft, von `ui.laufend.takt` — ``None``: noch nichts oder nichts
+    _inhalt: Benachrichtigung | None = None
+    #: Steht die gewöhnliche Benachrichtigung (ohne Dienst) gerade da?
+    _einfach: bool = False
 
     def __init__(self, page: ft.Page) -> None:
         import flet_ble  # nur hier — die Erweiterung gibt es nur im App-Build
@@ -132,17 +140,16 @@ class FletBleTransport:
             self._zwecke.pop(zweck, None)
         try:
             if not self._zwecke:
+                # Läuft noch der Timer, zeigt der nächste Takt ihn ohne Dienst — jetzt
+                # gleich wäre der alte Stand (mit der beendeten Messung) zu sehen.
                 await self.ble.hintergrund_beenden()
                 return None
             geraet, standort = "messung" in self._zwecke, "gps" in self._zwecke
-            if geraet and standort:
-                titel_neu = "Training mit Messung läuft"
-                text_neu = " · ".join(t for _, t in self._zwecke.values() if t)
-            else:
-                titel_neu, text_neu = next(iter(self._zwecke.values()))
+            b = self._inhalt or self._aus_zwecken()
             await self.ble.hintergrund_starten(
-                titel_neu, text_neu, geraet=geraet, standort=standort
+                b.titel, b.text, geraet=geraet, standort=standort, lang=b.lang, seit_ms=b.seit_ms
             )
+            self._einfach = False  # der Dienst ersetzt die gewöhnliche Benachrichtigung
         except Exception as fehler:
             return str(fehler) or type(fehler).__name__
         return None
@@ -155,13 +162,38 @@ class FletBleTransport:
         """
         if zweck not in self._zwecke:
             return
-        titel = self._zwecke[zweck][0]
-        self._zwecke[zweck] = (titel, text)
+        self._zwecke[zweck] = (self._zwecke[zweck][0], text)
+        if self._inhalt is None:  # sonst schreibt `anzeigen` jede Sekunde den ganzen Stand
+            await self._zeigen()
+
+    async def anzeigen(self, inhalt: Benachrichtigung | None) -> None:
+        """Was gerade läuft (`ui.laufend.takt`) — mit Dienst in dessen Benachrichtigung,
+        ohne Dienst (nur der Timer) in einer gewöhnlichen; ``None`` nimmt sie weg. Wirft nie."""
+        self._inhalt = inhalt
+        await self._zeigen()
+
+    def _aus_zwecken(self) -> Benachrichtigung:
+        """Ohne `anzeigen`: Titel und Text der Zwecke, wie vor dem 16.10.2026."""
         if len(self._zwecke) > 1:
-            titel = "Training mit Messung läuft"
             text = " · ".join(t for _, t in self._zwecke.values() if t)
+            return Benachrichtigung("Training mit Messung läuft", text, text)
+        titel, text = next(iter(self._zwecke.values()), ("Messung läuft", ""))
+        return Benachrichtigung(titel, text, text)
+
+    async def _zeigen(self) -> None:
         with suppress(Exception):
-            await self.ble.hintergrund_text(titel, text)
+            if self._zwecke:
+                b = self._inhalt or self._aus_zwecken()
+                await self.ble.hintergrund_text(b.titel, b.text, lang=b.lang, seit_ms=b.seit_ms)
+            elif self._inhalt is not None:
+                b = self._inhalt
+                await self.ble.benachrichtigung_zeigen(
+                    b.titel, b.text, lang=b.lang, seit_ms=b.seit_ms
+                )
+                self._einfach = True
+            elif self._einfach:
+                await self.ble.benachrichtigung_verbergen()
+                self._einfach = False
 
     async def akku(self) -> dict[str, Any] | None:
         """Akkustand für Strommessungen (siehe `flet_ble.FletBle.akku`); ``None`` bei Fehler."""

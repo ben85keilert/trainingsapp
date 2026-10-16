@@ -85,6 +85,8 @@ class GpsTestLauf:
         self.bericht = ""
         self.fertig = False
         self.von_selbst_fertig = False
+        #: Was die Benachrichtigung zeigt (`ui.laufend`) — Phase, Zeit, Strecke
+        self.meldung = ""
         self._stopp = asyncio.Event()
         self._aufgabe: asyncio.Task[None] | None = None
 
@@ -164,8 +166,6 @@ class GpsTestLauf:
 
     async def _benachrichtigen(self, nummer: int, ph: Phase, dauer: float | None) -> None:
         transport = self.state.ble_transport
-        if transport is None or not hasattr(transport, "hintergrund_text"):
-            return
         jetzt = self.quelle.jetzt()
         if self.art == "akku" and dauer is not None:
             rest = max(0.0, dauer - (jetzt - ph.start))
@@ -175,7 +175,9 @@ class GpsTestLauf:
                 f"{_uhr(jetzt - self.phasen[0].start)} · {zahl(_km(self.punkte()), 2)} km"
                 f" · {len(ph.punkte)} Ortungen"
             )
-        await transport.hintergrund_text(text, zweck=ZWECK)
+        self.meldung = text
+        if transport is not None and hasattr(transport, "hintergrund_text"):
+            await transport.hintergrund_text(text, zweck=ZWECK)
 
     async def _abschluss(self) -> None:
         if self.datei is not None:

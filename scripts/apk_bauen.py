@@ -28,14 +28,26 @@ Ohne beides bricht das Skript ab, statt still eine APK zu bauen, die sich nicht
 **Build-Nummer** (Android ``versionCode``) ist die Zahl der Commits auf dem
 aktuellen Stand. Sie steigt mit jedem Commit, lokal wie in der CI, und Android
 verlangt für ein Update eine mindestens gleich große Nummer.
+
+**Eigene MainActivity** (Ben, 16.10.2026: Wegwischen in der App-Übersicht beendete
+die Messung). Android beendet dabei die Activity; mit Flets Vorlage stirbt die
+Flutter-Engine mit — und mit ihr die Bluetooth-Verbindung (flutter_blue_plus trennt
+alle Geräte). Läuft eine Messung, hält der Vordergrunddienst den Prozess am Leben;
+die eigene MainActivity (`MAIN_ACTIVITY`) hält dann auch die Engine und gibt sie
+der nächsten Activity (Benachrichtigung, Startsymbol) zurück. Dafür baut
+`vorlage_bauen` aus Flets Vorlage eine Kopie mit dieser Datei
+(``build/vorlage/…zip``) und übergibt sie ``flet build --template``. Ändert Flet
+seine MainActivity, bricht das Skript ab, statt still eine andere zu ersetzen.
 """
 
 import argparse
+import hashlib
 import os
 import shutil
 import subprocess
 import sys
 import tomllib
+import zipfile
 from pathlib import Path
 
 PROJEKT = Path(__file__).resolve().parent.parent
@@ -48,6 +60,50 @@ BUILD_DATEI = PROJEKT / "src" / "trainingsapp" / "_build.py"
 UMGEBUNG_SCHLUESSEL = "FLET_ANDROID_SIGNING_KEY_STORE"
 #: Vorerst nur diese Architektur (Pixel 10) — siehe Moduldocstring
 ARCHITEKTUR = "arm64-v8a"
+
+#: Hier liegt die Vorlage mit eigener MainActivity (`vorlage_bauen`); ``build/`` ist ignoriert
+VORLAGE_ORDNER = PROJEKT / "build" / "vorlage"
+#: Die MainActivity in Flets Vorlage (cookiecutter) — und wie sie dort aussehen muss
+MAIN_ACTIVITY_PFAD = (
+    "build/{{cookiecutter.out_dir}}/android/app/src/main/kotlin/"
+    "{{ cookiecutter.kotlin_dir }}/MainActivity.kt"
+)
+MAIN_ACTIVITY_FLET = """package {{ cookiecutter.org_name_2 }}.{{ cookiecutter.package_name }}
+
+import io.flutter.embedding.android.FlutterFragmentActivity
+
+class MainActivity : FlutterFragmentActivity()
+"""
+#: Unsere MainActivity: hält die Flutter-Engine über das Ende der Activity hinaus
+MAIN_ACTIVITY = """package {{ cookiecutter.org_name_2 }}.{{ cookiecutter.package_name }}
+
+import android.content.Context
+import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
+
+// Von scripts/apk_bauen.py statt der MainActivity der Flet-Vorlage eingesetzt
+// (trainingsapp, 16.10.2026).
+//
+// Wischt man die App in der App-Übersicht weg, beendet Android die Activity. Mit der
+// Vorlage stürbe dabei die Flutter-Engine - und mit ihr Bluetooth (flutter_blue_plus
+// trennt alle Geräte), also die laufende Messung. Hier gehört die Engine nicht der
+// Activity: Sie liegt im FlutterEngineCache, und die nächste Activity (Tipp auf die
+// Benachrichtigung oder das Startsymbol) nimmt sie wieder. Den Prozess hält während
+// einer Messung der Vordergrunddienst (flet_ble, MessDienst) am Leben; ohne ihn
+// beendet Android ihn beim Wegwischen wie bisher.
+class MainActivity : FlutterFragmentActivity() {
+    override fun provideFlutterEngine(context: Context): FlutterEngine =
+        FlutterEngineCache.getInstance().get(ENGINE)
+            ?: FlutterEngine(context.applicationContext).also {
+                FlutterEngineCache.getInstance().put(ENGINE, it)
+            }
+
+    private companion object {
+        const val ENGINE = "trainingsapp"
+    }
+}
+"""
 
 
 def version() -> str:
@@ -84,6 +140,51 @@ def signier_umgebung() -> dict[str, str] | None:
         "FLET_ANDROID_SIGNING_KEY_PASSWORD": str(s["password"]),
         "FLET_ANDROID_SIGNING_KEY_ALIAS": str(s.get("alias", "upload")),
     }
+
+
+def vorlage_patchen(quelle: Path, ziel: Path) -> None:
+    """Flets Vorlage (ZIP) nach ``ziel`` kopieren — mit `MAIN_ACTIVITY` statt ihrer eigenen.
+
+    Reihenfolge und Einträge bleiben, wie sie sind (cookiecutter verlangt den
+    Ordner ``build/`` als ersten Eintrag). Weicht Flets MainActivity von
+    `MAIN_ACTIVITY_FLET` ab oder fehlt sie, bricht das Skript ab.
+    """
+    ziel.parent.mkdir(parents=True, exist_ok=True)
+    ersetzt = False
+    with zipfile.ZipFile(quelle) as rein, zipfile.ZipFile(ziel, "w", zipfile.ZIP_DEFLATED) as raus:
+        for info in rein.infolist():
+            daten = rein.read(info.filename)
+            if info.filename == MAIN_ACTIVITY_PFAD:
+                if daten.decode("utf-8").strip() != MAIN_ACTIVITY_FLET.strip():
+                    sys.exit(
+                        f"Flets MainActivity hat sich geändert ({quelle}) — "
+                        "MAIN_ACTIVITY in scripts/apk_bauen.py prüfen und anpassen."
+                    )
+                daten = MAIN_ACTIVITY.encode("utf-8")
+                ersetzt = True
+            raus.writestr(info, daten)
+    if not ersetzt:
+        sys.exit(f"Keine MainActivity in {quelle} — scripts/apk_bauen.py anpassen.")
+
+
+def vorlage_bauen() -> Path:
+    """Die Vorlage der installierten Flet-Version mit eigener MainActivity, als ZIP.
+
+    Der Name trägt eine Prüfsumme der MainActivity: Ändert sie sich, ist es ein
+    anderer Pfad — ``flet build`` merkt sich die Vorlage am Pfad und legt das
+    Flutter-Projekt nur dann neu an.
+    """
+    import flet.version
+    from flet_cli.commands.build_base import DEFAULT_TEMPLATE_URL
+    from flet_cli.utils.template_cache import get_cached_template_zip
+
+    version = flet.version.flet_version
+    quelle = get_cached_template_zip(DEFAULT_TEMPLATE_URL.format(version=version), version)
+    pruefsumme = hashlib.sha256(MAIN_ACTIVITY.encode("utf-8")).hexdigest()[:8]
+    ziel = VORLAGE_ORDNER / f"flet-build-template-{version}-{pruefsumme}.zip"
+    if not ziel.exists():
+        vorlage_patchen(Path(quelle), ziel)
+    return ziel
 
 
 def main() -> None:
@@ -129,6 +230,8 @@ def main() -> None:
         "--no-rich-output",
         "--build-number",
         str(nummer),
+        "--template",
+        str(vorlage_bauen()),
     ]
     if not args.alle_architekturen:
         befehl += ["--arch", ARCHITEKTUR]

@@ -123,7 +123,7 @@ async def test_live_vollbild_zwei_achsen_ablesen_und_notizen(daten) -> None:
     seite.height, seite.width = 412, 915  # quer: so groß ist die Fläche
     nummer_vorher = state.live_ansicht
 
-    # Ohne Aufnahme: Kurven da, aber keine Notiz möglich
+    # Ohne Aufnahme: Kurven da, Notizen schon möglich (Ben, 16.10.2026)
     while lauf.jetzt_s() < 20:
         await asyncio.sleep(0.01)
     ansicht = live_vollbild_view(seite, state)
@@ -134,9 +134,14 @@ async def test_live_vollbild_zwei_achsen_ablesen_und_notizen(daten) -> None:
     gesten = [c for c in _alle_controls(ansicht) if isinstance(c, ft.GestureDetector)]
     assert gesten and not any(c.on_vertical_drag_end for c in gesten)
     _symbol(ansicht, ft.Icons.ADD_COMMENT_OUTLINED).on_click()
-    assert seite.aufrufe and "Aufnahme" in _baum_texte(seite.aufrufe[-1])[0]
+    assert not any("Aufnahme" in t for d in seite.aufrufe for t in _baum_texte(d))
+    (vorher,) = lauf.ereignisse()
+    assert vorher["text"] == "" and vorher["beat_index"] is None
 
-    lauf.aufnahme_starten()
+    lauf.aufnahme_starten()  # die Notiz von vorher rückt an den Anfang der Aufnahme
+    (vorher,) = lauf.aufnahme.ereignisse
+    assert vorher["t_wall_s"] == 0.0
+    lauf.ereignisse_setzen([])  # im Folgenden ohne sie
     while lauf.aufnahme_dauer_s() < 70:
         await asyncio.sleep(0.01)
     ansicht = live_vollbild_view(seite, state)

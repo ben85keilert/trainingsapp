@@ -78,6 +78,7 @@ from trainingsapp.data.strecken import StreckenSchreiber, dateiname, gpx, jsonl_
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.gps import GpsQuelle
 from trainingsapp.ui.ausrichtung import querformat
+from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.karte_strecke import StreckenKarte, ganze_strecke
 from trainingsapp.ui.components.kurve import Reihe, kurve
@@ -461,11 +462,11 @@ def verwaiste_uebernehmen(state: AppState, pfad: Path) -> Strecke | None:
 
 
 def verwaiste_dialog(page: ft.Page, state: AppState) -> ft.AlertDialog:
-    """Beim Start: je verwaister Datei „Übernehmen" oder „Löschen" (keine Koordinaten)."""
-    zeilen = ft.Column(tight=True, spacing=4)
+    """Beim Start: je verwaister Datei „Übernehmen" oder „Löschen" (keine Koordinaten).
 
-    def melden(text: str) -> None:
-        page.show_dialog(ft.SnackBar(ft.Text(text)))
+    Der Ablauf steckt in `components.dialoge.reste_dialog`, wie bei den
+    Crash-Backups der HRV-Aufnahme (`views.messung.backup_dialog`).
+    """
 
     def beschriftung(pfad: Path) -> str:
         kopf = kopf_lesen(pfad) or {}
@@ -476,59 +477,33 @@ def verwaiste_dialog(page: ft.Page, state: AppState) -> ft.AlertDialog:
         except (KeyError, ValueError):
             return f"{sport} ({pfad.name})"
 
-    def uebernehmer(pfad: Path) -> Callable[[], None]:
-        def handler() -> None:
-            strecke = verwaiste_uebernehmen(state, pfad)
-            melden("Training nachgetragen — auch im Tagebuch." if strecke else "Datei war leer.")
-            zeichnen()
+    def weg(pfad: Path) -> None:
+        state.verwaiste_strecken = [p for p in state.verwaiste_strecken if p != pfad]
 
-        return handler
+    async def uebernehmen(pfad: Path) -> Erledigt:
+        if not pfad.exists():  # schon erledigt — kein Fehler, nur nichts mehr zu tun
+            weg(pfad)
+            return Erledigt("Die Strecke war schon weg.")
+        strecke = verwaiste_uebernehmen(state, pfad)
+        return Erledigt(
+            "Training nachgetragen — auch im Tagebuch." if strecke else "Datei war leer."
+        )
 
-    def loescher(pfad: Path) -> Callable[[], None]:
-        def handler() -> None:
-            with contextlib.suppress(OSError):
-                pfad.unlink()
-            state.verwaiste_strecken = [p for p in state.verwaiste_strecken if p != pfad]
-            melden("Strecke gelöscht.")
-            zeichnen()
+    def loeschen(pfad: Path) -> Erledigt:
+        pfad.unlink(missing_ok=True)
+        weg(pfad)
+        return Erledigt("Strecke gelöscht.")
 
-        return handler
-
-    def zeichnen() -> None:
-        if not state.verwaiste_strecken:
-            page.pop_dialog()
-            return
-        zeilen.controls = [
-            ft.Row(
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                controls=[
-                    ft.Text(beschriftung(pfad), expand=True),
-                    ft.TextButton("Löschen", on_click=loescher(pfad)),
-                    ft.FilledTonalButton("Übernehmen", on_click=uebernehmer(pfad)),
-                ],
-            )
-            for pfad in state.verwaiste_strecken
-        ]
-        with contextlib.suppress(Exception):
-            zeilen.update()
-
-    zeichnen()
-    return ft.AlertDialog(
-        modal=True,
-        title=ft.Text("Unvollständiges Training gefunden"),
-        content=ft.Column(
-            tight=True,
-            spacing=10,
-            controls=[
-                ft.Text(
-                    "Die App wurde während eines Trainings beendet. Die Strecke liegt noch "
-                    "auf dem Handy — nachtragen (Strecke, Zeit, Tagebuch) oder löschen?",
-                    size=13,
-                ),
-                zeilen,
-            ],
-        ),
-        actions=[ft.TextButton("Später", on_click=lambda: page.pop_dialog())],
+    return reste_dialog(
+        page,
+        titel="Unvollständiges Training gefunden",
+        text="Die App wurde während eines Trainings beendet. Die Strecke liegt noch "
+        "auf dem Handy — nachtragen (Strecke, Zeit, Tagebuch) oder löschen?",
+        offen=lambda: list(state.verwaiste_strecken),
+        beschriftung=beschriftung,
+        knopf="Übernehmen",
+        uebernehmen=uebernehmen,
+        loeschen=loeschen,
     )
 
 

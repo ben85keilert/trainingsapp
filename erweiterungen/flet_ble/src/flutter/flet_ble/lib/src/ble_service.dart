@@ -10,7 +10,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 /// Methoden (Python → Dart, über `invokeMethod`): scan, stop_scan, connect,
 /// disconnect, bond, bond_state, discover_services, request_mtu, read, write,
 /// subscribe, unsubscribe, adapter_state, hintergrund_starten, hintergrund_beenden,
-/// hintergrund_text, akku.
+/// hintergrund_text, benachrichtigung_zeigen, benachrichtigung_verbergen, akku.
 ///
 /// Ereignisse (Dart → Python, nur wenn `on_<name>` in Python gesetzt ist):
 /// - `notification`     {device_id, service, characteristic, value (Uint8List → bytes),
@@ -123,8 +123,7 @@ class FletBleService extends FletService {
       case "hintergrund_starten":
         if (!_istAndroid) return false;
         return await _hintergrund.invokeMethod<bool>("starten", {
-              "titel": a["titel"] as String? ?? "Messung läuft",
-              "text": a["text"] as String? ?? "",
+              ..._inhalt(a),
               "geraet": a["geraet"] as bool? ?? true,
               "standort": a["standort"] as bool? ?? false,
             }) ??
@@ -134,11 +133,15 @@ class FletBleService extends FletService {
         return null;
       case "hintergrund_text":
         if (!_istAndroid) return false;
-        return await _hintergrund.invokeMethod<bool>("text", {
-              "titel": a["titel"] as String? ?? "Messung läuft",
-              "text": a["text"] as String? ?? "",
-            }) ??
+        return await _hintergrund.invokeMethod<bool>("text", _inhalt(a)) ??
             false;
+      case "benachrichtigung_zeigen":
+        if (!_istAndroid) return false;
+        return await _hintergrund.invokeMethod<bool>("zeigen", _inhalt(a)) ??
+            false;
+      case "benachrichtigung_verbergen":
+        if (_istAndroid) await _hintergrund.invokeMethod<void>("verbergen");
+        return null;
       case "akku":
         if (!_istAndroid) return null;
         final werte = await _hintergrund.invokeMethod<Map>("akku");
@@ -151,6 +154,15 @@ class FletBleService extends FletService {
         throw Exception("Unbekannte FletBle-Methode: $name");
     }
   }
+
+  /// Inhalt der Benachrichtigung: Titel, eingeklappter und ausgeklappter Text,
+  /// Beginn der Stoppuhr (ms seit 1970, 0 = keine).
+  static Map<String, dynamic> _inhalt(Map a) => {
+        "titel": a["titel"] as String? ?? "Messung läuft",
+        "text": a["text"] as String? ?? "",
+        "lang": a["lang"] as String? ?? "",
+        "seit_ms": (a["seit_ms"] as num?)?.toInt() ?? 0,
+      };
 
   Future<List<Map<String, dynamic>>> _scan(Map a) async {
     final dauer = _sekunden(a["timeout_s"], 8);

@@ -8,7 +8,9 @@ allen voran dem Plan, der während der Messung geübt wurde.
 
 Die Felder gehören in die Messdatei (`hrv_core.ereignisse.metadaten_schreiben`);
 wohin gespeichert wird, entscheidet der Aufrufer (``speichern``): nachträglich
-in die Datei, live in die laufende Aufnahme.
+in die Datei, live in die laufende Aufnahme. Wischt man das Blatt weg oder tippt
+daneben, gilt das wie „Speichern“ (Ben, 16.10.2026: Autosave); nur „Abbrechen“
+verwirft.
 """
 
 from __future__ import annotations
@@ -19,6 +21,8 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import flet as ft
+
+from trainingsapp.ui.components.dialoge import schliessen
 
 #: So weit vor und nach der Messung zählen Planeinträge noch zu ihr
 RAND = timedelta(minutes=10)
@@ -121,14 +125,14 @@ def titel_blatt(
     beschreibung: str,
     vorschlaege: Sequence[str],
     speichern: Callable[[str, str], None],
-    schliessen: Callable[[], object],
     *,
     vorgabe: str = "",
 ) -> ft.BottomSheet:
     """Blatt zum Bearbeiten — Titel mit Vorschlägen zum Antippen, Beschreibung darunter.
 
     ``vorgabe`` steht im leeren Titelfeld: der Plan, der während der Messung geübt
-    wurde (Ben: „der Plan gilt als Namensvorschlag").
+    wurde (Ben: „der Plan gilt als Namensvorschlag"). Das Blatt schließt sich selbst
+    (`dialoge.schliessen`); weggewischt speichert es, was geändert wurde.
     """
     titel_feld = ft.TextField(
         label="Titel",
@@ -153,17 +157,36 @@ def titel_blatt(
 
         return handler
 
+    def eingabe() -> tuple[str, str]:
+        return (titel_feld.value or "").strip(), (beschreibung_feld.value or "").strip()
+
+    anfang = eingabe()
+    #: Gespeichert oder abgebrochen — das Schließen danach tut nichts mehr
+    erledigt: list[bool] = []
+
     def sichern() -> None:
-        speichern((titel_feld.value or "").strip(), (beschreibung_feld.value or "").strip())
-        schliessen()
+        erledigt.append(True)
+        speichern(*eingabe())
+        schliessen(blatt)
+
+    def abbrechen() -> None:
+        erledigt.append(True)
+        schliessen(blatt)
+
+    def geschlossen(_e: object = None) -> None:
+        """Weggewischt oder daneben getippt: geändert heißt gespeichert."""
+        if not erledigt and eingabe() != anfang:
+            erledigt.append(True)
+            speichern(*eingabe())
 
     titel_feld.on_submit = lambda _: sichern()
     chips: list[ft.Control] = [
         ft.Chip(label=ft.Text(n, size=12), on_click=nehmen(n)) for n in vorschlaege
     ]
-    return ft.BottomSheet(
+    blatt = ft.BottomSheet(
         show_drag_handle=True,
         scrollable=True,
+        on_dismiss=geschlossen,
         content=ft.Container(
             padding=ft.Padding.only(left=16, right=16, bottom=16),
             content=ft.Column(
@@ -188,7 +211,7 @@ def titel_blatt(
                     ft.Row(
                         alignment=ft.MainAxisAlignment.END,
                         controls=[
-                            ft.TextButton("Abbrechen", on_click=lambda: schliessen()),
+                            ft.TextButton("Abbrechen", on_click=abbrechen),
                             ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=sichern),
                         ],
                     ),
@@ -196,6 +219,7 @@ def titel_blatt(
             ),
         ),
     )
+    return blatt
 
 
 __all__ = [

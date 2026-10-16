@@ -66,6 +66,7 @@ from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
 
 #: So oft je Sekunde wird die Anzeige aufgefrischt
@@ -751,7 +752,10 @@ def _leisten_auffrischen(state: AppState) -> None:
 
 
 def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, basis: str) -> ft.View:
-    """Name, Abschnitte (Name, mm:ss, Klang), Runden und ihre Klänge — anlegen oder ändern."""
+    """Name, Abschnitte (Name, mm:ss, Klang), Runden und ihre Klänge — anlegen oder ändern.
+
+    Zurück speichert (Ben, 16.10.2026, `components/zurueck.py`); „Abbrechen" verwirft.
+    """
     zurueck_route = timer_route(basis)
     profile = state.timer_profile()
     vorhanden = next((p for p in profile if p.id == profil_id), None)
@@ -847,7 +851,18 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
 
         return handler
 
-    async def speichern() -> None:
+    def stand() -> tuple[Any, ...]:
+        """Alles, was man hier ändern kann — für „Zurück speichert“ (Ben, 16.10.2026)."""
+        return (
+            name.value or "",
+            [(n.value or "", d.value or "", k.value) for n, d, k in zeilen],
+            runden["n"],
+            runden_klang.value,
+            ende_klang.value,
+        )
+
+    def sichern() -> str | None:
+        """Prüfen und speichern — ``None`` = gespeichert, sonst warum nicht."""
         abschnitte: list[Abschnitt] = []
         fehler = False
         for n, d, k in zeilen:
@@ -858,7 +873,7 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
                 abschnitte.append(Abschnitt((n.value or "").strip(), dauer, _klang_wert(k)))
         if fehler or not abschnitte:
             page.update()
-            return
+            return "Eine Dauer ist unlesbar — so: 0:30 oder 1:15."
         neu = TimerProfil(
             id=profil.id,
             name=(name.value or "").strip() or "Timer",
@@ -874,7 +889,16 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
             liste = [*andere, neu]
         state.timer_profile_setzen(liste)
         state.timer_profil_waehlen(neu.id)
-        page.show_dialog(ft.SnackBar(ft.Text(f"„{neu.name}“ gespeichert")))
+        gespeichert["name"] = neu.name
+        return None
+
+    #: Name des zuletzt gespeicherten Profils — für die Meldung
+    gespeichert: dict[str, str] = {}
+
+    async def speichern() -> None:
+        if sichern() is not None:
+            return
+        page.show_dialog(ft.SnackBar(ft.Text(f"„{gespeichert['name']}“ gespeichert")))
         await page.push_route(zurueck_route)
 
     nachher = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (`components/dialoge.py`)
@@ -909,8 +933,9 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
 
     zeilen.extend(zeile(a) for a in profil.abschnitte)
     zeichnen()
+    anfang = stand()
 
-    return ft.View(
+    ansicht = ft.View(
         route=route,
         appbar=ft.AppBar(
             title=ft.Text("Timer-Profil" if vorhanden else "Neues Timer-Profil"),
@@ -983,6 +1008,13 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
                 expand=False,
             )
         ],
+    )
+    return zurueck_speichert(
+        page,
+        ansicht,
+        geaendert=lambda: stand() != anfang,
+        speichern=sichern,
+        meldung="Timer-Profil gespeichert",
     )
 
 

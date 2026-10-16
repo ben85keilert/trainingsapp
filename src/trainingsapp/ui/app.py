@@ -42,6 +42,7 @@ einer tiefen Route. Unbekannte IDs enden beim letzten gültigen Element.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import suppress
 from datetime import date
 from typing import Any
@@ -51,6 +52,8 @@ import flet as ft
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.ui import ausrichtung
+from trainingsapp.ui.components.dialoge import dialog_offen
+from trainingsapp.ui.laufend import takt as laufend_takt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
 from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view, verwaiste_dialog
@@ -384,8 +387,30 @@ def main(page: ft.Page) -> None:
         if teile[2:3] == ["korrigieren"]:
             page.views.append(formular_korrektur(page, state, eintrag))
 
+    #: Route des zuletzt gebauten Stapels; ob ein aufgeschobener Neuaufbau wartet
+    gebaut: dict[str, Any] = {"route": None, "nachholen": False}
+
+    async def nachholen() -> None:
+        """Den aufgeschobenen Neuaufbau, sobald kein Dialog mehr offen ist."""
+        while dialog_offen(page):
+            await asyncio.sleep(0.2)
+        await asyncio.sleep(0.3)  # Flutter schließt den Dialog erst im nächsten Bild
+        gebaut["nachholen"] = False
+        zeige_route()
+
     def zeige_route() -> None:
-        """Baut den Ansichtsstapel passend zu `page.route` auf."""
+        """Baut den Ansichtsstapel passend zu `page.route` auf.
+
+        Ohne Routenwechsel nicht, solange ein Dialog offen ist — er ließe sich danach
+        nicht mehr schließen (`components/dialoge.py`, Ben 16.10.2026: Backup-Dialog
+        beim Start). `nachholen` baut dann neu auf, sobald er zu ist.
+        """
+        if gebaut["route"] == page.route and dialog_offen(page):
+            if not gebaut["nachholen"]:
+                gebaut["nachholen"] = True
+                page.run_task(nachholen)
+            return
+        gebaut["route"] = page.route
         state.route_nummer += 1
         state.timer_beobachter.pop("ansicht", None)  # die Timer-Ansicht trägt sich neu ein
         # Thema und Kurvenfarben zuerst — die Ansichten lesen sie beim Bauen
@@ -505,6 +530,9 @@ def main(page: ft.Page) -> None:
         page.show_dialog(entfallene_dialog(page, state, paket, offene_uebungen, offene_kurse))
     # Updates im Hintergrund (Paketquellen, App-Release) — blockiert das Zeichnen nicht
     page.run_task(updates_beim_start, page, state)
+    # Was läuft (HRV, Training, Timer), steht jede Sekunde in der Benachrichtigung —
+    # nur in der Android-App (Ben, 16.10.2026, `ui.laufend`)
+    page.run_task(laufend_takt, state)
 
 
 if __name__ == "__main__":

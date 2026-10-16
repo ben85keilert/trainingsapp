@@ -90,7 +90,7 @@ from trainingsapp.core.result_spec import (
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tagesbilanz import buendeln
 from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
-from trainingsapp.ui.components.dialoge import Nachher
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import ohne_auto_update, sicher
@@ -1007,12 +1007,11 @@ def plan_view(
                 page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name}: Notiz gespeichert")))
                 auffrischen()
 
-            async def geschlossen(e: object) -> None:
-                # Eine echte async-Funktion: eine Instanz mit async ``__call__``
-                # erkennt Flet nicht als Koroutine und ruft sie nie zu Ende
-                await nachher(e)
+            anfang = (feld.value or "").strip()
+            #: Gespeichert oder abgebrochen — das Schließen danach speichert nicht noch einmal
+            erledigt: list[bool] = []
 
-            def speichern() -> None:
+            def sichern() -> None:
                 text = (feld.value or "").strip()
                 if text or heutig is not None:
                     session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
@@ -1020,19 +1019,35 @@ def plan_view(
                         session, uebung, text, heute, neu=eigener_eintrag(item)
                     )
                     nachher.danach(gespeichert)
-                page.pop_dialog()
 
-            page.show_dialog(
-                ft.AlertDialog(
-                    on_dismiss=geschlossen,
-                    title=ft.Text(f"Notiz: {uebung.name}"),
-                    content=feld,
-                    actions=[
-                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
-                        ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=speichern),
-                    ],
-                )
+            async def geschlossen(e: object) -> None:
+                # Daneben getippt: Geänderter Text gilt als gespeichert (Ben, 16.10.2026,
+                # Autosave); nur „Abbrechen" verwirft.
+                if not erledigt and (feld.value or "").strip() != anfang:
+                    sichern()
+                # Eine echte async-Funktion: eine Instanz mit async ``__call__``
+                # erkennt Flet nicht als Koroutine und ruft sie nie zu Ende
+                await nachher(e)
+
+            def speichern() -> None:
+                erledigt.append(True)
+                sichern()
+                schliessen(dialog)
+
+            def abbrechen() -> None:
+                erledigt.append(True)
+                schliessen(dialog)
+
+            dialog = ft.AlertDialog(
+                on_dismiss=geschlossen,
+                title=ft.Text(f"Notiz: {uebung.name}"),
+                content=feld,
+                actions=[
+                    ft.TextButton("Abbrechen", on_click=abbrechen),
+                    ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=speichern),
+                ],
             )
+            page.show_dialog(dialog)
 
         return handler
 

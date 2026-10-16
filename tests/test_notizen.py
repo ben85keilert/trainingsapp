@@ -126,22 +126,25 @@ def test_aufnahme_schreibt_notizen_in_datei_und_backup(tmp_path: Path) -> None:
     assert list(doc).index("ereignisse") < list(doc).index("messungen")
 
 
-def test_messlauf_zeitbezug_nur_waehrend_der_aufnahme() -> None:
+def test_messlauf_zeitbezug_vor_und_waehrend_der_aufnahme() -> None:
+    """Seit 16.10.2026 auch vor der Aufnahme (Ben: Notizen schon vorher schreiben)."""
     from trainingsapp.devices.messlauf import Messlauf
     from trainingsapp.devices.simulated import SIM_SYNTH, SimulatedSource
 
     async def ablauf() -> None:
         lauf = Messlauf(SimulatedSource(tempo=30.0))
         await lauf.verbinden(SIM_SYNTH, "Simulator H10")
-        assert lauf.notiz_zeitbezug() is None
         task = asyncio.create_task(lauf.laufen())
         while lauf.jetzt_s() < 10:
             await asyncio.sleep(0.01)
-        lauf.aufnahme_starten()
+        vorher = lauf.notiz_zeitbezug()  # ohne Schläge: die Wanduhr ist die Live-Achse
+        a = vorher.anker(lauf.jetzt_s())
+        assert a["beat_index"] is None and vorher.x(a) == pytest.approx(lauf.jetzt_s(), abs=1.0)
+        lauf.aufnahme_starten()  # die Live-Achse beginnt mit der Aufnahme neu
         while lauf.aufnahme_dauer_s() < 10:
             await asyncio.sleep(0.01)
         zb = lauf.notiz_zeitbezug()
-        assert zb is not None and zb.wand_versatz == pytest.approx(10, abs=1.0)
+        assert zb.wand_versatz == pytest.approx(0, abs=0.01)
         a = zb.anker(lauf.jetzt_s())
         assert a["t_wall_s"] == pytest.approx(lauf.aufnahme_dauer_s(), abs=1.0)
         await lauf.trennen()

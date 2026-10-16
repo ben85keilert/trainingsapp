@@ -109,7 +109,8 @@ class Notizfeld:
     """Liste, Eingabe und Marken der Notizen einer Messung.
 
     Args:
-        zeitbezug: liefert den `Zeitbezug` (live ``None`` ohne Aufnahme).
+        zeitbezug: liefert den `Zeitbezug` (``None``: keine Notizen möglich). Live gibt
+            es ihn seit 16.10.2026 auch vor der Aufnahme (`Messlauf.notiz_zeitbezug`).
         ereignisse: liefert die aktuelle Liste (wird nicht verändert).
         speichern: bekommt die neue, sortierte Liste.
         neu_zeichnen: Kurven neu zeichnen (Marken).
@@ -188,7 +189,7 @@ class Notizfeld:
         return self._jetzt is not None
 
     def verfuegbar(self) -> bool:
-        """Live gibt es Notizen nur während einer Aufnahme."""
+        """Ob es einen Zeitbezug gibt — live auch vor der Aufnahme (Ben, 16.10.2026)."""
         return self._zeitbezug() is not None
 
     def _jetzt_x(self) -> float:

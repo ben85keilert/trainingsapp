@@ -172,8 +172,9 @@ def _vollbild(
     # -- Notizen ------------------------------------------------------------------------
 
     def notizen_speichern(liste: list[dict]) -> None:
-        if lauf.aufnahme is not None:
-            lauf.aufnahme.ereignisse = liste  # landet mit Backup und Messdatei
+        # In der Aufnahme: mit Backup und Messdatei; vorher warten sie auf den Start
+        # (Ben, 16.10.2026: Notizen schon vor der Aufnahme)
+        lauf.ereignisse_setzen(liste)
 
     def zeigen(x: float) -> None:
         """Die Kurve auf eine Zeit rücken — nahe der Gegenwart folgt sie wieder."""
@@ -188,7 +189,7 @@ def _vollbild(
 
     notizfeld = Notizfeld(
         zeitbezug=lauf.notiz_zeitbezug,
-        ereignisse=lambda: list(lauf.aufnahme.ereignisse) if lauf.aufnahme is not None else [],
+        ereignisse=lauf.ereignisse,
         speichern=notizen_speichern,
         neu_zeichnen=lambda: aktualisieren(erzwingen=True),
         zeigen=zeigen,
@@ -217,9 +218,7 @@ def _vollbild(
         else:
             x = None if fenster.ende_s is None else mitte()
         if not notizfeld.marke_setzen(x):
-            page.show_dialog(
-                ft.SnackBar(ft.Text("Notizen gehören zu einer Aufnahme — erst „Aufnahme starten“."))
-            )
+            page.show_dialog(ft.SnackBar(ft.Text("Hier lässt sich gerade keine Notiz setzen.")))
 
     def notizen_umschalten() -> None:
         st.notizen = not st.notizen

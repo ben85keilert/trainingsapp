@@ -138,6 +138,7 @@ from trainingsapp.ui.components.vollbild import (
 )
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
+from trainingsapp.ui.components.zurueck import rueckfrage, zurueck_ziel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.messung import ohne_rr
 
@@ -210,6 +211,8 @@ CROP = "crop"
 ABSCHNITT = "abschnitt"
 #: Farbe des verschiebbaren Analysefensters in der Rohkurve
 BAND_FARBE = ft.Colors.TERTIARY
+#: Meldung nach dem Speichern der Korrektur — Knopf und Zurück (Autosave, 16.10.2026)
+KORREKTUR_GESPEICHERT = "Korrektur gespeichert — die Rohdatei bleibt unverändert."
 
 
 @dataclass
@@ -352,6 +355,15 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     z = _Zustand(rec, gespeicherte_regeln or state.korrekturregeln())
     z.gespeichert = analyse_laden(pfad, z.basis)
     z.auswahl_aus(z.gespeichert, ohne_sidecar=gespeicherte_regeln is None)
+    #: Auswahl und Regeln beim Öffnen bzw. beim letzten Speichern. Zurück speichert nur,
+    #: was seither geändert wurde — ohne Sidecar gilt schon die Vorauswahl als
+    #: ungespeichert, die schreibt Zurück nicht ungefragt.
+    bezug = [(frozenset(z.uebernommen), z.regeln)]
+
+    def ungespeichert_geaendert() -> bool:
+        """Gibt es etwas, das Zurück speichern soll (Autosave, Ben 16.10.2026)?"""
+        hier = (frozenset(z.uebernommen), z.regeln) != bezug[0]
+        return hier and z.geaendert(gespeicherte_regeln)
 
     dauer = max((t for t, _ in z.roh_punkte), default=0.0)
     start_breite = START_BREITE_S if dauer > START_BREITE_S else 0
@@ -394,6 +406,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         segments=[ft.Segment(value=str(s), label=ft.Text(t, size=12)) for s, t in BREITEN],
     )
     speichern_knopf = ft.FilledButton("Korrektur speichern", icon=ft.Icons.SAVE, disabled=True)
+    #: Die fertige Ansicht — beim ersten `zeichnen` gibt es sie noch nicht
+    gebaut: list[ft.View] = []
 
     # -- Kennzahlen der ganzen Messung (korrigiert) --------------------------------
 
@@ -1287,8 +1301,14 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             ft.Text("Keine Auffälligkeiten gefunden.", opacity=0.7)
         ]
         speichern_knopf.disabled = not z.geaendert(gespeicherte_regeln)
+        zurueck_pruefen()
         if aktualisieren:
             page.update()
+
+    def zurueck_pruefen() -> None:
+        """Ungespeicherte Korrektur: Zurück fragt erst (`zurueck_im_vollbild`) und speichert."""
+        if gebaut and not m.vollbild:
+            gebaut[0].can_pop = not ungespeichert_geaendert()
 
     def nur_kurven(mit_analyse: bool = True) -> None:
         kurven(mit_analyse)
@@ -1658,18 +1678,24 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         z.uebernommen.clear()
         zeichnen()
 
-    async def speichern() -> None:
+    def korrektur_sichern() -> str | None:
+        """Korrektur ins Sidecar — ``None`` = gespeichert, sonst der Fehler."""
         nonlocal gespeicherte_regeln
         try:
             analyse_speichern(pfad, rec, z.korrekturen(), regeln=z.regeln, basis=z.basis)
         except (OSError, SidecarFehler) as fehler:
-            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
-            return
+            return str(fehler)
         z.gespeichert = z.korrekturen()
         gespeicherte_regeln = z.regeln
-        page.show_dialog(
-            ft.SnackBar(ft.Text("Korrektur gespeichert — die Rohdatei bleibt unverändert."))
-        )
+        bezug[0] = (frozenset(z.uebernommen), z.regeln)
+        zurueck_pruefen()
+        return None
+
+    async def speichern() -> None:
+        if (fehler := korrektur_sichern()) is not None:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
+            return
+        page.show_dialog(ft.SnackBar(ft.Text(KORREKTUR_GESPEICHERT)))
         zeichnen()
 
     speichern_knopf.on_click = speichern
@@ -1753,7 +1779,6 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 beschreibung,
                 titel_vorschlaege(state, von, bis, rec.ereignisse),
                 titel_speichern,
-                page.pop_dialog,
                 vorgabe=plaene[0] if plaene else "",
             )
         )
@@ -2012,17 +2037,41 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             view.appbar = leiste_oben
             view.scroll = ft.ScrollMode.AUTO
             view.padding = 12
-            view.can_pop = True
+            view.can_pop = not ungespeichert_geaendert()  # sonst speichert Zurück erst
             view.controls = [sicher(normal_inhalt, expand=False)]
             ausrichtung.anwenden(page, state, ausrichtung.modus_fuer_route(route))
         zeichnen()
 
     async def zurueck_im_vollbild(e: ft.Event[ft.View]) -> None:
-        """Systemtaste Zurück im Vollbild: nur das Vollbild schließen, die Messung bleibt."""
+        """Zurück im Vollbild: nur das Vollbild schließen, die Messung bleibt.
+
+        Außerhalb des Vollbilds kommt Zurück nur hierher, wenn die Korrektur ungespeichert
+        ist (`zurueck_pruefen`): Dann speichert es sie (Ben, 16.10.2026: Autosave,
+        `components/zurueck.py`) — scheitert das, fragt ein Dialog.
+        """
         if m.vollbild:
             vollbild_umschalten()
+            with contextlib.suppress(Exception):
+                await view.confirm_pop(False)  # die Messung bleibt offen
+            return
+        if not ungespeichert_geaendert():
+            with contextlib.suppress(Exception):
+                await view.confirm_pop(True)  # nichts zu speichern: gewöhnliches Zurück
+            return
         with contextlib.suppress(Exception):
-            await view.confirm_pop(False)
+            await view.confirm_pop(False)  # weiter geht es unten selbst
+        ziel = zurueck_ziel(page, view)
+        if (fehler := korrektur_sichern()) is None:
+            page.show_dialog(ft.SnackBar(ft.Text(KORREKTUR_GESPEICHERT)))
+            await page.push_route(ziel)
+            return
+
+        async def verwerfen() -> None:
+            await page.push_route(ziel)
+
+        page.show_dialog(
+            rueckfrage(f"Die Korrektur ließ sich nicht speichern: {fehler}", verwerfen)
+        )
 
     notizen_knopf = werkzeug(
         ft.Icons.NOTES, "Notizen: Liste, Text, Zeit", lambda: seite_umschalten(NOTIZEN)
@@ -2192,6 +2241,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     )
     view = ansicht([normal_inhalt])
     view.on_confirm_pop = zurueck_im_vollbild
+    gebaut.append(view)
+    zurueck_pruefen()
     return view
 
 

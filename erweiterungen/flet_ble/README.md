@@ -33,6 +33,17 @@ dauerhafter Benachrichtigung und Wake-Lock; `hintergrund_beenden()` stoppt ihn, 
 `<service>`-Eintrag samt Berechtigungen per Manifest-Merger in der App; die Flet-Vorlage kann
 keine Dienste eintragen. Nur aus dem Vordergrund starten (Android 12+).
 
+**Die Benachrichtigung** (seit 16.10.2026) zeigt, was läuft: `hintergrund_starten` und
+`hintergrund_text` nehmen außer Titel und Text auch `lang` (ausgeklappt, eine Zeile je
+Tätigkeit) und `seit_ms` (Beginn in ms seit 1970 — Android zählt ab da eine Stoppuhr im Kopf).
+`benachrichtigung_zeigen(...)` zeigt dieselbe Benachrichtigung **ohne** Dienst (etwa nur für den
+Timer; hält nichts am Leben), `benachrichtigung_verbergen()` nimmt sie weg. In der Statusleiste
+steht ein eigenes, einfarbiges Symbol (`res/drawable/ic_stat_trainingsapp.xml`). Der Kanal
+`laufend` hat die Wichtigkeit „Standard“ ohne Ton und Vibration: Benachrichtigungen mit
+„niedrig“ gelten als still, und stille zeigt die Statusleiste (Pixel) nicht als Symbol — der
+frühere Kanal `hrv_messung` wird beim ersten Start gelöscht. Was hineinkommt, setzt die App
+zusammen (`trainingsapp.ui.laufend`).
+
 Stolperfallen:
 
 - **Referenz halten.** Flet entfernt Dienste, auf die in Python niemand mehr zeigt, nach dem
@@ -52,6 +63,16 @@ Dart prüfen:
 ```bash
 cd erweiterungen/flet_ble/src/flutter/flet_ble
 ~/flutter/3.44.8/bin/flutter pub get && ~/flutter/3.44.8/bin/dart analyze
+```
+
+Java prüfen, ohne eine APK zu bauen (Android-SDK und Gradle-Cache wie auf Bens Rechner; `R` als
+Stummel, weil die Ressourcen erst der Build erzeugt):
+
+```bash
+A=erweiterungen/flet_ble/src/flutter/flet_ble/android/src/main/java/de/praxisebert/flet_ble
+C=~/.gradle/caches/modules-2/files-2.1; mkdir -p /tmp/fb/de/praxisebert/flet_ble
+printf 'package de.praxisebert.flet_ble;\npublic final class R { public static final class drawable { public static int ic_stat_trainingsapp; } }\n' > /tmp/fb/de/praxisebert/flet_ble/R.java
+javac --release 11 -d /tmp/fb/out -cp "$HOME/Android/sdk/platforms/android-36/android.jar:$(find $C -name 'flutter_embedding_release-*.jar' | head -1):$(find $C -name 'annotation-jvm-*.jar' | head -1)" /tmp/fb/de/praxisebert/flet_ble/R.java $A/*.java
 ```
 
 ## Lizenz von flutter_blue_plus — wichtig

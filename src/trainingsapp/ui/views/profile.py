@@ -4,6 +4,9 @@ Anlegen, umbenennen, löschen (mit Rückfrage). Gewählt wird das aktive Profil
 vorn in den Einstellungen; hier wird nur geändert. Gelöschte Profile werden
 ausgeblendet (`SubjectRepo.loeschen`) — ihre Einträge und Messungen bleiben
 auf dem Gerät, wie überall in der App. Das letzte Profil bleibt.
+
+Ein geänderter Name gilt auch, wenn man einfach zurückgeht (Ben, 16.10.2026,
+`components/zurueck.py`).
 """
 
 from __future__ import annotations
@@ -18,15 +21,19 @@ from trainingsapp.core.models import Subject
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
 
 
 def profile_view(page: ft.Page, state: AppState) -> ft.View:
     liste = ft.Column(spacing=10)
     neuer_name = ft.TextField(label="Neues Profil", dense=True, expand=True)
+    #: Die Namensfelder der Liste, wie sie gerade stehen — für „Zurück speichert“
+    felder: dict[str, tuple[Subject, ft.TextField]] = {}
 
     def zeichnen() -> None:
         profile = state.profile.alle()
+        felder.clear()
         liste.controls = [zeile(p, len(profile) > 1) for p in profile]
         with contextlib.suppress(Exception):
             liste.update()
@@ -82,6 +89,7 @@ def profile_view(page: ft.Page, state: AppState) -> ft.View:
 
     def zeile(profil: Subject, loeschbar: bool) -> ft.Control:
         feld = ft.TextField(value=profil.name, dense=True, expand=True)
+        felder[profil.id] = (profil, feld)
         feld.on_submit = lambda _: umbenenner(profil, feld)()
         aktiv = profil.id == state.profil.id
         return ft.Row(
@@ -124,7 +132,7 @@ def profile_view(page: ft.Page, state: AppState) -> ft.View:
     teile: list[ft.Control] = [
         karte(
             titel("Profile"),
-            hinweis("Namen ändern und mit ✓ oder Eingabe speichern."),
+            hinweis("Namen ändern — ✓, Eingabe oder Zurück speichert."),
             liste,
         ),
         karte(
@@ -143,12 +151,37 @@ def profile_view(page: ft.Page, state: AppState) -> ft.View:
     if ist_aktiv("profil_sperre"):
         # Praxis-Edition: Profile mehrerer Personen auf einem Gerät — gesperrt per PIN
         teile.append(hinweis("Profilwechsel ist durch PIN geschützt."))
-    return ft.View(
-        route="/einstellungen/profile",
-        appbar=ft.AppBar(title=ft.Text("Profile verwalten")),
-        scroll=ft.ScrollMode.AUTO,
-        padding=16,
-        controls=[sicher(ft.Column(spacing=14, controls=teile), expand=False)],
+
+    def geaendert() -> list[tuple[Subject, ft.TextField]]:
+        return [
+            (profil, feld)
+            for profil, feld in felder.values()
+            if (feld.value or "").strip() != profil.name
+        ]
+
+    def namen_sichern() -> str | None:
+        """Geänderte Namen übernehmen — ein leerer bleibt stehen und wird gemeldet."""
+        for profil, feld in geaendert():
+            name = (feld.value or "").strip()
+            if not name:
+                feld.error = "Ein Name muss sein."
+                page.update()
+                return "Ein Profil braucht einen Namen."
+            state.profil_umbenennen_id(profil.id, name)
+        return None
+
+    return zurueck_speichert(
+        page,
+        ft.View(
+            route="/einstellungen/profile",
+            appbar=ft.AppBar(title=ft.Text("Profile verwalten")),
+            scroll=ft.ScrollMode.AUTO,
+            padding=16,
+            controls=[sicher(ft.Column(spacing=14, controls=teile), expand=False)],
+        ),
+        geaendert=lambda: bool(geaendert()),
+        speichern=namen_sichern,
+        meldung="Namen gespeichert",
     )
 
 

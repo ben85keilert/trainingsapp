@@ -48,7 +48,7 @@ from trainingsapp.devices.messlauf import Gespeichert, Messlauf, backup_wiederhe
 from trainingsapp.devices.profiles import geraeteart
 from trainingsapp.devices.simulated import SIM_PPI, SIM_PREFIX, SIM_SYNTH, SimulatedSource
 from trainingsapp.ui.components.analyse import Analyse
-from trainingsapp.ui.components.dialoge import Nachher
+from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog
 from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, anzeige, zahl
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
@@ -329,7 +329,17 @@ def backup_uebernehmen(state: AppState, pfad: Path) -> HrvRecording | None:
     (`devices.messlauf.backup_wiederherstellen`), der Eintrag gehört dem Profil beim
     Start, falls es das noch gibt — sonst dem aktiven. ``None``: nichts eingetragen
     (Backup ohne Schlag, oder die Messung stand schon in der Liste)."""
-    ergebnis = backup_wiederherstellen(pfad)
+    return backup_eintragen(state, pfad, backup_wiederherstellen(pfad))
+
+
+def backup_eintragen(
+    state: AppState, pfad: Path, ergebnis: Gespeichert | None
+) -> HrvRecording | None:
+    """Der Datenbankteil von `backup_uebernehmen` — im Thread der Oberfläche (SQLite).
+
+    Das Schreiben der Messdatei (`backup_wiederherstellen`) darf vorher in einem
+    eigenen Thread laufen; hier wird nur noch eingetragen.
+    """
     state.hrv_backups = [p for p in state.hrv_backups if p != pfad]
     if ergebnis is None:
         return None
@@ -358,79 +368,40 @@ def _backup_beschriftung(pfad: Path) -> str:
 def backup_dialog(page: ft.Page, state: AppState) -> ft.AlertDialog:
     """Beim Start: je Backup „Wiederherstellen" oder „Löschen", unten „Später".
 
-    Vorbild `views.ausdauer.verwaiste_dialog`. Nach dem letzten Wiederherstellen
-    öffnet sich die Messung — erst wenn der Dialog wirklich zu ist (`Nachher`).
+    Der Ablauf steckt in `components.dialoge.reste_dialog` (gemeinsam mit
+    `views.ausdauer.verwaiste_dialog`). Wiederherstellen schreibt die Messdatei in
+    einem eigenen Thread — eine 4-h-Aufnahme braucht am Handy ein paar Sekunden —,
+    erst der Eintrag in die Datenbank läuft hier. Nach dem letzten Wiederherstellen
+    öffnet sich die Messung, sobald der Dialog zu ist.
     """
-    zeilen = ft.Column(tight=True, spacing=4)
-    nachher = Nachher()
 
-    def melden(text: str) -> None:
-        page.show_dialog(ft.SnackBar(ft.Text(text)))
-
-    def wiederhersteller(pfad: Path) -> Callable[[], None]:
-        def handler() -> None:
-            try:
-                eintrag = backup_uebernehmen(state, pfad)
-            except (OSError, ValueError) as fehler:
-                melden(f"Wiederherstellen fehlgeschlagen: {fehler}")
-                return
-            if eintrag is None:
-                melden("Sicherung war leer oder die Messung stand schon in der Liste.")
-            else:
-                melden("Messung wiederhergestellt.")
-                if not state.hrv_backups:
-                    nachher.danach(lambda: page.push_route(f"/messung/{eintrag.id}"))
-            zeichnen()
-
-        return handler
-
-    def loescher(pfad: Path) -> Callable[[], None]:
-        def handler() -> None:
-            with contextlib.suppress(OSError):
-                pfad.unlink()
+    async def wiederherstellen(pfad: Path) -> Erledigt:
+        try:
+            ergebnis = await asyncio.to_thread(backup_wiederherstellen, pfad)
+        except FileNotFoundError:  # schon erledigt — kein Fehler, nur nichts mehr zu tun
             state.hrv_backups = [p for p in state.hrv_backups if p != pfad]
-            melden("Sicherung gelöscht.")
-            zeichnen()
+            return Erledigt("Die Sicherung war schon weg.")
+        eintrag = backup_eintragen(state, pfad, ergebnis)
+        if eintrag is None:
+            return Erledigt("Sicherung war leer oder die Messung stand schon in der Liste.")
+        return Erledigt("Messung wiederhergestellt.", f"/messung/{eintrag.id}")
 
-        return handler
+    def loeschen(pfad: Path) -> Erledigt:
+        pfad.unlink(missing_ok=True)
+        state.hrv_backups = [p for p in state.hrv_backups if p != pfad]
+        return Erledigt("Sicherung gelöscht.")
 
-    def zeichnen() -> None:
-        if not state.hrv_backups:
-            page.pop_dialog()
-            return
-        zeilen.controls = [
-            ft.Row(
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                controls=[
-                    ft.Text(_backup_beschriftung(pfad), expand=True),
-                    ft.TextButton("Löschen", on_click=loescher(pfad)),
-                    ft.FilledTonalButton("Wiederherstellen", on_click=wiederhersteller(pfad)),
-                ],
-            )
-            for pfad in state.hrv_backups
-        ]
-        with contextlib.suppress(Exception):
-            zeilen.update()
-
-    zeichnen()
-    return ft.AlertDialog(
-        modal=True,
-        title=ft.Text("Unvollständige Messung gefunden"),
-        content=ft.Column(
-            tight=True,
-            spacing=10,
-            controls=[
-                ft.Text(
-                    "Die App wurde während einer Messung beendet (Akku leer, Absturz). "
-                    "Die Sicherung liegt noch auf dem Handy — als Messung wiederherstellen "
-                    "oder löschen?",
-                    size=13,
-                ),
-                zeilen,
-            ],
-        ),
-        actions=[ft.TextButton("Später", on_click=lambda: page.pop_dialog())],
-        on_dismiss=nachher.bei_schliessen,
+    return reste_dialog(
+        page,
+        titel="Unvollständige Messung gefunden",
+        text="Die App wurde während einer Messung beendet (Akku leer, Absturz). "
+        "Die Sicherung liegt noch auf dem Handy — als Messung wiederherstellen "
+        "oder löschen?",
+        offen=lambda: list(state.hrv_backups),
+        beschriftung=_backup_beschriftung,
+        knopf="Wiederherstellen",
+        uebernehmen=wiederherstellen,
+        loeschen=loeschen,
     )
 
 
@@ -745,8 +716,9 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         fenster.verschieben(x + fenster.breite_s / 2 - lauf.jetzt_s(), lauf.jetzt_s(), anfang())
 
     def notizen_speichern(liste: list[dict]) -> None:
-        if lauf.aufnahme is not None:
-            lauf.aufnahme.ereignisse = liste  # landet mit Backup und Messdatei
+        # In der Aufnahme: mit Backup und Messdatei. Vorher warten sie auf den Start
+        # und stehen dann an seinem Anfang (Ben, 16.10.2026: Notizen schon vorher).
+        lauf.ereignisse_setzen(liste)
 
     def notizen_offen(offen: bool) -> None:
         state.notizen_offen = offen
@@ -756,7 +728,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
 
     notizfeld = Notizfeld(
         zeitbezug=lauf.notiz_zeitbezug,
-        ereignisse=lambda: list(lauf.aufnahme.ereignisse) if lauf.aufnahme is not None else [],
+        ereignisse=lauf.ereignisse,
         speichern=notizen_speichern,
         neu_zeichnen=lambda: aktualisieren(erzwingen=True),
         zeigen=zeigen,
@@ -798,10 +770,15 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     )
 
     async def aufnahme_starten() -> None:
+        """Start mit leeren Kurven (Ben, 16.10.2026): Der Messlauf leert das Live-Fenster
+        und beginnt die Achse bei 0; die Ansicht baut sich neu auf, damit auch Analyse
+        und Fenster von vorn beginnen. Eine Notiz, die gerade getippt wird, kommt mit."""
+        if notizfeld.bearbeite is not None:
+            notizfeld.uebernehmen()  # mit Text gespeichert — sonst ginge er beim Neuaufbau verloren
         lauf.aufnahme_starten()
-        notizfeld.auffrischen()
-        aktualisieren(erzwingen=True)
+        state.messung_ende_s = None
         await _hintergrund(state, lauf, True, f"Aufnahme läuft · {lauf.geraet_name}")
+        state.neu_zeichnen()
 
     async def aufnahme_stoppen() -> None:
         ergebnis = lauf.aufnahme_stoppen(datenverzeichnis())
@@ -830,7 +807,6 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 aufnahme.notiz,
                 titel_vorschlaege(state, aufnahme.start_utc, utc_jetzt(), aufnahme.ereignisse),
                 speichern,
-                page.pop_dialog,
                 vorgabe=plaene[0] if plaene else "",
             )
         )
@@ -1010,7 +986,8 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             "Grau: alle Rohwerte, auch vom Sensor verworfene · Farbig: gewertet · Rote "
             "Punkte: Artefakte (markiert, nicht verändert) · Gelb: Notizen. Waagrecht "
             "wischen blättert zurück. Gespeichert werden immer die Rohwerte; korrigiert "
-            "wird in der Aufzeichnung."
+            "wird in der Aufzeichnung. Notizen vor dem Start stehen am Anfang der Aufnahme; "
+            "„Aufnahme starten“ beginnt die Kurven neu."
         ),
     )
     spalte = ft.Column(
@@ -1139,7 +1116,9 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
             expand=True,
             spacing=0,
             controls=[
+                # Gleich breit über die ganze Zeile, wie unter „Übungen" (Ben, 16.10.2026)
                 ft.TabBar(
+                    scrollable=False,
                     tabs=[
                         ft.Tab(
                             label="Live",
@@ -1149,7 +1128,7 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
                             label=f"Aufzeichnungen ({anzahl})" if anzahl else "Aufzeichnungen",
                             icon=ft.Icons.FOLDER_OPEN_OUTLINED,
                         ),
-                    ]
+                    ],
                 ),
                 ft.Container(expand=True, content=inhalt),
             ],

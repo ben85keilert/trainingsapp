@@ -194,6 +194,53 @@ def test_detailansicht_mit_artefakt_korrigieren_und_speichern(daten) -> None:
     )
 
 
+def test_detailansicht_zurueck_speichert_geaenderte_korrektur(daten) -> None:
+    """Autosave (Ben, 16.10.2026): Zurück speichert eine geänderte Korrektur — aber nicht
+    die bloße Vorauswahl einer Messung ohne Sidecar."""
+    from hrv_core.korrektur import analyse_regeln
+
+    state, tmp_path = daten
+    rr = [800 + (15 if i % 2 else -15) for i in range(160)]
+    rr[60] = rr[120] = 1650  # zwei ausgelassene Schläge, zwei Vorschläge
+    beats, t = [], 0.0
+    for x in rr:
+        t += x / 1000
+        beats.append(Beat(t_s=round(t, 3), rr_ms=x, hf_bpm=75, t_wall_s=round(t, 3)))
+    rec = Recording(beats=beats, geraet="Polar H10 TEST", geraet_profil="polar_h10")
+    pfad = speichern(rec, tmp_path / "Messungen" / "PolarH10")
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet="Polar H10 TEST",
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    routen: list[str] = []
+    antworten: list[bool] = []
+
+    async def push_route(route: str) -> None:
+        routen.append(route)
+
+    async def confirm_pop(soll: bool) -> None:
+        antworten.append(soll)
+
+    seite = _seite()
+    seite.push_route = push_route
+    ansicht = messung_detail_view(seite, state, eintrag)
+    ansicht.confirm_pop = confirm_pop
+    seite.views = [ft.View(route="/"), ansicht]
+    assert ansicht.can_pop  # nur angesehen: Zurück ist ein gewöhnliches Zurück
+
+    ketten = [c for c in _alle_controls(ansicht) if isinstance(c, ft.ListTile) and c.on_click]
+    assert len(ketten) == 2 and analyse_regeln(pfad) is None  # Vorauswahl: beide, kein Sidecar
+    ketten[1].on_click()  # den zweiten Vorschlag abwählen — eine Änderung
+    assert not ansicht.can_pop
+    asyncio.run(ansicht.on_confirm_pop(None))
+    assert antworten == [False] and routen == ["/"]
+    assert [k.beat_index for k in analyse_laden(pfad)] == [60]
+    assert ansicht.can_pop  # gespeichert: nichts mehr offen
+
+
 def test_detailansicht_ohne_datei(daten) -> None:
     state, _ = daten
     eintrag = HrvRecording(subject_id=state.profil.id, file_path="PolarH10/fehlt.json")
@@ -677,8 +724,19 @@ async def test_live_notiz_eingefroren_und_jetzt(daten) -> None:
 
     seite = _seite()
     ansicht = messung(seite, state)
-    assert _knopf(ansicht, "Notiz").disabled  # ohne Aufnahme keine Notiz
+    feld = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.TextField) and c.multiline and c.shift_enter
+    )
+    # Schon vor der Aufnahme (Ben, 16.10.2026) — getippt, aber nicht gespeichert:
+    # „Aufnahme starten" nimmt sie mit, an den Anfang der Aufnahme
+    assert not _knopf(ansicht, "Notiz").disabled
+    _knopf(ansicht, "Notiz").on_click()
+    feld.value = "Vorher"
     await _knopf(ansicht, "Aufnahme starten").on_click()
+    assert [x["text"] for x in lauf.aufnahme.ereignisse] == ["Vorher"]
+    assert lauf.aufnahme.ereignisse[0]["t_wall_s"] == 0.0
     while lauf.aufnahme_dauer_s() < 30:
         await asyncio.sleep(0.01)
 
@@ -687,14 +745,9 @@ async def test_live_notiz_eingefroren_und_jetzt(daten) -> None:
     eingefroren_bei = lauf.aufnahme_dauer_s()
     while lauf.aufnahme_dauer_s() < eingefroren_bei + 20:
         await asyncio.sleep(0.01)
-    feld = next(
-        c
-        for c in _alle_controls(ansicht)
-        if isinstance(c, ft.TextField) and c.multiline and c.shift_enter
-    )
     feld.value = "Liegestütz"
     feld.on_submit(None)
-    (e,) = lauf.aufnahme.ereignisse
+    _, e = lauf.aufnahme.ereignisse
     # Der Zeitpunkt ist der von „+ Notiz", nicht der des Speicherns
     assert e["t_wall_s"] == pytest.approx(eingefroren_bei, abs=2.0)
 
@@ -706,11 +759,11 @@ async def test_live_notiz_eingefroren_und_jetzt(daten) -> None:
     assert "eingefroren" in _baum_texte(ansicht)
     feld.value = "Ende"
     _symbol(ansicht, ft.Icons.CHECK, "Speichern").on_click()
-    assert [x["text"] for x in lauf.aufnahme.ereignisse] == ["Liegestütz", "Ende"]
+    assert [x["text"] for x in lauf.aufnahme.ereignisse] == ["Vorher", "Liegestütz", "Ende"]
 
     ergebnis = lauf.aufnahme_stoppen(tmp_path)
     assert ergebnis is not None
-    assert [x["text"] for x in ergebnis.recording.ereignisse] == ["Liegestütz", "Ende"]
+    assert [x["text"] for x in ergebnis.recording.ereignisse] == ["Vorher", "Liegestütz", "Ende"]
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
 
@@ -1178,8 +1231,14 @@ async def test_crash_backup_wird_beim_start_erkannt_und_wiederhergestellt(daten)
     assert "Unvollständige Messung gefunden" in _baum_texte(dialog)
     assert any("Simulator H10 vom" in t for t in _baum_texte(dialog))
 
-    eintrag = backup_uebernehmen(state, backups[0])
-    assert eintrag is not None and eintrag.subject_id == start
+    # Über den Dialog (Ben, 16.10.2026: fror ein, „Später" schloss nicht): Das
+    # Schreiben läuft in einem Thread, danach ist genau dieser Dialog zu.
+    dialog.open = True
+    knopf = next(c for c in _alle_controls(dialog) if isinstance(c, ft.FilledTonalButton))
+    await knopf.on_click()
+    assert not dialog.open and seite.aufrufe == []  # die Meldung kommt erst nach dem Schließen
+    (eintrag,) = state.hrv.alle(start)
+    assert eintrag.subject_id == start
     assert eintrag.file_path.startswith("Generator/sensor_")
     assert (messungenverzeichnis() / eintrag.file_path).exists()
     assert not backups[0].exists()

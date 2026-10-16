@@ -224,3 +224,66 @@ async def test_backup_jetzt_sichert_sofort(tmp_path) -> None:
     assert len(doc["messungen"]) == len(lauf.aufnahme.beats)
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
+
+
+# ---------------------------------------------------------------------------
+# Notizen vor der Aufnahme, leere Kurven beim Start (Ben, 16.10.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_notizen_vor_der_aufnahme_kommen_an_ihren_anfang(tmp_path) -> None:
+    """Ohne Aufnahme gibt es einen Zeitbezug; beim Start rücken die Notizen auf 0."""
+    from hrv_core.ereignisse import notiz
+
+    lauf = Messlauf(SimulatedSource(tempo=60.0, seed=7), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    while lauf.jetzt_s() < 30:
+        await asyncio.sleep(0.01)
+
+    zb = lauf.notiz_zeitbezug()  # vor dem Start: Live-Achse, keine Schläge
+    assert lauf.notiz_hinzufuegen("Timer ohne Aufnahme") is None  # der Timer schreibt nur in eine
+    vorher = notiz("Kaffee getrunken", zb.anker(25.0), zb.start_utc, uebungen=["AB12CD34"])
+    assert zb.x(vorher) == pytest.approx(25.0)
+    lauf.ereignisse_setzen([vorher])
+    assert lauf.ereignisse() == [vorher]
+    assert lauf.aufnahme is None
+
+    lauf.aufnahme_starten()
+    (e,) = lauf.ereignisse()
+    assert e["text"] == "Kaffee getrunken" and e["uebungen"] == ["AB12CD34"]
+    assert e["beat_index"] is None and e["t_wall_s"] == 0.0
+    assert lauf.notiz_zeitbezug().x(e) == pytest.approx(0.0, abs=0.5)
+    while lauf.aufnahme_dauer_s() < 10:
+        await asyncio.sleep(0.01)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    assert ergebnis is not None
+    assert [x["text"] for x in laden(ergebnis.pfad).ereignisse] == ["Kaffee getrunken"]
+    assert lauf.ereignisse() == []  # nach dem Stopp: die nächste Aufnahme beginnt leer
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+
+
+async def test_aufnahme_beginnt_mit_leeren_kurven(tmp_path) -> None:
+    """„Aufnahme starten" leert das Live-Fenster und setzt die Live-Achse auf 0."""
+    lauf = Messlauf(SimulatedSource(tempo=60.0, seed=7), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    while lauf.jetzt_s() < 60:
+        await asyncio.sleep(0.01)
+    assert lauf.live.punkte()
+
+    lauf.aufnahme_starten()
+    assert lauf.jetzt_s() < 1.0
+    assert all(p.t_s < 1.0 for p in lauf.live.punkte())  # höchstens ein Nachzügler
+    while lauf.aufnahme_dauer_s() < 20:
+        await asyncio.sleep(0.01)
+    punkte = lauf.live.punkte()
+    assert punkte and punkte[0].t_s < 3.0
+    # Live-Achse und Aufnahme laufen gleich: eine Notiz „jetzt" steht an derselben Stelle
+    e = lauf.notiz_hinzufuegen("jetzt")
+    assert e is not None
+    assert lauf.notiz_zeitbezug().x(e) == pytest.approx(lauf.jetzt_s(), abs=1.0)
+    assert lauf.aufnahme_stoppen(tmp_path) is not None
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)

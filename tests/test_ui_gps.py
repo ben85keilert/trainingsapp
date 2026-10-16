@@ -117,18 +117,18 @@ async def test_vordergrunddienst_teilen_sich_messung_und_gps() -> None:
     aufrufe: list[tuple[str, Any]] = []
 
     class Ble:
-        async def hintergrund_starten(self, titel, text="", *, geraet=True, standort=False):
+        async def hintergrund_starten(self, titel, text="", *, geraet=True, standort=False, **_):
             aufrufe.append(("start", (titel, geraet, standort)))
 
         async def hintergrund_beenden(self):
             aufrufe.append(("ende", None))
 
-        async def hintergrund_text(self, titel, text=""):
+        async def hintergrund_text(self, titel, text="", **_):
             aufrufe.append(("text", (titel, text)))
 
     transport = object.__new__(FletBleTransport)
     transport._zwecke = {}
-    transport.ble = Ble()
+    transport.ble = Ble()  # ohne `anzeigen` (ui.laufend): Titel und Text der Zwecke
 
     await transport.hintergrund(True, "HRV-Messung läuft", "H10")
     await transport.hintergrund(True, "GPS-Test läuft", "Start", zweck="gps")

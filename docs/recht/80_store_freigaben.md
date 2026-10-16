@@ -37,6 +37,7 @@ Angaben. Ein gemeinsamer Eintrag wäre für Edition A falsch.
 | `BLUETOOTH_SCAN` (mit `neverForLocation`) | Herzfrequenzsensor finden |
 | `BLUETOOTH_CONNECT` | mit dem Sensor verbinden |
 | Foreground Service (`connectedDevice`) | Messung läuft weiter, wenn der Bildschirm aus ist |
+| `POST_NOTIFICATIONS` | Benachrichtigung, solange etwas läuft (Messung, Training, Timer) — mit Zeit, ohne Ton und ohne Ortsangaben |
 | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` (seit 14.10.2026) | Strecke beim Ausdauertraining aufzeichnen (Gehen, Laufen, Rad) — nur während eines Trainings oder GPS-Tests, nur auf dem Gerät gespeichert, nie übertragen |
 | Foreground Service (`location`) | GPS läuft weiter, wenn der Bildschirm aus ist |
 | `INTERNET` | Kartenkacheln (OpenStreetMap), verlinkte Videos, Update-Prüfung (GitHub-Releases der App, Paketquellen — nur Versionsnummern, abschaltbar, Hinweis beim ersten Mal); keine eigenen Daten |

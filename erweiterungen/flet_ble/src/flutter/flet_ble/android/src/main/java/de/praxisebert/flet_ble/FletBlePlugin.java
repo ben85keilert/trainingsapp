@@ -22,10 +22,12 @@ import io.flutter.plugin.common.MethodChannel;
 /**
  * Kanal {@code flet_ble/hintergrund}: startet und beendet den {@link MessDienst}.
  *
- * <p>Methoden: {@code starten} (titel, text, geraet, standort) → bool, {@code beenden},
- * {@code aktiv} → bool, {@code text} (titel, text) → bool — Benachrichtigung ändern, ohne
- * den Dienst neu zu starten —, {@code akku} → Map für Strommessungen (Prozent, Ladung in µAh,
- * Strom in µA; ein Wert fehlt, wenn das Gerät ihn nicht liefert).
+ * <p>Methoden: {@code starten} (titel, text, lang, seit_ms, geraet, standort) → bool,
+ * {@code beenden}, {@code aktiv} → bool, {@code text} (titel, text, lang, seit_ms) → bool —
+ * Benachrichtigung ändern, ohne den Dienst neu zu starten —, {@code zeigen} (dieselben) → bool
+ * und {@code verbergen} — dieselbe Benachrichtigung ohne Dienst, etwa nur für den Timer —,
+ * {@code akku} → Map für Strommessungen (Prozent, Ladung in µAh, Strom in µA; ein Wert fehlt,
+ * wenn das Gerät ihn nicht liefert).
  */
 public class FletBlePlugin implements FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware {
     private static final int ANFRAGE_BENACHRICHTIGUNG = 4711;
@@ -58,6 +60,8 @@ public class FletBlePlugin implements FlutterPlugin, MethodChannel.MethodCallHan
                     Intent i = new Intent(kontext, MessDienst.class)
                             .putExtra(MessDienst.EXTRA_TITEL, (String) call.argument("titel"))
                             .putExtra(MessDienst.EXTRA_TEXT, (String) call.argument("text"))
+                            .putExtra(MessDienst.EXTRA_LANG, (String) call.argument("lang"))
+                            .putExtra(MessDienst.EXTRA_SEIT, seitMs(call))
                             .putExtra(MessDienst.EXTRA_GERAET, geraet == null || geraet)
                             .putExtra(MessDienst.EXTRA_STANDORT, standort != null && standort);
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -77,7 +81,18 @@ public class FletBlePlugin implements FlutterPlugin, MethodChannel.MethodCallHan
                     break;
                 case "text":
                     result.success(MessDienst.textAendern(kontext,
-                            (String) call.argument("titel"), (String) call.argument("text")));
+                            (String) call.argument("titel"), (String) call.argument("text"),
+                            (String) call.argument("lang"), seitMs(call)));
+                    break;
+                case "zeigen":
+                    benachrichtigungErlauben();
+                    result.success(MessDienst.zeigen(kontext,
+                            (String) call.argument("titel"), (String) call.argument("text"),
+                            (String) call.argument("lang"), seitMs(call)));
+                    break;
+                case "verbergen":
+                    MessDienst.verbergen(kontext);
+                    result.success(null);
                     break;
                 case "akku":
                     result.success(akku());
@@ -89,6 +104,12 @@ public class FletBlePlugin implements FlutterPlugin, MethodChannel.MethodCallHan
             // Android 12+: aus dem Hintergrund darf kein Vordergrunddienst starten.
             result.error("hintergrund", e.toString(), null);
         }
+    }
+
+    /** Beginn der Stoppuhr (ms seit 1970) — kommt je nach Größe als Integer oder Long an. */
+    private static long seitMs(MethodCall call) {
+        Object wert = call.argument("seit_ms");
+        return wert instanceof Number ? ((Number) wert).longValue() : 0L;
     }
 
     /**

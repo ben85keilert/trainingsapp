@@ -324,7 +324,14 @@ class FletBle(ft.Service):
     # -- Hintergrund --------------------------------------------------------
 
     async def hintergrund_starten(
-        self, titel: str, text: str = "", *, geraet: bool = True, standort: bool = False
+        self,
+        titel: str,
+        text: str = "",
+        *,
+        geraet: bool = True,
+        standort: bool = False,
+        lang: str = "",
+        seit_ms: int = 0,
     ) -> bool:
         """Vordergrunddienst mit Benachrichtigung starten (oder Text und Typ ändern).
 
@@ -336,22 +343,49 @@ class FletBle(ft.Service):
 
         ``geraet``: Typ ``connectedDevice`` (Gurt verbunden); ``standort``: Typ
         ``location`` (GPS läuft) — dafür muss die Standortberechtigung erteilt sein.
+        ``lang``: Text der ausgeklappten Benachrichtigung (mehrzeilig); ``seit_ms``:
+        Beginn in ms seit 1970 — Android zählt ab da eine Stoppuhr im Kopf (0 = keine).
         """
-        args = {"titel": titel, "text": text, "geraet": geraet, "standort": standort}
+        args = {
+            "titel": titel,
+            "text": text,
+            "geraet": geraet,
+            "standort": standort,
+            "lang": lang,
+            "seit_ms": seit_ms,
+        }
         return bool(await self._rufe("hintergrund_starten", args, _FRIST_KURZ))
 
     async def hintergrund_beenden(self) -> None:
         """Vordergrunddienst beenden; ohne laufenden Dienst ein No-op."""
         await self._rufe("hintergrund_beenden", None, _FRIST_KURZ)
 
-    async def hintergrund_text(self, titel: str, text: str = "") -> bool:
+    async def hintergrund_text(
+        self, titel: str, text: str = "", *, lang: str = "", seit_ms: int = 0
+    ) -> bool:
         """Text der laufenden Benachrichtigung ändern, ohne den Dienst neu zu starten.
 
         Anders als `hintergrund_starten` auch bei ausgeschaltetem Display
         erlaubt. ``False``, wenn kein Dienst läuft oder außerhalb von Android.
+        ``lang`` und ``seit_ms`` wie bei `hintergrund_starten`.
         """
-        args = {"titel": titel, "text": text}
+        args = {"titel": titel, "text": text, "lang": lang, "seit_ms": seit_ms}
         return bool(await self._rufe("hintergrund_text", args, _FRIST_KURZ))
+
+    async def benachrichtigung_zeigen(
+        self, titel: str, text: str = "", *, lang: str = "", seit_ms: int = 0
+    ) -> bool:
+        """Dieselbe Benachrichtigung ohne Vordergrunddienst — etwa nur für den Timer.
+
+        Hält die App nicht am Leben; läuft der Dienst, ändert es dessen Text.
+        Fragt auf Android 13+ einmal nach der Erlaubnis. ``False`` außerhalb von Android.
+        """
+        args = {"titel": titel, "text": text, "lang": lang, "seit_ms": seit_ms}
+        return bool(await self._rufe("benachrichtigung_zeigen", args, _FRIST_KURZ))
+
+    async def benachrichtigung_verbergen(self) -> None:
+        """Die Benachrichtigung ohne Dienst wegnehmen (die des Dienstes bleibt)."""
+        await self._rufe("benachrichtigung_verbergen", None, _FRIST_KURZ)
 
     async def akku(self) -> dict[str, Any] | None:
         """Akkustand für Strommessungen — feiner als die Prozentanzeige.

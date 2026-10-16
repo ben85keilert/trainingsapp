@@ -1,0 +1,109 @@
+"""Was gerade läuft — jede Sekunde in die Benachrichtigung (Ben, 16.10.2026).
+
+`laufendes` liest aus dem `AppState`, was läuft: HRV-Messung (verbunden oder mit
+Aufnahme), Ausdauertraining mit Karte, GPS-Test, Timer. `core.laufend` macht daraus
+Titel und Zeilen, `takt` reicht sie an den Bluetooth-Zugang weiter
+(`FletBleTransport.anzeigen`): Läuft der Vordergrunddienst, steht es in seiner
+Benachrichtigung; läuft nur der Timer, in einer gewöhnlichen.
+
+Nur in der gebauten Android-App — am Rechner gibt es keinen Transport, `takt`
+endet dann sofort.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import math
+from datetime import datetime, timedelta
+from typing import Any
+
+from trainingsapp.core.laufend import Benachrichtigung, Laufend, benachrichtigung, uhr
+from trainingsapp.core.strecke import SPORT_NAMEN
+from trainingsapp.devices.base import Verbindung
+
+#: So oft wird die Benachrichtigung aufgefrischt (s) — die Zeiten laufen sekundengenau
+TAKT_S = 1.0
+
+
+def _hrv(state: Any) -> Laufend | None:
+    lauf = state.messlauf
+    if lauf is None:
+        return None
+    # Ohne Aufnahme erst, wenn die Verbindung steht; mit Aufnahme auch während sie
+    # neu verbindet — die Aufnahme läuft dann weiter.
+    if lauf.aufnahme is None and lauf.status.verbindung != Verbindung.VERBUNDEN:
+        return None
+    geraet = lauf.geraet_name or "Gerät"
+    if lauf.aufnahme is None:
+        return Laufend("HRV-Messung", f"verbunden mit {geraet}, keine Aufnahme", "HRV verbunden")
+    dauer = uhr(lauf.aufnahme_dauer_s())
+    teile = [f"Aufnahme {dauer}", geraet]
+    with contextlib.suppress(Exception):
+        if hf := lauf.live.kennzahlen().hf_bpm:
+            teile.append(f"HF {hf}")
+    return Laufend("HRV-Messung", " · ".join(teile), f"HRV {dauer}", lauf.aufnahme.start_utc)
+
+
+def _ausdauer(state: Any) -> Laufend | None:
+    a = state.ausdauer
+    if a is None or a.fertig:
+        return None
+    sport = SPORT_NAMEN.get(a.sportart, "Training")
+    return Laufend(sport, a.text(), f"{sport} {uhr(a.dauer_s)}", a.start_utc)
+
+
+def _gps_test(state: Any) -> Laufend | None:
+    g = state.gps_test
+    if g is None or g.fertig:
+        return None
+    zeile = getattr(g, "meldung", "") or "läuft"
+    return Laufend("GPS-Test", zeile, "GPS-Test", g.gestartet.astimezone())
+
+
+def _timer(state: Any) -> Laufend | None:
+    t = state.timer
+    if t is None or not t.begonnen:
+        return None
+    s = t.stand()
+    if s.fertig:
+        return None
+    rest = uhr(math.ceil(s.rest_s))
+    teile = [f"{s.name or f'Abschnitt {s.index + 1}'} noch {rest}"]
+    if t.profil.runden > 1:
+        teile.append(f"Runde {s.runde}/{t.profil.runden}")
+    if s.laeuft:
+        # Stimmt auch dann noch, wenn Android die App ohne Vordergrunddienst anhält
+        ende = datetime.now() + timedelta(seconds=s.gesamt_rest_s)
+        teile.append(f"fertig um {ende:%H:%M}")
+    else:
+        teile.insert(0, "angehalten")
+    return Laufend("Timer", " · ".join(teile), f"Timer {rest}")
+
+
+def laufendes(state: Any) -> list[Laufend]:
+    """Alles, was gerade läuft — in fester Reihenfolge: HRV, Training, GPS-Test, Timer."""
+    teile: list[Laufend] = []
+    for quelle in (_hrv, _ausdauer, _gps_test, _timer):
+        with contextlib.suppress(Exception):  # ein Fehler hier darf nichts anhalten
+            if (x := quelle(state)) is not None:
+                teile.append(x)
+    return teile
+
+
+async def takt(state: Any) -> None:
+    """Hält die Benachrichtigung aktuell, solange die App lebt — nur mit Transport."""
+    transport = state.ble_transport
+    if transport is None or not hasattr(transport, "anzeigen"):
+        return
+    zuletzt: Benachrichtigung | None = None
+    while True:
+        inhalt = benachrichtigung(laufendes(state))
+        if inhalt != zuletzt:
+            with contextlib.suppress(Exception):
+                await transport.anzeigen(inhalt)
+                zuletzt = inhalt
+        await asyncio.sleep(TAKT_S)
+
+
+__all__ = ["TAKT_S", "laufendes", "takt"]

@@ -16,6 +16,8 @@ Von oben nach unten (Ben, 14.10.2026):
 4. **Standard der Übung** — weicht die Planübung ab, wird „Zurücksetzen"
    aktiv (sofort, nicht erst nach dem Speichern); „Als Standard setzen"
    schiebt die Einstellung in die Übung (`core/standards.py`).
+
+Zurück speichert (Ben, 16.10.2026, `components/zurueck.py`); „Abbrechen" verwirft.
 """
 
 from __future__ import annotations
@@ -53,6 +55,7 @@ from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.parameter_wahl import parameter_wahl
 from trainingsapp.ui.components.spec_form import SpecForm
+from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.uebung_bearbeiten import chips_lesen
 
@@ -254,14 +257,19 @@ def plan_einstellen(
 
     # -- Speichern und Standard ------------------------------------------------------
 
-    async def speichern() -> None:
-        if form.pruefen():
+    def sichern() -> str | None:
+        """Prüfen und speichern — ``None`` = gespeichert, sonst warum nicht."""
+        if probleme := form.pruefen():
             page.update()
-            return
+            return "Im Ziel ist etwas unlesbar: " + ", ".join(probleme) + "."
         aktuell = eingestellt()
         state.plaene.ziel_setzen(item.id, aktuell.target)
         state.plaene.eingabe_setzen(item.id, aktuell.input_mode, aktuell.quick, aktuell.felder)
-        await page.push_route(basis)
+        return None
+
+    async def speichern() -> None:
+        if sichern() is None:
+            await page.push_route(basis)
 
     async def ziel_loeschen() -> None:
         aktuell = eingestellt()
@@ -344,12 +352,18 @@ def plan_einstellen(
             ],
         ),
     ]
-    return ft.View(
-        route=f"{basis}/ziel/{item.id}",
-        appbar=ft.AppBar(title=ft.Text(f"Einstellen: {uebung.name}")),
-        scroll=ft.ScrollMode.AUTO,
-        padding=20,
-        controls=[sicher(ft.Column(spacing=16, controls=inhalt), expand=False)],
+    anfang = eingestellt()
+    return zurueck_speichert(
+        page,
+        ft.View(
+            route=f"{basis}/ziel/{item.id}",
+            appbar=ft.AppBar(title=ft.Text(f"Einstellen: {uebung.name}")),
+            scroll=ft.ScrollMode.AUTO,
+            padding=20,
+            controls=[sicher(ft.Column(spacing=16, controls=inhalt), expand=False)],
+        ),
+        geaendert=lambda: eingestellt() != anfang,
+        speichern=sichern,
     )
 
 

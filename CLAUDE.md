@@ -175,6 +175,19 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   eine Messung keinen RR-Wert, ist sie `bpm_only` — egal was das Geräteprofil versprach
   (`Recording.effektive_qualitaet()`).
 
+- **Zurück speichert** (Ben, 16.10.2026): Formulare mit „Speichern“ hängen an
+  `ui/components/zurueck.zurueck_speichert` (`can_pop`/`on_confirm_pop`) — Zurück speichert
+  Geändertes, Unvollständiges fragt, „Abbrechen“ verwirft; Blätter und Notizdialoge speichern
+  beim Schließen. Neue Formulare ebenso. **Dialoge exakt schließen:** `page.pop_dialog()`
+  trifft den obersten Eintrag — auch eine SnackBar —, darum `components/dialoge.schliessen`
+  und keine SnackBar, solange ein Dialog offen ist (`Nachher`, `reste_dialog`).
+
+- **Laufende Messung überlebt das Wegwischen** (Ben, 16.10.2026): `scripts/apk_bauen.py`
+  setzt in Flets Vorlage eine eigene MainActivity, die die Flutter-Engine im
+  `FlutterEngineCache` hält — Bluetooth bleibt verbunden, den Prozess hält der
+  Vordergrunddienst (`flet_ble`, `MessDienst`). APKs darum nur über das Skript bauen. Was
+  läuft, steht jede Sekunde in dessen Benachrichtigung (`core/laufend.py`, `ui/laufend.py`).
+
 ## Datenbank-Konventionen
 
 SQLite über `sqlite3`, kein ORM. Migrationen sind nummerierte `.sql`-Dateien in

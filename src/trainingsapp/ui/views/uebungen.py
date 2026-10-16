@@ -144,12 +144,15 @@ def uebungen(page: ft.Page, state: AppState) -> ft.Control:
             expand=True,
             spacing=0,
             controls=[
+                # Nicht scrollbar: die drei Reiter teilen sich die Breite gleichmäßig
+                # (Ben, 16.10.2026) — scrollbar standen sie links gedrängt.
                 ft.TabBar(
+                    scrollable=False,
                     tabs=[
                         ft.Tab(label="Übungen", icon=ft.Icons.FITNESS_CENTER),
                         ft.Tab(label="Pläne", icon=ft.Icons.LIST_ALT),
                         ft.Tab(label="Kurse", icon=ft.Icons.SCHOOL_OUTLINED),
-                    ]
+                    ],
                 ),
                 ft.TabBarView(
                     expand=True,

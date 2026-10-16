@@ -11,6 +11,11 @@ Bleibt ein Backup liegen (Akku leer, Absturz), macht `backup_wiederherstellen`
 daraus beim nächsten Start die Messdatei, die „Stopp & speichern" geschrieben
 hätte — mit Profil und Timer-Abschnitten, die das Backup dafür mitführt.
 
+**Eine neue Aufnahme beginnt mit leeren Kurven** (Ben, 16.10.2026):
+`aufnahme_starten` leert das Live-Fenster und setzt die Live-Achse auf 0.
+**Notizen gibt es schon vor der Aufnahme** (`ereignisse`, `notiz_zeitbezug`);
+beim Start rücken sie an den Anfang der Aufnahme.
+
 Kein flet-Import: Der Messlauf ist ohne Bildschirm testbar (Simulator).
 """
 
@@ -29,7 +34,7 @@ from pathlib import Path
 from hrv_core.aufnahme import Aufnahme, backup_lesen
 from hrv_core.ausschnitte import grenzen_speichern
 from hrv_core.constants import malik_threshold
-from hrv_core.ereignisse import Zeitbezug, notiz
+from hrv_core.ereignisse import Zeitbezug, anker_aus_wand, notiz
 from hrv_core.live import LiveFenster
 from hrv_core.ppi import messluecken
 from hrv_core.recording import Recording, messordner, speichern
@@ -120,6 +125,20 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
     )
 
 
+def _an_den_anfang(e: dict, start_utc: datetime | None) -> dict:
+    """Eine Notiz von vor der Aufnahme an deren Anfang (Zeitpunkt 0).
+
+    Text, Übungen und fremde Felder bleiben (`hrv_core.ereignisse.notiz` mit
+    ``alt``); die Uhrzeit ist die des Aufnahmestarts.
+
+    >>> s = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
+    >>> e = _an_den_anfang({"t_wall_s": 12.0, "text": "Kaffee", "uebungen": ["AB12CD34"]}, s)
+    >>> e["beat_index"], e["t_wall_s"], e["text"], e["uebungen"]
+    (None, 0.0, 'Kaffee', ['AB12CD34'])
+    """
+    return notiz(str(e.get("text") or ""), anker_aus_wand((), 0.0), start_utc, alt=e)
+
+
 class Messlauf:
     """Verbindet eine Quelle mit Live-Anzeige und Aufnahme."""
 
@@ -152,13 +171,17 @@ class Messlauf:
         self.aufnahme: Aufnahme | None = None
         #: Abschnittsgrenzen des Timers in der laufenden Aufnahme: (Notiz, Name, Ende?)
         self._grenzen: list[tuple[dict, str, bool]] = []
+        #: Notizen ohne Aufnahme (Ben, 16.10.2026) — `aufnahme_starten` übernimmt sie
+        self._vorab: list[dict] = []
         self.status = DeviceStatus(verbindung=Verbindung.GETRENNT)
         self.device_id = ""
         self.geraet_name = ""
         self.profil: GeraeteProfil | None = None
         self.simulation = False
-        #: Nullpunkt der Live-Achse (Verbindungsbeginn), monotonic
+        #: Nullpunkt der Live-Achse (Verbindungsbeginn, ab der ersten Aufnahme deren
+        #: Start), monotonic — und dieselbe Stelle auf der Wanduhr
         self.start_mono = self._uhr()
+        self._achse_utc = jetzt_utc()
         self._letztes_backup = 0.0
         #: Wird mit ``layout=True`` gerufen, wenn sich die Verbindung ändert,
         #: sonst nach neuen Messwerten. Fehler im Beobachter stoppen nichts.
@@ -167,7 +190,7 @@ class Messlauf:
     # -- Zeit ------------------------------------------------------------------
 
     def jetzt_s(self) -> float:
-        """Sekunden seit Verbindungsbeginn — die x-Achse der Live-Kurven."""
+        """Sekunden seit Verbindungsbeginn bzw. Aufnahmestart — die x-Achse der Live-Kurven."""
         return self._uhr() - self.start_mono
 
     @property
@@ -194,6 +217,8 @@ class Messlauf:
         self._ppi_uhr = Kontinuitaetsuhr()
         self._schlagzeiten.clear()
         self.start_mono = self._uhr()
+        self._achse_utc = self._jetzt_utc()
+        self._vorab = []
         self.status = self.quelle.aktueller_status
 
     def regeln_setzen(self, regeln: Korrekturregeln) -> None:
@@ -316,36 +341,62 @@ class Messlauf:
     # -- Aufnahme -----------------------------------------------------------------
 
     def aufnahme_starten(self) -> None:
+        """Aufnahme beginnen — mit leeren Kurven (Ben, 16.10.2026).
+
+        Das Live-Fenster wird geleert und die Live-Achse beginnt bei 0: Kurven,
+        Kacheln und Analyse zeigen nur noch, was zur neuen Aufnahme gehört. Notizen
+        von vor dem Start stehen in der Aufnahme an ihrem Anfang (`_an_den_anfang`).
+        """
         if self.aufnahme is not None:
             return
         profil = self.profil
+        start = self._uhr()
         self.aufnahme = Aufnahme(
             geraet=self.geraet_name,
             geraet_profil=profil.id if profil else "ble_generic",
             intervall_quelle=profil.intervall_quelle if profil else "ekg_rr",
-            start_mono=self._uhr(),
+            start_mono=start,
             start_utc=self._jetzt_utc(),
             ppi=bool(profil and profil.kann("pmd_ppi")),
             simulation=self.simulation,
         )
         self.aufnahme.batterie_prozent = self.status.batterie_prozent
         self._grenzen = []
-        self._letztes_backup = self._uhr()
+        self._letztes_backup = start
+        self.live.leeren()
+        self.start_mono = start
+        self._achse_utc = self.aufnahme.start_utc
+        vorab, self._vorab = self._vorab, []
+        self.aufnahme.ereignisse = [_an_den_anfang(e, self.aufnahme.start_utc) for e in vorab]
 
-    def notiz_zeitbezug(self) -> Zeitbezug | None:
-        """Zeitbezug der Live-Achse für Notizen — nur während einer Aufnahme.
+    def notiz_zeitbezug(self) -> Zeitbezug:
+        """Zeitbezug der Live-Achse für Notizen — mit und ohne Aufnahme.
 
-        Die Live-Achse zählt ab Verbindungsbeginn, die Wanduhr der Aufnahme ab
-        deren Start; der Unterschied ist ``wand_versatz``.
+        Während einer Aufnahme zählen Live-Achse und Wanduhr der Aufnahme beide ab
+        ihrem Start (`aufnahme_starten`); ``wand_versatz`` hält einen Unterschied
+        fest, falls es je einen gibt. Ohne Aufnahme gibt es keine Schläge: Die
+        Wanduhr einer Notiz ist dann ihre Stelle auf der Live-Achse.
         """
         aufnahme = self.aufnahme
         if aufnahme is None:
-            return None
+            return Zeitbezug(lambda: (), self._achse_utc, wand_versatz=0.0)
         return Zeitbezug(
             lambda: aufnahme.beats,
             aufnahme.start_utc,
             wand_versatz=aufnahme.start_mono - self.start_mono,
         )
+
+    def ereignisse(self) -> list[dict]:
+        """Die Notizen — der laufenden Aufnahme, ohne Aufnahme die für die nächste (Kopie)."""
+        return list(self.aufnahme.ereignisse if self.aufnahme is not None else self._vorab)
+
+    def ereignisse_setzen(self, liste: list[dict]) -> None:
+        """Notizen ersetzen: in der Aufnahme landen sie mit Backup und Messdatei, ohne
+        Aufnahme warten sie auf den Start (`aufnahme_starten`)."""
+        if self.aufnahme is not None:
+            self.aufnahme.ereignisse = list(liste)
+        else:
+            self._vorab = list(liste)
 
     def notiz_hinzufuegen(self, text: str, vor_s: float = 0.0) -> dict | None:
         """Notiz in die laufende Aufnahme, ``vor_s`` Sekunden vor jetzt — ohne Aufnahme ``None``.
@@ -355,9 +406,9 @@ class Messlauf:
         „Jetzt" über die Wanduhr. Angehängt, nicht einsortiert: So verrutscht keine
         Notiz, die gerade jemand bearbeitet (das Notizfeld merkt sich den Index).
         """
-        zb = self.notiz_zeitbezug()
-        if zb is None or self.aufnahme is None:
+        if self.aufnahme is None:
             return None
+        zb = self.notiz_zeitbezug()
         eintrag = notiz(text, zb.anker(self.jetzt_s() - max(vor_s, 0.0)), zb.start_utc)
         self.aufnahme.ereignisse.append(eintrag)
         return eintrag

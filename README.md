@@ -120,13 +120,25 @@ Schritte. Den Schlüssel bekommt er aus den Repository-Secrets
 
 ```bash
 gh workflow run apk.yml                     # APK als Artefakt am Lauf (ZIP, 30 Tage)
-
-# Release mit herunterladbarer APK: Version in pyproject.toml anheben, committen, dann
-git tag v0.2.0 && git push origin v0.2.0
 ```
 
-Das Release erscheint als Pre-Release unter „Releases“ und lässt sich ohne
-Anmeldung herunterladen.
+**Release veröffentlichen** (eine APK, die die App als Update findet):
+
+1. Version in `pyproject.toml` anheben (`uv lock` zieht `uv.lock` nach), committen,
+   auf `main` pushen. Bei gleicher Version entscheidet nur die Build-Nummer —
+   sauberer ist ein Versionssprung.
+2. Tag setzen, **erst wenn `main` den Versionscommit enthält** (sonst steht die
+   alte Version im Dateinamen):
+
+   ```bash
+   git pull && git tag v0.2.0 && git push origin v0.2.0
+   ```
+
+   Oder auf GitHub: Releases → „Draft a new release“ → „Choose a tag“ → `v0.2.0`
+   eintippen → „Create new tag on publish“. Beides startet den Workflow.
+3. Der Workflow baut rund eine Viertelstunde, signiert mit dem festen Schlüssel
+   und hängt die APK an das Release (Pre-Release). Download ohne Anmeldung.
+
 
 **Update aus der App heraus (Android):** Einstellungen → App → „Nach Updates
 suchen“ fragt die GitHub-Releases ab (`core/update.py`). Gibt es eine neuere
@@ -189,6 +201,32 @@ baut, braucht nur dieses Repo und `hrv-core`.
 Commit-Nachrichten tragen bei KI-unterstützter Arbeit `Co-Authored-By` und
 einen Link auf die Claude-Code-Sitzung — bewusst sichtbar, damit nachvollziehbar
 bleibt, was wie entstanden ist.
+
+## Repo-Einstellungen (Sicherheit)
+
+Beide öffentlichen Repos (`trainingsapp`, `hrv-core`) sind gleich eingestellt
+(16.10.2026):
+
+- **Dependabot:** Alerts und Sicherheitsupdates an; `.github/dependabot.yml`
+  bündelt wöchentliche Versionsupdates für `uv.lock` (und hier die Actions) in
+  einen PR. Die flet-Pakete sind ausgenommen — die wechseln bewusst, mit
+  Build-Test und `flet-mcp` im Gleichschritt.
+- **Secret-Scanning mit Push-Schutz:** ein Push mit erkanntem Token wird
+  abgewiesen. Optional, nur über die Weboberfläche: Nicht-Anbieter-Muster und
+  Gültigkeitsprüfung.
+- **Ruleset „main schützen“:** kein Force-Push, kein Löschen. Normale Pushes
+  auf `main` bleiben erlaubt.
+- **Actions:** nur GitHub-eigene und verifizierte Ersteller, dazu
+  `astral-sh/setup-uv` und `softprops/action-gh-release`. Workflow-Token nur
+  lesend (das Release-Job hebt `contents: write` selbst an); Fork-PRs von
+  Erstbeitragenden laufen erst nach Freigabe.
+- **Signierschlüssel** nur in den Repository-Secrets (Fork-PRs sehen sie nicht)
+  und lokal unter `~/.trainingsapp-signierung/`.
+
+Wer eine Dependabot-Meldung bekommt: `uv lock --upgrade-package <paket>`, Tests,
+committen. Zieht ein Paket eine verwundbare Version fest (wie `neurokit2 0.2.13`
+→ `setuptools < 82` in hrv-core), hilft `uv lock --upgrade-package '<paket>>=<fix>'`,
+uv weicht dann auf einen passenden Stand aus.
 
 ## Lizenz
 

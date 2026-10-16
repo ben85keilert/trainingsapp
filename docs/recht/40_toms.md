@@ -34,9 +34,19 @@
   `neverForLocation`. Verbindungen nach außen, alle abschaltbar und mit einmaligem
   Hinweis, nie mit eigenen Daten: die Karte holt Kacheln von OpenStreetMap (grobe
   Kachelkoordinaten); die Update-Prüfung fragt beim Start die GitHub-Releases der
-  App und die eingetragenen Paketquellen (Vorgabe: der Server des Herstellers) nur
-  nach Versionsnummern — übertragen werden IP-Adresse und der Name der App
-  (`docs/uebungspakete.md`, „Paketquellen“; seit 16.10.2026).
+  App und die eingetragenen Paketquellen nur nach Versionsnummern — übertragen
+  werden IP-Adresse und der Name der App (`docs/uebungspakete.md`, „Paketquellen“;
+  seit 16.10.2026).
+- **Vorgabe-Paketquelle** `trainingsapp.osteo-ebert.de` (seit 16.10.2026; Übergang,
+  bis die Website der App steht): ein angemieteter Server in Deutschland, den der
+  Hersteller selbst betreibt; Anbieter Hetzner Online GmbH, mit Vertrag zur
+  Auftragsverarbeitung nach Art. 28 DSGVO. Der Server hält je Abruf IP-Adresse,
+  Zeitpunkt, abgerufene Adresse, Antwort und den Namen der App
+  (`trainingsapp-pakete`) in einem Protokoll fest; es wird täglich bereinigt und
+  nach höchstens sieben Tagen gelöscht. Ein Programm zur Angriffserkennung
+  (CrowdSec) prüft das Protokoll ausschließlich auf diesem Server; IP-Adressen gehen
+  nicht an Dritte. Dieselben Angaben wie in der Datenschutzerklärung von
+  osteo-ebert.de (Server-Protokolle, Hosting).
 
 ## Verfügbarkeit
 

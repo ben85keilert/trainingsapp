@@ -34,9 +34,10 @@ from .pakete import MAX_PAKET_BYTES, Paket, PaketFehler, Paketinhalt, paket_lese
 #: Kennung und Version des Index — `paket_werkzeug.index` schreibt genau das
 INDEX_FORMAT: Final[str] = "trainingsapp-paketindex"
 INDEX_VERSION: Final[int] = 1
-#: Die Quelle, die die App mitbringt (Bens Server). Leer, bis die Adresse mit der
-#: Homepage feststeht (Ben, 16.10.2026) — dann ist sie die erste in der Liste.
-QUELLE_VORGABE: Final[str] = ""
+#: Die Quelle, die die App mitbringt (Bens Server, seit 16.10.2026) — sie gilt, solange
+#: niemand eigene Quellen einträgt. Übergang, bis die Website der App steht: Zieht die
+#: Quelle um, leitet die alte Adresse per 301 weiter (Katalog A9).
+QUELLE_VORGABE: Final[str] = "https://trainingsapp.osteo-ebert.de/pakete/index.json"
 #: Größer ist kein Index
 MAX_INDEX_BYTES: Final[int] = 1_000_000
 _ZEITLIMIT_S: Final[float] = 10.0

@@ -266,8 +266,9 @@ einfach, dass es von jedem Webserver, von GitHub Pages oder aus einem Release ko
 kann (`core/paketquelle.py`).
 
 - **Quellen** stehen unter Einstellungen → Updates: die Vorgabe (der Server des
-  Herstellers, `QUELLE_VORGABE` — leer, bis die Adresse mit der Homepage feststeht)
-  und eigene, nur `https://` (zum Ausprobieren auch `http://localhost`/`127.0.0.1`,
+  Herstellers, `QUELLE_VORGABE` = `https://trainingsapp.osteo-ebert.de/pakete/index.json`,
+  seit 16.10.2026 — Übergang, bis die Website der App steht; Inhalte aus
+  `trainingsapp-inhalte`, siehe oben) und eigene, nur `https://` (zum Ausprobieren auch `http://localhost`/`127.0.0.1`,
   etwa `python -m http.server` im `dist/`-Ordner des Inhalte-Repos).
 - **Prüfung** beim Start (abschaltbar, beim ersten Mal ein Hinweis; nur Versionsnummern,
   es gehen IP-Adresse und der Name der App hinaus) oder per „Jetzt prüfen“. Nennen

@@ -68,6 +68,7 @@ def qigong(version: int, **extra) -> dict:
 
 
 def test_seite_baut_und_markiert_gesehen(page, state) -> None:
+    state.paketquellen_setzen([])  # ausdrücklich keine — sonst gilt die Vorgabe
     ansicht = updates.updates_view(page, state, ft.UrlLauncher())
     assert ansicht.route == "/einstellungen/updates"
     assert "Noch nicht geprüft" in texte(ansicht)
@@ -177,6 +178,7 @@ def test_neue_pakete_und_quellen_fehler(page, state, monkeypatch) -> None:
 
 
 def test_quellen_verwalten(page, state) -> None:
+    state.paketquellen_setzen([])  # von einer leeren Liste aus, unabhängig von der Vorgabe
     ansicht = updates.updates_view(page, state, ft.UrlLauncher())
     feld = next(c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.TextField))
     plus = next(

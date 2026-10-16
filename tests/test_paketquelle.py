@@ -11,6 +11,7 @@ import pytest
 from trainingsapp.core.pakete import Paket, paket_json
 from trainingsapp.core.paketquelle import (
     INDEX_FORMAT,
+    QUELLE_VORGABE,
     IndexEintrag,
     QuellenFehler,
     index_laden,
@@ -135,3 +136,9 @@ def test_pruefen_sammelt_fehler_je_quelle_und_passt_zum_werkzeug(tmp_path) -> No
     inhalt = paket_laden(ergebnis.updates[0].eintrag, laden)
     assert [u.name for u in inhalt.uebungen] == [u.name for u in seed_inhalt().uebungen[:2]]
     assert url_pruefen("ftp://x") and url_pruefen("https://ok.de/i.json") is None
+
+
+def test_vorgabe_besteht_die_eigene_adresspruefung() -> None:
+    # Die App bringt die Quelle mit; eine Adresse, die url_pruefen ablehnt, könnte die
+    # Person in den Einstellungen nicht wieder eintragen, nachdem sie sie entfernt hat.
+    assert QUELLE_VORGABE.startswith("https://") and url_pruefen(QUELLE_VORGABE) is None

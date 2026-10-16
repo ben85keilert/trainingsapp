@@ -169,6 +169,7 @@ docs/
   roadmap.md           Meilensteine
   offene_fragen.md     Katalog offener Entscheidungen und Befunde
   nachschlagen.md      externe Links (Flet-Icons, Docs, Spezifikationen)
+  dependabot.md        Abhängigkeiten überwachen: Alerts, Sicherheits- und Versionsupdates
   recht/               DSGVO, MDR, Store-Freigaben
   tutorial/            der Lernpfad
 ```
@@ -223,6 +224,7 @@ Beide öffentlichen Repos (`trainingsapp`, `hrv-core`) sind gleich eingestellt
 - **Signierschlüssel** nur in den Repository-Secrets (Fork-PRs sehen sie nicht)
   und lokal unter `~/.trainingsapp-signierung/`.
 
+Ausführlich mit Beispielen: [docs/dependabot.md](docs/dependabot.md).
 Wer eine Dependabot-Meldung bekommt: `uv lock --upgrade-package <paket>`, Tests,
 committen. Zieht ein Paket eine verwundbare Version fest (wie `neurokit2 0.2.13`
 → `setuptools < 82` in hrv-core), hilft `uv lock --upgrade-package '<paket>>=<fix>'`,

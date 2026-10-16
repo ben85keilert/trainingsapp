@@ -7,7 +7,16 @@ import json
 
 from trainingsapp.core.pakete import GRUNDAUSSTATTUNG, paket_lesen
 from trainingsapp.data.seed import SEED_DATEI
-from trainingsapp.paket_werkzeug import INDEX_FORMAT, bauen, index, main, pruefen
+from trainingsapp.paket_werkzeug import (
+    INDEX_FORMAT,
+    bauen,
+    index,
+    main,
+    pruefen,
+    quelle_pruefen,
+    wortliste_lesen,
+    wortliste_pruefen,
+)
 
 QIGONG = """[paket]
 name = "Qigong"
@@ -92,3 +101,59 @@ def test_befehlszeile(tmp_path, capsys) -> None:
     assert json.loads(ziel.read_text("utf-8"))["pakete"][0]["url"].startswith("https://x/p/")
     datei.write_text(QIGONG.replace("Sitzen.", ""), encoding="utf-8")
     assert main(["bauen", str(datei), "--ziel", str(tmp_path / "dist")]) == 1
+
+
+def test_wortliste(tmp_path, monkeypatch) -> None:
+    liste = tmp_path / "wortliste.txt"
+    liste.write_text("# Sprachregelung\nAnalyse\nerkennt Stressbelastung  # Beispiel\n", "utf-8")
+    assert wortliste_lesen(liste) == ["Analyse", "erkennt Stressbelastung"]
+    roh = {
+        "paket": {"name": "Q", "neuigkeiten": "Neue HRV-Analyse"},
+        "exercises": [
+            {"key": "a", "name": "A", "description": "Die Übung erkennt Stressbelastung."}
+        ],
+        "kurse": [
+            {"key": "k", "name": "K", "kapitel": [{"key": "1", "titel": "T", "text": "nichts"}]}
+        ],
+    }
+    treffer = wortliste_pruefen(roh, wortliste_lesen(liste))
+    assert treffer == [
+        "Paket, neuigkeiten: „Analyse“",
+        "Übung „A“, Beschreibung: „erkennt Stressbelastung“",
+    ]
+    datei = tmp_path / "q.toml"
+    datei.write_text(QIGONG.replace("Knie weich.", "Die Analyse zeigt es."), "utf-8")
+    fehler, hinweise = pruefen(datei, None, ["Analyse"])
+    assert fehler == [] and any("Wortliste" in h for h in hinweise)
+    fehler, _ = pruefen(datei, None, ["Analyse"], streng=True)
+    assert any("Wortliste" in f for f in fehler)
+    assert main(["pruefen", str(datei), "--wortliste", str(liste)]) == 0
+    assert main(["pruefen", str(datei), "--wortliste", str(liste), "--streng"]) == 1
+
+
+def test_quelle_pruefen_wie_die_app(tmp_path, monkeypatch) -> None:
+    import trainingsapp.core.paketquelle as pq
+
+    datei = tmp_path / "qigong.toml"
+    datei.write_text(QIGONG, "utf-8")
+    pfad = bauen(datei, tmp_path / "dist")
+    daten = index([pfad], "https://x/pakete", quelle="Praxis")
+    antworten = {
+        "https://x/pakete/index.json": json.dumps(daten).encode(),
+        "https://x/pakete/" + pfad.name: pfad.read_bytes(),
+    }
+    laden = lambda url: antworten[url]  # noqa: E731
+    zeilen, fehler = quelle_pruefen("https://x/pakete/index.json", laden)
+    assert (
+        fehler == []
+        and zeilen[0] == "Quelle „Praxis“: 1 Paket(e)"
+        and "Prüfsumme in Ordnung" in zeilen[1]
+    )
+    antworten["https://x/pakete/" + pfad.name] = b"{}"
+    _, fehler = quelle_pruefen("https://x/pakete/index.json", laden)
+    assert fehler and "Prüfsumme" in fehler[0]
+    monkeypatch.setattr(pq, "_laden", laden)
+    import trainingsapp.paket_werkzeug as werkzeug
+
+    monkeypatch.setattr(werkzeug, "netz_laden", laden)
+    assert main(["quelle", "https://x/pakete/index.json"]) == 1

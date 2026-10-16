@@ -4,9 +4,14 @@ Das Werkzeug für das Inhalte-Repo (`docs/uebungspakete.md`, „Inhalte pflegen�
 Pakete werden als TOML von Hand gepflegt, die App liest sie beim Start direkt
 (``TRAININGSAPP_PAKETE``) — fürs Handy und für Paketquellen braucht es JSON.
 
-    trainingsapp-paket pruefen pakete/*.toml
+    trainingsapp-paket pruefen pakete/*.toml [--wortliste DATEI] [--streng]
     trainingsapp-paket bauen pakete/*.toml --ziel dist/
     trainingsapp-paket index dist/*.json --ziel dist/index.json --basis-url https://…/pakete/
+    trainingsapp-paket quelle https://…/pakete/index.json   # wie die App: Index + Prüfsummen
+
+Die Wortliste (Sprachregelung der Praxis-Website, Zone 3: erklären, nicht bewerten)
+liegt im privaten Repo der Homepage; das Werkzeug liest nur die Datei, die man
+ihm gibt — eine Zeile je Begriff, ``#`` leitet Kommentare ein.
 
 Es importiert kein flet (die Symbolprüfung läuft nur, wenn flet da ist) und
 liegt in der trainingsapp, nicht im privaten Inhalte-Repo: Öffentliche Repos
@@ -20,7 +25,7 @@ import hashlib
 import json
 import re
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -32,7 +37,14 @@ from trainingsapp.core.pakete import (
     dateiname,
     paket_json,
 )
-from trainingsapp.core.paketquelle import INDEX_FORMAT, INDEX_VERSION
+from trainingsapp.core.paketquelle import (
+    INDEX_FORMAT,
+    INDEX_VERSION,
+    QuellenFehler,
+    index_laden,
+    paket_laden,
+)
+from trainingsapp.core.paketquelle import _laden as netz_laden
 from trainingsapp.data.seed import seed_inhalt
 
 #: Typen und Regionen des Pakets „Standard“ — ein Paket darf eigene mitbringen
@@ -67,11 +79,69 @@ def _roh(datei: Path) -> dict[str, Any]:
     return tomllib.loads(text) if datei.suffix == ".toml" else json.loads(text)
 
 
-def pruefen(datei: Path, symbole: Iterable[str] | None = None) -> tuple[list[str], list[str]]:
+def wortliste_lesen(datei: Path) -> list[str]:
+    """Begriffe aus einer Wortliste — eine Zeile je Begriff, ``#`` leitet Kommentare ein."""
+    begriffe: list[str] = []
+    for zeile in datei.read_text(encoding="utf-8").splitlines():
+        text = zeile.split("#", 1)[0].strip()
+        if text:
+            begriffe.append(text)
+    return begriffe
+
+
+def _texte(roh: dict[str, Any]) -> list[tuple[str, str]]:
+    """``(Wo, Text)`` aller Texte eines Pakets, die jemand liest: Kopf, Übungen, Kurse."""
+    texte: list[tuple[str, str]] = []
+    kopf = roh.get("paket") or {}
+    if isinstance(kopf, dict):
+        for feld in ("name", "beschreibung", "neuigkeiten"):
+            texte.append((f"Paket, {feld}", str(kopf.get(feld) or "")))
+    for e in roh.get("exercises", []):
+        if isinstance(e, dict):
+            wo = f"Übung „{e.get('name', e.get('key', '?'))}“"
+            texte.append((f"{wo}, Name", str(e.get("name") or "")))
+            texte.append((f"{wo}, Beschreibung", str(e.get("description") or "")))
+    for k in roh.get("kurse", []):
+        if not isinstance(k, dict):
+            continue
+        wo = f"Kurs „{k.get('name', k.get('key', '?'))}“"
+        texte.append((f"{wo}, Name", str(k.get("name") or "")))
+        texte.append((f"{wo}, Beschreibung", str(k.get("beschreibung") or "")))
+        for kap in k.get("kapitel", []):
+            if isinstance(kap, dict):
+                titel = kap.get("titel", kap.get("key", "?"))
+                texte.append((f"{wo}, Kapitel „{titel}“, Titel", str(kap.get("titel") or "")))
+                texte.append((f"{wo}, Kapitel „{titel}“, Text", str(kap.get("text") or "")))
+    return texte
+
+
+def wortliste_pruefen(roh: dict[str, Any], begriffe: Iterable[str]) -> list[str]:
+    """Treffer der Wortliste in den Texten — Groß/klein egal, je Stelle ein Satz.
+
+    >>> wortliste_pruefen({"exercises": [{"name": "A", "description": "Die Analyse zeigt …"}]},
+    ...                   ["Analyse"])
+    ['Übung „A“, Beschreibung: „Analyse“']
+    """
+    treffer: list[str] = []
+    for wo, text in _texte(roh):
+        klein = text.casefold()
+        for begriff in begriffe:
+            if begriff.casefold() in klein:
+                treffer.append(f"{wo}: „{begriff}“")
+    return treffer
+
+
+def pruefen(
+    datei: Path,
+    symbole: Iterable[str] | None = None,
+    wortliste: Iterable[str] = (),
+    streng: bool = False,
+) -> tuple[list[str], list[str]]:
     """``(Fehler, Hinweise)`` zu einer Paketdatei — dieselben Regeln wie der Test des
     Standardpakets: Schlüssel klein und ohne Umlaute, eindeutig; Beschreibung da; Original
     einer Variante vorhanden; Symbol aus der Auswahl (``symbole``, sonst ungeprüft).
-    Typen und Regionen außerhalb des Standardpakets sind Hinweise, keine Fehler."""
+    Typen und Regionen außerhalb des Standardpakets sind Hinweise, keine Fehler; Treffer der
+    ``wortliste`` ebenso — mit ``streng`` werden sie Fehler."""
     fehler: list[str] = []
     hinweise: list[str] = []
     try:
@@ -107,7 +177,34 @@ def pruefen(datei: Path, symbole: Iterable[str] | None = None) -> tuple[list[str
             hinweise.append(f"{wo}: Region „{region}“ ist nicht im Standardpaket (gewollt?)")
     if inhalt.paket.version is None:
         hinweise.append("Kopf ohne `version` — ohne sie erkennt kein Gerät ein Update")
+    for treffer in wortliste_pruefen(roh, wortliste):
+        (fehler if streng else hinweise).append(f"Wortliste: {treffer}")
     return fehler, hinweise
+
+
+def quelle_pruefen(
+    url: str, laden: Callable[[str], bytes] | None = None
+) -> tuple[list[str], list[str]]:
+    """Index einer Quelle lesen und jedes Paket holen — ``(Zeilen, Fehler)``, wie die App."""
+    laden = laden or netz_laden
+    zeilen: list[str] = []
+    fehler: list[str] = []
+    try:
+        name, eintraege = index_laden(url, laden)
+    except QuellenFehler as f:
+        return [], [f"{url}: {f}"]
+    zeilen.append(f"Quelle „{name}“: {len(eintraege)} Paket(e)")
+    for eintrag in eintraege:
+        try:
+            inhalt = paket_laden(eintrag, laden)
+        except QuellenFehler as f:
+            fehler.append(f"{eintrag.name} ({eintrag.url}): {f}")
+            continue
+        zeilen.append(
+            f"  {eintrag.name} Version {eintrag.version}: {len(inhalt.uebungen)} Übungen, "
+            f"{len(inhalt.kurse)} Kurs(e), {eintrag.bytes} B, Prüfsumme in Ordnung"
+        )
+    return zeilen, fehler
 
 
 def bauen(datei: Path, ziel: Path) -> Path:
@@ -169,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="befehl", required=True)
     p = sub.add_parser("pruefen", help="Paketdateien prüfen (TOML oder JSON)")
     p.add_argument("dateien", nargs="+", type=Path)
+    p.add_argument("--wortliste", type=Path, help="Begriffe, die in Texten nichts verloren haben")
+    p.add_argument("--streng", action="store_true", help="Treffer der Wortliste sind Fehler")
     b = sub.add_parser("bauen", help="JSON-Paketdateien schreiben")
     b.add_argument("dateien", nargs="+", type=Path)
     b.add_argument("--ziel", type=Path, default=Path("dist"))
@@ -177,13 +276,16 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--ziel", type=Path, default=Path("dist/index.json"))
     i.add_argument("--basis-url", default="", help="Adresse, unter der die Dateien liegen")
     i.add_argument("--quelle", default="", help="Name der Quelle, wie die App ihn zeigt")
+    q = sub.add_parser("quelle", help="Index einer Quelle lesen und alle Pakete prüfen")
+    q.add_argument("url")
     args = parser.parse_args(argv)
 
     if args.befehl == "pruefen":
         symbole = _symbole()
+        begriffe = wortliste_lesen(args.wortliste) if args.wortliste else []
         schlecht = 0
         for datei in args.dateien:
-            fehler, hinweise = pruefen(datei, symbole)
+            fehler, hinweise = pruefen(datei, symbole, begriffe, args.streng)
             for text in hinweise:
                 print(f"{datei}: Hinweis: {text}")
             for text in fehler:
@@ -202,6 +304,13 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             print(bauen(datei, args.ziel))
         return 0
+    if args.befehl == "quelle":
+        zeilen, fehler = quelle_pruefen(args.url)
+        for z in zeilen:
+            print(z)
+        for f in fehler:
+            print(f"FEHLER: {f}")
+        return 1 if fehler else 0
     if args.befehl == "index":
         daten = index(args.dateien, args.basis_url, args.quelle)
         args.ziel.parent.mkdir(parents=True, exist_ok=True)

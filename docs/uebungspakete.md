@@ -246,9 +246,14 @@ uv run --project ../trainingsapp trainingsapp-paket index dist/*.json \
 
 `pruefen` wendet die Regeln des Standardpakets an (Schlüssel, Beschreibung, Variante,
 Symbol — Symbole nur mit flet); Typen und Regionen außerhalb des Standardpakets sind
-Hinweise. `index` schreibt den Index einer Paketquelle (ID, Name, Version, URL,
-SHA-256, Größe, Neuigkeiten, reserviertes Feld `signatur`) — das Format, das die App
-für Updates liest (Schritt 2).
+Hinweise. `--wortliste DATEI` sucht Begriffe, die in Pakettexten nichts verloren haben
+(Sprachregelung der Praxis-Website: erklären, nicht bewerten — die Liste liegt im privaten
+Repo der Homepage, `docs/wortliste-zone3.txt`); Treffer sind Hinweise, mit `--streng`
+Fehler. `index` schreibt den Index einer Paketquelle (ID, Name, Version, URL, SHA-256,
+Größe, Neuigkeiten, reserviertes Feld `signatur`) — das Format, das die App für Updates
+liest. `quelle URL` liest einen veröffentlichten Index wie die App und prüft jede
+Paketdatei samt Prüfsumme. Wie die Dateien auf den Server kommen: Homepage,
+`docs/runbooks/trainingsapp-pakete.md` (rsync mit beschränktem Schlüssel).
 
 ## Paketquellen — Updates online (Ben, 16.10.2026)
 

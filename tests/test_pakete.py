@@ -106,8 +106,6 @@ STANDARD_REGIONEN = {"Nacken", "Schulter", "Arm", "Hand", "Rumpf", "Rücken", "H
 
 def test_standardpaket_ist_sauber_gepflegt() -> None:
     """Die Paketdatei wird von Hand gepflegt — hier fallen Tippfehler auf."""
-    from trainingsapp.ui.components.icons import AUSWAHL
-
     eintraege = tomllib.loads(SEED_DATEI.read_text(encoding="utf-8"))["exercises"]
     keys = [e.get("key", "") for e in eintraege]
     assert all(re.fullmatch(r"[a-z0-9_]+", k) for k in keys), "key fehlt oder hat Umlaute"
@@ -115,11 +113,22 @@ def test_standardpaket_ist_sauber_gepflegt() -> None:
     for e in eintraege:
         wo = f"Übung „{e['name']}“"
         assert e.get("description"), f"{wo}: Beschreibung fehlt"
-        assert e.get("icon_key") in AUSWAHL, f"{wo}: Symbol {e.get('icon_key')!r} unbekannt"
         assert set(e.get("typen", [])) <= STANDARD_TYPEN, f"{wo}: unbekannter Typ"
         assert set(e.get("regionen", [])) <= STANDARD_REGIONEN, f"{wo}: unbekannte Region"
         assert e.get("variante_von", keys[0]) in keys, f"{wo}: Original fehlt"
     assert len(seed_inhalt().uebungen) == len(eintraege)  # liest sich auch fehlerfrei
+
+
+def test_standardpaket_symbole_sind_bekannt() -> None:
+    """Jedes ``icon_key`` steht in der kuratierten Auswahl — braucht flet (nicht in der CI)."""
+    pytest.importorskip("flet")
+    from trainingsapp.ui.components.icons import AUSWAHL
+
+    eintraege = tomllib.loads(SEED_DATEI.read_text(encoding="utf-8"))["exercises"]
+    for e in eintraege:
+        assert e.get("icon_key") in AUSWAHL, (
+            f"Übung „{e['name']}“: Symbol {e.get('icon_key')!r} unbekannt"
+        )
 
 
 def test_tippfehler_im_toml_nennt_die_zeile(tmp_path) -> None:

@@ -98,7 +98,7 @@ Ein Export packt die Rohdatei mit allem, was an ihrem Stamm hängt
 (`sensor_<ts>.json`, `sensor_<ts>_*`, `sensor_<ts>__c*`), in ein ZIP — Pfade
 relativ zum Datenverzeichnis, also `Messungen/<Geräteordner>/…`. Ausgepackt in
 einen Patientenordner liegt alles dort, wo praxis_gui es sucht. Die Dateien
-werden byte-genau kopiert, nicht neu geschrieben (`hrv_core.export`).
+werden byte-genau kopiert, nicht neu geschrieben (`core.hrv_export`).
 Die übrigen Ausschlüsse sind deckungsgleich.
 
 ---

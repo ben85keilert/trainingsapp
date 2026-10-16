@@ -2,8 +2,8 @@
 
 ## Die eine Regel
 
-> `core/`, `data/`, `hrv_core/` und `devices/` importieren **niemals** `flet`.
-> `hrv_core/` zusätzlich **niemals** `scipy`.
+> `core/`, `data/` und `devices/` importieren **niemals** `flet`.
+> Nichts unter `trainingsapp/` importiert **jemals** `scipy`.
 
 `tests/test_import_regel.py` erzwingt das. Zwei Gründe:
 
@@ -28,10 +28,21 @@ src/trainingsapp/
 ├─ config.py      Edition, Funktionsschalter, Speicherorte
 ├─ core/          Domäne — Modelle, Notation, Limit-Regeln, Einheiten
 ├─ data/          SQLite, Migrationen, Repositories, Seed-Daten
-├─ hrv_core/      HRV-Mathematik und das Austauschformat raw-v1
 ├─ devices/       Sensor-Port, Geräteprofile, Simulator, BLE
 └─ ui/            Flet — dünn, keine Rechenlogik
+../hrv-core/src/hrv_core/   HRV-Mathematik und das Austauschformat raw-v1 (Schwesterrepo)
 ```
+
+**hrv-core** (github `ben85keilert/hrv-core`) ist seit dem 16.10.2026 die gemeinsame
+HRV-Bibliothek von praxis_gui und trainingsapp: Konstanten, Artefaktkorrektur,
+Zeit-/Frequenzbereich, nichtlineare Maße, Atmung, PPI-Zuordnung, Live-Fenster,
+Aufnahme, Notizen, Abschnitte, Verlaufskurven — alles, was in beiden Apps dieselben
+Zahlen liefern muss. Sie liegt als Schwesterordner `../hrv-core` und ist editierbar
+eingebunden (`[tool.uv.sources]` für uv, `[tool.flet.dev_packages]` für `flet build`;
+die CI checkt beide Repos nebeneinander aus). Golden-Tests und Algorithmendoku liegen
+dort. In der App bleiben nur Anwendungsteile mit HRV-Bezug: `core/hrv_export.py`
+(ZIP-Export, Diagnoseprotokoll), `core/hrv_training.py` (HRV je Kilometer, DFA-Überblick),
+`core/hrv_ansicht.py`/`hrv_einstellungen.py`, `devices/messlauf.py`.
 
 Abhängigkeiten zeigen **nur nach innen**:
 
@@ -39,8 +50,8 @@ Abhängigkeiten zeigen **nur nach innen**:
 ui  →  core, data, hrv_core, devices
 devices  →  hrv_core, core      (core nur für GPS-Punkte: core.strecke)
 data  →  core
-core  →  (nichts)
-hrv_core  →  (nur numpy)
+core  →  (nur hrv_core)       (core/hrv_export.py, core/hrv_training.py)
+hrv_core  →  (nur numpy)      (extern, Schwesterrepo hrv-core)
 ```
 
 ---

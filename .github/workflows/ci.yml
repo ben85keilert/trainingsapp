@@ -13,8 +13,23 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13"]
 
+    # Beide Repos nebeneinander wie auf dem Entwicklungsrechner: pyproject.toml
+    # bindet hrv-core als Schwesterordner ../hrv-core ein.
+    defaults:
+      run:
+        working-directory: trainingsapp
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: trainingsapp
+
+      - name: hrv-core (gemeinsame HRV-Bibliothek) auschecken
+        # Öffentliches Repo (AGPL-3.0) — kein eigenes Token nötig.
+        uses: actions/checkout@v4
+        with:
+          repository: ben85keilert/hrv-core
+          path: hrv-core
 
       - uses: astral-sh/setup-uv@v6
         with:
@@ -42,7 +57,6 @@ jobs:
         run: |
           uv run --no-sync pytest --doctest-modules -q \
             src/trainingsapp/core \
-            src/trainingsapp/hrv_core \
             src/trainingsapp/devices \
             src/trainingsapp/config.py
         env:

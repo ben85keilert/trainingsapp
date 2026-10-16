@@ -8,13 +8,13 @@ import zipfile
 
 import pytest
 
-from trainingsapp.devices.messlauf import Messlauf
-from trainingsapp.devices.simulated import SIM_PPI, SimulatedSource
-from trainingsapp.hrv_core.export import (
+from trainingsapp.core.hrv_export import (
     diagnose_pfad,
     export_zip,
     zugehoerige_dateien,
 )
+from trainingsapp.devices.messlauf import Messlauf
+from trainingsapp.devices.simulated import SIM_PPI, SimulatedSource
 
 
 def test_zugehoerige_dateien_rohdatei_zuerst_ohne_fremde(tmp_path) -> None:

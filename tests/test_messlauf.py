@@ -6,12 +6,12 @@ import asyncio
 import json
 
 import pytest
+from hrv_core.korrektur import anwenden, automatisch, kennzahlen
+from hrv_core.recording import laden
 
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.devices.simulated import SIM_PPI, SIM_SYNTH, SimulatedSource
-from trainingsapp.hrv_core.korrektur import anwenden, automatisch, kennzahlen
-from trainingsapp.hrv_core.recording import laden
 
 
 async def _messen(tmp_path, device_id: str, sekunden: float) -> tuple[Messlauf, object, list[bool]]:
@@ -83,8 +83,8 @@ async def test_stoppen_ohne_schlaege_speichert_nichts(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_timer_abschnitte_entstehen_beim_speichern(tmp_path) -> None:
     """Der Timer markiert Abschnittsanfänge — beim Stoppen stehen sie als Abschnitte im Sidecar."""
-    from trainingsapp.hrv_core.ausschnitte import zusatz_lesen
-    from trainingsapp.hrv_core.korrektur import analyse_pfad
+    from hrv_core.ausschnitte import zusatz_lesen
+    from hrv_core.korrektur import analyse_pfad
 
     quelle = SimulatedSource(tempo=60.0, seed=7)
     lauf = Messlauf(quelle, backup_basis=tmp_path)
@@ -143,8 +143,9 @@ async def _abgestuerzt(tmp_path, *, subject_id: str | None = "p1") -> tuple[Mess
 async def test_backup_wiederherstellen_schreibt_messdatei_mit_profil_und_abschnitten(
     tmp_path,
 ) -> None:
+    from hrv_core.ausschnitte import zusatz_lesen
+
     from trainingsapp.devices.messlauf import backup_wiederherstellen
-    from trainingsapp.hrv_core.ausschnitte import zusatz_lesen
 
     lauf, _ = await _abgestuerzt(tmp_path)
     backups = list(tmp_path.rglob(".backup_*.json"))

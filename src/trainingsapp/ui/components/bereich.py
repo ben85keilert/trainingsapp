@@ -19,8 +19,8 @@ import contextlib
 from collections.abc import Callable, Sequence
 
 import flet as ft
+from hrv_core.ausschnitte import einrasten
 
-from trainingsapp.hrv_core.ausschnitte import einrasten
 from trainingsapp.ui.components.kurve import Reihe
 from trainingsapp.ui.components.notizen import senkrechte
 

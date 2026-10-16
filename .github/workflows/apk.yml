@@ -28,6 +28,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
+    # Beide Repos nebeneinander wie auf dem Entwicklungsrechner: `flet build` nimmt
+    # hrv-core aus ../hrv-core ([tool.flet.dev_packages] in pyproject.toml).
+    defaults:
+      run:
+        working-directory: trainingsapp
+
     steps:
       - name: Platz schaffen
         # Der Build (Flutter, NDK, Gradle, R8) braucht mehr als die ~14 GB, die
@@ -44,7 +50,15 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
+          path: trainingsapp
           fetch-depth: 0 # Build-Nummer = Zahl der Commits
+
+      - name: hrv-core (gemeinsame HRV-Bibliothek) auschecken
+        # Öffentliches Repo (AGPL-3.0) — kein eigenes Token nötig.
+        uses: actions/checkout@v4
+        with:
+          repository: ben85keilert/hrv-core
+          path: hrv-core
 
       - uses: astral-sh/setup-uv@v6
         with:
@@ -88,7 +102,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: trainingsapp-apk
-          path: dist/*.apk
+          path: trainingsapp/dist/*.apk
           retention-days: 30
           if-no-files-found: error
 
@@ -96,5 +110,5 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.apk
+          files: trainingsapp/dist/*.apk
           prerelease: true

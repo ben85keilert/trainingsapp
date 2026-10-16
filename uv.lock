@@ -896,6 +896,30 @@ wheels = [
 ]
 
 [[package]]
+name = "hrv-core"
+source = { editable = "../hrv-core" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "matplotlib", marker = "extra == 'plots'", specifier = ">=3.9" },
+    { name = "numpy", specifier = ">=2.1" },
+]
+provides-extras = ["plots"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "ruff", specifier = ">=0.6" },
+]
+referenz = [
+    { name = "neurokit2", specifier = ">=0.2.12" },
+    { name = "scipy", specifier = ">=1.18" },
+]
+
+[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -2378,6 +2402,7 @@ dependencies = [
     { name = "flet-permission-handler" },
     { name = "flet-ton" },
     { name = "flet-video" },
+    { name = "hrv-core" },
     { name = "numpy" },
 ]
 
@@ -2388,6 +2413,7 @@ desktop = [
 
 [package.dev-dependencies]
 ci = [
+    { name = "hrv-core" },
     { name = "mypy" },
     { name = "numpy" },
     { name = "pytest" },
@@ -2417,12 +2443,14 @@ requires-dist = [
     { name = "flet-permission-handler", specifier = "==1.0.*" },
     { name = "flet-ton", editable = "erweiterungen/flet_ton" },
     { name = "flet-video", specifier = "==1.0.*" },
+    { name = "hrv-core", editable = "../hrv-core" },
     { name = "numpy", specifier = ">=2.1" },
 ]
 provides-extras = ["desktop"]
 
 [package.metadata.requires-dev]
 ci = [
+    { name = "hrv-core", editable = "../hrv-core" },
     { name = "mypy", specifier = ">=1.11" },
     { name = "numpy", specifier = ">=2.1" },
     { name = "pytest", specifier = ">=8.0" },

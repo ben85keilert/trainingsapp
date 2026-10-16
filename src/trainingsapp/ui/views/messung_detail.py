@@ -41,15 +41,9 @@ from typing import Any
 
 import flet as ft
 import numpy as np
-
-from trainingsapp.config import datenverzeichnis, messungenverzeichnis
-from trainingsapp.core.hrv_einstellungen import ANALYSE_LAENGEN
-from trainingsapp.core.models import HrvRecording
-from trainingsapp.core.timer import ENDE_MARKE
-from trainingsapp.core.timer import name_aus_notiz as abschnittsname
-from trainingsapp.hrv_core.atmung import ATEMUEBUNG, RUHE, atemfrequenz, kurzgrund
-from trainingsapp.hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
-from trainingsapp.hrv_core.ausschnitte import (
+from hrv_core.atmung import ATEMUEBUNG, RUHE, atemfrequenz, kurzgrund
+from hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
+from hrv_core.ausschnitte import (
     Abschnitt,
     Grenze,
     abschnitt_spektrum,
@@ -61,11 +55,10 @@ from trainingsapp.hrv_core.ausschnitte import (
     zusatz_lesen,
     zusatz_speichern,
 )
-from trainingsapp.hrv_core.constants import BAND_OK
-from trainingsapp.hrv_core.ereignisse import Zeitbezug, metadaten_schreiben
-from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
-from trainingsapp.hrv_core.frequency import Fensterspektrum, frequenzbereich
-from trainingsapp.hrv_core.korrektur import (
+from hrv_core.constants import BAND_OK
+from hrv_core.ereignisse import Zeitbezug, metadaten_schreiben
+from hrv_core.frequency import Fensterspektrum, frequenzbereich
+from hrv_core.korrektur import (
     Kette,
     Korrektur,
     Korrigiert,
@@ -81,13 +74,20 @@ from trainingsapp.hrv_core.korrektur import (
     vorschlaege,
     zuschneiden,
 )
-from trainingsapp.hrv_core.nonlinear import compute_dfa_alpha1, compute_poincare, compute_sampen
-from trainingsapp.hrv_core.ppi import ppi_verworfen, schlagzeiten
-from trainingsapp.hrv_core.recording import Recording, laden
-from trainingsapp.hrv_core.regeln import Korrekturregeln
-from trainingsapp.hrv_core.segments import filter_rr
-from trainingsapp.hrv_core.time_domain import compute_time_domain
-from trainingsapp.hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
+from hrv_core.nonlinear import compute_dfa_alpha1, compute_poincare, compute_sampen
+from hrv_core.ppi import ppi_verworfen, schlagzeiten
+from hrv_core.recording import Recording, laden
+from hrv_core.regeln import Korrekturregeln
+from hrv_core.segments import filter_rr
+from hrv_core.time_domain import compute_time_domain
+from hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
+
+from trainingsapp.config import datenverzeichnis, messungenverzeichnis
+from trainingsapp.core.hrv_einstellungen import ANALYSE_LAENGEN
+from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
+from trainingsapp.core.models import HrvRecording
+from trainingsapp.core.timer import ENDE_MARKE
+from trainingsapp.core.timer import name_aus_notiz as abschnittsname
 from trainingsapp.ui import ausrichtung
 from trainingsapp.ui.components.analyse import Analyse, Analysefenster
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten

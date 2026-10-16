@@ -16,9 +16,9 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import flet as ft
+from hrv_core.trends import KENNZAHLEN, im_bereich, titel, treppe
 
 from trainingsapp.core.hrv_ansicht import BLOCK, GLEITEND, PNN_WAHL, Ansicht
-from trainingsapp.hrv_core.trends import KENNZAHLEN, im_bereich, titel, treppe
 from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.farben import FARBEN  # feste Farbe je Kurve, hell/dunkel
 

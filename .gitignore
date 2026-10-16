@@ -31,6 +31,7 @@ htmlcov/
 /daten/
 /messungen/
 sensor_*.json
+.backup_*.json
 !tests/golden/rr/sensor_*.json
 /temp/
 temp.py

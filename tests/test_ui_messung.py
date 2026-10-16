@@ -9,12 +9,13 @@ import pytest
 
 ft = pytest.importorskip("flet")
 
+from hrv_core.korrektur import analyse_laden  # noqa: E402
+from hrv_core.recording import Beat, Recording, speichern  # noqa: E402
+from hrv_core.regeln import Korrekturregeln  # noqa: E402
+
 from trainingsapp.core.models import HrvRecording  # noqa: E402
 from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
 from trainingsapp.devices.simulated import SIM_SYNTH, SimulatedSource  # noqa: E402
-from trainingsapp.hrv_core.korrektur import analyse_laden  # noqa: E402
-from trainingsapp.hrv_core.recording import Beat, Recording, speichern  # noqa: E402
-from trainingsapp.hrv_core.regeln import Korrekturregeln  # noqa: E402
 from trainingsapp.ui.components.kacheln import KACHELN  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.messung import messung  # noqa: E402
@@ -335,9 +336,8 @@ def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None
     from pathlib import Path
 
     import flet_charts as fc
-
-    from trainingsapp.hrv_core.ppi import ppi_folge
-    from trainingsapp.hrv_core.recording import laden
+    from hrv_core.ppi import ppi_folge
+    from hrv_core.recording import laden
 
     state, tmp_path = daten
     golden = Path(__file__).parent / "golden" / "rr" / "sensor_2026-10-13_000000.json"
@@ -498,8 +498,7 @@ def test_detailansicht_regeln_je_messung_und_lupe(daten) -> None:
     from pathlib import Path
 
     import flet_charts as fc
-
-    from trainingsapp.hrv_core.korrektur import analyse_regeln
+    from hrv_core.korrektur import analyse_regeln
 
     state, tmp_path = daten
     golden = Path(__file__).parent / "golden" / "rr" / "sensor_2026-10-13_000000.json"
@@ -592,9 +591,8 @@ def test_detailansicht_notiz_setzen_verschieben_loeschen(daten) -> None:
     from pathlib import Path
 
     import flet_charts as fc
-
-    from trainingsapp.hrv_core.ereignisse import herz_position
-    from trainingsapp.hrv_core.recording import laden
+    from hrv_core.ereignisse import herz_position
+    from hrv_core.recording import laden
 
     state, tmp_path = daten
     ordner = tmp_path / "Messungen" / "PolarH10"
@@ -722,8 +720,9 @@ def test_notiz_uebungen_aus_plan_einsetzen(daten) -> None:
     import shutil
     from pathlib import Path
 
+    from hrv_core.recording import laden
+
     from trainingsapp.core.models import Plan, PlanItem
-    from trainingsapp.hrv_core.recording import laden
     from trainingsapp.ui.components.notizen import ALLE, uebungsquellen
 
     state, tmp_path = daten
@@ -847,10 +846,10 @@ def test_aufzeichnung_zuschneiden_und_abschnitte(daten) -> None:
     import shutil
     from pathlib import Path
 
-    from trainingsapp.hrv_core.ausschnitte import zusatz_speichern
-    from trainingsapp.hrv_core.ereignisse import anker_aus_herz, metadaten_schreiben, notiz
-    from trainingsapp.hrv_core.korrektur import analyse_pfad
-    from trainingsapp.hrv_core.recording import laden
+    from hrv_core.ausschnitte import zusatz_speichern
+    from hrv_core.ereignisse import anker_aus_herz, metadaten_schreiben, notiz
+    from hrv_core.korrektur import analyse_pfad
+    from hrv_core.recording import laden
 
     state, tmp_path = daten
     ordner = tmp_path / "Messungen" / "PolarH10"
@@ -922,7 +921,7 @@ def _golden_eintrag(state, tmp_path) -> tuple[HrvRecording, object]:
 
 def test_titel_und_beschreibung_in_die_messdatei(daten) -> None:
     """Kopfzeile antippen → Blatt; Speichern schreibt titel/notiz in die Datei und die Liste."""
-    from trainingsapp.hrv_core.recording import laden
+    from hrv_core.recording import laden
 
     state, tmp_path = daten
     eintrag, pfad = _golden_eintrag(state, tmp_path)
@@ -953,7 +952,7 @@ def test_zuschneiden_in_der_kurve(daten) -> None:
     """✂ öffnet den Bereichseditor in der Rohkurve; ±5 s rückt den Anfang, Übernehmen speichert."""
     import json
 
-    from trainingsapp.hrv_core.korrektur import analyse_pfad
+    from hrv_core.korrektur import analyse_pfad
 
     state, tmp_path = daten
     eintrag, pfad = _golden_eintrag(state, tmp_path)
@@ -975,7 +974,7 @@ def test_abschnitt_anlegen_umbenennen_verschieben(daten) -> None:
     """„+ Abschnitt" nimmt den sichtbaren Bereich; antippen öffnet ihn wieder zum Ändern."""
     import json
 
-    from trainingsapp.hrv_core.korrektur import analyse_pfad
+    from hrv_core.korrektur import analyse_pfad
 
     state, tmp_path = daten
     eintrag, pfad = _golden_eintrag(state, tmp_path)
@@ -1043,7 +1042,7 @@ def test_abschnitt_ueber_die_ganze_messung_per_pfeil(daten) -> None:
     """Im Abschnitts-Editor der Aufzeichnung: beide Pfeile → Abschnitt über die ganze Messung."""
     import json
 
-    from trainingsapp.hrv_core.korrektur import analyse_pfad
+    from hrv_core.korrektur import analyse_pfad
 
     state, tmp_path = daten
     eintrag, pfad = _golden_eintrag(state, tmp_path)
@@ -1118,8 +1117,9 @@ async def test_live_titel_landet_in_der_messdatei(daten) -> None:
 
 def test_titel_vorschlag_ist_der_geuebte_plan(daten) -> None:
     """Wurde während der Messung aus einem Plan eingetragen, steht er im leeren Titelfeld."""
+    from hrv_core.ereignisse import metadaten_schreiben
+
     from trainingsapp.core.models import Plan, PlanItem, jetzt, lokaler_tag
-    from trainingsapp.hrv_core.ereignisse import metadaten_schreiben
 
     state, tmp_path = daten
     eintrag, pfad = _golden_eintrag(state, tmp_path)

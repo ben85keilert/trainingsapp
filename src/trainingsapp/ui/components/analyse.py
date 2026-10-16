@@ -36,10 +36,10 @@ from typing import Any
 
 import flet as ft
 import numpy as np
+from hrv_core.atmung import ATEMUEBUNG, RUHE
+from hrv_core.frequency import Fensterspektrum, fensterspektrum
+from hrv_core.trends import aktuell, verlauf
 
-from trainingsapp.hrv_core.atmung import ATEMUEBUNG, RUHE
-from trainingsapp.hrv_core.frequency import Fensterspektrum, fensterspektrum
-from trainingsapp.hrv_core.trends import aktuell, verlauf
 from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.notizen import senkrechte

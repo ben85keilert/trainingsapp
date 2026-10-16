@@ -18,12 +18,14 @@ Wer damit nicht einverstanden ist, kann das Projekt selbstverständlich trotzdem
 
 ### Die Importregel
 
-`core/`, `data/`, `hrv_core/` und `devices/` importieren **niemals** `flet` —
-und `hrv_core/` zusätzlich niemals `scipy`. `tests/test_import_regel.py`
+`core/`, `data/` und `devices/` importieren **niemals** `flet` — und nichts
+unter `trainingsapp/` importiert jemals `scipy`. `tests/test_import_regel.py`
 erzwingt beides.
 
 Begründung: Die Domänenlogik muss ohne Oberfläche testbar bleiben, und `scipy`
-existiert auf Android/iOS nicht (siehe `docs/hrv_algorithmen.md`).
+existiert auf Android/iOS nicht. Die HRV-Mathematik liegt darum als reine
+numpy-Bibliothek im Schwesterrepo hrv-core (`../hrv-core`, gemeinsam mit
+praxis_gui); Änderungen an Algorithmen gehören dorthin, samt Golden-Test.
 
 ### Weitere Regeln
 
@@ -33,8 +35,9 @@ existiert auf Android/iOS nicht (siehe `docs/hrv_algorithmen.md`).
   `.sql`-Dateien, Version über `PRAGMA user_version`.
 - **SQL** immer mit Platzhaltern (`?`) — nie String-Interpolation.
 - **UI dünn halten:** keine Rechenlogik in `ui/`. Views rufen Funktionen aus
-  `core/`, `data/`, `hrv_core/` auf.
-- **Tests:** `pytest` muss grün sein. HRV-Änderungen brauchen einen Golden-Test.
+  `core/`, `data/`, `hrv_core` auf.
+- **Tests:** `pytest` muss grün sein. HRV-Änderungen brauchen einen Golden-Test
+  in hrv-core.
 - **Stil:** `ruff check .` und `ruff format .` ohne Beanstandung.
 - **Sprache:** Code und Bezeichner englisch, wenn es die verbreitete Schreibweise
   ist; Kommentare, Docstrings und Dokumentation deutsch. Feldnamen des

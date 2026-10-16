@@ -17,9 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
-from trainingsapp.core.hrv_ansicht import BLOCK, Ansicht, ansichten_lesen
-from trainingsapp.hrv_core.korrektur import (
+from hrv_core.korrektur import (
     Korrektur,
     analyse_laden,
     analyse_pfad,
@@ -33,11 +31,13 @@ from trainingsapp.hrv_core.korrektur import (
     vorauswahl,
     vorschlaege,
 )
-from trainingsapp.hrv_core.ppi import ohne_verwerfung, ppi_naehte
-from trainingsapp.hrv_core.recording import Beat, Recording, laden, speichern
-from trainingsapp.hrv_core.regeln import Korrekturregeln
-from trainingsapp.hrv_core.time_domain import compute_time_domain
-from trainingsapp.hrv_core.trends import reihe, verlauf
+from hrv_core.ppi import ohne_verwerfung, ppi_naehte
+from hrv_core.recording import Beat, Recording, laden, speichern
+from hrv_core.regeln import Korrekturregeln
+from hrv_core.time_domain import compute_time_domain
+from hrv_core.trends import reihe, verlauf
+
+from trainingsapp.core.hrv_ansicht import BLOCK, Ansicht, ansichten_lesen
 
 GOLDEN_PPI = Path(__file__).parent / "golden" / "rr" / "sensor_2026-10-13_000000.json"
 SENSOR = Korrekturregeln(sensor_verwerfung="sensor")

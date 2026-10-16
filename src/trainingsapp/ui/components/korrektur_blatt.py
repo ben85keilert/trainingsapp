@@ -15,8 +15,7 @@ from dataclasses import replace
 from typing import Any
 
 import flet as ft
-
-from trainingsapp.hrv_core.regeln import (
+from hrv_core.regeln import (
     VERWERFUNG_SELBST,
     VERWERFUNG_SENSOR,
     Korrekturregeln,

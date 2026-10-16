@@ -19,9 +19,10 @@ import pytest
 
 ft = pytest.importorskip("flet")
 
+from hrv_core.recording import laden  # noqa: E402
+
 from trainingsapp.core.hrv_einstellungen import HrvEinstellungen  # noqa: E402
 from trainingsapp.core.models import HrvRecording  # noqa: E402
-from trainingsapp.hrv_core.recording import laden  # noqa: E402
 from trainingsapp.ui.components import zeitfenster  # noqa: E402
 from trainingsapp.ui.components.kurve import MAX_PUNKTE, Reihe, kurve, y_raster  # noqa: E402
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar  # noqa: E402
@@ -407,7 +408,7 @@ def test_einstellungen_erweitert_zugeklappt_mit_latenz_und_live_takt(daten) -> N
 def test_ppi_reihen_gemerkt_aber_nicht_geteilt() -> None:
     from dataclasses import replace
 
-    from trainingsapp.hrv_core.ppi import ppi_folge, schlagzeiten
+    from hrv_core.ppi import ppi_folge, schlagzeiten
 
     rec = laden(Path(__file__).parent / "golden" / "rr" / "sensor_2026-10-13_000000.json")
     a = schlagzeiten(rec)

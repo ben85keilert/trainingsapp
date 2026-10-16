@@ -26,6 +26,7 @@ from collections.abc import Callable
 from typing import Any
 
 import flet as ft
+from hrv_core.regeln import Korrekturregeln
 
 from trainingsapp.core.hrv_ansicht import PNN_WAHL, Ansicht
 from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
@@ -36,7 +37,6 @@ from trainingsapp.core.hrv_einstellungen import (
     UEBERSICHT,
     HrvEinstellungen,
 )
-from trainingsapp.hrv_core.regeln import Korrekturregeln
 from trainingsapp.ui.components.kacheln import GRUPPEN, KACHELN
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt

@@ -13,9 +13,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
-from trainingsapp.hrv_core.aufnahme import Aufnahme
-from trainingsapp.hrv_core.ereignisse import (
+from hrv_core.aufnahme import Aufnahme
+from hrv_core.ereignisse import (
     Zeitbezug,
     achsen_position,
     anker_aus_achse,
@@ -26,9 +25,9 @@ from trainingsapp.hrv_core.ereignisse import (
     notiz,
     sortiert,
 )
-from trainingsapp.hrv_core.korrektur import Korrektur, analyse_pfad, analyse_speichern
-from trainingsapp.hrv_core.ppi import schlagzeiten
-from trainingsapp.hrv_core.recording import Beat, laden
+from hrv_core.korrektur import Korrektur, analyse_pfad, analyse_speichern
+from hrv_core.ppi import schlagzeiten
+from hrv_core.recording import Beat, laden
 
 GOLDEN = Path(__file__).parent / "golden" / "rr"
 GOLDEN_H10 = GOLDEN / "sensor_2026-05-23_125422.json"

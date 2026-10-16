@@ -7,8 +7,9 @@ und trotzdem passiert etwas Nützliches. Genau deshalb sind unsere Tests schnell
 und brauchen keinen Bildschirm.
 """
 
+from hrv_core import compute_time_domain
+
 from trainingsapp.core.units import parse_shorthand
-from trainingsapp.hrv_core import compute_time_domain
 
 print("Kurzschrift-Eingabe")
 print("-" * 40)

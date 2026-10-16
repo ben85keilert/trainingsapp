@@ -14,14 +14,14 @@ import random
 
 import numpy as np
 import pytest
+from hrv_core.constants import MALIK_THRESHOLD_EKG, MALIK_THRESHOLD_PPI
+from hrv_core.regeln import Korrekturregeln
+from hrv_core.zeitachse import NEU_ANKERN_S, Kontinuitaetsuhr
 
 from trainingsapp.devices.base import DeviceInfo, HeartRateSource, Verbindung
 from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.devices.pmd import PpiProbe, ppi_messwerte
 from trainingsapp.devices.profiles import POLAR_H10, VERITY_SENSE, GeraeteProfil
-from trainingsapp.hrv_core.constants import MALIK_THRESHOLD_EKG, MALIK_THRESHOLD_PPI
-from trainingsapp.hrv_core.regeln import Korrekturregeln
-from trainingsapp.hrv_core.zeitachse import NEU_ANKERN_S, Kontinuitaetsuhr
 
 
 def _rr_reihe(n: int, seed: int = 1) -> list[int]:
@@ -186,7 +186,7 @@ async def test_verworfene_intervalle_werden_live_selbst_geprueft() -> None:
 
 
 def test_live_fehlerschaetzung_markiert_artefakt() -> None:
-    from trainingsapp.hrv_core.live import LiveFenster
+    from hrv_core.live import LiveFenster
 
     f = LiveFenster()
     f.regeln_setzen(Korrekturregeln(), "ppg_ppi")
@@ -198,8 +198,8 @@ def test_live_fehlerschaetzung_markiert_artefakt() -> None:
 
 
 def test_live_kennzahlen_differenzieren_nicht_ueber_verworfene() -> None:
-    from trainingsapp.hrv_core.live import LiveFenster
-    from trainingsapp.hrv_core.time_domain import compute_time_domain
+    from hrv_core.live import LiveFenster
+    from hrv_core.time_domain import compute_time_domain
 
     f = LiveFenster()
     werte = [800, 820, 800, 820, 800, 1000, 1020, 1000, 1020, 1000]
@@ -213,8 +213,8 @@ def test_live_kennzahlen_differenzieren_nicht_ueber_verworfene() -> None:
 
 
 def test_live_kennzahlen_differenzieren_nicht_ueber_die_naht() -> None:
-    from trainingsapp.hrv_core.live import LiveFenster
-    from trainingsapp.hrv_core.time_domain import compute_time_domain
+    from hrv_core.live import LiveFenster
+    from hrv_core.time_domain import compute_time_domain
 
     f = LiveFenster()
     werte = [800, 820, 800, 820, 800, 1000, 1020, 1000, 1020, 1000]

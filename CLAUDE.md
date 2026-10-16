@@ -14,15 +14,20 @@ Kompatibilität, nicht Konsistenz. Neuer Text (Antworten, Commit-Messages) auf D
 Das Projekt wird mit [uv](https://docs.astral.sh/uv/) verwaltet (`uv.lock` ist die
 Wahrheit, `.python-version` pinnt Python).
 
+Die HRV-Bibliothek **hrv-core** (github `ben85keilert/hrv-core`) ist ein Schwesterrepo und
+muss als `../hrv-core` neben diesem Ordner liegen — `pyproject.toml` bindet sie editierbar
+ein (`[tool.uv.sources]`, `[tool.flet.dev_packages]`), die CI checkt beide Repos nebeneinander aus.
+
 ```bash
+git clone https://github.com/ben85keilert/hrv-core.git ../hrv-core   # einmalig, Schwesterordner (öffentlich, AGPL-3.0)
 uv sync --extra desktop                # Entwicklungsumgebung (desktop = bleak für BLE)
 
 uv run flet run src/trainingsapp/ui/app.py    # Desktop-Vorschau der Oberfläche
 uv run flet run --android src/trainingsapp/ui/app.py   # Vorschau auf dem Handy (Flet-App aus dem Play Store, gleiches WLAN, QR-Code)
 uv run pytest                                  # alle Tests
-uv run pytest tests/test_hrv_core.py           # eine Datei
-uv run pytest tests/test_hrv_core.py::test_name -q   # ein einzelner Test
-uv run pytest --doctest-modules src/trainingsapp/core src/trainingsapp/hrv_core   # Doctests (laufen in CI)
+uv run pytest tests/test_messlauf.py           # eine Datei
+uv run pytest tests/test_messlauf.py::test_name -q   # ein einzelner Test
+uv run pytest --doctest-modules src/trainingsapp/core src/trainingsapp/devices   # Doctests (laufen in CI)
 uv run ruff check . && uv run ruff format --check .   # Linter + Formatprüfung
 uv run mypy                                    # Typprüfung (Paket ist in pyproject konfiguriert)
 ```
@@ -41,19 +46,26 @@ Edition und Datenpfad zur Laufzeit (siehe `config.py`).
 
 ## Die eine Architekturregel
 
-`core/`, `data/`, `hrv_core/` und `devices/` importieren **niemals** `flet`;
-`hrv_core/` zusätzlich **niemals** `scipy`. `tests/test_import_regel.py` erzwingt beides
+`core/`, `data/` und `devices/` importieren **niemals** `flet`; nichts unter
+`trainingsapp/` importiert **jemals** `scipy`. `tests/test_import_regel.py` erzwingt beides
 per AST-Scan — es ist kein Stilhinweis, sondern ein grüner Test, der brechen muss, wenn
 man dagegen verstößt.
 
 Gründe: Die Domäne bleibt ohne Bildschirm testbar, und Flet-Versionswechsel (zuletzt
 0.86 → 1.0) oder ein Umstieg auf das deklarative Modell betreffen nur `ui/`. `scipy`
-existiert auf Android/iOS nicht — darum implementiert `hrv_core/` Welch, Lomb-Scargle,
+existiert auf Android/iOS nicht — darum implementiert hrv-core Welch, Lomb-Scargle,
 DFA und SampEn selbst in reinem numpy.
 
+**Die HRV-Mathematik ist seit dem 16.10.2026 die externe Bibliothek `hrv_core`**
+(Schwesterrepo hrv-core, nur numpy; gemeinsam mit praxis_gui, damit beide Apps dieselben
+Zahlen liefern). Algorithmen, Korrekturregeln, Live-Fenster, Aufnahme und das Austauschformat
+raw-v1 werden **dort** geändert, nie hier nachgebaut. In der App bleiben nur Anwendungsteile:
+`core/hrv_export.py` (ZIP, Diagnoseprotokoll), `core/hrv_training.py` (HRV je Kilometer,
+DFA-Überblick), `devices/messlauf.py` (Orchestrierung), `ui/`.
+
 Abhängigkeiten zeigen **nur nach innen**: `ui → core, data, hrv_core, devices`;
-`devices → hrv_core, core` (GPS-Punkte: `core.strecke`); `data → core`; `core → (nichts)`;
-`hrv_core → (nur numpy)`.
+`devices → hrv_core, core` (GPS-Punkte: `core.strecke`); `data → core`;
+`core → (nur hrv_core)`; `hrv_core → (nur numpy)`.
 Keine Rechenlogik in `ui/` — Views rufen Funktionen aus den unteren Schichten auf.
 
 ## Aufbau
@@ -63,9 +75,9 @@ src/trainingsapp/
   config.py    Edition (solo/praxis), Funktionsschalter, Speicherorte
   core/        Domänenmodelle, ResultSpec (Notation), Limit-Regeln, Einheiten
   data/        SQLite (kein ORM), .sql-Migrationen, Seed-Daten
-  hrv_core/    HRV-Mathematik + Austauschformat raw-v1
   devices/     Geräte-Port (BLE/Simulator), Geräteprofile
   ui/          Flet — dünn
+../hrv-core/src/hrv_core/   HRV-Mathematik + Austauschformat raw-v1 (Schwesterrepo, extern)
 ```
 
 ## Zentrale Entwurfsentscheidungen
@@ -151,11 +163,12 @@ String-Interpolation.
 
 ## HRV-Änderungen
 
-Änderungen an der HRV-Mathematik brauchen einen **Golden-Test** (Referenzdaten unter
-`tests/golden/rr/`). Formeln, Konstanten und Fallstricke stehen in
-`docs/hrv_algorithmen.md`. Die automatische Korrektur folgt einem Grundsatz —
-**lieber eine Lücke als ein falscher Wert** —, ihre Regeln und die Messungen
-dahinter stehen in `docs/korrektur.md`; wer eine Vorgabe ändert, belegt es dort.
+Die HRV-Mathematik lebt in hrv-core — Änderungen dort, mit **Golden-Test**
+(`hrv-core/tests/golden/`, Toleranz 1e-9 gegen den Stand beim Umzug) und Eintrag in
+`hrv-core/docs/hrv_algorithmen.md` bzw. `korrektur.md` (Grundsatz der Korrektur:
+**lieber eine Lücke als ein falscher Wert**). `docs/hrv_algorithmen.md` und
+`docs/korrektur.md` hier sind nur noch Verweise. `tests/golden/rr/` bleibt für die
+App-Tests (Notizen, Export, UI), die eine echte Messdatei brauchen.
 
 ## Lernprojekt
 

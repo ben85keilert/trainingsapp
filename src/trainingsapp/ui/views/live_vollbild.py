@@ -30,12 +30,12 @@ from collections.abc import Callable
 from typing import Any
 
 import flet as ft
+from hrv_core.atmung import ATEMUEBUNG, RUHE
+from hrv_core.trends import titel
 
 from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.messlauf import Messlauf
-from trainingsapp.hrv_core.atmung import ATEMUEBUNG, RUHE
-from trainingsapp.hrv_core.trends import titel
 from trainingsapp.ui.components.analyse import verlaufsdaten
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.notizen import Notizfeld

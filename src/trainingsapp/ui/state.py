@@ -18,6 +18,9 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from hrv_core.aufnahme import backups_finden
+from hrv_core.regeln import Korrekturregeln
+
 from trainingsapp.config import datenbankpfad, messungenverzeichnis, streckenverzeichnis
 from trainingsapp.core.darstellung import Darstellung, darstellung_lesen, darstellung_schreiben
 from trainingsapp.core.hrv_ansicht import (
@@ -65,8 +68,6 @@ from trainingsapp.devices.bekannte import (
     merken,
     vergessen,
 )
-from trainingsapp.hrv_core.aufnahme import backups_finden
-from trainingsapp.hrv_core.regeln import Korrekturregeln
 
 STANDARD_PROFILNAME = "Ich"
 

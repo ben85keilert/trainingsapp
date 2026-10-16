@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hrv_core.recording import laden
 
 from trainingsapp.devices import pmd
 from trainingsapp.devices.base import (
@@ -49,7 +50,6 @@ from trainingsapp.devices.pmd import (
 from trainingsapp.devices.polar import PolarQuelle
 from trainingsapp.devices.profiles import POLAR_H10, VERITY_SENSE, profil_fuer_namen
 from trainingsapp.devices.simulated import SimulatedSource
-from trainingsapp.hrv_core.recording import laden
 
 GOLDEN = Path(__file__).parent / "golden" / "rr" / "sensor_2026-05-23_125422.json"
 

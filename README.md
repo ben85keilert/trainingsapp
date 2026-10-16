@@ -136,15 +136,15 @@ privat, darum braucht der Download am Handy eine GitHub-Anmeldung im Browser.
 src/trainingsapp/
   core/       Domänenmodelle, Notationsspezifikation, Limit-Regeln
   data/       SQLite, Migrationen, Repositories, Seed-Daten
-  hrv_core/   HRV-Mathematik (reines numpy, kein scipy)
   devices/    Sensoranbindung (BLE, Simulator)
   ui/         alles Flet-Spezifische
+../hrv-core/  HRV-Mathematik (reines numpy, kein scipy) — Schwesterrepo, gemeinsam mit praxis_gui
 docs/
   kompatibilitaet.md   ← der Datenformat-Vertrag mit praxis_gui
   architektur.md       Aufbau und Leitregeln
   datenmodell.md       Datenbankschema
-  hrv_algorithmen.md   Formeln, Konstanten, Fallstricke
-  korrektur.md         automatische Korrektur: was zählt und warum
+  hrv_algorithmen.md   Verweis → hrv-core/docs (Formeln, Konstanten, Fallstricke)
+  korrektur.md         Verweis → hrv-core/docs (automatische Korrektur)
   roadmap.md           Meilensteine
   offene_fragen.md     Katalog offener Entscheidungen und Befunde
   nachschlagen.md      externe Links (Flet-Icons, Docs, Spezifikationen)
@@ -152,10 +152,13 @@ docs/
   tutorial/            der Lernpfad
 ```
 
-**Die wichtigste Regel des Projekts:** `core/`, `data/`, `hrv_core/` und
-`devices/` importieren **niemals** `flet`. Ein Test erzwingt das. Dadurch
-bleibt alles ohne Oberfläche testbar, und Flet-Versionswechsel betreffen nur
-`ui/`.
+**Die wichtigste Regel des Projekts:** `core/`, `data/` und `devices/`
+importieren **niemals** `flet`. Ein Test erzwingt das. Dadurch bleibt alles ohne
+Oberfläche testbar, und Flet-Versionswechsel betreffen nur `ui/`.
+
+Die HRV-Bibliothek hrv-core muss als Schwesterordner `../hrv-core` neben dem
+Projekt liegen (`git clone https://github.com/ben85keilert/hrv-core.git ../hrv-core`),
+bevor `uv sync` läuft.
 
 ---
 

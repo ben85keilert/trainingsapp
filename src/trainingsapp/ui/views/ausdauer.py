@@ -3,7 +3,7 @@
 Gehen, Laufen, Rad (Ben, 14.10.2026: in dieser Reihenfolge) — mit oder ohne
 GPS (Laufband, Halle), mit oder ohne Gurt. Gerechnet wird in
 `core.strecke.StreckenRechner` (10-m-Schritt, Auto-Pause, Splits), die HRV je
-Kilometer in `hrv_core.training`. Diese Ansicht verbindet nur:
+Kilometer in `core.hrv_training`. Diese Ansicht verbindet nur:
 
 - **GPS jede Sekunde** (`GPS_TAKT_S`) — der Vorabtest zeigte keinen
   messbaren Stromvorteil für seltener, aber eine schlechtere Genauigkeit.
@@ -37,8 +37,27 @@ from pathlib import Path
 from typing import Any
 
 import flet as ft
+from hrv_core.korrektur import (
+    Korrigiert,
+    analyse_laden,
+    analyse_regeln,
+    analysebasis,
+    anwenden,
+    korr_zeiten,
+    vorauswahl,
+    vorschlaege,
+)
+from hrv_core.ppi import schlagzeiten
+from hrv_core.recording import Recording, laden
+from hrv_core.trends import aktuell, reihe
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis, streckenverzeichnis
+from trainingsapp.core.hrv_training import (
+    dfa_verlauf,
+    hf_je_zeit,
+    werte_zwischen,
+    zeit_je_bereich,
+)
 from trainingsapp.core.models import Exercise, Strecke, lokaler_tag
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
 from trainingsapp.core.strecke import (
@@ -58,25 +77,6 @@ from trainingsapp.data.seed import seed_id
 from trainingsapp.data.strecken import StreckenSchreiber, dateiname, gpx, jsonl_lesen, kopf_lesen
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.gps import GpsQuelle
-from trainingsapp.hrv_core.korrektur import (
-    Korrigiert,
-    analyse_laden,
-    analyse_regeln,
-    analysebasis,
-    anwenden,
-    korr_zeiten,
-    vorauswahl,
-    vorschlaege,
-)
-from trainingsapp.hrv_core.ppi import schlagzeiten
-from trainingsapp.hrv_core.recording import Recording, laden
-from trainingsapp.hrv_core.training import (
-    dfa_verlauf,
-    hf_je_zeit,
-    werte_zwischen,
-    zeit_je_bereich,
-)
-from trainingsapp.hrv_core.trends import aktuell, reihe
 from trainingsapp.ui.ausrichtung import querformat
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.karte_strecke import StreckenKarte, ganze_strecke

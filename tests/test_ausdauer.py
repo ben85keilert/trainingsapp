@@ -335,7 +335,7 @@ async def test_training_speichert_strecke_hrv_und_tagebuch(daten) -> None:
 async def test_regel_0_keine_koordinate_in_hrv_export_tagebuch_und_sync(daten) -> None:
     """GPS-Daten werden nie geteilt: HRV-Datei, Export-ZIP, Notizen, Tagebuch, outbox."""
     from trainingsapp.config import messungenverzeichnis
-    from trainingsapp.hrv_core.export import export_zip, zugehoerige_dateien
+    from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
 
     state, tmp_path = daten
     strecke, punkte = await _training(state, tmp_path)
@@ -440,11 +440,11 @@ def test_km_tabelle_ordnet_hf_und_dfa_ueber_die_uhrzeit_zu() -> None:
     from datetime import UTC, datetime
 
     import numpy as np
+    from hrv_core.korrektur import anwenden
+    from hrv_core.recording import Beat, Recording
 
     from trainingsapp.core.models import Strecke
     from trainingsapp.core.strecke import LAUFEN, Split
-    from trainingsapp.hrv_core.korrektur import anwenden
-    from trainingsapp.hrv_core.recording import Beat, Recording
     from trainingsapp.ui.views.ausdauer import _km_tabelle
 
     start = datetime(2026, 10, 18, 9, 0, tzinfo=UTC)

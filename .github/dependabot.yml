@@ -1,0 +1,20 @@
+# Dependabot: Versionsupdates für uv-Abhängigkeiten (uv.lock) und die Actions in den
+# Workflows — wöchentlich, gebündelt. Sicherheitsupdates laufen davon unabhängig
+# (Repo-Einstellung „Dependabot security updates“).
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python:
+        patterns: ["*"]
+    # flet und seine Erweiterungen wandern nur bewusst (flet-mcp im Gleichschritt,
+    # Android-Build prüfen) — keine automatischen PRs dafür.
+    ignore:
+      - dependency-name: "flet*"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

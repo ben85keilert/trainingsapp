@@ -36,6 +36,9 @@ jobs:
 
     steps:
       - name: Platz schaffen
+        # Läuft vor dem Checkout — den Projektordner gibt es noch nicht, darum
+        # ausdrücklich im Workspace statt im `defaults.run.working-directory`.
+        working-directory: ${{ github.workspace }}
         # Der Build (Flutter, NDK, Gradle, R8) braucht mehr als die ~14 GB, die
         # der Runner frei hat — der erste Probelauf scheiterte an R8 mit
         # „No space left on device". Das Android SDK unter /usr/local/lib/android
@@ -97,6 +100,7 @@ jobs:
 
       - name: Schlüssel entfernen
         if: always()
+        working-directory: ${{ github.workspace }} # auch, wenn der Checkout fehlschlug
         run: rm -f "$RUNNER_TEMP/upload-keystore.jks"
 
       - uses: actions/upload-artifact@v4

@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from hrv_core.regeln import Korrekturregeln
 
 from trainingsapp.core.hrv_ansicht import Ansicht
 from trainingsapp.core.hrv_einstellungen import (
@@ -12,7 +13,6 @@ from trainingsapp.core.hrv_einstellungen import (
     HrvEinstellungen,
     einstellungen_lesen,
 )
-from trainingsapp.hrv_core.regeln import Korrekturregeln
 
 
 def test_vorgaben_und_bereiche() -> None:

@@ -18,8 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import flet as ft
-
-from trainingsapp.hrv_core.trends import KENNZAHLEN
+from hrv_core.trends import KENNZAHLEN
 
 #: Feste Höhen — ein gleichmäßiges Raster statt Kacheln, die je nach Inhalt springen
 HOEHE = 74

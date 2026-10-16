@@ -20,11 +20,10 @@ from collections.abc import Sequence
 from typing import Any, Final
 
 import numpy as np
-
-from .korrektur import Korrigiert
-from .nonlinear import compute_dfa_alpha1
-from .recording import Recording
-from .trends import DFA_MIN_SCHLAEGE, verlauf
+from hrv_core.korrektur import Korrigiert
+from hrv_core.nonlinear import compute_dfa_alpha1
+from hrv_core.recording import Recording
+from hrv_core.trends import DFA_MIN_SCHLAEGE, verlauf
 
 #: Fenster mit so vielen korrigierten Schlägen (Anteil) bekommen kein α1
 ARTEFAKT_GRENZE: Final[float] = 0.03
@@ -63,8 +62,8 @@ def werte_zwischen(
     UTC-Zeiten minus der Start der Aufnahme). ``dfa=False`` bei optischen
     Pulsintervallen — dort ist α1 unter Belastung nicht validiert.
 
-    >>> from trainingsapp.hrv_core.recording import Beat
-    >>> from trainingsapp.hrv_core.korrektur import anwenden
+    >>> from hrv_core.recording import Beat
+    >>> from hrv_core.korrektur import anwenden
     >>> rng = np.random.default_rng(1)
     >>> rr = (800 + rng.normal(0, 30, 400)).round()
     >>> t = np.cumsum(rr) / 1000
@@ -162,7 +161,7 @@ def hf_je_zeit(
 
     Mittel der RR-Werte im Fenster um den Zeitpunkt; ohne Schlag dort kein Eintrag.
 
-    >>> from trainingsapp.hrv_core.recording import Beat
+    >>> from hrv_core.recording import Beat
     >>> rec = Recording(beats=[Beat(i * 0.8, 800, 75, i * 0.8) for i in range(1, 40)])
     >>> hf_je_zeit(rec, [10.0, 100.0])
     {10.0: 75}

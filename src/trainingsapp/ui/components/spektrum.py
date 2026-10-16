@@ -17,9 +17,9 @@ from itertools import pairwise
 
 import flet as ft
 import numpy as np
+from hrv_core.constants import FREQ_BANDS
+from hrv_core.frequency import Fensterspektrum
 
-from trainingsapp.hrv_core.constants import FREQ_BANDS
-from trainingsapp.hrv_core.frequency import Fensterspektrum
 from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.components.verlauf import FARBEN

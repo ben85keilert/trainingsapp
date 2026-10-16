@@ -32,9 +32,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import flet as ft
+from hrv_core.ereignisse import Zeitbezug, notiz, sortiert
 
 from trainingsapp.core.kurzcode import genannte, kurzcode
-from trainingsapp.hrv_core.ereignisse import Zeitbezug, notiz, sortiert
 from trainingsapp.ui.components.kurve import Reihe
 from trainingsapp.ui.farben import FARBEN
 

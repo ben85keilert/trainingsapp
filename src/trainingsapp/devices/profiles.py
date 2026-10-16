@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..hrv_core.constants import (
+from hrv_core.constants import (
     MALIK_THRESHOLD_EKG,
     MALIK_THRESHOLD_PPI,
     QUALITAET_BPM_ONLY,

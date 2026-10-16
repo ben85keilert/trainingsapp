@@ -176,9 +176,10 @@ def test_auswertung_vollbild_abschnitt_und_marke(daten) -> None:
     """Vollbild in der Auswertung: Leiste weg, Kurve groß, Abschnitt und Notizmarke setzen."""
     import json
 
+    from hrv_core.korrektur import analyse_pfad
+    from hrv_core.recording import laden
+
     from test_ui_messung import _golden_eintrag, _knopf
-    from trainingsapp.hrv_core.korrektur import analyse_pfad
-    from trainingsapp.hrv_core.recording import laden
     from trainingsapp.ui.views.messung_detail import messung_detail_view
 
     state, tmp_path = daten

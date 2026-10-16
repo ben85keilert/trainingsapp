@@ -48,7 +48,7 @@ async def pruefe() -> list[tuple[str, bool, str]]:
 
     # -- unsere eigene Domäne ------------------------------------------------
     try:
-        from trainingsapp.hrv_core import compute_time_domain
+        from hrv_core import compute_time_domain
 
         werte = compute_time_domain([800, 812, 795, 820, 788])
         assert werte is not None

@@ -10,8 +10,14 @@ license = { file = "LICENSE" }
 #
 # numpy ist die einzige binäre Abhängigkeit — sie ist als vorgebautes Wheel für
 # Android und iOS über pypi.flet.dev verfügbar. scipy ist es NICHT; deshalb
-# implementiert hrv_core/ Welch, Lomb-Scargle, DFA und SampEn selbst.
-# Siehe docs/hrv_algorithmen.md.
+# implementiert hrv-core Welch, Lomb-Scargle, DFA und SampEn selbst in numpy.
+#
+# hrv-core ist die gemeinsame HRV-Bibliothek von praxis_gui und trainingsapp
+# (github ben85keilert/hrv-core): Algorithmen, Korrektur und das Austauschformat
+# raw-v1. Sie liegt als Schwesterordner ../hrv-core neben diesem Projekt — für uv
+# über [tool.uv.sources], für `flet build` über [tool.flet.dev_packages]; die CI
+# legt beide Repos nebeneinander ab (.github/workflows). Formeln und Regeln:
+# hrv-core/docs/hrv_algorithmen.md und korrektur.md.
 dependencies = [
     "flet==1.0.*",
     "flet-charts==1.0.*",
@@ -21,6 +27,7 @@ dependencies = [
     "flet-map==1.0.*",
     "flet-geolocator==1.0.*",
     "numpy>=2.1",
+    "hrv-core",
     # Eigene Flet-Erweiterungen im Repo: BLE auf Android über flutter_blue_plus
     # (erweiterungen/flet_ble) und Signaltöne des Timers, die Musik nur kurz
     # leiser machen statt sie anzuhalten (erweiterungen/flet_ton — flet-audio
@@ -62,6 +69,7 @@ flet-dev = [
 ]
 ci = [
     "numpy>=2.1",
+    "hrv-core",
     { include-group = "dev" },
 ]
 
@@ -73,6 +81,9 @@ default-groups = ["dev", "flet-dev"]
 # Editierbar aus dem Repo — Änderungen am Python-Teil wirken ohne Neuinstallation.
 flet-ble = { path = "erweiterungen/flet_ble", editable = true }
 flet-ton = { path = "erweiterungen/flet_ton", editable = true }
+# Schwesterrepo (siehe Kommentar bei `dependencies`); editierbar, damit eine Änderung
+# an den Algorithmen hier sofort wirkt und beide Apps dieselben Zahlen liefern.
+hrv-core = { path = "../hrv-core", editable = true }
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -110,6 +121,9 @@ path = "src"
 # zum Projektordner.
 flet-ble = "erweiterungen/flet_ble"
 flet-ton = "erweiterungen/flet_ton"
+# Auch außerhalb des Projektordners erlaubt: flet löst den Pfad relativ zum Projekt
+# auf und übergibt ihn pip als file://-URL (flet_cli build_base, dev_packages).
+hrv-core = "../hrv-core"
 
 # Inline-Tabellen werden zu Attributen am <uses-permission> (android:<schlüssel>="…").
 # - neverForLocation: Scan-Ergebnisse werden nicht zur Ortung benutzt. Ohne das Flag

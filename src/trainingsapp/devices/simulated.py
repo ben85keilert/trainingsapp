@@ -34,7 +34,8 @@ import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from ..hrv_core.recording import laden
+from hrv_core.recording import laden
+
 from .base import (
     QUEUE_MAXSIZE,
     DeviceInfo,

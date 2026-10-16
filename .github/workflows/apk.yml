@@ -103,7 +103,7 @@ jobs:
         working-directory: ${{ github.workspace }} # auch, wenn der Checkout fehlschlug
         run: rm -f "$RUNNER_TEMP/upload-keystore.jks"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: trainingsapp-apk
           path: trainingsapp/dist/*.apk

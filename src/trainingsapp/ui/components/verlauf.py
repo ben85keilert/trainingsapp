@@ -12,6 +12,7 @@ hier: die Werte liefert der Aufrufer (`daten`), aus `hrv_core.trends`.
 from __future__ import annotations
 
 import contextlib
+import math
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -75,7 +76,6 @@ def diagramme(
     bereich: str | None = None,
     marken: Sequence[Reihe] = (),
     gesehen: dict[str, tuple[str, list[tuple[float, float]]]] | None = None,
-    gruppen: Sequence[Sequence[str]] | None = None,
 ) -> list[ft.Control]:
     """Je Gruppe gleicher Achse ein Diagramm, darüber die Legende.
 
@@ -83,11 +83,11 @@ def diagramme(
     einem reinen Pulsgeber) — sie bleiben gewählt, werden aber nicht gezeichnet.
     ``bereich``: nur die Kurven dieses Analysebereichs. ``marken``: in jedes
     Diagramm (der Ablesestrich). ``gesehen`` bekommt je Kurve Bezeichnung und
-    Punkte — zum Ablesen an einer Stelle. ``gruppen``: statt aller Gruppen der
-    Ansicht nur diese (das Vollbild zeigt eine).
+    Punkte — zum Ablesen an einer Stelle. Das Vollbild zeichnet anders: zwei
+    Achsen in einem Diagramm (`components.vollbild.doppelkurve`).
     """
     out: list[ft.Control] = []
-    for gruppe in gruppen if gruppen is not None else kurvengruppen(ansicht, bereich, ohne):
+    for gruppe in kurvengruppen(ansicht, bereich, ohne):
         reihen = []
         legende: list[ft.Control] = []
         for k in gruppe:
@@ -114,6 +114,30 @@ def diagramme(
                 y_schritt_min=schritt_min(gruppe),
             )
         )
+    return out
+
+
+def werte_bei(
+    gesehen: dict[str, tuple[str, list[tuple[float, float]]]], x: float
+) -> list[tuple[str, str, float]]:
+    """(Kennzahl, Bezeichnung, Wert) gezeichneter Verlaufskurven an der Stelle ``x``.
+
+    Je Kurve der nächste Punkt, sofern er nicht weiter als ein Fünfzigstel der
+    Spanne entfernt liegt (sonst ist dort eine Lücke).
+
+    >>> werte_bei({"rmssd": ("RMSSD 30 s", [(10.0, 40.0), (20.0, 42.0)])}, 19.0)
+    [('rmssd', 'RMSSD 30 s', 42.0)]
+    >>> werte_bei({"rmssd": ("RMSSD 30 s", [(10.0, 40.0), (20.0, 42.0)])}, 90.0)
+    []
+    """
+    out = []
+    for k, (name, punkte) in gesehen.items():
+        if not punkte:
+            continue
+        spanne = max(punkte[-1][0] - punkte[0][0], 1.0)
+        px, py = min(punkte, key=lambda p: abs(p[0] - x))
+        if abs(px - x) <= max(spanne / 50, 5.0) and math.isfinite(py):
+            out.append((k, name, float(py)))
     return out
 
 
@@ -257,16 +281,24 @@ def ansicht_menue(page: Any, state: Any, geaendert: Callable[[], None]) -> ft.Co
     )
 
 
-def darstellung_blatt(page: Any, state: Any, geaendert: Callable[[], None]) -> ft.BottomSheet:
+def darstellung_blatt(
+    page: Any,
+    state: Any,
+    geaendert: Callable[[], None],
+    kurven: Sequence[str] | None = None,
+) -> ft.BottomSheet:
     """Je gewählter Kurve des Bereichs: Fenster, gleitend oder Blöcke; pNNx-Schwelle.
 
     Ein Blatt von unten, kein Dialog: Ein ``AlertDialog`` misst seinen Inhalt
     vorab (intrinsische Größe), und das können Auswahllisten (``Dropdown``) nicht
     — der Dialog blieb unsichtbar, nur der Bildschirm wurde dunkel (14.10.).
+    ``kurven``: statt der Kurven des Bereichs diese (das Vollbild: beide Achsen).
     """
     ansicht = state.ansicht()
     gewaehlt = [
-        k for k in im_bereich(ansicht.bereich) if k in ansicht.kurven and KENNZAHLEN[k].rechnet
+        k
+        for k in (kurven if kurven is not None else im_bereich(ansicht.bereich))
+        if k in KENNZAHLEN and KENNZAHLEN[k].rechnet and (kurven is not None or k in ansicht.kurven)
     ]
 
     def speichern() -> None:
@@ -431,4 +463,5 @@ __all__ = [
     "fenster_text",
     "kurvengruppen",
     "speichern_dialog",
+    "werte_bei",
 ]

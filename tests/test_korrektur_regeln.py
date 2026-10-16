@@ -422,6 +422,25 @@ def test_ansicht_alt_wird_ergaenzt_und_neu_bleibt() -> None:
     assert Ansicht.aus_dict({"pnn_ms": 9999}).pnn_ms == 50
 
 
+def test_ansicht_vollbild_achsen_bleiben_und_alte_bekommen_die_vorgabe() -> None:
+    """Vollbild (16.10.2026): Kurven je Achse reisen mit der Ansicht; ältere: Roh | RMSSD."""
+    from trainingsapp.core.hrv_ansicht import LINKS, RECHTS, ROH
+
+    alt = Ansicht.aus_dict({"v": 3, "name": "Alt", "kurven": ["rmssd"]})
+    assert (alt.links, alt.rechts) == ([ROH], ["rmssd"])
+    a = Ansicht(links=["rmssd", "sdnn"], rechts=[])
+    zurueck = Ansicht.aus_dict(json.loads(json.dumps(a.als_dict())))
+    assert (zurueck.links, zurueck.rechts) == (["rmssd", "sdnn"], [])  # „keine rechts" bleibt
+    kaputt = Ansicht.aus_dict({"links": [], "rechts": ["roh", 3, "pnn50"]})
+    assert (kaputt.links, kaputt.rechts) == ([ROH], ["pnnx"])  # nie leer, nie doppelt
+    # Wählen über die Bereiche hinweg: RMSSD links, DFA α1 rechts
+    achse = {"roh": "rr", "rmssd": "var", "dfa_alpha1": "alpha"}.get
+    v = Ansicht()
+    v.achse_waehlen(LINKS, "rmssd", achse)
+    v.achse_waehlen(RECHTS, "dfa_alpha1", achse)
+    assert (v.links, v.rechts) == (["rmssd"], ["dfa_alpha1"])
+
+
 def test_state_speichert_regeln_und_ansichten(tmp_path: Path) -> None:
     from trainingsapp.ui.state import AppState
 

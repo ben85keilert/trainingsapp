@@ -26,6 +26,13 @@ Aufbau wie live: Kacheln (Werte der ganzen Messung, korrigiert), Hauptkurve,
 darunter die Analyse (Zeit ↔ Frequenz ↔ Nichtlinear) mit einer Zusammenfassung
 der ganzen Messung je Bereich — Zeitbereich roh und korrigiert, Frequenzbänder
 mit Sperrgrund (Task-Force-Mindestdauer), Poincaré, DFA α1 und SampEn.
+
+**Vollbild (quer)** ist ein Modus derselben Ansicht (`components.vollbild`,
+Ben 15./16.10.2026): zwei y-Achsen (links das Tachogramm, rechts eine
+Verlaufskurve — beide wählbar), rechts eine Werkzeugleiste (Ablesen, Notiz,
+Notizen, Abschnitte, Zuschneiden, Fenster & Darstellung) und daneben die
+Seitenleiste mit denselben Feldern wie hochkant. Ein Tipp auf eine Notizmarke
+oder einen Abschnittsbalken zeigt sein Etikett in der Kurve.
 """
 
 from __future__ import annotations
@@ -35,7 +42,7 @@ import contextlib
 from bisect import bisect_left
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
@@ -83,13 +90,14 @@ from hrv_core.time_domain import compute_time_domain
 from hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
+from trainingsapp.core.hrv_ansicht import LINKS, RECHTS, ROH
 from trainingsapp.core.hrv_einstellungen import ANALYSE_LAENGEN
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.core.timer import ENDE_MARKE
 from trainingsapp.core.timer import name_aus_notiz as abschnittsname
 from trainingsapp.ui import ausrichtung
-from trainingsapp.ui.components.analyse import Analyse, Analysefenster
+from trainingsapp.ui.components.analyse import Analyse, Analysefenster, verlaufsdaten
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten
 from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, anzeige, zahl
 from trainingsapp.ui.components.karte import hinweis, karte
@@ -109,7 +117,25 @@ from trainingsapp.ui.components.titel import (
     titel_kopf,
     titel_vorschlaege,
 )
-from trainingsapp.ui.components.verlauf import FARBEN, fenster_text
+from trainingsapp.ui.components.verlauf import FARBEN, darstellung_blatt, fenster_text, werte_bei
+from trainingsapp.ui.components.vollbild import (
+    ETIKETT_PX,
+    LEISTE_PX,
+    SEITE_PX,
+    ZEITACHSE_PX,
+    ablese_karte,
+    ablese_seite,
+    angebot,
+    doppelkurve,
+    etikett,
+    lage_px,
+    leiste,
+    markieren,
+    rechts_px,
+    seiten_wahl,
+    seitenkopf,
+    werkzeug,
+)
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
 from trainingsapp.ui.state import AppState
@@ -216,22 +242,25 @@ class _Kurvenmodus:
     #: Ablesen: der Strich steht an ``strich`` (s), darunter alle Werte
     ablesen: bool = False
     strich: float | None = None
-    #: Vollbild (quer): nur Rohkurve und Werkzeuge, Kurve in gemessener Höhe (px)
+    #: Vollbild (quer): Kurven mit zwei Achsen und Werkzeuge, Fläche in gemessener Größe (px)
     vollbild: bool = False
     hoehe: float = 220.0
+    breite: float = 800.0
+    #: Vollbild: wählbare Kurven, Breite der rechten Achse, Stand der Kopfzeile
+    angebot: list[str] = field(default_factory=list)
+    rechts: float = 0.0
+    kopf: tuple[Any, ...] = ()
+    #: Vollbild: zuletzt gezeichnete Verlaufskurven (zum Ablesen)
+    gesehen: dict[str, tuple[str, list[tuple[float, float]]]] = field(default_factory=dict)
+    #: Vollbild: Etikett in der Kurve — ``("notiz", Index)`` oder ``("abschnitt", ID)``
+    etikett: tuple[str, Any] | None = None
+    #: Vollbild: offene Seitenleiste — `NOTIZEN`, `ABSCHNITTE` oder ``None``
+    seite: str | None = None
 
 
-def _wertchip(farbe: str | None, name: str, wert: str, einheit: str) -> ft.Control:
-    return ft.Row(
-        spacing=4,
-        tight=True,
-        controls=[
-            ft.Container(width=8, height=8, border_radius=4, bgcolor=farbe or ft.Colors.OUTLINE),
-            ft.Text(name, size=11, opacity=0.7),
-            ft.Text(wert, size=13, weight=ft.FontWeight.W_600),
-            ft.Text(einheit, size=11, opacity=0.7),
-        ],
-    )
+#: Seitenleisten des Vollbilds
+NOTIZEN = "notizen"
+ABSCHNITTE = "abschnitte"
 
 
 def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -> ft.View:
@@ -239,11 +268,11 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     pfad = messungenverzeichnis() / eintrag.file_path
 
     #: Die Leiste der Ansicht — das Vollbild nimmt sie ab und gibt sie zurück
-    leiste: ft.AppBar | None = None
+    leiste_oben: ft.AppBar | None = None
 
     def ansicht(inhalt: list[ft.Control]) -> ft.View:
-        nonlocal leiste
-        leiste = ft.AppBar(
+        nonlocal leiste_oben
+        leiste_oben = ft.AppBar(
             title=ft.Text(f"Messung {eintrag.started_at.astimezone():%d.%m. %H:%M}"),
             actions=[
                 ft.IconButton(
@@ -259,7 +288,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         )
         return ft.View(
             route=route,
-            appbar=leiste,
+            appbar=leiste_oben,
             scroll=ft.ScrollMode.AUTO,
             padding=12,
             controls=[sicher(ft.Column(spacing=12, controls=inhalt), expand=False)],
@@ -565,12 +594,12 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         tooltip="Werte an einer Stelle der Kurven ablesen",
         on_click=lambda: ablesen_umschalten(),
     )
-    ablesen_knopf_voll = ft.TextButton(
-        "Ablesen", icon=ft.Icons.ADS_CLICK, on_click=lambda: ablesen_umschalten()
+    ablesen_knopf_voll = werkzeug(  # in der Werkzeugleiste des Vollbilds
+        ft.Icons.ADS_CLICK, "Ablesen: Werte an einer Stelle", lambda: ablesen_umschalten()
     )
 
-    def kurven(mit_analyse: bool = True) -> None:
-        x_von, x_bis = fenster.bereich(dauer)
+    def roh_reihen(x_von: float, x_bis: float) -> list[Reihe]:
+        """Das Tachogramm im Ausschnitt: Rohwerte grau, korrigiert farbig, auffällige rot."""
         korr = z.korrigiert()
         markiert = {v.beat_index for k in z.ketten for v in k.vorschlag}
         beats = z.basis.rec.beats
@@ -586,30 +615,36 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         korr_linie, korr_naehte = _linie(
             zip(zeiten, korr.rr_ms, strict=True), korr.breaks, x_von=x_von, x_bis=x_bis
         )
+        return [
+            Reihe(sichtbar, farbe=ft.Colors.OUTLINE, breite=1, naehte=sichtbar_naehte, skala=False),
+            Reihe(korr_linie, farbe=ft.Colors.PRIMARY, naehte=korr_naehte),
+            Reihe(art, farbe=FARBEN["rot"], nur_punkte=True, skala=False),
+        ]
+
+    def marken_reihen(x_von: float, x_bis: float) -> list[Reihe]:
+        """Notizen, Grenzen des Editors und der Ablesestrich — über den Kurven."""
+        strich = m.strich if m.ablesen else None
+        return [
+            *notizfeld.marken(x_von, x_bis),
+            *(m.editor.reihen(x_von, x_bis) if m.editor is not None else []),
+            *(
+                [senkrechte([strich], ft.Colors.ON_SURFACE, 1.2, gestrichelt=False)]
+                if strich is not None and x_von <= strich <= x_bis
+                else []
+            ),
+        ]
+
+    def kurven(mit_analyse: bool = True) -> None:
+        x_von, x_bis = fenster.bereich(dauer)
+        hinten = [*bereich_reihen(x_von, x_bis), *band_reihen(x_von, x_bis)]
+        if m.vollbild:
+            vollbild_kurven(x_von, x_bis, hinten)
+            return
         strich = m.strich if m.ablesen else None
         rr_box.content = kurve(
-            [
-                *bereich_reihen(x_von, x_bis),
-                *band_reihen(x_von, x_bis),
-                Reihe(
-                    sichtbar,
-                    farbe=ft.Colors.OUTLINE,
-                    breite=1,
-                    naehte=sichtbar_naehte,
-                    skala=False,
-                ),
-                Reihe(korr_linie, farbe=ft.Colors.PRIMARY, naehte=korr_naehte),
-                Reihe(art, farbe=FARBEN["rot"], nur_punkte=True, skala=False),
-                *notizfeld.marken(x_von, x_bis),
-                *(m.editor.reihen(x_von, x_bis) if m.editor is not None else []),
-                *(
-                    [senkrechte([strich], ft.Colors.ON_SURFACE, 1.2, gestrichelt=False)]
-                    if strich is not None and x_von <= strich <= x_bis
-                    else []
-                ),
-            ],
+            [*hinten, *roh_reihen(x_von, x_bis), *marken_reihen(x_von, x_bis)],
             einheit="PPI ms" if verity else "RR ms",
-            hoehe=int(m.hoehe) if m.vollbild else 220,
+            hoehe=220,
             x_von=x_von,
             x_bis=x_bis,
             y_spanne_min=RR_SPANNE_MIN_MS,
@@ -618,6 +653,18 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             analyse.zeichnen(x_von, x_bis, strich=strich)
             if strich is not None:
                 ablesen_zeichnen()
+
+    def ebenen() -> dict[str, int]:
+        """Ebene je Abschnitt: übereinander, wo sie sich decken (0 = oben)."""
+        out: dict[str, int] = {}
+        enden: list[float] = []  # Ende des letzten Balkens je Ebene
+        for a in sorted(eigene, key=lambda a: a.von_s):
+            ebene = next((i for i, ende in enumerate(enden) if a.von_s >= ende), len(enden))
+            if ebene == len(enden):
+                enden.append(a.bis_s)
+            enden[ebene] = a.bis_s
+            out[a.id] = ebene
+        return out
 
     def bereich_reihen(x_von: float, x_bis: float) -> list[Reihe]:
         """Zuschnitt grau schattiert, Abschnitte als Balken oben — gestapelt, wo sie sich decken."""
@@ -632,18 +679,27 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         bearbeitet = m.abschnitt.id if m.abschnitt is not None else None
         # Der Balken im Editor liegt oben — die übrigen rücken eine Ebene tiefer
         versatz = 1 if m.art == ABSCHNITT else 0
-        ebenen: list[float] = []  # Ende des letzten Balkens je Ebene
+        lagen = ebenen()
         for a in sorted(eigene, key=lambda a: a.von_s):
-            ebene = next((i for i, ende in enumerate(ebenen) if a.von_s >= ende), len(ebenen))
-            if ebene == len(ebenen):
-                ebenen.append(a.bis_s)
-            ebenen[ebene] = a.bis_s
             if a.id == bearbeitet or a.bis_s < x_von or a.von_s > x_bis:
                 continue
             balken = band(max(a.von_s, x_von), min(a.bis_s, x_bis), a.farbe)
-            balken.ebene = min(ebene + versatz, 3)
+            balken.ebene = min(lagen[a.id] + versatz, 3)
             out.append(balken)
         return out
+
+    def abschnitt_unter(x: float, y: float) -> Abschnitt | None:
+        """Der Abschnittsbalken unter dem Finger (``y`` px von oben) — die Balken liegen oben."""
+        flaeche = max(m.hoehe - ZEITACHSE_PX, 1.0)
+        toleranz = max(14.0, 0.05 * flaeche)
+        lagen = ebenen()
+        treffer = [
+            (abs(y - (0.04 + 0.06 * min(lagen[a.id], 3)) * flaeche), a)
+            for a in eigene
+            if a.von_s <= x <= a.bis_s
+        ]
+        nah = [(d, a) for d, a in treffer if d <= toleranz]
+        return min(nah, key=lambda t: t[0])[1] if nah else None
 
     def kurve_tippen(x: float) -> None:
         if m.editor is not None:
@@ -653,13 +709,26 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         else:
             notizfeld.tippen(x)
 
+    def kurve_tippen_punkt(x: float, y: float) -> None:
+        """Vollbild: Ein Tipp auf eine Marke oder einen Balken zeigt dessen Etikett."""
+        if m.editor is not None or m.ablesen or notizfeld.waehlen:
+            kurve_tippen(x)
+            return
+        i = notizfeld.bei(x)
+        a = abschnitt_unter(x, y) if i is None else None
+        m.etikett = ("notiz", i) if i is not None else ("abschnitt", a.id) if a else None
+        nur_kurven(mit_analyse=False)
+
     def kurve_greifen(x: float) -> bool:
         if m.editor is not None:
             return m.editor.ziehen(x)
         if m.ablesen:
             strich_setzen(x, zeichnen=False)
             return True
-        return notizfeld.greifen(x) or band_greifen(x)  # eine Marke unterm Finger folgt ihm
+        if notizfeld.greifen(x):  # eine Marke unterm Finger folgt ihm
+            m.etikett = None  # die Liste ordnet sich gleich neu
+            return True
+        return band_greifen(x)
 
     def analyse_tippen(x: float) -> None:
         if m.ablesen:
@@ -675,6 +744,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     def ablesen_umschalten() -> None:
         m.ablesen = not m.ablesen
+        m.etikett = None  # die Ablesewerte stehen, wo sonst das Etikett stünde
         if m.ablesen and m.strich is None:
             m.strich = sum(fenster.bereich(dauer)) / 2
         if m.ablesen:
@@ -723,6 +793,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         nur_kurven()
 
     def ablesen_zeichnen() -> None:
+        """Die Werte am Strich — hochkant unter der Kurve, im Vollbild über ihr."""
         x = m.strich
         if x is None:
             return
@@ -743,64 +814,23 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         geraet = min(hf_geraet(), key=lambda p: abs(p[0] - x), default=None)
         if geraet is not None and abs(geraet[0] - x) < 3:
             werte.append((FARBEN["hf_geraet"], "HF Gerät", zahl(geraet[1]), "bpm"))
-        for k, name, wert in analyse.werte_bei(x):
+        for k, name, wert in werte_bei(m.gesehen if m.vollbild else analyse.gesehen, x):
             kz = KENNZAHLEN[k]
             stellen = 0 if abs(wert) >= 100 else 1 if abs(wert) >= 10 else 2
             werte.append((FARBEN.get(k), name, zahl(wert, stellen), kz.einheit))
         in_abschnitten = [a.name for a in eigene if a.von_s <= x <= a.bis_s]
         uhr = zeitbezug.uhr(zeitbezug.anker(x))
         kopfzeile = f"{_uhr(x)}" + (f" · {uhr} Uhr" if uhr else "")
-        ablese_box.content = ft.Container(
-            border_radius=10,
-            padding=ft.Padding.only(left=4, right=4, top=2, bottom=8),
-            bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
-            content=ft.Column(
-                spacing=4,
-                tight=True,
-                controls=[
-                    ft.Row(
-                        spacing=0,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        controls=[
-                            ft.IconButton(
-                                ft.Icons.CHEVRON_LEFT,
-                                tooltip="Ein Schlag zurück",
-                                on_click=lambda: strich_schritt(-1),
-                            ),
-                            ft.Text(kopfzeile, size=14, weight=ft.FontWeight.W_600),
-                            ft.IconButton(
-                                ft.Icons.CHEVRON_RIGHT,
-                                tooltip="Ein Schlag weiter",
-                                on_click=lambda: strich_schritt(1),
-                            ),
-                            ft.Text(
-                                " · ".join(in_abschnitten),
-                                size=12,
-                                opacity=0.7,
-                                expand=True,
-                                max_lines=1,
-                                overflow=ft.TextOverflow.ELLIPSIS,
-                            ),
-                            ft.IconButton(
-                                ft.Icons.CLOSE,
-                                icon_size=18,
-                                tooltip="Ablesen beenden",
-                                on_click=lambda: ablesen_umschalten(),
-                            ),
-                        ],
-                    ),
-                    ft.Container(
-                        padding=ft.Padding.symmetric(horizontal=10),
-                        content=ft.Row(
-                            wrap=True,
-                            spacing=14,
-                            run_spacing=4,
-                            controls=[_wertchip(*w) for w in werte],
-                        ),
-                    ),
-                ],
-            ),
+        ablese_box.content = ablese_karte(
+            kopfzeile,
+            " · ".join(in_abschnitten),
+            werte,
+            schritt=strich_schritt,
+            schliessen=ablesen_umschalten,
+            schwebend=m.vollbild,
         )
+        if m.vollbild:
+            ablese_seite(ablese_box, x, *fenster.bereich(dauer), m.rechts)
 
     # -- Abschnitte (Werte je Teil der Messung) ---------------------------------
 
@@ -836,7 +866,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             ),
         )
 
-    def abschnitt_zeile(a: Abschnitt) -> ft.Control:
+    def abschnitt_teile(a: Abschnitt) -> list[str]:
+        """„Ø HF 72", „RMSSD 35" … — die Werte eines Abschnitts in Kurzform."""
         w = werte_von(a)
         teile = [f"Ø HF {zahl(w['mean_bpm'])}", f"RMSSD {zahl(w['rmssd'])}"]
         teile.append(f"SDNN {zahl(w['sdnn'])}")
@@ -844,6 +875,10 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             teile.append(f"Atem {zahl(w['atem'], 1)}/min")
         if w["lf_hf"] is not None:
             teile.append(f"LF/HF {zahl(w['lf_hf'], 2)}")
+        return teile
+
+    def abschnitt_zeile(a: Abschnitt) -> ft.Control:
+        teile = abschnitt_teile(a)
         return ft.Container(
             on_click=lambda: abschnitt_bearbeiten(a),
             border_radius=8,
@@ -945,6 +980,25 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 ),
                 action=ft.SnackBarAction("Rückgängig", on_click=zurueck),
             )
+        )
+
+    def abschnitt_menue() -> ft.Control:
+        """⋮ neben „+ Abschnitt": aus Notizen anlegen, alle löschen (hochkant und im Vollbild)."""
+        return ft.PopupMenuButton(
+            icon=ft.Icons.MORE_VERT,
+            tooltip="Mehr",
+            items=[
+                ft.PopupMenuItem(
+                    content="Aus Notizen …",
+                    icon=ft.Icons.NOTES,
+                    on_click=lambda: aus_notizen_oeffnen(),
+                ),
+                ft.PopupMenuItem(
+                    content="Alle löschen",
+                    icon=ft.Icons.DELETE_SWEEP_OUTLINED,
+                    on_click=lambda: alle_loeschen(),
+                ),
+            ],
         )
 
     def aus_notizen_oeffnen() -> None:
@@ -1244,12 +1298,15 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         """Beim Wischen und Ziehen: nur Rohkurve und Analyse aktualisieren, nicht die Seite.
 
         Wird das Band gezogen, ändert sich an der Analyse nichts — sie rechnet
-        erst nach dem Loslassen.
+        erst nach dem Loslassen. Im Vollbild gibt es keine Analyse, dafür
+        wandern Etikett und Ablesewerte mit.
         """
-        mit_analyse = mit_analyse and aw.griff is None
+        mit_analyse = mit_analyse and aw.griff is None and not m.vollbild
         kurven(mit_analyse)
         geaendert: list[ft.Control] = [rr_box]
-        if mit_analyse:
+        if m.vollbild:
+            geaendert += [etikett_box, ablese_box]
+        elif mit_analyse:
             geaendert.append(analyse.control)
             if ablese_box.visible:
                 geaendert.append(ablese_box)
@@ -1288,7 +1345,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         x_von, x_bis = fenster.bereich(dauer)
         if not x_von + 0.1 * (x_bis - x_von) <= x <= x_bis - 0.1 * (x_bis - x_von):
             zentrieren(x)
-            analyse.zeichnen(*fenster.bereich(dauer))
+            if not m.vollbild:
+                analyse.zeichnen(*fenster.bereich(dauer))
 
     # -- Notizen ---------------------------------------------------------------
 
@@ -1384,6 +1442,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         if aw.griff is not None:
             aw.griff = None
             nachrechnen_planen()
+            if m.vollbild:
+                return  # dort steht keine Analyse
             # Bis gerechnet ist: das letzte Ergebnis, blass, mit Hinweis
             analyse.zeichnen(*fenster.bereich(dauer), strich=m.strich if m.ablesen else None)
             with contextlib.suppress(Exception):
@@ -1401,6 +1461,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             if nummer != aw.auftrag or route != state.route_nummer:
                 return
             aw.wartet = False
+            if m.vollbild:
+                return  # gerechnet wird beim Verlassen des Vollbilds
             analyse.zeichnen(*fenster.bereich(dauer), strich=m.strich if m.ablesen else None)
             with contextlib.suppress(Exception):
                 analyse.control.update()
@@ -1696,16 +1758,25 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             )
         )
 
-    # -- Vollbild (quer): Rohkurve allein mit Werkzeugen (Ben, 15.10.2026) ----------
+    # -- Vollbild (quer): Kurven mit zwei Achsen und Werkzeugen (Ben, 15./16.10.2026) ----
     #
     # Kein Neubau der Ansicht (der kostete Sekunden und den Editorzustand): dieselbe
     # View tauscht Leiste und Inhalt. Rohkurve, Ablesewerte und Editor wandern in
     # eigene Boxen des Vollbilds; `rr_box`, `ablese_box` und `editor_box` zeigen
-    # jeweils auf die sichtbare, damit alle Zeichenwege weiter stimmen.
+    # jeweils auf die sichtbare, damit alle Zeichenwege weiter stimmen. Notizfeld
+    # und Abschnittsliste ziehen in die Seitenleiste — dieselben Controls wie
+    # hochkant, darum dieselben Funktionen.
     normal_boxen = (rr_box, ablese_box, editor_box)
     voll_boxen = (ft.Container(), ft.Container(visible=False), ft.Container(visible=False))
+    notiz_platz = (ft.Container(content=notizfeld.control), ft.Container())
+    abschnitte_platz = (ft.Container(content=abschnitte_box), ft.Container())
+    etikett_box = ft.Container(visible=False)
+    links_box, rechts_box = ft.Container(), ft.Container()
+    roh_titel = "PPI-Tachogramm" if verity else "RR-Tachogramm"
+    #: Zwischenspeicher der Verlaufskurven im Vollbild (die Analyse hat ihren eigenen)
+    vb_speicher: dict[Any, Any] = {}
 
-    def kurvengeste(box: ft.Container) -> ft.Control:
+    def kurvengeste(box: ft.Container, *, voll: bool = False) -> ft.Control:
         return wischbar(
             box,
             fenster,
@@ -1714,6 +1785,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             tippen=kurve_tippen,
             greifen=kurve_greifen,
             losgelassen=rr_losgelassen,
+            tippen_punkt=kurve_tippen_punkt if voll else None,
+            rechts_px=(lambda: m.rechts) if voll else (lambda: 0.0),
         )
 
     def boxen_umhaengen(nach: tuple[ft.Container, ...]) -> None:
@@ -1723,23 +1796,208 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             alt.content = None
         rr_box, ablese_box, editor_box = nach
 
-    def vollbild_hoehe(e: ft.LayoutSizeChangeEvent) -> None:
-        """Die wirkliche Höhe der Kurvenfläche — nach dem Drehen anders als geschätzt."""
-        neu = max(120.0, float(e.height))
-        if m.vollbild and abs(neu - m.hoehe) >= 4:
-            m.hoehe = neu
+    def umhaengen(paar: tuple[ft.Container, ft.Container], *, ins_vollbild: bool) -> None:
+        von, nach = paar if ins_vollbild else paar[::-1]
+        nach.content, von.content = von.content, None
+
+    def kurven_angebot() -> list[str]:
+        ohne = [] if rec.hat_rr else ohne_rr()
+        return angebot(einst.bereiche(optisch=verity), ohne, roh=rec.hat_rr)
+
+    def vollbild_kurven(x_von: float, x_bis: float, hinten: list[Reihe]) -> None:
+        """Im Vollbild: beide Achsen, Etikett und Ablesewerte — keine Analyse darunter."""
+        ansicht_ = state.ansicht()
+        m.angebot = kurven_angebot()
+        m.rechts = rechts_px(ansicht_, m.angebot)
+        kopf_zeichnen()
+        atem_modus = ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE
+        daten = verlaufsdaten(
+            analyse_reihe(), hf_geraet(), ansicht_, atem_modus, vb_speicher, x_von, x_bis
+        )
+        m.gesehen = {}
+        rr_box.content = doppelkurve(
+            ansicht_,
+            daten,
+            lambda: roh_reihen(x_von, x_bis),
+            angebot=m.angebot,
+            x_von=x_von,
+            x_bis=x_bis,
+            hoehe=int(m.hoehe),
+            roh_einheit="PPI ms" if verity else "RR ms",
+            marken=marken_reihen(x_von, x_bis),
+            hinten=hinten,
+            gesehen=m.gesehen,
+        )
+        etikett_zeichnen(x_von, x_bis)
+        if m.ablesen and m.strich is not None:
+            ablesen_zeichnen()
+        seite_zeichnen()
+
+    def kopf_zeichnen() -> None:
+        """Die Wahl der Achsen — nur neu gebaut, wenn sich an ihr etwas ändert."""
+        a = state.ansicht()
+        schluessel = (
+            tuple(a.links),
+            tuple(a.rechts),
+            tuple(m.angebot),
+            a.pnn_ms,
+            tuple(sorted(a.fenster.items())),
+            tuple(sorted(a.modus.items())),
+        )
+        if schluessel == m.kopf:
+            return
+        m.kopf = schluessel
+        links_box.content = seiten_wahl(state, LINKS, m.angebot, roh_titel, nur_kurven)
+        rechts_box.content = seiten_wahl(state, RECHTS, m.angebot, roh_titel, nur_kurven)
+
+    # Etikett: Zeit und Text einer Notiz bzw. Name und Werte eines Abschnitts
+
+    def etikett_knopf(icon: ft.IconData, tooltip: str, aktion: Callable[[], None]) -> ft.Control:
+        return ft.IconButton(icon, icon_size=20, tooltip=tooltip, on_click=lambda: aktion())
+
+    def etikett_zeichnen(x_von: float, x_bis: float) -> None:
+        inhalt: ft.Control | None = None
+        x: float | None = None
+        oben = 4.0
+        if m.etikett is not None and m.etikett[0] == "notiz":
+            i = int(m.etikett[1])
+            info = notizfeld.etikett(i)
+            if info is not None:
+                x, zeit, text = info
+                inhalt = etikett(
+                    zeit,
+                    text,
+                    FARBEN["notiz"],
+                    [
+                        etikett_knopf(
+                            ft.Icons.EDIT_OUTLINED, "Notiz bearbeiten", lambda: notiz_bearbeiten(i)
+                        ),
+                        etikett_knopf(
+                            ft.Icons.DELETE_OUTLINE, "Notiz löschen", lambda: notiz_loeschen(i)
+                        ),
+                        etikett_knopf(ft.Icons.CLOSE, "Etikett schließen", etikett_schliessen),
+                    ],
+                )
+        elif m.etikett is not None:
+            a = next((a for a in eigene if a.id == m.etikett[1]), None)
+            if a is not None:
+                x = min(max((a.von_s + a.bis_s) / 2, x_von), x_bis)
+                # gleich unter seinem Balken — die Kurve bleibt größtenteils frei
+                ebene = min(ebenen().get(a.id, 0), 3)
+                oben = (0.04 + 0.06 * (ebene + 1)) * max(m.hoehe - ZEITACHSE_PX, 1.0) + 4
+                inhalt = etikett(
+                    f"{_uhr(a.von_s)}–{_uhr(a.bis_s)} ({_uhr(a.dauer_s)})",
+                    a.name,
+                    a.farbe,
+                    [
+                        etikett_knopf(
+                            ft.Icons.EDIT_OUTLINED,
+                            "Abschnitt bearbeiten",
+                            lambda: etikett_abschnitt_bearbeiten(a),
+                        ),
+                        etikett_knopf(
+                            ft.Icons.DELETE_OUTLINE,
+                            "Abschnitt löschen",
+                            lambda: etikett_abschnitt_loeschen(a),
+                        ),
+                        etikett_knopf(ft.Icons.CLOSE, "Etikett schließen", etikett_schliessen),
+                    ],
+                    zeilen=[" · ".join(abschnitt_teile(a))],
+                )
+        sichtbar = inhalt is not None and x is not None and x_von <= x <= x_bis
+        etikett_box.visible = sichtbar
+        etikett_box.content = inhalt if sichtbar else None
+        if sichtbar and x is not None:
+            etikett_box.left = lage_px(x, x_von, x_bis, m.breite, m.rechts, ETIKETT_PX)
+            etikett_box.top = oben
+
+    def etikett_schliessen() -> None:
+        m.etikett = None
+        nur_kurven(mit_analyse=False)
+
+    def notiz_bearbeiten(i: int) -> None:
+        """✎ am Etikett: die Notiz in der Seitenleiste öffnen — Text, Zeit, Übungen."""
+        m.etikett = None
+        if m.editor is not None:
+            editor_schliessen(zeichnen_=False)
+        m.seite = NOTIZEN
+        notizfeld.aufklappen()
+        notizfeld.bearbeiten(i)
+
+    def notiz_loeschen(i: int) -> None:
+        m.etikett = None
+        weg = notizfeld.entfernen(i)
+        if weg is None:
+            return
+        page.show_dialog(
+            ft.SnackBar(
+                ft.Text("Notiz gelöscht"),
+                action=ft.SnackBarAction(
+                    "Rückgängig", on_click=lambda: notizfeld.zurueckholen(weg)
+                ),
+            )
+        )
+
+    def etikett_abschnitt_bearbeiten(a: Abschnitt) -> None:
+        m.etikett = None
+        abschnitt_bearbeiten(a)
+
+    def etikett_abschnitt_loeschen(a: Abschnitt) -> None:
+        m.etikett = None
+        abschnitt_loeschen(a)
+
+    # Seitenleiste und Werkzeugleiste
+
+    def seite_umschalten(welche: str) -> None:
+        """Notizen oder Abschnitte neben der Kurve — ein zweiter Tipp schließt."""
+        if m.editor is not None:
+            editor_schliessen(zeichnen_=False)
+        m.seite = None if m.seite == welche else welche
+        m.etikett = None
+        if m.seite == NOTIZEN:
+            notizfeld.aufklappen()
+        nur_kurven(mit_analyse=False)
+
+    def seite_zeichnen() -> None:
+        notiz_seite.visible = m.seite == NOTIZEN and m.editor is None
+        abschnitt_seite.visible = m.seite == ABSCHNITTE and m.editor is None
+        voll_seite.visible = m.editor is not None or m.seite is not None
+        markieren(notizen_knopf, notiz_seite.visible)
+        markieren(abschnitte_knopf, abschnitt_seite.visible)
+
+    def vollbild_groesse(e: ft.LayoutSizeChangeEvent) -> None:
+        """Die wirkliche Größe der Kurvenfläche — nach dem Drehen anders als geschätzt."""
+        hoehe, breite = max(120.0, float(e.height)), float(e.width)
+        if m.vollbild and (abs(hoehe - m.hoehe) >= 4 or abs(breite - m.breite) >= 4):
+            m.hoehe, m.breite = hoehe, breite
             nur_kurven()
 
     def marke_setzen() -> None:
-        """Notiz ohne Text — am Ablesestrich, sonst in der Fenstermitte; Text kommt hochkant."""
+        """Notiz ohne Text — am Ablesestrich, sonst in der Fenstermitte; Text über „Notizen"."""
         x = m.strich if m.ablesen and m.strich is not None else sum(fenster.bereich(dauer)) / 2
         notizfeld.marke_setzen(x)
 
+    def darstellung() -> None:
+        a = state.ansicht()
+        page.show_dialog(
+            darstellung_blatt(
+                page,
+                state,
+                lambda: nur_kurven(),
+                kurven=[k for k in (*a.links, *a.rechts) if k != ROH],
+            )
+        )
+
     def vollbild_umschalten() -> None:
         m.vollbild = not m.vollbild
+        m.etikett = None
         if m.vollbild:
-            m.hoehe = max(160.0, float(page.height or 480) - 140)
+            m.hoehe = max(160.0, float(page.height or 480) - 56)
+            m.breite = max(320.0, float(page.width or 800) - LEISTE_PX - 8)
+            m.kopf = ()
             boxen_umhaengen(voll_boxen)
+            umhaengen(notiz_platz, ins_vollbild=True)
+            umhaengen(abschnitte_platz, ins_vollbild=True)
             view.appbar = None
             view.scroll = None
             view.padding = ft.Padding.only(left=4, right=4)
@@ -1747,8 +2005,11 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             view.controls = [sicher(vollbild_inhalt)]
             ausrichtung.anwenden(page, state, ausrichtung.QUER)
         else:
+            m.seite = None
             boxen_umhaengen(normal_boxen)
-            view.appbar = leiste
+            umhaengen(notiz_platz, ins_vollbild=False)
+            umhaengen(abschnitte_platz, ins_vollbild=False)
+            view.appbar = leiste_oben
             view.scroll = ft.ScrollMode.AUTO
             view.padding = 12
             view.can_pop = True
@@ -1763,6 +2024,47 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         with contextlib.suppress(Exception):
             await view.confirm_pop(False)
 
+    notizen_knopf = werkzeug(
+        ft.Icons.NOTES, "Notizen: Liste, Text, Zeit", lambda: seite_umschalten(NOTIZEN)
+    )
+    abschnitte_knopf = werkzeug(
+        ft.Icons.VIEW_TIMELINE_OUTLINED,
+        "Abschnitte: Liste, neu, aus Notizen",
+        lambda: seite_umschalten(ABSCHNITTE),
+    )
+    notiz_seite = ft.Column(
+        spacing=4,
+        tight=True,
+        visible=False,
+        controls=[seitenkopf("Notizen", lambda: seite_umschalten(NOTIZEN)), notiz_platz[1]],
+    )
+    abschnitt_seite = ft.Column(
+        spacing=4,
+        tight=True,
+        visible=False,
+        controls=[
+            seitenkopf("Abschnitte", lambda: seite_umschalten(ABSCHNITTE)),
+            ft.Row(
+                spacing=0,
+                controls=[
+                    ft.TextButton("Abschnitt", icon=ft.Icons.ADD, on_click=abschnitt_neu),
+                    ft.Container(expand=True),
+                    abschnitt_menue(),
+                ],
+            ),
+            abschnitte_platz[1],
+        ],
+    )
+    # Scrollt für sich: Editor und Listen sind höher als ein quer gehaltenes Handy
+    voll_seite = ft.Container(
+        visible=False,
+        width=SEITE_PX,
+        content=ft.Column(
+            spacing=8,
+            scroll=ft.ScrollMode.AUTO,
+            controls=[voll_boxen[2], notiz_seite, abschnitt_seite],
+        ),
+    )
     vollbild_inhalt = ft.Column(
         spacing=4,
         expand=True,
@@ -1776,38 +2078,48 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                         tooltip="Vollbild verlassen",
                         on_click=lambda: vollbild_umschalten(),
                     ),
-                    breite_wahl_voll,
-                    ablesen_knopf_voll,
-                    ft.TextButton("Abschnitt", icon=ft.Icons.ADD, on_click=abschnitt_neu),
+                    links_box,
                     ft.Container(expand=True),
-                    ft.IconButton(
-                        ft.Icons.ADD_COMMENT_OUTLINED,
-                        tooltip="Notiz ohne Text setzen — hier an die Stelle ziehen",
-                        on_click=lambda: marke_setzen(),
-                    ),
+                    breite_wahl_voll,
+                    ft.Container(expand=True),
+                    rechts_box,
                 ],
             ),
-            # Der Editor steht quer neben der Kurve — unter ihr nähme er ihr die Höhe
             ft.Row(
                 expand=True,
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.START,
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[
                     ft.Container(
                         expand=True,
-                        on_size_change=vollbild_hoehe,
-                        content=kurvengeste(voll_boxen[0]),
+                        on_size_change=vollbild_groesse,
+                        content=ft.Stack(
+                            expand=True,
+                            fit=ft.StackFit.EXPAND,
+                            controls=[
+                                kurvengeste(voll_boxen[0], voll=True),
+                                etikett_box,
+                                voll_boxen[1],
+                            ],
+                        ),
                     ),
-                    # Scrollt für sich: der Editor ist höher als ein quer gehaltenes Handy
-                    ft.Container(
-                        width=330,
-                        content=ft.Column(
-                            expand=True, scroll=ft.ScrollMode.AUTO, controls=[voll_boxen[2]]
+                    voll_seite,
+                    leiste(
+                        ablesen_knopf_voll,
+                        werkzeug(
+                            ft.Icons.ADD_COMMENT_OUTLINED,
+                            "Notiz ohne Text hier — Text über „Notizen“",
+                            lambda: marke_setzen(),
+                        ),
+                        notizen_knopf,
+                        abschnitte_knopf,
+                        werkzeug(ft.Icons.CONTENT_CUT, "Zuschneiden", lambda: crop_oeffnen()),
+                        werkzeug(
+                            ft.Icons.TUNE, "Fenster & Darstellung der Kurven", lambda: darstellung()
                         ),
                     ),
                 ],
             ),
-            voll_boxen[1],
         ],
     )
 
@@ -1823,11 +2135,11 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             kacheln_box,
             karte(
                 kartentitel(
-                    "PPI-Tachogramm" if verity else "RR-Tachogramm",
+                    roh_titel,
                     ablesen_knopf,
                     ft.IconButton(
                         ft.Icons.FULLSCREEN,
-                        tooltip="Kurve im Vollbild (quer): Abschnitte und Notizen genau setzen",
+                        tooltip="Vollbild (quer): zwei Achsen, Notizen und Abschnitte genau setzen",
                         on_click=lambda: vollbild_umschalten(),
                     ),
                 ),
@@ -1835,7 +2147,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 kurvengeste(rr_box),
                 ablese_box,
                 editor_box,
-                notizfeld.control,
+                notiz_platz[0],
                 hinweis(
                     (
                         "Grau: alle Intervalle des Sensors, auch verworfene · Farbig: gewertet "
@@ -1849,24 +2161,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 kartentitel(
                     "Abschnitte",
                     ft.TextButton("Abschnitt", icon=ft.Icons.ADD, on_click=abschnitt_neu),
-                    ft.PopupMenuButton(
-                        icon=ft.Icons.MORE_VERT,
-                        tooltip="Mehr",
-                        items=[
-                            ft.PopupMenuItem(
-                                content="Aus Notizen …",
-                                icon=ft.Icons.NOTES,
-                                on_click=lambda: aus_notizen_oeffnen(),
-                            ),
-                            ft.PopupMenuItem(
-                                content="Alle löschen",
-                                icon=ft.Icons.DELETE_SWEEP_OUTLINED,
-                                on_click=lambda: alle_loeschen(),
-                            ),
-                        ],
-                    ),
+                    abschnitt_menue(),
                 ),
-                abschnitte_box,
+                abschnitte_platz[0],
                 hinweis(
                     "Werte je Abschnitt — so lassen sich Belastung und Pause oder Übungen "
                     "vergleichen. Antippen: Grenzen in der Kurve verschieben, umbenennen, "

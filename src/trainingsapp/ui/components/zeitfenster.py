@@ -87,6 +87,8 @@ def wischbar(
     tippen: Callable[[float], None] | None = None,
     greifen: Callable[[float], bool] | None = None,
     losgelassen: Callable[[], None] | None = None,
+    tippen_punkt: Callable[[float, float], None] | None = None,
+    rechts_px: Callable[[], float] = lambda: 0.0,
 ) -> ft.Control:
     """``inhalt`` (die Kurvenspalte) waagrecht wischbar machen.
 
@@ -103,6 +105,11 @@ def wischbar(
 
     Gezeichnet wird höchstens `_WISCH_HZ`-mal je Sekunde und am Ende der Geste —
     ``neu_zeichnen`` aktualisiert selbst, was es geändert hat.
+
+    ``tippen_punkt`` bekommt statt ``tippen`` Zeit **und** Höhe des Tipps (px von
+    oben) — das Vollbild unterscheidet so Abschnittsbalken oben von der Kurve.
+    ``rechts_px``: so breit ist rechts eine zweite Werteachse; sie zählt nicht
+    zur Zeichenfläche.
     """
     #: ``greift``: None = noch nicht entschieden, True = Geste gehört ``greifen``, False = blättern
     stand: dict[str, Any] = {"breite_px": _BREITE_VORGABE, "zuletzt": 0.0, "greift": None}
@@ -116,8 +123,12 @@ def wischbar(
             # Ab dem Ende gezählt: Ereignisse, die währenddessen auflaufen, fassen sich zusammen
             stand["zuletzt"] = time.monotonic()
 
+    def flaeche_px() -> float:
+        """Breite der Zeichenfläche: ohne die Beschriftung links und eine Achse rechts."""
+        return max(stand["breite_px"] - rechts_px(), 50.0)
+
     def zeit(position: ft.Offset) -> float:
-        return zeit_unter(position.x, fenster, jetzt_s(), anfang(), stand["breite_px"])
+        return zeit_unter(position.x, fenster, jetzt_s(), anfang(), flaeche_px())
 
     def gegriffen(position: ft.Offset | None) -> bool:
         """Gehört diese Lage ``greifen``? Entschieden wird einmal je Geste, am Anfang."""
@@ -148,7 +159,7 @@ def wischbar(
         if dx is None:
             dx = 0.0
         vorher = fenster.ende_s
-        fenster.verschieben(-dx / stand["breite_px"] * fenster.breite_s, jetzt_s(), anfang())
+        fenster.verschieben(-dx / flaeche_px() * fenster.breite_s, jetzt_s(), anfang())
         if fenster.ende_s == vorher:
             return  # am Rand oder bei „Alles": nichts bewegt, nichts zu zeichnen
         zeichnen_gedrosselt()
@@ -162,9 +173,13 @@ def wischbar(
             losgelassen()
 
     def tipp(e: ft.TapEvent) -> None:
-        if tippen is None or e.local_position is None:
+        if e.local_position is None:
             return
-        tippen(zeit_unter(e.local_position.x, fenster, jetzt_s(), anfang(), stand["breite_px"]))
+        x = zeit(e.local_position)
+        if tippen_punkt is not None:
+            tippen_punkt(x, float(e.local_position.y))
+        elif tippen is not None:
+            tippen(x)
 
     return ft.GestureDetector(
         content=ft.Container(content=inhalt, on_size_change=groesse),
@@ -172,7 +187,7 @@ def wischbar(
         on_horizontal_drag_start=beginn if greifen is not None else None,
         on_horizontal_drag_update=ziehen,
         on_horizontal_drag_end=ende,
-        on_tap_down=tipp if tippen is not None else None,
+        on_tap_down=tipp if tippen is not None or tippen_punkt is not None else None,
     )
 
 

@@ -4,6 +4,12 @@ Ein dünner Wrapper um `flet_charts.LineChart`. Er nimmt fertige Punktlisten
 entgegen und rechnet nichts — was eine Kurve zeigt, entscheiden `hrv_core`
 und die Ansicht. Die x-Achse ist meist die Zeit; Spektrum (Hz) und
 Poincaré-Wolke (ms) geben eigene Beschriftung und Schritte mit.
+
+**Zweite Werteachse** (Vollbild, Ben 16.10.2026): Ein `LineChart` kennt nur
+einen y-Bereich. Die Reihen der rechten Achse (`Skala`) werden darum in die
+Koordinaten der linken umgerechnet, und beide Achsen beschriften **dieselben
+Rasterlinien** mit eigenen runden Werten (`doppel_raster`) — ein Raster für
+beide Seiten, keine krummen Zahlen, und jede Kurve füllt die Höhe.
 """
 
 from __future__ import annotations
@@ -73,6 +79,22 @@ class Reihe:
     band: bool = False
     #: Balken übereinander, wo sich Abschnitte decken: 0 = oben
     ebene: int = 0
+
+
+@dataclass(slots=True)
+class Skala:
+    """Die rechte Werteachse: ihre Reihen, Einheit und kleinste Spanne."""
+
+    reihen: Sequence[Reihe]
+    einheit: str
+    spanne_min: float = 0.0
+    schritt_min: float = 1.0
+    #: Farbe der Beschriftung — die der Kurve, wenn es nur eine ist
+    farbe: str | None = None
+
+
+#: Platz einer beschrifteten y-Achse: Zahlen (``label_size``) plus Titel (px)
+ACHSE_PX = 52.0
 
 
 def ausduennen(punkte: Sequence[tuple[float, float]], maximal: int = MAX_PUNKTE) -> list:
@@ -192,6 +214,68 @@ def y_raster(
     return unten, oben, schritt
 
 
+#: Wie viele Rasterabstände zwei Achsen teilen — erst 4, dann 3 und 5 (mehr Füllung gewinnt)
+DOPPEL_LINIEN = (4, 3, 5)
+#: Rand über der obersten und unter der untersten Linie, in Rasterabständen
+DOPPEL_RAND = 0.12
+
+
+def doppel_raster(
+    links: tuple[float, float, float, float], rechts: tuple[float, float, float, float]
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """Ein Raster für zwei Werteachsen: ``((unten, oben, schritt), (anker, wert, rschritt))``.
+
+    ``links``/``rechts`` = ``(lo, hi, spanne_min, schritt_min)`` der Daten je Seite.
+    Beide Achsen teilen dieselben n Rasterabstände (`DOPPEL_LINIEN`); jede wählt
+    ihren eigenen runden Schritt und Anfang, sodass ihre Daten die Höhe möglichst
+    füllen — gewählt wird das n, bei dem die schlechter gefüllte Seite am besten
+    dasteht. Gezeichnet wird in Werten der linken Achse; ein Wert ``r`` der rechten
+    steht bei ``anker + (r - wert) * schritt / rschritt``, an der Linie ``anker``
+    steht rechts ``wert``.
+
+    >>> doppel_raster((900, 1160, 100, 1), (35, 95, 20, 1))  # RR links, RMSSD rechts
+    ((888.0, 1212.0, 100), (900.0, 25.0, 25))
+    >>> doppel_raster((60, 75, 10, 1), (0.6, 1.2, 0.5, 0.01))  # Ø HF links, DFA α1 rechts
+    ((59.4, 75.6, 5), (60.0, 0.6, 0.2))
+    """
+    beste: tuple[float, int, tuple[int, float], tuple[int, float]] | None = None
+    for n in DOPPEL_LINIEN:
+        l_ = _passend(*links, n)
+        r_ = _passend(*rechts, n)
+        if l_ is None or r_ is None:
+            continue
+        guete = min(l_[2], r_[2])
+        if beste is None or guete > beste[0] + 1e-9:
+            beste = (guete, n, l_[:2], r_[:2])
+    if beste is None:  # nur bei absurden Spannen — dann eben grob
+        q = Y_SCHRITTE[-1]
+        return y_raster(links[0], links[1], links[2], links[3]), (0.0, 0.0, q)
+    _, n, (m_l, s_l), (m_r, s_r) = beste
+    unten = round((m_l - DOPPEL_RAND) * s_l, 6)
+    oben = round((m_l + n + DOPPEL_RAND) * s_l, 6)
+    return (unten, oben, s_l), (float(round(m_l * s_l, 6)), float(round(m_r * s_r, 6)), s_r)
+
+
+def _passend(
+    lo: float, hi: float, spanne_min: float, schritt_min: float, n: int
+) -> tuple[int, float, float] | None:
+    """``(m, schritt, füllung)``: n Schritte ab ``m · schritt`` fassen ``lo``–``hi``.
+
+    Der feinste runde Schritt, mit dem die Daten (mindestens ``spanne_min``
+    hoch) in n Abstände passen; ``m`` legt sie möglichst mittig. ``füllung`` ist
+    der Anteil der Höhe, den die Daten einnehmen.
+    """
+    mitte = (lo + hi) / 2
+    halb = max((hi - lo) / 2, spanne_min / 2, schritt_min / 2)
+    lo, hi = mitte - halb, mitte + halb
+    for s in (x for x in Y_SCHRITTE if x >= schritt_min):
+        m_lo, m_hi = math.ceil(hi / s - n - 1e-9), math.floor(lo / s + 1e-9)
+        if m_lo <= m_hi:
+            m = min(max(round(mitte / s - n / 2), m_lo), m_hi)
+            return m, s, (hi - lo) / (n * s)
+    return None
+
+
 def _anzahl_vielfache(unten: float, oben: float, schritt: float) -> int:
     """Wie viele Vielfache von ``schritt`` zwischen ``unten`` und ``oben`` liegen — gerechnet.
 
@@ -247,15 +331,39 @@ def _achse_x(
     )
 
 
-def _achse_y(unten: float, oben: float, schritt: float, einheit: str) -> fc.ChartAxis:
+def _achse_y(
+    unten: float,
+    oben: float,
+    schritt: float,
+    einheit: str,
+    *,
+    wert_an: Callable[[float], float] | None = None,
+    farbe: str | None = None,
+    zahlen: bool = True,
+) -> fc.ChartAxis:
+    """Eine beschriftete Werteachse an den Rasterlinien (Vielfache von ``schritt``).
+
+    ``wert_an`` rechnet die Lage einer Linie in den Wert um, der dort steht (die
+    rechte Achse); ``zahlen=False`` hält den Platz frei, ohne etwas zu
+    beschriften — eine leere Liste ließe Flet seine eigenen Zahlen zeigen.
+    """
     # Flet fragt die Beschriftung nur an Vielfachen von label_spacing ab; die
     # Ränder (show_min/show_max) wären krumme Werte und überlappten.
-    labels = [
-        fc.ChartAxisLabel(value=wert, label=ft.Text(zahl_text(wert), size=10))
-        for wert in _vielfache(unten, oben, schritt)
-    ]
+    labels = (
+        [
+            fc.ChartAxisLabel(
+                value=lage,
+                label=ft.Text(
+                    zahl_text(round(wert_an(lage), 6) if wert_an else lage), size=10, color=farbe
+                ),
+            )
+            for lage in _vielfache(unten, oben, schritt)
+        ]
+        if zahlen
+        else [fc.ChartAxisLabel(value=unten - 10 * schritt, label=ft.Text(""))]
+    )
     return fc.ChartAxis(
-        title=ft.Text(einheit, size=10),
+        title=ft.Text(einheit, size=10, color=farbe),
         title_size=16,
         labels=labels,
         label_spacing=schritt,
@@ -284,6 +392,8 @@ def kurve(
     y_schritt_min: float = 1.0,
     x_text: Callable[[float], str] | None = None,
     x_schritte: Sequence[float] = X_SCHRITTE,
+    rechts: Skala | None = None,
+    farbe: str | None = None,
 ) -> ft.Control:
     """Ein Liniendiagramm, auf der x-Achse meist die Zeit (s).
 
@@ -291,26 +401,92 @@ def kurve(
     übrigen Reihen werden auf ihren Bereich begrenzt (Flet schneidet nicht ab,
     sie lägen sonst über den Beschriftungen). ``x_text``/``x_schritte``:
     Beschriftung und runde Schritte einer anderen x-Achse (Hz, ms).
+
+    ``rechts``: eine zweite Werteachse mit eigenen Reihen (`zweite_achse`). Ist
+    sie gegeben, steht sie auch ohne Punkte da — sonst spränge die Breite der
+    Kurve beim Wischen über eine Lücke. ``farbe``: Beschriftung der linken Achse.
     """
     alle = [p for r in reihen if not r.marke for p in r.punkte]
-    if not alle:
+    rechts_alle = [p for r in rechts.reihen if not r.marke for p in r.punkte] if rechts else []
+    if not alle and not rechts_alle:
         return ft.Container(
             height=hoehe,
             alignment=ft.Alignment.CENTER,
             content=ft.Text("Noch keine Daten", opacity=0.5),
         )
-    xs = [p[0] for p in alle]
-    ys = [p[1] for r in reihen if r.skala for p in r.punkte] or [p[1] for p in alle]
+    xs = [p[0] for p in alle or rechts_alle]
     x0 = x_von if x_von is not None else min(xs)
     x1 = x_bis if x_bis is not None else max(xs)
     if x1 <= x0:
         x1 = x0 + 1
-    unten, oben, schritt = y_raster(
-        y_von if y_von is not None else min(ys),
-        y_bis if y_bis is not None else max(ys),
+    ys = [p[1] for r in reihen if r.skala for p in r.punkte] or [p[1] for p in alle]
+    links_daten = (
+        y_von if y_von is not None else min(ys, default=0.0),
+        y_bis if y_bis is not None else max(ys, default=1.0),
         y_spanne_min,
         y_schritt_min,
     )
+    # Ohne rechte Achse wie immer; mit ihr ein gemeinsames Raster (`doppel_raster`).
+    # Steht nur rechts etwas im Ausschnitt, rechnet die Kurve in deren Werten.
+    anker, wert, rschritt = 0.0, 0.0, 1.0
+    if rechts is not None and rechts_alle:
+        rys = [p[1] for r in rechts.reihen if r.skala for p in r.punkte] or [
+            p[1] for p in rechts_alle
+        ]
+        rechts_daten = (min(rys), max(rys), rechts.spanne_min, rechts.schritt_min)
+        if alle:
+            (unten, oben, schritt), (anker, wert, rschritt) = doppel_raster(
+                links_daten, rechts_daten
+            )
+        else:
+            unten, oben, schritt = y_raster(*rechts_daten)
+            rschritt = schritt
+    else:
+        unten, oben, schritt = y_raster(*links_daten)
+    serien = _serien(reihen, unten, oben, x0, x1)
+    rechte_achse = None
+    if rechts is not None:
+        faktor = schritt / rschritt
+        serien += _serien(
+            rechts.reihen, unten, oben, x0, x1, nach=lambda r: anker + (r - wert) * faktor
+        )
+        rechte_achse = _achse_y(
+            unten,
+            oben,
+            schritt,
+            rechts.einheit,
+            wert_an=lambda lage: wert + (lage - anker) / faktor,
+            farbe=rechts.farbe,
+            zahlen=bool(rechts_alle),
+        )
+    return fc.LineChart(
+        data_series=serien,
+        min_x=x0,
+        max_x=x1,
+        min_y=unten,
+        max_y=oben,
+        left_axis=_achse_y(unten, oben, schritt, einheit, farbe=farbe, zahlen=bool(alle)),
+        right_axis=rechte_achse,
+        bottom_axis=_achse_x(x0, x1, x_text or _zeit, x_schritte),
+        horizontal_grid_lines=fc.ChartGridLines(
+            color=ft.Colors.with_opacity(0.15, ft.Colors.ON_SURFACE), width=1, interval=schritt
+        ),
+        interactive=False,
+        animation=None,
+        height=hoehe,
+        expand=True,
+    )
+
+
+def _serien(
+    reihen: Sequence[Reihe],
+    unten: float,
+    oben: float,
+    x0: float,
+    x1: float,
+    nach: Callable[[float], float] | None = None,
+) -> list[fc.LineChartData]:
+    """Die Reihen als Linien des Diagramms; ``nach`` rechnet Werte der rechten Achse um."""
     serien = []
     for r in reihen:
         if not r.punkte:
@@ -319,8 +495,11 @@ def kurve(
         if r.band:
             y = oben - (0.04 + 0.06 * r.ebene) * (oben - unten)
             punkte = [(x, y) for x, _ in punkte]
-        elif not r.skala:
-            punkte = [(x, min(max(y, unten), oben)) for x, y in punkte]
+        else:
+            if nach is not None:
+                punkte = [(x, nach(y)) for x, y in punkte]
+            if not r.skala:
+                punkte = [(x, min(max(y, unten), oben)) for x, y in punkte]
         teile = (
             [ausduennen(punkte)]
             if r.nur_punkte
@@ -343,31 +522,19 @@ def kurve(
                     below_line_bgcolor=r.flaeche,
                 )
             )
-    return fc.LineChart(
-        data_series=serien,
-        min_x=x0,
-        max_x=x1,
-        min_y=unten,
-        max_y=oben,
-        left_axis=_achse_y(unten, oben, schritt, einheit),
-        bottom_axis=_achse_x(x0, x1, x_text or _zeit, x_schritte),
-        horizontal_grid_lines=fc.ChartGridLines(
-            color=ft.Colors.with_opacity(0.15, ft.Colors.ON_SURFACE), width=1, interval=schritt
-        ),
-        interactive=False,
-        animation=None,
-        height=hoehe,
-        expand=True,
-    )
+    return serien
 
 
 __all__ = [
+    "ACHSE_PX",
     "HF_SPANNE_MIN_BPM",
     "MAX_PUNKTE",
     "RR_SPANNE_MIN_MS",
     "Reihe",
+    "Skala",
     "abschnitte",
     "ausduennen",
+    "doppel_raster",
     "kurve",
     "x_schritt",
     "y_raster",

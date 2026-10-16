@@ -56,6 +56,7 @@ from trainingsapp.ui.components.verlauf import (
     bereich_wahl,
     chips,
     diagramme,
+    werte_bei,
 )
 
 Reihe3 = tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -116,7 +117,7 @@ def verlaufsdaten(
 
     ``hf_geraet`` kommt fertig als ``(t, bpm)``; alles andere rechnet
     `hrv_core.trends.verlauf` aus ``reihe`` = ``(t, rr, naht)`` mit ``speicher``
-    als Zwischenspeicher. Gemeinsam für die Analysekarte und das Live-Vollbild.
+    als Zwischenspeicher. Gemeinsam für die Analysekarte und beide Vollbilder.
     """
     t, rr, naht = reihe
 
@@ -277,20 +278,8 @@ class Analyse:
         self._hinweis.value = HINWEISE[bereich]
 
     def werte_bei(self, x: float) -> list[tuple[str, str, float]]:
-        """(Kennzahl, Bezeichnung, Wert) der gezeichneten Verlaufskurven an der Stelle ``x``.
-
-        Je Kurve der nächste Punkt, sofern er nicht weiter als ein Fünfzigstel
-        der Spanne entfernt liegt (sonst ist dort eine Lücke).
-        """
-        out = []
-        for k, (name, punkte) in self.gesehen.items():
-            if len(punkte) < 1:
-                continue
-            spanne = max(punkte[-1][0] - punkte[0][0], 1.0)
-            px, py = min(punkte, key=lambda p: abs(p[0] - x))
-            if abs(px - x) <= max(spanne / 50, 5.0) and np.isfinite(py):
-                out.append((k, name, float(py)))
-        return out
+        """(Kennzahl, Bezeichnung, Wert) der gezeichneten Verlaufskurven an der Stelle ``x``."""
+        return werte_bei(self.gesehen, x)
 
     def zeichnen(self, x_von: float, x_bis: float, strich: float | None = None) -> None:
         """Spektrum bzw. Poincaré und die Verlaufskurven für den Ausschnitt neu rechnen.

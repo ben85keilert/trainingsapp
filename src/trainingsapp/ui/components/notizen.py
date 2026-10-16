@@ -11,7 +11,10 @@ ihre Stelle in die Kurve. Die Eingabe hat drei Zeilen:
    setzt den Zeitpunkt), ±1 s / ±5 s zum Verschieben.
 3. Text, Speichern, Abbrechen (beim Bearbeiten: Löschen).
 
-Marken stehen immer in der Hauptkurve (`marken`). Gespeichert wird das
+Marken stehen immer in der Hauptkurve (`marken`). Im Vollbild zeigt ein Tipp
+auf eine Marke ihr **Etikett** (`bei`, `etikett`): Zeit und Text in der Kurve,
+von dort bearbeiten oder löschen (`entfernen`, „Rückgängig" mit
+`zurueckholen`). Gespeichert wird das
 praxis_gui-Format mit Anker (`hrv_core.ereignisse`); wohin, entscheidet der
 Aufrufer (``speichern``): live in die laufende Aufnahme, nachträglich als
 Metadaten in die Messdatei.
@@ -290,21 +293,38 @@ class Notizfeld:
     # -- Marken ohne Tastatur (Querformat, Ben 15.10.2026) -------------------------
 
     def marke_setzen(self, x: float | None = None) -> bool:
-        """Eine Notiz ohne Text an ``x`` (sonst jetzt bzw. Fenstermitte) — der Text
-        kommt später hochkant dazu. ``False``: keine Aufnahme, nichts gesetzt."""
+        """Eine Notiz ohne Text an ``x`` (sonst jetzt bzw. Fenstermitte) — den Text
+        gibt man später dazu. ``False``: keine Aufnahme, nichts gesetzt."""
         zb = self._zeitbezug()
         if zb is None:
             return False
         stelle = self._jetzt_x() if x is None else x
         liste = list(self._ereignisse())
+        bearbeitet = self._bearbeitete(liste)
         liste.append(notiz("", zb.anker(stelle), zb.start_utc))
         self._speichern(sortiert(liste, zb.beats()))
+        self._neu_zaehlen(bearbeitet)
         self._aendern(kurve=True)
         return True
 
     def _toleranz(self) -> float:
         """Wie nah der Finger einer Marke sein muss: 2 % der Fensterbreite, mindestens 1 s."""
         return max(1.0, 0.02 * self._breite()) if self._breite is not None else 1.0
+
+    def bei(self, x: float, ohne: int | None = None) -> int | None:
+        """Die Notiz, deren Marke ``x`` am nächsten liegt — innerhalb der Toleranz."""
+        zb = self._zeitbezug()
+        if zb is None:
+            return None
+        beste: tuple[float, int] | None = None
+        for i, e in enumerate(self._ereignisse()):
+            mx = zb.x(e)
+            if mx is None or i == ohne:
+                continue
+            abstand = abs(mx - x)
+            if abstand <= self._toleranz() and (beste is None or abstand < beste[0]):
+                beste = (abstand, i)
+        return beste[1] if beste is not None else None
 
     def greifen(self, x: float) -> bool:
         """Für `zeitfenster.wischbar`: Eine Marke unter dem Finger folgt ihm.
@@ -315,20 +335,10 @@ class Notizfeld:
         if self.gezogen is not None:
             self.zieh_x = x
             return True
-        zb = self._zeitbezug()
-        if zb is None:
+        i = self.bei(x, ohne=self.bearbeite)
+        if i is None:
             return False
-        beste: tuple[float, int] | None = None
-        for i, e in enumerate(self._ereignisse()):
-            mx = zb.x(e)
-            if mx is None or i == self.bearbeite:
-                continue
-            abstand = abs(mx - x)
-            if abstand <= self._toleranz() and (beste is None or abstand < beste[0]):
-                beste = (abstand, i)
-        if beste is None:
-            return False
-        self.gezogen, self.zieh_x = beste[1], x
+        self.gezogen, self.zieh_x = i, x
         return True
 
     def loslassen(self) -> None:
@@ -338,10 +348,62 @@ class Notizfeld:
         liste = list(self._ereignisse())
         if i is None or zb is None or not 0 <= i < len(liste):
             return
+        bearbeitet = self._bearbeitete(liste)
         alt = liste[i]
         liste[i] = notiz(str(alt.get("text") or ""), zb.anker(self.zieh_x), zb.start_utc, alt)
         self._speichern(sortiert(liste, zb.beats()))
+        self._neu_zaehlen(bearbeitet)
         self._aendern(kurve=True)
+
+    # -- Etikett in der Kurve (Vollbild, Ben 16.10.2026) ----------------------------
+
+    def etikett(self, i: int) -> tuple[float, str, str] | None:
+        """``(Stelle, Zeit, Text)`` der Notiz ``i`` — für ihr Etikett in der Kurve."""
+        zb = self._zeitbezug()
+        liste = self._ereignisse()
+        if zb is None or not 0 <= i < len(liste):
+            return None
+        x = zb.x(liste[i])
+        if x is None:
+            return None
+        return x, self._zeit_von(liste[i], zb), str(liste[i].get("text") or "")
+
+    def entfernen(self, i: int) -> dict | None:
+        """Notiz ``i`` löschen, ohne die Eingabe zu öffnen — zurück kommt sie für „Rückgängig"."""
+        liste = list(self._ereignisse())
+        if not 0 <= i < len(liste):
+            return None
+        bearbeitet = self._bearbeitete(liste)
+        weg = liste.pop(i)
+        self._speichern(liste)
+        if bearbeitet is weg:
+            self.bearbeite = None
+        self._neu_zaehlen(bearbeitet)
+        self._aendern(kurve=True)
+        return weg
+
+    def zurueckholen(self, eintrag: dict) -> None:
+        """„Rückgängig" nach `entfernen`: die Notiz wieder an ihre Stelle."""
+        zb = self._zeitbezug()
+        if zb is None:
+            return
+        liste = list(self._ereignisse())
+        bearbeitet = self._bearbeitete(liste)
+        self._speichern(sortiert([*liste, eintrag], zb.beats()))
+        self._neu_zaehlen(bearbeitet)
+        self._aendern(kurve=True)
+
+    def _bearbeitete(self, liste: list[dict]) -> dict | None:
+        b = self.bearbeite
+        return liste[b] if b is not None and 0 <= b < len(liste) else None
+
+    def _neu_zaehlen(self, bearbeitet: dict | None) -> None:
+        """Nach Einfügen oder Löschen: Die offene Eingabe zeigt weiter auf ihre Notiz."""
+        if self.bearbeite is None or self.bearbeite < 0:
+            return
+        self.bearbeite = next(
+            (j for j, e in enumerate(self._ereignisse()) if e is bearbeitet), None
+        )
 
     def uebungen_umschalten(self) -> None:
         self.uebungen_offen = not self.uebungen_offen
@@ -366,6 +428,11 @@ class Notizfeld:
     def umklappen(self) -> None:
         self._klappen()
         self._aendern()
+
+    def aufklappen(self) -> None:
+        """Die Liste zeigen — das Vollbild öffnet die Notizen immer aufgeklappt."""
+        if not self.offen:
+            self.umklappen()
 
     def auffrischen(self) -> None:
         """Neu aufbauen, z. B. wenn live eine Aufnahme beginnt oder endet."""
@@ -600,11 +667,14 @@ class Notizfeld:
             _name_knopf(n, self.uebung_einsetzen) for n in gewaehlt.uebungen
         ]
 
-    def _zeile(self, i: int, e: dict, zb: Zeitbezug) -> ft.Control:
-        x = zb.x(e)
-        seit = float(e.get("t_wall_s") or 0.0) if self.live else (x or 0.0)
+    def _zeit_von(self, e: dict, zb: Zeitbezug) -> str:
+        """„2:15 · 14:03" — live seit Beginn der Aufnahme, nachträglich auf der Kurvenachse."""
+        seit = float(e.get("t_wall_s") or 0.0) if self.live else (zb.x(e) or 0.0)
         uhr = zb.uhr(e)
-        zeit = _uhr(seit) + (f" · {uhr}" if uhr else "")
+        return _uhr(seit) + (f" · {uhr}" if uhr else "")
+
+    def _zeile(self, i: int, e: dict, zb: Zeitbezug) -> ft.Control:
+        zeit = self._zeit_von(e, zb)
         return ft.Container(
             on_click=(lambda _=None, i=i: self.bearbeiten(i)),
             padding=ft.Padding.symmetric(vertical=4, horizontal=6),

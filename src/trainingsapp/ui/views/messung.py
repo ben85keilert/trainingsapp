@@ -140,10 +140,21 @@ def tachogramm(
     marken: list[Reihe] = (),  # type: ignore[assignment]
     hoehe: int = 180,
 ) -> ft.Control:
-    """Die Live-Hauptkurve: Rohwerte grau, gewertet farbig, Artefakte rot, dazu ``marken``.
+    """Die Live-Hauptkurve: Rohwerte grau, gewertet farbig, Artefakte rot, dazu ``marken``."""
+    return kurve(
+        [*tachogramm_reihen(lauf, x_von, x_bis, korrigiert=korrigiert), *marken],
+        einheit="PPI ms" if verity else "RR ms",
+        hoehe=hoehe,
+        x_von=x_von,
+        x_bis=x_bis,
+        y_spanne_min=RR_SPANNE_MIN_MS,
+    )
 
-    Gemeinsam für die Live-Ansicht und ihr Vollbild (`views.live_vollbild`).
-    """
+
+def tachogramm_reihen(
+    lauf: Messlauf, x_von: float, x_bis: float, *, korrigiert: bool
+) -> list[Reihe]:
+    """Die Reihen des Live-Tachogramms im Ausschnitt — auch fürs Vollbild (`live_vollbild`)."""
     punkte = [p for p in lauf.live.punkte(seit_s=x_von) if p.t_s <= x_bis]
     mit_rr = [p for p in punkte if p.rr_ms > 0]
     # Grau: alles, was der Sensor geliefert hat — auch vom Gerät verworfene
@@ -167,19 +178,11 @@ def tachogramm(
         offen = False
         rr_linie.append((p.t_s, wert))
     artefakte = [(p.t_s, float(p.rr_ms)) for p in mit_rr if p.artefakt and 250 < p.rr_ms < 2200]
-    return kurve(
-        [
-            Reihe(grau, farbe=ft.Colors.OUTLINE, breite=1, naehte=grau_naehte, skala=False),
-            Reihe(rr_linie, farbe=ft.Colors.PRIMARY, naehte=rr_naehte),
-            Reihe(artefakte, farbe=FARBEN["rot"], nur_punkte=True, skala=False),
-            *marken,
-        ],
-        einheit="PPI ms" if verity else "RR ms",
-        hoehe=hoehe,
-        x_von=x_von,
-        x_bis=x_bis,
-        y_spanne_min=RR_SPANNE_MIN_MS,
-    )
+    return [
+        Reihe(grau, farbe=ft.Colors.OUTLINE, breite=1, naehte=grau_naehte, skala=False),
+        Reihe(rr_linie, farbe=ft.Colors.PRIMARY, naehte=rr_naehte),
+        Reihe(artefakte, farbe=FARBEN["rot"], nur_punkte=True, skala=False),
+    ]
 
 
 def ohne_rr() -> list[str]:
@@ -1154,4 +1157,4 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
     )
 
 
-__all__ = ["aufnahme_eintragen", "kachel_werte", "messung", "ohne_rr"]
+__all__ = ["aufnahme_eintragen", "kachel_werte", "messung", "ohne_rr", "tachogramm_reihen"]

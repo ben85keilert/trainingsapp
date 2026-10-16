@@ -72,7 +72,7 @@ def test_einstellungsseiten_bauen_und_schalten(tmp_path) -> None:
         pop_dialog=lambda: None,
     )
     try:
-        assert einstellungen(seite, state).route == "/einstellungen"
+        assert einstellungen(seite, state, ft.UrlLauncher()).route == "/einstellungen"
         ansicht = einstellungen_hrv(seite, state)
         assert ansicht.route == "/einstellungen/hrv"
 

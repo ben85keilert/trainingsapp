@@ -125,8 +125,17 @@ gh workflow run apk.yml                     # APK als Artefakt am Lauf (ZIP, 30 
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-Das Release erscheint als Pre-Release unter „Releases“. Das Repository ist
-privat, darum braucht der Download am Handy eine GitHub-Anmeldung im Browser.
+Das Release erscheint als Pre-Release unter „Releases“ und lässt sich ohne
+Anmeldung herunterladen.
+
+**Update aus der App heraus (Android):** Einstellungen → App → „Nach Updates
+suchen“ fragt die GitHub-Releases ab (`core/update.py`). Gibt es eine neuere
+Version, öffnet „Herunterladen“ die APK im Browser; antippen installiert sie
+als Update über die bestehende App, die Daten bleiben (gleicher
+Signierschlüssel). Dazu muss die Version in `pyproject.toml` angehoben sein —
+bei gleicher Version entscheidet die Build-Nummer. iOS kennt keinen Weg am App
+Store vorbei; dort bleibt es bei TestFlight/App Store. Download und Installation
+innerhalb der App (Stufe 2) sind vorgemerkt (`docs/offene_fragen.md`, A8).
 
 ---
 
@@ -161,6 +170,25 @@ Projekt liegen (`git clone https://github.com/ben85keilert/hrv-core.git ../hrv-c
 bevor `uv sync` läuft.
 
 ---
+
+## Nachbarrepos
+
+| Repo | Sichtbarkeit | Inhalt |
+|---|---|---|
+| [`hrv-core`](https://github.com/ben85keilert/hrv-core) | öffentlich | HRV-Mathematik, Austauschformat raw-v1 — Schwesterordner `../hrv-core`, einzige Abhängigkeit außerhalb von PyPI |
+| [`praxis_gui`](https://github.com/ben85keilert/praxis_gui) | — | Praxissoftware, mit der das Datenformat kompatibel ist |
+| `trainingsapp-praxis` | privat | Edition B (Praxisanbindung) |
+| `trainingsapp-inhalte` | privat | Kurse und Übungspakete, die nicht mitgeliefert werden |
+| `hrv-research` | privat | de-identifizierte Messungen, Notebooks |
+
+**Regel:** Die öffentlichen Repos (`trainingsapp`, `hrv-core`) hängen nie von
+einem privaten ab — nicht in `pyproject.toml`, nicht in der CI, nicht in Tests.
+Die privaten Repos dürfen umgekehrt auf die öffentlichen aufbauen. Wer die App
+baut, braucht nur dieses Repo und `hrv-core`.
+
+Commit-Nachrichten tragen bei KI-unterstützter Arbeit `Co-Authored-By` und
+einen Link auf die Claude-Code-Sitzung — bewusst sichtbar, damit nachvollziehbar
+bleibt, was wie entstanden ist.
 
 ## Lizenz
 

@@ -44,6 +44,19 @@ praxis_gui); Änderungen an Algorithmen gehören dorthin, samt Golden-Test.
   Austauschformats bleiben so, wie `praxis_gui` sie schreibt (`intervall_quelle`,
   `messungen`, …) — dort zählt Kompatibilität, nicht Konsistenz.
 
+### Nachbarrepos
+
+Die öffentlichen Repos `trainingsapp` und `hrv-core` hängen **nie** von einem
+privaten Repo ab (`trainingsapp-praxis`, `trainingsapp-inhalte`, `hrv-research`)
+— nicht in `pyproject.toml`, nicht in der CI, nicht in Tests. Übersicht im README,
+Abschnitt „Nachbarrepos“.
+
+### Commit-Nachrichten
+
+Bei KI-unterstützter Arbeit stehen `Co-Authored-By` und der Link auf die
+Claude-Code-Sitzung unter der Nachricht. Das bleibt so — es soll nachvollziehbar
+sein, was wie entstanden ist.
+
 ## Vor dem Pull Request
 
 ```bash

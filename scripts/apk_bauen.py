@@ -41,6 +41,9 @@ from pathlib import Path
 PROJEKT = Path(__file__).resolve().parent.parent
 SIGNIERUNG = PROJEKT / "signierung.toml"
 AUSGABE = PROJEKT / "dist"
+#: Version und Build-Nummer für die laufende App (config.app_version) — pyproject.toml
+#: wandert nicht in die APK. Nicht versioniert (.gitignore).
+BUILD_DATEI = PROJEKT / "src" / "trainingsapp" / "_build.py"
 
 UMGEBUNG_SCHLUESSEL = "FLET_ANDROID_SIGNING_KEY_STORE"
 #: Vorerst nur diese Architektur (Pixel 10) — siehe Moduldocstring
@@ -113,6 +116,11 @@ def main() -> None:
                 del umgebung[name]
 
     nummer = build_nummer()
+    BUILD_DATEI.write_text(
+        '"""Von scripts/apk_bauen.py geschrieben — nicht bearbeiten, nicht committen."""\n\n'
+        f'VERSION = "{version()}"\nBUILD = {nummer}\n',
+        encoding="utf-8",
+    )
     befehl = [
         "flet",
         "build",

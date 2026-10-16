@@ -48,7 +48,7 @@ def test_alle_symbole_der_auswahl_existieren() -> None:
 def test_ansichten_lassen_sich_bauen(page, state) -> None:
     assert heute(page, state) is not None
     assert katalog(page, state) is not None
-    assert einstellungen(page, state).route == "/einstellungen"
+    assert einstellungen(page, state, ft.UrlLauncher()).route == "/einstellungen"
 
     uebung = state.uebungen.alle()[0]
     browser = ft.UrlLauncher()

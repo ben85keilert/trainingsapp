@@ -391,7 +391,7 @@ def main(page: ft.Page) -> None:
     def stapel(teile: list[str]) -> None:
         """Die Ansichten über der Hauptansicht für die Routenteile."""
         if teile[:1] == ["einstellungen"]:
-            page.views.append(einstellungen(page, state))
+            page.views.append(einstellungen(page, state, browser))
             if teile[1:2] == ["hrv"]:
                 page.views.append(einstellungen_hrv(page, state))
             elif teile[1:2] == ["profile"]:

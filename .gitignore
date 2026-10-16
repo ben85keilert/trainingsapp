@@ -22,6 +22,8 @@ htmlcov/
 *.apk
 *.aab
 *.ipa
+# Version/Build-Nummer für die laufende App, schreibt scripts/apk_bauen.py
+src/trainingsapp/_build.py
 
 # Lokale Daten — NIEMALS committen (Gesundheitsdaten!)
 *.db

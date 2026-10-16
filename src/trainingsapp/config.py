@@ -69,6 +69,9 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     # nichts zu schützen, was der Gerätebesitzer nicht ohnehin sieht; in
     # Edition B liegen fremde Gesundheitsdaten auf dem Gerät des Therapeuten.
     "profil_sperre": {Edition.PRAXIS},
+    # Update-Hinweis aus den öffentlichen GitHub-Releases (core/update.py). Die
+    # Praxis-Edition bekommt ihre APK von der Praxis, nicht von GitHub.
+    "update_pruefung": {Edition.SOLO},
 }
 
 
@@ -87,6 +90,38 @@ def ist_aktiv(funktion: str) -> bool:
     >>> del os.environ["TRAININGSAPP_EDITION"]
     """
     return edition() in _FUNKTIONEN.get(funktion, set())
+
+
+# ---------------------------------------------------------------------------
+# Version der laufenden App
+# ---------------------------------------------------------------------------
+
+
+def app_version() -> tuple[str, int | None]:
+    """``(Version, Build-Nummer)`` der laufenden App.
+
+    In der gebauten App aus ``trainingsapp/_build.py``, das ``scripts/apk_bauen.py``
+    vor dem Build schreibt (nicht versioniert — `pyproject.toml` wandert nicht in die
+    APK). In der Entwicklung aus `pyproject.toml`, ohne Build-Nummer; wenn auch das
+    fehlt, ``("0.0.0", None)``.
+
+    >>> version, build = app_version()
+    >>> len(version.split(".")) >= 2
+    True
+    """
+    try:
+        from trainingsapp import _build  # type: ignore[attr-defined]
+    except ImportError:
+        pass
+    else:
+        return str(_build.VERSION), int(_build.BUILD)
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    if pyproject.is_file():
+        import tomllib
+
+        with pyproject.open("rb") as f:
+            return str(tomllib.load(f)["project"]["version"]), None
+    return "0.0.0", None
 
 
 # ---------------------------------------------------------------------------

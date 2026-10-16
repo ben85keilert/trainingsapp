@@ -7,7 +7,11 @@ Ansicht (`/einstellungen/profile`). Dazu die eigene Einteilung der Übungen
 sie im Plan aussehen (`ui.state.PLAN_DARSTELLUNGEN`), Farbprofil und Hell/Dunkel
 des Profils (`einstellungen_darstellung`), der Weg zu den Einstellungen der
 HRV-Messung (`/einstellungen/hrv`), zum Timer, zum GPS-Vorabtest
-(`/einstellungen/gps-test`), Hilfe und Edition.
+(`/einstellungen/gps-test`), Hilfe, Update-Prüfung und Edition.
+
+Die Update-Prüfung (`ist_aktiv("update_pruefung")`, Solo) fragt die
+GitHub-Releases ab (`core/update.py`) und öffnet bei einer neueren Version den
+APK-Link im Browser — Android installiert die heruntergeladene APK als Update.
 
 Eine Sperre per PIN gibt es nur in der Praxis-Edition
 (`ist_aktiv("profil_sperre")`): Dort teilen sich mehrere Personen ein Gerät,
@@ -18,11 +22,13 @@ Gerätebesitzer nicht ohnehin sieht.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 
 import flet as ft
 
-from trainingsapp.config import edition, ist_aktiv
+from trainingsapp.config import app_version, edition, ist_aktiv
+from trainingsapp.core.update import UpdateFehler, ist_neuer, neuestes_release
 from trainingsapp.ui.components.hilfe import hilfe_oeffner
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
@@ -40,7 +46,7 @@ def _messung_laeuft(state: AppState) -> bool:
     return ausdauer is not None and not ausdauer.fertig
 
 
-def einstellungen(page: ft.Page, state: AppState) -> ft.View:
+def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.View:
     profil_liste = ft.Column(spacing=0)
 
     def wechsler(profil_id: str) -> Callable[[], None]:
@@ -84,6 +90,77 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
         return handler
 
     zeichnen()
+
+    # -- Update-Prüfung (Stufe 1: hinweisen und verlinken, core/update.py) ------------
+    version, build = app_version()
+    version_text = f"Version {version}" + (f" (Build {build})" if build is not None else "")
+    update_untertitel = f"{version_text} · APK aus den GitHub-Releases"
+    update_zeile = ft.ListTile(
+        leading=ft.Icon(ft.Icons.SYSTEM_UPDATE),
+        title=ft.Text("Nach Updates suchen"),
+        subtitle=ft.Text(update_untertitel, size=12),
+        content_padding=ft.Padding.only(left=0, right=0),
+    )
+
+    def melden(text: str) -> None:
+        page.show_dialog(ft.SnackBar(ft.Text(text)))
+
+    async def update_suchen() -> None:
+        update_zeile.subtitle = ft.Text("Suche bei GitHub …", size=12)
+        update_zeile.update()
+        try:
+            # urllib blockiert — nicht im Event-Loop, sonst steht die Oberfläche
+            release = await asyncio.to_thread(neuestes_release)
+        except UpdateFehler as e:
+            melden(f"GitHub ist nicht erreichbar ({e}) — Internetverbindung prüfen.")
+            return
+        finally:
+            update_zeile.subtitle = ft.Text(update_untertitel, size=12)
+            update_zeile.update()
+        if release is None:
+            melden("Bei GitHub liegt noch kein Release mit APK.")
+            return
+        if not ist_neuer(release, version, build):
+            melden(f"Du hast die neueste Version ({version_text}).")
+            return
+        android = page.platform == ft.PagePlatform.ANDROID
+        ziel = release.apk_url if android else release.seite
+        notizen = release.notizen[:600] + ("…" if len(release.notizen) > 600 else "")
+
+        async def herunterladen() -> None:
+            page.pop_dialog()
+            await browser.launch_url(ziel)
+
+        page.show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text(f"Version {release.version} (Build {release.build}) verfügbar"),
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            "Der Browser lädt die APK herunter; antippen installiert sie als "
+                            "Update, die Daten bleiben."
+                            if android
+                            else "Öffnet die Release-Seite bei GitHub; die APK ist für Android."
+                        ),
+                        *([ft.Text(notizen, size=12, selectable=True)] if notizen else []),
+                    ],
+                    tight=True,
+                    spacing=8,
+                    scroll=ft.ScrollMode.AUTO,
+                ),
+                actions=[
+                    ft.TextButton("Später", on_click=lambda: page.pop_dialog()),
+                    ft.FilledButton(
+                        "Herunterladen" if android else "Release öffnen",
+                        on_click=herunterladen,
+                    ),
+                ],
+            )
+        )
+
+    update_zeile.on_click = update_suchen
+    update_zeilen = [update_zeile] if ist_aktiv("update_pruefung") else []
 
     # Nur die Praxis-Edition sperrt den Profilwechsel per PIN (Modul-Docstring)
     sperre = (
@@ -217,7 +294,8 @@ def einstellungen(page: ft.Page, state: AppState) -> ft.View:
                                 on_click=hilfe_oeffner(page, "uebungen"),
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
-                            hinweis(f"Edition {edition().value}"),
+                            *update_zeilen,
+                            hinweis(f"Edition {edition().value} · {version_text}"),
                         ),
                     ],
                 ),

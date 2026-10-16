@@ -80,6 +80,11 @@ src/trainingsapp/
 ../hrv-core/src/hrv_core/   HRV-Mathematik + Austauschformat raw-v1 (Schwesterrepo, extern)
 ```
 
+**Nachbarrepos:** `trainingsapp` und `hrv-core` sind öffentlich und hängen **nie** von
+einem privaten Repo ab (`trainingsapp-praxis`, `trainingsapp-inhalte`, `hrv-research`) —
+nicht in `pyproject.toml`, CI oder Tests. Commit-Nachrichten behalten `Co-Authored-By`
+und den Sitzungslink (Ben, 16.10.2026: Nachvollziehbarkeit).
+
 ## Zentrale Entwurfsentscheidungen
 
 Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
@@ -140,6 +145,12 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Bedingungen rechnen aus Einträgen und Messdauer, **nie aus Messwerten**
   (rechtlich wie `physiologische_steuerung`). Kurse reisen in Paketen
   (`kurse[]`, Formatversion 2). Vertrag: `docs/plan_kurse.md`.
+
+- **Updates über GitHub-Releases, Stufe 1** (Ben, 16.10.2026): `core/update.py` fragt die
+  öffentlichen Releases ab, vergleicht Version und Build-Nummer mit `config.app_version()`
+  (aus `_build.py`, die `scripts/apk_bauen.py` schreibt) und die Einstellungen öffnen den
+  APK-Link im Browser. Nur Android, nur Solo (`ist_aktiv("update_pruefung")`). Stufe 2
+  (Installation in der App) ist Katalog A8.
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`

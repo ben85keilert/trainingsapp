@@ -1,6 +1,12 @@
 # Dependabot: Versionsupdates für uv-Abhängigkeiten (uv.lock) und die Actions in den
 # Workflows — wöchentlich, gebündelt. Sicherheitsupdates laufen davon unabhängig
-# (Repo-Einstellung „Dependabot security updates“).
+# (Repo-Einstellung „Dependabot security updates“). Erklärung: docs/dependabot.md.
+#
+# Kein `pub`-Ökosystem für die Dart-Seite der Erweiterungen (erweiterungen/*/src/
+# flutter/*/pubspec.yaml) — bewusst (Ben, 16.10.2026): flutter_blue_plus darf wegen
+# seiner Lizenz nie über 1.36.8, Dart-flet bleibt im Gleichschritt mit Python-flet,
+# und `flet build` löst die Bereiche ohnehin bei jedem Build neu auf. Begründung und
+# Vorlage für später: docs/dependabot.md, „Dart-Pakete (pub)“.
 version: 2
 updates:
   - package-ecosystem: "uv"

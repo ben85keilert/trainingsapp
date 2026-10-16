@@ -226,6 +226,7 @@ Offen: Reihenfolge, Format (ein Archiv je Profil?) und was ein Import mit vorhan
 | Datum | Frage | Entscheidung |
 |---|---|---|
 | 14.10.2026 | GPS-Takt | Sekundentakt, keine Sparstufe (Ben). |
+| 16.10.2026 | Dependabot `pub` | Dart-Seite der Erweiterungen bleibt unüberwacht: flutter_blue_plus wegen Lizenz nie über 1.36.8, Dart-flet im Gleichschritt, `flet build` löst neu auf. Begründung und Vorlage: `docs/dependabot.md`. |
 | 16.10.2026 | A6 erster APK-Build mit hrv-core | Erledigt: Release v0.2.0 (Build 124, 87 MB, arm64) über den APK-Workflow mit Schwester-Checkout von hrv-core gebaut; die Update-Abfrage der App findet es. |
 | 16.10.2026 | Öffentlich machen, Updates | trainingsapp wird öffentlich, sobald README/Nachbarrepo-Regel/Update-Stufe 1 durch sind (Ben stellt um, dann Secret-Scanning und Dependabot). Mailadresse in der Historie bleibt; `docs/recht` bleibt drin (wer die App in der eigenen Praxis nutzt, muss Bescheid wissen); Sitzungslinks in Commits bleiben (Nachvollziehbarkeit). Updates: Stufe 1 über GitHub-Releases, Stufe 2 vorgemerkt (A8). |
 | 16.10.2026 | hrv-core öffentlich, Lizenz | Repo öffentlich; AGPL-3.0 mit CLA wie die trainingsapp (Eigenbedarf frei, geschlossene Kommerzialisierung nur mit Lizenz des Inhabers). Eigene anonymisierte Aufnahmen bleiben als Fixtures, werden nach und nach durch verlässlichere ersetzt. |

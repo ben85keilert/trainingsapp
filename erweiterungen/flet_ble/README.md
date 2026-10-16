@@ -56,6 +56,9 @@ cd erweiterungen/flet_ble/src/flutter/flet_ble
 
 ## Lizenz von flutter_blue_plus — wichtig
 
+> Darum überwacht Dependabot die Dart-Pakete nicht (`docs/dependabot.md`, „Dart-Pakete (pub)“):
+> er würde den Sprung auf 2.x jede Woche vorschlagen.
+
 `flutter_blue_plus` ist **exakt auf 1.36.8 gepinnt** (kein `^`). Das ist die letzte Version
 unter **BSD-3-Clause**; sie pinnt ihre Plattformpakete (`flutter_blue_plus_android` 7.0.4 usw.)
 selbst exakt, ebenfalls BSD-3-Clause. Ab **2.0.0** gilt die proprietäre „FlutterBluePlus

@@ -83,10 +83,48 @@ Workflows) und ohne flet-Ausnahme.
 - `hrv-core`, `flet-ble`, `flet-ton` — Pfadabhängigkeiten
   (`[tool.uv.sources]`), keine PyPI-Pakete. Sie werden von Hand gepflegt.
 - Die Flutter-Seite der Erweiterungen (`erweiterungen/*/src/flutter/*/pubspec.yaml`)
-  und was `flet build` an Dart-Paketen zieht. Dafür gäbe es das Ökosystem
-  `pub`; bisher nicht eingerichtet, weil diese Stände bewusst mit dem
-  Android-Build zusammen gewechselt werden.
+  und was `flet build` an Dart-Paketen zieht — bewusst nicht eingerichtet,
+  siehe nächster Abschnitt.
 - Die Python-Version (`.python-version`) und uv selbst.
+
+## Dart-Pakete (`pub`): bewusst nicht überwacht
+
+Entschieden am 16.10.2026 (Ben): Das Ökosystem `pub` bleibt aus. Die
+Dart-Seite der beiden Erweiterungen hat je eine `pubspec.yaml`
+(`erweiterungen/flet_ble/src/flutter/flet_ble/`,
+`erweiterungen/flet_ton/src/flutter/flet_ton/`), die Dependabot überwachen
+könnte. Es lohnt nicht, aus vier Gründen:
+
+| Paket | Stand | Warum Dependabot nichts helfen würde |
+|---|---|---|
+| `flutter_blue_plus` | `1.36.8`, exakt gepinnt | **Darf nie angehoben werden.** 1.36.8 ist die letzte Version unter BSD-3; ab 2.0.0 gilt eine proprietäre Lizenz mit Kosten für gewinnorientierte Nutzung und Build-Telemetrie (`erweiterungen/flet_ble/README.md`, „Lizenz von flutter_blue_plus“). Dependabot würde genau diesen Sprung jede Woche vorschlagen. |
+| `flet` (Dart) | `^1.0.3` | Muss im Gleichschritt mit dem Python-Paket `flet` bleiben, das bei den Versionsupdates ausgenommen ist. |
+| `audioplayers` | `^6.6.0` | Der einzige frei aktualisierbare Kandidat — zu wenig für einen eigenen Wochen-PR. |
+| alle | — | `pubspec.lock` ist nicht versioniert, und `flet build` löst die Bereiche bei jedem Build neu auf: Innerhalb von `^6.6.0` bekommt die APK ohnehin den neuesten Stand. Ohne Lock gäbe es auch kaum Sicherheitsmeldungen, die hängen am Lock. |
+
+**Das eigentliche Risiko** liegt nicht bei fehlender Überwachung, sondern
+beim Pin: `flutter_blue_plus` bleibt wegen der Lizenz auf einem Stand von
+Anfang 2026 und bekommt keine Sicherheitskorrekturen mehr. Das ist eine
+bewusste Entscheidung, die irgendwann neu zu prüfen ist (Fork oder Wechsel
+der BLE-Bibliothek) — Dependabot würde daran nichts ändern.
+
+**Wann es sich lohnt:** sobald eine Erweiterung mehrere frei
+aktualisierbare Dart-Pakete hat. Dann je Erweiterung ein Block, mit den
+beiden festen Ausnahmen:
+
+```yaml
+  - package-ecosystem: "pub"
+    directory: "/erweiterungen/flet_ton/src/flutter/flet_ton"
+    schedule: { interval: "weekly" }
+    ignore:
+      - dependency-name: "flet"                 # Gleichschritt mit Python-flet
+  - package-ecosystem: "pub"
+    directory: "/erweiterungen/flet_ble/src/flutter/flet_ble"
+    schedule: { interval: "weekly" }
+    ignore:
+      - dependency-name: "flet"
+      - dependency-name: "flutter_blue_plus"    # Lizenz — nie anheben
+```
 
 ## Sicherheitsmeldungen abarbeiten
 

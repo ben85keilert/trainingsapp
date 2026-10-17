@@ -304,7 +304,7 @@ def _timer_ticken(page: Any, state: Any, e: Einheitslauf) -> None:
     """Der Timer der Einheit tickt in der Oberfläche weiter — für Töne und Leiste."""
     if e.timer is None:
         return
-    from trainingsapp.ui.views.timer import ticker_starten
+    from trainingsapp.ui.timer_takt import ticker_starten  # flet-frei (CI ohne flet)
 
     state.timer = e.timer.lauf
     with contextlib.suppress(Exception):

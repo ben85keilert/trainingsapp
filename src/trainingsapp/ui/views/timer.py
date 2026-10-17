@@ -37,7 +37,6 @@ eigenen Klang haben, das Profil einen für jede neue Runde und fürs Ende
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -45,23 +44,17 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.klang import GLOCKEN, KLAENGE, TOENE, glocke, wav
+from trainingsapp.core.klang import KLAENGE
 from trainingsapp.core.timer import (
-    COUNTDOWN,
-    ENDE,
     MAX_RUNDEN,
     QUELLEN,
     Abschnitt,
-    Marke,
     Teil,
     TimerLauf,
     TimerProfil,
-    TimerSignale,
     TimerStand,
     dauer_lesen,
     dauer_text,
-    klang_fuer,
-    signal,
     signale_kurz,
 )
 from trainingsapp.ui import einheit as einheit_ui
@@ -71,9 +64,7 @@ from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
-
-#: So oft je Sekunde wird die Anzeige aufgefrischt
-TICK_S = 0.2
+from trainingsapp.ui.timer_takt import ticker_starten, toene_laden, ton_spielen, wach_setzen
 
 
 def timer_route(basis: str) -> str:
@@ -109,119 +100,6 @@ def lauf_fuer(state: AppState, profil: TimerProfil) -> TimerLauf:
             teil.lauf = lauf
             teil.uhr_uebernehmen(e.uhr)
     return lauf
-
-
-async def toene_laden(state: AppState) -> None:
-    """Die Signaltöne einmal in den Tondienst legen (beim App-Start).
-
-    Erst die drei Signale (schnell erzeugt) — danach ist der Timer
-    hörbereit —, dann die Glocken. Die rechnen auf dem Handy eine Weile und
-    tun das in einem eigenen Thread, damit die Oberfläche nicht stockt.
-    """
-    if state.ton is None:
-        return
-    with contextlib.suppress(Exception):
-        for name, folge in TOENE.items():
-            await state.ton.laden(name, wav(folge))
-        state.toene_geladen = True
-        for name, (teiltoene, grund, dauer) in GLOCKEN.items():
-            daten = await asyncio.to_thread(glocke, teiltoene, grund, dauer)
-            await state.ton.laden(name, daten)
-
-
-async def ton_spielen(state: AppState, klang: str, signale: TimerSignale | None = None) -> bool:
-    """Einen Klang mit Regler und Lautstärke der Signale spielen — ``False``, wo es nicht geht."""
-    signale = signale or state.timer_signale()
-    if state.ton is None or not state.toene_geladen:
-        return False
-    try:
-        await state.ton.spielen(klang, signale.lautstaerke / 100, signale.quelle)
-    except Exception:
-        return False
-    return True
-
-
-async def _melden(state: AppState, art: str, signale: TimerSignale, klang: str) -> None:
-    """Ton und Vibration zu einem Signal — wie eingestellt und wo es geht."""
-    if art == COUNTDOWN and not signale.countdown:
-        return
-    if signale.ton:
-        await ton_spielen(state, klang, signale)
-    haptik = state.haptik
-    if signale.vibration and haptik is not None and art != COUNTDOWN:
-        with contextlib.suppress(Exception):
-            await haptik.vibrate()
-            if art == ENDE:
-                await asyncio.sleep(0.35)
-                await haptik.vibrate()
-
-
-async def _wach(state: AppState, an: bool) -> None:
-    """Bildschirm anlassen (oder wieder freigeben) — still, wo es nicht geht."""
-    if state.wach is None:
-        return
-    with contextlib.suppress(Exception):
-        await (state.wach.enable() if an else state.wach.disable())
-
-
-def _in_messung(state: AppState, marken: list[Marke], signale: TimerSignale) -> None:
-    """Abschnittsanfänge als Notizen und Abschnitte in die laufende Aufnahme (wenn eingestellt)."""
-    messlauf = state.messlauf
-    if not marken or not signale.notizen or messlauf is None:
-        return
-    # Jeder Abschnitt des Timers wird auch ein Abschnitt der Messung (beim Speichern)
-    neu = [
-        messlauf.abschnitt_markieren(m.text, m.vor_s, name=m.abschnitt, ende=m.ende) for m in marken
-    ]
-    if any(e is not None for e in neu):
-        for beobachter in list(state.notiz_beobachter.values()):
-            with contextlib.suppress(Exception):
-                beobachter()
-
-
-def ticker_starten(page: Any, state: AppState) -> None:
-    """Eine Aufgabe, die läuft, solange der Timer läuft — nie zwei zugleich.
-
-    Je Abfrage: Signal fällig? Abschnittsanfänge für Notizen? Beobachter
-    auffrischen. Der Bildschirm bleibt an, solange sie läuft (wenn eingestellt).
-    """
-    if state.timer_aufgabe:
-        return
-
-    async def ticken() -> None:
-        alt: TimerStand | None = None
-        wach = False
-        try:
-            while (lauf := state.timer) is not None:
-                stand = lauf.stand()
-                if (art := signal(alt, stand)) is not None:
-                    signale = state.timer_signale()
-                    klang = klang_fuer(art, stand, lauf.profil, signale)
-                    await _melden(state, art, signale, klang)
-                # Gehört der Timer einer Einheit, holt sie die Marken (ein Abnehmer)
-                if not einheit_ui.besitzt_timer(state, lauf) and (marken := lauf.neue_marken()):
-                    _in_messung(state, marken, state.timer_signale())
-                alt = stand
-                for beobachter in list(state.timer_beobachter.values()):
-                    with contextlib.suppress(Exception):
-                        beobachter()
-                if not stand.laeuft:
-                    break
-                if not wach and state.timer_signale().wach:
-                    await _wach(state, True)
-                    wach = True
-                await asyncio.sleep(TICK_S)
-        finally:
-            state.timer_aufgabe = None
-            if wach:
-                await _wach(state, False)
-
-    state.timer_aufgabe = True
-    try:
-        page.run_task(ticken)
-    except Exception:  # Seite schon weg — sonst startete bis zum Neustart kein Ticker mehr
-        state.timer_aufgabe = None
-        raise
 
 
 # ---------------------------------------------------------------------------
@@ -751,7 +629,7 @@ def _signale_karte(page: Any, state: AppState) -> ft.Control:
             state.timer_signale_setzen(aktuell)
             lauf: TimerLauf | None = state.timer
             if feld == "wach" and lauf is not None and lauf.laeuft:
-                page.run_task(_wach, state, aktuell.wach)
+                page.run_task(wach_setzen, state, aktuell.wach)
 
         return handler
 
@@ -1291,4 +1169,6 @@ __all__ = [
     "timer_route",
     "timer_signale_view",
     "timer_view",
+    "toene_laden",
+    "ton_spielen",
 ]

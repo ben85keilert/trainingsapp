@@ -431,6 +431,21 @@ def plan_view(
 
         return handler
 
+    def summen_erlediger(
+        item: PlanItem, feld: FieldSpec, wert_feld: ft.TextField
+    ) -> Callable[[], None]:
+        """Ohne Sätze: eine Zahl, die zum heutigen Eintrag dazukommt („+263“)."""
+
+        def handler() -> None:
+            wert = einzelwert_lesen(feld, (wert_feld.value or "").strip())
+            wert_feld.error = None if wert is not None and wert > 0 else "Wert?"
+            if wert_feld.error or wert is None:
+                page.update()
+                return
+            anhaengen(item, feld, [float(wert)])
+
+        return handler
+
     def wert_erlediger(
         item: PlanItem, feld: FieldSpec, eingabe: ft.TextField
     ) -> Callable[[], None]:
@@ -783,8 +798,11 @@ def plan_view(
         return abschnitt("Ausführung", *zeilen, zusatz="gilt für jeden Eintrag")
 
     def menge_abschnitt(item: PlanItem, feld: FieldSpec) -> ft.Control:
-        """Eine Menge (Wiederholungen, Haltezeit, Strecke …): Chips, darunter die Zahlenfelder."""
-        satz = feld.type == FieldType.SET_LIST
+        """Eine Menge (Wiederholungen, Haltezeit, Strecke …): Chips, darunter die Zahlenfelder.
+
+        Ohne Sätze (``FieldSpec.saetze``) zählt ein Chip zur Summe des Tages dazu."""
+        liste = feld.type == FieldType.SET_LIST
+        satz = liste and feld.saetze
         zeit = feld.unit == "s" or feld.type == FieldType.DURATION
         inhalt: list[ft.Control] = []
         if werte := chips_fuer(item, feld):
@@ -795,10 +813,14 @@ def plan_view(
                     run_spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
-                        ft.Text("Satz anhängen:" if satz else "Antippen:", size=12, opacity=0.7),
+                        ft.Text(
+                            "Satz anhängen:" if satz else "Dazu:" if liste else "Antippen:",
+                            size=12,
+                            opacity=0.7,
+                        ),
                         *[
                             ft.Chip(
-                                label=ft.Text(("+" if satz else "") + chip_text(feld, q)),
+                                label=ft.Text(("+" if liste else "") + chip_text(feld, q)),
                                 on_click=chip_erlediger(item, feld, q),
                             )
                             for q in werte
@@ -810,6 +832,8 @@ def plan_view(
             inhalt.append(mengen_eingabe(item, feld))
         if satz:
             zusatz = "Sekunden je Satz" if zeit else "je Satz"
+        elif liste:
+            zusatz = "zählt zur Summe des Tages"
         else:
             zusatz = "Minuten:Sekunden" if feld.type == FieldType.DURATION else feld.unit or ""
         return abschnitt(basis_label(feld), *inhalt, zusatz=zusatz)
@@ -818,7 +842,17 @@ def plan_view(
         """Nur Zahlen: „Sätze × Wert“ für Satzfelder, sonst ein Feld — dann „Eintragen“."""
         zeit = feld.unit == "s" or feld.type == FieldType.DURATION
         felder: list[ft.Control]
-        if feld.type == FieldType.SET_LIST:
+        if feld.type == FieldType.SET_LIST and not feld.saetze:
+            # Ohne Sätze (Ben, 18.10.2026): eine Zahl, sie kommt zum Tag dazu
+            wert = _zahlfeld(
+                120,
+                label="Zeit" if zeit else feld.unit or basis_label(feld),
+                hinweis="1:30" if zeit else "263",
+                zeit=zeit,
+            )
+            handler = summen_erlediger(item, feld, wert)
+            felder = [wert]
+        elif feld.type == FieldType.SET_LIST:
             anzahl = _zahlfeld(64, label="Sätze", hinweis="1")
             wert = _zahlfeld(
                 100,

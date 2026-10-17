@@ -73,6 +73,14 @@ Technisch ist jedes Plus eine Korrektur mit Verweis auf den vorherigen Stand
 (`replaces_entry_id`); der Eintrag bleibt unveränderlich, die Historie zeigt
 jeden Satz.
 
+**Ohne Sätze** (Ben, 18.10.2026): Im Übungsformular schaltet der Knopf „Sätze“ neben den
+Chips die Sätze aus (ausgegraut). Dann gibt es ein Zahlenfeld statt „Sätze × Wert“ — „263“
+Liegestütze am Tag —, ein Chip zählt zur Summe des Tages dazu, und angezeigt wird die Summe
+(`FieldSpec.saetze`; gespeichert weiter als Liste, `[263]`). Der Verlauf zeigt dann nur
+„je Tag“, keinen besten Satz.
+**Keine Chips:** Ein leeres Chip-Feld oder eine 0 heißt „nur das freie Feld“ — früher
+setzte das Formular dann die Chips des Feldvorrats wieder ein.
+
 ## Hierarchie
 
 Die **Übung** legt fest, welche Felder es gibt (aus dem Feldvorrat in

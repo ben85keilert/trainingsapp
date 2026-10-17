@@ -221,7 +221,7 @@ def plan_einstellen(
             hinweis = "Angetippte Chips stehen beim Üben bereit; das freie Feld gibt es immer."
         else:
             hinweis = "Kein Chip: beim Üben nur das freie Feld."
-        if f.type == FieldType.SET_LIST:
+        if f.type == FieldType.SET_LIST and f.saetze:
             titel = f"{f.label} je Satz"
         elif f.type == FieldType.SCALE:
             titel = skala_titel(f)

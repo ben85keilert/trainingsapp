@@ -83,7 +83,13 @@ def chips_text(werte: list[Any]) -> str:
 
 
 def chips_lesen(text: str, f: FieldSpec) -> list[Any]:
-    """„10, 15, 20“ → Zahlen; bei Auswahlfeldern Texte."""
+    """„10, 15, 20“ → Zahlen; bei Auswahlfeldern Texte. Eine 0 ist kein Chip — leer oder
+    „0“ heißt: nur das freie Feld (Ben, 18.10.2026).
+
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> chips_lesen("10, 15", vorrat_feld("reps")), chips_lesen("0", vorrat_feld("reps"))
+    ([10, 15], [])
+    """
     teile = [t.strip() for t in text.replace(";", ",").split(",") if t.strip()]
     if f.type in (FieldType.CHOICE, FieldType.TEXT):
         return teile
@@ -93,8 +99,33 @@ def chips_lesen(text: str, f: FieldSpec) -> list[Any]:
             zahl = float(t.replace(",", "."))
         except ValueError:
             continue
+        if zahl == 0:
+            continue
         werte.append(int(zahl) if zahl.is_integer() else zahl)
     return werte
+
+
+def _saetze_knopf(key: str, saetze_an: dict[str, bool], sichtbar: bool) -> ft.Chip:
+    """„Sätze“ (Ben, 18.10.2026): ausgegraut = aus, eine Zahl je Eintrag („263“);
+    angetippt = an, Eingabe je Satz („3 × 15“)."""
+    text = ft.Text("Sätze", opacity=1.0 if saetze_an[key] else 0.55)
+
+    def umschalten() -> None:
+        saetze_an[key] = not saetze_an[key]
+        knopf.selected = saetze_an[key]
+        text.opacity = 1.0 if saetze_an[key] else 0.55
+        with contextlib.suppress(Exception):
+            knopf.update()
+
+    knopf = ft.Chip(
+        label=text,
+        selected=saetze_an[key],
+        show_checkmark=True,
+        on_select=umschalten,
+        visible=sichtbar,
+        tooltip="An: Eingabe je Satz (3 × 15) · aus: eine Zahl je Eintrag (263)",
+    )
+    return knopf
 
 
 def spec_bauen(felder: list[FieldSpec]) -> ResultSpec:
@@ -155,6 +186,9 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
 
     schalter: dict[str, ft.Switch] = {}
     chipfelder: dict[str, ft.TextField] = {}
+    #: Satzlisten: zählen die Sätze? Aus = eine Zahl je Eintrag (Ben, 18.10.2026)
+    saetze_an: dict[str, bool] = {}
+    saetze_knoepfe: dict[str, ft.Chip] = {}
     zeilen: list[ft.Control] = []
     # Skala: eigener Bereich statt fest 0–10 — auch negativ, Kommazahlen als solche
     skala_alt = vorhanden.get("scale")
@@ -190,6 +224,8 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                 FieldType.TEXT,
                 FieldType.SCALE,
             )
+            if key in saetze_knoepfe:
+                saetze_knoepfe[key].visible = chipfelder[key].visible
             if key == "scale":
                 skala_felder.visible = bool(schalter[key].value)
             # Ein neues Feld kommt in den Plan-Standard, solange der „alle“ heißt
@@ -215,9 +251,14 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         chipfelder[vorlage.key] = ft.TextField(
             label="Chips (mit Komma)" if vorlage.type != FieldType.CHOICE else "Optionen",
             value=chips_text(quelle.quick),
+            hint_text="leer oder 0: keine Chips" if vorlage.type != FieldType.CHOICE else None,
             dense=True,
             visible=aktiv,
+            expand=True,
         )
+        if vorlage.type == FieldType.SET_LIST:
+            saetze_an[vorlage.key] = quelle.saetze
+            saetze_knoepfe[vorlage.key] = _saetze_knopf(vorlage.key, saetze_an, aktiv)
         if vorlage.type == FieldType.SCALE:
             chipfelder[vorlage.key].visible = False
             zeilen.append(
@@ -239,7 +280,18 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                         schalter[vorlage.key],
                         ft.Container(
                             padding=ft.Padding.only(left=56, bottom=6),
-                            content=chipfelder[vorlage.key],
+                            content=ft.Row(
+                                spacing=8,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    chipfelder[vorlage.key],
+                                    *(
+                                        [saetze_knoepfe[vorlage.key]]
+                                        if vorlage.key in saetze_knoepfe
+                                        else []
+                                    ),
+                                ],
+                            ),
                         ),
                     ],
                 )
@@ -587,12 +639,12 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                 continue
             alt = vorhanden.get(vorlage_feld.key)
             chips = chips_lesen(chipfelder[vorlage_feld.key].value or "", vorlage_feld)
+            # Leer heißt leer (Ben, 18.10.2026) — früher kamen dann die Chips des Vorrats
             feld = replace(
                 vorlage_feld,
-                quick=chips_sortiert(chips)
-                if chips or vorlage_feld.type == FieldType.CHOICE
-                else vorlage_feld.quick,
+                quick=chips_sortiert(chips),
                 default=alt.default if alt is not None else vorlage_feld.default,
+                saetze=saetze_an.get(vorlage_feld.key, True),
             )
             if feld.type == FieldType.SCALE:
                 lo, hi, schritt = skala_lesen(skala_bereich.value or "") or (0.0, 10.0, 1.0)
@@ -646,6 +698,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             typen_lesen(),
             regionen_lesen(),
             [(k, bool(s.value), chipfelder[k].value or "") for k, s in schalter.items()],
+            sorted(saetze_an.items()),
             skala_name.value or "",
             skala_bereich.value or "",
             familie.value,

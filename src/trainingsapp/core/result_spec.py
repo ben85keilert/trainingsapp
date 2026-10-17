@@ -72,7 +72,18 @@ class FieldSpec:
     """Ein Eingabefeld.
 
     ``quick`` ist der eigentliche Beschleuniger: die Werte erscheinen als
-    antippbare Chips. Ein Tipp statt Tastatur.
+    antippbare Chips. Ein Tipp statt Tastatur. Eine leere Liste heißt: keine Chips,
+    nur das freie Feld.
+
+    ``saetze`` (Satzlisten, Ben 18.10.2026): aus, wenn die Sätze nicht zählen — dann
+    gibt man eine Zahl ein („263 Liegestütze heute“), gespeichert als Liste mit einem
+    Wert; angezeigt wird die Summe.
+
+    >>> f = FieldSpec("reps", FieldType.SET_LIST, "Wiederholungen", saetze=False)
+    >>> f.to_dict()["saetze"], FieldSpec.from_dict(f.to_dict()).saetze
+    (False, False)
+    >>> "saetze" in FieldSpec("reps", FieldType.SET_LIST, "Wdh.").to_dict()
+    False
     """
 
     key: str
@@ -85,6 +96,7 @@ class FieldSpec:
     step: float | None = None
     quick: list[Any] = field(default_factory=list)
     required: bool = False
+    saetze: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"key": self.key, "type": str(self.type), "label": self.label}
@@ -96,6 +108,8 @@ class FieldSpec:
             d["quick"] = self.quick
         if self.required:
             d["required"] = True
+        if not self.saetze:
+            d["saetze"] = False
         return d
 
     @classmethod
@@ -111,6 +125,7 @@ class FieldSpec:
             step=d.get("step"),
             quick=list(d.get("quick") or []),
             required=bool(d.get("required")),
+            saetze=bool(d.get("saetze", True)),
         )
 
 
@@ -161,6 +176,9 @@ class ResultSpec:
                 menge = (
                     format_dauer(summe) if f.unit == "s" else f"{summe:g} {f.unit or ''}".strip()
                 )
+                if not f.saetze:
+                    teile.append(menge)
+                    continue
                 teile.append(f"{menge} in {len(wert)} {'Satz' if len(wert) == 1 else 'Sätzen'}")
         return " · ".join(teile)
 
@@ -233,6 +251,11 @@ def format_wert(f: FieldSpec, wert: Any) -> str:
 
     >>> format_wert(FieldSpec("hold", FieldType.DURATION, "Haltezeit", unit="s"), [45.0])
     '45s'
+
+    Ohne Sätze (``saetze=False``) die Summe:
+
+    >>> format_wert(FieldSpec("reps", FieldType.SET_LIST, "Wdh.", saetze=False), [50, 213])
+    '263'
     """
     if ist_leer(wert):
         return ""
@@ -240,6 +263,8 @@ def format_wert(f: FieldSpec, wert: Any) -> str:
     if f.type == FieldType.SET_LIST or isinstance(wert, list | tuple):
         try:
             liste = list(wert) if isinstance(wert, list | tuple) else [float(wert)]
+            if f.type == FieldType.SET_LIST and not f.saetze:
+                liste = [sum(float(w) for w in liste)]
             return format_sets([float(w) for w in liste], zeit=zeit)
         except (TypeError, ValueError, OverflowError):
             return str(wert)
@@ -469,6 +494,9 @@ def parameter_werte(spec: ResultSpec | None, werte: dict[str, Any]) -> list[Para
         if f.type == FieldType.SET_LIST and isinstance(wert, list) and len(wert) > 1:
             summe = satz_summe([float(w) for w in wert if isinstance(w, int | float)])
             zusatz = f"{format_dauer(summe) if f.unit == 's' else f'{summe:g}'} gesamt"
+            if not f.saetze:  # ohne Sätze steht die Summe vorn — dahinter, woraus
+                teile = [format_sets([float(w)], zeit=f.unit == "s") for w in wert]
+                zusatz = " + ".join(teile) if len(teile) <= 6 else ""
         elif f.type == FieldType.SCALE:
             zusatz = skala_bereich_text(f)
         zeilen.append(ParameterWert(basis_label(f), wert_text(f, wert), zusatz))

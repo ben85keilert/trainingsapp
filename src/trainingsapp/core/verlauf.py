@@ -198,6 +198,8 @@ def _kennzahlen_des_felds(f: FieldSpec) -> list[Kennzahl]:
     name = basis_label(f)
     dauer = f.unit == "s" or f.type == FieldType.DURATION
     einheit = "" if dauer else (f.unit or "")
+    if f.type == FieldType.SET_LIST and not f.saetze:  # ohne Sätze zählt nur die Summe
+        return [Kennzahl(f.key, SUMME, f"{name} je Tag", "Summe des Tages", einheit, dauer)]
     if f.type == FieldType.SET_LIST:
         bester = "längster Satz" if dauer else "bester Satz"
         am_stueck = "am Stück gehalten" if dauer else "die meisten am Stück"
@@ -307,7 +309,7 @@ def saetze_text(eintraege: Iterable[SessionEntry], k: Kennzahl) -> str:
     saetze: list[float] = []
     for e in eintraege:
         f = e.spec_snapshot.field_by_key(k.feld) if e.spec_snapshot is not None else None
-        if f is not None and f.type == FieldType.SET_LIST:
+        if f is not None and f.type == FieldType.SET_LIST and f.saetze:
             saetze.extend(_einzelwerte(e, k.feld))
     if not saetze:
         return ""

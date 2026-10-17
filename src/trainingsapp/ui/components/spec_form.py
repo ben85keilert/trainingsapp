@@ -105,6 +105,15 @@ class SpecForm:
             )
         if f.type == FieldType.TEXT:
             return ft.TextField(label=f.label, value=str(wert or ""), multiline=True, min_lines=2)
+        if f.type == FieldType.SET_LIST and not f.saetze:
+            # Ohne Sätze (Ben, 18.10.2026): eine Zahl — „263“ Liegestütze am Tag
+            zeit = f.unit == "s"
+            return ft.TextField(
+                label=f.label,
+                value=self._anzeige(f, wert),
+                hint_text="1:30" if zeit else "z. B. 263",
+                keyboard_type=ft.KeyboardType.DATETIME if zeit else ft.KeyboardType.NUMBER,
+            )
         if f.type == FieldType.SET_LIST:
             # Ohne Einheit dahinter: Das Label sagt „Wiederholungen", Zeiten
             # tragen ihre Schreibweise selbst („45s", „1:30") — ein „s" dahinter
@@ -253,6 +262,8 @@ class SpecForm:
             return ""
         if f.type == FieldType.SET_LIST or isinstance(wert, list):
             liste = wert if isinstance(wert, list) else [wert]
+            if f.type == FieldType.SET_LIST and not f.saetze:
+                liste = [sum(float(w) for w in liste)]
             return format_sets([float(w) for w in liste], zeit=(f.unit == "s"))
         if f.type == FieldType.DURATION:
             return format_dauer(float(wert))
@@ -275,7 +286,10 @@ class SpecForm:
         if not text:
             return None
         if f.type == FieldType.SET_LIST:
-            return parse_sets(text, zeit=(f.unit == "s"))
+            saetze = parse_sets(text, zeit=(f.unit == "s"))
+            if saetze and not f.saetze:  # ohne Sätze: eine Zahl, auch aus „50, 50“
+                return [sum(saetze)]
+            return saetze
         if f.type == FieldType.DURATION:
             return parse_dauer(text)
         wert = einzelwert_lesen(f, text)  # dieselben Grenzen wie in der Notation

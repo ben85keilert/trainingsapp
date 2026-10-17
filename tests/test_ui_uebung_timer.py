@@ -185,3 +185,63 @@ async def test_uhr_neben_dem_i_im_plan(umgebung) -> None:
     ]
     assert [u.tooltip for u in uhren] == ["Timer dieser Übung", "Timer festlegen"]
     assert any("Timer: Halten 3 × 10 s" in t for t in _texte(ansicht))
+
+
+async def test_editor_baut_eine_folge_mit_zaehlt(umgebung) -> None:
+    """Der Editor kann Teile (Folge) und „zählt“ je Abschnitt — gespeichert in der Übung."""
+    from trainingsapp.ui.views.timer import timer_bearbeiten_view
+    from trainingsapp.ui.views.uebung_timer import uebung_profilziel
+
+    state, _, _ = umgebung
+    uebung = _planke(state)
+    seite = Seite()
+    basis = f"/uebung/{uebung.id}"
+    ziel = uebung_profilziel(state, basis, uebung)
+    ansicht = timer_bearbeiten_view(seite, state, "halten", basis, ziel)
+    assert ansicht.appbar.title.value == "Timer der Übung"
+    _knopf(ansicht, "Teil anhängen").on_click()
+    felder = [x for x in _alle(ansicht) if isinstance(x, ft.TextField)]
+    teile = [f for f in felder if f.label == "Teil"]
+    assert len(teile) == 2
+    teile[0].value = "Training"
+    # Der Cooldown zählt von sich aus nicht; die Pause des Trainings schalten wir aus
+    zaehlt = [
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.TextButton) and x.content in ("zählt", "zählt nicht")
+    ]
+    assert [x.content for x in zaehlt] == ["zählt", "zählt", "zählt nicht"]
+    zaehlt[1].on_click()
+    await _knopf(ansicht, "Speichern").on_click()
+    gespeichert = state.uebungen.laden(uebung.id)
+    assert gespeichert is not None
+    (profil,) = profile_der_uebung(gespeichert)
+    assert profil.id == "halten" and profil.teil_name == "Training"
+    assert [a.zaehlt for a in profil.abschnitte] == [True, False]
+    assert [(t.name, [a.name for a in t.abschnitte]) for t in profil.teile] == [
+        ("Cooldown", ["Cooldown"])
+    ]
+    assert seite.route == f"{basis}/timer/uebung/{uebung.id}"
+
+
+async def test_editor_im_plan_speichert_eine_kopie_der_planuebung(umgebung) -> None:
+    from trainingsapp.ui.views.timer import timer_bearbeiten_view
+    from trainingsapp.ui.views.uebung_timer import uebung_profilziel
+
+    state, _, _ = umgebung
+    uebung = _planke(state)
+    plan = Plan(name="Rumpf", subject_id=state.profil.id, items=[PlanItem(exercise_id=uebung.id)])
+    state.plaene.speichern(plan)
+    gespeichert = state.plaene.laden(plan.id)
+    assert gespeichert is not None
+    item = gespeichert.items[0]
+    basis = f"/plan/{plan.id}"
+    ziel = uebung_profilziel(state, basis, uebung, gespeichert, item)
+    ansicht = timer_bearbeiten_view(Seite(), state, "halten", basis, ziel)
+    name = next(x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Name")
+    name.value = "Halten im Plan"
+    await _knopf(ansicht, "Speichern").on_click()
+    wahl = TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer)
+    assert wahl.eigen is not None and wahl.eigen.name == "Halten im Plan"
+    katalog = state.uebungen.laden(uebung.id)
+    assert katalog is not None and profile_der_uebung(katalog)[0].name == "Halten 3 × 10 s"

@@ -44,6 +44,7 @@ from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.timer import Profilziel
 
 #: Feldnamen im Tagebuch
 FELDNAMEN = {"hold": "Haltezeit je Satz", "duration": "Zeit gesamt"}
@@ -61,6 +62,50 @@ def _laufende(state: AppState, uebung_id: str) -> Einheitslauf | None:
     if isinstance(teil, UebungBaustein) and teil.kontext.uebung_id == uebung_id:
         return e
     return None
+
+
+def uebung_profilziel(
+    state: AppState,
+    basis: str,
+    uebung: Exercise,
+    plan: Plan | None = None,
+    item: PlanItem | None = None,
+) -> Profilziel:
+    """Wohin der Editor die Profile des Übungs-Timers speichert: im Plan als eigene Kopie
+    der Planübung (die Übung bleibt, wie sie ist), sonst in die Übung selbst."""
+    zurueck = uebung_timer_route(basis, uebung, item)
+
+    def profile() -> list[TimerProfil]:
+        return profile_zur_wahl(uebung, plan, item)
+
+    if item is not None:
+
+        def in_planuebung(neu: TimerProfil) -> None:
+            wahl = TimerWahl.aus_dict(item.timer)
+            item.timer = TimerWahl("", neu, wahl.zeitfeld, wahl.zeit_eintragen).als_dict()
+            state.plaene.timer_setzen(item.id, item.timer)
+
+        return Profilziel(
+            profile, in_planuebung, None, zurueck, f"{zurueck}/bearbeiten", "Timer der Planübung"
+        )
+
+    def in_uebung(neu: TimerProfil) -> None:
+        eigene = profile_der_uebung(uebung)
+        if any(p.id == neu.id for p in eigene):
+            uebung.timer = [(neu if p.id == neu.id else p).als_dict() for p in eigene]
+        else:
+            uebung.timer = [*(p.als_dict() for p in eigene), neu.als_dict()]
+        state.uebungen.speichern(uebung)
+        state.uebung_timer.setdefault(uebung.id, {})["profil"] = neu.id
+
+    def aus_uebung(alt: TimerProfil) -> None:
+        uebung.timer = [p.als_dict() for p in profile_der_uebung(uebung) if p.id != alt.id]
+        state.uebungen.speichern(uebung)
+        state.uebung_timer.setdefault(uebung.id, {}).pop("profil", None)
+
+    return Profilziel(
+        profile, in_uebung, aus_uebung, zurueck, f"{zurueck}/bearbeiten", "Timer der Übung"
+    )
 
 
 def _bereitgestellt(state: AppState, uebung_id: str) -> bool:
@@ -245,14 +290,24 @@ def uebung_timer_view(
 
             return handler
 
+        def neues() -> None:
+            nachher.danach(lambda: page.push_route(f"{route}/bearbeiten"))
+            schliessen(dialog)
+
         dialog = ft.AlertDialog(
             on_dismiss=nachher.bei_schliessen,
-            title=ft.Text("Timer übernehmen"),
+            title=ft.Text("Timer für diese Übung"),
             content=ft.Column(
                 tight=True,
                 scroll=ft.ScrollMode.AUTO,
                 controls=[
-                    hinweis("Aus der Timer-Bibliothek — die Übung bekommt eine eigene Kopie."),
+                    ft.ListTile(
+                        leading=ft.Icon(ft.Icons.ADD),
+                        title=ft.Text("Neues Profil"),
+                        subtitle=ft.Text("Einzeltimer oder Folge mit Teilen", size=12),
+                        on_click=neues,
+                    ),
+                    hinweis("Oder aus der Timer-Bibliothek — die Übung bekommt eine eigene Kopie."),
                     *(
                         ft.ListTile(
                             title=ft.Text(p.name),
@@ -591,8 +646,21 @@ def uebung_timer_view(
                 label=ft.Text("Profil"), leading=ft.Icon(ft.Icons.ADD), on_click=profil_hinzufuegen
             )
         )
+
+        async def bearbeiten() -> None:
+            if profil is not None:
+                await page.push_route(f"{route}/bearbeiten/{profil.id}")
+
         teile: list[ft.Control] = [
-            kartentitel("Timer dieser Übung"),
+            kartentitel(
+                "Timer dieser Übung",
+                ft.IconButton(
+                    ft.Icons.EDIT_OUTLINED,
+                    tooltip="Profil bearbeiten (Abschnitte, Teile, Runden)",
+                    on_click=bearbeiten,
+                    visible=profil is not None,
+                ),
+            ),
             ft.Row(wrap=True, spacing=8, run_spacing=8, controls=chips),
         ]
         if profil is None:
@@ -805,4 +873,4 @@ def uebung_timer_view(
     )
 
 
-__all__ = ["uebung_timer_route", "uebung_timer_view"]
+__all__ = ["uebung_profilziel", "uebung_timer_route", "uebung_timer_view"]

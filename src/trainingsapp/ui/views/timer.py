@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 import flet as ft
@@ -826,71 +827,111 @@ def _leisten_auffrischen(state: AppState) -> None:
 # ---------------------------------------------------------------------------
 
 
-def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, basis: str) -> ft.View:
-    """Name, Abschnitte (Name, mm:ss, Klang), Runden und ihre Klänge — anlegen oder ändern.
+@dataclass
+class Profilziel:
+    """Wo das Profil liegt, das der Editor bearbeitet — und wohin er speichert.
+
+    Vorgabe ist die Timer-Bibliothek (`bibliothek`). Der Timer einer Übung bearbeitet
+    ihre Profile, im Plan eine eigene Kopie der Planübung (`views.uebung_timer`).
+    """
+
+    #: die Profile, unter denen das bearbeitete gesucht wird
+    profile: Callable[[], list[TimerProfil]]
+    #: speichert das (geprüfte) Profil — neu oder geändert
+    speichern: Callable[[TimerProfil], None]
+    #: löscht es — ``None``: hier nicht löschbar
+    loeschen: Callable[[TimerProfil], None] | None
+    #: wohin Zurück, Speichern und Löschen führen
+    zurueck: str
+    #: Route des Editors ohne Profil-ID (``…/bearbeiten``)
+    route: str
+    titel: str = "Timer-Profil"
+
+
+def bibliothek(state: AppState, basis: str) -> Profilziel:
+    """Die Timer-Bibliothek (gerätelokal, `AppState.timer_profile`)."""
+    zurueck = timer_route(basis)
+
+    def speichern(neu: TimerProfil) -> None:
+        profile = state.timer_profile()
+        if any(p.id == neu.id for p in profile):
+            liste = [neu if p.id == neu.id else p for p in profile]
+        else:
+            liste = [*profile, neu]
+        state.timer_profile_setzen(liste)
+        state.timer_profil_waehlen(neu.id)
+
+    def loeschen(alt: TimerProfil) -> None:
+        state.timer_profile_setzen([p for p in state.timer_profile() if p.id != alt.id])
+        if state.timer is not None and state.timer.profil.id == alt.id:
+            state.timer = None
+
+    return Profilziel(state.timer_profile, speichern, loeschen, zurueck, f"{zurueck}/bearbeiten")
+
+
+@dataclass
+class _Zeile:
+    """Ein Abschnitt im Editor."""
+
+    name: ft.TextField
+    dauer: ft.TextField
+    klang: ft.Dropdown
+    zaehlt: bool = True
+
+
+@dataclass
+class _TeilFelder:
+    """Ein Teil im Editor — seine Abschnitte und Runden."""
+
+    name: ft.TextField
+    zeilen: list[_Zeile] = field(default_factory=list)
+    runden: int = 1
+
+
+def timer_bearbeiten_view(
+    page: Any,
+    state: AppState,
+    profil_id: str | None,
+    basis: str,
+    ziel: Profilziel | None = None,
+) -> ft.View:
+    """Name, Teile mit Abschnitten (Name, mm:ss, Klang, zählt) und Runden, die Klänge —
+    anlegen oder ändern.
+
+    Eine **Folge** reiht Teile: Vorbereitung 1 ×, Halten und Pause 3 ×, Cooldown 1 ×
+    (Ben, 17.10.2026); ein Profil mit einem Teil ist ein gewöhnlicher Timer. Je
+    Abschnitt „zählt“ (Vorgabe) oder „zählt nicht“ als Übungszeit.
 
     Zurück speichert (Ben, 16.10.2026, `components/zurueck.py`); „Abbrechen" verwirft.
     """
-    zurueck_route = timer_route(basis)
-    profile = state.timer_profile()
-    vorhanden = next((p for p in profile if p.id == profil_id), None)
+    ziel = ziel or bibliothek(state, basis)
+    vorhanden = next((p for p in ziel.profile() if p.id == profil_id), None)
     profil = vorhanden or TimerProfil(
         name="", abschnitte=[Abschnitt("Belastung", 30), Abschnitt("Pause", 15)], runden=1
     )
-    route = f"{zurueck_route}/bearbeiten" + (f"/{vorhanden.id}" if vorhanden else "")
+    route = ziel.route + (f"/{vorhanden.id}" if vorhanden else "")
 
     name = ft.TextField(label="Name", value=profil.name, hint_text="z. B. Intervall, Planke")
-    zeilen: list[tuple[ft.TextField, ft.TextField, ft.Dropdown]] = []
-    zeilen_spalte = ft.Column(spacing=14)
+    teile_ed: list[_TeilFelder] = []
+    teile_spalte = ft.Column(spacing=16)
     runden_klang = _klang_wahl(page, state, profil.runden_klang, "wie Abschnitt 1")
     ende_klang = _klang_wahl(page, state, profil.ende_klang, "Fanfare")
-    runden = {"n": profil.runden}
-    runden_text = ft.Text(
-        str(profil.runden),
-        size=18,
-        weight=ft.FontWeight.W_600,
-        width=36,
-        text_align=ft.TextAlign.CENTER,
-    )
     gesamt_text = ft.Text(size=13, opacity=0.75)
 
     def gesamt() -> None:
-        summe = sum(dauer_lesen(d.value or "") or 0 for _, d, _ in zeilen)
-        gesamt_text.value = f"Gesamt {dauer_text(summe * runden['n'])}"
-
-    def zeichnen() -> None:
-        zeilen_spalte.controls = [
-            ft.Column(
-                spacing=6,
-                controls=[
-                    ft.Row(
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        controls=[
-                            ft.Container(expand=True, content=n),
-                            ft.Container(width=96, content=d),
-                            ft.IconButton(
-                                ft.Icons.REMOVE_CIRCLE_OUTLINE,
-                                tooltip="Abschnitt entfernen",
-                                on_click=entferner(i),
-                                disabled=len(zeilen) <= 1,
-                            ),
-                        ],
-                    ),
-                    k,
-                ],
-            )
-            for i, (n, d, k) in enumerate(zeilen)
-        ]
-        gesamt()
+        summe = sum(
+            sum(dauer_lesen(z.dauer.value or "") or 0 for z in t.zeilen) * t.runden
+            for t in teile_ed
+        )
+        gesamt_text.value = f"Gesamt {dauer_text(summe)}"
 
     def dauer_geaendert() -> None:
         gesamt()
         with contextlib.suppress(Exception):
             gesamt_text.update()
 
-    def zeile(a: Abschnitt) -> tuple[ft.TextField, ft.TextField, ft.Dropdown]:
-        return (
+    def zeile(a: Abschnitt) -> _Zeile:
+        return _Zeile(
             ft.TextField(label="Abschnitt", value=a.name, dense=True),
             ft.TextField(
                 label="mm:ss",
@@ -901,69 +942,201 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
                 on_change=lambda _: dauer_geaendert(),
             ),
             _klang_wahl(page, state, a.klang, "Standardklang"),
+            a.zaehlt,
         )
 
-    def entferner(i: int) -> Callable[[], None]:
-        def handler() -> None:
-            if len(zeilen) > 1:
-                del zeilen[i]
-                zeichnen()
-                page.update()
+    def teil_felder(teil: Teil) -> _TeilFelder:
+        return _TeilFelder(
+            ft.TextField(label="Teil", value=teil.name, dense=True, hint_text="z. B. Vorbereitung"),
+            [zeile(a) for a in teil.abschnitte],
+            max(teil.runden, 1),
+        )
 
-        return handler
-
-    def hinzufuegen() -> None:
-        zeilen.append(zeile(Abschnitt("", 60)))
+    def neu_zeichnen() -> None:
         zeichnen()
         page.update()
 
-    def runden_aendern(delta: int) -> Callable[[], None]:
+    def entferner(k: int, i: int) -> Callable[[], None]:
         def handler() -> None:
-            runden["n"] = min(max(runden["n"] + delta, 1), MAX_RUNDEN)
-            runden_text.value = str(runden["n"])
-            gesamt()
-            page.update()
+            if len(teile_ed[k].zeilen) > 1:
+                del teile_ed[k].zeilen[i]
+                neu_zeichnen()
 
         return handler
+
+    def zaehlt_umschalter(k: int, i: int) -> Callable[[], None]:
+        def handler() -> None:
+            z = teile_ed[k].zeilen[i]
+            z.zaehlt = not z.zaehlt
+            neu_zeichnen()
+
+        return handler
+
+    def hinzufuegen(k: int) -> Callable[[], None]:
+        def handler() -> None:
+            teile_ed[k].zeilen.append(zeile(Abschnitt("", 60)))
+            neu_zeichnen()
+
+        return handler
+
+    def runden_aendern(k: int, delta: int) -> Callable[[], None]:
+        def handler() -> None:
+            t = teile_ed[k]
+            t.runden = min(max(t.runden + delta, 1), MAX_RUNDEN)
+            neu_zeichnen()
+
+        return handler
+
+    def teil_hinzufuegen() -> None:
+        teile_ed.append(teil_felder(Teil([Abschnitt("Cooldown", 60, zaehlt=False)], 1, "Cooldown")))
+        neu_zeichnen()
+
+    def teil_entferner(k: int) -> Callable[[], None]:
+        def handler() -> None:
+            if len(teile_ed) > 1:
+                del teile_ed[k]
+                neu_zeichnen()
+
+        return handler
+
+    def teil_karte(k: int, t: _TeilFelder) -> ft.Control:
+        folge = len(teile_ed) > 1
+        kopf: list[ft.Control] = (
+            [
+                ft.Row(
+                    controls=[
+                        ft.Container(expand=True, content=t.name),
+                        ft.IconButton(
+                            ft.Icons.DELETE_OUTLINE,
+                            tooltip="Teil entfernen",
+                            on_click=teil_entferner(k),
+                        ),
+                    ]
+                )
+            ]
+            if folge
+            else [kartentitel("Abschnitte")]
+        )
+        if k == 0:
+            kopf.append(
+                hinweis(
+                    "Je Abschnitt ein Name, die Dauer in Minuten:Sekunden und der Klang, mit "
+                    "dem er beginnt — etwa Glocke 1 für Belastung, Glocke 3 für die Pause. "
+                    "„zählt“: seine Zeit wird als Übungszeit eingetragen."
+                )
+            )
+        zeilen: list[ft.Control] = [
+            ft.Column(
+                spacing=6,
+                controls=[
+                    ft.Row(
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Container(expand=True, content=z.name),
+                            ft.Container(width=96, content=z.dauer),
+                            ft.IconButton(
+                                ft.Icons.REMOVE_CIRCLE_OUTLINE,
+                                tooltip="Abschnitt entfernen",
+                                on_click=entferner(k, i),
+                                disabled=len(t.zeilen) <= 1,
+                            ),
+                        ],
+                    ),
+                    ft.Row(
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Container(expand=True, content=z.klang),
+                            ft.TextButton(
+                                "zählt" if z.zaehlt else "zählt nicht",
+                                icon=ft.Icons.CHECK if z.zaehlt else ft.Icons.REMOVE,
+                                tooltip="Tippen schaltet um",
+                                on_click=zaehlt_umschalter(k, i),
+                            ),
+                        ],
+                    ),
+                ],
+            )
+            for i, z in enumerate(t.zeilen)
+        ]
+        return karte(
+            *kopf,
+            *zeilen,
+            ft.TextButton("Abschnitt hinzufügen", icon=ft.Icons.ADD, on_click=hinzufuegen(k)),
+            ft.Row(
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text("Runden", size=13, expand=True),
+                    ft.IconButton(ft.Icons.REMOVE, on_click=runden_aendern(k, -1)),
+                    ft.Text(
+                        str(t.runden),
+                        size=18,
+                        weight=ft.FontWeight.W_600,
+                        width=36,
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                    ft.IconButton(ft.Icons.ADD, on_click=runden_aendern(k, 1)),
+                ],
+            ),
+        )
+
+    def zeichnen() -> None:
+        teile_spalte.controls = [teil_karte(k, t) for k, t in enumerate(teile_ed)]
+        gesamt()
 
     def stand() -> tuple[Any, ...]:
         """Alles, was man hier ändern kann — für „Zurück speichert“ (Ben, 16.10.2026)."""
         return (
             name.value or "",
-            [(n.value or "", d.value or "", k.value) for n, d, k in zeilen],
-            runden["n"],
+            [
+                (
+                    t.name.value or "",
+                    [
+                        (z.name.value or "", z.dauer.value or "", z.klang.value, z.zaehlt)
+                        for z in t.zeilen
+                    ],
+                    t.runden,
+                )
+                for t in teile_ed
+            ],
             runden_klang.value,
             ende_klang.value,
         )
 
     def sichern() -> str | None:
         """Prüfen und speichern — ``None`` = gespeichert, sonst warum nicht."""
-        abschnitte: list[Abschnitt] = []
+        teile_neu: list[Teil] = []
         fehler = False
-        for n, d, k in zeilen:
-            dauer = dauer_lesen(d.value or "")
-            d.error = None if dauer else "z. B. 0:30"
-            fehler = fehler or dauer is None
-            if dauer:
-                abschnitte.append(Abschnitt((n.value or "").strip(), dauer, _klang_wert(k)))
-        if fehler or not abschnitte:
+        for t in teile_ed:
+            abschnitte: list[Abschnitt] = []
+            for z in t.zeilen:
+                dauer = dauer_lesen(z.dauer.value or "")
+                z.dauer.error = None if dauer else "z. B. 0:30"
+                fehler = fehler or dauer is None
+                if dauer:
+                    abschnitte.append(
+                        Abschnitt(
+                            (z.name.value or "").strip(), dauer, _klang_wert(z.klang), z.zaehlt
+                        )
+                    )
+            teile_neu.append(Teil(abschnitte, t.runden, (t.name.value or "").strip()))
+        if fehler or not all(t.abschnitte for t in teile_neu):
             page.update()
             return "Eine Dauer ist unlesbar — so: 0:30 oder 1:15."
+        erster, *weitere = teile_neu
         neu = TimerProfil(
             id=profil.id,
             name=(name.value or "").strip() or "Timer",
-            abschnitte=abschnitte,
-            runden=runden["n"],
+            abschnitte=erster.abschnitte,
+            runden=erster.runden,
             runden_klang=_klang_wert(runden_klang),
             ende_klang=_klang_wert(ende_klang),
+            teil_name=erster.name if weitere else "",
+            teile=weitere,
         )
-        andere = [p for p in state.timer_profile() if p.id != neu.id]
-        if vorhanden is not None:
-            liste = [neu if p.id == neu.id else p for p in state.timer_profile()]
-        else:
-            liste = [*andere, neu]
-        state.timer_profile_setzen(liste)
-        state.timer_profil_waehlen(neu.id)
+        ziel.speichern(neu)
         gespeichert["name"] = neu.name
         return None
 
@@ -974,16 +1147,14 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
         if sichern() is not None:
             return
         page.show_dialog(ft.SnackBar(ft.Text(f"„{gespeichert['name']}“ gespeichert")))
-        await page.push_route(zurueck_route)
+        await page.push_route(ziel.zurueck)
 
     nachher = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (`components/dialoge.py`)
 
     def loeschen() -> None:
-        rest = [p for p in state.timer_profile() if p.id != profil.id]
-        state.timer_profile_setzen(rest)
-        if state.timer is not None and state.timer.profil.id == profil.id:
-            state.timer = None
-        nachher.danach(lambda: page.push_route(zurueck_route))
+        if ziel.loeschen is not None:
+            ziel.loeschen(profil)
+        nachher.danach(lambda: page.push_route(ziel.zurueck))
         page.pop_dialog()
         page.show_dialog(ft.SnackBar(ft.Text(f"„{profil.name}“ gelöscht")))
 
@@ -995,6 +1166,8 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
                 title=ft.Text("Profil löschen?"),
                 content=ft.Text(
                     "Gibt es danach kein eigenes Profil mehr, kommen die zwei Vorlagen zurück."
+                    if ziel.loeschen is not None and ziel.titel == "Timer-Profil"
+                    else "Das Profil verschwindet aus dieser Übung."
                 ),
                 actions=[
                     ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
@@ -1004,22 +1177,22 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
         )
 
     async def abbrechen() -> None:
-        await page.push_route(zurueck_route)
+        await page.push_route(ziel.zurueck)
 
-    zeilen.extend(zeile(a) for a in profil.abschnitte)
+    teile_ed.extend(teil_felder(t) for t in profil.alle_teile())
     zeichnen()
     anfang = stand()
 
     ansicht = ft.View(
         route=route,
         appbar=ft.AppBar(
-            title=ft.Text("Timer-Profil" if vorhanden else "Neues Timer-Profil"),
+            title=ft.Text(ziel.titel if vorhanden else f"Neues {ziel.titel}"),
             actions=[
                 ft.IconButton(
                     ft.Icons.DELETE_OUTLINE, tooltip="Profil löschen", on_click=loeschen_fragen
                 )
             ]
-            if vorhanden
+            if vorhanden and ziel.loeschen is not None
             else [],
         ),
         scroll=ft.ScrollMode.AUTO,
@@ -1030,32 +1203,22 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
                     spacing=16,
                     controls=[
                         name,
-                        karte(
-                            kartentitel("Abschnitte"),
-                            hinweis(
-                                "Je Abschnitt ein Name, die Dauer in Minuten:Sekunden und der "
-                                "Klang, mit dem er beginnt — etwa Glocke 1 für Belastung, "
-                                "Glocke 3 für die Pause."
-                            ),
-                            zeilen_spalte,
-                            ft.TextButton(
-                                "Abschnitt hinzufügen", icon=ft.Icons.ADD, on_click=hinzufuegen
-                            ),
+                        teile_spalte,
+                        ft.Row(
+                            controls=[
+                                ft.OutlinedButton(
+                                    "Teil anhängen",
+                                    icon=ft.Icons.ADD,
+                                    tooltip="Eine Folge: Vorbereitung, Training, Cooldown …",
+                                    on_click=teil_hinzufuegen,
+                                ),
+                                ft.Container(width=8),
+                                gesamt_text,
+                            ]
                         ),
-                        karte(
-                            kartentitel("Runden"),
-                            ft.Row(
-                                spacing=4,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                controls=[
-                                    ft.IconButton(ft.Icons.REMOVE, on_click=runden_aendern(-1)),
-                                    runden_text,
-                                    ft.IconButton(ft.Icons.ADD, on_click=runden_aendern(1)),
-                                    ft.Container(width=8),
-                                    gesamt_text,
-                                ],
-                            ),
-                            hinweis("Alle Abschnitte so oft nacheinander."),
+                        hinweis(
+                            "Ein Teil läuft so viele Runden, wie bei ihm steht; dann kommt der "
+                            "nächste — etwa Vorbereitung 1 ×, Halten und Pause 3 ×, Cooldown 1 ×."
                         ),
                         karte(
                             kartentitel("Klänge"),
@@ -1094,6 +1257,8 @@ def timer_bearbeiten_view(page: Any, state: AppState, profil_id: str | None, bas
 
 
 __all__ = [
+    "Profilziel",
+    "bibliothek",
     "lauf_fuer",
     "ticker_starten",
     "timer_bearbeiten_view",

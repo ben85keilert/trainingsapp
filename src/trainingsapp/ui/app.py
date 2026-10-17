@@ -91,7 +91,7 @@ from trainingsapp.ui.views.timer import (
 )
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 from trainingsapp.ui.views.uebung_detail import uebung_detail
-from trainingsapp.ui.views.uebung_timer import uebung_timer_view
+from trainingsapp.ui.views.uebung_timer import uebung_profilziel, uebung_timer_view
 from trainingsapp.ui.views.uebungen import neuen_plan_anlegen, uebungen
 from trainingsapp.ui.views.updates import ROUTE as UPDATES_ROUTE
 from trainingsapp.ui.views.updates import beim_start as updates_beim_start
@@ -376,9 +376,14 @@ def main(page: ft.Page) -> None:
         uebung = state.uebungen.laden(rest[0]) if rest else None
         if uebung is None:
             return
-        item = state.plaene.item_laden(rest[1]) if len(rest) > 1 else None
+        bearbeiten = rest.index("bearbeiten") if "bearbeiten" in rest else len(rest)
+        item = state.plaene.item_laden(rest[1]) if bearbeiten > 1 else None
         plan = state.plaene.laden(item.plan_id) if item is not None else None
         page.views.append(uebung_timer_view(page, state, basis, uebung, plan, item))
+        if bearbeiten < len(rest):  # …/bearbeiten[/<Profil>]: der Editor, gespeichert dort
+            profil_id = rest[bearbeiten + 1] if len(rest) > bearbeiten + 1 else None
+            ziel = uebung_profilziel(state, basis, uebung, plan, item)
+            page.views.append(timer_bearbeiten_view(page, state, profil_id, basis, ziel))
 
     def paket_routen(basis: str, rest: list[str]) -> None:
         """Der Paketmanager — aus dem Katalog (`/pakete`) oder den Einstellungen."""

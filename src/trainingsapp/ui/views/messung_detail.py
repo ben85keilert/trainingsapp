@@ -99,6 +99,7 @@ from trainingsapp.core.timer import name_aus_notiz as abschnittsname
 from trainingsapp.ui import ausrichtung
 from trainingsapp.ui.components.analyse import Analyse, Analysefenster, verlaufsdaten
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten
+from trainingsapp.ui.components.forschung import forschung_fragen
 from trainingsapp.ui.components.kacheln import (
     KACHELN,
     PULS_KACHELN,
@@ -364,6 +365,13 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     leiste_oben: ft.AppBar | None = None
     #: Zuschneiden braucht Intervalle — eine reine Pulsmessung hat keine
     zuschneidbar = True
+    #: Die Einheiten, an denen die Messung teilnahm (älteste zuerst) — für den
+    #: Forschungsexport (Stufe 4, Katalog A14)
+    einheiten = (
+        [i for i, _ in state.einheiten.zur_datei("hrv", eintrag.file_path)]
+        if state.einheiten is not None
+        else []
+    )
 
     def ansicht(inhalt: list[ft.Control]) -> ft.View:
         nonlocal leiste_oben
@@ -377,6 +385,12 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                     visible=zuschneidbar,
                 ),
                 ft.IconButton(ft.Icons.SHARE, tooltip="Exportieren (ZIP)", on_click=exportieren),
+                ft.IconButton(
+                    ft.Icons.SCIENCE_OUTLINED,
+                    tooltip="Für die Auswertung exportieren (ohne Ort)",
+                    on_click=lambda: forschung_fragen(page, state, einheiten),
+                    visible=bool(einheiten),
+                ),
                 ft.IconButton(
                     ft.Icons.DELETE_OUTLINE, tooltip="Aus der Liste entfernen", on_click=fragen
                 ),

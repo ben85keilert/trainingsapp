@@ -12,6 +12,7 @@ import json
 import math
 import random
 import zipfile
+from datetime import timedelta
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -870,3 +871,46 @@ async def test_forschungsexport_waehrend_die_hrv_weiterlaeuft(daten) -> None:
     (hrv,) = [t for t in gesehen["dok"]["teile"] if t["art"] == "hrv"]
     assert hrv["datei"] is None and hrv["rolle"] == "laeuft_schon"
     assert hrv["versatz_s"] == pytest.approx(-30.0, abs=1e-6)
+
+
+async def test_forschungsexport_aus_der_hrv_auswertung(daten, monkeypatch) -> None:
+    """A14: Auch die HRV-Auswertung bietet den Forschungsexport an, wenn die Messung zu
+    einer Einheit gehört; lief sie über mehrere, wählt man eine (vorgewählt die jüngste)."""
+    import flet as ft
+
+    from trainingsapp.core.einheit import Beteiligung, Rolle
+    from trainingsapp.ui.views.messung_detail import messung_detail_view
+
+    state, tmp_path = daten
+    geteilt: list[tuple[str, bytes]] = []
+
+    async def weitergeben(page, name, inhalt, mime) -> None:
+        geteilt.append((name, inhalt))
+
+    monkeypatch.setattr("trainingsapp.ui.components.forschung.weitergeben", weitergeben)
+    strecke, _ = await _training(state, tmp_path, hrv_vorher=30)
+    (aufnahme,) = state.hrv.alle(state.profil.id)
+    # Eine zweite, spätere Einheit mit derselben Messdatei (sie lief über beide)
+    spaeter = strecke.started_at + timedelta(hours=1)
+    state.einheiten.einheit_beginnen("e-spaeter", state.profil.id, spaeter, "Timer")
+    state.einheiten.beteiligung(
+        "e-spaeter", Beteiligung("hrv", Rolle.LAEUFT_SCHON, datei=aufnahme.file_path)
+    )
+    dialoge: list = []
+    seite = SimpleNamespace(**vars(_seite()))
+    seite.show_dialog = dialoge.append
+    ansicht = messung_detail_view(seite, state, aufnahme)
+    knopf = next(a for a in ansicht.appbar.actions if "Auswertung exportieren" in (a.tooltip or ""))
+    assert knopf.visible
+    knopf.on_click()
+    (dialog,) = dialoge
+    wahl = next(c for c in _alle(dialog.content) if isinstance(c, ft.RadioGroup))
+    assert wahl.value == "e-spaeter"  # die jüngste vorgewählt
+    wahl.value = strecke.einheit_id
+    wahl.on_change(SimpleNamespace(control=wahl))
+    next(a for a in dialog.actions if getattr(a, "content", None) == "Exportieren").on_click()
+    await dialog.on_dismiss(None)  # geteilt wird erst, wenn der Dialog zu ist
+    ((name, archiv),) = geteilt
+    with zipfile.ZipFile(BytesIO(archiv)) as z:
+        dok = json.loads(z.read("einheit-v1.json"))
+    assert dok["einheit"]["id"] == strecke.einheit_id and name.endswith(".zip")

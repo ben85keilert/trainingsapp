@@ -121,7 +121,7 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 | 1 | Zeitleiste, `Einheitslauf` mit HRV, Timer, GPS; Startleiste, Laufleiste, Bereitstellen; Dienst `health` | gebaut 17.10.; offen: Messung mit Dauer und Ablauf (Katalog A11) |
 | 2 | Ausdauertraining als Einheit (verknüpft auch eine schon laufende HRV, Abgleich über `versatz_s`, Wiederherstellung H16) | gebaut 17.10.; Tabellen „Intervalle“ und „Kilometer“ live und in der Auswertung (A10, `core/intervalle.py`) |
 | 3 | Timer an Übung, Planübung und Plan (mehrere Profile, „zählt“, Abbrechen), Plan-Ablauf, Einträge mit Anfang und Ende — Migration 020 | gebaut 17.10. (§7); „vom Timer“ unter „Heute geleistet“ gebaut (A13) |
-| 4 | Forschungsexport (ausdrückliche Handlung): Messdateien, Zeitleiste `einheit-v1.json`, ortsfreies Tempo | gebaut 17.10. (§8) in der Auswertung des Trainings; offen: aus der HRV-Auswertung, für Einheiten ohne GPS (A14) |
+| 4 | Forschungsexport (ausdrückliche Handlung): Messdateien, Zeitleiste `einheit-v1.json`, ortsfreies Tempo | gebaut 17.10. (§8), in der Auswertung des Trainings und der HRV-Messung |
 
 ## 7. Timer an der Übung und Plan-Ablauf (Stufe 3)
 
@@ -167,9 +167,10 @@ einzelnen Übung“ — und: „Aus dem Text heraus weiß die App nicht, was Üb
 
 Für die Auswertung außerhalb der App (hrv-research: DFA α1 gegen RMSSD je Belastung, Tempo
 aus GPS, welche Übung wann). **Ausdrückliche Handlung** wie „GPX exportieren“: in der
-Auswertung eines Trainings das Symbol „Für die Auswertung exportieren (ohne Ort)“, ein
-Dialog sagt, was hineingeht, dann das Teilen-Menü (`ui/training.forschung_export`,
-`core/forschung.py`).
+Auswertung eines Trainings oder einer HRV-Messung, die zu einer Einheit gehört, das Symbol
+„Für die Auswertung exportieren (ohne Ort)“; ein Dialog sagt, was hineingeht (lief die
+Messung über mehrere Einheiten, wählt man eine), dann das Teilen-Menü
+(`ui/components/forschung.py`, `ui/training.forschung_export`, `core/forschung.py`).
 
 **Das ZIP** (`einheit_<JJJJ-MM-TT_HHMM>.zip`):
 

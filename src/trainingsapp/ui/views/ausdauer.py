@@ -97,6 +97,7 @@ from trainingsapp.devices.strecke_baustein import StreckeBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.ausrichtung import querformat
 from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog, schliessen
+from trainingsapp.ui.components.forschung import forschung_fragen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.karte_strecke import StreckenKarte, ganze_strecke
 from trainingsapp.ui.components.kurve import Reihe, kurve
@@ -105,7 +106,6 @@ from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.training import (
     HrvBezug,
-    forschung_export,
     hrv_bezug,
     lauftext,
     verwaiste_uebernehmen,
@@ -1059,37 +1059,6 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
             page, f"{lokal:%Y-%m-%d_%H%M}_{strecke.sportart}.gpx", daten, "application/gpx+xml"
         )
 
-    def forschung_fragen() -> None:
-        """Forschungsexport (Stufe 4) — ausdrücklich, wie „GPX exportieren“, aber ohne Ort."""
-        dialog: ft.AlertDialog
-
-        async def exportieren() -> None:
-            schliessen(dialog)
-            if not strecke.einheit_id:
-                return
-            try:
-                name, daten = forschung_export(state, strecke.einheit_id)
-            except (OSError, ValueError) as fehler:
-                page.show_dialog(ft.SnackBar(ft.Text(f"Export nicht möglich: {fehler}")))
-                return
-            await weitergeben(page, name, daten, "application/zip")
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text("Für die Auswertung exportieren?"),
-            content=ft.Text(
-                "Ein ZIP mit der HRV-Messung (unverändert, mit Korrekturen), der Zeitleiste "
-                "dieser Einheit — Timer-Abschnitte, Kilometer, Übungen — und dem Tempo alle "
-                "5 Sekunden. Ohne Ort: keine Koordinaten, keine Richtung, keine Höhe. Wohin "
-                "es geht, wählst du im nächsten Schritt."
-            ),
-            actions=[
-                ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
-                ft.FilledButton("Exportieren", icon=ft.Icons.SCIENCE, on_click=exportieren),
-            ],
-        )
-        page.show_dialog(dialog)
-
     def loeschen_fragen() -> None:
         async def loeschen() -> None:
             state.strecken.loeschen(strecke.id)
@@ -1233,7 +1202,7 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
                 ft.IconButton(
                     ft.Icons.SCIENCE_OUTLINED,
                     tooltip="Für die Auswertung exportieren (ohne Ort)",
-                    on_click=forschung_fragen,
+                    on_click=lambda: forschung_fragen(page, state, [strecke.einheit_id or ""]),
                     visible=bool(strecke.einheit_id),
                 ),
                 ft.IconButton(

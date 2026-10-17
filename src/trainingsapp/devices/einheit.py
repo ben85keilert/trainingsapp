@@ -1,0 +1,646 @@
+"""Der Ablauf einer Einheit: Teile bereitstellen, gemeinsam starten, im Takt sammeln.
+
+Datenmodell und Regeln stehen in `trainingsapp.core.einheit` (Vertrag
+``docs/plan_einheit.md``); hier läuft es ab:
+
+1. `Einheitslauf.hinzufuegen` — HRV (`HrvBaustein`), Timer (`TimerBaustein`),
+   GPS (``devices.strecke_baustein``) …
+2. `Einheitslauf.vorbereiten` (async, alle zugleich) — bis jeder Teil ``bereit``
+   ist. Ein Fehler gehört dem Teil, nicht der Einheit (`fehler`).
+3. `Einheitslauf.starten` (synchron) — eine Uhrzeit für alle. Mit Countdown nimmt
+   eine mitstartende HRV-Aufnahme schon ab jetzt auf (Vorlauf); die übrigen Teile
+   starten, sobald der Takt das Ende des Countdowns erreicht — mit genau diesem t0.
+4. `Einheitslauf.takt` (`laufen` ruft ihn alle `TICK_S`) — sammelt die Ereignisse der
+   Teile, schreibt sie in die Zeitleiste (`Senke`), projiziert sie in die laufende
+   HRV-Aufnahme (Marke + Spur, 5-s-Regel) und meldet sie dem `beobachter`.
+5. `Einheitslauf.beenden` und `abschliessen` — Ende je Teil nach `am_ende_stoppen`
+   (Vorgabe: was ich nicht gestartet habe, stoppe ich nicht).
+
+Die Teile kennen einander nicht. Kein flet: Speichern in die Datenbank und das
+Eintragen einer Aufnahme bleiben beim Aufrufer (UI), wie bei `Messlauf`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from ..core.einheit import (
+    MIN_MARKE_S,
+    Baustein,
+    Beteiligung,
+    Ereignis,
+    Projektion,
+    Rolle,
+    Senke,
+    Zeitbasis,
+    Zustand,
+    projektion,
+)
+from ..core.laufend import uhr as uhr_text
+from ..core.limits import TICK_S
+from ..core.models import new_id
+from ..core.timer import TimerLauf
+from .base import Verbindung
+from .messlauf import Gespeichert, Messlauf
+
+#: So viel Tiefschlaf (s) zwischen zwei Takten wird ein Ereignis ``einheit/schlaf``
+SCHLAF_AB_S = 2.0
+
+
+def _schlafversatz() -> float | None:
+    """Wie weit die Bootuhr der monotonen voraus ist — wächst er, lag die CPU im Tiefschlaf.
+
+    ``time.monotonic`` steht im Tiefschlaf (CLOCK_MONOTONIC), ``CLOCK_BOOTTIME`` nicht
+    (Linux, Android). Anderswo ``None``.
+    """
+    boot = getattr(time, "CLOCK_BOOTTIME", None)
+    if boot is None:
+        return None
+    try:
+        return time.clock_gettime(boot) - time.monotonic()
+    except OSError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Teile
+# ---------------------------------------------------------------------------
+
+
+class TimerBaustein:
+    """Der Timer als Teil einer Einheit — er meldet Abschnitte, Pause, Weiter und Ende.
+
+    Die Einheit ist dann der **einzige** Abnehmer von `TimerLauf.neue_marken` (die
+    Oberfläche spielt nur noch die Töne). Gestartet wird immer von vorn, auf t0.
+    """
+
+    art = "timer"
+
+    def __init__(self, lauf: TimerLauf, *, uhr: Callable[[], float] | None = None) -> None:
+        self.lauf = lauf
+        if uhr is not None:
+            lauf.uhr_setzen(uhr)
+        self._t0: float | None = None
+        self._lief = False
+
+    def uhr_uebernehmen(self, uhr: Callable[[], float]) -> None:
+        """Die Uhr der Einheit — beim HRV-Simulator läuft sie schneller (`Einheitslauf`)."""
+        self.lauf.uhr_setzen(uhr)
+
+    @property
+    def bereit(self) -> bool:
+        return bool(self.lauf.profil.abschnitte)
+
+    def status(self) -> str:
+        p = self.lauf.profil
+        return f"{p.name} · {p.kurztext()}" if p.abschnitte else f"{p.name} · ohne Abschnitte"
+
+    async def vorbereiten(self) -> None:
+        return None
+
+    def starten(self, t0: float) -> Beteiligung:
+        self._t0 = t0
+        self.lauf.zuruecksetzen()
+        self.lauf.start(bei=t0)
+        self._lief = True
+        return Beteiligung("timer", Rolle.MITSTARTEN, daten={"profil": self.lauf.profil.name})
+
+    def takt(self, jetzt: float) -> list[Ereignis]:
+        if self._t0 is None:
+            return []
+        t0 = self._t0
+        out: list[Ereignis] = []
+        marken = self.lauf.neue_marken()
+        laeuft = self.lauf.laeuft
+        start = self.lauf.start_uhr
+        if self._lief and not laeuft and not self.lauf.fertig:
+            halt = self.lauf.angehalten_bei if self.lauf.angehalten_bei is not None else jetzt
+            out.append(Ereignis(halt - t0, "timer", "pause", "Timer angehalten"))
+        elif not self._lief and laeuft and start is not None:
+            # Geht es im selben Abschnitt weiter, meldet `neue_marken` nichts — dann ist es
+            # ein „weiter“; ein übersprungener Abschnitt beginnt mit seiner eigenen Marke.
+            if not any(m.bei is not None and m.bei >= start - 1e-6 for m in marken):
+                nummer = self.lauf.stand().nummer
+                name, runde, von = self.lauf.angaben(nummer)
+                abschnitt = self.lauf.abschnittsname(nummer)
+                weiter = {"abschnitt": abschnitt, "name": name, "runde": runde, "von": von}
+                out.append(Ereignis(start - t0, "timer", "weiter", f"weiter: {abschnitt}", weiter))
+        self._lief = laeuft
+        for m in marken:
+            t = (m.bei if m.bei is not None else jetzt - m.vor_s) - t0
+            if m.ende:
+                out.append(Ereignis(t, "timer", "ende", m.text))
+                continue
+            daten: dict[str, Any] = {
+                "abschnitt": m.abschnitt,
+                "name": m.name,
+                "runde": m.runde,
+                "von": m.von,
+                "profil": self.lauf.profil.name,
+            }
+            out.append(Ereignis(t, "timer", "abschnitt", m.text, daten))
+        return out
+
+    def beenden(self, jetzt: float) -> list[Ereignis]:
+        out = self.takt(jetzt)
+        if self._t0 is not None and not self.lauf.fertig:
+            self.lauf.pause()
+            out.append(
+                Ereignis(jetzt - self._t0, "timer", "ende", "Timer beendet", {"grund": "beendet"})
+            )
+        return out
+
+
+class HrvBaustein:
+    """Die HRV-Messung als Teil einer Einheit.
+
+    Läuft schon eine Aufnahme, tritt sie bei (`Rolle.LAEUFT_SCHON`) und läuft danach
+    weiter; sonst beginnt die Einheit eine (`aufnahme_beginnen`, beim Countdown schon
+    vorher). Verbinden bleibt Sache der Messansicht — bereit ist der Teil, wenn der
+    Gurt verbunden ist. Endet die Aufnahme mitten in der Einheit oder beginnt eine
+    neue, meldet der Takt das (``hrv/verlassen``, ``hrv/beigetreten``).
+    """
+
+    art = "hrv"
+
+    def __init__(self, messlauf: Messlauf, *, basis: Path | None = None) -> None:
+        self.messlauf = messlauf
+        #: Datenverzeichnis zum Speichern, wenn die Aufnahme mit der Einheit endet
+        self.basis = basis
+        self.rolle = Rolle.LAEUFT_SCHON if messlauf.aufnahme is not None else Rolle.MITSTARTEN
+        self._aufnahme: Any = None
+        self._t0: float | None = None
+        self.beteiligung: Beteiligung | None = None
+
+    @property
+    def bereit(self) -> bool:
+        lauf = self.messlauf
+        return lauf.aufnahme is not None or lauf.status.verbindung == Verbindung.VERBUNDEN
+
+    def status(self) -> str:
+        lauf = self.messlauf
+        if lauf.aufnahme is not None:
+            return f"läuft seit {uhr_text(lauf.aufnahme_dauer_s())} · bekommt eine Marke"
+        if lauf.status.verbindung == Verbindung.VERBUNDEN:
+            return f"{lauf.geraet_name or 'Gurt'} verbunden · startet mit"
+        return "nicht verbunden"
+
+    async def vorbereiten(self) -> None:
+        return None
+
+    def aufnahme_beginnen(self, start_mono: float, start_utc: datetime) -> None:
+        """Die Aufnahme mit der Einheit beginnen — auf den vorgegebenen Nullpunkt."""
+        if self.messlauf.aufnahme is None:
+            self.messlauf.aufnahme_starten(start_mono=start_mono, start_utc=start_utc)
+            self.rolle = Rolle.MITSTARTEN
+
+    def starten(self, t0: float) -> Beteiligung:
+        self._t0 = t0
+        self._aufnahme = self.messlauf.aufnahme
+        self.beteiligung = self._beteiligung(self.rolle, von_s=0.0)
+        return self.beteiligung
+
+    def _beteiligung(self, rolle: Rolle, *, von_s: float) -> Beteiligung:
+        lauf = self.messlauf
+        aufnahme = lauf.aufnahme
+        versatz = None
+        if aufnahme is not None and self._t0 is not None:
+            versatz = round(aufnahme.start_mono - self._t0, 6)
+        return Beteiligung(
+            "hrv",
+            rolle,
+            datei=lauf.datei_relativ() or "",
+            versatz_s=versatz,
+            von_s=von_s,
+            daten={"teil": lauf.geraet_name},
+        )
+
+    def takt(self, jetzt: float) -> list[Ereignis]:
+        lauf = self.messlauf
+        if self._t0 is None or lauf.aufnahme is self._aufnahme:
+            return []
+        t0 = self._t0
+        out: list[Ereignis] = []
+        if self._aufnahme is not None and self.beteiligung is not None:
+            out.append(
+                Ereignis(jetzt - t0, "hrv", "verlassen", daten={"datei": self.beteiligung.datei})
+            )
+        self._aufnahme = lauf.aufnahme
+        if lauf.aufnahme is not None:
+            von = lauf.aufnahme.start_mono - t0
+            self.beteiligung = self._beteiligung(Rolle.MITSTARTEN, von_s=max(von, 0.0))
+            out.append(
+                Ereignis(
+                    max(von, 0.0),
+                    "hrv",
+                    "beigetreten",
+                    daten={
+                        "datei": self.beteiligung.datei,
+                        "versatz_s": self.beteiligung.versatz_s,
+                        "teil": lauf.geraet_name,
+                    },
+                )
+            )
+        return out
+
+    def beenden(self, jetzt: float) -> list[Ereignis]:
+        return self.takt(jetzt)
+
+    def projizieren(self, p: Projektion, bei: float) -> bool:
+        """Eine Projektion als Notiz und Grenze in die laufende Aufnahme — wenn es sie gibt."""
+        lauf = self.messlauf
+        if lauf.aufnahme is None or lauf.aufnahme is not self._aufnahme:
+            return False
+        eintrag = lauf.abschnitt_markieren(
+            p.text,
+            name=p.name,
+            ende=p.ende,
+            spur=p.spur,
+            bei=bei,
+            marke=p.marke,
+            als_notiz=p.als_notiz,
+        )
+        return eintrag is not None
+
+    def abschliessen(self) -> Gespeichert | None:
+        """Die Aufnahme beenden und speichern — nur mit Datenverzeichnis."""
+        if self.basis is None or self.messlauf.aufnahme is None:
+            return None
+        return self.messlauf.aufnahme_stoppen(self.basis)
+
+
+# ---------------------------------------------------------------------------
+# Die Einheit
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Abschluss:
+    """Was nach dem Ende übrig ist und der Aufrufer eintragen muss."""
+
+    #: die gespeicherte HRV-Aufnahme, wenn sie mit der Einheit endete
+    hrv: Gespeichert | None = None
+    #: je weiterem Teil, was er hinterlässt (``devices.strecke_baustein``: die Strecke)
+    teile: dict[str, Any] = field(default_factory=dict)
+
+
+class Einheitslauf:
+    """Klammer um HRV, Timer, GPS … — gemeinsam vorbereitet, gemeinsam gestartet."""
+
+    def __init__(
+        self,
+        *,
+        uhr: Callable[[], float] = time.monotonic,
+        jetzt_utc: Callable[[], datetime] = lambda: datetime.now(UTC),
+        senke: Senke | None = None,
+        subject_id: str | None = None,
+        titel: str = "",
+    ) -> None:
+        self.id = new_id()
+        #: Uhr der Einheit — mit HRV die des `Messlauf` (`Messlauf.uhr`)
+        self.uhr = uhr
+        self._jetzt_utc = jetzt_utc
+        self.senke = senke
+        self.subject_id = subject_id
+        self.titel = titel
+        self.teile: list[Baustein] = []
+        self.zustand = Zustand.VORBEREITUNG
+        self.zeitbasis: Zeitbasis | None = None
+        #: Uhr der Einheit bei t_s = 0
+        self.t0: float | None = None
+        self.countdown_s = 0.0
+        #: Ende der Einheit, wenn der Timer fertig ist („Dauer 15 min“, Ablauf)
+        self.ende_mit_timer = False
+        #: je Teil (``"hrv"``, ``"gps"``): beim Ende stoppen? Fehlt er, gilt die Vorgabe —
+        #: stoppen, was mit der Einheit begann, weiterlaufen lassen, was schon lief
+        self.am_ende_stoppen: dict[str, bool] = {}
+        #: alle Ereignisse in der Reihenfolge der Zeitleiste
+        self.ereignisse: list[Ereignis] = []
+        #: Fehler beim Vorbereiten je Teil
+        self.fehler: dict[str, str] = {}
+        #: Was nicht klappte, aber nichts anhält (Zeitleiste nicht geschrieben …)
+        self.warnung: str | None = None
+        #: Wird nach jedem Takt mit den neuen Ereignissen gerufen; Fehler stoppen nichts
+        self.beobachter: Callable[[list[Ereignis]], None] | None = None
+        self._beteiligungen: dict[int, Beteiligung] = {}
+        self._gestartet: set[int] = set()
+        self._nr = 0
+        self._zurueck: dict[str, tuple[Ereignis, Projektion]] = {}
+        self._schlaf: float | None = None
+        self._kopf_geschrieben = False
+
+    # -- Aufbau -------------------------------------------------------------------
+
+    def hinzufuegen(self, teil: Baustein) -> None:
+        """Einen Teil dazunehmen — nur vor dem Start, jede Art einmal."""
+        if self.zustand not in (Zustand.VORBEREITUNG, Zustand.BEREIT):
+            raise RuntimeError("Teile kommen vor dem Start dazu")
+        if any(t.art == teil.art for t in self.teile):
+            raise ValueError(f"{teil.art} ist schon dabei")
+        uebernehmen = getattr(teil, "uhr_uebernehmen", None)
+        if callable(uebernehmen):  # alle Teile auf der Uhr der Einheit
+            uebernehmen(self.uhr)
+        self.teile.append(teil)
+        self.zustand = Zustand.VORBEREITUNG
+
+    def entfernen(self, art: str) -> None:
+        if self.zustand not in (Zustand.VORBEREITUNG, Zustand.BEREIT):
+            raise RuntimeError("Teile gehen nur vor dem Start")
+        self.teile = [t for t in self.teile if t.art != art]
+
+    def teil(self, art: str) -> Baustein | None:
+        return next((t for t in self.teile if t.art == art), None)
+
+    @property
+    def hrv(self) -> HrvBaustein | None:
+        teil = self.teil("hrv")
+        return teil if isinstance(teil, HrvBaustein) else None
+
+    @property
+    def timer(self) -> TimerBaustein | None:
+        teil = self.teil("timer")
+        return teil if isinstance(teil, TimerBaustein) else None
+
+    @property
+    def bereit(self) -> bool:
+        return bool(self.teile) and all(t.bereit for t in self.teile)
+
+    @property
+    def laeuft(self) -> bool:
+        return self.zustand in (Zustand.COUNTDOWN, Zustand.LAEUFT)
+
+    def dauer_s(self) -> float:
+        """Sekunden seit dem Start (im Countdown negativ) — 0 vor dem Start."""
+        if self.t0 is None:
+            return 0.0
+        return self.uhr() - self.t0
+
+    # -- Vorbereiten und Starten -----------------------------------------------------
+
+    async def vorbereiten(self) -> dict[str, str]:
+        """Alle Teile zugleich vorbereiten — ein Fehler bleibt bei seinem Teil."""
+        ergebnisse = await asyncio.gather(
+            *(t.vorbereiten() for t in self.teile), return_exceptions=True
+        )
+        self.fehler = {
+            t.art: str(e) or type(e).__name__
+            for t, e in zip(self.teile, ergebnisse, strict=True)
+            if isinstance(e, BaseException)
+        }
+        if self.bereit and not self.fehler:
+            self.zustand = Zustand.BEREIT
+        return self.fehler
+
+    def starten(self, countdown_s: float = 0.0) -> float:
+        """Alle Teile auf einen Zeitpunkt — synchron, ohne ``await`` (Vertrag §2).
+
+        Gibt t0 zurück (Uhr der Einheit). Mit Countdown liegt t0 in der Zukunft; eine
+        mitstartende HRV-Aufnahme beginnt schon jetzt (Vorlauf), die übrigen Teile
+        startet der erste Takt nach t0 — mit genau diesem t0.
+        """
+        if self.zustand not in (Zustand.VORBEREITUNG, Zustand.BEREIT):
+            raise RuntimeError("Die Einheit läuft schon")
+        if not self.teile:
+            raise RuntimeError("Eine Einheit ohne Teile")
+        jetzt = self.uhr()
+        self.countdown_s = max(countdown_s, 0.0)
+        t0 = jetzt + self.countdown_s
+        self.t0 = t0
+        self.zeitbasis = Zeitbasis(t0, self._jetzt_utc() + timedelta(seconds=self.countdown_s))
+        hrv = self.hrv
+        if hrv is not None and hrv.messlauf.aufnahme is None:
+            hrv.aufnahme_beginnen(jetzt, self.zeitbasis.utc(jetzt - t0))
+        if self.countdown_s > 0:
+            # Nur die HRV nimmt schon auf (Vorlauf); der Rest startet nach dem Countdown
+            self.zustand = Zustand.COUNTDOWN
+            if hrv is not None:
+                self._teil_starten(hrv, t0)
+            self._kopf_schreiben()
+        else:
+            # Erst alle Teile in einer Schleife ohne ``await``, geschrieben wird danach
+            self._rest_starten(t0)
+            self._kopf_schreiben()
+            self._start_melden(t0)
+        return t0
+
+    def _teil_starten(self, teil: Baustein, t0: float) -> None:
+        b = teil.starten(t0)
+        self._beteiligungen[id(teil)] = b
+        self._gestartet.add(id(teil))
+
+    def _rest_starten(self, t0: float) -> list[Baustein]:
+        """Die Teile, die noch nicht laufen — synchron, ohne zu schreiben."""
+        neu = [t for t in self.teile if id(t) not in self._gestartet]
+        for teil in neu:
+            self._teil_starten(teil, t0)
+        self.zustand = Zustand.LAEUFT
+        return neu
+
+    def _start_melden(self, t0: float) -> list[Ereignis]:
+        daten: dict[str, Any] = {"countdown_s": self.countdown_s} if self.countdown_s else {}
+        start = Ereignis(0.0, "einheit", "start", self.titel, daten)
+        self._aufnehmen([start], t0)
+        return [start]
+
+    def _kopf_schreiben(self) -> None:
+        """Kopf der Einheit und die Beteiligungen der gestarteten Teile."""
+        if self.senke is None or self.zeitbasis is None:
+            return
+        try:
+            self.senke.einheit_beginnen(
+                self.id, self.subject_id, self.zeitbasis.utc(0.0), self.titel
+            )
+            self._kopf_geschrieben = True
+            for b in self._beteiligungen.values():
+                self.senke.beteiligung(self.id, b)
+        except Exception as fehler:  # die Einheit läuft trotzdem
+            self.warnung = f"Zeitleiste nicht gespeichert: {fehler}"
+
+    def _beteiligungen_schreiben(self, teile: Sequence[Baustein]) -> None:
+        if self.senke is None or not self._kopf_geschrieben:
+            return
+        try:
+            for teil in teile:
+                self.senke.beteiligung(self.id, self._beteiligungen[id(teil)])
+        except Exception as fehler:
+            self.warnung = f"Zeitleiste nicht gespeichert: {fehler}"
+
+    # -- Takt -----------------------------------------------------------------------
+
+    @property
+    def _einheit_spur(self) -> bool:
+        """Eine eigene Spur für die Einheit lohnt nur, wenn die HRV-Aufnahme schon lief."""
+        hrv = self.hrv
+        return hrv is not None and hrv.rolle is Rolle.LAEUFT_SCHON
+
+    def takt(self) -> list[Ereignis]:
+        """Ereignisse aller Teile seit dem letzten Takt sammeln, schreiben, projizieren."""
+        if not self.laeuft or self.t0 is None:
+            return []
+        jetzt = self.uhr()
+        neu: list[Ereignis] = []
+        if self.zustand is Zustand.COUNTDOWN:
+            if jetzt < self.t0:
+                return []
+            self._beteiligungen_schreiben(self._rest_starten(self.t0))
+            neu.extend(self._start_melden(self.t0))
+        gesammelt: list[Ereignis] = []
+        for teil in self.teile:
+            if id(teil) in self._gestartet:
+                gesammelt.extend(teil.takt(jetzt))
+        gesammelt.extend(self._schlaf_pruefen(jetzt))
+        gesammelt.sort(key=lambda e: e.t_s)
+        self._aufnehmen(gesammelt, jetzt)
+        neu.extend(gesammelt)
+        if neu and self.beobachter is not None:
+            with contextlib.suppress(Exception):
+                self.beobachter(neu)
+        if self.ende_mit_timer and any(e.quelle == "timer" and e.art == "ende" for e in neu):
+            self.beenden()
+        return neu
+
+    def _schlaf_pruefen(self, jetzt: float) -> list[Ereignis]:
+        """Tiefschlaf zwischen zwei Takten wird ein Ereignis (Datenqualität)."""
+        if self.uhr is not time.monotonic or self.t0 is None:
+            return []
+        versatz = _schlafversatz()
+        if versatz is None:
+            return []
+        alt, self._schlaf = self._schlaf, versatz
+        if alt is None or versatz - alt < SCHLAF_AB_S:
+            return []
+        return [
+            Ereignis(
+                jetzt - self.t0, "einheit", "schlaf", daten={"schlaf_s": round(versatz - alt, 1)}
+            )
+        ]
+
+    def _aufnehmen(self, neu: Sequence[Ereignis], jetzt: float) -> None:
+        """Nummerieren, in die Zeitleiste schreiben, projizieren — auch ohne Neues prüft
+        das wartende Anfangsmarken (5-s-Regel)."""
+        if not neu:
+            self._projizieren(neu, jetzt)
+            return
+        liste: list[tuple[int, Ereignis]] = []
+        for e in neu:
+            liste.append((self._nr, e))
+            self._nr += 1
+            self.ereignisse.append(e)
+            if e.quelle == "hrv" and e.art == "beigetreten":
+                self._beigetreten()
+        if self.senke is not None and self._kopf_geschrieben:
+            try:
+                self.senke.ereignisse_schreiben(self.id, liste)
+            except Exception as fehler:  # die Einheit läuft trotzdem
+                self.warnung = f"Zeitleiste nicht gespeichert: {fehler}"
+        self._projizieren(neu, jetzt)
+
+    def _beigetreten(self) -> None:
+        """Eine neue HRV-Aufnahme mitten in der Einheit: eine weitere Beteiligung."""
+        hrv = self.hrv
+        if hrv is None or hrv.beteiligung is None:
+            return
+        self._beteiligungen[id(hrv)] = hrv.beteiligung
+        if self.senke is not None and self._kopf_geschrieben:
+            with contextlib.suppress(Exception):
+                self.senke.beteiligung(self.id, hrv.beteiligung)
+
+    def _projizieren(self, neu: Sequence[Ereignis], jetzt: float) -> None:
+        """In die HRV-Aufnahme — Anfänge warten `MIN_MARKE_S` (5-s-Regel), Enden nicht."""
+        hrv = self.hrv
+        if hrv is None or self.t0 is None:
+            return
+        t0 = self.t0
+        for e in neu:
+            p = projektion(e, self.id, einheit_spur=self._einheit_spur)
+            if p is None:
+                continue
+            offen = self._zurueck.pop(p.spur, None)
+            if offen is not None and e.t_s - offen[0].t_s >= MIN_MARKE_S:
+                hrv.projizieren(offen[1], t0 + offen[0].t_s)
+            if p.ende:
+                hrv.projizieren(p, t0 + e.t_s)
+            else:
+                self._zurueck[p.spur] = (e, p)
+        t = jetzt - t0
+        for spur, (e, p) in list(self._zurueck.items()):
+            if t - e.t_s >= MIN_MARKE_S:
+                hrv.projizieren(p, t0 + e.t_s)
+                del self._zurueck[spur]
+
+    async def laufen(self, takt_s: float = TICK_S) -> None:
+        """Takt für Takt, bis die Einheit endet — über `page.run_task` starten."""
+        while self.zustand is not Zustand.BEENDET:
+            self.takt()
+            await asyncio.sleep(takt_s)
+
+    # -- Ende -----------------------------------------------------------------------
+
+    def stoppt_am_ende(self, art: str) -> bool:
+        """Endet der Teil mit der Einheit? Vorgabe: was mit ihr begann."""
+        if art in self.am_ende_stoppen:
+            return self.am_ende_stoppen[art]
+        if art == "hrv":
+            hrv = self.hrv
+            return hrv is not None and hrv.rolle is Rolle.MITSTARTEN
+        return True
+
+    def beenden(self) -> list[Ereignis]:
+        """Alle Teile beenden — die letzten Ereignisse schreiben und projizieren (synchron)."""
+        if self.zustand is Zustand.BEENDET:
+            return []
+        jetzt = self.uhr()
+        if self.t0 is None:  # nie gestartet
+            self.zustand = Zustand.BEENDET
+            return []
+        t = jetzt - self.t0
+        gesammelt: list[Ereignis] = []
+        for teil in self.teile:
+            if id(teil) in self._gestartet:
+                gesammelt.extend(teil.beenden(jetzt))
+        grund = "abgebrochen" if self.zustand is Zustand.COUNTDOWN else ""
+        gesammelt.sort(key=lambda e: e.t_s)
+        ende = Ereignis(
+            max(t, 0.0), "einheit", "ende", self.titel, {"grund": grund} if grund else {}
+        )
+        self._aufnehmen([*gesammelt, ende], jetzt)
+        # Was jetzt noch wartet, lief kürzer als 5 s — keine Marke (5-s-Regel)
+        self._zurueck.clear()
+        self.zustand = Zustand.BEENDET
+        if self.senke is not None and self._kopf_geschrieben and self.zeitbasis is not None:
+            try:
+                for b in self._beteiligungen.values():
+                    if b.bis_s is None:
+                        b.bis_s = round(max(t, 0.0), 3)
+                    self.senke.beteiligung(self.id, b)
+                self.senke.einheit_beenden(self.id, self.zeitbasis.utc(max(t, 0.0)))
+            except Exception as fehler:
+                self.warnung = f"Zeitleiste nicht abgeschlossen: {fehler}"
+        if self.beobachter is not None:
+            with contextlib.suppress(Exception):
+                self.beobachter([*gesammelt, ende])
+        return [*gesammelt, ende]
+
+    async def abschliessen(self) -> Abschluss:
+        """Nach `beenden`: Teile aufräumen, die HRV-Aufnahme speichern, wenn sie mit endet."""
+        if self.zustand is not Zustand.BEENDET:
+            self.beenden()
+        abschluss = Abschluss()
+        for teil in self.teile:
+            fertig = getattr(teil, "abschliessen_async", None)
+            if fertig is not None and id(teil) in self._gestartet:
+                abschluss.teile[teil.art] = await fertig(self.stoppt_am_ende(teil.art))
+        hrv = self.hrv
+        if hrv is not None and self.stoppt_am_ende("hrv"):
+            abschluss.hrv = hrv.abschliessen()
+        return abschluss
+
+
+__all__ = ["SCHLAF_AB_S", "Abschluss", "Einheitslauf", "HrvBaustein", "TimerBaustein"]

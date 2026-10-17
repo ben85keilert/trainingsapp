@@ -552,6 +552,20 @@ class TimerLauf:
         """Uhr beim letzten Start oder Fortsetzen — ``None``, solange er steht."""
         return self._start
 
+    def uhr_setzen(self, uhr: Callable[[], float]) -> bool:
+        """Auf eine andere Uhr umstellen — nur, solange er noch nicht begonnen hat.
+
+        Eine Einheit gibt allen Teilen ihre Uhr (beim HRV-Simulator läuft sie schneller).
+
+        >>> lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 10)]), uhr=lambda: 0.0)
+        >>> lauf.uhr_setzen(lambda: 5.0), lauf.start(), lauf.uhr_setzen(lambda: 9.0)
+        (True, None, False)
+        """
+        if self.begonnen:
+            return False
+        self._uhr = uhr
+        return True
+
     @property
     def laeuft(self) -> bool:
         return self._start is not None and not self.fertig

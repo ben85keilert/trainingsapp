@@ -99,8 +99,15 @@ from trainingsapp.core.timer import name_aus_notiz as abschnittsname
 from trainingsapp.ui import ausrichtung
 from trainingsapp.ui.components.analyse import Analyse, Analysefenster, verlaufsdaten
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten
-from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, anzeige, zahl
-from trainingsapp.ui.components.karte import hinweis, karte
+from trainingsapp.ui.components.kacheln import (
+    KACHELN,
+    PULS_KACHELN,
+    KachelWert,
+    anzeige,
+    ohne_intervalle,
+    zahl,
+)
+from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
@@ -232,6 +239,89 @@ class _Analysewahl:
     auftrag: int = 0
 
 
+#: Kleinste Spanne der Pulskurve (bpm) — wie live (`views.messung.HF_SPANNE_MIN_BPM`)
+HF_SPANNE_MIN_BPM = 10.0
+
+
+def _kurven_info(nur_puls: bool, verworfen: object) -> str:
+    """Was hinter dem „i“ der Hauptkurve steht (Ben, 17.10.2026: vorher grauer Text).
+
+    >>> _kurven_info(True, None).startswith("Diese Messung enthält nur die **Herzfrequenz**")
+    True
+    """
+    if nur_puls:
+        return (
+            "Diese Messung enthält nur die **Herzfrequenz** (bpm) — das Gerät hat keine "
+            "Abstände von Schlag zu Schlag gesendet. Die Kurve zeigt den Puls; HRV-Werte, "
+            "Korrektur, Zuschneiden und Abschnitte gibt es dafür nicht.\n\n"
+            "- **Gelb:** Notizen"
+        )
+    grau = "alle Intervalle des Sensors, auch verworfene" if verworfen else "Rohwerte"
+    return (
+        f"- **Grau:** {grau}\n"
+        "- **Farbig:** gewertet (korrigiert)\n"
+        "- **Rot:** auffällige Schläge\n"
+        "- **Gelb:** Notizen\n\n"
+        "Waagrecht wischen blättert, die Breite darüber wählt den Ausschnitt. "
+        "Korrigiert wird unter „Korrektur“ — die Rohdatei bleibt unverändert."
+    )
+
+
+# Was hinter den „i“ der übrigen Karten steht — vorher grauer Text darin (Ben, 17.10.2026).
+# Sichtbar bleibt, was die Zahlen einschränkt: gesperrte Bänder, optisch nicht belastbar.
+
+ABSCHNITTE_INFO = (
+    "Werte je Abschnitt — so lassen sich Belastung und Pause oder Übungen vergleichen.\n\n"
+    "- **„+ Abschnitt“** wählt einen Bereich in der Kurve.\n"
+    "- **Menü daneben:** Notizen werden zu Grenzen.\n"
+    "- **Antippen** eines Abschnitts: Grenzen in der Kurve verschieben, umbenennen, löschen; "
+    "nahe Notizen ziehen die Grenzen an.\n\n"
+    "Notizen sind dafür nicht nötig. Mit dem Timer entstehen Abschnitte beim Speichern der "
+    "Aufnahme von selbst."
+)
+
+KORREKTUR_INFO = (
+    "Vorschläge der Automatik: **kurze Ketten** auffälliger Schläge werden interpoliert, "
+    "**lange** ausgeschlossen.\n\n"
+    "- **Antippen** übernimmt oder verwirft einen Vorschlag, die **Lupe** zeigt die Stelle "
+    "in der Kurve.\n"
+    "- **„Alle“ / „Keine“** übernimmt bzw. verwirft alle auf einmal.\n"
+    "- **Regler:** die Regeln der Automatik für diese Messung ändern oder als Vorgabe merken.\n\n"
+    "„Korrektur speichern“ legt sie neben die Messung — die Rohdatei bleibt unverändert."
+)
+
+#: Zur Karte „Verlauf“: was die Tabelle des Bereichs zusammenfasst
+TABELLE_INFO = {
+    "zeit": "**Tabelle:** die ganze Messung, roh und korrigiert. Über Nähte (Lücken, "
+    "Ausschlüsse) wird keine Differenz gebildet.",
+    "frequenz": "**Tabelle:** die ganze Messung (korrigiert), Lomb-Scargle je lückenfreiem "
+    "Teilstück; bei langen Messungen LF/HF als Mittel von 5-min-Spektren, VLF von "
+    "30-min-Spektren, ULF über die ganze Länge. „gesperrt“: Das Band lässt sich in dieser "
+    "Messung nicht sicher bestimmen — warum, steht unter der Tabelle.",
+    "nichtlinear": "**Tabelle:** die ganze Messung (korrigiert). Nichtlineare Werte brauchen "
+    "genaue Schlagzeiten: beim 130-Hz-EKG des H10 als Trend lesbar, bei optischen "
+    "Pulsintervallen nicht belastbar.",
+}
+
+FENSTER_INFO = (
+    "**Analysefenster** (über Spektrum bzw. Poincaré): die ganze Messung, ein Abschnitt oder "
+    "ein Fenster fester Länge. Das Fenster als Band in der Rohkurve greifen und schieben; "
+    "die Pfeile rücken es um ein halbes weiter."
+)
+
+
+def _verlauf_info(bereich: str) -> str:
+    """Was das „i“ der Karte „Verlauf“ in der Aufzeichnung zusätzlich erklärt.
+
+    >>> "Analysefenster" in _verlauf_info("frequenz"), "Analysefenster" in _verlauf_info("zeit")
+    (True, False)
+    """
+    teile = [TABELLE_INFO.get(bereich, "")]
+    if bereich in ("frequenz", "nichtlinear"):
+        teile.append(FENSTER_INFO)
+    return "\n\n".join(t for t in teile if t)
+
+
 @dataclass
 class _Kurvenmodus:
     """Was Tippen und Ziehen in der Rohkurve gerade tun."""
@@ -272,6 +362,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     #: Die Leiste der Ansicht — das Vollbild nimmt sie ab und gibt sie zurück
     leiste_oben: ft.AppBar | None = None
+    #: Zuschneiden braucht Intervalle — eine reine Pulsmessung hat keine
+    zuschneidbar = True
 
     def ansicht(inhalt: list[ft.Control]) -> ft.View:
         nonlocal leiste_oben
@@ -282,6 +374,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                     ft.Icons.CONTENT_CUT,
                     tooltip="Zuschneiden",
                     on_click=lambda: crop_oeffnen(),
+                    visible=zuschneidbar,
                 ),
                 ft.IconButton(ft.Icons.SHARE, tooltip="Exportieren (ZIP)", on_click=exportieren),
                 ft.IconButton(
@@ -353,6 +446,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     # Optische Intervalle streuen mehr: Malik „nach Sensor" = 0.30 (Vertrag, Abschnitt 5).
     gespeicherte_regeln = analyse_regeln(pfad)
     z = _Zustand(rec, gespeicherte_regeln or state.korrekturregeln())
+    zuschneidbar = not z.nur_puls
     z.gespeichert = analyse_laden(pfad, z.basis)
     z.auswahl_aus(z.gespeichert, ohne_sidecar=gespeicherte_regeln is None)
     #: Auswahl und Regeln beim Öffnen bzw. beim letzten Speichern. Zurück speichert nur,
@@ -365,7 +459,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         hier = (frozenset(z.uebernommen), z.regeln) != bezug[0]
         return hier and z.geaendert(gespeicherte_regeln)
 
-    dauer = max((t for t, _ in z.roh_punkte), default=0.0)
+    dauer = max((t for t, _ in (z.puls_punkte if z.nur_puls else z.roh_punkte)), default=0.0)
     start_breite = START_BREITE_S if dauer > START_BREITE_S else 0
     fenster = (
         Fenster(float(start_breite), float(start_breite))
@@ -373,10 +467,17 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         else Fenster(dauer or 1.0, None)
     )
     # Notizen hängen an den Zeilen der Rohdatei; die Kurve hat ihre eigene Zeitachse
-    zeilen_achse = schlagzeiten(rec)
-    # Crop und eigene Abschnitte stehen im Sidecar auf der Herzuhr der Rohdatei
+    # (nur Puls: die Wanduhr, siehe `_Zustand`)
+    zeilen_achse = (
+        [float(b.t_wall_s or 0.0) for b in rec.beats] if z.nur_puls else schlagzeiten(rec)
+    )
+    # Crop und eigene Abschnitte stehen im Sidecar auf der Herzuhr der Rohdatei — die
+    # hat eine reine Pulsmessung nicht, dort gibt es beides nicht
     nach_datei, nach_achse = achsen_umrechnung(zeilen_achse, [b.t_s for b in rec.beats])
-    z.ausschnitt, eigene = zusatz_lesen(pfad, nach_achse)
+    if z.nur_puls:
+        eigene: list[Any] = []
+    else:
+        z.ausschnitt, eigene = zusatz_lesen(pfad, nach_achse)
     zeitbezug = Zeitbezug(lambda: rec.beats, rec.start_utc, achse=lambda: zeilen_achse)
 
     kopf_text = ft.Text(size=13, opacity=0.8)
@@ -481,8 +582,12 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             if art is None or key == "schwankung":
                 continue
             g = key in gross
+            bisher = len(out)
             if key == "hf":
-                out.append(KachelWert("Ø Herzfrequenz", zahl(td.get("mean_bpm")), "bpm", gross=g))
+                mittel = td.get("mean_bpm")
+                if mittel is None and z.puls_punkte:  # nur Puls: aus den Werten des Geräts
+                    mittel = sum(h for _, h in z.puls_punkte) / len(z.puls_punkte)
+                out.append(KachelWert("Ø Herzfrequenz", zahl(mittel), "bpm", gross=g))
             elif key == "rr":
                 titel_rr = "Ø PPI" if verity else "Ø RR"
                 out.append(KachelWert(titel_rr, zahl(td.get("mean_rr")), "ms", gross=g))
@@ -537,9 +642,14 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                         gross=g,
                     )
                 )
+            # Ohne Intervalle: der Grund statt „zu wenige gute Schläge“ (Ben, 17.10.2026)
+            if z.nur_puls and key not in PULS_KACHELN and len(out) > bisher:
+                out[-1] = ohne_intervalle(out[-1])
         return out
 
     def tabelle(bereich: str) -> ft.Control | None:
+        if z.nur_puls:
+            return None  # ohne Intervalle stünden dort nur Striche
         if bereich == "frequenz":
             return _frequenz_tabelle(frequenz())
         if bereich == "nichtlinear":
@@ -655,14 +765,25 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             vollbild_kurven(x_von, x_bis, hinten)
             return
         strich = m.strich if m.ablesen else None
-        rr_box.content = kurve(
-            [*hinten, *roh_reihen(x_von, x_bis), *marken_reihen(x_von, x_bis)],
-            einheit="PPI ms" if verity else "RR ms",
-            hoehe=220,
-            x_von=x_von,
-            x_bis=x_bis,
-            y_spanne_min=RR_SPANNE_MIN_MS,
-        )
+        if z.nur_puls:
+            puls = [(t, h) for t, h in z.puls_punkte if x_von <= t <= x_bis]
+            rr_box.content = kurve(
+                [*hinten, Reihe(puls, farbe=ft.Colors.PRIMARY), *marken_reihen(x_von, x_bis)],
+                einheit="HF bpm",
+                hoehe=220,
+                x_von=x_von,
+                x_bis=x_bis,
+                y_spanne_min=HF_SPANNE_MIN_BPM,
+            )
+        else:
+            rr_box.content = kurve(
+                [*hinten, *roh_reihen(x_von, x_bis), *marken_reihen(x_von, x_bis)],
+                einheit="PPI ms" if verity else "RR ms",
+                hoehe=220,
+                x_von=x_von,
+                x_bis=x_bis,
+                y_spanne_min=RR_SPANNE_MIN_MS,
+            )
         if mit_analyse:
             analyse.zeichnen(x_von, x_bis, strich=strich)
             if strich is not None:
@@ -814,7 +935,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         korr = z.korrigiert()
         zeiten = zeiten_korr()
         werte: list[tuple[str | None, str, str, str]] = []
-        if zeiten:
+        # Nur Puls: kein Intervall, das sich ablesen ließe — nur „HF Gerät“ (Ben, 17.10.)
+        if zeiten and not z.nur_puls:
             i = naechster(zeiten, x)
             rr = korr.rr_ms[i]
             zusatz = " (interpoliert)" if korr.flag[i] != "orig" else ""
@@ -823,7 +945,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             )
             werte.append((FARBEN["hf_rr"], "HF", zahl(60000 / rr if rr else None), "bpm"))
         roh = min(z.roh_punkte, key=lambda p: abs(p[0] - x), default=None)
-        if roh is not None and abs(roh[0] - x) < 3:
+        if roh is not None and abs(roh[0] - x) < 3 and not z.nur_puls:
             werte.append((ft.Colors.OUTLINE, "roh", zahl(roh[1]), "ms"))
         geraet = min(hf_geraet(), key=lambda p: abs(p[0] - x), default=None)
         if geraet is not None and abs(geraet[0] - x) < 3:
@@ -937,13 +1059,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 abschnitt_zeile(a) for a in sorted(eigene, key=lambda a: a.von_s)
             ]
         else:
-            abschnitte_box.controls = [
-                hinweis(
-                    "Noch keine Abschnitte. „+ Abschnitt“ wählt einen Bereich in der Kurve; "
-                    "im Menü daneben werden Notizen zu Grenzen. Mit dem Timer entstehen sie "
-                    "beim Speichern der Aufnahme von selbst."
-                )
-            ]
+            abschnitte_box.controls = [hinweis("Noch keine Abschnitte.")]  # wie: hinter dem „i“
 
     def zusatz_sichern() -> None:
         try:
@@ -1623,7 +1739,6 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                     ],
                 )
             )
-            zeilen.append(hinweis("Das Band in der Rohkurve greifen und schieben."))
         zeilen.append(ft.Text(analysefenster().titel, size=12, weight=ft.FontWeight.W_600))
         return ft.Column(spacing=6, tight=True, controls=zeilen)
 
@@ -1649,6 +1764,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         analysefenster=analysefenster,
         fenster_kopf=fenster_kopf,
         warten=lambda: aw.griff is not None or aw.wartet,
+        info_zusatz=lambda bereich: "" if z.nur_puls else _verlauf_info(bereich),
     )
 
     # -- Korrektur ---------------------------------------------------------------
@@ -1797,7 +1913,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     abschnitte_platz = (ft.Container(content=abschnitte_box), ft.Container())
     etikett_box = ft.Container(visible=False)
     links_box, rechts_box = ft.Container(), ft.Container()
-    roh_titel = "PPI-Tachogramm" if verity else "RR-Tachogramm"
+    roh_titel = "Herzfrequenz" if z.nur_puls else "PPI-Tachogramm" if verity else "RR-Tachogramm"
     #: Zwischenspeicher der Verlaufskurven im Vollbild (die Analyse hat ihren eigenen)
     vb_speicher: dict[Any, Any] = {}
 
@@ -2162,7 +2278,15 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                         ),
                         notizen_knopf,
                         abschnitte_knopf,
-                        werkzeug(ft.Icons.CONTENT_CUT, "Zuschneiden", lambda: crop_oeffnen()),
+                        *(
+                            []
+                            if z.nur_puls
+                            else [
+                                werkzeug(
+                                    ft.Icons.CONTENT_CUT, "Zuschneiden", lambda: crop_oeffnen()
+                                )
+                            ]
+                        ),
                         werkzeug(
                             ft.Icons.TUNE, "Fenster & Darstellung der Kurven", lambda: darstellung()
                         ),
@@ -2171,6 +2295,12 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             ),
         ],
     )
+
+    def nur_mit_intervallen(*inhalt: ft.Control) -> ft.Control:
+        """Eine Karte, die es bei einer reinen Pulsmessung nicht gibt (Abschnitte, Korrektur)."""
+        k = karte(*inhalt)
+        k.visible = not z.nur_puls
+        return k
 
     titel_zeichnen()
     zeichnen(aktualisieren=False)
@@ -2185,6 +2315,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             karte(
                 kartentitel(
                     roh_titel,
+                    # Was die Farben heißen — vorher grauer Text unter den Notizen (Ben, 17.10.)
+                    info_knopf(page, "So liest du die Kurve", _kurven_info(z.nur_puls, verworfen)),
                     ablesen_knopf,
                     ft.IconButton(
                         ft.Icons.FULLSCREEN,
@@ -2197,41 +2329,24 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 ablese_box,
                 editor_box,
                 notiz_platz[0],
-                hinweis(
-                    (
-                        "Grau: alle Intervalle des Sensors, auch verworfene · Farbig: gewertet "
-                        "(korrigiert) · Rot: auffällige Schläge"
-                    )
-                    if verworfen
-                    else "Grau: Rohwerte · Farbig: korrigiert · Rot: auffällige Schläge"
-                ),
             ),
-            karte(
+            nur_mit_intervallen(
                 kartentitel(
                     "Abschnitte",
+                    info_knopf(page, "So arbeitest du mit Abschnitten", ABSCHNITTE_INFO),
                     ft.TextButton("Abschnitt", icon=ft.Icons.ADD, on_click=abschnitt_neu),
                     abschnitt_menue(),
                 ),
                 abschnitte_platz[0],
-                hinweis(
-                    "Werte je Abschnitt — so lassen sich Belastung und Pause oder Übungen "
-                    "vergleichen. Antippen: Grenzen in der Kurve verschieben, umbenennen, "
-                    "löschen. Notizen sind dafür nicht nötig; nahe Notizen ziehen die "
-                    "Grenzen an."
-                ),
             ),
             analyse.control,
-            karte(
+            nur_mit_intervallen(
                 kartentitel(
                     "Korrektur",
+                    info_knopf(page, "So funktioniert die Korrektur", KORREKTUR_INFO),
                     regler_knopf(regeln_oeffnen, "Was automatische Korrektur heißt"),
                     ft.TextButton("Alle", on_click=alle_uebernehmen),
                     ft.TextButton("Keine", on_click=keine),
-                ),
-                hinweis(
-                    "Vorschläge der Automatik: kurze Ketten werden interpoliert, lange "
-                    "ausgeschlossen. Antippen übernimmt oder verwirft, die Lupe zeigt die "
-                    "Stelle in der Kurve."
                 ),
                 ketten_box,
                 speichern_knopf,
@@ -2293,16 +2408,20 @@ def _kurzgrund(grund: str) -> str:
 
 
 def _zeilen_tabelle(
-    kopf: list[str], zeilen: list[tuple[str, list[str]]], hinweis_text: str = ""
+    kopf: list[str], zeilen: list[tuple[str, list[str]]], hinweis_text: str = "", ecke: str = ""
 ) -> ft.Control:
-    """Eine kleine Tabelle: erste Spalte Name, dann Werte (rechts fett)."""
+    """Eine kleine Tabelle: erste Spalte Name, dann Werte (rechts fett).
+
+    ``hinweis_text`` nur für das, was die Zahlen einschränkt — Erklärungen stehen hinter
+    dem „i“ der Karte (`TABELLE_INFO`). ``ecke``: Text über der Namensspalte.
+    """
     breit = len(kopf) > 1
     inhalt: list[ft.Control] = []
     if breit:
         inhalt.append(
             ft.Row(
                 controls=[
-                    ft.Text("", expand=2),
+                    ft.Text(ecke, size=12, opacity=0.6, expand=2),
                     *[ft.Text(k, size=12, opacity=0.6, expand=1) for k in kopf],
                 ]
             )
@@ -2350,7 +2469,7 @@ def _zeit_tabelle(
             (titel_, [f"{_wert(roh, k, n)} {e}".strip(), f"{_wert(korr, k, n)} {e}".strip()])
             for titel_, k, e, n in zeilen
         ],
-        "Ganze Messung. Über Nähte (Lücken, Ausschlüsse) wird keine Differenz gebildet.",
+        ecke="ganze Messung",
     )
 
 
@@ -2380,14 +2499,7 @@ def _frequenz_tabelle(f: dict[str, Any] | None) -> ft.Control:
         for b in ("ulf", "vlf", "lf", "hf")
         if b in f["band_reason"]
     ]
-    text = "Ganze Messung (korrigiert), Lomb-Scargle je lückenfreiem Teilstück."
-    if f.get("strategy") == "lang":
-        text += (
-            " Lange Messung: LF/HF als Mittel von 5-min-Spektren, VLF von 30-min-Spektren, "
-            "ULF über die ganze Länge."
-        )
-    if gruende:
-        text += " Gesperrt — " + "; ".join(gruende) + "."
+    text = "Gesperrt — " + "; ".join(gruende) + "." if gruende else ""
     return _zeilen_tabelle(["ganze Messung"], zeilen, text)
 
 
@@ -2399,11 +2511,7 @@ def _nichtlinear_tabelle(n: dict[str, Any], optisch: bool) -> ft.Control:
         ("DFA α1", [zahl(n.get("dfa_alpha1"), 2)]),
         ("SampEn", [zahl(n.get("sampen"), 2)]),
     ]
-    text = (
-        "Ganze Messung (korrigiert). Nichtlineare Werte brauchen genaue Schlagzeiten: "
-        "beim 130-Hz-EKG des H10 als Trend lesbar"
-        + (", bei optischen Pulsintervallen nicht belastbar." if optisch else ".")
-    )
+    text = "Bei optischen Pulsintervallen nicht belastbar." if optisch else ""
     return _zeilen_tabelle(["ganze Messung"], zeilen, text)
 
 
@@ -2433,6 +2541,20 @@ class _Zustand:
         # Sensor verworfenen, sonst schrumpfte die Messung um deren Dauer.
         self.achse = schlagzeiten(self.basis.rec)
         self.roh_punkte, self.roh_naehte = rohfolge(self.basis.rec)
+        # Nur Puls (Ben, 17.10.2026): Ohne ein einziges Intervall bleibt die Herzuhr der
+        # Datei bei 0 — dann trägt die Wanduhr die Zeitachse, die Hauptkurve ist der Puls.
+        # Ohne Wanduhr (ältere Dateien) wird keine Achse geraten.
+        beats = self.basis.rec.beats
+        self.nur_puls = (
+            not self.basis.rec.hat_rr
+            and any(b.hf_bpm > 0 for b in beats)
+            and all(b.t_wall_s is not None for b in beats)
+        )
+        if self.nur_puls:
+            self.achse = [float(b.t_wall_s or 0.0) for b in beats]
+        self.puls_punkte = [
+            (x, float(b.hf_bpm)) for x, b in zip(self.achse, beats, strict=True) if b.hf_bpm > 0
+        ]
 
     def auswahl_aus(self, gespeichert: list[Korrektur], *, ohne_sidecar: bool) -> None:
         """Übernommen sind die gespeicherten Ketten — ohne Sidecar die Vorauswahl."""

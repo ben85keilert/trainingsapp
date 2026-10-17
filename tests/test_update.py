@@ -96,18 +96,36 @@ def test_neuestes_release_fragt_github_und_meldet_ausfall() -> None:
         neuestes_release(kaputt)
 
 
-def test_app_version_in_der_entwicklung_aus_pyproject() -> None:
+def _build_ersetzen(monkeypatch: pytest.MonkeyPatch, modul: object) -> None:
+    """``trainingsapp._build`` für einen Test vorgeben — ``None`` = es gibt keine.
+
+    Ein lokaler APK-Bau (`scripts/apk_bauen.py`) lässt eine echte `_build.py` im Baum
+    liegen; einmal importiert, hängt sie auch als Attribut am Paket. Beides ersetzen,
+    sonst hinge das Ergebnis davon ab, ob gerade gebaut wurde (17.10.2026).
+    """
+    import sys
+
+    import trainingsapp
+
+    monkeypatch.setitem(sys.modules, "trainingsapp._build", modul)
+    if modul is None:
+        monkeypatch.delattr(trainingsapp, "_build", raising=False)
+    else:
+        monkeypatch.setattr(trainingsapp, "_build", modul, raising=False)
+
+
+def test_app_version_in_der_entwicklung_aus_pyproject(monkeypatch: pytest.MonkeyPatch) -> None:
+    _build_ersetzen(monkeypatch, None)
     version, build = config.app_version()
     assert version_tupel(version) >= (0, 1)
-    assert build is None  # keine _build.py im Entwicklungsbaum
+    assert build is None  # ohne _build.py: Version aus pyproject, keine Build-Nummer
 
 
 def test_app_version_aus_build_datei(monkeypatch: pytest.MonkeyPatch) -> None:
-    import sys
     import types
 
     modul = types.ModuleType("trainingsapp._build")
     modul.VERSION = "0.2.0"  # type: ignore[attr-defined]
     modul.BUILD = 60  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "trainingsapp._build", modul)
+    _build_ersetzen(monkeypatch, modul)
     assert config.app_version() == ("0.2.0", 60)

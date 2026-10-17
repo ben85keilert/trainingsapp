@@ -1054,7 +1054,7 @@ def test_notiz_knopf_und_tafel_oeffnet_eintrag(page, welt) -> None:
 
     from trainingsapp.ui.views.plan import plan_view
 
-    state, plan, _item, uebung, eintrag = welt
+    state, plan, _item, uebung, _eintrag = welt
     dialoge: list = []
     page.show_dialog = dialoge.append
     page.pop_dialog = lambda: None
@@ -1076,15 +1076,17 @@ def test_notiz_knopf_und_tafel_oeffnet_eintrag(page, welt) -> None:
     heute = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
     assert [e.note for e in heute if e.exercise_id == uebung.id] == ["gut, links enger"]
 
+    from trainingsapp.ui.views.plan import LEISTUNGEN_TIPP
+
     block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
     gruppe = next(
-        c
-        for c in _alle(block)
-        if isinstance(c, ft.Container) and c.tooltip == "Eintrag ansehen, korrigieren oder löschen"
+        c for c in _alle(block) if isinstance(c, ft.Container) and c.tooltip == LEISTUNGEN_TIPP
     )
+    # Ben, 17.10.2026: alle Einträge der Übung von heute, nicht nur den jüngsten
     asyncio.run(gruppe.on_click())
-    assert gesprungen[-1].startswith(f"/plan/{plan.id}/eintrag/")
-    assert eintrag.id not in gesprungen[-1]  # der korrigierte, nicht der alte
+    assert gesprungen[-1] == f"/plan/{plan.id}/leistungen/{uebung.id}"
+    asyncio.run(_knopf_mit_text(block, "Bearbeiten").on_click())
+    assert gesprungen[-1] == f"/plan/{plan.id}/leistungen/{uebung.id}"
 
 
 def test_uebung_standard_fuer_plaene_mit_parameterknoepfen(page, welt) -> None:

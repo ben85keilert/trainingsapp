@@ -51,7 +51,7 @@ from ..core.models import (
 )
 from ..core.pakete import stand_tag_nachziehen
 from ..core.parameter import kontextfelder, modus_aus_felder
-from ..core.result_spec import FieldType, ResultSpec, werte_modernisieren
+from ..core.result_spec import FieldType, ResultSpec, ist_leer, werte_modernisieren
 from .db import transaktion
 
 #: Nach so vielen Tagen leert sich der Papierkorb von selbst (abschaltbar)
@@ -1395,21 +1395,90 @@ class SessionRepo:
         tag: date,
         neu: bool = False,
     ) -> SessionEntry:
-        """Eine Notiz an den heutigen Eintrag der Übung — oder „gemacht" mit Notiz.
+        """Die Notiz der Übung von heute setzen — oder „gemacht" mit Notiz.
 
-        Wie `wert_setzen`: Gibt es heute in dieser Session schon einen Eintrag,
-        bekommt er die Notiz als Korrektur (eine vorhandene wird ersetzt — der
-        Dialog zeigt sie zum Weiterschreiben). Sonst entsteht ein leerer
-        Eintrag („gemacht") mit Notiz. ``neu`` beginnt immer einen eigenen.
+        Eine Notiz je Übung, Tag und Plan (Ben, 17.10.2026): Sie sitzt am Eintrag,
+        den `notiz_eintrag` nennt, und wird dort als Korrektur ersetzt — der Dialog
+        zeigt sie zum Weiterschreiben. Ohne Eintrag in dieser Session entsteht ein
+        leerer („gemacht") mit Notiz. ``neu`` beginnt immer einen eigenen.
         """
         aktuell = (
-            None
-            if neu
-            else self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+            None if neu else self.notiz_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
         )
         if aktuell is None or aktuell.session_id != session.id:
             return self.eintrag_anlegen(session, uebung, {}, text)
         return self.eintrag_korrigieren(aktuell.id, dict(aktuell.result), note=text)
+
+    def _heute_im_plan(
+        self, subject_id: str, exercise_id: str, tag: date, plan_id: str | None
+    ) -> list[SessionEntry]:
+        """Die gültigen Einträge dieser Übung an diesem Tag in Sessions dieses Plans
+        (``None`` = ohne Plan) — der Reihe nach."""
+        return [
+            e
+            for e, s in self.eintraege_am_tag(subject_id, tag)
+            if e.exercise_id == exercise_id and s.plan_id == plan_id
+        ]
+
+    def notiz_eintrag(
+        self, subject_id: str, exercise_id: str, tag: date, plan_id: str | None = None
+    ) -> SessionEntry | None:
+        """Der Eintrag, dessen Notiz der Notiz-Knopf der Übung bearbeitet.
+
+        Der früheste von heute in diesem Plan, der schon eine Notiz hat — sonst der
+        jüngste (Ben, 17.10.2026: Nach „Gemacht“ oder einem neuen Satz legte die
+        nächste Notiz still eine zweite an, bearbeiten ließ sich nur die letzte).
+        ``None``: heute in diesem Plan noch kein Eintrag.
+        """
+        eintraege = self._heute_im_plan(subject_id, exercise_id, tag, plan_id)
+        return next((e for e in eintraege if e.note), eintraege[-1] if eintraege else None)
+
+    def text_eintrag(
+        self,
+        subject_id: str,
+        exercise_id: str,
+        tag: date,
+        plan_id: str | None,
+        feld_key: str,
+    ) -> SessionEntry | None:
+        """Der Eintrag von heute in diesem Plan, der ``feld_key`` (Freitext) schon trägt —
+        der jüngste davon; ``None``, wenn keiner."""
+        mit_text = [
+            e
+            for e in self._heute_im_plan(subject_id, exercise_id, tag, plan_id)
+            if not ist_leer(e.result.get(feld_key))
+        ]
+        return mit_text[-1] if mit_text else None
+
+    def text_setzen(
+        self,
+        session: Session,
+        uebung: Exercise,
+        feld_key: str,
+        text: str,
+        tag: date,
+        kontext: dict[str, Any] | None = None,
+        neu: bool = False,
+    ) -> SessionEntry:
+        """Freitext der Übung von heute setzen — wie die Notiz einmal je Tag und Plan.
+
+        Trägt ein Eintrag von heute den Text schon (`text_eintrag`), wird dort ersetzt —
+        sonst wie `wert_setzen`. So entsteht nach einem neuen Satz kein zweiter Text,
+        und das Feld zeigt immer den, den es ändert (Ben, 17.10.2026).
+        """
+        ziel = (
+            None
+            if neu
+            else self.text_eintrag(session.subject_id, uebung.id, tag, session.plan_id, feld_key)
+        )
+        if ziel is None or ziel.session_id != session.id:
+            return self.wert_setzen(session, uebung, feld_key, text, tag, kontext, neu=neu)
+        kopie = ziel.spec_snapshot
+        if kopie is not None and kopie.field_by_key(feld_key):
+            basis, neue_kopie = dict(ziel.result), None
+        else:
+            basis, neue_kopie = werte_modernisieren(ziel.result), uebung.result_spec
+        return self.eintrag_korrigieren(ziel.id, {**basis, feld_key: text}, spec=neue_kopie)
 
     def eintrag_loeschen(self, eintrag_id: str) -> None:
         """Weich löschen — samt der Einträge, die dieser korrigiert hat.

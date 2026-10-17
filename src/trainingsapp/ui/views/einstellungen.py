@@ -243,6 +243,15 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 on_click=hilfe_oeffner(page, "uebungen"),
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.HELP_OUTLINE),
+                                title=ft.Text("Atemfrequenz und Atemübung"),
+                                subtitle=ft.Text(
+                                    "Was „langsame Schwingung unter 8/min“ heißt", size=12
+                                ),
+                                on_click=hilfe_oeffner(page, "atmung"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
                             *update_zeilen,
                             hinweis(f"Edition {edition().value} · {version_text}"),
                         ),

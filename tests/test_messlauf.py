@@ -249,7 +249,9 @@ async def test_notizen_vor_der_aufnahme_kommen_an_ihren_anfang(tmp_path) -> None
     assert lauf.ereignisse() == [vorher]
     assert lauf.aufnahme is None
 
+    lauf.titel_notiz_setzen("Abendmessung", "Nach dem Training")  # auch das vorher (17.10.)
     lauf.aufnahme_starten()
+    assert lauf.titel_notiz() == ("Abendmessung", "Nach dem Training")
     (e,) = lauf.ereignisse()
     assert e["text"] == "Kaffee getrunken" and e["uebungen"] == ["AB12CD34"]
     assert e["beat_index"] is None and e["t_wall_s"] == 0.0
@@ -258,8 +260,11 @@ async def test_notizen_vor_der_aufnahme_kommen_an_ihren_anfang(tmp_path) -> None
         await asyncio.sleep(0.01)
     ergebnis = lauf.aufnahme_stoppen(tmp_path)
     assert ergebnis is not None
-    assert [x["text"] for x in laden(ergebnis.pfad).ereignisse] == ["Kaffee getrunken"]
+    rec = laden(ergebnis.pfad)
+    assert [x["text"] for x in rec.ereignisse] == ["Kaffee getrunken"]
+    assert (rec.titel, rec.notiz) == ("Abendmessung", "Nach dem Training")
     assert lauf.ereignisse() == []  # nach dem Stopp: die nächste Aufnahme beginnt leer
+    assert lauf.titel_notiz() == ("", "")
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
 

@@ -24,6 +24,10 @@ Live gilt der sichtbare Ausschnitt, aber neu gerechnet wird höchstens alle
 Live und in der Aufzeichnung dieselbe Karte; die Daten kommen über Funktionen
 herein (``reihe``: Zeit, RR mit NaN für schlechte Werte, Nähte). Verlaufskurven
 merkt sich `trends.verlauf` (``zwischenspeicher``).
+
+Was die Kurven heißen (`HINWEISE`), steht hinter dem „i“ im Kopf statt als grauer
+Text unter der Karte (Ben, 17.10.2026); die Aufzeichnung ergänzt dort Tabelle und
+Analysefenster (``info_zusatz``).
 """
 
 from __future__ import annotations
@@ -41,7 +45,7 @@ from hrv_core.frequency import Fensterspektrum, fensterspektrum
 from hrv_core.trends import aktuell, verlauf
 
 from trainingsapp.ui.components.kacheln import zahl
-from trainingsapp.ui.components.karte import hinweis, karte
+from trainingsapp.ui.components.karte import info_knopf, karte, titel
 from trainingsapp.ui.components.notizen import senkrechte
 from trainingsapp.ui.components.spektrum import (
     band_leiste,
@@ -158,6 +162,8 @@ class Analyse:
         wischen: macht die Verlaufskurven wischbar (`zeitfenster.wischbar`).
         tabelle: je Bereich eine Zusammenfassung der ganzen Messung (Detail).
         optisch: optische Pulsintervalle — Vorbehalt an Frequenzwerten.
+        info_zusatz: was das „i“ je Bereich außer `HINWEISE` erklärt (Detail:
+            Tabelle und Analysefenster).
     """
 
     def __init__(
@@ -178,6 +184,7 @@ class Analyse:
         fenster_kopf: Callable[[], ft.Control | None] | None = None,
         warten: Callable[[], bool] = lambda: False,
         live_intervall_s: Callable[[], float] | None = None,
+        info_zusatz: Callable[[str], str] | None = None,
     ) -> None:
         self._page = page
         self._state = state
@@ -194,6 +201,7 @@ class Analyse:
         self._fenster_kopf = fenster_kopf
         self._warten = warten
         self._live_intervall_s = live_intervall_s
+        self._info_zusatz = info_zusatz
         #: Ergebnisse je (Bereich, Fensterschlüssel) — gilt für eine Reihe (``_reihe_von``)
         self._fenster_speicher: OrderedDict[tuple[str, str], Any] = OrderedDict()
         self._reihe_von: Any = None
@@ -211,14 +219,12 @@ class Analyse:
         self._extra = ft.Container()
         self._chips = ft.Container()
         self._kurven = ft.Column(spacing=6)
-        self._hinweis = hinweis("")
         self.control = karte(
             self._kopf,
             self._tabelle,
             self._extra,
             self._chips,
             wischen(self._kurven),
-            self._hinweis,
         )
         self.aufbauen()
 
@@ -250,23 +256,24 @@ class Analyse:
     # -- Aufbau ------------------------------------------------------------------
 
     def aufbauen(self) -> None:
-        """Kopf, Chips, Tabelle und Hinweis — was sich nur bei Bedienung ändert."""
+        """Kopf, Chips und Tabelle — was sich nur bei Bedienung ändert."""
         bereich = self.bereich
-        kopf: list[ft.Control] = []
+        # Titelzeile wie in den anderen Karten, die Bereichswahl darunter über die ganze
+        # Breite — neben „i“ und Menü brach „Nichtlinear“ auf 412 px Breite um (17.10.2026)
+        kopf: list[ft.Control] = [
+            titel(
+                "Verlauf",
+                info_knopf(self._page, "So liest du den Verlauf", self.info_text),
+                ansicht_menue(self._page, self._state, self._geaendert),
+            )
+        ]
         if len(self.bereiche) > 1:
-            kopf.append(
-                ft.Container(
-                    expand=True,
-                    content=bereich_wahl(self.bereiche, bereich, self._wechseln),
-                )
-            )
-        else:
-            kopf.append(
-                ft.Text("VERLAUF", size=11, weight=ft.FontWeight.BOLD, opacity=0.6, expand=True)
-            )
-        kopf.append(ansicht_menue(self._page, self._state, self._geaendert))
-        self._kopf.content = ft.Row(
-            spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=kopf
+            kopf.append(bereich_wahl(self.bereiche, bereich, self._wechseln))
+        self._kopf.content = ft.Column(
+            spacing=8,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            controls=kopf,
         )
         self._ohne_chips = list(self._ohne())
         self._chips.content = chips(
@@ -275,7 +282,11 @@ class Analyse:
         tabelle = self._tabelle_fuer(bereich) if self._tabelle_fuer else None
         self._tabelle.content = tabelle
         self._tabelle.visible = tabelle is not None
-        self._hinweis.value = HINWEISE[bereich]
+
+    def info_text(self) -> str:
+        """Was hinter dem „i“ im Kopf steht: die Kurven des Bereichs, dazu ``info_zusatz``."""
+        zusatz = self._info_zusatz(self.bereich) if self._info_zusatz is not None else ""
+        return "\n\n".join(t for t in (HINWEISE[self.bereich], zusatz) if t)
 
     def werte_bei(self, x: float) -> list[tuple[str, str, float]]:
         """(Kennzahl, Bezeichnung, Wert) der gezeichneten Verlaufskurven an der Stelle ``x``."""

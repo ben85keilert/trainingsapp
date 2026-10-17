@@ -1237,3 +1237,51 @@ def test_eintrag_mit_zusatzfeld_der_planuebung_und_notiz(welt) -> None:
     andere = ExerciseRepo(con).laden(seed_id("einbeinstand"))
     neu = repo.eintrag_notiz_setzen(sitzung, andere, "wackelig", heute)
     assert neu.result == {} and neu.note == "wackelig"
+
+
+def test_eine_notiz_je_uebung_und_tag(welt) -> None:
+    """Ben, 17.10.2026: Notiz, dann „Gemacht“, dann wieder Notiz — dieselbe Notiz, keine zweite."""
+    con, repo, ich, sitzung = welt
+    uebung = _wadenheben(con)
+    heute = lokaler_tag(jetzt())
+    erster = repo.eintrag_notiz_setzen(sitzung, uebung, "Schulter zieht", heute)
+    repo.eintrag_anlegen(sitzung, uebung, {"reps": [15]})  # danach etwas anderes
+    assert repo.notiz_eintrag(ich.id, uebung.id, heute).note == "Schulter zieht"
+    repo.eintrag_notiz_setzen(sitzung, uebung, "Schulter zieht, später besser", heute)
+    notizen = [e.note for e in repo.eintraege(sitzung.id) if e.note]
+    assert notizen == ["Schulter zieht, später besser"]
+    # Ohne Notiz an einem Eintrag: der jüngste bekommt sie (wie bisher)
+    andere = ExerciseRepo(con).laden(seed_id("einbeinstand"))
+    repo.eintrag_anlegen(sitzung, andere, {})
+    zweiter = repo.eintrag_anlegen(sitzung, andere, {})
+    assert repo.notiz_eintrag(ich.id, andere.id, heute).id == zweiter.id
+    assert erster.id != zweiter.id
+
+
+def test_freitext_einmal_je_tag(welt) -> None:
+    """Freitext als Parameter: nach einem neuen Satz ersetzt er den von heute, kein zweiter."""
+    from dataclasses import replace
+
+    from trainingsapp.core.result_spec import vorrat_feld
+
+    con, repo, ich, sitzung = welt
+    basis = _wadenheben(con)
+    uebung = replace(
+        basis,
+        result_spec=replace(
+            basis.result_spec, fields=[*basis.result_spec.fields, vorrat_feld("note")]
+        ),
+    )
+    heute = lokaler_tag(jetzt())
+    repo.text_setzen(sitzung, uebung, "note", "linke Wade müde", heute)
+    repo.eintrag_anlegen(sitzung, uebung, {"reps": [20]})  # „Gemacht“ mit Wert: neuer Eintrag
+    assert (
+        repo.text_eintrag(ich.id, uebung.id, heute, None, "note").result["note"]
+        == "linke Wade müde"
+    )
+    repo.text_setzen(sitzung, uebung, "note", "beide Waden müde", heute)
+    texte = [e.result.get("note") for e in repo.eintraege(sitzung.id) if e.result.get("note")]
+    assert texte == ["beide Waden müde"]
+    # neu=True (zweite Stelle im Plan): eigener Eintrag
+    repo.text_setzen(sitzung, uebung, "note", "zweite Runde", heute, neu=True)
+    assert len([e for e in repo.eintraege(sitzung.id) if e.result.get("note")]) == 2

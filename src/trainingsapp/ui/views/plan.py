@@ -7,7 +7,9 @@ Anzeige und die Eingabemöglichkeiten besser ab“):
 
 - **Heute geleistet** — eine eigene Fläche, je Parameter groß der Wert
   (gebündelt wie in der Tagesansicht, je Ausprägung eine Gruppe), darunter die
-  Notizen. Antippen öffnet den Eintrag: ansehen, korrigieren, löschen.
+  Notizen. Antippen (oder „Bearbeiten“) zeigt **alle** Einträge der Übung von
+  heute auf einer Seite: Werte und Notizen auf einmal korrigieren, einzeln
+  löschen (`views/leistungen.py`, Ben 17.10.2026).
 - die Knöpfe „Gemacht“ (abhaken) und, wenn ein Ziel gesetzt ist, „Wie geplant“.
   Ohne Parameter bleibt es dabei — nur abhaken.
 - **Eintragen** — je Parameter ein umrandeter Abschnitt mit Überschrift, was
@@ -24,12 +26,15 @@ Anzeige und die Eingabemöglichkeiten besser ab“):
     schreibt ins Feld, abgeschickt wird mit dem Haken. Der Wert landet im
     heutigen Eintrag der Übung (`SitzungRepo.wert_setzen`), nicht in einem eigenen.
   - Ja/Nein und Freitext, wenn man sie hergeholt hat — ebenso in den heutigen
-    Eintrag.
+    Eintrag; der Freitext einmal je Tag: Er ersetzt den, der heute schon dasteht
+    (`SessionRepo.text_setzen`), statt nach einem neuen Satz einen zweiten anzulegen.
 
   Wie die Abschnitte stehen, bestimmt die Darstellung (`ui.state.PLAN_DARSTELLUNGEN`,
   umschaltbar oben im Plan): alle untereinander, einer zum Umschalten,
   oder aufgeklappt nur in einer Übung.
-- „Notiz“ — ein Satz ins Erfahrungstagebuch, am heutigen Eintrag der Übung.
+- „Notiz“ — ein Satz ins Erfahrungstagebuch: eine Notiz je Übung und Tag, die der
+  Knopf immer wieder öffnet (`SessionRepo.notiz_eintrag`) — auch nach einem neuen
+  Satz oder „Gemacht“.
 - Das **i-Symbol** holt Parameter heran (`plan_info.py`): jedes Feld der Übung
   und des Feldvorrats, gespeichert in der Planübung — die Übung bleibt, wie sie
   ist (`core.standards.plan_spec`). Dort auch Beschreibung und Videos.
@@ -103,6 +108,10 @@ from trainingsapp.ui.views.timer import timer_knopf
 from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 
 ECKEN = ft.RoundedRectangleBorder(radius=12)
+
+
+#: Was ein Tipp auf „Heute geleistet“ öffnet (`views/leistungen.py`)
+LEISTUNGEN_TIPP = "Alle Einträge von heute ansehen, korrigieren oder löschen"
 
 
 def ziel_text(uebung: Exercise, target: dict[str, Any]) -> str:
@@ -562,31 +571,54 @@ def plan_view(
             if zusatz := b.auspraegung_text():
                 gruppe.append(ft.Text(zusatz, size=13, weight=ft.FontWeight.W_600))
             gruppe.append(wert_leiste(zeilen))
-            # Antippen öffnet den jüngsten Eintrag der Gruppe — korrigieren, löschen
-            juengster = max(b.eintraege, key=lambda e: (e.started_at is not None, e.started_at))
+            # Antippen zeigt alle Einträge der Übung von heute — Ben, 17.10.2026: nicht
+            # nur den jüngsten, und mit allen Notizen
             inhalt.append(
                 ft.Container(
                     border_radius=8,
                     ink=True,
-                    tooltip="Eintrag ansehen, korrigieren oder löschen",
-                    on_click=oeffner(f"{route}/eintrag/{juengster.id}"),
+                    tooltip=LEISTUNGEN_TIPP,
+                    on_click=oeffner(leistungen_route(uebung)),
                     content=ft.Column(spacing=6, controls=gruppe),
                 )
             )
         inhalt += [
-            ft.Text(f"„{e.note}“", size=12, italic=True, opacity=0.75) for e in eigene if e.note
+            ft.Container(
+                border_radius=8,
+                ink=True,
+                tooltip=LEISTUNGEN_TIPP,
+                on_click=oeffner(leistungen_route(uebung)),
+                content=ft.Text(f"„{e.note}“", size=12, italic=True, opacity=0.75),
+            )
+            for e in eigene
+            if e.note
         ]
         # Spätere Stelle einer doppelten Übung: Was dasteht, stammt von früher am Tag
         if inhalt and uebung.id in mehrfach and item.id not in fertig_ids:
             titel = f"HEUTE BISHER — DAS {stelle[item.id]}. MAL STEHT NOCH AUS"
         else:
             titel = "HEUTE GELEISTET" if inhalt else "Heute noch nichts eingetragen"
-        kopf = ft.Text(
+        kopf: ft.Control = ft.Text(
             titel,
             size=11,
             weight=ft.FontWeight.BOLD if inhalt else None,
             opacity=0.65 if inhalt else 0.55,
+            expand=True,
         )
+        if inhalt:
+            kopf = ft.Row(
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    kopf,
+                    ft.TextButton(
+                        "Bearbeiten",
+                        icon=ft.Icons.EDIT_OUTLINED,
+                        tooltip=LEISTUNGEN_TIPP,
+                        on_click=oeffner(leistungen_route(uebung)),
+                    ),
+                ],
+            )
         return ft.Container(
             padding=ft.Padding.symmetric(horizontal=12, vertical=10),
             border_radius=12,
@@ -914,8 +946,16 @@ def plan_view(
         return lambda: wert_setzer(item, feld, wert)
 
     def text_abschnitt(item: PlanItem, uebung: Exercise, feld: FieldSpec) -> ft.Control:
-        """Freitext — ein Feld mit Haken; der Text kommt in den heutigen Eintrag."""
-        bisher = heutiger_wert(uebung, feld)
+        """Freitext — ein Feld mit Haken; einmal je Tag: Das Feld zeigt den Text von heute
+        und ersetzt ihn (`SessionRepo.text_setzen`), statt einen zweiten anzulegen."""
+        ziel = (
+            None
+            if eigener_eintrag(item)
+            else state.sitzungen.text_eintrag(
+                state.profil.id, uebung.id, heute, sitzungsplan, feld.key
+            )
+        )
+        bisher = ziel.result.get(feld.key) if ziel is not None else None
         eingabe = ft.TextField(
             value="" if bisher is None else str(bisher),
             dense=True,
@@ -926,8 +966,19 @@ def plan_view(
 
         def absenden() -> None:
             text = (eingabe.value or "").strip()
-            if text:
-                wert_setzer(item, feld, text)
+            if not text:
+                return
+            session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
+            eintrag = state.sitzungen.text_setzen(
+                session,
+                uebung,
+                feld.key,
+                text,
+                heute,
+                kontext(item, uebung),
+                neu=eigener_eintrag(item),
+            )
+            melden(uebung, eintrag)
 
         return abschnitt(
             feld.label,
@@ -983,6 +1034,10 @@ def plan_view(
             bereich += [bauen() for _, _, bauen in teile]
         return bereich
 
+    def leistungen_route(uebung: Exercise) -> str:
+        """Alle Einträge der Übung von heute (`views/leistungen.py`) — unter dem Plan."""
+        return f"{route}/leistungen/{uebung.id}"
+
     def info_route(item: PlanItem) -> str:
         """Beim Üben die Infoseite unter dem Plan (Zurück führt hierher), sonst die Übung."""
         if bearbeiten:
@@ -1002,12 +1057,11 @@ def plan_view(
 
         def handler() -> None:
             uebung = uebung_fuer(item)
+            # Die Notiz der Übung von heute — auch nach einem neuen Satz dieselbe
             heutig = (
                 None
                 if eigener_eintrag(item)
-                else state.sitzungen.heutiger_eintrag(
-                    state.profil.id, uebung.id, heute, sitzungsplan
-                )
+                else state.sitzungen.notiz_eintrag(state.profil.id, uebung.id, heute, sitzungsplan)
             )
             feld = ft.TextField(
                 value=heutig.note if heutig is not None else "",

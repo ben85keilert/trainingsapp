@@ -203,10 +203,16 @@ UHR_BROADCAST = GeraeteProfil(
     id="watch_broadcast",
     name="Uhr (Herzfrequenz-Übertragung)",
     kurz="Uhr",
+    # Uhren und Bänder, die ihre Herzfrequenz übertragen können. Die Live-Ansicht
+    # zeigt für sie den Puls (bpm) als Hauptkurve, bis ein Intervall ankommt
+    # (Ben, 17.10.2026). Garmin schreibt manche Namen mit Akzent („fēnix", „vívoactive").
     muster=(
         "garmin",
         "forerunner",
         "fenix",
+        "fēnix",
+        "epix",
+        "enduro",
         "venu",
         "coros",
         "amazfit",
@@ -215,6 +221,14 @@ UHR_BROADCAST = GeraeteProfil(
         "galaxy watch",
         "instinct",
         "vivoactive",
+        "vívoactive",
+        "vivosmart",
+        "vívosmart",
+        "mi band",
+        "mi smart band",
+        "xiaomi smart band",
+        "huawei watch",
+        "huawei band",
     ),
     intervall_quelle=QUELLE_PPG_PPI,
     # Vorsichtige Annahme. Der Prüfstand hebt auf `ppi_optisch` hoch, sobald
@@ -266,6 +280,8 @@ def profil_fuer_namen(name: str) -> GeraeteProfil:
     True
     >>> profil_fuer_namen("Forerunner 955").id
     'watch_broadcast'
+    >>> profil_fuer_namen("Mi Smart Band 6").hrv_moeglich   # nur Herzfrequenz
+    False
     >>> profil_fuer_namen("Irgendein Gurt").id
     'ble_generic'
     """

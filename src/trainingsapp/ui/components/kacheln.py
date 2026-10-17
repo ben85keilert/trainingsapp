@@ -15,7 +15,7 @@ dem Namen; manchmal mit einem Knopf, der weiterhilft („Atemübung").
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import flet as ft
 from hrv_core.trends import KENNZAHLEN
@@ -87,6 +87,24 @@ class KachelWert:
     grund: str = ""
     #: Ein Knopf, der weiterhilft: (Beschriftung, Handler)
     aktion: tuple[str, Callable[[], object]] | None = None
+
+
+#: Kacheln, die auch ohne Intervalle etwas zeigen — der Puls und seine Schwankung
+PULS_KACHELN = frozenset({"hf", "schwankung"})
+#: Grund in allen anderen, wenn das Gerät nur den Puls sendet (Ben, 17.10.2026)
+NUR_PULS_GRUND = "Gerät sendet nur den Puls"
+
+
+def ohne_intervalle(w: KachelWert) -> KachelWert:
+    """Die Kachel eines reinen Pulsgebers: kein Wert, dafür der Grund.
+
+    Ohne Intervalle hieße „zu wenige gute Schläge“ etwas anderes, als es ist.
+
+    >>> w = ohne_intervalle(KachelWert("RMSSD 30 s", "42", "ms"))
+    >>> w.wert, w.grund
+    ('–', 'Gerät sendet nur den Puls')
+    """
+    return replace(w, wert="–", zusatz="", grund=NUR_PULS_GRUND, aktion=None)
 
 
 def zahl(wert: float | int | None, nachkomma: int = 0) -> str:
@@ -269,10 +287,13 @@ def anzeige(werte: list[KachelWert], darstellung: str) -> ft.Control:
 __all__ = [
     "GRUPPEN",
     "KACHELN",
+    "NUR_PULS_GRUND",
+    "PULS_KACHELN",
     "KachelArt",
     "KachelWert",
     "anzeige",
     "kachel",
+    "ohne_intervalle",
     "raster",
     "uebersicht",
     "zahl",

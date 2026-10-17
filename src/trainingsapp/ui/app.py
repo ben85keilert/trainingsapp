@@ -66,6 +66,7 @@ from trainingsapp.ui.views.eintrag_formular import eintrag_formular
 from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.kurse import kapitel_view, kurs_view
+from trainingsapp.ui.views.leistungen import leistungen_view
 from trainingsapp.ui.views.live_vollbild import live_vollbild_view
 from trainingsapp.ui.views.messung import backup_dialog, messung
 from trainingsapp.ui.views.messung_detail import messung_detail_view
@@ -361,6 +362,15 @@ def main(page: ft.Page) -> None:
             )
         elif teile[2:3] == ["eintrag"]:
             eintrag_unter(f"/plan/{plan.id}", teile[3:])
+        elif teile[2:3] == ["leistungen"]:
+            leistungen_unter(f"/plan/{plan.id}", teile[3:])
+
+    def leistungen_unter(basis: str, rest: list[str]) -> None:
+        """Alle Einträge einer Übung von heute über dem Plan (`views/leistungen.py`)."""
+        uebung = state.uebungen.laden(rest[0], mit_geloeschten=True) if rest else None
+        if uebung is not None:
+            route = f"{basis}/leistungen/{uebung.id}"
+            page.views.append(leistungen_view(page, state, route, uebung))
 
     def eintrag_unter(basis: str, rest: list[str]) -> None:
         """Ein Eintrag über einer Übungsansicht — Zurück führt wieder dorthin."""
@@ -530,6 +540,8 @@ def main(page: ft.Page) -> None:
                     page.views.append(plan_info_view(page, state, basis, uebung, browser))
                 elif teile[2:3] == ["eintrag"]:
                     eintrag_unter(basis, teile[3:])
+                elif teile[2:3] == ["leistungen"]:
+                    leistungen_unter(basis, teile[3:])
         elif teile[:1] == ["tag"] and len(teile) >= 2:
             with suppress(ValueError):  # kein Datum → Hauptansicht
                 page.views.append(tag_view(page, state, date.fromisoformat(teile[1])))

@@ -19,8 +19,9 @@ Zeitpunkt (`bei`) und beim gemeinsamen Start den Nullpunkt der Aufnahme vor.
 
 **Eine neue Aufnahme beginnt mit leeren Kurven** (Ben, 16.10.2026):
 `aufnahme_starten` leert das Live-Fenster und setzt die Live-Achse auf 0.
-**Notizen gibt es schon vor der Aufnahme** (`ereignisse`, `notiz_zeitbezug`);
-beim Start rücken sie an den Anfang der Aufnahme.
+**Titel und Beschreibung schon vor der Aufnahme** (Ben, 17.10.2026: `titel_notiz`)
+und ebenso Notizen mit Zeitpunkt (`ereignisse`, `notiz_zeitbezug`) — beim Start
+übernimmt die Aufnahme sie, die Notizen rücken an ihren Anfang.
 
 Kein flet-Import: Der Messlauf ist ohne Bildschirm testbar (Simulator).
 """
@@ -209,6 +210,9 @@ class Messlauf:
         self._grenzen: dict[str, list[tuple[dict, str, bool]]] = {}
         #: Notizen ohne Aufnahme (Ben, 16.10.2026) — `aufnahme_starten` übernimmt sie
         self._vorab: list[dict] = []
+        #: Titel und Beschreibung ohne Aufnahme (Ben, 17.10.2026) — ebenso
+        self._vorab_titel = ""
+        self._vorab_notiz = ""
         self.status = DeviceStatus(verbindung=Verbindung.GETRENNT)
         self.device_id = ""
         self.geraet_name = ""
@@ -261,6 +265,7 @@ class Messlauf:
         self.start_mono = self._uhr()
         self._achse_utc = self._jetzt_utc()
         self._vorab = []
+        self._vorab_titel = self._vorab_notiz = ""
         self.status = self.quelle.aktueller_status
 
     def regeln_setzen(self, regeln: Korrekturregeln) -> None:
@@ -388,8 +393,9 @@ class Messlauf:
         """Aufnahme beginnen — mit leeren Kurven (Ben, 16.10.2026).
 
         Das Live-Fenster wird geleert und die Live-Achse beginnt bei 0: Kurven,
-        Kacheln und Analyse zeigen nur noch, was zur neuen Aufnahme gehört. Notizen
-        von vor dem Start stehen in der Aufnahme an ihrem Anfang (`_an_den_anfang`).
+        Kacheln und Analyse zeigen nur noch, was zur neuen Aufnahme gehört. Titel und
+        Beschreibung von vor dem Start übernimmt sie, Notizen stehen an ihrem Anfang
+        (`_an_den_anfang`).
         """
         if self.aufnahme is not None:
             return
@@ -414,6 +420,8 @@ class Messlauf:
         self._achse_utc = self.aufnahme.start_utc
         vorab, self._vorab = self._vorab, []
         self.aufnahme.ereignisse = [_an_den_anfang(e, self.aufnahme.start_utc) for e in vorab]
+        self.aufnahme.titel, self.aufnahme.notiz = self._vorab_titel, self._vorab_notiz
+        self._vorab_titel = self._vorab_notiz = ""
 
     def notiz_zeitbezug(self) -> Zeitbezug:
         """Zeitbezug der Live-Achse für Notizen — mit und ohne Aufnahme.
@@ -431,6 +439,21 @@ class Messlauf:
             aufnahme.start_utc,
             wand_versatz=aufnahme.start_mono - self.start_mono,
         )
+
+    def titel_notiz(self) -> tuple[str, str]:
+        """Titel und Beschreibung (``titel``/``notiz`` der Datei) — der laufenden Aufnahme,
+        ohne Aufnahme die für die nächste (Ben, 17.10.2026)."""
+        if self.aufnahme is not None:
+            return self.aufnahme.titel or "", self.aufnahme.notiz or ""
+        return self._vorab_titel, self._vorab_notiz
+
+    def titel_notiz_setzen(self, titel: str, notiz: str) -> None:
+        """Titel und Beschreibung setzen: in der Aufnahme landen sie mit Backup und
+        Messdatei, ohne Aufnahme übernimmt sie der nächste Start (`aufnahme_starten`)."""
+        if self.aufnahme is not None:
+            self.aufnahme.titel, self.aufnahme.notiz = titel, notiz
+        else:
+            self._vorab_titel, self._vorab_notiz = titel, notiz
 
     def ereignisse(self) -> list[dict]:
         """Die Notizen — der laufenden Aufnahme, ohne Aufnahme die für die nächste (Kopie)."""

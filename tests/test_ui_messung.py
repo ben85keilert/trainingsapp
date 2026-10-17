@@ -400,7 +400,8 @@ def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None
         intervall_quelle="ppg_ppi",
     )
     state.hrv.anlegen(eintrag)
-    ansicht = messung_detail_view(_seite(), state, eintrag)
+    seite = _seite()
+    ansicht = messung_detail_view(seite, state, eintrag)
     folge = ppi_folge(laden(pfad))
     assert folge is not None
     dauer = folge[-1].t_s
@@ -420,7 +421,17 @@ def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None
     assert rr_kurve.max_x == hf_kurve.max_x == rmssd_kurve.max_x == pytest.approx(dauer)
     texte = _baum_texte(ansicht)
     assert any(f"{int(dauer) // 60}:{int(dauer) % 60:02d}" in x for x in texte)
-    assert any("auch verworfene" in x for x in texte)
+    # Was Grau heißt, steht hinter dem „i“ im Kartentitel (Ben, 17.10.2026)
+    info = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.INFO_OUTLINE
+    )
+    info.on_click()
+    blatt = seite.aufrufe[-1]
+    assert any(
+        "auch verworfene" in c.value for c in _alle_controls(blatt) if isinstance(c, ft.Markdown)
+    )
     for kurve in (rr_kurve, hf_kurve):
         achse = kurve.left_axis
         assert not achse.show_min and not achse.show_max
@@ -1164,6 +1175,52 @@ async def test_live_titel_landet_in_der_messdatei(daten) -> None:
         "Morgenmessung",
         "Gut geschlafen",
     )
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+
+
+async def test_titel_und_beschreibung_schon_vor_der_aufnahme(daten) -> None:
+    """Ben, 17.10.2026: Titel und Beschreibung vor dem Start eintragen — der Start übernimmt
+    sie, die Messdatei hat sie; die nächste Aufnahme beginnt wieder ohne."""
+    state, tmp_path = daten
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    state.messlauf = lauf
+    while lauf.jetzt_s() < 10:
+        await asyncio.sleep(0.01)
+    seite = _seite()
+    ansicht = messung(seite, state)
+    assert lauf.aufnahme is None
+    kopf = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.Container)
+        and c.on_click is not None
+        and "Titel hinzufügen" in _baum_texte(c)
+    )
+    kopf.on_click()
+    blatt = seite.aufrufe[-1]
+    titel_feld, beschreibung_feld = [
+        c for c in _alle_controls(blatt) if isinstance(c, ft.TextField)
+    ]
+    titel_feld.value, beschreibung_feld.value = "Abendmessung", "Nach dem Training"
+    _knopf(blatt, "Speichern").on_click()
+    assert lauf.titel_notiz() == ("Abendmessung", "Nach dem Training")
+    ansicht = messung(seite, state)
+    assert "Abendmessung" in _baum_texte(ansicht)  # steht schon vor dem Start da
+
+    await _knopf(ansicht, "Aufnahme starten").on_click()
+    assert (lauf.aufnahme.titel, lauf.aufnahme.notiz) == ("Abendmessung", "Nach dem Training")
+    while lauf.aufnahme_dauer_s() < 10:
+        await asyncio.sleep(0.01)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    assert ergebnis is not None
+    assert (ergebnis.recording.titel, ergebnis.recording.notiz) == (
+        "Abendmessung",
+        "Nach dem Training",
+    )
+    assert lauf.titel_notiz() == ("", "")  # die nächste Aufnahme beginnt ohne
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
 

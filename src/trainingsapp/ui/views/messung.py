@@ -3,11 +3,17 @@
 **Live.** Ohne Verbindung: Gerät suchen (oder den Simulator nehmen). Mit
 Verbindung, von oben nach unten:
 
-1. Status — Gerät, Akku und der Aufnahmeknopf, damit man nicht erst scrollen muss.
+1. Status — Gerät, Akku und der Aufnahmeknopf, damit man nicht erst scrollen muss;
+   darunter Titel und Beschreibung, schon vor dem Start (Ben, 17.10.2026).
 2. Kacheln — welche, stellt man unter Einstellungen → HRV-Messung ein.
 3. Hauptkurve (RR- bzw. PPI-Tachogramm) mit Fensterbreite, „korrigiert",
-   Korrekturregeln und den Notizen.
+   Korrekturregeln und den Notizen. Sendet das Gerät nur die Herzfrequenz (Uhren im
+   Übertragungsmodus — im Geräteprofil hinterlegt, sonst erkannt), ist die Hauptkurve
+   der Puls in bpm (`nur_puls`, Ben 17.10.2026). Was die Farben heißen, steht hinter
+   dem „i“ im Kartentitel.
 4. Analyse — Zeit ↔ Frequenz ↔ Nichtlinear (`components.analyse`).
+
+Das Verbindungsprotokoll (Diagnose) öffnet ein Knopf in der Gerätezeile oben.
 
 Die laufende Messung liegt im `AppState` (`state.messlauf`), nicht in dieser
 Ansicht — sonst risse sie bei jedem Reiterwechsel ab (L03). Die Ansicht
@@ -46,11 +52,24 @@ from trainingsapp.core.models import jetzt as utc_jetzt
 from trainingsapp.devices.base import DeviceInfo, Verbindung
 from trainingsapp.devices.messlauf import Gespeichert, Messlauf, backup_wiederherstellen
 from trainingsapp.devices.profiles import geraeteart
-from trainingsapp.devices.simulated import SIM_PPI, SIM_PREFIX, SIM_SYNTH, SimulatedSource
+from trainingsapp.devices.simulated import (
+    SIM_PPI,
+    SIM_PREFIX,
+    SIM_PULS,
+    SIM_SYNTH,
+    SimulatedSource,
+)
 from trainingsapp.ui.components.analyse import Analyse
 from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog
-from trainingsapp.ui.components.kacheln import KACHELN, KachelWert, anzeige, zahl
-from trainingsapp.ui.components.karte import hinweis, karte
+from trainingsapp.ui.components.kacheln import (
+    KACHELN,
+    PULS_KACHELN,
+    KachelWert,
+    anzeige,
+    ohne_intervalle,
+    zahl,
+)
+from trainingsapp.ui.components.karte import info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
@@ -72,9 +91,13 @@ def _protokoll(lauf: Messlauf, zeilen: int = 20) -> list[str]:
     return list(getattr(lauf.quelle, "protokoll", []))[-zeilen:]
 
 
-def _diagnose(page: ft.Page, lauf: Messlauf) -> ft.Control:
-    """Aufklappbar — die letzten Zeilen zum Ansehen, das ganze Protokoll zum Teilen."""
-    zeilen = _protokoll(lauf)
+def diagnose_blatt(page: ft.Page, lauf: Messlauf) -> ft.BottomSheet:
+    """Das Verbindungsprotokoll — die letzten Zeilen zum Ansehen, das ganze zum Teilen.
+
+    Ein Blatt hinter einem Knopf in der Gerätezeile (Ben, 17.10.2026: stand vorher als
+    Klappfeld ganz unten in der Ansicht).
+    """
+    zeilen = _protokoll(lauf, 40)
 
     async def teilen() -> None:
         text = lauf.diagnose()
@@ -83,26 +106,48 @@ def _diagnose(page: ft.Page, lauf: Messlauf) -> ft.Control:
             return
         await weitergeben(page, f"diagnose_{zeitstempel()}.txt", text.encode("utf-8"), "text/plain")
 
-    return ft.ExpansionTile(
-        title=ft.Text("Diagnose", size=13),
-        subtitle=ft.Text(zeilen[-1] if zeilen else "noch keine Einträge", size=11, opacity=0.6),
-        controls=[
-            ft.Container(
-                padding=ft.Padding.only(left=12, right=12, bottom=8),
-                content=ft.Column(
-                    spacing=4,
-                    controls=[
-                        ft.Text(
-                            "\n".join(zeilen) or "–",
-                            size=11,
-                            selectable=True,
-                            font_family="monospace",
-                        ),
-                        ft.TextButton("Protokoll teilen", icon=ft.Icons.SHARE, on_click=teilen),
-                    ],
-                ),
-            )
-        ],
+    return ft.BottomSheet(
+        show_drag_handle=True,
+        scrollable=True,
+        content=ft.Container(
+            padding=ft.Padding.only(left=16, right=16, bottom=20),
+            content=ft.Column(
+                tight=True,
+                spacing=8,
+                controls=[
+                    ft.Text("Diagnose", size=17, weight=ft.FontWeight.W_600),
+                    ft.Text(
+                        f"{lauf.geraet_name or 'Gerät'} — die letzten Zeilen des "
+                        "Verbindungsprotokolls. Teilen schickt das ganze Protokoll.",
+                        size=12,
+                        opacity=0.7,
+                    ),
+                    ft.Text(
+                        "\n".join(zeilen) or "noch keine Einträge",
+                        size=11,
+                        selectable=True,
+                        font_family="monospace",
+                    ),
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.END,
+                        controls=[
+                            ft.TextButton("Protokoll teilen", icon=ft.Icons.SHARE, on_click=teilen)
+                        ],
+                    ),
+                ],
+            ),
+        ),
+    )
+
+
+def diagnose_knopf(page: ft.Page, lauf: Messlauf) -> ft.Control:
+    """Unauffälliger Knopf zum Verbindungsprotokoll — der Simulator führt keines."""
+    return ft.IconButton(
+        ft.Icons.RECEIPT_LONG_OUTLINED,
+        icon_size=20,
+        tooltip="Diagnose: Verbindungsprotokoll",
+        visible=not lauf.simulation,
+        on_click=lambda: page.show_dialog(diagnose_blatt(page, lauf)),
     )
 
 
@@ -190,6 +235,77 @@ def ohne_rr() -> list[str]:
     return [k for k in KENNZAHLEN if k != "hf_geraet"]
 
 
+#: Ohne ein einziges Intervall nach so vielen Paketen (≈ Sekunden) gilt ein Gerät
+#: als reiner Pulsgeber — auch ohne Angabe im Geräteprofil
+NUR_PULS_NACH = 10
+#: Kleinste Spanne der Pulskurve (bpm) — sonst füllte jedes Zucken die Höhe
+HF_SPANNE_MIN_BPM = 10.0
+
+
+def nur_puls(lauf: Messlauf) -> bool:
+    """Sendet das Gerät nur die Herzfrequenz (bpm), keine Intervalle von Schlag zu Schlag?
+
+    Ben, 17.10.2026: Uhren und Sensoren, die nur den Puls übertragen, bekommen den Puls
+    als Hauptkurve. Hinterlegt ist das im Geräteprofil (`GeraeteProfil.hrv_moeglich`,
+    z. B. `UHR_BROADCAST`); ohne Angabe dort entscheidet, was ankommt: `NUR_PULS_NACH`
+    Pakete ohne ein einziges Intervall. Kommt eines, ist es das Tachogramm.
+    """
+    punkte = lauf.live.punkte()
+    if any(p.rr_ms > 0 for p in punkte):
+        return False
+    if lauf.profil is not None and not lauf.profil.hrv_moeglich:
+        return True
+    return len(punkte) >= NUR_PULS_NACH
+
+
+def pulskurve(
+    lauf: Messlauf,
+    x_von: float,
+    x_bis: float,
+    *,
+    marken: list[Reihe] = (),  # type: ignore[assignment]
+    hoehe: int = 180,
+) -> ft.Control:
+    """Die Hauptkurve eines reinen Pulsgebers: die Herzfrequenz des Geräts in bpm."""
+    punkte = [(t, h) for t, h in lauf.live.hf_reihe() if x_von <= t <= x_bis]
+    return kurve(
+        [Reihe(punkte, farbe=ft.Colors.PRIMARY), *marken],
+        einheit="HF bpm",
+        hoehe=hoehe,
+        x_von=x_von,
+        x_bis=x_bis,
+        y_spanne_min=HF_SPANNE_MIN_BPM,
+    )
+
+
+#: Hinter dem „i“ im Kartentitel (Ben, 17.10.2026: vorher grauer Text unter den Notizen)
+TACHOGRAMM_INFO = """\
+- **Grau:** alle Rohwerte, auch vom Sensor verworfene
+- **Farbig:** gewertet
+- **Rote Punkte:** Artefakte — markiert, nicht verändert
+- **Gelb:** Notizen
+
+Waagrecht wischen blättert zurück. Gespeichert werden immer die Rohwerte; korrigiert
+wird in der Aufzeichnung.
+
+Titel, Beschreibung und Notizen lassen sich schon vor dem Start eintragen.
+„Aufnahme starten“ beginnt die Kurven neu.
+"""
+
+PULS_INFO = """\
+Dieses Gerät sendet nur die **Herzfrequenz** (bpm), keine Abstände von Schlag zu
+Schlag. Darum zeigt die Kurve den Puls, und HRV-Werte gibt es nicht.
+
+Welche Geräte das sind, steht im Geräteprofil — etwa Uhren, die ihre Herzfrequenz
+übertragen. Kommt doch ein Intervall an, wird die Kurve zum Tachogramm.
+
+- **Gelb:** Notizen
+
+Waagrecht wischen blättert zurück. Titel, Beschreibung und Notizen lassen sich schon
+vor dem Start eintragen; „Aufnahme starten“ beginnt die Kurve neu.
+"""
+
+
 # ---------------------------------------------------------------------------
 # Kacheln
 # ---------------------------------------------------------------------------
@@ -201,6 +317,8 @@ def kachel_werte(
     ansicht: Ansicht,
     verity: bool,
     atemuebung_an: Callable[[], object] | None = None,
+    *,
+    puls_allein: bool = False,
 ) -> list[KachelWert]:
     """Die eingestellten Werte der Übersicht mit den aktuellen Live-Werten.
 
@@ -208,7 +326,9 @@ def kachel_werte(
     letzte Punkt der Kurve. Die Atemfrequenz gibt es nur bei deutlicher Atmung;
     sonst steht der Grund da (bei langsamer Schwingung mit dem Knopf
     „Atemübung", ``atemuebung_an``). Vom Sensor verworfene Intervalle (Verity
-    Sense) erscheinen von selbst, sobald es welche gibt.
+    Sense) erscheinen von selbst, sobald es welche gibt. Sendet das Gerät nur den
+    Puls (``puls_allein``, `nur_puls`), sagen die übrigen Kacheln das statt eines
+    Grunds, der nicht stimmt (`ohne_intervalle`).
     """
     k = lauf.live.kennzahlen()
     t, rr, naht = lauf.live.verlaufsreihe()
@@ -221,6 +341,7 @@ def kachel_werte(
         if art is None:
             continue
         g = key in gross
+        bisher = len(out)
         if key == "hf":
             hf = k.hf_bpm if k.hf_bpm is not None else lauf.status.hf_bpm
             out.append(KachelWert("Herzfrequenz", zahl(hf), "bpm", gross=g))
@@ -277,6 +398,8 @@ def kachel_werte(
                     gross=g,
                 )
             )
+        if puls_allein and key not in PULS_KACHELN and len(out) > bisher:
+            out[-1] = ohne_intervalle(out[-1])
     if k.verworfen:
         zusatz = (
             "vom Sensor · selbst geprüft"
@@ -500,7 +623,11 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
                 f"Verbinden fehlgeschlagen: {fehler}. Ist das Gerät an und in der Nähe? "
                 "Sonst hilft „Geräte suchen“."
             )
-            diagnose.content = _diagnose(page, lauf)
+            diagnose.content = ft.TextButton(
+                "Diagnose ansehen",
+                icon=ft.Icons.RECEIPT_LONG_OUTLINED,
+                on_click=lambda: page.show_dialog(diagnose_blatt(page, lauf)),
+            )
             diagnose.visible = True
             page.update()
             return
@@ -564,8 +691,9 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             karte(
                 ft.Text("Gerät verbinden", size=18, weight=ft.FontWeight.W_600),
                 ft.Text(
-                    "Polar H10 (Brustgurt, RR-Intervalle) oder Polar Verity Sense "
-                    "(optisch, Pulsintervalle). Den Gurt vorher anfeuchten.",
+                    "Polar H10 (Brustgurt, RR-Intervalle), Polar Verity Sense "
+                    "(optisch, Pulsintervalle) oder eine Uhr, die ihren Puls überträgt "
+                    "(nur Herzfrequenz). Den Gurt vorher anfeuchten.",
                     size=12,
                     opacity=0.7,
                 ),
@@ -597,6 +725,12 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
                             icon=ft.Icons.SCIENCE_OUTLINED,
                             on_click=simulator(SIM_PPI, "Simulator Verity"),
                         ),
+                        # Wie eine Uhr, die nur den Puls sendet (Ben, 17.10.2026)
+                        ft.TextButton(
+                            "Simulator wie Uhr (nur Puls)",
+                            icon=ft.Icons.WATCH_OUTLINED,
+                            on_click=simulator(SIM_PULS, "Simulator Uhr"),
+                        ),
                     ],
                 ),
             ),
@@ -616,7 +750,6 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     kacheln_box = ft.Container()
     rr_box = ft.Container()
     lage_box = ft.Container()
-    diagnose_box = ft.Container()
     letzte = 0.0
     #: Wischen läuft (bis zum Nachrechnen nach dem Loslassen): Spektrum bleibt stehen
     wischt = False
@@ -791,21 +924,21 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         await page.push_route(f"/messung/{eintrag.id}")
 
     def titel_bearbeiten() -> None:
-        """Titel und Beschreibung schon während der Aufnahme — sie landen in der Datei."""
-        aufnahme = lauf.aufnahme
-        if aufnahme is None:
-            return
+        """Titel und Beschreibung — schon vor der Aufnahme (Ben, 17.10.2026), dann übernimmt
+        sie der Start; während der Aufnahme landen sie mit Backup und Messdatei."""
+        start = lauf.aufnahme.start_utc if lauf.aufnahme is not None else utc_jetzt()
+        titel, beschreibung = lauf.titel_notiz()
 
         def speichern(titel: str, text: str) -> None:
-            aufnahme.titel, aufnahme.notiz = titel, text
+            lauf.titel_notiz_setzen(titel, text)
             aktualisieren(erzwingen=True)
 
-        plaene = geuebte_plaene(state, aufnahme.start_utc, utc_jetzt())
+        plaene = geuebte_plaene(state, start, utc_jetzt())
         page.show_dialog(
             titel_blatt(
-                aufnahme.titel,
-                aufnahme.notiz,
-                titel_vorschlaege(state, aufnahme.start_utc, utc_jetzt(), aufnahme.ereignisse),
+                titel,
+                beschreibung,
+                titel_vorschlaege(state, start, utc_jetzt(), lauf.ereignisse()),
                 speichern,
                 vorgabe=plaene[0] if plaene else "",
             )
@@ -821,8 +954,40 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         state.messlauf = None
         state.neu_zeichnen()
 
+    #: Statuskarte: woraus sie zuletzt gebaut wurde, ihre Laufzeit-Anzeige und ob die
+    #: Beschreibung aufgeklappt ist
+    status_stand: dict[str, Any] = {"schluessel": None, "dauer": None, "offen": False}
+
+    def beschreibung_umklappen() -> None:
+        status_stand["offen"] = not status_stand["offen"]
+        aktualisieren(erzwingen=True)
+
+    def status_auffrischen() -> None:
+        """Die Statuskarte nur neu bauen, wenn sich an ihr etwas ändert — sonst nur die
+        Laufzeit. Neu gebaute Knöpfe verlören einen Tipp, der gerade läuft (bis zu 2×/s
+        kam eine neue Karte; Ben, 17.10.2026: „Titel hinzufügen“ reagierte erst beim
+        zweiten Mal)."""
+        s = lauf.status
+        schluessel = (
+            s.verbindung,
+            s.batterie_prozent,
+            s.hautkontakt,
+            s.meldung,
+            lauf.geraet_name,
+            lauf.aufnahme is not None,
+            lauf.titel_notiz(),
+            status_stand["offen"],
+        )
+        dauer = status_stand["dauer"]
+        if schluessel != status_stand["schluessel"]:
+            status_stand["schluessel"] = schluessel
+            status_box.content = status_karte()
+        elif isinstance(dauer, ft.Text):
+            dauer.value = f"Aufnahme {_uhr(lauf.aufnahme_dauer_s())}"
+
     def status_karte() -> ft.Control:
         s = lauf.status
+        status_stand["dauer"] = None
         farbe = {
             Verbindung.VERBUNDEN: ft.Colors.GREEN_400,
             Verbindung.VERBINDE: ft.Colors.AMBER_400,
@@ -834,20 +999,42 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         if s.hautkontakt is False:
             teile.append("kein Hautkontakt")
         if lauf.aufnahme is None:
-            aktion: ft.Control = ft.Row(
-                spacing=8,
-                wrap=True,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            titel, beschreibung = lauf.titel_notiz()
+            aktion: ft.Control = ft.Column(
+                spacing=4,
+                tight=True,
                 controls=[
-                    ft.FilledButton(
-                        "Aufnahme starten",
-                        icon=ft.Icons.FIBER_MANUAL_RECORD,
-                        on_click=aufnahme_starten,
+                    ft.Row(
+                        spacing=8,
+                        wrap=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.FilledButton(
+                                "Aufnahme starten",
+                                icon=ft.Icons.FIBER_MANUAL_RECORD,
+                                on_click=aufnahme_starten,
+                            ),
+                            ft.TextButton(
+                                "Trennen", icon=ft.Icons.BLUETOOTH_DISABLED, on_click=trennen
+                            ),
+                        ],
                     ),
-                    ft.TextButton("Trennen", icon=ft.Icons.BLUETOOTH_DISABLED, on_click=trennen),
+                    # Schon vor dem Start (Ben, 17.10.2026) — der Start übernimmt beides
+                    titel_kopf(
+                        titel,
+                        beschreibung,
+                        titel_bearbeiten,
+                        klein=True,
+                        offen=status_stand["offen"],
+                        umklappen=beschreibung_umklappen,
+                    ),
                 ],
             )
         else:
+            dauer = ft.Text(
+                f"Aufnahme {_uhr(lauf.aufnahme_dauer_s())}", size=15, weight=ft.FontWeight.W_600
+            )
+            status_stand["dauer"] = dauer
             aktion = ft.Column(
                 spacing=4,
                 tight=True,
@@ -858,27 +1045,31 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
                             ft.Icon(ft.Icons.FIBER_MANUAL_RECORD, color=FARBEN["rot"], size=16),
-                            ft.Text(
-                                f"Aufnahme {_uhr(lauf.aufnahme_dauer_s())}",
-                                size=15,
-                                weight=ft.FontWeight.W_600,
-                            ),
+                            dauer,
                             ft.FilledButton(
                                 "Stopp & speichern", icon=ft.Icons.STOP, on_click=aufnahme_stoppen
                             ),
                         ],
                     ),
                     titel_kopf(
-                        lauf.aufnahme.titel, lauf.aufnahme.notiz, titel_bearbeiten, klein=True
+                        lauf.aufnahme.titel,
+                        lauf.aufnahme.notiz,
+                        titel_bearbeiten,
+                        klein=True,
+                        offen=status_stand["offen"],
+                        umklappen=beschreibung_umklappen,
                     ),
                 ],
             )
         return karte(
             ft.Row(
                 spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     ft.Icon(ft.Icons.CIRCLE, size=12, color=farbe),
                     ft.Text("  ·  ".join(teile), size=13, expand=True),
+                    # Das Verbindungsprotokoll — vorher ein Klappfeld ganz unten (Ben, 17.10.)
+                    diagnose_knopf(page, lauf),
                 ],
             ),
             ft.Text(s.meldung, size=12, opacity=0.7, visible=bool(s.meldung)),
@@ -887,6 +1078,8 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         )
 
     def hauptkurve(x_von: float, x_bis: float) -> ft.Control:
+        if modus["puls"]:
+            return pulskurve(lauf, x_von, x_bis, marken=notizfeld.marken(x_von, x_bis))
         return tachogramm(
             lauf,
             x_von,
@@ -896,9 +1089,36 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             marken=notizfeld.marken(x_von, x_bis),
         )
 
+    def kurven_titel() -> str:
+        if modus["puls"]:
+            return "HERZFREQUENZ"
+        return "PPI-TACHOGRAMM" if verity else "RR-TACHOGRAMM"
+
+    def modus_pruefen() -> None:
+        """Puls oder Tachogramm (`nur_puls`) — wechselt, sobald sich zeigt, was das Gerät sendet."""
+        puls = nur_puls(lauf)
+        if puls == modus["puls"]:
+            return
+        modus["puls"] = puls
+        kurven_titel_text.value = kurven_titel()
+        regler.visible = korrigiert_schalter.visible = not puls
+
     async def vollbild() -> None:
         """Die Kurven allein, quer, ohne Leisten (`views.live_vollbild`)."""
         await page.push_route("/live")
+
+    #: Hauptkurve als Puls (bpm) statt als Tachogramm — `nur_puls`, `modus_pruefen`
+    modus = {"puls": nur_puls(lauf)}
+    kurven_titel_text = ft.Text(
+        kurven_titel(), size=11, weight=ft.FontWeight.BOLD, opacity=0.6, expand=True
+    )
+    regler = regler_knopf(regeln_oeffnen)
+    korrigiert_schalter = ft.Switch(
+        label="korrigiert (Artefakte überbrückt)",
+        value=einst.korrigiert,
+        on_change=korrigiert_wechseln,
+    )
+    regler.visible = korrigiert_schalter.visible = not modus["puls"]
 
     def lage() -> ft.Control:
         """Zurückgeblättert: wie weit, und zurück zur Gegenwart."""
@@ -918,8 +1138,11 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         state.messung_ende_s = fenster.ende_s
         # Ein Zeitpunkt für alle Kurven — sonst rückte jede ein Stück weiter.
         x_von, x_bis = fenster.bereich(lauf.jetzt_s(), anfang())
-        status_box.content = status_karte()
-        werte = kachel_werte(lauf, einst, state.ansicht(), verity, atemuebung_an)
+        status_auffrischen()
+        modus_pruefen()
+        werte = kachel_werte(
+            lauf, einst, state.ansicht(), verity, atemuebung_an, puls_allein=modus["puls"]
+        )
         kacheln_box.content = anzeige(werte, einst.darstellung)
         rr_box.content = hauptkurve(x_von, x_bis)
         lage_box.content = lage()
@@ -936,8 +1159,6 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         letzte = jetzt
         fuellen()
         notizfeld.tick()
-        if not lauf.simulation:
-            diagnose_box.content = _diagnose(page, lauf)
         # Ansicht nicht (mehr) auf der Seite — beim nächsten Aufbau geht es weiter.
         with contextlib.suppress(Exception):
             spalte.update()
@@ -949,14 +1170,24 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             aktualisieren(erzwingen=layout)
 
     haupt_karte = karte(
-        kartentitel(
-            "PPI-Tachogramm" if verity else "RR-Tachogramm",
-            regler_knopf(regeln_oeffnen),
-            ft.IconButton(
-                ft.Icons.FULLSCREEN,
-                tooltip="Kurven im Vollbild (quer)",
-                on_click=vollbild,
-            ),
+        ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                kurven_titel_text,
+                # Was die Farben heißen — vorher grauer Text unter den Notizen (Ben, 17.10.)
+                info_knopf(
+                    page,
+                    "So liest du die Kurve",
+                    lambda: PULS_INFO if modus["puls"] else TACHOGRAMM_INFO,
+                ),
+                regler,
+                ft.IconButton(
+                    ft.Icons.FULLSCREEN,
+                    tooltip="Kurven im Vollbild (quer)",
+                    on_click=vollbild,
+                ),
+            ],
         ),
         ft.SegmentedButton(
             selected=[str(fenster.breite_s if fenster.breite_s in LIVE_FENSTER else 120)],
@@ -966,11 +1197,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             ],
             on_change=fenster_wechseln,
         ),
-        ft.Switch(
-            label="korrigiert (Artefakte überbrückt)",
-            value=einst.korrigiert,
-            on_change=korrigiert_wechseln,
-        ),
+        korrigiert_schalter,
         lage_box,
         wischbar(
             rr_box,
@@ -982,17 +1209,10 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             losgelassen=wisch_ende,
         ),
         notizfeld.control,
-        hinweis(
-            "Grau: alle Rohwerte, auch vom Sensor verworfene · Farbig: gewertet · Rote "
-            "Punkte: Artefakte (markiert, nicht verändert) · Gelb: Notizen. Waagrecht "
-            "wischen blättert zurück. Gespeichert werden immer die Rohwerte; korrigiert "
-            "wird in der Aufzeichnung. Notizen vor dem Start stehen am Anfang der Aufnahme; "
-            "„Aufnahme starten“ beginnt die Kurven neu."
-        ),
     )
     spalte = ft.Column(
         spacing=12,
-        controls=[status_box, kacheln_box, haupt_karte, analyse.control, diagnose_box],
+        controls=[status_box, kacheln_box, haupt_karte, analyse.control],
     )
     # Erstbefüllung ohne update() — die Spalte hängt noch nicht an der Seite.
     fuellen()

@@ -72,10 +72,14 @@ def titel_kopf(
     bearbeiten: Callable[[], object],
     *,
     klein: bool = False,
+    offen: bool = False,
+    umklappen: Callable[[], object] | None = None,
 ) -> ft.Control:
     """Kopfzeile: Titel (oder leise „Titel hinzufügen"), darunter die Beschreibung.
 
-    Antippen öffnet das Blatt. ``klein``: eine Zeile für die Live-Ansicht.
+    Antippen öffnet das Blatt. ``klein``: kompakt für die Live-Ansicht — die
+    Beschreibung als eine Zeile, die sich mit ``umklappen`` ganz aufklappen lässt
+    (``offen``; Ben, 17.10.2026: „ausklappbar, damit es nicht überladen ist“).
     """
     titel, beschreibung = titel.strip(), beschreibung.strip()
     stift = ft.Icon(ft.Icons.EDIT_OUTLINED, size=16, opacity=0.55)
@@ -110,6 +114,36 @@ def titel_kopf(
                 opacity=0.75,
                 max_lines=3,
                 overflow=ft.TextOverflow.ELLIPSIS,
+            )
+        )
+    elif beschreibung:
+        auszug = ft.Text(
+            beschreibung,
+            size=12,
+            opacity=0.75,
+            max_lines=None if offen else 1,
+            overflow=ft.TextOverflow.CLIP if offen else ft.TextOverflow.ELLIPSIS,
+            expand=True,
+        )
+        zeilen.append(
+            ft.Row(
+                spacing=0,
+                # Zu: Pfeil neben der einen Zeile; auf: am Ende des Absatzes
+                vertical_alignment=(
+                    ft.CrossAxisAlignment.END if offen else ft.CrossAxisAlignment.CENTER
+                ),
+                controls=[
+                    auszug,
+                    ft.IconButton(
+                        ft.Icons.EXPAND_LESS if offen else ft.Icons.EXPAND_MORE,
+                        icon_size=18,
+                        visual_density=ft.VisualDensity.COMPACT,
+                        tooltip="Beschreibung zuklappen" if offen else "Ganze Beschreibung",
+                        on_click=lambda: umklappen(),
+                    ),
+                ]
+                if umklappen is not None
+                else [auszug],
             )
         )
     return ft.Container(

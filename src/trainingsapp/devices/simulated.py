@@ -46,12 +46,24 @@ from .base import (
     Verbindung,
 )
 from .pmd import PpiProbe, ppi_messwerte
-from .profiles import POLAR_H10, VERITY_SENSE, GeraeteProfil, profil_fuer_namen, profil_nach_id
+from .profiles import (
+    POLAR_H10,
+    UHR_BROADCAST,
+    VERITY_SENSE,
+    GeraeteProfil,
+    profil_fuer_namen,
+    profil_nach_id,
+)
 
 SIM_PREFIX = "sim:"
 SIM_SYNTH = f"{SIM_PREFIX}synth"
 SIM_PPI = f"{SIM_PREFIX}ppi"
 SIM_DATEI = f"{SIM_PREFIX}datei"
+#: Eine Uhr, die nur die Herzfrequenz überträgt — keine Intervalle (Ben, 17.10.2026)
+SIM_PULS = f"{SIM_PREFIX}puls"
+
+#: So oft schickt eine Uhr ihre Herzfrequenz (s)
+PULS_TAKT_S = 1.0
 
 #: So lange sammelt der PPI-Modus Schläge, bevor er ein Paket schickt (wie der Verity Sense).
 PPI_PAKET_S = 5.0
@@ -99,6 +111,7 @@ class SimulatedSource(HeartRateSource):
         geraete = [
             DeviceInfo(id=SIM_SYNTH, name="Simulator (synthetisch)", profil_id=POLAR_H10.id),
             DeviceInfo(id=SIM_PPI, name="Simulator (PPI wie Verity)", profil_id=VERITY_SENSE.id),
+            DeviceInfo(id=SIM_PULS, name="Simulator (Uhr, nur Puls)", profil_id=UHR_BROADCAST.id),
         ]
         if self.datei is not None:
             geraete.append(DeviceInfo(id=SIM_DATEI, name="Simulator (Datei-Wiedergabe)"))
@@ -107,15 +120,19 @@ class SimulatedSource(HeartRateSource):
     async def connect(self, device_id: str, name: str | None = None) -> None:
         if self._task is not None and not self._task.done():
             raise RuntimeError("Simulator läuft schon — zuerst disconnect()")
-        if device_id == SIM_DATEI or (device_id not in (SIM_SYNTH, SIM_PPI) and self.datei):
+        if device_id == SIM_DATEI or (
+            device_id not in (SIM_SYNTH, SIM_PPI, SIM_PULS) and self.datei
+        ):
             if self.datei is None:
                 raise ValueError("Datei-Wiedergabe ohne Datei — SimulatedSource(datei=…)")
             self._modus = "datei"
+        elif device_id == SIM_PULS:
+            self._modus = "puls"
         elif device_id == SIM_PPI or (device_id != SIM_SYNTH and self.ppi):
             self._modus = "ppi"
         else:
             self._modus = "synth"
-        self._profil = VERITY_SENSE if self._modus == "ppi" else POLAR_H10
+        self._profil = {"ppi": VERITY_SENSE, "puls": UHR_BROADCAST}.get(self._modus, POLAR_H10)
 
         self._sitzung_beginnen()
         self._device_id = device_id
@@ -159,6 +176,9 @@ class SimulatedSource(HeartRateSource):
             ende = "Wiedergabe beendet"
         elif self._modus == "ppi":
             quelle = self._ppi_synthetisch()
+            ende = "Simulation beendet"
+        elif self._modus == "puls":
+            quelle = self._puls_synthetisch()
             ende = "Simulation beendet"
         else:
             quelle = self._synthetisch()
@@ -229,6 +249,20 @@ class SimulatedSource(HeartRateSource):
             await self._bis(virt)
             yield Messwert(self._device_id, round(rr), round(60000.0 / rr), virt, "m")
 
+    async def _puls_synthetisch(self) -> AsyncIterator[Messwert | PpiPaket]:
+        """Wie eine Uhr im Übertragungsmodus: jede Sekunde die Herzfrequenz, kein Intervall.
+
+        Der Puls wandert langsam (Minutenwelle) — sonst wäre die Kurve ein Strich.
+        """
+        t_s = 0.0
+        while self.dauer_s is None or t_s < self.dauer_s:
+            t_s += PULS_TAKT_S
+            welle = 4.0 * math.sin(2 * math.pi * t_s / 60.0)
+            hf = round(self.bpm + welle + self._rng.gauss(0.0, 0.7))
+            virt = self._t0_virt + t_s
+            await self._bis(virt)
+            yield Messwert(self._device_id, 0, hf, virt, "m")
+
     async def _ppi_synthetisch(self) -> AsyncIterator[Messwert | PpiPaket]:
         t_s = 0.0
         proben: list[PpiProbe] = []
@@ -255,4 +289,13 @@ class SimulatedSource(HeartRateSource):
             paket_start = t_s
 
 
-__all__ = ["PPI_PAKET_S", "SIM_DATEI", "SIM_PPI", "SIM_PREFIX", "SIM_SYNTH", "SimulatedSource"]
+__all__ = [
+    "PPI_PAKET_S",
+    "PULS_TAKT_S",
+    "SIM_DATEI",
+    "SIM_PPI",
+    "SIM_PREFIX",
+    "SIM_PULS",
+    "SIM_SYNTH",
+    "SimulatedSource",
+]

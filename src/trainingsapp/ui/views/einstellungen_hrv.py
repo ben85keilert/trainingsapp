@@ -37,6 +37,7 @@ from trainingsapp.core.hrv_einstellungen import (
     UEBERSICHT,
     HrvEinstellungen,
 )
+from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.kacheln import GRUPPEN, KACHELN
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt
@@ -466,7 +467,7 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                 angebot,
             ),
             karte(
-                titel("Atmung"),
+                titel("Atmung", hilfe_knopf(page, thema="atmung")),
                 schalter(
                     "atemuebung",
                     "Atemübung (langsames Atmen)",

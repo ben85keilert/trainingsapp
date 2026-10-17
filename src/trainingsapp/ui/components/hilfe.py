@@ -5,6 +5,9 @@
 - **Varianten und Pakete** (`UEBUNGEN_MD`): die allgemeine Erklärung, die
   früher in jeder Übung stand (Ben, 14.10.2026: dort redundant). Ausführlich
   in `docs/datenmodell.md` (Varianten) und `docs/uebungspakete.md`.
+- **Atemfrequenz und Atemübung** (`ATMUNG_MD`, Ben 17.10.2026): was „unter 8/min“
+  und der Knopf „Atemübung“ heißen. Kommt in die Hilfedatei (Katalog A3); die
+  Rechenvorschrift steht in hrv-core (`hrv_core/atmung.py`).
 """
 
 from __future__ import annotations
@@ -81,10 +84,45 @@ Ein **Export** schreibt ausgewählte Übungen in eine Paketdatei zum Teilen — 
 Einträge, Messungen oder Strecken.
 """
 
+ATMUNG_MD = """\
+Die App liest die **Atemfrequenz aus dem Herzschlag**: Beim Einatmen schlägt das
+Herz etwas schneller, beim Ausatmen langsamer (respiratorische Sinusarrhythmie,
+RSA). Im Tachogramm ist das eine Welle — ihre Frequenz ist die Atemfrequenz, ihre
+Höhe die Kachel „Atemschwankung“.
+
+**Warum „unter 8/min“?** Im selben Signal steckt eine zweite Welle: die
+Blutdruckregulation (Mayer-Welle) schwingt etwa alle 10 Sekunden — das sähe aus
+wie 6 Atemzüge je Minute. Im Sitzen und besonders im Stehen ist sie oft stärker
+als die Atemschwankung. Unter 8 Atemzügen je Minute ist aus dem Herzschlag allein
+nicht zu unterscheiden, ob die Atmung oder der Blutdruck schwingt. Darum steht
+dort normalerweise keine Zahl, sondern der Grund: „langsame Schwingung unter
+8/min“.
+
+**Atemübung an** heißt: Du sagst der App, dass du gerade bewusst langsam atmest —
+etwa 6 Atemzüge je Minute (Resonanz- oder Kohärenzatmung). Dann zählt auch die
+langsame Welle als Atmung, aber nur, wenn sie klar überwiegt (mindestens 70 % der
+Schwankung liegen um ihren Gipfel) und der Herzschlag je Atemzug deutlich
+schwankt (mindestens 50 ms zwischen kürzestem und längstem Abstand). Ist daneben
+schnelleres Atmen deutlich zu sehen, gilt weiter das.
+
+**Atemübung aus** (Vorgabe): Atemfrequenz nur ab 8/min.
+
+Umschalten: live mit dem Knopf „Atemübung“, der bei langsamer Schwingung in der
+Kachel Atemfrequenz erscheint, oder in den Einstellungen unter „HRV-Messung“ im
+Abschnitt „Atmung“. Die Wahl gilt auch beim Ansehen von Aufzeichnungen.
+
+**Wann gibt es keine Zahl?** Die App prüft, statt zu schätzen: genug saubere
+Schläge, ein deutlicher Gipfel, einzelne Atemzüge von ähnlicher Länge, eine
+spürbare Schwankung, mindestens drei Herzschläge je Atemzug und ein Puls unter
+110 bpm. Passt etwas nicht, steht der Grund in der Kachel. Lieber keine Zahl als
+eine falsche — die Werte beschreiben, sie bewerten nicht.
+"""
+
 #: Thema → (Titel, Text, Tooltip des Knopfs)
 THEMEN: dict[str, tuple[str, str, str]] = {
     "notation": ("So wird eingegeben", NOTATION_MD, "Wie gebe ich ein?"),
     "uebungen": ("Varianten und Pakete", UEBUNGEN_MD, "Varianten und Pakete"),
+    "atmung": ("Atemfrequenz und Atemübung", ATMUNG_MD, "Was heißt „Atemübung“?"),
 }
 
 
@@ -119,6 +157,7 @@ def hilfe_oeffner(page: ft.Page, thema: str = "notation") -> Callable[[], None]:
 
 
 __all__ = [
+    "ATMUNG_MD",
     "NOTATION_MD",
     "THEMEN",
     "UEBUNGEN_MD",

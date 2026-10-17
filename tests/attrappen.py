@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 from trainingsapp.core.models import Subject
@@ -22,7 +22,10 @@ from trainingsapp.devices.gps import GpsQuelle
 from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.devices.profiles import POLAR_H10
 
-UTC0 = datetime(2026, 10, 17, 8, 0, tzinfo=UTC)
+#: Heute, 10:00 Ortszeit — so passt „heute“ der App (Läufe heute, Heute geleistet,
+#: Leistungen) immer zur Uhr der Attrappen. Ein festes Datum (17.10.2026) ließ diese
+#: Tests vom Folgetag an scheitern.
+UTC0 = datetime.combine(date.today(), time(10, 0)).astimezone(UTC)
 LAT0, LON0 = 52.4733, 13.4030  # Tempelhofer Feld — öffentlich, wie der Simulator
 GRAD_JE_M = 1 / 111_320
 

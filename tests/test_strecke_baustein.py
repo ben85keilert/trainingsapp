@@ -62,7 +62,8 @@ async def test_bereit_erst_mit_guter_ortung_und_kilometer_zur_split_zeit() -> No
     # sie, der Versatz bringt die Empfängeruhr (2,5 s falsch) auf die Achse der Einheit
     assert ablage.start_utc == UTC0 + timedelta(seconds=t0 - 1000.0)
     assert ablage.behalten is True
-    assert ergebnis.datei == strecke.beteiligung.datei == "strecke_2026-10-17_080001.jsonl"
+    erwartet = f"strecke_{UTC0 + timedelta(seconds=1):%Y-%m-%d_%H%M%S}.jsonl"
+    assert ergebnis.datei == strecke.beteiligung.datei == erwartet
     versatz = 1000.0 - UTC0.timestamp() - gps.versatz_s - t0
     assert ergebnis.versatz_s == pytest.approx(versatz, abs=1e-6)
     assert strecke.beteiligung.versatz_s == pytest.approx(versatz, abs=1e-6)

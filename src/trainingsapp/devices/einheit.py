@@ -100,7 +100,7 @@ class TimerBaustein:
 
     def status(self) -> str:
         p = self.lauf.profil
-        return f"{p.name} · {p.kurztext()}" if p.abschnitte else f"{p.name} · ohne Abschnitte"
+        return p.kurztext() if p.abschnitte else "ohne Abschnitte"
 
     async def vorbereiten(self) -> None:
         return None

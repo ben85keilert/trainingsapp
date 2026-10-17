@@ -18,6 +18,7 @@ from typing import Any, cast
 
 import flet as ft
 
+from trainingsapp.core.einheit import Zustand
 from trainingsapp.ui import einheit as ablauf
 from trainingsapp.ui.state import AppState
 
@@ -229,7 +230,7 @@ def _laufleiste(page: Any, state: AppState, e: Any, box: ft.Container, stand: di
     stand["zeile1"], stand["zeile2"] = zeile1, zeile2
     t = e.timer
     knoepfe: list[ft.Control] = []
-    if t is not None and not t.lauf.fertig:
+    if t is not None and not t.lauf.fertig and e.zustand is Zustand.LAEUFT:  # nicht im Countdown
         knoepfe.append(
             ft.IconButton(
                 ft.Icons.PAUSE if t.lauf.laeuft else ft.Icons.PLAY_ARROW,

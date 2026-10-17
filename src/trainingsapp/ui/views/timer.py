@@ -344,7 +344,12 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 teile.append(f"Abschnitt {stand.index + 1} von {len(profil.abschnitte)}")
             teile.append(f"gesamt noch {dauer_text(stand.gesamt_rest_s)}")
             stand_text.value = " · ".join(teile)
-        if stand.laeuft:
+        haupt_knopf.disabled = False
+        if einheit_ui.besitzt_timer(state, lauf) and not lauf.begonnen:
+            # Countdown der Einheit: Sie startet den Timer auf ihren Zeitpunkt
+            haupt_knopf.content = _knopf_inhalt(ft.Icons.HOURGLASS_TOP, "Gleich …")
+            haupt_knopf.disabled = True
+        elif stand.laeuft:
             haupt_knopf.content = _knopf_inhalt(ft.Icons.PAUSE, "Pause")
             haupt_knopf.on_click = anhalten
         else:

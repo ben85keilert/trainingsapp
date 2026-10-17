@@ -68,6 +68,7 @@ def bereitstellen(
         plan.id, plan.name, schritte, weiter_automatisch=plan.weiter_automatisch
     )
     e = einheit_ui.teil_bereitstellen(page, state, teil)
+    state.plan_ablaeufe[plan.id] = e.id
     if hrv and hrv_moeglich(state) and e.hrv is None:
         einheit_ui.hrv_bereitstellen(page, state)
     if hrv_beenden is not None:
@@ -143,6 +144,31 @@ def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry
     return eintrag
 
 
+def ergebnis_der_einheit(state: Any, einheit_id: str) -> dict[str, tuple[str, list[float]]] | None:
+    """Wie ein beendeter Ablauf ausging: je Planübung der Grund, mit dem sie endete, und
+    das Eingetragene — ``None``, solange er läuft oder nicht in der Zeitleiste steht.
+    Eine Übung, die nicht mehr drankam, fehlt."""
+    if state.einheiten is None:
+        return None
+    kopf = state.einheiten.laden(einheit_id)
+    if kopf is None or kopf.ended_at is None:
+        return None
+    ereignisse = state.einheiten.ereignisse(einheit_id)
+    werte = {
+        str(x.daten.get("planuebung")): list(x.daten.get("werte") or [])
+        for x in ereignisse
+        if x.quelle == "person" and x.art == "eintrag"
+    }
+    return {
+        str(x.daten.get("planuebung")): (
+            str(x.daten.get("grund") or ""),
+            werte.get(str(x.daten.get("planuebung")), []),
+        )
+        for x in ereignisse
+        if x.quelle == "plan" and x.art == "uebung_ende"
+    }
+
+
 def eingetragen(e: Einheitslauf) -> dict[str, list[float]]:
     """Je Planübung, was der Ablauf eingetragen hat (aus der Zeitleiste)."""
     return {
@@ -157,6 +183,7 @@ __all__ = [
     "ablauf_teil",
     "bereitstellen",
     "eingetragen",
+    "ergebnis_der_einheit",
     "hrv_moeglich",
     "laufender",
     "nach_der_uebung",

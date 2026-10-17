@@ -182,6 +182,7 @@ class PlanAblaufBaustein:
         assert self._t0 is not None
         self._ausstehend.append(self._ende_ereignis(jetzt, grund))
         self.ergebnisse[self.schritt.item_id] = grund
+        self.timer = None  # in der Pause gibt es keinen Timer (Laufleiste, ⏸)
         if self.k + 1 >= len(self.schritte):
             self.phase = FERTIG
             self._ausstehend.append(

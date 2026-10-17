@@ -76,6 +76,42 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
         except (RuntimeError, ValueError) as fehler:
             melden(str(fehler))
 
+    # -- Danach ---------------------------------------------------------------------------
+
+    def danach() -> list[ft.Control]:
+        """Nach einem Ablauf aus dieser Ansicht: wie er ausging (aus der Zeitleiste)."""
+        letzter = state.plan_ablaeufe.get(plan.id)
+        ergebnisse = plan_ablauf.ergebnis_der_einheit(state, letzter) if letzter else None
+        if not ergebnisse:
+            return []
+        eingetragen = sum(1 for grund, _ in ergebnisse.values() if grund in plan_ablauf.EINTRAGEN)
+        zeilen: list[ft.Control] = [
+            ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.CHECK_CIRCLE),
+                    ft.Text(
+                        f"{plan.name} fertig", size=18, weight=ft.FontWeight.W_700, expand=True
+                    ),
+                ]
+            ),
+            ft.Text(f"{eingetragen} von {len(schritte)} Übungen eingetragen", size=13),
+        ]
+        for s in schritte:
+            grund, werte = ergebnisse.get(s.item_id, ("", []))
+            unten = GRUENDE.get(grund, grund) if grund else "nicht drangekommen"
+            if werte:
+                unten = f"{_werte_text(werte)} · {unten}"
+            zeilen.append(ft.Text(f"{s.name}: {unten}", size=13))
+        zeilen.append(hinweis("Ändern oder löschen: unter „Heute geleistet“ im Plan."))
+        return [
+            ft.Container(
+                padding=16,
+                border_radius=16,
+                bgcolor=ft.Colors.PRIMARY_CONTAINER,
+                content=ft.Column(spacing=6, controls=zeilen),
+            )
+        ]
+
     # -- Vorher ---------------------------------------------------------------------------
 
     def vorher() -> list[ft.Control]:
@@ -350,7 +386,15 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
         jetzt = plan_ablauf.laufender(state, plan.id)
         if jetzt is None:
             vorbereitet = einheit_ui.in_vorbereitung(state) is not None
-            return ("vorher", vorbereitet, einheit_ui.laeuft(state) is not None, wahl["hrv"])
+            letzter = state.plan_ablaeufe.get(plan.id)
+            return (
+                "vorher",
+                vorbereitet,
+                einheit_ui.laeuft(state) is not None,
+                wahl["hrv"],
+                letzter,
+                state.einheit is None,
+            )
         e, teil = jetzt
         return ("lauf", teil.k, teil.phase, tuple(sorted(teil.ergebnisse.items())), e.id)
 
@@ -361,7 +405,7 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
             inhalt.controls = waehrend(*jetzt)
             zeiten_auffrischen(*jetzt)
         else:
-            inhalt.controls = vorher()
+            inhalt.controls = [*danach(), *vorher()]
         with contextlib.suppress(Exception):
             inhalt.update()
 

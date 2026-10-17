@@ -249,6 +249,8 @@ class AppState:
     #: Der letzte Lauf je Übung, der aus ihrem Timer gestartet wurde (Einheit-ID) — für
     #: die Karte „gemacht“ nach dem Ende
     uebung_laeufe: dict[str, str] = field(default_factory=dict)
+    #: Der letzte Ablauf je Plan (Einheit-ID) — für die Karte „fertig“ danach
+    plan_ablaeufe: dict[str, str] = field(default_factory=dict)
     #: Ausdauertraining, solange es bereitsteht oder läuft — der Teil ``gps`` der Einheit
     #: (`devices.strecke_baustein.StreckeBaustein`, ``fertig`` danach) — und seine Vorgaben
     ausdauer: Any = None

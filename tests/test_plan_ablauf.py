@@ -227,6 +227,11 @@ async def test_ansicht_vorher_waehrend_danach(umgebung) -> None:
     assert any("gemacht · im Tagebuch" in t for t in texte)  # Kniebeuge abgehakt
     e.beenden()
     await _bis_einheit_weg(state)
+    # Danach: wie der Ablauf ausging — die Atmung lief nicht mehr
+    fertig = _texte(plan_ablauf_view(seite, state, basis, plan))
+    assert "Kräftigung kurz fertig" in fertig and "2 von 3 Übungen eingetragen" in fertig
+    assert "Planke: 0:10 · 0:10 · im Tagebuch" in fertig
+    assert "Atmung: nicht drangekommen" in fertig
 
 
 def test_plan_editor_timer_fuer_alle_und_weiter(umgebung) -> None:
@@ -256,3 +261,18 @@ def test_timer_ueber_dem_plan_bietet_den_ablauf_an(umgebung) -> None:
     plan = _plan(state)
     ansicht = timer_view(Seite(), state, f"/plan/{plan.id}")
     assert "Ablauf öffnen" in [getattr(x, "content", None) for x in _alle(ansicht)]
+
+
+async def test_in_der_pause_kein_timer(umgebung) -> None:
+    """Zwischen zwei Übungen steht in der Laufleiste nur die Pause — kein „Timer fertig“
+    der vorigen Übung, und ⏸ hat nichts anzuhalten."""
+    state, uhr, gurt, _ = umgebung
+    plan = _plan(state)
+    e = plan_ablauf.starten(Seite(), state, plan)
+    await _sekunden(uhr, gurt, e, 31)
+    teil = plan_ablauf.ablauf_teil(e)
+    assert teil is not None and teil.phase == PAUSE and e.timer is None
+    oben, _ = einheit_ui.laufzeilen(e)
+    assert "Pause — dann Kniebeuge" in oben and "Timer" not in oben
+    e.beenden()
+    await _bis_einheit_weg(state)

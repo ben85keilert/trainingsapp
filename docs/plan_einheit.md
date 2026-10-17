@@ -6,7 +6,8 @@ man soweit ist, klickt man auf Start und es läuft los.“ Für spätere Auswert
 Learning: DFA α1 gegen RMSSD je Belastung, Tempo aus GPS, welche Übung wann) muss
 **jedes Ereignis auf einer Zeitachse** liegen.
 
-Skizzen der Oberfläche (15 Bildschirme): https://claude.ai/artifact/5m4q9AhyKnw5nMjWcwPjUs
+Skizzen der Oberfläche (21 Bildschirme, Reihe F: Startleiste kompakt, §9):
+https://claude.ai/artifact/5m4q9AhyKnw5nMjWcwPjUs
 
 ## 1. Begriffe
 
@@ -15,8 +16,8 @@ Skizzen der Oberfläche (15 Bildschirme): https://claude.ai/artifact/5m4q9AhyKnw
 | **Einheit** | die Klammer um alles, was zusammen läuft (`core/einheit.py`, `devices/einheit.py`) |
 | **Teil** | HRV-Messung, Timer, Ausdauertraining, Plan-Ablauf (`Baustein`). Das Training ist der Teil `gps` (`devices/strecke_baustein.StreckeBaustein`) — mit GPS eine Strecke, ohne GPS (Laufband, Halle) nur die Zeit, wie eine `Strecke` ohne Datei |
 | **Bereitstellen** | ein Teil macht sich fertig und wartet auf den gemeinsamen Start: Gurt verbunden, GPS hat Empfang, Profil geladen. Ein zweiter Knopf neben „Start“ (Ben, 17.10.: nicht der Sammelmodus mit Fahne) |
-| **Startleiste** | unter der Titelleiste, auf jeder Seite: alles Bereitgestellte, sein Stand, „Wenn der Timer fertig ist …“, Countdown, „Alle starten“ |
-| **Laufleiste** | dieselbe Stelle nach dem Start: eine Zeit, der laufende Abschnitt, ⏸ ⏹ für alle |
+| **Startleiste** | was bereitsteht: oben auf jeder Seite als **Infoleiste** (eine Zeile), ausführlich als **Startkarte** im Reiter „Einheit“ auf „Heute“ — jeder Teil mit Stand, „Wenn der Timer fertig ist …“, Countdown, „Alle starten“ (§9) |
+| **Laufleiste** | dieselbe Stelle nach dem Start: eine Zeit, der laufende Abschnitt, ⏸ ⏹ für alle; im Reiter „Einheit“ statt ihrer die **Übersicht** mit der Fortschrittsleiste des Timers (§9) |
 | **Zeitleiste** | die Ereignisse einer Einheit in der Datenbank (Migration 018) |
 
 ## 2. Gemeinsamer Start — zwei Schritte
@@ -36,9 +37,9 @@ Skizzen der Oberfläche (15 Bildschirme): https://claude.ai/artifact/5m4q9AhyKnw
   bekommt eine Marke und läuft danach weiter.
 
 **Ende** — Vorgabe „was ich nicht gestartet habe, stoppe ich nicht“, je Teil
-umschaltbar („Wenn der Timer fertig ist: GPS beenden ✓, HRV beenden ☐“). Eine
-mitstartende HRV-Messung mit Dauer („15 min“) endet nach Wahl mit dem Timer oder läuft
-weiter. **Die HRV pausiert nie** — eine Pause ist ein Abschnitt.
+umschaltbar („Wenn der Timer fertig ist: GPS beenden ✓, HRV beenden ☐“) — auch noch im
+Lauf, bis der Timer fertig ist (§9). Eine mitstartende HRV-Messung mit Dauer („15 min“)
+endet nach Wahl mit dem Timer oder läuft weiter. **Die HRV pausiert nie** — eine Pause ist ein Abschnitt.
 
 **Countdown 3-2-1** (wählbar): t0 ist sein Ende. Eine mitstartende HRV-Aufnahme
 beginnt schon beim Countdown (Vorlauf, `versatz_s = −3`), sonst fehlten die ersten
@@ -118,7 +119,7 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 | Stufe | Inhalt | Stand |
 |---|---|---|
 | 0 | hrv-core: `spuren_speichern`, `notiz(..., marke=)`; Vertrag §4/§9b | gebaut 17.10. |
-| 1 | Zeitleiste, `Einheitslauf` mit HRV, Timer, GPS; Startleiste, Laufleiste, Bereitstellen; Dienst `health` | gebaut 17.10.; Messung mit Dauer und Ablauf (A11): „Dauer der Messung“ in der Gerätekarte, Start als Einheit aus HRV und Timer, „Bereitstellen“ |
+| 1 | Zeitleiste, `Einheitslauf` mit HRV, Timer, GPS; Startleiste, Laufleiste, Bereitstellen; Dienst `health` | gebaut 17.10.; Messung mit Dauer und Ablauf (A11): „Dauer der Messung“ in der Gerätekarte, Start als Einheit aus HRV und Timer, „Bereitstellen“; Startleiste kompakt — Infoleiste, Reiter „Einheit“, Übersicht mit Fortschrittsleiste (§9) |
 | 2 | Ausdauertraining als Einheit (verknüpft auch eine schon laufende HRV, Abgleich über `versatz_s`, Wiederherstellung H16) | gebaut 17.10.; Tabellen „Intervalle“ und „Kilometer“ live und in der Auswertung (A10, `core/intervalle.py`) |
 | 3 | Timer an Übung, Planübung und Plan (mehrere Profile, „zählt“, Abbrechen), Plan-Ablauf, Einträge mit Anfang und Ende — Migration 020 | gebaut 17.10. (§7); „vom Timer“ unter „Heute geleistet“ gebaut (A13) |
 | 4 | Forschungsexport (ausdrückliche Handlung): Messdateien, Zeitleiste `einheit-v1.json`, ortsfreies Tempo | gebaut 17.10. (§8), in der Auswertung des Trainings und der HRV-Messung |
@@ -197,3 +198,48 @@ der Messdatei (`marke.einheit`, §4) nennt ihre Einheit.
 nicht die Strecke und nicht der Dateiname der GPS-Beteiligung. Ein Test prüft das ZIP
 (`tests/test_ausdauer.py::test_forschungsexport_ohne_ort`).
 
+## 9. Leisten und Reiter „Einheit“ (Skizzen 16–19)
+
+Ben, 17.10.2026: „Wenn mehrere Dinge abgelegt werden, nimmt das schnell viel Platz ein …
+der halbe Screen ist mit den bereitgestellten Dingen belegt.“ Entschieden: **Variante B** —
+ausführlich steht die Einheit nur noch auf „Heute“, überall sonst eine Zeile
+(`ui/components/startleiste.py`).
+
+| Zustand | „Heute“, Reiter „Einheit“ | „Heute“, Reiter „Heute“ | jede andere Seite |
+|---|---|---|---|
+| keine Einheit | — (kein Reiter) | der Tag | — |
+| bereitgestellt | **Startkarte**: die Teile mit Stand, Marke und ✕, „Leeren“, „Wenn der Timer fertig ist“, Countdown, „Alle starten“ | der Tag | **Infoleiste** |
+| Countdown, läuft | **Übersicht** | **Laufleiste** über dem Tag | **Laufleiste** |
+
+- **Infoleiste** (eine Zeile): die Teile als Symbole (der nicht bereite mit Rand), „2 von 3
+  bereit“ bzw. „Alles bereit“, darunter der Stand des langsamsten Teils („GPS sucht
+  Empfang … 24 m“), ein Fehler rot, sonst was startet. ▶ = „Alle starten“ mit der
+  Countdown-Einstellung, grau, bis alles bereit ist („Trotzdem starten“ nur in der
+  Startkarte). Antippen öffnet „Heute“ im Reiter „Einheit“ — ebenso die Laufleiste.
+- **Reiter** „Einheit · 3“ mit Punkt (orange: es bereitet noch etwas vor, grün: bereit), im
+  Lauf „Einheit läuft“ mit rotem Punkt.
+- **Reiterregel** (`ui.einheit.heute_reiter`): Erscheint eine Einheit oder beginnt sie,
+  öffnet „Heute“ auf „Einheit“; wer auf den Tag wechselt, bleibt dort bis zur nächsten
+  Änderung; endet sie, verschwindet der Reiter.
+- **Übersicht:** Kopf mit Name, Startzeit („seit 15:31“), Laufzeit, ⏸ ⏹; der Timer mit
+  Abschnitt, Runde, Restzeit und Fortschrittsleiste; „Wenn der Timer fertig ist – auch
+  jetzt noch änderbar“, solange er läuft; je Teil ein Live-Wert (HRV „seit 54:29 · HF 158“,
+  Training „2,10 km · 4:41 /km“, Plan-Ablauf „Übung 2 von 5“); „Intervalle (vom Timer)“,
+  sobald Strecke oder Herz dazukommen — dieselbe Rechnung wie in der Ausdaueransicht
+  (`ui/components/tabellen.live_tabellen`).
+- **Fortschrittsleiste** (A17; `TimerLauf.fortschritt`, `ui/components/fortschritt.py`):
+  je Abschnitt der ausgerollten Folge (Teile × Runden × Abschnitte) ein Stück, Breite nach
+  Dauer, Farbe nach Name wie in der Messung (`hrv_core.ausschnitte.FARBEN`, gleicher Name —
+  gleiche Farbe); fertige voll, das laufende anteilig, kommende blass. Darunter „Belastung
+  2:24 / 4:00 · danach Pause 3:00“ und „11:24 von 28:00“; bei nur einem Abschnitt nur
+  rechts.
+- **Ende im Lauf ändern:** `Einheitslauf.ende_mit_timer` und `am_ende_stoppen` wirken erst
+  am Ende des Timers bzw. der Einheit und dürfen bis dahin wechseln (Ben: „Das soll
+  nachträglich auch deaktiviert werden können“). In der Übersicht die beiden Haken; in der
+  Messung mit Dauer oder Ablauf (nur HRV und Timer) in der Statuskarte „Wenn die 5 min um
+  sind – auch jetzt noch änderbar: Messung beenden | Weiterlaufen“ (`core.timer.ende_frage`).
+  Ist der Timer durch, verschwindet die Wahl.
+- Alles frischt sich im Sekundentakt der Einheit auf (`ui.einheit.melden`) und baut Knöpfe
+  nur neu, wenn sich an ihnen etwas ändert; Verdecktes (anderer Reiter, eine Seite darüber)
+  frischt nicht auf. Nach einem Wechsel der Navigationsleiste ohne Neuaufbau zeigt
+  `leiste_auffrischen` die passende Leiste.

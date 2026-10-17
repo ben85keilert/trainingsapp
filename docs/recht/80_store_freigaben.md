@@ -40,7 +40,7 @@ Angaben. Ein gemeinsamer Eintrag wäre für Edition A falsch.
 | `POST_NOTIFICATIONS` | Benachrichtigung, solange etwas läuft (Messung, Training, Timer) — mit Zeit, ohne Ton und ohne Ortsangaben |
 | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` (seit 14.10.2026) | Strecke beim Ausdauertraining aufzeichnen (Gehen, Laufen, Rad) — nur während eines Trainings oder GPS-Tests, nur auf dem Gerät gespeichert, nie übertragen |
 | Foreground Service (`location`) | GPS läuft weiter, wenn der Bildschirm aus ist |
-| Foreground Service (`health`), `FOREGROUND_SERVICE_HEALTH`, `HIGH_SAMPLING_RATE_SENSORS` (seit 17.10.2026) | Timer oder Plan-Ablauf einer Einheit laufen weiter, wenn der Bildschirm aus ist und weder Gurt noch GPS den Dienst halten — Töne und Zeiten bleiben richtig (Ben, 17.10.2026, P26). `HIGH_SAMPLING_RATE_SENSORS` ist nur die Voraussetzung, die Android 14 für diesen Typ verlangt; die App liest damit keine Sensoren |
+| Foreground Service (`health`), `FOREGROUND_SERVICE_HEALTH`, `HIGH_SAMPLING_RATE_SENSORS` (seit 17.10.2026) | Ein Timer (allein oder als Teil einer Einheit) und ein Plan-Ablauf laufen weiter, wenn der Bildschirm aus ist und weder Gurt noch GPS den Dienst halten — Töne und Zeiten bleiben richtig (Ben, 17.10.2026, P26). `HIGH_SAMPLING_RATE_SENSORS` ist nur die Voraussetzung, die Android 14 für diesen Typ verlangt; die App liest damit keine Sensoren |
 | `INTERNET` | Kartenkacheln (OpenStreetMap), verlinkte Videos, Update-Prüfung (GitHub-Releases der App, Paketquellen — nur Versionsnummern, abschaltbar, Hinweis beim ersten Mal); keine eigenen Daten |
 
 `neverForLocation` bleibt bei Bluetooth: Die Standortberechtigung gilt dem

@@ -7,6 +7,10 @@ Titel und Zeilen, `takt` reicht sie an den Bluetooth-Zugang weiter
 (`FletBleTransport.anzeigen`): Läuft der Vordergrunddienst, steht es in seiner
 Benachrichtigung; läuft nur der Timer, in einer gewöhnlichen.
 
+Ein Timer allein hält den Vordergrunddienst mit Typ ``health`` (Ben, 17.10.2026,
+P26): Ohne ihn darf Android die App bei Display aus anhalten, und die Töne bleiben
+aus. Eine Einheit hält ihren Dienst selbst (`ui.einheit`).
+
 Nur in der gebauten Android-App — am Rechner gibt es keinen Transport, `takt`
 endet dann sofort.
 """
@@ -119,13 +123,33 @@ def laufendes(state: Any) -> list[Laufend]:
     return teile
 
 
+def timer_allein(state: Any) -> bool:
+    """Läuft ein Timer, der keiner Einheit gehört (auch angehalten, bis er fertig ist)?"""
+    from trainingsapp.ui import einheit as einheit_ui
+
+    t = state.timer
+    if t is None or not t.begonnen or t.fertig:
+        return False
+    return not (getattr(state, "einheit", None) is not None and einheit_ui.besitzt_timer(state, t))
+
+
 async def takt(state: Any) -> None:
-    """Hält die Benachrichtigung aktuell, solange die App lebt — nur mit Transport."""
+    """Hält die Benachrichtigung aktuell, solange die App lebt — nur mit Transport.
+
+    Nebenbei der Dienst für einen Timer allein: an, sobald er läuft (die App ist dann
+    vorn — aus dem Hintergrund darf kein Dienst starten), aus, wenn er fertig ist."""
     transport = state.ble_transport
     if transport is None or not hasattr(transport, "anzeigen"):
         return
     zuletzt: Benachrichtigung | None = None
+    dienst = False
     while True:
+        allein = timer_allein(state)
+        if allein != dienst and hasattr(transport, "hintergrund"):
+            with contextlib.suppress(Exception):
+                await transport.hintergrund(allein, "Timer läuft", "", zweck="timer")
+            dienst = allein
+            zuletzt = None  # Dienst oder nicht: die Benachrichtigung neu zeigen
         inhalt = benachrichtigung(laufendes(state))
         if inhalt != zuletzt:
             with contextlib.suppress(Exception):
@@ -134,4 +158,4 @@ async def takt(state: Any) -> None:
         await asyncio.sleep(TAKT_S)
 
 
-__all__ = ["TAKT_S", "laufendes", "takt"]
+__all__ = ["TAKT_S", "laufendes", "takt", "timer_allein"]

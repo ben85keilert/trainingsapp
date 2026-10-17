@@ -200,11 +200,47 @@ def test_transport_einheit_haelt_den_dienst_mit_typ_health() -> None:
         await t.hintergrund(True, "Messung", zweck="messung")
         await t.hintergrund(False, zweck="messung")
         await t.hintergrund(False, zweck="einheit")
+        await t.hintergrund(True, "Timer läuft", zweck="timer")  # ein Timer allein
+        await t.hintergrund(False, zweck="timer")
 
     asyncio.run(ablauf())
     assert typen == [
         {"geraet": False, "standort": False, "gesundheit": True},
         {"geraet": True, "standort": False, "gesundheit": False},
         {"geraet": False, "standort": False, "gesundheit": True},
+        {"geraet": False, "standort": False, "gesundheit": True},
     ]
     assert t.ble.aufrufe[-1] == ("beenden",)
+
+
+async def test_timer_allein_haelt_den_dienst(monkeypatch) -> None:
+    """P26 (Ben, 17.10.2026): Ein Timer allein bekommt den Vordergrunddienst (Zweck
+    „timer“, Typ health), solange er läuft oder angehalten ist; fertig → wieder aus."""
+    from trainingsapp.ui import laufend
+
+    monkeypatch.setattr(laufend, "TAKT_S", 0.005)
+    aufrufe: list[tuple[bool, str]] = []
+
+    class Zugang:
+        async def hintergrund(self, an, titel="", text="", *, zweck="messung"):
+            aufrufe.append((an, zweck))
+
+        async def anzeigen(self, inhalt) -> None:
+            return None
+
+    t = [0.0]
+    timer = TimerLauf(TimerProfil(abschnitte=[Abschnitt("Planke", 30)]), uhr=lambda: t[0])
+    aufgabe = asyncio.create_task(laufend.takt(_state(timer=timer, ble_transport=Zugang())))
+    await asyncio.sleep(0.03)
+    assert aufrufe == []  # noch nicht gestartet
+    timer.start()
+    await asyncio.sleep(0.03)
+    t[0] = 5.0
+    timer.pause()
+    await asyncio.sleep(0.03)
+    assert aufrufe == [(True, "timer")]  # angehalten bleibt der Dienst
+    timer.fortsetzen()
+    t[0] = 40.0
+    await asyncio.sleep(0.03)
+    assert aufrufe == [(True, "timer"), (False, "timer")]
+    aufgabe.cancel()

@@ -36,6 +36,10 @@ def _schluessel(device_id: str, service: str, characteristic: str) -> tuple[str,
     return device_id, service.lower(), characteristic.lower()
 
 
+#: Zwecke ohne Gurt und GPS — sie halten den Dienst mit Typ ``health`` (P26)
+GESUNDHEIT = frozenset({"einheit", "timer"})
+
+
 class FletBleTransport:
     """Erfüllt `devices.gatt.BleTransport` mit der Flet-Erweiterung."""
 
@@ -127,11 +131,11 @@ class FletBleTransport:
         """Vordergrunddienst für einen Zweck an/aus. Liefert eine Fehlermeldung oder ``None``.
 
         Zwecke teilen sich den einen Dienst: ``messung`` (Gurt, Typ
-        ``connectedDevice``), ``gps`` (Typ ``location``) und ``einheit`` (Timer
-        oder Plan einer Einheit, Typ ``health`` — nur, wenn weder Gurt noch GPS den
-        Dienst schon halten; Ben, 17.10.2026, P26). Endet einer, läuft der Dienst
-        für die anderen weiter — mit passendem Typ und Text; erst ohne Zweck wird
-        er beendet.
+        ``connectedDevice``), ``gps`` (Typ ``location``), ``einheit`` (Timer oder
+        Plan einer Einheit) und ``timer`` (ein Timer allein) — die letzten beiden
+        mit Typ ``health``, nur wenn weder Gurt noch GPS den Dienst schon halten
+        (Ben, 17.10.2026, P26). Endet einer, läuft der Dienst für die anderen
+        weiter — mit passendem Typ und Text; erst ohne Zweck wird er beendet.
 
         Wirft nie: Scheitert der Dienst, läuft die Messung trotzdem — nur eben
         nicht verlässlich bei ausgeschaltetem Display.
@@ -147,7 +151,7 @@ class FletBleTransport:
                 await self.ble.hintergrund_beenden()
                 return None
             geraet, standort = "messung" in self._zwecke, "gps" in self._zwecke
-            gesundheit = "einheit" in self._zwecke and not (geraet or standort)
+            gesundheit = bool(GESUNDHEIT & self._zwecke.keys()) and not (geraet or standort)
             b = self._inhalt or self._aus_zwecken()
             await self.ble.hintergrund_starten(
                 b.titel,

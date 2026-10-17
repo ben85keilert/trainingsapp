@@ -1916,7 +1916,8 @@ class StreckeRepo:
         self.con.execute(
             "INSERT INTO strecke (id, subject_id, sportart, started_at, ended_at, file_path, "
             "distanz_m, dauer_s, bewegt_s, hoehe_auf_m, hoehe_ab_m, hrv_recording_id, "
-            "session_entry_id, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "session_entry_id, title, einheit_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 s.id,
                 s.subject_id,
@@ -1932,6 +1933,7 @@ class StreckeRepo:
                 s.hrv_recording_id,
                 s.session_entry_id,
                 s.title,
+                s.einheit_id,
             ),
         )
 
@@ -1953,10 +1955,28 @@ class StreckeRepo:
         ]
 
     def zur_hrv(self, recording_id: str) -> Strecke | None:
-        """Das Training, zu dem eine HRV-Aufnahme gehört — falls eines."""
+        """Das Training, zu dem eine HRV-Aufnahme gehört — falls eines.
+
+        Lief die Aufnahme über das Training hinaus (eine Einheit, Migration 019), fehlt
+        ``hrv_recording_id``; dann verbindet die Einheit beide über die Messdatei
+        (``einheit_baustein.datei`` = ``hrv_recording.file_path``). Bei mehreren
+        Trainings in einer Aufnahme das erste.
+        """
         r = self.con.execute(
-            "SELECT * FROM strecke WHERE hrv_recording_id = ? AND deleted_at IS NULL",
-            (recording_id,),
+            "SELECT * FROM strecke WHERE deleted_at IS NULL AND (hrv_recording_id = ? "
+            "OR einheit_id IN (SELECT b.einheit_id FROM einheit_baustein b "
+            "JOIN hrv_recording h ON h.file_path = b.datei WHERE b.art = 'hrv' AND h.id = ?)) "
+            "ORDER BY started_at LIMIT 1",
+            (recording_id, recording_id),
+        ).fetchone()
+        return self._zeile(r) if r else None
+
+    def zur_einheit(self, einheit_id: str) -> Strecke | None:
+        """Das Training, als das eine Einheit lief — falls eines."""
+        r = self.con.execute(
+            "SELECT * FROM strecke WHERE einheit_id = ? AND deleted_at IS NULL "
+            "ORDER BY started_at LIMIT 1",
+            (einheit_id,),
         ).fetchone()
         return self._zeile(r) if r else None
 
@@ -1993,6 +2013,7 @@ class StreckeRepo:
             hrv_recording_id=r["hrv_recording_id"],
             session_entry_id=r["session_entry_id"],
             title=r["title"],
+            einheit_id=r["einheit_id"],
         )
 
 

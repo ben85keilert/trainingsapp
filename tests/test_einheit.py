@@ -1,4 +1,5 @@
-"""Einheit: Datenmodell (core/einheit.py) und Zeitleiste in der Datenbank (Migration 018)."""
+"""Einheit: Datenmodell (core/einheit.py) und Zeitleiste in der Datenbank (Migration 018,
+Strecke ↔ Einheit: 019)."""
 
 from __future__ import annotations
 
@@ -19,10 +20,10 @@ from trainingsapp.core.einheit import (
     daten_pruefen,
     projektion,
 )
-from trainingsapp.core.models import Subject
+from trainingsapp.core.models import HrvRecording, Strecke, Subject
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.einheiten import EinheitRepo
-from trainingsapp.data.repositories import SubjectRepo
+from trainingsapp.data.repositories import HrvRepo, StreckeRepo, SubjectRepo
 
 T0 = datetime(2026, 10, 17, 8, 0, tzinfo=UTC)
 
@@ -235,3 +236,29 @@ def test_rolle_und_teil_sind_geprueft(repo) -> None:
         )
     with pytest.raises(ValueError):
         r.einheit_beginnen("e-2", None, T0, "ohne Profil")
+
+
+def test_training_findet_seine_aufnahme_ueber_die_einheit(repo) -> None:
+    """Migration 019: Lief die HRV-Aufnahme über das Training hinaus, bleibt
+    ``hrv_recording_id`` leer — die Einheit verbindet beide über die Messdatei."""
+    r, profil = repo
+    datei = "PolarH10/sensor_2026-10-17_074000.json"
+    r.einheit_beginnen("e-1", profil, T0, "Laufen")
+    r.beteiligung("e-1", Beteiligung("hrv", Rolle.LAEUFT_SCHON, datei=datei, versatz_s=-1200.0))
+    r.beteiligung("e-1", Beteiligung("gps", Rolle.MITSTARTEN, datei="strecke_x.jsonl"))
+    strecken = StreckeRepo(r.con)
+    training = Strecke(subject_id=profil, started_at=T0, einheit_id="e-1")
+    strecken.anlegen(training)
+    assert strecken.laden(training.id).einheit_id == "e-1"
+    assert strecken.zur_einheit("e-1").id == training.id
+    # Erst nach dem Training gestoppt und gespeichert — die Zeile kennt das Training nicht
+    aufnahme = HrvRecording(subject_id=profil, file_path=datei, started_at=T0)
+    HrvRepo(r.con).anlegen(aufnahme)
+    assert strecken.zur_hrv(aufnahme.id).id == training.id
+    andere = HrvRecording(subject_id=profil, file_path="PolarH10/andere.json", started_at=T0)
+    HrvRepo(r.con).anlegen(andere)
+    assert strecken.zur_hrv(andere.id) is None
+    # Direkt verknüpft (die Aufnahme endete mit dem Training) wie bisher
+    direkt = Strecke(subject_id=profil, started_at=T0, hrv_recording_id=andere.id)
+    strecken.anlegen(direkt)
+    assert strecken.zur_hrv(andere.id).id == direkt.id

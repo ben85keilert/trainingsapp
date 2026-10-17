@@ -435,6 +435,9 @@ class Strecke:
     hrv_recording_id: str | None = None
     session_entry_id: str | None = None
     title: str = ""
+    #: Die Einheit, als die das Training lief (Migration 019) — über sie findet die
+    #: Auswertung auch eine HRV-Aufnahme, die schon vorher lief und weiterlief
+    einheit_id: str | None = None
 
 
 __all__ = [

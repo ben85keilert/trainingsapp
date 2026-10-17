@@ -39,7 +39,7 @@ from trainingsapp.core.uebung_timer import (
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
-from trainingsapp.ui.components.dialoge import schliessen
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
@@ -222,12 +222,15 @@ def uebung_timer_view(
         neu_zeichnen()
 
     def profil_hinzufuegen() -> None:
-        """„+ Profil“: eines aus der Timer-Bibliothek in die Übung übernehmen."""
+        """„+ Profil“: eines aus der Timer-Bibliothek in die Übung übernehmen.
+
+        Neu gezeichnet wird erst, wenn der Dialog wirklich zu ist (`Nachher`) — sonst
+        bliebe sein Abbild stehen (Flet 1.0.3, `components/dialoge.py`)."""
         dialog: ft.AlertDialog
+        nachher = Nachher()
 
         def nehmen(vorlage: TimerProfil) -> Callable[[], None]:
             def handler() -> None:
-                schliessen(dialog)
                 neu = _kopie(vorlage)
                 neu.id = new_id()
                 eigene = [p.als_dict() for p in profile_der_uebung(uebung)]
@@ -237,11 +240,13 @@ def uebung_timer_view(
                     wahl_speichern(TimerWahl(neu.id, None, wahl.zeitfeld, wahl.zeit_eintragen))
                 else:
                     katalog_merken(profil=neu.id)
-                neu_zeichnen()
+                nachher.danach(neu_zeichnen)
+                schliessen(dialog)
 
             return handler
 
         dialog = ft.AlertDialog(
+            on_dismiss=nachher.bei_schliessen,
             title=ft.Text("Timer übernehmen"),
             content=ft.Column(
                 tight=True,
@@ -664,8 +669,8 @@ def uebung_timer_view(
         halt_knopf.on_click = anhalten
         anzeigen(e)
         return [
-            zeit_text,
-            stand_text,
+            ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[zeit_text]),
+            ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[stand_text]),
             balken_platz,
             karte(saetze_spalte, abstand=0, padding=10),
             ft.Row(

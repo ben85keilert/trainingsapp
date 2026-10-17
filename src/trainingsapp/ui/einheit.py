@@ -38,6 +38,7 @@ from trainingsapp.devices.einheit import (
     UebungBaustein,
 )
 from trainingsapp.devices.gps import GpsQuelle
+from trainingsapp.devices.plan_ablauf import PAUSE, PlanAblaufBaustein
 from trainingsapp.devices.strecke_baustein import StreckeBaustein
 
 #: So oft frischt die Laufleiste ihre Zeiten auf (s)
@@ -261,7 +262,7 @@ def _aufraeumen(page: Any, teil: Any) -> None:
 def titel(e: Einheitslauf) -> str:
     """Ein kurzer Name aus den Teilen — „Laufen · Intervall 4 × 4“, „Planke“, „HRV-Messung“ …"""
     namen: list[str] = []
-    if isinstance(u := e.teil("plan"), UebungBaustein) and u.name:
+    if isinstance(u := e.teil("plan"), UebungBaustein | PlanAblaufBaustein) and u.name:
         return u.name
     if (g := e.teil("gps")) is not None:
         namen.append(SPORT_NAMEN.get(getattr(g, "sportart", ""), "Training"))
@@ -313,8 +314,17 @@ def _timer_ticken(page: Any, state: Any, e: Einheitslauf) -> None:
 def _ereignisse(page: Any, state: Any, e: Einheitslauf, neu: list[Ereignis]) -> None:
     """Nach jedem Takt mit Neuem: Ticker nach dem Countdown, Ton je Kilometer, Notizen
     in der Ansicht."""
-    if any(x.quelle == "einheit" and x.art == "start" for x in neu):
-        _timer_ticken(page, state, e)
+    if any((x.quelle, x.art) in (("einheit", "start"), ("plan", "uebung_start")) for x in neu):
+        _timer_ticken(page, state, e)  # auch der Timer jeder Übung eines Plan-Ablaufs
+    if isinstance(e.teil("plan"), PlanAblaufBaustein):
+        from trainingsapp.ui.plan_ablauf import nach_der_uebung
+
+        for x in neu:
+            if x.quelle == "plan" and x.art == "uebung_ende":
+                try:  # je Übung eintragen, sobald sie endet
+                    nach_der_uebung(state, e, x)
+                except Exception as fehler:
+                    e.warnung = f"Übung nicht eingetragen: {fehler}"
     if any(x.quelle == "gps" and x.art == "km" for x in neu):
         with contextlib.suppress(Exception):
             page.run_task(_km_signal, state)
@@ -454,6 +464,11 @@ def laufzeilen(e: Einheitslauf) -> tuple[str, str]:
         rest = max(0, math.ceil(-e.dauer_s()))
         return f"Start in {rest} …", _teile_text(e)
     oben = [uhr(max(e.dauer_s(), 0.0))]
+    if isinstance(ablauf := e.teil("plan"), PlanAblaufBaustein):
+        if ablauf.phase == PAUSE and ablauf.k + 1 < len(ablauf.schritte):
+            oben.append(f"Pause — dann {ablauf.schritte[ablauf.k + 1].name}")
+        elif ablauf.phase != PAUSE:
+            oben.append(ablauf.schritt.name)
     if timer := timer_text(e):
         oben.append(timer)
     return " · ".join(oben), _teile_text(e)
@@ -474,6 +489,8 @@ def timer_text(e: Einheitslauf) -> str:
 
 def _teile_text(e: Einheitslauf) -> str:
     teile: list[str] = []
+    if isinstance(ablauf := e.teil("plan"), PlanAblaufBaustein):
+        teile.append(f"Übung {ablauf.k + 1} von {len(ablauf.schritte)}")
     if (h := e.hrv) is not None:
         lauf = h.messlauf
         if lauf.aufnahme is not None:

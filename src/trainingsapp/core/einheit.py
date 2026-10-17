@@ -337,6 +337,11 @@ def projektion(
             )
         case ("plan", "uebung_ende"):
             return Projektion(SPUR_UEBUNG, e.text, "", True, marke(SPUR_UEBUNG))
+        case ("plan", "pause"):
+            # Zwischen zwei Übungen eines Plan-Ablaufs, bis „Weiter“ — ein eigener Abschnitt
+            return Projektion(
+                SPUR_UEBUNG, e.text or "Pause", "Pause", False, marke(SPUR_UEBUNG, name="Pause")
+            )
     return None
 
 

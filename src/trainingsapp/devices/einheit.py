@@ -106,10 +106,12 @@ class TimerBaustein:
     async def vorbereiten(self) -> None:
         return None
 
-    def starten(self, t0: float) -> Beteiligung:
+    def starten(self, t0: float, bei: float | None = None) -> Beteiligung:
+        """Von vorn, auf t0 — oder ``bei`` (Uhr der Einheit) mit t0 als Bezug: so startet
+        ein Plan-Ablauf den Timer jeder Übung später, auf derselben Achse."""
         self._t0 = t0
         self.lauf.zuruecksetzen()
-        self.lauf.start(bei=t0)
+        self.lauf.start(bei=t0 if bei is None else bei)
         self._lief = True
         return Beteiligung("timer", Rolle.MITSTARTEN, daten={"profil": self.lauf.profil.name})
 
@@ -414,6 +416,8 @@ class Einheitslauf:
         self.countdown_s = 0.0
         #: Ende der Einheit, wenn der Timer fertig ist („Dauer 15 min“, Ablauf)
         self.ende_mit_timer = False
+        #: Ende der Einheit, wenn ein Plan-Ablauf durch ist (``plan/ende``)
+        self.ende_mit_plan = False
         #: je Teil (``"hrv"``, ``"gps"``): beim Ende stoppen? Fehlt er, gilt die Vorgabe —
         #: stoppen, was mit der Einheit begann, weiterlaufen lassen, was schon lief
         self.am_ende_stoppen: dict[str, bool] = {}
@@ -468,8 +472,13 @@ class Einheitslauf:
 
     @property
     def timer(self) -> TimerBaustein | None:
+        """Der laufende Timer — der Teil ``timer`` oder der der Übung, die ein Plan-Ablauf
+        gerade führt (`devices.plan_ablauf`). Laufleiste, ⏸ und Töne folgen ihm."""
         teil = self.teil("timer")
-        return teil if isinstance(teil, TimerBaustein) else None
+        if isinstance(teil, TimerBaustein):
+            return teil
+        innen = getattr(self.teil("plan"), "timer", None)
+        return innen if isinstance(innen, TimerBaustein) else None
 
     @property
     def bereit(self) -> bool:
@@ -608,9 +617,17 @@ class Einheitslauf:
         if neu and self.beobachter is not None:
             with contextlib.suppress(Exception):
                 self.beobachter(neu)
-        if self.ende_mit_timer and any(e.quelle == "timer" and e.art == "ende" for e in neu):
+        if (self.ende_mit_timer and any(e.quelle == "timer" and e.art == "ende" for e in neu)) or (
+            self.ende_mit_plan and any(e.quelle == "plan" and e.art == "ende" for e in neu)
+        ):
             self.beenden()
         return neu
+
+    def nachtragen(self, ereignis: Ereignis) -> None:
+        """Ein Ereignis von außen in die Zeitleiste — etwa ``person/eintrag``, wenn eine
+        Übung eines Plan-Ablaufs eingetragen wurde (fortlaufende Nummer wie alle)."""
+        if self.t0 is not None:
+            self._aufnehmen([ereignis], self.uhr())
 
     def _sicher(
         self, teil: Baustein, aufruf: Callable[[float], list[Ereignis]], jetzt: float

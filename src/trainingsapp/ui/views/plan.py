@@ -89,6 +89,7 @@ from trainingsapp.core.result_spec import (
 )
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tagesbilanz import buendeln
+from trainingsapp.core.uebung_timer import timer_fuer
 from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
@@ -98,6 +99,7 @@ from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.werte import wert_leiste
 from trainingsapp.ui.state import AUFKLAPPEN, PLAN_DARSTELLUNGEN, UMSCHALTEN, AppState
 from trainingsapp.ui.views.timer import timer_knopf
+from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 
 ECKEN = ft.RoundedRectangleBorder(radius=12)
 
@@ -600,6 +602,21 @@ def plan_view(
         teile = [", ".join(uebung.typen), ", ".join(uebung.regionen)]
         if uebung.id in mehrfach:
             teile.append(f"{stelle[item.id]}. Mal im Plan")
+        # Die Uhr neben dem i (Ben, 17.10.2026): der Timer dieser Übung — an der
+        # Planübung, am Plan oder an der Übung; ohne einen legt die Uhr einen fest
+        uhr: list[ft.Control] = []
+        if not bearbeiten:
+            mit_plan = None if einzel else plan
+            profil = timer_fuer(uebung, mit_plan, None if einzel else item)
+            if profil is not None:
+                teile.append(f"Timer: {profil.name}")
+            uhr.append(
+                ft.IconButton(
+                    ft.Icons.TIMER if profil is not None else ft.Icons.TIMER_OUTLINED,
+                    tooltip="Timer dieser Übung" if profil is not None else "Timer festlegen",
+                    on_click=oeffner(uebung_timer_route(route, uebung, None if einzel else item)),
+                )
+            )
         untertitel = "  ·  ".join(t for t in teile if t)
         # Beim Bearbeiten zieht man am Griff (statt am ganzen Block, der Knöpfe trägt)
         griff: list[ft.Control] = (
@@ -626,6 +643,7 @@ def plan_view(
                         ft.Text(untertitel, size=12, opacity=0.6) if untertitel else ft.Container(),
                     ],
                 ),
+                *uhr,
                 ft.IconButton(
                     ft.Icons.INFO_OUTLINE,
                     tooltip="Beschreibung und Videos"

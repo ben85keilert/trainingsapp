@@ -928,6 +928,35 @@ class PlanRepo:
         )
         return self._mit_items([self._zeile(r) for r in zeilen])
 
+    def timer_setzen(self, item_id: str, timer: dict[str, Any]) -> None:
+        """Die Timer-Wahl einer Planübung (`core.uebung_timer.TimerWahl.als_dict`)."""
+        zeile = self.con.execute(
+            "SELECT plan_id FROM plan_item WHERE id = ?", (item_id,)
+        ).fetchone()
+        if zeile is None:
+            return
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE plan_item SET timer_json = ? WHERE id = ?",
+                (json.dumps(timer, ensure_ascii=False), item_id),
+            )
+            self._beruehrt(zeile["plan_id"])
+
+    def plan_timer_setzen(
+        self, plan_id: str, timer: dict[str, Any] | None, weiter_automatisch: bool
+    ) -> None:
+        """„Timer für alle Übungen“ und „nach dem Timer automatisch weiter“ (Migration 020)."""
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE plan SET timer_json = ?, auto_next = ? WHERE id = ?",
+                (
+                    json.dumps(timer, ensure_ascii=False) if timer else None,
+                    int(weiter_automatisch),
+                    plan_id,
+                ),
+            )
+            self._beruehrt(plan_id)
+
     def item_speichern(self, item: PlanItem) -> None:
         """Ziel, Stufe und Chips einer Planübung auf einmal (Standard übernehmen)."""
         with transaktion(self.con):

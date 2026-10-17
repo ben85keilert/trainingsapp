@@ -243,6 +243,12 @@ class AppState:
     gps_test_intervall: float = 1.0
     #: Dauertest: Takt der zweiten Phase (s) — die erste läuft immer mit 1 s
     gps_test_zweite_s: float = 10.0
+    #: Timer einer Übung außerhalb eines Plans (Katalog): Wahl je Übung — Profil-ID,
+    #: ``zeit_eintragen``, ``zeitfeld`` (im Plan hält die Planübung sie, Migration 020)
+    uebung_timer: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Der letzte Lauf je Übung, der aus ihrem Timer gestartet wurde (Einheit-ID) — für
+    #: die Karte „gemacht“ nach dem Ende
+    uebung_laeufe: dict[str, str] = field(default_factory=dict)
     #: Ausdauertraining, solange es bereitsteht oder läuft — der Teil ``gps`` der Einheit
     #: (`devices.strecke_baustein.StreckeBaustein`, ``fertig`` danach) — und seine Vorgaben
     ausdauer: Any = None

@@ -47,6 +47,8 @@ class Lauf:
     werte: list[float]
     #: läuft noch (oder die App starb mitten im Lauf)
     offen: bool = False
+    #: Ende des Laufs (UTC) — ``None`` solange er läuft
+    ende: datetime | None = None
 
     @property
     def dauer_s(self) -> float:
@@ -195,6 +197,7 @@ def laeufe_heute(state: Any, uebung_id: str, tag: Any = None) -> list[Lauf]:
                 eintrag_id=str(eingetragen.daten.get("eintrag")) if eingetragen else None,
                 werte=list(eingetragen.daten.get("werte") or []) if eingetragen else [],
                 offen=kopf.ended_at is None,
+                ende=kopf.ended_at,
             )
         )
     return laeufe

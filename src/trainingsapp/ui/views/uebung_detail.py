@@ -25,10 +25,12 @@ from trainingsapp.core.models import (
 from trainingsapp.core.parameter import gewaehlte_felder
 from trainingsapp.core.result_spec import format_wert
 from trainingsapp.core.standards import abweichungen, vom_standard
+from trainingsapp.core.uebung_timer import profile_der_uebung
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 
 
 def _beschreibung(uebung: Exercise, herkunft: str) -> ft.Control:
@@ -118,6 +120,10 @@ def uebung_detail(
 
     async def bearbeiten() -> None:
         await page.push_route(f"/uebung/{uebung.id}/bearbeiten")
+
+    async def timer_oeffnen() -> None:
+        """Der Timer dieser Übung (Ben, 17.10.2026) — ihre Profile, „zählt“, eintragen."""
+        await page.push_route(uebung_timer_route(f"/uebung/{uebung.id}", uebung))
 
     async def duplizieren() -> None:
         """Kopie als Variante — für „links/rechts“, 45° statt 90° und Ähnliches.
@@ -365,6 +371,11 @@ def uebung_detail(
         appbar=ft.AppBar(
             title=ft.Text(uebung.name),
             actions=[
+                ft.IconButton(
+                    ft.Icons.TIMER if profile_der_uebung(uebung) else ft.Icons.TIMER_OUTLINED,
+                    tooltip="Timer dieser Übung",
+                    on_click=timer_oeffnen,
+                ),
                 ft.IconButton(
                     ft.Icons.CONTENT_COPY, tooltip="Variante anlegen (Kopie)", on_click=duplizieren
                 ),

@@ -227,6 +227,21 @@ class TimerProfil:
         """Jeder Abschnitt einmal (ohne Runden) — für Listen und Editor."""
         return [a for t in self.alle_teile() for a in t.abschnitte]
 
+    def folge(self) -> list[tuple[int, int, int, Abschnitt]]:
+        """Der ganze Ablauf, ausgerollt: je Abschnitt (Teil, Runde, Index im Teil, Abschnitt).
+
+        >>> p = TimerProfil(abschnitte=[Abschnitt("A", 5)],
+        ...     teile=[Teil([Abschnitt("H", 10), Abschnitt("P", 5)], 2)])
+        >>> [(k, r, a.name) for k, r, _, a in p.folge()]
+        [(0, 1, 'A'), (1, 1, 'H'), (1, 1, 'P'), (1, 2, 'H'), (1, 2, 'P')]
+        """
+        return [
+            (k, r, i, a)
+            for k, teil in enumerate(self.alle_teile())
+            for r in range(1, max(teil.runden, 1) + 1)
+            for i, a in enumerate(teil.abschnitte)
+        ]
+
     def gesamt_s(self) -> int:
         return sum(t.gesamt_s() for t in self.alle_teile())
 
@@ -655,12 +670,7 @@ class TimerLauf:
         self._start: float | None = None  # Uhr beim letzten Start; None = angehalten
         self._teile = profil.alle_teile()
         # Je Abschnitt über alle Teile und Runden: (Teil, Runde, Index im Teil, Abschnitt)
-        self._folge: list[tuple[int, int, int, Abschnitt]] = [
-            (k, r, i, a)
-            for k, teil in enumerate(self._teile)
-            for r in range(1, max(teil.runden, 1) + 1)
-            for i, a in enumerate(teil.abschnitte)
-        ]
+        self._folge = profil.folge()
         # Grenzen: Ende jedes Abschnitts, kumuliert
         self._enden: list[float] = []
         summe = 0.0

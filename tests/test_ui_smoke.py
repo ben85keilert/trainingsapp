@@ -236,8 +236,10 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
 def test_verlauf_ohne_werte(page, state) -> None:
     from trainingsapp.ui.views.verlauf import verlauf
 
-    state.verlauf_uebung = "gibt-es-nicht"
-    assert verlauf(page, state) is not None
+    state.verlauf_typ = "gibt-es-nicht"
+    for reiter in (0, 1):
+        state.verlauf_tab = reiter
+        assert verlauf(page, state) is not None
 
 
 def test_planansicht_alle_eingabestufen(page, welt) -> None:
@@ -416,7 +418,7 @@ def test_verlauf_mit_varianten_und_kachelkurve(page, welt) -> None:
     from dataclasses import replace
 
     from trainingsapp.core.models import new_id
-    from trainingsapp.ui.views.verlauf import letzte_tage, verlauf
+    from trainingsapp.ui.views.verlauf import verlauf
     from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
 
     state, plan, _item, uebung, _ = welt
@@ -429,7 +431,6 @@ def test_verlauf_mit_varianten_und_kachelkurve(page, welt) -> None:
         state.profil.id, None, state.heute(), [uebung.id, variante.id]
     )
     assert len(eintraege) == 2
-    assert letzte_tage(page, state) is not None
     assert verlauf(page, state) is not None
     assert verlauf_kachel_view(page, state, uebung.id).route == f"/verlauf/{uebung.id}"
     state.verlauf_variante = variante.id

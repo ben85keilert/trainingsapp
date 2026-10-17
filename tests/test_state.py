@@ -78,7 +78,7 @@ def test_repos_und_tag_vorhanden(state) -> None:
     assert state.sitzungen.anzahl_am_tag(state.profil.id, state.heute()) == {}
     assert state.tagesnotizen.lesen(state.profil.id, state.heute()) == ""
     assert isinstance(state.heute(), date)
-    assert state.verlauf_monat.day == 1
+    assert state.verlauf_woche is None and state.verlauf_tab == 0  # die aktuelle Woche
 
 
 def test_paketordner_spielt_pakete_wie_einen_import_ein(tmp_path, monkeypatch) -> None:

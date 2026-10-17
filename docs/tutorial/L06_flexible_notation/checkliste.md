@@ -36,7 +36,7 @@ wurde, bleibt so lesbar, wie es erfasst wurde.
 | `ui/views/plan.py` | abhaken (Tipp = gemacht, Ziel-Chip = wie geplant), bearbeiten |
 | `ui/views/tag.py` | Tagesansicht: nach Plan, Zeit oder Übung; Notizen je Ebene |
 | `ui/views/eintrag.py` | ansehen, korrigieren, löschen mit Rückfrage |
-| `ui/views/verlauf.py` | Kalender mit Farbmarken, Kurve je Kennzahl |
+| `ui/views/verlauf.py` | Woche, Tag und Übungen; die Kurve je Übung in `verlauf_kachel.py` (seit 17.10.2026) |
 
 Kein Timer — der kommt mit **L07** (async) als eigener Schritt in die
 Planansicht. Wer die Übungen 3 und 4 gemacht hat, hat die Datenschicht von

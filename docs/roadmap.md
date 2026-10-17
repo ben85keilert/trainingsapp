@@ -79,6 +79,9 @@ einem sichtbaren Fortschritt in der App.
 - Parameterwahl in der Ausführung statt Vorlagen; Standard der Übung ↔ Planübung per
   Knopf (Migration 006); Varianten mit gemeinsamer Kachel (Migration 007)
 - Verlauf: „Letzte Tage“ je Kachel, Kurve der Tagessummen je Kachel (`/verlauf/<id>`)
+- Verlauf neu (17.10.2026, P37): Woche → Tag → Übung, Reiter „Übungen“ mit Mini-Kurven
+  und Trend; eine Kurve je Übung mit Kennzahl-Auswahl, Zeitraum und Datumsachse ohne
+  Randwerte (`core/verlauf.py`)
 - Pläne mit Zeitplan (Migration 008): aktiv/deaktiviert und Wochentage; „Heute“
   zeigt, was ansteht, plus Pläne, die man für heute aufnimmt („Trainieren“ in der
   Planverwaltung oder „Anderen Plan heute trainieren“). Übungen → Pläne öffnet zum

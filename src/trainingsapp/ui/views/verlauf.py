@@ -1,326 +1,580 @@
-"""Verlauf: die letzten Tage, Kalender mit Farbmarken, Kurven.
+"""Verlauf (Ben, 17.10.2026; Skizzen 1 und 5 zu P37: Variante A + B).
 
-Oben **Letzte Tage**: je Tag die Kacheln mit ihrer Tagesbilanz — „Liegestütz:
-150 Wdh.“, Varianten addiert und ausgewiesen (`core/tagesbilanz.Kachel`).
-Antippen einer Kachel öffnet `/verlauf/<kachel_id>` mit der Kurve der
-Tagessummen (`verlauf_kachel.py`).
+Zwei Reiter:
 
-Der Kalender zeigt, an welchen Tagen etwas gemacht wurde — mit Übungsfilter
-auch „an welchen Tagen habe ich geplankt". Unten die Kurve je Kennzahl aus
-`measurement` (ein Punkt je Eintrag); X-Achse ist die Trainingsnummer
-(Standard) oder die Zeit.
+- **Tage**: oben eine Woche (‹ ›, auch wischen), unter jedem Tag Punkte für die Zahl der
+  Übungen, heute mit Ring. Ein Tipp auf einen Tag zeigt darunter seine Übungen —
+  zusammengefasst wie „Nach Übung“ in der Tagesansicht: Wert, Sätze, Mini-Kurve.
+  „Tag öffnen“ führt in die Tagesansicht mit Plänen und Notizen.
+- **Übungen**: alle Übungen, die zuletzt gemachten zuerst, mit Mini-Kurve, letztem Wert
+  und Trend (Mittel der letzten vier Wochen gegen die vier davor); oben ein Filter nach
+  Typ.
+
+Eine Übung antippen öffnet `/verlauf/<kachel_id>` (`verlauf_kachel.py`): ihre Kurve und
+die Ergebnisse je Tag. Varianten einer Übung laufen zusammen (Kachel,
+`core/tagesbilanz`). Gerechnet wird in `core/verlauf.py`; HRV-Messungen stehen bewusst
+nicht hier (Ben: ohne feste Randbedingungen wenig aussagekräftig, P39).
 """
 
 from __future__ import annotations
 
-import calendar
+from collections import Counter
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 import flet as ft
-import flet_charts as fc
 
-from trainingsapp.core.models import Exercise
-from trainingsapp.core.tagesbilanz import kachel, kacheln
-from trainingsapp.core.verlauf import MODUS_NUMMER, MODUS_ZEIT, kurve_punkte
+from trainingsapp.core.models import Exercise, SessionEntry
+from trainingsapp.core.tagesbilanz import kachel
+from trainingsapp.core.verlauf import (
+    WOCHENTAGE,
+    haeufigkeit,
+    kennzahlen,
+    montag,
+    tag_titel,
+    tageswerte,
+    tageszeilen,
+    trend,
+    wochen_titel,
+)
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.scroll import scroll_merken
+from trainingsapp.ui.components.verlaufskurve import mini, mini_saeulen
 from trainingsapp.ui.state import AppState
 
-MONATE = [
-    "",
-    "Januar",
-    "Februar",
-    "März",
-    "April",
-    "Mai",
-    "Juni",
-    "Juli",
-    "August",
-    "September",
-    "Oktober",
-    "November",
-    "Dezember",
-]
-WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
-#: So weit reicht „Letzte Tage“ zurück
-LETZTE_TAGE = 14
+#: So viele Werte zeigt eine Mini-Kurve
+MINI_WERTE = 8
+#: „13× in 6 Wochen“ — so weit zählt die Liste der Übungen zurück
+UEBUNGEN_WOCHEN = 6
 
 
-def liniendiagramm(punkte: list[tuple[float, float, str]], einheit: str, modus: str) -> ft.Control:
-    """Eine Kurve mit Datums- oder Nummernachse — für Kennzahl und Kachel gleich."""
-    labels = [
-        fc.ChartAxisLabel(
-            value=x,
-            label=ft.Text(text if modus == MODUS_ZEIT else str(int(x)), size=10),
-        )
-        for x, _, text in punkte
-    ]
-    schritt = max(1, len(labels) // 6)
-    diagramm = fc.LineChart(
-        data_series=[
-            fc.LineChartData(
-                points=[
-                    fc.LineChartDataPoint(x=x, y=y, tooltip=f"{text}: {y:g} {einheit}".rstrip())
-                    for x, y, text in punkte
-                ],
-                stroke_width=3,
-                color=ft.Colors.PRIMARY,
-            )
-        ],
-        # Platz für drei- und vierstellige Werte, sonst brechen die Zahlen um;
-        # die Einheit steht in der Überschrift über dem Diagramm.
-        left_axis=fc.ChartAxis(show_labels=True, label_size=44),
-        bottom_axis=fc.ChartAxis(labels=labels[::schritt], show_labels=True),
-        min_y=0,
-        expand=True,
-        height=240,
-    )
-    # Rechts etwas Luft, damit der letzte Punkt nicht am Rand klebt
-    return ft.Container(padding=ft.Padding.only(right=16), content=diagramm)
+@dataclass(slots=True)
+class _Daten:
+    """Alles, was beide Reiter brauchen — einmal je Aufbau gelesen."""
+
+    heute: date
+    katalog: dict[str, Exercise]
+    namen: dict[str, str]
+    #: alle gültigen Einträge bis heute, zeitlich sortiert, mit ihrem lokalen Tag
+    eintraege: list[tuple[date, SessionEntry]]
+    #: dieselben je Kachel (Varianten zusammen)
+    je_kachel: dict[str, list[tuple[date, SessionEntry]]]
+
+    def kachel_von(self, exercise_id: str) -> str:
+        return kachel(self.katalog.get(exercise_id), exercise_id)
 
 
-def kachel_von(katalog: dict[str, Exercise]) -> Callable[[str], str]:
-    """Übungs-ID → Kachel-ID (Original der Variantenfamilie)."""
-    return lambda exercise_id: kachel(katalog.get(exercise_id), exercise_id)
-
-
-def letzte_tage(page: ft.Page, state: AppState) -> ft.Control:
-    """Je Tag die Kacheln mit Tagesbilanz — antippen öffnet die Kurve."""
+def _daten(state: AppState) -> _Daten:
     heute = state.heute()
     katalog = {u.id: u for u in state.uebungen.alle(mit_geloeschten=True)}
-    namen = {k: u.name for k, u in katalog.items()}
-    eintraege = state.sitzungen.eintraege_zwischen(
-        state.profil.id, heute - timedelta(days=LETZTE_TAGE - 1), heute
-    )
-    if not eintraege:
-        return ft.Text(f"In den letzten {LETZTE_TAGE} Tagen noch nichts dokumentiert.", opacity=0.7)
-
-    def oeffner(pfad: str) -> Callable[[], object]:
-        async def handler() -> None:
-            await page.push_route(pfad)
-
-        return handler
-
-    nach_tag: dict[date, list] = {}
+    eintraege = state.sitzungen.eintraege_zwischen(state.profil.id, None, heute)
+    daten = _Daten(heute, katalog, {k: u.name for k, u in katalog.items()}, eintraege, {})
     for tag, e in eintraege:
-        nach_tag.setdefault(tag, []).append(e)
-
-    zeilen: list[ft.Control] = []
-    for tag in sorted(nach_tag, reverse=True):
-        titel = "Heute" if tag == heute else "Gestern" if tag == heute - timedelta(days=1) else ""
-        titel = f"{titel + ', ' if titel else WOCHENTAGE[tag.weekday()] + ', '}{tag:%d.%m.}"
-        zeilen.append(
-            ft.Container(
-                padding=ft.Padding.only(top=8),
-                content=ft.Row(
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    controls=[
-                        ft.Text(titel, size=13, weight=ft.FontWeight.BOLD),
-                        ft.TextButton("Tag öffnen", on_click=oeffner(f"/tag/{tag.isoformat()}")),
-                    ],
-                ),
-            )
-        )
-        for k in kacheln(nach_tag[tag], kachel_von(katalog)):
-            original = katalog.get(k.kachel_id)
-            untertitel: list[ft.Control] = [ft.Text(k.zusammenfassung(), size=12)]
-            if aufschluesselung := k.aufschluesselung(namen):
-                untertitel.append(ft.Text(aufschluesselung, size=11, opacity=0.6))
-            zeilen.append(
-                ft.ListTile(
-                    leading=ft.Icon(
-                        symbol(original.icon_key if original else None),
-                        opacity=1 if k.leistungen else 0.5,
-                    ),
-                    title=ft.Text(original.name if original else "?"),
-                    subtitle=ft.Column(spacing=0, controls=untertitel),
-                    trailing=ft.Icon(ft.Icons.SHOW_CHART, opacity=0.5),
-                    dense=True,
-                    content_padding=ft.Padding.only(left=4, right=4),
-                    on_click=oeffner(f"/verlauf/{k.kachel_id}"),
-                )
-            )
-    return ft.Column(spacing=0, controls=zeilen)
+        daten.je_kachel.setdefault(daten.kachel_von(e.exercise_id), []).append((tag, e))
+    return daten
 
 
-def _monat_verschieben(monat: date, schritte: int) -> date:
-    jahr, m = divmod(monat.month - 1 + schritte, 12)
-    return date(monat.year + jahr, m + 1, 1)
+def kurz_datum(tag: date, heute: date) -> str:
+    """„heute“, „gestern“, sonst „Fr 16.10.“.
+
+    >>> heute = date(2026, 10, 17)
+    >>> kurz_datum(date(2026, 10, 16), heute), kurz_datum(date(2026, 10, 9), heute)
+    ('gestern', 'Fr 09.10.')
+    """
+    if tag == heute:
+        return "heute"
+    if tag == heute - timedelta(days=1):
+        return "gestern"
+    return f"{WOCHENTAGE[tag.weekday()]} {tag:%d.%m.}"
 
 
-def kalender(page: ft.Page, state: AppState) -> ft.Control:
-    monat = state.verlauf_monat
-    heute = state.heute()
-    tage_im_monat = calendar.monthrange(monat.year, monat.month)[1]
-    letzter = monat.replace(day=tage_im_monat)
-    zaehler = state.sitzungen.tage_mit_eintraegen(
-        state.profil.id, monat, letzter, exercise_id=state.verlauf_uebung
-    )
+def verlauf(page: ft.Page, state: AppState) -> ft.Control:
+    """Der Reiter „Verlauf“: Tage | Übungen."""
 
-    def verschieber(schritte: int) -> Callable[[], None]:
-        def handler() -> None:
-            state.verlauf_monat = _monat_verschieben(monat, schritte)
-            state.neu_zeichnen()
-
-        return handler
-
-    def springer(tag: date) -> Callable[[], object]:
-        async def handler() -> None:
-            await page.push_route(f"/tag/{tag.isoformat()}")
-
-        return handler
-
-    def uebung_waehlen(e: ft.Event[ft.Dropdown]) -> None:
-        state.verlauf_uebung = e.control.value or None
+    def wechseln(e: ft.Event[ft.Tabs]) -> None:
+        state.verlauf_tab = e.control.selected_index or 0
         state.neu_zeichnen()
 
-    zellen: list[ft.Control] = [
-        ft.Container(alignment=ft.Alignment.CENTER, content=ft.Text(w, size=11, opacity=0.6))
-        for w in WOCHENTAGE
-    ]
-    zellen.extend(ft.Container() for _ in range(monat.weekday()))
-    for tagnr in range(1, tage_im_monat + 1):
-        tag = monat.replace(day=tagnr)
-        n = zaehler.get(tag, 0)
-        farbe = (
-            None
-            if n == 0
-            else (ft.Colors.SECONDARY_CONTAINER if n < 3 else ft.Colors.PRIMARY_CONTAINER)
-        )
-        zellen.append(
-            ft.Container(
-                alignment=ft.Alignment.CENTER,
-                border_radius=8,
-                bgcolor=farbe,
-                border=ft.Border.all(2, ft.Colors.PRIMARY) if tag == heute else None,
-                ink=True,
-                content=ft.Text(str(tagnr), weight=ft.FontWeight.BOLD if n else None),
-                on_click=springer(tag),
-            )
-        )
-
-    uebungen = state.uebungen.alle()
-    return ft.Column(
-        spacing=8,
-        controls=[
-            ft.Row(
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                controls=[
-                    ft.IconButton(ft.Icons.CHEVRON_LEFT, on_click=verschieber(-1)),
-                    ft.Text(
-                        f"{MONATE[monat.month]} {monat.year}", size=16, weight=ft.FontWeight.BOLD
-                    ),
-                    ft.IconButton(ft.Icons.CHEVRON_RIGHT, on_click=verschieber(1)),
-                ],
-            ),
-            ft.Dropdown(
-                label="Übung",
-                value=state.verlauf_uebung or "",
-                options=[
-                    ft.DropdownOption(key="", text="Alle Übungen"),
-                    *[ft.DropdownOption(key=u.id, text=u.name) for u in uebungen],
-                ],
-                on_select=uebung_waehlen,
-                dense=True,
-            ),
-            ft.GridView(
-                runs_count=7, spacing=4, run_spacing=4, child_aspect_ratio=1.3, controls=zellen
-            ),
-            ft.Text("Antippen öffnet den Tag. Farbe = Anzahl Einträge.", size=11, opacity=0.6),
-        ],
-    )
-
-
-def kurve(page: ft.Page, state: AppState) -> ft.Control:
-    metriken = state.sitzungen.metriken(state.profil.id)
-    if not metriken:
-        return ft.Text(
-            "Noch keine Werte. Kurven entstehen, sobald du Zahlen einträgst — "
-            "ein reines „gemacht“ erscheint nur im Kalender.",
-            opacity=0.7,
-        )
-    katalog = {u.id: u for u in state.uebungen.alle(mit_geloeschten=True)}
-
-    def beschriftung(metric_key: str) -> str:
-        """„Wandsitz · Haltezeit (Summe)" statt „<id>:hold:sum"."""
-        uebung_id, _, rest = metric_key.partition(":")
-        feld_key, _, art = rest.partition(":")
-        uebung = katalog.get(uebung_id)
-        feld = uebung.result_spec.field_by_key(feld_key) if uebung else None
-        text = f"{uebung.name if uebung else uebung_id} · {feld.label if feld else feld_key}"
-        zusatz = {"sum": "Summe", "max": "Maximum je Satz"}.get(art)
-        return f"{text} ({zusatz})" if zusatz else text
-
-    if state.verlauf_metrik not in metriken:
-        state.verlauf_metrik = metriken[0]
-    metrik = state.verlauf_metrik
-    messungen = state.sitzungen.verlauf(state.profil.id, metrik)
-    punkte = kurve_punkte(messungen, state.verlauf_modus)
-    einheit = messungen[0].unit if messungen else ""
-
-    def metrik_waehlen(e: ft.Event[ft.Dropdown]) -> None:
-        state.verlauf_metrik = e.control.value
-        state.neu_zeichnen()
-
-    def modus_wechseln(e: ft.Event[ft.SegmentedButton]) -> None:
-        if e.control.selected:
-            state.verlauf_modus = e.control.selected[0]
-            state.neu_zeichnen()
-
-    chart = ft.Column(
-        spacing=4,
-        controls=[
-            ft.Text(f"in {einheit}" if einheit else "", size=11, opacity=0.6),
-            liniendiagramm(punkte, einheit, state.verlauf_modus),
-        ],
-    )
-    return ft.Column(
-        spacing=8,
-        controls=[
-            ft.Dropdown(
-                label="Kennzahl",
-                value=metrik,
-                options=[ft.DropdownOption(key=m, text=beschriftung(m)) for m in metriken],
-                on_select=metrik_waehlen,
-                dense=True,
-            ),
-            ft.SegmentedButton(
-                selected=[state.verlauf_modus],
-                segments=[
-                    ft.Segment(value=MODUS_NUMMER, label=ft.Text("Training Nr.")),
-                    ft.Segment(value=MODUS_ZEIT, label=ft.Text("Zeit (Tage)")),
-                ],
-                on_change=modus_wechseln,
-            ),
-            chart,
-            ft.Text(f"{len(punkte)} Werte", size=11, opacity=0.6),
-        ],
-    )
-
-
-def _abschnitt(titel: str, inhalt: ft.Control, unten: int = 0) -> ft.Control:
-    return ft.Container(
-        padding=ft.Padding.only(left=16, right=16, top=12, bottom=unten),
+    daten = _daten(state)
+    inhalt = _tage(page, state, daten) if state.verlauf_tab == 0 else _uebungen(page, state, daten)
+    return ft.Tabs(
+        length=2,
+        selected_index=state.verlauf_tab,
+        on_change=wechseln,
+        expand=True,
         content=ft.Column(
-            spacing=4,
-            controls=[ft.Text(titel, size=11, weight=ft.FontWeight.BOLD, opacity=0.6), inhalt],
+            expand=True,
+            spacing=0,
+            controls=[
+                ft.TabBar(scrollable=False, tabs=[ft.Tab(label="Tage"), ft.Tab(label="Übungen")]),
+                ft.Container(expand=True, content=inhalt),
+            ],
         ),
     )
 
 
-def verlauf(page: ft.Page, state: AppState) -> ft.Control:
+def _oeffner(page: ft.Page, pfad: str) -> Callable[[], object]:
+    async def handler() -> None:
+        await page.push_route(pfad)
+
+    return handler
+
+
+def _ueberschrift(text: str, rechts: ft.Control | None = None) -> ft.Control:
+    return ft.Container(
+        padding=ft.Padding.only(left=4, top=6),
+        content=ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Text(text.upper(), size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                rechts or ft.Container(),
+            ],
+        ),
+    )
+
+
+def _zeile(
+    *,
+    symbol_key: str | None,
+    titel: str,
+    unter: list[ft.Control],
+    rechts: list[ft.Control],
+    on_click: Callable[[], object],
+) -> ft.Control:
+    """Eine Übung als Karte: Symbol, Name und Zeilen darunter, rechts Wert und Mini-Kurve."""
+    return ft.Container(
+        bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
+        border_radius=16,
+        padding=ft.Padding.only(left=12, right=6, top=10, bottom=10),
+        ink=True,
+        on_click=on_click,
+        content=ft.Row(
+            spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Container(
+                    width=38,
+                    height=38,
+                    border_radius=19,
+                    bgcolor=ft.Colors.SECONDARY_CONTAINER,
+                    alignment=ft.Alignment.CENTER,
+                    content=ft.Icon(
+                        symbol(symbol_key), size=20, color=ft.Colors.ON_SECONDARY_CONTAINER
+                    ),
+                ),
+                ft.Column(
+                    spacing=1,
+                    expand=True,
+                    tight=True,
+                    controls=[ft.Text(titel, size=15, weight=ft.FontWeight.W_600), *unter],
+                ),
+                ft.Column(
+                    spacing=3,
+                    tight=True,
+                    horizontal_alignment=ft.CrossAxisAlignment.END,
+                    controls=rechts,
+                ),
+                ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+            ],
+        ),
+    )
+
+
+def _wert(text: str, einheit: str) -> ft.Control:
+    """„43 Wdh.“ — die Zahl groß, die Einheit klein dahinter."""
+    return ft.Row(
+        spacing=3,
+        tight=True,
+        vertical_alignment=ft.CrossAxisAlignment.END,
+        controls=[
+            ft.Text(text, size=15, weight=ft.FontWeight.W_700),
+            *([ft.Text(einheit, size=11, opacity=0.7)] if einheit else []),
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reiter „Tage“: Woche und Tag
+# ---------------------------------------------------------------------------
+
+
+def _gewaehlter_tag(gewaehlt: date | None, woche: list[date], heute: date, mit: list[date]) -> date:
+    """Der gezeigte Tag: der gewählte, sonst heute (wenn heute etwas eingetragen ist oder die
+    Woche sonst leer), sonst der letzte Tag der Woche mit Einträgen.
+
+    >>> w = [date(2026, 10, 12) + timedelta(days=i) for i in range(7)]
+    >>> heute = date(2026, 10, 17)
+    >>> _gewaehlter_tag(None, w, heute, [date(2026, 10, 12), date(2026, 10, 16)])
+    datetime.date(2026, 10, 16)
+    >>> _gewaehlter_tag(None, w, heute, []), _gewaehlter_tag(date(2026, 10, 13), w, heute, [])
+    (datetime.date(2026, 10, 17), datetime.date(2026, 10, 13))
+    """
+    if gewaehlt is not None and gewaehlt in woche:
+        return gewaehlt
+    if heute in woche and (heute in mit or not mit):
+        return heute
+    return mit[-1] if mit else min(heute, woche[0])
+
+
+def _tage(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
+    heute = daten.heute
+    jetzt = montag(heute)
+    beginn = state.verlauf_woche or jetzt
+    woche = [beginn + timedelta(days=i) for i in range(7)]
+    uebungen_je_tag: dict[date, set[str]] = {}
+    for t, e in daten.eintraege:
+        if beginn <= t <= woche[-1]:
+            uebungen_je_tag.setdefault(t, set()).add(daten.kachel_von(e.exercise_id))
+    tag = _gewaehlter_tag(state.verlauf_tag, woche, heute, sorted(uebungen_je_tag))
+
+    def woche_zeigen(neu: date) -> None:
+        state.verlauf_woche = None if neu == jetzt else neu
+        state.verlauf_tag = None
+        state.neu_zeichnen()
+
+    def blaettern(schritt: int) -> Callable[[], None]:
+        def handler() -> None:
+            ziel = beginn + timedelta(days=7 * schritt)
+            if ziel <= jetzt:
+                woche_zeigen(ziel)
+
+        return handler
+
+    def gewischt(e: ft.DragEndEvent) -> None:
+        geschwindigkeit = e.primary_velocity or 0
+        if geschwindigkeit > 300:
+            blaettern(-1)()
+        elif geschwindigkeit < -300:
+            blaettern(1)()
+
+    def waehler(t: date) -> Callable[[], None]:
+        def handler() -> None:
+            state.verlauf_tag = t
+            state.neu_zeichnen()
+
+        return handler
+
+    def zelle(t: date) -> ft.Control:
+        n = len(uebungen_je_tag.get(t, ()))
+        gewaehlt, ist_heute, zukunft = t == tag, t == heute, t > heute
+        schrift = ft.Colors.ON_PRIMARY if gewaehlt else None
+        punkte = ft.Row(
+            spacing=3,
+            tight=True,
+            controls=[
+                ft.Container(
+                    width=6,
+                    height=6,
+                    border_radius=3,
+                    bgcolor=ft.Colors.ON_PRIMARY if gewaehlt else ft.Colors.PRIMARY,
+                )
+                for _ in range(min(n, 3))
+            ],
+        )
+        return ft.Container(
+            expand=True,
+            height=64,
+            border_radius=14,
+            bgcolor=ft.Colors.PRIMARY if gewaehlt else None,
+            border=ft.Border.all(2, ft.Colors.PRIMARY) if ist_heute and not gewaehlt else None,
+            opacity=0.45 if zukunft else 1.0,
+            ink=not zukunft,
+            on_click=None if zukunft else waehler(t),
+            tooltip=f"{tag_titel(t)}: {n} Übungen" if n else None,
+            content=ft.Column(
+                spacing=3,
+                alignment=ft.MainAxisAlignment.CENTER,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text(
+                        "heute" if ist_heute else WOCHENTAGE[t.weekday()],
+                        size=11,
+                        color=schrift if gewaehlt else ft.Colors.PRIMARY if ist_heute else None,
+                        weight=ft.FontWeight.W_700 if ist_heute else None,
+                        opacity=1.0 if gewaehlt or ist_heute else 0.7,
+                    ),
+                    ft.Text(
+                        str(t.day),
+                        size=17,
+                        color=schrift,
+                        weight=ft.FontWeight.W_700 if n or gewaehlt else ft.FontWeight.W_500,
+                        opacity=1.0 if n or gewaehlt else 0.7,
+                    ),
+                    ft.Container(height=6, content=punkte),
+                ],
+            ),
+        )
+
+    trainingstage = len(uebungen_je_tag)
+    unterzeile: list[ft.Control] = [
+        ft.Text(
+            f"Woche {beginn.isocalendar().week} · {trainingstage} "
+            + ("Trainingstag" if trainingstage == 1 else "Trainingstage"),
+            size=12,
+            opacity=0.7,
+        )
+    ]
+    if beginn != jetzt:
+        unterzeile.append(
+            ft.TextButton(
+                "Heute",
+                on_click=lambda: woche_zeigen(jetzt),
+                style=ft.ButtonStyle(text_style=ft.TextStyle(size=12)),
+            )
+        )
+    streifen = ft.GestureDetector(
+        on_horizontal_drag_end=gewischt,
+        content=ft.Container(
+            bgcolor=ft.Colors.SURFACE_CONTAINER,
+            border_radius=18,
+            padding=ft.Padding.only(left=6, right=6, top=6, bottom=10),
+            content=ft.Column(
+                spacing=4,
+                tight=True,
+                controls=[
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.IconButton(
+                                ft.Icons.CHEVRON_LEFT,
+                                tooltip="Vorige Woche",
+                                on_click=blaettern(-1),
+                            ),
+                            ft.Column(
+                                spacing=0,
+                                tight=True,
+                                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    ft.Text(
+                                        wochen_titel(beginn), size=16, weight=ft.FontWeight.W_700
+                                    ),
+                                    ft.Row(
+                                        spacing=4,
+                                        tight=True,
+                                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                        controls=unterzeile,
+                                    ),
+                                ],
+                            ),
+                            ft.IconButton(
+                                ft.Icons.CHEVRON_RIGHT,
+                                tooltip="Nächste Woche",
+                                on_click=blaettern(1),
+                                disabled=beginn >= jetzt,
+                            ),
+                        ],
+                    ),
+                    ft.Row(spacing=4, controls=[zelle(t) for t in woche]),
+                ],
+            ),
+        ),
+    )
+
+    eintraege_des_tags = [e for t, e in daten.eintraege if t == tag]
+    zeilen = tageszeilen(eintraege_des_tags, daten.kachel_von, daten.namen)
+    anzahl = f"{len(zeilen)} {'Übung' if len(zeilen) == 1 else 'Übungen'}"
+    controls: list[ft.Control] = [
+        streifen,
+        _ueberschrift(
+            f"{tag_titel(tag)} · {anzahl}",
+            ft.TextButton("Tag öffnen", on_click=_oeffner(page, f"/tag/{tag.isoformat()}")),
+        ),
+    ]
+    if not zeilen:
+        controls.append(
+            ft.Container(
+                padding=ft.Padding.only(left=4, top=4),
+                content=ft.Text("An diesem Tag ist nichts eingetragen.", opacity=0.7),
+            )
+        )
+    for z in zeilen:
+        uebung = daten.katalog.get(z.kachel_id)
+        unter: list[ft.Control] = [ft.Text(z.zeile, size=12, opacity=0.75)]
+        if z.zusatz:
+            unter.append(ft.Text(z.zusatz, size=11, opacity=0.6))
+        rechts: list[ft.Control] = []
+        if z.kennzahl is not None and z.wert is not None:
+            bisher = [(t, e) for t, e in daten.je_kachel.get(z.kachel_id, []) if t <= tag]
+            werte = [w for _, w in tageswerte(bisher, z.kennzahl)][-MINI_WERTE:]
+            rechts = [_wert(z.kennzahl.text(z.wert), z.kennzahl.einheit), mini(werte)]
+        controls.append(
+            _zeile(
+                symbol_key=uebung.icon_key if uebung else None,
+                titel=uebung.name if uebung else "?",
+                unter=unter,
+                rechts=rechts,
+                on_click=_oeffner(page, f"/verlauf/{z.kachel_id}"),
+            )
+        )
+    if any(z.kennzahl is not None for z in zeilen):
+        controls.append(
+            ft.Text(
+                "Mini-Kurve: die letzten Male dieser Übung, der Punkt ist dieser Tag. "
+                "Antippen öffnet die Übung.",
+                size=11,
+                opacity=0.6,
+            )
+        )
     spalte = ft.Column(
         expand=True,
         scroll=ft.ScrollMode.AUTO,
         spacing=8,
         controls=[
-            _abschnitt("LETZTE TAGE — ANTIPPEN ZEIGT DIE KURVE", letzte_tage(page, state)),
-            _abschnitt("KALENDER", kalender(page, state)),
-            _abschnitt("KENNZAHLEN JE EINTRAG", kurve(page, state), unten=24),
+            ft.Container(
+                padding=ft.Padding.only(left=12, right=12, top=10, bottom=24),
+                content=ft.Column(spacing=8, controls=controls),
+            )
         ],
     )
-    return scroll_merken(page, state, "verlauf", spalte)
+    return scroll_merken(page, state, "verlauf_tage", spalte)
 
 
-__all__ = ["kachel_von", "kalender", "kurve", "letzte_tage", "liniendiagramm", "verlauf"]
+# ---------------------------------------------------------------------------
+# Reiter „Übungen“: alle Übungen mit Mini-Kurve und Trend
+# ---------------------------------------------------------------------------
+
+
+def trend_text(anteil: float | None) -> str:
+    """„+19 %“, „−4 %“, „± 0 %“ — leer ohne Trend. Ohne Pfeilzeichen: Die fehlen
+    manchen Schriften (im Browser standen Kästchen).
+
+    >>> trend_text(0.19), trend_text(-0.044), trend_text(0.001), trend_text(None)
+    ('+19 %', '−4 %', '± 0 %', '')
+    """
+    if anteil is None:
+        return ""
+    prozent = round(anteil * 100)
+    if prozent == 0:
+        return "± 0 %"
+    return f"{'+' if prozent > 0 else '−'}{abs(prozent)} %"
+
+
+def _uebungen(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
+    heute = daten.heute
+    seit = heute - timedelta(days=7 * UEBUNGEN_WOCHEN - 1)
+    reihenfolge = sorted(daten.je_kachel, key=lambda k: daten.je_kachel[k][-1][0], reverse=True)
+    typen = Counter(
+        typ for k in reihenfolge if (u := daten.katalog.get(k)) is not None for typ in u.typen
+    )
+    typ = state.verlauf_typ if state.verlauf_typ in typen else None
+
+    def filter_waehlen(neu: str | None) -> Callable[[], None]:
+        def handler() -> None:
+            state.verlauf_typ = neu
+            state.neu_zeichnen()
+
+        return handler
+
+    chips: list[ft.Control] = [
+        ft.Chip(
+            label=ft.Text(name),
+            selected=wert == typ,
+            show_checkmark=True,
+            on_select=filter_waehlen(wert),
+        )
+        for wert, name in [(None, "Alle"), *((t, t) for t, _ in typen.most_common())]
+    ]
+    controls: list[ft.Control] = []
+    if len(chips) > 2:
+        controls.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=chips))
+    controls.append(_ueberschrift("Zuletzt gemacht"))
+    gezeigt = 0
+    for kachel_id in reihenfolge:
+        uebung = daten.katalog.get(kachel_id)
+        if typ is not None and (uebung is None or typ not in uebung.typen):
+            continue
+        eintraege = daten.je_kachel[kachel_id]
+        tage = sorted({t for t, _ in eintraege})
+        zuletzt = tage[-1]
+        neulich = sum(1 for t in tage if t >= seit)
+        unter = (
+            f"{neulich}× in {UEBUNGEN_WOCHEN} Wochen · zuletzt {kurz_datum(zuletzt, heute)}"
+            if neulich
+            else f"zuletzt {kurz_datum(zuletzt, heute)}"
+        )
+        kz = kennzahlen([e for _, e in eintraege])
+        rechts: list[ft.Control]
+        if kz:
+            werte = tageswerte(eintraege, kz[0])
+            letzter = werte[-1][1] if werte else None
+            anteil = trend(werte, heute)
+            hinweis = trend_text(anteil)
+            if not hinweis and werte and werte[0][0] > heute - timedelta(days=28):
+                hinweis = "neu"
+            rechts = [
+                ft.Row(
+                    spacing=10,
+                    tight=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        mini([w for _, w in werte][-MINI_WERTE:], breite=72, hoehe=28),
+                        ft.Column(
+                            spacing=0,
+                            tight=True,
+                            horizontal_alignment=ft.CrossAxisAlignment.END,
+                            controls=[
+                                _wert(
+                                    kz[0].text(letzter) if letzter is not None else "–",
+                                    kz[0].einheit,
+                                ),
+                                ft.Text(hinweis, size=11, opacity=0.7),
+                            ],
+                        ),
+                    ],
+                )
+            ]
+        else:
+            _, je_woche = haeufigkeit(tage, montag(heute) - timedelta(days=35), heute)
+            rechts = [
+                ft.Row(
+                    spacing=10,
+                    tight=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        mini_saeulen([n for *_, n in je_woche], breite=72, hoehe=28),
+                        ft.Column(
+                            spacing=0,
+                            tight=True,
+                            horizontal_alignment=ft.CrossAxisAlignment.END,
+                            controls=[
+                                _wert(f"{je_woche[-1][2]}×", ""),
+                                ft.Text("diese Woche", size=11, opacity=0.7),
+                            ],
+                        ),
+                    ],
+                )
+            ]
+        controls.append(
+            _zeile(
+                symbol_key=uebung.icon_key if uebung else None,
+                titel=uebung.name if uebung else "?",
+                unter=[ft.Text(unter, size=12, opacity=0.75)],
+                rechts=rechts,
+                on_click=_oeffner(page, f"/verlauf/{kachel_id}"),
+            )
+        )
+        gezeigt += 1
+    if not gezeigt:
+        controls.append(
+            ft.Text(
+                "Noch nichts eingetragen — Übungen erscheinen hier, sobald du sie machst.",
+                opacity=0.7,
+            )
+        )
+    spalte = ft.Column(
+        expand=True,
+        scroll=ft.ScrollMode.AUTO,
+        controls=[
+            ft.Container(
+                padding=ft.Padding.only(left=12, right=12, top=10, bottom=24),
+                content=ft.Column(spacing=8, controls=controls),
+            )
+        ],
+    )
+    return scroll_merken(page, state, "verlauf_uebungen", spalte)
+
+
+__all__ = ["kurz_datum", "trend_text", "verlauf"]

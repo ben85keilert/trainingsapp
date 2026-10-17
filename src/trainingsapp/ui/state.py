@@ -53,7 +53,7 @@ from trainingsapp.core.timer import (
     timer_signale_schreiben,
 )
 from trainingsapp.core.update import Release
-from trainingsapp.core.verlauf import MODUS_NUMMER
+from trainingsapp.core.verlauf import MODUS_ZEIT, ZEITRAUM_VORGABE
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.einheiten import EinheitRepo
 from trainingsapp.data.kurse import KursRepo
@@ -177,13 +177,16 @@ class AppState:
     uebungen_tab: int = 0
     #: Ordnung der Tagesansicht: "plan", "zeit" oder "uebung"
     tag_ordnung: str = "plan"
-    #: Verlauf: angezeigter Monat (erster Tag), gewählte Kennzahl, X-Achse
-    verlauf_monat: date = field(default_factory=lambda: lokaler_tag(jetzt()).replace(day=1))
-    verlauf_metrik: str | None = None
-    verlauf_modus: str = MODUS_NUMMER
-    verlauf_uebung: str | None = None
-    #: Kachel-Kurve: welches Mengenfeld, welche Variante (None = alle zusammen)
-    verlauf_feld: str | None = None
+    #: Verlauf (Ben, 17.10.2026): Reiter (0 = Tage, 1 = Übungen), gezeigte Woche (ihr
+    #: Montag; None = die aktuelle), gewählter Tag (None = von selbst), Typ-Filter
+    verlauf_tab: int = 0
+    verlauf_woche: date | None = None
+    verlauf_tag: date | None = None
+    verlauf_typ: str | None = None
+    #: Kurve einer Übung: Zeitraum, X-Achse, Kennzahl je Kachel, Variante (None = alle)
+    verlauf_zeitraum: str = ZEITRAUM_VORGABE
+    verlauf_modus: str = MODUS_ZEIT
+    verlauf_kennzahlen: dict[str, str] = field(default_factory=dict)
     verlauf_variante: str | None = None
     #: Scrollposition je scrollbarer Fläche (Schlüssel meist die Route) — damit
     #: der Neubau nach einem Tipp nicht wieder oben beginnt

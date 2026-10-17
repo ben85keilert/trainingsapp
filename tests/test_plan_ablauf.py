@@ -135,6 +135,17 @@ async def test_ablauf_mit_pausen_traegt_jede_uebung_ein(umgebung) -> None:
     assert spur[:3] == ["Planke beginnt", "Planke fertig", "Pause"]
     assert "Atmung beginnt" in spur and spur[-1] == "Atmung fertig"
     assert "Kniebeuge beginnt" not in spur  # unter 5 s: keine Marke
+    # Die Notizen nennen ihre Übung per Kurzcode (A15) — die Pause nennt keine
+    from trainingsapp.core.kurzcode import kurzcode
+
+    genannt = {
+        x["text"]: x.get("uebungen")
+        for x in messlauf.aufnahme.ereignisse
+        if x.get("marke", {}).get("spur") == "uebung"
+    }
+    planke_code = kurzcode(plan.items[0].exercise_id)  # die Planke dieses Plans
+    assert genannt["Planke beginnt"] == genannt["Planke fertig"] == [planke_code]
+    assert genannt["Pause"] is None
 
 
 async def test_automatisch_weiter_und_ueberspringen(umgebung) -> None:

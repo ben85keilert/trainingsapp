@@ -48,6 +48,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Protocol
 
+from .kurzcode import kurzcode
 from .models import new_id
 
 #: Woher ein Ereignis kommt — ``einheit``, ``timer``, ``plan``, ``gps`` heißen in der
@@ -259,6 +260,9 @@ class Projektion:
     marke: dict[str, Any]
     #: als sichtbare Notiz — sonst nur eine stille Grenze (Ende einer Spur)
     als_notiz: bool = True
+    #: Kurzcodes der Übungen, die die Notiz nennt (raw-v1 ``uebungen``, Vertrag §4) —
+    #: „Planke beginnt“ verweist so auf die Übung (Katalog A15)
+    uebungen: tuple[str, ...] = ()
 
 
 def projektion(
@@ -283,6 +287,9 @@ def projektion(
     True
     >>> projektion(Ereignis(9.0, "person", "eintrag")) is None
     True
+    >>> projektion(Ereignis(5.0, "plan", "uebung_start", "Planke beginnt",
+    ...     {"uebung": "2b0c6f0e-0000-4000-8000-000000000001", "name": "Planke"})).uebungen
+    ('2ATPZCAY',)
     """
     d = e.daten
 
@@ -333,16 +340,33 @@ def projektion(
         case ("plan", "uebung_start"):
             name = str(d.get("name") or e.text)
             return Projektion(
-                SPUR_UEBUNG, e.text or name, name, False, marke(SPUR_UEBUNG, name=name)
+                SPUR_UEBUNG,
+                e.text or name,
+                name,
+                False,
+                marke(SPUR_UEBUNG, name=name),
+                uebungen=_kurzcodes(d),
             )
         case ("plan", "uebung_ende"):
-            return Projektion(SPUR_UEBUNG, e.text, "", True, marke(SPUR_UEBUNG))
+            return Projektion(
+                SPUR_UEBUNG, e.text, "", True, marke(SPUR_UEBUNG), uebungen=_kurzcodes(d)
+            )
         case ("plan", "pause"):
             # Zwischen zwei Übungen eines Plan-Ablaufs, bis „Weiter“ — ein eigener Abschnitt
             return Projektion(
                 SPUR_UEBUNG, e.text or "Pause", "Pause", False, marke(SPUR_UEBUNG, name="Pause")
             )
     return None
+
+
+def _kurzcodes(daten: Mapping[str, Any]) -> tuple[str, ...]:
+    """Der Kurzcode der Übung eines Plan-Ereignisses (`core.kurzcode`) — leer ohne Übung.
+
+    >>> _kurzcodes({}), len(_kurzcodes({"uebung": "u1"})[0])
+    ((), 8)
+    """
+    uebung = daten.get("uebung")
+    return (kurzcode(str(uebung)),) if uebung else ()
 
 
 def _km_schritt(daten: Mapping[str, Any]) -> int:

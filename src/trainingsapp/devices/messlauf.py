@@ -33,7 +33,7 @@ import contextlib
 import hashlib
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -474,6 +474,7 @@ class Messlauf:
         *,
         bei: float | None = None,
         marke: dict | None = None,
+        uebungen: Sequence[str] | None = None,
     ) -> dict | None:
         """Notiz in die laufende Aufnahme, ``vor_s`` Sekunden vor jetzt — ohne Aufnahme ``None``.
 
@@ -484,22 +485,29 @@ class Messlauf:
 
         ``bei``: die Stelle auf der Uhr (`uhr`) statt ``vor_s`` — eine Einheit meldet
         Ereignisse mit ihrer genauen Zeit. ``marke``: maschinenlesbar, wer die Notiz
-        setzte und was sie bedeutet (Vertrag §4).
+        setzte und was sie bedeutet (Vertrag §4). ``uebungen``: Kurzcodes der Übungen,
+        die die Notiz nennt (Vertrag §4, „Planke beginnt“ eines Übungs-Timers).
         """
         if self.aufnahme is None:
             return None
-        eintrag = self._notiz_bauen(text, vor_s, bei=bei, marke=marke)
+        eintrag = self._notiz_bauen(text, vor_s, bei=bei, marke=marke, uebungen=uebungen)
         self.aufnahme.ereignisse.append(eintrag)
         return eintrag
 
     def _notiz_bauen(
-        self, text: str, vor_s: float, *, bei: float | None, marke: dict | None
+        self,
+        text: str,
+        vor_s: float,
+        *,
+        bei: float | None,
+        marke: dict | None,
+        uebungen: Sequence[str] | None = None,
     ) -> dict:
         """Eine verankerte Notiz — nie in der Zukunft."""
         zb = self.notiz_zeitbezug()
         jetzt = self.jetzt_s()
         x = jetzt - max(vor_s, 0.0) if bei is None else min(bei - self.start_mono, jetzt)
-        return notiz(text, zb.anker(x), zb.start_utc, marke=marke)
+        return notiz(text, zb.anker(x), zb.start_utc, uebungen=uebungen or None, marke=marke)
 
     def abschnitt_markieren(
         self,
@@ -512,6 +520,7 @@ class Messlauf:
         bei: float | None = None,
         marke: dict | None = None,
         als_notiz: bool = True,
+        uebungen: Sequence[str] | None = None,
     ) -> dict | None:
         """Wie `notiz_hinzufuegen` — und die Notiz wird beim Speichern eine Abschnittsgrenze.
 
@@ -524,9 +533,9 @@ class Messlauf:
         if self.aufnahme is None:
             return None
         if als_notiz:
-            eintrag = self.notiz_hinzufuegen(text, vor_s, bei=bei, marke=marke)
+            eintrag = self.notiz_hinzufuegen(text, vor_s, bei=bei, marke=marke, uebungen=uebungen)
         else:
-            eintrag = self._notiz_bauen(text, vor_s, bei=bei, marke=marke)
+            eintrag = self._notiz_bauen(text, vor_s, bei=bei, marke=marke, uebungen=uebungen)
         if eintrag is not None:
             self._grenzen.setdefault(spur, []).append((eintrag, name, ende))
         return eintrag

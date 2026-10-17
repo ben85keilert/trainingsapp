@@ -284,6 +284,7 @@ class HrvBaustein:
             bei=bei,
             marke=p.marke,
             als_notiz=p.als_notiz,
+            uebungen=p.uebungen,
         )
         return eintrag is not None
 

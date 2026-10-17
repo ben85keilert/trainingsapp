@@ -80,7 +80,9 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 | `gps/start` | stille Grenze: „km 1“ (Rad „km 5“) beginnt mit der ersten gezählten Ortung | `km` |
 | `gps/km` | Notiz „km N“ zur Split-Zeit; der nächste Abschnitt heißt nach seinem Ende („km 2“, Rad „km 10“) | `km` |
 | `gps/ende` | stille Grenze, letzter km endet | `km` |
-| `plan/uebung_start`, `plan/uebung_ende` | Notiz mit Kurzcode (`uebungen`), Abschnitt der Übung | `uebung` |
+| `plan/uebung_start`, `plan/uebung_ende` | Notiz „Planke beginnt“ / „Planke fertig“, Abschnitt der Übung | `uebung` |
+| `plan/pause` | Pause zwischen zwei Übungen eines Plan-Ablaufs, bis „Weiter“ — Abschnitt „Pause“ | `uebung` |
+| `plan/ende`, `person/eintrag` | — (nur Zeitleiste: Ende des Ablaufs, was eingetragen wurde) | |
 
 - **Marken** in der Messdatei: `docs/kompatibilitaet.md` §4. **Spuren**: §9b — eine
   Grenze teilt nur ihre Spur, Abschnitte verschiedener Spuren überlappen sich.
@@ -88,7 +90,7 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
   bekommt keine Marke und keinen Abschnitt. Die Einheit hält eine Anfangsmarke zurück,
   bis ihr Abschnitt 5 s lief, und setzt sie dann an seine echte Anfangszeit. Die
   Zeitleiste behält alles.
-- Tagebuch: Einträge mit Anfang und Ende (Stufe 3).
+- Tagebuch: Einträge mit Anfang und Ende (Stufe 3, §7).
 - **Training ↔ Einheit** (Migration 019): Die Zeile `strecke` trägt `einheit_id`.
   Über die Einheit findet die Auswertung die HRV-Aufnahme auch, wenn sie schon vorher
   lief und weiterläuft (`hrv_recording_id` bleibt dann leer), und legt Ortungen und
@@ -118,5 +120,36 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 | 0 | hrv-core: `spuren_speichern`, `notiz(..., marke=)`; Vertrag §4/§9b | gebaut 17.10. |
 | 1 | Zeitleiste, `Einheitslauf` mit HRV, Timer, GPS; Startleiste, Laufleiste, Bereitstellen; Dienst `health` | gebaut 17.10.; offen: Messung mit Dauer und Ablauf (Katalog A11) |
 | 2 | Ausdauertraining als Einheit (verknüpft auch eine schon laufende HRV, Abgleich über `versatz_s`, Wiederherstellung H16) | gebaut 17.10.; offen: Tabellen „Intervalle“ und „Kilometer“ live (A10) |
-| 3 | Timer an Übung, Planübung und Plan (mehrere Profile, „zählt“, Abbrechen), Plan-Ablauf, Einträge mit Anfang und Ende — Migration 020 | (A12) |
+| 3 | Timer an Übung, Planübung und Plan (mehrere Profile, „zählt“, Abbrechen), Plan-Ablauf, Einträge mit Anfang und Ende — Migration 020 | gebaut 17.10. (§7); offen: „vom Timer“ unter „Heute geleistet“ (A13) |
 | 4 | Forschungsexport (ausdrückliche Handlung): Messdateien, Zeitleiste `einheit-v1.json`, ortsfreies Tempo | |
+
+## 7. Timer an der Übung und Plan-Ablauf (Stufe 3)
+
+Ben, 17.10.2026: „Grundsätzlich sollte man dem Plan auch einen Timer geben können oder der
+einzelnen Übung“ — und: „Aus dem Text heraus weiß die App nicht, was Übungszeit ist.“
+
+- **Profile** (`core/timer.py`): Ein Profil kann eine **Folge** sein — Teile mit eigenen
+  Runden (Vorbereitung 1 ×, Halten und Pause 3 ×, Cooldown 1 ×). Je Abschnitt **„zählt“**
+  (Vorgabe: alles zählt, die App rät nicht aus dem Namen). `TimerLauf.abbrechen` hält an
+  und markiert (kein Eintrag), `fertig_machen` („Fertig“) beendet mit der gelaufenen Zeit.
+- **Wo der Timer hängt** (Migration 020, `core/uebung_timer.py`): Profile an der Übung
+  (Paketfeld `timer`; ohne eigene gilt eine Timer-Regel im `limit_spec` als Einzeltimer),
+  „Timer für alle Übungen“ am Plan, die Wahl der Planübung (`TimerWahl`: Profil der Übung
+  oder eigene Kopie, gemerktes Zeitfeld, „Zeit eintragen“). **Vorrang:** Planübung > Plan >
+  erstes Profil der Übung > keiner.
+- **Übungslauf** (`ui/uebung_lauf.py`, `devices/einheit.UebungBaustein`): Die Uhr neben dem
+  i öffnet den Timer der Übung; er läuft als Einheit aus Übung und Timer (eine laufende HRV
+  bekommt Marken). Endet er, wird eingetragen — aus der Zeitleiste
+  (`core/timer_eintrag.py`): Haltezeit je zählendem Abschnitt oder die Summe als Zeit
+  gesamt; Pausen des Timers zählen nicht, unter `MIN_MARKE_S` fällt ein Abschnitt weg.
+  Der Eintrag bekommt Anfang und Ende, die Zeitleiste `person/eintrag`. Abgebrochen:
+  nichts — „Läufe heute“ bietet „Eintragen“ an (`lauf_eintragen`).
+- **Plan-Ablauf** (`core/plan_durchlauf.py`, `devices/plan_ablauf.py`, `ui/plan_ablauf.py`):
+  aus dem Timer des Plans („Ablauf öffnen“). Übung für Übung mit ihrem Timer (auf derselben
+  Achse: ein `TimerBaustein` je Übung mit Bezug t0), ohne Timer zum Abhaken; danach Pause
+  bis „Weiter“ (`plan/pause`) oder automatisch weiter, wie am Plan eingestellt;
+  `plan/ende` beendet die Einheit (`ende_mit_plan`). Jede Übung wird eingetragen, **sobald
+  sie endet** (`Einheitslauf.nachtragen` schreibt `person/eintrag`). Laufleiste, ⏸ und Töne
+  folgen dem Timer der laufenden Übung (`Einheitslauf.timer`).
+- **Kurse** zählen Timer-Einträge wie alle anderen (Bedingungen `summe`, `tage`) — nie
+  Messwerte.

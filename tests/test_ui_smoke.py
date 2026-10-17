@@ -673,6 +673,46 @@ def test_planblock_geleistet_oben_zahlentastatur_und_saetze(page, beinachse) -> 
     assert len(state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())) == vorher
 
 
+def test_planblock_nach_dem_auffrischen_nicht_eingefroren(page, beinachse) -> None:
+    """Flet 1.0 friert Controls ein, die beim Senden über ein ``key`` mit einem anderen
+    Objekt abgeglichen werden (wie im deklarativen Modell). Die Blöcke des Plans trugen
+    ``key=item.id``: Nach dem ersten Eintrag (neue Blöcke in derselben Liste) warf „Wert?“
+    am leeren Feld „Frozen controls cannot be updated“ (Ben, 17.10.2026, v0.2.2). Hier mit
+    Flets eigener Diff-Rechnung und Kodierung — wie die Sitzung bei ``page.update()``."""
+    import msgpack
+    from flet.controls.base_control import BaseControl
+    from flet.controls.object_patch import ObjectPatch
+    from flet.messaging.protocol import configure_encode_object_for_msgpack
+
+    from trainingsapp.ui.state import UNTEREINANDER
+    from trainingsapp.ui.views.plan import plan_view
+
+    kodierer = configure_encode_object_for_msgpack(BaseControl)
+
+    def senden(alt, neu) -> None:
+        patch, _, _ = ObjectPatch.from_diff(alt, neu, control_cls=BaseControl)
+        msgpack.packb(patch.to_message(), default=kodierer)
+
+    state, plan, _item, _u = beinachse
+    state.plan_darstellung_setzen(UNTEREINANDER)
+    ansicht = plan_view(page, state, plan)
+    senden(None, ansicht)  # das erste Zeichnen
+    page.update = lambda: senden(ansicht, ansicht)
+
+    def wertfeld(block, n: int = 0):
+        felder = [c for c in _alle(block) if isinstance(c, ft.TextField)]
+        saetze = [f for f in felder if f.label == "Sätze"]
+        return saetze[n], felder[felder.index(saetze[n]) + 1]
+
+    anzahl, wert = wertfeld(_block(ansicht, "Beinachsentraining"))
+    anzahl.value, wert.value = "3", "15"
+    _knopf_mit_text(_block(ansicht, "Beinachsentraining"), "Eintragen").on_click()
+    # Der Plan hat seine Blöcke ersetzt; im neuen Block ohne Wert eintragen
+    _, wert = wertfeld(_block(ansicht, "Beinachsentraining"))
+    wert.on_submit(None)
+    assert wert.error == "Wert?"
+
+
 def test_planblock_skala_regler_schreibt_ins_feld(page, beinachse) -> None:
     """Regler bewegen → Zahl im Feld; erst der Haken trägt ein. Getippt stellt den Regler."""
     from types import SimpleNamespace

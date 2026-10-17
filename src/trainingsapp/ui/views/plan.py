@@ -1144,9 +1144,13 @@ def plan_view(
         return handler
 
     def block(index: int, item: PlanItem) -> ft.Control:
+        # Kein ``key`` an den Blöcken (Ben, 17.10.2026): `auffrischen` setzt neue Blöcke in
+        # dieselbe Liste; Flet 1.0 gleicht gleiche Schlüssel verschiedener Objekte wie im
+        # deklarativen Modell ab und friert die neuen ein — dann warf jede spätere Änderung
+        # (etwa „Wert?“ am Feld) „Frozen controls cannot be updated“. Die ziehbare Liste
+        # kommt ohne aus (sie nimmt die ID des Controls).
         if item.exercise_id not in katalog:
             return ft.Container(
-                key=item.id,
                 padding=12,
                 content=ft.Text("(Übung nicht mehr vorhanden)", opacity=0.5),
             )
@@ -1246,7 +1250,6 @@ def plan_view(
                 inhalt.extend(eingabe_bereich(item, uebung))
 
         return ft.Container(
-            key=item.id,
             padding=ft.Padding.only(left=14, right=10, top=12, bottom=12),
             margin=ft.Margin.only(left=12, right=12, bottom=12),
             border_radius=14,

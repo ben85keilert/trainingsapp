@@ -459,6 +459,11 @@ Messungen/<Geräteordner>/.backup_<YYYY-MM-DD>_<HHMMSS>.json     # UTC-Startzeit
   `Recording.from_dict` heraus, damit er nicht über `extra` in die Messdatei
   gerät. praxis_gui liest Backups nicht; ein Backup ohne den Block (älter oder
   aus praxis_gui) wird dem aktiven Profil zugeordnet.
+  Seit 17.10.2026 kommen die **anderen Spuren** (§9b: km, Übung, Einheit) als
+  `"spuren": {"km": [[<Notiz>, "<Name>", false], …], …}` dazu — nur wenn es welche
+  gibt; `grenzen` bleibt die Spur des Timers, so lesen auch ältere App-Stände das
+  Backup. Eine Grenze kann „still“ sein: ihre Notiz steht dann nur hier, nicht in
+  `ereignisse` (das Ende einer Spur).
 - **Wiederherstellung** (ab 15.10.2026): Beim App-Start sucht
   `hrv_core.aufnahme.backups_finden` unter `Messungen/*/` nach Backups; der Dialog
   „Unvollständige Messung gefunden" bietet je Datei Wiederherstellen oder Löschen.

@@ -287,3 +287,111 @@ async def test_aufnahme_beginnt_mit_leeren_kurven(tmp_path) -> None:
     assert lauf.aufnahme_stoppen(tmp_path) is not None
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
+
+
+# ---------------------------------------------------------------------------
+# Spuren, Marken und gemeinsamer Start (Einheit, Ben 17.10.2026)
+# ---------------------------------------------------------------------------
+
+
+async def _laufend(tmp_path) -> tuple[Messlauf, asyncio.Task]:
+    lauf = Messlauf(SimulatedSource(tempo=60.0, seed=7), backup_basis=tmp_path, subject_id="p1")
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    return lauf, task
+
+
+async def _bis(lauf: Messlauf, sekunde: float) -> None:
+    while lauf.aufnahme_dauer_s() < sekunde:
+        await asyncio.sleep(0.01)
+
+
+async def test_spuren_schneiden_einander_nicht(tmp_path) -> None:
+    """Timer und Kilometer zugleich: Eine km-Grenze teilt keinen Timer-Abschnitt."""
+    from hrv_core.ausschnitte import zusatz_lesen
+
+    lauf, task = await _laufend(tmp_path)
+    km = {"quelle": "gps", "art": "km", "spur": "km"}
+    await _bis(lauf, 10)
+    lauf.abschnitt_markieren("km 1", name="km 1", spur="km", als_notiz=False)  # still
+    await _bis(lauf, 20)
+    lauf.abschnitt_markieren("Belastung", name="Belastung")
+    await _bis(lauf, 50)
+    lauf.abschnitt_markieren("km 1", name="km 2", spur="km", marke=km)
+    await _bis(lauf, 80)
+    lauf.abschnitt_markieren("Timer fertig", name="", ende=True)
+    await _bis(lauf, 100)
+    lauf.abschnitt_markieren("Ende", name="", ende=True, spur="km", als_notiz=False)
+    await _bis(lauf, 110)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+
+    assert ergebnis is not None
+    rec = laden(ergebnis.pfad)
+    # Stille Grenzen sind keine Notizen; die km-Notiz trägt ihre Marke
+    assert [e["text"] for e in rec.ereignisse] == ["Belastung", "km 1", "Timer fertig"]
+    assert rec.ereignisse[1]["marke"] == km
+    _, teile = zusatz_lesen(ergebnis.pfad, float)
+    spannen = {a.name: (a.von_s, a.bis_s) for a in teile}
+    assert set(spannen) == {"km 1", "Belastung", "km 2"}
+    # „km 2“ beginnt bei 50 s — die Belastung läuft trotzdem bis 80 s
+    assert spannen["Belastung"] == (pytest.approx(20, abs=3), pytest.approx(80, abs=3))
+    assert spannen["km 1"] == (pytest.approx(10, abs=3), pytest.approx(50, abs=3))
+    assert spannen["km 2"][1] == pytest.approx(100, abs=3)
+
+
+async def test_backup_traegt_alle_spuren(tmp_path) -> None:
+    """Die Spur des Timers steht wie bisher unter ``grenzen``, die anderen unter ``spuren``."""
+    from hrv_core.ausschnitte import zusatz_lesen
+
+    from trainingsapp.devices.messlauf import backup_wiederherstellen
+
+    lauf, task = await _laufend(tmp_path)
+    await _bis(lauf, 10)
+    lauf.abschnitt_markieren("Ruhe", name="Ruhe")
+    lauf.abschnitt_markieren("km 1", name="km 1", spur="km", als_notiz=False)
+    await _bis(lauf, 40)
+    lauf.backup_jetzt()
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+
+    backup = next(tmp_path.rglob(".backup_*.json"))
+    zusatz = json.loads(backup.read_text(encoding="utf-8"))["_wiederherstellung"]
+    assert [g[1] for g in zusatz["grenzen"]] == ["Ruhe"]
+    assert [g[1] for g in zusatz["spuren"]["km"]] == ["km 1"]
+    ergebnis = backup_wiederherstellen(backup)
+    assert ergebnis is not None
+    _, teile = zusatz_lesen(ergebnis.pfad, float)
+    assert {a.name for a in teile} == {"Ruhe", "km 1"}
+
+
+async def test_aufnahme_mit_vorgegebenem_nullpunkt_und_dateiname(tmp_path) -> None:
+    """Eine Einheit gibt Nullpunkt und Wanduhr vor; der Dateiname steht schon beim Start fest;
+    Notizen kommen an eine genaue Stelle (``bei``), nie in die Zukunft."""
+    from datetime import UTC, datetime
+
+    lauf = Messlauf(SimulatedSource(tempo=60.0, seed=7), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    assert lauf.datei_relativ() is None
+    t0 = lauf.uhr() - 3.0  # Vorlauf: der Countdown begann 3 s vor dem Start
+    utc = datetime(2026, 10, 17, 8, 0, 0, 500000, tzinfo=UTC)
+    lauf.aufnahme_starten(start_mono=t0, start_utc=utc)
+    assert lauf.aufnahme is not None and lauf.aufnahme.start_mono == t0
+    assert lauf.aufnahme.start_utc == utc and lauf.jetzt_s() >= 3.0
+    datei = lauf.datei_relativ()
+    assert datei == "Generator/sensor_2026-10-17_080000.json"
+    await _bis(lauf, 20)
+    marke = {"quelle": "timer", "art": "abschnitt", "spur": "timer"}
+    e = lauf.notiz_hinzufuegen("genau", bei=t0 + 10.0, marke=marke)
+    assert e is not None and e["t_wall_s"] == pytest.approx(10.0, abs=1.0)
+    assert e["marke"] == marke
+    spaeter = lauf.notiz_hinzufuegen("später", bei=lauf.uhr() + 100.0)
+    assert spaeter is not None and spaeter["t_wall_s"] <= lauf.aufnahme_dauer_s() + 1.0
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    assert ergebnis is not None
+    assert ergebnis.pfad.relative_to(tmp_path / "Messungen").as_posix() == datei
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)

@@ -11,6 +11,12 @@ Bleibt ein Backup liegen (Akku leer, Absturz), macht `backup_wiederherstellen`
 daraus beim nächsten Start die Messdatei, die „Stopp & speichern" geschrieben
 hätte — mit Profil und Timer-Abschnitten, die das Backup dafür mitführt.
 
+**Abschnitte je Spur** (Ben, 17.10.2026): Timer, Kilometer, Übungen und die
+Einheit (`devices.einheit`) haben jede ihre Spur — eine km-Grenze schneidet
+keinen Timer-Abschnitt (`hrv_core.ausschnitte.spuren_speichern`). Automatische
+Notizen tragen eine `marke` (Vertrag §4), und eine Einheit gibt den genauen
+Zeitpunkt (`bei`) und beim gemeinsamen Start den Nullpunkt der Aufnahme vor.
+
 **Eine neue Aufnahme beginnt mit leeren Kurven** (Ben, 16.10.2026):
 `aufnahme_starten` leert das Live-Fenster und setzt die Live-Achse auf 0.
 **Notizen gibt es schon vor der Aufnahme** (`ereignisse`, `notiz_zeitbezug`);
@@ -30,9 +36,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from hrv_core.aufnahme import Aufnahme, backup_lesen
-from hrv_core.ausschnitte import grenzen_speichern
+from hrv_core.ausschnitte import spuren_speichern
 from hrv_core.constants import malik_threshold
 from hrv_core.ereignisse import Zeitbezug, anker_aus_wand, notiz
 from hrv_core.live import LiveFenster
@@ -43,6 +50,7 @@ from hrv_core.segments import abdeckung
 from hrv_core.zeitachse import Kontinuitaetsuhr
 
 from .. import __version__
+from ..core.einheit import SPUR_TIMER
 from ..core.hrv_export import diagnose_pfad, diagnose_text
 from .base import DeviceStatus, HeartRateSource, Messwert, PpiPaket, Verbindung
 from .profiles import GeraeteProfil, profil_fuer_namen
@@ -109,12 +117,10 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
     pfad = backup.parent / rec.dateiname()
     if not pfad.exists():
         pfad = speichern(rec, backup.parent)
-        grenzen = zusatz.get("grenzen")
-        if isinstance(grenzen, list):  # Abschnitte des Timers — scheitert das, bleibt die Messung
+        spuren = _spuren_lesen(zusatz)
+        if spuren:  # Abschnitte je Spur — scheitert das, bleibt die Messung
             with contextlib.suppress(OSError, ValueError, TypeError):
-                grenzen_speichern(
-                    pfad, rec, [(dict(n), str(name), bool(ende)) for n, name, ende in grenzen]
-                )
+                spuren_speichern(pfad, rec, spuren)
     backup.unlink(missing_ok=True)
     subject_id = zusatz.get("subject_id")
     return _gespeichert(
@@ -123,6 +129,35 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
         dauer_s=rec.dauer_s,
         subject_id=str(subject_id) if subject_id else None,
     )
+
+
+def _spuren_lesen(zusatz: dict[str, Any]) -> dict[str, list[tuple[dict, str, bool]]]:
+    """Abschnittsgrenzen aus dem Backup: ``grenzen`` ist die Spur des Timers (wie bisher),
+    ``spuren`` alle anderen (seit 17.10.2026). Was nicht passt, fällt einzeln weg.
+
+    >>> n = {"beat_index": 3}
+    >>> s = _spuren_lesen({"grenzen": [[n, "A", False]], "spuren": {"km": [[n, "km 1", 0], 7]}})
+    >>> {k: [g[1:] for g in v] for k, v in s.items()}
+    {'timer': [('A', False)], 'km': [('km 1', False)]}
+    """
+    roh: dict[str, Any] = {}
+    if isinstance(zusatz.get("grenzen"), list):
+        roh[SPUR_TIMER] = zusatz["grenzen"]
+    weitere = zusatz.get("spuren")
+    if isinstance(weitere, dict):
+        for spur, liste in weitere.items():
+            if isinstance(liste, list) and spur != SPUR_TIMER:
+                roh[str(spur)] = liste
+    spuren: dict[str, list[tuple[dict, str, bool]]] = {}
+    for spur, liste in roh.items():
+        grenzen: list[tuple[dict, str, bool]] = []
+        for g in liste:
+            with contextlib.suppress(TypeError, ValueError):
+                n, name, ende = g
+                grenzen.append((dict(n), str(name), bool(ende)))
+        if grenzen:
+            spuren[spur] = grenzen
+    return spuren
 
 
 def _an_den_anfang(e: dict, start_utc: datetime | None) -> dict:
@@ -169,8 +204,9 @@ class Messlauf:
         #: Anzeigezeiten des letzten PPI-Pakets: (rr_ms, t, verworfen, fehler_ms) in Folge
         self._schlagzeiten: deque[tuple[int, float, bool, int]] = deque()
         self.aufnahme: Aufnahme | None = None
-        #: Abschnittsgrenzen des Timers in der laufenden Aufnahme: (Notiz, Name, Ende?)
-        self._grenzen: list[tuple[dict, str, bool]] = []
+        #: Abschnittsgrenzen der laufenden Aufnahme je Spur (Timer, km, Übung, Einheit):
+        #: (Notiz, Name, Ende?) — jede Spur teilt nur sich selbst (`spuren_speichern`)
+        self._grenzen: dict[str, list[tuple[dict, str, bool]]] = {}
         #: Notizen ohne Aufnahme (Ben, 16.10.2026) — `aufnahme_starten` übernimmt sie
         self._vorab: list[dict] = []
         self.status = DeviceStatus(verbindung=Verbindung.GETRENNT)
@@ -192,6 +228,12 @@ class Messlauf:
     def jetzt_s(self) -> float:
         """Sekunden seit Verbindungsbeginn bzw. Aufnahmestart — die x-Achse der Live-Kurven."""
         return self._uhr() - self.start_mono
+
+    @property
+    def uhr(self) -> Callable[[], float]:
+        """Die Uhr der Quelle (monotonic, beim Simulator schneller) — auch die Uhr einer
+        Einheit, zu der diese Messung gehört (`devices.einheit`)."""
+        return self._uhr
 
     @property
     def verbunden(self) -> bool:
@@ -340,7 +382,9 @@ class Messlauf:
 
     # -- Aufnahme -----------------------------------------------------------------
 
-    def aufnahme_starten(self) -> None:
+    def aufnahme_starten(
+        self, *, start_mono: float | None = None, start_utc: datetime | None = None
+    ) -> None:
         """Aufnahme beginnen — mit leeren Kurven (Ben, 16.10.2026).
 
         Das Live-Fenster wird geleert und die Live-Achse beginnt bei 0: Kurven,
@@ -349,19 +393,21 @@ class Messlauf:
         """
         if self.aufnahme is not None:
             return
+        # Eine Einheit gibt Nullpunkt und Wanduhr vor (gemeinsamer Start, Vorlauf im
+        # Countdown) — sonst liest die Aufnahme beide selbst.
         profil = self.profil
-        start = self._uhr()
+        start = self._uhr() if start_mono is None else min(start_mono, self._uhr())
         self.aufnahme = Aufnahme(
             geraet=self.geraet_name,
             geraet_profil=profil.id if profil else "ble_generic",
             intervall_quelle=profil.intervall_quelle if profil else "ekg_rr",
             start_mono=start,
-            start_utc=self._jetzt_utc(),
+            start_utc=start_utc or self._jetzt_utc(),
             ppi=bool(profil and profil.kann("pmd_ppi")),
             simulation=self.simulation,
         )
         self.aufnahme.batterie_prozent = self.status.batterie_prozent
-        self._grenzen = []
+        self._grenzen = {}
         self._letztes_backup = start
         self.live.leeren()
         self.start_mono = start
@@ -398,37 +444,82 @@ class Messlauf:
         else:
             self._vorab = list(liste)
 
-    def notiz_hinzufuegen(self, text: str, vor_s: float = 0.0) -> dict | None:
+    def notiz_hinzufuegen(
+        self,
+        text: str,
+        vor_s: float = 0.0,
+        *,
+        bei: float | None = None,
+        marke: dict | None = None,
+    ) -> dict | None:
         """Notiz in die laufende Aufnahme, ``vor_s`` Sekunden vor jetzt — ohne Aufnahme ``None``.
 
         Für den Timer: Jeder Abschnittsanfang wird eine Notiz an der Stelle, an der
         er war (`core.timer.TimerLauf.neue_marken`). Verankert wie „+ Notiz" →
         „Jetzt" über die Wanduhr. Angehängt, nicht einsortiert: So verrutscht keine
         Notiz, die gerade jemand bearbeitet (das Notizfeld merkt sich den Index).
+
+        ``bei``: die Stelle auf der Uhr (`uhr`) statt ``vor_s`` — eine Einheit meldet
+        Ereignisse mit ihrer genauen Zeit. ``marke``: maschinenlesbar, wer die Notiz
+        setzte und was sie bedeutet (Vertrag §4).
         """
         if self.aufnahme is None:
             return None
-        zb = self.notiz_zeitbezug()
-        eintrag = notiz(text, zb.anker(self.jetzt_s() - max(vor_s, 0.0)), zb.start_utc)
+        eintrag = self._notiz_bauen(text, vor_s, bei=bei, marke=marke)
         self.aufnahme.ereignisse.append(eintrag)
         return eintrag
 
+    def _notiz_bauen(
+        self, text: str, vor_s: float, *, bei: float | None, marke: dict | None
+    ) -> dict:
+        """Eine verankerte Notiz — nie in der Zukunft."""
+        zb = self.notiz_zeitbezug()
+        jetzt = self.jetzt_s()
+        x = jetzt - max(vor_s, 0.0) if bei is None else min(bei - self.start_mono, jetzt)
+        return notiz(text, zb.anker(x), zb.start_utc, marke=marke)
+
     def abschnitt_markieren(
-        self, text: str, vor_s: float = 0.0, *, name: str, ende: bool = False
+        self,
+        text: str,
+        vor_s: float = 0.0,
+        *,
+        name: str,
+        ende: bool = False,
+        spur: str = SPUR_TIMER,
+        bei: float | None = None,
+        marke: dict | None = None,
+        als_notiz: bool = True,
     ) -> dict | None:
         """Wie `notiz_hinzufuegen` — und die Notiz wird beim Speichern eine Abschnittsgrenze.
 
         Für den Timer: Seine Abschnitte werden Abschnitte der Messung (Sidecar wie
-        praxis_gui, `ausschnitte.grenzen_speichern`) — danach unabhängig von den
+        praxis_gui, `ausschnitte.spuren_speichern`) — danach unabhängig von den
         Notizen verschieb- und löschbar. ``ende``: beendet nur den letzten.
+        ``spur``: Jede Spur (Timer, km, Übung, Einheit) teilt nur sich selbst.
+        ``als_notiz=False``: eine stille Grenze ohne Notiz (etwa das Ende einer Spur).
         """
-        eintrag = self.notiz_hinzufuegen(text, vor_s)
+        if self.aufnahme is None:
+            return None
+        if als_notiz:
+            eintrag = self.notiz_hinzufuegen(text, vor_s, bei=bei, marke=marke)
+        else:
+            eintrag = self._notiz_bauen(text, vor_s, bei=bei, marke=marke)
         if eintrag is not None:
-            self._grenzen.append((eintrag, name, ende))
+            self._grenzen.setdefault(spur, []).append((eintrag, name, ende))
         return eintrag
 
     def aufnahme_dauer_s(self) -> float:
         return self.aufnahme.dauer_s() if self.aufnahme is not None else 0.0
+
+    def datei_relativ(self) -> str | None:
+        """Die Messdatei der laufenden Aufnahme relativ zu ``Messungen/`` — wie
+        ``hrv_recording.file_path``. Steht schon beim Start fest (Verweis einer Einheit).
+        """
+        if self.aufnahme is None:
+            return None
+        geraeteordner = self.profil.ordner if self.profil else "Unbekannt"
+        ordner = messordner(Path(), geraeteordner, simulation=self.simulation)
+        return (ordner.relative_to("Messungen") / self.aufnahme.dateiname()).as_posix()
 
     def _ordner(self, basis: Path) -> Path:
         geraeteordner = self.profil.ordner if self.profil else "Unbekannt"
@@ -455,10 +546,15 @@ class Messlauf:
 
     def _zusatz(self) -> dict[str, object]:
         """Was das Backup über die Datei hinaus braucht (`backup_wiederherstellen`)."""
-        return {
+        zusatz: dict[str, object] = {
             "subject_id": self.subject_id,
-            "grenzen": [[eintrag, name, ende] for eintrag, name, ende in self._grenzen],
+            # Die Spur des Timers wie bisher — so lesen auch ältere Stände sie
+            "grenzen": [list(g) for g in self._grenzen.get(SPUR_TIMER, [])],
         }
+        andere = {s: [list(g) for g in gs] for s, gs in self._grenzen.items() if s != SPUR_TIMER}
+        if any(andere.values()):
+            zusatz["spuren"] = {s: gs for s, gs in andere.items() if gs}
+        return zusatz
 
     def aufnahme_stoppen(self, basis: Path) -> Gespeichert | None:
         """Speichert atomar und beendet die Aufnahme. ``None``, wenn nichts aufgezeichnet wurde."""
@@ -467,10 +563,10 @@ class Messlauf:
             return None
         pfad = aufnahme.speichern(self._ordner(basis))
         rec = aufnahme.recording()
-        grenzen, self._grenzen = self._grenzen, []
-        if grenzen:  # Abschnitte des Timers — scheitert das, bleibt die Messung
+        spuren, self._grenzen = self._grenzen, {}
+        if any(spuren.values()):  # Abschnitte je Spur — scheitert das, bleibt die Messung
             with contextlib.suppress(OSError, ValueError):
-                grenzen_speichern(pfad, rec, grenzen)
+                spuren_speichern(pfad, rec, spuren)
         # Das Verbindungsprotokoll gehört zur Messung: Ohne adb ist es die einzige
         # Spur, warum ein Sensor (Verity Sense) Lücken oder keine Intervalle hatte.
         text = self.diagnose(

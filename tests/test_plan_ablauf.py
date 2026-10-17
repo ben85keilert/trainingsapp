@@ -156,3 +156,103 @@ async def test_automatisch_weiter_und_ueberspringen(umgebung) -> None:
     ]
     assert namen == ["Atmung"]
     assert list(teil.ergebnisse.values()) == ["uebersprungen", "uebersprungen", "fertig"]
+
+
+# ---------------------------------------------------------------------------
+# Oberfläche (Skizzen 7–9)
+# ---------------------------------------------------------------------------
+
+
+def _alle(c):
+    import flet as ft
+
+    yield c
+    for name in ("content", "controls", "label", "segments"):
+        kind = getattr(c, name, None)
+        for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
+            if isinstance(k, ft.Control):
+                yield from _alle(k)
+
+
+def _texte(c) -> list[str]:
+    import flet as ft
+
+    return [x.value for x in _alle(c) if isinstance(x, ft.Text) and isinstance(x.value, str)]
+
+
+def _knopf(c, text: str):
+    import flet as ft
+
+    knoepfe = ft.FilledButton | ft.OutlinedButton | ft.FilledTonalButton | ft.TextButton
+    for x in _alle(c):
+        if isinstance(x, knoepfe) and (
+            x.content == text or getattr(x.content, "value", None) == text
+        ):
+            return x
+    raise AssertionError(f"kein Knopf {text!r}")
+
+
+async def test_ansicht_vorher_waehrend_danach(umgebung) -> None:
+    pytest.importorskip("flet")
+    from trainingsapp.ui.views.plan_ablauf import plan_ablauf_view
+
+    state, uhr, gurt, _ = umgebung
+    plan = _plan(state)
+    seite = Seite()
+    basis = f"/plan/{plan.id}"
+    vorher = plan_ablauf_view(seite, state, basis, plan)
+    texte = _texte(vorher)
+    assert "1 Planke" in texte and "2 Kniebeuge" in texte and "ohne Timer" in texte
+    assert any("auf Tipp warten" in t for t in texte)
+    assert "Messung beenden" in texte  # HRV läuft und kann enden oder weiterlaufen
+    _knopf(vorher, "Ablauf starten").on_click()
+    e = state.einheit
+    assert e is not None and e.laeuft
+    await _sekunden(uhr, gurt, e, 3)
+    waehrend = plan_ablauf_view(seite, state, basis, plan)
+    assert "1 Planke" in _texte(waehrend)
+    _knopf(waehrend, "Fertig")
+    _knopf(waehrend, "Überspringen")
+    await _sekunden(uhr, gurt, e, 30)
+    pause = plan_ablauf_view(seite, state, basis, plan)
+    assert "Pause" in _texte(pause)
+    _knopf(pause, "Weiter mit Kniebeuge").on_click()
+    await _sekunden(uhr, gurt, e, 1)
+    kniebeuge = plan_ablauf_view(seite, state, basis, plan)
+    _knopf(kniebeuge, "Gemacht").on_click()
+    await _sekunden(uhr, gurt, e, 1)
+    danach = plan_ablauf_view(seite, state, basis, plan)
+    texte = _texte(danach)
+    assert any("im Tagebuch" in t for t in texte)  # Planke eingetragen
+    assert any("gemacht · im Tagebuch" in t for t in texte)  # Kniebeuge abgehakt
+    e.beenden()
+    await _bis_einheit_weg(state)
+
+
+def test_plan_editor_timer_fuer_alle_und_weiter(umgebung) -> None:
+    ft = pytest.importorskip("flet")
+    from trainingsapp.ui.views.plan_ablauf import plan_timer_karte
+
+    state, _, _, _ = umgebung
+    plan = _plan(state)
+    karte = plan_timer_karte(Seite(), state, plan)
+    auswahl = next(x for x in _alle(karte) if isinstance(x, ft.Dropdown))
+    vorlage = state.timer_profile()[0]
+    auswahl.value = vorlage.id
+    auswahl.on_select(type("E", (), {"control": auswahl})())
+    weiter = next(x for x in _alle(karte) if isinstance(x, ft.SegmentedButton))
+    weiter.selected = ["auto"]
+    weiter.on_change(type("E", (), {"control": weiter})())
+    gespeichert = state.plaene.laden(plan.id)
+    assert gespeichert is not None and gespeichert.weiter_automatisch
+    assert gespeichert.timer is not None and gespeichert.timer["name"] == vorlage.name
+
+
+def test_timer_ueber_dem_plan_bietet_den_ablauf_an(umgebung) -> None:
+    pytest.importorskip("flet")
+    from trainingsapp.ui.views.timer import timer_view
+
+    state, _, _, _ = umgebung
+    plan = _plan(state)
+    ansicht = timer_view(Seite(), state, f"/plan/{plan.id}")
+    assert "Ablauf öffnen" in [getattr(x, "content", None) for x in _alle(ansicht)]

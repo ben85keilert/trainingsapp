@@ -77,6 +77,7 @@ from trainingsapp.ui.views.pakete import (
 )
 from trainingsapp.ui.views.papierkorb import archiv_view, papierkorb_view
 from trainingsapp.ui.views.plan import einzel_plan, plan_view
+from trainingsapp.ui.views.plan_ablauf import plan_ablauf_view
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
 from trainingsapp.ui.views.plan_info import plan_info_view
@@ -449,6 +450,10 @@ def main(page: ft.Page) -> None:
                     page.views.append(timer_bearbeiten_view(page, state, profil_id, basis))
                 elif teile[i + 1 : i + 2] == ["signale"]:
                     page.views.append(timer_signale_view(page, state, basis))
+                elif teile[i + 1 : i + 2] == ["ablauf"] and teile[:1] == ["plan"] and i == 2:
+                    # Der Plan als Ablauf — aus dem Timer des Plans (Ben, 17.10.2026)
+                    if (plan := state.plaene.laden(teile[1])) is not None:
+                        page.views.append(plan_ablauf_view(page, state, basis, plan))
         else:
             stapel(teile)
         # Start- bzw. Laufleiste einer Einheit unter der Titelleiste der obersten Ansicht

@@ -504,6 +504,8 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             ),
         ],
     )
+    if (plan_karte := _plan_ablauf_karte(page, state, basis)) is not None:
+        inhalt.controls.insert(0, plan_karte)
     anzeigen()
     state.timer_beobachter["ansicht"] = auffrischen
     return ft.View(
@@ -532,6 +534,28 @@ SIGNAL_SCHALTER: list[tuple[str, str, str]] = [
         "nachträglich umbenennen, verschieben oder löschen wie jede Notiz.",
     ),
 ]
+
+
+def _plan_ablauf_karte(page: Any, state: AppState, basis: str) -> ft.Control | None:
+    """Über einem Plan: den Plan als Ablauf — jede Übung mit ihrem Timer (Skizze 8)."""
+    teile = [t for t in basis.split("/") if t]
+    if teile[:1] != ["plan"] or len(teile) != 2:
+        return None
+    plan = state.plaene.laden(teile[1])
+    if plan is None or not plan.items:
+        return None
+
+    async def oeffnen() -> None:
+        await page.push_route(f"{timer_route(basis)}/ablauf")
+
+    return karte(
+        kartentitel(f"Plan „{plan.name}“"),
+        hinweis(
+            "Als Ablauf: jede Übung mit ihrem Timer, nacheinander — eingetragen wird je "
+            "Übung, sobald sie endet."
+        ),
+        ft.FilledTonalButton("Ablauf öffnen", icon=ft.Icons.PLAYLIST_PLAY, on_click=oeffnen),
+    )
 
 
 def _signale_vermerk(state: AppState, oeffnen: Callable[[], object]) -> ft.Control:

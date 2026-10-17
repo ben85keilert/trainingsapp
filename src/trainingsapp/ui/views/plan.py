@@ -98,6 +98,7 @@ from trainingsapp.ui.components.layout import ohne_auto_update, sicher
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.werte import wert_leiste
 from trainingsapp.ui.state import AUFKLAPPEN, PLAN_DARSTELLUNGEN, UMSCHALTEN, AppState
+from trainingsapp.ui.views.plan_ablauf import plan_timer_karte
 from trainingsapp.ui.views.timer import timer_knopf
 from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 
@@ -603,20 +604,19 @@ def plan_view(
         if uebung.id in mehrfach:
             teile.append(f"{stelle[item.id]}. Mal im Plan")
         # Die Uhr neben dem i (Ben, 17.10.2026): der Timer dieser Übung — an der
-        # Planübung, am Plan oder an der Übung; ohne einen legt die Uhr einen fest
-        uhr: list[ft.Control] = []
-        if not bearbeiten:
-            mit_plan = None if einzel else plan
-            profil = timer_fuer(uebung, mit_plan, None if einzel else item)
-            if profil is not None:
-                teile.append(f"Timer: {profil.name}")
-            uhr.append(
-                ft.IconButton(
-                    ft.Icons.TIMER if profil is not None else ft.Icons.TIMER_OUTLINED,
-                    tooltip="Timer dieser Übung" if profil is not None else "Timer festlegen",
-                    on_click=oeffner(uebung_timer_route(route, uebung, None if einzel else item)),
-                )
+        # Planübung, am Plan oder an der Übung; ohne einen legt die Uhr einen fest. Auch
+        # beim Bearbeiten: dort wählt man den Timer der Planübung (Skizze 7).
+        mit_plan = None if einzel else plan
+        profil = timer_fuer(uebung, mit_plan, None if einzel else item)
+        if profil is not None:
+            teile.append(f"Timer: {profil.name}")
+        uhr: list[ft.Control] = [
+            ft.IconButton(
+                ft.Icons.TIMER if profil is not None else ft.Icons.TIMER_OUTLINED,
+                tooltip="Timer dieser Übung" if profil is not None else "Timer festlegen",
+                on_click=oeffner(uebung_timer_route(route, uebung, None if einzel else item)),
             )
+        ]
         untertitel = "  ·  ".join(t for t in teile if t)
         # Beim Bearbeiten zieht man am Griff (statt am ganzen Block, der Knöpfe trägt)
         griff: list[ft.Control] = (
@@ -1246,6 +1246,7 @@ def plan_view(
                 size=12,
                 opacity=0.7,
             ),
+            plan_timer_karte(page, state, plan),
             ft.Text(
                 "„Einstellen“ legt Ziel und Eingabe je Übung fest. Reihenfolge: am Griff ziehen "
                 "oder mit den Pfeilen. Eine Übung darf mehrmals im Plan stehen.",

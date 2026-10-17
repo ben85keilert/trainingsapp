@@ -245,3 +245,28 @@ async def test_editor_im_plan_speichert_eine_kopie_der_planuebung(umgebung) -> N
     assert wahl.eigen is not None and wahl.eigen.name == "Halten im Plan"
     katalog = state.uebungen.laden(uebung.id)
     assert katalog is not None and profile_der_uebung(katalog)[0].name == "Halten 3 × 10 s"
+
+
+async def test_timer_aus_der_regel_laesst_sich_bearbeiten(umgebung) -> None:
+    """Der Einzeltimer aus der Timer-Regel (Paket „Standard“) hat eine ID ohne Schrägstrich
+    — sonst zerbräche die Route des Editors, und er legte ein neues Profil an."""
+    from trainingsapp.ui.views.timer import timer_bearbeiten_view
+    from trainingsapp.ui.views.uebung_timer import uebung_profilziel
+
+    state, _, _ = umgebung
+    uebung = Exercise(
+        name="Kohärenzatmung", limit_spec={"rules": [{"type": "timer", "seconds": 300}]}
+    )
+    state.uebungen.speichern(uebung)
+    (regel,) = profile_der_uebung(uebung)
+    assert "/" not in regel.id
+    basis = f"/uebung/{uebung.id}"
+    ansicht = timer_bearbeiten_view(
+        Seite(), state, regel.id, basis, uebung_profilziel(state, basis, uebung)
+    )
+    assert ansicht.appbar.title.value == "Timer der Übung"
+    assert ansicht.route.endswith(f"/bearbeiten/{regel.id}")
+    await _knopf(ansicht, "Speichern").on_click()
+    gespeichert = state.uebungen.laden(uebung.id)
+    assert gespeichert is not None
+    assert [p.id for p in profile_der_uebung(gespeichert)] == [regel.id]

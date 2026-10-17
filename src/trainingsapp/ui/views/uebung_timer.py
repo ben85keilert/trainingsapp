@@ -86,7 +86,13 @@ def uebung_profilziel(
             state.plaene.timer_setzen(item.id, item.timer)
 
         return Profilziel(
-            profile, in_planuebung, None, zurueck, f"{zurueck}/bearbeiten", "Timer der Planübung"
+            profile,
+            in_planuebung,
+            None,
+            zurueck,
+            f"{zurueck}/bearbeiten",
+            "Timer der Planübung",
+            "Neuer Timer der Planübung",
         )
 
     def in_uebung(neu: TimerProfil) -> None:
@@ -104,7 +110,13 @@ def uebung_profilziel(
         state.uebung_timer.setdefault(uebung.id, {}).pop("profil", None)
 
     return Profilziel(
-        profile, in_uebung, aus_uebung, zurueck, f"{zurueck}/bearbeiten", "Timer der Übung"
+        profile,
+        in_uebung,
+        aus_uebung,
+        zurueck,
+        f"{zurueck}/bearbeiten",
+        "Timer der Übung",
+        "Neuer Timer der Übung",
     )
 
 

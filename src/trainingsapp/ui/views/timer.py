@@ -846,6 +846,7 @@ class Profilziel:
     #: Route des Editors ohne Profil-ID (``…/bearbeiten``)
     route: str
     titel: str = "Timer-Profil"
+    titel_neu: str = "Neues Timer-Profil"
 
 
 def bibliothek(state: AppState, basis: str) -> Profilziel:
@@ -1166,7 +1167,7 @@ def timer_bearbeiten_view(
                 title=ft.Text("Profil löschen?"),
                 content=ft.Text(
                     "Gibt es danach kein eigenes Profil mehr, kommen die zwei Vorlagen zurück."
-                    if ziel.loeschen is not None and ziel.titel == "Timer-Profil"
+                    if ziel.titel == "Timer-Profil"
                     else "Das Profil verschwindet aus dieser Übung."
                 ),
                 actions=[
@@ -1186,7 +1187,7 @@ def timer_bearbeiten_view(
     ansicht = ft.View(
         route=route,
         appbar=ft.AppBar(
-            title=ft.Text(ziel.titel if vorhanden else f"Neues {ziel.titel}"),
+            title=ft.Text(ziel.titel if vorhanden else ziel.titel_neu),
             actions=[
                 ft.IconButton(
                     ft.Icons.DELETE_OUTLINE, tooltip="Profil löschen", on_click=loeschen_fragen

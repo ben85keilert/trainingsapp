@@ -31,18 +31,22 @@ def profile_der_uebung(uebung: Exercise) -> list[TimerProfil]:
     >>> regel = {"rules": [{"type": "timer", "seconds": 300}]}
     >>> u = Exercise(id="u1", name="4-7-8-Atmung", limit_spec=regel)
     >>> [(p.id, p.name, p.kurztext()) for p in profile_der_uebung(u)]
-    [('u1/regel', '4-7-8-Atmung', '5:00 4-7-8-Atmung')]
+    [('u1-regel', '4-7-8-Atmung', '5:00 4-7-8-Atmung')]
     >>> profile_der_uebung(Exercise(name="Kniebeuge"))
     []
+
+    IDs stehen in Routen (``…/bearbeiten/<Profil>``) — ein Schrägstrich wird ein Strich.
     """
     profile = [p for d in uebung.timer if (p := TimerProfil.aus_dict(d)) is not None]
+    for p in profile:
+        p.id = p.id.replace("/", "-")
     if profile:
         return profile
     sekunden = _regel_sekunden(uebung.limit_spec)
     if not sekunden:
         return []
     name = uebung.name or "Timer"
-    return [TimerProfil(id=f"{uebung.id}/regel", name=name, abschnitte=[Abschnitt(name, sekunden)])]
+    return [TimerProfil(id=f"{uebung.id}-regel", name=name, abschnitte=[Abschnitt(name, sekunden)])]
 
 
 def _regel_sekunden(limit_spec: Any) -> int:

@@ -113,6 +113,25 @@ class Empfaenger(GpsQuelle):
         )
 
 
+class Ablage:
+    """Eine Streckenablage im Speicher — merkt sich Anlegen, Ortungen und Schließen."""
+
+    def __init__(self) -> None:
+        self.start_utc: datetime | None = None
+        self.punkte: list[Punkt] = []
+        self.behalten: bool | None = None
+
+    def anlegen(self, start_utc: datetime) -> str:
+        self.start_utc = start_utc
+        return f"strecke_{start_utc:%Y-%m-%d_%H%M%S}.jsonl"
+
+    def schreiben(self, punkt: Punkt) -> None:
+        self.punkte.append(punkt)
+
+    def schliessen(self, behalten: bool) -> None:
+        self.behalten = behalten
+
+
 async def ruhe() -> None:
     """Den anderen Tasks (Messlauf, GPS-Empfang) einen Durchgang lassen."""
     for _ in range(3):

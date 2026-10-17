@@ -645,8 +645,12 @@ class Einheitslauf:
         abschluss = Abschluss()
         for teil in self.teile:
             fertig = getattr(teil, "abschliessen_async", None)
-            if fertig is not None and id(teil) in self._gestartet:
-                abschluss.teile[teil.art] = await fertig(self.stoppt_am_ende(teil.art))
+            if fertig is None:
+                continue
+            # Auch ein Teil, der im Countdown nie startete, gibt frei, was er hält (GPS)
+            ergebnis = await fertig(self.stoppt_am_ende(teil.art))
+            if id(teil) in self._gestartet:
+                abschluss.teile[teil.art] = ergebnis
         hrv = self.hrv
         if hrv is not None and self.stoppt_am_ende("hrv"):
             abschluss.hrv = hrv.abschliessen()

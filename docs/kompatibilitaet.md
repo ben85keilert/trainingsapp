@@ -318,6 +318,41 @@ steht hinter `text` die Liste ihrer **Kurzcodes**:
   (`events_widget._on_save` kopiert das ganze Ereignis) — der Vertrag bleibt
   unverletzt.
 
+### Unsere Erweiterung: `marke` im Ereignis (seit 17.10.2026)
+
+Setzt nicht die Person eine Notiz, sondern ein Ablauf der App (Timer, Plan-Ablauf,
+GPS-Training), sagt `marke` maschinenlesbar, **wer** sie setzte und **was** sie
+bedeutet (Ben, 17.10.2026: „typisiert“ — für spätere Auswertungen, z. B. DFA α1
+gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
+
+```json
+{ "beat_index": 731, "dt_s": 0.35, "t_wall_s": 631.42, "t_s": 612.0,
+  "wall_time": "10:42:11", "text": "Planke (Runde 2/3)", "uebungen": ["C3XN0PRT"],
+  "marke": { "quelle": "timer", "art": "abschnitt", "spur": "timer",
+             "einheit": "0193b6a2-…", "name": "Planke", "runde": 2, "von": 3,
+             "zaehlt": true } }
+```
+
+| Feld | Werte | Bedeutung |
+|---|---|---|
+| `quelle` | `einheit`, `timer`, `plan`, `gps` | wer die Marke setzte |
+| `art` | `start`, `ende`, `abschnitt`, `pause`, `weiter`, `uebung_start`, `uebung_ende`, `km` | was sie bedeutet |
+| `spur` | `timer`, `uebung`, `km` | die Abschnittsspur, die sie teilt (Abschnitt 9b) |
+| `einheit` | Text (UUID) | der gemeinsame Ablauf in der App, dessen Zeitleiste die Marke kommt (`docs/plan_einheit.md`) |
+| `name` | Text | Abschnittsname ohne Zusatz („Belastung“, „Planke“) |
+| `runde`, `von` | Zahl | Runde r von n |
+| `zaehlt` | Ja/Nein | der Abschnitt zählt als Übungszeit (im Timer einstellbar) |
+
+- Nur diese Felder, nur Zahl, Text oder Ja/Nein — `hrv_core.ereignisse.marke_bereinigen`
+  wirft alles andere weg. **Nie ein Ort** (Abschnitt 0 in `docs/plan_gps.md`): eine
+  km-Marke trägt den Kilometer, keine Koordinate.
+- Was die Person selbst notiert, hat **keine** Marke. Wer eine automatische Notiz
+  bearbeitet (Text, Stelle), behält die Marke; löschen löscht sie mit.
+- Abschnitte unter 5 s bekommen keine Marke (versehentliches „Weiter“).
+- **praxis_gui** liest das Feld nicht und behält es beim Bearbeiten wie `uebungen`.
+- Keine neue Schema-Version: ein zusätzliches, optionales Feld wie `uebungen`; ältere
+  Leser übergehen es.
+
 ---
 
 ## 5. Geräteprofile
@@ -554,6 +589,13 @@ Felder, die praxis_gui selbst dafür nutzt (`hrv_core/ausschnitte.py`):
   „Aus Notizen …" macht ausgewählte Notizen zu Grenzen und speichert die
   Abschnitte. Gleiche Grundnamen („Pause (Runde 2/8)" → „Pause") bekommen
   gleiche Farben.
+- **Spuren** (seit 17.10.2026): Laufen mehrere Abläufe zugleich — Timer,
+  Übungen eines Plan-Ablaufs, Kilometer —, bildet jeder seine Abschnitte für sich
+  (`ausschnitte.spuren_speichern`, ein Schreibvorgang für alle). Eine km-Grenze
+  teilt keinen Timer-Abschnitt; Abschnitte verschiedener Spuren **überlappen** sich
+  (praxis_gui führt Abschnitte als unabhängige Bereiche). Die Spur selbst steht
+  nicht im Sidecar — praxis_gui würde ein eigenes Feld beim Speichern verwerfen —,
+  sondern in der `marke` der Notiz, die den Abschnitt begann (Abschnitt 4).
 - Gibt es noch kein Sidecar, entsteht ein knappes (`schema`, `source_file`,
   `source_file_sha1`, die beiden Felder, `updated_utc`).
 - Achtung, umgekehrt: praxis_gui schreibt das Sidecar beim Speichern aus seiner

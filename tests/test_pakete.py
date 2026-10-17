@@ -227,6 +227,27 @@ def test_hoehere_version_aktualisiert_die_grundausstattung(con, tmp_path) -> Non
     assert pakete.laden(GRUNDAUSSTATTUNG).version == roh["paket"]["version"]
 
 
+def test_seed_laesst_neuere_installation_stehen(con) -> None:
+    """K6: „Standard“ kam in höherer Version aus einer Quelle — der Start ändert nichts.
+
+    Sonst setzte er Version und Beschreibung zurück, hielte, was nur die Quelle kennt, für
+    entfallen und holte zurück, was dort gestrichen ist; die Quelle spielte es wieder ein.
+    """
+    pakete = PaketRepo(con)
+    roh = tomllib.loads(SEED_DATEI.read_text(encoding="utf-8"))
+    roh["paket"]["version"] += 1
+    roh["paket"]["beschreibung"] = "Aus der Quelle"
+    roh["exercises"] = [e for e in roh["exercises"] if e["key"] != "wadenheben"]
+    roh["exercises"].append({"key": "nur_in_der_quelle", "name": "Nur in der Quelle"})
+    pakete.importieren(paket_lesen(roh))
+    assert [u.id for u in pakete.entfallene(GRUNDAUSSTATTUNG)] == [seed_id("wadenheben")]
+
+    assert seed_einspielen(con) == 0
+    paket = pakete.laden(GRUNDAUSSTATTUNG)
+    assert (paket.version, paket.beschreibung) == (roh["paket"]["version"], "Aus der Quelle")
+    assert [u.id for u in pakete.entfallene(GRUNDAUSSTATTUNG)] == [seed_id("wadenheben")]
+
+
 def test_seed_holt_endgueltig_geloeschte_nicht_zurueck(con) -> None:
     repo = ExerciseRepo(con)
     repo.in_papierkorb(seed_id("wadenheben"))

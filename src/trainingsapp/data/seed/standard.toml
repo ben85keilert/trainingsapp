@@ -11,9 +11,12 @@
 #                Nur a–z, 0–9 und _ (keine Umlaute).
 #   alles andere darf man ändern.
 #   Neue Übung   Block kopieren, neuen key vergeben — kommt beim nächsten Start dazu.
-#   Änderungen   an vorhandenen Übungen kommen erst an, wenn paket.version steigt;
-#                dann überschreiben sie, was jemand in der App daran geändert hat.
-#                Bis dahin bietet die App sie über „Auf Paketstand setzen“ an.
+#   Änderungen   an vorhandenen Übungen kommen erst an, wenn paket.version steigt —
+#                dann je Feld: Was jemand in der App geändert hat, bleibt
+#                (docs/uebungspakete.md, „Update lässt Geändertes stehen“).
+#   version      gleiche Version = gleicher Inhalt wie das veröffentlichte Paket.
+#                Hat ein Gerät „Standard“ schon in höherer Version (Paketquelle),
+#                lässt der Start es in Ruhe.
 #   Prüfen       uv run pytest tests/test_pakete.py
 #
 # Felder je Übung

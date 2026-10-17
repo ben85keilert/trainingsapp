@@ -102,6 +102,9 @@ zurück.
   `paket.version` in `standard.toml` steigt, aktualisiert der nächste Start alle
   seine Übungen — Änderungen der Nutzer bleiben dabei (je Feld). Fällt eine Übung aus
   der Datei, wird sie auch ohne Versionssprung als „nicht mehr im Paket“ markiert.
+  Ist „Standard“ schon in höherer Version installiert (aus einer Paketquelle oder
+  Datei), lässt der Start es ganz in Ruhe: keine Version zurück, keine Markierung
+  (K6, 17.10.2026).
 
 ## Export
 
@@ -315,8 +318,11 @@ icon_key = "directions_walk"
 description = "Hände an der Wand, ein Bein weit nach hinten. … Je Seite."
 ```
 
+- **`paket.version`:** Die Datei entspricht einem veröffentlichten Stand (Paketquelle):
+  gleiche Version, gleicher Inhalt. Wo „Standard“ schon in höherer Version installiert
+  ist, lässt der Start das Paket in Ruhe (K6) — Neues kommt dort über die Quelle.
 - **Neue Übung:** Block kopieren, neuen `key` vergeben — sie kommt beim nächsten
-  Start auf jedes Gerät, ohne Versionswechsel.
+  Start auf jedes Gerät, ohne Versionswechsel (außer dort ist „Standard“ schon neuer).
 - **Korrektur an einer vorhandenen Übung:** wirkt erst, wenn `paket.version`
   steigt — dann je Feld: unveränderte Felder bekommen die Korrektur, selbst
   geänderte bleiben („Auf Paketstand setzen“ holt die Korrektur ganz).

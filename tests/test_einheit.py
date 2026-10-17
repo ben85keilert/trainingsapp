@@ -255,6 +255,7 @@ def test_training_findet_seine_aufnahme_ueber_die_einheit(repo) -> None:
     aufnahme = HrvRecording(subject_id=profil, file_path=datei, started_at=T0)
     HrvRepo(r.con).anlegen(aufnahme)
     assert strecken.zur_hrv(aufnahme.id).id == training.id
+    assert HrvRepo(r.con).zur_datei(datei).id == aufnahme.id
     andere = HrvRecording(subject_id=profil, file_path="PolarH10/andere.json", started_at=T0)
     HrvRepo(r.con).anlegen(andere)
     assert strecken.zur_hrv(andere.id) is None

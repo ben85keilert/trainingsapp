@@ -11,6 +11,9 @@ was die Architekturregel ``devices`` verbietet (Datenbank, Dateiablage):
   schon vorher lief und weiterläuft.
 - `verwaiste_uebernehmen` — eine liegengebliebene Streckendatei nachtragen, samt
   ihrer Einheit (H16): Messung und Strecke finden einander wieder.
+- `hrv_bezug` — die HRV-Aufnahme eines Trainings für die Auswertung: direkt verknüpft
+  oder über die Einheit, und wie ihre Zeit zu den Ortungen steht (Versätze statt
+  Startzeiten).
 
 **GPS-Daten werden nie geteilt** (`docs/plan_gps.md` §0): Tagebuch, Zeitleiste und
 Benachrichtigung bleiben ortsfrei; die Ortungen gehen nur in die Datei.
@@ -19,13 +22,14 @@ Benachrichtigung bleiben ortsfrei; die Ortungen gehen nur in die Datei.
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from trainingsapp.config import streckenverzeichnis
+from trainingsapp.config import messungenverzeichnis, streckenverzeichnis
 from trainingsapp.core.laufend import uhr
-from trainingsapp.core.models import Exercise, Strecke, lokaler_tag
+from trainingsapp.core.models import Exercise, HrvRecording, Strecke, lokaler_tag
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
 from trainingsapp.core.strecke import (
     GEHEN,
@@ -265,9 +269,73 @@ def verwaiste_uebernehmen(state: Any, pfad: Path) -> Strecke | None:
     return strecke
 
 
+# ---------------------------------------------------------------------------
+# HRV eines Trainings — für die Auswertung
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class HrvBezug:
+    """Die HRV-Aufnahme eines Trainings und wie ihre Zeit zu den Ortungen steht."""
+
+    #: die Messdatei unter ``Messungen/`` — fehlt sie, läuft die Aufnahme noch
+    pfad: Path
+    #: die Zeile ``hrv_recording`` — erst, wenn die Aufnahme gespeichert ist
+    aufnahme: HrvRecording | None = None
+    #: Ortungszeit (``Punkt.t``) − Verschiebung = ``t_wall_s`` der Messdatei; ``None``:
+    #: über die Startzeiten (Trainings ohne Einheit, Versatz unbekannt)
+    verschiebung_s: float | None = None
+    #: ``t_wall_s`` der Messdatei beim Start des Trainings — ``None`` wie oben
+    beginn_s: float | None = None
+
+    def ortung_zu_wand(self, t: float, start_utc: datetime | None) -> float | None:
+        """Eine Ortungszeit als ``t_wall_s`` der Messdatei — über den Versatz der Einheit,
+        sonst über den Start der Aufnahme (ganze Sekunden).
+
+        >>> b = HrvBezug(Path("x.json"), verschiebung_s=1_000_000.0 - 734.0)
+        >>> b.ortung_zu_wand(1_000_010.0, None)
+        744.0
+        """
+        if self.verschiebung_s is not None:
+            return t - self.verschiebung_s
+        if start_utc is not None:
+            return t - start_utc.timestamp()
+        return None
+
+
+def hrv_bezug(state: Any, strecke: Strecke) -> HrvBezug | None:
+    """Wo die HRV-Aufnahme eines Trainings liegt — ``None`` ohne HRV.
+
+    Direkt verknüpft (``hrv_recording_id``: die Aufnahme endete mit dem Training) oder
+    über die Einheit (Migration 019: Sie lief schon vorher oder läuft weiter; nach einem
+    Absturz kam sie aus dem Backup). Kennt die Einheit beide Versätze, legt sie
+    Ortungen und Herzschläge aufeinander (Vertrag ``docs/plan_einheit.md`` §3).
+    """
+    teile: list[Any] = []
+    if strecke.einheit_id and getattr(state, "einheiten", None) is not None:
+        with contextlib.suppress(Exception):
+            teile = state.einheiten.beteiligungen(strecke.einheit_id)
+    hrv = next((b for b in teile if b.art == "hrv" and b.datei), None)
+    gps = next((b for b in teile if b.art == "gps"), None)
+    aufnahme = state.hrv.laden(strecke.hrv_recording_id) if strecke.hrv_recording_id else None
+    if aufnahme is None and hrv is not None:
+        aufnahme = state.hrv.zur_datei(hrv.datei)
+    datei = aufnahme.file_path if aufnahme is not None else hrv.datei if hrv is not None else ""
+    if not datei:
+        return None
+    verschiebung = beginn = None
+    if hrv is not None and hrv.datei == datei and hrv.versatz_s is not None:
+        beginn = -hrv.versatz_s
+        if gps is not None and gps.versatz_s is not None:
+            verschiebung = hrv.versatz_s - gps.versatz_s
+    return HrvBezug(messungenverzeichnis() / datei, aufnahme, verschiebung, beginn)
+
+
 __all__ = [
+    "HrvBezug",
     "Streckendatei",
     "einheit_eintragen",
+    "hrv_bezug",
     "lauftext",
     "training_eintragen",
     "uebung_fuer",

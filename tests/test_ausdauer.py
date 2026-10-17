@@ -161,12 +161,15 @@ def daten(tmp_path, monkeypatch):
     state.schliessen()
 
 
-async def _training(state, tmp_path, sportart: str = GEHEN, zwischendurch=None, *, hrv_vorher=0):
+async def _training(
+    state, tmp_path, sportart: str = GEHEN, zwischendurch=None, *, hrv_vorher=0, vor_dem_stopp=None
+):
     """Ein Training wie in der App — als Einheit (Startleiste, „Training starten“), auf
     einer Uhr-Attrappe: Gurt und GPS ticken im Takt, ohne zu warten.
 
     ``hrv_vorher``: so viele Sekunden lief die HRV-Aufnahme schon vor dem Training (sie
-    läuft dann danach weiter). Gibt die Strecke und die gezählten Ortungen zurück.
+    läuft dann danach weiter, bis nach ``vor_dem_stopp(strecke)``). Gibt die Strecke und
+    die gezählten Ortungen zurück.
     """
     from attrappen import Empfaenger, Gurt, Seite, Uhr, ruhe
     from trainingsapp.devices.messlauf import Messlauf
@@ -208,6 +211,8 @@ async def _training(state, tmp_path, sportart: str = GEHEN, zwischendurch=None, 
         await asyncio.sleep(0.02)
     assert strecke is not None, e.warnung
     assert state.ausdauer is None and teil.fertig and not gps.laeuft
+    if vor_dem_stopp is not None:
+        vor_dem_stopp(strecke)
     if messlauf.aufnahme is not None and hrv_vorher:
         from trainingsapp.config import datenverzeichnis
         from trainingsapp.ui.views.messung import aufnahme_eintragen
@@ -389,8 +394,18 @@ async def test_laufende_hrv_bekommt_marken_und_laeuft_weiter(daten) -> None:
         async def spielen(self, name: str) -> None:
             toene.append(name)
 
+    from attrappen import UTC0
+    from trainingsapp.ui.training import hrv_bezug
+    from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, strecken_zeilen
+
+    gesehen: dict[str, list[str]] = {}
+
+    def waehrend_hrv_laeuft(strecke) -> None:
+        gesehen["detail"] = _texte(ausdauer_detail_view(_seite(), state, strecke))
+
     state.ton, state.toene_geladen = Ton(), True
-    strecke, _ = await _training(state, tmp_path, hrv_vorher=60)
+    strecke, _ = await _training(state, tmp_path, hrv_vorher=60, vor_dem_stopp=waehrend_hrv_laeuft)
+    assert any("läuft noch" in t for t in gesehen["detail"])
     assert strecke.hrv_recording_id is None and strecke.einheit_id is not None
     (aufnahme,) = state.hrv.alle(state.profil.id)
     assert state.strecken.zur_hrv(aufnahme.id).id == strecke.id
@@ -399,6 +414,26 @@ async def test_laufende_hrv_bekommt_marken_und_laeuft_weiter(daten) -> None:
     assert km[:2] == ["km 1", "km 2"] and len(km) == round(strecke.distanz_m) // 1000
     assert rec.dauer_s > 1200  # 60 s davor und 1170 s Training (RR) — eine Aufnahme
     assert toene == ["wechsel"] * len(km)
+    # Die Auswertung findet die Aufnahme über die Einheit und legt Ortungen und Schläge
+    # über die Versätze aufeinander: genau, obwohl die Empfängeruhr 2,5 s falsch geht
+    bezug = hrv_bezug(state, strecke)
+    assert bezug is not None and bezug.aufnahme is not None and bezug.aufnahme.id == aufnahme.id
+    assert bezug.beginn_s == pytest.approx(60.0, abs=1e-6)
+    assert bezug.verschiebung_s == pytest.approx(UTC0.timestamp() + 2.5, abs=1e-6)
+    import flet as ft
+
+    ansicht = ausdauer_detail_view(_seite(), state, strecke)
+    tabelle = [
+        [c.value for c in r.controls]
+        for r in _alle(ansicht)
+        if isinstance(r, ft.Row) and len(r.controls) == 6 and isinstance(r.controls[0], ft.Text)
+    ]
+    assert tabelle[0][3] == "Ø HF" and tabelle[1][3] not in ("–", "")  # HF je km
+    assert any(
+        isinstance(c, ft.FilledTonalButton) and c.content == "HRV-Auswertung öffnen"
+        for c in _alle(ansicht)
+    )
+    assert any("mit HRV" in t for t in _texte(ft.Column(strecken_zeilen(_seite(), state))))
 
 
 async def test_laufband_ohne_gps_traegt_die_zeit_ein(daten) -> None:

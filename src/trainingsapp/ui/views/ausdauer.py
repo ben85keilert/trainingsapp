@@ -55,7 +55,7 @@ from hrv_core.ppi import schlagzeiten
 from hrv_core.recording import Recording, laden
 from hrv_core.trends import aktuell, reihe
 
-from trainingsapp.config import messungenverzeichnis, streckenverzeichnis
+from trainingsapp.config import streckenverzeichnis
 from trainingsapp.core.hrv_training import (
     dfa_verlauf,
     hf_je_zeit,
@@ -89,7 +89,7 @@ from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.training import lauftext, verwaiste_uebernehmen
+from trainingsapp.ui.training import HrvBezug, hrv_bezug, lauftext, verwaiste_uebernehmen
 
 #: Live-DFA α1 so oft neu rechnen (s)
 DFA_ALLE_S = 5.0
@@ -706,16 +706,12 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
 # ---------------------------------------------------------------------------
 
 
-def _hrv_laden(state: AppState, strecke: Strecke) -> tuple[Recording, Korrigiert] | None:
-    """Die HRV-Aufnahme des Trainings, korrigiert wie in ihrer Auswertung (Sidecar, Regeln)."""
-    if not strecke.hrv_recording_id:
+def _hrv_laden(state: AppState, bezug: HrvBezug | None) -> tuple[Recording, Korrigiert] | None:
+    """Die HRV-Aufnahme des Trainings, korrigiert wie in ihrer Auswertung (Sidecar, Regeln) —
+    direkt verknüpft oder über die Einheit (`ui.training.hrv_bezug`)."""
+    if bezug is None or not bezug.pfad.exists():
         return None
-    eintrag = state.hrv.laden(strecke.hrv_recording_id)
-    if eintrag is None:
-        return None
-    pfad = messungenverzeichnis() / eintrag.file_path
-    if not pfad.exists():
-        return None
+    pfad = bezug.pfad
     rec = laden(pfad)
     regeln = analyse_regeln(pfad) or state.korrekturregeln()
     basis = analysebasis(rec, regeln)
@@ -730,11 +726,20 @@ def _hrv_laden(state: AppState, strecke: Strecke) -> tuple[Recording, Korrigiert
     return basis.rec, anwenden(basis.rec, korrekturen)
 
 
+def _zu_wand(bezug: HrvBezug | None, rec: Recording, t: float) -> float | None:
+    """Ortungszeit → ``t_wall_s`` der Messdatei: über die Versätze der Einheit, sonst
+    über den Start der Aufnahme (ältere Trainings)."""
+    if bezug is not None:
+        return bezug.ortung_zu_wand(t, rec.start_utc)
+    return t - rec.start_utc.timestamp() if rec.start_utc else None
+
+
 def _km_tabelle(
     strecke: Strecke,
     splits: Sequence[Split],
     hrv: tuple[Recording, Korrigiert] | None,
     ekg: bool,
+    bezug: HrvBezug | None = None,
 ) -> ft.Control:
     kopf = ["km", "Zeit", "Tempo", "Ø HF", "DFA α1", "Höhe"]
     zeilen = [kopf]
@@ -745,9 +750,9 @@ def _km_tabelle(
         hf = alpha = None
         if hrv is not None:
             rec, korr = hrv
-            start = rec.start_utc.timestamp() if rec.start_utc else None
-            if start is not None:
-                w = werte_zwischen(rec, korr, sp.t_start - start, sp.t_ende - start, dfa=ekg)
+            von, bis = _zu_wand(bezug, rec, sp.t_start), _zu_wand(bezug, rec, sp.t_ende)
+            if von is not None and bis is not None:
+                w = werte_zwischen(rec, korr, von, bis, dfa=ekg)
                 hf, alpha = w["mean_bpm"], w["dfa_alpha1"]
         zeilen.append(
             [
@@ -781,8 +786,13 @@ def _km_tabelle(
     )
 
 
-def _dfa_teil(hrv: tuple[Recording, Korrigiert], start_utc: datetime) -> ft.Control | None:
-    """DFA-α1-Überblick: Verlauf, Zeit je Wertebereich — beschreibend, ohne Empfehlung."""
+def _dfa_teil(
+    hrv: tuple[Recording, Korrigiert], start_utc: datetime, beginn_s: float | None = None
+) -> ft.Control | None:
+    """DFA-α1-Überblick: Verlauf, Zeit je Wertebereich — beschreibend, ohne Empfehlung.
+
+    ``beginn_s``: ``t_wall_s`` der Messdatei beim Start des Trainings (Einheit); sonst
+    aus den Startzeiten."""
     rec, korr = hrv
     achse = schlagzeiten(rec)
     zeiten = korr_zeiten(korr, achse)
@@ -791,7 +801,10 @@ def _dfa_teil(hrv: tuple[Recording, Korrigiert], start_utc: datetime) -> ft.Cont
     punkte = dfa_verlauf(t, rr, naht, korrigiert)
     if not punkte or all(w is None for _, w, _ in punkte):
         return None
-    versatz = (start_utc - rec.start_utc).total_seconds() if rec.start_utc else 0.0
+    if beginn_s is not None:
+        versatz = beginn_s
+    else:
+        versatz = (start_utc - rec.start_utc).total_seconds() if rec.start_utc else 0.0
     linien: list[list[tuple[float, float]]] = [[]]
     for te, wert, _ in punkte:
         if wert is None:
@@ -840,8 +853,9 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         if pfad.exists():
             punkte = jsonl_lesen(pfad)
     r = rechnen(punkte, strecke.sportart) if punkte else None
-    hrv = _hrv_laden(state, strecke)
-    eintrag = state.hrv.laden(strecke.hrv_recording_id) if strecke.hrv_recording_id else None
+    bezug = hrv_bezug(state, strecke)
+    hrv = _hrv_laden(state, bezug)
+    eintrag = bezug.aufnahme if bezug is not None else None
     ekg = bool(eintrag and eintrag.intervall_quelle == "ekg_rr")
     lokal = strecke.started_at.astimezone()
 
@@ -849,10 +863,10 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         if not punkte:
             return
         herz: dict[float, int] = {}
-        if hrv is not None and hrv[0].start_utc is not None:
-            start = hrv[0].start_utc.timestamp()
-            je_wand = hf_je_zeit(hrv[0], [p.t - start for p in punkte])
-            herz = {p.t: bpm for p in punkte if (bpm := je_wand.get(p.t - start)) is not None}
+        if hrv is not None:
+            wand = {p.t: w for p in punkte if (w := _zu_wand(bezug, hrv[0], p.t)) is not None}
+            je_wand = hf_je_zeit(hrv[0], list(wand.values()))
+            herz = {t: bpm for t, w in wand.items() if (bpm := je_wand.get(w)) is not None}
         daten = gpx(
             punkte,
             name=f"{SPORT_NAMEN[strecke.sportart]} {lokal:%d.%m.%Y %H:%M}",
@@ -886,7 +900,8 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         )
 
     async def hrv_oeffnen() -> None:
-        await page.push_route(f"/messung/{strecke.hrv_recording_id}")
+        if eintrag is not None:
+            await page.push_route(f"/messung/{eintrag.id}")
 
     # Zwei feste Zeilen — Kacheln mit expand in einer umbrechenden Zeile zeigt Flet
     # nur als grauen Fehlerkasten
@@ -936,11 +951,11 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         teile.append(
             karte(
                 titel("Je Kilometer" if strecke.sportart != RAD else "Je 5 Kilometer"),
-                _km_tabelle(strecke, r.splits_mit_rest(), hrv, ekg),
+                _km_tabelle(strecke, r.splits_mit_rest(), hrv, ekg, bezug),
             )
         )
     if hrv is not None and ekg:
-        dfa = _dfa_teil(hrv, strecke.started_at)
+        dfa = _dfa_teil(hrv, strecke.started_at, bezug.beginn_s if bezug else None)
         if dfa is not None:
             teile.append(karte(titel("DFA α1 — Überblick"), dfa))
     if eintrag is not None:  # nicht nur die ID — die Aufnahme kann gelöscht sein
@@ -950,6 +965,17 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
                 hinweis("Die Herzfrequenz-Aufnahme dieses Trainings, mit Abschnitten je km."),
                 ft.FilledTonalButton(
                     "HRV-Auswertung öffnen", icon=ft.Icons.MONITOR_HEART, on_click=hrv_oeffnen
+                ),
+            )
+        )
+    elif bezug is not None and not bezug.pfad.exists():
+        # Die HRV-Messung lief schon vor dem Training und läuft noch (eine Einheit)
+        teile.append(
+            karte(
+                titel("HRV"),
+                hinweis(
+                    "Die HRV-Messung läuft noch. Herzfrequenz und DFA α1 je Kilometer "
+                    "erscheinen hier, sobald sie gespeichert ist."
                 ),
             )
         )
@@ -1033,12 +1059,15 @@ def strecken_zeilen(page: ft.Page, state: AppState) -> list[ft.Control]:
         if s.file_path:
             teile.append(km_text(s.distanz_m))
         teile.append(zeit_text(s.dauer_s))
+        mit_hrv = bool(s.hrv_recording_id) or (
+            bool(s.einheit_id) and hrv_bezug(state, s) is not None
+        )
         zeilen.append(
             ft.ListTile(
                 leading=ft.Icon(SPORT_SYMBOLE.get(s.sportart, ft.Icons.DIRECTIONS_RUN)),
                 title=ft.Text(" · ".join(teile)),
                 subtitle=ft.Text(
-                    f"{lokal:%d.%m.%Y  %H:%M}" + ("  ·  mit HRV" if s.hrv_recording_id else ""),
+                    f"{lokal:%d.%m.%Y  %H:%M}" + ("  ·  mit HRV" if mit_hrv else ""),
                     size=12,
                 ),
                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),

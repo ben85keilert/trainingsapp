@@ -1665,6 +1665,16 @@ class HrvRepo:
         ).fetchone()
         return self._zeile(r) if r else None
 
+    def zur_datei(self, file_path: str) -> HrvRecording | None:
+        """Die Zeile zu einer Messdatei (relativ zu ``Messungen/``) — etwa für die
+        Beteiligung einer Einheit, die nur den Dateinamen kennt."""
+        r = self.con.execute(
+            "SELECT * FROM hrv_recording WHERE file_path = ? AND deleted_at IS NULL "
+            "ORDER BY started_at DESC LIMIT 1",
+            (file_path,),
+        ).fetchone()
+        return self._zeile(r) if r else None
+
     def dateipfade(self) -> set[str]:
         """``file_path`` aller Zeilen, auch gelöschter — Abgleich mit dem Messungsordner."""
         return {r["file_path"] for r in self.con.execute("SELECT file_path FROM hrv_recording")}

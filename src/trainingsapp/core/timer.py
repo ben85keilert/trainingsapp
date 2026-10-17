@@ -18,6 +18,14 @@ trägt den Zeitpunkt, zu dem der Abschnitt wirklich begann — auch wenn die
 Oberfläche ihn erst später abfragt. Die Notizen sind gewöhnliche Notizen:
 Nachträglich lassen sie sich umbenennen, verschieben und löschen.
 
+**Folgen** (Ben, 17.10.2026): Ein Profil kann aus mehreren **Teilen** bestehen, jeder mit
+eigenen Runden — Vorbereitung 1 ×, Halten und Pause 3 ×, Cooldown 1 ×. Der erste Teil
+sind ``abschnitte`` × ``runden`` wie bisher, weitere stehen in ``teile`` (`Teil`); ein
+Profil ohne weitere Teile ist genau das alte. Je Abschnitt sagt ``zaehlt``, ob seine
+Zeit als Übungszeit eingetragen wird — erst einmal zählt alles, die App rät nicht aus
+dem Namen. **Abbrechen** (`TimerLauf.abbrechen`) hält an und markiert den Lauf; ein
+Eintrag folgt daraus nicht.
+
 Wie sich der Timer meldet (Ton, Countdown, Vibration, Bildschirm an, Notizen,
 Lautstärke und Standardklang), steht in `TimerSignale` — gerätelokal, für alle
 Profile. **Welcher Klang** bei einem Wechsel spielt, bestimmt `klang_fuer`:
@@ -137,6 +145,42 @@ class Abschnitt:
     dauer_s: int
     #: Schlüssel aus `core.klang.KLAENGE`; leer = Standardklang der Signale
     klang: str = ""
+    #: Zählt seine Zeit als Übungszeit (Haltezeit, Zeit gesamt)? Vorgabe ja — die App
+    #: rät nicht aus dem Namen, umschalten geht je Abschnitt (Ben, 17.10.2026)
+    zaehlt: bool = True
+
+    def als_dict(self) -> dict[str, Any]:
+        """Klang und „zählt nicht“ nur, wenn gesetzt — ältere Profile bleiben gleich."""
+        d: dict[str, Any] = {"name": self.name, "dauer_s": self.dauer_s}
+        if self.klang:
+            d["klang"] = self.klang
+        if not self.zaehlt:
+            d["zaehlt"] = False
+        return d
+
+
+@dataclass
+class Teil:
+    """Ein Teil einer Folge: Abschnitte, ``runden``-mal hintereinander.
+
+    >>> Teil([Abschnitt("Halten", 60), Abschnitt("Pause", 30)], runden=3).gesamt_s()
+    270
+    """
+
+    abschnitte: list[Abschnitt] = field(default_factory=list)
+    runden: int = 1
+    #: „Vorbereitung“, „Training“, „Cooldown“ — leer: ohne Namen
+    name: str = ""
+
+    def gesamt_s(self) -> int:
+        return sum(a.dauer_s for a in self.abschnitte) * max(self.runden, 1)
+
+    def kurztext(self) -> str:
+        """„3 × (1:00 Halten · 0:30 Pause)“ — für die Zeile einer Folge."""
+        teile = " · ".join(f"{dauer_text(a.dauer_s)} {a.name}".strip() for a in self.abschnitte)
+        if self.runden > 1:
+            teile = f"{self.runden} × ({teile})"
+        return f"{self.name}: {teile}" if self.name else teile
 
 
 @dataclass
@@ -149,26 +193,54 @@ class TimerProfil:
     (360, '6:00')
     >>> TimerProfil.aus_dict(p.als_dict()) == p
     True
+
+    Eine Folge: Vorbereitung, dann dreimal Halten und Pause, dann Cooldown.
+
+    >>> f = TimerProfil(name="Planke", abschnitte=[Abschnitt("Vorbereitung", 10, zaehlt=False)],
+    ...     teile=[Teil([Abschnitt("Halten", 60), Abschnitt("Pause", 30, zaehlt=False)], 3),
+    ...            Teil([Abschnitt("Cooldown", 60, zaehlt=False)])])
+    >>> f.gesamt_s(), len(f.alle_teile())
+    (340, 3)
+    >>> TimerProfil.aus_dict(f.als_dict()) == f
+    True
     """
 
     id: str = field(default_factory=new_id)
     name: str = "Timer"
+    #: der erste Teil — bei einem Profil ohne weitere Teile das ganze Profil
     abschnitte: list[Abschnitt] = field(default_factory=list)
     runden: int = 1
     #: Klang zu Beginn jeder weiteren Runde; leer = wie der erste Abschnitt
     runden_klang: str = ""
     #: Klang am Ende; leer = Fanfare
     ende_klang: str = ""
+    #: Name des ersten Teils, wenn weitere folgen („Vorbereitung“)
+    teil_name: str = ""
+    #: weitere Teile nach dem ersten — eine Folge (Ben, 17.10.2026)
+    teile: list[Teil] = field(default_factory=list)
+
+    def alle_teile(self) -> list[Teil]:
+        """Alle Teile in ihrer Folge — der erste aus ``abschnitte`` und ``runden``."""
+        return [Teil(self.abschnitte, self.runden, self.teil_name), *self.teile]
+
+    def alle_abschnitte(self) -> list[Abschnitt]:
+        """Jeder Abschnitt einmal (ohne Runden) — für Listen und Editor."""
+        return [a for t in self.alle_teile() for a in t.abschnitte]
 
     def gesamt_s(self) -> int:
-        return sum(a.dauer_s for a in self.abschnitte) * max(self.runden, 1)
+        return sum(t.gesamt_s() for t in self.alle_teile())
 
     def kurztext(self) -> str:
-        """„0:30 Belastung · 0:15 Pause · 8 Runden" — für Listen.
+        """„0:30 Belastung · 0:15 Pause · 8 Runden" — für Listen; eine Folge mit Pfeilen.
 
         >>> TimerProfil(abschnitte=[Abschnitt("Halten", 60)], runden=1).kurztext()
         '1:00 Halten'
+        >>> TimerProfil(abschnitte=[Abschnitt("Vorbereitung", 10)],
+        ...     teile=[Teil([Abschnitt("Halten", 60), Abschnitt("Pause", 30)], 3)]).kurztext()
+        '0:10 Vorbereitung → 3 × (1:00 Halten · 0:30 Pause)'
         """
+        if self.teile:
+            return " → ".join(t.kurztext() for t in self.alle_teile())
         teile = [f"{dauer_text(a.dauer_s)} {a.name}".strip() for a in self.abschnitte]
         if self.runden > 1:
             teile.append(f"{self.runden} Runden")
@@ -177,20 +249,29 @@ class TimerProfil:
     # -- Serialisierung --------------------------------------------------------
 
     def als_dict(self) -> dict[str, Any]:
-        """Klänge nur, wenn gesetzt — ältere Profile bleiben, wie sie waren."""
+        """Klänge, „zählt nicht“ und weitere Teile nur, wenn gesetzt — ältere Profile
+        bleiben, wie sie waren."""
         d: dict[str, Any] = {
             "id": self.id,
             "name": self.name,
             "runden": self.runden,
-            "abschnitte": [
-                {"name": a.name, "dauer_s": a.dauer_s, **({"klang": a.klang} if a.klang else {})}
-                for a in self.abschnitte
-            ],
+            "abschnitte": [a.als_dict() for a in self.abschnitte],
         }
         if self.runden_klang:
             d["runden_klang"] = self.runden_klang
         if self.ende_klang:
             d["ende_klang"] = self.ende_klang
+        if self.teil_name:
+            d["teil_name"] = self.teil_name
+        if self.teile:
+            d["teile"] = [
+                {
+                    "runden": t.runden,
+                    "abschnitte": [a.als_dict() for a in t.abschnitte],
+                    **({"name": t.name} if t.name else {}),
+                }
+                for t in self.teile
+            ]
         return d
 
     @classmethod
@@ -198,32 +279,59 @@ class TimerProfil:
         """Defensiv: ohne brauchbaren Abschnitt kein Profil, nie eine Ausnahme."""
         if not isinstance(d, dict):
             return None
-        abschnitte: list[Abschnitt] = []
-        for a in d.get("abschnitte") or []:
-            if not isinstance(a, dict):
-                continue
-            try:
-                dauer = int(a.get("dauer_s") or 0)
-            except (TypeError, ValueError):
-                continue
-            if 0 < dauer <= MAX_ABSCHNITT_S:
-                abschnitte.append(
-                    Abschnitt(str(a.get("name") or ""), dauer, _klang_lesen(a.get("klang")))
-                )
+        abschnitte = _abschnitte_lesen(d.get("abschnitte"))
         if not abschnitte:
             return None
-        try:
-            runden = int(d.get("runden") or 1)
-        except (TypeError, ValueError):
-            runden = 1
+        teile: list[Teil] = []
+        for t in d.get("teile") or []:
+            if isinstance(t, dict) and (ab := _abschnitte_lesen(t.get("abschnitte"))):
+                teile.append(Teil(ab, _runden_lesen(t.get("runden")), str(t.get("name") or "")))
         return cls(
             id=str(d.get("id") or new_id()),
             name=str(d.get("name") or "Timer"),
             abschnitte=abschnitte,
-            runden=min(max(runden, 1), MAX_RUNDEN),
+            runden=_runden_lesen(d.get("runden")),
             runden_klang=_klang_lesen(d.get("runden_klang")),
             ende_klang=_klang_lesen(d.get("ende_klang")),
+            teil_name=str(d.get("teil_name") or "") if teile else "",
+            teile=teile,
         )
+
+
+def _abschnitte_lesen(roh: Any) -> list[Abschnitt]:
+    """Brauchbare Abschnitte aus JSON — kaputte fallen weg, nie eine Ausnahme.
+
+    >>> [a.name for a in _abschnitte_lesen([{"name": "A", "dauer_s": 5}, {"dauer_s": "x"}, 3])]
+    ['A']
+    >>> _abschnitte_lesen([{"name": "P", "dauer_s": 30, "zaehlt": False}])[0].zaehlt
+    False
+    """
+    abschnitte: list[Abschnitt] = []
+    for a in roh if isinstance(roh, list) else []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            dauer = int(a.get("dauer_s") or 0)
+        except (TypeError, ValueError):
+            continue
+        if 0 < dauer <= MAX_ABSCHNITT_S:
+            abschnitte.append(
+                Abschnitt(
+                    str(a.get("name") or ""),
+                    dauer,
+                    _klang_lesen(a.get("klang")),
+                    zaehlt=a.get("zaehlt") is not False,
+                )
+            )
+    return abschnitte
+
+
+def _runden_lesen(roh: Any) -> int:
+    try:
+        runden = int(roh or 1)
+    except (TypeError, ValueError):
+        runden = 1
+    return min(max(runden, 1), MAX_RUNDEN)
 
 
 def _klang_lesen(wert: Any) -> str:
@@ -400,6 +508,12 @@ class TimerStand:
     fertig: bool
     #: Laufende Nummer des Abschnitts über alle Runden (für Wechsel und Fortschritt)
     nummer: int = 0
+    #: Der Teil der Folge (ab 0), seine Rundenzahl und seine Abschnitte je Runde
+    teil: int = 0
+    runden: int = 1
+    abschnitte: int = 1
+    #: Zählt der laufende Abschnitt als Übungszeit?
+    zaehlt: bool = True
 
     @property
     def anteil(self) -> float:
@@ -459,8 +573,10 @@ def klang_fuer(art: str, stand: TimerStand, profil: TimerProfil, signale: TimerS
         return profil.ende_klang or ENDE
     if stand.index == 0 and stand.runde > 1 and profil.runden_klang:
         return profil.runden_klang
-    if 0 <= stand.index < len(profil.abschnitte) and profil.abschnitte[stand.index].klang:
-        return profil.abschnitte[stand.index].klang
+    teile = profil.alle_teile()
+    abschnitte = teile[stand.teil].abschnitte if 0 <= stand.teil < len(teile) else []
+    if 0 <= stand.index < len(abschnitte) and abschnitte[stand.index].klang:
+        return abschnitte[stand.index].klang
     return signale.klang or STANDARD_KLANG
 
 
@@ -481,6 +597,8 @@ class Marke:
     name: str = ""
     runde: int = 0
     von: int = 0
+    #: Zählt der Abschnitt als Übungszeit?
+    zaehlt: bool = True
 
 
 def name_aus_notiz(text: str) -> str:
@@ -520,6 +638,14 @@ class TimerLauf:
     ('Belastung', 2, 30.0)
     >>> lauf.fortsetzen(); t[0] = 200.0; lauf.stand().fertig
     True
+
+    Abbrechen hält an und markiert den Lauf; ein neuer Start beginnt von vorn.
+
+    >>> lauf.start(); t[0] = 210.0; lauf.abbrechen()
+    >>> lauf.abgebrochen, lauf.laeuft, lauf.fertig
+    (True, False, False)
+    >>> lauf.start(); lauf.abgebrochen, lauf.stand().gesamt_rest_s
+    (False, 90.0)
     """
 
     def __init__(self, profil: TimerProfil, uhr: Callable[[], float] = time.monotonic) -> None:
@@ -527,21 +653,26 @@ class TimerLauf:
         self._uhr = uhr
         self._basis_s = 0.0  # Laufzeit vor dem letzten Start
         self._start: float | None = None  # Uhr beim letzten Start; None = angehalten
-        # Grenzen: Ende jedes Abschnitts über alle Runden, kumuliert
-        self._folge: list[tuple[int, int, Abschnitt]] = [
-            (r, i, a)
-            for r in range(1, max(profil.runden, 1) + 1)
-            for i, a in enumerate(profil.abschnitte)
+        self._teile = profil.alle_teile()
+        # Je Abschnitt über alle Teile und Runden: (Teil, Runde, Index im Teil, Abschnitt)
+        self._folge: list[tuple[int, int, int, Abschnitt]] = [
+            (k, r, i, a)
+            for k, teil in enumerate(self._teile)
+            for r in range(1, max(teil.runden, 1) + 1)
+            for i, a in enumerate(teil.abschnitte)
         ]
+        # Grenzen: Ende jedes Abschnitts, kumuliert
         self._enden: list[float] = []
         summe = 0.0
-        for _, _, a in self._folge:
+        for *_, a in self._folge:
             summe += a.dauer_s
             self._enden.append(summe)
         #: Laufende Nummer des zuletzt gemeldeten Abschnittsanfangs (`neue_marken`)
         self._gemeldet: int | None = None
         #: Uhr beim letzten Anhalten (`pause`); ``None``, solange er läuft oder nie hielt
         self.angehalten_bei: float | None = None
+        #: Abgebrochen (`abbrechen`): angehalten, und nichts wird eingetragen
+        self.abgebrochen = False
 
     @property
     def gesamt_s(self) -> float:
@@ -596,7 +727,7 @@ class TimerLauf:
         >>> lauf.start(bei=10.0); lauf.stand().rest_s
         29.5
         """
-        if self.fertig:
+        if self.fertig or self.abgebrochen:
             self.zuruecksetzen()
         self.fortsetzen(bei)
 
@@ -616,6 +747,20 @@ class TimerLauf:
         self._start = None
         self._gemeldet = None  # der nächste Start meldet den ersten Abschnitt wieder
         self.angehalten_bei = None
+        self.abgebrochen = False
+
+    def abbrechen(self) -> None:
+        """Abbrechen (Ben, 17.10.2026): anhalten und als abgebrochen markieren — daraus
+        folgt kein Eintrag. Wie weit er kam, bleibt sichtbar; ein Start beginnt von vorn."""
+        if not self.begonnen or self.fertig:
+            return
+        self.pause()
+        self.abgebrochen = True
+
+    def fertig_machen(self) -> None:
+        """„Fertig“: jetzt ans Ende — der laufende Abschnitt endet mit der gelaufenen Zeit,
+        die übrigen fallen weg."""
+        self._springen(None)
 
     def weiter(self) -> None:
         """Zum Anfang des nächsten Abschnitts — im letzten: ans Ende."""
@@ -651,11 +796,15 @@ class TimerLauf:
         """„Belastung (Runde 2/8)" — der Name des Abschnitts in der Messung."""
         if nummer >= len(self._folge):
             return ENDE_MARKE
-        runde, index, a = self._folge[nummer]
+        k, runde, index, a = self._folge[nummer]
         text = a.name or f"Abschnitt {index + 1}"
-        if self.profil.runden > 1:
-            text += f" (Runde {runde}/{self.profil.runden})"
+        if self._teile[k].runden > 1:
+            text += f" (Runde {runde}/{self._teile[k].runden})"
         return text
+
+    def abschnitt(self, nummer: int) -> Abschnitt | None:
+        """Der Abschnitt mit der laufenden Nummer ``nummer`` — ``None`` am Ende."""
+        return self._folge[nummer][3] if 0 <= nummer < len(self._folge) else None
 
     def neue_marken(self) -> list[Marke]:
         """Abschnittsanfänge seit der letzten Abfrage — jeder genau einmal.
@@ -705,6 +854,7 @@ class TimerLauf:
                     name=name,
                     runde=runde,
                     von=von,
+                    zaehlt=a.zaehlt if (a := self.abschnitt(k)) is not None else True,
                 )
             )
         return marken
@@ -719,8 +869,8 @@ class TimerLauf:
         """
         if nummer >= len(self._folge):
             return "", 0, 0
-        runde, index, a = self._folge[nummer]
-        return a.name or f"Abschnitt {index + 1}", runde, max(self.profil.runden, 1)
+        k, runde, index, a = self._folge[nummer]
+        return a.name or f"Abschnitt {index + 1}", runde, max(self._teile[k].runden, 1)
 
     def _uhr_bei(self, nummer: int) -> float:
         """Wann Abschnitt ``nummer`` begann — seit dem letzten Start genau, sonst jetzt."""
@@ -740,8 +890,9 @@ class TimerLauf:
         nummer = next(
             (k for k, e in enumerate(self._enden) if e > vergangen + 1e-9), len(self._enden) - 1
         )
-        runde, index, abschnitt = self._folge[nummer]
+        k, runde, index, abschnitt = self._folge[nummer]
         rest = 0.0 if fertig else self._enden[nummer] - vergangen
+        teil = self._teile[k]
         return TimerStand(
             runde=runde,
             index=index,
@@ -752,6 +903,10 @@ class TimerLauf:
             laeuft=self._start is not None and not fertig,
             fertig=fertig,
             nummer=len(self._enden) if fertig else nummer,
+            teil=k,
+            runden=max(teil.runden, 1),
+            abschnitte=len(teil.abschnitte),
+            zaehlt=abschnitt.zaehlt,
         )
 
 
@@ -766,6 +921,7 @@ __all__ = [
     "WECHSEL",
     "Abschnitt",
     "Marke",
+    "Teil",
     "TimerLauf",
     "TimerProfil",
     "TimerSignale",

@@ -89,6 +89,7 @@ class TimerBaustein:
             lauf.uhr_setzen(uhr)
         self._t0: float | None = None
         self._lief = False
+        self._abgebrochen_gemeldet = False
 
     def uhr_uebernehmen(self, uhr: Callable[[], float]) -> None:
         """Die Uhr der Einheit — beim HRV-Simulator läuft sie schneller (`Einheitslauf`)."""
@@ -120,6 +121,19 @@ class TimerBaustein:
         marken = self.lauf.neue_marken()
         laeuft = self.lauf.laeuft
         start = self.lauf.start_uhr
+        if self.lauf.abgebrochen:
+            # Abgebrochen (Ben, 17.10.2026): das Ende des Timers, nicht eine Pause —
+            # eingetragen wird daraus nichts (`core.timer_eintrag`)
+            if not self._abgebrochen_gemeldet:
+                self._abgebrochen_gemeldet = True
+                halt = self.lauf.angehalten_bei if self.lauf.angehalten_bei is not None else jetzt
+                out.append(
+                    Ereignis(
+                        halt - t0, "timer", "ende", "Timer abgebrochen", {"grund": "abgebrochen"}
+                    )
+                )
+            self._lief = False
+            return out
         if self._lief and not laeuft and not self.lauf.fertig:
             halt = self.lauf.angehalten_bei if self.lauf.angehalten_bei is not None else jetzt
             out.append(Ereignis(halt - t0, "timer", "pause", "Timer angehalten"))
@@ -145,12 +159,14 @@ class TimerBaustein:
                 "von": m.von,
                 "profil": self.lauf.profil.name,
             }
+            if not m.zaehlt:
+                daten["zaehlt"] = False
             out.append(Ereignis(t, "timer", "abschnitt", m.text, daten))
         return out
 
     def beenden(self, jetzt: float) -> list[Ereignis]:
         out = self.takt(jetzt)
-        if self._t0 is not None and not self.lauf.fertig:
+        if self._t0 is not None and not self.lauf.fertig and not self._abgebrochen_gemeldet:
             self.lauf.pause()
             out.append(
                 Ereignis(jetzt - self._t0, "timer", "ende", "Timer beendet", {"grund": "beendet"})

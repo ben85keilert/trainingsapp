@@ -52,6 +52,7 @@ from trainingsapp.core.timer import (
     QUELLEN,
     Abschnitt,
     Marke,
+    Teil,
     TimerLauf,
     TimerProfil,
     TimerSignale,
@@ -298,9 +299,22 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
     ablauf = ft.Column(spacing=2)
 
     def ablauf_zeilen(stand: TimerStand) -> list[ft.Control]:
+        """Die Abschnitte je Teil — eine Folge (Vorbereitung, Training, Cooldown) mit
+        Überschrift und Runden je Teil; der laufende Abschnitt ist hervorgehoben."""
+        teile = profil.alle_teile()
+        if len(teile) > 1:
+            return [z for k, t in enumerate(teile) for z in teil_zeilen(stand, k, t, True)]
+        return teil_zeilen(stand, 0, teile[0], False)
+
+    def teil_zeilen(stand: TimerStand, k: int, teil: Teil, folge: bool) -> list[ft.Control]:
         zeilen: list[ft.Control] = []
-        for i, a in enumerate(profil.abschnitte):
-            jetzt = lauf.begonnen and not stand.fertig and i == stand.index
+        if folge:
+            kopf = teil.name or f"Teil {k + 1}"
+            if teil.runden > 1:
+                kopf += f" · {teil.runden} Runden"
+            zeilen.append(ft.Text(kopf, size=12, weight=ft.FontWeight.W_600, opacity=0.8))
+        for i, a in enumerate(teil.abschnitte):
+            jetzt = lauf.begonnen and not stand.fertig and i == stand.index and k == stand.teil
             zeilen.append(
                 ft.Container(
                     padding=ft.Padding.symmetric(horizontal=10, vertical=6),
@@ -310,15 +324,16 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                         controls=[
                             ft.Text(dauer_text(a.dauer_s), width=56, weight=ft.FontWeight.W_600),
                             ft.Text(a.name or f"Abschnitt {i + 1}", expand=True),
+                            ft.Text("zählt nicht", size=11, opacity=0.6, visible=not a.zaehlt),
                             ft.Icon(ft.Icons.PLAY_ARROW, size=16, visible=jetzt),
                         ]
                     ),
                 )
             )
-        if profil.runden > 1:
+        if not folge and teil.runden > 1:
             zeilen.append(
                 ft.Text(
-                    f"× {profil.runden} Runden · gesamt {dauer_text(profil.gesamt_s())}",
+                    f"× {teil.runden} Runden · gesamt {dauer_text(profil.gesamt_s())}",
                     size=12,
                     opacity=0.7,
                 )
@@ -338,10 +353,13 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             zeit_text.value = dauer_text(-(-stand.rest_s // 1))
             fortschritt.value = stand.anteil
             teile = []
-            if profil.runden > 1:
-                teile.append(f"Runde {stand.runde} von {profil.runden}")
-            if len(profil.abschnitte) > 1:
-                teile.append(f"Abschnitt {stand.index + 1} von {len(profil.abschnitte)}")
+            if len(profil.alle_teile()) > 1:
+                teil = profil.alle_teile()[stand.teil]
+                teile.append(teil.name or f"Teil {stand.teil + 1}")
+            if stand.runden > 1:
+                teile.append(f"Runde {stand.runde} von {stand.runden}")
+            if stand.abschnitte > 1:
+                teile.append(f"Abschnitt {stand.index + 1} von {stand.abschnitte}")
             teile.append(f"gesamt noch {dauer_text(stand.gesamt_rest_s)}")
             stand_text.value = " · ".join(teile)
         haupt_knopf.disabled = False

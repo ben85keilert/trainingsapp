@@ -271,3 +271,133 @@ def test_timer_ansichten_bauen(tmp_path) -> None:
         assert alt.route == "/timer/bearbeiten/vorlage-halten"
     finally:
         state.schliessen()
+
+
+# ---------------------------------------------------------------------------
+# Folgen, „zählt“, Abbrechen (Ben, 17.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def _planke() -> TimerProfil:
+    from trainingsapp.core.timer import Teil
+
+    return TimerProfil(
+        name="Planke",
+        abschnitte=[Abschnitt("Vorbereitung", 10, zaehlt=False)],
+        teil_name="Vorbereitung",
+        teile=[
+            Teil([Abschnitt("Halten", 60), Abschnitt("Pause", 30, zaehlt=False)], 3, "Training"),
+            Teil([Abschnitt("Cooldown", 60, zaehlt=False)], 1, "Cooldown"),
+        ],
+    )
+
+
+def test_folge_laeuft_teil_fuer_teil() -> None:
+    """Vorbereitung 1 ×, Halten und Pause 3 ×, Cooldown 1 × — Runden zählen je Teil."""
+    uhr = Uhr()
+    lauf = TimerLauf(_planke(), uhr=uhr)
+    assert lauf.gesamt_s == 10 + 3 * 90 + 60
+    lauf.start()
+    s = lauf.stand()
+    assert (s.teil, s.name, s.runden, s.zaehlt) == (0, "Vorbereitung", 1, False)
+    uhr.t += 10 + 90 + 5  # zweite Runde Halten
+    s = lauf.stand()
+    assert (s.teil, s.name, s.runde, s.runden, s.abschnitte, s.zaehlt) == (
+        1,
+        "Halten",
+        2,
+        3,
+        2,
+        True,
+    )
+    assert lauf.abschnittsname(s.nummer) == "Halten (Runde 2/3)"
+    assert lauf.angaben(s.nummer) == ("Halten", 2, 3)
+    uhr.t += 2 * 90 + 5  # im Cooldown — ohne Rundenzusatz
+    s = lauf.stand()
+    assert (s.teil, s.name) == (2, "Cooldown")
+    assert lauf.abschnittsname(s.nummer) == "Cooldown"
+    uhr.t += 60
+    assert lauf.fertig
+
+
+def test_folge_marken_tragen_zaehlt() -> None:
+    uhr = Uhr()
+    lauf = TimerLauf(_planke(), uhr=uhr)
+    lauf.start()
+    marken = lauf.neue_marken()
+    uhr.t += 10 + 60 + 1
+    marken += lauf.neue_marken()
+    assert [(m.abschnitt, m.zaehlt) for m in marken] == [
+        ("Vorbereitung", False),
+        ("Halten (Runde 1/3)", True),
+        ("Pause (Runde 1/3)", False),
+    ]
+
+
+def test_folge_und_zaehlt_ueberstehen_speichern() -> None:
+    """Gespeichert wie bisher; „zählt nicht“ und weitere Teile nur, wenn gesetzt."""
+    import json
+
+    profil = _planke()
+    (wieder,) = timer_profile_lesen(timer_profile_schreiben([profil]))
+    assert wieder == profil
+    alt = TimerProfil(name="Alt", abschnitte=[Abschnitt("Halten", 60)], runden=3)
+    roh = json.loads(timer_profile_schreiben([alt]))[0]
+    assert "teile" not in roh and "zaehlt" not in roh["abschnitte"][0]
+    # Kaputte Teile fallen weg, das Profil bleibt
+    roh["teile"] = [{"abschnitte": [{"dauer_s": "x"}]}, "kaputt", {"abschnitte": []}]
+    (gelesen,) = timer_profile_lesen(json.dumps([roh]))
+    assert gelesen.teile == [] and gelesen.abschnitte == alt.abschnitte
+
+
+def test_klang_je_teil() -> None:
+    from trainingsapp.core.timer import Teil, TimerStand, klang_fuer
+
+    p = TimerProfil(
+        abschnitte=[Abschnitt("Vorbereitung", 10)],
+        teile=[Teil([Abschnitt("Halten", 60, klang="glocke1")], 2)],
+    )
+    halten = TimerStand(1, 0, "Halten", 60, 60, 60, True, False, 1, teil=1, runden=2)
+    assert klang_fuer("wechsel", halten, p, TimerSignale(klang="glocke3")) == "glocke1"
+
+
+def test_abbrechen_und_fertig() -> None:
+    uhr = Uhr()
+    lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 30), Abschnitt("B", 30)]), uhr=uhr)
+    lauf.abbrechen()  # nicht begonnen: nichts
+    assert not lauf.abgebrochen
+    lauf.start()
+    uhr.t += 12
+    lauf.abbrechen()
+    assert lauf.abgebrochen and not lauf.laeuft and not lauf.fertig
+    lauf.start()  # von vorn
+    assert not lauf.abgebrochen and lauf.vergangen_s() == 0
+    uhr.t += 40
+    lauf.neue_marken()
+    lauf.fertig_machen()  # „Fertig“: B endet nach 10 s statt 30 s
+    marken = lauf.neue_marken()
+    assert lauf.fertig and marken[-1].ende and marken[-1].bei == uhr.t
+
+
+def test_abbruch_beendet_den_timer_der_einheit() -> None:
+    """In einer Einheit wird „Abbrechen“ das Ende des Timers (Grund „abgebrochen“), keine
+    Pause; mit „Einheit beenden, wenn der Timer fertig ist“ endet sie mit."""
+    from trainingsapp.core.einheit import Zustand
+    from trainingsapp.devices.einheit import Einheitslauf, TimerBaustein
+
+    uhr = Uhr()
+    lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("Halten", 60)], runden=3))
+    e = Einheitslauf(uhr=uhr, titel="Planke")
+    e.hinzufuegen(TimerBaustein(lauf))
+    e.ende_mit_timer = True
+    e.starten()
+    uhr.t += 20
+    e.takt()
+    lauf.abbrechen()
+    uhr.t += 1
+    e.takt()
+    timer = [(x.art, x.text, x.daten.get("grund")) for x in e.ereignisse if x.quelle == "timer"]
+    assert timer[-1] == ("ende", "Timer abgebrochen", "abgebrochen")
+    assert ("pause", "Timer angehalten", None) not in timer
+    assert e.zustand is Zustand.BEENDET
+    assert [x.art for x in e.ereignisse if x.quelle == "timer"].count("ende") == 1

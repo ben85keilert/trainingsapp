@@ -101,8 +101,8 @@ def _timer(state: Any) -> Laufend | None:
         return None
     rest = uhr(math.ceil(s.rest_s))
     teile = [f"{s.name or f'Abschnitt {s.index + 1}'} noch {rest}"]
-    if t.profil.runden > 1:
-        teile.append(f"Runde {s.runde}/{t.profil.runden}")
+    if s.runden > 1:
+        teile.append(f"Runde {s.runde}/{s.runden}")
     if s.laeuft:
         # Stimmt auch dann noch, wenn Android die App ohne Vordergrunddienst anhält
         ende = datetime.now() + timedelta(seconds=s.gesamt_rest_s)

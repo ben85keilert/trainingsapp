@@ -180,6 +180,7 @@ Je Übung:
 | `spec` | nein | Kurzname einer Vorlage: `saetze_wdh` (Vorgabe), `halten`, `wdh_oder_halten`, `winkel`, `benchmark_zeit` |
 | `result_spec` | nein | die vollständige Eingabe (`ResultSpec.to_dict()`), geht vor `spec`; schreibt der Export |
 | `limit_spec`, `default_target` | nein | Objekte wie in der Datenbank |
+| `timer[]` | nein | Timer-Profile der Übung (Ben, 17.10.2026; `docs/plan_einheit.md`, Stufe 3): je Profil `name`, `abschnitte[]` (`name`, `dauer_s`, `klang`, `zaehlt` — fehlt `zaehlt`, zählt der Abschnitt), `runden`, für eine Folge `teil_name` und `teile[]` (`name`, `runden`, `abschnitte[]`). `id` schreibt der Export; ohne sie eine feste aus Übung und Stelle. Fehlt `timer`, gilt eine Timer-Regel im `limit_spec` als Einzeltimer. Im Drei-Wege-Abgleich ein Feld |
 | `default_felder` | nein | Parameter neuer Planübungen; `[]` = nur abhaken, fehlt = alle |
 | `media[]` | nein | `{kind, source, uri, title, license}`; leere `uri` und `source: "local"` fallen weg |
 | `variante_von` | nein | Schlüssel oder ID des Originals (im Paket oder schon auf dem Gerät) |

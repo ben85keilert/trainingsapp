@@ -122,8 +122,8 @@ class ExerciseRepo:
                     (id, name, category, description, icon_key, image_path,
                      is_builtin, result_spec_json, limit_spec_json,
                      default_target_json, default_input_mode, archived, created_at, updated_at,
-                     family_id, default_fields_json, package_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     family_id, default_fields_json, package_id, timer_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -138,6 +138,7 @@ class ExerciseRepo:
                     archived = excluded.archived,
                     family_id = excluded.family_id,
                     package_id = excluded.package_id,
+                    timer_json = excluded.timer_json,
                     updated_at = excluded.updated_at,
                     revision = revision + 1
                 """,
@@ -159,6 +160,7 @@ class ExerciseRepo:
                     uebung.family_id,
                     _felder_json(uebung.default_felder),
                     uebung.package_id,
+                    json.dumps(uebung.timer, ensure_ascii=False),
                 ),
             )
             # Medien: alle Verweise neu schreiben. Einfacher als Abgleich, und
@@ -501,6 +503,7 @@ class ExerciseRepo:
             deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
             family_id=r["family_id"],
             package_id=r["package_id"],
+            timer=_json_lesen(r["timer_json"], []),
         )
 
 
@@ -512,6 +515,19 @@ class ExerciseRepo:
 def _felder_json(felder: list[str] | None) -> str | None:
     """Parameter einer Planübung bzw. Standard der Übung → Spalte (NULL = wie die Übung)."""
     return None if felder is None else json.dumps(list(felder), ensure_ascii=False)
+
+
+def _json_lesen(text: str | None, vorgabe: Any) -> Any:
+    """Eine JSON-Spalte — Kaputtes oder ein anderer Typ als die Vorgabe wird zur Vorgabe.
+
+    >>> _json_lesen('[{"name": "A"}]', []), _json_lesen("{kaputt", {}), _json_lesen("[]", {})
+    ([{'name': 'A'}], {}, {})
+    """
+    try:
+        wert = json.loads(text) if text else vorgabe
+    except (TypeError, ValueError):
+        return vorgabe
+    return wert if isinstance(wert, type(vorgabe)) else vorgabe
 
 
 def _felder_lesen(text: str | None) -> list[str] | None:
@@ -671,8 +687,9 @@ class PlanRepo:
             self.con.execute(
                 """
                 INSERT INTO plan (id, name, description, subject_id, created_at, updated_at,
-                                  active, weekdays_json, course_chapter_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  active, weekdays_json, course_chapter_id, timer_json,
+                                  auto_next)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -681,6 +698,8 @@ class PlanRepo:
                     active = excluded.active,
                     weekdays_json = excluded.weekdays_json,
                     course_chapter_id = excluded.course_chapter_id,
+                    timer_json = excluded.timer_json,
+                    auto_next = excluded.auto_next,
                     revision = revision + 1
                 """,
                 (
@@ -693,6 +712,8 @@ class PlanRepo:
                     int(plan.aktiv),
                     json.dumps(sorted(set(plan.wochentage))),
                     plan.kurs_kapitel_id,
+                    json.dumps(plan.timer, ensure_ascii=False) if plan.timer else None,
+                    int(plan.weiter_automatisch),
                 ),
             )
             self.con.execute(
@@ -948,7 +969,8 @@ class PlanRepo:
     def _item_schreiben(self, item: PlanItem) -> None:
         self.con.execute(
             "INSERT INTO plan_item (id, plan_id, exercise_id, sort_order, target_json, note, "
-            "input_mode, quick_json, fields_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "input_mode, quick_json, fields_json, timer_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 item.id,
                 item.plan_id,
@@ -959,6 +981,7 @@ class PlanRepo:
                 modus_aus_felder(item.felder),
                 json.dumps(item.quick, ensure_ascii=False),
                 _felder_json(item.felder),
+                json.dumps(item.timer, ensure_ascii=False),
             ),
         )
 
@@ -995,6 +1018,7 @@ class PlanRepo:
             input_mode=r["input_mode"],
             quick=json.loads(r["quick_json"]),
             felder=_felder_lesen(r["fields_json"]),
+            timer=_json_lesen(r["timer_json"], {}),
         )
 
     @staticmethod
@@ -1009,6 +1033,8 @@ class PlanRepo:
             aktiv=bool(r["active"]),
             wochentage=json.loads(r["weekdays_json"]),
             kurs_kapitel_id=r["course_chapter_id"],
+            timer=_json_lesen(r["timer_json"], {}) or None,
+            weiter_automatisch=bool(r["auto_next"]),
         )
 
 

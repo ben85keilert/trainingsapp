@@ -144,6 +144,9 @@ class Exercise:
     #: Aus welchem Paket die Übung kam (Migration 014, `core/pakete.py`);
     #: ``None`` = eigene Übung — hier angelegt oder kopiert.
     package_id: str | None = None
+    #: Timer-Profile der Übung (Migration 020): `core.timer.TimerProfil.als_dict` je
+    #: Profil — gelesen über `core.uebung_timer.profile_der_uebung`
+    timer: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # Wer nur `category` angibt (Altbestand, Tutorial), bekommt sie als Typ.
@@ -344,6 +347,9 @@ class PlanItem:
     #: Welche Parameter der Plan anbietet (Feldschlüssel) — ``None`` = wie die
     #: Übung, ``[]`` = keiner, nur abhaken (`core.parameter.aktive_felder`)
     felder: list[str] | None = None
+    #: Timer der Planübung (Migration 020): `core.uebung_timer.TimerWahl.als_dict` —
+    #: leer = wie der Plan, sonst wie die Übung
+    timer: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -363,6 +369,10 @@ class Plan:
     #: Von welchem Kurskapitel der Plan angelegt wurde (Migration 016, `core/kurse.py`);
     #: beim Abschluss des Kapitels wird er deaktiviert, nicht gelöscht. ``None`` = eigener Plan
     kurs_kapitel_id: str | None = None
+    #: „Timer für alle Übungen“ (Migration 020): ein `core.timer.TimerProfil.als_dict`
+    timer: dict[str, Any] | None = None
+    #: Nach dem Timer einer Übung automatisch weiter — sonst auf einen Tipp warten
+    weiter_automatisch: bool = False
 
     def steht_an(self, tag: date) -> bool:
         """Ob der Plan an diesem Tag von sich aus auf „Heute" erscheint.

@@ -59,6 +59,7 @@ from .kurse import (
 )
 from .models import Exercise, Media, MediaKind, MediaSource, jetzt
 from .result_spec import VORLAGEN, ResultSpec
+from .timer import TimerProfil
 
 #: Kennung im Feld ``format`` — andere JSON-Dateien (Messungen) sind kein Paket
 FORMAT = "trainingsapp-uebungspaket"
@@ -407,9 +408,10 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
     _werte_pruefen(default_target, "default_target")
     felder = eintrag.get("default_felder")
     variante = str(eintrag.get("variante_von") or "").strip()
+    uid = str(eintrag.get("id") or "").strip() or uebung_id(paket, key or name)
     return (
         Exercise(
-            id=str(eintrag.get("id") or "").strip() or uebung_id(paket, key or name),
+            id=uid,
             name=name,
             description=str(eintrag.get("description") or "").strip(),
             icon_key=str(eintrag["icon_key"]) if eintrag.get("icon_key") else None,
@@ -427,9 +429,33 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             regionen=_texte(eintrag.get("regionen", []), "regionen"),
             package_id=paket,
             family_id=variante or None,
+            timer=_timer_lesen(eintrag.get("timer", []), uid),
         ),
         key,
     )
+
+
+def _timer_lesen(roh: Any, uebung: str) -> list[dict[str, Any]]:
+    """Die Timer-Profile einer Übung (Ben, 17.10.2026) — jedes mit fester ID: ohne eigene
+    eine aus Übung und Stelle, damit eine Planübung ihr Profil über Updates behält.
+
+    >>> roh = [{"name": "Halten", "abschnitte": [{"name": "Halten", "dauer_s": 60}]}]
+    >>> a, b = _timer_lesen(roh, "u1"), _timer_lesen(roh, "u1")
+    >>> a == b, a[0]["name"], a[0]["id"] != _timer_lesen(roh, "u2")[0]["id"]
+    (True, 'Halten', True)
+    >>> _timer_lesen([{"name": "leer", "abschnitte": []}], "u1")
+    Traceback (most recent call last):
+    ValueError: Timer 1 hat keinen Abschnitt mit Dauer
+    """
+    profile: list[dict[str, Any]] = []
+    for i, d in enumerate(_liste(roh, "timer")):
+        p = TimerProfil.aus_dict(d)
+        if p is None:
+            raise ValueError(f"Timer {i + 1} hat keinen Abschnitt mit Dauer")
+        if not (isinstance(d, dict) and d.get("id")):
+            p.id = str(uuid.uuid5(NAMENSRAUM, f"{uebung}/timer/{i}"))
+        profile.append(p.als_dict())
+    return profile
 
 
 def _ganzzahl(wert: Any) -> bool:
@@ -535,6 +561,8 @@ def stand(u: Exercise) -> dict[str, Any]:
     d["result_spec"] = u.result_spec.to_dict()
     if u.limit_spec:
         d["limit_spec"] = u.limit_spec
+    if u.timer:
+        d["timer"] = [dict(p) for p in u.timer]
     if u.default_target:
         d["default_target"] = u.default_target
     if u.default_felder is not None:
@@ -582,6 +610,7 @@ FELDNAMEN: dict[str, str] = {
     "default_target": "Ziel",
     "default_felder": "Planparameter",
     "limit_spec": "Limits",
+    "timer": "Timer",
     "media": "Videos",
     "variante_von": "Variante",
 }

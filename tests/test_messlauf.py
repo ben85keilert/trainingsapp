@@ -318,16 +318,22 @@ async def test_spuren_schneiden_einander_nicht(tmp_path) -> None:
 
     lauf, task = await _laufend(tmp_path)
     km = {"quelle": "gps", "art": "km", "spur": "km"}
+
+    def bei(sekunde: float) -> float:
+        # Die Grenze an die Stelle der Daten, nicht an die Uhr: Unter Last läuft die Uhr
+        # des Simulators den Schlägen voraus (CI, 17.10.2026: „Belastung“ bei 30 statt 20 s)
+        return lauf.start_mono + sekunde
+
     await _bis(lauf, 10)
-    lauf.abschnitt_markieren("km 1", name="km 1", spur="km", als_notiz=False)  # still
+    lauf.abschnitt_markieren("km 1", name="km 1", spur="km", als_notiz=False, bei=bei(10))
     await _bis(lauf, 20)
-    lauf.abschnitt_markieren("Belastung", name="Belastung")
+    lauf.abschnitt_markieren("Belastung", name="Belastung", bei=bei(20))
     await _bis(lauf, 50)
-    lauf.abschnitt_markieren("km 1", name="km 2", spur="km", marke=km)
+    lauf.abschnitt_markieren("km 1", name="km 2", spur="km", marke=km, bei=bei(50))
     await _bis(lauf, 80)
-    lauf.abschnitt_markieren("Timer fertig", name="", ende=True)
+    lauf.abschnitt_markieren("Timer fertig", name="", ende=True, bei=bei(80))
     await _bis(lauf, 100)
-    lauf.abschnitt_markieren("Ende", name="", ende=True, spur="km", als_notiz=False)
+    lauf.abschnitt_markieren("Ende", name="", ende=True, spur="km", als_notiz=False, bei=bei(100))
     await _bis(lauf, 110)
     ergebnis = lauf.aufnahme_stoppen(tmp_path)
     await lauf.trennen()

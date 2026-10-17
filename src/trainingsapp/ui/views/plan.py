@@ -190,6 +190,27 @@ def _knopf(
     )
 
 
+def auspraegung_vorgabe(state: AppState, item: PlanItem, uebung: Exercise) -> dict[str, Any]:
+    """Gewählte Ausprägungen — sonst aus dem Ziel, sonst wie beim letzten Mal.
+
+    ``uebung`` so, wie die Planübung sie sieht (`core.standards.mit_plan_spec`). Gilt im
+    Plan und beim Abhaken auf „Heute“ (`views/tag.py`) gleich.
+    """
+    felder = kontextfelder(replace(uebung.result_spec, fields=aktive_felder(item, uebung)))
+    if not felder:
+        return {}
+    if item.id not in state.auspraegung_wahl:
+        quelle = item.target
+        if not any(not ist_leer(item.target.get(f.key)) for f in felder):
+            letzter = state.sitzungen.letzter_eintrag(state.profil.id, uebung.id)
+            quelle = letzter.result if letzter is not None else {}
+        state.auspraegung_wahl[item.id] = {
+            f.key: quelle[f.key] for f in felder if not ist_leer(quelle.get(f.key))
+        }
+    keys = {f.key for f in felder}
+    return {k: v for k, v in state.auspraegung_wahl[item.id].items() if k in keys}
+
+
 def einzel_plan(uebung: Exercise) -> Plan:
     """Ein Plan, der nur in der Ansicht existiert: genau diese Übung, mit ihrem Standard.
 
@@ -284,20 +305,7 @@ def plan_view(
         return replace(uebung.result_spec, fields=aktive_felder(item, uebung))
 
     def kontext(item: PlanItem, uebung: Exercise) -> dict[str, Any]:
-        """Gewählte Ausprägungen — sonst aus dem Ziel, sonst wie beim letzten Mal."""
-        felder = kontextfelder(teilspec(item, uebung))
-        if not felder:
-            return {}
-        if item.id not in state.auspraegung_wahl:
-            quelle = item.target
-            if not any(not ist_leer(item.target.get(f.key)) for f in felder):
-                letzter = state.sitzungen.letzter_eintrag(state.profil.id, uebung.id)
-                quelle = letzter.result if letzter is not None else {}
-            state.auspraegung_wahl[item.id] = {
-                f.key: quelle[f.key] for f in felder if not ist_leer(quelle.get(f.key))
-            }
-        keys = {f.key for f in felder}
-        return {k: v for k, v in state.auspraegung_wahl[item.id].items() if k in keys}
+        return auspraegung_vorgabe(state, item, uebung)
 
     def ziel_ohne_kontext(item: PlanItem) -> dict[str, Any]:
         """Das Ziel ohne Ausprägungen — die bestimmt allein die Auswahl im Block.
@@ -1458,4 +1466,4 @@ def plan_view(
     )
 
 
-__all__ = ["einzel_plan", "hauptfeld", "plan_view", "ziel_text"]
+__all__ = ["auspraegung_vorgabe", "einzel_plan", "hauptfeld", "plan_view", "ziel_text"]

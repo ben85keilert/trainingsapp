@@ -19,6 +19,8 @@ Routen:
     <bearbeiten>/ziel/<item_id>     Planübung einstellen: Stufe, Chips, Ziel
     <bearbeiten>/hinzufuegen        Übungen in den Plan aufnehmen
     /tag/<YYYY-MM-DD>               Tagesansicht eines beliebigen Tages
+    [/tag/<datum>]/leistungen/<übung>   Alle Einträge einer Übung an diesem Tag (ohne: heute)
+    [/tag/<datum>]/nachtragen/<übung>[/<plan>]   Nachtragen: Uhrzeit, Plan, Werte, Notiz
     /eintrag/<id>                   Ein Eintrag: ansehen, löschen
     /eintrag/<id>/korrigieren       Korrektur als neuer Eintrag
     /uebung/neu, /uebung/<id>, /uebung/<id>/bearbeiten   Katalog
@@ -52,6 +54,7 @@ import flet as ft
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.ui import ausrichtung
+from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.dialoge import dialog_offen
 from trainingsapp.ui.components.startleiste import (
     leiste_auffrischen,
@@ -74,6 +77,7 @@ from trainingsapp.ui.views.leistungen import leistungen_view
 from trainingsapp.ui.views.live_vollbild import live_vollbild_view
 from trainingsapp.ui.views.messung import backup_dialog, messung
 from trainingsapp.ui.views.messung_detail import messung_detail_view
+from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route, nachtragen_view
 from trainingsapp.ui.views.pakete import (
     entfallene_dialog,
     paket_export_view,
@@ -222,6 +226,12 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
             ansicht.floating_action_button = ft.FloatingActionButton(
                 icon=ft.Icons.ADD, tooltip="Neuer Plan", on_click=neuen_plan_anlegen(page, state)
             )
+        elif state.reiter == "heute" and (
+            einheit_ui.aktuell(state) is None
+            or einheit_ui.heute_reiter(state) != einheit_ui.REITER_EINHEIT
+        ):
+            # Nachtragen (Ben, 18.10.2026) — nur im Tag, nicht über der Einheit
+            ansicht.floating_action_button = nachtragen_knopf(page, state, None, "")
         else:
             ansicht.floating_action_button = None
 
@@ -374,12 +384,24 @@ def main(page: ft.Page) -> None:
         elif teile[2:3] == ["leistungen"]:
             leistungen_unter(f"/plan/{plan.id}", teile[3:])
 
-    def leistungen_unter(basis: str, rest: list[str]) -> None:
-        """Alle Einträge einer Übung von heute über dem Plan (`views/leistungen.py`)."""
+    def leistungen_unter(
+        basis: str, rest: list[str], tag: date | None = None, vom_tag: bool = False
+    ) -> None:
+        """Alle Einträge einer Übung über dem Plan oder dem Tag (`views/leistungen.py`)."""
         uebung = state.uebungen.laden(rest[0], mit_geloeschten=True) if rest else None
         if uebung is not None:
             route = f"{basis}/leistungen/{uebung.id}"
-            page.views.append(leistungen_view(page, state, route, uebung))
+            nachtragen = nachtragen_route(basis, uebung.id) if vom_tag else None
+            page.views.append(leistungen_view(page, state, route, uebung, tag, nachtragen))
+
+    def nachtragen_unter(basis: str, tag: date, rest: list[str]) -> None:
+        """Nachtragen über dem Tag (`views/nachtragen.py`) — nicht für die Zukunft."""
+        uebung = state.uebungen.laden(rest[0]) if rest else None
+        if uebung is None or tag > state.heute():
+            return
+        plan_id = rest[1] if len(rest) > 1 else None
+        route = nachtragen_route(basis, uebung.id, plan_id)
+        page.views.append(nachtragen_view(page, state, route, tag, uebung, plan_id))
 
     def eintrag_unter(basis: str, rest: list[str]) -> None:
         """Ein Eintrag über einer Übungsansicht — Zurück führt wieder dorthin."""
@@ -571,7 +593,17 @@ def main(page: ft.Page) -> None:
                     leistungen_unter(basis, teile[3:])
         elif teile[:1] == ["tag"] and len(teile) >= 2:
             with suppress(ValueError):  # kein Datum → Hauptansicht
-                page.views.append(tag_view(page, state, date.fromisoformat(teile[1])))
+                tag = date.fromisoformat(teile[1])
+                page.views.append(tag_view(page, state, tag))
+                basis = f"/tag/{tag.isoformat()}"
+                if teile[2:3] == ["leistungen"]:
+                    leistungen_unter(basis, teile[3:], tag, vom_tag=True)
+                elif teile[2:3] == ["nachtragen"]:
+                    nachtragen_unter(basis, tag, teile[3:])
+        elif teile[:1] == ["leistungen"]:
+            leistungen_unter("", teile[1:], vom_tag=True)
+        elif teile[:1] == ["nachtragen"]:
+            nachtragen_unter("", state.heute(), teile[1:])
         elif teile[:1] == ["eintrag"] and len(teile) >= 2:
             eintrag_routen(teile)
 

@@ -277,7 +277,7 @@ def test_heute_hat_den_reiter_einheit_nur_mit_einheit(state) -> None:
     assert "Bereitgestellt" in _texte(reiter)
     reiter.on_change(SimpleNamespace(control=SimpleNamespace(selected_index=1)))
     tag = heute(page, state)
-    assert tag.selected_index == einheit_ui.REITER_TAG and "PLÄNE" in _texte(tag)
+    assert tag.selected_index == einheit_ui.REITER_TAG and "STEHT AN" in _texte(tag)
     assert heute(page, state).selected_index == einheit_ui.REITER_TAG  # bleibt
     einheit_ui.alle_starten(page, state, 0.0)
     lauf = heute(page, state)

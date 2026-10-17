@@ -4,7 +4,7 @@ Zwei Reiter:
 
 - **Tage**: oben eine Woche (‹ ›, auch wischen), unter jedem Tag Punkte für die Zahl der
   Übungen, heute mit Ring. Ein Tipp auf einen Tag zeigt darunter seine Übungen —
-  zusammengefasst wie „Nach Übung“ in der Tagesansicht: Wert, Sätze, Mini-Kurve.
+  zusammengefasst wie „Gemacht“ in der Tagesansicht: Wert, Sätze, Mini-Kurve.
   „Tag öffnen“ führt in die Tagesansicht mit Plänen und Notizen.
 - **Übungen**: alle Übungen, die zuletzt gemachten zuerst, mit Mini-Kurve, letztem Wert
   und Trend (Mittel der letzten vier Wochen gegen die vier davor); oben ein Filter nach
@@ -38,8 +38,8 @@ from trainingsapp.core.verlauf import (
     trend,
     wochen_titel,
 )
-from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.scroll import scroll_merken
+from trainingsapp.ui.components.uebungszeile import abschnitt, grosser_wert, uebungszeile
 from trainingsapp.ui.components.verlaufskurve import mini, mini_saeulen
 from trainingsapp.ui.state import AppState
 
@@ -119,80 +119,6 @@ def _oeffner(page: ft.Page, pfad: str) -> Callable[[], object]:
         await page.push_route(pfad)
 
     return handler
-
-
-def _ueberschrift(text: str, rechts: ft.Control | None = None) -> ft.Control:
-    return ft.Container(
-        padding=ft.Padding.only(left=4, top=6),
-        content=ft.Row(
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Text(text.upper(), size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                rechts or ft.Container(),
-            ],
-        ),
-    )
-
-
-def _zeile(
-    *,
-    symbol_key: str | None,
-    titel: str,
-    unter: list[ft.Control],
-    rechts: list[ft.Control],
-    on_click: Callable[[], object],
-) -> ft.Control:
-    """Eine Übung als Karte: Symbol, Name und Zeilen darunter, rechts Wert und Mini-Kurve."""
-    return ft.Container(
-        bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
-        border_radius=16,
-        padding=ft.Padding.only(left=12, right=6, top=10, bottom=10),
-        ink=True,
-        on_click=on_click,
-        content=ft.Row(
-            spacing=12,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Container(
-                    width=38,
-                    height=38,
-                    border_radius=19,
-                    bgcolor=ft.Colors.SECONDARY_CONTAINER,
-                    alignment=ft.Alignment.CENTER,
-                    content=ft.Icon(
-                        symbol(symbol_key), size=20, color=ft.Colors.ON_SECONDARY_CONTAINER
-                    ),
-                ),
-                ft.Column(
-                    spacing=1,
-                    expand=True,
-                    tight=True,
-                    controls=[ft.Text(titel, size=15, weight=ft.FontWeight.W_600), *unter],
-                ),
-                ft.Column(
-                    spacing=3,
-                    tight=True,
-                    horizontal_alignment=ft.CrossAxisAlignment.END,
-                    controls=rechts,
-                ),
-                ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-            ],
-        ),
-    )
-
-
-def _wert(text: str, einheit: str) -> ft.Control:
-    """„43 Wdh.“ — die Zahl groß, die Einheit klein dahinter."""
-    return ft.Row(
-        spacing=3,
-        tight=True,
-        vertical_alignment=ft.CrossAxisAlignment.END,
-        controls=[
-            ft.Text(text, size=15, weight=ft.FontWeight.W_700),
-            *([ft.Text(einheit, size=11, opacity=0.7)] if einheit else []),
-        ],
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +304,7 @@ def _tage(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
     anzahl = f"{len(zeilen)} {'Übung' if len(zeilen) == 1 else 'Übungen'}"
     controls: list[ft.Control] = [
         streifen,
-        _ueberschrift(
+        abschnitt(
             f"{tag_titel(tag)} · {anzahl}",
             ft.TextButton("Tag öffnen", on_click=_oeffner(page, f"/tag/{tag.isoformat()}")),
         ),
@@ -399,9 +325,9 @@ def _tage(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
         if z.kennzahl is not None and z.wert is not None:
             bisher = [(t, e) for t, e in daten.je_kachel.get(z.kachel_id, []) if t <= tag]
             werte = [w for _, w in tageswerte(bisher, z.kennzahl)][-MINI_WERTE:]
-            rechts = [_wert(z.kennzahl.text(z.wert), z.kennzahl.einheit), mini(werte)]
+            rechts = [grosser_wert(z.kennzahl.text(z.wert), z.kennzahl.einheit), mini(werte)]
         controls.append(
-            _zeile(
+            uebungszeile(
                 symbol_key=uebung.icon_key if uebung else None,
                 titel=uebung.name if uebung else "?",
                 unter=unter,
@@ -480,7 +406,7 @@ def _uebungen(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
     controls: list[ft.Control] = []
     if len(chips) > 2:
         controls.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=chips))
-    controls.append(_ueberschrift("Zuletzt gemacht"))
+    controls.append(abschnitt("Zuletzt gemacht"))
     gezeigt = 0
     for kachel_id in reihenfolge:
         uebung = daten.katalog.get(kachel_id)
@@ -516,7 +442,7 @@ def _uebungen(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
                             tight=True,
                             horizontal_alignment=ft.CrossAxisAlignment.END,
                             controls=[
-                                _wert(
+                                grosser_wert(
                                     kz[0].text(letzter) if letzter is not None else "–",
                                     kz[0].einheit,
                                 ),
@@ -540,7 +466,7 @@ def _uebungen(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
                             tight=True,
                             horizontal_alignment=ft.CrossAxisAlignment.END,
                             controls=[
-                                _wert(f"{je_woche[-1][2]}×", ""),
+                                grosser_wert(f"{je_woche[-1][2]}×", ""),
                                 ft.Text("diese Woche", size=11, opacity=0.7),
                             ],
                         ),
@@ -548,7 +474,7 @@ def _uebungen(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
                 )
             ]
         controls.append(
-            _zeile(
+            uebungszeile(
                 symbol_key=uebung.icon_key if uebung else None,
                 titel=uebung.name if uebung else "?",
                 unter=[ft.Text(unter, size=12, opacity=0.75)],

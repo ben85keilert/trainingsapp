@@ -10,6 +10,7 @@ nicht — das ist Absicht, siehe `test_import_regel.py`).
 
 from __future__ import annotations
 
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -197,7 +198,7 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
     from trainingsapp.ui.views.plan_einstellen import plan_einstellen
     from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
     from trainingsapp.ui.views.plan_info import plan_info_view
-    from trainingsapp.ui.views.tag import tag_view, tagesansicht
+    from trainingsapp.ui.views.tag import UEBERSICHT, ZEITLEISTE, tag_view, tagesansicht
     from trainingsapp.ui.views.verlauf import verlauf
 
     state, plan, item, uebung, eintrag = welt
@@ -218,9 +219,10 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
     assert unter_plan.route == f"/plan/{plan.id}/eintrag/{eintrag.id}"
     korrektur = formular_korrektur(page, state, eintrag, f"/plan/{plan.id}")
     assert korrektur.route == f"/plan/{plan.id}/eintrag/{eintrag.id}/korrigieren"
-    for ordnung in ("plan", "zeit", "uebung"):
-        state.tag_ordnung = ordnung
+    for darstellung in (UEBERSICHT, ZEITLEISTE):
+        state.tag_darstellung = darstellung
         assert tagesansicht(page, state, state.heute()) is not None
+        assert tagesansicht(page, state, state.heute() - timedelta(days=1)) is not None
     assert tag_view(page, state, state.heute()).route.startswith("/tag/")
     assert verlauf(page, state) is not None  # mit Kurve, weil "hold" eine Kennzahl ist
 
@@ -228,9 +230,12 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
 
     assert uebungen(page, state) is not None
     assert plaene_liste(page, state) is not None
-    for reiter in ("heute", "verlauf"):
-        state.reiter = reiter
-        assert hauptansicht(page, state).floating_action_button is None
+    # Der runde Knopf: auf „Heute“ Nachtragen (Ben, 18.10.2026), im Verlauf keiner
+    state.reiter = "heute"
+    knopf = hauptansicht(page, state).floating_action_button
+    assert knopf is not None and knopf.content == "Nachtragen"
+    state.reiter = "verlauf"
+    assert hauptansicht(page, state).floating_action_button is None
 
 
 def test_verlauf_ohne_werte(page, state) -> None:

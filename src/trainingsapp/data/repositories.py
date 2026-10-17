@@ -1588,6 +1588,20 @@ class SessionRepo:
         ).fetchone()
         return self._zeile(r) if r else None
 
+    def zuletzt_gemacht(self, subject_id: str, anzahl: int = 6) -> list[SessionEntry]:
+        """Je Übung der jüngste gültige Eintrag, die jüngsten zuerst — für „Nachtragen“
+        (Ben, 18.10.2026: „zuletzt gemacht“ mit den Werten von damals)."""
+        ergebnis: dict[str, SessionEntry] = {}
+        for r in self.con.execute(
+            f"{_GUELTIGE} AND s.subject_id = ? ORDER BY e.started_at DESC, e.rowid DESC LIMIT 500",
+            (subject_id,),
+        ):
+            if r["exercise_id"] not in ergebnis:
+                ergebnis[r["exercise_id"]] = self._zeile(r)
+                if len(ergebnis) >= anzahl:
+                    break
+        return list(ergebnis.values())
+
     def tage_mit_eintraegen(
         self, subject_id: str, von: date, bis: date, exercise_id: str | None = None
     ) -> dict[date, int]:
@@ -1725,6 +1739,15 @@ class DayNoteRepo:
             (subject_id, tag.isoformat()),
         ).fetchone()
         return r["text"] if r else ""
+
+    def angelegt(self, subject_id: str, tag: date) -> datetime | None:
+        """Wann die Notiz zum ersten Mal geschrieben wurde — ihr Platz in der Zeitleiste."""
+        r = self.con.execute(
+            "SELECT created_at FROM day_note WHERE subject_id = ? AND date = ? "
+            "AND deleted_at IS NULL AND text != ''",
+            (subject_id, tag.isoformat()),
+        ).fetchone()
+        return datetime.fromisoformat(r["created_at"]) if r else None
 
     def setzen(self, subject_id: str, tag: date, text: str) -> None:
         stempel = jetzt().isoformat()
@@ -2116,6 +2139,31 @@ class StreckeRepo:
             (recording_id, recording_id),
         ).fetchone()
         return self._zeile(r) if r else None
+
+    def zu_eintraegen(self, eintrag_ids: Iterable[str]) -> dict[str, Strecke]:
+        """Die Trainings zu diesen Tagebucheinträgen: Eintrag-ID → Training (Tagesansicht).
+
+        Das Training zeigt auf den Eintrag, den es anlegte; eine Korrektur (Notiz, Werte)
+        ist ein neuer Eintrag — darum zählt auch jeder Vorgänger in der Kette.
+        """
+        ids = list(dict.fromkeys(eintrag_ids))
+        if not ids:
+            return {}
+        platzhalter = ",".join("?" * len(ids))
+        return {
+            r["eintrag"]: self._zeile(r)
+            for r in self.con.execute(
+                "WITH RECURSIVE kette(aktuell, eintrag) AS ("
+                f"  SELECT id, id FROM session_entry WHERE id IN ({platzhalter})"
+                "  UNION ALL"
+                "  SELECT e.replaces_entry_id, k.eintrag FROM kette k"
+                "  JOIN session_entry e ON e.id = k.aktuell WHERE e.replaces_entry_id IS NOT NULL"
+                ") SELECT k.eintrag AS eintrag, s.* FROM kette k"
+                " JOIN strecke s ON s.session_entry_id = k.aktuell"
+                " WHERE s.deleted_at IS NULL ORDER BY s.started_at",
+                ids,
+            )
+        }
 
     def zur_einheit(self, einheit_id: str) -> Strecke | None:
         """Das Training, als das eine Einheit lief — falls eines."""

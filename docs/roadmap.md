@@ -82,6 +82,9 @@ einem sichtbaren Fortschritt in der App.
 - Verlauf neu (17.10.2026, P37): Woche → Tag → Übung, Reiter „Übungen“ mit Mini-Kurven
   und Trend; eine Kurve je Übung mit Kennzahl-Auswahl, Zeitraum und Datumsachse ohne
   Randwerte (`core/verlauf.py`)
+- Heute neu (18.10.2026, P40): Übersicht mit Plan-Karten (Start/Weiter, Chips zum Abhaken),
+  „Gemacht“ und Notizen; Zeitleiste statt „Chronologisch“; „Nachtragen“ mit Uhrzeit und Plan,
+  auch für vergangene Tage; Kalender
 - Pläne mit Zeitplan (Migration 008): aktiv/deaktiviert und Wochentage; „Heute“
   zeigt, was ansteht, plus Pläne, die man für heute aufnimmt („Trainieren“ in der
   Planverwaltung oder „Anderen Plan heute trainieren“). Übungen → Pläne öffnet zum

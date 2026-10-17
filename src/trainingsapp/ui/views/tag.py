@@ -1,55 +1,90 @@
-"""Tagesansicht — die zentrale Ansicht: alles, was an einem Tag dran war.
+"""Ein Tag — der Reiter „Heute“ und `/tag/<datum>` (Ben, 18.10.2026; P40, Skizzen A und B).
 
-Auf „Heute" steht sie unter den Plänen; über `/tag/<YYYY-MM-DD>` erreicht man
-jeden anderen Tag (Kalender, Pfeile).
+Zwei Darstellungen, oben umschaltbar (`AppState.tag_darstellung`):
 
-Oben die **Tagesbilanz**: wie viele Übungen gemacht, je Plan „3 von 5" und
-was noch offen ist. Darunter drei Sortierungen derselben Einträge:
+- **Übersicht** (Vorgabe, Skizze A): was ansteht — je Plan eine Karte: noch nicht begonnen
+  mit ▶ Start (hat der Plan Timer, öffnet Start seinen Ablauf), unterwegs mit „Weiter
+  mit …“ und den offenen Übungen als Chips (Tipp = gemacht, mit Rückgängig; lang drücken
+  = Werte eintragen), fertig als eine Zeile —; was gemacht ist — je Übung eine Zeile im
+  Stil des Verlaufs, der Plan als Etikett, ein Training mit seiner Strecke —; dann die
+  Notizen (zum Tag, je Training).
+- **Zeitleiste** (Skizze B, statt „Chronologisch“): der Tag nach der Uhr — ein Plan als
+  Block mit seinen Übungen und seiner Notiz, ein Training für sich, die Notiz zum Tag an
+  ihrer Stelle; was noch ansteht, oben eine Zeile je Plan.
 
-- **Nach Plan** — je Training (Plan an diesem Tag): was gemacht wurde, gleiche
-  Übungen zusammengefasst, und welche Planübungen offen sind.
-- **Nach Übung** — die Tagesbilanz je Übung über alle Pläne hinweg: Mengen
-  addiert (dreimal 50 Liegestütze = 150), Ausprägungen getrennt (45° ≠ 90°).
-- **Chronologisch** — jeder Eintrag einzeln, so wie er entstand.
+„Nach Plan“ und „Nach Übung“ sind entfallen (Ben: „fast dreimal das gleiche“); die Sicht
+je Übung über die Tage hat der Verlauf. Gruppiert wird in `core/tag.py`. Eine gemachte
+Übung antippen öffnet alle ihre Einträge des Tags (`views/leistungen.py`), der runde
+Knopf „Nachtragen“ die Auswahl (`views/nachtragen.py`).
 
-Leistung und Abhaken sind immer unterscheidbar: Ein gefüllter Haken mit
-Werten ist eine Leistung, ein leerer Haken „nur abgehakt“. Das Bündeln rechnet
-`core/tagesbilanz.py`. Unten die Tagesnotiz, je Training die Trainingsnotiz —
-zusammen mit den Notizen je Übung ist das das Tagebuch.
+Ein Plan ist ein Rahmen, in dem man variiert: Die Karte sagt „2 von 5“ und zeigt je Übung
+ein Stück, sie zählt keine Prozente.
+
+Ein Tipp hier baut nur diese Spalte neu (`auffrischen`), nicht die ganze Ansicht — so
+bleibt die SnackBar mit „Rückgängig“ stehen.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
+import asyncio
+import contextlib
 from collections.abc import Callable
-from datetime import date, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.models import Session, SessionEntry
-from trainingsapp.core.plaene import heutige_plaene
-from trainingsapp.core.result_spec import parameter_werte
-from trainingsapp.core.tagesbilanz import (
-    Buendel,
-    Planstand,
-    buendeln,
-    ist_leistung,
-    planstand,
+from trainingsapp.core.models import (
+    Exercise,
+    Plan,
+    PlanItem,
+    Session,
+    SessionEntry,
+    Strecke,
+    lokaler_tag,
 )
+from trainingsapp.core.plaene import warum_nicht
+from trainingsapp.core.plan_durchlauf import dauer_text_gesamt, schritte_fuer
+from trainingsapp.core.standards import mit_plan_spec
+from trainingsapp.core.tag import (
+    FERTIG,
+    LEER,
+    NEU,
+    UNTERWEGS,
+    Abschnitt,
+    Gemacht,
+    Plankarte,
+    gemacht,
+    plaene_des_tags,
+    plankarten,
+    zeitleiste,
+    zusammenfassung,
+)
+from trainingsapp.core.verlauf import MONATE, WOCHENTAGE_LANG, montag
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.notiz import notiz_dialog
 from trainingsapp.ui.components.scroll import scroll_merken
-from trainingsapp.ui.components.werte import wert_zeilen
+from trainingsapp.ui.components.uebungszeile import (
+    abschnitt,
+    etikett,
+    grosser_wert,
+    uebungszeile,
+)
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
+from trainingsapp.ui.views.plan import auspraegung_vorgabe
+from trainingsapp.ui.views.plan_ablauf import plan_ablauf_route
+from trainingsapp.ui.views.uebungen import heute_trainieren
 
-ORDNUNGEN = [("plan", "Nach Plan"), ("uebung", "Nach Übung"), ("zeit", "Chronologisch")]
-ERKLAERUNG = {
-    "plan": "Je Plan: was gemacht wurde (gleiche Übungen zusammengefasst) und was noch offen ist.",
-    "uebung": "Je Übung über alle Pläne — Mengen addiert, Ausprägungen wie 45° und 90° getrennt.",
-    "zeit": "Jeder Eintrag einzeln, in der Reihenfolge, in der er entstand.",
-}
 WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
-#: Mehr offene Übungen nennt die Bilanz nicht beim Namen
-OFFEN_NAMEN = 4
+#: Die zwei Darstellungen (Ben, 18.10.2026: „A ist die Standardansicht“)
+UEBERSICHT, ZEITLEISTE = "uebersicht", "zeitleiste"
+DARSTELLUNGEN = [(UEBERSICHT, "Übersicht"), (ZEITLEISTE, "Zeitleiste")]
+#: Karten und Blöcke
+KARTE = ft.Colors.SURFACE_CONTAINER_LOWEST
+FERTIG_KARTE = ft.Colors.SURFACE_CONTAINER
 
 
 def tag_titel(tag: date, heute: date) -> str:
@@ -61,296 +96,1010 @@ def tag_titel(tag: date, heute: date) -> str:
     return f"{WOCHENTAGE[tag.weekday()]}, {tag:%d.%m.%Y}"
 
 
-def eintrag_text(e: SessionEntry) -> str:
-    """Eine Zeile für einen einzelnen Eintrag: Werte — oder „abgehakt“."""
-    if ist_leistung(e):
-        return e.shorthand()
-    zusatz = buendeln([e])[0].auspraegung_text()
-    return f"abgehakt · {zusatz}" if zusatz else "abgehakt"
+def tag_lang(tag: date) -> str:
+    """„Samstag, 17. Oktober“ — der Kopf auf „Heute“.
+
+    >>> tag_lang(date(2026, 10, 17))
+    'Samstag, 17. Oktober'
+    """
+    return f"{WOCHENTAGE_LANG[tag.weekday()]}, {tag.day}. {MONATE[tag.month - 1]}"
 
 
-def tagesansicht(page: ft.Page, state: AppState, tag: date) -> ft.Control:
-    eintraege = state.sitzungen.eintraege_am_tag(state.profil.id, tag)
-    katalog = {u.id: u for u in state.uebungen.alle(mit_geloeschten=True)}
-    gemacht = {e.exercise_id for e, _ in eintraege}
+def _uhr(t: datetime | None) -> str:
+    return f"{t.astimezone():%H:%M}" if t is not None else ""
 
-    def name(exercise_id: str) -> str:
-        u = katalog.get(exercise_id)
+
+def _spanne(von: datetime | None, bis: datetime | None) -> str:
+    """„07:42–07:58“ — oder „um 07:42“, wenn es keine Minute dauerte."""
+    if von is None:
+        return ""
+    if bis is None or (bis - von).total_seconds() < 60:
+        return f"um {_uhr(von)}"
+    return f"{_uhr(von)}–{_uhr(bis)}"
+
+
+def _minuten(von: datetime | None, bis: datetime | None) -> str:
+    """„16 min“ — leer unter einer Minute."""
+    if von is None or bis is None:
+        return ""
+    minuten = round((bis - von).total_seconds() / 60)
+    return f"{minuten} min" if minuten >= 1 else ""
+
+
+def _hinweis(text: str) -> ft.Control:
+    return ft.Container(
+        padding=ft.Padding.only(left=4, top=2, bottom=4),
+        content=ft.Text(text, size=13, opacity=0.7),
+    )
+
+
+@dataclass(slots=True)
+class _Daten:
+    """Alles über den Tag — einmal je Aufbau gelesen."""
+
+    tag: date
+    heute: date
+    eintraege: list[tuple[SessionEntry, Session]]
+    katalog: dict[str, Exercise]
+    plan_namen: dict[str, str]
+    karten: list[Plankarte]
+    #: Pläne, die an diesem Tag nicht anstehen — für „Anderen Plan“
+    andere: list[Plan]
+    gibt_plaene: bool
+    #: Eintrag-ID → Training (`data.StreckeRepo.zu_eintraegen`)
+    strecken: dict[str, Strecke]
+    vom_timer: set[str]
+    tagesnotiz: str
+    notiz_zeit: datetime | None
+
+    @property
+    def ist_heute(self) -> bool:
+        return self.tag == self.heute
+
+    def name(self, exercise_id: str) -> str:
+        u = self.katalog.get(exercise_id)
         return u.name if u else "(Übung nicht mehr vorhanden)"
 
-    def oeffner(pfad: str) -> Callable[[], object]:
-        async def handler() -> None:
-            await page.push_route(pfad)
+    def namen(self) -> dict[str, str]:
+        return {i: u.name for i, u in self.katalog.items()}
 
-        return handler
+    def ist_training(self, e: SessionEntry) -> bool:
+        return e.id in self.strecken
 
-    def ordnung_wechseln(e: ft.Event[ft.SegmentedButton]) -> None:
-        if e.control.selected:
-            state.tag_ordnung = e.control.selected[0]
-            state.neu_zeichnen()
+    def training(self, g: Gemacht) -> Strecke | None:
+        return next((self.strecken[e.id] for e in g.eintraege if e.id in self.strecken), None)
 
-    def tagesnotiz_speichern(e: ft.Event[ft.TextField]) -> None:
-        state.tagesnotizen.setzen(state.profil.id, tag, e.control.value or "")
-
-    def trainingsnotiz_speicherer(session_id: str) -> Callable[[ft.Event[ft.TextField]], None]:
-        def handler(e: ft.Event[ft.TextField]) -> None:
-            state.sitzungen.notiz_setzen(session_id, e.control.value or "")
-
-        return handler
-
-    # -- Bausteine ---------------------------------------------------------------
-
-    def haken(leistung: bool) -> ft.Control:
-        """Gefüllt = Leistung mit Werten, leer = nur abgehakt."""
-        return ft.Icon(
-            ft.Icons.CHECK_CIRCLE if leistung else ft.Icons.CHECK_CIRCLE_OUTLINE,
-            color=ft.Colors.PRIMARY if leistung else None,
-            opacity=1 if leistung else 0.55,
-            size=22,
+    def reihen(self) -> list[Gemacht]:
+        """Je Übung eine Zeile, nach dem ersten Eintrag — ein Training immer für sich."""
+        reihen = gemacht(
+            [(e, s) for e, s in self.eintraege if not self.ist_training(e)], self.namen()
+        )
+        for e, s in self.eintraege:
+            if self.ist_training(e):
+                reihen.extend(gemacht([(e, s)], self.namen()))
+        return sorted(
+            reihen, key=lambda g: (g.beginn is None, g.beginn.timestamp() if g.beginn else 0)
         )
 
-    def zeile(e: SessionEntry, mit_zeit: bool = True) -> ft.Control:
-        """Ein einzelner Eintrag — chronologisch und in aufgeklappten Bündeln.
+    def sessions(self) -> list[Session]:
+        """Die Sessions mit Einträgen, in der Reihenfolge ihres ersten Eintrags."""
+        return list({s.id: s for _, s in self.eintraege}.values())
 
-        Je Parameter eine eigene Zeile mit Namen; ohne Werte „abgehakt".
-        """
-        zeit = f"{e.started_at.astimezone():%H:%M}" if e.started_at else "–"
-        werte = parameter_werte(e.spec_snapshot, e.result) if e.result else []
-        teile: list[ft.Control] = []
-        if zusatz := buendeln([e])[0].auspraegung_text():
-            teile.append(ft.Text(zusatz, size=12, opacity=0.75))
-        teile.append(wert_zeilen(werte, 12) if werte else ft.Text("abgehakt", size=12))
-        if e.note:
-            teile.append(ft.Text(e.note[:80], size=11, opacity=0.6, italic=True))
-        return ft.ListTile(
-            leading=ft.Text(zeit, size=13) if mit_zeit else haken(ist_leistung(e)),
-            title=ft.Text(name(e.exercise_id) if mit_zeit else zeit),
-            subtitle=ft.Column(spacing=2, tight=True, controls=teile),
-            trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),
-            dense=True,
-            on_click=oeffner(f"/eintrag/{e.id}"),
-        )
+    def notizen(self) -> int:
+        return bool(self.tagesnotiz) + sum(1 for s in self.sessions() if s.note)
 
-    def buendel_zeile(b: Buendel) -> ft.Control:
-        """Ein Bündel: Überschrift = Übung, darunter Ausprägung und je Parameter eine Zeile.
+    def karte(self, plan_id: str | None) -> Plankarte | None:
+        return next((k for k in self.karten if k.plan.id == plan_id), None)
 
-        Aufklappbar zu den Einzeleinträgen, wenn es mehrere sind.
-        """
-        titel = name(b.exercise_id)
-        zeilen: list[ft.Control] = []
-        if zusatz := b.auspraegung_text():
-            zeilen.append(ft.Text(zusatz, size=12, opacity=0.75))
-        werte = b.parameter_zeilen()
-        if werte:
-            zeilen.append(wert_zeilen(werte, 12))
-        else:
-            n = len(b.abgehakt)
-            zeilen.append(ft.Text("abgehakt" if n <= 1 else f"{n}× abgehakt", size=12))
-        untertitel = ft.Column(spacing=2, tight=True, controls=zeilen)
-        if len(b.eintraege) == 1:
-            return ft.ListTile(
-                leading=haken(bool(b.leistungen)),
-                title=ft.Text(titel),
-                subtitle=untertitel,
-                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),
-                dense=True,
-                on_click=oeffner(f"/eintrag/{b.eintraege[0].id}"),
-            )
-        return ft.ExpansionTile(
-            leading=haken(bool(b.leistungen)),
-            title=ft.Text(titel),
-            subtitle=untertitel,
-            dense=True,
-            controls_padding=ft.Padding.only(left=24),
-            controls=[zeile(e, mit_zeit=False) for e in b.eintraege],
-        )
 
-    def offen_zeile(exercise_id: str, plan_id: str) -> ft.Control:
-        return ft.ListTile(
-            leading=ft.Icon(ft.Icons.RADIO_BUTTON_UNCHECKED, size=22, opacity=0.4),
-            title=ft.Text(name(exercise_id), opacity=0.6),
-            subtitle=ft.Text("offen", size=12, opacity=0.5),
-            dense=True,
-            on_click=oeffner(f"/plan/{plan_id}"),
-        )
-
-    def offene(stand: Planstand) -> list[ft.Control]:
-        """Offene Planübungen — ab ein paar Stück eingeklappt, damit das Gemachte vorn bleibt."""
-        if len(stand.offen) <= OFFEN_NAMEN:
-            return [offen_zeile(x, stand.plan_id) for x in stand.offen]
-        return [
-            ft.ExpansionTile(
-                leading=ft.Icon(ft.Icons.PENDING_OUTLINED, size=22, opacity=0.5),
-                title=ft.Text(f"{len(stand.offen)} noch offen", opacity=0.7),
-                dense=True,
-                controls=[offen_zeile(x, stand.plan_id) for x in stand.offen],
-            )
-        ]
-
-    def ueberschrift(text: str, rechts: str = "") -> ft.Control:
-        return ft.Container(
-            padding=ft.Padding.only(left=16, right=16, top=10, bottom=2),
-            content=ft.Row(
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                controls=[
-                    ft.Text(text.upper(), size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                    ft.Text(rechts, size=11, opacity=0.6),
-                ],
-            ),
-        )
-
-    def trainingsnotiz(session: Session) -> ft.Control:
-        return ft.Container(
-            padding=ft.Padding.symmetric(horizontal=16),
-            content=ft.TextField(
-                label="Notiz zum Training",
-                value=session.note,
-                multiline=True,
-                min_lines=1,
-                max_lines=6,
-                dense=True,
-                on_blur=trainingsnotiz_speicherer(session.id),
-            ),
-        )
-
-    # -- Tagesbilanz -------------------------------------------------------------
-
-    # Nur Pläne, die an diesem Tag anstehen oder aufgenommen wurden — ein
-    # deaktivierter Plan soll nicht als „offen" in der Bilanz stehen.
+def _lesen(state: AppState, tag: date) -> _Daten:
+    eintraege = state.sitzungen.eintraege_am_tag(state.profil.id, tag)
+    alle = state.plaene.alle(state.profil.id)
     aufgenommen = state.sitzungen.plaene_am_tag(state.profil.id, tag)
-    alle_plaene = state.plaene.alle(state.profil.id)
-    plaene = [p for p, _ in heutige_plaene(alle_plaene, tag, aufgenommen) if p.items]
-    staende = [planstand(p.id, p.name, [i.exercise_id for i in p.items], gemacht) for p in plaene]
+    plaene = plaene_des_tags(alle, tag, aufgenommen)
+    gezeigt = {p.id for p, _ in plaene}
+    plan_namen = {p.id: p.name for p in alle}
+    for _, s in eintraege:
+        if s.plan_id and s.plan_id not in plan_namen:
+            plan = state.plaene.laden(s.plan_id, mit_geloeschten=True)
+            plan_namen[s.plan_id] = plan.name if plan is not None else "Plan"
+    ids = [e.id for e, _ in eintraege]
+    return _Daten(
+        tag=tag,
+        heute=state.heute(),
+        eintraege=eintraege,
+        katalog={u.id: u for u in state.uebungen.alle(mit_geloeschten=True)},
+        plan_namen=plan_namen,
+        karten=plankarten(plaene, state.sitzungen.anzahl_am_tag(state.profil.id, tag), eintraege),
+        andere=[p for p in alle if p.id not in gezeigt],
+        gibt_plaene=bool(alle),
+        strecken=state.strecken.zu_eintraegen(ids),
+        vom_timer=(
+            state.einheiten.eintraege_vom_timer(ids)
+            if state.einheiten is not None and ids
+            else set()
+        ),
+        tagesnotiz=state.tagesnotizen.lesen(state.profil.id, tag),
+        notiz_zeit=state.tagesnotizen.angelegt(state.profil.id, tag),
+    )
 
-    def bilanz() -> ft.Control:
-        n_leistung = sum(1 for e, _ in eintraege if ist_leistung(e))
-        if eintraege:
-            kopf = (
-                f"{len(gemacht)} {'Übung' if len(gemacht) == 1 else 'Übungen'} gemacht · "
-                f"{n_leistung} mit Werten, {len(eintraege) - n_leistung} nur abgehakt"
-            )
-        else:
-            kopf = "Noch nichts dokumentiert."
-        zeilen: list[ft.Control] = [ft.Text(kopf, size=13, weight=ft.FontWeight.W_600)]
-        for s in staende:
-            offen = [name(x) for x in s.offen]
-            text = f"{s.name}: {len(s.erledigt)} von {s.gesamt}"
-            if offen:
-                text += " · offen: " + ", ".join(offen[:OFFEN_NAMEN])
-                if len(offen) > OFFEN_NAMEN:
-                    text += f" und {len(offen) - OFFEN_NAMEN} weitere"
-            else:
-                text += " · alles erledigt"
-            zeilen.append(
-                ft.Row(
-                    spacing=6,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
-                    controls=[
-                        ft.Icon(
-                            ft.Icons.CHECK_CIRCLE if not offen else ft.Icons.PENDING_OUTLINED,
-                            size=16,
-                            color=ft.Colors.PRIMARY if not offen else None,
-                            opacity=1 if not offen else 0.6,
-                        ),
-                        ft.Text(text, size=12, expand=True),
-                    ],
-                )
-            )
-        return ft.Container(
-            margin=ft.Margin.symmetric(horizontal=12),
-            padding=12,
-            border_radius=12,
-            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-            content=ft.Column(spacing=6, controls=zeilen),
-        )
 
-    # -- Die drei Sortierungen ---------------------------------------------------
-
-    zeilen: list[ft.Control] = []
-    if state.tag_ordnung == "uebung":
-        zeilen.extend(buendel_zeile(b) for b in buendeln(e for e, _ in eintraege))
-    elif state.tag_ordnung == "zeit":
-        zeilen.extend(zeile(e) for e, _ in eintraege)
-    else:  # plan: je Session gebündelt, in Reihenfolge des ersten Eintrags
-        sessions: dict[str, Session] = {}
-        gruppen: dict[str, list[SessionEntry]] = defaultdict(list)
-        for e, s in eintraege:
-            sessions.setdefault(s.id, s)
-            gruppen[s.id].append(e)
-        stand_von: dict[str | None, Planstand] = {s.plan_id: s for s in staende}
-        gezeigt: set[str] = set()
-        for session_id, gruppe in gruppen.items():
-            s = sessions[session_id]
-            plan = state.plaene.laden(s.plan_id, mit_geloeschten=True) if s.plan_id else None
-            stand = stand_von.get(s.plan_id)
-            zeilen.append(
-                ueberschrift(
-                    plan.name if plan else "Ohne Plan",
-                    f"{len(stand.erledigt)} von {stand.gesamt}" if stand else "",
-                )
-            )
-            zeilen.extend(buendel_zeile(b) for b in buendeln(gruppe))
-            if stand is not None:
-                zeilen.extend(offene(stand))
-                gezeigt.add(stand.plan_id)
-            zeilen.append(trainingsnotiz(s))
-        # Pläne ohne Eintrag an diesem Tag: nur heute zeigen, was noch offen ist
-        if tag == state.heute():
-            for stand in staende:
-                if stand.plan_id not in gezeigt and stand.offen:
-                    zeilen.append(ueberschrift(stand.name, f"0 von {stand.gesamt}"))
-                    zeilen.extend(offene(stand))
-
-    return ft.Column(
-        spacing=6,
+def _segmente(plan: Plan, k: Plankarte) -> ft.Control:
+    """Je Planübung ein Stück — gefüllt, wenn sie heute dran war (Skizze C1)."""
+    return ft.Row(
+        spacing=4 if len(plan.items) <= 12 else 2,
         controls=[
-            bilanz(),
             ft.Container(
-                padding=ft.Padding.only(left=16, right=16, top=6),
-                content=ft.SegmentedButton(
-                    selected=[state.tag_ordnung],
-                    segments=[ft.Segment(value=k, label=ft.Text(t)) for k, t in ORDNUNGEN],
-                    on_change=ordnung_wechseln,
+                expand=1,
+                height=6,
+                border_radius=3,
+                bgcolor=ft.Colors.PRIMARY if i.id in k.erledigt else ft.Colors.SECONDARY_CONTAINER,
+            )
+            for i in plan.items
+        ],
+    )
+
+
+def _zeitpunkt(zeit: str, inhalt: ft.Control, *, hohl: bool = False) -> ft.Control:
+    """Ein Punkt der Zeitleiste: Uhrzeit links, Punkt auf der Linie, rechts der Inhalt."""
+    punkt = ft.Container(
+        left=0,
+        top=6,
+        width=12,
+        height=12,
+        border_radius=6,
+        bgcolor=ft.Colors.SURFACE if hohl else ft.Colors.PRIMARY,
+        border=ft.Border.all(2, ft.Colors.PRIMARY) if hohl else None,
+    )
+    return ft.Row(
+        spacing=4,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+        controls=[
+            ft.Container(
+                width=42,
+                padding=ft.Padding.only(top=4),
+                content=ft.Text(
+                    zeit, size=12, weight=ft.FontWeight.W_700, opacity=0.6 if hohl else 1
                 ),
             ),
-            ft.Container(
-                padding=ft.Padding.symmetric(horizontal=16),
-                content=ft.Text(ERKLAERUNG.get(state.tag_ordnung, ""), size=11, opacity=0.6),
-            ),
-            *zeilen,
-            ft.Container(
-                padding=ft.Padding.only(left=16, right=16, top=10, bottom=16),
-                # In einer Zeile mit expand: das Feld nimmt die ganze Breite
-                content=ft.Row(
-                    controls=[
-                        ft.TextField(
-                            label="Notiz zum Tag",
-                            value=state.tagesnotizen.lesen(state.profil.id, tag),
-                            multiline=True,
-                            min_lines=2,
-                            max_lines=10,
-                            hint_text="Wie lief der Tag? Tippen oder diktieren.",
-                            on_blur=tagesnotiz_speichern,
-                            expand=True,
-                        )
-                    ]
-                ),
+            ft.Stack(
+                expand=True,
+                clip_behavior=ft.ClipBehavior.NONE,
+                controls=[
+                    ft.Container(
+                        margin=ft.Margin.only(left=5),
+                        padding=ft.Padding.only(left=14, bottom=12),
+                        border=ft.Border.only(left=ft.BorderSide(2, ft.Colors.OUTLINE_VARIANT)),
+                        # Die Zeile streckt den Inhalt auf die volle Breite (der Stack nicht)
+                        content=ft.Row(controls=[ft.Container(expand=True, content=inhalt)]),
+                    ),
+                    punkt,
+                ],
             ),
         ],
     )
 
 
-def tag_view(page: ft.Page, state: AppState, tag: date) -> ft.View:
-    def springer(ziel: date) -> Callable[[], object]:
+def tag_waehlen(page: Any, state: AppState, tag: date) -> None:
+    """Der Kalender: einen anderen Tag öffnen (`/tag/<datum>`)."""
+    nachher = Nachher()
+    heute = state.heute()
+
+    async def spaeter() -> None:
+        # Falls ``on_dismiss`` nach „Öffnen“ ausbleibt, geht es trotzdem weiter — die
+        # Aktionen laufen nur einmal (`Nachher`)
+        await asyncio.sleep(0.6)
+        await nachher.bei_schliessen()
+
+    def gewaehlt(_e: object = None) -> None:
+        wert = waehler.value
+        if wert is None:
+            return
+        if isinstance(wert, datetime):
+            ziel = (wert.astimezone() if wert.tzinfo is not None else wert).date()
+        else:
+            ziel = wert
+        waehler.open = False
+        nachher.danach(lambda: page.push_route(f"/tag/{ziel.isoformat()}"))
+        page.run_task(spaeter)
+
+    waehler = ft.DatePicker(
+        value=datetime.combine(tag, datetime.min.time()),
+        first_date=datetime(heute.year - 5, 1, 1),
+        last_date=datetime.combine(heute + timedelta(days=365), datetime.min.time()),
+        current_date=datetime.combine(heute, datetime.min.time()),
+        locale=ft.Locale("de", "DE"),
+        help_text="Tag wählen",
+        cancel_text="Abbrechen",
+        confirm_text="Öffnen",
+        on_change=gewaehlt,
+        on_dismiss=nachher.bei_schliessen,
+    )
+    page.show_dialog(waehler)
+
+
+def tagesansicht(
+    page: Any, state: AppState, tag: date, *, basis: str = "", mit_datum: bool = True
+) -> ft.Control:
+    """Der Tag in der gewählten Darstellung.
+
+    ``basis`` ist die Route dieser Ansicht (``""`` = „Heute“, sonst `/tag/<datum>`) — darunter
+    hängen `…/leistungen/<übung>` und `…/nachtragen/<übung>`. ``mit_datum``: der Tag im Kopf
+    (auf „Heute“; die Tagesansicht hat ihn in der Titelleiste).
+    """
+    stand: dict[str, _Daten] = {"daten": _lesen(state, tag)}
+    spalte = ft.Column(spacing=8, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+
+    def daten() -> _Daten:
+        return stand["daten"]
+
+    def auffrischen() -> None:
+        """Neu lesen und nur diese Spalte neu füllen."""
+        stand["daten"] = _lesen(state, tag)
+        spalte.controls = aufbauen()
+        with contextlib.suppress(Exception):  # nicht mehr auf dem Bildschirm
+            spalte.update()
+
+    def oeffner(pfad: str) -> Callable[[], Any]:
+        async def handler() -> None:
+            await page.push_route(pfad)
+
+        return handler
+
+    # -- Handlungen ---------------------------------------------------------------
+
+    def abhaker(plan: Plan, item: PlanItem) -> Callable[[], None]:
+        """Ein Chip: gemacht — wie „Erledigt“ im Plan, mit Rückgängig."""
+
+        def handler() -> None:
+            uebung = daten().katalog.get(item.exercise_id)
+            if uebung is None:
+                return
+            eff = mit_plan_spec(item, uebung)
+            session = state.sitzungen.session_fuer(state.profil.id, plan.id, tag)
+            eintrag = state.sitzungen.eintrag_anlegen(
+                session, eff, auspraegung_vorgabe(state, item, eff)
+            )
+            auffrischen()
+            page.show_dialog(
+                ft.SnackBar(
+                    ft.Text(f"{uebung.name}: gemacht"),
+                    action="Rückgängig",
+                    on_action=rueckgaengig(eintrag.id),
+                )
+            )
+
+        return handler
+
+    def rueckgaengig(eintrag_id: str) -> Callable[[], None]:
+        def handler() -> None:
+            state.sitzungen.eintrag_loeschen(eintrag_id)
+            auffrischen()
+
+        return handler
+
+    def weiter(plan: Plan, item: PlanItem) -> Callable[[], Any]:
+        """„Weiter mit …“: den Plan öffnen, diese Übung aufgeklappt."""
+
+        async def handler() -> None:
+            state.plan_offen = item.id
+            await page.push_route(f"/plan/{plan.id}")
+
+        return handler
+
+    def entferner(plan_id: str) -> Callable[[], None]:
+        def handler() -> None:
+            state.sitzungen.aus_tag_nehmen(state.profil.id, plan_id, tag)
+            auffrischen()
+
+        return handler
+
+    def anderen_plan_waehlen() -> None:
+        nachher = Nachher()
+
+        def waehler(plan_id: str) -> Callable[[], None]:
+            trainieren = heute_trainieren(page, state, plan_id)
+
+            def handler() -> None:
+                nachher.danach(trainieren)
+                schliessen(dialog)
+
+            return handler
+
+        dialog: ft.AlertDialog = ft.AlertDialog(
+            title=ft.Text("Plan heute trainieren"),
+            scrollable=True,
+            content=ft.Column(
+                tight=True,
+                spacing=0,
+                controls=[
+                    ft.ListTile(
+                        leading=ft.Icon(ft.Icons.PLAY_ARROW),
+                        title=ft.Text(p.name),
+                        subtitle=ft.Text(warum_nicht(p, tag), size=12),
+                        on_click=waehler(p.id),
+                    )
+                    for p in daten().andere
+                ],
+            ),
+            actions=[ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog))],
+            on_dismiss=nachher.bei_schliessen,
+        )
+        page.show_dialog(dialog)
+
+    async def im_verlauf() -> None:
+        """Der Tag im Verlauf (Reiter „Tage“)."""
+        state.reiter = "verlauf"
+        state.verlauf_tab = 0
+        state.verlauf_woche = montag(tag)
+        state.verlauf_tag = tag
+        if basis:
+            await page.push_route("/")
+        else:
+            state.neu_zeichnen()
+
+    def tagesnotiz_bearbeiten() -> None:
+        page.show_dialog(
+            notiz_dialog(
+                "Notiz zum Tag",
+                daten().tagesnotiz,
+                lambda text: state.tagesnotizen.setzen(state.profil.id, tag, text),
+                danach=auffrischen,
+                hinweis="Wie lief der Tag? Tippen oder diktieren.",
+            )
+        )
+
+    def session_titel(s: Session) -> str:
+        return daten().plan_namen.get(s.plan_id, "Plan") if s.plan_id else "Ohne Plan"
+
+    def session_notiz(s: Session) -> Callable[[], None]:
+        def handler() -> None:
+            page.show_dialog(
+                notiz_dialog(
+                    f"Notiz: {session_titel(s)}",
+                    s.note,
+                    lambda text: state.sitzungen.notiz_setzen(s.id, text),
+                    danach=auffrischen,
+                    hinweis="Wie ging das Training? Tippen oder diktieren.",
+                )
+            )
+
+        return handler
+
+    def ziel(g: Gemacht) -> Callable[[], Any]:
+        """Eine gemachte Übung antippen: ihre Einträge des Tags — ein Training: die Strecke."""
+        strecke = daten().training(g)
+        if strecke is not None:
+            return oeffner(f"/ausdauer/{strecke.id}")
+        return oeffner(f"{basis}/leistungen/{g.exercise_id}")
+
+    # -- Kopf -----------------------------------------------------------------------
+
+    def kopf() -> ft.Control:
+        d = daten()
+        reihen = d.reihen()
+        trainings = sum(1 for g in reihen if d.training(g) is not None)
+        zeilen: list[ft.Control] = []
+        if mit_datum:
+            zeilen.append(ft.Text(tag_lang(tag), size=18, weight=ft.FontWeight.W_600))
+        zeilen.append(
+            ft.Text(
+                zusammenfassung(len(reihen) - trainings, trainings, d.notizen()),
+                size=12,
+                opacity=0.7,
+            )
+        )
+        knoepfe: list[ft.Control] = []
+        if mit_datum:
+            knoepfe = [
+                ft.IconButton(
+                    ft.Icons.CHEVRON_LEFT,
+                    tooltip="Vortag",
+                    on_click=oeffner(f"/tag/{(tag - timedelta(days=1)).isoformat()}"),
+                ),
+                ft.IconButton(
+                    ft.Icons.CALENDAR_MONTH_OUTLINED,
+                    tooltip="Anderen Tag wählen",
+                    on_click=lambda: tag_waehlen(page, state, tag),
+                ),
+            ]
+        return ft.Container(
+            padding=ft.Padding.only(left=4),
+            content=ft.Row(
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Column(spacing=0, tight=True, expand=True, controls=zeilen),
+                    *knoepfe,
+                ],
+            ),
+        )
+
+    def umschalter() -> ft.Control:
+        def gewechselt(e: ft.Event[ft.SegmentedButton]) -> None:
+            if e.control.selected:
+                state.tag_darstellung = e.control.selected[0]
+                auffrischen()
+
+        return ft.SegmentedButton(
+            selected=[state.tag_darstellung],
+            show_selected_icon=False,
+            segments=[ft.Segment(value=k, label=ft.Text(t)) for k, t in DARSTELLUNGEN],
+            on_change=gewechselt,
+        )
+
+    # -- Pläne ---------------------------------------------------------------------------
+
+    def anderer_plan() -> ft.Control | None:
+        if not (daten().ist_heute and daten().andere):
+            return None
+        return ft.TextButton(
+            "Anderen Plan", icon=ft.Icons.PLAYLIST_ADD, on_click=anderen_plan_waehlen
+        )
+
+    def chip(plan: Plan, item: PlanItem) -> ft.Control:
+        """Eine offene Übung als Chip — ein Container: ``ft.Chip`` kennt kein langes Drücken."""
+        return ft.Container(
+            border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+            border_radius=8,
+            padding=ft.Padding.only(left=8, right=10, top=5, bottom=5),
+            ink=True,
+            on_click=abhaker(plan, item),
+            on_long_press=oeffner(nachtragen_route(basis, item.exercise_id, plan.id)),
+            tooltip="Antippen: gemacht · lang drücken: Werte eintragen",
+            content=ft.Row(
+                tight=True,
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Icon(ft.Icons.RADIO_BUTTON_UNCHECKED, size=16, opacity=0.7),
+                    ft.Text(daten().name(item.exercise_id), size=13),
+                ],
+            ),
+        )
+
+    def volle_karte(k: Plankarte) -> ft.Control:
+        """Heute, noch nicht begonnen oder unterwegs (Skizze C1)."""
+        d = daten()
+        plan = k.plan
+        schritte = schritte_fuer(plan, d.katalog)
+        mit_ablauf = any(s.profil is not None for s in schritte)
+        if k.zustand == NEU:
+            n = len(plan.items)
+            teile = [f"{n} {'Übung' if n == 1 else 'Übungen'}"]
+            if mit_ablauf:
+                teile.append(f"mit Ablauf, {dauer_text_gesamt(schritte)}")
+        else:
+            teile = [k.stand_text()]
+            if k.beginn is not None:
+                teile.append(f"begonnen um {_uhr(k.beginn)}")
+        if k.zusaetzlich:
+            teile.append("zusätzlich heute")
+        rechts: list[ft.Control] = []
+        if k.zusaetzlich and not k.eintraege:
+            rechts.append(
+                ft.IconButton(
+                    ft.Icons.CLOSE,
+                    tooltip="Für heute wieder entfernen",
+                    on_click=entferner(plan.id),
+                )
+            )
+        rechts.append(
+            ft.IconButton(
+                ft.Icons.CHEVRON_RIGHT, tooltip="Plan öffnen", on_click=oeffner(f"/plan/{plan.id}")
+            )
+        )
+        inhalt: list[ft.Control] = [
+            ft.Row(
+                vertical_alignment=ft.CrossAxisAlignment.START,
+                controls=[
+                    ft.Column(
+                        spacing=2,
+                        tight=True,
+                        expand=True,
+                        controls=[
+                            ft.Text(plan.name, size=17, weight=ft.FontWeight.BOLD),
+                            ft.Text(" · ".join(teile), size=12, opacity=0.75),
+                        ],
+                    ),
+                    *rechts,
+                ],
+            )
+        ]
+        if k.zustand == NEU:
+            start = plan_ablauf_route(f"/plan/{plan.id}") if mit_ablauf else f"/plan/{plan.id}"
+            inhalt.append(
+                ft.Row(
+                    spacing=4,
+                    controls=[
+                        ft.FilledButton("Start", icon=ft.Icons.PLAY_ARROW, on_click=oeffner(start)),
+                        ft.TextButton("Übungen ansehen", on_click=oeffner(f"/plan/{plan.id}")),
+                    ],
+                )
+            )
+        else:
+            naechste = k.offen[0]
+            inhalt += [
+                _segmente(plan, k),
+                ft.Row(
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text(
+                            spans=[
+                                ft.TextSpan("Weiter mit "),
+                                ft.TextSpan(
+                                    d.name(naechste.exercise_id),
+                                    style=ft.TextStyle(weight=ft.FontWeight.BOLD),
+                                ),
+                            ],
+                            size=14,
+                            expand=True,
+                        ),
+                        ft.FilledButton(
+                            "Weiter", icon=ft.Icons.PLAY_ARROW, on_click=weiter(plan, naechste)
+                        ),
+                    ],
+                ),
+                ft.Row(
+                    wrap=True,
+                    spacing=6,
+                    run_spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text("Noch offen:", size=12, opacity=0.7),
+                        *(chip(plan, i) for i in k.offen),
+                    ],
+                ),
+                ft.Text("Antippen: gemacht · lang drücken: Werte eintragen", size=11, opacity=0.55),
+            ]
+        return ft.Container(
+            bgcolor=KARTE,
+            border_radius=18,
+            padding=14,
+            content=ft.Column(spacing=10, controls=inhalt),
+        )
+
+    def kurze_karte(k: Plankarte) -> ft.Control:
+        """Eine Zeile: fertig, noch leer — oder ein anderer Tag."""
+        d = daten()
+        if k.zustand == LEER:
+            teile = ["noch leer — antippen und Übungen hinzufügen"]
+        else:
+            teile = [f"{k.stand_text()} erledigt" if k.zustand == FERTIG else k.stand_text()]
+            if spanne := _spanne(k.beginn, k.ende):
+                teile.append(spanne)
+            if k.notiz:
+                teile.append("eine Notiz")
+        if k.zusaetzlich and d.ist_heute:
+            teile.append("zusätzlich heute")
+        fertig = k.zustand == FERTIG
+        symbol = {
+            FERTIG: ft.Icons.CHECK_CIRCLE,
+            LEER: ft.Icons.LIST_ALT_OUTLINED,
+        }.get(k.zustand, ft.Icons.PENDING_OUTLINED)
+        return ft.Container(
+            bgcolor=FERTIG_KARTE if fertig else KARTE,
+            border_radius=16,
+            padding=ft.Padding.only(left=14, right=8, top=10, bottom=10),
+            ink=d.ist_heute,
+            on_click=oeffner(f"/plan/{k.plan.id}") if d.ist_heute else None,
+            content=ft.Row(
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Icon(
+                        symbol,
+                        size=22,
+                        color=ft.Colors.PRIMARY if fertig else None,
+                        opacity=1 if fertig else 0.6,
+                    ),
+                    ft.Column(
+                        spacing=0,
+                        tight=True,
+                        expand=True,
+                        controls=[
+                            ft.Text(k.plan.name, size=15, weight=ft.FontWeight.W_600),
+                            ft.Text(" · ".join(teile), size=12, opacity=0.75),
+                        ],
+                    ),
+                    *([ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5)] if d.ist_heute else []),
+                ],
+            ),
+        )
+
+    def plan_teile() -> list[ft.Control]:
+        d = daten()
+        karten = [k for k in d.karten if d.ist_heute or k.zustand != LEER]
+        titel = "Steht an" if d.ist_heute else "Pläne"
+        if not karten:
+            if not d.ist_heute:
+                return []
+            text = (
+                "Heute steht kein Plan an."
+                if d.gibt_plaene
+                else "Noch kein Plan. Pläne legst du unter „Übungen“ → „Pläne“ an."
+            )
+            return [abschnitt(titel, anderer_plan()), _hinweis(text)]
+        reihenfolge = [k for k in karten if k.zustand != FERTIG] + [
+            k for k in karten if k.zustand == FERTIG
+        ]
+        return [
+            abschnitt(titel, anderer_plan()),
+            *(
+                volle_karte(k) if d.ist_heute and k.zustand in (NEU, UNTERWEGS) else kurze_karte(k)
+                for k in reihenfolge
+            ),
+        ]
+
+    # -- Gemacht ---------------------------------------------------------------------------
+
+    def gemacht_zeile(g: Gemacht) -> ft.Control:
+        d = daten()
+        uebung = d.katalog.get(g.exercise_id)
+        strecke = d.training(g)
+        z = g.zeile
+        vom_timer = any(e.id in d.vom_timer for e in g.eintraege)
+        erste = " · ".join(
+            t for t in (_uhr(g.beginn), z.zeile, "vom Timer" if vom_timer else "") if t
+        )
+        unter: list[ft.Control] = [ft.Text(erste, size=12, opacity=0.75)]
+        if z.zusatz:
+            unter.append(ft.Text(z.zusatz, size=11, opacity=0.6))
+        if notiz := next((e.note for e in reversed(g.eintraege) if e.note), ""):
+            unter.append(
+                ft.Text(
+                    notiz,
+                    size=11,
+                    italic=True,
+                    opacity=0.6,
+                    max_lines=2,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                )
+            )
+        rechts: list[ft.Control] = (
+            [grosser_wert(z.kennzahl.text(z.wert), z.kennzahl.einheit)]
+            if z.kennzahl is not None and z.wert is not None
+            else [ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, size=20, opacity=0.6)]
+        )
+        etiketten = (
+            ["Training"]
+            if strecke is not None
+            else [d.plan_namen.get(p, "Plan") for p in g.plan_ids]
+        )
+        return uebungszeile(
+            symbol_key=uebung.icon_key if uebung else None,
+            titel=d.name(g.exercise_id),
+            unter=unter,
+            rechts=rechts,
+            on_click=ziel(g),
+            etiketten=etiketten,
+        )
+
+    def gemacht_teile() -> list[ft.Control]:
+        d = daten()
+        reihen = d.reihen()
+        verlauf = ft.TextButton("Im Verlauf", on_click=im_verlauf) if reihen else None
+        teile: list[ft.Control] = [
+            abschnitt(f"Gemacht · {len(reihen)}" if reihen else "Gemacht", verlauf)
+        ]
+        if not reihen:
+            teile.append(
+                _hinweis(
+                    "Noch nichts eingetragen — Plan starten, Chip antippen oder „Nachtragen“."
+                    if d.ist_heute
+                    else "An diesem Tag ist nichts eingetragen."
+                )
+            )
+        teile.extend(gemacht_zeile(g) for g in reihen)
+        return teile
+
+    # -- Notizen ---------------------------------------------------------------------------
+
+    def notiz_karte(titel: str, text: str, on_click: Callable[[], None]) -> ft.Control:
+        return ft.Container(
+            bgcolor=KARTE,
+            border_radius=16,
+            padding=ft.Padding.only(left=14, right=8, top=10, bottom=10),
+            ink=True,
+            on_click=on_click,
+            content=ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Column(
+                        spacing=2,
+                        tight=True,
+                        expand=True,
+                        controls=[
+                            ft.Text(titel, size=12, weight=ft.FontWeight.W_600, opacity=0.7),
+                            ft.Text(text, size=14),
+                        ],
+                    ),
+                    ft.Icon(ft.Icons.EDIT_OUTLINED, size=18, opacity=0.5),
+                ],
+            ),
+        )
+
+    def notiz_teile() -> list[ft.Control]:
+        d = daten()
+        karten: list[ft.Control] = []
+        knoepfe: list[ft.Control] = []
+        if d.tagesnotiz:
+            karten.append(notiz_karte("Zum Tag", d.tagesnotiz, tagesnotiz_bearbeiten))
+        else:
+            knoepfe.append(
+                ft.TextButton("Notiz zum Tag", icon=ft.Icons.ADD, on_click=tagesnotiz_bearbeiten)
+            )
+        for s in d.sessions():
+            if s.note:
+                karten.append(notiz_karte(session_titel(s), s.note, session_notiz(s)))
+            elif s.plan_id:
+                knoepfe.append(
+                    ft.TextButton(
+                        f"Notiz zu „{session_titel(s)}“",
+                        icon=ft.Icons.ADD,
+                        on_click=session_notiz(s),
+                    )
+                )
+        return [abschnitt("Notizen"), *karten, ft.Row(wrap=True, spacing=0, controls=knoepfe)]
+
+    # -- Zeitleiste ------------------------------------------------------------------------
+
+    def block_zeile(g: Gemacht) -> ft.Control:
+        z = g.zeile
+        abgehakt = z.kennzahl is None or z.wert is None
+        if z.kennzahl is not None and z.wert is not None:
+            wert = " ".join(t for t in (z.kennzahl.text(z.wert), z.kennzahl.einheit) if t)
+        else:
+            wert = "abgehakt"
+        unter = [ft.Text(z.zeile, size=11, opacity=0.65)] if not abgehakt else []
+        return ft.Container(
+            ink=True,
+            on_click=ziel(g),
+            border_radius=8,
+            padding=ft.Padding.symmetric(horizontal=4, vertical=2),
+            content=ft.Row(
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Column(
+                        spacing=0,
+                        tight=True,
+                        expand=True,
+                        controls=[ft.Text(daten().name(g.exercise_id), size=14), *unter],
+                    ),
+                    ft.Text(
+                        wert,
+                        size=13 if abgehakt else 14,
+                        weight=None if abgehakt else ft.FontWeight.W_600,
+                        opacity=0.7 if abgehakt else 1,
+                    ),
+                ],
+            ),
+        )
+
+    def block(a: Abschnitt) -> ft.Control:
+        d = daten()
+        if a.plan_id is None:
+            (g,) = a.zeilen
+            strecke = d.training(g)
+            if strecke is None:
+                return ft.Container(
+                    bgcolor=KARTE, border_radius=14, padding=8, content=block_zeile(g)
+                )
+            return ft.Container(
+                bgcolor=KARTE,
+                border_radius=14,
+                padding=ft.Padding.only(left=12, right=6, top=8, bottom=8),
+                ink=True,
+                on_click=ziel(g),
+                content=ft.Row(
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Column(
+                            spacing=2,
+                            tight=True,
+                            expand=True,
+                            controls=[
+                                ft.Row(
+                                    spacing=6,
+                                    controls=[
+                                        ft.Text(
+                                            d.name(g.exercise_id),
+                                            size=15,
+                                            weight=ft.FontWeight.W_600,
+                                        ),
+                                        etikett("Training"),
+                                    ],
+                                ),
+                                ft.Text(g.zeile.zeile, size=12, opacity=0.75),
+                            ],
+                        ),
+                        ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                    ],
+                ),
+            )
+        k = d.karte(a.plan_id)
+        teile = [k.stand_text()] if k is not None else []
+        if dauer := _minuten(a.beginn, a.ende):
+            teile.append(dauer)
+        kopf_zeile = ft.Container(
+            ink=d.ist_heute,
+            on_click=oeffner(f"/plan/{a.plan_id}") if d.ist_heute else None,
+            border_radius=8,
+            padding=ft.Padding.symmetric(horizontal=4, vertical=2),
+            content=ft.Row(
+                controls=[
+                    ft.Text(
+                        d.plan_namen.get(a.plan_id, "Plan"),
+                        size=15,
+                        weight=ft.FontWeight.W_700,
+                        expand=True,
+                    ),
+                    ft.Text(" · ".join(teile), size=12, opacity=0.7),
+                ]
+            ),
+        )
+        zeilen: list[ft.Control] = [kopf_zeile, *(block_zeile(g) for g in a.zeilen)]
+        if a.session is not None and a.session.note:
+            zeilen.append(
+                ft.Container(
+                    ink=True,
+                    on_click=session_notiz(a.session),
+                    border_radius=8,
+                    padding=ft.Padding.symmetric(horizontal=4, vertical=2),
+                    content=ft.Row(
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
+                        controls=[
+                            ft.Icon(ft.Icons.EDIT_NOTE, size=16, opacity=0.6),
+                            ft.Text(a.session.note, size=12, italic=True, expand=True),
+                        ],
+                    ),
+                )
+            )
+        if k is not None and k.offen and k.zustand != LEER:
+            zeilen.append(
+                ft.Container(
+                    padding=ft.Padding.symmetric(horizontal=4),
+                    content=ft.Text(
+                        "noch offen: " + ", ".join(d.name(i.exercise_id) for i in k.offen),
+                        size=12,
+                        opacity=0.6,
+                    ),
+                )
+            )
+        return ft.Container(
+            bgcolor=KARTE,
+            border_radius=14,
+            padding=8,
+            content=ft.Column(spacing=4, controls=zeilen),
+        )
+
+    def anstehen_zeile(k: Plankarte) -> ft.Control:
+        """Zeitleiste: ein Plan, der ansteht — eine Zeile mit Stand und ▶."""
+        plan = k.plan
+        if k.zustand == NEU:
+            mit_ablauf = any(s.profil is not None for s in schritte_fuer(plan, daten().katalog))
+            start = plan_ablauf_route(f"/plan/{plan.id}") if mit_ablauf else f"/plan/{plan.id}"
+            knopf = ft.FilledButton("Start", icon=ft.Icons.PLAY_ARROW, on_click=oeffner(start))
+        else:
+            knopf = ft.FilledButton(
+                "Weiter", icon=ft.Icons.PLAY_ARROW, on_click=weiter(plan, k.offen[0])
+            )
+        return ft.Container(
+            bgcolor=KARTE,
+            border_radius=16,
+            padding=ft.Padding.only(left=14, right=10, top=10, bottom=10),
+            content=ft.Row(
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Column(
+                        spacing=6,
+                        tight=True,
+                        expand=True,
+                        controls=[
+                            ft.Text(
+                                f"{plan.name} · {k.stand_text()}",
+                                size=14,
+                                weight=ft.FontWeight.W_600,
+                            ),
+                            _segmente(plan, k),
+                        ],
+                    ),
+                    knopf,
+                ],
+            ),
+        )
+
+    def zeitleiste_teile() -> list[ft.Control]:
+        d = daten()
+        teile: list[ft.Control] = []
+        if d.ist_heute:
+            anstehend = [k for k in d.karten if k.zustand in (NEU, UNTERWEGS)]
+            if anstehend or anderer_plan() is not None:
+                teile.append(abschnitt("Steht an", anderer_plan()))
+                teile.extend(anstehen_zeile(k) for k in anstehend)
+        teile.append(abschnitt("Der Tag"))
+        punkte: list[tuple[datetime | None, ft.Control]] = [
+            (a.beginn, block(a)) for a in zeitleiste(d.eintraege, d.namen(), d.ist_training)
+        ]
+        if d.tagesnotiz:
+            zeit = d.notiz_zeit if d.notiz_zeit and lokaler_tag(d.notiz_zeit) == tag else None
+            punkte.append(
+                (
+                    zeit,
+                    ft.Container(
+                        bgcolor=KARTE,
+                        border_radius=14,
+                        padding=ft.Padding.only(left=12, right=8, top=8, bottom=8),
+                        ink=True,
+                        on_click=tagesnotiz_bearbeiten,
+                        content=ft.Column(
+                            spacing=2,
+                            tight=True,
+                            controls=[
+                                ft.Text(
+                                    "Notiz zum Tag",
+                                    size=12,
+                                    weight=ft.FontWeight.W_600,
+                                    opacity=0.7,
+                                ),
+                                ft.Text(d.tagesnotiz, size=14),
+                            ],
+                        ),
+                    ),
+                )
+            )
+        punkte.sort(key=lambda p: (p[0] is None, p[0].timestamp() if p[0] else 0))
+        if not punkte:
+            teile.append(_hinweis("Noch nichts eingetragen."))
+        else:
+            linie = [_zeitpunkt(_uhr(z), c) for z, c in punkte]
+            if d.ist_heute:
+                linie.append(_zeitpunkt("jetzt", ft.Container(height=6), hohl=True))
+            teile.append(ft.Column(spacing=0, controls=linie))
+        if not d.tagesnotiz:
+            teile.append(
+                ft.Row(
+                    controls=[
+                        ft.TextButton(
+                            "Notiz zum Tag", icon=ft.Icons.ADD, on_click=tagesnotiz_bearbeiten
+                        )
+                    ]
+                )
+            )
+        return teile
+
+    # -- Zusammensetzen --------------------------------------------------------------------
+
+    def aufbauen() -> list[ft.Control]:
+        teile = [kopf(), umschalter()]
+        if state.tag_darstellung == ZEITLEISTE:
+            return teile + zeitleiste_teile()
+        return teile + plan_teile() + gemacht_teile() + notiz_teile()
+
+    spalte.controls = aufbauen()
+    # Unten Platz für den runden Knopf „Nachtragen“
+    return ft.Container(
+        padding=ft.Padding.only(left=12, right=12, top=8, bottom=96), content=spalte
+    )
+
+
+def tag_view(page: Any, state: AppState, tag: date) -> ft.View:
+    """`/tag/<datum>` — ein beliebiger Tag, vor- und zurückblätternd."""
+    heute = state.heute()
+    basis = f"/tag/{tag.isoformat()}"
+
+    def springer(ziel: date) -> Callable[[], Any]:
         async def handler() -> None:
             await page.push_route(f"/tag/{ziel.isoformat()}")
 
         return handler
 
     ansicht = ft.View(
-        route=f"/tag/{tag.isoformat()}",
+        route=basis,
         appbar=ft.AppBar(
-            title=ft.Text(tag_titel(tag, state.heute())),
+            title=ft.Text(tag_titel(tag, heute)),
             actions=[
                 ft.IconButton(
                     ft.Icons.CHEVRON_LEFT,
@@ -362,13 +1111,30 @@ def tag_view(page: ft.Page, state: AppState, tag: date) -> ft.View:
                     tooltip="Folgetag",
                     on_click=springer(tag + timedelta(days=1)),
                 ),
+                ft.IconButton(
+                    ft.Icons.CALENDAR_MONTH_OUTLINED,
+                    tooltip="Anderen Tag wählen",
+                    on_click=lambda: tag_waehlen(page, state, tag),
+                ),
             ],
         ),
+        floating_action_button=nachtragen_knopf(page, state, tag, basis) if tag <= heute else None,
         scroll=ft.ScrollMode.AUTO,
         padding=0,
-        controls=[sicher(tagesansicht(page, state, tag), expand=False)],
+        controls=[
+            sicher(tagesansicht(page, state, tag, basis=basis, mit_datum=False), expand=False)
+        ],
     )
     return scroll_merken(page, state, ansicht.route, ansicht)
 
 
-__all__ = ["tag_titel", "tag_view", "tagesansicht"]
+__all__ = [
+    "DARSTELLUNGEN",
+    "UEBERSICHT",
+    "ZEITLEISTE",
+    "tag_lang",
+    "tag_titel",
+    "tag_view",
+    "tag_waehlen",
+    "tagesansicht",
+]

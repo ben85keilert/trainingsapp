@@ -15,6 +15,7 @@ from trainingsapp.core.models import (
     Plan,
     PlanItem,
     Session,
+    Strecke,
     Subject,
     jetzt,
     lokaler_tag,
@@ -27,6 +28,7 @@ from trainingsapp.data.repositories import (
     PlanRepo,
     SessionRepo,
     SettingRepo,
+    StreckeRepo,
     SubjectRepo,
     TagRepo,
 )
@@ -1285,3 +1287,56 @@ def test_freitext_einmal_je_tag(welt) -> None:
     # neu=True (zweite Stelle im Plan): eigener Eintrag
     repo.text_setzen(sitzung, uebung, "note", "zweite Runde", heute, neu=True)
     assert len([e for e in repo.eintraege(sitzung.id) if e.result.get("note")]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Für die Tagesansicht (Ben, 18.10.2026; P40)
+# ---------------------------------------------------------------------------
+
+
+def test_zuletzt_gemacht_je_uebung_der_juengste(welt) -> None:
+    """„Nachtragen“ → „Zuletzt gemacht“: je Übung ein Eintrag, die jüngsten zuerst."""
+    con, repo, ich, sitzung = welt
+    wade = _wadenheben(con)
+    knie = ExerciseRepo(con).laden(seed_id("kniebeuge"))
+    assert knie is not None
+    t = datetime(2026, 10, 18, 8, tzinfo=UTC)
+    repo.eintrag_anlegen(sitzung, wade, {"reps": [10]}, started_at=t)
+    repo.eintrag_anlegen(sitzung, knie, {"reps": [12]}, started_at=t + timedelta(hours=1))
+    repo.eintrag_anlegen(sitzung, wade, {"reps": [15]}, started_at=t + timedelta(hours=2))
+    zuletzt = repo.zuletzt_gemacht(ich.id)
+    assert [(e.exercise_id, e.result["reps"]) for e in zuletzt] == [
+        (wade.id, [15]),
+        (knie.id, [12]),
+    ]
+    assert len(repo.zuletzt_gemacht(ich.id, 1)) == 1
+
+
+def test_training_zum_eintrag_auch_nach_korrekturen(welt) -> None:
+    """Das Training zeigt auf den Eintrag, den es anlegte — auch zwei Korrekturen später."""
+    con, repo, ich, sitzung = welt
+    eintrag = repo.eintrag_anlegen(sitzung, _wadenheben(con), {"duration": 305})
+    strecken = StreckeRepo(con)
+    training = Strecke(subject_id=ich.id, sportart="gehen", distanz_m=408, dauer_s=305)
+    training.session_entry_id = eintrag.id
+    strecken.anlegen(training)
+    assert strecken.zu_eintraegen([eintrag.id])[eintrag.id].id == training.id
+    erste = repo.eintrag_korrigieren(eintrag.id, {"duration": 310}, note="schön")
+    zweite = repo.eintrag_korrigieren(erste.id, {"duration": 320})
+    assert strecken.zu_eintraegen([zweite.id])[zweite.id].id == training.id
+    assert strecken.zu_eintraegen([]) == {}
+
+
+def test_tagesnotiz_weiss_wann_sie_entstand(welt) -> None:
+    """Ihr Platz in der Zeitleiste: der erste Zeitpunkt, nicht der letzte."""
+    con, _repo, ich, _sitzung = welt
+    notizen = DayNoteRepo(con)
+    tag = date(2026, 10, 16)
+    assert notizen.angelegt(ich.id, tag) is None
+    notizen.setzen(ich.id, tag, "Beine schwer")
+    erst = notizen.angelegt(ich.id, tag)
+    assert erst is not None
+    notizen.setzen(ich.id, tag, "Beine schwer, trotzdem gut")
+    assert notizen.angelegt(ich.id, tag) == erst
+    notizen.setzen(ich.id, tag, "")
+    assert notizen.angelegt(ich.id, tag) is None

@@ -1,9 +1,11 @@
-"""Leistungen von heute — Route `<plan>/leistungen/<übung>` (auch unter `/training/<übung>`).
+"""Leistungen eines Tages — Route `<plan>/leistungen/<übung>` (auch unter `/training/<übung>`),
+aus der Tagesansicht `/leistungen/<übung>` („Heute“) und `/tag/<datum>/leistungen/<übung>`.
 
 Aus der Übungsausführung: Ein Tipp auf „Heute geleistet“ zeigt **alle** Einträge der
 Übung von heute auf einer Seite (Ben, 17.10.2026: „es wird nicht alles angezeigt, nur das
 letzte — zumindest bei den Notizen“). Je Eintrag eine Karte mit Uhrzeit, Plan, den
-Werten — in der Notation von damals (`spec_snapshot`, `SpecForm`) — und der Notiz.
+Werten — in der Notation von damals (`spec_snapshot`, `SpecForm`) — und der Notiz. Aus der
+Tagesansicht (Ben, 18.10.2026, Skizze A4) dazu „Nachtragen“ und „Im Verlauf“.
 
 Alles auf einmal bearbeiten: „Speichern“ legt für jeden geänderten Eintrag eine Korrektur
 an (der alte Stand bleibt im Verlauf), Zurück speichert ebenso (`components/zurueck.py`),
@@ -16,11 +18,13 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Session, SessionEntry
+from trainingsapp.core.tagesbilanz import kachel
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.spec_form import SpecForm
@@ -45,16 +49,25 @@ class _Karte:
         return self.stand() != self.anfang
 
 
-def leistungen_view(page: Any, state: AppState, route: str, uebung: Exercise) -> ft.View:
-    """Alle Einträge von ``uebung`` heute — ansehen, korrigieren, löschen.
+def leistungen_view(
+    page: Any,
+    state: AppState,
+    route: str,
+    uebung: Exercise,
+    tag: date | None = None,
+    nachtragen: str | None = None,
+) -> ft.View:
+    """Alle Einträge von ``uebung`` an ``tag`` (ohne: heute) — ansehen, korrigieren, löschen.
 
-    ``route`` ist die eigene Route; die Ansicht darunter (Plan oder Einzeltraining)
-    ist alles davor (`…/leistungen/<übung>`).
+    ``route`` ist die eigene Route; die Ansicht darunter (Plan, Einzeltraining oder Tag)
+    ist alles davor (`…/leistungen/<übung>`). ``nachtragen``: Route der Nachtragen-Seite
+    dieser Übung (aus der Tagesansicht) — dann stehen „Nachtragen“ und „Im Verlauf“ da.
     """
-    basis = route.rsplit("/leistungen", 1)[0]
+    basis = route.rsplit("/leistungen", 1)[0] or "/"
     heute = state.heute()
+    tag = tag or heute
     karten: list[_Karte] = []
-    for eintrag, session in state.sitzungen.eintraege_am_tag(state.profil.id, heute):
+    for eintrag, session in state.sitzungen.eintraege_am_tag(state.profil.id, tag):
         if eintrag.exercise_id != uebung.id:
             continue
         form = SpecForm(
@@ -136,9 +149,9 @@ def leistungen_view(page: Any, state: AppState, route: str, uebung: Exercise) ->
 
     def zeichnen() -> None:
         liste.controls = [karte_bauen(i, k) for i, k in enumerate(karten, start=1)] or [
-            ft.Text("Heute noch nichts eingetragen.", opacity=0.7)
+            ft.Text(_kopftext(0, tag, heute), opacity=0.7)
         ]
-        kopf.value = _kopftext(len(karten))
+        kopf.value = _kopftext(len(karten), tag, heute)
         for c in (liste, kopf):
             with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
                 c.update()
@@ -192,11 +205,42 @@ def leistungen_view(page: Any, state: AppState, route: str, uebung: Exercise) ->
     async def abbrechen() -> None:
         await page.push_route(basis)
 
-    kopf = ft.Text(_kopftext(len(karten)), size=13, opacity=0.75)
+    def weiter_nach(ziel: str) -> Callable[[], Any]:
+        """Erst Geändertes speichern, dann weiter — sonst ginge es verloren."""
+
+        async def handler() -> None:
+            if any(k.geaendert() for k in karten) and sichern() is not None:
+                return
+            await page.push_route(ziel)
+
+        return handler
+
+    kopf = ft.Text(_kopftext(len(karten), tag, heute), size=13, opacity=0.75)
     zeichnen()
+    mehr: list[ft.Control] = (
+        [
+            ft.Row(
+                wrap=True,
+                spacing=8,
+                controls=[
+                    ft.OutlinedButton(
+                        "Nachtragen", icon=ft.Icons.ADD, on_click=weiter_nach(nachtragen)
+                    ),
+                    ft.TextButton(
+                        "Im Verlauf ansehen",
+                        icon=ft.Icons.SHOW_CHART,
+                        on_click=weiter_nach(f"/verlauf/{kachel(uebung, uebung.id)}"),
+                    ),
+                ],
+            )
+        ]
+        if nachtragen is not None
+        else []
+    )
+    titel = f"Heute: {uebung.name}" if tag == heute else f"{tag:%d.%m.}: {uebung.name}"
     ansicht = ft.View(
         route=route,
-        appbar=ft.AppBar(title=ft.Text(f"Heute: {uebung.name}")),
+        appbar=ft.AppBar(title=ft.Text(titel)),
         scroll=ft.ScrollMode.AUTO,
         padding=16,
         controls=[
@@ -207,6 +251,7 @@ def leistungen_view(page: Any, state: AppState, route: str, uebung: Exercise) ->
                     controls=[
                         kopf,
                         liste,
+                        *mehr,
                         ft.Text(
                             "Speichern legt für jeden geänderten Eintrag eine Korrektur an — "
                             "der alte Stand bleibt im Verlauf. Zurück speichert ebenso.",
@@ -237,17 +282,21 @@ def leistungen_view(page: Any, state: AppState, route: str, uebung: Exercise) ->
     )
 
 
-def _kopftext(anzahl: int) -> str:
+def _kopftext(anzahl: int, tag: date, heute: date) -> str:
     """„3 Einträge von heute — alle auf einmal bearbeiten.“
 
-    >>> _kopftext(1), _kopftext(0)
+    >>> h = date(2026, 10, 18)
+    >>> _kopftext(1, h, h), _kopftext(0, h, h)
     ('1 Eintrag von heute — Werte und Notiz bearbeiten, löschen.', 'Heute noch kein Eintrag.')
+    >>> _kopftext(2, date(2026, 10, 16), h)
+    '2 Einträge vom 16.10. — alle auf einmal bearbeiten, einzeln löschen.'
     """
+    wann = "von heute" if tag == heute else f"vom {tag:%d.%m.}"
     if anzahl == 0:
-        return "Heute noch kein Eintrag."
+        return "Heute noch kein Eintrag." if tag == heute else f"Am {tag:%d.%m.} kein Eintrag."
     if anzahl == 1:
-        return "1 Eintrag von heute — Werte und Notiz bearbeiten, löschen."
-    return f"{anzahl} Einträge von heute — alle auf einmal bearbeiten, einzeln löschen."
+        return f"1 Eintrag {wann} — Werte und Notiz bearbeiten, löschen."
+    return f"{anzahl} Einträge {wann} — alle auf einmal bearbeiten, einzeln löschen."
 
 
 __all__ = ["leistungen_view"]

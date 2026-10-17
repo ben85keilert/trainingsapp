@@ -175,8 +175,8 @@ class AppState:
     papierkorb_offen: int = 0
     #: Reiter „Übungen": 0 = Katalog, 1 = Pläne
     uebungen_tab: int = 0
-    #: Ordnung der Tagesansicht: "plan", "zeit" oder "uebung"
-    tag_ordnung: str = "plan"
+    #: Darstellung der Tagesansicht (Ben, 18.10.2026): "uebersicht" oder "zeitleiste"
+    tag_darstellung: str = "uebersicht"
     #: Verlauf (Ben, 17.10.2026): Reiter (0 = Tage, 1 = Übungen), gezeigte Woche (ihr
     #: Montag; None = die aktuelle), gewählter Tag (None = von selbst), Typ-Filter
     verlauf_tab: int = 0

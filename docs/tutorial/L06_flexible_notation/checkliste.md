@@ -32,9 +32,9 @@ wurde, bleibt so lesbar, wie es erfasst wurde.
 |---|---|
 | `ui/components/spec_form.py` | aus Aufgabe 3 |
 | `data/repositories.py` | `PlanRepo`, `SessionRepo` (Aufgabe 4), `DayNoteRepo` |
-| `ui/views/heute.py` | Pläne mit „x von n heute", darunter der Tag |
+| `ui/views/heute.py` | Pläne mit „x von n heute", darunter der Tag; seit 18.10.2026 der Tag aus `tag.py` mit „Nachtragen“ |
 | `ui/views/plan.py` | abhaken (Tipp = gemacht, Ziel-Chip = wie geplant), bearbeiten |
-| `ui/views/tag.py` | Tagesansicht: nach Plan, Zeit oder Übung; Notizen je Ebene |
+| `ui/views/tag.py` | Tagesansicht: nach Plan, Zeit oder Übung; Notizen je Ebene (seit 18.10.2026: Übersicht und Zeitleiste, `core/tag.py`) |
 | `ui/views/eintrag.py` | ansehen, korrigieren, löschen mit Rückfrage |
 | `ui/views/verlauf.py` | Woche, Tag und Übungen; die Kurve je Übung in `verlauf_kachel.py` (seit 17.10.2026) |
 

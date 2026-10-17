@@ -110,10 +110,11 @@ Jedes Feld hat eine Rolle (`core/parameter.py`):
 Im Plan wählt man Ausprägungen *vor* dem Eintragen (Chips „Winkel: 45° 90°“);
 sie wandern in jeden Eintrag. Ein „+30“ bei 45° hängt nie an den 90°-Eintrag an.
 
-Die Tagesansicht bündelt „Nach Plan“ und „Nach Übung“ je **Übung + Ausprägung**
-und addiert die Mengen (`core/tagesbilanz.py`). Ein Eintrag ohne Menge ist
-**abgehakt** (leerer Haken) und wird getrennt ausgewiesen: „150 Wdh. aus 3
-Einträgen · zusätzlich abgehakt“. „Chronologisch“ zeigt jeden Eintrag einzeln.
+Die Tagesansicht („Gemacht“) und der Verlauf bündeln je **Übung + Ausprägung**
+und addieren die Mengen (`core/tagesbilanz.py`, `core/tag.py`). Ein Eintrag ohne
+Menge ist **abgehakt** (leerer Haken) und wird getrennt ausgewiesen: „150 Wdh. aus
+3 Einträgen · zusätzlich abgehakt“. Die Zeitleiste zeigt den Tag nach der Uhr, je
+Plan ein Block (Ben, 18.10.2026: statt „Nach Plan“, „Nach Übung“, „Chronologisch“).
 
 **Varianten** (Migration 007): Eine Kopie einer Übung ist eine Variante
 (`exercise.family_id`) und teilt sich im Verlauf die Kachel des Originals. Wer

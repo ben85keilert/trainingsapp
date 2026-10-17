@@ -18,6 +18,9 @@ subject ──┬── session ──── session_entry ──── entry_me
           │                      └──────────── measurement
           ├── hrv_recording ──── hrv_metrics_cache
           ├── plan ──────── plan_item
+          ├── einheit ──┬── einheit_baustein   (Teile: HRV, Timer, GPS, Plan — Migration 018)
+          │             └── einheit_ereignis   (Zeitleiste, unveränderlich)
+          ├── strecke        (Ausdauertraining, Migration 012 — nie synchronisiert)
           └── consent
 
 exercise ──┬── exercise_media
@@ -99,6 +102,25 @@ tragen `plan.course_chapter_id` und werden beim Abschluss des Kapitels deaktivie
 nie gelöscht. Bedingungen rechnen aus `session_entry` und `hrv_recording`, nie aus
 Messwerten (`core/kurse.py`, `data/kurse.py`).
 
+**Einheit** (Migration 018, `docs/plan_einheit.md`): was zusammen lief — HRV-Messung,
+Timer, Ausdauertraining, Plan-Ablauf. `einheit.started_at` ist der Nullpunkt (`t_s` = 0),
+`ended_at` `NULL` heißt „läuft“ bzw. beim nächsten Start abgebrochen.
+`einheit_baustein` nennt je Teil seine Datei (HRV relativ zu `Messungen/`, Strecke
+relativ zu `Strecken/`) und `versatz_s` (Zeit des Teils + Versatz = `t_s`) — über den
+**Dateipfad**, weil eine HRV-Aufnahme über mehrere Einheiten laufen kann.
+`einheit_ereignis` ist die Zeitleiste (`nr` fortlaufend, `daten_json` nur ortsfrei,
+`core.einheit.DATEN_SCHLUESSEL`). Migration 019: `strecke.einheit_id` verbindet ein
+Training mit seiner Einheit — so findet die Auswertung auch eine HRV-Aufnahme, die
+vorher begann und weiterlief. Die Datei einer GPS-Beteiligung wird nie mitgeschickt.
+
+**Timer an Übung, Planübung und Plan** (Migration 020, `docs/plan_einheit.md` §7):
+`exercise.timer_json` = die Profile der Übung (Paketfeld `timer`), `plan.timer_json` =
+„Timer für alle Übungen“, `plan.auto_next` = nach dem Timer einer Übung automatisch
+weiter, `plan_item.timer_json` = die Wahl der Planübung (Profil der Übung oder eigene
+Kopie, Zeitfeld, „Zeit eintragen“). Vorrang: Planübung > Plan > erstes Profil der
+Übung. Ein Eintrag vom Timer trägt Anfang und Ende (`session_entry.started_at`,
+`ended_at`) — sonst steht dort nur der Zeitpunkt des Tippens.
+
 **Der Tag ist die Bezugsgröße.** Zeitstempel sind UTC, aber „heute" ist ein
 lokaler Kalendertag. `core.models.tagesgrenzen()` rechnet die lokale
 Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,
@@ -156,9 +178,9 @@ und nirgends sonst.
 | `hrv_korrektur` | Vorgabe der automatischen Korrektur (JSON, `hrv_core.regeln`) |
 | `timer_profile`, `timer_aktiv` | Timer-Profile (JSON, `core.timer`) und das zuletzt benutzte |
 
-Timer-Profile liegen hier, solange sie ein Werkzeug des Geräts sind. Hängen sie
-später an Planübungen (Planung: `docs/plan_hrv_timer.md`), brauchen sie eine
-eigene Tabelle mit Sync-Feldern.
+Die freie Timer-Bibliothek liegt hier, ein Werkzeug des Geräts. Profile, die an einer
+Übung, einem Plan oder einer Planübung hängen (Migration 020), stehen als JSON in deren
+Zeilen und reisen mit ihnen — eine eigene Tabelle braucht es dafür nicht.
 
 Dazu auf allen synchronisierten Tabellen: `origin_device_id` (Mehrgerätebetrieb),
 `revision` (serverseitig vergeben), `deleted_at` (Soft-Delete).

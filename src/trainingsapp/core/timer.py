@@ -55,6 +55,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Final
 
+from hrv_core.ausschnitte import FARBEN
+
 from .klang import KLAENGE
 from .models import new_id
 
@@ -657,6 +659,20 @@ def wechsel(alt: TimerStand | None, neu: TimerStand) -> bool:
     return neu.nummer != alt.nummer or (neu.fertig and not alt.fertig)
 
 
+@dataclass(frozen=True, slots=True)
+class Stueck:
+    """Ein Stück der Fortschrittsleiste: ein Abschnitt der ausgerollten Folge (Katalog A17)."""
+
+    name: str
+    dauer_s: float
+    #: wie viel davon gelaufen ist, 0…1
+    gefuellt: float
+    #: Farbe wie in der Messung und der Tabelle „Intervalle“: gleicher Name, gleiche Farbe
+    farbe: str
+    #: der Abschnitt, in dem der Timer gerade steht
+    aktuell: bool = False
+
+
 class TimerLauf:
     """Ablauf eines Profils: starten, anhalten, fortsetzen, überspringen, zurücksetzen.
 
@@ -835,6 +851,64 @@ class TimerLauf:
         """Der Abschnitt mit der laufenden Nummer ``nummer`` — ``None`` am Ende."""
         return self._folge[nummer][3] if 0 <= nummer < len(self._folge) else None
 
+    def fortschritt(self) -> list[Stueck]:
+        """Die Fortschrittsleiste (Ben, 17.10.2026; Katalog A17): je Abschnitt der
+        ausgerollten Folge ein Stück — Breite nach Dauer, gefüllt, so weit er gelaufen ist,
+        die Farbe nach dem Namen wie in der Messung.
+
+        >>> t = [0.0]
+        >>> lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("Belastung", 240),
+        ...     Abschnitt("Pause", 180)], runden=2), uhr=lambda: t[0])
+        >>> lauf.start(); t[0] = 540.0
+        >>> [(s.name, s.dauer_s, s.gefuellt, s.aktuell) for s in lauf.fortschritt()]
+        ... # doctest: +NORMALIZE_WHITESPACE
+        [('Belastung', 240.0, 1.0, False), ('Pause', 180.0, 1.0, False),
+         ('Belastung', 240.0, 0.5, True), ('Pause', 180.0, 0.0, False)]
+        >>> s = lauf.fortschritt(); s[0].farbe == s[2].farbe != s[1].farbe
+        True
+        """
+        vergangen = self.vergangen_s()
+        fertig = self.fertig
+        farbe_von: dict[str, str] = {}
+        stuecke: list[Stueck] = []
+        anfang = 0.0
+        for (*_, a), ende in zip(self._folge, self._enden, strict=True):
+            dauer = ende - anfang
+            if vergangen >= ende - 1e-9:
+                gefuellt = 1.0
+            elif vergangen <= anfang or dauer <= 0:
+                gefuellt = 0.0
+            else:
+                gefuellt = (vergangen - anfang) / dauer
+            farbe = farbe_von.setdefault(a.name, FARBEN[len(farbe_von) % len(FARBEN)])
+            aktuell = not fertig and anfang <= vergangen < ende
+            stuecke.append(Stueck(a.name, dauer, round(gefuellt, 4), farbe, aktuell))
+            anfang = ende
+        return stuecke
+
+    def fortschritt_text(self) -> tuple[str, str]:
+        """Die Beschriftung unter der Fortschrittsleiste: wo man steht — und gesamt.
+
+        >>> t = [0.0]
+        >>> lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("Belastung", 240),
+        ...     Abschnitt("Pause", 180)], runden=2), uhr=lambda: t[0])
+        >>> lauf.start(); t[0] = 564.0
+        >>> lauf.fortschritt_text()
+        ('Belastung 2:24 / 4:00 · danach Pause 3:00', '9:24 von 14:00')
+        >>> t[0] = 900.0; lauf.fortschritt_text()
+        ('fertig', '14:00 von 14:00')
+        """
+        gesamt = dauer_text(self.gesamt_s)
+        stand = self.stand()
+        if stand.fertig:
+            return "fertig", f"{gesamt} von {gesamt}"
+        gelaufen = int(stand.abschnitt_s - stand.rest_s)
+        name = stand.name or f"Abschnitt {stand.index + 1}"
+        links = f"{name} {dauer_text(gelaufen)} / {dauer_text(stand.abschnitt_s)}"
+        if (danach := self.abschnitt(stand.nummer + 1)) is not None:
+            links += f" · danach {danach.name} {dauer_text(danach.dauer_s)}"
+        return links, f"{dauer_text(int(self.vergangen_s()))} von {gesamt}"
+
     def neue_marken(self) -> list[Marke]:
         """Abschnittsanfänge seit der letzten Abfrage — jeder genau einmal.
 
@@ -951,6 +1025,7 @@ __all__ = [
     "WECHSEL",
     "Abschnitt",
     "Marke",
+    "Stueck",
     "Teil",
     "TimerLauf",
     "TimerProfil",

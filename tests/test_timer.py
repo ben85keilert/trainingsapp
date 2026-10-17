@@ -476,3 +476,29 @@ def test_eintrag_mit_anfang_und_ende(tmp_path) -> None:
     assert gelesen is not None and (gelesen.started_at, gelesen.ended_at) == (von, bis)
     assert gelesen.result == {"hold": [60, 45, 50]}
     con.close()
+
+
+def test_fortschrittsleiste_zeichnet_die_folge() -> None:
+    """Katalog A17: je Abschnitt ein Stück (Breite nach Dauer), das laufende anteilig."""
+    ft = pytest.importorskip("flet")
+    from trainingsapp.ui.components.fortschritt import Fortschrittsleiste
+
+    t = [0.0]
+    profil = TimerProfil(
+        abschnitte=[Abschnitt("Belastung", 240), Abschnitt("Pause", 180)], runden=4
+    )
+    lauf = TimerLauf(profil, uhr=lambda: t[0])
+    lauf.start()
+    t[0] = 564.0
+    leiste = Fortschrittsleiste(lauf)
+    stuecke = leiste.balken.controls
+    assert len(stuecke) == 8 and [s.expand for s in stuecke[:2]] == [240, 180]
+    laufend = stuecke[2]
+    assert isinstance(laufend.content, ft.Row)  # anteilig gefüllt
+    assert [c.expand for c in laufend.content.controls] == [600, 400]
+    assert leiste.links.value == "Belastung 2:24 / 4:00 · danach Pause 3:00"
+    assert leiste.rechts.value == "9:24 von 28:00"
+    t[0] = 2000.0
+    leiste.auffrischen()
+    assert all(s.content is None for s in leiste.balken.controls)  # alles voll
+    assert leiste.links.value == "fertig"

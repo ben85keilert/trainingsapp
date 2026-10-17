@@ -2391,7 +2391,7 @@ wheels = [
 
 [[package]]
 name = "trainingsapp"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "flet" },

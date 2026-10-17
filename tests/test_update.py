@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import tomllib
+import types
 import urllib.error
+from pathlib import Path
 
 import pytest
 
@@ -114,6 +117,14 @@ def _build_ersetzen(monkeypatch: pytest.MonkeyPatch, modul: object) -> None:
         monkeypatch.setattr(trainingsapp, "_build", modul, raising=False)
 
 
+def _build_modul(version: str, build: int) -> types.ModuleType:
+    """So, wie `scripts/apk_bauen.py` ``trainingsapp/_build.py`` schreibt."""
+    modul = types.ModuleType("trainingsapp._build")
+    modul.VERSION = version  # type: ignore[attr-defined]
+    modul.BUILD = build  # type: ignore[attr-defined]
+    return modul
+
+
 def test_app_version_in_der_entwicklung_aus_pyproject(monkeypatch: pytest.MonkeyPatch) -> None:
     _build_ersetzen(monkeypatch, None)
     version, build = config.app_version()
@@ -121,11 +132,24 @@ def test_app_version_in_der_entwicklung_aus_pyproject(monkeypatch: pytest.Monkey
     assert build is None  # ohne _build.py: Version aus pyproject, keine Build-Nummer
 
 
-def test_app_version_aus_build_datei(monkeypatch: pytest.MonkeyPatch) -> None:
-    import types
+def test_app_version_ein_frueherer_bau_zaehlt_nicht(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ein lokaler Bau lässt `_build.py` mit seiner Version im Baum; aus dem Quelltext
+    gestartet, gilt trotzdem `pyproject.toml` (17.10.2026: „0.2.1 (Build 170)“ nach dem
+    Sprung auf 0.2.2)."""
+    _build_ersetzen(monkeypatch, _build_modul("0.0.1", 1))
+    with config.PYPROJECT.open("rb") as f:
+        erwartet = tomllib.load(f)["project"]["version"]
+    assert config.app_version() == (erwartet, None)
 
-    modul = types.ModuleType("trainingsapp._build")
-    modul.VERSION = "0.2.0"  # type: ignore[attr-defined]
-    modul.BUILD = 60  # type: ignore[attr-defined]
-    _build_ersetzen(monkeypatch, modul)
+
+def test_app_version_aus_build_datei(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Gebaute App: `pyproject.toml` fehlt (`flet build` packt nur `src/`), `_build.py` gilt."""
+    monkeypatch.setattr(config, "PYPROJECT", tmp_path / "pyproject.toml")
+    _build_ersetzen(monkeypatch, _build_modul("0.2.0", 60))
     assert config.app_version() == ("0.2.0", 60)
+
+
+def test_app_version_ohne_beides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(config, "PYPROJECT", tmp_path / "pyproject.toml")
+    _build_ersetzen(monkeypatch, None)
+    assert config.app_version() == ("0.0.0", None)

@@ -27,8 +27,7 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp import __version__
-from trainingsapp.config import streckenverzeichnis
+from trainingsapp.config import app_version, streckenverzeichnis
 from trainingsapp.core.gps_vorabtest import (
     DAUERTEST_ZWEITE,
     AkkuProbe,
@@ -189,7 +188,7 @@ class GpsTestLauf:
             await _wach(self.state, False)
         kopf = [
             f"GPS-Vorabtest · {'Dauertest' if self.art == 'akku' else 'Strecke'}"
-            f" · Trainingsassistent {__version__}",
+            f" · Trainingsassistent {app_version()[0]}",
             f"Gestartet {self.gestartet:%d.%m.%Y %H:%M} · Quelle {self.quelle.name}"
             + (" · Bildschirm an" if self.bildschirm_an else ""),
             f"Hintergrunddienst: {self.dienst or '–'}",

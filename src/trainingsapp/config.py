@@ -102,31 +102,35 @@ def ist_aktiv(funktion: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+#: `pyproject.toml` des Projekts — gibt es nur in der Entwicklung: `flet build` packt
+#: allein `src/` in die App (`[tool.flet.app] path`).
+PYPROJECT: Path = Path(__file__).resolve().parents[2] / "pyproject.toml"
+
+
 def app_version() -> tuple[str, int | None]:
     """``(Version, Build-Nummer)`` der laufenden App.
 
-    In der gebauten App aus ``trainingsapp/_build.py``, das ``scripts/apk_bauen.py``
-    vor dem Build schreibt (nicht versioniert — `pyproject.toml` wandert nicht in die
-    APK). In der Entwicklung aus `pyproject.toml`, ohne Build-Nummer; wenn auch das
-    fehlt, ``("0.0.0", None)``.
+    In der Entwicklung aus `pyproject.toml`, ohne Build-Nummer. In der gebauten App
+    fehlt die Datei; dort gilt ``trainingsapp/_build.py``, das ``scripts/apk_bauen.py``
+    vor dem Build schreibt (nicht versioniert). `pyproject.toml` zuerst: Ein lokaler
+    Bau lässt `_build.py` im Baum liegen, mit der Version von damals — aus dem
+    Quelltext gestartet, stand sonst die alte Nummer da (17.10.2026: „0.2.1 (Build
+    170)“ nach dem Sprung auf 0.2.2). Fehlt beides, ``("0.0.0", None)``.
 
     >>> version, build = app_version()
     >>> len(version.split(".")) >= 2
     True
     """
+    if PYPROJECT.is_file():
+        import tomllib
+
+        with PYPROJECT.open("rb") as f:
+            return str(tomllib.load(f)["project"]["version"]), None
     try:
         from trainingsapp import _build  # type: ignore[attr-defined]
     except ImportError:
-        pass
-    else:
-        return str(_build.VERSION), int(_build.BUILD)
-    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
-    if pyproject.is_file():
-        import tomllib
-
-        with pyproject.open("rb") as f:
-            return str(tomllib.load(f)["project"]["version"]), None
-    return "0.0.0", None
+        return "0.0.0", None
+    return str(_build.VERSION), int(_build.BUILD)
 
 
 # ---------------------------------------------------------------------------

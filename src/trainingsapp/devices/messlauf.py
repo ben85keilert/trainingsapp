@@ -50,7 +50,7 @@ from hrv_core.regeln import Korrekturregeln
 from hrv_core.segments import abdeckung
 from hrv_core.zeitachse import Kontinuitaetsuhr
 
-from .. import __version__
+from ..config import app_version
 from ..core.einheit import SPUR_TIMER
 from ..core.hrv_export import diagnose_pfad, diagnose_text
 from .base import DeviceStatus, HeartRateSource, Messwert, PpiPaket, Verbindung
@@ -369,7 +369,7 @@ class Messlauf:
         if s.meldung:
             status.append(s.meldung)
         kopf = {
-            "App": f"Trainingsassistent {__version__}",
+            "App": f"Trainingsassistent {app_version()[0]}",
             "Gerät": f"{self.geraet_name} [{self.device_id}]",
             "Profil": self.profil.id if self.profil else "–",
             "Status": " · ".join(status),

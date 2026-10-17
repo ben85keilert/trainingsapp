@@ -1,3 +1,5 @@
-"""Trainingsassistent — Bewegungsübungen mit begleitender HRV-Messung."""
+"""Trainingsassistent — Bewegungsübungen mit begleitender HRV-Messung.
 
-__version__ = "0.1.0"
+Die Version steht nur in `pyproject.toml`; zur Laufzeit liefert sie
+`config.app_version()` — in der gebauten App samt Build-Nummer.
+"""

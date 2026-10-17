@@ -475,8 +475,18 @@ Genauigkeit bei längerem GPS nachlässt (Median je 5 min), und den Strom.
   nichts; andere Geräte: am Gerät prüfen (Katalog T-Eintrag).
 - **Fehler sind sichtbar.** GPS-Fehler (`quelle.meldung`), ein nicht gestarteter
   Vordergrunddienst und Schreibfehler stehen während des Trainings in roter Schrift
-  unter den Zahlen (`AusdauerLauf.warnung`); der Empfangs-Task stirbt nicht mehr still.
-  Scheitert der Start, bleibt kein halber Lauf im `AppState` (`abbrechen`).
+  unter den Zahlen (seit 17.10. `StreckeBaustein.warnung` bzw. die Warnung der
+  Einheit); der Empfangs-Task stirbt nicht mehr still. Scheitert der Start, bleibt
+  nichts zurück.
+- **Als Einheit (17.10.2026, `docs/plan_einheit.md`, Stufe 2).** Das Training ist ein
+  Teil der Einheit (`devices/strecke_baustein.StreckeBaustein`, flet-frei): bereitstellen
+  — das GPS sucht schon Empfang —, mit Timer (Intervalle) und HRV gemeinsam starten.
+  Die Kilometer stehen jetzt **zur Split-Zeit** in der Messung (vorher zur
+  Verarbeitungszeit, bis zu einem Takt später) und auf eigener Spur `km`, die
+  Timer-Abschnitte schneiden sie nicht. „km 1“ ist der erste Kilometer — vorher hieß
+  der Abschnitt nach der Notiz „km 1“, also der zweite, schon „km 1“. Eine HRV, die
+  schon lief, wird verknüpft und läuft weiter (`strecke.einheit_id`, Migration 019);
+  die Auswertung legt Ortungen und Schläge über die Versätze der Einheit aufeinander.
 
 ## 11. Quellen
 

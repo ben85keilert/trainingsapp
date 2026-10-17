@@ -13,7 +13,7 @@ Skizzen der Oberfläche (15 Bildschirme): https://claude.ai/artifact/5m4q9AhyKnw
 | Begriff | Bedeutung |
 |---|---|
 | **Einheit** | die Klammer um alles, was zusammen läuft (`core/einheit.py`, `devices/einheit.py`) |
-| **Teil** | HRV-Messung, Timer, GPS-Training, Plan-Ablauf (`Baustein`) |
+| **Teil** | HRV-Messung, Timer, Ausdauertraining, Plan-Ablauf (`Baustein`). Das Training ist der Teil `gps` (`devices/strecke_baustein.StreckeBaustein`) — mit GPS eine Strecke, ohne GPS (Laufband, Halle) nur die Zeit, wie eine `Strecke` ohne Datei |
 | **Bereitstellen** | ein Teil macht sich fertig und wartet auf den gemeinsamen Start: Gurt verbunden, GPS hat Empfang, Profil geladen. Ein zweiter Knopf neben „Start“ (Ben, 17.10.: nicht der Sammelmodus mit Fahne) |
 | **Startleiste** | unter der Titelleiste, auf jeder Seite: alles Bereitgestellte, sein Stand, „Wenn der Timer fertig ist …“, Countdown, „Alle starten“ |
 | **Laufleiste** | dieselbe Stelle nach dem Start: eine Zeit, der laufende Abschnitt, ⏸ ⏹ für alle |
@@ -55,11 +55,15 @@ Schläge.
   HRV ist die Zeit des Teils `t_wall_s` der Messdatei. Versätze stehen nur monoton —
   `start_utc` der Messdatei hat ganze Sekunden.
 - GPS: Fix-Zeit über `UhrAbgleich().umrechnen(p.t, jetzt=p.t_empfang)`, nicht die
-  Verarbeitungszeit.
+  Verarbeitungszeit. ``t_empfang`` steht auf der Uhr der Quelle; führt die Einheit
+  eine andere (Simulator, GPS-Simulator, Wiedergabe), rechnet der Teil sie über den
+  Abstand beider Uhren um. Die Beteiligung `gps` trägt den Versatz der Empfängeruhr
+  (`Punkt.t` + `versatz_s` = `t_s`) — am Ende nachgetragen, dann ist der Abgleich am
+  genauesten.
 - **Tiefschlaf:** Die monotone Uhr steht, wenn Android die CPU schlafen legt. Darum hält
   jede Einheit den Vordergrunddienst (Gurt: `connectedDevice`, GPS: `location`, sonst
-  `health` — Ben, 17.10.); bis der Dienst `health` kann, bleibt bei Einheiten ohne
-  Gurt und GPS der Bildschirm an.
+  `health` — Ben, 17.10.; ein Timer allein ebenso). Liegt zwischen zwei Takten doch
+  Tiefschlaf, steht `einheit/schlaf` in der Zeitleiste.
 
 ## 4. Zeitleiste und Projektionen
 
@@ -85,6 +89,12 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
   bis ihr Abschnitt 5 s lief, und setzt sie dann an seine echte Anfangszeit. Die
   Zeitleiste behält alles.
 - Tagebuch: Einträge mit Anfang und Ende (Stufe 3).
+- **Training ↔ Einheit** (Migration 019): Die Zeile `strecke` trägt `einheit_id`.
+  Über die Einheit findet die Auswertung die HRV-Aufnahme auch, wenn sie schon vorher
+  lief und weiterläuft (`hrv_recording_id` bleibt dann leer), und legt Ortungen und
+  Schläge über die Versätze aufeinander (`ui/training.hrv_bezug`): `t_wall_s` =
+  `Punkt.t` + `versatz_gps` − `versatz_hrv`. Nach einem Absturz nennt die Zeitleiste
+  beide Dateien — Backup und verwaiste Strecke finden einander (H16).
 
 ## 5. Regeln
 
@@ -106,7 +116,7 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 | Stufe | Inhalt | Stand |
 |---|---|---|
 | 0 | hrv-core: `spuren_speichern`, `notiz(..., marke=)`; Vertrag §4/§9b | gebaut 17.10. |
-| 1 | Zeitleiste, `Einheitslauf` mit HRV, Timer, GPS; Startleiste, Laufleiste, Bereitstellen; Messung mit Dauer und Ablauf; Dienst `health` | in Arbeit |
-| 2 | Ausdauertraining als Einheit (verknüpft auch eine schon laufende HRV, Abgleich über `versatz_s`, Wiederherstellung H16) | |
-| 3 | Timer an Übung, Planübung und Plan (mehrere Profile, „zählt“, Abbrechen), Plan-Ablauf, Einträge mit Anfang und Ende | |
+| 1 | Zeitleiste, `Einheitslauf` mit HRV, Timer, GPS; Startleiste, Laufleiste, Bereitstellen; Dienst `health` | gebaut 17.10.; offen: Messung mit Dauer und Ablauf (Katalog A11) |
+| 2 | Ausdauertraining als Einheit (verknüpft auch eine schon laufende HRV, Abgleich über `versatz_s`, Wiederherstellung H16) | gebaut 17.10.; offen: Tabellen „Intervalle“ und „Kilometer“ live (A10) |
+| 3 | Timer an Übung, Planübung und Plan (mehrere Profile, „zählt“, Abbrechen), Plan-Ablauf, Einträge mit Anfang und Ende — Migration 020 | (A12) |
 | 4 | Forschungsexport (ausdrückliche Handlung): Messdateien, Zeitleiste `einheit-v1.json`, ortsfreies Tempo | |

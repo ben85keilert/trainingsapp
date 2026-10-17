@@ -181,3 +181,32 @@ def test_laufende_einheit_steht_in_der_benachrichtigung(state) -> None:
     (zeile,) = [x for x in laufendes(state) if x.titel == "Einheit"]
     assert zeile.zeile.startswith("Kurz: 0:00 · A") and zeile.kurz == "Einheit 0:00"
     state.einheit.beenden()
+
+
+async def test_startleiste_zeigt_den_stand_der_vorbereitung(state) -> None:
+    """Während das GPS Empfang sucht, frischt die Startleiste jede Sekunde auf — die
+    Genauigkeit an Ort und Stelle (Knöpfe bleiben, kein Tipp geht verloren), bei
+    „bereit“ baut sie neu und gibt „Alle starten“ frei."""
+    from attrappen import Empfaenger, Uhr, ruhe
+
+    seite = Seite()
+    uhr = Uhr()
+    gps = Empfaenger(uhr)
+    einheit_ui.ausdauer_bereitstellen(seite, state, "laufen", gps)
+    await ruhe()
+    leiste = startleiste(seite, state)
+    assert leiste is not None
+    knopf = _knopf(leiste, "Alle starten")
+    assert knopf.disabled and "sucht Empfang …" in _texte(leiste)
+    gps.ortung(0, genauigkeit_m=50)
+    await ruhe()
+    einheit_ui.melden(state)  # das tut der Sekundentakt der Vorbereitung
+    assert "sucht Empfang … 50 m" in _texte(leiste)
+    assert _knopf(leiste, "Alle starten") is knopf  # nur der Text, kein Neubau
+    gps.ortung(0, genauigkeit_m=6)
+    await ruhe()
+    einheit_ui.melden(state)
+    assert "Empfang gut · 6 m" in _texte(leiste)
+    assert not _knopf(leiste, "Alle starten").disabled
+    einheit_ui.leeren(seite, state)
+    await asyncio.sleep(0)

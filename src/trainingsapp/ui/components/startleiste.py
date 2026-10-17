@@ -7,8 +7,9 @@ Laufleiste: eine Zeit, der laufende Abschnitt, ⏸ für den Timer (die HRV pausi
 nie), ⏹ für alles.
 
 Die Leiste baut ihre Knöpfe nur neu, wenn sich etwas an ihnen ändert; im Sekundentakt
-ändern sich nur Texte — sonst ginge ein Tipp verloren, der gerade läuft (wie in der
-Statuskarte der Messung, 17.10.2026).
+ändern sich nur Texte (Zeit, Abschnitt, Stand eines Teils wie die GPS-Genauigkeit) —
+sonst ginge ein Tipp verloren, der gerade läuft (wie in der Statuskarte der Messung,
+17.10.2026).
 """
 
 from __future__ import annotations
@@ -63,7 +64,7 @@ def startleiste(page: Any, state: AppState) -> ft.Container | None:
     if e is None:
         return None
     box = ft.Container(border_radius=16, padding=ft.Padding.only(left=12, right=6, top=8, bottom=8))
-    stand: dict[str, Any] = {"schluessel": None, "zeile1": None, "zeile2": None}
+    stand: dict[str, Any] = {"schluessel": None, "zeile1": None, "zeile2": None, "status": []}
 
     def schluessel() -> tuple:
         if e.laeuft:
@@ -71,7 +72,8 @@ def startleiste(page: Any, state: AppState) -> ft.Container | None:
             return ("lauf", e.zustand, t is not None, t is not None and t.lauf.laeuft)
         return (
             "start",
-            tuple((t.art, t.status(), t.bereit) for t in e.teile),
+            tuple((id(t), t.bereit) for t in e.teile),
+            tuple(e.fehler.items()),
             e.bereit,
             e.ende_mit_timer,
             e.stoppt_am_ende("hrv"),
@@ -83,7 +85,7 @@ def startleiste(page: Any, state: AppState) -> ft.Container | None:
         if e.laeuft:
             _laufleiste(page, state, e, box, stand)
         else:
-            _startleiste(page, state, e, box)
+            _startleiste(page, state, e, box, stand)
 
     def auffrischen() -> None:
         if ablauf.aktuell(state) is not e:
@@ -93,6 +95,9 @@ def startleiste(page: Any, state: AppState) -> ft.Container | None:
         elif e.laeuft and stand["zeile1"] is not None:
             oben, unten = ablauf.laufzeilen(e)
             stand["zeile1"].value, stand["zeile2"].value = oben, unten
+        elif not e.laeuft:
+            for text, teil in zip(stand["status"], e.teile, strict=False):
+                text.value = teil.status()
         with contextlib.suppress(Exception):
             box.update()
 
@@ -101,8 +106,9 @@ def startleiste(page: Any, state: AppState) -> ft.Container | None:
     return box
 
 
-def _startleiste(page: Any, state: AppState, e: Any, box: ft.Container) -> None:
+def _startleiste(page: Any, state: AppState, e: Any, box: ft.Container, stand: dict) -> None:
     box.bgcolor = ft.Colors.SURFACE_CONTAINER_HIGH
+    stand["status"] = []
 
     def raus(art: str):
         def handler() -> None:
@@ -122,6 +128,8 @@ def _startleiste(page: Any, state: AppState, e: Any, box: ft.Container) -> None:
     ]
     for teil in e.teile:
         text, grund, schrift = _marke(teil)
+        status = ft.Text(teil.status(), size=12, opacity=0.75)
+        stand["status"].append(status)
         zeilen.append(
             ft.Container(
                 bgcolor=ft.Colors.SURFACE,
@@ -138,7 +146,7 @@ def _startleiste(page: Any, state: AppState, e: Any, box: ft.Container) -> None:
                             tight=True,
                             controls=[
                                 ft.Text(_teil_titel(teil), size=14, weight=ft.FontWeight.W_600),
-                                ft.Text(teil.status(), size=12, opacity=0.75),
+                                status,
                             ],
                         ),
                         ft.Container(

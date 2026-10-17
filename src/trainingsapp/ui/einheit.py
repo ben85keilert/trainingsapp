@@ -38,6 +38,8 @@ from trainingsapp.devices.strecke_baustein import StreckeBaustein
 ANZEIGE_S = 1.0
 #: Vorgabe des Countdowns vor „Alle starten“ (s)
 COUNTDOWN_S = 3.0
+#: Einheiten, deren Stand in der Startleiste gerade jede Sekunde aufgefrischt wird
+_IM_BLICK: set[str] = set()
 
 
 def aktuell(state: Any) -> Einheitslauf | None:
@@ -175,6 +177,21 @@ def _vorbereiten(page: Any, state: Any, e: Einheitslauf) -> None:
 
     with contextlib.suppress(Exception):
         page.run_task(vorbereiten)
+    if e.id not in _IM_BLICK:
+        _IM_BLICK.add(e.id)
+        with contextlib.suppress(Exception):
+            page.run_task(_stand_zeigen, state, e)
+
+
+async def _stand_zeigen(state: Any, e: Einheitslauf) -> None:
+    """Solange vorbereitet wird, jede Sekunde der Stand in die Startleiste — die
+    Genauigkeit des GPS, „bereit“. Danach zählt die Laufleiste (`_anzeigen`)."""
+    try:
+        while in_vorbereitung(state) is e:
+            melden(state)
+            await asyncio.sleep(ANZEIGE_S)
+    finally:
+        _IM_BLICK.discard(e.id)
 
 
 def zuruecknehmen(page: Any, state: Any, art: str) -> None:

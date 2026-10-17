@@ -157,8 +157,11 @@ hrv-core = "../hrv-core"
 # path_provider_android 2.3.1) verlangt jni ^1.1.0 → „Constant evaluation error …
 # expect package:jni ^1.1.0“ beim Build. 1.0.3 passt zu jni 1.0.0 (gleiche Abhilfe
 # wie in praxis_mobil, 2026-10-06). Wegnehmen, sobald eine Flet-Vorlage jni ≥ 1.1 zulässt.
+# Ebenso shared_preferences_android 2.5.0 (erschienen 17.10.2026, verlangt jni ^1.1.0 —
+# der Tag v0.2.2 scheiterte daran); 2.4.28 kommt ohne jni aus.
 [tool.flet.flutter.pubspec.dependency_overrides]
 jni_flutter = "1.0.3"
+shared_preferences_android = "2.4.28"
 
 # ---------------------------------------------------------------------------
 # Werkzeuge

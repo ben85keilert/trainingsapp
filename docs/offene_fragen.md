@@ -52,6 +52,7 @@ Schönheit, Wartung.
 | P33 | Paketversionen, 17.10. | **Wo steht der Hinweis nach einem minor-Update?** Heute sagt das Label unter dem Zahnrad „aktualisiert: Standard“ (`AppState.updates_label`) — reicht das, oder dazu die Seite „Updates“ und die Übung selbst? | Offen. |
 | P34 | Paketversionen, 17.10. | **Freischaltung eines Kurses ändern:** immer major (Nachfrage) — oder nur, wenn sie strenger wird? | Offen. |
 | P35 | Paketversionen, 17.10. | **Kapitel ans Ende eines Kurses, den jemand schon abgeschlossen hat:** Der Kurs ist danach wieder offen. | Vorschlag minor. |
+| P36 | Einheit, 17.10. | **Timer allein als Einheit:** Steht nur der Timer in der Startleiste, fehlt der Haken „Wenn der Timer fertig ist: Einheit beenden“ (er erscheint erst ab zwei Teilen), und die Einheit läuft nach dem Timer weiter („Timer fertig“ in der Laufleiste), bis man ⏹ tippt. Soll sie allein mit dem Timer enden? | Vorschlag: ja — allein endet sie mit dem Timer; mit weiteren Teilen bleibt es beim Haken, auch im Lauf abwählbar. |
 
 Noch offene Fragen aus der Durchsicht vom 15.10. (Details beim jeweiligen Befund in
 Abschnitt 3; die beantworteten stehen unter „Entschieden“):

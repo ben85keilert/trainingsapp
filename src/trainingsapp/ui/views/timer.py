@@ -62,6 +62,7 @@ from trainingsapp.core.timer import (
     signal,
     signale_kurz,
 )
+from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
@@ -88,11 +89,23 @@ def timer_route(basis: str) -> str:
 
 
 def lauf_fuer(state: AppState, profil: TimerProfil) -> TimerLauf:
-    """Der Lauf zum Profil — ein anderes Profil (oder ein geändertes) beginnt neu."""
+    """Der Lauf zum Profil — ein anderes Profil (oder ein geändertes) beginnt neu.
+
+    Gehört der Timer einer laufenden Einheit, bleibt er (sonst liefe dort ein Timer,
+    den keine Ansicht mehr zeigt). Steht er bereitgestellt in der Startleiste, nimmt
+    die Einheit den neuen Lauf.
+    """
     lauf: TimerLauf | None = state.timer
+    if einheit_ui.besitzt_timer(state, lauf):
+        assert lauf is not None
+        return lauf
     if lauf is None or lauf.profil != profil:
         lauf = TimerLauf(profil)
         state.timer = lauf
+        e = einheit_ui.in_vorbereitung(state)
+        if e is not None and (teil := e.timer) is not None:
+            teil.lauf = lauf
+            teil.uhr_uebernehmen(e.uhr)
     return lauf
 
 
@@ -183,7 +196,8 @@ def ticker_starten(page: Any, state: AppState) -> None:
                     signale = state.timer_signale()
                     klang = klang_fuer(art, stand, lauf.profil, signale)
                     await _melden(state, art, signale, klang)
-                if marken := lauf.neue_marken():
+                # Gehört der Timer einer Einheit, holt sie die Marken (ein Abnehmer)
+                if not einheit_ui.besitzt_timer(state, lauf) and (marken := lauf.neue_marken()):
                     _in_messung(state, marken, state.timer_signale())
                 alt = stand
                 for beobachter in list(state.timer_beobachter.values()):
@@ -345,9 +359,20 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             inhalt.update()
 
     def starten() -> None:
+        if einheit_ui.bereitgestellt(state, "timer"):  # allein starten: aus der Startleiste
+            einheit_ui.zuruecknehmen(page, state, "timer")
         lauf.start()
         ticker_starten(page, state)
         auffrischen()
+
+    def bereitstellen() -> None:
+        """Auf den gemeinsamen Start warten (Ben, 17.10.2026) — oder wieder heraus."""
+        if einheit_ui.bereitgestellt(state, "timer"):
+            einheit_ui.zuruecknehmen(page, state, "timer")
+        else:
+            if lauf.begonnen:
+                lauf.zuruecksetzen()
+            einheit_ui.timer_bereitstellen(page, state, lauf)
 
     def anhalten() -> None:
         lauf.pause()
@@ -371,6 +396,12 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
     def waehler(profil_id: str) -> Callable[[], None]:
         def handler() -> None:
             if profil_id == profil.id:
+                return
+            if einheit_ui.besitzt_timer(state, lauf):  # erst die Einheit beenden
+                with contextlib.suppress(Exception):
+                    page.show_dialog(
+                        ft.SnackBar(ft.Text("Der Timer läuft in der Einheit — erst beenden."))
+                    )
                 return
             if lauf.laeuft:
                 lauf.pause()
@@ -440,6 +471,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 steuerung,
                 abstand=10,
             ),
+            _bereitstellen_knopf(state, lauf, bereitstellen),
             _signale_vermerk(state, signale_oeffnen),
             karte(kartentitel("Ablauf"), ablauf, abstand=6),
             hinweis(
@@ -729,6 +761,26 @@ def _klang_wert(wahl: ft.Dropdown) -> str:
     """Der gewählte Klang — leer für „wie vorgegeben“."""
     wert = wahl.value or ""
     return "" if wert == _VORGABE or wert not in KLAENGE else wert
+
+
+def _bereitstellen_knopf(
+    state: AppState, lauf: TimerLauf, umschalten: Callable[[], None]
+) -> ft.Control:
+    """„Bereitstellen“ neben dem Start: Der Timer wartet in der Startleiste auf den
+    gemeinsamen Start mit Messung, GPS … (Ben, 17.10.2026). In einer laufenden
+    Einheit steht nur, dass er dazugehört."""
+    if einheit_ui.besitzt_timer(state, lauf):
+        return hinweis("Der Timer läuft in der Einheit — oben in der Laufleiste.")
+    if einheit_ui.bereitgestellt(state, "timer"):
+        return ft.FilledTonalButton(
+            "Bereitgestellt", icon=ft.Icons.CHECK, on_click=umschalten, tooltip="Herausnehmen"
+        )
+    return ft.OutlinedButton(
+        "Bereitstellen",
+        icon=ft.Icons.HOURGLASS_TOP,
+        on_click=umschalten,
+        tooltip="Mit Messung oder GPS zusammen starten — in der Startleiste",
+    )
 
 
 def _knopf_inhalt(icon: ft.IconData, text: str) -> ft.Control:

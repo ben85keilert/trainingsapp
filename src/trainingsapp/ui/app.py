@@ -53,6 +53,7 @@ from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.ui import ausrichtung
 from trainingsapp.ui.components.dialoge import dialog_offen
+from trainingsapp.ui.components.startleiste import leiste_einsetzen, startleiste
 from trainingsapp.ui.laufend import takt as laufend_takt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
@@ -431,6 +432,10 @@ def main(page: ft.Page) -> None:
                 page.views.append(timer_signale_view(page, state, basis))
         else:
             stapel(teile)
+        # Start- bzw. Laufleiste einer Einheit unter der Titelleiste der obersten Ansicht
+        # (Ben, 17.10.2026) — ohne Einheit bleibt jede Ansicht, wie sie ist
+        if page.views and (leiste := startleiste(page, state)) is not None:
+            leiste_einsetzen(page.views[-1], leiste)
         hintergrund_setzen(page, darstellung)
         page.update()
         # Hochkant ist die Regel; Karten, Kurven und das Live-Vollbild dürfen quer

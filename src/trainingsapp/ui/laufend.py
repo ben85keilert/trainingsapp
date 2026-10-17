@@ -1,7 +1,8 @@
 """Was gerade läuft — jede Sekunde in die Benachrichtigung (Ben, 16.10.2026).
 
-`laufendes` liest aus dem `AppState`, was läuft: HRV-Messung (verbunden oder mit
-Aufnahme), Ausdauertraining mit Karte, GPS-Test, Timer. `core.laufend` macht daraus
+`laufendes` liest aus dem `AppState`, was läuft: eine Einheit (HRV, Timer, GPS
+gemeinsam gestartet, `ui.einheit`), HRV-Messung (verbunden oder mit Aufnahme),
+Ausdauertraining mit Karte, GPS-Test, Timer. `core.laufend` macht daraus
 Titel und Zeilen, `takt` reicht sie an den Bluetooth-Zugang weiter
 (`FletBleTransport.anzeigen`): Läuft der Vordergrunddienst, steht es in seiner
 Benachrichtigung; läuft nur der Timer, in einer gewöhnlichen.
@@ -24,6 +25,18 @@ from trainingsapp.devices.base import Verbindung
 
 #: So oft wird die Benachrichtigung aufgefrischt (s) — die Zeiten laufen sekundengenau
 TAKT_S = 1.0
+
+
+def _einheit(state: Any) -> Laufend | None:
+    """Die laufende Einheit: ihr Name, ihre Zeit und der Abschnitt — die Teile darunter."""
+    from trainingsapp.ui import einheit as einheit_ui
+
+    e = einheit_ui.laeuft(state) if getattr(state, "einheit", None) is not None else None
+    if e is None:
+        return None
+    oben, _ = einheit_ui.laufzeilen(e)
+    seit = e.zeitbasis.anker_utc if e.zeitbasis is not None else None
+    return Laufend("Einheit", f"{e.titel}: {oben}", f"Einheit {uhr(max(e.dauer_s(), 0.0))}", seit)
 
 
 def _hrv(state: Any) -> Laufend | None:
@@ -82,9 +95,10 @@ def _timer(state: Any) -> Laufend | None:
 
 
 def laufendes(state: Any) -> list[Laufend]:
-    """Alles, was gerade läuft — in fester Reihenfolge: HRV, Training, GPS-Test, Timer."""
+    """Alles, was gerade läuft — in fester Reihenfolge: Einheit, HRV, Training, GPS-Test,
+    Timer."""
     teile: list[Laufend] = []
-    for quelle in (_hrv, _ausdauer, _gps_test, _timer):
+    for quelle in (_einheit, _hrv, _ausdauer, _gps_test, _timer):
         with contextlib.suppress(Exception):  # ein Fehler hier darf nichts anhalten
             if (x := quelle(state)) is not None:
                 teile.append(x)

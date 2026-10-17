@@ -10,6 +10,7 @@ Oberfläche funktionieren, und genau das prüft ``tests/test_state.py``.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from collections.abc import Callable
@@ -54,6 +55,7 @@ from trainingsapp.core.timer import (
 from trainingsapp.core.update import Release
 from trainingsapp.core.verlauf import MODUS_NUMMER
 from trainingsapp.data.db import oeffnen
+from trainingsapp.data.einheiten import EinheitRepo
 from trainingsapp.data.kurse import KursRepo
 from trainingsapp.data.pakete import PaketRepo
 from trainingsapp.data.repositories import (
@@ -262,6 +264,15 @@ class AppState:
     #: Wer bei jedem Tick des Timers aufgefrischt wird (Name → Funktion);
     #: Ansichten tragen sich beim Bauen ein und ersetzen ihren alten Eintrag
     timer_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
+    #: Zeitleiste gemeinsamer Abläufe (Migration 018, `data.einheiten.EinheitRepo`)
+    einheiten: Any = None
+    #: Die Einheit in Vorbereitung oder im Lauf (`devices.einheit.Einheitslauf`) — HRV,
+    #: Timer, GPS gemeinsam bereitgestellt und gestartet (`ui.einheit`, Ben 17.10.2026)
+    einheit: Any = None
+    #: Wer erfährt, dass sich an der Einheit etwas geändert hat (Startleiste, Ansichten)
+    einheit_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
+    #: „Alle starten“ mit Countdown 3-2-1
+    einheit_countdown: bool = True
     #: Baut den Ansichtsstapel zur aktuellen Route neu — setzt `app.main()`.
     #: Views rufen es nach Änderungen, die die Route nicht wechseln (ein Tipp
     #: auf „gemacht" bleibt auf derselben Planansicht).
@@ -293,6 +304,9 @@ class AppState:
             backups = backups_finden(messungenverzeichnis())
         except OSError:
             backups = []
+        einheiten = EinheitRepo(con)
+        with contextlib.suppress(sqlite3.Error):
+            einheiten.abgebrochene_schliessen()  # Prozess-Tod in einer Einheit
         return cls(
             con=con,
             uebungen=ExerciseRepo(con),
@@ -305,6 +319,7 @@ class AppState:
             strecken=strecken,
             verwaiste_strecken=verwaist,
             hrv_backups=backups,
+            einheiten=einheiten,
             tags=TagRepo(con),
             pakete=PaketRepo(con),
             kurse=KursRepo(con),

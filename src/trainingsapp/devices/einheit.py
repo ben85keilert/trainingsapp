@@ -344,11 +344,18 @@ class Einheitslauf:
             raise RuntimeError("Teile kommen vor dem Start dazu")
         if any(t.art == teil.art for t in self.teile):
             raise ValueError(f"{teil.art} ist schon dabei")
-        uebernehmen = getattr(teil, "uhr_uebernehmen", None)
-        if callable(uebernehmen):  # alle Teile auf der Uhr der Einheit
-            uebernehmen(self.uhr)
         self.teile.append(teil)
+        if isinstance(teil, HrvBaustein):  # mit HRV gilt die Uhr der Quelle (Simulator!)
+            self.uhr = teil.messlauf.uhr
+        self._uhr_weitergeben()
         self.zustand = Zustand.VORBEREITUNG
+
+    def _uhr_weitergeben(self) -> None:
+        """Alle Teile auf die Uhr der Einheit — vor dem Start, solange es geht."""
+        for t in self.teile:
+            uebernehmen = getattr(t, "uhr_uebernehmen", None)
+            if callable(uebernehmen):
+                uebernehmen(self.uhr)
 
     def entfernen(self, art: str) -> None:
         if self.zustand not in (Zustand.VORBEREITUNG, Zustand.BEREIT):
@@ -385,16 +392,19 @@ class Einheitslauf:
     # -- Vorbereiten und Starten -----------------------------------------------------
 
     async def vorbereiten(self) -> dict[str, str]:
-        """Alle Teile zugleich vorbereiten — ein Fehler bleibt bei seinem Teil."""
-        ergebnisse = await asyncio.gather(
-            *(t.vorbereiten() for t in self.teile), return_exceptions=True
-        )
+        """Alle Teile zugleich vorbereiten — ein Fehler bleibt bei seinem Teil.
+
+        Wer schon startete, während noch vorbereitet wurde („Trotzdem starten“),
+        behält seinen Zustand — erst ein Ergebnis in der Vorbereitung macht ``BEREIT``.
+        """
+        teile = list(self.teile)
+        ergebnisse = await asyncio.gather(*(t.vorbereiten() for t in teile), return_exceptions=True)
         self.fehler = {
             t.art: str(e) or type(e).__name__
-            for t, e in zip(self.teile, ergebnisse, strict=True)
+            for t, e in zip(teile, ergebnisse, strict=True)
             if isinstance(e, BaseException)
         }
-        if self.bereit and not self.fehler:
+        if self.zustand is Zustand.VORBEREITUNG and self.bereit and not self.fehler:
             self.zustand = Zustand.BEREIT
         return self.fehler
 

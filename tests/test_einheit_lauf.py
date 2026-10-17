@@ -295,3 +295,14 @@ async def test_simulator_laeuft_mit_echten_takten(tmp_path) -> None:
     assert abschluss.hrv is not None
     texte = [x["text"] for x in laden(abschluss.hrv.pfad).ereignisse]
     assert texte[0].startswith("Timer „T“") and texte[-1] == "Timer fertig" and len(texte) == 5
+
+
+async def test_spaete_vorbereitung_setzt_den_lauf_nicht_zurueck() -> None:
+    """„Trotzdem starten“, während noch vorbereitet wird: Der Lauf bleibt ein Lauf."""
+    uhr = Uhr()
+    e = Einheitslauf(uhr=uhr, jetzt_utc=uhr.utc)
+    e.hinzufuegen(TimerBaustein(TimerLauf(_intervall(), uhr=uhr)))
+    vorbereitung = asyncio.ensure_future(e.vorbereiten())
+    e.starten()
+    await vorbereitung
+    assert e.zustand is Zustand.LAEUFT

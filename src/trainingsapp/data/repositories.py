@@ -1152,9 +1152,20 @@ class SessionRepo:
     # -- Einträge ----------------------------------------------------------
 
     def eintrag_anlegen(
-        self, session: Session, uebung: Exercise, result: dict[str, Any], note: str = ""
+        self,
+        session: Session,
+        uebung: Exercise,
+        result: dict[str, Any],
+        note: str = "",
+        *,
+        started_at: datetime | None = None,
+        ended_at: datetime | None = None,
     ) -> SessionEntry:
-        """Ein Eintrag — IMMER mit Kopie der Spezifikation und mit Zeitpunkt."""
+        """Ein Eintrag — IMMER mit Kopie der Spezifikation und mit Zeitpunkt.
+
+        ``started_at``/``ended_at``: Anfang und Ende der Übung, wenn sie bekannt sind
+        (Timer der Übung, Ben 17.10.2026) — sonst zählt der Augenblick des Eintragens.
+        """
         eintrag = SessionEntry(
             session_id=session.id,
             exercise_id=uebung.id,
@@ -1162,7 +1173,8 @@ class SessionRepo:
             result=result,
             spec_snapshot=uebung.result_spec,
             note=note.strip(),
-            started_at=jetzt(),
+            started_at=started_at or jetzt(),
+            ended_at=ended_at,
         )
         with transaktion(self.con):
             self._eintrag_schreiben(eintrag, ersetzt=None)

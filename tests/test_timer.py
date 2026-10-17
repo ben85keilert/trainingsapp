@@ -401,3 +401,78 @@ def test_abbruch_beendet_den_timer_der_einheit() -> None:
     assert ("pause", "Timer angehalten", None) not in timer
     assert e.zustand is Zustand.BEENDET
     assert [x.art for x in e.ereignisse if x.quelle == "timer"].count("ende") == 1
+
+
+def test_zeit_eintragen_aus_der_zeitleiste() -> None:
+    """Halten 3 × 1 min mit Pausen, die nicht zählen: Eine Pause des Timers zählt nicht,
+    „Weiter“ kürzt den Satz, „Fertig“ beendet den letzten mit der gelaufenen Zeit."""
+    from trainingsapp.core.timer_eintrag import abgebrochen, ergebnis, gelaufene_zeiten
+    from trainingsapp.devices.einheit import Einheitslauf, TimerBaustein
+
+    uhr = Uhr()
+    profil = TimerProfil(
+        name="Halten",
+        abschnitte=[Abschnitt("Halten", 60), Abschnitt("Pause", 30, zaehlt=False)],
+        runden=3,
+    )
+    lauf = TimerLauf(profil)
+    e = Einheitslauf(uhr=uhr, titel="Planke")
+    e.hinzufuegen(TimerBaustein(lauf))
+    e.starten()
+
+    def bis(sekunden: float) -> None:
+        for _ in range(int(sekunden)):
+            uhr.t += 1
+            e.takt()
+
+    bis(20)
+    lauf.pause()  # 20 s gehalten, dann angehalten
+    bis(15)
+    lauf.fortsetzen()
+    bis(40)  # Halten 1 voll (60 s), Pause 1 beginnt
+    bis(30)  # Pause 1 vorbei, Halten 2
+    bis(45)
+    lauf.weiter()  # Halten 2 nach 45 s beendet → Pause 2
+    bis(30)
+    bis(50)
+    lauf.fertig_machen()  # Halten 3 nach 50 s fertig
+    e.takt()
+    zeiten = gelaufene_zeiten(e.ereignisse)
+    assert [(z.name, z.runde, round(z.sekunden)) for z in zeiten if z.zaehlt] == [
+        ("Halten", 1, 60),
+        ("Halten", 2, 45),
+        ("Halten", 3, 50),
+    ]
+    assert ergebnis(zeiten, "hold") == {"hold": [60, 45, 50]}
+    assert ergebnis(zeiten, "duration") == {"duration": 155}
+    assert not abgebrochen(e.ereignisse)
+
+
+def test_eintrag_mit_anfang_und_ende(tmp_path) -> None:
+    """Der Timer kennt Anfang und Ende der Übung — der Eintrag behält beide (sonst nur
+    den Augenblick des Eintragens)."""
+    from datetime import UTC, date, datetime
+
+    from trainingsapp.core.models import Exercise, Subject
+    from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
+    from trainingsapp.data.db import oeffnen
+    from trainingsapp.data.repositories import ExerciseRepo, SessionRepo, SubjectRepo
+
+    con = oeffnen(tmp_path / "app.db")
+    profil = Subject(name="Ben")
+    SubjectRepo(con).speichern(profil)
+    hold = vorrat_feld("hold")
+    assert hold is not None
+    uebung = Exercise(name="Planke", result_spec=ResultSpec(layout=Layout.SINGLE, fields=[hold]))
+    ExerciseRepo(con).speichern(uebung)
+    sitzungen = SessionRepo(con)
+    sitzung = sitzungen.session_fuer(profil.id, None, date(2026, 10, 17))
+    von = datetime(2026, 10, 17, 8, 0, tzinfo=UTC)
+    bis = datetime(2026, 10, 17, 8, 4, 30, tzinfo=UTC)
+    eintrag = sitzungen.eintrag_anlegen(
+        sitzung, uebung, {"hold": [60, 45, 50]}, started_at=von, ended_at=bis
+    )
+    gelesen = sitzungen.eintrag_laden(eintrag.id)
+    assert gelesen is not None and (gelesen.started_at, gelesen.ended_at) == (von, bis)
+    assert gelesen.result == {"hold": [60, 45, 50]}
+    con.close()

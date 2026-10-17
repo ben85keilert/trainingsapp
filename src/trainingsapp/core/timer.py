@@ -400,6 +400,19 @@ def messdauer(minuten: int) -> TimerProfil:
     )
 
 
+def ende_frage(profil: TimerProfil) -> str:
+    """Die Frage über „Messung beenden | Weiterlaufen“ (Skizze 1) — vor dem Start und im Lauf.
+
+    >>> ende_frage(messdauer(15))
+    'Wenn die 15 min um sind'
+    >>> ende_frage(TimerProfil(abschnitte=[Abschnitt("Atmung", 300)]))
+    'Wenn der Ablauf fertig ist'
+    """
+    if profil.id.startswith("messdauer-"):
+        return f"Wenn die {profil.gesamt_s() // 60} min um sind"
+    return "Wenn der Ablauf fertig ist"
+
+
 def timer_profile_lesen(text: str | None) -> list[TimerProfil]:
     """Gespeicherte Profile (JSON-Liste); nichts Brauchbares → die Vorlagen.
 
@@ -897,11 +910,19 @@ class TimerLauf:
         ('Belastung 2:24 / 4:00 · danach Pause 3:00', '9:24 von 14:00')
         >>> t[0] = 900.0; lauf.fortschritt_text()
         ('fertig', '14:00 von 14:00')
+
+        Ein einziger Abschnitt („Messung 15 min“) braucht links nichts — rechts steht alles.
+
+        >>> t[0] = 0.0; einer = TimerLauf(messdauer(15), uhr=lambda: t[0])
+        >>> einer.start(); t[0] = 61.0; einer.fortschritt_text()
+        ('', '1:01 von 15:00')
         """
         gesamt = dauer_text(self.gesamt_s)
         stand = self.stand()
         if stand.fertig:
             return "fertig", f"{gesamt} von {gesamt}"
+        if len(self._folge) == 1:
+            return "", f"{dauer_text(int(self.vergangen_s()))} von {gesamt}"
         gelaufen = int(stand.abschnitt_s - stand.rest_s)
         name = stand.name or f"Abschnitt {stand.index + 1}"
         links = f"{name} {dauer_text(gelaufen)} / {dauer_text(stand.abschnitt_s)}"
@@ -1033,6 +1054,7 @@ __all__ = [
     "TimerStand",
     "dauer_lesen",
     "dauer_text",
+    "ende_frage",
     "klang_fuer",
     "messdauer",
     "signal",

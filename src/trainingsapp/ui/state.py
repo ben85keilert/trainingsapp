@@ -288,6 +288,10 @@ class AppState:
     einheit_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
     #: „Alle starten“ mit Countdown 3-2-1
     einheit_countdown: bool = True
+    #: Reiter auf „Heute“, solange eine Einheit da ist: 0 = „Einheit“, 1 = der Tag — und
+    #: (Einheit, läuft?) bei der letzten Wahl (`ui.einheit.heute_reiter`)
+    heute_tab: int = 0
+    heute_tab_stand: tuple[str, bool] | None = None
     #: Baut den Ansichtsstapel zur aktuellen Route neu — setzt `app.main()`.
     #: Views rufen es nach Änderungen, die die Route nicht wechseln (ein Tipp
     #: auf „gemacht" bleibt auf derselben Planansicht).

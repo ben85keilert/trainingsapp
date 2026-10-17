@@ -50,8 +50,16 @@ from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, HrvEinstellungen
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.core.models import jetzt as utc_jetzt
-from trainingsapp.core.timer import MESSDAUERN_MIN, TimerLauf, TimerProfil, dauer_text, messdauer
+from trainingsapp.core.timer import (
+    MESSDAUERN_MIN,
+    TimerLauf,
+    TimerProfil,
+    dauer_text,
+    ende_frage,
+    messdauer,
+)
 from trainingsapp.devices.base import DeviceInfo, Verbindung
+from trainingsapp.devices.einheit import Einheitslauf, TimerBaustein
 from trainingsapp.devices.messlauf import Gespeichert, Messlauf, backup_wiederherstellen
 from trainingsapp.devices.profiles import geraeteart
 from trainingsapp.devices.simulated import (
@@ -1037,11 +1045,8 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             )
             zeilen.append(ft.Column(spacing=4, controls=reihen))
         if profil is not None:
-            frage = (
-                "Wenn der Ablauf fertig ist" if wahl == "ablauf" else f"Wenn die {wahl} min um sind"
-            )
             zeilen += [
-                ft.Text(frage, size=12, weight=ft.FontWeight.W_600, opacity=0.8),
+                ft.Text(ende_frage(profil), size=12, weight=ft.FontWeight.W_600, opacity=0.8),
                 ft.SegmentedButton(
                     selected=["beenden" if state.messung_ende_beenden else "weiter"],
                     show_selected_icon=False,
@@ -1064,6 +1069,55 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 ),
             ]
         return ft.Column(spacing=8, controls=zeilen)
+
+    def messeinheit() -> tuple[Einheitslauf, TimerLauf] | None:
+        """Die laufende Einheit dieser Aufnahme mit Dauer oder Ablauf — nur HRV und Timer,
+        und der Timer ist noch nicht fertig. Mit Training oder Plan entscheidet die
+        Übersicht im Reiter „Einheit“."""
+        e = einheit_ui.laeuft(state)
+        if e is None or e.hrv is None or e.hrv.messlauf is not lauf:
+            return None
+        t = e.teil("timer")
+        if not {x.art for x in e.teile} <= {"hrv", "timer"} or not isinstance(t, TimerBaustein):
+            return None
+        return None if t.lauf.fertig else (e, t.lauf)
+
+    def ende_im_lauf(e: Einheitslauf, timer: TimerLauf) -> ft.Control:
+        """„Wenn die 15 min um sind: Messung beenden | Weiterlaufen“ — auch im Lauf noch
+        änderbar (Ben, 17.10.2026); beides wirkt erst, wenn der Timer fertig ist."""
+
+        def waehlen(ev: ft.Event[ft.SegmentedButton]) -> None:
+            if not ev.control.selected:
+                return
+            beenden = ev.control.selected[0] == "beenden"
+            state.messung_ende_beenden = beenden
+            e.am_ende_stoppen["hrv"] = beenden
+            e.ende_mit_timer = True  # die Einheit endet mit dem Timer, die Messung nach Wahl
+            einheit_ui.melden(state)
+            aktualisieren(erzwingen=True)
+
+        wahl = "beenden" if e.ende_mit_timer and e.stoppt_am_ende("hrv") else "weiter"
+        return ft.Column(
+            spacing=4,
+            tight=True,
+            controls=[
+                ft.Text(
+                    f"{ende_frage(timer.profil)} – auch jetzt noch änderbar",
+                    size=12,
+                    weight=ft.FontWeight.W_600,
+                    opacity=0.8,
+                ),
+                ft.SegmentedButton(
+                    selected=[wahl],
+                    show_selected_icon=False,
+                    segments=[
+                        ft.Segment(value="beenden", label=ft.Text("Messung beenden")),
+                        ft.Segment(value="weiter", label=ft.Text("Weiterlaufen")),
+                    ],
+                    on_change=waehlen,
+                ),
+            ],
+        )
 
     async def aufnahme_stoppen() -> None:
         e = einheit_ui.laeuft(state)
@@ -1145,6 +1199,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             state.messung_ende_beenden,
             einheit_ui.bereitgestellt(state, "hrv"),
             einheit_ui.laeuft(state) is not None,
+            (m[0].ende_mit_timer, m[0].stoppt_am_ende("hrv")) if (m := messeinheit()) else None,
         )
         dauer = status_stand["dauer"]
         if schluessel != status_stand["schluessel"]:
@@ -1216,6 +1271,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 f"Aufnahme {_uhr(lauf.aufnahme_dauer_s())}", size=15, weight=ft.FontWeight.W_600
             )
             status_stand["dauer"] = dauer
+            m = messeinheit()
             aktion = ft.Column(
                 spacing=4,
                 tight=True,
@@ -1232,6 +1288,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                             ),
                         ],
                     ),
+                    *([ende_im_lauf(*m)] if m is not None else []),
                     titel_kopf(
                         lauf.aufnahme.titel,
                         lauf.aufnahme.notiz,

@@ -83,6 +83,35 @@ def _neue(state: Any) -> Einheitslauf:
     return e
 
 
+#: Die Reiter auf „Heute“, solange eine Einheit bereitsteht oder läuft (Ben, 17.10.2026)
+REITER_EINHEIT, REITER_TAG = 0, 1
+
+
+def heute_reiter(state: Any) -> int:
+    """Welcher Reiter auf „Heute“ offen ist: Erscheint eine Einheit oder beginnt sie, öffnet
+    „Heute“ auf „Einheit“; wer auf den Tag wechselt, bleibt dort bis zur nächsten Änderung.
+    Ohne Einheit gibt es nur den Tag.
+
+    >>> from types import SimpleNamespace
+    >>> heute_reiter(SimpleNamespace(einheit=None, heute_tab=0, heute_tab_stand=None))
+    1
+    """
+    e = aktuell(state)
+    if e is None:
+        return REITER_TAG
+    stand = (e.id, e.laeuft)
+    if state.heute_tab_stand != stand:
+        state.heute_tab, state.heute_tab_stand = REITER_EINHEIT, stand
+    return int(state.heute_tab)
+
+
+def heute_reiter_waehlen(state: Any, reiter: int) -> None:
+    """Die Wahl der Person — sie gilt bis zur nächsten Änderung der Einheit."""
+    e = aktuell(state)
+    state.heute_tab = reiter
+    state.heute_tab_stand = (e.id, e.laeuft) if e is not None else None
+
+
 def bereitgestellt(state: Any, art: str) -> bool:
     """Ob ein Teil dieser Art auf den gemeinsamen Start wartet."""
     e = in_vorbereitung(state)
@@ -512,6 +541,8 @@ def _teile_text(e: Einheitslauf) -> str:
 __all__ = [
     "ANZEIGE_S",
     "COUNTDOWN_S",
+    "REITER_EINHEIT",
+    "REITER_TAG",
     "aktuell",
     "alle_beenden",
     "alle_starten",
@@ -521,6 +552,8 @@ __all__ = [
     "bereitgestellt",
     "besitzt_timer",
     "dabei",
+    "heute_reiter",
+    "heute_reiter_waehlen",
     "hrv_bereitstellen",
     "in_vorbereitung",
     "laeuft",

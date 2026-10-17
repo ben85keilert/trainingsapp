@@ -53,7 +53,11 @@ from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.ui import ausrichtung
 from trainingsapp.ui.components.dialoge import dialog_offen
-from trainingsapp.ui.components.startleiste import leiste_einsetzen, startleiste
+from trainingsapp.ui.components.startleiste import (
+    leiste_auffrischen,
+    leiste_einsetzen,
+    startleiste,
+)
 from trainingsapp.ui.laufend import takt as laufend_takt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
@@ -145,6 +149,7 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
         state.reiter = schluessel[e.control.selected_index]
         koerper.content = inhalt()
         hauptansicht_aktualisieren()
+        leiste_auffrischen(state)  # auf „Heute“ steht die Einheit im eigenen Reiter
         page.update()
 
     async def zu_einstellungen() -> None:
@@ -486,9 +491,11 @@ def main(page: ft.Page) -> None:
                         page.views.append(plan_ablauf_view(page, state, basis, plan))
         else:
             stapel(teile)
-        # Start- bzw. Laufleiste einer Einheit unter der Titelleiste der obersten Ansicht
-        # (Ben, 17.10.2026) — ohne Einheit bleibt jede Ansicht, wie sie ist
-        if page.views and (leiste := startleiste(page, state)) is not None:
+        # Info- bzw. Laufleiste einer Einheit unter der Titelleiste der obersten Ansicht
+        # (Ben, 17.10.2026) — ohne Einheit bleibt jede Ansicht, wie sie ist; auf „Heute“
+        # steht die Einheit im eigenen Reiter
+        haupt = len(page.views) == 1
+        if page.views and (leiste := startleiste(page, state, haupt=haupt)) is not None:
             leiste_einsetzen(page.views[-1], leiste)
         hintergrund_setzen(page, darstellung)
         page.update()

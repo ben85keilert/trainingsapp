@@ -3,6 +3,10 @@
 Ein Plan ist ein Rahmen, in dem man variiert — 20 Dehnungen im Plan, 7
 davon heute. Deshalb steht „7 von 20", kein Fortschrittsbalken, der auf
 Vollständigkeit drängt.
+
+Steht eine Einheit bereit oder läuft sie, hat „Heute“ zwei Reiter (Ben, 17.10.2026):
+„Einheit“ (Startkarte bzw. Übersicht, `components.startleiste`) und „Heute“ — der Tag wie
+sonst. Welcher offen ist, regelt `ui.einheit.heute_reiter`.
 """
 
 from __future__ import annotations
@@ -14,13 +18,49 @@ import flet as ft
 
 from trainingsapp.core.models import Plan
 from trainingsapp.core.plaene import erledigte, heutige_plaene, warum_nicht
+from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.scroll import scroll_merken
+from trainingsapp.ui.components.startleiste import einheit_reiter, reiter_titel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.tag import tag_titel, tagesansicht
 from trainingsapp.ui.views.uebungen import heute_trainieren
 
 
 def heute(page: ft.Page, state: AppState) -> ft.Control:
+    """Der Tag — mit einer Einheit dazu links der Reiter „Einheit“."""
+    if einheit_ui.aktuell(state) is None:
+        return _tag(page, state)
+    reiter = einheit_ui.heute_reiter(state)
+
+    def wechseln(e: ft.Event[ft.Tabs]) -> None:
+        einheit_ui.heute_reiter_waehlen(state, e.control.selected_index or 0)
+        state.neu_zeichnen()  # auch die feste Leiste: im Reiter „Heute“ die Laufleiste
+
+    if reiter == einheit_ui.REITER_EINHEIT:
+        inhalt = einheit_reiter(page, state)
+    else:
+        state.einheit_beobachter.pop("reiter", None)
+        inhalt = _tag(page, state)
+    return ft.Tabs(
+        length=2,
+        selected_index=reiter,
+        on_change=wechseln,
+        expand=True,
+        content=ft.Column(
+            expand=True,
+            spacing=0,
+            controls=[
+                ft.TabBar(
+                    scrollable=False,
+                    tabs=[ft.Tab(label=reiter_titel(page, state)), ft.Tab(label="Heute")],
+                ),
+                ft.Container(expand=True, content=inhalt),
+            ],
+        ),
+    )
+
+
+def _tag(page: ft.Page, state: AppState) -> ft.Control:
     tag = state.heute()
     alle = state.plaene.alle(state.profil.id)
     aufgenommen = state.sitzungen.plaene_am_tag(state.profil.id, tag)

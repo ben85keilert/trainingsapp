@@ -157,3 +157,25 @@ async def test_ablauf_bereitstellen_und_zuruecknehmen(umgebung) -> None:
     _knopf(messung(seite, state), "Bereitgestellt").on_click()
     e = einheit_ui.in_vorbereitung(state)
     assert e is None or not e.teile
+
+
+async def test_ende_der_messung_laesst_sich_im_lauf_aendern(umgebung) -> None:
+    """Auch im Lauf noch änderbar (Ben, 17.10.2026): gestartet mit „Messung beenden“, in der
+    laufenden Messung „Weiterlaufen“ — nach 5 min endet die Einheit, die Aufnahme läuft."""
+    state, uhr, gurt, lauf = umgebung
+    seite = _seite()
+    _waehlen(_wahl(messung(seite, state), "offen"), "5")
+    await _knopf(messung(seite, state), "Aufnahme starten").on_click()
+    e = state.einheit
+    await _sekunden(state, uhr, gurt, 5)
+    ansicht = messung(seite, state)
+    assert "Wenn die 5 min um sind – auch jetzt noch änderbar" in _texte(ansicht)
+    wahl = _wahl(ansicht, "weiter")
+    assert wahl.selected == ["beenden"]
+    _waehlen(wahl, "weiter")
+    assert e.ende_mit_timer and e.am_ende_stoppen["hrv"] is False
+    await _sekunden(state, uhr, gurt, 310)
+    await _bis_einheit_weg(state)
+    assert lauf.aufnahme is not None and lauf.aufnahme_dauer_s() > 300  # läuft weiter
+    assert not any("auch jetzt noch änderbar" in t for t in _texte(messung(seite, state)))
+    lauf.aufnahme_stoppen(messungenverzeichnis().parent)

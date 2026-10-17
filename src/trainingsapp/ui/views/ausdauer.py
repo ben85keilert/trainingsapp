@@ -14,6 +14,10 @@ Kilometer in `core.hrv_training`. Diese Ansicht verbindet nur:
   und läuft danach weiter.
 - An jedem Kilometer ein Ton, eine Vibration und die Notiz „km 3" in der Messung
   (`ui.einheit`). Die Notiz trägt **nie einen Ort**.
+- Unter den großen Zahlen zwei Tabellen (Skizze 6, `core.intervalle`): **Intervalle**
+  (je Abschnitt des Timers Strecke, Tempo, Ø HF — der laufende fett) und **Kilometer**
+  (je vollem Split Zeit, Tempo, Ø HF). Die Auswertung zeigt die Intervalle aus der
+  Zeitleiste der Einheit, mit DFA α1 beim EKG-Gurt.
 - Nach dem Ende: Strecke (Datei unter ``Strecken/``, Zeile `strecke` mit ihrer
   Einheit), HRV-Aufnahme (wie sonst unter ``Messungen/``) und ein
   **Tagebucheintrag** der Übung „Gehen"/„Laufen"/„Radfahren" (`ui.training`).
@@ -58,9 +62,19 @@ from hrv_core.trends import aktuell, reihe
 from trainingsapp.config import streckenverzeichnis
 from trainingsapp.core.hrv_training import (
     dfa_verlauf,
+    herz_aus_messung,
     hf_je_zeit,
     werte_zwischen,
     zeit_je_bereich,
+)
+from trainingsapp.core.intervalle import (
+    HerzQuelle,
+    HfReihe,
+    Intervall,
+    KmZeile,
+    intervalle,
+    kilometer,
+    strecke_auf_achse,
 )
 from trainingsapp.core.models import Strecke
 from trainingsapp.core.strecke import (
@@ -89,7 +103,13 @@ from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.training import HrvBezug, hrv_bezug, lauftext, verwaiste_uebernehmen
+from trainingsapp.ui.training import (
+    HrvBezug,
+    hrv_bezug,
+    lauftext,
+    verwaiste_uebernehmen,
+    zeitleiste_und_versatz,
+)
 
 #: Live-DFA α1 so oft neu rechnen (s)
 DFA_ALLE_S = 5.0
@@ -265,6 +285,105 @@ def _beenden_text(e: Einheitslauf, teil: StreckeBaustein) -> str:
     return " ".join(saetze)
 
 
+# ---------------------------------------------------------------------------
+# Tabellen „Intervalle“ und „Kilometer“ (Skizze 6, `core.intervalle`)
+# ---------------------------------------------------------------------------
+
+
+def _zelle(
+    text: str, *, kopf: bool = False, fett: bool = False, links: bool = False, expand: int = 1
+) -> ft.Text:
+    """Eine Zelle wie in „Je Kilometer“: Zahlen rechts, der Kopf klein und blass."""
+    return ft.Text(
+        text,
+        expand=expand,
+        size=12 if kopf else 13,
+        weight=ft.FontWeight.W_600 if kopf else ft.FontWeight.W_700 if fett else None,
+        opacity=0.7 if kopf else 1.0,
+        text_align=ft.TextAlign.LEFT if links else ft.TextAlign.RIGHT,
+    )
+
+
+def _tempo_kurz(sportart: str, s_pro_km: float | None) -> str:
+    """Tempo ohne Einheit — die steht im Kopf („/km“, Rad „km/h“)."""
+    return tempo_text(sportart, s_pro_km).removesuffix(" /km").removesuffix(" km/h")
+
+
+def intervall_tabelle(
+    zeilen: Sequence[Intervall], sportart: str, *, strecke: bool, hf: bool, dfa: bool = False
+) -> ft.Control:
+    """„Intervalle (vom Timer)“: je Abschnitt Runde, Name und gelaufene Zeit, dazu Strecke,
+    Tempo, Ø HF (in der Auswertung auch DFA α1) — der Punkt in der Farbe der Messung, der
+    laufende Abschnitt fett."""
+    kopf: list[ft.Control] = [_zelle("Runde · Abschnitt", kopf=True, links=True, expand=3)]
+    if strecke:
+        kopf += [_zelle("km", kopf=True), _zelle("km/h" if sportart == RAD else "/km", kopf=True)]
+    if hf:
+        kopf.append(_zelle("Ø HF", kopf=True))
+    if dfa:
+        kopf.append(_zelle("DFA α1", kopf=True))
+    reihen: list[ft.Control] = [ft.Row(spacing=4, controls=kopf)]
+    for z in zeilen:
+        name = f"{z.runde} {z.name}"
+        text = f"{name} · läuft" if z.laeuft else f"{name} {zeit_text(z.sekunden)}"
+        zellen: list[ft.Control] = [
+            ft.Row(
+                expand=3,
+                spacing=6,
+                controls=[
+                    ft.Container(width=8, height=8, border_radius=4, bgcolor=z.farbe),
+                    _zelle(text, fett=z.laeuft, links=True),
+                ],
+            )
+        ]
+        if strecke:
+            km = z.distanz_m / 1000 if z.distanz_m is not None else None
+            zellen += [
+                _zelle(_zahl(km, 2), fett=z.laeuft),
+                _zelle(_tempo_kurz(sportart, z.tempo_s_pro_km), fett=z.laeuft),
+            ]
+        if hf:
+            zellen.append(_zelle(_zahl(z.herz.hf_bpm), fett=z.laeuft))
+        if dfa:
+            zellen.append(_zelle(_zahl(z.herz.dfa_alpha1, 2), fett=z.laeuft))
+        reihen.append(ft.Row(spacing=4, controls=zellen))
+    return ft.Column(spacing=4, controls=reihen)
+
+
+def km_tabelle_live(zeilen: Sequence[KmZeile], sportart: str, *, hf: bool) -> ft.Control:
+    """„Kilometer (vom GPS)“ während des Trainings: je vollem Kilometer (Rad: fünf) Zeit,
+    Tempo und Ø HF."""
+    kopf: list[ft.Control] = [
+        _zelle("km", kopf=True, links=True),
+        _zelle("Zeit", kopf=True),
+        _zelle("km/h" if sportart == RAD else "/km", kopf=True),
+    ]
+    if hf:
+        kopf.append(_zelle("Ø HF", kopf=True))
+    reihen: list[ft.Control] = [ft.Row(spacing=4, controls=kopf)]
+    for z in zeilen:
+        zellen: list[ft.Control] = [
+            _zelle(f"km {z.km}", links=True),
+            _zelle(zeit_text(z.sekunden)),
+            _zelle(_tempo_kurz(sportart, z.tempo_s_pro_km)),
+        ]
+        if hf:
+            zellen.append(_zelle(_zahl(z.herz.hf_bpm)))
+        reihen.append(ft.Row(spacing=4, controls=zellen))
+    return ft.Column(spacing=4, controls=reihen)
+
+
+def _herz_live(e: Einheitslauf, reihe: HfReihe) -> HerzQuelle | None:
+    """Ø HF je Zeitraum aus der laufenden Aufnahme — ``None`` ohne HRV."""
+    hrv = e.hrv
+    aufnahme = hrv.messlauf.aufnahme if hrv is not None else None
+    beteiligung = hrv.beteiligung if hrv is not None else None
+    if aufnahme is None or beteiligung is None or beteiligung.versatz_s is None:
+        return None
+    reihe.nachladen(aufnahme.beats, beteiligung.versatz_s, aufnahme)
+    return reihe.herz
+
+
 def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
     """Training vorbereiten und starten — läuft eines, die großen Zahlen und die Karte."""
     nummer = state.ausdauer_ansicht = state.ausdauer_ansicht + 1
@@ -276,6 +395,10 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
     strecken_karte: StreckenKarte | None = None
     gross = {"an": False}
     dfa: dict[str, Any] = {"wert": None, "zuletzt": None}
+    intervall_platz = ft.Container(visible=False)
+    km_platz = ft.Container(visible=False)
+    hf_reihe = HfReihe()
+    tabellen_stand: dict[str, Any] = {"schluessel": None}
 
     # -- Bereitstellen und Starten ---------------------------------------------------
 
@@ -480,6 +603,59 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
             meldung = f"GPS: {teil.quelle.meldung}"
         warnung.value = meldung or ""
         warnung.visible = bool(meldung)
+        tabellen(e, teil)
+
+    def tabellen(e: Einheitslauf, teil: StreckeBaustein) -> None:
+        """„Intervalle (vom Timer)“ und „Kilometer (vom GPS)“ — neu gebaut nur, wenn sich
+        eine angezeigte Zahl ändert."""
+        herz = _herz_live(e, hf_reihe)
+        versatz = teil.versatz_s if teil.mit_gps else None
+        strecke = strecke_auf_achse(teil.rechner, versatz) if versatz is not None else None
+        runden = intervalle(e.ereignisse, jetzt_s=e.dauer_s(), strecke=strecke, herz=herz)
+        km = kilometer(teil.rechner.splits, versatz_s=versatz, herz=herz)
+        schluessel = (
+            herz is not None,
+            strecke is not None,
+            tuple(
+                (
+                    z.runde,
+                    z.name,
+                    z.laeuft,
+                    None if z.laeuft else round(z.sekunden),
+                    None if z.distanz_m is None else round(z.distanz_m / 10),
+                    None if z.tempo_s_pro_km is None else round(z.tempo_s_pro_km),
+                    None if z.herz.hf_bpm is None else round(z.herz.hf_bpm),
+                )
+                for z in runden
+            ),
+            tuple(
+                (z.km, round(z.sekunden), None if z.herz.hf_bpm is None else round(z.herz.hf_bpm))
+                for z in km
+            ),
+        )
+        if schluessel == tabellen_stand["schluessel"]:
+            return
+        tabellen_stand["schluessel"] = schluessel
+        intervall_platz.content = (
+            karte(
+                titel("Intervalle (vom Timer)"),
+                intervall_tabelle(
+                    runden, teil.sportart, strecke=strecke is not None, hf=herz is not None
+                ),
+            )
+            if runden
+            else None
+        )
+        intervall_platz.visible = bool(runden)
+        km_platz.content = (
+            karte(
+                titel("Kilometer (vom GPS)" if teil.sportart != RAD else "Je 5 Kilometer (GPS)"),
+                km_tabelle_live(km, teil.sportart, hf=herz is not None),
+            )
+            if km
+            else None
+        )
+        km_platz.visible = bool(km)
 
     def zeichnen() -> None:
         nonlocal strecken_karte
@@ -510,11 +686,13 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
                 hinweis(
                     "Display darf aus sein — die Benachrichtigung zeigt Strecke, Zeit und "
                     "Herzfrequenz. An jedem Kilometer ein Ton. Was mitläuft (Timer, HRV), "
-                    "steht oben in der Leiste."
+                    "steht oben in der Leiste; Runden und Kilometer stehen unten in "
+                    "Tabellen und als Marken in der HRV-Messung."
                 ),
             )
             if querformat(page) and teil.mit_gps and state.ausdauer_karte:
-                # Quer (Ben, 15.10.2026): Zahlen links, die Karte rechts in voller Höhe
+                # Quer (Ben, 15.10.2026): Zahlen und Tabellen links, die Karte rechts in
+                # voller Höhe
                 inhalt.controls = [
                     ft.Row(
                         spacing=14,
@@ -522,14 +700,16 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
                         controls=[
                             ft.Container(
                                 width=min(360.0, float(page.width or 900) * 0.42),
-                                content=zahlen_karte,
+                                content=ft.Column(
+                                    spacing=12, controls=[zahlen_karte, intervall_platz, km_platz]
+                                ),
                             ),
                             ft.Container(expand=True, content=karte_platz),
                         ],
                     )
                 ]
             else:
-                inhalt.controls = [zahlen_karte, karte_platz]
+                inhalt.controls = [zahlen_karte, intervall_platz, km_platz, karte_platz]
             return
         bereit = einheit_ui.bereitgestellt(state, "gps")
         andere = einheit_ui.laeuft(state)  # eine Einheit ohne Training läuft schon
@@ -857,6 +1037,7 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
     hrv = _hrv_laden(state, bezug)
     eintrag = bezug.aufnahme if bezug is not None else None
     ekg = bool(eintrag and eintrag.intervall_quelle == "ekg_rr")
+    zeitleiste, versatz_gps = zeitleiste_und_versatz(state, strecke)
     lokal = strecke.started_at.astimezone()
 
     async def gpx_export() -> None:
@@ -947,6 +1128,27 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         ),
         karte(titel("Strecke"), ganze_strecke(r.teilstuecke if r is not None else [])),
     ]
+    # Die Abschnitte des Timers, der mitlief (Skizze 6) — aus der Zeitleiste der Einheit
+    herz: HerzQuelle | None = None
+    if hrv is not None and bezug is not None and bezug.beginn_s is not None:
+        herz = herz_aus_messung(*hrv, bezug.beginn_s, dfa=ekg)
+    weg = None
+    if r is not None and versatz_gps is not None:
+        weg = strecke_auf_achse(r, versatz_gps)
+    runden = intervalle(zeitleiste, strecke=weg, herz=herz)
+    if runden:
+        teile.append(
+            karte(
+                titel("Intervalle (vom Timer)"),
+                intervall_tabelle(
+                    runden,
+                    strecke.sportart,
+                    strecke=weg is not None,
+                    hf=herz is not None,
+                    dfa=herz is not None and ekg,
+                ),
+            )
+        )
     if r is not None and r.splits_mit_rest():
         teile.append(
             karte(

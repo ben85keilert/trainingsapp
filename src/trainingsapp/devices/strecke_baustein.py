@@ -206,6 +206,13 @@ class StreckeBaustein:
             return None
         return round(offset - self._t0, 6)
 
+    @property
+    def versatz_s(self) -> float | None:
+        """Ortungszeit (``Punkt.t``) + Versatz = ``t_s`` der Einheit — ``None`` vor dem
+        Start und vor der ersten Ortung (der Abgleich der Uhren fehlt noch). Live für die
+        Tabellen „Intervalle“ und „Kilometer“ (`core.intervalle`)."""
+        return self._versatz()
+
     def starten(self, t0: float) -> Beteiligung:
         self._t0 = t0
         # Vor dem Start Eingetroffenes zählt nicht — nur für den Abgleich der Uhren

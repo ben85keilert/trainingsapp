@@ -162,13 +162,21 @@ def daten(tmp_path, monkeypatch):
 
 
 async def _training(
-    state, tmp_path, sportart: str = GEHEN, zwischendurch=None, *, hrv_vorher=0, vor_dem_stopp=None
+    state,
+    tmp_path,
+    sportart: str = GEHEN,
+    zwischendurch=None,
+    *,
+    hrv_vorher=0,
+    vor_dem_stopp=None,
+    timer=None,
 ):
     """Ein Training wie in der App — als Einheit (Startleiste, „Training starten“), auf
     einer Uhr-Attrappe: Gurt und GPS ticken im Takt, ohne zu warten.
 
     ``hrv_vorher``: so viele Sekunden lief die HRV-Aufnahme schon vor dem Training (sie
-    läuft dann danach weiter, bis nach ``vor_dem_stopp(strecke)``). Gibt die Strecke und
+    läuft dann danach weiter, bis nach ``vor_dem_stopp(strecke)``). ``timer``: ein
+    Timer-Profil, das mit in der Startleiste steht (Intervalle). Gibt die Strecke und
     die gezählten Ortungen zurück.
     """
     from attrappen import Empfaenger, Gurt, Seite, Uhr, ruhe
@@ -190,6 +198,10 @@ async def _training(
     seite = Seite()
     gps = Empfaenger(uhr)
     teil = einheit_ui.ausdauer_bereitstellen(seite, state, sportart, gps)
+    if timer is not None:
+        from trainingsapp.core.timer import TimerLauf
+
+        einheit_ui.timer_bereitstellen(seite, state, TimerLauf(timer))
     await ruhe()
     e = einheit_ui.alle_starten(seite, state, 0.0)
     assert e is not None and state.ausdauer is teil
@@ -683,3 +695,111 @@ async def test_laufendes_training_quer_zahlen_neben_der_karte(daten) -> None:
     await _training(state, tmp_path, zwischendurch=waehrend)
     assert gesehen["breite"] == pytest.approx(360.0)
     assert gesehen["hochkant"] is True
+
+
+async def test_intervalle_und_kilometer_als_tabellen(daten) -> None:
+    """Skizze 6 (Ben, 17.10.2026): Mit Timer stehen unter den Zahlen „Intervalle“ — je
+    Abschnitt Strecke, Tempo, Ø HF, der laufende fett — und „Kilometer“ mit Zeit und
+    Ø HF. Die Auswertung zeigt die Intervalle aus der Zeitleiste, mit HF aus der
+    Messdatei."""
+    import flet as ft
+
+    from trainingsapp.core.timer import Abschnitt, TimerProfil
+    from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view
+
+    state, tmp_path = daten
+    profil = TimerProfil(
+        name="Intervalle",
+        abschnitte=[Abschnitt("Belastung", 120), Abschnitt("Pause", 60)],
+        runden=4,
+    )
+    gesehen: dict[str, list] = {}
+
+    def zeilen(ansicht, titel: str) -> list[list[str]]:
+        """Die Zeilen der Tabelle unter ``titel`` — je Zeile die Texte."""
+        karte = next(
+            c
+            for c in _alle(ansicht)
+            if isinstance(c, ft.Column) and titel in _texte(c) and len(c.controls) <= 3
+        )
+        tabelle = next(c for c in _alle(karte) if isinstance(c, ft.Column) and c is not karte)
+        return [_texte(r) for r in tabelle.controls]
+
+    def waehrend() -> None:  # nach 600 s: Runde 4, Belastung läuft
+        ansicht = ausdauer_view(_seite(), state)
+        gesehen["intervalle"] = zeilen(ansicht, "INTERVALLE (VOM TIMER)")
+        gesehen["km"] = zeilen(ansicht, "KILOMETER (VOM GPS)")
+        gesehen["fett"] = [
+            t.value
+            for t in _alle(ansicht)
+            if isinstance(t, ft.Text) and t.weight == ft.FontWeight.W_700
+        ]
+
+    strecke, _ = await _training(state, tmp_path, zwischendurch=waehrend, timer=profil)
+    kopf, *runden = gesehen["intervalle"]
+    assert kopf == ["Runde · Abschnitt", "km", "/km", "Ø HF"]
+    assert [r[0] for r in runden] == [
+        "1 Belastung 2:00",
+        "1 Pause 1:00",
+        "2 Belastung 2:00",
+        "2 Pause 1:00",
+        "3 Belastung 2:00",
+        "3 Pause 1:00",
+        "4 Belastung · läuft",
+    ]
+    # 2,5 m/s: 120 s sind 0,30 km in 6:40 /km (das Zittern der Ortungen legt ein paar
+    # Meter drauf); der Gurt schlägt mit 1000/950 ms
+    km, tempo, hf = runden[2][1:]
+    assert float(km.replace(",", ".")) == pytest.approx(0.30, abs=0.02)
+    minuten, sekunden = tempo.split(":")
+    assert int(minuten) * 60 + int(sekunden) == pytest.approx(400, abs=25)
+    assert hf == "62"
+    assert "4 Belastung · läuft" in gesehen["fett"]
+    assert gesehen["km"][0] == ["km", "Zeit", "/km", "Ø HF"]
+    assert gesehen["km"][1][0] == "km 1" and gesehen["km"][1][3] == "62"
+    # Die Auswertung: alle acht Abschnitte, mit Ø HF aus der Messdatei und DFA α1 (EKG)
+    detail = ausdauer_detail_view(_seite(), state, strecke)
+    kopf, *runden = zeilen(detail, "INTERVALLE (VOM TIMER)")
+    assert kopf == ["Runde · Abschnitt", "km", "/km", "Ø HF", "DFA α1"]
+    assert len(runden) == 8 and runden[-1][0] == "4 Pause 1:00"
+    assert runden[2][1:4] == gesehen["intervalle"][3][1:4]  # dieselbe Rechnung wie live
+
+
+async def test_laufband_intervalle_ohne_strecke(daten) -> None:
+    """Ohne GPS (Laufband) zeigt die Tabelle nur Zeit und Ø HF — keine Kilometer."""
+    from attrappen import Gurt, Seite, Uhr, ruhe
+    from trainingsapp.core.timer import Abschnitt, TimerLauf, TimerProfil
+    from trainingsapp.devices.messlauf import Messlauf
+    from trainingsapp.ui import einheit as einheit_ui
+    from trainingsapp.ui.views.ausdauer import ausdauer_view
+
+    state, tmp_path = daten
+    uhr = Uhr()
+    gurt = Gurt(uhr)
+    messlauf = Messlauf(gurt, jetzt_utc=uhr.utc, backup_basis=tmp_path)
+    await messlauf.verbinden("gurt", "Polar H10 TEST")
+    lesen = asyncio.create_task(messlauf.laufen())
+    state.messlauf = messlauf
+    seite = Seite()
+    einheit_ui.ausdauer_bereitstellen(seite, state, GEHEN, None)
+    profil = TimerProfil(name="Kurz", abschnitte=[Abschnitt("Belastung", 30)], runden=2)
+    einheit_ui.timer_bereitstellen(seite, state, TimerLauf(profil))
+    await ruhe()
+    e = einheit_ui.alle_starten(seite, state, 0.0)
+    assert e is not None
+    for _ in range(45):
+        uhr.t += 1
+        gurt.schlag(800)
+        await ruhe()
+        e.takt()
+    texte = _texte(ausdauer_view(_seite(), state))
+    assert "INTERVALLE (VOM TIMER)" in texte and "KILOMETER (VOM GPS)" not in texte
+    assert "km" not in texte and "Ø HF" in texte
+    assert "1 Belastung 0:30" in texte and "2 Belastung · läuft" in texte and "75" in texte
+    einheit_ui.alle_beenden(state)
+    for _ in range(100):
+        if state.einheit is None:
+            break
+        await asyncio.sleep(0.02)
+    await messlauf.trennen()
+    await asyncio.wait_for(lesen, 5)

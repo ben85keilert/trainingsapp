@@ -25,6 +25,8 @@ from hrv_core.nonlinear import compute_dfa_alpha1
 from hrv_core.recording import Recording
 from hrv_core.trends import DFA_MIN_SCHLAEGE, verlauf
 
+from .intervalle import Herz, HerzQuelle
+
 #: Fenster mit so vielen korrigierten Schlägen (Anteil) bekommen kein α1
 ARTEFAKT_GRENZE: Final[float] = 0.03
 #: DFA α1 im Verlauf: 2-min-Fenster, alle 5 s neu (wie FatMaxxer, alphaHRV)
@@ -94,6 +96,28 @@ def werte_zwischen(
         "artefakt_anteil": round(max(anteil, 0.0), 4),
         "n": int(gut.size),
     }
+
+
+def herz_aus_messung(
+    rec: Recording, korr: Korrigiert, beginn_s: float, *, dfa: bool = True
+) -> HerzQuelle:
+    """Herzwerte je Zeitraum der Einheit aus der korrigierten Messdatei — für die
+    Tabelle „Intervalle“ der Auswertung (`core.intervalle`). ``beginn_s``: ``t_wall_s``
+    der Messdatei beim Start der Einheit (``t_s`` + ``beginn_s`` = ``t_wall_s``).
+
+    >>> from hrv_core.recording import Beat
+    >>> from hrv_core.korrektur import anwenden
+    >>> rec = Recording(beats=[Beat(i * 0.75, 750, 80, i * 0.75) for i in range(1, 400)])
+    >>> herz = herz_aus_messung(rec, anwenden(rec, []), 60.0, dfa=False)
+    >>> herz(0.0, 120.0).hf_bpm, herz(500.0, 600.0).hf_bpm
+    (80.0, None)
+    """
+
+    def herz(von_s: float, bis_s: float) -> Herz:
+        w = werte_zwischen(rec, korr, von_s + beginn_s, bis_s + beginn_s, dfa=dfa)
+        return Herz(w["mean_bpm"], w["dfa_alpha1"])
+
+    return herz
 
 
 def dfa_verlauf(
@@ -189,6 +213,7 @@ __all__ = [
     "DFA_FENSTER_S",
     "DFA_SCHRITT_S",
     "dfa_verlauf",
+    "herz_aus_messung",
     "hf_je_zeit",
     "wanduhr",
     "werte_zwischen",

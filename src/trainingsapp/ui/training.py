@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from trainingsapp.config import messungenverzeichnis, streckenverzeichnis
+from trainingsapp.core.einheit import Ereignis
 from trainingsapp.core.laufend import uhr
 from trainingsapp.core.models import Exercise, HrvRecording, Strecke, lokaler_tag
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
@@ -331,6 +332,22 @@ def hrv_bezug(state: Any, strecke: Strecke) -> HrvBezug | None:
     return HrvBezug(messungenverzeichnis() / datei, aufnahme, verschiebung, beginn)
 
 
+def zeitleiste_und_versatz(state: Any, strecke: Strecke) -> tuple[list[Ereignis], float | None]:
+    """Die Zeitleiste der Einheit eines Trainings und der Versatz seiner Ortungen
+    (Ortungszeit + Versatz = ``t_s``) — für die Tabelle „Intervalle“ der Auswertung. Ohne
+    Einheit (ältere Trainings) leer und ``None``."""
+    einheiten = getattr(state, "einheiten", None)
+    if not strecke.einheit_id or einheiten is None:
+        return [], None
+    try:
+        ereignisse = einheiten.ereignisse(strecke.einheit_id)
+        teile = einheiten.beteiligungen(strecke.einheit_id)
+    except Exception:  # eine kaputte Zeile kostet die Tabelle, nicht die Auswertung
+        return [], None
+    gps = next((b for b in teile if b.art == "gps"), None)
+    return ereignisse, gps.versatz_s if gps is not None else None
+
+
 __all__ = [
     "HrvBezug",
     "Streckendatei",
@@ -340,4 +357,5 @@ __all__ = [
     "training_eintragen",
     "uebung_fuer",
     "verwaiste_uebernehmen",
+    "zeitleiste_und_versatz",
 ]

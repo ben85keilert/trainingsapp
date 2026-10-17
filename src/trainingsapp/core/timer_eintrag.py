@@ -41,6 +41,8 @@ class Gelaufen:
     #: Anfang und Ende auf der Achse der Einheit (``t_s``)
     von_s: float
     bis_s: float
+    #: der Abschnitt, in dem der Timer gerade steht (``jetzt_s``) — noch nicht zu Ende
+    laeuft: bool = False
 
 
 def abgebrochen(ereignisse: Iterable[Ereignis]) -> bool:
@@ -58,9 +60,12 @@ def abgebrochen(ereignisse: Iterable[Ereignis]) -> bool:
 
 
 def gelaufene_zeiten(
-    ereignisse: Iterable[Ereignis], *, min_s: float = MIN_MARKE_S
+    ereignisse: Iterable[Ereignis], *, min_s: float = MIN_MARKE_S, jetzt_s: float | None = None
 ) -> list[Gelaufen]:
     """Je Abschnitt des Timers die gelaufene Zeit — aus der Zeitleiste, in ihrer Folge.
+
+    ``jetzt_s``: Der Timer läuft noch — sein Abschnitt kommt bis dahin dazu (``laeuft``),
+    auch unter ``min_s`` (Tabelle „Intervalle“ im Ausdauertraining).
 
     >>> def ab(t, name, runde=1, zaehlt=True):
     ...     d = {"name": name, "runde": runde, "von": 3}
@@ -73,16 +78,19 @@ def gelaufene_zeiten(
     ...     Ereignis(150.0, "timer", "ende", "Timer fertig")])
     >>> [(z.name, z.runde, z.sekunden, z.zaehlt) for z in zeiten]
     [('Halten', 1, 60.0, True), ('Pause', 1, 30.0, False), ('Pause', 2, 28.0, False)]
+    >>> [(z.name, z.sekunden, z.laeuft) for z in gelaufene_zeiten([ab(0.0, "Halten"),
+    ...     ab(60.0, "Pause", zaehlt=False)], jetzt_s=63.0)]
+    [('Halten', 60.0, False), ('Pause', 3.0, True)]
     """
     fertig: list[Gelaufen] = []
     offen: dict[str, Any] | None = None  # name, runde, zaehlt, von_s, summe, lauf_seit
 
-    def schliessen(t: float) -> None:
+    def schliessen(t: float, *, laeuft: bool = False) -> None:
         nonlocal offen
         if offen is None:
             return
         summe = offen["summe"] + (t - offen["lauf_seit"] if offen["lauf_seit"] is not None else 0)
-        if summe >= min_s:
+        if summe >= min_s or laeuft:
             fertig.append(
                 Gelaufen(
                     offen["name"],
@@ -91,6 +99,7 @@ def gelaufene_zeiten(
                     offen["zaehlt"],
                     offen["von_s"],
                     t,
+                    laeuft,
                 )
             )
         offen = None
@@ -119,6 +128,9 @@ def gelaufene_zeiten(
                 offen["lauf_seit"] = e.t_s  # angehalten beendet: die Pause zählt nicht
             schliessen(e.t_s)
             break
+    else:
+        if jetzt_s is not None and offen is not None:
+            schliessen(max(jetzt_s, offen["von_s"]), laeuft=True)
     return fertig
 
 

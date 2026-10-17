@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from bisect import bisect_right
 from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -291,6 +292,10 @@ class StreckenRechner:
         self._hoehe_bezug: float | None = None
         self._hoehen: deque[float] = deque(maxlen=HOEHE_MEDIAN)
         self._split_anfang: tuple[float, float, float, float] | None = None
+        #: Je angenommener Ortung ihre Zeit und der Stand danach (Strecke, Bewegungszeit)
+        #: — für Strecke und Tempo eines Zeitraums (`stand_bei`, Intervalle des Timers)
+        self._zeiten: list[float] = []
+        self._staende: list[tuple[float, float]] = []
 
     # -- Ortungen ----------------------------------------------------------------
 
@@ -319,6 +324,7 @@ class StreckenRechner:
             self._gezaehlt = p
             self._hoehe_bezug = p.hoehe_m
             self._split_anfang = (p.t, 0.0, 0.0, 0.0)
+            self._merken(p.t)
             return []
         dt = p.t - vorher.t
         if abstand_m(vorher, p) > self.sprung_m or dt > LUECKE_S:
@@ -327,6 +333,7 @@ class StreckenRechner:
             self._hoehe_bezug = p.hoehe_m
             self._hoehen.clear()  # Höhen von vor dem Tunnel mischen nicht mehr mit
             self._letzte_bewegung = None  # Bewegung erst, wenn hier wieder welche ist
+            self._merken(p.t)
             return []
         self.teilstuecke[-1].append(p)
 
@@ -362,9 +369,14 @@ class StreckenRechner:
         elif not self.pausiert:
             self.bewegt_s += dt
         self._hoehe(p)
+        self._merken(p.t)
         while self.distanz_m >= (len(self.splits) + 1) * self.split_m:
             neu.append(self._split_schliessen(p.t, self.split_m))
         return neu
+
+    def _merken(self, t: float) -> None:
+        self._zeiten.append(t)
+        self._staende.append((self.distanz_m, self.bewegt_s))
 
     def _hoehe(self, p: Punkt) -> None:
         if p.hoehe_m is None:
@@ -423,6 +435,31 @@ class StreckenRechner:
         if len(im_fenster) >= 2 and letzter.t > im_fenster[0].t:
             return abstand_m(im_fenster[0], letzter) / (letzter.t - im_fenster[0].t)
         return None
+
+    def stand_bei(self, t: float) -> tuple[float, float] | None:
+        """Strecke und Bewegungszeit (m, s) bis zur Zeit ``t`` (UTC-Sekunden wie
+        ``Punkt.t``) — zwischen zwei Ortungen linear; vor der ersten Ortung nichts
+        gezählt, nach der letzten ihr Stand. ``None`` ohne jede Ortung.
+
+        >>> r = StreckenRechner()
+        >>> for i in range(4):
+        ...     _ = r.hinzufuegen(Punkt(100.0 + 10 * i, 52.0 + i * 0.0005, 13.0, 4.0, tempo_ms=5.5))
+        >>> r.stand_bei(99.0), [round(x, 1) for x in r.stand_bei(115.0)]
+        ((0.0, 0.0), [83.4, 15.0])
+        >>> r.stand_bei(500.0) == (r.distanz_m, r.bewegt_s), StreckenRechner().stand_bei(1.0)
+        (True, None)
+        """
+        if not self._zeiten:
+            return None
+        i = bisect_right(self._zeiten, t)
+        if i == 0:
+            return (0.0, 0.0)
+        if i == len(self._zeiten):
+            return self._staende[-1]
+        t1, t2 = self._zeiten[i - 1], self._zeiten[i]
+        (d1, b1), (d2, b2) = self._staende[i - 1], self._staende[i]
+        anteil = (t - t1) / (t2 - t1) if t2 > t1 else 1.0
+        return (d1 + (d2 - d1) * anteil, b1 + (b2 - b1) * anteil)
 
     def splits_mit_rest(self) -> list[Split]:
         """Die vollen Splits und der angefangene letzte (falls ≥ 10 m)."""

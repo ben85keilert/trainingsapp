@@ -7,95 +7,35 @@ Millisekunde dort, wo die Abschnitte wirklich begannen.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from hrv_core.ausschnitte import zusatz_lesen
 from hrv_core.recording import laden
 
+from attrappen import UTC0, Uhr, aufbauen, ruhe
 from trainingsapp.core.einheit import Rolle, Zustand
-from trainingsapp.core.models import Subject
 from trainingsapp.core.timer import Abschnitt, TimerLauf, TimerProfil
-from trainingsapp.data.db import oeffnen
 from trainingsapp.data.einheiten import EinheitRepo
-from trainingsapp.data.repositories import SubjectRepo
-from trainingsapp.devices.base import DeviceInfo, HeartRateSource, Messwert, Verbindung
 from trainingsapp.devices.einheit import Einheitslauf, HrvBaustein, TimerBaustein
 from trainingsapp.devices.messlauf import Messlauf
-from trainingsapp.devices.profiles import POLAR_H10
 
-UTC0 = datetime(2026, 10, 17, 8, 0, tzinfo=UTC)
-
-
-class Uhr:
-    def __init__(self, t: float = 1000.0) -> None:
-        self.t = t
-
-    def __call__(self) -> float:
-        return self.t
-
-    def utc(self) -> datetime:
-        return UTC0 + timedelta(seconds=self.t - 1000.0)
-
-
-class Gurt(HeartRateSource):
-    """Ein Brustgurt auf der Uhr-Attrappe: `schlag` schickt ein RR-Intervall."""
-
-    def __init__(self, uhr: Uhr) -> None:
-        super().__init__()
-        self._uhr = uhr
-
-    async def scan(self, timeout: float = 8.0) -> list[DeviceInfo]:
-        return []
-
-    async def connect(self, device_id: str, name: str | None = None) -> None:
-        self._sitzung_beginnen()
-        self._status_aendern(verbindung=Verbindung.VERBUNDEN)
-
-    async def disconnect(self) -> None:
-        self._status_aendern(verbindung=Verbindung.GETRENNT)
-        self._ende_signalisieren()
-
-    @property
-    def profil(self):
-        return POLAR_H10
-
-    def jetzt(self) -> float:
-        return self._uhr()
-
-    def schlag(self, rr_ms: int = 1000) -> None:
-        self._push_messwert(Messwert("gurt", rr_ms, 60, self._uhr(), "m"))
-
-
-async def _ruhe() -> None:
-    for _ in range(3):
-        await asyncio.sleep(0)
+_ruhe = ruhe
 
 
 @pytest.fixture
 async def aufbau(tmp_path):
-    """Gurt verbunden, Messlauf liest; Datenbank mit Profil für die Zeitleiste."""
-    uhr = Uhr()
-    gurt = Gurt(uhr)
-    con = oeffnen(tmp_path / "app.db")
-    profil = Subject(name="Ben")
-    SubjectRepo(con).speichern(profil)
-    lauf = Messlauf(gurt, jetzt_utc=uhr.utc, backup_basis=tmp_path, subject_id=profil.id)
-    await lauf.verbinden("gurt", "Polar H10 TEST")
-    task = asyncio.create_task(lauf.laufen())
-    yield uhr, gurt, lauf, EinheitRepo(con), profil.id, tmp_path
-    if lauf.status.verbindung != Verbindung.GETRENNT:
-        await lauf.trennen()
-    await asyncio.wait_for(task, 5)
-    con.close()
+    a = await aufbauen(tmp_path)
+    yield a.uhr, a.gurt, a.lauf, a.repo, a.profil, a.pfad
+    await a.abbauen()
 
 
-async def _sekunden(uhr: Uhr, gurt: Gurt, n: int, einheit: Einheitslauf | None = None) -> None:
+async def _sekunden(uhr: Uhr, gurt, n: int, einheit: Einheitslauf | None = None) -> None:
     """``n`` Sekunden: je Sekunde ein Schlag (RR 1000 ms) und ein Takt der Einheit."""
     for _ in range(n):
         uhr.t += 1.0
         gurt.schlag(1000)
-        await _ruhe()
+        await ruhe()
         if einheit is not None:
             einheit.takt()
 

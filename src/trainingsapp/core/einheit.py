@@ -98,6 +98,7 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         # GPS — nur Abgeleitetes ohne Ort
         "sportart",
         "km",
+        "split_m",
         "distanz_m",
         "dauer_s",
         "bewegt_s",
@@ -275,6 +276,8 @@ def projektion(
     ['timer', 'abschnitt', 'timer', 'e1', 'Pause', 1, 8]
     >>> projektion(Ereignis(400.0, "gps", "km", "km 1", {"km": 1})).name
     'km 2'
+    >>> projektion(Ereignis(900.0, "gps", "km", "km 5", {"km": 5, "split_m": 5000})).name
+    'km 10'
     >>> projektion(Ereignis(0.0, "einheit", "start", "Intervalllauf"), einheit_spur=False) is None
     True
     >>> projektion(Ereignis(9.0, "person", "eintrag")) is None
@@ -314,12 +317,14 @@ def projektion(
             m = marke(SPUR_TIMER, name=d.get("name"), runde=d.get("runde"), von=d.get("von"))
             return Projektion(SPUR_TIMER, e.text or f"weiter: {name}", name, False, m)
         case ("gps", "start"):
-            # Der erste Kilometer beginnt mit der ersten gezählten Ortung — still
-            return Projektion(SPUR_KM, "km 1", "km 1", False, marke(SPUR_KM), als_notiz=False)
+            # Der erste Split beginnt mit der ersten gezählten Ortung — still
+            name = f"km {_km_schritt(d)}"
+            return Projektion(SPUR_KM, name, name, False, marke(SPUR_KM), als_notiz=False)
         case ("gps", "km"):
-            # Die Grenze am Ende von km N beginnt den Abschnitt km N+1
+            # Ein Abschnitt heißt nach seinem Ende: Die Grenze bei km 1 beginnt „km 2“
             km = int(d.get("km") or 0)
-            return Projektion(SPUR_KM, e.text or f"km {km}", f"km {km + 1}", False, marke(SPUR_KM))
+            name = f"km {km + _km_schritt(d)}"
+            return Projektion(SPUR_KM, e.text or f"km {km}", name, False, marke(SPUR_KM))
         case ("gps", "ende"):
             return Projektion(
                 SPUR_KM, "Ende der Strecke", "", True, marke(SPUR_KM), als_notiz=False
@@ -332,6 +337,18 @@ def projektion(
         case ("plan", "uebung_ende"):
             return Projektion(SPUR_UEBUNG, e.text, "", True, marke(SPUR_UEBUNG))
     return None
+
+
+def _km_schritt(daten: Mapping[str, Any]) -> int:
+    """Kilometer je Split (``split_m``): 1, beim Rad 5.
+
+    >>> _km_schritt({}), _km_schritt({"split_m": 5000.0})
+    (1, 5)
+    """
+    try:
+        return max(1, round(float(daten.get("split_m") or 1000.0) / 1000.0))
+    except (TypeError, ValueError):
+        return 1
 
 
 def beginnt_abschnitt(p: Projektion) -> bool:

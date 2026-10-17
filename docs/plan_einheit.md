@@ -73,8 +73,8 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 | `timer/abschnitt` | Notiz mit Marke, Abschnitt „Belastung (Runde 2/8)“ | `timer` |
 | `timer/pause`, `timer/weiter` | Notiz, Abschnitt endet bzw. geht weiter | `timer` |
 | `timer/ende` | „Timer fertig“, letzter Abschnitt endet | `timer` |
-| `gps/start` | stille Grenze: „km 1“ beginnt mit der ersten gezählten Ortung | `km` |
-| `gps/km` | Notiz „km N“, Abschnitt „km N+1“ beginnt | `km` |
+| `gps/start` | stille Grenze: „km 1“ (Rad „km 5“) beginnt mit der ersten gezählten Ortung | `km` |
+| `gps/km` | Notiz „km N“ zur Split-Zeit; der nächste Abschnitt heißt nach seinem Ende („km 2“, Rad „km 10“) | `km` |
 | `gps/ende` | stille Grenze, letzter km endet | `km` |
 | `plan/uebung_start`, `plan/uebung_ende` | Notiz mit Kurzcode (`uebungen`), Abschnitt der Übung | `uebung` |
 

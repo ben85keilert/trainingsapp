@@ -30,7 +30,9 @@
 - Standortdaten verlassen das Gerät nicht: Strecken (Ausdauertraining, seit
   14.10.2026) liegen getrennt von den Messungen und gehen weder in Export,
   Synchronisation noch Diagnose; hinaus nur per ausdrücklichem GPX-Export der
-  Person (`docs/plan_gps.md`, Regel 0). Bei der Bluetooth-Berechtigung weiter
+  Person (`docs/plan_gps.md`, Regel 0). Der Forschungsexport einer Einheit (ebenfalls
+  nur ausdrücklich, seit 17.10.2026) enthält aus der Strecke nur das Tempo als
+  5-s-Mittel, keine Ortung (`docs/plan_einheit.md` §8). Bei der Bluetooth-Berechtigung weiter
   `neverForLocation`. Verbindungen nach außen, alle abschaltbar und mit einmaligem
   Hinweis, nie mit eigenen Daten: die Karte holt Kacheln von OpenStreetMap (grobe
   Kachelkoordinaten); die Update-Prüfung fragt beim Start die GitHub-Releases der

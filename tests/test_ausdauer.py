@@ -803,3 +803,70 @@ async def test_laufband_intervalle_ohne_strecke(daten) -> None:
         await asyncio.sleep(0.02)
     await messlauf.trennen()
     await asyncio.wait_for(lesen, 5)
+
+
+async def test_forschungsexport_ohne_ort(daten) -> None:
+    """Stufe 4 (Ben, 17.10.2026): Das ZIP hat die Messdatei byte-genau und
+    ``einheit-v1.json`` mit Zeitleiste, Versätzen und Tempo alle 5 s — keine Koordinate,
+    keine Richtung, keine Höhe, keine Strecke (Regel 0)."""
+    from trainingsapp.config import messungenverzeichnis
+    from trainingsapp.core.timer import Abschnitt, TimerProfil
+    from trainingsapp.ui.training import forschung_export
+    from trainingsapp.ui.views.ausdauer import ausdauer_detail_view
+
+    state, tmp_path = daten
+    profil = TimerProfil(name="Intervalle", abschnitte=[Abschnitt("Belastung", 120)], runden=2)
+    strecke, punkte = await _training(state, tmp_path, timer=profil)
+    aktionen = ausdauer_detail_view(_seite(), state, strecke).appbar.actions
+    knopf = next(a for a in aktionen if "Auswertung exportieren" in (a.tooltip or ""))
+    assert knopf.visible
+    name, archiv = forschung_export(state, strecke.einheit_id)
+    assert name.startswith("einheit_") and name.endswith(".zip")
+    hrv = state.hrv.laden(strecke.hrv_recording_id)
+    with zipfile.ZipFile(BytesIO(archiv)) as z:
+        namen = z.namelist()
+        dok = json.loads(z.read("einheit-v1.json"))
+        roh = z.read(f"Messungen/{hrv.file_path}")
+        texte = {n: z.read(n).decode("utf-8", "replace") for n in namen}
+    assert roh == (messungenverzeichnis() / hrv.file_path).read_bytes()  # byte-genau
+    assert dok["format"] == "einheit-v1" and dok["einheit"]["id"] == strecke.einheit_id
+    teile = {t["art"]: t for t in dok["teile"]}
+    assert set(teile) == {"hrv", "gps", "timer"}
+    assert teile["hrv"]["datei"] == f"Messungen/{hrv.file_path}"
+    assert "datei" not in teile["gps"] and teile["gps"]["versatz_s"] is not None
+    arten = {(e["quelle"], e["art"]) for e in dok["ereignisse"]}
+    assert {("gps", "km"), ("timer", "abschnitt"), ("timer", "ende")} <= arten
+    assert [e["nr"] for e in dok["ereignisse"]] == list(range(1, len(dok["ereignisse"]) + 1))
+    # Tempo alle 5 s über die ganze Strecke, ~2,5 m/s
+    reihe = dok["tempo"]["reihe"]
+    werte = [v for _, v in reihe if v is not None]
+    assert dok["tempo"]["schritt_s"] == 5.0 and len(reihe) >= 230
+    assert sum(werte) / len(werte) == pytest.approx(2.5, abs=0.1)
+    # Regel 0: nichts Ortsbezogenes, keine Strecke
+    breiten = {f"{p.lat:.4f}" for p in punkte[::50]} | {f"{LAT0:.3f}", f"{LON0:.3f}"}
+    for n, text in texte.items():
+        assert not any(b in text for b in breiten), n
+        for schluessel in ('"lat"', '"lon"', "richtung", "hoehe"):
+            assert schluessel not in text, (n, schluessel)
+    assert not any("Strecken" in n or n.endswith((".jsonl", ".gpx")) for n in namen)
+
+
+async def test_forschungsexport_waehrend_die_hrv_weiterlaeuft(daten) -> None:
+    """Läuft die HRV-Messung nach dem Training weiter, fehlt ihre Datei noch: Der Teil
+    steht ohne Datei im Dokument, das ZIP hat nur ``einheit-v1.json``."""
+    from trainingsapp.ui.training import forschung_export
+
+    state, tmp_path = daten
+    gesehen: dict[str, object] = {}
+
+    def exportieren(strecke) -> None:
+        _, archiv = forschung_export(state, strecke.einheit_id)
+        with zipfile.ZipFile(BytesIO(archiv)) as z:
+            gesehen["namen"] = z.namelist()
+            gesehen["dok"] = json.loads(z.read("einheit-v1.json"))
+
+    await _training(state, tmp_path, hrv_vorher=30, vor_dem_stopp=exportieren)
+    assert gesehen["namen"] == ["einheit-v1.json"]
+    (hrv,) = [t for t in gesehen["dok"]["teile"] if t["art"] == "hrv"]
+    assert hrv["datei"] is None and hrv["rolle"] == "laeuft_schon"
+    assert hrv["versatz_s"] == pytest.approx(-30.0, abs=1e-6)

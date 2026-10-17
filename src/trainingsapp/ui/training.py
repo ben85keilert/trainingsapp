@@ -27,8 +27,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from trainingsapp.config import messungenverzeichnis, streckenverzeichnis
+from trainingsapp.config import (
+    app_version,
+    datenverzeichnis,
+    messungenverzeichnis,
+    streckenverzeichnis,
+)
 from trainingsapp.core.einheit import Ereignis
+from trainingsapp.core.forschung import dokument, forschung_zip, tempo_reihe
+from trainingsapp.core.hrv_export import zugehoerige_dateien
 from trainingsapp.core.laufend import uhr
 from trainingsapp.core.models import Exercise, HrvRecording, Strecke, lokaler_tag
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
@@ -348,10 +355,57 @@ def zeitleiste_und_versatz(state: Any, strecke: Strecke) -> tuple[list[Ereignis]
     return ereignisse, gps.versatz_s if gps is not None else None
 
 
+def forschung_export(state: Any, einheit_id: str) -> tuple[str, bytes]:
+    """Der Forschungsexport einer Einheit (``docs/plan_einheit.md`` §8) — Dateiname und
+    ZIP: die Messdateien samt Beiwerk byte-genau, ``einheit-v1.json`` mit Zeitleiste,
+    Versätzen und dem Tempo aus der Strecke. **Ohne Ort** (`core.forschung`).
+
+    Raises:
+        ValueError: Die Einheit gibt es nicht (mehr).
+    """
+    kopf = state.einheiten.laden(einheit_id) if state.einheiten is not None else None
+    if kopf is None:
+        raise ValueError("Diese Einheit gibt es nicht mehr.")
+    teile = state.einheiten.beteiligungen(einheit_id)
+    basis = datenverzeichnis()
+    dateien: list[Path] = []
+    archiv: dict[str, str] = {}
+    for b in teile:
+        if b.art != "hrv" or not b.datei or b.datei in archiv:
+            continue
+        pfad = messungenverzeichnis() / b.datei
+        archiv[b.datei] = ""
+        if pfad.exists():  # sonst läuft die Messung noch — der Teil steht ohne Datei da
+            dateien += zugehoerige_dateien(pfad)
+            with contextlib.suppress(ValueError):
+                archiv[b.datei] = pfad.resolve().relative_to(basis.resolve()).as_posix()
+    tempo: list[tuple[float, float | None]] = []
+    gps = next((b for b in teile if b.art == "gps" and b.datei), None)
+    if gps is not None and gps.versatz_s is not None:
+        strecke = streckenverzeichnis() / gps.datei
+        if strecke.exists():
+            tempo = tempo_reihe(jsonl_lesen(strecke), gps.versatz_s)
+    version, build = app_version()
+    dok = dokument(
+        einheit_id=kopf.id,
+        titel=kopf.titel,
+        start_utc=kopf.started_at,
+        ende_utc=kopf.ended_at,
+        teile=teile,
+        ereignisse=state.einheiten.ereignisse(einheit_id),
+        tempo=tempo,
+        archiv=archiv,
+        app=f"trainingsapp {version}" + (f" (Build {build})" if build else ""),
+    )
+    lokal = kopf.started_at.astimezone()
+    return f"einheit_{lokal:%Y-%m-%d_%H%M}.zip", forschung_zip(dok, dateien, basis)
+
+
 __all__ = [
     "HrvBezug",
     "Streckendatei",
     "einheit_eintragen",
+    "forschung_export",
     "hrv_bezug",
     "lauftext",
     "training_eintragen",

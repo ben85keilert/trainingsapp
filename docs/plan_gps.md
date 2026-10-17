@@ -35,6 +35,9 @@ Was das für den Bau heißt:
   Formate: Abschnitt 5b.
 - **Ein Test sichert es ab:** Export-ZIP und Sync-Outbox einer Messung mit
   Strecke enthalten keine Koordinate.
+- **Forschungsexport einer Einheit** (17.10.2026, `docs/plan_einheit.md` §8):
+  ausdrücklich ausgelöst; aus der Strecke nur das Tempo als 5-s-Mittel — keine
+  Ortung, keine Richtung, keine Höhenreihe, nicht die Datei. Ebenfalls per Test.
 - **Die Karte ist die eine Stelle, an der etwas nach außen geht** (Entscheidung 1,
   Online-Kacheln): Sie lädt Kacheln von `tile.openstreetmap.org`, und damit gehen
   grobe Kachelkoordinaten (bei Zoom 16/17 einige hundert Meter) an deren Server —

@@ -121,7 +121,7 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 | 1 | Zeitleiste, `Einheitslauf` mit HRV, Timer, GPS; Startleiste, Laufleiste, Bereitstellen; Dienst `health` | gebaut 17.10.; offen: Messung mit Dauer und Ablauf (Katalog A11) |
 | 2 | Ausdauertraining als Einheit (verknüpft auch eine schon laufende HRV, Abgleich über `versatz_s`, Wiederherstellung H16) | gebaut 17.10.; Tabellen „Intervalle“ und „Kilometer“ live und in der Auswertung (A10, `core/intervalle.py`) |
 | 3 | Timer an Übung, Planübung und Plan (mehrere Profile, „zählt“, Abbrechen), Plan-Ablauf, Einträge mit Anfang und Ende — Migration 020 | gebaut 17.10. (§7); offen: „vom Timer“ unter „Heute geleistet“ (A13) |
-| 4 | Forschungsexport (ausdrückliche Handlung): Messdateien, Zeitleiste `einheit-v1.json`, ortsfreies Tempo | |
+| 4 | Forschungsexport (ausdrückliche Handlung): Messdateien, Zeitleiste `einheit-v1.json`, ortsfreies Tempo | gebaut 17.10. (§8) in der Auswertung des Trainings; offen: aus der HRV-Auswertung, für Einheiten ohne GPS (A14) |
 
 ## 7. Timer an der Übung und Plan-Ablauf (Stufe 3)
 
@@ -153,3 +153,37 @@ einzelnen Übung“ — und: „Aus dem Text heraus weiß die App nicht, was Üb
   folgen dem Timer der laufenden Übung (`Einheitslauf.timer`).
 - **Kurse** zählen Timer-Einträge wie alle anderen (Bedingungen `summe`, `tage`) — nie
   Messwerte.
+
+## 8. Forschungsexport (Stufe 4, `einheit-v1`)
+
+Für die Auswertung außerhalb der App (hrv-research: DFA α1 gegen RMSSD je Belastung, Tempo
+aus GPS, welche Übung wann). **Ausdrückliche Handlung** wie „GPX exportieren“: in der
+Auswertung eines Trainings das Symbol „Für die Auswertung exportieren (ohne Ort)“, ein
+Dialog sagt, was hineingeht, dann das Teilen-Menü (`ui/training.forschung_export`,
+`core/forschung.py`).
+
+**Das ZIP** (`einheit_<JJJJ-MM-TT_HHMM>.zip`):
+
+| Pfad | Inhalt |
+|---|---|
+| `einheit-v1.json` | Kopf, Teile, Zeitleiste, Tempo (unten) |
+| `Messungen/<Gerät>/sensor_….json` | jede Messdatei der Einheit **byte-genau**, mit Beiwerk (`_analyzed.json` mit den Korrekturen, `_diagnose.txt`, …) — wie der Messungs-Export (`core/hrv_export.zugehoerige_dateien`) |
+
+**`einheit-v1.json`:**
+
+| Feld | Bedeutung |
+|---|---|
+| `format` | `"einheit-v1"` |
+| `app` | `"trainingsapp 0.2.1 (Build 139)"` |
+| `einheit` | `id`, `titel`, `start_utc` (= `t_s` 0, ISO 8601), `ende_utc` (`null`: abgebrochen und nicht geschlossen) |
+| `teile[]` | je Beteiligung `art` (`hrv`, `gps`, `timer`, `plan`), `rolle`, `versatz_s` (Zeit des Teils + `versatz_s` = `t_s`; HRV: `t_wall_s` der Messdatei; GPS: UTC-Sekunden der Ortung), `von_s`, `bis_s`, `daten`; HRV dazu `datei` = Pfad im ZIP (`null`: Messung lief beim Export noch) |
+| `ereignisse[]` | die Zeitleiste in ihrer Folge: `nr` (ab 1), `t_s`, `quelle`, `art`, `text`, `daten` (§4, nur `DATEN_SCHLUESSEL`) |
+| `tempo` | `schritt_s` (5), `einheit` (`"m/s"`), `reihe`: `[[t_s, m/s oder null], …]` je Fenster ab `t_s` = 0 — Mittel des Doppler-Tempos, ohne Doppler Weg je Zeit zwischen den Ortungen; Ortungen über 30 m Genauigkeit zählen nicht; `null` = keine Ortung (Tunnel) |
+
+Einen Herzschlag auf die Achse: `t_s` = `t_wall_s` + `versatz_s` des HRV-Teils; eine Marke
+der Messdatei (`marke.einheit`, §4) nennt ihre Einheit.
+
+**Ortsfrei** (`docs/plan_gps.md` §0): keine Koordinate, keine Richtung, keine Höhenreihe,
+nicht die Strecke und nicht der Dateiname der GPS-Beteiligung. Ein Test prüft das ZIP
+(`tests/test_ausdauer.py::test_forschungsexport_ohne_ort`).
+

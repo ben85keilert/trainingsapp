@@ -126,6 +126,7 @@ class FletBleService extends FletService {
               ..._inhalt(a),
               "geraet": a["geraet"] as bool? ?? true,
               "standort": a["standort"] as bool? ?? false,
+              "gesundheit": a["gesundheit"] as bool? ?? false,
             }) ??
             false;
       case "hintergrund_beenden":

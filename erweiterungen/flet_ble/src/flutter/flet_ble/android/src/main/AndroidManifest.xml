@@ -8,6 +8,11 @@
     <!-- GPS im Hintergrund (Training): Typ location. geolocator_android trägt die
          Berechtigung seit 5.1.1 nicht mehr selbst ein. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- Timer oder Plan allein (Einheit ohne Gurt und GPS, Ben 17.10.2026, P26): Typ
+         health. Android 14 verlangt dafür zusätzlich eine der Gesundheits-Voraussetzungen;
+         HIGH_SAMPLING_RATE_SENSORS ist eine normale Berechtigung ohne Rückfrage. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -15,6 +20,6 @@
         <service
             android:name="de.praxisebert.flet_ble.MessDienst"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice|location" />
+            android:foregroundServiceType="connectedDevice|location|health" />
     </application>
 </manifest>

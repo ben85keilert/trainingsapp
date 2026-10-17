@@ -207,6 +207,7 @@ def alle_starten(
     e.starten(countdown_s)
     if e.zustand is Zustand.LAEUFT:
         _timer_ticken(page, state, e)
+    page.run_task(_dienst, state, True, e.titel)
     page.run_task(_laufen, page, state, e, eintragen)
     page.run_task(_anzeigen, state, e)
     melden(state)
@@ -257,11 +258,23 @@ async def _laufen(
                 eintragen_mit = aufnahme_eintragen
             with contextlib.suppress(Exception):
                 eintragen_mit(state, abschluss.hrv, e.subject_id)
+        await _dienst(state, False)
         if state.einheit is e:
             state.einheit = None
         melden(state)
         with contextlib.suppress(Exception):
             state.neu_zeichnen()
+
+
+async def _dienst(state: Any, an: bool, titel: str = "") -> None:
+    """Der Vordergrunddienst für die Einheit (Zweck ``einheit``): Läuft nur Timer oder
+    Plan, hält er die App mit Typ ``health`` wach (P26); mit Gurt oder GPS teilen sie
+    sich den Dienst. Ohne Android (kein Zugang) nichts — wirft nie."""
+    transport = getattr(state, "ble_transport", None)
+    if transport is None or not hasattr(transport, "hintergrund"):
+        return
+    with contextlib.suppress(Exception):
+        await transport.hintergrund(an, f"{titel} läuft" if titel else "", "", zweck="einheit")
 
 
 async def _anzeigen(state: Any, e: Einheitslauf) -> None:

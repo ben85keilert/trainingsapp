@@ -43,6 +43,8 @@ public class MessDienst extends Service {
     static final String EXTRA_SEIT = "seit_ms";
     static final String EXTRA_GERAET = "geraet";
     static final String EXTRA_STANDORT = "standort";
+    /** Typ {@code health}: Timer oder Plan allein (Einheit ohne Gurt und GPS), ab Android 14. */
+    static final String EXTRA_GESUNDHEIT = "gesundheit";
 
     private static final String TAG = "FletBleMessDienst";
     /** Wichtigkeit „Standard“, ohne Ton — die eines bestehenden Kanals lässt sich nicht anheben. */
@@ -72,6 +74,7 @@ public class MessDienst extends Service {
         long seitMs = intent != null ? intent.getLongExtra(EXTRA_SEIT, 0L) : 0L;
         boolean geraet = intent == null || intent.getBooleanExtra(EXTRA_GERAET, true);
         boolean standort = intent != null && intent.getBooleanExtra(EXTRA_STANDORT, false);
+        boolean gesundheit = intent != null && intent.getBooleanExtra(EXTRA_GESUNDHEIT, false);
         try {
             kanalAnlegen(this);
             Notification n = benachrichtigung(this, titel, text, lang, seitMs);
@@ -79,6 +82,10 @@ public class MessDienst extends Service {
                 int typ = 0;
                 if (geraet) typ |= ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;
                 if (standort) typ |= ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+                if (gesundheit && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    typ |= ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH;
+                }
+                // Vor Android 14 gibt es health nicht — connectedDevice braucht dort nichts
                 if (typ == 0) typ = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;
                 try {
                     startForeground(BENACHRICHTIGUNG_ID, n, typ);

@@ -22,7 +22,7 @@ import io.flutter.plugin.common.MethodChannel;
 /**
  * Kanal {@code flet_ble/hintergrund}: startet und beendet den {@link MessDienst}.
  *
- * <p>Methoden: {@code starten} (titel, text, lang, seit_ms, geraet, standort) → bool,
+ * <p>Methoden: {@code starten} (titel, text, lang, seit_ms, geraet, standort, gesundheit) → bool,
  * {@code beenden}, {@code aktiv} → bool, {@code text} (titel, text, lang, seit_ms) → bool —
  * Benachrichtigung ändern, ohne den Dienst neu zu starten —, {@code zeigen} (dieselben) → bool
  * und {@code verbergen} — dieselbe Benachrichtigung ohne Dienst, etwa nur für den Timer —,
@@ -57,13 +57,15 @@ public class FletBlePlugin implements FlutterPlugin, MethodChannel.MethodCallHan
                     benachrichtigungErlauben();
                     Boolean geraet = call.argument("geraet");
                     Boolean standort = call.argument("standort");
+                    Boolean gesundheit = call.argument("gesundheit");
                     Intent i = new Intent(kontext, MessDienst.class)
                             .putExtra(MessDienst.EXTRA_TITEL, (String) call.argument("titel"))
                             .putExtra(MessDienst.EXTRA_TEXT, (String) call.argument("text"))
                             .putExtra(MessDienst.EXTRA_LANG, (String) call.argument("lang"))
                             .putExtra(MessDienst.EXTRA_SEIT, seitMs(call))
                             .putExtra(MessDienst.EXTRA_GERAET, geraet == null || geraet)
-                            .putExtra(MessDienst.EXTRA_STANDORT, standort != null && standort);
+                            .putExtra(MessDienst.EXTRA_STANDORT, standort != null && standort)
+                            .putExtra(MessDienst.EXTRA_GESUNDHEIT, gesundheit != null && gesundheit);
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         kontext.startForegroundService(i);
                     } else {

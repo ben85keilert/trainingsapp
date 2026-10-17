@@ -178,3 +178,30 @@ def test_transport_ohne_takt_wie_bisher() -> None:
         assert t.ble.aufrufe[-1] == ("text", "GPS-Test läuft", "Phase 1/3 · noch 4:00 min")
 
     asyncio.run(ablauf())
+
+
+def test_transport_einheit_haelt_den_dienst_mit_typ_health() -> None:
+    """Timer allein in einer Einheit: Dienst mit Typ health (P26, Ben 17.10.2026) —
+    kommt der Gurt dazu, hält der ihn (connectedDevice), health braucht es dann nicht."""
+    t = _transport()
+    typen: list[dict] = []
+
+    async def starten(titel, text="", **k) -> bool:
+        typen.append({x: k.get(x) for x in ("geraet", "standort", "gesundheit")})
+        return True
+
+    t.ble.hintergrund_starten = starten
+
+    async def ablauf() -> None:
+        await t.hintergrund(True, "Intervall läuft", zweck="einheit")
+        await t.hintergrund(True, "Messung", zweck="messung")
+        await t.hintergrund(False, zweck="messung")
+        await t.hintergrund(False, zweck="einheit")
+
+    asyncio.run(ablauf())
+    assert typen == [
+        {"geraet": False, "standort": False, "gesundheit": True},
+        {"geraet": True, "standort": False, "gesundheit": False},
+        {"geraet": False, "standort": False, "gesundheit": True},
+    ]
+    assert t.ble.aufrufe[-1] == ("beenden",)

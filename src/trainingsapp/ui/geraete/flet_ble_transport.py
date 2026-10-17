@@ -127,9 +127,11 @@ class FletBleTransport:
         """Vordergrunddienst für einen Zweck an/aus. Liefert eine Fehlermeldung oder ``None``.
 
         Zwecke teilen sich den einen Dienst: ``messung`` (Gurt, Typ
-        ``connectedDevice``) und ``gps`` (Typ ``location``). Endet einer, läuft
-        der Dienst für den anderen weiter — mit passendem Typ und Text; erst
-        ohne Zweck wird er beendet.
+        ``connectedDevice``), ``gps`` (Typ ``location``) und ``einheit`` (Timer
+        oder Plan einer Einheit, Typ ``health`` — nur, wenn weder Gurt noch GPS den
+        Dienst schon halten; Ben, 17.10.2026, P26). Endet einer, läuft der Dienst
+        für die anderen weiter — mit passendem Typ und Text; erst ohne Zweck wird
+        er beendet.
 
         Wirft nie: Scheitert der Dienst, läuft die Messung trotzdem — nur eben
         nicht verlässlich bei ausgeschaltetem Display.
@@ -145,9 +147,16 @@ class FletBleTransport:
                 await self.ble.hintergrund_beenden()
                 return None
             geraet, standort = "messung" in self._zwecke, "gps" in self._zwecke
+            gesundheit = "einheit" in self._zwecke and not (geraet or standort)
             b = self._inhalt or self._aus_zwecken()
             await self.ble.hintergrund_starten(
-                b.titel, b.text, geraet=geraet, standort=standort, lang=b.lang, seit_ms=b.seit_ms
+                b.titel,
+                b.text,
+                geraet=geraet,
+                standort=standort,
+                gesundheit=gesundheit,
+                lang=b.lang,
+                seit_ms=b.seit_ms,
             )
             self._einfach = False  # der Dienst ersetzt die gewöhnliche Benachrichtigung
         except Exception as fehler:

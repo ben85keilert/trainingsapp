@@ -330,6 +330,7 @@ class FletBle(ft.Service):
         *,
         geraet: bool = True,
         standort: bool = False,
+        gesundheit: bool = False,
         lang: str = "",
         seit_ms: int = 0,
     ) -> bool:
@@ -343,6 +344,8 @@ class FletBle(ft.Service):
 
         ``geraet``: Typ ``connectedDevice`` (Gurt verbunden); ``standort``: Typ
         ``location`` (GPS läuft) — dafür muss die Standortberechtigung erteilt sein.
+        ``gesundheit``: Typ ``health`` (ab Android 14) — Timer oder Plan allein, ohne Gurt
+        und GPS; vorher ``connectedDevice``.
         ``lang``: Text der ausgeklappten Benachrichtigung (mehrzeilig); ``seit_ms``:
         Beginn in ms seit 1970 — Android zählt ab da eine Stoppuhr im Kopf (0 = keine).
         """
@@ -351,6 +354,7 @@ class FletBle(ft.Service):
             "text": text,
             "geraet": geraet,
             "standort": standort,
+            "gesundheit": gesundheit,
             "lang": lang,
             "seit_ms": seit_ms,
         }

@@ -504,7 +504,7 @@ class Einheitslauf:
         gesammelt: list[Ereignis] = []
         for teil in self.teile:
             if id(teil) in self._gestartet:
-                gesammelt.extend(teil.takt(jetzt))
+                gesammelt.extend(self._sicher(teil, teil.takt, jetzt))
         gesammelt.extend(self._schlaf_pruefen(jetzt))
         gesammelt.sort(key=lambda e: e.t_s)
         self._aufnehmen(gesammelt, jetzt)
@@ -515,6 +515,17 @@ class Einheitslauf:
         if self.ende_mit_timer and any(e.quelle == "timer" and e.art == "ende" for e in neu):
             self.beenden()
         return neu
+
+    def _sicher(
+        self, teil: Baustein, aufruf: Callable[[float], list[Ereignis]], jetzt: float
+    ) -> list[Ereignis]:
+        """Ein Fehler gehört dem Teil, nicht der Einheit: Er steht in `warnung`, der Takt
+        läuft für die anderen weiter (ein kaputter Rechner hielte sonst auch die HRV an)."""
+        try:
+            return aufruf(jetzt)
+        except Exception as fehler:
+            self.warnung = f"{teil.art}: {fehler or type(fehler).__name__}"
+            return []
 
     def _schlaf_pruefen(self, jetzt: float) -> list[Ereignis]:
         """Tiefschlaf zwischen zwei Takten wird ein Ereignis (Datenqualität)."""
@@ -614,7 +625,7 @@ class Einheitslauf:
         gesammelt: list[Ereignis] = []
         for teil in self.teile:
             if id(teil) in self._gestartet:
-                gesammelt.extend(teil.beenden(jetzt))
+                gesammelt.extend(self._sicher(teil, teil.beenden, jetzt))
         grund = "abgebrochen" if self.zustand is Zustand.COUNTDOWN else ""
         gesammelt.sort(key=lambda e: e.t_s)
         ende = Ereignis(

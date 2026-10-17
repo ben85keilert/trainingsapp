@@ -77,24 +77,27 @@ async def test_hrv_verbunden_und_mit_aufnahme() -> None:
 
 
 def test_ausdauer_und_timer_zusammen() -> None:
+    """Ein Training mit Intervall-Timer ist eine Einheit: eine Zeile mit Strecke, Zeit und
+    Abschnitt — der Timer steht nicht noch einmal da."""
+    from attrappen import Empfaenger, Uhr
+    from trainingsapp.devices.einheit import Einheitslauf, TimerBaustein
+    from trainingsapp.devices.strecke_baustein import StreckeBaustein
     from trainingsapp.ui.laufend import laufendes
 
+    uhr = Uhr()
     start = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
-    ausdauer = SimpleNamespace(
-        fertig=False,
-        sportart="gehen",
-        dauer_s=605.0,
-        start_utc=start,
-        text=lambda: "1,23 km · 10:05",
-    )
-    t = [0.0]
-    timer = TimerLauf(TimerProfil(abschnitte=[Abschnitt("Planke", 60)]), uhr=lambda: t[0])
-    timer.start()
-    b = benachrichtigung(laufendes(_state(ausdauer=ausdauer, timer=timer)))
+    e = Einheitslauf(uhr=uhr, jetzt_utc=lambda: start, titel="Gehen · Planke")
+    teil = StreckeBaustein(Empfaenger(uhr), "gehen")
+    e.hinzufuegen(teil)
+    timer = TimerLauf(TimerProfil(name="Planke", abschnitte=[Abschnitt("Planke", 900)]))
+    e.hinzufuegen(TimerBaustein(timer))
+    e.starten()
+    uhr.t += 605
+    teil.rechner = SimpleNamespace(distanz_m=1230.0)  # type: ignore[assignment]
+    b = benachrichtigung(laufendes(_state(einheit=e, timer=timer)))
     assert b is not None
-    assert b.titel == "Gehen · Timer"
-    assert b.text == "Gehen 10:05 · Timer 1:00"
-    assert b.lang.splitlines()[0] == "Gehen: 1,23 km · 10:05"
+    assert b.titel == "Gehen läuft"
+    assert b.text == "1,23 km · 10:05 · Planke · noch 4:55"
     assert b.seit_ms == int(start.timestamp() * 1000)
 
 

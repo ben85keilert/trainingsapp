@@ -202,3 +202,30 @@ async def test_abgebrochener_countdown_gibt_das_gps_frei() -> None:
     abschluss = await e.abschliessen()
     assert "gps" not in abschluss.teile  # nichts einzutragen
     assert training.fertig and not gps.laeuft
+
+
+async def test_quelle_mit_eigener_uhr() -> None:
+    """GPS-Simulator und Wiedergabe führen ihre eigene Uhr (die App: monotonic wie die
+    Einheit). Die Empfangszeit kommt über den Abstand beider Uhren auf die der Einheit."""
+    uhr = Uhr()
+    gps = Empfaenger(lambda: uhr() - 900.0)  # type: ignore[arg-type]
+    teil = StreckeBaustein(gps, LAUFEN)
+    e = Einheitslauf(uhr=uhr, jetzt_utc=uhr.utc, titel="Lauf")
+    e.hinzufuegen(teil)
+    await e.vorbereiten()
+    gps.ortung(0)
+    await ruhe()
+    assert teil.bereit
+    e.starten()
+    for _ in range(100):
+        uhr.t += 1
+        gps.ortung()
+        await ruhe()
+        e.takt()
+    e.beenden()
+    ergebnis = (await e.abschliessen()).teile["gps"]
+    # Die Ortung beim Bereitstellen steht genau auf t0 und zählt — ohne Umrechnung läge
+    # sie (wie alle) 900 s davor, und nichts zählte
+    start = next(x for x in e.ereignisse if x.quelle == "gps")
+    assert start.t_s == pytest.approx(0.0, abs=1e-6)
+    assert len(ergebnis.rechner.punkte) == 101

@@ -5,14 +5,18 @@ GPS (Laufband, Halle), mit oder ohne Gurt. Gerechnet wird in
 `core.strecke.StreckenRechner` (10-m-Schritt, Auto-Pause, Splits), die HRV je
 Kilometer in `core.hrv_training`. Diese Ansicht verbindet nur:
 
-- **GPS jede Sekunde** (`GPS_TAKT_S`) — der Vorabtest zeigte keinen
-  messbaren Stromvorteil für seltener, aber eine schlechtere Genauigkeit.
-- Ist ein Gurt verbunden, läuft die **HRV-Aufnahme** mit; an jedem Kilometer
-  ein Ton, eine Vibration und die Notiz „km 3", die beim Speichern eine
-  Abschnittsgrenze wird. Die Notiz trägt **nie einen Ort**.
-- Beim Beenden: Strecke (Datei unter ``Strecken/``, Zeile `strecke`),
-  HRV-Aufnahme (wie sonst unter ``Messungen/``) und ein **Tagebucheintrag**
-  der Übung „Gehen"/„Laufen"/„Radfahren" mit Strecke und Zeit.
+- Das Training läuft **als Einheit** (Ben, 17.10.2026; ``docs/plan_einheit.md``,
+  Stufe 2): Sein Teil ist `devices.strecke_baustein.StreckeBaustein` — GPS jede
+  Sekunde, Kilometer zur Split-Zeit auf eigener Spur. **Training starten** startet
+  sofort, zusammen mit allem, was in der Startleiste wartet (Timer für Intervalle);
+  **Bereitstellen** legt es dorthin, das GPS sucht schon Empfang. Ist ein Gurt
+  verbunden, läuft die **HRV-Aufnahme** mit; lief sie schon, bekommt sie Marken
+  und läuft danach weiter.
+- An jedem Kilometer ein Ton, eine Vibration und die Notiz „km 3" in der Messung
+  (`ui.einheit`). Die Notiz trägt **nie einen Ort**.
+- Nach dem Ende: Strecke (Datei unter ``Strecken/``, Zeile `strecke` mit ihrer
+  Einheit), HRV-Aufnahme (wie sonst unter ``Messungen/``) und ein
+  **Tagebucheintrag** der Übung „Gehen"/„Laufen"/„Radfahren" (`ui.training`).
 
 **GPS-Daten werden nie geteilt** (`docs/plan_gps.md`, Abschnitt 0): Die
 Ortungen bleiben in ``Strecken/``; hinaus gehen sie nur über „GPX
@@ -22,8 +26,8 @@ Tagebucheintrag und Benachrichtigung bleiben ortsfrei.
 **DFA α1 ohne Empfehlung** (Abschnitt 6): Verlauf, Zeit je Wertebereich und
 Werte je Kilometer, neutral beschriftet — nur mit EKG-Gurt; keine Zonen.
 
-Der Lauf (`AusdauerLauf`) lebt im `AppState` und übersteht Ansichtswechsel;
-bei ausgeschaltetem Display hält ihn der Vordergrunddienst (Typ ``location``).
+Die Einheit lebt im `AppState` und übersteht Ansichtswechsel; bei ausgeschaltetem
+Display hält sie der Vordergrunddienst (Typ ``location``).
 """
 
 from __future__ import annotations
@@ -32,7 +36,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -51,15 +55,14 @@ from hrv_core.ppi import schlagzeiten
 from hrv_core.recording import Recording, laden
 from hrv_core.trends import aktuell, reihe
 
-from trainingsapp.config import datenverzeichnis, messungenverzeichnis, streckenverzeichnis
+from trainingsapp.config import messungenverzeichnis, streckenverzeichnis
 from trainingsapp.core.hrv_training import (
     dfa_verlauf,
     hf_je_zeit,
     werte_zwischen,
     zeit_je_bereich,
 )
-from trainingsapp.core.models import Exercise, Strecke, lokaler_tag
-from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
+from trainingsapp.core.models import Strecke
 from trainingsapp.core.strecke import (
     GEHEN,
     LAUFEN,
@@ -68,30 +71,28 @@ from trainingsapp.core.strecke import (
     SPORTARTEN,
     Punkt,
     Split,
-    StreckenRechner,
     rechnen,
     split_laenge_m,
 )
 from trainingsapp.data.repositories import SettingRepo
-from trainingsapp.data.seed import seed_id
-from trainingsapp.data.strecken import StreckenSchreiber, dateiname, gpx, jsonl_lesen, kopf_lesen
+from trainingsapp.data.strecken import gpx, jsonl_lesen, kopf_lesen
 from trainingsapp.devices.base import Verbindung
+from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.devices.gps import GpsQuelle
+from trainingsapp.devices.strecke_baustein import StreckeBaustein
+from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.ausrichtung import querformat
-from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog
+from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog, schliessen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.karte_strecke import StreckenKarte, ganze_strecke
 from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.training import lauftext, verwaiste_uebernehmen
 
-#: Ben, 14.10.2026: GPS im Sekundentakt — seltener sparte im Test keinen messbaren Strom
-GPS_TAKT_S = 1.0
-#: Benachrichtigung und Live-DFA so oft auffrischen (s)
-TEXT_ALLE_S = 5.0
-#: Zweck im gemeinsamen Vordergrunddienst — Typ ``location``
-ZWECK = "gps"
+#: Live-DFA α1 so oft neu rechnen (s)
+DFA_ALLE_S = 5.0
 
 SPORT_SYMBOLE = {
     GEHEN: ft.Icons.DIRECTIONS_WALK,
@@ -141,324 +142,8 @@ def _zahl(x: float | None, stellen: int = 0) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Übung im Tagebuch
-# ---------------------------------------------------------------------------
-
-
-def uebung_fuer(state: AppState, sportart: str) -> Exercise:
-    """Die Übung „Gehen"/„Laufen"/„Radfahren" — beim ersten Training angelegt.
-
-    Feste ID je Sportart (wie mitgelieferte Übungen), damit alle Trainings
-    einer Sportart im Verlauf zusammenstehen. Felder: Strecke und Zeit.
-    """
-    uid = seed_id(f"ausdauer_{sportart}")
-    vorhanden = state.uebungen.laden(uid, mit_geloeschten=True)
-    if vorhanden is not None:
-        return vorhanden
-    felder = [f for f in (vorrat_feld("distance"), vorrat_feld("duration")) if f is not None]
-    uebung = Exercise(
-        id=uid,
-        name=SPORT_NAMEN[sportart],
-        description="Ausdauer — mit GPS oder ohne aufgezeichnet (Reiter „Messung“, „Ausdauer“).",
-        result_spec=ResultSpec(layout=Layout.SINGLE, fields=felder),
-        typen=["Ausdauer"],
-        default_felder=["distance", "duration"],
-    )
-    state.uebungen.speichern(uebung)
-    return uebung
-
-
-# ---------------------------------------------------------------------------
-# Der Lauf
-# ---------------------------------------------------------------------------
-
-
-class AusdauerLauf:
-    """Ein laufendes Training: GPS, Rechner, Datei, HRV-Aufnahme und Benachrichtigung."""
-
-    def __init__(self, state: AppState, sportart: str, quelle: GpsQuelle | None) -> None:
-        self.state = state
-        #: Profil beim Start — ein Wechsel während des Trainings hängt nichts um
-        self.subject_id = state.profil.id
-        self.sportart = sportart
-        self.quelle = quelle
-        self.rechner = StreckenRechner(split_m=split_laenge_m(sportart))
-        self.start_utc = datetime.now(UTC)
-        self._start_mono = time.monotonic()
-        self.datei: StreckenSchreiber | None = None
-        #: Pfad der Streckendatei — bleibt, auch wenn das Schreiben scheitert
-        self.datei_pfad: Path | None = None
-        #: Was die Person wissen muss, während es läuft (GPS weg, Dienst fehlt, Datei voll)
-        self.warnung: str | None = None
-        self.messlauf = state.messlauf if _verbunden(state) else None
-        #: Die HRV-Aufnahme hat dieses Training gestartet (und beendet sie)
-        self.hrv_eigen = False
-        self.dfa: float | None = None
-        self.fertig = False
-        self._empfang: asyncio.Task[None] | None = None
-        self._takt: asyncio.Task[None] | None = None
-        self._laeuft = False
-
-    # -- Zahlen ------------------------------------------------------------------
-
-    @property
-    def dauer_s(self) -> float:
-        return time.monotonic() - self._start_mono
-
-    @property
-    def hf(self) -> int | None:
-        lauf = self.messlauf
-        if lauf is None:
-            return None
-        with contextlib.suppress(Exception):
-            return lauf.live.kennzahlen().hf_bpm
-        return None
-
-    @property
-    def ekg(self) -> bool:
-        profil = self.messlauf.profil if self.messlauf is not None else None
-        return bool(profil and profil.intervall_quelle == "ekg_rr")
-
-    def text(self) -> str:
-        """Für die Benachrichtigung — ortsfrei."""
-        teile = [zeit_text(self.dauer_s)]
-        if self.quelle is not None:
-            teile.insert(0, km_text(self.rechner.distanz_m))
-        if self.hf:
-            teile.append(f"HF {self.hf}")
-        return " · ".join(teile)
-
-    # -- Ablauf ------------------------------------------------------------------
-
-    async def starten(self) -> None:
-        self._laeuft = True
-        transport = self.state.ble_transport
-        if transport is not None and hasattr(transport, "hintergrund"):
-            fehler = await transport.hintergrund(
-                True, f"{SPORT_NAMEN[self.sportart]} läuft", self.text(), zweck=ZWECK
-            )
-            if fehler:
-                self.warnung = f"Hintergrunddienst nicht gestartet ({fehler}) — Display anlassen."
-        if self.messlauf is not None and self.messlauf.aufnahme is None:
-            self.messlauf.subject_id = self.subject_id
-            self.messlauf.aufnahme_starten()
-            self.hrv_eigen = True
-        if self.quelle is not None:
-            self.datei_pfad = streckenverzeichnis() / dateiname(self.start_utc)
-            # Kopf ohne Koordinaten: damit ein abgebrochenes Training nachgetragen werden kann
-            self.datei = StreckenSchreiber(
-                self.datei_pfad,
-                kopf={
-                    "schema": "strecke-v1",
-                    "sportart": self.sportart,
-                    "subject_id": self.subject_id,
-                    "started_at": self.start_utc.isoformat(),
-                },
-            )
-            await self.quelle.starten(GPS_TAKT_S)
-            self._empfang = asyncio.create_task(self._empfangen())
-        self._takt = asyncio.create_task(self._takten())
-
-    async def _empfangen(self) -> None:
-        """Ortungen entgegennehmen — ein Fehler stoppt nicht still, er steht in `warnung`."""
-        assert self.quelle is not None
-        try:
-            async for punkt in self.quelle.punkte():
-                if self.datei is not None:
-                    try:
-                        self.datei.schreiben(punkt)
-                    except OSError as fehler:  # Speicher voll, Datei weg
-                        self.datei.schliessen()
-                        self.datei = None
-                        self.warnung = f"Strecke wird nicht mehr gespeichert: {fehler}"
-                for split in self.rechner.hinzufuegen(punkt):
-                    await self._kilometer(split)
-        except Exception as fehler:
-            self.warnung = f"GPS-Empfang abgebrochen: {fehler}"
-
-    async def _kilometer(self, split: Split) -> None:
-        """Ton, Vibration und die Notiz „km N" — die beim Speichern ein Abschnitt wird."""
-        lauf = self.messlauf
-        km = round(split.nummer * split_laenge_m(self.sportart) / 1000)
-        if lauf is not None and lauf.aufnahme is not None:
-            lauf.abschnitt_markieren(f"km {km}", name=f"km {km}")
-        if self.state.ton is not None and self.state.toene_geladen:
-            with contextlib.suppress(Exception):
-                await self.state.ton.spielen("wechsel")
-        if self.state.haptik is not None:
-            with contextlib.suppress(Exception):
-                await self.state.haptik.vibrate()
-
-    async def _takten(self) -> None:
-        """Benachrichtigung und Live-DFA α1 alle `TEXT_ALLE_S`."""
-        transport = self.state.ble_transport
-        while self._laeuft:
-            await asyncio.sleep(TEXT_ALLE_S)
-            if self.quelle is not None and self.quelle.meldung:
-                self.warnung = f"GPS: {self.quelle.meldung}"
-            if self.ekg and self.messlauf is not None:
-                with contextlib.suppress(Exception):
-                    t, rr, naht = self.messlauf.live.verlaufsreihe()
-                    self.dfa = (
-                        aktuell(t, rr, naht, "dfa_alpha1", 120.0, ende=float(t[-1]))
-                        if len(t)
-                        else None
-                    )
-            if transport is not None and hasattr(transport, "hintergrund_text"):
-                await transport.hintergrund_text(self.text(), zweck=ZWECK)
-
-    async def _anhalten(self) -> None:
-        """GPS, Takt, Datei und Vordergrunddienst beenden — ohne zu speichern."""
-        self._laeuft = False
-        if self._takt is not None:
-            self._takt.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._takt
-        if self.quelle is not None:
-            with contextlib.suppress(Exception):
-                await self.quelle.beenden()
-            if self._empfang is not None:
-                with contextlib.suppress(Exception):
-                    await self._empfang
-        if self.datei is not None:
-            self.datei.schliessen()
-        transport = self.state.ble_transport
-        if transport is not None and hasattr(transport, "hintergrund"):
-            with contextlib.suppress(Exception):
-                await transport.hintergrund(False, zweck=ZWECK)
-
-    async def abbrechen(self) -> None:
-        """Start gescheitert: nichts speichern, die angefangene Datei entfernen."""
-        await self._anhalten()
-        if self.hrv_eigen and self.messlauf is not None:
-            with contextlib.suppress(Exception):
-                self.messlauf.aufnahme_stoppen(datenverzeichnis())
-        if self.datei_pfad is not None:
-            with contextlib.suppress(OSError):
-                self.datei_pfad.unlink()
-        self.fertig = True
-
-    async def stoppen(self) -> Strecke:
-        """Alles beenden und speichern: Strecke, HRV-Aufnahme, Tagebucheintrag."""
-        await self._anhalten()
-        hrv_id = None
-        if self.hrv_eigen and self.messlauf is not None:
-            from trainingsapp.ui.views.messung import aufnahme_eintragen
-
-            ergebnis = self.messlauf.aufnahme_stoppen(datenverzeichnis())
-            if ergebnis is not None:
-                hrv_id = aufnahme_eintragen(self.state, ergebnis, self.subject_id).id
-        r = self.rechner
-        mit_gps = self.quelle is not None and bool(r.teilstuecke)
-        if not mit_gps and self.datei_pfad is not None:  # kein Fix: keine leere Datei lassen
-            with contextlib.suppress(OSError):
-                self.datei_pfad.unlink()
-        # Wanduhr — mit GPS nie kürzer als die Zeit zwischen erster und letzter Ortung
-        dauer = max(self.dauer_s, r.dauer_s) if mit_gps else self.dauer_s
-        strecke = training_eintragen(
-            self.state,
-            subject_id=self.subject_id,
-            sportart=self.sportart,
-            started_at=self.start_utc,
-            ended_at=datetime.now(UTC),
-            file_path=(
-                self.datei_pfad.relative_to(streckenverzeichnis()).as_posix()
-                if mit_gps and self.datei_pfad is not None
-                else ""
-            ),
-            rechner=r if mit_gps else None,
-            dauer_s=dauer,
-            hrv_recording_id=hrv_id,
-        )
-        self.fertig = True
-        return strecke
-
-
-def training_eintragen(
-    state: AppState,
-    *,
-    subject_id: str,
-    sportart: str,
-    started_at: datetime,
-    ended_at: datetime,
-    file_path: str,
-    rechner: StreckenRechner | None,
-    dauer_s: float,
-    hrv_recording_id: str | None = None,
-    title: str = "",
-) -> Strecke:
-    """Strecke und Tagebucheintrag anlegen — beim Stoppen und beim Nachtragen.
-
-    ``rechner`` ``None`` heißt ohne GPS (Laufband): Strecke 0, Bewegungszeit = Dauer.
-    """
-    r = rechner
-    strecke = Strecke(
-        subject_id=subject_id,
-        sportart=sportart,
-        started_at=started_at,
-        ended_at=ended_at,
-        file_path=file_path if r is not None else "",
-        distanz_m=r.distanz_m if r is not None else 0.0,
-        dauer_s=dauer_s,
-        bewegt_s=r.bewegt_s if r is not None else dauer_s,
-        hoehe_auf_m=r.hoehe_auf_m if r is not None else 0.0,
-        hoehe_ab_m=r.hoehe_ab_m if r is not None else 0.0,
-        hrv_recording_id=hrv_recording_id,
-        title=title,
-    )
-    ergebnis_feld: dict[str, Any] = {"duration": round(dauer_s)}
-    if strecke.distanz_m >= 10:
-        ergebnis_feld["distance"] = round(strecke.distanz_m)
-    uebung = uebung_fuer(state, sportart)
-    sitzung = state.sitzungen.session_fuer(subject_id, None, lokaler_tag(started_at))
-    eintrag = state.sitzungen.eintrag_anlegen(sitzung, uebung, ergebnis_feld)
-    strecke.session_entry_id = eintrag.id
-    state.strecken.anlegen(strecke)
-    return strecke
-
-
-# ---------------------------------------------------------------------------
 # Verwaiste Streckendateien — Training, das Android mitten im Lauf beendet hat
 # ---------------------------------------------------------------------------
-
-
-def verwaiste_uebernehmen(state: AppState, pfad: Path) -> Strecke | None:
-    """Eine Streckendatei ohne Zeile als Training nachtragen (Ben, 15.10.2026: beim
-    Start erkennen und anbieten). Sportart, Profil und Start kommen aus dem Kopf der
-    Datei; ohne Kopf gilt „Gehen", das aktive Profil und die erste Ortung. Eine Datei
-    ohne Ortung wird gelöscht, nicht eingetragen (``None``)."""
-    punkte = jsonl_lesen(pfad)
-    if not punkte:
-        with contextlib.suppress(OSError):
-            pfad.unlink()
-        state.verwaiste_strecken = [p for p in state.verwaiste_strecken if p != pfad]
-        return None
-    kopf = kopf_lesen(pfad) or {}
-    sportart = str(kopf.get("sportart") or "")
-    if sportart not in SPORTARTEN:
-        sportart = GEHEN
-    subject_id = str(kopf.get("subject_id") or "")
-    if not subject_id or state.profile.laden(subject_id) is None:
-        subject_id = state.profil.id
-    try:
-        started_at = datetime.fromisoformat(str(kopf["started_at"]))
-    except (KeyError, ValueError):
-        started_at = datetime.fromtimestamp(punkte[0].t, UTC)
-    ended_at = datetime.fromtimestamp(punkte[-1].t, UTC)
-    r = rechnen(punkte, sportart)
-    strecke = training_eintragen(
-        state,
-        subject_id=subject_id,
-        sportart=sportart,
-        started_at=started_at,
-        ended_at=ended_at,
-        file_path=pfad.relative_to(streckenverzeichnis()).as_posix(),
-        rechner=r,
-        dauer_s=max(r.dauer_s, (ended_at - started_at).total_seconds()),
-        title="Nachgetragen — die App wurde während des Trainings beendet",
-    )
-    state.verwaiste_strecken = [p for p in state.verwaiste_strecken if p != pfad]
-    return strecke
 
 
 def verwaiste_dialog(page: ft.Page, state: AppState) -> ft.AlertDialog:
@@ -541,6 +226,45 @@ def _gross(name: str, wert: str, *, einheit: str = "", farbe: str | None = None)
     )
 
 
+def _training(state: AppState) -> tuple[Einheitslauf, StreckeBaustein] | None:
+    """Das laufende Training — Teil ``gps`` der laufenden Einheit."""
+    e = einheit_ui.laeuft(state)
+    teil = e.teil("gps") if e is not None else None
+    if e is None or not isinstance(teil, StreckeBaustein):
+        return None
+    return e, teil
+
+
+def _hf(e: Einheitslauf) -> int | None:
+    hrv = e.hrv
+    if hrv is None:
+        return None
+    with contextlib.suppress(Exception):
+        return hrv.messlauf.live.kennzahlen().hf_bpm
+    return None
+
+
+def _ekg(e: Einheitslauf) -> bool:
+    hrv = e.hrv
+    profil = hrv.messlauf.profil if hrv is not None else None
+    return bool(profil and profil.intervall_quelle == "ekg_rr")
+
+
+def _beenden_text(e: Einheitslauf, teil: StreckeBaustein) -> str:
+    """Was beim Beenden geschieht — die HRV-Messung endet nur, wenn sie mitbegann."""
+    saetze = [
+        "Strecke und Zeit werden gespeichert." if teil.mit_gps else "Die Zeit wird gespeichert."
+    ]
+    if e.hrv is not None:
+        if e.stoppt_am_ende("hrv"):
+            saetze.append("Die HRV-Messung endet und wird gespeichert.")
+        else:
+            saetze.append("Die HRV-Messung läuft weiter.")
+    if (t := e.timer) is not None and not t.lauf.fertig:
+        saetze.append("Der Timer endet mit.")
+    return " ".join(saetze)
+
+
 def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
     """Training vorbereiten und starten — läuft eines, die großen Zahlen und die Karte."""
     nummer = state.ausdauer_ansicht = state.ausdauer_ansicht + 1
@@ -551,95 +275,132 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
     warnung = ft.Text(size=13, color=ft.Colors.ERROR, visible=False)
     strecken_karte: StreckenKarte | None = None
     gross = {"an": False}
+    dfa: dict[str, Any] = {"wert": None, "zuletzt": None}
 
-    def lauf_jetzt() -> AusdauerLauf | None:
-        lauf: AusdauerLauf | None = state.ausdauer
-        return lauf if lauf is not None and not lauf.fertig else None
+    # -- Bereitstellen und Starten ---------------------------------------------------
 
-    # -- Start ---------------------------------------------------------------------
-
-    async def starten() -> None:
+    async def quelle_fuer_start() -> tuple[bool, GpsQuelle | None]:
+        """Die Ortungsquelle — ``(False, None)``, wenn es so nicht geht (Meldung steht da)."""
         from trainingsapp.ui.views.gps_test import quelle_holen
 
         if state.gps_test is not None and not state.gps_test.fertig:
             page.show_dialog(ft.SnackBar(ft.Text("Erst den GPS-Test beenden.")))
-            return
-        quelle: GpsQuelle | None = None
-        if state.ausdauer_gps:
-            quelle = quelle_holen(page, state)
-            berechtigung = getattr(quelle, "berechtigung", None)
-            if berechtigung is not None and (status := await berechtigung()) != "erteilt":
-                page.show_dialog(
-                    ft.SnackBar(
-                        ft.Text(
-                            f"Standort {status} — in den Einstellungen des Handys erlauben, "
-                            "oder ohne GPS trainieren."
-                        )
+            return False, None
+        if not state.ausdauer_gps:
+            return True, None
+        quelle = quelle_holen(page, state)
+        berechtigung = getattr(quelle, "berechtigung", None)
+        if berechtigung is not None and (status := await berechtigung()) != "erteilt":
+            page.show_dialog(
+                ft.SnackBar(
+                    ft.Text(
+                        f"Standort {status} — in den Einstellungen des Handys erlauben, "
+                        "oder ohne GPS trainieren."
                     )
                 )
-                return
-        lauf = AusdauerLauf(state, state.ausdauer_sportart, quelle)
+            )
+            return False, None
+        return True, quelle
+
+    async def bereitstellen() -> bool:
+        """Das Training in die Startleiste — ``True``, wenn es dort steht."""
+        if einheit_ui.laeuft(state) is not None:
+            page.show_dialog(
+                ft.SnackBar(ft.Text("Es läuft schon eine Einheit — erst oben mit ⏹ beenden."))
+            )
+            return False
+        ok, quelle = await quelle_fuer_start()
+        if not ok:
+            return False
         try:
-            await lauf.starten()
-        except Exception as fehler:  # GPS startet nicht, Datei nicht anlegbar …
-            await lauf.abbrechen()
-            page.show_dialog(ft.SnackBar(ft.Text(f"Training nicht gestartet: {fehler}")))
+            einheit_ui.ausdauer_bereitstellen(page, state, state.ausdauer_sportart, quelle)
+        except Exception as fehler:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Training nicht bereitgestellt: {fehler}")))
+            return False
+        return True
+
+    async def bereitstellen_umschalten() -> None:
+        """„Bereitstellen“ — steht es schon bereit, wieder heraus."""
+        if einheit_ui.bereitgestellt(state, "gps"):
+            einheit_ui.zuruecknehmen(page, state, "gps")
+        else:
+            await bereitstellen()
+
+    async def neu_bereitstellen() -> None:
+        """Sportart oder GPS geändert, während das Training bereitsteht: neu hinein."""
+        if einheit_ui.bereitgestellt(state, "gps"):
+            einheit_ui.zuruecknehmen(page, state, "gps")
+            await bereitstellen()
+
+    async def starten() -> None:
+        """Sofort los — zusammen mit allem, was in der Startleiste wartet."""
+        if not einheit_ui.bereitgestellt(state, "gps") and not await bereitstellen():
             return
-        state.ausdauer = lauf  # erst jetzt — ein halb gestarteter Lauf bliebe sonst hängen
-        zeichnen()
-        page.update()
-        page.run_task(ticker)
-        if quelle is not None and state.ausdauer_karte:
+        e = einheit_ui.alle_starten(page, state, 0.0)
+        if e is not None and state.ausdauer_gps and state.ausdauer_karte:
             karten_hinweis_einmal()
 
     def karten_hinweis_einmal() -> None:
         """Einmal (nicht je Aufzeichnung, Ben 15.10.2026): Die Karte holt Kacheln online."""
         if state.einstellungen.lesen(SettingRepo.HINWEIS_KARTE, "0") == "1":
             return
+        dialog: ft.AlertDialog
 
         def verstanden() -> None:
             state.einstellungen.setzen(SettingRepo.HINWEIS_KARTE, "1")
-            page.pop_dialog()
+            schliessen(dialog)
 
-        page.show_dialog(
-            ft.AlertDialog(
-                modal=True,
-                title=ft.Text("Karte während des Trainings"),
-                content=ft.Text(
-                    "Die Karte lädt ihre Kacheln von OpenStreetMap. Dabei gehen grobe "
-                    "Kachelkoordinaten (einige hundert Meter) an deren Server — die Strecke "
-                    "selbst bleibt auf dem Handy. Wer das nicht will, schaltet „Karte zeigen“ "
-                    "aus; dann wird nichts geladen."
-                ),
-                actions=[ft.FilledButton("Verstanden", on_click=verstanden)],
-            )
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Karte während des Trainings"),
+            content=ft.Text(
+                "Die Karte lädt ihre Kacheln von OpenStreetMap. Dabei gehen grobe "
+                "Kachelkoordinaten (einige hundert Meter) an deren Server — die Strecke "
+                "selbst bleibt auf dem Handy. Wer das nicht will, schaltet „Karte zeigen“ "
+                "aus; dann wird nichts geladen."
+            ),
+            actions=[ft.FilledButton("Verstanden", on_click=verstanden)],
         )
+        page.show_dialog(dialog)
 
     def karte_gewaehlt(e: ft.Event[ft.Switch]) -> None:
         state.ausdauer_karte = bool(e.control.value)
 
     def beenden_fragen() -> None:
+        jetzt = _training(state)
+        if jetzt is None:
+            return
+        e, teil = jetzt
+        dialog: ft.AlertDialog
+
         async def beenden() -> None:
-            page.pop_dialog()
-            lauf = lauf_jetzt()
-            if lauf is None:
+            schliessen(dialog)
+            einheit_ui.alle_beenden(state)
+            strecke = None
+            for _ in range(150):  # gespeichert wird im Takt der Einheit (`ui.einheit`)
+                strecke = state.strecken.zur_einheit(e.id)
+                if strecke is not None or (state.einheit is not e and e.warnung):
+                    break
+                await asyncio.sleep(0.1)
+            if strecke is None:
+                page.show_dialog(ft.SnackBar(ft.Text(e.warnung or "Training nicht gespeichert.")))
                 return
-            strecke = await lauf.stoppen()
-            state.ausdauer = None
             page.show_dialog(ft.SnackBar(ft.Text("Training gespeichert — auch im Tagebuch.")))
             await page.push_route(f"/ausdauer/{strecke.id}")
 
-        page.show_dialog(
-            ft.AlertDialog(
-                modal=True,
-                title=ft.Text("Training beenden?"),
-                content=ft.Text("Strecke, Zeit und HRV werden gespeichert."),
-                actions=[
-                    ft.TextButton("Weiter trainieren", on_click=lambda: page.pop_dialog()),
-                    ft.FilledButton("Beenden", icon=ft.Icons.STOP, on_click=beenden),
-                ],
-            )
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Training beenden?"),
+            content=ft.Text(_beenden_text(e, teil)),
+            actions=[
+                ft.TextButton("Weiter trainieren", on_click=lambda: schliessen(dialog)),
+                ft.FilledButton("Beenden", icon=ft.Icons.STOP, on_click=beenden),
+            ],
         )
+        page.show_dialog(dialog)
+
+    async def timer_oeffnen() -> None:
+        await page.push_route("/timer")
 
     def kartenhoehe() -> float:
         """Quer: die Karte füllt die Höhe neben den Zahlen; hochkant klein oder groß."""
@@ -656,7 +417,7 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
 
     def umbauen() -> None:
         """Gedreht (``page.on_resize``): Zahlen und Karte neu anordnen, Karte in neuer Höhe."""
-        if state.ausdauer_ansicht != nummer or lauf_jetzt() is None:
+        if state.ausdauer_ansicht != nummer or _training(state) is None:
             return
         zeichnen()
         with contextlib.suppress(Exception):
@@ -664,55 +425,75 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
 
     # -- Live-Werte ----------------------------------------------------------------
 
-    def werte(lauf: AusdauerLauf) -> None:
-        r = lauf.rechner
+    def dfa_auffrischen(e: Einheitslauf) -> None:
+        """Live-DFA α1 alle `DFA_ALLE_S` — nur mit EKG-Gurt, ein Schätzwert ohne Zonen."""
+        hrv = e.hrv
+        if hrv is None or not _ekg(e):
+            dfa["wert"] = None
+            return
+        jetzt = time.monotonic()
+        if dfa["zuletzt"] is not None and jetzt - dfa["zuletzt"] < DFA_ALLE_S:
+            return
+        dfa["zuletzt"] = jetzt
+        with contextlib.suppress(Exception):
+            t, rr, naht = hrv.messlauf.live.verlaufsreihe()
+            dfa["wert"] = (
+                aktuell(t, rr, naht, "dfa_alpha1", 120.0, ende=float(t[-1])) if len(t) else None
+            )
+
+    def werte(e: Einheitslauf, teil: StreckeBaustein) -> None:
+        r = teil.rechner
         aktuell_ms = r.aktuelles_tempo_ms()
         aktuell_s = 1000.0 / aktuell_ms if aktuell_ms else None
         reihen: list[ft.Control] = [
             ft.Row(
                 spacing=8,
                 controls=[
-                    _gross("Zeit", zeit_text(lauf.dauer_s)),
+                    _gross("Zeit", zeit_text(max(e.dauer_s(), 0.0))),
                     _gross("Strecke", km_text(r.distanz_m).removesuffix(" km"), einheit="km")
-                    if lauf.quelle is not None
+                    if teil.mit_gps
                     else _gross("Strecke", "–"),
                 ],
             )
         ]
-        if lauf.quelle is not None:
+        if teil.mit_gps:
             reihen.append(
                 ft.Row(
                     spacing=8,
                     controls=[
-                        _gross("Tempo", tempo_text(lauf.sportart, aktuell_s)),
-                        _gross("Ø Tempo", tempo_text(lauf.sportart, r.tempo_s_pro_km)),
+                        _gross("Tempo", tempo_text(teil.sportart, aktuell_s)),
+                        _gross("Ø Tempo", tempo_text(teil.sportart, r.tempo_s_pro_km)),
                     ],
                 )
             )
-        if lauf.messlauf is not None:
+        if e.hrv is not None:
             hf_zeile: list[ft.Control] = [
-                _gross("Herzfrequenz", _zahl(lauf.hf), einheit="bpm", farbe=ft.Colors.RED_400)
+                _gross("Herzfrequenz", _zahl(_hf(e)), einheit="bpm", farbe=ft.Colors.RED_400)
             ]
-            if lauf.ekg:
-                hf_zeile.append(_gross("DFA α1 (Schätzwert)", _zahl(lauf.dfa, 2)))
+            if _ekg(e):
+                hf_zeile.append(_gross("DFA α1 (Schätzwert)", _zahl(dfa["wert"], 2)))
             reihen.append(ft.Row(spacing=8, controls=hf_zeile))
         zahlen.controls = reihen
-        pause_text.visible = lauf.quelle is not None and r.pausiert and r.distanz_m > 0
-        warnung.value = lauf.warnung or ""
-        warnung.visible = bool(lauf.warnung)
+        pause_text.visible = teil.mit_gps and r.pausiert and r.distanz_m > 0
+        meldung = teil.warnung or e.warnung
+        if meldung is None and teil.quelle is not None and teil.quelle.meldung:
+            meldung = f"GPS: {teil.quelle.meldung}"
+        warnung.value = meldung or ""
+        warnung.visible = bool(meldung)
 
     def zeichnen() -> None:
         nonlocal strecken_karte
-        lauf = lauf_jetzt()
-        if lauf is not None:
-            werte(lauf)
+        jetzt = _training(state)
+        if jetzt is not None:
+            e, teil = jetzt
+            werte(e, teil)
             strecken_karte = None
             karte_platz.content = None
             zahlen_karte = karte(
                 ft.Row(
                     controls=[
-                        ft.Icon(SPORT_SYMBOLE[lauf.sportart]),
-                        titel(f"{SPORT_NAMEN[lauf.sportart]} läuft"),
+                        ft.Icon(SPORT_SYMBOLE[teil.sportart]),
+                        titel(f"{SPORT_NAMEN[teil.sportart]} läuft"),
                         pause_text,
                     ],
                 ),
@@ -724,14 +505,15 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
                     value=state.ausdauer_karte,
                     on_change=karte_gewaehlt,
                 )
-                if lauf.quelle is not None
+                if teil.mit_gps
                 else ft.Container(),
                 hinweis(
                     "Display darf aus sein — die Benachrichtigung zeigt Strecke, Zeit und "
-                    "Herzfrequenz. An jedem Kilometer ein Ton."
+                    "Herzfrequenz. An jedem Kilometer ein Ton. Was mitläuft (Timer, HRV), "
+                    "steht oben in der Leiste."
                 ),
             )
-            if querformat(page) and lauf.quelle is not None and state.ausdauer_karte:
+            if querformat(page) and teil.mit_gps and state.ausdauer_karte:
                 # Quer (Ben, 15.10.2026): Zahlen links, die Karte rechts in voller Höhe
                 inhalt.controls = [
                     ft.Row(
@@ -749,6 +531,9 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
             else:
                 inhalt.controls = [zahlen_karte, karte_platz]
             return
+        bereit = einheit_ui.bereitgestellt(state, "gps")
+        andere = einheit_ui.laeuft(state)  # eine Einheit ohne Training läuft schon
+        vorbereitet = einheit_ui.in_vorbereitung(state)
         sportwahl = ft.SegmentedButton(
             selected=[state.ausdauer_sportart],
             show_selected_icon=False,
@@ -763,13 +548,52 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
             value=state.ausdauer_gps,
             on_change=gps_gewaehlt,
         )
+        karte_schalter = ft.Switch(
+            label="Karte zeigen (Kacheln von OpenStreetMap)",
+            value=state.ausdauer_karte,
+            on_change=karte_gewaehlt,
+            visible=state.ausdauer_gps,
+        )
+        knoepfe = ft.Row(
+            spacing=8,
+            controls=[
+                ft.FilledButton(
+                    "Training starten",
+                    icon=ft.Icons.PLAY_ARROW,
+                    on_click=starten,
+                    disabled=andere is not None,
+                    expand=True,
+                ),
+                ft.FilledTonalButton(
+                    "Bereitgestellt", icon=ft.Icons.CHECK, on_click=bereitstellen_umschalten
+                )
+                if bereit
+                else ft.OutlinedButton(
+                    "Bereitstellen",
+                    icon=ft.Icons.HOURGLASS_TOP,
+                    on_click=bereitstellen_umschalten,
+                    disabled=andere is not None,
+                ),
+            ],
+        )
+        if andere is not None:
+            dazu = "Es läuft schon eine Einheit — erst oben mit ⏹ beenden."
+        elif vorbereitet is not None and any(t.art != "gps" for t in vorbereitet.teile):
+            dazu = "„Training starten“ startet alles aus der Startleiste mit."
+        else:
+            dazu = (
+                "Noch etwas dazu? Oben den Timer öffnen und dort „Bereitstellen“ tippen — "
+                "er kommt in die Startleiste, und alles startet gemeinsam."
+            )
         inhalt.controls = [
             karte(
                 titel("Training"),
                 sportwahl,
                 gps_schalter,
+                karte_schalter,
                 geraet_zeile(),
-                ft.FilledButton("Start", icon=ft.Icons.PLAY_ARROW, on_click=starten),
+                knoepfe,
+                hinweis(dazu),
             ),
             hinweis(
                 "Die Strecke bleibt auf dem Handy (Ordner „Strecken“) — nicht im "
@@ -794,26 +618,38 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
                 "Herzfrequenz bei Bewegung oft still (Polar), und HRV gibt es nur in Ruhe. "
                 "Für das Training besser den Brustgurt (H10)."
             )
+        if lauf is not None and lauf.aufnahme is not None:
+            return hinweis(
+                f"{name}: Die HRV-Messung läuft schon — sie bekommt Marken je km und "
+                "läuft nach dem Training weiter."
+            )
         return hinweis(f"{name}: Herzfrequenz, HRV und DFA α1 laufen mit.")
 
     def sport_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
         if e.control.selected:
             state.ausdauer_sportart = str(e.control.selected[0])
+            page.run_task(neu_bereitstellen)
 
     def gps_gewaehlt(e: ft.Event[ft.Switch]) -> None:
         state.ausdauer_gps = bool(e.control.value)
+        page.run_task(neu_bereitstellen)
+        zeichnen()
+        with contextlib.suppress(Exception):
+            page.update()
 
     # -- Takt der Anzeige ------------------------------------------------------------
 
     async def ticker() -> None:
         nonlocal strecken_karte
         while state.ausdauer_ansicht == nummer:
-            lauf = lauf_jetzt()
-            if lauf is None:
+            jetzt = _training(state)
+            if jetzt is None:
                 return
+            e, teil = jetzt
             if state.im_vordergrund:
-                werte(lauf)
-                punkte = lauf.rechner.punkte
+                dfa_auffrischen(e)
+                werte(e, teil)
+                punkte = teil.rechner.punkte
                 if not state.ausdauer_karte and strecken_karte is not None:
                     strecken_karte = None
                     karte_platz.content = None
@@ -844,11 +680,21 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
 
     zeichnen()
     state.groesse_beobachter["ausdauer"] = umbauen
-    if lauf_jetzt() is not None:
+    jetzt = _training(state)
+    if jetzt is not None:
         page.run_task(ticker)
     return ft.View(
         route="/ausdauer",
-        appbar=ft.AppBar(title=ft.Text("Ausdauer")),
+        appbar=ft.AppBar(
+            title=ft.Text(SPORT_NAMEN[jetzt[1].sportart] if jetzt is not None else "Ausdauer"),
+            actions=[
+                ft.IconButton(
+                    ft.Icons.TIMER_OUTLINED,
+                    tooltip="Timer — Intervalle bereitstellen",
+                    on_click=timer_oeffnen,
+                )
+            ],
+        ),
         scroll=ft.ScrollMode.AUTO,
         padding=16,
         controls=[sicher(inhalt, expand=False)],
@@ -1143,17 +989,26 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
 
 
 def ausdauer_karte(page: ft.Page, state: AppState) -> ft.Control:
-    """Einstieg im Reiter „Messung → Live": Training starten oder das laufende öffnen."""
+    """Einstieg im Reiter „Messung → Live": Training starten, das bereitgestellte oder
+    das laufende öffnen."""
 
     async def oeffnen() -> None:
         await page.push_route("/ausdauer")
 
-    lauf: AusdauerLauf | None = state.ausdauer
-    if lauf is not None and not lauf.fertig:
+    teil = einheit_ui.ausdauer_teil(state)
+    e = einheit_ui.aktuell(state)
+    if teil is not None and e is not None:
+        sport = SPORT_NAMEN.get(teil.sportart, "Training")
+        if e.laeuft:
+            return karte(
+                titel(f"{sport} läuft"),
+                ft.Text(lauftext(e, teil), size=14),
+                ft.FilledButton("Öffnen", icon=ft.Icons.OPEN_IN_NEW, on_click=oeffnen),
+            )
         return karte(
-            titel(f"{SPORT_NAMEN[lauf.sportart]} läuft"),
-            ft.Text(lauf.text(), size=14),
-            ft.FilledButton("Öffnen", icon=ft.Icons.OPEN_IN_NEW, on_click=oeffnen),
+            titel(f"{sport} bereitgestellt"),
+            hinweis("Wartet in der Startleiste oben auf „Alle starten“."),
+            ft.FilledTonalButton("Öffnen", icon=ft.Icons.OPEN_IN_NEW, on_click=oeffnen),
         )
     return karte(
         titel("Ausdauer"),
@@ -1194,16 +1049,12 @@ def strecken_zeilen(page: ft.Page, state: AppState) -> list[ft.Control]:
 
 
 __all__ = [
-    "AusdauerLauf",
     "ausdauer_detail_view",
     "ausdauer_karte",
     "ausdauer_view",
     "km_text",
     "strecken_zeilen",
     "tempo_text",
-    "training_eintragen",
-    "uebung_fuer",
     "verwaiste_dialog",
-    "verwaiste_uebernehmen",
     "zeit_text",
 ]

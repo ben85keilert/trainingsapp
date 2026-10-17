@@ -161,32 +161,61 @@ def daten(tmp_path, monkeypatch):
     state.schliessen()
 
 
-async def _training(state, tmp_path, sportart: str = GEHEN, zwischendurch=None):
-    from trainingsapp.devices.gps import PunktWiedergabe
-    from trainingsapp.devices.messlauf import Messlauf
-    from trainingsapp.devices.simulated import SIM_SYNTH, SimulatedSource
-    from trainingsapp.ui.views.ausdauer import AusdauerLauf
+async def _training(state, tmp_path, sportart: str = GEHEN, zwischendurch=None, *, hrv_vorher=0):
+    """Ein Training wie in der App — als Einheit (Startleiste, „Training starten“), auf
+    einer Uhr-Attrappe: Gurt und GPS ticken im Takt, ohne zu warten.
 
-    messlauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
-    await messlauf.verbinden(SIM_SYNTH, "Simulator H10")
-    task = asyncio.create_task(messlauf.laufen())
+    ``hrv_vorher``: so viele Sekunden lief die HRV-Aufnahme schon vor dem Training (sie
+    läuft dann danach weiter). Gibt die Strecke und die gezählten Ortungen zurück.
+    """
+    from attrappen import Empfaenger, Gurt, Seite, Uhr, ruhe
+    from trainingsapp.devices.messlauf import Messlauf
+    from trainingsapp.ui import einheit as einheit_ui
+
+    uhr = Uhr()
+    gurt = Gurt(uhr)
+    messlauf = Messlauf(gurt, jetzt_utc=uhr.utc, backup_basis=tmp_path)
+    await messlauf.verbinden("gurt", "Polar H10 TEST")
+    lesen = asyncio.create_task(messlauf.laufen())
     state.messlauf = messlauf
-    await asyncio.sleep(0.2)
+    if hrv_vorher:
+        messlauf.aufnahme_starten()
+        for _ in range(hrv_vorher):
+            uhr.t += 1
+            gurt.schlag(1000)
+            await ruhe()
+    seite = Seite()
+    gps = Empfaenger(uhr)
+    teil = einheit_ui.ausdauer_bereitstellen(seite, state, sportart, gps)
+    await ruhe()
+    e = einheit_ui.alle_starten(seite, state, 0.0)
+    assert e is not None and state.ausdauer is teil
     punkte = _gang(1200, 2.5, rauschen_m=1.5)  # 3 km
-    lauf = AusdauerLauf(state, sportart, PunktWiedergabe(punkte, beschleunigung=2000))
-    await lauf.starten()
-    state.ausdauer = lauf  # wie der Start-Knopf der Ansicht
-    for _ in range(100):
-        await asyncio.sleep(0.05)
-        if len(lauf.rechner.punkte) == len(punkte):
+    for i, p in enumerate(punkte):
+        uhr.t += 1
+        gurt.schlag(1000 if i % 2 else 950)
+        gps.punkt(p)
+        await ruhe()
+        e.takt()
+        if i == len(punkte) // 2 and zwischendurch is not None:
+            zwischendurch()
+    einheit_ui.alle_beenden(state)
+    strecke = None
+    for _ in range(200):
+        strecke = state.strecken.zur_einheit(e.id)
+        if strecke is not None and state.einheit is None:
             break
-    if zwischendurch is not None:
-        zwischendurch()
-    strecke = await lauf.stoppen()
-    state.ausdauer = None
+        await asyncio.sleep(0.02)
+    assert strecke is not None, e.warnung
+    assert state.ausdauer is None and teil.fertig and not gps.laeuft
+    if messlauf.aufnahme is not None and hrv_vorher:
+        from trainingsapp.config import datenverzeichnis
+        from trainingsapp.ui.views.messung import aufnahme_eintragen
+
+        aufnahme_eintragen(state, messlauf.aufnahme_stoppen(datenverzeichnis()))
     await messlauf.trennen()
-    await asyncio.wait_for(task, 5)
-    return strecke, punkte
+    await asyncio.wait_for(lesen, 5)
+    return strecke, list(teil.rechner.punkte)
 
 
 async def test_profilwechsel_waehrend_des_trainings_haengt_nichts_um(daten) -> None:
@@ -249,7 +278,7 @@ async def test_verwaiste_strecke_wird_erkannt_und_nachgetragen(daten) -> None:
     from trainingsapp.config import streckenverzeichnis
     from trainingsapp.data.strecken import StreckenSchreiber, verwaiste
     from trainingsapp.ui.state import AppState
-    from trainingsapp.ui.views.ausdauer import verwaiste_uebernehmen
+    from trainingsapp.ui.training import verwaiste_uebernehmen
 
     state, tmp_path = daten
     await _training(state, tmp_path)  # ein ordentliches Training daneben
@@ -278,35 +307,47 @@ async def test_verwaiste_strecke_wird_erkannt_und_nachgetragen(daten) -> None:
 
 
 async def test_abbrechen_und_fehler_im_empfang(daten) -> None:
-    """Scheitert der Start, bleibt nichts zurück; ein Fehler im Empfang steht in der
-    Warnung statt den Task still zu beenden (15.10.2026)."""
+    """Herausgenommen, bevor es startete: nichts bleibt, das GPS ist aus. Ein Fehler im
+    Takt stoppt die Einheit nicht, er steht in ihrer Warnung — gespeichert wird trotzdem
+    (15.10.2026, als Einheit 17.10.2026)."""
+    from attrappen import Empfaenger, Seite, Uhr, ruhe
     from trainingsapp.config import streckenverzeichnis
-    from trainingsapp.devices.gps import PunktWiedergabe
-    from trainingsapp.ui.views.ausdauer import AusdauerLauf
+    from trainingsapp.ui import einheit as einheit_ui
 
     state, _ = daten
-    punkte = _gang(60, 1.4)
-    lauf = AusdauerLauf(state, GEHEN, PunktWiedergabe(punkte, beschleunigung=2000))
-    await lauf.starten()
-    assert lauf.datei_pfad is not None and lauf.datei_pfad.exists()
-    await lauf.abbrechen()
-    assert lauf.fertig and not lauf.datei_pfad.exists()
+    seite = Seite()
+    uhr = Uhr()
+    gps = Empfaenger(uhr)
+    einheit_ui.ausdauer_bereitstellen(seite, state, GEHEN, gps)
+    await ruhe()
+    assert gps.laeuft and state.ausdauer is not None
+    einheit_ui.leeren(seite, state)
+    await ruhe()
+    assert not gps.laeuft and state.ausdauer is None and state.einheit is None
+    assert not streckenverzeichnis().exists() or not any(streckenverzeichnis().iterdir())
     assert state.strecken.alle(state.profil.id) == []
 
-    lauf = AusdauerLauf(state, GEHEN, PunktWiedergabe(punkte, beschleunigung=2000))
+    gps = Empfaenger(uhr)
+    teil = einheit_ui.ausdauer_bereitstellen(seite, state, GEHEN, gps)
+    await ruhe()
+    e = einheit_ui.alle_starten(seite, state, 0.0)
 
     def kaputt(_p):
         raise RuntimeError("Rechner kaputt")
 
-    lauf.rechner.hinzufuegen = kaputt  # type: ignore[method-assign]
-    await lauf.starten()
-    for _ in range(100):
-        await asyncio.sleep(0.02)
-        if lauf.warnung:
+    teil.rechner.hinzufuegen = kaputt  # type: ignore[method-assign]
+    uhr.t += 1
+    gps.ortung()
+    await ruhe()
+    e.takt()  # wirft nicht
+    assert e.laeuft and e.warnung is not None and "Rechner kaputt" in e.warnung
+    einheit_ui.alle_beenden(state)
+    for _ in range(200):
+        if state.einheit is None:
             break
-    assert lauf.warnung is not None and "abgebrochen" in lauf.warnung
-    strecke = await lauf.stoppen()
-    assert strecke.dauer_s >= 0 and not (streckenverzeichnis() / "x").exists()
+        await asyncio.sleep(0.02)
+    strecke = state.strecken.zur_einheit(e.id)
+    assert strecke is not None and strecke.dauer_s >= 0
 
 
 async def test_training_speichert_strecke_hrv_und_tagebuch(daten) -> None:
@@ -330,6 +371,114 @@ async def test_training_speichert_strecke_hrv_und_tagebuch(daten) -> None:
     strecke2, _ = await _training(state, tmp_path)
     eintrag2 = state.sitzungen.eintrag_laden(strecke2.session_entry_id)
     assert eintrag2 is not None and eintrag2.exercise_id == eintrag.exercise_id
+
+
+async def test_laufende_hrv_bekommt_marken_und_laeuft_weiter(daten) -> None:
+    """Lief die HRV-Messung schon (Ben, 17.10.2026), startet sie nicht neu: Sie bekommt
+    die Kilometer als Marken und läuft nach dem Training weiter. Strecke und Aufnahme
+    verbindet die Einheit (Migration 019) — ``hrv_recording_id`` bleibt leer. An jedem
+    Kilometer ein Ton, wie früher."""
+    from hrv_core.recording import laden
+
+    from trainingsapp.config import messungenverzeichnis
+
+    state, tmp_path = daten
+    toene: list[str] = []
+
+    class Ton:
+        async def spielen(self, name: str) -> None:
+            toene.append(name)
+
+    state.ton, state.toene_geladen = Ton(), True
+    strecke, _ = await _training(state, tmp_path, hrv_vorher=60)
+    assert strecke.hrv_recording_id is None and strecke.einheit_id is not None
+    (aufnahme,) = state.hrv.alle(state.profil.id)
+    assert state.strecken.zur_hrv(aufnahme.id).id == strecke.id
+    rec = laden(messungenverzeichnis() / aufnahme.file_path)
+    km = [x["text"] for x in rec.ereignisse if x.get("marke", {}).get("spur") == "km"]
+    assert km[:2] == ["km 1", "km 2"] and len(km) == round(strecke.distanz_m) // 1000
+    assert rec.dauer_s > 1200  # 60 s davor und 1170 s Training (RR) — eine Aufnahme
+    assert toene == ["wechsel"] * len(km)
+
+
+async def test_laufband_ohne_gps_traegt_die_zeit_ein(daten) -> None:
+    """Ohne GPS (Laufband, Halle) ist das Training sofort bereit; eingetragen werden Zeit
+    und Tagebuch, keine Strecke und keine Datei."""
+    from attrappen import Seite, ruhe
+    from trainingsapp.core.strecke import LAUFEN
+    from trainingsapp.ui import einheit as einheit_ui
+
+    state, _ = daten
+    seite = Seite()
+    teil = einheit_ui.ausdauer_bereitstellen(seite, state, LAUFEN, None)
+    await ruhe()
+    e = einheit_ui.in_vorbereitung(state)
+    assert e is not None and e.bereit and teil.status().startswith("ohne GPS")
+    assert einheit_ui.titel(e) == "Laufen"
+    einheit_ui.alle_starten(seite, state, 0.0)
+    await asyncio.sleep(0.05)
+    einheit_ui.alle_beenden(state)
+    for _ in range(200):
+        if state.einheit is None:
+            break
+        await asyncio.sleep(0.02)
+    strecke = state.strecken.zur_einheit(e.id)
+    assert strecke is not None and strecke.sportart == LAUFEN
+    assert strecke.file_path == "" and strecke.distanz_m == 0
+    eintrag = state.sitzungen.eintrag_laden(strecke.session_entry_id)
+    assert eintrag is not None and set(eintrag.result) == {"duration"}
+
+
+async def test_absturz_strecke_und_messung_finden_einander(daten) -> None:
+    """H16: Die App stirbt mitten im Training. Beim nächsten Start kommen die Messung
+    (Crash-Backup) und die Strecke (verwaiste Datei) getrennt zurück — und finden
+    einander über die Einheit, deren Zeitleiste beide Dateien nennt."""
+    import contextlib
+
+    from hrv_core.aufnahme import backups_finden
+
+    from attrappen import Empfaenger, Gurt, Uhr, ruhe
+    from trainingsapp.config import messungenverzeichnis, streckenverzeichnis
+    from trainingsapp.devices.einheit import Einheitslauf, HrvBaustein
+    from trainingsapp.devices.messlauf import Messlauf, backup_wiederherstellen
+    from trainingsapp.devices.strecke_baustein import StreckeBaustein
+    from trainingsapp.ui.training import Streckendatei, verwaiste_uebernehmen
+    from trainingsapp.ui.views.messung import aufnahme_eintragen
+
+    state, tmp_path = daten
+    uhr = Uhr()
+    gurt = Gurt(uhr)
+    messlauf = Messlauf(gurt, jetzt_utc=uhr.utc, backup_basis=tmp_path)
+    await messlauf.verbinden("gurt", "Polar H10 TEST")
+    lesen = asyncio.create_task(messlauf.laufen())
+    gps = Empfaenger(uhr)
+    e = Einheitslauf(uhr=uhr, jetzt_utc=uhr.utc, senke=state.einheiten, subject_id=state.profil.id)
+    e.hinzufuegen(HrvBaustein(messlauf, basis=tmp_path))
+    ablage = Streckendatei(GEHEN, state.profil.id)
+    e.hinzufuegen(StreckeBaustein(gps, GEHEN, ablage=ablage, jetzt_utc=uhr.utc))
+    await e.vorbereiten()
+    e.starten()
+    for p in _gang(300, 2.5):
+        uhr.t += 1
+        gurt.schlag(1000)
+        gps.punkt(p)
+        await ruhe()
+        e.takt()
+    messlauf.backup_jetzt()
+    # Absturz: nichts endet ordentlich. Der nächste Start schließt die Einheit …
+    lesen.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await lesen
+    await gps.beenden()
+    assert state.einheiten.abgebrochene_schliessen() == [e.id]
+    # … bietet das Backup an (Übernehmen) …
+    (backup,) = backups_finden(messungenverzeichnis())
+    aufnahme = aufnahme_eintragen(state, backup_wiederherstellen(backup), state.profil.id)
+    # … und die verwaiste Strecke
+    assert ablage.pfad is not None and ablage.pfad.parent == streckenverzeichnis()
+    strecke = verwaiste_uebernehmen(state, ablage.pfad)
+    assert strecke is not None and strecke.einheit_id == e.id
+    assert state.strecken.zur_hrv(aufnahme.id).id == strecke.id
 
 
 async def test_regel_0_keine_koordinate_in_hrv_export_tagebuch_und_sync(daten) -> None:
@@ -426,7 +575,9 @@ async def test_auswertung_und_liste_zeigen_das_training(daten) -> None:
     start = ausdauer_view(_seite(), state)
     wahl = next(c for c in _alle(start) if isinstance(c, ft.SegmentedButton))
     assert [s.value for s in wahl.segments] == ["gehen", "laufen", "rad"]
-    assert any(isinstance(c, ft.FilledButton) and c.content == "Start" for c in _alle(start))
+    assert any(
+        isinstance(c, ft.FilledButton) and c.content == "Training starten" for c in _alle(start)
+    )
     # Reiter „Messung → Aufzeichnungen": Abschnitt „Ausdauer"
     state.messung_tab = 1
     liste = messung(_seite(), state)

@@ -28,11 +28,13 @@ TAKT_S = 1.0
 
 
 def _einheit(state: Any) -> Laufend | None:
-    """Die laufende Einheit: ihr Name, ihre Zeit und der Abschnitt — die Teile darunter."""
+    """Die laufende Einheit: ihr Name, ihre Zeit und der Abschnitt — die Teile darunter.
+
+    Ein Training steht als Training da, mit dem Abschnitt des Timers (`_ausdauer`)."""
     from trainingsapp.ui import einheit as einheit_ui
 
     e = einheit_ui.laeuft(state) if getattr(state, "einheit", None) is not None else None
-    if e is None:
+    if e is None or e.teil("gps") is not None:
         return None
     oben, _ = einheit_ui.laufzeilen(e)
     seit = e.zeitbasis.anker_utc if e.zeitbasis is not None else None
@@ -59,11 +61,19 @@ def _hrv(state: Any) -> Laufend | None:
 
 
 def _ausdauer(state: Any) -> Laufend | None:
-    a = state.ausdauer
-    if a is None or a.fertig:
+    """Das laufende Training (Teil ``gps`` der Einheit): Strecke, Zeit, Herzfrequenz und
+    der Abschnitt, wenn ein Timer mitläuft (Intervalle)."""
+    from trainingsapp.ui import einheit as einheit_ui
+    from trainingsapp.ui.training import lauftext
+
+    e = einheit_ui.laeuft(state) if getattr(state, "einheit", None) is not None else None
+    teil = e.teil("gps") if e is not None else None
+    if e is None or teil is None:
         return None
-    sport = SPORT_NAMEN.get(a.sportart, "Training")
-    return Laufend(sport, a.text(), f"{sport} {uhr(a.dauer_s)}", a.start_utc)
+    sport = SPORT_NAMEN.get(getattr(teil, "sportart", ""), "Training")
+    zeile = " · ".join(x for x in (lauftext(e, teil), einheit_ui.timer_text(e)) if x)
+    seit = e.zeitbasis.anker_utc if e.zeitbasis is not None else None
+    return Laufend(sport, zeile, f"{sport} {uhr(max(e.dauer_s(), 0.0))}", seit)
 
 
 def _gps_test(state: Any) -> Laufend | None:
@@ -75,9 +85,13 @@ def _gps_test(state: Any) -> Laufend | None:
 
 
 def _timer(state: Any) -> Laufend | None:
+    from trainingsapp.ui import einheit as einheit_ui
+
     t = state.timer
     if t is None or not t.begonnen:
         return None
+    if getattr(state, "einheit", None) is not None and einheit_ui.besitzt_timer(state, t):
+        return None  # steht in der Zeile der Einheit
     s = t.stand()
     if s.fertig:
         return None

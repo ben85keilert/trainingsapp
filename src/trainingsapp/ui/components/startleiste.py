@@ -37,8 +37,15 @@ def _teil_titel(teil: Any) -> str:
     if teil.art == "gps":
         from trainingsapp.core.strecke import SPORT_NAMEN
 
-        return f"{SPORT_NAMEN.get(getattr(teil, 'sportart', ''), 'Training')} · GPS"
+        sport = SPORT_NAMEN.get(getattr(teil, "sportart", ""), "Training")
+        return f"{sport} · GPS" if getattr(teil, "quelle", None) is not None else sport
     return {"hrv": "HRV-Messung", "plan": "Plan"}.get(teil.art, teil.art)
+
+
+def _symbol(teil: Any) -> Any:
+    if teil.art == "gps" and getattr(teil, "quelle", None) is None:
+        return ft.Icons.DIRECTIONS_RUN  # Laufband, Halle
+    return SYMBOLE.get(teil.art, ft.Icons.CIRCLE)
 
 
 def _marke(teil: Any) -> tuple[str, Any, Any]:
@@ -124,7 +131,7 @@ def _startleiste(page: Any, state: AppState, e: Any, box: ft.Container) -> None:
                     spacing=10,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
-                        ft.Icon(SYMBOLE.get(teil.art, ft.Icons.CIRCLE), size=20),
+                        ft.Icon(_symbol(teil), size=20),
                         ft.Column(
                             spacing=0,
                             expand=True,
@@ -240,7 +247,7 @@ def _laufleiste(page: Any, state: AppState, e: Any, box: ft.Container, stand: di
         )
     knoepfe.append(
         ft.IconButton(
-            ft.Icons.STOP, tooltip="Alles beenden", on_click=lambda: ablauf.alle_beenden(state)
+            ft.Icons.STOP, tooltip="Alles beenden", on_click=lambda: _beenden_fragen(page, state, e)
         )
     )
     box.content = ft.Row(
@@ -252,6 +259,35 @@ def _laufleiste(page: Any, state: AppState, e: Any, box: ft.Container, stand: di
             *knoepfe,
         ],
     )
+
+
+def _beenden_fragen(page: Any, state: AppState, e: Any) -> None:
+    """⏹ fragt nach, wenn etwas gespeichert wird (Training, HRV) — ein Tipp daneben im
+    Laufen soll nichts beenden. Nur ein Timer endet ohne Rückfrage."""
+    from trainingsapp.ui.components.dialoge import schliessen
+
+    if e.teil("gps") is None and e.hrv is None:
+        ablauf.alle_beenden(state)
+        return
+    dialog: ft.AlertDialog
+
+    def beenden() -> None:
+        schliessen(dialog)
+        ablauf.alle_beenden(state)
+
+    saetze = ["Alles, was mit ihr begann, endet und wird gespeichert."]
+    if e.hrv is not None and not e.stoppt_am_ende("hrv"):
+        saetze.append("Die HRV-Messung läuft weiter.")
+    dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Einheit beenden?"),
+        content=ft.Text(" ".join(saetze)),
+        actions=[
+            ft.TextButton("Weiter", on_click=lambda: schliessen(dialog)),
+            ft.FilledButton("Beenden", icon=ft.Icons.STOP, on_click=beenden),
+        ],
+    )
+    page.show_dialog(dialog)
 
 
 def leiste_einsetzen(view: ft.View, leiste: ft.Container) -> None:

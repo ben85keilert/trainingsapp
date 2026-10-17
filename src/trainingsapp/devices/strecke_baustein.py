@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -104,8 +105,11 @@ class StreckeBaustein:
         self.takt_s = takt_s
         self.split_m = split_laenge_m(sportart)
         self.rechner = StreckenRechner(split_m=self.split_m)
-        self._abgleich = UhrAbgleich(uhr=quelle.jetzt) if quelle is not None else UhrAbgleich()
-        self._puffer: deque[Punkt] = deque()
+        #: Uhr der Einheit (`uhr_uebernehmen`) — allein die der Quelle
+        self._uhr: Callable[[], float] = quelle.jetzt if quelle is not None else time.monotonic
+        self._abgleich = UhrAbgleich(uhr=self._uhr)
+        #: Ortungen mit ihrer Empfangszeit auf der Uhr der Einheit
+        self._puffer: deque[tuple[Punkt, float]] = deque()
         self._empfang: asyncio.Task[None] | None = None
         self._t0: float | None = None
         #: letzte Ortung (auch vor dem Start) — für „bereit“ und die Startleiste
@@ -150,6 +154,15 @@ class StreckeBaustein:
 
     # -- Ablauf ------------------------------------------------------------------
 
+    def uhr_uebernehmen(self, uhr: Callable[[], float]) -> None:
+        """Die Uhr der Einheit — vor dem Start (`Einheitslauf.hinzufuegen`). Was schon
+        ankam, stand auf der alten Uhr und zählt ohnehin erst ab dem Start: weg damit."""
+        if uhr is self._uhr:
+            return
+        self._uhr = uhr
+        self._abgleich = UhrAbgleich(uhr=uhr)
+        self._puffer.clear()
+
     async def vorbereiten(self) -> None:
         """GPS einschalten — Ortungen kommen, gezählt wird erst ab dem Start."""
         if self.quelle is not None and self._empfang is None:
@@ -161,13 +174,26 @@ class StreckeBaustein:
         try:
             async for punkt in self.quelle.punkte():
                 self.letzte = punkt
-                self._puffer.append(punkt)
+                self._puffer.append((punkt, self._empfangszeit(punkt)))
         except Exception as fehler:  # steht in `warnung`, stoppt nicht still
             self.warnung = f"GPS-Empfang abgebrochen: {fehler}"
 
-    def _uhrzeit(self, p: Punkt) -> float:
+    def _empfangszeit(self, p: Punkt) -> float:
+        """Wann die Ortung ankam — auf der Uhr der Einheit.
+
+        ``t_empfang`` steht auf der Uhr der Quelle (in der App ``time.monotonic``, wie
+        Gurt und Einheit). Führt die Einheit eine andere — der Simulator, eine
+        Wiedergabe —, rechnet der Abstand beider Uhren in diesem Augenblick um; sie
+        laufen gleich schnell.
+        """
+        assert self.quelle is not None
+        quelle_jetzt = self.quelle.jetzt()
+        t = p.t_empfang if p.t_empfang is not None else quelle_jetzt
+        return t + (self._uhr() - quelle_jetzt)
+
+    def _uhrzeit(self, p: Punkt, empfang: float) -> float:
         """Zeit der Ortung auf der Uhr der Einheit (Empfängerzeit, über den Abgleich)."""
-        return self._abgleich.umrechnen(p.t, jetzt=p.t_empfang)
+        return self._abgleich.umrechnen(p.t, jetzt=empfang)
 
     def _split_zeit(self, s: Split) -> float:
         offset = self._abgleich.offset or 0.0
@@ -183,7 +209,7 @@ class StreckeBaustein:
     def starten(self, t0: float) -> Beteiligung:
         self._t0 = t0
         # Vor dem Start Eingetroffenes zählt nicht — nur für den Abgleich der Uhren
-        while self._puffer and self._uhrzeit(self._puffer[0]) < t0:
+        while self._puffer and self._uhrzeit(*self._puffer[0]) < t0:
             self._puffer.popleft()
         datei = ""
         if self.quelle is not None and self.ablage is not None:
@@ -206,8 +232,8 @@ class StreckeBaustein:
         t0 = self._t0
         out: list[Ereignis] = []
         while self._puffer:
-            p = self._puffer.popleft()
-            t = self._uhrzeit(p)
+            p, empfang = self._puffer.popleft()
+            t = self._uhrzeit(p, empfang)
             if t < t0:
                 continue
             self._schreiben(p)

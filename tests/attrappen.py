@@ -8,7 +8,7 @@ etwas wirklich begann.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -97,6 +97,10 @@ class Empfaenger(GpsQuelle):
         """Umgekehrt: Empfängerzeit → monotone Uhr."""
         return t_empfaenger - UTC0.timestamp() + 1000.0 - self.versatz_s
 
+    def punkt(self, p: Punkt) -> None:
+        """Eine fertige Ortung (Strecke aus einem Test) — jetzt, auf der Empfängeruhr."""
+        self._einreihen(replace(p, t=self.empfaengerzeit(self._uhr()), t_empfang=self._uhr()))
+
     def ortung(self, schritt_m: float = 12.5, genauigkeit_m: float = 4.0) -> None:
         self.nord_m += schritt_m
         verzug = 0.0 if self._n % 2 == 0 else 1.5
@@ -130,6 +134,30 @@ class Ablage:
 
     def schliessen(self, behalten: bool) -> None:
         self.behalten = behalten
+
+
+class Seite:
+    """Stellvertreter für `ft.Page` (ohne flet): Aufgaben laufen im Loop des Tests."""
+
+    def __init__(self) -> None:
+        self.route = "/"
+        self.views: list = []
+        self.dialoge: list = []
+        self.aufgaben: list = []
+
+    def run_task(self, f, *args):
+        aufgabe = asyncio.get_running_loop().create_task(f(*args))
+        self.aufgaben.append(aufgabe)
+        return aufgabe
+
+    def show_dialog(self, d) -> None:
+        self.dialoge.append(d)
+
+    def update(self) -> None:
+        return None
+
+    async def push_route(self, route: str) -> None:
+        self.route = route
 
 
 async def ruhe() -> None:

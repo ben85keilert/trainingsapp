@@ -243,7 +243,8 @@ class AppState:
     gps_test_intervall: float = 1.0
     #: Dauertest: Takt der zweiten Phase (s) — die erste läuft immer mit 1 s
     gps_test_zweite_s: float = 10.0
-    #: Laufendes Ausdauertraining (`ui.views.ausdauer.AusdauerLauf`) und seine Vorgaben
+    #: Ausdauertraining, solange es bereitsteht oder läuft — der Teil ``gps`` der Einheit
+    #: (`devices.strecke_baustein.StreckeBaustein`, ``fertig`` danach) — und seine Vorgaben
     ausdauer: Any = None
     ausdauer_ansicht: int = 0
     ausdauer_sportart: str = "gehen"

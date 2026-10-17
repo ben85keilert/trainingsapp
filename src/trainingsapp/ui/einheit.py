@@ -1,10 +1,14 @@
 """Die Einheit in der Oberfläche: bereitstellen, Startleiste, alle starten, beenden.
 
 Den Ablauf führt `devices.einheit.Einheitslauf`; hier hängt er am `AppState`
-(`state.einheit`) und an der Seite: Jeder Bereich (Messung, Timer, später GPS und
+(`state.einheit`) und an der Seite: Jeder Bereich (Messung, Timer, Ausdauer, später
 Plan) hat neben „Start“ den Knopf **Bereitstellen** (Ben, 17.10.2026). Er legt
 seinen Teil in die Einheit; die **Startleiste** unter der Titelleiste zeigt alles
 Bereitgestellte und startet es gemeinsam. Danach ist sie die **Laufleiste**.
+
+Das Ausdauertraining läuft immer als Einheit (Stufe 2): Sein Teil ist
+`devices.strecke_baustein.StreckeBaustein` (``state.ausdauer``, solange er
+bereitsteht oder läuft); nach dem Ende tragen `ui.training` Strecke und Tagebuch ein.
 
 Ohne flet-Import (wie ``ui/laufend.py``): ``page`` braucht nur ``run_task``. Die
 Timer-Ansicht (Töne) und das Eintragen der Aufnahme kommen erst beim Aufruf dazu.
@@ -20,10 +24,15 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from trainingsapp.config import datenverzeichnis
 from trainingsapp.core.einheit import Ereignis, Rolle, Zustand
 from trainingsapp.core.laufend import uhr
+from trainingsapp.core.strecke import SPORT_NAMEN
 from trainingsapp.core.timer import TimerLauf, dauer_text
+from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.einheit import Abschluss, Einheitslauf, HrvBaustein, TimerBaustein
+from trainingsapp.devices.gps import GpsQuelle
+from trainingsapp.devices.strecke_baustein import StreckeBaustein
 
 #: So oft frischt die Laufleiste ihre Zeiten auf (s)
 ANZEIGE_S = 1.0
@@ -98,11 +107,14 @@ def melden(state: Any) -> None:
 
 
 def hrv_bereitstellen(page: Any, state: Any, basis: Any = None) -> HrvBaustein | None:
-    """Die HRV-Messung in die Einheit — mit verbundenem Gurt (oder laufender Aufnahme)."""
+    """Die HRV-Messung in die Einheit — mit verbundenem Gurt (oder laufender Aufnahme).
+
+    ``basis``: wohin eine Aufnahme gespeichert wird, die mit der Einheit endet —
+    Vorgabe das Datenverzeichnis (wie beim Stopp in der Messung)."""
     lauf = state.messlauf
     if lauf is None:
         return None
-    teil = HrvBaustein(lauf, basis=basis)
+    teil = HrvBaustein(lauf, basis=basis if basis is not None else datenverzeichnis())
     _ersetzen(page, state, teil)
     return teil
 
@@ -111,6 +123,39 @@ def timer_bereitstellen(page: Any, state: Any, lauf: TimerLauf) -> TimerBaustein
     teil = TimerBaustein(lauf)
     _ersetzen(page, state, teil)
     return teil
+
+
+def ausdauer_bereitstellen(
+    page: Any, state: Any, sportart: str, quelle: GpsQuelle | None
+) -> StreckeBaustein:
+    """Das Ausdauertraining in die Einheit — mit GPS (es sucht schon Empfang) oder ohne.
+
+    Ist ein Gurt verbunden oder läuft eine Aufnahme, kommt die HRV mit (wie früher beim
+    Training); herausnehmen lässt sie sich in der Startleiste.
+    """
+    from trainingsapp.ui.training import Streckendatei
+
+    ablage = Streckendatei(sportart, state.profil.id) if quelle is not None else None
+    teil = StreckeBaustein(quelle, sportart, ablage=ablage)
+    _ersetzen(page, state, teil)
+    state.ausdauer = teil
+    e = in_vorbereitung(state)
+    lauf = state.messlauf
+    if (
+        e is not None
+        and e.hrv is None
+        and lauf is not None
+        and (lauf.aufnahme is not None or lauf.status.verbindung == Verbindung.VERBUNDEN)
+    ):
+        hrv_bereitstellen(page, state)
+    return teil
+
+
+def ausdauer_teil(state: Any) -> StreckeBaustein | None:
+    """Der Trainingsteil der aktuellen Einheit (bereitgestellt oder laufend)."""
+    e = aktuell(state)
+    teil = e.teil("gps") if e is not None else None
+    return teil if isinstance(teil, StreckeBaustein) else None
 
 
 def _ersetzen(page: Any, state: Any, teil: Any) -> None:
@@ -140,6 +185,8 @@ def zuruecknehmen(page: Any, state: Any, art: str) -> None:
     teil = e.teil(art)
     e.entfernen(art)
     _aufraeumen(page, teil)
+    if state.ausdauer is teil:
+        state.ausdauer = None
     if not e.teile:
         state.einheit = None
     melden(state)
@@ -153,6 +200,8 @@ def leeren(page: Any, state: Any) -> None:
         return
     for teil in list(e.teile):
         _aufraeumen(page, teil)
+        if state.ausdauer is teil:
+            state.ausdauer = None
     state.einheit = None
     melden(state)
     state.neu_zeichnen()
@@ -178,12 +227,13 @@ def _aufraeumen(page: Any, teil: Any) -> None:
 
 
 def titel(e: Einheitslauf) -> str:
-    """Ein kurzer Name aus den Teilen — „Intervall 4 × 4“, „HRV-Messung“ …"""
+    """Ein kurzer Name aus den Teilen — „Laufen · Intervall 4 × 4“, „HRV-Messung“ …"""
+    namen: list[str] = []
+    if (g := e.teil("gps")) is not None:
+        namen.append(SPORT_NAMEN.get(getattr(g, "sportart", ""), "Training"))
     if (t := e.timer) is not None:
-        return t.lauf.profil.name
-    if e.teil("gps") is not None:
-        return "Training"
-    return "HRV-Messung"
+        namen.append(t.lauf.profil.name)
+    return " · ".join(namen) or "HRV-Messung"
 
 
 def alle_starten(
@@ -207,7 +257,7 @@ def alle_starten(
     e.starten(countdown_s)
     if e.zustand is Zustand.LAEUFT:
         _timer_ticken(page, state, e)
-    page.run_task(_dienst, state, True, e.titel)
+    page.run_task(_dienst, state, e, True)
     page.run_task(_laufen, page, state, e, eintragen)
     page.run_task(_anzeigen, state, e)
     melden(state)
@@ -227,14 +277,30 @@ def _timer_ticken(page: Any, state: Any, e: Einheitslauf) -> None:
 
 
 def _ereignisse(page: Any, state: Any, e: Einheitslauf, neu: list[Ereignis]) -> None:
-    """Nach jedem Takt mit Neuem: Ticker nach dem Countdown, Notizen in der Ansicht."""
+    """Nach jedem Takt mit Neuem: Ticker nach dem Countdown, Ton je Kilometer, Notizen
+    in der Ansicht."""
     if any(x.quelle == "einheit" and x.art == "start" for x in neu):
         _timer_ticken(page, state, e)
+    if any(x.quelle == "gps" and x.art == "km" for x in neu):
+        with contextlib.suppress(Exception):
+            page.run_task(_km_signal, state)
     if e.hrv is not None and any(x.quelle in ("timer", "gps", "plan") for x in neu):
         for beobachter in list(state.notiz_beobachter.values()):
             with contextlib.suppress(Exception):
                 beobachter()
     melden(state)
+
+
+async def _km_signal(state: Any) -> None:
+    """An jedem Kilometer ein Ton und eine Vibration (wie früher beim Training)."""
+    ton = getattr(state, "ton", None)
+    if ton is not None and getattr(state, "toene_geladen", False):
+        with contextlib.suppress(Exception):
+            await ton.spielen("wechsel")
+    haptik = getattr(state, "haptik", None)
+    if haptik is not None:
+        with contextlib.suppress(Exception):
+            await haptik.vibrate()
 
 
 async def _laufen(
@@ -243,13 +309,15 @@ async def _laufen(
     e: Einheitslauf,
     eintragen: Callable[[Any, Any, str | None], Any] | None,
 ) -> None:
-    """Takt bis zum Ende, dann abschließen und eintragen, was gespeichert wurde."""
+    """Takt bis zum Ende, dann abschließen und eintragen, was gespeichert wurde:
+    die HRV-Aufnahme (wenn sie mit endete), das Training (Strecke und Tagebuch)."""
     try:
         await e.laufen()
     finally:
         abschluss: Abschluss | None = None
         with contextlib.suppress(Exception):
             abschluss = await e.abschliessen()
+        aufnahme: Any = None
         if abschluss is not None and abschluss.hrv is not None:
             eintragen_mit = eintragen
             if eintragen_mit is None:
@@ -257,8 +325,18 @@ async def _laufen(
 
                 eintragen_mit = aufnahme_eintragen
             with contextlib.suppress(Exception):
-                eintragen_mit(state, abschluss.hrv, e.subject_id)
-        await _dienst(state, False)
+                aufnahme = eintragen_mit(state, abschluss.hrv, e.subject_id)
+        training = abschluss.teile.get("gps") if abschluss is not None else None
+        if training is not None:
+            from trainingsapp.ui.training import einheit_eintragen
+
+            try:
+                einheit_eintragen(state, e, training, getattr(aufnahme, "id", None))
+            except Exception as fehler:  # steht in der Einheit; die Ansicht zeigt es
+                e.warnung = f"Training nicht gespeichert: {fehler}"
+        if state.ausdauer is not None and state.ausdauer is e.teil("gps"):
+            state.ausdauer = None
+        await _dienst(state, e, False)
         if state.einheit is e:
             state.einheit = None
         melden(state)
@@ -266,15 +344,21 @@ async def _laufen(
             state.neu_zeichnen()
 
 
-async def _dienst(state: Any, an: bool, titel: str = "") -> None:
-    """Der Vordergrunddienst für die Einheit (Zweck ``einheit``): Läuft nur Timer oder
-    Plan, hält er die App mit Typ ``health`` wach (P26); mit Gurt oder GPS teilen sie
-    sich den Dienst. Ohne Android (kein Zugang) nichts — wirft nie."""
+async def _dienst(state: Any, e: Einheitslauf, an: bool) -> None:
+    """Der Vordergrunddienst für die Einheit: Zweck ``einheit`` (Typ ``health`` — nur
+    Timer oder Plan, P26), mit GPS zusätzlich ``gps`` (Typ ``location``, sonst gibt es
+    bei Display aus keine Ortung). Den Gurt hält die Messung selbst (``messung``).
+    Ohne Android (kein Zugang) nichts — wirft nie."""
     transport = getattr(state, "ble_transport", None)
     if transport is None or not hasattr(transport, "hintergrund"):
         return
-    with contextlib.suppress(Exception):
-        await transport.hintergrund(an, f"{titel} läuft" if titel else "", "", zweck="einheit")
+    titel = f"{e.titel} läuft" if e.titel else ""
+    zwecke = ["einheit"]
+    if getattr(e.teil("gps"), "quelle", None) is not None:
+        zwecke.append("gps")
+    for zweck in zwecke:
+        with contextlib.suppress(Exception):
+            await transport.hintergrund(an, titel, "", zweck=zweck)
 
 
 async def _anzeigen(state: Any, e: Einheitslauf) -> None:
@@ -328,16 +412,22 @@ def laufzeilen(e: Einheitslauf) -> tuple[str, str]:
         rest = max(0, math.ceil(-e.dauer_s()))
         return f"Start in {rest} …", _teile_text(e)
     oben = [uhr(max(e.dauer_s(), 0.0))]
-    if (t := e.timer) is not None:
-        stand = t.lauf.stand()
-        if stand.fertig:
-            oben.append("Timer fertig")
-        else:
-            name = t.lauf.abschnittsname(stand.nummer)
-            oben.append(f"{name} · noch {dauer_text(math.ceil(stand.rest_s))}")
-            if not stand.laeuft and t.lauf.begonnen:
-                oben.append("angehalten")
+    if timer := timer_text(e):
+        oben.append(timer)
     return " · ".join(oben), _teile_text(e)
+
+
+def timer_text(e: Einheitslauf) -> str:
+    """Der laufende Abschnitt des Timers — „Belastung · noch 0:30“, leer ohne Timer."""
+    if (t := e.timer) is None:
+        return ""
+    stand = t.lauf.stand()
+    if stand.fertig:
+        return "Timer fertig"
+    teile = [t.lauf.abschnittsname(stand.nummer), f"noch {dauer_text(math.ceil(stand.rest_s))}"]
+    if not stand.laeuft and t.lauf.begonnen:
+        teile.append("angehalten")
+    return " · ".join(teile)
 
 
 def _teile_text(e: Einheitslauf) -> str:
@@ -351,7 +441,7 @@ def _teile_text(e: Einheitslauf) -> str:
                     teile.append(f"HF {hf}")
             if h.rolle is Rolle.LAEUFT_SCHON or not e.stoppt_am_ende("hrv"):
                 teile.append("läuft danach weiter")
-    if (g := e.teil("gps")) is not None:
+    if (g := e.teil("gps")) is not None and getattr(g, "quelle", None) is not None:
         rechner = getattr(g, "rechner", None)
         if rechner is not None:
             teile.append(f"{rechner.distanz_m / 1000:.2f} km".replace(".", ","))
@@ -367,6 +457,8 @@ __all__ = [
     "alle_beenden",
     "alle_starten",
     "anhalten_oder_weiter",
+    "ausdauer_bereitstellen",
+    "ausdauer_teil",
     "bereitgestellt",
     "besitzt_timer",
     "dabei",
@@ -378,6 +470,7 @@ __all__ = [
     "melden",
     "stopp_vorgabe",
     "timer_bereitstellen",
+    "timer_text",
     "titel",
     "zuruecknehmen",
 ]

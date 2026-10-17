@@ -292,6 +292,86 @@ class HrvBaustein:
         return self.messlauf.aufnahme_stoppen(self.basis)
 
 
+@dataclass
+class UebungKontext:
+    """Wozu eine Übung lief — der Aufrufer trägt damit ins Tagebuch ein (``ui``)."""
+
+    uebung_id: str
+    name: str
+    plan_id: str | None = None
+    item_id: str | None = None
+    #: Welches Feld die Zeit bekommt (``hold``/``duration``) — ``None``: nur „gemacht“
+    zeitfeld: str | None = None
+
+
+class UebungBaustein:
+    """Eine Übung als Teil einer Einheit (Ben, 17.10.2026): Anfang und Ende in der
+    Zeitleiste (``plan/uebung_start``, ``plan/uebung_ende``) — in einer laufenden
+    HRV-Aufnahme ein Abschnitt auf der Spur „uebung“ mit den Marken „Planke beginnt“
+    und „Planke fertig“. Ins Tagebuch trägt der Aufrufer aus der Zeitleiste ein
+    (`core.timer_eintrag`); dafür gibt `abschliessen_async` den `UebungKontext`.
+    """
+
+    art = "plan"
+
+    def __init__(self, kontext: UebungKontext) -> None:
+        self.kontext = kontext
+        self._t0: float | None = None
+        self._gemeldet = False
+        self._ende_gemeldet = False
+
+    @property
+    def name(self) -> str:
+        return self.kontext.name
+
+    @property
+    def bereit(self) -> bool:
+        return True
+
+    def status(self) -> str:
+        return "trägt die Zeit ein" if self.kontext.zeitfeld else "trägt „gemacht“ ein"
+
+    async def vorbereiten(self) -> None:
+        return None
+
+    def _daten(self) -> dict[str, Any]:
+        """Was die Zeitleiste über die Übung festhält — genug, um einen abgebrochenen
+        Lauf später doch einzutragen („Läufe heute“)."""
+        k = self.kontext
+        daten: dict[str, Any] = {"uebung": k.uebung_id, "name": k.name}
+        if k.plan_id:
+            daten["plan"] = k.plan_id
+        if k.item_id:
+            daten["planuebung"] = k.item_id
+        if k.zeitfeld:
+            daten["zeitfeld"] = k.zeitfeld
+        return daten
+
+    def starten(self, t0: float) -> Beteiligung:
+        self._t0 = t0
+        return Beteiligung("plan", Rolle.MITSTARTEN, daten=self._daten())
+
+    def takt(self, jetzt: float) -> list[Ereignis]:
+        if self._t0 is None or self._gemeldet:
+            return []
+        self._gemeldet = True
+        return [Ereignis(0.0, "plan", "uebung_start", f"{self.name} beginnt", self._daten())]
+
+    def beenden(self, jetzt: float) -> list[Ereignis]:
+        out = self.takt(jetzt)
+        if self._t0 is not None and not self._ende_gemeldet:
+            self._ende_gemeldet = True
+            out.append(
+                Ereignis(
+                    jetzt - self._t0, "plan", "uebung_ende", f"{self.name} fertig", self._daten()
+                )
+            )
+        return out
+
+    async def abschliessen_async(self, stoppen: bool = True) -> UebungKontext:
+        return self.kontext
+
+
 # ---------------------------------------------------------------------------
 # Die Einheit
 # ---------------------------------------------------------------------------
@@ -684,4 +764,12 @@ class Einheitslauf:
         return abschluss
 
 
-__all__ = ["SCHLAF_AB_S", "Abschluss", "Einheitslauf", "HrvBaustein", "TimerBaustein"]
+__all__ = [
+    "SCHLAF_AB_S",
+    "Abschluss",
+    "Einheitslauf",
+    "HrvBaustein",
+    "TimerBaustein",
+    "UebungBaustein",
+    "UebungKontext",
+]

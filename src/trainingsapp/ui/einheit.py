@@ -30,7 +30,13 @@ from trainingsapp.core.laufend import uhr
 from trainingsapp.core.strecke import SPORT_NAMEN
 from trainingsapp.core.timer import TimerLauf, dauer_text
 from trainingsapp.devices.base import Verbindung
-from trainingsapp.devices.einheit import Abschluss, Einheitslauf, HrvBaustein, TimerBaustein
+from trainingsapp.devices.einheit import (
+    Abschluss,
+    Einheitslauf,
+    HrvBaustein,
+    TimerBaustein,
+    UebungBaustein,
+)
 from trainingsapp.devices.gps import GpsQuelle
 from trainingsapp.devices.strecke_baustein import StreckeBaustein
 
@@ -125,6 +131,15 @@ def timer_bereitstellen(page: Any, state: Any, lauf: TimerLauf) -> TimerBaustein
     teil = TimerBaustein(lauf)
     _ersetzen(page, state, teil)
     return teil
+
+
+def teil_bereitstellen(page: Any, state: Any, teil: Any) -> Einheitslauf:
+    """Einen Teil in die Einheit (eine neue, wenn keine vorbereitet wird) — einer gleicher
+    Art wird ersetzt. Gibt die Einheit zurück."""
+    _ersetzen(page, state, teil)
+    e = in_vorbereitung(state)
+    assert e is not None
+    return e
 
 
 def ausdauer_bereitstellen(
@@ -244,8 +259,10 @@ def _aufraeumen(page: Any, teil: Any) -> None:
 
 
 def titel(e: Einheitslauf) -> str:
-    """Ein kurzer Name aus den Teilen — „Laufen · Intervall 4 × 4“, „HRV-Messung“ …"""
+    """Ein kurzer Name aus den Teilen — „Laufen · Intervall 4 × 4“, „Planke“, „HRV-Messung“ …"""
     namen: list[str] = []
+    if isinstance(u := e.teil("plan"), UebungBaustein) and u.name:
+        return u.name
     if (g := e.teil("gps")) is not None:
         namen.append(SPORT_NAMEN.get(getattr(g, "sportart", ""), "Training"))
     if (t := e.timer) is not None:
@@ -351,6 +368,14 @@ async def _laufen(
                 einheit_eintragen(state, e, training, getattr(aufnahme, "id", None))
             except Exception as fehler:  # steht in der Einheit; die Ansicht zeigt es
                 e.warnung = f"Training nicht gespeichert: {fehler}"
+        uebung = abschluss.teile.get("plan") if abschluss is not None else None
+        if uebung is not None:
+            from trainingsapp.ui.uebung_lauf import nach_dem_ende
+
+            try:
+                nach_dem_ende(state, e, uebung)
+            except Exception as fehler:
+                e.warnung = f"Übung nicht eingetragen: {fehler}"
         if state.ausdauer is not None and state.ausdauer is e.teil("gps"):
             state.ausdauer = None
         await _dienst(state, e, False)
@@ -486,6 +511,7 @@ __all__ = [
     "leeren",
     "melden",
     "stopp_vorgabe",
+    "teil_bereitstellen",
     "timer_bereitstellen",
     "timer_text",
     "titel",

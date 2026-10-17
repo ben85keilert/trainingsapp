@@ -40,6 +40,8 @@ def _teil_titel(teil: Any) -> str:
 
         sport = SPORT_NAMEN.get(getattr(teil, "sportart", ""), "Training")
         return f"{sport} · GPS" if getattr(teil, "quelle", None) is not None else sport
+    if teil.art == "plan" and getattr(teil, "name", ""):
+        return f"Übung · {teil.name}"
     return {"hrv": "HRV-Messung", "plan": "Plan"}.get(teil.art, teil.art)
 
 

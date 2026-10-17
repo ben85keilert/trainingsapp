@@ -104,6 +104,7 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         "bewegt_s",
         # Plan und Tagebuch
         "plan",
+        "planuebung",
         "uebung",
         "kurzcode",
         "stelle",

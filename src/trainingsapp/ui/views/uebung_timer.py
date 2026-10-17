@@ -95,7 +95,21 @@ def uebung_profilziel(
             "Neuer Timer der Planübung",
         )
 
-    def in_uebung(neu: TimerProfil) -> None:
+    return Profilziel(
+        profile,
+        _in_uebung(state, uebung),
+        _aus_uebung(state, uebung),
+        zurueck,
+        f"{zurueck}/bearbeiten",
+        "Timer der Übung",
+        "Neuer Timer der Übung",
+    )
+
+
+def _in_uebung(state: AppState, uebung: Exercise) -> Callable[[TimerProfil], None]:
+    """Ein Profil in die Übung speichern — ein vorhandenes ersetzen, ein neues anhängen."""
+
+    def speichern(neu: TimerProfil) -> None:
         eigene = profile_der_uebung(uebung)
         if any(p.id == neu.id for p in eigene):
             uebung.timer = [(neu if p.id == neu.id else p).als_dict() for p in eigene]
@@ -104,17 +118,38 @@ def uebung_profilziel(
         state.uebungen.speichern(uebung)
         state.uebung_timer.setdefault(uebung.id, {})["profil"] = neu.id
 
-    def aus_uebung(alt: TimerProfil) -> None:
+    return speichern
+
+
+def _aus_uebung(state: AppState, uebung: Exercise) -> Callable[[TimerProfil], None]:
+    """Ein Profil aus der Übung entfernen."""
+
+    def loeschen(alt: TimerProfil) -> None:
         uebung.timer = [p.als_dict() for p in profile_der_uebung(uebung) if p.id != alt.id]
         state.uebungen.speichern(uebung)
         state.uebung_timer.setdefault(uebung.id, {}).pop("profil", None)
 
+    return loeschen
+
+
+def formular_profil_route(formular: str, profil_id: str | None = None) -> str:
+    """Der Profil-Editor über dem Übungsformular — ``…/bearbeiten/timer/profil[/<Profil>]``.
+
+    >>> formular_profil_route("/uebung/u1/bearbeiten", "p2")
+    '/uebung/u1/bearbeiten/timer/profil/p2'
+    """
+    return f"{formular}/timer/profil" + (f"/{profil_id}" if profil_id else "")
+
+
+def formular_profilziel(state: AppState, formular: str, uebung: Exercise) -> Profilziel:
+    """Der Editor aus dem Abschnitt „Timer“ des Übungsformulars (Ben, 17.10.2026):
+    gespeichert wird in die Übung; Zurück, Speichern und Löschen führen ins Formular."""
     return Profilziel(
-        profile,
-        in_uebung,
-        aus_uebung,
-        zurueck,
-        f"{zurueck}/bearbeiten",
+        lambda: profile_der_uebung(uebung),
+        _in_uebung(state, uebung),
+        _aus_uebung(state, uebung),
+        formular,
+        formular_profil_route(formular),
         "Timer der Übung",
         "Neuer Timer der Übung",
     )
@@ -885,4 +920,10 @@ def uebung_timer_view(
     )
 
 
-__all__ = ["uebung_profilziel", "uebung_timer_route", "uebung_timer_view"]
+__all__ = [
+    "formular_profil_route",
+    "formular_profilziel",
+    "uebung_profilziel",
+    "uebung_timer_route",
+    "uebung_timer_view",
+]

@@ -151,6 +151,11 @@ einzelnen Übung“ — und: „Aus dem Text heraus weiß die App nicht, was Üb
   `plan/ende` beendet die Einheit (`ende_mit_plan`). Jede Übung wird eingetragen, **sobald
   sie endet** (`Einheitslauf.nachtragen` schreibt `person/eintrag`). Laufleiste, ⏸ und Töne
   folgen dem Timer der laufenden Übung (`Einheitslauf.timer`).
+- **Übungsformular** (Ben, 17.10.2026): Abschnitt „Timer“ mit den Profilen der Übung —
+  Reihenfolge (das erste ist die Vorgabe), entfernen, „Timer hinzufügen“ (neu oder eine
+  Kopie aus der Bibliothek) gehören zum Formular; der Stift öffnet den Editor (Teile,
+  „zählt“) über dem Formular (`…/bearbeiten/timer/profil/<Profil>`), vorher speichert
+  das Formular. Ohne eigenes Profil nennt es die Timer-Regel der Übung.
 - **Kurse** zählen Timer-Einträge wie alle anderen (Bedingungen `summe`, `tage`) — nie
   Messwerte.
 

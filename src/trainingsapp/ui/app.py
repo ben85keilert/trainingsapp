@@ -93,7 +93,11 @@ from trainingsapp.ui.views.timer import (
 )
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 from trainingsapp.ui.views.uebung_detail import uebung_detail
-from trainingsapp.ui.views.uebung_timer import uebung_profilziel, uebung_timer_view
+from trainingsapp.ui.views.uebung_timer import (
+    formular_profilziel,
+    uebung_profilziel,
+    uebung_timer_view,
+)
 from trainingsapp.ui.views.uebungen import neuen_plan_anlegen, uebungen
 from trainingsapp.ui.views.updates import ROUTE as UPDATES_ROUTE
 from trainingsapp.ui.views.updates import beim_start as updates_beim_start
@@ -396,6 +400,20 @@ def main(page: ft.Page) -> None:
             ziel = uebung_profilziel(state, basis, uebung, plan, item)
             page.views.append(timer_bearbeiten_view(page, state, profil_id, basis, ziel))
 
+    def formular_profil(basis: str, unten: list[str], rest: list[str]) -> None:
+        """Der Profil-Editor über dem Übungsformular (Ben, 17.10.2026) —
+        ``/uebung/<Übung>/bearbeiten/timer/profil[/<Profil>]``: gespeichert in die Übung,
+        Zurück ins Formular (`views/uebung_timer.formular_profilziel`)."""
+        if unten[:1] != ["uebung"] or unten[2:3] != ["bearbeiten"]:
+            return
+        uebung = state.uebungen.laden(unten[1])
+        if uebung is None:
+            return
+        ziel = formular_profilziel(state, basis, uebung)
+        page.views.append(
+            timer_bearbeiten_view(page, state, rest[0] if rest else None, basis, ziel)
+        )
+
     def paket_routen(basis: str, rest: list[str]) -> None:
         """Der Paketmanager — aus dem Katalog (`/pakete`) oder den Einstellungen."""
         page.views.append(pakete_view(page, state, basis))
@@ -453,6 +471,8 @@ def main(page: ft.Page) -> None:
             basis = "/" + "/".join(teile[:i])
             if teile[i + 1 : i + 2] == ["uebung"]:
                 uebung_timer_routen(basis, teile[i + 2 :])
+            elif teile[i + 1 : i + 2] == ["profil"]:
+                formular_profil(basis, teile[:i], teile[i + 2 :])
             else:
                 page.views.append(timer_view(page, state, basis))
                 if teile[i + 1 : i + 2] == ["bearbeiten"]:

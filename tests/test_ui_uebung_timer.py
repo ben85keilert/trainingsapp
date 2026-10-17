@@ -270,3 +270,129 @@ async def test_timer_aus_der_regel_laesst_sich_bearbeiten(umgebung) -> None:
     gespeichert = state.uebungen.laden(uebung.id)
     assert gespeichert is not None
     assert [p.id for p in profile_der_uebung(gespeichert)] == [regel.id]
+
+
+# ---------------------------------------------------------------------------
+# Abschnitt „Timer“ im Übungsformular (Ben, 17.10.2026)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def formular(tmp_path):
+    state = AppState.starten(tmp_path / "app.db")
+    a = TimerProfil(id="pa", name="Halten", abschnitte=[Abschnitt("Halten", 60)], runden=3)
+    b = TimerProfil(id="pb", name="Kurz", abschnitte=[Abschnitt("Halten", 20)])
+    u = Exercise(
+        name="Planke",
+        result_spec=ResultSpec(fields=[vorrat_feld("hold")]),
+        timer=[a.als_dict(), b.als_dict()],
+    )
+    state.uebungen.speichern(u)
+    yield state, state.uebungen.laden(u.id)
+    state.schliessen()
+
+
+def _symbolknopf(c, symbol, nummer: int = 0):
+    knoepfe = [
+        x for x in _alle(c) if isinstance(x, ft.IconButton) and x.icon == symbol and x.visible
+    ]
+    return knoepfe[nummer]
+
+
+async def test_formular_timer_reihenfolge_bibliothek_entfernen(formular) -> None:
+    """Die Profile der Übung im Formular: nach oben (das erste ist die Vorgabe), eine Kopie
+    aus der Bibliothek, entfernen — gespeichert wird mit dem Formular."""
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+
+    state, uebung = formular
+    seite = Seite()
+    ansicht = uebung_bearbeiten(seite, state, uebung)
+    texte = _texte(ansicht)
+    assert "TIMER" in texte and "Halten · Vorgabe" in texte and "Kurz" in texte
+    _symbolknopf(ansicht, ft.Icons.ARROW_UPWARD).on_click()  # „Kurz“ nach oben
+    assert "Kurz · Vorgabe" in _texte(ansicht)
+    _knopf(ansicht, "Timer hinzufügen").on_click()
+    dialog = seite.dialoge[-1]
+    vorlage = state.timer_profile()[0]
+    (zeile,) = [
+        z
+        for z in dialog.content.controls
+        if isinstance(z, ft.ListTile) and z.title.value == vorlage.name
+    ]
+    zeile.on_click()
+    await dialog.on_dismiss(None)  # neu gezeichnet erst, wenn der Dialog zu ist
+    assert vorlage.name in _texte(ansicht)
+    _symbolknopf(ansicht, ft.Icons.DELETE_OUTLINE, 1).on_click()  # „Halten“ entfernen
+    await _knopf(ansicht, "Speichern").on_click()
+    gespeichert = profile_der_uebung(state.uebungen.laden(uebung.id))
+    assert [p.name for p in gespeichert] == ["Kurz", vorlage.name]
+    assert gespeichert[1].id != vorlage.id  # eine eigene Kopie
+
+
+async def test_formular_timer_editor_speichert_vorher(formular) -> None:
+    """Der Stift öffnet den Editor über dem Formular — das Formular speichert vorher,
+    denn beim Zurückkommen entsteht es neu. Eine neue Übung braucht zuerst einen Namen."""
+    from trainingsapp.ui.views.timer import timer_bearbeiten_view
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+    from trainingsapp.ui.views.uebung_timer import formular_profilziel
+
+    state, uebung = formular
+    seite = Seite()
+    ansicht = uebung_bearbeiten(seite, state, uebung)
+    name = next(x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Name")
+    name.value = "Unterarmstütz"
+    await _symbolknopf(ansicht, ft.Icons.EDIT_OUTLINED).on_click()
+    formular_route = f"/uebung/{uebung.id}/bearbeiten"
+    assert seite.route == f"{formular_route}/timer/profil/pa"
+    assert state.uebungen.laden(uebung.id).name == "Unterarmstütz"
+    # Der Editor speichert in die Übung und führt zurück ins Formular
+    ziel = formular_profilziel(state, formular_route, state.uebungen.laden(uebung.id))
+    editor = timer_bearbeiten_view(seite, state, "pa", formular_route, ziel)
+    assert editor.route == f"{formular_route}/timer/profil/pa"
+    assert ziel.zurueck == formular_route
+    neu = TimerProfil(id="pa", name="Halten lang", abschnitte=[Abschnitt("Halten", 90)])
+    ziel.speichern(neu)
+    assert [p.name for p in profile_der_uebung(state.uebungen.laden(uebung.id))] == [
+        "Halten lang",
+        "Kurz",
+    ]
+    # Neue Übung: ohne Namen bleibt das Formular stehen, mit Namen geht es in den Editor
+    leer = Seite()
+    neue = uebung_bearbeiten(leer, state, None)
+    _knopf(neue, "Timer hinzufügen").on_click()
+    dialog = leer.dialoge[-1]
+    neues_profil = next(
+        z
+        for z in dialog.content.controls
+        if isinstance(z, ft.ListTile) and z.title.value == "Neues Profil"
+    )
+    neues_profil.on_click()
+    await dialog.on_dismiss(None)
+    assert leer.route == "/"
+    feld = next(x for x in _alle(neue) if isinstance(x, ft.TextField) and x.label == "Name")
+    assert feld.error == "Ein Name muss sein."
+    feld.value = "Seitstütz mit Timer"  # „Seitstütz“ steht schon im Katalog
+    _knopf(neue, "Timer hinzufügen").on_click()
+    dialog = leer.dialoge[-1]
+    next(
+        z
+        for z in dialog.content.controls
+        if isinstance(z, ft.ListTile) and z.title.value == "Neues Profil"
+    ).on_click()
+    await dialog.on_dismiss(None)
+    (seitstuetz,) = [u for u in state.uebungen.alle() if u.name == "Seitstütz mit Timer"]
+    assert leer.route == f"/uebung/{seitstuetz.id}/bearbeiten/timer/profil"
+
+
+def test_formular_ohne_eigenes_profil_nennt_die_timer_regel(tmp_path) -> None:
+    """Ohne eigenes Profil gilt die Timer-Regel der Übung (Paket „Standard“) — als Hinweis."""
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+
+    state = AppState.starten(tmp_path / "app.db")
+    try:
+        u = Exercise(name="Atmung", limit_spec={"rules": [{"type": "timer", "seconds": 300}]})
+        state.uebungen.speichern(u)
+        texte = _texte(uebung_bearbeiten(Seite(), state, state.uebungen.laden(u.id)))
+        assert "Ohne eigenes Profil gilt die Timer-Regel der Übung: 5:00 Atmung." in texte
+    finally:
+        state.schliessen()

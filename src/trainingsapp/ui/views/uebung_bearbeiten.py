@@ -13,11 +13,18 @@ Ben 15.10.2026) — zwei Kästen, Mehrfachauswahl in der Reihenfolge des
 Antippens (der erste Typ ist die Kategorie); „Neuer Typ …“ bzw. „Neue Region …“
 steht unten in der Liste, ein neuer Tag steht oben und ist gleich gewählt.
 
+**Timer** (Ben, 17.10.2026): die Profile der Übung — Einzeltimer oder Folge mit Teilen;
+das erste ist die Vorgabe (Vorrang Planübung > Plan > Übung, `core/uebung_timer.py`).
+Hinzufügen aus der Timer-Bibliothek, Reihenfolge und Entfernen gehören zum Formular;
+der Editor (Teile, „zählt“ je Abschnitt) ist eine eigene Seite — vor dem Sprung dorthin
+speichert das Formular, denn beim Zurückkommen entsteht es neu.
+
 Zurück speichert (Ben, 16.10.2026, `components/zurueck.py`); „Abbrechen“ verwirft.
 """
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -31,6 +38,7 @@ from trainingsapp.core.models import (
     Media,
     MediaKind,
     MediaSource,
+    new_id,
 )
 from trainingsapp.core.parameter import (
     chips_sortiert,
@@ -51,6 +59,9 @@ from trainingsapp.core.result_spec import (
     vorrat_feld,
 )
 from trainingsapp.core.standards import ziel_bereinigen, ziel_spec
+from trainingsapp.core.timer import TimerProfil
+from trainingsapp.core.uebung_timer import profile_der_uebung
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL, symbol
 from trainingsapp.ui.components.layout import sicher
@@ -59,6 +70,7 @@ from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.tagwahl import TagWahl
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.uebung_timer import formular_profil_route
 
 #: Auswahlwert „keine Variante" — ein leerer Schlüssel ist im Dropdown heikel
 EIGENSTAENDIG = "eigenstaendig"
@@ -403,6 +415,169 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     for m in uebung.media if uebung else []:
         zeile_anlegen(m)
 
+    # -- Timer (Ben, 17.10.2026) -------------------------------------------------
+    # Die eigenen Profile der Übung, im Formular gehalten: „Abbrechen“ verwirft auch hier.
+
+    timer_liste: list[TimerProfil] = (
+        profile_der_uebung(uebung) if uebung is not None and uebung.timer else []
+    )
+    timer_spalte = ft.Column(spacing=6)
+
+    def regel_profil() -> TimerProfil | None:
+        """Ohne eigenes Profil gilt die Timer-Regel der Übung als Einzeltimer (Paket
+        „Standard“) — als Hinweis, nicht als Zeile."""
+        if uebung is None:
+            return None
+        return next(iter(profile_der_uebung(replace(uebung, timer=[]))), None)
+
+    def timer_zeichnen() -> None:
+        reihen: list[ft.Control] = []
+        for k, p in enumerate(timer_liste):
+            vorgabe = " · Vorgabe" if k == 0 and len(timer_liste) > 1 else ""
+            reihen.append(
+                ft.Container(
+                    padding=ft.Padding.only(left=12, top=4, bottom=4),
+                    border_radius=12,
+                    bgcolor=ft.Colors.with_opacity(0.06, ft.Colors.ON_SURFACE),
+                    content=ft.Row(
+                        spacing=4,
+                        controls=[
+                            ft.Icon(ft.Icons.TIMER, size=20),
+                            ft.Column(
+                                expand=True,
+                                spacing=0,
+                                controls=[
+                                    ft.Text(
+                                        (p.name or "Timer") + vorgabe, weight=ft.FontWeight.W_600
+                                    ),
+                                    ft.Text(p.kurztext(), size=12, opacity=0.7),
+                                ],
+                            ),
+                            ft.IconButton(
+                                ft.Icons.ARROW_UPWARD,
+                                tooltip="Nach oben — das erste ist die Vorgabe",
+                                on_click=timer_nach_oben(k),
+                                visible=k > 0,
+                            ),
+                            ft.IconButton(
+                                ft.Icons.EDIT_OUTLINED,
+                                tooltip="Bearbeiten: Teile, Abschnitte, „zählt“",
+                                on_click=timer_bearbeiter(p.id),
+                            ),
+                            ft.IconButton(
+                                ft.Icons.DELETE_OUTLINE,
+                                tooltip="Aus der Übung entfernen",
+                                on_click=timer_entferner(k),
+                            ),
+                        ],
+                    ),
+                )
+            )
+        if not timer_liste:
+            regel = regel_profil()
+            reihen.append(
+                ft.Text(
+                    f"Ohne eigenes Profil gilt die Timer-Regel der Übung: {regel.kurztext()}."
+                    if regel is not None
+                    else "Noch kein Timer — „Timer hinzufügen“ legt einen an oder übernimmt "
+                    "einen aus der Timer-Bibliothek.",
+                    size=12,
+                    opacity=0.6,
+                )
+            )
+        timer_spalte.controls = reihen
+
+    def timer_neu_zeichnen() -> None:
+        timer_zeichnen()
+        with contextlib.suppress(Exception):  # noch nicht auf der Seite
+            timer_spalte.update()
+
+    def timer_nach_oben(k: int) -> Callable[[], None]:
+        def handler() -> None:
+            timer_liste.insert(0, timer_liste.pop(k))
+            timer_neu_zeichnen()
+
+        return handler
+
+    def timer_entferner(k: int) -> Callable[[], None]:
+        def handler() -> None:
+            timer_liste.pop(k)
+            timer_neu_zeichnen()
+
+        return handler
+
+    async def timer_editor(profil_id: str | None) -> None:
+        """Den Profil-Editor öffnen — das Formular speichert vorher (beim Zurückkommen
+        entsteht es aus der Datenbank neu). Fehlt etwas (Name), bleibt es hier."""
+        if sichern() is not None:
+            return
+        formular = f"/uebung/{gespeichert['id']}/bearbeiten"
+        await page.push_route(formular_profil_route(formular, profil_id))
+
+    def timer_bearbeiter(profil_id: str) -> Callable[[], Any]:
+        async def handler() -> None:
+            await timer_editor(profil_id)
+
+        return handler
+
+    def timer_hinzufuegen() -> None:
+        """„Timer hinzufügen“: ein neues Profil im Editor oder eine Kopie aus der
+        Timer-Bibliothek. Weiter geht es erst, wenn der Dialog zu ist (`Nachher`)."""
+        dialog: ft.AlertDialog
+        nachher = Nachher()
+
+        def nehmen(vorlage: TimerProfil) -> Callable[[], None]:
+            def handler() -> None:
+                kopie = TimerProfil.aus_dict(vorlage.als_dict())
+                if kopie is not None:
+                    kopie.id = new_id()
+                    timer_liste.append(kopie)
+                nachher.danach(timer_neu_zeichnen)
+                schliessen(dialog)
+
+            return handler
+
+        def neues() -> None:
+            nachher.danach(lambda: timer_editor(None))
+            schliessen(dialog)
+
+        dialog = ft.AlertDialog(
+            on_dismiss=nachher.bei_schliessen,
+            title=ft.Text("Timer für diese Übung"),
+            content=ft.Column(
+                tight=True,
+                scroll=ft.ScrollMode.AUTO,
+                controls=[
+                    ft.ListTile(
+                        leading=ft.Icon(ft.Icons.ADD),
+                        title=ft.Text("Neues Profil"),
+                        subtitle=ft.Text(
+                            "Einzeltimer oder Folge mit Teilen — speichert vorher die Übung",
+                            size=12,
+                        ),
+                        on_click=neues,
+                    ),
+                    ft.Text(
+                        "Oder aus der Timer-Bibliothek — die Übung bekommt eine eigene Kopie.",
+                        size=12,
+                        opacity=0.7,
+                    ),
+                    *(
+                        ft.ListTile(
+                            title=ft.Text(p.name),
+                            subtitle=ft.Text(p.kurztext(), size=12),
+                            on_click=nehmen(p),
+                        )
+                        for p in state.timer_profile()
+                    ),
+                ],
+            ),
+            actions=[ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog))],
+        )
+        page.show_dialog(dialog)
+
+    timer_zeichnen()
+
     # -- Speichern -------------------------------------------------------------
 
     def felder_lesen() -> list[FieldSpec]:
@@ -450,6 +625,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         ziel.default_input_mode = modus_aus_felder(ziel.default_felder)
         ziel.default_target = ziel_lesen(ziel.result_spec)
         ziel.regionen = regionen_lesen()
+        ziel.timer = [p.als_dict() for p in timer_liste]
         ziel.media = [
             Media(
                 kind=MediaKind.VIDEO,
@@ -477,6 +653,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             ziel_form.werte() if ziel_form is not None else None,
             gewaehlt,
             [(t.value or "", a.value or "") for t, a in medien_zeilen],
+            [p.als_dict() for p in timer_liste],
         )
 
     def sichern() -> str | None:
@@ -582,6 +759,20 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                             "Ein Ziel lässt sich nach dem ersten Speichern festlegen.",
                             size=12,
                             opacity=0.6,
+                        ),
+                        abschnitt("TIMER"),
+                        ft.Text(
+                            "Die Uhr neben dem i startet den Timer der Übung — im Plan und in "
+                            "der Übung. Das erste Profil ist die Vorgabe; ein Plan kann je "
+                            "Planübung ein anderes wählen. Teile (Vorbereitung, Training, "
+                            "Cooldown) und „zählt“ je Abschnitt stellst du im Editor ein — er "
+                            "speichert vorher die Übung.",
+                            size=12,
+                            opacity=0.7,
+                        ),
+                        timer_spalte,
+                        ft.TextButton(
+                            "Timer hinzufügen", icon=ft.Icons.MORE_TIME, on_click=timer_hinzufuegen
                         ),
                         abschnitt("SYMBOL"),
                         symbole,

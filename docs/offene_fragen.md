@@ -106,6 +106,7 @@ Abschnitt 3; die beantworteten stehen unter „Entschieden“):
 | T31 | Plan bearbeiten (17.10.) | Karte „Ablauf“: „Timer für alle Übungen“ (aus der Bibliothek), „Nach dem Timer einer Übung: Auf Tipp warten \| Automatisch weiter“; die Uhr neben dem i auch beim Bearbeiten (Timer der Planübung wählen). | offen |
 | T32 | Intervalle im Training (17.10.) | Ausdauer → Timer oben (Intervall 30/15) → „Bereitstellen“ → „Training starten“: unter den Zahlen „Intervalle (vom Timer)“ — je Abschnitt Runde, Name, Zeit, km, Tempo, Ø HF, Punkt in der Farbe der Messung, der laufende fett; ab dem ersten Kilometer „Kilometer (vom GPS)“ mit Zeit, Tempo, Ø HF. Quer stehen die Tabellen links unter den Zahlen. Danach in der Auswertung „Intervalle (vom Timer)“ mit DFA α1 (H10). | offen |
 | T33 | Forschungsexport (17.10.) | Training mit Gurt (gern mit Timer) → Auswertung → Kolben-Symbol oben („Für die Auswertung exportieren (ohne Ort)“) → Dialog → „Exportieren“: Teilen-Menü mit `einheit_<Datum>.zip`. Darin `einheit-v1.json` und die Messdatei unter `Messungen/…`; keine Strecke, keine Koordinate. | offen |
+| T34 | Timer im Übungsformular (17.10.) | Übung → Bearbeiten → Abschnitt „Timer“: Profile mit Kurztext, das erste „Vorgabe“; Pfeil nach oben, Papierkorb, „Timer hinzufügen“ (neues Profil oder Kopie aus der Bibliothek). Stift → Editor über dem Formular (vorher gespeichert) → Speichern → zurück im Formular mit dem geänderten Profil. „Abbrechen“ im Formular verwirft Reihenfolge und Entfernen. | offen |
 
 ## 3. Befunde aus der Durchsicht vom 15.10.2026
 

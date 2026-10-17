@@ -475,6 +475,12 @@ class Marke:
     abschnitt: str = ""
     #: Das Ende des Timers: beendet den letzten Abschnitt, beginnt keinen
     ende: bool = False
+    #: Wann der Abschnitt begann — auf der Uhr des Laufs (für die Zeitleiste der Einheit)
+    bei: float | None = None
+    #: Der Abschnittsname ohne Runde („Pause“) und die Runde r von n — fürs Ende leer
+    name: str = ""
+    runde: int = 0
+    von: int = 0
 
 
 def name_aus_notiz(text: str) -> str:
@@ -534,10 +540,17 @@ class TimerLauf:
             self._enden.append(summe)
         #: Laufende Nummer des zuletzt gemeldeten Abschnittsanfangs (`neue_marken`)
         self._gemeldet: int | None = None
+        #: Uhr beim letzten Anhalten (`pause`); ``None``, solange er läuft oder nie hielt
+        self.angehalten_bei: float | None = None
 
     @property
     def gesamt_s(self) -> float:
         return self._enden[-1] if self._enden else 0.0
+
+    @property
+    def start_uhr(self) -> float | None:
+        """Uhr beim letzten Start oder Fortsetzen — ``None``, solange er steht."""
+        return self._start
 
     @property
     def laeuft(self) -> bool:
@@ -557,25 +570,38 @@ class TimerLauf:
 
     # -- Bedienung -------------------------------------------------------------
 
-    def start(self) -> None:
-        """Von vorn, wenn fertig; sonst wie `fortsetzen`."""
+    def start(self, bei: float | None = None) -> None:
+        """Von vorn, wenn fertig; sonst wie `fortsetzen`.
+
+        ``bei``: der Startzeitpunkt auf der Uhr des Laufs, wenn er schon vorbei ist —
+        eine Einheit startet alle ihre Teile auf denselben Zeitpunkt, auch wenn der
+        Takt den Timer erst einen Augenblick später erreicht.
+
+        >>> t = [10.5]
+        >>> lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 30)]), uhr=lambda: t[0])
+        >>> lauf.start(bei=10.0); lauf.stand().rest_s
+        29.5
+        """
         if self.fertig:
             self.zuruecksetzen()
-        self.fortsetzen()
+        self.fortsetzen(bei)
 
-    def fortsetzen(self) -> None:
+    def fortsetzen(self, bei: float | None = None) -> None:
         if self._start is None and not self.fertig:
-            self._start = self._uhr()
+            self._start = self._uhr() if bei is None else min(bei, self._uhr())
+            self.angehalten_bei = None
 
     def pause(self) -> None:
         if self._start is not None:
             self._basis_s = self.vergangen_s()
             self._start = None
+            self.angehalten_bei = self._uhr()
 
     def zuruecksetzen(self) -> None:
         self._basis_s = 0.0
         self._start = None
         self._gemeldet = None  # der nächste Start meldet den ersten Abschnitt wieder
+        self.angehalten_bei = None
 
     def weiter(self) -> None:
         """Zum Anfang des nächsten Abschnitts — im letzten: ans Ende."""
@@ -651,15 +677,36 @@ class TimerLauf:
         else:
             nummern = list(range(self._gemeldet + 1, stand.nummer + 1))
         self._gemeldet = stand.nummer
-        return [
-            Marke(
-                self.markentext(k),
-                round(jetzt - self._uhr_bei(k), 3),
-                abschnitt=self.abschnittsname(k),
-                ende=k >= len(self._folge),
+        marken: list[Marke] = []
+        for k in nummern:
+            bei = self._uhr_bei(k)
+            name, runde, von = self.angaben(k)
+            marken.append(
+                Marke(
+                    self.markentext(k),
+                    round(jetzt - bei, 3),
+                    abschnitt=self.abschnittsname(k),
+                    ende=k >= len(self._folge),
+                    bei=bei,
+                    name=name,
+                    runde=runde,
+                    von=von,
+                )
             )
-            for k in nummern
-        ]
+        return marken
+
+    def angaben(self, nummer: int) -> tuple[str, int, int]:
+        """Name (ohne Runde), Runde und Rundenzahl des Abschnitts ``nummer`` — fürs Ende leer.
+
+        >>> p = TimerProfil(abschnitte=[Abschnitt("A", 10), Abschnitt("", 5)], runden=2)
+        >>> lauf = TimerLauf(p, uhr=lambda: 0.0)
+        >>> lauf.angaben(0), lauf.angaben(3), lauf.angaben(4)
+        (('A', 1, 2), ('Abschnitt 2', 2, 2), ('', 0, 0))
+        """
+        if nummer >= len(self._folge):
+            return "", 0, 0
+        runde, index, a = self._folge[nummer]
+        return a.name or f"Abschnitt {index + 1}", runde, max(self.profil.runden, 1)
 
     def _uhr_bei(self, nummer: int) -> float:
         """Wann Abschnitt ``nummer`` begann — seit dem letzten Start genau, sonst jetzt."""

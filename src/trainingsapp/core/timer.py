@@ -379,6 +379,25 @@ def standard_profile() -> list[TimerProfil]:
     ]
 
 
+#: Messdauern zur Wahl vor einer Messung (Ben, 17.10.2026: „HRV einfach begrenzen (15 min)“)
+MESSDAUERN_MIN: tuple[int, ...] = (5, 10, 15)
+
+
+def messdauer(minuten: int) -> TimerProfil:
+    """Eine Messdauer als Timer-Profil mit einem Abschnitt — er wird ein Abschnitt der
+    Messung, und wenn er um ist, endet die Messung oder läuft weiter (Skizze 1).
+
+    >>> p = messdauer(15)
+    >>> p.id, p.name, p.kurztext(), p.gesamt_s()
+    ('messdauer-15', 'Messung 15 min', '15:00 15 min', 900)
+    """
+    return TimerProfil(
+        id=f"messdauer-{minuten}",
+        name=f"Messung {minuten} min",
+        abschnitte=[Abschnitt(f"{minuten} min", minuten * 60)],
+    )
+
+
 def timer_profile_lesen(text: str | None) -> list[TimerProfil]:
     """Gespeicherte Profile (JSON-Liste); nichts Brauchbares → die Vorlagen.
 
@@ -926,6 +945,7 @@ __all__ = [
     "ENDE",
     "MAX_ABSCHNITT_S",
     "MAX_RUNDEN",
+    "MESSDAUERN_MIN",
     "QUELLEN",
     "STANDARD_KLANG",
     "WECHSEL",
@@ -939,6 +959,7 @@ __all__ = [
     "dauer_lesen",
     "dauer_text",
     "klang_fuer",
+    "messdauer",
     "signal",
     "signale_kurz",
     "standard_profile",

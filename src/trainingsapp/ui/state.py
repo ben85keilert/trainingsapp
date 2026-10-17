@@ -210,6 +210,12 @@ class AppState:
     live_ansicht: int = 0
     #: Live-Ansicht zurückgeblättert: rechter Rand in s; None = folgt der Messung
     messung_ende_s: float | None = None
+    #: Dauer der nächsten Messung (Ben, 17.10.2026; Katalog A11): „offen“, Minuten
+    #: („5“, „10“, „15“) oder „ablauf“ (ein Profil der Timer-Bibliothek)
+    messung_dauer: str = "offen"
+    messung_ablauf: str | None = None
+    #: Wenn die Dauer um ist: die Messung beenden (sonst läuft sie weiter)
+    messung_ende_beenden: bool = True
     #: Zuletzt gesetzte Bildschirmausrichtung (`ui.ausrichtung`), None = noch keine
     ausrichtung: str | None = None
     #: Wer erfährt, dass sich die Bildschirmgröße geändert hat (Drehen, Fenster);

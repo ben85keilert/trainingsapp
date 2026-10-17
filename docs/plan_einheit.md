@@ -118,7 +118,7 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 | Stufe | Inhalt | Stand |
 |---|---|---|
 | 0 | hrv-core: `spuren_speichern`, `notiz(..., marke=)`; Vertrag §4/§9b | gebaut 17.10. |
-| 1 | Zeitleiste, `Einheitslauf` mit HRV, Timer, GPS; Startleiste, Laufleiste, Bereitstellen; Dienst `health` | gebaut 17.10.; offen: Messung mit Dauer und Ablauf (Katalog A11) |
+| 1 | Zeitleiste, `Einheitslauf` mit HRV, Timer, GPS; Startleiste, Laufleiste, Bereitstellen; Dienst `health` | gebaut 17.10.; Messung mit Dauer und Ablauf (A11): „Dauer der Messung“ in der Gerätekarte, Start als Einheit aus HRV und Timer, „Bereitstellen“ |
 | 2 | Ausdauertraining als Einheit (verknüpft auch eine schon laufende HRV, Abgleich über `versatz_s`, Wiederherstellung H16) | gebaut 17.10.; Tabellen „Intervalle“ und „Kilometer“ live und in der Auswertung (A10, `core/intervalle.py`) |
 | 3 | Timer an Übung, Planübung und Plan (mehrere Profile, „zählt“, Abbrechen), Plan-Ablauf, Einträge mit Anfang und Ende — Migration 020 | gebaut 17.10. (§7); „vom Timer“ unter „Heute geleistet“ gebaut (A13) |
 | 4 | Forschungsexport (ausdrückliche Handlung): Messdateien, Zeitleiste `einheit-v1.json`, ortsfreies Tempo | gebaut 17.10. (§8), in der Auswertung des Trainings und der HRV-Messung |

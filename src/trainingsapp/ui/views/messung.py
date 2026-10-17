@@ -40,6 +40,7 @@ from typing import Any
 import flet as ft
 from hrv_core.atmung import ATEMUEBUNG, RUHE, kurzgrund
 from hrv_core.aufnahme import backup_lesen
+from hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
 from hrv_core.regeln import Korrekturregeln
 from hrv_core.trends import KENNZAHLEN, aktuell, atmung_aktuell, titel
 
@@ -49,6 +50,7 @@ from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, HrvEinstellungen
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.core.models import jetzt as utc_jetzt
+from trainingsapp.core.timer import MESSDAUERN_MIN, TimerLauf, TimerProfil, dauer_text, messdauer
 from trainingsapp.devices.base import DeviceInfo, Verbindung
 from trainingsapp.devices.messlauf import Gespeichert, Messlauf, backup_wiederherstellen
 from trainingsapp.devices.profiles import geraeteart
@@ -59,6 +61,7 @@ from trainingsapp.devices.simulated import (
     SIM_SYNTH,
     SimulatedSource,
 )
+from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.analyse import Analyse
 from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog
 from trainingsapp.ui.components.kacheln import (
@@ -908,13 +911,173 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         und Fenster von vorn beginnen. Eine Notiz, die gerade getippt wird, kommt mit."""
         if notizfeld.bearbeite is not None:
             notizfeld.uebernehmen()  # mit Text gespeichert — sonst ginge er beim Neuaufbau verloren
+        profil = dauer_profil()
+        if profil is not None:
+            # Mit Dauer oder Ablauf (Ben, 17.10.2026): als Einheit — Aufnahme und Timer auf
+            # einer Achse, mit allem, was schon in der Startleiste wartet
+            if einheit_ui.laeuft(state) is not None:
+                page.show_dialog(
+                    ft.SnackBar(ft.Text("Es läuft schon eine Einheit — erst oben mit ⏹ beenden."))
+                )
+                return
+            dauer_bereitstellen(profil)
+            state.messung_ende_s = None
+            einheit_ui.alle_starten(page, state, 0.0)
+            return
         lauf.aufnahme_starten()
         state.messung_ende_s = None
         await _hintergrund(state, lauf, True, f"Aufnahme läuft · {lauf.geraet_name}")
         state.neu_zeichnen()
 
+    def dauer_profil() -> TimerProfil | None:
+        """Der Timer zur gewählten Dauer — ``None`` bei „offen“ (Katalog A11)."""
+        wahl = state.messung_dauer
+        if wahl == "ablauf":
+            profile = state.timer_profile()
+            gewaehlt = next((p for p in profile if p.id == state.messung_ablauf), None)
+            return gewaehlt or (profile[0] if profile else None)
+        return messdauer(int(wahl)) if wahl.isdigit() else None
+
+    def dauer_bereitstellen(profil: TimerProfil | None) -> None:
+        """Die Messung in die Startleiste — mit Dauer oder Ablauf samt Timer, der die
+        Einheit beendet; die Aufnahme endet dann oder läuft weiter (Wahl)."""
+        einheit_ui.hrv_bereitstellen(page, state)
+        if profil is None:
+            return
+        einheit_ui.timer_bereitstellen(page, state, TimerLauf(profil))
+        e = einheit_ui.in_vorbereitung(state)
+        if e is not None:
+            e.ende_mit_timer = True
+            e.am_ende_stoppen["hrv"] = state.messung_ende_beenden
+
+    def bereitstellen_umschalten() -> None:
+        """„Bereitstellen“ — steht die Messung schon bereit, wieder heraus."""
+        if einheit_ui.bereitgestellt(state, "hrv"):
+            einheit_ui.zuruecknehmen(page, state, "hrv")
+            if einheit_ui.bereitgestellt(state, "timer") and dauer_profil() is not None:
+                einheit_ui.zuruecknehmen(page, state, "timer")
+        elif einheit_ui.laeuft(state) is None:
+            dauer_bereitstellen(dauer_profil())
+        state.neu_zeichnen()
+
+    def dauer_waehlen(e: ft.Event[ft.SegmentedButton]) -> None:
+        if e.control.selected:
+            state.messung_dauer = str(e.control.selected[0])
+            aktualisieren(erzwingen=True)
+
+    def ablauf_waehlen(e: Any) -> None:
+        state.messung_ablauf = e.control.value
+        aktualisieren(erzwingen=True)
+
+    def ende_waehlen(e: ft.Event[ft.SegmentedButton]) -> None:
+        if e.control.selected:
+            state.messung_ende_beenden = e.control.selected[0] == "beenden"
+            aktualisieren(erzwingen=True)
+
+    def dauer_block() -> ft.Control:
+        """„Dauer der Messung“: offen · 5 · 10 · 15 min · Ablauf (Skizzen 1–2, Ben 17.10.2026).
+
+        Mit Dauer oder Ablauf startet die Aufnahme als Einheit mit einem Timer; seine
+        Abschnitte werden Abschnitte der Messung."""
+        wahl = state.messung_dauer
+        zeilen: list[ft.Control] = [
+            ft.Text("Dauer der Messung", size=12, weight=ft.FontWeight.W_600, opacity=0.8),
+            ft.SegmentedButton(
+                selected=[wahl],
+                show_selected_icon=False,
+                segments=[
+                    ft.Segment(value="offen", label=ft.Text("offen")),
+                    *(ft.Segment(value=str(m), label=ft.Text(f"{m} min")) for m in MESSDAUERN_MIN),
+                    ft.Segment(value="ablauf", label=ft.Text("Ablauf")),
+                ],
+                on_change=dauer_waehlen,
+            ),
+        ]
+        profil = dauer_profil()
+        if wahl == "ablauf":
+            profile = state.timer_profile()
+            if not profile or profil is None:
+                zeilen.append(ft.Text("Im Timer ein Profil anlegen.", size=12, opacity=0.7))
+                return ft.Column(spacing=8, controls=zeilen)
+            zeilen.append(
+                ft.Dropdown(
+                    label="Ablauf",
+                    value=profil.id,
+                    options=[ft.DropdownOption(key=p.id, text=p.name) for p in profile],
+                    on_select=ablauf_waehlen,
+                    dense=True,
+                )
+            )
+            farbe_von: dict[str, str] = {}
+            reihen: list[ft.Control] = []
+            for teil in profil.alle_teile():
+                for a in teil.abschnitte:
+                    farbe = farbe_von.setdefault(
+                        a.name, ABSCHNITT_FARBEN[len(farbe_von) % len(ABSCHNITT_FARBEN)]
+                    )
+                    reihen.append(
+                        ft.Row(
+                            spacing=8,
+                            controls=[
+                                ft.Container(width=10, height=10, border_radius=5, bgcolor=farbe),
+                                ft.Text(a.name, size=13, expand=True),
+                                ft.Text(
+                                    dauer_text(a.dauer_s)
+                                    + (f" × {teil.runden}" if teil.runden > 1 else ""),
+                                    size=13,
+                                    opacity=0.75,
+                                ),
+                            ],
+                        )
+                    )
+            reihen.append(
+                ft.Text(
+                    f"Gesamt {dauer_text(profil.gesamt_s())}", size=13, weight=ft.FontWeight.W_600
+                )
+            )
+            zeilen.append(ft.Column(spacing=4, controls=reihen))
+        if profil is not None:
+            frage = (
+                "Wenn der Ablauf fertig ist" if wahl == "ablauf" else f"Wenn die {wahl} min um sind"
+            )
+            zeilen += [
+                ft.Text(frage, size=12, weight=ft.FontWeight.W_600, opacity=0.8),
+                ft.SegmentedButton(
+                    selected=["beenden" if state.messung_ende_beenden else "weiter"],
+                    show_selected_icon=False,
+                    segments=[
+                        ft.Segment(value="beenden", label=ft.Text("Messung beenden")),
+                        ft.Segment(value="weiter", label=ft.Text("Weiterlaufen")),
+                    ],
+                    on_change=ende_waehlen,
+                ),
+                ft.Text(
+                    "Die Restzeit steht oben in der Leiste und in der Benachrichtigung; "
+                    + (
+                        "die Abschnitte des Ablaufs werden Abschnitte der Messung. Abläufe "
+                        "sind Timer-Profile — angelegt und geändert im Timer."
+                        if wahl == "ablauf"
+                        else f"die {wahl} min werden ein Abschnitt der Messung."
+                    ),
+                    size=12,
+                    opacity=0.7,
+                ),
+            ]
+        return ft.Column(spacing=8, controls=zeilen)
+
     async def aufnahme_stoppen() -> None:
+        e = einheit_ui.laeuft(state)
+        # Eine Messung mit Dauer oder Ablauf: „Stopp“ beendet auch ihren Timer — eine
+        # Einheit mit Training oder Plan läuft weiter (die HRV verlässt sie nur)
+        nur_messung = (
+            e is not None
+            and e.hrv is not None
+            and e.hrv.messlauf is lauf
+            and {t.art for t in e.teile} <= {"hrv", "timer"}
+        )
         ergebnis = lauf.aufnahme_stoppen(datenverzeichnis())
+        if nur_messung:
+            einheit_ui.alle_beenden(state)
         await _hintergrund(state, lauf, True, f"Verbunden mit {lauf.geraet_name}")
         if ergebnis is None:
             aktualisieren(erzwingen=True)
@@ -977,6 +1140,11 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             lauf.aufnahme is not None,
             lauf.titel_notiz(),
             status_stand["offen"],
+            state.messung_dauer,
+            state.messung_ablauf,
+            state.messung_ende_beenden,
+            einheit_ui.bereitgestellt(state, "hrv"),
+            einheit_ui.laeuft(state) is not None,
         )
         dauer = status_stand["dauer"]
         if schluessel != status_stand["schluessel"]:
@@ -1004,6 +1172,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 spacing=4,
                 tight=True,
                 controls=[
+                    dauer_block(),
                     ft.Row(
                         spacing=8,
                         wrap=True,
@@ -1013,6 +1182,18 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                                 "Aufnahme starten",
                                 icon=ft.Icons.FIBER_MANUAL_RECORD,
                                 on_click=aufnahme_starten,
+                            ),
+                            ft.FilledTonalButton(
+                                "Bereitgestellt",
+                                icon=ft.Icons.CHECK,
+                                on_click=bereitstellen_umschalten,
+                            )
+                            if einheit_ui.bereitgestellt(state, "hrv")
+                            else ft.OutlinedButton(
+                                "Bereitstellen",
+                                icon=ft.Icons.HOURGLASS_TOP,
+                                on_click=bereitstellen_umschalten,
+                                disabled=einheit_ui.laeuft(state) is not None,
                             ),
                             ft.TextButton(
                                 "Trennen", icon=ft.Icons.BLUETOOTH_DISABLED, on_click=trennen

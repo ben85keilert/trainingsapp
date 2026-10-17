@@ -94,6 +94,7 @@ from trainingsapp.core.result_spec import (
 )
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tagesbilanz import buendeln
+from trainingsapp.core.timer_eintrag import vom_timer_text
 from trainingsapp.core.uebung_timer import timer_fuer
 from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -562,6 +563,12 @@ def plan_view(
         """
         inhalt: list[ft.Control] = []
         eigene = [e for e in tages_eintraege if e.exercise_id == uebung.id]
+        # Was ein Timer eintrug (Übungs-Timer, Plan-Ablauf) — aus der Zeitleiste
+        vom_timer = (
+            state.einheiten.eintraege_vom_timer([e.id for e in eigene])
+            if state.einheiten is not None and eigene
+            else set()
+        )
         for b in buendeln(eigene):
             zeilen = b.parameter_zeilen()
             if not zeilen:
@@ -571,6 +578,19 @@ def plan_view(
             if zusatz := b.auspraegung_text():
                 gruppe.append(ft.Text(zusatz, size=13, weight=ft.FontWeight.W_600))
             gruppe.append(wert_leiste(zeilen))
+            # „vom Timer, 10:07“ (Ben, 17.10.2026; Skizze 12) — wann der Lauf begann
+            if vom := vom_timer_text(
+                e.started_at for e in b.eintraege if e.id in vom_timer and e.started_at
+            ):
+                gruppe.append(
+                    ft.Row(
+                        spacing=4,
+                        controls=[
+                            ft.Icon(ft.Icons.TIMER_OUTLINED, size=14, opacity=0.7),
+                            ft.Text(vom, size=12, opacity=0.7),
+                        ],
+                    )
+                )
             # Antippen zeigt alle Einträge der Übung von heute — Ben, 17.10.2026: nicht
             # nur den jüngsten, und mit allen Notizen
             inhalt.append(

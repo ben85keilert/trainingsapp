@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from .einheit import MIN_MARKE_S, Ereignis
@@ -167,4 +168,30 @@ def ergebnis(zeiten: Sequence[Gelaufen], feld: str | None) -> dict[str, Any]:
     return {}
 
 
-__all__ = ["ZEITFELDER", "Gelaufen", "abgebrochen", "ergebnis", "gelaufene_zeiten", "zeitfeld"]
+def vom_timer_text(anfaenge: Iterable[datetime]) -> str:
+    """„vom Timer, 10:07“ — wann die Läufe begannen, die ein Timer eintrug (Ortszeit);
+    leer ohne einen (Ben, 17.10.2026; Skizze 12).
+
+    >>> zehn = datetime(2026, 10, 17, 10, 7).astimezone()
+    >>> vom_timer_text([zehn]), vom_timer_text([])
+    ('vom Timer, 10:07', '')
+    >>> vom_timer_text([zehn.replace(minute=31), zehn, zehn.replace(hour=11, minute=2)])
+    'vom Timer, 10:07, 10:31 und 11:02'
+    """
+    zeiten = [f"{t.astimezone():%H:%M}" for t in sorted(anfaenge)]
+    if not zeiten:
+        return ""
+    if len(zeiten) == 1:
+        return f"vom Timer, {zeiten[0]}"
+    return f"vom Timer, {', '.join(zeiten[:-1])} und {zeiten[-1]}"
+
+
+__all__ = [
+    "ZEITFELDER",
+    "Gelaufen",
+    "abgebrochen",
+    "ergebnis",
+    "gelaufene_zeiten",
+    "vom_timer_text",
+    "zeitfeld",
+]

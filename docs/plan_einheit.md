@@ -120,7 +120,7 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 | 0 | hrv-core: `spuren_speichern`, `notiz(..., marke=)`; Vertrag §4/§9b | gebaut 17.10. |
 | 1 | Zeitleiste, `Einheitslauf` mit HRV, Timer, GPS; Startleiste, Laufleiste, Bereitstellen; Dienst `health` | gebaut 17.10.; offen: Messung mit Dauer und Ablauf (Katalog A11) |
 | 2 | Ausdauertraining als Einheit (verknüpft auch eine schon laufende HRV, Abgleich über `versatz_s`, Wiederherstellung H16) | gebaut 17.10.; Tabellen „Intervalle“ und „Kilometer“ live und in der Auswertung (A10, `core/intervalle.py`) |
-| 3 | Timer an Übung, Planübung und Plan (mehrere Profile, „zählt“, Abbrechen), Plan-Ablauf, Einträge mit Anfang und Ende — Migration 020 | gebaut 17.10. (§7); offen: „vom Timer“ unter „Heute geleistet“ (A13) |
+| 3 | Timer an Übung, Planübung und Plan (mehrere Profile, „zählt“, Abbrechen), Plan-Ablauf, Einträge mit Anfang und Ende — Migration 020 | gebaut 17.10. (§7); „vom Timer“ unter „Heute geleistet“ gebaut (A13) |
 | 4 | Forschungsexport (ausdrückliche Handlung): Messdateien, Zeitleiste `einheit-v1.json`, ortsfreies Tempo | gebaut 17.10. (§8) in der Auswertung des Trainings; offen: aus der HRV-Auswertung, für Einheiten ohne GPS (A14) |
 
 ## 7. Timer an der Übung und Plan-Ablauf (Stufe 3)
@@ -156,6 +156,10 @@ einzelnen Übung“ — und: „Aus dem Text heraus weiß die App nicht, was Üb
   Kopie aus der Bibliothek) gehören zum Formular; der Stift öffnet den Editor (Teile,
   „zählt“) über dem Formular (`…/bearbeiten/timer/profil/<Profil>`), vorher speichert
   das Formular. Ohne eigenes Profil nennt es die Timer-Regel der Übung.
+- **„vom Timer“** (Skizze 12): Unter „Heute geleistet“ steht bei einem Eintrag vom Timer
+  „vom Timer, 10:07“, auf der Seite „Leistungen“ Anfang und Ende des Laufs — erkannt an
+  `person/eintrag` in der Zeitleiste (`EinheitRepo.eintraege_vom_timer`); ein Training
+  mit Ende allein zählt nicht.
 - **Kurse** zählen Timer-Einträge wie alle anderen (Bedingungen `summe`, `tage`) — nie
   Messwerte.
 

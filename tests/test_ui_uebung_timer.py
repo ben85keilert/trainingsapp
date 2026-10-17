@@ -396,3 +396,32 @@ def test_formular_ohne_eigenes_profil_nennt_die_timer_regel(tmp_path) -> None:
         assert "Ohne eigenes Profil gilt die Timer-Regel der Übung: 5:00 Atmung." in texte
     finally:
         state.schliessen()
+
+
+async def test_vom_timer_unter_heute_geleistet_und_in_den_leistungen(umgebung) -> None:
+    """A13 (Skizze 12): Ein Eintrag vom Timer steht unter „Heute geleistet“ mit „vom Timer,
+    10:07“; die Seite „Leistungen“ zeigt Anfang und Ende des Laufs."""
+    from trainingsapp.core.timer_eintrag import vom_timer_text
+    from trainingsapp.ui.views.leistungen import leistungen_view
+    from trainingsapp.ui.views.plan import plan_view
+
+    state, uhr, gurt = umgebung
+    uebung = _planke(state)
+    plan = Plan(name="Rumpf", subject_id=state.profil.id, items=[PlanItem(exercise_id=uebung.id)])
+    state.plaene.speichern(plan)
+    gespeichert = state.plaene.laden(plan.id)
+    assert gespeichert is not None
+    item = gespeichert.items[0]
+    basis = f"/plan/{plan.id}"
+    assert not any("vom Timer" in t for t in _texte(plan_view(Seite(), state, gespeichert)))
+    _knopf(
+        uebung_timer_view(Seite(), state, basis, uebung, gespeichert, item), "Starten"
+    ).on_click()
+    await _bis_zum_ende(state, uhr, gurt)
+    (eintrag,) = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
+    assert eintrag.started_at is not None and eintrag.ended_at is not None
+    erwartet = vom_timer_text([eintrag.started_at])
+    assert erwartet in _texte(plan_view(Seite(), state, gespeichert))
+    seite = leistungen_view(Seite(), state, f"{basis}/leistungen/{uebung.id}", uebung)
+    von, bis = eintrag.started_at.astimezone(), eintrag.ended_at.astimezone()
+    assert any(f"{von:%H:%M}–{bis:%H:%M} Uhr · vom Timer" in t for t in _texte(seite))

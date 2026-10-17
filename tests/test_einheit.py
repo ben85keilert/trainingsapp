@@ -263,3 +263,19 @@ def test_training_findet_seine_aufnahme_ueber_die_einheit(repo) -> None:
     direkt = Strecke(subject_id=profil, started_at=T0, hrv_recording_id=andere.id)
     strecken.anlegen(direkt)
     assert strecken.zur_hrv(andere.id).id == direkt.id
+
+
+def test_eintraege_vom_timer_aus_der_zeitleiste(repo) -> None:
+    """„vom Timer“ (Ben, 17.10.2026): Ein Eintrag stammt vom Timer, wenn die Zeitleiste
+    ihn als ``person/eintrag`` nennt — ein Eintrag mit Ende allein (Training) nicht."""
+    r, profil = repo
+    r.einheit_beginnen("e-1", profil, T0, "Planke")
+    r.ereignisse_schreiben(
+        "e-1",
+        [
+            (1, Ereignis(0.0, "plan", "uebung_start", "Planke beginnt", {"uebung": "u1"})),
+            (2, Ereignis(65.0, "person", "eintrag", "Planke", {"eintrag": "eintrag-a"})),
+        ],
+    )
+    assert r.eintraege_vom_timer(["eintrag-a", "eintrag-b", "eintrag-a"]) == {"eintrag-a"}
+    assert r.eintraege_vom_timer([]) == set()

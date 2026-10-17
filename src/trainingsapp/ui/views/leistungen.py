@@ -70,6 +70,12 @@ def leistungen_view(page: Any, state: AppState, route: str, uebung: Exercise) ->
         )
         karte = _Karte(eintrag, session, form, notiz, anfang=(form.werte(), eintrag.note.strip()))
         karten.append(karte)
+    # Was ein Timer eintrug (Übungs-Timer, Plan-Ablauf) — aus der Zeitleiste
+    vom_timer = (
+        state.einheiten.eintraege_vom_timer([k.eintrag.id for k in karten])
+        if state.einheiten is not None and karten
+        else set()
+    )
     liste = ft.Column(spacing=12)
 
     def plan_name(session: Session) -> str:
@@ -80,6 +86,10 @@ def leistungen_view(page: Any, state: AppState, route: str, uebung: Exercise) ->
 
     def karte_bauen(nummer: int, k: _Karte) -> ft.Control:
         zeit = f"{k.eintrag.started_at.astimezone():%H:%M} Uhr" if k.eintrag.started_at else ""
+        if k.eintrag.id in vom_timer and k.eintrag.started_at and k.eintrag.ended_at:
+            # Vom Timer (Ben, 17.10.2026): Anfang und Ende des Laufs
+            von, bis = k.eintrag.started_at.astimezone(), k.eintrag.ended_at.astimezone()
+            zeit = f"{von:%H:%M}–{bis:%H:%M} Uhr · vom Timer"
         felder: ft.Control = (
             k.form.control
             if k.form.spec.fields

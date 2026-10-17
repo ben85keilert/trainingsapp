@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -179,6 +180,24 @@ class EinheitRepo:
                 (art, datei),
             )
         ]
+
+    def eintraege_vom_timer(self, eintrag_ids: Collection[str]) -> set[str]:
+        """Welche dieser Tagebucheinträge ein Timer schrieb — der Timer einer Übung oder
+        der Plan-Ablauf halten jeden als ``person/eintrag`` in der Zeitleiste fest
+        (Ben, 17.10.2026: „vom Timer, 10:07“ unter „Heute geleistet“)."""
+        ids = list(dict.fromkeys(eintrag_ids))
+        if not ids:
+            return set()
+        platzhalter = ",".join("?" * len(ids))
+        return {
+            r["eintrag"]
+            for r in self.con.execute(
+                "SELECT json_extract(daten_json, '$.eintrag') AS eintrag FROM einheit_ereignis "
+                "WHERE quelle = 'person' AND art = 'eintrag' "
+                f"AND json_extract(daten_json, '$.eintrag') IN ({platzhalter})",
+                ids,
+            )
+        }
 
     def loeschen(self, einheit_id: str) -> None:
         """Weich löschen — die Zeitleiste bleibt als Grabstein für die Synchronisation."""

@@ -1,6 +1,6 @@
 """Verlauf (Ben, 17.10.2026; Skizzen 1 und 5 zu P37: Variante A + B).
 
-Zwei Reiter:
+Drei Reiter:
 
 - **Tage**: oben eine Woche (‹ ›, auch wischen), unter jedem Tag Punkte für die Zahl der
   Übungen, heute mit Ring. Ein Tipp auf einen Tag zeigt darunter seine Übungen —
@@ -9,6 +9,9 @@ Zwei Reiter:
 - **Übungen**: alle Übungen, die zuletzt gemachten zuerst, mit Mini-Kurve, letztem Wert
   und Trend (Mittel der letzten vier Wochen gegen die vier davor); oben ein Filter nach
   Typ.
+
+- **Tagebuch** (Ben, 18.10.2026): alle Notizen — zum Tag, zum Plan, zur Übung — nach Tagen
+  (mit Wochenleiste, die beim Scrollen mitgeht) oder nach Übungen (`views/tagebuch.py`).
 
 Eine Übung antippen öffnet `/verlauf/<kachel_id>` (`verlauf_kachel.py`): ihre Kurve und
 die Ergebnisse je Tag. Varianten einer Übung laufen zusammen (Kachel,
@@ -42,6 +45,7 @@ from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.uebungszeile import abschnitt, grosser_wert, uebungszeile
 from trainingsapp.ui.components.verlaufskurve import mini, mini_saeulen
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.tagebuch import tagebuch
 
 #: So viele Werte zeigt eine Mini-Kurve
 MINI_WERTE = 8
@@ -90,16 +94,21 @@ def kurz_datum(tag: date, heute: date) -> str:
 
 
 def verlauf(page: ft.Page, state: AppState) -> ft.Control:
-    """Der Reiter „Verlauf“: Tage | Übungen."""
+    """Der Reiter „Verlauf“: Tage | Übungen | Tagebuch."""
 
     def wechseln(e: ft.Event[ft.Tabs]) -> None:
         state.verlauf_tab = e.control.selected_index or 0
         state.neu_zeichnen()
 
-    daten = _daten(state)
-    inhalt = _tage(page, state, daten) if state.verlauf_tab == 0 else _uebungen(page, state, daten)
+    if state.verlauf_tab == 2:
+        inhalt = tagebuch(page, state)
+    else:
+        daten = _daten(state)
+        inhalt = (
+            _tage(page, state, daten) if state.verlauf_tab == 0 else _uebungen(page, state, daten)
+        )
     return ft.Tabs(
-        length=2,
+        length=3,
         selected_index=state.verlauf_tab,
         on_change=wechseln,
         expand=True,
@@ -107,7 +116,10 @@ def verlauf(page: ft.Page, state: AppState) -> ft.Control:
             expand=True,
             spacing=0,
             controls=[
-                ft.TabBar(scrollable=False, tabs=[ft.Tab(label="Tage"), ft.Tab(label="Übungen")]),
+                ft.TabBar(
+                    scrollable=False,
+                    tabs=[ft.Tab(label="Tage"), ft.Tab(label="Übungen"), ft.Tab(label="Tagebuch")],
+                ),
                 ft.Container(expand=True, content=inhalt),
             ],
         ),

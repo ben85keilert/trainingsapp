@@ -73,6 +73,7 @@ from trainingsapp.ui.components.uebungszeile import (
     grosser_wert,
     uebungszeile,
 )
+from trainingsapp.ui.components.zeitstrahl import zeitpunkt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
@@ -237,46 +238,6 @@ def _segmente(plan: Plan, k: Plankarte) -> ft.Control:
                 bgcolor=ft.Colors.PRIMARY if i.id in k.erledigt else ft.Colors.SECONDARY_CONTAINER,
             )
             for i in plan.items
-        ],
-    )
-
-
-def _zeitpunkt(zeit: str, inhalt: ft.Control, *, hohl: bool = False) -> ft.Control:
-    """Ein Punkt der Zeitleiste: Uhrzeit links, Punkt auf der Linie, rechts der Inhalt."""
-    punkt = ft.Container(
-        left=0,
-        top=6,
-        width=12,
-        height=12,
-        border_radius=6,
-        bgcolor=ft.Colors.SURFACE if hohl else ft.Colors.PRIMARY,
-        border=ft.Border.all(2, ft.Colors.PRIMARY) if hohl else None,
-    )
-    return ft.Row(
-        spacing=4,
-        vertical_alignment=ft.CrossAxisAlignment.START,
-        controls=[
-            ft.Container(
-                width=42,
-                padding=ft.Padding.only(top=4),
-                content=ft.Text(
-                    zeit, size=12, weight=ft.FontWeight.W_700, opacity=0.6 if hohl else 1
-                ),
-            ),
-            ft.Stack(
-                expand=True,
-                clip_behavior=ft.ClipBehavior.NONE,
-                controls=[
-                    ft.Container(
-                        margin=ft.Margin.only(left=5),
-                        padding=ft.Padding.only(left=14, bottom=12),
-                        border=ft.Border.only(left=ft.BorderSide(2, ft.Colors.OUTLINE_VARIANT)),
-                        # Die Zeile streckt den Inhalt auf die volle Breite (der Stack nicht)
-                        content=ft.Row(controls=[ft.Container(expand=True, content=inhalt)]),
-                    ),
-                    punkt,
-                ],
-            ),
         ],
     )
 
@@ -1092,9 +1053,9 @@ def tagesansicht(
         if not punkte:
             teile.append(_hinweis("Noch nichts eingetragen."))
         else:
-            linie = [_zeitpunkt(_uhr(z), c) for z, c in punkte]
+            linie = [zeitpunkt(_uhr(z), c) for z, c in punkte]
             if d.ist_heute:
-                linie.append(_zeitpunkt("jetzt", ft.Container(height=6), hohl=True))
+                linie.append(zeitpunkt("jetzt", ft.Container(height=6), hohl=True))
             teile.append(ft.Column(spacing=0, controls=linie))
         if not d.tagesnotiz:
             teile.append(

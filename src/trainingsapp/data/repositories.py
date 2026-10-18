@@ -1544,6 +1544,45 @@ class SessionRepo:
             ergebnis.append((eintrag, sessions[eintrag.session_id]))
         return ergebnis
 
+    def notizen(self, subject_id: str) -> list[tuple[SessionEntry, Session]]:
+        """Alle gültigen Einträge mit Notiz, zeitlich sortiert, mit ihrer Session — das
+        Tagebuch (Ben, 18.10.2026; `core/tagebuch.py`)."""
+        zeilen = self.con.execute(
+            f"{_GUELTIGE} AND s.subject_id = ? AND e.note != '' ORDER BY e.started_at, e.rowid",
+            (subject_id,),
+        ).fetchall()
+        sessions: dict[str, Session] = {}
+        ergebnis: list[tuple[SessionEntry, Session]] = []
+        for r in zeilen:
+            eintrag = self._zeile(r)
+            if eintrag.session_id not in sessions:
+                session = self.session_laden(eintrag.session_id)
+                assert session is not None
+                sessions[eintrag.session_id] = session
+            ergebnis.append((eintrag, sessions[eintrag.session_id]))
+        return ergebnis
+
+    def session_notizen(self, subject_id: str) -> list[tuple[Session, datetime | None]]:
+        """Sessions mit Notiz (die Notiz zum Plan an einem Tag) und wann ihr erster gültiger
+        Eintrag war — fürs Tagebuch."""
+        zeilen = self.con.execute(
+            """
+            SELECT s.*, (SELECT MIN(e.started_at) FROM session_entry e
+                         WHERE e.session_id = s.id AND e.deleted_at IS NULL) AS erst
+            FROM session s
+            WHERE s.subject_id = ? AND s.deleted_at IS NULL AND s.note != ''
+            ORDER BY s.started_at
+            """,
+            (subject_id,),
+        ).fetchall()
+        return [
+            (
+                self._session_zeile(r),
+                datetime.fromisoformat(r["erst"]) if r["erst"] else None,
+            )
+            for r in zeilen
+        ]
+
     def eintraege_zwischen(
         self,
         subject_id: str,
@@ -1749,6 +1788,17 @@ class DayNoteRepo:
             (subject_id, tag.isoformat()),
         ).fetchone()
         return r["text"] if r else ""
+
+    def alle(self, subject_id: str) -> list[tuple[date, str, datetime]]:
+        """Alle Notizen zum Tag (nicht leer) mit Tag, Text und wann angelegt — das Tagebuch."""
+        return [
+            (date.fromisoformat(r["date"]), r["text"], datetime.fromisoformat(r["created_at"]))
+            for r in self.con.execute(
+                "SELECT date, text, created_at FROM day_note WHERE subject_id = ? "
+                "AND deleted_at IS NULL AND text != '' ORDER BY date",
+                (subject_id,),
+            )
+        ]
 
     def angelegt(self, subject_id: str, tag: date) -> datetime | None:
         """Wann die Notiz zum ersten Mal geschrieben wurde — ihr Platz in der Zeitleiste."""

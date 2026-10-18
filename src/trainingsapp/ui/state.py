@@ -177,12 +177,17 @@ class AppState:
     uebungen_tab: int = 0
     #: Darstellung der Tagesansicht (Ben, 18.10.2026): "uebersicht" oder "zeitleiste"
     tag_darstellung: str = "uebersicht"
-    #: Verlauf (Ben, 17.10.2026): Reiter (0 = Tage, 1 = Übungen), gezeigte Woche (ihr
+    #: Verlauf (Ben, 17.10.2026): Reiter (0 = Tage, 1 = Übungen, 2 = Tagebuch), gezeigte Woche (ihr
     #: Montag; None = die aktuelle), gewählter Tag (None = von selbst), Typ-Filter
     verlauf_tab: int = 0
     verlauf_woche: date | None = None
     verlauf_tag: date | None = None
     verlauf_typ: str | None = None
+    #: Reiter „Tagebuch“ (Ben, 18.10.2026; Verlauf-Reiter 2): nach Tagen oder Übungen, mit
+    #: Wochenleiste, wie viele Tage mit Notizen gezeigt werden (`views/tagebuch.py`)
+    tagebuch_ordnung: str = "tage"
+    tagebuch_kalender: bool = True
+    tagebuch_anzahl: int = 0
     #: Kurve einer Übung: Zeitraum, X-Achse, Kennzahl je Kachel, Variante (None = alle)
     verlauf_zeitraum: str = ZEITRAUM_VORGABE
     verlauf_modus: str = MODUS_ZEIT

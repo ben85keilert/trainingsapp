@@ -1202,6 +1202,29 @@ class SessionRepo:
         )
         return True
 
+    def wieder_in_tag(self, subject_id: str, plan_id: str, tag: date) -> bool:
+        """„Rückgängig“ zu `aus_tag_nehmen`: die zuletzt so entfernten Sessions des Plans an
+        diesem Tag zurück — mit Notiz und Beginn. ``False``: keine da (dann legt
+        `session_fuer` eine neue an); steht schon wieder eine da, bleibt es dabei."""
+        von, bis = tagesgrenzen(tag)
+        tage = (subject_id, plan_id, von.isoformat(), bis.isoformat())
+        filter_ = "subject_id = ? AND plan_id = ? AND started_at >= ? AND started_at < ?"
+        if self.con.execute(
+            f"SELECT 1 FROM session WHERE {filter_} AND deleted_at IS NULL", tage
+        ).fetchone():
+            return True
+        r = self.con.execute(
+            f"SELECT MAX(deleted_at) AS d FROM session WHERE {filter_} AND deleted_at IS NOT NULL",
+            tage,
+        ).fetchone()
+        if r is None or r["d"] is None:
+            return False
+        self.con.execute(
+            f"UPDATE session SET deleted_at = NULL WHERE {filter_} AND deleted_at = ?",
+            (*tage, r["d"]),
+        )
+        return True
+
     def session_laden(self, session_id: str) -> Session | None:
         r = self.con.execute("SELECT * FROM session WHERE id = ?", (session_id,)).fetchone()
         return self._session_zeile(r) if r else None

@@ -438,3 +438,28 @@ def test_plan_editor_pause_ohne_timer(umgebung) -> None:
     pause.on_change(type("E", (), {"control": pause})())
     gespeichert = state.plaene.laden(plan.id)
     assert gespeichert is not None and gespeichert.pause_ohne_timer is False
+
+
+def test_waehlen_kurz_nach_dem_timer_ende_traegt_ein() -> None:
+    """Durchsicht 18.10.: Ist der Timer schon durch (oder „Gemacht“ setzte ihn ans Ende),
+    der Takt hat es aber noch nicht gesehen, gilt die Übung als fertig — nicht als
+    „gewechselt“."""
+    from trainingsapp.core.plan_durchlauf import Schritt
+    from trainingsapp.devices.plan_ablauf import PlanAblaufBaustein
+
+    uhr = [0.0]
+    halten = TimerProfil(name="Halten", abschnitte=[Abschnitt("Halten", 10)])
+    teil = PlanAblaufBaustein(
+        "p", "Plan", [Schritt("ia", "ua", "A", profil=halten), Schritt("ib", "ub", "B")]
+    )
+    teil.uhr_uebernehmen(lambda: uhr[0])
+    teil.starten(0.0)
+    uhr[0] = 9.0
+    teil.takt(9.0)
+    teil.gemacht()  # der Timer springt ans Ende — der nächste Takt käme erst gleich
+    uhr[0] = 9.1
+    assert teil.waehlen("ib")
+    ereignisse = teil.takt(9.2)
+    enden = [x.daten.get("grund") for x in ereignisse if x.art == "uebung_ende"]
+    assert enden == ["fertig"] and teil.ergebnisse == {"ia": "fertig"}
+    assert not teil.unterbrochen and teil.schritt.item_id == "ib"

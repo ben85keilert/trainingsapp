@@ -374,3 +374,37 @@ def test_einheit_zeilen_fuehren_zu_ihrem_teil(page, state) -> None:
     )
     asyncio.run(zeile.on_click())
     assert page.routen == [f"/plan/{plan.id}/timer/ablauf"]
+
+
+def test_rueckgaengig_holt_dieselbe_session_und_eintraege_halten_den_plan(page, state) -> None:
+    """Durchsicht 18.10.: „Rückgängig“ nach dem X holt die Session mit ihrer Notiz zurück;
+    hat der Plan inzwischen Einträge, nimmt das X ihn nicht weg."""
+    plan = _plan(state, "kniebeuge", name="Sonntagsplan")
+    state.plaene.wochentage_setzen(plan.id, [(state.heute().weekday() + 1) % 7])
+    session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
+    state.sitzungen.notiz_setzen(session.id, "erst später")
+    ansicht = tagesansicht(page, state, state.heute())
+    (x,) = _symbole(ansicht, ft.Icons.CLOSE)
+    x.on_click()
+    assert plan.id not in state.sitzungen.plaene_am_tag(state.profil.id, state.heute())
+    page.dialoge[-1].on_action()  # Rückgängig
+    zurueck = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
+    assert zurueck.id == session.id and zurueck.note == "erst später"
+
+    ansicht = tagesansicht(page, state, state.heute())
+    (x,) = _symbole(ansicht, ft.Icons.CLOSE)
+    _eintragen(state, plan.id, "kniebeuge", {"reps": [10]})  # kam inzwischen dazu
+    x.on_click()
+    assert plan.id in state.sitzungen.plaene_am_tag(state.profil.id, state.heute())
+    assert "er bleibt" in _texte(page.dialoge[-1])[0]
+
+
+def test_weiter_zur_ersten_uebung_beginnt_oben(page, state) -> None:
+    from trainingsapp.ui.views.plan import plan_view
+
+    plan = _plan(state, "liegestuetzen", "kniebeuge")
+    route = f"/plan/{plan.id}"
+    state.scroll_offsets[route] = 800.0  # von früher
+    state.plan_ziel = plan.items[0].id
+    plan_view(page, state, state.plaene.laden(plan.id))
+    assert route not in state.scroll_offsets

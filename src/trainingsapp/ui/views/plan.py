@@ -1492,7 +1492,9 @@ def plan_view(
         )
     else:
         liste = ft.ListView(expand=True, controls=listeninhalt())
-        if ziel_index:
+        if ziel_index == 0:
+            state.scroll_offsets.pop(route, None)  # die erste steht oben, unter dem Kopf
+        elif ziel_index is not None:
             _zum_ziel(page, state, route, liste, ziel_index + 1)  # 0 ist der Kopf
     liste = scroll_merken(page, state, route, liste)
 

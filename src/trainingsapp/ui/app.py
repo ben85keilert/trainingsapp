@@ -539,7 +539,9 @@ def main(page: ft.Page) -> None:
         route = navigation.normal(page.route)
         if erster:
             ansichten = [bauen() for bauen in ebenen(route)]
-            if ansichten:
+            if ansichten and not navigation.ist_nachfahre(
+                route, navigation.normal(str(ansichten[-1].route))
+            ):
                 ansichten[-1].route = route
             state.navigation = [str(v.route) for v in ansichten]
             return ansichten
@@ -554,6 +556,8 @@ def main(page: ft.Page) -> None:
             if not bauer:
                 continue  # unbekannte ID (gelöscht) — die Route fällt aus dem Weg
             ansicht = bauer[-1]()
+            if navigation.ist_nachfahre(r, navigation.normal(str(ansicht.route))):
+                continue  # nur ein Vorfahr ließ sich bauen (das Blatt ist weg) — ebenso
             ansicht.route = r  # Zurück (`zurueck`, `zurueck_ziel`) liest die Route der Ansicht
             ansichten.append(ansicht)
             weg.append(r)

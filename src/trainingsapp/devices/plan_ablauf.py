@@ -171,10 +171,17 @@ class PlanAblaufBaustein:
         """
         if self._t0 is None or self.phase == FERTIG:
             return False
+        jetzt = self._uhr()
+        if self.phase == UEBUNG and self.timer is not None and self.timer.lauf.fertig:
+            # Der Timer ist schon durch (oder „Gemacht“ setzte ihn ans Ende), der Takt hat es
+            # nur noch nicht gesehen: erst das Ende auswerten — die Übung ist fertig und wird
+            # eingetragen, nicht „gewechselt“. Was dabei anfällt, holt der nächste Takt ab.
+            self._ausstehend = self.takt(jetzt)
+            if self.phase == FERTIG:
+                return False
         k = next((i for i, s in enumerate(self.schritte) if s.item_id == item_id), None)
         if k is None or not self.offen(item_id) or (self.phase == UEBUNG and k == self.k):
             return False
-        jetzt = self._uhr()
         if self.phase == UEBUNG:
             if self.timer is not None:
                 self._ausstehend += self.timer.beenden(jetzt)

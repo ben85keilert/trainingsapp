@@ -356,11 +356,19 @@ def tagesansicht(
         Plan“ holt ihn zurück (Ben, 18.10.2026: „Kann man ihn dann auch wieder herholen?“)."""
 
         def zurueckholen() -> None:
-            state.sitzungen.session_fuer(state.profil.id, plan.id, tag)
+            # Dieselbe Session wie vorher — mit Notiz und Beginn
+            if not state.sitzungen.wieder_in_tag(state.profil.id, plan.id, tag):
+                state.sitzungen.session_fuer(state.profil.id, plan.id, tag)
             auffrischen()
 
         def handler() -> None:
-            state.sitzungen.aus_tag_nehmen(state.profil.id, plan.id, tag)
+            if not state.sitzungen.aus_tag_nehmen(state.profil.id, plan.id, tag):
+                # Inzwischen kam ein Eintrag dazu (etwa aus einem Ablauf) — er bleibt
+                auffrischen()
+                page.show_dialog(
+                    ft.SnackBar(ft.Text(f"„{plan.name}“ hat heute schon Einträge — er bleibt."))
+                )
+                return
             auffrischen()
             page.show_dialog(
                 ft.SnackBar(

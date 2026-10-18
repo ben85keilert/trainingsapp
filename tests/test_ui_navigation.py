@@ -188,3 +188,33 @@ def test_tag_ansicht_bleibt_an_ihrem_datum(umgebung) -> None:
     assert seite.routen()[-2] == "/tag/2026-10-17"
     seite.zurueck()
     assert seite.routen() == ["/", "/tag/2026-10-17"]
+
+
+def test_neue_uebung_timer_editor_zurueck_ins_formular(umgebung) -> None:
+    """Durchsicht 18.10.: Aus dem Timer-Editor einer neuen Übung führt Zurück ins Formular
+    der jetzt gespeicherten Übung — nicht an ihm vorbei auf die Startseite."""
+    from trainingsapp.core.models import Exercise
+
+    seite, state = umgebung()
+    seite.gehe("/uebung/neu")
+    neu = Exercise(name="Neu")
+    state.uebungen.speichern(neu)
+    formular = f"/uebung/{neu.id}/bearbeiten"
+    # wie `uebung_bearbeiten.timer_editor` nach dem Speichern
+    assert state.navigation[-1:] == ["/uebung/neu"]
+    state.navigation[-1] = formular
+    seite.gehe(f"{formular}/timer/profil")
+    assert seite.routen() == ["/", formular, f"{formular}/timer/profil"]
+    seite.zurueck()
+    assert seite.routen() == ["/", formular]
+
+
+def test_nur_der_vorfahr_baubar_faellt_aus_dem_weg(umgebung) -> None:
+    """Eine Route, deren Blatt fehlt (Planübung gelöscht), stellt nicht den Plan ein
+    zweites Mal auf den Stapel."""
+    seite, state = umgebung()
+    plan = _plan(state)
+    seite.gehe(f"/plan/{plan.id}")
+    seite.gehe(f"/plan/{plan.id}/info/gibt-es-nicht")
+    assert seite.routen() == ["/", f"/plan/{plan.id}"]
+    assert state.navigation == [f"/plan/{plan.id}"]

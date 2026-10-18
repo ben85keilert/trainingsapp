@@ -76,7 +76,6 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
 from trainingsapp.ui.views.plan import auspraegung_vorgabe
 from trainingsapp.ui.views.plan_ablauf import plan_ablauf_route
-from trainingsapp.ui.views.uebungen import heute_trainieren
 
 WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 #: Die zwei Darstellungen (Ben, 18.10.2026: „A ist die Standardansicht“)
@@ -379,29 +378,52 @@ def tagesansicht(
         return handler
 
     def weiter(plan: Plan, item: PlanItem) -> Callable[[], Any]:
-        """„Weiter mit …“: den Plan öffnen, diese Übung aufgeklappt."""
+        """„Weiter mit …“: den Plan öffnen, bei dieser Übung (Ben, 18.10.2026: „nicht ganz
+        nach oben in den Plan“) — oben im Bild und aufgeklappt."""
 
         async def handler() -> None:
             state.plan_offen = item.id
+            state.plan_ziel = item.id
             await page.push_route(f"/plan/{plan.id}")
 
         return handler
 
-    def entferner(plan_id: str) -> Callable[[], None]:
-        def handler() -> None:
-            state.sitzungen.aus_tag_nehmen(state.profil.id, plan_id, tag)
+    def entferner(plan: Plan) -> Callable[[], None]:
+        """Das X: Der Plan ist nur für heute wieder weg — deaktiviert wird er nicht; „Anderen
+        Plan“ holt ihn zurück (Ben, 18.10.2026: „Kann man ihn dann auch wieder herholen?“)."""
+
+        def zurueckholen() -> None:
+            state.sitzungen.session_fuer(state.profil.id, plan.id, tag)
             auffrischen()
+
+        def handler() -> None:
+            state.sitzungen.aus_tag_nehmen(state.profil.id, plan.id, tag)
+            auffrischen()
+            page.show_dialog(
+                ft.SnackBar(
+                    ft.Text(f"„{plan.name}“ ist für heute weg — „Anderen Plan“ holt ihn zurück."),
+                    action="Rückgängig",
+                    on_action=zurueckholen,
+                )
+            )
 
         return handler
 
     def anderen_plan_waehlen() -> None:
+        """Ein Plan, der heute nicht ansteht, kommt auf „Heute“ — ohne gleich hineinzuspringen
+        (Ben, 18.10.2026: „erstmal den Plan wieder herstellen und noch nicht rein gehen“): Auf
+        der Karte wählt man dann „Start“ (mit Timern der Ablauf) oder „Übungen ansehen“."""
         nachher = Nachher()
 
-        def waehler(plan_id: str) -> Callable[[], None]:
-            trainieren = heute_trainieren(page, state, plan_id)
-
+        def waehler(plan: Plan) -> Callable[[], None]:
             def handler() -> None:
-                nachher.danach(trainieren)
+                state.sitzungen.session_fuer(state.profil.id, plan.id, tag)
+
+                def danach() -> None:
+                    auffrischen()
+                    page.show_dialog(ft.SnackBar(ft.Text(f"„{plan.name}“ steht jetzt an.")))
+
+                nachher.danach(danach)
                 schliessen(dialog)
 
             return handler
@@ -414,10 +436,10 @@ def tagesansicht(
                 spacing=0,
                 controls=[
                     ft.ListTile(
-                        leading=ft.Icon(ft.Icons.PLAY_ARROW),
+                        leading=ft.Icon(ft.Icons.PLAYLIST_ADD),
                         title=ft.Text(p.name),
                         subtitle=ft.Text(warum_nicht(p, tag), size=12),
-                        on_click=waehler(p.id),
+                        on_click=waehler(p),
                     )
                     for p in daten().andere
                 ],
@@ -574,20 +596,17 @@ def tagesansicht(
                 teile.append(f"begonnen um {_uhr(k.beginn)}")
         if k.zusaetzlich:
             teile.append("zusätzlich heute")
+        # Kein Pfeil mehr (Ben, 18.10.2026): „Start“, „Übungen ansehen“ und „Weiter“ führen
+        # schon in den Plan — ein dritter Weg dorthin war überflüssig
         rechts: list[ft.Control] = []
         if k.zusaetzlich and not k.eintraege:
             rechts.append(
                 ft.IconButton(
                     ft.Icons.CLOSE,
-                    tooltip="Für heute wieder entfernen",
-                    on_click=entferner(plan.id),
+                    tooltip="Für heute wieder entfernen — „Anderen Plan“ holt ihn zurück",
+                    on_click=entferner(plan),
                 )
             )
-        rechts.append(
-            ft.IconButton(
-                ft.Icons.CHEVRON_RIGHT, tooltip="Plan öffnen", on_click=oeffner(f"/plan/{plan.id}")
-            )
-        )
         inhalt: list[ft.Control] = [
             ft.Row(
                 vertical_alignment=ft.CrossAxisAlignment.START,

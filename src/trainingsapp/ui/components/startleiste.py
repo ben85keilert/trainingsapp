@@ -94,6 +94,40 @@ async def zur_einheit(page: Any, state: AppState) -> None:
         await page.push_route("/")
 
 
+def _oeffner(page: Any, state: AppState, teil: Any) -> Callable[[], Any] | None:
+    """Ein Tipp auf die Zeile eines Teils im Reiter „Einheit“: dorthin, wo man ihn bedient
+    (Ben, 18.10.2026: „Klick auf den Plan öffnet aber nicht das entsprechende Menü“) — der
+    Plan-Ablauf in seine Ablaufansicht, die HRV in den Reiter „Messung“
+    (`ui.einheit.teil_route`)."""
+    if teil.art == "hrv":
+
+        async def zur_messung() -> None:
+            state.reiter = "messung"
+            if getattr(page, "route", "/") == "/":
+                state.neu_zeichnen()
+            else:
+                await page.push_route("/")
+
+        return zur_messung
+    route = ablauf.teil_route(teil)
+    if route is None:
+        return None
+
+    async def oeffnen() -> None:
+        await page.push_route(route)
+
+    return oeffnen
+
+
+def _timer_oeffner(page: Any, e: Any) -> Callable[[], Any]:
+    """Der Timer der Einheit: gehört er zu einer Übung oder zum Plan-Ablauf, dorthin."""
+
+    async def oeffnen() -> None:
+        await page.push_route(ablauf.timer_route(e))
+
+    return oeffnen
+
+
 def _selbst_auffrischend(
     page: Any,
     state: AppState,
@@ -436,11 +470,14 @@ def _startkarte(page: Any, state: AppState, e: Any, box: ft.Container, stand: di
         text, grund, schrift = _marke(teil)
         status = ft.Text(teil.status(), size=12, opacity=0.75)
         status_texte.append(status)
+        oeffnen = _oeffner(page, state, teil)
         zeilen.append(
             ft.Container(
                 bgcolor=ft.Colors.SURFACE,
                 border_radius=12,
                 padding=ft.Padding.only(left=10, right=2, top=4, bottom=4),
+                ink=oeffnen is not None,
+                on_click=oeffnen,
                 content=ft.Row(
                     spacing=10,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -647,7 +684,8 @@ def _uebersicht(
             leiste.auffrischen()
 
         auffrischer.append(timer_auffrischen)
-        karten.append(
+        timer_karte = cast(
+            ft.Container,
             karte(
                 ft.Row(
                     spacing=8,
@@ -666,8 +704,12 @@ def _uebersicht(
                 abschnitt,
                 leiste.control,
                 abstand=6,
-            )
+            ),
         )
+        # Antippen: der Timer — bzw. die Übung oder der Ablauf, zu dem er gehört
+        timer_karte.ink = True
+        timer_karte.on_click = _timer_oeffner(page, e)
+        karten.append(timer_karte)
     eigener = e.teil("timer")
     if isinstance(eigener, TimerBaustein) and not eigener.lauf.fertig and len(e.teile) > 1:
         karten.append(karte(_bei_timer_ende(state, e, im_lauf=True), abstand=0))
@@ -682,22 +724,29 @@ def _uebersicht(
             wert.value = _live_wert(e, teil)
 
         auffrischer.append(wert_auffrischen)
+        oeffnen = _oeffner(page, state, teil)
         zeilen.append(
-            ft.Row(
-                spacing=10,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Icon(_symbol(teil), size=18),
-                    ft.Column(
-                        spacing=0,
-                        expand=True,
-                        tight=True,
-                        controls=[
-                            ft.Text(_teil_titel(teil), size=14, weight=ft.FontWeight.W_600),
-                            wert,
-                        ],
-                    ),
-                ],
+            ft.Container(
+                border_radius=10,
+                ink=oeffnen is not None,
+                on_click=oeffnen,
+                content=ft.Row(
+                    spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Icon(_symbol(teil), size=18),
+                        ft.Column(
+                            spacing=0,
+                            expand=True,
+                            tight=True,
+                            controls=[
+                                ft.Text(_teil_titel(teil), size=14, weight=ft.FontWeight.W_600),
+                                wert,
+                            ],
+                        ),
+                        *([ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5)] if oeffnen else []),
+                    ],
+                ),
             )
         )
     if zeilen:

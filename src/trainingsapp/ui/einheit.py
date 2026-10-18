@@ -473,6 +473,49 @@ def anhalten_oder_weiter(page: Any, state: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Wohin ein Tipp auf einen Teil führt
+# ---------------------------------------------------------------------------
+
+
+def teil_route(teil: Any) -> str | None:
+    """Wo man einen Teil bedient — ``None`` für die HRV: Sie hat den Reiter „Messung“.
+
+    Ben, 18.10.2026: „Klick auf den Plan öffnet aber nicht das entsprechende Menü“ — im
+    Reiter „Einheit“ führt jede Zeile dorthin, wo ihr Teil gestartet wird: der Plan-Ablauf
+    in seine Ablaufansicht, eine Übung in ihren Timer, das Training nach „Ausdauer“.
+
+    >>> from trainingsapp.core.plan_durchlauf import Schritt
+    >>> teil_route(PlanAblaufBaustein("p1", "Kräftigung", [Schritt("i1", "u1", "Planke")]))
+    '/plan/p1/timer/ablauf'
+    >>> from trainingsapp.devices.einheit import UebungKontext
+    >>> teil_route(UebungBaustein(UebungKontext("u1", "Planke", "p1", "i1")))
+    '/plan/p1/timer/uebung/u1/i1'
+    >>> teil_route(UebungBaustein(UebungKontext("u1", "Planke")))
+    '/training/u1/timer/uebung/u1'
+    >>> teil_route(StreckeBaustein(None, "laufen"))
+    '/ausdauer'
+    """
+    if isinstance(teil, PlanAblaufBaustein):
+        return f"/plan/{teil.plan_id}/timer/ablauf"
+    if isinstance(teil, UebungBaustein):
+        k = teil.kontext
+        if k.plan_id and k.item_id:
+            return f"/plan/{k.plan_id}/timer/uebung/{k.uebung_id}/{k.item_id}"
+        return f"/training/{k.uebung_id}/timer/uebung/{k.uebung_id}"
+    if isinstance(teil, StreckeBaustein):
+        return "/ausdauer"
+    if isinstance(teil, TimerBaustein):
+        return "/timer"
+    return None
+
+
+def timer_route(e: Einheitslauf) -> str:
+    """Wohin ein Tipp auf den Timer der Einheit führt: Gehört er zu einer Übung oder zum
+    Plan-Ablauf, dorthin (`teil_route`) — sonst zum Timer selbst."""
+    return teil_route(e.teil("plan")) or "/timer"
+
+
+# ---------------------------------------------------------------------------
 # Was die Leisten zeigen
 # ---------------------------------------------------------------------------
 
@@ -562,7 +605,9 @@ __all__ = [
     "melden",
     "stopp_vorgabe",
     "teil_bereitstellen",
+    "teil_route",
     "timer_bereitstellen",
+    "timer_route",
     "timer_text",
     "titel",
     "zuruecknehmen",

@@ -55,7 +55,7 @@ from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.parameter_wahl import parameter_wahl
 from trainingsapp.ui.components.spec_form import SpecForm
-from trainingsapp.ui.components.zurueck import zurueck_speichert
+from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.uebung_bearbeiten import chips_lesen
 
@@ -267,18 +267,24 @@ def plan_einstellen(
         state.plaene.eingabe_setzen(item.id, aktuell.input_mode, aktuell.quick, aktuell.felder)
         return None
 
+    async def zurueckgehen() -> None:
+        """Dorthin, woher man kam — der Plan-Editor oder die Infoseite der Übung (Ben,
+        18.10.2026: Zurück führt dorthin, woher man kam; `ui/navigation.py`)."""
+        ziel = zurueck_ziel(page, ansicht) if ansicht in page.views else basis
+        await page.push_route(ziel)
+
     async def speichern() -> None:
         if sichern() is None:
-            await page.push_route(basis)
+            await zurueckgehen()
 
     async def ziel_loeschen() -> None:
         aktuell = eingestellt()
         state.plaene.ziel_setzen(item.id, {})
         state.plaene.eingabe_setzen(item.id, aktuell.input_mode, aktuell.quick, aktuell.felder)
-        await page.push_route(basis)
+        await zurueckgehen()
 
     async def abbrechen() -> None:
-        await page.push_route(basis)
+        await zurueckgehen()
 
     async def als_standard_setzen() -> None:
         if form.pruefen():
@@ -290,12 +296,12 @@ def plan_einstellen(
         page.show_dialog(
             ft.SnackBar(ft.Text(f"Standard von „{uebung.name}“ übernommen — gilt für neue Pläne"))
         )
-        await page.push_route(basis)
+        await zurueckgehen()
 
     async def standard_uebernehmen() -> None:
         state.plaene.item_speichern(vom_standard(uebung, item))
         page.show_dialog(ft.SnackBar(ft.Text("Auf den Standard der Übung zurückgesetzt")))
-        await page.push_route(basis)
+        await zurueckgehen()
 
     zuruecksetzen_knopf.on_click = standard_uebernehmen
 
@@ -353,17 +359,15 @@ def plan_einstellen(
         ),
     ]
     anfang = eingestellt()
+    ansicht = ft.View(
+        route=f"{basis}/ziel/{item.id}",
+        appbar=ft.AppBar(title=ft.Text(f"Einstellen: {uebung.name}")),
+        scroll=ft.ScrollMode.AUTO,
+        padding=20,
+        controls=[sicher(ft.Column(spacing=16, controls=inhalt), expand=False)],
+    )
     return zurueck_speichert(
-        page,
-        ft.View(
-            route=f"{basis}/ziel/{item.id}",
-            appbar=ft.AppBar(title=ft.Text(f"Einstellen: {uebung.name}")),
-            scroll=ft.ScrollMode.AUTO,
-            padding=20,
-            controls=[sicher(ft.Column(spacing=16, controls=inhalt), expand=False)],
-        ),
-        geaendert=lambda: eingestellt() != anfang,
-        speichern=sichern,
+        page, ansicht, geaendert=lambda: eingestellt() != anfang, speichern=sichern
     )
 
 

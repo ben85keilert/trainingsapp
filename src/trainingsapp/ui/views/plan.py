@@ -53,11 +53,14 @@ Routenwechsel neu gebaut wird.
 Ein Eintrag (Gemacht, Chip, Zahlenfeld) baut dagegen nur die Blöcke in der
 bestehenden Liste neu (`auffrischen`) — so bleibt die Scrollposition, und man
 verliert in einem langen Plan nicht die Orientierung. Kommt man aus einem
-Formular zurück, stellt `scroll_merken` die Position wieder her.
+Formular zurück, stellt `scroll_merken` die Position wieder her. Kommt man über
+„Weiter“ von „Heute“, beginnt die Liste bei der nächsten offenen Übung
+(`AppState.plan_ziel`, Ben 18.10.2026).
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from collections.abc import Callable
 from dataclasses import replace
@@ -103,6 +106,7 @@ from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import ohne_auto_update, sicher
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.werte import wert_leiste
+from trainingsapp.ui.components.zurueck import zurueck_ziel
 from trainingsapp.ui.state import AUFKLAPPEN, PLAN_DARSTELLUNGEN, UMSCHALTEN, AppState
 from trainingsapp.ui.views.plan_ablauf import plan_timer_karte
 from trainingsapp.ui.views.timer import timer_knopf
@@ -233,6 +237,29 @@ def einzel_plan(uebung: Exercise) -> Plan:
     )
 
 
+def _zum_ziel(page: Any, state: AppState, route: str, liste: ft.ListView, index: int) -> None:
+    """Die Liste beginnt bei ``liste.controls[index]`` statt oben (Ben, 18.10.2026: „Weiter“
+    setzt die Ansicht zur nächsten Übung, „nicht ganz nach oben in den Plan“).
+
+    Flutter rollt per ``ScrollKey`` dorthin (`Scrollable.ensureVisible`: Block oben im Bild).
+    Das geht nur, wenn die Liste alle Blöcke baut, nicht erst beim Hinscrollen. Der Schlüssel
+    ist je Aufbau neu: Gleiche Schlüssel an ersetzten Blöcken friert Flet 1.0 ein
+    (`auffrischen`, cb06ee9).
+    """
+    state.scroll_offsets.pop(route, None)  # die gemerkte Stelle gilt diesmal nicht
+    liste.build_controls_on_demand = False
+    schluessel: Any = ft.ScrollKey(f"plan-ziel-{state.route_nummer}-{index}")  # type: ignore[call-arg]
+    liste.controls[index].key = schluessel
+
+    async def rollen() -> None:
+        await asyncio.sleep(0.1)  # erst nach dem Aufbau hängt der Block in Flutter
+        with contextlib.suppress(Exception):  # Ansicht schon wieder ersetzt
+            await liste.scroll_to(scroll_key=schluessel, duration=0)
+
+    if hasattr(page, "run_task"):
+        page.run_task(rollen)
+
+
 def plan_view(
     page: ft.Page,
     state: AppState,
@@ -257,6 +284,8 @@ def plan_view(
         route = f"/plan/{plan.id}"
     #: In welcher Session die Einträge landen — ``None`` = die planlose des Tages
     sitzungsplan = None if einzel else plan.id
+    #: die fertige Ansicht — „Fertig“ fragt, was unter ihr liegt
+    ansicht_halter: list[ft.View] = []
     heute = state.heute()
     anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute)
     tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute)]
@@ -270,6 +299,13 @@ def plan_view(
     # Aufklappen: Ist keine Übung dieses Plans offen, die erste, die heute noch fehlt
     if state.plan_offen not in {item.id for item in plan.items}:
         state.plan_offen = next((item.id for item in plan.items if item.id not in fertig_ids), None)
+    # „Weiter“ auf „Heute“: einmal bei dieser Planübung beginnen (`_zum_ziel`)
+    ziel_index = (
+        next((i for i, item in enumerate(plan.items) if item.id == state.plan_ziel), None)
+        if not bearbeiten
+        else None
+    )
+    state.plan_ziel = None
 
     # -- Handler ---------------------------------------------------------------
 
@@ -523,7 +559,14 @@ def plan_view(
         ordnen(verschoben([i.id for i in plan.items], e.old_index, e.new_index))
 
     async def modus_wechseln() -> None:
-        await page.push_route(fertig if bearbeiten else f"/plan/{plan.id}/bearbeiten")
+        if not bearbeiten:
+            await page.push_route(f"/plan/{plan.id}/bearbeiten")
+            return
+        # „Fertig“: dorthin, woher man kam — aus der Übung oder dem Kurs wieder dorthin,
+        # nicht immer auf „Heute“ (`ui/navigation.py`); ohne Stapel (Tests) ``fertig``
+        ansicht = ansicht_halter[0] if ansicht_halter else None
+        ziel = zurueck_ziel(page, ansicht) if ansicht in page.views else fertig
+        await page.push_route(ziel)
 
     def aktiv_wechseln(e: ft.Event[ft.Switch]) -> None:
         state.plaene.aktiv_setzen(plan.id, bool(e.control.value))
@@ -1443,9 +1486,11 @@ def plan_view(
         )
     else:
         liste = ft.ListView(expand=True, controls=listeninhalt())
+        if ziel_index:
+            _zum_ziel(page, state, route, liste, ziel_index + 1)  # 0 ist der Kopf
     liste = scroll_merken(page, state, route, liste)
 
-    return ft.View(
+    ansicht = ft.View(
         route=route,
         appbar=ft.AppBar(
             title=ft.Text(plan.name),
@@ -1464,6 +1509,8 @@ def plan_view(
         padding=0,
         controls=[sicher(ft.Column(expand=True, spacing=0, controls=[liste]))],
     )
+    ansicht_halter.append(ansicht)
+    return ansicht
 
 
 __all__ = ["auspraegung_vorgabe", "einzel_plan", "hauptfeld", "plan_view", "ziel_text"]

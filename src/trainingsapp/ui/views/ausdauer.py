@@ -377,7 +377,10 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
                 page.show_dialog(ft.SnackBar(ft.Text(e.warnung or "Training nicht gespeichert.")))
                 return
             page.show_dialog(ft.SnackBar(ft.Text("Training gespeichert — auch im Tagebuch.")))
-            await page.push_route(f"/ausdauer/{strecke.id}")
+            # Die Auswertung tritt an die Stelle des Trainings — Zurück führt nicht wieder
+            # auf „Training starten“ (`ui/navigation.py`)
+            state.ersetzen_bei = f"/ausdauer/{strecke.id}"
+            await page.push_route(state.ersetzen_bei)
 
         dialog = ft.AlertDialog(
             modal=True,

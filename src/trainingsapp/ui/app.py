@@ -38,13 +38,22 @@ Routen:
     <jede Route>/timer/signale      Signale des Timers (Ton, Vibration …)
 
 Der Routen-Handler baut bei jedem Wechsel den **ganzen** Stapel neu auf
-(L03). Dadurch funktioniert der Zurück-Knopf auch nach einem Neustart auf
-einer tiefen Route. Unbekannte IDs enden beim letzten gültigen Element.
+(L03) — seit 18.10.2026 aber nach dem **Weg**, den man ging, nicht allein nach
+der Route (`ui/navigation.py`, Ben: „Man klickt wo rein, geht zurück und landet
+ganz wo anders“): Je Route im gemerkten Weg (`AppState.navigation`) entsteht nur
+deren oberste Ansicht, Zurück führt so dorthin, woher man kam. Nur der erste
+Aufbau (Start auf einer tiefen Route) folgt der Route allein — dann funktioniert
+der Zurück-Knopf auch nach einem Neustart. Unbekannte IDs enden beim letzten
+gültigen Element bzw. fallen aus dem Weg.
+
+Auf der Hauptansicht minimiert Zurück die App nicht: Ein anderer Reiter geht
+zu „Heute“, auf „Heute“ bleibt alles, wie es ist (Ben, 18.10.2026).
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import date
 from typing import Any
@@ -53,7 +62,7 @@ import flet as ft
 
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
-from trainingsapp.ui import ausrichtung
+from trainingsapp.ui import ausrichtung, navigation
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.dialoge import dialog_offen
 from trainingsapp.ui.components.startleiste import (
@@ -149,12 +158,25 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
             return messung(page, state)
         return verlauf(page, state)
 
-    def wechseln(e: ft.Event[ft.NavigationBar]) -> None:
-        state.reiter = schluessel[e.control.selected_index]
+    def reiter_zeigen(reiter: str) -> None:
+        state.reiter = reiter
         koerper.content = inhalt()
         hauptansicht_aktualisieren()
         leiste_auffrischen(state)  # auf „Heute“ steht die Einheit im eigenen Reiter
         page.update()
+
+    def wechseln(e: ft.Event[ft.NavigationBar]) -> None:
+        reiter_zeigen(schluessel[e.control.selected_index])
+
+    async def zurueck_auf_der_startseite(_e: object = None) -> None:
+        """Die Zurück-Taste auf der Startseite minimiert die App nicht (Ben, 18.10.2026:
+        „soll die Anwendung einfach offen bleiben“): Auf einem anderen Reiter geht es zu
+        „Heute“, auf „Heute“ bleibt alles, wie es ist. Flutter fragt vor jedem Zurück
+        (``can_pop=False``, `components/zurueck.py`) — die Antwort ist immer nein."""
+        await ansicht.confirm_pop(False)
+        if state.reiter != "heute":
+            leiste.selected_index = schluessel.index("heute")
+            reiter_zeigen("heute")
 
     async def zu_einstellungen() -> None:
         await page.push_route("/einstellungen")
@@ -163,6 +185,13 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
         await page.push_route("/uebung/neu")
 
     koerper = ft.Container(expand=True, content=inhalt())
+    leiste = ft.NavigationBar(
+        selected_index=schluessel.index(state.reiter),
+        on_change=wechseln,
+        destinations=[
+            ft.NavigationBarDestination(label=label, icon=icon) for _, label, icon in reiter
+        ],
+    )
 
     async def zu_updates() -> None:
         await page.push_route(UPDATES_ROUTE)
@@ -205,14 +234,10 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
         ),
         # Die Leiste gehört der View, nicht dem Inhalt: So setzt Flutter den
         # runden Knopf darüber und hält beides aus der Android-Systemleiste.
-        navigation_bar=ft.NavigationBar(
-            selected_index=schluessel.index(state.reiter),
-            on_change=wechseln,
-            destinations=[
-                ft.NavigationBarDestination(label=label, icon=icon) for _, label, icon in reiter
-            ],
-        ),
+        navigation_bar=leiste,
         controls=[*label, koerper],
+        can_pop=False,
+        on_confirm_pop=zurueck_auf_der_startseite,
     )
 
     def hauptansicht_aktualisieren() -> None:
@@ -348,6 +373,12 @@ def main(page: ft.Page) -> None:
         page.services.append(state.ton)
         page.run_task(toene_laden, state)
 
+    #: Die Bauer der Ansichten, die `stapel` und seine Helfer für eine Route ablegen
+    ablage: list[Callable[[], ft.View]] = []
+
+    def ablegen(bauer: Callable[[], ft.View]) -> None:
+        ablage.append(bauer)
+
     def planuebung(teile: list[str], index: int) -> tuple[PlanItem, Exercise] | None:
         if len(teile) <= index:
             return None
@@ -357,11 +388,11 @@ def main(page: ft.Page) -> None:
 
     def bearbeiten_routen(plan: Plan, basis: str, fertig: str, rest: list[str]) -> None:
         """Bearbeiten eines Plans — unter `/plaene/<id>` oder `/plan/<id>/bearbeiten`."""
-        page.views.append(plan_view(page, state, plan, bearbeiten=True, basis=basis, fertig=fertig))
+        ablegen(lambda: plan_view(page, state, plan, bearbeiten=True, basis=basis, fertig=fertig))
         if rest[:1] == ["hinzufuegen"]:
-            page.views.append(plan_hinzufuegen_view(page, state, plan, basis=basis))
+            ablegen(lambda: plan_hinzufuegen_view(page, state, plan, basis=basis))
         elif rest[:1] == ["ziel"] and (paar := planuebung(rest, 1)) is not None:
-            page.views.append(plan_einstellen(page, state, plan, *paar, basis=basis))
+            ablegen(lambda: plan_einstellen(page, state, plan, *paar, basis=basis))
 
     def plan_routen(teile: list[str]) -> None:
         plan = state.plaene.laden(teile[1])
@@ -370,15 +401,13 @@ def main(page: ft.Page) -> None:
         if teile[0] == "plaene":  # aus der Planverwaltung: nur bearbeiten
             bearbeiten_routen(plan, f"/plaene/{plan.id}", "/", teile[2:])
             return
-        page.views.append(plan_view(page, state, plan))  # üben
+        ablegen(lambda: plan_view(page, state, plan))  # üben
         if teile[2:3] == ["bearbeiten"]:
             basis = f"/plan/{plan.id}/bearbeiten"
             bearbeiten_routen(plan, basis, f"/plan/{plan.id}", teile[3:])
         elif teile[2:3] == ["info"] and (paar := planuebung(teile, 3)) is not None:
             item, uebung = paar
-            page.views.append(
-                plan_info_view(page, state, f"/plan/{plan.id}", uebung, browser, item)
-            )
+            ablegen(lambda: plan_info_view(page, state, f"/plan/{plan.id}", uebung, browser, item))
         elif teile[2:3] == ["eintrag"]:
             eintrag_unter(f"/plan/{plan.id}", teile[3:])
         elif teile[2:3] == ["leistungen"]:
@@ -392,7 +421,7 @@ def main(page: ft.Page) -> None:
         if uebung is not None:
             route = f"{basis}/leistungen/{uebung.id}"
             nachtragen = nachtragen_route(basis, uebung.id) if vom_tag else None
-            page.views.append(leistungen_view(page, state, route, uebung, tag, nachtragen))
+            ablegen(lambda: leistungen_view(page, state, route, uebung, tag, nachtragen))
 
     def nachtragen_unter(basis: str, tag: date, rest: list[str]) -> None:
         """Nachtragen über dem Tag (`views/nachtragen.py`) — nicht für die Zukunft."""
@@ -401,16 +430,16 @@ def main(page: ft.Page) -> None:
             return
         plan_id = rest[1] if len(rest) > 1 else None
         route = nachtragen_route(basis, uebung.id, plan_id)
-        page.views.append(nachtragen_view(page, state, route, tag, uebung, plan_id))
+        ablegen(lambda: nachtragen_view(page, state, route, tag, uebung, plan_id))
 
     def eintrag_unter(basis: str, rest: list[str]) -> None:
         """Ein Eintrag über einer Übungsansicht — Zurück führt wieder dorthin."""
         eintrag = state.sitzungen.eintrag_laden(rest[0]) if rest else None
         if eintrag is None:
             return
-        page.views.append(eintrag_view(page, state, eintrag, basis))
+        ablegen(lambda: eintrag_view(page, state, eintrag, basis))
         if rest[1:2] == ["korrigieren"]:
-            page.views.append(formular_korrektur(page, state, eintrag, basis))
+            ablegen(lambda: formular_korrektur(page, state, eintrag, basis))
 
     def uebung_timer_routen(basis: str, rest: list[str]) -> None:
         """Der Timer einer Übung (Ben, 17.10.2026) — ``…/timer/uebung/<Übung>[/<Planübung>]``
@@ -421,11 +450,18 @@ def main(page: ft.Page) -> None:
         bearbeiten = rest.index("bearbeiten") if "bearbeiten" in rest else len(rest)
         item = state.plaene.item_laden(rest[1]) if bearbeiten > 1 else None
         plan = state.plaene.laden(item.plan_id) if item is not None else None
-        page.views.append(uebung_timer_view(page, state, basis, uebung, plan, item))
+        ablegen(lambda: uebung_timer_view(page, state, basis, uebung, plan, item))
         if bearbeiten < len(rest):  # …/bearbeiten[/<Profil>]: der Editor, gespeichert dort
             profil_id = rest[bearbeiten + 1] if len(rest) > bearbeiten + 1 else None
-            ziel = uebung_profilziel(state, basis, uebung, plan, item)
-            page.views.append(timer_bearbeiten_view(page, state, profil_id, basis, ziel))
+            ablegen(
+                lambda: timer_bearbeiten_view(
+                    page,
+                    state,
+                    profil_id,
+                    basis,
+                    uebung_profilziel(state, basis, uebung, plan, item),
+                )
+            )
 
     def formular_profil(basis: str, unten: list[str], rest: list[str]) -> None:
         """Der Profil-Editor über dem Übungsformular (Ben, 17.10.2026) —
@@ -436,29 +472,90 @@ def main(page: ft.Page) -> None:
         uebung = state.uebungen.laden(unten[1])
         if uebung is None:
             return
-        ziel = formular_profilziel(state, basis, uebung)
-        page.views.append(
-            timer_bearbeiten_view(page, state, rest[0] if rest else None, basis, ziel)
+        profil_id = rest[0] if rest else None
+        ablegen(
+            lambda: timer_bearbeiten_view(
+                page, state, profil_id, basis, formular_profilziel(state, basis, uebung)
+            )
         )
 
     def paket_routen(basis: str, rest: list[str]) -> None:
         """Der Paketmanager — aus dem Katalog (`/pakete`) oder den Einstellungen."""
-        page.views.append(pakete_view(page, state, basis))
+        ablegen(lambda: pakete_view(page, state, basis))
         if rest[:1] == ["export"]:
             auswahl = rest[1] if len(rest) > 1 else None
-            page.views.append(paket_export_view(page, state, basis, auswahl))
+            ablegen(lambda: paket_export_view(page, state, basis, auswahl))
         elif rest and (paket := state.pakete.laden(rest[0])) is not None and not paket.entfernt:
-            page.views.append(paket_view(page, state, basis, paket))  # auch deaktivierte
+            ablegen(lambda: paket_view(page, state, basis, paket))  # auch deaktivierte
 
     def eintrag_routen(teile: list[str]) -> None:
         eintrag = state.sitzungen.eintrag_laden(teile[1])
         if eintrag is None:
             return
         tag = lokaler_tag(eintrag.started_at) if eintrag.started_at else state.heute()
-        page.views.append(tag_view(page, state, tag))
-        page.views.append(eintrag_view(page, state, eintrag))
+        ablegen(lambda: tag_view(page, state, tag))
+        ablegen(lambda: eintrag_view(page, state, eintrag))
         if teile[2:3] == ["korrigieren"]:
-            page.views.append(formular_korrektur(page, state, eintrag))
+            ablegen(lambda: formular_korrektur(page, state, eintrag))
+
+    def ebenen(route: str) -> list[Callable[[], ft.View]]:
+        """Die Ansichten über der Hauptansicht, die ``route`` allein ergibt (hierarchisch:
+        ``/plan/x/timer/ablauf`` = Plan, Timer, Ablauf) — als Bauer, damit nur entsteht,
+        was der Stapel braucht. Unbekannte IDs enden beim letzten gültigen Element."""
+        ablage.clear()
+        teile = navigation.teile(route)  # "/plan/abc" → ["plan", "abc"]
+        # Der Timer legt sich über jede Ansicht: erst deren Stapel, dann er.
+        if "timer" in teile:
+            i = teile.index("timer")
+            stapel(teile[:i])
+            basis = "/" + "/".join(teile[:i])
+            if teile[i + 1 : i + 2] == ["uebung"]:
+                uebung_timer_routen(basis, teile[i + 2 :])
+            elif teile[i + 1 : i + 2] == ["profil"]:
+                formular_profil(basis, teile[:i], teile[i + 2 :])
+            else:
+                ablegen(lambda: timer_view(page, state, basis))
+                if teile[i + 1 : i + 2] == ["bearbeiten"]:
+                    profil_id = teile[i + 2] if len(teile) > i + 2 else None
+                    ablegen(lambda: timer_bearbeiten_view(page, state, profil_id, basis))
+                elif teile[i + 1 : i + 2] == ["signale"]:
+                    ablegen(lambda: timer_signale_view(page, state, basis))
+                elif teile[i + 1 : i + 2] == ["ablauf"] and teile[:1] == ["plan"] and i == 2:
+                    # Der Plan als Ablauf — aus dem Timer des Plans (Ben, 17.10.2026)
+                    if (plan := state.plaene.laden(teile[1])) is not None:
+                        ablegen(lambda: plan_ablauf_view(page, state, basis, plan))
+        else:
+            stapel(teile)
+        return list(ablage)
+
+    def ansichten_bauen(erster: bool) -> list[ft.View]:
+        """Die Ansichten über der Hauptansicht (Ben, 18.10.2026: Zurück führt dorthin, woher
+        man kam — `ui/navigation.py`). Beim ersten Aufbau aus der Route allein, damit Zurück
+        auch nach einem Start auf einer tiefen Route geht; danach je Route des gemerkten
+        Wegs (`AppState.navigation`) nur deren oberste Ansicht."""
+        route = navigation.normal(page.route)
+        if erster:
+            ansichten = [bauen() for bauen in ebenen(route)]
+            if ansichten:
+                ansichten[-1].route = route
+            state.navigation = [str(v.route) for v in ansichten]
+            return ansichten
+        oben = state.navigation[-1] if state.navigation else "/"
+        ersetzen = state.ersetzen_bei is not None and navigation.normal(state.ersetzen_bei) == route
+        if ersetzen or route != oben:
+            state.ersetzen_bei = None  # gilt nur für den nächsten Wechsel
+        ansichten = []
+        weg: list[str] = []
+        for r in navigation.naechster_stapel(state.navigation, route, ersetzen=ersetzen):
+            bauer = ebenen(r)
+            if not bauer:
+                continue  # unbekannte ID (gelöscht) — die Route fällt aus dem Weg
+            ansicht = bauer[-1]()
+            ansicht.route = r  # Zurück (`zurueck`, `zurueck_ziel`) liest die Route der Ansicht
+            ansichten.append(ansicht)
+            weg.append(r)
+        state.navigation = weg
+        return ansichten
 
     #: Route des zuletzt gebauten Stapels; ob ein aufgeschobener Neuaufbau wartet
     gebaut: dict[str, Any] = {"route": None, "nachholen": False}
@@ -483,6 +580,7 @@ def main(page: ft.Page) -> None:
                 gebaut["nachholen"] = True
                 page.run_task(nachholen)
             return
+        erster = gebaut["route"] is None
         gebaut["route"] = page.route
         state.route_nummer += 1
         state.timer_beobachter.pop("ansicht", None)  # die Timer-Ansicht trägt sich neu ein
@@ -490,29 +588,7 @@ def main(page: ft.Page) -> None:
         darstellung = darstellung_anwenden()
         page.views.clear()
         page.views.append(hauptansicht(page, state))
-        teile = [t for t in page.route.split("/") if t]  # "/plan/abc" → ["plan", "abc"]
-        # Der Timer legt sich über jede Ansicht: erst deren Stapel, dann er.
-        if "timer" in teile:
-            i = teile.index("timer")
-            stapel(teile[:i])
-            basis = "/" + "/".join(teile[:i])
-            if teile[i + 1 : i + 2] == ["uebung"]:
-                uebung_timer_routen(basis, teile[i + 2 :])
-            elif teile[i + 1 : i + 2] == ["profil"]:
-                formular_profil(basis, teile[:i], teile[i + 2 :])
-            else:
-                page.views.append(timer_view(page, state, basis))
-                if teile[i + 1 : i + 2] == ["bearbeiten"]:
-                    profil_id = teile[i + 2] if len(teile) > i + 2 else None
-                    page.views.append(timer_bearbeiten_view(page, state, profil_id, basis))
-                elif teile[i + 1 : i + 2] == ["signale"]:
-                    page.views.append(timer_signale_view(page, state, basis))
-                elif teile[i + 1 : i + 2] == ["ablauf"] and teile[:1] == ["plan"] and i == 2:
-                    # Der Plan als Ablauf — aus dem Timer des Plans (Ben, 17.10.2026)
-                    if (plan := state.plaene.laden(teile[1])) is not None:
-                        page.views.append(plan_ablauf_view(page, state, basis, plan))
-        else:
-            stapel(teile)
+        page.views.extend(ansichten_bauen(erster))
         # Info- bzw. Laufleiste einer Einheit unter der Titelleiste der obersten Ansicht
         # (Ben, 17.10.2026) — ohne Einheit bleibt jede Ansicht, wie sie ist; auf „Heute“
         # steht die Einheit im eigenen Reiter
@@ -533,60 +609,61 @@ def main(page: ft.Page) -> None:
     page.on_resize = groesse_geaendert
 
     def stapel(teile: list[str]) -> None:
-        """Die Ansichten über der Hauptansicht für die Routenteile."""
+        """Legt die Bauer der Ansichten über der Hauptansicht für die Routenteile ab."""
         if teile[:1] == ["einstellungen"]:
-            page.views.append(einstellungen(page, state, browser))
+            ablegen(lambda: einstellungen(page, state, browser))
             if teile[1:2] == ["hrv"]:
-                page.views.append(einstellungen_hrv(page, state))
+                ablegen(lambda: einstellungen_hrv(page, state))
             elif teile[1:2] == ["profile"]:
-                page.views.append(profile_view(page, state))
+                ablegen(lambda: profile_view(page, state))
             elif teile[1:2] == ["tags"]:
-                page.views.append(einstellungen_tags_view(page, state))
+                ablegen(lambda: einstellungen_tags_view(page, state))
             elif teile[1:2] == ["pakete"]:
                 paket_routen("/einstellungen/pakete", teile[2:])
             elif teile[1:2] == ["gps-test"]:
-                page.views.append(gps_test_view(page, state))
+                ablegen(lambda: gps_test_view(page, state))
             elif teile[1:2] == ["updates"]:
-                page.views.append(updates_view(page, state, browser))
+                ablegen(lambda: updates_view(page, state, browser))
         elif teile[:1] == ["pakete"]:
             paket_routen("/pakete", teile[1:])
         elif teile[:1] == ["archiv"]:
-            page.views.append(archiv_view(page, state))
+            ablegen(lambda: archiv_view(page, state))
         elif teile[:1] == ["papierkorb"]:
-            page.views.append(papierkorb_view(page, state))
+            ablegen(lambda: papierkorb_view(page, state))
         elif teile[:1] == ["verlauf"] and len(teile) >= 2:
-            page.views.append(verlauf_kachel_view(page, state, teile[1]))
+            ablegen(lambda: verlauf_kachel_view(page, state, teile[1]))
         elif teile[:1] == ["uebung"] and len(teile) >= 2:
             if teile[1] == "neu":
-                page.views.append(uebung_bearbeiten(page, state, None))
+                ablegen(lambda: uebung_bearbeiten(page, state, None))
             elif (uebung := state.uebungen.laden(teile[1])) is not None:
-                page.views.append(uebung_detail(page, state, uebung, browser))
+                gefunden = uebung  # fest für die Bauer (mypy verengt nicht in Lambdas)
+                ablegen(lambda: uebung_detail(page, state, gefunden, browser))
                 if teile[2:] == ["bearbeiten"]:
-                    page.views.append(uebung_bearbeiten(page, state, uebung))
+                    ablegen(lambda: uebung_bearbeiten(page, state, gefunden))
         elif teile[:1] in (["plan"], ["plaene"]) and len(teile) >= 2:
             plan_routen(teile)
         elif teile[:1] == ["kurse"] and len(teile) >= 2:
             if (kurs := state.kurse.laden(teile[1])) is not None:
-                page.views.append(kurs_view(page, state, kurs))
+                ablegen(lambda: kurs_view(page, state, kurs))
                 if len(teile) >= 3 and (kapitel := kurs.kapitel_mit(teile[2])) is not None:
-                    page.views.append(kapitel_view(page, state, kurs, kapitel, browser))
+                    ablegen(lambda: kapitel_view(page, state, kurs, kapitel, browser))
         elif teile[:1] == ["live"]:
-            page.views.append(live_vollbild_view(page, state))
+            ablegen(lambda: live_vollbild_view(page, state))
         elif teile[:1] == ["ausdauer"]:
             if len(teile) == 1:
-                page.views.append(ausdauer_view(page, state))
+                ablegen(lambda: ausdauer_view(page, state))
             elif (strecke := state.strecken.laden(teile[1])) is not None:
-                page.views.append(ausdauer_detail_view(page, state, strecke))
+                ablegen(lambda: ausdauer_detail_view(page, state, strecke))
         elif teile[:1] == ["messung"] and len(teile) >= 2:
             if (aufzeichnung := state.hrv.laden(teile[1])) is not None:
-                page.views.append(messung_detail_view(page, state, aufzeichnung))
+                ablegen(lambda: messung_detail_view(page, state, aufzeichnung))
         elif teile[:1] == ["training"] and len(teile) >= 2:
             if (uebung := state.uebungen.laden(teile[1])) is not None:
                 einzel = einzel_plan(uebung)
-                page.views.append(plan_view(page, state, einzel, einzel=True))
+                ablegen(lambda: plan_view(page, state, einzel, einzel=True))
                 basis = f"/training/{uebung.id}"
                 if teile[2:3] == ["info"]:
-                    page.views.append(plan_info_view(page, state, basis, uebung, browser))
+                    ablegen(lambda: plan_info_view(page, state, basis, uebung, browser))
                 elif teile[2:3] == ["eintrag"]:
                     eintrag_unter(basis, teile[3:])
                 elif teile[2:3] == ["leistungen"]:
@@ -594,7 +671,7 @@ def main(page: ft.Page) -> None:
         elif teile[:1] == ["tag"] and len(teile) >= 2:
             with suppress(ValueError):  # kein Datum → Hauptansicht
                 tag = date.fromisoformat(teile[1])
-                page.views.append(tag_view(page, state, tag))
+                ablegen(lambda: tag_view(page, state, tag))
                 basis = f"/tag/{tag.isoformat()}"
                 if teile[2:3] == ["leistungen"]:
                     leistungen_unter(basis, teile[3:], tag, vom_tag=True)

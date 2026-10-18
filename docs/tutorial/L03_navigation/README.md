@@ -312,6 +312,19 @@ aus einem Lambda oder einem synchronen Handler heraus startet man sie mit
 Weg), Detailansichten über Routen (Stapel). So funktioniert die
 Zurück-Taste auf Android richtig.
 
+> **Nachtrag (18.10.2026): Was die App inzwischen anders macht.** Ein Stapel, der
+> nur aus der Route entsteht, kennt nur die *Hierarchie* der Route, nicht den Weg:
+> Wer im Verlauf eine Übung öffnet und von dort einen Tag (`/tag/2026-10-17`),
+> landet mit Zurück auf der Hauptansicht — `/tag/…` liegt laut Route direkt über
+> ihr. Umgekehrt baut `/plan/x/timer/ablauf` immer Plan und Timer darunter, auch
+> wenn man den Ablauf direkt von „Heute“ aus öffnete; dann braucht es dreimal
+> Zurück. Die App merkt sich darum den Weg — die Routen in der Reihenfolge, in
+> der man sie öffnete — und baut je Route nur deren oberste Ansicht
+> (`src/trainingsapp/ui/navigation.py`, Regeln mit Beispielen im Docstring). Der
+> Grundgedanke dieser Lektion bleibt: Der Stapel wird bei jedem Wechsel komplett
+> neu gebaut, aus einer Liste von Routen statt aus einer einzigen. Beim Start
+> gilt weiterhin die Route allein.
+
 ---
 
 ## 2. Zustand gehört nicht in die Oberfläche

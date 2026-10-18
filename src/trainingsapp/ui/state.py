@@ -194,12 +194,21 @@ class AppState:
     #: Zählt jeden Routenwechsel — verzögerte Rechnungen einer verlassenen Ansicht
     #: erkennen daran, dass sie nicht mehr gebraucht werden
     route_nummer: int = 0
+    #: Der Weg über der Hauptansicht — die Routen in der Reihenfolge, in der man sie öffnete
+    #: (Ben, 18.10.2026: Zurück führt dorthin, woher man kam; `ui/navigation.py`)
+    navigation: list[str] = field(default_factory=list)
+    #: Diese Route ersetzt beim nächsten Wechsel die oberste, statt dazuzukommen (Training
+    #: beendet → Auswertung, die nächste Übung im Timer) — gilt nur für genau diese Route
+    ersetzen_bei: str | None = None
     #: Planansicht: je Planübung der gewählte Parameter („reps", „hold" …) und
     #: die gewählten Ausprägungen ({"angle": 45}) — nur für diese Sitzung
     parameter_wahl: dict[str, str] = field(default_factory=dict)
     auspraegung_wahl: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: Darstellung „Aufklappen": die Planübung, deren Eingabe offen ist
     plan_offen: str | None = None
+    #: „Weiter“ auf „Heute“ (Ben, 18.10.2026): die Planübung, bei der der Plan beim
+    #: nächsten Öffnen steht — einmal, dann gilt wieder die gemerkte Scrollposition
+    plan_ziel: str | None = None
     #: Laufende HRV-Messung — lebt hier, nicht in der Ansicht, damit sie den
     #: Reiterwechsel überlebt (L03). Typ: `devices.messlauf.Messlauf`.
     messlauf: Any = None

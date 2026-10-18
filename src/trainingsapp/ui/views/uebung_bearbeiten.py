@@ -564,7 +564,12 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         if sichern() is not None:
             return
         formular = f"/uebung/{gespeichert['id']}/bearbeiten"
-        await page.push_route(formular_profil_route(formular, profil_id))
+        ziel = formular_profil_route(formular, profil_id)
+        if uebung is None:
+            # Die neue Übung ist jetzt gespeichert: „Neue Übung“ darunter gilt nicht mehr —
+            # sonst öffnete Zurück ein leeres Formular (`ui/navigation.py`)
+            state.ersetzen_bei = ziel
+        await page.push_route(ziel)
 
     def timer_bearbeiter(profil_id: str) -> Callable[[], Any]:
         async def handler() -> None:

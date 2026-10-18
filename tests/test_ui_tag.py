@@ -287,3 +287,84 @@ def test_runder_knopf_nur_im_tag_nicht_ueber_der_einheit(page, state) -> None:
     assert hauptansicht(page, state).floating_action_button is None
     einheit_ui.heute_reiter_waehlen(state, einheit_ui.REITER_TAG)
     assert hauptansicht(page, state).floating_action_button is not None
+
+
+# ---------------------------------------------------------------------------
+# Routing der Plan-Karten (Ben, 18.10.2026: temp.md „Routing von den Übungen“)
+# ---------------------------------------------------------------------------
+
+
+def _symbole(wurzel, symbol) -> list:
+    return [x for x in _alle(wurzel) if isinstance(x, ft.IconButton) and x.icon == symbol]
+
+
+def test_karte_ohne_pfeil_weiter_springt_zur_offenen_uebung(page, state) -> None:
+    """Der Pfeil war ein dritter Weg in den Plan — weg. „Weiter“ öffnet den Plan bei der
+    nächsten offenen Übung (`AppState.plan_ziel`), der Plan rollt einmal dorthin."""
+    from trainingsapp.ui.views.plan import plan_view
+
+    plan = _plan(state, "liegestuetzen", "kniebeuge", "wandsitz")
+    neu = tagesansicht(page, state, state.heute())
+    assert not _symbole(neu, ft.Icons.CHEVRON_RIGHT)
+    assert _knopf(neu, "Übungen ansehen")
+    _eintragen(state, plan.id, "liegestuetzen", {"reps": [15]})
+    unterwegs = tagesansicht(page, state, state.heute())
+    assert not _symbole(unterwegs, ft.Icons.CHEVRON_RIGHT)
+    weiter = next(
+        x for x in _alle(unterwegs) if isinstance(x, ft.FilledButton) and x.content == "Weiter"
+    )
+    asyncio.run(weiter.on_click())
+    assert page.routen == [f"/plan/{plan.id}"]
+    assert state.plan_ziel == plan.items[1].id
+    aufgaben: list = []
+    page.run_task = lambda f, *a: aufgaben.append(f)
+    ansicht = plan_view(page, state, state.plaene.laden(plan.id))
+    liste = next(x for x in _alle(ansicht) if isinstance(x, ft.ListView))
+    assert liste.build_controls_on_demand is False and len(aufgaben) == 1
+    assert isinstance(liste.controls[2].key, ft.ScrollKey)  # Kopf, 1. Übung, 2. Übung
+    assert state.plan_ziel is None  # nur einmal
+    wieder = plan_view(page, state, state.plaene.laden(plan.id))
+    assert next(x for x in _alle(wieder) if isinstance(x, ft.ListView)).build_controls_on_demand
+
+
+def test_anderer_plan_kommt_nur_auf_heute_und_x_mit_rueckgaengig(page, state) -> None:
+    """„Anderen Plan“ springt nicht mehr in den Plan — auf der Karte wählt man dann Start
+    oder die Übungen. Das X nimmt ihn für heute weg, mit Rückgängig."""
+    plan = _plan(state, "kniebeuge", name="Sonntagsplan")
+    state.plaene.wochentage_setzen(plan.id, [(state.heute().weekday() + 1) % 7])
+    ansicht = tagesansicht(page, state, state.heute())
+    _knopf(ansicht, "Anderen Plan").on_click()
+    dialog = page.dialoge[-1]
+    zeile = next(x for x in _alle(dialog) if isinstance(x, ft.ListTile))
+    zeile.on_click()
+    asyncio.run(dialog.on_dismiss(None))
+    assert page.routen == []  # kein Sprung in den Plan
+    assert plan.id in state.sitzungen.plaene_am_tag(state.profil.id, state.heute())
+    assert "„Sonntagsplan“ steht jetzt an." in _texte(page.dialoge[-1])
+
+    ansicht = tagesansicht(page, state, state.heute())
+    (x,) = _symbole(ansicht, ft.Icons.CLOSE)
+    x.on_click()
+    assert plan.id not in state.sitzungen.plaene_am_tag(state.profil.id, state.heute())
+    meldung = page.dialoge[-1]
+    assert isinstance(meldung, ft.SnackBar) and meldung.action == "Rückgängig"
+    assert "holt ihn zurück" in _texte(meldung)[0]
+    meldung.on_action()
+    assert plan.id in state.sitzungen.plaene_am_tag(state.profil.id, state.heute())
+
+
+def test_einheit_zeilen_fuehren_zu_ihrem_teil(page, state) -> None:
+    """Im Reiter „Einheit“ öffnet ein Tipp auf den Plan-Ablauf dessen Ablaufansicht (Ben:
+    „Klick auf den Plan öffnet aber nicht das entsprechende Menü“)."""
+    from trainingsapp.ui import plan_ablauf
+    from trainingsapp.ui.components.startleiste import einheit_reiter
+
+    plan = _plan(state, "kniebeuge", "wandsitz")
+    plan_ablauf.bereitstellen(page, state, plan)
+    karte = einheit_reiter(page, state)
+    titel = "Plan-Ablauf · Kräftigung kurz"
+    zeile = next(
+        x for x in _alle(karte) if isinstance(x, ft.Container) and x.on_click and titel in _texte(x)
+    )
+    asyncio.run(zeile.on_click())
+    assert page.routen == [f"/plan/{plan.id}/timer/ablauf"]

@@ -428,7 +428,9 @@ def uebung_timer_view(
             return
         u = state.uebungen.laden(naechste.exercise_id)
         assert u is not None
-        await page.push_route(uebung_timer_route(basis, u, naechste))
+        # Der Timer der nächsten Übung ersetzt diesen — Zurück führt in den Plan
+        state.ersetzen_bei = uebung_timer_route(basis, u, naechste)
+        await page.push_route(state.ersetzen_bei)
 
     # -- Teile der Ansicht --------------------------------------------------------------------
 

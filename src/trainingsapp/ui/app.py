@@ -70,6 +70,7 @@ from trainingsapp.ui.components.startleiste import (
     leiste_einsetzen,
     startleiste,
 )
+from trainingsapp.ui.flet_absicherung import methodenantworten_absichern
 from trainingsapp.ui.laufend import takt as laufend_takt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
@@ -303,6 +304,8 @@ def formular_korrektur(
 
 
 def main(page: ft.Page) -> None:
+    # Antworten für ersetzte Controls beenden sonst die Empfangsschleife (Web, Socket)
+    methodenantworten_absichern()
     page.title = "Trainingsassistent"
     page.padding = 0
 

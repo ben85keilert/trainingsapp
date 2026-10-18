@@ -188,6 +188,9 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `FlutterEngineCache` hält — Bluetooth bleibt verbunden, den Prozess hält der
   Vordergrunddienst (`flet_ble`, `MessDienst`). APKs darum nur über das Skript bauen. Was
   läuft, steht jede Sekunde in dessen Benachrichtigung (`core/laufend.py`, `ui/laufend.py`).
+  Die Engine kommt über `getCachedEngineId` mit `shouldDestroyEngineWithHost = false` —
+  `provideFlutterEngine` allein ließ das Fragment sie mit der Activity zerstören und tot im
+  Cache liegen (Absturz beim Wiederöffnen bis v0.3.4, Befund H19).
 
 ## Datenbank-Konventionen
 

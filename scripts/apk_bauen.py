@@ -38,6 +38,17 @@ der nächsten Activity (Benachrichtigung, Startsymbol) zurück. Dafür baut
 `vorlage_bauen` aus Flets Vorlage eine Kopie mit dieser Datei
 (``build/vorlage/…zip``) und übergibt sie ``flet build --template``. Ändert Flet
 seine MainActivity, bricht das Skript ab, statt still eine andere zu ersetzen.
+
+Berichtigt am 18.10.2026 (Ben: „Die App lässt sich bei laufender Messung immer noch
+gelegentlich schließen“): Bis dahin lieferte die MainActivity die Engine nur über
+``provideFlutterEngine``. FlutterFragmentActivity baut das Fragment dann mit
+``withNewEngine()``, also mit ``destroy_engine_with_fragment=true`` — das Ende der
+Activity zerstörte die Engine trotzdem, sie blieb tot im Cache, und die nächste
+Activity stürzte an ihr ab („FlutterJNI is not attached to native“). Jetzt holt das
+Fragment die Engine über ``getCachedEngineId``, ``shouldDestroyEngineWithHost`` ist
+``false``, und eine zerstörte Engine fliegt aus dem Cache. Übersetzen lässt sich die
+Klasse ohne APK-Bau mit dem Kotlin-Compiler aus dem Gradle-Cache (so am 18.10. gegen
+Flutter 3.44.8 geprüft); `tests/test_apk_bauen.py` hält die tragenden Stellen fest.
 """
 
 import argparse
@@ -78,12 +89,14 @@ class MainActivity : FlutterFragmentActivity()
 MAIN_ACTIVITY = """package {{ cookiecutter.org_name_2 }}.{{ cookiecutter.package_name }}
 
 import android.content.Context
+import android.os.Bundle
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
+import io.flutter.embedding.engine.dart.DartExecutor
 
 // Von scripts/apk_bauen.py statt der MainActivity der Flet-Vorlage eingesetzt
-// (trainingsapp, 16.10.2026).
+// (trainingsapp, 16.10.2026; berichtigt 18.10.2026).
 //
 // Wischt man die App in der App-Übersicht weg, beendet Android die Activity. Mit der
 // Vorlage stürbe dabei die Flutter-Engine - und mit ihr Bluetooth (flutter_blue_plus
@@ -92,15 +105,53 @@ import io.flutter.embedding.engine.FlutterEngineCache
 // Benachrichtigung oder das Startsymbol) nimmt sie wieder. Den Prozess hält während
 // einer Messung der Vordergrunddienst (flet_ble, MessDienst) am Leben; ohne ihn
 // beendet Android ihn beim Wegwischen wie bisher.
+//
+// Bis 18.10.2026 lieferte nur provideFlutterEngine die Engine. Dann baut
+// FlutterFragmentActivity das Fragment mit withNewEngine(), also mit
+// destroy_engine_with_fragment=true: Das Ende der Activity zerstörte die Engine
+// trotzdem, sie blieb tot im Cache, und die nächste Activity stürzte an ihr ab
+// ("FlutterJNI is not attached to native") - die Messung musste aus dem Backup
+// zurück. Jetzt gilt der Weg, den Flutter für eine Engine im Cache vorsieht:
+// getCachedEngineId, shouldDestroyEngineWithHost = false, die Engine liegt vor
+// super.onCreate bereit und hat Dart selbst gestartet.
 class MainActivity : FlutterFragmentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // Vor super.onCreate: Dort holt sich das Fragment die Engine aus dem Cache
+        engineHolen(applicationContext)
+        super.onCreate(savedInstanceState)
+    }
+
+    override fun getCachedEngineId(): String = ENGINE
+
+    override fun shouldDestroyEngineWithHost(): Boolean = false
+
+    // Nur für ein Fragment, das Android aus einem früheren Stand der App wiederherstellt
+    // (ohne Cache-ID in seinen Argumenten): auch dann diese Engine, nie eine zweite
     override fun provideFlutterEngine(context: Context): FlutterEngine =
-        FlutterEngineCache.getInstance().get(ENGINE)
-            ?: FlutterEngine(context.applicationContext).also {
-                FlutterEngineCache.getInstance().put(ENGINE, it)
-            }
+        engineHolen(context.applicationContext)
 
     private companion object {
         const val ENGINE = "trainingsapp"
+
+        fun engineHolen(context: Context): FlutterEngine {
+            val cache = FlutterEngineCache.getInstance()
+            cache.get(ENGINE)?.let { return it }
+            val engine = FlutterEngine(context)
+            // Wird sie doch einmal zerstört, fliegt sie aus dem Cache - eine tote Engine
+            // ließe die nächste Activity abstürzen, so entsteht eine neue
+            engine.addEngineLifecycleListener(
+                object : FlutterEngine.EngineLifecycleListener {
+                    override fun onPreEngineRestart() {}
+
+                    override fun onEngineWillDestroy() {
+                        if (cache.get(ENGINE) === engine) cache.remove(ENGINE)
+                    }
+                }
+            )
+            engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
+            cache.put(ENGINE, engine)
+            return engine
+        }
     }
 }
 """

@@ -44,6 +44,26 @@ def test_mainactivity_wird_ersetzt_der_rest_bleibt(apk_bauen, tmp_path) -> None:
         assert neu.read("build/cookiecutter.json") == b"{}"
 
 
+def test_mainactivity_haelt_die_engine_wirklich(apk_bauen) -> None:
+    """Ben, 18.10.2026: Nach dem Wegwischen stürzte die App beim Wiederöffnen ab. Nur
+    ``provideFlutterEngine`` zu überschreiben genügte nicht — das Fragment entstand mit
+    ``withNewEngine()`` (``destroy_engine_with_fragment=true``), zerstörte die Engine beim
+    Ende der Activity und ließ sie tot im Cache. Der Weg für eine Engine im Cache:"""
+    text = apk_bauen.MAIN_ACTIVITY
+    # Das Fragment holt sie über die Cache-ID — und zerstört sie nicht mit der Activity
+    assert "override fun getCachedEngineId(): String = ENGINE" in text
+    assert "override fun shouldDestroyEngineWithHost(): Boolean = false" in text
+    # Mit Cache-ID startet Flutter Dart nicht selbst
+    assert "executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())" in text
+    # Das Fragment sucht sie in super.onCreate — sie muss vorher im Cache liegen
+    rumpf = text[text.index("override fun onCreate") :]
+    assert rumpf.index("engineHolen(applicationContext)") < rumpf.index(
+        "super.onCreate(savedInstanceState)"
+    )
+    # Stirbt sie doch, bekommt die nächste Activity nie die tote
+    assert "onEngineWillDestroy" in text and "cache.remove(ENGINE)" in text
+
+
 def test_geaenderte_oder_fehlende_mainactivity_bricht_ab(apk_bauen, tmp_path) -> None:
     fremd = "class MainActivity : FlutterActivity()\n"
     anders = _vorlage(tmp_path / "anders.zip", fremd, apk_bauen)

@@ -494,7 +494,7 @@ def plan_view(
     def wert_erlediger(
         item: PlanItem, feld: FieldSpec, eingabe: ft.TextField
     ) -> Callable[[], None]:
-        """Ein Einzelwert (Zeit gesamt, Strecke …): ein Eintrag, dazu das übrige Ziel."""
+        """Ein Einzelwert (Zeit, Strecke …): ein Eintrag, dazu das übrige Ziel."""
 
         def handler() -> None:
             wert = einzelwert_lesen(feld, eingabe.value or "")

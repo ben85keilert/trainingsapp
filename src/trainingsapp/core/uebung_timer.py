@@ -10,6 +10,9 @@ Planübung > Timer des Plans > erstes Profil der Übung > keiner.
 - `TimerWahl` — was die Planübung festhält (Migration 020): ein Profil der Übung (ID)
   oder eine eigene Kopie, das gemerkte Zeitfeld, ob die Zeit eingetragen wird.
 - `timer_fuer` — der Timer, der gilt; `profile_zur_wahl` — die Chips im Timer.
+- `uhr_an`, `zaehlt_als` — die Uhr in der Übung (Ben, 18.10.2026, `docs/plan_stoppuhr.md`):
+  an oder aus (Planübung > Übung), und wohin ihre Zeit kommt — bietet die Übung Haltezeit an,
+  nach Wahl Haltezeit oder Zeit, sonst immer Zeit, auch ohne den Parameter Zeit.
 
 Rein: Die Profile liegen als JSON an Übung, Plan und Planübung (``core.models``);
 hier werden sie gelesen und gewählt.
@@ -17,11 +20,13 @@ hier werden sie gelesen und gewählt.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .models import Exercise, Plan, PlanItem
-from .timer import MAX_ABSCHNITT_S, Abschnitt, TimerProfil
+from .result_spec import FieldSpec, vorrat_feld
+from .timer import MAX_ABSCHNITT_S, STOPPUHR, Abschnitt, TimerProfil, stoppuhr
 from .timer_eintrag import ZEITFELDER
 
 
@@ -74,7 +79,7 @@ def _regel_sekunden(limit_spec: Any) -> int:
 class TimerWahl:
     """Was eine Planübung über ihren Timer festhält (``PlanItem.timer``).
 
-    >>> w = TimerWahl(profil_id="p1", zeitfeld="duration", zeit_eintragen=False)
+    >>> w = TimerWahl(profil_id="p1", zeitfeld="duration", zeit_eintragen=False, uhr=False)
     >>> TimerWahl.aus_dict(w.als_dict()) == w
     True
     >>> TimerWahl().als_dict(), TimerWahl.aus_dict("kaputt") == TimerWahl()
@@ -89,6 +94,8 @@ class TimerWahl:
     zeitfeld: str = ""
     #: Zeit eintragen — aus: nur „gemacht“
     zeit_eintragen: bool = True
+    #: Die Uhr in dieser Planübung — ``None``: wie die Übung (`uhr_an`)
+    uhr: bool | None = None
 
     def als_dict(self) -> dict[str, Any]:
         """Nur, was von der Vorgabe abweicht — eine Planübung ohne Wahl bleibt ``{}``."""
@@ -101,6 +108,8 @@ class TimerWahl:
             d["zeitfeld"] = self.zeitfeld
         if not self.zeit_eintragen:
             d["zeit_eintragen"] = False
+        if self.uhr is not None:
+            d["uhr"] = self.uhr
         return d
 
     @classmethod
@@ -114,6 +123,7 @@ class TimerWahl:
             eigen=TimerProfil.aus_dict(d.get("eigen")) if d.get("eigen") else None,
             zeitfeld=zeitfeld if zeitfeld in ZEITFELDER else "",
             zeit_eintragen=d.get("zeit_eintragen") is not False,
+            uhr=d["uhr"] if isinstance(d.get("uhr"), bool) else None,
         )
 
 
@@ -149,6 +159,8 @@ def timer_fuer(
     wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
     if wahl.eigen is not None:
         return wahl.eigen
+    if wahl.profil_id == STOPPUHR:  # an der Planübung die Stoppuhr gewählt
+        return stoppuhr()
     if wahl.profil_id:
         gewaehlt = next((p for p in profile if p.id == wahl.profil_id), None)
         if gewaehlt is not None:
@@ -159,12 +171,18 @@ def timer_fuer(
 
 
 def profile_zur_wahl(
-    uebung: Exercise, plan: Plan | None = None, item: PlanItem | None = None
+    uebung: Exercise,
+    plan: Plan | None = None,
+    item: PlanItem | None = None,
+    *,
+    mit_stoppuhr: bool = False,
 ) -> list[TimerProfil]:
     """Was der Timer einer Übung zur Wahl stellt: eine eigene Kopie der Planübung, die
-    Profile der Übung und den Timer des Plans — jedes einmal."""
+    Profile der Übung und den Timer des Plans — jedes einmal; ``mit_stoppuhr``: vorne die
+    Stoppuhr (die Uhr-Zeile in der Übung, Ben 18.10.2026)."""
     wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
-    auswahl = [p for p in (wahl.eigen, *profile_der_uebung(uebung), plan_timer(plan)) if p]
+    vorne = [stoppuhr()] if mit_stoppuhr else []
+    auswahl = [p for p in (*vorne, wahl.eigen, *profile_der_uebung(uebung), plan_timer(plan)) if p]
     eindeutig: list[TimerProfil] = []
     for p in auswahl:
         if all(p.id != q.id for q in eindeutig):
@@ -172,4 +190,67 @@ def profile_zur_wahl(
     return eindeutig
 
 
-__all__ = ["TimerWahl", "plan_timer", "profile_der_uebung", "profile_zur_wahl", "timer_fuer"]
+def uhr_an(uebung: Exercise, item: PlanItem | None = None) -> bool:
+    """Stehen Stoppuhr und Timer in der Übung bereit? Planübung > Übung (Vorgabe: an).
+
+    >>> uhr_an(Exercise()), uhr_an(Exercise(uhr=False))
+    (True, False)
+    >>> uhr_an(Exercise(uhr=False), PlanItem(timer={"uhr": True}))
+    True
+    """
+    wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
+    return uebung.uhr if wahl.uhr is None else wahl.uhr
+
+
+def zaehlt_als(felder: Sequence[str], uebung: Exercise, item: PlanItem | None = None) -> str:
+    """Wohin die Zeit von Stoppuhr und Timer kommt (Ben, 18.10.2026): Bietet die Übung hier
+    Haltezeit an, nach Wahl — Planübung > Übung, Vorgabe Haltezeit; sonst **immer Zeit**,
+    auch wenn der Parameter Zeit nicht aktiviert ist („Ist die Uhr ein, hat man automatisch
+    Zeit mit dabei“).
+
+    >>> zaehlt_als(["reps"], Exercise()), zaehlt_als(["hold"], Exercise())
+    ('duration', 'hold')
+    >>> zaehlt_als(["hold", "duration"], Exercise(zaehlt_als="duration"))
+    'duration'
+    >>> zaehlt_als(["hold"], Exercise(zaehlt_als="duration"), PlanItem(timer={"zeitfeld": "hold"}))
+    'hold'
+    """
+    if "hold" not in felder:
+        return "duration"
+    wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
+    gewaehlt = wahl.zeitfeld or uebung.zaehlt_als
+    return gewaehlt if gewaehlt in ZEITFELDER else "hold"
+
+
+def mit_zeitfeldern(uebung: Exercise, werte: Mapping[str, Any]) -> Exercise:
+    """Die Übung samt den Zeitfeldern, die ``werte`` füllt, ihre Eingabe aber nicht anbietet —
+    so zeigt die Kopie im Eintrag die Zeit (die Uhr trägt sie auch ohne den Parameter ein).
+
+    >>> u = mit_zeitfeldern(Exercise(name="Dehnen"), {"duration": 90})
+    >>> [(f.key, f.label) for f in u.result_spec.fields]
+    [('duration', 'Zeit')]
+    >>> mit_zeitfeldern(u, {"duration": 30}) is u
+    True
+    """
+    da = {f.key for f in uebung.result_spec.fields}
+    neu = [
+        FieldSpec.from_dict(f.to_dict())  # eine Kopie, nicht das Feld des Vorrats
+        for k in werte
+        if k in ZEITFELDER and k not in da and (f := vorrat_feld(k)) is not None
+    ]
+    if not neu:
+        return uebung
+    spec = replace(uebung.result_spec, fields=[*uebung.result_spec.fields, *neu])
+    return replace(uebung, result_spec=spec)
+
+
+__all__ = [
+    "TimerWahl",
+    "mit_zeitfeldern",
+    "plan_timer",
+    "profile_der_uebung",
+    "profile_zur_wahl",
+    "timer_fuer",
+    "uhr_an",
+    "zaehlt_als",
+]

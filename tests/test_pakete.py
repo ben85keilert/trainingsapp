@@ -813,3 +813,28 @@ def test_quellenfelder_am_paket(con) -> None:
     assert pakete.laden(pid).update_modus == "manuell" and pakete.laden(pid).quelle is not None
     pakete.geprueft_setzen()
     assert all(p.geprueft is not None for p, _ in pakete.alle())
+
+
+def test_uhr_und_zaehlt_als_reisen_im_paket(con) -> None:
+    """Ben, 18.10.2026: Uhr an/aus und „Zählt als“ gehören zur Übung — sie reisen im Paket
+    (nur, wenn sie von der Vorgabe abweichen), und wer sie hier ändert, behält sie."""
+    from trainingsapp.core.pakete import aus_stand, stand, zusammenfuehren
+
+    u = Exercise(name="Dehnen", uhr=False, zaehlt_als="duration")
+    d = stand(u)
+    assert d["uhr"] is False and d["zaehlt_als"] == "duration"
+    assert "uhr" not in stand(Exercise(name="Planke"))  # die Vorgabe schreibt sich nicht
+    zurueck = aus_stand(u.id, "p1", d)
+    assert (zurueck.uhr, zurueck.zaehlt_als) == (False, "duration")
+    # Drei-Wege-Abgleich: hier eingeschaltet, im Paket unverändert → bleibt eingeschaltet
+    hier = {**d, "uhr": True}
+    neu = {**d, "description": "Länger halten."}
+    gemischt = zusammenfuehren(d, hier, neu)
+    assert gemischt.get("uhr", True) is True and gemischt["description"] == "Länger halten."
+    # In der Datenbank
+    from trainingsapp.data.repositories import ExerciseRepo
+
+    repo = ExerciseRepo(con)
+    repo.speichern(u)
+    geladen = repo.laden(u.id)
+    assert geladen is not None and (geladen.uhr, geladen.zaehlt_als) == (False, "duration")

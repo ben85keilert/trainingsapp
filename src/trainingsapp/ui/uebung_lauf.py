@@ -2,7 +2,7 @@
 
 Ben, 17.10.2026 (Skizzen 12–15): Die Uhr neben dem i öffnet den Timer der Übung. Ist er
 fertig, gilt die Übung als **gemacht**, und die gelaufene Zeit kommt ins Tagebuch — als
-Haltezeit je Satz oder als Zeit gesamt (`core.timer_eintrag`). **Abbrechen** trägt
+Haltezeit je Satz oder als Zeit (`core.timer_eintrag`). **Abbrechen** trägt
 nichts ein; der Lauf bleibt unter „Läufe heute“ und lässt sich dort doch eintragen.
 Läuft eine HRV-Aufnahme, bekommt sie die Übung und ihre Abschnitte als Marken.
 
@@ -22,13 +22,13 @@ from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lok
 from trainingsapp.core.standards import aktive_felder, mit_plan_spec
 from trainingsapp.core.timer import TimerLauf, TimerProfil
 from trainingsapp.core.timer_eintrag import (
+    ZEITFELDER,
     Gelaufen,
     abgebrochen,
     ergebnis,
     gelaufene_zeiten,
-    zeitfeld,
 )
-from trainingsapp.core.uebung_timer import TimerWahl
+from trainingsapp.core.uebung_timer import TimerWahl, mit_zeitfeldern, zaehlt_als
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
 from trainingsapp.ui import einheit as einheit_ui
 
@@ -43,7 +43,7 @@ class Lauf:
     abgebrochen: bool
     #: der Eintrag im Tagebuch — ``None``: nicht eingetragen
     eintrag_id: str | None
-    #: was eingetragen wurde (Haltezeiten bzw. die Zeit gesamt)
+    #: was eingetragen wurde (Haltezeiten bzw. die Zeit)
     werte: list[float]
     #: läuft noch (oder die App starb mitten im Lauf)
     offen: bool = False
@@ -73,16 +73,21 @@ def kontext_fuer(
     feld: str | None = None,
 ) -> UebungKontext:
     """Wozu der Timer läuft: Übung, Plan, Planübung und das Zeitfeld — ``None``, wenn
-    „Zeit eintragen“ aus ist oder die Übung kein Zeitfeld anbietet (nur „gemacht“)."""
+    „Zeit eintragen“ aus ist (nur „gemacht“). Sonst „Zählt als“ (Ben, 18.10.2026): mit
+    Haltezeit nach Wahl, ohne immer Zeit — auch ohne den Parameter (`zaehlt_als`)."""
     wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
     eintragen = wahl.zeit_eintragen if zeit_eintragen is None else zeit_eintragen
-    gewaehlt = feld or wahl.zeitfeld or None
+    felder = felder_der_uebung(uebung, item)
+    if feld in ZEITFELDER and (feld == "duration" or "hold" in felder):
+        gewaehlt: str = feld  # im Timer der Übung gewählt
+    else:
+        gewaehlt = zaehlt_als(felder, uebung, item)
     return UebungKontext(
         uebung_id=uebung.id,
         name=uebung.name,
         plan_id=plan.id if plan is not None else None,
         item_id=item.id if item is not None else None,
-        zeitfeld=zeitfeld(felder_der_uebung(uebung, item), gewaehlt) if eintragen else None,
+        zeitfeld=gewaehlt if eintragen else None,
     )
 
 
@@ -142,6 +147,7 @@ def _eintragen(
         uebung = mit_plan_spec(item, uebung)
     zeiten = gelaufene_zeiten(ereignisse)
     werte = ergebnis(zeiten, kontext.zeitfeld)
+    uebung = mit_zeitfeldern(uebung, werte)  # Zeit auch ohne den Parameter (18.10.2026)
     ende_s = max(
         (x.t_s for x in ereignisse if x.quelle in ("timer", "plan", "einheit")), default=0.0
     )

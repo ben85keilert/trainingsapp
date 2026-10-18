@@ -501,7 +501,7 @@ class Tageszeile:
     #: die erste Kennzahl der Übung — ``None``: nur abgehakt
     kennzahl: Kennzahl | None
     wert: float | None
-    #: „3 Sätze · 15 · 15 · 13“, sonst die Zusammenfassung („408 m · 5:05 Zeit gesamt“)
+    #: „3 Sätze · 15 · 15 · 13“, sonst die Zusammenfassung („408 m · 5:05 Zeit“)
     zeile: str
     #: woraus sie besteht (Varianten, Ausprägungen) oder „zusätzlich abgehakt“
     zusatz: str = ""

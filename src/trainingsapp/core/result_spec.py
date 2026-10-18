@@ -114,10 +114,17 @@ class FieldSpec:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> FieldSpec:
+        """Aus JSON — ein alter Name des Feldvorrats kommt unter dem heutigen zurück.
+
+        >>> alt = {"key": "duration", "type": "duration", "label": "Zeit gesamt"}
+        >>> FieldSpec.from_dict(alt).label
+        'Zeit'
+        """
+        label = str(d.get("label") or d["key"])
         return cls(
             key=str(d["key"]),
             type=FieldType(d.get("type", "int")),
-            label=str(d.get("label") or d["key"]),
+            label=ALTE_NAMEN.get((str(d["key"]), label), label),
             unit=d.get("unit"),
             default=d.get("default"),
             min=d.get("min"),
@@ -512,12 +519,18 @@ def parameter_werte(spec: ResultSpec | None, werte: dict[str, Any]) -> list[Para
 # Jedes Feld bringt Typ und Einheit mit; die Übung legt nur Chips fest.
 # Reihenfolge = Reihenfolge im Editor.
 
+#: Umbenannte Felder des Vorrats: (Schlüssel, alter Name) → heutiger Name. Gespeicherte
+#: Übungen und die Kopien in Einträgen tragen den alten; gelesen wird der heutige — ein
+#: Name, keine Bedeutung (Ben, 18.10.2026: „Der Parameter Gesamtzeit wird programmweit
+#: zu Zeit“).
+ALTE_NAMEN: dict[tuple[str, str], str] = {("duration", "Zeit gesamt"): "Zeit"}
+
 FELDVORRAT: list[FieldSpec] = [
     FieldSpec("reps", FieldType.SET_LIST, "Wiederholungen", unit="Wdh.", quick=[10, 15, 20]),
     FieldSpec("hold", FieldType.SET_LIST, "Haltezeit", unit="s", quick=[15, 30, 45, 60]),
     FieldSpec("weight", FieldType.WEIGHT, "Gewicht", unit="kg", quick=[5, 10, 20]),
     FieldSpec("distance", FieldType.DISTANCE, "Strecke", unit="m", quick=[500, 1000, 2000]),
-    FieldSpec("duration", FieldType.DURATION, "Zeit gesamt", unit="s", quick=[300, 600, 1200]),
+    FieldSpec("duration", FieldType.DURATION, "Zeit", unit="s", quick=[300, 600, 1200]),
     FieldSpec(
         "angle", FieldType.DEGREES, "Winkel", unit="°", min=0, max=180, quick=[30, 45, 60, 90]
     ),

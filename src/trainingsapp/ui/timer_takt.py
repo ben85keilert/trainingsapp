@@ -115,7 +115,7 @@ def ticker_starten(page: Any, state: AppState) -> None:
         try:
             while (lauf := state.timer) is not None:
                 stand = lauf.stand()
-                if (art := signal(alt, stand)) is not None:
+                if not lauf.vorwaerts and (art := signal(alt, stand)) is not None:
                     signale = state.timer_signale()
                     klang = klang_fuer(art, stand, lauf.profil, signale)
                     await _melden(state, art, signale, klang)

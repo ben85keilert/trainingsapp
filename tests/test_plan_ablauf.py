@@ -463,3 +463,42 @@ def test_waehlen_kurz_nach_dem_timer_ende_traegt_ein() -> None:
     enden = [x.daten.get("grund") for x in ereignisse if x.art == "uebung_ende"]
     assert enden == ["fertig"] and teil.ergebnisse == {"ia": "fertig"}
     assert not teil.unterbrochen and teil.schritt.item_id == "ib"
+
+
+# ---------------------------------------------------------------------------
+# Die Uhr ohne Timer (Ben, 18.10.2026): „Gemacht“ trägt die Zeit ein
+# ---------------------------------------------------------------------------
+
+
+async def test_ohne_timer_traegt_gemacht_die_zeit_ein(umgebung) -> None:
+    """Eine Übung ohne Timer und ohne Zeitfeld: Die Uhr lief von Anfang bis „Gemacht“ — das
+    ist die Zeit (auch ohne den Parameter, die Kopie im Eintrag bekommt ihn). Mit
+    ausgeschalteter Uhr nur abgehakt."""
+    state, uhr, gurt, _ = umgebung
+    dehnen = _uebung(state, "Dehnen", None, None)
+    still = _uebung(state, "Still", None, None)
+    still.uhr = False
+    state.uebungen.speichern(still)
+    plan = Plan(
+        name="Abends",
+        subject_id=state.profil.id,
+        pause_ohne_timer=False,
+        items=[PlanItem(exercise_id=u.id) for u in (dehnen, still)],
+    )
+    state.plaene.speichern(plan)
+    gespeichert = state.plaene.laden(plan.id)
+    e = plan_ablauf.starten(Seite(), state, gespeichert)
+    teil = plan_ablauf.ablauf_teil(e)
+    await _sekunden(uhr, gurt, e, 42)
+    teil.gemacht()
+    await _sekunden(uhr, gurt, e, 30)
+    teil.gemacht()
+    await _sekunden(uhr, gurt, e, 2)
+    await _bis_einheit_weg(state)
+    eintraege = {
+        state.uebungen.laden(x.exercise_id).name: x
+        for x, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+    }
+    assert eintraege["Dehnen"].result == {"duration": 42}
+    assert [f.key for f in eintraege["Dehnen"].spec_snapshot.fields] == ["duration"]
+    assert eintraege["Still"].result == {}

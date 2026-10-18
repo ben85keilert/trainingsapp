@@ -64,6 +64,10 @@ from .models import new_id
 MAX_ABSCHNITT_S: Final[int] = 99 * 60 + 59
 #: Text der Notiz, wenn der Timer durch ist — beendet den letzten Abschnitt
 ENDE_MARKE = "Timer fertig"
+#: Die Stoppuhr (Ben, 18.10.2026): ID und Art des eingebauten Profils, das vorwärts zählt
+STOPPUHR: Final[str] = "stoppuhr"
+#: So lange zählt die Stoppuhr höchstens — dann ist sie von selbst fertig (vergessen)
+STOPPUHR_MAX_S: Final[int] = 12 * 3600
 
 #: Höchstens so viele Runden
 MAX_RUNDEN: Final[int] = 99
@@ -147,7 +151,7 @@ class Abschnitt:
     dauer_s: int
     #: Schlüssel aus `core.klang.KLAENGE`; leer = Standardklang der Signale
     klang: str = ""
-    #: Zählt seine Zeit als Übungszeit (Haltezeit, Zeit gesamt)? Vorgabe ja — die App
+    #: Zählt seine Zeit als Übungszeit (Haltezeit, Zeit)? Vorgabe ja — die App
     #: rät nicht aus dem Namen, umschalten geht je Abschnitt (Ben, 17.10.2026)
     zaehlt: bool = True
 
@@ -220,6 +224,12 @@ class TimerProfil:
     teil_name: str = ""
     #: weitere Teile nach dem ersten — eine Folge (Ben, 17.10.2026)
     teile: list[Teil] = field(default_factory=list)
+    #: ``timer`` (zählt rückwärts) oder ``stoppuhr`` (`stoppuhr`, zählt vorwärts)
+    art: str = "timer"
+
+    @property
+    def ist_stoppuhr(self) -> bool:
+        return self.art == STOPPUHR
 
     def alle_teile(self) -> list[Teil]:
         """Alle Teile in ihrer Folge — der erste aus ``abschnitte`` und ``runden``."""
@@ -255,7 +265,11 @@ class TimerProfil:
         >>> TimerProfil(abschnitte=[Abschnitt("Vorbereitung", 10)],
         ...     teile=[Teil([Abschnitt("Halten", 60), Abschnitt("Pause", 30)], 3)]).kurztext()
         '0:10 Vorbereitung → 3 × (1:00 Halten · 0:30 Pause)'
+        >>> stoppuhr().kurztext()
+        'zählt vorwärts'
         """
+        if self.ist_stoppuhr:
+            return "zählt vorwärts"
         if self.teile:
             return " → ".join(t.kurztext() for t in self.alle_teile())
         teile = [f"{dauer_text(a.dauer_s)} {a.name}".strip() for a in self.abschnitte]
@@ -289,6 +303,8 @@ class TimerProfil:
                 }
                 for t in self.teile
             ]
+        if self.ist_stoppuhr:
+            d["art"] = STOPPUHR
         return d
 
     @classmethod
@@ -296,6 +312,8 @@ class TimerProfil:
         """Defensiv: ohne brauchbaren Abschnitt kein Profil, nie eine Ausnahme."""
         if not isinstance(d, dict):
             return None
+        if d.get("art") == STOPPUHR:
+            return stoppuhr(str(d.get("name") or "Stoppuhr"))
         abschnitte = _abschnitte_lesen(d.get("abschnitte"))
         if not abschnitte:
             return None
@@ -358,6 +376,21 @@ def _klang_lesen(wert: Any) -> str:
     ('glocke2', '', '')
     """
     return wert if isinstance(wert, str) and wert in KLAENGE else ""
+
+
+def stoppuhr(name: str = "Stoppuhr") -> TimerProfil:
+    """Die Stoppuhr (Ben, 18.10.2026): zählt vorwärts, bis man „Fertig“ tippt. Ein einziger
+    Abschnitt, der erst nach `STOPPUHR_MAX_S` von selbst endet — Pause hält nur an, ein Lauf
+    ist ein Satz bzw. eine Zeit (`core.timer_eintrag`). Eingebaut, reist nicht in Paketen.
+
+    >>> p = stoppuhr(); p.id, p.name, p.ist_stoppuhr
+    ('stoppuhr', 'Stoppuhr', True)
+    >>> TimerProfil.aus_dict(p.als_dict()) == p
+    True
+    """
+    return TimerProfil(
+        id=STOPPUHR, name=name, abschnitte=[Abschnitt(name, STOPPUHR_MAX_S)], art=STOPPUHR
+    )
 
 
 def standard_profile() -> list[TimerProfil]:
@@ -760,6 +793,28 @@ class TimerLauf:
         return self._start is not None and not self.fertig
 
     @property
+    def vorwaerts(self) -> bool:
+        """Zählt vorwärts (`stoppuhr`) — Anzeigen zeigen dann die gelaufene Zeit."""
+        return self.profil.ist_stoppuhr
+
+    def anzeige(self) -> str:
+        """Die große Zeit: beim Timer der Rest des Abschnitts (aufgerundet), bei der Stoppuhr
+        die gelaufene Zeit (abgerundet).
+
+        >>> t = [0.0]
+        >>> uhr = TimerLauf(stoppuhr(), uhr=lambda: t[0]); uhr.start(); t[0] = 83.6
+        >>> uhr.anzeige(), uhr.fertig, uhr.vorwaerts
+        ('1:23', False, True)
+        >>> timer = TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 30)]), uhr=lambda: t[0])
+        >>> timer.start(); t[0] = 84.0; timer.anzeige()
+        '0:30'
+        """
+        if self.vorwaerts:
+            return dauer_text(int(self.vergangen_s()))
+        stand = self.stand()
+        return dauer_text(math.ceil(stand.rest_s)) if not stand.fertig else "0:00"
+
+    @property
     def fertig(self) -> bool:
         return self.vergangen_s() >= self.gesamt_s
 
@@ -846,8 +901,10 @@ class TimerLauf:
     def markentext(self, nummer: int) -> str:
         """„Belastung (Runde 2/8)"; der erste Anfang nennt das Profil, das Ende „Timer fertig"."""
         if nummer >= len(self._folge):
-            return ENDE_MARKE
+            return f"{self.profil.name} fertig" if self.vorwaerts else ENDE_MARKE
         text = self.abschnittsname(nummer)
+        if self.vorwaerts:
+            return text  # „Stoppuhr“ — der Name ist schon der Abschnitt
         return f"Timer „{self.profil.name}“: {text}" if nummer == 0 else text
 
     def abschnittsname(self, nummer: int) -> str:
@@ -880,6 +937,8 @@ class TimerLauf:
         >>> s = lauf.fortschritt(); s[0].farbe == s[2].farbe != s[1].farbe
         True
         """
+        if self.vorwaerts:
+            return []  # die Stoppuhr hat kein Ende, also keine Leiste
         vergangen = self.vergangen_s()
         fertig = self.fertig
         farbe_von: dict[str, str] = {}
@@ -917,6 +976,8 @@ class TimerLauf:
         >>> einer.start(); t[0] = 61.0; einer.fortschritt_text()
         ('', '1:01 von 15:00')
         """
+        if self.vorwaerts:
+            return "", self.anzeige()
         gesamt = dauer_text(self.gesamt_s)
         stand = self.stand()
         if stand.fertig:
@@ -1043,6 +1104,8 @@ __all__ = [
     "MESSDAUERN_MIN",
     "QUELLEN",
     "STANDARD_KLANG",
+    "STOPPUHR",
+    "STOPPUHR_MAX_S",
     "WECHSEL",
     "Abschnitt",
     "Marke",
@@ -1060,6 +1123,7 @@ __all__ = [
     "signal",
     "signale_kurz",
     "standard_profile",
+    "stoppuhr",
     "timer_profile_lesen",
     "timer_profile_schreiben",
     "timer_signale_lesen",

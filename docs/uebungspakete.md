@@ -184,6 +184,8 @@ Je Übung:
 | `result_spec` | nein | die vollständige Eingabe (`ResultSpec.to_dict()`), geht vor `spec`; schreibt der Export |
 | `limit_spec`, `default_target` | nein | Objekte wie in der Datenbank |
 | `timer[]` | nein | Timer-Profile der Übung (Ben, 17.10.2026; `docs/plan_einheit.md`, Stufe 3): je Profil `name`, `abschnitte[]` (`name`, `dauer_s`, `klang`, `zaehlt` — fehlt `zaehlt`, zählt der Abschnitt), `runden`, für eine Folge `teil_name` und `teile[]` (`name`, `runden`, `abschnitte[]`). `id` schreibt der Export; ohne sie eine feste aus Übung und Stelle. Fehlt `timer`, gilt eine Timer-Regel im `limit_spec` als Einzeltimer. Im Drei-Wege-Abgleich ein Feld |
+| `uhr` | nein | Stoppuhr und Timer stehen in der Übung bereit (Ben, 18.10.2026; `docs/plan_stoppuhr.md`); fehlt = an, `false` = aus. Im Drei-Wege-Abgleich ein Feld |
+| `zaehlt_als` | nein | „Zählt als“, wenn die Übung Haltezeit anbietet: `hold` (Haltezeit, ein Satz je Lauf) oder `duration` (Zeit); fehlt = Haltezeit. Ohne Haltezeit zählt die Uhr immer als Zeit. Im Drei-Wege-Abgleich ein Feld |
 | `default_felder` | nein | Parameter neuer Planübungen; `[]` = nur abhaken, fehlt = alle |
 | `media[]` | nein | `{kind, source, uri, title, license}`; leere `uri` und `source: "local"` fallen weg |
 | `variante_von` | nein | Schlüssel oder ID des Originals (im Paket oder schon auf dem Gerät) |

@@ -21,7 +21,8 @@ from trainingsapp.core.einheit import Ereignis
 from trainingsapp.core.models import Plan, SessionEntry, lokaler_tag
 from trainingsapp.core.plan_durchlauf import schritte_fuer
 from trainingsapp.core.standards import mit_plan_spec
-from trainingsapp.core.timer_eintrag import ergebnis, gelaufene_zeiten
+from trainingsapp.core.timer_eintrag import ergebnis, gelaufene_zeiten, ohne_timer
+from trainingsapp.core.uebung_timer import mit_zeitfeldern
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.devices.plan_ablauf import PlanAblaufBaustein
@@ -113,9 +114,10 @@ def starten(page: Any, state: Any, plan: Plan, **optionen: Any) -> Einheitslauf:
 def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry | None:
     """Eine Übung des Ablaufs ist zu Ende: ins Tagebuch, was sie gelaufen ist.
 
-    Gerechnet wird aus den Ereignissen zwischen ihrem Anfang und ihrem Ende; „gemacht“
-    ohne Timer gibt einen leeren Eintrag (abgehakt). Übersprungen, abgebrochen oder mit
-    der Einheit beendet: nichts.
+    Gerechnet wird aus den Ereignissen zwischen ihrem Anfang und ihrem Ende. Ohne Timer
+    zählt die Uhr von Anfang bis „Gemacht“ (Ben, 18.10.2026), wenn sie an ist (der Schritt
+    hat dann ein Zeitfeld) — sonst ein leerer Eintrag (abgehakt). Übersprungen, abgebrochen
+    oder mit der Einheit beendet: nichts.
     """
     d = ende.daten
     if d.get("grund") not in EINTRAGEN or e.zeitbasis is None:
@@ -142,7 +144,12 @@ def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry
     if item is not None:
         uebung = mit_plan_spec(item, uebung)
     zeitfeld = str(d["zeitfeld"]) if d.get("zeitfeld") else None
-    werte = ergebnis(gelaufene_zeiten(e.ereignisse[nr_start : nr_ende + 1]), zeitfeld)
+    zeiten = gelaufene_zeiten(e.ereignisse[nr_start : nr_ende + 1])
+    if zeiten:
+        werte = ergebnis(zeiten, zeitfeld)
+    else:  # ohne Timer: die Uhr lief von Anfang bis „Gemacht“
+        werte = ohne_timer(ende.t_s - start.t_s, zeitfeld) if zeitfeld else {}
+    uebung = mit_zeitfeldern(uebung, werte)
     anker = e.zeitbasis.anker_utc
     beginn = anker + timedelta(seconds=start.t_s)
     sitzung = state.sitzungen.session_fuer(

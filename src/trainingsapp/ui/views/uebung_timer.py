@@ -4,7 +4,7 @@ Die Uhr neben dem i im Plan (oder in der Übung) öffnet ihn:
 
 - **Vorher:** die Profile der Übung (Einzeltimer oder Folge), je Abschnitt „zählt /
   zählt nicht“ (erst einmal zählt alles), „Zeit eintragen“ und — bietet die Übung
-  beides an — Haltezeit je Satz oder Zeit gesamt. „Starten“ oder „Bereitstellen“.
+  beides an — Haltezeit je Satz oder Zeit. „Starten“ oder „Bereitstellen“.
 - **Während:** Er läuft als Einheit (`ui.uebung_lauf`) — oben die Laufleiste, hier die
   Restzeit, die Sätze, „Anhalten“, „Weiter“, „Fertig“ (beide nehmen die gelaufene Zeit)
   und „Abbrechen“ (trägt nichts ein).
@@ -47,7 +47,7 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.timer import Profilziel
 
 #: Feldnamen im Tagebuch
-FELDNAMEN = {"hold": "Haltezeit je Satz", "duration": "Zeit gesamt"}
+FELDNAMEN = {"hold": "Haltezeit je Satz", "duration": "Zeit"}
 
 
 def uebung_timer_route(basis: str, uebung: Exercise, item: PlanItem | None = None) -> str:
@@ -670,7 +670,7 @@ def uebung_timer_view(
                         ),
                         ft.Segment(
                             value="duration",
-                            label=ft.Text(f"Zeit gesamt\n{dauer_text(sum(saetze))}", size=13),
+                            label=ft.Text(f"Zeit\n{dauer_text(sum(saetze))}", size=13),
                         ),
                     ],
                     on_change=feld_gewaehlt,

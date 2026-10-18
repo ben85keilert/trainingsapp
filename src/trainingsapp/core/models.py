@@ -147,6 +147,12 @@ class Exercise:
     #: Timer-Profile der Übung (Migration 020): `core.timer.TimerProfil.als_dict` je
     #: Profil — gelesen über `core.uebung_timer.profile_der_uebung`
     timer: list[dict[str, Any]] = field(default_factory=list)
+    #: Stoppuhr und Timer stehen in der Übung bereit (Migration 022) — die Planübung kann
+    #: abweichen (`core.uebung_timer.uhr_an`)
+    uhr: bool = True
+    #: „Zählt als“, wenn die Übung Haltezeit anbietet: ``hold`` oder ``duration``; leer =
+    #: Haltezeit (`core.uebung_timer.zaehlt_als`)
+    zaehlt_als: str = ""
 
     def __post_init__(self) -> None:
         # Wer nur `category` angibt (Altbestand, Tutorial), bekommt sie als Typ.

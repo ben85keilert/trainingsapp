@@ -1,7 +1,7 @@
 """Zeit eintragen, wenn der Timer einer Übung fertig ist (Ben, 17.10.2026).
 
 Ist der Timer einer Übung durch, gilt die Übung als **gemacht**, und ihre Zeit kommt
-ins Tagebuch — als **Haltezeit je Satz** (`hold`) oder als **Zeit gesamt**
+ins Tagebuch — als **Haltezeit je Satz** (`hold`) oder als **Zeit**
 (`duration`), je nachdem, was die Planübung anbietet. Gerechnet wird aus der
 Zeitleiste der Einheit (`core.einheit.Ereignis`), nicht aus dem Profil:
 
@@ -151,7 +151,7 @@ def zeitfeld(felder: Iterable[str], gemerkt: str | None = None) -> str | None:
 def ergebnis(zeiten: Sequence[Gelaufen], feld: str | None) -> dict[str, Any]:
     """Was ins Tagebuch kommt — leer heißt „gemacht“ (ohne Zeitfeld oder ohne Zeit).
 
-    Haltezeit: ein Wert je zählendem Abschnitt (Sätze). Zeit gesamt: die Summe der
+    Haltezeit: ein Wert je zählendem Abschnitt (Sätze). Zeit: die Summe der
     zählenden Abschnitte — mit der Vorgabe „alles zählt“ also die Laufzeit.
 
     >>> zeiten = [Gelaufen("Halten", 1, 58.4, True, 0, 58.4),
@@ -166,6 +166,19 @@ def ergebnis(zeiten: Sequence[Gelaufen], feld: str | None) -> dict[str, Any]:
     if feld == "duration" and (summe := round(sum(z.sekunden for z in zaehlend))) > 0:
         return {"duration": summe}
     return {}
+
+
+def ohne_timer(dauer_s: float, feld: str | None) -> dict[str, Any]:
+    """Eine Übung ohne Timer mit eingeschalteter Uhr (Ben, 18.10.2026): Ihre Zeit von Beginn
+    bis „Gemacht“ ist ein Lauf — ein Satz Haltezeit bzw. die Zeit; unter
+    `core.einheit.MIN_MARKE_S` nur „gemacht“.
+
+    >>> ohne_timer(42.4, "duration"), ohne_timer(42.4, "hold"), ohne_timer(3.0, "duration")
+    ({'duration': 42}, {'hold': [42]}, {})
+    """
+    if dauer_s < MIN_MARKE_S:
+        return {}
+    return ergebnis([Gelaufen("", 1, dauer_s, True, 0.0, dauer_s)], feld)
 
 
 def vom_timer_text(anfaenge: Iterable[datetime]) -> str:
@@ -192,6 +205,7 @@ __all__ = [
     "abgebrochen",
     "ergebnis",
     "gelaufene_zeiten",
+    "ohne_timer",
     "vom_timer_text",
     "zeitfeld",
 ]

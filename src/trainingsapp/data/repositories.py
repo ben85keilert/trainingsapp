@@ -122,8 +122,9 @@ class ExerciseRepo:
                     (id, name, category, description, icon_key, image_path,
                      is_builtin, result_spec_json, limit_spec_json,
                      default_target_json, default_input_mode, archived, created_at, updated_at,
-                     family_id, default_fields_json, package_id, timer_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     family_id, default_fields_json, package_id, timer_json, clock_on,
+                     clock_counts_as)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -139,6 +140,8 @@ class ExerciseRepo:
                     family_id = excluded.family_id,
                     package_id = excluded.package_id,
                     timer_json = excluded.timer_json,
+                    clock_on = excluded.clock_on,
+                    clock_counts_as = excluded.clock_counts_as,
                     updated_at = excluded.updated_at,
                     revision = revision + 1
                 """,
@@ -161,6 +164,8 @@ class ExerciseRepo:
                     _felder_json(uebung.default_felder),
                     uebung.package_id,
                     json.dumps(uebung.timer, ensure_ascii=False),
+                    int(uebung.uhr),
+                    uebung.zaehlt_als,
                 ),
             )
             # Medien: alle Verweise neu schreiben. Einfacher als Abgleich, und
@@ -504,6 +509,8 @@ class ExerciseRepo:
             family_id=r["family_id"],
             package_id=r["package_id"],
             timer=_json_lesen(r["timer_json"], []),
+            uhr=bool(r["clock_on"]),
+            zaehlt_als=r["clock_counts_as"] or "",
         )
 
 

@@ -430,9 +430,20 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             package_id=paket,
             family_id=variante or None,
             timer=_timer_lesen(eintrag.get("timer", []), uid),
+            uhr=eintrag.get("uhr") is not False,
+            zaehlt_als=_zaehlt_als_lesen(eintrag.get("zaehlt_als")),
         ),
         key,
     )
+
+
+def _zaehlt_als_lesen(roh: Any) -> str:
+    """„Zählt als“ der Übung — ``hold`` oder ``duration``, sonst leer (die Vorgabe).
+
+    >>> _zaehlt_als_lesen("duration"), _zaehlt_als_lesen("Minuten"), _zaehlt_als_lesen(None)
+    ('duration', '', '')
+    """
+    return roh if roh in ("hold", "duration") else ""
 
 
 def _timer_lesen(roh: Any, uebung: str) -> list[dict[str, Any]]:
@@ -563,6 +574,10 @@ def stand(u: Exercise) -> dict[str, Any]:
         d["limit_spec"] = u.limit_spec
     if u.timer:
         d["timer"] = [dict(p) for p in u.timer]
+    if not u.uhr:
+        d["uhr"] = False
+    if u.zaehlt_als:
+        d["zaehlt_als"] = u.zaehlt_als
     if u.default_target:
         d["default_target"] = u.default_target
     if u.default_felder is not None:
@@ -611,6 +626,8 @@ FELDNAMEN: dict[str, str] = {
     "default_felder": "Planparameter",
     "limit_spec": "Limits",
     "timer": "Timer",
+    "uhr": "Uhr",
+    "zaehlt_als": "Zählt als",
     "media": "Videos",
     "variante_von": "Variante",
 }

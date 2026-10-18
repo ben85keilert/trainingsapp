@@ -17,8 +17,7 @@ from dataclasses import dataclass
 from .models import Exercise, Plan
 from .standards import aktive_felder
 from .timer import TimerProfil, dauer_text
-from .timer_eintrag import zeitfeld
-from .uebung_timer import TimerWahl, timer_fuer
+from .uebung_timer import TimerWahl, timer_fuer, uhr_an, zaehlt_als
 
 
 @dataclass(frozen=True)
@@ -30,7 +29,8 @@ class Schritt:
     name: str
     #: ``None``: ohne Timer — abhaken
     profil: TimerProfil | None = None
-    #: welches Feld die Zeit bekommt — ``None``: nur „gemacht“
+    #: welches Feld die Zeit bekommt — ``None``: nur „gemacht“. Mit Timer immer eins (Ben,
+    #: 18.10.2026: Zeit auch ohne den Parameter), ohne Timer nur mit eingeschalteter Uhr
     zeitfeld: str | None = None
 
     def kurztext(self) -> str:
@@ -55,7 +55,13 @@ def schritte_fuer(plan: Plan, katalog: Mapping[str, Exercise]) -> list[Schritt]:
     ...                    PlanItem(id="3", exercise_id="weg")])
     >>> schritte = schritte_fuer(plan, {"p": planke, "k": kniebeuge})
     >>> [(s.name, s.kurztext(), s.zeitfeld) for s in schritte]
-    [('Kniebeuge', 'ohne Timer', None), ('Planke', '1:00 Halten', 'hold')]
+    [('Kniebeuge', 'ohne Timer', 'duration'), ('Planke', '1:00 Halten', 'hold')]
+
+    Ohne Timer und mit ausgeschalteter Uhr bleibt es beim Abhaken:
+
+    >>> kniebeuge.uhr = False
+    >>> schritte_fuer(plan, {"p": planke, "k": kniebeuge})[0].zeitfeld is None
+    True
     """
     schritte: list[Schritt] = []
     for item in plan.items:
@@ -64,10 +70,10 @@ def schritte_fuer(plan: Plan, katalog: Mapping[str, Exercise]) -> list[Schritt]:
             continue
         wahl = TimerWahl.aus_dict(item.timer)
         felder = [f.key for f in aktive_felder(item, uebung)]
-        feld = zeitfeld(felder, wahl.zeitfeld or None) if wahl.zeit_eintragen else None
-        schritte.append(
-            Schritt(item.id, uebung.id, uebung.name, timer_fuer(uebung, plan, item), feld)
-        )
+        profil = timer_fuer(uebung, plan, item)
+        zaehlt = wahl.zeit_eintragen and (profil is not None or uhr_an(uebung, item))
+        feld = zaehlt_als(felder, uebung, item) if zaehlt else None
+        schritte.append(Schritt(item.id, uebung.id, uebung.name, profil, feld))
     return schritte
 
 

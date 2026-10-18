@@ -103,7 +103,7 @@ Jedes Feld hat eine Rolle (`core/parameter.py`):
 
 | Rolle | Felder | Wirkung |
 |---|---|---|
-| **Menge** | Wiederholungen, Haltezeit, Zeit gesamt, Strecke | wird addiert: 3 × 50 Liegestütze = 150 |
+| **Menge** | Wiederholungen, Haltezeit, Zeit, Strecke | wird addiert: 3 × 50 Liegestütze = 150 |
 | **Ausprägung** | Winkel, Gewicht, Seite | trennt: Wandsitz 45° ≠ Wandsitz 90° |
 | **Beiwerk** | Skala, Freitext, Ja/Nein | wird mitgeschrieben, weder addiert noch trennend |
 

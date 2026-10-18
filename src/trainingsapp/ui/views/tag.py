@@ -14,8 +14,9 @@ Zwei Darstellungen, oben umschaltbar (`AppState.tag_darstellung`):
 
 „Nach Plan“ und „Nach Übung“ sind entfallen (Ben: „fast dreimal das gleiche“); die Sicht
 je Übung über die Tage hat der Verlauf. Gruppiert wird in `core/tag.py`. Eine gemachte
-Übung antippen öffnet alle ihre Einträge des Tags (`views/leistungen.py`), der runde
-Knopf „Nachtragen“ die Auswahl (`views/nachtragen.py`).
+Übung antippen öffnet alle ihre Einträge des Tags als Blatt von unten
+(`views/leistungen.leistungen_blatt`), der runde Knopf „Nachtragen“ die Auswahl
+(`views/nachtragen.py`).
 
 Ein Plan ist ein Rahmen, in dem man variiert: Die Karte sagt „2 von 5“ und zeigt je Übung
 ein Stück, sie zählt keine Prozente.
@@ -73,6 +74,7 @@ from trainingsapp.ui.components.uebungszeile import (
     uebungszeile,
 )
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
 from trainingsapp.ui.views.plan import auspraegung_vorgabe
 from trainingsapp.ui.views.plan_ablauf import plan_ablauf_route
@@ -489,11 +491,28 @@ def tagesansicht(
         return handler
 
     def ziel(g: Gemacht) -> Callable[[], Any]:
-        """Eine gemachte Übung antippen: ihre Einträge des Tags — ein Training: die Strecke."""
+        """Eine gemachte Übung antippen: ihre Einträge des Tags als Blatt von unten (Ben,
+        18.10.2026: kein Seitenwechsel) — ein Training: die Strecke."""
         strecke = daten().training(g)
         if strecke is not None:
             return oeffner(f"/ausdauer/{strecke.id}")
-        return oeffner(f"{basis}/leistungen/{g.exercise_id}")
+
+        def blatt() -> None:
+            uebung = state.uebungen.laden(g.exercise_id, mit_geloeschten=True)
+            if uebung is None:
+                return
+            page.show_dialog(
+                leistungen_blatt(
+                    page,
+                    state,
+                    uebung,
+                    tag,
+                    nachtragen=nachtragen_route(basis, g.exercise_id),
+                    danach=auffrischen,
+                )
+            )
+
+        return blatt
 
     # -- Kopf -----------------------------------------------------------------------
 

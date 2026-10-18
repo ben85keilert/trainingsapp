@@ -1096,7 +1096,6 @@ def test_i_symbol_holt_parameter_aus_dem_feldvorrat(page, welt) -> None:
 
 
 def test_notiz_knopf_und_tafel_oeffnet_eintrag(page, welt) -> None:
-    import asyncio
 
     from trainingsapp.ui.views.plan import plan_view
 
@@ -1128,11 +1127,13 @@ def test_notiz_knopf_und_tafel_oeffnet_eintrag(page, welt) -> None:
     gruppe = next(
         c for c in _alle(block) if isinstance(c, ft.Container) and c.tooltip == LEISTUNGEN_TIPP
     )
-    # Ben, 17.10.2026: alle Einträge der Übung von heute, nicht nur den jüngsten
-    asyncio.run(gruppe.on_click())
-    assert gesprungen[-1] == f"/plan/{plan.id}/leistungen/{uebung.id}"
-    asyncio.run(_knopf_mit_text(block, "Bearbeiten").on_click())
-    assert gesprungen[-1] == f"/plan/{plan.id}/leistungen/{uebung.id}"
+    # Ben, 17.10.2026: alle Einträge der Übung von heute, nicht nur den jüngsten — seit
+    # 18.10. als Blatt über dem Plan, ohne Seitenwechsel
+    gruppe.on_click()
+    assert isinstance(dialoge[-1], ft.BottomSheet) and not gesprungen
+    assert "Heute: Nackendehnung seitlich" in _texte(dialoge[-1])
+    _knopf_mit_text(block, "Bearbeiten").on_click()
+    assert isinstance(dialoge[-1], ft.BottomSheet) and not gesprungen
 
 
 def test_uebung_standard_fuer_plaene_mit_parameterknoepfen(page, welt) -> None:

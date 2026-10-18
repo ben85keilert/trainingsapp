@@ -8,8 +8,8 @@ Anzeige und die Eingabemöglichkeiten besser ab“):
 - **Heute geleistet** — eine eigene Fläche, je Parameter groß der Wert
   (gebündelt wie in der Tagesansicht, je Ausprägung eine Gruppe), darunter die
   Notizen. Antippen (oder „Bearbeiten“) zeigt **alle** Einträge der Übung von
-  heute auf einer Seite: Werte und Notizen auf einmal korrigieren, einzeln
-  löschen (`views/leistungen.py`, Ben 17.10.2026).
+  heute in einem Blatt von unten: Werte und Notizen auf einmal korrigieren, einzeln
+  löschen (`views/leistungen.py`, Ben 17.10.2026; Blatt statt Seite 18.10.).
 - die Knöpfe „Gemacht“ (abhaken) und, wenn ein Ziel gesetzt ist, „Wie geplant“.
   Ohne Parameter bleibt es dabei — nur abhaken.
 - **Eintragen** — je Parameter ein umrandeter Abschnitt mit Überschrift, was
@@ -108,6 +108,7 @@ from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.werte import wert_leiste
 from trainingsapp.ui.components.zurueck import zurueck_ziel
 from trainingsapp.ui.state import AUFKLAPPEN, PLAN_DARSTELLUNGEN, UMSCHALTEN, AppState
+from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.plan_ablauf import plan_timer_karte
 from trainingsapp.ui.views.timer import timer_knopf
 from trainingsapp.ui.views.uebung_timer import uebung_timer_route
@@ -664,7 +665,7 @@ def plan_view(
                     border_radius=8,
                     ink=True,
                     tooltip=LEISTUNGEN_TIPP,
-                    on_click=oeffner(leistungen_route(uebung)),
+                    on_click=leistungen_zeigen(uebung),
                     content=ft.Column(spacing=6, controls=gruppe),
                 )
             )
@@ -673,7 +674,7 @@ def plan_view(
                 border_radius=8,
                 ink=True,
                 tooltip=LEISTUNGEN_TIPP,
-                on_click=oeffner(leistungen_route(uebung)),
+                on_click=leistungen_zeigen(uebung),
                 content=ft.Text(f"„{e.note}“", size=12, italic=True, opacity=0.75),
             )
             for e in eigene
@@ -701,7 +702,7 @@ def plan_view(
                         "Bearbeiten",
                         icon=ft.Icons.EDIT_OUTLINED,
                         tooltip=LEISTUNGEN_TIPP,
-                        on_click=oeffner(leistungen_route(uebung)),
+                        on_click=leistungen_zeigen(uebung),
                     ),
                 ],
             )
@@ -1139,9 +1140,14 @@ def plan_view(
             bereich += [bauen() for _, _, bauen in teile]
         return bereich
 
-    def leistungen_route(uebung: Exercise) -> str:
-        """Alle Einträge der Übung von heute (`views/leistungen.py`) — unter dem Plan."""
-        return f"{route}/leistungen/{uebung.id}"
+    def leistungen_zeigen(uebung: Exercise) -> Callable[[], None]:
+        """Alle Einträge der Übung von heute — als Blatt über dem Plan (`views/leistungen.py`;
+        Ben, 18.10.2026: „So wechselt das Bild nicht immer hin und her“)."""
+
+        def handler() -> None:
+            page.show_dialog(leistungen_blatt(page, state, uebung, heute, danach=auffrischen))
+
+        return handler
 
     def info_route(item: PlanItem) -> str:
         """Beim Üben die Infoseite unter dem Plan (Zurück führt hierher), sonst die Übung."""

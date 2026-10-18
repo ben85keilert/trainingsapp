@@ -190,8 +190,14 @@ def test_vergangener_tag_ohne_spaeteren_plan_und_mit_eigener_route(page, state) 
         for x in _alle(ansicht)
         if isinstance(x, ft.Container) and x.on_click and "Kniebeuge" in _texte(x)
     )
-    asyncio.run(zeile.on_click())
-    assert page.routen[-1] == f"{basis}/leistungen/{seed_id('kniebeuge')}"
+    zeile.on_click()  # ein Blatt über dem Tag, kein Seitenwechsel (Ben, 18.10.2026)
+    blatt = page.dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet) and not page.routen
+    assert any(t.startswith("1 Eintrag vom") for t in _texte(blatt))
+    blatt.open = True  # wie nach page.show_dialog
+    _knopf(blatt, "Nachtragen").on_click()
+    asyncio.run(blatt.on_dismiss(None))  # erst wenn das Blatt zu ist, geht es weiter
+    assert page.routen == [f"{basis}/nachtragen/{seed_id('kniebeuge')}"]
 
 
 def test_nachtragen_frueher_heute_in_den_plan(page, state) -> None:

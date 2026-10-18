@@ -136,3 +136,66 @@ def _knopf(ansicht, text: str):
         for c in _alle(v)
         if isinstance(c, ft.FilledButton | ft.TextButton) and c.content == text
     )
+
+
+# ---------------------------------------------------------------------------
+# Als Blatt von unten (Ben, 18.10.2026: „So wechselt das Bild nicht immer hin und her“)
+# ---------------------------------------------------------------------------
+
+
+def _blatt_felder(blatt, label: str) -> list:
+    return [c for c in _alle(blatt) if isinstance(c, ft.TextField) and c.label == label]
+
+
+def _blatt_knopf(blatt, text: str):
+    return next(
+        c
+        for c in _alle(blatt)
+        if isinstance(c, ft.FilledButton | ft.TextButton | ft.OutlinedButton) and c.content == text
+    )
+
+
+def test_blatt_schliessen_speichert_was_lesbar_ist(page, welt) -> None:
+    from trainingsapp.ui.views.leistungen import leistungen_blatt
+
+    state, _plan, uebung = welt
+    aufgefrischt: list[bool] = []
+    blatt = leistungen_blatt(page, state, uebung, danach=lambda: aufgefrischt.append(True))
+    assert isinstance(blatt, ft.BottomSheet)
+    notizen = _blatt_felder(blatt, "Notiz")
+    haltezeiten = _blatt_felder(blatt, "Haltezeit je Satz")
+    assert [n.value for n in notizen] == ["gut", ""]
+    notizen[1].value = "rechts enger"
+    haltezeiten[0].value = "viel"  # unlesbar — bleibt, wie es war
+    asyncio.run(blatt.on_dismiss(None))  # nach unten gewischt
+    eintraege = _heute(state, uebung)
+    assert [e.note for e in eintraege] == ["gut", "rechts enger"]
+    assert [e.result["hold"] for e in eintraege] == [[45, 45], [30]]
+    meldung = page.dialoge[-1]
+    assert isinstance(meldung, ft.SnackBar) and "unlesbar" in meldung.content.value
+    assert aufgefrischt == [True]
+
+
+def test_blatt_abbrechen_verwirft_speichern_prueft(page, welt) -> None:
+    from trainingsapp.ui.views.leistungen import leistungen_blatt
+
+    state, _plan, uebung = welt
+    blatt = leistungen_blatt(page, state, uebung)
+    blatt.open = True
+    _blatt_felder(blatt, "Notiz")[0].value = "verworfen"
+    _blatt_knopf(blatt, "Abbrechen").on_click()
+    asyncio.run(blatt.on_dismiss(None))
+    assert [e.note for e in _heute(state, uebung)] == ["gut", ""]
+
+    blatt = leistungen_blatt(page, state, uebung)
+    blatt.open = True
+    _blatt_felder(blatt, "Haltezeit je Satz")[1].value = "viel"
+    _blatt_knopf(blatt, "Speichern").on_click()
+    assert blatt.open  # bleibt offen, sagt warum
+    fehler = [c for c in _alle(blatt) if isinstance(c, ft.Text) and c.visible and c.value]
+    assert any("Unlesbar" in c.value for c in fehler)
+    _blatt_felder(blatt, "Haltezeit je Satz")[1].value = "40"
+    _blatt_knopf(blatt, "Speichern").on_click()
+    assert not blatt.open
+    asyncio.run(blatt.on_dismiss(None))
+    assert [e.result["hold"] for e in _heute(state, uebung)] == [[45, 45], [40]]

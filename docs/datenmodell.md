@@ -119,7 +119,9 @@ vorher begann und weiterlief. Die Datei einer GPS-Beteiligung wird nie mitgeschi
 weiter, `plan_item.timer_json` = die Wahl der Planübung (Profil der Übung oder eigene
 Kopie, Zeitfeld, „Zeit eintragen“). Vorrang: Planübung > Plan > erstes Profil der
 Übung. Ein Eintrag vom Timer trägt Anfang und Ende (`session_entry.started_at`,
-`ended_at`) — sonst steht dort nur der Zeitpunkt des Tippens.
+`ended_at`) — sonst steht dort nur der Zeitpunkt des Tippens. Migration 021:
+`plan.pause_no_timer` = im Ablauf auch nach einer Übung ohne Timer auf „Weiter“ warten
+(Vorgabe 1; 0 = nach „Gemacht“ gleich die nächste).
 
 **Der Tag ist die Bezugsgröße.** Zeitstempel sind UTC, aber „heute" ist ein
 lokaler Kalendertag. `core.models.tagesgrenzen()` rechnet die lokale

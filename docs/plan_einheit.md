@@ -152,6 +152,14 @@ einzelnen Übung“ — und: „Aus dem Text heraus weiß die App nicht, was Üb
   `plan/ende` beendet die Einheit (`ende_mit_plan`). Jede Übung wird eingetragen, **sobald
   sie endet** (`Einheitslauf.nachtragen` schreibt `person/eintrag`). Laufleiste, ⏸ und Töne
   folgen dem Timer der laufenden Übung (`Einheitslauf.timer`).
+  Ben, 18.10.2026: Vorher ist abgehakt, was heute schon gemacht ist — es kommt nicht dran
+  (`bereitstellen(ohne=…)`, auf Wunsch wieder mitnehmen), ▶ beginnt bei einer Übung
+  (`erste`), ist alles abgehakt, heißt der Knopf „Noch einmal“. Nach einer Übung ohne Timer
+  kommt die Pause nur, wenn `plan.pause_no_timer` (Migration 021). Eine wartende Übung lässt
+  sich jederzeit wählen (`PlanAblaufBaustein.waehlen`): die laufende endet mit
+  `plan/uebung_ende` Grund **„gewechselt“** (kein Eintrag, sie bleibt offen; ein laufender
+  Countdown fragt vorher), weiter geht es mit der ersten offenen Übung in der Reihenfolge des
+  Plans (`naechster`). Ohne Timer läuft die Uhr der Übung vorwärts (`seit_s`).
 - **Übungsformular** (Ben, 17.10.2026): Abschnitt „Timer“ mit den Profilen der Übung —
   Reihenfolge (das erste ist die Vorgabe), entfernen, „Timer hinzufügen“ (neu oder eine
   Kopie aus der Bibliothek) gehören zum Formular; der Stift öffnet den Editor (Teile,

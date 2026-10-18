@@ -287,3 +287,154 @@ async def test_in_der_pause_kein_timer(umgebung) -> None:
     assert "Pause — dann Kniebeuge" in oben and "Timer" not in oben
     e.beenden()
     await _bis_einheit_weg(state)
+
+
+# ---------------------------------------------------------------------------
+# Ben, 18.10.2026: Pause ohne Timer, Übung wählen, Erledigtes draußen, „Noch einmal“
+# ---------------------------------------------------------------------------
+
+
+def _namen_heute(state) -> dict[str, dict]:
+    return {
+        state.uebungen.laden(x.exercise_id).name: x.result
+        for x, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+    }
+
+
+async def test_ohne_timer_geht_es_ohne_pause_weiter(umgebung) -> None:
+    """„Gemacht“ ist bei einer Übung ohne Timer schon der Tipp — mit dem Schalter am Plan
+    kommt danach keine Pause (nach einem Timer bleibt sie)."""
+    state, uhr, gurt, _ = umgebung
+    plan = _plan(state)
+    state.plaene.plan_timer_setzen(plan.id, None, False, pause_ohne_timer=False)
+    plan = state.plaene.laden(plan.id)
+    assert plan is not None and plan.pause_ohne_timer is False
+    e = plan_ablauf.starten(Seite(), state, plan)
+    teil = plan_ablauf.ablauf_teil(e)
+    assert teil is not None
+    await _sekunden(uhr, gurt, e, 31)
+    assert teil.phase == PAUSE  # nach dem Timer der Planke: Pause wie bisher
+    teil.weiter()
+    await _sekunden(uhr, gurt, e, 2)
+    assert teil.schritt.name == "Kniebeuge" and teil.seit_s() == pytest.approx(2, abs=1)
+    teil.gemacht()
+    await _sekunden(uhr, gurt, e, 1)
+    assert teil.phase == UEBUNG and teil.schritt.name == "Atmung"  # keine Pause
+    e.beenden()
+    await _bis_einheit_weg(state)
+
+
+async def test_andere_uebung_waehlen_laesst_die_laufende_offen(umgebung) -> None:
+    """Eine wartende Übung antippen: jetzt sie. Die laufende endet ohne Eintrag und kommt
+    danach wieder dran — die erste offene in der Reihenfolge des Plans."""
+    state, uhr, gurt, _ = umgebung
+    plan = _plan(state)
+    planke, kniebeuge, atmung = (i.id for i in plan.items)
+    e = plan_ablauf.starten(Seite(), state, plan)
+    teil = plan_ablauf.ablauf_teil(e)
+    assert teil is not None
+    await _sekunden(uhr, gurt, e, 3)
+    assert teil.waehlen(atmung) and teil.schritt.name == "Atmung"
+    assert planke in teil.unterbrochen and teil.offen(planke)
+    assert not teil.waehlen(atmung)  # läuft schon
+    await _sekunden(uhr, gurt, e, 22)  # Atmung 20 s
+    assert teil.phase == PAUSE and teil.ergebnisse == {atmung: "fertig"}
+    assert teil.naechster == 0  # die Planke kommt zurück
+    assert "Pause — dann Planke" in einheit_ui.laufzeilen(e)[0]
+    teil.weiter()
+    await _sekunden(uhr, gurt, e, 31)
+    assert teil.ergebnisse[planke] == "fertig" and planke not in teil.unterbrochen
+    assert teil.phase == PAUSE and teil.schritte[teil.naechster].item_id == kniebeuge
+    assert not teil.waehlen(atmung)  # schon erledigt
+    teil.weiter()
+    await _sekunden(uhr, gurt, e, 1)
+    teil.gemacht()
+    await _sekunden(uhr, gurt, e, 1)
+    await _bis_einheit_weg(state)
+    eintraege = _namen_heute(state)
+    assert eintraege == {"Atmung": {"duration": 20}, "Planke": {"hold": [10, 10]}, "Kniebeuge": {}}
+
+
+async def test_erledigtes_bleibt_draussen_und_beginnen_bei(umgebung) -> None:
+    state, _, _, _ = umgebung
+    plan = _plan(state)
+    planke, kniebeuge, atmung = (i.id for i in plan.items)
+    e = plan_ablauf.starten(Seite(), state, plan, ohne={planke}, erste=atmung)
+    teil = plan_ablauf.ablauf_teil(e)
+    assert teil is not None
+    assert [s.item_id for s in teil.schritte] == [kniebeuge, atmung]
+    assert teil.schritt.item_id == atmung  # beginnt dort
+    assert state.plan_ablauf_auswahl[plan.id] == [kniebeuge, atmung]
+    e.beenden()
+    await _bis_einheit_weg(state)
+
+
+async def test_ansicht_haekchen_noch_einmal_und_kacheln(umgebung) -> None:
+    """Vorher: Erledigtes ist abgehakt und kommt nicht dran, antippen nimmt es wieder mit;
+    ist alles abgehakt, heißt der Knopf „Noch einmal“. Während: eine wartende Kachel
+    antippen wechselt — läuft ein Countdown, erst nach Rückfrage."""
+    ft = pytest.importorskip("flet")
+    from trainingsapp.ui.views.plan_ablauf import plan_ablauf_view
+
+    state, uhr, gurt, _ = umgebung
+    plan = _plan(state)
+    planke, kniebeuge, atmung = plan.items
+    session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
+    state.sitzungen.eintrag_anlegen(session, state.uebungen.laden(planke.exercise_id), {})
+    seite = Seite()
+    basis = f"/plan/{plan.id}"
+    vorher = plan_ablauf_view(seite, state, basis, plan)
+    kaesten = [x for x in _alle(vorher) if isinstance(x, ft.Checkbox)]
+    assert [k.value for k in kaesten] == [True, False, False]
+    assert "heute gemacht — kommt nicht dran" in _texte(vorher)
+    assert "Pause auch nach Übungen ohne Timer" in [
+        x.label for x in _alle(vorher) if isinstance(x, ft.Switch)
+    ]
+    _knopf(vorher, "Ablauf starten")
+    # Alles abhaken → „Noch einmal“ (die Ansicht baut ihren Inhalt neu)
+    for nr in (1, 2):
+        kaesten = [x for x in _alle(vorher) if isinstance(x, ft.Checkbox)]
+        kaesten[nr].on_change(None)
+    assert [k.value for k in _alle(vorher) if isinstance(k, ft.Checkbox)] == [True] * 3
+    assert "diesmal nicht" in _texte(vorher)
+    _knopf(vorher, "Noch einmal").on_click()  # nimmt alle mit
+    e = state.einheit
+    assert e is not None and e.laeuft
+    teil = plan_ablauf.ablauf_teil(e)
+    assert teil is not None and [s.item_id for s in teil.schritte] == [i.id for i in plan.items]
+    await _sekunden(uhr, gurt, e, 3)
+    waehrend = plan_ablauf_view(seite, state, basis, plan)
+    kachel = next(
+        x
+        for x in _alle(waehrend)
+        if isinstance(x, ft.Container) and x.on_click and "3 Atmung" in _texte(x)
+    )
+    kachel.on_click()  # die Planke zählt herunter — erst fragen
+    frage = seite.dialoge[-1]
+    assert isinstance(frage, ft.AlertDialog) and teil.schritt.name == "Planke"
+    wechseln = frage.actions[-1]
+    assert wechseln.content == "Wechseln"
+    wechseln.on_click()
+    await frage.on_dismiss(None)
+    assert teil.schritt.name == "Atmung" and planke.id in teil.unterbrochen
+    e.beenden()
+    await _bis_einheit_weg(state)
+    danach = _texte(plan_ablauf_view(seite, state, basis, plan))
+    assert "Planke: angefangen, dann gewechselt · nicht eingetragen" in danach
+    assert "Kniebeuge: nicht drangekommen" in danach and "0 von 3 Übungen eingetragen" in danach
+    assert [i.id for i in plan.items] == [planke.id, kniebeuge.id, atmung.id]
+
+
+def test_plan_editor_pause_ohne_timer(umgebung) -> None:
+    ft = pytest.importorskip("flet")
+    from trainingsapp.ui.views.plan_ablauf import plan_timer_karte
+
+    state, _, _, _ = umgebung
+    plan = _plan(state)
+    karte = plan_timer_karte(Seite(), state, plan)
+    _, pause = [x for x in _alle(karte) if isinstance(x, ft.SegmentedButton)]
+    assert pause.selected == ["pause"]
+    pause.selected = ["gleich"]
+    pause.on_change(type("E", (), {"control": pause})())
+    gespeichert = state.plaene.laden(plan.id)
+    assert gespeichert is not None and gespeichert.pause_ohne_timer is False

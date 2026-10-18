@@ -6,10 +6,14 @@ ins Tagebuch, **sobald sie endet** — mit Anfang und Ende und der gelaufenen Ze
 (`core.timer_eintrag`); ohne Timer als „gemacht“, übersprungen oder abgebrochen gar
 nicht. Eine HRV-Messung kann mitstarten; wenn der Ablauf fertig ist, endet sie oder
 läuft weiter.
+
+Ben, 18.10.2026: Was heute schon gemacht ist, bleibt draußen — vorher abgehakt, auf Wunsch
+wieder mitgenommen (``ohne``); begonnen werden kann mit jeder Übung (``erste``).
 """
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import timedelta
 from typing import Any
 
@@ -51,24 +55,39 @@ def hrv_moeglich(state: Any) -> bool:
 
 
 def bereitstellen(
-    page: Any, state: Any, plan: Plan, *, hrv: bool = True, hrv_beenden: bool | None = None
+    page: Any,
+    state: Any,
+    plan: Plan,
+    *,
+    hrv: bool = True,
+    hrv_beenden: bool | None = None,
+    ohne: Collection[str] = (),
+    erste: str | None = None,
 ) -> Einheitslauf:
     """Den Ablauf in die Startleiste — die HRV kommt mit, wenn gewünscht und möglich.
 
     ``hrv_beenden``: wenn der Ablauf fertig ist, die HRV-Messung beenden (``True``) oder
     weiterlaufen lassen; ``None`` = Vorgabe (endet, wenn sie mit dem Ablauf begann).
+    ``ohne``: Planübungen, die nicht drankommen (heute schon gemacht, abgehakt);
+    ``erste``: die Planübung, mit der er beginnt.
 
     Raises:
-        ValueError: Der Plan hat keine Übung.
+        ValueError: Der Plan hat keine Übung — oder keine bleibt übrig.
         RuntimeError: Es läuft schon eine Einheit.
     """
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
-    schritte = schritte_fuer(plan, katalog)
+    schritte = [s for s in schritte_fuer(plan, katalog) if s.item_id not in set(ohne)]
     teil = PlanAblaufBaustein(
-        plan.id, plan.name, schritte, weiter_automatisch=plan.weiter_automatisch
+        plan.id,
+        plan.name,
+        schritte,
+        weiter_automatisch=plan.weiter_automatisch,
+        pause_ohne_timer=plan.pause_ohne_timer,
+        erste=erste,
     )
     e = einheit_ui.teil_bereitstellen(page, state, teil)
     state.plan_ablaeufe[plan.id] = e.id
+    state.plan_ablauf_auswahl[plan.id] = [s.item_id for s in schritte]
     if hrv and hrv_moeglich(state) and e.hrv is None:
         einheit_ui.hrv_bereitstellen(page, state)
     if hrv_beenden is not None:

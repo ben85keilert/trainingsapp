@@ -269,6 +269,8 @@ class AppState:
     uebung_laeufe: dict[str, str] = field(default_factory=dict)
     #: Der letzte Ablauf je Plan (Einheit-ID) — für die Karte „fertig“ danach
     plan_ablaeufe: dict[str, str] = field(default_factory=dict)
+    #: … und welche Planübungen in ihm liefen (Ben, 18.10.2026: Erledigtes bleibt draußen)
+    plan_ablauf_auswahl: dict[str, list[str]] = field(default_factory=dict)
     #: Ausdauertraining, solange es bereitsteht oder läuft — der Teil ``gps`` der Einheit
     #: (`devices.strecke_baustein.StreckeBaustein`, ``fertig`` danach) — und seine Vorgaben
     ausdauer: Any = None

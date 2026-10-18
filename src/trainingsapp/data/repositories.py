@@ -688,8 +688,8 @@ class PlanRepo:
                 """
                 INSERT INTO plan (id, name, description, subject_id, created_at, updated_at,
                                   active, weekdays_json, course_chapter_id, timer_json,
-                                  auto_next)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  auto_next, pause_no_timer)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -700,6 +700,7 @@ class PlanRepo:
                     course_chapter_id = excluded.course_chapter_id,
                     timer_json = excluded.timer_json,
                     auto_next = excluded.auto_next,
+                    pause_no_timer = excluded.pause_no_timer,
                     revision = revision + 1
                 """,
                 (
@@ -714,6 +715,7 @@ class PlanRepo:
                     plan.kurs_kapitel_id,
                     json.dumps(plan.timer, ensure_ascii=False) if plan.timer else None,
                     int(plan.weiter_automatisch),
+                    int(plan.pause_ohne_timer),
                 ),
             )
             self.con.execute(
@@ -943,15 +945,22 @@ class PlanRepo:
             self._beruehrt(zeile["plan_id"])
 
     def plan_timer_setzen(
-        self, plan_id: str, timer: dict[str, Any] | None, weiter_automatisch: bool
+        self,
+        plan_id: str,
+        timer: dict[str, Any] | None,
+        weiter_automatisch: bool,
+        pause_ohne_timer: bool | None = None,
     ) -> None:
-        """„Timer für alle Übungen“ und „nach dem Timer automatisch weiter“ (Migration 020)."""
+        """„Timer für alle Übungen“ und „nach dem Timer automatisch weiter“ (Migration 020),
+        dazu „Pause nach Übungen ohne Timer“ (Migration 021; ``None`` = unverändert)."""
         with transaktion(self.con):
             self.con.execute(
-                "UPDATE plan SET timer_json = ?, auto_next = ? WHERE id = ?",
+                "UPDATE plan SET timer_json = ?, auto_next = ?, "
+                "pause_no_timer = COALESCE(?, pause_no_timer) WHERE id = ?",
                 (
                     json.dumps(timer, ensure_ascii=False) if timer else None,
                     int(weiter_automatisch),
+                    None if pause_ohne_timer is None else int(pause_ohne_timer),
                     plan_id,
                 ),
             )
@@ -1064,6 +1073,7 @@ class PlanRepo:
             kurs_kapitel_id=r["course_chapter_id"],
             timer=_json_lesen(r["timer_json"], {}) or None,
             weiter_automatisch=bool(r["auto_next"]),
+            pause_ohne_timer=bool(r["pause_no_timer"]),
         )
 
 

@@ -10,22 +10,34 @@ mit dem Eingetragenen, die laufende mit Restzeit, Sätzen, „Fertig“ und „�
 Den Ablauf führt `devices.plan_ablauf.PlanAblaufBaustein`; eingetragen wird je Übung,
 sobald sie endet (`ui.plan_ablauf`). Knöpfe entstehen nur neu, wenn sich der Stand
 ändert — im Sekundentakt ändern sich nur Zeiten (kein verlorener Tipp).
+
+Ben, 18.10.2026 (temp.md „Routing von den Übungen“):
+
+- **Vorher** ist jede Übung ein Kästchen: abgehakt, was heute schon gemacht ist — es
+  kommt nicht dran; antippen nimmt es wieder mit. ▶ an einer Übung beginnt dort. Ist
+  alles abgehakt, heißt der Knopf **„Noch einmal“** und nimmt alle mit. Ob nach einer
+  Übung ohne Timer eine Pause kommt, ist ein Schalter (am Plan gespeichert).
+- **Während** lässt sich jede wartende Übung antippen: jetzt sie (`waehlen`) — bei
+  laufendem Countdown erst nach einer Rückfrage. Ohne Timer läuft die Uhr vorwärts.
 """
 
 from __future__ import annotations
 
 import contextlib
 import math
+from collections.abc import Callable
 from typing import Any
 
 import flet as ft
 
 from trainingsapp.core.models import Plan
+from trainingsapp.core.plaene import erledigte
 from trainingsapp.core.plan_durchlauf import Schritt, dauer_text_gesamt, schritte_fuer
 from trainingsapp.core.timer import dauer_text
-from trainingsapp.devices.plan_ablauf import FERTIG, PAUSE, PlanAblaufBaustein
+from trainingsapp.devices.plan_ablauf import PAUSE, UEBUNG, PlanAblaufBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import plan_ablauf
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
@@ -38,6 +50,7 @@ GRUENDE = {
     "uebersprungen": "übersprungen",
     "abgebrochen": "abgebrochen · nicht eingetragen",
     "beendet": "beendet · nicht eingetragen",
+    "gewechselt": "angefangen, dann gewechselt · nicht eingetragen",
 }
 
 
@@ -54,27 +67,87 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
     route = plan_ablauf_route(basis)
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
     schritte = schritte_fuer(plan, katalog)
-    wahl: dict[str, Any] = {"hrv": True, "hrv_beenden": True}
+    #: die Stelle im Plan je Planübung — die Nummern bleiben, auch wenn nur ein Teil läuft
+    stelle = {s.item_id: n for n, s in enumerate(schritte, start=1)}
+    #: ``ohne``: abgehakt, kommt nicht dran — ``None``: wie heute erledigt (`ohne`)
+    wahl: dict[str, Any] = {"hrv": True, "hrv_beenden": True, "ohne": None}
     inhalt = ft.Column(spacing=10)
-    stand: dict[str, Any] = {"schluessel": None, "zeit": None, "info": None, "balken": None}
+    stand: dict[str, Any] = {
+        "schluessel": None,
+        "zeit": None,
+        "info": None,
+        "balken": None,
+        "pause": None,
+    }
 
     def melden(text: str) -> None:
         with contextlib.suppress(Exception):
             page.show_dialog(ft.SnackBar(ft.Text(text)))
 
-    def starten() -> None:
+    # -- Was drankommt (Ben, 18.10.2026: „Oben sind ohnehin Checkboxen …“) ----------------
+
+    def heute_erledigt() -> frozenset[str]:
+        """Die Planübungen, die heute schon dran waren — wie im Plan (`core.plaene.erledigte`)."""
+        anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, state.heute())
+        return frozenset(erledigte(plan.items, anzahl))
+
+    def ohne() -> set[str]:
+        """Abgehakt — kommt nicht dran. Vorgabe: was heute schon gemacht ist."""
+        if wahl["ohne"] is None:
+            wahl["ohne"] = {s.item_id for s in schritte if s.item_id in heute_erledigt()}
+        return set(wahl["ohne"])
+
+    def offen() -> list[Schritt]:
+        return [s for s in schritte if s.item_id not in ohne()]
+
+    def optionen(erste: str | None = None) -> dict[str, Any]:
+        """Für `ui.plan_ablauf` — ist alles abgehakt, nimmt „Noch einmal“ alle Übungen."""
+        return {
+            "hrv": wahl["hrv"],
+            "hrv_beenden": wahl["hrv_beenden"],
+            "ohne": ohne() if offen() else set(),
+            "erste": erste,
+        }
+
+    def starten(erste: str | None = None) -> None:
         try:
-            plan_ablauf.starten(page, state, plan, hrv=wahl["hrv"], hrv_beenden=wahl["hrv_beenden"])
+            plan_ablauf.starten(page, state, plan, **optionen(erste))
         except (RuntimeError, ValueError) as fehler:
             melden(str(fehler))
 
+    def ablauf_starten() -> None:
+        starten()
+
     def bereitstellen() -> None:
         try:
-            plan_ablauf.bereitstellen(
-                page, state, plan, hrv=wahl["hrv"], hrv_beenden=wahl["hrv_beenden"]
-            )
+            plan_ablauf.bereitstellen(page, state, plan, **optionen())
         except (RuntimeError, ValueError) as fehler:
             melden(str(fehler))
+
+    def umschalten(s: Schritt) -> Callable[..., None]:
+        """Abhaken oder wieder mitnehmen — ein Tipp auf die Zeile oder das Kästchen."""
+
+        def handler(_e: object = None) -> None:
+            wahl["ohne"] = ohne() ^ {s.item_id}
+            neu_bauen()
+
+        return handler
+
+    def hier_beginnen(s: Schritt) -> Callable[[], None]:
+        """▶ an einer Übung: der Ablauf beginnt dort (Ben: „auf eine andere Kachel klicken,
+        wenn noch nicht gestartet wurde“)."""
+
+        def handler() -> None:
+            starten(erste=s.item_id)
+
+        return handler
+
+    def pause_umschalten(e: ft.Event[ft.Switch]) -> None:
+        """Nach einer Übung ohne Timer gleich weiter — oder auf „Weiter“ warten (Migration 021)."""
+        plan.pause_ohne_timer = bool(e.control.value)
+        state.plaene.plan_timer_setzen(
+            plan.id, plan.timer, plan.weiter_automatisch, pause_ohne_timer=plan.pause_ohne_timer
+        )
 
     # -- Danach ---------------------------------------------------------------------------
 
@@ -84,7 +157,9 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
         ergebnisse = plan_ablauf.ergebnis_der_einheit(state, letzter) if letzter else None
         if not ergebnisse:
             return []
+        im_lauf = set(state.plan_ablauf_auswahl.get(plan.id) or [s.item_id for s in schritte])
         eingetragen = sum(1 for grund, _ in ergebnisse.values() if grund in plan_ablauf.EINTRAGEN)
+        gelaufen = sum(1 for s in schritte if s.item_id in im_lauf)
         zeilen: list[ft.Control] = [
             ft.Row(
                 controls=[
@@ -94,9 +169,12 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
                     ),
                 ]
             ),
-            ft.Text(f"{eingetragen} von {len(schritte)} Übungen eingetragen", size=13),
+            ft.Text(f"{eingetragen} von {gelaufen} Übungen eingetragen", size=13),
         ]
         for s in schritte:
+            if s.item_id not in im_lauf:
+                zeilen.append(ft.Text(f"{s.name}: nicht im Ablauf", size=13, opacity=0.7))
+                continue
             grund, werte = ergebnisse.get(s.item_id, ("", []))
             unten = GRUENDE.get(grund, grund) if grund else "nicht drangekommen"
             if werte:
@@ -114,33 +192,97 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
 
     # -- Vorher ---------------------------------------------------------------------------
 
+    def vorher_zeile(
+        n: int, s: Schritt, abgehakt: bool, heute_schon: bool, startbar: bool
+    ) -> ft.Control:
+        """Eine Übung vor dem Start: abgehakt (heute gemacht) oder offen, mit ▶."""
+        if abgehakt:
+            unten = "heute gemacht — kommt nicht dran" if heute_schon else "diesmal nicht"
+        else:
+            unten = s.kurztext() + (" · heute schon gemacht" if heute_schon else "")
+        rechts: list[ft.Control] = []
+        if not abgehakt:
+            rechts.append(
+                ft.IconButton(
+                    ft.Icons.PLAY_ARROW,
+                    tooltip=f"Mit {s.name} beginnen",
+                    disabled=not startbar,
+                    on_click=hier_beginnen(s),
+                )
+            )
+        return ft.Container(
+            ink=True,
+            border_radius=10,
+            on_click=umschalten(s),
+            content=ft.Row(
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Checkbox(value=abgehakt, on_change=umschalten(s)),
+                    ft.Column(
+                        spacing=0,
+                        tight=True,
+                        expand=True,
+                        controls=[
+                            ft.Text(
+                                f"{n} {s.name}",
+                                weight=ft.FontWeight.W_600,
+                                opacity=0.6 if abgehakt else 1,
+                            ),
+                            ft.Row(
+                                spacing=4,
+                                tight=True,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    ft.Icon(
+                                        ft.Icons.TIMER
+                                        if s.profil is not None
+                                        else ft.Icons.TIMER_OFF_OUTLINED,
+                                        size=14,
+                                        color=ft.Colors.PRIMARY
+                                        if s.profil is not None
+                                        else ft.Colors.OUTLINE,
+                                    ),
+                                    ft.Text(unten, size=12, opacity=0.75),
+                                ],
+                            ),
+                        ],
+                    ),
+                    *rechts,
+                ],
+            ),
+        )
+
     def vorher() -> list[ft.Control]:
         if not schritte:
             return [hinweis("Der Plan hat noch keine Übung.")]
+        andere = einheit_ui.laeuft(state)
+        erledigt = heute_erledigt()
+        abgehakt = ohne()
         zeilen: list[ft.Control] = [kartentitel("Ablauf · Timer je Übung")]
         for n, s in enumerate(schritte, start=1):
             zeilen.append(
-                ft.Row(
-                    controls=[
-                        ft.Icon(
-                            ft.Icons.TIMER
-                            if s.profil is not None
-                            else ft.Icons.CHECK_BOX_OUTLINE_BLANK,
-                            size=18,
-                            color=ft.Colors.PRIMARY if s.profil is not None else ft.Colors.OUTLINE,
-                        ),
-                        ft.Text(f"{n} {s.name}", weight=ft.FontWeight.W_600, expand=True),
-                        ft.Text(s.kurztext(), size=13, opacity=0.75),
-                    ]
-                )
+                vorher_zeile(n, s, s.item_id in abgehakt, s.item_id in erledigt, andere is None)
             )
-        weiter = "automatisch weiter" if plan.weiter_automatisch else "auf Tipp warten"
+        if plan.weiter_automatisch:
+            weiter = "Nach jeder Übung: automatisch weiter"
+        else:
+            weiter = "Nach dem Timer einer Übung: auf Tipp warten"
         zeilen.append(
             hinweis(
-                f"Nach jeder Übung: {weiter} (am Plan eingestellt) · Timer zusammen "
-                f"{dauer_text_gesamt(schritte)}, dazu die Pausen."
+                f"{weiter} (am Plan eingestellt) · Timer zusammen "
+                f"{dauer_text_gesamt(schritte)}, dazu die Pausen. Abgehakt kommt nicht dran — "
+                "antippen nimmt es wieder mit; ▶ beginnt dort."
             )
         )
+        if not plan.weiter_automatisch and any(s.profil is None for s in schritte):
+            zeilen.append(
+                ft.Switch(
+                    label="Pause auch nach Übungen ohne Timer",
+                    value=plan.pause_ohne_timer,
+                    on_change=pause_umschalten,
+                )
+            )
         teile: list[ft.Control] = [karte(*zeilen, abstand=8)]
         if plan_ablauf.hrv_moeglich(state):
 
@@ -176,18 +318,19 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
                     ),
                 ]
             teile.append(karte(*hrv, abstand=8))
-        andere = einheit_ui.laeuft(state)
         bereit = (v := einheit_ui.in_vorbereitung(state)) is not None and isinstance(
             v.teil("plan"), PlanAblaufBaustein
         )
+        # Alles abgehakt — heute schon durch: „Noch einmal“ (Ben, 18.10.2026)
+        nochmal = not offen()
         teile.append(
             ft.Row(
                 spacing=8,
                 controls=[
                     ft.FilledButton(
-                        "Ablauf starten",
-                        icon=ft.Icons.PLAY_ARROW,
-                        on_click=starten,
+                        "Noch einmal" if nochmal else "Ablauf starten",
+                        icon=ft.Icons.REPLAY if nochmal else ft.Icons.PLAY_ARROW,
+                        on_click=ablauf_starten,
                         disabled=andere is not None,
                         expand=True,
                     ),
@@ -206,6 +349,8 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
                 ],
             )
         )
+        if nochmal:
+            teile.append(hinweis("Heute ist alles gemacht — „Noch einmal“ nimmt alle Übungen mit."))
         if andere is not None:
             teile.append(hinweis("Es läuft schon eine Einheit — erst oben mit ⏹ beenden."))
         return teile
@@ -240,16 +385,72 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
             ),
         )
 
-    def wartende_zeile(n: int, s: Schritt) -> ft.Control:
+    def wechseln(teil: PlanAblaufBaustein, s: Schritt) -> None:
+        if teil.waehlen(s.item_id):
+            einheit_ui.melden(state)
+
+    def wechsel_fragen(teil: PlanAblaufBaustein, s: Schritt) -> None:
+        """Läuft der Timer der laufenden Übung, erst fragen (Ben: „Solange eine Übung keinen
+        nach unten zählenden Timer hat, ist es doch egal“)."""
+        nachher = Nachher()
+
+        def ja() -> None:
+            nachher.danach(lambda: wechseln(teil, s))
+            schliessen(dialog)
+
+        dialog: ft.AlertDialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(f"Zu {s.name} wechseln?"),
+            content=ft.Text(
+                f"Der Timer von „{teil.schritt.name}“ läuft noch. Er endet ohne Eintrag; die "
+                "Übung bleibt offen und kommt später noch dran."
+            ),
+            actions=[
+                ft.TextButton("Weiter üben", on_click=lambda: schliessen(dialog)),
+                ft.FilledButton("Wechseln", icon=ft.Icons.SWAP_HORIZ, on_click=ja),
+            ],
+            on_dismiss=nachher.bei_schliessen,
+        )
+        page.show_dialog(dialog)
+
+    def waehler(teil: PlanAblaufBaustein, s: Schritt) -> Callable[[], None]:
+        """Eine wartende Übung antippen: jetzt sie — die Uhr läuft dort (Ben, 18.10.2026)."""
+
+        def handler() -> None:
+            t = teil.timer
+            if teil.phase == UEBUNG and t is not None and t.lauf.begonnen and not t.lauf.fertig:
+                wechsel_fragen(teil, s)
+            else:
+                wechseln(teil, s)
+
+        return handler
+
+    def wartende_zeile(n: int, s: Schritt, teil: PlanAblaufBaustein) -> ft.Control:
+        schon = s.item_id in teil.unterbrochen
         return ft.Container(
-            padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+            padding=ft.Padding.only(left=12, right=4, top=8, bottom=8),
             border_radius=12,
             border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
-            content=ft.Column(
-                spacing=0,
+            ink=True,
+            tooltip=f"Jetzt {s.name}",
+            on_click=waehler(teil, s),
+            content=ft.Row(
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
-                    ft.Text(f"{n} {s.name}", weight=ft.FontWeight.W_600),
-                    ft.Text(f"{s.kurztext()} · wartet", size=12, opacity=0.75),
+                    ft.Column(
+                        spacing=0,
+                        expand=True,
+                        controls=[
+                            ft.Text(f"{n} {s.name}", weight=ft.FontWeight.W_600),
+                            ft.Text(
+                                f"{s.kurztext()} · "
+                                + ("angefangen — kommt noch" if schon else "wartet"),
+                                size=12,
+                                opacity=0.75,
+                            ),
+                        ],
+                    ),
+                    ft.Icon(ft.Icons.PLAY_ARROW, size=20, opacity=0.5),
                 ],
             ),
         )
@@ -308,7 +509,10 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
         )
 
     def pause_karte(teil: PlanAblaufBaustein) -> ft.Control:
-        naechste = teil.schritte[teil.k + 1] if teil.k + 1 < len(teil.schritte) else None
+        k = teil.naechster
+        naechste = teil.schritte[k] if k is not None else None
+        seit = ft.Text(size=13, opacity=0.8)
+        stand["pause"] = seit
 
         def weiter() -> None:
             teil.weiter()
@@ -321,8 +525,16 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
             content=ft.Column(
                 spacing=8,
                 controls=[
-                    ft.Text("Pause", size=16, weight=ft.FontWeight.W_700),
-                    hinweis("Die Pause wird ein eigener Abschnitt der Messung."),
+                    ft.Row(
+                        controls=[
+                            ft.Text("Pause", size=16, weight=ft.FontWeight.W_700, expand=True),
+                            seit,
+                        ]
+                    ),
+                    hinweis(
+                        "Die Pause wird ein eigener Abschnitt der Messung. Eine andere Übung: "
+                        "unten antippen."
+                    ),
                     ft.FilledButton(
                         f"Weiter mit {naechste.name}" if naechste else "Weiter",
                         icon=ft.Icons.PLAY_ARROW,
@@ -335,35 +547,39 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
     def waehrend(e: Any, teil: PlanAblaufBaustein) -> list[ft.Control]:
         werte = plan_ablauf.eingetragen(e)
         zeilen: list[ft.Control] = []
-        stand.update(zeit=None, info=None, balken=None)
-        for n, s in enumerate(teil.schritte, start=1):
-            k = n - 1
+        stand.update(zeit=None, info=None, balken=None, pause=None)
+        for k, s in enumerate(teil.schritte):
+            n = stelle.get(s.item_id, k + 1)
             grund = teil.ergebnisse.get(s.item_id)
-            if grund is not None and (k < teil.k or teil.phase in (PAUSE, FERTIG)):
-                zeilen.append(fertige_zeile(n, s, grund, werte.get(s.item_id)))
-            elif k == teil.k and teil.phase not in (PAUSE, FERTIG):
+            if k == teil.k and teil.phase == UEBUNG:
                 zeilen.append(laufende_karte(n, s, teil))
+            elif grund is not None:
+                zeilen.append(fertige_zeile(n, s, grund, werte.get(s.item_id)))
             else:
-                zeilen.append(wartende_zeile(n, s))
+                zeilen.append(wartende_zeile(n, s, teil))
             if k == teil.k and teil.phase == PAUSE:
                 zeilen.append(pause_karte(teil))
         zeilen.append(
             hinweis(
                 "Jede Übung kommt ins Tagebuch, sobald sie endet — mit Anfang, Ende und der "
-                "gelaufenen Zeit. „Überspringen“ trägt nichts ein."
+                "gelaufenen Zeit. „Überspringen“ trägt nichts ein. Eine wartende Übung "
+                "antippen: jetzt sie."
             )
         )
         return zeilen
 
     def zeiten_auffrischen(e: Any, teil: PlanAblaufBaustein) -> None:
-        """Restzeit, Satz und Balken der laufenden Übung — an Ort und Stelle."""
+        """Restzeit, Satz und Balken der laufenden Übung — an Ort und Stelle; ohne Timer läuft
+        die Uhr vorwärts, in der Pause zählt sie die Pause."""
+        if (pause := stand.get("pause")) is not None and teil.phase == PAUSE:
+            pause.value = dauer_text(teil.seit_s())
         zeit, info, balken = stand["zeit"], stand["info"], stand["balken"]
         if zeit is None or info is None:
             return
         t = teil.timer
         if t is None:
-            zeit.value = ""
-            info.value = "ohne Timer — abhaken"
+            zeit.value = dauer_text(teil.seit_s())
+            info.value = "ohne Timer — „Gemacht“, wenn du fertig bist"
             return
         lauf = t.lauf
         s = lauf.stand()
@@ -396,10 +612,20 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
                 state.einheit is None,
             )
         e, teil = jetzt
-        return ("lauf", teil.k, teil.phase, tuple(sorted(teil.ergebnisse.items())), e.id)
+        return (
+            "lauf",
+            teil.k,
+            teil.phase,
+            tuple(sorted(teil.ergebnisse.items())),
+            tuple(sorted(teil.unterbrochen)),
+            e.id,
+        )
 
     def neu_bauen() -> None:
+        war_im_lauf = stand["schluessel"] is not None and stand["schluessel"][0] == "lauf"
         stand["schluessel"] = schluessel()
+        if war_im_lauf and stand["schluessel"][0] != "lauf":
+            wahl["ohne"] = None  # nach dem Lauf: neu, was heute gemacht ist
         jetzt = plan_ablauf.laufender(state, plan.id)
         if jetzt is not None:
             inhalt.controls = waehrend(*jetzt)
@@ -436,7 +662,8 @@ _KEINER = "-"
 
 def plan_timer_karte(page: Any, state: AppState, plan: Plan) -> ft.Control:
     """Im Plan-Editor (Skizze 7): „Timer für alle Übungen“ und was nach dem Timer einer
-    Übung geschieht — auf einen Tipp warten oder automatisch weiter.
+    Übung geschieht — auf einen Tipp warten oder automatisch weiter; dazu, ob nach einer
+    Übung ohne Timer eine Pause kommt (Migration 021).
 
     Der Timer für alle ist eine Kopie aus der Timer-Bibliothek; es gilt der Timer der
     Planübung, sonst dieser, sonst der der Übung (Ben, 17.10.2026).
@@ -451,7 +678,9 @@ def plan_timer_karte(page: Any, state: AppState, plan: Plan) -> ft.Control:
         )
 
     def speichern() -> None:
-        state.plaene.plan_timer_setzen(plan.id, plan.timer, plan.weiter_automatisch)
+        state.plaene.plan_timer_setzen(
+            plan.id, plan.timer, plan.weiter_automatisch, plan.pause_ohne_timer
+        )
 
     def timer_gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
         wert = e.control.value or _KEINER
@@ -463,6 +692,10 @@ def plan_timer_karte(page: Any, state: AppState, plan: Plan) -> ft.Control:
 
     def weiter_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
         plan.weiter_automatisch = bool(e.control.selected) and e.control.selected[0] == "auto"
+        speichern()
+
+    def pause_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+        plan.pause_ohne_timer = bool(e.control.selected) and e.control.selected[0] == "pause"
         speichern()
 
     return karte(
@@ -484,6 +717,18 @@ def plan_timer_karte(page: Any, state: AppState, plan: Plan) -> ft.Control:
                 ft.Segment(value="auto", label=ft.Text("Automatisch weiter")),
             ],
             on_change=weiter_gewaehlt,
+        ),
+        # Ben, 18.10.2026: „bisher wird ohne Timer immer eine Pause gesetzt“ — „Gemacht“ ist
+        # dort schon der Tipp; gilt bei „Auf Tipp warten“
+        ft.Text("Nach einer Übung ohne Timer (bei „Auf Tipp warten“)", size=12, opacity=0.75),
+        ft.SegmentedButton(
+            selected=["pause" if plan.pause_ohne_timer else "gleich"],
+            show_selected_icon=False,
+            segments=[
+                ft.Segment(value="pause", label=ft.Text("Pause")),
+                ft.Segment(value="gleich", label=ft.Text("Gleich weiter")),
+            ],
+            on_change=pause_gewaehlt,
         ),
         hinweis(
             "Es gilt der Timer der Planübung (Uhr an der Übung), sonst dieser, sonst der der "

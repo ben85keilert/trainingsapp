@@ -537,8 +537,8 @@ def laufzeilen(e: Einheitslauf) -> tuple[str, str]:
         return f"Start in {rest} …", _teile_text(e)
     oben = [uhr(max(e.dauer_s(), 0.0))]
     if isinstance(ablauf := e.teil("plan"), PlanAblaufBaustein):
-        if ablauf.phase == PAUSE and ablauf.k + 1 < len(ablauf.schritte):
-            oben.append(f"Pause — dann {ablauf.schritte[ablauf.k + 1].name}")
+        if ablauf.phase == PAUSE and (n := ablauf.naechster) is not None:
+            oben.append(f"Pause — dann {ablauf.schritte[n].name}")
         elif ablauf.phase != PAUSE:
             oben.append(ablauf.schritt.name)
     if timer := timer_text(e):

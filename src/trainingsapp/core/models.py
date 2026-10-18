@@ -373,6 +373,9 @@ class Plan:
     timer: dict[str, Any] | None = None
     #: Nach dem Timer einer Übung automatisch weiter — sonst auf einen Tipp warten
     weiter_automatisch: bool = False
+    #: Wartet der Ablauf auf einen Tipp: auch nach einer Übung ohne Timer (Migration 021,
+    #: Vorgabe) — sonst beginnt nach „Gemacht“ gleich die nächste
+    pause_ohne_timer: bool = True
 
     def steht_an(self, tag: date) -> bool:
         """Ob der Plan an diesem Tag von sich aus auf „Heute" erscheint.

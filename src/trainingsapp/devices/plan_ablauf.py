@@ -11,6 +11,13 @@ gleich weiter, wie am Plan eingestellt. Nach der letzten Übung kommt ``plan/end
 Timer ebenso (Grund „abgebrochen“). Eingetragen wird außerhalb (``ui``) — je Übung, sobald
 sie endet, aus der Zeitleiste (`core.timer_eintrag`).
 
+Ben, 18.10.2026: Nach einer Übung **ohne Timer** muss keine Pause kommen — „Gemacht“ war
+schon der Tipp (``pause_ohne_timer``, am Plan eingestellt). Eine andere Übung lässt sich
+jederzeit **wählen** (`waehlen`): Die laufende endet ohne Eintrag und bleibt offen (Grund
+„gewechselt“), die Uhr läuft bei der gewählten — rückwärts mit Timer, vorwärts ohne
+(`seit_s`). Danach geht es mit der ersten offenen Übung in der Reihenfolge des Plans
+weiter (`naechster`).
+
 Die Einheit sieht den Timer der laufenden Übung als ihren (`Einheitslauf.timer`):
 Laufleiste, ⏸ und Töne folgen ihm.
 """
@@ -28,6 +35,8 @@ from .einheit import TimerBaustein
 
 #: Wo der Ablauf steht
 UEBUNG, PAUSE, FERTIG = "uebung", "pause", "fertig"
+#: Mit diesem Grund endet eine Übung, die offen bleibt — sie kommt später noch dran
+GEWECHSELT = "gewechselt"
 
 
 class PlanAblaufBaustein:
@@ -42,22 +51,32 @@ class PlanAblaufBaustein:
         schritte: list[Schritt],
         *,
         weiter_automatisch: bool = False,
+        pause_ohne_timer: bool = True,
+        erste: str | None = None,
     ) -> None:
+        """``pause_ohne_timer``: nach einer Übung ohne Timer auf „Weiter“ warten (sonst gleich
+        die nächste) — gilt nur, wenn nicht ohnehin ``weiter_automatisch``. ``erste``: die
+        Planübung, mit der der Ablauf beginnt (sonst die erste)."""
         if not schritte:
             raise ValueError("Ein Ablauf ohne Übung")
         self.plan_id = plan_id
         self.name = name
         self.schritte = schritte
         self.weiter_automatisch = weiter_automatisch
+        self.pause_ohne_timer = pause_ohne_timer
         #: die laufende (oder zuletzt gelaufene) Übung
-        self.k = 0
+        self.k = next((i for i, s in enumerate(schritte) if s.item_id == erste), 0)
         self.phase = UEBUNG
         #: der Timer der laufenden Übung — ``None`` ohne Timer
         self.timer: TimerBaustein | None = None
-        #: je Planübung, wie sie endete: fertig, gemacht, uebersprungen, abgebrochen
+        #: je Planübung, wie sie endete: fertig, gemacht, uebersprungen, abgebrochen, beendet
         self.ergebnisse: dict[str, str] = {}
+        #: Planübungen, die schon liefen und für eine andere verlassen wurden (`waehlen`)
+        self.unterbrochen: set[str] = set()
         self._uhr: Callable[[], float] = time.monotonic
         self._t0: float | None = None
+        #: seit wann die laufende Übung bzw. die Pause läuft (Uhr des Ablaufs)
+        self._seit: float | None = None
         self._ausstehend: list[Ereignis] = []
 
     # -- Teil einer Einheit ------------------------------------------------------------
@@ -77,12 +96,32 @@ class PlanAblaufBaustein:
     def schritt(self) -> Schritt:
         return self.schritte[self.k]
 
+    def offen(self, item_id: str) -> bool:
+        """Kommt diese Planübung noch dran? (Eine gewechselte ja, eine beendete nicht.)"""
+        return item_id not in self.ergebnisse
+
+    @property
+    def naechster(self) -> int | None:
+        """Die Übung nach der laufenden: die erste offene in der Reihenfolge des Plans —
+        ``None``, wenn keine mehr offen ist."""
+        return next(
+            (i for i, s in enumerate(self.schritte) if i != self.k and self.offen(s.item_id)),
+            None,
+        )
+
+    def seit_s(self) -> float:
+        """Wie lange die laufende Übung (oder die Pause) schon dauert — ohne Timer läuft
+        diese Uhr vorwärts (Ben, 18.10.2026)."""
+        if self._seit is None or self.phase == FERTIG:
+            return 0.0
+        return max(0.0, self._uhr() - self._seit)
+
     async def vorbereiten(self) -> None:
         return None
 
     def starten(self, t0: float) -> Beteiligung:
         self._t0 = t0
-        self._beginnen(0, t0)
+        self._beginnen(self.k, t0)
         return Beteiligung(
             "plan", Rolle.MITSTARTEN, daten={"plan": self.plan_id, "name": self.name}
         )
@@ -117,8 +156,32 @@ class PlanAblaufBaustein:
 
     def weiter(self) -> None:
         """In der Pause: die nächste Übung beginnt jetzt."""
-        if self.phase == PAUSE and self._t0 is not None:
-            self._beginnen(self.k + 1, self._uhr())
+        if self.phase == PAUSE and self._t0 is not None and (n := self.naechster) is not None:
+            self._beginnen(n, self._uhr())
+
+    def waehlen(self, item_id: str) -> bool:
+        """Jetzt diese Übung (Ben, 18.10.2026: „Eine Übung ist ausgewählt, die Uhr läuft …
+        immer dort, wo die Kachel gerade aktiviert ist“). Die laufende endet ohne Eintrag
+        und bleibt offen (Grund „gewechselt“), ihr Timer endet; aus der Pause beginnt die
+        gewählte sofort.
+
+        Returns:
+            ``False``, wenn es nicht geht: der Ablauf ist fertig, die Übung schon erledigt
+            oder unbekannt — oder sie läuft gerade.
+        """
+        if self._t0 is None or self.phase == FERTIG:
+            return False
+        k = next((i for i, s in enumerate(self.schritte) if s.item_id == item_id), None)
+        if k is None or not self.offen(item_id) or (self.phase == UEBUNG and k == self.k):
+            return False
+        jetzt = self._uhr()
+        if self.phase == UEBUNG:
+            if self.timer is not None:
+                self._ausstehend += self.timer.beenden(jetzt)
+            self._ausstehend.append(self._ende_ereignis(jetzt, GEWECHSELT))
+            self.unterbrochen.add(self.schritt.item_id)
+        self._beginnen(k, jetzt)
+        return True
 
     def gemacht(self) -> None:
         """Die laufende Übung ist fertig — mit Timer: jetzt ans Ende (die gelaufene Zeit
@@ -167,6 +230,7 @@ class PlanAblaufBaustein:
     def _beginnen(self, k: int, bei: float) -> None:
         assert self._t0 is not None
         self.k, self.phase = k, UEBUNG
+        self._seit = bei
         s = self.schritt
         self._ausstehend.append(
             Ereignis(bei - self._t0, "plan", "uebung_start", f"{s.name} beginnt", self._daten(s))
@@ -182,16 +246,20 @@ class PlanAblaufBaustein:
         assert self._t0 is not None
         self._ausstehend.append(self._ende_ereignis(jetzt, grund))
         self.ergebnisse[self.schritt.item_id] = grund
+        self.unterbrochen.discard(self.schritt.item_id)
+        ohne_timer = self.schritt.profil is None
         self.timer = None  # in der Pause gibt es keinen Timer (Laufleiste, ⏸)
-        if self.k + 1 >= len(self.schritte):
+        naechster = self.naechster
+        if naechster is None:
             self.phase = FERTIG
             self._ausstehend.append(
                 Ereignis(jetzt - self._t0, "plan", "ende", self.name, {"plan": self.plan_id})
             )
-        elif self.weiter_automatisch:
-            self._beginnen(self.k + 1, jetzt)
+        elif self.weiter_automatisch or (ohne_timer and not self.pause_ohne_timer):
+            self._beginnen(naechster, jetzt)
         else:
             self.phase = PAUSE
+            self._seit = jetzt
             self._ausstehend.append(
                 Ereignis(jetzt - self._t0, "plan", "pause", "Pause", {"plan": self.plan_id})
             )
@@ -201,4 +269,4 @@ class PlanAblaufBaustein:
         return out
 
 
-__all__ = ["FERTIG", "PAUSE", "UEBUNG", "PlanAblaufBaustein"]
+__all__ = ["FERTIG", "GEWECHSELT", "PAUSE", "UEBUNG", "PlanAblaufBaustein"]

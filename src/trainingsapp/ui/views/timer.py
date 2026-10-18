@@ -56,6 +56,7 @@ from trainingsapp.core.timer import (
     dauer_lesen,
     dauer_text,
     signale_kurz,
+    stoppuhr,
 )
 from trainingsapp.devices.einheit import TimerBaustein
 from trainingsapp.ui import einheit as einheit_ui
@@ -124,7 +125,7 @@ def timer_knopf(page: Any, state: AppState, name: str) -> ft.Control:
         lauf: TimerLauf | None = state.timer
         stand = lauf.stand() if lauf is not None else None
         aktiv = stand is not None and lauf is not None and lauf.begonnen and not stand.fertig
-        text.value = dauer_text(-(-stand.rest_s // 1)) if aktiv and stand else "Timer"
+        text.value = lauf.anzeige() if aktiv and lauf is not None else "Timer"
         return aktiv
 
     def auffrischen() -> None:
@@ -222,7 +223,19 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
 
     def anzeigen() -> None:
         stand = lauf.stand()
-        if stand.fertig:
+        fortschritt.visible = not lauf.vorwaerts
+        if lauf.vorwaerts:  # die Stoppuhr (Ben, 18.10.2026): vorwärts, ohne Abschnitte
+            abschnitt_text.value = profil.name
+            zeit_text.value = lauf.anzeige()
+            if stand.fertig:
+                stand_text.value = "fertig"
+            elif stand.laeuft:
+                stand_text.value = "läuft — „Fertig“, wenn du fertig bist"
+            elif lauf.begonnen:
+                stand_text.value = "angehalten — „Weiter“ zählt weiter"
+            else:
+                stand_text.value = "zählt vorwärts, bis du „Fertig“ tippst"
+        elif stand.fertig:
             abschnitt_text.value = "Fertig"
             zeit_text.value = "0:00"
             fortschritt.value = 1.0
@@ -242,6 +255,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 teile.append(f"Abschnitt {stand.index + 1} von {stand.abschnitte}")
             teile.append(f"gesamt noch {dauer_text(stand.gesamt_rest_s)}")
             stand_text.value = " · ".join(teile)
+        fertig_knopf.visible = lauf.vorwaerts and lauf.begonnen and not stand.fertig
         haupt_knopf.disabled = False
         if einheit_ui.besitzt_timer(state, lauf) and not lauf.begonnen:
             # Countdown der Einheit: Sie startet den Timer auf ihren Zeitpunkt
@@ -254,7 +268,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             text = "Nochmal" if stand.fertig else ("Weiter" if lauf.begonnen else "Start")
             haupt_knopf.content = _knopf_inhalt(ft.Icons.PLAY_ARROW, text)
             haupt_knopf.on_click = starten
-        ablauf.controls = ablauf_zeilen(stand)
+        ablauf.controls = [] if lauf.vorwaerts else ablauf_zeilen(stand)
 
     def auffrischen() -> None:
         anzeigen()
@@ -302,6 +316,12 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         ticker_starten(page, state)
         auffrischen()
 
+    def fertig() -> None:
+        """Die Stoppuhr anhalten und beenden — ihre Einheit endet mit ihr."""
+        lauf.fertig_machen()
+        auffrischen()
+        _leisten_auffrischen(state)
+
     def zurueck() -> None:
         lauf.zurueck()
         auffrischen()
@@ -333,6 +353,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
     async def signale_oeffnen() -> None:
         await page.push_route(f"{route}/signale")
 
+    # Vorne die Stoppuhr — eingebaut, ohne Stift und Löschen (Ben, 18.10.2026)
     profil_chips = ft.Row(
         wrap=True,
         spacing=8,
@@ -340,13 +361,18 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         controls=[
             ft.Chip(
                 label=ft.Text(p.name),
+                leading=ft.Icon(ft.Icons.AV_TIMER, size=18) if p.ist_stoppuhr else None,
                 selected=p.id == profil.id,
                 show_checkmark=False,
                 on_select=waehler(p.id),
             )
-            for p in profile
+            for p in [stoppuhr(), *profile]
         ],
     )
+    fertig_knopf = ft.IconButton(
+        ft.Icons.STOP, tooltip="Fertig", icon_size=28, on_click=fertig, visible=False
+    )
+    ohne_abschnitte = profil.ist_stoppuhr
     steuerung = ft.Row(
         alignment=ft.MainAxisAlignment.CENTER,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -356,12 +382,21 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 ft.Icons.REPLAY, tooltip="Zurücksetzen", icon_size=28, on_click=zuruecksetzen
             ),
             ft.IconButton(
-                ft.Icons.SKIP_PREVIOUS, tooltip="Abschnitt zurück", icon_size=28, on_click=zurueck
+                ft.Icons.SKIP_PREVIOUS,
+                tooltip="Abschnitt zurück",
+                icon_size=28,
+                on_click=zurueck,
+                visible=not ohne_abschnitte,
             ),
             haupt_knopf,
             ft.IconButton(
-                ft.Icons.SKIP_NEXT, tooltip="Nächster Abschnitt", icon_size=28, on_click=weiter
+                ft.Icons.SKIP_NEXT,
+                tooltip="Nächster Abschnitt",
+                icon_size=28,
+                on_click=weiter,
+                visible=not ohne_abschnitte,
             ),
+            fertig_knopf,
         ],
     )
     inhalt = ft.Column(
@@ -370,7 +405,10 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             kartentitel(
                 "Profil",
                 ft.IconButton(
-                    ft.Icons.EDIT_OUTLINED, tooltip="Profil bearbeiten", on_click=bearbeiten
+                    ft.Icons.EDIT_OUTLINED,
+                    tooltip="Profil bearbeiten",
+                    on_click=bearbeiten,
+                    disabled=profil.ist_stoppuhr,
                 ),
                 ft.IconButton(ft.Icons.ADD, tooltip="Neues Profil", on_click=neu),
             ),
@@ -386,10 +424,19 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             ),
             _bereitstellen_knopf(state, lauf, bereitstellen),
             _signale_vermerk(state, signale_oeffnen),
-            karte(kartentitel("Ablauf"), ablauf, abstand=6),
+            karte(kartentitel("Ablauf"), ablauf, abstand=6)
+            if not profil.ist_stoppuhr
+            else karte(
+                kartentitel("So zählt sie"),
+                hinweis(
+                    "Sie läuft, bis du „Fertig“ tippst; „Pause“ hält nur an. Für sich gestartet "
+                    "trägt sie nichts ins Tagebuch ein — in einer laufenden HRV-Messung setzt "
+                    "sie Marken, und eine laufende Einheit nimmt sie auf."
+                ),
+            ),
             hinweis(
                 "Der Timer läuft weiter, wenn du die Ansicht verlässt — oben in der Leiste "
-                "steht dann die Restzeit."
+                "steht dann seine Zeit."
             ),
         ],
     )

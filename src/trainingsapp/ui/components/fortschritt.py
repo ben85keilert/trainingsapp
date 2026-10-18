@@ -60,6 +60,7 @@ class Fortschrittsleiste:
         stuecke = self.lauf.fortschritt()
         self.balken.spacing = 3 if len(stuecke) < DICHT_AB else 1
         self.balken.controls = [_stueck(s, self.hoehe) for s in stuecke]
+        self.balken.visible = bool(stuecke)  # die Stoppuhr hat kein Ende, keine Leiste
         self.links.value, self.rechts.value = self.lauf.fortschritt_text()
 
 

@@ -45,7 +45,7 @@ def plan_info_view(
     gespeichert werden könnte — dann verweist die Seite auf die Übung.
     """
     route = f"{basis}/info/{item.id}" if item is not None else f"{basis}/info"
-    detail = uebung_detail(page, state, uebung, browser)
+    detail = uebung_detail(page, state, uebung, browser, item)
 
     async def einstellen() -> None:
         assert item is not None

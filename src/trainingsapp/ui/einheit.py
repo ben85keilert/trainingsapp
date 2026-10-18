@@ -635,8 +635,14 @@ def timer_text(e: Einheitslauf) -> str:
         return ""
     stand = t.lauf.stand()
     if stand.fertig:
-        return "Timer fertig"
-    teile = [t.lauf.abschnittsname(stand.nummer), f"noch {dauer_text(math.ceil(stand.rest_s))}"]
+        return f"{t.lauf.profil.name} fertig" if t.lauf.vorwaerts else "Timer fertig"
+    if t.lauf.vorwaerts:  # die Stoppuhr zählt vorwärts (18.10.2026)
+        teile = [t.lauf.profil.name, t.lauf.anzeige()]
+    else:
+        teile = [
+            t.lauf.abschnittsname(stand.nummer),
+            f"noch {dauer_text(math.ceil(stand.rest_s))}",
+        ]
     if not stand.laeuft and t.lauf.begonnen:
         teile.append("angehalten")
     return " · ".join(teile)

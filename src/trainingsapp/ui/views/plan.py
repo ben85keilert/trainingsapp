@@ -98,13 +98,14 @@ from trainingsapp.core.result_spec import (
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tagesbilanz import buendeln
 from trainingsapp.core.timer_eintrag import vom_timer_text
-from trainingsapp.core.uebung_timer import timer_fuer
+from trainingsapp.core.uebung_timer import timer_fuer, uhr_an
 from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import ohne_auto_update, sicher
 from trainingsapp.ui.components.scroll import scroll_merken
+from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile
 from trainingsapp.ui.components.werte import wert_leiste
 from trainingsapp.ui.components.zurueck import zurueck_ziel
 from trainingsapp.ui.state import AUFKLAPPEN, PLAN_DARSTELLUNGEN, UMSCHALTEN, AppState
@@ -1334,9 +1335,28 @@ def plan_view(
                         on_click=aufklapper(item),
                     )
                 )
+            # Stoppuhr und Timer (Ben, 18.10.2026): als Knöpfe zwischen „Gemacht“ und „Notiz“
+            # oder als eigene Zeile darunter — und, solange sie läuft, ihre Anzeige
+            aus_katalog = katalog[item.exercise_id]
+            planuebung = None if einzel else item
+            uhr = (
+                uhr_teile(
+                    page,
+                    state,
+                    uebung=aus_katalog,
+                    plan=None if einzel else plan,
+                    item=planuebung,
+                    timer_oeffnen=oeffner(uebung_timer_route(route, aus_katalog, planuebung)),
+                )
+                if uhr_an(aus_katalog, planuebung)
+                else UhrTeile()
+            )
+            knoepfe.extend(uhr.knoepfe)
             knoepfe.append(notiz_knopf(item))
             inhalt.append(geleistet_tafel(uebung, item))
             inhalt.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=knoepfe))
+            if uhr.zeile is not None and (offen or laufende(state, aus_katalog, planuebung)):
+                inhalt.append(uhr.zeile)
             if offen:
                 inhalt.extend(eingabe_bereich(item, uebung))
 
@@ -1431,8 +1451,9 @@ def plan_view(
             ),
             menue,
             ft.Text(
-                "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · +Zahl = Satz anhängen · "
-                "Eintragen = Sätze × Wert · Notiz = ins Tagebuch · i = Parameter herholen",
+                "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · Uhr = Zeit stoppen · "
+                "+Zahl = Satz anhängen · Eintragen = Sätze × Wert · Notiz = ins Tagebuch · "
+                "i = Parameter herholen",
                 size=11,
                 opacity=0.55,
             ),
@@ -1445,8 +1466,9 @@ def plan_view(
                 controls=[ft.Container(content=stand, expand=True), menue],
             ),
             ft.Text(
-                "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · +Zahl = Satz anhängen · "
-                "Eintragen = Sätze × Wert · Notiz = ins Tagebuch · i = Parameter herholen",
+                "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · Uhr = Zeit stoppen · "
+                "+Zahl = Satz anhängen · Eintragen = Sätze × Wert · Notiz = ins Tagebuch · "
+                "i = Parameter herholen",
                 size=11,
                 opacity=0.55,
             ),

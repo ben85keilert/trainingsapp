@@ -20,7 +20,6 @@ der Übung selbst (ein geändertes „zählt“) und die Wahl im `AppState`.
 from __future__ import annotations
 
 import contextlib
-import math
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -830,7 +829,7 @@ def uebung_timer_view(
         stand = lauf.stand()
         folge = lauf.profil.folge()
         zaehlend = [n for n, (*_, a) in enumerate(folge) if a.zaehlt]
-        zeit_text.value = dauer_text(math.ceil(stand.rest_s)) if not stand.fertig else "0:00"
+        zeit_text.value = lauf.anzeige()  # bei der Stoppuhr vorwärts (18.10.2026)
         teile = [stand.name or "Abschnitt"]
         if stand.nummer in zaehlend:
             teile.append(f"Satz {zaehlend.index(stand.nummer) + 1} von {len(zaehlend)}")
@@ -846,7 +845,7 @@ def uebung_timer_view(
                 anteile.append((a, stand.anteil))
             else:
                 anteile.append((a, -1.0 if not stand.fertig else 1.0))
-        balken_platz.content = _balken(anteile, hoehe=12)
+        balken_platz.content = None if lauf.vorwaerts else _balken(anteile, hoehe=12)
         # Sätze: was zählt, mit der gelaufenen Zeit aus der Zeitleiste
         fertig = {(z.name, z.runde): z.sekunden for z in gelaufene_zeiten(e.ereignisse)}
         zeilen: list[ft.Control] = []

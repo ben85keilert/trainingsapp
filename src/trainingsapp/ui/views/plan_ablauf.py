@@ -581,6 +581,12 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
             info.value = "ohne Timer — „Gemacht“, wenn du fertig bist"
             return
         lauf = t.lauf
+        if balken is not None:
+            balken.visible = not lauf.vorwaerts
+        if lauf.vorwaerts:  # an der Planübung die Stoppuhr gewählt (18.10.2026)
+            zeit.value = lauf.anzeige()
+            info.value = "Stoppuhr — „Fertig“, wenn du fertig bist"
+            return
         s = lauf.stand()
         folge = lauf.profil.folge()
         zaehlend = [n for n, (*_, a) in enumerate(folge) if a.zaehlt]

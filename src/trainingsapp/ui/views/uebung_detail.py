@@ -24,8 +24,8 @@ from trainingsapp.core.models import (
 )
 from trainingsapp.core.parameter import gewaehlte_felder
 from trainingsapp.core.result_spec import format_wert
-from trainingsapp.core.standards import abweichungen, vom_standard
-from trainingsapp.core.uebung_timer import profile_der_uebung
+from trainingsapp.core.standards import abweichungen, aktive_felder, vom_standard
+from trainingsapp.core.uebung_timer import TimerWahl, profile_der_uebung, uhr_an, zaehlt_als
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
@@ -54,6 +54,73 @@ def _abschnitt(titel: str, inhalt: ft.Control) -> ft.Control:
         controls=[
             ft.Text(titel.upper(), size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
             inhalt,
+        ],
+    )
+
+
+def uhr_und_timer(uebung: Exercise, item: PlanItem | None = None) -> ft.Control:
+    """Uhr und Timer der Übung — und was sie eintragen (Ben, 18.10.2026: „wenn eine Übung
+    einen Timer hat, wird der in der Übungseinstellung gezeigt, aber nicht in der
+    Informationsview. Dort sollte auch stehen …, wie sich Timer und Zeit auf die Zählung und
+    das ‚Gemacht‘-Feld auswirken“). Mit ``item`` so, wie die Planübung es einstellt."""
+    an = uhr_an(uebung, item)
+    zeilen: list[ft.Control] = []
+    if an:
+        zeilen.append(_uhr_zeile(ft.Icons.AV_TIMER, "Stoppuhr", "zählt vorwärts, immer dabei"))
+    for k, p in enumerate(profile_der_uebung(uebung)):
+        name = p.name + (" · Vorgabe" if k == 0 and len(uebung.timer) > 1 else "")
+        zeilen.append(_uhr_zeile(ft.Icons.TIMER_OUTLINED, name, p.kurztext()))
+    if not an:
+        zaehlt, erklaerung = "nichts (Uhr aus)", "Keine Uhr in der Übung — „Gemacht“ hakt nur ab."
+    else:
+        felder = (
+            [f.key for f in aktive_felder(item, uebung)]
+            if item is not None
+            else [f.key for f in uebung.result_spec.fields]
+        )
+        wohin = zaehlt_als(felder, uebung, item)
+        zaehlt = "Haltezeit je Satz" if wohin == "hold" else "Zeit"
+        erklaerung = (
+            "„Fertig“ hakt die Übung ab und trägt ein: "
+            + (
+                "jeder Lauf der Stoppuhr und jeder zählende Abschnitt eines Timers ist ein Satz"
+                if wohin == "hold"
+                else "die gelaufene Zeit, auch ohne den Parameter Zeit"
+            )
+            + ". Pausen zählen nicht, unter 5 s fällt weg; „Abbrechen“ trägt nichts ein."
+        )
+    zeilen.append(
+        ft.Container(
+            padding=12,
+            border_radius=12,
+            bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
+            content=ft.Column(
+                spacing=2,
+                controls=[
+                    ft.Text("Zählt als", size=12, opacity=0.7),
+                    ft.Text(zaehlt, size=17, weight=ft.FontWeight.W_600),
+                    ft.Text(erklaerung, size=12, opacity=0.75),
+                ],
+            ),
+        )
+    )
+    wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
+    if item is not None and (wahl.uhr is not None or wahl.zeitfeld):
+        zeilen.append(ft.Text("In diesem Plan eingestellt (Einstellen).", size=12, opacity=0.6))
+    return ft.Column(spacing=8, controls=zeilen)
+
+
+def _uhr_zeile(icon: ft.IconData, name: str, text: str) -> ft.Control:
+    return ft.Row(
+        spacing=10,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+        controls=[
+            ft.Icon(icon, size=20, opacity=0.85),
+            ft.Column(
+                spacing=0,
+                expand=True,
+                controls=[ft.Text(name, weight=ft.FontWeight.W_600), ft.Text(text, size=12)],
+            ),
         ],
     )
 
@@ -108,9 +175,14 @@ def _notation(uebung: Exercise) -> ft.Control:
 
 
 def uebung_detail(
-    page: ft.Page, state: AppState, uebung: Exercise, browser: ft.UrlLauncher
+    page: ft.Page,
+    state: AppState,
+    uebung: Exercise,
+    browser: ft.UrlLauncher,
+    item: PlanItem | None = None,
 ) -> ft.View:
-    """`browser` ist ein Flet-Dienst, den `main()` einmal an der Seite registriert."""
+    """`browser` ist ein Flet-Dienst, den `main()` einmal an der Seite registriert; mit
+    ``item`` (die Infoseite im Plan) zeigt „Uhr und Timer“, was die Planübung einstellt."""
 
     def oeffner(medium: Media) -> Callable[[], object]:
         async def handler() -> None:
@@ -337,6 +409,7 @@ def uebung_detail(
             else ft.Text("—"),
         ),
         _abschnitt("Eingabe", _notation(uebung)),
+        _abschnitt("Uhr und Timer", uhr_und_timer(uebung, item)),
         _abschnitt("Standard für Pläne", ft.Column(spacing=0, controls=verwendungen)),
         _abschnitt(
             "Videos",

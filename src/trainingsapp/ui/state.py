@@ -45,8 +45,10 @@ from trainingsapp.core.models import Exercise, Subject, jetzt, lokaler_tag
 from trainingsapp.core.pakete import Paket
 from trainingsapp.core.paketquelle import QUELLE_VORGABE, Pruefung, url_pruefen
 from trainingsapp.core.timer import (
+    STOPPUHR,
     TimerProfil,
     TimerSignale,
+    stoppuhr,
     timer_profile_lesen,
     timer_profile_schreiben,
     timer_signale_lesen,
@@ -92,6 +94,16 @@ PLAN_DARSTELLUNGEN: dict[str, str] = {
     UNTEREINANDER: "Alle Parameter untereinander",
     UMSCHALTEN: "Ein Parameter, umschaltbar",
     AUFKLAPPEN: "Aufklappen: eine Übung offen",
+}
+
+
+#: Wo Stoppuhr und Timer in der Übung stehen (Ben, 18.10.2026: „Kannst du Variante A und
+#: B2 einbauen. In den Haupt-Einstellungen kann man beides umstellen, Standard ist A.“)
+UHR_ZEILE = "zeile"
+UHR_KNOEPFE = "knoepfe"
+UHR_DARSTELLUNGEN: dict[str, str] = {
+    UHR_ZEILE: "Eigene Zeile: links die Wahl, rechts Start",
+    UHR_KNOEPFE: "Knöpfe „Uhr“ und „Timer“ neben „Gemacht“",
 }
 
 
@@ -272,6 +284,9 @@ class AppState:
     #: Der letzte Lauf je Übung, der aus ihrem Timer gestartet wurde (Einheit-ID) — für
     #: die Karte „gemacht“ nach dem Ende
     uebung_laeufe: dict[str, str] = field(default_factory=dict)
+    #: Uhr in der Übung (Ben, 18.10.2026): je Planübung bzw. Übung die gewählte oder zuletzt
+    #: gestartete — nur für diese Sitzung, keine Einstellung (`ui.components.uhr`)
+    uhr_wahl: dict[str, str] = field(default_factory=dict)
     #: Der letzte Ablauf je Plan (Einheit-ID) — für die Karte „fertig“ danach
     plan_ablaeufe: dict[str, str] = field(default_factory=dict)
     #: … und welche Planübungen in ihm liefen (Ben, 18.10.2026: Erledigtes bleibt draußen)
@@ -482,6 +497,16 @@ class AppState:
         if wert in PLAN_DARSTELLUNGEN:
             self.einstellungen.setzen(SettingRepo.PLAN_DARSTELLUNG, wert)
 
+    def uhr_darstellung(self) -> str:
+        """Wo Stoppuhr und Timer in der Übung stehen — `UHR_ZEILE` (Vorgabe) oder
+        `UHR_KNOEPFE`."""
+        wert = self.einstellungen.lesen(SettingRepo.UHR_DARSTELLUNG, UHR_ZEILE)
+        return wert if wert in UHR_DARSTELLUNGEN else UHR_ZEILE
+
+    def uhr_darstellung_setzen(self, wert: str) -> None:
+        if wert in UHR_DARSTELLUNGEN:
+            self.einstellungen.setzen(SettingRepo.UHR_DARSTELLUNG, wert)
+
     def darstellung(self, profil_id: str | None = None) -> Darstellung:
         """Farbprofil, Hell/Dunkel und Verlauf eines Profils (Vorgabe: das aktive)."""
         schluessel = f"{SettingRepo.DARSTELLUNG}:{profil_id or self.profil.id}"
@@ -601,9 +626,11 @@ class AppState:
         self.einstellungen.setzen(SettingRepo.TIMER_PROFILE, timer_profile_schreiben(profile))
 
     def timer_profil(self) -> TimerProfil:
-        """Das zuletzt benutzte Profil — fehlt es, das erste."""
+        """Das zuletzt benutzte Profil — fehlt es, das erste; die Stoppuhr ist eingebaut."""
         profile = self.timer_profile()
         gemerkt = self.einstellungen.lesen(SettingRepo.TIMER_AKTIV)
+        if gemerkt == STOPPUHR:
+            return stoppuhr()
         return next((p for p in profile if p.id == gemerkt), profile[0])
 
     def timer_profil_waehlen(self, profil_id: str) -> None:

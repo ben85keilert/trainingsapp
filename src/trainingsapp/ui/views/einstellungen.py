@@ -30,7 +30,7 @@ from trainingsapp.ui.components.hilfe import hilfe_oeffner
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.scroll import scroll_merken
-from trainingsapp.ui.state import PLAN_DARSTELLUNGEN, AppState
+from trainingsapp.ui.state import PLAN_DARSTELLUNGEN, UHR_DARSTELLUNGEN, AppState
 from trainingsapp.ui.views.einstellungen_darstellung import darstellung_karte
 
 
@@ -79,6 +79,9 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
 
     def darstellung_setzen(e: ft.Event[ft.Dropdown]) -> None:
         state.plan_darstellung_setzen(str(e.control.value))
+
+    def uhr_setzen(e: ft.Event[ft.Dropdown]) -> None:
+        state.uhr_darstellung_setzen(str(e.control.value))
 
     def oeffner(route: str) -> Callable[[], object]:
         async def handler() -> None:
@@ -185,6 +188,20 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                             hinweis(
                                 "Wie die Eingabe beim Training aussieht — auch oben im Plan "
                                 "umschaltbar."
+                            ),
+                            ft.Dropdown(
+                                label="Stoppuhr und Timer in der Übung",
+                                value=state.uhr_darstellung(),
+                                options=[
+                                    ft.DropdownOption(key=key, text=text)
+                                    for key, text in UHR_DARSTELLUNGEN.items()
+                                ],
+                                on_select=uhr_setzen,
+                                expand=True,
+                            ),
+                            hinweis(
+                                "Ob und wie die Zeit zählt, steht an jeder Übung (Übung "
+                                "bearbeiten → Timer: Uhr an/aus, „Zählt als“)."
                             ),
                         ),
                         darstellung_karte(page, state),

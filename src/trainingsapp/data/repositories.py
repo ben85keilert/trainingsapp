@@ -631,6 +631,8 @@ class SettingRepo:
     BEKANNTE_GERAETE = "bekannte_geraete"
     #: Plan: wie die Übungen beim Training aussehen (`ui.state.PLAN_DARSTELLUNGEN`)
     PLAN_DARSTELLUNG = "plan_darstellung"
+    #: Wo Stoppuhr und Timer in der Übung stehen (`ui.state.UHR_DARSTELLUNGEN`)
+    UHR_DARSTELLUNG = "uhr_darstellung"
     #: Paketquellen: JSON-Liste von Index-Adressen (`core.paketquelle`); fehlt der
     #: Schlüssel, gilt `QUELLE_VORGABE`
     PAKETQUELLEN = "paketquellen"

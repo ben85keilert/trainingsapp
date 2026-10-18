@@ -234,6 +234,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             elif standard_alle["ja"] and vorlage.type not in (FieldType.BOOL, FieldType.TEXT):
                 plan_wahl.add(key)
             standard_zeichnen()
+            uhr_zeichnen()
             page.update()
 
         return handler
@@ -558,6 +559,54 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
 
         return handler
 
+    # -- Die Uhr in der Übung (Ben, 18.10.2026: „die Uhr kann … separat ein/abgeschalten
+    # werden. Ist die Uhr ein, hat man automatisch Zeit mit dabei“) ----------------------
+    uhr_vorher = uebung.zaehlt_als if uebung is not None else ""
+    uhr_schalter = ft.Switch(
+        label="Uhr in der Übung — Stoppuhr und Timer",
+        value=uebung.uhr if uebung is not None else True,
+        on_change=lambda: uhr_zeichnen(),
+    )
+    zaehlt_als_wahl = ft.SegmentedButton(
+        segments=[
+            ft.Segment(value="hold", label=ft.Text("Haltezeit")),
+            ft.Segment(value="duration", label=ft.Text("Zeit")),
+        ],
+        selected=[uhr_vorher or "hold"],
+        allow_empty_selection=False,
+        show_selected_icon=False,
+    )
+    zaehlt_als_zeile = ft.Row(
+        spacing=12,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[ft.Text("Zählt als", weight=ft.FontWeight.W_600), zaehlt_als_wahl],
+    )
+    uhr_text = ft.Text(size=12, opacity=0.7)
+    uhr_spalte = ft.Column(spacing=8, controls=[uhr_schalter, zaehlt_als_zeile, uhr_text])
+
+    def uhr_zeichnen() -> None:
+        """„Zählt als“ nur mit Haltezeit — sonst zählt die Uhr immer als Zeit."""
+        an = bool(uhr_schalter.value)
+        halten = bool(schalter["hold"].value)
+        zaehlt_als_zeile.visible = an and halten
+        if an and halten:
+            uhr_text.value = (
+                "„Fertig“ hakt ab und trägt ein: einen Satz Haltezeit oder die Zeit. "
+                "Im Plan kann die Planübung abweichen."
+            )
+        elif an:
+            uhr_text.value = "Zählt als Zeit — auch ohne den Parameter Zeit. „Fertig“ hakt ab."
+        else:
+            uhr_text.value = "Aus: keine Uhr in der Übung — „Gemacht“ hakt nur ab."
+        with contextlib.suppress(Exception):  # noch nicht auf der Seite
+            uhr_spalte.update()
+
+    def zaehlt_als_lesen() -> str:
+        """Die Vorgabe (Haltezeit) bleibt leer, solange nie etwas anderes gewählt war — eine
+        Paketübung gilt sonst als „geändert: Zählt als“."""
+        wahl = next(iter(zaehlt_als_wahl.selected or []), "hold")
+        return "" if wahl == "hold" and not uhr_vorher else str(wahl)
+
     async def timer_editor(profil_id: str | None) -> None:
         """Den Profil-Editor öffnen — das Formular speichert vorher (beim Zurückkommen
         entsteht es aus der Datenbank neu). Fehlt etwas (Name), bleibt es hier."""
@@ -635,6 +684,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         page.show_dialog(dialog)
 
     timer_zeichnen()
+    uhr_zeichnen()
 
     # -- Speichern -------------------------------------------------------------
 
@@ -684,6 +734,8 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         ziel.default_target = ziel_lesen(ziel.result_spec)
         ziel.regionen = regionen_lesen()
         ziel.timer = [p.als_dict() for p in timer_liste]
+        ziel.uhr = bool(uhr_schalter.value)
+        ziel.zaehlt_als = zaehlt_als_lesen()
         ziel.media = [
             Media(
                 kind=MediaKind.VIDEO,
@@ -713,6 +765,8 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             gewaehlt,
             [(t.value or "", a.value or "") for t, a in medien_zeilen],
             [p.als_dict() for p in timer_liste],
+            bool(uhr_schalter.value),
+            zaehlt_als_lesen(),
         )
 
     def sichern() -> str | None:
@@ -821,11 +875,12 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                         ),
                         abschnitt("TIMER"),
                         ft.Text(
-                            "Die Uhr neben dem i startet den Timer der Übung — im Plan und in "
-                            "der Übung. Das erste Profil ist die Vorgabe; ein Plan kann je "
-                            "Planübung ein anderes wählen. Teile (Vorbereitung, Training, "
-                            "Cooldown) und „zählt“ je Abschnitt stellst du im Editor ein — er "
-                            "speichert vorher die Übung.",
+                            "Stoppuhr und Timer stehen in der Übung unter „Gemacht“ (wie, "
+                            "stellst du unter Einstellungen → Übungen ein); die Uhr neben dem i "
+                            "öffnet den Timer der Übung. Das erste Profil ist die Vorgabe; ein "
+                            "Plan kann je Planübung ein anderes wählen. Teile (Vorbereitung, "
+                            "Training, Cooldown) und „zählt“ je Abschnitt stellst du im Editor "
+                            "ein — er speichert vorher die Übung.",
                             size=12,
                             opacity=0.7,
                         ),
@@ -833,6 +888,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                         ft.TextButton(
                             "Timer hinzufügen", icon=ft.Icons.MORE_TIME, on_click=timer_hinzufuegen
                         ),
+                        uhr_spalte,
                         abschnitt("SYMBOL"),
                         symbole,
                         abschnitt("VIDEOS"),

@@ -607,7 +607,9 @@ def _timer_zeilen(lauf: TimerLauf) -> tuple[str, str]:
     """Rechts „noch 1:36“, darunter „Belastung · Runde 2 von 4“."""
     stand = lauf.stand()
     if stand.fertig:
-        return "fertig", "Timer fertig"
+        return "fertig", f"{lauf.profil.name} fertig" if lauf.vorwaerts else "Timer fertig"
+    if lauf.vorwaerts:  # die Stoppuhr (18.10.2026): die gelaufene Zeit
+        return lauf.anzeige(), lauf.profil.name + ("" if stand.laeuft else " · angehalten")
     name = stand.name or f"Abschnitt {stand.index + 1}"
     if stand.runden > 1:
         name += f" · Runde {stand.runde} von {stand.runden}"

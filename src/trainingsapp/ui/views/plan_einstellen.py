@@ -12,8 +12,10 @@ Von oben nach unten (Ben, 14.10.2026):
 2. **Chips** — unter jedem eingeschalteten Parameter seine Chips zum Antippen,
    aufsteigend; eigene Werte lassen sich ergänzen. **Kein Chip heißt freies
    Feld** — das gibt es beim Üben für jeden Messwert ohnehin.
-3. **Ziel** (optional) — was „Wie geplant" einträgt.
-4. **Standard der Übung** — weicht die Planübung ab, wird „Zurücksetzen"
+3. **Uhr in diesem Plan** (Ben, 18.10.2026) — Stoppuhr und Timer wie die Übung, an oder
+   aus; mit Haltezeit „Zählt als“ wie die Übung, Haltezeit oder Zeit (`TimerWahl`).
+4. **Ziel** (optional) — was „Wie geplant" einträgt.
+5. **Standard der Übung** — weicht die Planübung ab, wird „Zurücksetzen"
    aktiv (sofort, nicht erst nach dem Speichern); „Als Standard setzen"
    schiebt die Einstellung in die Übung (`core/standards.py`).
 
@@ -22,6 +24,7 @@ Zurück speichert (Ben, 16.10.2026, `components/zurueck.py`); „Abbrechen" verw
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -51,6 +54,7 @@ from trainingsapp.core.standards import (
     ziel_bereinigen,
     ziel_spec,
 )
+from trainingsapp.core.uebung_timer import TimerWahl, uhr_an
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.parameter_wahl import parameter_wahl
@@ -124,6 +128,7 @@ def plan_einstellen(
             felder=None if felder == standard else felder,
             input_mode=modus_aus_felder(felder),
             quick=quick,
+            timer=neue_wahl().als_dict(),
         )
 
     # -- Aufbau ------------------------------------------------------------------
@@ -131,6 +136,7 @@ def plan_einstellen(
     def zeichnen() -> None:
         parameter_reihe.content = parameter_wahl(eigene, aktiv, umschalten, vorrat)
         chips_bereich.controls = [chips_block(f) for f in planbar if f.key in aktiv]
+        uhr_zeichnen()  # „Zählt als“ hängt an der Haltezeit
         if not aktiv:
             chips_bereich.controls = [
                 ft.Text(
@@ -255,6 +261,58 @@ def plan_einstellen(
             ),
         )
 
+    # -- Uhr in diesem Plan (Ben, 18.10.2026) -------------------------------------------
+
+    wahl_vorher = TimerWahl.aus_dict(item.timer)
+    uhr_wahl = ft.SegmentedButton(
+        segments=[
+            ft.Segment(value="uebung", label=ft.Text("Wie die Übung")),
+            ft.Segment(value="an", label=ft.Text("An")),
+            ft.Segment(value="aus", label=ft.Text("Aus")),
+        ],
+        selected=["uebung" if wahl_vorher.uhr is None else "an" if wahl_vorher.uhr else "aus"],
+        allow_empty_selection=False,
+        show_selected_icon=False,
+        on_change=lambda: uhr_zeichnen(),
+    )
+    zaehlt_wahl = ft.SegmentedButton(
+        segments=[
+            ft.Segment(value="uebung", label=ft.Text("Wie die Übung")),
+            ft.Segment(value="hold", label=ft.Text("Haltezeit")),
+            ft.Segment(value="duration", label=ft.Text("Zeit")),
+        ],
+        selected=[wahl_vorher.zeitfeld or "uebung"],
+        allow_empty_selection=False,
+        show_selected_icon=False,
+    )
+    zaehlt_zeile = ft.Column(
+        spacing=6, controls=[ft.Text("Zählt als", weight=ft.FontWeight.W_600), zaehlt_wahl]
+    )
+    uhr_text = ft.Text(size=12, opacity=0.7)
+    uhr_bereich = ft.Column(spacing=10, controls=[uhr_wahl, zaehlt_zeile, uhr_text])
+
+    def neue_wahl() -> TimerWahl:
+        """Die Timer-Wahl der Planübung mit Uhr und „Zählt als“ vom Bildschirm."""
+        w = TimerWahl.aus_dict(item.timer)
+        u = next(iter(uhr_wahl.selected or []), "uebung")
+        w.uhr = None if u == "uebung" else u == "an"
+        z = next(iter(zaehlt_wahl.selected or []), "uebung")
+        w.zeitfeld = "" if z == "uebung" else str(z)
+        return w
+
+    def uhr_zeichnen() -> None:
+        """„Zählt als“ nur, wenn der Plan Haltezeit anbietet — sonst zählt die Uhr als Zeit."""
+        an = uhr_an(uebung, replace(item, timer=neue_wahl().als_dict()))
+        zaehlt_zeile.visible = an and "hold" in aktiv
+        if not an:
+            uhr_text.value = "Aus: keine Uhr in dieser Planübung — „Gemacht“ hakt nur ab."
+        elif "hold" in aktiv:
+            uhr_text.value = "„Fertig“ trägt einen Satz Haltezeit oder die Zeit ein."
+        else:
+            uhr_text.value = "Zählt als Zeit — auch ohne den Parameter Zeit."
+        with contextlib.suppress(Exception):  # noch nicht auf der Seite
+            uhr_bereich.update()
+
     # -- Speichern und Standard ------------------------------------------------------
 
     def sichern() -> str | None:
@@ -265,6 +323,8 @@ def plan_einstellen(
         aktuell = eingestellt()
         state.plaene.ziel_setzen(item.id, aktuell.target)
         state.plaene.eingabe_setzen(item.id, aktuell.input_mode, aktuell.quick, aktuell.felder)
+        if aktuell.timer != item.timer:
+            state.plaene.timer_setzen(item.id, aktuell.timer)
         return None
 
     async def zurueckgehen() -> None:
@@ -318,6 +378,8 @@ def plan_einstellen(
         ),
         parameter_reihe,
         chips_bereich,
+        abschnitt("UHR IN DIESEM PLAN"),
+        uhr_bereich,
         ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             controls=[abschnitt("ZIEL (optional)"), hilfe_knopf(page)],

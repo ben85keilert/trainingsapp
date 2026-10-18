@@ -43,6 +43,8 @@ HINWEIS = (
     "Speichern legt für jeden geänderten Eintrag eine Korrektur an — der alte Stand bleibt "
     "im Verlauf. Zurück speichert ebenso."
 )
+#: Geschätzte Höhen im Blatt (px): Kopf, Knöpfe und Hinweis; je Karte; je Feld darin
+BLATT_RAHMEN, BLATT_KARTE, BLATT_FELD = 270.0, 90.0, 112.0
 #: Dasselbe im Blatt
 HINWEIS_BLATT = (
     "Speichern legt für jeden geänderten Eintrag eine Korrektur an — der alte Stand bleibt "
@@ -205,6 +207,12 @@ class _Leistungen:
 
     def geaendert(self) -> bool:
         return any(k.geaendert() for k in self.karten)
+
+    def hoehe(self) -> float:
+        """Wie hoch das Blatt etwa wird — passt es nicht, scrollt es (`leistungen_blatt`)."""
+        return BLATT_RAHMEN + sum(
+            BLATT_KARTE + BLATT_FELD * len(k.form.spec.fields) for k in self.karten
+        )
 
     def _korrigieren(self, k: _Karte) -> None:
         werte, notiz = k.stand()
@@ -428,6 +436,10 @@ def leistungen_blatt(
         if nachtragen is not None
         else []
     )
+    # Eine scrollende Spalte macht das Blatt bildschirmhoch — nur wenn es nicht passt, damit
+    # die Ansicht darunter sichtbar bleibt (Ben: „man hat mehr Orientierung“)
+    hoehe = float(getattr(page, "height", None) or 700)
+    scrollen = leistungen.hoehe() > 0.9 * hoehe
     blatt = ft.BottomSheet(
         show_drag_handle=True,
         scrollable=True,
@@ -438,7 +450,7 @@ def leistungen_blatt(
             content=ft.Column(
                 tight=True,
                 spacing=14,
-                scroll=ft.ScrollMode.AUTO,
+                scroll=ft.ScrollMode.AUTO if scrollen else None,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[
                     ft.Text(leistungen.titel, size=20, weight=ft.FontWeight.W_600),

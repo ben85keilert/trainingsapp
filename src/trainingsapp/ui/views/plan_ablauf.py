@@ -67,8 +67,6 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
     route = plan_ablauf_route(basis)
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
     schritte = schritte_fuer(plan, katalog)
-    #: die Stelle im Plan je Planübung — die Nummern bleiben, auch wenn nur ein Teil läuft
-    stelle = {s.item_id: n for n, s in enumerate(schritte, start=1)}
     #: ``ohne``: abgehakt, kommt nicht dran — ``None``: wie heute erledigt (`ohne`)
     wahl: dict[str, Any] = {"hrv": True, "hrv_beenden": True, "ohne": None}
     inhalt = ft.Column(spacing=10)
@@ -272,7 +270,7 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
             hinweis(
                 f"{weiter} (am Plan eingestellt) · Timer zusammen "
                 f"{dauer_text_gesamt(schritte)}, dazu die Pausen. Abgehakt kommt nicht dran — "
-                "antippen nimmt es wieder mit; ▶ beginnt dort."
+                "antippen nimmt es wieder mit; der Pfeil rechts beginnt dort."
             )
         )
         if not plan.weiter_automatisch and any(s.profil is None for s in schritte):
@@ -549,7 +547,7 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
         zeilen: list[ft.Control] = []
         stand.update(zeit=None, info=None, balken=None, pause=None)
         for k, s in enumerate(teil.schritte):
-            n = stelle.get(s.item_id, k + 1)
+            n = k + 1  # wie „Übung 1 von 3“ in der Laufleiste — Abgehaktes läuft nicht mit
             grund = teil.ergebnisse.get(s.item_id)
             if k == teil.k and teil.phase == UEBUNG:
                 zeilen.append(laufende_karte(n, s, teil))

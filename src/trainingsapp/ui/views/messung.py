@@ -59,7 +59,7 @@ from trainingsapp.core.timer import (
     messdauer,
 )
 from trainingsapp.devices.base import DeviceInfo, Verbindung
-from trainingsapp.devices.einheit import Einheitslauf, TimerBaustein
+from trainingsapp.devices.einheit import Einheitslauf, HrvBaustein, TimerBaustein
 from trainingsapp.devices.messlauf import Gespeichert, Messlauf, backup_wiederherstellen
 from trainingsapp.devices.profiles import geraeteart
 from trainingsapp.devices.simulated import (
@@ -932,7 +932,11 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             state.messung_ende_s = None
             einheit_ui.alle_starten(page, state, 0.0)
             return
-        lauf.aufnahme_starten()
+        # Für sich gestartet — trotzdem in die Leiste und in den Reiter „Einheit“ (Ben,
+        # 18.10.2026): als eigene Einheit oder in der, die schon läuft; sonst allein
+        hrv = HrvBaustein(lauf, basis=datenverzeichnis())
+        if einheit_ui.einzeln_starten(page, state, hrv) is None:
+            lauf.aufnahme_starten()
         state.messung_ende_s = None
         await _hintergrund(state, lauf, True, f"Aufnahme läuft · {lauf.geraet_name}")
         state.neu_zeichnen()
@@ -1130,8 +1134,10 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             and {t.art for t in e.teile} <= {"hrv", "timer"}
         )
         ergebnis = lauf.aufnahme_stoppen(datenverzeichnis())
-        if nur_messung:
+        if nur_messung and e is not None and not e.ende_wenn_alles_fertig:
             einheit_ui.alle_beenden(state)
+        # Aus Einzelstarts: Die Einheit endet von selbst, sobald nichts mehr läuft — ein
+        # Timer, der dazukam, läuft weiter (Ben, 18.10.2026)
         await _hintergrund(state, lauf, True, f"Verbunden mit {lauf.geraet_name}")
         if ergebnis is None:
             aktualisieren(erzwingen=True)

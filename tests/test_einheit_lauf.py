@@ -306,3 +306,74 @@ async def test_spaete_vorbereitung_setzt_den_lauf_nicht_zurueck() -> None:
     e.starten()
     await vorbereitung
     assert e.zustand is Zustand.LAEUFT
+
+
+# ---------------------------------------------------------------------------
+# Einzeln gestartet (Ben, 18.10.2026): beitreten, Ende wenn nichts mehr läuft
+# ---------------------------------------------------------------------------
+
+
+async def test_timer_tritt_der_messung_bei_und_haelt_die_einheit(aufbau) -> None:
+    """Die Messung lief für sich (eigene Einheit), dann startet man den Timer einzeln: Er tritt
+    bei — Marken in der Aufnahme ab seinem Start. Stoppt man die Messung, läuft die Einheit
+    mit dem Timer weiter und endet mit ihm."""
+    uhr, gurt, lauf, repo, profil, tmp_path = aufbau
+    e = _einheit(lauf, uhr, repo, profil, "HRV-Messung")
+    e.hinzufuegen(HrvBaustein(lauf, basis=tmp_path))
+    e.ende_wenn_alles_fertig = True
+    e.starten()
+    await _sekunden(uhr, gurt, 30, e)
+    timer = TimerBaustein(TimerLauf(_intervall(), uhr=lauf.uhr))
+    e.beitreten(timer)
+    with pytest.raises(ValueError):
+        e.beitreten(TimerBaustein(TimerLauf(_intervall(), uhr=lauf.uhr)))
+    await _sekunden(uhr, gurt, 40, e)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)  # die Messung endet für sich
+    assert ergebnis is not None
+    await _sekunden(uhr, gurt, 10, e)
+    assert e.zustand is Zustand.LAEUFT  # der Timer läuft noch
+    await _sekunden(uhr, gurt, 60, e)  # 2 × (30 + 15) = 90 s ab Sekunde 30
+    assert e.zustand is Zustand.BEENDET
+    zeitleiste = [(x.t_s, x.quelle, x.art) for x in repo.ereignisse(e.id)]
+    assert (30.0, "timer", "beigetreten") in zeitleiste
+    assert ("hrv", "verlassen") in [(q, a) for _, q, a in zeitleiste]
+    teile = {b.art: b for b in repo.beteiligungen(e.id)}
+    assert teile["timer"].von_s == 30.0 and teile["timer"].bis_s is not None
+    # In der Aufnahme beginnt der Timer bei Sekunde 30 seiner Wanduhr
+    rec = laden(ergebnis.pfad)
+    wand = {x["text"]: x["t_wall_s"] for x in rec.ereignisse}
+    assert wand["Timer „T“: Belastung (Runde 1/2)"] == 30.0
+    assert wand["Pause (Runde 1/2)"] == 60.0
+
+
+async def test_messung_tritt_dem_timer_bei_und_laeuft_danach_weiter(aufbau) -> None:
+    """Der Timer lief für sich, dann startet man die Messung: Die Aufnahme beginnt jetzt, auf
+    der Achse der Einheit. Endet die Einheit, läuft die Aufnahme weiter — die Einheit hat
+    sie nicht gestartet."""
+    uhr, gurt, lauf, repo, profil, tmp_path = aufbau
+    e = Einheitslauf(uhr=lauf.uhr, jetzt_utc=uhr.utc, senke=repo, subject_id=profil, titel="T")
+    e.hinzufuegen(TimerBaustein(TimerLauf(_intervall(), uhr=lauf.uhr)))
+    e.ende_wenn_alles_fertig = True
+    e.starten()
+    await _sekunden(uhr, gurt, 10, e)
+    e.beitreten(HrvBaustein(lauf, basis=tmp_path))
+    assert lauf.aufnahme is not None and e.hrv is not None
+    assert not e.stoppt_am_ende("hrv")
+    beteiligt = {b.art: b for b in repo.beteiligungen(e.id)}
+    assert beteiligt["hrv"].versatz_s == 10.0 and beteiligt["hrv"].von_s == 10.0
+    await _sekunden(uhr, gurt, 85, e)  # der Timer ist durch, die Aufnahme läuft
+    assert e.zustand is Zustand.LAEUFT
+    e.beenden()  # ⏹
+    abschluss = await e.abschliessen()
+    assert abschluss.hrv is None and lauf.aufnahme is not None  # läuft weiter
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    assert ergebnis is not None
+    wand = {x["text"]: x["t_wall_s"] for x in laden(ergebnis.pfad).ereignisse}
+    # Die Aufnahme begann bei Sekunde 10 der Einheit: Der zweite Abschnitt (45 s) liegt bei 35
+    assert wand["Belastung (Runde 2/2)"] == 35.0
+
+
+async def test_beitreten_nur_im_lauf() -> None:
+    e = Einheitslauf(uhr=Uhr())
+    with pytest.raises(RuntimeError):
+        e.beitreten(TimerBaustein(TimerLauf(_intervall())))

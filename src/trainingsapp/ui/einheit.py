@@ -6,6 +6,11 @@ Plan) hat neben „Start“ den Knopf **Bereitstellen** (Ben, 17.10.2026). Er le
 seinen Teil in die Einheit; die **Startleiste** unter der Titelleiste zeigt alles
 Bereitgestellte und startet es gemeinsam. Danach ist sie die **Laufleiste**.
 
+**Einzeln gestartet** (Ben, 18.10.2026): Startet man die Messung oder den Timer für sich,
+kommt er trotzdem in die Leiste und den Reiter „Einheit“ (`einzeln_starten`) — läuft schon
+eine Einheit, tritt er ihr bei, sonst bildet er eine eigene, die endet, wenn nichts in ihr
+mehr läuft. Steht eine Einheit nur bereit, startet er allein wie bisher.
+
 Das Ausdauertraining läuft immer als Einheit (Stufe 2): Sein Teil ist
 `devices.strecke_baustein.StreckeBaustein` (``state.ausdauer``, solange er
 bereitsteht oder läuft); nach dem Ende tragen `ui.training` Strecke und Tagebuch ein.
@@ -155,6 +160,41 @@ def hrv_bereitstellen(page: Any, state: Any, basis: Any = None) -> HrvBaustein |
     teil = HrvBaustein(lauf, basis=basis if basis is not None else datenverzeichnis())
     _ersetzen(page, state, teil)
     return teil
+
+
+def einzeln_starten(page: Any, state: Any, teil: Any) -> Einheitslauf | None:
+    """Ein Dienst, der für sich startet (Timer, HRV-Messung), kommt in die Leiste und in den
+    Reiter „Einheit“ (Ben, 18.10.2026: „auch wenn die Dienste nicht direkt verbunden
+    wurden. Ohne die manuelle Verbindung kann man die ja trotzdem noch verketten“).
+
+    - Läuft eine Einheit ohne einen Teil dieser Art: Er tritt ihr bei (`Einheitslauf.beitreten`)
+      und bekommt ihre Achse — Marken in der HRV-Aufnahme, Intervalle zum Training.
+    - Läuft keine: Er ist eine eigene Einheit, die endet, wenn nichts in ihr mehr läuft
+      (`Einheitslauf.ende_wenn_alles_fertig`) — der Timer mit seinem Ende, die Messung mit
+      ihrem Stopp.
+
+    ``None``: Er startet allein wie bisher — eine Einheit steht nur bereit (sie bleibt
+    unangetastet), zählt gerade herunter, hat schon einen Teil dieser Art, oder ein
+    Plan-Ablauf führt den Timer selbst.
+    """
+    e = laeuft(state)
+    if e is not None:
+        if e.zustand is not Zustand.LAEUFT or e.teil(teil.art) is not None:
+            return None
+        if isinstance(teil, TimerBaustein) and (e.timer is not None or e.teil("plan")):
+            return None  # ein Plan-Ablauf oder eine Übung führt ihre Timer selbst
+        e.beitreten(teil)
+        if isinstance(teil, TimerBaustein):
+            _timer_ticken(page, state, e)
+        melden(state)
+        state.neu_zeichnen()
+        return e
+    if in_vorbereitung(state) is not None:
+        return None
+    e = _neue(state)
+    e.hinzufuegen(teil)
+    e.ende_wenn_alles_fertig = True
+    return alle_starten(page, state, 0.0)
 
 
 def timer_bereitstellen(page: Any, state: Any, lauf: TimerLauf) -> TimerBaustein:
@@ -595,6 +635,7 @@ __all__ = [
     "bereitgestellt",
     "besitzt_timer",
     "dabei",
+    "einzeln_starten",
     "heute_reiter",
     "heute_reiter_waehlen",
     "hrv_bereitstellen",

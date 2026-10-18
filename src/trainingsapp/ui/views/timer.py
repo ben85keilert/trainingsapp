@@ -57,6 +57,7 @@ from trainingsapp.core.timer import (
     dauer_text,
     signale_kurz,
 )
+from trainingsapp.devices.einheit import TimerBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.karte import hinweis, karte
@@ -263,6 +264,16 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
     def starten() -> None:
         if einheit_ui.bereitgestellt(state, "timer"):  # allein starten: aus der Startleiste
             einheit_ui.zuruecknehmen(page, state, "timer")
+        # Für sich gestartet — trotzdem in die Leiste und in den Reiter „Einheit“, mit Runden
+        # und Abschnitten (Ben, 18.10.2026): als eigene Einheit oder in der, die schon läuft
+        von_vorn = not lauf.begonnen or lauf.fertig or lauf.abgebrochen
+        if (
+            von_vorn
+            and not einheit_ui.besitzt_timer(state, lauf)
+            and einheit_ui.einzeln_starten(page, state, TimerBaustein(lauf)) is not None
+        ):
+            auffrischen()
+            return
         lauf.start()
         ticker_starten(page, state)
         auffrischen()

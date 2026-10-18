@@ -45,6 +45,26 @@ endet nach Wahl mit dem Timer oder läuft weiter. **Die HRV pausiert nie** — e
 beginnt schon beim Countdown (Vorlauf, `versatz_s = −3`), sonst fehlten die ersten
 Schläge.
 
+**Einzeln gestartet** (Ben, 18.10.2026: „Wenn aber Dienste einzeln gestartet werden,
+sollten diese auch in die Leiste und zu Heute-Einheit, auch wenn die Dienste nicht direkt
+verbunden wurden. Ohne die manuelle Verbindung kann man die ja trotzdem noch verketten“):
+Startet man die Messung („offen“) oder den Timer für sich, ruft die Oberfläche
+`ui.einheit.einzeln_starten`:
+
+- **Läuft eine Einheit** ohne einen Teil dieser Art, tritt er ihr bei
+  (`Einheitslauf.beitreten`, Zeitleiste `<teil>/beigetreten`, Beteiligung ab `von_s`): der
+  Timer von vorn auf der Achse der Einheit, die HRV mit einer neuen Aufnahme. Was so
+  dazukam, hat die Einheit nicht gestartet — eine HRV-Aufnahme läuft nach ihrem Ende weiter
+  (`am_ende_stoppen["hrv"] = False`), ein Timer endet mit. Nicht in eine Einheit mit
+  Plan-Ablauf oder Übungs-Timer (die führen ihre Timer selbst).
+- **Läuft keine**, ist er eine eigene Einheit mit `ende_wenn_alles_fertig`: Sie endet,
+  sobald kein Teil mehr läuft (`aktiv`: Timer nicht fertig und nicht abgebrochen, HRV mit
+  Aufnahme) — der Timer allein mit seinem Ende, die Messung mit „Stopp & speichern“; ist
+  ein Timer beigetreten, läuft sie weiter, bis auch er fertig ist. ⏹ in der Laufleiste
+  beendet und speichert wie gewohnt.
+- **Steht eine Einheit nur bereit** (oder zählt sie herunter), startet er allein wie bisher —
+  die bereitgestellte bleibt unangetastet.
+
 ## 3. Eine Achse, je Uhrdomäne ein Anker
 
 - `Zeitbasis`: monotone Uhr und UTC einmal nacheinander gelesen. Jedes Ereignis trägt

@@ -338,3 +338,104 @@ async def test_einheit_beenden_laesst_sich_im_lauf_abwaehlen(state) -> None:
         asyncio.gather(*[a for a in page.aufgaben if isinstance(a, asyncio.Task)]), 6
     )
     assert state.einheit is None
+
+
+# ---------------------------------------------------------------------------
+# Einzeln gestartet (Ben, 18.10.2026): trotzdem in Leiste und Reiter „Einheit“
+# ---------------------------------------------------------------------------
+
+
+def _knopf_mit(c, text: str):
+    for x in _alle(c):
+        inhalt = getattr(x, "content", None)
+        if isinstance(x, ft.FilledButton) and any(
+            isinstance(t, ft.Text) and t.value == text for t in _alle(inhalt)
+        ):
+            return x
+    raise AssertionError(f"kein Knopf {text!r}")
+
+
+async def test_timer_einzeln_gestartet_steht_in_leiste_und_reiter(state) -> None:
+    """Start im Timer (ohne Bereitstellen): eine eigene Einheit — Laufleiste auf anderen
+    Seiten, im Reiter „Einheit“ der Timer mit Fortschrittsleiste; sie endet mit ihm."""
+    page = Seite()
+    state.neu_zeichnen = lambda: None
+    state.timer_profil_waehlen(state.timer_profile()[0].id)
+    ansicht = timer_view(page, state, "/")
+    lauf = state.timer
+    _knopf_mit(ansicht, "Start").on_click()
+    e = einheit_ui.laeuft(state)
+    assert e is not None and e.ende_wenn_alles_fertig and einheit_ui.besitzt_timer(state, lauf)
+    assert lauf.laeuft and [t.art for t in e.teile] == ["timer"]
+    leiste = startleiste(page, state)
+    assert leiste is not None and ft.Icons.STOP in [
+        x.icon for x in _alle(leiste) if isinstance(x, ft.IconButton)
+    ]
+    state.reiter = "heute"
+    page.route = "/"
+    texte = _texte(einheit_reiter(page, state))
+    assert f"Timer · {lauf.profil.name}" in texte  # die Karte des Timers mit Fortschrittsleiste
+    assert any(t.startswith("noch ") for t in texte)  # Restzeit, darunter der Abschnitt
+    lauf.fertig_machen()  # der Timer ist durch — die Einheit endet mit ihm
+    await asyncio.wait_for(
+        asyncio.gather(*[a for a in page.aufgaben if isinstance(a, asyncio.Task)]), 6
+    )
+    assert e.zustand is Zustand.BEENDET and state.einheit is None
+
+
+async def test_timer_tritt_einer_laufenden_einheit_bei(state) -> None:
+    """Läuft schon eine Einheit ohne Timer (hier ein Ersatz für ein Training), tritt ein
+    einzeln gestarteter Timer ihr bei; ein zweiter startet allein."""
+    from trainingsapp.devices.einheit import TimerBaustein
+
+    page = Seite()
+    state.neu_zeichnen = lambda: None
+
+    class Teil:  # ein Teil ohne Timer, der läuft, bis man ihn beendet
+        art = "gps"
+        bereit = True
+        aktiv = True
+
+        def status(self) -> str:
+            return "läuft"
+
+        async def vorbereiten(self) -> None:
+            return None
+
+        def starten(self, t0):
+            from trainingsapp.core.einheit import Beteiligung
+
+            return Beteiligung("gps", Rolle.MITSTARTEN)
+
+        def takt(self, jetzt):
+            return []
+
+        def beenden(self, jetzt):
+            return []
+
+    einheit_ui.teil_bereitstellen(page, state, Teil())
+    e = einheit_ui.alle_starten(page, state, 0.0)
+    assert e is not None and e.zustand is Zustand.LAEUFT
+    lauf = TimerLauf(_profil(30))
+    assert einheit_ui.einzeln_starten(page, state, TimerBaustein(lauf)) is e
+    assert e.teil("timer") is not None and lauf.laeuft and state.timer is lauf
+    assert ("timer", "beigetreten") in [(x.quelle, x.art) for x in e.ereignisse]
+    # Ein zweiter Timer startet allein (die Einheit hat schon einen)
+    assert einheit_ui.einzeln_starten(page, state, TimerBaustein(TimerLauf(_profil(5)))) is None
+    einheit_ui.alle_beenden(state)
+    await asyncio.wait_for(
+        asyncio.gather(*[a for a in page.aufgaben if isinstance(a, asyncio.Task)]), 6
+    )
+    assert state.einheit is None
+
+
+def test_bereitgestellte_einheit_bleibt_unangetastet(state) -> None:
+    """Steht etwas nur bereit, startet ein Dienst für sich wie bisher — allein."""
+    from trainingsapp.devices.einheit import TimerBaustein
+
+    page = Seite()
+    state.neu_zeichnen = lambda: None
+    einheit_ui.timer_bereitstellen(page, state, TimerLauf(_profil(30)))
+    vorher = state.einheit
+    assert einheit_ui.einzeln_starten(page, state, TimerBaustein(TimerLauf(_profil(5)))) is None
+    assert state.einheit is vorher and not vorher.laeuft

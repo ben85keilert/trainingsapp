@@ -16,6 +16,13 @@ Datenmodell und Regeln stehen in `trainingsapp.core.einheit` (Vertrag
 5. `Einheitslauf.beenden` und `abschliessen` — Ende je Teil nach `am_ende_stoppen`
    (Vorgabe: was ich nicht gestartet habe, stoppe ich nicht).
 
+**Einzeln gestartet** (Ben, 18.10.2026: „Wenn aber Dienste einzeln gestartet werden, sollten
+diese auch in die Leiste und zu Heute-Einheit … Ohne die manuelle Verbindung kann man die
+ja trotzdem noch verketten“): Ein Teil kann einer laufenden Einheit beitreten
+(`Einheitslauf.beitreten`) — er beginnt dann auf ihrer Achse. Eine Einheit, die nur aus
+solchen Einzelstarts entstand, endet von selbst, wenn nichts in ihr mehr läuft
+(`ende_wenn_alles_fertig`, `aktiv` je Teil).
+
 Die Teile kennen einander nicht. Kein flet: Speichern in die Datenbank und das
 Eintragen einer Aufnahme bleiben beim Aufrufer (UI), wie bei `Messlauf`.
 """
@@ -98,6 +105,11 @@ class TimerBaustein:
     @property
     def bereit(self) -> bool:
         return bool(self.lauf.profil.abschnitte)
+
+    @property
+    def aktiv(self) -> bool:
+        """Läuft noch etwas? Angehalten ja — fertig oder abgebrochen nicht."""
+        return self._t0 is not None and not (self.lauf.fertig or self.lauf.abgebrochen)
 
     def status(self) -> str:
         p = self.lauf.profil
@@ -201,6 +213,11 @@ class HrvBaustein:
     def bereit(self) -> bool:
         lauf = self.messlauf
         return lauf.aufnahme is not None or lauf.status.verbindung == Verbindung.VERBUNDEN
+
+    @property
+    def aktiv(self) -> bool:
+        """Läuft eine Aufnahme?"""
+        return self.messlauf.aufnahme is not None
 
     def status(self) -> str:
         lauf = self.messlauf
@@ -419,6 +436,9 @@ class Einheitslauf:
         self.ende_mit_timer = False
         #: Ende der Einheit, wenn ein Plan-Ablauf durch ist (``plan/ende``)
         self.ende_mit_plan = False
+        #: Ende, sobald kein Teil mehr läuft (`aktiv`) — für Einheiten aus Einzelstarts
+        #: (Ben, 18.10.2026): der Timer allein endet mit ihm, eine Messung mit ihrem Stopp
+        self.ende_wenn_alles_fertig = False
         #: je Teil (``"hrv"``, ``"gps"``): beim Ende stoppen? Fehlt er, gilt die Vorgabe —
         #: stoppen, was mit der Einheit begann, weiterlaufen lassen, was schon lief
         self.am_ende_stoppen: dict[str, bool] = {}
@@ -462,6 +482,51 @@ class Einheitslauf:
         if self.zustand not in (Zustand.VORBEREITUNG, Zustand.BEREIT):
             raise RuntimeError("Teile gehen nur vor dem Start")
         self.teile = [t for t in self.teile if t.art != art]
+
+    def beitreten(self, teil: Baustein) -> None:
+        """Ein einzeln gestarteter Teil kommt in die laufende Einheit — er beginnt jetzt, auf
+        ihrer Achse: der Timer von vorn, die HRV mit einer neuen Aufnahme (läuft schon eine,
+        tritt sie nur bei). Was so dazukam, hat die Einheit nicht gestartet: Eine
+        HRV-Aufnahme läuft nach ihrem Ende weiter (`am_ende_stoppen`), ein Timer endet mit.
+
+        Raises:
+            RuntimeError: Die Einheit läuft nicht (vorbereitet, im Countdown, beendet).
+            ValueError: Ein Teil dieser Art ist schon dabei.
+        """
+        if self.zustand is not Zustand.LAEUFT or self.t0 is None or self.zeitbasis is None:
+            raise RuntimeError("Beitreten geht nur, solange die Einheit läuft")
+        if any(t.art == teil.art for t in self.teile):
+            raise ValueError(f"{teil.art} ist schon dabei")
+        jetzt = self.uhr()
+        t = max(jetzt - self.t0, 0.0)
+        uebernehmen = getattr(teil, "uhr_uebernehmen", None)
+        if callable(uebernehmen):
+            uebernehmen(self.uhr)
+        if isinstance(teil, HrvBaustein):
+            neu = teil.messlauf.aufnahme is None
+            teil.aufnahme_beginnen(jetzt, self.zeitbasis.utc(t))
+            b = teil.starten(self.t0)
+            if neu:
+                self.am_ende_stoppen.setdefault("hrv", False)
+        elif isinstance(teil, TimerBaustein):
+            b = teil.starten(self.t0, bei=jetzt)
+        else:
+            b = teil.starten(self.t0)
+        b.von_s = round(t, 3)
+        self.teile.append(teil)
+        self._beteiligungen[id(teil)] = b
+        self._gestartet.add(id(teil))
+        if self.senke is not None and self._kopf_geschrieben:
+            try:
+                self.senke.beteiligung(self.id, b)
+            except Exception as fehler:
+                self.warnung = f"Zeitleiste nicht gespeichert: {fehler}"
+        daten: dict[str, Any] = {"teil": teil.art}
+        if isinstance(teil, HrvBaustein):
+            daten.update({"datei": b.datei, "versatz_s": b.versatz_s})
+        elif isinstance(teil, TimerBaustein):
+            daten["profil"] = teil.lauf.profil.name
+        self._aufnehmen([Ereignis(t, teil.art, "beigetreten", "", daten)], jetzt)
 
     def teil(self, art: str) -> Baustein | None:
         return next((t for t in self.teile if t.art == art), None)
@@ -618,11 +683,22 @@ class Einheitslauf:
         if neu and self.beobachter is not None:
             with contextlib.suppress(Exception):
                 self.beobachter(neu)
-        if (self.ende_mit_timer and any(e.quelle == "timer" and e.art == "ende" for e in neu)) or (
-            self.ende_mit_plan and any(e.quelle == "plan" and e.art == "ende" for e in neu)
-        ):
+        if self._zu_ende(neu):
             self.beenden()
         return neu
+
+    def _zu_ende(self, neu: Sequence[Ereignis]) -> bool:
+        """Endet die Einheit jetzt? Mit dem Timer bzw. dem Plan-Ablauf, wenn so eingestellt —
+        aus Einzelstarts, sobald nichts mehr läuft."""
+        if self.ende_mit_timer and any(e.quelle == "timer" and e.art == "ende" for e in neu):
+            return True
+        if self.ende_mit_plan and any(e.quelle == "plan" and e.art == "ende" for e in neu):
+            return True
+        return self.ende_wenn_alles_fertig and not any(self._aktiv(t) for t in self.teile)
+
+    def _aktiv(self, teil: Baustein) -> bool:
+        """Läuft der Teil noch? Ohne Angabe (`aktiv`) gilt er als laufend."""
+        return id(teil) in self._gestartet and bool(getattr(teil, "aktiv", True))
 
     def nachtragen(self, ereignis: Ereignis) -> None:
         """Ein Ereignis von außen in die Zeitleiste — etwa ``person/eintrag``, wenn eine

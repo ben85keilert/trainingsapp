@@ -129,11 +129,15 @@ async def test_messung_laeuft_nach_der_zeit_weiter(umgebung) -> None:
     _waehlen(_wahl(messung(seite, state), "weiter"), "weiter")
     assert state.messung_ende_beenden is False
     await _knopf(messung(seite, state), "Aufnahme starten").on_click()
+    e = state.einheit
     await _sekunden(state, uhr, gurt, 310)
-    await _bis_einheit_weg(state)
+    await _bis_neue_einheit(state, e)  # die Messung steht wieder für sich da
+    assert [t.art for t in state.einheit.teile] == ["hrv"]
     assert lauf.aufnahme is not None and lauf.aufnahme_dauer_s() > 300
     assert state.hrv.alle(state.profil.id) == []  # noch nicht gespeichert
     lauf.aufnahme_stoppen(messungenverzeichnis().parent)
+    await _sekunden(state, uhr, gurt, 1)
+    await _bis_einheit_weg(state)  # ohne Aufnahme endet ihre Einheit von selbst
 
 
 async def test_ablauf_bereitstellen_und_zuruecknehmen(umgebung) -> None:
@@ -175,10 +179,13 @@ async def test_ende_der_messung_laesst_sich_im_lauf_aendern(umgebung) -> None:
     _waehlen(wahl, "weiter")
     assert e.ende_mit_timer and e.am_ende_stoppen["hrv"] is False
     await _sekunden(state, uhr, gurt, 310)
-    await _bis_einheit_weg(state)
+    await _bis_neue_einheit(state, e)  # die Messung steht wieder für sich da
+    assert [t.art for t in state.einheit.teile] == ["hrv"]
     assert lauf.aufnahme is not None and lauf.aufnahme_dauer_s() > 300  # läuft weiter
     assert not any("auch jetzt noch änderbar" in t for t in _texte(messung(seite, state)))
     lauf.aufnahme_stoppen(messungenverzeichnis().parent)
+    await _sekunden(state, uhr, gurt, 1)
+    await _bis_einheit_weg(state)  # ohne Aufnahme endet ihre Einheit von selbst
 
 
 # ---------------------------------------------------------------------------
@@ -228,3 +235,67 @@ async def test_timer_tritt_der_offenen_messung_bei(umgebung) -> None:
     await _bis_einheit_weg(state)
     _, teile = zusatz_lesen(ergebnis.pfad, float)
     assert "Halten" in {a.name for a in teile}
+
+
+# ---------------------------------------------------------------------------
+# Übung während einer offenen Messung (v0.3.4 verweigerte den Start, 18.10.2026)
+# ---------------------------------------------------------------------------
+
+
+async def _bis_neue_einheit(state, alt) -> None:
+    for _ in range(400):
+        e = state.einheit
+        if e is not None and e is not alt and e.laeuft:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("Die Messung stand nicht wieder für sich da")
+
+
+async def test_uebungs_timer_startet_waehrend_einer_offenen_messung(umgebung) -> None:
+    """Die Messung macht Platz: Ihre Einheit endet, die Aufnahme läuft weiter und kommt als
+    „läuft schon“ in die Einheit der Übung. Danach steht sie wieder für sich in der Leiste —
+    ⏹ beendet und speichert sie."""
+    from trainingsapp.core.models import Exercise
+    from trainingsapp.core.timer import Abschnitt, TimerProfil
+    from trainingsapp.ui import uebung_lauf
+
+    state, uhr, gurt, lauf = umgebung
+    seite = _seite()
+    state.neu_zeichnen = lambda: None
+    await _knopf(messung(seite, state), "Aufnahme starten").on_click()
+    messung_einheit = state.einheit
+    assert messung_einheit is not None and einheit_ui.platz_frei(state)
+    await _sekunden(state, uhr, gurt, 5)
+    uebung = Exercise(name="Planke")
+    state.uebungen.speichern(uebung)
+    profil = TimerProfil(name="Halten", abschnitte=[Abschnitt("Halten", 20)])
+    e = uebung_lauf.starten(seite, state, uebung_lauf.kontext_fuer(uebung), profil)
+    assert e is not messung_einheit and not messung_einheit.laeuft
+    assert e.hrv is not None and not e.stoppt_am_ende("hrv") and lauf.aufnahme is not None
+    await _sekunden(state, uhr, gurt, 25)  # der Timer ist durch, die Übung eingetragen
+    await _bis_neue_einheit(state, e)
+    wieder = state.einheit
+    assert [t.art for t in wieder.teile] == ["hrv"] and wieder.stoppt_am_ende("hrv")
+    assert lauf.aufnahme is not None and not e.laeuft
+    einheit_ui.alle_beenden(state)
+    await _sekunden(state, uhr, gurt, 1)
+    await _bis_einheit_weg(state)
+    assert lauf.aufnahme is None and len(state.hrv.alle(state.profil.id)) == 1
+
+
+async def test_ein_laufender_timer_macht_keinen_platz(umgebung) -> None:
+    """Läuft in der Einheit der Messung auch ein Timer, bleibt es beim Hinweis."""
+    from trainingsapp.core.timer import Abschnitt, TimerLauf, TimerProfil
+    from trainingsapp.devices.einheit import TimerBaustein
+
+    state, uhr, gurt, _ = umgebung
+    seite = _seite()
+    state.neu_zeichnen = lambda: None
+    await _knopf(messung(seite, state), "Aufnahme starten").on_click()
+    timer = TimerLauf(TimerProfil(name="T", abschnitte=[Abschnitt("A", 60)]))
+    assert einheit_ui.einzeln_starten(seite, state, TimerBaustein(timer)) is state.einheit
+    assert not einheit_ui.platz_frei(state) and not einheit_ui.platz_machen(state)
+    assert state.einheit.laeuft
+    einheit_ui.alle_beenden(state)
+    await _sekunden(state, uhr, gurt, 1)
+    await _bis_einheit_weg(state)

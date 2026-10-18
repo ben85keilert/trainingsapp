@@ -163,6 +163,13 @@ class Seite:
         self.route = route
 
 
+def vorbei(state) -> bool:
+    """Die Einheit ist vorbei. Läuft die HRV-Aufnahme weiter, steht danach nur sie wieder
+    als eigene Einheit da (`ui.einheit._messung_weiter_zeigen`, 18.10.2026)."""
+    e = state.einheit
+    return e is None or (e.ende_wenn_alles_fertig and [t.art for t in e.teile] == ["hrv"])
+
+
 async def ruhe() -> None:
     """Den anderen Tasks (Messlauf, GPS-Empfang) einen Durchgang lassen."""
     for _ in range(3):

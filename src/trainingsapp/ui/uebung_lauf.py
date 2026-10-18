@@ -106,7 +106,7 @@ def starten(page: Any, state: Any, kontext: UebungKontext, profil: TimerProfil) 
     Raises:
         RuntimeError: Es läuft schon eine Einheit.
     """
-    if einheit_ui.laeuft(state) is not None:
+    if not einheit_ui.platz_machen(state):
         raise RuntimeError("Es läuft schon eine Einheit — erst oben mit ⏹ beenden.")
     bereitstellen(page, state, kontext, profil)
     e = einheit_ui.alle_starten(page, state, 0.0)

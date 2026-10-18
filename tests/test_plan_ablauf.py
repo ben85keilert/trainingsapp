@@ -8,7 +8,7 @@ import asyncio
 
 import pytest
 
-from attrappen import Gurt, Seite, Uhr, ruhe
+from attrappen import Gurt, Seite, Uhr, ruhe, vorbei
 from trainingsapp.core.models import Exercise, Plan, PlanItem
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
 from trainingsapp.core.timer import Abschnitt, TimerProfil
@@ -84,7 +84,7 @@ async def _sekunden(uhr, gurt, e, n: int) -> None:
 
 async def _bis_einheit_weg(state) -> None:
     for _ in range(200):
-        if state.einheit is None:
+        if vorbei(state):
             return
         await asyncio.sleep(0.01)
     raise AssertionError("Die Einheit endete nicht")

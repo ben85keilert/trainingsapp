@@ -254,7 +254,8 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
     def vorher() -> list[ft.Control]:
         if not schritte:
             return [hinweis("Der Plan hat noch keine Übung.")]
-        andere = einheit_ui.laeuft(state)
+        # Eine für sich laufende Messung blockiert nicht — sie kommt mit (`platz_machen`)
+        andere = None if einheit_ui.platz_frei(state) else einheit_ui.laeuft(state)
         erledigt = heute_erledigt()
         abgehakt = ohne()
         zeilen: list[ft.Control] = [kartentitel("Ablauf · Timer je Übung")]
@@ -604,7 +605,7 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
             return (
                 "vorher",
                 vorbereitet,
-                einheit_ui.laeuft(state) is not None,
+                not einheit_ui.platz_frei(state),
                 wahl["hrv"],
                 letzter,
                 state.einheit is None,

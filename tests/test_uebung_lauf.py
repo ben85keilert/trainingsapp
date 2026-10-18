@@ -8,7 +8,7 @@ import asyncio
 
 import pytest
 
-from attrappen import Gurt, Seite, Uhr, ruhe
+from attrappen import Gurt, Seite, Uhr, ruhe, vorbei
 from trainingsapp.core.models import Exercise
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
 from trainingsapp.core.timer import Abschnitt, TimerProfil
@@ -61,7 +61,7 @@ async def _ticken(state, uhr, gurt, e, sekunden: int, *, bis_ende: bool = False)
             break
     if bis_ende:
         for _ in range(200):
-            if state.einheit is None:
+            if vorbei(state):
                 return
             await asyncio.sleep(0.01)
         raise AssertionError("Die Einheit endete nicht")

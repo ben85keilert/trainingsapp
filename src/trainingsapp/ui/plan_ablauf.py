@@ -102,7 +102,7 @@ def starten(page: Any, state: Any, plan: Plan, **optionen: Any) -> Einheitslauf:
     Raises:
         RuntimeError: Es läuft schon eine Einheit.
     """
-    if einheit_ui.laeuft(state) is not None:
+    if not einheit_ui.platz_machen(state):
         raise RuntimeError("Es läuft schon eine Einheit — erst oben mit ⏹ beenden.")
     bereitstellen(page, state, plan, **optionen)
     e = einheit_ui.alle_starten(page, state, 0.0)

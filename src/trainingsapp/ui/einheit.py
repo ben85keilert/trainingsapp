@@ -72,12 +72,41 @@ def laeuft(state: Any) -> Einheitslauf | None:
     return e if e is not None and e.laeuft else None
 
 
+def _nur_messung(e: Einheitslauf) -> bool:
+    """Eine Einheit aus Einzelstarts, in der allein die HRV-Messung läuft."""
+    return e.ende_wenn_alles_fertig and bool(e.teile) and all(t.art == "hrv" for t in e.teile)
+
+
+def platz_frei(state: Any) -> bool:
+    """Kann eine neue Einheit beginnen (Übung, Plan-Ablauf, Training, Bereitstellen)? Ja,
+    wenn keine läuft — oder nur eine für sich gestartete HRV-Messung (`platz_machen`)."""
+    e = laeuft(state)
+    return e is None or _nur_messung(e)
+
+
+def platz_machen(state: Any) -> bool:
+    """Platz für eine neue Einheit. Läuft nur eine für sich gestartete HRV-Messung als
+    Einheit (seit v0.3.4), endet diese Einheit, die **Aufnahme läuft weiter**: Die neue
+    nimmt sie als „läuft schon“ auf, wie vor dem 18.10.2026 (in v0.3.4 verweigerten Übung,
+    Plan-Ablauf und Training den Start). Endet die neue, steht die Messung wieder für sich
+    in der Leiste (`_messung_weiter_zeigen`). ``False``: Es läuft etwas anderes."""
+    e = laeuft(state)
+    if e is None:
+        return True
+    if not _nur_messung(e):
+        return False
+    e.am_ende_stoppen["hrv"] = False
+    e.beenden()
+    melden(state)
+    return True
+
+
 def _neue(state: Any) -> Einheitslauf:
     """Die Einheit zum Bereitstellen — eine neue, wenn keine vorbereitet wird."""
     e = in_vorbereitung(state)
     if e is not None:
         return e
-    if laeuft(state) is not None:
+    if not platz_machen(state):
         raise RuntimeError("Es läuft schon eine Einheit — erst beenden")
     e = Einheitslauf(
         uhr=time.monotonic,
@@ -460,9 +489,23 @@ async def _laufen(
         await _dienst(state, e, False)
         if state.einheit is e:
             state.einheit = None
+        with contextlib.suppress(Exception):
+            _messung_weiter_zeigen(page, state)
         melden(state)
         with contextlib.suppress(Exception):
             state.neu_zeichnen()
+
+
+def _messung_weiter_zeigen(page: Any, state: Any) -> None:
+    """Läuft die HRV-Aufnahme nach dem Ende einer Einheit weiter (sie lief schon vorher,
+    oder „Weiterlaufen“), steht sie wieder für sich in Leiste und Reiter „Einheit“ — wie
+    eine einzeln gestartete Messung (Ben, 18.10.2026). ⏹ beendet und speichert sie dann."""
+    lauf = getattr(state, "messlauf", None)
+    if lauf is None or lauf.aufnahme is None or aktuell(state) is not None:
+        return
+    e = einzeln_starten(page, state, HrvBaustein(lauf, basis=datenverzeichnis()))
+    if e is not None:
+        e.am_ende_stoppen["hrv"] = True
 
 
 async def _dienst(state: Any, e: Einheitslauf, an: bool) -> None:
@@ -644,6 +687,8 @@ __all__ = [
     "laufzeilen",
     "leeren",
     "melden",
+    "platz_frei",
+    "platz_machen",
     "stopp_vorgabe",
     "teil_bereitstellen",
     "teil_route",

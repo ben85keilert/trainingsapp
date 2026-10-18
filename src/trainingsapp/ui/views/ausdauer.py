@@ -295,7 +295,7 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
 
     async def bereitstellen() -> bool:
         """Das Training in die Startleiste — ``True``, wenn es dort steht."""
-        if einheit_ui.laeuft(state) is not None:
+        if not einheit_ui.platz_frei(state):
             page.show_dialog(
                 ft.SnackBar(ft.Text("Es läuft schon eine Einheit — erst oben mit ⏹ beenden."))
             )
@@ -559,7 +559,9 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
                 inhalt.controls = [zahlen_karte, intervall_platz, km_platz, karte_platz]
             return
         bereit = einheit_ui.bereitgestellt(state, "gps")
-        andere = einheit_ui.laeuft(state)  # eine Einheit ohne Training läuft schon
+        # Eine Einheit ohne Training läuft schon — eine für sich laufende Messung blockiert
+        # nicht, sie kommt mit (`platz_machen`)
+        andere = None if einheit_ui.platz_frei(state) else einheit_ui.laeuft(state)
         vorbereitet = einheit_ui.in_vorbereitung(state)
         sportwahl = ft.SegmentedButton(
             selected=[state.ausdauer_sportart],

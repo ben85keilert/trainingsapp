@@ -9,7 +9,7 @@ import pytest
 
 ft = pytest.importorskip("flet")
 
-from attrappen import Gurt, Seite, Uhr, ruhe  # noqa: E402
+from attrappen import Gurt, Seite, Uhr, ruhe, vorbei  # noqa: E402
 from trainingsapp.core.models import Exercise, Plan, PlanItem  # noqa: E402
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld  # noqa: E402
 from trainingsapp.core.timer import Abschnitt, TimerProfil  # noqa: E402
@@ -84,12 +84,12 @@ async def _bis_zum_ende(state, uhr, gurt, sekunden: int = 120) -> None:
         uhr.t += 1
         gurt.schlag(1000)
         await ruhe()
-        if state.einheit is not None:
+        if state.einheit is not None and not vorbei(state):
             state.einheit.takt()
-        if state.einheit is None:
+        if vorbei(state):
             return
     for _ in range(200):
-        if state.einheit is None:
+        if vorbei(state):
             return
         await asyncio.sleep(0.01)
     raise AssertionError("Die Einheit endete nicht")

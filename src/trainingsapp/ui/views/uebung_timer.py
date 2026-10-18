@@ -721,7 +721,8 @@ def uebung_timer_view(
             )
             return teile
         bereit = _bereitgestellt(state, uebung.id)
-        andere = einheit_ui.laeuft(state)
+        # Eine für sich laufende Messung blockiert nicht — sie kommt mit (`platz_machen`)
+        andere = None if einheit_ui.platz_frei(state) else einheit_ui.laeuft(state)
         teile.extend(
             [
                 profil_karte(),

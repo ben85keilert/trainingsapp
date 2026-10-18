@@ -48,6 +48,7 @@ from ..core.einheit import (
     Senke,
     Zeitbasis,
     Zustand,
+    in_uebung,
     projektion,
 )
 from ..core.laufend import uhr as uhr_text
@@ -159,6 +160,7 @@ class TimerBaustein:
                 name, runde, von = self.lauf.angaben(nummer)
                 abschnitt = self.lauf.abschnittsname(nummer)
                 weiter = {"abschnitt": abschnitt, "name": name, "runde": runde, "von": von}
+                weiter.update(self._ablauf(self.lauf.abschnitt(nummer)))
                 out.append(Ereignis(start - t0, "timer", "weiter", f"weiter: {abschnitt}", weiter))
         self._lief = laeuft
         for m in marken:
@@ -172,11 +174,22 @@ class TimerBaustein:
                 "runde": m.runde,
                 "von": m.von,
                 "profil": self.lauf.profil.name,
+                "profil_id": self.lauf.profil.id,
             }
+            if m.soll_s:
+                daten["soll_s"] = m.soll_s
             if not m.zaehlt:
                 daten["zaehlt"] = False
             out.append(Ereignis(t, "timer", "abschnitt", m.text, daten))
         return out
+
+    def _ablauf(self, abschnitt: Any) -> dict[str, Any]:
+        """Welcher Ablauf und wie lang geplant (P54): ``profil_id``, ``soll_s`` (nicht bei
+        der Stoppuhr)."""
+        d: dict[str, Any] = {"profil_id": self.lauf.profil.id}
+        if abschnitt is not None and not self.lauf.vorwaerts:
+            d["soll_s"] = float(abschnitt.dauer_s)
+        return d
 
     def beenden(self, jetzt: float) -> list[Ereignis]:
         out = self.takt(jetzt)
@@ -678,6 +691,7 @@ class Einheitslauf:
                 gesammelt.extend(self._sicher(teil, teil.takt, jetzt))
         gesammelt.extend(self._schlaf_pruefen(jetzt))
         gesammelt.sort(key=lambda e: e.t_s)
+        gesammelt = self._mit_uebung(gesammelt)
         self._aufnehmen(gesammelt, jetzt)
         neu.extend(gesammelt)
         if neu and self.beobachter is not None:
@@ -695,6 +709,14 @@ class Einheitslauf:
         if self.ende_mit_plan and any(e.quelle == "plan" and e.art == "ende" for e in neu):
             return True
         return self.ende_wenn_alles_fertig and not any(self._aktiv(t) for t in self.teile)
+
+    def _mit_uebung(self, liste: list[Ereignis]) -> list[Ereignis]:
+        """Läuft eine Übung mit ihrem Timer (Uhr der Übung), nennen die Timer-Ereignisse sie
+        (`core.einheit.in_uebung`, P54). Der Plan-Ablauf macht das selbst je Übung."""
+        teil = self.teil("plan")
+        if not isinstance(teil, UebungBaustein):
+            return liste
+        return [in_uebung(e, teil.kontext.uebung_id) for e in liste]
 
     def _aktiv(self, teil: Baustein) -> bool:
         """Läuft der Teil noch? Ohne Angabe (`aktiv`) gilt er als laufend."""
@@ -818,6 +840,7 @@ class Einheitslauf:
                 gesammelt.extend(self._sicher(teil, teil.beenden, jetzt))
         grund = "abgebrochen" if self.zustand is Zustand.COUNTDOWN else ""
         gesammelt.sort(key=lambda e: e.t_s)
+        gesammelt = self._mit_uebung(gesammelt)
         ende = Ereignis(
             max(t, 0.0), "einheit", "ende", self.titel, {"grund": grund} if grund else {}
         )

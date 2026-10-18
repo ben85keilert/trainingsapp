@@ -192,6 +192,8 @@ einzelnen Übung“ — und: „Aus dem Text heraus weiß die App nicht, was Üb
 - **Kurse** zählen Timer-Einträge wie alle anderen (Bedingungen `summe`, `tage`) — nie
   Messwerte.
 
+**Stoppuhr und „Zählt als“ (18.10.2026):** Die Uhr der Übung kann auch die Stoppuhr sein — ein eingebautes Profil, das vorwärts zählt (`core.timer.stoppuhr`, `TimerLauf.vorwaerts`). Uhr an/aus und „Zählt als“ (Haltezeit oder Zeit; ohne Haltezeit immer Zeit) stehen an Übung und Planübung; Timer tragen ihre Zeit auch ohne den Parameter ein, im Plan-Ablauf auch Übungen ohne Timer, wenn die Uhr an ist. Marken einer Übung nennen sie alle (`in_uebung`), mit `soll_s` und `profil`. Alles in `docs/plan_stoppuhr.md`.
+
 ## 8. Forschungsexport (Stufe 4, `einheit-v1`)
 
 Für die Auswertung außerhalb der App (hrv-research: DFA α1 gegen RMSSD je Belastung, Tempo

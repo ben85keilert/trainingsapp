@@ -43,13 +43,14 @@ Kein flet, kein asyncio: Protokolle und Datenmodell; der Ablauf steht in
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Protocol
 
 from .kurzcode import kurzcode
 from .models import new_id
+from .timer import dauer_text, name_aus_notiz
 
 #: Woher ein Ereignis kommt — ``einheit``, ``timer``, ``plan``, ``gps`` heißen in der
 #: Messdatei ebenso (``marke.quelle``); ``hrv`` und ``person`` bleiben in der Zeitleiste
@@ -89,8 +90,11 @@ MIN_MARKE_S = 5.0
 #: Was ein Ereignis an Daten tragen darf — ortsfrei, ohne Messwerte. Alles andere fällt weg.
 DATEN_SCHLUESSEL: frozenset[str] = frozenset(
     {
-        # Timer
+        # Timer (`profil` ist der Name; `profil_id`, `soll_s` und `still` seit 18.10.2026, P54)
         "profil",
+        "profil_id",
+        "soll_s",
+        "still",
         "abschnitt",
         "name",
         "runde",
@@ -314,16 +318,43 @@ def projektion(
                 runde=d.get("runde"),
                 von=d.get("von"),
                 zaehlt=d.get("zaehlt"),
+                soll_s=d.get("soll_s"),
+                profil=_profil(d),
             )
-            return Projektion(SPUR_TIMER, e.text or name, name, False, m)
+            return Projektion(SPUR_TIMER, e.text or name, name, False, m, uebungen=_kurzcodes(d))
         case ("timer", "ende"):
-            return Projektion(SPUR_TIMER, e.text or "Timer fertig", "", True, marke(SPUR_TIMER))
+            # In einer Übung still (`in_uebung`): „Planke fertig“ sagt es schon
+            return Projektion(
+                SPUR_TIMER,
+                e.text or "Timer fertig",
+                "",
+                True,
+                marke(SPUR_TIMER),
+                als_notiz=not d.get("still"),
+                uebungen=_kurzcodes(d),
+            )
         case ("timer", "pause"):
-            return Projektion(SPUR_TIMER, e.text or "Timer angehalten", "", True, marke(SPUR_TIMER))
+            return Projektion(
+                SPUR_TIMER,
+                e.text or "Timer angehalten",
+                "",
+                True,
+                marke(SPUR_TIMER),
+                uebungen=_kurzcodes(d),
+            )
         case ("timer", "weiter"):
             name = str(d.get("abschnitt") or "")
-            m = marke(SPUR_TIMER, name=d.get("name"), runde=d.get("runde"), von=d.get("von"))
-            return Projektion(SPUR_TIMER, e.text or f"weiter: {name}", name, False, m)
+            m = marke(
+                SPUR_TIMER,
+                name=d.get("name"),
+                runde=d.get("runde"),
+                von=d.get("von"),
+                soll_s=d.get("soll_s"),
+                profil=_profil(d),
+            )
+            return Projektion(
+                SPUR_TIMER, e.text or f"weiter: {name}", name, False, m, uebungen=_kurzcodes(d)
+            )
         case ("gps", "start"):
             # Der erste Split beginnt mit der ersten gezählten Ortung — still
             name = f"km {_km_schritt(d)}"
@@ -357,6 +388,91 @@ def projektion(
                 SPUR_UEBUNG, e.text or "Pause", "Pause", False, marke(SPUR_UEBUNG, name="Pause")
             )
     return None
+
+
+def in_uebung(e: Ereignis, uebung_id: str) -> Ereignis:
+    """Ein Timer-Ereignis während einer Übung (Ben, 18.10.2026, P54): Es nennt die Übung
+    (``uebung`` → ihr Kurzcode in der Messung), sein Text den Timer nicht mehr — der Name der
+    Übung steht schon da —, und das Ende des Timers wird still: „Planke fertig“ sagt es.
+
+    >>> x = in_uebung(Ereignis(0.0, "timer", "abschnitt", "Timer „H“: Halten (Runde 1/3)"), "u1")
+    >>> x.text, x.daten["uebung"]
+    ('Halten (Runde 1/3)', 'u1')
+    >>> in_uebung(Ereignis(9.0, "timer", "ende", "Timer fertig"), "u1").daten["still"]
+    True
+    >>> in_uebung(Ereignis(9.0, "plan", "uebung_ende", "Planke fertig"), "u1").daten
+    {}
+    """
+    if e.quelle != "timer":
+        return e
+    daten = {**e.daten, "uebung": uebung_id}
+    if e.art == "ende":
+        daten["still"] = True
+    text = name_aus_notiz(e.text) if e.art == "abschnitt" else e.text
+    return replace(e, text=text, daten=daten)
+
+
+#: Wie die Art einer Marke unter der Notiz heißt (`marke_angaben`)
+_ART_TEXT: dict[str, str] = {
+    "start": "Start",
+    "ende": "Ende",
+    "abschnitt": "Abschnitt",
+    "pause": "Pause",
+    "weiter": "weiter",
+    "uebung_start": "Beginn",
+    "uebung_ende": "Ende",
+    "km": "km",
+}
+
+
+def marke_angaben(notiz: Mapping[str, Any]) -> list[str]:
+    """Was eine Notiz maschinenlesbar trägt — sichtbar unter ihrem Text (Ben, 18.10.2026:
+    „Aus Transparenzgründen“; den Kurzcode auszublenden kommt später): Übung (Kurzcode),
+    wer die Marke setzte und was sie bedeutet, Runde, „zählt nicht“, Soll, Ablauf.
+
+    >>> marke_angaben({"text": "Halten (Runde 1/3)", "uebungen": ["2ATPZCAY"],
+    ...     "marke": {"quelle": "timer", "art": "abschnitt", "name": "Halten", "runde": 1,
+    ...               "von": 3, "soll_s": 60, "profil": "7KQ4M2XA"}})
+    ['Übung 2ATPZCAY', 'timer · Abschnitt', 'Halten · 1/3', 'soll 1:00', 'Ablauf 7KQ4M2XA']
+    >>> marke_angaben({"marke": {"quelle": "timer", "art": "abschnitt", "name": "Stoppuhr",
+    ...                          "profil": "stoppuhr"}})
+    ['timer · Abschnitt', 'Stoppuhr']
+    >>> marke_angaben({"text": "selbst notiert"})
+    []
+    """
+    angaben = [f"Übung {code}" for code in notiz.get("uebungen") or []]
+    m = notiz.get("marke")
+    if not isinstance(m, Mapping) or not m:
+        return angaben
+    art = str(m.get("art") or "")
+    angaben.append(f"{m.get('quelle') or '?'} · {_ART_TEXT.get(art, art)}")
+    name = str(m.get("name") or "")
+    if m.get("runde") and m.get("von"):
+        name = f"{name} · {m['runde']}/{m['von']}" if name else f"{m['runde']}/{m['von']}"
+    if m.get("zaehlt") is False:
+        name = f"{name} · zählt nicht" if name else "zählt nicht"
+    if name and m.get("profil") != "stoppuhr":
+        angaben.append(name)
+    if m.get("soll_s"):
+        angaben.append(f"soll {dauer_text(float(m['soll_s']))}")
+    if (profil := m.get("profil")) == "stoppuhr":
+        angaben.append("Stoppuhr")
+    elif profil:
+        angaben.append(f"Ablauf {profil}")
+    return angaben
+
+
+def _profil(daten: Mapping[str, Any]) -> str | None:
+    """Welcher Ablauf lief (``marke.profil``, P54): der Kurzcode der Profil-ID, die Stoppuhr
+    heißt so — ohne Angabe ``None``.
+
+    >>> _profil({"profil_id": "stoppuhr"}), len(_profil({"profil_id": "p1"})), _profil({})
+    ('stoppuhr', 8, None)
+    """
+    pid = daten.get("profil_id")
+    if not pid:
+        return None
+    return "stoppuhr" if pid == "stoppuhr" else kurzcode(str(pid))
 
 
 def _kurzcodes(daten: Mapping[str, Any]) -> tuple[str, ...]:
@@ -444,5 +560,7 @@ __all__ = [
     "Zustand",
     "beginnt_abschnitt",
     "daten_pruefen",
+    "in_uebung",
+    "marke_angaben",
     "projektion",
 ]

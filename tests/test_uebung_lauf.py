@@ -132,3 +132,43 @@ async def test_zweite_einheit_waehrend_einer_laeuft_geht_nicht(umgebung) -> None
         uebung_lauf.starten(Seite(), state, kontext, _profil())
     e.timer.lauf.abbrechen()
     await _ticken(state, uhr, gurt, e, 2, bis_ende=True)
+
+
+async def test_marken_einer_uebung_nennen_sie_und_den_ablauf(umgebung) -> None:
+    """Ben, 18.10.2026 (P54): Jede Marke der Übung trägt ihren Kurzcode, der Text nennt den
+    Timer nicht mehr, „Timer fertig“ fällt weg (stille Grenze), die Marke trägt die geplante
+    Dauer und welcher Ablauf lief."""
+    from trainingsapp.core.kurzcode import kurzcode
+
+    state, uhr, gurt, messlauf = umgebung
+    uebung = _planke(state, "hold")
+    profil = _profil()
+    e = uebung_lauf.starten(Seite(), state, uebung_lauf.kontext_fuer(uebung), profil)
+    await _ticken(state, uhr, gurt, e, 60, bis_ende=True)
+    notizen = messlauf.aufnahme.ereignisse
+    texte = [x["text"] for x in notizen]
+    assert "Halten (Runde 1/3)" in texte and not any(t.startswith("Timer „") for t in texte)
+    assert "Timer fertig" not in texte and "Planke fertig" in texte
+    timer = [x for x in notizen if x.get("marke", {}).get("quelle") == "timer"]
+    assert timer and all(x.get("uebungen") == [kurzcode(uebung.id)] for x in timer)
+    halten = next(x for x in timer if x["text"] == "Halten (Runde 1/3)")
+    assert halten["marke"]["soll_s"] == 10.0 and halten["marke"]["profil"] == kurzcode(profil.id)
+
+
+async def test_stoppuhr_marke_heisst_stoppuhr_ohne_soll(umgebung) -> None:
+    from trainingsapp.core.timer import stoppuhr
+
+    state, uhr, gurt, messlauf = umgebung
+    uebung = _planke(state, "hold")
+    e = uebung_lauf.starten(Seite(), state, uebung_lauf.kontext_fuer(uebung), stoppuhr())
+    await _ticken(state, uhr, gurt, e, 20)
+    e.timer.lauf.fertig_machen()
+    await _ticken(state, uhr, gurt, e, 2, bis_ende=True)
+    (marke,) = [
+        x["marke"]
+        for x in messlauf.aufnahme.ereignisse
+        if x.get("marke", {}).get("quelle") == "timer"
+    ]
+    assert marke["profil"] == "stoppuhr" and "soll_s" not in marke
+    (eintrag,) = [x for x, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
+    assert eintrag.result == {"hold": [20]}

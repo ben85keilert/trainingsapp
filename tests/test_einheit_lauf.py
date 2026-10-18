@@ -15,6 +15,7 @@ from hrv_core.recording import laden
 
 from attrappen import UTC0, Uhr, aufbauen, ruhe
 from trainingsapp.core.einheit import Rolle, Zustand
+from trainingsapp.core.kurzcode import kurzcode
 from trainingsapp.core.timer import Abschnitt, TimerLauf, TimerProfil
 from trainingsapp.data.einheiten import EinheitRepo
 from trainingsapp.devices.einheit import Einheitslauf, HrvBaustein, TimerBaustein
@@ -81,6 +82,7 @@ async def test_hrv_laeuft_schon_timer_startet_auf_die_sekunde(aufbau) -> None:
         "Ende der Einheit": 180.0,
     }
     pause = next(x for x in rec.ereignisse if x["text"] == "Pause (Runde 1/2)")
+    profil_id = next(b for b in repo.ereignisse(e.id) if b.quelle == "timer").daten["profil_id"]
     assert pause["marke"] == {
         "quelle": "timer",
         "art": "abschnitt",
@@ -89,6 +91,9 @@ async def test_hrv_laeuft_schon_timer_startet_auf_die_sekunde(aufbau) -> None:
         "name": "Pause",
         "runde": 1,
         "von": 2,
+        # seit 18.10.2026 (P54): die geplante Dauer und welcher Ablauf lief
+        "soll_s": 15.0,
+        "profil": kurzcode(profil_id),
     }
     _, teile = zusatz_lesen(ergebnis.pfad, float)
     spannen = {a.name: (round(a.von_s), round(a.bis_s)) for a in teile}

@@ -37,6 +37,7 @@ from typing import Any
 import flet as ft
 from hrv_core.ereignisse import Zeitbezug, notiz, sortiert
 
+from trainingsapp.core.einheit import marke_angaben
 from trainingsapp.core.kurzcode import genannte, kurzcode
 from trainingsapp.ui.components.kurve import Reihe
 from trainingsapp.ui.farben import FARBEN
@@ -676,6 +677,25 @@ class Notizfeld:
 
     def _zeile(self, i: int, e: dict, zb: Zeitbezug) -> ft.Control:
         zeit = self._zeit_von(e, zb)
+        text: ft.Control = (
+            ft.Text(str(e.get("text") or ""), size=13)
+            if e.get("text")
+            else ft.Text("(ohne Text — antippen)", size=13, italic=True, opacity=0.6)
+        )
+        # Was die Notiz maschinenlesbar trägt — sichtbar (Ben, 18.10.2026: „Aus
+        # Transparenzgründen“): Übung, Marke, Soll, Ablauf
+        angaben = marke_angaben(e)
+        if angaben:
+            text = ft.Column(
+                spacing=3,
+                tight=True,
+                controls=[
+                    text,
+                    ft.Row(
+                        wrap=True, spacing=4, run_spacing=4, controls=[_angabe(a) for a in angaben]
+                    ),
+                ],
+            )
         return ft.Container(
             on_click=(lambda _=None, i=i: self.bearbeiten(i)),
             padding=ft.Padding.symmetric(vertical=4, horizontal=6),
@@ -687,21 +707,20 @@ class Notizfeld:
                 controls=[
                     ft.Container(width=3, height=16, bgcolor=FARBEN["notiz"], border_radius=2),
                     ft.Text(zeit, size=12, opacity=0.7, width=96),
-                    ft.Text(str(e.get("text") or ""), size=13, expand=True)
-                    if e.get("text")
-                    else ft.Text(
-                        "(ohne Text — antippen)", size=13, italic=True, opacity=0.6, expand=True
-                    ),
-                    ft.Icon(
-                        ft.Icons.FITNESS_CENTER,
-                        size=14,
-                        opacity=0.6,
-                        tooltip="Nennt Übungen aus dem Katalog",
-                        visible=bool(e.get("uebungen")),
-                    ),
+                    ft.Container(content=text, expand=True),
                 ],
             ),
         )
+
+
+def _angabe(text: str) -> ft.Control:
+    """Eine Angabe der Marke als kleines Etikett (`core.einheit.marke_angaben`)."""
+    return ft.Container(
+        padding=ft.Padding.symmetric(horizontal=6, vertical=1),
+        border_radius=6,
+        bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
+        content=ft.Text(text, size=11, opacity=0.8),
+    )
 
 
 def _name_knopf(name: str, einsetzen: Callable[[str], None]) -> ft.Control:

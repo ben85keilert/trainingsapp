@@ -681,6 +681,8 @@ class Marke:
     von: int = 0
     #: Zählt der Abschnitt als Übungszeit?
     zaehlt: bool = True
+    #: Die geplante Dauer des Abschnitts (s) — 0 bei der Stoppuhr und fürs Ende (P54)
+    soll_s: float = 0.0
 
 
 def name_aus_notiz(text: str) -> str:
@@ -1029,6 +1031,7 @@ class TimerLauf:
         for k in nummern:
             bei = self._uhr_bei(k)
             name, runde, von = self.angaben(k)
+            a = self.abschnitt(k)
             marken.append(
                 Marke(
                     self.markentext(k),
@@ -1039,7 +1042,8 @@ class TimerLauf:
                     name=name,
                     runde=runde,
                     von=von,
-                    zaehlt=a.zaehlt if (a := self.abschnitt(k)) is not None else True,
+                    zaehlt=a.zaehlt if a is not None else True,
+                    soll_s=float(a.dauer_s) if a is not None and not self.vorwaerts else 0.0,
                 )
             )
         return marken

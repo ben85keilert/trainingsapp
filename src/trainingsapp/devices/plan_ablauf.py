@@ -28,7 +28,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from ..core.einheit import Beteiligung, Ereignis, Rolle
+from ..core.einheit import Beteiligung, Ereignis, Rolle, in_uebung
 from ..core.plan_durchlauf import Schritt
 from ..core.timer import TimerLauf, TimerProfil
 from .einheit import TimerBaustein
@@ -129,7 +129,7 @@ class PlanAblaufBaustein:
     def takt(self, jetzt: float) -> list[Ereignis]:
         out = self._abholen()
         if self.phase == UEBUNG and self.timer is not None:
-            neu = self.timer.takt(jetzt)
+            neu = self._uebungs_timer(self.timer.takt(jetzt))
             out += neu
             ende = next((x for x in neu if x.quelle == "timer" and x.art == "ende"), None)
             if ende is not None and self._t0 is not None:
@@ -143,7 +143,7 @@ class PlanAblaufBaustein:
         out = self.takt(jetzt)
         if self.phase == UEBUNG and self._t0 is not None:
             if self.timer is not None:
-                out += self.timer.beenden(jetzt)
+                out += self._uebungs_timer(self.timer.beenden(jetzt))
             self._ausstehend.append(self._ende_ereignis(jetzt, "beendet"))
             self.ergebnisse.setdefault(self.schritt.item_id, "beendet")
             self.phase = FERTIG
@@ -184,7 +184,7 @@ class PlanAblaufBaustein:
             return False
         if self.phase == UEBUNG:
             if self.timer is not None:
-                self._ausstehend += self.timer.beenden(jetzt)
+                self._ausstehend += self._uebungs_timer(self.timer.beenden(jetzt))
             self._ausstehend.append(self._ende_ereignis(jetzt, GEWECHSELT))
             self.unterbrochen.add(self.schritt.item_id)
         self._beginnen(k, jetzt)
@@ -206,10 +206,16 @@ class PlanAblaufBaustein:
             return
         jetzt = self._uhr()
         if self.timer is not None:
-            self._ausstehend += self.timer.beenden(jetzt)
+            self._ausstehend += self._uebungs_timer(self.timer.beenden(jetzt))
         self._beenden(jetzt, "uebersprungen")
 
     # -- intern ---------------------------------------------------------------------------
+
+    def _uebungs_timer(self, ereignisse: list[Ereignis]) -> list[Ereignis]:
+        """Die Ereignisse des Timers der laufenden Übung nennen sie (P54) — hier, solange
+        sie läuft, nicht erst in der Einheit: Im selben Takt kann schon die nächste beginnen."""
+        uebung_id = self.schritt.uebung_id
+        return [in_uebung(e, uebung_id) for e in ereignisse]
 
     def _daten(self, s: Schritt) -> dict[str, Any]:
         daten: dict[str, Any] = {

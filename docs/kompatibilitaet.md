@@ -330,7 +330,7 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
   "wall_time": "10:42:11", "text": "Planke (Runde 2/3)", "uebungen": ["C3XN0PRT"],
   "marke": { "quelle": "timer", "art": "abschnitt", "spur": "timer",
              "einheit": "0193b6a2-…", "name": "Planke", "runde": 2, "von": 3,
-             "zaehlt": true } }
+             "zaehlt": true, "soll_s": 60, "profil": "7KQ4M2XA" } }
 ```
 
 | Feld | Werte | Bedeutung |
@@ -342,6 +342,8 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
 | `name` | Text | Abschnittsname ohne Zusatz („Belastung“, „Planke“) |
 | `runde`, `von` | Zahl | Runde r von n |
 | `zaehlt` | Ja/Nein | der Abschnitt zählt als Übungszeit (im Timer einstellbar) |
+| `soll_s` | Zahl | die geplante Dauer des Abschnitts in Sekunden — ein „Weiter“ kürzt ihn, Soll gegen Ist zeigt es; fehlt bei der Stoppuhr (seit 18.10.2026) |
+| `profil` | Text | welcher Ablauf lief: der Kurzcode der Profil-ID (8 Zeichen wie bei Übungen), die Stoppuhr `stoppuhr` — derselbe Ablauf über Tage, auch nach Umbenennen (seit 18.10.2026) |
 
 - Nur diese Felder, nur Zahl, Text oder Ja/Nein — `hrv_core.ereignisse.marke_bereinigen`
   wirft alles andere weg. **Nie ein Ort** (Abschnitt 0 in `docs/plan_gps.md`): eine
@@ -349,6 +351,12 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
 - Was die Person selbst notiert, hat **keine** Marke. Wer eine automatische Notiz
   bearbeitet (Text, Stelle), behält die Marke; löschen löscht sie mit.
 - Abschnitte unter 5 s bekommen keine Marke (versehentliches „Weiter“).
+- **Marken einer Übung** (Ben, 18.10.2026, P54): Läuft eine Übung (Timer der Übung, Stoppuhr,
+  Plan-Ablauf), tragen **alle** ihre Marken den Kurzcode in `uebungen`, auch die Abschnitte des
+  Timers — die Auswertung muss nichts über die Zeit zuordnen. Der Text nennt dann den Timer
+  nicht mehr („Halten (Runde 1/3)“ statt „Timer „Halten 3 × 1 min“: …“); läuft er allein,
+  bleibt der Name, er ist dann der einzige Hinweis. „Timer fertig“ fällt in einer Übung als
+  Notiz weg — „Planke fertig“ sagt dasselbe; die Abschnittsgrenze bleibt (still).
 - **praxis_gui** liest das Feld nicht und behält es beim Bearbeiten wie `uebungen`.
 - Keine neue Schema-Version: ein zusätzliches, optionales Feld wie `uebungen`; ältere
   Leser übergehen es.

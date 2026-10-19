@@ -73,6 +73,34 @@ def gemacht(
     return ergebnis
 
 
+def gemacht_reihen(
+    eintraege: Iterable[tuple[SessionEntry, Session]],
+    namen: dict[str, str],
+    ist_training: Callable[[SessionEntry], bool] = lambda _: False,
+) -> list[Gemacht]:
+    """Je Übung eine Zeile, nach dem ersten Eintrag — ein Training (Gehen, Laufen, Rad)
+    immer für sich, auch wenn es dieselbe Übung zweimal am Tag war (bis 19.10.2026
+    `_Daten.reihen` in `ui/views/tag.py`, N25).
+
+    >>> from datetime import UTC
+    >>> s = Session(id="s")
+    >>> def e(i, x, minute): return SessionEntry(id=i, exercise_id=x,
+    ...     started_at=datetime(2026, 10, 18, 7, minute, tzinfo=UTC))
+    >>> liste = [(e("1", "gehen", 1), s), (e("2", "kb", 2), s), (e("3", "gehen", 3), s)]
+    >>> [g.exercise_id for g in gemacht_reihen(liste, {})]
+    ['gehen', 'kb']
+    >>> training = lambda e: e.exercise_id == "gehen"
+    >>> [(g.exercise_id, len(g.eintraege)) for g in gemacht_reihen(liste, {}, training)]
+    [('gehen', 1), ('kb', 1), ('gehen', 1)]
+    """
+    paare = list(eintraege)
+    reihen = gemacht([(e, s) for e, s in paare if not ist_training(e)], namen)
+    for e, s in paare:
+        if ist_training(e):
+            reihen.extend(gemacht([(e, s)], namen))
+    return sorted(reihen, key=lambda g: (g.beginn is None, g.beginn.timestamp() if g.beginn else 0))
+
+
 @dataclass(frozen=True, slots=True)
 class Abschnitt:
     """Ein Punkt der Zeitleiste: ein Plan mit seinen Übungen oder eine Übung ohne Plan."""
@@ -273,6 +301,7 @@ __all__ = [
     "Gemacht",
     "Plankarte",
     "gemacht",
+    "gemacht_reihen",
     "plaene_des_tags",
     "plankarten",
     "uhrzeit_lesen",

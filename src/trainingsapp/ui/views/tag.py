@@ -45,7 +45,7 @@ from trainingsapp.core.models import (
     Strecke,
     lokaler_tag,
 )
-from trainingsapp.core.plaene import warum_nicht
+from trainingsapp.core.plaene import anzahl_je_uebung, auspraegung_vorgabe, warum_nicht
 from trainingsapp.core.plan_durchlauf import dauer_text_gesamt, schritte_fuer
 from trainingsapp.core.standards import mit_plan_spec
 from trainingsapp.core.tag import (
@@ -56,7 +56,7 @@ from trainingsapp.core.tag import (
     Abschnitt,
     Gemacht,
     Plankarte,
-    gemacht,
+    gemacht_reihen,
     plaene_des_tags,
     plankarten,
     zeitleiste,
@@ -77,7 +77,6 @@ from trainingsapp.ui.components.zeitstrahl import zeitpunkt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
-from trainingsapp.ui.views.plan import auspraegung_vorgabe
 from trainingsapp.ui.views.plan_ablauf import plan_ablauf_route
 
 WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
@@ -173,15 +172,7 @@ class _Daten:
 
     def reihen(self) -> list[Gemacht]:
         """Je Übung eine Zeile, nach dem ersten Eintrag — ein Training immer für sich."""
-        reihen = gemacht(
-            [(e, s) for e, s in self.eintraege if not self.ist_training(e)], self.namen()
-        )
-        for e, s in self.eintraege:
-            if self.ist_training(e):
-                reihen.extend(gemacht([(e, s)], self.namen()))
-        return sorted(
-            reihen, key=lambda g: (g.beginn is None, g.beginn.timestamp() if g.beginn else 0)
-        )
+        return gemacht_reihen(self.eintraege, self.namen(), self.ist_training)
 
     def sessions(self) -> list[Session]:
         """Die Sessions mit Einträgen, in der Reihenfolge ihres ersten Eintrags."""
@@ -212,7 +203,7 @@ def _lesen(state: AppState, tag: date) -> _Daten:
         eintraege=eintraege,
         katalog={u.id: u for u in state.uebungen.alle(mit_geloeschten=True)},
         plan_namen=plan_namen,
-        karten=plankarten(plaene, state.sitzungen.anzahl_am_tag(state.profil.id, tag), eintraege),
+        karten=plankarten(plaene, anzahl_je_uebung([e for e, _ in eintraege]), eintraege),
         andere=[p for p in alle if p.id not in gezeigt],
         gibt_plaene=bool(alle),
         strecken=state.strecken.zu_eintraegen(ids),
@@ -325,9 +316,13 @@ def tagesansicht(
                 return
             eff = mit_plan_spec(item, uebung)
             session = state.sitzungen.session_fuer(state.profil.id, plan.id, tag_jetzt())
-            eintrag = state.sitzungen.eintrag_fertig(
-                session, eff, auspraegung_vorgabe(state, item, eff), tag=tag_jetzt()
+            vorgabe = auspraegung_vorgabe(
+                state.auspraegung_wahl,
+                item,
+                eff,
+                lambda: state.sitzungen.letzter_eintrag(state.profil.id, eff.id),
             )
+            eintrag = state.sitzungen.eintrag_fertig(session, eff, vorgabe, tag=tag_jetzt())
             auffrischen()
             page.show_dialog(
                 ft.SnackBar(

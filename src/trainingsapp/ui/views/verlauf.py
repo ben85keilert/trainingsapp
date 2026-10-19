@@ -17,10 +17,18 @@ Eine Übung antippen öffnet `/verlauf/<kachel_id>` (`verlauf_kachel.py`): ihre 
 die Ergebnisse je Tag. Varianten einer Übung laufen zusammen (Kachel,
 `core/tagesbilanz`). Gerechnet wird in `core/verlauf.py`; HRV-Messungen stehen bewusst
 nicht hier (Ben: ohne feste Randbedingungen wenig aussagekräftig, P39).
+
+**Einmal lesen, in der Spalte auffrischen** (N23, 19.10.2026): Die Einträge aller Tage
+(`_Daten`) werden je Aufbau der Ansicht einmal gelesen und gehalten. Tag wählen, Woche
+blättern, Typ filtern und der Reiterwechsel ersetzen nur den Inhalt ihrer Spalte
+(`control.update()`) — kein `neu_zeichnen`, keine neue Abfrage. Ändert sich der Bestand
+(Nachtragen, Löschen, Leistungen-Blatt), geschieht das auf einer anderen Route oder in
+einem Dialog, nach dem die App den Stapel ohnehin neu baut — dann wird neu gelesen.
 """
 
 from __future__ import annotations
 
+import contextlib
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -97,20 +105,38 @@ def kurz_datum(tag: date, heute: date) -> str:
     return f"{WOCHENTAGE[tag.weekday()]} {tag:%d.%m.}"
 
 
+def _zeigen(control: ft.Control) -> None:
+    """Ein Control neu zeichnen — außerhalb einer laufenden App (Tests) ohne Fehler."""
+    with contextlib.suppress(Exception):
+        control.update()
+
+
 def verlauf(page: ft.Page, state: AppState) -> ft.Control:
     """Der Reiter „Verlauf“: Tage | Übungen | Tagebuch."""
+    #: die Daten dieses Aufbaus — gelesen beim ersten Bedarf, neu nur am nächsten Tag
+    halter: list[_Daten] = []
+
+    def daten() -> _Daten:
+        if not halter or halter[0].heute != state.heute():
+            halter[:] = [_daten(state)]
+        return halter[0]
+
+    inhalt = ft.Container(expand=True)
+
+    def fuellen() -> None:
+        if state.verlauf_tab == 2:
+            inhalt.content = tagebuch(page, state)
+        elif state.verlauf_tab == 0:
+            inhalt.content = _tage(page, state, daten)
+        else:
+            inhalt.content = _uebungen(page, state, daten)
 
     def wechseln(e: ft.Event[ft.Tabs]) -> None:
         state.verlauf_tab = e.control.selected_index or 0
-        state.neu_zeichnen()
+        fuellen()
+        _zeigen(inhalt)
 
-    if state.verlauf_tab == 2:
-        inhalt = tagebuch(page, state)
-    else:
-        daten = _daten(state)
-        inhalt = (
-            _tage(page, state, daten) if state.verlauf_tab == 0 else _uebungen(page, state, daten)
-        )
+    fuellen()
     return ft.Tabs(
         length=3,
         selected_index=state.verlauf_tab,
@@ -124,7 +150,7 @@ def verlauf(page: ft.Page, state: AppState) -> ft.Control:
                     scrollable=False,
                     tabs=[ft.Tab(label="Tage"), ft.Tab(label="Übungen"), ft.Tab(label="Tagebuch")],
                 ),
-                ft.Container(expand=True, content=inhalt),
+                inhalt,
             ],
         ),
     )
@@ -160,7 +186,33 @@ def _gewaehlter_tag(gewaehlt: date | None, woche: list[date], heute: date, mit: 
     return mit[-1] if mit else min(heute, woche[0])
 
 
-def _tage(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
+def _tage(page: ft.Page, state: AppState, daten: Callable[[], _Daten]) -> ft.Control:
+    """Die Spalte „Tage“ — ein Tipp füllt nur ihren Inhalt neu."""
+    inhalt = ft.Column(spacing=8)
+
+    def auffrischen() -> None:
+        inhalt.controls = _tage_inhalt(page, state, daten(), auffrischen)
+        _zeigen(inhalt)
+
+    inhalt.controls = _tage_inhalt(page, state, daten(), auffrischen)
+    spalte = ft.Column(
+        expand=True,
+        scroll=ft.ScrollMode.AUTO,
+        spacing=8,
+        controls=[
+            ft.Container(
+                padding=ft.Padding.only(left=12, right=12, top=10, bottom=24),
+                content=inhalt,
+            )
+        ],
+    )
+    return scroll_merken(page, state, "verlauf_tage", spalte)
+
+
+def _tage_inhalt(
+    page: ft.Page, state: AppState, daten: _Daten, auffrischen: Callable[[], None]
+) -> list[ft.Control]:
+    """Wochenstreifen und die Übungen des gewählten Tages."""
     heute = daten.heute
     jetzt = montag(heute)
     beginn = state.verlauf_woche or jetzt
@@ -171,7 +223,7 @@ def _tage(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
     def woche_zeigen(neu: date) -> None:
         state.verlauf_woche = None if neu == jetzt else neu
         state.verlauf_tag = None
-        state.neu_zeichnen()
+        auffrischen()
 
     def blaettern(schritt: int) -> Callable[[], None]:
         def handler() -> None:
@@ -191,7 +243,7 @@ def _tage(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
     def waehler(t: date) -> Callable[[], None]:
         def handler() -> None:
             state.verlauf_tag = t
-            state.neu_zeichnen()
+            auffrischen()
 
         return handler
 
@@ -319,18 +371,7 @@ def _tage(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
                 opacity=0.6,
             )
         )
-    spalte = ft.Column(
-        expand=True,
-        scroll=ft.ScrollMode.AUTO,
-        spacing=8,
-        controls=[
-            ft.Container(
-                padding=ft.Padding.only(left=12, right=12, top=10, bottom=24),
-                content=ft.Column(spacing=8, controls=controls),
-            )
-        ],
-    )
-    return scroll_merken(page, state, "verlauf_tage", spalte)
+    return controls
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +394,32 @@ def trend_text(anteil: float | None) -> str:
     return f"{'+' if prozent > 0 else '−'}{abs(prozent)} %"
 
 
-def _uebungen(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
+def _uebungen(page: ft.Page, state: AppState, daten: Callable[[], _Daten]) -> ft.Control:
+    """Die Spalte „Übungen“ — der Typfilter füllt nur ihren Inhalt neu."""
+    inhalt = ft.Column(spacing=8)
+
+    def auffrischen() -> None:
+        inhalt.controls = _uebungen_inhalt(page, state, daten(), auffrischen)
+        _zeigen(inhalt)
+
+    inhalt.controls = _uebungen_inhalt(page, state, daten(), auffrischen)
+    spalte = ft.Column(
+        expand=True,
+        scroll=ft.ScrollMode.AUTO,
+        controls=[
+            ft.Container(
+                padding=ft.Padding.only(left=12, right=12, top=10, bottom=24),
+                content=inhalt,
+            )
+        ],
+    )
+    return scroll_merken(page, state, "verlauf_uebungen", spalte)
+
+
+def _uebungen_inhalt(
+    page: ft.Page, state: AppState, daten: _Daten, auffrischen: Callable[[], None]
+) -> list[ft.Control]:
+    """Typ-Chips und je Übung eine Zeile mit Mini-Kurve und Trend."""
     heute = daten.heute
     reihenfolge = sorted(daten.je_kachel, key=lambda k: daten.je_kachel[k][-1][0], reverse=True)
     typen = Counter(
@@ -364,7 +430,7 @@ def _uebungen(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
     def filter_waehlen(neu: str | None) -> Callable[[], None]:
         def handler() -> None:
             state.verlauf_typ = neu
-            state.neu_zeichnen()
+            auffrischen()
 
         return handler
 
@@ -464,17 +530,7 @@ def _uebungen(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
                 opacity=0.7,
             )
         )
-    spalte = ft.Column(
-        expand=True,
-        scroll=ft.ScrollMode.AUTO,
-        controls=[
-            ft.Container(
-                padding=ft.Padding.only(left=12, right=12, top=10, bottom=24),
-                content=ft.Column(spacing=8, controls=controls),
-            )
-        ],
-    )
-    return scroll_merken(page, state, "verlauf_uebungen", spalte)
+    return controls
 
 
 __all__ = ["kurz_datum", "trend_text", "verlauf"]

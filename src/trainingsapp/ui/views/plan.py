@@ -81,10 +81,17 @@ from trainingsapp.core.models import (
 from trainingsapp.core.parameter import BEIWERK, kontextfelder, leistungsfelder, rolle
 from trainingsapp.core.plaene import (
     WOCHENTAGE_KURZ,
+    anzahl_je_uebung,
+    auspraegung_vorgabe,
+    einzel_plan,
     erledigte,
+    letzter_heute,
+    spaetere_stelle_offen,
+    stand_im_plan,
     tage_text,
     verschoben,
     vorkommen,
+    ziel_ohne_kontext,
 )
 from trainingsapp.core.result_spec import (
     FieldSpec,
@@ -217,47 +224,12 @@ def _knopf(
     )
 
 
-def auspraegung_vorgabe(state: AppState, item: PlanItem, uebung: Exercise) -> dict[str, Any]:
-    """Gewählte Ausprägungen — sonst aus dem Ziel, sonst wie beim letzten Mal.
-
-    ``uebung`` so, wie die Planübung sie sieht (`core.standards.mit_plan_spec`). Gilt im
-    Plan und beim Abhaken auf „Heute“ (`views/tag.py`) gleich.
-    """
-    felder = kontextfelder(replace(uebung.result_spec, fields=aktive_felder(item, uebung)))
-    if not felder:
-        return {}
-    if item.id not in state.auspraegung_wahl:
-        quelle = item.target
-        if not any(not ist_leer(item.target.get(f.key)) for f in felder):
-            letzter = state.sitzungen.letzter_eintrag(state.profil.id, uebung.id)
-            quelle = letzter.result if letzter is not None else {}
-        state.auspraegung_wahl[item.id] = {
-            f.key: quelle[f.key] for f in felder if not ist_leer(quelle.get(f.key))
-        }
-    keys = {f.key for f in felder}
-    return {k: v for k, v in state.auspraegung_wahl[item.id].items() if k in keys}
-
-
-def einzel_plan(uebung: Exercise) -> Plan:
-    """Ein Plan, der nur in der Ansicht existiert: genau diese Übung, mit ihrem Standard.
-
-    Für „Trainieren“ aus dem Katalog. Er wird nie gespeichert; die Einträge
-    landen in der planlosen Session des Tages („Ohne Plan“). Die feste
-    Planübungs-ID hält die gewählte Ausprägung über den Neubau der Ansicht.
-    """
-    return Plan(
-        id=f"einzel-{uebung.id}",
-        name=uebung.name,
-        items=[
-            PlanItem(
-                id=f"einzel-{uebung.id}",
-                exercise_id=uebung.id,
-                target=dict(uebung.default_target),
-                input_mode=uebung.default_input_mode,
-                felder=uebung.default_felder,
-            )
-        ],
-    )
+def _vom_timer(state: AppState, eintraege: list[SessionEntry]) -> set[str]:
+    """Welche Einträge ein Timer schrieb (Übungs-Timer, Plan-Ablauf) — aus der Zeitleiste,
+    einmal für den ganzen Tag statt je Block."""
+    if state.einheiten is None or not eintraege:
+        return set()
+    return state.einheiten.eintraege_vom_timer([e.id for e in eintraege])
 
 
 def _zum_ziel(page: Any, state: AppState, route: str, liste: ft.ListView, index: int) -> None:
@@ -318,8 +290,14 @@ def plan_view(
     #: Blöcke, die heute einen eigenen Eintrag angelegt haben (spätere Stelle einer
     #: Übung): Weitere Sätze gehen dorthin, nicht in noch einen Eintrag (D7)
     eigene: set[str] = set()
-    anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute())
-    tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute())]
+    #: Die Einträge des Tages mit ihrer Session — einmal gelesen; alles Weitere (Anzahl je
+    #: Übung, offener Eintrag, Ziel eines Tipps, „vom Timer“) leitet sich daraus ab (N24)
+    tages_paare = state.sitzungen.eintraege_am_tag(state.profil.id, heute())
+    tages_eintraege = [e for e, _ in tages_paare]
+    anzahl = anzahl_je_uebung(tages_eintraege)
+    vom_timer = _vom_timer(state, tages_eintraege)
+    #: Der letzte Eintrag je Übung, sobald einmal gefragt (`auspraegung_vorgabe`)
+    letzte: dict[str, SessionEntry | None] = {}
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
     #: Die wievielte Stelle ihrer Übung jede Planübung ist — und was heute erledigt ist
     stelle = vorkommen(plan.items)
@@ -342,9 +320,12 @@ def plan_view(
 
     def auffrischen() -> None:
         """Stand neu lesen und die Blöcke in derselben Liste ersetzen."""
-        nonlocal anzahl, gemacht, tages_eintraege, fertig_ids
-        anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute())
-        tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute())]
+        nonlocal anzahl, gemacht, tages_paare, tages_eintraege, vom_timer, fertig_ids
+        tages_paare = state.sitzungen.eintraege_am_tag(state.profil.id, heute())
+        tages_eintraege = [e for e, _ in tages_paare]
+        anzahl = anzahl_je_uebung(tages_eintraege)
+        vom_timer = _vom_timer(state, tages_eintraege)
+        letzte.clear()
         fertig_ids = erledigte(plan.items, anzahl)
         gemacht = len(fertig_ids)
         stand.value = stand_text()
@@ -365,8 +346,26 @@ def plan_view(
 
     def eigener_eintrag(item: PlanItem) -> bool:
         """Spätere Stelle einer Übung, die heute noch offen ist: neuer Eintrag statt anhängen —
-        aber nur einmal je Block (`eigene`)."""
-        return stelle[item.id] > 1 and item.id not in fertig_ids and item.id not in eigene
+        aber nur einmal je Block (`eigene`, `core.plaene.spaetere_stelle_offen`)."""
+        return spaetere_stelle_offen(item, stelle, fertig_ids, eigene)
+
+    def letzter_eintrag(uebung: Exercise) -> SessionEntry | None:
+        """„Wie zuletzt“: der jüngste Eintrag der Übung — aus dem Tag, wenn sie heute dran
+        war, sonst einmal je Auffrischen aus der Datenbank."""
+        if uebung.id not in letzte:
+            heutig = letzter_heute(tages_eintraege, uebung.id)
+            letzte[uebung.id] = (
+                heutig
+                if heutig is not None
+                else state.sitzungen.letzter_eintrag(state.profil.id, uebung.id)
+            )
+        return letzte[uebung.id]
+
+    def vorgabe(item: PlanItem, uebung: Exercise) -> dict[str, Any]:
+        """Gewählte Ausprägungen, sonst Ziel, sonst wie zuletzt (`core.plaene`)."""
+        return auspraegung_vorgabe(
+            state.auspraegung_wahl, item, uebung, lambda: letzter_eintrag(uebung)
+        )
 
     def eigenen_gemerkt(item: PlanItem, neu: bool) -> None:
         if neu:
@@ -380,7 +379,9 @@ def plan_view(
         """Die gewählte Ausführung — beim ersten Aufbau wie der offene Eintrag, wenn es
         einen gibt (die Chips zeigen seinen Zustand), sonst `auspraegung_vorgabe`."""
         if item.id not in state.auspraegung_wahl:
-            offen = state.sitzungen.offener_eintrag(state.profil.id, uebung, heute(), sitzungsplan)
+            offen = stand_im_plan(
+                tages_paare, uebung, sitzungsplan, {}, jetzt(), state.sitzungen.offen_min
+            ).offen
             if offen is not None:
                 felder = kontextfelder(teilspec(item, uebung))
                 state.auspraegung_wahl[item.id] = {
@@ -388,15 +389,28 @@ def plan_view(
                     for f in felder
                     if not ist_leer(offen.result.get(f.key))
                 }
-        return auspraegung_vorgabe(state, item, uebung)
+        return vorgabe(item, uebung)
 
-    def stand_fuer(item: PlanItem, uebung: Exercise) -> offene.Stand:
+    def stand_fuer(item: PlanItem, uebung: Exercise, frisch: bool = False) -> offene.Stand:
         """Offener Eintrag und ob er markiert ist (`core.eintraege`). Die spätere Stelle einer
-        Mehrfachübung beginnt immer neu — dort ist nichts markiert."""
+        Mehrfachübung beginnt immer neu — dort ist nichts markiert.
+
+        Beim Aufbau aus den gelesenen Einträgen des Tages (`core.plaene.stand_im_plan`);
+        wer gleich schreibt, fragt mit ``frisch`` die Datenbank — dieselbe Regel.
+        """
         if eigener_eintrag(item):
             return offene.Stand(None, offene.KEINER)
-        return state.sitzungen.stand(
-            state.profil.id, uebung, heute(), sitzungsplan, kontext(item, uebung)
+        if frisch:
+            return state.sitzungen.stand(
+                state.profil.id, uebung, heute(), sitzungsplan, kontext(item, uebung)
+            )
+        return stand_im_plan(
+            tages_paare,
+            uebung,
+            sitzungsplan,
+            kontext(item, uebung),
+            jetzt(),
+            state.sitzungen.offen_min,
         )
 
     def kontext_text(uebung: Exercise, werte: dict[str, Any]) -> str:
@@ -412,15 +426,9 @@ def plan_view(
         Nicht, wenn ihre Uhr läuft — die klammert schon (`ui.marken`)."""
         return laufende(state, katalog[item.exercise_id], None if einzel else item) is None
 
-    def ziel_ohne_kontext(item: PlanItem) -> dict[str, Any]:
-        """Das Ziel ohne Ausprägungen — die bestimmt allein die Auswahl im Block.
-
-        Sonst gewänne beim Eintragen der Winkel aus dem Ziel (90°) gegen den
-        gerade gewählten (45°), und eine aufgehobene Auswahl käme über das Ziel
-        zurück.
-        """
-        keys = {f.key for f in kontextfelder(uebung_fuer(item).result_spec)}
-        return {k: v for k, v in item.target.items() if k not in keys}
+    def ziel_frei(item: PlanItem) -> dict[str, Any]:
+        """Das Ziel ohne Ausprägungen (`core.plaene.ziel_ohne_kontext`)."""
+        return ziel_ohne_kontext(item, uebung_fuer(item))
 
     def eintragen(item: PlanItem, result: dict[str, Any]) -> None:
         """„Gemacht“, „Wie geplant“, ein Einzelwert: ein fertiger, geschlossener Eintrag —
@@ -442,7 +450,7 @@ def plan_view(
 
         def handler() -> None:
             uebung = uebung_fuer(item)
-            ziel = stand_fuer(item, uebung).ziel
+            ziel = stand_fuer(item, uebung, frisch=True).ziel
             if ziel is None:
                 return
             eintrag = state.sitzungen.eintrag_schliessen(ziel.id)
@@ -465,7 +473,7 @@ def plan_view(
         neu = eigener_eintrag(item)
         eigenen_gemerkt(item, neu)
         # Der erste Satz des Eintrags beginnt seinen Abschnitt in der Aufnahme (`ui.marken`)
-        ziel = None if neu else stand_fuer(item, uebung).ziel
+        ziel = None if neu else stand_fuer(item, uebung, frisch=True).ziel
         erster = ziel is None or not mengen(ziel.spec_snapshot, ziel.result)
         for wert in werte:
             eintrag = state.sitzungen.satz_anhaengen(
@@ -493,7 +501,10 @@ def plan_view(
 
     def ziel_erlediger(item: PlanItem) -> Callable[[], None]:
         def handler() -> None:
-            eintragen(item, {**ziel_ohne_kontext(item), **kontext(item, uebung_fuer(item))})
+            eintragen(
+                item,
+                {**ziel_frei(item), **kontext(item, uebung_fuer(item))},
+            )
 
         return handler
 
@@ -545,7 +556,7 @@ def plan_view(
                 wert_setzer(item, feld, wert)
             else:
                 zusatz = kontext(item, uebung_fuer(item))
-                eintragen(item, {**ziel_ohne_kontext(item), **zusatz, feld.key: wert})
+                eintragen(item, {**ziel_frei(item), **zusatz, feld.key: wert})
 
         return handler
 
@@ -618,7 +629,7 @@ def plan_view(
                 page.update()
                 return
             zusatz = kontext(item, uebung_fuer(item))
-            eintragen(item, {**ziel_ohne_kontext(item), **zusatz, feld.key: wert})
+            eintragen(item, {**ziel_frei(item), **zusatz, feld.key: wert})
 
         return handler
 
@@ -748,12 +759,6 @@ def plan_view(
         eigene = sorted(
             (e for e in tages_eintraege if e.exercise_id == uebung.id),
             key=lambda e: (e.started_at is None, e.started_at),
-        )
-        # Was ein Timer eintrug (Übungs-Timer, Plan-Ablauf) — aus der Zeitleiste
-        vom_timer = (
-            state.einheiten.eintraege_vom_timer([e.id for e in eigene])
-            if state.einheiten is not None and eigene
-            else set()
         )
         aufnahme = marken.aufnahme_laeuft(state)
         inhalt: list[ft.Control] = [
@@ -1340,13 +1345,8 @@ def plan_view(
     def text_abschnitt(item: PlanItem, uebung: Exercise, feld: FieldSpec) -> ft.Control:
         """Freitext — ein Feld mit Haken; einmal je Tag: Das Feld zeigt den Text von heute
         und ersetzt ihn (`SessionRepo.text_setzen`), statt einen zweiten anzulegen."""
-        ziel = (
-            None
-            if eigener_eintrag(item)
-            else state.sitzungen.text_eintrag(
-                state.profil.id, uebung, heute(), sitzungsplan, feld.key, kontext(item, uebung)
-            )
-        )
+        # Der markierte Eintrag — `SessionRepo.text_eintrag` ist dieselbe Regel (N24)
+        ziel = stand_fuer(item, uebung).ziel
         bisher = ziel.result.get(feld.key) if ziel is not None else None
         eingabe = ft.TextField(
             value="" if bisher is None else str(bisher),
@@ -1861,4 +1861,5 @@ def plan_view(
     return ansicht
 
 
-__all__ = ["auspraegung_vorgabe", "einzel_plan", "hauptfeld", "plan_view", "ziel_text"]
+#: `einzel_plan` kommt aus `core.plaene` und bleibt hier erreichbar (`app.py`, Tests)
+__all__ = ["einzel_plan", "hauptfeld", "plan_view", "ziel_text"]

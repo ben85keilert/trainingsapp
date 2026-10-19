@@ -176,3 +176,47 @@ def test_variante_steht_bei_ihrem_ergebnis(state) -> None:
     _eintragen(state, seed_id("wandliegestuetz"), state.heute(), reps=[15])
     texte = _texte(verlauf_kachel_view(Seite(), state, LIEGESTUETZ))
     assert "Liegestütz an der Wand" in texte and "15" in texte
+
+
+def test_tipps_frischen_nur_die_spalte_auf(state, monkeypatch) -> None:
+    """N23: Tag wählen, Woche blättern und Typ filtern lesen die Einträge nicht neu und
+    bauen die Seite nicht neu — nur ihre Spalte bekommt neuen Inhalt."""
+    heute = state.heute()
+    gestern = heute - timedelta(days=1)
+    _eintragen(state, LIEGESTUETZ, heute, reps=[15, 15, 13])
+    _eintragen(state, WADEN, gestern, reps=[20])
+    abfragen: list[object] = []
+    original = state.sitzungen.eintraege_zwischen
+
+    def gezaehlt(*args, **kwargs):
+        abfragen.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(state.sitzungen, "eintraege_zwischen", gezaehlt)
+    neu_gezeichnet: list[bool] = []
+    state.neu_zeichnen = lambda: neu_gezeichnet.append(True)
+
+    ansicht = verlauf(Seite(), state)
+    assert len(abfragen) == 1
+    if gestern < montag(heute):  # Montag: gestern liegt in der vorigen Woche
+        knoepfe = {x.tooltip: x for x in _alle(ansicht) if isinstance(x, ft.IconButton)}
+        knoepfe["Vorige Woche"].on_click()
+    zellen = [x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.height == 64]
+    gestern_zelle = next(z for z in zellen if str(gestern.day) in _texte(z))
+    gestern_zelle.on_click()
+    assert state.verlauf_tag == gestern
+    texte = _texte(ansicht)
+    assert "Wadenheben" in texte and "Liegestützen" not in texte  # die Spalte zeigt gestern
+    knoepfe = {x.tooltip: x for x in _alle(ansicht) if isinstance(x, ft.IconButton)}
+    knoepfe["Vorige Woche"].on_click()
+    assert "Wadenheben" not in _texte(ansicht)  # eine Woche ohne Einträge
+
+    # Reiter „Übungen“ und Typfilter — dieselben Daten, keine Abfrage
+    state.verlauf_tab = 1
+    tabs = next(x for x in _alle(ansicht) if isinstance(x, ft.Tabs))
+    tabs.on_change(SimpleNamespace(control=SimpleNamespace(selected_index=1)))
+    chips = [x for x in _alle(ansicht) if isinstance(x, ft.Chip)]
+    if chips:
+        chips[-1].on_select()
+    assert len(abfragen) == 1
+    assert neu_gezeichnet == []

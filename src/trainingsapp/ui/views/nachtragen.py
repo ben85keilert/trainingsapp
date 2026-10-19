@@ -21,7 +21,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem, lokaler_tag
-from trainingsapp.core.plaene import erste_offene
+from trainingsapp.core.plaene import auspraegung_vorgabe, einzel_plan, erste_offene
 from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tag import LEER, plaene_des_tags, plankarten, uhrzeit_lesen
@@ -33,7 +33,6 @@ from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.uebungszeile import abschnitt
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.views.plan import auspraegung_vorgabe, einzel_plan
 
 #: So viele Übungen nennt „zuletzt gemacht“, so viele Treffer die Suche
 ZULETZT = 6
@@ -302,7 +301,7 @@ def nachtragen_view(
         eff, teil, item = bauteile()
         form = SpecForm(
             teil,
-            auspraegung_vorgabe(state, item, eff),
+            auspraegung_vorgabe(state.auspraegung_wahl, item, eff, lambda: letzter),
             page=page,
             quick={f.key: chips_fuer(item, f) for f in teil.fields},
         )

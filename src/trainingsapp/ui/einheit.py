@@ -50,6 +50,19 @@ from trainingsapp.devices.strecke_baustein import StreckeBaustein
 ANZEIGE_S = 1.0
 #: Vorgabe des Countdowns vor „Alle starten“ (s)
 COUNTDOWN_S = 3.0
+
+
+def bis_zur_vollen_sekunde(dauer_s: float) -> float:
+    """Wie lange bis zum nächsten Sekundensprung einer laufenden Zeit — die Anzeige
+    schlief sonst fest 1 s und übersprang gelegentlich eine Sekunde (N27).
+
+    >>> bis_zur_vollen_sekunde(12.25), bis_zur_vollen_sekunde(12.0), bis_zur_vollen_sekunde(-2.5)
+    (0.75, 1.0, 0.5)
+    """
+    rest = 1.0 - (dauer_s % 1.0)
+    return rest if rest > 0.05 else rest + 1.0
+
+
 #: Einheiten, deren Stand in der Startleiste gerade jede Sekunde aufgefrischt wird
 _IM_BLICK: set[str] = set()
 
@@ -181,7 +194,9 @@ def melden(state: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def hrv_bereitstellen(page: Any, state: Any, basis: Any = None) -> HrvBaustein | None:
+def hrv_bereitstellen(
+    page: Any, state: Any, basis: Any = None, *, zeichnen: bool = True
+) -> HrvBaustein | None:
     """Die HRV-Messung in die Einheit — mit verbundenem Gurt (oder laufender Aufnahme).
 
     ``basis``: wohin eine Aufnahme gespeichert wird, die mit der Einheit endet —
@@ -190,7 +205,7 @@ def hrv_bereitstellen(page: Any, state: Any, basis: Any = None) -> HrvBaustein |
     if lauf is None:
         return None
     teil = HrvBaustein(lauf, basis=basis if basis is not None else datenverzeichnis())
-    _ersetzen(page, state, teil)
+    _ersetzen(page, state, teil, zeichnen=zeichnen)
     return teil
 
 
@@ -229,22 +244,26 @@ def einzeln_starten(page: Any, state: Any, teil: Any) -> Einheitslauf | None:
     return alle_starten(page, state, 0.0)
 
 
-def timer_bereitstellen(page: Any, state: Any, lauf: TimerLauf) -> TimerBaustein:
+def timer_bereitstellen(
+    page: Any, state: Any, lauf: TimerLauf, *, zeichnen: bool = True
+) -> TimerBaustein:
     """Der Timer in die Einheit; eine HRV, die schon aufnimmt, kommt mit (nur Marken) — wie
     bei Übung und Training (H30)."""
     teil = TimerBaustein(lauf)
-    _ersetzen(page, state, teil)
+    _ersetzen(page, state, teil, zeichnen=False)
     e = in_vorbereitung(state)
     messlauf = state.messlauf
     if e is not None and e.hrv is None and messlauf is not None and messlauf.aufnahme is not None:
-        hrv_bereitstellen(page, state)
+        hrv_bereitstellen(page, state, zeichnen=False)
+    if zeichnen:
+        state.neu_zeichnen()
     return teil
 
 
-def teil_bereitstellen(page: Any, state: Any, teil: Any) -> Einheitslauf:
+def teil_bereitstellen(page: Any, state: Any, teil: Any, *, zeichnen: bool = True) -> Einheitslauf:
     """Einen Teil in die Einheit (eine neue, wenn keine vorbereitet wird) — einer gleicher
     Art wird ersetzt. Gibt die Einheit zurück."""
-    _ersetzen(page, state, teil)
+    _ersetzen(page, state, teil, zeichnen=zeichnen)
     e = in_vorbereitung(state)
     assert e is not None
     return e
@@ -283,14 +302,18 @@ def ausdauer_teil(state: Any) -> StreckeBaustein | None:
     return teil if isinstance(teil, StreckeBaustein) else None
 
 
-def _ersetzen(page: Any, state: Any, teil: Any) -> None:
+def _ersetzen(page: Any, state: Any, teil: Any, *, zeichnen: bool = True) -> None:
+    """``zeichnen=False``: Wer mehrere Teile nacheinander bereitstellt, zeichnet einmal am
+    Ende — jeder Neuaufbau des Ansichtsstapels kostet und war der Auslöser für
+    „not registered“-Antworten an ersetzte Controls (N22)."""
     e = _neue(state)
     if e.teil(teil.art) is not None:
         e.entfernen(teil.art)
     e.hinzufuegen(teil)
     _vorbereiten(page, state, e)
     melden(state)
-    state.neu_zeichnen()
+    if zeichnen:
+        state.neu_zeichnen()
 
 
 def _vorbereiten(page: Any, state: Any, e: Einheitslauf) -> None:
@@ -559,7 +582,7 @@ async def _anzeigen(state: Any, e: Einheitslauf) -> None:
     """Die Laufleiste zählt mit — einmal je Sekunde, solange die Einheit läuft."""
     while e.laeuft:
         melden(state)
-        await asyncio.sleep(ANZEIGE_S)
+        await asyncio.sleep(bis_zur_vollen_sekunde(e.anzeige_dauer_s()))
 
 
 def alle_beenden(state: Any) -> None:

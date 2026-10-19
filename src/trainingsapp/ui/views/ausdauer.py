@@ -670,7 +670,8 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
 
     async def ticker() -> None:
         nonlocal strecken_karte
-        while state.ausdauer_ansicht == nummer:
+        route = state.route_nummer  # die Ansicht verlassen → nicht mehr für sie zeichnen (H35)
+        while state.ausdauer_ansicht == nummer and state.route_nummer == route:
             jetzt = _training(state)
             if jetzt is None:
                 return

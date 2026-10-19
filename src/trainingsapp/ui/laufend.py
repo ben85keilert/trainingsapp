@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import math
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -160,7 +161,7 @@ async def takt(state: Any) -> None:
             with contextlib.suppress(Exception):
                 await transport.anzeigen(inhalt)
                 zuletzt = inhalt
-        await asyncio.sleep(TAKT_S)
+        await asyncio.sleep(TAKT_S - (time.monotonic() % TAKT_S))  # auf die volle Sekunde (N27)
 
 
 __all__ = ["TAKT_S", "laufendes", "takt", "timer_allein"]

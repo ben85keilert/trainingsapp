@@ -428,17 +428,20 @@ def gps_test_view(page: ft.Page, state: AppState) -> ft.View:
         return strecken_karte.nachziehen(punkte)
 
     async def ticker() -> None:
-        while state.gps_test_ansicht == nummer:
+        route = state.route_nummer  # die Ansicht verlassen → Schluss (H35)
+        while state.gps_test_ansicht == nummer and state.route_nummer == route:
             lauf = lauf_jetzt()
             if lauf is None:
                 return
             if state.im_vordergrund:
                 if lauf.fertig:
                     zeichnen()
-                    page.update()
+                    with contextlib.suppress(Exception):
+                        page.update()
                     return
                 folgen = aktualisieren(lauf)
-                page.update()
+                with contextlib.suppress(Exception):  # ein Fehler beendete die Aufgabe still
+                    page.update()
                 if folgen and strecken_karte is not None:
                     with contextlib.suppress(Exception):
                         await strecken_karte.folgen(lauf.punkte()[-1])

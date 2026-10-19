@@ -53,6 +53,7 @@ zu „Heute“, auf „Heute“ bleibt alles, wie es ist (Ben, 18.10.2026).
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import date
@@ -590,12 +591,34 @@ def main(page: ft.Page) -> None:
         erster = gebaut["route"] is None
         gebaut["route"] = page.route
         state.route_nummer += 1
-        state.timer_beobachter.pop("ansicht", None)  # die Timer-Ansicht trägt sich neu ein
+        # Alle Beobachter gehören Ansichten, Leiste oder Komponenten, die gleich neu
+        # entstehen und sich neu eintragen — was bliebe, zöge im Takt an verwaisten
+        # Controls (N21: „uhr_in_der_uebung“, „ablauf“, „uebung“, „ausdauer“ liefen weiter)
+        for beobachter in (
+            state.timer_beobachter,
+            state.einheit_beobachter,
+            state.groesse_beobachter,
+            state.notiz_beobachter,
+        ):
+            beobachter.clear()
         # Thema und Kurvenfarben zuerst — die Ansichten lesen sie beim Bauen
         darstellung = darstellung_anwenden()
+        vorher = list(page.views)
         page.views.clear()
-        page.views.append(hauptansicht(page, state))
-        page.views.extend(ansichten_bauen(erster))
+        try:
+            page.views.append(hauptansicht(page, state))
+            page.views.extend(ansichten_bauen(erster))
+        except Exception as fehler:
+            # Ein Bauer wirft (kaputte Daten, Fehler in einer Ansicht): nicht mit leerem
+            # Stapel dastehen — die alten Ansichten bleiben, der Fehler steht unten (N17)
+            logging.getLogger(__name__).exception("Ansicht %s nicht gebaut", page.route)
+            page.views.clear()
+            page.views.extend(vorher or [hauptansicht(page, state)])
+            gebaut["route"] = page.views[-1].route if page.views else None
+            page.update()
+            with suppress(Exception):
+                page.show_dialog(ft.SnackBar(ft.Text(f"Ansicht nicht geöffnet: {fehler}")))
+            return
         # Info- bzw. Laufleiste einer Einheit unter der Titelleiste der obersten Ansicht
         # (Ben, 17.10.2026) — ohne Einheit bleibt jede Ansicht, wie sie ist; auf „Heute“
         # steht die Einheit im eigenen Reiter
@@ -692,6 +715,9 @@ def main(page: ft.Page) -> None:
             eintrag_routen(teile)
 
     async def zurueck() -> None:
+        if not page.views:  # nach einem gescheiterten Aufbau (N17)
+            await page.push_route("/")
+            return
         # Wer eine Ansicht verlässt, beginnt beim nächsten Öffnen wieder oben.
         state.scroll_offsets.pop(page.views[-1].route, None)
         if len(page.views) > 1:

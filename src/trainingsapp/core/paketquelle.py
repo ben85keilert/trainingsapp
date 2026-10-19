@@ -174,7 +174,7 @@ def index_lesen(daten: Any, quelle_url: str) -> tuple[str, list[IndexEintrag]]:
 class _NurHttps(urllib.request.HTTPRedirectHandler):
     """Weiterleitungen nur auf https:// — `urllib` folgte sonst auch nach http:// (A9)."""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
         if url_pruefen(newurl) is not None:
             raise urllib.error.HTTPError(
                 newurl, code, "Weiterleitung nur auf https://", headers, fp

@@ -92,16 +92,18 @@ def kontext_fuer(
 
 
 def bereitstellen(
-    page: Any, state: Any, kontext: UebungKontext, profil: TimerProfil
+    page: Any, state: Any, kontext: UebungKontext, profil: TimerProfil, *, zeichnen: bool = True
 ) -> Einheitslauf:
     """Übung und Timer in die Startleiste; eine HRV, die schon aufnimmt, kommt mit (nur
     Marken). Die Einheit endet mit dem Timer."""
-    e = einheit_ui.teil_bereitstellen(page, state, UebungBaustein(kontext))
-    einheit_ui.timer_bereitstellen(page, state, TimerLauf(profil))
+    e = einheit_ui.teil_bereitstellen(page, state, UebungBaustein(kontext), zeichnen=False)
+    einheit_ui.timer_bereitstellen(page, state, TimerLauf(profil), zeichnen=False)
     lauf = state.messlauf
     if lauf is not None and lauf.aufnahme is not None and e.hrv is None:
-        einheit_ui.hrv_bereitstellen(page, state)
+        einheit_ui.hrv_bereitstellen(page, state, zeichnen=False)
     e.ende_mit_timer = True
+    if zeichnen:
+        state.neu_zeichnen()
     return e
 
 
@@ -113,7 +115,7 @@ def starten(page: Any, state: Any, kontext: UebungKontext, profil: TimerProfil) 
     """
     if not einheit_ui.platz_machen(state):
         raise RuntimeError("Es läuft schon eine Einheit — erst oben mit ⏹ beenden.")
-    bereitstellen(page, state, kontext, profil)
+    bereitstellen(page, state, kontext, profil, zeichnen=False)  # `alle_starten` zeichnet
     e = einheit_ui.alle_starten(page, state, 0.0)
     assert e is not None
     return e

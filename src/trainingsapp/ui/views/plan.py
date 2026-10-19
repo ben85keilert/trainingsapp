@@ -64,6 +64,7 @@ import asyncio
 import contextlib
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import date
 from functools import partial
 from typing import Any
 
@@ -288,9 +289,17 @@ def plan_view(
     sitzungsplan = None if einzel else plan.id
     #: die fertige Ansicht — „Fertig“ fragt, was unter ihr liegt
     ansicht_halter: list[ft.View] = []
-    heute = state.heute()
-    anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute)
-    tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute)]
+
+    def heute() -> date:
+        """Der Tag beim Tippen, nicht beim Aufbau: Über Mitternacht offen gelassen (die
+        Engine bleibt im Cache), landete ein Satz sonst im gestrigen Eintrag (D3)."""
+        return state.heute()
+
+    #: Blöcke, die heute einen eigenen Eintrag angelegt haben (spätere Stelle einer
+    #: Übung): Weitere Sätze gehen dorthin, nicht in noch einen Eintrag (D7)
+    eigene: set[str] = set()
+    anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute())
+    tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute())]
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
     #: Die wievielte Stelle ihrer Übung jede Planübung ist — und was heute erledigt ist
     stelle = vorkommen(plan.items)
@@ -314,8 +323,8 @@ def plan_view(
     def auffrischen() -> None:
         """Stand neu lesen und die Blöcke in derselben Liste ersetzen."""
         nonlocal anzahl, gemacht, tages_eintraege, fertig_ids
-        anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute)
-        tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute)]
+        anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, heute())
+        tages_eintraege = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, heute())]
         fertig_ids = erledigte(plan.items, anzahl)
         gemacht = len(fertig_ids)
         stand.value = stand_text()
@@ -335,8 +344,13 @@ def plan_view(
         return mit_plan_spec(item, katalog[item.exercise_id])
 
     def eigener_eintrag(item: PlanItem) -> bool:
-        """Spätere Stelle einer Übung, die heute noch offen ist: neuer Eintrag statt anhängen."""
-        return stelle[item.id] > 1 and item.id not in fertig_ids
+        """Spätere Stelle einer Übung, die heute noch offen ist: neuer Eintrag statt anhängen —
+        aber nur einmal je Block (`eigene`)."""
+        return stelle[item.id] > 1 and item.id not in fertig_ids and item.id not in eigene
+
+    def eigenen_gemerkt(item: PlanItem, neu: bool) -> None:
+        if neu:
+            eigene.add(item.id)
 
     def teilspec(item: PlanItem, uebung: Exercise) -> Any:
         """Die Spezifikation, beschränkt auf die Parameter, die der Plan anbietet."""
@@ -357,17 +371,18 @@ def plan_view(
 
     def eintragen(item: PlanItem, result: dict[str, Any]) -> None:
         uebung = uebung_fuer(item)
-        session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
+        session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
         melden(uebung, state.sitzungen.eintrag_anlegen(session, uebung, result))
 
     def anhaengen(item: PlanItem, feld: FieldSpec, werte: list[float]) -> None:
         uebung = uebung_fuer(item)
-        session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
+        session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
         eintrag = None
         neu = eigener_eintrag(item)
+        eigenen_gemerkt(item, neu)
         for wert in werte:
             eintrag = state.sitzungen.satz_anhaengen(
-                session, uebung, feld.key, wert, heute, kontext(item, uebung), neu=neu
+                session, uebung, feld.key, wert, heute(), kontext(item, uebung), neu=neu
             )
             neu = False
         if eintrag is not None:
@@ -388,9 +403,11 @@ def plan_view(
     def wert_setzer(item: PlanItem, feld: FieldSpec, wert: Any) -> None:
         """Skala & Co.: in den heutigen Eintrag der Übung, nicht in einen eigenen."""
         uebung = uebung_fuer(item)
-        session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
+        session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
+        neu = eigener_eintrag(item)
+        eigenen_gemerkt(item, neu)
         eintrag = state.sitzungen.wert_setzen(
-            session, uebung, feld.key, wert, heute, kontext(item, uebung), neu=eigener_eintrag(item)
+            session, uebung, feld.key, wert, heute(), kontext(item, uebung), neu=neu
         )
         melden(uebung, eintrag)
 
@@ -1059,7 +1076,7 @@ def plan_view(
             None
             if eigener_eintrag(item)
             else state.sitzungen.text_eintrag(
-                state.profil.id, uebung.id, heute, sitzungsplan, feld.key
+                state.profil.id, uebung.id, heute(), sitzungsplan, feld.key
             )
         )
         bisher = ziel.result.get(feld.key) if ziel is not None else None
@@ -1075,15 +1092,11 @@ def plan_view(
             text = (eingabe.value or "").strip()
             if not text:
                 return
-            session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
+            session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
+            neu = eigener_eintrag(item)
+            eigenen_gemerkt(item, neu)
             eintrag = state.sitzungen.text_setzen(
-                session,
-                uebung,
-                feld.key,
-                text,
-                heute,
-                kontext(item, uebung),
-                neu=eigener_eintrag(item),
+                session, uebung, feld.key, text, heute(), kontext(item, uebung), neu=neu
             )
             melden(uebung, eintrag)
 
@@ -1146,7 +1159,7 @@ def plan_view(
         Ben, 18.10.2026: „So wechselt das Bild nicht immer hin und her“)."""
 
         def handler() -> None:
-            page.show_dialog(leistungen_blatt(page, state, uebung, heute, danach=auffrischen))
+            page.show_dialog(leistungen_blatt(page, state, uebung, heute(), danach=auffrischen))
 
         return handler
 
@@ -1173,7 +1186,9 @@ def plan_view(
             heutig = (
                 None
                 if eigener_eintrag(item)
-                else state.sitzungen.notiz_eintrag(state.profil.id, uebung.id, heute, sitzungsplan)
+                else state.sitzungen.notiz_eintrag(
+                    state.profil.id, uebung.id, heute(), sitzungsplan
+                )
             )
             feld = ft.TextField(
                 value=heutig.note if heutig is not None else "",
@@ -1198,10 +1213,10 @@ def plan_view(
             def sichern() -> None:
                 text = (feld.value or "").strip()
                 if text or heutig is not None:
-                    session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute)
-                    state.sitzungen.eintrag_notiz_setzen(
-                        session, uebung, text, heute, neu=eigener_eintrag(item)
-                    )
+                    session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
+                    neu = eigener_eintrag(item)
+                    eigenen_gemerkt(item, neu)
+                    state.sitzungen.eintrag_notiz_setzen(session, uebung, text, heute(), neu=neu)
                     nachher.danach(gespeichert)
 
             async def geschlossen(e: object) -> None:

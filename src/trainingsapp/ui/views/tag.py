@@ -289,7 +289,13 @@ def tagesansicht(
     hängen `…/leistungen/<übung>` und `…/nachtragen/<übung>`. ``mit_datum``: der Tag im Kopf
     (auf „Heute“; die Tagesansicht hat ihn in der Titelleiste).
     """
-    stand: dict[str, _Daten] = {"daten": _lesen(state, tag)}
+
+    def tag_jetzt() -> date:
+        """Der Tag beim Tippen: Auf „Heute“ ist das der aktuelle Tag, auch wenn die Ansicht
+        gestern gebaut wurde (D3); eine Tagesansicht bleibt bei ihrem Tag."""
+        return state.heute() if basis == "" else tag
+
+    stand: dict[str, _Daten] = {"daten": _lesen(state, tag_jetzt())}
     spalte = ft.Column(spacing=8, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
 
     def daten() -> _Daten:
@@ -297,7 +303,7 @@ def tagesansicht(
 
     def auffrischen() -> None:
         """Neu lesen und nur diese Spalte neu füllen."""
-        stand["daten"] = _lesen(state, tag)
+        stand["daten"] = _lesen(state, tag_jetzt())
         spalte.controls = aufbauen()
         with contextlib.suppress(Exception):  # nicht mehr auf dem Bildschirm
             spalte.update()
@@ -318,7 +324,7 @@ def tagesansicht(
             if uebung is None:
                 return
             eff = mit_plan_spec(item, uebung)
-            session = state.sitzungen.session_fuer(state.profil.id, plan.id, tag)
+            session = state.sitzungen.session_fuer(state.profil.id, plan.id, tag_jetzt())
             eintrag = state.sitzungen.eintrag_anlegen(
                 session, eff, auspraegung_vorgabe(state, item, eff)
             )
@@ -357,12 +363,12 @@ def tagesansicht(
 
         def zurueckholen() -> None:
             # Dieselbe Session wie vorher — mit Notiz und Beginn
-            if not state.sitzungen.wieder_in_tag(state.profil.id, plan.id, tag):
-                state.sitzungen.session_fuer(state.profil.id, plan.id, tag)
+            if not state.sitzungen.wieder_in_tag(state.profil.id, plan.id, tag_jetzt()):
+                state.sitzungen.session_fuer(state.profil.id, plan.id, tag_jetzt())
             auffrischen()
 
         def handler() -> None:
-            if not state.sitzungen.aus_tag_nehmen(state.profil.id, plan.id, tag):
+            if not state.sitzungen.aus_tag_nehmen(state.profil.id, plan.id, tag_jetzt()):
                 # Inzwischen kam ein Eintrag dazu (etwa aus einem Ablauf) — er bleibt
                 auffrischen()
                 page.show_dialog(
@@ -388,7 +394,7 @@ def tagesansicht(
 
         def waehler(plan: Plan) -> Callable[[], None]:
             def handler() -> None:
-                state.sitzungen.session_fuer(state.profil.id, plan.id, tag)
+                state.sitzungen.session_fuer(state.profil.id, plan.id, tag_jetzt())
 
                 def danach() -> None:
                     auffrischen()
@@ -436,7 +442,7 @@ def tagesansicht(
             notiz_dialog(
                 "Notiz zum Tag",
                 daten().tagesnotiz,
-                lambda text: state.tagesnotizen.setzen(state.profil.id, tag, text),
+                lambda text: state.tagesnotizen.setzen(state.profil.id, tag_jetzt(), text),
                 danach=auffrischen,
                 hinweis="Wie lief der Tag? Tippen oder diktieren.",
             )

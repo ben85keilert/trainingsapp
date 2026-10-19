@@ -142,3 +142,35 @@ def test_ohne_saetze_eine_zahl_im_plan_und_im_formular(page, state) -> None:
     feld.value = "120, 30"
     assert form.werte() == {"reps": [150.0]}
     assert eintrag.spec_snapshot.fields[0].type == FieldType.SET_LIST
+
+
+def test_spaetere_stelle_sammelt_ihre_saetze_in_einem_eintrag(page, state) -> None:
+    """D7: Plan [A, X, A], die erste Stelle ausgelassen — drei Tipps im dritten Block ergeben
+    einen Eintrag mit drei Sätzen, nicht zwei Einträge."""
+    import inspect
+
+    a = _uebung(state)
+    x = Exercise(name="Dazwischen", result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
+    state.uebungen.speichern(x)
+    plan = Plan(name="Doppelt", subject_id=state.profil.id)
+    state.plaene.speichern(plan)
+    for uebung_id in (a.id, x.id, a.id):
+        state.plaene.uebung_hinzufuegen(plan.id, uebung_id)
+    state.plan_darstellung_setzen(UNTEREINANDER)
+    ansicht = plan_view(page, state, state.plaene.laden(plan.id))
+    zehner = [
+        c
+        for c in _alle(ansicht)
+        if isinstance(c, ft.Chip) and [t.lstrip("+") for t in _texte(c.label)] == ["10"]
+    ]
+    assert len(zehner) == 2  # je A-Block ein Chip „10“
+    for _ in range(3):
+        ergebnis = zehner[-1].on_click()
+        if inspect.isawaitable(ergebnis):
+            asyncio.run(ergebnis)
+    eintraege = [
+        e
+        for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+        if e.exercise_id == a.id
+    ]
+    assert [e.result for e in eintraege] == [{"reps": [10.0, 10.0, 10.0]}]

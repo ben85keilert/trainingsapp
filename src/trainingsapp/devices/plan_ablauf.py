@@ -28,7 +28,14 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from ..core.einheit import Beteiligung, Ereignis, Rolle, in_uebung
+from ..core.einheit import (
+    Beteiligung,
+    Ereignis,
+    Rolle,
+    in_uebung,
+    uebung_ende_text,
+    uebung_start_text,
+)
 from ..core.plan_durchlauf import Schritt
 from ..core.timer import TimerLauf, TimerProfil
 from .einheit import TimerBaustein
@@ -214,8 +221,8 @@ class PlanAblaufBaustein:
     def _uebungs_timer(self, ereignisse: list[Ereignis]) -> list[Ereignis]:
         """Die Ereignisse des Timers der laufenden Übung nennen sie (P54) — hier, solange
         sie läuft, nicht erst in der Einheit: Im selben Takt kann schon die nächste beginnen."""
-        uebung_id = self.schritt.uebung_id
-        return [in_uebung(e, uebung_id) for e in ereignisse]
+        s = self.schritt
+        return [in_uebung(e, s.uebung_id, s.name) for e in ereignisse]
 
     def _daten(self, s: Schritt) -> dict[str, Any]:
         daten: dict[str, Any] = {
@@ -236,7 +243,7 @@ class PlanAblaufBaustein:
             jetzt - self._t0,
             "plan",
             "uebung_ende",
-            f"{s.name} fertig",
+            uebung_ende_text(s.name),
             {**self._daten(s), "grund": grund},
         )
 
@@ -246,7 +253,9 @@ class PlanAblaufBaustein:
         self._seit = bei
         s = self.schritt
         self._ausstehend.append(
-            Ereignis(bei - self._t0, "plan", "uebung_start", f"{s.name} beginnt", self._daten(s))
+            Ereignis(
+                bei - self._t0, "plan", "uebung_start", uebung_start_text(s.name), self._daten(s)
+            )
         )
         self.timer = None
         if s.profil is not None:

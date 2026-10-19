@@ -356,7 +356,12 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
   Timers — die Auswertung muss nichts über die Zeit zuordnen. Der Text nennt dann den Timer
   nicht mehr („Halten (Runde 1/3)“ statt „Timer „Halten 3 × 1 min“: …“); läuft er allein,
   bleibt der Name, er ist dann der einzige Hinweis. „Timer fertig“ fällt in einer Übung als
-  Notiz weg — „Planke fertig“ sagt dasselbe; die Abschnittsgrenze bleibt (still).
+  Notiz weg — „Planke: Ende“ sagt dasselbe; die Abschnittsgrenze bleibt (still). Anhalten
+  und Weiter des Timers heißen in der Übung „Planke: Pause“ / „Planke: weiter“.
+- **Einzelne Übung ohne Spur „einheit“** (Ben, 19.10.2026): Läuft eine einzelne Übung mit
+  ihrem Timer in einer schon laufenden Aufnahme, fehlen „Start: …“ und „Ende der Einheit“ —
+  „Planke: Start“ und „Planke: Ende“ klammern sie schon. Ein Plan-Ablauf behält die Spur.
+  Ältere Dateien behalten ihre Notizen („Planke beginnt“ / „Planke fertig“).
 - **praxis_gui** liest das Feld nicht und behält es beim Bearbeiten wie `uebungen`.
 - Keine neue Schema-Version: ein zusätzliches, optionales Feld wie `uebungen`; ältere
   Leser übergehen es.

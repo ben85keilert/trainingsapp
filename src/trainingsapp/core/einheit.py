@@ -266,7 +266,7 @@ class Projektion:
     #: als sichtbare Notiz — sonst nur eine stille Grenze (Ende einer Spur)
     als_notiz: bool = True
     #: Kurzcodes der Übungen, die die Notiz nennt (raw-v1 ``uebungen``, Vertrag §4) —
-    #: „Planke beginnt“ verweist so auf die Übung (Katalog A15)
+    #: „Planke: Start“ verweist so auf die Übung (Katalog A15)
     uebungen: tuple[str, ...] = ()
 
 
@@ -292,7 +292,7 @@ def projektion(
     True
     >>> projektion(Ereignis(9.0, "person", "eintrag")) is None
     True
-    >>> projektion(Ereignis(5.0, "plan", "uebung_start", "Planke beginnt",
+    >>> projektion(Ereignis(5.0, "plan", "uebung_start", "Planke: Start",
     ...     {"uebung": "2b0c6f0e-0000-4000-8000-000000000001", "name": "Planke"})).uebungen
     ('2ATPZCAY',)
     """
@@ -324,7 +324,7 @@ def projektion(
             )
             return Projektion(SPUR_TIMER, e.text or name, name, False, m, uebungen=_kurzcodes(d))
         case ("timer", "ende"):
-            # In einer Übung still (`in_uebung`): „Planke fertig“ sagt es schon
+            # In einer Übung still (`in_uebung`): „Planke: Ende“ sagt es schon
             return Projektion(
                 SPUR_TIMER,
                 e.text or "Timer fertig",
@@ -391,17 +391,37 @@ def projektion(
     return None
 
 
-def in_uebung(e: Ereignis, uebung_id: str) -> Ereignis:
+def uebung_start_text(name: str) -> str:
+    """Die Notiz, mit der eine Übung beginnt (Ben, 19.10.2026: „{Übung}: Start“).
+
+    >>> uebung_start_text("Planke"), uebung_ende_text("Planke")
+    ('Planke: Start', 'Planke: Ende')
+    """
+    return f"{name}: Start"
+
+
+def uebung_ende_text(name: str) -> str:
+    """Die Notiz, mit der eine Übung endet."""
+    return f"{name}: Ende"
+
+
+def in_uebung(e: Ereignis, uebung_id: str, name: str = "") -> Ereignis:
     """Ein Timer-Ereignis während einer Übung (Ben, 18.10.2026, P54): Es nennt die Übung
     (``uebung`` → ihr Kurzcode in der Messung), sein Text den Timer nicht mehr — der Name der
-    Übung steht schon da —, und das Ende des Timers wird still: „Planke fertig“ sagt es.
+    Übung steht schon da —, und das Ende des Timers wird still: „Planke: Ende“ sagt es.
+    Anhalten und Weiter heißen nach der Übung (Ben, 19.10.2026): „Planke: Pause“,
+    „Planke: weiter“ — mit ``name``; ohne bleibt der Text des Timers.
 
     >>> x = in_uebung(Ereignis(0.0, "timer", "abschnitt", "Timer „H“: Halten (Runde 1/3)"), "u1")
     >>> x.text, x.daten["uebung"]
     ('Halten (Runde 1/3)', 'u1')
     >>> in_uebung(Ereignis(9.0, "timer", "ende", "Timer fertig"), "u1").daten["still"]
     True
-    >>> in_uebung(Ereignis(9.0, "plan", "uebung_ende", "Planke fertig"), "u1").daten
+    >>> in_uebung(Ereignis(9.0, "timer", "pause", "Timer angehalten"), "u1", "Planke").text
+    'Planke: Pause'
+    >>> in_uebung(Ereignis(9.0, "timer", "weiter", "weiter: Halten"), "u1", "Planke").text
+    'Planke: weiter'
+    >>> in_uebung(Ereignis(9.0, "plan", "uebung_ende", "Planke: Ende"), "u1").daten
     {}
     """
     if e.quelle != "timer":
@@ -409,7 +429,13 @@ def in_uebung(e: Ereignis, uebung_id: str) -> Ereignis:
     daten = {**e.daten, "uebung": uebung_id}
     if e.art == "ende":
         daten["still"] = True
-    text = name_aus_notiz(e.text) if e.art == "abschnitt" else e.text
+    text = e.text
+    if e.art == "abschnitt":
+        text = name_aus_notiz(e.text)
+    elif e.art == "pause" and name:
+        text = f"{name}: Pause"
+    elif e.art == "weiter" and name:
+        text = f"{name}: weiter"
     return replace(e, text=text, daten=daten)
 
 
@@ -420,7 +446,7 @@ _ART_TEXT: dict[str, str] = {
     "abschnitt": "Abschnitt",
     "pause": "Pause",
     "weiter": "weiter",
-    "uebung_start": "Beginn",
+    "uebung_start": "Start",
     "uebung_ende": "Ende",
     "km": "km",
 }
@@ -589,4 +615,6 @@ __all__ = [
     "in_uebung",
     "marke_angaben",
     "projektion",
+    "uebung_ende_text",
+    "uebung_start_text",
 ]

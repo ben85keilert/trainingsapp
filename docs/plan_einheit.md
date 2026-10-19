@@ -101,7 +101,7 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 | `gps/start` | stille Grenze: „km 1“ (Rad „km 5“) beginnt mit der ersten gezählten Ortung | `km` |
 | `gps/km` | Notiz „km N“ zur Split-Zeit; der nächste Abschnitt heißt nach seinem Ende („km 2“, Rad „km 10“) | `km` |
 | `gps/ende` | stille Grenze, letzter km endet | `km` |
-| `plan/uebung_start`, `plan/uebung_ende` | Notiz „Planke beginnt“ / „Planke fertig“ mit dem Kurzcode der Übung (`uebungen`, Vertrag §4), Abschnitt der Übung | `uebung` |
+| `plan/uebung_start`, `plan/uebung_ende` | Notiz „Planke: Start“ / „Planke: Ende“ mit dem Kurzcode der Übung (`uebungen`, Vertrag §4), Abschnitt der Übung; Anhalten und Weiter ihres Timers heißen „Planke: Pause“ / „Planke: weiter“ (Ben, 19.10.2026) | `uebung` |
 | `plan/pause` | Pause zwischen zwei Übungen eines Plan-Ablaufs, bis „Weiter“ — Abschnitt „Pause“ | `uebung` |
 | `plan/ende`, `person/eintrag` | — (nur Zeitleiste: Ende des Ablaufs, was eingetragen wurde) | |
 

@@ -85,7 +85,11 @@ async def test_fertig_heisst_gemacht_mit_haltezeit_je_satz(umgebung) -> None:
     # Die HRV lief weiter und hat die Übung als Abschnitt auf eigener Spur
     assert messlauf.aufnahme is not None
     marken = [x for x in messlauf.aufnahme.ereignisse if x.get("marke", {}).get("spur") == "uebung"]
-    assert [x["text"] for x in marken] == ["Planke beginnt", "Planke fertig"]
+    assert [x["text"] for x in marken] == ["Planke: Start", "Planke: Ende"]
+    # Eine einzelne Übung: „Start: Planke“ / „Ende der Einheit“ fallen weg (Ben, 19.10.2026)
+    assert not any(
+        x.get("marke", {}).get("spur") == "einheit" for x in messlauf.aufnahme.ereignisse
+    )
 
 
 async def test_abbrechen_traegt_nichts_ein_laeufe_heute_schon(umgebung) -> None:
@@ -148,7 +152,7 @@ async def test_marken_einer_uebung_nennen_sie_und_den_ablauf(umgebung) -> None:
     notizen = messlauf.aufnahme.ereignisse
     texte = [x["text"] for x in notizen]
     assert "Halten (Runde 1/3)" in texte and not any(t.startswith("Timer „") for t in texte)
-    assert "Timer fertig" not in texte and "Planke fertig" in texte
+    assert "Timer fertig" not in texte and "Planke: Ende" in texte
     timer = [x for x in notizen if x.get("marke", {}).get("quelle") == "timer"]
     assert timer and all(x.get("uebungen") == [kurzcode(uebung.id)] for x in timer)
     halten = next(x for x in timer if x["text"] == "Halten (Runde 1/3)")

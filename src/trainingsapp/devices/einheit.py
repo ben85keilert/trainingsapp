@@ -50,6 +50,8 @@ from ..core.einheit import (
     Zustand,
     in_uebung,
     projektion,
+    uebung_ende_text,
+    uebung_start_text,
 )
 from ..core.laufend import uhr as uhr_text
 from ..core.limits import TICK_S
@@ -340,8 +342,8 @@ class UebungKontext:
 class UebungBaustein:
     """Eine Übung als Teil einer Einheit (Ben, 17.10.2026): Anfang und Ende in der
     Zeitleiste (``plan/uebung_start``, ``plan/uebung_ende``) — in einer laufenden
-    HRV-Aufnahme ein Abschnitt auf der Spur „uebung“ mit den Marken „Planke beginnt“
-    und „Planke fertig“. Ins Tagebuch trägt der Aufrufer aus der Zeitleiste ein
+    HRV-Aufnahme ein Abschnitt auf der Spur „uebung“ mit den Marken „Planke: Start“
+    und „Planke: Ende“. Ins Tagebuch trägt der Aufrufer aus der Zeitleiste ein
     (`core.timer_eintrag`); dafür gibt `abschliessen_async` den `UebungKontext`.
     """
 
@@ -388,7 +390,7 @@ class UebungBaustein:
         if self._t0 is None or self._gemeldet:
             return []
         self._gemeldet = True
-        return [Ereignis(0.0, "plan", "uebung_start", f"{self.name} beginnt", self._daten())]
+        return [Ereignis(0.0, "plan", "uebung_start", uebung_start_text(self.name), self._daten())]
 
     def beenden(self, jetzt: float) -> list[Ereignis]:
         out = self.takt(jetzt)
@@ -396,7 +398,11 @@ class UebungBaustein:
             self._ende_gemeldet = True
             out.append(
                 Ereignis(
-                    jetzt - self._t0, "plan", "uebung_ende", f"{self.name} fertig", self._daten()
+                    jetzt - self._t0,
+                    "plan",
+                    "uebung_ende",
+                    uebung_ende_text(self.name),
+                    self._daten(),
                 )
             )
         return out
@@ -710,9 +716,15 @@ class Einheitslauf:
 
     @property
     def _einheit_spur(self) -> bool:
-        """Eine eigene Spur für die Einheit lohnt nur, wenn die HRV-Aufnahme schon lief."""
+        """Eine eigene Spur für die Einheit lohnt nur, wenn die HRV-Aufnahme schon lief —
+        und nicht, wenn die Einheit eine einzelne Übung mit ihrem Timer ist (Ben,
+        19.10.2026): „Planke: Start“ und „Planke: Ende“ klammern sie schon, „Start: Planke“
+        und „Ende der Einheit“ wären dieselben Stellen noch einmal. Ein Plan-Ablauf behält
+        die Spur (mehrere Übungen, Pausen dazwischen)."""
         hrv = self.hrv
-        return hrv is not None and hrv.rolle is Rolle.LAEUFT_SCHON
+        if hrv is None or hrv.rolle is not Rolle.LAEUFT_SCHON:
+            return False
+        return not isinstance(self.teil("plan"), UebungBaustein)
 
     def takt(self) -> list[Ereignis]:
         """Ereignisse aller Teile seit dem letzten Takt sammeln, schreiben, projizieren."""
@@ -756,7 +768,7 @@ class Einheitslauf:
         teil = self.teil("plan")
         if not isinstance(teil, UebungBaustein):
             return liste
-        return [in_uebung(e, teil.kontext.uebung_id) for e in liste]
+        return [in_uebung(e, teil.kontext.uebung_id, teil.name) for e in liste]
 
     def _aktiv(self, teil: Baustein) -> bool:
         """Läuft der Teil noch? Ohne Angabe (`aktiv`) gilt er als laufend."""

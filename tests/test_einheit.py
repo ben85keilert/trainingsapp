@@ -273,7 +273,7 @@ def test_eintraege_vom_timer_aus_der_zeitleiste(repo) -> None:
     r.ereignisse_schreiben(
         "e-1",
         [
-            (1, Ereignis(0.0, "plan", "uebung_start", "Planke beginnt", {"uebung": "u1"})),
+            (1, Ereignis(0.0, "plan", "uebung_start", "Planke: Start", {"uebung": "u1"})),
             (2, Ereignis(65.0, "person", "eintrag", "Planke", {"eintrag": "eintrag-a"})),
         ],
     )

@@ -29,6 +29,7 @@ from trainingsapp.config import (
     streckenverzeichnis,
 )
 from trainingsapp.core.darstellung import Darstellung, darstellung_lesen, darstellung_schreiben
+from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.core.hrv_ansicht import (
     Ansicht,
     ansicht_lesen,
@@ -115,6 +116,16 @@ BENACHRICHTIGUNGEN: dict[str, str] = {
     "updates": "Nur Updates",
     "alles": "Updates und Neuigkeiten",
 }
+
+
+def _offen_min(einstellungen: SettingRepo) -> int:
+    """Der gespeicherte Zeitabstand — bei Unsinn die Vorgabe."""
+    roh = einstellungen.lesen(SettingRepo.EINTRAG_OFFEN_MIN)
+    try:
+        wert = int(roh) if roh is not None else OFFEN_MIN_VORGABE
+    except ValueError:
+        return OFFEN_MIN_VORGABE
+    return wert if wert in OFFEN_WAHL else OFFEN_MIN_VORGABE
 
 
 @dataclass
@@ -348,6 +359,8 @@ class AppState:
         datenformat_aktualisieren(con)
         profile = SubjectRepo(con)
         einstellungen = SettingRepo(con)
+        sitzungen = SessionRepo(con)
+        sitzungen.offen_min = _offen_min(einstellungen)
         profil = cls._aktives_profil(profile, einstellungen)
         offen = cls._papierkorb_aufraeumen(con, einstellungen)
         strecken = StreckeRepo(con)
@@ -368,7 +381,7 @@ class AppState:
             profile=profile,
             einstellungen=einstellungen,
             plaene=PlanRepo(con),
-            sitzungen=SessionRepo(con),
+            sitzungen=sitzungen,
             tagesnotizen=DayNoteRepo(con),
             hrv=HrvRepo(con),
             strecken=strecken,
@@ -508,6 +521,16 @@ class AppState:
     def uhr_darstellung_setzen(self, wert: str) -> None:
         if wert in UHR_DARSTELLUNGEN:
             self.einstellungen.setzen(SettingRepo.UHR_DARSTELLUNG, wert)
+
+    def eintrag_offen_min(self) -> int:
+        """Minuten ohne Satz, nach denen ein Eintrag als geschlossen gilt (`core.eintraege`;
+        0 = nur mit „Abschließen“)."""
+        return self.sitzungen.offen_min
+
+    def eintrag_offen_min_setzen(self, minuten: int) -> None:
+        if minuten in OFFEN_WAHL:
+            self.einstellungen.setzen(SettingRepo.EINTRAG_OFFEN_MIN, str(minuten))
+            self.sitzungen.offen_min = minuten
 
     def darstellung(self, profil_id: str | None = None) -> Darstellung:
         """Farbprofil, Hell/Dunkel und Verlauf eines Profils (Vorgabe: das aktive)."""

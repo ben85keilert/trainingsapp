@@ -73,6 +73,9 @@ ARTEN: frozenset[str] = frozenset(
         "verlassen",
         "eintrag",
         "schlaf",
+        # Leistung der Person in der Übungsausführung (Ben, 19.10.2026, Plan B)
+        "leistung",
+        "abschluss",
     }
 )
 
@@ -118,6 +121,12 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         "zeitfeld",
         "werte",
         "grund",
+        # Leistung (Plan B): welches Feld, welcher Wert, erster Satz des Eintrags, ob die
+        # Marke den Abschnitt der Übung beginnt/beendet (nicht, wenn ihre Uhr schon läuft)
+        "feld",
+        "wert",
+        "erster",
+        "grenze",
         # Teile
         "teil",
         "rolle",
@@ -268,6 +277,9 @@ class Projektion:
     #: Kurzcodes der Übungen, die die Notiz nennt (raw-v1 ``uebungen``, Vertrag §4) —
     #: „Planke: Start“ verweist so auf die Übung (Katalog A15)
     uebungen: tuple[str, ...] = ()
+    #: eine Abschnittsgrenze (Vorgabe) — sonst nur eine Notiz mit Marke, sofort gesetzt
+    #: (keine 5-s-Regel): die Leistungen der Person zwischen Anfang und Ende
+    grenze: bool = True
 
 
 def projektion(
@@ -388,6 +400,40 @@ def projektion(
             return Projektion(
                 SPUR_UEBUNG, e.text or "Pause", "Pause", False, marke(SPUR_UEBUNG, name="Pause")
             )
+        case ("person", "leistung"):
+            # Ein Mengen-Tipp (Ben, 19.10.2026): „geleistet bis hierher“ — die Tippzeit, nie
+            # als Beginn gedeutet. Der erste Satz eines Eintrags beginnt den Abschnitt der
+            # Übung, wenn nicht ihre Uhr schon einen führt (``grenze``).
+            name = str(d.get("name") or e.text)
+            beginnt = bool(d.get("erster")) and bool(d.get("grenze", True))
+            m = marke(
+                SPUR_UEBUNG,
+                name=name,
+                feld=d.get("feld"),
+                wert=d.get("wert"),
+            )
+            return Projektion(
+                SPUR_UEBUNG,
+                e.text or name,
+                name if beginnt else "",
+                False,
+                m,
+                uebungen=_kurzcodes(d),
+                grenze=beginnt,
+            )
+        case ("person", "abschluss"):
+            # „Abschließen“ (oder „Gemacht“): der Eintrag ist fertig — Ende des Abschnitts,
+            # wenn die Leistungen ihn begonnen haben
+            grenze = bool(d.get("grenze", True))
+            return Projektion(
+                SPUR_UEBUNG,
+                e.text or f"{d.get('name') or 'Übung'}: fertig",
+                "",
+                grenze,
+                marke(SPUR_UEBUNG, name=d.get("name")),
+                uebungen=_kurzcodes(d),
+                grenze=grenze,
+            )
     return None
 
 
@@ -449,6 +495,8 @@ _ART_TEXT: dict[str, str] = {
     "uebung_start": "Start",
     "uebung_ende": "Ende",
     "km": "km",
+    "leistung": "geleistet bis hierher",
+    "abschluss": "fertig",
 }
 
 
@@ -482,6 +530,12 @@ def marke_angaben(notiz: Mapping[str, Any]) -> list[str]:
         angaben.append(name)
     if (soll := zahl_lesen(m.get("soll_s"))) > 0:
         angaben.append(f"soll {dauer_text(soll)}")
+    if m.get("feld") and m.get("wert") is not None:
+        angaben.append(
+            f"{m['feld']} {m['wert']:g}"
+            if isinstance(m["wert"], int | float) and not isinstance(m["wert"], bool)
+            else f"{m['feld']} {m['wert']}"
+        )
     if (profil := m.get("profil")) == "stoppuhr":
         angaben.append("Stoppuhr")
     elif profil:

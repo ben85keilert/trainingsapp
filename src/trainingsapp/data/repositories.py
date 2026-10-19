@@ -25,6 +25,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
+from ..core import eintraege as offene
 from ..core.models import (
     EINGABE_CHIPS,
     EINGABE_HAKEN,
@@ -52,7 +53,7 @@ from ..core.models import (
 )
 from ..core.pakete import stand_tag_nachziehen
 from ..core.parameter import kontextfelder, modus_aus_felder
-from ..core.result_spec import FieldType, ResultSpec, ist_leer, werte_modernisieren
+from ..core.result_spec import FieldType, ResultSpec, werte_modernisieren
 from .db import transaktion
 
 #: Nach so vielen Tagen leert sich der Papierkorb von selbst (abschaltbar)
@@ -649,6 +650,8 @@ class SettingRepo:
     PLAN_DARSTELLUNG = "plan_darstellung"
     #: Wo Stoppuhr und Timer in der Übung stehen (`ui.state.UHR_DARSTELLUNGEN`)
     UHR_DARSTELLUNG = "uhr_darstellung"
+    #: Minuten ohne Satz, nach denen ein Eintrag als geschlossen gilt (`core.eintraege`)
+    EINTRAG_OFFEN_MIN = "eintrag_offen_min"
     #: Paketquellen: JSON-Liste von Index-Adressen (`core.paketquelle`); fehlt der
     #: Schlüssel, gilt `QUELLE_VORGABE`
     PAKETQUELLEN = "paketquellen"
@@ -1110,7 +1113,15 @@ class PlanRepo:
 # Trainingseinheiten und Einträge
 # ---------------------------------------------------------------------------
 
+
 #: Gültige Einträge: nicht gelöscht und nicht durch eine Korrektur ersetzt.
+class _Unveraendert:
+    """Markiert „ohne Angabe“ bei `eintrag_korrigieren(ended_at=…)` — ``None`` heißt dort
+    „öffnen“, darum reicht es nicht als Vorgabe."""
+
+
+UNVERAENDERT = _Unveraendert()
+
 _GUELTIGE = """
     SELECT e.* FROM session_entry e
     JOIN session s ON s.id = e.session_id
@@ -1301,8 +1312,28 @@ class SessionRepo:
         return eintrag
 
     def erledigt(self, session: Session, uebung: Exercise, note: str = "") -> SessionEntry:
-        """Nur „gemacht": leeres Ergebnis, keine Kennzahl — zählt für Häufigkeit und Kalender."""
-        return self.eintrag_anlegen(session, uebung, {}, note)
+        """Nur „gemacht": leeres Ergebnis, keine Kennzahl — zählt für Häufigkeit und Kalender.
+        Der Eintrag ist gleich **geschlossen** (`eintrag_fertig`)."""
+        return self.eintrag_fertig(session, uebung, {}, note)
+
+    def eintrag_fertig(
+        self,
+        session: Session,
+        uebung: Exercise,
+        result: dict[str, Any],
+        note: str = "",
+        *,
+        tag: date | None = None,
+        bei: datetime | None = None,
+    ) -> SessionEntry:
+        """„Gemacht“ / „Wie geplant“: ein fertiger Eintrag, gleich geschlossen — und was von
+        dieser Übung heute in dieser Session noch offen war, wird dabei geschlossen
+        (`docs/plan_eintraege_hrv.md`, A2: ohne markierten Eintrag heißt der Knopf
+        „Gemacht“ und schließt einen noch offenen mit)."""
+        bei = bei or jetzt()
+        with transaktion(self.con):
+            self.offene_schliessen(session, uebung, tag or lokaler_tag(bei), bei)
+            return self.eintrag_anlegen(session, uebung, result, note, started_at=bei, ended_at=bei)
 
     def eintrag_korrigieren(
         self,
@@ -1310,12 +1341,15 @@ class SessionRepo:
         result: dict[str, Any],
         note: str | None = None,
         spec: ResultSpec | None = None,
+        *,
+        ended_at: datetime | _Unveraendert | None = UNVERAENDERT,
     ) -> SessionEntry:
         """Korrektur = neuer Eintrag mit Verweis; übernimmt die Kopie des ALTEN.
 
         ``spec`` ersetzt die Kopie nur dann, wenn die neuen Werte in einer
         anderen Notation vorliegen als die alten (siehe `satz_anhaengen`).
-        Kopie und Werte müssen immer zusammenpassen.
+        Kopie und Werte müssen immer zusammenpassen. ``ended_at`` schließt
+        (Zeitpunkt) oder öffnet (``None``) den Eintrag — ohne Angabe bleibt es.
         """
         alt = self.eintrag_laden(alter_eintrag_id)
         if alt is None:
@@ -1330,13 +1364,99 @@ class SessionRepo:
             spec_snapshot=spec or alt.spec_snapshot,
             note=alt.note if note is None else note.strip(),
             started_at=alt.started_at,
-            ended_at=alt.ended_at,
+            ended_at=alt.ended_at if isinstance(ended_at, _Unveraendert) else ended_at,
         )
         with transaktion(self.con):
             self._eintrag_schreiben(neu, ersetzt=alt.id)
             self.con.execute("DELETE FROM measurement WHERE session_entry_id = ?", (alt.id,))
             self._kennzahlen_schreiben(session, neu)
         return neu
+
+    # -- Offener Eintrag (Ben, 19.10.2026; `core.eintraege`) --------------------------
+
+    #: Zeitabstand in Minuten, nach dem ein Eintrag ohne neuen Satz als geschlossen gilt
+    #: (Einstellungen → Übungen, `SettingRepo.EINTRAG_OFFEN_MIN`); 0 = nur „Abschließen“
+    offen_min: int = offene.OFFEN_MIN_VORGABE
+
+    def offener_eintrag(
+        self,
+        subject_id: str,
+        uebung: Exercise,
+        tag: date,
+        plan_id: str | None = None,
+        jetzt_: datetime | None = None,
+    ) -> SessionEntry | None:
+        """Der offene Eintrag dieser Übung an diesem Tag in diesem Plan (``None`` = ohne
+        Plan) — ohne Ende und nicht länger als `offen_min` unberührt; ``None``, wenn
+        keiner offen ist. Legt keine Session an (die Ansicht darf jederzeit fragen)."""
+        eigene = self._heute_im_plan(subject_id, uebung.id, tag, plan_id)
+        return offene.offener(eigene, jetzt_ or jetzt(), self.offen_min)
+
+    def stand(
+        self,
+        subject_id: str,
+        uebung: Exercise,
+        tag: date,
+        plan_id: str | None = None,
+        kontext: dict[str, Any] | None = None,
+        jetzt_: datetime | None = None,
+    ) -> offene.Stand:
+        """Offener Eintrag und ob er zur gewählten Ausprägung passt (`core.eintraege.stand`)."""
+        kontext = kontext or {}
+        felder = {f.key for f in kontextfelder(uebung.result_spec)} | set(kontext)
+        eigene = self._heute_im_plan(subject_id, uebung.id, tag, plan_id)
+        return offene.stand(eigene, kontext, felder, jetzt_ or jetzt(), self.offen_min)
+
+    def ziel_eintrag(
+        self,
+        subject_id: str,
+        uebung: Exercise,
+        tag: date,
+        plan_id: str | None = None,
+        kontext: dict[str, Any] | None = None,
+        jetzt_: datetime | None = None,
+    ) -> SessionEntry | None:
+        """Wohin der nächste Tipp geht — der markierte Eintrag, sonst ``None`` (neu)."""
+        return self.stand(subject_id, uebung, tag, plan_id, kontext, jetzt_).ziel
+
+    def offene_schliessen(
+        self, session: Session, uebung: Exercise, tag: date, bei: datetime | None = None
+    ) -> list[SessionEntry]:
+        """Alles, was von dieser Übung heute in dieser Session noch offen ist, schließen —
+        bevor ein neuer Eintrag beginnt (höchstens einer ist offen). Das Ende ist der
+        Zeitpunkt der letzten Änderung, wenn der Zeitabstand schon überschritten war,
+        sonst ``bei`` (jetzt)."""
+        bei = bei or jetzt()
+        geschlossen: list[SessionEntry] = []
+        for e in self._heute_im_plan(session.subject_id, uebung.id, tag, session.plan_id):
+            if e.session_id != session.id or e.ended_at is not None:
+                continue
+            zuletzt = offene.letzte_aenderung(e)
+            ende = bei if offene.ist_offen(e, bei, self.offen_min) or zuletzt is None else zuletzt
+            geschlossen.append(self.eintrag_schliessen(e.id, ende))
+        return geschlossen
+
+    def eintrag_schliessen(self, eintrag_id: str, bei: datetime | None = None) -> SessionEntry:
+        """„Abschließen“: der Eintrag bekommt sein Ende (Korrektur, Werte bleiben)."""
+        alt = self.eintrag_laden(eintrag_id)
+        if alt is None:
+            raise KeyError(eintrag_id)
+        return self.eintrag_korrigieren(alt.id, dict(alt.result), ended_at=bei or jetzt())
+
+    def eintrag_oeffnen(self, eintrag_id: str) -> SessionEntry:
+        """„Wieder öffnen“: das Ende fällt weg, weitere Sätze hängen wieder hier an — ein
+        anderer offener Eintrag derselben Übung wird dabei geschlossen."""
+        alt = self.eintrag_laden(eintrag_id)
+        if alt is None:
+            raise KeyError(eintrag_id)
+        session = self.session_laden(alt.session_id)
+        assert session is not None
+        tag = lokaler_tag(alt.started_at) if alt.started_at else lokaler_tag(jetzt())
+        with transaktion(self.con):
+            for e in self._heute_im_plan(session.subject_id, alt.exercise_id, tag, session.plan_id):
+                if e.session_id == session.id and e.id != alt.id and e.ended_at is None:
+                    self.eintrag_schliessen(e.id)
+            return self.eintrag_korrigieren(alt.id, dict(alt.result), ended_at=None)
 
     def heutiger_eintrag(
         self, subject_id: str, exercise_id: str, tag: date, plan_id: str | None = None
@@ -1378,22 +1498,21 @@ class SessionRepo:
 
         ``neu`` beginnt in jedem Fall einen Eintrag — für die zweite Stelle
         derselben Übung im Plan, die nicht an die erste anhängen soll.
+
+        Seit 19.10.2026 (`core.eintraege`): Ziel ist der **offene, markierte** Eintrag —
+        ohne Ende, nicht länger als `offen_min` unberührt, gleiche Ausprägung. Sonst
+        beginnt ein neuer, und was noch offen war, wird geschlossen.
         """
         kontext = kontext or {}
         aktuell = (
             None
             if neu
-            else self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+            else self.ziel_eintrag(session.subject_id, uebung, tag, session.plan_id, kontext)
         )
-        # Verglichen werden alle Ausprägungsfelder: Ein Satz ohne Winkel gehört
-        # nicht an einen Eintrag mit 45° — und umgekehrt.
-        felder = {f.key for f in kontextfelder(uebung.result_spec)} | set(kontext)
-        if (
-            aktuell is None
-            or aktuell.session_id != session.id
-            or any(aktuell.result.get(k) != kontext.get(k) for k in felder)
-        ):
-            return self.eintrag_anlegen(session, uebung, {**kontext, feld_key: [wert]})
+        if aktuell is None:
+            with transaktion(self.con):
+                self.offene_schliessen(session, uebung, tag)
+                return self.eintrag_anlegen(session, uebung, {**kontext, feld_key: [wert]})
 
         # Stammt der heutige Eintrag aus der Zeit vor dem Satzfeld (Kopie mit
         # „sets" + Einzelwert), bekommt die Korrektur die heutige Spezifikation,
@@ -1433,15 +1552,12 @@ class SessionRepo:
         aktuell = (
             None
             if neu
-            else self.heutiger_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+            else self.ziel_eintrag(session.subject_id, uebung, tag, session.plan_id, kontext)
         )
-        felder = {f.key for f in kontextfelder(uebung.result_spec)} | set(kontext)
-        if (
-            aktuell is None
-            or aktuell.session_id != session.id
-            or any(aktuell.result.get(k) != kontext.get(k) for k in felder)
-        ):
-            return self.eintrag_anlegen(session, uebung, {**kontext, feld_key: wert})
+        if aktuell is None:
+            with transaktion(self.con):
+                self.offene_schliessen(session, uebung, tag)
+                return self.eintrag_anlegen(session, uebung, {**kontext, feld_key: wert})
         # Wie `satz_anhaengen`: Kennt die Kopie das Feld, bleiben Werte und Kopie, wie sie
         # sind; sonst bekommt der Eintrag die heutige Spezifikation samt übersetzten Werten.
         kopie = aktuell.spec_snapshot
@@ -1458,19 +1574,25 @@ class SessionRepo:
         text: str,
         tag: date,
         neu: bool = False,
+        kontext: dict[str, Any] | None = None,
     ) -> SessionEntry:
-        """Die Notiz der Übung von heute setzen — oder „gemacht" mit Notiz.
+        """Die Notiz in den offenen Eintrag der Übung setzen — oder einen neuen beginnen.
 
-        Eine Notiz je Übung, Tag und Plan (Ben, 17.10.2026): Sie sitzt am Eintrag,
-        den `notiz_eintrag` nennt, und wird dort als Korrektur ersetzt — der Dialog
-        zeigt sie zum Weiterschreiben. Ohne Eintrag in dieser Session entsteht ein
-        leerer („gemacht") mit Notiz. ``neu`` beginnt immer einen eigenen.
+        Seit 19.10.2026 (`core.eintraege`): Ziel ist der markierte Eintrag (offen, gleiche
+        Ausprägung wie ``kontext``; ohne ``kontext`` der offene); die Notiz wird dort als
+        Korrektur ersetzt — der Dialog zeigt sie zum Weiterschreiben (`notiz_eintrag`).
+        Ist keiner markiert, beginnt ein **offener** Eintrag mit der Ausprägung und der
+        Notiz; was noch offen war, wird geschlossen. ``neu`` beginnt immer einen eigenen.
         """
         aktuell = (
-            None if neu else self.notiz_eintrag(session.subject_id, uebung.id, tag, session.plan_id)
+            None
+            if neu
+            else self.notiz_eintrag(session.subject_id, uebung, tag, session.plan_id, kontext)
         )
-        if aktuell is None or aktuell.session_id != session.id:
-            return self.eintrag_anlegen(session, uebung, {}, text)
+        if aktuell is None:
+            with transaktion(self.con):
+                self.offene_schliessen(session, uebung, tag)
+                return self.eintrag_anlegen(session, uebung, dict(kontext or {}), text)
         return self.eintrag_korrigieren(aktuell.id, dict(aktuell.result), note=text)
 
     def _heute_im_plan(
@@ -1485,34 +1607,35 @@ class SessionRepo:
         ]
 
     def notiz_eintrag(
-        self, subject_id: str, exercise_id: str, tag: date, plan_id: str | None = None
+        self,
+        subject_id: str,
+        uebung: Exercise,
+        tag: date,
+        plan_id: str | None = None,
+        kontext: dict[str, Any] | None = None,
     ) -> SessionEntry | None:
-        """Der Eintrag, dessen Notiz der Notiz-Knopf der Übung bearbeitet.
-
-        Der früheste von heute in diesem Plan, der schon eine Notiz hat — sonst der
-        jüngste (Ben, 17.10.2026: Nach „Gemacht“ oder einem neuen Satz legte die
-        nächste Notiz still eine zweite an, bearbeiten ließ sich nur die letzte).
-        ``None``: heute in diesem Plan noch kein Eintrag.
+        """Der Eintrag, dessen Notiz der Notiz-Knopf der Übung bearbeitet: der markierte
+        (offen, passende Ausprägung — ohne ``kontext`` der offene). ``None``: die nächste
+        Notiz beginnt einen neuen Eintrag. (Bis 19.10.2026: der früheste mit Text, sonst
+        der jüngste — die Notiz landete nach einem Gewichtswechsel am falschen Eintrag.)
         """
-        eintraege = self._heute_im_plan(subject_id, exercise_id, tag, plan_id)
-        return next((e for e in eintraege if e.note), eintraege[-1] if eintraege else None)
+        if kontext is None:
+            return self.offener_eintrag(subject_id, uebung, tag, plan_id)
+        return self.ziel_eintrag(subject_id, uebung, tag, plan_id, kontext)
 
     def text_eintrag(
         self,
         subject_id: str,
-        exercise_id: str,
+        uebung: Exercise,
         tag: date,
         plan_id: str | None,
         feld_key: str,
+        kontext: dict[str, Any] | None = None,
     ) -> SessionEntry | None:
-        """Der Eintrag von heute in diesem Plan, der ``feld_key`` (Freitext) schon trägt —
-        der jüngste davon; ``None``, wenn keiner."""
-        mit_text = [
-            e
-            for e in self._heute_im_plan(subject_id, exercise_id, tag, plan_id)
-            if not ist_leer(e.result.get(feld_key))
-        ]
-        return mit_text[-1] if mit_text else None
+        """Der Eintrag, dessen Freitext ``feld_key`` das Feld zeigt und ersetzt: der
+        markierte (`ziel_eintrag`); ``None``, wenn keiner markiert ist."""
+        del feld_key  # eine Übung hat einen markierten Eintrag, nicht einen je Feld
+        return self.ziel_eintrag(subject_id, uebung, tag, plan_id, kontext)
 
     def text_setzen(
         self,
@@ -1526,16 +1649,18 @@ class SessionRepo:
     ) -> SessionEntry:
         """Freitext der Übung von heute setzen — wie die Notiz einmal je Tag und Plan.
 
-        Trägt ein Eintrag von heute den Text schon (`text_eintrag`), wird dort ersetzt —
-        sonst wie `wert_setzen`. So entsteht nach einem neuen Satz kein zweiter Text,
-        und das Feld zeigt immer den, den es ändert (Ben, 17.10.2026).
+        Im markierten Eintrag (`text_eintrag`) wird der Text ersetzt — sonst wie
+        `wert_setzen`. So entsteht nach einem neuen Satz kein zweiter Text, und das Feld
+        zeigt immer den, den es ändert (Ben, 17.10.2026).
         """
         ziel = (
             None
             if neu
-            else self.text_eintrag(session.subject_id, uebung.id, tag, session.plan_id, feld_key)
+            else self.text_eintrag(
+                session.subject_id, uebung, tag, session.plan_id, feld_key, kontext
+            )
         )
-        if ziel is None or ziel.session_id != session.id:
+        if ziel is None:
             return self.wert_setzen(session, uebung, feld_key, text, tag, kontext, neu=neu)
         kopie = ziel.spec_snapshot
         if kopie is not None and kopie.field_by_key(feld_key):
@@ -1759,10 +1884,12 @@ class SessionRepo:
 
     def _eintrag_schreiben(self, e: SessionEntry, ersetzt: str | None) -> None:
         assert e.spec_snapshot is not None, "Eintrag ohne Kopie der Spezifikation"
+        if e.created_at is None:
+            e.created_at = jetzt()
         self.con.execute(
             "INSERT INTO session_entry (id, session_id, exercise_id, sort_order, result_json, "
-            "spec_snapshot_json, note, started_at, ended_at, replaces_entry_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "spec_snapshot_json, note, started_at, ended_at, replaces_entry_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 e.id,
                 e.session_id,
@@ -1774,6 +1901,7 @@ class SessionRepo:
                 iso_utc(e.started_at) if e.started_at else None,
                 iso_utc(e.ended_at) if e.ended_at else None,
                 ersetzt,
+                iso_utc(e.created_at),
             ),
         )
 
@@ -1822,6 +1950,7 @@ class SessionRepo:
             note=r["note"],
             started_at=datetime.fromisoformat(r["started_at"]) if r["started_at"] else None,
             ended_at=datetime.fromisoformat(r["ended_at"]) if r["ended_at"] else None,
+            created_at=datetime.fromisoformat(r["created_at"]) if r["created_at"] else None,
         )
 
 

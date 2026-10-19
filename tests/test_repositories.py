@@ -492,13 +492,15 @@ def test_satz_anhaengen_baut_den_eintrag_auf(welt) -> None:
 
 
 def test_satz_anhaengen_nach_gemacht(welt) -> None:
-    """Erst „gemacht", dann +20: aus dem leeren Eintrag wird 20."""
+    """Erst „gemacht", dann +20: „Gemacht“ ist geschlossen (Ben, 19.10.2026) — der Satz
+    beginnt einen neuen, offenen Eintrag."""
     con, repo, _ich, sitzung = welt
     uebung = _wadenheben(con)
-    repo.erledigt(sitzung, uebung)
+    fertig = repo.erledigt(sitzung, uebung)
+    assert fertig.ended_at is not None
     e = repo.satz_anhaengen(sitzung, uebung, "reps", 20, lokaler_tag(jetzt()))
-    assert e.result == {"reps": [20]}
-    assert len(repo.eintraege(sitzung.id)) == 1
+    assert e.result == {"reps": [20]} and e.ended_at is None
+    assert len(repo.eintraege(sitzung.id)) == 2
 
 
 def test_satz_anhaengen_trennt_nach_auspraegung(welt) -> None:
@@ -1242,21 +1244,25 @@ def test_eintrag_mit_zusatzfeld_der_planuebung_und_notiz(welt) -> None:
 
 
 def test_eine_notiz_je_uebung_und_tag(welt) -> None:
-    """Ben, 17.10.2026: Notiz, dann „Gemacht“, dann wieder Notiz — dieselbe Notiz, keine zweite."""
+    """Ben, 17.10.2026: Notiz, dann ein Satz, dann wieder Notiz — dieselbe Notiz, keine
+    zweite. Seit 19.10.2026 sitzt sie am offenen Eintrag (`core.eintraege`)."""
     con, repo, ich, sitzung = welt
     uebung = _wadenheben(con)
     heute = lokaler_tag(jetzt())
     erster = repo.eintrag_notiz_setzen(sitzung, uebung, "Schulter zieht", heute)
-    repo.eintrag_anlegen(sitzung, uebung, {"reps": [15]})  # danach etwas anderes
-    assert repo.notiz_eintrag(ich.id, uebung.id, heute).note == "Schulter zieht"
+    assert erster.ended_at is None  # die Notiz beginnt einen offenen Eintrag
+    repo.satz_anhaengen(sitzung, uebung, "reps", 15, heute)  # hängt dort an
+    assert repo.notiz_eintrag(ich.id, uebung, heute).note == "Schulter zieht"
     repo.eintrag_notiz_setzen(sitzung, uebung, "Schulter zieht, später besser", heute)
-    notizen = [e.note for e in repo.eintraege(sitzung.id) if e.note]
-    assert notizen == ["Schulter zieht, später besser"]
-    # Ohne Notiz an einem Eintrag: der jüngste bekommt sie (wie bisher)
+    eintraege = repo.eintraege(sitzung.id)
+    assert [e.note for e in eintraege] == ["Schulter zieht, später besser"]
+    assert eintraege[0].result == {"reps": [15]}
+    # Nach „Gemacht“ (geschlossen) ist kein Eintrag offen: die nächste Notiz beginnt einen
     andere = ExerciseRepo(con).laden(seed_id("einbeinstand"))
-    repo.eintrag_anlegen(sitzung, andere, {})
-    zweiter = repo.eintrag_anlegen(sitzung, andere, {})
-    assert repo.notiz_eintrag(ich.id, andere.id, heute).id == zweiter.id
+    repo.erledigt(sitzung, andere)
+    assert repo.notiz_eintrag(ich.id, andere, heute) is None
+    zweiter = repo.eintrag_notiz_setzen(sitzung, andere, "wackelig", heute)
+    assert repo.notiz_eintrag(ich.id, andere, heute).id == zweiter.id
     assert erster.id != zweiter.id
 
 
@@ -1276,10 +1282,9 @@ def test_freitext_einmal_je_tag(welt) -> None:
     )
     heute = lokaler_tag(jetzt())
     repo.text_setzen(sitzung, uebung, "note", "linke Wade müde", heute)
-    repo.eintrag_anlegen(sitzung, uebung, {"reps": [20]})  # „Gemacht“ mit Wert: neuer Eintrag
+    repo.satz_anhaengen(sitzung, uebung, "reps", 20, heute)  # ein Satz an den offenen Eintrag
     assert (
-        repo.text_eintrag(ich.id, uebung.id, heute, None, "note").result["note"]
-        == "linke Wade müde"
+        repo.text_eintrag(ich.id, uebung, heute, None, "note").result["note"] == "linke Wade müde"
     )
     repo.text_setzen(sitzung, uebung, "note", "beide Waden müde", heute)
     texte = [e.result.get("note") for e in repo.eintraege(sitzung.id) if e.result.get("note")]
@@ -1392,3 +1397,78 @@ def test_uebung_speichern_nimmt_vorhandenen_tag_ohne_gross_klein(repo, con) -> N
     ]
     assert namen == ["Dehnung"]
     assert sorted(u.name for u in repo.alle(kategorie="Dehnung")) == ["A", "B"]
+
+
+# ---------------------------------------------------------------------------
+# Offener Eintrag (Ben, 19.10.2026; `core.eintraege`, docs/plan_eintraege_hrv.md Teil A)
+# ---------------------------------------------------------------------------
+
+
+def test_offener_eintrag_zeitabstand_schliesst(welt) -> None:
+    """Liegt der letzte Satz länger als `offen_min` zurück, beginnt der nächste einen neuen
+    Eintrag — der alte bekommt als Ende seine letzte Änderung."""
+    from datetime import timedelta
+
+    con, repo, ich, sitzung = welt
+    uebung = _wadenheben(con)
+    heute = lokaler_tag(jetzt())
+    e = repo.satz_anhaengen(sitzung, uebung, "reps", 15, heute)
+    spaeter = jetzt() + timedelta(minutes=31)
+    assert repo.ziel_eintrag(ich.id, uebung, heute, jetzt_=spaeter) is None
+    assert repo.ziel_eintrag(ich.id, uebung, heute, jetzt_=jetzt()) is not None
+    # Die Datenschicht schließt den alten erst beim nächsten Tipp nach
+    repo.offen_min = 0  # nie von selbst zu …
+    assert repo.ziel_eintrag(ich.id, uebung, heute, jetzt_=spaeter).id == e.id
+    repo.offen_min = 30
+    con.execute(
+        "UPDATE session_entry SET created_at = ? WHERE id = ?",
+        ((jetzt() - timedelta(minutes=40)).isoformat(), e.id),
+    )
+    neu = repo.satz_anhaengen(sitzung, uebung, "reps", 20, heute)
+    eintraege = {x.result["reps"][0]: x for x in repo.eintraege(sitzung.id)}
+    assert neu.id == eintraege[20].id and eintraege[20].ended_at is None
+    alt = eintraege[15]
+    assert alt.ended_at is not None
+    assert jetzt() - alt.ended_at > timedelta(minutes=39)  # das Ende ist die letzte Änderung
+
+
+def test_abschliessen_und_wieder_oeffnen(welt) -> None:
+    """„Abschließen“ setzt das Ende (Korrektur, Werte bleiben); „Wieder öffnen“ nimmt es
+    weg und schließt einen anderen offenen Eintrag derselben Übung."""
+    con, repo, ich, sitzung = welt
+    uebung = _wadenheben(con)
+    heute = lokaler_tag(jetzt())
+    a = repo.satz_anhaengen(sitzung, uebung, "reps", 15, heute)
+    zu = repo.eintrag_schliessen(a.id)
+    assert zu.ended_at is not None and zu.result == {"reps": [15]} and zu.id != a.id
+    assert repo.ziel_eintrag(ich.id, uebung, heute) is None
+    b = repo.satz_anhaengen(sitzung, uebung, "reps", 20, heute)  # neuer, offener
+    assert len(repo.eintraege(sitzung.id)) == 2
+    wieder = repo.eintrag_oeffnen(zu.id)
+    assert wieder.ended_at is None
+    # der andere ist jetzt zu (seine Korrektur trägt das Ende)
+    andere = next(x for x in repo.eintraege(sitzung.id) if x.result == b.result)
+    assert andere.ended_at is not None
+    e = repo.satz_anhaengen(sitzung, uebung, "reps", 15, heute)
+    assert e.result == {"reps": [15, 15]}  # hängt wieder am ersten an
+
+
+def test_gemacht_schliesst_den_offenen(welt) -> None:
+    """„Gemacht“ ohne markierten Eintrag (Ausprägung gewechselt): ein fertiger Eintrag mit
+    der neuen Ausprägung, der offene wird dabei geschlossen (Skizze A2/A3)."""
+    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+
+    con, repo, ich, sitzung = welt
+    kniebeuge = Exercise(
+        name="Kniebeuge",
+        result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("weight")]),
+    )
+    ExerciseRepo(con).speichern(kniebeuge)
+    heute = lokaler_tag(jetzt())
+    offen = repo.satz_anhaengen(sitzung, kniebeuge, "reps", 12, heute, {"weight": 10})
+    stand = repo.stand(ich.id, kniebeuge, heute, None, {"weight": 15})
+    assert stand.zustand == "offen_anders" and stand.offen.id == offen.id and stand.ziel is None
+    fertig = repo.eintrag_fertig(sitzung, kniebeuge, {"weight": 15})
+    assert fertig.ended_at is not None and fertig.result == {"weight": 15}
+    assert all(e.ended_at is not None for e in repo.eintraege(sitzung.id))
+    assert repo.stand(ich.id, kniebeuge, heute, None, {"weight": 10}).zustand == "keiner"

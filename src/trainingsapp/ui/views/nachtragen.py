@@ -424,8 +424,9 @@ def nachtragen_view(
             return f"Uhrzeit: {fehler}."
         eff, _teil, _item = bauteile()
         session = state.sitzungen.session_fuer(state.profil.id, wahl["plan"], tag)
+        # Nachgetragen = fertig: mit Ende, damit kein späterer Satz daran hängt
         state.sitzungen.eintrag_anlegen(
-            session, eff, form.werte(), notiz.value or "", started_at=zeit
+            session, eff, form.werte(), notiz.value or "", started_at=zeit, ended_at=zeit
         )
         return None
 

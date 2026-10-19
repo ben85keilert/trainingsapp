@@ -26,6 +26,7 @@ from collections.abc import Callable
 import flet as ft
 
 from trainingsapp.config import app_version, edition, ist_aktiv
+from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.ui.components.hilfe import hilfe_oeffner
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
@@ -79,6 +80,9 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
 
     def darstellung_setzen(e: ft.Event[ft.Dropdown]) -> None:
         state.plan_darstellung_setzen(str(e.control.value))
+
+    def offen_setzen(e: ft.Event[ft.Dropdown]) -> None:
+        state.eintrag_offen_min_setzen(int(e.control.value or OFFEN_MIN_VORGABE))
 
     def uhr_setzen(e: ft.Event[ft.Dropdown]) -> None:
         state.uhr_darstellung_setzen(str(e.control.value))
@@ -188,6 +192,21 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                             hinweis(
                                 "Wie die Eingabe beim Training aussieht — auch oben im Plan "
                                 "umschaltbar."
+                            ),
+                            ft.Dropdown(
+                                label="Eintrag bleibt offen",
+                                value=str(state.eintrag_offen_min()),
+                                options=[
+                                    ft.DropdownOption(key=str(minuten), text=text)
+                                    for minuten, text in OFFEN_WAHL.items()
+                                ],
+                                on_select=offen_setzen,
+                                expand=True,
+                            ),
+                            hinweis(
+                                "Sätze, Skala und Notiz gehen in den offenen Eintrag der Übung. "
+                                "Nach dieser Zeit ohne neuen Satz gilt er als abgeschlossen — "
+                                "der nächste Wert beginnt einen neuen Eintrag."
                             ),
                             ft.Dropdown(
                                 label="Stoppuhr und Timer in der Übung",

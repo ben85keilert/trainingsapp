@@ -216,8 +216,11 @@ class SessionEntry:
     spec_snapshot: ResultSpec | None = None
     note: str = ""
     started_at: datetime | None = None
+    #: Ende der Übung — leer heißt **offen**: Sätze hängen noch an (`core.eintraege`)
     ended_at: datetime | None = None
     media: list[Media] = field(default_factory=list)
+    #: Wann diese Zeile entstand (jede Korrektur ist eine) — die letzte Änderung
+    created_at: datetime | None = None
 
     def shorthand(self) -> str:
         """Kompakte Anzeige — immer mit der Spezifikation von damals."""

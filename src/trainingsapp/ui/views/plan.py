@@ -70,11 +70,13 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import eintraege as offene
 from trainingsapp.core.models import (
     Exercise,
     Plan,
     PlanItem,
     SessionEntry,
+    jetzt,
 )
 from trainingsapp.core.parameter import BEIWERK, kontextfelder, leistungsfelder, rolle
 from trainingsapp.core.plaene import (
@@ -87,7 +89,6 @@ from trainingsapp.core.plaene import (
 from trainingsapp.core.result_spec import (
     FieldSpec,
     FieldType,
-    ParameterWert,
     basis_label,
     einzelwert_lesen,
     format_wert,
@@ -97,10 +98,11 @@ from trainingsapp.core.result_spec import (
     stellen,
 )
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
-from trainingsapp.core.tagesbilanz import buendeln
+from trainingsapp.core.tagesbilanz import buendeln, mengen
 from trainingsapp.core.timer_eintrag import vom_timer_text
 from trainingsapp.core.uebung_timer import timer_fuer, uhr_an
 from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
+from trainingsapp.ui import marken
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
@@ -120,6 +122,24 @@ ECKEN = ft.RoundedRectangleBorder(radius=12)
 
 #: Was ein Tipp auf „Heute geleistet“ öffnet (`views/leistungen.py`)
 LEISTUNGEN_TIPP = "Alle Einträge von heute ansehen, korrigieren oder löschen"
+#: Ein Tipp auf einen geschlossenen Eintrag (`eintrag_blatt`)
+EINTRAG_TIPP = "Wieder öffnen, bearbeiten oder löschen"
+#: Das „i“ im Kopf von „Heute geleistet“ (Ben, 19.10.2026: die Erklärung nicht im Block)
+OFFEN_ERKLAERUNG = (
+    "Ein Tipp (Satz, Skala, Notiz) geht in den **markierten** Eintrag. Ist keiner markiert, "
+    "beginnt er einen neuen.\n\n"
+    "**Offen** ist der jüngste Eintrag der Übung ohne Ende — solange seit dem letzten Satz "
+    "nicht mehr als die eingestellte Zeit vergangen ist (Einstellungen → Übungen → „Eintrag "
+    "bleibt offen“).\n\n"
+    "**Markiert** ist er, wenn die gewählte Ausführung (Gewicht, Seite, Winkel) zu ihm passt. "
+    "Ein anderes Gewicht nimmt die Markierung weg: Der nächste Wert beginnt einen neuen "
+    "Eintrag, der alte wird geschlossen. Zurück zum alten Gewicht — und es geht dort weiter.\n\n"
+    "**Abschließen** fixiert den markierten Eintrag. Ohne markierten heißt der Knopf "
+    "**Gemacht** und legt einen fertigen Eintrag an. Ein Tipp auf einen geschlossenen Eintrag "
+    "bietet „Wieder öffnen“.\n\n"
+    "Läuft eine HRV-Aufnahme, bekommt jeder Satz dort eine Marke — zur Tippzeit, also "
+    "„geleistet bis hierher“."
+)
 
 
 def ziel_text(uebung: Exercise, target: dict[str, Any]) -> str:
@@ -357,7 +377,40 @@ def plan_view(
         return replace(uebung.result_spec, fields=aktive_felder(item, uebung))
 
     def kontext(item: PlanItem, uebung: Exercise) -> dict[str, Any]:
+        """Die gewählte Ausführung — beim ersten Aufbau wie der offene Eintrag, wenn es
+        einen gibt (die Chips zeigen seinen Zustand), sonst `auspraegung_vorgabe`."""
+        if item.id not in state.auspraegung_wahl:
+            offen = state.sitzungen.offener_eintrag(state.profil.id, uebung, heute(), sitzungsplan)
+            if offen is not None:
+                felder = kontextfelder(teilspec(item, uebung))
+                state.auspraegung_wahl[item.id] = {
+                    f.key: offen.result[f.key]
+                    for f in felder
+                    if not ist_leer(offen.result.get(f.key))
+                }
         return auspraegung_vorgabe(state, item, uebung)
+
+    def stand_fuer(item: PlanItem, uebung: Exercise) -> offene.Stand:
+        """Offener Eintrag und ob er markiert ist (`core.eintraege`). Die spätere Stelle einer
+        Mehrfachübung beginnt immer neu — dort ist nichts markiert."""
+        if eigener_eintrag(item):
+            return offene.Stand(None, offene.KEINER)
+        return state.sitzungen.stand(
+            state.profil.id, uebung, heute(), sitzungsplan, kontext(item, uebung)
+        )
+
+    def kontext_text(uebung: Exercise, werte: dict[str, Any]) -> str:
+        """„10 kg · links“ — die Ausprägungen in ``werte``."""
+        return " · ".join(
+            format_wert(f, werte[f.key])
+            for f in kontextfelder(uebung.result_spec)
+            if not ist_leer(werte.get(f.key))
+        )
+
+    def grenze_frei(item: PlanItem) -> bool:
+        """Darf die Leistung den Abschnitt der Übung in der Aufnahme beginnen und beenden?
+        Nicht, wenn ihre Uhr läuft — die klammert schon (`ui.marken`)."""
+        return laufende(state, katalog[item.exercise_id], None if einzel else item) is None
 
     def ziel_ohne_kontext(item: PlanItem) -> dict[str, Any]:
         """Das Ziel ohne Ausprägungen — die bestimmt allein die Auswahl im Block.
@@ -370,9 +423,40 @@ def plan_view(
         return {k: v for k, v in item.target.items() if k not in keys}
 
     def eintragen(item: PlanItem, result: dict[str, Any]) -> None:
+        """„Gemacht“, „Wie geplant“, ein Einzelwert: ein fertiger, geschlossener Eintrag —
+        ein noch offener derselben Übung wird dabei geschlossen (`eintrag_fertig`)."""
         uebung = uebung_fuer(item)
         session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
-        melden(uebung, state.sitzungen.eintrag_anlegen(session, uebung, result))
+        eintrag = state.sitzungen.eintrag_fertig(session, uebung, result, tag=heute())
+        marken.abschluss(
+            state,
+            uebung,
+            eintrag,
+            grenze=grenze_frei(item),
+            auspraegung=kontext_text(uebung, eintrag.result),
+        )
+        melden(uebung, eintrag)
+
+    def abschliesser(item: PlanItem) -> Callable[[], None]:
+        """„Abschließen“: der markierte Eintrag bekommt sein Ende — und eine Marke."""
+
+        def handler() -> None:
+            uebung = uebung_fuer(item)
+            ziel = stand_fuer(item, uebung).ziel
+            if ziel is None:
+                return
+            eintrag = state.sitzungen.eintrag_schliessen(ziel.id)
+            marken.abschluss(
+                state,
+                uebung,
+                eintrag,
+                grenze=grenze_frei(item),
+                auspraegung=kontext_text(uebung, eintrag.result),
+            )
+            page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name}: abgeschlossen")))
+            auffrischen()
+
+        return handler
 
     def anhaengen(item: PlanItem, feld: FieldSpec, werte: list[float]) -> None:
         uebung = uebung_fuer(item)
@@ -380,11 +464,24 @@ def plan_view(
         eintrag = None
         neu = eigener_eintrag(item)
         eigenen_gemerkt(item, neu)
+        # Der erste Satz des Eintrags beginnt seinen Abschnitt in der Aufnahme (`ui.marken`)
+        ziel = None if neu else stand_fuer(item, uebung).ziel
+        erster = ziel is None or not mengen(ziel.spec_snapshot, ziel.result)
         for wert in werte:
             eintrag = state.sitzungen.satz_anhaengen(
                 session, uebung, feld.key, wert, heute(), kontext(item, uebung), neu=neu
             )
-            neu = False
+            marken.leistung(
+                state,
+                uebung,
+                eintrag,
+                feld.key,
+                wert,
+                erster=erster,
+                grenze=grenze_frei(item),
+                auspraegung=kontext_text(uebung, eintrag.result),
+            )
+            neu = erster = False
         if eintrag is not None:
             melden(uebung, eintrag)
 
@@ -639,102 +736,273 @@ def plan_view(
     # die Knöpfe; dann, abgesetzt unter „EINTRAGEN“, je Parameter ein umrandeter
     # Abschnitt mit Überschrift — man sieht, wo etwas anfängt und aufhört.
 
-    def geleistet_tafel(uebung: Exercise, item: PlanItem) -> ft.Control:
-        """Was heute schon da ist — je Parameter groß der Wert.
+    def geleistet_tafel(uebung: Exercise, item: PlanItem, st: offene.Stand) -> ft.Control:
+        """Was heute schon da ist — **Einträge statt Bündel** (Ben, 19.10.2026, Skizze A1).
 
-        Gebündelt wie in der Tagesansicht: je Ausprägung (45°, 90°) eine Gruppe,
-        Mengen addiert („45 Wiederholungen · 3x15“), Skala mit jedem Wert des
-        Tages. Nur Abgehaktes steht als „Abgehakt 1×“.
+        Jeder Eintrag eine Zeile: Zeit, Ausprägung, die Werte groß, die Notiz kursiv. Der
+        **offene** Eintrag ist markiert (Rand, „offen seit 10:07“) — dorthin geht der nächste
+        Tipp; passt die gewählte Ausführung nicht, steht er ohne Markierung da. Ein Tipp auf
+        einen geschlossenen Eintrag bietet „Wieder öffnen“ (`eintrag_blatt`), auf den offenen
+        das Leistungen-Blatt. Das „i“ erklärt die Regel (`OFFEN_ERKLAERUNG`).
         """
-        inhalt: list[ft.Control] = []
-        eigene = [e for e in tages_eintraege if e.exercise_id == uebung.id]
+        eigene = sorted(
+            (e for e in tages_eintraege if e.exercise_id == uebung.id),
+            key=lambda e: (e.started_at is None, e.started_at),
+        )
         # Was ein Timer eintrug (Übungs-Timer, Plan-Ablauf) — aus der Zeitleiste
         vom_timer = (
             state.einheiten.eintraege_vom_timer([e.id for e in eigene])
             if state.einheiten is not None and eigene
             else set()
         )
-        for b in buendeln(eigene):
-            zeilen = b.parameter_zeilen()
-            if not zeilen:
-                n = len(b.leistungen) or len(b.abgehakt)
-                zeilen = [ParameterWert("Eingetragen" if b.leistungen else "Abgehakt", f"{n}×")]
-            gruppe: list[ft.Control] = []
-            if zusatz := b.auspraegung_text():
-                gruppe.append(ft.Text(zusatz, size=13, weight=ft.FontWeight.W_600))
-            gruppe.append(wert_leiste(zeilen))
-            # „vom Timer, 10:07“ (Ben, 17.10.2026; Skizze 12) — wann der Lauf begann
-            if vom := vom_timer_text(
-                e.started_at for e in b.eintraege if e.id in vom_timer and e.started_at
-            ):
-                gruppe.append(
-                    ft.Row(
-                        spacing=4,
-                        controls=[
-                            ft.Icon(ft.Icons.TIMER_OUTLINED, size=14, opacity=0.7),
-                            ft.Text(vom, size=12, opacity=0.7),
-                        ],
-                    )
-                )
-            # Antippen zeigt alle Einträge der Übung von heute — Ben, 17.10.2026: nicht
-            # nur den jüngsten, und mit allen Notizen
-            inhalt.append(
-                ft.Container(
-                    border_radius=8,
-                    ink=True,
-                    tooltip=LEISTUNGEN_TIPP,
-                    on_click=leistungen_zeigen(uebung),
-                    content=ft.Column(spacing=6, controls=gruppe),
-                )
-            )
-        inhalt += [
-            ft.Container(
-                border_radius=8,
-                ink=True,
-                tooltip=LEISTUNGEN_TIPP,
-                on_click=leistungen_zeigen(uebung),
-                content=ft.Text(f"„{e.note}“", size=12, italic=True, opacity=0.75),
-            )
-            for e in eigene
-            if e.note
+        aufnahme = marken.aufnahme_laeuft(state)
+        inhalt: list[ft.Control] = [
+            eintrag_zeile(e, uebung, item, st, e.id in vom_timer, aufnahme) for e in eigene
         ]
         # Spätere Stelle einer doppelten Übung: Was dasteht, stammt von früher am Tag
         if inhalt and uebung.id in mehrfach and item.id not in fertig_ids:
             titel = f"HEUTE BISHER — DAS {stelle[item.id]}. MAL STEHT NOCH AUS"
         else:
             titel = "HEUTE GELEISTET" if inhalt else "Heute noch nichts eingetragen"
-        kopf: ft.Control = ft.Text(
-            titel,
-            size=11,
-            weight=ft.FontWeight.BOLD if inhalt else None,
-            opacity=0.65 if inhalt else 0.55,
-            expand=True,
-        )
+        kopf_teile: list[ft.Control] = [
+            ft.Text(
+                titel,
+                size=11,
+                weight=ft.FontWeight.BOLD if inhalt else None,
+                opacity=0.65 if inhalt else 0.55,
+            ),
+            ft.IconButton(
+                ft.Icons.INFO_OUTLINE,
+                icon_size=16,
+                tooltip="Wohin geht der nächste Tipp?",
+                on_click=erklaerung_zeigen,
+            ),
+            ft.Container(expand=True),
+        ]
         if inhalt:
-            kopf = ft.Row(
-                spacing=4,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    kopf,
-                    ft.TextButton(
-                        "Bearbeiten",
-                        icon=ft.Icons.EDIT_OUTLINED,
-                        tooltip=LEISTUNGEN_TIPP,
-                        on_click=leistungen_zeigen(uebung),
-                    ),
-                ],
+            kopf_teile.append(
+                ft.TextButton(
+                    "Bearbeiten",
+                    icon=ft.Icons.EDIT_OUTLINED,
+                    tooltip=LEISTUNGEN_TIPP,
+                    on_click=leistungen_zeigen(uebung),
+                )
             )
+        kopf = ft.Row(
+            spacing=2, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=kopf_teile
+        )
         return ft.Container(
-            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            padding=ft.Padding.symmetric(horizontal=12, vertical=8),
             border_radius=12,
             bgcolor=ft.Colors.SURFACE,
-            # Gestreckt: jede Gruppe ist auf voller Breite antippbar
+            # Gestreckt: jede Zeile ist auf voller Breite antippbar
             content=ft.Column(
                 spacing=6,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[kopf, *inhalt],
             ),
         )
+
+    def erklaerung_zeigen() -> None:
+        dialog: ft.AlertDialog = ft.AlertDialog(
+            title=ft.Text("Wohin geht der nächste Tipp?"),
+            content=ft.Markdown(OFFEN_ERKLAERUNG),
+            actions=[ft.TextButton("Verstanden", on_click=lambda: schliessen(dialog))],
+        )
+        page.show_dialog(dialog)
+
+    def eintrag_zeile(
+        e: SessionEntry,
+        uebung: Exercise,
+        item: PlanItem,
+        st: offene.Stand,
+        vom_timer: bool,
+        aufnahme: bool,
+    ) -> ft.Control:
+        """Eine Zeile je Eintrag — markiert, offen ohne Markierung oder geschlossen."""
+        b = buendeln([e])[0]
+        zeilen = b.parameter_zeilen()
+        offen_ist = st.offen is not None and st.offen.id == e.id
+        markiert = offen_ist and st.zustand == offene.MARKIERT
+        von = e.started_at.astimezone() if e.started_at else None
+        bis = e.ended_at.astimezone() if e.ended_at else None
+        if offen_ist:
+            zeit = f"seit {von:%H:%M}" if von else ""
+            status = "OFFEN" if markiert else "offen · andere Ausführung"
+        else:
+            zeit = f"{von:%H:%M}–{bis:%H:%M}" if von and bis else f"{von:%H:%M}" if von else ""
+            # „vom Timer, 10:07“ (Ben, 17.10.2026; Skizze 12) — wann der Lauf begann
+            status = (
+                vom_timer_text([e.started_at] if e.started_at else [])
+                if vom_timer
+                else "zu"
+                if bis
+                else "zu · Zeitabstand"
+            )
+        kopf_text = " · ".join(t for t in (zeit, b.auspraegung_text()) if t)
+        kopf: list[ft.Control] = [
+            ft.Text(kopf_text, size=12, opacity=0.75, expand=True),
+            ft.Text(
+                status,
+                size=11,
+                weight=ft.FontWeight.W_700 if markiert else None,
+                opacity=1.0 if markiert else 0.6,
+            ),
+        ]
+        if markiert and aufnahme:
+            kopf.append(
+                ft.Icon(
+                    ft.Icons.FAVORITE,
+                    size=14,
+                    color=ft.Colors.ERROR,
+                    tooltip="Marken gehen in die laufende Aufnahme",
+                )
+            )
+        werte: ft.Control = (
+            wert_leiste(zeilen) if zeilen else ft.Text("Abgehakt", size=13, opacity=0.7)
+        )
+        teile: list[ft.Control] = [
+            ft.Row(spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=kopf),
+            werte,
+        ]
+        if e.note:
+            teile.append(ft.Text(f"„{e.note}“", size=12, italic=True, opacity=0.75))
+        if markiert:
+            teile.append(ft.Text("Tipps gehen hierhin", size=11, opacity=0.7))
+        return ft.Container(
+            padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+            border_radius=10,
+            ink=True,
+            bgcolor=ft.Colors.PRIMARY_CONTAINER
+            if markiert
+            else ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            border=ft.Border.all(2, ft.Colors.PRIMARY)
+            if markiert
+            else ft.Border.all(1, ft.Colors.OUTLINE_VARIANT)
+            if offen_ist
+            else None,
+            tooltip=LEISTUNGEN_TIPP if offen_ist else EINTRAG_TIPP,
+            on_click=leistungen_zeigen(uebung) if offen_ist else eintrag_blatt_oeffner(e, uebung),
+            content=ft.Column(spacing=4, controls=teile),
+        )
+
+    def eintrag_blatt_oeffner(e: SessionEntry, uebung: Exercise) -> Callable[[], None]:
+        """Ein geschlossener Eintrag (Skizze A4): wieder öffnen, bearbeiten, löschen."""
+
+        def handler() -> None:
+            page.show_dialog(eintrag_blatt(e, uebung))
+
+        return handler
+
+    def eintrag_blatt(e: SessionEntry, uebung: Exercise) -> ft.BottomSheet:
+        b = buendeln([e])[0]
+        von = e.started_at.astimezone() if e.started_at else None
+        bis = e.ended_at.astimezone() if e.ended_at else None
+        zeit = f"{von:%H:%M}–{bis:%H:%M}" if von and bis else f"{von:%H:%M}" if von else ""
+        werte = " · ".join(
+            t for t in (b.auspraegung_text(), b.leistung_text() or b.einzelwerte_text()) if t
+        )
+        if e.ended_at is None:
+            zuletzt = offene.letzte_aenderung(e)
+            vor = int((jetzt() - zuletzt).total_seconds() // 60) if zuletzt else 0
+            grund = (
+                f"Vor {vor} min zuletzt geändert — länger als {state.eintrag_offen_min()} min "
+                "ohne Satz (Zeitabstand, Einstellungen → Übungen)."
+            )
+        else:
+            grund = f"Abgeschlossen um {bis:%H:%M}." if bis else "Abgeschlossen."
+        nachher = Nachher()
+
+        def wieder_oeffnen() -> None:
+            state.sitzungen.eintrag_oeffnen(e.id)
+            # Die Chips folgen dem wieder offenen Eintrag
+            for item in plan.items:
+                if item.exercise_id == uebung.id:
+                    state.auspraegung_wahl.pop(item.id, None)
+            nachher.danach(
+                lambda: page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name}: wieder offen")))
+            )
+            nachher.danach(auffrischen)
+            schliessen(blatt)
+
+        def bearbeiten() -> None:
+            nachher.danach(leistungen_zeigen(uebung))
+            schliessen(blatt)
+
+        def loeschen_fragen() -> None:
+            nachher.danach(loeschen_dialog)
+            schliessen(blatt)
+
+        def loeschen_dialog() -> None:
+            danach = Nachher()
+
+            def loeschen() -> None:
+                state.sitzungen.eintrag_loeschen(e.id)
+                danach.danach(auffrischen)
+                danach.danach(lambda: page.show_dialog(ft.SnackBar(ft.Text("Eintrag gelöscht"))))
+                schliessen(dialog)
+
+            dialog: ft.AlertDialog = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Eintrag löschen?"),
+                content=ft.Text("Er verschwindet aus Tag, Kalender und Verlauf."),
+                actions=[
+                    ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+                    ft.FilledButton("Löschen", on_click=loeschen),
+                ],
+                on_dismiss=danach.bei_schliessen,
+            )
+            page.show_dialog(dialog)
+
+        blatt: ft.BottomSheet = ft.BottomSheet(
+            show_drag_handle=True,
+            on_dismiss=nachher.bei_schliessen,
+            content=ft.SafeArea(
+                avoid_intrusions_top=False,
+                content=ft.Container(
+                    padding=ft.Padding.only(left=16, right=16, bottom=20),
+                    content=ft.Column(
+                        tight=True,
+                        spacing=12,
+                        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                        controls=[
+                            ft.Text(
+                                f"{uebung.name} · {zeit}" if zeit else uebung.name,
+                                size=18,
+                                weight=ft.FontWeight.W_600,
+                            ),
+                            ft.Text(werte or "abgehakt", size=13, opacity=0.75),
+                            ft.Text(grund, size=13, opacity=0.75),
+                            ft.FilledButton(
+                                "Wieder öffnen — weitere Sätze hängen hier an",
+                                icon=ft.Icons.RESTORE,
+                                on_click=wieder_oeffnen,
+                            ),
+                            ft.Row(
+                                spacing=8,
+                                controls=[
+                                    ft.OutlinedButton(
+                                        "Bearbeiten",
+                                        icon=ft.Icons.EDIT_OUTLINED,
+                                        expand=True,
+                                        on_click=bearbeiten,
+                                    ),
+                                    ft.OutlinedButton(
+                                        "Löschen",
+                                        icon=ft.Icons.DELETE_OUTLINE,
+                                        expand=True,
+                                        style=ft.ButtonStyle(color=ft.Colors.ERROR),
+                                        on_click=loeschen_fragen,
+                                    ),
+                                ],
+                            ),
+                            ft.TextButton("Abbrechen", on_click=lambda: schliessen(blatt)),
+                        ],
+                    ),
+                ),
+            ),
+        )
+        return blatt
 
     def kopfzeile(uebung: Exercise, item: PlanItem) -> ft.Control:
         teile = [", ".join(uebung.typen), ", ".join(uebung.regionen)]
@@ -1076,7 +1344,7 @@ def plan_view(
             None
             if eigener_eintrag(item)
             else state.sitzungen.text_eintrag(
-                state.profil.id, uebung.id, heute(), sitzungsplan, feld.key
+                state.profil.id, uebung, heute(), sitzungsplan, feld.key, kontext(item, uebung)
             )
         )
         bisher = ziel.result.get(feld.key) if ziel is not None else None
@@ -1114,7 +1382,33 @@ def plan_view(
             ),
         )
 
-    def eingabe_bereich(item: PlanItem, uebung: Exercise) -> list[ft.Control]:
+    def ziel_hinweis(item: PlanItem, uebung: Exercise, st: offene.Stand) -> ft.Control:
+        """Unter den Chips (Skizze A1/A2): wohin der nächste Wert geht — ohne Markierung nur
+        eine Zeile, die Erklärung hängt am „i“ (Ben, 19.10.2026)."""
+        wahl = kontext_text(uebung, kontext(item, uebung))
+        if st.zustand == offene.MARKIERT:
+            text = (
+                f"Kommt zum offenen Eintrag ({wahl}) dazu"
+                if wahl
+                else "Kommt zum offenen Eintrag dazu"
+            )
+            punkt: ft.Control = ft.Container(
+                width=8, height=8, border_radius=4, bgcolor=ft.Colors.PRIMARY
+            )
+        else:
+            text = (
+                f"Beginnt einen neuen Eintrag ({wahl})" if wahl else "Beginnt einen neuen Eintrag"
+            )
+            punkt = ft.Container(
+                width=8, height=8, border_radius=4, border=ft.Border.all(1, ft.Colors.OUTLINE)
+            )
+        return ft.Row(
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[punkt, ft.Text(text, size=11, opacity=0.75)],
+        )
+
+    def eingabe_bereich(item: PlanItem, uebung: Exercise, st: offene.Stand) -> list[ft.Control]:
         """Unter „EINTRAGEN“: Ausführung, dann die Parameter — wie die Darstellung sagt."""
         teile = parameter_abschnitte(item, uebung)
         ausfuehrung = ausfuehrung_abschnitt(item, uebung)
@@ -1152,6 +1446,8 @@ def plan_view(
             bereich.append(next(bauen() for key, _, bauen in teile if key == gewaehlt))
         else:
             bereich += [bauen() for _, _, bauen in teile]
+        if teile:
+            bereich.append(ziel_hinweis(item, uebung, st))
         return bereich
 
     def leistungen_zeigen(uebung: Exercise) -> Callable[[], None]:
@@ -1173,7 +1469,7 @@ def plan_view(
         return ft.TextButton(
             "Notiz",
             icon=ft.Icons.EDIT_NOTE_OUTLINED,
-            tooltip="Ein Satz ins Tagebuch — am heutigen Eintrag",
+            tooltip="Ein Satz ins Tagebuch — am offenen Eintrag",
             on_click=notiz_fragen(item),
         )
 
@@ -1187,7 +1483,7 @@ def plan_view(
                 None
                 if eigener_eintrag(item)
                 else state.sitzungen.notiz_eintrag(
-                    state.profil.id, uebung.id, heute(), sitzungsplan
+                    state.profil.id, uebung, heute(), sitzungsplan, kontext(item, uebung)
                 )
             )
             feld = ft.TextField(
@@ -1216,7 +1512,9 @@ def plan_view(
                     session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
                     neu = eigener_eintrag(item)
                     eigenen_gemerkt(item, neu)
-                    state.sitzungen.eintrag_notiz_setzen(session, uebung, text, heute(), neu=neu)
+                    state.sitzungen.eintrag_notiz_setzen(
+                        session, uebung, text, heute(), neu=neu, kontext=kontext(item, uebung)
+                    )
                     nachher.danach(gespeichert)
 
             async def geschlossen(e: object) -> None:
@@ -1330,8 +1628,13 @@ def plan_view(
                 and bool(aktive_felder(item, uebung))
             )
             offen = not klappbar or state.plan_offen == item.id
+            st = stand_fuer(item, uebung)
+            # „Abschließen“ fixiert den markierten Eintrag; ohne markierten heißt der Knopf
+            # „Gemacht“ und legt einen fertigen an (Ben, 19.10.2026, Skizzen A1–A3)
             knoepfe: list[ft.Control] = [
-                _knopf("Gemacht", ft.Icons.CHECK, erlediger(item), betont=not ziel)
+                _knopf("Abschließen", ft.Icons.CHECK, abschliesser(item), betont=True)
+                if st.zustand == offene.MARKIERT
+                else _knopf("Gemacht", ft.Icons.CHECK, erlediger(item), betont=not ziel)
             ]
             if ziel:
                 knoepfe.append(
@@ -1368,12 +1671,12 @@ def plan_view(
             )
             knoepfe.extend(uhr.knoepfe)
             knoepfe.append(notiz_knopf(item))
-            inhalt.append(geleistet_tafel(uebung, item))
+            inhalt.append(geleistet_tafel(uebung, item, st))
             inhalt.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=knoepfe))
             if uhr.zeile is not None and (offen or laufende(state, aus_katalog, planuebung)):
                 inhalt.append(uhr.zeile)
             if offen:
-                inhalt.extend(eingabe_bereich(item, uebung))
+                inhalt.extend(eingabe_bereich(item, uebung, st))
 
         return ft.Container(
             padding=ft.Padding.only(left=14, right=10, top=12, bottom=12),

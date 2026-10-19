@@ -308,6 +308,11 @@ class HrvBaustein:
         lauf = self.messlauf
         if lauf.aufnahme is None or lauf.aufnahme is not self._aufnahme:
             return False
+        if not p.grenze:
+            return (
+                lauf.notiz_hinzufuegen(p.text, bei=bei, marke=p.marke, uebungen=p.uebungen)
+                is not None
+            )
         eintrag = lauf.abschnitt_markieren(
             p.text,
             name=p.name,
@@ -846,6 +851,11 @@ class Einheitslauf:
         for e in neu:
             p = projektion(e, self.id, einheit_spur=self._einheit_spur)
             if p is None:
+                continue
+            if not p.grenze:
+                # Nur eine Notiz mit Marke (Leistung der Person): sofort, ohne 5-s-Regel —
+                # zwei Sätze in drei Sekunden sind zwei Sätze
+                hrv.projizieren(p, t0 + e.t_s)
                 continue
             offen = self._zurueck.pop(p.spur, None)
             if offen is not None and e.t_s - offen[0].t_s >= MIN_MARKE_S:

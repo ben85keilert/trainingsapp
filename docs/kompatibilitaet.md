@@ -335,8 +335,8 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
 
 | Feld | Werte | Bedeutung |
 |---|---|---|
-| `quelle` | `einheit`, `timer`, `plan`, `gps` | wer die Marke setzte |
-| `art` | `start`, `ende`, `abschnitt`, `pause`, `weiter`, `uebung_start`, `uebung_ende`, `km` | was sie bedeutet |
+| `quelle` | `einheit`, `timer`, `plan`, `gps`, `person` | wer die Marke setzte — `person`: ein Tipp in der Übungsausführung (seit 19.10.2026) |
+| `art` | `start`, `ende`, `abschnitt`, `pause`, `weiter`, `uebung_start`, `uebung_ende`, `km`, `leistung`, `abschluss` | was sie bedeutet — `leistung`: „geleistet bis hierher“ (die **Tippzeit**, nie der Beginn des Satzes), `abschluss`: der Eintrag ist fertig |
 | `spur` | `timer`, `uebung`, `km` | die Abschnittsspur, die sie teilt (Abschnitt 9b) |
 | `einheit` | Text (UUID) | der gemeinsame Ablauf in der App, dessen Zeitleiste die Marke kommt (`docs/plan_einheit.md`) |
 | `name` | Text | Abschnittsname ohne Zusatz („Belastung“, „Planke“) |
@@ -344,12 +344,20 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
 | `zaehlt` | Ja/Nein | der Abschnitt zählt als Übungszeit (im Timer einstellbar) |
 | `soll_s` | Zahl | die geplante Dauer des Abschnitts in Sekunden — ein „Weiter“ kürzt ihn, Soll gegen Ist zeigt es; fehlt bei der Stoppuhr (seit 18.10.2026) |
 | `profil` | Text | welcher Ablauf lief: der Kurzcode der Profil-ID (8 Zeichen wie bei Übungen), die Stoppuhr `stoppuhr`, der Einmal-Timer `einmal` (seit 19.10.2026) — derselbe Ablauf über Tage, auch nach Umbenennen (seit 18.10.2026) |
+| `feld`, `wert` | Text, Zahl | bei `person/leistung`: das Feld der Übung (`reps`, `hold`, …) und der eingetragene Wert (seit 19.10.2026) — die Ausprägung (Gewicht, Seite) steht im Text („Kniebeuge 20 kg: 10“) |
 
 - Nur diese Felder, nur Zahl, Text oder Ja/Nein — `hrv_core.ereignisse.marke_bereinigen`
   wirft alles andere weg. **Nie ein Ort** (Abschnitt 0 in `docs/plan_gps.md`): eine
   km-Marke trägt den Kilometer, keine Koordinate.
 - Was die Person selbst notiert, hat **keine** Marke. Wer eine automatische Notiz
   bearbeitet (Text, Stelle), behält die Marke; löschen löscht sie mit.
+- **Leistungen der Person** (Ben, 19.10.2026, `docs/plan_eintraege_hrv.md` Teil B): Jeder
+  Tipp, der eine Menge einträgt, wird eine Notiz mit Marke `person/leistung` (`feld`,
+  `wert`, `uebungen`), „Abschließen“ eine mit `person/abschluss`. Der erste Satz eines
+  Eintrags beginnt den Abschnitt der Übung auf der Spur `uebung`, das Abschließen beendet
+  ihn — außer die Uhr der Übung läuft schon (dann nur Notizen). Diese Notizen unterliegen
+  **nicht** der 5-s-Regel (zwei Sätze in drei Sekunden sind zwei Sätze). praxis_gui zeigt
+  sie als normale Notizen; Nachträge und Korrekturen bekommen keine Marke.
 - Abschnitte unter 5 s bekommen keine Marke (versehentliches „Weiter“).
 - **Marken einer Übung** (Ben, 18.10.2026, P54): Läuft eine Übung (Timer der Übung, Stoppuhr,
   Plan-Ablauf), tragen **alle** ihre Marken den Kurzcode in `uebungen`, auch die Abschnitte des

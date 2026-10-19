@@ -325,8 +325,8 @@ def tagesansicht(
                 return
             eff = mit_plan_spec(item, uebung)
             session = state.sitzungen.session_fuer(state.profil.id, plan.id, tag_jetzt())
-            eintrag = state.sitzungen.eintrag_anlegen(
-                session, eff, auspraegung_vorgabe(state, item, eff)
+            eintrag = state.sitzungen.eintrag_fertig(
+                session, eff, auspraegung_vorgabe(state, item, eff), tag=tag_jetzt()
             )
             auffrischen()
             page.show_dialog(

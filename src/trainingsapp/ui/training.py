@@ -182,7 +182,9 @@ def training_eintragen(
         ergebnis_feld["distance"] = round(strecke.distanz_m)
     uebung = uebung_fuer(state, sportart)
     sitzung = state.sitzungen.session_fuer(subject_id, None, lokaler_tag(started_at))
-    eintrag = state.sitzungen.eintrag_anlegen(sitzung, uebung, ergebnis_feld)
+    eintrag = state.sitzungen.eintrag_anlegen(
+        sitzung, uebung, ergebnis_feld, started_at=started_at, ended_at=ended_at
+    )
     strecke.session_entry_id = eintrag.id
     state.strecken.anlegen(strecke)
     return strecke

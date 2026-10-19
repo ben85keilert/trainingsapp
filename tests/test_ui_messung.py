@@ -409,8 +409,8 @@ def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None
     # Die Aufzeichnung öffnet mit den ersten 2 Minuten …
     rr_kurve = next(c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart))
     assert (rr_kurve.min_x, rr_kurve.max_x) == (0.0, 120.0)
-    # … „Alles" zeigt die ganze Messung
-    _breiten_wahl(ansicht).on_change(_ereignis("0"))
+    # … der Chip „Ganze Messung“ zeigt die ganze Messung (seit 19.10.2026 statt „Alles“)
+    _ganze_messung(ansicht).on_click()
 
     # Tachogramm, darunter die Vorgabe-Ansicht: Ø HF aus RR, RMSSD
     rr_kurve, hf_kurve, rmssd_kurve = [
@@ -476,11 +476,22 @@ def _ereignis(wert) -> SimpleNamespace:
 
 
 def _breiten_wahl(wurzel) -> ft.SegmentedButton:
-    """Die Breitenwahl der Aufzeichnung (1 min … Alles)."""
+    """Die Breitenwahl der Aufzeichnung (1 Min … 10 Min)."""
     return next(
         c
         for c in _alle_controls(wurzel)
-        if isinstance(c, ft.SegmentedButton) and any(s.value == "0" for s in c.segments)
+        if isinstance(c, ft.SegmentedButton) and any(s.value == "600" for s in c.segments)
+    )
+
+
+def _ganze_messung(wurzel) -> ft.Container:
+    """Der Abschnitt-Chip „Ganze Messung“ unter den Breitenknöpfen (Plan F)."""
+    return next(
+        c
+        for c in _alle_controls(wurzel)
+        if isinstance(c, ft.Container)
+        and c.on_click is not None
+        and any(isinstance(t, ft.Text) and t.value == "Ganze Messung" for t in _alle_controls(c))
     )
 
 

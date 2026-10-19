@@ -1762,6 +1762,59 @@ class SessionRepo:
             for r in zeilen
         ]
 
+    def eintrag_aktuell(self, eintrag_id: str) -> SessionEntry | None:
+        """Der gültige Stand eines Eintrags — auch wenn ``eintrag_id`` eine ältere Zeile der
+        Korrekturkette nennt (die Zeitleiste merkt sich die Zeile von damals)."""
+        aktuell = eintrag_id
+        for _ in range(10_000):  # eine Kette ist endlich; Schutz vor einem Zyklus
+            r = self.con.execute(
+                "SELECT id FROM session_entry WHERE replaces_entry_id = ? AND deleted_at IS NULL",
+                (aktuell,),
+            ).fetchone()
+            if r is None:
+                break
+            aktuell = r["id"]
+        return self.eintrag_laden(aktuell)
+
+    def eintrag_kette(self, eintrag_id: str) -> list[str]:
+        """Diese Zeile und alle, die sie ersetzt hat (rückwärts) — die Zeitleiste nennt die
+        Zeile von damals, der Eintrag hat seitdem Korrekturen bekommen."""
+        kette = [eintrag_id]
+        aktuell: str | None = eintrag_id
+        for _ in range(10_000):
+            r = self.con.execute(
+                "SELECT replaces_entry_id FROM session_entry WHERE id = ?", (aktuell,)
+            ).fetchone()
+            aktuell = r["replaces_entry_id"] if r is not None else None
+            if aktuell is None:
+                break
+            kette.append(aktuell)
+        return kette
+
+    def eintraege_der_uebung(self, subject_id: str, exercise_id: str) -> list[SessionEntry]:
+        """Alle gültigen Einträge einer Übung — die jüngsten zuerst."""
+        return [
+            self._zeile(r)
+            for r in self.con.execute(
+                f"{_GUELTIGE} AND s.subject_id = ? AND e.exercise_id = ? "
+                "ORDER BY e.started_at DESC, e.rowid DESC",
+                (subject_id, exercise_id),
+            )
+        ]
+
+    def eintraege_im_zeitraum(
+        self, subject_id: str, von: datetime, bis: datetime
+    ) -> list[SessionEntry]:
+        """Gültige Einträge, die zwischen ``von`` und ``bis`` begannen (zeitlich sortiert)."""
+        return [
+            self._zeile(r)
+            for r in self.con.execute(
+                f"{_GUELTIGE} AND s.subject_id = ? AND e.started_at >= ? AND e.started_at <= ? "
+                "ORDER BY e.started_at, e.rowid",
+                (subject_id, iso_utc(von), iso_utc(bis)),
+            )
+        ]
+
     def eintraege_zwischen(
         self,
         subject_id: str,

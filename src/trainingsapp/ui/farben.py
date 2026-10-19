@@ -37,6 +37,7 @@ DUNKEL: dict[str, str] = {
     # Signale außerhalb der Kennzahlen
     "notiz": ft.Colors.AMBER_400,
     "notiz_neu": ft.Colors.ORANGE_600,
+    "leistung": ft.Colors.LIGHT_BLUE_300,  # Leistungen der Person in der Aufnahme (Plan D)
     "rot": ft.Colors.RED_400,  # auffällige Schläge, Fehler
 }
 
@@ -61,6 +62,7 @@ HELL: dict[str, str] = {
     "dfa_alpha1": "#767D1F",
     "notiz": "#957100",
     "notiz_neu": "#B46400",
+    "leistung": "#2F7DB5",
     "rot": "#EA221F",
 }
 

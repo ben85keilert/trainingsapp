@@ -199,6 +199,45 @@ class EinheitRepo:
             )
         }
 
+    def aufnahmen_zu_eintraegen(self, eintrag_ids: Collection[str]) -> dict[str, tuple[str, int]]:
+        """Je Tagebucheintrag die Datei der HRV-Aufnahme seiner Einheit und die Zahl seiner
+        Marken (``person/leistung``, ``person/abschluss``, ``person/eintrag``) — nur für
+        Einträge, deren Einheit eine Aufnahme hatte (Ben, 19.10.2026, Plan C)."""
+        ids = list(dict.fromkeys(eintrag_ids))
+        if not ids:
+            return {}
+        platzhalter = ",".join("?" * len(ids))
+        out: dict[str, tuple[str, int]] = {}
+        for r in self.con.execute(
+            "SELECT json_extract(x.daten_json, '$.eintrag') AS eintrag, b.datei AS datei, "
+            "COUNT(*) AS n FROM einheit_ereignis x "
+            "JOIN einheit_baustein b ON b.einheit_id = x.einheit_id AND b.art = 'hrv' "
+            "JOIN einheit e ON e.id = x.einheit_id AND e.deleted_at IS NULL "
+            "WHERE x.quelle = 'person' AND b.datei != '' "
+            f"AND json_extract(x.daten_json, '$.eintrag') IN ({platzhalter}) "
+            "GROUP BY eintrag, b.datei ORDER BY n DESC",
+            ids,
+        ):
+            out.setdefault(r["eintrag"], (r["datei"], int(r["n"])))
+        return out
+
+    def eintraege_zur_datei(self, datei: str) -> dict[str, int]:
+        """Je Tagebucheintrag, der in einer Einheit mit dieser Aufnahme eine Marke bekam,
+        die Zahl seiner Marken."""
+        return {
+            r["eintrag"]: int(r["n"])
+            for r in self.con.execute(
+                "SELECT json_extract(x.daten_json, '$.eintrag') AS eintrag, COUNT(*) AS n "
+                "FROM einheit_ereignis x "
+                "JOIN einheit_baustein b ON b.einheit_id = x.einheit_id AND b.art = 'hrv' "
+                "JOIN einheit e ON e.id = x.einheit_id AND e.deleted_at IS NULL "
+                "WHERE x.quelle = 'person' AND b.datei = ? "
+                "AND json_extract(x.daten_json, '$.eintrag') IS NOT NULL "
+                "GROUP BY eintrag ORDER BY MIN(x.t_s)",
+                (datei,),
+            )
+        }
+
     def loeschen(self, einheit_id: str) -> None:
         """Weich löschen — die Zeitleiste bleibt als Grabstein für die Synchronisation."""
         self.con.execute(

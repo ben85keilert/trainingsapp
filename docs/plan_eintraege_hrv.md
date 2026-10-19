@@ -1,6 +1,6 @@
 # Plan: Offener Eintrag, Leistungen in der HRV-Kurve, Übungsausschnitte
 
-Stand 19.10.2026: **Teile A und B gebaut** (v0.3.6), C–F offen (Katalog A18). Ben hat die vier
+Stand 19.10.2026: **alle Teile gebaut** — A und B in v0.3.6, C–F danach auf main (Gerätetest T60). Ben hat die vier
 offenen Punkte am 19.10. bejaht
 (Katalog „Entschieden“); Skizzen: https://claude.ai/artifact/HRPrwTvS5M2bEW4qJrgmAX
 (Reihe A = Teil A, Reihe D = Teile B–D, Reihe F = Teile E–F). Anlass: Bens

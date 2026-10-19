@@ -142,9 +142,13 @@ class Notizfeld:
         uebungen_merken: Callable[[bool, str | None], None] = lambda *_: None,
         katalog: Callable[[], dict[str, str]] | None = None,
         breite: Callable[[], float] | None = None,
+        ausblenden: Callable[[dict], bool] | None = None,
     ) -> None:
         self._zeitbezug = zeitbezug
         self._ereignisse = ereignisse
+        #: Notizen, die Liste und `marken` nicht zeigen (die Leistungen der Person — sie
+        #: haben eine eigene Ebene, Plan D); `bei` und `etikett` kennen sie weiter
+        self._ausblenden = ausblenden or (lambda _e: False)
         self._speichern = speichern
         self._neu_zeichnen = neu_zeichnen
         self._zeigen = zeigen
@@ -463,7 +467,12 @@ class Notizfeld:
         notizen: list[float] = []
         for i, e in enumerate(self._ereignisse()):
             x = zb.x(e)
-            if x is not None and x_von <= x <= x_bis and i not in (self.bearbeite, self.gezogen):
+            if (
+                x is not None
+                and x_von <= x <= x_bis
+                and i not in (self.bearbeite, self.gezogen)
+                and not self._ausblenden(e)
+            ):
                 notizen.append(x)
         reihen = [senkrechte(notizen, FARBEN["notiz"], 1.5, gestrichelt=False)]
         if self.bearbeite is not None:
@@ -473,6 +482,25 @@ class Notizfeld:
         if self.gezogen is not None and x_von <= self.zieh_x <= x_bis:
             reihen.append(senkrechte([self.zieh_x], FARBEN["notiz_neu"], 2.0, gestrichelt=True))
         return [r for r in reihen if r.punkte]
+
+    def positionen(self, x_von: float, x_bis: float, nur: Callable[[dict], bool]) -> list[float]:
+        """Die Stellen der Notizen im Ausschnitt, auf die ``nur`` zutrifft — für eine
+        eigene Ebene (die Leistungen der Person)."""
+        zb = self._zeitbezug()
+        if zb is None:
+            return []
+        out: list[float] = []
+        for e in self._ereignisse():
+            if not nur(e):
+                continue
+            x = zb.x(e)
+            if x is not None and x_von <= x <= x_bis:
+                out.append(x)
+        return out
+
+    def ereignis(self, i: int) -> dict | None:
+        liste = self._ereignisse()
+        return liste[i] if 0 <= i < len(liste) else None
 
     # -- Aufbau ------------------------------------------------------------------
 
@@ -616,9 +644,10 @@ class Notizfeld:
     def _aufbauen(self) -> None:
         zb = self._zeitbezug()
         liste = self._ereignisse()
+        sichtbar = [i for i, e in enumerate(liste) if not self._ausblenden(e)]
         verfuegbar = zb is not None
         self._pfeil.icon = ft.Icons.EXPAND_MORE if self.offen else ft.Icons.CHEVRON_RIGHT
-        self._titel.value = f"NOTIZEN · {len(liste)}" if liste else "NOTIZEN"
+        self._titel.value = f"NOTIZEN · {len(sichtbar)}" if sichtbar else "NOTIZEN"
         self._neu_knopf.disabled = not verfuegbar or self.bearbeite is not None
         self._neu_knopf.tooltip = None if verfuegbar else "Notizen gehören zu einer Aufnahme"
 
@@ -641,7 +670,7 @@ class Notizfeld:
             self._loeschen_knopf.visible = self.bearbeite is not None and self.bearbeite >= 0
             self._uebungen_fuellen()
 
-        self._hinweis.visible = self.offen and (not verfuegbar or not liste)
+        self._hinweis.visible = self.offen and (not verfuegbar or not sichtbar)
         self._hinweis.value = (
             "Notizen gehören zu einer Aufnahme."
             if not verfuegbar
@@ -649,7 +678,7 @@ class Notizfeld:
         )
         self._liste.visible = self.offen and verfuegbar
         self._liste.controls = (
-            [self._zeile(i, e, zb) for i, e in enumerate(liste)] if zb is not None else []
+            [self._zeile(i, liste[i], zb) for i in sichtbar] if zb is not None else []
         )
 
     def _uebungen_fuellen(self) -> None:

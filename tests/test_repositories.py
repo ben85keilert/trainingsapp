@@ -1372,16 +1372,26 @@ def test_nachtrag_spaet_am_abend_bleibt_in_seinem_tag(welt) -> None:
 
 def test_upgrade_schreibt_alte_stempel_nach_utc(welt) -> None:
     """Schritt 5: Stempel mit Versatz aus der Zeit vor D2 werden einmal umgeschrieben."""
+    from datetime import timezone
+
     from trainingsapp.data.upgrade import datenformat_aktualisieren
 
     con, repo, ich, _ = welt
     uebung = _wadenheben(con)
     tag = date(2026, 6, 15)
-    zeit = datetime.combine(tag, datetime.min.time()).astimezone() + timedelta(hours=23, minutes=30)
+    # Ein Stempel mit Versatz, wie ihn ein Gerät in Berlin schrieb — unabhängig von der
+    # Zeitzone des Rechners, der den Test ausführt (die CI läuft in UTC)
+    berlin = timezone(timedelta(hours=2))
+    zeit = datetime.combine(tag, datetime.min.time(), tzinfo=berlin) + timedelta(
+        hours=23, minutes=30
+    )
     session = repo.session_fuer(ich.id, None, tag)
     e = repo.eintrag_anlegen(session, uebung, {"reps": [15]}, started_at=zeit)
     con.execute("UPDATE session_entry SET started_at = ? WHERE id = ?", (zeit.isoformat(), e.id))
-    assert repo.eintraege_am_tag(ich.id, tag) == []  # so sah der Fehler aus
+    # Der alte Stempel trägt den Versatz (ob der Tag ihn fand, hing von der Zeitzone des
+    # Rechners ab — in UTC lief die CI rot, Berlin fand ihn nicht)
+    roh = con.execute("SELECT started_at FROM session_entry WHERE id = ?", (e.id,)).fetchone()[0]
+    assert roh.endswith("+02:00")
     SettingRepo(con).setzen("datenformat", "4")
     assert datenformat_aktualisieren(con) == 1
     assert [x.id for x, _ in repo.eintraege_am_tag(ich.id, tag)] == [e.id]
@@ -1472,3 +1482,70 @@ def test_gemacht_schliesst_den_offenen(welt) -> None:
     assert fertig.ended_at is not None and fertig.result == {"weight": 15}
     assert all(e.ended_at is not None for e in repo.eintraege(sitzung.id))
     assert repo.stand(ich.id, kniebeuge, heute, None, {"weight": 10}).zustand == "keiner"
+
+
+# ---------------------------------------------------------------------------
+# Eintrag ↔ Aufnahme (Ben, 19.10.2026; `data/bezuege.py`, Plan C)
+# ---------------------------------------------------------------------------
+
+
+def test_bezug_ueber_zeitleiste_und_zeitlich(welt) -> None:
+    """Ein Eintrag mit Marke findet seine Aufnahme über die Zeitleiste — auch über seine
+    alte Zeile der Korrekturkette; einer ohne Marke nur über die Uhr (zeitlich)."""
+    from datetime import timedelta
+
+    from trainingsapp.core.einheit import Beteiligung, Ereignis, Rolle
+    from trainingsapp.core.models import HrvRecording
+    from trainingsapp.data.bezuege import BezugRepo
+    from trainingsapp.data.einheiten import EinheitRepo
+    from trainingsapp.data.repositories import HrvRepo
+
+    con, repo, ich, sitzung = welt
+    uebung = _wadenheben(con)
+    heute = lokaler_tag(jetzt())
+    t0 = jetzt() - timedelta(minutes=30)
+    aufnahme = HrvRecording(
+        subject_id=ich.id, file_path="PolarH10/sensor_a.json", started_at=t0, duration_s=2400
+    )
+    HrvRepo(con).anlegen(aufnahme)
+    erster = repo.satz_anhaengen(sitzung, uebung, "reps", 15, heute)
+    einheiten = EinheitRepo(con)
+    einheiten.einheit_beginnen("e-1", ich.id, t0, "Messung")
+    einheiten.beteiligung(
+        "e-1", Beteiligung("hrv", Rolle.LAEUFT_SCHON, datei=aufnahme.file_path, versatz_s=0.0)
+    )
+    einheiten.ereignisse_schreiben(
+        "e-1",
+        [
+            (1, Ereignis(600.0, "person", "leistung", "Wadenheben: 15", {"eintrag": erster.id})),
+            (
+                2,
+                Ereignis(
+                    700.0, "person", "abschluss", "Wadenheben: fertig", {"eintrag": erster.id}
+                ),
+            ),
+        ],
+    )
+    zweiter = repo.satz_anhaengen(sitzung, uebung, "reps", 20, heute)  # Korrektur, neue Zeile
+    assert zweiter.id != erster.id
+    bezuege = BezugRepo(con)
+    b = bezuege.zu_eintrag(zweiter)
+    assert b is not None and b.aufnahme.id == aufnahme.id and b.marken == 2 and not b.zeitlich
+    assert 0 <= b.von_s <= 2400
+    # Nachgetragen, ohne Marke: nur zeitlich
+    nachtrag = repo.eintrag_anlegen(
+        sitzung, uebung, {"reps": [5]}, started_at=t0 + timedelta(minutes=10)
+    )
+    z = bezuege.zu_eintrag(nachtrag)
+    assert z is not None and z.zeitlich and z.aufnahme.id == aufnahme.id
+    assert z.von_s == 600.0
+    # Von der Aufnahme aus: der verknüpfte zuerst, dann der zeitliche
+    liste = bezuege.zur_aufnahme(aufnahme)
+    assert [x.eintrag.id for x in liste] == [zweiter.id, nachtrag.id]
+    assert [x.zeitlich for x in liste] == [False, True]
+    # Von der Übung aus: eine Aufnahme mit beiden Einträgen
+    je_aufnahme = bezuege.zur_uebung(ich.id, uebung.id)
+    assert len(je_aufnahme) == 1 and len(je_aufnahme[0][1]) == 2
+    # Außerhalb jeder Aufnahme: nichts
+    fremd = repo.eintrag_anlegen(sitzung, uebung, {}, started_at=t0 - timedelta(hours=3))
+    assert bezuege.zu_eintrag(fremd) is None

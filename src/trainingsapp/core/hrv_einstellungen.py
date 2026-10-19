@@ -41,6 +41,13 @@ KACHELN: Final[str] = "kacheln"
 #: Wählbare Breiten des Live-Zeitfensters (s)
 LIVE_FENSTER: Final[tuple[int, ...]] = (60, 120, 300, 600)
 
+#: Ebenen über der Hauptkurve einer Aufzeichnung (Ben, 19.10.2026, Plan D): Notizen (gelb),
+#: Leistungen der Person (blau, `person/leistung`), Abschnittsbalken — einzeln einblendbar
+EBENE_NOTIZEN: Final[str] = "notizen"
+EBENE_LEISTUNGEN: Final[str] = "leistungen"
+EBENE_ABSCHNITTE: Final[str] = "abschnitte"
+EBENEN: Final[tuple[str, ...]] = (EBENE_NOTIZEN, EBENE_LEISTUNGEN, EBENE_ABSCHNITTE)
+
 #: Erweitert — Latenz, nach der ein losgelassenes Analysefenster neu rechnet (ms).
 #: Kommt in dieser Zeit noch eine Bewegung nach, wird erst danach gerechnet.
 NACHRECHNEN_MS: Final[tuple[int, ...]] = (0, 250, 500, 800, 1200)
@@ -104,6 +111,8 @@ class HrvEinstellungen:
     live_spektrum_s: int = 15
     #: Zuletzt gewählte Länge des verschiebbaren Analysefensters (s)
     analyse_laenge_s: int = 300
+    #: Eingeblendete Ebenen über der Kurve (`EBENEN`; Vorgabe alle)
+    ebenen: list[str] = field(default_factory=lambda: list(EBENEN))
 
     def bereiche(self, *, optisch: bool) -> list[str]:
         """Welche Analysebereiche die Ansicht anbietet (Zeit immer)."""
@@ -132,6 +141,7 @@ class HrvEinstellungen:
             "nachrechnen_ms": self.nachrechnen_ms,
             "live_spektrum_s": self.live_spektrum_s,
             "analyse_laenge_s": self.analyse_laenge_s,
+            "ebenen": list(self.ebenen),
         }
 
     @classmethod
@@ -176,6 +186,7 @@ class HrvEinstellungen:
             nachrechnen_ms=auswahl("nachrechnen_ms", NACHRECHNEN_MS),
             live_spektrum_s=auswahl("live_spektrum_s", LIVE_SPEKTRUM_S),
             analyse_laenge_s=auswahl("analyse_laenge_s", ANALYSE_LAENGEN),
+            ebenen=[k for k in liste("ebenen") if k in EBENEN],
         )
 
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Any
 
 import flet as ft
 
@@ -123,6 +124,59 @@ def _uhr_zeile(icon: ft.IconData, name: str, text: str) -> ft.Control:
             ),
         ],
     )
+
+
+def aufnahmen_liste(page: Any, state: AppState, uebung: Exercise) -> ft.Control:
+    """HRV-Aufnahmen, in denen Einträge dieser Übung liegen (Skizze D3, Plan C) — nur die
+    Liste; Kurven und Kennzahlen stehen in der Aufnahme. Ein Tipp öffnet sie, gezoomt auf
+    die Einträge. Die HRV bleibt aus dem Verlauf der Übung (Katalog P39)."""
+    if state.bezuege is None:
+        return ft.Text("—", opacity=0.6)
+    je_aufnahme = state.bezuege.zur_uebung(state.profil.id, uebung.id)
+    if not je_aufnahme:
+        return ft.Text(
+            "Noch keine — läuft eine Aufnahme, bekommt jeder Satz dort eine Marke.",
+            size=13,
+            opacity=0.6,
+        )
+    heute = state.heute()
+    zeilen: list[ft.Control] = []
+    for aufnahme, bezuege in je_aufnahme[:12]:
+        beginn = aufnahme.started_at.astimezone()
+        wann = "Heute" if beginn.date() == heute else f"{beginn:%d.%m.}"
+        dauer = f"{int(aufnahme.duration_s // 60)} min"
+        werte = " · ".join(
+            " ".join(t for t in (b.eintrag.shorthand(),) if t) or "abgehakt" for b in bezuege
+        )
+        zeitlich = all(b.zeitlich for b in bezuege)
+        n = len(bezuege)
+        unten = f"{n} Eintr{'ag' if n == 1 else 'äge'} · {werte}" + (
+            " · zeitlich zugeordnet" if zeitlich else ""
+        )
+
+        def oeffner(a=aufnahme, bz=bezuege) -> Callable[[], object]:
+            async def handler() -> None:
+                von = min(b.fenster()[0] for b in bz)
+                bis = max(b.fenster()[1] for b in bz)
+                state.messung_zoom = (a.id, von, bis)
+                await page.push_route(f"/messung/{a.id}")
+
+            return handler
+
+        zeilen.append(
+            ft.ListTile(
+                leading=ft.Icon(
+                    ft.Icons.FAVORITE_BORDER if zeitlich else ft.Icons.FAVORITE,
+                    color=ft.Colors.OUTLINE if zeitlich else ft.Colors.ERROR,
+                ),
+                title=ft.Text(f"{wann}, {beginn:%H:%M} · {dauer} · {aufnahme.geraet or 'Gurt'}"),
+                subtitle=ft.Text(unten, size=12),
+                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                on_click=oeffner(),
+                content_padding=ft.Padding.only(left=0, right=0),
+            )
+        )
+    return ft.Column(spacing=0, controls=zeilen)
 
 
 def _notation(uebung: Exercise) -> ft.Control:
@@ -411,6 +465,7 @@ def uebung_detail(
         _abschnitt("Eingabe", _notation(uebung)),
         _abschnitt("Uhr und Timer", uhr_und_timer(uebung, item)),
         _abschnitt("Standard für Pläne", ft.Column(spacing=0, controls=verwendungen)),
+        _abschnitt("Aufnahmen mit dieser Übung", aufnahmen_liste(page, state, uebung)),
         _abschnitt(
             "Videos",
             ft.Column(spacing=0, controls=videos)

@@ -44,6 +44,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
+from functools import partial
 from typing import Any
 
 import flet as ft
@@ -90,6 +91,7 @@ from hrv_core.time_domain import compute_time_domain
 from hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
+from trainingsapp.core.aufnahme_bezug import RAND_S, Bezug
 from trainingsapp.core.hrv_ansicht import (
     HF_SPANNE_MIN_BPM,
     LINKS,
@@ -98,10 +100,17 @@ from trainingsapp.core.hrv_ansicht import (
     ROH_MAX_MS,
     ROH_MIN_MS,
 )
-from trainingsapp.core.hrv_einstellungen import ANALYSE_LAENGEN
+from trainingsapp.core.hrv_einstellungen import (
+    ANALYSE_LAENGEN,
+    EBENE_ABSCHNITTE,
+    EBENE_LEISTUNGEN,
+    EBENE_NOTIZEN,
+    EBENEN,
+)
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.models import HrvRecording
+from trainingsapp.core.tagesbilanz import buendeln
 from trainingsapp.core.timer import ENDE_MARKE
 from trainingsapp.core.timer import name_aus_notiz as abschnittsname
 from trainingsapp.ui import ausrichtung
@@ -212,8 +221,33 @@ def _verworfen_text(rec_verworfen: tuple[int, int] | None) -> Sequence[str]:
     return [f"{round(100 * rec_verworfen[0] / rec_verworfen[1])} % vom Sensor verworfen"]
 
 
-#: Breiten des Zeitfensters (s); 0 = die ganze Messung
-BREITEN = [(60, "1 min"), (120, "2 min"), (300, "5 min"), (0, "Alles")]
+#: Breiten des Zeitfensters (s) — „Min“ hinten dran, vier Knöpfe über die volle Breite
+#: (Ben, 19.10.2026, Plan F); die ganze Messung zeigt der Abschnitt-Chip „Ganze Messung“
+BREITEN = [(60, "1 Min"), (120, "2 Min"), (300, "5 Min"), (600, "10 Min")]
+#: Beschriftung der Ebenen-Chips über der Kurve (Plan D)
+EBENEN_TEXT = {
+    EBENE_NOTIZEN: "Notizen",
+    EBENE_LEISTUNGEN: "Leistungen",
+    EBENE_ABSCHNITTE: "Abschnitte",
+}
+UEBUNGEN_INFO = (
+    "Hier stehen die **Tagebucheinträge**, die in dieser Aufnahme liegen — gefunden über die "
+    "Zeitleiste der Einheit (jeder Satz bekam eine Marke) oder, bei älteren und nachgetragenen "
+    "Einträgen, über die Uhr („zeitlich“).\n\n"
+    "Ein Tipp **zoomt** auf den Ausschnitt des Eintrags und legt das Analysefenster darauf — "
+    "die Aufnahme bleibt ein Stück; nichts wird zerschnitten.\n\n"
+    "- **Blau** in der Kurve: Leistungen — „geleistet bis hierher“, die Tippzeit eines Satzes.\n"
+    "- **Gelb:** Notizen."
+)
+
+
+def _ist_leistung(e: dict) -> bool:
+    """Eine Notiz mit Marke der Person (`person/leistung`, `person/abschluss`) — sie gehört
+    zur Ebene „Leistungen“, nicht in die Notizliste."""
+    m = e.get("marke")
+    return isinstance(m, dict) and m.get("quelle") == "person"
+
+
 #: So breit öffnet die Aufzeichnung — am Anfang der Messung (Ben, 14.10.2026)
 START_BREITE_S = 120
 
@@ -354,6 +388,9 @@ class _Kurvenmodus:
     etikett: tuple[str, Any] | None = None
     #: Vollbild: offene Seitenleiste — `NOTIZEN`, `ABSCHNITTE` oder ``None``
     seite: str | None = None
+    #: Die Achse ist an diesen Abschnitt gebunden (Chip, Plan F): 0:00 ist sein Beginn,
+    #: Wischen bleibt darin — ``None``: die ganze Messung
+    bindung: Abschnitt | None = None
 
 
 #: Seitenleisten des Vollbilds
@@ -375,6 +412,11 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         [i for i, _ in state.einheiten.zur_datei("hrv", eintrag.file_path)]
         if state.einheiten is not None
         else []
+    )
+
+    #: Tagebucheinträge in dieser Aufnahme (Plan C) — über die Zeitleiste oder die Uhr
+    bezuege_liste: list[Bezug] = (
+        state.bezuege.zur_aufnahme(eintrag) if getattr(state, "bezuege", None) is not None else []
     )
 
     def ansicht(inhalt: list[ft.Control]) -> ft.View:
@@ -529,6 +571,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         # Ein Abschnitt kann jede Breite haben — dann ist keine Taste gewählt
         allow_empty_selection=True,
         show_selected_icon=False,
+        expand=True,
         segments=[ft.Segment(value=str(s), label=ft.Text(t)) for s, t in BREITEN],
     )
     breite_wahl_voll = ft.SegmentedButton(  # dieselbe Wahl in der Kopfzeile des Vollbilds
@@ -783,11 +826,18 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             Reihe(art, farbe=FARBEN["rot"], nur_punkte=True, skala=False),
         ]
 
+    def leistungs_reihen(x_von: float, x_bis: float) -> list[Reihe]:
+        """Die Leistungen der Person (Plan D): sanftes Blau, eigene Ebene."""
+        xs = notizfeld.positionen(x_von, x_bis, _ist_leistung)
+        return [senkrechte(xs, FARBEN["leistung"], 2.0, gestrichelt=False)] if xs else []
+
     def marken_reihen(x_von: float, x_bis: float) -> list[Reihe]:
-        """Notizen, Grenzen des Editors und der Ablesestrich — über den Kurven."""
+        """Notizen (gelb), Leistungen (blau), Grenzen des Editors und der Ablesestrich — über
+        den Kurven; Notizen und Leistungen nur, wenn ihre Ebene eingeblendet ist."""
         strich = m.strich if m.ablesen else None
         return [
-            *notizfeld.marken(x_von, x_bis),
+            *(notizfeld.marken(x_von, x_bis) if EBENE_NOTIZEN in einst.ebenen else []),
+            *(leistungs_reihen(x_von, x_bis) if EBENE_LEISTUNGEN in einst.ebenen else []),
             *(m.editor.reihen(x_von, x_bis) if m.editor is not None else []),
             *(
                 [senkrechte([strich], ft.Colors.ON_SURFACE, 1.2, gestrichelt=False)]
@@ -797,7 +847,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         ]
 
     def kurven(mit_analyse: bool = True) -> None:
-        x_von, x_bis = fenster.bereich(dauer)
+        x_von, x_bis = sichtbar()
         hinten = [*bereich_reihen(x_von, x_bis), *band_reihen(x_von, x_bis)]
         if m.vollbild:
             vollbild_kurven(x_von, x_bis, hinten)
@@ -812,6 +862,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 x_von=x_von,
                 x_bis=x_bis,
                 y_spanne_min=HF_SPANNE_MIN_BPM,
+                x_text=achse_text,
             )
         else:
             rr_box.content = kurve(
@@ -821,6 +872,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 x_von=x_von,
                 x_bis=x_bis,
                 y_spanne_min=RR_SPANNE_MIN_MS,
+                x_text=achse_text,
             )
         if mit_analyse:
             analyse.zeichnen(x_von, x_bis, strich=strich)
@@ -853,8 +905,11 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         # Der Balken im Editor liegt oben — die übrigen rücken eine Ebene tiefer
         versatz = 1 if m.art == ABSCHNITT else 0
         lagen = ebenen()
+        balken_an = EBENE_ABSCHNITTE in einst.ebenen or m.art == ABSCHNITT
         for a in sorted(eigene, key=lambda a: a.von_s):
             if a.id == bearbeitet or a.bis_s < x_von or a.von_s > x_bis:
+                continue
+            if not balken_an and (m.bindung is None or a.id != m.bindung.id):
                 continue
             balken = band(max(a.von_s, x_von), min(a.bis_s, x_bis), a.farbe)
             balken.ebene = min(lagen[a.id] + versatz, 3)
@@ -919,7 +974,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         m.ablesen = not m.ablesen
         m.etikett = None  # die Ablesewerte stehen, wo sonst das Etikett stünde
         if m.ablesen and m.strich is None:
-            m.strich = sum(fenster.bereich(dauer)) / 2
+            m.strich = sum(sichtbar()) / 2
         if m.ablesen:
             m.strich = schlag_bei(m.strich or 0.0)
         for knopf in (ablesen_knopf, ablesen_knopf_voll):
@@ -960,7 +1015,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             return
         i = naechster(zeiten, jetzt)
         m.strich = float(zeiten[min(max(i + richtung, 0), len(zeiten) - 1)])
-        x_von, x_bis = fenster.bereich(dauer)
+        x_von, x_bis = sichtbar()
         if not x_von <= m.strich <= x_bis:
             zentrieren(m.strich)
         nur_kurven()
@@ -1004,7 +1059,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             schwebend=m.vollbild,
         )
         if m.vollbild:
-            ablese_seite(ablese_box, x, *fenster.bereich(dauer), m.rechts)
+            ablese_seite(ablese_box, x, *sichtbar(), m.rechts)
 
     # -- Abschnitte (Werte je Teil der Messung) ---------------------------------
 
@@ -1098,6 +1153,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             ]
         else:
             abschnitte_box.controls = [hinweis("Noch keine Abschnitte.")]  # wie: hinter dem „i“
+        chips_zeichnen()
 
     def zusatz_sichern() -> None:
         try:
@@ -1415,7 +1471,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     def abschnitt_neu() -> None:
         """Neuer Abschnitt: der sichtbare Bereich, Grenzen rasten an nahen Notizen ein."""
-        x_von, x_bis = fenster.bereich(dauer)
+        x_von, x_bis = sichtbar()
         lo, hi = grenzen()
         punkte = [x for x, _ in notiz_punkte()]
         rand = 0.1 * (x_bis - x_von)
@@ -1495,6 +1551,25 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 c.update()
 
     # -- Zeitfenster -------------------------------------------------------------
+    # Die Achse ist entweder die ganze Messung oder an einen Abschnitt gebunden (Plan F):
+    # dann beginnt sie bei seinem Anfang (mit Rand), endet an seinem Ende, und die
+    # Beschriftung zählt ab Abschnittsbeginn.
+
+    def achse_anfang() -> float:
+        return max(m.bindung.von_s - RAND_S, 0.0) if m.bindung is not None else 0.0
+
+    def achse_ende() -> float:
+        return min(m.bindung.bis_s + RAND_S, dauer) if m.bindung is not None else dauer
+
+    def sichtbar() -> tuple[float, float]:
+        return fenster.bereich(achse_ende(), achse_anfang())
+
+    def achse_text(sekunden: float) -> str:
+        if m.bindung is None:
+            return _uhr(sekunden) if sekunden >= 60 else f"{int(sekunden)}s"
+        rel = sekunden - m.bindung.von_s
+        text = _uhr(abs(rel)) if abs(rel) >= 60 else f"{int(abs(rel))}s"
+        return f"-{text}" if rel < 0 else text
 
     def breite_setzen(
         breite_s: float, mitte: float | None = None, *, zeichnen_: bool = True
@@ -1506,7 +1581,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             fenster.ende_s = None if breite_s <= 0 else fenster.ende_s
         else:
             fenster.ende_s = None
-            fenster.verschieben(mitte + fenster.breite_s / 2 - dauer, dauer)
+            fenster.verschieben(
+                mitte + fenster.breite_s / 2 - achse_ende(), achse_ende(), achse_anfang()
+            )
         for wahl in (breite_wahl, breite_wahl_voll):
             wahl.selected = [str(int(breite_s))] if breite_s in dict(BREITEN) else []
         if zeichnen_:
@@ -1515,18 +1592,229 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     def zentrieren(x: float) -> None:
         """Die Kurve auf eine Zeit rücken (Notiz antippen); bei „Alles" bleibt sie."""
         fenster.ende_s = None
-        fenster.verschieben(x + fenster.breite_s / 2 - dauer, dauer)
+        fenster.verschieben(x + fenster.breite_s / 2 - achse_ende(), achse_ende(), achse_anfang())
+
+    def zoom_auf(von: float, bis: float, *, zeichnen_: bool = True) -> None:
+        """Auf einen Ausschnitt zoomen (ein Eintrag, Plan E): das Fenster ist der Ausschnitt,
+        das Analysefenster ein Band darauf — die Aufnahme bleibt ein Stück."""
+        m.bindung = None
+        lo, hi = grenzen()
+        von, bis = max(von, lo), min(bis, hi) if hi > lo else bis
+        if bis <= von:
+            bis = von + 10.0
+        fenster.breite_s = bis - von
+        fenster.ende_s = None if bis >= dauer - 0.5 else bis
+        for wahl in (breite_wahl, breite_wahl_voll):
+            wahl.selected = []
+        aw.art = AW_BAND
+        aw.laenge_s = max(round(bis - von - 2 * RAND_S), 10)
+        aw.von = von + RAND_S
+        bindung_zeichnen()
+        if zeichnen_:
+            nachrechnen_planen()
+            nur_kurven()
+
+    def binden(a: Abschnitt | None) -> None:
+        """Ein Abschnitt-Chip: die Achse an den Abschnitt binden (Plan F) — oder lösen."""
+        m.bindung = a
+        if a is not None:
+            spanne = achse_ende() - achse_anfang()
+            if fenster.breite_s >= spanne or fenster.breite_s not in dict(BREITEN):
+                fenster.breite_s = spanne
+            # am Anfang des Abschnitts beginnen
+            fenster.ende_s = min(achse_anfang() + fenster.breite_s, achse_ende())
+            if fenster.ende_s >= achse_ende() - 0.5:
+                fenster.ende_s = None
+            aw.art = AW_ABSCHNITT
+            aw.abschnitt_id = a.id
+        else:
+            # „Ganze Messung“ ersetzt den Knopf „Alles“ (Ben, 19.10.2026): das Fenster ist
+            # die ganze Messung, die Achse beginnt wieder bei 0
+            fenster.breite_s = dauer or 1.0
+            fenster.ende_s = None
+            if aw.art == AW_ABSCHNITT:
+                aw.art = AW_ALLES
+        for wahl in (breite_wahl, breite_wahl_voll):
+            wahl.selected = (
+                [str(int(fenster.breite_s))] if fenster.breite_s in dict(BREITEN) else []
+            )
+        bindung_zeichnen()
+        chips_zeichnen()
+        nachrechnen_planen()
+        nur_kurven()
+
+    def blaettern(richtung: int) -> None:
+        """‹ ›: um eine Fensterbreite — im gebundenen Abschnitt minutenweise."""
+        fenster.verschieben(richtung * fenster.breite_s, achse_ende(), achse_anfang())
+        nur_kurven()
+
+    bindung_box = ft.Container(visible=False)
+    bindung_voll = ft.Text(size=12, weight=ft.FontWeight.W_600, visible=False)
+    chips_box = ft.Row(spacing=6, scroll=ft.ScrollMode.AUTO)
+    chips_voll = ft.Row(spacing=4, scroll=ft.ScrollMode.AUTO, expand=True)
+
+    def bindung_zeichnen() -> None:
+        """Die Zeile über der Kurve: welcher Abschnitt, wo das Fenster darin steht."""
+        a = m.bindung
+        bindung_box.visible = a is not None
+        bindung_voll.visible = a is not None
+        if a is None:
+            bindung_box.content = None
+            bindung_voll.value = ""
+        else:
+            von, bis = sichtbar()
+            lage = f"{achse_text(von)}–{achse_text(bis)} von {_uhr(a.bis_s - a.von_s)}"
+            bindung_voll.value = f"{a.name} · {lage}"
+            bindung_box.content = ft.Row(
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.IconButton(
+                        ft.Icons.CHEVRON_LEFT,
+                        tooltip="Eine Fensterbreite zurück",
+                        on_click=lambda: blaettern(-1),
+                    ),
+                    ft.Column(
+                        spacing=0,
+                        expand=True,
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Text(a.name, size=13, weight=ft.FontWeight.W_700),
+                            ft.Text(
+                                f"{_uhr(a.von_s)}–{_uhr(a.bis_s)} · Fenster {lage}",
+                                size=11,
+                                opacity=0.75,
+                            ),
+                        ],
+                    ),
+                    ft.IconButton(
+                        ft.Icons.CHEVRON_RIGHT,
+                        tooltip="Eine Fensterbreite weiter",
+                        on_click=lambda: blaettern(1),
+                    ),
+                ],
+            )
+        for c in (bindung_box, bindung_voll):
+            with contextlib.suppress(Exception):
+                c.update()
+
+    def abschnitt_chip(a: Abschnitt | None, *, klein: bool) -> ft.Control:
+        gewaehlt = (
+            (m.bindung is None) if a is None else (m.bindung is not None and m.bindung.id == a.id)
+        )
+        text = "Ganze Messung" if a is None else f"{a.name} {_uhr(a.von_s)}"
+        inhalt: list[ft.Control] = []
+        if a is not None:
+            inhalt.append(ft.Container(width=8, height=8, border_radius=4, bgcolor=a.farbe))
+        inhalt.append(
+            ft.Text(
+                text, size=11 if klein else 12, weight=ft.FontWeight.W_700 if gewaehlt else None
+            )
+        )
+        return ft.Container(
+            height=30 if klein else 36,
+            padding=ft.Padding.symmetric(horizontal=10),
+            border_radius=18,
+            ink=True,
+            bgcolor=ft.Colors.PRIMARY_CONTAINER
+            if gewaehlt
+            else ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            border=ft.Border.all(2, ft.Colors.PRIMARY) if gewaehlt else None,
+            on_click=lambda _=None, a=a: binden(a),
+            content=ft.Row(
+                tight=True,
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=inhalt,
+            ),
+        )
+
+    def chips_zeichnen() -> None:
+        """Die Abschnitt-Chips (Plan F) — Übungen sind Abschnitte, keine Sonderform."""
+        geordnet = sorted(eigene, key=lambda a: a.von_s)
+        chips_box.controls = [
+            abschnitt_chip(None, klein=False),
+            *[abschnitt_chip(a, klein=False) for a in geordnet],
+        ]
+        chips_voll.controls = [
+            abschnitt_chip(None, klein=True),
+            *[abschnitt_chip(a, klein=True) for a in geordnet],
+        ]
+        if m.bindung is not None and all(a.id != m.bindung.id for a in eigene):
+            m.bindung = None  # der gebundene Abschnitt ist weg
+            bindung_zeichnen()
+        for c in (chips_box, chips_voll):
+            with contextlib.suppress(Exception):
+                c.update()
+
+    # -- Ebenen über der Kurve (Plan D) ------------------------------------------
+
+    ebenen_box = ft.Container()
+    ebenen_knoepfe_voll: dict[str, ft.IconButton] = {}
+
+    def ebene_umschalten(name: str) -> None:
+        aktiv = list(einst.ebenen)
+        if name in aktiv:
+            aktiv.remove(name)
+        else:
+            aktiv = [k for k in EBENEN if k in aktiv or k == name]
+        einst.ebenen = aktiv
+        gespeichert_ = state.hrv_einstellungen()
+        gespeichert_.ebenen = list(aktiv)
+        state.hrv_einstellungen_setzen(gespeichert_)
+        ebenen_zeichnen()
+        nur_kurven()
+
+    def ebenen_zeichnen() -> None:
+        farben = {
+            EBENE_NOTIZEN: FARBEN["notiz"],
+            EBENE_LEISTUNGEN: FARBEN["leistung"],
+            EBENE_ABSCHNITTE: ft.Colors.PRIMARY,
+        }
+        chips: list[ft.Control] = []
+        for name in EBENEN:
+            an = name in einst.ebenen
+            chips.append(
+                ft.Container(
+                    height=32,
+                    padding=ft.Padding.symmetric(horizontal=10),
+                    border_radius=8,
+                    ink=True,
+                    bgcolor=ft.Colors.with_opacity(0.25 if an else 0.0, farben[name]),
+                    border=None if an else ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+                    on_click=lambda _=None, n=name: ebene_umschalten(n),
+                    content=ft.Row(
+                        tight=True,
+                        spacing=5,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Icon(ft.Icons.CHECK if an else ft.Icons.ADD, size=14),
+                            ft.Text(
+                                EBENEN_TEXT[name],
+                                size=12,
+                                weight=ft.FontWeight.W_600 if an else None,
+                            ),
+                        ],
+                    ),
+                )
+            )
+        ebenen_box.content = ft.Row(spacing=6, wrap=True, controls=chips)
+        for name, knopf in ebenen_knoepfe_voll.items():
+            markieren(knopf, name in einst.ebenen)
+        for c in (ebenen_box, *ebenen_knoepfe_voll.values()):
+            with contextlib.suppress(Exception):
+                c.update()
 
     def zentrieren_und_zeichnen(x: float) -> None:
         """Im Editor: die Kurve zur gewählten Grenze rücken, wenn sie am Rand oder draußen liegt.
 
         Die Rohkurve zeichnet danach der Editor; die Verlaufskurven ziehen hier mit.
         """
-        x_von, x_bis = fenster.bereich(dauer)
+        x_von, x_bis = sichtbar()
         if not x_von + 0.1 * (x_bis - x_von) <= x <= x_bis - 0.1 * (x_bis - x_von):
             zentrieren(x)
             if not m.vollbild:
-                analyse.zeichnen(*fenster.bereich(dauer))
+                analyse.zeichnen(*sichtbar())
 
     # -- Notizen ---------------------------------------------------------------
 
@@ -1548,11 +1836,12 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     notizfeld = Notizfeld(
         zeitbezug=lambda: zeitbezug,
+        ausblenden=_ist_leistung,
         ereignisse=lambda: list(rec.ereignisse),
         speichern=notizen_speichern,
         neu_zeichnen=nur_kurven,
         zeigen=zentrieren,
-        mitte=lambda: sum(fenster.bereich(dauer)) / 2,
+        mitte=lambda: sum(sichtbar()) / 2,
         offen=state.notizen_offen,
         offen_merken=notizen_offen,
         uebungen=(lambda: uebungsquellen(state)) if einst.notiz_uebungen else None,
@@ -1586,7 +1875,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         lo, hi = grenzen()
         laenge = min(float(aw.laenge_s), hi - lo)
         if aw.von is None:
-            aw.von = sum(fenster.bereich(dauer)) / 2 - laenge / 2
+            aw.von = sum(sichtbar()) / 2 - laenge / 2
         aw.von = min(max(aw.von, lo), hi - laenge)
         return aw.von, aw.von + laenge
 
@@ -1625,7 +1914,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             if m.vollbild:
                 return  # dort steht keine Analyse
             # Bis gerechnet ist: das letzte Ergebnis, blass, mit Hinweis
-            analyse.zeichnen(*fenster.bereich(dauer), strich=m.strich if m.ablesen else None)
+            analyse.zeichnen(*sichtbar(), strich=m.strich if m.ablesen else None)
             with contextlib.suppress(Exception):
                 analyse.control.update()
 
@@ -1643,7 +1932,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             aw.wartet = False
             if m.vollbild:
                 return  # gerechnet wird beim Verlassen des Vollbilds
-            analyse.zeichnen(*fenster.bereich(dauer), strich=m.strich if m.ablesen else None)
+            analyse.zeichnen(*sichtbar(), strich=m.strich if m.ablesen else None)
             with contextlib.suppress(Exception):
                 analyse.control.update()
 
@@ -1656,7 +1945,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             band_bereich()
             nachrechnen_planen()
             mitte = sum(band_bereich()) / 2
-            x_von, x_bis = fenster.bereich(dauer)
+            x_von, x_bis = sichtbar()
             if not x_von <= mitte <= x_bis:
                 zentrieren(mitte)
             nur_kurven()
@@ -1797,8 +2086,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         wischen=lambda c: wischbar(
             c,
             fenster,
-            lambda: dauer,
+            achse_ende,
             wisch_zeichnen,
+            anfang=achse_anfang,
             tippen=analyse_tippen,
             greifen=analyse_greifen,
         ),
@@ -1965,8 +2255,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         return wischbar(
             box,
             fenster,
-            lambda: dauer,
+            achse_ende,
             lambda: wisch_zeichnen(mit_analyse=m.editor is None),
+            anfang=achse_anfang,
             tippen=kurve_tippen,
             greifen=kurve_greifen,
             losgelassen=rr_losgelassen,
@@ -2049,10 +2340,13 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             info = notizfeld.etikett(i)
             if info is not None:
                 x, zeit, text = info
+                ereignis_ = notizfeld.ereignis(i)
                 inhalt = etikett(
                     zeit,
                     text,
-                    FARBEN["notiz"],
+                    FARBEN["leistung"]
+                    if ereignis_ and _ist_leistung(ereignis_)
+                    else FARBEN["notiz"],
                     [
                         etikett_knopf(
                             ft.Icons.EDIT_OUTLINED, "Notiz bearbeiten", lambda: notiz_bearbeiten(i)
@@ -2159,7 +2453,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     def marke_setzen() -> None:
         """Notiz ohne Text — am Ablesestrich, sonst in der Fenstermitte; Text über „Notizen"."""
-        x = m.strich if m.ablesen and m.strich is not None else sum(fenster.bereich(dauer)) / 2
+        x = m.strich if m.ablesen and m.strich is not None else sum(sichtbar()) / 2
         notizfeld.marke_setzen(x)
 
     def darstellung() -> None:
@@ -2243,6 +2537,16 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     notizen_knopf = werkzeug(
         ft.Icons.NOTES, "Notizen: Liste, Text, Zeit", lambda: seite_umschalten(NOTIZEN)
     )
+    for _name, _icon in (
+        (EBENE_NOTIZEN, ft.Icons.STICKY_NOTE_2_OUTLINED),
+        (EBENE_LEISTUNGEN, ft.Icons.FITNESS_CENTER),
+        (EBENE_ABSCHNITTE, ft.Icons.VIEW_TIMELINE_OUTLINED),
+    ):
+        ebenen_knoepfe_voll[_name] = werkzeug(
+            _icon,
+            f"Ebene „{EBENEN_TEXT[_name]}“ ein-/ausblenden",
+            partial(ebene_umschalten, _name),
+        )
     abschnitte_knopf = werkzeug(
         ft.Icons.VIEW_TIMELINE_OUTLINED,
         "Abschnitte: Liste, neu, aus Notizen",
@@ -2295,9 +2599,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                         on_click=lambda: vollbild_umschalten(),
                     ),
                     links_box,
-                    ft.Container(expand=True),
                     breite_wahl_voll,
-                    ft.Container(expand=True),
+                    bindung_voll,
+                    chips_voll,
                     rechts_box,
                 ],
             ),
@@ -2329,6 +2633,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                         ),
                         notizen_knopf,
                         abschnitte_knopf,
+                        *ebenen_knoepfe_voll.values(),
                         *(
                             []
                             if z.nur_puls
@@ -2353,6 +2658,64 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         k.visible = not z.nur_puls
         return k
 
+    def uebungen_liste() -> ft.Control:
+        """Je Eintrag eine Zeile (Skizze D1): Übung, Werte, von–bis; ein Tipp zoomt."""
+        namen: dict[str, str] = {}
+        zeilen: list[ft.Control] = []
+        for b in bezuege_liste:
+            e = b.eintrag
+            if e.exercise_id not in namen:
+                u = state.uebungen.laden(e.exercise_id)
+                namen[e.exercise_id] = u.name if u is not None else "Übung"
+            bd = buendeln([e])[0]
+            kopf = " · ".join(t for t in (namen[e.exercise_id], bd.auspraegung_text()) if t)
+            werte = bd.leistung_text() or bd.einzelwerte_text() or "abgehakt"
+            unten = (
+                f"{_uhr(b.von_s)}–{_uhr(b.bis_s)} · {werte}"
+                + (" · zeitlich" if b.zeitlich else "")
+                + (f" · „{e.note}“" if e.note else "")
+            )
+            zeilen.append(
+                ft.Container(
+                    border_radius=10,
+                    ink=True,
+                    padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+                    on_click=lambda _=None, b=b: zoom_auf(*b.fenster()),
+                    content=ft.Row(
+                        spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Container(
+                                width=4,
+                                height=34,
+                                border_radius=2,
+                                bgcolor=ft.Colors.OUTLINE if b.zeitlich else FARBEN["leistung"],
+                            ),
+                            ft.Column(
+                                spacing=0,
+                                expand=True,
+                                controls=[
+                                    ft.Text(kopf, size=14, weight=ft.FontWeight.W_600),
+                                    ft.Text(unten, size=12, opacity=0.75),
+                                ],
+                            ),
+                            ft.Text(
+                                "Zoom ›",
+                                size=12,
+                                weight=ft.FontWeight.W_600,
+                                color=ft.Colors.PRIMARY,
+                            ),
+                        ],
+                    ),
+                )
+            )
+        return ft.Column(spacing=2, controls=zeilen)
+
+    ebenen_zeichnen()
+    zoom = getattr(state, "messung_zoom", None)
+    if zoom is not None and zoom[0] == eintrag.id:
+        state.messung_zoom = None
+        zoom_auf(float(zoom[1]), float(zoom[2]), zeichnen_=False)
     titel_zeichnen()
     zeichnen(aktualisieren=False)
     normal_inhalt = ft.Column(
@@ -2377,11 +2740,27 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                         on_click=lambda: vollbild_umschalten(),
                     ),
                 ),
-                breite_wahl,
+                ebenen_box,
+                bindung_box,
                 kurvengeste(rr_box),
+                ft.Row(controls=[breite_wahl]),
+                chips_box,
                 ablese_box,
                 editor_box,
                 notiz_platz[0],
+            ),
+            *(
+                [
+                    karte(
+                        kartentitel(
+                            f"Übungen · {len(bezuege_liste)}",
+                            info_knopf(page, "Einträge in dieser Aufnahme", UEBUNGEN_INFO),
+                        ),
+                        uebungen_liste(),
+                    )
+                ]
+                if bezuege_liste
+                else []
             ),
             nur_mit_intervallen(
                 kartentitel(

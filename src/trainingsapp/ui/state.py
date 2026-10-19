@@ -59,6 +59,7 @@ from trainingsapp.core.timer import (
 )
 from trainingsapp.core.update import Release
 from trainingsapp.core.verlauf import MODUS_ZEIT, ZEITRAUM_VORGABE
+from trainingsapp.data.bezuege import BezugRepo
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.einheiten import EinheitRepo
 from trainingsapp.data.kurse import KursRepo
@@ -239,6 +240,9 @@ class AppState:
     #: „Weiter“ auf „Heute“ (Ben, 18.10.2026): die Planübung, bei der der Plan beim
     #: nächsten Öffnen steht — einmal, dann gilt wieder die gemerkte Scrollposition
     plan_ziel: str | None = None
+    #: Beim Öffnen einer Aufnahme auf diesen Ausschnitt zoomen: (Aufnahme-ID, von_s, bis_s)
+    #: — gesetzt vom Leistungen-Blatt oder der Übung (Plan C/E), einmal gelesen
+    messung_zoom: tuple[str, float, float] | None = None
     #: Laufende HRV-Messung — lebt hier, nicht in der Ansicht, damit sie den
     #: Reiterwechsel überlebt (L03). Typ: `devices.messlauf.Messlauf`.
     messlauf: Any = None
@@ -328,6 +332,8 @@ class AppState:
     timer_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
     #: Zeitleiste gemeinsamer Abläufe (Migration 018, `data.einheiten.EinheitRepo`)
     einheiten: Any = None
+    #: Eintrag ↔ Aufnahme (`data.bezuege.BezugRepo`)
+    bezuege: Any = None
     #: Die Einheit in Vorbereitung oder im Lauf (`devices.einheit.Einheitslauf`) — HRV,
     #: Timer, GPS gemeinsam bereitgestellt und gestartet (`ui.einheit`, Ben 17.10.2026)
     einheit: Any = None
@@ -388,6 +394,7 @@ class AppState:
             verwaiste_strecken=verwaist,
             hrv_backups=backups,
             einheiten=einheiten,
+            bezuege=BezugRepo(con),
             tags=TagRepo(con),
             pakete=PaketRepo(con),
             kurse=KursRepo(con),

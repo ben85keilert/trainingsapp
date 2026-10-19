@@ -30,6 +30,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core.aufnahme_bezug import Bezug, zeit_text
 from trainingsapp.core.models import Exercise, Session, SessionEntry
 from trainingsapp.core.tagesbilanz import kachel
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -62,6 +63,8 @@ class _Karte:
     form: SpecForm
     notiz: ft.TextField
     anfang: tuple[dict[str, Any], str]
+    #: In welcher HRV-Aufnahme der Eintrag liegt (`data.bezuege`, Plan C) — ``None``: in keiner
+    bezug: Bezug | None = None
 
     def stand(self) -> tuple[dict[str, Any], str]:
         return self.form.werte(), (self.notiz.value or "").strip()
@@ -92,7 +95,8 @@ class _Leistungen:
                 hint_text="Wie ging es?",
             )
             anfang = (form.werte(), eintrag.note.strip())
-            self.karten.append(_Karte(eintrag, session, form, notiz, anfang))
+            bezug = state.bezuege.zu_eintrag(eintrag) if state.bezuege is not None else None
+            self.karten.append(_Karte(eintrag, session, form, notiz, anfang, bezug))
         # Was ein Timer eintrug (Übungs-Timer, Plan-Ablauf) — aus der Zeitleiste
         self.vom_timer = (
             state.einheiten.eintraege_vom_timer([k.eintrag.id for k in self.karten])
@@ -103,6 +107,8 @@ class _Leistungen:
         self.kopf = ft.Text(_kopftext(len(self.karten), tag, self.heute), size=13, opacity=0.75)
         #: nach dem Löschen (das Blatt zeichnet sich dann selbst neu)
         self.gezeichnet: Callable[[], None] = lambda: None
+        #: „Ansehen“ an einer Aufnahme: speichert Geändertes und wechselt die Route
+        self.weiter: Callable[[str], Callable[[], Any]] = lambda _ziel: lambda: None
         self.zeichnen()
 
     @property
@@ -163,6 +169,40 @@ class _Leistungen:
                     ),
                     ft.Container(padding=ft.Padding.only(right=8), content=felder),
                     ft.Container(padding=ft.Padding.only(right=8), content=k.notiz),
+                    *([self.aufnahme_zeile(k.bezug)] if k.bezug is not None else []),
+                ],
+            ),
+        )
+
+    def aufnahme_zeile(self, b: Bezug) -> ft.Control:
+        """„♥ Aufnahme 10:02–10:40 · 4 Marken · Ansehen“ (Skizze D2) — „Ansehen“ öffnet die
+        Aufnahme, gezoomt auf den Eintrag (`AppState.messung_zoom`)."""
+        marken = (
+            "zeitlich zugeordnet"
+            if b.zeitlich
+            else f"{b.marken} Marke{'' if b.marken == 1 else 'n'}"
+        )
+
+        def ansehen() -> None:
+            self.state.messung_zoom = (b.aufnahme.id, *b.fenster())
+            self.weiter(f"/messung/{b.aufnahme.id}")()
+
+        return ft.Container(
+            padding=ft.Padding.only(left=10, right=4, top=4, bottom=4),
+            margin=ft.Margin.only(right=8),
+            border_radius=10,
+            bgcolor=ft.Colors.SURFACE,
+            content=ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Icon(
+                        ft.Icons.FAVORITE if not b.zeitlich else ft.Icons.FAVORITE_BORDER,
+                        size=16,
+                        color=ft.Colors.ERROR if not b.zeitlich else ft.Colors.OUTLINE,
+                    ),
+                    ft.Text(f"Aufnahme {zeit_text(b.aufnahme)} · {marken}", size=13, expand=True),
+                    ft.TextButton("Ansehen", icon=ft.Icons.CHEVRON_RIGHT, on_click=ansehen),
                 ],
             ),
         )
@@ -288,6 +328,7 @@ def leistungen_view(
 
         return handler
 
+    leistungen.weiter = lambda ziel: lambda: page.run_task(weiter_nach(ziel))
     mehr: list[ft.Control] = (
         [
             ft.Row(
@@ -407,6 +448,7 @@ def leistungen_blatt(
             blatt.update()
 
     leistungen.gezeichnet = neu_gezeichnet
+    leistungen.weiter = weiter_nach
     fehler = ft.Text("", size=12, color=ft.Colors.ERROR, visible=False)
     mehr: list[ft.Control] = (
         [

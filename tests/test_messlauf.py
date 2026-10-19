@@ -406,3 +406,45 @@ async def test_aufnahme_mit_vorgegebenem_nullpunkt_und_dateiname(tmp_path) -> No
     assert ergebnis.pfad.relative_to(tmp_path / "Messungen").as_posix() == datei
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
+
+
+@pytest.mark.asyncio
+async def test_stoppen_bei_schreibfehler_behaelt_die_aufnahme(tmp_path, monkeypatch) -> None:
+    """H24: Scheitert das Speichern, bleibt die Aufnahme im Lauf — ein zweiter Versuch
+    (oder das Backup) rettet sie; vorher war sie in dem Moment weg."""
+    from hrv_core.aufnahme import Aufnahme
+
+    quelle = SimulatedSource(tempo=60.0, seed=7)
+    lauf = Messlauf(quelle, backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 10:
+        await asyncio.sleep(0.01)
+    original = Aufnahme.speichern
+
+    def kaputt(self, ordner):
+        raise OSError("Speicher voll")
+
+    monkeypatch.setattr(Aufnahme, "speichern", kaputt)
+    with pytest.raises(OSError):
+        lauf.aufnahme_stoppen(tmp_path)
+    assert lauf.aufnahme is not None and lauf.aufnahme.beats
+    monkeypatch.setattr(Aufnahme, "speichern", original)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    assert ergebnis is not None and lauf.aufnahme is None
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+
+
+@pytest.mark.asyncio
+async def test_kaputte_wiedergabedatei_beendet_den_strom(tmp_path) -> None:
+    """H36: Ein Fehler im Simulator-Task endet mit Status und Ende-Signal, nicht still."""
+    datei = tmp_path / "sensor_kaputt.json"
+    datei.write_text("{nix", encoding="utf-8")
+    quelle = SimulatedSource(datei, tempo=60.0)
+    lauf = Messlauf(quelle, backup_basis=tmp_path)
+    await lauf.verbinden("datei", None)
+    await asyncio.wait_for(lauf.laufen(), 5)
+    assert lauf.status.verbindung == Verbindung.GETRENNT
+    assert "abgebrochen" in (lauf.status.meldung or "")

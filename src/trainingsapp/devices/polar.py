@@ -104,6 +104,11 @@ WATCHDOG_TAKT_S = 1.0
 WATCHDOG_WARNUNG_S = 3.0
 #: ohne Daten → Neuverbinden (vor dem ersten Paket gilt ``profil.ersttelegramm_s``)
 WATCHDOG_NEUVERBINDEN_S = 8.0
+#: So lange müssen Daten am Stück kommen, bis ein Neuaufbau als gelungen gilt — erst
+#: dann beginnt die Zählung der Fehlversuche von vorn und die Warnung geht weg. Vorher
+#: setzte jedes Paket den Zähler zurück: Riss der Strom nach 2 s wieder ab, blieb es
+#: beim festen 16-s-Takt ohne Warnung (H18, H27).
+WATCHDOG_STABIL_S = 30.0
 #: Batteriestand neu lesen
 BATTERIE_INTERVALL_S = 300.0
 #: Versuche beim ersten `connect()`; danach (Reconnect) unbegrenzt
@@ -220,6 +225,7 @@ class PolarQuelle(HeartRateSource):
         self._generation = 0  # je Aufbau +1; Rückrufe älterer Verbindungen verfallen
         self._getrennt_gemeldet = False
         self._fehlversuche = 0
+        self._verbunden_seit = 0.0  # Uhr beim letzten gelungenen Aufbau
 
         self._ppi_modus = False  # Intervalle aus PMD-PPI, 0x2A37 nur Lebenszeichen
         self._ppi_aktiv = False  # Startkommando geschrieben
@@ -443,6 +449,7 @@ class PolarQuelle(HeartRateSource):
             raise ConnectionError("Gerät hat während des Verbindungsaufbaus getrennt")
 
         self._verbunden = True
+        self._verbunden_seit = self._uhr()
         if not self._daten_gesehen:
             self._letzte_daten = self._uhr()
         if self._ppi_modus:
@@ -462,6 +469,16 @@ class PolarQuelle(HeartRateSource):
         else:
             self._meldung_warten = "" if self._daten_gesehen else "Verbunden — warte auf Daten"
             meldung = self._meldung_warten
+        if self._fehlversuche:
+            # Bleibt stehen, bis der Strom WATCHDOG_STABIL_S am Stück läuft — eine
+            # Abriss-Schleife (H18) soll sichtbar sein, nicht bei jedem Paket verschwinden.
+            self._meldung_watchdog = (
+                f"Wieder verbunden (Versuch {self._fehlversuche}) — Verbindung wird beobachtet"
+            )
+            self._gewarnt = True
+            if meldung == self._meldung_warten:
+                self._meldung_warten = ""
+                meldung = self._meldung_watchdog
         self._status_aendern(verbindung=Verbindung.VERBUNDEN, meldung=meldung)
 
     async def _ppi_einrichten(self, gen: int) -> None:
@@ -796,14 +813,16 @@ class PolarQuelle(HeartRateSource):
     # -- Hilfen -------------------------------------------------------------
 
     def _daten_da(self) -> None:
-        """Jede Notification: Watchdog zurücksetzen, Warnungen zurücknehmen."""
-        self._letzte_daten = self._uhr()
-        self._fehlversuche = 0
+        """Jede Notification: Watchdog zurücksetzen; Warnungen erst nach stabiler Phase."""
+        jetzt = self._uhr()
+        self._letzte_daten = jetzt
+        if self._fehlversuche and jetzt - self._verbunden_seit >= WATCHDOG_STABIL_S:
+            self._fehlversuche = 0
         if not self._daten_gesehen:
             self._daten_gesehen = True
             if not self._ppi_modus:
                 self._meldung_zuruecknehmen(self._meldung_warten)
-        if self._gewarnt:
+        if self._gewarnt and not self._fehlversuche:
             self._gewarnt = False
             self._meldung_zuruecknehmen(self._meldung_watchdog)
 
@@ -835,6 +854,7 @@ __all__ = [
     "BATTERIE_INTERVALL_S",
     "ERSTE_VERBINDUNG_VERSUCHE",
     "WATCHDOG_NEUVERBINDEN_S",
+    "WATCHDOG_STABIL_S",
     "WATCHDOG_WARNUNG_S",
     "PolarQuelle",
     "profil_zuordnen",

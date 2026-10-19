@@ -287,7 +287,7 @@ class StreckeBaustein:
             "dauer_s": round(r.dauer_s, 1),
             "bewegt_s": round(r.bewegt_s, 1),
         }
-        out.append(Ereignis(max(t, jetzt) - self._t0, "gps", "ende", "", daten))
+        out.append(Ereignis(max(t, self._t0) - self._t0, "gps", "ende", "", daten))
         return out
 
     async def abschliessen_async(self, stoppen: bool = True) -> StreckeErgebnis:

@@ -926,3 +926,30 @@ def test_bekannte_geraete_im_zustand(tmp_path) -> None:
         assert [g.name for g in state.bekannte_geraete()] == ["Polar H10 1A2B"]
     finally:
         state.schliessen()
+
+
+async def test_fehlversuche_zaehlen_erst_nach_stabiler_phase_von_vorn() -> None:
+    """H18/H27: Reißt der Strom nach dem Neuaufbau gleich wieder ab, wächst die Pause
+    (3, 6, 9 s) und die Warnung bleibt stehen — vorher setzte jedes Paket alles zurück."""
+    quelle, transport, zeit, _s = await verbinde(H10_NAME, H10_DIENSTE)
+    for pause in (3, 6, 9):
+        transport.senden(HR_MEASUREMENT_UUID, bytes([0x10, 60, 0x00, 0x04]), zeit.t)
+        await zeit.vorspulen(8)  # Stall → Neuaufbau nach `pause`
+        n = transport.anzahl("connect")
+        await zeit.vorspulen(pause - 0.5)
+        assert transport.anzahl("connect") == n
+        await zeit.vorspulen(0.5)
+        assert transport.anzahl("connect") == n + 1
+        transport.senden(HR_MEASUREMENT_UUID, bytes([0x10, 60, 0x00, 0x04]), zeit.t)  # 2 s Daten
+        await zeit.vorspulen(2)
+        assert quelle.aktueller_status.meldung  # Warnung bleibt, solange es nicht stabil ist
+    # 30 s am Stück Daten: Zähler und Warnung weg
+    for _ in range(31):
+        transport.senden(HR_MEASUREMENT_UUID, bytes([0x10, 60, 0x00, 0x04]), zeit.t)
+        await zeit.vorspulen(1)
+    assert not quelle.aktueller_status.meldung
+    await zeit.vorspulen(8)
+    n = transport.anzahl("connect")
+    await zeit.vorspulen(3)
+    assert transport.anzahl("connect") == n + 1  # wieder Versuch 1: 3 s
+    await quelle.disconnect()

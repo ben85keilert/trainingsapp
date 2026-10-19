@@ -847,7 +847,9 @@ class TimerLauf:
         self.fortsetzen(bei)
 
     def fortsetzen(self, bei: float | None = None) -> None:
-        if self._start is None and not self.fertig:
+        """Weiter nach einer Pause. Ein abgebrochener Lauf bleibt stehen — `start` beginnt
+        von vorn; sonst zählte die Anzeige, aber Marken und Eintrag blieben aus (H33)."""
+        if self._start is None and not self.fertig and not self.abgebrochen:
             self._start = self._uhr() if bei is None else min(bei, self._uhr())
             self.angehalten_bei = None
 

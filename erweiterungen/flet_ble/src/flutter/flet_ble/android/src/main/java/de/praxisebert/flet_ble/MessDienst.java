@@ -55,7 +55,6 @@ public class MessDienst extends Service {
     /** Ohne Dienst (nur der Timer): eigene Nummer — das Ende des Dienstes nimmt 4712 mit. */
     private static final int EINFACH_ID = 4713;
     /** Sicherheitsnetz: die Wake-Lock fällt spätestens nach 6 h. */
-    private static final long SPERRE_MS = 6L * 60 * 60 * 1000;
 
     static volatile boolean laeuft = false;
 
@@ -112,8 +111,10 @@ public class MessDienst extends Service {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
             sperre = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "trainingsapp:messung");
             sperre.setReferenceCounted(false);
-            sperre.acquire(SPERRE_MS);
         }
+        // Bei jedem Start neu holen: Ohne Referenzzählung verlängert das die Frist —
+        // vorher lief die Sperre nach SPERRE_MS aus, der Dienst weiter (H32, Nachtmessung).
+        sperre.acquire();  // ohne Frist — der Dienst endet ausdrücklich (onDestroy gibt frei)
         laeuft = true;
         // Stirbt der Prozess, ist auch die Messung weg — ein Neustart des
         // Dienstes allein brächte nichts.

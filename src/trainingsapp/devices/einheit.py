@@ -435,6 +435,9 @@ class Einheitslauf:
         self.id = new_id()
         #: Uhr der Einheit — mit HRV die des `Messlauf` (`Messlauf.uhr`)
         self.uhr = uhr
+        #: Läuft die Uhr in echter Zeit? Nur dann ist ein Sprung der Boot-Uhr Tiefschlaf
+        #: (Simulator und Attrappen laufen schneller oder stehen — H26)
+        self.echtzeit = uhr is time.monotonic
         self._jetzt_utc = jetzt_utc
         self.senke = senke
         self.subject_id = subject_id
@@ -481,6 +484,7 @@ class Einheitslauf:
         self.teile.append(teil)
         if isinstance(teil, HrvBaustein):  # mit HRV gilt die Uhr der Quelle (Simulator!)
             self.uhr = teil.messlauf.uhr
+            self.echtzeit = bool(getattr(teil.messlauf.quelle, "echtzeit", True))
         self._uhr_weitergeben()
         self.zustand = Zustand.VORBEREITUNG
 
@@ -741,7 +745,7 @@ class Einheitslauf:
 
     def _schlaf_pruefen(self, jetzt: float) -> list[Ereignis]:
         """Tiefschlaf zwischen zwei Takten wird ein Ereignis (Datenqualität)."""
-        if self.uhr is not time.monotonic or self.t0 is None:
+        if not self.echtzeit or self.t0 is None:
             return []
         versatz = _schlafversatz()
         if versatz is None:

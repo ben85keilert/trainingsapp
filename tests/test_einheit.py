@@ -279,3 +279,25 @@ def test_eintraege_vom_timer_aus_der_zeitleiste(repo) -> None:
     )
     assert r.eintraege_vom_timer(["eintrag-a", "eintrag-b", "eintrag-a"]) == {"eintrag-a"}
     assert r.eintraege_vom_timer([]) == set()
+
+
+def test_tiefschlaf_pruefung_nur_mit_echter_uhr() -> None:
+    """H26: Mit einer HRV-Quelle in Echtzeit (Polar) bleibt die Prüfung an, mit dem
+    Simulator (virtuelle Uhr) nicht — vorher entschied die Identität mit time.monotonic."""
+    import time
+
+    from trainingsapp.devices.einheit import Einheitslauf, HrvBaustein
+    from trainingsapp.devices.messlauf import Messlauf
+    from trainingsapp.devices.simulated import SimulatedSource
+
+    class Echt:
+        def jetzt(self) -> float:
+            return time.monotonic()
+
+    e = Einheitslauf()
+    assert e.echtzeit
+    e.hinzufuegen(HrvBaustein(Messlauf(Echt())))  # type: ignore[arg-type]
+    assert e.echtzeit
+    e2 = Einheitslauf()
+    e2.hinzufuegen(HrvBaustein(Messlauf(SimulatedSource(tempo=60.0))))
+    assert not e2.echtzeit

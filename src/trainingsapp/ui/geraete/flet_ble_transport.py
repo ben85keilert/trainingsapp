@@ -86,8 +86,13 @@ class FletBleTransport:
         ]
 
     async def connect(self, device_id: str, bei_trennung: Callable[[str | None], None]) -> int:
+        # Den Rückruf erst eintragen, wenn Dart verbunden hat: Ein „disconnected“ der
+        # vorigen Verbindung (Dart trennt bis 10 s, Python wartet nur 3 s) kam sonst noch
+        # an und galt als Abriss der neuen — ein Grund für die Neuverbinden-Schleife H18.
+        self._bei_trennung.pop(device_id, None)
+        mtu = int(await self.ble.connect(device_id) or 0)
         self._bei_trennung[device_id] = bei_trennung
-        return int(await self.ble.connect(device_id) or 0)
+        return mtu
 
     async def bond(self, device_id: str) -> None:
         zustand = await self.ble.bond(device_id)

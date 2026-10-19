@@ -502,3 +502,17 @@ def test_fortschrittsleiste_zeichnet_die_folge() -> None:
     leiste.auffrischen()
     assert all(s.content is None for s in leiste.balken.controls)  # alles voll
     assert leiste.links.value == "fertig"
+
+
+def test_abgebrochener_timer_laeuft_nicht_weiter() -> None:
+    """H33: „Weiter“ nach „Abbrechen“ setzt die Uhr nicht wieder in Gang — nur `start`."""
+    uhr = Uhr()
+    lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 30)]), uhr=uhr)
+    lauf.start()
+    uhr.t += 5
+    lauf.abbrechen()
+    lauf.fortsetzen()
+    uhr.t += 5
+    assert lauf.abgebrochen and not lauf.laeuft and lauf.vergangen_s() == 5
+    lauf.start()
+    assert lauf.laeuft and not lauf.abgebrochen

@@ -589,11 +589,18 @@ class Messlauf:
         return zusatz
 
     def aufnahme_stoppen(self, basis: Path) -> Gespeichert | None:
-        """Speichert atomar und beendet die Aufnahme. ``None``, wenn nichts aufgezeichnet wurde."""
-        aufnahme, self.aufnahme = self.aufnahme, None
+        """Speichert atomar und beendet die Aufnahme. ``None``, wenn nichts aufgezeichnet wurde.
+
+        Scheitert das Schreiben (Speicher voll, Ordner nicht beschreibbar), bleibt die
+        Aufnahme im Lauf — der Aufrufer bekommt die Ausnahme und kann es noch einmal
+        versuchen; vorher war sie in dem Moment weg (H24, 19.10.2026).
+        """
+        aufnahme = self.aufnahme
         if aufnahme is None or not aufnahme.beats:
+            self.aufnahme = None
             return None
         pfad = aufnahme.speichern(self._ordner(basis))
+        self.aufnahme = None
         rec = aufnahme.recording()
         spuren, self._grenzen = self._grenzen, {}
         if any(spuren.values()):  # Abschnitte je Spur — scheitert das, bleibt die Messung

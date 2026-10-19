@@ -70,6 +70,8 @@ PPI_PAKET_S = 5.0
 
 
 class SimulatedSource(HeartRateSource):
+    #: Die Uhr ist virtuell (`tempo`) — eine Einheit erkennt damit keinen Tiefschlaf (H26)
+    echtzeit = False
     """Spielt eine Datei ab oder erzeugt synthetische Schläge."""
 
     def __init__(
@@ -183,10 +185,13 @@ class SimulatedSource(HeartRateSource):
         else:
             quelle = self._synthetisch()
             ende = "Simulation beendet"
-        async for wert in quelle:
-            self._push_messwert(wert)
-            if isinstance(wert, Messwert) and wert.hf_bpm != self.aktueller_status.hf_bpm:
-                self._status_aendern(hf_bpm=wert.hf_bpm)
+        try:
+            async for wert in quelle:
+                self._push_messwert(wert)
+                if isinstance(wert, Messwert) and wert.hf_bpm != self.aktueller_status.hf_bpm:
+                    self._status_aendern(hf_bpm=wert.hf_bpm)
+        except Exception as e:  # kaputte Datei, unbekanntes Profil — sonst wartete `stream()` ewig
+            ende = f"Wiedergabe abgebrochen: {e or type(e).__name__}"
         self._status_aendern(verbindung=Verbindung.GETRENNT, meldung=ende)
         self._ende_signalisieren()
 

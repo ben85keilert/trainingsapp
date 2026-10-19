@@ -33,6 +33,7 @@ import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
 from trainingsapp.core.parameter import (
+    chips_lesen,
     chips_sortiert,
     gewaehlte_felder,
     modus_aus_felder,
@@ -62,7 +63,6 @@ from trainingsapp.ui.components.parameter_wahl import parameter_wahl
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.views.uebung_bearbeiten import chips_lesen
 
 
 def _chip_text(f: FieldSpec, wert: Any) -> str:

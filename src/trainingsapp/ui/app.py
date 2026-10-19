@@ -63,6 +63,7 @@ import flet as ft
 
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
+from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.ui import ausrichtung, navigation
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.dialoge import dialog_offen
@@ -277,7 +278,8 @@ def formular_korrektur(
     """``basis`` wie bei `eintrag_view`: der Plan darunter, leer = der Tag."""
     uebung = state.uebungen.laden(eintrag.exercise_id, mit_geloeschten=True)
     tag = lokaler_tag(eintrag.started_at) if eintrag.started_at else state.heute()
-    assert eintrag.spec_snapshot is not None
+    # Ohne Kopie der Notation (ältere Einträge, D8): die der Übung — wie `views/leistungen.py`
+    spec = eintrag.spec_snapshot or (uebung.result_spec if uebung is not None else ResultSpec())
 
     async def speichern(ergebnis: dict[str, Any], notiz: str) -> None:
         state.sitzungen.eintrag_korrigieren(eintrag.id, ergebnis, notiz)
@@ -291,7 +293,7 @@ def formular_korrektur(
         page,
         route=f"{basis}/eintrag/{eintrag.id}/korrigieren",
         titel=f"Korrigieren: {uebung.name if uebung else 'Eintrag'}",
-        spec=eintrag.spec_snapshot,  # die Notation von damals, nicht die heutige
+        spec=spec,  # die Notation von damals, nicht die heutige
         werte=dict(eintrag.result),
         notiz=eintrag.note,
         on_speichern=speichern,

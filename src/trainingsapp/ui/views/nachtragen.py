@@ -21,7 +21,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem, lokaler_tag
-from trainingsapp.core.plaene import erledigte
+from trainingsapp.core.plaene import erste_offene
 from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tag import LEER, plaene_des_tags, plankarten, uhrzeit_lesen
@@ -267,20 +267,19 @@ def nachtragen_view(
         # Lang gedrückt auf einer Plan-Karte: der Plan gilt, auch wenn er nicht ansteht
         plaene[:0] = [p for p in alle if p.id == plan_id and enthaelt(p)]
 
+    def stellen(plan: Plan) -> list[PlanItem]:
+        return [i for i in plan.items if i.exercise_id == uebung.id]
+
     def item_fuer(plan: Plan) -> PlanItem:
-        """Die erste Stelle der Übung im Plan, die noch offen ist — sonst die erste."""
-        fertig = erledigte(plan.items, anzahl)
-        passend = [i for i in plan.items if i.exercise_id == uebung.id]
-        return next((i for i in passend if i.id not in fertig), passend[0])
+        """Die erste Stelle der Übung im Plan, die noch offen ist — sonst die erste
+        (`core.plaene.erste_offene`)."""
+        passend = stellen(plan)
+        return erste_offene(passend, anzahl) or passend[0]
 
     def vorwahl() -> str | None:
         if plan_id and any(p.id == plan_id for p in plaene):
             return plan_id
-        for p in plaene:
-            fertig = erledigte(p.items, anzahl)
-            if any(i.exercise_id == uebung.id and i.id not in fertig for i in p.items):
-                return p.id
-        return None
+        return next((p.id for p in plaene if erste_offene(stellen(p), anzahl) is not None), None)
 
     wahl: dict[str, Any] = {"plan": vorwahl()}
 

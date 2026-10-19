@@ -22,6 +22,7 @@ from itertools import pairwise
 import flet as ft
 import flet_charts as fc
 
+from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM
 from trainingsapp.core.laufend import minuten
 
 #: Mehr Punkte je Linie schickt die Kurve nicht ans Handy; darüber wird
@@ -42,7 +43,6 @@ X_MAX_LABELS = 8
 #: Kleinste Spanne der Werteachse — sonst füllen wenige ms Rauschen die Höhe
 #: und eine ruhige Messung sieht unruhig aus.
 RR_SPANNE_MIN_MS = 100
-HF_SPANNE_MIN_BPM = 10
 
 #: Runde Schrittweiten der Werteachse und höchstens so viele Beschriftungen.
 #: Unter 1 nur für Kennzahlen, die es brauchen (DFA α1, LF/HF): `y_raster(schritt_min=…)`.

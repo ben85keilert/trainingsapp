@@ -37,6 +37,13 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+#: Rohpunkte der Tachogramm-Kurven (grau, Artefakte) zeigen RR-Werte in diesem Bereich (ms) —
+#: live und in der Aufzeichnung dieselben Grenzen; vorher 250–2200 und 200–2600 (H38)
+ROH_MIN_MS: Final = 200
+ROH_MAX_MS: Final = 2600
+#: Kleinste Spanne der Pulskurve (bpm) — sonst füllte jedes Zucken die Höhe
+HF_SPANNE_MIN_BPM: Final = 10.0
+
 #: Vorgabe je Bereich: ruhige Herzfrequenz, Kurzzeitvariabilität und Atmung; LF,
 #: HF und LF/HF (wer Frequenz will, will LF/HF); SD1 und DFA α1
 STANDARD_KURVEN: Final[tuple[str, ...]] = (

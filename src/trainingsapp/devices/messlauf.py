@@ -176,6 +176,11 @@ def _an_den_anfang(e: dict, start_utc: datetime | None) -> dict:
     return notiz(str(e.get("text") or ""), anker_aus_wand((), 0.0), start_utc, alt=e)
 
 
+#: Ohne ein einziges Intervall nach so vielen Paketen (≈ Sekunden) gilt ein Gerät
+#: als reiner Pulsgeber — auch ohne Angabe im Geräteprofil (`Messlauf.nur_puls`)
+NUR_PULS_NACH = 10
+
+
 class Messlauf:
     """Verbindet eine Quelle mit Live-Anzeige und Aufnahme."""
 
@@ -542,6 +547,21 @@ class Messlauf:
         if eintrag is not None:
             self._grenzen.setdefault(spur, []).append((eintrag, name, ende))
         return eintrag
+
+    def nur_puls(self) -> bool:
+        """Sendet das Gerät nur die Herzfrequenz (bpm), keine Intervalle von Schlag zu Schlag?
+
+        Ben, 17.10.2026: Uhren und Sensoren, die nur den Puls übertragen, bekommen den Puls
+        als Hauptkurve. Hinterlegt ist das im Geräteprofil (`GeraeteProfil.hrv_moeglich`,
+        z. B. `UHR_BROADCAST`); ohne Angabe dort entscheidet, was ankommt: `NUR_PULS_NACH`
+        Pakete ohne ein einziges Intervall. Kommt eines, ist es das Tachogramm.
+        """
+        punkte = self.live.punkte()
+        if any(p.rr_ms > 0 for p in punkte):
+            return False
+        if self.profil is not None and not self.profil.hrv_moeglich:
+            return True
+        return len(punkte) >= NUR_PULS_NACH
 
     def aufnahme_dauer_s(self) -> float:
         return self.aufnahme.dauer_s() if self.aufnahme is not None else 0.0

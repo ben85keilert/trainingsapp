@@ -791,6 +791,8 @@ def paket_bauen(
     uebungen: list[Exercise],
     exportiert: datetime | None = None,
     kurse: list[Kurs] | None = None,
+    *,
+    mit_zeitstempel: bool = True,
 ) -> dict[str, Any]:
     """Die Paketdatei als Wörterbuch — `paket_json` macht Bytes daraus.
 
@@ -816,17 +818,28 @@ def paket_bauen(
         "format": FORMAT,
         "version": FORMAT_VERSION if kurse else 1,
         "paket": kopf,
-        "exportiert": (exportiert or jetzt()).isoformat(timespec="seconds"),
         "exercises": [{"id": u.id, **stand(u)} for u in uebungen],
     }
+    if mit_zeitstempel or exportiert is not None:
+        # Das Werkzeug lässt den Stempel weg: Zwei Builds derselben Quelle sind dann
+        # byteidentisch, die Prüfsumme im Index bleibt gleich (K28)
+        roh["exportiert"] = (exportiert or jetzt()).isoformat(timespec="seconds")
     if kurse:
         roh["kurse"] = [{"id": k.id, **kurs_stand(k)} for k in kurse]
     return roh
 
 
-def paket_json(paket: Paket, uebungen: list[Exercise], kurse: list[Kurs] | None = None) -> bytes:
-    """Die Datei zum Weitergeben: lesbar eingerückt, Umlaute im Klartext."""
-    roh = paket_bauen(paket, uebungen, kurse=kurse)
+def paket_json(
+    paket: Paket,
+    uebungen: list[Exercise],
+    kurse: list[Kurs] | None = None,
+    *,
+    mit_zeitstempel: bool = True,
+) -> bytes:
+    """Die Datei zum Weitergeben: lesbar eingerückt, Umlaute im Klartext.
+
+    ``mit_zeitstempel=False`` (Werkzeug): ohne ``exportiert`` — reproduzierbar (K28)."""
+    roh = paket_bauen(paket, uebungen, kurse=kurse, mit_zeitstempel=mit_zeitstempel)
     return (json.dumps(roh, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 

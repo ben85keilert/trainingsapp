@@ -90,7 +90,14 @@ from hrv_core.time_domain import compute_time_domain
 from hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
-from trainingsapp.core.hrv_ansicht import LINKS, RECHTS, ROH
+from trainingsapp.core.hrv_ansicht import (
+    HF_SPANNE_MIN_BPM,
+    LINKS,
+    RECHTS,
+    ROH,
+    ROH_MAX_MS,
+    ROH_MIN_MS,
+)
 from trainingsapp.core.hrv_einstellungen import ANALYSE_LAENGEN
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
@@ -239,10 +246,6 @@ class _Analysewahl:
     wartet: bool = False
     #: Laufende Nummer des Nachrechnen-Auftrags — nur der letzte rechnet
     auftrag: int = 0
-
-
-#: Kleinste Spanne der Pulskurve (bpm) — wie live (`views.messung.HF_SPANNE_MIN_BPM`)
-HF_SPANNE_MIN_BPM = 10.0
 
 
 def _kurven_info(nur_puls: bool, verworfen: object) -> str:
@@ -413,7 +416,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         if not dateien:
             page.show_dialog(ft.SnackBar(ft.Text("Keine Dateien zu dieser Messung gefunden.")))
             return
-        daten = export_zip(dateien, datenverzeichnis())
+        daten = await asyncio.to_thread(export_zip, dateien, datenverzeichnis())
         await weitergeben(page, f"{pfad.stem}.zip", daten, "application/zip")
 
     # -- Entfernen -------------------------------------------------------------
@@ -761,11 +764,15 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         art = [
             (z.achse[i], float(beats[i].rr_ms))
             for i in sorted(markiert)
-            if i < len(beats) and 0 < beats[i].rr_ms < 2600 and x_von <= z.achse[i] <= x_bis
+            if i < len(beats)
+            and ROH_MIN_MS < beats[i].rr_ms < ROH_MAX_MS
+            and x_von <= z.achse[i] <= x_bis
         ]
         # Grau reißt nur an Messlücken ab; farbig auch an Nähten und Ausschlüssen —
         # dort gibt es keine Schlag-zu-Schlag-Differenz.
-        sichtbar, sichtbar_naehte = _linie(z.roh_punkte, z.roh_naehte, 200, 2600, x_von, x_bis)
+        sichtbar, sichtbar_naehte = _linie(
+            z.roh_punkte, z.roh_naehte, ROH_MIN_MS, ROH_MAX_MS, x_von, x_bis
+        )
         zeiten = zeiten_korr()
         korr_linie, korr_naehte = _linie(
             zip(zeiten, korr.rr_ms, strict=True), korr.breaks, x_von=x_von, x_bis=x_bis
@@ -1192,6 +1199,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 h.value = an
             vorschau_zeichnen()
             page.update()
+
+        blatt: ft.BottomSheet
 
         def anlegen() -> None:
             neu = aus_grenzen(grenzen_aus_haken(), lo, hi)

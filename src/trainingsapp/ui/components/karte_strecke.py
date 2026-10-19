@@ -127,6 +127,7 @@ def ganze_strecke(teilstuecke: Sequence[Sequence[Punkt]], *, hoehe: float = 300)
         )
     sued, nord = min(p.lat for p in alle), max(p.lat for p in alle)
     west, ost = min(p.lon for p in alle), max(p.lon for p in alle)
+    kacheln, namensnennung = osm_ebenen()  # einmal — zwei Aufrufe verwarfen je eine Schicht
     return fm.Map(
         height=hoehe,
         initial_center=fm.MapLatitudeLongitude((sued + nord) / 2, (west + ost) / 2),
@@ -139,7 +140,7 @@ def ganze_strecke(teilstuecke: Sequence[Sequence[Punkt]], *, hoehe: float = 300)
             max_zoom=17,
         ),
         layers=[
-            osm_ebenen()[0],
+            kacheln,
             fm.PolylineLayer(
                 polylines=[
                     fm.PolylineMarker(
@@ -167,7 +168,7 @@ def ganze_strecke(teilstuecke: Sequence[Sequence[Punkt]], *, hoehe: float = 300)
                     ),
                 ]
             ),
-            osm_ebenen()[1],
+            namensnennung,
         ],
     )
 

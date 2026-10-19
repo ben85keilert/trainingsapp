@@ -16,7 +16,7 @@ Niemals ins Repository einchecken.
 """
 
 import argparse
-import base64
+import os
 import secrets
 import shutil
 import subprocess
@@ -69,30 +69,31 @@ def main() -> None:
             "4096",
             "-validity",
             "10000",
-            "-storepass",
-            passwort,
+            "-storepass:env",
+            "TRAININGSAPP_STOREPASS",  # nicht als Argument — stünde sonst in `ps`/`/proc`
             "-dname",
             "CN=Trainingsassistent, O=Praxis Ebert, C=DE",
         ],
         check=True,
+        env={**os.environ, "TRAININGSAPP_STOREPASS": passwort},
     )
-    SIGNIERUNG.write_text(
-        "# Lokale Signierung für scripts/apk_bauen.py — NICHT einchecken (steht in .gitignore).\n"
-        f'key_store = "{ziel.as_posix()}"\n'
-        f'alias = "{ALIAS}"\n'
-        f'password = "{passwort}"\n',
-        encoding="utf-8",
-    )
+    # Nur für den Besitzer lesbar — mit der Standard-Umask wäre die Datei 0644
+    fd = os.open(SIGNIERUNG, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(
+            "# Lokale Signierung für scripts/apk_bauen.py — NICHT einchecken "
+            "(steht in .gitignore).\n"
+            f'key_store = "{ziel.as_posix()}"\n'
+            f'alias = "{ALIAS}"\n'
+            f'password = "{passwort}"\n'
+        )
 
-    print(f"\nSchlüssel: {ziel}\nLokale Angaben: {SIGNIERUNG.name}\n")
+    print(f"\nSchlüssel: {ziel}\nLokale Angaben: {SIGNIERUNG.name} (Passwort steht nur dort)\n")
     print("Für GitHub (Repository → Settings → Secrets and variables → Actions):\n")
-    print(f"  ANDROID_KEYSTORE_PASSWORD = {passwort}")
+    print(f"  ANDROID_KEYSTORE_PASSWORD = (password aus {SIGNIERUNG.name})")
     print(f"  ANDROID_KEY_ALIAS         = {ALIAS}")
-    print("  ANDROID_KEYSTORE_BASE64   = (Inhalt der Datei unten)")
-    b64 = ziel.with_suffix(".jks.base64.txt")
-    b64.write_text(base64.b64encode(ziel.read_bytes()).decode("ascii"), encoding="ascii")
-    print(f"                              {b64}")
-    print("\nDanach die .base64.txt-Datei löschen. Schlüssel und Passwort sicher aufbewahren!")
+    print("  ANDROID_KEYSTORE_BASE64   = Ausgabe von:  base64 -w0 " + str(ziel))
+    print("\nSchlüssel und Passwort sicher aufbewahren (Passwortmanager) — keine Kopien im Repo!")
 
 
 if __name__ == "__main__":

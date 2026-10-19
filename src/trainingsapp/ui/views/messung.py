@@ -45,7 +45,7 @@ from hrv_core.regeln import Korrekturregeln
 from hrv_core.trends import KENNZAHLEN, aktuell, atmung_aktuell, titel
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
-from trainingsapp.core.hrv_ansicht import Ansicht
+from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM, ROH_MAX_MS, ROH_MIN_MS, Ansicht
 from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, HrvEinstellungen
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
@@ -61,7 +61,12 @@ from trainingsapp.core.timer import (
 )
 from trainingsapp.devices.base import DeviceInfo, Verbindung
 from trainingsapp.devices.einheit import Einheitslauf, HrvBaustein, TimerBaustein
-from trainingsapp.devices.messlauf import Gespeichert, Messlauf, backup_wiederherstellen
+from trainingsapp.devices.messlauf import NUR_PULS_NACH as NUR_PULS_NACH  # Re-Export (H40)
+from trainingsapp.devices.messlauf import (
+    Gespeichert,
+    Messlauf,
+    backup_wiederherstellen,
+)
 from trainingsapp.devices.profiles import geraeteart
 from trainingsapp.devices.simulated import (
     SIM_PPI,
@@ -223,7 +228,7 @@ def tachogramm_reihen(
     for p in mit_rr:
         if p.naht_davor and grau:
             grau_naehte.append(len(grau))
-        if 250 < p.rr_ms < 2200:
+        if ROH_MIN_MS < p.rr_ms < ROH_MAX_MS:
             grau.append((p.t_s, float(p.rr_ms)))
         wert = p.rr_korr if korrigiert else float(p.rr_ms)
         if p.verworfen or wert is None:
@@ -233,7 +238,9 @@ def tachogramm_reihen(
             rr_naehte.append(len(rr_linie))
         offen = False
         rr_linie.append((p.t_s, wert))
-    artefakte = [(p.t_s, float(p.rr_ms)) for p in mit_rr if p.artefakt and 250 < p.rr_ms < 2200]
+    artefakte = [
+        (p.t_s, float(p.rr_ms)) for p in mit_rr if p.artefakt and ROH_MIN_MS < p.rr_ms < ROH_MAX_MS
+    ]
     return [
         Reihe(grau, farbe=ft.Colors.OUTLINE, breite=1, naehte=grau_naehte, skala=False),
         Reihe(rr_linie, farbe=ft.Colors.PRIMARY, naehte=rr_naehte),
@@ -246,27 +253,10 @@ def ohne_rr() -> list[str]:
     return [k for k in KENNZAHLEN if k != "hf_geraet"]
 
 
-#: Ohne ein einziges Intervall nach so vielen Paketen (≈ Sekunden) gilt ein Gerät
-#: als reiner Pulsgeber — auch ohne Angabe im Geräteprofil
-NUR_PULS_NACH = 10
-#: Kleinste Spanne der Pulskurve (bpm) — sonst füllte jedes Zucken die Höhe
-HF_SPANNE_MIN_BPM = 10.0
-
-
 def nur_puls(lauf: Messlauf) -> bool:
-    """Sendet das Gerät nur die Herzfrequenz (bpm), keine Intervalle von Schlag zu Schlag?
-
-    Ben, 17.10.2026: Uhren und Sensoren, die nur den Puls übertragen, bekommen den Puls
-    als Hauptkurve. Hinterlegt ist das im Geräteprofil (`GeraeteProfil.hrv_moeglich`,
-    z. B. `UHR_BROADCAST`); ohne Angabe dort entscheidet, was ankommt: `NUR_PULS_NACH`
-    Pakete ohne ein einziges Intervall. Kommt eines, ist es das Tachogramm.
-    """
-    punkte = lauf.live.punkte()
-    if any(p.rr_ms > 0 for p in punkte):
-        return False
-    if lauf.profil is not None and not lauf.profil.hrv_moeglich:
-        return True
-    return len(punkte) >= NUR_PULS_NACH
+    """Sendet das Gerät nur die Herzfrequenz? Entscheidet der Messlauf (`Messlauf.nur_puls`,
+    H40) — die Ansicht fragt nur."""
+    return lauf.nur_puls()
 
 
 def pulskurve(
@@ -1468,8 +1458,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
 # ---------------------------------------------------------------------------
 
 
-def _liste(page: ft.Page, state: AppState) -> ft.Control:
-    eintraege = state.hrv.alle(state.profil.id)
+def _liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
 
     def oeffner(recording_id: str) -> Callable[[], Any]:
         async def handler() -> None:
@@ -1484,7 +1473,7 @@ def _liste(page: ft.Page, state: AppState) -> ft.Control:
         if not dateien:
             page.show_dialog(ft.SnackBar(ft.Text("Keine Messdateien gefunden.")))
             return
-        daten = export_zip(dateien, datenverzeichnis())
+        daten = await asyncio.to_thread(export_zip, dateien, datenverzeichnis())
         await weitergeben(page, f"messungen_{zeitstempel()}.zip", daten, "application/zip")
 
     from trainingsapp.ui.views.ausdauer import strecken_zeilen
@@ -1549,13 +1538,14 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
     lauf = state.messlauf
     state.live_ansicht += 1  # eine ältere Live-Ansicht hört auf zu rechnen
     verbunden = lauf is not None and lauf.status.verbindung != Verbindung.GETRENNT
+    eintraege = state.hrv.alle(state.profil.id)  # einmal je Aufbau (N28)
 
     def wechseln(e: ft.Event[ft.Tabs]) -> None:
         state.messung_tab = e.control.selected_index or 0
         state.neu_zeichnen()
 
     if state.messung_tab == 1:
-        inhalt: ft.Control = _liste(page, state)
+        inhalt: ft.Control = _liste(page, state, eintraege)
         if lauf is not None:
             # Die Liste braucht keine Live-Werte; nur ein Abriss baut neu.
             lauf.beobachter = lambda layout: state.neu_zeichnen() if layout else None
@@ -1569,7 +1559,7 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
             spacing=12,
             controls=[ausdauer_karte(page, state), teil],
         )
-    anzahl = len(state.hrv.alle(state.profil.id))
+    anzahl = len(eintraege)
     return ft.Tabs(
         length=2,
         selected_index=state.messung_tab,

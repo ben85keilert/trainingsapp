@@ -14,6 +14,7 @@ einer beim Bauen gesetzten Konstante. Alles Editionsabhängige läuft über
 
 from __future__ import annotations
 
+import importlib
 import os
 from enum import StrEnum
 from pathlib import Path
@@ -127,10 +128,10 @@ def app_version() -> tuple[str, int | None]:
         with PYPROJECT.open("rb") as f:
             return str(tomllib.load(f)["project"]["version"]), None
     try:
-        from trainingsapp import _build  # type: ignore[attr-defined]
+        build = importlib.import_module("trainingsapp._build")
     except ImportError:
         return "0.0.0", None
-    return str(_build.VERSION), int(_build.BUILD)
+    return str(build.VERSION), int(build.BUILD)
 
 
 # ---------------------------------------------------------------------------

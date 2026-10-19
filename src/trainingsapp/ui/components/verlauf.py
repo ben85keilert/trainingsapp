@@ -403,6 +403,7 @@ def darstellung_blatt(
             opacity=0.65,
         ),
     ]
+    blatt: ft.BottomSheet
     kopf = ft.Row(
         controls=[
             ft.Text("Fenster & Darstellung", size=18, weight=ft.FontWeight.W_600, expand=True),
@@ -435,6 +436,7 @@ def speichern_dialog(page: Any, state: Any, geaendert: Callable[[], None]) -> ft
     )
 
     nachher = Nachher()
+    dialog: ft.AlertDialog
 
     def speichern() -> None:
         text = (name.value or "").strip()

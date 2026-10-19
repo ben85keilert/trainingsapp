@@ -33,7 +33,10 @@ from trainingsapp.core.tagesbilanz import kachel
 from trainingsapp.core.verlauf import (
     WOCHENTAGE,
     haeufigkeit,
+    ist_neu,
+    je_tag_der_woche,
     kennzahlen,
+    kuerzlich,
     montag,
     tag_titel,
     tageswerte,
@@ -44,6 +47,7 @@ from trainingsapp.core.verlauf import (
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.uebungszeile import abschnitt, grosser_wert, uebungszeile
 from trainingsapp.ui.components.verlaufskurve import mini, mini_saeulen
+from trainingsapp.ui.components.wochenleiste import tageszelle
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.tagebuch import tagebuch
 
@@ -161,10 +165,7 @@ def _tage(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
     jetzt = montag(heute)
     beginn = state.verlauf_woche or jetzt
     woche = [beginn + timedelta(days=i) for i in range(7)]
-    uebungen_je_tag: dict[date, set[str]] = {}
-    for t, e in daten.eintraege:
-        if beginn <= t <= woche[-1]:
-            uebungen_je_tag.setdefault(t, set()).add(daten.kachel_von(e.exercise_id))
+    uebungen_je_tag = je_tag_der_woche(daten.eintraege, daten.kachel_von, beginn)
     tag = _gewaehlter_tag(state.verlauf_tag, woche, heute, sorted(uebungen_je_tag))
 
     def woche_zeigen(neu: date) -> None:
@@ -196,53 +197,15 @@ def _tage(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
 
     def zelle(t: date) -> ft.Control:
         n = len(uebungen_je_tag.get(t, ()))
-        gewaehlt, ist_heute, zukunft = t == tag, t == heute, t > heute
-        schrift = ft.Colors.ON_PRIMARY if gewaehlt else None
-        punkte = ft.Row(
-            spacing=3,
-            tight=True,
-            controls=[
-                ft.Container(
-                    width=6,
-                    height=6,
-                    border_radius=3,
-                    bgcolor=ft.Colors.ON_PRIMARY if gewaehlt else ft.Colors.PRIMARY,
-                )
-                for _ in range(min(n, 3))
-            ],
-        )
-        return ft.Container(
-            expand=True,
-            height=64,
-            border_radius=14,
-            bgcolor=ft.Colors.PRIMARY if gewaehlt else None,
-            border=ft.Border.all(2, ft.Colors.PRIMARY) if ist_heute and not gewaehlt else None,
-            opacity=0.45 if zukunft else 1.0,
-            ink=not zukunft,
-            on_click=None if zukunft else waehler(t),
+        return tageszelle(
+            t,
+            heute=heute,
+            gewaehlt=t == tag,
+            anzahl=n,
+            punkte=min(n, 3),
+            on_click=waehler(t),
             tooltip=f"{tag_titel(t)}: {n} Übungen" if n else None,
-            content=ft.Column(
-                spacing=3,
-                alignment=ft.MainAxisAlignment.CENTER,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Text(
-                        "heute" if ist_heute else WOCHENTAGE[t.weekday()],
-                        size=11,
-                        color=schrift if gewaehlt else ft.Colors.PRIMARY if ist_heute else None,
-                        weight=ft.FontWeight.W_700 if ist_heute else None,
-                        opacity=1.0 if gewaehlt or ist_heute else 0.7,
-                    ),
-                    ft.Text(
-                        str(t.day),
-                        size=17,
-                        color=schrift,
-                        weight=ft.FontWeight.W_700 if n or gewaehlt else ft.FontWeight.W_500,
-                        opacity=1.0 if n or gewaehlt else 0.7,
-                    ),
-                    ft.Container(height=6, content=punkte),
-                ],
-            ),
+            heute_wort=True,
         )
 
     trainingstage = len(uebungen_je_tag)
@@ -392,7 +355,6 @@ def trend_text(anteil: float | None) -> str:
 
 def _uebungen(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
     heute = daten.heute
-    seit = heute - timedelta(days=7 * UEBUNGEN_WOCHEN - 1)
     reihenfolge = sorted(daten.je_kachel, key=lambda k: daten.je_kachel[k][-1][0], reverse=True)
     typen = Counter(
         typ for k in reihenfolge if (u := daten.katalog.get(k)) is not None for typ in u.typen
@@ -427,7 +389,7 @@ def _uebungen(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
         eintraege = daten.je_kachel[kachel_id]
         tage = sorted({t for t, _ in eintraege})
         zuletzt = tage[-1]
-        neulich = sum(1 for t in tage if t >= seit)
+        neulich = kuerzlich(tage, heute, UEBUNGEN_WOCHEN)
         unter = (
             f"{neulich}× in {UEBUNGEN_WOCHEN} Wochen · zuletzt {kurz_datum(zuletzt, heute)}"
             if neulich
@@ -440,7 +402,7 @@ def _uebungen(page: ft.Page, state: AppState, daten: _Daten) -> ft.Control:
             letzter = werte[-1][1] if werte else None
             anteil = trend(werte, heute)
             hinweis = trend_text(anteil)
-            if not hinweis and werte and werte[0][0] > heute - timedelta(days=28):
+            if not hinweis and ist_neu(werte, heute):
                 hinweis = "neu"
             rechts = [
                 ft.Row(

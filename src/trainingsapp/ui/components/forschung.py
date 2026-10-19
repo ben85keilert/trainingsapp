@@ -15,7 +15,7 @@ import flet as ft
 
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.weitergeben import weitergeben
-from trainingsapp.ui.training import forschung_export
+from trainingsapp.ui.training import forschung_export_async
 
 #: Was der Dialog über den Inhalt sagt
 ERKLAERUNG = (
@@ -47,7 +47,7 @@ def forschung_fragen(page: Any, state: Any, einheit_ids: Sequence[str]) -> None:
 
     async def teilen() -> None:
         try:
-            name, daten = forschung_export(state, wahl["id"])
+            name, daten = await forschung_export_async(state, wahl["id"])  # packt im Thread
         except (OSError, ValueError) as fehler:
             page.show_dialog(ft.SnackBar(ft.Text(f"Export nicht möglich: {fehler}")))
             return

@@ -471,6 +471,60 @@ def ueberblick(werte: Sequence[tuple[date, float]], trainings: int, heute: date)
     return Ueberblick(hoechster, mittel, trainings)
 
 
+def je_tag_der_woche(
+    eintraege: Iterable[tuple[date, SessionEntry]],
+    kachel_von: Callable[[str], str],
+    beginn: date,
+) -> dict[date, set[str]]:
+    """Welche Übungen (Kacheln) an welchem Tag der Woche ab ``beginn`` dran waren.
+
+    >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    >>> mo = date(2026, 10, 12)
+    >>> liste = [(mo, SessionEntry(exercise_id="a")), (mo + timedelta(days=8), SessionEntry())]
+    >>> je_tag_der_woche(liste, lambda k: k, mo)
+    {datetime.date(2026, 10, 12): {'a'}}
+    """
+    ende = beginn + timedelta(days=6)
+    out: dict[date, set[str]] = {}
+    for t, e in eintraege:
+        if beginn <= t <= ende:
+            out.setdefault(t, set()).add(kachel_von(e.exercise_id))
+    return out
+
+
+def kuerzlich(tage: Iterable[date], heute: date, wochen: int) -> int:
+    """Wie viele Trainingstage in den letzten ``wochen`` Wochen (heute eingeschlossen) liegen.
+
+    >>> heute = date(2026, 10, 19)
+    >>> kuerzlich([heute, heute - timedelta(days=41), heute - timedelta(days=42)], heute, 6)
+    2
+    """
+    seit = heute - timedelta(days=7 * wochen - 1)
+    return sum(1 for t in tage if t >= seit)
+
+
+def ist_neu(werte: Sequence[tuple[date, float]], heute: date, tage: int = 28) -> bool:
+    """„neu“: Der erste Wert ist jünger als ``tage`` Tage — zu kurz für einen Trend.
+
+    >>> heute = date(2026, 10, 19)
+    >>> ist_neu([(heute - timedelta(days=10), 1.0)], heute), ist_neu([], heute)
+    (True, False)
+    """
+    return bool(werte) and werte[0][0] > heute - timedelta(days=tage)
+
+
+def saetze_kurz(eintraege: Iterable[SessionEntry], k: Kennzahl) -> str:
+    """Nur die Sätze eines Tages ohne die Zählung: „15 · 15 · 13“ (leer wie `saetze_text`).
+
+    >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    >>> e = SessionEntry(result={"reps": [15, 13]}, spec_snapshot=SPEC_SAETZE_WDH)
+    >>> saetze_kurz([e], kennzahlen([e])[0])
+    '15 · 13'
+    """
+    text = saetze_text(eintraege, k)
+    return text.split(" · ", 1)[1] if " · " in text else ""
+
+
 def trend(werte: Sequence[tuple[date, float]], heute: date, tage: int = 28) -> float | None:
     """Das Mittel der letzten ``tage`` gegen das der ``tage`` davor: 0,19 = 19 % mehr.
     ``None``, wenn eine Seite leer ist oder das frühere Mittel 0.

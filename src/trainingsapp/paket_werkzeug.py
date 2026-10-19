@@ -212,7 +212,8 @@ def bauen(datei: Path, ziel: Path) -> Path:
     inhalt: Paketinhalt = seed_inhalt(datei)
     ziel.mkdir(parents=True, exist_ok=True)
     pfad = ziel / dateiname(inhalt.paket)
-    pfad.write_bytes(paket_json(inhalt.paket, inhalt.uebungen, inhalt.kurse))
+    # ohne Zeitstempel: derselbe Quelltext ergibt dieselbe Datei und Prüfsumme (K28)
+    pfad.write_bytes(paket_json(inhalt.paket, inhalt.uebungen, inhalt.kurse, mit_zeitstempel=False))
     return pfad
 
 

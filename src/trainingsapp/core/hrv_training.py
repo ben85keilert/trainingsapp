@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from typing import Any, Final
 
 import numpy as np
+from hrv_core.constants import RR_MAX_MS, RR_MIN_MS
 from hrv_core.korrektur import Korrigiert
 from hrv_core.nonlinear import compute_dfa_alpha1
 from hrv_core.recording import Recording
@@ -83,7 +84,7 @@ def werte_zwischen(
     n_roh = int(((roh_wand >= von_s) & (roh_wand <= bis_s)).sum())
     flags = np.array(korr.flag, dtype=object)
     werte = rr[im]
-    gut = werte[(werte >= 250) & (werte <= 2000)]
+    gut = werte[(werte >= RR_MIN_MS) & (werte <= RR_MAX_MS)]
     n_orig = int((flags[im] == "orig").sum())
     anteil = 1.0 - n_orig / n_roh if n_roh else 0.0
     alpha: float | None = None
@@ -194,7 +195,7 @@ def hf_je_zeit(
         [b.t_wall_s if b.t_wall_s is not None else np.nan for b in rec.beats], dtype=float
     )
     rr = np.array([float(b.rr_ms) for b in rec.beats], dtype=float)
-    gut = (rr >= 250) & (rr <= 2000) & np.isfinite(wand)
+    gut = (rr >= RR_MIN_MS) & (rr <= RR_MAX_MS) & np.isfinite(wand)
     wand, rr = wand[gut], rr[gut]
     ordnung = np.argsort(wand)
     wand, rr = wand[ordnung], rr[ordnung]

@@ -183,6 +183,8 @@ class TagWahl:
                 capitalization=ft.TextCapitalization.SENTENCES,
             )
 
+            dialog: ft.AlertDialog
+
             def anlegen() -> None:
                 name, fehler = neuer_name(feld.value or "", namen, andere, _ARTEN[titel][2])
                 if name is None:

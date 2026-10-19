@@ -183,3 +183,40 @@ __all__ = [
     "planbare_felder",
     "rolle",
 ]
+
+
+def chips_text(werte: list[Any]) -> str:
+    """Chips als Eingabetext: „10, 15, 20“ — ganze Zahlen ohne „.0“.
+
+    >>> chips_text([10, 15.0, 2.5, "links"])
+    '10, 15, 2.5, links'
+    """
+    return ", ".join(
+        str(int(w)) if isinstance(w, float) and w.is_integer() else str(w) for w in werte
+    )
+
+
+def chips_lesen(text: str, f: FieldSpec) -> list[Any]:
+    """„10, 15, 20“ → Zahlen; bei Auswahlfeldern Texte. Eine 0 ist kein Chip — leer oder
+    „0“ heißt: nur das freie Feld (Ben, 18.10.2026). Aus `ui/views/uebung_bearbeiten.py`
+    hierher (N25): Notation gehört in den Kern.
+
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> chips_lesen("10, 15", vorrat_feld("reps")), chips_lesen("0", vorrat_feld("reps"))
+    ([10, 15], [])
+    >>> chips_lesen("links; rechts", vorrat_feld("side"))
+    ['links', 'rechts']
+    """
+    teile = [t.strip() for t in text.replace(";", ",").split(",") if t.strip()]
+    if f.type in (FieldType.CHOICE, FieldType.TEXT):
+        return teile
+    werte: list[Any] = []
+    for t in teile:
+        try:
+            zahl = float(t.replace(",", "."))
+        except ValueError:
+            continue
+        if zahl == 0:
+            continue
+        werte.append(int(zahl) if zahl.is_integer() else zahl)
+    return werte

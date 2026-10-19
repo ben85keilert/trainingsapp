@@ -285,6 +285,7 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
 
     def fragen() -> None:
         nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (N19)
+        dialog: ft.AlertDialog
 
         def alles_zuruecksetzen() -> None:
             state.hrv_zuruecksetzen()

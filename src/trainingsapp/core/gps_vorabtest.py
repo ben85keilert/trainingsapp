@@ -22,6 +22,7 @@ from itertools import pairwise
 from typing import Any, Final
 
 from .strecke import (
+    MAX_GENAUIGKEIT_M,
     STAND_TEMPO_MS,
     Punkt,
     abstand_m,
@@ -59,8 +60,8 @@ def dauertest(zweite_s: float = 10.0, dauer_s: float = 15 * 60) -> list[tuple[fl
     return [(1.0, dauer_s), (zweite_s, dauer_s)]
 
 
-#: Ortungen schlechter als das zählen in den gefilterten Distanzen nicht (m)
-MAX_GENAUIGKEIT_M: Final[float] = 30.0
+#: Ortungen schlechter als das zählen in den gefilterten Distanzen nicht (m) — dieselbe
+#: Grenze wie die Streckenaufzeichnung (`strecke.MAX_GENAUIGKEIT_M`, H38)
 
 #: „Genau" für die Zeit bis zur ersten brauchbaren Ortung (m)
 GENAU_M: Final[float] = 20.0

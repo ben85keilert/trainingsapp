@@ -910,6 +910,7 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
 
     def loeschen_fragen() -> None:
         nachher = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (N19)
+        dialog: ft.AlertDialog
 
         def loeschen() -> None:
             state.strecken.loeschen(strecke.id)

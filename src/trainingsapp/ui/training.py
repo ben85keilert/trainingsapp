@@ -21,6 +21,7 @@ Benachrichtigung bleiben ortsfrei; die Ortungen gehen nur in die Datei.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -363,6 +364,20 @@ def forschung_export(state: Any, einheit_id: str) -> tuple[str, bytes]:
     Raises:
         ValueError: Die Einheit gibt es nicht (mehr).
     """
+    name, dok, dateien, basis = _forschung_teile(state, einheit_id)
+    return name, forschung_zip(dok, dateien, basis)
+
+
+async def forschung_export_async(state: Any, einheit_id: str) -> tuple[str, bytes]:
+    """Wie `forschung_export`, aber das Packen (Messdateien lesen, deflate — bei einer
+    4-h-Aufnahme Sekunden) läuft in einem Thread; die Datenbank wird davor im Loop gelesen
+    (sqlite-Verbindungen gehören ihrem Thread; H39)."""
+    name, dok, dateien, basis = _forschung_teile(state, einheit_id)
+    return name, await asyncio.to_thread(forschung_zip, dok, dateien, basis)
+
+
+def _forschung_teile(state: Any, einheit_id: str) -> tuple[str, Any, list[Path], Path]:
+    """Dateiname, Dokument, Messdateien und Basis des Forschungsexports — aus der Datenbank."""
     kopf = state.einheiten.laden(einheit_id) if state.einheiten is not None else None
     if kopf is None:
         raise ValueError("Diese Einheit gibt es nicht mehr.")
@@ -398,7 +413,7 @@ def forschung_export(state: Any, einheit_id: str) -> tuple[str, bytes]:
         app=f"trainingsapp {version}" + (f" (Build {build})" if build else ""),
     )
     lokal = kopf.started_at.astimezone()
-    return f"einheit_{lokal:%Y-%m-%d_%H%M}.zip", forschung_zip(dok, dateien, basis)
+    return f"einheit_{lokal:%Y-%m-%d_%H%M}.zip", dok, dateien, basis
 
 
 __all__ = [

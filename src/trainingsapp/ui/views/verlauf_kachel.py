@@ -32,7 +32,7 @@ from trainingsapp.core.verlauf import (
     Kennzahl,
     haeufigkeit,
     kennzahlen,
-    saetze_text,
+    saetze_kurz,
     tageswert,
     tageswerte,
     ueberblick,
@@ -286,7 +286,7 @@ def _ergebnisse(
         liste = je_tag[tag]
         mitte: list[ft.Control] = []
         wert = tageswert(liste, kennzahl) if kennzahl is not None else None
-        saetze = saetze_text(liste, kennzahl).split(" · ", 1)[-1] if kennzahl else ""
+        saetze = saetze_kurz(liste, kennzahl) if kennzahl else ""
         if saetze:
             mitte.append(ft.Text(saetze, size=13))
         else:

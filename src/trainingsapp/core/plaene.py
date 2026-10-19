@@ -143,3 +143,15 @@ __all__ = [
     "vorkommen",
     "warum_nicht",
 ]
+
+
+def erste_offene(items: Sequence[PlanItem], anzahl: Mapping[str, int]) -> PlanItem | None:
+    """Die erste Planübung, die heute noch offen ist — wohin ein Nachtrag gehört
+    (`ui/views/nachtragen.py`, N25). ``None``: alles erledigt oder kein Plan.
+
+    >>> a, b = (PlanItem(exercise_id=x) for x in "AB")
+    >>> erste_offene([a, b], {"A": 1}) is b, erste_offene([a, b], {"A": 1, "B": 1}) is None
+    (True, True)
+    """
+    fertig = erledigte(items, anzahl)
+    return next((i for i in items if i.id not in fertig), None)

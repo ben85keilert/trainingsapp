@@ -52,6 +52,7 @@ from trainingsapp.core.tagebuch import (
 from trainingsapp.core.verlauf import MONATE, WOCHENTAGE, WOCHENTAGE_LANG, wochen_titel
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.notiz import notiz_dialog
+from trainingsapp.ui.components.wochenleiste import tageszelle
 from trainingsapp.ui.components.zeitstrahl import zeitpunkt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.leistungen import leistungen_blatt
@@ -422,46 +423,15 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
 
     def zelle(t: date) -> ft.Control:
         n = zahl.get(t, 0)
-        gewaehlt, ist_heute, zukunft = t == stand["oben"], t == heute, t > heute
-        schrift = ft.Colors.ON_PRIMARY if gewaehlt else None
-        return ft.Container(
-            expand=True,
-            height=56,
-            border_radius=14,
-            bgcolor=ft.Colors.PRIMARY if gewaehlt else None,
-            border=ft.Border.all(2, ft.Colors.PRIMARY) if ist_heute and not gewaehlt else None,
-            opacity=0.45 if zukunft else 1.0,
-            ink=not zukunft,
-            on_click=None if zukunft else tipp(t),
+        return tageszelle(
+            t,
+            heute=heute,
+            gewaehlt=t == stand["oben"],
+            anzahl=n,
+            punkte=1 if n else 0,
+            on_click=tipp(t),
             tooltip=f"{n} Notizen" if n > 1 else "1 Notiz" if n else None,
-            content=ft.Column(
-                spacing=2,
-                alignment=ft.MainAxisAlignment.CENTER,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Text(
-                        WOCHENTAGE[t.weekday()],
-                        size=11,
-                        color=schrift,
-                        opacity=1.0 if gewaehlt else 0.7,
-                    ),
-                    ft.Text(
-                        str(t.day),
-                        size=16,
-                        color=schrift,
-                        weight=ft.FontWeight.W_700 if n or gewaehlt else ft.FontWeight.W_500,
-                        opacity=1.0 if n or gewaehlt else 0.6,
-                    ),
-                    ft.Container(
-                        width=6,
-                        height=6,
-                        border_radius=3,
-                        bgcolor=(ft.Colors.ON_PRIMARY if gewaehlt else ft.Colors.PRIMARY)
-                        if n
-                        else None,
-                    ),
-                ],
-            ),
+            hoehe=56,
         )
 
     def leiste_bauen() -> None:

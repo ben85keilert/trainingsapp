@@ -26,14 +26,15 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
 from hrv_core.ausschnitte import FARBEN
+from hrv_core.constants import RR_MAX_MS, RR_MIN_MS
 from hrv_core.recording import Beat
 
 from .einheit import Ereignis
 from .strecke import Split, StreckenRechner
 from .timer_eintrag import gelaufene_zeiten
 
-#: RR-Werte außerhalb zählen nicht zur Ø Herzfrequenz (wie `core.hrv_training.werte_zwischen`)
-RR_MIN_MS, RR_MAX_MS = 250, 2000
+#: RR-Werte außerhalb zählen nicht zur Ø Herzfrequenz — die Grenzen von hrv-core
+#: (`hrv_core.constants`), wie in `core.hrv_training` (H38)
 #: Unter so viel Strecke (m) kein Tempo — Stehen in der Pause
 MIN_STRECKE_M = 10.0
 

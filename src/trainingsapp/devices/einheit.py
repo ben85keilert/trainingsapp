@@ -128,7 +128,7 @@ class TimerBaustein:
         self.lauf.zuruecksetzen()
         self.lauf.start(bei=t0 if bei is None else bei)
         self._lief = True
-        return Beteiligung("timer", Rolle.MITSTARTEN, daten={"profil": self.lauf.profil.name})
+        return Beteiligung("timer", Rolle.MITSTARTEN, daten={"profil": self.lauf.profil.markenname})
 
     def takt(self, jetzt: float) -> list[Ereignis]:
         if self._t0 is None:
@@ -175,7 +175,7 @@ class TimerBaustein:
                 "name": m.name,
                 "runde": m.runde,
                 "von": m.von,
-                "profil": self.lauf.profil.name,
+                "profil": self.lauf.profil.markenname,
                 "profil_id": self.lauf.profil.id,
             }
             if m.soll_s:
@@ -548,7 +548,7 @@ class Einheitslauf:
         if isinstance(teil, HrvBaustein):
             daten.update({"datei": b.datei, "versatz_s": b.versatz_s})
         elif isinstance(teil, TimerBaustein):
-            daten["profil"] = teil.lauf.profil.name
+            daten["profil"] = teil.lauf.profil.markenname
         self._aufnehmen([Ereignis(t, teil.art, "beigetreten", "", daten)], jetzt)
 
     def teil(self, art: str) -> Baustein | None:

@@ -33,6 +33,15 @@ Ein Abschnitt kann einen eigenen haben (Glocke 1 für Belastung, Glocke 3 für
 die Pause), das Profil einen für den Beginn jeder neuen Runde und einen fürs
 Ende (Ben, 14.10.2026).
 
+**Einmaluhren** (Ben, 19.10.2026): Stoppuhr und Timer sind die Vorgabe, Profile das
+Komplexere. Beide Einmaluhren sind eingebaute Profile mit fester ID (`STOPPUHR`,
+`EINMAL`), die nicht in der Bibliothek liegen, sondern einzeln gemerkt werden
+(`einmaluhren_lesen`). Der Timer zählt einfach rückwärts (`einmal_timer`); wer
+Abschnitte oder Runden braucht, baut sie im Editor — ohne Namen, ohne zu speichern.
+Beide tragen einen **Namen** (optional) und den Schalter ``name_in_marken``: ob der
+Name in die Marken der HRV-Messung und der Strecke kommt (`TimerProfil.markenname`)
+oder dort nur „Stoppuhr“ bzw. „Timer“ steht.
+
 **Lautstärke** (`QUELLEN`): Auf Android läuft jeder Ton über einen der
 Lautstärkeregler des Systems. Vorgabe ist **Medien** — der Regler, den die
 Lautstärketasten in der App bedienen und über den auch Musik läuft (Kopfhörer
@@ -51,7 +60,7 @@ import json
 import math
 import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Final
 
@@ -68,6 +77,12 @@ ENDE_MARKE = "Timer fertig"
 STOPPUHR: Final[str] = "stoppuhr"
 #: So lange zählt die Stoppuhr höchstens — dann ist sie von selbst fertig (vergessen)
 STOPPUHR_MAX_S: Final[int] = 12 * 3600
+#: Der Einmal-Timer (Ben, 19.10.2026): ID des eingebauten Profils, das rückwärts zählt
+EINMAL: Final[str] = "einmal"
+#: Vorgabe des Einmal-Timers (s)
+EINMAL_DAUER_S: Final[int] = 5 * 60
+#: Dauern zur schnellen Wahl im Einmal-Timer (s)
+EINMAL_DAUERN_S: Final[tuple[int, ...]] = (60, 120, 300, 600, 900)
 
 #: Höchstens so viele Runden
 MAX_RUNDEN: Final[int] = 99
@@ -226,10 +241,52 @@ class TimerProfil:
     teile: list[Teil] = field(default_factory=list)
     #: ``timer`` (zählt rückwärts) oder ``stoppuhr`` (`stoppuhr`, zählt vorwärts)
     art: str = "timer"
+    #: Steht der Name in den Marken der Messung und der Strecke? Nur bei den Einmaluhren
+    #: abschaltbar (Ben, 19.10.2026) — sonst heißt es dort „Stoppuhr“ bzw. „Timer“
+    name_in_marken: bool = True
 
     @property
     def ist_stoppuhr(self) -> bool:
         return self.art == STOPPUHR
+
+    @property
+    def ist_einmal(self) -> bool:
+        """Eine Einmaluhr — Stoppuhr oder Einmal-Timer, nicht aus der Bibliothek."""
+        return self.id in (STOPPUHR, EINMAL)
+
+    @property
+    def einfach(self) -> bool:
+        """Ein einziger Abschnitt, eine Runde — der Einmal-Timer, wie er anfängt.
+
+        >>> einmal_timer(90).einfach, stoppuhr().einfach
+        (True, True)
+        >>> TimerProfil(abschnitte=[Abschnitt("A", 5)], runden=2).einfach
+        False
+        """
+        return len(self.abschnitte) == 1 and self.runden <= 1 and not self.teile
+
+    @property
+    def anzeigename(self) -> str:
+        """Der Name auf dem Bildschirm — ohne eigenen „Stoppuhr“ bzw. „Timer“.
+
+        >>> stoppuhr().anzeigename, einmal_timer(60, "Dehnen").anzeigename
+        ('Stoppuhr', 'Dehnen')
+        """
+        return self.name or ("Stoppuhr" if self.ist_stoppuhr else "Timer")
+
+    @property
+    def markenname(self) -> str:
+        """Der Name in den Marken (HRV, Strecke, Titel der Einheit): der eigene, wenn er
+        weitergegeben wird — sonst „Stoppuhr“ bzw. „Timer“.
+
+        >>> einmal_timer(60, "Dehnen").markenname
+        'Dehnen'
+        >>> einmal_timer(60, "Dehnen", name_in_marken=False).markenname
+        'Timer'
+        """
+        if self.name_in_marken:
+            return self.anzeigename
+        return "Stoppuhr" if self.ist_stoppuhr else "Timer"
 
     def alle_teile(self) -> list[Teil]:
         """Alle Teile in ihrer Folge — der erste aus ``abschnitte`` und ``runden``."""
@@ -305,6 +362,8 @@ class TimerProfil:
             ]
         if self.ist_stoppuhr:
             d["art"] = STOPPUHR
+        if not self.name_in_marken:
+            d["name_in_marken"] = False
         return d
 
     @classmethod
@@ -312,24 +371,28 @@ class TimerProfil:
         """Defensiv: ohne brauchbaren Abschnitt kein Profil, nie eine Ausnahme."""
         if not isinstance(d, dict):
             return None
+        in_marken = d.get("name_in_marken") is not False
         if d.get("art") == STOPPUHR:
-            return stoppuhr(str(d.get("name") or "Stoppuhr"))
+            return stoppuhr(str(d.get("name") or ""), name_in_marken=in_marken)
         abschnitte = _abschnitte_lesen(d.get("abschnitte"))
         if not abschnitte:
             return None
+        einmal = d.get("id") == EINMAL
         teile: list[Teil] = []
         for t in d.get("teile") or []:
             if isinstance(t, dict) and (ab := _abschnitte_lesen(t.get("abschnitte"))):
                 teile.append(Teil(ab, _runden_lesen(t.get("runden")), str(t.get("name") or "")))
         return cls(
             id=str(d.get("id") or new_id()),
-            name=str(d.get("name") or "Timer"),
+            # Die Einmaluhr darf namenlos sein (`anzeigename`), ein Profil heißt wenigstens „Timer“
+            name=str(d.get("name") or ("" if einmal else "Timer")),
             abschnitte=abschnitte,
             runden=_runden_lesen(d.get("runden")),
             runden_klang=_klang_lesen(d.get("runden_klang")),
             ende_klang=_klang_lesen(d.get("ende_klang")),
             teil_name=str(d.get("teil_name") or "") if teile else "",
             teile=teile,
+            name_in_marken=in_marken if einmal else True,
         )
 
 
@@ -378,18 +441,79 @@ def _klang_lesen(wert: Any) -> str:
     return wert if isinstance(wert, str) and wert in KLAENGE else ""
 
 
-def stoppuhr(name: str = "Stoppuhr") -> TimerProfil:
+def stoppuhr(name: str = "", *, name_in_marken: bool = True) -> TimerProfil:
     """Die Stoppuhr (Ben, 18.10.2026): zählt vorwärts, bis man „Fertig“ tippt. Ein einziger
     Abschnitt, der erst nach `STOPPUHR_MAX_S` von selbst endet — Pause hält nur an, ein Lauf
     ist ein Satz bzw. eine Zeit (`core.timer_eintrag`). Eingebaut, reist nicht in Paketen.
+    Der Abschnitt heißt wie die Marken (`markenname`): ``name``, wenn er weitergegeben
+    wird, sonst „Stoppuhr“.
 
-    >>> p = stoppuhr(); p.id, p.name, p.ist_stoppuhr
+    >>> p = stoppuhr(); p.id, p.anzeigename, p.ist_stoppuhr
     ('stoppuhr', 'Stoppuhr', True)
     >>> TimerProfil.aus_dict(p.als_dict()) == p
     True
+    >>> s = stoppuhr("Dehnen", name_in_marken=False)
+    >>> s.abschnitte[0].name, TimerProfil.aus_dict(s.als_dict()) == s
+    ('Stoppuhr', True)
     """
+    marke = name if name and name_in_marken else "Stoppuhr"
     return TimerProfil(
-        id=STOPPUHR, name=name, abschnitte=[Abschnitt(name, STOPPUHR_MAX_S)], art=STOPPUHR
+        id=STOPPUHR,
+        name=name,
+        abschnitte=[Abschnitt(marke, STOPPUHR_MAX_S)],
+        art=STOPPUHR,
+        name_in_marken=name_in_marken,
+    )
+
+
+def einmal_timer(
+    dauer_s: int = EINMAL_DAUER_S, name: str = "", *, name_in_marken: bool = True
+) -> TimerProfil:
+    """Der Einmal-Timer (Ben, 19.10.2026): zählt eine Dauer rückwärts, ohne Profil. Ein
+    Abschnitt, der wie die Marken heißt; Abschnitte und Runden kommen im Editor dazu.
+
+    >>> p = einmal_timer(90, "Dehnen"); p.id, p.anzeigename, p.gesamt_s(), p.einfach
+    ('einmal', 'Dehnen', 90, True)
+    >>> TimerProfil.aus_dict(p.als_dict()) == p
+    True
+    >>> einmal_timer(0).gesamt_s()  # unlesbar → Vorgabe
+    300
+    """
+    dauer = dauer_s if 0 < dauer_s <= MAX_ABSCHNITT_S else EINMAL_DAUER_S
+    marke = name if name and name_in_marken else "Timer"
+    return TimerProfil(
+        id=EINMAL, name=name, abschnitte=[Abschnitt(marke, dauer)], name_in_marken=name_in_marken
+    )
+
+
+def einmaluhren_lesen(text: str | None) -> dict[str, TimerProfil]:
+    """Die gemerkten Einmaluhren aus ``app_setting`` — fehlt eine, ihre Vorgabe.
+
+    >>> u = einmaluhren_lesen(None); sorted(u), u[EINMAL].gesamt_s()
+    (['einmal', 'stoppuhr'], 300)
+    >>> einmaluhren_lesen(einmaluhren_schreiben({EINMAL: einmal_timer(60, "x")}))[EINMAL].name
+    'x'
+    >>> einmaluhren_lesen("kaputt")[STOPPUHR].ist_stoppuhr
+    True
+    """
+    roh: Any = None
+    if text:
+        try:
+            roh = json.loads(text)
+        except ValueError:
+            roh = None
+    uhren: dict[str, TimerProfil] = {}
+    for art, vorgabe in ((STOPPUHR, stoppuhr), (EINMAL, einmal_timer)):
+        p = TimerProfil.aus_dict(roh.get(art)) if isinstance(roh, dict) else None
+        uhren[art] = p if p is not None and p.id == art else vorgabe()
+    return uhren
+
+
+def einmaluhren_schreiben(uhren: Mapping[str, TimerProfil]) -> str:
+    """Nur die Einmaluhren (`STOPPUHR`, `EINMAL`) — andere Profile gehören in die Bibliothek."""
+    return json.dumps(
+        {art: p.als_dict() for art, p in uhren.items() if art in (STOPPUHR, EINMAL)},
+        ensure_ascii=False,
     )
 
 
@@ -903,13 +1027,24 @@ class TimerLauf:
         return self._enden[min(nummer, len(self._enden)) - 1] if nummer > 0 else 0.0
 
     def markentext(self, nummer: int) -> str:
-        """„Belastung (Runde 2/8)"; der erste Anfang nennt das Profil, das Ende „Timer fertig"."""
+        """„Belastung (Runde 2/8)"; der erste Anfang nennt das Profil, das Ende „Timer fertig".
+
+        Stoppuhr und einfacher Einmal-Timer (ein Abschnitt) nennen nur ihren `markenname`
+        — „Dehnen“ oder „Timer“, je nach Schalter (Ben, 19.10.2026).
+
+        >>> lauf = TimerLauf(einmal_timer(60, "Dehnen", name_in_marken=False))
+        >>> lauf.markentext(0), lauf.markentext(1)
+        ('Timer', 'Timer fertig')
+        >>> TimerLauf(stoppuhr("Dehnen")).markentext(0)
+        'Dehnen'
+        """
+        name = self.profil.markenname
         if nummer >= len(self._folge):
-            return f"{self.profil.name} fertig" if self.vorwaerts else ENDE_MARKE
+            return f"{name} fertig" if self.vorwaerts else ENDE_MARKE
+        if self.vorwaerts or (self.profil.ist_einmal and len(self._folge) == 1):
+            return name  # der Name ist schon der Abschnitt
         text = self.abschnittsname(nummer)
-        if self.vorwaerts:
-            return text  # „Stoppuhr“ — der Name ist schon der Abschnitt
-        return f"Timer „{self.profil.name}“: {text}" if nummer == 0 else text
+        return f"Timer „{name}“: {text}" if nummer == 0 else text
 
     def abschnittsname(self, nummer: int) -> str:
         """„Belastung (Runde 2/8)" — der Name des Abschnitts in der Messung."""
@@ -1104,6 +1239,9 @@ class TimerLauf:
 __all__ = [
     "COUNTDOWN",
     "COUNTDOWN_S",
+    "EINMAL",
+    "EINMAL_DAUERN_S",
+    "EINMAL_DAUER_S",
     "ENDE",
     "MAX_ABSCHNITT_S",
     "MAX_RUNDEN",
@@ -1123,6 +1261,9 @@ __all__ = [
     "TimerStand",
     "dauer_lesen",
     "dauer_text",
+    "einmal_timer",
+    "einmaluhren_lesen",
+    "einmaluhren_schreiben",
     "ende_frage",
     "klang_fuer",
     "messdauer",

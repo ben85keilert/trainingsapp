@@ -104,7 +104,8 @@ def _timer(state: Any) -> Laufend | None:
     if t.vorwaerts:  # die Stoppuhr (18.10.2026): die gelaufene Zeit
         zeit = uhr(int(t.vergangen_s()))
         zeile = zeit if s.laeuft else f"angehalten · {zeit}"
-        return Laufend(t.profil.name, zeile, f"{t.profil.name} {zeit}")
+        name = t.profil.anzeigename
+        return Laufend(name, zeile, f"{name} {zeit}")
     rest = uhr(math.ceil(s.rest_s))
     teile = [f"{s.name or f'Abschnitt {s.index + 1}'} noch {rest}"]
     if s.runden > 1:

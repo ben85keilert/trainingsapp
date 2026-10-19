@@ -346,8 +346,9 @@ def test_planuebung_parameter_und_chips_einstellen(page, welt) -> None:
 
 
 def test_uebung_editor_und_katalogfilter(page, welt) -> None:
+    from trainingsapp.core.parameter import chips_lesen
     from trainingsapp.ui.views.katalog import katalog
-    from trainingsapp.ui.views.uebung_bearbeiten import chips_lesen, spec_bauen, uebung_bearbeiten
+    from trainingsapp.ui.views.uebung_bearbeiten import spec_bauen, uebung_bearbeiten
     from trainingsapp.ui.views.uebung_detail import uebung_detail
 
     state, _plan, _item, uebung, _ = welt
@@ -999,7 +1000,10 @@ def test_timer_signale_eigene_seite(page, state) -> None:
     from trainingsapp.ui.views.timer import timer_signale_view, timer_view
 
     ansicht = timer_view(page, state, "/")
-    assert not any(isinstance(c, ft.Switch) for c in _alle(ansicht))
+    # Nur der Schalter der Einmaluhr („Name in die Marken“) — die Signale haben ihre Seite
+    assert [c.label for c in _alle(ansicht) if isinstance(c, ft.Switch)] == [
+        "Name in die Marken (HRV, Strecke)"
+    ]
     assert "Piep (Medien 100 %) mit 3-2-1 · Vibration · Bildschirm an · Abschnitte in HRV" in (
         _texte(ansicht)
     )
@@ -1042,7 +1046,7 @@ def test_timer_klang_und_lautstaerke(page, state) -> None:
     assert gespielt[-1] == ("glocke1", 0.6, "wecker")
 
     # Profil: je Abschnitt ein Klang, dazu Runden- und Endklang
-    profil = state.timer_profil()
+    profil = state.timer_profile()[0]
     ansicht = timer_bearbeiten_view(page, state, profil.id, "/")
     wahlen = [c for c in _alle(ansicht) if isinstance(c, ft.Dropdown)]
     assert len(wahlen) == len(profil.abschnitte) + 2

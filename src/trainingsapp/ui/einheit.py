@@ -399,7 +399,7 @@ def titel(e: Einheitslauf) -> str:
     if (g := e.teil("gps")) is not None:
         namen.append(SPORT_NAMEN.get(getattr(g, "sportart", ""), "Training"))
     if (t := e.timer) is not None:
-        namen.append(t.lauf.profil.name)
+        namen.append(t.lauf.profil.markenname)  # der Titel wird die Marke „Start: …“
     return " · ".join(namen) or "HRV-Messung"
 
 
@@ -690,9 +690,9 @@ def timer_text(e: Einheitslauf) -> str:
         return ""
     stand = t.lauf.stand()
     if stand.fertig:
-        return f"{t.lauf.profil.name} fertig" if t.lauf.vorwaerts else "Timer fertig"
+        return f"{t.lauf.profil.anzeigename} fertig" if t.lauf.vorwaerts else "Timer fertig"
     if t.lauf.vorwaerts:  # die Stoppuhr zählt vorwärts (18.10.2026)
-        teile = [t.lauf.profil.name, t.lauf.anzeige()]
+        teile = [t.lauf.profil.anzeigename, t.lauf.anzeige()]
     else:
         teile = [
             t.lauf.abschnittsname(stand.nummer),

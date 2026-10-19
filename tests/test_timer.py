@@ -222,7 +222,9 @@ def test_zustand_merkt_profile_und_das_zuletzt_benutzte(tmp_path) -> None:
 
     state = AppState.starten(tmp_path / "app.db")
     try:
-        assert state.timer_profil().id == "vorlage-intervall"
+        # Vorgabe ist die Stoppuhr (Ben, 19.10.2026); die Bibliothek beginnt bei der Vorlage
+        assert state.timer_profil().id == "stoppuhr"
+        assert state.timer_profil_bibliothek().id == "vorlage-intervall"
         eigen = profil()
         state.timer_profile_setzen([*state.timer_profile(), eigen])
         state.timer_profil_waehlen("p1")

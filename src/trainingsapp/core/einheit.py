@@ -490,16 +490,18 @@ def marke_angaben(notiz: Mapping[str, Any]) -> list[str]:
 
 
 def _profil(daten: Mapping[str, Any]) -> str | None:
-    """Welcher Ablauf lief (``marke.profil``, P54): der Kurzcode der Profil-ID, die Stoppuhr
-    heißt so — ohne Angabe ``None``.
+    """Welcher Ablauf lief (``marke.profil``, P54): der Kurzcode der Profil-ID; die Stoppuhr
+    und der Einmal-Timer heißen so (``stoppuhr``, ``einmal``) — ohne Angabe ``None``.
 
     >>> _profil({"profil_id": "stoppuhr"}), len(_profil({"profil_id": "p1"})), _profil({})
     ('stoppuhr', 8, None)
+    >>> _profil({"profil_id": "einmal"})
+    'einmal'
     """
     pid = daten.get("profil_id")
     if not pid:
         return None
-    return "stoppuhr" if pid == "stoppuhr" else kurzcode(str(pid))
+    return str(pid) if pid in ("stoppuhr", "einmal") else kurzcode(str(pid))
 
 
 def _kurzcodes(daten: Mapping[str, Any]) -> tuple[str, ...]:

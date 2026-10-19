@@ -45,10 +45,12 @@ from trainingsapp.core.models import Exercise, Subject, jetzt, lokaler_tag
 from trainingsapp.core.pakete import Paket
 from trainingsapp.core.paketquelle import QUELLE_VORGABE, Pruefung, url_pruefen
 from trainingsapp.core.timer import (
+    EINMAL,
     STOPPUHR,
     TimerProfil,
     TimerSignale,
-    stoppuhr,
+    einmaluhren_lesen,
+    einmaluhren_schreiben,
     timer_profile_lesen,
     timer_profile_schreiben,
     timer_signale_lesen,
@@ -626,15 +628,36 @@ class AppState:
         self.einstellungen.setzen(SettingRepo.TIMER_PROFILE, timer_profile_schreiben(profile))
 
     def timer_profil(self) -> TimerProfil:
-        """Das zuletzt benutzte Profil — fehlt es, das erste; die Stoppuhr ist eingebaut."""
+        """Die zuletzt benutzte Uhr: Stoppuhr oder Einmal-Timer (`timer_einmal`) oder ein
+        Profil der Bibliothek. Vorgabe ist die Stoppuhr (Ben, 19.10.2026: „Einmaluhren der
+        Standard“); ein gelöschtes Profil fällt auf das erste zurück."""
+        gemerkt = self.einstellungen.lesen(SettingRepo.TIMER_AKTIV) or STOPPUHR
+        if gemerkt in (STOPPUHR, EINMAL):
+            return self.timer_einmal(gemerkt)
         profile = self.timer_profile()
-        gemerkt = self.einstellungen.lesen(SettingRepo.TIMER_AKTIV)
-        if gemerkt == STOPPUHR:
-            return stoppuhr()
         return next((p for p in profile if p.id == gemerkt), profile[0])
 
     def timer_profil_waehlen(self, profil_id: str) -> None:
+        """Merkt die Wahl — ein Profil der Bibliothek auch für den Reiter „Profile“."""
         self.einstellungen.setzen(SettingRepo.TIMER_AKTIV, profil_id)
+        if profil_id not in (STOPPUHR, EINMAL):
+            self.einstellungen.setzen(SettingRepo.TIMER_BIBLIOTHEK_AKTIV, profil_id)
+
+    def timer_profil_bibliothek(self) -> TimerProfil:
+        """Das zuletzt benutzte Profil der Bibliothek — fehlt es, das erste."""
+        profile = self.timer_profile()
+        gemerkt = self.einstellungen.lesen(SettingRepo.TIMER_BIBLIOTHEK_AKTIV)
+        return next((p for p in profile if p.id == gemerkt), profile[0])
+
+    def timer_einmal(self, art: str) -> TimerProfil:
+        """Die Einmaluhr ``art`` (`STOPPUHR` oder `EINMAL`), wie sie zuletzt eingestellt war."""
+        return einmaluhren_lesen(self.einstellungen.lesen(SettingRepo.TIMER_EINMAL))[art]
+
+    def timer_einmal_setzen(self, profil: TimerProfil) -> None:
+        """Merkt eine Einmaluhr (Name, Schalter, Dauer bzw. Abschnitte) — unter ihrer ID."""
+        uhren = einmaluhren_lesen(self.einstellungen.lesen(SettingRepo.TIMER_EINMAL))
+        uhren[profil.id] = profil
+        self.einstellungen.setzen(SettingRepo.TIMER_EINMAL, einmaluhren_schreiben(uhren))
 
     def timer_signale(self) -> TimerSignale:
         """Ton, Countdown, Vibration, Bildschirm an, Notizen — alles an, wenn nichts gespeichert."""

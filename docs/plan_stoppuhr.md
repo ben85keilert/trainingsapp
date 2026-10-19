@@ -84,10 +84,26 @@ was „Fertig“ einträgt; im Plan der Hinweis, wenn die Planübung abweicht.
 
 ## 6. Timer-Menü
 
-„Stoppuhr“ als erster Chip vor den Profilen — eingebaut, ohne Stift. Gewählt: 0:00
-vorwärts, Start, Bereitstellen, Anhalten/Weiter, ↺ und Fertig; statt der Ablaufliste „So
-zählt sie“. Für sich gestartet tritt sie einer laufenden Einheit bei (eine Messung bekommt
-ihre Marken) oder ist eine eigene; ohne Übung trägt sie nichts ein.
+**Seit 19.10.2026 drei Reiter: Stoppuhr · Timer · Profile** (Ben: „Einmaluhren der
+Standard, Profile sind komplexer gebaut“). Stoppuhr und Timer sind *Einmaluhren*
+(`core.timer.stoppuhr`, `einmal_timer`; gemerkt in `app_setting` ``timer_einmal``, nicht
+in der Bibliothek) mit einem **Namen** (optional) und dem Schalter **„Name in die Marken
+(HRV, Strecke)“** — aus heißt: in Messung, Strecke und Titel der Einheit steht nur
+„Stoppuhr“ bzw. „Timer“ (`TimerProfil.markenname`), auf dem Bildschirm bleibt der Name
+(`anzeigename`). Der Timer zählt eine **Dauer** rückwärts (Feld mm:ss, Chips 1–15 min,
+Vorgabe 5:00); „Abschnitte und Runden …“ öffnet den Editor im Einmal-Modus
+(``…/timer/bearbeiten/einmal``, `views.timer.einmaluhr`): ohne Namensfeld, „Übernehmen“
+statt „Speichern“, das Lesezeichen oben fragt erst beim **„Als Profil speichern“** nach
+einem Namen. „Nur eine Dauer“ verwirft die Abschnitte wieder. Läuft die Einmaluhr, bleiben
+Dauer und Abschnitte gesperrt; Name und Schalter gelten sofort (`_in_lauf_uebernehmen`),
+und `lauf_fuer` ersetzt eine laufende Einmaluhr nicht durch neue Einstellungen.
+
+Die Stoppuhr gewählt: 0:00 vorwärts, Start, Bereitstellen, Anhalten/Weiter, ↺ und Fertig;
+statt der Ablaufliste „So zählt sie“. Für sich gestartet tritt sie einer laufenden Einheit
+bei (eine Messung bekommt ihre Marken) oder ist eine eigene; ohne Übung trägt sie nichts
+ein. Der Reiter „Profile“ zeigt die Bibliothek als Chips (Stift, Plus) — zuletzt gewähltes
+Profil in ``timer_bibliothek_aktiv``. Marken: `marke.profil` ist ``stoppuhr`` bzw.
+``einmal`` (`docs/kompatibilitaet.md` §4).
 
 ## 7. Plan-Ablauf
 

@@ -124,7 +124,7 @@ def uhr_teile(
                 melden(str(fehler))
                 return
             state.uebung_laeufe[uebung.id] = lauf.id
-            melden(f"{uebung.name}: {profil.name} steht bereit — oben „Alle starten“")
+            melden(f"{uebung.name}: {profil.anzeigename} steht bereit — oben „Alle starten“")
             state.neu_zeichnen()
 
         return handler
@@ -152,7 +152,7 @@ def uhr_teile(
                 controls=[
                     ft.Icon(_symbol(profil), size=18),
                     ft.Text(
-                        profil.name,
+                        profil.anzeigename,
                         weight=ft.FontWeight.W_600,
                         max_lines=1,
                         overflow=ft.TextOverflow.ELLIPSIS,
@@ -170,7 +170,7 @@ def uhr_teile(
                         spacing=0,
                         tight=True,
                         controls=[
-                            ft.Text(p.name, weight=ft.FontWeight.W_600),
+                            ft.Text(p.anzeigename, weight=ft.FontWeight.W_600),
                             ft.Text(p.kurztext(), size=12, opacity=0.7),
                         ],
                     ),
@@ -204,7 +204,7 @@ def uhr_teile(
                 ),
                 ft.IconButton(
                     ft.Icons.PLAY_ARROW,
-                    tooltip=f"{profil.name} starten",
+                    tooltip=f"{profil.anzeigename} starten",
                     icon_size=30,
                     style=ft.ButtonStyle(bgcolor=ft.Colors.PRIMARY, color=ft.Colors.ON_PRIMARY),
                     on_click=starten(profil),
@@ -255,7 +255,7 @@ def _knoepfe(
                         spacing=0,
                         tight=True,
                         controls=[
-                            ft.Text(p.name, weight=ft.FontWeight.W_600),
+                            ft.Text(p.anzeigename, weight=ft.FontWeight.W_600),
                             ft.Text(p.kurztext(), size=12, opacity=0.7),
                         ],
                     ),
@@ -284,11 +284,11 @@ def _laufend(page: Any, state: Any, e: Einheitslauf) -> ft.Control:
     def beschriften() -> None:
         stand = lauf.stand()
         zeit.value = lauf.anzeige()
-        name = lauf.profil.name
+        name = lauf.profil.anzeigename
         if not lauf.vorwaerts and not stand.fertig:
             name = f"{name}: {lauf.abschnittsname(stand.nummer)}"  # „Halten (Runde 1/3)“
         if stand.fertig:
-            oben.value = f"{lauf.profil.name} · fertig"
+            oben.value = f"{lauf.profil.anzeigename} · fertig"
         else:
             oben.value = f"{name} läuft" if stand.laeuft else f"{name} · angehalten"
         laeuft = stand.laeuft

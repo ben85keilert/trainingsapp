@@ -221,8 +221,8 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 leading=ft.Icon(ft.Icons.TIMER_OUTLINED),
                                 title=ft.Text("Timer"),
                                 subtitle=ft.Text(
-                                    "Profile mit Abschnitten · zuletzt "
-                                    f"„{state.timer_profil().name}“",
+                                    "Stoppuhr, Timer, Profile · zuletzt "
+                                    f"„{state.timer_profil().anzeigename}“",
                                     size=12,
                                 ),
                                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),

@@ -226,20 +226,102 @@ def test_die_wahl_im_menue_aendert_keine_einstellung(umgebung) -> None:
 
 
 async def test_stoppuhr_im_timer_menue(umgebung) -> None:
-    """Im Timer (Leiste) steht die Stoppuhr als erster Chip; gewählt zählt sie vorwärts,
-    ohne Abschnitte, und „Fertig“ beendet sie."""
+    """Im Timer (Leiste) ist die Stoppuhr der erste Reiter und die Vorgabe; sie zählt
+    vorwärts, ohne Abschnitte, und „Fertig“ beendet sie."""
     from trainingsapp.ui.views.timer import timer_view
 
     state, _, _ = umgebung
     ansicht = timer_view(Seite(), state, "/")
-    chips = [x for x in _alle(ansicht) if isinstance(x, ft.Chip)]
-    assert _texte(chips[0].label) == ["Stoppuhr"]
-    chips[0].on_select()
-    assert state.timer_profil().ist_stoppuhr
-    texte = _texte(timer_view(Seite(), state, "/"))
+    reiter = next(x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton))
+    assert [s.value for s in reiter.segments] == ["stoppuhr", "einmal", "profile"]
+    assert reiter.selected == ["stoppuhr"] and state.timer_profil().ist_stoppuhr
+    texte = _texte(ansicht)
     assert "zählt vorwärts, bis du „Fertig“ tippst" in texte and "SO ZÄHLT SIE" in [
         t.upper() for t in texte
     ]
+
+
+def _feld(ansicht, label: str) -> ft.TextField:
+    return next(x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == label)
+
+
+async def test_einmaluhren_name_marken_dauer_und_profile(umgebung) -> None:
+    """Ben, 19.10.2026: Stoppuhr und Timer sind Einmaluhren mit Namen und dem Schalter,
+    ob er in die Marken kommt; der Timer hat eine Dauer; Abschnitte baut der Editor ohne
+    Namen; der Reiter „Profile“ führt zur Bibliothek."""
+    from trainingsapp.core.timer import EINMAL, STOPPUHR, TimerLauf
+    from trainingsapp.ui.views.timer import PROFILE, timer_bearbeiten_view, timer_view
+
+    state, _, _ = umgebung
+    ansicht = timer_view(Seite(), state, "/")
+    reiter = next(x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton))
+
+    # Stoppuhr: Name und Schalter wirken auf die Marken
+    name = _feld(ansicht, "Name (optional)")
+    name.value = "Dehnen"
+    name.on_change()
+    assert state.timer_einmal(STOPPUHR).name == "Dehnen"
+    assert state.timer_profil().markenname == "Dehnen"
+    assert TimerLauf(state.timer_profil()).markentext(0) == "Dehnen"
+    schalter = next(x for x in _alle(ansicht) if isinstance(x, ft.Switch))
+    schalter.value = False
+    schalter.on_change()
+    assert state.timer_profil().anzeigename == "Dehnen"
+    assert state.timer_profil().markenname == "Stoppuhr"
+    assert TimerLauf(state.timer_profil()).markentext(0) == "Stoppuhr"
+
+    # Timer: zählt eine Dauer rückwärts, Vorgabe 5:00; Feld und Chips stellen sie
+    reiter.on_change(SimpleNamespace(control=SimpleNamespace(selected=[EINMAL])))
+    assert state.timer_profil().id == EINMAL and state.timer_profil().gesamt_s() == 300
+    ansicht = timer_view(Seite(), state, "/")
+    dauer = _feld(ansicht, "Dauer")
+    dauer.value = "2:30"
+    dauer.on_blur()
+    assert state.timer_profil().gesamt_s() == 150 and state.timer_profil().einfach
+    ansicht = timer_view(Seite(), state, "/")
+    assert "Abschnitte und Runden …" in _texte(ansicht) or any(
+        isinstance(x, ft.TextButton) and x.content == "Abschnitte und Runden …"
+        for x in _alle(ansicht)
+    )
+    _feld(ansicht, "Name (optional)").value = "Atmen"
+    _feld(ansicht, "Name (optional)").on_change()
+    lauf = TimerLauf(state.timer_profil())
+    assert lauf.markentext(0) == "Atmen" and lauf.markentext(1) == "Timer fertig"
+
+    # Der Editor für den Einmal-Timer: ohne Namensfeld, „Übernehmen“ statt „Speichern“
+    editor = timer_bearbeiten_view(Seite(), state, EINMAL, "/")
+    assert editor.route == "/timer/bearbeiten/einmal"
+    assert _feld(editor, "Name").visible is False
+    assert any(isinstance(x, ft.TextButton) and x.content == "Übernehmen" for x in _alle(editor))
+    seite = Seite()
+    editor = timer_bearbeiten_view(seite, state, EINMAL, "/")
+    next(
+        x
+        for x in _alle(editor)
+        if isinstance(x, ft.TextButton) and x.content == "Abschnitt hinzufügen"
+    ).on_click()
+    await next(
+        x for x in _alle(editor) if isinstance(x, ft.TextButton) and x.content == "Übernehmen"
+    ).on_click()
+    assert seite.route == "/timer"
+    uhr = state.timer_profil()
+    assert uhr.id == EINMAL and len(uhr.abschnitte) == 2 and uhr.name == "Atmen"
+    assert (
+        not uhr.einfach and state.timer_profile() == state.timer_profile()
+    )  # nichts in der Bibliothek
+    assert all(p.id != EINMAL for p in state.timer_profile())
+    ansicht = timer_view(Seite(), state, "/")
+    assert any(
+        isinstance(x, ft.TextButton) and x.content == "Nur eine Dauer" for x in _alle(ansicht)
+    )
+
+    # Profile: die Bibliothek, zuletzt die Vorlage
+    reiter = next(x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton))
+    reiter.on_change(SimpleNamespace(control=SimpleNamespace(selected=[PROFILE])))
+    assert state.timer_profil().id == "vorlage-intervall"
+    ansicht = timer_view(Seite(), state, "/")
+    chips = [x for x in _alle(ansicht) if isinstance(x, ft.Chip)]
+    assert [_texte(c.label)[0] for c in chips] == ["Intervall 30/15", "Halten 3 × 1 min"]
 
 
 async def test_formular_uhr_und_zaehlt_als(umgebung) -> None:

@@ -639,6 +639,10 @@ class SettingRepo:
     TIMER_PROFILE = "timer_profile"
     TIMER_AKTIV = "timer_aktiv"
     TIMER_SIGNALE = "timer_signale"
+    #: Timer: die Einmaluhren (Stoppuhr, Einmal-Timer — JSON, `core.timer.einmaluhren_lesen`)
+    #: und das zuletzt benutzte Profil der Bibliothek (für den Reiter „Profile“)
+    TIMER_EINMAL = "timer_einmal"
+    TIMER_BIBLIOTHEK_AKTIV = "timer_bibliothek_aktiv"
     #: Bluetooth: Geräte, mit denen die App schon verbunden war (JSON, `devices.bekannte`)
     BEKANNTE_GERAETE = "bekannte_geraete"
     #: Plan: wie die Übungen beim Training aussehen (`ui.state.PLAN_DARSTELLUNGEN`)

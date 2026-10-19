@@ -6,6 +6,13 @@ Der Timer ist von überall erreichbar (Symbol oben in der Leiste) und legt sich
 Plan zurück in den Plan. Er läuft weiter, wenn man die Ansicht verlässt; die
 Leiste zeigt dann die Restzeit (`timer_knopf`).
 
+**Stoppuhr und Timer sind die Vorgabe** (Ben, 19.10.2026) — drei Reiter oben:
+Stoppuhr, Timer, Profile. Die Einmaluhren (`core.timer.stoppuhr`, `einmal_timer`)
+haben einen Namen (optional) und den Schalter, ob er in die Marken von HRV und
+Strecke kommt; der Timer zählt eine Dauer rückwärts. Abschnitte und Runden baut
+der Editor auch für den Einmal-Timer — ohne Namen, ohne zu speichern; „Als Profil
+speichern“ fragt dann erst nach einem Namen.
+
 Ein **Profil** ist eine Folge benannter Abschnitte (``mm:ss``) und eine
 Rundenzahl (`core.timer.TimerProfil`). Das zuletzt benutzte ist beim Öffnen
 aktiv. Ohne eigene Profile gibt es zwei Vorlagen.
@@ -39,15 +46,19 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import flet as ft
 
 from trainingsapp.core.klang import KLAENGE
+from trainingsapp.core.models import new_id
 from trainingsapp.core.timer import (
+    EINMAL,
+    EINMAL_DAUERN_S,
     MAX_RUNDEN,
     QUELLEN,
+    STOPPUHR,
     Abschnitt,
     Teil,
     TimerLauf,
@@ -55,12 +66,13 @@ from trainingsapp.core.timer import (
     TimerStand,
     dauer_lesen,
     dauer_text,
+    einmal_timer,
     signale_kurz,
     stoppuhr,
 )
 from trainingsapp.devices.einheit import TimerBaustein
 from trainingsapp.ui import einheit as einheit_ui
-from trainingsapp.ui.components.dialoge import Nachher
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
@@ -68,6 +80,9 @@ from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_takt import ticker_starten, toene_laden, ton_spielen, wach_setzen
+
+#: Der dritte Reiter neben Stoppuhr und Timer — die Bibliothek der Profile
+PROFILE = "profile"
 
 
 def timer_route(basis: str) -> str:
@@ -95,6 +110,14 @@ def lauf_fuer(state: AppState, profil: TimerProfil) -> TimerLauf:
     if einheit_ui.besitzt_timer(state, lauf):
         assert lauf is not None
         return lauf
+    if (
+        lauf is not None
+        and lauf.profil.ist_einmal
+        and lauf.profil.id == profil.id
+        and lauf.begonnen
+        and not lauf.fertig
+    ):
+        return lauf  # eine laufende Einmaluhr: neue Einstellungen gelten ab dem nächsten Start
     if lauf is None or lauf.profil != profil:
         lauf = TimerLauf(profil)
         state.timer = lauf
@@ -166,10 +189,17 @@ def timer_knopf(page: Any, state: AppState, name: str) -> ft.Control:
 
 
 def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
+    """Stoppuhr, Einmal-Timer und Profile — drei Reiter oben (Ben, 19.10.2026: „Einmaluhren
+    der Standard, Profile sind komplexer gebaut“). Stoppuhr und Timer haben einen Namen
+    (optional) und den Schalter, ob er in die Marken kommt; der Timer eine Dauer, und wer
+    Abschnitte oder Runden braucht, öffnet den Editor — ohne Namen, ohne zu speichern."""
     route = timer_route(basis)
     profile = state.timer_profile()
     profil = state.timer_profil()
     lauf = lauf_fuer(state, profil)
+    reiter = profil.id if profil.ist_einmal else PROFILE
+    #: Läuft die Uhr gerade (angehalten zählt mit)? Dann bleiben Dauer und Abschnitte
+    laufend = lauf.begonnen and not lauf.fertig and not lauf.abgebrochen
 
     abschnitt_text = ft.Text(size=24, weight=ft.FontWeight.W_600, text_align=ft.TextAlign.CENTER)
     zeit_text = ft.Text(size=84, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER)
@@ -226,7 +256,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         stand = lauf.stand()
         fortschritt.visible = not lauf.vorwaerts
         if lauf.vorwaerts:  # die Stoppuhr (Ben, 18.10.2026): vorwärts, ohne Abschnitte
-            abschnitt_text.value = profil.name
+            abschnitt_text.value = profil.anzeigename
             zeit_text.value = lauf.anzeige()
             if stand.fertig:
                 stand_text.value = "fertig"
@@ -240,7 +270,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             abschnitt_text.value = "Fertig"
             zeit_text.value = "0:00"
             fortschritt.value = 1.0
-            stand_text.value = f"{profil.name} · {dauer_text(profil.gesamt_s())}"
+            stand_text.value = f"{profil.anzeigename} · {dauer_text(profil.gesamt_s())}"
         else:
             abschnitt_text.value = stand.name or f"Abschnitt {stand.index + 1}"
             # Vor dem Start die volle Dauer, danach aufgerundet (0:01 bis zuletzt)
@@ -327,23 +357,34 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         lauf.zurueck()
         auffrischen()
 
-    def waehler(profil_id: str) -> Callable[[], None]:
-        def handler() -> None:
-            if profil_id == profil.id:
-                return
-            if einheit_ui.besitzt_timer(state, lauf):  # erst die Einheit beenden
-                with contextlib.suppress(Exception):
-                    page.show_dialog(
-                        ft.SnackBar(ft.Text("Der Timer läuft in der Einheit — erst beenden."))
-                    )
-                return
-            if lauf.laeuft:
-                lauf.pause()
-            state.timer_profil_waehlen(profil_id)
-            state.timer = None
-            state.neu_zeichnen()
+    def in_einheit() -> bool:
+        """Der Timer gehört einer laufenden Einheit — erst beenden, dann umschalten."""
+        if einheit_ui.besitzt_timer(state, lauf):
+            with contextlib.suppress(Exception):
+                page.show_dialog(
+                    ft.SnackBar(ft.Text("Der Timer läuft in der Einheit — erst beenden."))
+                )
+            return True
+        return False
 
-        return handler
+    def umschalten(profil_id: str) -> None:
+        """Eine andere Uhr: merken, der nächste Aufbau holt sich ihren Lauf."""
+        if profil_id == profil.id or in_einheit():
+            return
+        if lauf.laeuft:
+            lauf.pause()
+        state.timer_profil_waehlen(profil_id)
+        state.timer = None
+        state.neu_zeichnen()
+
+    def waehler(profil_id: str) -> Callable[[], None]:
+        return lambda: umschalten(profil_id)
+
+    def reiter_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+        neu = next(iter(e.control.selected or []), reiter)
+        if neu == reiter:
+            return
+        umschalten(state.timer_profil_bibliothek().id if neu == PROFILE else neu)
 
     async def neu() -> None:
         await page.push_route(f"{route}/bearbeiten")
@@ -354,7 +395,154 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
     async def signale_oeffnen() -> None:
         await page.push_route(f"{route}/signale")
 
-    # Vorne die Stoppuhr — eingebaut, ohne Stift und Löschen (Ben, 18.10.2026)
+    # -- Die Einmaluhr einstellen (Ben, 19.10.2026) ----------------------------------
+
+    def einmal_merken(neu: TimerProfil) -> None:
+        """Name, Schalter, Dauer der Einmaluhr merken. Läuft sie gerade, kommen nur Name und
+        Schalter in den Lauf (`_in_lauf_uebernehmen`); sonst folgt ihr der nächste Lauf."""
+        nonlocal profil
+        state.timer_einmal_setzen(neu)
+        profil = neu
+        if laufend or einheit_ui.besitzt_timer(state, lauf):
+            _in_lauf_uebernehmen(lauf, neu)
+        else:
+            state.timer = None
+
+    def mit_name(name: str, in_marken: bool) -> TimerProfil:
+        """Die Einmaluhr mit diesem Namen und Schalter — die Dauer bzw. Abschnitte bleiben."""
+        if profil.ist_stoppuhr:
+            return stoppuhr(name, name_in_marken=in_marken)
+        if profil.einfach:
+            return einmal_timer(profil.gesamt_s(), name, name_in_marken=in_marken)
+        return replace(profil, name=name, name_in_marken=in_marken)
+
+    def name_geaendert(_e: object = None) -> None:
+        einmal_merken(mit_name((name_feld.value or "").strip(), marken_schalter.value))
+
+    def dauer_setzen(sekunden: int) -> None:
+        einmal_merken(einmal_timer(sekunden, profil.name, name_in_marken=profil.name_in_marken))
+        state.neu_zeichnen()
+
+    def dauer_gelesen(_e: object = None) -> None:
+        sekunden = dauer_lesen(dauer_feld.value or "")
+        if sekunden is None:
+            dauer_feld.error = "z. B. 5:00"
+            with contextlib.suppress(Exception):
+                dauer_feld.update()
+            return
+        if sekunden != profil.gesamt_s():
+            dauer_setzen(sekunden)
+
+    def dauer_waehler(sekunden: int) -> Callable[[], None]:
+        return lambda: dauer_setzen(sekunden)
+
+    def nur_eine_dauer() -> None:
+        """Abschnitte und Runden verwerfen — nur noch eine Dauer (die bisherige Summe)."""
+        dauer_setzen(profil.gesamt_s())
+
+    async def abschnitte_bearbeiten() -> None:
+        await page.push_route(f"{route}/bearbeiten/{EINMAL}")
+
+    name_feld = ft.TextField(
+        label="Name (optional)",
+        value=profil.name if profil.ist_einmal else "",
+        hint_text="z. B. Dehnen",
+        dense=True,
+        on_change=name_geaendert,
+    )
+    marken_schalter = ft.Switch(
+        label="Name in die Marken (HRV, Strecke)",
+        value=profil.name_in_marken,
+        on_change=name_geaendert,
+    )
+    dauer_feld = ft.TextField(
+        label="Dauer",
+        value=dauer_text(profil.gesamt_s()),
+        width=110,
+        dense=True,
+        keyboard_type=ft.KeyboardType.DATETIME,
+        text_align=ft.TextAlign.END,
+        disabled=laufend,
+        on_submit=dauer_gelesen,
+        on_blur=dauer_gelesen,
+    )
+
+    def einmal_karte() -> ft.Control:
+        """Name und Schalter — beim Timer davor die Dauer oder die Abschnitte."""
+        zeilen: list[ft.Control] = []
+        if profil.id == EINMAL and profil.einfach:
+            zeilen += [
+                ft.Row(
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        dauer_feld,
+                        ft.Row(
+                            wrap=True,
+                            spacing=6,
+                            run_spacing=6,
+                            expand=True,
+                            controls=[
+                                ft.Chip(
+                                    label=ft.Text(dauer_text(s)),
+                                    selected=s == profil.gesamt_s(),
+                                    show_checkmark=False,
+                                    disabled=laufend,
+                                    on_select=dauer_waehler(s),
+                                )
+                                for s in EINMAL_DAUERN_S
+                            ],
+                        ),
+                    ],
+                ),
+                ft.TextButton(
+                    "Abschnitte und Runden …",
+                    icon=ft.Icons.PLAYLIST_ADD,
+                    tooltip="Mehrere Abschnitte, Runden, Klänge — ohne Namen, ohne Speichern",
+                    on_click=abschnitte_bearbeiten,
+                    disabled=laufend,
+                ),
+            ]
+        elif profil.id == EINMAL:
+            zeilen += [
+                ft.Text(profil.kurztext(), size=13),
+                ft.Row(
+                    wrap=True,
+                    spacing=4,
+                    controls=[
+                        ft.TextButton(
+                            "Bearbeiten",
+                            icon=ft.Icons.EDIT_OUTLINED,
+                            on_click=abschnitte_bearbeiten,
+                            disabled=laufend,
+                        ),
+                        ft.TextButton(
+                            "Nur eine Dauer",
+                            icon=ft.Icons.UNDO,
+                            tooltip="Abschnitte und Runden verwerfen",
+                            on_click=nur_eine_dauer,
+                            disabled=laufend,
+                        ),
+                    ],
+                ),
+            ]
+        zeilen += [name_feld, marken_schalter]
+        return karte(*zeilen, abstand=8)
+
+    reiter_wahl = ft.SegmentedButton(
+        selected=[reiter],
+        show_selected_icon=False,
+        segments=[
+            ft.Segment(value=STOPPUHR, label=ft.Text("Stoppuhr"), icon=ft.Icon(ft.Icons.AV_TIMER)),
+            ft.Segment(
+                value=EINMAL, label=ft.Text("Timer"), icon=ft.Icon(ft.Icons.HOURGLASS_BOTTOM)
+            ),
+            ft.Segment(
+                value=PROFILE, label=ft.Text("Profile"), icon=ft.Icon(ft.Icons.FORMAT_LIST_BULLETED)
+            ),
+        ],
+        on_change=reiter_gewaehlt,
+    )
     profil_chips = ft.Row(
         wrap=True,
         spacing=8,
@@ -362,18 +550,17 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         controls=[
             ft.Chip(
                 label=ft.Text(p.name),
-                leading=ft.Icon(ft.Icons.AV_TIMER, size=18) if p.ist_stoppuhr else None,
                 selected=p.id == profil.id,
                 show_checkmark=False,
                 on_select=waehler(p.id),
             )
-            for p in [stoppuhr(), *profile]
+            for p in profile
         ],
     )
     fertig_knopf = ft.IconButton(
         ft.Icons.STOP, tooltip="Fertig", icon_size=28, on_click=fertig, visible=False
     )
-    ohne_abschnitte = profil.ist_stoppuhr
+    ohne_abschnitte = profil.ist_stoppuhr or (profil.ist_einmal and profil.einfach)
     steuerung = ft.Row(
         alignment=ft.MainAxisAlignment.CENTER,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -400,20 +587,43 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             fertig_knopf,
         ],
     )
-    inhalt = ft.Column(
-        spacing=14,
-        controls=[
+    if reiter == PROFILE:
+        wahl: list[ft.Control] = [
             kartentitel(
                 "Profil",
                 ft.IconButton(
-                    ft.Icons.EDIT_OUTLINED,
-                    tooltip="Profil bearbeiten",
-                    on_click=bearbeiten,
-                    disabled=profil.ist_stoppuhr,
+                    ft.Icons.EDIT_OUTLINED, tooltip="Profil bearbeiten", on_click=bearbeiten
                 ),
                 ft.IconButton(ft.Icons.ADD, tooltip="Neues Profil", on_click=neu),
             ),
             profil_chips,
+        ]
+    else:
+        wahl = [einmal_karte()]
+    if profil.ist_stoppuhr:
+        ablauf_karte = karte(
+            kartentitel("So zählt sie"),
+            hinweis(
+                "Sie läuft, bis du „Fertig“ tippst; „Pause“ hält nur an. Für sich gestartet "
+                "trägt sie nichts ins Tagebuch ein — in einer laufenden HRV-Messung setzt "
+                "sie Marken, und eine laufende Einheit nimmt sie auf."
+            ),
+        )
+    elif ohne_abschnitte:
+        ablauf_karte = karte(
+            kartentitel("So zählt er"),
+            hinweis(
+                "Er zählt die Dauer rückwärts und meldet sich am Ende. In einer laufenden "
+                "HRV-Messung setzt er Marken, eine laufende Einheit nimmt ihn auf."
+            ),
+        )
+    else:
+        ablauf_karte = karte(kartentitel("Ablauf"), ablauf, abstand=6)
+    inhalt = ft.Column(
+        spacing=14,
+        controls=[
+            reiter_wahl,
+            *wahl,
             karte(
                 abschnitt_text,
                 zeit_text,
@@ -425,16 +635,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             ),
             _bereitstellen_knopf(state, lauf, bereitstellen),
             _signale_vermerk(state, signale_oeffnen),
-            karte(kartentitel("Ablauf"), ablauf, abstand=6)
-            if not profil.ist_stoppuhr
-            else karte(
-                kartentitel("So zählt sie"),
-                hinweis(
-                    "Sie läuft, bis du „Fertig“ tippst; „Pause“ hält nur an. Für sich gestartet "
-                    "trägt sie nichts ins Tagebuch ein — in einer laufenden HRV-Messung setzt "
-                    "sie Marken, und eine laufende Einheit nimmt sie auf."
-                ),
-            ),
+            ablauf_karte,
             hinweis(
                 "Der Timer läuft weiter, wenn du die Ansicht verlässt — oben in der Leiste "
                 "steht dann seine Zeit."
@@ -452,6 +653,15 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         padding=16,
         controls=[sicher(inhalt, expand=False)],
     )
+
+
+def _in_lauf_uebernehmen(lauf: TimerLauf, neu: TimerProfil) -> None:
+    """Name und Schalter in einen laufenden Lauf — die Dauer bleibt, wie sie begann; bei
+    einem Abschnitt auch sein Name (er ist die Marke)."""
+    p = lauf.profil
+    p.name, p.name_in_marken = neu.name, neu.name_in_marken
+    if p.einfach and neu.einfach:
+        p.abschnitte[0].name = neu.abschnitte[0].name
 
 
 #: Schalter der Karte „Signale": Feld in `TimerSignale`, Titel, Erklärung
@@ -808,6 +1018,10 @@ class Profilziel:
     route: str
     titel: str = "Timer-Profil"
     titel_neu: str = "Neues Timer-Profil"
+    #: ohne Namensfeld — der Einmal-Timer heißt auf der Timer-Seite (Ben, 19.10.2026)
+    ohne_name: bool = False
+    #: „Als Profil speichern“: legt eine Kopie mit Namen in die Bibliothek — ``None``: nicht
+    als_profil: Callable[[TimerProfil], None] | None = None
 
 
 def bibliothek(state: AppState, basis: str) -> Profilziel:
@@ -829,6 +1043,27 @@ def bibliothek(state: AppState, basis: str) -> Profilziel:
             state.timer = None
 
     return Profilziel(state.timer_profile, speichern, loeschen, zurueck, f"{zurueck}/bearbeiten")
+
+
+def einmaluhr(state: AppState, basis: str) -> Profilziel:
+    """Der Einmal-Timer im Editor (Ben, 19.10.2026): Abschnitte und Runden ohne Namen und
+    ohne Profil — gemerkt als Einmaluhr; „Als Profil speichern“ legt ihn in die Bibliothek."""
+    zurueck = timer_route(basis)
+
+    def speichern(neu: TimerProfil) -> None:
+        state.timer_einmal_setzen(neu)
+        state.timer_profil_waehlen(EINMAL)
+
+    return Profilziel(
+        lambda: [state.timer_einmal(EINMAL)],
+        speichern,
+        None,
+        zurueck,
+        f"{zurueck}/bearbeiten",
+        titel="Timer: Abschnitte und Runden",
+        ohne_name=True,
+        als_profil=bibliothek(state, basis).speichern,
+    )
 
 
 @dataclass
@@ -866,14 +1101,20 @@ def timer_bearbeiten_view(
 
     Zurück speichert (Ben, 16.10.2026, `components/zurueck.py`); „Abbrechen" verwirft.
     """
-    ziel = ziel or bibliothek(state, basis)
+    if ziel is None:
+        ziel = einmaluhr(state, basis) if profil_id == EINMAL else bibliothek(state, basis)
     vorhanden = next((p for p in ziel.profile() if p.id == profil_id), None)
     profil = vorhanden or TimerProfil(
         name="", abschnitte=[Abschnitt("Belastung", 30), Abschnitt("Pause", 15)], runden=1
     )
     route = ziel.route + (f"/{vorhanden.id}" if vorhanden else "")
 
-    name = ft.TextField(label="Name", value=profil.name, hint_text="z. B. Intervall, Planke")
+    name = ft.TextField(
+        label="Name",
+        value=profil.name,
+        hint_text="z. B. Intervall, Planke",
+        visible=not ziel.ohne_name,
+    )
     teile_ed: list[_TeilFelder] = []
     teile_spalte = ft.Column(spacing=16)
     runden_klang = _klang_wahl(page, state, profil.runden_klang, "wie Abschnitt 1")
@@ -1067,8 +1308,8 @@ def timer_bearbeiten_view(
             ende_klang.value,
         )
 
-    def sichern() -> str | None:
-        """Prüfen und speichern — ``None`` = gespeichert, sonst warum nicht."""
+    def bauen(profil_id: str, profil_name: str) -> TimerProfil | str:
+        """Das Profil aus den Feldern — oder der Grund, warum nicht (Felder markiert)."""
         teile_neu: list[Teil] = []
         fehler = False
         for t in teile_ed:
@@ -1088,19 +1329,64 @@ def timer_bearbeiten_view(
             page.update()
             return "Eine Dauer ist unlesbar — so: 0:30 oder 1:15."
         erster, *weitere = teile_neu
-        neu = TimerProfil(
-            id=profil.id,
-            name=(name.value or "").strip() or "Timer",
+        return TimerProfil(
+            id=profil_id,
+            name=profil_name,
             abschnitte=erster.abschnitte,
             runden=erster.runden,
             runden_klang=_klang_wert(runden_klang),
             ende_klang=_klang_wert(ende_klang),
             teil_name=erster.name if weitere else "",
             teile=weitere,
+            name_in_marken=profil.name_in_marken if ziel.ohne_name else True,
         )
+
+    def sichern() -> str | None:
+        """Prüfen und speichern — ``None`` = gespeichert, sonst warum nicht."""
+        profil_name = profil.name if ziel.ohne_name else (name.value or "").strip() or "Timer"
+        neu = bauen(profil.id, profil_name)
+        if isinstance(neu, str):
+            return neu
         ziel.speichern(neu)
-        gespeichert["name"] = neu.name
+        gespeichert["name"] = neu.anzeigename
         return None
+
+    def als_profil_fragen() -> None:
+        """„Als Profil speichern“ (Einmal-Timer): erst hier braucht es einen Namen."""
+        feld = ft.TextField(label="Name", hint_text="z. B. Intervall, Planke", autofocus=True)
+        nachher_profil = Nachher()
+
+        def anlegen() -> None:
+            profil_name = (feld.value or "").strip()
+            if not profil_name:
+                feld.error = "Ein Name, bitte."
+                page.update()
+                return
+            neu = bauen(new_id(), profil_name)
+            if isinstance(neu, str):
+                feld.error = neu
+                page.update()
+                return
+            assert ziel.als_profil is not None
+            ziel.als_profil(neu)
+            nachher_profil.danach(
+                lambda: page.show_dialog(ft.SnackBar(ft.Text(f"„{profil_name}“ gespeichert")))
+            )
+            nachher_profil.danach(lambda: page.push_route(ziel.zurueck))
+            schliessen(dialog)
+
+        dialog: ft.AlertDialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Als Profil speichern"),
+            content=feld,
+            on_dismiss=nachher_profil.bei_schliessen,
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+                ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=anlegen),
+            ],
+        )
+        feld.on_submit = lambda _: anlegen()
+        page.show_dialog(dialog)
 
     #: Name des zuletzt gespeicherten Profils — für die Meldung
     gespeichert: dict[str, str] = {}
@@ -1108,7 +1394,8 @@ def timer_bearbeiten_view(
     async def speichern() -> None:
         if sichern() is not None:
             return
-        page.show_dialog(ft.SnackBar(ft.Text(f"„{gespeichert['name']}“ gespeichert")))
+        meldung = "Übernommen" if ziel.ohne_name else f"„{gespeichert['name']}“ gespeichert"
+        page.show_dialog(ft.SnackBar(ft.Text(meldung)))
         await page.push_route(ziel.zurueck)
 
     nachher = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (`components/dialoge.py`)
@@ -1151,13 +1438,31 @@ def timer_bearbeiten_view(
             ziel.titel if vorhanden else ziel.titel_neu,
             abbrechen=abbrechen,
             speichern=speichern,
+            text="Übernehmen" if ziel.ohne_name else "Speichern",
             vorher=[
-                ft.IconButton(
-                    ft.Icons.DELETE_OUTLINE, tooltip="Profil löschen", on_click=loeschen_fragen
-                )
-            ]
-            if vorhanden and ziel.loeschen is not None
-            else [],
+                *(
+                    [
+                        ft.IconButton(
+                            ft.Icons.BOOKMARK_ADD_OUTLINED,
+                            tooltip="Als Profil speichern — mit Namen in die Bibliothek",
+                            on_click=als_profil_fragen,
+                        )
+                    ]
+                    if ziel.als_profil is not None
+                    else []
+                ),
+                *(
+                    [
+                        ft.IconButton(
+                            ft.Icons.DELETE_OUTLINE,
+                            tooltip="Profil löschen",
+                            on_click=loeschen_fragen,
+                        )
+                    ]
+                    if vorhanden and ziel.loeschen is not None
+                    else []
+                ),
+            ],
         ),
         scroll=ft.ScrollMode.AUTO,
         padding=16,
@@ -1167,6 +1472,12 @@ def timer_bearbeiten_view(
                     spacing=16,
                     controls=[
                         name,
+                        hinweis(
+                            "Gilt für den Einmal-Timer — ohne Namen, ohne Profil. Das Lesezeichen "
+                            "oben legt ihn mit Namen in die Bibliothek."
+                        )
+                        if ziel.ohne_name
+                        else ft.Container(height=0),
                         teile_spalte,
                         ft.Row(
                             controls=[
@@ -1207,13 +1518,15 @@ def timer_bearbeiten_view(
         ansicht,
         geaendert=lambda: stand() != anfang,
         speichern=sichern,
-        meldung="Timer-Profil gespeichert",
+        meldung="Übernommen" if ziel.ohne_name else "Timer-Profil gespeichert",
     )
 
 
 __all__ = [
+    "PROFILE",
     "Profilziel",
     "bibliothek",
+    "einmaluhr",
     "lauf_fuer",
     "ticker_starten",
     "timer_bearbeiten_view",

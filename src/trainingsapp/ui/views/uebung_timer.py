@@ -356,7 +356,7 @@ def uebung_timer_view(
                     hinweis("Oder aus der Timer-Bibliothek — die Übung bekommt eine eigene Kopie."),
                     *(
                         ft.ListTile(
-                            title=ft.Text(p.name),
+                            title=ft.Text(p.anzeigename),
                             subtitle=ft.Text(p.kurztext(), size=12),
                             on_click=nehmen(p),
                         )
@@ -682,7 +682,7 @@ def uebung_timer_view(
     def vorher() -> list[ft.Control]:
         chips: list[ft.Control] = [
             ft.Chip(
-                label=ft.Text(p.name),
+                label=ft.Text(p.anzeigename),
                 selected=profil is not None and p.id == profil.id,
                 show_checkmark=True,
                 on_select=profil_waehlen(p),

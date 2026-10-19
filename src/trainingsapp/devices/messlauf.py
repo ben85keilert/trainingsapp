@@ -212,6 +212,10 @@ class Messlauf:
         #: Anzeigezeiten des letzten PPI-Pakets: (rr_ms, t, verworfen, fehler_ms) in Folge
         self._schlagzeiten: deque[tuple[int, float, bool, int]] = deque()
         self.aufnahme: Aufnahme | None = None
+        #: „Stopp & speichern“ läuft (H39: das Schreiben darf in einem Thread liegen) —
+        #: solange kommt kein Schlag und kein Backup mehr in die Aufnahme, und ein
+        #: zweiter Stopp speichert sie nicht noch einmal
+        self._wird_gespeichert = False
         #: Abschnittsgrenzen der laufenden Aufnahme je Spur (Timer, km, Übung, Einheit):
         #: (Notiz, Name, Ende?) — jede Spur teilt nur sich selbst (`spuren_speichern`)
         self._grenzen: dict[str, list[tuple[dict, str, bool]]] = {}
@@ -292,9 +296,11 @@ class Messlauf:
         status_task = asyncio.create_task(self._status_lesen())
         try:
             async for wert in self.quelle.stream():
+                # Beim Speichern (Thread) ist die Aufnahme beendet: nichts mehr hinein
+                aufnahme = None if self._wird_gespeichert else self.aufnahme
                 if isinstance(wert, PpiPaket):
-                    if self.aufnahme is not None:
-                        self.aufnahme.ppi_paket(
+                    if aufnahme is not None:
+                        aufnahme.ppi_paket(
                             wert.t_capture, wert.ppi_ms, wert.fehler_ms, wert.blocker, wert.kontakt
                         )
                     self._ppi_paket_erwarten(wert)
@@ -306,8 +312,8 @@ class Messlauf:
                     t_live - self.start_mono, wert.rr_ms, wert.hf_bpm, fehler_ms=fehler
                 )
                 self._verworfene_zeigen()
-                if self.aufnahme is not None:
-                    self.aufnahme.schlag(wert.rr_ms, wert.hf_bpm, wert.t_capture, wert.tw_src)
+                if aufnahme is not None:
+                    aufnahme.schlag(wert.rr_ms, wert.hf_bpm, wert.t_capture, wert.tw_src)
                     self._backup_wenn_faellig()
                 self._melden(False)
         finally:
@@ -613,7 +619,7 @@ class Messlauf:
         Ohne Aufnahme oder Backup-Basis passiert nichts; ein Schreibfehler
         stoppt die Messung nicht.
         """
-        if self.aufnahme is None or self._backup_basis is None:
+        if self.aufnahme is None or self._backup_basis is None or self._wird_gespeichert:
             return
         self._letztes_backup = self._uhr()
         with contextlib.suppress(OSError):
@@ -637,19 +643,69 @@ class Messlauf:
         Scheitert das Schreiben (Speicher voll, Ordner nicht beschreibbar), bleibt die
         Aufnahme im Lauf — der Aufrufer bekommt die Ausnahme und kann es noch einmal
         versuchen; vorher war sie in dem Moment weg (H24, 19.10.2026).
+
+        Schreibt im aufrufenden Thread; die Oberfläche nimmt `aufnahme_stoppen_async`,
+        damit eine 4-h-Datei den Event-Loop nicht anhält (H39).
         """
+        aufnahme = self._stopp_beginnen()
+        if aufnahme is None:
+            return None
+        try:
+            ergebnis = self._schreiben(aufnahme, basis)
+        except BaseException:
+            self._stopp_beenden(gespeichert=False)
+            raise
+        self._stopp_beenden(gespeichert=True)
+        return ergebnis
+
+    async def aufnahme_stoppen_async(self, basis: Path) -> Gespeichert | None:
+        """Wie `aufnahme_stoppen`, aber Messdatei, Abschnitte und Diagnoseprotokoll
+        schreibt ein Thread (`asyncio.to_thread`, H39).
+
+        Beenden und Aufräumen bleiben im Loop: Ab dem Aufruf nimmt die Aufnahme keinen
+        Schlag mehr an (`laufen`), ``self.aufnahme`` bleibt bis zum fertigen Schreiben
+        stehen (H24) und wird erst danach gelöscht — der Thread verändert nichts an
+        ``self``.
+        """
+        aufnahme = self._stopp_beginnen()
+        if aufnahme is None:
+            return None
+        try:
+            ergebnis = await asyncio.to_thread(self._schreiben, aufnahme, basis)
+        except BaseException:
+            self._stopp_beenden(gespeichert=False)
+            raise
+        self._stopp_beenden(gespeichert=True)
+        return ergebnis
+
+    def _stopp_beginnen(self) -> Aufnahme | None:
+        """Die Aufnahme beenden: ab jetzt kein Schlag mehr hinein. ``None``: nichts
+        aufgezeichnet — oder ein anderer Aufruf speichert sie gerade (der trägt sie ein)."""
         aufnahme = self.aufnahme
         if aufnahme is None or not aufnahme.beats:
             self.aufnahme = None
             return None
+        if self._wird_gespeichert:
+            return None
+        self._wird_gespeichert = True
+        return aufnahme
+
+    def _stopp_beenden(self, *, gespeichert: bool) -> None:
+        self._wird_gespeichert = False
+        if gespeichert:
+            self.aufnahme = None
+            self._grenzen = {}
+
+    def _schreiben(self, aufnahme: Aufnahme, basis: Path) -> Gespeichert:
+        """Messdatei, Abschnitte je Spur und Diagnoseprotokoll schreiben — liest ``self``
+        nur, darum auch in einem Thread möglich."""
         pfad = aufnahme.speichern(self._ordner(basis))
         if self._dateiname_fest is not None and pfad.name != self._dateiname_fest:
             logging.getLogger(__name__).warning(
                 "Messdatei heißt %s, angekündigt war %s", pfad.name, self._dateiname_fest
             )
-        self.aufnahme = None
         rec = aufnahme.recording()
-        spuren, self._grenzen = self._grenzen, {}
+        spuren = {s: list(gs) for s, gs in self._grenzen.items()}
         if any(spuren.values()):  # Abschnitte je Spur — scheitert das, bleibt die Messung
             with contextlib.suppress(OSError, ValueError):
                 spuren_speichern(pfad, rec, spuren)

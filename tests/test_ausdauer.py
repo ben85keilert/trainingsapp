@@ -435,7 +435,9 @@ async def test_laufende_hrv_bekommt_marken_und_laeuft_weiter(daten) -> None:
     assert bezug.verschiebung_s == pytest.approx(UTC0.timestamp() + 2.5, abs=1e-6)
     import flet as ft
 
-    ansicht = ausdauer_detail_view(_seite(), state, strecke)
+    seite = _seite()
+    ansicht = ausdauer_detail_view(seite, state, strecke)
+    await asyncio.gather(*seite.aufgaben)  # die HRV-Aufnahme liest ein Thread (H39)
     tabelle = [
         [c.value for c in r.controls]
         for r in _alle(ansicht)
@@ -594,13 +596,17 @@ def _texte(wurzel) -> list[str]:
 
 
 def _seite() -> SimpleNamespace:
+    from attrappen import aufgabe_starten
+
+    aufgaben: list = []
     return SimpleNamespace(
         route="/",
         views=[],
         update=lambda: None,
         show_dialog=lambda *_: None,
         pop_dialog=lambda: None,
-        run_task=lambda f, *a: None,
+        run_task=lambda f, *a: aufgabe_starten(aufgaben, f, *a),
+        aufgaben=aufgaben,
     )
 
 
@@ -612,7 +618,9 @@ async def test_auswertung_und_liste_zeigen_das_training(daten) -> None:
 
     state, tmp_path = daten
     strecke, _ = await _training(state, tmp_path)
-    view = ausdauer_detail_view(_seite(), state, state.strecken.laden(strecke.id))
+    seite = _seite()
+    view = ausdauer_detail_view(seite, state, state.strecken.laden(strecke.id))
+    await asyncio.gather(*seite.aufgaben)  # die HRV-Aufnahme liest ein Thread (H39)
     texte = _texte(view)
     assert "JE KILOMETER" in texte and "STRECKE" in texte
     assert any(isinstance(c, fm.Map) for c in _alle(view))
@@ -759,7 +767,9 @@ async def test_intervalle_und_kilometer_als_tabellen(daten) -> None:
     assert gesehen["km"][0] == ["km", "Zeit", "/km", "Ø HF"]
     assert gesehen["km"][1][0] == "km 1" and gesehen["km"][1][3] == "62"
     # Die Auswertung: alle acht Abschnitte, mit Ø HF aus der Messdatei und DFA α1 (EKG)
-    detail = ausdauer_detail_view(_seite(), state, strecke)
+    seite = _seite()
+    detail = ausdauer_detail_view(seite, state, strecke)
+    await asyncio.gather(*seite.aufgaben)  # die HRV-Aufnahme liest ein Thread (H39)
     kopf, *runden = zeilen(detail, "INTERVALLE (VOM TIMER)")
     assert kopf == ["Runde · Abschnitt", "km", "/km", "Ø HF", "DFA α1"]
     assert len(runden) == 8 and runden[-1][0] == "4 Pause 1:00"
@@ -900,6 +910,7 @@ async def test_forschungsexport_aus_der_hrv_auswertung(daten, monkeypatch) -> No
     seite = SimpleNamespace(**vars(_seite()))
     seite.show_dialog = dialoge.append
     ansicht = messung_detail_view(seite, state, aufnahme)
+    await asyncio.gather(*seite.aufgaben)  # die Messdatei liest ein Thread (H39)
     knopf = next(a for a in ansicht.appbar.actions if "Auswertung exportieren" in (a.tooltip or ""))
     assert knopf.visible
     knopf.on_click()

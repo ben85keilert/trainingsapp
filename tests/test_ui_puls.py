@@ -17,6 +17,7 @@ fc = pytest.importorskip("flet_charts")
 
 from hrv_core.recording import Beat, Recording, speichern  # noqa: E402
 
+from attrappen import aufgabe_starten  # noqa: E402
 from trainingsapp.core.models import HrvRecording  # noqa: E402
 from trainingsapp.devices.base import DeviceStatus, Verbindung  # noqa: E402
 from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
@@ -47,13 +48,15 @@ def daten(tmp_path, monkeypatch):
 
 def _seite() -> SimpleNamespace:
     aufrufe: list = []
+    aufgaben: list = []
     return SimpleNamespace(
         route="/",
         views=[],
         update=lambda: None,
         show_dialog=aufrufe.append,
         pop_dialog=lambda: None,
-        run_task=lambda f, *a: None,
+        run_task=lambda f, *a: aufgabe_starten(aufgaben, f, *a),
+        aufgaben=aufgaben,
         aufrufe=aufrufe,
         height=900,
         width=412,
@@ -273,7 +276,9 @@ async def test_uhr_im_simulator_bis_zur_aufzeichnung(daten) -> None:
     assert all(b.t_wall_s is not None for b in rec.beats)
 
     eintrag = aufnahme_eintragen(state, ergebnis, lauf.subject_id)
-    ansicht = messung_detail_view(_seite(), state, eintrag)
+    seite = _seite()
+    ansicht = messung_detail_view(seite, state, eintrag)
+    await asyncio.gather(*seite.aufgaben)  # die Messdatei liest ein Thread (H39)
     alle = list(_alle(ansicht))
     texte = [c.value for c in alle if isinstance(c, ft.Text) and c.value]
     assert "HERZFREQUENZ" in texte

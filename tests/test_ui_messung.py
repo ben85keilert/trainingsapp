@@ -13,6 +13,7 @@ from hrv_core.korrektur import analyse_laden  # noqa: E402
 from hrv_core.recording import Beat, Recording, speichern  # noqa: E402
 from hrv_core.regeln import Korrekturregeln  # noqa: E402
 
+from attrappen import aufgabe_starten  # noqa: E402
 from trainingsapp.core.models import HrvRecording  # noqa: E402
 from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
 from trainingsapp.devices.simulated import SIM_SYNTH, SimulatedSource  # noqa: E402
@@ -32,13 +33,15 @@ def daten(tmp_path, monkeypatch):
 
 def _seite() -> SimpleNamespace:
     aufrufe: list[object] = []
+    aufgaben: list = []
     return SimpleNamespace(
         route="/",
         views=[],
         update=lambda: None,
         show_dialog=aufrufe.append,
         pop_dialog=lambda: None,
-        run_task=lambda f, *a: None,
+        run_task=lambda f, *a: aufgabe_starten(aufgaben, f, *a),
+        aufgaben=aufgaben,
         aufrufe=aufrufe,
     )
 

@@ -139,6 +139,20 @@ class Ablage:
         self.behalten = behalten
 
 
+def aufgabe_starten(aufgaben: list, f, *args):
+    """Wie `page.run_task`: ein Task im laufenden Loop — gemerkt in ``aufgaben``, damit ein
+    Test ihn abwarten kann (``await asyncio.gather(*seite.aufgaben)``). Ohne laufenden Loop
+    (synchroner Test) läuft die Aufgabe sofort zu Ende, wie ein gewöhnlicher Aufruf: Die
+    Ansichten lesen und schreiben Messdateien seit dem 19.10.2026 in Threads (H39)."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(f(*args))
+    aufgabe = loop.create_task(f(*args))
+    aufgaben.append(aufgabe)
+    return aufgabe
+
+
 class Seite:
     """Stellvertreter für `ft.Page` (ohne flet): Aufgaben laufen im Loop des Tests."""
 
@@ -149,9 +163,7 @@ class Seite:
         self.aufgaben: list = []
 
     def run_task(self, f, *args):
-        aufgabe = asyncio.get_running_loop().create_task(f(*args))
-        self.aufgaben.append(aufgabe)
-        return aufgabe
+        return aufgabe_starten(self.aufgaben, f, *args)
 
     def show_dialog(self, d) -> None:
         self.dialoge.append(d)

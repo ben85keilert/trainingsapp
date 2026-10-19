@@ -39,12 +39,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from bisect import bisect_left
 from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from functools import partial
+from pathlib import Path
 from typing import Any
 
 import flet as ft
@@ -69,22 +71,20 @@ from hrv_core.frequency import Fensterspektrum, frequenzbereich
 from hrv_core.korrektur import (
     Kette,
     Korrektur,
+    Korrekturstand,
     Korrigiert,
     SidecarFehler,
-    analyse_lesen,
-    analyse_regeln,
     analyse_speichern,
-    analysebasis,
     anwenden,
     korr_zeiten,
+    korrektur_laden,
+    korrekturstand,
     rohfolge,
     vorauswahl,
-    vorschlaege,
     zuschneiden,
 )
 from hrv_core.nonlinear import compute_dfa_alpha1, compute_poincare, compute_sampen
 from hrv_core.ppi import ppi_verworfen, schlagzeiten
-from hrv_core.recording import Recording, laden
 from hrv_core.regeln import Korrekturregeln
 from hrv_core.segments import filter_rr
 from hrv_core.time_domain import compute_time_domain
@@ -399,8 +399,131 @@ ABSCHNITTE = "abschnitte"
 
 
 def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -> ft.View:
+    """Die Auswertung einer Aufzeichnung.
+
+    Die Ansicht steht sofort; Messdatei und Sidecar liest ein Thread (`_laden` — H39:
+    eine 4-h-Datei hielt den Event-Loop sekundenlang an), danach baut `_aufbauen` den
+    Inhalt — sofern die Ansicht noch die aktuelle ist (`state.route_nummer`).
+    """
     route = f"/messung/{eintrag.id}"
     pfad = messungenverzeichnis() / eintrag.file_path
+    inhalt = ft.Column(spacing=12)
+    view = ft.View(
+        route=route,
+        appbar=ft.AppBar(title=ft.Text(_titel(eintrag))),
+        scroll=ft.ScrollMode.AUTO,
+        padding=12,
+        controls=[sicher(inhalt, expand=False)],
+    )
+    if not pfad.exists():
+        inhalt.controls = [
+            ft.Text("Die Messdatei fehlt.", size=16, weight=ft.FontWeight.W_600),
+            ft.Text(str(pfad), size=12, selectable=True, opacity=0.7),
+        ]
+        return view
+    inhalt.controls = [
+        ft.Row(
+            spacing=10,
+            controls=[
+                ft.ProgressRing(width=20, height=20, stroke_width=2),
+                ft.Text("Messdatei wird gelesen …", opacity=0.7),
+            ],
+        )
+    ]
+    vorgabe = state.korrekturregeln()  # Datenbank: im Loop, nicht im Thread
+    ansicht_nummer = state.route_nummer
+
+    async def fuellen() -> None:
+        try:
+            geladen = await asyncio.to_thread(_laden, pfad, vorgabe)
+            if state.route_nummer != ansicht_nummer:
+                return  # die Ansicht ist schon verlassen
+            _aufbauen(page, state, eintrag, view, inhalt, geladen)
+        except Exception as fehler:
+            if state.route_nummer != ansicht_nummer:
+                return
+            logging.getLogger(__name__).exception("Messung %s nicht geöffnet", eintrag.id)
+            inhalt.controls = [
+                ft.Text(
+                    "Die Messdatei ließ sich nicht lesen.", size=16, weight=ft.FontWeight.W_600
+                ),
+                ft.Text(str(fehler), size=12, selectable=True, opacity=0.7),
+            ]
+        with contextlib.suppress(Exception):
+            page.update()
+
+    page.run_task(fuellen)
+    return view
+
+
+def _titel(eintrag: HrvRecording) -> str:
+    return f"Messung {eintrag.started_at.astimezone():%d.%m. %H:%M}"
+
+
+@dataclass
+class _Geladen:
+    """Was die Ansicht aus Messdatei und Sidecar braucht — gelesen und gerechnet im Thread."""
+
+    z: _Zustand
+    gespeicherte_regeln: Korrekturregeln | None
+    #: Das Sidecar gehört zu einer anderen oder veränderten Messdatei (hrv-core R16)
+    sidecar_alt: bool
+    #: Zeitachse der Zeilen der Rohdatei — Notizen hängen daran
+    zeilen_achse: list[float]
+    #: Kurvenachse → Herzuhr der Rohdatei (Sidecar)
+    nach_datei: Callable[[float], float]
+    #: Selbst markierte Abschnitte (Sidecar)
+    eigene: list[Any]
+
+
+def _laden(pfad: Path, vorgabe: Korrekturregeln) -> _Geladen:
+    """Messdatei, Regeln, Sidecar, Vorschläge und Auswahl (`hrv_core.korrektur.korrektur_laden`),
+    dazu Achsen und Abschnitte — nur Datei- und Rechenarbeit, darum im Thread (H39).
+
+    Regeln sind die der gespeicherten Korrektur, sonst ``vorgabe`` (gerätelokal; optische
+    Intervalle streuen mehr: Malik „nach Sensor" = 0.30, Vertrag Abschnitt 5). Passt die
+    Prüfsumme im Sidecar nicht zur Messdatei, gehören Korrekturen und Abschnitte zu einer
+    anderen oder veränderten Datei — per Index träfen sie falsche Schläge (hrv-core R16).
+    Dann gilt die Vorauswahl, und die Ansicht sagt es (``sidecar_alt``).
+    """
+    stand = korrektur_laden(pfad, vorgabe)
+    z = _Zustand(stand)
+    rec = stand.rec
+    sidecar_alt = stand.veraltet
+    # Notizen hängen an den Zeilen der Rohdatei; die Kurve hat ihre eigene Zeitachse
+    # (nur Puls: die Wanduhr, siehe `_Zustand`)
+    zeilen_achse = (
+        [float(b.t_wall_s or 0.0) for b in rec.beats] if z.nur_puls else schlagzeiten(rec)
+    )
+    # Crop und eigene Abschnitte stehen im Sidecar auf der Herzuhr der Rohdatei — die
+    # hat eine reine Pulsmessung nicht, dort gibt es beides nicht
+    nach_datei, nach_achse = achsen_umrechnung(zeilen_achse, [b.t_s for b in rec.beats])
+    if z.nur_puls or sidecar_alt:
+        eigene: list[Any] = []
+    else:
+        z.ausschnitt, eigene = zusatz_lesen(pfad, nach_achse)
+    return _Geladen(z, stand.gespeicherte_regeln, sidecar_alt, zeilen_achse, nach_datei, eigene)
+
+
+def _aufbauen(
+    page: ft.Page,
+    state: AppState,
+    eintrag: HrvRecording,
+    view: ft.View,
+    inhalt: ft.Column,
+    geladen: _Geladen,
+) -> None:
+    """Der Inhalt der Auswertung in ``view`` — alles, was Messdatei und Sidecar braucht."""
+    route = f"/messung/{eintrag.id}"
+    pfad = messungenverzeichnis() / eintrag.file_path
+    #: Schreibvorgänge auf Messdatei und Sidecar laufen in Threads, der Reihe nach (H39):
+    #: ein schnelles zweites Loslassen des Markenreglers überholt das erste nicht
+    sperre = asyncio.Lock()
+    ansicht_nummer = state.route_nummer
+
+    def aktuell() -> bool:
+        """Ist die Ansicht nach einem ``await`` noch die aktuelle?"""
+        return state.route_nummer == ansicht_nummer
 
     #: Die Leiste der Ansicht — das Vollbild nimmt sie ab und gibt sie zurück
     leiste_oben: ft.AppBar | None = None
@@ -419,10 +542,10 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         state.bezuege.zur_aufnahme(eintrag) if getattr(state, "bezuege", None) is not None else []
     )
 
-    def ansicht(inhalt: list[ft.Control]) -> ft.View:
+    def ansicht(teile: list[ft.Control]) -> ft.View:
         nonlocal leiste_oben
         leiste_oben = ft.AppBar(
-            title=ft.Text(f"Messung {eintrag.started_at.astimezone():%d.%m. %H:%M}"),
+            title=ft.Text(_titel(eintrag)),
             actions=[
                 ft.IconButton(
                     ft.Icons.CONTENT_CUT,
@@ -442,13 +565,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 ),
             ],
         )
-        return ft.View(
-            route=route,
-            appbar=leiste_oben,
-            scroll=ft.ScrollMode.AUTO,
-            padding=12,
-            controls=[sicher(ft.Column(spacing=12, controls=inhalt), expand=False)],
-        )
+        view.appbar = leiste_oben
+        inhalt.controls = teile
+        return view
 
     # -- Exportieren -----------------------------------------------------------
 
@@ -492,32 +611,16 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         ],
     )
 
-    if not pfad.exists():
-        return ansicht(
-            [
-                ft.Text("Die Messdatei fehlt.", size=16, weight=ft.FontWeight.W_600),
-                ft.Text(str(pfad), size=12, selectable=True, opacity=0.7),
-            ]
-        )
-
-    rec = laden(pfad)
+    z = geladen.z
+    rec = z.rec
+    gespeicherte_regeln = geladen.gespeicherte_regeln
+    sidecar_alt = geladen.sidecar_alt
+    zeilen_achse, eigene = geladen.zeilen_achse, geladen.eigene
+    nach_datei = geladen.nach_datei
     verworfen = ppi_verworfen(rec)
     verity = rec.ppi_pakete is not None
     einst = state.hrv_einstellungen()
-
-    # -- Zustand: Regeln → Basis → Vorschläge → Auswahl -------------------------
-    # Regeln der gespeicherten Korrektur, sonst die gerätelokale Vorgabe.
-    # Optische Intervalle streuen mehr: Malik „nach Sensor" = 0.30 (Vertrag, Abschnitt 5).
-    gespeicherte_regeln = analyse_regeln(pfad)
-    z = _Zustand(rec, gespeicherte_regeln or state.korrekturregeln())
     zuschneidbar = not z.nur_puls
-    sidecar = analyse_lesen(pfad, z.basis)
-    # Passt die Prüfsumme im Sidecar nicht zur Messdatei, gehören Korrekturen und
-    # Abschnitte zu einer anderen oder veränderten Datei — per Index träfen sie
-    # falsche Schläge (hrv-core R16). Dann gilt die Vorauswahl, und die Ansicht sagt es.
-    sidecar_alt = sidecar.veraltet
-    z.gespeichert = [] if sidecar_alt else sidecar.korrekturen
-    z.auswahl_aus(z.gespeichert, ohne_sidecar=gespeicherte_regeln is None or sidecar_alt)
     #: Auswahl und Regeln beim Öffnen bzw. beim letzten Speichern. Zurück speichert nur,
     #: was seither geändert wurde — ohne Sidecar gilt schon die Vorauswahl als
     #: ungespeichert, die schreibt Zurück nicht ungefragt.
@@ -535,18 +638,6 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         if start_breite
         else Fenster(dauer or 1.0, None)
     )
-    # Notizen hängen an den Zeilen der Rohdatei; die Kurve hat ihre eigene Zeitachse
-    # (nur Puls: die Wanduhr, siehe `_Zustand`)
-    zeilen_achse = (
-        [float(b.t_wall_s or 0.0) for b in rec.beats] if z.nur_puls else schlagzeiten(rec)
-    )
-    # Crop und eigene Abschnitte stehen im Sidecar auf der Herzuhr der Rohdatei — die
-    # hat eine reine Pulsmessung nicht, dort gibt es beides nicht
-    nach_datei, nach_achse = achsen_umrechnung(zeilen_achse, [b.t_s for b in rec.beats])
-    if z.nur_puls or sidecar_alt:
-        eigene: list[Any] = []
-    else:
-        z.ausschnitt, eigene = zusatz_lesen(pfad, nach_achse)
     zeitbezug = Zeitbezug(lambda: rec.beats, rec.start_utc, achse=lambda: zeilen_achse)
 
     kopf_text = ft.Text(size=13, opacity=0.8)
@@ -1156,10 +1247,17 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         chips_zeichnen()
 
     def zusatz_sichern() -> None:
-        try:
-            zusatz_speichern(pfad, z.ausschnitt, eigene, nach_datei)
-        except (OSError, SidecarFehler) as fehler:
-            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
+        """Crop und Abschnitte ins Sidecar — ein Thread schreibt den Stand von jetzt (H39)."""
+        ausschnitt, liste = z.ausschnitt, [replace(a) for a in eigene]
+
+        async def schreiben() -> None:
+            try:
+                async with sperre:
+                    await asyncio.to_thread(zusatz_speichern, pfad, ausschnitt, liste, nach_datei)
+            except (OSError, SidecarFehler) as fehler:
+                page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
+
+        page.run_task(schreiben)
 
     def abschnitt_loeschen(a: Abschnitt) -> None:
         vorher = list(eigene)
@@ -1819,14 +1917,24 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     # -- Notizen ---------------------------------------------------------------
 
     def notizen_speichern(liste: list[dict]) -> None:
-        """Als Metadaten in die Messdatei — wie praxis_gui; die Messwerte bleiben."""
-        try:
-            sha1 = metadaten_schreiben(pfad, ereignisse=liste)
-        except (OSError, ValueError) as fehler:
-            page.show_dialog(ft.SnackBar(ft.Text(f"Notiz nicht gespeichert: {fehler}")))
-            return
+        """Als Metadaten in die Messdatei — wie praxis_gui; die Messwerte bleiben.
+
+        Die Ansicht übernimmt die Liste sofort (die nächste Änderung baut darauf auf);
+        geschrieben wird in einem Thread, ein Vorgang nach dem anderen (`sperre`, H39).
+        """
         rec.ereignisse = list(liste)
-        state.hrv.sha1_setzen(eintrag.id, sha1)
+        kopie = [dict(e) for e in liste]
+
+        async def schreiben() -> None:
+            try:
+                async with sperre:
+                    sha1 = await asyncio.to_thread(metadaten_schreiben, pfad, ereignisse=kopie)
+            except (OSError, ValueError) as fehler:
+                page.show_dialog(ft.SnackBar(ft.Text(f"Notiz nicht gespeichert: {fehler}")))
+                return
+            state.hrv.sha1_setzen(eintrag.id, sha1)  # Datenbank: im Loop
+
+        page.run_task(schreiben)
 
     def notizen_offen(offen: bool) -> None:
         state.notizen_offen = offen
@@ -2128,22 +2236,32 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         z.uebernommen.clear()
         zeichnen()
 
-    def korrektur_sichern() -> str | None:
-        """Korrektur ins Sidecar — ``None`` = gespeichert, sonst der Fehler."""
+    async def korrektur_sichern() -> str | None:
+        """Korrektur ins Sidecar (Thread, H39) — ``None`` = gespeichert, sonst der Fehler.
+
+        Geschrieben wird der Stand beim Aufruf; was die Person währenddessen ändert,
+        bleibt ungespeichert und der Knopf dafür aktiv."""
         nonlocal gespeicherte_regeln
+        korrekturen, regeln, basis = z.korrekturen(), z.regeln, z.basis
+        auswahl = frozenset(z.uebernommen)
         try:
-            analyse_speichern(pfad, rec, z.korrekturen(), regeln=z.regeln, basis=z.basis)
+            async with sperre:
+                await asyncio.to_thread(
+                    analyse_speichern, pfad, rec, korrekturen, regeln=regeln, basis=basis
+                )
         except (OSError, SidecarFehler) as fehler:
             return str(fehler)
-        z.gespeichert = z.korrekturen()
-        gespeicherte_regeln = z.regeln
-        bezug[0] = (frozenset(z.uebernommen), z.regeln)
+        z.gespeichert = korrekturen
+        gespeicherte_regeln = regeln
+        bezug[0] = (auswahl, regeln)
         zurueck_pruefen()
         return None
 
     async def speichern() -> None:
-        if (fehler := korrektur_sichern()) is not None:
+        if (fehler := await korrektur_sichern()) is not None:
             page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
+            return
+        if not aktuell():
             return
         page.show_dialog(ft.SnackBar(ft.Text(KORREKTUR_GESPEICHERT)))
         zeichnen()
@@ -2151,10 +2269,25 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     speichern_knopf.on_click = speichern
 
     def regeln_oeffnen() -> None:
+        auftrag = [0]
+
         def aendern(regeln: Korrekturregeln) -> None:
-            neu = analyse_lesen(pfad, analysebasis(rec, regeln))
-            z.regeln_setzen(regeln, [] if neu.veraltet else neu.korrekturen)
-            zeichnen()
+            """Neue Regeln: Basis, Vorschläge und Sidecar dazu rechnet ein Thread; kommt
+            vorher die nächste Änderung, zählt nur die letzte (wie `nachrechnen_planen`)."""
+            auftrag[0] += 1
+            nummer = auftrag[0]
+
+            async def rechnen() -> None:
+                async with sperre:
+                    if nummer != auftrag[0]:
+                        return
+                    stand = await asyncio.to_thread(korrekturstand, pfad, rec, regeln)
+                if nummer != auftrag[0] or not aktuell():
+                    return
+                z.regeln_setzen(stand)
+                zeichnen()
+
+            page.run_task(rechnen)
 
         def merken(regeln: Korrekturregeln) -> None:
             state.korrekturregeln_setzen(regeln)
@@ -2204,20 +2337,28 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         titel_box.content = titel_kopf(rec.titel, beschreibung, titel_bearbeiten)
 
     def titel_speichern(titel: str, text: str) -> None:
+        """In die Messdatei (Thread, H39); die Kopien in der Datenbank folgen, wenn sie steht."""
         nonlocal beschreibung
         if titel == rec.titel and text == (rec.notiz or ""):
             return
-        try:
-            sha1 = metadaten_schreiben(pfad, titel=titel, notiz=text)
-        except (OSError, ValueError) as fehler:
-            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
-            return
         rec.titel, rec.notiz, beschreibung = titel, text, text
-        state.hrv.titel_setzen(eintrag.id, titel)
-        state.hrv.notiz_setzen(eintrag.id, text)
-        state.hrv.sha1_setzen(eintrag.id, sha1)
         titel_zeichnen()
         page.update()
+
+        async def schreiben() -> None:
+            try:
+                async with sperre:
+                    sha1 = await asyncio.to_thread(
+                        metadaten_schreiben, pfad, titel=titel, notiz=text
+                    )
+            except (OSError, ValueError) as fehler:
+                page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
+                return
+            state.hrv.titel_setzen(eintrag.id, titel)
+            state.hrv.notiz_setzen(eintrag.id, text)
+            state.hrv.sha1_setzen(eintrag.id, sha1)
+
+        page.run_task(schreiben)
 
     def titel_bearbeiten() -> None:
         von = eintrag.started_at
@@ -2522,7 +2663,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         with contextlib.suppress(Exception):
             await view.confirm_pop(False)  # weiter geht es unten selbst
         ziel = zurueck_ziel(page, view)
-        if (fehler := korrektur_sichern()) is None:
+        if (fehler := await korrektur_sichern()) is None:
             page.show_dialog(ft.SnackBar(ft.Text(KORREKTUR_GESPEICHERT)))
             await page.push_route(ziel)
             return
@@ -2786,11 +2927,10 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             ft.Text(f"Datei: {eintrag.file_path}", size=11, opacity=0.5, selectable=True),
         ],
     )
-    view = ansicht([normal_inhalt])
+    ansicht([normal_inhalt])
     view.on_confirm_pop = zurueck_im_vollbild
     gebaut.append(view)
     zurueck_pruefen()
-    return view
 
 
 # ---------------------------------------------------------------------------
@@ -2950,24 +3090,28 @@ def _nichtlinear_tabelle(n: dict[str, Any], optisch: bool) -> ft.Control:
 class _Zustand:
     """Was die Detailansicht über die Korrektur weiß — ohne Oberfläche.
 
-    Regeln → Analysebasis (`korrektur.analysebasis`) → Vorschläge → Auswahl.
-    Ändern sich die Regeln, entsteht alles dahinter neu.
+    Regeln → Analysebasis → Vorschläge → Auswahl kommen als `Korrekturstand` aus
+    hrv-core (`korrektur_laden`, `korrekturstand`); hier liegen Kurvenachsen,
+    Zwischenergebnisse und die Auswahl, die die Person ändert. Ändern sich die
+    Regeln, entsteht alles dahinter neu (`regeln_setzen`).
     """
 
-    def __init__(self, rec: Recording, regeln: Korrekturregeln) -> None:
-        self.rec = rec
+    def __init__(self, stand: Korrekturstand) -> None:
+        self.rec = stand.rec
         self.gespeichert: list[Korrektur] = []
         self.uebernommen: set[int] = set()
         #: Crop auf der Kurvenachse — ``None`` = die ganze Messung zählt
         self.ausschnitt: tuple[float, float] | None = None
-        self._basis_bauen(regeln)
+        self._stand_uebernehmen(stand)
 
-    def _basis_bauen(self, regeln: Korrekturregeln) -> None:
+    def _stand_uebernehmen(self, stand: Korrekturstand) -> None:
         self._korr: tuple[frozenset[int], Korrigiert] | None = None
         self._gemerkt: dict[str, tuple[Any, Any]] = {}
-        self.regeln = regeln
-        self.basis = analysebasis(self.rec, regeln)
-        self.ketten: list[Kette] = vorschlaege(self.basis.rec, regeln)
+        self.regeln = stand.regeln
+        self.basis = stand.basis
+        self.ketten: list[Kette] = stand.ketten
+        self.gespeichert = stand.gespeichert
+        self.uebernommen = set(stand.uebernommen)
         self._roh = anwenden(self.basis.rec, [])
         # Zeitachse: Herzuhr aller Intervalle — bei der Verity Sense samt der vom
         # Sensor verworfenen, sonst schrumpfte die Messung um deren Dauer.
@@ -2988,23 +3132,11 @@ class _Zustand:
             (x, float(b.hf_bpm)) for x, b in zip(self.achse, beats, strict=True) if b.hf_bpm > 0
         ]
 
-    def auswahl_aus(self, gespeichert: list[Korrektur], *, ohne_sidecar: bool) -> None:
-        """Übernommen sind die gespeicherten Ketten — ohne Sidecar die Vorauswahl."""
-        if ohne_sidecar and not gespeichert:
-            self.uebernommen = vorauswahl(self.ketten, self.regeln.vorauswahl)
-            return
-        indizes = {k.beat_index for k in gespeichert}
-        self.uebernommen = {
-            i
-            for i, k in enumerate(self.ketten)
-            if any(v.beat_index in indizes for v in k.vorschlag)
-        }
-
-    def regeln_setzen(self, regeln: Korrekturregeln, gespeichert: list[Korrektur]) -> None:
-        """Neue Regeln: neue Basis und Vorschläge, Auswahl nach Vorauswahl der Regeln."""
-        self._basis_bauen(regeln)
-        self.gespeichert = gespeichert
-        self.uebernommen = vorauswahl(self.ketten, regeln.vorauswahl)
+    def regeln_setzen(self, stand: Korrekturstand) -> None:
+        """Neue Regeln (`korrekturstand`): neue Basis und Vorschläge, Auswahl nach der
+        Vorauswahl der Regeln — nicht nach dem Sidecar."""
+        self._stand_uebernehmen(stand)
+        self.uebernommen = vorauswahl(self.ketten, stand.regeln.vorauswahl)
 
     def korrekturen(self) -> list[Korrektur]:
         return [v for i in sorted(self.uebernommen) for v in self.ketten[i].vorschlag]

@@ -21,6 +21,7 @@ ft = pytest.importorskip("flet")
 
 from hrv_core.recording import laden  # noqa: E402
 
+from attrappen import aufgabe_starten  # noqa: E402
 from trainingsapp.core.hrv_einstellungen import HrvEinstellungen  # noqa: E402
 from trainingsapp.core.models import HrvRecording  # noqa: E402
 from trainingsapp.ui.components import zeitfenster  # noqa: E402
@@ -41,13 +42,23 @@ def daten(tmp_path, monkeypatch):
 
 
 def _seite(aufgaben: list | None = None) -> SimpleNamespace:
+    """``aufgaben``: das Nachrechnen nach der Latenz (`spaeter`) wird nur gesammelt, der
+    Test stößt es selbst an; alles andere (Messdatei lesen, Sidecar schreiben — Threads
+    seit 19.10., H39) läuft sofort zu Ende (`attrappen.aufgabe_starten`)."""
+
+    def run_task(f, *a):
+        if aufgaben is not None and f.__name__ == "spaeter":
+            aufgaben.append(f)
+            return None
+        return aufgabe_starten([], f, *a)
+
     return SimpleNamespace(
         route="/",
         views=[],
         update=lambda: None,
         show_dialog=lambda *_: None,
         pop_dialog=lambda: None,
-        run_task=(lambda f, *a: aufgaben.append(f)) if aufgaben is not None else lambda f, *a: None,
+        run_task=run_task,
     )
 
 

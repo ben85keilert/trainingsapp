@@ -47,16 +47,12 @@ from typing import Any
 import flet as ft
 from hrv_core.korrektur import (
     Korrigiert,
-    analyse_lesen,
-    analyse_regeln,
-    analysebasis,
-    anwenden,
     korr_zeiten,
-    vorauswahl,
-    vorschlaege,
+    korrektur_laden,
 )
 from hrv_core.ppi import schlagzeiten
-from hrv_core.recording import Recording, laden
+from hrv_core.recording import Recording
+from hrv_core.regeln import Korrekturregeln
 from hrv_core.trends import aktuell, reihe
 
 from trainingsapp.config import streckenverzeichnis
@@ -736,24 +732,17 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
 # ---------------------------------------------------------------------------
 
 
-def _hrv_laden(state: AppState, bezug: HrvBezug | None) -> tuple[Recording, Korrigiert] | None:
-    """Die HRV-Aufnahme des Trainings, korrigiert wie in ihrer Auswertung (Sidecar, Regeln) —
-    direkt verknüpft oder über die Einheit (`ui.training.hrv_bezug`)."""
+def _hrv_laden(
+    bezug: HrvBezug | None, vorgabe: Korrekturregeln
+) -> tuple[Recording, Korrigiert] | None:
+    """Die HRV-Aufnahme des Trainings, korrigiert wie in ihrer Auswertung (Sidecar, Regeln —
+    `hrv_core.korrektur.korrektur_laden`), direkt verknüpft oder über die Einheit
+    (`ui.training.hrv_bezug`). ``vorgabe``: die gerätelokalen Regeln, wenn das Sidecar
+    keine hat. Liest Dateien und rechnet — die Ansicht ruft es in einem Thread (H39)."""
     if bezug is None or not bezug.pfad.exists():
         return None
-    pfad = bezug.pfad
-    rec = laden(pfad)
-    regeln = analyse_regeln(pfad) or state.korrekturregeln()
-    basis = analysebasis(rec, regeln)
-    sidecar = analyse_lesen(pfad, basis)
-    if sidecar.korrekturen and not sidecar.veraltet:  # veraltet: andere Datei (R16)
-        korrekturen = sidecar.korrekturen
-    else:
-        ketten = vorschlaege(basis.rec, regeln)
-        korrekturen = [
-            v for i in sorted(vorauswahl(ketten, regeln.vorauswahl)) for v in ketten[i].vorschlag
-        ]
-    return basis.rec, anwenden(basis.rec, korrekturen)
+    stand = korrektur_laden(bezug.pfad, vorgabe)
+    return stand.basis.rec, stand.anwenden()
 
 
 def _zu_wand(bezug: HrvBezug | None, rec: Recording, t: float) -> float | None:
@@ -884,7 +873,9 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
             punkte = jsonl_lesen(pfad)
     r = rechnen(punkte, strecke.sportart) if punkte else None
     bezug = hrv_bezug(state, strecke)
-    hrv = _hrv_laden(state, bezug)
+    vorgabe = state.korrekturregeln()  # Datenbank: im Loop, nicht im Thread (H39)
+    #: Die HRV-Aufnahme, sobald gelesen — `fuellen` setzt sie, `gpx_export` liest sie
+    geladen: list[tuple[Recording, Korrigiert] | None] = [None]
     eintrag = bezug.aufnahme if bezug is not None else None
     ekg = bool(eintrag and eintrag.intervall_quelle == "ekg_rr")
     zeitleiste, versatz_gps = zeitleiste_und_versatz(state, strecke)
@@ -894,7 +885,7 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         if not punkte:
             return
         herz: dict[float, int] = {}
-        if hrv is not None:
+        if (hrv := geladen[0]) is not None:
             wand = {p.t: w for p in punkte if (w := _zu_wand(bezug, hrv[0], p.t)) is not None}
             je_wand = hf_je_zeit(hrv[0], list(wand.values()))
             herz = {t: bpm for t, w in wand.items() if (bpm := je_wand.get(w)) is not None}
@@ -967,84 +958,8 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
             ),
         ],
     )
-    teile: list[ft.Control] = [
-        karte(
-            ft.Row(
-                controls=[
-                    ft.Icon(SPORT_SYMBOLE.get(strecke.sportart, ft.Icons.DIRECTIONS_RUN)),
-                    titel(SPORT_NAMEN.get(strecke.sportart, strecke.sportart)),
-                ]
-            ),
-            ueberblick,
-            ft.Text(
-                f"Höhe: {zahl_text(strecke.hoehe_auf_m)} m hinauf, "
-                f"{zahl_text(strecke.hoehe_ab_m)} m hinab (nur in Bewegung, ab 5 m)",
-                size=12,
-                opacity=0.7,
-            ),
-        ),
-        karte(titel("Strecke"), ganze_strecke(r.teilstuecke if r is not None else [])),
-    ]
-    # Die Abschnitte des Timers, der mitlief (Skizze 6) — aus der Zeitleiste der Einheit
-    herz: HerzQuelle | None = None
-    if hrv is not None and bezug is not None and bezug.beginn_s is not None:
-        herz = herz_aus_messung(*hrv, bezug.beginn_s, dfa=ekg)
-    weg = None
-    if r is not None and versatz_gps is not None:
-        weg = strecke_auf_achse(r, versatz_gps)
-    runden = intervalle(zeitleiste, strecke=weg, herz=herz)
-    if runden:
-        teile.append(
-            karte(
-                titel("Intervalle (vom Timer)"),
-                intervall_tabelle(
-                    runden,
-                    strecke.sportart,
-                    strecke=weg is not None,
-                    hf=herz is not None,
-                    dfa=herz is not None and ekg,
-                ),
-            )
-        )
-    if r is not None and r.splits_mit_rest():
-        teile.append(
-            karte(
-                titel("Je Kilometer" if strecke.sportart != RAD else "Je 5 Kilometer"),
-                _km_tabelle(strecke, r.splits_mit_rest(), hrv, ekg, bezug),
-            )
-        )
-    if hrv is not None and ekg:
-        dfa = _dfa_teil(hrv, strecke.started_at, bezug.beginn_s if bezug else None)
-        if dfa is not None:
-            teile.append(karte(titel("DFA α1 — Überblick"), dfa))
-    if eintrag is not None:  # nicht nur die ID — die Aufnahme kann gelöscht sein
-        teile.append(
-            karte(
-                titel("HRV"),
-                hinweis("Die Herzfrequenz-Aufnahme dieses Trainings, mit Abschnitten je km."),
-                ft.FilledTonalButton(
-                    "HRV-Auswertung öffnen", icon=ft.Icons.MONITOR_HEART, on_click=hrv_oeffnen
-                ),
-            )
-        )
-    elif bezug is not None and not bezug.pfad.exists():
-        # Die HRV-Messung lief schon vor dem Training und läuft noch (eine Einheit)
-        teile.append(
-            karte(
-                titel("HRV"),
-                hinweis(
-                    "Die HRV-Messung läuft noch. Herzfrequenz und DFA α1 je Kilometer "
-                    "erscheinen hier, sobald sie gespeichert ist."
-                ),
-            )
-        )
-    teile.append(
-        hinweis(
-            "Die Strecke bleibt auf dem Handy. „GPX exportieren“ (oben) gibt sie ausdrücklich "
-            "heraus — Strava, Komoot, Garmin Connect und OsmAnd lesen GPX."
-        )
-    )
-    return ft.View(
+    inhalt = ft.Column(spacing=12)
+    view = ft.View(
         route=route,
         appbar=ft.AppBar(
             title=ft.Text(f"{SPORT_NAMEN.get(strecke.sportart, '')} {lokal:%d.%m. %H:%M}"),
@@ -1070,8 +985,125 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         ),
         scroll=ft.ScrollMode.AUTO,
         padding=12,
-        controls=[sicher(ft.Column(spacing=12, controls=teile), expand=False)],
+        controls=[sicher(inhalt, expand=False)],
     )
+
+    def fuellen(hrv: tuple[Recording, Korrigiert] | None, fehler: str | None = None) -> None:
+        """Der Inhalt der Ansicht — mit der gelesenen HRV-Aufnahme oder ohne sie."""
+        geladen[0] = hrv
+        teile: list[ft.Control] = [
+            karte(
+                ft.Row(
+                    controls=[
+                        ft.Icon(SPORT_SYMBOLE.get(strecke.sportart, ft.Icons.DIRECTIONS_RUN)),
+                        titel(SPORT_NAMEN.get(strecke.sportart, strecke.sportart)),
+                    ]
+                ),
+                ueberblick,
+                ft.Text(
+                    f"Höhe: {zahl_text(strecke.hoehe_auf_m)} m hinauf, "
+                    f"{zahl_text(strecke.hoehe_ab_m)} m hinab (nur in Bewegung, ab 5 m)",
+                    size=12,
+                    opacity=0.7,
+                ),
+            ),
+            karte(titel("Strecke"), ganze_strecke(r.teilstuecke if r is not None else [])),
+        ]
+        # Die Abschnitte des Timers, der mitlief (Skizze 6) — aus der Zeitleiste der Einheit
+        herz: HerzQuelle | None = None
+        if hrv is not None and bezug is not None and bezug.beginn_s is not None:
+            herz = herz_aus_messung(*hrv, bezug.beginn_s, dfa=ekg)
+        weg = None
+        if r is not None and versatz_gps is not None:
+            weg = strecke_auf_achse(r, versatz_gps)
+        runden = intervalle(zeitleiste, strecke=weg, herz=herz)
+        if runden:
+            teile.append(
+                karte(
+                    titel("Intervalle (vom Timer)"),
+                    intervall_tabelle(
+                        runden,
+                        strecke.sportart,
+                        strecke=weg is not None,
+                        hf=herz is not None,
+                        dfa=herz is not None and ekg,
+                    ),
+                )
+            )
+        if r is not None and r.splits_mit_rest():
+            teile.append(
+                karte(
+                    titel("Je Kilometer" if strecke.sportart != RAD else "Je 5 Kilometer"),
+                    _km_tabelle(strecke, r.splits_mit_rest(), hrv, ekg, bezug),
+                )
+            )
+        if hrv is not None and ekg:
+            dfa = _dfa_teil(hrv, strecke.started_at, bezug.beginn_s if bezug else None)
+            if dfa is not None:
+                teile.append(karte(titel("DFA α1 — Überblick"), dfa))
+        if eintrag is not None:  # nicht nur die ID — die Aufnahme kann gelöscht sein
+            teile.append(
+                karte(
+                    titel("HRV"),
+                    hinweis("Die Herzfrequenz-Aufnahme dieses Trainings, mit Abschnitten je km."),
+                    ft.FilledTonalButton(
+                        "HRV-Auswertung öffnen", icon=ft.Icons.MONITOR_HEART, on_click=hrv_oeffnen
+                    ),
+                )
+            )
+        elif bezug is not None and not bezug.pfad.exists():
+            # Die HRV-Messung lief schon vor dem Training und läuft noch (eine Einheit)
+            teile.append(
+                karte(
+                    titel("HRV"),
+                    hinweis(
+                        "Die HRV-Messung läuft noch. Herzfrequenz und DFA α1 je Kilometer "
+                        "erscheinen hier, sobald sie gespeichert ist."
+                    ),
+                )
+            )
+        teile.append(
+            hinweis(
+                "Die Strecke bleibt auf dem Handy. „GPX exportieren“ (oben) gibt sie ausdrücklich "
+                "heraus — Strava, Komoot, Garmin Connect und OsmAnd lesen GPX."
+            )
+        )
+        if fehler:
+            teile.append(
+                karte(titel("HRV"), hinweis(f"Die HRV-Aufnahme ließ sich nicht lesen: {fehler}"))
+            )
+        inhalt.controls = teile
+
+    if bezug is None or not bezug.pfad.exists():
+        fuellen(None)  # keine Messdatei zu lesen (auch: die Messung läuft noch) — sofort
+    else:
+        # Messdatei und Sidecar liest ein Thread (H39); danach füllt sich die Ansicht,
+        # sofern sie noch die aktuelle ist (wie der Ticker oben, H35)
+        ansicht_nummer = state.route_nummer
+        inhalt.controls = [
+            ft.Row(
+                spacing=10,
+                controls=[
+                    ft.ProgressRing(width=20, height=20, stroke_width=2),
+                    ft.Text("HRV-Aufnahme wird gelesen …", opacity=0.7),
+                ],
+            )
+        ]
+
+        async def laden_async() -> None:
+            fehler: str | None = None
+            try:
+                hrv = await asyncio.to_thread(_hrv_laden, bezug, vorgabe)
+            except (OSError, ValueError) as f:
+                hrv, fehler = None, str(f)
+            if state.route_nummer != ansicht_nummer:
+                return  # die Ansicht ist schon verlassen
+            fuellen(hrv, fehler)
+            with contextlib.suppress(Exception):
+                page.update()
+
+        page.run_task(laden_async)
+    return view
 
 
 # ---------------------------------------------------------------------------

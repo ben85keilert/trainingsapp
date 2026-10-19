@@ -1112,7 +1112,13 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             ],
         )
 
+    #: „Stopp & speichern“ läuft — ein zweiter Tipp, während die Datei geschrieben wird,
+    #: tut nichts
+    stoppt = [False]
+
     async def aufnahme_stoppen() -> None:
+        if stoppt[0]:
+            return
         e = einheit_ui.laeuft(state)
         # Eine Messung mit Dauer oder Ablauf: „Stopp“ beendet auch ihren Timer — eine
         # Einheit mit Training oder Plan läuft weiter (die HRV verlässt sie nur)
@@ -1122,7 +1128,13 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             and e.hrv.messlauf is lauf
             and {t.art for t in e.teile} <= {"hrv", "timer"}
         )
-        ergebnis = lauf.aufnahme_stoppen(datenverzeichnis())
+        stoppt[0] = True
+        try:
+            # Die Messdatei schreibt ein Thread (H39: eine 4-h-Datei hielt die Oberfläche
+            # an); bis dahin bleibt die Aufnahme im Lauf, nimmt aber nichts mehr auf
+            ergebnis = await lauf.aufnahme_stoppen_async(datenverzeichnis())
+        finally:
+            stoppt[0] = False
         if nur_messung and e is not None and not e.ende_wenn_alles_fertig:
             einheit_ui.alle_beenden(state)
         # Aus Einzelstarts: Die Einheit endet von selbst, sobald nichts mehr läuft — ein

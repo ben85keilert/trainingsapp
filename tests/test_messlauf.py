@@ -479,3 +479,74 @@ async def test_name_und_adresse_stehen_getrennt_in_der_messdatei(
     assert doc["geraet"] == geraet
     assert doc.get("adresse") == adresse
     assert lauf.geraet_name == (name or device_id)  # Anzeige behält den Notnagel
+
+
+@pytest.mark.asyncio
+async def test_stoppen_im_thread_nimmt_keine_schlaege_mehr_auf(tmp_path, monkeypatch) -> None:
+    """H39: `aufnahme_stoppen_async` schreibt die Messdatei in einem Thread. Derweil
+    läuft die Live-Anzeige weiter, aber kein Schlag kommt mehr in die Aufnahme, sie bleibt
+    bis zum fertigen Schreiben im Lauf (H24), und ein zweiter Stopp speichert nichts
+    doppelt. Ein Schreibfehler lässt sie wie bei `aufnahme_stoppen` im Lauf."""
+    import threading
+
+    from hrv_core.aufnahme import Aufnahme
+
+    quelle = SimulatedSource(tempo=60.0, seed=7)
+    lauf = Messlauf(quelle, backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 10:
+        await asyncio.sleep(0.01)
+    aufnahme = lauf.aufnahme
+    assert aufnahme is not None
+    original = Aufnahme.speichern
+    weiter = threading.Event()
+    gesehen: dict[str, object] = {}
+
+    def langsam(self, ordner):
+        gesehen["schlaege"] = len(self.beats)
+        gesehen["im_thread"] = threading.current_thread() is not threading.main_thread()
+        weiter.wait(5)  # der Loop empfängt derweil weiter
+        return original(self, ordner)
+
+    monkeypatch.setattr(Aufnahme, "speichern", langsam)
+    stopp = asyncio.create_task(lauf.aufnahme_stoppen_async(tmp_path))
+    while "schlaege" not in gesehen:
+        await asyncio.sleep(0.005)
+    n = gesehen["schlaege"]
+    live_vorher = lauf.live.kennzahlen().schlaege
+    for _ in range(20):
+        await asyncio.sleep(0.01)
+    assert lauf.aufnahme is aufnahme and len(aufnahme.beats) == n  # nichts mehr hinein
+    assert lauf.live.kennzahlen().schlaege > live_vorher  # die Anzeige läuft weiter
+    assert await lauf.aufnahme_stoppen_async(tmp_path) is None  # ein zweiter Stopp
+    assert lauf.aufnahme_stoppen(tmp_path) is None
+    assert lauf.aufnahme is aufnahme
+    weiter.set()
+    ergebnis = await stopp
+    assert ergebnis is not None and lauf.aufnahme is None and gesehen["im_thread"] is True
+    assert len(laden(ergebnis.pfad).beats) == n
+    assert not list(tmp_path.rglob(".backup_*"))
+
+    # Schreibfehler: die Aufnahme bleibt im Lauf und nimmt wieder auf (H24)
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 5:
+        await asyncio.sleep(0.01)
+
+    def kaputt(self, ordner):
+        raise OSError("Speicher voll")
+
+    monkeypatch.setattr(Aufnahme, "speichern", kaputt)
+    with pytest.raises(OSError):
+        await lauf.aufnahme_stoppen_async(tmp_path)
+    zweite = lauf.aufnahme
+    assert zweite is not None and zweite.beats
+    m = len(zweite.beats)
+    for _ in range(20):
+        await asyncio.sleep(0.01)
+    assert len(zweite.beats) > m  # nicht mehr gesperrt
+    monkeypatch.setattr(Aufnahme, "speichern", original)
+    assert await lauf.aufnahme_stoppen_async(tmp_path) is not None and lauf.aufnahme is None
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)

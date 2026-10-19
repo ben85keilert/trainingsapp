@@ -128,8 +128,8 @@ def test_uebung_kurve_und_ergebnisse(state) -> None:
     _eintragen(state, LIEGESTUETZ, heute - timedelta(days=5), reps=[12, 14])
     state.verlauf_zeitraum = "alles"
     ansicht = verlauf_kachel_view(Seite(), state, LIEGESTUETZ)
-    (auswahl,) = [x for x in _alle(ansicht) if isinstance(x, ft.Dropdown)]
-    assert auswahl.label == "Kennzahl" and len(auswahl.options) == 2
+    chips = [x for x in _alle(ansicht) if isinstance(x, ft.Chip)]
+    assert len(chips) == 2 and [c.selected for c in chips] == [True, False]
     (kurve,) = [x for x in _alle(ansicht) if isinstance(x, fc.LineChart)]
     assert [p.y for p in kurve.data_series[0].points] == [20, 26]
     assert {lbl.label.value for lbl in kurve.left_axis.labels} >= {"0", "10", "20", "30"}
@@ -146,8 +146,11 @@ def test_uebung_kurve_und_ergebnisse(state) -> None:
         if isinstance(x, ft.Container) and x.bgcolor == ft.Colors.SECONDARY_CONTAINER
     ]
     assert len(markiert) == 1 and "12 · 14" in _texte(markiert[0])
-    auswahl.on_select(SimpleNamespace(control=SimpleNamespace(value="reps:bester")))
+    chips[1].on_select(None)
     assert state.verlauf_kennzahlen[LIEGESTUETZ] == "reps:bester"
+    ansicht = verlauf_kachel_view(Seite(), state, LIEGESTUETZ)
+    chips = [x for x in _alle(ansicht) if isinstance(x, ft.Chip)]
+    assert [c.selected for c in chips] == [False, True]
     (knopf,) = [x for x in _alle(ansicht) if isinstance(x, ft.IconButton)]
     knopf.on_click()
     assert state.verlauf_modus == MODUS_NUMMER
@@ -162,7 +165,7 @@ def test_eine_kennzahl_ohne_auswahl_und_abgehakt_als_saeulen(state) -> None:
     state.uebungen.speichern(hantel)
     _eintragen(state, hantel.id, heute, weight=12)
     ansicht = verlauf_kachel_view(Seite(), state, hantel.id)
-    assert not [x for x in _alle(ansicht) if isinstance(x, ft.Dropdown)]
+    assert not [x for x in _alle(ansicht) if isinstance(x, ft.Chip)]
     assert "Gewicht – höchster Wert · kg" in _texte(ansicht)
     _eintragen(state, WADEN, heute)
     waden = verlauf_kachel_view(Seite(), state, WADEN)

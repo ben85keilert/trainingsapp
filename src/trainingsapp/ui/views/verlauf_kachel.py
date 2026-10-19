@@ -5,7 +5,7 @@ sind ein Punkt bei 150), darunter drei Zahlen und die **Ergebnisse** je Tag mit 
 Varianten und Notizen — antippen öffnet den Tag. Ein Tipp auf einen Punkt markiert seine
 Zeile.
 
-- **Kennzahl** als Auswahl nur, wenn die Übung mehrere hat (Wiederholungen je Tag, bester
+- **Kennzahl** als Chips (eine Zeile, bricht um) nur, wenn die Übung mehrere hat (Wiederholungen je Tag, bester
   Satz, Haltezeit …, `core/verlauf.kennzahlen`); mit einer steht sie als Überschrift da.
 - Ohne Werte, nur abgehakt: **wie oft** je Woche bzw. Monat als Säulen.
 - **Zeitraum** 4 Wochen · 3 Monate · Jahr · alles; die Kurve beginnt beim ersten Wert darin.
@@ -83,10 +83,12 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
         state.verlauf_variante = None if e.control.value in (None, ALLE) else e.control.value
         neu()
 
-    def kennzahl_waehlen(e: ft.Event[ft.Dropdown]) -> None:
-        if e.control.value:
-            state.verlauf_kennzahlen[kachel_id] = str(e.control.value)
+    def kennzahl_waehler(schluessel: str) -> Callable[[object], None]:
+        def waehlen(_e: object = None) -> None:
+            state.verlauf_kennzahlen[kachel_id] = schluessel
             neu()
+
+        return waehlen
 
     def zeitraum_waehlen(e: ft.Event[ft.SegmentedButton]) -> None:
         if e.control.selected:
@@ -122,14 +124,22 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
             )
         )
     if len(optionen) > 1 and kennzahl is not None:
+        # Kennzahlen als Chips statt Dropdown (Ben, 19.10.2026): meist 1–5 Stück, der Platz
+        # ist da — die Zeile bricht um, wenn es mehr werden
         inhalt.append(
-            ft.Dropdown(
-                label="Kennzahl",
-                value=kennzahl.schluessel,
-                options=[ft.DropdownOption(key=k.schluessel, text=k.label) for k in optionen],
-                on_select=kennzahl_waehlen,
-                dense=True,
-                expand=True,
+            ft.Row(
+                wrap=True,
+                spacing=8,
+                run_spacing=6,
+                controls=[
+                    ft.Chip(
+                        label=ft.Text(k.label, size=13),
+                        selected=k.schluessel == kennzahl.schluessel,
+                        show_checkmark=False,
+                        on_select=kennzahl_waehler(k.schluessel),
+                    )
+                    for k in optionen
+                ],
             )
         )
     inhalt.append(

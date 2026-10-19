@@ -143,20 +143,26 @@ from trainingsapp.ui.components.titel import (
     titel_kopf,
     titel_vorschlaege,
 )
-from trainingsapp.ui.components.verlauf import FARBEN, darstellung_blatt, fenster_text, werte_bei
+from trainingsapp.ui.components.verlauf import FARBEN, darstellung_blatt, fenster_text
 from trainingsapp.ui.components.vollbild import (
     ETIKETT_PX,
     LEISTE_PX,
     SEITE_PX,
     ZEITACHSE_PX,
+    Ablesewert,
     ablese_karte,
     ablese_seite,
     angebot,
     doppelkurve,
     etikett,
+    etikett_knopf,
+    geraet_wert,
+    intervall_werte,
+    kennzahl_werte,
     lage_px,
     leiste,
     markieren,
+    notiz_etikett,
     rechts_px,
     seiten_wahl,
     seitenkopf,
@@ -1118,26 +1124,18 @@ def _aufbauen(
             return
         korr = z.korrigiert()
         zeiten = zeiten_korr()
-        werte: list[tuple[str | None, str, str, str]] = []
+        werte: list[Ablesewert] = []
         # Nur Puls: kein Intervall, das sich ablesen ließe — nur „HF Gerät“ (Ben, 17.10.)
         if zeiten and not z.nur_puls:
             i = naechster(zeiten, x)
             rr = korr.rr_ms[i]
             zusatz = " (interpoliert)" if korr.flag[i] != "orig" else ""
-            werte.append(
-                (ft.Colors.PRIMARY, "RR" if not verity else "PPI", zahl(rr), "ms" + zusatz)
-            )
-            werte.append((FARBEN["hf_rr"], "HF", zahl(60000 / rr if rr else None), "bpm"))
+            werte += intervall_werte(float(rr), zusatz, verity=verity)
         roh = min(z.roh_punkte, key=lambda p: abs(p[0] - x), default=None)
         if roh is not None and abs(roh[0] - x) < 3 and not z.nur_puls:
             werte.append((ft.Colors.OUTLINE, "roh", zahl(roh[1]), "ms"))
-        geraet = min(hf_geraet(), key=lambda p: abs(p[0] - x), default=None)
-        if geraet is not None and abs(geraet[0] - x) < 3:
-            werte.append((FARBEN["hf_geraet"], "HF Gerät", zahl(geraet[1]), "bpm"))
-        for k, name, wert in werte_bei(m.gesehen if m.vollbild else analyse.gesehen, x):
-            kz = KENNZAHLEN[k]
-            stellen = 0 if abs(wert) >= 100 else 1 if abs(wert) >= 10 else 2
-            werte.append((FARBEN.get(k), name, zahl(wert, stellen), kz.einheit))
+        werte += geraet_wert(hf_geraet(), x)
+        werte += kennzahl_werte(m.gesehen if m.vollbild else analyse.gesehen, x)
         in_abschnitten = [a.name for a in eigene if a.von_s <= x <= a.bis_s]
         uhr = zeitbezug.uhr(zeitbezug.anker(x))
         kopfzeile = f"{_uhr(x)}" + (f" · {uhr} Uhr" if uhr else "")
@@ -2469,9 +2467,6 @@ def _aufbauen(
 
     # Etikett: Zeit und Text einer Notiz bzw. Name und Werte eines Abschnitts
 
-    def etikett_knopf(icon: ft.IconData, tooltip: str, aktion: Callable[[], None]) -> ft.Control:
-        return ft.IconButton(icon, icon_size=20, tooltip=tooltip, on_click=lambda: aktion())
-
     def etikett_zeichnen(x_von: float, x_bis: float) -> None:
         inhalt: ft.Control | None = None
         x: float | None = None
@@ -2482,21 +2477,15 @@ def _aufbauen(
             if info is not None:
                 x, zeit, text = info
                 ereignis_ = notizfeld.ereignis(i)
-                inhalt = etikett(
+                inhalt = notiz_etikett(
                     zeit,
                     text,
                     FARBEN["leistung"]
                     if ereignis_ and _ist_leistung(ereignis_)
                     else FARBEN["notiz"],
-                    [
-                        etikett_knopf(
-                            ft.Icons.EDIT_OUTLINED, "Notiz bearbeiten", lambda: notiz_bearbeiten(i)
-                        ),
-                        etikett_knopf(
-                            ft.Icons.DELETE_OUTLINE, "Notiz löschen", lambda: notiz_loeschen(i)
-                        ),
-                        etikett_knopf(ft.Icons.CLOSE, "Etikett schließen", etikett_schliessen),
-                    ],
+                    bearbeiten=lambda: notiz_bearbeiten(i),
+                    loeschen=lambda: notiz_loeschen(i),
+                    schliessen=etikett_schliessen,
                 )
         elif m.etikett is not None:
             a = next((a for a in eigene if a.id == m.etikett[1]), None)

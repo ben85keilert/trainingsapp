@@ -36,8 +36,15 @@ import flet as ft
 from hrv_core.trends import KENNZAHLEN, titel, treppe
 
 from trainingsapp.core.hrv_ansicht import BLOCK, LINKS, RECHTS, ROH, Ansicht
+from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.kurve import ACHSE_PX, RR_SPANNE_MIN_MS, Reihe, Skala, kurve
-from trainingsapp.ui.components.verlauf import BEREICH_TITEL, Daten, bezeichnung, schritt_min
+from trainingsapp.ui.components.verlauf import (
+    BEREICH_TITEL,
+    Daten,
+    bezeichnung,
+    schritt_min,
+    werte_bei,
+)
 from trainingsapp.ui.farben import FARBEN
 
 #: Breite der Werkzeugleiste rechts und der Seitenleiste daneben (px)
@@ -409,6 +416,69 @@ def etikett(
             ],
         ),
     )
+
+
+def etikett_knopf(icon: ft.IconData, tooltip: str, aktion: Callable[[], None]) -> ft.Control:
+    """Ein Knopf im Etikett (Bearbeiten, Löschen, Schließen)."""
+    return ft.IconButton(icon, icon_size=20, tooltip=tooltip, on_click=lambda: aktion())
+
+
+def notiz_etikett(
+    zeit: str,
+    text: str,
+    farbe_: str,
+    *,
+    bearbeiten: Callable[[], None],
+    loeschen: Callable[[], None],
+    schliessen: Callable[[], None],
+) -> ft.Control:
+    """Das Etikett einer Notizmarke mit Bearbeiten, Löschen, Schließen — Live und
+    Auswertung zeigen dasselbe (N28)."""
+    return etikett(
+        zeit,
+        text,
+        farbe_,
+        [
+            etikett_knopf(ft.Icons.EDIT_OUTLINED, "Notiz bearbeiten", bearbeiten),
+            etikett_knopf(ft.Icons.DELETE_OUTLINE, "Notiz löschen", loeschen),
+            etikett_knopf(ft.Icons.CLOSE, "Etikett schließen", schliessen),
+        ],
+    )
+
+
+#: Eine abgelesene Zeile: Farbe, Name, Zahl, Einheit (`wertchip`).
+Ablesewert = tuple[str | None, str, str, str]
+
+
+def intervall_werte(rr_ms: float | None, zusatz: str, *, verity: bool) -> list[Ablesewert]:
+    """RR bzw. PPI und die Herzfrequenz daraus — leer ohne Intervall."""
+    if rr_ms is None:
+        return []
+    return [
+        (ft.Colors.PRIMARY, "PPI" if verity else "RR", zahl(rr_ms), "ms" + zusatz),
+        (FARBEN["hf_rr"], "HF", zahl(60000 / rr_ms if rr_ms else None), "bpm"),
+    ]
+
+
+def geraet_wert(hf_reihe: Sequence[tuple[float, float]], x: float) -> list[Ablesewert]:
+    """„HF Gerät“ am nächsten Gerätewert, wenn er höchstens 3 s entfernt liegt."""
+    geraet = min(hf_reihe, key=lambda p: abs(p[0] - x), default=None)
+    if geraet is None or abs(geraet[0] - x) >= 3:
+        return []
+    return [(FARBEN["hf_geraet"], "HF Gerät", zahl(geraet[1]), "bpm")]
+
+
+def kennzahl_werte(
+    gesehen: dict[str, tuple[str, list[tuple[float, float]]]], x: float, *, ohne: Sequence[str] = ()
+) -> list[Ablesewert]:
+    """Die gezeichneten Verlaufskurven an der Stelle ``x``, Stellenzahl nach Größe."""
+    werte: list[Ablesewert] = []
+    for k, name_, wert in werte_bei(gesehen, x):
+        if k in ohne:
+            continue
+        stellen = 0 if abs(wert) >= 100 else 1 if abs(wert) >= 10 else 2
+        werte.append((FARBEN.get(k), name_, zahl(wert, stellen), KENNZAHLEN[k].einheit))
+    return werte
 
 
 def wertchip(farbe_: str | None, name_: str, wert: str, einheit: str) -> ft.Control:

@@ -1768,13 +1768,7 @@ def plan_view(
                 opacity=0.7,
             ),
             menue,
-            ft.Text(
-                "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · Uhr = Zeit stoppen · "
-                "+Zahl = Satz anhängen · Eintragen = Sätze × Wert · Notiz = ins Tagebuch · "
-                "i = Parameter herholen",
-                size=11,
-                opacity=0.55,
-            ),
+            _knopf_legende(),
         ]
     else:
         kopf = [
@@ -1783,13 +1777,7 @@ def plan_view(
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[ft.Container(content=stand, expand=True), menue],
             ),
-            ft.Text(
-                "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · Uhr = Zeit stoppen · "
-                "+Zahl = Satz anhängen · Eintragen = Sätze × Wert · Notiz = ins Tagebuch · "
-                "i = Parameter herholen",
-                size=11,
-                opacity=0.55,
-            ),
+            _knopf_legende(),
         ]
 
     fuss: list[ft.Control] = []
@@ -1863,3 +1851,14 @@ def plan_view(
 
 #: `einzel_plan` kommt aus `core.plaene` und bleibt hier erreichbar (`app.py`, Tests)
 __all__ = ["einzel_plan", "hauptfeld", "plan_view", "ziel_text"]
+
+
+def _knopf_legende() -> ft.Control:
+    """Was die Knöpfe einer Planübung tun — im Plan und bei der Einzelübung derselbe Text."""
+    return ft.Text(
+        "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · Uhr = Zeit stoppen · "
+        "+Zahl = Satz anhängen · Eintragen = Sätze × Wert · Notiz = ins Tagebuch · "
+        "i = Parameter herholen",
+        size=11,
+        opacity=0.55,
+    )

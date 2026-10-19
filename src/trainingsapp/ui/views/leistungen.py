@@ -277,6 +277,13 @@ class _Leistungen:
             self._korrigieren(k)
         return None
 
+    def vor_dem_weiter(self) -> str | None:
+        """Erst Geändertes speichern, dann weiter — sonst ginge es verloren.
+        Liefert den Grund, wenn das Speichern scheitert (dann nicht weiter)."""
+        if not self.geaendert():
+            return None
+        return self.sichern()
+
     def sichern_was_geht(self) -> str | None:
         """Beim Schließen des Blatts: jeden lesbaren geänderten Eintrag korrigieren — was
         unlesbar ist, bleibt, wie es war (lieber nichts als ein falscher Wert). ``None`` =
@@ -290,6 +297,31 @@ class _Leistungen:
                 continue
             self._korrigieren(k)
         return ", ".join(dict.fromkeys(probleme)) if probleme else None
+
+
+def _nachtragen_zeile(
+    uebung: Exercise, nachtragen: str | None, weiter_nach: Callable[[str], Any]
+) -> list[ft.Control]:
+    """„Nachtragen“ und „Im Verlauf ansehen“ — nur, wenn die Tagesansicht eine
+    Nachtragen-Route mitgibt (Skizze A4). Ansicht und Blatt teilen sich die Zeile (N28)."""
+    if nachtragen is None:
+        return []
+    return [
+        ft.Row(
+            wrap=True,
+            spacing=8,
+            controls=[
+                ft.OutlinedButton(
+                    "Nachtragen", icon=ft.Icons.ADD, on_click=weiter_nach(nachtragen)
+                ),
+                ft.TextButton(
+                    "Im Verlauf ansehen",
+                    icon=ft.Icons.SHOW_CHART,
+                    on_click=weiter_nach(f"/verlauf/{kachel(uebung, uebung.id)}"),
+                ),
+            ],
+        )
+    ]
 
 
 def leistungen_view(
@@ -322,33 +354,14 @@ def leistungen_view(
         """Erst Geändertes speichern, dann weiter — sonst ginge es verloren."""
 
         async def handler() -> None:
-            if leistungen.geaendert() and leistungen.sichern() is not None:
+            if leistungen.vor_dem_weiter() is not None:
                 return
             await page.push_route(ziel)
 
         return handler
 
     leistungen.weiter = lambda ziel: lambda: page.run_task(weiter_nach(ziel))
-    mehr: list[ft.Control] = (
-        [
-            ft.Row(
-                wrap=True,
-                spacing=8,
-                controls=[
-                    ft.OutlinedButton(
-                        "Nachtragen", icon=ft.Icons.ADD, on_click=weiter_nach(nachtragen)
-                    ),
-                    ft.TextButton(
-                        "Im Verlauf ansehen",
-                        icon=ft.Icons.SHOW_CHART,
-                        on_click=weiter_nach(f"/verlauf/{kachel(uebung, uebung.id)}"),
-                    ),
-                ],
-            )
-        ]
-        if nachtragen is not None
-        else []
-    )
+    mehr = _nachtragen_zeile(uebung, nachtragen, weiter_nach)
     ansicht = ft.View(
         route=route,
         appbar=formular_leiste(leistungen.titel, abbrechen=abbrechen, speichern=speichern),
@@ -412,12 +425,15 @@ def leistungen_blatt(
             nachher.danach(danach)
         await nachher.bei_schliessen(e)
 
+    def fehler_zeigen(grund: str) -> None:
+        with contextlib.suppress(Exception):  # schon zu
+            fehler.value = grund
+            fehler.visible = True
+            fehler.update()
+
     def speichern() -> None:
         if (grund := leistungen.sichern()) is not None:
-            with contextlib.suppress(Exception):
-                fehler.value = grund
-                fehler.visible = True
-                fehler.update()
+            fehler_zeigen(grund)
             return
         erledigt.append(True)
         melden("Korrigiert")
@@ -431,11 +447,8 @@ def leistungen_blatt(
         """Erst Geändertes speichern, dann weiter, wenn das Blatt zu ist."""
 
         def handler() -> None:
-            if leistungen.geaendert() and (grund := leistungen.sichern()) is not None:
-                with contextlib.suppress(Exception):
-                    fehler.value = grund
-                    fehler.visible = True
-                    fehler.update()
+            if (grund := leistungen.vor_dem_weiter()) is not None:
+                fehler_zeigen(grund)
                 return
             erledigt.append(True)
             nachher.danach(lambda: page.push_route(ziel))
@@ -450,26 +463,7 @@ def leistungen_blatt(
     leistungen.gezeichnet = neu_gezeichnet
     leistungen.weiter = weiter_nach
     fehler = ft.Text("", size=12, color=ft.Colors.ERROR, visible=False)
-    mehr: list[ft.Control] = (
-        [
-            ft.Row(
-                wrap=True,
-                spacing=8,
-                controls=[
-                    ft.OutlinedButton(
-                        "Nachtragen", icon=ft.Icons.ADD, on_click=weiter_nach(nachtragen)
-                    ),
-                    ft.TextButton(
-                        "Im Verlauf ansehen",
-                        icon=ft.Icons.SHOW_CHART,
-                        on_click=weiter_nach(f"/verlauf/{kachel(uebung, uebung.id)}"),
-                    ),
-                ],
-            )
-        ]
-        if nachtragen is not None
-        else []
-    )
+    mehr = _nachtragen_zeile(uebung, nachtragen, weiter_nach)
     # Eine scrollende Spalte macht das Blatt bildschirmhoch — nur wenn es nicht passt, damit
     # die Ansicht darunter sichtbar bleibt (Ben: „man hat mehr Orientierung“)
     hoehe = float(getattr(page, "height", None) or 700)

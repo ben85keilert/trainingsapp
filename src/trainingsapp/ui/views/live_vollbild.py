@@ -35,7 +35,6 @@ from typing import Any
 
 import flet as ft
 from hrv_core.atmung import ATEMUEBUNG, RUHE
-from hrv_core.trends import KENNZAHLEN
 
 from trainingsapp.core.hrv_ansicht import LINKS, RECHTS, ROH
 from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER
@@ -43,7 +42,6 @@ from trainingsapp.core.laufend import minuten
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.ui.components.analyse import verlaufsdaten
-from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.notizen import (
     Notizfeld,
@@ -51,7 +49,7 @@ from trainingsapp.ui.components.notizen import (
     uebungs_katalog,
     uebungsquellen,
 )
-from trainingsapp.ui.components.verlauf import FARBEN, darstellung_blatt, fenster_text, werte_bei
+from trainingsapp.ui.components.verlauf import FARBEN, darstellung_blatt, fenster_text
 from trainingsapp.ui.components.vollbild import (
     ETIKETT_PX,
     LEISTE_PX,
@@ -60,10 +58,13 @@ from trainingsapp.ui.components.vollbild import (
     ablese_seite,
     angebot,
     doppelkurve,
-    etikett,
+    geraet_wert,
+    intervall_werte,
+    kennzahl_werte,
     lage_px,
     leiste,
     markieren,
+    notiz_etikett,
     rechts_px,
     seiten_wahl,
     seitenkopf,
@@ -288,23 +289,18 @@ def _vollbild(
         aktualisieren(erzwingen=True)
 
     def ablese_werte(x: float) -> list[tuple[str | None, str, str, str]]:
-        werte: list[tuple[str | None, str, str, str]] = []
         punkte = [p for p in lauf.live.punkte(seit_s=x - 3) if p.rr_ms > 0 and p.t_s <= x + 3]
         p = min(punkte, key=lambda q: abs(q.t_s - x), default=None)
+        rr = zusatz = None
         if p is not None:
             rr = p.rr_korr if einst.korrigiert and p.rr_korr else float(p.rr_ms)
             zusatz = " (verworfen)" if p.verworfen else " (auffällig)" if p.artefakt else ""
-            werte.append((ft.Colors.PRIMARY, "PPI" if verity else "RR", zahl(rr), "ms" + zusatz))
-            werte.append((FARBEN["hf_rr"], "HF", zahl(60000 / rr if rr else None), "bpm"))
-        geraet = min(lauf.live.hf_reihe(), key=lambda q: abs(q[0] - x), default=None)
-        if geraet is not None and abs(geraet[0] - x) < 3:
-            werte.append((FARBEN["hf_geraet"], "HF Gerät", zahl(geraet[1]), "bpm"))
-        for k, name, wert in werte_bei(st.gesehen, x):
-            if k == "hf_geraet":
-                continue  # steht schon da, aus dem Gerät
-            stellen = 0 if abs(wert) >= 100 else 1 if abs(wert) >= 10 else 2
-            werte.append((FARBEN.get(k), name, zahl(wert, stellen), KENNZAHLEN[k].einheit))
-        return werte
+        return (
+            intervall_werte(rr, zusatz or "", verity=verity)
+            + geraet_wert(lauf.live.hf_reihe(), x)
+            # hf_geraet steht schon da, aus dem Gerät
+            + kennzahl_werte(st.gesehen, x, ohne=("hf_geraet",))
+        )
 
     def ablesen_zeichnen(x_von: float, x_bis: float) -> None:
         x = st.strich
@@ -417,25 +413,13 @@ def _vollbild(
             etikett_box.visible, etikett_box.content = False, None
             return
         x, zeit, text = info
-        etikett_box.content = etikett(
+        etikett_box.content = notiz_etikett(
             zeit,
             text,
             FARBEN["notiz"],
-            [
-                ft.IconButton(
-                    ft.Icons.EDIT_OUTLINED,
-                    tooltip="Notiz bearbeiten",
-                    on_click=lambda: notiz_bearbeiten(i),
-                ),
-                ft.IconButton(
-                    ft.Icons.DELETE_OUTLINE,
-                    tooltip="Notiz löschen",
-                    on_click=lambda: notiz_loeschen(i),
-                ),
-                ft.IconButton(
-                    ft.Icons.CLOSE, tooltip="Etikett schließen", on_click=etikett_schliessen
-                ),
-            ],
+            bearbeiten=lambda: notiz_bearbeiten(i),
+            loeschen=lambda: notiz_loeschen(i),
+            schliessen=etikett_schliessen,
         )
         etikett_box.left = lage_px(x, x_von, x_bis, st.breite, st.rechts, ETIKETT_PX)
         etikett_box.top = 4

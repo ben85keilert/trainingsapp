@@ -13,6 +13,7 @@ import flet as ft
 
 from trainingsapp.core.models import SessionEntry, lokaler_tag
 from trainingsapp.core.result_spec import parameter_werte
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.werte import wert_kacheln
 from trainingsapp.ui.state import AppState
@@ -38,14 +39,16 @@ def eintrag_view(page: ft.Page, state: AppState, eintrag: SessionEntry, basis: s
     def loeschen_fragen() -> None:
         page.show_dialog(dialog)
 
-    def abbrechen() -> None:
-        page.pop_dialog()
+    nachher = Nachher()  # SnackBar und Routenwechsel erst, wenn der Dialog zu ist (N19)
 
-    async def loeschen() -> None:
+    def abbrechen() -> None:
+        schliessen(dialog)
+
+    def loeschen() -> None:
         state.sitzungen.eintrag_loeschen(eintrag.id)
-        page.pop_dialog()
-        page.show_dialog(ft.SnackBar(ft.Text("Eintrag gelöscht")))
-        await page.push_route(basis or f"/tag/{tag.isoformat()}")
+        nachher.danach(lambda: page.show_dialog(ft.SnackBar(ft.Text("Eintrag gelöscht"))))
+        nachher.danach(lambda: page.push_route(basis or f"/tag/{tag.isoformat()}"))
+        schliessen(dialog)
 
     dialog = ft.AlertDialog(
         modal=True,
@@ -55,6 +58,7 @@ def eintrag_view(page: ft.Page, state: AppState, eintrag: SessionEntry, basis: s
             ft.TextButton("Abbrechen", on_click=abbrechen),
             ft.FilledButton("Löschen", on_click=loeschen),
         ],
+        on_dismiss=nachher.bei_schliessen,
     )
 
     zeit = f"{eintrag.started_at.astimezone():%d.%m.%Y, %H:%M}" if eintrag.started_at else "–"

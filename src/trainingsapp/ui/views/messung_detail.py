@@ -70,7 +70,7 @@ from hrv_core.korrektur import (
     Korrektur,
     Korrigiert,
     SidecarFehler,
-    analyse_laden,
+    analyse_lesen,
     analyse_regeln,
     analyse_speichern,
     analysebasis,
@@ -93,12 +93,14 @@ from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.hrv_ansicht import LINKS, RECHTS, ROH
 from trainingsapp.core.hrv_einstellungen import ANALYSE_LAENGEN
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
+from trainingsapp.core.laufend import minuten
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.core.timer import ENDE_MARKE
 from trainingsapp.core.timer import name_aus_notiz as abschnittsname
 from trainingsapp.ui import ausrichtung
 from trainingsapp.ui.components.analyse import Analyse, Analysefenster, verlaufsdaten
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.forschung import forschung_fragen
 from trainingsapp.ui.components.kacheln import (
     KACHELN,
@@ -157,9 +159,8 @@ QUALITAET = {
 }
 
 
-def _uhr(sekunden: float) -> str:
-    s = int(sekunden)
-    return f"{s // 60}:{s % 60:02d}"
+#: Eine Schreibweise für alle Zeiten (N26)
+_uhr = minuten
 
 
 def _wert(d: dict | None, key: str, nachkomma: int = 1) -> str:
@@ -420,17 +421,21 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     def fragen() -> None:
         page.show_dialog(dialog)
 
-    def abbrechen() -> None:
-        page.pop_dialog()
+    nachher = Nachher()  # SnackBar und Routenwechsel erst, wenn der Dialog zu ist (N19)
 
-    async def entfernen() -> None:
+    def abbrechen() -> None:
+        schliessen(dialog)
+
+    def entfernen() -> None:
         state.hrv.loeschen(eintrag.id)
-        page.pop_dialog()
-        page.show_dialog(ft.SnackBar(ft.Text("Aus der Liste entfernt — die Datei bleibt.")))
-        await page.push_route("/")
+        meldung = "Aus der Liste entfernt — die Datei bleibt."
+        nachher.danach(lambda: page.show_dialog(ft.SnackBar(ft.Text(meldung))))
+        nachher.danach(lambda: page.push_route("/"))
+        schliessen(dialog)
 
     dialog = ft.AlertDialog(
         modal=True,
+        on_dismiss=nachher.bei_schliessen,
         title=ft.Text("Aufzeichnung entfernen?"),
         content=ft.Text(
             "Sie verschwindet aus der Liste. Die Messdatei bleibt im Ordner "
@@ -461,8 +466,13 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     gespeicherte_regeln = analyse_regeln(pfad)
     z = _Zustand(rec, gespeicherte_regeln or state.korrekturregeln())
     zuschneidbar = not z.nur_puls
-    z.gespeichert = analyse_laden(pfad, z.basis)
-    z.auswahl_aus(z.gespeichert, ohne_sidecar=gespeicherte_regeln is None)
+    sidecar = analyse_lesen(pfad, z.basis)
+    # Passt die Prüfsumme im Sidecar nicht zur Messdatei, gehören Korrekturen und
+    # Abschnitte zu einer anderen oder veränderten Datei — per Index träfen sie
+    # falsche Schläge (hrv-core R16). Dann gilt die Vorauswahl, und die Ansicht sagt es.
+    sidecar_alt = sidecar.veraltet
+    z.gespeichert = [] if sidecar_alt else sidecar.korrekturen
+    z.auswahl_aus(z.gespeichert, ohne_sidecar=gespeicherte_regeln is None or sidecar_alt)
     #: Auswahl und Regeln beim Öffnen bzw. beim letzten Speichern. Zurück speichert nur,
     #: was seither geändert wurde — ohne Sidecar gilt schon die Vorauswahl als
     #: ungespeichert, die schreibt Zurück nicht ungefragt.
@@ -488,7 +498,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
     # Crop und eigene Abschnitte stehen im Sidecar auf der Herzuhr der Rohdatei — die
     # hat eine reine Pulsmessung nicht, dort gibt es beides nicht
     nach_datei, nach_achse = achsen_umrechnung(zeilen_achse, [b.t_s for b in rec.beats])
-    if z.nur_puls:
+    if z.nur_puls or sidecar_alt:
         eigene: list[Any] = []
     else:
         z.ausschnitt, eigene = zusatz_lesen(pfad, nach_achse)
@@ -496,6 +506,13 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     kopf_text = ft.Text(size=13, opacity=0.8)
     hinweis_text = ft.Text(size=12, color=FARBEN["rot"])
+    sidecar_text = ft.Text(
+        "Die gespeicherten Korrekturen und Abschnitte gehören zu einer anderen oder "
+        "nachträglich veränderten Messdatei — sie gelten hier nicht. Speichern ersetzt sie.",
+        size=12,
+        color=FARBEN["rot"],
+        visible=sidecar_alt,
+    )
     titel_box = ft.Container()
     # Die Datei ist die Wahrheit — die Zeile hält nur Kopien für die Liste
     if rec.titel != eintrag.title:
@@ -1181,7 +1198,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             farben_nach_namen(neu, vergeben=len(eigene))
             eigene.extend(neu)
             zusatz_sichern()
-            page.pop_dialog()
+            schliessen(blatt)  # nicht `pop_dialog`: eine Fehler-SnackBar läge sonst oben (N18)
             zeichnen()
 
         for h in haken:
@@ -1199,45 +1216,44 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             )
             for (x, t), h in zip(notizen, haken, strict=True)
         ]
-        page.show_dialog(
-            ft.BottomSheet(
-                show_drag_handle=True,
-                scrollable=True,
-                content=ft.Container(
-                    padding=ft.Padding.only(left=16, right=16, bottom=16),
-                    content=ft.Column(
-                        tight=True,
-                        spacing=8,
-                        controls=[
-                            ft.Text("Abschnitte aus Notizen", size=18, weight=ft.FontWeight.W_600),
-                            ft.Text(
-                                "Jede gewählte Notiz beginnt einen Abschnitt, benannt nach "
-                                "ihr; er reicht bis zur nächsten gewählten. „Timer fertig“ "
-                                "beendet nur. Notizen, die mitten in einer Übung stehen, "
-                                "einfach abwählen.",
-                                size=12,
-                                opacity=0.7,
-                            ),
-                            ft.Row(
-                                controls=[
-                                    ft.TextButton("Alle", on_click=lambda: alle(True)),
-                                    ft.TextButton("Keine", on_click=lambda: alle(False)),
-                                ]
-                            ),
-                            *zeilen,
-                            vorschau,
-                            ft.Row(
-                                alignment=ft.MainAxisAlignment.END,
-                                controls=[
-                                    ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
-                                    ft.FilledButton("Anlegen", icon=ft.Icons.ADD, on_click=anlegen),
-                                ],
-                            ),
-                        ],
-                    ),
+        blatt = ft.BottomSheet(
+            show_drag_handle=True,
+            scrollable=True,
+            content=ft.Container(
+                padding=ft.Padding.only(left=16, right=16, bottom=16),
+                content=ft.Column(
+                    tight=True,
+                    spacing=8,
+                    controls=[
+                        ft.Text("Abschnitte aus Notizen", size=18, weight=ft.FontWeight.W_600),
+                        ft.Text(
+                            "Jede gewählte Notiz beginnt einen Abschnitt, benannt nach "
+                            "ihr; er reicht bis zur nächsten gewählten. „Timer fertig“ "
+                            "beendet nur. Notizen, die mitten in einer Übung stehen, "
+                            "einfach abwählen.",
+                            size=12,
+                            opacity=0.7,
+                        ),
+                        ft.Row(
+                            controls=[
+                                ft.TextButton("Alle", on_click=lambda: alle(True)),
+                                ft.TextButton("Keine", on_click=lambda: alle(False)),
+                            ]
+                        ),
+                        *zeilen,
+                        vorschau,
+                        ft.Row(
+                            alignment=ft.MainAxisAlignment.END,
+                            controls=[
+                                ft.TextButton("Abbrechen", on_click=lambda: schliessen(blatt)),
+                                ft.FilledButton("Anlegen", icon=ft.Icons.ADD, on_click=anlegen),
+                            ],
+                        ),
+                    ],
                 ),
-            )
+            ),
         )
+        page.show_dialog(blatt)
 
     # -- Bereich wählen: Zuschneiden und Abschnitte ----------------------------------
 
@@ -1435,10 +1451,15 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         if aktualisieren:
             page.update()
 
+    def kann_zurueck() -> bool:
+        """Nichts Ungespeichertes: keine geänderte Korrektur, kein offener Editor (H34)."""
+        return not ungespeichert_geaendert() and m.editor is None
+
     def zurueck_pruefen() -> None:
-        """Ungespeicherte Korrektur: Zurück fragt erst (`zurueck_im_vollbild`) und speichert."""
+        """Ungespeicherte Korrektur oder offener Editor: Zurück speichert erst
+        (`zurueck_im_vollbild`)."""
         if gebaut and not m.vollbild:
-            gebaut[0].can_pop = not ungespeichert_geaendert()
+            gebaut[0].can_pop = kann_zurueck()
 
     def nur_kurven(mit_analyse: bool = True) -> None:
         kurven(mit_analyse)
@@ -1832,7 +1853,8 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
 
     def regeln_oeffnen() -> None:
         def aendern(regeln: Korrekturregeln) -> None:
-            z.regeln_setzen(regeln, analyse_laden(pfad, analysebasis(rec, regeln)))
+            neu = analyse_lesen(pfad, analysebasis(rec, regeln))
+            z.regeln_setzen(regeln, [] if neu.veraltet else neu.korrekturen)
             zeichnen()
 
         def merken(regeln: Korrekturregeln) -> None:
@@ -1841,16 +1863,15 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
                 ft.SnackBar(ft.Text("Als Vorgabe gemerkt — gilt für neue Aufzeichnungen und live."))
             )
 
-        page.show_dialog(
-            korrektur_blatt(
-                z.regeln,
-                aendern,
-                erweitert=True,
-                verity=verity,
-                standard_merken=merken,
-                schliessen=page.pop_dialog,
-            )
+        blatt = korrektur_blatt(
+            z.regeln,
+            aendern,
+            erweitert=True,
+            verity=verity,
+            standard_merken=merken,
+            schliessen=lambda: schliessen(blatt),  # „Fertig“ traf sonst die SnackBar (N18)
         )
+        page.show_dialog(blatt)
 
     def ketten_zeile(i: int, k: Kette) -> ft.Control:
         an = i in z.uebernommen
@@ -2167,7 +2188,7 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             view.appbar = leiste_oben
             view.scroll = ft.ScrollMode.AUTO
             view.padding = 12
-            view.can_pop = not ungespeichert_geaendert()  # sonst speichert Zurück erst
+            view.can_pop = kann_zurueck()  # sonst speichert Zurück erst
             view.controls = [sicher(normal_inhalt, expand=False)]
             ausrichtung.anwenden(page, state, ausrichtung.modus_fuer_route(route))
         zeichnen()
@@ -2184,6 +2205,13 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
             with contextlib.suppress(Exception):
                 await view.confirm_pop(False)  # die Messung bleibt offen
             return
+        if m.editor is not None:
+            # Zurück speichert (CLAUDE.md): Abschnitt-Editor und Zuschnitt haben zwar einen
+            # Knopf, aber Zurück verwarf die Änderung stumm (H34)
+            if m.art == ABSCHNITT:
+                abschnitt_sichern()
+            else:
+                crop_uebernehmen()
         if not ungespeichert_geaendert():
             with contextlib.suppress(Exception):
                 await view.confirm_pop(True)  # nichts zu speichern: gewöhnliches Zurück
@@ -2323,7 +2351,9 @@ def messung_detail_view(page: ft.Page, state: AppState, eintrag: HrvRecording) -
         controls=[
             ft.Container(
                 padding=ft.Padding.symmetric(horizontal=4),
-                content=ft.Column(spacing=4, controls=[titel_box, kopf_text, hinweis_text]),
+                content=ft.Column(
+                    spacing=4, controls=[titel_box, kopf_text, hinweis_text, sidecar_text]
+                ),
             ),
             kacheln_box,
             karte(

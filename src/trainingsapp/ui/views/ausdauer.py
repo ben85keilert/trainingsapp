@@ -47,7 +47,7 @@ from typing import Any
 import flet as ft
 from hrv_core.korrektur import (
     Korrigiert,
-    analyse_laden,
+    analyse_lesen,
     analyse_regeln,
     analysebasis,
     anwenden,
@@ -93,7 +93,7 @@ from trainingsapp.devices.gps import GpsQuelle
 from trainingsapp.devices.strecke_baustein import StreckeBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.ausrichtung import querformat
-from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog, schliessen
+from trainingsapp.ui.components.dialoge import Erledigt, Nachher, reste_dialog, schliessen
 from trainingsapp.ui.components.forschung import forschung_fragen
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.karte_strecke import StreckenKarte, ganze_strecke
@@ -745,9 +745,9 @@ def _hrv_laden(state: AppState, bezug: HrvBezug | None) -> tuple[Recording, Korr
     rec = laden(pfad)
     regeln = analyse_regeln(pfad) or state.korrekturregeln()
     basis = analysebasis(rec, regeln)
-    gespeichert = analyse_laden(pfad, basis)
-    if gespeichert:
-        korrekturen = gespeichert
+    sidecar = analyse_lesen(pfad, basis)
+    if sidecar.korrekturen and not sidecar.veraltet:  # veraltet: andere Datei (R16)
+        korrekturen = sidecar.korrekturen
     else:
         ketten = vorschlaege(basis.rec, regeln)
         korrekturen = [
@@ -909,26 +909,32 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         )
 
     def loeschen_fragen() -> None:
-        async def loeschen() -> None:
-            state.strecken.loeschen(strecke.id)
-            page.pop_dialog()
-            page.show_dialog(ft.SnackBar(ft.Text("Aus der Liste entfernt — die Datei bleibt.")))
-            await page.push_route("/")
+        nachher = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (N19)
 
-        page.show_dialog(
-            ft.AlertDialog(
-                modal=True,
-                title=ft.Text("Training entfernen?"),
-                content=ft.Text(
-                    "Es verschwindet aus der Liste. Die Strecke bleibt im Ordner „Strecken“, "
-                    "HRV-Aufnahme und Tagebucheintrag bleiben."
-                ),
-                actions=[
-                    ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
-                    ft.FilledButton("Entfernen", on_click=loeschen),
-                ],
+        def loeschen() -> None:
+            state.strecken.loeschen(strecke.id)
+            nachher.danach(
+                lambda: page.show_dialog(
+                    ft.SnackBar(ft.Text("Aus der Liste entfernt — die Datei bleibt."))
+                )
             )
+            nachher.danach(lambda: page.push_route("/"))
+            schliessen(dialog)
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Training entfernen?"),
+            content=ft.Text(
+                "Es verschwindet aus der Liste. Die Strecke bleibt im Ordner „Strecken“, "
+                "HRV-Aufnahme und Tagebucheintrag bleiben."
+            ),
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+                ft.FilledButton("Entfernen", on_click=loeschen),
+            ],
+            on_dismiss=nachher.bei_schliessen,
         )
+        page.show_dialog(dialog)
 
     async def hrv_oeffnen() -> None:
         if eintrag is not None:

@@ -39,6 +39,7 @@ from hrv_core.trends import KENNZAHLEN
 
 from trainingsapp.core.hrv_ansicht import LINKS, RECHTS, ROH
 from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER
+from trainingsapp.core.laufend import minuten
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.ui.components.analyse import verlaufsdaten
@@ -76,9 +77,8 @@ from trainingsapp.ui.views.messung import ohne_rr, tachogramm_reihen
 _KOPF_PX = 56
 
 
-def _uhr(sekunden: float) -> str:
-    s = max(0, round(sekunden))
-    return f"{s // 60}:{s % 60:02d}"
+#: Eine Schreibweise für alle Zeiten (abgeschnitten, nicht gerundet — wie die Achse; N26)
+_uhr = minuten
 
 
 @dataclass

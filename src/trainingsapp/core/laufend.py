@@ -57,6 +57,18 @@ def uhr(sekunden: float) -> str:
     return f"{s // 60}:{s % 60:02d}"
 
 
+def minuten(sekunden: float) -> str:
+    """Zeit in einer Messung als ``m:ss`` — auch über eine Stunde (``70:00``), abgeschnitten,
+    nicht gerundet. Eine Schreibweise für Notizen, Achsen, Bereiche und Blätter (N26:
+    vorher sechs Fassungen mit drei Rundungen, 59,6 s stand als „1:00“ neben „0:59“).
+
+    >>> minuten(5), minuten(59.6), minuten(4200), minuten(-3)
+    ('0:05', '0:59', '70:00', '0:00')
+    """
+    s = max(0, int(sekunden))
+    return f"{s // 60}:{s % 60:02d}"
+
+
 def benachrichtigung(laufend: Sequence[Laufend]) -> Benachrichtigung | None:
     """Der Inhalt für alles, was läuft — ``None``, wenn nichts läuft.
 

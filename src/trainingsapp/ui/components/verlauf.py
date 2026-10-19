@@ -20,6 +20,7 @@ import flet as ft
 from hrv_core.trends import KENNZAHLEN, im_bereich, titel, treppe
 
 from trainingsapp.core.hrv_ansicht import BLOCK, GLEITEND, PNN_WAHL, Ansicht
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.farben import FARBEN  # feste Farbe je Kurve, hell/dunkel
 
@@ -405,10 +406,12 @@ def darstellung_blatt(
     kopf = ft.Row(
         controls=[
             ft.Text("Fenster & Darstellung", size=18, weight=ft.FontWeight.W_600, expand=True),
-            ft.TextButton("Fertig", on_click=lambda: page.pop_dialog()),
+            # genau das Blatt — eine SnackBar der Live-Ansicht (Gurt getrennt) läge sonst
+            # oben und `pop_dialog` träfe sie (N18)
+            ft.TextButton("Fertig", on_click=lambda: schliessen(blatt)),
         ]
     )
-    return ft.BottomSheet(
+    blatt = ft.BottomSheet(
         content=ft.Container(
             padding=ft.Padding.only(left=16, top=4, right=16, bottom=16),
             content=ft.Column(
@@ -418,6 +421,7 @@ def darstellung_blatt(
         scrollable=True,
         show_drag_handle=True,
     )
+    return blatt
 
 
 def speichern_dialog(page: Any, state: Any, geaendert: Callable[[], None]) -> ft.AlertDialog:
@@ -430,6 +434,8 @@ def speichern_dialog(page: Any, state: Any, geaendert: Callable[[], None]) -> ft
         autofocus=True,
     )
 
+    nachher = Nachher()
+
     def speichern() -> None:
         text = (name.value or "").strip()
         if not text:
@@ -437,18 +443,22 @@ def speichern_dialog(page: Any, state: Any, geaendert: Callable[[], None]) -> ft
         ansicht.name = text
         state.ansicht_speichern(ansicht)
         state.ansicht_setzen(ansicht)
-        page.pop_dialog()
-        page.show_dialog(ft.SnackBar(ft.Text(f"Ansicht „{text}“ gespeichert.")))
-        geaendert()
+        nachher.danach(
+            lambda: page.show_dialog(ft.SnackBar(ft.Text(f"Ansicht „{text}“ gespeichert.")))
+        )
+        nachher.danach(geaendert)
+        schliessen(dialog)
 
-    return ft.AlertDialog(
+    dialog = ft.AlertDialog(
         title=ft.Text("Ansicht speichern"),
         content=name,
+        on_dismiss=nachher.bei_schliessen,
         actions=[
-            ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+            ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
             ft.FilledButton("Speichern", on_click=speichern),
         ],
     )
+    return dialog
 
 
 __all__ = [

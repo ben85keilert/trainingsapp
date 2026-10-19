@@ -325,8 +325,10 @@ def _vorbereiten(page: Any, state: Any, e: Einheitslauf) -> None:
         page.run_task(vorbereiten)
     if e.id not in _IM_BLICK:
         _IM_BLICK.add(e.id)
-        with contextlib.suppress(Exception):
+        try:
             page.run_task(_stand_zeigen, state, e)
+        except Exception:  # sonst bliebe die Einheit „im Blick“, ohne je aufzufrischen
+            _IM_BLICK.discard(e.id)
 
 
 async def _stand_zeigen(state: Any, e: Einheitslauf) -> None:

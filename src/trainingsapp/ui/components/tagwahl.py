@@ -39,6 +39,7 @@ from collections.abc import Callable, Iterable
 import flet as ft
 
 from trainingsapp.core.models import tag_name_pruefen
+from trainingsapp.ui.components.dialoge import schliessen
 
 #: Breite der aufgeklappten Liste (px) — passt auf jedes Handy
 LISTE_BREITE = 260
@@ -193,22 +194,21 @@ class TagWahl:
                 if name not in wahl:
                     wahl.append(name)
                 liste_bauen()
-                page.pop_dialog()
+                schliessen(dialog)  # genau dieser Dialog — nicht eine SnackBar (N18)
                 aktualisieren(flaeche)
                 geaendert()
 
             feld.on_submit = lambda _: anlegen()
-            page.show_dialog(
-                ft.AlertDialog(
-                    modal=True,
-                    title=ft.Text(_ARTEN[titel][1]),
-                    content=feld,
-                    actions=[
-                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
-                        ft.FilledButton("Anlegen", on_click=anlegen),
-                    ],
-                )
+            dialog = ft.AlertDialog(
+                modal=True,
+                title=ft.Text(_ARTEN[titel][1]),
+                content=feld,
+                actions=[
+                    ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+                    ft.FilledButton("Anlegen", on_click=anlegen),
+                ],
             )
+            page.show_dialog(dialog)
 
         liste_bauen()
         kasten_text()

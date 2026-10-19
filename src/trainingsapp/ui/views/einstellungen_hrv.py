@@ -37,6 +37,7 @@ from trainingsapp.core.hrv_einstellungen import (
     UEBERSICHT,
     HrvEinstellungen,
 )
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.kacheln import GRUPPEN, KACHELN
 from trainingsapp.ui.components.karte import hinweis, karte, titel
@@ -180,7 +181,8 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
         art = KACHELN[key]
         gross = key in e.gross
         return ft.Container(
-            key=key,
+            # kein key=: Die Zeilen werden bei jeder Änderung ersetzt, und Flet 1.0 friert
+            # ersetzte Controls mit key ein („Frozen controls cannot be updated“, N20)
             height=ZEILE_PX,
             content=ft.Row(
                 spacing=8,
@@ -268,11 +270,10 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
             regeln_zeile.value = regeln_text(r)
             regeln_zeile.update()
 
-        page.show_dialog(
-            korrektur_blatt(
-                state.korrekturregeln(), aendern, erweitert=True, schliessen=page.pop_dialog
-            )
+        blatt = korrektur_blatt(
+            state.korrekturregeln(), aendern, erweitert=True, schliessen=lambda: schliessen(blatt)
         )
+        page.show_dialog(blatt)
 
     def regeln_zuruecksetzen() -> None:
         state.korrekturregeln_setzen(Korrekturregeln())
@@ -282,28 +283,34 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
 
     # -- Alles zurücksetzen -------------------------------------------------------
 
-    def alles_zuruecksetzen() -> None:
-        state.hrv_zuruecksetzen()
-        page.pop_dialog()
-        page.show_dialog(ft.SnackBar(ft.Text("HRV-Einstellungen auf Standard zurückgesetzt.")))
-        state.neu_zeichnen()
-
     def fragen() -> None:
-        page.show_dialog(
-            ft.AlertDialog(
-                modal=True,
-                title=ft.Text("Alles zurücksetzen?"),
-                content=ft.Text(
-                    "Kacheln, Fenster, Kurven, Analysebereiche und die automatische "
-                    "Korrektur gehen auf die Vorgaben zurück. Gespeicherte Ansichten und "
-                    "Messungen bleiben."
-                ),
-                actions=[
-                    ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
-                    ft.FilledButton("Zurücksetzen", on_click=alles_zuruecksetzen),
-                ],
+        nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (N19)
+
+        def alles_zuruecksetzen() -> None:
+            state.hrv_zuruecksetzen()
+            nachher.danach(
+                lambda: page.show_dialog(
+                    ft.SnackBar(ft.Text("HRV-Einstellungen auf Standard zurückgesetzt."))
+                )
             )
+            nachher.danach(state.neu_zeichnen)
+            schliessen(dialog)
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Alles zurücksetzen?"),
+            content=ft.Text(
+                "Kacheln, Fenster, Kurven, Analysebereiche und die automatische "
+                "Korrektur gehen auf die Vorgaben zurück. Gespeicherte Ansichten und "
+                "Messungen bleiben."
+            ),
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+                ft.FilledButton("Zurücksetzen", on_click=alles_zuruecksetzen),
+            ],
+            on_dismiss=nachher.bei_schliessen,
         )
+        page.show_dialog(dialog)
 
     # -- Erweitert (zugeklappt): Rechnen, Kennzahlen, Korrektur ------------------------
 

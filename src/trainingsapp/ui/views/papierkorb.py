@@ -20,6 +20,7 @@ import flet as ft
 
 from trainingsapp.core.models import Exercise, jetzt
 from trainingsapp.data.repositories import PAPIERKORB_TAGE, SettingRepo
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
@@ -117,23 +118,26 @@ def papierkorb_view(page: ft.Page, state: AppState) -> ft.View:
     #: Was der offene Dialog löschen soll
     auswahl: list[Exercise] = []
 
+    nachher = Nachher()  # SnackBar und Neuaufbau erst, wenn der Dialog zu ist (N19)
+
     def endgueltig(mit_verlauf: bool) -> Callable[[], None]:
         def handler() -> None:
             for u in auswahl:
                 state.uebungen.endgueltig_loeschen(u.id, mit_verlauf=mit_verlauf)
-            page.pop_dialog()
             text = "samt Verlauf gelöscht" if mit_verlauf else "gelöscht — Verlauf bleibt"
-            page.show_dialog(ft.SnackBar(ft.Text(f"{len(auswahl)} Übung(en) {text}")))
+            meldung = f"{len(auswahl)} Übung(en) {text}"
             # Nur so viele Hinweise, wie wirklich noch auf eine Entscheidung warten
             state.papierkorb_offen = sum(
                 1 for u in state.uebungen.faellig() if state.uebungen.hat_eintraege(u.id)
             )
-            state.neu_zeichnen()
+            nachher.danach(lambda: page.show_dialog(ft.SnackBar(ft.Text(meldung))))
+            nachher.danach(state.neu_zeichnen)
+            schliessen(verlauf_dialog)
 
         return handler
 
     def abbrechen() -> None:
-        page.pop_dialog()
+        schliessen(verlauf_dialog)
 
     verlauf_text = ft.Text()
     verlauf_dialog = ft.AlertDialog(
@@ -149,6 +153,7 @@ def papierkorb_view(page: ft.Page, state: AppState) -> ft.View:
             ),
             ft.FilledButton("Verlauf behalten", on_click=endgueltig(False)),
         ],
+        on_dismiss=nachher.bei_schliessen,
     )
 
     def loeschen_fragen(kandidaten: list[Exercise]) -> None:

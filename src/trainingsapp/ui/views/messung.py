@@ -48,6 +48,7 @@ from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.hrv_ansicht import Ansicht
 from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, HrvEinstellungen
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
+from trainingsapp.core.laufend import minuten
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.core.models import jetzt as utc_jetzt
 from trainingsapp.core.timer import (
@@ -71,7 +72,7 @@ from trainingsapp.devices.simulated import (
 )
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.analyse import Analyse
-from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog
+from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog, schliessen
 from trainingsapp.ui.components.kacheln import (
     KACHELN,
     PULS_KACHELN,
@@ -181,9 +182,8 @@ async def _hintergrund(state: AppState, lauf: Messlauf, an: bool, text: str = ""
         )
 
 
-def _uhr(sekunden: float) -> str:
-    s = int(sekunden)
-    return f"{s // 60}:{s % 60:02d}"
+#: Eine Schreibweise für alle Zeiten (N26)
+_uhr = minuten
 
 
 def tachogramm(
@@ -845,14 +845,13 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             state.korrekturregeln_setzen(regeln)  # wirkt sofort auf den Messlauf
             aktualisieren(erzwingen=True)
 
-        page.show_dialog(
-            korrektur_blatt(
-                state.korrekturregeln(),
-                aendern,
-                verity=verity,
-                schliessen=page.pop_dialog,
-            )
+        blatt = korrektur_blatt(
+            state.korrekturregeln(),
+            aendern,
+            verity=verity,
+            schliessen=lambda: schliessen(blatt),  # genau das Blatt, nie eine SnackBar (N18)
         )
+        page.show_dialog(blatt)
 
     def zeigen(x: float) -> None:
         """Die Kurve auf eine Zeit rücken — nahe der Gegenwart folgt sie wieder."""

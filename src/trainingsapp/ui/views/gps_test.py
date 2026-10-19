@@ -37,6 +37,7 @@ from trainingsapp.core.gps_vorabtest import (
     dauertest,
     phasenname,
 )
+from trainingsapp.core.laufend import minuten
 from trainingsapp.core.strecke import Punkt, ausgeduennt, distanz_m, genaue
 from trainingsapp.data.strecken import StreckenSchreiber, gpx
 from trainingsapp.devices.gps import GpsQuelle, GpsSimulator
@@ -216,9 +217,8 @@ def _km(punkte: Sequence[Punkt]) -> float:
     return distanz_m(ausgeduennt(genaue(punkte, 30.0), 5.0)) / 1000
 
 
-def _uhr(sekunden: float) -> str:
-    s = max(0, int(sekunden))
-    return f"{s // 60}:{s % 60:02d}"
+#: Eine Schreibweise für alle Zeiten (N26)
+_uhr = minuten
 
 
 async def _wach(state: AppState, an: bool) -> None:

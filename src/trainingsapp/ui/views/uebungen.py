@@ -15,6 +15,7 @@ import flet as ft
 
 from trainingsapp.core.models import Plan
 from trainingsapp.core.plaene import erledigte, tage_text
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.katalog import katalog, trainieren_knopf
 from trainingsapp.ui.views.kurse import kurse_liste
@@ -23,19 +24,20 @@ from trainingsapp.ui.views.kurse import kurse_liste
 def neuen_plan_anlegen(page: ft.Page, state: AppState) -> Callable[[], None]:
     """Gibt den Handler für „Neuer Plan" zurück: Dialog mit Namen, dann Bearbeiten-Modus."""
     name = ft.TextField(label="Name", hint_text="z. B. Dehnung, Planke", autofocus=True)
+    nachher = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (N19)
 
     def abbrechen() -> None:
-        page.pop_dialog()
+        schliessen(dialog)
 
-    async def anlegen() -> None:
+    def anlegen() -> None:
         if not (name.value or "").strip():
             name.error = "Ein Name muss sein."
             page.update()
             return
         plan = Plan(name=(name.value or "").strip(), subject_id=state.profil.id)
         state.plaene.speichern(plan)
-        page.pop_dialog()
-        await page.push_route(f"/plaene/{plan.id}")
+        nachher.danach(lambda: page.push_route(f"/plaene/{plan.id}"))
+        schliessen(dialog)
 
     dialog = ft.AlertDialog(
         modal=True,
@@ -45,6 +47,7 @@ def neuen_plan_anlegen(page: ft.Page, state: AppState) -> Callable[[], None]:
             ft.TextButton("Abbrechen", on_click=abbrechen),
             ft.FilledButton("Anlegen", on_click=anlegen),
         ],
+        on_dismiss=nachher.bei_schliessen,
     )
 
     def handler() -> None:

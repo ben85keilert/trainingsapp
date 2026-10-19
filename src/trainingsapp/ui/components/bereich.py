@@ -21,6 +21,7 @@ from collections.abc import Callable, Sequence
 import flet as ft
 from hrv_core.ausschnitte import einrasten
 
+from trainingsapp.core.laufend import minuten
 from trainingsapp.ui.components.kurve import Reihe
 from trainingsapp.ui.components.notizen import senkrechte
 
@@ -34,9 +35,8 @@ MIN_BREITE_S = 5.0
 RAST_ANTEIL = 0.03
 
 
-def _uhr(sekunden: float) -> str:
-    s = max(0, round(sekunden))
-    return f"{s // 60}:{s % 60:02d}"
+#: Eine Schreibweise für alle Zeiten (abgeschnitten, nicht gerundet — wie die Achse; N26)
+_uhr = minuten
 
 
 def schatten(x_von: float, x_bis: float, farbe: str) -> Reihe:

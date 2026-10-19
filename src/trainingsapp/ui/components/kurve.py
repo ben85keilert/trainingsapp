@@ -22,6 +22,8 @@ from itertools import pairwise
 import flet as ft
 import flet_charts as fc
 
+from trainingsapp.core.laufend import minuten
+
 #: Mehr Punkte je Linie schickt die Kurve nicht ans Handy; darüber wird
 #: ausgedünnt — je Abschnitt Minimum und Maximum, so bleiben Ausreißer
 #: sichtbar. Jeder Punkt ist ein eigenes Flet-Control: Bau, Vergleich und
@@ -376,7 +378,7 @@ def _achse_y(
 
 def _zeit(sekunden: float) -> str:
     s = int(sekunden)
-    return f"{s // 60}:{s % 60:02d}" if s >= 60 else f"{s}s"
+    return minuten(s) if s >= 60 else f"{s}s"
 
 
 def kurve(

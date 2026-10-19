@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import logging
 import time
 from collections import deque
 from collections.abc import Callable, Sequence
@@ -45,7 +46,7 @@ from hrv_core.constants import malik_threshold
 from hrv_core.ereignisse import Zeitbezug, anker_aus_wand, notiz
 from hrv_core.live import LiveFenster
 from hrv_core.ppi import messluecken
-from hrv_core.recording import Recording, messordner, speichern
+from hrv_core.recording import Recording, freier_pfad, messordner, speichern
 from hrv_core.regeln import Korrekturregeln
 from hrv_core.segments import abdeckung
 from hrv_core.zeitachse import Kontinuitaetsuhr
@@ -198,6 +199,7 @@ class Messlauf:
         self._uhr: Callable[[], float] = getattr(quelle, "jetzt", time.monotonic)
         self._jetzt_utc = jetzt_utc
         self._backup_basis = backup_basis
+        self._dateiname_fest: str | None = None  # vorab festgelegter Dateiname (F10)
         self.live = LiveFenster()
         # Live-x-Achse gebündelter PPI-Pakete (Verity Sense): Schlagzeiten aus der
         # Intervallsumme statt aus der streuenden Ankunft (`hrv_core.zeitachse`).
@@ -403,6 +405,7 @@ class Messlauf:
         # Countdown) — sonst liest die Aufnahme beide selbst.
         profil = self.profil
         start = self._uhr() if start_mono is None else min(start_mono, self._uhr())
+        self._dateiname_fest = None
         self.aufnahme = Aufnahme(
             geraet=self.geraet_name,
             geraet_profil=profil.id if profil else "ble_generic",
@@ -551,7 +554,19 @@ class Messlauf:
             return None
         geraeteordner = self.profil.ordner if self.profil else "Unbekannt"
         ordner = messordner(Path(), geraeteordner, simulation=self.simulation)
-        return (ordner.relative_to("Messungen") / self.aufnahme.dateiname()).as_posix()
+        return (ordner.relative_to("Messungen") / self._dateiname()).as_posix()
+
+    def _dateiname(self) -> str:
+        """Der Name, unter dem `aufnahme_stoppen` speichern wird: Liegt schon eine Datei mit
+        der Startsekunde da, hängt hrv-core einen Zähler an (F10) — der Verweis einer
+        Einheit muss denselben Namen tragen, darum hier dieselbe Regel (`freier_pfad`)."""
+        assert self.aufnahme is not None
+        if self._dateiname_fest is None:
+            name = self.aufnahme.dateiname()
+            if self._backup_basis is not None:
+                name = freier_pfad(self._ordner(self._backup_basis), name).name
+            self._dateiname_fest = name
+        return self._dateiname_fest
 
     def _ordner(self, basis: Path) -> Path:
         geraeteordner = self.profil.ordner if self.profil else "Unbekannt"
@@ -600,6 +615,10 @@ class Messlauf:
             self.aufnahme = None
             return None
         pfad = aufnahme.speichern(self._ordner(basis))
+        if self._dateiname_fest is not None and pfad.name != self._dateiname_fest:
+            logging.getLogger(__name__).warning(
+                "Messdatei heißt %s, angekündigt war %s", pfad.name, self._dateiname_fest
+            )
         self.aufnahme = None
         rec = aufnahme.recording()
         spuren, self._grenzen = self._grenzen, {}

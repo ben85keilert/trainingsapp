@@ -39,6 +39,7 @@ from hrv_core.ereignisse import Zeitbezug, notiz, sortiert
 
 from trainingsapp.core.einheit import marke_angaben
 from trainingsapp.core.kurzcode import genannte, kurzcode
+from trainingsapp.core.laufend import minuten
 from trainingsapp.ui.components.kurve import Reihe
 from trainingsapp.ui.farben import FARBEN
 
@@ -101,9 +102,8 @@ def einfuegen(text: str, name: str) -> str:
     return f"{text}, {name}"
 
 
-def _uhr(sekunden: float) -> str:
-    s = max(0, round(sekunden))
-    return f"{s // 60}:{s % 60:02d}"
+#: Eine Schreibweise für alle Zeiten (abgeschnitten, nicht gerundet — wie die Achse; N26)
+_uhr = minuten
 
 
 class Notizfeld:

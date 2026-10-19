@@ -573,6 +573,14 @@ class PaketRepo:
                 repo.in_papierkorb(uebung_id)
             kurse = KursRepo(self.con)
             for kurs in kurse.des_pakets(paket_id):
+                # Pläne aus Kapiteln des Kurses enden mit ihm — sonst stünde ein
+                # leerer Plan (Übungen im Papierkorb) weiter als Tagesplan (K22).
+                for kapitel in kurs.kapitel:
+                    self.con.execute(
+                        "UPDATE plan SET active = 0, updated_at = ?, revision = revision + 1 "
+                        "WHERE course_chapter_id = ? AND active = 1",
+                        (jetzt().isoformat(), kapitel.id),
+                    )
                 kurse.loeschen(kurs.id)
             self.con.execute(
                 "UPDATE package SET removed_at = ? WHERE id = ?", (jetzt().isoformat(), paket_id)
@@ -657,7 +665,7 @@ class PaketRepo:
         kurse = KursRepo(self.con)
         stempel = jetzt().isoformat()
         with transaktion(self.con):
-            self._eintragen(inhalt.paket, geschrieben=vorschau.zu_tun)
+            self._eintragen(inhalt.paket, geschrieben=vorschau.zu_tun, installieren=True)
             for kurs in kurs_ziele:
                 kurs.deleted_at = None  # ZURUECK: wieder in der Liste
                 kurse.speichern(kurs, package_standard=kurs_stand(kurs))
@@ -922,12 +930,13 @@ class PaketRepo:
             (text, uebung_id, text),
         )
 
-    def _eintragen(self, paket: Paket, geschrieben: bool) -> None:
+    def _eintragen(self, paket: Paket, geschrieben: bool, installieren: bool = False) -> None:
         """Paketzeile anlegen bzw. Name, Beschreibung, Version auffrischen.
 
         Eine Datei ohne Version lässt die gespeicherte stehen (ein Export
         übernimmt sie ohnehin). ``updated_at`` rückt nur, wenn Übungen
-        geschrieben wurden. Ein entferntes Paket ist danach wieder installiert.
+        geschrieben wurden. Nur ein Import (``installieren``) holt ein entferntes
+        Paket zurück — `herkunft_nachtragen` lässt ``removed_at`` stehen (K25).
         """
         stempel = jetzt().isoformat()
         p = paket
@@ -935,9 +944,10 @@ class PaketRepo:
             "INSERT INTO package (id, name, description, version, installed_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
             "name = excluded.name, description = excluded.description, "
-            "version = COALESCE(excluded.version, package.version), removed_at = NULL, "
+            "version = COALESCE(excluded.version, package.version), "
+            "removed_at = CASE WHEN ? THEN NULL ELSE package.removed_at END, "
             "updated_at = CASE WHEN ? THEN excluded.updated_at ELSE package.updated_at END",
-            (p.id, p.name, p.beschreibung, p.version, stempel, stempel, geschrieben),
+            (p.id, p.name, p.beschreibung, p.version, stempel, stempel, installieren, geschrieben),
         )
 
     @staticmethod

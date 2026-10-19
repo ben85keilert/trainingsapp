@@ -396,3 +396,15 @@ def test_standardpaket_bringt_den_einfuehrungskurs_mit(con, profil) -> None:
     # Ein zweiter Start ändert nichts
     assert seed_einspielen(con) == 0
     assert len(repo.alle()) == 1
+
+
+def test_kapitel_eines_anderen_kurses_wird_nicht_uebernommen(con) -> None:
+    """K21: Nennt ein Kurs die Kapitel-ID eines anderen, bricht das Speichern ab —
+    am Kapitel hängen Fortschritt und Pläne."""
+    repo = KursRepo(con)
+    a = Kurs(name="A", kapitel=[Kapitel(titel="Eins", text="x")])
+    repo.speichern(a)
+    b = Kurs(name="B", kapitel=[Kapitel(id=a.kapitel[0].id, titel="Geklaut", text="y")])
+    with pytest.raises(ValueError, match="gehört schon"):
+        repo.speichern(b)
+    assert [k.titel for k in repo.laden(a.id).kapitel] == ["Eins"]

@@ -44,6 +44,22 @@ def jetzt() -> datetime:
     return datetime.now(UTC)
 
 
+def iso_utc(zeit: datetime) -> str:
+    """Zeitstempel für die Datenbank: immer UTC, immer ``+00:00``.
+
+    Tagesabfragen vergleichen ISO-Strings gegen die UTC-Grenzen aus
+    `tagesgrenzen`; ein Stempel mit anderem Versatz (``23:30+02:00``) stünde
+    im Text hinter ``22:00+00:00`` und fiele aus seinem Tag (Befund D2,
+    19.10.2026). Darum normieren alle Schreibpfade hier, nicht die Aufrufer.
+    Ein naiver Zeitpunkt gilt als Ortszeit.
+
+    >>> from datetime import timedelta, timezone
+    >>> iso_utc(datetime(2026, 10, 18, 23, 30, tzinfo=timezone(timedelta(hours=2))))
+    '2026-10-18T21:30:00+00:00'
+    """
+    return zeit.astimezone(UTC).isoformat()
+
+
 def lokaler_tag(zeit: datetime) -> date:
     """Der Kalendertag, zu dem ein Zeitpunkt in der Zeitzone des Geräts gehört.
 

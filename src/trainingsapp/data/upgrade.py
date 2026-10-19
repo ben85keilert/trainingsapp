@@ -26,14 +26,22 @@ einmal, in Reihenfolge.
   und die bisherige `exercise.category` wird der erste Typ-Tag ihrer Übung.
   Eigene Regionen, die ein Nutzer als Tag angelegt hatte, landen dabei bei den
   Typen — im Editor lassen sie sich umsortieren.
+- **Schritt 5** — Zeitstempel mit Versatz (Befund D2, 19.10.2026): Nachtragen
+  schrieb ``started_at`` als Ortszeit (``23:30+02:00``), die Tagesabfragen
+  vergleichen aber Text gegen UTC-Grenzen — der Eintrag fiel aus seinem Tag.
+  Seitdem normieren die Schreibpfade (`core.models.iso_utc`); hier werden die
+  vorhandenen Stempel in `session`, `session_entry`, `einheit` und
+  `hrv_recording` einmal nach UTC umgeschrieben. Der Zeitpunkt bleibt derselbe,
+  nur die Schreibweise ändert sich.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 
-from ..core.models import REGIONEN, TAG_TYP, new_id
+from ..core.models import REGIONEN, TAG_TYP, iso_utc, new_id
 from ..core.result_spec import (
     FieldType,
     ResultSpec,
@@ -46,7 +54,7 @@ from .db import transaktion
 from .repositories import SettingRepo
 
 SCHLUESSEL = "datenformat"
-AKTUELL = 4
+AKTUELL = 5
 
 #: Alte Seed-Kategorien (Region) → Typ und Region als Tag
 _KATEGORIEN_ALT: dict[str, tuple[str, str | None]] = {
@@ -78,7 +86,38 @@ def datenformat_aktualisieren(con: sqlite3.Connection) -> int:
             geaendert += _schritt_3_kopien_reparieren(con)
         if stand < 4:
             geaendert += _schritt_4_tag_arten(con)
+        if stand < 5:
+            geaendert += _schritt_5_zeitstempel_utc(con)
         einstellungen.setzen(SCHLUESSEL, str(AKTUELL))
+    return geaendert
+
+
+def _schritt_5_zeitstempel_utc(con: sqlite3.Connection) -> int:
+    """Stempel mit anderem Versatz als ``+00:00`` nach UTC umschreiben (gleicher Zeitpunkt)."""
+    geaendert = 0
+    for tabelle, spalten in (
+        ("session", ("started_at", "ended_at")),
+        ("session_entry", ("started_at", "ended_at")),
+        ("einheit", ("started_at", "ended_at")),
+        ("hrv_recording", ("started_at",)),
+    ):
+        for spalte in spalten:
+            zeilen = con.execute(
+                f"SELECT rowid, {spalte} AS wert FROM {tabelle} "
+                f"WHERE {spalte} IS NOT NULL AND {spalte} NOT LIKE '%+00:00'"
+            ).fetchall()
+            for r in zeilen:
+                try:
+                    zeit = datetime.fromisoformat(r["wert"])
+                except ValueError:
+                    continue
+                if zeit.tzinfo is None:
+                    continue  # naiv: Bedeutung unklar, lieber stehen lassen
+                con.execute(
+                    f"UPDATE {tabelle} SET {spalte} = ? WHERE rowid = ?",
+                    (iso_utc(zeit), r["rowid"]),
+                )
+                geaendert += 1
     return geaendert
 
 

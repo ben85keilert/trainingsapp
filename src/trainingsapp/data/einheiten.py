@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from ..core.einheit import Beteiligung, Ereignis, Rolle, daten_pruefen
-from ..core.models import jetzt, new_id
+from ..core.models import iso_utc, jetzt, new_id
 from .db import transaktion
 
 
@@ -49,7 +49,7 @@ class EinheitRepo:
             raise ValueError("Eine Einheit gehört immer zu einem Profil")
         self.con.execute(
             "INSERT INTO einheit (id, subject_id, titel, started_at) VALUES (?, ?, ?, ?)",
-            (einheit_id, subject_id, titel.strip(), started_at.isoformat()),
+            (einheit_id, subject_id, titel.strip(), iso_utc(started_at)),
         )
 
     def beteiligung(self, einheit_id: str, b: Beteiligung) -> None:
@@ -99,7 +99,7 @@ class EinheitRepo:
     def einheit_beenden(self, einheit_id: str, ended_at: datetime) -> None:
         self.con.execute(
             "UPDATE einheit SET ended_at = ? WHERE id = ? AND ended_at IS NULL",
-            (ended_at.isoformat(), einheit_id),
+            (iso_utc(ended_at), einheit_id),
         )
 
     # -- Lesen -------------------------------------------------------------------

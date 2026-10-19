@@ -96,6 +96,18 @@ class KursRepo:
             )
             ids = [k.id for k in kurs.kapitel]
             platzhalter = ",".join("?" * len(ids)) or "''"
+            # Ein Kapitel gehört seinem Kurs: Nennt eine Paketdatei die Kapitel-ID eines
+            # anderen Kurses, darf sie es nicht übernehmen — am Kapitel hängen Fortschritt
+            # und Pläne, der andere Kurs verlöre es beim nächsten Speichern (K21).
+            fremd = self.con.execute(
+                f"SELECT id, course_id FROM course_chapter WHERE id IN ({platzhalter}) "
+                "AND course_id != ?",
+                [*ids, kurs.id],
+            ).fetchone()
+            if fremd is not None:
+                raise ValueError(
+                    f"Kapitel {fremd['id']} gehört schon zum Kurs {fremd['course_id']}"
+                )
             self.con.execute(
                 f"DELETE FROM course_chapter WHERE course_id = ? AND id NOT IN ({platzhalter})",
                 [kurs.id, *ids],

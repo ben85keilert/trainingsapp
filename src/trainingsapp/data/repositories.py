@@ -43,6 +43,7 @@ from ..core.models import (
     SessionEntry,
     Strecke,
     Subject,
+    iso_utc,
     jetzt,
     lokaler_tag,
     new_id,
@@ -73,11 +74,13 @@ PAKET_AKTIV = (
     " AND NOT EXISTS (SELECT 1 FROM package pk WHERE pk.id = exercise.package_id"
     " AND pk.disabled_at IS NOT NULL)"
 )
-#: Dasselbe für Pläne aus Kurskapiteln eines deaktivierten Pakets
+#: Dasselbe für Pläne aus Kurskapiteln eines deaktivierten oder entfernten Pakets
+#: (entfernt: `PaketRepo.entfernen` deaktiviert die Kapitelpläne außerdem — K22)
 _PLAN_PAKET_AKTIV = (
     " AND NOT EXISTS (SELECT 1 FROM course_chapter cc JOIN course c ON c.id = cc.course_id"
     " JOIN package pk ON pk.id = c.package_id"
-    " WHERE cc.id = plan.course_chapter_id AND pk.disabled_at IS NOT NULL)"
+    " WHERE cc.id = plan.course_chapter_id"
+    " AND (pk.disabled_at IS NOT NULL OR pk.removed_at IS NOT NULL))"
 )
 
 
@@ -190,17 +193,26 @@ class ExerciseRepo:
             # Tags: je Name genau eine Zeile in `tag`, Zuordnung komplett ersetzen.
             # Erst die Typen, dann die Regionen — die Reihenfolge bleibt erhalten.
             self.con.execute("DELETE FROM exercise_tag WHERE exercise_id = ?", (uebung.id,))
+            # „dehnung“ ist „Dehnung“: ein vorhandener Tag gleichen Namens (ohne
+            # Rücksicht auf Groß/klein, wie `TagRepo.anlegen` und der Paketimport)
+            # wird genommen, sonst entstünden zwei Tags nebeneinander (D6).
             for name, art in _tags_mit_art(uebung):
-                self.con.execute(
-                    "INSERT INTO tag (id, name, kind, sort) "
-                    "VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort), 0) + 1 FROM tag) * ?) "
-                    "ON CONFLICT(name) DO NOTHING",
-                    (new_id(), name, art, int(neue_tags_oben)),
-                )
-                tag_id = self.con.execute("SELECT id FROM tag WHERE name = ?", (name,)).fetchone()
+                vorhanden = self.con.execute(
+                    "SELECT id FROM tag WHERE name = ? COLLATE NOCASE ORDER BY name = ? DESC",
+                    (name, name),
+                ).fetchone()
+                if vorhanden is None:
+                    tag_id = new_id()
+                    self.con.execute(
+                        "INSERT INTO tag (id, name, kind, sort) "
+                        "VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort), 0) + 1 FROM tag) * ?)",
+                        (tag_id, name, art, int(neue_tags_oben)),
+                    )
+                else:
+                    tag_id = vorhanden["id"]
                 self.con.execute(
                     "INSERT OR IGNORE INTO exercise_tag (exercise_id, tag_id) VALUES (?, ?)",
-                    (uebung.id, tag_id["id"]),
+                    (uebung.id, tag_id),
                 )
 
     def archivieren(self, uebung_id: str) -> None:
@@ -727,9 +739,13 @@ class PlanRepo:
                     int(plan.pause_ohne_timer),
                 ),
             )
+            # Versteckte bleiben stehen: Übungen im Papierkorb und aus deaktivierten
+            # Paketen lädt `_mit_items` nicht — löschte man sie hier, wären sie nach
+            # dem Wiederherstellen bzw. Aktivieren aus dem Plan verschwunden (D4).
             self.con.execute(
                 "DELETE FROM plan_item WHERE plan_id = ? AND exercise_id NOT IN "
-                "(SELECT id FROM exercise WHERE deleted_at IS NOT NULL)",
+                "(SELECT id FROM exercise WHERE deleted_at IS NOT NULL OR package_id IN "
+                "(SELECT id FROM package WHERE disabled_at IS NOT NULL))",
                 (plan.id,),
             )
             # Versteckte (Übung im Papierkorb) lückenlos nach vorn, die Liste dahinter —
@@ -1121,7 +1137,7 @@ class SessionRepo:
                 session.id,
                 session.subject_id,
                 session.plan_id,
-                session.started_at.isoformat(),
+                iso_utc(session.started_at),
                 session.note,
                 session.mood,
             ),
@@ -1145,7 +1161,9 @@ class SessionRepo:
         # Heute: jetzt. Ein anderer Tag (Nachtrag): Mittag dieses Tages, damit
         # die Session innerhalb seiner Grenzen liegt.
         start = (
-            jetzt() if tag == lokaler_tag(jetzt()) else datetime.combine(tag, time(12)).astimezone()
+            jetzt()
+            if tag == lokaler_tag(jetzt())
+            else datetime.combine(tag, time(12)).astimezone(UTC)
         )
         session = Session(subject_id=subject_id, plan_id=plan_id, started_at=start)
         self.anlegen(session)
@@ -1749,8 +1767,8 @@ class SessionRepo:
                 json.dumps(e.result, ensure_ascii=False),
                 json.dumps(e.spec_snapshot.to_dict(), ensure_ascii=False),
                 e.note,
-                e.started_at.isoformat() if e.started_at else None,
-                e.ended_at.isoformat() if e.ended_at else None,
+                iso_utc(e.started_at) if e.started_at else None,
+                iso_utc(e.ended_at) if e.ended_at else None,
                 ersetzt,
             ),
         )
@@ -1899,7 +1917,7 @@ class HrvRepo:
                 a.geraet_profil,
                 a.intervall_quelle,
                 a.datenqualitaet,
-                a.started_at.isoformat(),
+                iso_utc(a.started_at),
                 a.duration_s,
                 a.coverage_pct,
                 a.n_gaps,

@@ -838,3 +838,81 @@ def test_uhr_und_zaehlt_als_reisen_im_paket(con) -> None:
     repo.speichern(u)
     geladen = repo.laden(u.id)
     assert geladen is not None and (geladen.uhr, geladen.zaehlt_als) == (False, "duration")
+
+
+def test_plan_speichern_behaelt_uebungen_deaktivierter_pakete(con) -> None:
+    """D4: `laden` blendet Übungen deaktivierter Pakete aus, `speichern` darf sie nicht
+    löschen — Aktivieren stellt den Plan vollständig her (Migration 017)."""
+    pakete = PaketRepo(con)
+    plaene = PlanRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    baum, _tief = inhalt.uebungen
+    plan = Plan(name="Morgens", subject_id=None)
+    plaene.speichern(plan)
+    plaene.uebung_hinzufuegen(plan.id, baum.id)
+    plaene.uebung_hinzufuegen(plan.id, seed_id("wadenheben"))
+
+    pakete.deaktivieren(inhalt.paket.id)
+    geladen = plaene.laden(plan.id)
+    assert [i.exercise_id for i in geladen.items] == [seed_id("wadenheben")]
+    geladen.name = "Morgens neu"
+    plaene.speichern(geladen)
+
+    pakete.aktivieren(inhalt.paket.id)
+    assert [i.exercise_id for i in plaene.laden(plan.id).items] == [
+        baum.id,
+        seed_id("wadenheben"),
+    ]
+
+
+def test_entfernen_beendet_plaene_aus_kurskapiteln(con) -> None:
+    """K22: Pläne aus Kapiteln eines entfernten Pakets stehen nicht mehr als Tagesplan."""
+    from trainingsapp.core.models import Subject
+    from trainingsapp.data.repositories import SubjectRepo
+
+    pakete = PaketRepo(con)
+    kurse = KursRepo(con)
+    plaene = PlanRepo(con)
+    ich = Subject(name="Ich")
+    SubjectRepo(con).speichern(ich)
+    roh = qigong()
+    roh["kurse"] = [
+        {
+            "key": "k1",
+            "name": "Kurs A",
+            "kapitel": [
+                {
+                    "key": "a",
+                    "titel": "A",
+                    "text": "x",
+                    "plaene": [{"name": "Täglich", "uebungen": [{"uebung": "baum"}]}],
+                }
+            ],
+        }
+    ]
+    inhalt = paket_lesen(roh)
+    pakete.importieren(inhalt)
+    kurs = kurse.laden(inhalt.kurse[0].id)
+    kurse.starten(kurs, ich.id)
+    assert [p.name for p in plaene.alle(ich.id) if p.kurs_kapitel_id] == ["Täglich"]
+
+    pakete.entfernen(inhalt.paket.id)
+    assert [p.name for p in plaene.alle(ich.id) if p.kurs_kapitel_id] == []
+    zeile = con.execute(
+        "SELECT active FROM plan WHERE course_chapter_id = ?", (kurs.kapitel[0].id,)
+    ).fetchone()
+    assert zeile["active"] == 0
+
+
+def test_herkunft_nachtragen_installiert_entferntes_paket_nicht(con) -> None:
+    """K25: Nur ein Import holt ein entferntes Paket zurück."""
+    pakete = PaketRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    pakete.entfernen(inhalt.paket.id)
+    assert pakete.laden(inhalt.paket.id).entfernt is not None
+    pakete.herkunft_nachtragen(inhalt)
+    assert pakete.laden(inhalt.paket.id).entfernt is not None
+    pakete.importieren(inhalt)
+    assert pakete.laden(inhalt.paket.id).entfernt is None

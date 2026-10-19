@@ -1340,3 +1340,55 @@ def test_tagesnotiz_weiss_wann_sie_entstand(welt) -> None:
     assert notizen.angelegt(ich.id, tag) == erst
     notizen.setzen(ich.id, tag, "")
     assert notizen.angelegt(ich.id, tag) is None
+
+
+def test_nachtrag_spaet_am_abend_bleibt_in_seinem_tag(welt) -> None:
+    """D2: Nachtragen gibt die Ortszeit mit Versatz (+02:00) — der Eintrag gehört trotzdem
+    zum Tag, nicht zum nächsten (die Tagesabfragen vergleichen Text gegen UTC-Grenzen)."""
+    con, repo, ich, _ = welt
+    uebung = _wadenheben(con)
+    tag = date(2026, 6, 15)
+    zeit = datetime.combine(tag, datetime.min.time()).astimezone() + timedelta(hours=23, minutes=30)
+    session = repo.session_fuer(ich.id, None, tag)
+    e = repo.eintrag_anlegen(session, uebung, {"reps": [15]}, started_at=zeit)
+
+    gespeichert = con.execute(
+        "SELECT started_at FROM session_entry WHERE id = ?", (e.id,)
+    ).fetchone()[0]
+    assert gespeichert.endswith("+00:00")
+    assert [x.id for x, _ in repo.eintraege_am_tag(ich.id, tag)] == [e.id]
+    assert repo.eintraege_am_tag(ich.id, tag + timedelta(days=1)) == []
+    assert repo.heutiger_eintrag(ich.id, uebung.id, tag=tag) is not None
+    assert repo.anzahl_am_tag(ich.id, tag) == {uebung.id: 1}
+    # die Session des Nachtrags liegt ebenfalls in UTC
+    s = con.execute("SELECT started_at FROM session WHERE id = ?", (session.id,)).fetchone()[0]
+    assert s.endswith("+00:00")
+
+
+def test_upgrade_schreibt_alte_stempel_nach_utc(welt) -> None:
+    """Schritt 5: Stempel mit Versatz aus der Zeit vor D2 werden einmal umgeschrieben."""
+    from trainingsapp.data.upgrade import datenformat_aktualisieren
+
+    con, repo, ich, _ = welt
+    uebung = _wadenheben(con)
+    tag = date(2026, 6, 15)
+    zeit = datetime.combine(tag, datetime.min.time()).astimezone() + timedelta(hours=23, minutes=30)
+    session = repo.session_fuer(ich.id, None, tag)
+    e = repo.eintrag_anlegen(session, uebung, {"reps": [15]}, started_at=zeit)
+    con.execute("UPDATE session_entry SET started_at = ? WHERE id = ?", (zeit.isoformat(), e.id))
+    assert repo.eintraege_am_tag(ich.id, tag) == []  # so sah der Fehler aus
+    SettingRepo(con).setzen("datenformat", "4")
+    assert datenformat_aktualisieren(con) == 1
+    assert [x.id for x, _ in repo.eintraege_am_tag(ich.id, tag)] == [e.id]
+    assert datenformat_aktualisieren(con) == 0
+
+
+def test_uebung_speichern_nimmt_vorhandenen_tag_ohne_gross_klein(repo, con) -> None:
+    """D6: „dehnung“ an einer Übung legt keinen zweiten Tag neben „Dehnung“ an."""
+    repo.speichern(Exercise(name="A", typen=["Dehnung"]))
+    repo.speichern(Exercise(name="B", typen=["dehnung"]))
+    namen = [
+        r[0] for r in con.execute("SELECT name FROM tag WHERE name = 'Dehnung' COLLATE NOCASE")
+    ]
+    assert namen == ["Dehnung"]
+    assert sorted(u.name for u in repo.alle(kategorie="Dehnung")) == ["A", "B"]

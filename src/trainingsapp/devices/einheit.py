@@ -577,6 +577,42 @@ class Einheitslauf:
             return 0.0
         return self.uhr() - self.t0
 
+    def aktive_teile(self) -> list[Baustein]:
+        """Die Teile, die noch laufen (ein fertiger Timer zählt nicht mehr)."""
+        return [t for t in self.teile if self._aktiv(t)]
+
+    def _nur_huelle_der_aufnahme(self) -> Messlauf | None:
+        """Ist die Einheit nur die Hülle einer HRV-Aufnahme, die schon vor ihr lief?
+
+        So steht eine Messung nach dem Ende einer Übung wieder für sich in der Leiste
+        (`ui.einheit._messung_weiter_zeigen`). Ihre Zeit ist dann die der Aufnahme —
+        nicht die der neuen Hülle, die bei 0:00 begänne (Ben, 19.10.2026).
+        """
+        hrv = self.hrv
+        if (
+            hrv is None
+            or hrv.rolle is not Rolle.LAEUFT_SCHON
+            or hrv.messlauf.aufnahme is None
+            or any(t.art != "hrv" for t in self.teile)
+        ):
+            return None
+        return hrv.messlauf
+
+    def anzeige_dauer_s(self) -> float:
+        """Die Zeit in Leiste und Benachrichtigung: die der Einheit — oder die der Aufnahme,
+        wenn die Einheit nur deren Hülle ist (`_nur_huelle_der_aufnahme`)."""
+        lauf = self._nur_huelle_der_aufnahme()
+        if lauf is not None and self.zustand is not Zustand.COUNTDOWN:
+            return lauf.jetzt_s()  # seit dem Aufnahmestart, auch ohne Schläge
+        return self.dauer_s()
+
+    def anzeige_seit_utc(self) -> datetime | None:
+        """Der Anfang, den Leiste und Benachrichtigung nennen (siehe `anzeige_dauer_s`)."""
+        lauf = self._nur_huelle_der_aufnahme()
+        if lauf is not None and lauf.aufnahme is not None:
+            return lauf.aufnahme.start_utc
+        return self.zeitbasis.anker_utc if self.zeitbasis is not None else None
+
     # -- Vorbereiten und Starten -----------------------------------------------------
 
     async def vorbereiten(self) -> dict[str, str]:

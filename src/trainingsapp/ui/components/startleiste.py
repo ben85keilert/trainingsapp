@@ -592,15 +592,16 @@ def _bei_timer_ende(state: AppState, e: Any, *, im_lauf: bool = False) -> ft.Con
 def _kopfzeile(e: Any) -> str:
     """„Intervalllauf · seit 15:31“ — die Startzeit in Ortszeit."""
     name = e.titel or ablauf.titel(e)
-    if e.zeitbasis is None or e.zustand is Zustand.COUNTDOWN:
+    seit = e.anzeige_seit_utc()
+    if seit is None or e.zustand is Zustand.COUNTDOWN:
         return name
-    return f"{name} · seit {e.zeitbasis.anker_utc.astimezone().strftime('%H:%M')}"
+    return f"{name} · seit {seit.astimezone().strftime('%H:%M')}"
 
 
 def _laufzeit(e: Any) -> str:
     if e.zustand is Zustand.COUNTDOWN:
         return f"Start in {max(0, math.ceil(-e.dauer_s()))} …"
-    return uhr(max(e.dauer_s(), 0.0))
+    return uhr(max(e.anzeige_dauer_s(), 0.0))
 
 
 def _timer_zeilen(lauf: TimerLauf) -> tuple[str, str]:

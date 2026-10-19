@@ -439,3 +439,78 @@ def test_bereitgestellte_einheit_bleibt_unangetastet(state) -> None:
     vorher = state.einheit
     assert einheit_ui.einzeln_starten(page, state, TimerBaustein(TimerLauf(_profil(5)))) is None
     assert state.einheit is vorher and not vorher.laeuft
+
+
+async def test_fertiger_timer_macht_wieder_platz_und_stoppt_die_aufnahme_nicht(
+    state, tmp_path
+) -> None:
+    """H25: Messung für sich, ein Timer tritt bei und läuft ab — danach ist wieder Platz,
+    und `platz_machen` lässt die Aufnahme weiterlaufen."""
+    from attrappen import aufbauen
+    from trainingsapp.devices.einheit import TimerBaustein
+
+    a = await aufbauen(tmp_path)
+    state.messlauf = a.lauf
+    state.einheiten = a.repo
+    state.neu_zeichnen = lambda: None
+    a.lauf.aufnahme_starten()
+    page = Seite()
+    einheit_ui._messung_weiter_zeigen(page, state)
+    e = einheit_ui.laeuft(state)
+    assert e is not None and einheit_ui.platz_frei(state)
+    lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 2)]))
+    assert einheit_ui.einzeln_starten(page, state, TimerBaustein(lauf)) is e
+    a.uhr.t += 3.0
+    for _ in range(5):
+        await asyncio.sleep(0.25)
+    assert lauf.fertig and e.zustand is Zustand.LAEUFT
+    assert einheit_ui.platz_frei(state)
+    assert einheit_ui.platz_machen(state)
+    assert not e.stoppt_am_ende("hrv") and a.lauf.aufnahme is not None
+    await a.abbauen()
+
+
+async def test_trotzdem_starten_ohne_gurt_laesst_die_hrv_draussen(state, tmp_path) -> None:
+    """H31: Kein Gurt verbunden → die HRV startet nicht mit, die Einheit sagt es."""
+    from attrappen import aufbauen
+
+    a = await aufbauen(tmp_path)
+    await a.lauf.trennen()
+    state.messlauf = a.lauf
+    state.einheiten = a.repo
+    state.neu_zeichnen = lambda: None
+    page = Seite()
+    einheit_ui.timer_bereitstellen(
+        page, state, TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 5)]))
+    )
+    einheit_ui.hrv_bereitstellen(page, state)
+    e = einheit_ui.in_vorbereitung(state)
+    assert e is not None and e.hrv is not None and not e.bereit
+    gestartet = einheit_ui.alle_starten(page, state, 0.0)
+    assert gestartet is e and e.hrv is None and a.lauf.aufnahme is None
+    assert e.warnung and "kein Gurt" in e.warnung
+    e.beenden()
+    await asyncio.sleep(0.3)
+    await a.abbauen()
+
+
+async def test_laufende_messung_kommt_in_die_bereitgestellte_einheit(state, tmp_path) -> None:
+    """H30: Endet eine Einheit, während etwas bereitsteht, verschwindet die weiterlaufende
+    Messung nicht — sie kommt in die bereitgestellte Einheit."""
+    from attrappen import aufbauen
+
+    a = await aufbauen(tmp_path)
+    state.messlauf = a.lauf
+    state.einheiten = a.repo
+    state.neu_zeichnen = lambda: None
+    a.lauf.aufnahme_starten()
+    page = Seite()
+    einheit_ui.timer_bereitstellen(
+        page, state, TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 5)]))
+    )
+    e = einheit_ui.in_vorbereitung(state)
+    assert e is not None and e.hrv is not None  # timer_bereitstellen nimmt die Aufnahme mit
+    e.entfernen("hrv")
+    einheit_ui._messung_weiter_zeigen(page, state)
+    assert e.hrv is not None and einheit_ui.in_vorbereitung(state) is e
+    await a.abbauen()

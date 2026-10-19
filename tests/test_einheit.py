@@ -301,3 +301,33 @@ def test_tiefschlaf_pruefung_nur_mit_echter_uhr() -> None:
     e2 = Einheitslauf()
     e2.hinzufuegen(HrvBaustein(Messlauf(SimulatedSource(tempo=60.0))))
     assert not e2.echtzeit
+
+
+def test_huelle_einer_laufenden_aufnahme_zeigt_deren_zeit() -> None:
+    """Die Messung lief schon, die Einheit ist nur ihre Hülle (nach dem Ende einer Übung):
+    Leiste und Benachrichtigung zählen die Aufnahme weiter, nicht von vorn (Ben, 19.10.)."""
+    from trainingsapp.core.timer import Abschnitt, TimerLauf, TimerProfil
+    from trainingsapp.devices.einheit import Einheitslauf, HrvBaustein, TimerBaustein
+    from trainingsapp.devices.messlauf import Messlauf
+    from trainingsapp.devices.simulated import SimulatedSource
+
+    t = [100.0]
+    quelle = SimulatedSource(tempo=0.0)
+    quelle.jetzt = lambda: t[0]  # type: ignore[method-assign]
+    lauf = Messlauf(quelle)
+    lauf.aufnahme_starten()
+    t[0] += 600.0
+    e = Einheitslauf(uhr=lambda: t[0])
+    e.hinzufuegen(HrvBaustein(lauf))
+    e.ende_wenn_alles_fertig = True
+    e.starten()
+    t[0] += 5.0
+    assert round(e.dauer_s()) == 5 and round(e.anzeige_dauer_s()) == 605
+    assert e.anzeige_seit_utc() == lauf.aufnahme.start_utc
+    # mit einem zweiten Teil ist es eine richtige Einheit — ihre eigene Zeit zählt
+    e2 = Einheitslauf(uhr=lambda: t[0])
+    e2.hinzufuegen(HrvBaustein(lauf))
+    e2.hinzufuegen(TimerBaustein(TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 30)]))))
+    e2.starten()
+    t[0] += 5.0
+    assert round(e2.anzeige_dauer_s()) == 5

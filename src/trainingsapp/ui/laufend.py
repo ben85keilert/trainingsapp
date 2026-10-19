@@ -41,8 +41,9 @@ def _einheit(state: Any) -> Laufend | None:
     if e is None or e.teil("gps") is not None:
         return None
     oben, _ = einheit_ui.laufzeilen(e)
-    seit = e.zeitbasis.anker_utc if e.zeitbasis is not None else None
-    return Laufend("Einheit", f"{e.titel}: {oben}", f"Einheit {uhr(max(e.dauer_s(), 0.0))}", seit)
+    seit = e.anzeige_seit_utc()
+    dauer = uhr(max(e.anzeige_dauer_s(), 0.0))
+    return Laufend("Einheit", f"{e.titel}: {oben}", f"Einheit {dauer}", seit)
 
 
 def _hrv(state: Any) -> Laufend | None:

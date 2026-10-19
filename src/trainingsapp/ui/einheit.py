@@ -73,8 +73,11 @@ def laeuft(state: Any) -> Einheitslauf | None:
 
 
 def _nur_messung(e: Einheitslauf) -> bool:
-    """Eine Einheit aus Einzelstarts, in der allein die HRV-Messung läuft."""
-    return e.ende_wenn_alles_fertig and bool(e.teile) and all(t.art == "hrv" for t in e.teile)
+    """Eine Einheit aus Einzelstarts, in der allein die HRV-Messung (noch) läuft — ein
+    beigetretener Timer, der durch ist, zählt nicht mehr (H25: er blockierte sonst jeden
+    Start, und ⏹ beendete dann die Aufnahme)."""
+    aktive = e.aktive_teile()
+    return e.ende_wenn_alles_fertig and bool(aktive) and all(t.art == "hrv" for t in aktive)
 
 
 def platz_frei(state: Any) -> bool:
@@ -227,8 +230,14 @@ def einzeln_starten(page: Any, state: Any, teil: Any) -> Einheitslauf | None:
 
 
 def timer_bereitstellen(page: Any, state: Any, lauf: TimerLauf) -> TimerBaustein:
+    """Der Timer in die Einheit; eine HRV, die schon aufnimmt, kommt mit (nur Marken) — wie
+    bei Übung und Training (H30)."""
     teil = TimerBaustein(lauf)
     _ersetzen(page, state, teil)
+    e = in_vorbereitung(state)
+    messlauf = state.messlauf
+    if e is not None and e.hrv is None and messlauf is not None and messlauf.aufnahme is not None:
+        hrv_bereitstellen(page, state)
     return teil
 
 
@@ -384,6 +393,15 @@ def alle_starten(
     e = in_vorbereitung(state)
     if e is None or not e.teile:
         return None
+    hrv = e.hrv
+    if hrv is not None and not hrv.bereit:
+        # „Trotzdem starten“ ohne Gurt: Die HRV bleibt draußen — sonst liefe eine leere
+        # Aufnahme, und die Leiste behauptete „HRV läuft seit …“ (H31)
+        e.entfernen("hrv")
+        e.warnung = "HRV-Messung nicht dabei — kein Gurt verbunden"
+        if not e.teile:
+            melden(state)
+            return None
     if not e.titel:
         e.titel = titel(e)
     e.beobachter = lambda neu: _ereignisse(page, state, e, neu)
@@ -404,6 +422,12 @@ def _timer_ticken(page: Any, state: Any, e: Einheitslauf) -> None:
         return
     from trainingsapp.ui.timer_takt import ticker_starten  # flet-frei (CI ohne flet)
 
+    alt = getattr(state, "timer", None)
+    if alt is not None and alt is not e.timer.lauf and alt.laeuft:
+        # Ein Timer, der während des Countdowns für sich startete, verlöre jetzt seinen
+        # Ticker (Töne, Marken) und liefe stumm weiter — lieber beenden und sagen (H29)
+        alt.abbrechen()
+        e.warnung = "Der für sich gestartete Timer wurde beendet — der Timer der Einheit läuft"
     state.timer = e.timer.lauf
     with contextlib.suppress(Exception):
         ticker_starten(page, state)
@@ -466,8 +490,10 @@ async def _laufen(
                 from trainingsapp.ui.views.messung import aufnahme_eintragen
 
                 eintragen_mit = aufnahme_eintragen
-            with contextlib.suppress(Exception):
+            try:
                 aufnahme = eintragen_mit(state, abschluss.hrv, e.subject_id)
+            except Exception as fehler:  # die Datei liegt unter Messungen/, nur die DB-Zeile fehlt
+                e.warnung = f"Aufnahme gespeichert, aber nicht eingetragen: {fehler}"
         training = abschluss.teile.get("gps") if abschluss is not None else None
         if training is not None:
             from trainingsapp.ui.training import einheit_eintragen
@@ -501,7 +527,11 @@ def _messung_weiter_zeigen(page: Any, state: Any) -> None:
     oder „Weiterlaufen“), steht sie wieder für sich in Leiste und Reiter „Einheit“ — wie
     eine einzeln gestartete Messung (Ben, 18.10.2026). ⏹ beendet und speichert sie dann."""
     lauf = getattr(state, "messlauf", None)
-    if lauf is None or lauf.aufnahme is None or aktuell(state) is not None:
+    if lauf is None or lauf.aufnahme is None:
+        return
+    if (e := aktuell(state)) is not None:
+        if not e.laeuft and e.hrv is None:
+            hrv_bereitstellen(page, state)  # steht etwas bereit, kommt die Messung dorthin (H30)
         return
     e = einzeln_starten(page, state, HrvBaustein(lauf, basis=datenverzeichnis()))
     if e is not None:
@@ -618,7 +648,7 @@ def laufzeilen(e: Einheitslauf) -> tuple[str, str]:
     if e.zustand is Zustand.COUNTDOWN:
         rest = max(0, math.ceil(-e.dauer_s()))
         return f"Start in {rest} …", _teile_text(e)
-    oben = [uhr(max(e.dauer_s(), 0.0))]
+    oben = [uhr(max(e.anzeige_dauer_s(), 0.0))]
     if isinstance(ablauf := e.teil("plan"), PlanAblaufBaustein):
         if ablauf.phase == PAUSE and (n := ablauf.naechster) is not None:
             oben.append(f"Pause — dann {ablauf.schritte[n].name}")

@@ -5,8 +5,9 @@ sind ein Punkt bei 150), darunter drei Zahlen und die **Ergebnisse** je Tag mit 
 Varianten und Notizen — antippen öffnet den Tag. Ein Tipp auf einen Punkt markiert seine
 Zeile.
 
-- **Kennzahl** als Chips (eine Zeile, bricht um) nur, wenn die Übung mehrere hat (Wiederholungen je Tag, bester
-  Satz, Haltezeit …, `core/verlauf.kennzahlen`); mit einer steht sie als Überschrift da.
+- **Kennzahl** als Chips (eine Zeile, bricht um) nur, wenn die Übung mehrere hat
+  (Wiederholungen je Tag, bester Satz, Haltezeit …, `core/verlauf.kennzahlen`); mit einer
+  steht sie als Überschrift da.
 - Ohne Werte, nur abgehakt: **wie oft** je Woche bzw. Monat als Säulen.
 - **Zeitraum** 4 Wochen · 3 Monate · Jahr · alles; die Kurve beginnt beim ersten Wert darin.
 - **Achse**: das Datum (Vorgabe) oder die Trainingsnummer (gleiche Abstände) — das Symbol

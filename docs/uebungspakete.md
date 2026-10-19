@@ -266,8 +266,9 @@ Paketdatei samt Prüfsumme. Wie die Dateien auf den Server kommen: Homepage,
 Eine **Quelle** ist eine HTTPS-Adresse, unter der ein **Index** liegt — die JSON, die
 `trainingsapp-paket index` schreibt: je Paket `id`, `name`, `beschreibung`, `version`,
 `url` (Paketdatei), `sha256`, `bytes`, `uebungen`, `kurse`, `neuigkeiten`,
-`veroeffentlicht`, `signatur` (reserviert, `null`). Kopf: `format =
-"trainingsapp-paketindex"`, `version = 1`, `quelle.name`. Das Format ist bewusst so
+`veroeffentlicht` (Datum des letzten Inhaltswechsels: bei gleicher Prüfsumme bleibt es
+aus dem vorigen Index am `--ziel` stehen, K30), `signatur` (reserviert, `null`). Kopf:
+`format = "trainingsapp-paketindex"`, `version = 1`, `quelle.name`. Das Format ist bewusst so
 einfach, dass es von jedem Webserver, von GitHub Pages oder aus einem Release kommen
 kann (`core/paketquelle.py`).
 

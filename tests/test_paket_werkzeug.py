@@ -88,6 +88,30 @@ def test_bauen_und_index(tmp_path) -> None:
     assert std["id"] == GRUNDAUSSTATTUNG and std["kurse"] == 1 and std["signatur"] is None
 
 
+def test_index_behaelt_das_datum_unveraenderter_pakete(tmp_path) -> None:
+    """K30: `veroeffentlicht` = letzter Inhaltswechsel, nicht Build-Datum — bei gleicher
+    Prüfsumme kommt das Datum aus dem vorigen Index, ein geändertes Paket bekommt heute."""
+    datei = tmp_path / "qigong.toml"
+    datei.write_text(QIGONG, encoding="utf-8")
+    pfad = bauen(datei, tmp_path / "dist")
+    vorher = index([pfad, SEED_DATEI], "https://x/p")
+    vorher["pakete"][0]["veroeffentlicht"] = "2026-01-02"
+    vorher["pakete"][1]["veroeffentlicht"] = "2026-03-04"
+    datei.write_text(QIGONG.replace("Neu: Lotus", "Neu: Lotus, Baum"), encoding="utf-8")
+    pfad = bauen(datei, tmp_path / "dist")
+
+    daten = index([pfad, SEED_DATEI], "https://x/p", vorher=vorher)
+    q, std = daten["pakete"]
+    assert q["veroeffentlicht"] != "2026-01-02"  # Inhalt geändert → heute
+    assert std["veroeffentlicht"] == "2026-03-04"  # unverändert → Datum bleibt
+
+    ziel = tmp_path / "dist" / "index.json"
+    ziel.write_text(json.dumps(daten), encoding="utf-8")
+    assert main(["index", str(pfad), str(SEED_DATEI), "--ziel", str(ziel), "--basis-url", "x"]) == 0
+    neu = json.loads(ziel.read_text(encoding="utf-8"))
+    assert neu["pakete"][1]["veroeffentlicht"] == "2026-03-04"
+
+
 def test_befehlszeile(tmp_path, capsys) -> None:
     datei = tmp_path / "qigong.toml"
     datei.write_text(QIGONG, encoding="utf-8")

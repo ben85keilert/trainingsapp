@@ -217,18 +217,33 @@ def bauen(datei: Path, ziel: Path) -> Path:
     return pfad
 
 
-def index(dateien: Iterable[Path], basis_url: str = "", quelle: str = "") -> dict[str, Any]:
+def index(
+    dateien: Iterable[Path],
+    basis_url: str = "",
+    quelle: str = "",
+    vorher: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Der Index einer Paketquelle: je Paketdatei ID, Name, Version, URL, SHA-256, Größe,
     Neuigkeiten. ``basis_url`` + Dateiname = Download-Adresse. ``signatur`` ist
     reserviert (Ben, 16.10.2026: erst, wenn Pakete von Dritten kommen).
 
+    ``veroeffentlicht`` ist das Datum des letzten Inhaltswechsels je Paket, nicht das
+    Build-Datum (K30): Paketdateien sind reproduzierbar (`paket_bauen` ohne
+    Zeitstempel), darum bleibt bei gleicher Prüfsumme das Datum aus dem vorigen
+    Index ``vorher`` stehen.
+
     >>> sorted(index([]).keys())
     ['format', 'pakete', 'quelle', 'version']
     """
+    bekannt: dict[str, str] = {}
+    for e in (vorher or {}).get("pakete") or []:
+        if isinstance(e, dict) and e.get("sha256") and e.get("veroeffentlicht"):
+            bekannt[str(e["sha256"])] = str(e["veroeffentlicht"])
     pakete: list[dict[str, Any]] = []
     for datei in dateien:
         daten = datei.read_bytes()
         inhalt = seed_inhalt(datei)
+        sha256 = hashlib.sha256(daten).hexdigest()
         pakete.append(
             {
                 "id": inhalt.paket.id,
@@ -236,12 +251,12 @@ def index(dateien: Iterable[Path], basis_url: str = "", quelle: str = "") -> dic
                 "beschreibung": inhalt.paket.beschreibung,
                 "version": inhalt.paket.version,
                 "url": basis_url.rstrip("/") + "/" + datei.name if basis_url else datei.name,
-                "sha256": hashlib.sha256(daten).hexdigest(),
+                "sha256": sha256,
                 "bytes": len(daten),
                 "uebungen": len(inhalt.uebungen),
                 "kurse": len(inhalt.kurse),
                 "neuigkeiten": inhalt.paket.neuigkeiten,
-                "veroeffentlicht": datetime.now(UTC).date().isoformat(),
+                "veroeffentlicht": bekannt.get(sha256) or datetime.now(UTC).date().isoformat(),
                 "format_version": FORMAT_VERSION if inhalt.kurse else 1,
                 "signatur": None,
             }
@@ -313,7 +328,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"FEHLER: {f}")
         return 1 if fehler else 0
     if args.befehl == "index":
-        daten = index(args.dateien, args.basis_url, args.quelle)
+        vorher = None
+        if args.ziel.is_file():  # Datum unveränderter Pakete übernehmen (K30)
+            try:
+                vorher = json.loads(args.ziel.read_text("utf-8"))
+            except ValueError:
+                vorher = None
+        daten = index(args.dateien, args.basis_url, args.quelle, vorher)
         args.ziel.parent.mkdir(parents=True, exist_ok=True)
         args.ziel.write_text(json.dumps(daten, ensure_ascii=False, indent=2) + "\n", "utf-8")
         print(f"{args.ziel}: {len(daten['pakete'])} Paket(e)")

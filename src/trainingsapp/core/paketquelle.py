@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterable
@@ -108,6 +109,9 @@ def url_pruefen(url: str) -> str | None:
     return None
 
 
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
 def _ganzzahl(wert: Any) -> bool:
     return isinstance(wert, int) and not isinstance(wert, bool)
 
@@ -117,14 +121,16 @@ def index_lesen(daten: Any, quelle_url: str) -> tuple[str, list[IndexEintrag]]:
 
     >>> roh = {"format": "trainingsapp-paketindex", "version": 1, "quelle": {"name": "Q"},
     ...        "pakete": [{"id": "p1", "name": "Dehnung", "version": 2,
-    ...                    "url": "https://x/d.json", "sha256": "ab", "bytes": 10}]}
+    ...                    "url": "https://x/d.json", "sha256": "0" * 64, "bytes": 10}]}
     >>> name, eintraege = index_lesen(roh, "https://x/index.json")
     >>> name, eintraege[0].name, eintraege[0].version
     ('Q', 'Dehnung', 2)
     """
     if not isinstance(daten, dict) or daten.get("format") != INDEX_FORMAT:
         raise QuellenFehler("Unter der Adresse liegt kein Paketindex.")
-    if not _ganzzahl(daten.get("version", 1)) or daten.get("version", 1) > INDEX_VERSION:
+    if not _ganzzahl(daten.get("version", 1)):
+        raise QuellenFehler("Der Index ist unlesbar (Version).")
+    if daten.get("version", 1) > INDEX_VERSION:
         raise QuellenFehler("Der Index ist neuer als diese App — bitte die App aktualisieren.")
     quelle = daten.get("quelle") or {}
     name = str(quelle.get("name") or "").strip() if isinstance(quelle, dict) else ""
@@ -138,15 +144,20 @@ def index_lesen(daten: Any, quelle_url: str) -> tuple[str, list[IndexEintrag]]:
         paket_id = str(e.get("id") or "").strip()
         url = str(e.get("url") or "").strip()
         version = e.get("version")
+        sha256 = str(e.get("sha256") or "").lower()
         if not paket_id or not url or (version is not None and not _ganzzahl(version)):
             continue  # unvollständige Einträge überspringen, nicht die ganze Quelle
+        # Die Paketdatei kommt nur verschlüsselt und nur mit Prüfsumme — ein Index, der
+        # http:// oder keine Prüfsumme nennt, lieferte sonst ungeprüften Inhalt (K14)
+        if url_pruefen(url) is not None or not _SHA256.fullmatch(sha256):
+            continue
         eintraege.append(
             IndexEintrag(
                 id=paket_id,
                 name=str(e.get("name") or paket_id),
                 version=version,
                 url=url,
-                sha256=str(e.get("sha256") or "").lower(),
+                sha256=sha256,
                 bytes=int(e["bytes"]) if _ganzzahl(e.get("bytes")) else 0,
                 quelle_url=quelle_url,
                 quelle_name=name,
@@ -160,10 +171,24 @@ def index_lesen(daten: Any, quelle_url: str) -> tuple[str, list[IndexEintrag]]:
     return name, eintraege
 
 
+class _NurHttps(urllib.request.HTTPRedirectHandler):
+    """Weiterleitungen nur auf https:// — `urllib` folgte sonst auch nach http:// (A9)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        if url_pruefen(newurl) is not None:
+            raise urllib.error.HTTPError(
+                newurl, code, "Weiterleitung nur auf https://", headers, fp
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OEFFNER = urllib.request.build_opener(_NurHttps)
+
+
 def _laden(url: str) -> bytes:
     """Holt bis zu `MAX_PAKET_BYTES` + 1 — mehr liest niemand."""
     anfrage = urllib.request.Request(url, headers={"User-Agent": "trainingsapp-pakete"})
-    with urllib.request.urlopen(anfrage, timeout=_ZEITLIMIT_S) as antwort:
+    with _OEFFNER.open(anfrage, timeout=_ZEITLIMIT_S) as antwort:
         return antwort.read(MAX_PAKET_BYTES + 1)
 
 
@@ -224,7 +249,7 @@ def paket_laden(eintrag: IndexEintrag, laden: Callable[[str], bytes] = _laden) -
     daten = _holen(eintrag.url, laden)
     if len(daten) > MAX_PAKET_BYTES:
         raise QuellenFehler("Die Paketdatei ist zu groß.")
-    if eintrag.sha256 and hashlib.sha256(daten).hexdigest() != eintrag.sha256:
+    if hashlib.sha256(daten).hexdigest() != eintrag.sha256:
         raise QuellenFehler("Die Prüfsumme stimmt nicht — die Datei ist nicht die aus dem Index.")
     try:
         inhalt = paket_lesen(daten)
@@ -232,6 +257,13 @@ def paket_laden(eintrag: IndexEintrag, laden: Callable[[str], bytes] = _laden) -
         raise QuellenFehler(str(e)) from e
     if inhalt.paket.id != eintrag.id:
         raise QuellenFehler("Die Datei gehört zu einem anderen Paket als im Index angegeben.")
+    if (
+        eintrag.version is not None
+        and inhalt.paket.version is not None
+        and inhalt.paket.version != eintrag.version
+    ):
+        # sonst meldete `updates_finden` nach dem Einspielen dasselbe Update erneut (K23)
+        raise QuellenFehler("Die Datei trägt eine andere Version als im Index angegeben.")
     return inhalt
 
 

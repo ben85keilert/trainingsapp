@@ -34,6 +34,8 @@ _APK_NAME: Final[re.Pattern[str]] = re.compile(
     r"^trainingsapp-(?P<version>\d+(?:\.\d+)*)-(?P<build>\d+)(?P<debug>-debug)?\.apk$"
 )
 _ZEITLIMIT_S: Final[float] = 10.0
+#: Die Release-Liste ist wenige KB; mehr als das liest niemand
+_MAX_ANTWORT_BYTES = 2_000_000
 
 
 class UpdateFehler(Exception):
@@ -95,7 +97,10 @@ def release_aus_json(daten: Any) -> Release | None:
     for eintrag in daten:
         if not isinstance(eintrag, dict) or eintrag.get("draft"):
             continue
-        for asset in eintrag.get("assets") or []:
+        assets = eintrag.get("assets")
+        for asset in assets if isinstance(assets, list) else []:
+            if not isinstance(asset, dict):
+                continue
             treffer = _APK_NAME.match(str(asset.get("name", "")))
             if treffer is None or treffer.group("debug"):
                 continue
@@ -120,7 +125,10 @@ def _laden(url: str) -> Any:
         },
     )
     with urllib.request.urlopen(anfrage, timeout=_ZEITLIMIT_S) as antwort:
-        return json.load(antwort)
+        daten = antwort.read(_MAX_ANTWORT_BYTES + 1)
+    if len(daten) > _MAX_ANTWORT_BYTES:
+        raise UpdateFehler("Die Antwort von GitHub ist unerwartet groß")
+    return json.loads(daten)
 
 
 def neuestes_release(laden: Callable[[str], Any] = _laden) -> Release | None:

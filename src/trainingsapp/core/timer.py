@@ -347,7 +347,7 @@ def _abschnitte_lesen(roh: Any) -> list[Abschnitt]:
             continue
         try:
             dauer = int(a.get("dauer_s") or 0)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):  # 1e400 ist inf → OverflowError
             continue
         if 0 < dauer <= MAX_ABSCHNITT_S:
             abschnitte.append(
@@ -364,7 +364,7 @@ def _abschnitte_lesen(roh: Any) -> list[Abschnitt]:
 def _runden_lesen(roh: Any) -> int:
     try:
         runden = int(roh or 1)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         runden = 1
     return min(max(runden, 1), MAX_RUNDEN)
 

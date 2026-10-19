@@ -40,7 +40,7 @@ def _eintrag(**extra) -> dict:
         "name": "Dehnung",
         "version": 2,
         "url": "https://x/d.json",
-        "sha256": "",
+        "sha256": "0" * 64,
         "bytes": 10,
     } | extra
 
@@ -55,6 +55,22 @@ def test_index_lesen_prueft_format_und_ueberspringt_unvollstaendiges() -> None:
         index_lesen(_index() | {"version": 9}, "u")
     with pytest.raises(QuellenFehler, match="keine Paketliste"):
         index_lesen(_index() | {"pakete": "x"}, "u")
+    with pytest.raises(QuellenFehler, match="unlesbar"):
+        index_lesen(_index() | {"version": "1.0"}, "u")
+
+
+def test_index_lesen_nimmt_nur_https_und_pruefsumme(tmp_path) -> None:
+    """K14: Die Paketdatei kommt nur verschlüsselt und nur mit Prüfsumme — sonst holte
+    ein fremder Index ungeprüften Inhalt."""
+    roh = _index(
+        _eintrag(),
+        _eintrag(id="http", url="http://x/d.json"),
+        _eintrag(id="datei", url="file:///etc/passwd"),
+        _eintrag(id="ohne", sha256=""),
+        _eintrag(id="kurz", sha256="ab"),
+    )
+    _name, eintraege = index_lesen(roh, "https://x/i")
+    assert [e.id for e in eintraege] == ["p1"]
 
 
 def test_index_laden_meldet_netzfehler_und_unsinn() -> None:
@@ -102,11 +118,17 @@ def test_paket_laden_prueft_pruefsumme_und_id(tmp_path) -> None:
     falsch = IndexEintrag("p1", "Dehnung", 2, "https://x/d.json", "00" * 32, len(datei), "q")
     with pytest.raises(QuellenFehler, match="Prüfsumme"):
         paket_laden(falsch, lambda url: datei)
-    andere = IndexEintrag("p2", "Dehnung", 2, "https://x/d.json", "", 0, "q")
+    sha = hashlib.sha256(datei).hexdigest()
+    andere = IndexEintrag("p2", "Dehnung", 2, "https://x/d.json", sha, 0, "q")
     with pytest.raises(QuellenFehler, match="anderen Paket"):
         paket_laden(andere, lambda url: datei)
+    # K23: Datei und Index nennen verschiedene Versionen — sonst „Update“ ohne Ende
+    versatz = IndexEintrag("p1", "Dehnung", 3, "https://x/d.json", sha, 0, "q")
+    with pytest.raises(QuellenFehler, match="andere Version"):
+        paket_laden(versatz, lambda url: datei)
+    nix = hashlib.sha256(b"nix").hexdigest()
     with pytest.raises(QuellenFehler, match="keine Paketdatei"):
-        paket_laden(IndexEintrag("p1", "D", 2, "u", "", 0, "q"), lambda url: b"nix")
+        paket_laden(IndexEintrag("p1", "D", 2, "u", nix, 0, "q"), lambda url: b"nix")
 
 
 def test_pruefen_sammelt_fehler_je_quelle_und_passt_zum_werkzeug(tmp_path) -> None:

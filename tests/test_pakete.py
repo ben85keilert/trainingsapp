@@ -916,3 +916,77 @@ def test_herkunft_nachtragen_installiert_entferntes_paket_nicht(con) -> None:
     assert pakete.laden(inhalt.paket.id).entfernt is not None
     pakete.importieren(inhalt)
     assert pakete.laden(inhalt.paket.id).entfernt is None
+
+
+def test_paket_lesen_faengt_kaputte_felder_statt_abzustuerzen() -> None:
+    """K15–K18: Fremddaten enden in `PaketFehler` oder einem Problemtext — nie in
+    AttributeError, OverflowError oder einem Absturz beim Anzeigen."""
+    faelle = [
+        {"result_spec": {"fields": ["abc"]}},
+        {"result_spec": {"fields": "x"}},
+        {"result_spec": {"fields": [{"key": "reps", "type": "set_list"}], "shorthand": "{reps:d}"}},
+        {"result_spec": {"fields": [{"key": "a", "type": "int"}], "shorthand": "{a.__class__}"}},
+        {"timer": [{"name": "T", "abschnitte": [{"name": "a", "dauer_s": 1e400}]}]},
+        {"timer": [{"name": "T", "abschnitte": [{"name": "a", "dauer_s": 30}], "runden": 1e400}]},
+    ]
+    for extra in faelle:
+        roh = qigong()
+        roh["exercises"][0] |= extra
+        try:
+            paket_lesen(roh)
+        except PaketFehler:
+            continue
+        # gelesen — nur die Rundenzahl wird still auf ihr Maximum gedeckelt
+        assert "runden" in extra["timer"][0]
+
+
+def test_kursbedingung_mit_unendlichem_soll_wird_abgelehnt() -> None:
+    """K17: `int(inf)` stürzte beim Anzeigen des Kurses ab."""
+    for soll in (1e400, "1e400", float("nan")):
+        roh = qigong()
+        roh["kurse"] = [
+            {
+                "key": "k",
+                "name": "K",
+                "kapitel": [
+                    {
+                        "key": "a",
+                        "titel": "A",
+                        "text": "x",
+                        "bedingung": {"art": "tage", "soll": soll},
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(PaketFehler):
+            paket_lesen(roh)
+
+
+def test_kennzahlen_ueberstehen_none_und_text_in_satzliste() -> None:
+    """K19: `result={"reps": [15, None]}` stürzte das Speichern jedes Eintrags ab."""
+    from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+
+    assert SPEC_SAETZE_WDH.kennzahlen({"reps": [15, None, "abc", 5]}) == [
+        ("reps:sum", 20.0, "Wdh."),
+        ("reps:max", 15.0, "Wdh."),
+    ]
+    assert SPEC_SAETZE_WDH.kennzahlen({"reps": [None]}) == []
+    assert SPEC_WINKEL.format_shorthand({"angle": [1, 2]}) != ""  # Vorlage passt nicht → Felder
+
+
+def test_paketstand_mit_altem_feldnamen_gilt_als_unveraendert() -> None:
+    """K20: „Zeit gesamt“ im gespeicherten Paketstand ist dasselbe wie „Zeit“ heute."""
+    from trainingsapp.core.pakete import abweichungen, stand, zusammenfuehren
+    from trainingsapp.core.result_spec import FieldSpec, FieldType, ResultSpec
+
+    u = Exercise(
+        name="Lauf",
+        result_spec=ResultSpec(
+            fields=[FieldSpec("duration", FieldType.DURATION, "Zeit", unit="s")]
+        ),
+    )
+    alt = stand(u)
+    alt["result_spec"]["fields"][0]["label"] = "Zeit gesamt"
+    assert abweichungen(u, alt) == []
+    soll = stand(u) | {"description": "neu"}
+    assert zusammenfuehren(alt, stand(u), soll)["description"] == "neu"

@@ -42,6 +42,7 @@ Kein flet, kein asyncio: Protokolle und Datenmodell; der Ablauf steht in
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -361,7 +362,7 @@ def projektion(
             return Projektion(SPUR_KM, name, name, False, marke(SPUR_KM), als_notiz=False)
         case ("gps", "km"):
             # Ein Abschnitt heißt nach seinem Ende: Die Grenze bei km 1 beginnt „km 2“
-            km = int(d.get("km") or 0)
+            km = ganzzahl_lesen(d.get("km"))
             name = f"km {km + _km_schritt(d)}"
             return Projektion(SPUR_KM, e.text or f"km {km}", name, False, marke(SPUR_KM))
         case ("gps", "ende"):
@@ -453,8 +454,8 @@ def marke_angaben(notiz: Mapping[str, Any]) -> list[str]:
         name = f"{name} · zählt nicht" if name else "zählt nicht"
     if name and m.get("profil") != "stoppuhr":
         angaben.append(name)
-    if m.get("soll_s"):
-        angaben.append(f"soll {dauer_text(float(m['soll_s']))}")
+    if (soll := zahl_lesen(m.get("soll_s"))) > 0:
+        angaben.append(f"soll {dauer_text(soll)}")
     if (profil := m.get("profil")) == "stoppuhr":
         angaben.append("Stoppuhr")
     elif profil:
@@ -483,6 +484,31 @@ def _kurzcodes(daten: Mapping[str, Any]) -> tuple[str, ...]:
     """
     uebung = daten.get("uebung")
     return (kurzcode(str(uebung)),) if uebung else ()
+
+
+def zahl_lesen(wert: Any, fallback: float = 0.0) -> float:
+    """Eine endliche Zahl aus Messdatei oder Ereignis — sonst ``fallback``.
+
+    Die Datei ist die Wahrheit, aber auch praxis_gui oder eine Hand schreibt sie;
+    ``"soll_s": "abc"`` stürzte sonst beim Anzeigen der Notizen ab (K27).
+
+    >>> zahl_lesen("12.5"), zahl_lesen("abc"), zahl_lesen(None, 1.0), zahl_lesen(1e400)
+    (12.5, 0.0, 1.0, 0.0)
+    """
+    try:
+        zahl = float(wert)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return zahl if math.isfinite(zahl) else fallback
+
+
+def ganzzahl_lesen(wert: Any, fallback: int = 0) -> int:
+    """Wie `zahl_lesen`, als ganze Zahl.
+
+    >>> ganzzahl_lesen("3"), ganzzahl_lesen(2.9), ganzzahl_lesen("x", 1)
+    (3, 2, 1)
+    """
+    return int(zahl_lesen(wert, float(fallback)))
 
 
 def _km_schritt(daten: Mapping[str, Any]) -> int:

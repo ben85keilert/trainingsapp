@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from .einheit import MIN_MARKE_S, Ereignis
+from .einheit import MIN_MARKE_S, Ereignis, ganzzahl_lesen
 
 #: Die Zeitfelder, die der Timer füllen kann — in dieser Reihenfolge der Vorgabe
 ZEITFELDER: tuple[str, ...] = ("hold", "duration")
@@ -113,7 +113,7 @@ def gelaufene_zeiten(
             schliessen(e.t_s)
             offen = {
                 "name": str(d.get("name") or e.text),
-                "runde": int(d.get("runde") or 1),
+                "runde": max(1, ganzzahl_lesen(d.get("runde"), 1)),
                 "zaehlt": d.get("zaehlt") is not False,
                 "von_s": e.t_s,
                 "summe": 0.0,

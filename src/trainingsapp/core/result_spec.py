@@ -120,6 +120,8 @@ class FieldSpec:
         >>> FieldSpec.from_dict(alt).label
         'Zeit'
         """
+        if not isinstance(d, dict):
+            raise ValueError("ein Feld muss ein Objekt sein")
         label = str(d.get("label") or d["key"])
         return cls(
             key=str(d["key"]),
@@ -161,8 +163,8 @@ class ResultSpec:
         if self.shorthand:
             try:
                 return self.shorthand.format(**werte)
-            except (KeyError, IndexError, ValueError):
-                pass
+            except (KeyError, IndexError, ValueError, TypeError, AttributeError):
+                pass  # Vorlage passt nicht zu den Werten — dann die Felder aneinanderreihen
         teile = [
             format_wert(f, werte[f.key])
             for f in self.fields
@@ -209,8 +211,14 @@ class ResultSpec:
                 continue
             einheit = f.unit or ""
             if f.type == FieldType.SET_LIST and isinstance(wert, list):
-                ergebnis.append((f"{key}:sum", satz_summe(wert), einheit))
-                ergebnis.append((f"{key}:max", float(max(wert)), einheit))
+                # nur Zahlen — ein None oder Text in der Liste stürzte das Speichern ab (K19)
+                zahlen = [
+                    float(w) for w in wert if isinstance(w, int | float) and not isinstance(w, bool)
+                ]
+                if not zahlen:
+                    continue
+                ergebnis.append((f"{key}:sum", satz_summe(zahlen), einheit))
+                ergebnis.append((f"{key}:max", max(zahlen), einheit))
             elif f.type in (FieldType.BOOL, FieldType.TEXT, FieldType.CHOICE):
                 continue
             elif isinstance(wert, int | float | str):
@@ -233,9 +241,12 @@ class ResultSpec:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ResultSpec:
+        felder = d.get("fields") or []
+        if not isinstance(felder, list):
+            raise ValueError("„fields“ muss eine Liste sein")
         return cls(
             layout=Layout(d.get("layout", "sets")),
-            fields=[FieldSpec.from_dict(f) for f in (d.get("fields") or [])],
+            fields=[FieldSpec.from_dict(f) for f in felder],
             shorthand=d.get("shorthand"),
             chart_metrics=list(d.get("chart_metrics") or []),
         )

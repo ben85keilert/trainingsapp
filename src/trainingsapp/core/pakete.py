@@ -273,7 +273,7 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
     for nr, eintrag in enumerate(eintraege, start=1):
         try:
             uebung, key = _uebung_lesen(eintrag, paket.id)
-        except (KeyError, TypeError, ValueError) as grund:
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as grund:
             titel = eintrag.get("name") if isinstance(eintrag, dict) else None
             probleme.append(f"Übung {nr}{f' („{titel}“)' if titel else ''}: {grund}")
             continue
@@ -298,7 +298,7 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
     for nr, eintrag in enumerate(kurs_eintraege, start=1):
         try:
             kurs = _kurs_lesen(eintrag, paket.id, schluessel)
-        except (KeyError, TypeError, ValueError) as grund:
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as grund:
             titel = eintrag.get("name") if isinstance(eintrag, dict) else None
             probleme.append(f"Kurs {nr}{f' („{titel}“)' if titel else ''}: {grund}")
             continue
@@ -375,7 +375,7 @@ def _bedingung_lesen(roh: Any, schluessel: Mapping[str, str]) -> Bedingung:
     art = str(roh.get("art") or "gelesen") if isinstance(roh, dict) else "gelesen"
     if art not in BEDINGUNGEN:
         raise ValueError(f"unbekannte Bedingung „{art}“")
-    if art != "gelesen" and b.soll <= 0:
+    if art != "gelesen" and not (math.isfinite(b.soll) and b.soll > 0):
         raise ValueError(f"Bedingung „{art}“ braucht ein Soll größer 0")
     if art == "summe" and not b.exercise_id:
         raise ValueError("Bedingung „summe“ braucht eine Übung")
@@ -394,7 +394,7 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
     if "result_spec" in eintrag:
         try:
             spec = ResultSpec.from_dict(_objekt(eintrag["result_spec"], "result_spec"))
-        except (KeyError, TypeError, ValueError) as grund:
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as grund:
             raise ValueError("die Parameter (result_spec) sind unlesbar") from grund
     else:
         kurz = str(eintrag.get("spec") or STANDARD_SPEC)
@@ -402,6 +402,7 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             raise ValueError(f"unbekannte Eingabe „{kurz}“")
         spec = ResultSpec.from_dict(VORLAGEN[kurz][1].to_dict())  # Kopie, nicht die Vorlage
     _spec_zahlen_pruefen(spec)
+    _shorthand_pruefen(spec)
     limit_spec = _objekt(eintrag.get("limit_spec", {}), "limit_spec")
     _werte_pruefen(limit_spec, "limit_spec")
     default_target = _objekt(eintrag.get("default_target", {}), "default_target")
@@ -491,6 +492,20 @@ def _spec_zahlen_pruefen(spec: ResultSpec) -> None:
             if isinstance(wert, list) and all(_zahl(x) for x in wert):
                 continue
             raise ValueError(f"Parameter „{f.key}“: Vorgabe oder Chip „{wert}“ ist keine Zahl")
+
+
+_PLATZHALTER = re.compile(r"\{([^{}]*)\}")
+
+
+def _shorthand_pruefen(spec: ResultSpec) -> None:
+    """Eine Vorlage nennt nur Feldschlüssel: ``"{angle}°"`` — kein ``{reps:d}``, kein
+    ``{angle.__class__}``; `format` liefe sonst in TypeError/AttributeError (K18)."""
+    if not spec.shorthand:
+        return
+    keys = {f.key for f in spec.fields}
+    for name in _PLATZHALTER.findall(spec.shorthand):
+        if name not in keys:
+            raise ValueError(f"die Kurzform nennt „{name}“, das ist kein Feld der Übung")
 
 
 def _werte_pruefen(obj: Any, feld: str) -> None:
@@ -661,6 +676,28 @@ def stand_tag_nachziehen(
     return {**standard, feld: danach}
 
 
+def stand_normieren(standard: dict[str, Any]) -> dict[str, Any]:
+    """Ein gespeicherter Paketstand in heutiger Schreibweise.
+
+    `ResultSpec.from_dict` ersetzt alte Feldnamen (``"Zeit gesamt"`` → ``"Zeit"``,
+    `result_spec.ALTE_NAMEN`); `stand(u)` liefert darum immer die neue Form. Ein
+    Paketstand von vor der Umbenennung verglich sich sonst nie als gleich — jede
+    Paketübung mit Zeitfeld galt als „geändert: Parameter“ und bekam kein Update (K20).
+
+    >>> alt = {"result_spec": {"fields": [{"key": "duration", "type": "duration",
+    ...                                    "label": "Zeit gesamt"}]}}
+    >>> stand_normieren(alt)["result_spec"]["fields"][0]["label"]
+    'Zeit'
+    """
+    spec = standard.get("result_spec")
+    if not isinstance(spec, dict):
+        return standard
+    try:
+        return {**standard, "result_spec": ResultSpec.from_dict(spec).to_dict()}
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return standard
+
+
 def abweichungen(u: Exercise, standard: dict[str, Any]) -> list[str]:
     """Was an der Übung anders ist als im Paket — in Worten, leer = wie im Paket.
 
@@ -671,6 +708,7 @@ def abweichungen(u: Exercise, standard: dict[str, Any]) -> list[str]:
     ['Beschreibung']
     """
     jetzt = stand(u)
+    standard = stand_normieren(standard)
     return [text for feld, text in FELDNAMEN.items() if jetzt.get(feld) != standard.get(feld)]
 
 
@@ -698,6 +736,7 @@ def zusammenfuehren(
     """
     if basis is None:
         return dict(soll)
+    basis = stand_normieren(basis)
     ergebnis: dict[str, Any] = {}
     for feld in FELDNAMEN:
         geaendert = nutzer.get(feld) != basis.get(feld)

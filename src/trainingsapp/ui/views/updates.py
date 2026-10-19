@@ -175,6 +175,11 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
         except Exception as e:
             melden(f"Prüfung nicht möglich: {e}")
             return
+        finally:
+            pruefen_knopf.disabled = False
+            pruefen_knopf.content = "Jetzt prüfen"
+            with contextlib.suppress(Exception):
+                pruefen_knopf.update()
         teile = []
         if ergebnis.pruefung.updates:
             teile.append(f"{len(ergebnis.pruefung.updates)} Paket-Update(s)")

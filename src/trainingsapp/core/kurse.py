@@ -29,6 +29,7 @@ das Paketformat `core/pakete.py`.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -118,6 +119,8 @@ class Bedingung:
         try:
             soll = float(roh.get("soll") or 0)
         except (TypeError, ValueError):
+            soll = 0.0
+        if not math.isfinite(soll):  # 1e400, "inf", NaN — `int(soll)` stürzte später ab (K17)
             soll = 0.0
         return cls(
             art=art,

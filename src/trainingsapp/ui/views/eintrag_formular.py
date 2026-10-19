@@ -17,6 +17,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.result_spec import ResultSpec
+from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.zurueck import zurueck_speichert
@@ -73,21 +74,12 @@ def eintrag_formular(
     if mit_notiz:
         inhalt.append(notizfeld)
     inhalt.extend(extra or [])
-    inhalt.append(
-        ft.Row(
-            alignment=ft.MainAxisAlignment.END,
-            controls=[
-                ft.TextButton("Abbrechen", on_click=on_abbrechen),
-                ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=speichern),
-            ],
-        )
-    )
     anfang = stand()
     return zurueck_speichert(
         page,
         ft.View(
             route=route,
-            appbar=ft.AppBar(title=ft.Text(titel)),
+            appbar=formular_leiste(titel, abbrechen=on_abbrechen, speichern=speichern),
             scroll=ft.ScrollMode.AUTO,
             padding=20,
             controls=[

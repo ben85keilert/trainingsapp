@@ -264,7 +264,16 @@ def test_planansicht_alle_eingabestufen(page, welt) -> None:
 def _alle(c):
     """Alle Controls eines Baums — für Knöpfe und Felder in Ansichten."""
     yield c
-    for name in ("content", "controls", "title", "subtitle", "leading", "trailing"):
+    for name in (
+        "content",
+        "controls",
+        "title",
+        "subtitle",
+        "leading",
+        "trailing",
+        "appbar",
+        "actions",
+    ):
         kind = getattr(c, name, None)
         for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
             if hasattr(k, "__dict__"):
@@ -296,13 +305,13 @@ def test_planuebung_parameter_und_chips_einstellen(page, welt) -> None:
     page.show_dialog = lambda d: None
     ansicht = plan_einstellen(page, state, plan, item, u)
 
-    knopfarten = ft.FilledTonalButton | ft.OutlinedButton | ft.FilledButton
+    knopfarten = ft.FilledTonalButton | ft.OutlinedButton | ft.FilledButton | ft.TextButton
 
     def knopf(text: str):
         """Knopf mit diesem Text — als Inhalt oder als Text in einer Zeile."""
         return next(
             c
-            for v in ansicht.controls
+            for v in [*ansicht.appbar.actions, *ansicht.controls]
             for c in _alle(v)
             if isinstance(c, knopfarten)
             and (c.content == text or any(getattr(t, "value", None) == text for t in _alle(c)))
@@ -547,7 +556,7 @@ def _knopf_mit_text(wurzel, text: str):
             and any(text in t for t in texte(c))
         ):
             return c
-        for name in ("controls", "content", "trailing", "leading", "title"):
+        for name in ("appbar", "actions", "controls", "content", "trailing", "leading", "title"):
             wert = getattr(c, name, None)
             for k in wert if isinstance(wert, list) else [wert]:
                 if (treffer := suchen(k)) is not None:
@@ -851,7 +860,7 @@ def test_editor_typ_mit_plus_und_skala_mit_namen(page, welt) -> None:
     name = next(c for c in alle if isinstance(c, ft.TextField) and c.label == "Name der Skala")
     assert name.value == "Skala"
     name.value = "Stabilität"
-    speichern = _knopf_mit_text(ansicht.controls[0], "Speichern")
+    speichern = _knopf_mit_text(ansicht, "Speichern")
     asyncio.run(speichern.on_click())
 
     gespeichert = state.uebungen.laden(uebung.id)

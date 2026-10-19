@@ -55,6 +55,7 @@ from trainingsapp.core.standards import (
     ziel_spec,
 )
 from trainingsapp.core.uebung_timer import TimerWahl, uhr_an
+from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.parameter_wahl import parameter_wahl
@@ -388,14 +389,8 @@ def plan_einstellen(
         ft.Text("Ein Tipp auf „Wie geplant“ trägt genau diese Werte ein.", size=12, opacity=0.7),
         ft.Row(
             alignment=ft.MainAxisAlignment.END,
-            wrap=True,
-            controls=[
-                ft.TextButton("Ziel löschen", on_click=ziel_loeschen)
-                if item.target
-                else ft.Container(),
-                ft.TextButton("Abbrechen", on_click=abbrechen),
-                ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=speichern),
-            ],
+            controls=[ft.TextButton("Ziel löschen", on_click=ziel_loeschen)],
+            visible=bool(item.target),
         ),
         ft.Divider(),
         abschnitt("STANDARD DER ÜBUNG"),
@@ -423,7 +418,9 @@ def plan_einstellen(
     anfang = eingestellt()
     ansicht = ft.View(
         route=f"{basis}/ziel/{item.id}",
-        appbar=ft.AppBar(title=ft.Text(f"Einstellen: {uebung.name}")),
+        appbar=formular_leiste(
+            f"Einstellen: {uebung.name}", abbrechen=abbrechen, speichern=speichern
+        ),
         scroll=ft.ScrollMode.AUTO,
         padding=20,
         controls=[sicher(ft.Column(spacing=16, controls=inhalt), expand=False)],

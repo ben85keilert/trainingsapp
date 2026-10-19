@@ -61,6 +61,7 @@ from trainingsapp.core.timer import (
 from trainingsapp.devices.einheit import TimerBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.dialoge import Nachher
+from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
@@ -1146,9 +1147,11 @@ def timer_bearbeiten_view(
 
     ansicht = ft.View(
         route=route,
-        appbar=ft.AppBar(
-            title=ft.Text(ziel.titel if vorhanden else ziel.titel_neu),
-            actions=[
+        appbar=formular_leiste(
+            ziel.titel if vorhanden else ziel.titel_neu,
+            abbrechen=abbrechen,
+            speichern=speichern,
+            vorher=[
                 ft.IconButton(
                     ft.Icons.DELETE_OUTLINE, tooltip="Profil löschen", on_click=loeschen_fragen
                 )
@@ -1192,15 +1195,6 @@ def timer_bearbeiten_view(
                                 "Zahnrad unter dem Timer."
                             ),
                             abstand=8,
-                        ),
-                        ft.Row(
-                            alignment=ft.MainAxisAlignment.END,
-                            controls=[
-                                ft.TextButton("Abbrechen", on_click=abbrechen),
-                                ft.FilledButton(
-                                    "Speichern", icon=ft.Icons.CHECK, on_click=speichern
-                                ),
-                            ],
                         ),
                     ],
                 ),

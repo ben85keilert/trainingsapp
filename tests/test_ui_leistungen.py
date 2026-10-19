@@ -130,9 +130,10 @@ def test_eintrag_loeschen_nach_rueckfrage(page, welt) -> None:
 
 
 def _knopf(ansicht, text: str):
+    """Knopf in der Ansicht — auch in der Titelleiste (Speichern/Abbrechen, 19.10.2026)."""
     return next(
         c
-        for v in ansicht.controls
+        for v in [*ansicht.appbar.actions, *ansicht.controls]
         for c in _alle(v)
         if isinstance(c, ft.FilledButton | ft.TextButton) and c.content == text
     )

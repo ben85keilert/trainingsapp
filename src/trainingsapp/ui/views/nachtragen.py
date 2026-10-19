@@ -26,6 +26,7 @@ from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tag import LEER, plaene_des_tags, plankarten, uhrzeit_lesen
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.spec_form import SpecForm
@@ -478,18 +479,14 @@ def nachtragen_view(
         ft.Text("Werte", size=12, weight=ft.FontWeight.W_600, opacity=0.75),
         form_platz,
         notiz,
-        ft.Row(
-            alignment=ft.MainAxisAlignment.END,
-            controls=[
-                ft.TextButton("Abbrechen", on_click=abbrechen),
-                ft.FilledButton("Eintragen", icon=ft.Icons.CHECK, on_click=eintragen),
-            ],
-        ),
     ]
     ansicht = ft.View(
         route=route,
-        appbar=ft.AppBar(
-            title=ft.Text("Nachtragen" if tag == heute else f"Nachtragen · {tag:%d.%m.}")
+        appbar=formular_leiste(
+            "Nachtragen" if tag == heute else f"Nachtragen · {tag:%d.%m.}",
+            abbrechen=abbrechen,
+            speichern=eintragen,
+            text="Eintragen",
         ),
         scroll=ft.ScrollMode.AUTO,
         padding=16,

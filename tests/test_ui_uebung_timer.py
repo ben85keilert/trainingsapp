@@ -40,7 +40,7 @@ async def umgebung(tmp_path, monkeypatch):
 
 def _alle(c):
     yield c
-    for name in ("content", "controls", "label", "leading"):
+    for name in ("content", "controls", "label", "leading", "appbar", "actions"):
         kind = getattr(c, name, None)
         for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
             if isinstance(k, ft.Control):

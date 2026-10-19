@@ -60,7 +60,16 @@ def page():
 
 def _alle(c):
     yield c
-    for name in ("content", "controls", "title", "subtitle", "leading", "label", "actions"):
+    for name in (
+        "content",
+        "controls",
+        "title",
+        "subtitle",
+        "leading",
+        "label",
+        "actions",
+        "appbar",
+    ):
         kind = getattr(c, name, None)
         for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
             if isinstance(k, ft.Control):

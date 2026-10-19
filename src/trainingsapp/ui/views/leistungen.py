@@ -33,6 +33,7 @@ import flet as ft
 from trainingsapp.core.models import Exercise, Session, SessionEntry
 from trainingsapp.core.tagesbilanz import kachel
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.zurueck import zurueck_speichert
@@ -309,7 +310,7 @@ def leistungen_view(
     )
     ansicht = ft.View(
         route=route,
-        appbar=ft.AppBar(title=ft.Text(leistungen.titel)),
+        appbar=formular_leiste(leistungen.titel, abbrechen=abbrechen, speichern=speichern),
         scroll=ft.ScrollMode.AUTO,
         padding=16,
         controls=[
@@ -322,15 +323,6 @@ def leistungen_view(
                         leistungen.liste,
                         *mehr,
                         ft.Text(HINWEIS, size=12, opacity=0.6),
-                        ft.Row(
-                            alignment=ft.MainAxisAlignment.END,
-                            controls=[
-                                ft.TextButton("Abbrechen", on_click=abbrechen),
-                                ft.FilledButton(
-                                    "Speichern", icon=ft.Icons.CHECK, on_click=speichern
-                                ),
-                            ],
-                        ),
                     ],
                 ),
                 expand=False,
@@ -445,28 +437,35 @@ def leistungen_blatt(
         scrollable=True,
         draggable=True,
         on_dismiss=geschlossen,
-        content=ft.Container(
-            padding=ft.Padding.only(left=16, right=16, bottom=20),
-            content=ft.Column(
-                tight=True,
-                spacing=14,
-                scroll=ft.ScrollMode.AUTO if scrollen else None,
-                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                controls=[
-                    ft.Text(leistungen.titel, size=20, weight=ft.FontWeight.W_600),
-                    leistungen.kopf,
-                    leistungen.liste,
-                    *mehr,
-                    ft.Text(HINWEIS_BLATT, size=12, opacity=0.6),
-                    fehler,
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.END,
-                        controls=[
-                            ft.TextButton("Abbrechen", on_click=abbrechen),
-                            ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=speichern),
-                        ],
-                    ),
-                ],
+        # Unten im SafeArea: Android 15 legt die Navigationsleiste über das Blatt, sonst
+        # lagen „Abbrechen“ und „Speichern“ darunter (Ben, 19.10.2026)
+        content=ft.SafeArea(
+            avoid_intrusions_top=False,
+            content=ft.Container(
+                padding=ft.Padding.only(left=16, right=16, bottom=20),
+                content=ft.Column(
+                    tight=True,
+                    spacing=14,
+                    scroll=ft.ScrollMode.AUTO if scrollen else None,
+                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                    controls=[
+                        ft.Text(leistungen.titel, size=20, weight=ft.FontWeight.W_600),
+                        leistungen.kopf,
+                        leistungen.liste,
+                        *mehr,
+                        ft.Text(HINWEIS_BLATT, size=12, opacity=0.6),
+                        fehler,
+                        ft.Row(
+                            alignment=ft.MainAxisAlignment.END,
+                            controls=[
+                                ft.TextButton("Abbrechen", on_click=abbrechen),
+                                ft.FilledButton(
+                                    "Speichern", icon=ft.Icons.CHECK, on_click=speichern
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
             ),
         ),
     )

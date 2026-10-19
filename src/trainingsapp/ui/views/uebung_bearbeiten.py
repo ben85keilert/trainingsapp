@@ -62,6 +62,7 @@ from trainingsapp.core.standards import ziel_bereinigen, ziel_spec
 from trainingsapp.core.timer import TimerProfil
 from trainingsapp.core.uebung_timer import profile_der_uebung
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL, symbol
 from trainingsapp.ui.components.layout import sicher
@@ -810,7 +811,11 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     anfang = stand()
     ansicht = ft.View(
         route=route,
-        appbar=ft.AppBar(title=ft.Text("Neue Übung" if neu else "Übung bearbeiten")),
+        appbar=formular_leiste(
+            "Neue Übung" if neu else "Übung bearbeiten",
+            abbrechen=abbrechen,
+            speichern=speichern,
+        ),
         scroll=ft.ScrollMode.AUTO,
         padding=20,
         controls=[
@@ -897,15 +902,6 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                             "Video-Link hinzufügen",
                             icon=ft.Icons.ADD_LINK,
                             on_click=link_hinzufuegen,
-                        ),
-                        ft.Row(
-                            alignment=ft.MainAxisAlignment.END,
-                            controls=[
-                                ft.TextButton("Abbrechen", on_click=abbrechen),
-                                ft.FilledButton(
-                                    "Speichern", icon=ft.Icons.CHECK, on_click=speichern
-                                ),
-                            ],
                         ),
                     ],
                 ),

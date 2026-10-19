@@ -49,7 +49,7 @@ def page():
 
 def alle(wurzel):
     yield wurzel
-    for name in ("content", "controls", "leading", "trailing"):
+    for name in ("content", "controls", "leading", "trailing", "appbar", "actions"):
         kind = getattr(wurzel, name, None)
         for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
             if isinstance(k, ft.BaseControl):
@@ -154,7 +154,7 @@ def test_editor_speichert_die_auswahl(page, state) -> None:
     dialog.actions[1].on_click()
 
     speichern = next(
-        c for c in alle(ansicht) if isinstance(c, ft.FilledButton) and c.content == "Speichern"
+        c for c in alle(ansicht) if isinstance(c, ft.TextButton) and c.content == "Speichern"
     )
     asyncio.run(speichern.on_click())
     gespeichert = state.uebungen.laden(uebung.id)

@@ -223,6 +223,7 @@ class Messlauf:
         self.status = DeviceStatus(verbindung=Verbindung.GETRENNT)
         self.device_id = ""
         self.geraet_name = ""
+        self._name_bekannt = False
         self.profil: GeraeteProfil | None = None
         self.simulation = False
         #: Nullpunkt der Live-Achse (Verbindungsbeginn, ab der ersten Aufnahme deren
@@ -254,7 +255,13 @@ class Messlauf:
 
     async def verbinden(self, device_id: str, name: str | None = None) -> None:
         self.device_id = device_id
+        # Name und Adresse bleiben getrennt (Ben, 19.10.2026): ein Gurt ohne
+        # Bluetooth-Namen bekommt in der Messdatei `geraet` = "Unbekannt" und die
+        # Adresse in `adresse` — nie die Adresse als Name, denn `deid` leert nur
+        # das Adressfeld. Für die Anzeige (`geraet_name`) bleibt die Adresse als
+        # Notnagel, damit die Person das Gerät wiedererkennt.
         self.geraet_name = name or device_id
+        self._name_bekannt = bool(name)
         self.simulation = device_id.startswith("sim:")
         self.profil = profil_fuer_namen(name or "")
         self.live.leeren()
@@ -412,8 +419,9 @@ class Messlauf:
         start = self._uhr() if start_mono is None else min(start_mono, self._uhr())
         self._dateiname_fest = None
         self.aufnahme = Aufnahme(
-            geraet=self.geraet_name,
+            geraet=self.geraet_name if self._name_bekannt else "Unbekannt",
             geraet_profil=profil.id if profil else "ble_generic",
+            adresse=None if self.simulation else self.device_id,
             intervall_quelle=profil.intervall_quelle if profil else "ekg_rr",
             start_mono=start,
             start_utc=start_utc or self._jetzt_utc(),

@@ -144,8 +144,9 @@ gelesenen Datei bleiben beim Schreiben erhalten und stehen am Ende.
 | `behandlung_id` | int \| null | Verknüpfung zur Behandlung in praxis_gui |
 | `patient_id` | int \| null | Verknüpfung zum Patienten |
 | `datum` | str | `YYYY-MM-DD`, **lokales** Datum der Messung. Beim Lesen übernehmen, nicht aus `start_utc` neu ableiten |
-| `geraet` | str | Anzeigename, i. d. R. der BLE-Gerätename |
+| `geraet` | str | Anzeigename, i. d. R. der BLE-Gerätename; `Unbekannt`, wenn der Gurt keinen Namen meldet (nie die Adresse — Ben, 19.10.2026) |
 | `geraet_profil` | str | Profil-ID, siehe Abschnitt 5 |
+| `adresse` | str | **optional**, seit 19.10.2026: BLE-Adresse des Geräts (Android/Linux MAC, macOS/iOS UUID), nie bei Simulation. Pseudo-Identifikator — `hrv_core.deid` leert das Feld; praxis_gui erhält es als unbekanntes Feld. Dateien ohne Adresse haben den Schlüssel nicht |
 | `intervall_quelle` | str | **Pflicht** — `ekg_rr` oder `ppg_ppi` |
 | `simulation` | bool | `true` ⇒ Ablage unter `Messungen/Generator/` |
 | `generator_config` | dict \| null | Syntheseparameter, nur bei Simulation |

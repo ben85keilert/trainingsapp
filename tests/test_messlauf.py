@@ -448,3 +448,34 @@ async def test_kaputte_wiedergabedatei_beendet_den_strom(tmp_path) -> None:
     await asyncio.wait_for(lauf.laufen(), 5)
     assert lauf.status.verbindung == Verbindung.GETRENNT
     assert "abgebrochen" in (lauf.status.meldung or "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("device_id", "name", "geraet", "adresse"),
+    [
+        ("E2:B4:CC:3F:08:44", None, "Unbekannt", "E2:B4:CC:3F:08:44"),
+        ("E2:B4:CC:3F:08:44", "TICKR 1A2B", "TICKR 1A2B", "E2:B4:CC:3F:08:44"),
+        (SIM_SYNTH, None, "Unbekannt", None),
+    ],
+)
+async def test_name_und_adresse_stehen_getrennt_in_der_messdatei(
+    tmp_path, device_id, name, geraet, adresse
+) -> None:
+    """Ein Gurt ohne Bluetooth-Namen trägt nie die Adresse als Namen (Ben, 19.10.2026):
+    `geraet` = Unbekannt, die Adresse im eigenen Feld — bei Simulation gar nicht."""
+    quelle = SimulatedSource(tempo=60.0, seed=7)
+    lauf = Messlauf(quelle, backup_basis=tmp_path)
+    await lauf.verbinden(device_id, name)
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 3:
+        await asyncio.sleep(0.01)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert ergebnis is not None
+    doc = json.loads(ergebnis.pfad.read_text(encoding="utf-8"))
+    assert doc["geraet"] == geraet
+    assert doc.get("adresse") == adresse
+    assert lauf.geraet_name == (name or device_id)  # Anzeige behält den Notnagel

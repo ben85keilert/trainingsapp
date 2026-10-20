@@ -25,6 +25,7 @@ from hrv_core.regeln import Korrekturregeln
 from trainingsapp.config import (
     anhaengeverzeichnis,
     datenbankpfad,
+    datenverzeichnis,
     messungenverzeichnis,
     paketordner,
     streckenverzeichnis,
@@ -47,6 +48,9 @@ from trainingsapp.core.kurse import Kurs
 from trainingsapp.core.models import Exercise, Subject, jetzt, lokaler_tag
 from trainingsapp.core.pakete import Paket
 from trainingsapp.core.paketquelle import QUELLE_VORGABE, Pruefung, url_pruefen
+from trainingsapp.core.sicherung import Sicherung
+from trainingsapp.core.sicherung import setzen as sicherung_setzen
+from trainingsapp.core.sicherung import stand as sicherung_stand
 from trainingsapp.core.timer import (
     EINMAL,
     STOPPUHR,
@@ -579,6 +583,29 @@ class AppState:
 
     def update_pruefung_setzen(self, an: bool) -> None:
         self.einstellungen.setzen(SettingRepo.UPDATE_PRUEFUNG, "1" if an else "0")
+
+    def kapitel_bilder(self) -> bool:
+        """Bilder in Kapiteltexten aus dem Netz laden? Vorgabe aus — sie werden Links, die
+        erst auf Tipp öffnen (`core.kapiteltext`, Sicherheitsdurchsicht S2)."""
+        return self.einstellungen.lesen(SettingRepo.KAPITEL_BILDER, "0") == "1"
+
+    def kapitel_bilder_setzen(self, an: bool) -> None:
+        self.einstellungen.setzen(SettingRepo.KAPITEL_BILDER, "1" if an else "0")
+
+    @property
+    def datenordner(self) -> Path:
+        """Der Ordner der geöffneten Datenbank — das Datenverzeichnis der App (in Tests
+        der temporäre Ordner, nie das echte)."""
+        zeile = self.con.execute("PRAGMA database_list").fetchone()
+        pfad = str(zeile[2]) if zeile is not None else ""
+        return Path(pfad).parent if pfad else datenverzeichnis()
+
+    def sicherung(self) -> Sicherung:
+        """Geräte-Backup: die Marke im Datenverzeichnis ist die Wahrheit (`core.sicherung`)."""
+        return sicherung_stand(self.datenordner)
+
+    def sicherung_setzen(self, sicherung: Sicherung) -> None:
+        sicherung_setzen(self.datenordner, sicherung)
 
     def benachrichtigung(self) -> str:
         wert = self.einstellungen.lesen(SettingRepo.BENACHRICHTIGUNG, "updates")

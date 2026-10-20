@@ -155,6 +155,86 @@ class MainActivity : FlutterFragmentActivity() {
     }
 }
 """
+#: Der BackupAgent kommt als zweite Datei neben die MainActivity
+SICHERUNG_PFAD = MAIN_ACTIVITY_PFAD.replace("MainActivity.kt", "Sicherung.kt")
+#: Geräte-Backup nur auf Wunsch (Sicherheitsdurchsicht S4; Ben, 20.10.2026: Vorgabe aus,
+#: einschaltbar). `pyproject.toml` trägt ihn als ``backupAgent`` ins Manifest ein
+#: (`[tool.flet.android.manifest_application]`); die Marke schreibt `core/sicherung.py`.
+SICHERUNG = """package {{ cookiecutter.org_name_2 }}.{{ cookiecutter.package_name }}
+
+import android.app.backup.BackupAgent
+import android.app.backup.BackupDataInput
+import android.app.backup.BackupDataOutput
+import android.app.backup.FullBackupDataOutput
+import android.os.ParcelFileDescriptor
+import java.io.File
+
+// Von scripts/apk_bauen.py in die Flet-Vorlage gelegt (trainingsapp, 20.10.2026).
+//
+// Android sichert den app-privaten Speicher von sich aus in Googles Cloud-Backup und
+// überträgt ihn beim Gerätewechsel - Datenbank, Messdateien, Anhänge, GPS-Strecken.
+// Die App verspricht, dass nichts das Gerät verlässt, was die Person nicht selbst
+// auslöst. Darum sichert dieser Agent nur, wenn die App die Marke
+// geraete_sicherung.txt (core/sicherung.py) in ihr Datenverzeichnis geschrieben hat;
+// steht "strecken" darin, gehen auch die GPS-Strecken (Ordner Strecken/) mit, sonst
+// bleiben sie draußen. Ohne Marke wird nichts geschrieben - weder ins Cloud-Backup
+// noch bei der Übertragung von Gerät zu Gerät.
+//
+// Kein Schlüssel-Wert-Backup (onBackup/onRestore leer): android:fullBackupOnly="true"
+// im Manifest lässt Android allein onFullBackup rufen. Die Wiederherstellung übernimmt
+// BackupAgent.onRestoreFile, Datei für Datei dorthin, wo sie lag.
+class Sicherung : BackupAgent() {
+    override fun onBackup(
+        oldState: ParcelFileDescriptor?,
+        data: BackupDataOutput?,
+        newState: ParcelFileDescriptor?,
+    ) {}
+
+    override fun onRestore(
+        data: BackupDataInput?,
+        appVersionCode: Int,
+        newState: ParcelFileDescriptor?,
+    ) {}
+
+    override fun onFullBackup(data: FullBackupDataOutput) {
+        val wurzel = dataDir
+        val marke = markeFinden(wurzel, TIEFE) ?: return
+        val strecken = marke.readLines().any { it.trim() == STRECKEN_ZEILE }
+        wurzel
+            .walkTopDown()
+            .onEnter { ordner ->
+                ordner === wurzel ||
+                    (ordner.name !in AUSGESCHLOSSEN && (strecken || ordner.name != STRECKEN_ORDNER))
+            }
+            .filter { it.isFile }
+            .forEach { fullBackupFile(it, data) }
+    }
+
+    private companion object {
+        // Wörtlich wie core/sicherung.py (MARKE) und config.streckenverzeichnis()
+        const val MARKE = "geraete_sicherung.txt"
+        const val STRECKEN_ZEILE = "strecken"
+        const val STRECKEN_ORDNER = "Strecken"
+        // Flet legt das Datenverzeichnis wenige Ebenen unter dataDir ab (app_flutter/…)
+        const val TIEFE = 3
+        // Was Android selbst nie sichert - und was wir nicht brauchen
+        val AUSGESCHLOSSEN = setOf("cache", "code_cache", "lib", "no_backup")
+
+        fun markeFinden(ordner: File, tiefe: Int): File? {
+            val direkt = File(ordner, MARKE)
+            if (direkt.isFile) return direkt
+            if (tiefe == 0) return null
+            val kinder = ordner.listFiles() ?: return null
+            for (kind in kinder) {
+                if (kind.isDirectory && kind.name !in AUSGESCHLOSSEN) {
+                    markeFinden(kind, tiefe - 1)?.let { return it }
+                }
+            }
+            return null
+        }
+    }
+}
+"""
 
 
 def version() -> str:
@@ -214,6 +294,9 @@ def vorlage_patchen(quelle: Path, ziel: Path) -> None:
                 daten = MAIN_ACTIVITY.encode("utf-8")
                 ersetzt = True
             raus.writestr(info, daten)
+            if ersetzt and info.filename == MAIN_ACTIVITY_PFAD:
+                # Der BackupAgent direkt dahinter, im selben Kotlin-Ordner (S4)
+                raus.writestr(SICHERUNG_PFAD, SICHERUNG.encode("utf-8"))
     if not ersetzt:
         sys.exit(f"Keine MainActivity in {quelle} — scripts/apk_bauen.py anpassen.")
 
@@ -231,7 +314,7 @@ def vorlage_bauen() -> Path:
 
     version = flet.version.flet_version
     quelle = get_cached_template_zip(DEFAULT_TEMPLATE_URL.format(version=version), version)
-    pruefsumme = hashlib.sha256(MAIN_ACTIVITY.encode("utf-8")).hexdigest()[:8]
+    pruefsumme = hashlib.sha256((MAIN_ACTIVITY + SICHERUNG).encode("utf-8")).hexdigest()[:8]
     ziel = VORLAGE_ORDNER / f"flet-build-template-{version}-{pruefsumme}.zip"
     if not ziel.exists():
         vorlage_patchen(Path(quelle), ziel)

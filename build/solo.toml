@@ -5,6 +5,9 @@
 # Kein Netzwerkpfad für eigene Daten, keine Serververbindung. Nach außen gehen nur,
 # abschaltbar und mit Hinweis: Kartenkacheln (OpenStreetMap), Update-Prüfung
 # (GitHub-Releases, Paketquellen — nur Versionsnummern) und verlinkte Videos.
+# Bilder in Kurskapiteln laden erst nach Einschalten (Einstellungen → Updates).
+# Androids Geräte-Backup sichert nur, wenn es in den Einstellungen eingeschaltet ist
+# (Vorgabe aus; GPS-Strecken gesondert) — BackupAgent `Sicherung`, scripts/apk_bauen.py.
 
 [app]
 edition = "solo"

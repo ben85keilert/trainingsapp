@@ -657,6 +657,9 @@ class SettingRepo:
     PAKETQUELLEN = "paketquellen"
     #: "1" (Vorgabe) = beim Start Paketquellen (und das App-Release) prüfen
     UPDATE_PRUEFUNG = "update_pruefung_beim_start"
+    #: "1" = Bilder in Kapiteltexten aus dem Netz laden; Vorgabe "0": Bilder werden
+    #: Links, die erst auf Tipp öffnen (`core.kapiteltext`, Sicherheitsdurchsicht S2)
+    KAPITEL_BILDER = "kapitel_bilder_aus_dem_netz"
     #: Label unter dem Zahnrad: "aus" | "updates" (Vorgabe) | "alles" (auch Neuigkeiten)
     BENACHRICHTIGUNG = "benachrichtigung"
     #: JSON {schlüssel: stand} — was das Label schon gezeigt hat (`AppState.updates_label`)

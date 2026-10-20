@@ -68,6 +68,10 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     # Zugriff auf die Rohdaten einer HRV-Messung
     "hrv_rohdaten": {Edition.SOLO, Edition.PRAXIS},
     "export": {Edition.SOLO, Edition.PRAXIS},
+    # Geräte-Backup (Android Auto Backup) einschaltbar — Vorgabe aus (`core/sicherung.py`,
+    # Sicherheitsdurchsicht S4). In der Praxis-Edition nie: fremde Gesundheitsdaten
+    # gehören nicht in das Google-Konto der Therapeutin.
+    "geraete_sicherung": {Edition.SOLO},
     # Profilwechsel nur nach PIN oder Fingerabdruck. In Edition A gibt es
     # nichts zu schützen, was der Gerätebesitzer nicht ohnehin sieht; in
     # Edition B liegen fremde Gesundheitsdaten auf dem Gerät des Therapeuten.

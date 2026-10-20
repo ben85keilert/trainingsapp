@@ -28,6 +28,7 @@ import flet as ft
 from trainingsapp.config import app_version, edition, ist_aktiv
 from trainingsapp.core.anhaenge import anzahl_text, groesse_text
 from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
+from trainingsapp.core.sicherung import Sicherung
 from trainingsapp.ui.components.hilfe import hilfe_oeffner
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
@@ -116,6 +117,50 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
             )
         ]
         if ist_aktiv("update_pruefung") or ist_aktiv("paket_quellen")
+        else []
+    )
+
+    # -- Geräte-Backup (`core/sicherung.py`): Vorgabe aus, hier einschaltbar (S4) ---------
+    def sicherung_schalter(ev: ft.Event[ft.Switch]) -> None:
+        alt = state.sicherung()
+        state.sicherung_setzen(Sicherung(an=bool(ev.control.value), strecken=alt.strecken))
+        state.neu_zeichnen()  # der Strecken-Schalter erscheint oder verschwindet
+
+    def strecken_schalter(ev: ft.Event[ft.Switch]) -> None:
+        state.sicherung_setzen(Sicherung(an=True, strecken=bool(ev.control.value)))
+
+    sicherung = state.sicherung()
+    sicherung_karte = (
+        [
+            karte(
+                titel("Geräte-Backup"),
+                ft.Switch(
+                    label="Mit dem Gerät sichern",
+                    value=sicherung.an,
+                    on_change=sicherung_schalter,
+                ),
+                *(
+                    [
+                        ft.Switch(
+                            label="GPS-Strecken einschließen",
+                            value=sicherung.strecken,
+                            on_change=strecken_schalter,
+                        )
+                    ]
+                    if sicherung.an
+                    else []
+                ),
+                hinweis(
+                    "Aus (Vorgabe): Nichts aus der App geht ins Backup des Geräts — nach "
+                    "Gerätewechsel oder Neuinstallation ist alles weg, was du nicht exportiert "
+                    "hast. An: Datenbank, Messungen und Anhänge gehen in das Backup deines "
+                    "Google-Kontos (mit der Gerätesperre verschlüsselt, höchstens 25 MB) und "
+                    "kommen auf dem nächsten Gerät zurück. GPS-Strecken nur, wenn du sie "
+                    "ausdrücklich einschließt."
+                ),
+            )
+        ]
+        if ist_aktiv("geraete_sicherung")
         else []
     )
 
@@ -275,6 +320,7 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
                         ),
+                        *sicherung_karte,
                         karte(
                             titel("App"),
                             ft.ListTile(

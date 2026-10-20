@@ -155,6 +155,14 @@ hrv-core = "../hrv-core"
 "android.permission.CAMERA" = true
 "android.permission.RECORD_AUDIO" = true
 
+# Geräte-Backup nur auf Wunsch (Sicherheitsdurchsicht S4; Ben, 20.10.2026): Androids
+# Auto Backup sichert sonst Datenbank, Messungen und GPS-Strecken in Googles Cloud.
+# Der Agent `Sicherung` (scripts/apk_bauen.py legt ihn in die Vorlage) schreibt nur,
+# wenn die App die Marke aus core/sicherung.py gesetzt hat — Vorgabe aus.
+[tool.flet.android.manifest_application]
+backupAgent = ".Sicherung"
+fullBackupOnly = "true"
+
 [tool.flet.android.feature]
 # BLE ist nötig für Messungen, aber kein Installationshindernis (required="false").
 "android.hardware.bluetooth_le" = false

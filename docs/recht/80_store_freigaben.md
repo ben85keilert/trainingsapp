@@ -22,7 +22,7 @@ Vollständig und wahrheitsgemäß:
 | Frage | Unsere Antwort |
 |---|---|
 | Werden Daten erhoben? | Edition A: nein (alles bleibt auf dem Gerät). Edition B: ja |
-| Werden Daten geteilt? | nein |
+| Werden Daten geteilt? | nein — das Geräte-Backup (Google-Konto) sichert App-Daten nur, wenn die Person es in den Einstellungen einschaltet; Vorgabe aus, GPS-Strecken gesondert (`docs/sicherung.md`, seit 20.10.2026) |
 | Verschlüsselte Übertragung? | ja |
 | Löschung anforderbar? | ja |
 | Kategorien | Gesundheit und Fitness |
@@ -60,6 +60,8 @@ URL in Store-Eintrag, App und Website muss **identisch** sein.
 
 - Keine Nutzung von HealthKit-Daten für Werbung oder Data-Mining
 - **Keine Speicherung von HealthKit-Daten in iCloud**
+- App-Daten gehen nur nach Einschalten ins iCloud-Backup (Vorgabe aus, Attribut
+  `NSURLIsExcludedFromBackupKey` am Datenordner — `docs/sicherung.md`)
 - Datenschutzerklärung verpflichtend
 - Bei medizinischen Aussagen deutlich strengere Prüfung — ein weiterer Grund,
   die Zweckbestimmung sauber zu halten (`00_zweckbestimmung.md`)

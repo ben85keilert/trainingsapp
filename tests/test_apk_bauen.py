@@ -37,11 +37,39 @@ def test_mainactivity_wird_ersetzt_der_rest_bleibt(apk_bauen, tmp_path) -> None:
     ziel = tmp_path / "vorlage" / "eigene.zip"
     apk_bauen.vorlage_patchen(quelle, ziel)
     with zipfile.ZipFile(quelle) as alt, zipfile.ZipFile(ziel) as neu:
-        assert neu.namelist() == alt.namelist()  # cookiecutter braucht build/ zuerst
+        erwartet = list(alt.namelist())  # cookiecutter braucht build/ zuerst
+        erwartet.insert(erwartet.index(apk_bauen.MAIN_ACTIVITY_PFAD) + 1, apk_bauen.SICHERUNG_PFAD)
+        assert neu.namelist() == erwartet
         text = neu.read(apk_bauen.MAIN_ACTIVITY_PFAD).decode("utf-8")
         assert "FlutterEngineCache" in text and "provideFlutterEngine" in text
         assert text.startswith("package {{ cookiecutter.org_name_2 }}.")
         assert neu.read("build/cookiecutter.json") == b"{}"
+        assert neu.read(apk_bauen.SICHERUNG_PFAD).decode("utf-8") == apk_bauen.SICHERUNG
+
+
+def test_backupagent_sichert_nur_mit_marke(apk_bauen) -> None:
+    """S4 (Ben, 20.10.2026): Vorgabe aus, einschaltbar; GPS-Strecken gesondert. Der Agent
+    kennt Marke und Streckenordner wörtlich wie die Python-Seite, und das Manifest
+    bekommt ihn über pyproject.toml."""
+    import tomllib
+
+    from trainingsapp import config
+    from trainingsapp.core import sicherung
+
+    text = apk_bauen.SICHERUNG
+    assert text.startswith("package {{ cookiecutter.org_name_2 }}.")
+    assert f'const val MARKE = "{sicherung.MARKE}"' in text
+    assert f'const val STRECKEN_ORDNER = "{config.streckenverzeichnis().name}"' in text
+    assert "markeFinden(wurzel, TIEFE) ?: return" in text  # ohne Marke: nichts
+    assert "fullBackupFile(it, data)" in text
+    assert "override fun onRestore(" in text and "override fun onBackup(" in text
+    pyproject = tomllib.loads((SKRIPT.parent.parent / "pyproject.toml").read_text("utf-8"))
+    manifest = pyproject["tool"]["flet"]["android"]["manifest_application"]
+    assert manifest == {"backupAgent": ".Sicherung", "fullBackupOnly": "true"}
+    assert apk_bauen.SICHERUNG_PFAD.endswith("/Sicherung.kt")
+    assert (
+        apk_bauen.SICHERUNG_PFAD.rsplit("/", 1)[0] == apk_bauen.MAIN_ACTIVITY_PFAD.rsplit("/", 1)[0]
+    )
 
 
 def test_mainactivity_haelt_die_engine_wirklich(apk_bauen) -> None:

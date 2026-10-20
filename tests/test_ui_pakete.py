@@ -6,6 +6,7 @@ mit `flet` (nicht in der CI-Gruppe `ci`).
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -247,13 +248,48 @@ def test_paket_entfernen_fragt_bei_planbezug_und_kopiert(page, state) -> None:
     kopie = state.uebungen.laden(items[0].exercise_id)
     assert kopie.name == wade.name and kopie.package_id is None
 
-    # Beim Import einer Datei mit der Standard-ID sagt die Rückfrage es deutlich
+    # Beim Import einer Datei mit der Standard-ID sagt die Rückfrage es deutlich (S3 b)
+    from trainingsapp.core.paketquelle import QUELLE_VORGABE
     from trainingsapp.ui.views.pakete import import_rueckfrage
 
     state.pakete.importieren(state.pakete.inhalt(GRUNDAUSSTATTUNG))  # wieder installieren
     inhalt = state.pakete.inhalt(GRUNDAUSSTATTUNG)
     dialog = import_rueckfrage(page, state, inhalt, state.pakete.vorschau(inhalt))
-    assert any("Ersetzt das mitgelieferte Paket" in t for t in texte(dialog.content))
+    assert any(
+        "gibt sich als „Standard“ aus (bisher mitgeliefert)" in t for t in texte(dialog.content)
+    )
+    # Aus der Vorgabequelle dagegen ohne Hinweis
+    dialog = import_rueckfrage(
+        page, state, inhalt, state.pakete.vorschau(inhalt), quelle=QUELLE_VORGABE
+    )
+    assert not any("gibt sich als" in t for t in texte(dialog.content))
+
+
+def test_import_warnt_bei_paket_aus_einer_quelle(page, state) -> None:
+    """S3 (b): Eine Datei mit der ID eines Pakets, das aus einer Quelle kam, nennt die Quelle."""
+    from trainingsapp.core.pakete import paket_lesen
+    from trainingsapp.ui.views.pakete import import_rueckfrage
+
+    roh = {
+        "paket": {"name": "Qigong", "version": 1},
+        "exercises": [{"key": "baum", "name": "Baum", "spec": "halten"}],
+    }
+    inhalt = paket_lesen(json.dumps(roh).encode())
+    state.pakete.importieren(inhalt)
+    pid = inhalt.paket.id
+    # Per Datei geholt: eine weitere Datei ist kein Fall
+    roh["paket"]["version"] = 2
+    roh["exercises"][0]["name"] = "Baum (neu)"
+    inhalt2 = paket_lesen(json.dumps(roh).encode())
+    dialog = import_rueckfrage(page, state, inhalt2, state.pakete.vorschau(inhalt2))
+    assert not any("gibt sich als" in t for t in texte(dialog.content))
+    # Aus einer Quelle gebunden: die Datei gibt sich als dieses Paket aus
+    state.pakete.quelle_setzen(pid, "https://x/i")
+    dialog = import_rueckfrage(page, state, inhalt2, state.pakete.vorschau(inhalt2))
+    assert any(
+        "gibt sich als „Qigong“ aus (bisher aus https://x/i)" in t for t in texte(dialog.content)
+    )
+    assert dialog.actions[1].content == "Importieren"  # kein Verbot — die Person entscheidet
 
 
 def test_uebung_zeigt_geaendert_und_setzt_zurueck(page, state) -> None:

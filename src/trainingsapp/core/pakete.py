@@ -110,7 +110,8 @@ class Paket:
     deaktiviert: datetime | None = None
     #: ``"auto"`` (Updates aus der Quelle beim Start einspielen) oder ``"manuell"``
     update_modus: str = "auto"
-    #: Woher das Paket zuletzt kam (Adresse der Paketdatei) — ``None`` = Datei/Seed
+    #: Woher das Paket zuletzt kam (Adresse der Quelle, ihr Index; Migration 026) —
+    #: ``None`` = Datei/Seed. Nur diese Quelle darf es aktualisieren (`paketquelle.quelle_passt`)
     quelle: str | None = None
     #: Was die Paketquelle zuletzt meldete (Migration 017): Version, Datei, Prüfsumme,
     #: Neuigkeiten — ``verfuegbar`` ``None`` = nichts Neueres bekannt

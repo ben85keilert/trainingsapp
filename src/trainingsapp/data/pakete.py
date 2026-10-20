@@ -401,7 +401,8 @@ class PaketRepo:
         self.con.execute("UPDATE package SET update_mode = ? WHERE id = ?", (modus, paket_id))
 
     def quelle_setzen(self, paket_id: str, url: str | None) -> None:
-        """Woher das Paket zuletzt kam — nach einem Import aus einer Quelle."""
+        """Woher das Paket zuletzt kam (Adresse der Quelle, ihr Index) — nach einem Import
+        aus einer Quelle. Nur diese Quelle darf es fortan aktualisieren (S3)."""
         self.con.execute("UPDATE package SET source_url = ? WHERE id = ?", (url, paket_id))
 
     # -- Nicht mehr im Paket (Migration 017) ----------------------------------

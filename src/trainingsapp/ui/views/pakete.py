@@ -36,7 +36,6 @@ from trainingsapp.config import medienverzeichnis
 from trainingsapp.core.kurse import Kurs
 from trainingsapp.core.models import Exercise
 from trainingsapp.core.pakete import (
-    GRUNDAUSSTATTUNG,
     Paket,
     PaketFehler,
     Paketinhalt,
@@ -46,6 +45,7 @@ from trainingsapp.core.pakete import (
     paket_json,
     paket_lesen,
 )
+from trainingsapp.core.paketquelle import fremde_identitaet
 from trainingsapp.data.pakete import ARCHIV, KATALOG, PAPIERKORB, Status, Uebungsstand, Vorschau
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.hilfe import hilfe_knopf
@@ -173,9 +173,11 @@ def import_rueckfrage(
     inhalt: Paketinhalt,
     vorschau: Vorschau,
     danach: Callable[[], None] | None = None,
+    quelle: str | None = None,
 ) -> ft.AlertDialog:
     """Die Rückfrage vor dem Schreiben: was der Import tut — auch für „Wieder installieren“
-    und für Pakete aus einer Quelle (``danach`` läuft nach dem Schreiben, etwa Quelle merken)."""
+    und für Pakete aus einer Quelle (``quelle`` = ihre Adresse, ``None`` = Datei; ``danach``
+    läuft nach dem Schreiben, etwa Quelle merken)."""
     wieder = vorschau.entfernt is not None
     nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
 
@@ -230,18 +232,12 @@ def import_rueckfrage(
     if inhalt.paket.beschreibung:
         zeilen.append(ft.Text(inhalt.paket.beschreibung, size=13, italic=True))
     zeilen += [ft.Text(f"• {z}") for z in vorschau.zusammenfassung()]
-    if not wieder and inhalt.paket.id == GRUNDAUSSTATTUNG and vorschau.installiert is not None:
-        # Offen für alle (Ben, 15.10.2026) — aber nie still: Diese Datei ersetzt das
-        # mitgelieferte Paket. Der eingebaute Stand kommt per „Wieder installieren“ zurück.
-        zeilen.append(
-            ft.Text(
-                f"Ersetzt das mitgelieferte Paket „Standard“ — "
-                f"{uebungen_zahl(vorschau.anzahl(Status.GEAENDERT))} "
-                "bekommen den Stand dieser Datei (deine Änderungen bleiben).",
-                weight=ft.FontWeight.W_600,
-                color=ft.Colors.ERROR,
-            )
-        )
+    # Offen für alle (Ben, 15.10.2026) — aber nie still: Gibt sich die Datei als
+    # mitgeliefertes Paket oder als eines aus einer Quelle aus, steht das hier (S3);
+    # der vorige Stand kommt per „Wieder installieren“ zurück. Entscheiden tut die Person.
+    warnung = None if wieder else fremde_identitaet(inhalt.paket, vorschau.installiert, quelle)
+    if warnung:
+        zeilen.append(ft.Text(warnung, weight=ft.FontWeight.W_600, color=ft.Colors.ERROR))
     if vorschau.anzahl(Status.GEAENDERT, Status.ZURUECK):
         zeilen.append(hinweis("Einträge im Verlauf bleiben, wie sie sind."))
     if not vorschau.zu_tun:

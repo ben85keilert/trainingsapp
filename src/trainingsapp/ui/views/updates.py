@@ -31,6 +31,7 @@ from trainingsapp.core.paketquelle import (
     IndexEintrag,
     Pruefung,
     QuellenFehler,
+    gebundene_quelle,
     paket_laden,
     pruefen,
     url_pruefen,
@@ -57,7 +58,7 @@ def _eintrag_aus_paket(p: Paket) -> IndexEintrag | None:
         url=p.verfuegbar_url,
         sha256=p.verfuegbar_sha256 or "",
         bytes=0,
-        quelle_url=p.quelle or "",
+        quelle_url=gebundene_quelle(p) or "",  # vorgemerkt wird nur aus ihr
         neuigkeiten=p.verfuegbar_neuigkeiten,
     )
 
@@ -89,7 +90,7 @@ async def pruefung_ausfuehren(state: AppState) -> UpdateStand:
         try:
             inhalt = await asyncio.to_thread(paket_laden, u.eintrag)
             state.pakete.importieren(inhalt)
-            state.pakete.quelle_setzen(u.eintrag.id, u.eintrag.url)
+            state.pakete.quelle_setzen(u.eintrag.id, u.eintrag.quelle_url or None)
             state.pakete.verfuegbar_loeschen(u.eintrag.id)
         except (QuellenFehler, sqlite3.Error) as e:
             ergebnis.fehler.append(f"{u.eintrag.name}: {e}")
@@ -208,7 +209,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
                 return
 
             def danach() -> None:
-                state.pakete.quelle_setzen(eintrag.id, eintrag.url)
+                state.pakete.quelle_setzen(eintrag.id, eintrag.quelle_url or None)
                 state.pakete.verfuegbar_loeschen(eintrag.id)
                 if state.updates is not None:
                     state.updates.pruefung.updates = [
@@ -219,7 +220,14 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
                     ]
 
             page.show_dialog(
-                import_rueckfrage(page, state, inhalt, state.pakete.vorschau(inhalt), danach)
+                import_rueckfrage(
+                    page,
+                    state,
+                    inhalt,
+                    state.pakete.vorschau(inhalt),
+                    danach,
+                    quelle=eintrag.quelle_url or None,
+                )
             )
 
         return handler

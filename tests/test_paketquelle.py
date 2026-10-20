@@ -8,16 +8,19 @@ import urllib.error
 
 import pytest
 
-from trainingsapp.core.pakete import Paket, paket_json
+from trainingsapp.core.pakete import GRUNDAUSSTATTUNG, Paket, paket_json
 from trainingsapp.core.paketquelle import (
     INDEX_FORMAT,
     QUELLE_VORGABE,
     IndexEintrag,
     QuellenFehler,
+    fremde_identitaet,
+    gebundene_quelle,
     index_laden,
     index_lesen,
     paket_laden,
     pruefen,
+    quelle_passt,
     updates_finden,
     url_pruefen,
 )
@@ -93,19 +96,72 @@ def test_index_laden_meldet_netzfehler_und_unsinn() -> None:
 
 def test_updates_finden_nur_aktive_und_nur_nach_oben() -> None:
     e_neu = IndexEintrag("p1", "Dehnung", 3, "https://x/d.json", "", 0, "q")
-    e_alt = IndexEintrag("p1", "Dehnung", 1, "https://y/d.json", "", 0, "q2")
+    e_alt = IndexEintrag("p1", "Dehnung", 1, "https://y/d.json", "", 0, "q")
     e_fremd = IndexEintrag("p9", "Yoga", 1, "https://x/y.json", "", 0, "q")
-    installiert = Paket(id="p1", name="Dehnung", version=2)
+    installiert = Paket(id="p1", name="Dehnung", version=2, quelle="q")
     updates, neue = updates_finden([e_alt, e_neu, e_fremd], [installiert])
-    assert updates == [] and [n.id for n in neue] == ["p9"]  # erste Quelle zählt: 1 < 2
+    assert updates == [] and [n.id for n in neue] == ["p9"]  # erster Eintrag zählt: 1 < 2
     updates, neue = updates_finden([e_neu, e_alt], [installiert])
     assert [u.eintrag.version for u in updates] == [3]
     from datetime import UTC, datetime
 
-    aus = Paket(id="p1", name="Dehnung", version=2, deaktiviert=datetime.now(UTC))
+    aus = Paket(id="p1", name="Dehnung", version=2, deaktiviert=datetime.now(UTC), quelle="q")
     assert updates_finden([e_neu], [aus]) == ([], [])
-    ohne_version = Paket(id="p1", name="Dehnung", version=None)
+    ohne_version = Paket(id="p1", name="Dehnung", version=None, quelle="q")
     assert [u.eintrag.id for u in updates_finden([e_neu], [ohne_version])[0]] == ["p1"]
+
+
+def test_updates_nur_aus_der_gebundenen_quelle() -> None:
+    """S3 (a): Eine eingetragene Fremdquelle kann kein installiertes Paket „aktualisieren“."""
+    eigene = IndexEintrag("p1", "Dehnung", 3, "https://x/d.json", "", 0, "https://x/i")
+    fremde = IndexEintrag("p1", "Dehnung", 9, "https://boese/d.json", "", 0, "https://boese/i")
+    gebunden = Paket(id="p1", name="Dehnung", version=2, quelle="https://x/i")
+    # Die Fremdquelle steht zuerst — sie zählt trotzdem nicht, auch nicht als „gesehen“
+    updates, neue = updates_finden([fremde, eigene], [gebunden])
+    assert [u.eintrag.quelle_url for u in updates] == ["https://x/i"] and neue == []
+    assert updates_finden([fremde], [gebunden]) == ([], [])
+    # Per Datei geholt (keine Bindung): keine Quelle darf, auch nicht die Vorgabe
+    per_datei = Paket(id="p1", name="Dehnung", version=2)
+    from dataclasses import replace
+
+    vorgabe = replace(eigene, quelle_url=QUELLE_VORGABE)
+    assert updates_finden([eigene, fremde, vorgabe], [per_datei]) == ([], [])
+    assert gebundene_quelle(per_datei) is None and not quelle_passt(QUELLE_VORGABE, per_datei)
+    # „Standard“ ohne Bindung: nur die Vorgabequelle; einmal von dort geholt, ist es gebunden
+    standard = Paket(id=GRUNDAUSSTATTUNG, name="Standard", version=1)
+    s_fremd = replace(fremde, id=GRUNDAUSSTATTUNG, name="Standard")
+    s_vorgabe = replace(vorgabe, id=GRUNDAUSSTATTUNG, name="Standard")
+    assert updates_finden([s_fremd], [standard]) == ([], [])
+    updates, _ = updates_finden([s_fremd, s_vorgabe], [standard])
+    assert [u.eintrag.version for u in updates] == [3]
+    assert gebundene_quelle(standard) == QUELLE_VORGABE
+    anders = Paket(id=GRUNDAUSSTATTUNG, name="Standard", version=3, quelle="https://x/i")
+    assert not quelle_passt(QUELLE_VORGABE, anders) and quelle_passt("https://x/i", anders)
+    # Nicht installiert: erscheint als neu — von jeder Quelle, die erste zählt
+    assert [n.quelle_url for n in updates_finden([fremde, eigene], [])[1]] == ["https://boese/i"]
+
+
+def test_fremde_identitaet_beim_dateiimport() -> None:
+    """S3 (b): Der Hinweis kommt nur, wenn eine Datei ein Paket anderer Herkunft vorgibt."""
+    datei = Paket(id="p1", name="Dehnung (neu)")
+    assert fremde_identitaet(datei, None) is None
+    assert fremde_identitaet(datei, Paket(id="p1", name="Dehnung")) is None  # Datei → Datei
+    assert fremde_identitaet(datei, Paket(id="p2", name="Anderes")) is None
+    text = fremde_identitaet(datei, Paket(id="p1", name="Dehnung", quelle="https://x/i"))
+    assert text == (
+        "Diese Datei gibt sich als „Dehnung“ aus (bisher aus https://x/i). "
+        "Nur fortfahren, wenn du der Datei vertraust."
+    )  # der installierte Name, nicht der aus der Datei
+    standard = Paket(id=GRUNDAUSSTATTUNG, name="Standard")
+    assert "(bisher mitgeliefert)" in (fremde_identitaet(standard, standard) or "")
+    # Aus der gebundenen Quelle: kein Hinweis; aus einer anderen Quelle: Hinweis auf die Quelle
+    assert fremde_identitaet(standard, standard, QUELLE_VORGABE) is None
+    gebunden = Paket(id="p1", name="Dehnung", quelle="https://x/i")
+    assert fremde_identitaet(datei, gebunden, "https://x/i") is None
+    assert (fremde_identitaet(datei, gebunden, "https://y/i") or "").startswith(
+        "Dieses Paket gibt sich als „Dehnung“ aus (bisher aus https://x/i). Nur fortfahren, "
+        "wenn du der Quelle vertraust."
+    )
 
 
 def test_paket_laden_prueft_pruefsumme_und_id(tmp_path) -> None:
@@ -150,7 +206,7 @@ def test_pruefen_sammelt_fehler_je_quelle_und_passt_zum_werkzeug(tmp_path) -> No
 
     ergebnis = pruefen(
         ["https://kaputt/index.json", "https://x/pakete/index.json"],
-        [Paket(id="p1", name="Dehnung", version=1)],
+        [Paket(id="p1", name="Dehnung", version=1, quelle="https://x/pakete/index.json")],
         laden,
     )
     assert ergebnis.fehler == ["https://kaputt/index.json: unbekannt"]

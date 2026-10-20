@@ -108,7 +108,7 @@ def test_pruefung_auto_und_manuell(page, state, monkeypatch) -> None:
     assert [(i, n, v) for i, n, v in stand.eingespielt] == [(pid, "Qigong", 2)]
     assert stand.pruefung.updates == []
     p = state.pakete.laden(pid)
-    assert p.version == 2 and p.quelle == "https://x/q.json" and p.verfuegbar is None
+    assert p.version == 2 and p.quelle == "https://x/i" and p.verfuegbar is None  # = Index
     assert "Lotus v2" in [u.name for u in state.uebungen.alle()]
     assert state.updates_label() == "Updates verfügbar: aktualisiert: Qigong"
     ansicht = updates.updates_view(page, state, ft.UrlLauncher())
@@ -153,8 +153,10 @@ def test_pruefung_auto_und_manuell(page, state, monkeypatch) -> None:
     frage = page.dialoge[-1]
     frage.actions[1].on_click()
     p = state.pakete.laden(pid)
-    assert p.version == 3 and p.verfuegbar is None and p.quelle == "https://x/q3.json"
+    assert p.version == 3 and p.verfuegbar is None and p.quelle == "https://x/i"
     assert state.updates.pruefung.updates == []
+    # Aus der gebundenen Quelle geholt: kein Hinweis auf fremde Identität im Dialog
+    assert not any("gibt sich als" in t for t in texte(frage.content))
 
 
 def test_neue_pakete_und_quellen_fehler(page, state, monkeypatch) -> None:

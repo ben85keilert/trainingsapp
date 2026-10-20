@@ -289,6 +289,18 @@ kann (`core/paketquelle.py`).
 - **Sicherheit:** HTTPS sichert die Herkunft, die Prüfsumme den Download (stimmt sie
   nicht, wird nichts geschrieben), die Datei muss zur ID im Index passen, maximal
   5 MB. Eine Signatur kommt, wenn Pakete von Dritten kommen.
+- **Quellenbindung** (Sicherheitsdurchsicht S3, Ben, 20.10.2026): Ein Paket bekommt
+  Updates nur aus der Quelle, die es zuletzt lieferte — `package.source_url` hält die
+  Adresse ihres Index (seit Migration 026; die Bindung entsteht beim ersten Einspielen
+  aus einer Quelle, auch im Modus „automatisch“). Pakete ohne Bindung — per Datei
+  importiert oder über `TRAININGSAPP_PAKETE` — bekommen von keiner Quelle Updates; wer
+  per Datei holt, holt weiter per Datei. Einzige Ausnahme: das mitgelieferte „Standard“
+  darf aus `QUELLE_VORGABE` aktualisiert werden. So kann eine eingetragene Fremdquelle
+  kein vertrautes Paket „aktualisieren“, auch nicht beim Start (`paketquelle.quelle_passt`).
+  Ein **Datei-Import**, dessen `id` zu einem Paket aus einer Quelle oder zu „Standard“
+  gehört, sagt es in der Rückfrage deutlich („Diese Datei gibt sich als ‚Standard‘ aus
+  (bisher mitgeliefert). Nur fortfahren, wenn du der Datei vertraust.“,
+  `paketquelle.fremde_identitaet`) — entscheiden tut die Person, kein Verbot.
 - **Label unter dem Zahnrad:** „Updates verfügbar: 2 Pakete, App“ — einmal je Stand,
   bis die Seite „Updates“ geöffnet wurde. Einstellbar: aus / nur Updates / Updates und
   Neuigkeiten (dann auch neue Pakete in den Quellen).

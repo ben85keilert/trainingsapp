@@ -38,7 +38,9 @@
   Kachelkoordinaten); die Update-Prüfung fragt beim Start die GitHub-Releases der
   App und die eingetragenen Paketquellen nur nach Versionsnummern — übertragen
   werden IP-Adresse und der Name der App (`docs/uebungspakete.md`, „Paketquellen“;
-  seit 16.10.2026).
+  seit 16.10.2026). Ein Paket nimmt Updates nur von der Quelle an, die es zuletzt
+  lieferte (seit 20.10.2026, Sicherheitsdurchsicht S3) — eine fremde Quelle kann
+  mitgelieferte oder bereits installierte Inhalte nicht ersetzen.
 - **Fotos und Videos an Einträgen** (seit 20.10.2026, `docs/plan_anhaenge.md`): mit der
   Kamera der App aufgenommen, als nackte JPEG/MP4-Bytes ohne Ortsstempel in den
   app-privaten Ordner `Anhaenge/` geschrieben; nicht in Galerie, Export, Diagnose,

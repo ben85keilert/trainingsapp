@@ -41,11 +41,21 @@
   seit 16.10.2026). Ein Paket nimmt Updates nur von der Quelle an, die es zuletzt
   lieferte (seit 20.10.2026, Sicherheitsdurchsicht S3) — eine fremde Quelle kann
   mitgelieferte oder bereits installierte Inhalte nicht ersetzen.
+- **Geräte-Backup** (seit 20.10.2026, Sicherheitsdurchsicht S4): Androids Auto Backup
+  sichert nichts aus der App, solange die Person es nicht unter Einstellungen →
+  Geräte-Backup einschaltet (Vorgabe aus; GPS-Strecken nur mit zweitem Schalter).
+  Eingeschaltet gehen Datenbank, Messungen und Anhänge in das Backup des
+  Google-Kontos — Empfänger Google, mit der Gerätesperre verschlüsselt, höchstens
+  25 MB (`docs/sicherung.md`). Für iOS gilt dieselbe Regel (iCloud).
+- **Bilder in Kurskapiteln** (seit 20.10.2026, S2): Markdown-Bilder aus Paketen laden
+  erst, wenn die Person es unter Einstellungen → Updates einschaltet (Vorgabe aus);
+  bis dahin stehen sie als Link, der auf Tipp öffnet. Beim Laden erfährt der Anbieter
+  des Pakets IP-Adresse und Zeitpunkt.
 - **Fotos und Videos an Einträgen** (seit 20.10.2026, `docs/plan_anhaenge.md`): mit der
   Kamera der App aufgenommen, als nackte JPEG/MP4-Bytes ohne Ortsstempel in den
   app-privaten Ordner `Anhaenge/` geschrieben; nicht in Galerie, Export, Diagnose,
-  Synchronisation oder Geräte-Backup (dafür muss `allowBackup="false"` im Manifest stehen,
-  Sicherheitsdurchsicht S4). Hinaus nur über „Teilen“ am einzelnen Anhang nach Rückfrage.
+  Synchronisation; ins Geräte-Backup nur, wenn die Person es einschaltet (unten).
+  Hinaus nur über „Teilen“ am einzelnen Anhang nach Rückfrage.
   Drei Aufnahmequalitäten, mittlere als Vorgabe — Datensparsamkeit auch beim Speicherplatz;
   Speicherübersicht und endgültiges Löschen in Einstellungen → Anhänge.
 - **Bluetooth-Adresse des Sensors** (seit 20.10.2026, Sicherheitsdurchsicht S10): Die

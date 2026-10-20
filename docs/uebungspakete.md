@@ -202,7 +202,7 @@ Je Kurs (`kurse[]`, Formatversion 2):
 
 Je Kapitel: `titel` (Pflicht), `key` (nie ändern — die Kapitel-ID folgt daraus und
 der **Fortschritt der Nutzer hängt daran**; ohne `key` zählt die Nummer), `text`
-(Markdown), `media[]` (wie bei Übungen, zusätzlich `kind: "audio"`), `plaene[]`
+(Markdown; Bilder `![…](https://…)` darin lädt die App erst, wenn die Person es unter Einstellungen → Updates einschaltet — bis dahin stehen sie als Link „[Bild: …]“, `core/kapiteltext.py`, Sicherheitsdurchsicht S2), `media[]` (wie bei Übungen, zusätzlich `kind: "audio"`), `plaene[]`
 (`{name, wochentage: [0..6], uebungen: [{uebung: <key|id>, ziel?, felder?}]}`) und
 `bedingung` (`{art: "gelesen"}` Vorgabe · `{art: "summe", uebung, feld, soll}` ·
 `{art: "tage", soll}` · `{art: "messung", soll}` in Minuten). `uebung` ist der

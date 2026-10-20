@@ -199,3 +199,20 @@ def test_kapitel_mit_plan_legt_den_plan_an(page, state) -> None:
     assert any("gesperrt" in t for t in texte(gesperrt))
     with pytest.raises(AssertionError):
         knopf(gesperrt, "Weiter")
+
+
+def test_bilder_im_kapiteltext_sind_links_bis_man_sie_einschaltet(page, state) -> None:
+    """S2 (Ben, 20.10.2026): Ein Bild im Kapiteltext lüde beim Öffnen vom Server des
+    Paketautors — darum Vorgabe aus: Es steht als Link, der erst auf Tipp öffnet."""
+    (kurs,) = state.kurse.alle()
+    erstes = kurs.kapitel[0]
+    erstes.text = "Haltung: ![Rücken gerade](https://example.org/r.png)\n\nText"
+
+    def markdown() -> ft.Markdown:
+        ansicht = kapitel_view(page, state, kurs, erstes, ft.UrlLauncher())
+        (m,) = [c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.Markdown)]
+        return m
+
+    assert markdown().value == "Haltung: [Bild: Rücken gerade](https://example.org/r.png)\n\nText"
+    state.kapitel_bilder_setzen(True)
+    assert markdown().value == erstes.text

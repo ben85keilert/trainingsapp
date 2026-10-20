@@ -428,6 +428,9 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
     def start_schalter(ev: ft.Event[ft.Switch]) -> None:
         state.update_pruefung_setzen(bool(ev.control.value))
 
+    def bilder_schalter(ev: ft.Event[ft.Switch]) -> None:
+        state.kapitel_bilder_setzen(bool(ev.control.value))
+
     def benachrichtigung_setzen(ev: ft.Event[ft.Dropdown]) -> None:
         if ev.control.value is not None:
             state.benachrichtigung_setzen(str(ev.control.value))
@@ -499,6 +502,17 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
                             hinweis(
                                 "Es gehen nur die Adresse deines Geräts und der Name der App an "
                                 "die Quellen — nie Messungen, Einträge oder Profile."
+                            ),
+                            ft.Switch(
+                                label="Bilder in Kurskapiteln aus dem Netz laden",
+                                value=state.kapitel_bilder(),
+                                on_change=bilder_schalter,
+                            ),
+                            hinweis(
+                                "Aus (Vorgabe): Ein Bild im Kapiteltext steht als Link „[Bild: …]“ "
+                                "und lädt erst, wenn du tippst. An: Bilder laden beim Öffnen des "
+                                "Kapitels — der Anbieter des Pakets sieht dann die Adresse deines "
+                                "Geräts und wann du liest."
                             ),
                             ft.Dropdown(
                                 label="Benachrichtigung unter dem Zahnrad",

@@ -25,6 +25,7 @@ from datetime import datetime
 
 import flet as ft
 
+from trainingsapp.core.kapiteltext import bilder_zu_links
 from trainingsapp.core.kurse import (
     AKTUELL,
     FERTIG,
@@ -373,7 +374,9 @@ def kapitel_view(
         ft.Text(kapitel.titel, size=22, weight=ft.FontWeight.BOLD),
     ]
     if kapitel.text.strip():
-        bloecke.append(ft.Markdown(kapitel.text, selectable=True, on_tap_link=link))
+        # Bilder laden erst nach Einschalten (S2) — bis dahin sind sie Links
+        text = kapitel.text if state.kapitel_bilder() else bilder_zu_links(kapitel.text)
+        bloecke.append(ft.Markdown(text, selectable=True, on_tap_link=link))
 
     if medien := [m for m in kapitel.media if m.uri]:
         bloecke.append(

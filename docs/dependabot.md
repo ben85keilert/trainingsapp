@@ -78,10 +78,30 @@ Drei Entscheidungen stecken darin:
 hrv-core hat dieselbe Datei ohne den Actions-Teil (dort gibt es keine
 Workflows) und ohne flet-Ausnahme.
 
+**Actions auf Commit-SHA gepinnt** (Sicherheitsdurchsicht S9, 20.10.2026): In
+`ci.yml` und `apk.yml` steht jede Action als `owner/name@<40-Hex-SHA> # vX.Y.Z`
+statt `@v7`. Ein Major-Tag ist beweglich — wer das Konto des Anbieters
+übernimmt, kann ihn auf beliebigen Code zeigen lassen, und der nächste Lauf
+führt ihn aus. Der SHA ist unveränderlich. Dependabot versteht die Schreibweise:
+Es hebt den SHA auf den der neuen Version und schreibt den Versionskommentar
+dahinter mit; der Kommentar ist also kein Schmuck, sondern das, woran Dependabot
+(und man selbst) die Version erkennt. Beim Mergen eines solchen PR prüft man wie
+sonst die Release-Notizen — am Pin ändert das nichts.
+
+`hrv-core.ref` im Wurzelverzeichnis pinnt auf dieselbe Weise die
+Schwesterbibliothek: eine Zeile, der volle Commit-SHA von hrv-core, den CI und
+APK-Build auschecken (CLAUDE.md, „Die HRV-Bibliothek hrv-core“). **Diese Datei
+hebt Dependabot nicht** — sie ist für ihn keine Abhängigkeit, und das ist
+gewollt: Ein neuer hrv-core-Stand kommt nur in eine Release-APK, wenn jemand ihn
+bewusst einträgt (`git -C ../hrv-core rev-parse origin/main > hrv-core.ref`) und
+die CI damit grün war. Lokal läuft weiter der Ordner `../hrv-core`, wie er
+gerade steht.
+
 **Was Dependabot hier nicht sieht:**
 
 - `hrv-core`, `flet-ble`, `flet-ton` — Pfadabhängigkeiten
-  (`[tool.uv.sources]`), keine PyPI-Pakete. Sie werden von Hand gepflegt.
+  (`[tool.uv.sources]`), keine PyPI-Pakete. Sie werden von Hand gepflegt;
+  den CI-/APK-Stand von hrv-core pinnt `hrv-core.ref` (oben).
 - Die Flutter-Seite der Erweiterungen (`erweiterungen/*/src/flutter/*/pubspec.yaml`)
   und was `flet build` an Dart-Paketen zieht — bewusst nicht eingerichtet,
   siehe nächster Abschnitt.

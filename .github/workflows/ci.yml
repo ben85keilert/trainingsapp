@@ -20,18 +20,33 @@ jobs:
         working-directory: trainingsapp
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: trainingsapp
 
+      - name: hrv-core-Stand aus hrv-core.ref lesen
+        # Die Datei pinnt den Commit der Schwesterbibliothek (CLAUDE.md, „Die
+        # HRV-Bibliothek hrv-core“). Dependabot hebt sie nicht — das geschieht
+        # bewusst von Hand, wenn die App einen neueren Stand braucht.
+        id: hrv_core
+        working-directory: ${{ github.workspace }}
+        run: |
+          ref="$(tr -d '[:space:]' < trainingsapp/hrv-core.ref)"
+          if ! printf '%s' "$ref" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "::error file=hrv-core.ref::hrv-core.ref muss genau einen vollen Commit-SHA (40 Hex-Zeichen) enthalten, gefunden: '$ref'"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
       - name: hrv-core (gemeinsame HRV-Bibliothek) auschecken
         # Öffentliches Repo (AGPL-3.0) — kein eigenes Token nötig.
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ben85keilert/hrv-core
+          ref: ${{ steps.hrv_core.outputs.ref }}
           path: hrv-core
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true

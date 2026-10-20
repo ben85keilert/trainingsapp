@@ -51,23 +51,34 @@ jobs:
           sudo docker image prune --all --force > /dev/null || true
           df -h /
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: trainingsapp
           fetch-depth: 0 # Build-Nummer = Zahl der Commits
 
+      - name: hrv-core-Stand aus hrv-core.ref lesen
+        # Die Datei pinnt den Commit der Schwesterbibliothek (CLAUDE.md, „Die
+        # HRV-Bibliothek hrv-core“). Dependabot hebt sie nicht — das geschieht
+        # bewusst von Hand, wenn die App einen neueren Stand braucht.
+        id: hrv_core
+        working-directory: ${{ github.workspace }}
+        run: |
+          ref="$(tr -d '[:space:]' < trainingsapp/hrv-core.ref)"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
       - name: hrv-core (gemeinsame HRV-Bibliothek) auschecken
         # Öffentliches Repo (AGPL-3.0) — kein eigenes Token nötig.
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ben85keilert/hrv-core
+          ref: ${{ steps.hrv_core.outputs.ref }}
           path: hrv-core
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           enable-cache: true
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: "17"
@@ -103,7 +114,7 @@ jobs:
         working-directory: ${{ github.workspace }} # auch, wenn der Checkout fehlschlug
         run: rm -f "$RUNNER_TEMP/upload-keystore.jks"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: trainingsapp-apk
           path: trainingsapp/dist/*.apk
@@ -112,7 +123,7 @@ jobs:
 
       - name: Release anlegen
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: trainingsapp/dist/*.apk
           prerelease: true

@@ -17,6 +17,10 @@ Wahrheit, `.python-version` pinnt Python).
 Die HRV-Bibliothek **hrv-core** (github `ben85keilert/hrv-core`) ist ein Schwesterrepo und
 muss als `../hrv-core` neben diesem Ordner liegen — `pyproject.toml` bindet sie editierbar
 ein (`[tool.uv.sources]`, `[tool.flet.dev_packages]`), die CI checkt beide Repos nebeneinander aus.
+Lokal gilt der Ordner `../hrv-core`, wie er gerade steht; **CI und APK-Build nehmen den Commit aus
+`hrv-core.ref`** (eine Zeile, voller SHA) — bei jeder hrv-core-Änderung, die die App braucht, wird
+die Datei bewusst angehoben (`git -C ../hrv-core rev-parse origin/main > hrv-core.ref`), Dependabot
+fasst sie nicht an.
 
 ```bash
 git clone https://github.com/ben85keilert/hrv-core.git ../hrv-core   # einmalig, Schwesterordner (öffentlich, AGPL-3.0)

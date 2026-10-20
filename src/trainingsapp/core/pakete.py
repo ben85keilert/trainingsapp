@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from . import links
 from .kurse import (
     BEDINGUNGEN,
     FREISCHALTUNGEN,
@@ -541,7 +542,12 @@ def _texte(wert: Any, feld: str) -> list[str]:
 
 
 def _medium(roh: Any) -> Media | None:
-    """Ein Video-Link. Leere Platzhalter und Dateien vom Ursprungsgerät fallen weg."""
+    """Ein Video-Link. Leere Platzhalter und Dateien vom Ursprungsgerät fallen weg.
+
+    Ebenso ein Link, den die App nicht öffnen darf (`links.erlaubt`: nur ``https://``
+    und ``mailto:``) — still, denn `paket_lesen` sammelt nur Fehler, die den Import
+    abbrechen, und ein ``intent://`` in einem Medium soll die Übung nicht kosten (S1).
+    """
     if not isinstance(roh, dict):
         raise ValueError("ein Medium ist kein Objekt")
     uri = str(roh.get("uri") or "").strip()
@@ -552,7 +558,7 @@ def _medium(roh: Any) -> Media | None:
         raise ValueError(f"Medium „{uri}“: unbekannte Art oder Quelle") from None
     if art == MediaKind.AUDIO:
         raise ValueError(f"Medium „{uri}“: Ton gibt es nur an Kurskapiteln")
-    if not uri or quelle == MediaSource.LOCAL:
+    if not uri or quelle == MediaSource.LOCAL or not links.erlaubt(uri):
         return None
     return Media(
         kind=art,

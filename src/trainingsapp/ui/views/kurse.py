@@ -51,6 +51,7 @@ from trainingsapp.core.plaene import erledigte, tage_text
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.katalog import trainieren_knopf
 
@@ -355,14 +356,15 @@ def kapitel_view(
 
     def medium_oeffner(medium: Media) -> Callable[[], Awaitable[None]]:
         async def handler() -> None:
-            await browser.launch_url(medium.uri)
+            await link_oeffnen(page, browser, medium.uri)
 
         return handler
 
     async def link(e: ft.Event[ft.Markdown]) -> None:
+        """Markdown-Link im Kapiteltext — ``e.data`` ist die Adresse aus dem Paket (S1)."""
         ziel = str(getattr(e, "data", "") or "")
         if ziel:
-            await browser.launch_url(ziel)
+            await link_oeffnen(page, browser, ziel)
 
     # -- Aufbau ---------------------------------------------------------------
 

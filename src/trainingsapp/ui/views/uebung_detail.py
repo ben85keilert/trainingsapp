@@ -30,6 +30,7 @@ from trainingsapp.core.uebung_timer import TimerWahl, profile_der_uebung, uhr_an
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang_verlauf import aufnahmen_raster
 from trainingsapp.ui.views.uebung_timer import uebung_timer_route
@@ -241,7 +242,7 @@ def uebung_detail(
 
     def oeffner(medium: Media) -> Callable[[], object]:
         async def handler() -> None:
-            await browser.launch_url(medium.uri)
+            await link_oeffnen(page, browser, medium.uri)
 
         return handler
 

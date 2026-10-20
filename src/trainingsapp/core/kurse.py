@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
+from . import links
 from .models import (
     Exercise,
     HrvRecording,
@@ -523,9 +524,15 @@ def medien_to_list(media: Iterable[Media]) -> list[dict[str, Any]]:
 def medien_from_list(roh: Any) -> list[Media]:
     """Liest Medien; Unlesbares fällt weg, Dateien vom Ursprungsgerät (``local``) auch.
 
+    Ebenso ein Link, den die App nicht öffnen darf (`links.erlaubt`: nur ``https://``
+    und ``mailto:``) — still, damit ein ``intent://`` im Paket nicht das Kapitel kostet
+    (S1). Das gilt beim Import wie beim Lesen aus der Datenbank.
+
     >>> roh = [{"kind": "audio", "uri": "https://x/a.mp3"}, {"uri": ""}]
     >>> [str(m.kind) for m in medien_from_list(roh)]
     ['audio']
+    >>> medien_from_list([{"uri": "intent://scan/#Intent;end"}])
+    []
     """
     ergebnis: list[Media] = []
     if not isinstance(roh, list):
@@ -539,7 +546,7 @@ def medien_from_list(roh: Any) -> list[Media]:
             quelle = MediaSource(d.get("source", "url"))
         except ValueError:
             continue
-        if not uri or quelle == MediaSource.LOCAL:
+        if not uri or quelle == MediaSource.LOCAL or not links.erlaubt(uri):
             continue
         ergebnis.append(
             Media(

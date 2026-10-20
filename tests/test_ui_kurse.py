@@ -112,6 +112,46 @@ async def test_weiter_schliesst_ab_und_oeffnet_das_naechste(page, state) -> None
 
 
 @pytest.mark.asyncio
+async def test_link_im_kapiteltext_oeffnet_nur_https(page, state) -> None:
+    """S1: Markdown-Links und Medien aus Paketen gehen nur als https:// oder mailto: an den
+    Browser; alles andere bleibt zu, mit Hinweis — auch was die Datenbank liefert."""
+    from trainingsapp.core.models import Media, MediaKind
+    from trainingsapp.ui.components.links import NICHT_GEOEFFNET
+
+    (kurs,) = state.kurse.alle()
+    erstes = kurs.kapitel[0]
+    erstes.media.append(Media(kind=MediaKind.VIDEO, uri="intent://scan/#Intent;end", title="x"))
+    erstes.media.append(Media(kind=MediaKind.VIDEO, uri="https://example.org/v", title="y"))
+    geoeffnet: list[str] = []
+
+    async def launch_url(url: str) -> None:
+        geoeffnet.append(url)
+
+    browser = SimpleNamespace(launch_url=launch_url)
+    ansicht = kapitel_view(page, state, kurs, erstes, browser)
+    (markdown,) = [c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.Markdown)]
+
+    await markdown.on_tap_link(SimpleNamespace(data="intent://scan/#Intent;end"))
+    await markdown.on_tap_link(SimpleNamespace(data="tel:+49123"))
+    assert geoeffnet == []
+    assert [d.content.value for d in page.dialoge] == [NICHT_GEOEFFNET, NICHT_GEOEFFNET]
+    await markdown.on_tap_link(SimpleNamespace(data="https://example.org/hrv"))
+    assert geoeffnet == ["https://example.org/hrv"]
+
+    kacheln = [
+        c
+        for v in ansicht.controls
+        for c in alle(v)
+        if isinstance(c, ft.ListTile) and c.title.value in ("x", "y")
+    ]
+    assert len(kacheln) == 2
+    for kachel in kacheln:
+        await kachel.on_click()
+    assert geoeffnet == ["https://example.org/hrv", "https://example.org/v"]
+    assert len(page.dialoge) == 3
+
+
+@pytest.mark.asyncio
 async def test_freischalten_fragt_einmal_und_markiert_uebersprungen(page, state) -> None:
     (kurs,) = state.kurse.alle()
     messen = next(k for k in kurs.kapitel if k.bedingung.art == MESSUNG)

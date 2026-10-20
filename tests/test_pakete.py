@@ -940,6 +940,44 @@ def test_paket_lesen_faengt_kaputte_felder_statt_abzustuerzen() -> None:
         assert "runden" in extra["timer"][0]
 
 
+def test_medien_mit_fremdem_schema_fallen_beim_import_weg() -> None:
+    """S1: ``intent://``, ``tel:``, ``http://`` öffnet die App nicht — das Medium fällt weg,
+    Übung und Kapitel bleiben (keine Fehlermeldung, nur https:// und mailto: zählen)."""
+    roh = qigong()
+    roh["exercises"][0]["media"] = [
+        {"uri": "intent://scan/#Intent;scheme=zxing;end"},
+        {"uri": "https://example.org/baum.mp4", "title": "Video"},
+        {"uri": "tel:+4912345"},
+        {"uri": "http://example.org/unverschluesselt.mp4"},
+    ]
+    roh["kurse"] = [
+        {
+            "key": "k",
+            "name": "K",
+            "kapitel": [
+                {
+                    "key": "a",
+                    "titel": "A",
+                    "text": "x",
+                    "media": [
+                        {"kind": "audio", "uri": "file:///sdcard/a.mp3"},
+                        {"kind": "audio", "uri": "mailto:praxis@example.org"},
+                        {"kind": "audio", "uri": "HTTPS://example.org/a.mp3"},
+                    ],
+                }
+            ],
+        }
+    ]
+    inhalt = paket_lesen(roh)
+    (baum, _) = inhalt.uebungen
+    assert [(m.uri, m.title) for m in baum.media] == [("https://example.org/baum.mp4", "Video")]
+    (kurs,) = inhalt.kurse
+    assert [m.uri for m in kurs.kapitel[0].media] == [
+        "mailto:praxis@example.org",
+        "HTTPS://example.org/a.mp3",
+    ]
+
+
 def test_kursbedingung_mit_unendlichem_soll_wird_abgelehnt() -> None:
     """K17: `int(inf)` stürzte beim Anzeigen des Kurses ab."""
     for soll in (1e400, "1e400", float("nan")):

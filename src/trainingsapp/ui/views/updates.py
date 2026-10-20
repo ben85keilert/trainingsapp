@@ -39,6 +39,7 @@ from trainingsapp.core.update import UpdateFehler, ist_neuer, neuestes_release
 from trainingsapp.data.repositories import SettingRepo
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.state import BENACHRICHTIGUNGEN, AppState, UpdateStand
 from trainingsapp.ui.views.pakete import entfallene_dialog, import_rueckfrage, uebungen_zahl
 
@@ -233,7 +234,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
         ziel = release.apk_url if android else release.seite
 
         async def herunterladen() -> None:
-            await browser.launch_url(ziel)
+            await link_oeffnen(page, browser, ziel)
 
         app_zeilen += [
             ft.Text(

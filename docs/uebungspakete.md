@@ -187,7 +187,7 @@ Je Übung:
 | `uhr` | nein | Stoppuhr und Timer stehen in der Übung bereit (Ben, 18.10.2026; `docs/plan_stoppuhr.md`); fehlt = an, `false` = aus. Im Drei-Wege-Abgleich ein Feld |
 | `zaehlt_als` | nein | „Zählt als“, wenn die Übung Haltezeit anbietet: `hold` (Haltezeit, ein Satz je Lauf) oder `duration` (Zeit); fehlt = Haltezeit. Ohne Haltezeit zählt die Uhr immer als Zeit. Im Drei-Wege-Abgleich ein Feld |
 | `default_felder` | nein | Parameter neuer Planübungen; `[]` = nur abhaken, fehlt = alle |
-| `media[]` | nein | `{kind, source, uri, title, license}`; leere `uri` und `source: "local"` fallen weg |
+| `media[]` | nein | `{kind, source, uri, title, license}`; leere `uri` und `source: "local"` fallen weg. `uri` nur `https://…` oder `mailto:…` — andere Schemata (`http://`, `intent://`, `tel:`, `file://`) verwirft der Import still, die Übung bleibt; die App öffnet außerdem vor jedem Tipp nur solche Adressen (`core/links.py`, auch für Links im Kapiteltext) |
 | `variante_von` | nein | Schlüssel oder ID des Originals (im Paket oder schon auf dem Gerät) |
 
 Je Kurs (`kurse[]`, Formatversion 2):

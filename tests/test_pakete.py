@@ -919,13 +919,11 @@ def test_herkunft_nachtragen_installiert_entferntes_paket_nicht(con) -> None:
 
 
 def test_paket_lesen_faengt_kaputte_felder_statt_abzustuerzen() -> None:
-    """K15–K18: Fremddaten enden in `PaketFehler` oder einem Problemtext — nie in
+    """K15–K17: Fremddaten enden in `PaketFehler` oder einem Problemtext — nie in
     AttributeError, OverflowError oder einem Absturz beim Anzeigen."""
     faelle = [
         {"result_spec": {"fields": ["abc"]}},
         {"result_spec": {"fields": "x"}},
-        {"result_spec": {"fields": [{"key": "reps", "type": "set_list"}], "shorthand": "{reps:d}"}},
-        {"result_spec": {"fields": [{"key": "a", "type": "int"}], "shorthand": "{a.__class__}"}},
         {"timer": [{"name": "T", "abschnitte": [{"name": "a", "dauer_s": 1e400}]}]},
         {"timer": [{"name": "T", "abschnitte": [{"name": "a", "dauer_s": 30}], "runden": 1e400}]},
     ]
@@ -1007,6 +1005,35 @@ def test_ids_aus_paketen_sind_eng_gefasst() -> None:
     from trainingsapp.core.pakete import uebung_id
 
     assert [u.id for u in inhalt.uebungen] == ["i" * 64, uebung_id(inhalt.paket.id, "baum_tief")]
+
+
+def test_kurzform_liest_keine_attribute_und_keine_formatangaben() -> None:
+    """S7 (vorher K18): Die Kurzform ersetzt nur ``{feldschlüssel}`` — ``{a.__class__}``,
+    ``{reps:d}`` oder ``{reps[0]}`` zeigen nie Internes, sondern lassen die Vorlage
+    „nicht passen“; angezeigt werden dann die Felder. Das gilt auch für Vorlagen aus
+    `spec_snapshot_json`, darum braucht der Import keine eigene Prüfung mehr."""
+    from trainingsapp.core.result_spec import FieldSpec, FieldType, ResultSpec
+
+    for vorlage in ("{a.__class__}", "{a.__class__.__mro__}", "{a:d}", "{a[0]}", "{a!r}"):
+        roh = qigong()
+        roh["exercises"][0]["result_spec"] = {
+            "fields": [{"key": "a", "type": "int", "label": "A"}],
+            "shorthand": vorlage,
+        }
+        (u, _) = paket_lesen(roh).uebungen
+        text = u.result_spec.format_shorthand({"a": 12})
+        assert text == "12" and "class" not in text, vorlage
+    # Gültige Vorlagen wie bisher — auch die Fälle, in denen sie nicht zu den Werten passt
+    spec = ResultSpec(
+        fields=[
+            FieldSpec("sets", FieldType.INT, "Sätze"),
+            FieldSpec("reps", FieldType.INT, "Wdh."),
+        ],
+        shorthand="{sets}x{reps}",
+    )
+    assert spec.format_shorthand({"sets": 3, "reps": 15}) == "3x15"
+    assert spec.format_shorthand({"reps": 15}) == "15"
+    assert SPEC_WINKEL.format_shorthand({"angle": 45}) == "45°"
 
 
 def test_kursbedingung_mit_unendlichem_soll_wird_abgelehnt() -> None:

@@ -408,7 +408,6 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             raise ValueError(f"unbekannte Eingabe „{kurz}“")
         spec = ResultSpec.from_dict(VORLAGEN[kurz][1].to_dict())  # Kopie, nicht die Vorlage
     _spec_zahlen_pruefen(spec)
-    _shorthand_pruefen(spec)
     limit_spec = _objekt(eintrag.get("limit_spec", {}), "limit_spec")
     _werte_pruefen(limit_spec, "limit_spec")
     default_target = _objekt(eintrag.get("default_target", {}), "default_target")
@@ -528,20 +527,6 @@ def _spec_zahlen_pruefen(spec: ResultSpec) -> None:
             if isinstance(wert, list) and all(_zahl(x) for x in wert):
                 continue
             raise ValueError(f"Parameter „{f.key}“: Vorgabe oder Chip „{wert}“ ist keine Zahl")
-
-
-_PLATZHALTER = re.compile(r"\{([^{}]*)\}")
-
-
-def _shorthand_pruefen(spec: ResultSpec) -> None:
-    """Eine Vorlage nennt nur Feldschlüssel: ``"{angle}°"`` — kein ``{reps:d}``, kein
-    ``{angle.__class__}``; `format` liefe sonst in TypeError/AttributeError (K18)."""
-    if not spec.shorthand:
-        return
-    keys = {f.key for f in spec.fields}
-    for name in _PLATZHALTER.findall(spec.shorthand):
-        if name not in keys:
-            raise ValueError(f"die Kurzform nennt „{name}“, das ist kein Feld der Übung")
 
 
 def _werte_pruefen(obj: Any, feld: str) -> None:

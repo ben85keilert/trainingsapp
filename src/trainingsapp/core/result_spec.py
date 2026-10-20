@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
@@ -160,11 +161,8 @@ class ResultSpec:
         Ohne Vorlage werden die gefüllten Felder aneinandergereiht; eine
         Vorlage (``"{angle}°"``) wird benutzt, wenn sie zu den Werten passt.
         """
-        if self.shorthand:
-            try:
-                return self.shorthand.format(**werte)
-            except (KeyError, IndexError, ValueError, TypeError, AttributeError):
-                pass  # Vorlage passt nicht zu den Werten — dann die Felder aneinanderreihen
+        if self.shorthand and (text := vorlage_fuellen(self.shorthand, werte)) is not None:
+            return text
         teile = [
             format_wert(f, werte[f.key])
             for f in self.fields
@@ -250,6 +248,44 @@ class ResultSpec:
             shorthand=d.get("shorthand"),
             chart_metrics=list(d.get("chart_metrics") or []),
         )
+
+
+#: Ein Platzhalter der Kurzform: ``{angle}`` — nur der Feldschlüssel, nichts dazwischen
+_PLATZHALTER = re.compile(r"\{([^{}]*)\}")
+
+
+def vorlage_fuellen(vorlage: str, werte: Mapping[str, Any]) -> str | None:
+    """``"{angle}°"`` mit ``werte`` füllen — ``None``, wenn die Vorlage nicht zu ihnen passt.
+
+    Bewusst kein `str.format` (Sicherheitsdurchsicht S7): Vorlagen kommen aus Paketen und
+    aus `spec_snapshot_json`, und `str.format` ließe ``{reps.__class__.__mro__}`` oder
+    ``{reps[0]}`` Attribute und Elemente auslesen. Hier wird ein Platzhalter nur durch den
+    Wert **seines Feldschlüssels** ersetzt; alles andere — Formatangaben (``{reps:d}``),
+    Attribute, Indizes, unbekannte oder fehlende Schlüssel, einzelne Klammern — heißt
+    „passt nicht“, und `format_shorthand` reiht wie bisher die Felder aneinander.
+
+    >>> vorlage_fuellen("{angle}°", {"angle": 45})
+    '45°'
+    >>> vorlage_fuellen("{sets}x{reps}", {"reps": 15}) is None
+    True
+    >>> for v in ("{reps:d}", "{reps.__class__}", "{reps[0]}", "{reps!r}", "{", "a}b"):
+    ...     assert vorlage_fuellen(v, {"reps": [1]}) is None, v
+    """
+    passt = True
+
+    def ersetzen(treffer: re.Match[str]) -> str:
+        nonlocal passt
+        key = treffer.group(1)
+        if key not in werte:
+            passt = False
+            return ""
+        return format(werte[key], "")  # was `str.format` mit ``{key}`` täte
+
+    text = _PLATZHALTER.sub(ersetzen, vorlage)
+    rest = _PLATZHALTER.sub("", vorlage)
+    if not passt or "{" in rest or "}" in rest:
+        return None
+    return text
 
 
 def ist_leer(wert: Any) -> bool:
@@ -749,6 +785,7 @@ __all__ = [
     "skala_wert",
     "skala_werte",
     "stellen",
+    "vorlage_fuellen",
     "vorrat_feld",
     "wert_text",
     "werte_modernisieren",

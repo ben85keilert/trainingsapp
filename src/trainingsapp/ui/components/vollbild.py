@@ -118,6 +118,8 @@ def doppelkurve(
     marken: Sequence[Reihe] = (),
     hinten: Sequence[Reihe] = (),
     gesehen: dict[str, tuple[str, list[tuple[float, float]]]] | None = None,
+    x_text: Callable[[float], str] | None = None,
+    x_null: float = 0.0,
 ) -> ft.Control:
     """Die Kurven der linken und der rechten Achse in einem Diagramm.
 
@@ -126,7 +128,8 @@ def doppelkurve(
     Blöcke wie in `Ansicht`). ``marken`` (Notizen, Ablesestrich) liegen über
     den Kurven, ``hinten`` (Zuschnitt, Abschnittsbalken) darunter — beide
     gehören zur linken Achse. ``gesehen`` bekommt je Verlaufskurve Bezeichnung
-    und Punkte — zum Ablesen.
+    und Punkte — zum Ablesen. ``x_text``/``x_null``: Beschriftung der Zeitachse
+    (`kurve`), etwa Uhrzeiten statt Dauern.
     """
     links, rechts = ansicht.achsen(angebot)
 
@@ -170,6 +173,8 @@ def doppelkurve(
         x_bis=x_bis,
         y_spanne_min=l_spanne,
         y_schritt_min=l_schritt,
+        x_text=x_text,
+        x_null=x_null,
         rechts=zweite,
         farbe=l_farbe,
     )

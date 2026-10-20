@@ -113,6 +113,7 @@ from trainingsapp.core.models import HrvRecording
 from trainingsapp.core.tagesbilanz import buendeln
 from trainingsapp.core.timer import ENDE_MARKE
 from trainingsapp.core.timer import name_aus_notiz as abschnittsname
+from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.ui import ausrichtung
 from trainingsapp.ui.components.analyse import Analyse, Analysefenster, verlaufsdaten
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten
@@ -169,6 +170,7 @@ from trainingsapp.ui.components.vollbild import (
     werkzeug,
 )
 from trainingsapp.ui.components.weitergeben import weitergeben
+from trainingsapp.ui.components.zeitachse import achse, achsen_knopf
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
 from trainingsapp.ui.components.zurueck import rueckfrage, zurueck_ziel
 from trainingsapp.ui.state import AppState
@@ -680,6 +682,18 @@ def _aufbauen(
         ),
         segments=[ft.Segment(value=str(s), label=ft.Text(t, size=12)) for s, t in BREITEN],
     )
+
+    def achse_umschalten() -> None:
+        """Zeitachse: Uhrzeit statt Dauer (Ben, 20.10.2026) — dieselbe Einstellung wie live."""
+        einst.achse_uhrzeit = not einst.achse_uhrzeit
+        gespeichert_ = state.hrv_einstellungen()
+        gespeichert_.achse_uhrzeit = einst.achse_uhrzeit
+        state.hrv_einstellungen_setzen(gespeichert_)
+        nur_kurven()
+
+    #: Zwei Knöpfe, weil die Karte und die Kopfzeile des Vollbilds je einen brauchen
+    uhr_knopf = achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten)
+    uhr_knopf_voll = achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten)
     speichern_knopf = ft.FilledButton("Korrektur speichern", icon=ft.Icons.SAVE, disabled=True)
     #: Die fertige Ansicht — beim ersten `zeichnen` gibt es sie noch nicht
     gebaut: list[ft.View] = []
@@ -950,6 +964,7 @@ def _aufbauen(
             vollbild_kurven(x_von, x_bis, hinten)
             return
         strich = m.strich if m.ablesen else None
+        x_text, x_null = zeitachse(x_von, x_bis)
         if z.nur_puls:
             puls = [(t, h) for t, h in z.puls_punkte if x_von <= t <= x_bis]
             rr_box.content = kurve(
@@ -959,7 +974,8 @@ def _aufbauen(
                 x_von=x_von,
                 x_bis=x_bis,
                 y_spanne_min=HF_SPANNE_MIN_BPM,
-                x_text=achse_text,
+                x_text=x_text,
+                x_null=x_null,
             )
         else:
             rr_box.content = kurve(
@@ -969,7 +985,8 @@ def _aufbauen(
                 x_von=x_von,
                 x_bis=x_bis,
                 y_spanne_min=RR_SPANNE_MIN_MS,
-                x_text=achse_text,
+                x_text=x_text,
+                x_null=x_null,
             )
         if mit_analyse:
             analyse.zeichnen(x_von, x_bis, strich=strich)
@@ -1667,6 +1684,12 @@ def _aufbauen(
         text = _uhr(abs(rel)) if abs(rel) >= 60 else f"{int(abs(rel))}s"
         return f"-{text}" if rel < 0 else text
 
+    def zeitachse(x_von: float, x_bis: float) -> tuple[Callable[[float], str], float]:
+        """Beschriftung der Zeitachse: Uhrzeit, wenn eingestellt — sonst die Dauer, bei
+        gebundener Achse ab dem Abschnitt (`achse_text`)."""
+        x_text, x_null = achse(rec.start_utc, x_von, x_bis, uhrzeit=einst.achse_uhrzeit)
+        return x_text or achse_text, x_null
+
     def breite_setzen(
         breite_s: float, mitte: float | None = None, *, zeichnen_: bool = True
     ) -> None:
@@ -1956,6 +1979,7 @@ def _aufbauen(
         uebungen_merken=uebungen_merken,
         katalog=(lambda: uebungs_katalog(state)) if einst.notiz_uebungen else None,
         breite=lambda: fenster.breite_s,
+        zeit_modus=UHR if einst.achse_uhrzeit else DAUER,
     )
 
     def breite_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
@@ -2430,6 +2454,7 @@ def _aufbauen(
             analyse_reihe(), hf_geraet(), ansicht_, atem_modus, vb_speicher, x_von, x_bis
         )
         m.gesehen = {}
+        x_text, x_null = zeitachse(x_von, x_bis)
         rr_box.content = doppelkurve(
             ansicht_,
             daten,
@@ -2442,6 +2467,8 @@ def _aufbauen(
             marken=marken_reihen(x_von, x_bis),
             hinten=hinten,
             gesehen=m.gesehen,
+            x_text=x_text,
+            x_null=x_null,
         )
         etikett_zeichnen(x_von, x_bis)
         if m.ablesen and m.strich is not None:
@@ -2730,6 +2757,7 @@ def _aufbauen(
                     ),
                     links_box,
                     breite_wahl_voll,
+                    uhr_knopf_voll,
                     bindung_voll,
                     chips_voll,
                     rechts_box,
@@ -2873,7 +2901,7 @@ def _aufbauen(
                 ebenen_box,
                 bindung_box,
                 kurvengeste(rr_box),
-                ft.Row(controls=[breite_wahl]),
+                ft.Row(spacing=4, controls=[breite_wahl, uhr_knopf]),
                 chips_box,
                 ablese_box,
                 editor_box,

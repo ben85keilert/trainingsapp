@@ -107,3 +107,13 @@ def test_rechte_achse_ohne_punkte_haelt_den_platz() -> None:
     nur_rechts = kurve([], einheit="RR ms", rechts=Skala([Reihe([(0, 20), (60, 40)])], "ms"))
     assert [label.label.value for label in nur_rechts.left_axis.labels] == [""]
     assert nur_rechts.right_axis.labels[0].label.value != ""
+
+
+def test_x_achse_mit_nullpunkt_fuer_runde_uhrzeiten() -> None:
+    """Uhrzeit-Achse (20.10.2026): Marken an ``x_null + k·Schritt``, Flet bekommt ``baseline_x``."""
+    c = kurve([Reihe([(0, 800), (120, 810)])], einheit="RR ms", x_von=0, x_bis=120, x_null=-7)
+    werte = [label.value for label in c.bottom_axis.labels]
+    assert werte == [8, 23, 38, 53, 68, 83, 98, 113]  # 15-s-Raster, um 7 s versetzt
+    assert c.baseline_x == -7 and c.bottom_axis.label_spacing == 15
+    ohne = kurve([Reihe([(0, 800), (120, 810)])], einheit="RR ms", x_von=0, x_bis=120)
+    assert ohne.baseline_x == 0

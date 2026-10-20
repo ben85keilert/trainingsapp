@@ -246,6 +246,12 @@ class Messlauf:
         return self._uhr() - self.start_mono
 
     @property
+    def achse_utc(self) -> datetime:
+        """Die Wanduhr (UTC) am Nullpunkt der Live-Achse — für eine Achse mit Uhrzeiten
+        (`core.zeitangabe.uhr_text`)."""
+        return self._achse_utc
+
+    @property
     def uhr(self) -> Callable[[], float]:
         """Die Uhr der Quelle (monotonic, beim Simulator schneller) — auch die Uhr einer
         Einheit, zu der diese Messung gehört (`devices.einheit`)."""

@@ -39,6 +39,7 @@ from hrv_core.atmung import ATEMUEBUNG, RUHE
 from trainingsapp.core.hrv_ansicht import LINKS, RECHTS, ROH
 from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER
 from trainingsapp.core.laufend import minuten
+from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.ui.components.analyse import verlaufsdaten
@@ -70,6 +71,7 @@ from trainingsapp.ui.components.vollbild import (
     seitenkopf,
     werkzeug,
 )
+from trainingsapp.ui.components.zeitachse import achse, achsen_knopf
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.messung import ohne_rr, tachogramm_reihen
@@ -204,6 +206,7 @@ def _vollbild(
         uebungen_merken=uebungen_merken,
         katalog=(lambda: uebungs_katalog(state)) if einst.notiz_uebungen else None,
         breite=lambda: fenster.breite_s,
+        zeit_modus=UHR if einst.achse_uhrzeit else DAUER,
     )
 
     def timer_notizen() -> None:
@@ -358,6 +361,7 @@ def _vollbild(
         if st.ablesen and st.strich is not None and x_von <= st.strich <= x_bis:
             marken.append(senkrechte([st.strich], ft.Colors.ON_SURFACE, 1.2, gestrichelt=False))
         st.gesehen = {}
+        x_text, x_null = achse(lauf.achse_utc, x_von, x_bis, uhrzeit=einst.achse_uhrzeit)
         return doppelkurve(
             ansicht,
             daten,
@@ -369,6 +373,8 @@ def _vollbild(
             roh_einheit="PPI ms" if verity else "RR ms",
             marken=marken,
             gesehen=st.gesehen,
+            x_text=x_text,
+            x_null=x_null,
         )
 
     def lage() -> ft.Control:
@@ -482,6 +488,15 @@ def _vollbild(
         state.hrv_einstellungen_setzen(aktuell)
         aktualisieren(erzwingen=True)
 
+    def achse_umschalten() -> None:
+        """Zeitachse: Uhrzeit statt Dauer (Ben, 20.10.2026) — dieselbe Einstellung wie
+        in der Karte und in der Aufzeichnung."""
+        einst.achse_uhrzeit = not einst.achse_uhrzeit
+        aktuell = state.hrv_einstellungen()
+        aktuell.achse_uhrzeit = einst.achse_uhrzeit
+        state.hrv_einstellungen_setzen(aktuell)
+        aktualisieren(erzwingen=True)
+
     def darstellung() -> None:
         a = state.ansicht()
         page.show_dialog(
@@ -537,6 +552,7 @@ def _vollbild(
                 ],
                 on_change=fenster_wechseln,
             ),
+            achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten),
             ft.Container(expand=True),
             rechts_box,
         ],

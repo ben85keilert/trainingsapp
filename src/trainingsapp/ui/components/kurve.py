@@ -314,14 +314,21 @@ def _achse_x(
     bis: float,
     text: Callable[[float], str],
     schritte: Sequence[float],
+    null: float = 0.0,
 ) -> fc.ChartAxis:
+    """Zeitachse mit Marken an Vielfachen des Schritts — gezählt ab ``null``.
+
+    Flet (fl_chart) fragt Beschriftungen nur an ``baseline_x + k · label_spacing`` ab;
+    `kurve` setzt darum dieselbe ``null`` als ``baseline_x``. Mit ``null = −Tagessekunden``
+    des Aufnahmestarts fallen die Marken auf runde Uhrzeiten (`core.zeitangabe`).
+    """
     schritt = x_schritt(max(bis - von, 1e-9), schritte)
     # Keine Marke auf dem linken Rand, und eine am rechten würde abgeschnitten („2:0").
     letzter = bis - 0.04 * (bis - von)
     labels = [
         fc.ChartAxisLabel(value=x, label=ft.Text(text(x), size=10))
-        for x in _vielfache(von, letzter, schritt)
-        if x > von + 1e-9
+        for v in _vielfache(von - null, letzter - null, schritt)
+        if (x := round(v + null, 6)) > von + 1e-9
     ]
     return fc.ChartAxis(
         labels=labels,
@@ -394,10 +401,14 @@ def kurve(
     y_schritt_min: float = 1.0,
     x_text: Callable[[float], str] | None = None,
     x_schritte: Sequence[float] = X_SCHRITTE,
+    x_null: float = 0.0,
     rechts: Skala | None = None,
     farbe: str | None = None,
 ) -> ft.Control:
     """Ein Liniendiagramm, auf der x-Achse meist die Zeit (s).
+
+    ``x_null``: Nullpunkt der Achsenmarken — sie stehen an ``x_null + k · Schritt``
+    (Uhrzeit-Achse: runde Uhrzeiten statt runder Dauern).
 
     Die Werteachse richtet sich nach den Reihen mit ``skala=True``; Punkte der
     übrigen Reihen werden auf ihren Bereich begrenzt (Flet schneidet nicht ab,
@@ -469,7 +480,8 @@ def kurve(
         max_y=oben,
         left_axis=_achse_y(unten, oben, schritt, einheit, farbe=farbe, zahlen=bool(alle)),
         right_axis=rechte_achse,
-        bottom_axis=_achse_x(x0, x1, x_text or _zeit, x_schritte),
+        bottom_axis=_achse_x(x0, x1, x_text or _zeit, x_schritte, x_null),
+        baseline_x=x_null,
         horizontal_grid_lines=fc.ChartGridLines(
             color=ft.Colors.with_opacity(0.15, ft.Colors.ON_SURFACE), width=1, interval=schritt
         ),

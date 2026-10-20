@@ -103,6 +103,9 @@ class HrvEinstellungen:
     nichtlinear_optisch: bool = False
     #: In Notizen zur Messung die Übungen aus Plänen zum Antippen anbieten
     notiz_uebungen: bool = True
+    #: Zeitachse der Kurven mit der Uhrzeit beschriften statt mit der Dauer seit Beginn
+    #: (Ben, 20.10.2026) — gilt live und in der Aufzeichnung, Knopf an der Breitenwahl
+    achse_uhrzeit: bool = False
     #: Atemübung: auch langsames Atmen (unter 8/min) auswerten (`hrv_core.atmung`)
     atemuebung: bool = False
     #: Erweitert: Latenz vor dem Nachrechnen eines losgelassenen Analysefensters (ms)
@@ -137,6 +140,7 @@ class HrvEinstellungen:
             "nichtlinear": self.nichtlinear,
             "nichtlinear_optisch": self.nichtlinear_optisch,
             "notiz_uebungen": self.notiz_uebungen,
+            "achse_uhrzeit": self.achse_uhrzeit,
             "atemuebung": self.atemuebung,
             "nachrechnen_ms": self.nachrechnen_ms,
             "live_spektrum_s": self.live_spektrum_s,
@@ -182,6 +186,7 @@ class HrvEinstellungen:
             nichtlinear=schalter("nichtlinear"),
             nichtlinear_optisch=schalter("nichtlinear_optisch"),
             notiz_uebungen=schalter("notiz_uebungen"),
+            achse_uhrzeit=schalter("achse_uhrzeit"),
             atemuebung=schalter("atemuebung"),
             nachrechnen_ms=auswahl("nachrechnen_ms", NACHRECHNEN_MS),
             live_spektrum_s=auswahl("live_spektrum_s", LIVE_SPEKTRUM_S),

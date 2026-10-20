@@ -59,6 +59,7 @@ from trainingsapp.core.timer import (
     ende_frage,
     messdauer,
 )
+from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.devices.base import DeviceInfo, Verbindung
 from trainingsapp.devices.einheit import Einheitslauf, HrvBaustein, TimerBaustein
 from trainingsapp.devices.messlauf import NUR_PULS_NACH as NUR_PULS_NACH  # Re-Export (H40)
@@ -99,6 +100,7 @@ from trainingsapp.ui.components.titel import (
 )
 from trainingsapp.ui.components.verlauf import FARBEN, fenster_text
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
+from trainingsapp.ui.components.zeitachse import achse, achsen_knopf
 from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
 from trainingsapp.ui.state import AppState
 
@@ -200,8 +202,11 @@ def tachogramm(
     verity: bool,
     marken: list[Reihe] = (),  # type: ignore[assignment]
     hoehe: int = 180,
+    x_text: Callable[[float], str] | None = None,
+    x_null: float = 0.0,
 ) -> ft.Control:
-    """Die Live-Hauptkurve: Rohwerte grau, gewertet farbig, Artefakte rot, dazu ``marken``."""
+    """Die Live-Hauptkurve: Rohwerte grau, gewertet farbig, Artefakte rot, dazu ``marken``.
+    ``x_text``/``x_null``: Beschriftung der Zeitachse (`kurve`)."""
     return kurve(
         [*tachogramm_reihen(lauf, x_von, x_bis, korrigiert=korrigiert), *marken],
         einheit="PPI ms" if verity else "RR ms",
@@ -209,6 +214,8 @@ def tachogramm(
         x_von=x_von,
         x_bis=x_bis,
         y_spanne_min=RR_SPANNE_MIN_MS,
+        x_text=x_text,
+        x_null=x_null,
     )
 
 
@@ -266,6 +273,8 @@ def pulskurve(
     *,
     marken: list[Reihe] = (),  # type: ignore[assignment]
     hoehe: int = 180,
+    x_text: Callable[[float], str] | None = None,
+    x_null: float = 0.0,
 ) -> ft.Control:
     """Die Hauptkurve eines reinen Pulsgebers: die Herzfrequenz des Geräts in bpm."""
     punkte = [(t, h) for t, h in lauf.live.hf_reihe() if x_von <= t <= x_bis]
@@ -276,6 +285,8 @@ def pulskurve(
         x_von=x_von,
         x_bis=x_bis,
         y_spanne_min=HF_SPANNE_MIN_BPM,
+        x_text=x_text,
+        x_null=x_null,
     )
 
 
@@ -874,6 +885,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         quelle=state.notiz_uebungen_quelle,
         uebungen_merken=uebungen_merken,
         katalog=(lambda: uebungs_katalog(state)) if einst.notiz_uebungen else None,
+        zeit_modus=UHR if einst.achse_uhrzeit else DAUER,
     )
 
     def timer_notizen() -> None:
@@ -1323,8 +1335,16 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         )
 
     def hauptkurve(x_von: float, x_bis: float) -> ft.Control:
+        x_text, x_null = achse(lauf.achse_utc, x_von, x_bis, uhrzeit=einst.achse_uhrzeit)
         if modus["puls"]:
-            return pulskurve(lauf, x_von, x_bis, marken=notizfeld.marken(x_von, x_bis))
+            return pulskurve(
+                lauf,
+                x_von,
+                x_bis,
+                marken=notizfeld.marken(x_von, x_bis),
+                x_text=x_text,
+                x_null=x_null,
+            )
         return tachogramm(
             lauf,
             x_von,
@@ -1332,7 +1352,14 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             korrigiert=einst.korrigiert,
             verity=verity,
             marken=notizfeld.marken(x_von, x_bis),
+            x_text=x_text,
+            x_null=x_null,
         )
+
+    def achse_umschalten() -> None:
+        """Zeitachse: Uhrzeit statt Dauer — gilt auch in der Aufzeichnung (Ben, 20.10.2026)."""
+        einstellung_merken(achse_uhrzeit=not einst.achse_uhrzeit)
+        aktualisieren(erzwingen=True)
 
     def kurven_titel() -> str:
         if modus["puls"]:
@@ -1434,13 +1461,21 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 ),
             ],
         ),
-        ft.SegmentedButton(
-            selected=[str(fenster.breite_s if fenster.breite_s in LIVE_FENSTER else 120)],
-            show_selected_icon=False,
-            segments=[
-                ft.Segment(value=str(s), label=ft.Text(fenster_text(s))) for s in LIVE_FENSTER
+        ft.Row(
+            spacing=4,
+            controls=[
+                ft.SegmentedButton(
+                    selected=[str(fenster.breite_s if fenster.breite_s in LIVE_FENSTER else 120)],
+                    show_selected_icon=False,
+                    expand=True,
+                    segments=[
+                        ft.Segment(value=str(s), label=ft.Text(fenster_text(s)))
+                        for s in LIVE_FENSTER
+                    ],
+                    on_change=fenster_wechseln,
+                ),
+                achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten),
             ],
-            on_change=fenster_wechseln,
         ),
         korrigiert_schalter,
         lage_box,

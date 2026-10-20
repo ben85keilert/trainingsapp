@@ -2,14 +2,22 @@
 
 Zugeklappt ist es eine Zeile: „NOTIZEN · 3" und „+ Notiz". Aufgeklappt zeigt
 es die Liste; ein Tipp auf eine Notiz öffnet sie zum Bearbeiten und rückt
-ihre Stelle in die Kurve. Die Eingabe hat drei Zeilen:
+ihre Stelle in die Kurve. Die Eingabe hat vier Zeilen:
 
 1. Zeitpunkt — beim Öffnen **eingefroren** auf den Moment des Tippens (das
    Ereignis passierte, als man „+ Notiz" drückte, nicht als man fertig
-   getippt hat). Live lässt er sich auch mitlaufen lassen.
+   getippt hat). Live lässt er sich auch mitlaufen lassen. Das Feld nimmt die
+   Zeit als **Dauer** („2:15“) oder als **Uhrzeit** („14:03:05“) entgegen —
+   wer eine Notiz nachträgt, hat oft nur die Uhr; der Knopf daneben zeigt die
+   jeweils andere Schreibweise und schaltet um (`core.zeitangabe`).
 2. Zeit setzen — „Jetzt" (live), „In Kurve" (der nächste Tipp in die Kurve
-   setzt den Zeitpunkt), ±1 s / ±5 s zum Verschieben.
-3. Text, Speichern, Abbrechen (beim Bearbeiten: Löschen).
+   setzt den Zeitpunkt), „Übungen" (unten).
+3. ±1 s / ±5 s zum Verschieben.
+4. Text, Speichern, Abbrechen (beim Bearbeiten: Löschen).
+
+Eine **neue** Notiz entsteht oben, über der Liste. Eine **bestehende** öffnet
+sich direkt unter ihrer Zeile (Ben, 20.10.2026: bei vielen Notizen sah man die
+Eingabe oben sonst nicht) — die Liste bleibt im Blick, die Zeile ist markiert.
 
 Marken stehen immer in der Hauptkurve (`marken`). Im Vollbild zeigt ein Tipp
 auf eine Marke ihr **Etikett** (`bei`, `etikett`): Zeit und Text in der Kurve,
@@ -40,11 +48,24 @@ from hrv_core.ereignisse import Zeitbezug, notiz, sortiert
 from trainingsapp.core.einheit import marke_angaben
 from trainingsapp.core.kurzcode import genannte, kurzcode
 from trainingsapp.core.laufend import minuten
+from trainingsapp.core.zeitangabe import (
+    DAUER,
+    UHR,
+    dauer_lesen,
+    dauer_text,
+    uhr_lesen,
+    uhr_text,
+    wand_aus_x,
+    x_aus_wand,
+)
 from trainingsapp.ui.components.kurve import Reihe
 from trainingsapp.ui.farben import FARBEN
 
 #: Schritte zum Verschieben (s)
 SCHRITTE = (-5, -1, 1, 5)
+
+#: Was der Hinweis sagt, wenn sich die eingetippte Zeit nicht lesen lässt
+ZEIT_UNLESBAR = "Zeit nicht lesbar — 2:15 oder 14:03:05"
 
 
 #: Quelle „Alle Übungen" in der Auswahl
@@ -122,6 +143,8 @@ class Notizfeld:
         uebungen: liefert die `UebungsQuelle`-n zum Antippen; ``None`` = aus.
         uebungen_offen, quelle, uebungen_merken: ob die Namen eingeblendet sind
             und aus welcher Quelle — überleben den Neuaufbau (``(offen, quelle)``).
+        zeit_modus: wie das Zeitfeld der Eingabe anfangs schreibt — `DAUER` („2:15“)
+            oder `UHR` („14:03:05“); die Person schaltet jederzeit um.
     """
 
     def __init__(
@@ -143,6 +166,7 @@ class Notizfeld:
         katalog: Callable[[], dict[str, str]] | None = None,
         breite: Callable[[], float] | None = None,
         ausblenden: Callable[[dict], bool] | None = None,
+        zeit_modus: str = DAUER,
     ) -> None:
         self._zeitbezug = zeitbezug
         self._ereignisse = ereignisse
@@ -170,6 +194,10 @@ class Notizfeld:
         self.x = 0.0
         self.eingefroren = True
         self.waehlen = False
+        #: `DAUER` oder `UHR` — was im Zeitfeld steht; der Knopf daneben zeigt das andere
+        self.zeit_modus = zeit_modus if zeit_modus in (DAUER, UHR) else DAUER
+        #: Die zuletzt eingetippte Zeit ließ sich nicht lesen — der Hinweis sagt es einmal
+        self._zeit_fehler = False
         self._text = ft.TextField(
             hint_text="Was ist passiert?",
             dense=True,
@@ -180,7 +208,23 @@ class Notizfeld:
             expand=True,
             on_submit=lambda _: self.uebernehmen(),
         )
-        self._zeit = ft.Text(size=13, weight=ft.FontWeight.W_600)
+        self._zeit_feld = ft.TextField(
+            dense=True,
+            width=100,
+            text_size=13,
+            text_align=ft.TextAlign.CENTER,
+            content_padding=ft.Padding.symmetric(horizontal=6, vertical=6),
+            keyboard_type=ft.KeyboardType.DATETIME,
+            tooltip="Zeit eintippen — als Dauer (2:15) oder Uhrzeit (14:03:05)",
+            on_submit=lambda _: self.zeit_eingeben(),
+            on_blur=lambda _: self.zeit_eingeben(),
+            on_focus=lambda _: self._zeit_fokus(),
+        )
+        self._zeit_wechsel = ft.TextButton(
+            icon=ft.Icons.SWAP_HORIZ,
+            on_click=lambda: self.zeit_modus_wechseln(),
+            style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=6)),
+        )
         self._zustand = ft.Text(size=11, opacity=0.65)
         self._inhalt = ft.Column(spacing=4)
         self.control = ft.Container(content=self._inhalt)
@@ -243,6 +287,68 @@ class Notizfeld:
         else:
             self.x = self._jetzt_x()
             self.eingefroren = True
+        self._aendern(kurve=True)
+
+    # -- Zeit eintippen: Dauer oder Uhrzeit (Ben, 20.10.2026) -------------------
+
+    def _zeit_modus(self, zb: Zeitbezug) -> str:
+        """Der wirksame Modus — Uhrzeit nur, wenn die Aufnahme eine Startzeit kennt."""
+        return UHR if self.zeit_modus == UHR and zb.start_utc is not None else DAUER
+
+    def zeit_modus_wechseln(self) -> None:
+        self.zeit_modus = DAUER if self.zeit_modus == UHR else UHR
+        self._zeit_fehler = False
+        self._aendern()
+
+    def _zeit_fokus(self) -> None:
+        """Wer ins Zeitfeld tippt, will eine Zeit setzen — live hält die Eingabe an."""
+        if self.live and not self.eingefroren:
+            self.x = self._jetzt_x()
+            self.eingefroren = True
+            self._aendern(kurve=True)
+
+    def zeit_lesen(self, text: str) -> float | None:
+        """Die Stelle auf der Kurve zu einem getippten Text — nach dem Modus des Felds;
+        ``None``, wenn er sich nicht lesen lässt."""
+        zb = self._zeitbezug()
+        if zb is None:
+            return None
+        if self._zeit_modus(zb) == UHR:
+            wand = uhr_lesen(text, zb.start_utc)
+            return None if wand is None else x_aus_wand(zb, wand)
+        dauer = dauer_lesen(text)
+        if dauer is None:
+            return None
+        # Live zählt die Dauer ab Aufnahmestart (Wanduhr), nachträglich ist sie die Achse —
+        # wie die Zeile in der Liste (`_zeit_von`)
+        return x_aus_wand(zb, dauer) if self.live else dauer
+
+    def zeit_eingeben(self) -> None:
+        """Eingabe oder Verlassen des Zeitfelds: den Zeitpunkt übernehmen und hinrücken.
+
+        Unverändert (etwa nach Eingabe *und* Verlassen) passiert nichts; Unlesbares
+        bleibt stehen und der Hinweis sagt, wie es geht.
+        """
+        if self.bearbeite is None or self._zeitbezug() is None:
+            return
+        text = self._zeit_feld.value or ""
+        if text.strip() == self._zeit_anzeige():
+            if self._zustand.value == ZEIT_UNLESBAR:  # Hinweis nach der Verbesserung weg
+                self._aendern()
+            return
+        x = self.zeit_lesen(text)
+        if x is None:
+            self._zeit_fehler = True
+            self._aendern()
+            return
+        self._zeit_fehler = False
+        if abs(x - self._x_der_eingabe()) < 0.5:
+            self._aendern()
+            return
+        self.x = x
+        self.eingefroren = True
+        self.waehlen = False
+        self._zeigen(x)
         self._aendern(kurve=True)
 
     def waehlen_umschalten(self) -> None:
@@ -447,11 +553,12 @@ class Notizfeld:
         self._aendern()
 
     def tick(self) -> None:
-        """Live: die mitlaufende Zeit der Eingabe auffrischen (nur das Textfeld)."""
+        """Live: die mitlaufende Zeit der Eingabe auffrischen (nur Zeitfeld und Knopf)."""
         if self.bearbeite is not None and not self.eingefroren:
             self._zeit_texte()
             with contextlib.suppress(Exception):
-                self._zeit.update()
+                self._zeit_feld.update()
+                self._zeit_wechsel.update()
 
     # -- Marken ------------------------------------------------------------------
 
@@ -511,17 +618,41 @@ class Notizfeld:
         if kurve:
             self._neu_zeichnen()
 
+    def _zeit_schreibweisen(self) -> tuple[str, str]:
+        """``(Dauer, Uhrzeit)`` der Eingabe — die Uhrzeit leer ohne Startzeit."""
+        zb = self._zeitbezug()
+        if zb is None:
+            return "", ""
+        x = self._x_der_eingabe()
+        wand = wand_aus_x(zb, x)
+        return dauer_text(wand if self.live else x), uhr_text(zb.start_utc, wand)
+
+    def _zeit_anzeige(self) -> str:
+        """Was im Zeitfeld steht, solange niemand tippt."""
+        zb = self._zeitbezug()
+        if zb is None:
+            return ""
+        dauer, uhr = self._zeit_schreibweisen()
+        return uhr if self._zeit_modus(zb) == UHR else dauer
+
     def _zeit_texte(self) -> None:
         zb = self._zeitbezug()
-        x = self._x_der_eingabe()
         if zb is None:
-            self._zeit.value = ""
+            self._zeit_feld.value = ""
+            self._zeit_wechsel.visible = False
             return
-        anker = zb.anker(x)
-        seit = float(anker.get("t_wall_s") or 0.0) if self.live else x
-        uhr = zb.uhr(anker)
-        self._zeit.value = f"{_uhr(seit)}" + (f" · {uhr}" if uhr else "")
-        if self.waehlen:
+        dauer, uhr = self._zeit_schreibweisen()
+        uhr_modus = self._zeit_modus(zb) == UHR
+        if not self._zeit_fehler:  # Unlesbares bleibt zum Verbessern stehen
+            self._zeit_feld.value = uhr if uhr_modus else dauer
+        # Der Knopf zeigt die andere Schreibweise — ein Tipp tauscht
+        self._zeit_wechsel.content = dauer if uhr_modus else uhr
+        self._zeit_wechsel.tooltip = "Als Dauer eingeben" if uhr_modus else "Als Uhrzeit eingeben"
+        self._zeit_wechsel.visible = bool(uhr)
+        if self._zeit_fehler:
+            self._zustand.value = ZEIT_UNLESBAR
+            self._zeit_fehler = False
+        elif self.waehlen:
             self._zustand.value = "Tippe in die Kurve"
         elif self.live and not self.eingefroren:
             self._zustand.value = "läuft mit"
@@ -539,7 +670,7 @@ class Notizfeld:
         self._neu_knopf = ft.TextButton(
             "Notiz", icon=ft.Icons.ADD_COMMENT_OUTLINED, on_click=lambda: self.neu()
         )
-        kopf = ft.Row(
+        self._kopf = ft.Row(
             spacing=0,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
@@ -561,6 +692,8 @@ class Notizfeld:
         self._waehlen_knopf = ft.TextButton(
             "In Kurve", icon=ft.Icons.TOUCH_APP_OUTLINED, on_click=lambda: self.waehlen_umschalten()
         )
+        # Zeile 2: Zeit setzen und Übungen; Zeile 3: Verschieben (Ben, 20.10.2026 —
+        # vorher brach eine Zeile mit allem am Handy um)
         knoepfe: list[ft.Control] = []
         if self.live:
             knoepfe.append(
@@ -569,7 +702,6 @@ class Notizfeld:
                 )
             )
         knoepfe.append(self._waehlen_knopf)
-        knoepfe += [_schritt(d, self.verschieben) for d in SCHRITTE]
         self._uebungen_knopf = ft.TextButton(
             "Übungen",
             icon=ft.Icons.FITNESS_CENTER,
@@ -578,6 +710,7 @@ class Notizfeld:
             visible=self._uebungen is not None,
         )
         knoepfe.append(self._uebungen_knopf)
+        schritte: list[ft.Control] = [_schritt(d, self.verschieben) for d in SCHRITTE]
         self._quelle_wahl = ft.Dropdown(
             dense=True,
             text_size=13,
@@ -609,12 +742,14 @@ class Notizfeld:
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
                             ft.Icon(ft.Icons.SCHEDULE, size=16, color=FARBEN["notiz_neu"]),
-                            self._zeit,
-                            self._zustand,
+                            self._zeit_feld,
+                            self._zeit_wechsel,
+                            ft.Container(content=self._zustand, expand=True),
                             self._einfrieren,
                         ],
                     ),
                     ft.Row(spacing=0, wrap=True, controls=knoepfe),
+                    ft.Row(spacing=0, wrap=True, controls=schritte),
                     self._uebungs_box,
                     ft.Row(
                         spacing=0,
@@ -639,7 +774,7 @@ class Notizfeld:
         )
         self._hinweis = ft.Text(size=12, opacity=0.6)
         self._liste = ft.Column(spacing=0)
-        self._inhalt.controls = [kopf, self._eingabe_box, self._hinweis, self._liste]
+        self._inhalt.controls = [self._kopf, self._eingabe_box, self._hinweis, self._liste]
 
     def _aufbauen(self) -> None:
         zb = self._zeitbezug()
@@ -652,7 +787,16 @@ class Notizfeld:
         self._neu_knopf.tooltip = None if verfuegbar else "Notizen gehören zu einer Aufnahme"
 
         offen_eingabe = self.bearbeite is not None
+        # Eine bestehende Notiz öffnet sich unter ihrer Zeile, eine neue oben
+        in_liste = offen_eingabe and self.offen and verfuegbar and self.bearbeite in sichtbar
         self._eingabe_box.visible = offen_eingabe
+        self._eingabe_box.margin = ft.Margin.only(left=12, top=2, bottom=6) if in_liste else None
+        self._inhalt.controls = [
+            self._kopf,
+            *([] if in_liste else [self._eingabe_box]),
+            self._hinweis,
+            self._liste,
+        ]
         if offen_eingabe:
             self._zeit_texte()
             self._einfrieren.icon = (
@@ -677,9 +821,13 @@ class Notizfeld:
             else "Noch keine Notiz. „+ Notiz“ friert den Zeitpunkt sofort ein."
         )
         self._liste.visible = self.offen and verfuegbar
-        self._liste.controls = (
-            [self._zeile(i, liste[i], zb) for i in sichtbar] if zb is not None else []
-        )
+        zeilen: list[ft.Control] = []
+        if zb is not None:
+            for i in sichtbar:
+                zeilen.append(self._zeile(i, liste[i], zb))
+                if in_liste and i == self.bearbeite:
+                    zeilen.append(self._eingabe_box)
+        self._liste.controls = zeilen
 
     def _uebungen_fuellen(self) -> None:
         """Die Namen der gewählten Quelle — klein und dicht, damit zehn Übungen passen."""

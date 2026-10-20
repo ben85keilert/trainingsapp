@@ -259,8 +259,12 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
     pversion = kopf.get("version")
     if pversion is not None and not _ganzzahl(pversion):
         raise PaketFehler("Die Paketversion muss eine ganze Zahl sein.")
+    try:
+        pid = _id_lesen(kopf.get("id"), "des Pakets")
+    except ValueError as grund:
+        raise PaketFehler(f"Der Paketkopf ist unlesbar: {grund}.") from None
     paket = Paket(
-        id=str(kopf.get("id") or "").strip() or paket_id(name),
+        id=pid or paket_id(name),
         name=name,
         beschreibung=str(kopf.get("beschreibung") or "").strip(),
         version=pversion,
@@ -322,7 +326,7 @@ def _kurs_lesen(eintrag: Any, paket: str, schluessel: Mapping[str, str]) -> Kurs
     if not name:
         raise ValueError("der Name fehlt")
     key = str(eintrag.get("key") or "").strip()
-    kid = str(eintrag.get("id") or "").strip() or kurs_id(paket, key or name)
+    kid = _id_lesen(eintrag.get("id"), "des Kurses") or kurs_id(paket, key or name)
     freischaltung = str(eintrag.get("freischaltung") or RUECKFRAGE)
     if freischaltung not in FREISCHALTUNGEN:
         raise ValueError(f"unbekannte Freischaltung „{freischaltung}“")
@@ -336,7 +340,7 @@ def _kurs_lesen(eintrag: Any, paket: str, schluessel: Mapping[str, str]) -> Kurs
             raise ValueError(f"Kapitel {nr}: der Titel fehlt")
         kkey = str(roh.get("key") or "").strip() or str(nr)
         k = Kapitel(
-            id=str(roh.get("id") or "").strip() or kapitel_id(kid, kkey),
+            id=_id_lesen(roh.get("id"), f"von Kapitel {nr}") or kapitel_id(kid, kkey),
             kurs_id=kid,
             order=nr - 1,
             titel=titel,
@@ -410,7 +414,7 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
     _werte_pruefen(default_target, "default_target")
     felder = eintrag.get("default_felder")
     variante = str(eintrag.get("variante_von") or "").strip()
-    uid = str(eintrag.get("id") or "").strip() or uebung_id(paket, key or name)
+    uid = _id_lesen(eintrag.get("id"), "der Übung") or uebung_id(paket, key or name)
     return (
         Exercise(
             id=uid,
@@ -469,6 +473,36 @@ def _timer_lesen(roh: Any, uebung: str) -> list[dict[str, Any]]:
             p.id = str(uuid.uuid5(NAMENSRAUM, f"{uebung}/timer/{i}"))
         profile.append(p.als_dict())
     return profile
+
+
+#: Eine ID aus einem Paket: Buchstaben, Ziffern, „-“ und „_“, 1–64 Zeichen — UUIDs erfüllen
+#: das; `/`, `?` oder Leerzeichen brächen die Routen (`/uebung/<id>/…`), Leeres oder
+#: Kilobytes landeten in der Datenbank (S6)
+_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _id_lesen(roh: Any, was: str) -> str | None:
+    """Die ``id`` eines Pakets, einer Übung, eines Kurses oder Kapitels — ``None``, wenn
+    keine dasteht (dann entsteht sie aus dem Schlüssel), sonst geprüft gegen `_ID`.
+
+    >>> _id_lesen("2c1194ea-67ba-536d-aa7d-bf74bc3c73d4", "des Pakets")
+    '2c1194ea-67ba-536d-aa7d-bf74bc3c73d4'
+    >>> _id_lesen(None, "der Übung") is None, _id_lesen("  ", "der Übung") is None
+    (True, True)
+    >>> _id_lesen("baum/tief?x=1", "der Übung")  # doctest: +ELLIPSIS
+    Traceback (most recent call last):
+    ValueError: die ID der Übung „baum/tief?x=1“ darf nur Buchstaben, Ziffern, ...
+    """
+    wert = str(roh or "").strip()
+    if not wert:
+        return None
+    if not _ID.match(wert):
+        kurz = wert if len(wert) <= 40 else wert[:40] + "…"
+        raise ValueError(
+            f"die ID {was} „{kurz}“ darf nur Buchstaben, Ziffern, „-“ und „_“ enthalten "
+            "(1–64 Zeichen)"
+        )
+    return wert
 
 
 def _ganzzahl(wert: Any) -> bool:

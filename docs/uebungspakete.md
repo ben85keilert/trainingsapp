@@ -176,7 +176,7 @@ Je Übung:
 | Feld | Pflicht | Bedeutung |
 |---|---|---|
 | `name` | ja | |
-| `id` | nein | schreibt der Export; behält die Übung auf allen Geräten |
+| `id` | nein | schreibt der Export; behält die Übung auf allen Geräten. Jede `id` im Paket (Paket, Übung, Kurs, Kapitel) besteht nur aus Buchstaben, Ziffern, `-` und `_`, 1–64 Zeichen (`^[A-Za-z0-9_-]{1,64}$`, UUIDs erfüllen das) — sonst lehnt der Import das Paket ab |
 | `key` | nein | für Pakete von Hand: ID = UUIDv5 aus Paket-ID und Schlüssel (ohne `id` und `key` zählt der Name) |
 | `description`, `icon_key` | nein | Symbolnamen wie im Editor (`ui/components/icons.py`) |
 | `typen`, `regionen` | nein | Listen von Namen |

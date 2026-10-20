@@ -978,6 +978,37 @@ def test_medien_mit_fremdem_schema_fallen_beim_import_weg() -> None:
     ]
 
 
+def test_ids_aus_paketen_sind_eng_gefasst() -> None:
+    """S6: `/`, `?`, Leerzeichen oder Kilobytes in einer ID brächen Routen und Datenbank —
+    `^[A-Za-z0-9_-]{1,64}$`, sonst `PaketFehler` mit Hinweis; UUIDs und Schlüssel gehen."""
+    kaputt = ["baum/tief", "a b", "x?y=1", "ä", "i" * 65, "<script>"]
+    for falsch in kaputt:
+        with pytest.raises(PaketFehler, match="ID des Pakets"):
+            paket_lesen(qigong(id=falsch))
+        roh = qigong()
+        roh["exercises"][0]["id"] = falsch
+        with pytest.raises(PaketFehler, match="ID der Übung"):
+            paket_lesen(roh)
+        kurs = {"key": "k", "name": "K", "kapitel": [{"key": "a", "titel": "A", "text": "x"}]}
+        roh = qigong()
+        roh["kurse"] = [kurs | {"id": falsch}]
+        with pytest.raises(PaketFehler, match="ID des Kurses"):
+            paket_lesen(roh)
+        roh = qigong()
+        roh["kurse"] = [kurs | {"kapitel": [kurs["kapitel"][0] | {"id": falsch}]}]
+        with pytest.raises(PaketFehler, match="ID von Kapitel 1"):
+            paket_lesen(roh)
+    # Gültig: UUIDs, Schlüssel, 64 Zeichen; leer = keine ID (dann aus dem Schlüssel)
+    roh = qigong(id="2c1194ea-67ba-536d-aa7d-bf74bc3c73d4")
+    roh["exercises"][0]["id"] = "i" * 64
+    roh["exercises"][1]["id"] = ""
+    inhalt = paket_lesen(roh)
+    assert inhalt.paket.id == "2c1194ea-67ba-536d-aa7d-bf74bc3c73d4"
+    from trainingsapp.core.pakete import uebung_id
+
+    assert [u.id for u in inhalt.uebungen] == ["i" * 64, uebung_id(inhalt.paket.id, "baum_tief")]
+
+
 def test_kursbedingung_mit_unendlichem_soll_wird_abgelehnt() -> None:
     """K17: `int(inf)` stürzte beim Anzeigen des Kurses ab."""
     for soll in (1e400, "1e400", float("nan")):

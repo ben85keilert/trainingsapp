@@ -16,7 +16,8 @@ geändert hat, bleibt beim Update ohnehin (`data/pakete.py`, Drei-Wege-Abgleich)
 
 Dieses Modul kennt kein flet und keine Datenbank; die Abfrage (`urllib`) lässt
 sich für Tests durch eine eigene ``laden``-Funktion ersetzen — wie in
-`core/update.py`. Die Oberfläche ruft es per ``asyncio.to_thread`` auf.
+`core/update.py`. Der Öffner, der Weiterleitungen nur auf https:// folgt, ist
+mit ihm geteilt (`core/netz.py`). Die Oberfläche ruft es per ``asyncio.to_thread`` auf.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from datetime import datetime
 from typing import Any, Final
 
 from .models import jetzt
+from .netz import OEFFNER, verschluesselt
 from .pakete import (
     GRUNDAUSSTATTUNG,
     MAX_PAKET_BYTES,
@@ -109,9 +111,7 @@ def url_pruefen(url: str) -> str | None:
     url = url.strip()
     if not url:
         return "Keine Adresse."
-    # http:// nur zum eigenen Rechner — zum Ausprobieren mit `python -m http.server`
-    lokal = url.startswith(("http://localhost", "http://127.0.0.1", "http://[::1]"))
-    if not url.startswith("https://") and not lokal:
+    if not verschluesselt(url):  # http:// nur zum eigenen Rechner (`netz.verschluesselt`)
         return "Nur https:// — die Verbindung muss verschlüsselt sein."
     if " " in url or len(url) > 2000:
         return "Das ist keine gültige Adresse."
@@ -180,24 +180,11 @@ def index_lesen(daten: Any, quelle_url: str) -> tuple[str, list[IndexEintrag]]:
     return name, eintraege
 
 
-class _NurHttps(urllib.request.HTTPRedirectHandler):
-    """Weiterleitungen nur auf https:// — `urllib` folgte sonst auch nach http:// (A9)."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if url_pruefen(newurl) is not None:
-            raise urllib.error.HTTPError(
-                newurl, code, "Weiterleitung nur auf https://", headers, fp
-            )
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
-_OEFFNER = urllib.request.build_opener(_NurHttps)
-
-
 def _laden(url: str) -> bytes:
-    """Holt bis zu `MAX_PAKET_BYTES` + 1 — mehr liest niemand."""
+    """Holt bis zu `MAX_PAKET_BYTES` + 1 — mehr liest niemand; Weiterleitungen nur auf
+    https:// (`netz.OEFFNER`, A9)."""
     anfrage = urllib.request.Request(url, headers={"User-Agent": "trainingsapp-pakete"})
-    with _OEFFNER.open(anfrage, timeout=_ZEITLIMIT_S) as antwort:
+    with OEFFNER.open(anfrage, timeout=_ZEITLIMIT_S) as antwort:
         return antwort.read(MAX_PAKET_BYTES + 1)
 
 

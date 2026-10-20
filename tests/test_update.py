@@ -21,6 +21,30 @@ from trainingsapp.core.update import (
 )
 
 
+def test_laden_geht_ueber_den_https_oeffner(monkeypatch) -> None:
+    """S8: `_laden` nutzt `netz.OEFFNER` (Weiterleitungen nur auf https://), nicht `urlopen`."""
+    import contextlib
+    import io
+
+    from trainingsapp.core import update
+
+    gesehen: list[tuple[str, float | None]] = []
+
+    class Oeffner:
+        @contextlib.contextmanager
+        def open(self, anfrage, timeout=None):
+            gesehen.append((anfrage.full_url, timeout))
+            assert anfrage.get_header("User-agent") == "trainingsapp-update"
+            yield io.BytesIO(b'[{"tag_name": "v1"}]')
+
+    monkeypatch.setattr(update, "OEFFNER", Oeffner())
+    monkeypatch.setattr(
+        update.urllib.request, "urlopen", lambda *a, **k: pytest.fail("urlopen umgangen")
+    )
+    assert update._laden(API_URL) == [{"tag_name": "v1"}]
+    assert gesehen == [(API_URL, update._ZEITLIMIT_S)]
+
+
 def _release(tag: str, assets: list[str], **extra) -> dict:
     return {
         "tag_name": tag,

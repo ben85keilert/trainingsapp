@@ -11,7 +11,8 @@ am App Store vorbei.
 Stufe 2 (Download und Installation in der App selbst, Kotlin-Erweiterung mit
 `REQUEST_INSTALL_PACKAGES`) ist vermerkt in `docs/offene_fragen.md` (A8).
 
-Dieses Modul kennt kein flet und spricht nur per `urllib` mit GitHub; die
+Dieses Modul kennt kein flet und spricht nur per `urllib` mit GitHub — über den
+Öffner aus `core/netz.py`, der Weiterleitungen nur auf https:// folgt (S8); die
 Abfrage lässt sich für Tests durch eine eigene `laden`-Funktion ersetzen.
 Pre-Releases zählen mit — bisher sind alle Releases als solche markiert.
 """
@@ -25,6 +26,8 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final
+
+from .netz import OEFFNER
 
 #: Wo die Releases liegen (öffentlich, ohne Anmeldung lesbar).
 REPO: Final[str] = "ben85keilert/trainingsapp"
@@ -124,7 +127,7 @@ def _laden(url: str) -> Any:
             "User-Agent": "trainingsapp-update",
         },
     )
-    with urllib.request.urlopen(anfrage, timeout=_ZEITLIMIT_S) as antwort:
+    with OEFFNER.open(anfrage, timeout=_ZEITLIMIT_S) as antwort:
         daten = antwort.read(_MAX_ANTWORT_BYTES + 1)
     if len(daten) > _MAX_ANTWORT_BYTES:
         raise UpdateFehler("Die Antwort von GitHub ist unerwartet groß")

@@ -47,7 +47,7 @@ from hrv_core.trends import KENNZAHLEN, aktuell, atmung_aktuell, titel
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM, ROH_MAX_MS, ROH_MIN_MS, Ansicht
 from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, HrvEinstellungen
-from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
+from trainingsapp.core.hrv_export import adresse_maskieren, export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.core.models import jetzt as utc_jetzt
@@ -119,7 +119,8 @@ def diagnose_blatt(page: ft.Page, lauf: Messlauf) -> ft.BottomSheet:
     zeilen = _protokoll(lauf, 40)
 
     async def teilen() -> None:
-        text = lauf.diagnose()
+        # Verlässt das Gerät — darum ohne Bluetooth-Adresse, wie die Exportkopie (S10)
+        text = adresse_maskieren(lauf.diagnose())
         if not text:
             page.show_dialog(ft.SnackBar(ft.Text("Noch keine Einträge im Protokoll.")))
             return
@@ -1514,7 +1515,8 @@ def _liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
         return handler
 
     async def alle_exportieren() -> None:
-        """Alle Aufzeichnungen dieses Profils samt Beiwerk als ein ZIP."""
+        """Alle Aufzeichnungen dieses Profils samt Beiwerk als ein ZIP — ohne
+        Bluetooth-Adressen (`core.hrv_export.exportkopie`, S10)."""
         basis = messungenverzeichnis()
         dateien = [d for a in eintraege for d in zugehoerige_dateien(basis / a.file_path)]
         if not dateien:

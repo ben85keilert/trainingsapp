@@ -38,9 +38,7 @@
   Kachelkoordinaten); die Update-Prüfung fragt beim Start die GitHub-Releases der
   App und die eingetragenen Paketquellen nur nach Versionsnummern — übertragen
   werden IP-Adresse und der Name der App (`docs/uebungspakete.md`, „Paketquellen“;
-  seit 16.10.2026). Ein Paket nimmt Updates nur von der Quelle an, die es zuletzt
-  lieferte (seit 20.10.2026, Sicherheitsdurchsicht S3) — eine fremde Quelle kann
-  mitgelieferte oder bereits installierte Inhalte nicht ersetzen.
+  seit 16.10.2026).
 - **Fotos und Videos an Einträgen** (seit 20.10.2026, `docs/plan_anhaenge.md`): mit der
   Kamera der App aufgenommen, als nackte JPEG/MP4-Bytes ohne Ortsstempel in den
   app-privaten Ordner `Anhaenge/` geschrieben; nicht in Galerie, Export, Diagnose,
@@ -48,6 +46,13 @@
   Sicherheitsdurchsicht S4). Hinaus nur über „Teilen“ am einzelnen Anhang nach Rückfrage.
   Drei Aufnahmequalitäten, mittlere als Vorgabe — Datensparsamkeit auch beim Speicherplatz;
   Speicherübersicht und endgültiges Löschen in Einstellungen → Anhänge.
+- **Bluetooth-Adresse des Sensors** (seit 20.10.2026, Sicherheitsdurchsicht S10): Die
+  Messdatei auf dem Gerät hält die Adresse (MAC/UUID) des Brustgurts oder der Uhr fest,
+  damit sich das Gerät wiedererkennen lässt. Sie ist eine Gerätekennung, über die sich
+  Messungen einer Person zusammenführen ließen — darum verlässt sie das Gerät nicht:
+  Der Export einer Messung, der Forschungsexport einer Einheit und das geteilte
+  Verbindungsprotokoll enthalten die Kopie ohne das Feld `adresse` bzw. mit maskierter
+  Adresse (`core/hrv_export.py`, `docs/kompatibilitaet.md`, „Export“).
 - **Vorgabe-Paketquelle** `trainingsapp.osteo-ebert.de` (seit 16.10.2026; Übergang,
   bis die Website der App steht): ein angemieteter Server in Deutschland, den der
   Hersteller selbst betreibt; Anbieter Hetzner Online GmbH, mit Vertrag zur

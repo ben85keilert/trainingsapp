@@ -817,10 +817,11 @@ async def test_laufband_intervalle_ohne_strecke(daten) -> None:
 
 
 async def test_forschungsexport_ohne_ort(daten) -> None:
-    """Stufe 4 (Ben, 17.10.2026): Das ZIP hat die Messdatei byte-genau und
-    ``einheit-v1.json`` mit Zeitleiste, Versätzen und Tempo alle 5 s — keine Koordinate,
-    keine Richtung, keine Höhe, keine Strecke (Regel 0)."""
+    """Stufe 4 (Ben, 17.10.2026): Das ZIP hat die Messdatei byte-genau (ohne die
+    Bluetooth-Adresse, S10) und ``einheit-v1.json`` mit Zeitleiste, Versätzen und Tempo
+    alle 5 s — keine Koordinate, keine Richtung, keine Höhe, keine Strecke (Regel 0)."""
     from trainingsapp.config import messungenverzeichnis
+    from trainingsapp.core.hrv_export import messdatei_ohne_adresse
     from trainingsapp.core.timer import Abschnitt, TimerProfil
     from trainingsapp.ui.training import forschung_export
     from trainingsapp.ui.views.ausdauer import ausdauer_detail_view
@@ -839,7 +840,10 @@ async def test_forschungsexport_ohne_ort(daten) -> None:
         dok = json.loads(z.read("einheit-v1.json"))
         roh = z.read(f"Messungen/{hrv.file_path}")
         texte = {n: z.read(n).decode("utf-8", "replace") for n in namen}
-    assert roh == (messungenverzeichnis() / hrv.file_path).read_bytes()  # byte-genau
+    # byte-genau — bis auf die Bluetooth-Adresse, die das Gerät nicht verlässt (S10)
+    original = (messungenverzeichnis() / hrv.file_path).read_bytes()
+    assert roh == messdatei_ohne_adresse(original) != original
+    assert "adresse" in json.loads(original) and "adresse" not in json.loads(roh)
     assert dok["format"] == "einheit-v1" and dok["einheit"]["id"] == strecke.einheit_id
     teile = {t["art"]: t for t in dok["teile"]}
     assert set(teile) == {"hrv", "gps", "timer"}

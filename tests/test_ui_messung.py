@@ -192,7 +192,7 @@ def test_detailansicht_mit_artefakt_korrigieren_und_speichern(daten) -> None:
     ]
     assert len(export) == 1 and export[0].visible
     assert any(
-        isinstance(c, ft.IconButton) and c.tooltip == "Exportieren (ZIP)"
+        isinstance(c, ft.IconButton) and (c.tooltip or "").startswith("Exportieren (ZIP")
         for c in ansicht.appbar.actions
     )
 

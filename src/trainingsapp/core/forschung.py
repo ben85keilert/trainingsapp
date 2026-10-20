@@ -5,8 +5,9 @@ Belastung, Tempo aus GPS, welche Übung wann) muss jedes Ereignis auf einer Zeit
 liegen. Der Export ist eine **ausdrückliche Handlung** wie „GPX exportieren“ und packt
 in ein ZIP (Vertrag: ``docs/plan_einheit.md`` §8):
 
-- die Messdateien der Einheit samt Beiwerk **byte-genau**, mit den Pfaden des
-  Datenverzeichnisses (``Messungen/<Gerät>/sensor_….json``, wie der Messungs-Export),
+- die Messdateien der Einheit samt Beiwerk als Dateikopie, mit den Pfaden des
+  Datenverzeichnisses (``Messungen/<Gerät>/sensor_….json``, wie der Messungs-Export) —
+  ohne die Bluetooth-Adresse des Sensors (`core.hrv_export.exportkopie`, S10),
 - ``einheit-v1.json``: Kopf, Teile mit ihren Versätzen (Zeit des Teils + ``versatz_s`` =
   ``t_s``), die Zeitleiste und das Tempo.
 
@@ -27,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from .einheit import Beteiligung, Ereignis, daten_pruefen
+from .hrv_export import in_zip_schreiben
 from .strecke import LUECKE_S, MAX_GENAUIGKEIT_M, Punkt, abstand_m
 
 #: Name und Kennung des Formats
@@ -169,8 +171,9 @@ def dokument(
 
 
 def forschung_zip(dok: Mapping[str, Any], dateien: Iterable[Path], basis: Path) -> bytes:
-    """Das ZIP: ``einheit-v1.json`` und die Dateien byte-genau, Pfade relativ zu ``basis``
-    (dem Datenverzeichnis) — jede einmal; eine Datei außerhalb landet oben mit ihrem Namen."""
+    """Das ZIP: ``einheit-v1.json`` und die Dateien als Exportkopie (ohne Bluetooth-Adresse,
+    sonst byte-genau), Pfade relativ zu ``basis`` (dem Datenverzeichnis) — jede einmal; eine
+    Datei außerhalb landet oben mit ihrem Namen."""
     wurzel = Path(basis).resolve()
     puffer = io.BytesIO()
     gepackt = {DATEINAME}
@@ -184,7 +187,7 @@ def forschung_zip(dok: Mapping[str, Any], dateien: Iterable[Path], basis: Path) 
                 name = pfad.name
             if name in gepackt:
                 continue
-            archiv.write(pfad, name)
+            in_zip_schreiben(archiv, pfad, name)
             gepackt.add(name)
     return puffer.getvalue()
 

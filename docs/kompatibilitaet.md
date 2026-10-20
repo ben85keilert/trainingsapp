@@ -98,7 +98,15 @@ Ein Export packt die Rohdatei mit allem, was an ihrem Stamm hängt
 (`sensor_<ts>.json`, `sensor_<ts>_*`, `sensor_<ts>__c*`), in ein ZIP — Pfade
 relativ zum Datenverzeichnis, also `Messungen/<Geräteordner>/…`. Ausgepackt in
 einen Patientenordner liegt alles dort, wo praxis_gui es sucht. Die Dateien
-werden byte-genau kopiert, nicht neu geschrieben (`core.hrv_export`).
+werden kopiert, nicht neu gerechnet (`core.hrv_export`) — mit **einer** Ausnahme
+(Ben, 20.10.2026, Sicherheitsdurchsicht S10): Die Kopie der Messdatei verliert den
+Schlüssel `adresse` (Bluetooth-Adresse des Sensors), das Diagnoseprotokoll bekommt
+maskierte Adressen (`E2:B4:CC:xx:xx:xx`, `0F1E2D3C-xxxx-…`). Die Kopie wird mit
+denselben Parametern geschrieben wie das Original (`ensure_ascii=False, indent=2`)
+und ist bis auf diese Zeile byteidentisch; Dateien ohne `adresse` bleiben
+byteidentisch. Dasselbe gilt für den Forschungsexport einer Einheit
+(`core.forschung`) und das Teilen des Protokolls aus der Live-Ansicht. Die
+Originaldatei auf dem Gerät behält die Adresse.
 Die übrigen Ausschlüsse sind deckungsgleich.
 
 ---
@@ -146,7 +154,7 @@ gelesenen Datei bleiben beim Schreiben erhalten und stehen am Ende.
 | `datum` | str | `YYYY-MM-DD`, **lokales** Datum der Messung. Beim Lesen übernehmen, nicht aus `start_utc` neu ableiten |
 | `geraet` | str | Anzeigename, i. d. R. der BLE-Gerätename; `Unbekannt`, wenn der Gurt keinen Namen meldet (nie die Adresse — Ben, 19.10.2026) |
 | `geraet_profil` | str | Profil-ID, siehe Abschnitt 5 |
-| `adresse` | str | **optional**, seit 19.10.2026: BLE-Adresse des Geräts (Android/Linux MAC, macOS/iOS UUID), nie bei Simulation. Pseudo-Identifikator — `hrv_core.deid` leert das Feld; praxis_gui erhält es als unbekanntes Feld. Dateien ohne Adresse haben den Schlüssel nicht |
+| `adresse` | str | **optional**, seit 19.10.2026: BLE-Adresse des Geräts (Android/Linux MAC, macOS/iOS UUID), nie bei Simulation. Pseudo-Identifikator — `hrv_core.deid` leert das Feld; praxis_gui erhält es als unbekanntes Feld. Dateien ohne Adresse haben den Schlüssel nicht. **Der Export entfernt das Feld** (seit 20.10.2026, S10): nur die Originaldatei auf dem Gerät trägt es, keine Kopie, die das Gerät verlässt (Abschnitt 2, „Export“) |
 | `intervall_quelle` | str | **Pflicht** — `ekg_rr` oder `ppg_ppi` |
 | `simulation` | bool | `true` ⇒ Ablage unter `Messungen/Generator/` |
 | `generator_config` | dict \| null | Syntheseparameter, nur bei Simulation |

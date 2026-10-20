@@ -21,8 +21,9 @@ from trainingsapp.ui.training import forschung_export_async
 ERKLAERUNG = (
     "Ein ZIP mit der HRV-Messung (unverändert, mit Korrekturen), der Zeitleiste der "
     "Einheit — Timer-Abschnitte, Kilometer, Übungen — und, wenn GPS dabei war, dem Tempo "
-    "alle 5 Sekunden. Ohne Ort: keine Koordinaten, keine Richtung, keine Höhe. Wohin es "
-    "geht, wählst du im nächsten Schritt."
+    "alle 5 Sekunden. Ohne Ort: keine Koordinaten, keine Richtung, keine Höhe. Die "
+    "Bluetooth-Adresse des Sensors wird nicht mitgegeben. Wohin es geht, wählst du im "
+    "nächsten Schritt."
 )
 
 

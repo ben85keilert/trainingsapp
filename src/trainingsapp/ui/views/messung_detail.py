@@ -561,7 +561,11 @@ def _aufbauen(
                     on_click=lambda: crop_oeffnen(),
                     visible=zuschneidbar,
                 ),
-                ft.IconButton(ft.Icons.SHARE, tooltip="Exportieren (ZIP)", on_click=exportieren),
+                ft.IconButton(
+                    ft.Icons.SHARE,
+                    tooltip="Exportieren (ZIP, ohne Bluetooth-Adresse)",
+                    on_click=exportieren,
+                ),
                 ft.IconButton(
                     ft.Icons.SCIENCE_OUTLINED,
                     tooltip="Für die Auswertung exportieren (ohne Ort)",
@@ -580,7 +584,8 @@ def _aufbauen(
     # -- Exportieren -----------------------------------------------------------
 
     async def exportieren() -> None:
-        """Rohdatei samt Korrektur und Diagnoseprotokoll als ZIP herausgeben."""
+        """Rohdatei samt Korrektur und Diagnoseprotokoll als ZIP herausgeben — ohne die
+        Bluetooth-Adresse des Sensors (`core.hrv_export.exportkopie`, S10)."""
         dateien = zugehoerige_dateien(pfad)
         if not dateien:
             page.show_dialog(ft.SnackBar(ft.Text("Keine Dateien zu dieser Messung gefunden.")))

@@ -104,6 +104,12 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Teilen, Diagnose — keine Koordinaten. Strecken liegen getrennt von
   `Messungen/` (`config.streckenverzeichnis()`). Einzige Ausnahme: der
   GPX-Export, den die Person selbst auslöst (`docs/plan_gps.md`, Abschnitt 0).
+  Dasselbe gilt für **Anhänge** (Ben, 19.10.2026): Fotos und Videos an Einträgen liegen
+  unter `Anhaenge/<JJJJ>/<MM>/` (`config.anhaengeverzeichnis()`, Tabelle `entry_media`,
+  `core/anhaenge.py`), kommen aus der Kamera der App (flet-camera, drei Qualitäten) und
+  gehen nie in Export, Backup oder Sync — nur „Teilen“ am Einzelbild. Kein Video läuft
+  außerhalb der Ansicht `/anhang/<id>`; Tag, Tagebuch und Übung zeigen Frontbilder
+  (`ui/components/anhang_reihe.py`). Vertrag: `docs/plan_anhaenge.md`.
 
 - **Zwei Editionen aus einem Quelltext.** `config.ist_aktiv("funktion")` beantwortet
   „darf ich X?" statt „bin ich Edition B?". Ein Schalter je Fähigkeit, nicht je

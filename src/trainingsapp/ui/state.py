@@ -23,11 +23,13 @@ from hrv_core.aufnahme import backups_finden
 from hrv_core.regeln import Korrekturregeln
 
 from trainingsapp.config import (
+    anhaengeverzeichnis,
     datenbankpfad,
     messungenverzeichnis,
     paketordner,
     streckenverzeichnis,
 )
+from trainingsapp.core.anhaenge import ZEITRAUM_VORGABE as ANHAENGE_ZEITRAUM_VORGABE
 from trainingsapp.core.darstellung import Darstellung, darstellung_lesen, darstellung_schreiben
 from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.core.hrv_ansicht import (
@@ -59,6 +61,7 @@ from trainingsapp.core.timer import (
 )
 from trainingsapp.core.update import Release
 from trainingsapp.core.verlauf import MODUS_ZEIT, ZEITRAUM_VORGABE
+from trainingsapp.data.anhaenge import AnhangRepo
 from trainingsapp.data.bezuege import BezugRepo
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.einheiten import EinheitRepo
@@ -173,6 +176,8 @@ class AppState:
     pakete: PaketRepo
     #: Kurse (Migration 016) — Kapitel, Fortschritt je Profil, Pläne aus Kapiteln
     kurse: KursRepo
+    #: Fotos und Videos an Einträgen (Migration 025, `core/anhaenge.py`) — nie geteilt
+    anhaenge: AnhangRepo
     profil: Subject
     #: Welcher Reiter der Navigationsleiste aktiv ist — als Schlüssel, nicht als
     #: Index: der Reiter „Messung" lässt sich ausblenden (`app.REITER`)
@@ -214,6 +219,8 @@ class AppState:
     tagebuch_ordnung: str = "tage"
     tagebuch_kalender: bool = True
     tagebuch_anzahl: int = 0
+    #: Aufnahmen im Verlauf der Übung (`core.anhaenge.ZEITRAEUME`): gezeigter Zeitraum
+    anhaenge_zeitraum: str = ANHAENGE_ZEITRAUM_VORGABE
     #: Kurve einer Übung: Zeitraum, X-Achse, Kennzahl je Kachel, Variante (None = alle)
     verlauf_zeitraum: str = ZEITRAUM_VORGABE
     verlauf_modus: str = MODUS_ZEIT
@@ -398,6 +405,7 @@ class AppState:
             tags=TagRepo(con),
             pakete=PaketRepo(con),
             kurse=KursRepo(con),
+            anhaenge=AnhangRepo(con, anhaengeverzeichnis()),
             profil=profil,
             neu_eingespielt=neu,
             entfallene=PaketRepo(con).entfallene_offen(),

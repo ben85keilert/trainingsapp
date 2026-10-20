@@ -76,8 +76,11 @@ from trainingsapp.ui.flet_absicherung import methodenantworten_absichern
 from trainingsapp.ui.laufend import takt as laufend_takt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
+from trainingsapp.ui.views.anhang import anhang_view
+from trainingsapp.ui.views.anhang_aufnahme import ARTEN, anhang_aufnahme_view, aufnahme_route
 from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view, verwaiste_dialog
 from trainingsapp.ui.views.einstellungen import einstellungen
+from trainingsapp.ui.views.einstellungen_anhaenge import einstellungen_anhaenge
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
 from trainingsapp.ui.views.einstellungen_tags import einstellungen_tags_view
 from trainingsapp.ui.views.eintrag import eintrag_view
@@ -447,6 +450,18 @@ def main(page: ft.Page) -> None:
         if rest[1:2] == ["korrigieren"]:
             ablegen(lambda: formular_korrektur(page, state, eintrag, basis))
 
+    def anhang_routen(basis: str, rest: list[str]) -> None:
+        """Fotos und Videos über jeder Ansicht (Ben, 19.10.2026; `views/anhang*.py`):
+        ``…/anhang/aufnehmen/<eintrag>/<foto|video>`` nimmt auf, ``…/anhang/<id>`` zeigt."""
+        if rest[:1] == ["aufnehmen"] and len(rest) >= 3:
+            eintrag = state.sitzungen.eintrag_laden(rest[1])
+            art = ARTEN.get(rest[2])
+            if eintrag is not None and art is not None:
+                route = aufnahme_route(basis, eintrag.id, art)
+                ablegen(lambda: anhang_aufnahme_view(page, state, route, eintrag, art))
+        elif rest and (anhang := state.anhaenge.laden(rest[0])) is not None:
+            ablegen(lambda: anhang_view(page, state, basis, anhang))
+
     def uebung_timer_routen(basis: str, rest: list[str]) -> None:
         """Der Timer einer Übung (Ben, 17.10.2026) — ``…/timer/uebung/<Übung>[/<Planübung>]``
         über dem Plan, der Übung oder dem Training (`views/uebung_timer.py`)."""
@@ -510,8 +525,13 @@ def main(page: ft.Page) -> None:
         was der Stapel braucht. Unbekannte IDs enden beim letzten gültigen Element."""
         ablage.clear()
         teile = navigation.teile(route)  # "/plan/abc" → ["plan", "abc"]
+        # Anhänge (Foto, Video) legen sich wie der Timer über jede Ansicht
+        if "anhang" in teile:
+            i = teile.index("anhang")
+            stapel(teile[:i])
+            anhang_routen("/" + "/".join(teile[:i]), teile[i + 1 :])
         # Der Timer legt sich über jede Ansicht: erst deren Stapel, dann er.
-        if "timer" in teile:
+        elif "timer" in teile:
             i = teile.index("timer")
             stapel(teile[:i])
             basis = "/" + "/".join(teile[:i])
@@ -656,6 +676,8 @@ def main(page: ft.Page) -> None:
                 ablegen(lambda: gps_test_view(page, state))
             elif teile[1:2] == ["updates"]:
                 ablegen(lambda: updates_view(page, state, browser))
+            elif teile[1:2] == ["anhaenge"]:
+                ablegen(lambda: einstellungen_anhaenge(page, state))
         elif teile[:1] == ["pakete"]:
             paket_routen("/pakete", teile[1:])
         elif teile[:1] == ["archiv"]:

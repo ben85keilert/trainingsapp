@@ -39,6 +39,13 @@
   App und die eingetragenen Paketquellen nur nach Versionsnummern — übertragen
   werden IP-Adresse und der Name der App (`docs/uebungspakete.md`, „Paketquellen“;
   seit 16.10.2026).
+- **Fotos und Videos an Einträgen** (seit 20.10.2026, `docs/plan_anhaenge.md`): mit der
+  Kamera der App aufgenommen, als nackte JPEG/MP4-Bytes ohne Ortsstempel in den
+  app-privaten Ordner `Anhaenge/` geschrieben; nicht in Galerie, Export, Diagnose,
+  Synchronisation oder Geräte-Backup (dafür muss `allowBackup="false"` im Manifest stehen,
+  Sicherheitsdurchsicht S4). Hinaus nur über „Teilen“ am einzelnen Anhang nach Rückfrage.
+  Drei Aufnahmequalitäten, mittlere als Vorgabe — Datensparsamkeit auch beim Speicherplatz;
+  Speicherübersicht und endgültiges Löschen in Einstellungen → Anhänge.
 - **Vorgabe-Paketquelle** `trainingsapp.osteo-ebert.de` (seit 16.10.2026; Übergang,
   bis die Website der App steht): ein angemieteter Server in Deutschland, den der
   Hersteller selbst betreibt; Anbieter Hetzner Online GmbH, mit Vertrag zur

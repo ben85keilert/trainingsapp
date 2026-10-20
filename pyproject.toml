@@ -36,6 +36,7 @@ dependencies = [
     # installiert Projektabhängigkeiten nicht und bleibt damit flet-frei.
     "flet-ble",
     "flet-ton",
+    "flet-camera==1.0.*",
 ]
 
 # Werkzeug fürs Inhalte-Repo: Paketdateien prüfen, bauen, Index schreiben
@@ -148,10 +149,22 @@ hrv-core = "../hrv-core"
 "android.permission.ACCESS_FINE_LOCATION" = true
 "android.permission.ACCESS_COARSE_LOCATION" = true
 "android.permission.INTERNET" = true
+# Fotos und Videos an Einträgen (docs/plan_anhaenge.md, seit 19.10.2026): Kamera in der
+# App (flet-camera), Ton nur für Videos. Laufzeitabfrage beim ersten Aufnehmen; die
+# Aufnahmen bleiben im app-privaten Speicher, ohne Ortsstempel, nie in Export oder Sync.
+"android.permission.CAMERA" = true
+"android.permission.RECORD_AUDIO" = true
 
 [tool.flet.android.feature]
 # BLE ist nötig für Messungen, aber kein Installationshindernis (required="false").
 "android.hardware.bluetooth_le" = false
+# Ohne Kamera läuft die App ebenso — nur Aufnehmen fehlt dann.
+"android.hardware.camera" = false
+
+# iOS: Begründungen in Info.plist (ohne sie lehnt Apple die App ab, `docs/recht/80_store_freigaben.md`).
+[tool.flet.ios.info]
+NSCameraUsageDescription = "Fotos und Videos deiner Übungsausführung aufnehmen — sie bleiben auf diesem Gerät."
+NSMicrophoneUsageDescription = "Ton für Videos deiner Übungsausführung — sie bleiben auf diesem Gerät."
 
 # Die Flet-Vorlage 1.0.3 zwingt jni auf 1.0.0; jni_flutter 1.0.4+1 (über
 # path_provider_android 2.3.1) verlangt jni ^1.1.0 → „Constant evaluation error …

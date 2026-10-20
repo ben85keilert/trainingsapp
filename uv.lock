@@ -750,6 +750,18 @@ dependencies = [
 requires-dist = [{ name = "flet", specifier = ">=1.0.3" }]
 
 [[package]]
+name = "flet-camera"
+version = "1.0.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "flet" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2d/91/5e78609ab8162cf13b496b7d56e8aa398044e2eacf070bd17a9572c27816/flet_camera-1.0.3.tar.gz", hash = "sha256:0c44e42d1cc515859e46dcd5eae26e90abc23dc39759e05a97ac102894e8f078", size = 16055, upload-time = "2026-09-30T02:13:58.599Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ea/da/10da7b4e0343e543884283e31d2a4f21171d843a3e925e816d9d347aaa86/flet_camera-1.0.3-py3-none-any.whl", hash = "sha256:7a681c20bbc85ecc82a01cb7286e6ff78aa659d93a2d1a123a34556da83cfac2", size = 17146, upload-time = "2026-09-30T02:13:57.636Z" },
+]
+
+[[package]]
 name = "flet-charts"
 version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2396,6 +2408,7 @@ source = { editable = "." }
 dependencies = [
     { name = "flet" },
     { name = "flet-ble" },
+    { name = "flet-camera" },
     { name = "flet-charts" },
     { name = "flet-geolocator" },
     { name = "flet-map" },
@@ -2437,6 +2450,7 @@ requires-dist = [
     { name = "bleak", marker = "extra == 'desktop'", specifier = ">=0.22" },
     { name = "flet", specifier = "==1.0.*" },
     { name = "flet-ble", editable = "erweiterungen/flet_ble" },
+    { name = "flet-camera", specifier = "==1.0.*" },
     { name = "flet-charts", specifier = "==1.0.*" },
     { name = "flet-geolocator", specifier = "==1.0.*" },
     { name = "flet-map", specifier = "==1.0.*" },

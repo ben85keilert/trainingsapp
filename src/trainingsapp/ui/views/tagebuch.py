@@ -35,6 +35,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.tagebuch import (
+    AUFNAHME,
     PLAN,
     TAG,
     UEBUNG,
@@ -50,11 +51,13 @@ from trainingsapp.core.tagebuch import (
     zahl_je_tag,
 )
 from trainingsapp.core.verlauf import MONATE, WOCHENTAGE, WOCHENTAGE_LANG, wochen_titel
+from trainingsapp.ui.components.anhang_reihe import anhang_reihe
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.notiz import notiz_dialog
 from trainingsapp.ui.components.wochenleiste import tageszelle
 from trainingsapp.ui.components.zeitstrahl import zeitpunkt
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.anhang import anhang_route
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 
 #: So viele Tage mit Notizen zeigt das Tagebuch zuerst, „Ältere zeigen“ je so viele mehr
@@ -96,10 +99,17 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
     profil = state.profil.id
     #: Scrollposition je Darstellung — „Übungen“ beginnt nicht da, wo „Tage“ stand
     merk = f"tagebuch-{state.tagebuch_ordnung}"
+    # Fotos und Videos (Ben, 19.10.2026): je Eintrag mit Anhängen ein Block „Aufnahmen“ —
+    # nur Frontbilder, kein Video läuft im Tagebuch
+    aufnahmen = state.anhaenge.alle(profil, mit_geloeschten=False)
+    je_eintrag: dict[str, list] = {}
+    for x in aufnahmen:
+        je_eintrag.setdefault(x.anhang.eintrag_id, []).append(x.anhang)
     alle = sammeln(
         state.tagesnotizen.alle(profil),
         state.sitzungen.session_notizen(profil),
         state.sitzungen.notizen(profil),
+        aufnahmen,
     )
     katalog = {u.id: u for u in state.uebungen.alle(mit_geloeschten=True)}
     plan_namen: dict[str, str] = {p.id: p.name for p in state.plaene.alle(profil)}
@@ -133,7 +143,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
         if n.art == PLAN:
             return f"Plan „{plan_name(n.plan_id)}“" if n.plan_id else "Ohne Plan"
         u = katalog.get(n.exercise_id or "")
-        return u.name if u is not None else "(Übung nicht mehr vorhanden)"
+        name = u.name if u is not None else "(Übung nicht mehr vorhanden)"
+        return f"Aufnahmen · {name}" if n.art == AUFNAHME else name
 
     # -- Bearbeiten ---------------------------------------------------------------------
 
@@ -163,10 +174,16 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                         hinweis="Wie ging das Training? Tippen oder diktieren.",
                     )
                 )
-            elif n.art == UEBUNG and n.exercise_id:
+            elif n.art in (UEBUNG, AUFNAHME) and n.exercise_id:
                 uebung = state.uebungen.laden(n.exercise_id, mit_geloeschten=True)
                 if uebung is not None:
                     page.show_dialog(leistungen_blatt(page, state, uebung, n.tag, danach=neu))
+
+        return handler
+
+    def anhang_oeffner(anhang) -> Callable[[], Any]:
+        async def handler() -> None:
+            await page.push_route(anhang_route("/", anhang.id))
 
         return handler
 
@@ -240,13 +257,22 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             etiketten.append(ft.Text(plan_name(n.plan_id), size=11, opacity=0.6))
         symbol_name = (
             katalog[n.exercise_id].icon_key
-            if n.art == UEBUNG and n.exercise_id in katalog
+            if n.art in (UEBUNG, AUFNAHME) and n.exercise_id in katalog
             else None
         )
         icon = {
             TAG: ft.Icons.WB_SUNNY_OUTLINED,
             PLAN: ft.Icons.LIST_ALT,
+            AUFNAHME: ft.Icons.ATTACH_FILE,
         }.get(n.art) or symbol(symbol_name)
+        inhalt: ft.Control = ft.Text(n.text, size=14, selectable=False)
+        if n.art == AUFNAHME:
+            reihe = anhang_reihe(
+                je_eintrag.get(n.bezug_id or "", []), state.anhaenge.bild, anhang_oeffner
+            )
+            inhalt = reihe if reihe is not None else inhalt
+            if not mit_datum:
+                etiketten.append(ft.Text(n.text, size=11, opacity=0.6))
         return ft.Container(
             bgcolor=KARTE,
             border_radius=14,
@@ -272,7 +298,7 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                             *etiketten,
                         ],
                     ),
-                    ft.Text(n.text, size=14, selectable=False),
+                    inhalt,
                 ],
             ),
         )

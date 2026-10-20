@@ -19,7 +19,13 @@ permissions = [
     "android.permission.BLUETOOTH_CONNECT",
     "android.permission.INTERNET",
     "android.permission.POST_NOTIFICATIONS",
+    # Fotos und Videos an Einträgen (seit 19.10.2026) — Aufnahmen bleiben auf dem Gerät,
+    # gehen nicht in den Sync (docs/plan_anhaenge.md, G5)
+    "android.permission.CAMERA",
+    "android.permission.RECORD_AUDIO",
 ]
 
 [ios]
 bluetooth_usage = "Zum Verbinden mit deinem Herzfrequenzsensor während des Trainings."
+camera_usage = "Fotos und Videos deiner Übungsausführung aufnehmen — sie bleiben auf diesem Gerät."
+microphone_usage = "Ton für Videos deiner Übungsausführung — sie bleiben auf diesem Gerät."

@@ -16,9 +16,14 @@ bundle_id = "de.praxisebert.trainingsassistent"
 permissions = [
     "android.permission.BLUETOOTH_SCAN",
     "android.permission.BLUETOOTH_CONNECT",
+    # Fotos und Videos an Einträgen (seit 19.10.2026) — Aufnahmen bleiben auf dem Gerät
+    "android.permission.CAMERA",
+    "android.permission.RECORD_AUDIO",
 ]
 # INTERNET wird in dieser Edition für Erklärvideos, Kartenkacheln und die
 # Update-Prüfung gebraucht. Wer das nicht braucht, kann die Berechtigung entfernen.
 
 [ios]
 bluetooth_usage = "Zum Verbinden mit deinem Herzfrequenzsensor während des Trainings."
+camera_usage = "Fotos und Videos deiner Übungsausführung aufnehmen — sie bleiben auf diesem Gerät."
+microphone_usage = "Ton für Videos deiner Übungsausführung — sie bleiben auf diesem Gerät."

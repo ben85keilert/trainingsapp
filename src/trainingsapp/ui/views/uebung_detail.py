@@ -31,6 +31,7 @@ from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.anhang_verlauf import aufnahmen_raster
 from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 
 
@@ -466,6 +467,12 @@ def uebung_detail(
         _abschnitt("Uhr und Timer", uhr_und_timer(uebung, item)),
         _abschnitt("Standard für Pläne", ft.Column(spacing=0, controls=verwendungen)),
         _abschnitt("Aufnahmen mit dieser Übung", aufnahmen_liste(page, state, uebung)),
+        # Eigene Fotos und Videos (Ben, 19.10.2026; `views/anhang_verlauf.py`) — nur mit Aufnahmen
+        *(
+            [_abschnitt("Fotos und Videos", raster)]
+            if (raster := aufnahmen_raster(page, state, uebung)) is not None
+            else []
+        ),
         _abschnitt(
             "Videos",
             ft.Column(spacing=0, controls=videos)

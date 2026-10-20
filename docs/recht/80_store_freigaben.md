@@ -42,6 +42,7 @@ Angaben. Ein gemeinsamer Eintrag wäre für Edition A falsch.
 | Foreground Service (`location`) | GPS läuft weiter, wenn der Bildschirm aus ist |
 | Foreground Service (`health`), `FOREGROUND_SERVICE_HEALTH`, `HIGH_SAMPLING_RATE_SENSORS` (seit 17.10.2026) | Ein Timer (allein oder als Teil einer Einheit) und ein Plan-Ablauf laufen weiter, wenn der Bildschirm aus ist und weder Gurt noch GPS den Dienst halten — Töne und Zeiten bleiben richtig (Ben, 17.10.2026, P26). `HIGH_SAMPLING_RATE_SENSORS` ist nur die Voraussetzung, die Android 14 für diesen Typ verlangt; die App liest damit keine Sensoren |
 | `INTERNET` | Kartenkacheln (OpenStreetMap), verlinkte Videos, Update-Prüfung (GitHub-Releases der App, Paketquellen — nur Versionsnummern, abschaltbar, Hinweis beim ersten Mal); keine eigenen Daten |
+| `CAMERA`, `RECORD_AUDIO` (seit 20.10.2026) | Fotos und Videos der eigenen Übungsausführung an einen Trainingseintrag hängen (`docs/plan_anhaenge.md`) — nur auf Tipp der Person, nur in der App, Aufnahmen bleiben im app-privaten Speicher ohne Ortsstempel, nie übertragen; Ton nur für Videos. Hardware-Feature `camera` nicht erforderlich |
 
 `neverForLocation` bleibt bei Bluetooth: Die Standortberechtigung gilt dem
 Ausdauertraining, nicht dem Sensor. Im Store-Formular „Standort“ ehrlich
@@ -66,7 +67,10 @@ URL in Store-Eintrag, App und Website muss **identisch** sein.
 ### Info.plist
 
 `NSBluetoothAlwaysUsageDescription` mit einer Begründung, die ein Mensch
-versteht — nicht „App benötigt Bluetooth".
+versteht — nicht „App benötigt Bluetooth". Seit 20.10.2026 ebenso
+`NSCameraUsageDescription` und `NSMicrophoneUsageDescription` (Fotos und Videos der
+eigenen Übungsausführung; Texte in `pyproject.toml` `[tool.flet.ios.info]` und
+`build/*.toml`).
 
 Bei späterer HealthKit-Nutzung zusätzlich `NSHealthShareUsageDescription` und
 `NSHealthUpdateUsageDescription`.

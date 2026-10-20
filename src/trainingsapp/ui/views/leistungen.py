@@ -18,35 +18,46 @@ Alles auf einmal bearbeiten: „Speichern“ legt für jeden geänderten Eintrag
 an (der alte Stand bleibt im Verlauf), Zurück speichert ebenso (`components/zurueck.py`),
 „Abbrechen“ verwirft. Der Papierkorb an einer Karte löscht diesen einen Eintrag — nach
 einer Rückfrage, wie in der Eintragsansicht.
+
+**Fotos und Videos** (Ben, 19.10.2026; `docs/plan_anhaenge.md`): Unter „Nachtragen · Im
+Verlauf“ eine zweite Zeile „Foto“ „Video“ — sie hängt die Aufnahme an den **jüngsten
+Eintrag** des Tages; die Büroklammer an jeder Karte hängt sie gezielt an **diesen**
+Eintrag. Die Frontbilder stehen als Kachelreihe unter der Karte (`components/anhang_reihe`),
+ein Tipp öffnet die Ansicht. Ohne Eintrag: erst eintragen, dann anhängen.
 """
 
 from __future__ import annotations
 
 import contextlib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
 import flet as ft
 
+from trainingsapp.core.anhaenge import BILD, VIDEO, Anhang
 from trainingsapp.core.aufnahme_bezug import Bezug, zeit_text
 from trainingsapp.core.models import Exercise, Session, SessionEntry
 from trainingsapp.core.tagesbilanz import kachel
+from trainingsapp.ui.components.anhang_reihe import anhang_reihe
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.anhang import anhang_route
+from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
 
 #: Was „Speichern“ bzw. Zurück speichert
 HINWEIS = (
     "Speichern legt für jeden geänderten Eintrag eine Korrektur an — der alte Stand bleibt "
     "im Verlauf. Zurück speichert ebenso."
 )
-#: Geschätzte Höhen im Blatt (px): Kopf, Knöpfe und Hinweis; je Karte; je Feld darin
-BLATT_RAHMEN, BLATT_KARTE, BLATT_FELD = 270.0, 90.0, 112.0
+#: Geschätzte Höhen im Blatt (px): Kopf, Knöpfe und Hinweis; je Karte; je Feld darin;
+#: je Kachelreihe mit Anhängen
+BLATT_RAHMEN, BLATT_KARTE, BLATT_FELD, BLATT_REIHE = 320.0, 90.0, 112.0, 80.0
 #: Dasselbe im Blatt
 HINWEIS_BLATT = (
     "Speichern legt für jeden geänderten Eintrag eine Korrektur an — der alte Stand bleibt "
@@ -65,6 +76,8 @@ class _Karte:
     anfang: tuple[dict[str, Any], str]
     #: In welcher HRV-Aufnahme der Eintrag liegt (`data.bezuege`, Plan C) — ``None``: in keiner
     bezug: Bezug | None = None
+    #: Fotos und Videos an diesem Eintrag (`data.anhaenge`), älteste zuerst
+    anhaenge: list[Anhang] = field(default_factory=list)
 
     def stand(self) -> tuple[dict[str, Any], str]:
         return self.form.werte(), (self.notiz.value or "").strip()
@@ -97,6 +110,12 @@ class _Leistungen:
             anfang = (form.werte(), eintrag.note.strip())
             bezug = state.bezuege.zu_eintrag(eintrag) if state.bezuege is not None else None
             self.karten.append(_Karte(eintrag, session, form, notiz, anfang, bezug))
+        # Fotos und Videos — eine Abfrage für alle Karten
+        je_eintrag = state.anhaenge.je_eintraegen([k.eintrag.id for k in self.karten])
+        for k in self.karten:
+            k.anhaenge = je_eintrag.get(k.eintrag.id, [])
+        #: Route der Ansicht darunter — Aufnahme und Ansicht legen sich darüber
+        self.basis: str = str(getattr(page, "route", "/") or "/")
         # Was ein Timer eintrug (Übungs-Timer, Plan-Ablauf) — aus der Zeitleiste
         self.vom_timer = (
             state.einheiten.eintraege_vom_timer([k.eintrag.id for k in self.karten])
@@ -160,6 +179,7 @@ class _Leistungen:
                                 opacity=0.75,
                                 expand=True,
                             ),
+                            self.anhang_knopf(k.eintrag.id),
                             ft.IconButton(
                                 ft.Icons.DELETE_OUTLINE,
                                 tooltip="Diesen Eintrag löschen",
@@ -170,9 +190,58 @@ class _Leistungen:
                     ft.Container(padding=ft.Padding.only(right=8), content=felder),
                     ft.Container(padding=ft.Padding.only(right=8), content=k.notiz),
                     *([self.aufnahme_zeile(k.bezug)] if k.bezug is not None else []),
+                    *([reihe] if (reihe := self.anhang_zeile(k)) is not None else []),
                 ],
             ),
         )
+
+    # -- Fotos und Videos (Ben, 19.10.2026) ----------------------------------------------------
+
+    def aufnahme_ziel(self, art: str, eintrag_id: str | None = None) -> str | None:
+        """Route der Aufnahmeseite — ohne Angabe für den jüngsten Eintrag des Tages;
+        ``None`` ohne Eintrag (erst eintragen, dann anhängen)."""
+        if eintrag_id is None:
+            if not self.karten:
+                return None
+            eintrag_id = self.karten[-1].eintrag.id
+        return aufnahme_route(self.basis, eintrag_id, art)
+
+    def _weiter_zu(self, ziel: str) -> Callable[[], Any]:
+        """Ein Handler, der `weiter` erst beim Tipp fragt — Ansicht und Blatt setzen es nach
+        dem ersten Zeichnen (`weiter` speichert Geändertes und wechselt dann die Route)."""
+        return lambda: self.weiter(ziel)()
+
+    def anhang_knopf(self, eintrag_id: str) -> ft.Control:
+        """Die Büroklammer an der Karte: Foto oder Video gezielt an **diesen** Eintrag."""
+        foto = self.aufnahme_ziel(BILD, eintrag_id) or self.basis
+        video = self.aufnahme_ziel(VIDEO, eintrag_id) or self.basis
+        return ft.PopupMenuButton(
+            icon=ft.Icons.ATTACH_FILE,
+            tooltip="Foto oder Video an diesen Eintrag",
+            items=[
+                ft.PopupMenuItem(
+                    content=ft.Text("Foto aufnehmen"),
+                    icon=ft.Icons.CAMERA_ALT_OUTLINED,
+                    on_click=self._weiter_zu(foto),
+                ),
+                ft.PopupMenuItem(
+                    content=ft.Text("Video aufnehmen"),
+                    icon=ft.Icons.VIDEOCAM_OUTLINED,
+                    on_click=self._weiter_zu(video),
+                ),
+            ],
+        )
+
+    def anhang_zeile(self, k: _Karte) -> ft.Control | None:
+        """Die Frontbilder unter der Karte — ein Tipp öffnet die Ansicht (kein Video läuft hier)."""
+        reihe = anhang_reihe(
+            k.anhaenge,
+            self.state.anhaenge.bild,
+            lambda a: self._weiter_zu(anhang_route(self.basis, a.id)),
+        )
+        if reihe is None:
+            return None
+        return ft.Container(padding=ft.Padding.only(right=8), content=reihe)
 
     def aufnahme_zeile(self, b: Bezug) -> ft.Control:
         """„♥ Aufnahme 10:02–10:40 · 4 Marken · Ansehen“ (Skizze D2) — „Ansehen“ öffnet die
@@ -252,7 +321,8 @@ class _Leistungen:
     def hoehe(self) -> float:
         """Wie hoch das Blatt etwa wird — passt es nicht, scrollt es (`leistungen_blatt`)."""
         return BLATT_RAHMEN + sum(
-            BLATT_KARTE + BLATT_FELD * len(k.form.spec.fields) for k in self.karten
+            BLATT_KARTE + BLATT_FELD * len(k.form.spec.fields) + (BLATT_REIHE if k.anhaenge else 0)
+            for k in self.karten
         )
 
     def _korrigieren(self, k: _Karte) -> None:
@@ -300,28 +370,60 @@ class _Leistungen:
 
 
 def _nachtragen_zeile(
-    uebung: Exercise, nachtragen: str | None, weiter_nach: Callable[[str], Any]
+    uebung: Exercise,
+    nachtragen: str | None,
+    weiter_nach: Callable[[str], Any],
+    leistungen: _Leistungen | None = None,
 ) -> list[ft.Control]:
     """„Nachtragen“ und „Im Verlauf ansehen“ — nur, wenn die Tagesansicht eine
-    Nachtragen-Route mitgibt (Skizze A4). Ansicht und Blatt teilen sich die Zeile (N28)."""
-    if nachtragen is None:
-        return []
-    return [
-        ft.Row(
-            wrap=True,
-            spacing=8,
-            controls=[
-                ft.OutlinedButton(
-                    "Nachtragen", icon=ft.Icons.ADD, on_click=weiter_nach(nachtragen)
-                ),
-                ft.TextButton(
-                    "Im Verlauf ansehen",
-                    icon=ft.Icons.SHOW_CHART,
-                    on_click=weiter_nach(f"/verlauf/{kachel(uebung, uebung.id)}"),
-                ),
-            ],
+    Nachtragen-Route mitgibt (Skizze A4). Ansicht und Blatt teilen sich die Zeile (N28).
+    Darunter „Foto“ „Video“ an den jüngsten Eintrag des Tages (Ben, 19.10.2026) — zwei
+    Knöpfe füllen die Zeile; käme ein dritter Weg (Galerie), wird daraus „Anhang“ mit Menü."""
+    zeilen: list[ft.Control] = []
+    if nachtragen is not None:
+        zeilen.append(
+            ft.Row(
+                wrap=True,
+                spacing=8,
+                controls=[
+                    ft.OutlinedButton(
+                        "Nachtragen", icon=ft.Icons.ADD, on_click=weiter_nach(nachtragen)
+                    ),
+                    ft.TextButton(
+                        "Im Verlauf ansehen",
+                        icon=ft.Icons.SHOW_CHART,
+                        on_click=weiter_nach(f"/verlauf/{kachel(uebung, uebung.id)}"),
+                    ),
+                ],
+            )
         )
-    ]
+    if leistungen is not None:
+        foto, video = leistungen.aufnahme_ziel(BILD), leistungen.aufnahme_ziel(VIDEO)
+        if foto is None or video is None:
+            zeilen.append(
+                ft.Text("Foto oder Video: erst eintragen, dann anhängen.", size=12, opacity=0.6)
+            )
+        else:
+            zeilen.append(
+                ft.Row(
+                    spacing=8,
+                    controls=[
+                        ft.OutlinedButton(
+                            "Foto",
+                            icon=ft.Icons.CAMERA_ALT_OUTLINED,
+                            on_click=weiter_nach(foto),
+                            expand=True,
+                        ),
+                        ft.OutlinedButton(
+                            "Video",
+                            icon=ft.Icons.VIDEOCAM_OUTLINED,
+                            on_click=weiter_nach(video),
+                            expand=True,
+                        ),
+                    ],
+                )
+            )
+    return zeilen
 
 
 def leistungen_view(
@@ -361,7 +463,8 @@ def leistungen_view(
         return handler
 
     leistungen.weiter = lambda ziel: lambda: page.run_task(weiter_nach(ziel))
-    mehr = _nachtragen_zeile(uebung, nachtragen, weiter_nach)
+    leistungen.basis = route  # Aufnahme und Ansicht legen sich über diese Seite
+    mehr = _nachtragen_zeile(uebung, nachtragen, weiter_nach, leistungen)
     ansicht = ft.View(
         route=route,
         appbar=formular_leiste(leistungen.titel, abbrechen=abbrechen, speichern=speichern),
@@ -463,7 +566,7 @@ def leistungen_blatt(
     leistungen.gezeichnet = neu_gezeichnet
     leistungen.weiter = weiter_nach
     fehler = ft.Text("", size=12, color=ft.Colors.ERROR, visible=False)
-    mehr = _nachtragen_zeile(uebung, nachtragen, weiter_nach)
+    mehr = _nachtragen_zeile(uebung, nachtragen, weiter_nach, leistungen)
     # Eine scrollende Spalte macht das Blatt bildschirmhoch — nur wenn es nicht passt, damit
     # die Ansicht darunter sichtbar bleibt (Ben: „man hat mehr Orientierung“)
     hoehe = float(getattr(page, "height", None) or 700)

@@ -53,10 +53,14 @@ def modus_fuer_route(route: str) -> str:
     ['frei', 'frei', 'frei', 'frei']
     >>> modus_fuer_route("/ausdauer/timer"), modus_fuer_route("/live/timer")  # Timer ist hochkant
     ('hochkant', 'hochkant')
+    >>> modus_fuer_route("/tag/2026-10-20/anhang/aufnehmen/e1/video")  # Kamera darf drehen
+    'frei'
     """
     teile = [t for t in route.split("/") if t]
     if "timer" in teile:
         return HOCHKANT
+    if "anhang" in teile:  # Aufnehmen und Ansehen von Fotos und Videos (`views/anhang*.py`)
+        return FREI
     if teile[:1] == ["live"]:
         return QUER
     if teile[:1] == ["ausdauer"]:

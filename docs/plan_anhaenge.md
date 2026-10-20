@@ -1,6 +1,10 @@
 # Plan: Anhänge an Einträgen — Fotos und Videos der eigenen Übung
 
-Stand 19.10.2026: **Vorschlag, nichts gebaut.** Ben: „Plane das erst vor der Freigabe.“
+Stand 19.10.2026: Vorschlag (Ben: „Plane das erst vor der Freigabe.“). **20.10.2026: Teile
+A–E gebaut** (Ben: „Kümmere dich um die Medienablage der Übungen und im Tagebuch“) — die
+Entscheidungen G1–G5 wie vorgeschlagen, G6 (Skizzen) entfiel. Was vom Bau abweicht, steht
+kursiv in den Abschnitten; Gerätetests T62–T67 in `docs/offene_fragen.md`. Noch nicht
+gebaut: F (Galerie-Import), Anhänge an Messungen und Notizen, Praxis-Sync.
 Katalog P44 (Knöpfe, Ablage), P45 (e) (Tagebuch), K-F6/Abschnitt 4 (Medien an Übungen
 aus Paketen — **bleibt vertagt**, dieser Plan betrifft nur eigene Aufnahmen),
 Sicherheitsdurchsicht S4 (Backup) und S1 (Links). Bens Auftrag vom 19.10.:
@@ -23,6 +27,14 @@ Fünf Teile, jeder für sich lauffähig:
 | C | Ansehen, Löschen; Frontbilder an Eintrag, Tag und Tagebuch | `ui/views/anhang.py`, `leistungen.py`, `tag.py`, `tagebuch.py` |
 | D | Verlauf der Übung als Bilderreihe | `uebung_detail.py` |
 | E | Einstellungen: Qualität, Speicherübersicht, Aufräumen | `ui/views/einstellungen_anhaenge.py` |
+
+*Gebaut (20.10.) außerdem: `ui/components/anhang_reihe.py` (Kacheln), `ui/views/anhang_verlauf.py`
+(Raster in der Übung), Routen ``…/anhang/aufnehmen/<eintrag>/<foto|video>`` und ``…/anhang/<id>``
+über jeder Ansicht (`app.ebenen`, wie der Timer), `ui/ausrichtung` erlaubt dort Drehen,
+Tagebuch-Art `AUFNAHME` in `core/tagebuch.sammeln`, Tests `tests/test_anhaenge.py`,
+`tests/test_ui_anhaenge.py`. Am Rechner steht statt der Kamera „Datei wählen“ (unverkleinert,
+nur zum Prüfen des Ablaufs). flet-camera liegt in 1.0.3 vor; ob `camera_android_camerax` die
+jni-Override-Falle trifft, zeigt erst Bens APK-Build.*
 
 Danach, getrennt zu entscheiden: Galerie-Import mit Verkleinern (braucht eine eigene
 Flutter-Erweiterung, Abschnitt F), Anhänge an Messungen und Notizen, Praxis-Sync.

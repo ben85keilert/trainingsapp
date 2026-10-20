@@ -11,7 +11,10 @@ an einem Tag (`session.note`) und zur Übung (`session_entry.note`) — und ordn
   beschriebene oben, darin die neueste Notiz zuerst; die Notizen zum Tag für sich.
 
 Hier steht nur Ordnen; Lesen macht `data` (`SessionRepo.notizen`, `DayNoteRepo.alle`),
-Zeigen `ui/views/tagebuch.py`. Fotos und Diktat sind spätere Arten derselben Notiz.
+Zeigen `ui/views/tagebuch.py`. **Aufnahmen** (Fotos und Videos an Einträgen, Ben
+19.10.2026, `core/anhaenge.py`) sind eine vierte Art: je Eintrag mit Anhängen eine
+Notiz der Art `AUFNAHME`, deren Text die Anzahl nennt — die Ansicht zeigt dafür die
+Frontbilder, nie ein laufendes Video. Nach Übungen geordnet stehen sie unter der Übung.
 """
 
 from __future__ import annotations
@@ -20,10 +23,11 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+from .anhaenge import AnhangMitBezug, anzahl_text, zusammenfassung
 from .models import Session, SessionEntry, lokaler_tag
 
-#: Woran eine Notiz hängt
-TAG, PLAN, UEBUNG = "tag", "plan", "uebung"
+#: Woran eine Notiz hängt — `AUFNAHME`: Fotos und Videos an einem Eintrag
+TAG, PLAN, UEBUNG, AUFNAHME = "tag", "plan", "uebung", "aufnahme"
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,11 +70,14 @@ def sammeln(
     tage: Iterable[tuple[date, str, datetime | None]],
     sessions: Iterable[tuple[Session, datetime | None]],
     eintraege: Iterable[tuple[SessionEntry, Session]],
+    aufnahmen: Iterable[AnhangMitBezug] = (),
 ) -> list[Notiz]:
-    """Die drei Ebenen als Notizen — ``tage`` (Tag, Text, angelegt), ``sessions`` (mit ihrem
-    ersten Eintrag), ``eintraege`` (mit ihrer Session). Leere Notizen fallen weg.
+    """Die Ebenen als Notizen — ``tage`` (Tag, Text, angelegt), ``sessions`` (mit ihrem
+    ersten Eintrag), ``eintraege`` (mit ihrer Session), ``aufnahmen`` (Anhänge mit ihrem
+    Eintrag — je Eintrag eine Notiz `AUFNAHME`). Leere Notizen fallen weg.
 
     >>> from datetime import UTC
+    >>> from .anhaenge import Anhang
     >>> s = Session(id="s1", plan_id="p", note="zäh",
     ...             started_at=datetime(2026, 10, 17, 7, tzinfo=UTC))
     >>> e = SessionEntry(id="e1", session_id="s1", exercise_id="kb", note="eng",
@@ -80,6 +87,10 @@ def sammeln(
     [('tag', 'müde', None), ('plan', 'zäh', 's1'), ('uebung', 'eng', 'e1')]
     >>> [(x.plan_id, x.exercise_id) for x in n]
     [(None, None), ('p', None), ('p', 'kb')]
+    >>> a = AnhangMitBezug(Anhang("e1", aufgenommen=e.started_at), "kb", e.started_at)
+    >>> b = AnhangMitBezug(Anhang("e1", "video", aufgenommen=e.started_at), "kb", e.started_at)
+    >>> [(x.art, x.text, x.bezug_id, x.exercise_id) for x in sammeln([], [], [], [a, b])]
+    [('aufnahme', '1 Foto, 1 Video', 'e1', 'kb')]
     """
     ergebnis = [Notiz(t, TAG, text.strip(), zeit) for t, text, zeit in tage if text.strip()]
     for s, erst in sessions:
@@ -101,6 +112,24 @@ def sammeln(
                     e.id,
                 )
             )
+    je_eintrag: dict[str, list[AnhangMitBezug]] = {}
+    for x in aufnahmen:
+        je_eintrag.setdefault(x.anhang.eintrag_id, []).append(x)
+    for eintrag_id, liste in je_eintrag.items():
+        erste = min(liste, key=lambda x: x.anhang.aufgenommen)
+        zeit = erste.eintrag_zeit or erste.anhang.aufgenommen
+        bilder, videos, _ = zusammenfassung(x.anhang for x in liste)
+        ergebnis.append(
+            Notiz(
+                lokaler_tag(zeit),
+                AUFNAHME,
+                anzahl_text(bilder, videos),
+                zeit,
+                erste.exercise_id,
+                None,
+                eintrag_id,
+            )
+        )
     return ergebnis
 
 
@@ -142,8 +171,10 @@ def nach_uebungen(notizen: Iterable[Notiz]) -> list[Gruppe]:
     """
     gruppen: dict[tuple[str, str | None], list[Notiz]] = {}
     for x in notizen:
-        schluessel = x.exercise_id if x.art == UEBUNG else x.plan_id if x.art == PLAN else None
-        gruppen.setdefault((x.art, schluessel), []).append(x)
+        # Aufnahmen stehen unter ihrer Übung, zwischen deren Notizen
+        art = UEBUNG if x.art == AUFNAHME else x.art
+        schluessel = x.exercise_id if art == UEBUNG else x.plan_id if art == PLAN else None
+        gruppen.setdefault((art, schluessel), []).append(x)
 
     def neueste(liste: list[Notiz]) -> tuple[date, float]:
         return max((x.tag, x.sortierzeit()) for x in liste)

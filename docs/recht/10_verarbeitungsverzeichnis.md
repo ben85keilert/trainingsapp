@@ -36,6 +36,16 @@ Patientinnen und Patienten der Praxis.
 > Herzfrequenzmittelwert und potenziell biometrisch auswertbar. Entsprechend
 > behandeln.
 
+**Medien** (gebaut 20.10.2026, `docs/plan_anhaenge.md`): Fotos und Videos der eigenen
+Übungsausführung, die die Person mit der Kamera der App an einen Trainingseintrag hängt.
+Zweck ausschließlich Dokumentation für die Person selbst (kein Vergleich, keine Bewertung
+der Haltung durch die App). Speicherort: app-privater Speicher des Geräts
+(`Anhaenge/<Jahr>/<Monat>/`), ohne Ortsstempel; sie gehen in **keinen** Export, kein
+Geräte-Backup und keine Synchronisation — hinaus nur über „Teilen“ am einzelnen Bild, das
+die Person selbst auslöst. Löschung jederzeit durch die Person, endgültig (Einstellungen →
+Anhänge). Eine Übertragung an die Praxis gibt es nicht; käme sie, braucht sie eine eigene
+Einwilligung (`20_einwilligung.md`).
+
 ### Rechtsgrundlage
 
 - Art. 9 Abs. 2 lit. a — **ausdrückliche Einwilligung** (der tragende Weg, siehe `20_einwilligung.md`)

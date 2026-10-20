@@ -204,9 +204,22 @@ def medienverzeichnis() -> Path:
     return datenverzeichnis() / "Medien"
 
 
+def anhaengeverzeichnis() -> Path:
+    """Fotos und Videos an Einträgen — die eigene Übungsausführung (`core/anhaenge.py`).
+
+    Getrennt von ``Messungen/`` (praxis_gui liest und synchronisiert den Ordner),
+    ``Medien/`` (Übungsfotos aus Paketen) und ``Strecken/``. Wie Strecken **nie geteilt**:
+    nicht im Export, nicht in Diagnose oder Sync — hinaus nur per „Teilen“ am einzelnen
+    Anhang, das die Person selbst drückt (`docs/plan_anhaenge.md`, Abschnitt 0).
+    Darunter Monatsordner ``<JJJJ>/<MM>/``.
+    """
+    return datenverzeichnis() / "Anhaenge"
+
+
 __all__ = [
     "EDITION_BUILD",
     "Edition",
+    "anhaengeverzeichnis",
     "datenbankpfad",
     "datenverzeichnis",
     "edition",

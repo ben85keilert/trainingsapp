@@ -36,6 +36,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core.anhaenge import Anhang
 from trainingsapp.core.models import (
     Exercise,
     Plan,
@@ -149,6 +150,8 @@ class _Daten:
     gibt_plaene: bool
     #: Eintrag-ID → Training (`data.StreckeRepo.zu_eintraegen`)
     strecken: dict[str, Strecke]
+    #: Eintrag-ID → Fotos und Videos (`data.AnhangRepo.je_eintraegen`) — Büroklammer mit Zahl
+    anhaenge: dict[str, list[Anhang]]
     vom_timer: set[str]
     tagesnotiz: str
     notiz_zeit: datetime | None
@@ -169,6 +172,10 @@ class _Daten:
 
     def training(self, g: Gemacht) -> Strecke | None:
         return next((self.strecken[e.id] for e in g.eintraege if e.id in self.strecken), None)
+
+    def aufnahmen(self, g: Gemacht) -> int:
+        """Wie viele Fotos und Videos an den Einträgen dieser Übung hängen."""
+        return sum(len(self.anhaenge.get(e.id, [])) for e in g.eintraege)
 
     def reihen(self) -> list[Gemacht]:
         """Je Übung eine Zeile, nach dem ersten Eintrag — ein Training immer für sich."""
@@ -207,6 +214,7 @@ def _lesen(state: AppState, tag: date) -> _Daten:
         andere=[p for p in alle if p.id not in gezeigt],
         gibt_plaene=bool(alle),
         strecken=state.strecken.zu_eintraegen(ids),
+        anhaenge=state.anhaenge.je_eintraegen(ids),
         vom_timer=(
             state.einheiten.eintraege_vom_timer(ids)
             if state.einheiten is not None and ids
@@ -752,6 +760,19 @@ def tagesansicht(
         unter: list[ft.Control] = [ft.Text(erste, size=12, opacity=0.75)]
         if z.zusatz:
             unter.append(ft.Text(z.zusatz, size=11, opacity=0.6))
+        if anzahl := d.aufnahmen(g):
+            # Dezent (Ben, 19.10.2026): Büroklammer mit Zahl — die Bilder zeigt das Blatt
+            unter.append(
+                ft.Row(
+                    spacing=2,
+                    controls=[
+                        ft.Icon(ft.Icons.ATTACH_FILE, size=13, opacity=0.6),
+                        ft.Text(
+                            f"{anzahl} Aufnahme{'' if anzahl == 1 else 'n'}", size=11, opacity=0.6
+                        ),
+                    ],
+                )
+            )
         if notiz := next((e.note for e in reversed(g.eintraege) if e.note), ""):
             unter.append(
                 ft.Text(

@@ -26,6 +26,7 @@ from collections.abc import Callable
 import flet as ft
 
 from trainingsapp.config import app_version, edition, ist_aktiv
+from trainingsapp.core.anhaenge import anzahl_text, groesse_text
 from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.ui.components.hilfe import hilfe_oeffner
 from trainingsapp.ui.components.karte import hinweis, karte, titel
@@ -126,6 +127,8 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
     tag_text = f"{len(state.tags.namen('typ'))} Typen · {len(state.tags.namen('region'))} Regionen"
     pakete = len(state.pakete.alle())
     paket_text = "1 Paket installiert" if pakete == 1 else f"{pakete} Pakete installiert"
+    bilder, videos, groesse = state.anhaenge.gesamt(state.profil.id)
+    anhang_text = f"{anzahl_text(bilder, videos)} · {groesse_text(groesse)}"
     hrv_text = f"{len(e.kacheln)} Kacheln · Reiter „Messung“ " + (
         "sichtbar" if e.messung_anzeigen else "ausgeblendet"
     )
@@ -177,6 +180,18 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 ),
                                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
                                 on_click=oeffner("/einstellungen/pakete"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.ATTACH_FILE),
+                                title=ft.Text("Anhänge"),
+                                subtitle=ft.Text(
+                                    f"Fotos und Videos an Einträgen: Qualität, Speicher, "
+                                    f"Aufräumen · {anhang_text}",
+                                    size=12,
+                                ),
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/anhaenge"),
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
                             ft.Dropdown(

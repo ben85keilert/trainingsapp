@@ -122,14 +122,63 @@ def test_tagebuch_zeigt_aufnahmen_block(welt, page) -> None:
     assert len([c for c in _alle(kontrolle) if isinstance(c, ft.Image)]) == 2
 
 
+def _umbrechend_mit_ausdehnung(wurzel) -> list:
+    """Zeilen mit ``wrap=True``, in denen ein Kind ``expand`` hat — Flutter legt sie als Wrap
+    an, ein Expanded darin ist ein Layoutfehler: Die Release-App zeigt statt des Abschnitts
+    eine leere graue/weiße Fläche (Ben, 21.10.2026: „großes weißes Fenster bei Fotos und
+    Videos“)."""
+    return [
+        c
+        for c in _alle(wurzel)
+        if isinstance(c, ft.Row) and c.wrap and any(k.expand for k in c.controls)
+    ]
+
+
 def test_uebung_zeigt_raster(welt, page) -> None:
     browser = SimpleNamespace()
     ansicht = uebung_detail(page, welt.state, welt.uebung, browser)
     assert "FOTOS UND VIDEOS" in _texte(ansicht)
     assert any(isinstance(c, ft.SegmentedButton) for c in _alle(ansicht))
+    assert not _umbrechend_mit_ausdehnung(ansicht)
     # Eine Übung ohne Aufnahmen hat den Abschnitt nicht
     andere = welt.state.uebungen.laden(seed_id("wandsitz"))
     assert "FOTOS UND VIDEOS" not in _texte(uebung_detail(page, welt.state, andere, browser))
+
+
+def test_keine_ausdehnung_in_umbrechenden_zeilen(welt, page) -> None:
+    """Dieselbe Regel für alle Ansichten mit Anhängen: Blatt, Seite, Tagebuch, Tag,
+    Einstellungen, Einzelansicht."""
+    from trainingsapp.ui.views.tag import tagesansicht
+
+    heute = welt.state.heute()
+    ansichten = [
+        leistungen_blatt(page, welt.state, welt.uebung, heute),
+        leistungen_view(page, welt.state, f"/leistungen/{welt.uebung.id}", welt.uebung),
+        tagebuch(page, welt.state),
+        tagesansicht(page, welt.state, heute),
+        einstellungen_anhaenge(page, welt.state),
+        anhang_view(page, welt.state, "/", welt.foto),
+        anhang_view(page, welt.state, "/", welt.video),
+    ]
+    for ansicht in ansichten:
+        assert not _umbrechend_mit_ausdehnung(ansicht), ansicht
+
+
+async def test_verwerfen_laesst_die_kamera_an(welt, page) -> None:
+    """Ben, 21.10.2026: „wenn ein Bild verworfen wird, ist die Kamera danach deaktiviert“ —
+    das Ergebnis ersetzte die Kamera im Baum, flet-camera gab dabei den Controller frei.
+    Jetzt liegt es über ihr (`Camera.content`), „Verwerfen“ nimmt es nur weg."""
+    flet_camera = pytest.importorskip("flet_camera")
+    a = _Aufnahme(page, welt.state, welt.eintrag, BILD)
+    a.kamera = flet_camera.Camera()
+    a.flaeche.content = a.kamera
+    a.bereit = True
+    a.daten = JPEG
+    a.ergebnis_zeigen()
+    assert a.flaeche.content is a.kamera and isinstance(a.kamera.content, ft.Container)
+    await a.verwerfen()
+    assert a.flaeche.content is a.kamera and a.kamera.content is None
+    assert a.bereit and a.daten is None
 
 
 def test_einstellungen_zeigen_ueberblick(welt, page) -> None:
@@ -147,7 +196,9 @@ def test_einstellungen_zeigen_ueberblick(welt, page) -> None:
 def test_ansicht_foto_und_video(welt, page) -> None:
     foto = anhang_view(page, welt.state, "/", welt.foto)
     assert any(isinstance(c, ft.InteractiveViewer) for c in _alle(foto))
-    assert any("Mittel · 1080p" in t for t in _texte(foto))
+    # Nur der Name der Stufe — die Auflösung kann eine frühere gewesen sein
+    assert any("Mittel" in t for t in _texte(foto))
+    assert not any("1080p" in t or "720p" in t for t in _texte(foto))
     video = anhang_view(page, welt.state, "/", welt.video)
     assert not any(isinstance(c, ft.InteractiveViewer) for c in _alle(video))
     assert any("0:09" in t for t in _texte(video))

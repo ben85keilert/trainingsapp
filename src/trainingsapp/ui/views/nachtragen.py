@@ -21,7 +21,12 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem, lokaler_tag
-from trainingsapp.core.plaene import auspraegung_vorgabe, einzel_plan, erste_offene
+from trainingsapp.core.plaene import (
+    auspraegung_vorgabe,
+    einzel_plan,
+    erste_offene,
+    nachtrag_vorwahl,
+)
 from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tag import LEER, plaene_des_tags, plankarten, uhrzeit_lesen
@@ -276,9 +281,22 @@ def nachtragen_view(
         return erste_offene(passend, anzahl) or passend[0]
 
     def vorwahl() -> str | None:
-        if plan_id and any(p.id == plan_id for p in plaene):
-            return plan_id
-        return next((p.id for p in plaene if erste_offene(stellen(p), anzahl) is not None), None)
+        """Der übergebene Plan, sonst einer, in dem die Übung noch offen ist, sonst der, in
+        dem sie an diesem Tag zuletzt eingetragen wurde (`core.plaene.nachtrag_vorwahl`)."""
+        gemacht_in = [
+            s.plan_id
+            for e, s in sorted(
+                state.sitzungen.eintraege_am_tag(state.profil.id, tag),
+                key=lambda es: es[0].started_at.timestamp() if es[0].started_at else 0.0,
+            )
+            if e.exercise_id == uebung.id
+        ]
+        return nachtrag_vorwahl(
+            plan_id,
+            [p.id for p in plaene],
+            [p.id for p in plaene if erste_offene(stellen(p), anzahl) is not None],
+            gemacht_in,
+        )
 
     wahl: dict[str, Any] = {"plan": vorwahl()}
 

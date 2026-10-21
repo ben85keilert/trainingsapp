@@ -10,7 +10,9 @@ Foto geschossen — das ist das Frontbild (`vorschau`), ohne Thumbnail-Bibliothe
 Ablauf: Vorschau vollflächig, unten Auslöser bzw. Aufnahme/Stopp mit laufender Zeit und
 Restzeit bis zur Höchstdauer, Kamera wechseln (Front ist für Übungen vor dem Handy die
 Regel), Qualitätsstufe als Text. Nach der Aufnahme: Vorschau, Notizzeile, „Behalten“ /
-„Verwerfen“. „Behalten“ schreibt die Dateien in einem Thread (die Bytes sind groß,
+„Verwerfen“. Die Vorschau liegt **über** der Kamera (`Camera.content`), nie an ihrer
+Stelle — ein aus dem Baum genommenes Kamera-Control verliert seinen Controller.
+„Behalten“ schreibt die Dateien in einem Thread (die Bytes sind groß,
 `AnhangRepo.dateien_schreiben`), die Zeile danach im Event-Loop (`AnhangRepo.eintragen` —
 die SQLite-Verbindung darf den Thread nicht wechseln) und geht zurück zur Ansicht darunter.
 
@@ -147,6 +149,7 @@ class _Aufnahme:
                 preset,
                 enable_audio=self.art == VIDEO,
                 video_bitrate=self.qualitaet.video_bitrate,
+                audio_bitrate=self.qualitaet.audio_bitrate,
             )
         except Exception as fehler:
             self.melden(f"Kamera lässt sich nicht öffnen: {fehler}")
@@ -266,7 +269,18 @@ class _Aufnahme:
             if bild
             else ft.Icon(ft.Icons.VIDEOCAM, size=64, opacity=0.5)
         )
-        self.flaeche.content = vorschau
+        if self.kamera is not None:
+            # Über die Kamera legen, nicht an ihre Stelle: Aus dem Baum genommen gibt das
+            # Plugin den Controller frei, und nach „Verwerfen“ war die Kamera tot (Ben,
+            # 21.10.2026 — flet-camera `dispose` → „Camera is not initialized“)
+            self.kamera.content = ft.Container(
+                expand=True,
+                bgcolor=ft.Colors.BLACK,
+                alignment=ft.Alignment.CENTER,
+                content=vorschau,
+            )
+        else:
+            self.flaeche.content = vorschau
         teile = [groesse_text(len(self.daten)), self.qualitaet.label]
         if self.art == VIDEO and self.dauer_s is not None:
             teile.insert(0, dauer_text(self.dauer_s))
@@ -300,9 +314,11 @@ class _Aufnahme:
         await self.zurueck()
 
     async def verwerfen(self) -> None:
+        """Zurück zur Kamera — sie lief unter dem Ergebnis weiter, ein neuer Versuch geht
+        sofort."""
         self.daten, self.frontbild, self.dauer_s = None, None, None
         if self.kamera is not None and self.bereit:
-            self.flaeche.content = self.kamera
+            self.kamera.content = None
             self.status.value = f"{self.qualitaet.label} · {self._richtung()}"
             self.zeichnen()
         else:

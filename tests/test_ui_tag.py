@@ -258,6 +258,45 @@ def test_nachtragen_ohne_plan_und_zurueck_speichert(page, state) -> None:
     assert plan.id not in state.sitzungen.plaene_am_tag(state.profil.id, vorgestern)
 
 
+def test_nachtragen_nach_dem_plan_waehlt_den_plan(page, state) -> None:
+    """Ben, 21.10.2026: Nach einem Eintrag im Plan stand beim Nachtragen „ohne Plan“ — der
+    Nachtrag landete neben dem Plan, die Zeile zeigte aber nur dessen Schild. Jetzt ist der
+    Plan vorgewählt, über die Zeile in „Gemacht“ wie über den runden Knopf; Einträge ohne
+    Plan in derselben Zeile sagt ein eigenes Schild."""
+    plan = _plan(state, "liegestuetzen", "kniebeuge")
+    lgs = seed_id("liegestuetzen")
+    _eintragen(state, plan.id, "liegestuetzen", {"reps": [15]}, started_at=_heute_um(state, 30))
+    ansicht = tagesansicht(page, state, state.heute())
+    zeile = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container) and x.on_click and "Liegestützen" in _texte(x)
+    )
+    zeile.on_click()
+    blatt = page.dialoge[-1]
+    blatt.open = True
+    _knopf(blatt, "Nachtragen").on_click()
+    asyncio.run(blatt.on_dismiss(None))
+    assert page.routen == [f"/nachtragen/{lgs}/{plan.id}"]
+
+    # Der runde Knopf übergibt keinen Plan — die Seite wählt den, in dem sie heute dran war
+    uebung = state.uebungen.laden(lgs)
+    seite = nachtragen_view(page, state, f"/nachtragen/{lgs}", state.heute(), uebung)
+    chips = {x.label.value: x for x in _alle(seite) if isinstance(x, ft.Chip)}
+    assert chips["Kräftigung kurz"].selected and not chips["ohne Plan"].selected
+    _feld(seite, "Wiederholungen je Satz").value = "10"
+    asyncio.run(_knopf(seite, "Eintragen").on_click())
+    plaene = [
+        s.plan_id for _, s in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+    ]
+    assert plaene == [plan.id, plan.id]
+
+    # Wer bewusst „ohne Plan“ nachträgt, sieht das in der Zeile
+    _eintragen(state, None, "liegestuetzen", {"reps": [5]})
+    texte = _texte(tagesansicht(page, state, state.heute()))
+    assert "Kräftigung kurz" in texte and "ohne Plan" in texte
+
+
 def test_nachtragen_blatt_suche_und_auswahl(page, state) -> None:
     _eintragen(state, None, "wandsitz", {"hold": [60]})
     blatt = nachtragen_blatt(page, state, state.heute(), "")

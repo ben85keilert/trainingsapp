@@ -92,10 +92,12 @@ wie eine Notiz mit Anker. Sync-Felder (`outbox`) kommen, wenn die Praxis-Edition
 **`core/anhaenge.py`:**
 
 - `Qualitaet` (StrEnum `klein` · `mittel` · `gross`) mit `preset` (flet-camera
-  `ResolutionPreset.HIGH` 720p · `VERY_HIGH` 1080p · `ULTRA_HIGH` 2160p), `video_bitrate`
-  (1,5 · 3 · 6 Mbit/s), `label`, `richtwert_text` („~0,3 MB je Foto, ~20 MB je Minute“).
-  Foto und Video nutzen dasselbe Preset — ein 1080p-JPEG hat 300–600 kB, das reicht
-  für „wie sah die Übung aus“. Vorgabe **mittel** (`app_setting` `anhang_qualitaet`).
+  `ResolutionPreset.MEDIUM` 480p · `HIGH` 720p · `VERY_HIGH` 1080p), `video_bitrate`
+  (0,4 · 0,8 · 2 Mbit/s), `audio_bitrate` (48 · 64 · 96 kbit/s), `label`, `richtwert`
+  („~0,2 MB je Foto · ~6,5 MB je Minute Video“). Foto und Video nutzen dasselbe Preset.
+  Vorgabe **mittel** (`app_setting` `anhang_qualitaet`). Bis 21.10.2026 eine Stufe
+  größer (720p/1080p/2160p, 1,5/3/6 Mbit/s) — Ben: „Ein 1-Minutenvideo hat 14,6 MB. Das
+  ist viel zu viel.“ Gespeicherte Aufnahmen nennen darum nur den Namen der Stufe.
 - `MAX_VIDEO_S` = 60 als Vorgabe, einstellbar 30/60/120/180 (`anhang_video_max_s`):
   flet-camera gibt das Video als Bytes zurück, es liegt also einmal ganz im Speicher
   (bei „mittel“ ~22 MB je Minute); über drei Minuten wird das auf alten Geräten eng.
@@ -140,8 +142,10 @@ Eintrag hängt. Ohne Eintrag an dem Tag: „Erst eintragen (Nachtragen), dann an
 **Aufnahmeseite `/anhang/aufnehmen/<eintrag>/<foto|video>`** (`views/anhang_aufnahme.py`):
 Vorschau vollflächig, unten Auslöser bzw. Aufnahme/Stopp mit laufender Zeit und
 Restzeit bis `MAX_VIDEO_S`, Kamera wechseln (Rück/Front — Front ist für Übungen vor dem
-Handy die Regel), Blitz aus, Qualitätsstufe als Text („mittel · 1080p“, antippen →
-Einstellungen). Drehen erlaubt (`ui/ausrichtung`, wie Ausdauer). Bei Video wird
+Handy die Regel), Blitz aus, Qualitätsstufe als Text („Mittel · 720p“, antippen →
+Einstellungen). Das Ergebnis liegt über der Kamera (`Camera.content`), nie an ihrer Stelle
+— aus dem Baum genommen gibt flet-camera den Controller frei, und nach „Verwerfen“ war die
+Kamera tot (21.10.2026). Drehen erlaubt (`ui/ausrichtung`, wie Ausdauer). Bei Video wird
 **direkt vor dem Start ein Foto geschossen** — das ist das Frontbild (`vorschau`); so
 braucht es keine Video-Thumbnail-Bibliothek. Nach der Aufnahme: Vorschau mit „Behalten“
 / „Verwerfen“ und einer Notizzeile (`note`, optional, z. B. „links“). „Behalten“

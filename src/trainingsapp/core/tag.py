@@ -45,6 +45,8 @@ class Gemacht:
     plan_ids: tuple[str, ...]
     #: die Variante dieser Zeile — leer ohne (Ben, 21.10.2026)
     variante: str = ""
+    #: mindestens ein Eintrag ohne Plan — neben Plan-Einträgen zeigt die Zeile das an
+    ohne_plan: bool = False
 
     @property
     def nur_abgehakt(self) -> bool:
@@ -63,8 +65,8 @@ def gemacht(
     ...     result={"reps": list(n), **({"variant": v} if v else {})},
     ...     spec_snapshot=SPEC_SAETZE_WDH, started_at=datetime(2026, 10, 18, 7, minute, tzinfo=UTC))
     >>> z = gemacht([(e("lgs", 1, 15, 15), plan), (e("kb", 2), frei), (e("lgs", 3, 13), frei)], {})
-    >>> [(g.exercise_id, g.zeile.wert, g.plan_ids, g.nur_abgehakt) for g in z]
-    [('lgs', 43.0, ('p',), False), ('kb', None, (), True)]
+    >>> [(g.exercise_id, g.zeile.wert, g.plan_ids, g.nur_abgehakt, g.ohne_plan) for g in z]
+    [('lgs', 43.0, ('p',), False, True), ('kb', None, (), True, True)]
 
     Kurz und lang zählen getrennt — 400 kurze sind etwas anderes als 400 lange:
 
@@ -84,7 +86,8 @@ def gemacht(
         ]
         plaene = tuple(dict.fromkeys(s.plan_id for _, s in liste if s.plan_id))
         beginn = min((e.started_at for e in nur if e.started_at), default=None)
-        ergebnis.append(Gemacht(exercise_id, beginn, zeile, tuple(nur), plaene, variante))
+        ohne = any(not s.plan_id for _, s in liste)
+        ergebnis.append(Gemacht(exercise_id, beginn, zeile, tuple(nur), plaene, variante, ohne))
     return ergebnis
 
 

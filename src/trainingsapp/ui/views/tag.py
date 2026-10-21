@@ -498,13 +498,16 @@ def tagesansicht(
             uebung = state.uebungen.laden(g.exercise_id, mit_geloeschten=True)
             if uebung is None:
                 return
+            # Mit dem Plan der Zeile — sonst stand beim Nachtragen „ohne Plan“, und der
+            # Nachtrag landete neben dem Plan (Ben, 21.10.2026)
+            plan_id = g.plan_ids[-1] if g.plan_ids else None
             page.show_dialog(
                 leistungen_blatt(
                     page,
                     state,
                     uebung,
                     tag,
-                    nachtragen=nachtragen_route(basis, g.exercise_id),
+                    nachtragen=nachtragen_route(basis, g.exercise_id, plan_id),
                     danach=auffrischen,
                 )
             )
@@ -812,6 +815,8 @@ def tagesansicht(
             ["Training"]
             if strecke is not None
             else [d.plan_namen.get(p, "Plan") for p in g.plan_ids]
+            # Auch Einträge ohne Plan dabei: sagen — sonst wirkt alles wie im Plan
+            + (["ohne Plan"] if g.ohne_plan and g.plan_ids else [])
         )
         return uebungszeile(
             symbol_key=uebung.icon_key if uebung else None,

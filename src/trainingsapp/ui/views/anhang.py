@@ -68,7 +68,7 @@ def anhang_view(page: Any, state: AppState, basis: str, anhang: Anhang) -> ft.Vi
     kopf = [f"{zeit:%d.%m.%Y}, {zeit:%H:%M} Uhr"]
     if anhang.ist_video and anhang.dauer_s:
         kopf.append(f"{dauer_text(anhang.dauer_s)} min")
-    kopf += [groesse_text(anhang.bytes), Qualitaet.lesen(anhang.qualitaet).label]
+    kopf += [groesse_text(anhang.bytes), Qualitaet.lesen(anhang.qualitaet).name_kurz]
     if len(reihe) > 1:
         kopf.append(f"{position + 1} von {len(reihe)}")
 

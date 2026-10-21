@@ -49,13 +49,16 @@ def aufnahmen_raster(page: Any, state: AppState, uebung: Exercise) -> ft.Control
         return "Heute" if t == heute else f"{t:%d.%m.}" if t.year == heute.year else f"{t:%d.%m.%y}"
 
     bilder, videos, _ = zusammenfassung(alle)
+    # Kein ``expand`` in der umbrechenden Zeile: Flutter legt sie als Wrap an, ein Expanded
+    # darin ist ein Layoutfehler — die Release-App zeigte statt des Abschnitts eine leere
+    # graue/weiße Fläche (Ben, 21.10.2026)
     kopf = ft.Row(
         wrap=True,
         spacing=8,
         run_spacing=6,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         controls=[
-            ft.Text(anzahl_text(bilder, videos), size=13, opacity=0.75, expand=True),
+            ft.Text(anzahl_text(bilder, videos), size=13, opacity=0.75),
             ft.SegmentedButton(
                 selected=[state.anhaenge_zeitraum],
                 show_selected_icon=False,

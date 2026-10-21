@@ -63,14 +63,20 @@ ZEITRAUM_VORGABE = "3m"
 class Qualitaet(StrEnum):
     """Die drei Aufnahmequalitäten (Ben: „mittlere als Standard“).
 
-    Foto und Video nutzen dasselbe Preset — ein 1080p-JPEG hat 300–600 kB, das reicht für
-    „wie sah die Übung aus“. `preset` ist der Wert von flet-camera ``ResolutionPreset``
+    Foto und Video nutzen dasselbe Preset. Seit 21.10.2026 eine Stufe kleiner und mit
+    knapper Bitrate (Ben: „Ein 1-Minutenvideo hat 14,6 MB. Das ist viel zu viel.“): Für
+    „wie sah die Übung aus“ reicht 720p bei unbewegter Kamera; für Profiaufnahmen ist die
+    Kamera des Telefons da. `preset` ist der Wert von flet-camera ``ResolutionPreset``
     (hier als Text, damit `core` flet-frei bleibt).
 
-    >>> Qualitaet.MITTEL.preset, Qualitaet.MITTEL.video_bitrate
-    ('veryHigh', 3000000)
+    >>> Qualitaet.MITTEL.preset, Qualitaet.MITTEL.video_bitrate, Qualitaet.MITTEL.audio_bitrate
+    ('high', 800000, 64000)
     >>> Qualitaet("gross").label
-    'Groß · 2160p'
+    'Groß · 1080p'
+    >>> [q.richtwert for q in Qualitaet]  # doctest: +NORMALIZE_WHITESPACE
+    ['~0,1 MB je Foto · ~3,4 MB je Minute Video',
+     '~0,2 MB je Foto · ~6,5 MB je Minute Video',
+     '~0,5 MB je Foto · ~15,7 MB je Minute Video']
     >>> Qualitaet.lesen("quatsch") is Qualitaet.MITTEL
     True
     """
@@ -81,28 +87,38 @@ class Qualitaet(StrEnum):
 
     @property
     def preset(self) -> str:
-        return {"klein": "high", "mittel": "veryHigh", "gross": "ultraHigh"}[self.value]
+        return {"klein": "medium", "mittel": "high", "gross": "veryHigh"}[self.value]
 
     @property
     def aufloesung(self) -> str:
-        return {"klein": "720p", "mittel": "1080p", "gross": "2160p"}[self.value]
+        return {"klein": "480p", "mittel": "720p", "gross": "1080p"}[self.value]
 
     @property
     def video_bitrate(self) -> int:
-        """Bit je Sekunde."""
-        return {"klein": 1_500_000, "mittel": 3_000_000, "gross": 6_000_000}[self.value]
+        """Bit je Sekunde (Bild)."""
+        return {"klein": 400_000, "mittel": 800_000, "gross": 2_000_000}[self.value]
+
+    @property
+    def audio_bitrate(self) -> int:
+        """Bit je Sekunde (Ton) — Sprache und Zählen, keine Musik."""
+        return {"klein": 48_000, "mittel": 64_000, "gross": 96_000}[self.value]
+
+    @property
+    def name_kurz(self) -> str:
+        """Nur der Name der Stufe — für gespeicherte Aufnahmen: deren Auflösung kann eine
+        frühere gewesen sein (bis 21.10.2026 war „mittel“ 1080p)."""
+        return {"klein": "Klein", "mittel": "Mittel", "gross": "Groß"}[self.value]
 
     @property
     def label(self) -> str:
-        name = {"klein": "Klein", "mittel": "Mittel", "gross": "Groß"}[self.value]
-        return f"{name} · {self.aufloesung}"
+        return f"{self.name_kurz} · {self.aufloesung}"
 
     @property
     def richtwert(self) -> str:
         """Was eine Aufnahme etwa braucht — für die Einstellungen."""
-        foto = {"klein": "0,2", "mittel": "0,4", "gross": "1,5"}[self.value]
-        minute = round(self.video_bitrate / 8 / 1e6 * 60)
-        return f"~{foto} MB je Foto · ~{minute} MB je Minute Video"
+        foto = {"klein": "0,1", "mittel": "0,2", "gross": "0,5"}[self.value]
+        minute = (self.video_bitrate + self.audio_bitrate) / 8 / 1e6 * 60
+        return f"~{foto} MB je Foto · ~{minute:.1f} MB je Minute Video".replace(".", ",")
 
     @classmethod
     def lesen(cls, wert: str | None) -> Qualitaet:

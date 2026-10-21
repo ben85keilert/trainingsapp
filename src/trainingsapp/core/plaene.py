@@ -153,6 +153,38 @@ def erste_offene(items: Sequence[PlanItem], anzahl: Mapping[str, int]) -> PlanIt
     return next((i for i in items if i.id not in fertig), None)
 
 
+def nachtrag_vorwahl(
+    gewuenscht: str | None,
+    plaene: Sequence[str],
+    offen: Iterable[str],
+    gemacht_in: Sequence[str | None],
+) -> str | None:
+    """Welcher Plan beim Nachtragen vorgewählt ist: der übergebene, sonst einer, in dem die
+    Übung an diesem Tag noch offen ist, sonst der, in dem sie zuletzt eingetragen wurde —
+    erst dann „ohne Plan“ (Ben, 21.10.2026: Nach einem Training im Plan stand „ohne Plan“
+    da, und der Nachtrag landete neben dem Plan).
+
+    ``plaene``: die Pläne des Tags mit dieser Übung (wie die Chips sie zeigen); ``offen``:
+    die davon, in denen sie noch offen ist; ``gemacht_in``: der Plan je Eintrag der Übung
+    an diesem Tag, der älteste zuerst (``None``: ohne Plan).
+
+    >>> nachtrag_vorwahl("p", ["p", "q"], [], [])
+    'p'
+    >>> nachtrag_vorwahl(None, ["p", "q"], ["q"], ["p"])
+    'q'
+    >>> nachtrag_vorwahl(None, ["p", "q"], [], ["q", None, "p", None])
+    'p'
+    >>> nachtrag_vorwahl(None, ["p"], [], [None]) is None
+    True
+    """
+    if gewuenscht is not None and gewuenscht in plaene:
+        return gewuenscht
+    noch_offen = set(offen)
+    if (plan := next((p for p in plaene if p in noch_offen), None)) is not None:
+        return plan
+    return next((p for p in reversed(gemacht_in) if p is not None and p in plaene), None)
+
+
 # ---------------------------------------------------------------------------
 # Regeln der Übungsausführung (bis 19.10.2026 in `ui/views/plan.py`, N25)
 # ---------------------------------------------------------------------------
@@ -354,6 +386,7 @@ __all__ = [
     "heutige_plaene",
     "im_plan",
     "letzter_heute",
+    "nachtrag_vorwahl",
     "spaetere_stelle_offen",
     "stand_im_plan",
     "tage_text",

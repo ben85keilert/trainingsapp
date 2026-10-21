@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import date
 
 import flet as ft
@@ -28,6 +29,7 @@ from trainingsapp.core.verlauf import (
     Kennzahl,
     datum_marken,
     kurven_punkte,
+    trainingsnummern,
 )
 from trainingsapp.ui.components.kurve import Y_SCHRITTE, zahl_text
 
@@ -93,6 +95,17 @@ def tooltip_text(tag: date, wert: float, kennzahl: Kennzahl) -> str:
     return f"{tag_text} · {kennzahl.text(wert)} {kennzahl.einheit}".strip()
 
 
+@dataclass(frozen=True, slots=True)
+class Reihe:
+    """Eine Linie der Kurve: ihre Tageswerte, ihre Farbe und wie sie heißt (Ben, 21.10.2026:
+    eine Linie je Variante, „Zusammen“ gestrichelt)."""
+
+    werte: Sequence[tuple[date, float]]
+    farbe: str = ft.Colors.PRIMARY
+    name: str = ""
+    gestrichelt: bool = False
+
+
 def linie(
     werte: Sequence[tuple[date, float]],
     kennzahl: Kennzahl,
@@ -105,16 +118,41 @@ def linie(
 ) -> ft.Control:
     """Die Kurve einer Kennzahl: ein Punkt je Tag, x die Zeit bis ``bis`` (heute) oder die
     Trainingsnummer. ``markiert``: dieser Tag als hervorgehobener Punkt."""
-    if not werte:
+    return linien(
+        [Reihe(werte)],
+        kennzahl,
+        modus=modus,
+        bis=bis,
+        markiert=markiert,
+        auf_tipp=auf_tipp,
+        hoehe=hoehe,
+    )
+
+
+def linien(
+    reihen: Sequence[Reihe],
+    kennzahl: Kennzahl,
+    *,
+    modus: str,
+    bis: date,
+    markiert: date | None = None,
+    auf_tipp: Callable[[date], None] | None = None,
+    hoehe: int = 220,
+) -> ft.Control:
+    """Mehrere Linien in **einer** Kurve (Skizze B2) — gemeinsame Achsen: die Zeit ab dem
+    ersten Wert irgendeiner Linie, bzw. die Trainingsnummer über alle Linien."""
+    reihen = [r for r in reihen if r.werte]
+    if not reihen:
         return ft.Container(
             height=hoehe,
             alignment=ft.Alignment.CENTER,
             content=ft.Text("Noch keine Werte in diesem Zeitraum", opacity=0.6),
         )
-    beginn = werte[0][0]
-    punkte = kurven_punkte(werte, modus, beginn)
+    beginn = min(r.werte[0][0] for r in reihen)
+    nummern = trainingsnummern(t for r in reihen for t, _ in r.werte)
+    je_reihe = [kurven_punkte(r.werte, modus, beginn, nummern) for r in reihen]
     if modus == MODUS_NUMMER:
-        n = len(punkte)
+        n = len(nummern)
         schritt = next((s for s in NUMMER_SCHRITTE if n / s <= X_MARKEN), NUMMER_SCHRITTE[-1])
         x0, x1 = 0.4, n + 0.6
         marken = [(float(k), str(k)) for k in range(schritt, n + 1, schritt)] or [(1.0, "1")]
@@ -126,41 +164,47 @@ def linie(
         tage = datum_marken(beginn, bis, X_MARKEN) or [(beginn, f"{beginn.day}.{beginn.month}.")]
         marken = [(float((t - beginn).days), text) for t, text in tage]
         x_abstand = 1
-    oben, y_schritt = werteachse(max(w for _, w in werte), kennzahl.dauer)
-    farbe = ft.Colors.PRIMARY
+    oben, y_schritt = werteachse(max(w for r in reihen for _, w in r.werte), kennzahl.dauer)
     stil = ft.TextStyle(size=12, color=ft.Colors.ON_INVERSE_SURFACE)
-    daten = fc.LineChartData(
-        points=[
-            fc.LineChartDataPoint(
-                x,
-                y,
-                selected=tag == markiert,
-                tooltip=fc.LineChartDataPointTooltip(
-                    text=tooltip_text(tag, y, kennzahl), text_style=stil
-                ),
-            )
-            for x, y, tag in punkte
-        ],
-        stroke_width=2.5,
-        color=farbe,
-        rounded_stroke_cap=True,
-        rounded_stroke_join=True,
-        point=fc.ChartCirclePoint(radius=3.5, color=farbe),
-        selected_point=fc.ChartCirclePoint(
-            radius=6, color=ft.Colors.SURFACE, stroke_color=farbe, stroke_width=3
-        ),
-    )
+    mehrere = len(reihen) > 1
+
+    def daten(r: Reihe, punkte: list[tuple[float, float, date]]) -> fc.LineChartData:
+        vorn = f"{r.name} · " if mehrere and r.name else ""
+        return fc.LineChartData(
+            points=[
+                fc.LineChartDataPoint(
+                    x,
+                    y,
+                    selected=tag == markiert,
+                    tooltip=fc.LineChartDataPointTooltip(
+                        text=vorn + tooltip_text(tag, y, kennzahl), text_style=stil
+                    ),
+                )
+                for x, y, tag in punkte
+            ],
+            stroke_width=2 if r.gestrichelt else 2.5,
+            color=r.farbe,
+            dash_pattern=[6, 4] if r.gestrichelt else None,
+            rounded_stroke_cap=True,
+            rounded_stroke_join=True,
+            point=fc.ChartCirclePoint(radius=2.5 if r.gestrichelt else 3.5, color=r.farbe),
+            selected_point=fc.ChartCirclePoint(
+                radius=6, color=ft.Colors.SURFACE, stroke_color=r.farbe, stroke_width=3
+            ),
+        )
 
     def ereignis(e: fc.LineChartEvent) -> None:
         if auf_tipp is None or e.type != fc.ChartEventType.TAP_UP:
             return
         for spot in e.spots or []:
-            if spot.bar_index == 0 and 0 <= spot.spot_index < len(punkte):
-                auf_tipp(punkte[spot.spot_index][2])
+            if 0 <= spot.bar_index < len(je_reihe) and 0 <= spot.spot_index < len(
+                je_reihe[spot.bar_index]
+            ):
+                auf_tipp(je_reihe[spot.bar_index][spot.spot_index][2])
                 return
 
     return fc.LineChart(
-        data_series=[daten],
+        data_series=[daten(r, p) for r, p in zip(reihen, je_reihe, strict=True)],
         min_x=x0,
         max_x=x1,
         # Knapp unter 0: Flet beschriftet den Rand nicht — so steht die 0 mit ihrer Linie da
@@ -309,4 +353,13 @@ def mini_saeulen(
     return cv.Canvas(shapes=formen, width=breite, height=hoehe)
 
 
-__all__ = ["linie", "mini", "mini_saeulen", "saeulen", "tooltip_text", "werteachse"]
+__all__ = [
+    "Reihe",
+    "linie",
+    "linien",
+    "mini",
+    "mini_saeulen",
+    "saeulen",
+    "tooltip_text",
+    "werteachse",
+]

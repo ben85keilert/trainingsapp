@@ -233,7 +233,12 @@ def uebung_timer_view(
 
     def kontext() -> Any:
         return uebung_lauf.kontext_fuer(
-            uebung, plan, item, zeit_eintragen=zeit_eintragen, feld=feld_gemerkt or None
+            uebung,
+            plan,
+            item,
+            zeit_eintragen=zeit_eintragen,
+            feld=feld_gemerkt or None,
+            auspraegung=uebung_lauf.gewaehlte_ausfuehrung(state, uebung, item),
         )
 
     # -- Speichern, wo die Wahl hingehört ------------------------------------------------

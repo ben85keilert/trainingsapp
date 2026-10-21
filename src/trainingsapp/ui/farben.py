@@ -39,6 +39,14 @@ DUNKEL: dict[str, str] = {
     "notiz_neu": ft.Colors.ORANGE_600,
     "leistung": ft.Colors.LIGHT_BLUE_300,  # Leistungen der Person in der Aufnahme (Plan D)
     "rot": ft.Colors.RED_400,  # auffällige Schläge, Fehler
+    # Linien der Kurve einer Übung, eine je Variante (Ben, 21.10.2026, Skizze B2) — erst
+    # die Primärfarbe, dann Orange und Blau, die auch ohne Farbsehen auseinanderfallen
+    "reihe_1": ft.Colors.PRIMARY,
+    "reihe_2": ft.Colors.ORANGE_400,
+    "reihe_3": ft.Colors.BLUE_400,
+    "reihe_4": ft.Colors.PURPLE_300,
+    "reihe_5": ft.Colors.LIME_600,
+    "reihe_6": ft.Colors.PINK_300,
 }
 
 #: Heller Grund: gleicher Farbton, abgedunkelt auf ≥ 3:1 (Hexwerte, weil es
@@ -64,7 +72,16 @@ HELL: dict[str, str] = {
     "notiz_neu": "#B46400",
     "leistung": "#2F7DB5",
     "rot": "#EA221F",
+    "reihe_1": ft.Colors.PRIMARY,
+    "reihe_2": "#AD6600",
+    "reihe_3": "#0C7AD3",
+    "reihe_4": "#AF50C0",
+    "reihe_5": "#767D1F",
+    "reihe_6": "#E9185E",
 }
+
+#: Die Linienfarben der Kurve einer Übung, in dieser Reihenfolge (wiederholt ab der siebten)
+REIHEN: tuple[str, ...] = ("reihe_1", "reihe_2", "reihe_3", "reihe_4", "reihe_5", "reihe_6")
 
 FARBEN: dict[str, str] = dict(DUNKEL)
 
@@ -75,4 +92,4 @@ def helligkeit_setzen(hell: bool) -> None:
     FARBEN.update(HELL if hell else DUNKEL)
 
 
-__all__ = ["DUNKEL", "FARBEN", "HELL", "helligkeit_setzen"]
+__all__ = ["DUNKEL", "FARBEN", "HELL", "REIHEN", "helligkeit_setzen"]

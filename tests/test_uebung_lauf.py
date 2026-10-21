@@ -176,3 +176,37 @@ async def test_stoppuhr_marke_heisst_stoppuhr_ohne_soll(umgebung) -> None:
     assert marke["profil"] == "stoppuhr" and "soll_s" not in marke
     (eintrag,) = [x for x, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
     assert eintrag.result == {"hold": [20]}
+
+
+async def test_timer_traegt_die_gewaehlte_variante_ein(umgebung) -> None:
+    """Ben, 21.10.2026: „Ablauf und Uhr tragen sie ein“ — die Ausführung, die der Block zeigt,
+    kommt in den Eintrag, auch beim späteren „Eintragen“ eines abgebrochenen Laufs."""
+    from trainingsapp.core import varianten as var
+
+    state, uhr, gurt, _ = umgebung
+    uebung = _planke(state, "hold")
+    uebung.result_spec = var.mit_varianten(
+        uebung.result_spec, [var.Variante("Unterarm"), var.Variante("gestreckt")]
+    )
+    state.uebungen.speichern(uebung)
+    state.auspraegung_wahl[f"einzel-{uebung.id}"] = {"variant": "gestreckt"}
+    wahl = uebung_lauf.gewaehlte_ausfuehrung(state, uebung, None)
+    assert wahl == {"variant": "gestreckt"}
+    e = uebung_lauf.starten(
+        Seite(), state, uebung_lauf.kontext_fuer(uebung, auspraegung=wahl), _profil()
+    )
+    await _ticken(state, uhr, gurt, e, 60, bis_ende=True)
+    (lauf,) = uebung_lauf.laeufe_heute(state, uebung.id)
+    eintrag = state.sitzungen.eintrag_laden(lauf.eintrag_id)
+    assert eintrag is not None and eintrag.result == {"variant": "gestreckt", "hold": [10, 10, 10]}
+
+    # Abgebrochen und später eingetragen: die Ausführung steht in der Zeitleiste
+    e = uebung_lauf.starten(
+        Seite(), state, uebung_lauf.kontext_fuer(uebung, auspraegung=wahl), _profil()
+    )
+    await _ticken(state, uhr, gurt, e, 12)
+    e.timer.lauf.abbrechen()
+    await _ticken(state, uhr, gurt, e, 2, bis_ende=True)
+    abgebrochen = next(x for x in uebung_lauf.laeufe_heute(state, uebung.id) if x.abgebrochen)
+    spaeter = uebung_lauf.lauf_eintragen(state, abgebrochen.einheit_id)
+    assert spaeter is not None and spaeter.result == {"variant": "gestreckt", "hold": [10]}

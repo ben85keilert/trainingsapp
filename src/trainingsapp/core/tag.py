@@ -3,7 +3,9 @@
 Die Tagesansicht hat zwei Darstellungen (`ui/views/tag.py`):
 
 - **Übersicht** (Vorgabe): je Übung eine Zeile in der Reihenfolge ihres ersten Eintrags —
-  Wert, Sätze, die Pläne als Etikett (`gemacht`).
+  Wert, Sätze, die Pläne als Etikett (`gemacht`). Hat eine Übung Varianten, bekommt jede
+  ihre eigene Zeile mit eigener Zahl (Ben, 21.10.2026: „Varianten werden separat gezählt.
+  Das ist vor allem im Tagebuch wichtig“).
 - **Zeitleiste**: der Tag in Uhrzeit-Reihenfolge; ein Plan ist ein Block mit seinen
   Übungen, was ohne Plan dazukam, steht einzeln an seiner Stelle (`zeitleiste`).
 
@@ -23,6 +25,7 @@ from datetime import date, datetime, time
 
 from .models import Plan, PlanItem, Session, SessionEntry, lokaler_tag
 from .plaene import erledigte, heutige_plaene
+from .varianten import von as variante_von
 from .verlauf import Tageszeile, tageszeilen
 
 #: Zustände der Plan-Karte (Skizze C1)
@@ -31,7 +34,7 @@ NEU, UNTERWEGS, FERTIG, LEER = "neu", "unterwegs", "fertig", "leer"
 
 @dataclass(frozen=True, slots=True)
 class Gemacht:
-    """Eine Übung an diesem Tag — alle ihre Einträge, Ausprägungen zusammen."""
+    """Eine Übung an diesem Tag — alle ihre Einträge einer Variante, Ausprägungen zusammen."""
 
     exercise_id: str
     #: der erste Eintrag des Tages
@@ -40,6 +43,8 @@ class Gemacht:
     eintraege: tuple[SessionEntry, ...]
     #: die Pläne, in denen sie dran war (in der Reihenfolge des ersten Eintrags)
     plan_ids: tuple[str, ...]
+    #: die Variante dieser Zeile — leer ohne (Ben, 21.10.2026)
+    variante: str = ""
 
     @property
     def nur_abgehakt(self) -> bool:
@@ -49,27 +54,37 @@ class Gemacht:
 def gemacht(
     eintraege: Iterable[tuple[SessionEntry, Session]], namen: dict[str, str]
 ) -> list[Gemacht]:
-    """Je Übung eine Zeile, in der Reihenfolge des ersten Eintrags.
+    """Je Übung und Variante eine Zeile, in der Reihenfolge des ersten Eintrags.
 
     >>> from datetime import UTC
     >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
     >>> plan, frei = Session(id="s1", plan_id="p"), Session(id="s2")
-    >>> def e(x, minute, *n): return SessionEntry(exercise_id=x, result={"reps": list(n)},
+    >>> def e(x, minute, *n, v=""): return SessionEntry(exercise_id=x,
+    ...     result={"reps": list(n), **({"variant": v} if v else {})},
     ...     spec_snapshot=SPEC_SAETZE_WDH, started_at=datetime(2026, 10, 18, 7, minute, tzinfo=UTC))
     >>> z = gemacht([(e("lgs", 1, 15, 15), plan), (e("kb", 2), frei), (e("lgs", 3, 13), frei)], {})
     >>> [(g.exercise_id, g.zeile.wert, g.plan_ids, g.nur_abgehakt) for g in z]
     [('lgs', 43.0, ('p',), False), ('kb', None, (), True)]
+
+    Kurz und lang zählen getrennt — 400 kurze sind etwas anderes als 400 lange:
+
+    >>> z = gemacht([(e("lgs", 1, 30, v="kurz"), plan), (e("lgs", 2, 15, v="lang"), plan),
+    ...              (e("lgs", 3, 30, v="kurz"), plan)], {})
+    >>> [(g.variante, g.zeile.wert) for g in z]
+    [('kurz', 60.0), ('lang', 15.0)]
     """
-    je_uebung: dict[str, list[tuple[SessionEntry, Session]]] = {}
+    je_zeile: dict[tuple[str, str], list[tuple[SessionEntry, Session]]] = {}
     for e, s in eintraege:
-        je_uebung.setdefault(e.exercise_id, []).append((e, s))
+        je_zeile.setdefault((e.exercise_id, variante_von(e.result)), []).append((e, s))
     ergebnis = []
-    for exercise_id, liste in je_uebung.items():
+    for (exercise_id, variante), liste in je_zeile.items():
         nur = [e for e, _ in liste]
-        (zeile,) = tageszeilen(nur, lambda x: x, namen) or [Tageszeile(exercise_id, None, None, "")]
+        (zeile,) = tageszeilen(nur, lambda x: x, namen) or [
+            Tageszeile(exercise_id, None, None, "", variante=variante)
+        ]
         plaene = tuple(dict.fromkeys(s.plan_id for _, s in liste if s.plan_id))
         beginn = min((e.started_at for e in nur if e.started_at), default=None)
-        ergebnis.append(Gemacht(exercise_id, beginn, zeile, tuple(nur), plaene))
+        ergebnis.append(Gemacht(exercise_id, beginn, zeile, tuple(nur), plaene, variante))
     return ergebnis
 
 

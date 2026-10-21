@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.einheit import (
+    AUSFUEHRUNG_SCHLUESSEL,
     MIN_MARKE_S,
     Baustein,
     Beteiligung,
@@ -342,6 +343,9 @@ class UebungKontext:
     item_id: str | None = None
     #: Welches Feld die Zeit bekommt (``hold``/``duration``) — ``None``: nur „gemacht“
     zeitfeld: str | None = None
+    #: Die Ausführung beim Start — Variante, Gewicht, Seite … (Ben, 21.10.2026: „Ablauf und
+    #: Uhr tragen sie ein“); sie kommt in den Eintrag
+    auspraegung: dict[str, Any] = field(default_factory=dict)
 
 
 class UebungBaustein:
@@ -385,6 +389,8 @@ class UebungBaustein:
             daten["planuebung"] = k.item_id
         if k.zeitfeld:
             daten["zeitfeld"] = k.zeitfeld
+        # Flach, wie im Eintrag — die Zeitleiste nimmt nur einfache Werte (`daten_pruefen`)
+        daten.update({s: k.auspraegung[s] for s in AUSFUEHRUNG_SCHLUESSEL if s in k.auspraegung})
         return daten
 
     def starten(self, t0: float) -> Beteiligung:

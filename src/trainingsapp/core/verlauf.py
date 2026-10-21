@@ -19,11 +19,15 @@ Datenbank und ohne Oberfläche:
 Zwei X-Achsen: die **Zeit** (Vorgabe seit 17.10.2026, ein Datum an der Achse) und die
 **Trainingsnummer** (gleiche Abstände, egal ob ein Tag oder drei Wochen dazwischen
 lagen). Die Nummer wird hier gezählt, nicht gespeichert.
+
+**Varianten** (Ben, 21.10.2026, `core.varianten`) zählen getrennt: Ein Tag zeigt je
+Variante eine eigene Zeile (`tageszeilen`), die Kurve einer Übung je Variante eine eigene
+Linie (`linien`) — „kurze und lange getrennt dargestellt in der selben Kurve“.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -40,6 +44,8 @@ from .result_spec import (
 )
 from .tagesbilanz import kacheln
 from .units import format_dauer
+from .varianten import VARIANTE
+from .varianten import von as variante_von
 
 MODUS_NUMMER = "nummer"
 MODUS_ZEIT = "zeit"
@@ -318,22 +324,122 @@ def saetze_text(eintraege: Iterable[SessionEntry], k: Kennzahl) -> str:
 
 
 def kurven_punkte(
-    werte: Sequence[tuple[date, float]], modus: str, von: date | None = None
+    werte: Sequence[tuple[date, float]],
+    modus: str,
+    von: date | None = None,
+    nummern: Mapping[date, int] | None = None,
 ) -> list[tuple[float, float, date]]:
-    """x je Tag: Tage seit ``von`` (Vorgabe: der erste Wert) oder die laufende Nummer.
+    """x je Tag: Tage seit ``von`` (Vorgabe: der erste Wert) oder die laufende Nummer —
+    bei mehreren Linien die gemeinsame (``nummern``, `trainingsnummern`).
 
     >>> w = [(date(2026, 10, 1), 5.0), (date(2026, 10, 8), 6.0)]
     >>> [(x, y) for x, y, _ in kurven_punkte(w, MODUS_ZEIT)]
     [(0.0, 5.0), (7.0, 6.0)]
     >>> [(x, y) for x, y, _ in kurven_punkte(w, MODUS_NUMMER)]
     [(1.0, 5.0), (2.0, 6.0)]
+    >>> nr = trainingsnummern([date(2026, 10, 1), date(2026, 10, 3), date(2026, 10, 8)])
+    >>> [(x, y) for x, y, _ in kurven_punkte(w, MODUS_NUMMER, nummern=nr)]
+    [(1.0, 5.0), (3.0, 6.0)]
     """
     if not werte:
         return []
     beginn = von or werte[0][0]
     if modus == MODUS_NUMMER:
+        if nummern is not None:
+            return [(float(nummern[tag]), w, tag) for tag, w in werte if tag in nummern]
         return [(float(i + 1), w, tag) for i, (tag, w) in enumerate(werte)]
     return [(float((tag - beginn).days), w, tag) for tag, w in werte]
+
+
+def trainingsnummern(tage: Iterable[date]) -> dict[date, int]:
+    """Die laufende Trainingsnummer je Tag — gemeinsam für alle Linien einer Kurve.
+
+    >>> trainingsnummern([date(2026, 10, 8), date(2026, 10, 1), date(2026, 10, 8)])
+    {datetime.date(2026, 10, 1): 1, datetime.date(2026, 10, 8): 2}
+    """
+    return {tag: i + 1 for i, tag in enumerate(sorted(set(tage)))}
+
+
+@dataclass(frozen=True, slots=True)
+class Linie:
+    """Eine Linie in der Kurve einer Übung: ein Teil (Übung + Variante) mit seinen
+    Tageswerten (Ben, 21.10.2026, Skizze B2)."""
+
+    exercise_id: str
+    #: leer = Einträge ohne Variante
+    variante: str
+    werte: tuple[tuple[date, float], ...]
+
+    @property
+    def schluessel(self) -> str:
+        return f"{self.exercise_id}|{self.variante}"
+
+
+def linien(eintraege: Iterable[tuple[date, SessionEntry]], k: Kennzahl) -> list[Linie]:
+    """Je Teil (Übung + Variante) eine Linie, in der Reihenfolge des ersten Eintrags. Teile
+    ohne Wert in dieser Kennzahl (nur abgehakt) fallen weg.
+
+    >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    >>> def e(v, *n): return SessionEntry(exercise_id="lgs", spec_snapshot=SPEC_SAETZE_WDH,
+    ...     result={"reps": list(n), **({"variant": v} if v else {})})
+    >>> mo, di = date(2026, 10, 12), date(2026, 10, 13)
+    >>> tage = [(mo, e("kurz", 30)), (mo, e("lang", 15)), (di, e("kurz", 40)), (mo, e("kurz", 30))]
+    >>> summe, _ = kennzahlen([e("", 1)])
+    >>> [(x.variante, [w for _, w in x.werte]) for x in linien(tage, summe)]
+    [('kurz', [60.0, 40.0]), ('lang', [15.0])]
+    """
+    gruppen: dict[tuple[str, str], list[tuple[date, SessionEntry]]] = {}
+    for tag, e in eintraege:
+        gruppen.setdefault((e.exercise_id, variante_von(e.result)), []).append((tag, e))
+    ergebnis = []
+    for (exercise_id, variante), liste in gruppen.items():
+        werte = tageswerte(liste, k)
+        if werte:
+            ergebnis.append(Linie(exercise_id, variante, tuple(werte)))
+    return ergebnis
+
+
+def linie_name(linie: Linie, namen: Mapping[str, str], kachel_id: str) -> str:
+    """Wie eine Linie heißt: ihre Variante („kurz“), ohne Variante „ohne Variante“ — gehört
+    sie zu einer verwandten Übung (gleiche Kachel), steht deren Name davor.
+
+    >>> namen = {"lgs": "Liegestütz", "wand": "Liegestütz an der Wand"}
+    >>> linie_name(Linie("lgs", "kurz", ()), namen, "lgs")
+    'kurz'
+    >>> linie_name(Linie("wand", "", ()), namen, "lgs")
+    'Liegestütz an der Wand'
+    >>> linie_name(Linie("lgs", "", ()), namen, "lgs")
+    'ohne Variante'
+    """
+    if linie.exercise_id == kachel_id:
+        return linie.variante or "ohne Variante"
+    name = namen.get(linie.exercise_id, "?")
+    return f"{name} · {linie.variante}" if linie.variante else name
+
+
+def linien_ordnen(
+    liste: Iterable[Linie], kachel_id: str, reihenfolge: Sequence[str], namen: Mapping[str, str]
+) -> list[Linie]:
+    """Die Varianten der Übung in der Reihenfolge ihrer Einstellungen, dann inzwischen
+    entfernte, dann was ohne Variante eingetragen wurde, zuletzt verwandte Übungen — so
+    behält jede Linie ihre Farbe, welcher Zeitraum auch gezeigt wird.
+
+    >>> namen = {"lgs": "Liegestütz", "wand": "Liegestütz an der Wand"}
+    >>> l = [Linie("wand", "", ()), Linie("lgs", "", ()), Linie("lgs", "lang", ()),
+    ...      Linie("lgs", "alt", ()), Linie("lgs", "kurz", ())]
+    >>> [linie_name(x, namen, "lgs") for x in linien_ordnen(l, "lgs", ["kurz", "lang"], namen)]
+    ['kurz', 'lang', 'alt', 'ohne Variante', 'Liegestütz an der Wand']
+    """
+    vorne = list(reihenfolge)
+
+    def rang(x: Linie) -> tuple[int, int, str]:
+        if x.exercise_id != kachel_id:
+            return (3, 0, f"{namen.get(x.exercise_id, '')}|{x.variante}")
+        if x.variante in vorne:
+            return (0, vorne.index(x.variante), "")
+        return (1, 0, x.variante) if x.variante else (2, 0, "")
+
+    return sorted(liste, key=rang)
 
 
 # ---------------------------------------------------------------------------
@@ -549,7 +655,8 @@ def trend(werte: Sequence[tuple[date, float]], heute: date, tage: int = 28) -> f
 
 @dataclass(frozen=True, slots=True)
 class Tageszeile:
-    """Eine Übung an einem Tag — Varianten zusammen wie in der Tagesbilanz."""
+    """Eine Übung an einem Tag — verwandte Übungen zusammen wie in der Tagesbilanz, jede
+    Variante für sich."""
 
     kachel_id: str
     #: die erste Kennzahl der Übung — ``None``: nur abgehakt
@@ -557,8 +664,10 @@ class Tageszeile:
     wert: float | None
     #: „3 Sätze · 15 · 15 · 13“, sonst die Zusammenfassung („408 m · 5:05 Zeit“)
     zeile: str
-    #: woraus sie besteht (Varianten, Ausprägungen) oder „zusätzlich abgehakt“
+    #: woraus sie besteht (verwandte Übungen, Ausprägungen) oder „zusätzlich abgehakt“
     zusatz: str = ""
+    #: die Variante dieser Zeile — leer ohne (Ben, 21.10.2026)
+    variante: str = ""
 
 
 def tageszeilen(
@@ -566,26 +675,39 @@ def tageszeilen(
     kachel_von: Callable[[str], str],
     namen: dict[str, str],
 ) -> list[Tageszeile]:
-    """Die Übungen eines Tages, in der Reihenfolge ihres ersten Eintrags.
+    """Die Übungen eines Tages, in der Reihenfolge ihres ersten Eintrags — je Variante eine
+    eigene Zeile mit eigener Zahl (Ben, 21.10.2026: „Varianten werden separat gezählt“).
 
     >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
-    >>> def e(x, *n): return SessionEntry(exercise_id=x, result={"reps": list(n)},
-    ...                                   spec_snapshot=SPEC_SAETZE_WDH)
+    >>> def e(x, *n, v=""): return SessionEntry(exercise_id=x, spec_snapshot=SPEC_SAETZE_WDH,
+    ...     result={"reps": list(n), **({"variant": v} if v else {})})
     >>> z = tageszeilen([e("lgs", 15, 15), e("lgs", 13), e("kb")], lambda x: x, {})
     >>> [(t.kachel_id, t.wert, t.zeile) for t in z]
     [('lgs', 43.0, '3 Sätze · 15 · 15 · 13'), ('kb', None, 'abgehakt')]
+    >>> z = tageszeilen([e("lgs", 30, v="kurz"), e("lgs", 15, v="lang"), e("lgs", 30, v="kurz")],
+    ...                 lambda x: x, {})
+    >>> [(t.variante, t.wert, t.zusatz) for t in z]
+    [('kurz', 60.0, ''), ('lang', 15.0, '')]
     """
     zeilen = []
     for k in kacheln(eintraege, kachel_von):
-        alle = [e for b in k.teile for e in b.eintraege]
-        kz = kennzahlen(alle)
-        erste = kz[0] if kz else None
-        wert = tageswert(alle, erste) if erste is not None else None
-        saetze = saetze_text(alle, erste) if erste is not None else ""
-        zusatz = k.aufschluesselung(namen)
-        if saetze and k.abgehakt and not zusatz:
-            zusatz = "zusätzlich abgehakt"
-        zeilen.append(Tageszeile(k.kachel_id, erste, wert, saetze or k.zusammenfassung(), zusatz))
+        je_variante: dict[str, list[SessionEntry]] = {}
+        for e in (e for b in k.teile for e in b.eintraege):
+            je_variante.setdefault(variante_von(e.result), []).append(e)
+        for variante, alle in je_variante.items():
+            (teil,) = kacheln(alle, kachel_von)
+            kz = kennzahlen(alle)
+            erste = kz[0] if kz else None
+            wert = tageswert(alle, erste) if erste is not None else None
+            saetze = saetze_text(alle, erste) if erste is not None else ""
+            zusatz = teil.aufschluesselung(namen, ohne=(VARIANTE,))
+            if saetze and teil.abgehakt and not zusatz:
+                zusatz = "zusätzlich abgehakt"
+            zeilen.append(
+                Tageszeile(
+                    k.kachel_id, erste, wert, saetze or teil.zusammenfassung(), zusatz, variante
+                )
+            )
     return zeilen
 
 
@@ -603,18 +725,23 @@ __all__ = [
     "ZEITRAEUME",
     "ZEITRAUM_VORGABE",
     "Kennzahl",
+    "Linie",
     "Tageszeile",
     "Ueberblick",
     "datum_marken",
     "haeufigkeit",
     "kennzahlen",
     "kurven_punkte",
+    "linie_name",
+    "linien",
+    "linien_ordnen",
     "montag",
     "saetze_text",
     "tag_titel",
     "tageswert",
     "tageswerte",
     "tageszeilen",
+    "trainingsnummern",
     "trend",
     "ueberblick",
     "wochen_titel",

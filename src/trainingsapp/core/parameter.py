@@ -13,6 +13,10 @@ Für das Abhaken, Bündeln und Summieren zählt, **wie** ein Parameter wirkt:
 
 Hat eine Übung *nur* Ausprägungen (eine Winkelmessung), dann ist die
 Ausprägung selbst die Leistung — siehe `leistungsfelder`.
+
+Die **Variante** (``variant``, Ben 21.10.2026, `core.varianten`) ist eine Ausprägung, die
+immer vorher gewählt wird und nie selbst die Leistung ist; in Plänen ist sie kein Parameter
+neben anderen, sondern ein eigener Bereich (`core.standards.aktive_felder`).
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 from .result_spec import FieldSpec, FieldType, ResultSpec, ist_leer
+from .varianten import ist_variante
 
 MENGE = "menge"
 AUSPRAEGUNG = "auspraegung"
@@ -56,17 +61,36 @@ def auspraegungsfelder(spec: ResultSpec) -> list[FieldSpec]:
 def leistungsfelder(spec: ResultSpec) -> list[FieldSpec]:
     """Was man in der Ausführung „als geleistet“ antippt.
 
-    Die Mengen — oder, wenn eine Übung keine hat, ihre Ausprägungen.
+    Die Mengen — oder, wenn eine Übung keine hat, ihre Ausprägungen. Die Variante ist nie
+    selbst die Leistung.
+
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> from trainingsapp.core.varianten import Variante, mit_varianten
+    >>> winkel = mit_varianten(ResultSpec(fields=[vorrat_feld("angle")]), [Variante("aktiv")])
+    >>> [f.key for f in leistungsfelder(winkel)]
+    ['angle']
     """
-    return mengenfelder(spec) or auspraegungsfelder(spec)
+    return mengenfelder(spec) or [f for f in auspraegungsfelder(spec) if not ist_variante(f)]
 
 
 def kontextfelder(spec: ResultSpec) -> list[FieldSpec]:
     """Ausprägungen, die man *vor* dem Eintragen wählt (45° oder 90°).
 
-    Leer, wenn die Ausprägungen selbst die Leistung sind.
+    Die Variante immer und zuerst (Ben, 21.10.2026), die übrigen nur, wenn die Übung Mengen
+    hat — sonst sind sie selbst die Leistung.
+
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> from trainingsapp.core.varianten import Variante, mit_varianten
+    >>> basis = ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("weight")])
+    >>> [f.key for f in kontextfelder(mit_varianten(basis, [Variante("kurz")]))]
+    ['variant', 'weight']
+    >>> nur_haken = mit_varianten(ResultSpec(fields=[vorrat_feld("angle")]), [Variante("aktiv")])
+    >>> [f.key for f in kontextfelder(nur_haken)]
+    ['variant']
     """
-    return auspraegungsfelder(spec) if mengenfelder(spec) else []
+    variante = [f for f in spec.fields if ist_variante(f)]
+    uebrige = [f for f in auspraegungsfelder(spec) if not ist_variante(f)]
+    return [*variante, *(uebrige if mengenfelder(spec) else [])]
 
 
 # ---------------------------------------------------------------------------
@@ -79,14 +103,19 @@ def planbare_felder(spec: ResultSpec) -> list[FieldSpec]:
 
     Die beiden kommen nur in den Plan, wenn man sie ausdrücklich einschaltet
     (`gewaehlte_felder` mit Wahl) — sonst stünde bei jeder Übung mit Notizfeld
-    ein Textfeld im Block.
+    ein Textfeld im Block. Die Variante ist kein Parameter: Sie hat in der Planübung einen
+    eigenen Bereich (`core.standards.varianten_an`, Ben 21.10.2026).
 
     >>> from trainingsapp.core.result_spec import vorrat_feld
     >>> spec = ResultSpec(fields=[vorrat_feld(k) for k in ("reps", "scale", "done", "note")])
     >>> [f.key for f in planbare_felder(spec)]
     ['reps', 'scale']
     """
-    return [f for f in spec.fields if f.type not in (FieldType.BOOL, FieldType.TEXT)]
+    return [
+        f
+        for f in spec.fields
+        if f.type not in (FieldType.BOOL, FieldType.TEXT) and not ist_variante(f)
+    ]
 
 
 def gewaehlte_felder(
@@ -114,7 +143,7 @@ def gewaehlte_felder(
     wahl = felder if felder is not None else standard
     if wahl is None:
         return planbare_felder(spec)
-    return [f for f in spec.fields if f.key in wahl]
+    return [f for f in spec.fields if f.key in wahl and not ist_variante(f)]
 
 
 def modus_aus_felder(felder: list[str] | None) -> str:

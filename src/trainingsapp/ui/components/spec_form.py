@@ -20,6 +20,10 @@ wird das Feld — leer heißt „ohne Wert“, auch wenn der Regler am Anfang st
 Jedes Feld steht in voller Breite, seine Chips **darunter** — nebeneinander
 quetschten sich Feld und Chips am Handy, und welcher Chip zu welchem Feld
 gehörte, war nicht mehr zu sehen.
+
+Die **Variante** (``variant``, Ben 21.10.2026) zeigt die Variantenwahl
+(`components/varianten.py`): Segmente, bei Platzmangel nur Symbole oder zwei Spalten —
+nicht die Segmente einer gewöhnlichen Auswahl, die vier lange Namen nicht fassen.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import varianten as var
 from trainingsapp.core.result_spec import (
     FieldSpec,
     FieldType,
@@ -43,6 +48,7 @@ from trainingsapp.core.result_spec import (
 from trainingsapp.core.units import format_dauer, format_sets, parse_dauer, parse_sets
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import ohne_auto_update
+from trainingsapp.ui.components.varianten import Variantenwahl, zeilenbreite
 
 ZAHLENARTIG = {
     FieldType.INT,
@@ -71,6 +77,8 @@ class SpecForm:
         self._chips: dict[str, list[ft.Chip]] = {}
         #: Skala: der Regler neben dem Zahlenfeld (das Feld ist das Widget)
         self._regler: dict[str, ft.Slider] = {}
+        #: Die Variantenwahl je Variantenfeld (das Widget ist ihre Spalte)
+        self._varianten: dict[str, Variantenwahl] = {}
         zeilen: list[ft.Control] = []
         start = {**spec.defaults(), **(werte or {})}
         for f in spec.fields:
@@ -86,6 +94,14 @@ class SpecForm:
     # -- Bauen -------------------------------------------------------------
 
     def _widget(self, f: FieldSpec, wert: Any) -> ft.Control:
+        if var.ist_variante(f):
+            wahl = Variantenwahl(
+                var.varianten(self.spec),
+                "" if wert in (None, "") else str(wert),
+                breite=zeilenbreite(self._page, rand=80),
+            )
+            self._varianten[f.key] = wahl
+            return wahl.control
         if f.type == FieldType.BOOL:
             return ft.Switch(label=f.label, value=bool(wert))
         if f.type == FieldType.SCALE:
@@ -138,6 +154,20 @@ class SpecForm:
         )
 
     def _zeile(self, f: FieldSpec, widget: ft.Control) -> ft.Control:
+        if var.ist_variante(f):
+            return ft.Column(
+                spacing=4,
+                controls=[
+                    ft.Row(
+                        spacing=6,
+                        controls=[
+                            ft.Icon(ft.Icons.SELL_OUTLINED, size=16, opacity=0.7),
+                            ft.Text(f.label, size=12, opacity=0.7),
+                        ],
+                    ),
+                    widget,
+                ],
+            )
         if f.type in (FieldType.BOOL, FieldType.TEXT, FieldType.CHOICE):
             return widget
         if f.type == FieldType.SCALE:
@@ -299,6 +329,10 @@ class SpecForm:
         """Das Ergebnis-Dict. Felder mit leerer oder unbrauchbarer Eingabe fehlen."""
         ergebnis: dict[str, Any] = {}
         for f in self.spec.fields:
+            if (wahl := self._varianten.get(f.key)) is not None:
+                if wahl.wert:
+                    ergebnis[f.key] = wahl.wert
+                continue
             wert = self._lesen(f, self._widgets[f.key])
             if wert is not None and wert != "":
                 ergebnis[f.key] = wert
@@ -308,6 +342,9 @@ class SpecForm:
         """Vorbelegen — Ziel aus dem Plan, „Wie zuletzt", Kurzschrift."""
         for f in self.spec.fields:
             if f.key not in werte:
+                continue
+            if (wahl := self._varianten.get(f.key)) is not None:
+                wahl.setzen("" if werte[f.key] in (None, "") else str(werte[f.key]))
                 continue
             widget = self._widgets[f.key]
             if f.type == FieldType.BOOL:
@@ -328,6 +365,8 @@ class SpecForm:
         """Labels der Felder, die fehlen oder ungültig sind — und markiert sie."""
         probleme: list[str] = []
         for f in self.spec.fields:
+            if f.key in self._varianten:
+                continue  # eine Wahl ist immer gültig, auch „ohne“
             widget = self._widgets[f.key]
             wert = self._lesen(f, widget)
             text = str(getattr(widget, "value", "") or "").strip()

@@ -36,6 +36,7 @@ from datetime import date, timedelta
 
 import flet as ft
 
+from trainingsapp.core import varianten as var
 from trainingsapp.core.models import Exercise, SessionEntry
 from trainingsapp.core.tagesbilanz import kachel
 from trainingsapp.core.verlauf import (
@@ -54,6 +55,7 @@ from trainingsapp.core.verlauf import (
 )
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.uebungszeile import abschnitt, grosser_wert, uebungszeile
+from trainingsapp.ui.components.varianten import etikett as varianten_etikett
 from trainingsapp.ui.components.verlaufskurve import mini, mini_saeulen
 from trainingsapp.ui.components.wochenleiste import tageszelle
 from trainingsapp.ui.state import AppState
@@ -350,7 +352,12 @@ def _tage_inhalt(
             unter.append(ft.Text(z.zusatz, size=11, opacity=0.6))
         rechts: list[ft.Control] = []
         if z.kennzahl is not None and z.wert is not None:
-            bisher = [(t, e) for t, e in daten.je_kachel.get(z.kachel_id, []) if t <= tag]
+            # Die Mini-Kurve dieser Variante — 400 kurze sind etwas anderes als 400 lange
+            bisher = [
+                (t, e)
+                for t, e in daten.je_kachel.get(z.kachel_id, [])
+                if t <= tag and var.von(e.result) == z.variante
+            ]
             werte = [w for _, w in tageswerte(bisher, z.kennzahl)][-MINI_WERTE:]
             rechts = [grosser_wert(z.kennzahl.text(z.wert), z.kennzahl.einheit), mini(werte)]
         controls.append(
@@ -360,6 +367,7 @@ def _tage_inhalt(
                 unter=unter,
                 rechts=rechts,
                 on_click=_oeffner(page, f"/verlauf/{z.kachel_id}"),
+                variante=_schild(uebung, z.variante),
             )
         )
     if any(z.kennzahl is not None for z in zeilen):
@@ -448,11 +456,17 @@ def _uebungen_inhalt(
         controls.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=chips))
     controls.append(abschnitt("Zuletzt gemacht"))
     gezeigt = 0
-    for kachel_id in reihenfolge:
+    # Je Übung und Variante eine Zeile (Ben, 21.10.2026, Skizze B3) — zuletzt Gemachtes zuerst
+    reihen = [
+        (kachel_id, variante, liste)
+        for kachel_id in reihenfolge
+        for variante, liste in _je_variante(daten.je_kachel[kachel_id])
+    ]
+    reihen.sort(key=lambda r: r[2][-1][0], reverse=True)
+    for kachel_id, variante, eintraege in reihen:
         uebung = daten.katalog.get(kachel_id)
         if typ is not None and (uebung is None or typ not in uebung.typen):
             continue
-        eintraege = daten.je_kachel[kachel_id]
         tage = sorted({t for t, _ in eintraege})
         zuletzt = tage[-1]
         neulich = kuerzlich(tage, heute, UEBUNGEN_WOCHEN)
@@ -520,6 +534,7 @@ def _uebungen_inhalt(
                 unter=[ft.Text(unter, size=12, opacity=0.75)],
                 rechts=rechts,
                 on_click=_oeffner(page, f"/verlauf/{kachel_id}"),
+                variante=_schild(uebung, variante),
             )
         )
         gezeigt += 1
@@ -531,6 +546,23 @@ def _uebungen_inhalt(
             )
         )
     return controls
+
+
+def _je_variante(
+    eintraege: list[tuple[date, SessionEntry]],
+) -> list[tuple[str, list[tuple[date, SessionEntry]]]]:
+    """Die Einträge einer Kachel je Variante — leer = ohne (in der Reihenfolge des ersten)."""
+    gruppen: dict[str, list[tuple[date, SessionEntry]]] = {}
+    for tag, e in eintraege:
+        gruppen.setdefault(var.von(e.result), []).append((tag, e))
+    return list(gruppen.items())
+
+
+def _schild(uebung: Exercise | None, variante: str) -> ft.Control | None:
+    """Das Schild der Variante hinter dem Namen — mit Symbol, wenn die Übung eins kennt."""
+    if not variante:
+        return None
+    return varianten_etikett(var.finden(uebung.result_spec if uebung else None, variante))
 
 
 __all__ = ["kurz_datum", "trend_text", "verlauf"]

@@ -1463,9 +1463,10 @@ def test_abschliessen_und_wieder_oeffnen(welt) -> None:
     assert e.result == {"reps": [15, 15]}  # hängt wieder am ersten an
 
 
-def test_gemacht_schliesst_den_offenen(welt) -> None:
-    """„Gemacht“ ohne markierten Eintrag (Ausprägung gewechselt): ein fertiger Eintrag mit
-    der neuen Ausprägung, der offene wird dabei geschlossen (Skizze A2/A3)."""
+def test_gemacht_schliesst_nur_dieselbe_ausfuehrung(welt) -> None:
+    """„Gemacht“ ohne markierten Eintrag (Ausführung gewechselt): ein fertiger Eintrag mit
+    der neuen Ausführung — der offene mit anderer Ausführung bleibt offen (Ben, 21.10.2026,
+    P57: je Ausführung ein offener Eintrag); einer mit derselben wird geschlossen."""
     from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
 
     con, repo, ich, sitzung = welt
@@ -1480,8 +1481,88 @@ def test_gemacht_schliesst_den_offenen(welt) -> None:
     assert stand.zustand == "offen_anders" and stand.offen.id == offen.id and stand.ziel is None
     fertig = repo.eintrag_fertig(sitzung, kniebeuge, {"weight": 15})
     assert fertig.ended_at is not None and fertig.result == {"weight": 15}
+    # Zurück zu 10 kg: der alte Eintrag ist noch offen und wieder markiert
+    assert repo.stand(ich.id, kniebeuge, heute, None, {"weight": 10}).ziel.id == offen.id
+    repo.eintrag_fertig(sitzung, kniebeuge, {"weight": 10})
     assert all(e.ended_at is not None for e in repo.eintraege(sitzung.id))
     assert repo.stand(ich.id, kniebeuge, heute, None, {"weight": 10}).zustand == "keiner"
+
+
+# ---------------------------------------------------------------------------
+# Varianten (Ben, 21.10.2026; `core.varianten`, docs/plan_varianten.md)
+# ---------------------------------------------------------------------------
+
+
+def _liegestuetz(con) -> Exercise:
+    from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    from trainingsapp.core.varianten import Variante, mit_varianten
+
+    u = Exercise(
+        name="Liegestütz",
+        result_spec=mit_varianten(SPEC_SAETZE_WDH, [Variante("kurz"), Variante("lang")]),
+    )
+    ExerciseRepo(con).speichern(u)
+    return u
+
+
+def test_je_variante_ein_offener_eintrag(welt) -> None:
+    """Ben: „kurz +30, lang +15, kurz +30 — dann wird kein zweiter Kurzeintrag angelegt.“"""
+    con, repo, ich, sitzung = welt
+    lgs = _liegestuetz(con)
+    heute = lokaler_tag(jetzt())
+    kurz = repo.satz_anhaengen(sitzung, lgs, "reps", 30, heute, {"variant": "kurz"})
+    lang = repo.satz_anhaengen(sitzung, lgs, "reps", 15, heute, {"variant": "lang"})
+    wieder = repo.satz_anhaengen(sitzung, lgs, "reps", 30, heute, {"variant": "kurz"})
+    eintraege = repo.eintraege(sitzung.id)
+    assert len(eintraege) == 2
+    assert {e.result["variant"]: e.result["reps"] for e in eintraege} == {
+        "kurz": [30, 30],
+        "lang": [15],
+    }
+    assert all(e.ended_at is None for e in eintraege)  # beide noch offen
+    assert wieder.id != kurz.id and repo.eintrag_kette(wieder.id)[-1] == kurz.id
+    stand = repo.stand(ich.id, lgs, heute, None, {"variant": "lang"})
+    assert stand.ziel is not None and stand.ziel.id != wieder.id
+    assert [e.id for e in stand.andere] == [wieder.id]
+    assert lang.result == {"variant": "lang", "reps": [15]}
+
+
+def test_variante_setzen_und_umbenennen(welt) -> None:
+    """Das Etikett neben „Notiz“ setzt die Variante eines Eintrags als Korrektur — auch an
+    einem Eintrag von vor der ersten Variante; Umbenennen nimmt die bisherigen mit."""
+    from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    from trainingsapp.core.varianten import namen
+
+    con, repo, ich, sitzung = welt
+    lgs = _liegestuetz(con)
+    heute = lokaler_tag(jetzt())
+    alt = repo.eintrag_anlegen(sitzung, replace(lgs, result_spec=SPEC_SAETZE_WDH), {"reps": [12]})
+    neu = repo.variante_setzen(alt.id, lgs, "lang")
+    assert neu.result == {"variant": "lang", "reps": [12]} and neu.id != alt.id
+    assert namen(neu.spec_snapshot) == ["kurz", "lang"]
+    assert repo.variante_zaehlen(ich.id, lgs.id, "lang") == 1
+    assert repo.variante_umbenennen(ich.id, lgs.id, "lang", "weit") == 1
+    (umbenannt,) = repo.eintraege(sitzung.id)
+    assert umbenannt.result["variant"] == "weit" and namen(umbenannt.spec_snapshot) == [
+        "kurz",
+        "weit",
+    ]
+    ohne = repo.variante_setzen(umbenannt.id, lgs, "")
+    assert "variant" not in ohne.result
+    assert repo.ziel_eintrag(ich.id, lgs, heute, None, {}) is not None  # noch offen
+
+
+def test_variante_setzen_schliesst_gleiche_offene(welt) -> None:
+    """Je Ausführung höchstens ein offener Eintrag: Wird der offene „kurz“-Eintrag zu „lang“,
+    schließt ein anderer offener „lang“-Eintrag."""
+    con, repo, _ich, sitzung = welt
+    lgs = _liegestuetz(con)
+    heute = lokaler_tag(jetzt())
+    kurz = repo.satz_anhaengen(sitzung, lgs, "reps", 30, heute, {"variant": "kurz"})
+    repo.satz_anhaengen(sitzung, lgs, "reps", 15, heute, {"variant": "lang"})
+    repo.variante_setzen(kurz.id, lgs, "lang")
+    offen = [e for e in repo.eintraege(sitzung.id) if e.ended_at is None]
+    assert [e.result["reps"] for e in offen] == [[30]]
 
 
 # ---------------------------------------------------------------------------

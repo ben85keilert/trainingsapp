@@ -104,11 +104,27 @@ Jedes Feld hat eine Rolle (`core/parameter.py`):
 | Rolle | Felder | Wirkung |
 |---|---|---|
 | **Menge** | Wiederholungen, Haltezeit, Zeit, Strecke | wird addiert: 3 × 50 Liegestütze = 150 |
-| **Ausprägung** | Winkel, Gewicht, Seite | trennt: Wandsitz 45° ≠ Wandsitz 90° |
+| **Ausprägung** | Variante, Winkel, Gewicht, Seite | trennt: Wandsitz 45° ≠ Wandsitz 90° |
 | **Beiwerk** | Skala, Freitext, Ja/Nein | wird mitgeschrieben, weder addiert noch trennend |
 
-Im Plan wählt man Ausprägungen *vor* dem Eintragen (Chips „Winkel: 45° 90°“);
-sie wandern in jeden Eintrag. Ein „+30“ bei 45° hängt nie an den 90°-Eintrag an.
+Im Plan wählt man Ausprägungen *vor* dem Eintragen — oben im Block, in der getönten
+Zone „Ausführung“ (Ben, 21.10.2026, Skizze C1; darunter „Eintragen“ mit den gefüllten
+„+“-Knöpfen). Sie wandern in jeden Eintrag. Ein „+30“ bei 45° hängt nie an den
+90°-Eintrag an.
+
+**Je Ausführung ein offener Eintrag** (Ben, 21.10.2026, P57): kurz +30, lang +15,
+kurz +30 ergibt einen Eintrag „kurz“ mit 60 und einen „lang“ mit 15 — kein zweiter
+Kurz-Eintrag, solange der erste offen ist (Zeitabstand, `core/eintraege.py`). Das gilt
+für Variante, Gewicht, Seite und Winkel gleich; „Abschließen“ schließt den markierten,
+die übrigen schließt der Zeitabstand.
+
+**Varianten** (Ben, 21.10.2026, `core/varianten.py`): kurz und lang, Unterarm und
+gestreckt — die Namen gehören zur Übung (Feld `variant`, siehe `docs/datenmodell.md`).
+Die Variante steht immer zuerst in der Ausführung, auch wenn die Übung keine Menge hat,
+ist aber selbst nie die Leistung: Ein Eintrag nur mit Variante ist *abgehakt (lang)*.
+Gezählt wird je Variante für sich — im Tag, im Tagebuch, in der Kurve (eine Linie je
+Variante). Das Etikett neben „Notiz“ setzt die Variante des offenen Eintrags, auch
+nachträglich (eine Korrektur, Einträge bleiben unveränderlich).
 
 Die Tagesansicht („Gemacht“) und der Verlauf bündeln je **Übung + Ausprägung**
 und addieren die Mengen (`core/tagesbilanz.py`, `core/tag.py`). Ein Eintrag ohne
@@ -116,7 +132,7 @@ Menge ist **abgehakt** (leerer Haken) und wird getrennt ausgewiesen: „150 Wdh.
 3 Einträgen · zusätzlich abgehakt“. Die Zeitleiste zeigt den Tag nach der Uhr, je
 Plan ein Block (Ben, 18.10.2026: statt „Nach Plan“, „Nach Übung“, „Chronologisch“).
 
-**Varianten** (Migration 007): Eine Kopie einer Übung ist eine Variante
-(`exercise.family_id`) und teilt sich im Verlauf die Kachel des Originals. Wer
-eine Variante getrennt führen will (Liegestütz einarmig), macht sie im Editor
-eigenständig.
+**Verwandte Übungen** (Migration 007, bisher ebenfalls „Varianten“ genannt, P61): Eine
+Kopie einer Übung (`exercise.family_id`) teilt sich im Verlauf die Kachel des Originals
+und ist dort eine eigene Linie. Wer sie getrennt führen will (Liegestütz einarmig),
+macht sie im Editor eigenständig.

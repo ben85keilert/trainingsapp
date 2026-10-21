@@ -13,12 +13,16 @@ gelaufenen Zeiten, und ``person/eintrag`` hält fest, was eingetragen wurde.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from trainingsapp.core.einheit import Ereignis
+from trainingsapp.core.einheit import AUSFUEHRUNG_SCHLUESSEL, Ereignis
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
+from trainingsapp.core.parameter import kontextfelder
+from trainingsapp.core.plaene import auspraegung_vorgabe, einzel_plan
+from trainingsapp.core.result_spec import ist_leer
 from trainingsapp.core.standards import aktive_felder, mit_plan_spec
 from trainingsapp.core.timer import TimerLauf, TimerProfil
 from trainingsapp.core.timer_eintrag import (
@@ -71,10 +75,13 @@ def kontext_fuer(
     *,
     zeit_eintragen: bool | None = None,
     feld: str | None = None,
+    auspraegung: Mapping[str, Any] | None = None,
 ) -> UebungKontext:
     """Wozu der Timer läuft: Übung, Plan, Planübung und das Zeitfeld — ``None``, wenn
     „Zeit eintragen“ aus ist (nur „gemacht“). Sonst „Zählt als“ (Ben, 18.10.2026): mit
-    Haltezeit nach Wahl, ohne immer Zeit — auch ohne den Parameter (`zaehlt_als`)."""
+    Haltezeit nach Wahl, ohne immer Zeit — auch ohne den Parameter (`zaehlt_als`).
+    ``auspraegung``: die Ausführung, die im Block gewählt ist (Variante, Gewicht …) — sie
+    kommt mit in den Eintrag (Ben, 21.10.2026)."""
     wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
     eintragen = wahl.zeit_eintragen if zeit_eintragen is None else zeit_eintragen
     felder = felder_der_uebung(uebung, item)
@@ -88,6 +95,7 @@ def kontext_fuer(
         plan_id=plan.id if plan is not None else None,
         item_id=item.id if item is not None else None,
         zeitfeld=gewaehlt if eintragen else None,
+        auspraegung=dict(auspraegung or {}),
     )
 
 
@@ -148,7 +156,7 @@ def _eintragen(
     if item is not None:
         uebung = mit_plan_spec(item, uebung)
     zeiten = gelaufene_zeiten(ereignisse)
-    werte = ergebnis(zeiten, kontext.zeitfeld)
+    werte = {**ausfuehrung(uebung, kontext.auspraegung), **ergebnis(zeiten, kontext.zeitfeld)}
     uebung = mit_zeitfeldern(uebung, werte)  # Zeit auch ohne den Parameter (18.10.2026)
     ende_s = max(
         (x.t_s for x in ereignisse if x.quelle in ("timer", "plan", "einheit")), default=0.0
@@ -229,14 +237,43 @@ def lauf_eintragen(state: Any, einheit_id: str) -> SessionEntry | None:
         plan_id=str(d["plan"]) if d.get("plan") else None,
         item_id=str(d["planuebung"]) if d.get("planuebung") else None,
         zeitfeld=str(d["zeitfeld"]) if d.get("zeitfeld") else None,
+        auspraegung={k: d[k] for k in AUSFUEHRUNG_SCHLUESSEL if k in d},
     )
     return _eintragen(state, einheit_id, kopf.subject_id, kontext, ereignisse, kopf.started_at)
 
 
+def ausfuehrung(uebung: Exercise, auspraegung: Mapping[str, Any]) -> dict[str, Any]:
+    """Die Ausführung, soweit die Übung (wie die Planübung sie sieht) ihre Felder als
+    Ausprägung kennt — was sie nicht anbietet, kommt nicht in den Eintrag.
+
+    >>> from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+    >>> u = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("weight"), vorrat_feld("hold")]))
+    >>> ausfuehrung(u, {"weight": 10, "side": "links", "hold": [30]})
+    {'weight': 10}
+    """
+    keys = {f.key for f in kontextfelder(uebung.result_spec)}
+    return {k: v for k, v in auspraegung.items() if k in keys and not ist_leer(v)}
+
+
+def gewaehlte_ausfuehrung(state: Any, uebung: Exercise, item: PlanItem | None) -> dict[str, Any]:
+    """Die Ausführung, die der Block dieser (Plan-)Übung zeigt — gewählt, sonst aus dem Ziel,
+    sonst wie zuletzt (`core.plaene.auspraegung_vorgabe`); ohne Planübung die der einzelnen
+    Übung (`einzel_plan`). Uhr, Timer und Ablauf tragen sie mit ein (Ben, 21.10.2026)."""
+    planuebung = item if item is not None else einzel_plan(uebung).items[0]
+    return auspraegung_vorgabe(
+        state.auspraegung_wahl,
+        planuebung,
+        mit_plan_spec(planuebung, uebung),
+        lambda: state.sitzungen.letzter_eintrag(state.profil.id, uebung.id),
+    )
+
+
 __all__ = [
     "Lauf",
+    "ausfuehrung",
     "bereitstellen",
     "felder_der_uebung",
+    "gewaehlte_ausfuehrung",
     "kontext_fuer",
     "laeufe_heute",
     "lauf_eintragen",

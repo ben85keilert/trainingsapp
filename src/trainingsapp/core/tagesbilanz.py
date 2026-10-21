@@ -20,7 +20,7 @@ Alles hier ist reine Rechnung ohne Datenbank und ohne Oberfläche.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable, Iterable
+from collections.abc import Callable, Hashable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,6 +38,8 @@ from .result_spec import (
     wert_text,
 )
 from .units import format_dauer, satz_summe
+from .varianten import VARIANTE
+from .varianten import von as variante_von
 
 
 def mengen(spec: ResultSpec | None, werte: dict[str, Any]) -> dict[str, float]:
@@ -104,14 +106,22 @@ class Buendel:
             key=lambda e: (e.started_at is None, e.started_at),
         )
 
-    def auspraegung_text(self) -> str:
-        """„45°“, „20kg · links“ — leer, wenn es keine gibt."""
+    def auspraegung_text(self, ohne: Iterable[str] = ()) -> str:
+        """„45°“, „lang · 20kg · links“ — leer, wenn es keine gibt. ``ohne``: Schlüssel, die
+        schon woanders stehen (die Variante in der Überschrift einer Zeile je Variante)."""
         if self.spec is None:
             return ""
+        weg = set(ohne)
         teile = []
         for key, wert in self.auspraegung:
+            if key in weg:
+                continue
             f = self.spec.field_by_key(key)
             teile.append(format_wert(f, wert) if f is not None else str(wert))
+        # Die Variante zuerst — die Schlüssel sind alphabetisch sortiert („angle“ < „variant“)
+        if (variante := dict(self.auspraegung).get(VARIANTE)) is not None and VARIANTE not in weg:
+            teile.remove(str(variante))
+            teile.insert(0, str(variante))
         return " · ".join(teile)
 
     def leistung_text(self) -> str:
@@ -252,10 +262,18 @@ def ist_leistung(e: SessionEntry) -> bool:
     >>> messung = ResultSpec(fields=[vorrat_feld("angle")])
     >>> ist_leistung(SessionEntry(result={"angle": 45}, spec_snapshot=messung))
     True
+
+    Eine Variante allein ist nie die Leistung — „Gemacht (lang)“ ist abgehakt:
+
+    >>> from trainingsapp.core.varianten import Variante, mit_varianten
+    >>> dehnen = mit_varianten(ResultSpec(), [Variante("lang")])
+    >>> ist_leistung(SessionEntry(result={"variant": "lang"}, spec_snapshot=dehnen))
+    False
     """
     if mengen(e.spec_snapshot, e.result):
         return True
-    return bool(auspraegung(e.spec_snapshot, e.result)) and _nur_auspraegung(e)
+    auspr = [k for k, _ in auspraegung(e.spec_snapshot, e.result) if k != VARIANTE]
+    return bool(auspr) and _nur_auspraegung(e)
 
 
 def _nur_auspraegung(e: SessionEntry) -> bool:
@@ -321,17 +339,18 @@ class Kachel:
             teile.append(f"zusätzlich {wort}" if teile else wort)
         return " · ".join(t for t in teile if t)
 
-    def aufschluesselung(self, namen: dict[str, str]) -> str:
+    def aufschluesselung(self, namen: dict[str, str], ohne: Iterable[str] = ()) -> str:
         """Woraus die Kachel besteht, wenn mehr als eine Variante/Ausprägung dabei ist.
 
-        ``namen`` bildet Übungs-IDs auf Namen ab.
+        ``namen`` bildet Übungs-IDs auf Namen ab; ``ohne`` wie bei
+        `Buendel.auspraegung_text`.
         """
         if len(self.teile) < 2:
             return ""
         zeilen = []
         for b in self.teile:
             name = namen.get(b.exercise_id, "?")
-            if zusatz := b.auspraegung_text():
+            if zusatz := b.auspraegung_text(ohne):
                 name += f" {zusatz}"
             zeilen.append(f"{name}: {b.zusammenfassung()}")
         return "davon " + " · ".join(zeilen)
@@ -351,6 +370,39 @@ def kacheln(eintraege: Iterable[SessionEntry], kachel_von: Callable[[str], str])
     for e in eintraege:
         nach_kachel.setdefault(kachel_von(e.exercise_id), []).append(e)
     return [Kachel(kachel_id=k, teile=buendeln(liste)) for k, liste in nach_kachel.items()]
+
+
+def je_variante(eintraege: Sequence[SessionEntry]) -> list[tuple[str, str]]:
+    """Was je Variante zusammenkam — für den Kopf von „Heute geleistet“ (Skizze A3:
+    „kurz 60 Wdh. · lang 15 Wdh.“). Leer, wenn keiner der Einträge eine Variante hat;
+    Einträge ohne heißen „ohne Variante“. Gezählt wird je Variante für sich (Ben,
+    21.10.2026).
+
+    >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    >>> def e(v, *n): return SessionEntry(result={"variant": v, "reps": list(n)},
+    ...                                   spec_snapshot=SPEC_SAETZE_WDH)
+    >>> je_variante([e("kurz", 30), e("lang", 15), e("kurz", 30)])
+    [('kurz', '60 Wdh.'), ('lang', '15 Wdh.')]
+    >>> je_variante([SessionEntry(result={"reps": [5]}, spec_snapshot=SPEC_SAETZE_WDH)])
+    []
+    """
+    gruppen: dict[str, list[SessionEntry]] = {}
+    for e in eintraege:
+        gruppen.setdefault(variante_von(e.result), []).append(e)
+    if set(gruppen) <= {""}:
+        return []
+    ergebnis = []
+    for name, liste in gruppen.items():
+        summen: dict[str, float] = {}
+        spec: ResultSpec | None = None
+        for e in liste:
+            spec = e.spec_snapshot or spec
+            for key, wert in mengen(e.spec_snapshot, e.result).items():
+                summen[key] = summen.get(key, 0.0) + wert
+        felder = spec.fields if spec is not None else []
+        text = " · ".join(menge_text(f, summen[f.key]) for f in felder if f.key in summen)
+        ergebnis.append((name or "ohne Variante", text or "abgehakt"))
+    return ergebnis
 
 
 @dataclass(slots=True)
@@ -386,6 +438,7 @@ __all__ = [
     "Planstand",
     "buendeln",
     "ist_leistung",
+    "je_variante",
     "kachel",
     "kacheln",
     "menge_text",

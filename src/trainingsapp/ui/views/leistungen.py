@@ -36,6 +36,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import BILD, VIDEO, Anhang
 from trainingsapp.core.aufnahme_bezug import Bezug, zeit_text
 from trainingsapp.core.models import Exercise, Session, SessionEntry
@@ -96,9 +97,12 @@ class _Leistungen:
         for eintrag, session in state.sitzungen.eintraege_am_tag(state.profil.id, tag):
             if eintrag.exercise_id != uebung.id:
                 continue
-            form = SpecForm(
-                eintrag.spec_snapshot or uebung.result_spec, dict(eintrag.result), page=page
+            # Die Kopie des Eintrags, dazu die heutigen Varianten der Übung — so lässt sich
+            # auch ein Eintrag von vor der ersten Variante nachträglich setzen (Skizze A6)
+            spec = var.zum_bearbeiten(
+                eintrag.spec_snapshot, uebung.result_spec, var.von(eintrag.result)
             )
+            form = SpecForm(spec, dict(eintrag.result), page=page)
             notiz = ft.TextField(
                 label="Notiz",
                 value=eintrag.note,
@@ -330,8 +334,12 @@ class _Leistungen:
         # Was die Maske nicht kennt (ältere Felder), bleibt am Eintrag
         felder = {f.key for f in k.form.spec.fields}
         rest = {key: wert for key, wert in k.eintrag.result.items() if key not in felder}
-        # Die Karte gehört danach zur Korrektur — ein zweites Speichern korrigiert sie weiter
-        k.eintrag = self.state.sitzungen.eintrag_korrigieren(k.eintrag.id, {**rest, **werte}, notiz)
+        # Die Karte gehört danach zur Korrektur — ein zweites Speichern korrigiert sie weiter.
+        # Trägt die Maske die Varianten der Übung, bekommt die Kopie sie mit.
+        spec = k.form.spec if var.feld(k.form.spec) is not None else None
+        k.eintrag = self.state.sitzungen.eintrag_korrigieren(
+            k.eintrag.id, {**rest, **werte}, notiz, spec=spec
+        )
         k.anfang = k.stand()
 
     def sichern(self) -> str | None:

@@ -61,6 +61,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import varianten
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.core.result_spec import ResultSpec
@@ -281,11 +282,14 @@ def formular_korrektur(
     """``basis`` wie bei `eintrag_view`: der Plan darunter, leer = der Tag."""
     uebung = state.uebungen.laden(eintrag.exercise_id, mit_geloeschten=True)
     tag = lokaler_tag(eintrag.started_at) if eintrag.started_at else state.heute()
-    # Ohne Kopie der Notation (ältere Einträge, D8): die der Übung — wie `views/leistungen.py`
-    spec = eintrag.spec_snapshot or (uebung.result_spec if uebung is not None else ResultSpec())
+    # Ohne Kopie der Notation (ältere Einträge, D8): die der Übung — wie `views/leistungen.py`;
+    # dazu die heutigen Varianten der Übung, damit sie sich nachträglich setzen lassen
+    heutige = uebung.result_spec if uebung is not None else ResultSpec()
+    spec = varianten.zum_bearbeiten(eintrag.spec_snapshot, heutige, varianten.von(eintrag.result))
 
     async def speichern(ergebnis: dict[str, Any], notiz: str) -> None:
-        state.sitzungen.eintrag_korrigieren(eintrag.id, ergebnis, notiz)
+        mit = spec if varianten.feld(spec) is not None else None
+        state.sitzungen.eintrag_korrigieren(eintrag.id, ergebnis, notiz, spec=mit)
         page.show_dialog(ft.SnackBar(ft.Text("Korrigiert")))
         await page.push_route(basis or f"/tag/{tag.isoformat()}")
 

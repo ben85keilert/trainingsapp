@@ -19,6 +19,11 @@ Hinzufügen aus der Timer-Bibliothek, Reihenfolge und Entfernen gehören zum For
 der Editor (Teile, „zählt“ je Abschnitt) ist eine eigene Seite — vor dem Sprung dorthin
 speichert das Formular, denn beim Zurückkommen entsteht es neu.
 
+**Varianten** (Ben, 21.10.2026; Skizzen D3, D4): Etiketten innerhalb der Übung — kurz und
+lang. Je Variante Name, Symbol oder Kürzel und eine Beschreibung; die Reihenfolge ist die
+der Knöpfe beim Eintragen. Gehalten im Formular wie die Timer; wer umbenennt, kann die
+bisherigen Einträge mitnehmen — das geschieht erst beim Speichern (`core.varianten`).
+
 Zurück speichert (Ben, 16.10.2026, `components/zurueck.py`); „Abbrechen“ verwirft.
 """
 
@@ -31,6 +36,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import varianten as var
 from trainingsapp.core.models import (
     TAG_REGION,
     TAG_TYP,
@@ -71,6 +77,8 @@ from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.parameter_wahl import parameter_wahl
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.tagwahl import TagWahl
+from trainingsapp.ui.components.varianten import plakette
+from trainingsapp.ui.components.varianten import symbol as varianten_symbol
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.uebung_timer import formular_profil_route
@@ -271,8 +279,9 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                     ],
                 )
             )
-    # Felder, die nicht im Vorrat stehen (ältere oder besondere), bleiben erhalten.
-    fremde = [f for key, f in vorhanden.items() if key not in schalter]
+    # Felder, die nicht im Vorrat stehen (ältere oder besondere), bleiben erhalten — die
+    # Varianten haben ihren eigenen Abschnitt.
+    fremde = [f for key, f in vorhanden.items() if key not in schalter and not var.ist_variante(f)]
     if fremde:
         zeilen.append(
             ft.Text(
@@ -282,6 +291,235 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                 opacity=0.6,
             )
         )
+
+    # -- Varianten (Ben, 21.10.2026; Skizzen D3, D4) -----------------------------------------
+    # Gehalten im Formular — „Abbrechen“ verwirft auch hier. Bisherige Einträge umbenennen
+    # (Skizze A5) geschieht erst beim Speichern, sonst passten Übung und Einträge nach einem
+    # Abbrechen nicht mehr zusammen.
+
+    varianten_liste: list[var.Variante] = var.varianten(uebung.result_spec) if uebung else []
+    #: (alt, neu): bisherige Einträge beim Speichern mitnehmen
+    umbenennen: list[tuple[str, str]] = []
+    varianten_spalte = ft.Column(spacing=2)
+
+    def varianten_zeichnen() -> None:
+        reihen: list[ft.Control] = []
+        for k, v in enumerate(varianten_liste):
+            texte: list[ft.Control] = [ft.Text(v.name, weight=ft.FontWeight.W_600)]
+            if v.text:
+                texte.append(ft.Text(v.text, size=12, opacity=0.7))
+            reihen.append(
+                ft.Container(
+                    padding=ft.Padding.only(left=8, top=4, bottom=4),
+                    border_radius=12,
+                    bgcolor=ft.Colors.with_opacity(0.06, ft.Colors.ON_SURFACE),
+                    content=ft.Row(
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            plakette(v, 36),
+                            ft.Column(spacing=0, expand=True, controls=texte),
+                            ft.IconButton(
+                                ft.Icons.ARROW_UPWARD,
+                                tooltip="Nach oben — die Reihenfolge der Knöpfe beim Eintragen",
+                                visible=k > 0,
+                                on_click=varianten_schieber(v.name),
+                            ),
+                            ft.IconButton(
+                                ft.Icons.EDIT_OUTLINED,
+                                tooltip=f"„{v.name}“ bearbeiten",
+                                on_click=varianten_bearbeiter(v.name),
+                            ),
+                        ],
+                    ),
+                )
+            )
+        if not varianten_liste:
+            reihen.append(
+                ft.Text(
+                    "Noch keine. Beim Üben legt das Etikett neben „Notiz“ auch eine an.",
+                    size=12,
+                    opacity=0.6,
+                )
+            )
+        varianten_spalte.controls = reihen
+
+    def varianten_neu_zeichnen() -> None:
+        varianten_zeichnen()
+        with contextlib.suppress(Exception):  # noch nicht auf der Seite
+            varianten_spalte.update()
+
+    def varianten_schieber(name_: str) -> Callable[[], None]:
+        def handler() -> None:
+            varianten_liste[:] = var.verschoben(varianten_liste, name_, -1)
+            varianten_neu_zeichnen()
+
+        return handler
+
+    def varianten_bearbeiter(name_: str | None) -> Callable[[], None]:
+        return lambda: variante_dialog(name_)
+
+    def variante_dialog(bisher: str | None) -> None:
+        """Skizze D4: Symbol (oder Kürzel), Name, Beschreibung — und Entfernen."""
+        alt = next((v for v in varianten_liste if v.name == bisher), None)
+        symbol_wahl = {"key": alt.symbol if alt is not None else ""}
+        name_feld = ft.TextField(
+            label="Name",
+            value=alt.name if alt is not None else "",
+            autofocus=alt is None,
+            capitalization=ft.TextCapitalization.NONE,
+        )
+        kuerzel_feld = ft.TextField(
+            label="oder Kürzel",
+            value=alt.kuerzel if alt is not None else "",
+            hint_text="z. B. UA",
+            width=130,
+            dense=True,
+            max_length=var.KUERZEL_MAX,
+        )
+        text_feld = ft.TextField(
+            label="Beschreibung (optional)",
+            value=alt.text if alt is not None else "",
+            multiline=True,
+            min_lines=1,
+            max_lines=3,
+        )
+        bisherige = (
+            state.sitzungen.variante_zaehlen(state.profil.id, uebung.id, alt.name)
+            if alt is not None and uebung is not None
+            else 0
+        )
+        mitnehmen = ft.Checkbox(
+            label=f"Auch die {bisherige} bisherigen Einträge mit „{bisher}“ umbenennen",
+            value=True,
+            visible=False,
+        )
+
+        def name_geaendert(_e: object = None) -> None:
+            mitnehmen.visible = bisherige > 0 and (name_feld.value or "").strip() != bisher
+            with contextlib.suppress(Exception):
+                mitnehmen.update()
+
+        name_feld.on_change = name_geaendert
+        kacheln: dict[str, ft.Container] = {}
+
+        def symbol_waehler(key: str) -> Callable[[], None]:
+            def handler() -> None:
+                symbol_wahl["key"] = key
+                for k, kachel in kacheln.items():
+                    kachel.bgcolor = ft.Colors.PRIMARY_CONTAINER if k == key else None
+                with contextlib.suppress(Exception):
+                    page.update()
+
+            return handler
+
+        for key in (*var.SYMBOLE, ""):
+            icon = varianten_symbol(key)
+            kacheln[key] = ft.Container(
+                width=44,
+                height=44,
+                border_radius=10,
+                alignment=ft.Alignment.CENTER,
+                ink=True,
+                border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+                bgcolor=ft.Colors.PRIMARY_CONTAINER if key == symbol_wahl["key"] else None,
+                tooltip="Kein Symbol — dann gilt das Kürzel" if not key else None,
+                content=ft.Icon(icon) if icon is not None else ft.Text("keins", size=11),
+                on_click=symbol_waehler(key),
+            )
+        nachher = Nachher()
+
+        def uebernehmen(_e: object = None) -> None:
+            fehler = False
+            try:
+                neuer_name = var.name_pruefen(
+                    name_feld.value or "", [v.name for v in varianten_liste], bisher=bisher
+                )
+                name_feld.error = None
+            except ValueError as grund:
+                name_feld.error, fehler = str(grund), True
+            try:
+                kuerzel = var.kuerzel_pruefen(kuerzel_feld.value or "")
+                kuerzel_feld.error = None
+            except ValueError as grund:
+                kuerzel_feld.error, fehler = str(grund), True
+            try:
+                text = var.text_pruefen(text_feld.value or "")
+                text_feld.error = None
+            except ValueError as grund:
+                text_feld.error, fehler = str(grund), True
+            if fehler:
+                with contextlib.suppress(Exception):
+                    page.update()
+                return
+            neu = var.Variante(neuer_name, symbol_wahl["key"], kuerzel, text)
+            varianten_liste[:] = var.ersetzen(varianten_liste, bisher, neu)
+            if (
+                bisher is not None
+                and neuer_name != bisher
+                and mitnehmen.visible
+                and mitnehmen.value
+            ):
+                umbenennen.append((bisher, neuer_name))
+            nachher.danach(varianten_neu_zeichnen)
+            schliessen(dialog)
+
+        def entfernen(_e: object = None) -> None:
+            if bisher is not None:
+                varianten_liste[:] = var.entfernen(varianten_liste, bisher)
+            nachher.danach(varianten_neu_zeichnen)
+            schliessen(dialog)
+
+        aktionen: list[ft.Control] = []
+        if alt is not None:
+            aktionen.append(
+                ft.TextButton(
+                    "Entfernen",
+                    style=ft.ButtonStyle(color=ft.Colors.ERROR),
+                    tooltip="Bisherige Einträge behalten ihre Variante",
+                    on_click=entfernen,
+                )
+            )
+        aktionen += [
+            ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+            ft.FilledButton("Übernehmen", icon=ft.Icons.CHECK, on_click=uebernehmen),
+        ]
+        dialog: ft.AlertDialog = ft.AlertDialog(
+            on_dismiss=nachher.bei_schliessen,
+            # Der Dialog scrollt selbst — eine scrollende Spalte darin ließ eine Lücke über
+            # den Knöpfen (Web-Foto, 21.10.2026)
+            scrollable=True,
+            title=ft.Text("Variante bearbeiten" if alt is not None else "Neue Variante"),
+            content=ft.Column(
+                tight=True,
+                spacing=12,
+                controls=[
+                    ft.Text("SYMBOL", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                    ft.Row(wrap=True, spacing=6, run_spacing=6, controls=list(kacheln.values())),
+                    ft.Row(
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            kuerzel_feld,
+                            ft.Text("gilt ohne Symbol", size=12, opacity=0.6, expand=True),
+                        ],
+                    ),
+                    name_feld,
+                    mitnehmen,
+                    text_feld,
+                    ft.Text(
+                        "Steht im Blatt hinter dem Etikett, unter der Variantenzeile und in "
+                        "der Übungsinfo.",
+                        size=12,
+                        opacity=0.7,
+                    ),
+                ],
+            ),
+            actions=aktionen,
+        )
+        page.show_dialog(dialog)
+
+    varianten_zeichnen()
 
     # -- Standard für Pläne ----------------------------------------------------
 
@@ -700,7 +938,7 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         ziel.icon_key = gewaehlt
         if not eigene_varianten:
             ziel.family_id = None if familie.value in (None, EIGENSTAENDIG) else familie.value
-        ziel.result_spec = spec_bauen(felder_lesen())
+        ziel.result_spec = var.mit_varianten(spec_bauen(felder_lesen()), varianten_liste)
         im_plan = [f.key for f in ziel.result_spec.fields if f.key in plan_wahl]
         alle = [f.key for f in planbare_felder(ziel.result_spec)]
         ziel.default_felder = None if im_plan == alle else im_plan
@@ -741,6 +979,8 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             [p.als_dict() for p in timer_liste],
             bool(uhr_schalter.value),
             zaehlt_als_lesen(),
+            [(v.name, v.symbol, v.kuerzel, v.text) for v in varianten_liste],
+            list(umbenennen),
         )
 
     def sichern() -> str | None:
@@ -758,6 +998,10 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         ziel = eingelesen()
         state.uebungen.speichern(ziel)
         gespeichert["id"] = ziel.id
+        # Umbenannte Varianten: die bisherigen Einträge erst jetzt mitnehmen (Skizze A5)
+        for alt, neu in umbenennen:
+            state.sitzungen.variante_umbenennen(state.profil.id, ziel.id, alt, neu)
+        umbenennen.clear()
         return None
 
     #: Die ID nach dem ersten Speichern — eine neue Übung hat erst dann eine
@@ -816,6 +1060,21 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                             opacity=0.7,
                         ),
                         ft.Column(spacing=6, controls=zeilen),
+                        abschnitt("VARIANTEN", hilfe_knopf(page, thema="varianten")),
+                        ft.Text(
+                            "Wie du die Übung ausführst, z. B. kurz und lang. Jede Variante "
+                            "wird für sich gezählt und steht beim Eintragen oben als Knopf — "
+                            "in dieser Reihenfolge. Passen die Namen nicht in eine Zeile, "
+                            "stehen dort nur Symbole oder Kürzel.",
+                            size=12,
+                            opacity=0.7,
+                        ),
+                        varianten_spalte,
+                        ft.TextButton(
+                            "Variante hinzufügen",
+                            icon=ft.Icons.SELL_OUTLINED,
+                            on_click=varianten_bearbeiter(None),
+                        ),
                         abschnitt("VERLAUF", hilfe_knopf(page, thema="uebungen")),
                         ft.Row(controls=[familie]),
                         ft.Text(

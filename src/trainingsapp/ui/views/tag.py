@@ -36,6 +36,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import Anhang
 from trainingsapp.core.models import (
     Exercise,
@@ -74,6 +75,7 @@ from trainingsapp.ui.components.uebungszeile import (
     grosser_wert,
     uebungszeile,
 )
+from trainingsapp.ui.components.varianten import etikett as varianten_etikett
 from trainingsapp.ui.components.zeitstrahl import zeitpunkt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.leistungen import leistungen_blatt
@@ -801,7 +803,17 @@ def tagesansicht(
             rechts=rechts,
             on_click=ziel(g),
             etiketten=etiketten,
+            variante=varianten_schild(g),
         )
+
+    def varianten_schild(g: Gemacht, klein: bool = False) -> ft.Control | None:
+        """Jede Variante hat ihre eigene Zeile (Ben, 21.10.2026) — ihr Schild steht hinter
+        dem Namen, mit dem Symbol aus der Übung, wenn sie eins hat."""
+        if not g.variante:
+            return None
+        uebung = daten().katalog.get(g.exercise_id)
+        v = var.finden(uebung.result_spec if uebung else None, g.variante)
+        return varianten_etikett(v, klein=klein)
 
     def gemacht_teile() -> list[ft.Control]:
         d = daten()
@@ -893,7 +905,22 @@ def tagesansicht(
                         spacing=0,
                         tight=True,
                         expand=True,
-                        controls=[ft.Text(daten().name(g.exercise_id), size=14), *unter],
+                        controls=[
+                            ft.Row(
+                                spacing=6,
+                                wrap=True,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    ft.Text(daten().name(g.exercise_id), size=14),
+                                    *(
+                                        [schild]
+                                        if (schild := varianten_schild(g, klein=True))
+                                        else []
+                                    ),
+                                ],
+                            ),
+                            *unter,
+                        ],
                     ),
                     ft.Text(
                         wert,

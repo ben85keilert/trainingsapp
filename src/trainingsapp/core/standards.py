@@ -21,6 +21,11 @@ Schlüssel steht nur in ``PlanItem.felder``; `plan_spec` ergänzt die Spec der
 Übung um ihn. Einträge speichern diese erweiterte Spec als Kopie, also stimmen
 Anzeige und Verlauf. In die Übung gelangt das Feld erst mit `als_standard`.
 
+**Varianten** (Ben, 21.10.2026, `core.varianten`) gehören der Übung, nicht dem Plan: Hat
+die Übung welche, zeigt **jede** Planübung sie — auch mit eigener Parameterwahl und bei „nur
+abhaken“. In der Planübung sind sie ein eigener Bereich unter den Parametern, der sich
+abschalten lässt (`varianten_an`, P58); hin- und hergeschoben wird dabei nichts.
+
 Reine Funktionen ohne Datenbank: Sie geben neue Objekte zurück, speichern tut
 der Aufrufer.
 """
@@ -42,6 +47,8 @@ from .result_spec import (
     skala_werte,
     vorrat_feld,
 )
+from .varianten import VARIANTE, ist_variante
+from .varianten import feld as varianten_feld
 
 
 def ziel_spec(spec: ResultSpec) -> ResultSpec:
@@ -124,26 +131,71 @@ def waehlbare_felder(uebung: Exercise) -> tuple[list[FieldSpec], list[FieldSpec]
     >>> eigene, vorrat = waehlbare_felder(u)
     >>> [f.key for f in eigene], [f.key for f in vorrat][:3]
     (['hold'], ['reps', 'weight', 'distance'])
+
+    Die Variante steht nicht darunter — sie hat einen eigenen Bereich (`varianten_an`).
     """
-    eigene = list(uebung.result_spec.fields)
-    keys = {f.key for f in eigene}
+    eigene = [f for f in uebung.result_spec.fields if not ist_variante(f)]
+    keys = {f.key for f in uebung.result_spec.fields}
     return eigene, [replace(f) for f in FELDVORRAT if f.key not in keys]
+
+
+def varianten_an(item: PlanItem) -> bool:
+    """Zeigt diese Planübung die Varianten der Übung? (Ben, 21.10.2026, P58: ein eigener
+    Bereich unter den Parametern.) Vorgabe ja; aus ist er nur ausdrücklich — als leere
+    Chipliste der Variante (``quick["variant"] == []``, keine Varianten zur Wahl).
+
+    >>> varianten_an(PlanItem()), varianten_an(varianten_schalten(PlanItem(), False))
+    (True, False)
+    """
+    return item.quick.get(VARIANTE) != []
+
+
+def varianten_schalten(item: PlanItem, an: bool) -> PlanItem:
+    """Den Variantenbereich der Planübung an- oder abschalten.
+
+    >>> aus = varianten_schalten(PlanItem(quick={"reps": [5]}), False)
+    >>> aus.quick, varianten_schalten(aus, True).quick
+    ({'reps': [5], 'variant': []}, {'reps': [5]})
+    """
+    quick = {k: list(v) for k, v in item.quick.items() if k != VARIANTE}
+    if not an:
+        quick[VARIANTE] = []
+    return replace(item, quick=quick)
 
 
 def aktive_felder(item: PlanItem, uebung: Exercise) -> list[FieldSpec]:
     """Die Parameter, die diese Planübung anbietet — leer heißt nur abhaken.
+
+    Hat die Übung Varianten, steht ihr Feld vorn, egal welche Parameter der Plan anbietet
+    (Ben, 21.10.2026: „Zeile in jeder Planübung“) — außer der Bereich ist abgeschaltet.
 
     >>> u = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("scale")]))
     >>> [f.key for f in aktive_felder(PlanItem(), u)], aktive_felder(PlanItem(felder=[]), u)
     (['reps', 'scale'], [])
     >>> [f.key for f in aktive_felder(PlanItem(felder=["weight", "reps"]), u)]
     ['reps', 'weight']
+    >>> from trainingsapp.core.varianten import Variante, mit_varianten
+    >>> kurz_lang = replace(u, result_spec=mit_varianten(u.result_spec, [Variante("kurz")]))
+    >>> [f.key for f in aktive_felder(PlanItem(felder=[]), kurz_lang)]
+    ['variant']
+    >>> aktive_felder(varianten_schalten(PlanItem(felder=[]), False), kurz_lang)
+    []
     """
-    return gewaehlte_felder(plan_spec(item, uebung), item.felder, uebung.default_felder)
+    spec = plan_spec(item, uebung)
+    felder = gewaehlte_felder(spec, item.felder, uebung.default_felder)
+    variante = varianten_feld(spec)
+    if variante is not None and variante.quick and varianten_an(item):
+        return [variante, *felder]
+    return felder
 
 
 def aktive_keys(item: PlanItem, uebung: Exercise) -> list[str]:
     return [f.key for f in aktive_felder(item, uebung)]
+
+
+def parameter_keys(item: PlanItem, uebung: Exercise) -> list[str]:
+    """Die angebotenen Parameter ohne die Variante — das, was „Parameter“ heißt."""
+    return [f.key for f in aktive_felder(item, uebung) if not ist_variante(f)]
 
 
 def chips_fuer(item: PlanItem, f: FieldSpec) -> list:
@@ -166,12 +218,15 @@ def chips_fuer(item: PlanItem, f: FieldSpec) -> list:
 
 
 def eigene_chips(item: PlanItem, uebung: Exercise) -> dict[str, list]:
-    """Nur die Chips, die wirklich von der Übung abweichen (auch „keine")."""
+    """Nur die Chips, die wirklich von der Übung abweichen (auch „keine"). Die Variante
+    zählt nicht dazu — ihr Schalter ist kein Chip (`varianten_an`)."""
     ergebnis = {}
     spec = plan_spec(item, uebung)
     for key, werte in item.quick.items():
         f = spec.field_by_key(key)
-        if f is not None and chips_sortiert(list(werte)) != chips_fuer(PlanItem(), f):
+        if f is None or ist_variante(f):
+            continue
+        if chips_sortiert(list(werte)) != chips_fuer(PlanItem(), f):
             ergebnis[key] = list(werte)
     return ergebnis
 
@@ -188,12 +243,18 @@ def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
     ['Ziel', 'Parameter', 'Chips Wiederholungen']
     >>> abweichungen(PlanItem(target={"reps": [15, 15]}, felder=["reps", "scale", "weight"]), u)
     ['Parameter']
+    >>> from trainingsapp.core.varianten import Variante, mit_varianten
+    >>> v = replace(u, result_spec=mit_varianten(u.result_spec, [Variante("kurz")]))
+    >>> abweichungen(PlanItem(target={"reps": [15, 15]}), v)
+    []
+    >>> abweichungen(varianten_schalten(PlanItem(target={"reps": [15, 15]}), False), v)
+    ['Varianten aus']
     """
     teile = []
     if dict(item.target) != dict(uebung.default_target):
         teile.append("Ziel")
     standard = gewaehlte_felder(uebung.result_spec, uebung.default_felder)
-    if aktive_felder(item, uebung) != standard:
+    if [f for f in aktive_felder(item, uebung) if not ist_variante(f)] != standard:
         teile.append("Parameter")
     spec = plan_spec(item, uebung)
     teile.extend(
@@ -201,6 +262,8 @@ def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
         for key in eigene_chips(item, uebung)
         if (f := spec.field_by_key(key)) is not None
     )
+    if varianten_feld(spec) is not None and not varianten_an(item):
+        teile.append("Varianten aus")
     return teile
 
 
@@ -223,7 +286,9 @@ def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
         replace(f, quick=chips_sortiert(list(chips[f.key]))) if f.key in chips else f
         for f in spec.fields
     ]
-    gewaehlt = None if item.felder is None else aktive_keys(item, uebung)
+    # Die Variante ist kein Parameter: Sie wandert weder in die Parameter der Übung, noch
+    # nimmt ein abgeschalteter Variantenbereich der Übung ihre Varianten
+    gewaehlt = None if item.felder is None else parameter_keys(item, uebung)
     return replace(
         uebung,
         default_target=dict(item.target),
@@ -266,7 +331,10 @@ __all__ = [
     "chips_fuer",
     "eigene_chips",
     "mit_plan_spec",
+    "parameter_keys",
     "plan_spec",
+    "varianten_an",
+    "varianten_schalten",
     "vom_standard",
     "waehlbare_felder",
     "ziel_bereinigen",

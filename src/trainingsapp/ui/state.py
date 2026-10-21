@@ -225,11 +225,13 @@ class AppState:
     tagebuch_anzahl: int = 0
     #: Aufnahmen im Verlauf der Übung (`core.anhaenge.ZEITRAEUME`): gezeigter Zeitraum
     anhaenge_zeitraum: str = ANHAENGE_ZEITRAUM_VORGABE
-    #: Kurve einer Übung: Zeitraum, X-Achse, Kennzahl je Kachel, Variante (None = alle)
+    #: Kurve einer Übung: Zeitraum, X-Achse, Kennzahl je Kachel; je Kachel die
+    #: ausgeblendeten Linien (`core.verlauf.Linie.schluessel`) und ob „Zusammen“ an ist
     verlauf_zeitraum: str = ZEITRAUM_VORGABE
     verlauf_modus: str = MODUS_ZEIT
     verlauf_kennzahlen: dict[str, str] = field(default_factory=dict)
-    verlauf_variante: str | None = None
+    verlauf_aus: dict[str, set[str]] = field(default_factory=dict)
+    verlauf_zusammen: set[str] = field(default_factory=set)
     #: Scrollposition je scrollbarer Fläche (Schlüssel meist die Route) — damit
     #: der Neubau nach einem Tipp nicht wieder oben beginnt
     scroll_offsets: dict[str, float] = field(default_factory=dict)

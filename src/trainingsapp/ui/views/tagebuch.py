@@ -144,6 +144,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             return f"Plan „{plan_name(n.plan_id)}“" if n.plan_id else "Ohne Plan"
         u = katalog.get(n.exercise_id or "")
         name = u.name if u is not None else "(Übung nicht mehr vorhanden)"
+        if n.variante:  # „Liegestütz · lang“ (Ben, 21.10.2026: Varianten getrennt)
+            name = f"{name} · {n.variante}"
         return f"Aufnahmen · {name}" if n.art == AUFNAHME else name
 
     # -- Bearbeiten ---------------------------------------------------------------------

@@ -8,6 +8,9 @@
 - **Atemfrequenz und Atemübung** (`ATMUNG_MD`, Ben 17.10.2026): was „unter 8/min“
   und der Knopf „Atemübung“ heißen. Kommt in die Hilfedatei (Katalog A3); die
   Rechenvorschrift steht in hrv-core (`hrv_core/atmung.py`).
+- **Varianten** (`VARIANTEN_MD`, Ben 21.10.2026): was das Etikett neben „Notiz“ heißt —
+  neben dem Symbol steht kein Wort, die Erklärung kommt in die Hilfedatei (Katalog A3).
+  Die alten „Varianten“ (Kopien mit gemeinsamer Kachel) erklärt noch `UEBUNGEN_MD` (P61).
 """
 
 from __future__ import annotations
@@ -47,6 +50,33 @@ oder Komma (`12,5`); in Satzlisten trennt das Komma Sätze, also dort `12.5`.
 **Menge oder Ausprägung**: Wiederholungen und Zeiten werden addiert (3 × 50 = 150).
 Winkel, Gewicht und Seite wählst du vorher aus — sie trennen: Wandsitz 45° ist
 nicht Wandsitz 90°. „Gemacht“ ohne Werte zählt als *abgehakt* (leerer Haken).
+
+**Varianten** (Liegestütz kurz und lang) stehen ganz oben in der Ausführung und werden
+getrennt gezählt: kurz +30, lang +15, kurz +30 ergibt „kurz 60“ und „lang 15“. Das
+**Etikett** neben „Notiz“ setzt die Variante des offenen Eintrags, auch nachträglich,
+und legt eine neue an.
+"""
+
+VARIANTEN_MD = """\
+**Varianten** sind Ausführungen derselben Übung — Liegestütz kurz und lang, Planke
+Unterarm, gestreckt, seitlich. Sie gehören zur Übung und werden **getrennt gezählt**:
+400 kurze sind etwas anderes als 400 lange. Im Tag und im Tagebuch hat jede Variante
+ihre eigene Zeile, in der Kurve ihre eigene Linie; „Zusammen“ blendet die Summe dazu.
+
+**Beim Üben** stehen die Varianten oben in der Ausführung, neben Gewicht und Seite. Die
+gewählte gilt für jeden Eintrag, bis du umschaltest — je Ausführung sammelt sich ein
+Eintrag, solange er offen ist. Das **Etikett** neben „Notiz“ setzt die Variante des
+offenen Eintrags, auch nachträglich, und legt eine neue an. Uhr, Timer und
+Plan-Ablauf tragen die gewählte Variante mit ein.
+
+**In der Übung** (Bearbeiten → Varianten) bekommt jede Variante einen Namen, ein Symbol
+oder ein Kürzel bis drei Zeichen und eine Beschreibung. Passen nicht alle Namen in eine
+Zeile, zeigt die Ausführung nur die Symbole — Name und Beschreibung der gewählten stehen
+darunter. Umbenennen kann die bisherigen Einträge mitnehmen; Entfernen lässt sie, wie
+sie sind.
+
+**Im Plan** steht die Zeile in jeder Planübung; unter „Einstellen“ und beim i schaltest
+du sie für eine Planübung aus. Ein Ziel kann eine Variante vorgeben.
 """
 
 
@@ -121,6 +151,7 @@ eine falsche — die Werte beschreiben, sie bewerten nicht.
 #: Thema → (Titel, Text, Tooltip des Knopfs)
 THEMEN: dict[str, tuple[str, str, str]] = {
     "notation": ("So wird eingegeben", NOTATION_MD, "Wie gebe ich ein?"),
+    "varianten": ("Varianten", VARIANTEN_MD, "Was sind Varianten?"),
     "uebungen": ("Varianten und Pakete", UEBUNGEN_MD, "Varianten und Pakete"),
     "atmung": ("Atemfrequenz und Atemübung", ATMUNG_MD, "Was heißt „Atemübung“?"),
 }
@@ -161,6 +192,7 @@ __all__ = [
     "NOTATION_MD",
     "THEMEN",
     "UEBUNGEN_MD",
+    "VARIANTEN_MD",
     "hilfe_dialog",
     "hilfe_knopf",
     "hilfe_oeffner",

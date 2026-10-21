@@ -66,16 +66,24 @@ def uebungszeile(
     rechts: list[ft.Control],
     on_click: Callable[[], object] | None,
     etiketten: Sequence[str] = (),
+    variante: ft.Control | None = None,
 ) -> ft.Control:
-    """Eine Übung als Karte: Symbol, Name und Zeilen darunter, rechts Wert und Mini-Kurve."""
+    """Eine Übung als Karte: Symbol, Name und Zeilen darunter, rechts Wert und Mini-Kurve.
+
+    ``variante``: das Schild der Variante direkt hinter dem Namen — jede Variante hat ihre
+    eigene Zeile mit eigener Zahl (Ben, 21.10.2026, `components/varianten.etikett`)."""
     kopf: ft.Control = ft.Text(titel, size=15, weight=ft.FontWeight.W_600)
-    if etiketten:
+    if etiketten or variante is not None:
         kopf = ft.Row(
             spacing=6,
             wrap=True,
             run_spacing=2,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[kopf, *(etikett(t) for t in etiketten)],
+            controls=[
+                kopf,
+                *([variante] if variante is not None else []),
+                *(etikett(t) for t in etiketten),
+            ],
         )
     return ft.Container(
         bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,

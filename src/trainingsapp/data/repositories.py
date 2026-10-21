@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core import eintraege as offene
+from ..core import varianten
 from ..core.models import (
     EINGABE_CHIPS,
     EINGABE_HAKEN,
@@ -1330,12 +1331,14 @@ class SessionRepo:
         bei: datetime | None = None,
     ) -> SessionEntry:
         """„Gemacht“ / „Wie geplant“: ein fertiger Eintrag, gleich geschlossen — und was von
-        dieser Übung heute in dieser Session noch offen war, wird dabei geschlossen
-        (`docs/plan_eintraege_hrv.md`, A2: ohne markierten Eintrag heißt der Knopf
-        „Gemacht“ und schließt einen noch offenen mit)."""
+        dieser Übung heute in dieser Session mit **derselben Ausführung** noch offen war,
+        wird dabei geschlossen (`docs/plan_eintraege_hrv.md`, A2; seit 21.10.2026 bleiben
+        offene Einträge anderer Varianten und Gewichte offen, `docs/plan_varianten.md` C)."""
         bei = bei or jetzt()
         with transaktion(self.con):
-            self.offene_schliessen(session, uebung, tag or lokaler_tag(bei), bei)
+            self.offene_schliessen(
+                session, uebung, tag or lokaler_tag(bei), bei, ausfuehrung=result
+            )
             return self.eintrag_anlegen(session, uebung, result, note, started_at=bei, ended_at=bei)
 
     def eintrag_korrigieren(
@@ -1423,19 +1426,35 @@ class SessionRepo:
         return self.stand(subject_id, uebung, tag, plan_id, kontext, jetzt_).ziel
 
     def offene_schliessen(
-        self, session: Session, uebung: Exercise, tag: date, bei: datetime | None = None
+        self,
+        session: Session,
+        uebung: Exercise,
+        tag: date,
+        bei: datetime | None = None,
+        ausfuehrung: dict[str, Any] | None = None,
     ) -> list[SessionEntry]:
-        """Alles, was von dieser Übung heute in dieser Session noch offen ist, schließen —
-        bevor ein neuer Eintrag beginnt (höchstens einer ist offen). Das Ende ist der
-        Zeitpunkt der letzten Änderung, wenn der Zeitabstand schon überschritten war,
-        sonst ``bei`` (jetzt)."""
+        """Offenes dieser Übung heute in dieser Session schließen, bevor ein neuer Eintrag
+        beginnt. Das Ende ist der Zeitpunkt der letzten Änderung, wenn der Zeitabstand schon
+        überschritten war, sonst ``bei`` (jetzt).
+
+        Mit ``ausfuehrung`` (Werte des neuen Eintrags) nur, was dieselbe Ausführung hat oder
+        ohnehin abgelaufen ist — je Ausführung bleibt einer offen (Ben, 21.10.2026: „kurz
+        +30, lang +15, kurz +30“ sind zwei Einträge). Ohne: alles."""
         bei = bei or jetzt()
+        felder = (
+            None
+            if ausfuehrung is None
+            else {f.key for f in kontextfelder(uebung.result_spec)} | set(ausfuehrung)
+        )
         geschlossen: list[SessionEntry] = []
         for e in self._heute_im_plan(session.subject_id, uebung.id, tag, session.plan_id):
             if e.session_id != session.id or e.ended_at is not None:
                 continue
+            noch_offen = offene.ist_offen(e, bei, self.offen_min)
+            if felder is not None and noch_offen and not offene.passt(e, ausfuehrung or {}, felder):
+                continue  # andere Ausführung, noch im Zeitabstand: bleibt offen
             zuletzt = offene.letzte_aenderung(e)
-            ende = bei if offene.ist_offen(e, bei, self.offen_min) or zuletzt is None else zuletzt
+            ende = bei if noch_offen or zuletzt is None else zuletzt
             geschlossen.append(self.eintrag_schliessen(e.id, ende))
         return geschlossen
 
@@ -1448,18 +1467,84 @@ class SessionRepo:
 
     def eintrag_oeffnen(self, eintrag_id: str) -> SessionEntry:
         """„Wieder öffnen“: das Ende fällt weg, weitere Sätze hängen wieder hier an — ein
-        anderer offener Eintrag derselben Übung wird dabei geschlossen."""
+        anderer offener Eintrag derselben Übung **und Ausführung** wird dabei geschlossen."""
         alt = self.eintrag_laden(eintrag_id)
         if alt is None:
             raise KeyError(eintrag_id)
-        session = self.session_laden(alt.session_id)
-        assert session is not None
-        tag = lokaler_tag(alt.started_at) if alt.started_at else lokaler_tag(jetzt())
         with transaktion(self.con):
-            for e in self._heute_im_plan(session.subject_id, alt.exercise_id, tag, session.plan_id):
-                if e.session_id == session.id and e.id != alt.id and e.ended_at is None:
-                    self.eintrag_schliessen(e.id)
+            self._gleiche_schliessen(alt)
             return self.eintrag_korrigieren(alt.id, dict(alt.result), ended_at=None)
+
+    def _gleiche_schliessen(self, e: SessionEntry) -> None:
+        """Andere offene Einträge mit der Ausführung von ``e`` schließen — je Ausführung ist
+        höchstens einer offen."""
+        session = self.session_laden(e.session_id)
+        assert session is not None
+        tag = lokaler_tag(e.started_at) if e.started_at else lokaler_tag(jetzt())
+        felder = [f.key for f in kontextfelder(e.spec_snapshot)] if e.spec_snapshot else []
+        wahl = offene.ausfuehrung(e, felder)
+        for anderer in self._heute_im_plan(session.subject_id, e.exercise_id, tag, session.plan_id):
+            if (
+                anderer.session_id == session.id
+                and anderer.id != e.id
+                and anderer.ended_at is None
+                and offene.passt(anderer, wahl, felder)
+            ):
+                self.eintrag_schliessen(anderer.id)
+
+    def variante_setzen(self, eintrag_id: str, uebung: Exercise, name: str) -> SessionEntry:
+        """Die Variante eines Eintrags setzen oder ändern — leer: ohne (Ben, 21.10.2026; das
+        Etikett neben „Notiz“ und das Leistungen-Blatt). Eine Korrektur wie jede andere; die
+        Spec-Kopie bekommt dabei die Varianten der Übung (`core.varianten.zum_bearbeiten`).
+        Ist der Eintrag offen, schließt ein anderer offener derselben Ausführung."""
+        alt = self.eintrag_laden(eintrag_id)
+        if alt is None:
+            raise KeyError(eintrag_id)
+        werte = {k: v for k, v in alt.result.items() if k != varianten.VARIANTE}
+        if name:
+            werte = {varianten.VARIANTE: name, **werte}
+        spec = varianten.zum_bearbeiten(alt.spec_snapshot, uebung.result_spec, name)
+        with transaktion(self.con):
+            neu = self.eintrag_korrigieren(alt.id, werte, spec=spec)
+            if neu.ended_at is None:
+                self._gleiche_schliessen(neu)
+        return neu
+
+    def variante_zaehlen(self, subject_id: str, exercise_id: str, name: str) -> int:
+        """Wie viele gültige Einträge dieser Person die Variante ``name`` tragen."""
+        return sum(
+            1
+            for e in self.eintraege_der_uebung(subject_id, exercise_id)
+            if varianten.von(e.result) == name
+        )
+
+    def variante_umbenennen(self, subject_id: str, exercise_id: str, alt: str, neu: str) -> int:
+        """„Auch die bisherigen Einträge umbenennen“ (Skizze A5): Jeder gültige Eintrag
+        dieser Person mit der Variante ``alt`` bekommt ``neu`` — als Korrektur, in einer
+        Transaktion; die Werte bleiben. Gibt zurück, wie viele es waren."""
+        anzahl = 0
+        with transaktion(self.con):
+            for e in self.eintraege_der_uebung(subject_id, exercise_id):
+                if varianten.von(e.result) != alt:
+                    continue
+                werte = {**e.result, varianten.VARIANTE: neu}
+                kopie = e.spec_snapshot
+                if kopie is not None and varianten.feld(kopie) is not None:
+                    # Die Kopie nennt die Variante mit: dort umbenennen, Angaben wandern mit
+                    liste = varianten.varianten(kopie)
+                    if any(v.name == neu for v in liste):
+                        liste = [v for v in liste if v.name != alt]
+                    else:
+                        liste = [
+                            varianten.Variante(neu, v.symbol, v.kuerzel, v.text)
+                            if v.name == alt
+                            else v
+                            for v in liste
+                        ]
+                    kopie = varianten.mit_varianten(kopie, liste)
+                self.eintrag_korrigieren(e.id, werte, spec=kopie)
+                anzahl += 1
+        return anzahl
 
     def heutiger_eintrag(
         self, subject_id: str, exercise_id: str, tag: date, plan_id: str | None = None
@@ -1504,7 +1589,7 @@ class SessionRepo:
 
         Seit 19.10.2026 (`core.eintraege`): Ziel ist der **offene, markierte** Eintrag —
         ohne Ende, nicht länger als `offen_min` unberührt, gleiche Ausprägung. Sonst
-        beginnt ein neuer, und was noch offen war, wird geschlossen.
+        beginnt ein neuer; offene Einträge anderer Ausführung bleiben offen (21.10.2026).
         """
         kontext = kontext or {}
         aktuell = (
@@ -1514,7 +1599,7 @@ class SessionRepo:
         )
         if aktuell is None:
             with transaktion(self.con):
-                self.offene_schliessen(session, uebung, tag)
+                self.offene_schliessen(session, uebung, tag, ausfuehrung=kontext)
                 return self.eintrag_anlegen(session, uebung, {**kontext, feld_key: [wert]})
 
         # Stammt der heutige Eintrag aus der Zeit vor dem Satzfeld (Kopie mit
@@ -1559,7 +1644,7 @@ class SessionRepo:
         )
         if aktuell is None:
             with transaktion(self.con):
-                self.offene_schliessen(session, uebung, tag)
+                self.offene_schliessen(session, uebung, tag, ausfuehrung=kontext)
                 return self.eintrag_anlegen(session, uebung, {**kontext, feld_key: wert})
         # Wie `satz_anhaengen`: Kennt die Kopie das Feld, bleiben Werte und Kopie, wie sie
         # sind; sonst bekommt der Eintrag die heutige Spezifikation samt übersetzten Werten.
@@ -1585,7 +1670,7 @@ class SessionRepo:
         Ausprägung wie ``kontext``; ohne ``kontext`` der offene); die Notiz wird dort als
         Korrektur ersetzt — der Dialog zeigt sie zum Weiterschreiben (`notiz_eintrag`).
         Ist keiner markiert, beginnt ein **offener** Eintrag mit der Ausprägung und der
-        Notiz; was noch offen war, wird geschlossen. ``neu`` beginnt immer einen eigenen.
+        Notiz; offene anderer Ausführung bleiben offen. ``neu`` beginnt immer einen eigenen.
         """
         aktuell = (
             None
@@ -1594,7 +1679,7 @@ class SessionRepo:
         )
         if aktuell is None:
             with transaktion(self.con):
-                self.offene_schliessen(session, uebung, tag)
+                self.offene_schliessen(session, uebung, tag, ausfuehrung=dict(kontext or {}))
                 return self.eintrag_anlegen(session, uebung, dict(kontext or {}), text)
         return self.eintrag_korrigieren(aktuell.id, dict(aktuell.result), note=text)
 

@@ -502,3 +502,27 @@ async def test_ohne_timer_traegt_gemacht_die_zeit_ein(umgebung) -> None:
     assert eintraege["Dehnen"].result == {"duration": 42}
     assert [f.key for f in eintraege["Dehnen"].spec_snapshot.fields] == ["duration"]
     assert eintraege["Still"].result == {}
+
+
+async def test_ablauf_traegt_die_gewaehlte_variante_ein(umgebung) -> None:
+    """Ben, 21.10.2026: „Ablauf und Uhr tragen sie ein“ — je Planübung die Ausführung, die
+    ihr Block zeigt."""
+    from trainingsapp.core import varianten as var
+
+    state, uhr, gurt, _ = umgebung
+    plan = _plan(state)
+    planke = state.uebungen.laden(plan.items[0].exercise_id)
+    planke.result_spec = var.mit_varianten(
+        planke.result_spec, [var.Variante("Unterarm"), var.Variante("gestreckt")]
+    )
+    state.uebungen.speichern(planke)
+    state.auspraegung_wahl[plan.items[0].id] = {"variant": "Unterarm"}
+    e = plan_ablauf.starten(Seite(), state, plan)
+    teil = plan_ablauf.ablauf_teil(e)
+    assert teil is not None
+    await _sekunden(uhr, gurt, e, 31)
+    eintraege = {
+        state.uebungen.laden(x.exercise_id).name: x
+        for x, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+    }
+    assert eintraege["Planke"].result == {"variant": "Unterarm", "hold": [10, 10]}

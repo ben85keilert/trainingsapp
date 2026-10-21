@@ -25,6 +25,7 @@ from datetime import date, datetime, timedelta
 
 from .anhaenge import AnhangMitBezug, anzahl_text, zusammenfassung
 from .models import Session, SessionEntry, lokaler_tag
+from .varianten import von as variante_von
 
 #: Woran eine Notiz hängt — `AUFNAHME`: Fotos und Videos an einem Eintrag
 TAG, PLAN, UEBUNG, AUFNAHME = "tag", "plan", "uebung", "aufnahme"
@@ -43,6 +44,8 @@ class Notiz:
     plan_id: str | None = None
     #: woran sie gespeichert ist (Eintrag bzw. Session) — zum Bearbeiten
     bezug_id: str | None = None
+    #: die Variante ihres Eintrags — leer ohne (Ben, 21.10.2026: „vor allem im Tagebuch“)
+    variante: str = ""
 
     def sortierzeit(self) -> float:
         return self.zeit.timestamp() if self.zeit is not None else 0.0
@@ -87,6 +90,10 @@ def sammeln(
     [('tag', 'müde', None), ('plan', 'zäh', 's1'), ('uebung', 'eng', 'e1')]
     >>> [(x.plan_id, x.exercise_id) for x in n]
     [(None, None), ('p', None), ('p', 'kb')]
+    >>> lang = SessionEntry(id="e2", session_id="s1", exercise_id="lgs", note="zäh",
+    ...                     result={"variant": "lang"}, started_at=e.started_at)
+    >>> [x.variante for x in sammeln([], [], [(lang, s)])]
+    ['lang']
     >>> a = AnhangMitBezug(Anhang("e1", aufgenommen=e.started_at), "kb", e.started_at)
     >>> b = AnhangMitBezug(Anhang("e1", "video", aufgenommen=e.started_at), "kb", e.started_at)
     >>> [(x.art, x.text, x.bezug_id, x.exercise_id) for x in sammeln([], [], [], [a, b])]
@@ -110,6 +117,7 @@ def sammeln(
                     e.exercise_id,
                     s.plan_id,
                     e.id,
+                    variante_von(e.result),
                 )
             )
     je_eintrag: dict[str, list[AnhangMitBezug]] = {}

@@ -80,11 +80,21 @@ class FieldSpec:
     gibt man eine Zahl ein („263 Liegestütze heute“), gespeichert als Liste mit einem
     Wert; angezeigt wird die Summe.
 
+    ``optionen`` (Auswahl, Ben 21.10.2026): Angaben je Wert aus ``quick`` — bei den
+    Varianten einer Übung Symbol, Kürzel und Beschreibung (`core.varianten`). Gespeichert
+    nur, wenn es welche gibt; ältere Stände lesen ``quick`` und übersehen den Rest.
+
     >>> f = FieldSpec("reps", FieldType.SET_LIST, "Wiederholungen", saetze=False)
     >>> f.to_dict()["saetze"], FieldSpec.from_dict(f.to_dict()).saetze
     (False, False)
     >>> "saetze" in FieldSpec("reps", FieldType.SET_LIST, "Wdh.").to_dict()
     False
+    >>> v = FieldSpec("variant", FieldType.CHOICE, "Variante", quick=["kurz"],
+    ...               optionen={"kurz": {"kuerzel": "K"}})
+    >>> FieldSpec.from_dict(v.to_dict()).optionen
+    {'kurz': {'kuerzel': 'K'}}
+    >>> FieldSpec.from_dict({"key": "x", "type": "choice", "optionen": [1]}).optionen
+    {}
     """
 
     key: str
@@ -98,6 +108,7 @@ class FieldSpec:
     quick: list[Any] = field(default_factory=list)
     required: bool = False
     saetze: bool = True
+    optionen: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"key": self.key, "type": str(self.type), "label": self.label}
@@ -111,6 +122,8 @@ class FieldSpec:
             d["required"] = True
         if not self.saetze:
             d["saetze"] = False
+        if self.optionen:
+            d["optionen"] = {k: dict(v) for k, v in self.optionen.items()}
         return d
 
     @classmethod
@@ -124,6 +137,17 @@ class FieldSpec:
         if not isinstance(d, dict):
             raise ValueError("ein Feld muss ein Objekt sein")
         label = str(d.get("label") or d["key"])
+        roh = d.get("optionen")
+        # Aus Paketen und Spec-Kopien: nur Text je Wert, alles andere fällt weg
+        optionen = (
+            {
+                str(wert): {str(k): str(v) for k, v in angaben.items() if v not in (None, "")}
+                for wert, angaben in roh.items()
+                if isinstance(angaben, dict)
+            }
+            if isinstance(roh, dict)
+            else {}
+        )
         return cls(
             key=str(d["key"]),
             type=FieldType(d.get("type", "int")),
@@ -136,6 +160,7 @@ class FieldSpec:
             quick=list(d.get("quick") or []),
             required=bool(d.get("required")),
             saetze=bool(d.get("saetze", True)),
+            optionen={k: v for k, v in optionen.items() if v},
         )
 
 

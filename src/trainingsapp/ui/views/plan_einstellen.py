@@ -12,6 +12,8 @@ Von oben nach unten (Ben, 14.10.2026):
 2. **Chips** — unter jedem eingeschalteten Parameter seine Chips zum Antippen,
    aufsteigend; eigene Werte lassen sich ergänzen. **Kein Chip heißt freies
    Feld** — das gibt es beim Üben für jeden Messwert ohnehin.
+   Darunter, wenn die Übung Varianten hat, ihr **eigener Bereich** (Ben, 21.10.2026, P58):
+   ein Schalter, ob diese Planübung sie zeigt (`core.standards.varianten_an`).
 3. **Uhr in diesem Plan** (Ben, 18.10.2026) — Stoppuhr und Timer wie die Übung, an oder
    aus; mit Haltezeit „Zählt als“ wie die Übung, Haltezeit oder Zeit (`TimerWahl`).
 4. **Ziel** (optional) — was „Wie geplant" einträgt.
@@ -31,6 +33,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import varianten as var
 from trainingsapp.core.models import Exercise, Plan, PlanItem
 from trainingsapp.core.parameter import (
     chips_lesen,
@@ -50,6 +53,8 @@ from trainingsapp.core.standards import (
     als_standard,
     chips_fuer,
     plan_spec,
+    varianten_an,
+    varianten_schalten,
     vom_standard,
     waehlbare_felder,
     ziel_bereinigen,
@@ -102,6 +107,13 @@ def plan_einstellen(
     gewaehlt: dict[str, list[Any]] = {f.key: chips_fuer(item, f) for f in planbar}
 
     form = SpecForm(ziel_spec(spec), dict(item.target), page=page)
+    #: Die Varianten der Übung — ein eigener Bereich unter den Parametern (P58)
+    varianten_liste = var.varianten(uebung.result_spec)
+    varianten_schalter = ft.Switch(
+        label="Varianten beim Eintragen zeigen",
+        value=varianten_an(item),
+        on_change=lambda: standard_abgleichen_neu(),
+    )
     parameter_reihe = ft.Container()
     chips_bereich = ft.Column(spacing=16)
     stand_text = ft.Text(size=12, opacity=0.8)
@@ -123,7 +135,7 @@ def plan_einstellen(
             for f in planbar
             if f.key in aktiv and chips_sortiert(gewaehlt[f.key]) != chips_fuer(PlanItem(), f)
         }
-        return replace(
+        neu = replace(
             item,
             target=ziel(),
             felder=None if felder == standard else felder,
@@ -131,6 +143,9 @@ def plan_einstellen(
             quick=quick,
             timer=neue_wahl().als_dict(),
         )
+        # Der Variantenbereich (P58) steht als leere Chipliste der Variante in ``quick``
+        an = bool(varianten_schalter.value) if varianten_liste else True
+        return varianten_schalten(neu, an)
 
     # -- Aufbau ------------------------------------------------------------------
 
@@ -161,6 +176,11 @@ def plan_einstellen(
     def neu() -> None:
         zeichnen()
         page.update()
+
+    def standard_abgleichen_neu() -> None:
+        standard_abgleichen()
+        with contextlib.suppress(Exception):  # außerhalb einer laufenden App (Tests)
+            page.update()
 
     def umschalten(key: str) -> None:
         aktiv.symmetric_difference_update({key})
@@ -379,6 +399,21 @@ def plan_einstellen(
         ),
         parameter_reihe,
         chips_bereich,
+        *(
+            [
+                abschnitt("VARIANTEN IN DIESEM PLAN"),
+                ft.Text(
+                    "Die Varianten gehören zur Übung: "
+                    + " · ".join(v.name for v in varianten_liste)
+                    + ". Beim Eintragen stehen sie oben in der Ausführung.",
+                    size=12,
+                    opacity=0.7,
+                ),
+                varianten_schalter,
+            ]
+            if varianten_liste
+            else []
+        ),
         abschnitt("UHR IN DIESEM PLAN"),
         uhr_bereich,
         ft.Row(

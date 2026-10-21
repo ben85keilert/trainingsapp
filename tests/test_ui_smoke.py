@@ -448,7 +448,9 @@ def test_verlauf_mit_varianten_und_kachelkurve(page, welt) -> None:
     assert len(eintraege) == 2
     assert verlauf(page, state) is not None
     assert verlauf_kachel_view(page, state, uebung.id).route == f"/verlauf/{uebung.id}"
-    state.verlauf_variante = variante.id
+    # Die Kopie ist eine eigene Linie (Skizze B2); „Zusammen“ und Ausblenden bauen neu
+    state.verlauf_zusammen.add(uebung.id)
+    state.verlauf_aus[uebung.id] = {f"{variante.id}|"}
     assert verlauf_kachel_view(page, state, uebung.id) is not None
     # Eine Kachel nur mit „gemacht“ zeichnet keine Kurve, sondern erklärt das.
     andere = plan.items[1].exercise_id
@@ -773,14 +775,20 @@ def test_planblock_umschalten_und_aufklappen(page, beinachse) -> None:
 
     state, plan, item, _u = beinachse
 
-    # Umschalten: Chips für alle drei Parameter, nur einer ist zu sehen
+    # Umschalten: ein Segment je Parameter in der Ausführung (Skizze C1), nur einer zu sehen
     state.plan_darstellung_setzen(UMSCHALTEN)
     block = _block(plan_view(page, state, plan), "Beinachsentraining")
-    chips = [c for c in _alle(block) if isinstance(c, ft.Chip) and c.selected is not None]
-    namen = [c.label.value for c in chips if c.label.value in ("Wiederholungen", "Haltezeit")]
-    assert set(namen) == {"Wiederholungen", "Haltezeit"}
+    schalter = next(
+        c
+        for c in _alle(block)
+        if isinstance(c, ft.SegmentedButton)
+        and "Wiederholungen" in [s.label.value for s in c.segments]
+    )
+    namen = [s.label.value for s in schalter.segments]
+    assert {"Wiederholungen", "Haltezeit"} <= set(namen)
     assert sum(isinstance(c, ft.Slider) for c in _alle(block)) == 0  # Skala nicht gewählt
-    next(c for c in chips if c.label.value == "Stabilität").on_click()
+    schalter.selected = [next(s.value for s in schalter.segments if s.label.value == "Stabilität")]
+    schalter.on_change(SimpleNamespace(control=schalter))
     block = _block(plan_view(page, state, plan), "Beinachsentraining")
     assert sum(isinstance(c, ft.Slider) for c in _alle(block)) == 1
     assert state.parameter_wahl[item.id] == "scale"
@@ -799,7 +807,8 @@ def test_planblock_umschalten_und_aufklappen(page, beinachse) -> None:
     assert len(offen) <= 1
     block = _block(ansicht, "Beinachsentraining")
     if "EINTRAGEN" not in _texte(block):
-        _knopf_mit_text(block, "Eintragen").on_click()
+        # „Werte“ statt „Eintragen“ (Ben, 21.10.2026): das Wort hatte drei Bedeutungen
+        _knopf_mit_text(block, "Werte").on_click()
         block = _block(plan_view(page, state, plan), "Beinachsentraining")
     assert state.plan_offen == item.id and "EINTRAGEN" in _texte(block)
     _knopf_mit_text(block, "Zuklappen").on_click()
@@ -1093,16 +1102,23 @@ def test_i_symbol_holt_parameter_aus_dem_feldvorrat(page, welt) -> None:
     assert "weight" in state.plaene.item_laden(item.id).felder
     assert state.uebungen.laden(uebung.id).result_spec.field_by_key("weight") is None
 
-    # Zurück im Plan: Gewicht steht als Ausführung im Block — Chip wählen, Satz anhängen
+    # Zurück im Plan: Gewicht steht als Ausführung im Block — Segment wählen, Satz anhängen
     plan = state.plaene.laden(plan.id)
     block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
 
-    def chip(text: str):
-        return next(c for c in _alle(block) if isinstance(c, ft.Chip) and c.label.value == text)
+    def segment_waehlen(text: str) -> None:
+        for c in _alle(block):
+            if isinstance(c, ft.SegmentedButton):
+                for s in c.segments:
+                    if isinstance(s.label, ft.Text) and s.label.value == text:
+                        c.selected = [s.value]
+                        c.on_change(SimpleNamespace(control=c))
+                        return
+        raise AssertionError(f"kein Segment {text!r}")
 
-    chip("5kg").on_click()
+    segment_waehlen("5kg")
     block = _block(plan_view(page, state, plan), "Nackendehnung seitlich")
-    chip("+30").on_click()
+    _knopf_mit_text(block, "+30").on_click()
     heute = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
     neu = [e for e in heute if e.result.get("weight") == 5]
     assert neu and neu[0].spec_snapshot.field_by_key("weight") is not None

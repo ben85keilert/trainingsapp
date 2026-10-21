@@ -68,7 +68,24 @@ für Pläne — `default_target_json`, `default_fields_json` (Parameter, seit 01
 Variantenfamilie (nie auf eine andere Variante). Im Verlauf bilden Original und
 Varianten eine Kachel; ihre Mengen werden addiert und je Variante ausgewiesen
 (`core/tagesbilanz.py`). Eine Kopie ist zunächst Variante, im Editor lässt sie
-sich eigenständig machen.
+sich eigenständig machen. (Seit 21.10.2026 heißen Varianten auch die leichten innerhalb
+einer Übung, nächster Absatz; die Texte der Kopien sind offen, P61.)
+
+**Varianten in der Übung** (Ben, 21.10.2026, `core/varianten.py`, ohne Migration): ein
+Auswahlfeld mit dem Schlüssel `variant` (Name „Variante“) in `exercise.result_spec`. Seine
+Chips (`quick`) sind die Namen in Knopfreihenfolge; `optionen` hält je Name Symbol
+(Material-Name aus `varianten.SYMBOLE`), Kürzel (bis 3 Zeichen) und Beschreibung — in
+`to_dict` nur, wenn gesetzt. Ein Eintrag trägt `result["variant"] = "lang"`, seine
+Spec-Kopie das Feld; so bleibt die Anzeige richtig, auch wenn die Übung die Variante
+später nicht mehr kennt (`varianten.finden` gibt dann nur den Namen). Das Feld steht nicht
+im `FELDVORRAT`: kein Planparameter, nicht in der Parameterliste des Editors. Eine
+Planübung schaltet die Zeile mit `quick["variant"] == []` ab (`standards.varianten_an`,
+P58). Umbenennen mit „bisherige Einträge mitnehmen“ legt je gültigem Eintrag eine
+Korrektur an, alles in einer Transaktion (`SessionRepo.variante_umbenennen`). Pakete
+können Varianten über `result_spec` liefern; der Paketabgleich behandelt das ganze Feld
+„Parameter“ als eins (P60). Die Zeitleiste einer Einheit hält die Ausführung flach fest
+(`core.einheit.AUSFUEHRUNG_SCHLUESSEL`: `variant`, `weight`, `angle`, `side`), damit ein
+abgebrochener Lauf sie später einträgt; in die Messdatei kommt sie nicht.
 
 **Übungspakete** (Migration 014): `exercise.package_id` zeigt auf das Paket, aus
 dem die Übung auf dieses Gerät kam (`package`: Name, Beschreibung, Version);

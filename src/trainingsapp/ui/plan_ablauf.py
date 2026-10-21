@@ -27,6 +27,7 @@ from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.devices.plan_ablauf import PlanAblaufBaustein
 from trainingsapp.ui import einheit as einheit_ui
+from trainingsapp.ui.uebung_lauf import ausfuehrung, gewaehlte_ausfuehrung
 
 #: Mit diesem Grund endet eine Übung, die eingetragen wird
 EINTRAGEN = ("fertig", "gemacht")
@@ -141,6 +142,8 @@ def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry
     item = state.plaene.item_laden(item_id) if item_id else None
     if uebung is None:
         return None
+    # Die Ausführung, die der Block zeigt — Variante, Gewicht … (Ben, 21.10.2026)
+    gewaehlt = gewaehlte_ausfuehrung(state, uebung, item) if item is not None else {}
     if item is not None:
         uebung = mit_plan_spec(item, uebung)
     zeitfeld = str(d["zeitfeld"]) if d.get("zeitfeld") else None
@@ -149,6 +152,7 @@ def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry
         werte = ergebnis(zeiten, zeitfeld)
     else:  # ohne Timer: die Uhr lief von Anfang bis „Gemacht“
         werte = ohne_timer(ende.t_s - start.t_s, zeitfeld) if zeitfeld else {}
+    werte = {**ausfuehrung(uebung, gewaehlt), **werte}
     uebung = mit_zeitfeldern(uebung, werte)
     anker = e.zeitbasis.anker_utc
     beginn = anker + timedelta(seconds=start.t_s)

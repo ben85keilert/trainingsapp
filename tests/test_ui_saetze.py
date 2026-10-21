@@ -168,12 +168,15 @@ def test_spaetere_stelle_sammelt_ihre_saetze_in_einem_eintrag(page, state) -> No
         state.plaene.uebung_hinzufuegen(plan.id, uebung_id)
     state.plan_darstellung_setzen(UNTEREINANDER)
     ansicht = plan_view(page, state, state.plaene.laden(plan.id))
+    # Die Werte sind gefüllte „+“-Knöpfe (Skizze C1, 21.10.2026)
     zehner = [
         c
         for c in _alle(ansicht)
-        if isinstance(c, ft.Chip) and [t.lstrip("+") for t in _texte(c.label)] == ["10"]
+        if isinstance(c, ft.FilledButton)
+        and isinstance(c.content, ft.Control)
+        and [t.lstrip("+") for t in _texte(c.content)] == ["10"]
     ]
-    assert len(zehner) == 2  # je A-Block ein Chip „10“
+    assert len(zehner) == 2  # je A-Block ein Knopf „+10“
     for _ in range(3):
         ergebnis = zehner[-1].on_click()
         if inspect.isawaitable(ergebnis):

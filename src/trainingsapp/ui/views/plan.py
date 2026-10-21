@@ -12,14 +12,18 @@ Anzeige und die Eingabemöglichkeiten besser ab“):
   löschen (`views/leistungen.py`, Ben 17.10.2026; Blatt statt Seite 18.10.).
 - die Knöpfe „Gemacht“ (abhaken) und, wenn ein Ziel gesetzt ist, „Wie geplant“.
   Ohne Parameter bleibt es dabei — nur abhaken.
+- Einstellungen und Werte sehen verschieden aus (Ben, 21.10.2026, Skizze C1 in
+  `docs/plan_varianten.md`): oben eine getönte Zone **Ausführung** mit Segmenten (gewählt =
+  Häkchen, ein Zustand), darunter **Eintragen** mit gefüllten „+“-Knöpfen (jeder Tipp schreibt).
+- **Ausführung**: zuerst die **Variante** der Übung (kurz/lang; Segmente, bei vielen nur
+  Symbole oder zwei Spalten, `components/varianten.py`), dann Ausprägungen (Winkel, Gewicht,
+  Seite) — man wählt sie vorher, sie wandern in jeden Eintrag und trennen ihn (45° ≠ 90°,
+  siehe `core/parameter.py`). Je Ausführung ist ein Eintrag offen (`core.eintraege`).
 - **Eintragen** — je Parameter ein umrandeter Abschnitt mit Überschrift, was
   die **Parameter der Planübung** anbieten (`PlanItem.felder`, eingestellt
   unter „Einstellen“; Migration 010):
 
-  - Ausführung: Ausprägungen (Winkel, Gewicht, Seite) wählt man vorher — Chip
-    oder eigener Wert; sie wandern in jeden Eintrag und trennen ihn
-    (45° ≠ 90°, siehe `core/parameter.py`).
-  - Mengen: Chips (``+10 +15 +20`` hängen einen Satz an) und Zahlenfelder mit
+  - Mengen: „+“-Knöpfe (``+10 +15 +20`` hängen einen Satz an) und Zahlenfelder mit
     Zahlentastatur — „Sätze × Wert“ statt der Notation ``3x15``, die auf einer
     Zahlentastatur nicht zu tippen ist. Zeiten nehmen auch ``1:30``.
   - Skala: Regler und Zahlenfeld in einer Zeile, der Name darüber; der Regler
@@ -34,7 +38,8 @@ Anzeige und die Eingabemöglichkeiten besser ab“):
   oder aufgeklappt nur in einer Übung.
 - „Notiz“ — ein Satz ins Erfahrungstagebuch: eine Notiz je Übung und Tag, die der
   Knopf immer wieder öffnet (`SessionRepo.notiz_eintrag`) — auch nach einem neuen
-  Satz oder „Gemacht“.
+  Satz oder „Gemacht“. Daneben das **Etikett-Symbol** ohne Text (Ben, 21.10.2026): die
+  Variante des markierten Eintrags setzen oder eine neue anlegen (`varianten_blatt`).
 - Das **i-Symbol** holt Parameter heran (`plan_info.py`): jedes Feld der Übung
   und des Feldvorrats, gespeichert in der Planübung — die Übung bleibt, wie sie
   ist (`core.standards.plan_spec`). Dort auch Beschreibung und Videos.
@@ -71,6 +76,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import eintraege as offene
+from trainingsapp.core import varianten as var
 from trainingsapp.core.models import (
     Exercise,
     Plan,
@@ -104,8 +110,8 @@ from trainingsapp.core.result_spec import (
     skala_wert,
     stellen,
 )
-from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
-from trainingsapp.core.tagesbilanz import buendeln, mengen
+from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec, varianten_an
+from trainingsapp.core.tagesbilanz import buendeln, je_variante, mengen
 from trainingsapp.core.timer_eintrag import vom_timer_text
 from trainingsapp.core.uebung_timer import timer_fuer, uhr_an
 from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
@@ -116,6 +122,7 @@ from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import ohne_auto_update, sicher
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile
+from trainingsapp.ui.components.varianten import Variantenwahl, varianten_blatt, zeilenbreite
 from trainingsapp.ui.components.werte import wert_leiste
 from trainingsapp.ui.components.zurueck import zurueck_ziel
 from trainingsapp.ui.state import AUFKLAPPEN, PLAN_DARSTELLUNGEN, UMSCHALTEN, AppState
@@ -125,25 +132,33 @@ from trainingsapp.ui.views.timer import timer_knopf
 from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 
 ECKEN = ft.RoundedRectangleBorder(radius=12)
+#: Das Segment „…“ einer Ausprägung: einen eigenen Wert eingeben (52°)
+_EIGEN = "…eigen"
 
 
 #: Was ein Tipp auf „Heute geleistet“ öffnet (`views/leistungen.py`)
 LEISTUNGEN_TIPP = "Alle Einträge von heute ansehen, korrigieren oder löschen"
 #: Ein Tipp auf einen geschlossenen Eintrag (`eintrag_blatt`)
 EINTRAG_TIPP = "Wieder öffnen, bearbeiten oder löschen"
+#: Ein Tipp auf einen offenen Eintrag mit anderer Ausführung: sie wählen
+WAEHLEN_TIPP = "Diese Ausführung wählen — die nächsten Tipps gehen hierhin"
 #: Das „i“ im Kopf von „Heute geleistet“ (Ben, 19.10.2026: die Erklärung nicht im Block)
 OFFEN_ERKLAERUNG = (
     "Ein Tipp (Satz, Skala, Notiz) geht in den **markierten** Eintrag. Ist keiner markiert, "
     "beginnt er einen neuen.\n\n"
-    "**Offen** ist der jüngste Eintrag der Übung ohne Ende — solange seit dem letzten Satz "
-    "nicht mehr als die eingestellte Zeit vergangen ist (Einstellungen → Übungen → „Eintrag "
-    "bleibt offen“).\n\n"
-    "**Markiert** ist er, wenn die gewählte Ausführung (Gewicht, Seite, Winkel) zu ihm passt. "
-    "Ein anderes Gewicht nimmt die Markierung weg: Der nächste Wert beginnt einen neuen "
-    "Eintrag, der alte wird geschlossen. Zurück zum alten Gewicht — und es geht dort weiter.\n\n"
+    "**Offen** ist ein Eintrag ohne Ende — solange seit dem letzten Satz nicht mehr als die "
+    "eingestellte Zeit vergangen ist (Einstellungen → Übungen → „Eintrag bleibt offen“). Je "
+    "**Ausführung** (Variante, Gewicht, Seite, Winkel) kann einer offen sein: kurz +30, "
+    "lang +15, kurz +30 sind zwei Einträge, kurz 60 und lang 15.\n\n"
+    "**Markiert** ist der offene Eintrag, dessen Ausführung zur gewählten passt. Eine andere "
+    "Wahl nimmt die Markierung weg: Der nächste Wert beginnt einen neuen Eintrag, der alte "
+    "bleibt offen. Zurück zur alten Wahl — oder ein Tipp auf den offenen Eintrag — und es geht "
+    "dort weiter.\n\n"
     "**Abschließen** fixiert den markierten Eintrag. Ohne markierten heißt der Knopf "
     "**Gemacht** und legt einen fertigen Eintrag an. Ein Tipp auf einen geschlossenen Eintrag "
     "bietet „Wieder öffnen“.\n\n"
+    "Das **Etikett** neben „Notiz“ setzt die Variante des markierten Eintrags — oder legt eine "
+    "neue an, die in der Übung bleibt.\n\n"
     "Läuft eine HRV-Aufnahme, bekommt jeder Satz dort eine Marke — zur Tippzeit, also "
     "„geleistet bis hierher“."
 )
@@ -220,6 +235,21 @@ def _knopf(
         content=ft.Row(tight=True, spacing=6, controls=[ft.Icon(icon, size=18), ft.Text(text)]),
         height=48,
         style=ft.ButtonStyle(shape=ECKEN, padding=ft.Padding.symmetric(horizontal=14)),
+        on_click=on_click,
+    )
+
+
+def _umrandet(text: str, icon: ft.IconData, on_click: Callable[[], object]) -> ft.Control:
+    """„Abschließen“/„Gemacht“ umrandet (Skizze C1): gefüllt sind nur Knöpfe, die Werte
+    schreiben."""
+    return ft.OutlinedButton(
+        content=ft.Row(tight=True, spacing=6, controls=[ft.Icon(icon, size=18), ft.Text(text)]),
+        height=48,
+        style=ft.ButtonStyle(
+            shape=ECKEN,
+            side=ft.BorderSide(1, ft.Colors.PRIMARY),
+            padding=ft.Padding.symmetric(horizontal=14),
+        ),
         on_click=on_click,
     )
 
@@ -430,9 +460,15 @@ def plan_view(
         """Das Ziel ohne Ausprägungen (`core.plaene.ziel_ohne_kontext`)."""
         return ziel_ohne_kontext(item, uebung_fuer(item))
 
+    def noch_offen(item: PlanItem, uebung: Exercise) -> bool:
+        """Ist von dieser Übung noch ein Eintrag offen (andere Ausführung)? Dann läuft ihr
+        Abschnitt in der Aufnahme weiter — einer je Übung, nicht je Eintrag (21.10.2026)."""
+        return bool(stand_fuer(item, uebung, frisch=True).alle_offenen)
+
     def eintragen(item: PlanItem, result: dict[str, Any]) -> None:
         """„Gemacht“, „Wie geplant“, ein Einzelwert: ein fertiger, geschlossener Eintrag —
-        ein noch offener derselben Übung wird dabei geschlossen (`eintrag_fertig`)."""
+        ein noch offener derselben Übung und Ausführung wird dabei geschlossen
+        (`eintrag_fertig`)."""
         uebung = uebung_fuer(item)
         session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
         eintrag = state.sitzungen.eintrag_fertig(session, uebung, result, tag=heute())
@@ -440,7 +476,7 @@ def plan_view(
             state,
             uebung,
             eintrag,
-            grenze=grenze_frei(item),
+            grenze=grenze_frei(item) and not noch_offen(item, uebung),
             auspraegung=kontext_text(uebung, eintrag.result),
         )
         melden(uebung, eintrag)
@@ -458,7 +494,7 @@ def plan_view(
                 state,
                 uebung,
                 eintrag,
-                grenze=grenze_frei(item),
+                grenze=grenze_frei(item) and not noch_offen(item, uebung),
                 auspraegung=kontext_text(uebung, eintrag.result),
             )
             page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name}: abgeschlossen")))
@@ -472,9 +508,13 @@ def plan_view(
         eintrag = None
         neu = eigener_eintrag(item)
         eigenen_gemerkt(item, neu)
-        # Der erste Satz des Eintrags beginnt seinen Abschnitt in der Aufnahme (`ui.marken`)
-        ziel = None if neu else stand_fuer(item, uebung, frisch=True).ziel
-        erster = ziel is None or not mengen(ziel.spec_snapshot, ziel.result)
+        # Der erste Satz des Eintrags beginnt seinen Abschnitt in der Aufnahme (`ui.marken`) —
+        # außer ein anderer Eintrag der Übung ist noch offen: dann läuft der Abschnitt schon
+        st = None if neu else stand_fuer(item, uebung, frisch=True)
+        ziel = st.ziel if st is not None else None
+        erster = (ziel is None or not mengen(ziel.spec_snapshot, ziel.result)) and not (
+            st is not None and st.andere
+        )
         for wert in werte:
             eintrag = state.sitzungen.satz_anhaengen(
                 session, uebung, feld.key, wert, heute(), kontext(item, uebung), neu=neu
@@ -519,20 +559,6 @@ def plan_view(
         )
         melden(uebung, eintrag)
 
-    def kontext_frei(item: PlanItem, feld: FieldSpec, eingabe: ft.TextField) -> Callable[[], None]:
-        """Eigener Wert einer Ausprägung (52°) — gilt wie ein angetippter Chip."""
-
-        def handler() -> None:
-            wert = einzelwert_lesen(feld, eingabe.value or "")
-            if wert is None:
-                eingabe.error = "?"
-                page.update()
-                return
-            state.auspraegung_wahl.setdefault(item.id, {})[feld.key] = wert
-            auffrischen()
-
-        return handler
-
     def skala_erlediger(
         item: PlanItem, feld: FieldSpec, eingabe: ft.TextField
     ) -> Callable[[], None]:
@@ -567,18 +593,133 @@ def plan_view(
 
         return handler
 
-    def auspraegung_waehler(item: PlanItem, key: str, wert: Any) -> Callable[[], None]:
-        """Ein Tipp wählt die Ausprägung, ein zweiter hebt die Wahl auf."""
+    def parameter_geaendert(item: PlanItem) -> Callable[[ft.Event[ft.SegmentedButton]], None]:
+        """Das Segment „Parameter“ in der Ausführung (Darstellung „umschalten“)."""
+
+        def handler(e: ft.Event[ft.SegmentedButton]) -> None:
+            if e.control.selected:
+                parameter_waehler(item, str(e.control.selected[0]))()
+
+        return handler
+
+    def auspraegung_setzen(item: PlanItem, key: str, wert: Any) -> None:
+        """Eine Ausprägung wählen — ``None`` hebt die Wahl auf."""
+        gewaehlt = state.auspraegung_wahl.setdefault(item.id, {})
+        if wert is None:
+            gewaehlt.pop(key, None)
+        else:
+            gewaehlt[key] = wert
+        auffrischen()
+
+    def variante_waehler(item: PlanItem) -> Callable[[str], None]:
+        """Die Variantenzeile: ein Tipp wählt, ein zweiter heißt „ohne“ (Skizze A3)."""
+        return lambda name: auspraegung_setzen(item, var.VARIANTE, name or None)
+
+    def ausfuehrung_waehler(
+        item: PlanItem, uebung: Exercise, e: SessionEntry
+    ) -> Callable[[], None]:
+        """Tipp auf einen offenen Eintrag anderer Ausführung: sie wählen — dann ist er markiert
+        und die nächsten Tipps gehen dorthin (Skizze A3: „Tippen wählt lang“)."""
 
         def handler() -> None:
-            gewaehlt = state.auspraegung_wahl.setdefault(item.id, {})
-            if gewaehlt.get(key) == wert:
-                gewaehlt.pop(key)
-            else:
-                gewaehlt[key] = wert
+            felder = [f.key for f in kontextfelder(teilspec(item, uebung))]
+            state.auspraegung_wahl[item.id] = offene.ausfuehrung(e, felder)
             auffrischen()
 
         return handler
+
+    def variante_blatt_oeffner(item: PlanItem) -> Callable[[], None]:
+        """Das Etikett-Symbol neben „Notiz“ (Ben, 21.10.2026; Skizzen A1, A2, D5): die Variante
+        des markierten Eintrags setzen — ohne markierten die für den nächsten — oder eine neue
+        anlegen, die in der Übung gespeichert wird."""
+
+        def handler() -> None:
+            uebung = uebung_fuer(item)
+            st = stand_fuer(item, uebung, frisch=True)
+            ziel = st.ziel
+            gewaehlt = (
+                var.von(ziel.result)
+                if ziel is not None
+                else str(kontext(item, uebung).get(var.VARIANTE) or "")
+            )
+            if ziel is not None:
+                von = ziel.started_at.astimezone() if ziel.started_at else None
+                werte = ziel.shorthand() if ziel.result else ""
+                teile = [t for t in (f"seit {von:%H:%M}" if von else "", werte) if t]
+                hinweis = (
+                    f"Gilt für den offenen Eintrag ({' · '.join(teile)}) und alles, "
+                    "was danach kommt."
+                    if teile
+                    else "Gilt für den offenen Eintrag und alles, was danach kommt."
+                )
+            else:
+                hinweis = "Gilt für den nächsten Eintrag."
+
+            def waehlen(name: str) -> None:
+                aktuell = katalog[item.exercise_id]
+                if ziel is not None:
+                    state.sitzungen.variante_setzen(ziel.id, aktuell, name)
+                auspraegung_setzen(item, var.VARIANTE, name or None)
+
+            def neu(name: str) -> None:
+                aktuell = katalog[item.exercise_id]
+                liste = [*var.varianten(aktuell.result_spec), var.Variante(name)]
+                gespeichert = replace(
+                    aktuell, result_spec=var.mit_varianten(aktuell.result_spec, liste)
+                )
+                state.uebungen.speichern(gespeichert)
+                katalog[gespeichert.id] = gespeichert
+                waehlen(name)
+                page.show_dialog(
+                    ft.SnackBar(ft.Text(f"{aktuell.name}: Variante „{name}“ angelegt"))
+                )
+
+            page.show_dialog(
+                varianten_blatt(
+                    uebung.name,
+                    var.varianten(katalog[item.exercise_id].result_spec),
+                    gewaehlt,
+                    hinweis=hinweis,
+                    auf_wahl=waehlen,
+                    auf_neu=neu,
+                    auf_bearbeiten=oeffner(f"/uebung/{item.exercise_id}/bearbeiten"),
+                )
+            )
+
+        return handler
+
+    def eigener_wert_fragen(item: PlanItem, feld: FieldSpec) -> None:
+        """„…“ in einer Ausprägung (Skizze C1): ein eigener Wert (52°) — gilt wie ein
+        angetippter Chip und steht danach als Segment in der Reihe."""
+        eingabe = _kleines_feld(feld)
+        eingabe.width = 140
+        eingabe.autofocus = True
+        nachher = Nachher()
+
+        def uebernehmen(_e: object = None) -> None:
+            wert = einzelwert_lesen(feld, eingabe.value or "")
+            if wert is None:
+                eingabe.error = "?"
+                _zeigen(eingabe)
+                return
+            nachher.danach(lambda: auspraegung_setzen(item, feld.key, wert))
+            schliessen(dialog)
+
+        def abbrechen(_e: object = None) -> None:
+            nachher.danach(auffrischen)  # die Segmente zeigen wieder die alte Wahl
+            schliessen(dialog)
+
+        eingabe.on_submit = uebernehmen
+        dialog: ft.AlertDialog = ft.AlertDialog(
+            title=ft.Text(f"{basis_label(feld)}: eigener Wert"),
+            content=eingabe,
+            on_dismiss=nachher.bei_schliessen,
+            actions=[
+                ft.TextButton("Abbrechen", on_click=abbrechen),
+                ft.FilledButton("Übernehmen", icon=ft.Icons.CHECK, on_click=uebernehmen),
+            ],
+        )
+        page.show_dialog(dialog)
 
     def satz_erlediger(
         item: PlanItem, feld: FieldSpec, anzahl_feld: ft.TextField, wert_feld: ft.TextField
@@ -764,6 +905,33 @@ def plan_view(
         inhalt: list[ft.Control] = [
             eintrag_zeile(e, uebung, item, st, e.id in vom_timer, aufnahme) for e in eigene
         ]
+        # Je Variante, was heute zusammenkam (Skizze A3) — getrennt gezählt
+        if summen := je_variante(eigene):
+            inhalt.insert(
+                0,
+                ft.Row(
+                    wrap=True,
+                    spacing=6,
+                    run_spacing=4,
+                    controls=[
+                        ft.Container(
+                            padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                            border_radius=6,
+                            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                            content=ft.Text(
+                                spans=[
+                                    ft.TextSpan(
+                                        text=name, style=ft.TextStyle(weight=ft.FontWeight.W_600)
+                                    ),
+                                    ft.TextSpan(text=f" {text}"),
+                                ],
+                                size=12,
+                            ),
+                        )
+                        for name, text in summen
+                    ],
+                ),
+            )
         # Spätere Stelle einer doppelten Übung: Was dasteht, stammt von früher am Tag
         if inhalt and uebung.id in mehrfach and item.id not in fertig_ids:
             titel = f"HEUTE BISHER — DAS {stelle[item.id]}. MAL STEHT NOCH AUS"
@@ -824,16 +992,22 @@ def plan_view(
         vom_timer: bool,
         aufnahme: bool,
     ) -> ft.Control:
-        """Eine Zeile je Eintrag — markiert, offen ohne Markierung oder geschlossen."""
+        """Eine Zeile je Eintrag — markiert, offen ohne Markierung (andere Ausführung, ein
+        Tipp wählt sie) oder geschlossen."""
         b = buendeln([e])[0]
         zeilen = b.parameter_zeilen()
-        offen_ist = st.offen is not None and st.offen.id == e.id
-        markiert = offen_ist and st.zustand == offene.MARKIERT
+        offen_ist = any(x.id == e.id for x in st.alle_offenen)
+        markiert = (
+            offen_ist
+            and st.zustand == offene.MARKIERT
+            and st.offen is not None
+            and st.offen.id == e.id
+        )
         von = e.started_at.astimezone() if e.started_at else None
         bis = e.ended_at.astimezone() if e.ended_at else None
         if offen_ist:
             zeit = f"seit {von:%H:%M}" if von else ""
-            status = "OFFEN" if markiert else "offen · andere Ausführung"
+            status = "OFFEN" if markiert else "offen · Tippen wählt"
         else:
             zeit = f"{von:%H:%M}–{bis:%H:%M}" if von and bis else f"{von:%H:%M}" if von else ""
             # „vom Timer, 10:07“ (Ben, 17.10.2026; Skizze 12) — wann der Lauf begann
@@ -886,8 +1060,12 @@ def plan_view(
             else ft.Border.all(1, ft.Colors.OUTLINE_VARIANT)
             if offen_ist
             else None,
-            tooltip=LEISTUNGEN_TIPP if offen_ist else EINTRAG_TIPP,
-            on_click=leistungen_zeigen(uebung) if offen_ist else eintrag_blatt_oeffner(e, uebung),
+            tooltip=LEISTUNGEN_TIPP if markiert else WAEHLEN_TIPP if offen_ist else EINTRAG_TIPP,
+            on_click=leistungen_zeigen(uebung)
+            if markiert
+            else ausfuehrung_waehler(item, uebung, e)
+            if offen_ist
+            else eintrag_blatt_oeffner(e, uebung),
             content=ft.Column(spacing=4, controls=teile),
         )
 
@@ -1064,16 +1242,64 @@ def plan_view(
             ],
         )
 
-    def auswahl_chip(text: str, gewaehlt: bool, on_click: Callable[[], None]) -> ft.Control:
-        return ft.Chip(
-            label=ft.Text(text, weight=ft.FontWeight.W_600 if gewaehlt else None),
-            selected=gewaehlt,
-            show_checkmark=False,
+    def wert_knopf(
+        text: str, on_click: Callable[[], None], gewaehlt: bool = False, col: int = 12
+    ) -> ft.Control:
+        """Ein Wert-Knopf (Skizze C1): gefüllt und groß — jeder Tipp schreibt sofort.
+        ``gewaehlt``: der heutige Wert (Ja/Nein) mit Haken."""
+        return ft.FilledButton(
+            content=ft.Row(
+                tight=True,
+                spacing=4,
+                alignment=ft.MainAxisAlignment.CENTER,
+                controls=[
+                    *([ft.Icon(ft.Icons.CHECK, size=18)] if gewaehlt else []),
+                    ft.Text(text, size=16, weight=ft.FontWeight.W_700),
+                ],
+            ),
+            height=48,
+            col=col,
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=24),
+                padding=ft.Padding.symmetric(horizontal=12),
+            ),
             on_click=on_click,
         )
 
+    def einstellungs_zone(zeilen: list[ft.Control]) -> ft.Control:
+        """Die getönte Zone „Ausführung“ (Skizze C1): was für jeden Eintrag gilt — Variante,
+        Gewicht, Seite, Winkel, die Wahl des Parameters. Segmente mit Haken: ein Zustand."""
+        farbe = ft.Colors.ON_SECONDARY_CONTAINER
+        kopf = ft.Row(
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(ft.Icons.TUNE, size=16, color=farbe),
+                ft.Text("AUSFÜHRUNG", size=11, weight=ft.FontWeight.BOLD, color=farbe),
+                ft.Text("gilt für jeden Eintrag", size=11, opacity=0.75),
+            ],
+        )
+        return ft.Container(
+            padding=ft.Padding.only(left=12, right=10, top=10, bottom=12),
+            border_radius=12,
+            bgcolor=ft.Colors.with_opacity(0.55, ft.Colors.SECONDARY_CONTAINER),
+            content=ft.Column(
+                spacing=8,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                controls=[kopf, *zeilen],
+            ),
+        )
+
+    def einstellungs_zeile(vorn: ft.Control, auswahl: ft.Control) -> ft.Control:
+        return ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[vorn, ft.Container(expand=True, content=auswahl)],
+        )
+
     def abschnitt(titel: str, *inhalt: ft.Control, zusatz: str = "") -> ft.Control:
-        """Ein umrandeter Abschnitt je Parameter, die Überschrift oben."""
+        """Ein umrandeter Abschnitt je Parameter, die Überschrift oben — weiß auf dem Block,
+        damit die Werte sich von der getönten Ausführung abheben (Skizze C1)."""
         kopf: list[ft.Control] = [ft.Text(titel, size=14, weight=ft.FontWeight.W_600)]
         if zusatz:
             kopf.append(ft.Text(zusatz, size=12, opacity=0.6))
@@ -1081,6 +1307,7 @@ def plan_view(
             padding=ft.Padding.only(left=12, right=8, top=8, bottom=10),
             border_radius=12,
             border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+            bgcolor=ft.Colors.SURFACE,
             content=ft.Column(
                 spacing=8,
                 controls=[
@@ -1095,50 +1322,99 @@ def plan_view(
             ),
         )
 
-    def ausfuehrung_abschnitt(item: PlanItem, uebung: Exercise) -> ft.Control | None:
-        """Ausprägungen (Winkel, Gewicht, Seite) vorher wählen — sie gelten für jeden Eintrag."""
-        felder = kontextfelder(teilspec(item, uebung))
-        if not felder:
-            return None
-        gewaehlt = kontext(item, uebung)
-        zeilen: list[ft.Control] = []
-        for f in felder:
-            optionen = chips_fuer(item, f) or (f.quick if f.type == FieldType.CHOICE else [])
-            # Ein eigener Wert (52°) steht wie ein Chip in der Reihe
-            if gewaehlt.get(f.key) is not None and gewaehlt[f.key] not in optionen:
-                optionen = [*optionen, gewaehlt[f.key]]
-            reihe: list[ft.Control] = [
-                ft.Text(f"{f.label}:", size=12, opacity=0.7),
-                *[
-                    auswahl_chip(
-                        chip_text(f, q),
-                        gewaehlt.get(f.key) == q,
-                        auspraegung_waehler(item, f.key, q),
-                    )
-                    for q in optionen
-                ],
-            ]
-            if f.type != FieldType.CHOICE:  # messbar: eigener Wert immer möglich
-                eingabe = _kleines_feld(f)
-                eingabe.on_submit = lambda _, f=f, e=eingabe: kontext_frei(item, f, e)()
-                reihe += [
-                    eingabe,
-                    ft.IconButton(
-                        ft.Icons.CHECK,
-                        tooltip=f"{f.label} übernehmen",
-                        on_click=kontext_frei(item, f, eingabe),
-                    ),
-                ]
-            zeilen.append(
-                ft.Row(
-                    wrap=True,
-                    spacing=6,
-                    run_spacing=6,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=reihe,
+    def varianten_zeile(item: PlanItem, gewaehlt: str) -> ft.Control:
+        """Die Variante als erste Zeile der Ausführung (Skizzen A3, D1, D2): Segmente mit
+        Namen, bei Platzmangel nur Symbole oder zwei Spalten (`components/varianten.py`)."""
+        liste = var.varianten(katalog[item.exercise_id].result_spec)
+        wahl = Variantenwahl(
+            liste, gewaehlt, breite=zeilenbreite(page), on_change=variante_waehler(item)
+        )
+        return einstellungs_zeile(
+            ft.Icon(ft.Icons.SELL_OUTLINED, size=18, opacity=0.8, tooltip="Variante"),
+            wahl.control,
+        )
+
+    def auspraegung_auswahl(item: PlanItem, f: FieldSpec, gewaehlt: Any) -> ft.Control:
+        """Eine Ausprägung (Gewicht, Seite, Winkel) als Segmente mit Haken (Skizze C1);
+        „…“ nimmt einen eigenen Wert. Passen sie nicht in die Zeile: Chips, die umbrechen."""
+        optionen = chips_fuer(item, f) or (f.quick if f.type == FieldType.CHOICE else [])
+        # Ein eigener Wert (52°) steht wie ein Chip in der Reihe
+        if gewaehlt is not None and gewaehlt not in optionen:
+            optionen = [*optionen, gewaehlt]
+        werte = {str(q): q for q in optionen}
+        eigen = f.type != FieldType.CHOICE  # messbar: eigener Wert immer möglich
+        breite = sum(len(chip_text(f, q)) * var.ZEICHEN_PX + var.INNEN_PX for q in optionen)
+        breite += 44 if eigen else 0
+        # Rand: Seite und Block (48), Zone (22), der Name davor (70)
+        if breite <= zeilenbreite(page, rand=140):
+
+            def geaendert(e: ft.Event[ft.SegmentedButton]) -> None:
+                auswahl = list(e.control.selected or [])
+                if not auswahl:
+                    auspraegung_setzen(item, f.key, None)
+                elif auswahl[0] == _EIGEN:
+                    eigener_wert_fragen(item, f)
+                else:
+                    auspraegung_setzen(item, f.key, werte[auswahl[0]])
+
+            segmente = [ft.Segment(value=str(q), label=ft.Text(chip_text(f, q))) for q in optionen]
+            if eigen:
+                segmente.append(
+                    ft.Segment(value=_EIGEN, label=ft.Text("…"), tooltip="Eigener Wert")
+                )
+            return ft.SegmentedButton(
+                segments=segmente,
+                selected=[str(gewaehlt)] if gewaehlt is not None else [],
+                allow_empty_selection=True,
+                show_selected_icon=True,
+                expand=True,
+                on_change=geaendert,
+            )
+
+        def tipp(q: Any) -> Callable[[], None]:
+            return lambda: auspraegung_setzen(item, f.key, None if gewaehlt == q else q)
+
+        chips: list[ft.Control] = [
+            ft.Chip(
+                label=ft.Text(chip_text(f, q)),
+                selected=gewaehlt == q,
+                show_checkmark=True,
+                on_click=tipp(q),
+            )
+            for q in optionen
+        ]
+        if eigen:
+            chips.append(
+                ft.Chip(
+                    label=ft.Text("…"),
+                    tooltip="Eigener Wert",
+                    on_click=lambda: eigener_wert_fragen(item, f),
                 )
             )
-        return abschnitt("Ausführung", *zeilen, zusatz="gilt für jeden Eintrag")
+        return ft.Row(wrap=True, spacing=6, run_spacing=6, controls=chips)
+
+    def ausfuehrung_abschnitt(
+        item: PlanItem, uebung: Exercise, schalter: ft.Control | None = None
+    ) -> ft.Control | None:
+        """Die Zone „Ausführung“: zuerst die Variante, dann die Ausprägungen (Winkel, Gewicht,
+        Seite) — man wählt sie vorher, sie gelten für jeden Eintrag; ``schalter`` ist die
+        Wahl des Parameters (Darstellung „umschalten“)."""
+        felder = kontextfelder(teilspec(item, uebung))
+        gewaehlt = kontext(item, uebung) if felder else {}
+        zeilen: list[ft.Control] = []
+        for f in felder:
+            if var.ist_variante(f):
+                zeilen.append(varianten_zeile(item, str(gewaehlt.get(f.key) or "")))
+                continue
+            zeilen.append(
+                einstellungs_zeile(
+                    ft.Text(basis_label(f), size=12, width=62, opacity=0.8),
+                    auspraegung_auswahl(item, f, gewaehlt.get(f.key)),
+                )
+            )
+        if schalter is not None:
+            zeilen.append(schalter)
+        return einstellungs_zone(zeilen) if zeilen else None
 
     def menge_abschnitt(item: PlanItem, feld: FieldSpec) -> ft.Control:
         """Eine Menge (Wiederholungen, Haltezeit, Strecke …): Chips, darunter die Zahlenfelder.
@@ -1149,25 +1425,18 @@ def plan_view(
         zeit = feld.unit == "s" or feld.type == FieldType.DURATION
         inhalt: list[ft.Control] = []
         if werte := chips_fuer(item, feld):
+            # Gefüllte „+“-Knöpfe, drei je Reihe (Skizze C1) — jeder Tipp trägt sofort ein
             inhalt.append(
-                ft.Row(
-                    wrap=True,
-                    spacing=6,
-                    run_spacing=6,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ft.ResponsiveRow(
+                    spacing=8,
+                    run_spacing=8,
                     controls=[
-                        ft.Text(
-                            "Satz anhängen:" if satz else "Dazu:" if liste else "Antippen:",
-                            size=12,
-                            opacity=0.7,
-                        ),
-                        *[
-                            ft.Chip(
-                                label=ft.Text(("+" if liste else "") + chip_text(feld, q)),
-                                on_click=chip_erlediger(item, feld, q),
-                            )
-                            for q in werte
-                        ],
+                        wert_knopf(
+                            ("+" if liste else "") + chip_text(feld, q),
+                            chip_erlediger(item, feld, q),
+                            col=4,
+                        )
+                        for q in werte
                     ],
                 )
             )
@@ -1220,12 +1489,26 @@ def plan_view(
             handler = wert_erlediger(item, feld, wert)
             felder = [wert]
         wert.on_submit = lambda _: handler()
+        eintragen_knopf = ft.OutlinedButton(
+            content=ft.Row(
+                tight=True,
+                spacing=6,
+                controls=[ft.Icon(ft.Icons.ADD, size=18), ft.Text("Eintragen")],
+            ),
+            height=48,
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=24),
+                side=ft.BorderSide(2, ft.Colors.PRIMARY),
+                padding=ft.Padding.symmetric(horizontal=14),
+            ),
+            on_click=handler,
+        )
         return ft.Row(
             wrap=True,
             spacing=8,
             run_spacing=6,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[*felder, _knopf("Eintragen", ft.Icons.CHECK, handler)],
+            controls=[*felder, eintragen_knopf],
         )
 
     def heutiger_wert(uebung: Exercise, feld: FieldSpec) -> Any:
@@ -1326,14 +1609,15 @@ def plan_view(
         return teile
 
     def janein_abschnitt(item: PlanItem, uebung: Exercise, feld: FieldSpec) -> ft.Control:
-        """Ja/Nein — zwei Chips, der heutige Wert ist markiert; ein Tipp trägt ein."""
+        """Ja/Nein — zwei Wert-Knöpfe (Skizze C1), der heutige Wert mit Haken; ein Tipp
+        trägt ein."""
         bisher = heutiger_wert(uebung, feld)
         return abschnitt(
             feld.label,
-            ft.Row(
-                spacing=6,
+            ft.ResponsiveRow(
+                spacing=8,
                 controls=[
-                    auswahl_chip(text, bisher is wert, wert_chip(item, feld, wert))
+                    wert_knopf(text, wert_chip(item, feld, wert), gewaehlt=bisher is wert, col=6)
                     for text, wert in (("ja", True), ("nein", False))
                 ],
             ),
@@ -1409,44 +1693,50 @@ def plan_view(
         )
 
     def eingabe_bereich(item: PlanItem, uebung: Exercise, st: offene.Stand) -> list[ft.Control]:
-        """Unter „EINTRAGEN“: Ausführung, dann die Parameter — wie die Darstellung sagt."""
+        """Oben die Zone „Ausführung“ (Einstellungen), darunter „EINTRAGEN“ mit den Werten —
+        wie die Darstellung sagt (Skizze C1)."""
         teile = parameter_abschnitte(item, uebung)
-        ausfuehrung = ausfuehrung_abschnitt(item, uebung)
-        if not teile and ausfuehrung is None:
-            return []
-        bereich: list[ft.Control] = [
-            ft.Row(
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Text("EINTRAGEN", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                    ft.Container(expand=True, height=1, bgcolor=ft.Colors.OUTLINE_VARIANT),
-                ],
-            )
-        ]
-        if ausfuehrung is not None:
-            bereich.append(ausfuehrung)
+        gewaehlt: str | None = None
+        schalter: ft.Control | None = None
         if darstellung == UMSCHALTEN and len(teile) > 1:
             keys = [key for key, _, _ in teile]
             haupt = hauptfeld(uebung)
             gewaehlt = state.parameter_wahl.get(item.id)
             if gewaehlt not in keys:
                 gewaehlt = haupt.key if haupt is not None and haupt.key in keys else keys[0]
+            # Welcher Parameter gerade eingetragen wird, ist eine Einstellung — ein Segment
+            schalter = einstellungs_zeile(
+                ft.Text("Parameter", size=12, width=62, opacity=0.8),
+                ft.SegmentedButton(
+                    segments=[ft.Segment(value=key, label=ft.Text(name)) for key, name, _ in teile],
+                    selected=[gewaehlt],
+                    show_selected_icon=False,
+                    expand=True,
+                    on_change=parameter_geaendert(item),
+                ),
+            )
+        ausfuehrung = ausfuehrung_abschnitt(item, uebung, schalter)
+        if not teile and ausfuehrung is None:
+            return []
+        bereich: list[ft.Control] = []
+        if ausfuehrung is not None:
+            bereich.append(ausfuehrung)
+        if teile:
             bereich.append(
                 ft.Row(
-                    wrap=True,
                     spacing=6,
-                    run_spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
-                        auswahl_chip(name, key == gewaehlt, parameter_waehler(item, key))
-                        for key, name, _ in teile
+                        ft.Icon(ft.Icons.ADD, size=14, opacity=0.6),
+                        ft.Text("EINTRAGEN", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                        ft.Container(expand=True, height=1, bgcolor=ft.Colors.OUTLINE_VARIANT),
                     ],
                 )
             )
-            bereich.append(next(bauen() for key, _, bauen in teile if key == gewaehlt))
-        else:
-            bereich += [bauen() for _, _, bauen in teile]
-        if teile:
+            if gewaehlt is not None:
+                bereich.append(next(bauen() for key, _, bauen in teile if key == gewaehlt))
+            else:
+                bereich += [bauen() for _, _, bauen in teile]
             bereich.append(ziel_hinweis(item, uebung, st))
         return bereich
 
@@ -1471,6 +1761,19 @@ def plan_view(
             icon=ft.Icons.EDIT_NOTE_OUTLINED,
             tooltip="Ein Satz ins Tagebuch — am offenen Eintrag",
             on_click=notiz_fragen(item),
+        )
+
+    def etikett_knopf(item: PlanItem, st: offene.Stand) -> ft.Control:
+        """Neben „Notiz“ nur das Etikett-Symbol, ohne Text (Ben, 21.10.2026: „bleib beim
+        Symbol“ — was es bedeutet, sagt die Hilfe). Getönt, wenn der markierte Eintrag eine
+        Variante trägt."""
+        gesetzt = var.von(st.ziel.result) if st.ziel is not None else ""
+        return ft.IconButton(
+            ft.Icons.SELL if gesetzt else ft.Icons.SELL_OUTLINED,
+            tooltip=f"Variante: {gesetzt}" if gesetzt else "Variante",
+            icon_color=ft.Colors.PRIMARY,
+            style=ft.ButtonStyle(bgcolor=ft.Colors.SECONDARY_CONTAINER) if gesetzt else None,
+            on_click=variante_blatt_oeffner(item),
         )
 
     def notiz_fragen(item: PlanItem) -> Callable[[], None]:
@@ -1565,7 +1868,10 @@ def plan_view(
         inhalt: list[ft.Control] = [kopfzeile(uebung, item)]
 
         if bearbeiten:
-            aktive = aktive_felder(item, uebung)
+            aktive = [f for f in aktive_felder(item, uebung) if not var.ist_variante(f)]
+            varianten_text = ""
+            if var.feld(uebung.result_spec) is not None:
+                varianten_text = "  ·  Varianten" if varianten_an(item) else "  ·  Varianten aus"
             inhalt.append(
                 ft.Text(
                     (
@@ -1573,6 +1879,7 @@ def plan_view(
                         if aktive
                         else "nur abhaken"
                     )
+                    + varianten_text
                     + (f"  ·  Ziel {ziel}" if ziel else "  ·  kein Ziel"),
                     size=12,
                     opacity=0.7,
@@ -1631,10 +1938,12 @@ def plan_view(
             st = stand_fuer(item, uebung)
             # „Abschließen“ fixiert den markierten Eintrag; ohne markierten heißt der Knopf
             # „Gemacht“ und legt einen fertigen an (Ben, 19.10.2026, Skizzen A1–A3)
+            # Gefüllt sind nur Knöpfe, die Werte schreiben (Skizze C1): „Wie geplant“ und die
+            # „+“-Knöpfe; „Abschließen“/„Gemacht“ stehen umrandet daneben
             knoepfe: list[ft.Control] = [
-                _knopf("Abschließen", ft.Icons.CHECK, abschliesser(item), betont=True)
+                _umrandet("Abschließen", ft.Icons.CHECK, abschliesser(item))
                 if st.zustand == offene.MARKIERT
-                else _knopf("Gemacht", ft.Icons.CHECK, erlediger(item), betont=not ziel)
+                else _umrandet("Gemacht", ft.Icons.CHECK, erlediger(item))
             ]
             if ziel:
                 knoepfe.append(
@@ -1643,9 +1952,10 @@ def plan_view(
                     )
                 )
             if klappbar:
+                # „Werte“ statt „Eintragen“ (Ben, 21.10.2026): das Wort hatte drei Bedeutungen
                 knoepfe.append(
                     ft.TextButton(
-                        "Zuklappen" if offen else "Eintragen",
+                        "Zuklappen" if offen else "Werte",
                         icon=ft.Icons.EXPAND_LESS if offen else ft.Icons.EXPAND_MORE,
                         tooltip="Eingabe dieser Übung schließen"
                         if offen
@@ -1671,6 +1981,8 @@ def plan_view(
             )
             knoepfe.extend(uhr.knoepfe)
             knoepfe.append(notiz_knopf(item))
+            if varianten_an(item):
+                knoepfe.append(etikett_knopf(item, st))
             inhalt.append(geleistet_tafel(uebung, item, st))
             inhalt.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=knoepfe))
             if uhr.zeile is not None and (offen or laufende(state, aus_katalog, planuebung)):
@@ -1858,7 +2170,7 @@ def _knopf_legende() -> ft.Control:
     return ft.Text(
         "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · Uhr = Zeit stoppen · "
         "+Zahl = Satz anhängen · Eintragen = Sätze × Wert · Notiz = ins Tagebuch · "
-        "i = Parameter herholen",
+        "Etikett = Variante · i = Parameter herholen",
         size=11,
         opacity=0.55,
     )

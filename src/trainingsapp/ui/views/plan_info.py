@@ -9,7 +9,8 @@ Oben **Parameter in diesem Plan**: dieselben Knöpfe wie unter „Einstellen"
 Feldvorrat. Ein Tipp speichert sofort in der Planübung; zurück im Plan steht der
 Abschnitt im Block. Ausgeschaltet wird nur von Hand (hier oder unter
 „Einstellen"). Die Übung selbst bleibt unberührt — in sie gelangt ein Feld nur
-per „Als Standard der Übung setzen".
+per „Als Standard der Übung setzen". Hat die Übung **Varianten**, folgt darunter ihr
+eigener Bereich mit einem Schalter (Ben, 21.10.2026, P58).
 
 Darunter, was die Übungsansicht zeigt (Beschreibung, Eingabe, Videos …) — die
 Ansicht wird von `uebung_detail` übernommen, nicht nachgebaut. Weil die Route
@@ -20,9 +21,15 @@ from __future__ import annotations
 
 import flet as ft
 
+from trainingsapp.core import varianten as var
 from trainingsapp.core.models import Exercise, PlanItem
 from trainingsapp.core.parameter import gewaehlte_felder
-from trainingsapp.core.standards import aktive_keys, waehlbare_felder
+from trainingsapp.core.standards import (
+    aktive_keys,
+    varianten_an,
+    varianten_schalten,
+    waehlbare_felder,
+)
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
@@ -72,16 +79,39 @@ def plan_info_view(
             page.update()
 
         wahl.content = parameter_wahl(eigene, aktiv, umschalten, vorrat)
-        oben = karte(
+        teile: list[ft.Control] = [
             kartentitel("Parameter in diesem Plan"),
             hinweis(
                 "Antippen holt einen Parameter in den Block oder nimmt ihn wieder heraus — "
                 "gilt nur für diese Planübung, die Übung bleibt, wie sie ist."
             ),
             wahl,
-            ft.TextButton("Chips und Ziel einstellen", icon=ft.Icons.TUNE, on_click=einstellen),
-            abstand=10,
+        ]
+        # Die Varianten: ein eigener Bereich unter den Parametern (Ben, 21.10.2026, P58)
+        if liste := var.varianten(uebung.result_spec):
+
+            def varianten_umschalten(e: ft.Event[ft.Switch]) -> None:
+                neu = varianten_schalten(item, bool(e.control.value))
+                state.plaene.eingabe_setzen(item.id, "", neu.quick, item.felder)
+                item.quick = neu.quick
+
+            teile += [
+                kartentitel("Varianten in diesem Plan"),
+                hinweis(
+                    "Sie gehören zur Übung: "
+                    + " · ".join(v.name for v in liste)
+                    + ". Beim Eintragen stehen sie oben in der Ausführung."
+                ),
+                ft.Switch(
+                    label="Varianten beim Eintragen zeigen",
+                    value=varianten_an(item),
+                    on_change=varianten_umschalten,
+                ),
+            ]
+        teile.append(
+            ft.TextButton("Chips und Ziel einstellen", icon=ft.Icons.TUNE, on_click=einstellen)
         )
+        oben = karte(*teile, abstand=10)
     else:
         oben = karte(
             kartentitel("Parameter"),

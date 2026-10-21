@@ -29,7 +29,7 @@ import flet as ft
 from trainingsapp.core.models import Exercise, Plan, PlanItem
 from trainingsapp.core.timer import TimerProfil, dauer_text, stoppuhr
 from trainingsapp.core.uebung_timer import profile_zur_wahl, timer_fuer
-from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein
+from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.state import UHR_KNOEPFE
@@ -91,7 +91,8 @@ def uhr_teile(
     """Knöpfe und Zeile der Uhr für eine Übung — ``plan``/``item`` ``None`` ohne Plan.
 
     ``uebung`` ist die Übung aus dem Katalog (die Planübung liest ``item``);
-    ``timer_oeffnen`` führt zum Timer der Übung (Profile, „zählt“, Läufe heute).
+    ``timer_oeffnen`` führt zum Timer der Übung (Profile, „zählt“, Läufe heute). Der Lauf
+    trägt die Ausführung ein, die der Block beim Start zeigt (Variante, Gewicht …).
     """
     e = laufende(state, uebung, item)
     if e is not None and e.timer is not None:
@@ -101,12 +102,15 @@ def uhr_teile(
         with contextlib.suppress(Exception):
             page.show_dialog(ft.SnackBar(ft.Text(text)))
 
+    def kontext() -> UebungKontext:
+        wahl = uebung_lauf.gewaehlte_ausfuehrung(state, uebung, item)
+        return uebung_lauf.kontext_fuer(uebung, plan, item, auspraegung=wahl)
+
     def starten(profil: TimerProfil) -> Callable[[], None]:
         def handler() -> None:
             state.uhr_wahl[schluessel(uebung, item)] = profil.id  # zuletzt gestartet
-            kontext = uebung_lauf.kontext_fuer(uebung, plan, item)
             try:
-                lauf = uebung_lauf.starten(page, state, kontext, _kopie(profil))
+                lauf = uebung_lauf.starten(page, state, kontext(), _kopie(profil))
             except RuntimeError as fehler:
                 melden(str(fehler))
                 return
@@ -117,9 +121,8 @@ def uhr_teile(
 
     def bereitstellen(profil: TimerProfil) -> Callable[[], None]:
         def handler() -> None:
-            kontext = uebung_lauf.kontext_fuer(uebung, plan, item)
             try:
-                lauf = uebung_lauf.bereitstellen(page, state, kontext, _kopie(profil))
+                lauf = uebung_lauf.bereitstellen(page, state, kontext(), _kopie(profil))
             except RuntimeError as fehler:
                 melden(str(fehler))
                 return

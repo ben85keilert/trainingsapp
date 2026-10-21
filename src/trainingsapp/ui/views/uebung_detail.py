@@ -17,6 +17,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import varianten as var
 from trainingsapp.core.models import (
     Exercise,
     Media,
@@ -31,6 +32,7 @@ from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
+from trainingsapp.ui.components.varianten import plakette
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang_verlauf import aufnahmen_raster
 from trainingsapp.ui.views.uebung_timer import uebung_timer_route
@@ -188,10 +190,11 @@ def _notation(uebung: Exercise) -> ft.Control:
     z. B. 3x15") — bei mehreren Parametern war nicht zu erkennen, was wozu gehört.
     """
     spec = uebung.result_spec
-    if not spec.fields:
+    felder = [f for f in spec.fields if not var.ist_variante(f)]  # eigener Abschnitt
+    if not felder:
         return ft.Text("Keine Felder — nur „gemacht“.")
     bloecke: list[ft.Control] = []
-    for f in spec.fields:
+    for f in felder:
         beispiel = format_wert(f, f.default) if f.default is not None else ""
         unten: list[ft.Control] = [
             ft.Container(
@@ -228,6 +231,33 @@ def _notation(uebung: Exercise) -> ft.Control:
             )
         )
     return ft.Column(spacing=8, controls=bloecke)
+
+
+def _varianten(liste: list[var.Variante]) -> ft.Control:
+    """Je Variante Zeichen, Name und Beschreibung (Ben, 21.10.2026, Skizze D3) — gezählt wird
+    jede für sich; angelegt und beschrieben unter „Bearbeiten“."""
+    return ft.Column(
+        spacing=8,
+        controls=[
+            ft.Row(
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+                controls=[
+                    plakette(v),
+                    ft.Column(
+                        spacing=1,
+                        tight=True,
+                        expand=True,
+                        controls=[
+                            ft.Text(v.name, weight=ft.FontWeight.W_600),
+                            *([ft.Text(v.text, size=12, opacity=0.75)] if v.text else []),
+                        ],
+                    ),
+                ],
+            )
+            for v in liste
+        ],
+    )
 
 
 def uebung_detail(
@@ -465,6 +495,11 @@ def uebung_detail(
             else ft.Text("—"),
         ),
         _abschnitt("Eingabe", _notation(uebung)),
+        *(
+            [_abschnitt("Varianten", _varianten(liste))]
+            if (liste := var.varianten(uebung.result_spec))
+            else []
+        ),
         _abschnitt("Uhr und Timer", uhr_und_timer(uebung, item)),
         _abschnitt("Standard für Pläne", ft.Column(spacing=0, controls=verwendungen)),
         _abschnitt("Aufnahmen mit dieser Übung", aufnahmen_liste(page, state, uebung)),

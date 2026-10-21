@@ -636,7 +636,8 @@ def _block(ansicht, name: str):
 
 
 def test_planblock_geleistet_oben_zahlentastatur_und_saetze(page, beinachse) -> None:
-    """Alle Parameter untereinander: eigene Abschnitte, nur Zahlenfelder, Sätze × Wert."""
+    """Alle Parameter untereinander: eine Karte „Eintragen“, je Menge eine Zeile (P70 = E2),
+    nur Zahlenfelder, Sätze × Wert; die Skala steht in der Ausführung (P71)."""
     from trainingsapp.ui.state import UNTEREINANDER
     from trainingsapp.ui.views.plan import plan_view
 
@@ -645,7 +646,7 @@ def test_planblock_geleistet_oben_zahlentastatur_und_saetze(page, beinachse) -> 
     block = _block(plan_view(page, state, plan), "Beinachsentraining")
     texte = _texte(block)
     assert "Heute noch nichts eingetragen" in texte and "EINTRAGEN" in texte
-    assert {"Wiederholungen", "Haltezeit", "Stabilität"} <= set(texte)
+    assert {"Wdh.", "Haltezeit", "Stabilität", "AUSFÜHRUNG"} <= set(texte)
     felder = [c for c in _alle(block) if isinstance(c, ft.TextField)]
     assert felder and all(
         f.keyboard_type in (ft.KeyboardType.NUMBER, ft.KeyboardType.DATETIME) for f in felder
@@ -731,42 +732,38 @@ def test_planblock_nach_dem_auffrischen_nicht_eingefroren(page, beinachse) -> No
     assert wert.error == "Wert?"
 
 
-def test_planblock_skala_regler_schreibt_ins_feld(page, beinachse) -> None:
-    """Regler bewegen → Zahl im Feld; erst der Haken trägt ein. Getippt stellt den Regler."""
-    from types import SimpleNamespace
-
+def test_planblock_skala_ist_der_schiebebalken_fuer_den_offenen_eintrag(page, beinachse) -> None:
+    """P71 (Ben, 21.10.2026): Die Skala steht in der Ausführung, als Schiebebalken der
+    Tagesfelder. Bewegen zeigt den Wert, erst das Loslassen trägt ihn in den offenen Eintrag
+    ein — ohne offenen beginnt einer; trennen tut sie nicht."""
     from trainingsapp.ui.views.plan import plan_view
 
     state, plan, _item, u = beinachse
     block = _block(plan_view(page, state, plan), "Beinachsentraining")
     regler = next(c for c in _alle(block) if isinstance(c, ft.Slider))
-    zeile = next(c for c in _alle(block) if isinstance(c, ft.Row) and regler in (c.controls or []))
-    feld = next(c for c in zeile.controls if isinstance(c, ft.TextField))
-    haken = next(c for c in zeile.controls if isinstance(c, ft.FilledTonalIconButton))
 
-    regler.on_change(SimpleNamespace(control=SimpleNamespace(value=7.0)))
-    assert feld.value == "7"
-    assert not [
-        e
-        for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
-        if e.exercise_id == u.id
-    ]  # nur bewegt, noch nichts eingetragen
-    feld.value = "4"
-    feld.on_change(None)
-    assert regler.value == 4.0
-    haken.on_click()
-    eigene = [
-        e
-        for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
-        if e.exercise_id == u.id
-    ]
-    assert [e.result.get("scale") for e in eigene] == [4]
+    def eigene() -> list:
+        return [
+            e
+            for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+            if e.exercise_id == u.id
+        ]
 
-    # Neu gebaut: Feld und Regler zeigen den heutigen Wert
+    regler.value = 7.0
+    regler.on_change(None)
+    assert not eigene()  # nur bewegt, noch nichts eingetragen
+    regler.value = 4.0
+    regler.on_change_end(None)
+    assert [e.result.get("scale") for e in eigene()] == [4]
+
+    # Neu gebaut: Der Balken zeigt den Wert des offenen Eintrags; ein neuer Wert ändert ihn
     block = _block(plan_view(page, state, plan), "Beinachsentraining")
     regler = next(c for c in _alle(block) if isinstance(c, ft.Slider))
     assert regler.value == 4.0
-    assert "Stabilität" in _texte(block) and "0 bis 10" in _texte(block)
+    assert "Stabilität" in _texte(block) and "gilt für den offenen Eintrag" in _texte(block)
+    regler.value = 6.0
+    regler.on_change_end(None)
+    assert [e.result.get("scale") for e in eigene()] == [6]  # derselbe Eintrag, korrigiert
 
 
 def test_planblock_umschalten_und_aufklappen(page, beinachse) -> None:
@@ -786,12 +783,14 @@ def test_planblock_umschalten_und_aufklappen(page, beinachse) -> None:
     )
     namen = [s.label.value for s in schalter.segments]
     assert {"Wiederholungen", "Haltezeit"} <= set(namen)
-    assert sum(isinstance(c, ft.Slider) for c in _alle(block)) == 0  # Skala nicht gewählt
-    schalter.selected = [next(s.value for s in schalter.segments if s.label.value == "Stabilität")]
+    # Die Skala steht immer in der Ausführung (P71), sie ist kein Parameter zum Umschalten
+    assert "Stabilität" not in namen
+    assert sum(isinstance(c, ft.Slider) for c in _alle(block)) == 1
+    schalter.selected = [next(s.value for s in schalter.segments if s.label.value == "Haltezeit")]
     schalter.on_change(SimpleNamespace(control=schalter))
     block = _block(plan_view(page, state, plan), "Beinachsentraining")
-    assert sum(isinstance(c, ft.Slider) for c in _alle(block)) == 1
-    assert state.parameter_wahl[item.id] == "scale"
+    assert state.parameter_wahl[item.id] == "hold"
+    assert "Haltezeit" in _texte(block) and "Wdh." not in _texte(block)  # nur die gewählte
 
     # Aufklappen: Die erste Übung ohne Eintrag ist offen, die anderen zu
     state.plan_darstellung_setzen(AUFKLAPPEN)

@@ -106,9 +106,6 @@ from trainingsapp.core.result_spec import (
     einzelwert_lesen,
     format_wert,
     ist_leer,
-    skala_bereich_text,
-    skala_wert,
-    stellen,
 )
 from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec, varianten_an
 from trainingsapp.core.tagesbilanz import buendeln, je_variante, mengen
@@ -119,8 +116,9 @@ from trainingsapp.ui import marken
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
-from trainingsapp.ui.components.layout import ohne_auto_update, sicher
+from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.scroll import scroll_merken
+from trainingsapp.ui.components.skala_regler import skala_regler
 from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile
 from trainingsapp.ui.components.varianten import Variantenwahl, varianten_blatt, zeilenbreite
 from trainingsapp.ui.components.werte import wert_leiste
@@ -320,6 +318,8 @@ def plan_view(
     #: Blöcke, die heute einen eigenen Eintrag angelegt haben (spätere Stelle einer
     #: Übung): Weitere Sätze gehen dorthin, nicht in noch einen Eintrag (D7)
     eigene: set[str] = set()
+    #: Unter welchen Mengen „…“ den eigenen Wert aufgeklappt hat — (Planübung, Feld)
+    frei_offen: set[tuple[str, str]] = set()
     #: Die Einträge des Tages mit ihrer Session — einmal gelesen; alles Weitere (Anzahl je
     #: Übung, offener Eintrag, Ziel eines Tipps, „vom Timer“) leitet sich daraus ab (N24)
     tages_paare = state.sitzungen.eintraege_am_tag(state.profil.id, heute())
@@ -558,21 +558,6 @@ def plan_view(
             session, uebung, feld.key, wert, heute(), kontext(item, uebung), neu=neu
         )
         melden(uebung, eintrag)
-
-    def skala_erlediger(
-        item: PlanItem, feld: FieldSpec, eingabe: ft.TextField
-    ) -> Callable[[], None]:
-        """Den Wert im Feld abschicken — der Regler hat ihn dort hineingeschrieben."""
-
-        def handler() -> None:
-            wert = einzelwert_lesen(feld, eingabe.value or "")
-            if wert is None:
-                eingabe.error = "?" if (eingabe.value or "").strip() else "Wert?"
-                page.update()
-                return
-            wert_setzer(item, feld, wert)
-
-        return handler
 
     def chip_erlediger(item: PlanItem, feld: FieldSpec, wert: Any) -> Callable[[], None]:
         def handler() -> None:
@@ -1242,33 +1227,12 @@ def plan_view(
             ],
         )
 
-    def wert_knopf(
-        text: str, on_click: Callable[[], None], gewaehlt: bool = False, col: int = 12
+    def einstellungs_zone(
+        zeilen: list[ft.Control], untertitel: str = "gilt für jeden Eintrag"
     ) -> ft.Control:
-        """Ein Wert-Knopf (Skizze C1): gefüllt und groß — jeder Tipp schreibt sofort.
-        ``gewaehlt``: der heutige Wert (Ja/Nein) mit Haken."""
-        return ft.FilledButton(
-            content=ft.Row(
-                tight=True,
-                spacing=4,
-                alignment=ft.MainAxisAlignment.CENTER,
-                controls=[
-                    *([ft.Icon(ft.Icons.CHECK, size=18)] if gewaehlt else []),
-                    ft.Text(text, size=16, weight=ft.FontWeight.W_700),
-                ],
-            ),
-            height=48,
-            col=col,
-            style=ft.ButtonStyle(
-                shape=ft.RoundedRectangleBorder(radius=24),
-                padding=ft.Padding.symmetric(horizontal=12),
-            ),
-            on_click=on_click,
-        )
-
-    def einstellungs_zone(zeilen: list[ft.Control]) -> ft.Control:
         """Die getönte Zone „Ausführung“ (Skizze C1): was für jeden Eintrag gilt — Variante,
-        Gewicht, Seite, Winkel, die Wahl des Parameters. Segmente mit Haken: ein Zustand."""
+        Gewicht, Seite, Winkel, die Wahl des Parameters. Segmente mit Haken: ein Zustand.
+        Darunter, abgesetzt, Ja/Nein, Skala und Freitext für den offenen Eintrag (P71)."""
         farbe = ft.Colors.ON_SECONDARY_CONTAINER
         kopf = ft.Row(
             spacing=6,
@@ -1276,7 +1240,7 @@ def plan_view(
             controls=[
                 ft.Icon(ft.Icons.TUNE, size=16, color=farbe),
                 ft.Text("AUSFÜHRUNG", size=11, weight=ft.FontWeight.BOLD, color=farbe),
-                ft.Text("gilt für jeden Eintrag", size=11, opacity=0.75),
+                ft.Text(untertitel, size=11, opacity=0.75),
             ],
         )
         return ft.Container(
@@ -1297,29 +1261,41 @@ def plan_view(
             controls=[vorn, ft.Container(expand=True, content=auswahl)],
         )
 
-    def abschnitt(titel: str, *inhalt: ft.Control, zusatz: str = "") -> ft.Control:
-        """Ein umrandeter Abschnitt je Parameter, die Überschrift oben — weiß auf dem Block,
-        damit die Werte sich von der getönten Ausführung abheben (Skizze C1)."""
-        kopf: list[ft.Control] = [ft.Text(titel, size=14, weight=ft.FontWeight.W_600)]
-        if zusatz:
-            kopf.append(ft.Text(zusatz, size=12, opacity=0.6))
+    def trennlinie(text: str) -> ft.Control:
+        """Eine dünne Linie mit Text in der Mitte — trennt in der Zone, was für jeden Eintrag
+        gilt, von dem, was nur den offenen betrifft."""
+
+        def strich() -> ft.Control:
+            return ft.Container(
+                expand=True,
+                height=1,
+                bgcolor=ft.Colors.with_opacity(0.5, ft.Colors.OUTLINE),
+            )
+
+        return ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[strich(), ft.Text(text, size=11, opacity=0.75), strich()],
+        )
+
+    def eintragen_karte(zeilen: list[ft.Control], hinweis: ft.Control) -> ft.Control:
+        """Eine Karte „Eintragen“ für alle Mengen, je Feld eine Zeile (Ben, 21.10.2026, P70 =
+        Skizze E2: „Wdh. und Zeit nebeneinander … sonst werden das zu viele Fenster“) — weiß
+        auf dem Block, damit die Werte sich von der getönten Ausführung abheben."""
+        kopf = ft.Row(
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(ft.Icons.ADD, size=14, opacity=0.6),
+                ft.Text("EINTRAGEN", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+            ],
+        )
         return ft.Container(
-            padding=ft.Padding.only(left=12, right=8, top=8, bottom=10),
+            padding=ft.Padding.only(left=12, right=10, top=10, bottom=12),
             border_radius=12,
             border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
             bgcolor=ft.Colors.SURFACE,
-            content=ft.Column(
-                spacing=8,
-                controls=[
-                    ft.Row(
-                        spacing=8,
-                        wrap=True,
-                        vertical_alignment=ft.CrossAxisAlignment.END,
-                        controls=kopf,
-                    ),
-                    *inhalt,
-                ],
-            ),
+            content=ft.Column(spacing=10, controls=[kopf, *zeilen, hinweis]),
         )
 
     def varianten_zeile(item: PlanItem, gewaehlt: str) -> ft.Control:
@@ -1394,11 +1370,13 @@ def plan_view(
         return ft.Row(wrap=True, spacing=6, run_spacing=6, controls=chips)
 
     def ausfuehrung_abschnitt(
-        item: PlanItem, uebung: Exercise, schalter: ft.Control | None = None
+        item: PlanItem, uebung: Exercise, st: offene.Stand, schalter: ft.Control | None = None
     ) -> ft.Control | None:
         """Die Zone „Ausführung“: zuerst die Variante, dann die Ausprägungen (Winkel, Gewicht,
         Seite) — man wählt sie vorher, sie gelten für jeden Eintrag; ``schalter`` ist die
-        Wahl des Parameters (Darstellung „umschalten“)."""
+        Wahl des Parameters (Darstellung „umschalten“). Abgesetzt darunter Ja/Nein, Skala und
+        Freitext: Sie gelten nur für den offenen Eintrag und trennen nicht (Ben, 21.10.2026,
+        P71)."""
         felder = kontextfelder(teilspec(item, uebung))
         gewaehlt = kontext(item, uebung) if felder else {}
         zeilen: list[ft.Control] = []
@@ -1414,41 +1392,219 @@ def plan_view(
             )
         if schalter is not None:
             zeilen.append(schalter)
-        return einstellungs_zone(zeilen) if zeilen else None
+        beiwerk = beiwerk_felder(item, uebung)
+        if not beiwerk:
+            return einstellungs_zone(zeilen) if zeilen else None
+        if zeilen:
+            zeilen.append(trennlinie("gilt für den offenen Eintrag"))
+        zeilen += [beiwerk_zeile(item, uebung, f, st.ziel) for f in beiwerk]
+        if len(zeilen) == len(beiwerk):  # nur Beiwerk: kein Strich, der Kopf sagt es
+            return einstellungs_zone(zeilen, "gilt für den offenen Eintrag")
+        return einstellungs_zone(zeilen)
 
-    def menge_abschnitt(item: PlanItem, feld: FieldSpec) -> ft.Control:
-        """Eine Menge (Wiederholungen, Haltezeit, Strecke …): Chips, darunter die Zahlenfelder.
+    def beiwerk_felder(item: PlanItem, uebung: Exercise) -> list[FieldSpec]:
+        """Ja/Nein, Skala und Freitext, die diese Planübung anbietet — sie stehen in der
+        Ausführung, nicht unter „Eintragen“ (P71)."""
+        return [
+            f
+            for f in aktive_felder(item, uebung)
+            if rolle(f) == BEIWERK and f.type in (FieldType.SCALE, FieldType.BOOL, FieldType.TEXT)
+        ]
 
-        Ohne Sätze (``FieldSpec.saetze``) zählt ein Chip zur Summe des Tages dazu."""
-        liste = feld.type == FieldType.SET_LIST
-        satz = liste and feld.saetze
-        zeit = feld.unit == "s" or feld.type == FieldType.DURATION
-        inhalt: list[ft.Control] = []
-        if werte := chips_fuer(item, feld):
-            # Gefüllte „+“-Knöpfe, drei je Reihe (Skizze C1) — jeder Tipp trägt sofort ein
-            inhalt.append(
-                ft.ResponsiveRow(
-                    spacing=8,
-                    run_spacing=8,
-                    controls=[
-                        wert_knopf(
-                            ("+" if liste else "") + chip_text(feld, q),
-                            chip_erlediger(item, feld, q),
-                            col=4,
-                        )
-                        for q in werte
+    def beiwerk_zeile(
+        item: PlanItem, uebung: Exercise, f: FieldSpec, ziel: SessionEntry | None
+    ) -> ft.Control:
+        """Eine Zeile der Ausführung für den offenen Eintrag: zeigt seinen Wert und ändert ihn
+        (`SessionRepo.wert_setzen`, `text_setzen`) — wie die Notiz; ohne markierten Eintrag
+        beginnt der erste Wert einen. Die Skala ist der Schiebebalken der Tagesfelder."""
+        wert = ziel.result.get(f.key) if ziel is not None else None
+        name = ft.Text(basis_label(f), size=12, width=62, opacity=0.8)
+        if f.type == FieldType.SCALE:
+
+            def skala(x: float | int | None) -> None:
+                if x is None and ziel is None:
+                    return  # ✕ ohne offenen Eintrag: nichts zu löschen
+                wert_setzer(item, f, x)
+
+            zahl = float(wert) if isinstance(wert, int | float) else None
+            return einstellungs_zeile(name, skala_regler(f, zahl, skala))
+        if f.type == FieldType.BOOL:
+
+            def gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+                auswahl = list(e.control.selected or [])
+                if not auswahl:
+                    if ziel is not None:
+                        wert_setzer(item, f, None)
+                    return
+                wert_setzer(item, f, auswahl[0] == "ja")
+
+            return einstellungs_zeile(
+                name,
+                ft.SegmentedButton(
+                    segments=[
+                        ft.Segment(value="ja", label=ft.Text("Ja")),
+                        ft.Segment(value="nein", label=ft.Text("Nein")),
                     ],
+                    selected=["ja"] if wert is True else ["nein"] if wert is False else [],
+                    allow_empty_selection=True,
+                    show_selected_icon=True,
+                    expand=True,
+                    on_change=gewaehlt,
+                ),
+            )
+        # Freitext — ersetzt den Text des offenen Eintrags (`SessionRepo.text_setzen`)
+        eingabe = ft.TextField(
+            value="" if wert is None else str(wert),
+            dense=True,
+            expand=True,
+            multiline=True,
+            max_lines=3,
+        )
+
+        def absenden() -> None:
+            text = (eingabe.value or "").strip()
+            if not text:
+                return
+            session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
+            neu = eigener_eintrag(item)
+            eigenen_gemerkt(item, neu)
+            eintrag = state.sitzungen.text_setzen(
+                session, uebung, f.key, text, heute(), kontext(item, uebung), neu=neu
+            )
+            melden(uebung, eintrag)
+
+        return einstellungs_zeile(
+            name,
+            ft.Row(
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    eingabe,
+                    ft.IconButton(
+                        ft.Icons.CHECK, tooltip=f"{f.label} eintragen", on_click=absenden
+                    ),
+                ],
+            ),
+        )
+
+    def kurzname(feld: FieldSpec) -> str:
+        """Der Name vor einer Zeile unter „Eintragen“ — kurz genug für die Spalte:
+        „Wiederholungen“ wird „Wdh.“ (die Einheit), „Haltezeit“ bleibt."""
+        name = basis_label(feld)
+        if len(name) > 9 and feld.unit and len(feld.unit) <= 6:
+            return feld.unit
+        return name
+
+    def zeilen_zusatz(feld: FieldSpec) -> str:
+        """Klein unter dem Namen: wie ein Wert zählt — je Satz, zur Summe, mm:ss."""
+        liste = feld.type == FieldType.SET_LIST
+        zeit = feld.unit == "s" or feld.type == FieldType.DURATION
+        if liste and feld.saetze:
+            return "s je Satz" if zeit else "je Satz"
+        if liste:
+            return "zur Summe"
+        if feld.type == FieldType.DURATION:
+            return "mm:ss"
+        return "" if feld.unit == kurzname(feld) else feld.unit or ""
+
+    def zeilen_knopf(text: str, on_click: Callable[[], None], col: int | None = None) -> ft.Control:
+        """Ein gefüllter Wert-Knopf in einer Zeile (Skizze E2): Die Knöpfe teilen sich die
+        Breite; ab vier stehen sie zu dritt in einer eigenen Reihe (``col``)."""
+        return ft.FilledButton(
+            content=ft.Text(text, size=15, weight=ft.FontWeight.W_700, no_wrap=True),
+            height=44,
+            expand=col is None,
+            col=col if col is not None else 12,
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=22),
+                padding=ft.Padding.symmetric(horizontal=4),
+            ),
+            on_click=on_click,
+        )
+
+    def menge_zeile(item: PlanItem, feld: FieldSpec) -> ft.Control:
+        """Eine Menge (Wiederholungen, Haltezeit, Strecke …) als Zeile der Karte „Eintragen“
+        (Ben, 21.10.2026, P70 = Skizze E2): der Name, die gefüllten „+“-Knöpfe — jeder Tipp
+        trägt sofort ein —, „…“ klappt den eigenen Wert auf (Sätze × Wert). Ohne Chips steht
+        das Zahlenfeld gleich da; ohne Sätze (``FieldSpec.saetze``) zählt ein Chip zur Summe
+        des Tages dazu."""
+        liste = feld.type == FieldType.SET_LIST
+        werte = chips_fuer(item, feld)
+        zusatz = zeilen_zusatz(feld)
+        name = ft.Column(
+            spacing=0,
+            tight=True,
+            width=64,
+            controls=[
+                ft.Text(kurzname(feld), size=12, weight=ft.FontWeight.W_600, max_lines=2),
+                *([ft.Text(zusatz, size=10, opacity=0.6)] if zusatz else []),
+            ],
+        )
+        # Eine Auswahl (Seite) gibt es nur über die Knöpfe
+        frei = mengen_eingabe(item, feld) if feld.type != FieldType.CHOICE else None
+        if not werte:
+            return ft.Row(
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[name, ft.Container(expand=True, content=frei)],
+            )
+        knoepfe = [
+            (("+" if liste else "") + chip_text(feld, q), chip_erlediger(item, feld, q))
+            for q in werte
+        ]
+        schluessel = (item.id, feld.key)
+        mehr: list[ft.Control] = []
+        frei_box = ft.Container(
+            content=frei,
+            visible=schluessel in frei_offen,
+            padding=ft.Padding.only(left=70),
+        )
+        if frei is not None:
+
+            def umschalten() -> None:
+                frei_offen.symmetric_difference_update({schluessel})
+                frei_box.visible = schluessel in frei_offen
+                _zeigen(frei_box)
+
+            mehr.append(
+                ft.OutlinedButton(
+                    content=ft.Text("…", size=15, weight=ft.FontWeight.W_700),
+                    width=44,
+                    height=44,
+                    tooltip="Eigener Wert (Sätze × Wert)" if liste else "Eigener Wert",
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=22),
+                        side=ft.BorderSide(2, ft.Colors.PRIMARY),
+                        padding=ft.Padding.all(0),
+                    ),
+                    on_click=umschalten,
                 )
             )
-        if feld.type != FieldType.CHOICE:  # Auswahl (Seite) nur über die Chips
-            inhalt.append(mengen_eingabe(item, feld))
-        if satz:
-            zusatz = "Sekunden je Satz" if zeit else "je Satz"
-        elif liste:
-            zusatz = "zählt zur Summe des Tages"
+        teile: list[ft.Control]
+        if len(knoepfe) <= 3:
+            teile = [
+                ft.Row(
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[name, *(zeilen_knopf(t, h) for t, h in knoepfe), *mehr],
+                )
+            ]
         else:
-            zusatz = "Minuten:Sekunden" if feld.type == FieldType.DURATION else feld.unit or ""
-        return abschnitt(basis_label(feld), *inhalt, zusatz=zusatz)
+            teile = [
+                ft.Row(
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[ft.Container(expand=True, content=name), *mehr],
+                ),
+                ft.ResponsiveRow(
+                    spacing=6,
+                    run_spacing=6,
+                    controls=[zeilen_knopf(t, h, col=4) for t, h in knoepfe],
+                ),
+            ]
+        if frei is not None:
+            teile.append(frei_box)
+        return ft.Column(spacing=6, controls=teile)
 
     def mengen_eingabe(item: PlanItem, feld: FieldSpec) -> ft.Control:
         """Nur Zahlen: „Sätze × Wert“ für Satzfelder, sonst ein Feld — dann „Eintragen“."""
@@ -1511,160 +1667,18 @@ def plan_view(
             controls=[*felder, eintragen_knopf],
         )
 
-    def heutiger_wert(uebung: Exercise, feld: FieldSpec) -> Any:
-        """Der zuletzt heute eingetragene Wert eines Beiwerks (Skala) — oder ``None``."""
-        werte = [
-            e.result[feld.key]
-            for e in tages_eintraege
-            if e.exercise_id == uebung.id and e.result.get(feld.key) is not None
-        ]
-        return werte[-1] if werte else None
-
-    def skala_abschnitt(item: PlanItem, uebung: Exercise, feld: FieldSpec) -> ft.Control:
-        """Regler und Zahlenfeld in einer Zeile, der Name der Skala darüber.
-
-        Der Regler schreibt seine Zahl ins Feld, abgeschickt wird mit dem Haken
-        oder Enter (Ben, 14.10.2026) — so landet nichts, nur weil man den Regler
-        streift. Getippte Zahlen stellen den Regler mit.
-        """
-        lo = feld.min if feld.min is not None else 0
-        hi = feld.max if feld.max is not None else 10
-        schritt = feld.step or 1
-        bisher = heutiger_wert(uebung, feld)
-        eingabe = _zahlfeld(72, wert="" if bisher is None else str(bisher))
-        eingabe.text_align = ft.TextAlign.CENTER
-        start = float(bisher) if isinstance(bisher, (int, float)) else float(lo)
-        regler = ft.Slider(
-            min=lo,
-            max=hi,
-            divisions=max(1, round((hi - lo) / schritt)),
-            value=min(max(start, lo), hi),
-            label="{value}",
-            round=stellen(schritt),
-            expand=True,
-        )
-
-        def gezogen(e: ft.Event[ft.Slider]) -> None:
-            ohne_auto_update()  # kommt beim Ziehen dauernd — nur das Feld neu zeichnen
-            wert = skala_wert(feld, float(e.control.value or 0))
-            eingabe.value = "" if wert is None else str(wert)
-            eingabe.error = None
-            _zeigen(eingabe)
-
-        def getippt(_: ft.Event[ft.TextField]) -> None:
-            ohne_auto_update()
-            wert = einzelwert_lesen(feld, eingabe.value or "")
-            if wert is not None:
-                regler.value = float(wert)
-                _zeigen(regler)
-
-        regler.on_change = gezogen
-        eingabe.on_change = getippt
-        absenden = skala_erlediger(item, feld, eingabe)
-        eingabe.on_submit = lambda _: absenden()
-        return abschnitt(
-            basis_label(feld),
-            ft.Row(
-                spacing=4,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    regler,
-                    eingabe,
-                    ft.FilledTonalIconButton(
-                        ft.Icons.CHECK,
-                        tooltip=f"{basis_label(feld)} eintragen",
-                        on_click=absenden,
-                    ),
-                ],
-            ),
-            zusatz=skala_bereich_text(feld),
-        )
-
     def parameter_abschnitte(
         item: PlanItem, uebung: Exercise
     ) -> list[tuple[str, str, Callable[[], ft.Control]]]:
-        """Je Parameter (Schlüssel, Name, Bauer): erst die Mengen, dann die Skala.
+        """Je Menge (Schlüssel, Name, Bauer) eine Zeile der Karte „Eintragen“ — Ja/Nein,
+        Skala und Freitext stehen seit P71 in der Ausführung (`beiwerk_felder`).
 
-        Gebaut wird erst bei Bedarf — beim Umschalten nur der gewählte.
+        Gebaut wird erst bei Bedarf — beim Umschalten nur die gewählte.
         """
-        teile: list[tuple[str, str, Callable[[], ft.Control]]] = [
-            (f.key, basis_label(f), partial(menge_abschnitt, item, f))
+        return [
+            (f.key, basis_label(f), partial(menge_zeile, item, f))
             for f in leistungsfelder(teilspec(item, uebung))
         ]
-        teile += [
-            (f.key, basis_label(f), partial(skala_abschnitt, item, uebung, f))
-            for f in aktive_felder(item, uebung)
-            if rolle(f) == BEIWERK and f.type == FieldType.SCALE
-        ]
-        teile += [
-            (f.key, basis_label(f), partial(janein_abschnitt, item, uebung, f))
-            for f in aktive_felder(item, uebung)
-            if f.type == FieldType.BOOL
-        ]
-        teile += [
-            (f.key, basis_label(f), partial(text_abschnitt, item, uebung, f))
-            for f in aktive_felder(item, uebung)
-            if f.type == FieldType.TEXT
-        ]
-        return teile
-
-    def janein_abschnitt(item: PlanItem, uebung: Exercise, feld: FieldSpec) -> ft.Control:
-        """Ja/Nein — zwei Wert-Knöpfe (Skizze C1), der heutige Wert mit Haken; ein Tipp
-        trägt ein."""
-        bisher = heutiger_wert(uebung, feld)
-        return abschnitt(
-            feld.label,
-            ft.ResponsiveRow(
-                spacing=8,
-                controls=[
-                    wert_knopf(text, wert_chip(item, feld, wert), gewaehlt=bisher is wert, col=6)
-                    for text, wert in (("ja", True), ("nein", False))
-                ],
-            ),
-        )
-
-    def wert_chip(item: PlanItem, feld: FieldSpec, wert: Any) -> Callable[[], None]:
-        return lambda: wert_setzer(item, feld, wert)
-
-    def text_abschnitt(item: PlanItem, uebung: Exercise, feld: FieldSpec) -> ft.Control:
-        """Freitext — ein Feld mit Haken; einmal je Tag: Das Feld zeigt den Text von heute
-        und ersetzt ihn (`SessionRepo.text_setzen`), statt einen zweiten anzulegen."""
-        # Der markierte Eintrag — `SessionRepo.text_eintrag` ist dieselbe Regel (N24)
-        ziel = stand_fuer(item, uebung).ziel
-        bisher = ziel.result.get(feld.key) if ziel is not None else None
-        eingabe = ft.TextField(
-            value="" if bisher is None else str(bisher),
-            dense=True,
-            expand=True,
-            multiline=True,
-            max_lines=4,
-        )
-
-        def absenden() -> None:
-            text = (eingabe.value or "").strip()
-            if not text:
-                return
-            session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
-            neu = eigener_eintrag(item)
-            eigenen_gemerkt(item, neu)
-            eintrag = state.sitzungen.text_setzen(
-                session, uebung, feld.key, text, heute(), kontext(item, uebung), neu=neu
-            )
-            melden(uebung, eintrag)
-
-        return abschnitt(
-            feld.label,
-            ft.Row(
-                spacing=4,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    eingabe,
-                    ft.FilledTonalIconButton(
-                        ft.Icons.CHECK, tooltip=f"{feld.label} eintragen", on_click=absenden
-                    ),
-                ],
-            ),
-        )
 
     def ziel_hinweis(item: PlanItem, uebung: Exercise, st: offene.Stand) -> ft.Control:
         """Unter den Chips (Skizze A1/A2): wohin der nächste Wert geht — ohne Markierung nur
@@ -1715,28 +1729,21 @@ def plan_view(
                     on_change=parameter_geaendert(item),
                 ),
             )
-        ausfuehrung = ausfuehrung_abschnitt(item, uebung, schalter)
+        ausfuehrung = ausfuehrung_abschnitt(item, uebung, st, schalter)
         if not teile and ausfuehrung is None:
             return []
         bereich: list[ft.Control] = []
         if ausfuehrung is not None:
             bereich.append(ausfuehrung)
         if teile:
-            bereich.append(
-                ft.Row(
-                    spacing=6,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Icon(ft.Icons.ADD, size=14, opacity=0.6),
-                        ft.Text("EINTRAGEN", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                        ft.Container(expand=True, height=1, bgcolor=ft.Colors.OUTLINE_VARIANT),
-                    ],
-                )
+            # Eine Karte für alle Mengen, je Feld eine Zeile (P70 = Skizze E2)
+            zeilen = (
+                [next(bauen() for key, _, bauen in teile if key == gewaehlt)]
+                if gewaehlt is not None
+                else [bauen() for _, _, bauen in teile]
             )
-            if gewaehlt is not None:
-                bereich.append(next(bauen() for key, _, bauen in teile if key == gewaehlt))
-            else:
-                bereich += [bauen() for _, _, bauen in teile]
+            bereich.append(eintragen_karte(zeilen, ziel_hinweis(item, uebung, st)))
+        else:  # nur Ausführung (Skala & Co.): wohin der nächste Wert geht
             bereich.append(ziel_hinweis(item, uebung, st))
         return bereich
 

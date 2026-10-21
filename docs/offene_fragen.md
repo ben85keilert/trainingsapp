@@ -64,6 +64,7 @@ Schönheit, Wartung.
 | P47 | Ablauf, 18.10. | **Nach einem Wechsel:** Wer im Ablauf eine andere Übung antippt, lässt die laufende offen; danach geht es mit der **ersten offenen in der Reihenfolge des Plans** weiter (gebaut) — oder mit der nach der gewählten? Vorher lässt sich ▶ an jeder Übung tippen (dort beginnen); die Häkchen zeigen, was heute schon gemacht ist. | Gebaut wie links; Rückmeldung. |
 | P48 | Allgemein, 18.10. | **Zurück auf der Startseite:** gebaut: auf einem anderen Reiter → „Heute“, auf „Heute“ geschieht nichts (die App minimiert nicht mehr). Passt das — oder auf „Heute“ ein Hinweis „Zum Verlassen Home-Taste“? | Rückmeldung. |
 | P49 | S10 (20.10.) | **Hinweis beim Messungs-Export:** Teilen-Knopf und „Alle exportieren“ sagen nur im Tooltip, dass die Bluetooth-Adresse nicht mitgeht — am Handy unsichtbar. Dialog wie beim Forschungsexport? | Offen. |
+| P50 | Ben, 21.10. | **Herzfrequenz (HR) in der Messansicht:** Ben arbeitet sich in die Literatur unter `../hrv-research/literatur/heart-rate` ein. Danach ist zu überlegen, wie die Herzfrequenz sinnvoll in die Anzeige kommt (heute: Kachel „HF“, Kurven „Ø HF“ und „HF Gerät“ unter Zeit, Puls als Hauptkurve nur bei `nur_puls`). **Noch nicht bauen** — erst, wenn Ben so weit ist. Zusammen mit der Live-Karte vom 21.10. (Bereich und Chips über der Hauptkurve, Notizen direkt darunter, Verlaufskurven dahinter) denken. | Wartet auf Ben. |
 
 Noch offene Fragen aus der Durchsicht vom 15.10. (Details beim jeweiligen Befund in
 Abschnitt 3; die beantworteten stehen unter „Entschieden“):

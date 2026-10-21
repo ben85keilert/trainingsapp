@@ -28,6 +28,13 @@ merkt sich `trends.verlauf` (``zwischenspeicher``).
 Was die Kurven heißen (`HINWEISE`), steht hinter dem „i“ im Kopf statt als grauer
 Text unter der Karte (Ben, 17.10.2026); die Aufzeichnung ergänzt dort Tabelle und
 Analysefenster (``info_zusatz``).
+
+**Eingebettet** (Ben, 21.10.2026): Live liegt die Hauptkurve zu weit von den
+Verlaufskurven weg. Mit ``eingebettet=True`` gibt es keine eigene Karte, sondern
+zwei Teile für die Karte der Hauptkurve: ``wahl`` (Bereich und Chips — kommen
+**über** die Hauptkurve) und ``control`` (Spektrum bzw. Poincaré und die
+Verlaufskurven — direkt unter die Notizen). Das Menü „Ansichten“ (``menue``) wandert
+in die Titelzeile der Hauptkurve, das „i“ in deren Info-Text (`info_text`).
 """
 
 from __future__ import annotations
@@ -164,6 +171,8 @@ class Analyse:
         optisch: optische Pulsintervalle — Vorbehalt an Frequenzwerten.
         info_zusatz: was das „i“ je Bereich außer `HINWEISE` erklärt (Detail:
             Tabelle und Analysefenster).
+        eingebettet: keine eigene Karte — ``wahl``, ``control`` und ``menue`` baut
+            die Ansicht selbst ein (live, siehe Modulbeschreibung).
     """
 
     def __init__(
@@ -185,6 +194,7 @@ class Analyse:
         warten: Callable[[], bool] = lambda: False,
         live_intervall_s: Callable[[], float] | None = None,
         info_zusatz: Callable[[str], str] | None = None,
+        eingebettet: bool = False,
     ) -> None:
         self._page = page
         self._state = state
@@ -202,6 +212,7 @@ class Analyse:
         self._warten = warten
         self._live_intervall_s = live_intervall_s
         self._info_zusatz = info_zusatz
+        self._eingebettet = eingebettet
         #: Ergebnisse je (Bereich, Fensterschlüssel) — gilt für eine Reihe (``_reihe_von``)
         self._fenster_speicher: OrderedDict[tuple[str, str], Any] = OrderedDict()
         self._reihe_von: Any = None
@@ -219,13 +230,33 @@ class Analyse:
         self._extra = ft.Container()
         self._chips = ft.Container()
         self._kurven = ft.Column(spacing=6)
-        self.control = karte(
-            self._kopf,
-            self._tabelle,
-            self._extra,
-            self._chips,
-            wischen(self._kurven),
-        )
+        #: Menü „Ansichten“ — wird in `aufbauen` neu gefüllt (gespeicherte Ansichten)
+        self.menue = ft.Container()
+        #: Eingebettet: Bereich und Chips — die Ansicht setzt sie über die Hauptkurve
+        #: (sonst leer; beides steckt dann in ``control``)
+        self.wahl: ft.Control = ft.Container(visible=False)
+        self.control: ft.Control
+        if eingebettet:
+            self.wahl = ft.Column(
+                spacing=8,
+                tight=True,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                controls=[self._kopf, self._chips],
+            )
+            self.control = ft.Column(
+                spacing=12,
+                tight=True,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                controls=[self._tabelle, self._extra, wischen(self._kurven)],
+            )
+        else:
+            self.control = karte(
+                self._kopf,
+                self._tabelle,
+                self._extra,
+                self._chips,
+                wischen(self._kurven),
+            )
         self.aufbauen()
 
     # -- Zustand -----------------------------------------------------------------
@@ -258,15 +289,19 @@ class Analyse:
     def aufbauen(self) -> None:
         """Kopf, Chips und Tabelle — was sich nur bei Bedienung ändert."""
         bereich = self.bereich
+        self.menue.content = ansicht_menue(self._page, self._state, self._geaendert)
         # Titelzeile wie in den anderen Karten, die Bereichswahl darunter über die ganze
-        # Breite — neben „i“ und Menü brach „Nichtlinear“ auf 412 px Breite um (17.10.2026)
-        kopf: list[ft.Control] = [
-            titel(
-                "Verlauf",
-                info_knopf(self._page, "So liest du den Verlauf", self.info_text),
-                ansicht_menue(self._page, self._state, self._geaendert),
+        # Breite — neben „i“ und Menü brach „Nichtlinear“ auf 412 px Breite um (17.10.2026).
+        # Eingebettet trägt die Hauptkurve Titel, „i“ und Menü.
+        kopf: list[ft.Control] = []
+        if not self._eingebettet:
+            kopf.append(
+                titel(
+                    "Verlauf",
+                    info_knopf(self._page, "So liest du den Verlauf", self.info_text),
+                    self.menue,
+                )
             )
-        ]
         if len(self.bereiche) > 1:
             kopf.append(bereich_wahl(self.bereiche, bereich, self._wechseln))
         self._kopf.content = ft.Column(
@@ -275,6 +310,7 @@ class Analyse:
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             controls=kopf,
         )
+        self._kopf.visible = bool(kopf)
         self._ohne_chips = list(self._ohne())
         self._chips.content = chips(
             self._state.ansicht(), self._umschalten, bereich, ohne=self._ohne_chips

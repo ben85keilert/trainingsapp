@@ -6,12 +6,14 @@ Verbindung, von oben nach unten:
 1. Status — Gerät, Akku und der Aufnahmeknopf, damit man nicht erst scrollen muss;
    darunter Titel und Beschreibung, schon vor dem Start (Ben, 17.10.2026).
 2. Kacheln — welche, stellt man unter Einstellungen → HRV-Messung ein.
-3. Hauptkurve (RR- bzw. PPI-Tachogramm) mit Fensterbreite, „korrigiert",
-   Korrekturregeln und den Notizen. Sendet das Gerät nur die Herzfrequenz (Uhren im
-   Übertragungsmodus — im Geräteprofil hinterlegt, sonst erkannt), ist die Hauptkurve
-   der Puls in bpm (`nur_puls`, Ben 17.10.2026). Was die Farben heißen, steht hinter
-   dem „i“ im Kartentitel.
-4. Analyse — Zeit ↔ Frequenz ↔ Nichtlinear (`components.analyse`).
+3. Eine Karte für die Kurven (Ben, 21.10.2026: Hauptkurve und Verlaufskurven dicht
+   beieinander): Fensterbreite, Bereich Zeit ↔ Frequenz ↔ Nichtlinear und die Chips
+   der Verlaufskurven, „korrigiert", dann die Hauptkurve (RR- bzw. PPI-Tachogramm),
+   direkt darunter die Notizen, darunter Spektrum bzw. Poincaré und die
+   Verlaufskurven (`components.analyse`, eingebettet). Sendet das Gerät nur die
+   Herzfrequenz (Uhren im Übertragungsmodus — im Geräteprofil hinterlegt, sonst
+   erkannt), ist die Hauptkurve der Puls in bpm (`nur_puls`, Ben 17.10.2026). Was die
+   Farben heißen, steht hinter dem „i“ im Kartentitel — für beide Kurvenarten.
 
 Das Verbindungsprotokoll (Diagnose) öffnet ein Knopf in der Gerätezeile oben.
 
@@ -821,7 +823,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         rr_box.content = hauptkurve(x_von, x_bis)
         lage_box.content = lage()
         analyse.zeichnen(x_von, x_bis)
-        for c in (rr_box, lage_box, analyse.control):
+        for c in (rr_box, lage_box, analyse.wahl, analyse.control):
             with contextlib.suppress(Exception):
                 c.update()
 
@@ -913,6 +915,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         optisch=verity,
         warten=lambda: wischt,
         live_intervall_s=lambda: float(state.hrv_einstellungen().live_spektrum_s),
+        eingebettet=True,
     )
 
     async def aufnahme_starten() -> None:
@@ -1442,6 +1445,15 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         else:
             aktualisieren(erzwingen=layout)
 
+    def kurven_info() -> str:
+        """Hauptkurve und Verlaufskurven hinter einem „i“ (Ben, 21.10.2026: ein Knopf)."""
+        haupt = PULS_INFO if modus["puls"] else TACHOGRAMM_INFO
+        return f"{haupt}\n**Verlaufskurven.** {analyse.info_text()}"
+
+    # Eine Karte für alles (Ben, 21.10.2026: Hauptkurve und Verlaufskurven näher
+    # zusammen): Bereich und Chips über der Hauptkurve, die Notizen direkt darunter —
+    # dort trifft man die Zeit am genauesten —, dann Spektrum bzw. Poincaré und die
+    # Verlaufskurven. Menü „Ansichten“ und „i“ des Verlaufs sitzen in der Titelzeile.
     haupt_karte = karte(
         ft.Row(
             spacing=4,
@@ -1449,17 +1461,14 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             controls=[
                 kurven_titel_text,
                 # Was die Farben heißen — vorher grauer Text unter den Notizen (Ben, 17.10.)
-                info_knopf(
-                    page,
-                    "So liest du die Kurve",
-                    lambda: PULS_INFO if modus["puls"] else TACHOGRAMM_INFO,
-                ),
+                info_knopf(page, "So liest du die Kurven", kurven_info),
                 regler,
                 ft.IconButton(
                     ft.Icons.FULLSCREEN,
                     tooltip="Kurven im Vollbild (quer)",
                     on_click=vollbild,
                 ),
+                analyse.menue,
             ],
         ),
         ft.Row(
@@ -1478,6 +1487,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten),
             ],
         ),
+        analyse.wahl,
         korrigiert_schalter,
         lage_box,
         wischbar(
@@ -1490,10 +1500,11 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             losgelassen=wisch_ende,
         ),
         notizfeld.control,
+        analyse.control,
     )
     spalte = ft.Column(
         spacing=12,
-        controls=[status_box, kacheln_box, haupt_karte, analyse.control],
+        controls=[status_box, kacheln_box, haupt_karte],
     )
     # Erstbefüllung ohne update() — die Spalte hängt noch nicht an der Seite.
     fuellen()

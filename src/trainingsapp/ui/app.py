@@ -30,6 +30,8 @@ Routen:
     /einstellungen/hrv              Einstellungen der HRV-Messung
     /einstellungen/profile          Profile anlegen, umbenennen, löschen
     /einstellungen/tags             Typen und Regionen der Übungen: anlegen, umbenennen, löschen
+    /einstellungen/tagesfelder[/<id>|/neu]   Tagesfelder: Liste, Formular (docs/plan_tagesfelder.md)
+    /verlauf/tagesfeld/<id>         Ein Tagesfeld im Verlauf: Säulen bzw. Linien je Variante
     /pakete[/<id>|/export[/<id>]]   Paketmanager: Pakete, ein Paket, Export (auch /einstellungen/…)
     /einstellungen/gps-test         GPS-Vorabtest: Strecke und Dauertest (docs/plan_gps.md)
     /ausdauer                       Ausdauertraining mit GPS: starten, live
@@ -108,6 +110,7 @@ from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
 from trainingsapp.ui.views.plan_info import plan_info_view
 from trainingsapp.ui.views.profile import profile_view
 from trainingsapp.ui.views.tag import tag_view
+from trainingsapp.ui.views.tagesfelder import tagesfeld_formular_view, tagesfelder_view
 from trainingsapp.ui.views.timer import (
     timer_bearbeiten_view,
     timer_knopf,
@@ -128,6 +131,7 @@ from trainingsapp.ui.views.updates import beim_start as updates_beim_start
 from trainingsapp.ui.views.updates import updates_view
 from trainingsapp.ui.views.verlauf import verlauf
 from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
+from trainingsapp.ui.views.verlauf_tagesfeld import verlauf_tagesfeld_view
 
 #: Reiter der Navigationsleiste: Schlüssel, Beschriftung, Symbol
 REITER = [
@@ -682,12 +686,19 @@ def main(page: ft.Page) -> None:
                 ablegen(lambda: updates_view(page, state, browser))
             elif teile[1:2] == ["anhaenge"]:
                 ablegen(lambda: einstellungen_anhaenge(page, state))
+            elif teile[1:2] == ["tagesfelder"]:
+                ablegen(lambda: tagesfelder_view(page, state))
+                if len(teile) >= 3:
+                    feld_id = None if teile[2] == "neu" else teile[2]
+                    ablegen(lambda: tagesfeld_formular_view(page, state, feld_id))
         elif teile[:1] == ["pakete"]:
             paket_routen("/pakete", teile[1:])
         elif teile[:1] == ["archiv"]:
             ablegen(lambda: archiv_view(page, state))
         elif teile[:1] == ["papierkorb"]:
             ablegen(lambda: papierkorb_view(page, state))
+        elif teile[:2] == ["verlauf", "tagesfeld"] and len(teile) >= 3:
+            ablegen(lambda: verlauf_tagesfeld_view(page, state, teile[2]))
         elif teile[:1] == ["verlauf"] and len(teile) >= 2:
             ablegen(lambda: verlauf_kachel_view(page, state, teile[1]))
         elif teile[:1] == ["uebung"] and len(teile) >= 2:

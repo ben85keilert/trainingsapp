@@ -14,8 +14,11 @@ der Kalender mit.“
   dann Plan- und Übungsnotizen nach der Uhr. Beim Scrollen geht die Woche mit (die Höhe
   jedes Tages meldet ``on_size_change``, `core.tagebuch.oben` rechnet); ein Tipp auf einen
   Tag der Woche springt zu ihm (oder zum nächstälteren mit Notiz), ‹ › blättern.
-- **Übungen**: je Übung (und je Plan) ihre Notizen, die neueste oben; die Notizen zum Tag
-  für sich.
+- **Übungen und Felder**: je Übung (und je Plan, je Tagesfeld) ihre Notizen, die neueste
+  oben; die Notizen zum Tag für sich.
+- **Tagesfelder** (Ben, 21.10.2026, Skizze C4): An der Notiz zum Tag steht die Zeile mit den
+  Werten des Tags; Texte der Felder und Werte mit Notiz stehen nach der Uhr. Antippen öffnet
+  das Blatt des Felds (`components/tagesfeld_blatt.py`).
 - Antippen bearbeitet: die Notiz zum Tag und die zum Plan im Notizdialog, die einer Übung
   in ihren Leistungen des Tages (Blatt, `views/leistungen.py`).
 
@@ -38,6 +41,7 @@ from trainingsapp.core.tagebuch import (
     AUFNAHME,
     PLAN,
     TAG,
+    TAGESFELD,
     UEBUNG,
     Gruppe,
     Notiz,
@@ -54,6 +58,7 @@ from trainingsapp.core.verlauf import MONATE, WOCHENTAGE, WOCHENTAGE_LANG, woche
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.notiz import notiz_dialog
+from trainingsapp.ui.components.tagesfeld_blatt import tagesfeld_blatt
 from trainingsapp.ui.components.wochenleiste import tageszelle
 from trainingsapp.ui.components.zeitstrahl import zeitpunkt
 from trainingsapp.ui.state import AppState
@@ -105,11 +110,14 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
     je_eintrag: dict[str, list] = {}
     for x in aufnahmen:
         je_eintrag.setdefault(x.anhang.eintrag_id, []).append(x.anhang)
+    tagesfelder = {f.id: f for f in state.tagesfelder.alle(profil, mit_geloeschten=True)}
     alle = sammeln(
         state.tagesnotizen.alle(profil),
         state.sitzungen.session_notizen(profil),
         state.sitzungen.notizen(profil),
         aufnahmen,
+        state.tageswerte.zwischen(profil, None, None),
+        tagesfelder,
     )
     katalog = {u.id: u for u in state.uebungen.alle(mit_geloeschten=True)}
     plan_namen: dict[str, str] = {p.id: p.name for p in state.plaene.alle(profil)}
@@ -140,6 +148,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
     def titel(n: Notiz) -> str:
         if n.art == TAG:
             return "Zum Tag"
+        if n.art == TAGESFELD:
+            return n.titel
         if n.art == PLAN:
             return f"Plan „{plan_name(n.plan_id)}“" if n.plan_id else "Ohne Plan"
         u = katalog.get(n.exercise_id or "")
@@ -176,6 +186,9 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                         hinweis="Wie ging das Training? Tippen oder diktieren.",
                     )
                 )
+            elif n.art == TAGESFELD and (feld := tagesfelder.get(n.feld_id or "")) is not None:
+                if feld.deleted_at is None:
+                    page.show_dialog(tagesfeld_blatt(page, state, feld, n.tag, danach=neu))
             elif n.art in (UEBUNG, AUFNAHME) and n.exercise_id:
                 uebung = state.uebungen.laden(n.exercise_id, mit_geloeschten=True)
                 if uebung is not None:
@@ -222,7 +235,7 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                     show_selected_icon=False,
                     segments=[
                         ft.Segment(value=TAGE, label=ft.Text("Tage")),
-                        ft.Segment(value=UEBUNGEN, label=ft.Text("Übungen")),
+                        ft.Segment(value=UEBUNGEN, label=ft.Text("Übungen und Felder")),
                     ],
                     on_change=ordnung_gewaehlt,
                 ),
@@ -266,8 +279,22 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             TAG: ft.Icons.WB_SUNNY_OUTLINED,
             PLAN: ft.Icons.LIST_ALT,
             AUFNAHME: ft.Icons.ATTACH_FILE,
+            TAGESFELD: ft.Icons.LABEL_OUTLINE,
         }.get(n.art) or symbol(symbol_name)
         inhalt: ft.Control = ft.Text(n.text, size=14, selectable=False)
+        if n.art == TAG and n.werte:
+            # Die Werte der Tagesfelder an diesem Tag (Skizze C4)
+            zeile = ft.Container(
+                bgcolor=ft.Colors.SURFACE_CONTAINER,
+                border_radius=8,
+                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                content=ft.Text(n.werte, size=12),
+            )
+            inhalt = ft.Column(
+                spacing=4,
+                tight=True,
+                controls=[*([inhalt] if n.text else []), zeile],
+            )
         if n.art == AUFNAHME:
             reihe = anhang_reihe(
                 je_eintrag.get(n.bezug_id or "", []), state.anhaenge.bild, anhang_oeffner
@@ -336,6 +363,10 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             kopf_text, icon = "Zum Tag", ft.Icons.WB_SUNNY_OUTLINED
         elif g.art == PLAN:
             kopf_text, icon = f"Plan „{plan_name(g.schluessel)}“", ft.Icons.LIST_ALT
+        elif g.art == TAGESFELD:
+            feld = tagesfelder.get(g.schluessel or "")
+            kopf_text = feld.name if feld is not None else "Tagesfeld"
+            icon = ft.Icons.LABEL_OUTLINE
         else:
             u = katalog.get(g.schluessel or "")
             kopf_text = u.name if u is not None else "(Übung nicht mehr vorhanden)"

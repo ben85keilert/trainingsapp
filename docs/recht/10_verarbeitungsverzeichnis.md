@@ -29,6 +29,7 @@ Patientinnen und Patienten der Praxis.
 | Trainingsdaten | Übungen, Wiederholungen, Notizen | **ja** — Gesundheitsdaten |
 | Messwerte | Herzfrequenz, RR-Intervalle, HRV-Kennzahlen | **ja** |
 | Medien | selbst aufgenommene Übungsvideos, Fotos | **ja** |
+| Tagesfelder | Beschwerden auf einer Skala, Einnahmen (Anzahl), Trinkmenge, Texte zu Themen wie Ernährung | **ja** — Gesundheitsdaten |
 | Nachrichten | Text zwischen Patient und Therapeut | **ja** |
 | Technische Daten | Gerätekennung, Zeitstempel, Protokolle | nein |
 
@@ -45,6 +46,15 @@ Geräte-Backup und keine Synchronisation — hinaus nur über „Teilen“ am ei
 die Person selbst auslöst. Löschung jederzeit durch die Person, endgültig (Einstellungen →
 Anhänge). Eine Übertragung an die Praxis gibt es nicht; käme sie, braucht sie eine eigene
 Einwilligung (`20_einwilligung.md`).
+
+**Tagesfelder** (gebaut 21.10.2026, `docs/plan_tagesfelder.md`): Werte, die die Person
+selbst je Tag festhält — frei benannt, etwa Schmerz 0–10, Einnahmen eines Medikaments je
+Dosis, Trinkmenge, Texte zur Ernährung. Zweck ausschließlich Dokumentation für die Person
+selbst; die App bewertet nichts, zeigt keine Grenzen und erinnert an nichts
+(`00_zweckbestimmung.md`). Speicherort wie die Trainingsdaten (Datenbank im app-privaten
+Speicher, Tabellen `day_field`, `day_value`); sie folgen den Trainingsdaten in Geräte-Backup
+(nur wenn eingeschaltet) und künftiger Synchronisation. Löschung durch die Person je Wert
+oder je Feld „mit allen Einträgen“.
 
 ### Rechtsgrundlage
 

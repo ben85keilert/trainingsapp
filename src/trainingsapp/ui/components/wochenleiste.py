@@ -23,11 +23,14 @@ def tageszelle(
     tooltip: str | None,
     heute_wort: bool = False,
     hoehe: int = 64,
+    raute: bool = False,
 ) -> ft.Container:
     """Wochentag, Tageszahl und bis zu drei Punkte; gewählt = Primärfarbe, heute = Rahmen.
 
     ``anzahl``: fett, wenn an dem Tag etwas war; ``punkte``: wie viele Punkte darunter
     (0–3); ``heute_wort``: „heute“ statt des Wochentags. Zukunft ist blass und nicht tippbar.
+    ``raute``: eine kleine Raute hinter den Punkten — an dem Tag gibt es Tageswerte
+    (Tagesfelder, Skizze C1).
     """
     ist_heute, zukunft = t == heute, t > heute
     schrift = ft.Colors.ON_PRIMARY if gewaehlt else None
@@ -40,6 +43,16 @@ def tageszelle(
             for _ in range(max(0, min(punkte, 3)))
         ],
     )
+    if raute:
+        reihe.controls.append(
+            ft.Container(
+                width=6,
+                height=6,
+                rotate=ft.Rotate(angle=0.785),
+                bgcolor=ft.Colors.ON_PRIMARY if gewaehlt else ft.Colors.TERTIARY,
+                tooltip=None,
+            )
+        )
     return ft.Container(
         expand=True,
         height=hoehe,

@@ -31,11 +31,12 @@ from __future__ import annotations
 import contextlib
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 import flet as ft
 
+from trainingsapp.core import tagesfelder as tf
 from trainingsapp.core import varianten as var
 from trainingsapp.core.models import Exercise, SessionEntry
 from trainingsapp.core.tagesbilanz import kachel
@@ -63,6 +64,9 @@ from trainingsapp.ui.views.tagebuch import tagebuch
 
 #: So viele Werte zeigt eine Mini-Kurve
 MINI_WERTE = 8
+#: Die Reiter (`AppState.verlauf_tab`): 0 Tage, 1 Übungen, 2 Zum Tag (Tagesfelder, Ben
+#: 21.10.2026: „E1 gut“ — eigener Reiter), 3 Tagebuch
+ZUM_TAG, TAGEBUCH = 2, 3
 #: „13× in 6 Wochen“ — so weit zählt die Liste der Übungen zurück
 UEBUNGEN_WOCHEN = 6
 
@@ -78,6 +82,9 @@ class _Daten:
     eintraege: list[tuple[date, SessionEntry]]
     #: dieselben je Kachel (Varianten zusammen)
     je_kachel: dict[str, list[tuple[date, SessionEntry]]]
+    #: Tagesfelder (auch ausgeschaltete und gelöschte) und alle ihre Werte bis heute
+    felder: dict[str, tf.Tagesfeld] = field(default_factory=dict)
+    werte: list[tf.Tageswert] = field(default_factory=list)
 
     def kachel_von(self, exercise_id: str) -> str:
         return kachel(self.katalog.get(exercise_id), exercise_id)
@@ -87,7 +94,15 @@ def _daten(state: AppState) -> _Daten:
     heute = state.heute()
     katalog = {u.id: u for u in state.uebungen.alle(mit_geloeschten=True)}
     eintraege = state.sitzungen.eintraege_zwischen(state.profil.id, None, heute)
-    daten = _Daten(heute, katalog, {k: u.name for k, u in katalog.items()}, eintraege, {})
+    daten = _Daten(
+        heute,
+        katalog,
+        {k: u.name for k, u in katalog.items()},
+        eintraege,
+        {},
+        {f.id: f for f in state.tagesfelder.alle(state.profil.id, mit_geloeschten=True)},
+        state.tageswerte.zwischen(state.profil.id, None, heute),
+    )
     for tag, e in eintraege:
         daten.je_kachel.setdefault(daten.kachel_von(e.exercise_id), []).append((tag, e))
     return daten
@@ -114,7 +129,7 @@ def _zeigen(control: ft.Control) -> None:
 
 
 def verlauf(page: ft.Page, state: AppState) -> ft.Control:
-    """Der Reiter „Verlauf“: Tage | Übungen | Tagebuch."""
+    """Der Reiter „Verlauf“: Tage | Übungen | Zum Tag | Tagebuch."""
     #: die Daten dieses Aufbaus — gelesen beim ersten Bedarf, neu nur am nächsten Tag
     halter: list[_Daten] = []
 
@@ -126,10 +141,12 @@ def verlauf(page: ft.Page, state: AppState) -> ft.Control:
     inhalt = ft.Container(expand=True)
 
     def fuellen() -> None:
-        if state.verlauf_tab == 2:
+        if state.verlauf_tab == TAGEBUCH:
             inhalt.content = tagebuch(page, state)
         elif state.verlauf_tab == 0:
             inhalt.content = _tage(page, state, daten)
+        elif state.verlauf_tab == ZUM_TAG:
+            inhalt.content = _zum_tag(page, state, daten)
         else:
             inhalt.content = _uebungen(page, state, daten)
 
@@ -140,8 +157,8 @@ def verlauf(page: ft.Page, state: AppState) -> ft.Control:
 
     fuellen()
     return ft.Tabs(
-        length=3,
-        selected_index=state.verlauf_tab,
+        length=4,
+        selected_index=min(state.verlauf_tab, TAGEBUCH),
         on_change=wechseln,
         expand=True,
         content=ft.Column(
@@ -150,7 +167,12 @@ def verlauf(page: ft.Page, state: AppState) -> ft.Control:
             controls=[
                 ft.TabBar(
                     scrollable=False,
-                    tabs=[ft.Tab(label="Tage"), ft.Tab(label="Übungen"), ft.Tab(label="Tagebuch")],
+                    tabs=[
+                        ft.Tab(label="Tage"),
+                        ft.Tab(label="Übungen"),
+                        ft.Tab(label="Zum Tag"),
+                        ft.Tab(label="Tagebuch"),
+                    ],
                 ),
                 inhalt,
             ],
@@ -220,7 +242,10 @@ def _tage_inhalt(
     beginn = state.verlauf_woche or jetzt
     woche = [beginn + timedelta(days=i) for i in range(7)]
     uebungen_je_tag = je_tag_der_woche(daten.eintraege, daten.kachel_von, beginn)
-    tag = _gewaehlter_tag(state.verlauf_tag, woche, heute, sorted(uebungen_je_tag))
+    mit_werten = {w.tag for w in daten.werte if woche[0] <= w.tag <= woche[-1]}
+    tag = _gewaehlter_tag(
+        state.verlauf_tag, woche, heute, sorted(set(uebungen_je_tag) | mit_werten)
+    )
 
     def woche_zeigen(neu: date) -> None:
         state.verlauf_woche = None if neu == jetzt else neu
@@ -255,11 +280,12 @@ def _tage_inhalt(
             t,
             heute=heute,
             gewaehlt=t == tag,
-            anzahl=n,
+            anzahl=n or int(t in mit_werten),
             punkte=min(n, 3),
             on_click=waehler(t),
             tooltip=f"{tag_titel(t)}: {n} Übungen" if n else None,
             heute_wort=True,
+            raute=t in mit_werten,
         )
 
     trainingstage = len(uebungen_je_tag)
@@ -338,7 +364,8 @@ def _tage_inhalt(
             ft.TextButton("Tag öffnen", on_click=_oeffner(page, f"/tag/{tag.isoformat()}")),
         ),
     ]
-    if not zeilen:
+    controls.extend(_tageswerte(page, daten, tag))
+    if not zeilen and not any(w.tag == tag for w in daten.werte):
         controls.append(
             ft.Container(
                 padding=ft.Padding.only(left=4, top=4),
@@ -379,6 +406,202 @@ def _tage_inhalt(
                 opacity=0.6,
             )
         )
+    return controls
+
+
+def _tageswerte(page: ft.Page, daten: _Daten, tag: date) -> list[ft.Control]:
+    """Reiter „Tage“: die Tagesfelder des gewählten Tags über den Übungen (Skizze C1) — je
+    Feld eine Zeile; antippen öffnet das Feld im Verlauf."""
+    werte = [w for w in daten.werte if w.tag == tag]
+    if not werte:
+        return []
+    zeilen: list[ft.Control] = []
+    for feld in daten.felder.values():
+        eigene = [w for w in werte if w.feld_id == feld.id]
+        if not eigene:
+            continue
+        stand = tf.stand_text(feld, tf.tagesstand(feld, eigene))
+        ist_text = feld.art == tf.TEXT
+        # Bis drei Uhrzeiten, sonst wie oft („6×“) — Trinken hat schnell ein Dutzend
+        uhren = ""
+        if feld.mehrmals and not ist_text:
+            zeiten = sorted(w.zeit for w in eigene)
+            uhren = (
+                " · ".join(f"{z.astimezone():%H:%M}" for z in zeiten)
+                if len(zeiten) <= 3
+                else f"{len(zeiten)}×"
+            )
+        zeilen.append(
+            ft.Container(
+                ink=True,
+                on_click=_oeffner(page, f"/verlauf/tagesfeld/{feld.id}"),
+                border_radius=10,
+                padding=ft.Padding.symmetric(horizontal=12, vertical=7),
+                content=ft.Row(
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Column(
+                            spacing=0,
+                            tight=True,
+                            expand=True,
+                            controls=[
+                                ft.Text(feld.name, size=14),
+                                *(
+                                    [ft.Text(stand, size=12, opacity=0.75, max_lines=2)]
+                                    if ist_text
+                                    else []
+                                ),
+                            ],
+                        ),
+                        *([ft.Text(uhren, size=11, opacity=0.65)] if uhren else []),
+                        *(
+                            []
+                            if ist_text
+                            else [ft.Text(stand, size=15, weight=ft.FontWeight.W_700)]
+                        ),
+                    ],
+                ),
+            )
+        )
+    return [
+        ft.Text("ZUM TAG", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+        ft.Container(
+            bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
+            border_radius=14,
+            content=ft.Column(spacing=0, controls=zeilen),
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Reiter „Zum Tag“: die Tagesfelder mit Mini-Kurve (Skizze C2)
+# ---------------------------------------------------------------------------
+
+
+def _zum_tag(page: ft.Page, state: AppState, daten: Callable[[], _Daten]) -> ft.Control:
+    spalte = ft.Column(
+        expand=True,
+        scroll=ft.ScrollMode.AUTO,
+        controls=[
+            ft.Container(
+                padding=ft.Padding.only(left=12, right=12, top=10, bottom=24),
+                content=ft.Column(spacing=8, controls=_zum_tag_inhalt(page, daten())),
+            )
+        ],
+    )
+    return scroll_merken(page, state, "verlauf_zum_tag", spalte)
+
+
+def _zum_tag_inhalt(page: ft.Page, daten: _Daten) -> list[ft.Control]:
+    """Je Tagesfeld eine Zeile: Stand des letzten Tags, Mini-Kurve bzw. -Säulen; darunter
+    ausgeschaltete und gelöschte, deren Einträge geblieben sind."""
+    heute = daten.heute
+    je_feld: dict[str, list[tf.Tageswert]] = {}
+    for w in daten.werte:
+        je_feld.setdefault(w.feld_id, []).append(w)
+    aktiv = [f for f in daten.felder.values() if f.aktiv and f.deleted_at is None]
+    sonst = [
+        f for f in daten.felder.values() if (not f.aktiv or f.deleted_at) and je_feld.get(f.id)
+    ]
+    if not aktiv and not sonst:
+        return [
+            ft.Text(
+                "Noch keine Tagesfelder. Mit ihnen hältst du an jedem Tag fest, was dir wichtig "
+                "ist — Schmerz auf einer Skala, Trinken, Einnahmen, Themen zum Schreiben.",
+                opacity=0.75,
+            ),
+            ft.Row(
+                controls=[
+                    ft.FilledTonalButton(
+                        "Tagesfelder anlegen",
+                        icon=ft.Icons.ADD,
+                        on_click=_oeffner(page, "/einstellungen/tagesfelder"),
+                    )
+                ]
+            ),
+        ]
+
+    def zeile(feld: tf.Tagesfeld) -> ft.Control:
+        werte = je_feld.get(feld.id, [])
+        if werte:
+            letzter = max(w.tag for w in werte)
+            stand = tf.stand_text(feld, tf.tagesstand(feld, [w for w in werte if w.tag == letzter]))
+            unter = (
+                f"{stand} · {kurz_datum(letzter, heute)}"
+                if feld.art != tf.TEXT
+                else (
+                    f"nur Text · {len(werte)} {'Eintrag' if len(werte) == 1 else 'Einträge'} · "
+                    f"zuletzt {kurz_datum(letzter, heute)}"
+                )
+            )
+        else:
+            unter = "noch nichts eingetragen"
+        if not feld.aktiv and feld.deleted_at is None:
+            unter = f"ausgeschaltet · {unter}"
+        elif feld.deleted_at is not None:
+            unter = f"gelöscht, Einträge behalten · {unter}"
+        rechts: list[ft.Control] = []
+        if werte and feld.art in tf.SUMMIERT:
+            tage = [heute - timedelta(days=i) for i in range(6, -1, -1)]
+            summen = [
+                sum(float(w.wert) for w in werte if w.tag == t and isinstance(w.wert, int | float))
+                for t in tage
+            ]
+            rechts.append(mini_saeulen(summen, breite=84, hoehe=28))
+        elif werte and feld.art == tf.SKALA:
+            je_tag: dict[date, list[tf.Tageswert]] = {}
+            for w in werte:
+                je_tag.setdefault(w.tag, []).append(w)
+            punkte = []
+            for t in sorted(je_tag):
+                zahlen = [float(w.wert) for w in je_tag[t] if isinstance(w.wert, int | float)]
+                if zahlen:
+                    punkte.append(sum(zahlen) / len(zahlen))
+            rechts.append(mini(punkte[-MINI_WERTE:], breite=84, hoehe=28))
+        rechts.append(ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5))
+        return ft.Container(
+            bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
+            border_radius=14,
+            padding=ft.Padding.only(left=14, right=6, top=8, bottom=8),
+            ink=True,
+            on_click=_oeffner(page, f"/verlauf/tagesfeld/{feld.id}"),
+            content=ft.Row(
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Column(
+                        spacing=0,
+                        tight=True,
+                        expand=True,
+                        controls=[
+                            ft.Text(
+                                feld.name,
+                                size=15,
+                                weight=ft.FontWeight.W_600,
+                                opacity=1 if feld in aktiv else 0.7,
+                            ),
+                            ft.Text(unter, size=12, opacity=0.75, max_lines=2),
+                        ],
+                    ),
+                    *rechts,
+                ],
+            ),
+        )
+
+    controls: list[ft.Control] = [abschnitt("Tagesfelder")]
+    controls.extend(zeile(f) for f in aktiv)
+    if sonst:
+        controls.append(abschnitt("Ausgeschaltet oder gelöscht"))
+        controls.extend(zeile(f) for f in sonst)
+    controls.append(
+        ft.Text(
+            "Säulen: die letzten 7 Tage. Linie: die letzten Tage mit Wert. Antippen öffnet "
+            "das Feld mit allen Einträgen.",
+            size=11,
+            opacity=0.6,
+        )
+    )
     return controls
 
 

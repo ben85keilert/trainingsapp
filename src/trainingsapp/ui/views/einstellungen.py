@@ -1,7 +1,8 @@
 """Einstellungen — Route `/einstellungen`.
 
 Vorn das aktive Profil wählen; anlegen, umbenennen und löschen in einer eigenen
-Ansicht (`/einstellungen/profile`). Dazu die eigene Einteilung der Übungen
+Ansicht (`/einstellungen/profile`). Die Tagesfelder des Profils
+(`/einstellungen/tagesfelder`, `views/tagesfelder.py`). Dazu die eigene Einteilung der Übungen
 (`/einstellungen/tags`: Typen und Regionen), der Paketmanager
 (`/einstellungen/pakete`: Übungspakete importieren, exportieren, entfernen), wie
 sie im Plan aussehen (`ui.state.PLAN_DARSTELLUNGEN`), Farbprofil und Hell/Dunkel
@@ -174,6 +175,11 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
     paket_text = "1 Paket installiert" if pakete == 1 else f"{pakete} Pakete installiert"
     bilder, videos, groesse = state.anhaenge.gesamt(state.profil.id)
     anhang_text = f"{anzahl_text(bilder, videos)} · {groesse_text(groesse)}"
+    felder = state.tagesfelder.alle(state.profil.id)
+    aktiv = sum(1 for f in felder if f.aktiv)
+    felder_text = f"{aktiv} aktiv" + (
+        f" · {len(felder) - aktiv} aus" if len(felder) > aktiv else ""
+    )
     hrv_text = f"{len(e.kacheln)} Kacheln · Reiter „Messung“ " + (
         "sichtbar" if e.messung_anzeigen else "ausgeblendet"
     )
@@ -201,6 +207,21 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
                             *sperre,
+                        ),
+                        karte(
+                            titel("Tag"),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.LABEL_OUTLINE),
+                                title=ft.Text("Tagesfelder"),
+                                subtitle=ft.Text(
+                                    "Schmerz, Trinken, Einnahmen, Themen — unter Heute → "
+                                    f"„Zum Tag“ · {felder_text}",
+                                    size=12,
+                                ),
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/tagesfelder"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
                         ),
                         karte(
                             titel("Übungen"),

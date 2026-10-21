@@ -32,6 +32,7 @@ device        external_ref     outbox     tombstone
 
 app_setting   (gerätelokal, Migration 002 — wird nie synchronisiert)
 day_note      (Tagesnotiz je Profil und lokalem Tag, Migration 003)
+day_field ──── day_value   (Tagesfelder je Profil und ihre Werte, Migration 027)
 ```
 
 **Parameter im Plan** (Migration 004, seit Migration 010 so): Die Übung legt in
@@ -146,6 +147,26 @@ Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,
 „x von n heute") vergleichen `session_entry.started_at` mit diesen Grenzen.
 `day_note.date` speichert den lokalen Tag als `YYYY-MM-DD`. Eine Session ist
 „ein Plan an einem Tag" und entsteht beim ersten Eintrag automatisch.
+
+**Tagesfelder** (Migration 027, Ben 21.10.2026, `core/tagesfelder.py`,
+`docs/plan_tagesfelder.md`): Parameter und Tags an der Tagesnotiz — „Schmerz“ (Skala),
+„Trinken“ (Menge), „Ibu“ (Anzahl mit Varianten 400/800), „Ernährung“ (nur Text).
+- `day_field` je Profil: Name, `spec_json` (eine `ResultSpec` mit dem Wertfeld `value`,
+  bei „nur Text“ ohne, wahlweise `variant` davor), `mehrmals` (0 = einmal am Tag),
+  `sort_order`, `active` (0 = ausgeschaltet: nicht unter Heute, alles bleibt),
+  `deleted_at`. Veränderlich, letzter Schreiber gewinnt (`revision`).
+- `day_value`: `date` (lokaler Tag wie `day_note.date`), `recorded_at` (UTC),
+  `result_json`, `spec_snapshot_json`, `note` (bei „nur Text“ der Text).
+  **Unveränderlich** wie `session_entry`: Eine Korrektur ist eine neue Zeile mit
+  `replaces_value_id`. „Einmal am Tag“ korrigiert den Wert des Tags (je Variante).
+- Gültig ist eine Zeile ohne `deleted_at`, die keine **lebende** Zeile ersetzt. So nimmt
+  „Rückgängig“ nur die neue Zeile weg, und der alte Wert gilt wieder
+  (`data/tagesfelder.py`).
+- Löschen eines Felds: `deleted_at` am Feld; die Werte bleiben im Verlauf, außer
+  „mit allen Einträgen“ — dann tragen sie denselben Stempel, damit „Rückgängig“ genau sie
+  zurückholt.
+- Bewusst **keine** Übung: Pläne, Kurse, Pakete, Katalog und alle Tagesabfragen über
+  `session_entry` sehen Tagesfelder nie.
 
 ## Die wichtigen Entscheidungen
 

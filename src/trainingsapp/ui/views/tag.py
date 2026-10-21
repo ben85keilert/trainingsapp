@@ -36,6 +36,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import tagesfelder as tf
 from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import Anhang
 from trainingsapp.core.models import (
@@ -69,6 +70,7 @@ from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.notiz import notiz_dialog
 from trainingsapp.ui.components.scroll import scroll_merken
+from trainingsapp.ui.components.tagesfeld_blatt import tagesfeld_blatt
 from trainingsapp.ui.components.uebungszeile import (
     abschnitt,
     etikett,
@@ -77,6 +79,8 @@ from trainingsapp.ui.components.uebungszeile import (
 )
 from trainingsapp.ui.components.varianten import etikett as varianten_etikett
 from trainingsapp.ui.components.zeitstrahl import zeitpunkt
+from trainingsapp.ui.components.zum_tag import EINSTELLUNGEN as TAGESFELDER_ROUTE
+from trainingsapp.ui.components.zum_tag import zum_tag_block
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
@@ -157,6 +161,11 @@ class _Daten:
     vom_timer: set[str]
     tagesnotiz: str
     notiz_zeit: datetime | None
+    #: Tagesfelder (Ben, 21.10.2026): die aktiven (Block „Zum Tag“), alle mit gelöschten
+    #: (Namen in der Zeitleiste) und die Werte des Tags
+    felder: list[tf.Tagesfeld]
+    alle_felder: dict[str, tf.Tagesfeld]
+    werte: list[tf.Tageswert]
 
     @property
     def ist_heute(self) -> bool:
@@ -190,6 +199,10 @@ class _Daten:
     def notizen(self) -> int:
         return bool(self.tagesnotiz) + sum(1 for s in self.sessions() if s.note)
 
+    def tageswerte(self) -> int:
+        """Wie viele Tagesfelder an diesem Tag etwas haben."""
+        return len({w.feld_id for w in self.werte if w.wert is not None or w.note})
+
     def karte(self, plan_id: str | None) -> Plankarte | None:
         return next((k for k in self.karten if k.plan.id == plan_id), None)
 
@@ -206,6 +219,7 @@ def _lesen(state: AppState, tag: date) -> _Daten:
             plan = state.plaene.laden(s.plan_id, mit_geloeschten=True)
             plan_namen[s.plan_id] = plan.name if plan is not None else "Plan"
     ids = [e.id for e, _ in eintraege]
+    alle_felder = {f.id: f for f in state.tagesfelder.alle(state.profil.id, mit_geloeschten=True)}
     return _Daten(
         tag=tag,
         heute=state.heute(),
@@ -224,6 +238,9 @@ def _lesen(state: AppState, tag: date) -> _Daten:
         ),
         tagesnotiz=state.tagesnotizen.lesen(state.profil.id, tag),
         notiz_zeit=state.tagesnotizen.angelegt(state.profil.id, tag),
+        felder=[f for f in alle_felder.values() if f.aktiv and f.deleted_at is None],
+        alle_felder=alle_felder,
+        werte=state.tageswerte.am_tag(state.profil.id, tag),
     )
 
 
@@ -505,7 +522,7 @@ def tagesansicht(
             zeilen.append(ft.Text(tag_lang(tag), size=18, weight=ft.FontWeight.W_600))
         zeilen.append(
             ft.Text(
-                zusammenfassung(len(reihen) - trainings, trainings, d.notizen()),
+                zusammenfassung(len(reihen) - trainings, trainings, d.notizen(), d.tageswerte()),
                 size=12,
                 opacity=0.7,
             )
@@ -861,15 +878,10 @@ def tagesansicht(
         )
 
     def notiz_teile() -> list[ft.Control]:
+        """Die Notizen zu den Plänen — die Notiz zum Tag steht im Block „Zum Tag“."""
         d = daten()
         karten: list[ft.Control] = []
         knoepfe: list[ft.Control] = []
-        if d.tagesnotiz:
-            karten.append(notiz_karte("Zum Tag", d.tagesnotiz, tagesnotiz_bearbeiten))
-        else:
-            knoepfe.append(
-                ft.TextButton("Notiz zum Tag", icon=ft.Icons.ADD, on_click=tagesnotiz_bearbeiten)
-            )
         for s in d.sessions():
             if s.note:
                 karten.append(notiz_karte(session_titel(s), s.note, session_notiz(s)))
@@ -881,7 +893,92 @@ def tagesansicht(
                         on_click=session_notiz(s),
                     )
                 )
+        if not karten and not knoepfe:
+            return []
         return [abschnitt("Notizen"), *karten, ft.Row(wrap=True, spacing=0, controls=knoepfe)]
+
+    # -- Zum Tag (Tagesfelder) ---------------------------------------------------------------
+
+    def zum_tag_teile(mit_notiz: bool = True) -> list[ft.Control]:
+        """Der Block „Zum Tag“ — Ben: „unter gemacht ans Ende“."""
+        d = daten()
+        return [
+            ft.Container(height=4),
+            zum_tag_block(
+                page,
+                state,
+                tag_jetzt(),
+                d.felder,
+                d.werte,
+                auffrischen=auffrischen,
+                notiz=d.tagesnotiz if mit_notiz else None,
+                notiz_bearbeiten=tagesnotiz_bearbeiten if mit_notiz else None,
+            ),
+        ]
+
+    def wert_oeffnen(feld: tf.Tagesfeld) -> Callable[[], None]:
+        def handler() -> None:
+            if feld.deleted_at is not None:
+                return
+            page.show_dialog(
+                tagesfeld_blatt(
+                    page,
+                    state,
+                    feld,
+                    tag_jetzt(),
+                    danach=auffrischen,
+                    bearbeiten=oeffner(f"{TAGESFELDER_ROUTE}/{feld.id}"),
+                )
+            )
+
+        return handler
+
+    def einmal_zeile() -> str:
+        """Die Werte „einmal am Tag“ — sie stehen in der Zeitleiste an der Notiz zum Tag."""
+        d = daten()
+        teile = []
+        for feld in d.alle_felder.values():
+            if feld.mehrmals:
+                continue
+            if text := tf.tageszeile(feld, [w for w in d.werte if w.feld_id == feld.id]):
+                teile.append(text)
+        return " · ".join(teile)
+
+    def wert_punkt(gruppe: list[tf.Tageswert]) -> ft.Control:
+        """Zeitleiste: ein Wert, der mehrmals am Tag gesetzt wird, an seiner Uhrzeit — folgen
+        mehrere desselben Felds ohne etwas dazwischen aufeinander, eine Zeile für alle
+        („Trinken 1,25 l“, darunter „5× · 08:00–12:30“)."""
+        w = gruppe[0]
+        feld = daten().alle_felder.get(w.feld_id)
+        name = feld.name if feld is not None else "Tagesfeld"
+        if len(gruppe) == 1 or feld is None:
+            zeilen: list[ft.Control] = [ft.Text(tf.eintrag_text(name, w), size=14)]
+        else:
+            stand = tf.stand_text(feld, tf.tagesstand(feld, gruppe))
+            zeilen = [
+                ft.Text(f"{name} {stand}", size=14),
+                ft.Text(
+                    f"{len(gruppe)}× · {_uhr(gruppe[0].zeit)}–{_uhr(gruppe[-1].zeit)}",
+                    size=12,
+                    opacity=0.7,
+                ),
+            ]
+        if w.note:
+            zeilen.append(ft.Text(w.note, size=12, italic=True, opacity=0.8))
+        return ft.Container(
+            bgcolor=KARTE,
+            border_radius=14,
+            padding=ft.Padding.only(left=12, right=8, top=6, bottom=6),
+            ink=feld is not None,
+            on_click=wert_oeffnen(feld) if feld is not None else None,
+            content=ft.Row(
+                spacing=8,
+                controls=[
+                    ft.Icon(ft.Icons.LABEL_OUTLINE, size=16, opacity=0.6),
+                    ft.Column(spacing=0, tight=True, expand=True, controls=zeilen),
+                ],
+            ),
+        )
 
     # -- Zeitleiste ------------------------------------------------------------------------
 
@@ -1079,8 +1176,37 @@ def tagesansicht(
         punkte: list[tuple[datetime | None, ft.Control]] = [
             (a.beginn, block(a)) for a in zeitleiste(d.eintraege, d.namen(), d.ist_training)
         ]
-        if d.tagesnotiz:
+        einmal = einmal_zeile()
+        if d.tagesnotiz or einmal:
             zeit = d.notiz_zeit if d.notiz_zeit and lokaler_tag(d.notiz_zeit) == tag else None
+            if zeit is None and not d.tagesnotiz:
+                zeit = min(
+                    (
+                        w.zeit
+                        for w in d.werte
+                        if (f := d.alle_felder.get(w.feld_id)) and not f.mehrmals
+                    ),
+                    default=None,
+                )
+            zeilen: list[ft.Control] = [
+                ft.Text(
+                    "Notiz zum Tag" if d.tagesnotiz else "Zum Tag",
+                    size=12,
+                    weight=ft.FontWeight.W_600,
+                    opacity=0.7,
+                )
+            ]
+            if d.tagesnotiz:
+                zeilen.append(ft.Text(d.tagesnotiz, size=14))
+            if einmal:
+                zeilen.append(
+                    ft.Container(
+                        bgcolor=ft.Colors.SURFACE_CONTAINER,
+                        border_radius=8,
+                        padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                        content=ft.Text(einmal, size=12),
+                    )
+                )
             punkte.append(
                 (
                     zeit,
@@ -1090,23 +1216,34 @@ def tagesansicht(
                         padding=ft.Padding.only(left=12, right=8, top=8, bottom=8),
                         ink=True,
                         on_click=tagesnotiz_bearbeiten,
-                        content=ft.Column(
-                            spacing=2,
-                            tight=True,
-                            controls=[
-                                ft.Text(
-                                    "Notiz zum Tag",
-                                    size=12,
-                                    weight=ft.FontWeight.W_600,
-                                    opacity=0.7,
-                                ),
-                                ft.Text(d.tagesnotiz, size=14),
-                            ],
-                        ),
+                        content=ft.Column(spacing=4, tight=True, controls=zeilen),
                     ),
                 )
             )
-        punkte.sort(key=lambda p: (p[0] is None, p[0].timestamp() if p[0] else 0))
+        roh: list[tuple[datetime | None, ft.Control | tf.Tageswert]] = [*punkte]
+        for w in d.werte:
+            feld = d.alle_felder.get(w.feld_id)
+            if feld is not None and feld.mehrmals:
+                roh.append((w.zeit, w))
+        roh.sort(key=lambda p: (p[0] is None, p[0].timestamp() if p[0] else 0))
+        # Werte desselben Felds ohne etwas dazwischen in eine Zeile — mit Notiz für sich
+        punkte = []
+        gruppe: list[tf.Tageswert] = []
+
+        def abschliessen() -> None:
+            if gruppe:
+                punkte.append((gruppe[0].zeit, wert_punkt(list(gruppe))))
+                gruppe.clear()
+
+        for zeit, x in roh:
+            if not isinstance(x, tf.Tageswert):
+                abschliessen()
+                punkte.append((zeit, x))
+                continue
+            if gruppe and (gruppe[-1].feld_id != x.feld_id or gruppe[-1].note or x.note):
+                abschliessen()
+            gruppe.append(x)
+        abschliessen()
         if not punkte:
             teile.append(_hinweis("Noch nichts eingetragen."))
         else:
@@ -1124,6 +1261,8 @@ def tagesansicht(
                     ]
                 )
             )
+        if d.felder:
+            teile.extend(zum_tag_teile(mit_notiz=False))
         return teile
 
     # -- Zusammensetzen --------------------------------------------------------------------
@@ -1132,7 +1271,7 @@ def tagesansicht(
         teile = [kopf(), umschalter()]
         if state.tag_darstellung == ZEITLEISTE:
             return teile + zeitleiste_teile()
-        return teile + plan_teile() + gemacht_teile() + notiz_teile()
+        return teile + plan_teile() + gemacht_teile() + notiz_teile() + zum_tag_teile()
 
     spalte.controls = aufbauen()
     # Unten Platz für den runden Knopf „Nachtragen“

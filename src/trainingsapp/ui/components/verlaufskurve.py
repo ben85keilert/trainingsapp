@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 import flet as ft
 import flet.canvas as cv
@@ -291,6 +291,101 @@ def saeulen(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class Stapel:
+    """Ein Teil der gestapelten Säulen: eine Variante mit ihrem Wert je Tag (Tagesfelder,
+    Skizze C3: „wie viele 400er und 800er“)."""
+
+    name: str
+    farbe: str
+    werte: dict[date, float]
+
+
+def stapel_saeulen(
+    teile: Sequence[Stapel],
+    kennzahl: Kennzahl,
+    *,
+    von: date,
+    bis: date,
+    hoehe: int = 200,
+) -> ft.Control:
+    """Je Tag von ``von`` bis ``bis`` eine Säule, die Teile übereinander in ihren Farben —
+    Tage ohne Wert bleiben leer. Ein Tipp zeigt Tag, Teile und Summe."""
+    tage = [von + timedelta(days=i) for i in range((bis - von).days + 1)]
+    summen = [sum(t.werte.get(tag, 0.0) for t in teile) for tag in tage]
+    if not tage or not any(summen):
+        return ft.Container(
+            height=hoehe,
+            alignment=ft.Alignment.CENTER,
+            content=ft.Text("Noch keine Werte in diesem Zeitraum", opacity=0.6),
+        )
+    oben, schritt = werteachse(max(summen), kennzahl.dauer, ganz=not kennzahl.dauer)
+    breite = max(2.0, min(16.0, 280 / len(tage)))
+    stil = ft.TextStyle(size=12, color=ft.Colors.ON_INVERSE_SURFACE)
+    marken = datum_marken(von, bis, X_MARKEN)
+
+    def tooltip(tag: date, summe: float) -> str:
+        zeilen = [f"{WOCHENTAGE[tag.weekday()]} {tag:%d.%m.}"]
+        mehrere = len([t for t in teile if t.werte.get(tag)]) > 1
+        for t in teile:
+            if w := t.werte.get(tag):
+                zeilen.append(f"{t.name} · {kennzahl.text(w)}".strip(" ·"))
+        if mehrere:
+            zeilen.append(f"zusammen {kennzahl.text(summe)}")
+        return "\n".join(zeilen)
+
+    def stab(tag: date, summe: float) -> fc.BarChartRod:
+        stapel: list[fc.BarChartRodStackItem] = []
+        farbe: str | None = None
+        unten = 0.0
+        for t in teile:
+            if w := t.werte.get(tag):
+                stapel.append(fc.BarChartRodStackItem(from_y=unten, to_y=unten + w, color=t.farbe))
+                farbe = farbe or t.farbe
+                unten += w
+        mehrere = len(stapel) > 1
+        return fc.BarChartRod(
+            from_y=0,
+            to_y=summe,
+            width=breite,
+            # Ein Teil an diesem Tag: die Säule in seiner Farbe, sonst gestapelt
+            color=None if mehrere else farbe,
+            stack_items=stapel if mehrere else [],
+            border_radius=2,
+            tooltip=fc.BarChartRodTooltip(text=tooltip(tag, summe), text_style=stil),
+            show_tooltip=summe > 0,
+        )
+
+    gruppen = [
+        fc.BarChartGroup(x=i, rods=[stab(tag, summe)])
+        for i, (tag, summe) in enumerate(zip(tage, summen, strict=True))
+    ]
+    return fc.BarChart(
+        groups=gruppen,
+        left_axis=_werte_achse(oben, schritt, kennzahl.dauer),
+        bottom_axis=fc.ChartAxis(
+            labels=[
+                fc.ChartAxisLabel(value=(t - von).days, label=ft.Text(text, size=10))
+                for t, text in marken
+            ],
+            label_spacing=1,
+            show_min=False,
+            show_max=False,
+            label_size=22,
+        ),
+        horizontal_grid_lines=fc.ChartGridLines(
+            color=ft.Colors.with_opacity(0.15, ft.Colors.ON_SURFACE), width=1, interval=schritt
+        ),
+        tooltip=fc.BarChartTooltip(bgcolor=ft.Colors.INVERSE_SURFACE, border_radius=8),
+        min_y=-round(oben * 0.03, 6),
+        max_y=round(oben * 1.06, 6),
+        interactive=True,
+        animation=None,
+        height=hoehe,
+        expand=True,
+    )
+
+
 def mini(
     werte: Sequence[float], *, breite: int = 64, hoehe: int = 20, farbe: str = ft.Colors.PRIMARY
 ) -> ft.Control:
@@ -326,7 +421,7 @@ def mini(
 
 
 def mini_saeulen(
-    werte: Sequence[int], *, breite: int = 96, hoehe: int = 32, farbe: str = ft.Colors.PRIMARY
+    werte: Sequence[float], *, breite: int = 96, hoehe: int = 32, farbe: str = ft.Colors.PRIMARY
 ) -> ft.Control:
     """Kleine Säulen je Woche — für Übungen, die nur abgehakt werden; die letzte heller."""
     if not werte:
@@ -355,11 +450,13 @@ def mini_saeulen(
 
 __all__ = [
     "Reihe",
+    "Stapel",
     "linie",
     "linien",
     "mini",
     "mini_saeulen",
     "saeulen",
+    "stapel_saeulen",
     "tooltip_text",
     "werteachse",
 ]

@@ -162,6 +162,19 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   (rechtlich wie `physiologische_steuerung`). Kurse reisen in Paketen
   (`kurse[]`, Formatversion 2). Vertrag: `docs/plan_kurse.md`.
 
+- **Tagesfelder** (Ben, 21.10.2026): Parameter und Tags an der Tagesnotiz. Das sind frei
+  benannte Felder je Profil:
+  - Art: Skala, Anzahl, Menge, Dauer, Ja/Nein oder nur Text;
+  - wahlweise Varianten;
+  - einmal am Tag oder mehrmals mit Uhrzeit.
+
+  Unter Heute stehen sie im Block „Zum Tag“. Sie haben eigene Tabellen `day_field`/
+  `day_value` (Migration 027) und sind **keine Übungen**: Pläne, Kurse, Pakete und die
+  Tagesabfragen über `session_entry` sehen sie nie. Kurven entstehen über
+  `core.tagesfelder.als_eintraege` → `core.verlauf`. Es gibt nur Zahlen, keine Bewertung,
+  Grenze oder Erinnerung (`docs/recht/00_zweckbestimmung.md`). Vertrag:
+  `docs/plan_tagesfelder.md`.
+
 - **Updates** (Ben, 16.10.2026): `core/update.py` fragt die GitHub-Releases der App ab
   (Version und Build-Nummer gegen `config.app_version()` — in der gebauten App aus
   `_build.py`, die `scripts/apk_bauen.py` schreibt, aus dem Quelltext aus `pyproject.toml`;

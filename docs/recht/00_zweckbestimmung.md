@@ -60,6 +60,22 @@ Der Unterschied liegt an einer feinen, aber entscheidenden Stelle:
 | „RMSSD 28 ms" | „Deine Erholung ist unzureichend" |
 | „Timer abgelaufen" | „Weiter, dein Puls hat sich erholt" |
 
+**Tagesfelder** (Ben, 21.10.2026, `docs/plan_tagesfelder.md`): Die Person hält je Tag
+selbst Werte fest — frei benannt, etwa Schmerz auf einer Skala, Einnahmen eines
+Medikaments, Trinkmenge, Texte zur Ernährung. Das ist Dokumentation wie die Notizen
+(„Dokumentieren“ oben ist erlaubt). Für die Entwicklung gilt:
+
+| erlaubt | nicht erlaubt |
+|---|---|
+| „Ibu 400 × 2 heute“, „400 · 9 Stück in 4 Wochen“ | „Höchstdosis erreicht“, „zu viel Ibuprofen“ |
+| „Schmerz Knie 3“, Linie über die Zeit | „Schmerz steigt — Arzt aufsuchen“, Trendpfeil als Urteil |
+| Vorschläge zum Anlegen („Schmerz“, „Medikament“) | Erinnerung an Einnahmen, Grenzlinien, Ampelfarben |
+
+Die Vorschläge „Schmerz“ und „Medikament“ heißen so, weil die Person ihre Felder selbst
+benennt und wählt; die App wertet keinen Wert aus. **Offen** (Katalog P68): ob diese
+Vorschläge in der Solo-Edition so bleiben dürfen oder neutral heißen sollen — vor einer
+Veröffentlichung im Store mit der Beschreibung dort abgleichen.
+
 ### Pflichthinweise in der App
 
 Beim ersten Start und in den Informationen:

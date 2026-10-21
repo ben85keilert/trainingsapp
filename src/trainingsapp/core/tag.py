@@ -291,11 +291,14 @@ def uhrzeit_lesen(text: str) -> time | None:
     return time(h, m) if 0 <= h <= 23 and 0 <= m <= 59 else None
 
 
-def zusammenfassung(uebungen: int, trainings: int, notizen: int) -> str:
-    """„6 Übungen · 1 Training · 2 Notizen“ — nur, was es gibt.
+def zusammenfassung(uebungen: int, trainings: int, notizen: int, tageswerte: int = 0) -> str:
+    """„6 Übungen · 1 Training · 2 Notizen · 3 Tageswerte“ — nur, was es gibt. ``tageswerte``:
+    wie viele Tagesfelder an dem Tag etwas haben (`core.tagesfelder`).
 
     >>> zusammenfassung(6, 1, 2), zusammenfassung(1, 0, 0), zusammenfassung(0, 0, 0)
     ('6 Übungen · 1 Training · 2 Notizen', '1 Übung', 'Noch nichts eingetragen')
+    >>> zusammenfassung(0, 0, 1, 1)
+    '1 Notiz · 1 Tageswert'
     """
     teile = []
     if uebungen:
@@ -304,6 +307,8 @@ def zusammenfassung(uebungen: int, trainings: int, notizen: int) -> str:
         teile.append(f"{trainings} {'Training' if trainings == 1 else 'Trainings'}")
     if notizen:
         teile.append(f"{notizen} {'Notiz' if notizen == 1 else 'Notizen'}")
+    if tageswerte:
+        teile.append(f"{tageswerte} {'Tageswert' if tageswerte == 1 else 'Tageswerte'}")
     return " · ".join(teile) or "Noch nichts eingetragen"
 
 

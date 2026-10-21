@@ -260,7 +260,7 @@ def test_physiologische_steuerung_nur_in_der_praxis(monkeypatch) -> None:
 
 def test_migration_erzeugt_das_schema(tmp_path) -> None:
     con = oeffnen(tmp_path / "test.db")
-    assert schema_version(con) == 26
+    assert schema_version(con) == 27
 
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     for erwartet in (
@@ -284,6 +284,8 @@ def test_migration_erzeugt_das_schema(tmp_path) -> None:
         "einheit",
         "einheit_baustein",
         "einheit_ereignis",
+        "day_field",
+        "day_value",
     ):
         assert erwartet in tabellen, f"Tabelle fehlt: {erwartet}"
     con.close()
@@ -293,8 +295,8 @@ def test_migration_ist_wiederholbar(tmp_path) -> None:
     """Ein zweiter Lauf darf nichts tun und nicht scheitern."""
     pfad = tmp_path / "test.db"
     con = oeffnen(pfad)
-    assert migrieren(con) == 26
-    assert migrieren(con) == 26
+    assert migrieren(con) == 27
+    assert migrieren(con) == 27
     con.close()
 
 

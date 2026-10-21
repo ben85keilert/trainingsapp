@@ -15,20 +15,29 @@ Zeigen `ui/views/tagebuch.py`. **Aufnahmen** (Fotos und Videos an Einträgen, Be
 19.10.2026, `core/anhaenge.py`) sind eine vierte Art: je Eintrag mit Anhängen eine
 Notiz der Art `AUFNAHME`, deren Text die Anzahl nennt — die Ansicht zeigt dafür die
 Frontbilder, nie ein laufendes Video. Nach Übungen geordnet stehen sie unter der Übung.
+
+**Tagesfelder** (Ben, 21.10.2026, `core/tagesfelder.py`, Skizze C4): An der Notiz zum Tag
+steht die Zeile mit den Werten des Tags (`Notiz.werte` — „Schmerz Knie 3 · Ibu 400 × 2“);
+ein Tag nur mit Werten erscheint dann auch ohne Text. Texte der Felder („Ernährung“) und
+Werte mit Notiz sind Notizen der Art `TAGESFELD` nach der Uhr; nach Übungen geordnet hat
+jedes Tagesfeld seine Gruppe.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
 from .anhaenge import AnhangMitBezug, anzahl_text, zusammenfassung
 from .models import Session, SessionEntry, lokaler_tag
+from .tagesfelder import TEXT as NUR_TEXT
+from .tagesfelder import Tagesfeld, Tageswert, eintrag_text, tageszeile
 from .varianten import von as variante_von
 
-#: Woran eine Notiz hängt — `AUFNAHME`: Fotos und Videos an einem Eintrag
-TAG, PLAN, UEBUNG, AUFNAHME = "tag", "plan", "uebung", "aufnahme"
+#: Woran eine Notiz hängt — `AUFNAHME`: Fotos und Videos an einem Eintrag, `TAGESFELD`: Text
+#: oder Notiz eines Tagesfelds
+TAG, PLAN, UEBUNG, AUFNAHME, TAGESFELD = "tag", "plan", "uebung", "aufnahme", "tagesfeld"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +55,11 @@ class Notiz:
     bezug_id: str | None = None
     #: die Variante ihres Eintrags — leer ohne (Ben, 21.10.2026: „vor allem im Tagebuch“)
     variante: str = ""
+    #: Notiz zum Tag: die Werte der Tagesfelder an diesem Tag
+    werte: str = ""
+    #: Tagesfeld: welches, und wie die Notiz heißt („Ibu 400“, „Ernährung“)
+    feld_id: str | None = None
+    titel: str = ""
 
     def sortierzeit(self) -> float:
         return self.zeit.timestamp() if self.zeit is not None else 0.0
@@ -74,10 +88,13 @@ def sammeln(
     sessions: Iterable[tuple[Session, datetime | None]],
     eintraege: Iterable[tuple[SessionEntry, Session]],
     aufnahmen: Iterable[AnhangMitBezug] = (),
+    tageswerte: Iterable[Tageswert] = (),
+    tagesfelder: Mapping[str, Tagesfeld] | None = None,
 ) -> list[Notiz]:
     """Die Ebenen als Notizen — ``tage`` (Tag, Text, angelegt), ``sessions`` (mit ihrem
     ersten Eintrag), ``eintraege`` (mit ihrer Session), ``aufnahmen`` (Anhänge mit ihrem
-    Eintrag — je Eintrag eine Notiz `AUFNAHME`). Leere Notizen fallen weg.
+    Eintrag — je Eintrag eine Notiz `AUFNAHME`), ``tageswerte`` mit ihren ``tagesfelder``
+    (Wertezeile an der Notiz zum Tag, Texte als `TAGESFELD`). Leere Notizen fallen weg.
 
     >>> from datetime import UTC
     >>> from .anhaenge import Anhang
@@ -98,8 +115,22 @@ def sammeln(
     >>> b = AnhangMitBezug(Anhang("e1", "video", aufgenommen=e.started_at), "kb", e.started_at)
     >>> [(x.art, x.text, x.bezug_id, x.exercise_id) for x in sammeln([], [], [], [a, b])]
     [('aufnahme', '1 Foto, 1 Video', 'e1', 'kb')]
+    >>> from . import tagesfelder as tf
+    >>> ibu = tf.Tagesfeld(id="ibu", name="Ibu", spec=tf.spec_bauen(tf.ANZAHL, varianten=["400"]))
+    >>> ess = tf.Tagesfeld(id="ess", name="Ernährung", spec=tf.spec_bauen(tf.TEXT))
+    >>> t = date(2026, 10, 21)
+    >>> w = [tf.Tageswert(feld_id="ibu", tag=t, result=tf.ergebnis(1, "400"), spec=ibu.spec,
+    ...                   note="nach dem Laufen"),
+    ...      tf.Tageswert(feld_id="ess", tag=t, note="Gemüse", spec=ess.spec)]
+    >>> n = sammeln([(t, "müde", None)], [], [], [], w, {"ibu": ibu, "ess": ess})
+    >>> for x in n:
+    ...     print(x.art, "|", x.text, "|", x.werte or x.titel)
+    tag | müde | Ibu 400 × 1
+    tagesfeld | nach dem Laufen | Ibu 400
+    tagesfeld | Gemüse | Ernährung
     """
     ergebnis = [Notiz(t, TAG, text.strip(), zeit) for t, text, zeit in tage if text.strip()]
+    ergebnis = _mit_tageswerten(ergebnis, list(tageswerte), tagesfelder or {})
     for s, erst in sessions:
         if s.note.strip():
             zeit = erst or s.started_at
@@ -136,6 +167,53 @@ def sammeln(
                 erste.exercise_id,
                 None,
                 eintrag_id,
+            )
+        )
+    return ergebnis
+
+
+def _mit_tageswerten(
+    notizen: list[Notiz], werte: list[Tageswert], felder: Mapping[str, Tagesfeld]
+) -> list[Notiz]:
+    """Die Notizen zum Tag mit ihrer Wertezeile — dazu die Texte der Tagesfelder."""
+    if not werte:
+        return notizen
+    je_tag: dict[date, list[Tageswert]] = {}
+    for w in werte:
+        je_tag.setdefault(w.tag, []).append(w)
+    zum_tag = {n.tag: n for n in notizen if n.art == TAG}
+    ergebnis = [n for n in notizen if n.art != TAG]
+    for tag in sorted(set(zum_tag) | set(je_tag)):
+        teile = [
+            text
+            for feld in felder.values()
+            if (text := tageszeile(feld, [w for w in je_tag.get(tag, []) if w.feld_id == feld.id]))
+        ]
+        notiz = zum_tag.get(tag)
+        if notiz is not None:
+            ergebnis.append(replace(notiz, werte=" · ".join(teile)))
+        elif teile:
+            ergebnis.append(Notiz(tag, TAG, "", None, werte=" · ".join(teile)))
+    for w in werte:
+        if not w.note.strip():
+            continue
+        feld = felder.get(w.feld_id)
+        name = feld.name if feld is not None else "Tagesfeld"
+        titel = (
+            " · ".join(x for x in (name, w.variante) if x)
+            if feld is None or feld.art == NUR_TEXT
+            else eintrag_text(name, w)
+        )
+        ergebnis.append(
+            Notiz(
+                w.tag,
+                TAGESFELD,
+                w.note.strip(),
+                w.zeit,
+                bezug_id=w.id,
+                variante=w.variante,
+                feld_id=w.feld_id,
+                titel=titel,
             )
         )
     return ergebnis
@@ -179,9 +257,11 @@ def nach_uebungen(notizen: Iterable[Notiz]) -> list[Gruppe]:
     """
     gruppen: dict[tuple[str, str | None], list[Notiz]] = {}
     for x in notizen:
+        if x.art == TAG and not x.text:
+            continue  # nur Werte — die stehen nach Tagen, nicht als Notiz zum Tag
         # Aufnahmen stehen unter ihrer Übung, zwischen deren Notizen
         art = UEBUNG if x.art == AUFNAHME else x.art
-        schluessel = x.exercise_id if art == UEBUNG else x.plan_id if art == PLAN else None
+        schluessel = {UEBUNG: x.exercise_id, PLAN: x.plan_id, TAGESFELD: x.feld_id}.get(art)
         gruppen.setdefault((art, schluessel), []).append(x)
 
     def neueste(liste: list[Notiz]) -> tuple[date, float]:
@@ -260,8 +340,10 @@ def woche(tag: date) -> list[date]:
 
 
 __all__ = [
+    "AUFNAHME",
     "PLAN",
     "TAG",
+    "TAGESFELD",
     "UEBUNG",
     "Gruppe",
     "Notiz",

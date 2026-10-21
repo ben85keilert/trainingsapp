@@ -150,10 +150,11 @@ def test_leer_und_neue_notiz_zum_tag(page, state) -> None:
     assert state.tagesnotizen.lesen(state.profil.id, state.heute()) == "erster Eintrag"
 
 
-def test_der_verlauf_hat_drei_reiter(page, state) -> None:
-    from trainingsapp.ui.views.verlauf import verlauf
+def test_der_verlauf_hat_vier_reiter(page, state) -> None:
+    """Seit den Tagesfeldern (21.10.2026) steht „Zum Tag“ vor dem Tagebuch."""
+    from trainingsapp.ui.views.verlauf import TAGEBUCH, verlauf
 
-    state.verlauf_tab = 2
+    state.verlauf_tab = TAGEBUCH
     reiter = verlauf(page, state)
     leiste = next(x for x in _alle(reiter) if isinstance(x, ft.TabBar))
-    assert [t.label for t in leiste.tabs] == ["Tage", "Übungen", "Tagebuch"]
+    assert [t.label for t in leiste.tabs] == ["Tage", "Übungen", "Zum Tag", "Tagebuch"]

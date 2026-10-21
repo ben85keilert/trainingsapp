@@ -84,6 +84,7 @@ from trainingsapp.data.repositories import (
 )
 from trainingsapp.data.seed import pakete_aus_ordner, seed_einspielen
 from trainingsapp.data.strecken import verwaiste as strecken_verwaiste
+from trainingsapp.data.tagesfelder import TagesfeldRepo, TageswertRepo
 from trainingsapp.data.upgrade import datenformat_aktualisieren
 from trainingsapp.devices.bekannte import (
     BekanntesGeraet,
@@ -182,6 +183,9 @@ class AppState:
     kurse: KursRepo
     #: Fotos und Videos an Einträgen (Migration 025, `core/anhaenge.py`) — nie geteilt
     anhaenge: AnhangRepo
+    #: Tagesfelder und ihre Werte (Migration 027, `core/tagesfelder.py`) — je Profil
+    tagesfelder: TagesfeldRepo
+    tageswerte: TageswertRepo
     profil: Subject
     #: Welcher Reiter der Navigationsleiste aktiv ist — als Schlüssel, nicht als
     #: Index: der Reiter „Messung" lässt sich ausblenden (`app.REITER`)
@@ -232,6 +236,9 @@ class AppState:
     verlauf_kennzahlen: dict[str, str] = field(default_factory=dict)
     verlauf_aus: dict[str, set[str]] = field(default_factory=dict)
     verlauf_zusammen: set[str] = field(default_factory=set)
+    #: Tagesfelder: die zuletzt gewählte Variante je Feld — der Schnellknopf unter Heute
+    #: trägt sie ein (`ui/components/tagesfeld_blatt.py`)
+    tagesfeld_varianten: dict[str, str] = field(default_factory=dict)
     #: Scrollposition je scrollbarer Fläche (Schlüssel meist die Route) — damit
     #: der Neubau nach einem Tipp nicht wieder oben beginnt
     scroll_offsets: dict[str, float] = field(default_factory=dict)
@@ -415,6 +422,8 @@ class AppState:
             pakete=PaketRepo(con),
             kurse=KursRepo(con),
             anhaenge=AnhangRepo(con, anhaengeverzeichnis()),
+            tagesfelder=TagesfeldRepo(con),
+            tageswerte=TageswertRepo(con),
             profil=profil,
             neu_eingespielt=neu,
             entfallene=PaketRepo(con).entfallene_offen(),

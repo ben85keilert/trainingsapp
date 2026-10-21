@@ -20,7 +20,7 @@ Routen:
     <bearbeiten>/hinzufuegen        Übungen in den Plan aufnehmen
     /tag/<YYYY-MM-DD>               Tagesansicht eines beliebigen Tages
     [/tag/<datum>]/leistungen/<übung>   Alle Einträge einer Übung an diesem Tag (ohne: heute)
-    [/tag/<datum>]/nachtragen/<übung>[/<plan>]   Nachtragen: Uhrzeit, Plan, Werte, Notiz
+    [/tag/<datum>]/nachtragen/<übung>[/<plan>|/ohne]   Nachtragen: Wann, Plan, Trainingsblock
     /eintrag/<id>                   Ein Eintrag: ansehen, löschen
     /eintrag/<id>/korrigieren       Korrektur als neuer Eintrag
     /uebung/neu, /uebung/<id>, /uebung/<id>/bearbeiten   Katalog

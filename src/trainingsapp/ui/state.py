@@ -15,7 +15,7 @@ import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -260,6 +260,10 @@ class AppState:
     #: „Weiter“ auf „Heute“ (Ben, 18.10.2026): die Planübung, bei der der Plan beim
     #: nächsten Öffnen steht — einmal, dann gilt wieder die gemerkte Scrollposition
     plan_ziel: str | None = None
+    #: Nachtragen als Trainingsblock (P72, `views/nachtragen.py`): je Tag und Übung die Zeit,
+    #: um die nachgetragen wird (``None`` = jetzt) — überlebt den Neubau der Ansicht und den
+    #: Wechsel des Plans, fällt beim Verlassen weg
+    nachtrag_zeit: dict[str, datetime | None] = field(default_factory=dict)
     #: Beim Öffnen einer Aufnahme auf diesen Ausschnitt zoomen: (Aufnahme-ID, von_s, bis_s)
     #: — gesetzt vom Leistungen-Blatt oder der Übung (Plan C/E), einmal gelesen
     messung_zoom: tuple[str, float, float] | None = None

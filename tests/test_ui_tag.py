@@ -1,8 +1,8 @@
 """Der Tag neu (Ben, 18.10.2026; P40, Skizzen A und B) — `ui/views/tag.py`, `nachtragen.py`.
 
 Übersicht mit Plan-Karten (Chip = gemacht, mit Rückgängig; lang drücken = Werte), Zeitleiste
-statt „Chronologisch“, Nachtragen mit Uhrzeit und Plan, alle Einträge einer Übung an einem
-beliebigen Tag.
+statt „Chronologisch“, Nachtragen mit Uhrzeit und Plan (seit 21.10.2026 der Trainingsblock,
+P72), alle Einträge einer Übung an einem beliebigen Tag.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.leistungen import leistungen_view  # noqa: E402
 from trainingsapp.ui.views.nachtragen import (  # noqa: E402
     FRUEHER,
+    OHNE_PLAN,
     nachtragen_blatt,
     nachtragen_view,
 )
@@ -209,53 +210,145 @@ def test_vergangener_tag_ohne_spaeteren_plan_und_mit_eigener_route(page, state) 
     assert page.routen == [f"{basis}/nachtragen/{seed_id('kniebeuge')}"]
 
 
-def test_nachtragen_frueher_heute_in_den_plan(page, state) -> None:
-    plan = _plan(state, "kniebeuge")
-    uebung = state.uebungen.laden(seed_id("kniebeuge"))
-    route = f"/nachtragen/{uebung.id}/{plan.id}"
-    ansicht = nachtragen_view(page, state, route, state.heute(), uebung, plan.id)
-    wann = next(x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton))
-    wann.selected = [FRUEHER]
-    wann.on_change(SimpleNamespace(control=wann))
-    uhrzeit = _feld(ansicht, "Uhrzeit")
-    assert uhrzeit.visible
-    uhrzeit.value = "25:00"
-    _feld(ansicht, "Wiederholungen je Satz").value = "20, 18"
-    asyncio.run(_knopf(ansicht, "Eintragen").on_click())
-    assert uhrzeit.error == "Uhrzeit?" and not page.routen  # nichts eingetragen
-
-    zeit = _heute_um(state, 20).replace(second=0, microsecond=0)
-    uhrzeit.value = f"{zeit:%H:%M}"
-    asyncio.run(_knopf(ansicht, "Eintragen").on_click())
-    ((eintrag, session),) = state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
-    assert session.plan_id == plan.id and eintrag.result["reps"] == [20.0, 18.0]
-    assert eintrag.started_at is not None and eintrag.started_at.astimezone() == zeit
-    assert page.routen == ["/"]
+def _plus(wurzel, text: str | None = None):
+    """Ein „+“-Knopf der Karte „Eintragen“ — der erste oder der mit ``text``."""
+    return next(
+        x
+        for x in _alle(wurzel)
+        if isinstance(x, ft.FilledButton)
+        and isinstance(x.content, ft.Text)
+        and str(x.content.value).startswith("+")
+        and (text is None or x.content.value == text)
+    )
 
 
-def test_nachtragen_ohne_plan_und_zurueck_speichert(page, state) -> None:
-    plan = _plan(state, "kniebeuge")
-    uebung = state.uebungen.laden(seed_id("kniebeuge"))
-    vorgestern = state.heute() - timedelta(days=2)
-    basis = f"/tag/{vorgestern.isoformat()}"
-    ansicht = nachtragen_view(page, state, f"{basis}/nachtragen/{uebung.id}", vorgestern, uebung)
-    assert not [x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton)]  # nur Uhrzeit
-    assert "Zu welchem Plan" not in _texte(ansicht)  # den Plan gab es vorgestern nicht
-    _feld(ansicht, "Uhrzeit").value = "7:30"
-    _feld(ansicht, "Wiederholungen je Satz").value = "3x12"
+def _klick(knopf) -> None:
+    ergebnis = knopf.on_click()
+    if asyncio.iscoroutine(ergebnis):
+        asyncio.run(ergebnis)
+
+
+def _zurueck(page, ansicht, basis: str) -> list[bool]:
+    """Zurück (Pfeil oder Systemtaste) über ``basis`` — gibt die Antworten an Flutter."""
     antworten: list[bool] = []
 
     async def confirm_pop(soll: bool) -> None:
         antworten.append(soll)
 
     ansicht.confirm_pop = confirm_pop
-    page.views = [ft.View(route=basis), ansicht]  # darunter der Tag
-    asyncio.run(ansicht.on_confirm_pop(None))  # Zurück speichert
-    assert antworten == [False] and page.routen == [basis]
+    page.views = [ft.View(route=basis), ansicht]
+    asyncio.run(ansicht.on_confirm_pop(None))
+    return antworten
+
+
+def test_nachtragen_frueher_heute_in_den_plan(page, state) -> None:
+    """P72 (Ben, 21.10.2026, Skizze G1): Nachtragen ist der Trainingsblock — oben Wann und
+    Plan; alles bekommt die gewählte Zeit und sammelt sich in einem Eintrag, „Fertig“
+    schließt ihn ab."""
+    plan = _plan(state, "kniebeuge")
+    uebung = state.uebungen.laden(seed_id("kniebeuge"))
+    route = f"/nachtragen/{uebung.id}/{plan.id}"
+    ansicht = nachtragen_view(page, state, route, state.heute(), uebung, plan.id)
+    texte = _texte(ansicht)
+    assert "Wann" in texte and "Plan" in texte and "EINTRAGEN" in texte
+    assert not [
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.IconButton) and x.icon in (ft.Icons.TIMER, ft.Icons.TIMER_OUTLINED)
+    ]  # ohne Uhr — die Übung ist vorbei
+    wann = next(x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton))
+    assert wann.selected == ["jetzt"]
+    wann.selected = [FRUEHER]
+    wann.on_change(SimpleNamespace(control=wann))
+    uhrzeit = _feld(ansicht, "Uhrzeit")
+    assert uhrzeit.visible and uhrzeit.value  # vorbelegt
+    uhrzeit.value = "25:00"
+    uhrzeit.on_submit()
+    assert uhrzeit.error == "Uhrzeit?"
+
+    zeit = _heute_um(state, 20).replace(second=0, microsecond=0)
+    uhrzeit.value = f"{zeit:%H:%M}"
+    uhrzeit.on_change()
+    assert uhrzeit.error is None
+    ansicht = nachtragen_view(page, state, route, state.heute(), uebung, plan.id)  # neu gebaut
+    assert f"EINTRAGEN · mit {zeit:%H:%M}" in _texte(ansicht)  # die Zeit bleibt
+    _klick(_plus(ansicht))
+    _klick(_plus(ansicht))
+    ((eintrag, session),) = state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+    assert session.plan_id == plan.id and len(eintrag.result["reps"]) == 2  # ein Eintrag
+    assert eintrag.started_at is not None and eintrag.started_at.astimezone() == zeit
+    assert eintrag.ended_at is None
+    assert "NACHTRAG" in _texte(nachtragen_view(page, state, route, state.heute(), uebung))
+
+    page.views = [ft.View(route="/"), ansicht]
+    _klick(_knopf(ansicht, "Fertig"))
+    ((eintrag, _),) = state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+    assert eintrag.ended_at is not None and eintrag.ended_at.astimezone() == zeit
+    assert page.routen == ["/"] and not state.nachtrag_zeit  # beim nächsten Mal wieder „Jetzt“
+
+
+def test_nachtragen_ohne_plan_und_zurueck_schliesst(page, state) -> None:
+    plan = _plan(state, "kniebeuge")
+    uebung = state.uebungen.laden(seed_id("kniebeuge"))
+    vorgestern = state.heute() - timedelta(days=2)
+    basis = f"/tag/{vorgestern.isoformat()}"
+    ansicht = nachtragen_view(page, state, f"{basis}/nachtragen/{uebung.id}", vorgestern, uebung)
+    assert not [x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton)]  # nur Uhrzeit
+    assert "Plan" not in _texte(ansicht)  # den Plan gab es vorgestern nicht
+    assert f"AM {vorgestern:%d.%m.} GELEISTET" not in _texte(ansicht)
+    uhrzeit = _feld(ansicht, "Uhrzeit")
+    assert uhrzeit.value == "12:00"  # ohne frühere Einträge
+    uhrzeit.value = "7:30"
+    uhrzeit.on_change()
+    # „…“: Sätze × Wert
+    mehr = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.OutlinedButton)
+        and isinstance(x.content, ft.Text)
+        and x.content.value == "…"
+    )
+    mehr.on_click()
+    kasten = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container)
+        and isinstance(x.padding, ft.Padding)
+        and x.padding.left == 70
+        and x.visible
+    )
+    saetze, wert = [f for f in _alle(kasten) if isinstance(f, ft.TextField)][:2]
+    saetze.value, wert.value = "3", "12"
+    _klick(next(x for x in _alle(kasten) if isinstance(x, ft.OutlinedButton)))
+
+    assert _zurueck(page, ansicht, basis) == [False]  # Zurück schließt und geht selbst
+    assert page.routen == [basis]
     ((eintrag, session),) = state.sitzungen.eintraege_am_tag(state.profil.id, vorgestern)
     assert session.plan_id is None and eintrag.result["reps"] == [12.0, 12.0, 12.0]
     assert eintrag.started_at is not None and f"{eintrag.started_at.astimezone():%H:%M}" == "07:30"
+    assert eintrag.ended_at == eintrag.started_at
     assert plan.id not in state.sitzungen.plaene_am_tag(state.profil.id, vorgestern)
+
+
+def test_nachtragen_nimmt_die_alte_zeit_und_haengt_nicht_an(page, state) -> None:
+    """„Die alte Zeit als Vorlage“: Gab es die Übung an dem Tag, steht ihre Uhrzeit da. Ein
+    Nachtrag hängt sich nie an einen Eintrag von jetzt — und nicht an einen geschlossenen."""
+    gestern = state.heute() - timedelta(days=1)
+    um = datetime.combine(gestern, time(18, 15)).astimezone()
+    _eintragen(state, None, "kniebeuge", {"reps": [19]}, started_at=um, ended_at=um)
+    _eintragen(state, None, "kniebeuge", {"reps": [5]})  # heute, offen
+    uebung = state.uebungen.laden(seed_id("kniebeuge"))
+    basis = f"/tag/{gestern.isoformat()}"
+    route = f"{basis}/nachtragen/{uebung.id}"
+    ansicht = nachtragen_view(page, state, route, gestern, uebung)
+    assert _feld(ansicht, "Uhrzeit").value == "18:15"
+    texte = _texte(ansicht)
+    assert f"AM {gestern:%d.%m.} GELEISTET" in texte and "EINTRAGEN · mit 18:15" in texte
+    _klick(_plus(ansicht))
+    am_tag = state.sitzungen.eintraege_am_tag(state.profil.id, gestern)
+    assert [len(e.result["reps"]) for e, _ in am_tag] == [1, 1]  # ein neuer, nicht angehängt
+    heute = state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+    assert [e.result["reps"] for e, _ in heute] == [[5.0]]
 
 
 def test_nachtragen_nach_dem_plan_waehlt_den_plan(page, state) -> None:
@@ -265,7 +358,8 @@ def test_nachtragen_nach_dem_plan_waehlt_den_plan(page, state) -> None:
     Plan in derselben Zeile sagt ein eigenes Schild."""
     plan = _plan(state, "liegestuetzen", "kniebeuge")
     lgs = seed_id("liegestuetzen")
-    _eintragen(state, plan.id, "liegestuetzen", {"reps": [15]}, started_at=_heute_um(state, 30))
+    frueh = _heute_um(state, 30)
+    _eintragen(state, plan.id, "liegestuetzen", {"reps": [15]}, started_at=frueh, ended_at=frueh)
     ansicht = tagesansicht(page, state, state.heute())
     zeile = next(
         x
@@ -284,12 +378,18 @@ def test_nachtragen_nach_dem_plan_waehlt_den_plan(page, state) -> None:
     seite = nachtragen_view(page, state, f"/nachtragen/{lgs}", state.heute(), uebung)
     chips = {x.label.value: x for x in _alle(seite) if isinstance(x, ft.Chip)}
     assert chips["Kräftigung kurz"].selected and not chips["ohne Plan"].selected
-    _feld(seite, "Wiederholungen je Satz").value = "10"
-    asyncio.run(_knopf(seite, "Eintragen").on_click())
+    _klick(_plus(seite))
     plaene = [
         s.plan_id for _, s in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
     ]
     assert plaene == [plan.id, plan.id]
+
+    # „ohne Plan“ ersetzt die Seite (Zurück führt weiter zum Tag)
+    asyncio.run(chips["ohne Plan"].on_select())
+    assert page.routen[-1] == state.ersetzen_bei == f"/nachtragen/{lgs}/{OHNE_PLAN}"
+    seite = nachtragen_view(page, state, page.routen[-1], state.heute(), uebung, OHNE_PLAN)
+    chips = {x.label.value: x for x in _alle(seite) if isinstance(x, ft.Chip)}
+    assert chips["ohne Plan"].selected and not chips["Kräftigung kurz"].selected
 
     # Wer bewusst „ohne Plan“ nachträgt, sieht das in der Zeile
     _eintragen(state, None, "liegestuetzen", {"reps": [5]})

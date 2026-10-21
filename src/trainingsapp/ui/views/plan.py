@@ -68,8 +68,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Callable
-from dataclasses import replace
-from datetime import date
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime
 from functools import partial
 from typing import Any
 
@@ -122,7 +122,7 @@ from trainingsapp.ui.components.skala_regler import skala_regler
 from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile
 from trainingsapp.ui.components.varianten import Variantenwahl, varianten_blatt, zeilenbreite
 from trainingsapp.ui.components.werte import wert_leiste
-from trainingsapp.ui.components.zurueck import zurueck_ziel
+from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AUFKLAPPEN, PLAN_DARSTELLUNGEN, UMSCHALTEN, AppState
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.plan_ablauf import plan_timer_karte
@@ -132,6 +132,46 @@ from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 ECKEN = ft.RoundedRectangleBorder(radius=12)
 #: Das Segment „…“ einer Ausprägung: einen eigenen Wert eingeben (52°)
 _EIGEN = "…eigen"
+
+
+@dataclass
+class Nachtrag:
+    """Nachtragen als Trainingsblock (Ben, 21.10.2026, P72, Skizze G1; `views/nachtragen.py`):
+    derselbe Block wie beim Üben, für ``tag``. Neue Einträge beginnen um ``zeit`` und sammeln
+    sich dort; ``None`` = jetzt, wie beim Training. Ohne HRV-Marken und ohne Uhr — die Übung
+    ist vorbei. Oben steht ``kopf`` (Wann, Plan).
+
+    ``schliessen`` setzt `plan_view`: Es beendet, was der Nachtrag offen hat („Fertig“,
+    Zurück, eine andere Zeit oder ein anderer Plan im Kopf)."""
+
+    tag: date
+    zeit: datetime | None
+    route: str
+    titel: str
+    kopf: list[ft.Control] = field(default_factory=list)
+    #: Beim Verlassen („Fertig“, Zurück) — setzt `nachtragen_view`
+    verlassen: Callable[[], None] = lambda: None
+    #: Was um ``zeit`` offen ist, schließen; den Block neu zeigen — setzt `plan_view`
+    schliessen: Callable[[], None] = lambda: None
+    auffrischen: Callable[[], None] = lambda: None
+
+    def zeit_setzen(self, zeit: datetime | None) -> None:
+        """Eine andere Zeit im Kopf: Was um die alte offen ist, ist fertig; die nächsten Tipps
+        sammeln sich um die neue."""
+        if zeit == self.zeit:
+            return
+        self.schliessen()
+        self.zeit = zeit
+        self.auffrischen()
+
+    def hinweis(self) -> str:
+        """Der Satz unter dem Block."""
+        if self.zeit is None:
+            return "Alles hier bekommt die Uhrzeit des Tippens — wie beim Training."
+        return (
+            f"Alles hier bekommt {self.zeit.astimezone():%H:%M} und sammelt sich im Nachtrag. "
+            "„Fertig“ schließt ihn ab."
+        )
 
 
 #: Was ein Tipp auf „Heute geleistet“ öffnet (`views/leistungen.py`)
@@ -291,15 +331,20 @@ def plan_view(
     basis: str | None = None,
     fertig: str = "/",
     einzel: bool = False,
+    nachtrag: Nachtrag | None = None,
 ) -> ft.View:
     """Üben (`/plan/<id>`) oder Bearbeiten — oder eine einzelne Übung üben.
 
     Bearbeitet wird unter ``basis`` — `/plaene/<id>` aus der Planverwaltung,
     `/plan/<id>/bearbeiten` aus der Übungsansicht heraus. ``fertig`` ist das
     Ziel des Hakens oben rechts. Mit ``einzel`` ist ``plan`` ein
-    `einzel_plan()`: Route `/training/<übung>`, Einträge ohne Plan.
+    `einzel_plan()`: Route `/training/<übung>`, Einträge ohne Plan. Mit ``nachtrag``
+    (`views/nachtragen.py`) ist ``plan`` die eine Planübung — oder ein `einzel_plan` —
+    für einen Nachtrag (`Nachtrag`).
     """
-    if einzel:
+    if nachtrag is not None:
+        route = nachtrag.route
+    elif einzel:
         route = f"/training/{plan.items[0].exercise_id}"
     elif bearbeiten:
         route = basis or f"/plaene/{plan.id}"
@@ -312,8 +357,21 @@ def plan_view(
 
     def heute() -> date:
         """Der Tag beim Tippen, nicht beim Aufbau: Über Mitternacht offen gelassen (die
-        Engine bleibt im Cache), landete ein Satz sonst im gestrigen Eintrag (D3)."""
-        return state.heute()
+        Engine bleibt im Cache), landete ein Satz sonst im gestrigen Eintrag (D3). Beim
+        Nachtragen der gewählte Tag."""
+        return nachtrag.tag if nachtrag is not None else state.heute()
+
+    def zur_zeit() -> contextlib.AbstractContextManager[None]:
+        """Beim Nachtragen schreibt und fragt alles wie zur gewählten Zeit
+        (`SessionRepo.zur_zeit`) — sonst jetzt."""
+        return state.sitzungen.zur_zeit(nachtrag.zeit if nachtrag is not None else None)
+
+    def stand_paare() -> list[tuple[SessionEntry, Any]]:
+        """Die Einträge, die offen sein können: beim Nachtragen nur die mit dem gewählten
+        Anfang — ein Nachtrag hängt sich nie an einen Eintrag von jetzt."""
+        if nachtrag is None or nachtrag.zeit is None:
+            return tages_paare
+        return [(e, s) for e, s in tages_paare if e.started_at == nachtrag.zeit]
 
     #: Blöcke, die heute einen eigenen Eintrag angelegt haben (spätere Stelle einer
     #: Übung): Weitere Sätze gehen dorthin, nicht in noch einen Eintrag (D7)
@@ -335,8 +393,9 @@ def plan_view(
     gemacht = len(fertig_ids)
     mehrfach = {i.exercise_id for i in plan.items if stelle[i.id] > 1}
     darstellung = state.plan_darstellung()
-    # Aufklappen: Ist keine Übung dieses Plans offen, die erste, die heute noch fehlt
-    if state.plan_offen not in {item.id for item in plan.items}:
+    # Aufklappen: Ist keine Übung dieses Plans offen, die erste, die heute noch fehlt (der
+    # Nachtrag hat nur einen Block und lässt die Wahl des Plans in Ruhe)
+    if nachtrag is None and state.plan_offen not in {item.id for item in plan.items}:
         state.plan_offen = next((item.id for item in plan.items if item.id not in fertig_ids), None)
     # „Weiter“ auf „Heute“: einmal bei dieser Planübung beginnen (`_zum_ziel`)
     ziel_index = (
@@ -410,7 +469,7 @@ def plan_view(
         einen gibt (die Chips zeigen seinen Zustand), sonst `auspraegung_vorgabe`."""
         if item.id not in state.auspraegung_wahl:
             offen = stand_im_plan(
-                tages_paare, uebung, sitzungsplan, {}, jetzt(), state.sitzungen.offen_min
+                stand_paare(), uebung, sitzungsplan, {}, jetzt(), state.sitzungen.offen_min
             ).offen
             if offen is not None:
                 felder = kontextfelder(teilspec(item, uebung))
@@ -431,11 +490,12 @@ def plan_view(
         if eigener_eintrag(item):
             return offene.Stand(None, offene.KEINER)
         if frisch:
-            return state.sitzungen.stand(
-                state.profil.id, uebung, heute(), sitzungsplan, kontext(item, uebung)
-            )
+            with zur_zeit():
+                return state.sitzungen.stand(
+                    state.profil.id, uebung, heute(), sitzungsplan, kontext(item, uebung)
+                )
         return stand_im_plan(
-            tages_paare,
+            stand_paare(),
             uebung,
             sitzungsplan,
             kontext(item, uebung),
@@ -471,14 +531,16 @@ def plan_view(
         (`eintrag_fertig`)."""
         uebung = uebung_fuer(item)
         session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
-        eintrag = state.sitzungen.eintrag_fertig(session, uebung, result, tag=heute())
-        marken.abschluss(
-            state,
-            uebung,
-            eintrag,
-            grenze=grenze_frei(item) and not noch_offen(item, uebung),
-            auspraegung=kontext_text(uebung, eintrag.result),
-        )
+        with zur_zeit():
+            eintrag = state.sitzungen.eintrag_fertig(session, uebung, result, tag=heute())
+        if nachtrag is None:  # Ein Nachtrag ist vorbei — keine Marke in einer Aufnahme
+            marken.abschluss(
+                state,
+                uebung,
+                eintrag,
+                grenze=grenze_frei(item) and not noch_offen(item, uebung),
+                auspraegung=kontext_text(uebung, eintrag.result),
+            )
         melden(uebung, eintrag)
 
     def abschliesser(item: PlanItem) -> Callable[[], None]:
@@ -489,14 +551,16 @@ def plan_view(
             ziel = stand_fuer(item, uebung, frisch=True).ziel
             if ziel is None:
                 return
-            eintrag = state.sitzungen.eintrag_schliessen(ziel.id)
-            marken.abschluss(
-                state,
-                uebung,
-                eintrag,
-                grenze=grenze_frei(item) and not noch_offen(item, uebung),
-                auspraegung=kontext_text(uebung, eintrag.result),
-            )
+            with zur_zeit():
+                eintrag = state.sitzungen.eintrag_schliessen(ziel.id)
+            if nachtrag is None:
+                marken.abschluss(
+                    state,
+                    uebung,
+                    eintrag,
+                    grenze=grenze_frei(item) and not noch_offen(item, uebung),
+                    auspraegung=kontext_text(uebung, eintrag.result),
+                )
             page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name}: abgeschlossen")))
             auffrischen()
 
@@ -516,19 +580,21 @@ def plan_view(
             st is not None and st.andere
         )
         for wert in werte:
-            eintrag = state.sitzungen.satz_anhaengen(
-                session, uebung, feld.key, wert, heute(), kontext(item, uebung), neu=neu
-            )
-            marken.leistung(
-                state,
-                uebung,
-                eintrag,
-                feld.key,
-                wert,
-                erster=erster,
-                grenze=grenze_frei(item),
-                auspraegung=kontext_text(uebung, eintrag.result),
-            )
+            with zur_zeit():
+                eintrag = state.sitzungen.satz_anhaengen(
+                    session, uebung, feld.key, wert, heute(), kontext(item, uebung), neu=neu
+                )
+            if nachtrag is None:
+                marken.leistung(
+                    state,
+                    uebung,
+                    eintrag,
+                    feld.key,
+                    wert,
+                    erster=erster,
+                    grenze=grenze_frei(item),
+                    auspraegung=kontext_text(uebung, eintrag.result),
+                )
             neu = erster = False
         if eintrag is not None:
             melden(uebung, eintrag)
@@ -554,9 +620,10 @@ def plan_view(
         session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
         neu = eigener_eintrag(item)
         eigenen_gemerkt(item, neu)
-        eintrag = state.sitzungen.wert_setzen(
-            session, uebung, feld.key, wert, heute(), kontext(item, uebung), neu=neu
-        )
+        with zur_zeit():
+            eintrag = state.sitzungen.wert_setzen(
+                session, uebung, feld.key, wert, heute(), kontext(item, uebung), neu=neu
+            )
         melden(uebung, eintrag)
 
     def chip_erlediger(item: PlanItem, feld: FieldSpec, wert: Any) -> Callable[[], None]:
@@ -643,7 +710,8 @@ def plan_view(
             def waehlen(name: str) -> None:
                 aktuell = katalog[item.exercise_id]
                 if ziel is not None:
-                    state.sitzungen.variante_setzen(ziel.id, aktuell, name)
+                    with zur_zeit():
+                        state.sitzungen.variante_setzen(ziel.id, aktuell, name)
                 auspraegung_setzen(item, var.VARIANTE, name or None)
 
             def neu(name: str) -> None:
@@ -920,6 +988,12 @@ def plan_view(
         # Spätere Stelle einer doppelten Übung: Was dasteht, stammt von früher am Tag
         if inhalt and uebung.id in mehrfach and item.id not in fertig_ids:
             titel = f"HEUTE BISHER — DAS {stelle[item.id]}. MAL STEHT NOCH AUS"
+        elif heute() != state.heute():  # Nachtrag an einem vergangenen Tag
+            titel = (
+                f"AM {heute():%d.%m.} GELEISTET"
+                if inhalt
+                else f"Am {heute():%d.%m.} noch nichts eingetragen"
+            )
         else:
             titel = "HEUTE GELEISTET" if inhalt else "Heute noch nichts eingetragen"
         kopf_teile: list[ft.Control] = [
@@ -990,7 +1064,11 @@ def plan_view(
         )
         von = e.started_at.astimezone() if e.started_at else None
         bis = e.ended_at.astimezone() if e.ended_at else None
-        if offen_ist:
+        if offen_ist and nachtrag is not None and nachtrag.zeit is not None:
+            # Offen ist hier nur, was um die gewählte Zeit nachgetragen wird (Skizze G1)
+            zeit = f"{von:%H:%M}" if von else ""
+            status = "NACHTRAG" if markiert else "Nachtrag · Tippen wählt"
+        elif offen_ist:
             zeit = f"seit {von:%H:%M}" if von else ""
             status = "OFFEN" if markiert else "offen · Tippen wählt"
         else:
@@ -1082,7 +1160,8 @@ def plan_view(
         nachher = Nachher()
 
         def wieder_oeffnen() -> None:
-            state.sitzungen.eintrag_oeffnen(e.id)
+            with zur_zeit():
+                state.sitzungen.eintrag_oeffnen(e.id)
             # Die Chips folgen dem wieder offenen Eintrag
             for item in plan.items:
                 if item.exercise_id == uebung.id:
@@ -1282,12 +1361,15 @@ def plan_view(
         """Eine Karte „Eintragen“ für alle Mengen, je Feld eine Zeile (Ben, 21.10.2026, P70 =
         Skizze E2: „Wdh. und Zeit nebeneinander … sonst werden das zu viele Fenster“) — weiß
         auf dem Block, damit die Werte sich von der getönten Ausführung abheben."""
+        titel = "EINTRAGEN"
+        if nachtrag is not None and nachtrag.zeit is not None:
+            titel += f" · mit {nachtrag.zeit.astimezone():%H:%M}"
         kopf = ft.Row(
             spacing=6,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Icon(ft.Icons.ADD, size=14, opacity=0.6),
-                ft.Text("EINTRAGEN", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+                ft.Text(titel, size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
             ],
         )
         return ft.Container(
@@ -1468,9 +1550,10 @@ def plan_view(
             session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
             neu = eigener_eintrag(item)
             eigenen_gemerkt(item, neu)
-            eintrag = state.sitzungen.text_setzen(
-                session, uebung, f.key, text, heute(), kontext(item, uebung), neu=neu
-            )
+            with zur_zeit():
+                eintrag = state.sitzungen.text_setzen(
+                    session, uebung, f.key, text, heute(), kontext(item, uebung), neu=neu
+                )
             melden(uebung, eintrag)
 
         return einstellungs_zeile(
@@ -1789,13 +1872,14 @@ def plan_view(
         def handler() -> None:
             uebung = uebung_fuer(item)
             # Die Notiz der Übung von heute — auch nach einem neuen Satz dieselbe
-            heutig = (
-                None
-                if eigener_eintrag(item)
-                else state.sitzungen.notiz_eintrag(
-                    state.profil.id, uebung, heute(), sitzungsplan, kontext(item, uebung)
+            with zur_zeit():
+                heutig = (
+                    None
+                    if eigener_eintrag(item)
+                    else state.sitzungen.notiz_eintrag(
+                        state.profil.id, uebung, heute(), sitzungsplan, kontext(item, uebung)
+                    )
                 )
-            )
             feld = ft.TextField(
                 value=heutig.note if heutig is not None else "",
                 hint_text="Wie ging es? (Diktat über die Tastatur)",
@@ -1822,9 +1906,15 @@ def plan_view(
                     session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
                     neu = eigener_eintrag(item)
                     eigenen_gemerkt(item, neu)
-                    state.sitzungen.eintrag_notiz_setzen(
-                        session, uebung, text, heute(), neu=neu, kontext=kontext(item, uebung)
-                    )
+                    with zur_zeit():
+                        state.sitzungen.eintrag_notiz_setzen(
+                            session,
+                            uebung,
+                            text,
+                            heute(),
+                            neu=neu,
+                            kontext=kontext(item, uebung),
+                        )
                     nachher.danach(gespeichert)
 
             async def geschlossen(e: object) -> None:
@@ -1872,7 +1962,8 @@ def plan_view(
         uebung = uebung_fuer(item)
         n = item.id in fertig_ids
         ziel = ziel_text(uebung, item.target)
-        inhalt: list[ft.Control] = [kopfzeile(uebung, item)]
+        # Beim Nachtragen steht die Übung schon im Kopf der Seite (Skizze G1)
+        inhalt: list[ft.Control] = [kopfzeile(uebung, item)] if nachtrag is None else []
 
         if bearbeiten:
             aktive = [f for f in aktive_felder(item, uebung) if not var.ist_variante(f)]
@@ -1983,7 +2074,7 @@ def plan_view(
                     item=planuebung,
                     timer_oeffnen=oeffner(uebung_timer_route(route, aus_katalog, planuebung)),
                 )
-                if uhr_an(aus_katalog, planuebung)
+                if nachtrag is None and uhr_an(aus_katalog, planuebung)
                 else UhrTeile()
             )
             knoepfe.extend(uhr.knoepfe)
@@ -2079,6 +2170,8 @@ def plan_view(
                 opacity=0.7,
             ),
         ]
+    elif nachtrag is not None:
+        kopf = list(nachtrag.kopf)
     elif einzel:
         kopf = [
             ft.Text(
@@ -2125,6 +2218,15 @@ def plan_view(
         bloecke = [block(i, item) for i, item in enumerate(plan.items)]
         if bearbeiten:
             return bloecke  # Kopf und Fuß sind Kopf- und Fußzeile der ziehbaren Liste
+        if nachtrag is not None:  # unter dem Block, wohin die Tipps gehen (Skizze G1)
+            hinweis = ft.Text(nachtrag.hinweis(), size=12, opacity=0.7)
+            return [
+                kopf_box,
+                *bloecke,
+                ft.Container(
+                    padding=ft.Padding.only(left=20, right=20, top=4, bottom=24), content=hinweis
+                ),
+            ]
         return [kopf_box, *bloecke, *([fuss_box] if fuss else [])]
 
     liste: ft.ListView
@@ -2145,31 +2247,73 @@ def plan_view(
             _zum_ziel(page, state, route, liste, ziel_index + 1)  # 0 ist der Kopf
     liste = scroll_merken(page, state, route, liste)
 
+    # -- Nachtrag: „Fertig“ und Zurück schließen, was hier offen ist ------------------
+
+    def nachtrag_offene() -> list[SessionEntry]:
+        """Die Einträge, die der Nachtrag offen hat — um die gewählte Zeit; jetzt
+        Eingetragenes bleibt offen wie beim Training."""
+        if nachtrag is None or nachtrag.zeit is None:
+            return []
+        return [
+            e
+            for item in plan.items
+            if item.exercise_id in katalog
+            for e in stand_fuer(item, uebung_fuer(item), frisch=True).alle_offenen
+        ]
+
+    def nachtrag_schliessen() -> None:
+        with zur_zeit():
+            for e in nachtrag_offene():
+                state.sitzungen.eintrag_schliessen(e.id)
+
+    def nachtrag_beenden() -> None:
+        nachtrag_schliessen()
+        if nachtrag is not None:
+            nachtrag.verlassen()
+
+    async def nachtrag_fertig() -> None:
+        nachtrag_beenden()
+        ansicht = ansicht_halter[0] if ansicht_halter else None
+        await page.push_route(zurueck_ziel(page, ansicht) if ansicht in page.views else fertig)
+
+    aktionen: list[ft.Control]
+    if nachtrag is not None:
+        nachtrag.schliessen = nachtrag_schliessen
+        nachtrag.auffrischen = auffrischen
+        aktionen = [hilfe_knopf(page), ft.TextButton("Fertig", on_click=nachtrag_fertig)]
+    elif einzel:
+        aktionen = [timer_knopf(page, state, "plan"), hilfe_knopf(page)]
+    else:
+        aktionen = [
+            *([] if bearbeiten else [timer_knopf(page, state, "plan")]),
+            hilfe_knopf(page),
+            ft.IconButton(
+                ft.Icons.CHECK if bearbeiten else ft.Icons.EDIT_OUTLINED,
+                tooltip="Fertig" if bearbeiten else "Plan bearbeiten",
+                on_click=modus_wechseln,
+            ),
+        ]
+
     ansicht = ft.View(
         route=route,
         appbar=ft.AppBar(
-            title=ft.Text(plan.name),
-            actions=[timer_knopf(page, state, "plan"), hilfe_knopf(page)]
-            if einzel
-            else [
-                *([] if bearbeiten else [timer_knopf(page, state, "plan")]),
-                hilfe_knopf(page),
-                ft.IconButton(
-                    ft.Icons.CHECK if bearbeiten else ft.Icons.EDIT_OUTLINED,
-                    tooltip="Fertig" if bearbeiten else "Plan bearbeiten",
-                    on_click=modus_wechseln,
-                ),
-            ],
+            title=ft.Text(nachtrag.titel if nachtrag is not None else plan.name),
+            actions=aktionen,
         ),
         padding=0,
         controls=[sicher(ft.Column(expand=True, spacing=0, controls=[liste]))],
     )
     ansicht_halter.append(ansicht)
+    if nachtrag is not None:
+        # Zurück wie „Fertig“: Was offen ist, wird geschlossen (`components/zurueck.py`)
+        return zurueck_speichert(
+            page, ansicht, geaendert=lambda: True, speichern=nachtrag_beenden, meldung=""
+        )
     return ansicht
 
 
 #: `einzel_plan` kommt aus `core.plaene` und bleibt hier erreichbar (`app.py`, Tests)
-__all__ = ["einzel_plan", "hauptfeld", "plan_view", "ziel_text"]
+__all__ = ["Nachtrag", "einzel_plan", "hauptfeld", "plan_view", "ziel_text"]
 
 
 def _knopf_legende() -> ft.Control:

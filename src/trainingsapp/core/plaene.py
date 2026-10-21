@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any
 
 from . import eintraege as offene
@@ -20,6 +20,7 @@ from .models import Exercise, Plan, PlanItem, Session, SessionEntry
 from .parameter import kontextfelder
 from .result_spec import ist_leer
 from .standards import aktive_felder
+from .tagesfelder import UHRZEIT_NACHTRAGEN
 
 WOCHENTAGE_KURZ = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
@@ -183,6 +184,35 @@ def nachtrag_vorwahl(
     if (plan := next((p for p in plaene if p in noch_offen), None)) is not None:
         return plan
     return next((p for p in reversed(gemacht_in) if p is not None and p in plaene), None)
+
+
+def nachtrag_uhrzeit(
+    am_tag: Sequence[datetime], frueher: Sequence[datetime], jetzt_: datetime | None = None
+) -> time:
+    """Die vorbelegte Uhrzeit beim Nachtragen einer Übung (Ben, 21.10.2026, P72: wie bei den
+    Tagesfeldern „die alte Zeit als Vorlage“, `core.tagesfelder.uhrzeit_vorlage`): der Anfang
+    ihres jüngsten Eintrags an dem Tag, sonst die Uhrzeit ihres jüngsten Eintrags überhaupt,
+    sonst 12:00. Mit ``jetzt_`` (Nachtragen heute) nie später als jetzt.
+
+    >>> from datetime import UTC
+    >>> t = datetime(2026, 10, 19, 5, 30, tzinfo=UTC).astimezone()
+    >>> nachtrag_uhrzeit([], [])
+    datetime.time(12, 0)
+    >>> nachtrag_uhrzeit([t], []) == nachtrag_uhrzeit([], [t]) == time(t.hour, t.minute)
+    True
+    >>> nachtrag_uhrzeit([], [], datetime(2026, 10, 21, 7, 5).astimezone())
+    datetime.time(7, 5)
+    """
+    vorlage = UHRZEIT_NACHTRAGEN
+    for liste in (am_tag, frueher):
+        if liste:
+            t = max(liste).astimezone()
+            vorlage = time(t.hour, t.minute)
+            break
+    if jetzt_ is not None:
+        lokal = jetzt_.astimezone()
+        vorlage = min(vorlage, time(lokal.hour, lokal.minute))
+    return vorlage
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +416,7 @@ __all__ = [
     "heutige_plaene",
     "im_plan",
     "letzter_heute",
+    "nachtrag_uhrzeit",
     "nachtrag_vorwahl",
     "spaetere_stelle_offen",
     "stand_im_plan",

@@ -56,19 +56,22 @@ Dezimalzahlen mit Punkt oder Komma, `12,5` wird 12.5.
 **Skala:** Standard `0` bis `10`; jeder Bereich geht, auch negativ (`-5 - 5`)
 oder mit Kommastellen — die schreibt man im Bereich als solche: `0.0 - 10.0`
 erlaubt `3.5`, `0 - 10` nur ganze Zahlen. Die Skala hat einen Namen (Vorgabe
-„Skala“, im Übungs-Editor änderbar: „Anstrengung“, „Schmerz“ …). Eingegeben
-wird mit Regler und Zahlenfeld in einer Zeile, der Name darüber: Der Regler
-schreibt seine Zahl ins Feld, abgeschickt wird mit dem Haken. Ein leeres
-Feld heißt „ohne Wert“ — auch im Formular, wo der Regler am Anfang steht.
+„Skala“, im Übungs-Editor änderbar: „Anstrengung“, „Schmerz“ …). Im Plan ist
+sie ein Schiebebalken wie bei den Tagesfeldern (Ben, 21.10.2026, P71): Bewegen zeigt
+den Wert, Loslassen trägt ihn in den offenen Eintrag ein, ✕ nimmt ihn heraus. Im
+Formular (Leistungen, Korrektur) stehen Regler und Zahlenfeld in einer Zeile, der Name
+darüber: Der Regler schreibt seine Zahl ins Feld, abgeschickt wird mit dem Haken. Ein
+leeres Feld heißt „ohne Wert“ — auch dort, wo der Regler am Anfang steht.
 In Satzlisten trennt das Komma Sätze — Kommazahlen dort mit Punkt (`12.5`).
 
 ## Das Plus im Plan
 
-Jede Übung mit Satzfeld bekommt im Planblock Chips `+10` `+15` `+20` (aus den
-Chips der Übung, im Plan überschreibbar) und darunter zwei Zahlenfelder
-**Sätze × Wert** mit „Eintragen“ (leer bei Sätze heißt einer; Zeiten nehmen
-auch `1:30`). Jeder Tipp hängt Sätze an den heutigen Eintrag dieser Übung an
-oder legt ihn an.
+Im Planblock steht eine Karte „Eintragen“ mit einer Zeile je Menge (Ben, 21.10.2026,
+P70): links der kurze Name („Wdh.“, „Haltezeit“) mit „je Satz“, daneben die Knöpfe
+`+10` `+15` `+20` (aus den Chips der Übung, im Plan überschreibbar) und „…“. „…“ klappt
+zwei Zahlenfelder **Sätze × Wert** mit „Eintragen“ auf (leer bei Sätze heißt einer;
+Zeiten nehmen auch `1:30`); ohne Chips stehen sie gleich in der Zeile. Jeder Tipp hängt
+Sätze an den heutigen Eintrag dieser Übung an oder legt ihn an.
 Technisch ist jedes Plus eine Korrektur mit Verweis auf den vorherigen Stand
 (`replaces_entry_id`); der Eintrag bleibt unveränderlich, die Historie zeigt
 jeden Satz.
@@ -110,7 +113,9 @@ Jedes Feld hat eine Rolle (`core/parameter.py`):
 Im Plan wählt man Ausprägungen *vor* dem Eintragen — oben im Block, in der getönten
 Zone „Ausführung“ (Ben, 21.10.2026, Skizze C1; darunter „Eintragen“ mit den gefüllten
 „+“-Knöpfen). Sie wandern in jeden Eintrag. Ein „+30“ bei 45° hängt nie an den
-90°-Eintrag an.
+90°-Eintrag an. Darunter, abgesetzt mit „gilt für den offenen Eintrag“, steht das
+Beiwerk — Ja/Nein, Skala, Freitext (P71): Es zeigt und ändert den Wert des markierten
+Eintrags wie die Notiz; ohne markierten beginnt der erste Wert einen.
 
 **Je Ausführung ein offener Eintrag** (Ben, 21.10.2026, P57): kurz +30, lang +15,
 kurz +30 ergibt einen Eintrag „kurz“ mit 60 und einen „lang“ mit 15 — kein zweiter

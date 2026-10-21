@@ -1370,6 +1370,38 @@ def test_nachtrag_spaet_am_abend_bleibt_in_seinem_tag(welt) -> None:
     assert s.endswith("+00:00")
 
 
+def test_zur_zeit_sammelt_um_die_gewaehlte_zeit(welt) -> None:
+    """P72 (Ben, 21.10.2026): Nachtragen als Trainingsblock — Einträge beginnen um die
+    gewählte Zeit und sammeln sich dort; was zu einer anderen Zeit offen ist, bleibt
+    unberührt, und „Abschließen“ endet um die gewählte Zeit."""
+    con, repo, ich, _ = welt
+    uebung = _wadenheben(con)
+    tag = date(2026, 6, 15)
+    um = datetime.combine(tag, datetime.min.time()).astimezone() + timedelta(hours=7, minutes=30)
+    session = repo.session_fuer(ich.id, None, tag)
+    spaeter = repo.eintrag_anlegen(
+        session, uebung, {"reps": [5]}, started_at=um + timedelta(hours=2)
+    )
+    assert repo.offener_eintrag(ich.id, uebung, tag) is not None  # gerade angelegt = offen
+
+    with repo.zur_zeit(um):
+        assert repo.offener_eintrag(ich.id, uebung, tag) is None  # der um 9:30 zählt nicht
+        repo.satz_anhaengen(session, uebung, "reps", 10, tag, {})
+        nachtrag = repo.satz_anhaengen(session, uebung, "reps", 12, tag, {})
+        offen = repo.offener_eintrag(ich.id, uebung, tag)
+        assert offen is not None and offen.id == nachtrag.id
+        zu = repo.eintrag_schliessen(nachtrag.id)
+    assert nachtrag.started_at == um and nachtrag.result["reps"] == [10.0, 12.0]
+    assert zu.ended_at == um
+    eintraege = {e.id: e for e, _ in repo.eintraege_am_tag(ich.id, tag)}
+    assert eintraege[spaeter.id].result["reps"] == [5.0] and eintraege[spaeter.id].ended_at is None
+
+    with repo.zur_zeit(um):  # „Gemacht“: beginnt und endet um die gewählte Zeit
+        fertig = repo.eintrag_fertig(session, uebung, {})
+    assert fertig.started_at == fertig.ended_at == um
+    assert repo._zeit is None  # nach dem Block wieder jetzt
+
+
 def test_upgrade_schreibt_alte_stempel_nach_utc(welt) -> None:
     """Schritt 5: Stempel mit Versatz aus der Zeit vor D2 werden einmal umgeschrieben."""
     from datetime import timezone

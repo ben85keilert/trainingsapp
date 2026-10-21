@@ -16,11 +16,12 @@ Konventionen:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import sqlite3
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -1145,6 +1146,26 @@ class SessionRepo:
 
     def __init__(self, con: sqlite3.Connection) -> None:
         self.con = con
+        #: Nachtragen (Ben, 21.10.2026, P72; `zur_zeit`): Anfang neuer Einträge, Ende beim
+        #: Abschließen — und offen ist nur, was mit diesem Anfang begann. ``None`` = jetzt.
+        self._zeit: datetime | None = None
+
+    @contextlib.contextmanager
+    def zur_zeit(self, zeit: datetime | None) -> Iterator[None]:
+        """Schreiben wie zu ``zeit``: Nachtragen als Trainingsblock (P72). Neue Einträge
+        beginnen um ``zeit``, „Gemacht“ und „Abschließen“ enden dort; als offen gelten nur
+        Einträge mit genau diesem Anfang — ein Nachtrag hängt sich nie an einen Eintrag von
+        jetzt (und umgekehrt). ``None`` ändert nichts."""
+        vorher = self._zeit
+        self._zeit = zeit
+        try:
+            yield
+        finally:
+            self._zeit = vorher
+
+    def _jetzt(self) -> datetime:
+        """Der Augenblick, den das Schreiben meint — beim Nachtragen die gewählte Zeit."""
+        return self._zeit or jetzt()
 
     # -- Sitzungen ---------------------------------------------------------
 
@@ -1307,7 +1328,7 @@ class SessionRepo:
             result=result,
             spec_snapshot=uebung.result_spec,
             note=note.strip(),
-            started_at=started_at or jetzt(),
+            started_at=started_at or self._jetzt(),
             ended_at=ended_at,
         )
         with transaktion(self.con):
@@ -1334,7 +1355,7 @@ class SessionRepo:
         dieser Übung heute in dieser Session mit **derselben Ausführung** noch offen war,
         wird dabei geschlossen (`docs/plan_eintraege_hrv.md`, A2; seit 21.10.2026 bleiben
         offene Einträge anderer Varianten und Gewichte offen, `docs/plan_varianten.md` C)."""
-        bei = bei or jetzt()
+        bei = bei or self._jetzt()
         with transaktion(self.con):
             self.offene_schliessen(
                 session, uebung, tag or lokaler_tag(bei), bei, ausfuehrung=result
@@ -1440,7 +1461,7 @@ class SessionRepo:
         Mit ``ausfuehrung`` (Werte des neuen Eintrags) nur, was dieselbe Ausführung hat oder
         ohnehin abgelaufen ist — je Ausführung bleibt einer offen (Ben, 21.10.2026: „kurz
         +30, lang +15, kurz +30“ sind zwei Einträge). Ohne: alles."""
-        bei = bei or jetzt()
+        bei = bei or self._jetzt()
         felder = (
             None
             if ausfuehrung is None
@@ -1463,7 +1484,7 @@ class SessionRepo:
         alt = self.eintrag_laden(eintrag_id)
         if alt is None:
             raise KeyError(eintrag_id)
-        return self.eintrag_korrigieren(alt.id, dict(alt.result), ended_at=bei or jetzt())
+        return self.eintrag_korrigieren(alt.id, dict(alt.result), ended_at=bei or self._jetzt())
 
     def eintrag_oeffnen(self, eintrag_id: str) -> SessionEntry:
         """„Wieder öffnen“: das Ende fällt weg, weitere Sätze hängen wieder hier an — ein
@@ -1687,11 +1708,14 @@ class SessionRepo:
         self, subject_id: str, exercise_id: str, tag: date, plan_id: str | None
     ) -> list[SessionEntry]:
         """Die gültigen Einträge dieser Übung an diesem Tag in Sessions dieses Plans
-        (``None`` = ohne Plan) — der Reihe nach."""
+        (``None`` = ohne Plan) — der Reihe nach. Beim Nachtragen (`zur_zeit`) nur die mit
+        dem gewählten Anfang: Nur sie können offen sein, sich schließen oder Sätze nehmen."""
         return [
             e
             for e, s in self.eintraege_am_tag(subject_id, tag)
-            if e.exercise_id == exercise_id and s.plan_id == plan_id
+            if e.exercise_id == exercise_id
+            and s.plan_id == plan_id
+            and (self._zeit is None or e.started_at == self._zeit)
         ]
 
     def notiz_eintrag(

@@ -2,42 +2,38 @@
 Skizzen A2 und A3).
 
 Erst ein Blatt (`nachtragen_blatt`): eine Übung suchen oder aus „noch offen“ (je Plan des
-Tags) und „zuletzt gemacht“ wählen. Dann die Seite `<tag>/nachtragen/<übung>[/<plan>]`
-(`nachtragen_view`): wann (jetzt oder früher am Tag, an einem anderen Tag die Uhrzeit), zu
-welchem Plan, die Werte — die Parameter, die der Plan anbietet, ohne Plan die der Übung
-wie bei „Trainieren“ im Katalog —, „wie zuletzt“ und eine Notiz. „Eintragen“ legt einen
-neuen Eintrag mit diesem Zeitpunkt in der Session des Plans an diesem Tag an. Zurück
-speichert, was eingegeben ist (`components/zurueck.py`), „Abbrechen“ verwirft.
+Tags) und „zuletzt gemacht“ wählen. Dann die Seite `<tag>/nachtragen/<übung>[/<plan>|/ohne]`
+(`nachtragen_view`, seit 21.10.2026 der Trainingsblock, P72): wann (jetzt oder früher am
+Tag, an einem anderen Tag die Uhrzeit), zu welchem Plan — darunter derselbe Block wie im
+Plan, nur ohne Uhr und HRV-Marken. Alles bekommt die gewählte Zeit und sammelt sich dort in
+einem Eintrag der Session des Plans an diesem Tag; „Fertig“ und Zurück schließen ihn ab.
+Bis 21.10. war es ein Formular mit „Eintragen“ (Ben: „dieselbe Ansicht wie beim Training
+aus dem Plan, mit Kacheln und so“).
 """
 
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.models import Exercise, Plan, PlanItem, lokaler_tag
+from trainingsapp.core.models import Exercise, Plan, PlanItem, jetzt, lokaler_tag
 from trainingsapp.core.plaene import (
-    auspraegung_vorgabe,
     einzel_plan,
     erste_offene,
+    nachtrag_uhrzeit,
     nachtrag_vorwahl,
 )
-from trainingsapp.core.result_spec import ResultSpec
-from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec
 from trainingsapp.core.tag import LEER, plaene_des_tags, plankarten, uhrzeit_lesen
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
-from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.icons import symbol
-from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.uebungszeile import abschnitt
-from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.plan import Nachtrag, plan_view
 
 #: So viele Übungen nennt „zuletzt gemacht“, so viele Treffer die Suche
 ZULETZT = 6
@@ -47,10 +43,13 @@ TREFFER_HOEHE = 54
 TREFFER_MAX = 380
 #: „Wann“ auf „Heute“
 JETZT, FRUEHER = "jetzt", "frueher"
+#: Statt des Plans in der Route: bewusst ohne Plan (sonst wählt die Seite vor)
+OHNE_PLAN = "ohne"
 
 
 def nachtragen_route(basis: str, exercise_id: str, plan_id: str | None = None) -> str:
-    """``<basis>/nachtragen/<übung>[/<plan>]`` — ``basis`` ``""`` ist „Heute“.
+    """``<basis>/nachtragen/<übung>[/<plan>]`` — ``basis`` ``""`` ist „Heute“; `OHNE_PLAN`
+    statt des Plans heißt bewusst ohne.
 
     >>> nachtragen_route("", "kb"), nachtragen_route("/tag/2026-10-17", "kb", "p")
     ('/nachtragen/kb', '/tag/2026-10-17/nachtragen/kb/p')
@@ -255,38 +254,43 @@ def nachtragen_view(
     uebung: Exercise,
     plan_id: str | None = None,
 ) -> ft.View:
-    """Werte, Uhrzeit, Plan — eintragen (Skizze A3). ``route`` ist die eigene Route."""
+    """Nachtragen wie beim Training (Ben, 21.10.2026, P72, Skizze G1): oben die Übung, Wann
+    und Plan, darunter ihr Block aus dem Plan (`views/plan.py`, `Nachtrag`) — Ausführung,
+    „+“-Knöpfe, Notiz, Etikett. ``route`` ist die eigene Route; ``plan_id`` der Plan aus der
+    Route, `OHNE_PLAN` bewusst ohne, ``None`` die Vorwahl (`core.plaene.nachtrag_vorwahl`).
+
+    Wann: heute „Jetzt“ (wie beim Training) oder „Früher heute“, an einem vergangenen Tag die
+    Uhrzeit — vorbelegt mit der alten Zeit, sonst 12:00 (`core.plaene.nachtrag_uhrzeit`).
+    Alles sammelt sich um diese Zeit; „Fertig“, Zurück, eine andere Zeit oder ein anderer
+    Plan schließen es ab.
+    """
     heute = state.heute()
     basis = route.rsplit("/nachtragen", 1)[0]
-    zurueck_route = basis or "/"
     alle = state.plaene.alle(state.profil.id)
     aufgenommen = state.sitzungen.plaene_am_tag(state.profil.id, tag)
     anzahl = state.sitzungen.anzahl_am_tag(state.profil.id, tag)
+    tages_paare = state.sitzungen.eintraege_am_tag(state.profil.id, tag)
 
     def enthaelt(p: Plan) -> bool:
         return any(i.exercise_id == uebung.id for i in p.items)
 
     plaene = [p for p, _ in plaene_des_tags(alle, tag, aufgenommen) if enthaelt(p)]
-    if plan_id and all(p.id != plan_id for p in plaene):
+    if plan_id not in (None, OHNE_PLAN) and all(p.id != plan_id for p in plaene):
         # Lang gedrückt auf einer Plan-Karte: der Plan gilt, auch wenn er nicht ansteht
         plaene[:0] = [p for p in alle if p.id == plan_id and enthaelt(p)]
 
     def stellen(plan: Plan) -> list[PlanItem]:
         return [i for i in plan.items if i.exercise_id == uebung.id]
 
-    def item_fuer(plan: Plan) -> PlanItem:
-        """Die erste Stelle der Übung im Plan, die noch offen ist — sonst die erste
-        (`core.plaene.erste_offene`)."""
-        passend = stellen(plan)
-        return erste_offene(passend, anzahl) or passend[0]
-
     def vorwahl() -> str | None:
         """Der übergebene Plan, sonst einer, in dem die Übung noch offen ist, sonst der, in
         dem sie an diesem Tag zuletzt eingetragen wurde (`core.plaene.nachtrag_vorwahl`)."""
+        if plan_id == OHNE_PLAN:
+            return None
         gemacht_in = [
             s.plan_id
             for e, s in sorted(
-                state.sitzungen.eintraege_am_tag(state.profil.id, tag),
+                tages_paare,
                 key=lambda es: es[0].started_at.timestamp() if es[0].started_at else 0.0,
             )
             if e.exercise_id == uebung.id
@@ -298,78 +302,70 @@ def nachtragen_view(
             gemacht_in,
         )
 
-    wahl: dict[str, Any] = {"plan": vorwahl()}
-
-    def bauteile() -> tuple[Exercise, ResultSpec, PlanItem]:
-        """Die Übung, wie der gewählte Plan sie sieht, ihre Eingabefelder, die Planübung."""
-        plan = next((p for p in plaene if p.id == wahl["plan"]), None)
-        if plan is not None:
-            item = item_fuer(plan)
-            eff = mit_plan_spec(item, uebung)
-        else:
-            item = einzel_plan(uebung).items[0]
-            eff = uebung
-        return eff, replace(eff.result_spec, fields=aktive_felder(item, eff)), item
-
-    letzter = state.sitzungen.letzter_eintrag(state.profil.id, uebung.id)
-    form_platz = ft.Column(spacing=10)
-    stand: dict[str, Any] = {}
-
-    def form_bauen(mitnehmen: dict[str, Any] | None = None) -> None:
-        eff, teil, item = bauteile()
-        form = SpecForm(
-            teil,
-            auspraegung_vorgabe(state.auspraegung_wahl, item, eff, lambda: letzter),
-            page=page,
-            quick={f.key: chips_fuer(item, f) for f in teil.fields},
-        )
-        stand["anfang"] = form.werte()
-        keys = {f.key for f in teil.fields}
-        if mitnehmen:
-            form.setzen({k: v for k, v in mitnehmen.items() if k in keys}, aktualisieren=False)
-        stand["form"] = form
-        controls: list[ft.Control] = [
-            form.control
-            if teil.fields
-            else ft.Text("Nur abhaken — hier ohne Werte.", size=13, opacity=0.7)
-        ]
-        wie_zuletzt = (
-            {k: v for k, v in letzter.result.items() if k in keys} if letzter is not None else {}
-        )
-        if wie_zuletzt and letzter is not None:
-            controls.append(
-                ft.Row(
-                    controls=[
-                        ft.Chip(
-                            label=ft.Text(f"wie zuletzt: {letzter.shorthand()}"),
-                            leading=ft.Icon(ft.Icons.HISTORY, size=16),
-                            on_click=lambda: form.setzen(wie_zuletzt),
-                        )
-                    ]
-                )
-            )
-        form_platz.controls = controls
-
-    form_bauen()
+    gewaehlt = vorwahl()
+    plan = next((p for p in plaene if p.id == gewaehlt), None)
 
     # -- Wann -------------------------------------------------------------------
+    schluessel = f"{tag.isoformat()}/{uebung.id}"
+    letzter = state.sitzungen.letzter_eintrag(state.profil.id, uebung.id)
+
+    def vorlage() -> datetime:
+        """Die alte Zeit als Vorlage (`core.plaene.nachtrag_uhrzeit`) — heute nie später als
+        jetzt."""
+        am_tag = [
+            e.started_at for e, _ in tages_paare if e.exercise_id == uebung.id and e.started_at
+        ]
+        frueher = [letzter.started_at] if letzter is not None and letzter.started_at else []
+        t = nachtrag_uhrzeit(am_tag, frueher, jetzt() if tag == heute else None)
+        return datetime.combine(tag, t).astimezone()
+
+    if schluessel not in state.nachtrag_zeit:
+        state.nachtrag_zeit[schluessel] = None if tag == heute else vorlage()
+    zeit = state.nachtrag_zeit[schluessel]
+
+    def zeit_setzen(neu: datetime | None) -> None:
+        state.nachtrag_zeit[schluessel] = neu
+        nachtrag.zeit_setzen(neu)
+
+    def uhrzeit_uebernehmen(melden: bool) -> None:
+        """Eine lesbare Uhrzeit gilt sofort; ``melden``: sonst steht am Feld, warum nicht."""
+        t = uhrzeit_lesen(uhrzeit.value or "")
+        neu = datetime.combine(tag, t).astimezone() if t is not None else None
+        fehler = "Uhrzeit?" if neu is None else "liegt in der Zukunft" if neu > jetzt() else ""
+        if fehler:
+            if melden:
+                uhrzeit.error = fehler
+                page.update()
+            return
+        uhrzeit.error = None
+        zeit_setzen(neu)
+        page.update()
+
     uhrzeit = ft.TextField(
         label="Uhrzeit",
-        value=f"{datetime.now():%H:%M}" if tag == heute else "12:00",
+        value=f"{zeit.astimezone():%H:%M}" if zeit is not None else "",
         hint_text="7:30",
         width=110,
         dense=True,
         keyboard_type=ft.KeyboardType.DATETIME,
-        visible=tag != heute,
+        visible=zeit is not None,
+        on_change=lambda: uhrzeit_uebernehmen(False),
+        on_submit=lambda: uhrzeit_uebernehmen(True),
+        on_blur=lambda: uhrzeit_uebernehmen(True),
     )
 
     def wann_gewechselt(e: ft.Event[ft.SegmentedButton]) -> None:
-        uhrzeit.visible = bool(e.control.selected) and e.control.selected[0] == FRUEHER
+        frueher = bool(e.control.selected) and e.control.selected[0] == FRUEHER
+        neu = vorlage() if frueher else None
+        if neu is not None:
+            uhrzeit.value = f"{neu:%H:%M}"
+        uhrzeit.visible = frueher
         uhrzeit.error = None
+        zeit_setzen(neu)
         page.update()
 
     wann = ft.SegmentedButton(
-        selected=[JETZT],
+        selected=[FRUEHER if zeit is not None else JETZT],
         show_selected_icon=False,
         segments=[
             ft.Segment(value=JETZT, label=ft.Text("Jetzt")),
@@ -378,29 +374,22 @@ def nachtragen_view(
         on_change=wann_gewechselt,
     )
 
-    def zeitpunkt() -> tuple[datetime | None, str]:
-        """Der Zeitpunkt des Eintrags — ``None`` heißt jetzt —, sonst warum nicht."""
-        if tag == heute and wann.selected == [JETZT]:
-            return None, ""
-        t = uhrzeit_lesen(uhrzeit.value or "")
-        if t is None:
-            return None, "Uhrzeit?"
-        zeit = datetime.combine(tag, t).astimezone()
-        if zeit > datetime.now().astimezone():
-            return None, "liegt in der Zukunft"
-        return zeit, ""
-
     # -- Plan -------------------------------------------------------------------
     plan_chips: list[ft.Chip] = []
 
-    def plan_waehler(neu: str | None) -> Callable[[], None]:
-        def handler() -> None:
-            mitnehmen = stand["form"].werte()
-            wahl["plan"] = neu
-            for chip in plan_chips:
-                chip.selected = chip.data == neu
-            form_bauen(mitnehmen)
-            page.update()
+    def plan_waehler(neu: str | None) -> Callable[[], Awaitable[None]]:
+        """Ein anderer Plan: Was offen ist, ist fertig; die Seite des Plans ersetzt diese
+        (`AppState.ersetzen_bei`) — Zurück führt weiter zum Tag."""
+
+        async def handler() -> None:
+            if neu == gewaehlt:
+                for chip in plan_chips:
+                    chip.selected = chip.data == neu
+                page.update()
+                return
+            nachtrag.schliessen()
+            state.ersetzen_bei = nachtragen_route(basis, uebung.id, neu or OHNE_PLAN)
+            await page.push_route(state.ersetzen_bei)
 
         return handler
 
@@ -409,60 +398,19 @@ def nachtragen_view(
             ft.Chip(
                 label=ft.Text(p.name if p is not None else "ohne Plan"),
                 leading=ft.Icon(ft.Icons.LIST_ALT, size=16) if p is not None else None,
-                selected=wahl["plan"] == (p.id if p is not None else None),
+                selected=gewaehlt == (p.id if p is not None else None),
                 show_checkmark=False,
                 data=p.id if p is not None else None,
                 on_select=plan_waehler(p.id if p is not None else None),
             )
         )
 
-    notiz = ft.TextField(
-        label="Notiz",
-        hint_text="optional — tippen oder diktieren",
-        multiline=True,
-        min_lines=1,
-        max_lines=6,
-        dense=True,
-    )
-
-    def geaendert() -> bool:
-        return stand["form"].werte() != stand["anfang"] or bool((notiz.value or "").strip())
-
-    def sichern() -> str | None:
-        """Eintragen — ``None`` = eingetragen, sonst warum nicht."""
-        form: SpecForm = stand["form"]
-        probleme = form.pruefen()
-        zeit, fehler = zeitpunkt()
-        uhrzeit.error = fehler or None
-        if probleme or fehler:
-            page.update()
-            if probleme:
-                return "Unlesbar: " + ", ".join(dict.fromkeys(probleme)) + "."
-            return f"Uhrzeit: {fehler}."
-        eff, _teil, _item = bauteile()
-        session = state.sitzungen.session_fuer(state.profil.id, wahl["plan"], tag)
-        # Nachgetragen = fertig: mit Ende, damit kein späterer Satz daran hängt
-        state.sitzungen.eintrag_anlegen(
-            session, eff, form.werte(), notiz.value or "", started_at=zeit, ended_at=zeit
-        )
-        return None
-
-    async def eintragen() -> None:
-        if sichern() is not None:
-            return
-        page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name}: eingetragen")))
-        await page.push_route(zurueck_route)
-
-    async def abbrechen() -> None:
-        await page.push_route(zurueck_route)
-
     zuletzt_text = (
         f"zuletzt {wann_text(letzter.started_at, heute)} · {letzter.shorthand() or 'abgehakt'}"
         if letzter is not None and letzter.started_at
         else "noch nie eingetragen"
     )
-    wann_zeile: list[ft.Control] = [wann, uhrzeit] if tag == heute else [uhrzeit]
-    inhalt: list[ft.Control] = [
+    kopf: list[ft.Control] = [
         ft.Row(
             spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -484,46 +432,42 @@ def nachtragen_view(
             wrap=True,
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=wann_zeile,
+            controls=[wann, uhrzeit] if tag == heute else [uhrzeit],
         ),
     ]
     if plaene:
-        inhalt += [
-            ft.Text("Zu welchem Plan", size=12, weight=ft.FontWeight.W_600, opacity=0.75),
+        kopf += [
+            ft.Text("Plan", size=12, weight=ft.FontWeight.W_600, opacity=0.75),
             ft.Row(wrap=True, spacing=6, run_spacing=6, controls=list(plan_chips)),
         ]
-    inhalt += [
-        ft.Text("Werte", size=12, weight=ft.FontWeight.W_600, opacity=0.75),
-        form_platz,
-        notiz,
-    ]
-    ansicht = ft.View(
+
+    # -- Der Block --------------------------------------------------------------
+    if plan is not None:
+        # Die erste Stelle der Übung im Plan, die noch offen ist — sonst die erste
+        passend = stellen(plan)
+        block_plan = replace(plan, items=[erste_offene(passend, anzahl) or passend[0]])
+    else:
+        block_plan = einzel_plan(uebung)
+
+    def verlassen() -> None:
+        """Wer wiederkommt, beginnt mit der Vorlage — nicht mit der Zeit von vorhin."""
+        state.nachtrag_zeit.pop(schluessel, None)
+
+    nachtrag = Nachtrag(
+        tag=tag,
+        zeit=zeit,
         route=route,
-        appbar=formular_leiste(
-            "Nachtragen" if tag == heute else f"Nachtragen · {tag:%d.%m.}",
-            abbrechen=abbrechen,
-            speichern=eintragen,
-            text="Eintragen",
-        ),
-        scroll=ft.ScrollMode.AUTO,
-        padding=16,
-        controls=[
-            sicher(
-                ft.Column(
-                    spacing=12,
-                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                    controls=inhalt,
-                ),
-                expand=False,
-            )
-        ],
+        titel="Nachtragen" if tag == heute else f"Nachtragen · {tag:%d.%m.}",
+        kopf=kopf,
+        verlassen=verlassen,
     )
-    return zurueck_speichert(
-        page, ansicht, geaendert=geaendert, speichern=sichern, meldung="Eingetragen"
-    )
+    return plan_view(page, state, block_plan, einzel=plan is None, nachtrag=nachtrag)
 
 
 __all__ = [
+    "FRUEHER",
+    "JETZT",
+    "OHNE_PLAN",
     "nachtragen_blatt",
     "nachtragen_knopf",
     "nachtragen_route",

@@ -185,9 +185,27 @@ Bedeutungen: Aufklappen, Abschicken und die Überschrift.
   - Die Umschaltung Wiederholungen | Haltezeit wird ein Segment in der Ausführung.
   - Ja/Nein werden Wert-Knöpfe.
 
+**Nachgezogen 21.10.2026 abends** (P70, P71; Skizzen
+https://claude.ai/artifact/7JzRndHG41e3ZfeCm7huCH):
+- „Eintragen“ ist **eine** weiße Karte für alle Mengen, je Feld eine Zeile (E2): kurzer
+  Name („Wdh.“, „Haltezeit“) mit „je Satz“ darunter, bis zu drei „+“-Knöpfe, „…“ klappt
+  Sätze × Wert auf. Ab vier Knöpfen stehen sie zu dritt in einer eigenen Reihe; ohne
+  Chips steht das Zahlenfeld gleich in der Zeile.
+- Ja/Nein, Skala und Freitext werden **keine** Wert-Knöpfe (anders als oben „für alle
+  drei“): Sie stehen in der Ausführung unter „gilt für den offenen Eintrag“, zeigen und
+  ändern dessen Wert und trennen keine Einträge. Die Skala ist der Schiebebalken der
+  Tagesfelder (`ui/components/skala_regler.py`).
+
 ## G. Nachträglich, Uhr/Ablauf, Ziel (A6)
 
-- Im Leistungen-Blatt, in der Korrektur und beim Nachtragen bekommt SpecForm die
+- **Nachtragen ist der Trainingsblock** (Ben, 21.10.2026, P72, Skizze G1): oben Wann
+  (heute „Jetzt“ oder „Früher heute“, an einem vergangenen Tag die Uhrzeit; Vorlage ist
+  die alte Zeit, sonst 12:00, `core.plaene.nachtrag_uhrzeit`) und Plan, darunter der
+  Block ohne Uhr und HRV-Marken. `SessionRepo.zur_zeit` lässt alles um die gewählte Zeit
+  beginnen und sammelt dort; offen ist dabei nur, was genau dann begann. „Fertig“,
+  Zurück, eine andere Zeit oder ein anderer Plan schließen ab; wer die Seite anders
+  verlässt (App beendet), dem schließt der Zeitabstand.
+- Im Leistungen-Blatt und in der Korrektur bekommt SpecForm die
   Spec-Kopie, ergänzt um die heutigen Varianten der Übung (`spec_mit_varianten`). Auch ein
   Eintrag von vor der Variante lässt sich so noch setzen.
 - `UebungKontext` bekommt `auspraegung`, also die Ausführung beim Start.

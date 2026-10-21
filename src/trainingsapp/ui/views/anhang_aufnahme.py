@@ -9,9 +9,14 @@ Foto geschossen — das ist das Frontbild (`vorschau`), ohne Thumbnail-Bibliothe
 
 Ablauf: Vorschau vollflächig, unten Auslöser bzw. Aufnahme/Stopp mit laufender Zeit und
 Restzeit bis zur Höchstdauer, Kamera wechseln (Front ist für Übungen vor dem Handy die
-Regel), Qualitätsstufe als Text. Nach der Aufnahme: Vorschau, Notizzeile, „Behalten“ /
-„Verwerfen“. Die Vorschau liegt **über** der Kamera (`Camera.content`), nie an ihrer
-Stelle — ein aus dem Baum genommenes Kamera-Control verliert seinen Controller.
+Regel). Oben im Bild (Ben, 21.10.2026, P73, Skizzen H1/H2: „Timer, Qualität direkt an der
+Kamera, Blitz … nicht zu viel“): Blitz (Foto aus · automatisch · an, Video Licht), Timer
+(ein Tipp: aus → 1 → 3 → 5 → 10 s; dann zählt die Mitte groß herunter, je Sekunde ein Ton,
+„Abbrechen“ hält an) und die Qualität dieser Aufnahme (die Vorgabe bleibt in den
+Einstellungen). Mehr nicht — für Profiaufnahmen und lange Videos ist die Kamera des
+Telefons da. Nach der Aufnahme: Vorschau, Notizzeile, „Behalten“ / „Verwerfen“. Die
+Vorschau liegt **über** der Kamera (`Camera.content`), nie an ihrer Stelle — ein aus dem
+Baum genommenes Kamera-Control verliert seinen Controller.
 „Behalten“ schreibt die Dateien in einem Thread (die Bytes sind groß,
 `AnhangRepo.dateien_schreiben`), die Zeile danach im Event-Loop (`AnhangRepo.eintragen` —
 die SQLite-Verbindung darf den Thread nicht wechseln) und geht zurück zur Ansicht darunter.
@@ -28,6 +33,7 @@ import asyncio
 import contextlib
 import sqlite3
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import flet as ft
@@ -37,19 +43,28 @@ from trainingsapp.core.anhaenge import (
     VIDEO,
     Anhang,
     Qualitaet,
+    blitz_text,
+    blitz_weiter,
+    countdown_text,
     dauer_text,
     groesse_text,
     neuer_anhang,
+    timer_text,
+    timer_weiter,
 )
 from trainingsapp.core.models import SessionEntry, jetzt
+from trainingsapp.core.timer import COUNTDOWN
 from trainingsapp.data.anhaenge import qualitaet_lesen, video_max_s
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.zurueck import zurueck_ziel
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.timer_takt import ton_spielen
 
 #: Routenteile
 ANHANG, AUFNEHMEN = "anhang", "aufnehmen"
 ARTEN = {"foto": BILD, "video": VIDEO}
+#: Takt des Selbstauslösers (s) — eine Zahl, ein Ton
+COUNTDOWN_TAKT_S = 1.0
 
 
 def aufnahme_route(basis: str, eintrag_id: str, art: str) -> str:
@@ -82,6 +97,8 @@ class _Aufnahme:
         self.kameras: list[Any] = []
         self.kamera_index = 0
         self.bereit = False
+        #: Der zuletzt gemeldete Fehler der Kamera — er steht in jedem weiteren Zustand
+        self.letzter_fehler: str | None = None
         self.laeuft_seit: float | None = None
         #: Ergebnis: Daten, Frontbild (Video), Dauer
         self.daten: bytes | None = None
@@ -95,6 +112,15 @@ class _Aufnahme:
         self.flaeche = ft.Container(expand=True, alignment=ft.Alignment.CENTER)
         self.knoepfe = ft.Row(alignment=ft.MainAxisAlignment.CENTER, spacing=16)
         self.ticker: asyncio.Task[None] | None = None
+        #: Oben im Bild (P73): Blitz (flet-camera ``FlashMode`` als Text) und Selbstauslöser
+        #: (s) — nur für diese Seite; die Qualität oben gilt nur für diese Aufnahme
+        self.blitz = "off"
+        self.timer_s = 0
+        self.leiste = ft.Row(alignment=ft.MainAxisAlignment.CENTER, spacing=8)
+        #: Countdown des Selbstauslösers: Sekunden bis zum Auslösen, groß in der Mitte
+        self.countdown_rest: int | None = None
+        self.countdown_aufgabe: Any = None
+        self.gross = ft.Text("", size=120, weight=ft.FontWeight.W_700, color=ft.Colors.WHITE)
         #: die Seite, sobald sie gebaut ist (für Zurück)
         self.ansicht: Any = None
 
@@ -154,17 +180,50 @@ class _Aufnahme:
         except Exception as fehler:
             self.melden(f"Kamera lässt sich nicht öffnen: {fehler}")
             return
-        with contextlib.suppress(Exception):
-            from flet_camera import FlashMode
-
-            await self.kamera.set_flash_mode(FlashMode.OFF)
+        await self._blitz_setzen()  # ein neuer Controller beginnt mit seinem eigenen Blitz
         self.bereit = True
-        self.status.value = f"{self.qualitaet.label} · {self._richtung()}"
+        self.status.value = self.kamera_text()
         self.zeichnen()
 
+    async def _blitz_setzen(self) -> bool:
+        """Den gewählten Blitz an die Kamera geben — ``False``, wenn sie keinen hat."""
+        if self.kamera is None:
+            return False
+        try:
+            from flet_camera import FlashMode
+
+            await self.kamera.set_flash_mode(FlashMode(self.blitz))
+        except Exception:
+            return False
+        return True
+
+    def kamera_text(self) -> str:
+        """„Mittel · 720p · Frontkamera · Timer 3 s“ — was gerade eingestellt ist."""
+        teile = [self.qualitaet.label, self._richtung()]
+        if self.timer_s:
+            teile.append(f"Timer {self.timer_s} s")
+        return " · ".join(t for t in teile if t)
+
     def _zustand(self, e: Any) -> None:
-        if getattr(e, "has_error", False):
-            self.melden(f"Kamera: {getattr(e, 'error_description', '') or 'Fehler'}")
+        """Ein Fehler im Zustand der Kamera. flet-camera trägt ihn in **jedem** weiteren
+        Zustand mit (``errorDescription`` bleibt stehen) — darum zählt nur ein neuer, und
+        die Kamera bleibt bereit, solange sie geöffnet ist. Blitzfehler (keine Lampe an
+        dieser Kamera) meldet `blitz_tippen` selbst. Bis 21.10.2026 machte schon das
+        „Blitz aus“ beim Öffnen einer Kamera ohne Lampe („torchModeNotSupported“) jeden
+        späteren Zustand zum Fehler: Auslöser gesperrt, „Verwerfen“ verließ die Seite."""
+        if not getattr(e, "has_error", False):
+            return
+        text = str(getattr(e, "error_description", "") or "Fehler")
+        if text == self.letzter_fehler:
+            return
+        self.letzter_fehler = text
+        if "torch" in text.lower() or "flash" in text.lower():
+            return
+        if getattr(e, "is_initialized", True):
+            self.status.value = f"Kamera: {text}"
+            self.zeichnen()
+        else:
+            self.melden(f"Kamera: {text}")
 
     def _richtung(self) -> str:
         if not self.kameras:
@@ -181,8 +240,107 @@ class _Aufnahme:
         except Exception as fehler:
             self.melden(f"Kamera wechseln: {fehler}")
             return
-        self.status.value = f"{self.qualitaet.label} · {self._richtung()}"
+        await self._blitz_setzen()
+        self.status.value = self.kamera_text()
         self.zeichnen()
+
+    # -- Oben im Bild: Blitz, Timer, Qualität (P73, Skizze H1) ---------------------------
+
+    async def blitz_tippen(self) -> None:
+        """Blitz weiterschalten: Foto aus → automatisch → an, Video Licht aus ↔ an."""
+        if self.kamera is None or not self.bereit:
+            return
+        self.blitz = blitz_weiter(self.art, self.blitz)
+        if await self._blitz_setzen():
+            self.status.value = self.kamera_text()
+        else:  # die Frontkamera hat meist keinen
+            self.blitz = "off"
+            self.status.value = f"{self.kamera_text()} · ohne Blitz"
+        self.zeichnen()
+
+    def timer_tippen(self) -> None:
+        """Selbstauslöser weiterschalten: aus → 1 → 3 → 5 → 10 s → aus."""
+        self.timer_s = timer_weiter(self.timer_s)
+        self.status.value = self.kamera_text()
+        self.zeichnen()
+
+    def qualitaet_waehler(self, q: Qualitaet) -> Callable[[], Awaitable[None]]:
+        async def handler() -> None:
+            await self.qualitaet_setzen(q)
+
+        return handler
+
+    async def qualitaet_setzen(self, q: Qualitaet) -> None:
+        """Die Qualität dieser Aufnahme: Die Kamera öffnet mit dem anderen Preset neu
+        (flet-camera tauscht den Controller); die Vorgabe in den Einstellungen bleibt."""
+        if (
+            q == self.qualitaet
+            or self.kamera is None
+            or not self.kameras
+            or self.laeuft_seit is not None
+            or self.countdown_rest is not None
+        ):
+            return
+        from flet_camera import ResolutionPreset
+
+        self.qualitaet = q
+        self.bereit = False
+        self.status.value = "Kamera wird neu geöffnet …"
+        self.zeichnen()
+        await self._oeffnen(ResolutionPreset(q.preset))
+
+    # -- Auslösen, mit Selbstauslöser (Skizze H2) ----------------------------------------
+
+    async def ausloesen(self) -> None:
+        """Der Auslöser: gleich — oder nach dem Countdown des Selbstauslösers."""
+        if (
+            self.kamera is None
+            or not self.bereit
+            or self.countdown_rest is not None
+            or self.laeuft_seit is not None
+        ):
+            return
+        if self.timer_s <= 0:
+            await self._jetzt_ausloesen()
+            return
+        self.countdown_rest = self.timer_s
+        self.zeichnen()  # gleich „Abbrechen“ statt des Auslösers
+        self.countdown_aufgabe = self.page.run_task(self._countdown)
+
+    async def _jetzt_ausloesen(self) -> None:
+        await (self.foto() if self.art == BILD else self.video_start())
+
+    async def _countdown(self) -> None:
+        """Je Sekunde die Zahl groß in der Mitte und ein kurzer Ton (der Countdown-Ton des
+        Timers, mit dessen Lautstärke) — danach Foto bzw. Videostart."""
+        for rest in range(self.timer_s, 0, -1):
+            if self.countdown_rest is None:  # abgebrochen
+                return
+            self.countdown_rest = rest
+            self.gross.value = str(rest)
+            self.status.value = countdown_text(self.art, rest, self.max_s)
+            self.zeichnen()
+            await ton_spielen(self.state, COUNTDOWN)
+            await asyncio.sleep(COUNTDOWN_TAKT_S)
+        if self.countdown_rest is None:
+            return
+        self.countdown_ende()
+        await self._jetzt_ausloesen()
+
+    def countdown_ende(self) -> None:
+        self.countdown_rest = None
+        self.countdown_aufgabe = None
+        self.gross.value = ""
+        self.status.value = self.kamera_text()
+        self.zeichnen()
+
+    def abbrechen(self) -> None:
+        """„Abbrechen“ hält den Countdown an — aufgenommen wird nichts."""
+        aufgabe = self.countdown_aufgabe
+        self.countdown_ende()
+        if aufgabe is not None:
+            with contextlib.suppress(Exception):
+                aufgabe.cancel()
 
     # -- Aufnehmen -----------------------------------------------------------------------
 
@@ -319,7 +477,7 @@ class _Aufnahme:
         self.daten, self.frontbild, self.dauer_s = None, None, None
         if self.kamera is not None and self.bereit:
             self.kamera.content = None
-            self.status.value = f"{self.qualitaet.label} · {self._richtung()}"
+            self.status.value = self.kamera_text()
             self.zeichnen()
         else:
             await self.zurueck()
@@ -330,6 +488,8 @@ class _Aufnahme:
 
     async def aufraeumen(self) -> None:
         """Eine laufende Aufnahme beim Verlassen verwerfen (Zurück, Wegwischen)."""
+        if self.countdown_rest is not None:
+            self.abbrechen()
         if self.ticker is not None:
             self.ticker.cancel()
             self.ticker = None
@@ -347,8 +507,17 @@ class _Aufnahme:
 
     def zeichnen(self) -> None:
         self.knoepfe.controls = self._knoepfe()
+        self.leiste.controls = self._leiste()
         self.notiz.visible = self.daten is not None
-        for c in (self.knoepfe, self.status, self.zeit, self.notiz, self.flaeche):
+        for c in (
+            self.knoepfe,
+            self.leiste,
+            self.gross,
+            self.status,
+            self.zeit,
+            self.notiz,
+            self.flaeche,
+        ):
             with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
                 c.update()
 
@@ -366,6 +535,8 @@ class _Aufnahme:
                     "Datei wählen", icon=ft.Icons.FOLDER_OPEN, on_click=self.datei_waehlen
                 )
             ]
+        if self.countdown_rest is not None:
+            return [ft.OutlinedButton("Abbrechen", icon=ft.Icons.CLOSE, on_click=self.abbrechen)]
         wechsel = ft.IconButton(
             ft.Icons.FLIP_CAMERA_ANDROID,
             tooltip="Kamera wechseln",
@@ -379,7 +550,7 @@ class _Aufnahme:
                     ft.Icons.CAMERA,
                     icon_size=56,
                     tooltip="Foto aufnehmen",
-                    on_click=self.foto,
+                    on_click=self.ausloesen,
                     disabled=not self.bereit,
                 ),
                 ft.Container(width=48),
@@ -401,11 +572,75 @@ class _Aufnahme:
                 icon_size=56,
                 icon_color=ft.Colors.ERROR,
                 tooltip="Video aufnehmen",
-                on_click=self.video_start,
+                on_click=self.ausloesen,
                 disabled=not self.bereit,
             ),
             ft.Container(width=48),
         ]
+
+    def _leiste(self) -> list[ft.Control]:
+        """Oben im Bild (Skizze H1): Blitz, Timer, Qualität — nur mit Kamera und solange
+        kein Ergebnis dasteht. Während der Aufnahme bleibt nur das Licht schaltbar."""
+        if self.kamera is None or not self.kameras or self.daten is not None:
+            return []
+        frei = self.bereit and self.laeuft_seit is None and self.countdown_rest is None
+        symbol = {
+            "auto": ft.Icons.FLASH_AUTO,
+            "always": ft.Icons.FLASH_ON,
+            "torch": ft.Icons.FLASHLIGHT_ON,
+        }.get(self.blitz, ft.Icons.FLASHLIGHT_OFF if self.art == VIDEO else ft.Icons.FLASH_OFF)
+        return [
+            _schalter(
+                symbol,
+                blitz_text(self.art, self.blitz),
+                "Licht" if self.art == VIDEO else "Blitz",
+                self.blitz_tippen,
+                aus=not self.bereit or self.countdown_rest is not None,
+            ),
+            _schalter(
+                ft.Icons.TIMER if self.timer_s else ft.Icons.TIMER_OFF,
+                timer_text(self.timer_s),
+                "Selbstauslöser",
+                self.timer_tippen,
+                aus=not frei,
+            ),
+            ft.PopupMenuButton(
+                tooltip="Qualität dieser Aufnahme",
+                disabled=not frei,
+                content=_schalter(ft.Icons.HD, self.qualitaet.label, None, None, aus=not frei),
+                items=[
+                    ft.PopupMenuItem(
+                        content=q.label,
+                        checked=q == self.qualitaet,
+                        on_click=self.qualitaet_waehler(q),
+                    )
+                    for q in Qualitaet
+                ],
+            ),
+        ]
+
+
+def _schalter(
+    symbol: Any, text: str, tooltip: str | None, on_click: Any, *, aus: bool = False
+) -> ft.Control:
+    """Ein Knopf oben im Bild: hell auf dunklem, halbdurchsichtigem Grund."""
+    return ft.Container(
+        padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+        border_radius=18,
+        bgcolor=ft.Colors.with_opacity(0.45, ft.Colors.BLACK),
+        opacity=0.5 if aus else 1.0,
+        tooltip=tooltip,
+        ink=on_click is not None,
+        on_click=None if aus else on_click,
+        content=ft.Row(
+            tight=True,
+            spacing=6,
+            controls=[
+                ft.Icon(symbol, size=18, color=ft.Colors.WHITE),
+                ft.Text(text, size=13, weight=ft.FontWeight.W_600, color=ft.Colors.WHITE),
+            ],
+        ),
+    )
 
 
 def anhang_aufnahme_view(
@@ -416,9 +651,9 @@ def anhang_aufnahme_view(
     a = _Aufnahme(page, state, eintrag, art)
     titel = ("Foto: " if art == BILD else "Video: ") + (uebung.name if uebung else "Übung")
     hinweis = (
-        f"Höchstens {dauer_text(a.max_s)} min · Qualität in Einstellungen → Anhänge"
+        f"Höchstens {dauer_text(a.max_s)} min · Vorgabe der Qualität: Einstellungen → Anhänge"
         if art == VIDEO
-        else "Qualität in Einstellungen → Anhänge"
+        else "Vorgabe der Qualität: Einstellungen → Anhänge"
     )
     if _kamera_moeglich(page):
         a.status.value = "Kamera wird geöffnet …"
@@ -451,8 +686,16 @@ def anhang_aufnahme_view(
                         ft.Container(
                             expand=True,
                             bgcolor=ft.Colors.BLACK,
-                            alignment=ft.Alignment.CENTER,
-                            content=a.flaeche,
+                            # Über dem Bild: der Countdown groß in der Mitte, oben die Leiste
+                            content=ft.Stack(
+                                expand=True,
+                                fit=ft.StackFit.EXPAND,
+                                controls=[
+                                    a.flaeche,
+                                    ft.Container(alignment=ft.Alignment.CENTER, content=a.gross),
+                                    ft.Container(top=10, left=8, right=8, content=a.leiste),
+                                ],
+                            ),
                         ),
                         ft.Container(
                             padding=ft.Padding.symmetric(horizontal=16),

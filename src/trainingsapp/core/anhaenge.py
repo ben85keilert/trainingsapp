@@ -141,6 +141,72 @@ def video_max_lesen(wert: str | None) -> int:
     return n if n in VIDEO_MAX_WAHL else VIDEO_MAX_VORGABE_S
 
 
+#: Selbstauslöser an der Kamera (Ben, 21.10.2026, P73: „Timer (1, 3, 5, 10 s)“, Skizze H1):
+#: ein Tipp schaltet weiter, 0 = aus
+TIMER_STUFEN: tuple[int, ...] = (0, 1, 3, 5, 10)
+
+#: Blitz je Art (P73: „nicht zu viel“) — beim Foto aus · automatisch · an, beim Video das
+#: Dauerlicht. Der Schlüssel ist der Wert von flet-camera ``FlashMode`` (als Text, damit
+#: `core` flet-frei bleibt), daneben die Beschriftung
+BLITZ: dict[str, tuple[tuple[str, str], ...]] = {
+    BILD: (("off", "Aus"), ("auto", "Auto"), ("always", "An")),
+    VIDEO: (("off", "Licht aus"), ("torch", "Licht an")),
+}
+
+
+def timer_weiter(s: int) -> int:
+    """Ein Tipp auf den Timer: aus → 1 → 3 → 5 → 10 s → aus.
+
+    >>> [timer_weiter(s) for s in TIMER_STUFEN], timer_weiter(7)
+    ([1, 3, 5, 10, 0], 0)
+    """
+    i = TIMER_STUFEN.index(s) if s in TIMER_STUFEN else -1
+    return TIMER_STUFEN[(i + 1) % len(TIMER_STUFEN)]
+
+
+def timer_text(s: int) -> str:
+    """Die Beschriftung des Timers.
+
+    >>> timer_text(0), timer_text(3)
+    ('Aus', '3 s')
+    """
+    return f"{s} s" if s > 0 else "Aus"
+
+
+def blitz_weiter(art: str, modus: str) -> str:
+    """Ein Tipp auf den Blitz: beim Foto aus → automatisch → an, beim Video Licht aus ↔ an.
+
+    >>> blitz_weiter(BILD, "off"), blitz_weiter(BILD, "always"), blitz_weiter(VIDEO, "off")
+    ('auto', 'off', 'torch')
+    >>> blitz_weiter(VIDEO, "auto")  # vom Foto mitgebracht: beim Video gibt es nur Licht
+    'off'
+    """
+    stufen = [m for m, _ in BLITZ[art]]
+    i = stufen.index(modus) if modus in stufen else len(stufen) - 1
+    return stufen[(i + 1) % len(stufen)]
+
+
+def blitz_text(art: str, modus: str) -> str:
+    """Die Beschriftung des Blitzes.
+
+    >>> blitz_text(BILD, "auto"), blitz_text(VIDEO, "torch"), blitz_text(VIDEO, "?")
+    ('Auto', 'Licht an', 'Licht aus')
+    """
+    stufen = BLITZ[art]
+    return dict(stufen).get(modus, stufen[0][1])
+
+
+def countdown_text(art: str, rest_s: int, max_s: int) -> str:
+    """Was unter dem Bild steht, solange der Selbstauslöser zählt (Skizze H2).
+
+    >>> countdown_text(BILD, 3, 60), countdown_text(VIDEO, 2, 60)
+    ('Foto in 3 s', 'Video in 2 s · danach höchstens 1:00')
+    """
+    if art == VIDEO:
+        return f"Video in {rest_s} s · danach höchstens {dauer_text(max_s)}"
+    return f"Foto in {rest_s} s"
+
+
 @dataclass(slots=True)
 class Anhang:
     """Eine Zeile ``entry_media``: ein Foto oder Video an einem Eintrag."""
@@ -455,10 +521,12 @@ def fehlende(anhaenge: Iterable[Anhang], vorhanden: Iterable[str]) -> list[Anhan
 
 __all__ = [
     "BILD",
+    "BLITZ",
     "ENDUNG",
     "REIHE_MAX",
     "SETTING_QUALITAET",
     "SETTING_VIDEO_MAX",
+    "TIMER_STUFEN",
     "VIDEO",
     "VIDEO_MAX_VORGABE_S",
     "VIDEO_MAX_WAHL",
@@ -470,6 +538,9 @@ __all__ = [
     "Qualitaet",
     "anzahl_text",
     "aufraeumen_vorschlag",
+    "blitz_text",
+    "blitz_weiter",
+    "countdown_text",
     "dateiname",
     "dauer_text",
     "fehlende",
@@ -478,6 +549,8 @@ __all__ = [
     "monatsgruppen",
     "neuer_anhang",
     "relativer_pfad",
+    "timer_text",
+    "timer_weiter",
     "verwaiste",
     "video_max_lesen",
     "vorschau_name",

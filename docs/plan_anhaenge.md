@@ -142,10 +142,29 @@ Eintrag hängt. Ohne Eintrag an dem Tag: „Erst eintragen (Nachtragen), dann an
 **Aufnahmeseite `/anhang/aufnehmen/<eintrag>/<foto|video>`** (`views/anhang_aufnahme.py`):
 Vorschau vollflächig, unten Auslöser bzw. Aufnahme/Stopp mit laufender Zeit und
 Restzeit bis `MAX_VIDEO_S`, Kamera wechseln (Rück/Front — Front ist für Übungen vor dem
-Handy die Regel), Blitz aus, Qualitätsstufe als Text („Mittel · 720p“, antippen →
-Einstellungen). Das Ergebnis liegt über der Kamera (`Camera.content`), nie an ihrer Stelle
-— aus dem Baum genommen gibt flet-camera den Controller frei, und nach „Verwerfen“ war die
-Kamera tot (21.10.2026). Drehen erlaubt (`ui/ausrichtung`, wie Ausdauer). Bei Video wird
+Handy die Regel). Das Ergebnis liegt über der Kamera (`Camera.content`), nie an ihrer
+Stelle — aus dem Baum genommen gibt flet-camera den Controller frei, und nach „Verwerfen“
+war die Kamera tot (21.10.2026).
+
+**Oben im Bild** (Ben, 21.10.2026, P73: „Timer (1, 3, 5, 10 s), Qualität direkt an der
+Kamera, Blitz … nicht zu viel“; Skizzen H1/H2 https://claude.ai/artifact/7JzRndHG41e3ZfeCm7huCH)
+drei Knöpfe hell auf dunklem Grund (`core.anhaenge.BLITZ`, `TIMER_STUFEN`):
+- **Blitz** — Foto aus → automatisch → an, Video „Licht“ aus ↔ an (Dauerlicht, auch während
+  der Aufnahme). Beim Öffnen steht er aus; jeder neue Controller (Qualität, Kamera
+  wechseln) bekommt ihn wieder. Hat die Kamera keine Lampe (Frontkamera), bleibt er aus,
+  und unter dem Bild steht „ohne Blitz“.
+- **Timer** — ein Tipp: aus → 1 → 3 → 5 → 10 s. Mit Timer zählt die Mitte groß herunter,
+  je Sekunde der Countdown-Ton des Timers (mit dessen Lautstärke); „Abbrechen“ hält an,
+  beim Video beginnt danach die Aufnahme („Video in 3 s · danach höchstens 1:00“).
+- **Qualität** — Klein · Mittel · Groß **nur für diese Aufnahme**: Die Kamera öffnet mit
+  dem anderen Preset neu, die Vorgabe bleibt in Einstellungen → Anhänge.
+
+Mehr nicht: Für Profiaufnahmen und lange Videos ist die Kamera des Telefons da (dann
+„Hochladen“, F). **Zustandsfehler:** flet-camera trägt einen Fehler in jedem weiteren
+Zustand mit. Bis 21.10.2026 machte schon „Blitz aus“ an einer Kamera ohne Lampe
+(„torchModeNotSupported“, im Browser beim Öffnen) jeden späteren Zustand zum Fehler —
+Auslöser gesperrt, „Verwerfen“ verließ die Seite. Jetzt zählt nur ein neuer Fehler,
+Blitzfehler gar nicht, und die geöffnete Kamera bleibt bereit (`_Aufnahme._zustand`). Drehen erlaubt (`ui/ausrichtung`, wie Ausdauer). Bei Video wird
 **direkt vor dem Start ein Foto geschossen** — das ist das Frontbild (`vorschau`); so
 braucht es keine Video-Thumbnail-Bibliothek. Nach der Aufnahme: Vorschau mit „Behalten“
 / „Verwerfen“ und einer Notizzeile (`note`, optional, z. B. „links“). „Behalten“

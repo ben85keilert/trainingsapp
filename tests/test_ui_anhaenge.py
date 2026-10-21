@@ -181,6 +181,131 @@ async def test_verwerfen_laesst_die_kamera_an(welt, page) -> None:
     assert a.bereit and a.daten is None
 
 
+class _Kamera:
+    """Was die Seite von flet-camera braucht — schreibt die Aufrufe mit."""
+
+    def __init__(self, blitz: bool = True) -> None:
+        self.aufrufe: list[tuple[str, ...]] = []
+        self.content = None
+        self.blitz = blitz
+
+    async def set_flash_mode(self, modus) -> None:
+        if not self.blitz:
+            raise RuntimeError("Diese Kamera hat keinen Blitz")
+        self.aufrufe.append(("blitz", modus.value))
+
+    async def initialize(self, _beschreibung, preset, **_kw) -> None:
+        self.aufrufe.append(("öffnen", preset.value))
+
+    async def take_picture(self) -> bytes:
+        self.aufrufe.append(("foto",))
+        return JPEG
+
+
+def _mit_kamera(page, welt, art: str, **kw) -> _Aufnahme:
+    page.platform = ft.PagePlatform.ANDROID
+    a = _Aufnahme(page, welt.state, welt.eintrag, art)
+    a.kamera = _Kamera(**kw)
+    a.kameras = [SimpleNamespace(lens_direction=SimpleNamespace(value="back"))]
+    a.bereit = True
+    a.zeichnen()
+    return a
+
+
+async def test_blitz_timer_und_qualitaet_oben_im_bild(welt, page) -> None:
+    """P73 (Ben, 21.10.2026, Skizze H1): oben im Bild Blitz, Timer und die Qualität dieser
+    Aufnahme — die Vorgabe in den Einstellungen bleibt."""
+    pytest.importorskip("flet_camera")
+    from trainingsapp.data.anhaenge import qualitaet_lesen
+
+    a = _mit_kamera(page, welt, BILD)
+    assert _texte(a.leiste) == ["Aus", "Aus", "Mittel · 720p"]
+    await a.blitz_tippen()
+    assert a.blitz == "auto" and a.kamera.aufrufe[-1] == ("blitz", "auto")
+    a.timer_tippen()
+    a.timer_tippen()
+    assert a.timer_s == 3 and a.status.value == "Mittel · 720p · Rückkamera · Timer 3 s"
+
+    menue = next(c for c in a.leiste.controls if isinstance(c, ft.PopupMenuButton))
+    await next(i for i in menue.items if i.content == "Groß · 1080p").on_click()
+    assert a.qualitaet is Qualitaet.GROSS and ("öffnen", "veryHigh") in a.kamera.aufrufe
+    assert a.kamera.aufrufe[-1] == ("blitz", "auto")  # der neue Controller bekommt den Blitz
+    assert a.bereit and "Groß · 1080p" in _texte(a.leiste)
+    assert qualitaet_lesen(welt.state.einstellungen) is Qualitaet.MITTEL
+
+    video = _mit_kamera(page, welt, VIDEO, blitz=False)  # Frontkamera: meist ohne Blitz
+    assert _texte(video.leiste)[0] == "Licht aus"
+    await video.blitz_tippen()
+    assert video.blitz == "off" and video.status.value.endswith("ohne Blitz")
+
+
+async def test_selbstausloeser_zaehlt_mit_ton_und_bricht_ab(welt, page, monkeypatch) -> None:
+    """Skizze H2: Mit Timer zählt die Mitte groß herunter, je Sekunde ein Ton; „Abbrechen“
+    hält an, ohne aufzunehmen."""
+    pytest.importorskip("flet_camera")
+    import asyncio
+
+    from trainingsapp.ui.views import anhang_aufnahme as modul
+
+    toene: list[str] = []
+
+    async def ton(_state, klang, _signale=None) -> bool:
+        toene.append(klang)
+        return True
+
+    monkeypatch.setattr(modul, "ton_spielen", ton)
+    monkeypatch.setattr(modul, "COUNTDOWN_TAKT_S", 0)
+    aufgaben: list[asyncio.Task] = []
+
+    def run_task(f, *args):
+        aufgaben.append(asyncio.ensure_future(f(*args)))
+        return aufgaben[-1]
+
+    page.run_task = run_task
+    a = _mit_kamera(page, welt, BILD)
+    a.timer_s = 3
+    await a.ausloesen()
+    assert a.countdown_rest == 3 and _knoepfe(a.knoepfe) == ["Abbrechen"]
+    a.abbrechen()
+    await asyncio.gather(*aufgaben, return_exceptions=True)
+    assert a.countdown_rest is None and a.gross.value == "" and a.daten is None
+    assert ("foto",) not in a.kamera.aufrufe
+
+    await a.ausloesen()
+    await asyncio.gather(*aufgaben[1:])
+    assert toene == ["countdown"] * 3
+    assert a.kamera.aufrufe[-1] == ("foto",) and a.daten == JPEG and a.gross.value == ""
+
+
+async def test_ein_blitzfehler_sperrt_die_kamera_nicht(welt, page) -> None:
+    """flet-camera trägt einen Fehler in jedem weiteren Zustand mit. „Blitz aus“ an einer
+    Kamera ohne Lampe („torchModeNotSupported“, im Browser schon beim Öffnen) sperrte so den
+    Auslöser, und „Verwerfen“ verließ die Seite (21.10.2026)."""
+    pytest.importorskip("flet_camera")
+    a = _mit_kamera(page, welt, BILD)
+    fehler = SimpleNamespace(
+        has_error=True,
+        error_description="Error code: torchModeNotSupported",
+        is_initialized=True,
+    )
+    for _ in range(3):  # jeder weitere Zustand trägt ihn mit
+        a._zustand(fehler)
+    assert a.bereit and "torch" not in a.status.value
+    a.daten = JPEG
+    a.ergebnis_zeigen()
+    await a.verwerfen()
+    assert a.bereit and a.daten is None and not page.routen  # zurück zur Kamera
+    # Ein anderer Fehler steht im Text — einmal; die geöffnete Kamera bleibt bereit
+    a._zustand(SimpleNamespace(has_error=True, error_description="Kaputt", is_initialized=True))
+    assert a.bereit and a.status.value == "Kamera: Kaputt"
+    a.status.value = ""
+    a._zustand(SimpleNamespace(has_error=True, error_description="Kaputt", is_initialized=True))
+    assert a.status.value == ""
+    # Ist sie nicht (mehr) geöffnet, ist sie es nicht
+    a._zustand(SimpleNamespace(has_error=True, error_description="weg", is_initialized=False))
+    assert not a.bereit
+
+
 def test_einstellungen_zeigen_ueberblick(welt, page) -> None:
     ansicht = einstellungen_anhaenge(page, welt.state)
     texte = _texte(ansicht)

@@ -95,10 +95,21 @@ class AnhangRepo:
 
     def anlegen(self, a: Anhang, daten: bytes, vorschau: bytes | None = None) -> None:
         """Datei(en) atomar schreiben, dann die Zeile. ``a.bytes`` wird gesetzt."""
+        self.dateien_schreiben(a, daten, vorschau)
+        self.eintragen(a)
+
+    def dateien_schreiben(self, a: Anhang, daten: bytes, vorschau: bytes | None = None) -> None:
+        """Erster Teil von `anlegen`: nur die Datei(en), ohne Datenbank — darf in einem
+        Thread laufen (`asyncio.to_thread`). Die Verbindung gehört dem Thread, der sie
+        geöffnet hat (``check_same_thread``); die Zeile schreibt danach `eintragen` im
+        Event-Loop."""
         _atomar_schreiben(self.datei(a), daten)
         if a.vorschau and vorschau is not None:
             _atomar_schreiben(self.wurzel / a.vorschau, vorschau)
         a.bytes = len(daten)
+
+    def eintragen(self, a: Anhang) -> None:
+        """Zweiter Teil von `anlegen`: die Zeile zu schon geschriebenen Dateien."""
         if a.created_at is None:
             a.created_at = jetzt()
         with transaktion(self.con):

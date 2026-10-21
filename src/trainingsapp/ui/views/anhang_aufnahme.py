@@ -10,8 +10,9 @@ Foto geschossen — das ist das Frontbild (`vorschau`), ohne Thumbnail-Bibliothe
 Ablauf: Vorschau vollflächig, unten Auslöser bzw. Aufnahme/Stopp mit laufender Zeit und
 Restzeit bis zur Höchstdauer, Kamera wechseln (Front ist für Übungen vor dem Handy die
 Regel), Qualitätsstufe als Text. Nach der Aufnahme: Vorschau, Notizzeile, „Behalten“ /
-„Verwerfen“. „Behalten“ schreibt über `AnhangRepo.anlegen` in einem Thread (die Bytes
-sind groß) und geht zurück zur Ansicht darunter.
+„Verwerfen“. „Behalten“ schreibt die Dateien in einem Thread (die Bytes sind groß,
+`AnhangRepo.dateien_schreiben`), die Zeile danach im Event-Loop (`AnhangRepo.eintragen` —
+die SQLite-Verbindung darf den Thread nicht wechseln) und geht zurück zur Ansicht darunter.
 
 Am Rechner gibt es keine Kamera-Erweiterung (`Camera` wirft dort beim Anzeigen) — dort
 steht „Datei wählen“: Ein Bild oder Video vom Rechner, **unverkleinert**, nur zum Prüfen
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sqlite3
 import time
 from typing import Any
 
@@ -285,8 +287,10 @@ class _Aufnahme:
         )
         daten, frontbild = self.daten, self.frontbild
         try:
-            await asyncio.to_thread(self.state.anhaenge.anlegen, a, daten, frontbild)
-        except OSError as fehler:
+            # Nur die Bytes im Thread — die SQLite-Verbindung gehört dem Event-Loop
+            await asyncio.to_thread(self.state.anhaenge.dateien_schreiben, a, daten, frontbild)
+            self.state.anhaenge.eintragen(a)
+        except (OSError, sqlite3.Error) as fehler:
             self.melden(f"Nicht gespeichert: {fehler}")
             return
         self.daten = None

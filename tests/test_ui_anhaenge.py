@@ -14,7 +14,7 @@ from trainingsapp.core.models import Plan  # noqa: E402
 from trainingsapp.data.seed import seed_id  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.anhang import anhang_view, reihe_fuer  # noqa: E402
-from trainingsapp.ui.views.anhang_aufnahme import anhang_aufnahme_view  # noqa: E402
+from trainingsapp.ui.views.anhang_aufnahme import _Aufnahme, anhang_aufnahme_view  # noqa: E402
 from trainingsapp.ui.views.einstellungen_anhaenge import einstellungen_anhaenge  # noqa: E402
 from trainingsapp.ui.views.leistungen import leistungen_blatt, leistungen_view  # noqa: E402
 from trainingsapp.ui.views.tagebuch import tagebuch  # noqa: E402
@@ -162,3 +162,17 @@ def test_aufnahmeseite_am_rechner(welt, page) -> None:
     )
     assert "Datei wählen" in _knoepfe(ansicht)
     assert any("Nackendehnung" in t or "Foto:" in t for t in _texte(ansicht))
+
+
+async def test_behalten_schreibt_zeile_im_loop(welt, page) -> None:
+    """Die Bytes gehen in einen Thread, die Zeile nicht: Die SQLite-Verbindung gehört dem
+    Event-Loop — ein INSERT aus dem Thread warf am Handy „SQLite objects created in a thread
+    can only be used in that same thread“ (21.10.2026)."""
+    a = _Aufnahme(page, welt.state, welt.eintrag, BILD)
+    a.daten = JPEG
+    a.notiz.value = "rechts"
+    await a.behalten()
+    neu = [x for x in welt.state.anhaenge.je_eintrag(welt.eintrag.id) if x.note == "rechts"]
+    assert len(neu) == 1 and neu[0].bytes == len(JPEG)
+    assert welt.state.anhaenge.vorhanden(neu[0])
+    assert a.daten is None and page.routen == ["/"]

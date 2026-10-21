@@ -135,6 +135,32 @@ def test_kurve_duennt_aus_und_behaelt_ausreisser() -> None:
     assert max(ys) == 1900.0
 
 
+def test_zeitachse_breite_marken_bekommen_groesseren_schritt() -> None:
+    """2 min Fenster: „21:45“ passt achtmal, „07:41:15“ (Uhrzeit mit Sekunden) und
+    „101:45“ (Dauer ab 100 min) überlappten — weniger Marken (Ben, 21.10.2026)."""
+    from datetime import UTC, datetime
+
+    from trainingsapp.ui.components.zeitachse import achse
+
+    punkte = [(float(x), 800.0) for x in range(0, 7200)]
+
+    def marken(x_von: float, x_bis: float, uhrzeit: bool) -> list[str]:
+        x_text, x_null = achse(
+            datetime(2026, 10, 21, 5, 40, tzinfo=UTC), x_von, x_bis, uhrzeit=uhrzeit
+        )
+        chart = kurve(
+            [Reihe(punkte)], einheit="ms", x_von=x_von, x_bis=x_bis, x_text=x_text, x_null=x_null
+        )
+        return [label.label.value for label in chart.bottom_axis.labels]
+
+    kurz = marken(1290, 1410, uhrzeit=False)
+    assert len(kurz) == 7 and kurz[0] == "21:45"  # wie bisher: 15-s-Schritt
+    uhr = marken(1290, 1410, uhrzeit=True)
+    assert 2 <= len(uhr) <= 5 and all(len(m) == 8 for m in uhr), uhr  # Sekunden bleiben
+    lang = marken(6090, 6210, uhrzeit=False)  # ab 100 min: „101:45“
+    assert 2 <= len(lang) <= 6 and all(len(m) == 6 for m in lang), lang
+
+
 # ---------------------------------------------------------------------------
 # Wischen
 # ---------------------------------------------------------------------------

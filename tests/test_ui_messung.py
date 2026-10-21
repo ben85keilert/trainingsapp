@@ -57,7 +57,16 @@ def _baum_texte(c) -> list[str]:
         gesehen.add(id(x))
         if isinstance(x, ft.Text) and x.value:
             texte.append(x.value)
-        for name in ("controls", "content", "title", "subtitle", "leading", "trailing"):
+        for name in (
+            "controls",
+            "content",
+            "title",
+            "subtitle",
+            "leading",
+            "trailing",
+            "tabs",
+            "label",
+        ):
             wert = getattr(x, name, None)
             for k in wert if isinstance(wert, list) else [wert]:
                 lauf(k)
@@ -93,10 +102,16 @@ def test_messung_ohne_geraet(daten) -> None:
     texte = _baum_texte(messung(_seite(), state))
     assert "Gerät verbinden" in texte
     assert "OHNE GERÄT AUSPROBIEREN" in texte
-    state.messung_tab = 1  # Reiter „Aufzeichnungen"
+    state.messung_tab = 2  # Reiter „Aufzeichnungen" — ohne alles: Unterreiter „Laufen"
+    texte = _baum_texte(messung(_seite(), state))
+    assert state.aufzeichnungen_tab == 0 and "Laufen" in texte and "HRV" in texte
+    assert any(t.startswith("Noch kein Training.") for t in texte)
+    state.aufzeichnungen_tab = 1
     assert any(
         t.startswith("Noch keine Aufzeichnung.") for t in _baum_texte(messung(_seite(), state))
     )
+    state.messung_tab = 1  # Reiter „GPS": der Einstieg ins Ausdauertraining
+    assert "AUSDAUER" in _baum_texte(messung(_seite(), state))
 
 
 async def test_messung_live_mit_simulator(daten) -> None:
@@ -134,7 +149,7 @@ async def test_messung_live_mit_simulator(daten) -> None:
         assert "DFA α1 2 min" in texte and "LF-Band 2 min" in texte  # Kacheln
     # Ein anderer Reiter: die alte Live-Ansicht rechnet nicht weiter
     nummer = state.live_ansicht
-    state.messung_tab = 1
+    state.messung_tab = 2
     messung(seite, state)
     assert state.live_ansicht == nummer + 1
     state.messung_tab = 0
@@ -181,9 +196,11 @@ def test_detailansicht_mit_artefakt_korrigieren_und_speichern(daten) -> None:
     assert [k.beat_index for k in analyse_laden(pfad)] == [60]
     assert pfad.read_text(encoding="utf-8").count('"rr_ms": 1650') == 1  # Rohdatei unverändert
 
-    # Liste im Reiter zeigt die Aufzeichnung — und bietet den Export an
-    state.messung_tab = 1
+    # Liste im Reiter zeigt die Aufzeichnung — und bietet den Export an; ohne Trainings
+    # öffnet sich gleich der Unterreiter „HRV"
+    state.messung_tab = 2
     liste = messung(seite, state)
+    assert state.aufzeichnungen_tab == 1 and "HRV (1)" in _baum_texte(liste)
     assert "Noch keine Aufzeichnung." not in _baum_texte(liste)
     export = [
         c
@@ -260,7 +277,16 @@ def _alle_controls(wurzel) -> list:
             return
         gesehen.add(id(x))
         alle.append(x)
-        for name in ("controls", "content", "title", "subtitle", "leading", "trailing"):
+        for name in (
+            "controls",
+            "content",
+            "title",
+            "subtitle",
+            "leading",
+            "trailing",
+            "tabs",
+            "label",
+        ):
             wert = getattr(x, name, None)
             for k in wert if isinstance(wert, list) else [wert]:
                 lauf(k)

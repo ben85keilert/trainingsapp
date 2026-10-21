@@ -260,8 +260,11 @@ class AppState:
     #: Bluetooth-Zugang (nur Android, `ui.geraete.FletBleTransport`); hält den
     #: Flet-Service stark referenziert, sonst räumt Flet ihn ab.
     ble_transport: Any = None
-    #: Reiter „Messung": 0 = Live, 1 = Aufzeichnungen
+    #: Reiter „Messung": 0 = Live, 1 = GPS, 2 = Aufzeichnungen
     messung_tab: int = 0
+    #: Unterreiter der Aufzeichnungen: 0 = Laufen, 1 = HRV; None = noch nie gewählt
+    #: (dann der, in dem etwas liegt)
+    aufzeichnungen_tab: int | None = None
     #: Zählt jeden Aufbau der Hauptansicht hoch; eine Live-Ansicht, deren Nummer
     #: nicht mehr stimmt, ist nicht zu sehen und rechnet nichts mehr
     live_ansicht: int = 0

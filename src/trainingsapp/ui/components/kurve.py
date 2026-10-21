@@ -40,6 +40,20 @@ BREITE_PX = 400
 X_SCHRITTE = (5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600)
 X_MAX_LABELS = 8
 
+
+def x_marken_max(laenge: int) -> int:
+    """Höchstens so viele Zeitmarken bei Beschriftungen dieser Länge.
+
+    „0:15“ passt achtmal auf 412 px, „1:21:15“ (ab einer Stunde) sechsmal, „07:41:15“
+    (Uhrzeit mit Sekunden) fünfmal — bei 2 min Fenster überlappten sie sonst (Ben,
+    21.10.2026).
+
+    >>> x_marken_max(4), x_marken_max(7), x_marken_max(8)
+    (8, 6, 5)
+    """
+    return X_MAX_LABELS if laenge <= 5 else 6 if laenge <= 7 else 5
+
+
 #: Kleinste Spanne der Werteachse — sonst füllen wenige ms Rauschen die Höhe
 #: und eine ruhige Messung sieht unruhig aus.
 RR_SPANNE_MIN_MS = 100
@@ -170,13 +184,17 @@ def abschnitte(
     return [_min_max(list(punkte[a:b]), eimer) for a, b in pairwise(grenzen)]
 
 
-def x_schritt(spanne: float, schritte: Sequence[float] = X_SCHRITTE) -> float:
-    """Kleinste Schrittweite, mit der höchstens `X_MAX_LABELS` Zeitmarken entstehen.
+def x_schritt(
+    spanne: float, schritte: Sequence[float] = X_SCHRITTE, *, max_marken: int = X_MAX_LABELS
+) -> float:
+    """Kleinste Schrittweite, mit der höchstens ``max_marken`` Zeitmarken entstehen.
 
     >>> x_schritt(120), x_schritt(60), x_schritt(214), x_schritt(900)
     (15, 10, 30, 120)
+    >>> x_schritt(120, max_marken=5)
+    30
     """
-    return next((s for s in schritte if spanne / s <= X_MAX_LABELS), schritte[-1])
+    return next((s for s in schritte if spanne / s <= max_marken), schritte[-1])
 
 
 def y_raster(
@@ -322,14 +340,23 @@ def _achse_x(
     `kurve` setzt darum dieselbe ``null`` als ``baseline_x``. Mit ``null = −Tagessekunden``
     des Aufnahmestarts fallen die Marken auf runde Uhrzeiten (`core.zeitangabe`).
     """
-    schritt = x_schritt(max(bis - von, 1e-9), schritte)
+    spanne = max(bis - von, 1e-9)
+    schritt = x_schritt(spanne, schritte)
     # Keine Marke auf dem linken Rand, und eine am rechten würde abgeschnitten („2:0").
-    letzter = bis - 0.04 * (bis - von)
-    labels = [
-        fc.ChartAxisLabel(value=x, label=ft.Text(text(x), size=10))
-        for v in _vielfache(von - null, letzter - null, schritt)
-        if (x := round(v + null, 6)) > von + 1e-9
-    ]
+    letzter = bis - 0.04 * spanne
+    while True:
+        marken = [
+            (x, text(x))
+            for v in _vielfache(von - null, letzter - null, schritt)
+            if (x := round(v + null, 6)) > von + 1e-9
+        ]
+        # Lange Beschriftungen (Stunden, Uhrzeit mit Sekunden) brauchen einen
+        # größeren Schritt — `x_schritt` liefert dann den nächsten, der passt.
+        erlaubt = x_marken_max(max((len(t) for _, t in marken), default=0))
+        if len(marken) <= erlaubt or schritt >= schritte[-1]:
+            break
+        schritt = x_schritt(spanne, schritte, max_marken=erlaubt)
+    labels = [fc.ChartAxisLabel(value=x, label=ft.Text(t, size=10)) for x, t in marken]
     return fc.ChartAxis(
         labels=labels,
         label_spacing=schritt,
@@ -550,6 +577,7 @@ __all__ = [
     "ausduennen",
     "doppel_raster",
     "kurve",
+    "x_marken_max",
     "x_schritt",
     "y_raster",
     "zahl_text",

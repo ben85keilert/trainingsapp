@@ -580,7 +580,16 @@ def _alle(wurzel) -> list:
             return
         gesehen.add(id(x))
         alle.append(x)
-        for name in ("controls", "content", "title", "subtitle", "leading", "trailing"):
+        for name in (
+            "controls",
+            "content",
+            "title",
+            "subtitle",
+            "leading",
+            "trailing",
+            "tabs",
+            "label",
+        ):
             wert = getattr(x, name, None)
             for k in wert if isinstance(wert, list) else [wert]:
                 lauf(k)
@@ -634,10 +643,10 @@ async def test_auswertung_und_liste_zeigen_das_training(daten) -> None:
     assert any(
         isinstance(c, ft.FilledButton) and c.content == "Training starten" for c in _alle(start)
     )
-    # Reiter „Messung → Aufzeichnungen": Abschnitt „Ausdauer"
-    state.messung_tab = 1
+    # Reiter „Messung → Aufzeichnungen": Unterreiter „Laufen" mit dem Training
+    state.messung_tab = 2
     liste = messung(_seite(), state)
-    assert "AUSDAUER" in _texte(liste)
+    assert state.aufzeichnungen_tab == 0 and "Laufen (1)" in _texte(liste)
     assert any(t.startswith("Gehen · ") and " km · " in t for t in _texte(liste)), _texte(liste)
 
 

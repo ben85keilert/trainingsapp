@@ -1,4 +1,5 @@
-"""Reiter „Messung": oben „Live" und „Aufzeichnungen".
+"""Reiter „Messung": oben „Live", „GPS" und „Aufzeichnungen" (Symbol neben dem Text,
+damit die Zeile flach bleibt — Ben, 21.10.2026).
 
 **Live.** Ohne Verbindung: Gerät suchen (oder den Simulator nehmen). Mit
 Verbindung, von oben nach unten:
@@ -26,8 +27,12 @@ Live wird nichts an den Rohdaten verändert. Artefakte werden markiert (rote
 Punkte), die korrigierte Kurve ist eine Anzeige; gespeichert werden immer
 die Rohwerte. Korrigiert wird nachträglich in der Aufzeichnung.
 
-**Aufzeichnungen.** Die gespeicherten Messungen des Profils, neueste zuerst,
-und „Alle exportieren".
+**GPS.** Der Einstieg ins Ausdauertraining (`views.ausdauer.ausdauer_karte`) — bis
+21.10.2026 stand er über dem Live-Teil. Der Bereich wird noch umgebaut (Katalog A17:
+Tempo entlang der Strecke, eingefärbte Kurvenabschnitte, Kurve Strecke/Zeit gegen HF).
+
+**Aufzeichnungen.** Zwei Unterreiter: „Laufen" (die Trainings, `strecken_zeilen`) und
+„HRV" (die gespeicherten Messungen des Profils, neueste zuerst, „Alle exportieren").
 """
 
 from __future__ import annotations
@@ -1517,7 +1522,29 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
 # ---------------------------------------------------------------------------
 
 
-def _liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
+def _reiter(text: str, icon: ft.IconData) -> ft.Tab:
+    """Ein Reiter mit dem Symbol **neben** dem Text — mit ``icon`` stünde es darüber,
+    und die Zeile wäre doppelt so hoch (Ben, 21.10.2026)."""
+    return ft.Tab(
+        label=ft.Row(
+            tight=True, spacing=6, controls=[ft.Icon(icon, size=18), ft.Text(text, size=14)]
+        )
+    )
+
+
+def _leer(text: str) -> ft.Control:
+    return ft.Container(padding=24, content=ft.Text(text, opacity=0.7))
+
+
+def _trainings_liste(trainings: list[ft.Control]) -> ft.Control:
+    """Unterreiter „Laufen": die Trainings — Zeilen aus `views.ausdauer.strecken_zeilen`."""
+    if not trainings:
+        return _leer("Noch kein Training. Unter „GPS“ ein Ausdauertraining starten.")
+    return ft.ListView(expand=True, padding=ft.Padding.only(bottom=24), controls=trainings)
+
+
+def _hrv_liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
+    """Unterreiter „HRV": die Messungen des Profils und „Alle exportieren"."""
 
     def oeffner(recording_id: str) -> Callable[[], Any]:
         async def handler() -> None:
@@ -1536,30 +1563,12 @@ def _liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
         daten = await asyncio.to_thread(export_zip, dateien, datenverzeichnis())
         await weitergeben(page, f"messungen_{zeitstempel()}.zip", daten, "application/zip")
 
-    from trainingsapp.ui.views.ausdauer import strecken_zeilen
-
-    trainings = strecken_zeilen(page, state)
-    if not eintraege and not trainings:
-        return ft.Container(
-            padding=24,
-            content=ft.Text(
-                "Noch keine Aufzeichnung. Unter „Live“ ein Gerät verbinden und "
-                "„Aufnahme starten“ tippen — oder ein Ausdauertraining starten.",
-                opacity=0.7,
-            ),
-        )
-    zeilen: list[ft.Control] = []
-    if trainings:
-        zeilen.append(
-            ft.Container(
-                padding=ft.Padding.only(left=16, top=12),
-                content=ft.Text("AUSDAUER", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-            )
-        )
-        zeilen += trainings
     if not eintraege:
-        return ft.ListView(expand=True, padding=ft.Padding.only(bottom=24), controls=zeilen)
-    zeilen += [
+        return _leer(
+            "Noch keine Aufzeichnung. Unter „Live“ ein Gerät verbinden und "
+            "„Aufnahme starten“ tippen."
+        )
+    zeilen: list[ft.Control] = [
         ft.Container(
             padding=ft.Padding.only(left=16, right=8, top=8),
             content=ft.Row(
@@ -1593,8 +1602,52 @@ def _liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
     return ft.ListView(expand=True, padding=ft.Padding.only(bottom=24), controls=zeilen)
 
 
+def _aufzeichnungen(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
+    """Reiter „Aufzeichnungen": Unterreiter „Laufen" und „HRV" (Ben, 21.10.2026)."""
+    from trainingsapp.ui.views.ausdauer import strecken_zeilen
+
+    trainings = strecken_zeilen(page, state)
+    if state.aufzeichnungen_tab is None:
+        # Erstes Öffnen: dort anfangen, wo etwas liegt
+        state.aufzeichnungen_tab = 1 if eintraege and not trainings else 0
+
+    def wechseln(e: ft.Event[ft.Tabs]) -> None:
+        state.aufzeichnungen_tab = e.control.selected_index or 0
+        state.neu_zeichnen()
+
+    def zahl(text: str, n: int) -> str:
+        return f"{text} ({n})" if n else text
+
+    inhalt = (
+        _hrv_liste(page, state, eintraege)
+        if state.aufzeichnungen_tab == 1
+        else _trainings_liste(trainings)
+    )
+    return ft.Tabs(
+        length=2,
+        selected_index=state.aufzeichnungen_tab,
+        on_change=wechseln,
+        expand=True,
+        content=ft.Column(
+            expand=True,
+            spacing=0,
+            controls=[
+                ft.TabBar(
+                    secondary=True,
+                    scrollable=False,
+                    tabs=[
+                        _reiter(zahl("Laufen", len(trainings)), ft.Icons.DIRECTIONS_RUN),
+                        _reiter(zahl("HRV", len(eintraege)), ft.Icons.MONITOR_HEART_OUTLINED),
+                    ],
+                ),
+                ft.Container(expand=True, content=inhalt),
+            ],
+        ),
+    )
+
+
 def messung(page: ft.Page, state: AppState) -> ft.Control:
-    """Reiter oben: „Live" und „Aufzeichnungen" — umschalten baut nur den Inhalt neu."""
+    """Reiter oben: „Live", „GPS" und „Aufzeichnungen" — umschalten baut nur den Inhalt neu."""
     lauf = state.messlauf
     state.live_ansicht += 1  # eine ältere Live-Ansicht hört auf zu rechnen
     verbunden = lauf is not None and lauf.status.verbindung != Verbindung.GETRENNT
@@ -1604,24 +1657,29 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
         state.messung_tab = e.control.selected_index or 0
         state.neu_zeichnen()
 
-    if state.messung_tab == 1:
-        inhalt: ft.Control = _liste(page, state, eintraege)
-        if lauf is not None:
-            # Die Liste braucht keine Live-Werte; nur ein Abriss baut neu.
-            lauf.beobachter = lambda layout: state.neu_zeichnen() if layout else None
-    else:
-        from trainingsapp.ui.views.ausdauer import ausdauer_karte
-
-        teil = _live_teil(page, state, lauf) if verbunden else _verbinden_teil(page, state)
-        inhalt = ft.ListView(
+    def liste(*teile: ft.Control) -> ft.Control:
+        return ft.ListView(
             expand=True,
             padding=ft.Padding.only(left=12, right=12, top=12, bottom=24),
             spacing=12,
-            controls=[ausdauer_karte(page, state), teil],
+            controls=list(teile),
         )
-    anzahl = len(eintraege)
+
+    inhalt: ft.Control
+    if state.messung_tab == 0:
+        inhalt = liste(_live_teil(page, state, lauf) if verbunden else _verbinden_teil(page, state))
+    else:
+        if lauf is not None:
+            # GPS und Listen brauchen keine Live-Werte; nur ein Abriss baut neu.
+            lauf.beobachter = lambda layout: state.neu_zeichnen() if layout else None
+        if state.messung_tab == 1:
+            from trainingsapp.ui.views.ausdauer import ausdauer_karte
+
+            inhalt = liste(ausdauer_karte(page, state))
+        else:
+            inhalt = _aufzeichnungen(page, state, eintraege)
     return ft.Tabs(
-        length=2,
+        length=3,
         selected_index=state.messung_tab,
         on_change=wechseln,
         expand=True,
@@ -1633,14 +1691,12 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
                 ft.TabBar(
                     scrollable=False,
                     tabs=[
-                        ft.Tab(
-                            label="Live",
-                            icon=ft.Icons.SENSORS if verbunden else ft.Icons.BLUETOOTH_SEARCHING,
+                        _reiter(
+                            "Live",
+                            ft.Icons.SENSORS if verbunden else ft.Icons.BLUETOOTH_SEARCHING,
                         ),
-                        ft.Tab(
-                            label=f"Aufzeichnungen ({anzahl})" if anzahl else "Aufzeichnungen",
-                            icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                        ),
+                        _reiter("GPS", ft.Icons.GPS_FIXED),
+                        _reiter("Aufzeichnungen", ft.Icons.FOLDER_OPEN_OUTLINED),
                     ],
                 ),
                 ft.Container(expand=True, content=inhalt),

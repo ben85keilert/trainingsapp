@@ -16,6 +16,7 @@ Anhang in der Speicherübersicht sichtbar („Eintrag gelöscht“), bis die Per
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
 from collections.abc import Iterable
 from datetime import date, datetime
@@ -27,6 +28,8 @@ from trainingsapp.core.anhaenge import (
     Anhang,
     AnhangMitBezug,
     Qualitaet,
+    jpeg_ohne_metadaten,
+    mp4_ortsboxen,
     video_max_lesen,
 )
 from trainingsapp.core.models import iso_utc, jetzt, tagesgrenzen
@@ -47,11 +50,73 @@ _MIT_BEZUG = """
 """
 
 
+#: Unterordner der Wurzel für Dateien, die „Hochladen“ gerade verkleinert (P74) — wie die
+#: Anhänge nie in Backup, Export oder Sync; Reste findet „Aufräumen“
+HOCHLADEN_ORDNER = ".hochladen"
+
+
 def _atomar_schreiben(ziel: Path, daten: bytes) -> None:
     ziel.parent.mkdir(parents=True, exist_ok=True)
     tmp = ziel.with_name(ziel.name + ".tmp")
     tmp.write_bytes(daten)
     os.replace(tmp, ziel)
+
+
+def _verschieben(quelle: Path, ziel: Path) -> None:
+    """Atomar an den Platz — über Dateisystemgrenzen erst kopieren, dann umbenennen."""
+    ziel.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.replace(quelle, ziel)
+    except OSError:
+        tmp = ziel.with_name(ziel.name + ".tmp")
+        shutil.copyfile(quelle, tmp)
+        os.replace(tmp, ziel)
+        quelle.unlink(missing_ok=True)
+
+
+def mp4_ort_entfernen(pfad: Path) -> int:
+    """Ortsangaben im ``moov`` eines MP4 unschädlich machen (Typ → ``free``,
+    `core.anhaenge.mp4_ortsboxen`) — an Ort und Stelle; gelesen wird nur die ``moov``-Box,
+    nicht das ganze Video. Gibt zurück, wie viele Boxen es waren.
+
+    Netz unter der Erweiterung: Sie verkleinert ohne Ort, aber was sie liefert, wird hier
+    noch einmal geprüft (Regel wie GPS: kein Ort in Anhängen).
+    """
+    gefunden = 0
+    with pfad.open("r+b") as f:
+        laenge = f.seek(0, os.SEEK_END)
+        i = 0
+        while i + 8 <= laenge:
+            f.seek(i)
+            kopf = f.read(16)
+            groesse = int.from_bytes(kopf[:4], "big")
+            typ = kopf[4:8]
+            k = 8
+            if groesse == 1:
+                groesse = int.from_bytes(kopf[8:16], "big")
+                k = 16
+            elif groesse == 0:
+                groesse = laenge - i
+            if groesse < k:
+                break
+            if typ == b"moov":
+                f.seek(i + k)
+                for stelle in mp4_ortsboxen(f.read(groesse - k), i + k):
+                    f.seek(stelle)
+                    f.write(b"free")
+                    gefunden += 1
+            i += groesse
+    return gefunden
+
+
+def jpeg_datei_ohne_metadaten(pfad: Path) -> bool:
+    """`core.anhaenge.jpeg_ohne_metadaten` auf eine Datei — ``True``, wenn etwas wegfiel."""
+    daten = pfad.read_bytes()
+    ohne = jpeg_ohne_metadaten(daten)
+    if ohne == daten:
+        return False
+    _atomar_schreiben(pfad, ohne)
+    return True
 
 
 class AnhangRepo:
@@ -107,6 +172,21 @@ class AnhangRepo:
         if a.vorschau and vorschau is not None:
             _atomar_schreiben(self.wurzel / a.vorschau, vorschau)
         a.bytes = len(daten)
+
+    def hochladen_ordner(self) -> Path:
+        """Wohin die Erweiterung beim Hochladen verkleinert (`HOCHLADEN_ORDNER`)."""
+        ordner = self.wurzel / HOCHLADEN_ORDNER
+        ordner.mkdir(parents=True, exist_ok=True)
+        return ordner
+
+    def dateien_uebernehmen(self, a: Anhang, datei: Path, vorschau: Path | None = None) -> None:
+        """Wie `dateien_schreiben`, aber für fertige Dateien (Hochladen, P74): verschieben
+        statt die Bytes durch den Speicher zu tragen — ein Video von zehn Minuten wiegt bei
+        „Mittel“ gut 60 MB. ``a.bytes`` wird gesetzt."""
+        a.bytes = datei.stat().st_size
+        _verschieben(datei, self.datei(a))
+        if a.vorschau and vorschau is not None:
+            _verschieben(vorschau, self.wurzel / a.vorschau)
 
     def eintragen(self, a: Anhang) -> None:
         """Zweiter Teil von `anlegen`: die Zeile zu schon geschriebenen Dateien."""
@@ -301,7 +381,10 @@ def video_max_setzen(einstellungen: SettingRepo, sekunden: int) -> None:
 
 
 __all__ = [
+    "HOCHLADEN_ORDNER",
     "AnhangRepo",
+    "jpeg_datei_ohne_metadaten",
+    "mp4_ort_entfernen",
     "qualitaet_lesen",
     "qualitaet_setzen",
     "video_max_s",

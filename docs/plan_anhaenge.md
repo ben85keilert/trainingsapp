@@ -220,15 +220,41 @@ Neue Seite **Einstellungen → Anhänge** (`einstellungen_anhaenge.py`, Karte �
 Die Paketseite zeigt heute die Größe eigener Übungsmedien (`PaketRepo.groesse`);
 Anhänge zählen dort nicht mit — sie gehören zu Einträgen, nicht zu Paketen.
 
-## F. Später: Galerie-Import mit Verkleinern
+## F. Hochladen aus der Fotoauswahl (gebaut 21.10.2026, P74)
 
-Ein vorhandenes Foto oder Video aus der Galerie ist über `ft.FilePicker.pick_files`
-erreichbar, aber **nicht verkleinerbar**: Auf Android gibt es kein Pillow, kein ffmpeg,
-nur numpy — ein 12-MP-Foto oder 4K-Video käme in voller Größe und mit EXIF-Ort. Dafür
-braucht es eine eigene Erweiterung wie `flet_ton` (Kotlin/Dart: `image_picker` mit
-`maxWidth`/`imageQuality`, EXIF nur Orientierung; Video über `video_compress`). Erst
-bauen, wenn B–E stehen und Ben die Galerie wirklich braucht; dann wird aus den zwei
-Knöpfen der Menü-Knopf „Anhang“.
+Ben, 21.10.2026: „Ermögliche das Hochladen von Anhängen. Dabei Vorsicht mit den
+Nutzerrechten, hier nicht zu aggressiv sein.“ Videos höchstens zehn Minuten. Skizzen I1/I2
+(https://claude.ai/artifact/7JzRndHG41e3ZfeCm7huCH).
+
+- **Wo:** im Leistungen-Blatt der dritte Knopf „Hochladen“ neben Foto und Video, an der
+  Büroklammer „Aus der Fotoauswahl“ — nur, wo die Erweiterung da ist (gebaute Android-App).
+  Seite `…/anhang/hochladen/<eintrag>` (`ui/views/anhang_hochladen.py`).
+- **Rechte:** image_picker mit dem **Photo Picker** von Android — keine Berechtigung für
+  Fotos oder Speicher, die App bekommt nur die gewählte Datei (eine Kopie im Cache).
+- **Verkleinern** (Erweiterung `erweiterungen/flet_hochladen`): Fotos mit
+  flutter_image_compress auf die kurze Seite der Stufe (480/720/1080 px), JPEG **ohne
+  Exif**; Videos mit einer eigenen Kotlin-Klasse über Transcoder 0.10.5 — Bitrate wie die
+  Kamera (`Qualitaet.video_bitrate`/`audio_bitrate`), Keyframes alle 5 s (sonst reicht
+  Transcoder Videos mit passender Größe unverkleinert durch), Datenquelle **ohne Ort**
+  (`OhneOrt`), dazu das Frontbild. Fortschritt in Prozent, „Abbrechen“.
+- **Warum nicht die fertigen Pakete:** image_picker kopiert beim Verkleinern die GPS-Felder
+  mit (`ExifDataCopier`); video_compress schätzt die Bitrate (0,14 · Breite · Höhe · fps,
+  bei 720p 3,9 Mbit/s ≈ 30 MB je Minute) und schreibt den Ort des Originals ins Ergebnis;
+  light_compressor kennt nur ganze Mbit/s und lädt seine Bibliothek von JitPack.
+- **Netz darunter:** Was die Erweiterung liefert, prüft die App noch einmal:
+  `core.anhaenge.jpeg_ohne_metadaten` (APP1/APP13/Kommentare weg, Bilddaten unverändert)
+  und `data.anhaenge.mp4_ort_entfernen` (``©xyz``, ``loci``, ``meta`` im ``moov`` werden zu
+  ``free`` — gleiche Größe, alle Versätze bleiben gültig). Die Kopie der Auswahl wird gleich
+  nach dem Verkleinern gelöscht.
+- **Zu lang:** Videos über zehn Minuten (`HOCHLADEN_VIDEO_MAX_S`) werden gar nicht erst
+  verkleinert — „In der Galerie kürzen (Bearbeiten → Zuschneiden), dann noch einmal.“
+- **Behalten** verschiebt die fertigen Dateien aus `Anhaenge/.hochladen/` an ihren Platz
+  (`AnhangRepo.dateien_uebernehmen`) — ein Video von zehn Minuten wiegt bei „Mittel“ gut
+  60 MB, das trägt keine Brücke durch den Speicher. Reste in `.hochladen/` findet
+  „Aufräumen“.
+- **Prüfung ohne Handy:** Dart `flutter analyze` ohne Befund; die Kotlin-Klasse kompiliert
+  mit Kotlin 2.2.20 gegen android.jar 36, das Flutter-Embedding und Transcoder 0.10.5. Der
+  erste APK-Build mit der Erweiterung ist zugleich ihr erster Gradle-Build (T71).
 
 ## G. Zu entscheiden (Ben)
 
@@ -250,6 +276,8 @@ Knöpfen der Menü-Knopf „Anhang“.
   kein Sync. `80_store_freigaben.md`: Begründung für `CAMERA`/`RECORD_AUDIO`.
   `build/solo.toml`, `build/praxis.toml`: iOS-Texte.
 - Reihenfolge der Builds: S4 (Backup aus) **vor** oder **mit** dem Kamera-Build.
+- Hochladen (F): keine neue Berechtigung (`80_store_freigaben.md`); neue Erweiterung mit
+  Android-Teil — `flet build` holt Transcoder (Maven Central) beim ersten Build.
 - Tests: Doctests `core/anhaenge` (Namen, Stufen, Gruppen, Aufräumvorschlag);
   `tests/test_anhaenge.py` für Repo (anlegen atomar, löschen entfernt Datei und Frontbild,
   verwaiste/fehlende); Importregel bleibt (core/data flet-frei); Gerätetests T61–T66:

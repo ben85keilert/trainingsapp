@@ -38,8 +38,10 @@ Patientinnen und Patienten der Praxis.
 > behandeln.
 
 **Medien** (gebaut 20.10.2026, `docs/plan_anhaenge.md`): Fotos und Videos der eigenen
-Übungsausführung, die die Person mit der Kamera der App an einen Trainingseintrag hängt.
-Zweck ausschließlich Dokumentation für die Person selbst (kein Vergleich, keine Bewertung
+Übungsausführung, die die Person mit der Kamera der App an einen Trainingseintrag hängt —
+oder seit 21.10.2026 aus der Fotoauswahl von Android hochlädt (P74): Die App bekommt nur
+die gewählte Datei, verkleinert sie und speichert sie **ohne Ortsangabe** (Exif/GPS im Foto,
+Ortsboxen im Video); die Kopie der Auswahl wird danach gelöscht. Zweck ausschließlich Dokumentation für die Person selbst (kein Vergleich, keine Bewertung
 der Haltung durch die App). Speicherort: app-privater Speicher des Geräts
 (`Anhaenge/<Jahr>/<Monat>/`), ohne Ortsstempel; sie gehen in **keinen** Export, kein
 Geräte-Backup und keine Synchronisation — hinaus nur über „Teilen“ am einzelnen Bild, das

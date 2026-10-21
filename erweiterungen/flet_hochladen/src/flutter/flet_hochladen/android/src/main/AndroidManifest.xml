@@ -1,0 +1,3 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Keine Berechtigung: Die Fotoauswahl gibt nur die gewählte Datei heraus -->
+</manifest>

@@ -23,8 +23,9 @@ die SQLite-Verbindung darf den Thread nicht wechseln) und geht zurück zur Ansic
 
 Am Rechner gibt es keine Kamera-Erweiterung (`Camera` wirft dort beim Anzeigen) — dort
 steht „Datei wählen“: Ein Bild oder Video vom Rechner, **unverkleinert**, nur zum Prüfen
-des Ablaufs in der Entwicklung. Der Galerie-Import am Handy braucht eine eigene
-Erweiterung mit Verkleinern (Plan, Abschnitt F) und ist bewusst nicht gebaut.
+des Ablaufs in der Entwicklung. Am Handy kommt ein vorhandenes Foto oder Video über
+„Hochladen“ (`views/anhang_hochladen.py`, Erweiterung `flet_hochladen`: verkleinert, ohne
+Ortsangabe; Plan, Abschnitt F).
 """
 
 from __future__ import annotations

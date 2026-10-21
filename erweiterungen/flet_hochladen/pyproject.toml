@@ -1,0 +1,21 @@
+[project]
+name = "flet-hochladen"
+version = "0.1.0"
+description = "Flet-Erweiterung: ein Foto oder Video aus der Android-Fotoauswahl, verkleinert und ohne Ortsangabe"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Praxis Ebert" }]
+# Nur flet — Auswahl und Verkleinern sind Dart/Kotlin. Version im Gleichschritt mit der App.
+dependencies = ["flet>=1.0.3"]
+
+# Wie flet_ton: der Flutter-Teil landet im Wheel unter flutter/flet_hochladen, wo
+# serious_python beim `flet build` Erweiterungen sucht.
+[tool.setuptools.package-data]
+"flutter.flet_hochladen" = ["**/*"]
+
+[tool.setuptools]
+license-files = []
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

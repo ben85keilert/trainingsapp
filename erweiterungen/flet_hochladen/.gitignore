@@ -1,0 +1,5 @@
+# Artefakte von uv/pip/setuptools (flet build installiert die Erweiterung per pip aus diesem Ordner)
+build/
+dist/
+*.egg-info/
+__pycache__/

@@ -188,3 +188,54 @@ def test_einstellungen(welt) -> None:
     assert video_max_s(einstellungen) == 120
     video_max_setzen(einstellungen, 7)  # nicht in der Auswahl → Vorgabe
     assert video_max_s(einstellungen) == 60
+
+
+def _box(typ: bytes, inhalt: bytes = b"") -> bytes:
+    return (8 + len(inhalt)).to_bytes(4, "big") + typ + inhalt
+
+
+def test_mp4_ort_entfernen_an_ort_und_stelle(tmp_path) -> None:
+    """P74: Ein hochgeladenes Video verliert seinen Ort (``©xyz``, ``meta``) — die Größe
+    bleibt, also stimmen alle Versätze (``stco``) weiter; das Bild bleibt Byte für Byte."""
+    from trainingsapp.data.anhaenge import mp4_ort_entfernen
+
+    ort = _box(b"\xa9xyz", b"+48.1371+011.5754/")
+    apple = _box(b"meta", _box(b"keys", b"com.apple.quicktime.location.ISO6709"))
+    moov = _box(b"moov", _box(b"mvhd", b"0" * 20) + _box(b"udta", ort) + apple)
+    mdat = (1).to_bytes(4, "big") + b"mdat" + (16 + 6).to_bytes(8, "big") + b"BILDER"
+    video = _box(b"ftyp", b"mp42") + moov + mdat
+    datei = tmp_path / "v.mp4"
+    datei.write_bytes(video)
+    assert mp4_ort_entfernen(datei) == 2
+    neu = datei.read_bytes()
+    assert len(neu) == len(video) and b"\xa9xyz" not in neu and b"meta" not in neu
+    assert neu.endswith(b"BILDER") and neu.count(b"free") == 2
+    assert mp4_ort_entfernen(datei) == 0  # nichts mehr da
+
+
+def test_jpeg_datei_und_uebernehmen(welt, tmp_path) -> None:
+    """Hochladen: Das verkleinerte Foto verliert Exif, dann wandert die fertige Datei an
+    ihren Platz — verschoben, nicht durch den Speicher getragen."""
+    from trainingsapp.data.anhaenge import jpeg_datei_ohne_metadaten
+
+    repo, eintrag = welt.repo, welt.eintrag
+    ordner = repo.hochladen_ordner()
+    assert ordner.is_dir() and ordner.parent == repo.wurzel
+    exif = b"\xff\xe1\x00\x0eExif\x00\x00GPS!!!"
+    foto = ordner / "f.jpg"
+    foto.write_bytes(b"\xff\xd8" + exif + b"\xff\xda\x00\x02DATEN\xff\xd9")
+    assert jpeg_datei_ohne_metadaten(foto) and b"GPS" not in foto.read_bytes()
+    assert not jpeg_datei_ohne_metadaten(foto)
+
+    a = neuer_anhang(eintrag.id, BILD, Qualitaet.MITTEL)
+    repo.dateien_uebernehmen(a, foto)
+    repo.eintragen(a)
+    assert not foto.exists() and repo.vorhanden(a) and a.bytes == repo.datei(a).stat().st_size
+
+    video, bild = ordner / "v.mp4", ordner / "v.jpg"
+    video.write_bytes(MP4)
+    bild.write_bytes(JPEG)
+    v = neuer_anhang(eintrag.id, VIDEO, Qualitaet.KLEIN, dauer_s=12.0)
+    repo.dateien_uebernehmen(v, video, bild)
+    assert repo.datei(v).read_bytes() == MP4 and repo.bild(v).read_bytes() == JPEG
+    assert not list(ordner.iterdir())

@@ -50,6 +50,7 @@ from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang import anhang_route
 from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
+from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 
 #: Was „Speichern“ bzw. Zurück speichert
 HINWEIS = (
@@ -210,6 +211,17 @@ class _Leistungen:
             eintrag_id = self.karten[-1].eintrag.id
         return aufnahme_route(self.basis, eintrag_id, art)
 
+    def hochladen_ziel(self, eintrag_id: str | None = None) -> str | None:
+        """Route von „Hochladen“ (P74) — nur in der App mit der Erweiterung; sonst wie
+        `aufnahme_ziel` ``None`` ohne Eintrag."""
+        if self.state.hochladen is None:
+            return None
+        if eintrag_id is None:
+            if not self.karten:
+                return None
+            eintrag_id = self.karten[-1].eintrag.id
+        return hochladen_route(self.basis, eintrag_id)
+
     def _weiter_zu(self, ziel: str) -> Callable[[], Any]:
         """Ein Handler, der `weiter` erst beim Tipp fragt — Ansicht und Blatt setzen es nach
         dem ersten Zeichnen (`weiter` speichert Geändertes und wechselt dann die Route)."""
@@ -232,6 +244,17 @@ class _Leistungen:
                     content=ft.Text("Video aufnehmen"),
                     icon=ft.Icons.VIDEOCAM_OUTLINED,
                     on_click=self._weiter_zu(video),
+                ),
+                *(
+                    [
+                        ft.PopupMenuItem(
+                            content=ft.Text("Aus der Fotoauswahl"),
+                            icon=ft.Icons.PHOTO_LIBRARY_OUTLINED,
+                            on_click=self._weiter_zu(hoch),
+                        )
+                    ]
+                    if (hoch := self.hochladen_ziel(eintrag_id)) is not None
+                    else []
                 ),
             ],
         )
@@ -412,22 +435,30 @@ def _nachtragen_zeile(
                 ft.Text("Foto oder Video: erst eintragen, dann anhängen.", size=12, opacity=0.6)
             )
         else:
+            # Hochladen aus der Fotoauswahl (P74, Skizze I1) — nur mit Erweiterung; zu dritt
+            # mit schmalerem Rand, sonst bricht „Hochladen“ am Handy um
+            hoch = leistungen.hochladen_ziel()
+            knoepfe = [("Foto", ft.Icons.CAMERA_ALT_OUTLINED, foto)]
+            knoepfe.append(("Video", ft.Icons.VIDEOCAM_OUTLINED, video))
+            if hoch is not None:
+                knoepfe.append(("Hochladen", ft.Icons.PHOTO_LIBRARY_OUTLINED, hoch))
+            schmal = (
+                ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=8))
+                if hoch is not None
+                else None
+            )
             zeilen.append(
                 ft.Row(
                     spacing=8,
                     controls=[
                         ft.OutlinedButton(
-                            "Foto",
-                            icon=ft.Icons.CAMERA_ALT_OUTLINED,
-                            on_click=weiter_nach(foto),
+                            text,
+                            icon=symbol,
+                            on_click=weiter_nach(ziel),
                             expand=True,
-                        ),
-                        ft.OutlinedButton(
-                            "Video",
-                            icon=ft.Icons.VIDEOCAM_OUTLINED,
-                            on_click=weiter_nach(video),
-                            expand=True,
-                        ),
+                            style=schmal,
+                        )
+                        for text, symbol, ziel in knoepfe
                     ],
                 )
             )

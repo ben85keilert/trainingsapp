@@ -819,6 +819,17 @@ wheels = [
 ]
 
 [[package]]
+name = "flet-hochladen"
+version = "0.1.0"
+source = { editable = "erweiterungen/flet_hochladen" }
+dependencies = [
+    { name = "flet" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "flet", specifier = ">=1.0.3" }]
+
+[[package]]
 name = "flet-map"
 version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2411,6 +2422,7 @@ dependencies = [
     { name = "flet-camera" },
     { name = "flet-charts" },
     { name = "flet-geolocator" },
+    { name = "flet-hochladen" },
     { name = "flet-map" },
     { name = "flet-permission-handler" },
     { name = "flet-ton" },
@@ -2453,6 +2465,7 @@ requires-dist = [
     { name = "flet-camera", specifier = "==1.0.*" },
     { name = "flet-charts", specifier = "==1.0.*" },
     { name = "flet-geolocator", specifier = "==1.0.*" },
+    { name = "flet-hochladen", editable = "erweiterungen/flet_hochladen" },
     { name = "flet-map", specifier = "==1.0.*" },
     { name = "flet-permission-handler", specifier = "==1.0.*" },
     { name = "flet-ton", editable = "erweiterungen/flet_ton" },

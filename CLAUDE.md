@@ -110,8 +110,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   GPX-Export, den die Person selbst auslöst (`docs/plan_gps.md`, Abschnitt 0).
   Dasselbe gilt für **Anhänge** (Ben, 19.10.2026): Fotos und Videos an Einträgen liegen
   unter `Anhaenge/<JJJJ>/<MM>/` (`config.anhaengeverzeichnis()`, Tabelle `entry_media`,
-  `core/anhaenge.py`), kommen aus der Kamera der App (flet-camera, drei Qualitäten) und
-  gehen nie in Export, Backup oder Sync — nur „Teilen“ am Einzelbild. Kein Video läuft
+  `core/anhaenge.py`), kommen aus der Kamera der App (flet-camera, drei Qualitäten) oder aus
+  der Fotoauswahl (`erweiterungen/flet_hochladen`: keine Berechtigung, verkleinert, **ohne
+  Ortsangabe** — die App prüft nach) und gehen nie in Export, Backup oder Sync — nur
+  „Teilen“ am Einzelbild. Kein Video läuft
   außerhalb der Ansicht `/anhang/<id>`; Tag, Tagebuch und Übung zeigen Frontbilder
   (`ui/components/anhang_reihe.py`). Vertrag: `docs/plan_anhaenge.md`.
 

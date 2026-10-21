@@ -1,0 +1,33 @@
+name: flet_hochladen
+description: Flet-Service fürs Hochladen von Anhängen — Fotoauswahl von Android, verkleinert, ohne Ortsangabe
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: ">=3.44.0"
+
+dependencies:
+  flet: ^1.0.3
+  flutter:
+    sdk: flutter
+  # Fotoauswahl (Android Photo Picker — keine Berechtigung für Fotos oder Speicher), BSD-3
+  image_picker: ^1.2.0
+  image_picker_android: ^0.8.13
+  image_picker_platform_interface: ^2.11.0
+  # Fotos verkleinern, Exif weglassen (keepExif: false), MIT
+  flutter_image_compress: ^2.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+# Ein Plugin mit Android-Teil: Videos verkleinert eine eigene Kotlin-Klasse mit Transcoder
+# (android/), weil video_compress weder die Bitrate festlegen lässt noch den Ort weglässt
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: de.praxisebert.flet_hochladen
+        pluginClass: FletHochladenPlugin

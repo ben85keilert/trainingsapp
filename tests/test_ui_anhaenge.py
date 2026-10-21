@@ -352,3 +352,139 @@ async def test_behalten_schreibt_zeile_im_loop(welt, page) -> None:
     assert len(neu) == 1 and neu[0].bytes == len(JPEG)
     assert welt.state.anhaenge.vorhanden(neu[0])
     assert a.daten is None and page.routen == ["/"]
+
+
+# -- Hochladen aus der Fotoauswahl (P74, Skizzen I1/I2) -----------------------------------
+
+#: Ein JPEG mit Ortsangabe im Exif — so käme es aus der Galerie
+JPEG_MIT_ORT = b"\xff\xd8\xff\xe1\x00\x0eExif\x00\x00GPS!!!\xff\xda\x00\x02DATEN\xff\xd9"
+
+
+def _box(typ: bytes, inhalt: bytes = b"") -> bytes:
+    return (8 + len(inhalt)).to_bytes(4, "big") + typ + inhalt
+
+
+#: Ein MP4 mit ``©xyz`` (Ort) im ``moov``
+MP4_MIT_ORT = (
+    _box(b"ftyp", b"mp42")
+    + _box(b"moov", _box(b"udta", _box(b"\xa9xyz", b"+48.13+011.57/")))
+    + _box(b"mdat", b"BILDER")
+)
+
+
+class _Dienst:
+    """Was die Seite von flet_hochladen braucht. Die Auswahl ist eine Datei im „Cache“; das
+    Verkleinern kopiert sie nur — samt Ort, damit das Netz der App geprüft wird."""
+
+    def __init__(self, cache, name: str, daten: bytes, dauer_ms: int | None = None) -> None:
+        cache.mkdir(parents=True, exist_ok=True)
+        self.quelle = cache / name
+        self.quelle.write_bytes(daten)
+        self.name, self.dauer = name, dauer_ms
+        self.aufrufe: list[dict] = []
+
+    async def waehlen(self):
+        return {"pfad": str(self.quelle), "name": self.name, "mime": None, "bytes": 312_000_000}
+
+    async def dauer_ms(self, _pfad):
+        return self.dauer
+
+    async def verkleinern(self, quelle, art, ziel, **kw):
+        from pathlib import Path
+
+        self.aufrufe.append({"art": art, **kw})
+        Path(ziel).write_bytes(Path(quelle).read_bytes())
+        if kw["frontbild"]:
+            Path(kw["frontbild"]).write_bytes(JPEG_MIT_ORT)
+        return {"bytes": 1, "breite": 1280, "hoehe": 720, "dauer_ms": self.dauer}
+
+    async def abbrechen(self):
+        return None
+
+
+async def test_hochladen_foto_ohne_ort(welt, page, tmp_path) -> None:
+    """P74: Die Seite öffnet die Fotoauswahl, verkleinert auf die Vorgabe, nimmt den Ort
+    heraus (auch wenn die Erweiterung ihn durchließe) und löscht die Kopie der Auswahl."""
+    from trainingsapp.ui.views.anhang_hochladen import _Hochladen
+
+    dienst = _Dienst(tmp_path / "cache", "IMG_1.jpg", JPEG_MIT_ORT)
+    welt.state.hochladen = dienst
+    h = _Hochladen(page, welt.state, welt.eintrag)
+    await h.starten()
+    assert h.fertig and not dienst.quelle.exists()  # die Kopie mit Ort ist weg
+    assert dienst.aufrufe == [
+        {
+            "art": "bild",
+            "frontbild": None,
+            "kurze_seite": 720,
+            "jpeg_qualitaet": 85,
+            "video_bitrate": 800_000,
+            "audio_bitrate": 64_000,
+        }
+    ]
+    assert h.ziel is not None and b"GPS" not in h.ziel.read_bytes()
+    assert h.ort.visible and h.status.value.startswith("312,0 MB → ")
+    assert _knoepfe(h.knoepfe) == ["Verwerfen", "Behalten"]
+
+    h.notiz.value = "von links"
+    await h.behalten()
+    (neu,) = [a for a in welt.state.anhaenge.je_eintrag(welt.eintrag.id) if a.note == "von links"]
+    assert neu.art == BILD and welt.state.anhaenge.vorhanden(neu)
+    assert b"GPS" not in welt.state.anhaenge.datei(neu).read_bytes()
+    assert not list(welt.state.anhaenge.hochladen_ordner().iterdir())
+    assert page.routen == ["/"]
+
+
+async def test_hochladen_video_ohne_ort_und_hoechstens_zehn_minuten(welt, page, tmp_path) -> None:
+    from trainingsapp.ui.views.anhang_hochladen import _Hochladen
+
+    lang = _Dienst(tmp_path / "cache", "lang.mp4", MP4_MIT_ORT, dauer_ms=11 * 60_000)
+    welt.state.hochladen = lang
+    h = _Hochladen(page, welt.state, welt.eintrag)
+    await h.starten()
+    assert not h.fertig and "höchstens 10:00" in h.status.value
+    assert not lang.aufrufe and not lang.quelle.exists()
+    assert _knoepfe(h.knoepfe) == ["Zurück"]
+
+    kurz = _Dienst(tmp_path / "cache", "kurz.mp4", MP4_MIT_ORT, dauer_ms=9_000)
+    welt.state.hochladen = kurz
+    h = _Hochladen(page, welt.state, welt.eintrag)
+    await h.starten()
+    assert h.fertig and kurz.aufrufe[0]["art"] == "video" and kurz.aufrufe[0]["frontbild"]
+    assert h.ziel is not None and b"\xa9xyz" not in h.ziel.read_bytes()
+    assert h.frontbild is not None and b"GPS" not in h.frontbild.read_bytes()
+    assert h.titel.value == "Video · 0:09 · aus der Fotoauswahl"
+    await h.behalten()
+    (video,) = [a for a in welt.state.anhaenge.je_eintrag(welt.eintrag.id) if a.breite == 1280]
+    assert video.art == VIDEO and video.hoehe == 720 and video.dauer_s == 9.0
+    assert welt.state.anhaenge.bild(video).is_file()
+
+
+async def test_hochladen_verwerfen_und_ohne_erweiterung(welt, page, tmp_path) -> None:
+    from trainingsapp.ui.views.anhang_hochladen import _Hochladen
+
+    welt.state.hochladen = _Dienst(tmp_path / "cache", "IMG_2.jpg", JPEG_MIT_ORT)
+    h = _Hochladen(page, welt.state, welt.eintrag)
+    await h.starten()
+    ziel = h.ziel
+    await h.verwerfen()
+    assert ziel is not None and not ziel.exists() and page.routen == ["/"]
+    vorher = len(welt.state.anhaenge.je_eintrag(welt.eintrag.id))
+
+    welt.state.hochladen = None  # am Rechner: keine Erweiterung
+    h = _Hochladen(page, welt.state, welt.eintrag)
+    await h.starten()
+    assert "nur in der App am Handy" in h.status.value
+    assert len(welt.state.anhaenge.je_eintrag(welt.eintrag.id)) == vorher
+
+
+def test_leistungen_zeigen_hochladen_nur_mit_erweiterung(welt, page, tmp_path) -> None:
+    """Skizze I1: ein dritter Knopf neben Foto und Video — nur, wo die Erweiterung da ist."""
+    route = f"/tag/{welt.state.heute()}/leistungen/{welt.uebung.id}"
+    assert "Hochladen" not in _knoepfe(leistungen_view(page, welt.state, route, welt.uebung))
+    welt.state.hochladen = _Dienst(tmp_path / "cache", "x.jpg", JPEG)
+    ansicht = leistungen_view(page, welt.state, route, welt.uebung)
+    assert {"Foto", "Video", "Hochladen"} <= set(_knoepfe(ansicht))
+    klammer = next(c for c in _alle(ansicht) if isinstance(c, ft.PopupMenuButton))
+    assert [i.content.value for i in klammer.items][-1] == "Aus der Fotoauswahl"
+    assert not _umbrechend_mit_ausdehnung(ansicht)

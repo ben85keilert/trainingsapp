@@ -104,6 +104,21 @@ class Qualitaet(StrEnum):
         return {"klein": 48_000, "mittel": 64_000, "gross": 96_000}[self.value]
 
     @property
+    def kurze_seite(self) -> int:
+        """Pixel der kürzeren Seite — so verkleinert „Hochladen“ Fotos und Videos, wie die
+        Kamera aufnimmt (P74).
+
+        >>> [q.kurze_seite for q in Qualitaet], Qualitaet.MITTEL.jpeg_qualitaet
+        ([480, 720, 1080], 85)
+        """
+        return {"klein": 480, "mittel": 720, "gross": 1080}[self.value]
+
+    @property
+    def jpeg_qualitaet(self) -> int:
+        """JPEG-Qualität (0–100) beim Verkleinern hochgeladener Fotos."""
+        return {"klein": 80, "mittel": 85, "gross": 90}[self.value]
+
+    @property
     def name_kurz(self) -> str:
         """Nur der Name der Stufe — für gespeicherte Aufnahmen: deren Auflösung kann eine
         frühere gewesen sein (bis 21.10.2026 war „mittel“ 1080p)."""
@@ -328,6 +343,134 @@ def neuer_anhang(
 
 
 # ---------------------------------------------------------------------------
+# Hochladen (Ben, 21.10.2026, P74): verkleinert und ohne Ortsangabe
+# ---------------------------------------------------------------------------
+
+#: Längstes hochgeladenes Video (s) — Ben, 21.10.2026: zehn Minuten. Was länger ist, kürzt
+#: man vorher in der Galerie.
+HOCHLADEN_VIDEO_MAX_S = 600
+
+_BILD_ENDUNGEN = {"jpg", "jpeg", "png", "heic", "heif", "webp"}
+_VIDEO_ENDUNGEN = {"mp4", "mov", "m4v", "3gp", "webm", "mkv"}
+
+
+def art_der_datei(name: str) -> str | None:
+    """Foto oder Video nach der Endung der gewählten Datei — ``None`` für alles andere.
+
+    >>> art_der_datei("IMG_1.HEIC"), art_der_datei("clip.mov"), art_der_datei("a.pdf")
+    ('image', 'video', None)
+    """
+    endung = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if endung in _BILD_ENDUNGEN:
+        return BILD
+    if endung in _VIDEO_ENDUNGEN:
+        return VIDEO
+    return None
+
+
+def geschaetzte_bytes(q: Qualitaet, dauer_s: float) -> int:
+    """Wie groß ein hochgeladenes Video nach dem Verkleinern etwa wird — Bild- und Tonrate
+    der Stufe mal Dauer („312 MB → etwa 17 MB“, Skizze I2).
+
+    >>> groesse_text(geschaetzte_bytes(Qualitaet.MITTEL, 160))
+    '17,3 MB'
+    """
+    return int((q.video_bitrate + q.audio_bitrate) / 8 * max(dauer_s, 0.0))
+
+
+#: Was `jpeg_ohne_metadaten` aus einem JPEG nimmt: APP1 (Exif und XMP — dort steht der
+#: Ort), APP13 (IPTC) und Kommentare
+_JPEG_WEG = {0xE1, 0xED, 0xFE}
+
+
+def jpeg_ohne_metadaten(daten: bytes) -> bytes:
+    r"""Ein JPEG ohne Exif, XMP, IPTC und Kommentare — die Bilddaten bleiben Byte für Byte.
+
+    Die Erweiterung schreibt schon ohne Exif; das hier ist das Netz darunter (Regel wie GPS:
+    kein Ort in Anhängen). Kein JPEG → unverändert.
+
+    >>> jfif = b"\xff\xe0\x00\x06JFIF"
+    >>> exif = b"\xff\xe1\x00\x0eExif\x00\x00GPS!!!"
+    >>> scan = b"\xff\xda\x00\x02\x12\xff\x00\x34\xff\xd9"
+    >>> bild = b"\xff\xd8" + jfif + exif + scan
+    >>> ohne = jpeg_ohne_metadaten(bild)
+    >>> b"GPS" in ohne, ohne == b"\xff\xd8" + jfif + scan
+    (False, True)
+    >>> jpeg_ohne_metadaten(b"kein jpeg")
+    b'kein jpeg'
+    """
+    if not daten.startswith(b"\xff\xd8"):
+        return daten
+    teile = [daten[:2]]
+    i = 2
+    while i + 4 <= len(daten) and daten[i] == 0xFF:
+        marker = daten[i + 1]
+        if marker == 0xFF:  # Füllbyte vor einem Marker
+            i += 1
+            continue
+        if marker in (0xDA, 0xD9):  # Start of Scan: ab hier Bilddaten
+            break
+        if 0xD0 <= marker <= 0xD7 or marker == 0x01:  # Marker ohne Länge
+            teile.append(daten[i : i + 2])
+            i += 2
+            continue
+        ende = i + 2 + int.from_bytes(daten[i + 2 : i + 4], "big")
+        if marker not in _JPEG_WEG:
+            teile.append(daten[i:ende])
+        i = ende
+    teile.append(daten[i:])
+    return b"".join(teile)
+
+
+#: Boxen, in denen ein MP4/MOV den Ort trägt: ``©xyz`` (Android, QuickTime), ``loci``
+#: (3GPP) und ``meta`` (Apple: ``com.apple.quicktime.location.ISO6709``)
+_MP4_ORT = {b"\xa9xyz", b"loci", b"meta"}
+#: Behälter, in die `mp4_ortsboxen` hineinsieht
+_MP4_BEHAELTER = {b"moov", b"trak", b"udta", b"mdia", b"minf"}
+
+
+def mp4_ortsboxen(daten: bytes, basis: int = 0) -> list[int]:
+    r"""Wo in einem MP4 eine Box mit Ortsangabe steht — der Versatz ihres Typs (ab
+    ``basis``). `data.anhaenge.mp4_ort_entfernen` schreibt dort ``free`` hinein: Die Größe
+    bleibt, also stimmen alle Versätze im Video (``stco``), und Spieler überspringen ``free``.
+
+    ``daten``: eine Folge von Boxen — die ganze Datei oder der Inhalt der ``moov``-Box.
+
+    >>> def box(typ, inhalt=b""):
+    ...     return (8 + len(inhalt)).to_bytes(4, "big") + typ + inhalt
+    >>> ort = box(b"\xa9xyz", b"+48.1+011.5/")
+    >>> moov = box(b"moov", box(b"udta", ort) + box(b"trak", box(b"udta", box(b"loci"))))
+    >>> datei = box(b"ftyp", b"isom") + moov + box(b"mdat", b"x")
+    >>> [datei[s : s + 4] for s in mp4_ortsboxen(datei)]
+    [b'\xa9xyz', b'loci']
+    >>> mp4_ortsboxen(box(b"ftyp") + b"\x00\x00")  # abgeschnitten: nichts erfunden
+    []
+    """
+    stellen: list[int] = []
+    i = 0
+    while i + 8 <= len(daten):
+        groesse = int.from_bytes(daten[i : i + 4], "big")
+        typ = daten[i + 4 : i + 8]
+        kopf = 8
+        if groesse == 1:  # 64-bit-Größe
+            if i + 16 > len(daten):
+                break
+            groesse = int.from_bytes(daten[i + 8 : i + 16], "big")
+            kopf = 16
+        elif groesse == 0:  # bis zum Ende
+            groesse = len(daten) - i
+        if groesse < kopf:
+            break  # kaputt — lieber nichts als Unsinn
+        if typ in _MP4_ORT:
+            stellen.append(basis + i + 4)
+        elif typ in _MP4_BEHAELTER:
+            ende = min(i + groesse, len(daten))
+            stellen += mp4_ortsboxen(daten[i + kopf : ende], basis + i + kopf)
+        i += groesse
+    return stellen
+
+
+# ---------------------------------------------------------------------------
 # Texte
 # ---------------------------------------------------------------------------
 
@@ -523,6 +666,7 @@ __all__ = [
     "BILD",
     "BLITZ",
     "ENDUNG",
+    "HOCHLADEN_VIDEO_MAX_S",
     "REIHE_MAX",
     "SETTING_QUALITAET",
     "SETTING_VIDEO_MAX",
@@ -537,6 +681,7 @@ __all__ = [
     "Monatsgruppe",
     "Qualitaet",
     "anzahl_text",
+    "art_der_datei",
     "aufraeumen_vorschlag",
     "blitz_text",
     "blitz_weiter",
@@ -544,9 +689,12 @@ __all__ = [
     "dateiname",
     "dauer_text",
     "fehlende",
+    "geschaetzte_bytes",
     "groesse_text",
     "im_zeitraum",
+    "jpeg_ohne_metadaten",
     "monatsgruppen",
+    "mp4_ortsboxen",
     "neuer_anhang",
     "relativer_pfad",
     "timer_text",

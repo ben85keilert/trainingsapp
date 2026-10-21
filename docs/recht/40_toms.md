@@ -58,6 +58,13 @@
   Hinaus nur über „Teilen“ am einzelnen Anhang nach Rückfrage.
   Drei Aufnahmequalitäten, mittlere als Vorgabe — Datensparsamkeit auch beim Speicherplatz;
   Speicherübersicht und endgültiges Löschen in Einstellungen → Anhänge.
+  **Hochladen** (seit 21.10.2026, P74): aus der Fotoauswahl von Android — keine
+  Berechtigung für Fotos oder Speicher, die App sieht nur die gewählte Datei. Verkleinert
+  auf die Qualitätsstufe (Videos höchstens zehn Minuten, feste Bitrate) und **ohne
+  Ortsangabe**: Die Erweiterung `flet_hochladen` schreibt Fotos ohne Exif und Videos ohne
+  Ort, die App prüft beides noch einmal (`jpeg_ohne_metadaten`, `mp4_ort_entfernen`). Die
+  Kopie der Auswahl (trägt den Ort des Originals) wird gleich nach dem Verkleinern gelöscht;
+  wird die App dabei beendet, bleibt sie app-privat im Cache, bis Android ihn leert.
 - **Bluetooth-Adresse des Sensors** (seit 20.10.2026, Sicherheitsdurchsicht S10): Die
   Messdatei auf dem Gerät hält die Adresse (MAC/UUID) des Brustgurts oder der Uhr fest,
   damit sich das Gerät wiedererkennen lässt. Sie ist eine Gerätekennung, über die sich

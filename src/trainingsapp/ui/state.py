@@ -313,6 +313,10 @@ class AppState:
     toene_geladen: bool = False
     #: Bildschirm anlassen, solange der Timer läuft (Flet-Dienst `Wakelock`)
     wach: Any = None
+    #: Hochladen (`flet_hochladen.FletHochladen`, nur in der gebauten App, P74) und wer den
+    #: Fortschritt des Verkleinerns gerade sehen will (die Seite „Hochladen“)
+    hochladen: Any = None
+    hochladen_beobachter: Callable[[float], None] | None = None
     #: GPS: Ortungsquelle (`devices.gps.GpsQuelle` — auf Android `FletGpsQuelle`,
     #: in `app.py` angelegt; sonst beim ersten Bedarf ein Simulator) und der
     #: laufende Vorabtest (`ui.views.gps_test.GpsTestLauf`) mit seinen Vorgaben

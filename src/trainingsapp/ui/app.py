@@ -81,6 +81,11 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
 from trainingsapp.ui.views.anhang import anhang_view
 from trainingsapp.ui.views.anhang_aufnahme import ARTEN, anhang_aufnahme_view, aufnahme_route
+from trainingsapp.ui.views.anhang_hochladen import (
+    HOCHLADEN,
+    anhang_hochladen_view,
+    hochladen_route,
+)
 from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view, verwaiste_dialog
 from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_anhaenge import einstellungen_anhaenge
@@ -389,6 +394,21 @@ def main(page: ft.Page) -> None:
         state.ton = FletTon()
         page.services.append(state.ton)
         page.run_task(toene_laden, state)
+    # Hochladen aus der Fotoauswahl (P74) ebenso — der Fortschritt geht an die Seite, die
+    # gerade zusieht (`AppState.hochladen_beobachter`)
+    try:
+        from flet_hochladen import FletHochladen
+        from flet_hochladen import verfuegbar as hochladen_verfuegbar
+    except ImportError:
+        hochladen_verfuegbar = None
+    if hochladen_verfuegbar is not None and hochladen_verfuegbar(page):
+
+        def fortschritt(e: Any) -> None:
+            if state.hochladen_beobachter is not None:
+                state.hochladen_beobachter(float(e.anteil))
+
+        state.hochladen = FletHochladen(on_fortschritt=fortschritt)
+        page.services.append(state.hochladen)
 
     #: Die Bauer der Ansichten, die `stapel` und seine Helfer für eine Route ablegen
     ablage: list[Callable[[], ft.View]] = []
@@ -460,8 +480,13 @@ def main(page: ft.Page) -> None:
 
     def anhang_routen(basis: str, rest: list[str]) -> None:
         """Fotos und Videos über jeder Ansicht (Ben, 19.10.2026; `views/anhang*.py`):
-        ``…/anhang/aufnehmen/<eintrag>/<foto|video>`` nimmt auf, ``…/anhang/<id>`` zeigt."""
-        if rest[:1] == ["aufnehmen"] and len(rest) >= 3:
+        ``…/anhang/aufnehmen/<eintrag>/<foto|video>`` nimmt auf, ``…/anhang/hochladen/<eintrag>``
+        nimmt eins aus der Fotoauswahl (P74), ``…/anhang/<id>`` zeigt."""
+        if rest[:1] == [HOCHLADEN] and len(rest) >= 2:
+            if (an := state.sitzungen.eintrag_laden(rest[1])) is not None:
+                route = hochladen_route(basis, an.id)
+                ablegen(lambda: anhang_hochladen_view(page, state, route, an))
+        elif rest[:1] == ["aufnehmen"] and len(rest) >= 3:
             eintrag = state.sitzungen.eintrag_laden(rest[1])
             art = ARTEN.get(rest[2])
             if eintrag is not None and art is not None:

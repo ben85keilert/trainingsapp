@@ -4,6 +4,7 @@ Profile und „zählt“, Starten, laufende Anzeige, „gemacht“ mit dem Einge
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -95,7 +96,9 @@ async def _bis_zum_ende(state, uhr, gurt, sekunden: int = 120) -> None:
     raise AssertionError("Die Einheit endete nicht")
 
 
-async def test_vorher_zaehlt_umschalten_speichert_in_der_uebung(umgebung) -> None:
+async def test_vorher_zeigt_abschnitte_und_zaehlt_fuer_jetzt(umgebung) -> None:
+    """P79 (Ben, 22.10.2026): Beim Üben gilt die Wahl für jetzt — „Zählt für Planke“ schaltet
+    nur diese Sitzung um; die Abschnitte zeigen „zählt“, geändert wird in der Übung."""
     state, _, _ = umgebung
     uebung = _planke(state)
     seite = Seite()
@@ -103,36 +106,43 @@ async def test_vorher_zaehlt_umschalten_speichert_in_der_uebung(umgebung) -> Non
     texte = _texte(ansicht)
     assert ansicht.appbar.title.value == "Timer · Planke" and "Halten 3 × 10 s" in texte
     assert "zählt: 0:45" in texte and "Laufzeit 0:45" in texte  # erst einmal zählt alles
-    # Die Pause zählt erst einmal mit — Tipp: zählt nicht; gespeichert in der Übung
-    zwei = [x for x in _alle(ansicht) if isinstance(x, ft.FilledButton) and x.content == "zählt"]
-    assert len(zwei) == 2
-    zwei[1].on_click()
-    gespeichert = state.uebungen.laden(uebung.id)
-    assert gespeichert is not None
-    (profil,) = profile_der_uebung(gespeichert)
-    assert [a.zaehlt for a in profil.abschnitte] == [True, False]
+    assert "Zählt für Planke" in texte and "ändern: in „Übung bearbeiten“" in texte
+    assert not [
+        x for x in _alle(ansicht) if isinstance(x, ft.FilledButton) and x.content == "zählt"
+    ]
+    schalter = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.Switch) and x.tooltip == "Timerzeit zählt"
+    )
+    assert schalter.value is True
+    schalter.on_change(SimpleNamespace(control=SimpleNamespace(value=False)))
+    assert state.uhr_zaehlt[uebung.id] is False  # für jetzt …
+    assert state.uebungen.laden(uebung.id).zeit_zaehlt is True  # … die Übung bleibt
+    ansicht = uebung_timer_view(seite, state, f"/uebung/{uebung.id}", uebung)
+    assert "nur „gemacht“ — für jetzt" in _texte(ansicht)
 
 
-async def test_im_plan_haelt_die_planuebung_die_wahl(umgebung) -> None:
+async def test_im_plan_gilt_die_wahl_fuer_jetzt(umgebung) -> None:
+    """Ein anderes Profil im Timer des Plans gilt für jetzt (wie das ▾ in der Leiste) — die
+    Planübung bleibt, wie sie ist; dauerhaft geht es in „Im Plan einstellen“ (P79)."""
     state, _, _ = umgebung
     uebung = _planke(state)
+    kurz = TimerProfil(id="kurz", name="Kurz", abschnitte=[Abschnitt("Halten", 5)])
+    uebung.timer = [*uebung.timer, kurz.als_dict()]
+    state.uebungen.speichern(uebung)
     plan = Plan(name="Rumpf", subject_id=state.profil.id, items=[PlanItem(exercise_id=uebung.id)])
     state.plaene.speichern(plan)
     gespeichert = state.plaene.laden(plan.id)
     assert gespeichert is not None
     item = gespeichert.items[0]
     ansicht = uebung_timer_view(Seite(), state, f"/plan/{plan.id}", uebung, gespeichert, item)
-    [x for x in _alle(ansicht) if isinstance(x, ft.FilledButton) and x.content == "zählt"][
-        1
-    ].on_click()
-    wieder = state.plaene.item_laden(item.id)
-    assert wieder is not None
-    wahl = TimerWahl.aus_dict(wieder.timer)
-    assert wahl.eigen is not None and [a.zaehlt for a in wahl.eigen.abschnitte] == [True, False]
-    # Die Übung selbst bleibt, wie sie ist
-    katalog = state.uebungen.laden(uebung.id)
-    assert katalog is not None
-    assert [a.zaehlt for a in profile_der_uebung(katalog)[0].abschnitte] == [True, True]
+    chip = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Chip) and isinstance(x.label, ft.Text) and x.label.value == "Kurz"
+    )
+    chip.on_select()
+    assert state.uhr_wahl[item.id] == "kurz"
+    assert state.plaene.item_laden(item.id).timer == {}
 
 
 async def test_starten_laufen_fertig_gemacht(umgebung) -> None:
@@ -308,7 +318,7 @@ async def test_formular_timer_reihenfolge_bibliothek_entfernen(formular) -> None
     seite = Seite()
     ansicht = uebung_bearbeiten(seite, state, uebung)
     texte = _texte(ansicht)
-    assert "TIMER" in texte and "Halten · Vorgabe" in texte and "Kurz" in texte
+    assert "UHR UND TIMER" in texte and "Halten · Vorgabe" in texte and "Kurz" in texte
     _symbolknopf(ansicht, ft.Icons.ARROW_UPWARD).on_click()  # „Kurz“ nach oben
     assert "Kurz · Vorgabe" in _texte(ansicht)
     _knopf(ansicht, "Timer hinzufügen").on_click()
@@ -398,30 +408,33 @@ def test_formular_ohne_eigenes_profil_nennt_die_timer_regel(tmp_path) -> None:
         state.schliessen()
 
 
-async def test_vom_timer_unter_heute_geleistet_und_in_den_leistungen(umgebung) -> None:
-    """A13 (Skizze 12): Ein Eintrag vom Timer steht unter „Heute geleistet“ mit „vom Timer,
-    10:07“; die Seite „Leistungen“ zeigt Anfang und Ende des Laufs."""
-    from trainingsapp.core.timer_eintrag import vom_timer_text
-    from trainingsapp.ui.views.leistungen import leistungen_view
+async def test_timerlauf_sammelt_im_offenen_eintrag(umgebung) -> None:
+    """P79 D1 (Ben, 22.10.2026): „Wenn der Timer in der Übung Zeit sammelt … sollte im letzten
+    aktiven Eintrag gesammelt werden“ — zwei Läufe, ein offener Eintrag mit allen Sätzen."""
     from trainingsapp.ui.views.plan import plan_view
 
     state, uhr, gurt = umgebung
-    uebung = _planke(state)
+    uebung = _planke(state, pause_zaehlt=False)
     plan = Plan(name="Rumpf", subject_id=state.profil.id, items=[PlanItem(exercise_id=uebung.id)])
     state.plaene.speichern(plan)
     gespeichert = state.plaene.laden(plan.id)
     assert gespeichert is not None
     item = gespeichert.items[0]
     basis = f"/plan/{plan.id}"
-    assert not any("vom Timer" in t for t in _texte(plan_view(Seite(), state, gespeichert)))
-    _knopf(
-        uebung_timer_view(Seite(), state, basis, uebung, gespeichert, item), "Starten"
-    ).on_click()
-    await _bis_zum_ende(state, uhr, gurt)
-    (eintrag,) = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
-    assert eintrag.started_at is not None and eintrag.ended_at is not None
-    erwartet = vom_timer_text([eintrag.started_at])
-    assert erwartet in _texte(plan_view(Seite(), state, gespeichert))
-    seite = leistungen_view(Seite(), state, f"{basis}/leistungen/{uebung.id}", uebung)
-    von, bis = eintrag.started_at.astimezone(), eintrag.ended_at.astimezone()
-    assert any(f"{von:%H:%M}–{bis:%H:%M} Uhr · vom Timer" in t for t in _texte(seite))
+    for _ in range(2):
+        _knopf(
+            uebung_timer_view(Seite(), state, basis, uebung, gespeichert, item), "Starten"
+        ).on_click()
+        await _bis_zum_ende(state, uhr, gurt)
+        await ruhe()
+
+    def eintraege() -> list:
+        return [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
+
+    for _ in range(300):  # das Eintragen folgt dem Ende der Einheit im nächsten Takt
+        if [e.result for e in eintraege()] == [{"hold": [10] * 6}]:
+            break
+        await asyncio.sleep(0.01)
+    (eintrag,) = eintraege()
+    assert eintrag.ended_at is None and eintrag.result == {"hold": [10] * 6}
+    assert any("OFFEN" in t for t in _texte(plan_view(Seite(), state, gespeichert)))

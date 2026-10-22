@@ -36,6 +36,10 @@ def eintrag_view(page: ft.Page, state: AppState, eintrag: SessionEntry, basis: s
     async def korrigieren() -> None:
         await page.push_route(f"{basis}/eintrag/{eintrag.id}/korrigieren")
 
+    async def uebung_ansehen() -> None:
+        """Das i führt zur Übungsseite, wie überall (Ben, 22.10.2026, P79)."""
+        await page.push_route(f"/uebung/{eintrag.exercise_id}")
+
     def loeschen_fragen() -> None:
         page.show_dialog(dialog)
 
@@ -67,6 +71,15 @@ def eintrag_view(page: ft.Page, state: AppState, eintrag: SessionEntry, basis: s
         appbar=ft.AppBar(
             title=ft.Text(uebung.name if uebung else "Eintrag"),
             actions=[
+                *(
+                    [
+                        ft.IconButton(
+                            ft.Icons.INFO_OUTLINE, tooltip="Übung ansehen", on_click=uebung_ansehen
+                        )
+                    ]
+                    if uebung is not None
+                    else []
+                ),
                 ft.IconButton(ft.Icons.EDIT_OUTLINED, tooltip="Korrigieren", on_click=korrigieren),
                 ft.IconButton(ft.Icons.DELETE_OUTLINE, tooltip="Löschen", on_click=loeschen_fragen),
             ],

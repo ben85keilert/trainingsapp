@@ -77,6 +77,10 @@ def plan_hinzufuegen_view(
     async def fertig() -> None:
         await page.push_route(basis)
 
+    async def neue_uebung() -> None:
+        """„Neue Übung anlegen“ (Ben, 22.10.2026, P79) — danach steht sie gleich im Plan."""
+        await page.push_route(f"{basis}/hinzufuegen/neu")
+
     # Typ | Region (Ben, 14.10.2026): zwei Kästen unter der Suche, Mehrfachauswahl
     # mit „Akzeptieren“ / „Liste leeren“ (`ui/components/tagwahl.py`). Die Wahl
     # liegt im AppState und übersteht so das Hin und Her zwischen Plan und Liste.
@@ -123,6 +127,12 @@ def plan_hinzufuegen_view(
                             content=tagwahl.control,
                         ),
                         liste,
+                        ft.Container(
+                            padding=ft.Padding.only(left=8, right=16, bottom=8),
+                            content=ft.TextButton(
+                                "Neue Übung anlegen", icon=ft.Icons.ADD, on_click=neue_uebung
+                            ),
+                        ),
                     ],
                 )
             )

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from .models import Exercise, Plan
 from .standards import aktive_felder
 from .timer import TimerProfil, dauer_text
-from .uebung_timer import TimerWahl, timer_fuer, uhr_an, zaehlt_als
+from .uebung_timer import timer_fuer, uhr_an, zaehlt_als
 
 
 @dataclass(frozen=True)
@@ -68,11 +68,11 @@ def schritte_fuer(plan: Plan, katalog: Mapping[str, Exercise]) -> list[Schritt]:
         uebung = katalog.get(item.exercise_id)
         if uebung is None:
             continue
-        wahl = TimerWahl.aus_dict(item.timer)
         felder = [f.key for f in aktive_felder(item, uebung)]
         profil = timer_fuer(uebung, plan, item)
-        zaehlt = wahl.zeit_eintragen and (profil is not None or uhr_an(uebung, item))
-        feld = zaehlt_als(felder, uebung, item) if zaehlt else None
+        # Ob die Zeit zählt, legt die Übung fest (P79 D2)
+        zaehlt = uebung.zeit_zaehlt and (profil is not None or uhr_an(uebung, item))
+        feld = zaehlt_als(felder, uebung) if zaehlt else None
         schritte.append(Schritt(item.id, uebung.id, uebung.name, profil, feld))
     return schritte
 

@@ -412,7 +412,8 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
     _werte_pruefen(limit_spec, "limit_spec")
     default_target = _objekt(eintrag.get("default_target", {}), "default_target")
     _werte_pruefen(default_target, "default_target")
-    felder = eintrag.get("default_felder")
+    # „default_felder“ (Planparameter) wird überlesen: Was die Übung hat, bieten alle Pläne an
+    # (Ben, 22.10.2026, P79 C2) — kein Paket nutzte es
     variante = str(eintrag.get("variante_von") or "").strip()
     uid = _id_lesen(eintrag.get("id"), "der Übung") or uebung_id(paket, key or name)
     return (
@@ -425,7 +426,6 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             result_spec=spec,
             limit_spec=limit_spec,
             default_target=default_target,
-            default_felder=None if felder is None else _texte(felder, "default_felder"),
             media=[
                 m
                 for m in (_medium(d) for d in _liste(eintrag.get("media", []), "media"))
@@ -621,8 +621,6 @@ def stand(u: Exercise) -> dict[str, Any]:
         d["zaehlt_als"] = u.zaehlt_als
     if u.default_target:
         d["default_target"] = u.default_target
-    if u.default_felder is not None:
-        d["default_felder"] = list(u.default_felder)
     medien = [
         {
             "kind": str(m.kind),
@@ -664,13 +662,12 @@ FELDNAMEN: dict[str, str] = {
     "regionen": "Regionen",
     "result_spec": "Parameter",
     "default_target": "Ziel",
-    "default_felder": "Planparameter",
     "limit_spec": "Limits",
     "timer": "Timer",
     "uhr": "Uhr",
     "zaehlt_als": "Zählt als",
     "media": "Videos",
-    "variante_von": "Variante",
+    "variante_von": "Im Verlauf zusammen mit",
 }
 
 

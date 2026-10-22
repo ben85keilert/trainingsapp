@@ -96,33 +96,56 @@ def _uebung(state: AppState) -> Exercise:
     return state.uebungen.laden(u.id)
 
 
+def _sichtbar(c):
+    """Wie `_alle`, aber ohne Ausgeblendetes (abgeschaltete Parameter im Formular)."""
+    if not getattr(c, "visible", True):
+        return
+    yield c
+    for name in ("content", "controls", "title", "label", "appbar", "actions"):
+        kind = getattr(c, name, None)
+        for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
+            if isinstance(k, ft.Control):
+                yield from _sichtbar(k)
+
+
+def _chip(wurzel, text: str, *, gewaehlt: bool) -> ft.Chip:
+    return next(
+        x
+        for x in _sichtbar(wurzel)
+        if isinstance(x, ft.Chip) and _texte(x.label) == [text] and bool(x.selected) == gewaehlt
+    )
+
+
 def test_leere_chips_bleiben_leer_und_saetze_lassen_sich_ausschalten(page, state) -> None:
+    """Chips tippt man an wie in der Planübung (Ben, 22.10.2026, P79) — keiner angetippt heißt
+    keine Chips, nur das freie Feld (Ben, 18.10.2026: „leer heißt leer“)."""
     u = _uebung(state)
     assert u.result_spec.fields[0].quick == [10, 15, 20]
     ansicht = uebung_bearbeiten(page, state, u)
-    chips = next(
-        x
-        for x in _alle(ansicht)
-        if isinstance(x, ft.TextField) and x.label == "Chips (mit Komma)" and x.visible
-    )
     saetze = _saetze_chip(ansicht)
     assert saetze.selected  # Sätze an — wie bisher
-    chips.value = "0"
+    for wert in ("10", "15", "20"):  # nach jedem Tipp neu gezeichnet
+        _chip(ansicht, wert, gewaehlt=True).on_select()
     saetze.on_select()
     assert not saetze.selected
     asyncio.run(_knopf(ansicht, "Speichern").on_click())
     feld = state.uebungen.laden(u.id).result_spec.fields[0]
     assert feld.quick == [] and feld.saetze is False
-    # Ein zweites Mal: leer bleibt leer, die Sätze bleiben aus
+    # Ein zweites Mal: leer bleibt leer (die Chips stehen zur Wahl, keiner angetippt)
     ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(u.id))
-    chips = next(
-        x
-        for x in _alle(ansicht)
-        if isinstance(x, ft.TextField) and x.label == "Chips (mit Komma)" and x.visible
-    )
-    assert chips.value == ""
+    assert _chip(ansicht, "15", gewaehlt=False)
     asyncio.run(_knopf(ansicht, "Speichern").on_click())
     assert state.uebungen.laden(u.id).result_spec.fields[0].quick == []
+    # Antippen und ein eigener Wert kommen dazu
+    ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(u.id))
+    _chip(ansicht, "15", gewaehlt=False).on_select()
+    eigener = next(
+        x for x in _sichtbar(ansicht) if isinstance(x, ft.TextField) and x.hint_text == "eigener"
+    )
+    eigener.value = "12"
+    eigener.on_submit(None)
+    asyncio.run(_knopf(ansicht, "Speichern").on_click())
+    assert state.uebungen.laden(u.id).result_spec.fields[0].quick == [12, 15]
 
 
 def test_ohne_saetze_eine_zahl_im_plan_und_im_formular(page, state) -> None:
@@ -137,7 +160,8 @@ def test_ohne_saetze_eine_zahl_im_plan_und_im_formular(page, state) -> None:
     ansicht = plan_view(page, state, state.plaene.laden(plan.id))
     felder = [x for x in _alle(ansicht) if isinstance(x, ft.TextField)]
     assert not [f for f in felder if f.label == "Sätze"]  # keine Sätze …
-    assert not [x for x in _alle(ansicht) if isinstance(x, ft.Chip)]  # … und keine Chips
+    chips = [x for x in _alle(ansicht) if isinstance(x, ft.Chip)]
+    assert not [x for x in chips if not (x.tooltip or "").startswith("Timerzeit")]  # … keine
     (wert,) = [f for f in felder if f.label == "Wdh."]
     wert.value = "263"
     _knopf(ansicht, "Eintragen").on_click()

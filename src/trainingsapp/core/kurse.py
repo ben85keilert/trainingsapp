@@ -495,7 +495,8 @@ def plan_aus_vorlage(
                 plan_id=plan.id,
                 exercise_id=item.exercise_id,
                 order=nr,
-                target=dict(item.target),
+                # Ohne Ziel in der Vorlage folgt die Planübung der Übung (P79)
+                target=dict(item.target) if item.target else None,
                 felder=None if item.felder is None else list(item.felder),
             )
         )

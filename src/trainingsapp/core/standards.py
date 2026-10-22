@@ -1,25 +1,25 @@
-"""Standard der Übung ↔ Planübung: Änderungen gezielt hin- und herschieben.
+"""Übung ↔ Planübung: Die Planübung folgt der Übung, bis man im Plan etwas ändert (P79).
 
-Die Übung hat einen Standard für Pläne — Ziel, Parameter (welche Felder der
-Plan anbietet; keiner = nur abhaken), Chips je Feld.
-Nimmt ein Plan die Übung auf, übernimmt die Planübung diesen Standard
-(`PlanRepo.uebung_hinzufuegen`). Danach sind beide unabhängig: Wer im Plan
-nachjustiert, ändert nicht stillschweigend jede andere Verwendung.
+Ben, 22.10.2026 (`docs/plan_uebungen_einstellen.md`): Beim Aufnehmen wird nichts kopiert. Was
+die Planübung nicht selbst festlegt, gilt **wie die Übung** — Ziel (``target is None``,
+`ziel_von`), Parameter (``felder is None`` = alle der Übung; Ben: „Was in der Orginalübung steht
+wird überall angeboten, sonst muss Planübung geändert werden“), Chips (fehlender Schlüssel in
+``quick``), Varianten, Uhr und Timer (leere `TimerWahl`). Was sie festlegt, gilt **nur hier**.
 
-Weil sich Übung und Plan aber gegenseitig befruchten — die Durchführung
-verändert den Blick auf die Übung —, gibt es zwei ausdrückliche Wege:
+Zwei ausdrückliche Wege bleiben, weil sich Übung und Plan gegenseitig befruchten:
 
-- `als_standard`: Planübung → Standard der Übung („Als Standard setzen")
-- `vom_standard`: Standard der Übung → Planübung („Standard übernehmen")
+- `als_standard`: Planübung → Übung („In die Übung übernehmen …“; `uebernehmen_vorschau` sagt
+  vorher, was sich ändert und welche Pläne es mitbekommen)
+- `vom_standard`: zurück zur Übung („Alles wie die Übung“)
 
-`abweichungen` sagt, ob und worin die beiden auseinanderliegen.
+`abweichungen` sagt, worin die Planübung anders ist — am Wert gemessen, Uhr und Timer
+eingeschlossen; `bereinigt` lässt beim Speichern folgen, was der Übung gleicht.
 
-**Die Planübung darf mehr können als die Übung** (Ben, 14.10.2026): Beim Üben
-holt man über das i-Symbol jeden Parameter heran — auch einen aus dem
-Feldvorrat, den die Übung gar nicht hat (Gewicht bei Liegestützen). Sein
-Schlüssel steht nur in ``PlanItem.felder``; `plan_spec` ergänzt die Spec der
-Übung um ihn. Einträge speichern diese erweiterte Spec als Kopie, also stimmen
-Anzeige und Verlauf. In die Übung gelangt das Feld erst mit `als_standard`.
+**Die Planübung darf mehr können als die Übung** (Ben, 14.10.2026): Im Plan holt man jeden
+Parameter heran — auch einen aus dem Feldvorrat, den die Übung gar nicht hat (Gewicht bei
+Liegestützen). Sein Schlüssel steht nur in ``PlanItem.felder``; `plan_spec` ergänzt die Spec
+der Übung um ihn. Einträge speichern diese erweiterte Spec als Kopie, also stimmen Anzeige und
+Verlauf. In die Übung gelangt das Feld erst mit `als_standard`.
 
 **Varianten** (Ben, 21.10.2026, `core.varianten`) gehören der Übung, nicht dem Plan: Hat
 die Übung welche, zeigt **jede** Planübung sie — auch mit eigener Parameterwahl und bei „nur
@@ -32,6 +32,7 @@ der Aufrufer.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -47,6 +48,8 @@ from .result_spec import (
     skala_werte,
     vorrat_feld,
 )
+from .timer import STOPPUHR
+from .uebung_timer import TimerWahl, profile_der_uebung
 from .varianten import VARIANTE, ist_variante
 from .varianten import feld as varianten_feld
 
@@ -77,6 +80,18 @@ def ziel_bereinigen(werte: dict[str, Any], spec: ResultSpec) -> dict[str, Any]:
     """
     keys = {f.key for f in spec.fields}
     return {k: v for k, v in werte.items() if k in keys and not ist_leer(v)}
+
+
+def ziel_von(item: PlanItem, uebung: Exercise) -> dict[str, Any]:
+    """Das Ziel, das in der Planübung gilt: ihr eigenes, sonst das der Übung (P79, B1).
+
+    >>> u = Exercise(default_target={"hold": [45, 45]})
+    >>> ziel_von(PlanItem(), u), ziel_von(PlanItem(target={"hold": [30]}), u)
+    ({'hold': [45, 45]}, {'hold': [30]})
+    >>> ziel_von(PlanItem(target={}), u)  # ausdrücklich kein Ziel
+    {}
+    """
+    return dict(uebung.default_target if item.target is None else item.target)
 
 
 def zusatzfelder(item: PlanItem, uebung: Exercise) -> list[FieldSpec]:
@@ -182,7 +197,7 @@ def aktive_felder(item: PlanItem, uebung: Exercise) -> list[FieldSpec]:
     []
     """
     spec = plan_spec(item, uebung)
-    felder = gewaehlte_felder(spec, item.felder, uebung.default_felder)
+    felder = gewaehlte_felder(spec, item.felder)
     variante = varianten_feld(spec)
     if variante is not None and variante.quick and varianten_an(item):
         return [variante, *felder]
@@ -232,29 +247,31 @@ def eigene_chips(item: PlanItem, uebung: Exercise) -> dict[str, list]:
 
 
 def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
-    """Worin die Planübung vom Standard der Übung abweicht — leer = gleich.
+    """Worin die Planübung anders ist als die Übung — leer heißt „wie die Übung“ (P79).
+
+    Am Wert gemessen: Ein eigenes Ziel, das dem der Übung gleicht, weicht nicht ab. Uhr und
+    Timer zählen mit (B2).
 
     >>> from trainingsapp.core.result_spec import vorrat_feld
     >>> u = Exercise(default_target={"reps": [15, 15]},
     ...              result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("scale")]))
-    >>> abweichungen(PlanItem(target={"reps": [15, 15]}), u)
-    []
+    >>> abweichungen(PlanItem(), u), abweichungen(PlanItem(target={"reps": [15, 15]}), u)
+    ([], [])
     >>> abweichungen(PlanItem(target={"reps": [20]}, felder=["reps"], quick={"reps": []}), u)
     ['Ziel', 'Parameter', 'Chips Wiederholungen']
-    >>> abweichungen(PlanItem(target={"reps": [15, 15]}, felder=["reps", "scale", "weight"]), u)
+    >>> abweichungen(PlanItem(felder=["reps", "scale", "weight"]), u)
     ['Parameter']
+    >>> abweichungen(PlanItem(timer={"uhr": False, "profil": "p1"}), u)
+    ['Uhr', 'Timer']
     >>> from trainingsapp.core.varianten import Variante, mit_varianten
     >>> v = replace(u, result_spec=mit_varianten(u.result_spec, [Variante("kurz")]))
-    >>> abweichungen(PlanItem(target={"reps": [15, 15]}), v)
-    []
-    >>> abweichungen(varianten_schalten(PlanItem(target={"reps": [15, 15]}), False), v)
-    ['Varianten aus']
+    >>> abweichungen(PlanItem(), v), abweichungen(varianten_schalten(PlanItem(), False), v)
+    ([], ['Varianten aus'])
     """
     teile = []
-    if dict(item.target) != dict(uebung.default_target):
+    if ziel_von(item, uebung) != dict(uebung.default_target):
         teile.append("Ziel")
-    standard = gewaehlte_felder(uebung.result_spec, uebung.default_felder)
-    if [f for f in aktive_felder(item, uebung) if not ist_variante(f)] != standard:
+    if parameter_keys(item, uebung) != [f.key for f in gewaehlte_felder(uebung.result_spec, None)]:
         teile.append("Parameter")
     spec = plan_spec(item, uebung)
     teile.extend(
@@ -264,63 +281,164 @@ def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
     )
     if varianten_feld(spec) is not None and not varianten_an(item):
         teile.append("Varianten aus")
+    wahl = TimerWahl.aus_dict(item.timer)
+    if wahl.uhr is not None:
+        teile.append("Uhr")
+    if wahl.profil_id or wahl.eigen is not None:
+        teile.append("Timer")
     return teile
 
 
+def bereinigt(item: PlanItem, uebung: Exercise) -> PlanItem:
+    """Was der Übung gleicht, folgt ihr wieder — so speichert „Im Plan einstellen“ (P79).
+
+    Ein Ziel wie das der Übung wird ``None``, alle Parameter der Übung werden ``None``, Chips
+    wie die der Übung fallen aus ``quick``. Der Variantenschalter und die Timer-Wahl bleiben.
+
+    >>> from trainingsapp.core.result_spec import vorrat_feld
+    >>> u = Exercise(default_target={"reps": [15]},
+    ...              result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
+    >>> gleich = PlanItem(target={"reps": [15]}, felder=["reps"], quick={"reps": [10, 15, 20]})
+    >>> b = bereinigt(gleich, u)
+    >>> b.target, b.felder, b.quick
+    (None, None, {})
+    >>> bereinigt(PlanItem(target={"reps": [20]}, felder=[]), u).target
+    {'reps': [20]}
+    """
+    ziel = (
+        None
+        if item.target is None or dict(item.target) == dict(uebung.default_target)
+        else dict(item.target)
+    )
+    alle = [f.key for f in gewaehlte_felder(uebung.result_spec, None)]
+    felder = None if item.felder is None or parameter_keys(item, uebung) == alle else item.felder
+    chips = eigene_chips(item, uebung)
+    quick = {k: list(v) for k, v in item.quick.items() if k in chips or k == VARIANTE}
+    return replace(
+        item, target=ziel, felder=felder, input_mode=modus_aus_felder(felder), quick=quick
+    )
+
+
 def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
-    """Die Planübung wird zum Standard der Übung — Chips wandern in die Felder.
+    """Die Planübung wird zur Übung („In die Übung übernehmen …“) — sie gilt dann in jedem
+    Plan, der der Übung folgt (P79).
 
-    Zusatzfelder (aus dem Feldvorrat geholt) werden dabei Felder der Übung.
+    Es wandern: das Ziel, die Parameter (geholte werden Felder der Übung, abgeschaltete fallen
+    weg — was die Übung hat, bieten alle Pläne an), die Chips, die Uhr und ein im Plan gewählter
+    Timer (wird Vorgabe, eine eigene Kopie kommt dazu). Die Varianten bleiben, wie sie sind:
+    Sie gehören der Übung.
 
-    >>> u0 = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
-    >>> u = als_standard(PlanItem(target={"reps": [20]}, felder=[], quick={"reps": [5]}), u0)
-    >>> u.default_target, u.default_felder, u.default_input_mode, u.result_spec.fields[0].quick
-    ({'reps': [20]}, [], 'haken', [5])
-    >>> u = als_standard(PlanItem(felder=["reps", "weight"], quick={"weight": [8]}), u0)
-    >>> [(f.key, f.quick) for f in u.result_spec.fields], u.default_felder
-    ([('reps', [10, 15, 20]), ('weight', [8])], ['reps', 'weight'])
+    >>> u0 = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("hold")]))
+    >>> u = als_standard(PlanItem(target={"reps": [20]}, felder=["reps"], quick={"reps": [5]}), u0)
+    >>> u.default_target, [(f.key, f.quick) for f in u.result_spec.fields]
+    ({'reps': [20]}, [('reps', [5])])
+    >>> u = als_standard(PlanItem(felder=["reps", "hold", "weight"], quick={"weight": [8]}), u0)
+    >>> [(f.key, f.quick) for f in u.result_spec.fields]
+    [('reps', [10, 15, 20]), ('hold', [15, 30, 45, 60]), ('weight', [8])]
+    >>> als_standard(PlanItem(timer={"uhr": False}), u0).uhr
+    False
     """
     chips = eigene_chips(item, uebung)
     spec = plan_spec(item, uebung)
+    behalten = set(parameter_keys(item, uebung))
+    weg = (
+        {f.key for f in gewaehlte_felder(spec, None)} - behalten
+        if item.felder is not None
+        else set()
+    )
     felder = [
         replace(f, quick=chips_sortiert(list(chips[f.key]))) if f.key in chips else f
         for f in spec.fields
+        if f.key not in weg
     ]
-    # Die Variante ist kein Parameter: Sie wandert weder in die Parameter der Übung, noch
-    # nimmt ein abgeschalteter Variantenbereich der Übung ihre Varianten
-    gewaehlt = None if item.felder is None else parameter_keys(item, uebung)
+    wahl = TimerWahl.aus_dict(item.timer)
+    profile = list(uebung.timer)
+    if wahl.eigen is not None:
+        profile = [wahl.eigen.als_dict(), *(p for p in profile if p.get("id") != wahl.eigen.id)]
+    elif wahl.profil_id and wahl.profil_id != STOPPUHR:
+        gewaehlt = [p for p in profile if p.get("id") == wahl.profil_id]
+        profile = [*gewaehlt, *(p for p in profile if p.get("id") != wahl.profil_id)]
     return replace(
         uebung,
-        default_target=dict(item.target),
-        default_felder=gewaehlt if gewaehlt is not None else uebung.default_felder,
-        default_input_mode=modus_aus_felder(
-            gewaehlt if gewaehlt is not None else uebung.default_felder
-        ),
+        default_target=ziel_von(item, uebung),
+        default_input_mode=modus_aus_felder(None),
         result_spec=replace(spec, fields=felder),
         media=list(uebung.media),
         typen=list(uebung.typen),
         regionen=list(uebung.regionen),
+        timer=profile,
+        uhr=uebung.uhr if wahl.uhr is None else wahl.uhr,
     )
 
 
 def vom_standard(uebung: Exercise, item: PlanItem) -> PlanItem:
-    """Die Planübung übernimmt wieder den Standard der Übung („zurücksetzen").
+    """Alles wie die Übung („Alles wie die Übung“, P79): Ziel, Parameter, Chips, Varianten,
+    Uhr und Timer folgen wieder der Übung. Zusatzfelder fallen dabei weg — sie stehen nur in
+    ``felder``.
 
-    Zusatzfelder fallen dabei weg — sie stehen nur in ``felder``.
-
-    >>> u = Exercise(default_target={"hold": [30]}, default_felder=[])
-    >>> alt = PlanItem(target={"hold": [60]}, quick={"hold": [10]}, felder=["hold"])
-    >>> neu = vom_standard(u, alt)
-    >>> neu.target, neu.felder, neu.quick, neu.input_mode
-    ({'hold': [30]}, None, {}, 'haken')
+    >>> alt = PlanItem(target={"hold": [60]}, quick={"hold": [10]}, felder=["hold"],
+    ...                timer={"uhr": False})
+    >>> neu = vom_standard(Exercise(default_target={"hold": [30]}), alt)
+    >>> neu.target, neu.felder, neu.quick, neu.timer, neu.input_mode
+    (None, None, {}, {}, 'chips')
     """
     return replace(
-        item,
-        target=dict(uebung.default_target),
-        felder=None,
-        input_mode=modus_aus_felder(uebung.default_felder),
-        quick={},
+        item, target=None, felder=None, input_mode=modus_aus_felder(None), quick={}, timer={}
     )
+
+
+def uebernehmen_vorschau(
+    item: PlanItem, uebung: Exercise, andere: Sequence[tuple[str, PlanItem]] = ()
+) -> tuple[list[str], list[str], list[str]]:
+    """Was „In die Übung übernehmen“ ändert — und wen es trifft (P79, Skizze B4).
+
+    Gibt drei Listen zurück: die Änderungen an der Übung, die anderen Pläne, die ihr ganz folgen
+    (sie bekommen alles mit), und die mit eigenen Einstellungen (die bleiben, der Rest kommt
+    an). ``andere``: Planname und Planübung derselben Übung in anderen Plänen.
+
+    >>> u = Exercise(default_target={"hold": [45, 45, 45]},
+    ...              result_spec=ResultSpec(fields=[vorrat_feld("hold")]))
+    >>> hier = PlanItem(target={"hold": [30, 30, 30]}, felder=["hold", "weight"])
+    >>> aenderungen, folgen, eigene = uebernehmen_vorschau(
+    ...     hier, u, [("Morgens", PlanItem()), ("Reha", PlanItem(target={"hold": [20]}))])
+    >>> aenderungen
+    ['Ziel 3x30s statt 3x45s', 'Gewicht kommt dazu']
+    >>> folgen, eigene
+    (['Morgens'], ['Reha – Ziel'])
+    """
+    neu = als_standard(item, uebung)
+    aenderungen: list[str] = []
+    if neu.default_target != dict(uebung.default_target):
+        if not neu.default_target:
+            aenderungen.append("kein Ziel mehr")
+        elif uebung.default_target:
+            aenderungen.append(
+                f"Ziel {neu.result_spec.format_shorthand(neu.default_target)} statt "
+                f"{uebung.result_spec.format_shorthand(uebung.default_target)}"
+            )
+        else:
+            aenderungen.append(f"Ziel {neu.result_spec.format_shorthand(neu.default_target)}")
+    vorher = {f.key: f for f in uebung.result_spec.fields}
+    nachher = {f.key: f for f in neu.result_spec.fields}
+    aenderungen += [f"{f.label} kommt dazu" for k, f in nachher.items() if k not in vorher]
+    aenderungen += [f"{f.label} fällt weg" for k, f in vorher.items() if k not in nachher]
+    aenderungen += [
+        f"Chips {f.label}: " + " · ".join(str(w) for w in f.quick)
+        for k, f in nachher.items()
+        if k in vorher and list(f.quick) != list(vorher[k].quick)
+    ]
+    if neu.uhr != uebung.uhr:
+        aenderungen.append("Uhr an" if neu.uhr else "Uhr aus")
+    if neu.timer[:1] != list(uebung.timer)[:1] and (erstes := profile_der_uebung(neu)):
+        aenderungen.append(f"Timer „{erstes[0].name}“ wird Vorgabe")
+    folgen: list[str] = []
+    eigene: list[str] = []
+    for name, anderes in andere:
+        if eigenes := abweichungen(anderes, uebung):
+            eigene.append(f"{name} – {', '.join(eigenes)}")
+        else:
+            folgen.append(name)
+    return aenderungen, folgen, eigene
 
 
 __all__ = [
@@ -328,16 +446,19 @@ __all__ = [
     "aktive_felder",
     "aktive_keys",
     "als_standard",
+    "bereinigt",
     "chips_fuer",
     "eigene_chips",
     "mit_plan_spec",
     "parameter_keys",
     "plan_spec",
+    "uebernehmen_vorschau",
     "varianten_an",
     "varianten_schalten",
     "vom_standard",
     "waehlbare_felder",
     "ziel_bereinigen",
     "ziel_spec",
+    "ziel_von",
     "zusatzfelder",
 ]

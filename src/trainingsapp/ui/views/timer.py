@@ -77,6 +77,7 @@ from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.timer_takt import ticker_starten, toene_laden, ton_spielen, wach_setzen
@@ -322,6 +323,27 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         lauf.start()
         ticker_starten(page, state)
         auffrischen()
+
+    def zeit_gestellt(sekunden: int) -> None:
+        """Ein Tipp auf die Zeit (Ben, 22.10.2026, P79 D4): Timer ohne Ablauf stellen und gleich
+        starten — wie in der Android-Uhr; aus der Stoppuhr wird dabei der Timer."""
+        name = profil.name if profil.ist_einmal else ""
+        neu = einmal_timer(sekunden, name, name_in_marken=profil.name_in_marken)
+        state.timer_einmal_setzen(neu)
+        state.timer_profil_waehlen(EINMAL)
+        if not einheit_ui.besitzt_timer(state, state.timer):
+            state.timer = None
+        neuer = lauf_fuer(state, neu)
+        if einheit_ui.einzeln_starten(page, state, TimerBaustein(neuer)) is None:
+            neuer.start()
+            ticker_starten(page, state)
+        state.neu_zeichnen()
+
+    def zeit_stellen() -> None:
+        if laufend:
+            return
+        vorher = 60 if profil.ist_stoppuhr else profil.gesamt_s()
+        page.show_dialog(zeit_blatt(vorher, starten=zeit_gestellt, untertitel="ohne Ablauf"))
 
     def bereitstellen() -> None:
         """Auf den gemeinsamen Start warten (Ben, 17.10.2026) — oder wieder heraus."""
@@ -613,8 +635,9 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         ablauf_karte = karte(
             kartentitel("So zählt er"),
             hinweis(
-                "Er zählt die Dauer rückwärts und meldet sich am Ende. In einer laufenden "
-                "HRV-Messung setzt er Marken, eine laufende Einheit nimmt ihn auf."
+                "Er zählt die Dauer rückwärts und meldet sich am Ende. Für sich gestartet zählt "
+                "er für keine Übung — in einer laufenden HRV-Messung setzt er Marken, eine "
+                "laufende Einheit nimmt ihn auf. Ein Tipp auf die Zeit stellt sie neu."
             ),
         )
     else:
@@ -626,7 +649,13 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             *wahl,
             karte(
                 abschnitt_text,
-                zeit_text,
+                # Ein Tipp auf die Zeit stellt einen Timer ohne Ablauf (P79 D4)
+                ft.Container(
+                    content=zeit_text,
+                    on_click=None if laufend else zeit_stellen,
+                    tooltip=None if laufend else "Zeit stellen — Timer ohne Ablauf",
+                    border_radius=16,
+                ),
                 fortschritt,
                 stand_text,
                 ft.Container(height=4),

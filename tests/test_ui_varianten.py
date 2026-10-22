@@ -196,29 +196,39 @@ def test_etikett_setzt_die_variante_des_offenen_eintrags(page, state) -> None:
 
 
 def test_varianten_bereich_unter_den_parametern(page, state) -> None:
-    """P58: i-Seite und „Einstellen“ haben unter den Parametern den Abschnitt „Varianten in
-    diesem Plan“; aus heißt: keine Variantenzeile in dieser Planübung."""
+    """P58/P79: „Im Plan einstellen“ hat unter den Parametern den Abschnitt „Varianten“; aus
+    heißt: keine Variantenzeile in dieser Planübung — „nur hier“, ↺ holt sie zurück. Die
+    Übungsseite aus dem Plan zeigt es in der Karte „In diesem Plan“."""
     from trainingsapp.ui.views.plan_einstellen import plan_einstellen
-    from trainingsapp.ui.views.plan_info import plan_info_view
+    from trainingsapp.ui.views.uebung_detail import uebung_detail
 
     uebung = _liegestuetz(state)
     plan, item = _plan(state, uebung)
-    info = plan_info_view(page, state, f"/plan/{plan.id}", uebung, None, item)
-    assert "VARIANTEN IN DIESEM PLAN" in _texte(info)
-    (schalter,) = [x for x in _alle(info) if isinstance(x, ft.Switch)]
+    ansicht = plan_einstellen(page, state, plan, item, uebung)
+    assert "VARIANTEN" in _texte(ansicht)
+    schalter = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.Switch) and "Varianten" in (x.tooltip or "")
+    )
     assert schalter.value is True
-    schalter.on_change(SimpleNamespace(control=SimpleNamespace(value=False)))
+    schalter.value = False
+    schalter.on_change()
+    speichern = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.TextButton) and x.content == "Speichern"
+    )
+    _klick(speichern)
     gespeichert = state.plaene.item_laden(item.id)
     assert not varianten_an(gespeichert)
     assert _variantenzeile(plan_view(page, state, state.plaene.laden(plan.id))) is None
     assert var.namen(state.uebungen.laden(uebung.id).result_spec) == ["kurz", "lang"]
+    seite = uebung_detail(page, state, uebung, None, gespeichert, plan=plan, einstellen="/x")
+    assert "nicht gezeigt" in _texte(seite) and "nur hier" in _texte(seite)
 
-    # „Einstellen“: derselbe Schalter, gespeichert mit „Speichern“
+    # Wieder öffnen: der Schalter steht aus, „nur hier“ — wieder an, gespeichert mit „Speichern“
     ansicht = plan_einstellen(page, state, state.plaene.laden(plan.id), gespeichert, uebung)
-    assert "VARIANTEN IN DIESEM PLAN" in _texte(ansicht)
-    (schalter,) = [x for x in _alle(ansicht) if isinstance(x, ft.Switch)]
-    assert schalter.value is False
-    assert any("Varianten aus" in t for t in _texte(ansicht))  # weicht vom Standard ab
+    schalter = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.Switch) and "Varianten" in (x.tooltip or "")
+    )
+    assert schalter.value is False and "nur hier" in _texte(ansicht)
     schalter.value = True
     schalter.on_change()
     speichern = next(
@@ -232,7 +242,7 @@ def test_varianten_bereich_unter_den_parametern(page, state) -> None:
 def test_ohne_varianten_keine_zeile_aber_das_etikett(page, state) -> None:
     """Ohne Varianten bleibt der Block wie bisher — nur das Etikett steht neben „Notiz“, damit
     die erste Variante unterwegs entstehen kann (A1); einen Plan-Abschnitt gibt es nicht."""
-    from trainingsapp.ui.views.plan_info import plan_info_view
+    from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 
     u = Exercise(name="Kniebeuge", result_spec=ResultSpec(fields=[vorrat_feld("reps")]))
     state.uebungen.speichern(u)
@@ -243,9 +253,13 @@ def test_ohne_varianten_keine_zeile_aber_das_etikett(page, state) -> None:
         x for x in _alle(ansicht) if isinstance(x, ft.IconButton) and x.tooltip == "Variante"
     ]
     assert len(etiketten) == 1
-    info = plan_info_view(page, state, f"/plan/{plan.id}", u, None, item)
-    assert "VARIANTEN IN DIESEM PLAN" not in _texte(info)
-    assert not [x for x in _alle(info) if isinstance(x, ft.Switch)]
+    einstellen = plan_einstellen(page, state, plan, item, state.uebungen.laden(u.id))
+    assert "VARIANTEN" not in _texte(einstellen)
+    assert not [
+        x
+        for x in _alle(einstellen)
+        if isinstance(x, ft.Switch) and "Varianten" in (x.tooltip or "")
+    ]
 
 
 def test_viele_varianten_nur_zeichen(page, state) -> None:

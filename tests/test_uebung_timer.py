@@ -46,7 +46,7 @@ def test_uebung_plan_und_planuebung_speichern_ihren_timer(con) -> None:
     plaene = PlanRepo(con)
     alle = TimerProfil(id="alle", name="1 min", abschnitte=[Abschnitt("Übung", 60)])
     plan = Plan(name="Rumpf", subject_id=profil.id, timer=alle.als_dict(), weiter_automatisch=True)
-    wahl = TimerWahl(profil_id="folge", zeitfeld="duration", zeit_eintragen=False)
+    wahl = TimerWahl(profil_id="folge", uhr=False)
     plan.items = [PlanItem(exercise_id=uebung.id, timer=wahl.als_dict())]
     plaene.speichern(plan)
     wieder = plaene.laden(plan.id)

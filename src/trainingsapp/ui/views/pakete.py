@@ -632,22 +632,31 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
         else:
             info = "wie im Paket"
         info += {ARCHIV: "  ·  im Archiv", PAPIERKORB: "  ·  im Papierkorb"}.get(z.ort, "")
+
+        async def oeffnen() -> None:
+            await page.push_route(f"/uebung/{z.uebung.id}")
+
+        # Die Zeile öffnet die Übungsseite (Ben, 22.10.2026, P79) — auch aus Archiv und Papierkorb
         return ft.Row(
             spacing=10,
             controls=[
                 ft.Icon(symbol(z.uebung.icon_key), opacity=0.5 if z.ort != KATALOG else 1),
-                ft.Column(
-                    spacing=0,
+                ft.Container(
                     expand=True,
-                    controls=[
-                        ft.Text(z.uebung.name, size=15),
-                        ft.Text(
-                            info,
-                            size=11,
-                            opacity=0.8 if z.geaendert else 0.6,
-                            color=ft.Colors.PRIMARY if z.geaendert else None,
-                        ),
-                    ],
+                    on_click=oeffnen,
+                    tooltip="Übung ansehen",
+                    content=ft.Column(
+                        spacing=0,
+                        controls=[
+                            ft.Text(z.uebung.name, size=15),
+                            ft.Text(
+                                info,
+                                size=11,
+                                opacity=0.8 if z.geaendert else 0.6,
+                                color=ft.Colors.PRIMARY if z.geaendert else None,
+                            ),
+                        ],
+                    ),
                 ),
                 ft.IconButton(
                     ft.Icons.RESTORE,

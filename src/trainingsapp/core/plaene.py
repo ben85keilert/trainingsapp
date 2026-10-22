@@ -19,7 +19,7 @@ from . import eintraege as offene
 from .models import Exercise, Plan, PlanItem, Session, SessionEntry
 from .parameter import kontextfelder
 from .result_spec import ist_leer
-from .standards import aktive_felder
+from .standards import aktive_felder, ziel_von
 from .tagesfelder import UHRZEIT_NACHTRAGEN
 
 WOCHENTAGE_KURZ = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
@@ -236,13 +236,7 @@ def einzel_plan(uebung: Exercise) -> Plan:
         id=f"einzel-{uebung.id}",
         name=uebung.name,
         items=[
-            PlanItem(
-                id=f"einzel-{uebung.id}",
-                exercise_id=uebung.id,
-                target=dict(uebung.default_target),
-                input_mode=uebung.default_input_mode,
-                felder=uebung.default_felder,
-            )
+            PlanItem(id=f"einzel-{uebung.id}", exercise_id=uebung.id)  # folgt der Übung
         ],
     )
 
@@ -280,8 +274,8 @@ def auspraegung_vorgabe(
     if not felder:
         return {}
     if item.id not in wahl:
-        quelle: Mapping[str, Any] = item.target
-        if not any(not ist_leer(item.target.get(f.key)) for f in felder):
+        quelle: Mapping[str, Any] = ziel_von(item, uebung)
+        if not any(not ist_leer(quelle.get(f.key)) for f in felder):
             eintrag = letzter()
             quelle = eintrag.result if eintrag is not None else {}
         wahl[item.id] = {f.key: quelle[f.key] for f in felder if not ist_leer(quelle.get(f.key))}
@@ -302,7 +296,7 @@ def ziel_ohne_kontext(item: PlanItem, uebung: Exercise) -> dict[str, Any]:
     {'hold': [30]}
     """
     keys = {f.key for f in kontextfelder(uebung.result_spec)}
-    return {k: v for k, v in item.target.items() if k not in keys}
+    return {k: v for k, v in ziel_von(item, uebung).items() if k not in keys}
 
 
 def spaetere_stelle_offen(

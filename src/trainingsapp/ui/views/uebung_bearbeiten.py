@@ -1,11 +1,20 @@
-"""Übung anlegen oder bearbeiten — Route `/uebung/neu` bzw. `/uebung/<id>/bearbeiten`.
+"""Übung bearbeiten — Route `/uebung/neu` bzw. `/uebung/<id>/bearbeiten`.
+
+Der eine Ort, an dem man die Übung selbst ändert (Ben, 22.10.2026, P79: „Der Zugang von
+Übungen → Übung → Bearbeiten ist sinnvoll und gut“) — erreichbar über die Übungsseite, nie
+direkt aus dem Üben. Von häufig nach selten: Name, Beschreibung, Videos und Links; Parameter;
+Varianten; Uhr und Timer; Vorgabe für Pläne (das Ziel); zuletzt Ordnen (Typ und Region,
+Symbol, „Im Verlauf zusammen mit“). Aus „Übung hinzufügen“ im Plan-Editor angelegt
+(`<bearbeiten>/hinzufuegen/neu`), steht die neue Übung danach gleich im Plan.
 
 Die Parameter einer Übung kommen aus dem **Feldvorrat** (`core/result_spec.py`):
-Jedes Feld bringt Typ und Einheit mit, hier schaltet man es ein und legt die
-Chips fest. Was eingeschaltet ist, kann man in der Ausführung als geleistet
-antippen. (Vorlagen gibt es im Editor nicht mehr — die Schalter sind schneller
-als ein Umweg.) Felder, die eine Übung aus früheren Zeiten trägt und die nicht
-im Vorrat stehen, bleiben erhalten. Die Skala trägt einen eigenen Namen
+Jedes Feld bringt Typ und Einheit mit, hier schaltet man es ein und tippt die
+Chips an (wie in der Planübung, `components/chips_wahl.py`). Was eingeschaltet ist, bieten
+alle Pläne an (C2: „Was in der Orginalübung steht wird überall angeboten, sonst muss
+Planübung geändert werden“) und kann man in der Ausführung als geleistet antippen.
+(Vorlagen gibt es im Editor nicht mehr — die Schalter sind schneller als ein Umweg.)
+Felder, die eine Übung aus früheren Zeiten trägt und die nicht im Vorrat stehen, bleiben
+erhalten. Die Skala trägt einen eigenen Namen
 (Vorgabe „Skala“) und einen Bereich.
 
 Typen und Regionen: dieselbe Auswahl wie im Katalog (`ui/components/tagwahl.py`,
@@ -44,16 +53,10 @@ from trainingsapp.core.models import (
     Media,
     MediaKind,
     MediaSource,
+    Plan,
     new_id,
 )
-from trainingsapp.core.parameter import (
-    chips_lesen,
-    chips_sortiert,
-    chips_text,
-    gewaehlte_felder,
-    modus_aus_felder,
-    planbare_felder,
-)
+from trainingsapp.core.parameter import chips_sortiert
 from trainingsapp.core.result_spec import (
     FELDVORRAT,
     FieldSpec,
@@ -69,12 +72,12 @@ from trainingsapp.core.result_spec import (
 from trainingsapp.core.standards import ziel_bereinigen, ziel_spec
 from trainingsapp.core.timer import TimerProfil
 from trainingsapp.core.uebung_timer import profile_der_uebung
+from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL, symbol
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.parameter_wahl import parameter_wahl
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.tagwahl import TagWahl
 from trainingsapp.ui.components.varianten import plakette
@@ -121,9 +124,22 @@ def spec_bauen(felder: list[FieldSpec]) -> ResultSpec:
     )
 
 
-def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -> ft.View:
+def uebung_bearbeiten(
+    page: ft.Page,
+    state: AppState,
+    uebung: Exercise | None,
+    *,
+    plan: Plan | None = None,
+    basis: str | None = None,
+) -> ft.View:
+    """``plan``/``basis``: neu angelegt aus „Übung hinzufügen“ im Plan-Editor (P79) — beim
+    ersten Speichern kommt die Übung in den Plan, danach geht es zurück dorthin."""
     neu = uebung is None
-    route = "/uebung/neu" if uebung is None else f"/uebung/{uebung.id}/bearbeiten"
+    im_plan = plan is not None and basis is not None and neu
+    if im_plan:
+        route = f"{basis}/hinzufuegen/neu"
+    else:
+        route = "/uebung/neu" if uebung is None else f"/uebung/{uebung.id}/bearbeiten"
     vorhanden = {f.key: f for f in (uebung.result_spec.fields if uebung else [])}
     # Eine neue Übung beginnt mit Wiederholungen — der häufigste Fall.
     eingeschaltet = set(vorhanden) if uebung is not None else {"reps"}
@@ -167,7 +183,12 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     # Übung das Feld schon hat; Chips aus der Übung, sonst aus dem Vorrat.
 
     schalter: dict[str, ft.Switch] = {}
-    chipfelder: dict[str, ft.TextField] = {}
+    #: Je Parameter die Chips zur Wahl und die angetippten (P79: antippen wie in der
+    #: Planübung statt einer Kommaliste); eingerückt darunter, sichtbar, solange er an ist
+    chips_kandidaten: dict[str, list[Any]] = {}
+    chips_wahl: dict[str, list[Any]] = {}
+    chips_reihen: dict[str, ft.Container] = {}
+    chips_bereiche: dict[str, ft.Container] = {}
     #: Satzlisten: zählen die Sätze? Aus = eine Zahl je Eintrag (Ben, 18.10.2026)
     saetze_an: dict[str, bool] = {}
     saetze_knoepfe: dict[str, ft.Chip] = {}
@@ -200,26 +221,42 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
 
     def sichtbarkeit(key: str) -> Callable[[], None]:
         def handler() -> None:
-            vorlage = next(f for f in FELDVORRAT if f.key == key)
-            chipfelder[key].visible = bool(schalter[key].value) and vorlage.type not in (
-                FieldType.BOOL,
-                FieldType.TEXT,
-                FieldType.SCALE,
-            )
+            if key in chips_bereiche:
+                chips_bereiche[key].visible = bool(schalter[key].value)
             if key in saetze_knoepfe:
-                saetze_knoepfe[key].visible = chipfelder[key].visible
+                saetze_knoepfe[key].visible = bool(schalter[key].value)
             if key == "scale":
                 skala_felder.visible = bool(schalter[key].value)
-            # Ein neues Feld kommt in den Plan-Standard, solange der „alle“ heißt
-            if not schalter[key].value:
-                plan_wahl.discard(key)
-            elif standard_alle["ja"] and vorlage.type not in (FieldType.BOOL, FieldType.TEXT):
-                plan_wahl.add(key)
-            standard_zeichnen()
             uhr_zeichnen()
             page.update()
 
         return handler
+
+    def chips_zeichnen(key: str) -> None:
+        vorlage = next(f for f in FELDVORRAT if f.key == key)
+
+        def umschalten(wert: Any) -> None:
+            liste = chips_wahl[key]
+            chips_wahl[key] = [w for w in liste if w != wert] if wert in liste else [*liste, wert]
+            chips_neu(key)
+
+        def ergaenzen(neue: list[Any]) -> None:
+            chips_kandidaten[key] = chips_sortiert([*chips_kandidaten[key], *neue])
+            chips_wahl[key] = chips_sortiert([*chips_wahl[key], *neue])
+            chips_neu(key)
+
+        chips_reihen[key].content = chips_zeile(
+            vorlage,
+            chips_sortiert(chips_kandidaten[key]),
+            chips_wahl[key],
+            umschalten=umschalten,
+            ergaenzen=ergaenzen,
+        )
+
+    def chips_neu(key: str) -> None:
+        chips_zeichnen(key)
+        with contextlib.suppress(Exception):  # noch nicht auf der Seite
+            chips_reihen[key].update()
 
     for vorlage in FELDVORRAT:
         aktiv = vorlage.key in eingeschaltet
@@ -231,54 +268,31 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             value=aktiv,
             on_change=sichtbarkeit(vorlage.key),
         )
-        chipfelder[vorlage.key] = ft.TextField(
-            label="Chips (mit Komma)" if vorlage.type != FieldType.CHOICE else "Optionen",
-            value=chips_text(quelle.quick),
-            hint_text="leer oder 0: keine Chips" if vorlage.type != FieldType.CHOICE else None,
-            dense=True,
-            visible=aktiv,
-            expand=True,
-        )
+        if vorlage.type == FieldType.SCALE:
+            zeilen.append(ft.Column(spacing=4, controls=[schalter[vorlage.key], skala_felder]))
+            continue
+        if vorlage.type in (FieldType.BOOL, FieldType.TEXT):
+            zeilen.append(schalter[vorlage.key])
+            continue
+        # Leer heißt leer (Ben, 18.10.2026): ohne angetippten Chip nur das freie Feld
+        chips_kandidaten[vorlage.key] = chips_sortiert([*vorlage.quick, *quelle.quick])
+        chips_wahl[vorlage.key] = chips_sortiert(list(quelle.quick))
+        chips_reihen[vorlage.key] = ft.Container()
+        chips_zeichnen(vorlage.key)
+        unten: list[ft.Control] = [chips_reihen[vorlage.key]]
         if vorlage.type == FieldType.SET_LIST:
             saetze_an[vorlage.key] = quelle.saetze
             saetze_knoepfe[vorlage.key] = _saetze_knopf(vorlage.key, saetze_an, aktiv)
-        if vorlage.type == FieldType.SCALE:
-            chipfelder[vorlage.key].visible = False
-            zeilen.append(
-                ft.Column(
-                    spacing=4,
-                    controls=[schalter[vorlage.key], skala_felder],
-                )
-            )
-        elif vorlage.type in (FieldType.BOOL, FieldType.TEXT):
-            chipfelder[vorlage.key].visible = False
-            zeilen.append(schalter[vorlage.key])
-        else:
-            # Schalter oben, Chips darunter eingerückt — nebeneinander passte
-            # beides am Handy nicht, das Chip-Feld lief über den Rand.
-            zeilen.append(
-                ft.Column(
-                    spacing=4,
-                    controls=[
-                        schalter[vorlage.key],
-                        ft.Container(
-                            padding=ft.Padding.only(left=56, bottom=6),
-                            content=ft.Row(
-                                spacing=8,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                controls=[
-                                    chipfelder[vorlage.key],
-                                    *(
-                                        [saetze_knoepfe[vorlage.key]]
-                                        if vorlage.key in saetze_knoepfe
-                                        else []
-                                    ),
-                                ],
-                            ),
-                        ),
-                    ],
-                )
-            )
+            unten.append(saetze_knoepfe[vorlage.key])
+        # Schalter oben, Chips darunter eingerückt — nebeneinander passte beides am Handy nicht
+        chips_bereiche[vorlage.key] = ft.Container(
+            padding=ft.Padding.only(left=56, bottom=6),
+            visible=aktiv,
+            content=ft.Column(spacing=6, controls=unten),
+        )
+        zeilen.append(
+            ft.Column(spacing=4, controls=[schalter[vorlage.key], chips_bereiche[vorlage.key]])
+        )
     # Felder, die nicht im Vorrat stehen (ältere oder besondere), bleiben erhalten — die
     # Varianten haben ihren eigenen Abschnitt.
     fremde = [f for key, f in vorhanden.items() if key not in schalter and not var.ist_variante(f)]
@@ -521,47 +535,9 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
 
     varianten_zeichnen()
 
-    # -- Standard für Pläne ----------------------------------------------------
-
-    # Welche Parameter ein neuer Plan anbietet — dieselben Knöpfe wie in der
-    # Planübung (Ben, 14.10.2026: Übung und Planübung vereinheitlichen). Keiner
-    # heißt nur abhaken. Die Planübung übernimmt das beim Aufnehmen und weicht
-    # danach nach Belieben ab; „Als Standard setzen“ schiebt zurück.
-    plan_wahl: set[str] = (
-        {f.key for f in gewaehlte_felder(uebung.result_spec, uebung.default_felder)}
-        if uebung is not None
-        else {"reps"}
-    )
-    #: Heißt der Standard „alle“? Dann kommt ein neu eingeschaltetes Feld dazu.
-    standard_alle = {"ja": uebung is None or uebung.default_felder is None}
-    standard_wahl = ft.Container()
-
-    def eingeschaltete_felder() -> list[FieldSpec]:
-        return [
-            *(f for f in FELDVORRAT if schalter[f.key].value),
-            *fremde,
-        ]
-
-    def standard_umschalten(key: str) -> None:
-        plan_wahl.symmetric_difference_update({key})
-        planbar = {f.key for f in planbare_felder(ResultSpec(fields=eingeschaltete_felder()))}
-        standard_alle["ja"] = plan_wahl == planbar
-        standard_zeichnen()
-        page.update()
-
-    def standard_zeichnen() -> None:
-        felder = eingeschaltete_felder()
-        standard_wahl.content = (
-            parameter_wahl(felder, plan_wahl, standard_umschalten)
-            if felder
-            else ft.Text("Erst oben Felder einschalten.", size=12, opacity=0.6)
-        )
-
-    standard_zeichnen()
-
-    # -- Kachel im Verlauf -----------------------------------------------------
-    # Eine Variante zeigt auf ein Original; wer selbst Varianten hat, ist ein
-    # Original und kann nicht gleichzeitig Variante sein (keine Ketten).
+    # -- Im Verlauf zusammen mit (P61; bis 22.10.2026 „Kachel im Verlauf“) ------------------
+    # Eine Kopie zeigt auf ein Original; wer selbst Kopien hat, ist ein Original und kann
+    # nicht gleichzeitig zu einem anderen gehören (keine Ketten).
 
     eigene_varianten = state.uebungen.varianten(uebung.id, mit_papierkorb=True) if uebung else []
     originale = [
@@ -579,18 +555,18 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     if weg is not None and all(u.id != weg.id for u in originale):
         originale.append(replace(weg, name=f"{weg.name} (gelöscht)"))
     familie = ft.Dropdown(
-        label="Kachel im Verlauf",
+        label="Im Verlauf zusammen mit",
         value=uebung.family_id if uebung and uebung.family_id else EIGENSTAENDIG,
         options=[
-            ft.DropdownOption(key=EIGENSTAENDIG, text="Eigenständig (eigene Liste)"),
-            *[ft.DropdownOption(key=u.id, text=f"Variante von „{u.name}“") for u in originale],
+            ft.DropdownOption(key=EIGENSTAENDIG, text="keiner — eigene Kachel"),
+            *[ft.DropdownOption(key=u.id, text=f"„{u.name}“") for u in originale],
         ],
         disabled=bool(eigene_varianten),
         expand=True,
     )
 
-    # Das Standard-Ziel bezieht sich auf die *gespeicherten* Parameter — wer
-    # oben Schalter umlegt, sieht das Ziel dafür nach dem Speichern.
+    # Vorgabe für Pläne: nur noch das Ziel (C2). Es bezieht sich auf die *gespeicherten*
+    # Parameter — wer oben Schalter umlegt, sieht das Ziel dafür nach dem Speichern.
     ziel_form = (
         SpecForm(ziel_spec(uebung.result_spec), dict(uebung.default_target), page=page)
         if uebung is not None and uebung.result_spec.fields
@@ -775,8 +751,15 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     # werden. Ist die Uhr ein, hat man automatisch Zeit mit dabei“) ----------------------
     uhr_vorher = uebung.zaehlt_als if uebung is not None else ""
     uhr_schalter = ft.Switch(
-        label="Uhr in der Übung — Stoppuhr und Timer",
+        label="Stoppuhr und Timer beim Üben",
         value=uebung.uhr if uebung is not None else True,
+        on_change=lambda: uhr_zeichnen(),
+    )
+    # Ob Timerzeit zählt (Ben, 22.10.2026, P79 D2): hier die Vorgabe, beim Üben in der Leiste
+    # für jetzt umschaltbar
+    zaehlt_schalter = ft.Switch(
+        label="Timerzeit zählt",
+        value=uebung.zeit_zaehlt if uebung is not None else True,
         on_change=lambda: uhr_zeichnen(),
     )
     zaehlt_als_wahl = ft.SegmentedButton(
@@ -794,22 +777,28 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         controls=[ft.Text("Zählt als", weight=ft.FontWeight.W_600), zaehlt_als_wahl],
     )
     uhr_text = ft.Text(size=12, opacity=0.7)
-    uhr_spalte = ft.Column(spacing=8, controls=[uhr_schalter, zaehlt_als_zeile, uhr_text])
+    uhr_spalte = ft.Column(
+        spacing=8, controls=[uhr_schalter, zaehlt_schalter, zaehlt_als_zeile, uhr_text]
+    )
 
     def uhr_zeichnen() -> None:
         """„Zählt als“ nur mit Haltezeit — sonst zählt die Uhr immer als Zeit."""
         an = bool(uhr_schalter.value)
+        zaehlt = bool(zaehlt_schalter.value)
         halten = bool(schalter["hold"].value)
-        zaehlt_als_zeile.visible = an and halten
-        if an and halten:
-            uhr_text.value = (
-                "„Fertig“ hakt ab und trägt ein: einen Satz Haltezeit oder die Zeit. "
-                "Im Plan kann die Planübung abweichen."
-            )
-        elif an:
-            uhr_text.value = "Zählt als Zeit — auch ohne den Parameter Zeit. „Fertig“ hakt ab."
-        else:
+        zaehlt_schalter.visible = an
+        zaehlt_als_zeile.visible = an and zaehlt and halten
+        if not an:
             uhr_text.value = "Aus: keine Uhr in der Übung — „Gemacht“ hakt nur ab."
+        elif not zaehlt:
+            uhr_text.value = "Läufe tragen nur „gemacht“ ein. Beim Üben in der Leiste umschaltbar."
+        elif halten:
+            uhr_text.value = (
+                "Jeder Lauf ist ein Satz Haltezeit (oder die Zeit) im offenen Eintrag. Beim "
+                "Üben schaltest du „zählt“ in der Leiste für jetzt um."
+            )
+        else:
+            uhr_text.value = "Läufe zählen als Zeit im offenen Eintrag — auch ohne den Parameter."
         with contextlib.suppress(Exception):  # noch nicht auf der Seite
             uhr_spalte.update()
 
@@ -819,19 +808,30 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         wahl = next(iter(zaehlt_als_wahl.selected or []), "hold")
         return "" if wahl == "hold" and not uhr_vorher else str(wahl)
 
-    async def timer_editor(profil_id: str | None) -> None:
-        """Den Profil-Editor öffnen — das Formular speichert vorher (beim Zurückkommen
-        entsteht es aus der Datenbank neu). Fehlt etwas (Name), bleibt es hier."""
+    async def wechseln(ziel: str | None = None, profil_id: str | None = None) -> None:
+        """Weiter zu ``ziel`` (sonst in den Profil-Editor) — das Formular speichert vorher
+        (beim Zurückkommen entsteht es aus der Datenbank neu). Fehlt etwas (Name), bleibt es
+        hier."""
         if sichern() is not None:
             return
         formular = f"/uebung/{gespeichert['id']}/bearbeiten"
-        ziel = formular_profil_route(formular, profil_id)
-        if uebung is None and state.navigation[-1:] == ["/uebung/neu"]:
+        if uebung is None and state.navigation[-1:] == [route]:
             # Die neue Übung ist jetzt gespeichert: An die Stelle von „Neue Übung“ tritt ihr
-            # Formular — Zurück aus dem Editor führt dorthin, nicht in ein leeres Formular
-            # und nicht an ihm vorbei (`ui/navigation.py`)
+            # Formular — Zurück führt dorthin, nicht in ein leeres Formular und nicht an ihm
+            # vorbei (`ui/navigation.py`)
             state.navigation[-1] = formular
-        await page.push_route(ziel)
+        await page.push_route(ziel or formular_profil_route(formular, profil_id))
+
+    async def timer_editor(profil_id: str | None) -> None:
+        await wechseln(profil_id=profil_id)
+
+    def gehe_zu(ziel: str) -> Callable[[], Any]:
+        """Ein Link aus dem Formular (P79: Wege statt Wegbeschreibungen) — speichert vorher."""
+
+        async def handler() -> None:
+            await wechseln(ziel)
+
+        return handler
 
     def timer_bearbeiter(profil_id: str) -> Callable[[], Any]:
         async def handler() -> None:
@@ -906,8 +906,9 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             if not schalter[vorlage_feld.key].value:
                 continue
             alt = vorhanden.get(vorlage_feld.key)
-            chips = chips_lesen(chipfelder[vorlage_feld.key].value or "", vorlage_feld)
-            # Leer heißt leer (Ben, 18.10.2026) — früher kamen dann die Chips des Vorrats
+            chips = chips_wahl.get(
+                vorlage_feld.key, list((alt or vorlage_feld).quick)
+            )  # Skala, Ja/Nein, Freitext: wie sie sind
             feld = replace(
                 vorlage_feld,
                 quick=chips_sortiert(chips),
@@ -939,14 +940,11 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         if not eigene_varianten:
             ziel.family_id = None if familie.value in (None, EIGENSTAENDIG) else familie.value
         ziel.result_spec = var.mit_varianten(spec_bauen(felder_lesen()), varianten_liste)
-        im_plan = [f.key for f in ziel.result_spec.fields if f.key in plan_wahl]
-        alle = [f.key for f in planbare_felder(ziel.result_spec)]
-        ziel.default_felder = None if im_plan == alle else im_plan
-        ziel.default_input_mode = modus_aus_felder(ziel.default_felder)
         ziel.default_target = ziel_lesen(ziel.result_spec)
         ziel.regionen = regionen_lesen()
         ziel.timer = [p.als_dict() for p in timer_liste]
         ziel.uhr = bool(uhr_schalter.value)
+        ziel.zeit_zaehlt = bool(zaehlt_schalter.value)
         ziel.zaehlt_als = zaehlt_als_lesen()
         ziel.media = [
             Media(
@@ -967,17 +965,17 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
             beschreibung.value or "",
             typen_lesen(),
             regionen_lesen(),
-            [(k, bool(s.value), chipfelder[k].value or "") for k, s in schalter.items()],
+            [(k, bool(s.value), list(chips_wahl.get(k, []))) for k, s in schalter.items()],
             sorted(saetze_an.items()),
             skala_name.value or "",
             skala_bereich.value or "",
             familie.value,
-            sorted(plan_wahl),
             ziel_form.werte() if ziel_form is not None else None,
             gewaehlt,
             [(t.value or "", a.value or "") for t, a in medien_zeilen],
             [p.als_dict() for p in timer_liste],
             bool(uhr_schalter.value),
+            bool(zaehlt_schalter.value),
             zaehlt_als_lesen(),
             [(v.name, v.symbol, v.kuerzel, v.text) for v in varianten_liste],
             list(umbenennen),
@@ -997,6 +995,10 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
         skala_bereich.error = None
         ziel = eingelesen()
         state.uebungen.speichern(ziel)
+        if im_plan and plan is not None and not gespeichert.get("im_plan"):
+            # Aus „Übung hinzufügen“: Sie kommt gleich in den Plan — und folgt der Übung (P79)
+            state.plaene.uebung_hinzufuegen(plan.id, ziel.id)
+            gespeichert["im_plan"] = plan.id
         gespeichert["id"] = ziel.id
         # Umbenannte Varianten: die bisherigen Einträge erst jetzt mitnehmen (Skizze A5)
         for alt, neu in umbenennen:
@@ -1010,10 +1012,17 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
     async def speichern() -> None:
         if sichern() is not None:
             return
+        if im_plan and plan is not None and basis is not None:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Angelegt — steht jetzt in „{plan.name}“")))
+            await page.push_route(basis)
+            return
         page.show_dialog(ft.SnackBar(ft.Text("Gespeichert")))
         await page.push_route(f"/uebung/{gespeichert['id']}")
 
     async def abbrechen() -> None:
+        if im_plan:
+            await page.push_route(f"{basis}/hinzufuegen")
+            return
         await page.push_route("/" if uebung is None else f"/uebung/{uebung.id}")
 
     def abschnitt(text: str, rechts: ft.Control | None = None) -> ft.Control:
@@ -1042,20 +1051,19 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                     controls=[
                         name,
                         beschreibung,
-                        abschnitt("TYP UND REGION (OPTIONAL)"),
-                        tagwahl.control,
-                        ft.Text(
-                            "Der erste Typ ist die Kategorie. Neue unten in der Liste; "
-                            "umbenennen und löschen in den Einstellungen unter "
-                            "„Typen und Regionen“.",
-                            size=12,
-                            opacity=0.6,
+                        abschnitt("VIDEOS UND LINKS"),
+                        medien_spalte,
+                        ft.TextButton(
+                            "Link hinzufügen",
+                            icon=ft.Icons.ADD_LINK,
+                            on_click=link_hinzufuegen,
                         ),
-                        abschnitt("PARAMETER — WAS KANN MAN LEISTEN?", hilfe_knopf(page)),
+                        abschnitt("PARAMETER", hilfe_knopf(page)),
                         ft.Text(
-                            "Eingeschaltete Parameter tippst du beim Training als geleistet an. "
-                            "Winkel, Gewicht und Seite beschreiben die Ausführung und trennen "
-                            "Einträge (45° ≠ 90°); Wiederholungen und Zeiten werden addiert.",
+                            "Eingeschaltete Parameter tippst du beim Training als geleistet an "
+                            "— in jedem Plan; weniger stellst du in der Planübung ein. Winkel, "
+                            "Gewicht und Seite beschreiben die Ausführung und trennen Einträge "
+                            "(45° ≠ 90°); Wiederholungen und Zeiten werden addiert.",
                             size=12,
                             opacity=0.7,
                         ),
@@ -1075,31 +1083,37 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                             icon=ft.Icons.SELL_OUTLINED,
                             on_click=varianten_bearbeiter(None),
                         ),
-                        abschnitt("VERLAUF", hilfe_knopf(page, thema="uebungen")),
-                        ft.Row(controls=[familie]),
+                        abschnitt("UHR UND TIMER"),
+                        uhr_spalte,
                         ft.Text(
-                            "Varianten (Wandsitz 45° und 90°) teilen sich eine Kachel: Mengen "
-                            "werden addiert, die Variante wird dazugeschrieben. Weicht eine "
-                            "Variante stark ab (Liegestütz einarmig), mach sie eigenständig."
-                            if not eigene_varianten
-                            else "Diese Übung ist das Original ihrer Varianten: "
-                            + ", ".join(v.name for v in eigene_varianten),
+                            "Das erste Profil ist die Vorgabe; ein Plan kann in „Im Plan "
+                            "einstellen“ ein anderes nehmen. Teile (Vorbereitung, Training, "
+                            "Cooldown) und „zählt“ je Abschnitt stellst du im Editor ein — er "
+                            "speichert vorher die Übung.",
                             size=12,
                             opacity=0.7,
                         ),
-                        abschnitt("STANDARD FÜR PLÄNE"),
-                        ft.Text(
-                            "Welche Parameter ein neuer Plan anbietet — keiner heißt nur "
-                            "abhaken. Im Plan lässt sich das je Planübung ändern, auch beim "
-                            "Üben über das i-Symbol; „Als Standard der Übung setzen“ schiebt "
-                            "es hierher zurück.",
-                            size=12,
-                            opacity=0.7,
+                        timer_spalte,
+                        ft.Row(
+                            wrap=True,
+                            spacing=8,
+                            controls=[
+                                ft.TextButton(
+                                    "Timer hinzufügen",
+                                    icon=ft.Icons.MORE_TIME,
+                                    on_click=timer_hinzufuegen,
+                                ),
+                                ft.TextButton(
+                                    "Darstellung der Uhr",
+                                    icon=ft.Icons.CHEVRON_RIGHT,
+                                    on_click=gehe_zu("/einstellungen"),
+                                ),
+                            ],
                         ),
-                        standard_wahl,
+                        abschnitt("VORGABE FÜR PLÄNE"),
                         ft.Text(
-                            "Ziel (optional): das übernimmt eine neue Planübung als „Wie "
-                            "geplant“; leer heißt kein Ziel.",
+                            "Das Ziel (optional) gilt in jedem Plan, der kein eigenes hat — "
+                            "„Wie geplant“ trägt es ein; leer heißt kein Ziel.",
                             size=12,
                             opacity=0.7,
                         ),
@@ -1110,30 +1124,44 @@ def uebung_bearbeiten(page: ft.Page, state: AppState, uebung: Exercise | None) -
                             size=12,
                             opacity=0.6,
                         ),
-                        abschnitt("TIMER"),
-                        ft.Text(
-                            "Stoppuhr und Timer stehen in der Übung unter „Gemacht“ (wie, "
-                            "stellst du unter Einstellungen → Übungen ein); die Uhr neben dem i "
-                            "öffnet den Timer der Übung. Das erste Profil ist die Vorgabe; ein "
-                            "Plan kann je Planübung ein anderes wählen. Teile (Vorbereitung, "
-                            "Training, Cooldown) und „zählt“ je Abschnitt stellst du im Editor "
-                            "ein — er speichert vorher die Übung.",
-                            size=12,
-                            opacity=0.7,
+                        abschnitt("ORDNEN"),
+                        tagwahl.control,
+                        ft.Row(
+                            wrap=True,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            controls=[
+                                ft.Text(
+                                    "Der erste Typ ist die Kategorie; neue unten in der Liste.",
+                                    size=12,
+                                    opacity=0.6,
+                                ),
+                                ft.TextButton(
+                                    "Typen und Regionen verwalten",
+                                    icon=ft.Icons.CHEVRON_RIGHT,
+                                    on_click=gehe_zu("/einstellungen/tags"),
+                                ),
+                            ],
                         ),
-                        timer_spalte,
-                        ft.TextButton(
-                            "Timer hinzufügen", icon=ft.Icons.MORE_TIME, on_click=timer_hinzufuegen
-                        ),
-                        uhr_spalte,
-                        abschnitt("SYMBOL"),
+                        ft.Text("Symbol", weight=ft.FontWeight.W_600),
                         symbole,
-                        abschnitt("VIDEOS"),
-                        medien_spalte,
-                        ft.TextButton(
-                            "Video-Link hinzufügen",
-                            icon=ft.Icons.ADD_LINK,
-                            on_click=link_hinzufuegen,
+                        ft.Row(controls=[familie]),
+                        ft.Row(
+                            spacing=6,
+                            controls=[
+                                ft.Text(
+                                    "Eine Kopie (Wandsitz 45° und 90°) steht im Verlauf mit "
+                                    "dem Original auf einer Kachel: Mengen werden addiert, die "
+                                    "Kopie wird dazugeschrieben. Weicht sie stark ab "
+                                    "(Liegestütz einarmig), nimm „keiner“."
+                                    if not eigene_varianten
+                                    else "Mit dieser Übung zusammen im Verlauf: "
+                                    + ", ".join(v.name for v in eigene_varianten),
+                                    size=12,
+                                    opacity=0.7,
+                                    expand=True,
+                                ),
+                                hilfe_knopf(page, thema="uebungen"),
+                            ],
                         ),
                     ],
                 ),

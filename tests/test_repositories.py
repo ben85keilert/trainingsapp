@@ -868,8 +868,10 @@ def test_papierkorb_automatik_fragt_bei_verlauf(welt) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_standard_hin_und_her(con) -> None:
-    from trainingsapp.core.standards import abweichungen, als_standard, vom_standard
+def test_planuebung_folgt_der_uebung(con) -> None:
+    """P79 (Ben, 22.10.2026): Die Planübung folgt der Übung, bis man im Plan etwas ändert —
+    „In die Übung übernehmen“ und „Alles wie die Übung“ schieben ausdrücklich hin und her."""
+    from trainingsapp.core.standards import abweichungen, als_standard, vom_standard, ziel_von
 
     seed_einspielen(con)
     uebungen, plaene = ExerciseRepo(con), PlanRepo(con)
@@ -879,29 +881,80 @@ def test_standard_hin_und_her(con) -> None:
 
     plan = Plan(name="A")
     plaene.speichern(plan)
-    item = plaene.uebung_hinzufuegen(plan.id, u.id)  # übernimmt den Standard
-    assert (item.target, item.input_mode, item.felder) == ({"reps": [15, 15, 15]}, "chips", None)
+    item = plaene.uebung_hinzufuegen(plan.id, u.id)  # kopiert nichts
+    assert (item.target, item.input_mode, item.felder) == (None, "chips", None)
+    item = plaene.item_laden(item.id)
+    assert item.target is None and ziel_von(item, u) == {"reps": [15, 15, 15]}
     assert abweichungen(item, u) == []
 
-    # Im Plan nachjustiert — die Übung bleibt, wie sie ist …
-    item = replace(item, target={"reps": [20, 20]}, quick={"reps": [20, 25]})
-    plaene.item_speichern(item)
-    assert uebungen.laden(u.id).default_target == {"reps": [15, 15, 15]}
-    assert abweichungen(plaene.item_laden(item.id), u) == ["Ziel", "Chips Wiederholungen"]
+    # Ändert sich die Übung, ändert sich der Plan mit
+    u.default_target = {"reps": [12, 12]}
+    uebungen.speichern(u)
+    assert ziel_von(plaene.item_laden(item.id), uebungen.laden(u.id)) == {"reps": [12, 12]}
 
-    # … bis man es ausdrücklich zum Standard macht.
+    # Im Plan nachjustiert — die Übung bleibt, wie sie ist …
+    item = replace(item, target={"reps": [20, 20]}, quick={"reps": [20, 25]}, timer={"uhr": False})
+    plaene.item_speichern(item)
+    assert uebungen.laden(u.id).default_target == {"reps": [12, 12]}
+    assert abweichungen(plaene.item_laden(item.id), u) == ["Ziel", "Chips Wiederholungen", "Uhr"]
+
+    # … bis man es ausdrücklich in die Übung übernimmt.
     uebungen.speichern(als_standard(item, u))
     u = uebungen.laden(u.id)
-    assert u.default_target == {"reps": [20, 20]}
+    assert u.default_target == {"reps": [20, 20]} and u.uhr is False
     assert u.result_spec.field_by_key("reps").quick == [20, 25]
     assert [p.name for p, _ in plaene.verwendungen(u.id)] == ["A"]
 
-    # Und zurück: Ein anderer Plan holt den Standard.
+    # Und zurück: Ein anderer Plan mit eigenem Ziel folgt wieder ganz der Übung.
     b = Plan(name="B")
     plaene.speichern(b)
     anders = plaene.uebung_hinzufuegen(b.id, u.id, {"reps": [5]})
-    plaene.item_speichern(vom_standard(u, anders))
-    assert plaene.item_laden(anders.id).target == {"reps": [20, 20]}
+    plaene.item_speichern(vom_standard(u, replace(anders, timer={"profil": "x"})))
+    zurueck = plaene.item_laden(anders.id)
+    assert (zurueck.target, zurueck.timer) == (None, {})
+    assert ziel_von(zurueck, u) == {"reps": [20, 20]}
+
+
+def test_migration_028_planuebung_folgt(tmp_path) -> None:
+    """Bestehende Pläne ändern sich nicht: eine alte Planvorgabe wird eigene Parameter, ein
+    kopiertes Ziel folgt der Übung, ein abweichendes bleibt."""
+    from trainingsapp.data.db import MIGRATIONS_DIR, migrieren, verbinden
+
+    ordner = tmp_path / "bis027"
+    ordner.mkdir()
+    for datei in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if int(datei.name[:3]) <= 27:
+            (ordner / datei.name).write_text(datei.read_text(encoding="utf-8"), encoding="utf-8")
+    con = verbinden(tmp_path / "alt.db")
+    assert migrieren(con, ordner) == 27
+    jetzt = "2026-10-22T12:00:00+00:00"
+    con.execute(
+        "INSERT INTO exercise (id, name, category, result_spec_json, default_target_json, "
+        "default_fields_json, created_at, updated_at) "
+        "VALUES ('u', 'Wandsitz', '', '{}', ?, ?, ?, ?)",
+        ('{"hold": [30]}', '["hold"]', jetzt, jetzt),
+    )
+    con.execute(
+        "INSERT INTO plan (id, name, created_at, updated_at) VALUES ('p', 'A', ?, ?)",
+        (jetzt, jetzt),
+    )
+    for nr, (ziel, felder) in enumerate(
+        [('{"hold": [30]}', None), ('{"hold": [45]}', '["hold", "weight"]')]
+    ):
+        con.execute(
+            "INSERT INTO plan_item (id, plan_id, exercise_id, sort_order, target_json, "
+            "fields_json) VALUES (?, 'p', 'u', ?, ?, ?)",
+            (f"i{nr}", nr, ziel, felder),
+        )
+    con.commit()
+    assert migrieren(con) == 28
+    zeilen = {
+        r["id"]: (r["target_json"], r["fields_json"])
+        for r in con.execute("SELECT id, target_json, fields_json FROM plan_item")
+    }
+    assert zeilen == {"i0": ("null", '["hold"]'), "i1": ('{"hold": [45]}', '["hold", "weight"]')}
+    zeile = con.execute("SELECT default_fields_json, clock_counts FROM exercise").fetchone()
+    assert tuple(zeile) == (None, 1)
 
 
 # ---------------------------------------------------------------------------

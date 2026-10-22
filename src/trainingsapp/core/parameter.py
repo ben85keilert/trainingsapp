@@ -99,51 +99,43 @@ def kontextfelder(spec: ResultSpec) -> list[FieldSpec]:
 
 
 def planbare_felder(spec: ResultSpec) -> list[FieldSpec]:
-    """Was ein Plan von sich aus anbietet — alles außer Ja/Nein und Freitext.
+    """Was ein Plan von sich aus anbietet — alle Parameter der Übung.
 
-    Die beiden kommen nur in den Plan, wenn man sie ausdrücklich einschaltet
-    (`gewaehlte_felder` mit Wahl) — sonst stünde bei jeder Übung mit Notizfeld
-    ein Textfeld im Block. Die Variante ist kein Parameter: Sie hat in der Planübung einen
-    eigenen Bereich (`core.standards.varianten_an`, Ben 21.10.2026).
+    Ben, 22.10.2026 (P79, C2): „Was in der Orginalübung steht wird überall angeboten, sonst muss
+    Planübung geändert werden.“ Bis dahin kamen Ja/Nein und Freitext nur auf ausdrücklichen
+    Wunsch in den Plan; wer sie in der Übung einschaltet, bekommt sie jetzt überall. Die
+    Variante ist kein Parameter: Sie hat in der Planübung einen eigenen Bereich
+    (`core.standards.varianten_an`, Ben 21.10.2026).
 
     >>> from trainingsapp.core.result_spec import vorrat_feld
     >>> spec = ResultSpec(fields=[vorrat_feld(k) for k in ("reps", "scale", "done", "note")])
     >>> [f.key for f in planbare_felder(spec)]
-    ['reps', 'scale']
+    ['reps', 'scale', 'done', 'note']
     """
-    return [
-        f
-        for f in spec.fields
-        if f.type not in (FieldType.BOOL, FieldType.TEXT) and not ist_variante(f)
-    ]
+    return [f for f in spec.fields if not ist_variante(f)]
 
 
-def gewaehlte_felder(
-    spec: ResultSpec, felder: list[str] | None, standard: list[str] | None = None
-) -> list[FieldSpec]:
+def gewaehlte_felder(spec: ResultSpec, felder: list[str] | None) -> list[FieldSpec]:
     """Die Parameter, die ein Plan anbietet — in der Reihenfolge der Übung.
 
-    ``felder`` ist die Wahl der Planübung, ``standard`` die der Übung; ``None``
-    heißt jeweils „wie darüber", ganz oben „alle planbaren". ``[]`` heißt:
-    keiner, nur abhaken. Eine ausdrückliche Wahl darf auch Ja/Nein und
-    Freitext enthalten.
+    ``felder`` ist die Wahl der Planübung; ``None`` heißt „wie die Übung“, also alle ihre
+    Parameter (P79, C2), ``[]`` keiner, nur abhaken.
 
     >>> from trainingsapp.core.result_spec import vorrat_feld
     >>> spec = ResultSpec(fields=[vorrat_feld(k) for k in ("reps", "hold", "scale")])
     >>> [f.key for f in gewaehlte_felder(spec, None)], gewaehlte_felder(spec, [])
     (['reps', 'hold', 'scale'], [])
-    >>> [f.key for f in gewaehlte_felder(spec, None, ["scale", "reps"])]
+    >>> [f.key for f in gewaehlte_felder(spec, ["scale", "reps"])]
     ['reps', 'scale']
     >>> notiz = ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("note")])
     >>> [f.key for f in gewaehlte_felder(notiz, None)]
-    ['reps']
+    ['reps', 'note']
     >>> [f.key for f in gewaehlte_felder(notiz, ["note"])]
     ['note']
     """
-    wahl = felder if felder is not None else standard
-    if wahl is None:
+    if felder is None:
         return planbare_felder(spec)
-    return [f for f in spec.fields if f.key in wahl and not ist_variante(f)]
+    return [f for f in spec.fields if f.key in felder and not ist_variante(f)]
 
 
 def modus_aus_felder(felder: list[str] | None) -> str:

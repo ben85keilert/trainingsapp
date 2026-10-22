@@ -335,6 +335,12 @@ class AppState:
     #: Uhr in der Übung (Ben, 18.10.2026): je Planübung bzw. Übung die gewählte oder zuletzt
     #: gestartete — nur für diese Sitzung, keine Einstellung (`ui.components.uhr`)
     uhr_wahl: dict[str, str] = field(default_factory=dict)
+    #: Zählt die Timerzeit — je Planübung bzw. Übung, nur für diese Sitzung (P79 D2: der Knopf
+    #: „zählt“ in der Leiste; fehlt er, gilt `Exercise.zeit_zaehlt`)
+    uhr_zaehlt: dict[str, bool] = field(default_factory=dict)
+    #: Ein schnell gestellter Timer ohne Ablauf in Sekunden — je Planübung bzw. Übung, nur für
+    #: diese Sitzung (P79 D3/D4, `components/zeit_stellen.py`)
+    uhr_einmal: dict[str, int] = field(default_factory=dict)
     #: Der letzte Ablauf je Plan (Einheit-ID) — für die Karte „fertig“ danach
     plan_ablaeufe: dict[str, str] = field(default_factory=dict)
     #: … und welche Planübungen in ihm liefen (Ben, 18.10.2026: Erledigtes bleibt draußen)

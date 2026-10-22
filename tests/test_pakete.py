@@ -391,7 +391,6 @@ def test_export_und_import_auf_einem_anderen_geraet(con, tmp_path) -> None:
         regionen=["Bein"],
         result_spec=SPEC_WINKEL,
         default_target={"angle": 90},
-        default_felder=[],
         media=[Media(uri="https://example.org/wandsitz", title="Video")],
     )
     repo.speichern(original)
@@ -410,7 +409,9 @@ def test_export_und_import_auf_einem_anderen_geraet(con, tmp_path) -> None:
         ["Bein"],
     )
     assert da.result_spec.to_dict() == SPEC_WINKEL.to_dict()
-    assert (da.default_target, da.default_felder) == ({"angle": 90}, [])
+    assert da.default_target == {"angle": 90}
+    # „default_felder“ entfällt (P79, C2): kein Feld mehr im Export, ein altes wird überlesen
+    assert b"default_felder" not in datei
     assert [(m.uri, m.title) for m in da.media] == [("https://example.org/wandsitz", "Video")]
     assert da.package_id == paket_id("Beine")
     assert ExerciseRepo(anderes).laden(variante.id).family_id == original.id

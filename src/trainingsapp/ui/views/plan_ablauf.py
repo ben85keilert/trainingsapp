@@ -736,7 +736,7 @@ def plan_timer_karte(page: Any, state: AppState, plan: Plan) -> ft.Control:
             on_change=pause_gewaehlt,
         ),
         hinweis(
-            "Es gilt der Timer der Planübung (Uhr an der Übung), sonst dieser, sonst der der "
+            "Es gilt der Timer der Planübung („Einstellen“), sonst dieser, sonst der der "
             "Übung. Den Plan als Ablauf startet der Timer oben in der Planansicht."
         ),
         abstand=8,

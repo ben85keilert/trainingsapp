@@ -39,7 +39,7 @@ Stand 17.10.2026: **geplant; gebaut ist nur Phase 1** (K6, Abschnitt 7). Heute i
 | Videos und Links (`media`) | minor |
 | Eingabe bekommt andere Felder (`result_spec`: Wiederholungen → Haltezeit) | minor — die Einträge behalten ihre Eingabe von damals (`spec_snapshot_json`) |
 | Chips und die übrigen Vorgaben der Eingabe (Startwerte, Grenzen) | patch |
-| Ziel (`default_target`), Planparameter (`default_felder`), Timer und Limits (`limit_spec`) | patch |
+| Ziel (`default_target`), Timer und Limits (`limit_spec`) — `default_felder` entfällt seit 22.10.2026 (P79 C2) | patch |
 | Symbol (`icon_key`), Typen, Regionen | patch |
 | Variante (`variante_von`, teilt die Kachel im Verlauf) | patch |
 

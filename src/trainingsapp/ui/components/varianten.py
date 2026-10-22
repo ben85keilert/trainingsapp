@@ -297,6 +297,8 @@ def varianten_blatt(
     neu_feld = ft.TextField(
         label="Neue Variante",
         hint_text="z. B. lang",
+        # Sie gehört der Übung, nicht dem Plan (Ben, 22.10.2026, P79 A2)
+        helper="wird in der Übung angelegt — gilt in allen Plänen",
         dense=True,
         expand=True,
         capitalization=ft.TextCapitalization.NONE,
@@ -324,8 +326,8 @@ def varianten_blatt(
     if auf_bearbeiten is not None:
         unten.append(
             ft.TextButton(
-                "Varianten der Übung bearbeiten",
-                icon=ft.Icons.CHEVRON_RIGHT,
+                "Übung ansehen",
+                icon=ft.Icons.INFO_OUTLINE,
                 on_click=bearbeiten,
             )
         )

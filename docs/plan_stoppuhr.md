@@ -32,7 +32,10 @@ Skizzen „Pause beendet den Satz“ oder vier Stufen zeigen, gilt, was hier ste
   und `anzeige()` lassen Leiste, Reiter „Einheit“, Benachrichtigung, Timer-Ansicht,
   Plan-Ablauf und die Übung die gelaufene Zeit zeigen; keine Töne.
 - **Ein Lauf ist ein Satz bzw. eine Zeit**: Pausen zählen nicht, unter 5 s fällt weg
-  (`core.timer_eintrag`).
+  (`core.timer_eintrag`). Seit 22.10.2026 **im offenen Eintrag** wie ein Tipp (P79 D1,
+  `SessionRepo.lauf_eintragen`); ob die Zeit zählt, legt die Übung fest
+  (`Exercise.zeit_zaehlt`), beim Üben der Knopf „zählt“ in der Leiste für jetzt
+  (`docs/plan_uebungen_einstellen.md`).
 
 ## 3. Uhr an der Übung und „Zählt als“
 

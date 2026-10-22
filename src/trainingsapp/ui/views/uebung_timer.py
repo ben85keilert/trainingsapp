@@ -2,9 +2,10 @@
 
 Die Uhr neben dem i im Plan (oder in der Übung) öffnet ihn:
 
-- **Vorher:** die Profile der Übung (Einzeltimer oder Folge), je Abschnitt „zählt /
-  zählt nicht“ (erst einmal zählt alles), „Zeit eintragen“ und — bietet die Übung
-  beides an — Haltezeit je Satz oder Zeit. „Starten“ oder „Bereitstellen“.
+- **Vorher:** die Zeit groß — antippen stellt einen Timer ohne Ablauf (Räder und Tippfeld,
+  `components/zeit_stellen.py`, Ben 22.10.2026, P79 D4); die Profile der Übung (Einzeltimer
+  oder Folge) mit ihren Abschnitten; „Zählt für <Übung> als Haltezeit/Zeit“ (D2/D3) und
+  „Starten“ oder „Bereitstellen“.
 - **Während:** Er läuft als Einheit (`ui.uebung_lauf`) — oben die Laufleiste, hier die
   Restzeit, die Sätze, „Anhalten“, „Weiter“, „Fertig“ (beide nehmen die gelaufene Zeit)
   und „Abbrechen“ (trägt nichts ein).
@@ -12,9 +13,10 @@ Die Uhr neben dem i im Plan (oder in der Übung) öffnet ihn:
   doch eintragen), „Nochmal“, „Nächste Übung“. Ändern und löschen geht unter „Heute
   geleistet“.
 
-Gespeichert wird, wo die Wahl hingehört: im Plan bei der Planübung (`TimerWahl` —
-Profil, „zählt“ als eigene Kopie, Zeitfeld, „Zeit eintragen“), sonst die Profile in
-der Übung selbst (ein geändertes „zählt“) und die Wahl im `AppState`.
+Beim Üben gilt jede Wahl hier **für jetzt** (P79): Profil, „zählt“ und die gestellte Zeit
+stehen im `AppState` (`uhr_wahl`, `uhr_zaehlt`, `uhr_einmal` — dieselben wie in der Leiste,
+`components/uhr.py`). Dauerhaft stellt man Profile und „zählt“ in „Übung bearbeiten“ ein,
+einen anderen Timer für einen Plan in „Im Plan einstellen“.
 """
 
 from __future__ import annotations
@@ -25,23 +27,24 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.models import Exercise, Plan, PlanItem, new_id
-from trainingsapp.core.timer import Abschnitt, TimerProfil, dauer_text
+from trainingsapp.core.models import Exercise, Plan, PlanItem
+from trainingsapp.core.timer import Abschnitt, TimerProfil, dauer_text, einmal_timer
 from trainingsapp.core.timer_eintrag import gelaufene_zeiten
 from trainingsapp.core.uebung_timer import (
     TimerWahl,
-    plan_timer,
     profile_der_uebung,
     profile_zur_wahl,
     timer_fuer,
+    zaehlt_als,
 )
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
-from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.uhr import schluessel
+from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.timer import Profilziel
 
@@ -81,7 +84,7 @@ def uebung_profilziel(
 
         def in_planuebung(neu: TimerProfil) -> None:
             wahl = TimerWahl.aus_dict(item.timer)
-            item.timer = TimerWahl("", neu, wahl.zeitfeld, wahl.zeit_eintragen).als_dict()
+            item.timer = TimerWahl("", neu, uhr=wahl.uhr).als_dict()
             state.plaene.timer_setzen(item.id, item.timer)
 
         return Profilziel(
@@ -218,38 +221,25 @@ def uebung_timer_view(
     item: PlanItem | None = None,
 ) -> ft.View:
     route = uebung_timer_route(basis, uebung, item)
-    wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
-    katalog_wahl = state.uebung_timer.setdefault(uebung.id, {})
+    key = schluessel(uebung, item)
     auswahl = profile_zur_wahl(uebung, plan, item)
+    if einmal := state.uhr_einmal.get(key):
+        auswahl = [einmal_timer(einmal), *auswahl]
     profil = timer_fuer(uebung, plan, item)
-    if item is None and (gemerkt := katalog_wahl.get("profil")):
+    if gemerkt := state.uhr_wahl.get(key):
         profil = next((p for p in auswahl if p.id == gemerkt), profil)
-    zeit_eintragen = (
-        wahl.zeit_eintragen if item is not None else katalog_wahl.get("zeit_eintragen", True)
-    )
-    feld_gemerkt = wahl.zeitfeld if item is not None else str(katalog_wahl.get("zeitfeld") or "")
+    #: „zählt“ — für jetzt, sonst wie die Übung (P79 D2/D3)
+    zaehlt = state.uhr_zaehlt.get(key, uebung.zeit_zaehlt)
     felder = uebung_lauf.felder_der_uebung(uebung, item)
-    zeitfelder = [f for f in ("hold", "duration") if f in felder]
 
     def kontext() -> Any:
         return uebung_lauf.kontext_fuer(
             uebung,
             plan,
             item,
-            zeit_eintragen=zeit_eintragen,
-            feld=feld_gemerkt or None,
+            zeit_eintragen=zaehlt,
             auspraegung=uebung_lauf.gewaehlte_ausfuehrung(state, uebung, item),
         )
-
-    # -- Speichern, wo die Wahl hingehört ------------------------------------------------
-
-    def wahl_speichern(neu: TimerWahl) -> None:
-        if item is not None:
-            item.timer = neu.als_dict()
-            state.plaene.timer_setzen(item.id, item.timer)
-
-    def katalog_merken(**werte: Any) -> None:
-        katalog_wahl.update(werte)
 
     def neu_zeichnen() -> None:
         with contextlib.suppress(Exception):
@@ -257,121 +247,14 @@ def uebung_timer_view(
 
     def profil_waehlen(p: TimerProfil) -> Callable[[], None]:
         def handler() -> None:
-            if item is not None:
-                if wahl.eigen is not None and p.id == wahl.eigen.id:
-                    return
-                ist_plan = (pt := plan_timer(plan)) is not None and p.id == pt.id
-                wahl_speichern(
-                    TimerWahl("" if ist_plan else p.id, None, wahl.zeitfeld, wahl.zeit_eintragen)
-                )
-            else:
-                katalog_merken(profil=p.id)
+            state.uhr_wahl[key] = p.id  # für jetzt — dauerhaft in der Übung bzw. im Plan
             neu_zeichnen()
 
         return handler
 
-    def profil_speichern(geaendert: TimerProfil) -> None:
-        """Ein geändertes „zählt“: im Plan als eigene Kopie der Planübung, sonst in der Übung."""
-        if item is not None:
-            wahl_speichern(TimerWahl("", geaendert, wahl.zeitfeld, wahl.zeit_eintragen))
-        else:
-            eigene = profile_der_uebung(uebung)
-            ids = [p.id for p in eigene]
-            if geaendert.id in ids and uebung.timer:
-                uebung.timer = [
-                    geaendert.als_dict() if p.id == geaendert.id else p.als_dict() for p in eigene
-                ]
-            else:  # die Timer-Regel wird ein eigenes Profil
-                uebung.timer = [
-                    geaendert.als_dict(),
-                    *(p.als_dict() for p in eigene if p.id != geaendert.id),
-                ]
-            state.uebungen.speichern(uebung)
-            katalog_merken(profil=geaendert.id)
+    def zaehlt_umschalten(e: ft.Event[ft.Switch]) -> None:
+        state.uhr_zaehlt[key] = bool(e.control.value)
         neu_zeichnen()
-
-    def zaehlt_umschalten(k: int, i: int) -> Callable[[], None]:
-        def handler() -> None:
-            if profil is None:
-                return
-            neu = _kopie(profil)
-            a = neu.alle_teile()[k].abschnitte[i]
-            a.zaehlt = not a.zaehlt
-            profil_speichern(neu)
-
-        return handler
-
-    def eintragen_umschalten(e: ft.Event[ft.Switch]) -> None:
-        an = bool(e.control.value)
-        if item is not None:
-            wahl_speichern(TimerWahl(wahl.profil_id, wahl.eigen, wahl.zeitfeld, an))
-        else:
-            katalog_merken(zeit_eintragen=an)
-        neu_zeichnen()
-
-    def feld_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
-        feld = str(e.control.selected[0]) if e.control.selected else ""
-        if item is not None:
-            wahl_speichern(TimerWahl(wahl.profil_id, wahl.eigen, feld, wahl.zeit_eintragen))
-        else:
-            katalog_merken(zeitfeld=feld)
-        neu_zeichnen()
-
-    def profil_hinzufuegen() -> None:
-        """„+ Profil“: eines aus der Timer-Bibliothek in die Übung übernehmen.
-
-        Neu gezeichnet wird erst, wenn der Dialog wirklich zu ist (`Nachher`) — sonst
-        bliebe sein Abbild stehen (Flet 1.0.3, `components/dialoge.py`)."""
-        dialog: ft.AlertDialog
-        nachher = Nachher()
-
-        def nehmen(vorlage: TimerProfil) -> Callable[[], None]:
-            def handler() -> None:
-                neu = _kopie(vorlage)
-                neu.id = new_id()
-                eigene = [p.als_dict() for p in profile_der_uebung(uebung)]
-                uebung.timer = [*eigene, neu.als_dict()]
-                state.uebungen.speichern(uebung)
-                if item is not None:
-                    wahl_speichern(TimerWahl(neu.id, None, wahl.zeitfeld, wahl.zeit_eintragen))
-                else:
-                    katalog_merken(profil=neu.id)
-                nachher.danach(neu_zeichnen)
-                schliessen(dialog)
-
-            return handler
-
-        def neues() -> None:
-            nachher.danach(lambda: page.push_route(f"{route}/bearbeiten"))
-            schliessen(dialog)
-
-        dialog = ft.AlertDialog(
-            on_dismiss=nachher.bei_schliessen,
-            title=ft.Text("Timer für diese Übung"),
-            content=ft.Column(
-                tight=True,
-                scroll=ft.ScrollMode.AUTO,
-                controls=[
-                    ft.ListTile(
-                        leading=ft.Icon(ft.Icons.ADD),
-                        title=ft.Text("Neues Profil"),
-                        subtitle=ft.Text("Einzeltimer oder Folge mit Teilen", size=12),
-                        on_click=neues,
-                    ),
-                    hinweis("Oder aus der Timer-Bibliothek — die Übung bekommt eine eigene Kopie."),
-                    *(
-                        ft.ListTile(
-                            title=ft.Text(p.anzeigename),
-                            subtitle=ft.Text(p.kurztext(), size=12),
-                            on_click=nehmen(p),
-                        )
-                        for p in state.timer_profile()
-                    ),
-                ],
-            ),
-            actions=[ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog))],
-        )
-        page.show_dialog(dialog)
 
     # -- Starten ---------------------------------------------------------------------------
 
@@ -379,15 +262,27 @@ def uebung_timer_view(
         with contextlib.suppress(Exception):
             page.show_dialog(ft.SnackBar(ft.Text(text)))
 
-    def starten() -> None:
-        if profil is None:
+    def starten(mit: TimerProfil | None = None) -> None:
+        gewaehlt = mit or profil
+        if gewaehlt is None:
             return
         try:
-            e = uebung_lauf.starten(page, state, kontext(), _kopie(profil))
+            e = uebung_lauf.starten(page, state, kontext(), _kopie(gewaehlt))
         except RuntimeError as fehler:
             melden(str(fehler))
             return
         state.uebung_laeufe[uebung.id] = e.id
+
+    def zeit_stellen() -> None:
+        """Ein Tipp auf die Zeit: Timer ohne Ablauf stellen und gleich starten (P79 D4)."""
+
+        def los(sekunden: int) -> None:
+            state.uhr_einmal[key] = sekunden
+            neu = einmal_timer(sekunden)
+            state.uhr_wahl[key] = neu.id
+            starten(neu)
+
+        page.show_dialog(zeit_blatt(profil.gesamt_s() if profil is not None else 60, starten=los))
 
     def bereitstellen() -> None:
         if _bereitgestellt(state, uebung.id):
@@ -542,7 +437,10 @@ def uebung_timer_view(
                         spacing=8,
                         controls=[
                             ft.OutlinedButton(
-                                "Nochmal", icon=ft.Icons.REPLAY, on_click=starten, expand=True
+                                "Nochmal",
+                                icon=ft.Icons.REPLAY,
+                                on_click=lambda: starten(),
+                                expand=True,
                             ),
                             ft.FilledTonalButton(
                                 "Nächste Übung" if item is not None else "Zurück",
@@ -583,7 +481,7 @@ def uebung_timer_view(
                         ],
                     ),
                     ft.Text(
-                        "Tippen schaltet um",
+                        "ändern: in „Übung bearbeiten“",
                         size=12,
                         opacity=0.7,
                         expand=True,
@@ -602,10 +500,12 @@ def uebung_timer_view(
                     ft.Text(kopf, size=12, weight=ft.FontWeight.W_600, color=ft.Colors.PRIMARY)
                 )
             for i, a in enumerate(teil.abschnitte):
-                knopf: ft.Control = (
-                    ft.FilledButton("zählt", icon=ft.Icons.CHECK, on_click=zaehlt_umschalten(k, i))
-                    if a.zaehlt
-                    else ft.OutlinedButton("zählt nicht", on_click=zaehlt_umschalten(k, i))
+                knopf: ft.Control = ft.Container(
+                    padding=ft.Padding.symmetric(horizontal=10, vertical=4),
+                    border_radius=10,
+                    bgcolor=ft.Colors.PRIMARY_CONTAINER if a.zaehlt else None,
+                    border=None if a.zaehlt else ft.Border.all(1, ft.Colors.OUTLINE),
+                    content=ft.Text("zählt" if a.zaehlt else "zählt nicht", size=12),
                 )
                 zeilen.append(
                     ft.Container(
@@ -645,44 +545,33 @@ def uebung_timer_view(
         )
         return karte(*zeilen, abstand=6)
 
-    def zeitfeld_teil() -> list[ft.Control]:
-        """„Zeit eintragen“ und — bietet die Übung beides an — welches Feld."""
-        teile: list[ft.Control] = [
-            ft.Switch(
-                label="Zeit eintragen (aus: nur „gemacht“)",
-                value=zeit_eintragen,
-                on_change=eintragen_umschalten,
-            )
-        ]
-        if not zeit_eintragen:
-            return teile
-        if not zeitfelder:
-            teile.append(hinweis("Diese Übung hat kein Zeitfeld — eingetragen wird „gemacht“."))
-            return teile
-        feld = kontext().zeitfeld
-        if len(zeitfelder) > 1 and profil is not None:
-            folge = profil.folge()
-            saetze = [a.dauer_s for *_, a in folge if a.zaehlt]
-            teile.append(
-                ft.SegmentedButton(
-                    selected=[feld or "hold"],
-                    show_selected_icon=False,
-                    segments=[
-                        ft.Segment(
-                            value="hold",
-                            label=ft.Text(f"Haltezeit je Satz\n{_werte_text(saetze[:4])}", size=13),
-                        ),
-                        ft.Segment(
-                            value="duration",
-                            label=ft.Text(f"Zeit\n{dauer_text(sum(saetze))}", size=13),
-                        ),
-                    ],
-                    on_change=feld_gewaehlt,
-                )
-            )
-        else:
-            teile.append(hinweis(f"Eingetragen wird: {FELDNAMEN.get(feld or '', 'gemacht')}."))
-        return teile
+    def zaehlt_teil() -> ft.Control:
+        """Wofür die Zeit zählt (Ben, 22.10.2026, P79: „beim Timer/Stoppuhr-Werkzeug selbst mit
+        angegeben“) — für jetzt umschaltbar, die Vorgabe steht in der Übung."""
+        als = "Haltezeit je Satz" if zaehlt_als(felder, uebung) == "hold" else "Zeit"
+        return karte(
+            ft.Row(
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Column(
+                        spacing=0,
+                        expand=True,
+                        controls=[
+                            ft.Text(f"Zählt für {uebung.name}", weight=ft.FontWeight.W_600),
+                            ft.Text(
+                                f"als {als} · in den offenen Eintrag"
+                                if zaehlt
+                                else "nur „gemacht“ — für jetzt",
+                                size=12,
+                                opacity=0.75,
+                            ),
+                        ],
+                    ),
+                    ft.Switch(value=zaehlt, tooltip="Timerzeit zählt", on_change=zaehlt_umschalten),
+                ],
+            ),
+            abstand=0,
+        )
 
     def vorher() -> list[ft.Control]:
         chips: list[ft.Control] = [
@@ -694,35 +583,32 @@ def uebung_timer_view(
             )
             for p in auswahl
         ]
-        chips.append(
-            ft.Chip(
-                label=ft.Text("Profil"), leading=ft.Icon(ft.Icons.ADD), on_click=profil_hinzufuegen
-            )
-        )
-
-        async def bearbeiten() -> None:
-            if profil is not None:
-                await page.push_route(f"{route}/bearbeiten/{profil.id}")
-
         teile: list[ft.Control] = [
-            kartentitel(
-                "Timer dieser Übung",
-                ft.IconButton(
-                    ft.Icons.EDIT_OUTLINED,
-                    tooltip="Profil bearbeiten (Abschnitte, Teile, Runden)",
-                    on_click=bearbeiten,
-                    visible=profil is not None,
-                ),
+            ft.Row(
+                alignment=ft.MainAxisAlignment.CENTER,
+                controls=[
+                    ft.TextButton(
+                        content=ft.Text(
+                            dauer_text(profil.gesamt_s()) if profil is not None else "0:00",
+                            size=56,
+                            weight=ft.FontWeight.W_300,
+                        ),
+                        tooltip="Zeit stellen — Timer ohne Ablauf",
+                        on_click=zeit_stellen,
+                    )
+                ],
             ),
+            kartentitel("Timer dieser Übung"),
             ft.Row(wrap=True, spacing=8, run_spacing=8, controls=chips),
         ]
         if profil is None:
-            teile.append(
+            teile += [
                 hinweis(
-                    "Noch kein Timer für diese Übung — „+ Profil“ übernimmt einen aus der "
-                    "Timer-Bibliothek."
-                )
-            )
+                    "Noch kein Timer für diese Übung — tippe auf die Zeit und stell einen ohne "
+                    "Ablauf. Profile mit Abschnitten legst du in „Übung bearbeiten“ an."
+                ),
+                zaehlt_teil(),
+            ]
             return teile
         bereit = _bereitgestellt(state, uebung.id)
         # Eine für sich laufende Messung blockiert nicht — sie kommt mit (`platz_machen`)
@@ -730,14 +616,14 @@ def uebung_timer_view(
         teile.extend(
             [
                 profil_karte(),
-                *zeitfeld_teil(),
+                zaehlt_teil(),
                 ft.Row(
                     spacing=8,
                     controls=[
                         ft.FilledButton(
                             "Starten",
                             icon=ft.Icons.PLAY_ARROW,
-                            on_click=starten,
+                            on_click=lambda: starten(),
                             disabled=andere is not None,
                             expand=True,
                         ),

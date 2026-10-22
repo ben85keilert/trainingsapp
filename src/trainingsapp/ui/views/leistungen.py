@@ -510,7 +510,19 @@ def leistungen_view(
     mehr = _nachtragen_zeile(uebung, nachtragen, weiter_nach, leistungen)
     ansicht = ft.View(
         route=route,
-        appbar=formular_leiste(leistungen.titel, abbrechen=abbrechen, speichern=speichern),
+        appbar=formular_leiste(
+            leistungen.titel,
+            abbrechen=abbrechen,
+            speichern=speichern,
+            # Das i führt zur Übungsseite, wie überall (Ben, 22.10.2026, P79) — speichert vorher
+            vorher=[
+                ft.IconButton(
+                    ft.Icons.INFO_OUTLINE,
+                    tooltip="Übung ansehen",
+                    on_click=weiter_nach(f"/uebung/{uebung.id}"),
+                )
+            ],
+        ),
         scroll=ft.ScrollMode.AUTO,
         padding=16,
         controls=[
@@ -621,7 +633,18 @@ def leistungen_blatt(
         # ein kurzes Blatt bleibt kurz (Ben: „man hat mehr Orientierung“)
         content=blatt_spalte(
             [
-                ft.Text(leistungen.titel, size=20, weight=ft.FontWeight.W_600),
+                ft.Row(
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text(leistungen.titel, size=20, weight=ft.FontWeight.W_600, expand=True),
+                        # Das i führt zur Übungsseite, wie überall (P79) — speichert vorher
+                        ft.IconButton(
+                            ft.Icons.INFO_OUTLINE,
+                            tooltip="Übung ansehen",
+                            on_click=weiter_nach(f"/uebung/{uebung.id}"),
+                        ),
+                    ],
+                ),
                 leistungen.kopf,
                 leistungen.liste,
                 *mehr,

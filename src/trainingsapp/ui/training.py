@@ -137,7 +137,6 @@ def uebung_fuer(state: Any, sportart: str) -> Exercise:
         description="Ausdauer — mit GPS oder ohne aufgezeichnet (Reiter „Messung“, „Ausdauer“).",
         result_spec=ResultSpec(layout=Layout.SINGLE, fields=felder),
         typen=["Ausdauer"],
-        default_felder=["distance", "duration"],
     )
     state.uebungen.speichern(uebung)
     return uebung

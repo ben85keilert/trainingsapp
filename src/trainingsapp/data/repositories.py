@@ -129,8 +129,8 @@ class ExerciseRepo:
                      is_builtin, result_spec_json, limit_spec_json,
                      default_target_json, default_input_mode, archived, created_at, updated_at,
                      family_id, default_fields_json, package_id, timer_json, clock_on,
-                     clock_counts_as)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     clock_counts_as, clock_counts)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -148,6 +148,7 @@ class ExerciseRepo:
                     timer_json = excluded.timer_json,
                     clock_on = excluded.clock_on,
                     clock_counts_as = excluded.clock_counts_as,
+                    clock_counts = excluded.clock_counts,
                     updated_at = excluded.updated_at,
                     revision = revision + 1
                 """,
@@ -162,16 +163,16 @@ class ExerciseRepo:
                     json.dumps(uebung.result_spec.to_dict(), ensure_ascii=False),
                     json.dumps(uebung.limit_spec, ensure_ascii=False),
                     json.dumps(uebung.default_target, ensure_ascii=False),
-                    modus_aus_felder(uebung.default_felder),
+                    uebung.default_input_mode,
                     int(uebung.archived),
                     uebung.created_at.isoformat(),
                     uebung.updated_at.isoformat(),
                     uebung.family_id,
-                    _felder_json(uebung.default_felder),
                     uebung.package_id,
                     json.dumps(uebung.timer, ensure_ascii=False),
                     int(uebung.uhr),
                     uebung.zaehlt_als,
+                    int(uebung.zeit_zaehlt),
                 ),
             )
             # Medien: alle Verweise neu schreiben. Einfacher als Abgleich, und
@@ -516,7 +517,6 @@ class ExerciseRepo:
             limit_spec=json.loads(r["limit_spec_json"]),
             default_target=json.loads(r["default_target_json"]),
             default_input_mode=r["default_input_mode"],
-            default_felder=_felder_lesen(r["default_fields_json"]),
             archived=bool(r["archived"]),
             created_at=datetime.fromisoformat(r["created_at"]),
             updated_at=datetime.fromisoformat(r["updated_at"]),
@@ -526,6 +526,7 @@ class ExerciseRepo:
             timer=_json_lesen(r["timer_json"], []),
             uhr=bool(r["clock_on"]),
             zaehlt_als=r["clock_counts_as"] or "",
+            zeit_zaehlt=bool(r["clock_counts"]),
         )
 
 
@@ -785,27 +786,21 @@ class PlanRepo:
     def uebung_hinzufuegen(
         self, plan_id: str, exercise_id: str, target: dict[str, Any] | None = None
     ) -> PlanItem:
-        """Hängt eine Übung ans Ende des Plans — mit dem Standard der Übung.
+        """Hängt eine Übung ans Ende des Plans — sie folgt der Übung (Ben, 22.10.2026, P79).
 
-        Ziel und Eingabestufe kommen aus der Übung (``target`` überschreibt das
-        Ziel); Chips bleiben leer, also „wie die Übung".
+        Nichts wird kopiert: Ziel, Parameter, Chips, Uhr und Timer gelten „wie die Übung“, bis
+        man sie im Plan ändert (``target`` setzt gleich ein eigenes Ziel, etwa aus einem Kurs).
         """
         naechste = self.con.execute(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM plan_item WHERE plan_id = ?",
             (plan_id,),
         ).fetchone()[0]
-        standard = self.con.execute(
-            "SELECT default_target_json, default_input_mode, default_fields_json "
-            "FROM exercise WHERE id = ?",
-            (exercise_id,),
-        ).fetchone()
         item = PlanItem(
             plan_id=plan_id,
             exercise_id=exercise_id,
             order=naechste,
-            target=target if target is not None else json.loads(standard[0]) if standard else {},
-            input_mode=standard[1] if standard else EINGABE_CHIPS,
-            felder=_felder_lesen(standard[2]) if standard else None,
+            target=target,
+            input_mode=EINGABE_CHIPS,
         )
         with transaktion(self.con):
             self._item_schreiben(item)
@@ -845,7 +840,8 @@ class PlanRepo:
                 )
             self._beruehrt(plan_id)
 
-    def ziel_setzen(self, item_id: str, target: dict[str, Any]) -> None:
+    def ziel_setzen(self, item_id: str, target: dict[str, Any] | None) -> None:
+        """Ziel der Planübung — ``None``: wie die Übung (P79)."""
         self.con.execute(
             "UPDATE plan_item SET target_json = ? WHERE id = ?",
             (json.dumps(target, ensure_ascii=False), item_id),
@@ -1004,10 +1000,12 @@ class PlanRepo:
             self._beruehrt(plan_id)
 
     def item_speichern(self, item: PlanItem) -> None:
-        """Ziel, Stufe und Chips einer Planübung auf einmal (Standard übernehmen)."""
+        """Ziel, Parameter, Chips und Timer einer Planübung auf einmal („Im Plan einstellen“,
+        „Alles wie die Übung“ — P79)."""
         with transaktion(self.con):
             self.ziel_setzen(item.id, item.target)
             self.eingabe_setzen(item.id, item.input_mode, item.quick, item.felder)
+            self.timer_setzen(item.id, item.timer)
 
     def verwendungen(
         self, exercise_id: str, subject_id: str | None = None
@@ -1638,6 +1636,53 @@ class SessionRepo:
         liste = list(bisher) if isinstance(bisher, list) else ([bisher] if bisher else [])
         return self.eintrag_korrigieren(
             aktuell.id, {**basis, feld_key: [*liste, wert]}, spec=neue_kopie
+        )
+
+    def lauf_eintragen(
+        self,
+        session: Session,
+        uebung: Exercise,
+        werte: dict[str, Any],
+        tag: date,
+        kontext: dict[str, Any] | None = None,
+        *,
+        beginn: datetime | None = None,
+        ende: datetime | None = None,
+    ) -> SessionEntry:
+        """Ein Lauf von Stoppuhr oder Timer — wie ein Tipp in den offenen Eintrag (Ben,
+        22.10.2026, P79 D1: „im letzten aktiven Eintrag gesammelt …, wenn es keine Änderungen
+        der Einstellungen oder andere Gründe gibt“).
+
+        Haltezeiten hängen als Sätze an, Zeit kommt zur Zeit dazu. Ein neuer, offener Eintrag
+        beginnt nur dort, wo auch ein Tipp einen begänne: andere Ausführung, abgeschlossen,
+        länger als `offen_min` unberührt, anderer Plan oder Tag (`ziel_eintrag`). Ohne Zeit
+        („zählt“ aus) bleibt ein offener Eintrag, wie er ist; ohne offenen entsteht wie bisher
+        ein abgeschlossenes „gemacht“ von ``beginn`` bis ``ende``.
+        """
+        kontext = kontext or {}
+        zeit = {k: v for k, v in werte.items() if k in ("hold", "duration")}
+        aktuell = self.ziel_eintrag(session.subject_id, uebung, tag, session.plan_id, kontext)
+        if aktuell is None:
+            if not zeit:
+                return self.eintrag_anlegen(
+                    session, uebung, dict(werte), started_at=beginn, ended_at=ende
+                )
+            with transaktion(self.con):
+                self.offene_schliessen(session, uebung, tag, ausfuehrung=kontext)
+                return self.eintrag_anlegen(session, uebung, dict(werte), started_at=beginn)
+        if not zeit:
+            return aktuell
+        kopie = aktuell.spec_snapshot
+        fehlt = kopie is None or any(kopie.field_by_key(k) is None for k in zeit)
+        basis = werte_modernisieren(aktuell.result) if fehlt else dict(aktuell.result)
+        if "hold" in zeit:
+            bisher = basis.get("hold")
+            liste = list(bisher) if isinstance(bisher, list) else ([bisher] if bisher else [])
+            basis["hold"] = [*liste, *zeit["hold"]]
+        if "duration" in zeit:
+            basis["duration"] = (basis.get("duration") or 0) + zeit["duration"]
+        return self.eintrag_korrigieren(
+            aktuell.id, basis, spec=uebung.result_spec if fehlt else None
         )
 
     def wert_setzen(

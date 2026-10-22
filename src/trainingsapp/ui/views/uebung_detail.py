@@ -1,4 +1,9 @@
-"""Detailansicht einer Übung — eine Route auf dem Stapel (`/uebung/<id>`).
+"""Die Übungsseite — eine Route auf dem Stapel (`/uebung/<id>`, unter einem Plan `…/info/<item>`).
+
+Ben, 22.10.2026 (P79, `docs/plan_uebungen_einstellen.md`): Das i führt überall hierher — aus
+dem Plan, von Heute, aus Verlauf, Tagebuch, Paket, Archiv und Papierkorb. Die Seite zeigt alles
+und ändert nichts; geändert wird über den Stift („Übung bearbeiten“, gilt überall) oder, aus
+einem Plan, über „Im Plan einstellen“ (Karte „In diesem Plan“ oben, Abschnitt „In Plänen“).
 
 Aus welchem Paket die Übung kommt, steht unscheinbar in Klammern hinter der
 Beschreibung (Ben, 14.10.2026) — „eigene Übung“, wenn sie hier angelegt oder
@@ -21,17 +26,30 @@ from trainingsapp.core import varianten as var
 from trainingsapp.core.models import (
     Exercise,
     Media,
+    Plan,
     PlanItem,
     new_id,
 )
-from trainingsapp.core.parameter import gewaehlte_felder
 from trainingsapp.core.result_spec import format_wert
-from trainingsapp.core.standards import abweichungen, aktive_felder, vom_standard
-from trainingsapp.core.uebung_timer import TimerWahl, profile_der_uebung, uhr_an, zaehlt_als
-from trainingsapp.ui.components.dialoge import Nachher
+from trainingsapp.core.standards import (
+    abweichungen,
+    aktive_felder,
+    plan_spec,
+    varianten_an,
+    ziel_von,
+)
+from trainingsapp.core.uebung_timer import (
+    TimerWahl,
+    profile_der_uebung,
+    timer_fuer,
+    uhr_an,
+    zaehlt_als,
+)
+from trainingsapp.ui.components.dialoge import Nachher, meldung, schliessen
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
+from trainingsapp.ui.components.planstand import stand_zeile
 from trainingsapp.ui.components.varianten import plakette
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang_verlauf import aufnahmen_raster
@@ -77,20 +95,24 @@ def uhr_und_timer(uebung: Exercise, item: PlanItem | None = None) -> ft.Control:
         zeilen.append(_uhr_zeile(ft.Icons.TIMER_OUTLINED, name, p.kurztext()))
     if not an:
         zaehlt, erklaerung = "nichts (Uhr aus)", "Keine Uhr in der Übung — „Gemacht“ hakt nur ab."
+    elif not uebung.zeit_zaehlt:
+        zaehlt = "nichts — nur „gemacht“"
+        erklaerung = "Timerzeit zählt nicht; beim Üben in der Leiste für jetzt umschaltbar."
     else:
         felder = (
             [f.key for f in aktive_felder(item, uebung)]
             if item is not None
             else [f.key for f in uebung.result_spec.fields]
         )
-        wohin = zaehlt_als(felder, uebung, item)
+        wohin = zaehlt_als(felder, uebung)
         zaehlt = "Haltezeit je Satz" if wohin == "hold" else "Zeit"
+        # Ein Lauf geht in den offenen Eintrag wie ein Tipp (P79 D1)
         erklaerung = (
-            "„Fertig“ hakt die Übung ab und trägt ein: "
+            "„Fertig“ trägt in den offenen Eintrag ein: "
             + (
                 "jeder Lauf der Stoppuhr und jeder zählende Abschnitt eines Timers ist ein Satz"
                 if wohin == "hold"
-                else "die gelaufene Zeit, auch ohne den Parameter Zeit"
+                else "die gelaufene Zeit kommt dazu, auch ohne den Parameter Zeit"
             )
             + ". Pausen zählen nicht, unter 5 s fällt weg; „Abbrechen“ trägt nichts ein."
         )
@@ -110,7 +132,7 @@ def uhr_und_timer(uebung: Exercise, item: PlanItem | None = None) -> ft.Control:
         )
     )
     wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
-    if item is not None and (wahl.uhr is not None or wahl.zeitfeld):
+    if item is not None and (wahl.uhr is not None or wahl.profil_id or wahl.eigen):
         zeilen.append(ft.Text("In diesem Plan eingestellt (Einstellen).", size=12, opacity=0.6))
     return ft.Column(spacing=8, controls=zeilen)
 
@@ -260,15 +282,95 @@ def _varianten(liste: list[var.Variante]) -> ft.Control:
     )
 
 
+def _plan_karte(
+    uebung: Exercise, plan: Plan, item: PlanItem, einstellen: Callable[[], object] | None
+) -> ft.Control:
+    """Oben auf der Übungsseite, wenn man aus einem Plan kommt: was dort gilt (P79, Skizze A2).
+
+    Grau „wie die Übung“, sonst „nur hier“; „Im Plan einstellen“ öffnet die Seite dafür.
+    """
+    unterschiede = abweichungen(item, uebung)
+    parameter = [f for f in aktive_felder(item, uebung) if not var.ist_variante(f)]
+    spec = plan_spec(item, uebung)
+    ziel = ziel_von(item, uebung)
+    ziel_text = spec.format_shorthand(ziel) if ziel else "kein Ziel"
+    if "Ziel" in unterschiede and uebung.default_target:
+        ziel_text += f"  (Übung {uebung.result_spec.format_shorthand(uebung.default_target)})"
+    zeilen: list[ft.Control] = [
+        stand_zeile(
+            "Parameter",
+            " · ".join(f.label for f in parameter) or "nur abhaken",
+            "Parameter" in unterschiede or any(u.startswith("Chips") for u in unterschiede),
+        ),
+        stand_zeile("Ziel", ziel_text, "Ziel" in unterschiede),
+    ]
+    if var.varianten(uebung.result_spec):
+        an = varianten_an(item)
+        zeilen.append(stand_zeile("Varianten", "gezeigt" if an else "nicht gezeigt", not an))
+    profil = timer_fuer(uebung, plan, item)
+    uhr = uhr_an(uebung, item)
+    zeilen.append(
+        stand_zeile(
+            "Uhr, Timer",
+            ("an" + (f" · {profil.name}" if profil is not None else "")) if uhr else "aus",
+            "Uhr" in unterschiede or "Timer" in unterschiede,
+        )
+    )
+    return ft.Container(
+        padding=ft.Padding.only(left=14, top=10, right=14, bottom=10),
+        border_radius=16,
+        border=ft.Border.all(2, ft.Colors.PRIMARY),
+        content=ft.Column(
+            spacing=8,
+            controls=[
+                ft.Row(
+                    spacing=6,
+                    controls=[
+                        ft.Text("In diesem Plan", size=15, weight=ft.FontWeight.BOLD),
+                        ft.Text(f"„{plan.name}“", size=13, opacity=0.75),
+                    ],
+                ),
+                *zeilen,
+                *(
+                    [
+                        ft.Row(
+                            alignment=ft.MainAxisAlignment.END,
+                            controls=[
+                                ft.FilledTonalButton(
+                                    "Im Plan einstellen", icon=ft.Icons.TUNE, on_click=einstellen
+                                )
+                            ],
+                        )
+                    ]
+                    if einstellen is not None
+                    else []
+                ),
+            ],
+        ),
+    )
+
+
 def uebung_detail(
     page: ft.Page,
     state: AppState,
     uebung: Exercise,
     browser: ft.UrlLauncher,
     item: PlanItem | None = None,
+    *,
+    plan: Plan | None = None,
+    route: str | None = None,
+    einstellen: str | None = None,
 ) -> ft.View:
-    """`browser` ist ein Flet-Dienst, den `main()` einmal an der Seite registriert; mit
-    ``item`` (die Infoseite im Plan) zeigt „Uhr und Timer“, was die Planübung einstellt."""
+    """Die Übungsseite — überall dieselbe (Ben, 22.10.2026, P79: „ein Weg zur Info“).
+
+    Sie zeigt alles und ändert nichts: geändert wird über den Stift („Übung bearbeiten“) oder,
+    aus einem Plan, über „Im Plan einstellen“ (``einstellen``: dessen Route). ``route`` ist
+    die eigene Route — unter einem Plan (`…/info/<item>`) führt Zurück wieder dorthin. Mit
+    ``plan`` und ``item`` steht oben die Karte „In diesem Plan“, und „Uhr und Timer“ zeigt,
+    was die Planübung einstellt. `browser` ist ein Flet-Dienst, den `main()` einmal an der
+    Seite registriert.
+    """
+    geloescht = uebung.deleted_at is not None
 
     def oeffner(medium: Media) -> Callable[[], object]:
         async def handler() -> None:
@@ -276,25 +378,24 @@ def uebung_detail(
 
         return handler
 
-    async def bearbeiten() -> None:
-        await page.push_route(f"/uebung/{uebung.id}/bearbeiten")
+    def gehe_zu(ziel: str) -> Callable[[], object]:
+        async def handler() -> None:
+            await page.push_route(ziel)
 
-    async def timer_oeffnen() -> None:
-        """Der Timer dieser Übung (Ben, 17.10.2026) — ihre Profile, „zählt“, eintragen."""
-        await page.push_route(uebung_timer_route(f"/uebung/{uebung.id}", uebung))
+        return handler
 
     async def duplizieren() -> None:
-        """Kopie als Variante — für „links/rechts“, 45° statt 90° und Ähnliches.
+        """Kopie — für „links/rechts“, 45° statt 90° und Ähnliches.
 
-        Eine Kopie gehört zur Kachel des Originals: Im Verlauf addieren sich ihre
-        Mengen, die Variante wird ausgewiesen. Im Editor lässt sie sich
-        eigenständig machen (Liegestütz einarmig ist eine eigene Liste wert).
-        Sie ist eine eigene Übung — kein Paket-Update ändert sie.
+        Eine Kopie steht im Verlauf mit dem Original zusammen: Ihre Mengen addieren sich, die
+        Kopie wird ausgewiesen. Im Editor lässt sie sich lösen („Im Verlauf zusammen mit“;
+        Liegestütz einarmig ist eine eigene Liste wert). Sie ist eine eigene Übung — kein
+        Paket-Update ändert sie. „Variante“ heißt seit 22.10.2026 nur noch das Etikett (P61).
         """
         kopie = replace(
             uebung,
             id=new_id(),
-            name=f"{uebung.name} (Variante)",
+            name=f"{uebung.name} (Kopie)",
             is_builtin=False,
             package_id=None,
             media=[replace(m, id=new_id()) for m in uebung.media],
@@ -305,7 +406,11 @@ def uebung_detail(
         )
         state.uebungen.speichern(kopie)
         page.show_dialog(
-            ft.SnackBar(ft.Text("Variante angelegt — gleiche Kachel im Verlauf. Jetzt anpassen."))
+            ft.SnackBar(
+                ft.Text(
+                    f"Kopie angelegt — im Verlauf zusammen mit „{uebung.name}“. Jetzt anpassen."
+                )
+            )
         )
         await page.push_route(f"/uebung/{kopie.id}/bearbeiten")
 
@@ -324,14 +429,7 @@ def uebung_detail(
         state.uebungen.in_papierkorb(uebung.id)
         entfernt.danach(lambda: page.push_route("/"))
         page.pop_dialog()
-        page.show_dialog(
-            ft.SnackBar(
-                ft.Text(f"„{uebung.name}“ liegt im Papierkorb"),
-                action="Rückgängig",
-                on_action=rueckgaengig,
-                persist=False,  # mit Aktion bliebe sie stehen (`dialoge.meldung`)
-            )
-        )
+        page.show_dialog(meldung(f"„{uebung.name}“ liegt im Papierkorb", rueckgaengig))
 
     def rueckgaengig() -> None:
         state.uebungen.aus_papierkorb(uebung.id)
@@ -358,6 +456,15 @@ def uebung_detail(
             ft.FilledButton("Archivieren", on_click=archivieren),
         ],
     )
+
+    def wiederherstellen() -> None:
+        """Aus Archiv oder Papierkorb zurück in den Katalog (P79: Zeilen dort öffnen die Übung)."""
+        if geloescht:
+            state.uebungen.aus_papierkorb(uebung.id)
+        else:
+            state.uebungen.wiederherstellen(uebung.id)
+        page.show_dialog(ft.SnackBar(ft.Text(f"„{uebung.name}“ ist wieder im Katalog")))
+        state.neu_zeichnen()
 
     paket = state.pakete.laden(uebung.package_id) if uebung.package_id else None
     geaendert = state.pakete.abweichungen(uebung) if paket is not None else None
@@ -397,59 +504,72 @@ def uebung_detail(
             )
         )
 
-    # -- Standard für Pläne und Verwendungen -------------------------------------
+    # -- In Plänen (P79): jede Zeile öffnet „Im Plan einstellen“ dieses Plans --------------
 
-    def uebertrager(item: PlanItem) -> Callable[[], None]:
+    aufgenommen = Nachher()
+    auswahl: ft.AlertDialog
+
+    def aufnehmer(ziel: Plan) -> Callable[[], None]:
         def handler() -> None:
-            state.plaene.item_speichern(vom_standard(uebung, item))
-            page.show_dialog(ft.SnackBar(ft.Text("Standard in den Plan übertragen")))
-            state.neu_zeichnen()
+            state.plaene.uebung_hinzufuegen(ziel.id, uebung.id)
+            aufgenommen.danach(
+                lambda: page.show_dialog(
+                    ft.SnackBar(ft.Text(f"„{uebung.name}“ steht jetzt in „{ziel.name}“"))
+                )
+            )
+            aufgenommen.danach(state.neu_zeichnen)
+            schliessen(auswahl)
 
         return handler
 
-    def plan_oeffner(plan_id: str) -> Callable[[], object]:
-        async def handler() -> None:
-            await page.push_route(f"/plaene/{plan_id}")
-
-        return handler
-
-    standard_felder = gewaehlte_felder(uebung.result_spec, uebung.default_felder)
-    parameter = (
-        "Parameter " + ", ".join(f.label for f in standard_felder)
-        if standard_felder
-        else "nur abhaken"
+    auswahl = ft.AlertDialog(
+        title=ft.Text("In einen Plan aufnehmen"),
+        on_dismiss=aufgenommen.bei_schliessen,
+        actions=[ft.TextButton("Abbrechen", on_click=lambda: schliessen(auswahl))],
     )
-    ziel = (
-        f"Ziel {uebung.result_spec.format_shorthand(uebung.default_target)}"
-        if uebung.default_target
-        else "kein Ziel"
-    )
-    verwendungen: list[ft.Control] = [
-        ft.Text(
-            f"Neue Planübungen übernehmen: {ziel} · {parameter} · Chips wie oben.",
-            size=13,
+
+    def aufnehmen_fragen() -> None:
+        plaene = sorted(state.plaene.alle(state.profil.id), key=lambda p: (not p.aktiv, p.name))
+        auswahl.content = ft.Column(
+            tight=True,
+            scroll=ft.ScrollMode.AUTO,
+            controls=[
+                ft.ListTile(
+                    leading=ft.Icon(ft.Icons.LIST_ALT_OUTLINED),
+                    title=ft.Text(p.name),
+                    subtitle=None if p.aktiv else ft.Text("deaktiviert", size=12),
+                    on_click=aufnehmer(p),
+                )
+                for p in plaene
+            ]
+            or [ft.Text("Noch kein Plan — unter Übungen → Pläne anlegen.")],
         )
-    ]
-    for plan, item in state.plaene.verwendungen(uebung.id, state.profil.id):
-        unterschiede = abweichungen(item, uebung)
+        page.show_dialog(auswahl)
+
+    verwendungen: list[ft.Control] = []
+    for p, it in state.plaene.verwendungen(uebung.id, state.profil.id):
+        unterschiede = abweichungen(it, uebung)
         verwendungen.append(
             ft.ListTile(
                 leading=ft.Icon(ft.Icons.LIST_ALT_OUTLINED),
-                title=ft.Text(plan.name),
+                title=ft.Text(p.name),
                 subtitle=ft.Text(
-                    "weicht ab: " + ", ".join(unterschiede) if unterschiede else "wie der Standard",
+                    "nur hier: " + ", ".join(unterschiede) if unterschiede else "wie die Übung",
                     size=12,
+                    color=ft.Colors.TERTIARY if unterschiede else None,
                 ),
-                trailing=ft.IconButton(
-                    ft.Icons.DOWNLOAD_OUTLINED,
-                    tooltip="Standard in diesen Plan übertragen",
-                    on_click=uebertrager(item),
-                )
-                if unterschiede
-                else None,
-                on_click=plan_oeffner(plan.id),
+                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                tooltip="Im Plan einstellen",
+                on_click=gehe_zu(f"/plaene/{p.id}/ziel/{it.id}"),
                 content_padding=ft.Padding.only(left=0, right=0),
             )
+        )
+    if uebung.default_target:
+        vorgabe = uebung.result_spec.format_shorthand(uebung.default_target)
+        verwendungen.append(ft.Text(f"Vorgabe für Pläne: Ziel {vorgabe}", size=12, opacity=0.7))
+    if not geloescht:
+        verwendungen.append(
+            ft.TextButton("In einen Plan aufnehmen", icon=ft.Icons.ADD, on_click=aufnehmen_fragen)
         )
 
     videos: list[ft.Control] = [
@@ -464,7 +584,34 @@ def uebung_detail(
         if m.uri
     ]
 
-    abschnitte: list[ft.Control] = [
+    abschnitte: list[ft.Control] = []
+    if geloescht or uebung.archived:
+        abschnitte.append(
+            ft.Container(
+                padding=ft.Padding.only(left=14, top=6, right=6, bottom=6),
+                border_radius=12,
+                bgcolor=ft.Colors.SECONDARY_CONTAINER,
+                content=ft.Row(
+                    spacing=8,
+                    controls=[
+                        ft.Icon(
+                            ft.Icons.DELETE_OUTLINE if geloescht else ft.Icons.ARCHIVE_OUTLINED,
+                            size=20,
+                        ),
+                        ft.Text(
+                            "Im Papierkorb" if geloescht else "Archiviert — nicht im Katalog",
+                            expand=True,
+                        ),
+                        ft.TextButton("Wiederherstellen", on_click=wiederherstellen),
+                    ],
+                ),
+            )
+        )
+    if plan is not None and item is not None:
+        abschnitte.append(
+            _plan_karte(uebung, plan, item, gehe_zu(einstellen) if einstellen else None)
+        )
+    abschnitte += [
         ft.Row(
             spacing=16,
             controls=[
@@ -488,6 +635,12 @@ def uebung_detail(
         ),
         _abschnitt("Beschreibung", _beschreibung(uebung, herkunft)),
         _abschnitt(
+            "Videos und Links",
+            ft.Column(spacing=0, controls=videos)
+            if videos
+            else ft.Text("Noch keine Videos oder Links hinterlegt.", opacity=0.6),
+        ),
+        _abschnitt(
             "Regionen",
             ft.Row(
                 wrap=True, spacing=6, controls=[ft.Chip(label=ft.Text(t)) for t in uebung.regionen]
@@ -495,26 +648,20 @@ def uebung_detail(
             if uebung.regionen
             else ft.Text("—"),
         ),
-        _abschnitt("Eingabe", _notation(uebung)),
+        _abschnitt("Parameter", _notation(uebung)),
         *(
             [_abschnitt("Varianten", _varianten(liste))]
             if (liste := var.varianten(uebung.result_spec))
             else []
         ),
         _abschnitt("Uhr und Timer", uhr_und_timer(uebung, item)),
-        _abschnitt("Standard für Pläne", ft.Column(spacing=0, controls=verwendungen)),
+        _abschnitt("In Plänen", ft.Column(spacing=0, controls=verwendungen)),
         _abschnitt("Aufnahmen mit dieser Übung", aufnahmen_liste(page, state, uebung)),
         # Eigene Fotos und Videos (Ben, 19.10.2026; `views/anhang_verlauf.py`) — nur mit Aufnahmen
         *(
             [_abschnitt("Fotos und Videos", raster)]
             if (raster := aufnahmen_raster(page, state, uebung)) is not None
             else []
-        ),
-        _abschnitt(
-            "Videos",
-            ft.Column(spacing=0, controls=videos)
-            if videos
-            else ft.Text("Noch keine Videos hinterlegt.", opacity=0.6),
         ),
     ]
     if paket is not None and geaendert:
@@ -538,27 +685,40 @@ def uebung_detail(
             )
         )
 
+    # Oben nur Timer, Stift und ⋮ (P79, Skizze C1) — im Papierkorb nichts davon
+    aktionen: list[ft.Control] = (
+        []
+        if geloescht
+        else [
+            ft.IconButton(
+                ft.Icons.TIMER if profile_der_uebung(uebung) else ft.Icons.TIMER_OUTLINED,
+                tooltip="Timer dieser Übung",
+                on_click=gehe_zu(uebung_timer_route(f"/uebung/{uebung.id}", uebung)),
+            ),
+            ft.IconButton(
+                ft.Icons.EDIT_OUTLINED,
+                tooltip="Übung bearbeiten",
+                on_click=gehe_zu(f"/uebung/{uebung.id}/bearbeiten"),
+            ),
+            ft.PopupMenuButton(
+                icon=ft.Icons.MORE_VERT,
+                tooltip="Mehr",
+                items=[
+                    ft.PopupMenuItem(
+                        content="Kopie anlegen", icon=ft.Icons.CONTENT_COPY, on_click=duplizieren
+                    ),
+                    ft.PopupMenuItem(
+                        content="Archivieren oder löschen",
+                        icon=ft.Icons.DELETE_OUTLINE,
+                        on_click=entfernen_fragen,
+                    ),
+                ],
+            ),
+        ]
+    )
     return ft.View(
-        route=f"/uebung/{uebung.id}",
-        appbar=ft.AppBar(
-            title=ft.Text(uebung.name),
-            actions=[
-                ft.IconButton(
-                    ft.Icons.TIMER if profile_der_uebung(uebung) else ft.Icons.TIMER_OUTLINED,
-                    tooltip="Timer dieser Übung",
-                    on_click=timer_oeffnen,
-                ),
-                ft.IconButton(
-                    ft.Icons.CONTENT_COPY, tooltip="Variante anlegen (Kopie)", on_click=duplizieren
-                ),
-                ft.IconButton(ft.Icons.EDIT_OUTLINED, tooltip="Bearbeiten", on_click=bearbeiten),
-                ft.IconButton(
-                    ft.Icons.DELETE_OUTLINE,
-                    tooltip="Archivieren oder löschen",
-                    on_click=entfernen_fragen,
-                ),
-            ],
-        ),
+        route=route or f"/uebung/{uebung.id}",
+        appbar=ft.AppBar(title=ft.Text(uebung.name), actions=aktionen),
         scroll=ft.ScrollMode.AUTO,
         padding=20,
         controls=[sicher(ft.Column(spacing=22, controls=abschnitte), expand=False)],

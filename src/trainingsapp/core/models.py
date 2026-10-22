@@ -138,12 +138,11 @@ class Exercise:
     is_builtin: bool = False
     result_spec: ResultSpec = field(default_factory=ResultSpec)
     limit_spec: dict[str, Any] = field(default_factory=dict)
-    #: Standard für Pläne: Ziel und Eingabestufe, die eine neue Planübung
-    #: übernimmt (Chips stehen je Feld in `result_spec`) — `core/standards.py`
+    #: Vorgabe für Pläne: das Ziel jeder Planübung ohne eigenes (P79, `core.standards.ziel_von`).
+    #: Parameter und Chips gelten ohnehin überall, wo der Plan nichts anderes festlegt.
     default_target: dict[str, Any] = field(default_factory=dict)
+    #: Alte Eingabestufe (Migration 006) — bleibt für ältere Stände und die Synchronisation
     default_input_mode: str = "chips"
-    #: Standard der Parameter für neue Planübungen — ``None`` = alle, ``[]`` = nur abhaken
-    default_felder: list[str] | None = None
     media: list[Media] = field(default_factory=list)
     #: Typ-Tags: was für eine Übung das ist (Kräftigung, Dehnung, …) — optional
     typen: list[str] = field(default_factory=list)
@@ -169,6 +168,9 @@ class Exercise:
     #: „Zählt als“, wenn die Übung Haltezeit anbietet: ``hold`` oder ``duration``; leer =
     #: Haltezeit (`core.uebung_timer.zaehlt_als`)
     zaehlt_als: str = ""
+    #: Timerzeit zählt (Migration 028, P79 D2): Läufe von Stoppuhr und Timer tragen Zeit ein —
+    #: aus: nur „gemacht“. Beim Üben in der Leiste für jetzt umschaltbar.
+    zeit_zaehlt: bool = True
 
     def __post_init__(self) -> None:
         # Wer nur `category` angibt (Altbestand, Tutorial), bekommt sie als Typ.
@@ -350,18 +352,20 @@ EINGABE_FREI = "frei"
 
 @dataclass(slots=True)
 class PlanItem:
-    """Eine Übung im Plan: mit Ziel, Eingabestufe und eigenen Chips.
+    """Eine Übung im Plan: mit Ziel, Parametern, Chips und Timer — eigenen oder der Übung.
 
-    Hierarchie: Die Übung gibt Felder und Standard-Chips vor, der Plan
-    übernimmt sie und darf sie überschreiben, der Eintrag übernimmt den Plan
-    und darf wiederum abweichen.
+    Hierarchie: Die Übung gibt alles vor; die Planübung folgt ihr, bis man im Plan etwas
+    ändert (Ben, 22.10.2026, P79: „wie die Übung“ oder „nur hier“, `core/standards.py`); der
+    Eintrag übernimmt den Plan und darf wiederum abweichen.
     """
 
     id: str = field(default_factory=new_id)
     plan_id: str = ""
     exercise_id: str = ""
     order: int = 0
-    target: dict[str, Any] = field(default_factory=dict)
+    #: Ziel der Planübung — ``None`` = wie die Übung (`core.standards.ziel_von`), ``{}`` =
+    #: ausdrücklich keins
+    target: dict[str, Any] | None = None
     note: str = ""
     #: Abgeleitet aus `felder` (``haken`` bei keinem Parameter, sonst ``chips``) —
     #: bleibt für ältere Stände und die Synchronisation (Migration 010)

@@ -197,8 +197,8 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
     from trainingsapp.ui.views.plan import plan_view
     from trainingsapp.ui.views.plan_einstellen import plan_einstellen
     from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
-    from trainingsapp.ui.views.plan_info import plan_info_view
     from trainingsapp.ui.views.tag import UEBERSICHT, ZEITLEISTE, tag_view, tagesansicht
+    from trainingsapp.ui.views.uebung_detail import uebung_detail
     from trainingsapp.ui.views.verlauf import verlauf
 
     state, plan, item, uebung, eintrag = welt
@@ -210,8 +210,12 @@ def test_m3_ansichten_lassen_sich_bauen(page, welt) -> None:
     assert plan_hinzufuegen_view(page, state, plan, basis=basis).route == f"{basis}/hinzufuegen"
     assert plan_hinzufuegen_view(page, state, plan).route.endswith("/hinzufuegen")
     browser = Dienst(launch_url=None)
-    info = plan_info_view(page, state, f"/plan/{plan.id}", uebung, browser, item)
-    assert info.route == f"/plan/{plan.id}/info/{item.id}"
+    # Das i: die Übungsseite unter dem Plan, oben die Karte „In diesem Plan“ (P79)
+    route = f"/plan/{plan.id}/info/{item.id}"
+    info = uebung_detail(
+        page, state, uebung, browser, item, plan=plan, route=route, einstellen="/x"
+    )
+    assert info.route == route
     assert plan_einstellen(page, state, plan, item, uebung).route.endswith(f"/ziel/{item.id}")
     assert formular_korrektur(page, state, eintrag).route.endswith("/korrigieren")
     assert eintrag_view(page, state, eintrag).route == f"/eintrag/{eintrag.id}"
@@ -281,7 +285,8 @@ def _alle(c):
 
 
 def test_planuebung_parameter_und_chips_einstellen(page, welt) -> None:
-    """Parameter an/aus, Chips wählen, eigener Chip, Zurücksetzen nur bei Abweichung."""
+    """„Im Plan einstellen“ (P79): Parameter an/aus, Chips wählen — „nur hier“ mit ↺; was der
+    Übung gleicht, folgt ihr; „Alles wie die Übung“ setzt die Seite zurück."""
     import asyncio
 
     from trainingsapp.core.models import Exercise
@@ -305,10 +310,16 @@ def test_planuebung_parameter_und_chips_einstellen(page, welt) -> None:
     page.show_dialog = lambda d: None
     ansicht = plan_einstellen(page, state, plan, item, u)
 
-    knopfarten = ft.FilledTonalButton | ft.OutlinedButton | ft.FilledButton | ft.TextButton
+    def schalter(name: str) -> ft.Switch:
+        return next(
+            c
+            for v in ansicht.controls
+            for c in _alle(v)
+            if isinstance(c, ft.Switch) and f"„{name}“" in (c.tooltip or "")
+        )
 
     def knopf(text: str):
-        """Knopf mit diesem Text — als Inhalt oder als Text in einer Zeile."""
+        knopfarten = ft.FilledTonalButton | ft.OutlinedButton | ft.FilledButton | ft.TextButton
         return next(
             c
             for v in [*ansicht.appbar.actions, *ansicht.controls]
@@ -317,15 +328,17 @@ def test_planuebung_parameter_und_chips_einstellen(page, welt) -> None:
             and (c.content == text or any(getattr(t, "value", None) == text for t in _alle(c)))
         )
 
-    zuruecksetzen = next(
-        c
-        for v in ansicht.controls
-        for c in _alle(v)
-        if isinstance(c, ft.OutlinedButton) and c.content == "Standard der Übung übernehmen"
-    )
-    assert zuruecksetzen.disabled  # entspricht dem Standard
-    knopf("Skala").on_click()  # Skala aus → nur Wiederholungen
-    assert not zuruecksetzen.disabled
+    def texte() -> list[str]:
+        return [
+            c.value
+            for v in ansicht.controls
+            for c in _alle(v)
+            if isinstance(c, ft.Text) and c.value
+        ]
+
+    assert "nur hier" not in texte()  # alles wie die Übung
+    schalter("Skala 0–10").on_change()  # Skala aus → nur Wiederholungen
+    assert "nur hier" in texte()
     chip_15 = next(
         c
         for v in ansicht.controls
@@ -336,7 +349,15 @@ def test_planuebung_parameter_und_chips_einstellen(page, welt) -> None:
     asyncio.run(knopf("Speichern").on_click())
     gespeichert = state.plaene.item_laden(item.id)
     assert gespeichert.felder == ["reps"] and gespeichert.quick == {"reps": [10, 20]}
+    assert gespeichert.target is None  # das Ziel folgt der Übung
     assert gesprungen
+
+    # „Alles wie die Übung“: folgt ihr wieder ganz
+    ansicht = plan_einstellen(page, state, plan, gespeichert, u)
+    knopf("Alles wie die Übung").on_click()
+    asyncio.run(knopf("Speichern").on_click())
+    zurueck = state.plaene.item_laden(item.id)
+    assert (zurueck.felder, zurueck.quick, zurueck.target) == (None, {}, None)
 
     # Nichts an: nur abhaken — die Planansicht baut ohne Eingabefelder
     state.plaene.eingabe_setzen(item.id, "chips", {}, [])
@@ -577,7 +598,7 @@ def test_einzelne_uebung_trainieren_ohne_plan(page, state) -> None:
     from trainingsapp.data.seed import seed_id
     from trainingsapp.ui.views.katalog import katalog
     from trainingsapp.ui.views.plan import einzel_plan, plan_view
-    from trainingsapp.ui.views.plan_info import plan_info_view
+    from trainingsapp.ui.views.uebung_detail import uebung_detail
 
     page.show_dialog = lambda _d: None
     page.update = lambda: None
@@ -586,7 +607,8 @@ def test_einzelne_uebung_trainieren_ohne_plan(page, state) -> None:
     ansicht = plan_view(page, state, einzel, einzel=True)
     assert ansicht.route == f"/training/{uebung.id}"
     assert len(einzel.items) == 1 and einzel.items[0].exercise_id == uebung.id
-    info = plan_info_view(page, state, ansicht.route, uebung, Dienst(launch_url=None))
+    route = f"{ansicht.route}/info"  # das i: die Übungsseite über dem Einzeltraining (P79)
+    info = uebung_detail(page, state, uebung, Dienst(launch_url=None), route=route)
     assert info.route == f"/training/{uebung.id}/info"
     assert katalog(page, state) is not None
 
@@ -1075,7 +1097,7 @@ def test_i_symbol_holt_parameter_aus_dem_feldvorrat(page, welt) -> None:
     import asyncio
 
     from trainingsapp.ui.views.plan import plan_view
-    from trainingsapp.ui.views.plan_info import plan_info_view
+    from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 
     state, plan, item, uebung, _ = welt
     page.show_dialog = lambda _d: None
@@ -1094,10 +1116,11 @@ def test_i_symbol_holt_parameter_aus_dem_feldvorrat(page, welt) -> None:
     asyncio.run(info.on_click())
     assert gesprungen[-1] == f"/plan/{plan.id}/info/{item.id}"
 
-    seite = plan_info_view(page, state, f"/plan/{plan.id}", uebung, SimpleNamespace(), item)
-    assert "Aus dem Feldvorrat — nur für diese Planübung" in _texte(seite)
-    gewicht = _knopf_mit_text(seite, "Gewicht")
-    gewicht.on_click()
+    # Herholen geht jetzt über „Im Plan einstellen“ (P79, A) — gespeichert mit „Speichern“
+    seite = plan_einstellen(page, state, plan, item, uebung, f"/plan/{plan.id}/bearbeiten")
+    assert "Weitere Parameter holen" in _texte(seite)
+    _knopf_mit_text(seite, "+ Gewicht").on_click()
+    asyncio.run(_knopf_mit_text(seite, "Speichern").on_click())
     assert "weight" in state.plaene.item_laden(item.id).felder
     assert state.uebungen.laden(uebung.id).result_spec.field_by_key("weight") is None
 
@@ -1164,29 +1187,33 @@ def test_notiz_knopf_und_tafel_oeffnet_eintrag(page, welt) -> None:
     assert isinstance(dialoge[-1], ft.BottomSheet) and not gesprungen
 
 
-def test_uebung_standard_fuer_plaene_mit_parameterknoepfen(page, welt) -> None:
-    """Gleiche Knöpfe wie in der Planübung: Skala aus → default_felder nur Wiederholungen."""
+def test_was_die_uebung_hat_bieten_alle_plaene_an(page, welt) -> None:
+    """C2 (Ben, 22.10.2026): kein „Standard für Pläne“ mehr im Formular — was die Übung hat,
+    bietet jede Planübung an. Aus „Übung hinzufügen“ angelegt, steht sie gleich im Plan."""
     import asyncio
 
-    from trainingsapp.core.models import Exercise
-    from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+    from trainingsapp.core.standards import parameter_keys
     from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 
-    state, *_ = welt
-    u = Exercise(
-        name="Kniebeuge",
-        result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("scale")]),
-    )
-    state.uebungen.speichern(u)
+    state, plan, *_ = welt
     page.update = lambda: None
     page.show_dialog = lambda _d: None
-    page.push_route = lambda _r: asyncio.sleep(0)
-    ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(u.id))
-    skala = next(
-        c
-        for c in _alle(ansicht)
-        if isinstance(c, ft.FilledTonalButton) and getattr(c, "data", None) == "scale"
-    )
-    skala.on_click()
+    gesprungen: list[str] = []
+
+    async def push_route(r: str) -> None:
+        gesprungen.append(r)
+
+    page.push_route = push_route
+    basis = f"/plaene/{plan.id}"
+    ansicht = uebung_bearbeiten(page, state, None, plan=plan, basis=basis)
+    assert ansicht.route == f"{basis}/hinzufuegen/neu"
+    texte = _texte(ansicht)
+    assert "STANDARD FÜR PLÄNE" not in texte and "VORGABE FÜR PLÄNE" in texte
+    name = next(c for c in _alle(ansicht) if isinstance(c, ft.TextField) and c.label == "Name")
+    name.value = "Kniebeuge tief"
     asyncio.run(_knopf_mit_text(ansicht, "Speichern").on_click())
-    assert state.uebungen.laden(u.id).default_felder == ["reps"]
+    assert gesprungen[-1] == basis
+    neu = next(u for u in state.uebungen.alle() if u.name == "Kniebeuge tief")
+    item = next(i for i in state.plaene.laden(plan.id).items if i.exercise_id == neu.id)
+    assert (item.target, item.felder) == (None, None)
+    assert parameter_keys(item, neu) == [f.key for f in neu.result_spec.fields] == ["reps"]

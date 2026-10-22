@@ -340,12 +340,23 @@ async def test_formular_uhr_und_zaehlt_als(umgebung) -> None:
     wahl = _wahl(ansicht, {"hold", "duration"})
     wahl.selected = ["duration"]
     schalter = next(
-        x for x in _alle(ansicht) if isinstance(x, ft.Switch) and "Uhr in der Übung" in str(x.label)
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Switch) and "Stoppuhr und Timer beim Üben" in str(x.label)
     )
     schalter.value = False
+    zaehlt = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.Switch) and x.label == "Timerzeit zählt"
+    )
+    assert zaehlt.value is True  # Vorgabe an (P79, D2)
+    zaehlt.value = False
     await _knopf(ansicht, "Speichern").on_click()
     gespeichert = state.uebungen.laden(uebung.id)
-    assert (gespeichert.uhr, gespeichert.zaehlt_als) == (False, "duration")
+    assert (gespeichert.uhr, gespeichert.zaehlt_als, gespeichert.zeit_zaehlt) == (
+        False,
+        "duration",
+        False,
+    )
 
 
 async def test_planuebung_stellt_die_uhr_fuer_den_plan_ein(umgebung) -> None:

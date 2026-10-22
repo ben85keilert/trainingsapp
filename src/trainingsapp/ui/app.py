@@ -9,15 +9,16 @@ Routen:
 
     /                               Hauptansicht mit vier Reitern
     /plan/<id>                      Plan üben (von „Heute" aus)
-    /plan/<id>/info/<item_id>       i-Symbol beim Üben: Parameter herholen, Beschreibung, Videos
+    /plan/<id>/info/<item_id>       i-Symbol: die Übungsseite mit Karte „In diesem Plan“ (P79)
     /plan/<id>/eintrag/<id>[/korrigieren]   Eintrag von heute aus dem Plan heraus
     /plan/<id>/bearbeiten[/…]       Plan bearbeiten, aus dem Üben heraus
     /plaene/<id>                    Plan bearbeiten (aus „Übungen" → „Pläne")
     /kurse/<id>[/<kapitel_id>]      Ein Kurs mit seinen Kapiteln; ein Kapitel (Text, Pläne, Weiter)
     /messung/<id>                   Eine HRV-Aufzeichnung: Kurven, Kennzahlen, Korrektur
     /training/<übung>[/info|/eintrag/<id>]   Eine einzelne Übung üben — ohne Plan (Katalog)
-    <bearbeiten>/ziel/<item_id>     Planübung einstellen: Stufe, Chips, Ziel
-    <bearbeiten>/hinzufuegen        Übungen in den Plan aufnehmen
+    <bearbeiten>/ziel/<item_id>     Im Plan einstellen: Parameter, Chips, Uhr, Ziel (P79)
+    <bearbeiten>/info/<item_id>     die Übungsseite aus dem Plan-Editor
+    <bearbeiten>/hinzufuegen[/neu]  Übungen in den Plan aufnehmen — oder neu anlegen
     /tag/<YYYY-MM-DD>               Tagesansicht eines beliebigen Tages
     [/tag/<datum>]/leistungen/<übung>   Alle Einträge einer Übung an diesem Tag (ohne: heute)
     [/tag/<datum>]/nachtragen/<übung>[/<plan>|/ohne]   Nachtragen: Wann, Plan, Trainingsblock
@@ -112,7 +113,6 @@ from trainingsapp.ui.views.plan import einzel_plan, plan_view
 from trainingsapp.ui.views.plan_ablauf import plan_ablauf_view
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
-from trainingsapp.ui.views.plan_info import plan_info_view
 from trainingsapp.ui.views.profile import profile_view
 from trainingsapp.ui.views.tag import tag_view
 from trainingsapp.ui.views.tagesfelder import tagesfeld_formular_view, tagesfelder_view
@@ -329,6 +329,12 @@ def main(page: ft.Page) -> None:
     snackbars_absichern()
     page.title = "Trainingsassistent"
     page.padding = 0
+    # Flutters eigene Texte (Räder „Min./Sek.“, Zurück, Kopieren …) deutsch — ohne Angabe
+    # nimmt Flet nur en_US, egal was das Handy spricht
+    deutsch = ft.Locale("de", "DE")
+    page.locale_configuration = ft.LocaleConfiguration(
+        supported_locales=[deutsch], current_locale=deutsch
+    )
 
     state = AppState.starten()
     # Farbprofil des aktiven Profils (`core.darstellung`); gesetzt wird es bei
@@ -425,13 +431,32 @@ def main(page: ft.Page) -> None:
         uebung = state.uebungen.laden(item.exercise_id) if item else None
         return (item, uebung) if item is not None and uebung is not None else None
 
+    def uebungsseite_im_plan(plan: Plan, basis: str, einstellen: str, paar: Any) -> None:
+        """Die Übungsseite unter dem Plan — das i beim Üben und beim Bearbeiten (P79)."""
+        item, uebung = paar
+        route = f"{basis}/info/{item.id}"
+        ablegen(
+            lambda: uebung_detail(
+                page, state, uebung, browser, item, plan=plan, route=route, einstellen=einstellen
+            )
+        )
+
     def bearbeiten_routen(plan: Plan, basis: str, fertig: str, rest: list[str]) -> None:
         """Bearbeiten eines Plans — unter `/plaene/<id>` oder `/plan/<id>/bearbeiten`."""
         ablegen(lambda: plan_view(page, state, plan, bearbeiten=True, basis=basis, fertig=fertig))
         if rest[:1] == ["hinzufuegen"]:
             ablegen(lambda: plan_hinzufuegen_view(page, state, plan, basis=basis))
+            if rest[1:2] == ["neu"]:  # „Neue Übung anlegen“ — danach steht sie im Plan (P79)
+                ablegen(lambda: uebung_bearbeiten(page, state, None, plan=plan, basis=basis))
         elif rest[:1] == ["ziel"] and (paar := planuebung(rest, 1)) is not None:
-            ablegen(lambda: plan_einstellen(page, state, plan, *paar, basis=basis))
+            einstellen_item, einstellen_uebung = paar
+            ablegen(
+                lambda: plan_einstellen(
+                    page, state, plan, einstellen_item, einstellen_uebung, basis=basis
+                )
+            )
+        elif rest[:1] == ["info"] and (info := planuebung(rest, 1)) is not None:
+            uebungsseite_im_plan(plan, basis, f"{basis}/ziel/{info[0].id}", info)
 
     def plan_routen(teile: list[str]) -> None:
         plan = state.plaene.laden(teile[1])
@@ -445,8 +470,8 @@ def main(page: ft.Page) -> None:
             basis = f"/plan/{plan.id}/bearbeiten"
             bearbeiten_routen(plan, basis, f"/plan/{plan.id}", teile[3:])
         elif teile[2:3] == ["info"] and (paar := planuebung(teile, 3)) is not None:
-            item, uebung = paar
-            ablegen(lambda: plan_info_view(page, state, f"/plan/{plan.id}", uebung, browser, item))
+            einstellen = f"/plan/{plan.id}/bearbeiten/ziel/{paar[0].id}"
+            uebungsseite_im_plan(plan, f"/plan/{plan.id}", einstellen, paar)
         elif teile[2:3] == ["eintrag"]:
             eintrag_unter(f"/plan/{plan.id}", teile[3:])
         elif teile[2:3] == ["leistungen"]:
@@ -735,7 +760,8 @@ def main(page: ft.Page) -> None:
         elif teile[:1] == ["uebung"] and len(teile) >= 2:
             if teile[1] == "neu":
                 ablegen(lambda: uebung_bearbeiten(page, state, None))
-            elif (uebung := state.uebungen.laden(teile[1])) is not None:
+            # Auch aus Archiv und Papierkorb (P79: die Zeilen dort öffnen die Übung)
+            elif (uebung := state.uebungen.laden(teile[1], mit_geloeschten=True)) is not None:
                 gefunden = uebung  # fest für die Bauer (mypy verengt nicht in Lambdas)
                 ablegen(lambda: uebung_detail(page, state, gefunden, browser))
                 if teile[2:] == ["bearbeiten"]:
@@ -763,7 +789,8 @@ def main(page: ft.Page) -> None:
                 ablegen(lambda: plan_view(page, state, einzel, einzel=True))
                 basis = f"/training/{uebung.id}"
                 if teile[2:3] == ["info"]:
-                    ablegen(lambda: plan_info_view(page, state, basis, uebung, browser))
+                    route = f"{basis}/info"
+                    ablegen(lambda: uebung_detail(page, state, uebung, browser, route=route))
                 elif teile[2:3] == ["eintrag"]:
                     eintrag_unter(basis, teile[3:])
                 elif teile[2:3] == ["leistungen"]:

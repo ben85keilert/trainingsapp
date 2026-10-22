@@ -80,8 +80,8 @@ async def test_fertig_heisst_gemacht_mit_haltezeit_je_satz(umgebung) -> None:
     assert not lauf.abgebrochen and lauf.eintrag_id is not None and lauf.werte == [10, 10, 10]
     eintrag = state.sitzungen.eintrag_laden(lauf.eintrag_id)
     assert eintrag is not None and eintrag.result == {"hold": [10, 10, 10]}
-    assert eintrag.ended_at is not None and eintrag.started_at is not None
-    assert (eintrag.ended_at - eintrag.started_at).total_seconds() == pytest.approx(45, abs=1)
+    # Ein Lauf ist ein Satz im offenen Eintrag wie ein Tipp (Ben, 22.10.2026, P79 D1)
+    assert eintrag.ended_at is None and eintrag.started_at is not None
     # Die HRV lief weiter und hat die Übung als Abschnitt auf eigener Spur
     assert messlauf.aufnahme is not None
     marken = [x for x in messlauf.aufnahme.ereignisse if x.get("marke", {}).get("spur") == "uebung"]
@@ -200,7 +200,8 @@ async def test_timer_traegt_die_gewaehlte_variante_ein(umgebung) -> None:
     eintrag = state.sitzungen.eintrag_laden(lauf.eintrag_id)
     assert eintrag is not None and eintrag.result == {"variant": "gestreckt", "hold": [10, 10, 10]}
 
-    # Abgebrochen und später eingetragen: die Ausführung steht in der Zeitleiste
+    # Abgebrochen und später eingetragen: die Ausführung steht in der Zeitleiste — und der
+    # Satz kommt in denselben offenen Eintrag (P79 D1)
     e = uebung_lauf.starten(
         Seite(), state, uebung_lauf.kontext_fuer(uebung, auspraegung=wahl), _profil()
     )
@@ -209,4 +210,5 @@ async def test_timer_traegt_die_gewaehlte_variante_ein(umgebung) -> None:
     await _ticken(state, uhr, gurt, e, 2, bis_ende=True)
     abgebrochen = next(x for x in uebung_lauf.laeufe_heute(state, uebung.id) if x.abgebrochen)
     spaeter = uebung_lauf.lauf_eintragen(state, abgebrochen.einheit_id)
-    assert spaeter is not None and spaeter.result == {"variant": "gestreckt", "hold": [10]}
+    assert spaeter is not None
+    assert spaeter.result == {"variant": "gestreckt", "hold": [10, 10, 10, 10]}

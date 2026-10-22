@@ -193,7 +193,8 @@ def test_ziel_ohne_kontext_und_spaetere_stelle(welt) -> None:
     assert not spaetere_stelle_offen(zweite, stelle, set(), {zweite.id})
     einzel = einzel_plan(wandsitz)
     assert einzel.items[0].id == einzel.id == f"einzel-{wandsitz.id}"
-    assert einzel.items[0].target == wandsitz.default_target
+    # Die Planübung des Einzeltrainings folgt der Übung (P79)
+    assert einzel.items[0].target is None and einzel.items[0].felder is None
 
 
 def test_gemacht_reihen_buendelt_trainings_fuer_sich() -> None:

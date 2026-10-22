@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 import flet as ft
 
@@ -38,6 +39,15 @@ def _ueberschrift(text: str) -> ft.Control:
         padding=ft.Padding.only(left=16, right=16, top=16, bottom=4),
         content=ft.Text(text.upper(), size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
     )
+
+
+def _uebung_oeffner(page: ft.Page, uebung_id: str) -> Callable[[], Any]:
+    """Die Zeile öffnet die Übungsseite — mit „Wiederherstellen“ oben (Ben, 22.10.2026, P79)."""
+
+    async def handler() -> None:
+        await page.push_route(f"/uebung/{uebung_id}")
+
+    return handler
 
 
 def archiv_view(page: ft.Page, state: AppState) -> ft.View:
@@ -64,6 +74,7 @@ def archiv_view(page: ft.Page, state: AppState) -> ft.View:
             leading=ft.Icon(symbol(u.icon_key)),
             title=ft.Text(u.name),
             subtitle=ft.Text(", ".join(u.typen), size=12),
+            on_click=_uebung_oeffner(page, u.id),
             trailing=ft.Row(
                 tight=True,
                 spacing=0,
@@ -261,6 +272,7 @@ def papierkorb_view(page: ft.Page, state: AppState) -> ft.View:
                 leading=ft.Icon(symbol(u.icon_key), opacity=0.6),
                 title=ft.Text(u.name),
                 subtitle=ft.Text(frist(u.deleted_at), size=12),
+                on_click=_uebung_oeffner(page, u.id),
                 trailing=knoepfe(zurueckholer(u), loescher(u)),
             )
             for u in uebungen

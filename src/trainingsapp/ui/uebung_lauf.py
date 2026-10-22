@@ -2,8 +2,11 @@
 
 Ben, 17.10.2026 (Skizzen 12–15): Die Uhr neben dem i öffnet den Timer der Übung. Ist er
 fertig, gilt die Übung als **gemacht**, und die gelaufene Zeit kommt ins Tagebuch — als
-Haltezeit je Satz oder als Zeit (`core.timer_eintrag`). **Abbrechen** trägt
-nichts ein; der Lauf bleibt unter „Läufe heute“ und lässt sich dort doch eintragen.
+Haltezeit je Satz oder als Zeit (`core.timer_eintrag`), seit 22.10.2026 **in den offenen
+Eintrag** wie ein Tipp (P79 D1, `SessionRepo.lauf_eintragen`). Ob sie zählt, legt die Übung
+fest (`Exercise.zeit_zaehlt`); beim Üben gilt die Wahl in der Leiste für jetzt
+(`AppState.uhr_zaehlt`). **Abbrechen** trägt nichts ein; der Lauf bleibt unter „Läufe
+heute“ und lässt sich dort doch eintragen.
 Läuft eine HRV-Aufnahme, bekommt sie die Übung und ihre Abschnitte als Marken.
 
 Ein Lauf ist eine Einheit aus Übung (`devices.einheit.UebungBaustein`) und Timer, dazu
@@ -32,7 +35,7 @@ from trainingsapp.core.timer_eintrag import (
     ergebnis,
     gelaufene_zeiten,
 )
-from trainingsapp.core.uebung_timer import TimerWahl, mit_zeitfeldern, zaehlt_als
+from trainingsapp.core.uebung_timer import mit_zeitfeldern, zaehlt_als
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
 from trainingsapp.ui import einheit as einheit_ui
 
@@ -77,18 +80,18 @@ def kontext_fuer(
     feld: str | None = None,
     auspraegung: Mapping[str, Any] | None = None,
 ) -> UebungKontext:
-    """Wozu der Timer läuft: Übung, Plan, Planübung und das Zeitfeld — ``None``, wenn
-    „Zeit eintragen“ aus ist (nur „gemacht“). Sonst „Zählt als“ (Ben, 18.10.2026): mit
-    Haltezeit nach Wahl, ohne immer Zeit — auch ohne den Parameter (`zaehlt_als`).
-    ``auspraegung``: die Ausführung, die im Block gewählt ist (Variante, Gewicht …) — sie
-    kommt mit in den Eintrag (Ben, 21.10.2026)."""
-    wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
-    eintragen = wahl.zeit_eintragen if zeit_eintragen is None else zeit_eintragen
+    """Wozu der Timer läuft: Übung, Plan, Planübung und das Zeitfeld — ``None``, wenn die
+    Timerzeit nicht zählt (nur „gemacht“). Ob sie zählt, legt die Übung fest
+    (`Exercise.zeit_zaehlt`, P79 D2); ``zeit_eintragen`` ist die Wahl für jetzt (die Leiste,
+    `AppState.uhr_zaehlt`). „Zählt als“ (Ben, 18.10.2026): mit Haltezeit nach der Übung, ohne
+    immer Zeit — auch ohne den Parameter (`zaehlt_als`). ``auspraegung``: die Ausführung, die
+    im Block gewählt ist (Variante, Gewicht …) — sie kommt mit in den Eintrag (21.10.2026)."""
+    eintragen = uebung.zeit_zaehlt if zeit_eintragen is None else zeit_eintragen
     felder = felder_der_uebung(uebung, item)
     if feld in ZEITFELDER and (feld == "duration" or "hold" in felder):
-        gewaehlt: str = feld  # im Timer der Übung gewählt
+        gewaehlt: str = feld
     else:
-        gewaehlt = zaehlt_als(felder, uebung, item)
+        gewaehlt = zaehlt_als(felder, uebung)
     return UebungKontext(
         uebung_id=uebung.id,
         name=uebung.name,
@@ -162,15 +165,17 @@ def _eintragen(
         (x.t_s for x in ereignisse if x.quelle in ("timer", "plan", "einheit")), default=0.0
     )
     beginn = anker_utc
-    sitzung = state.sitzungen.session_fuer(
-        subject_id or state.profil.id, kontext.plan_id, lokaler_tag(beginn)
-    )
-    eintrag: SessionEntry = state.sitzungen.eintrag_anlegen(
+    tag = lokaler_tag(beginn)
+    sitzung = state.sitzungen.session_fuer(subject_id or state.profil.id, kontext.plan_id, tag)
+    # In den offenen Eintrag wie ein Tipp (P79 D1) — die Ausführung trennt wie dort
+    eintrag: SessionEntry = state.sitzungen.lauf_eintragen(
         sitzung,
         uebung,
         werte,
-        started_at=beginn,
-        ended_at=beginn + timedelta(seconds=ende_s),
+        tag,
+        ausfuehrung(uebung, kontext.auspraegung),
+        beginn=beginn,
+        ende=beginn + timedelta(seconds=ende_s),
     )
     # In die Zeitleiste, was eingetragen wurde — „Läufe heute“ liest es zurück
     zahlen = werte.get("hold") or ([werte["duration"]] if "duration" in werte else [])

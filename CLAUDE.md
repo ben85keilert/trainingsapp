@@ -135,7 +135,12 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   „30 s halten" sind derselbe Mechanismus. Felder kommen aus dem `FELDVORRAT`; das
   Satzfeld (`SET_LIST`) speichert eine Liste je Satz und nimmt die Notation aus
   `docs/notation.md` entgegen (`3x15`, `30`, `15/15/20`, `+20`). Hierarchie: Übung →
-  Plan (`plan_item.felder` = angebotene Parameter, keiner = nur abhaken; Chips, Ziel) → Eintrag. Jeder `SessionEntry` speichert eine Kopie der
+  Plan → Eintrag; die **Planübung folgt der Übung**, bis man im Plan etwas ändert (Ben,
+  22.10.2026, P79: `target`/`felder` ``None`` = wie die Übung, „nur hier“ ↺,
+  `core/standards.py`; keiner = nur abhaken). **Zwei Orte zum Einstellen** — „Übung
+  bearbeiten“ (gilt überall, über Übungsseite → Stift) und „Im Plan einstellen“ (gilt nur
+  dort); das i führt überall zur Übungsseite, die nichts ändert; beim Üben gilt eine Wahl
+  für jetzt (`docs/plan_uebungen_einstellen.md`). Jeder `SessionEntry` speichert eine Kopie der
   Spec, mit der er erfasst wurde (`spec_snapshot_json`); angezeigt wird **immer** mit der
   Kopie, nie mit der aktuellen Definition. Neuer `FieldType` → hier ergänzen und in
   `ui/components/spec_form.py` ein Widget registrieren.

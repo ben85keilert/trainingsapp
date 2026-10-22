@@ -15,6 +15,12 @@ Läuft die Uhr dieser Übung, zeigen beide dieselbe Anzeige: die Zeit, Anhalten 
 App und ändert keine Einstellung (Ben: „wenn im Übungsfeld ein anderer Timer ausgewählt
 wurde, ändert sich keine Einstellung“); gespeichert wird nur in Übung bzw. Planübung.
 Ob die Uhr überhaupt dasteht, sagt `core.uebung_timer.uhr_an`.
+
+Ben, 22.10.2026 (P79, Skizzen D1–D4): Neben der Zeit steht der kleine Knopf **„zählt“** — ob
+die Timerzeit als Haltezeit bzw. Zeit in den offenen Eintrag geht; er gilt für jetzt
+(`AppState.uhr_zaehlt`), die Vorgabe kommt aus der Übung (`Exercise.zeit_zaehlt`). Ein **Tipp
+auf die Zeit** stellt einen Timer ohne Ablauf (Räder und Tippfeld, `components/zeit_stellen.py`)
+und startet ihn; er bleibt für diese Sitzung zur Wahl (`AppState.uhr_einmal`).
 """
 
 from __future__ import annotations
@@ -27,11 +33,12 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
-from trainingsapp.core.timer import TimerProfil, dauer_text, stoppuhr
-from trainingsapp.core.uebung_timer import profile_zur_wahl, timer_fuer
+from trainingsapp.core.timer import TimerProfil, dauer_text, einmal_timer, stoppuhr
+from trainingsapp.core.uebung_timer import profile_zur_wahl, timer_fuer, zaehlt_als
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
+from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.state import UHR_KNOEPFE
 
 #: Eckenradius wie die Knöpfe im Plan
@@ -52,17 +59,25 @@ def schluessel(uebung: Exercise, item: PlanItem | None) -> str:
     return item.id if item is not None else uebung.id
 
 
-def angebot(uebung: Exercise, plan: Plan | None, item: PlanItem | None) -> list[TimerProfil]:
-    """Zur Wahl: die Stoppuhr, dann die Timer der Planübung, der Übung und des Plans."""
-    return profile_zur_wahl(uebung, plan, item, mit_stoppuhr=True)
+def angebot(
+    uebung: Exercise, plan: Plan | None, item: PlanItem | None, einmal_s: int | None = None
+) -> list[TimerProfil]:
+    """Zur Wahl: die Stoppuhr, ein schnell gestellter Timer ohne Ablauf (``einmal_s``, P79
+    D4), dann die Timer der Planübung, der Übung und des Plans."""
+    profile = profile_zur_wahl(uebung, plan, item, mit_stoppuhr=True)
+    if einmal_s:
+        profile.insert(1, einmal_timer(einmal_s))
+    return profile
 
 
 def gesetzt(state: Any, uebung: Exercise, plan: Plan | None, item: PlanItem | None) -> TimerProfil:
     """Was ▶ startet: die in dieser Sitzung gewählte (oder zuletzt gestartete) Uhr — sonst
     wie eingestellt (Planübung > Plan > erster Timer der Übung), ohne Timer die Stoppuhr."""
-    gewaehlt = state.uhr_wahl.get(schluessel(uebung, item))
+    key = schluessel(uebung, item)
+    gewaehlt = state.uhr_wahl.get(key)
     if gewaehlt:
-        treffer = next((p for p in angebot(uebung, plan, item) if p.id == gewaehlt), None)
+        auswahl = angebot(uebung, plan, item, state.uhr_einmal.get(key))
+        treffer = next((p for p in auswahl if p.id == gewaehlt), None)
         if treffer is not None:
             return treffer
     return timer_fuer(uebung, plan, item) or stoppuhr()
@@ -97,6 +112,9 @@ def uhr_teile(
     e = laufende(state, uebung, item)
     if e is not None and e.timer is not None:
         return UhrTeile(zeile=_laufend(page, state, e))
+    key = schluessel(uebung, item)
+    #: „zählt“ — für jetzt, sonst wie die Übung (P79 D2)
+    zaehlt = state.uhr_zaehlt.get(key, uebung.zeit_zaehlt)
 
     def melden(text: str) -> None:
         with contextlib.suppress(Exception):
@@ -104,7 +122,26 @@ def uhr_teile(
 
     def kontext() -> UebungKontext:
         wahl = uebung_lauf.gewaehlte_ausfuehrung(state, uebung, item)
-        return uebung_lauf.kontext_fuer(uebung, plan, item, auspraegung=wahl)
+        return uebung_lauf.kontext_fuer(uebung, plan, item, zeit_eintragen=zaehlt, auspraegung=wahl)
+
+    def zaehlt_umschalten() -> None:
+        state.uhr_zaehlt[key] = not zaehlt
+        state.neu_zeichnen()
+
+    als = (
+        "Haltezeit"
+        if zaehlt_als(uebung_lauf.felder_der_uebung(uebung, item), uebung) == "hold"
+        else "Zeit"
+    )
+    zaehlt_knopf = ft.Chip(
+        label=ft.Text("zählt" if zaehlt else "zählt nicht", size=12),
+        selected=zaehlt,
+        show_checkmark=True,
+        tooltip=f"Timerzeit zählt als {als} im offenen Eintrag — gilt für jetzt"
+        if zaehlt
+        else "Timerzeit zählt nicht — nur „gemacht“; gilt für jetzt",
+        on_select=zaehlt_umschalten,
+    )
 
     def starten(profil: TimerProfil) -> Callable[[], None]:
         def handler() -> None:
@@ -133,12 +170,23 @@ def uhr_teile(
         return handler
 
     if state.uhr_darstellung() == UHR_KNOEPFE:
-        return UhrTeile(knoepfe=_knoepfe(uebung, plan, item, starten, timer_oeffnen))
+        knoepfe = _knoepfe(uebung, plan, item, starten, timer_oeffnen)
+        return UhrTeile(knoepfe=[*knoepfe, zaehlt_knopf])
     profil = gesetzt(state, uebung, plan, item)
+
+    def zeit_stellen() -> None:
+        """Ein Tipp auf die Zeit: Timer ohne Ablauf stellen und gleich starten (P79 D4)."""
+
+        def los(sekunden: int) -> None:
+            state.uhr_einmal[key] = sekunden
+            starten(einmal_timer(sekunden))()
+
+        vorher = 60 if profil.ist_stoppuhr else profil.gesamt_s()
+        page.show_dialog(zeit_blatt(vorher, starten=los))
 
     def waehlen(p: TimerProfil) -> Callable[[], None]:
         def handler() -> None:
-            state.uhr_wahl[schluessel(uebung, item)] = p.id  # nur für diese Sitzung
+            state.uhr_wahl[key] = p.id  # nur für diese Sitzung
             state.neu_zeichnen()
 
         return handler
@@ -179,7 +227,7 @@ def uhr_teile(
                     ),
                     on_click=waehlen(p),
                 )
-                for p in angebot(uebung, plan, item)
+                for p in angebot(uebung, plan, item, state.uhr_einmal.get(key))
             ),
             ft.PopupMenuItem(),  # Trennlinie
             ft.PopupMenuItem(
@@ -199,7 +247,13 @@ def uhr_teile(
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Container(content=menue, expand=True, alignment=ft.Alignment.CENTER_LEFT),
-                ft.Text(zeit, size=20, weight=ft.FontWeight.W_500),
+                ft.TextButton(
+                    content=ft.Text(zeit, size=20, weight=ft.FontWeight.W_500),
+                    tooltip="Zeit stellen — Timer ohne Ablauf",
+                    style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=4)),
+                    on_click=zeit_stellen,
+                ),
+                zaehlt_knopf,
                 ft.IconButton(
                     ft.Icons.HOURGLASS_TOP,
                     tooltip="Bereitstellen — startet mit „Alle starten“",
@@ -280,6 +334,8 @@ def _laufend(page: Any, state: Any, e: Einheitslauf) -> ft.Control:
     zählt im Takt des Tickers mit (`AppState.timer_beobachter`)."""
     assert e.timer is not None
     lauf = e.timer.lauf
+    teil = e.teil("plan")
+    zaehlt = isinstance(teil, UebungBaustein) and teil.kontext.zeitfeld is not None
     zeit = ft.Text(size=40, weight=ft.FontWeight.BOLD)
     oben = ft.Text(size=14, opacity=0.85, expand=True)
     pause = ft.OutlinedButton(height=48, style=ft.ButtonStyle(shape=ECKEN), expand=True)
@@ -334,7 +390,12 @@ def _laufend(page: Any, state: Any, e: Einheitslauf) -> ft.Control:
             controls=[
                 ft.Row(
                     spacing=8,
-                    controls=[ft.Icon(_symbol(lauf.profil), size=18, opacity=0.85), oben],
+                    controls=[
+                        ft.Icon(_symbol(lauf.profil), size=18, opacity=0.85),
+                        oben,
+                        # Ob die Zeit zählt, steht auch beim Laufen da (P79 D1)
+                        ft.Text("zählt" if zaehlt else "zählt nicht", size=12, opacity=0.75),
+                    ],
                 ),
                 zeit,
                 ft.Row(

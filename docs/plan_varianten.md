@@ -7,7 +7,8 @@ Stand 21.10.2026: **Gebaut** (Teile A–H), Gerätetest offen (T69).
   Bereich unterhalb der Parameter.“
 - P58 gebaut als Abschnitt „Varianten in diesem Plan“ unter den Parametern (i-Seite und
   „Einstellen“) mit dem Schalter „Varianten beim Eintragen zeigen“; aus = `quick["variant"]
-  == []` (`core.standards.varianten_schalten`).
+  == []` (`core.standards.varianten_schalten`). Seit 22.10.2026 (P79) nur noch in „Im Plan
+  einstellen“ — die i-Seite gibt es nicht mehr.
 - Weiter offen: Kurse (P59), Pakete (P60), Texte der alten Varianten (P61).
 
 Skizzen: https://claude.ai/artifact/M37Kb79EDKgfcwDTHSkCnx

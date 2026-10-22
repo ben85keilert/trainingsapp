@@ -318,9 +318,22 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
     )
     inhalt.append(ergebnisse)
 
+    async def uebung_ansehen() -> None:
+        await page.push_route(f"/uebung/{kachel_id}")
+
     return ft.View(
         route=f"/verlauf/{kachel_id}",
-        appbar=ft.AppBar(title=ft.Text(original.name if original else "Verlauf")),
+        appbar=ft.AppBar(
+            title=ft.Text(original.name if original else "Verlauf"),
+            # Das i führt zur Übungsseite, wie überall (Ben, 22.10.2026, P79)
+            actions=[
+                ft.IconButton(
+                    ft.Icons.INFO_OUTLINE, tooltip="Übung ansehen", on_click=uebung_ansehen
+                )
+            ]
+            if original is not None
+            else [],
+        ),
         scroll=ft.ScrollMode.AUTO,
         padding=16,
         controls=[sicher(ft.Column(spacing=10, controls=inhalt), expand=False)],

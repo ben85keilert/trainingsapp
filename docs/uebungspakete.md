@@ -26,8 +26,8 @@ Tabelle `package` und Spalte `exercise.package_id` seit Migration 014,
 
 **Paketstand.** Jede Übung eines Pakets trägt ihre Standardwerte aus dem Paket
 (`package_standard_json`, genau die Felder des Dateiformats unten: Name, Beschreibung,
-Symbol, Parameter samt Chips, Ziel, Planparameter, Limits, Typen, Regionen, Videos,
-Variante).
+Symbol, Parameter samt Chips, Ziel, Limits, Typen, Regionen, Videos, „Im Verlauf
+zusammen mit“ — `variante_von`).
 Jeder Import frischt ihn auf; der Start trägt ihn beim Paket „Standard“ nur nach, wo er
 fehlt. Wer einen Typ oder eine Region umbenennt oder löscht, ändert ihn mit — die
 Paketübungen gelten danach nicht als „geändert“ (Ben, 15.10.2026). „Auf Paketstand
@@ -186,9 +186,9 @@ Je Übung:
 | `timer[]` | nein | Timer-Profile der Übung (Ben, 17.10.2026; `docs/plan_einheit.md`, Stufe 3): je Profil `name`, `abschnitte[]` (`name`, `dauer_s`, `klang`, `zaehlt` — fehlt `zaehlt`, zählt der Abschnitt), `runden`, für eine Folge `teil_name` und `teile[]` (`name`, `runden`, `abschnitte[]`). `id` schreibt der Export; ohne sie eine feste aus Übung und Stelle. Fehlt `timer`, gilt eine Timer-Regel im `limit_spec` als Einzeltimer. Im Drei-Wege-Abgleich ein Feld |
 | `uhr` | nein | Stoppuhr und Timer stehen in der Übung bereit (Ben, 18.10.2026; `docs/plan_stoppuhr.md`); fehlt = an, `false` = aus. Im Drei-Wege-Abgleich ein Feld |
 | `zaehlt_als` | nein | „Zählt als“, wenn die Übung Haltezeit anbietet: `hold` (Haltezeit, ein Satz je Lauf) oder `duration` (Zeit); fehlt = Haltezeit. Ohne Haltezeit zählt die Uhr immer als Zeit. Im Drei-Wege-Abgleich ein Feld |
-| `default_felder` | nein | Parameter neuer Planübungen; `[]` = nur abhaken, fehlt = alle |
+| `default_felder` | — | **überlesen** seit 22.10.2026 (P79, C2): Was die Übung hat, bieten alle Pläne an; weniger stellt man in der Planübung ein. Der Export schreibt es nicht mehr |
 | `media[]` | nein | `{kind, source, uri, title, license}`; leere `uri` und `source: "local"` fallen weg. `uri` nur `https://…` oder `mailto:…` — andere Schemata (`http://`, `intent://`, `tel:`, `file://`) verwirft der Import still, die Übung bleibt; die App öffnet außerdem vor jedem Tipp nur solche Adressen (`core/links.py`, auch für Links im Kapiteltext) |
-| `variante_von` | nein | Schlüssel oder ID des Originals (im Paket oder schon auf dem Gerät) |
+| `variante_von` | nein | „Im Verlauf zusammen mit“: Schlüssel oder ID des Originals (im Paket oder schon auf dem Gerät) — die Kopie steht im Verlauf mit ihm auf einer Kachel |
 
 Je Kurs (`kurse[]`, Formatversion 2):
 

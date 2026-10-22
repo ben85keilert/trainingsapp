@@ -40,9 +40,9 @@ Anzeige und die Eingabemöglichkeiten besser ab“):
   Knopf immer wieder öffnet (`SessionRepo.notiz_eintrag`) — auch nach einem neuen
   Satz oder „Gemacht“. Daneben das **Etikett-Symbol** ohne Text (Ben, 21.10.2026): die
   Variante des markierten Eintrags setzen oder eine neue anlegen (`varianten_blatt`).
-- Das **i-Symbol** holt Parameter heran (`plan_info.py`): jedes Feld der Übung
-  und des Feldvorrats, gespeichert in der Planübung — die Übung bleibt, wie sie
-  ist (`core.standards.plan_spec`). Dort auch Beschreibung und Videos.
+- Das **i-Symbol** öffnet die Übungsseite (Ben, 22.10.2026, P79: „ein Weg zur Info“) —
+  oben die Karte „In diesem Plan“; „Im Plan einstellen“ holt dort jeden Parameter heran,
+  auch aus dem Feldvorrat, gespeichert in der Planübung (`core.standards.plan_spec`).
 
 Das frühere „Mehr …“ (volles Formular) ist darin aufgegangen (Ben, 14.10.2026):
 Notiz → „Notiz“, Ja/Nein und Freitext → herholen, Korrigieren → Tafel.
@@ -107,7 +107,14 @@ from trainingsapp.core.result_spec import (
     format_wert,
     ist_leer,
 )
-from trainingsapp.core.standards import aktive_felder, chips_fuer, mit_plan_spec, varianten_an
+from trainingsapp.core.standards import (
+    abweichungen,
+    aktive_felder,
+    chips_fuer,
+    mit_plan_spec,
+    varianten_an,
+    ziel_von,
+)
 from trainingsapp.core.tagesbilanz import buendeln, je_variante, mengen
 from trainingsapp.core.timer_eintrag import vom_timer_text
 from trainingsapp.core.uebung_timer import timer_fuer, uhr_an
@@ -117,6 +124,7 @@ from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.planstand import nur_hier, wie_die_uebung
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.skala_regler import skala_regler
 from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile
@@ -735,7 +743,8 @@ def plan_view(
                     hinweis=hinweis,
                     auf_wahl=waehlen,
                     auf_neu=neu,
-                    auf_bearbeiten=oeffner(f"/uebung/{item.exercise_id}/bearbeiten"),
+                    # Zur Übungsseite wie das i (P79) — bearbeitet wird von dort aus
+                    auf_bearbeiten=oeffner(info_route(item)),
                 )
             )
 
@@ -914,12 +923,19 @@ def plan_view(
 
     nachher = Nachher()  # Routenwechsel erst, wenn der Dialog zu ist (`components/dialoge.py`)
 
+    async def zum_papierkorb() -> None:
+        await page.push_route("/papierkorb")
+
     def loeschen() -> None:
         state.plaene.loeschen(plan.id)
         nachher.danach(lambda: page.push_route("/"))
         page.pop_dialog()
         page.show_dialog(
-            ft.SnackBar(ft.Text(f"Plan „{plan.name}“ liegt im Papierkorb — Einträge bleiben."))
+            ft.SnackBar(
+                ft.Text(f"Plan „{plan.name}“ liegt im Papierkorb — Einträge bleiben."),
+                # Ein Weg statt einer Wegbeschreibung (P79)
+                action=ft.SnackBarAction("Papierkorb", on_click=zum_papierkorb),
+            )
         )
 
     dialog = ft.AlertDialog(
@@ -927,7 +943,7 @@ def plan_view(
         on_dismiss=nachher.bei_schliessen,
         title=ft.Text("Plan löschen?"),
         content=ft.Text(
-            "Der Plan kommt in den Papierkorb (Übungen → Katalog → Papierkorb). "
+            "Der Plan kommt in den Papierkorb und lässt sich von dort wiederherstellen. "
             "Alles, was du damit dokumentiert hast, bleibt."
         ),
         actions=[
@@ -1262,13 +1278,19 @@ def plan_view(
         profil = timer_fuer(uebung, mit_plan, None if einzel else item)
         if profil is not None:
             teile.append(f"Timer: {profil.name}")
-        uhr: list[ft.Control] = [
-            ft.IconButton(
-                ft.Icons.TIMER if profil is not None else ft.Icons.TIMER_OUTLINED,
-                tooltip="Timer dieser Übung" if profil is not None else "Timer festlegen",
-                on_click=oeffner(uebung_timer_route(route, uebung, None if einzel else item)),
-            )
-        ]
+        # Beim Bearbeiten keine Uhr am Block (P79, Skizze B1): Uhr und Timer der Planübung
+        # stehen in „Im Plan einstellen“
+        uhr: list[ft.Control] = (
+            []
+            if bearbeiten
+            else [
+                ft.IconButton(
+                    ft.Icons.TIMER if profil is not None else ft.Icons.TIMER_OUTLINED,
+                    tooltip="Timer dieser Übung" if profil is not None else "Timer festlegen",
+                    on_click=oeffner(uebung_timer_route(route, uebung, None if einzel else item)),
+                )
+            ]
+        )
         untertitel = "  ·  ".join(t for t in teile if t)
         # Beim Bearbeiten zieht man am Griff (statt am ganzen Block, der Knöpfe trägt)
         griff: list[ft.Control] = (
@@ -1298,9 +1320,7 @@ def plan_view(
                 *uhr,
                 ft.IconButton(
                     ft.Icons.INFO_OUTLINE,
-                    tooltip="Beschreibung und Videos"
-                    if bearbeiten
-                    else "Parameter herholen, Beschreibung, Videos",
+                    tooltip="Übung ansehen",
                     on_click=oeffner(info_route(item)),
                 ),
             ],
@@ -1840,9 +1860,8 @@ def plan_view(
         return handler
 
     def info_route(item: PlanItem) -> str:
-        """Beim Üben die Infoseite unter dem Plan (Zurück führt hierher), sonst die Übung."""
-        if bearbeiten:
-            return f"/uebung/{item.exercise_id}"
+        """Die Übungsseite unter dem Plan — beim Üben wie beim Bearbeiten (Ben, 22.10.2026, P79:
+        das i führt überall dorthin); Zurück führt wieder hierher."""
         return f"{route}/info" if einzel else f"{route}/info/{item.id}"
 
     def notiz_knopf(item: PlanItem) -> ft.Control:
@@ -1961,7 +1980,7 @@ def plan_view(
             )
         uebung = uebung_fuer(item)
         n = item.id in fertig_ids
-        ziel = ziel_text(uebung, item.target)
+        ziel = ziel_text(uebung, ziel_von(item, uebung))
         # Beim Nachtragen steht die Übung schon im Kopf der Seite (Skizze G1)
         inhalt: list[ft.Control] = [kopfzeile(uebung, item)] if nachtrag is None else []
 
@@ -1970,6 +1989,8 @@ def plan_view(
             varianten_text = ""
             if var.feld(uebung.result_spec) is not None:
                 varianten_text = "  ·  Varianten" if varianten_an(item) else "  ·  Varianten aus"
+            # Was nur in diesem Plan gilt, steht mit Schild darunter (P79, Skizze B1)
+            eigenes = abweichungen(item, uebung)
             inhalt.append(
                 ft.Text(
                     (
@@ -1981,6 +2002,15 @@ def plan_view(
                     + (f"  ·  Ziel {ziel}" if ziel else "  ·  kein Ziel"),
                     size=12,
                     opacity=0.7,
+                )
+            )
+            inhalt.append(
+                ft.Row(
+                    spacing=6,
+                    wrap=True,
+                    controls=[nur_hier(), ft.Text(", ".join(eigenes), size=12)]
+                    if eigenes
+                    else [wie_die_uebung()],
                 )
             )
             # Knöpfe links (dürfen umbrechen), die Pfeile fest rechts — ein dehnbarer
@@ -2321,7 +2351,7 @@ def _knopf_legende() -> ft.Control:
     return ft.Text(
         "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · Uhr = Zeit stoppen · "
         "+Zahl = Satz anhängen · Eintragen = Sätze × Wert · Notiz = ins Tagebuch · "
-        "Etikett = Variante · i = Parameter herholen",
+        "Etikett = Variante · i = Übung ansehen",
         size=11,
         opacity=0.55,
     )

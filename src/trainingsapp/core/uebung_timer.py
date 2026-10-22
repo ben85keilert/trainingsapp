@@ -77,23 +77,23 @@ def _regel_sekunden(limit_spec: Any) -> int:
 
 @dataclass
 class TimerWahl:
-    """Was eine Planübung über ihren Timer festhält (``PlanItem.timer``).
+    """Was eine Planübung über ihren Timer festhält (``PlanItem.timer``): ein anderer Timer
+    und die Uhr — nur hier (P79). Ob und als was die Zeit zählt, legt seit 22.10.2026 die
+    Übung fest (D2); alte Werte dazu (``zeitfeld``, ``zeit_eintragen``) werden überlesen.
 
-    >>> w = TimerWahl(profil_id="p1", zeitfeld="duration", zeit_eintragen=False, uhr=False)
+    >>> w = TimerWahl(profil_id="p1", uhr=False)
     >>> TimerWahl.aus_dict(w.als_dict()) == w
     True
     >>> TimerWahl().als_dict(), TimerWahl.aus_dict("kaputt") == TimerWahl()
     ({}, True)
+    >>> TimerWahl.aus_dict({"zeitfeld": "duration", "zeit_eintragen": False}).als_dict()
+    {}
     """
 
     #: ein Profil der Übung — leer: wie der Plan, sonst das erste der Übung
     profil_id: str = ""
     #: im Plan geändert: eine eigene Kopie (geht vor ``profil_id``)
     eigen: TimerProfil | None = None
-    #: das gemerkte Zeitfeld, wenn die Planübung beide anbietet (``hold``/``duration``)
-    zeitfeld: str = ""
-    #: Zeit eintragen — aus: nur „gemacht“
-    zeit_eintragen: bool = True
     #: Die Uhr in dieser Planübung — ``None``: wie die Übung (`uhr_an`)
     uhr: bool | None = None
 
@@ -104,10 +104,6 @@ class TimerWahl:
             d["profil"] = self.profil_id
         if self.eigen is not None:
             d["eigen"] = self.eigen.als_dict()
-        if self.zeitfeld in ZEITFELDER:
-            d["zeitfeld"] = self.zeitfeld
-        if not self.zeit_eintragen:
-            d["zeit_eintragen"] = False
         if self.uhr is not None:
             d["uhr"] = self.uhr
         return d
@@ -117,12 +113,9 @@ class TimerWahl:
         """Defensiv: Unbrauchbares gilt als „keine Wahl“."""
         if not isinstance(d, dict):
             return cls()
-        zeitfeld = d.get("zeitfeld")
         return cls(
             profil_id=str(d.get("profil") or ""),
             eigen=TimerProfil.aus_dict(d.get("eigen")) if d.get("eigen") else None,
-            zeitfeld=zeitfeld if zeitfeld in ZEITFELDER else "",
-            zeit_eintragen=d.get("zeit_eintragen") is not False,
             uhr=d["uhr"] if isinstance(d.get("uhr"), bool) else None,
         )
 
@@ -202,35 +195,38 @@ def uhr_an(uebung: Exercise, item: PlanItem | None = None) -> bool:
     return uebung.uhr if wahl.uhr is None else wahl.uhr
 
 
-def zaehlt_als(felder: Sequence[str], uebung: Exercise, item: PlanItem | None = None) -> str:
+def zaehlt_als(felder: Sequence[str], uebung: Exercise) -> str:
     """Wohin die Zeit von Stoppuhr und Timer kommt (Ben, 18.10.2026): Bietet die Übung hier
-    Haltezeit an, nach Wahl — Planübung > Übung, Vorgabe Haltezeit; sonst **immer Zeit**,
-    auch wenn der Parameter Zeit nicht aktiviert ist („Ist die Uhr ein, hat man automatisch
-    Zeit mit dabei“).
+    Haltezeit an, nach ihrer Wahl — Vorgabe Haltezeit; sonst **immer Zeit**, auch wenn der
+    Parameter Zeit nicht aktiviert ist („Ist die Uhr ein, hat man automatisch Zeit mit
+    dabei“). Die Planübung hat dazu seit 22.10.2026 nichts mehr (P79 D2).
 
     >>> zaehlt_als(["reps"], Exercise()), zaehlt_als(["hold"], Exercise())
     ('duration', 'hold')
     >>> zaehlt_als(["hold", "duration"], Exercise(zaehlt_als="duration"))
     'duration'
-    >>> zaehlt_als(["hold"], Exercise(zaehlt_als="duration"), PlanItem(timer={"zeitfeld": "hold"}))
-    'hold'
     """
     if "hold" not in felder:
         return "duration"
-    wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
-    gewaehlt = wahl.zeitfeld or uebung.zaehlt_als
-    return gewaehlt if gewaehlt in ZEITFELDER else "hold"
+    return uebung.zaehlt_als if uebung.zaehlt_als in ZEITFELDER else "hold"
 
 
 def mit_zeitfeldern(uebung: Exercise, werte: Mapping[str, Any]) -> Exercise:
     """Die Übung samt den Zeitfeldern, die ``werte`` füllt, ihre Eingabe aber nicht anbietet —
     so zeigt die Kopie im Eintrag die Zeit (die Uhr trägt sie auch ohne den Parameter ein).
+    Das Feld wird auch Kennzahl, sonst fehlte die Timerzeit in der Kurve (Ben, 22.10.2026,
+    P79 D5: „Timer zählt als getippt“).
 
     >>> u = mit_zeitfeldern(Exercise(name="Dehnen"), {"duration": 90})
     >>> [(f.key, f.label) for f in u.result_spec.fields]
     [('duration', 'Zeit')]
     >>> mit_zeitfeldern(u, {"duration": 30}) is u
     True
+    >>> from trainingsapp.core.result_spec import ResultSpec
+    >>> mit_reps = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps")],
+    ...                                            chart_metrics=["reps"]))
+    >>> mit_zeitfeldern(mit_reps, {"duration": 30}).result_spec.chart_metrics
+    ['reps', 'duration']
     """
     da = {f.key for f in uebung.result_spec.fields}
     neu = [
@@ -240,7 +236,9 @@ def mit_zeitfeldern(uebung: Exercise, werte: Mapping[str, Any]) -> Exercise:
     ]
     if not neu:
         return uebung
-    spec = replace(uebung.result_spec, fields=[*uebung.result_spec.fields, *neu])
+    alt = uebung.result_spec
+    kennzahlen = [*alt.chart_metrics, *(f.key for f in neu)] if alt.chart_metrics else []
+    spec = replace(alt, fields=[*alt.fields, *neu], chart_metrics=kennzahlen)
     return replace(uebung, result_spec=spec)
 
 

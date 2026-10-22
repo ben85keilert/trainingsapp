@@ -177,6 +177,60 @@ async def test_fertig_und_zurueck_auf_heute_beenden_das_schreiben(page, state) -
     assert notiz.verlauf.kann_rueckgaengig
 
 
+def test_feld_ueber_die_ganze_breite(page, state) -> None:
+    """„Setze das Feld auf die ganze Breite“: Ohne ``expand`` oder ``width`` gäbe Flet dem
+    Textfeld feste 300 px — die Spalte streckt es."""
+    notiz = _notiz(_feld(tagesansicht(page, state, state.heute(), mit_datum=False)))
+    spalte = notiz.control()
+    assert notiz.feld in spalte.controls
+    assert spalte.horizontal_alignment == ft.CrossAxisAlignment.STRETCH
+    assert notiz.feld.width is None and not notiz.feld.expand
+
+
+async def test_fertig_und_abbrechen_nehmen_dem_feld_den_fokus(page, state) -> None:
+    """„Der Fertig-Button macht nicht fertig“ (v0.3.15): Der Fokus ging an den Knopf, der mit
+    seiner Leiste verschwand — Flutter gab ihn dem Feld zurück, die Tastatur ging wieder auf.
+    Jetzt nimmt ``blur`` dem Feld den Fokus, jedes Mal mit einem neuen Wert."""
+    notiz = _notiz(_feld(tagesansicht(page, state, state.heute(), mit_datum=False)))
+    assert isinstance(notiz.feld, tn.Notizfeld) and notiz.feld.blur is None
+    assert notiz.feld._c == "TextField"  # Flet zeichnet ein gewöhnliches Textfeld
+    notiz.feld.on_focus(None)
+    _tippen(notiz, "fertig geschrieben")
+    await notiz.fertig()
+    erster = notiz.feld.blur
+    assert erster and not notiz.schreibt and notiz.anhang_leiste.visible
+    assert _gespeichert(state) == "fertig geschrieben"
+    notiz.feld.on_focus(None)
+    _tippen(notiz, "doch nicht")
+    await notiz.abbrechen()
+    assert notiz.feld.blur not in (None, erster)
+    assert notiz.feld.value == "fertig geschrieben" == _gespeichert(state)
+
+
+async def test_daneben_tippen_beendet_das_schreiben(page, state, monkeypatch) -> None:
+    """„Der Klick aus dem Fenster raus soll … speichern“: Ein Tipp neben das Feld beendet das
+    Schreiben wie „Fertig“ — nach der Nachfrist, denn auch ↶ und ↷ liegen daneben, und Flutter
+    meldet den Tipp schon beim Aufsetzen, ihren Klick erst beim Loslassen."""
+    monkeypatch.setattr(tn, "NACHFRIST_S", 0.0)
+    notiz = _notiz(_feld(tagesansicht(page, state, state.heute(), mit_datum=False)))
+    notiz.feld.on_focus(None)
+    _tippen(notiz, "Knie gut, Schulter fest")
+    _tippen(notiz, "Knie gut")  # ein Stück gelöscht
+    notiz.feld.on_tap_outside(None)  # der Finger setzt auf ↶ auf …
+    zeit = notiz._daneben_um
+    await notiz.rueckgaengig()  # … und hebt ab
+    await notiz._nach_daneben(zeit)
+    assert notiz.schreibt and notiz.feld.value == "Knie gut, Schulter fest"
+    notiz.feld.on_tap_outside(None)  # irgendwo sonst
+    await notiz._nach_daneben(notiz._daneben_um)
+    assert not notiz.schreibt and notiz.anhang_leiste.visible and notiz.feld.blur
+    assert _gespeichert(state) == "Knie gut, Schulter fest"
+    assert tn.SICHERN not in state.vor_dem_verlassen and state.schreiben_beenden is None
+    page.aufgaben.clear()
+    notiz.feld.on_tap_outside(None)  # ohne Schreiben: nichts
+    assert page.aufgaben == []
+
+
 def test_auffrischen_behaelt_den_stand(page, state) -> None:
     """Baut die Ansicht die Spalte neu (hier: Darstellung umschalten), entsteht ein neues Feld
     mit demselben Text — und demselben Verlauf."""

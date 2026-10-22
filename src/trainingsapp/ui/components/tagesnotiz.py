@@ -17,6 +17,10 @@ Video.“
   „Abbrechen“ und „Fertig“. **Abbrechen** stellt den Text her, der beim Antippen dastand —
   auch in der Datenbank — und bietet 5 s lang „Rückgängig“ an, falls das ein Versehen war.
   **Fertig** schließt die Tastatur; gespeichert ist ohnehin schon.
+- **Daneben tippen** beendet das Schreiben wie „Fertig“ (Ben, 22.10.2026: „der Klick aus dem
+  Fenster raus soll … speichern“). Am Handy nähme Flutter dem Feld von sich aus nie den Fokus.
+  Den Tipp meldet es schon beim Aufsetzen (``on_tap_outside``), auch auf ↶ und ↷ — darum
+  wartet die Notiz `NACHFRIST_S`, ob einer der beiden kommt.
 - **Anhänge am Tag:** Ohne Schreiben steht an derselben Stelle Foto · Video · Audio (· aus
   der Fotoauswahl, nur mit der Erweiterung); die Aufnahmen hängen am Tag
   (`core.anhaenge.Ziel`), ihre Kacheln stehen darunter, ein Tipp öffnet die Ansicht.
@@ -27,6 +31,13 @@ Speichern frischt die Ansicht bewusst **nicht** auf — ein Neuaufbau nähme dem
 Fokus und schlösse die Tastatur. Auch die beiden Leisten entstehen nur mit dem Feld; danach
 ändern sich nur Eigenschaften (sichtbar, gesperrt, Text): Am Rechner nimmt schon der Klick
 auf ↶ dem Feld den Fokus — ein dabei ersetzter Knopf bekäme den Klick nicht mehr.
+
+Das Feld steht in einer gestreckten Spalte: Ohne ``expand`` oder ``width`` gibt Flet einem
+Textfeld feste 300 px (Ben, 22.10.2026: „setze das Feld auf die ganze Breite“). Die Tastatur
+schließt `Notizfeld` mit ``blur``, nicht der Fokus auf einem Knopf: Verschwindet ein
+fokussierter Knopf mit seiner Leiste, gibt Flutter den Fokus dem zuvor fokussierten zurück —
+dem Feld. Bis v0.3.15 ging so die Tastatur zu und gleich wieder auf, die Ansicht sprang, und
+das Schreiben begann von vorn („der Fertig-Button macht nicht fertig“).
 """
 
 from __future__ import annotations
@@ -47,10 +58,22 @@ from trainingsapp.ui.state import AppState
 
 #: So lange nach der letzten Änderung wird gespeichert (s)
 SPEICHERN_NACH_S = 1.0
+#: So lange nach einem Tipp neben das Feld wartet die Notiz, ob es ↶ oder ↷ war (s) — deren
+#: Klick kommt erst beim Loslassen
+NACHFRIST_S = 0.5
 #: Hinweis im leeren Feld
 HINWEIS = "Notiz zum Tag … Wie lief der Tag? Tippen oder diktieren."
 #: Schlüssel in `AppState.vor_dem_verlassen`
 SICHERN = "tagesnotiz"
+
+
+@ft.control
+class Notizfeld(ft.TextField):
+    """Ein Textfeld, dem man den Fokus nehmen kann: Ein neuer Wert in ``blur`` ruft auf der
+    Dart-Seite ``unfocus()``. Flet liest die Eigenschaft beim Aufbau (`textfield.dart`, 1.0.3
+    bis 1.0.5), nur die Python-Klasse führt sie nicht."""
+
+    blur: str | None = None
 
 
 class Tagesnotiz:
@@ -73,13 +96,16 @@ class Tagesnotiz:
         #: Wann zuletzt geändert (`time.monotonic`) und das wartende Speichern
         self._letzte = 0.0
         self._aufgabe: Any = None
+        #: Wann zuletzt neben das Feld getippt wurde, solange die Nachfrist läuft
+        self._daneben_um: float | None = None
+        #: Zähler für ``Notizfeld.blur`` — jeder neue Wert nimmt den Fokus
+        self._losgelassen = 0
         #: Die Controls des letzten Aufbaus — Feld, die Leiste beim Schreiben (↶ ↷ …) und die
         #: mit den Anhängen; je nach `schreibt` ist eine der beiden sichtbar
-        self.feld = ft.TextField()
+        self.feld = Notizfeld()
         self.zurueck_knopf = ft.IconButton()
         self.vor_knopf = ft.IconButton()
         self.stand = ft.Text()
-        self.fertig_knopf = ft.FilledTonalButton()
         self.schreib_leiste = ft.Row()
         self.anhang_leiste = ft.Row()
 
@@ -96,7 +122,7 @@ class Tagesnotiz:
 
     def control(self) -> ft.Control:
         """Feld, Leiste und Kacheln — neu, mit dem Stand dieses Objekts."""
-        self.feld = ft.TextField(
+        self.feld = Notizfeld(
             value=self.text,
             hint_text=HINWEIS,
             multiline=True,
@@ -111,6 +137,7 @@ class Tagesnotiz:
             on_change=self._geaendert,
             on_focus=self._angetippt,
             on_blur=self._verlassen,
+            on_tap_outside=self._daneben,
         )
         self.zurueck_knopf = ft.IconButton(
             ft.Icons.UNDO, tooltip="Rückgängig", on_click=self.rueckgaengig
@@ -121,7 +148,6 @@ class Tagesnotiz:
         self.stand = ft.Text(
             "", size=12, opacity=0.6, expand=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS
         )
-        self.fertig_knopf = ft.FilledTonalButton("Fertig", on_click=self.fertig)
         self.schreib_leiste = ft.Row(
             spacing=0,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -132,7 +158,7 @@ class Tagesnotiz:
                 ft.TextButton(
                     "Abbrechen", tooltip="Zurück zum Text beim Antippen", on_click=self.abbrechen
                 ),
-                self.fertig_knopf,
+                ft.FilledTonalButton("Fertig", on_click=self.fertig),
             ],
         )
         self.anhang_leiste = ft.Row(
@@ -146,7 +172,13 @@ class Tagesnotiz:
         teile: list[ft.Control] = [self.feld, self.schreib_leiste, self.anhang_leiste]
         if (reihe := self._kacheln()) is not None:
             teile.append(ft.Container(padding=ft.Padding.only(left=4, bottom=4), content=reihe))
-        return ft.Column(spacing=2, tight=True, controls=teile)
+        # Gestreckt: das Feld über die ganze Breite (Moduldocstring)
+        return ft.Column(
+            spacing=2,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            controls=teile,
+        )
 
     def _stand_setzen(self) -> None:
         """Welche Leiste, was gesperrt ist, „gespeichert“ — nur Eigenschaften (Moduldocstring)."""
@@ -230,6 +262,17 @@ class Tagesnotiz:
         self.speichern()
         self._zeigen()
 
+    def _daneben(self, _e: object = None) -> None:
+        """Neben das Feld getippt: nach der Nachfrist fertig, wenn nicht ↶ oder ↷ kam."""
+        if self.schreibt:
+            self._daneben_um = zeit = time.monotonic()
+            self.page.run_task(self._nach_daneben, zeit)
+
+    async def _nach_daneben(self, zeit: float) -> None:
+        await asyncio.sleep(NACHFRIST_S)
+        if self.schreibt and self._daneben_um == zeit:
+            await self.fertig()
+
     async def _spaeter_speichern(self) -> None:
         """Speichern, sobald `SPEICHERN_NACH_S` lang nichts mehr kam."""
         try:
@@ -251,11 +294,13 @@ class Tagesnotiz:
     # -- Leiste --------------------------------------------------------------------------
 
     async def rueckgaengig(self) -> None:
+        self._daneben_um = None  # der Tipp daneben war dieser Knopf
         alt = self.text
         if (neu := self.verlauf.rueckgaengig()) is not None:
             await self._setzen(neu, stelle(alt, neu))
 
     async def wiederholen(self) -> None:
+        self._daneben_um = None
         alt = self.text
         if (neu := self.verlauf.wiederholen()) is not None:
             await self._setzen(neu, stelle(alt, neu))
@@ -291,7 +336,7 @@ class Tagesnotiz:
             return
         verworfen, anfang = self.text, self.anfang
         self._ersetzen(anfang)
-        await self._beenden()
+        self._beenden()
         if verworfen.strip() == anfang.strip():
             return
 
@@ -312,17 +357,26 @@ class Tagesnotiz:
         """Gespeichert ist schon — die Tastatur zu und die Leiste wieder mit den Anhängen.
         Der Verlauf bleibt: Wer wieder hineintippt, hat ↶ noch."""
         self.speichern()
-        await self._beenden()
+        self._beenden()
 
-    async def _beenden(self) -> None:
+    def _beenden(self) -> None:
         self.anfang = None
-        self.state.vor_dem_verlassen.pop(SICHERN, None)
+        self._daneben_um = None
+        # Nur die eigenen Haken — eine neue Ansicht kann schon ihre angemeldet haben
+        if self.state.vor_dem_verlassen.get(SICHERN) == self.speichern:
+            del self.state.vor_dem_verlassen[SICHERN]
         if self.state.schreiben_beenden == self.fertig:
             self.state.schreiben_beenden = None
-        # Der Fokus geht an den Knopf — das Feld gibt die Tastatur ab (Flet kennt kein blur)
-        with contextlib.suppress(Exception):
-            await self.fertig_knopf.focus()
+        self._loslassen()
         self._zeigen()
 
+    def _loslassen(self) -> None:
+        """Dem Feld den Fokus nehmen — die Tastatur geht zu (über ``blur``, nicht über den
+        Fokus eines Knopfs: Moduldocstring)."""
+        self._losgelassen += 1
+        self.feld.blur = str(self._losgelassen)
+        with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
+            self.feld.update()
 
-__all__ = ["HINWEIS", "SPEICHERN_NACH_S", "Tagesnotiz"]
+
+__all__ = ["HINWEIS", "NACHFRIST_S", "SPEICHERN_NACH_S", "Notizfeld", "Tagesnotiz"]

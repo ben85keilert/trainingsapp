@@ -141,6 +141,45 @@ def test_katalog_filtert_beim_ankreuzen(page, state) -> None:
     assert namen and sorted(namen) == sorted(erwartet)
 
 
+def _schirm(ansicht) -> tuple[ft.ListView, ft.Container]:
+    stapel = next(c for c in alle(ansicht) if isinstance(c, ft.Stack))
+    liste, schirm = stapel.controls
+    assert isinstance(liste, ft.ListView) and stapel.expand
+    return liste, schirm
+
+
+def test_tipp_neben_den_offenen_filter_waehlt_keine_uebung(page, state) -> None:
+    """Ben, 22.10.2026: „der Klick aus dem Filter soll bestätigen, ohne dass Übungen
+    ausgewählt werden“. Flutter schließt das Menü beim Tipp daneben, reicht den Tipp aber
+    weiter — solange eine Liste offen ist, liegt darum ein durchsichtiger Schirm über der
+    Übungsliste und nimmt ihn."""
+    ansicht = katalog(page, state)
+    typ, region = kaesten(ansicht)
+    _, schirm = _schirm(ansicht)
+    assert not schirm.visible and schirm.bgcolor == ft.Colors.TRANSPARENT
+    typ.on_open()
+    assert schirm.visible
+    region.on_open()  # ein Tipp auf den anderen Kasten: Typ schließt erst danach
+    typ.on_close()
+    assert schirm.visible
+    region.on_close()
+    assert not schirm.visible
+
+
+def test_uebung_hinzufuegen_hat_den_schirm(page, state) -> None:
+    from trainingsapp.core.models import Plan
+    from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
+
+    plan = Plan(name="Kraft", subject_id=state.profil.id)
+    state.plaene.speichern(plan)
+    ansicht = plan_hinzufuegen_view(page, state, plan)
+    typ, _ = kaesten(ansicht)
+    liste, schirm = _schirm(ansicht)
+    assert liste.controls and not schirm.visible
+    typ.on_open()
+    assert schirm.visible
+
+
 def test_editor_speichert_die_auswahl(page, state) -> None:
     uebung = Exercise(name="Probe", typen=["Kräftigung"])
     state.uebungen.speichern(uebung)

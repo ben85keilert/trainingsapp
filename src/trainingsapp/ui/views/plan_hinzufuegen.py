@@ -126,7 +126,8 @@ def plan_hinzufuegen_view(
                             padding=ft.Padding.symmetric(horizontal=16),
                             content=tagwahl.control,
                         ),
-                        liste,
+                        # Der Tipp, der den Filter schließt, nimmt keine Übung auf
+                        tagwahl.abschirmen(liste),
                         ft.Container(
                             padding=ft.Padding.only(left=8, right=16, bottom=8),
                             content=ft.TextButton(

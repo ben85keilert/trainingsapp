@@ -214,7 +214,11 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   beim Schließen. Neue Formulare ebenso. Die **Notiz zum Tag** schreibt man direkt unter
   Heute (Ben, 22.10.2026): Autosave nach 1 s, vor jedem Neuaufbau und vor dem Hintergrund
   (`AppState.vor_dem_verlassen`), ↶ ↷ aus `core/textverlauf.py`, „Abbrechen“ = Text vom
-  Antippen (`components/tagesnotiz.py`) — das Speichern frischt die Ansicht nie auf (Fokus). **Dialoge exakt schließen:** `page.pop_dialog()`
+  Antippen (`components/tagesnotiz.py`) — das Speichern frischt die Ansicht nie auf (Fokus).
+  Tippen daneben = „Fertig“; die Tastatur schließt `Notizfeld.blur` — nie den Fokus an einen
+  Knopf geben, der danach verschwindet (Flutter gibt ihn dem Feld zurück). Flutter-Menüs
+  reichen den Tipp, der sie schließt, an das Darunter weiter — Filter schirmen ihre Liste ab
+  (`TagWahl.abschirmen`). **Dialoge exakt schließen:** `page.pop_dialog()`
   trifft den obersten Eintrag — auch eine SnackBar —, darum `components/dialoge.schliessen`
   und keine SnackBar, solange ein Dialog offen ist (`Nachher`, `reste_dialog`).
   **Meldungen gehen nach 5 s** (Ben, 22.10.2026), auch mit „Rückgängig“ — zentral in

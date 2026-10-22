@@ -191,7 +191,7 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
                 ),
             ),
             ft.Container(padding=ft.Padding.symmetric(horizontal=16), content=tagwahl.control),
-            liste,
+            tagwahl.abschirmen(liste),  # der Tipp, der den Filter schließt, öffnet keine Übung
         ],
     )
 

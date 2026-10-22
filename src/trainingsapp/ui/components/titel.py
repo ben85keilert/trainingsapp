@@ -22,6 +22,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import schliessen
 
 #: So weit vor und nach der Messung zählen Planeinträge noch zu ihr
@@ -221,36 +222,31 @@ def titel_blatt(
         show_drag_handle=True,
         scrollable=True,
         on_dismiss=geschlossen,
-        content=ft.Container(
-            padding=ft.Padding.only(left=16, right=16, bottom=16),
-            content=ft.Column(
-                tight=True,
-                spacing=10,
-                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                controls=[
-                    ft.Text("Titel und Beschreibung", size=18, weight=ft.FontWeight.W_600),
-                    titel_feld,
-                    *(
-                        [ft.Row(wrap=True, spacing=6, run_spacing=6, controls=chips)]
-                        if chips
-                        else []
-                    ),
-                    beschreibung_feld,
-                    ft.Text(
-                        "Beides steht in der Messdatei — praxis_gui zeigt es ebenso. "
-                        "Notizen mit Zeitpunkt stehen unter der Kurve.",
-                        size=12,
-                        opacity=0.65,
-                    ),
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.END,
-                        controls=[
-                            ft.TextButton("Abbrechen", on_click=abbrechen),
-                            ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=sichern),
-                        ],
-                    ),
-                ],
-            ),
+        # Knöpfe fest über der Navigationsleiste, der Rest scrollt (`components/blatt.py`)
+        content=blatt_spalte(
+            [
+                ft.Text("Titel und Beschreibung", size=18, weight=ft.FontWeight.W_600),
+                titel_feld,
+                *([ft.Row(wrap=True, spacing=6, run_spacing=6, controls=chips)] if chips else []),
+                beschreibung_feld,
+                ft.Text(
+                    "Beides steht in der Messdatei — praxis_gui zeigt es ebenso. "
+                    "Notizen mit Zeitpunkt stehen unter der Kurve.",
+                    size=12,
+                    opacity=0.65,
+                ),
+            ],
+            [
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.END,
+                    controls=[
+                        ft.TextButton("Abbrechen", on_click=abbrechen),
+                        ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=sichern),
+                    ],
+                )
+            ],
+            geschaetzt=300,
+            abstand=10,
         ),
     )
     return blatt

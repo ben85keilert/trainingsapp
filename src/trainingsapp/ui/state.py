@@ -372,6 +372,9 @@ class AppState:
     einheit_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
     #: „Alle starten“ mit Countdown 3-2-1
     einheit_countdown: bool = True
+    #: Zeigte der letzte Aufbau Leiste und Reiter „Einheit“ (`ui.einheit.zu_zeigen`)? Ändert
+    #: sich das, zeichnet `ui.einheit.anzeige_takt` neu (Ben, 22.10.2026)
+    laufend_gezeigt: bool = False
     #: Reiter auf „Heute“, solange eine Einheit da ist: 0 = „Einheit“, 1 = der Tag — und
     #: (Einheit, läuft?) bei der letzten Wahl (`ui.einheit.heute_reiter`)
     heute_tab: int = 0

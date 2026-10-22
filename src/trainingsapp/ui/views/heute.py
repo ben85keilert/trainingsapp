@@ -2,8 +2,10 @@
 
 Steht eine Einheit bereit oder läuft sie, hat „Heute“ zwei Reiter (Ben, 17.10.2026):
 „Einheit“ (Startkarte bzw. Übersicht, `components.startleiste`) und „Heute“ — der Tag wie
-sonst. Welcher offen ist, regelt `ui.einheit.heute_reiter`. Der runde Knopf „Nachtragen“
-gehört zum Reiter „Heute“ (`app.hauptansicht`).
+sonst. Ebenso, wenn etwas außerhalb einer Einheit läuft — ein Timer für sich, eine Aufnahme,
+ein verbundener Gurt (Ben, 22.10.2026, `ui.einheit.ausserhalb`). Welcher offen ist, regelt
+`ui.einheit.heute_reiter`. Der runde Knopf „Nachtragen“ gehört zum Reiter „Heute“
+(`app.hauptansicht`).
 """
 
 from __future__ import annotations
@@ -18,8 +20,8 @@ from trainingsapp.ui.views.tag import tagesansicht
 
 
 def heute(page: ft.Page, state: AppState) -> ft.Control:
-    """Der Tag — mit einer Einheit dazu links der Reiter „Einheit“."""
-    if einheit_ui.aktuell(state) is None:
+    """Der Tag — mit einer Einheit (oder was sonst läuft) dazu links der Reiter „Einheit“."""
+    if not einheit_ui.zu_zeigen(state):
         return _tag(page, state)
     reiter = einheit_ui.heute_reiter(state)
 

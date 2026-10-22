@@ -13,6 +13,14 @@ Reiter „Einheit“ zeigt die **Übersicht**: Laufzeit, den Timer mit seiner Fo
 je Teil einen Live-Wert, die Intervalle — und was am Ende des Timers geschieht, auch jetzt
 noch änderbar.
 
+**Was außerhalb der Einheit läuft** (Ben, 22.10.2026; `ui.einheit.ausserhalb`) — ein Timer
+für sich, eine Aufnahme oder ein verbundener Gurt, die in keiner Einheit stecken, der
+GPS-Test — steht immer mit da: ohne Einheit als eigene Laufleiste („Timer · Dehnen“,
+darunter „Belastung · noch 0:12 · HRV 12:34“), neben der Laufleiste in ihrer zweiten Zeile,
+unter der Infoleiste als schmale Zeile „Läuft außerdem: …“. Der Reiter „Einheit“ zeigt je
+Bereich eine Karte — Antippen führt dorthin, wo man ihn bedient; ein Timer lässt sich dort
+anhalten. So verschwindet nichts, was weiterläuft, und jeder Bereich bleibt für sich bedienbar.
+
 Alles baut seine Knöpfe nur neu, wenn sich an ihnen etwas ändert; im Sekundentakt ändern
 sich nur Texte (Zeit, Abschnitt, Stand eines Teils wie die GPS-Genauigkeit) — sonst ginge
 ein Tipp verloren, der gerade läuft (wie in der Statuskarte der Messung, 17.10.2026).
@@ -45,6 +53,7 @@ from trainingsapp.ui.components.tabellen import (
     tempo_text,
 )
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.timer_takt import ticker_starten
 
 #: Symbol je Teil
 SYMBOLE: dict[str, Any] = {
@@ -60,7 +69,7 @@ KURZ = {"hrv": "HRV", "timer": "Timer", "gps": "GPS", "plan": "Plan"}
 
 def _teil_titel(teil: Any) -> str:
     if teil.art == "timer":
-        return f"Timer · {teil.lauf.profil.name}"
+        return ablauf.timer_titel(teil.lauf)
     if teil.art == "gps":
         sport = SPORT_NAMEN.get(getattr(teil, "sportart", ""), "Training")
         return f"{sport} · GPS" if getattr(teil, "quelle", None) is not None else sport
@@ -170,14 +179,15 @@ def _selbst_auffrischend(
 
 
 def startleiste(page: Any, state: AppState, *, haupt: bool = False) -> ft.Container | None:
-    """Die feste Leiste unter der Titelleiste — ``None`` ohne Einheit (die Ansicht bleibt
-    unverändert). Bereitgestellt die Infoleiste, im Lauf die Laufleiste.
+    """Die feste Leiste unter der Titelleiste — ``None``, wenn nichts bereitsteht oder läuft
+    (die Ansicht bleibt unverändert). Bereitgestellt die Infoleiste, im Lauf die Laufleiste;
+    was außerhalb der Einheit läuft, steht mit darin (Moduldocstring).
 
     ``haupt``: Die Hauptansicht liegt oben. Auf „Heute“ steht dann im Reiter „Einheit“
-    keine Leiste (dort steht alles) und im Reiter „Heute“ nur die Laufleiste.
+    keine Leiste (dort steht alles) und im Reiter „Heute“ nur, was läuft.
     """
     e = ablauf.aktuell(state)
-    if e is None:
+    if e is None and not ablauf.ausserhalb(state):
         return None
 
     async def oeffnen() -> None:
@@ -185,35 +195,46 @@ def startleiste(page: Any, state: AppState, *, haupt: bool = False) -> ft.Contai
 
     box = ft.Container(border_radius=16, ink=True, on_click=oeffnen)
 
+    def im_reiter() -> bool:
+        """Auf „Heute“ im Reiter „Einheit“ — dort steht alles, die Leiste schweigt."""
+        return (
+            haupt
+            and state.reiter == "heute"
+            and ablauf.heute_reiter(state) == ablauf.REITER_EINHEIT
+        )
+
     def art() -> str:
+        if e is None or im_reiter():
+            return ""
         if haupt and state.reiter == "heute":
-            if ablauf.heute_reiter(state) == ablauf.REITER_EINHEIT:
-                return ""
             return "lauf" if e.laeuft else ""
         return "lauf" if e.laeuft else "info"
 
     def schluessel() -> tuple:
         wo = art()
-        if wo == "lauf":
-            t = e.timer
-            return (wo, e.zustand, _timer_schluessel(t))
-        if wo == "info":
+        aussen = () if im_reiter() else ablauf.ausserhalb_schluessel(state)
+        if e is not None and wo == "lauf":
+            return (wo, aussen, e.zustand, _timer_schluessel(e.timer))
+        if e is not None and wo == "info":
             return (
                 wo,
+                aussen,
                 tuple((id(t), t.bereit) for t in e.teile),
                 tuple(e.fehler),
                 e.bereit,
                 state.einheit_countdown,
             )
-        return (wo,)
+        return (wo, aussen)
 
     def bauen(stand: dict) -> None:
-        wo = stand["schluessel"][0]
-        box.visible = bool(wo)
-        if wo == "lauf":
+        wo, aussen = stand["schluessel"][0], stand["schluessel"][1]
+        box.visible = bool(wo or aussen)
+        if e is not None and wo == "lauf":
             _laufleiste(page, state, e, box, stand)
-        elif wo == "info":
+        elif e is not None and wo == "info":
             _infoleiste(page, state, e, box, stand)
+        elif aussen:
+            _aussen_leiste(page, state, box, stand)
         else:
             box.content = None
 
@@ -269,13 +290,10 @@ def _infoleiste(page: Any, state: AppState, e: Any, box: ft.Container, stand: di
         oben.value, unten.value, fehler = _info_texte(e)
         unten.color = ft.Colors.ERROR if fehler else None
 
-    texte()
-    stand["texte"] = texte
-
     def starten() -> None:
         ablauf.alle_starten(page, state, ablauf.COUNTDOWN_S if state.einheit_countdown else 0.0)
 
-    box.content = ft.Row(
+    zeile = ft.Row(
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         controls=[
@@ -291,10 +309,38 @@ def _infoleiste(page: Any, state: AppState, e: Any, box: ft.Container, stand: di
             ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.6),
         ],
     )
+    bereiche = ablauf.ausserhalb(state)
+    if not bereiche:
+        texte()
+        stand["texte"] = texte
+        box.content = zeile
+        return
+    # Was außerdem läuft, als schmale Zeile darunter (Moduldocstring)
+    aussen = ft.Text(size=12, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, expand=True)
+
+    def alle_texte() -> None:
+        texte()
+        aussen.value = "Läuft außerdem: " + " · ".join(b.kurz for b in ablauf.ausserhalb(state))
+
+    alle_texte()
+    stand["texte"] = alle_texte
+    box.content = ft.Column(
+        spacing=2,
+        tight=True,
+        controls=[
+            zeile,
+            ft.Row(
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[_punkt(bereiche), aussen, *_aussen_timer_knopf(page, state, bereiche)],
+            ),
+        ],
+    )
 
 
 def _lauf_knoepfe(page: Any, state: AppState, e: Any) -> list[ft.Control]:
-    """⏸ für den Timer (nicht im Countdown, nicht wenn er fertig ist), ⏹ für alles."""
+    """⏸ für den Timer (nicht im Countdown, nicht wenn er fertig ist) — hat die Einheit
+    keinen, für einen, der außerhalb läuft —, ⏹ für alles."""
     t = e.timer
     knoepfe: list[ft.Control] = []
     if t is not None and not t.lauf.fertig and e.zustand is Zustand.LAEUFT:
@@ -305,6 +351,8 @@ def _lauf_knoepfe(page: Any, state: AppState, e: Any) -> list[ft.Control]:
                 on_click=lambda: ablauf.anhalten_oder_weiter(page, state),
             )
         )
+    elif t is None:
+        knoepfe += _aussen_timer_knopf(page, state, ablauf.ausserhalb(state))
     knoepfe.append(
         ft.IconButton(
             ft.Icons.STOP, tooltip="Alles beenden", on_click=lambda: _beenden_fragen(page, state, e)
@@ -314,14 +362,16 @@ def _lauf_knoepfe(page: Any, state: AppState, e: Any) -> list[ft.Control]:
 
 
 def _laufleiste(page: Any, state: AppState, e: Any, box: ft.Container, stand: dict) -> None:
-    """Zeit und Abschnitt, darunter die Teile, ⏸ ⏹ (Skizze 17)."""
+    """Zeit und Abschnitt, darunter die Teile — und was außerhalb läuft —, ⏸ ⏹ (Skizze 17)."""
     box.bgcolor = ft.Colors.PRIMARY_CONTAINER
     box.padding = ft.Padding.only(left=12, right=6, top=8, bottom=8)
     zeile1 = ft.Text(size=15, weight=ft.FontWeight.W_700, color=ft.Colors.ON_PRIMARY_CONTAINER)
     zeile2 = ft.Text(size=12, color=ft.Colors.ON_PRIMARY_CONTAINER)
 
     def texte() -> None:
-        zeile1.value, zeile2.value = ablauf.laufzeilen(e)
+        oben, unten = ablauf.laufzeilen(e)
+        aussen = [b.kurz for b in ablauf.ausserhalb(state)]
+        zeile1.value, zeile2.value = oben, " · ".join(t for t in (unten, *aussen) if t)
 
     texte()
     stand["texte"] = texte
@@ -332,6 +382,82 @@ def _laufleiste(page: Any, state: AppState, e: Any, box: ft.Container, stand: di
             ft.Icon(ft.Icons.FIBER_MANUAL_RECORD, size=14, color=ft.Colors.RED_700),
             ft.Column(spacing=0, expand=True, tight=True, controls=[zeile1, zeile2]),
             *_lauf_knoepfe(page, state, e),
+        ],
+    )
+
+
+def _punkt(bereiche: list[ablauf.Bereich], groesse: int = 10) -> ft.Control:
+    """Rot, wenn etwas wirklich läuft — sonst (nur verbunden, angehalten) blass."""
+    aktiv = any(b.aktiv for b in bereiche)
+    return ft.Icon(
+        ft.Icons.FIBER_MANUAL_RECORD,
+        size=groesse,
+        color=ft.Colors.RED_700 if aktiv else ft.Colors.OUTLINE,
+    )
+
+
+def _aussen_timer_knopf(
+    page: Any, state: AppState, bereiche: list[ablauf.Bereich]
+) -> list[ft.Control]:
+    """⏸ bzw. ▶ für einen Timer, der für sich läuft — leer ohne."""
+    t = state.timer
+    if t is None or not any(b.art == "timer" for b in bereiche):
+        return []
+
+    def umschalten() -> None:
+        if t.laeuft:
+            t.pause()
+        else:
+            t.fortsetzen()
+            with contextlib.suppress(Exception):
+                ticker_starten(page, state)  # Töne und Timer-Knopf zählen wieder mit
+        for beobachter in list(state.timer_beobachter.values()):
+            with contextlib.suppress(Exception):
+                beobachter()
+        ablauf.melden(state)
+
+    return [
+        ft.IconButton(
+            ft.Icons.PAUSE if t.laeuft else ft.Icons.PLAY_ARROW,
+            tooltip="Timer anhalten" if t.laeuft else "Timer fortsetzen",
+            on_click=umschalten,
+        )
+    ]
+
+
+def _aussen_leiste(page: Any, state: AppState, box: ft.Container, stand: dict) -> None:
+    """Ohne Einheit: Was für sich läuft, als Laufleiste — der erste Bereich mit seinem Wert,
+    die anderen kurz dahinter („Timer · Dehnen“, darunter „Belastung · noch 0:12 · HRV
+    12:34“), ⏸ für einen Timer."""
+    bereiche = ablauf.ausserhalb(state)
+    box.bgcolor = ft.Colors.PRIMARY_CONTAINER
+    box.padding = ft.Padding.only(left=12, right=6, top=8, bottom=8)
+    zeile1 = ft.Text(size=15, weight=ft.FontWeight.W_700, color=ft.Colors.ON_PRIMARY_CONTAINER)
+    zeile2 = ft.Text(
+        size=12,
+        color=ft.Colors.ON_PRIMARY_CONTAINER,
+        max_lines=1,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+
+    def texte() -> None:
+        jetzt = ablauf.ausserhalb(state)
+        if not jetzt:
+            return  # gleich weg (`ui.einheit.anzeige_takt`)
+        erster, *rest = jetzt
+        zeile1.value = erster.titel
+        zeile2.value = " · ".join([erster.wert, *(b.kurz for b in rest)])
+
+    texte()
+    stand["texte"] = texte
+    box.content = ft.Row(
+        spacing=10,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[
+            _punkt(bereiche, 14),
+            ft.Column(spacing=0, expand=True, tight=True, controls=[zeile1, zeile2]),
+            *_aussen_timer_knopf(page, state, bereiche),
+            ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.6, color=ft.Colors.ON_PRIMARY_CONTAINER),
         ],
     )
 
@@ -352,19 +478,21 @@ def _reiter_sichtbar(page: Any, state: AppState) -> bool:
 
 def reiter_titel(page: Any, state: AppState) -> ft.Control:
     """„Einheit · 3“ mit einem Punkt (orange: es bereitet noch etwas vor, sonst grün) —
-    im Lauf „Einheit läuft“ mit rotem Punkt (Skizzen 18, 19)."""
+    im Lauf „Einheit läuft“ mit rotem Punkt (Skizzen 18, 19), ebenso, wenn außerhalb etwas
+    läuft; ist nur ein Gurt verbunden, „Einheit“ mit blassem Punkt."""
     e = ablauf.aktuell(state)
     punkt = ft.Container(width=8, height=8, border_radius=4)
     text = ft.Text()
 
     def zeigen() -> None:
-        if e is None:
-            return
-        if e.laeuft:
+        bereiche = ablauf.ausserhalb(state)
+        if (e is not None and e.laeuft) or any(b.aktiv for b in bereiche):
             text.value, punkt.bgcolor = "Einheit läuft", ft.Colors.RED_700
-        else:
+        elif e is not None:
             text.value = f"Einheit · {len(e.teile)}"
             punkt.bgcolor = ft.Colors.PRIMARY if e.bereit else ft.Colors.TERTIARY
+        else:
+            text.value, punkt.bgcolor = "Einheit", ft.Colors.OUTLINE
 
     def auffrischen() -> None:
         if ablauf.aktuell(state) is not e or getattr(page, "route", "/") != "/":
@@ -389,7 +517,7 @@ def reiter_titel(page: Any, state: AppState) -> ft.Control:
 
 def einheit_reiter(page: Any, state: AppState) -> ft.Control:
     """Der Reiter „Einheit“: bereitgestellt die Startkarte in voller Höhe, im Lauf die
-    Übersicht (Skizzen 18, 19)."""
+    Übersicht (Skizzen 18, 19) — darunter je Bereich, der außerhalb läuft, eine Karte."""
     e = ablauf.aktuell(state)
     box = ft.Container()
     spalte = ft.Column(
@@ -399,11 +527,13 @@ def einheit_reiter(page: Any, state: AppState) -> ft.Control:
             ft.Container(padding=ft.Padding.only(left=12, right=12, top=12, bottom=24), content=box)
         ],
     )
-    if e is None:
+    if e is None and not ablauf.ausserhalb(state):
         return spalte
     hf_reihe = HfReihe()
 
-    def schluessel() -> tuple:
+    def einheit_schluessel() -> tuple:
+        if e is None:
+            return ()
         if e.laeuft:
             return (
                 "lauf",
@@ -423,11 +553,30 @@ def einheit_reiter(page: Any, state: AppState) -> ft.Control:
             state.einheit_countdown,
         )
 
+    def schluessel() -> tuple:
+        return (einheit_schluessel(), ablauf.ausserhalb_schluessel(state))
+
     def bauen(stand: dict) -> None:
-        if e.laeuft:
-            _uebersicht(page, state, e, box, stand, hf_reihe)
-        else:
-            _startkarte(page, state, e, box, stand)
+        teile: list[ft.Control] = []
+        einheit_texte: Callable[[], None] | None = None
+        if e is not None:
+            einheit_box = ft.Container()
+            if e.laeuft:
+                _uebersicht(page, state, e, einheit_box, stand, hf_reihe)
+            else:
+                _startkarte(page, state, e, einheit_box, stand)
+            einheit_texte = stand["texte"]
+            teile.append(einheit_box)
+        karten, aussen_texte = _aussen_karten(page, state, mit_titel=e is not None)
+        teile += karten
+
+        def texte() -> None:
+            if einheit_texte is not None:
+                einheit_texte()
+            aussen_texte()
+
+        stand["texte"] = texte
+        box.content = ft.Column(spacing=12, tight=True, controls=teile)
 
     _selbst_auffrischend(
         page,
@@ -440,6 +589,71 @@ def einheit_reiter(page: Any, state: AppState) -> ft.Control:
         sichtbar=lambda: _reiter_sichtbar(page, state),
     )
     return spalte
+
+
+def _bereich_oeffner(page: Any, state: AppState, b: ablauf.Bereich) -> Callable[[], Any] | None:
+    """Wohin ein Tipp auf einen Bereich führt — die HRV in den Reiter „Messung“ (`_oeffner`)."""
+    if b.route is None:
+        return _oeffner(page, state, b)
+    route = b.route
+
+    async def oeffnen() -> None:
+        await page.push_route(route)
+
+    return oeffnen
+
+
+def _aussen_karten(
+    page: Any, state: AppState, *, mit_titel: bool
+) -> tuple[list[ft.Control], Callable[[], None]]:
+    """Je Bereich, der außerhalb läuft, eine Karte (Moduldocstring): Symbol, Name, Live-Wert
+    — der Timer mit Fortschrittsleiste und ⏸ —; Antippen führt dorthin, wo man ihn bedient.
+    Gibt die Karten und ihre Auffrischung im Sekundentakt zurück."""
+    bereiche = ablauf.ausserhalb(state)
+    if not bereiche:
+        return [], lambda: None
+    auffrischer: list[Callable[[], None]] = []
+    karten: list[ft.Control] = []
+    if mit_titel:
+        karten.append(titel("Läuft außerdem — für sich"))
+    for b in bereiche:
+        wert = ft.Text(b.wert, size=13, opacity=0.85)
+        zeilen: list[ft.Control] = [
+            ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Icon(SYMBOLE.get(b.art, ft.Icons.CIRCLE), size=18),
+                    ft.Text(b.titel, size=14, weight=ft.FontWeight.W_600, expand=True),
+                    *(_aussen_timer_knopf(page, state, [b]) if b.art == "timer" else []),
+                    ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                ],
+            ),
+            wert,
+        ]
+
+        def wert_auffrischen(art: str = b.art, wert: ft.Text = wert) -> None:
+            jetzt = next((x for x in ablauf.ausserhalb(state) if x.art == art), None)
+            if jetzt is not None:
+                wert.value = jetzt.wert
+
+        auffrischer.append(wert_auffrischen)
+        if b.art == "timer" and state.timer is not None:
+            leiste = Fortschrittsleiste(state.timer)
+            leiste.auffrischen()
+            auffrischer.append(leiste.auffrischen)
+            zeilen.append(leiste.control)
+        k = cast(ft.Container, karte(*zeilen, abstand=6))
+        k.ink = True
+        k.on_click = _bereich_oeffner(page, state, b)
+        karten.append(k)
+
+    def texte() -> None:
+        for f in auffrischer:
+            with contextlib.suppress(Exception):
+                f()
+
+    return karten, texte
 
 
 def _startkarte(page: Any, state: AppState, e: Any, box: ft.Container, stand: dict) -> None:
@@ -696,7 +910,7 @@ def _uebersicht(
                     controls=[
                         ft.Icon(ft.Icons.TIMER_OUTLINED, size=18),
                         ft.Text(
-                            f"Timer · {t.lauf.profil.name}",
+                            ablauf.timer_titel(t.lauf),
                             size=14,
                             weight=ft.FontWeight.W_600,
                             expand=True,

@@ -75,7 +75,7 @@ from trainingsapp.ui.components.startleiste import (
     leiste_einsetzen,
     startleiste,
 )
-from trainingsapp.ui.flet_absicherung import methodenantworten_absichern
+from trainingsapp.ui.flet_absicherung import methodenantworten_absichern, snackbars_absichern
 from trainingsapp.ui.laufend import takt as laufend_takt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
@@ -268,7 +268,7 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
                 icon=ft.Icons.ADD, tooltip="Neuer Plan", on_click=neuen_plan_anlegen(page, state)
             )
         elif state.reiter == "heute" and (
-            einheit_ui.aktuell(state) is None
+            not einheit_ui.zu_zeigen(state)
             or einheit_ui.heute_reiter(state) != einheit_ui.REITER_EINHEIT
         ):
             # Nachtragen (Ben, 18.10.2026) — nur im Tag, nicht über der Einheit
@@ -325,6 +325,8 @@ def formular_korrektur(
 def main(page: ft.Page) -> None:
     # Antworten für ersetzte Controls beenden sonst die Empfangsschleife (Web, Socket)
     methodenantworten_absichern()
+    # Meldungen unten gehen nach 5 s von selbst — auch mit „Rückgängig“ (Ben, 22.10.2026)
+    snackbars_absichern()
     page.title = "Trainingsassistent"
     page.padding = 0
 
@@ -656,6 +658,10 @@ def main(page: ft.Page) -> None:
             state.notiz_beobachter,
         ):
             beobachter.clear()
+        # Was läuft, zeigt dieser Aufbau — `einheit_ui.anzeige_takt` zeichnet neu, wenn sich
+        # das ändert (vor dem Bauen gesetzt: ein Fehler beim Bauen soll nicht jede Sekunde
+        # einen neuen Versuch auslösen)
+        state.laufend_gezeigt = einheit_ui.zu_zeigen(state)
         # Thema und Kurvenfarben zuerst — die Ansichten lesen sie beim Bauen
         darstellung = darstellung_anwenden()
         vorher = list(page.views)
@@ -675,8 +681,8 @@ def main(page: ft.Page) -> None:
                 page.show_dialog(ft.SnackBar(ft.Text(f"Ansicht nicht geöffnet: {fehler}")))
             return
         # Info- bzw. Laufleiste einer Einheit unter der Titelleiste der obersten Ansicht
-        # (Ben, 17.10.2026) — ohne Einheit bleibt jede Ansicht, wie sie ist; auf „Heute“
-        # steht die Einheit im eigenen Reiter
+        # (Ben, 17.10.2026), mit allem, was außerhalb läuft (22.10.2026) — läuft nichts,
+        # bleibt jede Ansicht, wie sie ist; auf „Heute“ steht es im Reiter „Einheit“
         haupt = len(page.views) == 1
         if page.views and (leiste := startleiste(page, state, haupt=haupt)) is not None:
             leiste_einsetzen(page.views[-1], leiste)
@@ -807,6 +813,9 @@ def main(page: ft.Page) -> None:
     # Was läuft (HRV, Training, Timer), steht jede Sekunde in der Benachrichtigung —
     # nur in der Android-App (Ben, 16.10.2026, `ui.laufend`)
     page.run_task(laufend_takt, state)
+    # … und in der App selbst, oben in der Leiste und im Reiter „Einheit“ — auch was in
+    # keiner Einheit steckt (Ben, 22.10.2026)
+    page.run_task(einheit_ui.anzeige_takt, state)
 
 
 if __name__ == "__main__":

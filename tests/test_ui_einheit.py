@@ -16,6 +16,7 @@ from trainingsapp.ui.components.startleiste import (  # noqa: E402
     einheit_reiter,
     leiste_auffrischen,
     leiste_einsetzen,
+    reiter_titel,
     startleiste,
 )
 from trainingsapp.ui.state import AppState  # noqa: E402
@@ -106,7 +107,8 @@ def test_timer_bereitstellen_zeigt_infoleiste_und_startkarte(state) -> None:
     # Ausführlich im Reiter „Einheit“ auf „Heute“
     karte = einheit_reiter(page, state)
     texte = _texte(karte)
-    assert "Bereitgestellt" in texte and any(t.startswith("Timer · ") for t in texte)
+    # Die Uhr mit ihrem Namen — vorher „Timer · “ ohne Namen (`ui.einheit.timer_titel`)
+    assert "Bereitgestellt" in texte and "Stoppuhr" in texte
     assert not _knopf(karte, "Alle starten").disabled
     # In der Timer-Ansicht heißt der Knopf jetzt „Bereitgestellt“ — ein Tipp nimmt ihn heraus
     _knopf(timer_view(page, state, "/"), "Bereitgestellt").on_click()
@@ -514,3 +516,169 @@ async def test_laufende_messung_kommt_in_die_bereitgestellte_einheit(state, tmp_
     einheit_ui._messung_weiter_zeigen(page, state)
     assert e.hrv is not None and einheit_ui.in_vorbereitung(state) is e
     await a.abbauen()
+
+
+# ---------------------------------------------------------------------------
+# Was außerhalb der Einheit läuft (Ben, 22.10.2026: „wenn etwas läuft soll das aber
+# angezeigt sein … Die laufende Einheit soll alles erfassen, es gibt Timer - Messung - GPS“)
+# ---------------------------------------------------------------------------
+
+
+async def _messung_mit_bereitgestelltem_timer(state, tmp_path):
+    """Eine Aufnahme läuft für sich (eigene Einheit), dann wird ein Timer bereitgestellt —
+    die Aufnahme kommt mit in die Startleiste (`platz_machen`, `timer_bereitstellen`)."""
+    from attrappen import aufbauen
+
+    a = await aufbauen(tmp_path)
+    state.messlauf = a.lauf
+    state.einheiten = a.repo
+    state.neu_zeichnen = lambda: None
+    a.lauf.aufnahme_starten()
+    page = Seite()
+    einheit_ui._messung_weiter_zeigen(page, state)
+    assert einheit_ui.laeuft(state) is not None
+    einheit_ui.timer_bereitstellen(page, state, TimerLauf(_profil(60)))
+    e = einheit_ui.in_vorbereitung(state)
+    assert e is not None and e.hrv is not None and a.lauf.aufnahme is not None
+    return a, page, e
+
+
+async def test_herausgenommene_aufnahme_steht_weiter_da(state, tmp_path) -> None:
+    """Ben, 22.10.2026: „Man kann diese wegklicken in Einheit, dann läuft sie weiter, aber
+    wird nicht mehr angezeigt.“ — ✕ an der laufenden Aufnahme: Sie läuft weiter und steht
+    unter der Infoleiste und im Reiter „Einheit“ als eigener Bereich."""
+    a, page, e = await _messung_mit_bereitgestelltem_timer(state, tmp_path)
+    einheit_ui.zuruecknehmen(page, state, "hrv")
+    assert e.hrv is None and a.lauf.aufnahme is not None
+    (b,) = einheit_ui.ausserhalb(state)
+    assert b.art == "hrv" and b.aktiv and b.wert.startswith("Aufnahme 0:")
+    leiste = startleiste(page, state)
+    assert leiste is not None
+    assert any(t.startswith("Läuft außerdem: HRV ") for t in _texte(leiste))
+    state.reiter = "heute"
+    texte = _texte(einheit_reiter(page, state))
+    assert "Bereitgestellt" in texte and "HRV-Messung" in texte
+    assert "Läuft außerdem — für sich".upper() in texte
+    einheit_ui.leeren(page, state)
+    await a.abbauen()
+
+
+async def test_leeren_zeigt_die_aufnahme_wieder_als_eigene(state, tmp_path) -> None:
+    """„Leeren“ nimmt die Startleiste weg — die Aufnahme, die schon lief, steht danach wieder
+    als eigene Einheit da (Laufleiste mit ⏹), statt nur noch in der Benachrichtigung."""
+    a, page, e = await _messung_mit_bereitgestelltem_timer(state, tmp_path)
+    einheit_ui.leeren(page, state)
+    neu = einheit_ui.laeuft(state)
+    assert neu is not None and neu is not e and [t.art for t in neu.teile] == ["hrv"]
+    assert neu.stoppt_am_ende("hrv") and einheit_ui.ausserhalb(state) == []
+    leiste = startleiste(page, state)
+    assert leiste is not None and ft.Icons.STOP in [
+        x.icon for x in _alle(leiste) if isinstance(x, ft.IconButton)
+    ]
+    neu.am_ende_stoppen["hrv"] = False
+    neu.beenden()
+    await a.abbauen()
+
+
+async def test_timer_neben_bereitgestellter_einheit_steht_in_der_leiste(state) -> None:
+    """Steht eine Einheit bereit, startet ein Timer für sich (`einzeln_starten` → ``None``) —
+    bisher nur im Timer-Knopf sichtbar. Jetzt: „Läuft außerdem“, ⏸ hält ihn an."""
+    from trainingsapp.devices.einheit import TimerBaustein
+
+    page = Seite()
+    state.neu_zeichnen = lambda: None
+    einheit_ui.ausdauer_bereitstellen(page, state, "laufen", None)  # drinnen: gleich bereit
+    lauf = TimerLauf(_profil(30))
+    assert einheit_ui.einzeln_starten(page, state, TimerBaustein(lauf)) is None
+    lauf.start()
+    state.timer = lauf
+    (b,) = einheit_ui.ausserhalb(state)
+    assert (b.art, b.titel, b.aktiv, b.route) == ("timer", "Timer · Kurz", True, "/timer")
+    assert b.wert.startswith("A · noch 0:") and b.kurz.startswith("Timer 0:")
+    leiste = startleiste(page, state)
+    assert leiste is not None and "1 von 1 bereit" not in _texte(leiste)
+    (pause,) = [
+        x for x in _alle(leiste) if isinstance(x, ft.IconButton) and x.icon == ft.Icons.PAUSE
+    ]
+    pause.on_click()
+    assert not lauf.laeuft and lauf.begonnen
+    assert einheit_ui.ausserhalb(state)[0].aktiv is False  # angehalten: blass, aber da
+    einheit_ui.leeren(page, state)
+    assert einheit_ui.zu_zeigen(state)  # der Timer bleibt
+    leiste = startleiste(page, state)
+    assert leiste is not None and "Timer · Kurz" in _texte(leiste)
+    await asyncio.sleep(0)
+
+
+async def test_beenden_mitten_im_timer_laesst_keinen_angehaltenen_zurueck(state) -> None:
+    """⏹ hält den Timer der Einheit nur an — danach stand er als „angehalten“ für sich da
+    (Leiste, Benachrichtigung). Jetzt endet er mit der Einheit."""
+    from trainingsapp.ui.laufend import laufendes
+
+    page = Seite()
+    state.neu_zeichnen = lambda: None
+    lauf = lauf_fuer(state, _profil(60))
+    einheit_ui.timer_bereitstellen(page, state, lauf)
+    einheit_ui.alle_starten(page, state, 0.0)
+    await asyncio.sleep(0.05)
+    einheit_ui.alle_beenden(state)
+    assert einheit_ui.ausserhalb(state) == []  # gehört der eben beendeten Einheit
+    await asyncio.wait_for(
+        asyncio.gather(*[a for a in page.aufgaben if isinstance(a, asyncio.Task)]), 6
+    )
+    assert state.einheit is None and state.timer is None
+    assert not einheit_ui.zu_zeigen(state) and laufendes(state) == []
+
+
+async def test_verbundener_gurt_ohne_aufnahme(state, tmp_path) -> None:
+    """Wie in der Benachrichtigung: ein verbundener Gurt steht da — blass, „Einheit“ im
+    Reiter; mit Aufnahme in einer Einheit zeigt ihn die Einheit selbst."""
+    from attrappen import aufbauen
+
+    a = await aufbauen(tmp_path)
+    state.messlauf = a.lauf
+    state.einheiten = a.repo
+    state.neu_zeichnen = lambda: None
+    (b,) = einheit_ui.ausserhalb(state)
+    assert (b.art, b.aktiv, b.kurz) == ("hrv", False, "HRV verbunden")
+    assert b.wert.startswith("verbunden mit Polar H10 TEST · keine Aufnahme")
+    page = Seite()
+    state.reiter = "heute"
+    titel = reiter_titel(page, state)
+    assert "Einheit" in _texte(titel)
+    # Heute: der Tag bleibt vorn, der Reiter „Einheit“ ist da
+    from trainingsapp.ui.views.heute import heute
+
+    reiter = heute(page, state)
+    assert isinstance(reiter, ft.Tabs) and reiter.selected_index == einheit_ui.REITER_TAG
+    await a.abbauen()
+    assert einheit_ui.ausserhalb(state) == []
+
+
+async def test_anzeige_takt_zeichnet_neu_wenn_etwas_erscheint(state) -> None:
+    """Der Sekundentakt: Erscheint etwas, das die Ansichten noch nicht zeigen, wird nach zwei
+    Takten neu gezeichnet; läuft schon alles Gezeigte, zählen nur die Texte mit."""
+    gezeichnet: list[int] = []
+
+    def zeichnen() -> None:
+        gezeichnet.append(1)
+        state.laufend_gezeigt = einheit_ui.zu_zeigen(state)  # wie `app.zeige_route`
+
+    state.neu_zeichnen = zeichnen
+    state.laufend_gezeigt = False
+    takt = asyncio.ensure_future(einheit_ui.anzeige_takt(state))
+    try:
+        lauf = TimerLauf(_profil(30))
+        lauf.start()
+        state.timer = lauf  # ein Timer für sich, ohne Neuaufbau gestartet
+        for _ in range(40):
+            await asyncio.sleep(0.1)
+            if gezeichnet:
+                break
+        assert gezeichnet == [1] and state.laufend_gezeigt
+        gemeldet: list[int] = []
+        state.einheit_beobachter["probe"] = lambda: gemeldet.append(1)
+        await asyncio.sleep(1.2)
+        assert gezeichnet == [1] and gemeldet  # nur Texte
+    finally:
+        takt.cancel()

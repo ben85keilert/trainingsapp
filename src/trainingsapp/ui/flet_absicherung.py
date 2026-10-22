@@ -9,6 +9,16 @@ neu zeichnet. Kommt die Antwort des Clients danach an, wirft
 und über den Socket (``flet run``) beendet das die Empfangsschleife: Die App reagiert auf
 nichts mehr. Hier wird die Antwort trotzdem dem Wartenden zugestellt (wie Flet es für
 bekannte Controls tut) und nicht geworfen.
+
+**Graue Meldungen, die stehen bleiben** (Ben, 22.10.2026: „beim Anklicken einer Übung in
+Heute kommt unten ein grauer Infobalken, der nicht mehr verschwindet … die grauen Balken
+sollen nach 5 Sekunden verschwinden“): Eine `ft.SnackBar` mit ``action`` („Rückgängig“)
+bleibt seit Flutter 3.35 stehen, solange ``persist`` nicht ausdrücklich ``False`` ist —
+Flets Vorgabe ist ``None``, und das heißt „mit Aktion: bleiben“. Solange sie steht, warten
+alle weiteren Meldungen dahinter. Einzelne Stellen nachzuziehen reichte nicht (über 100
+Meldungen, jede neue wäre wieder eine Falle); `snackbars_absichern` gibt darum jeder
+SnackBar beim Zeigen ``persist=False`` und `MELDUNG_MS` statt Flets 4 s — was eine Stelle
+ausdrücklich setzt, bleibt.
 """
 
 from __future__ import annotations
@@ -18,6 +28,11 @@ import logging
 from typing import Any
 
 log = logging.getLogger(__name__)
+
+#: So lange steht eine Meldung unten (ms) — Ben, 22.10.2026: „nach 5 Sekunden verschwinden“
+MELDUNG_MS = 5000
+#: Flets Vorgabe für ``SnackBar.duration`` (ms)
+FLET_MELDUNG_MS = 4000
 
 
 def methodenantworten_absichern() -> bool:
@@ -66,4 +81,53 @@ def antwort_zustellen(session: Any, call_id: str, result: Any, error: str | None
         evt.set()
 
 
-__all__ = ["antwort_zustellen", "methodenantworten_absichern"]
+def _millisekunden(wert: Any) -> int | None:
+    """``SnackBar.duration`` in ms — eine Zahl (ms) oder ein `ft.Duration`."""
+    if isinstance(wert, int | float):
+        return int(wert)
+    return getattr(wert, "in_milliseconds", None)
+
+
+def meldung_vorgaben(snackbar: Any) -> None:
+    """Was jede Meldung bekommt (Moduldocstring): ``persist=False``, wenn nichts gesetzt ist,
+    und `MELDUNG_MS` statt Flets 4 s. Ausdrücklich Gesetztes bleibt."""
+    if getattr(snackbar, "persist", False) is None:
+        snackbar.persist = False
+    if _millisekunden(getattr(snackbar, "duration", None)) == FLET_MELDUNG_MS:
+        snackbar.duration = MELDUNG_MS
+
+
+def snackbars_absichern() -> bool:
+    """Ersetzt ``show_dialog`` der Seite durch eine Fassung, die jede SnackBar vorher mit
+    `meldung_vorgaben` versieht. Mehrfach aufrufbar; ``False``, wenn es die Stelle in dieser
+    Flet-Version nicht gibt (dann bleibt alles, wie es ist)."""
+    try:
+        from flet.controls.base_page import BasePage
+        from flet.controls.material.snack_bar import SnackBar
+    except ImportError:
+        return False
+    original = getattr(BasePage, "show_dialog", None)
+    if original is None:
+        return False
+    if getattr(original, "abgesichert", False):
+        return True
+
+    def show_dialog(self: Any, dialog: Any) -> None:
+        if isinstance(dialog, SnackBar):
+            meldung_vorgaben(dialog)
+        original(self, dialog)
+
+    show_dialog.abgesichert = True  # type: ignore[attr-defined]
+    show_dialog.original = original  # type: ignore[attr-defined]
+    BasePage.show_dialog = show_dialog  # type: ignore[method-assign]
+    return True
+
+
+__all__ = [
+    "FLET_MELDUNG_MS",
+    "MELDUNG_MS",
+    "antwort_zustellen",
+    "meldung_vorgaben",
+    "methodenantworten_absichern",
+    "snackbars_absichern",
+]

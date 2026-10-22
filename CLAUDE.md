@@ -207,6 +207,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   beim Schließen. Neue Formulare ebenso. **Dialoge exakt schließen:** `page.pop_dialog()`
   trifft den obersten Eintrag — auch eine SnackBar —, darum `components/dialoge.schliessen`
   und keine SnackBar, solange ein Dialog offen ist (`Nachher`, `reste_dialog`).
+  **Meldungen gehen nach 5 s** (Ben, 22.10.2026), auch mit „Rückgängig“ — zentral in
+  `ui/flet_absicherung.snackbars_absichern` (`persist=False` beim Zeigen; Flutter ließe sie
+  sonst stehen). **Blätter von unten** nehmen `components/blatt.blatt_spalte`: Inhalt
+  scrollt, gemessene Höhe, Knöpfe fest über der Navigationsleiste — keine Höhenschätzung.
 
 - **Laufende Messung überlebt das Wegwischen** (Ben, 16.10.2026): `scripts/apk_bauen.py`
   setzt in Flets Vorlage eine eigene MainActivity, die die Flutter-Engine im

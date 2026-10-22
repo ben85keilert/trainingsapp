@@ -18,6 +18,12 @@ je Übung über die Tage hat der Verlauf. Gruppiert wird in `core/tag.py`. Eine 
 (`views/leistungen.leistungen_blatt`), der runde Knopf „Nachtragen“ die Auswahl
 (`views/nachtragen.py`).
 
+**Fotos und Videos** stehen als Frontbilder unter der Übung — in beiden Darstellungen, wie im
+Tagebuch (Ben, 22.10.2026: „dass man die Anhänge direkter sieht“; vorher nur eine Büroklammer
+mit Zahl). Ein Tipp auf ein Bild öffnet die Ansicht (`…/anhang/<id>`), kein Video läuft hier;
+die Bilder sind klein dekodiert (`components/anhang_reihe`), gelesen wird mit einer Abfrage
+für den ganzen Tag (`AnhangRepo.je_eintraegen`).
+
 Ein Plan ist ein Rahmen, in dem man variiert: Die Karte sagt „2 von 5“ und zeigt je Übung
 ein Stück, sie zählt keine Prozente.
 
@@ -66,6 +72,7 @@ from trainingsapp.core.tag import (
     zusammenfassung,
 )
 from trainingsapp.core.verlauf import MONATE, WOCHENTAGE_LANG, montag
+from trainingsapp.ui.components.anhang_reihe import anhang_reihe
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.notiz import notiz_dialog
@@ -82,6 +89,7 @@ from trainingsapp.ui.components.zeitstrahl import zeitpunkt
 from trainingsapp.ui.components.zum_tag import EINSTELLUNGEN as TAGESFELDER_ROUTE
 from trainingsapp.ui.components.zum_tag import zum_tag_block
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.anhang import anhang_route
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
 from trainingsapp.ui.views.plan_ablauf import plan_ablauf_route
@@ -156,7 +164,7 @@ class _Daten:
     gibt_plaene: bool
     #: Eintrag-ID → Training (`data.StreckeRepo.zu_eintraegen`)
     strecken: dict[str, Strecke]
-    #: Eintrag-ID → Fotos und Videos (`data.AnhangRepo.je_eintraegen`) — Büroklammer mit Zahl
+    #: Eintrag-ID → Fotos und Videos (`data.AnhangRepo.je_eintraegen`) — ihre Frontbilder
     anhaenge: dict[str, list[Anhang]]
     vom_timer: set[str]
     tagesnotiz: str
@@ -184,9 +192,10 @@ class _Daten:
     def training(self, g: Gemacht) -> Strecke | None:
         return next((self.strecken[e.id] for e in g.eintraege if e.id in self.strecken), None)
 
-    def aufnahmen(self, g: Gemacht) -> int:
-        """Wie viele Fotos und Videos an den Einträgen dieser Übung hängen."""
-        return sum(len(self.anhaenge.get(e.id, [])) for e in g.eintraege)
+    def aufnahmen(self, g: Gemacht) -> list[Anhang]:
+        """Die Fotos und Videos an den Einträgen dieser Übung — Eintrag für Eintrag, je
+        Eintrag die älteste zuerst."""
+        return [a for e in g.eintraege for a in self.anhaenge.get(e.id, [])]
 
     def reihen(self) -> list[Gemacht]:
         """Je Übung eine Zeile, nach dem ersten Eintrag — ein Training immer für sich."""
@@ -516,6 +525,15 @@ def tagesansicht(
 
         return blatt
 
+    def aufnahmen_reihe(g: Gemacht) -> ft.Control | None:
+        """Die Frontbilder der Fotos und Videos dieser Übung (Moduldocstring) — ``None``
+        ohne; ein Tipp öffnet die Ansicht über dieser."""
+        return anhang_reihe(
+            daten().aufnahmen(g),
+            state.anhaenge.bild,
+            lambda a: oeffner(anhang_route(basis or "/", a.id)),
+        )
+
     # -- Kopf -----------------------------------------------------------------------
 
     def kopf() -> ft.Control:
@@ -784,19 +802,6 @@ def tagesansicht(
         unter: list[ft.Control] = [ft.Text(erste, size=12, opacity=0.75)]
         if z.zusatz:
             unter.append(ft.Text(z.zusatz, size=11, opacity=0.6))
-        if anzahl := d.aufnahmen(g):
-            # Dezent (Ben, 19.10.2026): Büroklammer mit Zahl — die Bilder zeigt das Blatt
-            unter.append(
-                ft.Row(
-                    spacing=2,
-                    controls=[
-                        ft.Icon(ft.Icons.ATTACH_FILE, size=13, opacity=0.6),
-                        ft.Text(
-                            f"{anzahl} Aufnahme{'' if anzahl == 1 else 'n'}", size=11, opacity=0.6
-                        ),
-                    ],
-                )
-            )
         if notiz := next((e.note for e in reversed(g.eintraege) if e.note), ""):
             unter.append(
                 ft.Text(
@@ -828,6 +833,7 @@ def tagesansicht(
             on_click=ziel(g),
             etiketten=etiketten,
             variante=varianten_schild(g),
+            unten=aufnahmen_reihe(g),
         )
 
     def varianten_schild(g: Gemacht, klein: bool = False) -> ft.Control | None:
@@ -997,43 +1003,43 @@ def tagesansicht(
         else:
             wert = "abgehakt"
         unter = [ft.Text(z.zeile, size=11, opacity=0.65)] if not abgehakt else []
+        zeile = ft.Row(
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Column(
+                    spacing=0,
+                    tight=True,
+                    expand=True,
+                    controls=[
+                        ft.Row(
+                            spacing=6,
+                            wrap=True,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            controls=[
+                                ft.Text(daten().name(g.exercise_id), size=14),
+                                *([schild] if (schild := varianten_schild(g, klein=True)) else []),
+                            ],
+                        ),
+                        *unter,
+                    ],
+                ),
+                ft.Text(
+                    wert,
+                    size=13 if abgehakt else 14,
+                    weight=None if abgehakt else ft.FontWeight.W_600,
+                    opacity=0.7 if abgehakt else 1,
+                ),
+            ],
+        )
+        reihe = aufnahmen_reihe(g)
         return ft.Container(
             ink=True,
             on_click=ziel(g),
             border_radius=8,
             padding=ft.Padding.symmetric(horizontal=4, vertical=2),
-            content=ft.Row(
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Column(
-                        spacing=0,
-                        tight=True,
-                        expand=True,
-                        controls=[
-                            ft.Row(
-                                spacing=6,
-                                wrap=True,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                controls=[
-                                    ft.Text(daten().name(g.exercise_id), size=14),
-                                    *(
-                                        [schild]
-                                        if (schild := varianten_schild(g, klein=True))
-                                        else []
-                                    ),
-                                ],
-                            ),
-                            *unter,
-                        ],
-                    ),
-                    ft.Text(
-                        wert,
-                        size=13 if abgehakt else 14,
-                        weight=None if abgehakt else ft.FontWeight.W_600,
-                        opacity=0.7 if abgehakt else 1,
-                    ),
-                ],
-            ),
+            content=zeile
+            if reihe is None
+            else ft.Column(spacing=6, tight=True, controls=[zeile, reihe]),
         )
 
     def block(a: Abschnitt) -> ft.Control:

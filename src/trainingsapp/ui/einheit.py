@@ -15,6 +15,20 @@ Das Ausdauertraining läuft immer als Einheit (Stufe 2): Sein Teil ist
 `devices.strecke_baustein.StreckeBaustein` (``state.ausdauer``, solange er
 bereitsteht oder läuft); nach dem Ende tragen `ui.training` Strecke und Tagebuch ein.
 
+**Was läuft, steht da — auch außerhalb einer Einheit** (Ben, 22.10.2026: „Wenn eine Messung
+läuft, dann ein Timer startet und endet … Man kann diese wegklicken in Einheit, dann läuft
+sie weiter, aber wird nicht mehr angezeigt. Sorge dafür, dass der Betrieb der Bereiche
+unabhängig ist, wenn etwas läuft soll das aber angezeigt sein … Die laufende Einheit soll
+alles erfassen, es gibt Timer - Messung - GPS“). Leiste und Reiter „Einheit“ zeigten nur,
+was in der Einheit steckte: Eine Aufnahme, die man aus der bereitgestellten Einheit nahm
+(✕, „Leeren“), ein Timer, der neben einer bereitgestellten Einheit startete, oder ein
+verbundener Gurt liefen weiter, standen aber nur noch in der Benachrichtigung. Jetzt
+sammelt `ausserhalb` diese Bereiche — dieselben Quellen wie die Benachrichtigung
+(`ui.laufend`) —, Leiste und Reiter zeigen sie neben der Einheit, `anzeige_takt` zählt sie
+jede Sekunde mit und zeichnet neu, wenn etwas erscheint oder verschwindet. Endet eine
+Einheit oder wird sie geleert, steht eine weiterlaufende Aufnahme wieder als eigene da
+(`_messung_weiter_zeigen`).
+
 Ohne flet-Import (wie ``ui/laufend.py``): ``page`` braucht nur ``run_task``. Die
 Timer-Ansicht (Töne) und das Eintragen der Aufnahme kommen erst beim Aufruf dazu.
 Vertrag: ``docs/plan_einheit.md``.
@@ -27,6 +41,8 @@ import contextlib
 import math
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from trainingsapp.config import datenverzeichnis
@@ -137,10 +153,15 @@ def _neue(state: Any) -> Einheitslauf:
 REITER_EINHEIT, REITER_TAG = 0, 1
 
 
+#: Stand des Reiters, wenn nur außerhalb einer Einheit etwas läuft (`heute_reiter`)
+_NUR_AUSSERHALB = ("ausserhalb", False)
+
+
 def heute_reiter(state: Any) -> int:
     """Welcher Reiter auf „Heute“ offen ist: Erscheint eine Einheit oder beginnt sie, öffnet
     „Heute“ auf „Einheit“; wer auf den Tag wechselt, bleibt dort bis zur nächsten Änderung.
-    Ohne Einheit gibt es nur den Tag.
+    Läuft nur etwas außerhalb einer Einheit (`ausserhalb`), bleibt der Tag vorn — die Leiste
+    darüber zeigt es, ein Tipp darauf öffnet „Einheit“. Ohne beides gibt es nur den Tag.
 
     >>> from types import SimpleNamespace
     >>> heute_reiter(SimpleNamespace(einheit=None, heute_tab=0, heute_tab_stand=None))
@@ -148,7 +169,11 @@ def heute_reiter(state: Any) -> int:
     """
     e = aktuell(state)
     if e is None:
-        return REITER_TAG
+        if not ausserhalb(state):
+            return REITER_TAG
+        if state.heute_tab_stand != _NUR_AUSSERHALB:
+            state.heute_tab, state.heute_tab_stand = REITER_TAG, _NUR_AUSSERHALB
+        return int(state.heute_tab)
     stand = (e.id, e.laeuft)
     if state.heute_tab_stand != stand:
         state.heute_tab, state.heute_tab_stand = REITER_EINHEIT, stand
@@ -159,7 +184,10 @@ def heute_reiter_waehlen(state: Any, reiter: int) -> None:
     """Die Wahl der Person — sie gilt bis zur nächsten Änderung der Einheit."""
     e = aktuell(state)
     state.heute_tab = reiter
-    state.heute_tab_stand = (e.id, e.laeuft) if e is not None else None
+    if e is not None:
+        state.heute_tab_stand = (e.id, e.laeuft)
+    else:
+        state.heute_tab_stand = _NUR_AUSSERHALB if ausserhalb(state) else None
 
 
 def bereitgestellt(state: Any, art: str) -> bool:
@@ -343,7 +371,10 @@ async def _stand_zeigen(state: Any, e: Einheitslauf) -> None:
 
 
 def zuruecknehmen(page: Any, state: Any, art: str) -> None:
-    """Einen Teil wieder aus der Startleiste — ohne Teile verschwindet sie."""
+    """Einen Teil wieder aus der Startleiste — ohne Teile verschwindet sie. Eine Aufnahme,
+    die schon lief, läuft weiter: neben der Einheit (`ausserhalb`) bzw., ist keine mehr da,
+    wieder als eigene (Ben, 22.10.2026: „dann läuft sie weiter, aber wird nicht mehr
+    angezeigt“)."""
     e = in_vorbereitung(state)
     if e is None or e.teil(art) is None:
         return
@@ -354,12 +385,15 @@ def zuruecknehmen(page: Any, state: Any, art: str) -> None:
         state.ausdauer = None
     if not e.teile:
         state.einheit = None
+        if _messung_eigen_zeigen(page, state):
+            return  # sie zeichnet selbst (`alle_starten`)
     melden(state)
     state.neu_zeichnen()
 
 
 def leeren(page: Any, state: Any) -> None:
-    """Die Startleiste leeren — nichts startet."""
+    """Die Startleiste leeren — nichts startet. Eine Aufnahme, die schon lief, steht danach
+    wieder als eigene da (`zuruecknehmen`)."""
     e = in_vorbereitung(state)
     if e is None:
         return
@@ -368,8 +402,19 @@ def leeren(page: Any, state: Any) -> None:
         if state.ausdauer is teil:
             state.ausdauer = None
     state.einheit = None
+    if _messung_eigen_zeigen(page, state):
+        return
     melden(state)
     state.neu_zeichnen()
+
+
+def _messung_eigen_zeigen(page: Any, state: Any) -> bool:
+    """Ohne Einheit: Läuft eine Aufnahme, wird sie wieder eine eigene (`_messung_weiter_zeigen`)
+    — ``True``, wenn das geschah (dann ist schon neu gezeichnet). Wirft nie."""
+    try:
+        return _messung_weiter_zeigen(page, state)
+    except Exception:
+        return False
 
 
 def _aufraeumen(page: Any, teil: Any) -> None:
@@ -505,6 +550,12 @@ async def _laufen(
     try:
         await e.laufen()
     finally:
+        # Der Timer der Einheit endet mit ihr (⏹ hält ihn nur an): Sonst stünde er danach
+        # als angehaltener Timer „für sich“ in Leiste, Reiter und Benachrichtigung
+        # (`ausserhalb`, `ui.laufend`), und die Timer-Ansicht böte „Weiter“ an
+        t = e.timer
+        if t is not None and getattr(state, "timer", None) is t.lauf and not t.lauf.fertig:
+            state.timer = None
         abschluss: Abschluss | None = None
         with contextlib.suppress(Exception):
             abschluss = await e.abschliessen()
@@ -537,7 +588,12 @@ async def _laufen(
                 e.warnung = f"Übung nicht eingetragen: {fehler}"
         if state.ausdauer is not None and state.ausdauer is e.teil("gps"):
             state.ausdauer = None
+        # Läuft schon die nächste Einheit (`platz_machen`), braucht sie den Dienst weiter —
+        # die Zwecke des Dienstes sind Namen, kein Zähler je Einheit
+        naechste = laeuft(state)
         await _dienst(state, e, False)
+        if naechste is not None and naechste is not e:
+            await _dienst(state, naechste, True)
         if state.einheit is e:
             state.einheit = None
         with contextlib.suppress(Exception):
@@ -547,20 +603,23 @@ async def _laufen(
             state.neu_zeichnen()
 
 
-def _messung_weiter_zeigen(page: Any, state: Any) -> None:
+def _messung_weiter_zeigen(page: Any, state: Any) -> bool:
     """Läuft die HRV-Aufnahme nach dem Ende einer Einheit weiter (sie lief schon vorher,
     oder „Weiterlaufen“), steht sie wieder für sich in Leiste und Reiter „Einheit“ — wie
-    eine einzeln gestartete Messung (Ben, 18.10.2026). ⏹ beendet und speichert sie dann."""
+    eine einzeln gestartete Messung (Ben, 18.10.2026). ⏹ beendet und speichert sie dann.
+    ``True``, wenn sie dafür eine eigene Einheit bekam (die ist dann schon gezeichnet)."""
     lauf = getattr(state, "messlauf", None)
     if lauf is None or lauf.aufnahme is None:
-        return
+        return False
     if (e := aktuell(state)) is not None:
         if not e.laeuft and e.hrv is None:
             hrv_bereitstellen(page, state)  # steht etwas bereit, kommt die Messung dorthin (H30)
-        return
+        return False
     e = einzeln_starten(page, state, HrvBaustein(lauf, basis=datenverzeichnis()))
-    if e is not None:
-        e.am_ende_stoppen["hrv"] = True
+    if e is None:
+        return False
+    e.am_ende_stoppen["hrv"] = True
+    return True
 
 
 async def _dienst(state: Any, e: Einheitslauf, an: bool) -> None:
@@ -686,19 +745,29 @@ def laufzeilen(e: Einheitslauf) -> tuple[str, str]:
 
 def timer_text(e: Einheitslauf) -> str:
     """Der laufende Abschnitt des Timers — „Belastung · noch 0:30“, leer ohne Timer."""
-    if (t := e.timer) is None:
-        return ""
-    stand = t.lauf.stand()
+    return timer_lauf_text(e.timer.lauf) if e.timer is not None else ""
+
+
+def timer_lauf_text(lauf: TimerLauf) -> str:
+    """Der laufende Abschnitt eines Timers, „angehalten“ dahinter — die Stoppuhr mit ihrer
+    Zeit; für den Timer der Einheit wie für einen, der für sich läuft (`ausserhalb`).
+
+    >>> from trainingsapp.core.timer import Abschnitt, TimerProfil
+    >>> t = [0.0]
+    >>> lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("Belastung", 30)]), uhr=lambda: t[0])
+    >>> lauf.start(); t[0] = 12.5; timer_lauf_text(lauf)
+    'Belastung · noch 0:18'
+    >>> lauf.pause(); timer_lauf_text(lauf)
+    'Belastung · noch 0:18 · angehalten'
+    """
+    stand = lauf.stand()
     if stand.fertig:
-        return f"{t.lauf.profil.anzeigename} fertig" if t.lauf.vorwaerts else "Timer fertig"
-    if t.lauf.vorwaerts:  # die Stoppuhr zählt vorwärts (18.10.2026)
-        teile = [t.lauf.profil.anzeigename, t.lauf.anzeige()]
+        return f"{lauf.profil.anzeigename} fertig" if lauf.vorwaerts else "Timer fertig"
+    if lauf.vorwaerts:  # die Stoppuhr zählt vorwärts (18.10.2026)
+        teile = [lauf.profil.anzeigename, lauf.anzeige()]
     else:
-        teile = [
-            t.lauf.abschnittsname(stand.nummer),
-            f"noch {dauer_text(math.ceil(stand.rest_s))}",
-        ]
-    if not stand.laeuft and t.lauf.begonnen:
+        teile = [lauf.abschnittsname(stand.nummer), f"noch {dauer_text(math.ceil(stand.rest_s))}"]
+    if not stand.laeuft and lauf.begonnen:
         teile.append("angehalten")
     return " · ".join(teile)
 
@@ -725,17 +794,166 @@ def _teile_text(e: Einheitslauf) -> str:
     return " · ".join(teile)
 
 
+# ---------------------------------------------------------------------------
+# Was außerhalb der Einheit läuft (Ben, 22.10.2026; Moduldocstring)
+# ---------------------------------------------------------------------------
+
+#: Wo der GPS-Test läuft
+GPS_TEST = "/einstellungen/gps-test"
+
+
+@dataclass(frozen=True, slots=True)
+class Bereich:
+    """Ein Bereich, der läuft, ohne in der aktuellen Einheit zu stecken."""
+
+    #: ``"timer"``, ``"hrv"`` oder ``"gps"``
+    art: str
+    #: „Timer · Dehnen“, „Stoppuhr“, „HRV-Messung“, „GPS-Test“
+    titel: str
+    #: Der Live-Wert — „Belastung · noch 0:30“, „Aufnahme 12:34 · HF 70 · Polar H10“
+    wert: str
+    #: Für die eine Zeile der Leiste — „Timer 0:12“, „HRV 12:34“
+    kurz: str
+    #: Läuft wirklich (Aufnahme, Timer, GPS-Test) — ``False``: nur verbunden oder angehalten
+    aktiv: bool = True
+    #: Wo man ihn bedient — ``None`` für die HRV: Sie hat den Reiter „Messung“
+    route: str | None = None
+
+
+def _timer_ausserhalb(state: Any) -> Bereich | None:
+    """Ein Timer, der für sich läuft (auch angehalten) — etwa neben einer bereitgestellten
+    Einheit gestartet, oder als zweiter neben dem der Einheit."""
+    t = getattr(state, "timer", None)
+    if t is None or not t.begonnen or t.fertig or t.abgebrochen:
+        return None
+    # Auch der Timer einer eben beendeten Einheit (⏹ hält ihn an) gehört ihr — `_laufen`
+    # räumt ihn gleich ab; er läuft nicht „für sich“
+    e = getattr(state, "einheit", None)
+    if e is not None and e.timer is not None and e.timer.lauf is t:
+        return None  # die Einheit zeigt ihn
+    kurz = f"{t.profil.anzeigename if t.vorwaerts else 'Timer'} {t.anzeige()}"
+    return Bereich(
+        "timer", timer_titel(t), timer_lauf_text(t), kurz, aktiv=t.laeuft, route="/timer"
+    )
+
+
+def timer_titel(lauf: TimerLauf) -> str:
+    """„Timer · Dehnen“ — ohne Namen „Timer“, die Stoppuhr mit ihrem Namen (vorher stand beim
+    Einmal-Timer „Timer · “).
+
+    >>> from trainingsapp.core.timer import einmal_timer, stoppuhr
+    >>> [timer_titel(TimerLauf(p)) for p in (einmal_timer(60), einmal_timer(60, "Dehnen"))]
+    ['Timer', 'Timer · Dehnen']
+    >>> timer_titel(TimerLauf(stoppuhr()))
+    'Stoppuhr'
+    """
+    p = lauf.profil
+    return p.anzeigename if lauf.vorwaerts or not p.name else f"Timer · {p.name}"
+
+
+def _hrv_ausserhalb(state: Any) -> Bereich | None:
+    """Die HRV-Messung außerhalb der Einheit: eine Aufnahme (auch während sie neu verbindet)
+    oder ein verbundener Gurt ohne Aufnahme — wie in der Benachrichtigung (`ui.laufend`)."""
+    lauf = getattr(state, "messlauf", None)
+    if lauf is None:
+        return None
+    e = aktuell(state)
+    if e is not None and e.hrv is not None and e.hrv.messlauf is lauf:
+        return None  # die Einheit zeigt sie
+    verbunden = lauf.status.verbindung == Verbindung.VERBUNDEN
+    geraet = lauf.geraet_name or "Gurt"
+    hf = ""
+    with contextlib.suppress(Exception):
+        if wert := lauf.live.kennzahlen().hf_bpm:
+            hf = f"HF {wert}"
+    if lauf.aufnahme is not None:
+        dauer = uhr(lauf.aufnahme_dauer_s())
+        teile = [f"Aufnahme {dauer}", hf, geraet if verbunden else "verbindet neu …"]
+        return Bereich("hrv", "HRV-Messung", " · ".join(t for t in teile if t), f"HRV {dauer}")
+    if not verbunden:
+        return None
+    wert = " · ".join(t for t in (f"verbunden mit {geraet}", "keine Aufnahme", hf) if t)
+    return Bereich("hrv", "HRV-Messung", wert, "HRV verbunden", aktiv=False)
+
+
+def _gps_ausserhalb(state: Any) -> Bereich | None:
+    """Der GPS-Test (Einstellungen) — ein Training läuft immer als Einheit."""
+    g = getattr(state, "gps_test", None)
+    if g is None or g.fertig:
+        return None
+    seit = uhr((datetime.now() - g.gestartet).total_seconds())
+    zeile = getattr(g, "meldung", "") or "läuft"
+    return Bereich("gps", "GPS-Test", f"{zeile} · {seit}", f"GPS-Test {seit}", route=GPS_TEST)
+
+
+def ausserhalb(state: Any) -> list[Bereich]:
+    """Was läuft, ohne in der aktuellen Einheit (bereitgestellt oder im Lauf) zu stecken —
+    in Bens Reihenfolge Timer, Messung, GPS. Was in ihr steckt, zeigt die Einheit selbst.
+
+    >>> from types import SimpleNamespace
+    >>> ausserhalb(SimpleNamespace(einheit=None, timer=None, messlauf=None, gps_test=None))
+    []
+    """
+    bereiche: list[Bereich] = []
+    for quelle in (_timer_ausserhalb, _hrv_ausserhalb, _gps_ausserhalb):
+        with contextlib.suppress(Exception):  # ein Fehler hier darf nichts anhalten
+            if (b := quelle(state)) is not None:
+                bereiche.append(b)
+    return bereiche
+
+
+def ausserhalb_schluessel(state: Any) -> tuple[tuple[str, bool], ...]:
+    """Was sich ändern muss, damit Leiste und Reiter ihre Knöpfe neu bauen."""
+    return tuple((b.art, b.aktiv) for b in ausserhalb(state))
+
+
+def zu_zeigen(state: Any) -> bool:
+    """Gibt es etwas für Leiste und Reiter „Einheit“ — eine Einheit oder einen Bereich, der
+    außerhalb läuft?"""
+    return aktuell(state) is not None or bool(ausserhalb(state))
+
+
+async def anzeige_takt(state: Any) -> None:
+    """Jede Sekunde, solange die App lebt (`app.main`): Läuft nur etwas außerhalb einer
+    Einheit, zählen Leiste und Reiter mit (`melden` — für Einheiten tun das ihre eigenen
+    Takte). Erscheint oder verschwindet etwas, das die Ansichten noch nicht zeigen
+    (`AppState.laufend_gezeigt`), wird neu gezeichnet — erst, wenn es zwei Takte so bleibt:
+    Ein Gurt, der kurz abreißt, baut nichts neu."""
+    kandidat: bool | None = None
+    while True:
+        await asyncio.sleep(bis_zur_vollen_sekunde(time.monotonic()))
+        try:
+            jetzt = zu_zeigen(state)
+            if jetzt != getattr(state, "laufend_gezeigt", False):
+                if kandidat is jetzt:
+                    kandidat = None
+                    state.neu_zeichnen()
+                else:
+                    kandidat = jetzt
+                continue
+            kandidat = None
+            if aktuell(state) is None and ausserhalb(state):
+                melden(state)
+        except Exception:  # der Takt darf nie enden
+            kandidat = None
+
+
 __all__ = [
     "ANZEIGE_S",
     "COUNTDOWN_S",
+    "GPS_TEST",
     "REITER_EINHEIT",
     "REITER_TAG",
+    "Bereich",
     "aktuell",
     "alle_beenden",
     "alle_starten",
     "anhalten_oder_weiter",
+    "anzeige_takt",
     "ausdauer_bereitstellen",
     "ausdauer_teil",
+    "ausserhalb",
+    "ausserhalb_schluessel",
     "bereitgestellt",
     "besitzt_timer",
     "dabei",
@@ -754,8 +972,11 @@ __all__ = [
     "teil_bereitstellen",
     "teil_route",
     "timer_bereitstellen",
+    "timer_lauf_text",
     "timer_route",
     "timer_text",
+    "timer_titel",
     "titel",
+    "zu_zeigen",
     "zuruecknehmen",
 ]

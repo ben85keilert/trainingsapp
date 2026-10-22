@@ -122,6 +122,26 @@ def test_tagebuch_zeigt_aufnahmen_block(welt, page) -> None:
     assert len([c for c in _alle(kontrolle) if isinstance(c, ft.Image)]) == 2
 
 
+@pytest.mark.parametrize("darstellung", ["uebersicht", "zeitleiste"])
+async def test_heute_zeigt_frontbilder_unter_der_uebung(welt, page, darstellung) -> None:
+    """Ben, 22.10.2026: „Photos erzeugen in Verlauf eine Miniaturansicht. In Heute aber
+    nicht“ — jetzt in beiden Darstellungen, ein Tipp öffnet die Ansicht."""
+    from trainingsapp.ui.views.tag import tagesansicht
+
+    welt.state.tag_darstellung = darstellung
+    ansicht = tagesansicht(page, welt.state, welt.state.heute())
+    bilder = [c for c in _alle(ansicht) if isinstance(c, ft.Image)]
+    assert len(bilder) == 2  # Foto und Frontbild des Videos
+    assert not any("Aufnahme" in t for t in _texte(ansicht))  # keine Büroklammer mit Zahl
+    kacheln = [
+        c
+        for c in _alle(ansicht)
+        if isinstance(c, ft.Container) and c.width == 64 and c.on_click is not None
+    ]
+    await kacheln[0].on_click()
+    assert page.routen == [f"/anhang/{welt.foto.id}"]
+
+
 def _umbrechend_mit_ausdehnung(wurzel) -> list:
     """Zeilen mit ``wrap=True``, in denen ein Kind ``expand`` hat — Flutter legt sie als Wrap
     an, ein Expanded darin ist ein Layoutfehler: Die Release-App zeigt statt des Abschnitts

@@ -12,7 +12,8 @@ Notation von damals (`spec_snapshot`, `SpecForm`) — und der Notiz. Aus der Tag
 herholen … So wechselt das Bild nicht immer hin und her, man hat mehr Orientierung“): Plan
 und Tag öffnen die Leistungen als Blatt über der Ansicht; die Seite bleibt für Routen, die
 von außen kommen. Schließen speichert, was sich geändert hat (wie Notizdialoge), was
-unlesbar ist, bleibt ungespeichert und wird gemeldet; „Abbrechen“ verwirft.
+unlesbar ist, bleibt ungespeichert und wird gemeldet; „Abbrechen“ verwirft. Der Inhalt des
+Blatts scrollt, „Abbrechen“ und „Speichern“ stehen fest darunter (`components/blatt.py`).
 
 Alles auf einmal bearbeiten: „Speichern“ legt für jeden geänderten Eintrag eine Korrektur
 an (der alte Stand bleibt im Verlauf), Zurück speichert ebenso (`components/zurueck.py`),
@@ -42,6 +43,7 @@ from trainingsapp.core.aufnahme_bezug import Bezug, zeit_text
 from trainingsapp.core.models import Exercise, Session, SessionEntry
 from trainingsapp.core.tagesbilanz import kachel
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
+from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.layout import sicher
@@ -58,8 +60,9 @@ HINWEIS = (
     "im Verlauf. Zurück speichert ebenso."
 )
 #: Geschätzte Höhen im Blatt (px): Kopf, Knöpfe und Hinweis; je Karte; je Feld darin;
-#: je Kachelreihe mit Anhängen
+#: je Kachelreihe mit Anhängen; die Knöpfe unten — nur bis zur ersten Messung
 BLATT_RAHMEN, BLATT_KARTE, BLATT_FELD, BLATT_REIHE = 320.0, 90.0, 112.0, 80.0
+BLATT_FUSS = 60.0
 #: Dasselbe im Blatt
 HINWEIS_BLATT = (
     "Speichern legt für jeden geänderten Eintrag eine Korrektur an — der alte Stand bleibt "
@@ -346,7 +349,8 @@ class _Leistungen:
         return any(k.geaendert() for k in self.karten)
 
     def hoehe(self) -> float:
-        """Wie hoch das Blatt etwa wird — passt es nicht, scrollt es (`leistungen_blatt`)."""
+        """Wie hoch der Inhalt des Blatts etwa wird — bis er gemessen ist
+        (`components.blatt.blatt_spalte`)."""
         return BLATT_RAHMEN + sum(
             BLATT_KARTE + BLATT_FELD * len(k.form.spec.fields) + (BLATT_REIHE if k.anhaenge else 0)
             for k in self.karten
@@ -606,45 +610,34 @@ def leistungen_blatt(
     leistungen.weiter = weiter_nach
     fehler = ft.Text("", size=12, color=ft.Colors.ERROR, visible=False)
     mehr = _nachtragen_zeile(uebung, nachtragen, weiter_nach, leistungen)
-    # Eine scrollende Spalte macht das Blatt bildschirmhoch — nur wenn es nicht passt, damit
-    # die Ansicht darunter sichtbar bleibt (Ben: „man hat mehr Orientierung“)
-    hoehe = float(getattr(page, "height", None) or 700)
-    scrollen = leistungen.hoehe() > 0.9 * hoehe
     blatt = ft.BottomSheet(
         show_drag_handle=True,
         scrollable=True,
         draggable=True,
         on_dismiss=geschlossen,
-        # Unten im SafeArea: Android 15 legt die Navigationsleiste über das Blatt, sonst
-        # lagen „Abbrechen“ und „Speichern“ darunter (Ben, 19.10.2026)
-        content=ft.SafeArea(
-            avoid_intrusions_top=False,
-            content=ft.Container(
-                padding=ft.Padding.only(left=16, right=16, bottom=20),
-                content=ft.Column(
-                    tight=True,
-                    spacing=14,
-                    scroll=ft.ScrollMode.AUTO if scrollen else None,
-                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        # Der Inhalt scrollt immer und ist so hoch, wie er gemessen wird; „Abbrechen“ und
+        # „Speichern“ stehen fest darunter, über der Navigationsleiste (Ben, 19. und
+        # 22.10.2026: „wenn das Eingabefenster zu groß ist … hinter die Androidleiste“) —
+        # ein kurzes Blatt bleibt kurz (Ben: „man hat mehr Orientierung“)
+        content=blatt_spalte(
+            [
+                ft.Text(leistungen.titel, size=20, weight=ft.FontWeight.W_600),
+                leistungen.kopf,
+                leistungen.liste,
+                *mehr,
+                ft.Text(HINWEIS_BLATT, size=12, opacity=0.6),
+            ],
+            [
+                fehler,
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.END,
                     controls=[
-                        ft.Text(leistungen.titel, size=20, weight=ft.FontWeight.W_600),
-                        leistungen.kopf,
-                        leistungen.liste,
-                        *mehr,
-                        ft.Text(HINWEIS_BLATT, size=12, opacity=0.6),
-                        fehler,
-                        ft.Row(
-                            alignment=ft.MainAxisAlignment.END,
-                            controls=[
-                                ft.TextButton("Abbrechen", on_click=abbrechen),
-                                ft.FilledButton(
-                                    "Speichern", icon=ft.Icons.CHECK, on_click=speichern
-                                ),
-                            ],
-                        ),
+                        ft.TextButton("Abbrechen", on_click=abbrechen),
+                        ft.FilledButton("Speichern", icon=ft.Icons.CHECK, on_click=speichern),
                     ],
                 ),
-            ),
+            ],
+            geschaetzt=leistungen.hoehe() - BLATT_FUSS,
         ),
     )
     return blatt

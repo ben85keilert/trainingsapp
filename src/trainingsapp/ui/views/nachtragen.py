@@ -29,6 +29,7 @@ from trainingsapp.core.plaene import (
     nachtrag_vorwahl,
 )
 from trainingsapp.core.tag import LEER, plaene_des_tags, plankarten, uhrzeit_lesen
+from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.uebungszeile import abschnitt
@@ -221,26 +222,24 @@ def nachtragen_blatt(page: Any, state: AppState, tag: date, basis: str) -> ft.Bo
         scrollable=True,
         draggable=True,
         on_dismiss=nachher.bei_schliessen,
-        content=ft.Container(
-            padding=ft.Padding.only(left=16, right=16, bottom=20),
-            content=ft.Column(
-                tight=True,
-                spacing=10,
-                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                controls=[
-                    ft.Text(titel, size=20, weight=ft.FontWeight.W_600),
-                    suche,
-                    treffer,
-                    standard_spalte,
-                    ft.Row(
-                        controls=[
-                            ft.TextButton(
-                                "Alle Übungen zeigen", icon=ft.Icons.LIST, on_click=alle_zeigen
-                            )
-                        ]
-                    ),
-                ],
-            ),
+        # Über der Navigationsleiste, viele Pläne und Übungen scrollen (Ben, 22.10.2026,
+        # `components/blatt.py`)
+        content=blatt_spalte(
+            [
+                ft.Text(titel, size=20, weight=ft.FontWeight.W_600),
+                suche,
+                treffer,
+                standard_spalte,
+                ft.Row(
+                    controls=[
+                        ft.TextButton(
+                            "Alle Übungen zeigen", icon=ft.Icons.LIST, on_click=alle_zeigen
+                        )
+                    ]
+                ),
+            ],
+            abstand=10,
+            rand=ft.Padding.only(left=16, right=16, bottom=20),
         ),
     )
     return blatt

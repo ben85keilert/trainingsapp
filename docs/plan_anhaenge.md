@@ -186,11 +186,15 @@ und geht zurück ins Blatt, das die Bilderreihe auffrischt.
   Overlay, antippen → Ansicht. Mehr als sechs: „+3“ als letzte Kachel. Flet zeigt lokale
   Dateien im App-Speicher über den absoluten Pfad; wenn das auf Android hakt
   (Gerätetest), Fallback `src=bytes` eines vorab verkleinerten Frontbilds.
-- Wo die Reihe steht: Leistungen-Blatt unter jeder Eintragskarte mit Anhängen; Tag
-  (`tag.py` `volle_karte`/`kurze_karte`): dezente Büroklammer mit Zahl an der Planübung,
-  die Reihe erst im Blatt; **Tagebuch** (`tagebuch.py`): im Tagesblock ein eigener
-  Block „Aufnahmen“ je Eintrag (Uhrzeit · Übung · Reihe), in der Ordnung „Übungen“
-  unter der Übung — Notizen und Aufnahmen bleiben getrennte Karten, kein Autoplay.
+- Wo die Reihe steht: Leistungen-Blatt unter jeder Eintragskarte mit Anhängen; **Tag**
+  (`tag.py`, „Heute“ und `/tag/<datum>`): unter der gemachten Übung, in der Übersicht wie in
+  der Zeitleiste — ein Tipp öffnet die Ansicht (Ben, 22.10.2026: „Photos erzeugen in
+  Verlauf eine Miniaturansicht. In Heute aber nicht … dass man die Anhänge direkter sieht“;
+  vorher eine dezente Büroklammer mit Zahl, die Reihe erst im Blatt); **Tagebuch**
+  (`tagebuch.py`): im Tagesblock ein eigener Block „Aufnahmen“ je Eintrag (Uhrzeit · Übung
+  · Reihe), in der Ordnung „Übungen“ unter der Übung — Notizen und Aufnahmen bleiben
+  getrennte Karten, kein Autoplay. Die Kacheln kosten wenig: eine Abfrage für den ganzen
+  Tag (`je_eintraegen`), höchstens sechs je Übung, klein dekodiert (`cache_width`).
 
 ## D. Verlauf der Übung
 

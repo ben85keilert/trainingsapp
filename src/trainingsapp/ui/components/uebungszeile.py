@@ -67,11 +67,14 @@ def uebungszeile(
     on_click: Callable[[], object] | None,
     etiketten: Sequence[str] = (),
     variante: ft.Control | None = None,
+    unten: ft.Control | None = None,
 ) -> ft.Control:
     """Eine Übung als Karte: Symbol, Name und Zeilen darunter, rechts Wert und Mini-Kurve.
 
     ``variante``: das Schild der Variante direkt hinter dem Namen — jede Variante hat ihre
-    eigene Zeile mit eigener Zahl (Ben, 21.10.2026, `components/varianten.etikett`)."""
+    eigene Zeile mit eigener Zahl (Ben, 21.10.2026, `components/varianten.etikett`).
+    ``unten``: etwas über die ganze Breite unter der Zeile, bündig mit dem Namen — die
+    Frontbilder der Fotos und Videos in der Tagesansicht (`components/anhang_reihe`)."""
     kopf: ft.Control = ft.Text(titel, size=15, weight=ft.FontWeight.W_600)
     if etiketten or variante is not None:
         kopf = ft.Row(
@@ -85,36 +88,45 @@ def uebungszeile(
                 *(etikett(t) for t in etiketten),
             ],
         )
+    zeile = ft.Row(
+        spacing=12,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[
+            ft.Container(
+                width=38,
+                height=38,
+                border_radius=19,
+                bgcolor=ft.Colors.SECONDARY_CONTAINER,
+                alignment=ft.Alignment.CENTER,
+                content=ft.Icon(
+                    symbol(symbol_key), size=20, color=ft.Colors.ON_SECONDARY_CONTAINER
+                ),
+            ),
+            ft.Column(spacing=1, expand=True, tight=True, controls=[kopf, *unter]),
+            ft.Column(
+                spacing=3,
+                tight=True,
+                horizontal_alignment=ft.CrossAxisAlignment.END,
+                controls=rechts,
+            ),
+            *([ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5)] if on_click is not None else []),
+        ],
+    )
+    inhalt: ft.Control = zeile
+    if unten is not None:
+        # Bündig mit dem Namen: Kreis (38) und Abstand (12)
+        inhalt = ft.Column(
+            spacing=8,
+            tight=True,
+            controls=[zeile, ft.Container(padding=ft.Padding.only(left=50), content=unten)],
+        )
     return ft.Container(
         bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
         border_radius=16,
         padding=ft.Padding.only(left=12, right=6, top=10, bottom=10),
         ink=on_click is not None,
         on_click=on_click,
-        content=ft.Row(
-            spacing=12,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Container(
-                    width=38,
-                    height=38,
-                    border_radius=19,
-                    bgcolor=ft.Colors.SECONDARY_CONTAINER,
-                    alignment=ft.Alignment.CENTER,
-                    content=ft.Icon(
-                        symbol(symbol_key), size=20, color=ft.Colors.ON_SECONDARY_CONTAINER
-                    ),
-                ),
-                ft.Column(spacing=1, expand=True, tight=True, controls=[kopf, *unter]),
-                ft.Column(
-                    spacing=3,
-                    tight=True,
-                    horizontal_alignment=ft.CrossAxisAlignment.END,
-                    controls=rechts,
-                ),
-                *([ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5)] if on_click is not None else []),
-            ],
-        ),
+        content=inhalt,
     )
 
 

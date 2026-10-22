@@ -237,9 +237,10 @@ ausführlich steht die Einheit nur noch auf „Heute“, überall sonst eine Zei
 
 | Zustand | „Heute“, Reiter „Einheit“ | „Heute“, Reiter „Heute“ | jede andere Seite |
 |---|---|---|---|
-| keine Einheit | — (kein Reiter) | der Tag | — |
-| bereitgestellt | **Startkarte**: die Teile mit Stand, Marke und ✕, „Leeren“, „Wenn der Timer fertig ist“, Countdown, „Alle starten“ | der Tag | **Infoleiste** |
-| Countdown, läuft | **Übersicht** | **Laufleiste** über dem Tag | **Laufleiste** |
+| nichts läuft | — (kein Reiter) | der Tag | — |
+| nur außerhalb (§ 9.1) | je Bereich eine **Karte** | **Laufleiste** der Bereiche über dem Tag (Tag vorn) | **Laufleiste** der Bereiche |
+| bereitgestellt | **Startkarte**: die Teile mit Stand, Marke und ✕, „Leeren“, „Wenn der Timer fertig ist“, Countdown, „Alle starten“ — darunter die Karten von außerhalb | der Tag (läuft außerhalb etwas: dessen Laufleiste) | **Infoleiste**, darunter „Läuft außerdem: …“ |
+| Countdown, läuft | **Übersicht**, darunter die Karten von außerhalb | **Laufleiste** über dem Tag | **Laufleiste**, außerhalb Laufendes in ihrer zweiten Zeile |
 
 - **Infoleiste** (eine Zeile): die Teile als Symbole (der nicht bereite mit Rand), „2 von 3
   bereit“ bzw. „Alles bereit“, darunter der Stand des langsamsten Teils („GPS sucht
@@ -273,3 +274,38 @@ ausführlich steht die Einheit nur noch auf „Heute“, überall sonst eine Zei
   nur neu, wenn sich an ihnen etwas ändert; Verdecktes (anderer Reiter, eine Seite darüber)
   frischt nicht auf. Nach einem Wechsel der Navigationsleiste ohne Neuaufbau zeigt
   `leiste_auffrischen` die passende Leiste.
+
+### 9.1 Was außerhalb einer Einheit läuft (Ben, 22.10.2026)
+
+Ben: „Wenn eine Messung läuft, dann ein Timer startet und endet, wird Messung als laufender
+Betrieb angezeigt. Man kann diese wegklicken in Einheit, dann läuft sie weiter, aber wird
+nicht mehr angezeigt. Sorge dafür, dass der Betrieb der Bereiche (Messung, …) unabhängig ist,
+wenn etwas läuft soll das aber angezeigt sein. In der Android Benachrichtigung klappt es
+schon, aber auch in der App oben in der Statuszeile und in Einheit. Die laufende Einheit soll
+alles erfassen, es gibt Timer - Messung - GPS.“
+
+Leisten und Reiter zeigten nur, was **in** der Einheit steckte. Was daneben weiterlief, stand
+nur in der Benachrichtigung: die Aufnahme nach ✕ oder „Leeren“ in der Startkarte, ein Timer,
+der neben einer bereitgestellten Einheit für sich startete, der verbundene Gurt nach „Einheit
+beenden“ (die Aufnahme ist gespeichert, die Verbindung steht). Jetzt:
+
+- `ui.einheit.ausserhalb` sammelt die **Bereiche** Timer · Messung · GPS, die laufen, ohne in
+  der aktuellen Einheit zu stecken — aus denselben Quellen wie die Benachrichtigung
+  (`ui.laufend`): ein Timer für sich (auch angehalten), eine Aufnahme (auch während sie neu
+  verbindet), ein verbundener Gurt ohne Aufnahme (blass: „nur verbunden“), der GPS-Test.
+  Ein Training läuft immer als Einheit.
+- Leiste, Reiter „Einheit“ und Reitertitel zeigen sie mit (Tabelle oben); ein Tipp auf eine
+  Karte führt dorthin, wo man den Bereich bedient (Timer, Reiter „Messung“, GPS-Test), ein
+  Timer hat dort und in der Leiste ⏸/▶. Läuft nur etwas außerhalb, bleibt auf „Heute“ der
+  Tag vorn — die Laufleiste darüber zeigt es, ein Tipp öffnet „Einheit“.
+- `ui.einheit.anzeige_takt` (jede Sekunde, alle Plattformen) zählt die Bereiche mit und
+  zeichnet neu, wenn etwas erscheint oder verschwindet, das der letzte Aufbau nicht zeigte
+  (`AppState.laufend_gezeigt`) — erst nach zwei gleichen Takten, damit ein Gurt, der kurz
+  abreißt, nichts neu baut.
+- „Leeren“ und das letzte ✕: Läuft eine Aufnahme, die schon vorher lief, steht sie wieder als
+  eigene Einheit da (`_messung_weiter_zeigen`, wie nach dem Ende einer Einheit).
+- ⏹ hält den Timer der Einheit an; mit dem Ende der Einheit ist er vorbei
+  (`state.timer` wird geräumt) — vorher stand er danach „angehalten“ für sich in
+  Benachrichtigung und Leiste, und der Dienst „timer“ sprang an.
+- Endet eine Einheit, während schon die nächste läuft (`platz_machen`), setzt sie den
+  Dienstzweck „einheit“ der neuen wieder (Zwecke sind Namen, kein Zähler je Einheit).

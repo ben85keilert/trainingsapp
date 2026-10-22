@@ -13,6 +13,7 @@ import pytest
 
 pytest.importorskip("flet")
 
+from flet.controls.base_page import BasePage
 from flet.messaging.session import Session
 
 from trainingsapp.ui.flet_absicherung import methodenantworten_absichern
@@ -46,3 +47,42 @@ def test_bekanntes_control_wie_bisher() -> None:
     sitzung, evt = _sitzung(registriert={7})
     Session.handle_invoke_method_results(sitzung, 7, "c1", {"ok": 1}, None)  # type: ignore[arg-type]
     assert evt.is_set() and sitzung._Session__method_call_results[evt] == ({"ok": 1}, None)
+
+
+def _seite() -> SimpleNamespace:
+    """So viel Seite, wie `BasePage.show_dialog` braucht."""
+    return SimpleNamespace(
+        _dialogs=SimpleNamespace(controls=[], update=lambda: None),
+        _prepare_dialog=lambda d: None,
+    )
+
+
+def test_snackbar_mit_aktion_geht_nach_5_s() -> None:
+    """Ben, 22.10.2026: „die grauen Balken sollen nach 5 Sekunden verschwinden“ — auch mit
+    „Rückgängig“. Fällt die erste Zeile um, hat Flet seine Vorgaben geändert: prüfen, ob die
+    Absicherung noch nötig ist."""
+    import flet as ft
+
+    from trainingsapp.ui.flet_absicherung import MELDUNG_MS, snackbars_absichern
+
+    roh = ft.SnackBar(ft.Text("Planke: gemacht"), action="Rückgängig")
+    assert roh.persist is None and roh.duration == ft.Duration(milliseconds=4000)  # Flet selbst
+    assert snackbars_absichern() and snackbars_absichern()  # mehrfach
+    seite = _seite()
+    BasePage.show_dialog(seite, roh)  # type: ignore[arg-type]
+    assert roh.open and roh.persist is False and roh.duration == MELDUNG_MS
+    assert seite._dialogs.controls == [roh]
+
+
+def test_ausdruecklich_gesetztes_bleibt() -> None:
+    import flet as ft
+
+    from trainingsapp.ui.flet_absicherung import snackbars_absichern
+
+    snackbars_absichern()
+    lang = ft.SnackBar(ft.Text("x"), persist=True, duration=ft.Duration(seconds=8))
+    dialog = ft.AlertDialog(title=ft.Text("Löschen?"))
+    BasePage.show_dialog(_seite(), lang)  # type: ignore[arg-type]
+    BasePage.show_dialog(_seite(), dialog)  # type: ignore[arg-type]
+    assert lang.persist is True and lang.duration == ft.Duration(seconds=8)
+    assert dialog.open

@@ -33,6 +33,7 @@ from trainingsapp.core import tagesfelder as tf
 from trainingsapp.core.models import jetzt
 from trainingsapp.core.tag import uhrzeit_lesen
 from trainingsapp.core.verlauf import WOCHENTAGE
+from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.skala_regler import skala_regler
 from trainingsapp.ui.state import AppState
@@ -763,13 +764,9 @@ def tagesfeld_blatt(
         scrollable=True,
         draggable=True,
         on_dismiss=geschlossen,
-        content=ft.SafeArea(
-            avoid_intrusions_top=False,
-            content=ft.Container(
-                padding=ft.Padding.only(left=16, right=16, bottom=20),
-                content=inhalt,
-            ),
-        ),
+        # Viele Einträge am Tag: Der Inhalt scrollt, statt unter der Navigationsleiste zu
+        # verschwinden (Ben, 22.10.2026, `components/blatt.py`)
+        content=blatt_spalte(inhalt, rand=ft.Padding.only(left=16, right=16, bottom=20)),
     )
     return blatt
 

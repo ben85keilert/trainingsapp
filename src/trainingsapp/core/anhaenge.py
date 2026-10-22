@@ -4,9 +4,14 @@ Ben: „Wenn Übungen gemacht sind, soll man Photos/Videos nachtragen können �
 nicht zu groß, drei Qualitäten, mittlere Standard. Speicher muss sich leeren lassen bzw.
 im Überblick bleiben.“ Plan: `docs/plan_anhaenge.md`.
 
+Seit 22.10.2026 (Ben: „Auch eine Audioaufnahme soll möglich sein + Photo + Video. Erweitere
+die Medien um Audio.“) gibt es eine dritte Art, **Audio** (AAC in ``.m4a``, ohne Frontbild),
+und ein zweites **Ziel**: Ein Anhang hängt an einem Eintrag — oder am Tag selbst, bei der
+Notiz zum Tag (`Ziel`, Migration 029: ``entry_media.subject_id`` und ``day``).
+
 Grundsätze:
 
-- **Die Datei ist die Wahrheit.** Fotos und Videos liegen unter
+- **Die Datei ist die Wahrheit.** Fotos, Videos und Audioaufnahmen liegen unter
   ``<Datenverzeichnis>/Anhaenge/<JJJJ>/<MM>/`` (`config.anhaengeverzeichnis`); die Zeile
   ``entry_media`` hält den relativen Pfad und Kennzahlen. Löschen löscht die Datei; fehlt
   die Datei, zeigt die Zeile „fehlt“.
@@ -31,8 +36,16 @@ from enum import StrEnum
 from .models import jetzt, lokaler_tag, new_id
 
 #: `entry_media.kind`
-BILD, VIDEO = "image", "video"
-ENDUNG = {BILD: "jpg", VIDEO: "mp4"}
+BILD, VIDEO, AUDIO = "image", "video", "audio"
+ENDUNG = {BILD: "jpg", VIDEO: "mp4", AUDIO: "m4a"}
+#: Was eine Art heißt — Einzahl und Mehrzahl, für Meldungen und Zählungen
+NAMEN: dict[str, tuple[str, str]] = {
+    BILD: ("Foto", "Fotos"),
+    VIDEO: ("Video", "Videos"),
+    AUDIO: ("Audioaufnahme", "Audioaufnahmen"),
+}
+#: MIME-Typ je Dateiendung — fürs Teilen
+MIME = {"jpg": "image/jpeg", "mp4": "video/mp4", "m4a": "audio/mp4", "wav": "audio/wav"}
 
 #: Schlüssel in `app_setting`
 SETTING_QUALITAET = "anhang_qualitaet"
@@ -47,6 +60,9 @@ VIDEO_MAX_WAHL: dict[int, str] = {
     120: "2 Minuten",
     180: "3 Minuten",
 }
+#: Längste Audioaufnahme (s): Der Rekorder schreibt gleich in die Datei, nichts liegt im
+#: Speicher — die Grenze fängt nur ein vergessenes „Stopp“ ab (bei „Mittel“ ~14 MB)
+AUDIO_MAX_S = 30 * 60
 
 #: Wie viele Kacheln eine Reihe zeigt, bevor „+n“ kommt
 REIHE_MAX = 6
@@ -74,9 +90,9 @@ class Qualitaet(StrEnum):
     >>> Qualitaet("gross").label
     'Groß · 1080p'
     >>> [q.richtwert for q in Qualitaet]  # doctest: +NORMALIZE_WHITESPACE
-    ['~0,1 MB je Foto · ~3,4 MB je Minute Video',
-     '~0,2 MB je Foto · ~6,5 MB je Minute Video',
-     '~0,5 MB je Foto · ~15,7 MB je Minute Video']
+    ['~0,1 MB je Foto · ~3,4 MB je Minute Video · ~0,4 MB je Minute Audio',
+     '~0,2 MB je Foto · ~6,5 MB je Minute Video · ~0,5 MB je Minute Audio',
+     '~0,5 MB je Foto · ~15,7 MB je Minute Video · ~0,7 MB je Minute Audio']
     >>> Qualitaet.lesen("quatsch") is Qualitaet.MITTEL
     True
     """
@@ -100,7 +116,8 @@ class Qualitaet(StrEnum):
 
     @property
     def audio_bitrate(self) -> int:
-        """Bit je Sekunde (Ton) — Sprache und Zählen, keine Musik."""
+        """Bit je Sekunde (Ton) — Sprache und Zählen, keine Musik. Gilt für den Ton der
+        Videos und für Audioaufnahmen (dort einkanalig)."""
         return {"klein": 48_000, "mittel": 64_000, "gross": 96_000}[self.value]
 
     @property
@@ -133,7 +150,10 @@ class Qualitaet(StrEnum):
         """Was eine Aufnahme etwa braucht — für die Einstellungen."""
         foto = {"klein": "0,1", "mittel": "0,2", "gross": "0,5"}[self.value]
         minute = (self.video_bitrate + self.audio_bitrate) / 8 / 1e6 * 60
-        return f"~{foto} MB je Foto · ~{minute:.1f} MB je Minute Video".replace(".", ",")
+        ton = self.audio_bitrate / 8 / 1e6 * 60
+        return (
+            f"~{foto} MB je Foto · ~{minute:.1f} MB je Minute Video · ~{ton:.1f} MB je Minute Audio"
+        ).replace(".", ",")
 
     @classmethod
     def lesen(cls, wert: str | None) -> Qualitaet:
@@ -222,11 +242,73 @@ def countdown_text(art: str, rest_s: int, max_s: int) -> str:
     return f"Foto in {rest_s} s"
 
 
+@dataclass(frozen=True, slots=True)
+class Ziel:
+    """Woran ein neuer Anhang hängt: an einem Eintrag — oder am Tag selbst, bei der Notiz zum
+    Tag (Ben, 22.10.2026). Steht als ein Routenteil in den Wegen zur Kamera, zum Rekorder und
+    zur Fotoauswahl (`teil`, `ziel_lesen`).
+
+    >>> Ziel.fuer_eintrag("e1").teil, Ziel.fuer_tag("p1", date(2026, 10, 22)).teil
+    ('e1', 'tag/2026-10-22')
+    """
+
+    eintrag_id: str | None = None
+    profil_id: str | None = None
+    zum_tag: date | None = None
+
+    @classmethod
+    def fuer_eintrag(cls, eintrag_id: str) -> Ziel:
+        return cls(eintrag_id=eintrag_id)
+
+    @classmethod
+    def fuer_tag(cls, profil_id: str, tag: date) -> Ziel:
+        return cls(profil_id=profil_id, zum_tag=tag)
+
+    @property
+    def ist_tag(self) -> bool:
+        return self.zum_tag is not None
+
+    @property
+    def teil(self) -> str:
+        """Der Routenteil: die ID des Eintrags oder ``tag/<datum>``."""
+        if self.zum_tag is not None:
+            return f"{TAG_TEIL}/{self.zum_tag.isoformat()}"
+        return self.eintrag_id or ""
+
+
+#: Routenteil für den Tag als Ziel — eine Eintrags-ID (UUID) heißt nie so
+TAG_TEIL = "tag"
+
+
+def ziel_lesen(teile: list[str], profil_id: str) -> tuple[Ziel, list[str]] | None:
+    """Das Ziel vorn in ``teile`` (nach ``aufnehmen``/``hochladen``) und was danach kommt —
+    ``None``, wenn dort keins steht. Der Tag gilt für das aktive Profil.
+
+    >>> ziel_lesen(["e1", "foto"], "p1")
+    (Ziel(eintrag_id='e1', profil_id=None, zum_tag=None), ['foto'])
+    >>> z, rest = ziel_lesen(["tag", "2026-10-22", "audio"], "p1")
+    >>> z.zum_tag, z.profil_id, rest
+    (datetime.date(2026, 10, 22), 'p1', ['audio'])
+    >>> ziel_lesen(["tag", "gestern"], "p1"), ziel_lesen([], "p1")
+    (None, None)
+    """
+    if not teile:
+        return None
+    if teile[0] == TAG_TEIL:
+        try:
+            tag = date.fromisoformat(teile[1]) if len(teile) > 1 else None
+        except ValueError:
+            tag = None
+        return (Ziel.fuer_tag(profil_id, tag), teile[2:]) if tag is not None else None
+    return Ziel.fuer_eintrag(teile[0]), teile[1:]
+
+
 @dataclass(slots=True)
 class Anhang:
-    """Eine Zeile ``entry_media``: ein Foto oder Video an einem Eintrag."""
+    """Eine Zeile ``entry_media``: ein Foto, Video oder eine Audioaufnahme — an einem Eintrag
+    (`eintrag_id`) oder am Tag (`profil_id` und `zum_tag`, Notiz zum Tag)."""
 
-    eintrag_id: str
+    eintrag_id: str | None
     art: str = BILD
     #: relativ zu `config.anhaengeverzeichnis()`, mit ``/``: ``2026/10/20261020_1430_ab12cd.jpg``
     pfad: str = ""
@@ -236,20 +318,46 @@ class Anhang:
     dauer_s: float | None = None
     breite: int | None = None
     hoehe: int | None = None
-    #: Frontbild eines Videos, relativ wie `pfad`; ``None`` bei Fotos
+    #: Frontbild eines Videos, relativ wie `pfad`; ``None`` bei Fotos und Audioaufnahmen
     vorschau: str | None = None
     qualitaet: str = Qualitaet.MITTEL.value
     note: str = ""
     created_at: datetime | None = None
+    #: Am Tag statt an einem Eintrag (seit 22.10.2026): wessen Tag und welcher
+    profil_id: str | None = None
+    zum_tag: date | None = None
 
     @property
     def ist_video(self) -> bool:
         return self.art == VIDEO
 
     @property
+    def ist_audio(self) -> bool:
+        return self.art == AUDIO
+
+    @property
+    def am_tag(self) -> bool:
+        """Hängt am Tag (Notiz zum Tag), nicht an einem Eintrag."""
+        return self.zum_tag is not None
+
+    @property
+    def ziel(self) -> Ziel:
+        return Ziel(self.eintrag_id, self.profil_id, self.zum_tag)
+
+    @property
     def bild(self) -> str:
-        """Was als Kachel gezeigt wird: beim Video das Frontbild, sonst das Foto selbst."""
+        """Was als Kachel gezeigt wird: beim Video das Frontbild, sonst die Datei selbst — bei
+        einer Audioaufnahme zeigt die Kachel ein Symbol und prüft damit nur, ob sie da ist."""
         return self.vorschau or self.pfad
+
+    @property
+    def name(self) -> str:
+        """„Foto“, „Video“, „Audioaufnahme“."""
+        return NAMEN.get(self.art, NAMEN[BILD])[0]
+
+    @property
+    def mime(self) -> str:
+        return MIME.get(self.pfad.rsplit(".", 1)[-1].lower(), "application/octet-stream")
 
     @property
     def tag(self) -> date:
@@ -261,8 +369,9 @@ class AnhangMitBezug:
     """Ein Anhang mit dem, woran er hängt — für Tagebuch, Verlauf und Speicherübersicht."""
 
     anhang: Anhang
-    exercise_id: str
-    #: Beginn des Eintrags; ``None``, wenn der Eintrag keine Zeit hat
+    #: Die Übung des Eintrags — ``None`` bei einem Anhang am Tag
+    exercise_id: str | None
+    #: Beginn des Eintrags; ``None``, wenn der Eintrag keine Zeit hat (und am Tag)
     eintrag_zeit: datetime | None
     #: der Eintrag ist weich gelöscht — der Anhang hängt in der Luft (Speicherübersicht)
     eintrag_geloescht: bool = False
@@ -309,33 +418,46 @@ def vorschau_name(name: str) -> str:
 
 
 def neuer_anhang(
-    eintrag_id: str,
+    ziel: Ziel | str,
     art: str,
     qualitaet: Qualitaet,
     zeit: datetime | None = None,
     *,
     dauer_s: float | None = None,
     note: str = "",
+    endung: str | None = None,
 ) -> Anhang:
     """Ein Anhang mit fertigem Pfad (und Frontbildpfad beim Video) — noch ohne Bytes.
+    ``ziel``: woran er hängt (eine Eintrags-ID genügt); ``endung`` statt der üblichen der Art
+    (am Rechner nimmt der Rekorder WAV auf, wo AAC fehlt).
 
     >>> a = neuer_anhang("e1", VIDEO, Qualitaet.KLEIN, dauer_s=12.5)
     >>> a.pfad.endswith(".mp4"), a.vorschau.endswith("_bild.jpg"), a.qualitaet
     (True, True, 'klein')
     >>> neuer_anhang("e1", BILD, Qualitaet.MITTEL).vorschau is None
     True
+    >>> t = neuer_anhang(Ziel.fuer_tag("p1", date(2026, 10, 22)), AUDIO, Qualitaet.MITTEL)
+    >>> t.pfad.endswith(".m4a"), t.vorschau, t.eintrag_id, t.zum_tag, t.am_tag
+    (True, None, None, datetime.date(2026, 10, 22), True)
+    >>> neuer_anhang("e1", AUDIO, Qualitaet.MITTEL, endung="wav").pfad.endswith(".wav")
+    True
     """
     if art not in ENDUNG:
         raise ValueError(f"Unbekannte Art: {art!r}")
+    z = ziel if isinstance(ziel, Ziel) else Ziel.fuer_eintrag(ziel)
     a = Anhang(
-        eintrag_id=eintrag_id,
+        eintrag_id=z.eintrag_id,
         art=art,
         aufgenommen=zeit or jetzt(),
         dauer_s=dauer_s,
         qualitaet=qualitaet.value,
         note=note.strip(),
+        profil_id=z.profil_id,
+        zum_tag=z.zum_tag,
     )
     name = dateiname(art, a.aufgenommen, a.id)
+    if endung:
+        name = f"{name.rsplit('.', 1)[0]}.{endung}"
     a.pfad = relativer_pfad(a.aufgenommen, name)
     if art == VIDEO:
         a.vorschau = relativer_pfad(a.aufgenommen, vorschau_name(name))
@@ -502,34 +624,53 @@ def dauer_text(s: float | None) -> str:
     return f"{ganz // 60}:{ganz % 60:02d}"
 
 
-def anzahl_text(bilder: int, videos: int) -> str:
-    """„3 Fotos, 1 Video“.
+def anzahl_text(bilder: int, videos: int, audios: int = 0) -> str:
+    """„3 Fotos, 1 Video, 2 Audioaufnahmen“.
 
-    >>> anzahl_text(1, 0), anzahl_text(3, 1), anzahl_text(0, 0)
-    ('1 Foto', '3 Fotos, 1 Video', 'keine Aufnahmen')
+    >>> anzahl_text(1, 0), anzahl_text(3, 1), anzahl_text(0, 0), anzahl_text(0, 0, 1)
+    ('1 Foto', '3 Fotos, 1 Video', 'keine Aufnahmen', '1 Audioaufnahme')
     """
     teile = []
-    if bilder:
-        teile.append(f"{bilder} Foto{'' if bilder == 1 else 's'}")
-    if videos:
-        teile.append(f"{videos} Video{'' if videos == 1 else 's'}")
+    for art, n in ((BILD, bilder), (VIDEO, videos), (AUDIO, audios)):
+        if n:
+            einzahl, mehrzahl = NAMEN[art]
+            teile.append(f"{n} {einzahl if n == 1 else mehrzahl}")
     return ", ".join(teile) or "keine Aufnahmen"
 
 
-def zusammenfassung(anhaenge: Iterable[Anhang]) -> tuple[int, int, int]:
-    """``(Fotos, Videos, Bytes)``.
+@dataclass(frozen=True, slots=True)
+class Umfang:
+    """Wie viele Fotos, Videos und Audioaufnahmen, und wie groß zusammen."""
 
-    >>> zusammenfassung([Anhang("e", BILD, bytes=100), Anhang("e", VIDEO, bytes=900)])
-    (1, 1, 1000)
+    bilder: int = 0
+    videos: int = 0
+    audios: int = 0
+    bytes: int = 0
+
+    @property
+    def anzahl(self) -> int:
+        return self.bilder + self.videos + self.audios
+
+    @property
+    def text(self) -> str:
+        """„3 Fotos, 1 Video“ — `anzahl_text`."""
+        return anzahl_text(self.bilder, self.videos, self.audios)
+
+
+def zusammenfassung(anhaenge: Iterable[Anhang]) -> Umfang:
+    """Zählen und zusammenrechnen.
+
+    >>> u = zusammenfassung([Anhang("e", BILD, bytes=100), Anhang("e", VIDEO, bytes=900),
+    ...                      Anhang("e", AUDIO, bytes=50)])
+    >>> u.bilder, u.videos, u.audios, u.bytes, u.anzahl, u.text
+    (1, 1, 1, 1050, 3, '1 Foto, 1 Video, 1 Audioaufnahme')
     """
-    bilder = videos = groesse = 0
+    zahl = {BILD: 0, VIDEO: 0, AUDIO: 0}
+    groesse = 0
     for a in anhaenge:
         groesse += a.bytes
-        if a.ist_video:
-            videos += 1
-        else:
-            bilder += 1
-    return bilder, videos, groesse
+        zahl[a.art if a.art in zahl else BILD] += 1
+    return Umfang(zahl[BILD], zahl[VIDEO], zahl[AUDIO], groesse)
 
 
 # ---------------------------------------------------------------------------
@@ -663,13 +804,18 @@ def fehlende(anhaenge: Iterable[Anhang], vorhanden: Iterable[str]) -> list[Anhan
 
 
 __all__ = [
+    "AUDIO",
+    "AUDIO_MAX_S",
     "BILD",
     "BLITZ",
     "ENDUNG",
     "HOCHLADEN_VIDEO_MAX_S",
+    "MIME",
+    "NAMEN",
     "REIHE_MAX",
     "SETTING_QUALITAET",
     "SETTING_VIDEO_MAX",
+    "TAG_TEIL",
     "TIMER_STUFEN",
     "VIDEO",
     "VIDEO_MAX_VORGABE_S",
@@ -680,6 +826,8 @@ __all__ = [
     "AnhangMitBezug",
     "Monatsgruppe",
     "Qualitaet",
+    "Umfang",
+    "Ziel",
     "anzahl_text",
     "art_der_datei",
     "aufraeumen_vorschlag",
@@ -702,5 +850,6 @@ __all__ = [
     "verwaiste",
     "video_max_lesen",
     "vorschau_name",
+    "ziel_lesen",
     "zusammenfassung",
 ]

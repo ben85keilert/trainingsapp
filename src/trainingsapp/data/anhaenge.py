@@ -11,6 +11,11 @@ Ein Anhang hängt an dem Eintrag, der beim Anhängen galt. Eine Korrektur ist ei
 Eintrag mit ``replaces_entry_id`` — darum folgt `je_eintraegen` der Kette zurück, wie
 `StreckeRepo.zu_eintraegen`. Wird der Eintrag gelöscht (weich, ``deleted_at``), bleibt der
 Anhang in der Speicherübersicht sichtbar („Eintrag gelöscht“), bis die Person ihn löscht.
+
+Seit Migration 029 (Ben, 22.10.2026) hängt ein Anhang auch **am Tag** (Notiz zum Tag:
+``subject_id`` + ``day``, `zum_tag`), und es gibt **Audio** (``.m4a``). Was nach Übungen
+fragt (`je_eintraegen`, `je_uebung`, `je_tag`), sieht Anhänge am Tag nicht; die
+Speicherübersicht, das Tagebuch und das Aufräumen (`alle`, `gesamt`, `alle_zeilen`) schon.
 """
 
 from __future__ import annotations
@@ -28,31 +33,38 @@ from trainingsapp.core.anhaenge import (
     Anhang,
     AnhangMitBezug,
     Qualitaet,
+    Umfang,
     jpeg_ohne_metadaten,
     mp4_ortsboxen,
     video_max_lesen,
+    zusammenfassung,
 )
 from trainingsapp.core.models import iso_utc, jetzt, tagesgrenzen
 
 from .db import transaktion
 from .repositories import SettingRepo
 
-#: Was unter `Anhaenge/` als Datei zählt
-_ENDUNGEN = {".jpg", ".jpeg", ".mp4"}
+#: Was unter `Anhaenge/` als Datei zählt (WAV: am Rechner, wo dem Rekorder AAC fehlt)
+_ENDUNGEN = {".jpg", ".jpeg", ".mp4", ".m4a", ".wav"}
 
-#: Anhang mit dem Eintrag, an dem er hängt, und dessen Session
+#: Anhang mit dem Eintrag, an dem er hängt, und dessen Session — bei einem Anhang am Tag
+#: bleiben deren Spalten leer (LEFT JOIN), das Profil steht dann an der Zeile selbst
 _MIT_BEZUG = """
     SELECT m.*, e.exercise_id AS exercise_id, e.started_at AS eintrag_zeit,
            e.deleted_at AS eintrag_geloescht
     FROM entry_media m
-    JOIN session_entry e ON e.id = m.session_entry_id
-    JOIN session s ON s.id = e.session_id
+    LEFT JOIN session_entry e ON e.id = m.session_entry_id
+    LEFT JOIN session s ON s.id = e.session_id
 """
+#: Wessen Anhang: das Profil der Session — oder das an der Zeile (Anhang am Tag)
+_PROFIL = "COALESCE(s.subject_id, m.subject_id)"
 
 
 #: Unterordner der Wurzel für Dateien, die „Hochladen“ gerade verkleinert (P74) — wie die
 #: Anhänge nie in Backup, Export oder Sync; Reste findet „Aufräumen“
 HOCHLADEN_ORDNER = ".hochladen"
+#: Ebenso für die Audioaufnahme, die gerade läuft (der Rekorder schreibt dorthin)
+AUFNAHME_ORDNER = ".aufnahme"
 
 
 def _atomar_schreiben(ziel: Path, daten: bytes) -> None:
@@ -179,6 +191,13 @@ class AnhangRepo:
         ordner.mkdir(parents=True, exist_ok=True)
         return ordner
 
+    def aufnahme_ordner(self) -> Path:
+        """Wohin der Rekorder eine Audioaufnahme schreibt, bis sie behalten wird
+        (`AUFNAHME_ORDNER`)."""
+        ordner = self.wurzel / AUFNAHME_ORDNER
+        ordner.mkdir(parents=True, exist_ok=True)
+        return ordner
+
     def dateien_uebernehmen(self, a: Anhang, datei: Path, vorschau: Path | None = None) -> None:
         """Wie `dateien_schreiben`, aber für fertige Dateien (Hochladen, P74): verschieben
         statt die Bytes durch den Speicher zu tragen — ein Video von zehn Minuten wiegt bei
@@ -194,12 +213,14 @@ class AnhangRepo:
             a.created_at = jetzt()
         with transaktion(self.con):
             self.con.execute(
-                "INSERT INTO entry_media (id, session_entry_id, kind, uri, recorded_at, bytes, "
-                "dauer_s, breite, hoehe, vorschau, qualitaet, note, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO entry_media (id, session_entry_id, subject_id, day, kind, uri, "
+                "recorded_at, bytes, dauer_s, breite, hoehe, vorschau, qualitaet, note, "
+                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     a.id,
                     a.eintrag_id,
+                    a.profil_id if a.am_tag else None,
+                    a.zum_tag.isoformat() if a.zum_tag is not None else None,
                     a.art,
                     a.pfad,
                     iso_utc(a.aufgenommen),
@@ -302,14 +323,29 @@ class AnhangRepo:
             )
         ]
 
+    def zum_tag(self, subject_id: str, tag: date) -> list[Anhang]:
+        """Die Anhänge am Tag selbst (Notiz zum Tag), älteste zuerst."""
+        return [
+            self._zeile(r)
+            for r in self.con.execute(
+                "SELECT * FROM entry_media WHERE subject_id = ? AND day = ? "
+                "ORDER BY recorded_at, rowid",
+                (subject_id, tag.isoformat()),
+            )
+        ]
+
     def alle(self, subject_id: str, *, mit_geloeschten: bool = True) -> list[AnhangMitBezug]:
         """Alles eines Profils, die neueste zuerst — Tagebuch (ohne gelöschte Einträge)
-        und Speicherübersicht (mit)."""
-        filter_ = "" if mit_geloeschten else "AND e.deleted_at IS NULL AND s.deleted_at IS NULL "
+        und Speicherübersicht (mit); Anhänge am Tag immer."""
+        filter_ = (
+            ""
+            if mit_geloeschten
+            else "AND (m.day IS NOT NULL OR (e.deleted_at IS NULL AND s.deleted_at IS NULL)) "
+        )
         return [
             self._bezug(r)
             for r in self.con.execute(
-                f"{_MIT_BEZUG} WHERE s.subject_id = ? {filter_}"
+                f"{_MIT_BEZUG} WHERE {_PROFIL} = ? {filter_}"
                 "ORDER BY m.recorded_at DESC, m.rowid DESC",
                 (subject_id,),
             )
@@ -319,16 +355,17 @@ class AnhangRepo:
         """Jede Zeile, über alle Profile — für „Verwaiste“ und „Fehlende“."""
         return [self._zeile(r) for r in self.con.execute("SELECT * FROM entry_media")]
 
-    def gesamt(self, subject_id: str) -> tuple[int, int, int]:
-        """``(Fotos, Videos, Bytes)`` eines Profils."""
-        r = self.con.execute(
-            "SELECT SUM(m.kind = 'image') AS bilder, SUM(m.kind = 'video') AS videos, "
-            "SUM(m.bytes) AS groesse FROM entry_media m "
-            "JOIN session_entry e ON e.id = m.session_entry_id "
-            "JOIN session s ON s.id = e.session_id WHERE s.subject_id = ?",
-            (subject_id,),
-        ).fetchone()
-        return int(r["bilder"] or 0), int(r["videos"] or 0), int(r["groesse"] or 0)
+    def gesamt(self, subject_id: str) -> Umfang:
+        """Fotos, Videos, Audioaufnahmen und Bytes eines Profils — mit denen am Tag."""
+        return zusammenfassung(
+            self._zeile(r)
+            for r in self.con.execute(
+                f"SELECT m.* FROM entry_media m "
+                "LEFT JOIN session_entry e ON e.id = m.session_entry_id "
+                f"LEFT JOIN session s ON s.id = e.session_id WHERE {_PROFIL} = ?",
+                (subject_id,),
+            )
+        )
 
     # -- Zeilen ----------------------------------------------------------------------------
 
@@ -348,6 +385,8 @@ class AnhangRepo:
             qualitaet=r["qualitaet"] or Qualitaet.MITTEL.value,
             note=r["note"] or "",
             created_at=datetime.fromisoformat(r["created_at"]) if r["created_at"] else None,
+            profil_id=r["subject_id"],
+            zum_tag=date.fromisoformat(r["day"]) if r["day"] else None,
         )
 
     def _bezug(self, r: sqlite3.Row) -> AnhangMitBezug:
@@ -381,6 +420,7 @@ def video_max_setzen(einstellungen: SettingRepo, sekunden: int) -> None:
 
 
 __all__ = [
+    "AUFNAHME_ORDNER",
     "HOCHLADEN_ORDNER",
     "AnhangRepo",
     "jpeg_datei_ohne_metadaten",

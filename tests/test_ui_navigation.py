@@ -63,6 +63,15 @@ class Seite:
         return [str(v.route) for v in self.views]
 
 
+def _alle(c):
+    yield c
+    for name in ("content", "controls", "appbar", "title", "leading"):
+        kind = getattr(c, name, None)
+        for k in kind if isinstance(kind, list) else [kind] if kind is not None else []:
+            if isinstance(k, ft.BaseControl):
+                yield from _alle(k)
+
+
 @pytest.fixture
 def umgebung(tmp_path, monkeypatch):
     monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))
@@ -218,3 +227,57 @@ def test_nur_der_vorfahr_baubar_faellt_aus_dem_weg(umgebung) -> None:
     seite.gehe(f"/plan/{plan.id}/info/gibt-es-nicht")
     assert seite.routen() == ["/", f"/plan/{plan.id}"]
     assert state.navigation == [f"/plan/{plan.id}"]
+
+
+def test_aufnahmen_zum_tag_und_audio_liegen_ueber_der_ansicht(umgebung) -> None:
+    """Ben, 22.10.2026: Foto, Video und Audio auch zur Notiz zum Tag — der Weg trägt
+    ``tag/<datum>`` statt einer Eintrags-ID; ein Tag in der Zukunft fällt aus dem Weg."""
+    from datetime import timedelta
+
+    from trainingsapp.ui.views.anhang_ton import anhang_ton_view
+
+    seite, state = umgebung()
+    heute = state.heute()
+    audio = f"/anhang/aufnehmen/tag/{heute.isoformat()}/audio"
+    seite.gehe(audio)
+    assert seite.routen() == ["/", audio]
+    assert seite.views[-1].can_pop is False  # die Systemtaste räumt den Rekorder auf
+    assert any(
+        isinstance(c, ft.IconButton) and c.icon == ft.Icons.FIBER_MANUAL_RECORD
+        for c in _alle(seite.views[-1])
+    )
+    # Über einem anderen Tag (Kaltstart baut den Weg hierarchisch)
+    gestern = (heute - timedelta(days=1)).isoformat()
+    foto = f"/tag/{gestern}/anhang/aufnehmen/tag/{gestern}/foto"
+    neu, _ = umgebung(foto)
+    assert neu.routen() == ["/", f"/tag/{gestern}", foto]
+    morgen = f"/anhang/aufnehmen/tag/{(heute + timedelta(days=1)).isoformat()}/audio"
+    zukunft, _ = umgebung(morgen)
+    assert zukunft.routen() == ["/"]
+    assert anhang_ton_view.__name__  # die Seite gibt es (Import im Router)
+
+
+def test_zurueck_auf_heute_beendet_das_schreiben(umgebung) -> None:
+    """Zurück macht Autosave: Wer auf „Heute“ die Notiz zum Tag schreibt, beendet mit der
+    Systemtaste das Schreiben — gespeichert ist schon; ein neuer Aufbau speichert ebenso."""
+    seite, state = umgebung()
+    haupt = seite.views[0]
+    antworten: list[bool] = []
+
+    async def confirm_pop(soll: bool) -> None:
+        antworten.append(soll)
+
+    haupt.confirm_pop = confirm_pop
+    beendet: list[bool] = []
+
+    async def schreiben_beenden() -> None:
+        beendet.append(True)
+        state.schreiben_beenden = None
+
+    state.schreiben_beenden = schreiben_beenden
+    asyncio.run(haupt.on_confirm_pop(None))
+    assert antworten == [False] and beendet == [True] and state.reiter == "heute"
+    gespeichert: list[str] = []
+    state.vor_dem_verlassen["test"] = lambda: gespeichert.append("ja")
+    seite.gehe("/tag/2026-10-17")
+    assert gespeichert == ["ja"] and state.vor_dem_verlassen == {}

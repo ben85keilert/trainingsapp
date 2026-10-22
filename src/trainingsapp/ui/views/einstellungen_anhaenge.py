@@ -3,7 +3,8 @@
 
 Qualität der Aufnahmen (klein · mittel · groß, `core.anhaenge.Qualitaet`) und die längste
 Videoaufnahme — beides gilt für künftige Aufnahmen (`app_setting`). Darunter der
-**Überblick**: Gesamtgröße, Anzahl Fotos und Videos, Monatsgruppen mit Größe, je Gruppe
+**Überblick**: Gesamtgröße, Anzahl Fotos, Videos und Audioaufnahmen (auch die am Tag,
+seit 22.10.2026), Monatsgruppen mit Größe, je Gruppe
 aufklappbar zur Kachelreihe; Mehrfachauswahl (Kachel antippen) und „Löschen“ mit
 Rückfrage „12 Aufnahmen, 180 MB — endgültig“. Schnellweg „Videos älter als 3 Monate“.
 Aufräumen: verwaiste Dateien (Datei ohne Zeile) und fehlende Dateien (Zeile ohne Datei).
@@ -28,7 +29,6 @@ from trainingsapp.core.anhaenge import (
     AnhangMitBezug,
     Monatsgruppe,
     Qualitaet,
-    anzahl_text,
     aufraeumen_vorschlag,
     fehlende,
     groesse_text,
@@ -121,7 +121,7 @@ def einstellungen_anhaenge(page: Any, state: AppState) -> ft.View:
 
     alle = repo.alle(state.profil.id)
     gruppen = monatsgruppen(alle)
-    bilder, videos, gesamt = zusammenfassung(x.anhang for x in alle)
+    umfang = zusammenfassung(x.anhang for x in alle)
     katalog = {u.id: u.name for u in state.uebungen.alle(mit_geloeschten=True)}
 
     def oeffner(a: Anhang) -> Callable[[], Any]:
@@ -168,7 +168,10 @@ def einstellungen_anhaenge(page: Any, state: AppState) -> ft.View:
     def kachel_mit_wahl(x: AnhangMitBezug) -> ft.Control:
         a = x.anhang
         gewaehlt = a.id in auswahl
-        name = katalog.get(x.exercise_id, "Übung")
+        if a.zum_tag is not None:
+            name = f"Zum Tag · {a.zum_tag:%d.%m.}"
+        else:
+            name = katalog.get(x.exercise_id or "", "Übung")
         if x.eintrag_geloescht:
             name += " (Eintrag gelöscht)"
         k = kachel(a, repo.bild(a), oeffner(a), unterschrift=f"{a.tag:%d.%m.}")
@@ -185,13 +188,13 @@ def einstellungen_anhaenge(page: Any, state: AppState) -> ft.View:
         )
 
     def gruppen_zeile(g: Monatsgruppe) -> ft.Control:
-        b, v, groesse = zusammenfassung(x.anhang for x in g.anhaenge)
+        u = zusammenfassung(x.anhang for x in g.anhaenge)
         auf = (g.jahr, g.monat) in offen
         alle_gewaehlt = {x.anhang.id for x in g.anhaenge} <= auswahl
         kopf = ft.ListTile(
             leading=ft.Icon(ft.Icons.EXPAND_LESS if auf else ft.Icons.EXPAND_MORE, opacity=0.7),
             title=ft.Text(g.label),
-            subtitle=ft.Text(f"{anzahl_text(b, v)} · {groesse_text(groesse)}", size=12),
+            subtitle=ft.Text(f"{u.text} · {groesse_text(u.bytes)}", size=12),
             trailing=ft.IconButton(
                 ft.Icons.CHECK_BOX if alle_gewaehlt else ft.Icons.CHECK_BOX_OUTLINE_BLANK,
                 tooltip="Monat auswählen",
@@ -217,8 +220,7 @@ def einstellungen_anhaenge(page: Any, state: AppState) -> ft.View:
     def loeschen_fragen(ids: list[str], warum: str) -> None:
         if not ids:
             return
-        betroffen = [x.anhang for x in alle if x.anhang.id in set(ids)]
-        b, v, groesse = zusammenfassung(betroffen)
+        betroffen = zusammenfassung(x.anhang for x in alle if x.anhang.id in set(ids))
         nachher = Nachher()
 
         def loeschen() -> None:
@@ -238,8 +240,8 @@ def einstellungen_anhaenge(page: Any, state: AppState) -> ft.View:
             modal=True,
             title=ft.Text(f"{warum} löschen?"),
             content=ft.Text(
-                f"{anzahl_text(b, v)}, {groesse_text(groesse)} — endgültig, es gibt keinen "
-                "Papierkorb für Aufnahmen."
+                f"{betroffen.text}, {groesse_text(betroffen.bytes)} — endgültig, es gibt "
+                "keinen Papierkorb für Aufnahmen."
             ),
             actions=[
                 ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
@@ -337,13 +339,14 @@ def einstellungen_anhaenge(page: Any, state: AppState) -> ft.View:
     def zeichnen() -> None:
         liste.controls = [gruppen_zeile(g) for g in gruppen] or [
             hinweis(
-                "Noch keine Aufnahmen. Sie entstehen in den Leistungen einer Übung (Foto, Video)."
+                "Noch keine Aufnahmen. Sie entstehen in den Leistungen einer Übung und an der "
+                "Notiz zum Tag (Foto, Video, Audio)."
             )
         ]
         if auswahl:
-            b, v, groesse = zusammenfassung(x.anhang for x in alle if x.anhang.id in auswahl)
+            gewaehlt = zusammenfassung(x.anhang for x in alle if x.anhang.id in auswahl)
             kopfzeile.controls = [
-                ft.Text(f"Ausgewählt: {anzahl_text(b, v)} · {groesse_text(groesse)}", size=13),
+                ft.Text(f"Ausgewählt: {gewaehlt.text} · {groesse_text(gewaehlt.bytes)}", size=13),
                 ft.TextButton("Aufheben", on_click=auswahl_aufheben),
                 ft.FilledTonalButton(
                     "Löschen", icon=ft.Icons.DELETE_OUTLINE, on_click=auswahl_loeschen
@@ -352,13 +355,13 @@ def einstellungen_anhaenge(page: Any, state: AppState) -> ft.View:
         else:
             kopfzeile.controls = [
                 ft.Text(
-                    f"{anzahl_text(bilder, videos)} · {groesse_text(gesamt)}",
+                    f"{umfang.text} · {groesse_text(umfang.bytes)}",
                     size=13,
                     weight=ft.FontWeight.W_600,
                 ),
                 *(
                     [ft.TextButton("Videos älter als 3 Monate …", on_click=alte_videos)]
-                    if videos
+                    if umfang.videos
                     else []
                 ),
             ]

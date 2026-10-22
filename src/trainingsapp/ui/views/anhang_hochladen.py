@@ -1,7 +1,8 @@
 """Ein Foto oder Video aus der Fotoauswahl an einen Eintrag hängen — Route
-``<basis>/anhang/hochladen/<eintrag>`` (Ben, 21.10.2026, P74: „Ermögliche das Hochladen von
+``<basis>/anhang/hochladen/<ziel>`` (Ben, 21.10.2026, P74: „Ermögliche das Hochladen von
 Anhängen. Dabei Vorsicht mit den Nutzerrechten, hier nicht zu aggressiv sein“; Skizzen
-I1/I2 https://claude.ai/artifact/7JzRndHG41e3ZfeCm7huCH).
+I1/I2 https://claude.ai/artifact/7JzRndHG41e3ZfeCm7huCH). ``<ziel>``: die ID des Eintrags
+oder, seit 22.10.2026, ``tag/<datum>`` für die Notiz zum Tag (`core.anhaenge.Ziel`).
 
 Die Seite öffnet gleich die Fotoauswahl von Android (`flet_hochladen`): Die App bekommt nur
 die gewählte Datei, eine Berechtigung für Fotos oder Speicher braucht sie nicht. Danach wird
@@ -33,13 +34,14 @@ from trainingsapp.core.anhaenge import (
     VIDEO,
     Anhang,
     Qualitaet,
+    Ziel,
     art_der_datei,
     dauer_text,
     geschaetzte_bytes,
     groesse_text,
     neuer_anhang,
 )
-from trainingsapp.core.models import SessionEntry, jetzt, new_id
+from trainingsapp.core.models import jetzt, new_id
 from trainingsapp.data.anhaenge import (
     jpeg_datei_ohne_metadaten,
     mp4_ort_entfernen,
@@ -49,18 +51,21 @@ from trainingsapp.ui.components.anhang_reihe import bild_laden
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.zurueck import zurueck_ziel
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.anhang_aufnahme import ziel_name
 
 #: Routenteil
 HOCHLADEN = "hochladen"
 
 
-def hochladen_route(basis: str, eintrag_id: str) -> str:
-    """``<basis>/anhang/hochladen/<eintrag>`` — ``basis`` ``""`` oder ``/`` = Heute.
+def hochladen_route(basis: str, ziel: Ziel | str) -> str:
+    """``<basis>/anhang/hochladen/<ziel>`` — ``basis`` ``""`` oder ``/`` = Heute; ``ziel`` eine
+    Eintrags-ID oder ein `Ziel` (auch der Tag).
 
     >>> hochladen_route("/", "e1"), hochladen_route("/tag/2026-10-20", "e1")
     ('/anhang/hochladen/e1', '/tag/2026-10-20/anhang/hochladen/e1')
     """
-    return f"{basis.rstrip('/')}/anhang/{HOCHLADEN}/{eintrag_id}"
+    teil = ziel.teil if isinstance(ziel, Ziel) else ziel
+    return f"{basis.rstrip('/')}/anhang/{HOCHLADEN}/{teil}"
 
 
 def _art(gewaehlt: dict[str, Any]) -> str | None:
@@ -75,8 +80,9 @@ def _art(gewaehlt: dict[str, Any]) -> str | None:
 class _Hochladen:
     """Zustand der Seite: Auswahl, Verkleinern, Ergebnis."""
 
-    def __init__(self, page: Any, state: AppState, eintrag: SessionEntry) -> None:
-        self.page, self.state, self.eintrag = page, state, eintrag
+    def __init__(self, page: Any, state: AppState, ziel: Ziel) -> None:
+        #: Woran der Anhang hängt (`self.ziel` ist die verkleinerte Datei)
+        self.page, self.state, self.woran = page, state, ziel
         self.qualitaet: Qualitaet = qualitaet_lesen(state.einstellungen)
         self.art: str | None = None
         #: Die Kopie der Auswahl (trägt den Ort noch) und was daraus wird
@@ -239,7 +245,7 @@ class _Hochladen:
         if not self.fertig or self.ziel is None or self.art is None:
             return
         a: Anhang = neuer_anhang(
-            self.eintrag.id,
+            self.woran,
             self.art,
             self.qualitaet,
             jetzt(),
@@ -348,11 +354,10 @@ class _Hochladen:
         return [ft.OutlinedButton("Zurück", icon=ft.Icons.ARROW_BACK, on_click=self.zurueck)]
 
 
-def anhang_hochladen_view(page: Any, state: AppState, route: str, eintrag: SessionEntry) -> ft.View:
+def anhang_hochladen_view(page: Any, state: AppState, route: str, ziel: Ziel) -> ft.View:
     """Die Seite — sie öffnet beim Aufbau die Fotoauswahl."""
-    uebung = state.uebungen.laden(eintrag.exercise_id, mit_geloeschten=True)
-    h = _Hochladen(page, state, eintrag)
-    titel = "Hochladen: " + (uebung.name if uebung else "Übung")
+    h = _Hochladen(page, state, ziel)
+    titel = "Hochladen: " + ziel_name(state, ziel)
     h.zeichnen()
     page.run_task(h.starten)
 

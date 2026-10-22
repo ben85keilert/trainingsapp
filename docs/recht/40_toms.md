@@ -58,6 +58,11 @@
   Hinaus nur über „Teilen“ am einzelnen Anhang nach Rückfrage.
   Drei Aufnahmequalitäten, mittlere als Vorgabe — Datensparsamkeit auch beim Speicherplatz;
   Speicherübersicht und endgültiges Löschen in Einstellungen → Anhänge.
+- **Audioaufnahmen** (seit 22.10.2026, an Einträgen und an der Notiz zum Tag): mit dem
+  Mikrofon der App aufgenommen, direkt in den app-privaten Ordner `Anhaenge/` geschrieben
+  (bis „Behalten“ in `Anhaenge/.aufnahme/`, beim Verlassen ohne „Behalten“ gelöscht);
+  dieselben Regeln wie für Fotos und Videos. Aufgenommen wird nur nach Tipp auf ● und nur,
+  solange die Seite offen ist; Verlassen bricht die Aufnahme ab.
   **Hochladen** (seit 21.10.2026, P74): aus der Fotoauswahl von Android — keine
   Berechtigung für Fotos oder Speicher, die App sieht nur die gewählte Datei. Verkleinert
   auf die Qualitätsstufe (Videos höchstens zehn Minuten, feste Bitrate) und **ohne

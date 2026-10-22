@@ -40,6 +40,12 @@ dependencies = [
     "flet-ton",
     "flet-hochladen",
     "flet-camera==1.0.*",
+    # Audioaufnahmen an Einträgen und an der Notiz zum Tag (Ben, 22.10.2026): Aufnehmen
+    # über flet-audio-recorder (Flutter-Plugin record, schreibt gleich in eine Datei),
+    # Abspielen in der Ansicht über flet-audio (audioplayers) — das nimmt Musik-Apps den
+    # Audiofokus, hier gewollt: Man hört sich die Aufnahme bewusst an.
+    "flet-audio-recorder==1.0.*",
+    "flet-audio==1.0.*",
 ]
 
 # Werkzeug fürs Inhalte-Repo: Paketdateien prüfen, bauen, Index schreiben
@@ -155,8 +161,10 @@ hrv-core = "../hrv-core"
 "android.permission.ACCESS_COARSE_LOCATION" = true
 "android.permission.INTERNET" = true
 # Fotos und Videos an Einträgen (docs/plan_anhaenge.md, seit 19.10.2026): Kamera in der
-# App (flet-camera), Ton nur für Videos. Laufzeitabfrage beim ersten Aufnehmen; die
-# Aufnahmen bleiben im app-privaten Speicher, ohne Ortsstempel, nie in Export oder Sync.
+# App (flet-camera); das Mikrofon für den Ton der Videos und seit 22.10.2026 für
+# Audioaufnahmen (an Einträgen und an der Notiz zum Tag). Laufzeitabfrage beim ersten
+# Aufnehmen; die Aufnahmen bleiben im app-privaten Speicher, ohne Ortsstempel, nie in
+# Export oder Sync.
 "android.permission.CAMERA" = true
 "android.permission.RECORD_AUDIO" = true
 
@@ -177,7 +185,7 @@ fullBackupOnly = "true"
 # iOS: Begründungen in Info.plist (ohne sie lehnt Apple die App ab, `docs/recht/80_store_freigaben.md`).
 [tool.flet.ios.info]
 NSCameraUsageDescription = "Fotos und Videos deiner Übungsausführung aufnehmen — sie bleiben auf diesem Gerät."
-NSMicrophoneUsageDescription = "Ton für Videos deiner Übungsausführung — sie bleiben auf diesem Gerät."
+NSMicrophoneUsageDescription = "Ton für Videos und Audioaufnahmen zu deinen Übungen und deinem Tag — sie bleiben auf diesem Gerät."
 
 # Die Flet-Vorlage 1.0.3 zwingt jni auf 1.0.0; jni_flutter 1.0.4+1 (über
 # path_provider_android 2.3.1) verlangt jni ^1.1.0 → „Constant evaluation error …

@@ -21,10 +21,11 @@ an (der alte Stand bleibt im Verlauf), Zurück speichert ebenso (`components/zur
 einer Rückfrage, wie in der Eintragsansicht.
 
 **Fotos und Videos** (Ben, 19.10.2026; `docs/plan_anhaenge.md`): Unter „Nachtragen · Im
-Verlauf“ eine zweite Zeile „Foto“ „Video“ — sie hängt die Aufnahme an den **jüngsten
-Eintrag** des Tages; die Büroklammer an jeder Karte hängt sie gezielt an **diesen**
-Eintrag. Die Frontbilder stehen als Kachelreihe unter der Karte (`components/anhang_reihe`),
-ein Tipp öffnet die Ansicht. Ohne Eintrag: erst eintragen, dann anhängen.
+Verlauf“ die Knöpfe „Foto“ „Video“ „Audio“ (seit 22.10.2026) und „Hochladen“ — sie hängen
+die Aufnahme an den **jüngsten Eintrag** des Tages; die Büroklammer an jeder Karte hängt
+sie gezielt an **diesen** Eintrag. Die Frontbilder stehen als Kachelreihe unter der Karte
+(`components/anhang_reihe`), ein Tipp öffnet die Ansicht. Ohne Eintrag: erst eintragen, dann
+anhängen.
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import varianten as var
-from trainingsapp.core.anhaenge import BILD, VIDEO, Anhang
+from trainingsapp.core.anhaenge import AUDIO, BILD, VIDEO, Anhang
 from trainingsapp.core.aufnahme_bezug import Bezug, zeit_text
 from trainingsapp.core.models import Exercise, Session, SessionEntry
 from trainingsapp.core.tagesbilanz import kachel
@@ -231,12 +232,13 @@ class _Leistungen:
         return lambda: self.weiter(ziel)()
 
     def anhang_knopf(self, eintrag_id: str) -> ft.Control:
-        """Die Büroklammer an der Karte: Foto oder Video gezielt an **diesen** Eintrag."""
+        """Die Büroklammer an der Karte: Foto, Video oder Audio gezielt an **diesen** Eintrag."""
         foto = self.aufnahme_ziel(BILD, eintrag_id) or self.basis
         video = self.aufnahme_ziel(VIDEO, eintrag_id) or self.basis
+        ton = self.aufnahme_ziel(AUDIO, eintrag_id) or self.basis
         return ft.PopupMenuButton(
             icon=ft.Icons.ATTACH_FILE,
-            tooltip="Foto oder Video an diesen Eintrag",
+            tooltip="Foto, Video oder Audio an diesen Eintrag",
             items=[
                 ft.PopupMenuItem(
                     content=ft.Text("Foto aufnehmen"),
@@ -247,6 +249,11 @@ class _Leistungen:
                     content=ft.Text("Video aufnehmen"),
                     icon=ft.Icons.VIDEOCAM_OUTLINED,
                     on_click=self._weiter_zu(video),
+                ),
+                ft.PopupMenuItem(
+                    content=ft.Text("Audio aufnehmen"),
+                    icon=ft.Icons.MIC_NONE,
+                    on_click=self._weiter_zu(ton),
                 ),
                 *(
                     [
@@ -412,8 +419,9 @@ def _nachtragen_zeile(
 ) -> list[ft.Control]:
     """„Nachtragen“ und „Im Verlauf ansehen“ — nur, wenn die Tagesansicht eine
     Nachtragen-Route mitgibt (Skizze A4). Ansicht und Blatt teilen sich die Zeile (N28).
-    Darunter „Foto“ „Video“ an den jüngsten Eintrag des Tages (Ben, 19.10.2026) — zwei
-    Knöpfe füllen die Zeile; käme ein dritter Weg (Galerie), wird daraus „Anhang“ mit Menü."""
+    Darunter „Foto“ „Video“ „Audio“ (seit 22.10.2026) und „Hochladen“ an den jüngsten Eintrag
+    des Tages (Ben, 19.10.2026) — bis zu drei Knöpfe in einer Zeile, vier am Handy zu zweit
+    in zwei Zeilen (sonst bricht „Hochladen“ um), auf breitem Bildschirm in einer."""
     zeilen: list[ft.Control] = []
     if nachtragen is not None:
         zeilen.append(
@@ -434,33 +442,35 @@ def _nachtragen_zeile(
         )
     if leistungen is not None:
         foto, video = leistungen.aufnahme_ziel(BILD), leistungen.aufnahme_ziel(VIDEO)
-        if foto is None or video is None:
+        ton = leistungen.aufnahme_ziel(AUDIO)
+        if foto is None or video is None or ton is None:
             zeilen.append(
-                ft.Text("Foto oder Video: erst eintragen, dann anhängen.", size=12, opacity=0.6)
+                ft.Text(
+                    "Foto, Video oder Audio: erst eintragen, dann anhängen.", size=12, opacity=0.6
+                )
             )
         else:
-            # Hochladen aus der Fotoauswahl (P74, Skizze I1) — nur mit Erweiterung; zu dritt
-            # mit schmalerem Rand, sonst bricht „Hochladen“ am Handy um
+            # Hochladen aus der Fotoauswahl (P74, Skizze I1) — nur mit Erweiterung
             hoch = leistungen.hochladen_ziel()
-            knoepfe = [("Foto", ft.Icons.CAMERA_ALT_OUTLINED, foto)]
-            knoepfe.append(("Video", ft.Icons.VIDEOCAM_OUTLINED, video))
+            knoepfe = [
+                ("Foto", ft.Icons.CAMERA_ALT_OUTLINED, foto),
+                ("Video", ft.Icons.VIDEOCAM_OUTLINED, video),
+                ("Audio", ft.Icons.MIC_NONE, ton),
+            ]
             if hoch is not None:
                 knoepfe.append(("Hochladen", ft.Icons.PHOTO_LIBRARY_OUTLINED, hoch))
-            schmal = (
-                ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=8))
-                if hoch is not None
-                else None
-            )
+            breit = 12 // len(knoepfe)
             zeilen.append(
-                ft.Row(
+                ft.ResponsiveRow(
                     spacing=8,
+                    run_spacing=8,
                     controls=[
                         ft.OutlinedButton(
                             text,
                             icon=symbol,
                             on_click=weiter_nach(ziel),
-                            expand=True,
-                            style=schmal,
+                            col={"xs": 6 if len(knoepfe) > 3 else breit, "sm": breit},
+                            style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=8)),
                         )
                         for text, symbol, ziel in knoepfe
                     ],

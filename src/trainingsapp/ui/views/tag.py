@@ -24,6 +24,11 @@ mit Zahl). Ein Tipp auf ein Bild öffnet die Ansicht (`…/anhang/<id>`), kein V
 die Bilder sind klein dekodiert (`components/anhang_reihe`), gelesen wird mit einer Abfrage
 für den ganzen Tag (`AnhangRepo.je_eintraegen`).
 
+**Die Notiz zum Tag** schreibt man direkt (Ben, 22.10.2026: „Ermögliche direktes Eintragen
+mit Autosave und zurück und vor Button …“) — in der Übersicht oben im Block „Zum Tag“, in der
+Zeitleiste an ihrer Uhrzeit (noch ohne Notiz am Ende); dazu Foto, Video und Audio zum Tag
+(`components/tagesnotiz.py`). Ihr Stand lebt über das Auffrischen der Spalte hinweg.
+
 Ein Plan ist ein Rahmen, in dem man variiert: Die Karte sagt „2 von 5“ und zeigt je Übung
 ein Stück, sie zählt keine Prozente.
 
@@ -78,6 +83,7 @@ from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.notiz import notiz_dialog
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.tagesfeld_blatt import tagesfeld_blatt
+from trainingsapp.ui.components.tagesnotiz import Tagesnotiz
 from trainingsapp.ui.components.uebungszeile import (
     abschnitt,
     etikett,
@@ -324,9 +330,22 @@ def tagesansicht(
 
     stand: dict[str, _Daten] = {"daten": _lesen(state, tag_jetzt())}
     spalte = ft.Column(spacing=8, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+    #: Die Notiz zum Tag zum direkten Schreiben — ihr Stand (Text, ↶ ↷) überlebt das
+    #: Auffrischen der Spalte
+    notiz_stand: dict[str, Tagesnotiz] = {}
 
     def daten() -> _Daten:
         return stand["daten"]
+
+    def tagesnotiz() -> Tagesnotiz:
+        """Die Notiz des Tags beim Tippen — nach Mitternacht (Heute) oder einem
+        Profilwechsel eine neue; die alte ist vorher gespeichert."""
+        n = notiz_stand.get("notiz")
+        if n is None or n.tag != tag_jetzt() or n.profil_id != state.profil.id:
+            if n is not None:
+                n.speichern()
+            n = notiz_stand["notiz"] = Tagesnotiz(page, state, tag_jetzt(), basis=basis)
+        return n
 
     def auffrischen() -> None:
         """Neu lesen und nur diese Spalte neu füllen."""
@@ -469,17 +488,6 @@ def tagesansicht(
             await page.push_route("/")
         else:
             state.neu_zeichnen()
-
-    def tagesnotiz_bearbeiten() -> None:
-        page.show_dialog(
-            notiz_dialog(
-                "Notiz zum Tag",
-                daten().tagesnotiz,
-                lambda text: state.tagesnotizen.setzen(state.profil.id, tag_jetzt(), text),
-                danach=auffrischen,
-                hinweis="Wie lief der Tag? Tippen oder diktieren.",
-            )
-        )
 
     def session_titel(s: Session) -> str:
         return daten().plan_namen.get(s.plan_id, "Plan") if s.plan_id else "Ohne Plan"
@@ -924,8 +932,7 @@ def tagesansicht(
                 d.felder,
                 d.werte,
                 auffrischen=auffrischen,
-                notiz=d.tagesnotiz if mit_notiz else None,
-                notiz_bearbeiten=tagesnotiz_bearbeiten if mit_notiz else None,
+                notiz=tagesnotiz().control() if mit_notiz else None,
             ),
         ]
 
@@ -1190,9 +1197,15 @@ def tagesansicht(
             (a.beginn, block(a)) for a in zeitleiste(d.eintraege, d.namen(), d.ist_training)
         ]
         einmal = einmal_zeile()
-        if d.tagesnotiz or einmal:
+        notiz = tagesnotiz()
+        # Mit Text oder Anhängen steht die Notiz an ihrer Uhrzeit, sonst am Ende
+        an_der_uhrzeit = bool(d.tagesnotiz or notiz.anhaenge)
+        if an_der_uhrzeit or einmal:
             zeit = d.notiz_zeit if d.notiz_zeit and lokaler_tag(d.notiz_zeit) == tag else None
-            if zeit is None and not d.tagesnotiz:
+            if zeit is None and notiz.anhaenge:
+                erste = min(a.aufgenommen for a in notiz.anhaenge)
+                zeit = erste if lokaler_tag(erste) == tag else None
+            if zeit is None and not an_der_uhrzeit:
                 zeit = min(
                     (
                         w.zeit
@@ -1203,14 +1216,14 @@ def tagesansicht(
                 )
             zeilen: list[ft.Control] = [
                 ft.Text(
-                    "Notiz zum Tag" if d.tagesnotiz else "Zum Tag",
+                    "Notiz zum Tag" if an_der_uhrzeit else "Zum Tag",
                     size=12,
                     weight=ft.FontWeight.W_600,
                     opacity=0.7,
                 )
             ]
-            if d.tagesnotiz:
-                zeilen.append(ft.Text(d.tagesnotiz, size=14))
+            if an_der_uhrzeit:
+                zeilen.append(notiz.control())
             if einmal:
                 zeilen.append(
                     ft.Container(
@@ -1227,8 +1240,6 @@ def tagesansicht(
                         bgcolor=KARTE,
                         border_radius=14,
                         padding=ft.Padding.only(left=12, right=8, top=8, bottom=8),
-                        ink=True,
-                        on_click=tagesnotiz_bearbeiten,
                         content=ft.Column(spacing=4, tight=True, controls=zeilen),
                     ),
                 )
@@ -1264,14 +1275,23 @@ def tagesansicht(
             if d.ist_heute:
                 linie.append(zeitpunkt("jetzt", ft.Container(height=6), hohl=True))
             teile.append(ft.Column(spacing=0, controls=linie))
-        if not d.tagesnotiz:
+        if not an_der_uhrzeit:
+            # Noch keine Notiz: das Feld am Ende, gleich zum Schreiben
             teile.append(
-                ft.Row(
-                    controls=[
-                        ft.TextButton(
-                            "Notiz zum Tag", icon=ft.Icons.ADD, on_click=tagesnotiz_bearbeiten
-                        )
-                    ]
+                ft.Container(
+                    bgcolor=KARTE,
+                    border_radius=14,
+                    padding=ft.Padding.only(left=12, right=8, top=8, bottom=8),
+                    content=ft.Column(
+                        spacing=4,
+                        tight=True,
+                        controls=[
+                            ft.Text(
+                                "Notiz zum Tag", size=12, weight=ft.FontWeight.W_600, opacity=0.7
+                            ),
+                            notiz.control(),
+                        ],
+                    ),
                 )
             )
         if d.felder:

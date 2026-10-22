@@ -45,6 +45,7 @@ def zurueck_speichert(
     speichern: Speichern,
     danach: Callable[[], Awaitable[None]] | None = None,
     meldung: str = "Gespeichert",
+    vorher: Callable[[], Awaitable[None]] | None = None,
 ) -> ft.View:
     """Zurück (Pfeil oder Systemtaste) speichert, was sich in ``view`` geändert hat.
 
@@ -56,6 +57,8 @@ def zurueck_speichert(
             ``speichern``, das selbst meldet und weitergeht, bekommt hier eine
             Funktion, die nichts tut, und ``meldung=""``.
         meldung: SnackBar nach dem Speichern (leer = keine).
+        vorher: Was vor jedem Zurück läuft, auch ohne Änderung — etwa eine Wiedergabe
+            anhalten, die außerhalb der Seite spielt (Audioaufnahme, `views/anhang.py`).
 
     Returns:
         ``view`` — zum Einwickeln direkt beim ``return``.
@@ -65,6 +68,8 @@ def zurueck_speichert(
         await page.push_route(zurueck_ziel(page, view))
 
     async def bestaetigen(_e: object = None) -> None:
+        if vorher is not None:
+            await vorher()
         if not geaendert():
             await view.confirm_pop(True)
             return

@@ -9,7 +9,14 @@ import pytest
 
 ft = pytest.importorskip("flet")
 
-from trainingsapp.core.anhaenge import BILD, VIDEO, Qualitaet, neuer_anhang  # noqa: E402
+from trainingsapp.core.anhaenge import (  # noqa: E402
+    AUDIO,
+    BILD,
+    VIDEO,
+    Qualitaet,
+    Ziel,
+    neuer_anhang,
+)
 from trainingsapp.core.models import Plan  # noqa: E402
 from trainingsapp.data.seed import seed_id  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
@@ -21,6 +28,11 @@ from trainingsapp.ui.views.tagebuch import tagebuch  # noqa: E402
 from trainingsapp.ui.views.uebung_detail import uebung_detail  # noqa: E402
 
 JPEG = b"\xff\xd8\xff\xe0" + b"0" * 200
+M4A = b"\x00\x00\x00\x1cftypM4A " + b"0" * 800
+
+
+def _ziel(welt) -> Ziel:
+    return Ziel.fuer_eintrag(welt.eintrag.id)
 
 
 @pytest.fixture
@@ -189,7 +201,7 @@ async def test_verwerfen_laesst_die_kamera_an(welt, page) -> None:
     das Ergebnis ersetzte die Kamera im Baum, flet-camera gab dabei den Controller frei.
     Jetzt liegt es über ihr (`Camera.content`), „Verwerfen“ nimmt es nur weg."""
     flet_camera = pytest.importorskip("flet_camera")
-    a = _Aufnahme(page, welt.state, welt.eintrag, BILD)
+    a = _Aufnahme(page, welt.state, _ziel(welt), BILD)
     a.kamera = flet_camera.Camera()
     a.flaeche.content = a.kamera
     a.bereit = True
@@ -224,7 +236,7 @@ class _Kamera:
 
 def _mit_kamera(page, welt, art: str, **kw) -> _Aufnahme:
     page.platform = ft.PagePlatform.ANDROID
-    a = _Aufnahme(page, welt.state, welt.eintrag, art)
+    a = _Aufnahme(page, welt.state, _ziel(welt), art)
     a.kamera = _Kamera(**kw)
     a.kameras = [SimpleNamespace(lens_direction=SimpleNamespace(value="back"))]
     a.bereit = True
@@ -354,7 +366,7 @@ def test_ansicht_foto_und_video(welt, page) -> None:
 
 def test_aufnahmeseite_am_rechner(welt, page) -> None:
     ansicht = anhang_aufnahme_view(
-        page, welt.state, f"/anhang/aufnehmen/{welt.eintrag.id}/foto", welt.eintrag, BILD
+        page, welt.state, f"/anhang/aufnehmen/{welt.eintrag.id}/foto", _ziel(welt), BILD
     )
     assert "Datei wählen" in _knoepfe(ansicht)
     assert any("Nackendehnung" in t or "Foto:" in t for t in _texte(ansicht))
@@ -364,7 +376,7 @@ async def test_behalten_schreibt_zeile_im_loop(welt, page) -> None:
     """Die Bytes gehen in einen Thread, die Zeile nicht: Die SQLite-Verbindung gehört dem
     Event-Loop — ein INSERT aus dem Thread warf am Handy „SQLite objects created in a thread
     can only be used in that same thread“ (21.10.2026)."""
-    a = _Aufnahme(page, welt.state, welt.eintrag, BILD)
+    a = _Aufnahme(page, welt.state, _ziel(welt), BILD)
     a.daten = JPEG
     a.notiz.value = "rechts"
     await a.behalten()
@@ -429,7 +441,7 @@ async def test_hochladen_foto_ohne_ort(welt, page, tmp_path) -> None:
 
     dienst = _Dienst(tmp_path / "cache", "IMG_1.jpg", JPEG_MIT_ORT)
     welt.state.hochladen = dienst
-    h = _Hochladen(page, welt.state, welt.eintrag)
+    h = _Hochladen(page, welt.state, _ziel(welt))
     await h.starten()
     assert h.fertig and not dienst.quelle.exists()  # die Kopie mit Ort ist weg
     assert dienst.aufrufe == [
@@ -460,7 +472,7 @@ async def test_hochladen_video_ohne_ort_und_hoechstens_zehn_minuten(welt, page, 
 
     lang = _Dienst(tmp_path / "cache", "lang.mp4", MP4_MIT_ORT, dauer_ms=11 * 60_000)
     welt.state.hochladen = lang
-    h = _Hochladen(page, welt.state, welt.eintrag)
+    h = _Hochladen(page, welt.state, _ziel(welt))
     await h.starten()
     assert not h.fertig and "höchstens 10:00" in h.status.value
     assert not lang.aufrufe and not lang.quelle.exists()
@@ -468,7 +480,7 @@ async def test_hochladen_video_ohne_ort_und_hoechstens_zehn_minuten(welt, page, 
 
     kurz = _Dienst(tmp_path / "cache", "kurz.mp4", MP4_MIT_ORT, dauer_ms=9_000)
     welt.state.hochladen = kurz
-    h = _Hochladen(page, welt.state, welt.eintrag)
+    h = _Hochladen(page, welt.state, _ziel(welt))
     await h.starten()
     assert h.fertig and kurz.aufrufe[0]["art"] == "video" and kurz.aufrufe[0]["frontbild"]
     assert h.ziel is not None and b"\xa9xyz" not in h.ziel.read_bytes()
@@ -484,7 +496,7 @@ async def test_hochladen_verwerfen_und_ohne_erweiterung(welt, page, tmp_path) ->
     from trainingsapp.ui.views.anhang_hochladen import _Hochladen
 
     welt.state.hochladen = _Dienst(tmp_path / "cache", "IMG_2.jpg", JPEG_MIT_ORT)
-    h = _Hochladen(page, welt.state, welt.eintrag)
+    h = _Hochladen(page, welt.state, _ziel(welt))
     await h.starten()
     ziel = h.ziel
     await h.verwerfen()
@@ -492,7 +504,7 @@ async def test_hochladen_verwerfen_und_ohne_erweiterung(welt, page, tmp_path) ->
     vorher = len(welt.state.anhaenge.je_eintrag(welt.eintrag.id))
 
     welt.state.hochladen = None  # am Rechner: keine Erweiterung
-    h = _Hochladen(page, welt.state, welt.eintrag)
+    h = _Hochladen(page, welt.state, _ziel(welt))
     await h.starten()
     assert "nur in der App am Handy" in h.status.value
     assert len(welt.state.anhaenge.je_eintrag(welt.eintrag.id)) == vorher
@@ -508,3 +520,175 @@ def test_leistungen_zeigen_hochladen_nur_mit_erweiterung(welt, page, tmp_path) -
     klammer = next(c for c in _alle(ansicht) if isinstance(c, ft.PopupMenuButton))
     assert [i.content.value for i in klammer.items][-1] == "Aus der Fotoauswahl"
     assert not _umbrechend_mit_ausdehnung(ansicht)
+
+
+# -- Audioaufnahmen und Anhänge am Tag (Ben, 22.10.2026) ----------------------------------
+
+
+class _Rekorder:
+    """Was die Aufnahmeseite von flet-audio-recorder braucht — schreibt beim Stopp ein „M4A“
+    in die Datei, die die Seite vorgelegt hat."""
+
+    def __init__(self, erlaubt: bool = True, aac: bool = True) -> None:
+        self.erlaubt, self.aac = erlaubt, aac
+        self.pfad: str | None = None
+        self.konfiguration = None
+        self.abgebrochen = False
+        self.aufrufe: list[str] = []
+
+    async def has_permission(self) -> bool:
+        return self.erlaubt
+
+    async def is_supported_encoder(self, _encoder) -> bool:
+        return self.aac
+
+    async def start_recording(self, output_path=None, configuration=None) -> bool:
+        from pathlib import Path
+
+        assert Path(output_path).is_file()  # vorgelegt — sonst nähme Flet den Assets-Ordner
+        self.pfad, self.konfiguration = output_path, configuration
+        return True
+
+    async def pause_recording(self) -> None:
+        self.aufrufe.append("pause")
+
+    async def resume_recording(self) -> None:
+        self.aufrufe.append("weiter")
+
+    async def stop_recording(self) -> str | None:
+        from pathlib import Path
+
+        Path(self.pfad).write_bytes(M4A)
+        return self.pfad
+
+    async def cancel_recording(self) -> None:
+        from pathlib import Path
+
+        self.abgebrochen = True
+        Path(self.pfad).unlink(missing_ok=True)
+
+
+async def test_audio_aufnehmen_anhalten_und_am_tag_behalten(welt, page) -> None:
+    """● nimmt einkanalig mit der Tonrate der Stufe in ``.aufnahme/`` auf, ⏸/▶ hält an und
+    macht weiter, ⏹ legt die Aufnahme zum Anhören bereit, „Behalten“ hängt sie an den Tag."""
+    from trainingsapp.ui.views.anhang_ton import _Ton
+
+    heute = welt.state.heute()
+    t = _Ton(page, welt.state, Ziel.fuer_tag(welt.state.profil.id, heute))
+    t.rekorder = _Rekorder()
+    await t.starten()
+    assert t.laeuft and t.datei is not None and t.datei.parent.name == ".aufnahme"
+    assert t.rekorder.konfiguration.channels == 1
+    assert t.rekorder.konfiguration.bit_rate == Qualitaet.MITTEL.audio_bitrate
+    await t.pause_umschalten()
+    assert t.pausiert and "Angehalten" in t.status.value
+    await t.pause_umschalten()
+    assert t.rekorder.aufrufe == ["pause", "weiter"] and not t.pausiert
+    await t.stoppen()
+    assert t.fertig and t.spieler is not None and _knoepfe(t.knoepfe) == ["Verwerfen", "Behalten"]
+    assert any(isinstance(c, ft.Slider) for c in _alle(t.flaeche))  # Anhören vor dem Behalten
+    t.notiz.value = "nach dem Laufen"
+    await t.behalten()
+    am_tag = welt.state.anhaenge.zum_tag(welt.state.profil.id, heute)
+    assert [(a.art, a.note, a.eintrag_id) for a in am_tag] == [(AUDIO, "nach dem Laufen", None)]
+    assert am_tag[0].pfad.endswith(".m4a") and welt.state.anhaenge.vorhanden(am_tag[0])
+    assert not list(welt.state.anhaenge.aufnahme_ordner().iterdir())
+    assert page.routen == ["/"]
+
+
+async def test_audio_verwerfen_verlassen_und_ohne_berechtigung(welt, page) -> None:
+    """Verwerfen löscht und ist gleich wieder bereit; wer die Seite verlässt, bricht eine
+    laufende Aufnahme ab und lässt keine Datei liegen; ohne Mikrofon kein Start."""
+    from trainingsapp.ui.views.anhang_ton import _Ton
+
+    vorher = len(welt.state.anhaenge.je_eintrag(welt.eintrag.id))
+    t = _Ton(page, welt.state, _ziel(welt))
+    t.rekorder = _Rekorder()
+    await t.starten()
+    await t.stoppen()
+    datei = t.datei
+    await t.verwerfen()
+    assert not t.fertig and datei is not None and not datei.exists()
+    assert _knoepfe(t.knoepfe) == [] and t.zeit.value == "0:00"  # nur das große ●
+    await t.starten()
+    laufend = t.datei
+    await t.zurueck()
+    assert t.rekorder.abgebrochen and laufend is not None and not laufend.exists()
+    assert len(welt.state.anhaenge.je_eintrag(welt.eintrag.id)) == vorher
+
+    ohne = _Ton(page, welt.state, _ziel(welt))
+    ohne.rekorder = _Rekorder(erlaubt=False)
+    await ohne.starten()
+    assert "Mikrofon-Berechtigung" in ohne.status.value and not ohne.laeuft
+    assert ohne.datei is None
+    page.web = True
+    im_browser = _Ton(page, welt.state, _ziel(welt))
+    await im_browser.starten()
+    assert "Browser" in im_browser.status.value
+
+
+async def test_audio_ohne_aac_wird_wav(welt, page) -> None:
+    """Am Rechner kennt der Rekorder manchmal kein AAC — dann WAV, und Aufräumen kennt es."""
+    from trainingsapp.core.anhaenge import verwaiste
+    from trainingsapp.ui.views.anhang_ton import _Ton
+
+    t = _Ton(page, welt.state, _ziel(welt))
+    t.rekorder = _Rekorder(aac=False)
+    await t.starten()
+    assert t.datei is not None and t.datei.suffix == ".wav"
+    await t.stoppen()
+    await t.behalten()
+    neu = [a for a in welt.state.anhaenge.je_eintrag(welt.eintrag.id) if a.ist_audio]
+    assert len(neu) == 1 and neu[0].pfad.endswith(".wav") and neu[0].mime == "audio/wav"
+    repo = welt.state.anhaenge
+    assert verwaiste(repo.dateien(), repo.alle_zeilen()) == []
+
+
+def test_audioseite_und_ansicht(welt, page) -> None:
+    """Die Seite zeigt das große ● und den Tag im Titel; die Ansicht einer Audioaufnahme
+    spielt mit Knopf und Regler und blättert durch die Anhänge desselben Tags."""
+    from trainingsapp.ui.views.anhang_ton import anhang_ton_view
+
+    heute = welt.state.heute()
+    ziel = Ziel.fuer_tag(welt.state.profil.id, heute)
+    seite = anhang_ton_view(page, welt.state, f"/anhang/aufnehmen/tag/{heute}/audio", ziel)
+    assert seite.can_pop is False and seite.on_confirm_pop is not None
+    texte = _texte(seite)
+    assert f"Audio: Zum Tag · {heute:%d.%m.}" in texte
+    assert any(
+        isinstance(c, ft.IconButton) and c.icon == ft.Icons.FIBER_MANUAL_RECORD
+        for c in _alle(seite)
+    )
+
+    ton = neuer_anhang(ziel, AUDIO, Qualitaet.MITTEL, dauer_s=65.0)
+    welt.state.anhaenge.anlegen(ton, M4A)
+    foto = neuer_anhang(ziel, BILD, Qualitaet.MITTEL)
+    welt.state.anhaenge.anlegen(foto, JPEG)
+    ansicht = anhang_view(page, welt.state, "/", ton)
+    texte = _texte(ansicht)
+    assert f"Zum Tag · {heute:%d.%m.}" in texte and any("1:05" in t for t in texte)
+    assert any(isinstance(c, ft.Slider) for c in _alle(ansicht))
+    assert not any(isinstance(c, ft.InteractiveViewer) for c in _alle(ansicht))
+    assert [a.id for a in reihe_fuer(welt.state, "/", ton)] == [ton.id, foto.id]
+
+
+def test_audio_in_leistungen_tagebuch_und_einstellungen(welt, page) -> None:
+    """Der Knopf „Audio“ und „Audio aufnehmen“ an der Büroklammer; im Tagebuch eine Karte
+    „Aufnahmen · Zum Tag“; die Kachel einer Audioaufnahme zeigt Klangsymbol und Dauer."""
+    route = f"/tag/{welt.state.heute()}/leistungen/{welt.uebung.id}"
+    ansicht = leistungen_view(page, welt.state, route, welt.uebung)
+    assert {"Foto", "Video", "Audio"} <= set(_knoepfe(ansicht))
+    klammer = next(c for c in _alle(ansicht) if isinstance(c, ft.PopupMenuButton))
+    assert "Audio aufnehmen" in [i.content.value for i in klammer.items]
+
+    heute = welt.state.heute()
+    ton = neuer_anhang(Ziel.fuer_tag(welt.state.profil.id, heute), AUDIO, Qualitaet.MITTEL)
+    ton.dauer_s = 12.0
+    welt.state.anhaenge.anlegen(ton, M4A)
+    kontrolle = tagebuch(page, welt.state)
+    texte = _texte(kontrolle)
+    assert "Aufnahmen · Zum Tag" in texte and "1 Audioaufnahme" in " ".join(texte)
+    assert any(isinstance(c, ft.Icon) and c.icon == ft.Icons.GRAPHIC_EQ for c in _alle(kontrolle))
+    assert any("0:12" in t for t in texte)
+    einstellungen = _texte(einstellungen_anhaenge(page, welt.state))
+    assert any("1 Foto, 1 Video, 1 Audioaufnahme" in t for t in einstellungen)

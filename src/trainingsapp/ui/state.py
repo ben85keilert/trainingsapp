@@ -13,7 +13,7 @@ from __future__ import annotations
 import contextlib
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -317,6 +317,13 @@ class AppState:
     #: Fortschritt des Verkleinerns gerade sehen will (die Seite „Hochladen“)
     hochladen: Any = None
     hochladen_beobachter: Callable[[float], None] | None = None
+    #: Was gleich gespeichert werden muss, bevor die App in den Hintergrund geht oder die
+    #: Ansichten neu entstehen (Zurück, Reiterwechsel) — etwa die Notiz zum Tag, solange
+    #: man sie schreibt (`components/tagesnotiz.py`, Ben 22.10.2026: „Zurück macht Autosave“)
+    vor_dem_verlassen: dict[str, Callable[[], None]] = field(default_factory=dict)
+    #: Zurück auf „Heute“, während man dort schreibt: Schreiben beenden (gespeichert ist
+    #: schon) statt nichts zu tun — setzt `components/tagesnotiz.py`
+    schreiben_beenden: Callable[[], Awaitable[None]] | None = None
     #: GPS: Ortungsquelle (`devices.gps.GpsQuelle` — auf Android `FletGpsQuelle`,
     #: in `app.py` angelegt; sonst beim ersten Bedarf ein Simulator) und der
     #: laufende Vorabtest (`ui.views.gps_test.GpsTestLauf`) mit seinen Vorgaben

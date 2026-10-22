@@ -27,7 +27,7 @@ from collections.abc import Callable
 import flet as ft
 
 from trainingsapp.config import app_version, edition, ist_aktiv
-from trainingsapp.core.anhaenge import anzahl_text, groesse_text
+from trainingsapp.core.anhaenge import groesse_text
 from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.core.sicherung import Sicherung
 from trainingsapp.ui.components.hilfe import hilfe_oeffner
@@ -173,8 +173,8 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
     tag_text = f"{len(state.tags.namen('typ'))} Typen · {len(state.tags.namen('region'))} Regionen"
     pakete = len(state.pakete.alle())
     paket_text = "1 Paket installiert" if pakete == 1 else f"{pakete} Pakete installiert"
-    bilder, videos, groesse = state.anhaenge.gesamt(state.profil.id)
-    anhang_text = f"{anzahl_text(bilder, videos)} · {groesse_text(groesse)}"
+    umfang = state.anhaenge.gesamt(state.profil.id)
+    anhang_text = f"{umfang.text} · {groesse_text(umfang.bytes)}"
     felder = state.tagesfelder.alle(state.profil.id)
     aktiv = sum(1 for f in felder if f.aktiv)
     felder_text = f"{aktiv} aktiv" + (

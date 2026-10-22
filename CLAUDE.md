@@ -108,7 +108,9 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Teilen, Diagnose — keine Koordinaten. Strecken liegen getrennt von
   `Messungen/` (`config.streckenverzeichnis()`). Einzige Ausnahme: der
   GPX-Export, den die Person selbst auslöst (`docs/plan_gps.md`, Abschnitt 0).
-  Dasselbe gilt für **Anhänge** (Ben, 19.10.2026): Fotos und Videos an Einträgen liegen
+  Dasselbe gilt für **Anhänge** (Ben, 19.10.2026): Fotos und Videos an Einträgen — seit
+  22.10.2026 auch Audioaufnahmen (`.m4a`, flet-audio-recorder, abgespielt mit flet-audio) und
+  Anhänge am Tag (Notiz zum Tag: `core.anhaenge.Ziel`, Migration 029) — liegen
   unter `Anhaenge/<JJJJ>/<MM>/` (`config.anhaengeverzeichnis()`, Tabelle `entry_media`,
   `core/anhaenge.py`), kommen aus der Kamera der App (flet-camera, drei Qualitäten) oder aus
   der Fotoauswahl (`erweiterungen/flet_hochladen`: keine Berechtigung, verkleinert, **ohne
@@ -209,7 +211,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
 - **Zurück speichert** (Ben, 16.10.2026): Formulare mit „Speichern“ hängen an
   `ui/components/zurueck.zurueck_speichert` (`can_pop`/`on_confirm_pop`) — Zurück speichert
   Geändertes, Unvollständiges fragt, „Abbrechen“ verwirft; Blätter und Notizdialoge speichern
-  beim Schließen. Neue Formulare ebenso. **Dialoge exakt schließen:** `page.pop_dialog()`
+  beim Schließen. Neue Formulare ebenso. Die **Notiz zum Tag** schreibt man direkt unter
+  Heute (Ben, 22.10.2026): Autosave nach 1 s, vor jedem Neuaufbau und vor dem Hintergrund
+  (`AppState.vor_dem_verlassen`), ↶ ↷ aus `core/textverlauf.py`, „Abbrechen“ = Text vom
+  Antippen (`components/tagesnotiz.py`) — das Speichern frischt die Ansicht nie auf (Fokus). **Dialoge exakt schließen:** `page.pop_dialog()`
   trifft den obersten Eintrag — auch eine SnackBar —, darum `components/dialoge.schliessen`
   und keine SnackBar, solange ein Dialog offen ist (`Nachher`, `reste_dialog`).
   **Meldungen gehen nach 5 s** (Ben, 22.10.2026), auch mit „Rückgängig“ — zentral in

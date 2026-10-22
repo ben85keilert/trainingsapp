@@ -739,6 +739,30 @@ wheels = [
 ]
 
 [[package]]
+name = "flet-audio"
+version = "1.0.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "flet" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/65/fd/4f7b8dda12fb88ffe0560bc2f126596e8ffd612a4491d60225b3d0d55737/flet_audio-1.0.3.tar.gz", hash = "sha256:2b7fcf46f13f8b810aca7e5cfe1a3b404d407324b97c75826056345aafbf8f50", size = 11721, upload-time = "2026-09-30T02:13:53.481Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c0/3a/db7a85f52166c123284f31c357f19e1a5238c504da3e68f3c0a3a192deb8/flet_audio-1.0.3-py3-none-any.whl", hash = "sha256:0343a87aa823b125eb85569722f432887dc7e74bda35c5bfd00fa9a72f6ef741", size = 13495, upload-time = "2026-09-30T02:13:52.625Z" },
+]
+
+[[package]]
+name = "flet-audio-recorder"
+version = "1.0.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "flet" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/9f/867cb48fafea0a8e8ab6f722e47a9f14b48cd08f9ff17fdedd90d1507ea2/flet_audio_recorder-1.0.3.tar.gz", hash = "sha256:34a455e92193b9da416cae719aa87dc67adb2c5143c6b3ff3f78515fe47bb8e5", size = 18497, upload-time = "2026-09-30T02:13:56.148Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/7f/584ad1da4e1b155321aac283cde2c75ca7ae2c93f839ae1478ea25d51146/flet_audio_recorder-1.0.3-py3-none-any.whl", hash = "sha256:b1f2938c38079cc403f98ac4b24bb9c1196dbd7e0ecab0bcc8115cf901c6672b", size = 19713, upload-time = "2026-09-30T02:13:55.072Z" },
+]
+
+[[package]]
 name = "flet-ble"
 version = "0.1.0"
 source = { editable = "erweiterungen/flet_ble" }
@@ -2418,6 +2442,8 @@ version = "0.3.14"
 source = { editable = "." }
 dependencies = [
     { name = "flet" },
+    { name = "flet-audio" },
+    { name = "flet-audio-recorder" },
     { name = "flet-ble" },
     { name = "flet-camera" },
     { name = "flet-charts" },
@@ -2461,6 +2487,8 @@ flet-dev = [
 requires-dist = [
     { name = "bleak", marker = "extra == 'desktop'", specifier = ">=0.22" },
     { name = "flet", specifier = "==1.0.*" },
+    { name = "flet-audio", specifier = "==1.0.*" },
+    { name = "flet-audio-recorder", specifier = "==1.0.*" },
     { name = "flet-ble", editable = "erweiterungen/flet_ble" },
     { name = "flet-camera", specifier = "==1.0.*" },
     { name = "flet-charts", specifier = "==1.0.*" },

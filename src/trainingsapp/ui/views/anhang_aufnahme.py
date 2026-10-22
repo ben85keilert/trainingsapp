@@ -1,6 +1,7 @@
 """Foto oder Video an einen Eintrag hängen — Route
-``<basis>/anhang/aufnehmen/<eintrag>/<foto|video>`` (Ben, 19.10.2026; `docs/plan_anhaenge.md`,
-Teil B).
+``<basis>/anhang/aufnehmen/<ziel>/<foto|video>`` (Ben, 19.10.2026; `docs/plan_anhaenge.md`,
+Teil B). ``<ziel>`` ist die ID des Eintrags oder, seit 22.10.2026, ``tag/<datum>`` für die
+Notiz zum Tag (`core.anhaenge.Ziel`); ``…/audio`` führt zum Rekorder (`views/anhang_ton.py`).
 
 Die Kamera läuft **in der App** (`flet-camera`): So sind die drei Qualitätsstufen
 (`core.anhaenge.Qualitaet`) beim Aufnehmen steuerbar, nichts landet in der Galerie des
@@ -40,10 +41,12 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.anhaenge import (
+    AUDIO,
     BILD,
     VIDEO,
     Anhang,
     Qualitaet,
+    Ziel,
     blitz_text,
     blitz_weiter,
     countdown_text,
@@ -53,7 +56,7 @@ from trainingsapp.core.anhaenge import (
     timer_text,
     timer_weiter,
 )
-from trainingsapp.core.models import SessionEntry, jetzt
+from trainingsapp.core.models import jetzt
 from trainingsapp.core.timer import COUNTDOWN
 from trainingsapp.data.anhaenge import qualitaet_lesen, video_max_s
 from trainingsapp.ui.components.layout import sicher
@@ -63,19 +66,37 @@ from trainingsapp.ui.timer_takt import ton_spielen
 
 #: Routenteile
 ANHANG, AUFNEHMEN = "anhang", "aufnehmen"
-ARTEN = {"foto": BILD, "video": VIDEO}
+ARTEN = {"foto": BILD, "video": VIDEO, "audio": AUDIO}
+WORT = {art: wort for wort, art in ARTEN.items()}
 #: Takt des Selbstauslösers (s) — eine Zahl, ein Ton
 COUNTDOWN_TAKT_S = 1.0
 
 
-def aufnahme_route(basis: str, eintrag_id: str, art: str) -> str:
-    """``<basis>/anhang/aufnehmen/<eintrag>/<foto|video>`` — ``basis`` ``""`` oder ``/`` = Heute.
+def aufnahme_route(basis: str, ziel: Ziel | str, art: str) -> str:
+    """``<basis>/anhang/aufnehmen/<ziel>/<foto|video|audio>`` — ``basis`` ``""`` oder ``/`` =
+    Heute; ``ziel`` eine Eintrags-ID oder ein `Ziel` (auch der Tag).
 
     >>> aufnahme_route("/", "e1", BILD), aufnahme_route("/tag/2026-10-20", "e1", VIDEO)
     ('/anhang/aufnehmen/e1/foto', '/tag/2026-10-20/anhang/aufnehmen/e1/video')
+    >>> from datetime import date
+    >>> aufnahme_route("/", Ziel.fuer_tag("p", date(2026, 10, 22)), AUDIO)
+    '/anhang/aufnehmen/tag/2026-10-22/audio'
     """
-    wort = "video" if art == VIDEO else "foto"
-    return f"{basis.rstrip('/')}/{ANHANG}/{AUFNEHMEN}/{eintrag_id}/{wort}"
+    teil = ziel.teil if isinstance(ziel, Ziel) else ziel
+    return f"{basis.rstrip('/')}/{ANHANG}/{AUFNEHMEN}/{teil}/{WORT.get(art, 'foto')}"
+
+
+def ziel_name(state: AppState, ziel: Ziel) -> str:
+    """Wofür aufgenommen wird — der Name der Übung des Eintrags, beim Tag „Zum Tag · 22.10.“."""
+    if ziel.zum_tag is not None:
+        return f"Zum Tag · {ziel.zum_tag:%d.%m.}"
+    eintrag = state.sitzungen.eintrag_laden(ziel.eintrag_id) if ziel.eintrag_id else None
+    uebung = (
+        state.uebungen.laden(eintrag.exercise_id, mit_geloeschten=True)
+        if eintrag is not None
+        else None
+    )
+    return uebung.name if uebung is not None else "Übung"
 
 
 def _kamera_moeglich(page: Any) -> bool:
@@ -90,8 +111,8 @@ def _kamera_moeglich(page: Any) -> bool:
 class _Aufnahme:
     """Zustand der Seite: Kamera, laufende Aufnahme, Ergebnis."""
 
-    def __init__(self, page: Any, state: AppState, eintrag: SessionEntry, art: str) -> None:
-        self.page, self.state, self.eintrag, self.art = page, state, eintrag, art
+    def __init__(self, page: Any, state: AppState, ziel: Ziel, art: str) -> None:
+        self.page, self.state, self.ziel, self.art = page, state, ziel, art
         self.qualitaet: Qualitaet = qualitaet_lesen(state.einstellungen)
         self.max_s: int = video_max_s(state.einstellungen)
         self.kamera: Any = None  # flet_camera.Camera
@@ -451,7 +472,7 @@ class _Aufnahme:
         if self.daten is None:
             return
         a: Anhang = neuer_anhang(
-            self.eintrag.id,
+            self.ziel,
             self.art,
             self.qualitaet,
             jetzt(),
@@ -644,13 +665,10 @@ def _schalter(
     )
 
 
-def anhang_aufnahme_view(
-    page: Any, state: AppState, route: str, eintrag: SessionEntry, art: str
-) -> ft.View:
-    """Die Seite. ``art``: `BILD` oder `VIDEO`."""
-    uebung = state.uebungen.laden(eintrag.exercise_id, mit_geloeschten=True)
-    a = _Aufnahme(page, state, eintrag, art)
-    titel = ("Foto: " if art == BILD else "Video: ") + (uebung.name if uebung else "Übung")
+def anhang_aufnahme_view(page: Any, state: AppState, route: str, ziel: Ziel, art: str) -> ft.View:
+    """Die Seite. ``art``: `BILD` oder `VIDEO`; ``ziel``: woran die Aufnahme hängt."""
+    a = _Aufnahme(page, state, ziel, art)
+    titel = ("Foto: " if art == BILD else "Video: ") + ziel_name(state, ziel)
     hinweis = (
         f"Höchstens {dauer_text(a.max_s)} min · Vorgabe der Qualität: Einstellungen → Anhänge"
         if art == VIDEO
@@ -725,4 +743,12 @@ def anhang_aufnahme_view(
     return ansicht
 
 
-__all__ = ["ANHANG", "ARTEN", "AUFNEHMEN", "anhang_aufnahme_view", "aufnahme_route"]
+__all__ = [
+    "ANHANG",
+    "ARTEN",
+    "AUFNEHMEN",
+    "WORT",
+    "anhang_aufnahme_view",
+    "aufnahme_route",
+    "ziel_name",
+]

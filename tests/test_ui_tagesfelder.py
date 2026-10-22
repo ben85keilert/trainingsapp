@@ -121,11 +121,14 @@ def test_zum_tag_steht_unter_gemacht_am_ende(page, state) -> None:
     f = _felder(state)
     state.tagesnotizen.setzen(state.profil.id, state.heute(), "Schulter fest")
     state.tageswerte.hinzufuegen(f["ibu"], state.heute(), _um(state, 0, 1), wert=1, variante="400")
-    texte = _texte(tagesansicht(page, state, state.heute(), mit_datum=False))
+    ansicht = tagesansicht(page, state, state.heute(), mit_datum=False)
+    texte = _texte(ansicht)
     gemacht = next(i for i, t in enumerate(texte) if t.startswith("GEMACHT"))
     zum_tag = texte.index("Zum Tag")
     assert zum_tag > gemacht
-    assert "Schulter fest" in texte[zum_tag:]
+    # Die Notiz steht direkt zum Schreiben im Block (Ben, 22.10.2026: kein Dialog mehr)
+    felder = [x for x in _alle(ansicht) if isinstance(x, ft.TextField)]
+    assert [x.value for x in felder] == ["Schulter fest"]
     assert texte.index("Ibu") > zum_tag and "400 × 1" in texte
     assert texte.index("Ernährung") > zum_tag
     assert any(t.endswith("1 Tageswert") for t in texte)  # Kopfzeile

@@ -28,4 +28,4 @@ permissions = [
 [ios]
 bluetooth_usage = "Zum Verbinden mit deinem Herzfrequenzsensor während des Trainings."
 camera_usage = "Fotos und Videos deiner Übungsausführung aufnehmen — sie bleiben auf diesem Gerät."
-microphone_usage = "Ton für Videos deiner Übungsausführung — sie bleiben auf diesem Gerät."
+microphone_usage = "Ton für Videos und Audioaufnahmen zu deinen Übungen und deinem Tag — sie bleiben auf diesem Gerät."

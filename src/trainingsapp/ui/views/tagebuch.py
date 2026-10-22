@@ -104,12 +104,11 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
     profil = state.profil.id
     #: Scrollposition je Darstellung — „Übungen“ beginnt nicht da, wo „Tage“ stand
     merk = f"tagebuch-{state.tagebuch_ordnung}"
-    # Fotos und Videos (Ben, 19.10.2026): je Eintrag mit Anhängen ein Block „Aufnahmen“ —
-    # nur Frontbilder, kein Video läuft im Tagebuch
+    # Fotos, Videos und Audioaufnahmen (Ben, 19.10.2026; Audio und Anhänge am Tag seit
+    # 22.10.2026): je Eintrag mit Anhängen ein Block „Aufnahmen“, ebenso je Tag für die an der
+    # Notiz zum Tag — nur Kacheln, nichts läuft im Tagebuch
     aufnahmen = state.anhaenge.alle(profil, mit_geloeschten=False)
-    je_eintrag: dict[str, list] = {}
-    for x in aufnahmen:
-        je_eintrag.setdefault(x.anhang.eintrag_id, []).append(x.anhang)
+    nach_id = {x.anhang.id: x.anhang for x in aufnahmen}
     tagesfelder = {f.id: f for f in state.tagesfelder.alle(profil, mit_geloeschten=True)}
     alle = sammeln(
         state.tagesnotizen.alle(profil),
@@ -148,6 +147,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
     def titel(n: Notiz) -> str:
         if n.art == TAG:
             return "Zum Tag"
+        if n.art == AUFNAHME and not n.exercise_id:
+            return "Aufnahmen · Zum Tag"
         if n.art == TAGESFELD:
             return n.titel
         if n.art == PLAN:
@@ -193,6 +194,9 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                 uebung = state.uebungen.laden(n.exercise_id, mit_geloeschten=True)
                 if uebung is not None:
                     page.show_dialog(leistungen_blatt(page, state, uebung, n.tag, danach=neu))
+            elif n.art == AUFNAHME:
+                # Anhänge am Tag: der Tag, dort stehen sie an der Notiz zum Tag
+                page.run_task(page.push_route, f"/tag/{n.tag.isoformat()}")
 
         return handler
 
@@ -297,7 +301,9 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             )
         if n.art == AUFNAHME:
             reihe = anhang_reihe(
-                je_eintrag.get(n.bezug_id or "", []), state.anhaenge.bild, anhang_oeffner
+                [nach_id[i] for i in n.anhang_ids if i in nach_id],
+                state.anhaenge.bild,
+                anhang_oeffner,
             )
             inhalt = reihe if reihe is not None else inhalt
             if not mit_datum:

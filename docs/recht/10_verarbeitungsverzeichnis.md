@@ -49,6 +49,15 @@ die Person selbst auslöst. Löschung jederzeit durch die Person, endgültig (Ei
 Anhänge). Eine Übertragung an die Praxis gibt es nicht; käme sie, braucht sie eine eigene
 Einwilligung (`20_einwilligung.md`).
 
+**Audioaufnahmen und Anhänge am Tag** (gebaut 22.10.2026, `docs/plan_anhaenge.md`,
+Abschnitt H): Sprachaufnahmen, die die Person mit dem Mikrofon der App an einen
+Trainingseintrag oder an die Notiz zum Tag hängt (AAC, einkanalig, höchstens 30 Minuten);
+ebenso Fotos und Videos zur Notiz zum Tag. Gesundheitsbezug möglich (die Person spricht
+über Beschwerden, Befinden). Zweck, Speicherort, Löschung und Weitergabe wie bei den
+Medien oben: nur Dokumentation für die Person selbst, app-privat, kein Export, keine
+Synchronisation, hinaus nur über „Teilen“ am einzelnen Anhang. Keine Spracherkennung,
+keine Auswertung der Aufnahme durch die App.
+
 **Tagesfelder** (gebaut 21.10.2026, `docs/plan_tagesfelder.md`): Werte, die die Person
 selbst je Tag festhält — frei benannt, etwa Schmerz 0–10, Einnahmen eines Medikaments je
 Dosis, Trinkmenge, Texte zur Ernährung. Zweck ausschließlich Dokumentation für die Person

@@ -3,8 +3,9 @@
 Stand 19.10.2026: Vorschlag (Ben: „Plane das erst vor der Freigabe.“). **20.10.2026: Teile
 A–E gebaut** (Ben: „Kümmere dich um die Medienablage der Übungen und im Tagebuch“) — die
 Entscheidungen G1–G5 wie vorgeschlagen, G6 (Skizzen) entfiel. Was vom Bau abweicht, steht
-kursiv in den Abschnitten; Gerätetests T62–T67 in `docs/offene_fragen.md`. Noch nicht
-gebaut: F (Galerie-Import), Anhänge an Messungen und Notizen, Praxis-Sync.
+kursiv in den Abschnitten; Gerätetests T62–T67 in `docs/offene_fragen.md`. F (Hochladen)
+kam am 21.10.2026 dazu, **H (Audio und Anhänge am Tag) am 22.10.2026** (Gerätetest T75).
+Noch nicht gebaut: Anhänge an Messungen, Praxis-Sync.
 Katalog P44 (Knöpfe, Ablage), P45 (e) (Tagebuch), K-F6/Abschnitt 4 (Medien an Übungen
 aus Paketen — **bleibt vertagt**, dieser Plan betrifft nur eigene Aufnahmen),
 Sicherheitsdurchsicht S4 (Backup) und S1 (Links). Bens Auftrag vom 19.10.:
@@ -260,6 +261,45 @@ Nutzerrechten, hier nicht zu aggressiv sein.“ Videos höchstens zehn Minuten. 
   mit Kotlin 2.2.20 gegen android.jar 36, das Flutter-Embedding und Transcoder 0.10.5. Der
   erste APK-Build mit der Erweiterung ist zugleich ihr erster Gradle-Build (T71).
 
+## H. Audio und Anhänge am Tag (gebaut 22.10.2026)
+
+Ben, 22.10.2026, zur Notiz zum Tag unter Heute: „Auch eine Audioaufnahme soll möglich sein +
+Photo + Video. Erweitere die Medien um Audio.“ Zugleich wurde die Notiz selbst direkt
+beschreibbar (`ui/components/tagesnotiz.py`, Autosave, ↶ ↷ aus `core/textverlauf.py`).
+
+- **Audio ist die dritte Art** (`core.anhaenge.AUDIO`, Endung ``.m4a``, kein Frontbild): AAC,
+  einkanalig, 44,1 kHz, Tonrate der Qualitätsstufe (`Qualitaet.audio_bitrate`: 48 · 64 ·
+  96 kbit/s ≈ 0,4 · 0,5 · 0,7 MB je Minute). Höchstens `AUDIO_MAX_S` = 30 min — der Rekorder
+  schreibt gleich in die Datei, die Grenze fängt nur ein vergessenes Stopp ab. Am Rechner,
+  wo der Rekorder kein AAC kennt, wird es WAV (`neuer_anhang(…, endung="wav")`).
+- **Aufnehmen** auf eigener Seite ``…/anhang/aufnehmen/<ziel>/audio``
+  (`ui/views/anhang_ton.py`, flet-audio-recorder um das Flutter-Plugin `record`): ● · ⏸/▶ ·
+  ⏹, die Zeit groß, danach Anhören, Notiz, „Behalten“/„Verwerfen“. Die Datei entsteht unter
+  ``Anhaenge/.aufnahme/`` und wird **vor** dem Start leer angelegt — Flet reicht dem Plugin nur
+  einen vorhandenen Pfad unverändert durch (`getAssetSrc` legte einen neuen in den Ordner
+  der App-Assets). „Behalten“ verschiebt sie an ihren Platz (`AnhangRepo.dateien_uebernehmen`).
+  Der Rekorder ist ein Dienst außerhalb der Seite: Pfeil und Systemtaste brechen eine
+  laufende Aufnahme ab und löschen die Datei. Bluetooth-Kopfhörer bleiben außen vor
+  (`manage_bluetooth=False`), aufgenommen wird mit dem Mikrofon des Telefons.
+- **Abspielen** nur in der Ansicht ``…/anhang/<id>`` und vor dem Behalten
+  (`ui/components/tonspieler.py`, flet-audio um `audioplayers`): ▶/⏸, Regler, Zeit. Der Spieler
+  bekommt den Pfad; beim Verlassen — auch über die Systemtaste
+  (`zurueck_speichert(vorher=…)`) — hält er an. Die Kachel zeigt ein Klangsymbol und die Dauer.
+- **Anhänge am Tag:** Ein Anhang hängt an einem Eintrag **oder** am Tag eines Profils
+  (`core.anhaenge.Ziel`; Migration 029 baut `entry_media` neu: `kind` mit 'audio',
+  `session_entry_id` darf leer sein, dafür `subject_id` + `day`, genau eins von beiden). Die
+  Wege tragen das Ziel als ``tag/<datum>`` statt der Eintrags-ID (Aufnehmen, Hochladen; ein Tag
+  in der Zukunft gilt nicht). Unter der Notiz zum Tag stehen Foto · Video · Audio
+  (· Fotoauswahl) und die Kacheln; in der Ansicht blättern die Pfeile durch die Anhänge
+  desselben Tags. Abfragen nach Übungen (`je_eintraegen`, `je_uebung`, `je_tag`) sehen sie
+  nicht; Speicherübersicht, Summe, Tagebuch und Aufräumen schon. Im Tagebuch: je Tag eine
+  Karte „Aufnahmen · Zum Tag“ (Tipp → der Tag), nach Übungen geordnet bei den Notizen zum Tag.
+  Die Anhänge gehören zum Tag, nicht zum Text: Leert man die Notiz, bleiben sie.
+- **Leistungen:** Foto · Video · Audio (· Hochladen) — am Handy zu zweit in zwei Zeilen, auf
+  breitem Bildschirm in einer; an der Büroklammer „Audio aufnehmen“.
+- **Regeln wie bisher:** app-privat, ohne Ort, nie in Export, Diagnose oder Sync; hinaus nur
+  über „Teilen“ (MIME ``audio/mp4``). Keine Bewertung, keine Spracherkennung.
+
 ## G. Zu entscheiden (Ben)
 
 1. **Kamera in der App** (flet-camera, Qualität steuerbar, nichts in der Galerie, zwei
@@ -282,6 +322,10 @@ Nutzerrechten, hier nicht zu aggressiv sein.“ Videos höchstens zehn Minuten. 
 - Reihenfolge der Builds: S4 (Backup aus) **vor** oder **mit** dem Kamera-Build.
 - Hochladen (F): keine neue Berechtigung (`80_store_freigaben.md`); neue Erweiterung mit
   Android-Teil — `flet build` holt Transcoder (Maven Central) beim ersten Build.
+- Audio (H): keine neue Berechtigung — `RECORD_AUDIO` gab es für den Ton der Videos schon, sie
+  dient jetzt auch Audioaufnahmen (`80_store_freigaben.md`, iOS-Text in `pyproject.toml` und
+  `build/*.toml`); neue Datenart „Audioaufnahme“ in `10_verarbeitungsverzeichnis.md`. Zwei neue
+  Flutter-Plugins (`record`, `audioplayers`) — der nächste APK-Build ist ihr erster.
 - Tests: Doctests `core/anhaenge` (Namen, Stufen, Gruppen, Aufräumvorschlag);
   `tests/test_anhaenge.py` für Repo (anlegen atomar, löschen entfernt Datei und Frontbild,
   verwaiste/fehlende); Importregel bleibt (core/data flet-frei); Gerätetests T61–T66:

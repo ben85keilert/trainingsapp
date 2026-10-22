@@ -15,6 +15,8 @@ Zeigen `ui/views/tagebuch.py`. **Aufnahmen** (Fotos und Videos an Einträgen, Be
 19.10.2026, `core/anhaenge.py`) sind eine vierte Art: je Eintrag mit Anhängen eine
 Notiz der Art `AUFNAHME`, deren Text die Anzahl nennt — die Ansicht zeigt dafür die
 Frontbilder, nie ein laufendes Video. Nach Übungen geordnet stehen sie unter der Übung.
+Seit 22.10.2026 auch Audioaufnahmen, und Anhänge am Tag selbst (Notiz zum Tag): je Tag eine
+`AUFNAHME` ohne Übung, nach Übungen geordnet bei den Notizen zum Tag.
 
 **Tagesfelder** (Ben, 21.10.2026, `core/tagesfelder.py`, Skizze C4): An der Notiz zum Tag
 steht die Zeile mit den Werten des Tags (`Notiz.werte` — „Schmerz Knie 3 · Ibu 400 × 2“);
@@ -29,7 +31,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
-from .anhaenge import AnhangMitBezug, anzahl_text, zusammenfassung
+from .anhaenge import AnhangMitBezug, zusammenfassung
 from .models import Session, SessionEntry, lokaler_tag
 from .tagesfelder import TEXT as NUR_TEXT
 from .tagesfelder import Tagesfeld, Tageswert, eintrag_text, tageszeile
@@ -60,6 +62,9 @@ class Notiz:
     #: Tagesfeld: welches, und wie die Notiz heißt („Ibu 400“, „Ernährung“)
     feld_id: str | None = None
     titel: str = ""
+    #: `AUFNAHME`: die Anhänge, die älteste zuerst — an einem Eintrag oder am Tag (dann ohne
+    #: Übung, Ben 22.10.2026)
+    anhang_ids: tuple[str, ...] = ()
 
     def sortierzeit(self) -> float:
         return self.zeit.timestamp() if self.zeit is not None else 0.0
@@ -115,6 +120,13 @@ def sammeln(
     >>> b = AnhangMitBezug(Anhang("e1", "video", aufgenommen=e.started_at), "kb", e.started_at)
     >>> [(x.art, x.text, x.bezug_id, x.exercise_id) for x in sammeln([], [], [], [a, b])]
     [('aufnahme', '1 Foto, 1 Video', 'e1', 'kb')]
+
+    Anhänge am Tag (Notiz zum Tag) sind je Tag eine Aufnahme ohne Übung:
+
+    >>> c = AnhangMitBezug(Anhang(None, "audio", id="c", aufgenommen=e.started_at,
+    ...                           profil_id="p1", zum_tag=date(2026, 10, 17)), None, None)
+    >>> [(x.art, x.text, x.exercise_id, x.anhang_ids) for x in sammeln([], [], [], [c])]
+    [('aufnahme', '1 Audioaufnahme', None, ('c',))]
     >>> from . import tagesfelder as tf
     >>> ibu = tf.Tagesfeld(id="ibu", name="Ibu", spec=tf.spec_bauen(tf.ANZAHL, varianten=["400"]))
     >>> ess = tf.Tagesfeld(id="ess", name="Ernährung", spec=tf.spec_bauen(tf.TEXT))
@@ -151,25 +163,46 @@ def sammeln(
                     variante_von(e.result),
                 )
             )
+    # Je Eintrag eine Notiz `AUFNAHME` — die Anhänge am Tag (Notiz zum Tag) je Tag eine
     je_eintrag: dict[str, list[AnhangMitBezug]] = {}
+    je_tag: dict[date, list[AnhangMitBezug]] = {}
     for x in aufnahmen:
-        je_eintrag.setdefault(x.anhang.eintrag_id, []).append(x)
+        if x.anhang.zum_tag is not None:
+            je_tag.setdefault(x.anhang.zum_tag, []).append(x)
+        elif x.anhang.eintrag_id is not None:
+            je_eintrag.setdefault(x.anhang.eintrag_id, []).append(x)
     for eintrag_id, liste in je_eintrag.items():
         erste = min(liste, key=lambda x: x.anhang.aufgenommen)
         zeit = erste.eintrag_zeit or erste.anhang.aufgenommen
-        bilder, videos, _ = zusammenfassung(x.anhang for x in liste)
         ergebnis.append(
             Notiz(
                 lokaler_tag(zeit),
                 AUFNAHME,
-                anzahl_text(bilder, videos),
+                zusammenfassung(x.anhang for x in liste).text,
                 zeit,
                 erste.exercise_id,
                 None,
                 eintrag_id,
+                anhang_ids=_reihenfolge(liste),
+            )
+        )
+    for tag, liste in je_tag.items():
+        erste = min(liste, key=lambda x: x.anhang.aufgenommen)
+        ergebnis.append(
+            Notiz(
+                tag,
+                AUFNAHME,
+                zusammenfassung(x.anhang for x in liste).text,
+                erste.anhang.aufgenommen,
+                anhang_ids=_reihenfolge(liste),
             )
         )
     return ergebnis
+
+
+def _reihenfolge(liste: list[AnhangMitBezug]) -> tuple[str, ...]:
+    """Die IDs der Anhänge, die älteste zuerst."""
+    return tuple(x.anhang.id for x in sorted(liste, key=lambda x: x.anhang.aufgenommen))
 
 
 def _mit_tageswerten(
@@ -259,8 +292,9 @@ def nach_uebungen(notizen: Iterable[Notiz]) -> list[Gruppe]:
     for x in notizen:
         if x.art == TAG and not x.text:
             continue  # nur Werte — die stehen nach Tagen, nicht als Notiz zum Tag
-        # Aufnahmen stehen unter ihrer Übung, zwischen deren Notizen
-        art = UEBUNG if x.art == AUFNAHME else x.art
+        # Aufnahmen stehen unter ihrer Übung, zwischen deren Notizen — die am Tag bei den
+        # Notizen zum Tag
+        art = (UEBUNG if x.exercise_id else TAG) if x.art == AUFNAHME else x.art
         schluessel = {UEBUNG: x.exercise_id, PLAN: x.plan_id, TAGESFELD: x.feld_id}.get(art)
         gruppen.setdefault((art, schluessel), []).append(x)
 

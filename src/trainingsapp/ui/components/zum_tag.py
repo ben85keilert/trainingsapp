@@ -2,10 +2,11 @@
 21.10.2026, Skizze A1: „A1 ist gut, aber der Block ‚Zum Tag‘ muss runter unter gemacht
 ans Ende“).
 
-Je aktivem Tagesfeld ein Knopf mit dem Stand des Tags; ein Tipp öffnet sein Blatt
-(`components/tagesfeld_blatt.py`). Hat das Feld Schnellknöpfe, trägt der kleine Knopf
-daneben den ersten sofort ein — danach „Rückgängig“. Das Symbol oben rechts führt zu
-Einstellungen → Tagesfelder.
+Oben die Notiz zum Tag, direkt zu schreiben (Ben, 22.10.2026: kein Dialog mehr,
+`components/tagesnotiz.py`). Darunter je aktivem Tagesfeld ein Knopf mit dem Stand des Tags;
+ein Tipp öffnet sein Blatt (`components/tagesfeld_blatt.py`). Hat das Feld Schnellknöpfe,
+trägt der kleine Knopf daneben den ersten sofort ein — danach „Rückgängig“. Das Symbol oben
+rechts führt zu Einstellungen → Tagesfelder.
 """
 
 from __future__ import annotations
@@ -36,10 +37,9 @@ def zum_tag_block(
     werte: list[tf.Tageswert],
     *,
     auffrischen: Callable[[], None],
-    notiz: str | None = None,
-    notiz_bearbeiten: Callable[[], None] | None = None,
+    notiz: ft.Control | None = None,
 ) -> ft.Control:
-    """Der Block. ``notiz`` (mit ``notiz_bearbeiten``): die Notiz zum Tag oben im Block —
+    """Der Block. ``notiz``: die Notiz zum Tag oben im Block (`Tagesnotiz.control`) —
     ``None`` lässt sie weg (Zeitleiste: sie steht dort schon an ihrer Uhrzeit)."""
 
     def oeffner(pfad: str) -> Callable[[], Any]:
@@ -167,29 +167,8 @@ def zum_tag_block(
             ],
         )
     ]
-    if notiz_bearbeiten is not None and notiz is not None:
-        inhalt.append(
-            ft.Container(
-                bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
-                border_radius=12,
-                padding=ft.Padding.only(left=12, right=8, top=8, bottom=8),
-                ink=True,
-                on_click=notiz_bearbeiten,
-                content=ft.Row(
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Text(
-                            notiz or "Notiz zum Tag …",
-                            size=14,
-                            opacity=1 if notiz else 0.6,
-                            expand=True,
-                        ),
-                        ft.Icon(ft.Icons.EDIT_OUTLINED, size=18, opacity=0.5),
-                    ],
-                ),
-            )
-        )
+    if notiz is not None:
+        inhalt.append(ft.Container(padding=ft.Padding.only(right=4), content=notiz))
     if felder:
         inhalt.append(
             ft.ResponsiveRow(spacing=8, run_spacing=8, controls=[knopf(f) for f in felder])

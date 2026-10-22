@@ -947,7 +947,7 @@ def test_migration_028_planuebung_folgt(tmp_path) -> None:
             (f"i{nr}", nr, ziel, felder),
         )
     con.commit()
-    assert migrieren(con) == 28
+    assert migrieren(con) == 29
     zeilen = {
         r["id"]: (r["target_json"], r["fields_json"])
         for r in con.execute("SELECT id, target_json, fields_json FROM plan_item")

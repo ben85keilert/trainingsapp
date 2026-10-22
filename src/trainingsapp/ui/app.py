@@ -65,6 +65,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import varianten
+from trainingsapp.core.anhaenge import AUDIO, Ziel, ziel_lesen
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.core.result_spec import ResultSpec
@@ -87,6 +88,7 @@ from trainingsapp.ui.views.anhang_hochladen import (
     anhang_hochladen_view,
     hochladen_route,
 )
+from trainingsapp.ui.views.anhang_ton import anhang_ton_view
 from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view, verwaiste_dialog
 from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_anhaenge import einstellungen_anhaenge
@@ -187,10 +189,14 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
     async def zurueck_auf_der_startseite(_e: object = None) -> None:
         """Die Zurück-Taste auf der Startseite minimiert die App nicht (Ben, 18.10.2026:
         „soll die Anwendung einfach offen bleiben“): Auf einem anderen Reiter geht es zu
-        „Heute“, auf „Heute“ bleibt alles, wie es ist. Flutter fragt vor jedem Zurück
-        (``can_pop=False``, `components/zurueck.py`) — die Antwort ist immer nein."""
+        „Heute“, auf „Heute“ bleibt alles, wie es ist — nur wer dort gerade die Notiz zum
+        Tag schreibt, beendet das (gespeichert ist schon; Ben, 22.10.2026: „Zurück macht
+        Autosave“). Flutter fragt vor jedem Zurück (``can_pop=False``,
+        `components/zurueck.py`) — die Antwort ist immer nein."""
         await ansicht.confirm_pop(False)
-        if state.reiter != "heute":
+        if state.reiter == "heute" and state.schreiben_beenden is not None:
+            await state.schreiben_beenden()
+        elif state.reiter != "heute":
             leiste.selected_index = schluessel.index("heute")
             reiter_zeigen("heute")
 
@@ -381,6 +387,11 @@ def main(page: ft.Page) -> None:
         # darauf (oder der Akku ist leer), fehlen sonst bis zu 15 s.
         if not vorn and state.messlauf is not None:
             state.messlauf.backup_jetzt()
+        # Ebenso, was gerade geschrieben wird (Notiz zum Tag: sonst bis zu 1 s)
+        if not vorn:
+            for sichern in list(state.vor_dem_verlassen.values()):
+                with suppress(Exception):
+                    sichern()
 
     page.on_app_lifecycle_state_change = lebenszyklus
     # Dienste sind Controls ohne Darstellung; sie müssen an der Seite hängen.
@@ -505,20 +516,41 @@ def main(page: ft.Page) -> None:
         if rest[1:2] == ["korrigieren"]:
             ablegen(lambda: formular_korrektur(page, state, eintrag, basis))
 
+    def anhang_ziel(teile: list[str]) -> tuple[Ziel, list[str]] | None:
+        """Das Ziel einer Aufnahme vorn in ``teile`` — ein Eintrag, den es gibt, oder ein Tag,
+        der nicht in der Zukunft liegt (Notiz zum Tag, 22.10.2026)."""
+        gelesen = ziel_lesen(teile, state.profil.id)
+        if gelesen is None:
+            return None
+        ziel = gelesen[0]
+        if ziel.zum_tag is not None:
+            return gelesen if ziel.zum_tag <= state.heute() else None
+        eintrag = state.sitzungen.eintrag_laden(ziel.eintrag_id or "")
+        return gelesen if eintrag is not None else None
+
     def anhang_routen(basis: str, rest: list[str]) -> None:
-        """Fotos und Videos über jeder Ansicht (Ben, 19.10.2026; `views/anhang*.py`):
-        ``…/anhang/aufnehmen/<eintrag>/<foto|video>`` nimmt auf, ``…/anhang/hochladen/<eintrag>``
-        nimmt eins aus der Fotoauswahl (P74), ``…/anhang/<id>`` zeigt."""
-        if rest[:1] == [HOCHLADEN] and len(rest) >= 2:
-            if (an := state.sitzungen.eintrag_laden(rest[1])) is not None:
-                route = hochladen_route(basis, an.id)
-                ablegen(lambda: anhang_hochladen_view(page, state, route, an))
-        elif rest[:1] == ["aufnehmen"] and len(rest) >= 3:
-            eintrag = state.sitzungen.eintrag_laden(rest[1])
-            art = ARTEN.get(rest[2])
-            if eintrag is not None and art is not None:
-                route = aufnahme_route(basis, eintrag.id, art)
-                ablegen(lambda: anhang_aufnahme_view(page, state, route, eintrag, art))
+        """Fotos, Videos und Audioaufnahmen über jeder Ansicht (Ben, 19.10.2026; Audio und
+        der Tag als Ziel seit 22.10.2026; `views/anhang*.py`):
+        ``…/anhang/aufnehmen/<ziel>/<foto|video|audio>`` nimmt auf,
+        ``…/anhang/hochladen/<ziel>`` nimmt eins aus der Fotoauswahl (P74), ``…/anhang/<id>``
+        zeigt. ``<ziel>``: die ID eines Eintrags oder ``tag/<datum>``."""
+        if rest[:1] == [HOCHLADEN]:
+            if (gelesen := anhang_ziel(rest[1:])) is not None:
+                ziel = gelesen[0]
+                route = hochladen_route(basis, ziel)
+                ablegen(lambda: anhang_hochladen_view(page, state, route, ziel))
+        elif rest[:1] == ["aufnehmen"]:
+            gelesen = anhang_ziel(rest[1:])
+            if gelesen is None or not gelesen[1]:
+                return
+            ziel, art = gelesen[0], ARTEN.get(gelesen[1][0])
+            if art is None:
+                return
+            route = aufnahme_route(basis, ziel, art)
+            if art == AUDIO:
+                ablegen(lambda: anhang_ton_view(page, state, route, ziel))
+            else:
+                ablegen(lambda: anhang_aufnahme_view(page, state, route, ziel, art))
         elif rest and (anhang := state.anhaenge.laden(rest[0])) is not None:
             ablegen(lambda: anhang_view(page, state, basis, anhang))
 
@@ -673,6 +705,13 @@ def main(page: ft.Page) -> None:
         erster = gebaut["route"] is None
         gebaut["route"] = page.route
         state.route_nummer += 1
+        # Was gerade geschrieben wird (Notiz zum Tag), ist gespeichert, bevor die Ansicht
+        # neu entsteht — Zurück speichert (Ben, 22.10.2026); die Schreibenden entstehen neu
+        for sichern in list(state.vor_dem_verlassen.values()):
+            with suppress(Exception):
+                sichern()
+        state.vor_dem_verlassen.clear()
+        state.schreiben_beenden = None
         # Alle Beobachter gehören Ansichten, Leiste oder Komponenten, die gleich neu
         # entstehen und sich neu eintragen — was bliebe, zöge im Takt an verwaisten
         # Controls (N21: „uhr_in_der_uebung“, „ablauf“, „uebung“, „ausdauer“ liefen weiter)

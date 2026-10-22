@@ -16,7 +16,7 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.anhaenge import ZEITRAEUME, Anhang, anzahl_text, im_zeitraum, zusammenfassung
+from trainingsapp.core.anhaenge import ZEITRAEUME, Anhang, im_zeitraum, zusammenfassung
 from trainingsapp.core.models import Exercise
 from trainingsapp.ui.components.anhang_reihe import KACHEL_GROSS, kachel
 from trainingsapp.ui.state import AppState
@@ -48,7 +48,7 @@ def aufnahmen_raster(page: Any, state: AppState, uebung: Exercise) -> ft.Control
         t = a.tag
         return "Heute" if t == heute else f"{t:%d.%m.}" if t.year == heute.year else f"{t:%d.%m.%y}"
 
-    bilder, videos, _ = zusammenfassung(alle)
+    umfang = zusammenfassung(alle)
     # Kein ``expand`` in der umbrechenden Zeile: Flutter legt sie als Wrap an, ein Expanded
     # darin ist ein Layoutfehler — die Release-App zeigte statt des Abschnitts eine leere
     # graue/weiße Fläche (Ben, 21.10.2026)
@@ -58,7 +58,7 @@ def aufnahmen_raster(page: Any, state: AppState, uebung: Exercise) -> ft.Control
         run_spacing=6,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         controls=[
-            ft.Text(anzahl_text(bilder, videos), size=13, opacity=0.75),
+            ft.Text(umfang.text, size=13, opacity=0.75),
             ft.SegmentedButton(
                 selected=[state.anhaenge_zeitraum],
                 show_selected_icon=False,

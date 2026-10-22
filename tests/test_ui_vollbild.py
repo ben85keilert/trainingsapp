@@ -9,7 +9,14 @@ import pytest
 
 ft = pytest.importorskip("flet")
 
-from test_ui_messung import _alle_controls, _baum_texte, _knopf, _seite, _symbol  # noqa: E402
+from test_ui_messung import (  # noqa: E402
+    _alle_controls,
+    _baum_texte,
+    _knopf,
+    _loeschen_bestaetigen,
+    _seite,
+    _symbol,
+)
 from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
 from trainingsapp.devices.simulated import SIM_SYNTH, SimulatedSource  # noqa: E402
 from trainingsapp.ui import ausrichtung  # noqa: E402
@@ -201,10 +208,13 @@ async def test_live_vollbild_zwei_achsen_ablesen_und_notizen(daten) -> None:
     _symbol(ansicht, ft.Icons.CHECK, "Speichern").on_click()
     (e,) = lauf.aufnahme.ereignisse
     assert e["text"] == "Atemübung"
-    # Löschen am Etikett, „Rückgängig" holt sie zurück
+    # Löschen am Etikett fragt erst (Ben, 21.10.2026), „Rückgängig" holt sie zurück
     wischer.on_tap_down(SimpleNamespace(local_position=ft.Offset(marke_px(), 120)))
     _symbol(ansicht, ft.Icons.DELETE_OUTLINE, "Notiz löschen").on_click()
+    assert len(lauf.aufnahme.ereignisse) == 1
+    await _loeschen_bestaetigen(seite).on_dismiss(None)
     assert lauf.aufnahme.ereignisse == []
+    assert seite.aufrufe[-1].persist is False  # die Meldung geht von selbst
     seite.aufrufe[-1].action.on_click()
     (e,) = lauf.aufnahme.ereignisse
     assert e["text"] == "Atemübung"
@@ -333,6 +343,7 @@ def test_auswertung_vollbild_etiketten_seitenleiste_ablesen(daten) -> None:
     wischer.on_tap_down(SimpleNamespace(local_position=ft.Offset(px(60), 150)))
     assert "Atemübung 6/min" in _baum_texte(view)
     _symbol(view, ft.Icons.DELETE_OUTLINE, "Notiz löschen").on_click()
+    asyncio.run(_loeschen_bestaetigen(seite).on_dismiss(None))  # erst fragen (21.10.2026)
     assert laden(pfad).ereignisse == []
     seite.aufrufe[-1].action.on_click()  # Rückgängig
     assert [x["text"] for x in laden(pfad).ereignisse] == ["Atemübung 6/min"]

@@ -41,6 +41,7 @@ from trainingsapp.ui.components.kurve import ACHSE_PX, RR_SPANNE_MIN_MS, Reihe, 
 from trainingsapp.ui.components.verlauf import (
     BEREICH_TITEL,
     Daten,
+    Werteachse,
     bezeichnung,
     schritt_min,
     werte_bei,
@@ -85,6 +86,27 @@ def achse(kennzahl: str) -> str | None:
         return KENNZAHLEN["mean_rr"].achse_schluessel
     kz = KENNZAHLEN.get(kennzahl)
     return kz.achse_schluessel if kz else None
+
+
+def werteachsen(ansicht: Ansicht, kurven: Sequence[str], roh_titel: str) -> list[Werteachse]:
+    """Die y-Achsen dieser Kurven fürs Blatt „Fenster & Darstellung“ — gleiche teilen eine.
+
+    >>> [(a.schluessel, a.name) for a in werteachsen(Ansicht(), ["roh", "mean_rr", "rmssd",
+    ...     "sdnn"], "RR-Tachogramm")]
+    [('rr', 'RR-Tachogramm · Ø RR'), ('var', 'RMSSD · SDNN')]
+    """
+    out: dict[str, tuple[list[str], str, str]] = {}
+    for k in kurven:
+        schluessel = achse(k)
+        if schluessel is None:
+            continue
+        namen = out.setdefault(
+            schluessel, ([], "ms" if k == ROH else KENNZAHLEN[k].einheit, farbe(k))
+        )[0]
+        name_ = name(k, ansicht.pnn_ms, roh_titel)
+        if name_ not in namen:
+            namen.append(name_)
+    return [Werteachse(s, " · ".join(n), e, f) for s, (n, e, f) in out.items()]
 
 
 def farbe(kennzahl: str) -> str:
@@ -164,7 +186,14 @@ def doppelkurve(
     zweite = None
     if rechts:
         r_reihen, r_einheit, r_spanne, r_schritt, r_farbe = seite(rechts)
-        zweite = Skala(r_reihen, r_einheit, r_spanne, r_schritt, r_farbe)
+        zweite = Skala(
+            r_reihen,
+            r_einheit,
+            r_spanne,
+            r_schritt,
+            r_farbe,
+            fest=ansicht.y_bereich(achse(rechts[0])),
+        )
     return kurve(
         [*hinten, *l_reihen, *marken],
         einheit=l_einheit,
@@ -177,6 +206,7 @@ def doppelkurve(
         x_null=x_null,
         rechts=zweite,
         farbe=l_farbe,
+        y_fest=ansicht.y_bereich(achse(links[0])) if links else None,
     )
 
 
@@ -343,7 +373,7 @@ def werkzeug(
     return knopf
 
 
-def markieren(knopf: ft.IconButton, aktiv: bool) -> None:
+def markieren(knopf: ft.IconButton | ft.TextButton, aktiv: bool) -> None:
     knopf.style = (
         ft.ButtonStyle(bgcolor=ft.Colors.with_opacity(0.16, ft.Colors.PRIMARY)) if aktiv else None
     )
@@ -610,4 +640,5 @@ __all__ = [
     "seitenkopf",
     "werkzeug",
     "wertchip",
+    "werteachsen",
 ]

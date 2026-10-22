@@ -21,11 +21,14 @@ Eingabe oben sonst nicht) — die Liste bleibt im Blick, die Zeile ist markiert.
 
 Marken stehen immer in der Hauptkurve (`marken`). Im Vollbild zeigt ein Tipp
 auf eine Marke ihr **Etikett** (`bei`, `etikett`): Zeit und Text in der Kurve,
-von dort bearbeiten oder löschen (`entfernen`, „Rückgängig" mit
-`zurueckholen`). Gespeichert wird das
+von dort bearbeiten oder löschen. Gespeichert wird das
 praxis_gui-Format mit Anker (`hrv_core.ereignisse`); wohin, entscheidet der
 Aufrufer (``speichern``): live in die laufende Aufnahme, nachträglich als
 Metadaten in die Messdatei.
+
+**Löschen fragt erst** (Ben, 21.10.2026) — in der Eingabe wie am Etikett
+(`loeschen_fragen`); danach steht kurz „Notiz gelöscht · Rückgängig“ unten
+(`zurueckholen`).
 
 **Übungen antippen.** „Übungen" in der Eingabe blendet die Übungen eines Plans
 als kleine Namen ein (zuerst die heute anstehenden Pläne, zuletzt alle
@@ -58,6 +61,7 @@ from trainingsapp.core.zeitangabe import (
     wand_aus_x,
     x_aus_wand,
 )
+from trainingsapp.ui.components.dialoge import loeschen_rueckfrage, meldung
 from trainingsapp.ui.components.kurve import Reihe
 from trainingsapp.ui.farben import FARBEN
 
@@ -145,6 +149,8 @@ class Notizfeld:
             und aus welcher Quelle — überleben den Neuaufbau (``(offen, quelle)``).
         zeit_modus: wie das Zeitfeld der Eingabe anfangs schreibt — `DAUER` („2:15“)
             oder `UHR` („14:03:05“); die Person schaltet jederzeit um.
+        dialog: zeigt Rückfrage und Meldung (``page.show_dialog``) — ohne löscht
+            `loeschen_fragen` sofort.
     """
 
     def __init__(
@@ -167,9 +173,11 @@ class Notizfeld:
         breite: Callable[[], float] | None = None,
         ausblenden: Callable[[dict], bool] | None = None,
         zeit_modus: str = DAUER,
+        dialog: Callable[[Any], None] | None = None,
     ) -> None:
         self._zeitbezug = zeitbezug
         self._ereignisse = ereignisse
+        self._dialog = dialog
         #: Notizen, die Liste und `marken` nicht zeigen (die Leistungen der Person — sie
         #: haben eine eigene Ebene, Plan D); `bei` und `etikett` kennen sie weiter
         self._ausblenden = ausblenden or (lambda _e: False)
@@ -394,13 +402,46 @@ class Notizfeld:
         self._aendern(kurve=True)
 
     def loeschen(self) -> None:
-        liste = list(self._ereignisse())
-        if self.bearbeite is None or not 0 <= self.bearbeite < len(liste):
+        """„Löschen“ in der Eingabe: die bearbeitete Notiz — nach Rückfrage."""
+        if self.bearbeite is not None and self.bearbeite >= 0:
+            self.loeschen_fragen(self.bearbeite)
+
+    def loeschen_fragen(self, i: int) -> None:
+        """Notiz ``i`` löschen — erst fragen, danach „Notiz gelöscht · Rückgängig“.
+
+        Gemerkt wird die Notiz selbst, nicht ihre Nummer: Live kann der Timer
+        dazwischen Notizen einfügen.
+        """
+        liste = self._ereignisse()
+        if not 0 <= i < len(liste):
             return
-        del liste[self.bearbeite]
-        self._speichern(liste)
-        self.bearbeite = None
-        self._aendern(kurve=True)
+        eintrag = liste[i]
+        if self._dialog is None:
+            self._entfernen_eintrag(eintrag)
+            return
+        zeigen = self._dialog
+
+        def ja() -> None:
+            weg = self._entfernen_eintrag(eintrag)
+            if weg is not None:
+                zeigen(meldung("Notiz gelöscht", lambda: self.zurueckholen(weg)))
+
+        zeigen(loeschen_rueckfrage("Notiz löschen?", self.beschreibung(eintrag), ja))
+
+    def beschreibung(self, e: dict) -> str:
+        """Was die Rückfrage nennt: Text und Zeit der Notiz."""
+        zb = self._zeitbezug()
+        zeit = self._zeit_von(e, zb) if zb is not None else ""
+        text = str(e.get("text") or "").strip()
+        was = f"„{text}“" if text else "Die Notiz ohne Text"
+        return f"{was}{f' bei {zeit}' if zeit else ''} wird gelöscht."
+
+    def _entfernen_eintrag(self, eintrag: dict) -> dict | None:
+        liste = self._ereignisse()
+        i = next((j for j, e in enumerate(liste) if e is eintrag), None)
+        if i is None:  # z. B. live: die Aufnahme hat die Liste inzwischen übernommen
+            i = next((j for j, e in enumerate(liste) if e == eintrag), None)
+        return self.entfernen(i) if i is not None else None
 
     # -- Marken ohne Tastatur (Querformat, Ben 15.10.2026) -------------------------
 
@@ -481,7 +522,7 @@ class Notizfeld:
         return x, self._zeit_von(liste[i], zb), str(liste[i].get("text") or "")
 
     def entfernen(self, i: int) -> dict | None:
-        """Notiz ``i`` löschen, ohne die Eingabe zu öffnen — zurück kommt sie für „Rückgängig"."""
+        """Notiz ``i`` löschen, ohne zu fragen — zurück kommt sie für „Rückgängig"."""
         liste = list(self._ereignisse())
         if not 0 <= i < len(liste):
             return None

@@ -120,6 +120,28 @@ def test_einstellungsseiten_bauen_und_schalten(tmp_path) -> None:
         )
         weg.on_click()
         assert "dfa_alpha1" not in state.hrv_einstellungen().kacheln
+        # Zeitfenster live: dieselben vier Knöpfe wie an der Kurve, jede andere Breite
+        # eingetippt (Ben, 21.10.2026) — auch über den Knöpfen hinaus, bis 30 min
+        knoepfe = next(
+            c
+            for c in controls
+            if isinstance(c, ft.SegmentedButton) and any(s.value == "600" for s in c.segments)
+        )
+        assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "5 Min", "10 Min"]
+        feld = next(
+            c for c in controls if isinstance(c, ft.TextField) and c.label == "Breite der Zeitachse"
+        )
+        feld.value = "3:30"
+        feld.on_submit(None)
+        assert state.hrv_einstellungen().fenster_s == 210 and knoepfe.selected == []
+        feld.value = "90 min"  # mehr hält der Live-Puffer nicht
+        feld.on_blur(None)
+        assert state.hrv_einstellungen().fenster_s == 1800 and feld.value == "30:00"
+        feld.value = "viel"
+        feld.on_submit(None)
+        assert feld.error and state.hrv_einstellungen().fenster_s == 1800
+        knoepfe.on_change(SimpleNamespace(control=SimpleNamespace(selected=["300"])))
+        assert state.hrv_einstellungen().fenster_s == 300 and feld.value == "5:00"
         zurueck = next(
             c
             for c in controls

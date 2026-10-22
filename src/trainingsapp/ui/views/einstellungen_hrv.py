@@ -29,21 +29,22 @@ import flet as ft
 from hrv_core.regeln import Korrekturregeln
 
 from trainingsapp.core.hrv_ansicht import PNN_WAHL, Ansicht
-from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
 from trainingsapp.core.hrv_einstellungen import (
-    LIVE_FENSTER,
+    FENSTER_MAX_S,
     LIVE_SPEKTRUM_S,
     NACHRECHNEN_MS,
     UEBERSICHT,
     HrvEinstellungen,
 )
+from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.kacheln import GRUPPEN, KACHELN
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.verlauf import FARBEN, fenster_text
+from trainingsapp.ui.components.verlauf import FARBEN
+from trainingsapp.ui.components.zeitfenster import BreiteFeld, breiten_auswahl, breiten_wahl
 from trainingsapp.ui.state import AppState
 
 
@@ -221,10 +222,17 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
     uebersicht_neu()
 
     # -- Kurven ----------------------------------------------------------------
+    # Dieselben vier Knöpfe wie an der Kurve, jede andere Breite eingetippt (Ben, 21.10.2026)
 
-    def fenster_gewaehlt(ev: ft.Event[ft.SegmentedButton]) -> None:
-        if ev.control.selected:
-            setzen(fenster_s=int(ev.control.selected[0]))
+    def breite_gewaehlt(breite_s: float) -> None:
+        setzen(fenster_s=round(breite_s))
+        breite_knoepfe.selected = breiten_auswahl(breite_s)
+        breite_feld.anzeigen(breite_s)
+        with contextlib.suppress(Exception):
+            breite_knoepfe.update()
+
+    breite_knoepfe = breiten_wahl(e.fenster_s, breite_gewaehlt)
+    breite_feld = BreiteFeld(e.fenster_s, breite_gewaehlt, max_s=FENSTER_MAX_S)
 
     def pnn_gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
         a = state.ansicht()
@@ -488,15 +496,8 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
             karte(
                 titel("Kurven"),
                 ft.Text("Zeitfenster live", size=12, opacity=0.8),
-                ft.SegmentedButton(
-                    selected=[str(e.fenster_s)],
-                    show_selected_icon=False,
-                    segments=[
-                        ft.Segment(value=str(s), label=ft.Text(fenster_text(s)))
-                        for s in LIVE_FENSTER
-                    ],
-                    on_change=fenster_gewaehlt,
-                ),
+                breite_knoepfe,
+                breite_feld.control,
                 schalter(
                     "korrigiert",
                     "Live die korrigierte Kurve zeigen",
@@ -505,7 +506,8 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                 ),
                 hinweis(
                     "Welche Verlaufskurven mit welchem Fenster zu sehen sind, stellt man in "
-                    "der Messung über das Kurvenmenü ein (Fenster, gleitend oder Blöcke)."
+                    "der Messung unter „Fenster & Darstellung“ ein (Regler an der Kurve) — "
+                    "dort auch feste Werteachsen, z. B. RR 500 bis 1500 ms."
                 ),
                 ft.TextButton(
                     "Kurven auf Standard zurücksetzen",

@@ -329,6 +329,7 @@ def uebung_detail(
                 ft.Text(f"„{uebung.name}“ liegt im Papierkorb"),
                 action="Rückgängig",
                 on_action=rueckgaengig,
+                persist=False,  # mit Aktion bliebe sie stehen (`dialoge.meldung`)
             )
         )
 

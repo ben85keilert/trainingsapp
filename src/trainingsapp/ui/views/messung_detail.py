@@ -33,6 +33,12 @@ Verlaufskurve — beide wählbar), rechts eine Werkzeugleiste (Ablesen, Notiz,
 Notizen, Abschnitte, Zuschneiden, Fenster & Darstellung) und daneben die
 Seitenleiste mit denselben Feldern wie hochkant. Ein Tipp auf eine Notizmarke
 oder einen Abschnittsbalken zeigt sein Etikett in der Kurve.
+
+**Wie live** (Ben, 21.10.2026): An der Hauptkurve stehen Ablesen, Vollbild, Fenster &
+Darstellung (Zeitachse eintippen, feste Werteachsen) und das Menü ⋮ (Info,
+automatische Korrektur, Ansichten); dieselben vier Breitenknöpfe. Ein Abschnitt-Chip
+zeigt den **ganzen** Abschnitt, die Breitenknöpfe zoomen hinein. Notizen und
+Abschnitte werden erst nach einer Rückfrage gelöscht.
 """
 
 from __future__ import annotations
@@ -117,7 +123,7 @@ from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.ui import ausrichtung
 from trainingsapp.ui.components.analyse import Analyse, Analysefenster, verlaufsdaten
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten
-from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.dialoge import Nachher, loeschen_rueckfrage, meldung, schliessen
 from trainingsapp.ui.components.forschung import forschung_fragen
 from trainingsapp.ui.components.kacheln import (
     KACHELN,
@@ -127,9 +133,13 @@ from trainingsapp.ui.components.kacheln import (
     ohne_intervalle,
     zahl,
 )
-from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
+from trainingsapp.ui.components.karte import hinweis, info_eintrag, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
-from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
+from trainingsapp.ui.components.korrektur_blatt import (
+    korrektur_blatt,
+    regler_eintrag,
+    regler_knopf,
+)
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.notizen import (
@@ -144,7 +154,14 @@ from trainingsapp.ui.components.titel import (
     titel_kopf,
     titel_vorschlaege,
 )
-from trainingsapp.ui.components.verlauf import FARBEN, darstellung_blatt, fenster_text
+from trainingsapp.ui.components.verlauf import (
+    FARBEN,
+    Zeitachse,
+    darstellung_blatt,
+    darstellung_knopf,
+    fenster_text,
+    kurvengruppen,
+)
 from trainingsapp.ui.components.vollbild import (
     ETIKETT_PX,
     LEISTE_PX,
@@ -168,10 +185,17 @@ from trainingsapp.ui.components.vollbild import (
     seiten_wahl,
     seitenkopf,
     werkzeug,
+    werteachsen,
 )
+from trainingsapp.ui.components.vollbild import achse as werteachse
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.components.zeitachse import achse, achsen_knopf
-from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
+from trainingsapp.ui.components.zeitfenster import (
+    Fenster,
+    breiten_auswahl,
+    breiten_wahl,
+    wischbar,
+)
 from trainingsapp.ui.components.zurueck import rueckfrage, zurueck_ziel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.messung import ohne_rr
@@ -229,9 +253,6 @@ def _verworfen_text(rec_verworfen: tuple[int, int] | None) -> Sequence[str]:
     return [f"{round(100 * rec_verworfen[0] / rec_verworfen[1])} % vom Sensor verworfen"]
 
 
-#: Breiten des Zeitfensters (s) — „Min“ hinten dran, vier Knöpfe über die volle Breite
-#: (Ben, 19.10.2026, Plan F); die ganze Messung zeigt der Abschnitt-Chip „Ganze Messung“
-BREITEN = [(60, "1 Min"), (120, "2 Min"), (300, "5 Min"), (600, "10 Min")]
 #: Beschriftung der Ebenen-Chips über der Kurve (Plan D)
 EBENEN_TEXT = {
     EBENE_NOTIZEN: "Notizen",
@@ -670,22 +691,11 @@ def _aufbauen(
     kacheln_box = ft.Container()
     rr_box = ft.Container()
     ketten_box = ft.Column(spacing=0)
-    breite_wahl = ft.SegmentedButton(
-        selected=[str(start_breite)],
-        # Ein Abschnitt kann jede Breite haben — dann ist keine Taste gewählt
-        allow_empty_selection=True,
-        show_selected_icon=False,
-        expand=True,
-        segments=[ft.Segment(value=str(s), label=ft.Text(t)) for s, t in BREITEN],
-    )
-    breite_wahl_voll = ft.SegmentedButton(  # dieselbe Wahl in der Kopfzeile des Vollbilds
-        selected=[str(start_breite)],
-        allow_empty_selection=True,
-        show_selected_icon=False,
-        style=ft.ButtonStyle(
-            visual_density=ft.VisualDensity.COMPACT, padding=ft.Padding.symmetric(horizontal=6)
-        ),
-        segments=[ft.Segment(value=str(s), label=ft.Text(t, size=12)) for s, t in BREITEN],
+    # Dieselben vier Knöpfe wie live (Ben, 21.10.2026); ein Abschnitt, die ganze Messung
+    # oder eine eingetippte Breite wählt keinen — `breiten_auswahl`
+    breite_wahl = breiten_wahl(fenster.breite_s, lambda s: breite_setzen(s))
+    breite_wahl_voll = breiten_wahl(  # dieselbe Wahl in der Kopfzeile des Vollbilds
+        fenster.breite_s, lambda s: breite_setzen(s), kompakt=True
     )
 
     def achse_umschalten() -> None:
@@ -970,6 +980,7 @@ def _aufbauen(
             return
         strich = m.strich if m.ablesen else None
         x_text, x_null = zeitachse(x_von, x_bis)
+        ansicht_ = state.ansicht()
         if z.nur_puls:
             puls = [(t, h) for t, h in z.puls_punkte if x_von <= t <= x_bis]
             rr_box.content = kurve(
@@ -981,6 +992,7 @@ def _aufbauen(
                 y_spanne_min=HF_SPANNE_MIN_BPM,
                 x_text=x_text,
                 x_null=x_null,
+                y_fest=ansicht_.y_bereich(werteachse("hf_geraet")),
             )
         else:
             rr_box.content = kurve(
@@ -992,6 +1004,7 @@ def _aufbauen(
                 y_spanne_min=RR_SPANNE_MIN_MS,
                 x_text=x_text,
                 x_null=x_null,
+                y_fest=ansicht_.y_bereich(werteachse(ROH)),
             )
         if mit_analyse:
             analyse.zeichnen(x_von, x_bis, strich=strich)
@@ -1251,7 +1264,7 @@ def _aufbauen(
                         ft.Icons.CLOSE,
                         icon_size=18,
                         tooltip="Abschnitt löschen",
-                        on_click=lambda: abschnitt_loeschen(a),
+                        on_click=lambda: abschnitt_loeschen(a),  # fragt erst (Ben, 21.10.)
                     ),
                 ],
             ),
@@ -1280,6 +1293,17 @@ def _aufbauen(
         page.run_task(schreiben)
 
     def abschnitt_loeschen(a: Abschnitt) -> None:
+        """Erst fragen (Ben, 21.10.2026), dann löschen — „Rückgängig“ holt ihn zurück."""
+        page.show_dialog(
+            loeschen_rueckfrage(
+                "Abschnitt löschen?",
+                f"„{a.name}“ ({_uhr(a.von_s)}–{_uhr(a.bis_s)}) wird gelöscht. Die Messung "
+                "selbst bleibt unverändert.",
+                lambda: abschnitt_entfernen(a),
+            )
+        )
+
+    def abschnitt_entfernen(a: Abschnitt) -> None:
         vorher = list(eigene)
         eigene[:] = [b for b in eigene if b.id != a.id]
         if m.abschnitt is not None and m.abschnitt.id == a.id:
@@ -1292,14 +1316,23 @@ def _aufbauen(
             zusatz_sichern()
             zeichnen()
 
+        page.show_dialog(meldung(f"„{a.name}“ gelöscht", zurueck))
+
+    def alle_loeschen() -> None:
+        if not eigene:
+            return
+        n = len(eigene)
         page.show_dialog(
-            ft.SnackBar(
-                ft.Text(f"„{a.name}“ gelöscht"),
-                action=ft.SnackBarAction("Rückgängig", on_click=zurueck),
+            loeschen_rueckfrage(
+                "Alle Abschnitte löschen?",
+                ("Der Abschnitt wird" if n == 1 else f"Alle {n} Abschnitte werden")
+                + " gelöscht. Die Messung selbst bleibt unverändert.",
+                alle_entfernen,
+                knopf="Alle löschen",
             )
         )
 
-    def alle_loeschen() -> None:
+    def alle_entfernen() -> None:
         if not eigene:
             return
         vorher = list(eigene)
@@ -1314,13 +1347,11 @@ def _aufbauen(
             zeichnen()
 
         page.show_dialog(
-            ft.SnackBar(
-                ft.Text(
-                    "1 Abschnitt gelöscht"
-                    if len(vorher) == 1
-                    else f"{len(vorher)} Abschnitte gelöscht"
-                ),
-                action=ft.SnackBarAction("Rückgängig", on_click=zurueck),
+            meldung(
+                "1 Abschnitt gelöscht"
+                if len(vorher) == 1
+                else f"{len(vorher)} Abschnitte gelöscht",
+                zurueck,
             )
         )
 
@@ -1708,10 +1739,14 @@ def _aufbauen(
             fenster.verschieben(
                 mitte + fenster.breite_s / 2 - achse_ende(), achse_ende(), achse_anfang()
             )
-        for wahl in (breite_wahl, breite_wahl_voll):
-            wahl.selected = [str(int(breite_s))] if breite_s in dict(BREITEN) else []
+        breiten_zeigen()
         if zeichnen_:
             nur_kurven()
+
+    def breiten_zeigen() -> None:
+        """Die Breitenknöpfe nach dem Fenster — keiner, wenn die Breite zu keinem passt."""
+        for wahl in (breite_wahl, breite_wahl_voll):
+            wahl.selected = breiten_auswahl(fenster.breite_s)
 
     def zentrieren(x: float) -> None:
         """Die Kurve auf eine Zeit rücken (Notiz antippen); bei „Alles" bleibt sie."""
@@ -1728,8 +1763,7 @@ def _aufbauen(
             bis = von + 10.0
         fenster.breite_s = bis - von
         fenster.ende_s = None if bis >= dauer - 0.5 else bis
-        for wahl in (breite_wahl, breite_wahl_voll):
-            wahl.selected = []
+        breiten_zeigen()
         aw.art = AW_BAND
         aw.laenge_s = max(round(bis - von - 2 * RAND_S), 10)
         aw.von = von + RAND_S
@@ -1739,16 +1773,17 @@ def _aufbauen(
             nur_kurven()
 
     def binden(a: Abschnitt | None) -> None:
-        """Ein Abschnitt-Chip: die Achse an den Abschnitt binden (Plan F) — oder lösen."""
+        """Ein Abschnitt-Chip: die Achse an den Abschnitt binden (Plan F) — oder lösen.
+
+        Der Chip zeigt den **ganzen** Abschnitt (Ben, 21.10.2026: „die Möglichkeit, einen
+        Abschnitt als Ganzes zu setzen“), so wie „Ganze Messung“ die ganze Messung; die
+        Breitenknöpfe zoomen danach hinein, ‹ › blättern darin. Ein zweiter Tipp auf den
+        Chip zeigt ihn wieder ganz.
+        """
         m.bindung = a
         if a is not None:
-            spanne = achse_ende() - achse_anfang()
-            if fenster.breite_s >= spanne or fenster.breite_s not in dict(BREITEN):
-                fenster.breite_s = spanne
-            # am Anfang des Abschnitts beginnen
-            fenster.ende_s = min(achse_anfang() + fenster.breite_s, achse_ende())
-            if fenster.ende_s >= achse_ende() - 0.5:
-                fenster.ende_s = None
+            fenster.breite_s = achse_ende() - achse_anfang()
+            fenster.ende_s = None
             aw.art = AW_ABSCHNITT
             aw.abschnitt_id = a.id
         else:
@@ -1758,10 +1793,7 @@ def _aufbauen(
             fenster.ende_s = None
             if aw.art == AW_ABSCHNITT:
                 aw.art = AW_ALLES
-        for wahl in (breite_wahl, breite_wahl_voll):
-            wahl.selected = (
-                [str(int(fenster.breite_s))] if fenster.breite_s in dict(BREITEN) else []
-            )
+        breiten_zeigen()
         bindung_zeichnen()
         chips_zeichnen()
         nachrechnen_planen()
@@ -1985,14 +2017,8 @@ def _aufbauen(
         katalog=(lambda: uebungs_katalog(state)) if einst.notiz_uebungen else None,
         breite=lambda: fenster.breite_s,
         zeit_modus=UHR if einst.achse_uhrzeit else DAUER,
+        dialog=page.show_dialog,
     )
-
-    def breite_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
-        if e.control.selected:
-            breite_setzen(float(e.control.selected[0]))
-
-    breite_wahl.on_change = breite_gewaehlt
-    breite_wahl_voll.on_change = breite_gewaehlt
 
     # -- Analysefenster: wofür Spektrum, Poincaré und DFA gelten --------------------
     # Die ganze Messung (Vorgabe), ein Abschnitt oder ein Band fester Länge. Das Band
@@ -2210,6 +2236,15 @@ def _aufbauen(
         zeilen.append(ft.Text(analysefenster().titel, size=12, weight=ft.FontWeight.W_600))
         return ft.Column(spacing=6, tight=True, controls=zeilen)
 
+    def menue_oben() -> list[ft.PopupMenuItem]:
+        """Info und automatische Korrektur im Menü ⋮ — wie live (Ben, 21.10.2026)."""
+        eintraege = [
+            info_eintrag(page, "So liest du die Kurve", _kurven_info(z.nur_puls, verworfen))
+        ]
+        if not z.nur_puls:
+            eintraege.append(regler_eintrag(lambda: regeln_oeffnen()))
+        return eintraege
+
     analyse = Analyse(
         page,
         state,
@@ -2234,6 +2269,9 @@ def _aufbauen(
         fenster_kopf=fenster_kopf,
         warten=lambda: aw.griff is not None or aw.wartet,
         info_zusatz=lambda bereich: "" if z.nur_puls else _verlauf_info(bereich),
+        # Das Menü steht wie live an der Hauptkurve (Ben, 21.10.2026)
+        menue_oben=lambda: menue_oben(),
+        menue_im_kopf=False,
     )
 
     # -- Korrektur ---------------------------------------------------------------
@@ -2566,18 +2604,10 @@ def _aufbauen(
         notizfeld.bearbeiten(i)
 
     def notiz_loeschen(i: int) -> None:
+        """Löschen am Etikett — nach Rückfrage, mit „Rückgängig“ (Ben, 21.10.2026)."""
         m.etikett = None
-        weg = notizfeld.entfernen(i)
-        if weg is None:
-            return
-        page.show_dialog(
-            ft.SnackBar(
-                ft.Text("Notiz gelöscht"),
-                action=ft.SnackBarAction(
-                    "Rückgängig", on_click=lambda: notizfeld.zurueckholen(weg)
-                ),
-            )
-        )
+        notizfeld.loeschen_fragen(i)
+        nur_kurven(mit_analyse=False)
 
     def etikett_abschnitt_bearbeiten(a: Abschnitt) -> None:
         m.etikett = None
@@ -2619,15 +2649,35 @@ def _aufbauen(
         notizfeld.marke_setzen(x)
 
     def darstellung() -> None:
+        """Fenster & Darstellung: Breite der Zeitachse (bis zum Ende der Achse — Messung
+        oder gebundener Abschnitt), Werteachsen der gezeigten Kurven, Fenster je Kurve.
+        Im Vollbild die Kurven beider Achsen, hochkant Hauptkurve und Bereich."""
         a = state.ansicht()
-        page.show_dialog(
-            darstellung_blatt(
+        zeit = Zeitachse(
+            fenster.breite_s, lambda s: breite_setzen(s), max_s=achse_ende() - achse_anfang()
+        )
+        if m.vollbild:
+            links, rechts = a.achsen(m.angebot)
+            blatt = darstellung_blatt(
                 page,
                 state,
                 lambda: nur_kurven(),
                 kurven=[k for k in (*a.links, *a.rechts) if k != ROH],
+                achsen=werteachsen(a, [*links, *rechts], roh_titel),
+                zeitachse=zeit,
             )
-        )
+        else:
+            ohne = [] if rec.hat_rr else ohne_rr()
+            haupt = ["hf_geraet"] if z.nur_puls else [ROH]
+            gezeigt = [k for g in kurvengruppen(a, analyse.bereich, ohne) for k in g]
+            blatt = darstellung_blatt(
+                page,
+                state,
+                lambda: zeichnen(),
+                achsen=werteachsen(a, [*haupt, *gezeigt], roh_titel),
+                zeitachse=zeit,
+            )
+        page.show_dialog(blatt)
 
     def vollbild_umschalten() -> None:
         m.vollbild = not m.vollbild
@@ -2892,16 +2942,19 @@ def _aufbauen(
             ),
             kacheln_box,
             karte(
+                # Wie live (Ben, 21.10.2026): Ablesen, Vollbild, Fenster & Darstellung
+                # zweiter von rechts, Menü ⋮ mit Info (was die Farben heißen), Korrektur
+                # und den Ansichten
                 kartentitel(
                     roh_titel,
-                    # Was die Farben heißen — vorher grauer Text unter den Notizen (Ben, 17.10.)
-                    info_knopf(page, "So liest du die Kurve", _kurven_info(z.nur_puls, verworfen)),
                     ablesen_knopf,
                     ft.IconButton(
                         ft.Icons.FULLSCREEN,
                         tooltip="Vollbild (quer): zwei Achsen, Notizen und Abschnitte genau setzen",
                         on_click=lambda: vollbild_umschalten(),
                     ),
+                    darstellung_knopf(lambda: darstellung()),
+                    analyse.menue,
                 ),
                 ebenen_box,
                 bindung_box,

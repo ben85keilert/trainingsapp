@@ -109,6 +109,37 @@ def test_rechte_achse_ohne_punkte_haelt_den_platz() -> None:
     assert nur_rechts.right_axis.labels[0].label.value != ""
 
 
+def test_feste_achse_schneidet_ab_statt_zu_stauchen() -> None:
+    """Ben, 21.10.2026: RR fest 500–1500 — die Achse bleibt, ein Ausreißer reißt am Rand ab,
+    statt die Kurve zu stauchen oder als Plateau am Rand entlangzulaufen."""
+    c = kurve([Reihe([(0, 800), (1, 1700), (2, 900)])], einheit="RR ms", y_fest=(500, 1500))
+    assert (c.min_y, c.max_y) == (470.0, 1530.0)
+    assert [label.value for label in c.left_axis.labels] == [500, 750, 1000, 1250, 1500]
+    teile = [[(p.x, p.y) for p in s.points] for s in c.data_series]
+    assert len(teile) == 2  # die Linie reißt oben ab und kommt wieder herein
+    assert teile[0][-1][1] == teile[1][0][1] == c.max_y
+    assert teile[0][0] == (0, 800) and teile[1][-1] == (2, 900)
+    # Ohne festen Bereich: wie immer nach den Werten
+    auto = kurve([Reihe([(0, 800), (1, 1700), (2, 900)])], einheit="RR ms")
+    assert auto.max_y > 1700
+
+
+def test_feste_rechte_achse_haelt_ihre_grenzen() -> None:
+    """Vollbild: RMSSD rechts fest 0–100, das Tachogramm links automatisch."""
+    from trainingsapp.ui.components.kurve import Skala
+
+    rmssd = Skala([Reihe([(0, 35), (60, 140)])], "ms", 20, 1, fest=(0, 100))
+    c = kurve([Reihe([(0, 900), (60, 1160)])], einheit="RR ms", rechts=rmssd)
+    rechts = [label.label.value for label in c.right_axis.labels]
+    assert rechts == ["0", "25", "50", "75", "100"]
+    assert max(p.y for p in c.data_series[-1].points) == c.max_y  # 140: am Rand abgeschnitten
+    # Fest, aber rechts nichts im Ausschnitt: die Zahlen stehen trotzdem da
+    leer = kurve(
+        [Reihe([(0, 900), (60, 1160)])], einheit="RR ms", rechts=Skala([], "ms", fest=(0, 100))
+    )
+    assert [label.label.value for label in leer.right_axis.labels][-1] == "100"
+
+
 def test_x_achse_mit_nullpunkt_fuer_runde_uhrzeiten() -> None:
     """Uhrzeit-Achse (20.10.2026): Marken an ``x_null + k·Schritt``, Flet bekommt ``baseline_x``."""
     c = kurve([Reihe([(0, 800), (120, 810)])], einheit="RR ms", x_von=0, x_bis=120, x_null=-7)

@@ -37,7 +37,7 @@ import flet as ft
 from hrv_core.atmung import ATEMUEBUNG, RUHE
 
 from trainingsapp.core.hrv_ansicht import LINKS, RECHTS, ROH
-from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER
+from trainingsapp.core.hrv_einstellungen import FENSTER_MAX_S
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.devices.base import Verbindung
@@ -50,7 +50,7 @@ from trainingsapp.ui.components.notizen import (
     uebungs_katalog,
     uebungsquellen,
 )
-from trainingsapp.ui.components.verlauf import FARBEN, darstellung_blatt, fenster_text
+from trainingsapp.ui.components.verlauf import FARBEN, Zeitachse, darstellung_blatt
 from trainingsapp.ui.components.vollbild import (
     ETIKETT_PX,
     LEISTE_PX,
@@ -59,9 +59,6 @@ from trainingsapp.ui.components.vollbild import (
     ablese_seite,
     angebot,
     doppelkurve,
-    geraet_wert,
-    intervall_werte,
-    kennzahl_werte,
     lage_px,
     leiste,
     markieren,
@@ -70,11 +67,25 @@ from trainingsapp.ui.components.vollbild import (
     seiten_wahl,
     seitenkopf,
     werkzeug,
+    werteachsen,
 )
 from trainingsapp.ui.components.zeitachse import achse, achsen_knopf
-from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
+from trainingsapp.ui.components.zeitfenster import (
+    Fenster,
+    breiten_auswahl,
+    breiten_wahl,
+    wischbar,
+)
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.views.messung import ohne_rr, tachogramm_reihen
+from trainingsapp.ui.views.messung import (
+    ablese_kopf_live,
+    ablese_werte_live,
+    ohne_rr,
+    schlag_bei_live,
+    schlag_weiter_live,
+    strich_anfang_live,
+    tachogramm_reihen,
+)
 
 #: Platz über der Kurve (Kopfzeile) und Ränder — für die Schätzung vor der Messung (px)
 _KOPF_PX = 56
@@ -107,6 +118,9 @@ class _Stand:
     angebot: list[str] = field(default_factory=list)
     rechts: float = 0.0
     gesehen: dict[str, tuple[str, list[tuple[float, float]]]] = field(default_factory=dict)
+    #: Woraus die Ablesewerte zuletzt gebaut wurden — gleich: nicht neu bauen (ein neuer
+    #: Knopf verlöre einen Tipp, der gerade läuft)
+    ablese_karte: tuple[Any, ...] | None = None
 
 
 def live_vollbild_view(page: ft.Page, state: AppState) -> ft.View:
@@ -207,6 +221,7 @@ def _vollbild(
         katalog=(lambda: uebungs_katalog(state)) if einst.notiz_uebungen else None,
         breite=lambda: fenster.breite_s,
         zeit_modus=UHR if einst.achse_uhrzeit else DAUER,
+        dialog=page.show_dialog,
     )
 
     def timer_notizen() -> None:
@@ -237,31 +252,16 @@ def _vollbild(
         notizfeld.bearbeiten(i)
 
     def notiz_loeschen(i: int) -> None:
+        """Löschen am Etikett — nach Rückfrage, mit „Rückgängig“ (Ben, 21.10.2026)."""
         st.etikett = None
-        weg = notizfeld.entfernen(i)
-        if weg is None:
-            return
-        page.show_dialog(
-            ft.SnackBar(
-                ft.Text("Notiz gelöscht"),
-                action=ft.SnackBarAction(
-                    "Rückgängig", on_click=lambda: notizfeld.zurueckholen(weg)
-                ),
-            )
-        )
+        notizfeld.loeschen_fragen(i)
+        aktualisieren(erzwingen=True)
 
     def etikett_schliessen() -> None:
         st.etikett = None
         aktualisieren(erzwingen=True)
 
-    # -- Ablesen ----------------------------------------------------------------------------
-
-    def schlaege_um(x: float) -> list[float]:
-        return [p.t_s for p in lauf.live.punkte(seit_s=x - 10) if p.rr_ms > 0 and p.t_s <= x + 10]
-
-    def schlag_bei(x: float) -> float:
-        zeiten = schlaege_um(x)
-        return min(zeiten, key=lambda t: abs(t - x)) if zeiten else x
+    # -- Ablesen (wie hochkant: `messung.schlag_bei_live` …) ---------------------------------
 
     def ablesen_umschalten() -> None:
         st.ablesen = not st.ablesen
@@ -269,11 +269,11 @@ def _vollbild(
             st.etikett = None
             if fenster.ende_s is None:
                 fenster.ende_s = lauf.jetzt_s()  # anhalten, damit man ablesen kann
-            st.strich = schlag_bei(mitte())
+            st.strich = strich_anfang_live(lauf, *fenster.bereich(lauf.jetzt_s(), anfang()))
         aktualisieren(erzwingen=True)
 
     def strich_setzen(x: float, *, zeichnen: bool = True) -> None:
-        st.strich = schlag_bei(x)
+        st.strich = schlag_bei_live(lauf, x)
         if zeichnen:
             aktualisieren(erzwingen=True)
 
@@ -282,8 +282,7 @@ def _vollbild(
         jetzt = st.strich
         if jetzt is None:
             return
-        weiter = [t for t in schlaege_um(jetzt) if (t - jetzt) * richtung > 1e-6]
-        neu = min(weiter, key=lambda t: abs(t - jetzt)) if weiter else jetzt
+        neu = schlag_weiter_live(lauf, jetzt, richtung)
         st.strich = neu
         x_von, x_bis = fenster.bereich(lauf.jetzt_s(), anfang())
         if not x_von <= neu <= x_bis:
@@ -291,36 +290,24 @@ def _vollbild(
             fenster.ende_s = fenster.ende_s or lauf.jetzt_s()
         aktualisieren(erzwingen=True)
 
-    def ablese_werte(x: float) -> list[tuple[str | None, str, str, str]]:
-        punkte = [p for p in lauf.live.punkte(seit_s=x - 3) if p.rr_ms > 0 and p.t_s <= x + 3]
-        p = min(punkte, key=lambda q: abs(q.t_s - x), default=None)
-        rr = zusatz = None
-        if p is not None:
-            rr = p.rr_korr if einst.korrigiert and p.rr_korr else float(p.rr_ms)
-            zusatz = " (verworfen)" if p.verworfen else " (auffällig)" if p.artefakt else ""
-        return (
-            intervall_werte(rr, zusatz or "", verity=verity)
-            + geraet_wert(lauf.live.hf_reihe(), x)
-            # hf_geraet steht schon da, aus dem Gerät
-            + kennzahl_werte(st.gesehen, x, ohne=("hf_geraet",))
-        )
-
     def ablesen_zeichnen(x_von: float, x_bis: float) -> None:
         x = st.strich
         ablese_box.visible = st.ablesen and x is not None
         if not ablese_box.visible or x is None:
-            ablese_box.content = None
+            ablese_box.content, st.ablese_karte = None, None
             return
-        zb = lauf.notiz_zeitbezug()
-        uhr = zb.uhr(zb.anker(x)) if zb is not None else ""
-        ablese_box.content = ablese_karte(
-            _uhr(x) + (f" · {uhr} Uhr" if uhr else ""),
-            "",
-            ablese_werte(x),
-            schritt=strich_schritt,
-            schliessen=ablesen_umschalten,
-            schwebend=True,
-        )
+        kopf_ = ablese_kopf_live(lauf, x)
+        werte = ablese_werte_live(lauf, x, st.gesehen, korrigiert=einst.korrigiert, verity=verity)
+        if (kopf_, werte) != st.ablese_karte:
+            st.ablese_karte = (kopf_, werte)
+            ablese_box.content = ablese_karte(
+                kopf_,
+                "",
+                werte,
+                schritt=strich_schritt,
+                schliessen=ablesen_umschalten,
+                schwebend=True,
+            )
         ablese_seite(ablese_box, x, x_von, x_bis, st.rechts)
 
     # -- Gesten in der Kurve ----------------------------------------------------------------
@@ -479,13 +466,13 @@ def _vollbild(
         st.ablesen = False  # „Live" heißt: wieder mitlaufen
         aktualisieren(erzwingen=True)
 
-    def fenster_wechseln(e: ft.Event[ft.SegmentedButton]) -> None:
-        if not e.control.selected:
-            return
-        fenster.breite_s = int(e.control.selected[0])
+    def breite_waehlen(breite_s: float) -> None:
+        """Ein Breitenknopf oder die eingetippte Breite — dieselbe Einstellung wie hochkant."""
+        fenster.breite_s = breite_s
         aktuell = state.hrv_einstellungen()
-        aktuell.fenster_s = int(fenster.breite_s)
+        aktuell.fenster_s = round(breite_s)
         state.hrv_einstellungen_setzen(aktuell)
+        breiten_knoepfe.selected = breiten_auswahl(breite_s)
         aktualisieren(erzwingen=True)
 
     def achse_umschalten() -> None:
@@ -498,13 +485,17 @@ def _vollbild(
         aktualisieren(erzwingen=True)
 
     def darstellung() -> None:
+        """Fenster & Darstellung der gezeigten Kurven — samt Zeitachse und Werteachsen."""
         a = state.ansicht()
+        links, rechts = a.achsen(st.angebot)
         page.show_dialog(
             darstellung_blatt(
                 page,
                 state,
                 lambda: aktualisieren(erzwingen=True),
                 kurven=[k for k in (*a.links, *a.rechts) if k != ROH],
+                achsen=werteachsen(a, [*links, *rechts], roh_titel),
+                zeitachse=Zeitachse(fenster.breite_s, breite_waehlen, max_s=FENSTER_MAX_S),
             )
         )
 
@@ -531,6 +522,8 @@ def _vollbild(
             controls=[seitenkopf("Notizen", lambda: notizen_umschalten()), notizfeld.control],
         ),
     )
+    #: Dieselben Knöpfe wie hochkant und in der Aufzeichnung (Ben, 21.10.2026)
+    breiten_knoepfe = breiten_wahl(fenster.breite_s, breite_waehlen, kompakt=True)
     kopf = ft.Row(
         spacing=2,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -539,19 +532,7 @@ def _vollbild(
             links_box,
             ft.Container(expand=True),
             lage_box,
-            ft.SegmentedButton(
-                selected=[str(fenster.breite_s if fenster.breite_s in LIVE_FENSTER else 120)],
-                show_selected_icon=False,
-                style=ft.ButtonStyle(
-                    visual_density=ft.VisualDensity.COMPACT,
-                    padding=ft.Padding.symmetric(horizontal=6),
-                ),
-                segments=[
-                    ft.Segment(value=str(s), label=ft.Text(fenster_text(s), size=12))
-                    for s in LIVE_FENSTER
-                ],
-                on_change=fenster_wechseln,
-            ),
+            breiten_knoepfe,
             achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten),
             ft.Container(expand=True),
             rechts_box,

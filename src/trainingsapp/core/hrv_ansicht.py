@@ -25,6 +25,11 @@ eine eigene Festlegung für kleine Bildschirme, keine fachliche. Weil gleiche
 Achsen sich ein Diagramm teilen und je Bereich nur dessen Kurven stehen, wächst
 die Ansicht langsamer als die Zahl der Kurven.
 
+**Feste Werteachsen** (Ben, 21.10.2026): Sonst richtet sich jede y-Achse nach den
+Werten im Ausschnitt; wer eine ruhige, vergleichbare Ansicht will, legt sie fest,
+z. B. RR 500–1500 ms (``y_achsen``). Gemerkt wird je **Werteachse**, nicht je
+Kurve — RMSSD und SDNN teilen sich eine, das Tachogramm die von Ø RR.
+
 Kein Wissen über die Kennzahlen selbst: Die Schlüssel sind Text, Achse und
 Bereich reicht die Oberfläche herein. Dieses Modul importiert nichts aus
 anderen Schichten.
@@ -33,6 +38,7 @@ anderen Schichten.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -65,8 +71,8 @@ BLOCK: Final[str] = "block"
 PNN_WAHL: Final[tuple[int, ...]] = (10, 20, 30, 40, 50, 100)
 PNN_STANDARD: Final[int] = 50
 #: Formatstand der gespeicherten Ansicht; ältere werden beim Lesen ergänzt
-#: (4: Kurven des Vollbilds je Achse)
-VERSION: Final[int] = 4
+#: (4: Kurven des Vollbilds je Achse; 5: feste Werteachsen)
+VERSION: Final[int] = 5
 #: Vollbild: das Tachogramm (RR bzw. PPI) — keine Kennzahl, aber wählbar wie eine
 ROH: Final[str] = "roh"
 #: Seiten der Werteachsen im Vollbild
@@ -107,9 +113,28 @@ class Ansicht:
     #: Vollbild: Kurven an der linken und der rechten Achse (`ROH` = Tachogramm)
     links: list[str] = field(default_factory=lambda: list(VOLL_LINKS))
     rechts: list[str] = field(default_factory=lambda: list(VOLL_RECHTS))
+    #: Feste Werteachsen: Achsenschlüssel → (von, bis); fehlt einer, gilt die Automatik
+    y_achsen: dict[str, tuple[float, float]] = field(default_factory=dict)
 
     def fenster_fuer(self, kennzahl: str, vorgabe: float) -> int:
         return int(self.fenster.get(kennzahl, vorgabe))
+
+    def y_bereich(self, achse: str | None) -> tuple[float, float] | None:
+        """Der feste Bereich dieser Werteachse — ``None``: automatisch."""
+        return self.y_achsen.get(achse) if achse else None
+
+    def y_setzen(self, achse: str, bereich: tuple[float, float] | None) -> None:
+        """Eine Werteachse festlegen oder (``None``) wieder der Automatik überlassen.
+
+        >>> a = Ansicht(); a.y_setzen("rr", (500, 1500)); a.y_bereich("rr"), a.y_bereich("var")
+        ((500.0, 1500.0), None)
+        >>> a.y_setzen("rr", (900, 900)); a.y_bereich("rr") is None  # leer: wieder automatisch
+        True
+        """
+        if bereich is None or not _bereich_ok(*bereich):
+            self.y_achsen.pop(achse, None)
+        else:
+            self.y_achsen[achse] = (float(bereich[0]), float(bereich[1]))
 
     def modus_fuer(self, kennzahl: str) -> str:
         return BLOCK if self.modus.get(kennzahl) == BLOCK else GLEITEND
@@ -268,6 +293,7 @@ class Ansicht:
             "bereich": self.bereich,
             "links": list(self.links),
             "rechts": list(self.rechts),
+            "y_achsen": {k: list(v) for k, v in self.y_achsen.items()},
         }
 
     @classmethod
@@ -280,6 +306,9 @@ class Ansicht:
         >>> alt = Ansicht.aus_dict({"name": "Alt", "kurven": ["pnn50", "rmssd"]})
         >>> alt.kurven
         ['pnnx', 'rmssd', 'lf_power', 'hf_power', 'sd1', 'dfa_alpha1', 'atemfrequenz', 'lf_hf']
+        >>> y = {"rr": [500, 1500], "var": [9, 3], "x": "kaputt"}
+        >>> Ansicht.aus_dict({"y_achsen": y}).y_achsen  # nur Brauchbares
+        {'rr': (500.0, 1500.0)}
         """
         if not isinstance(d, dict):
             return cls()
@@ -309,6 +338,12 @@ class Ansicht:
         }
         pnn = d.get("pnn_ms")
         links = _seite(d.get("links"), VOLL_LINKS) or list(VOLL_LINKS)
+        y_roh = d.get("y_achsen")
+        y_achsen = {
+            str(k): (float(v[0]), float(v[1]))
+            for k, v in (y_roh.items() if isinstance(y_roh, dict) else [])
+            if isinstance(v, list | tuple) and len(v) == 2 and _bereich_ok(*v)
+        }
         return cls(
             name=str(d.get("name") or "Standard"),
             kurven=list(dict.fromkeys(kurven)),
@@ -319,7 +354,18 @@ class Ansicht:
             bereich=str(d.get("bereich") or "zeit"),
             links=links,
             rechts=[k for k in _seite(d.get("rechts"), VOLL_RECHTS) if k not in links],
+            y_achsen=y_achsen,
         )
+
+
+def _bereich_ok(lo: Any, hi: Any) -> bool:
+    """Zwei endliche Zahlen, ``lo`` unter ``hi`` — sonst kein fester Bereich.
+
+    >>> _bereich_ok(500, 1500), _bereich_ok(3, 3), _bereich_ok(True, 2), _bereich_ok(0, "9")
+    (True, False, False, False)
+    """
+    zahlen = all(isinstance(x, int | float) and not isinstance(x, bool) for x in (lo, hi))
+    return zahlen and math.isfinite(lo) and math.isfinite(hi) and lo < hi
 
 
 def _seite(roh: Any, vorgabe: Iterable[str]) -> list[str]:

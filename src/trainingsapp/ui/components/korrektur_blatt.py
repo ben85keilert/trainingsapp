@@ -297,4 +297,12 @@ def regler_knopf(oeffnen: Callable[[], Any], tooltip: str = "Automatische Korrek
     return ft.IconButton(ft.Icons.TUNE, tooltip=tooltip, icon_size=20, on_click=oeffnen)
 
 
-__all__ = ["korrektur_blatt", "regler_knopf"]
+def regler_eintrag(oeffnen: Callable[[], Any]) -> ft.PopupMenuItem:
+    """Die automatische Korrektur als Eintrag im Menü ⋮ der Kurven (Ben, 21.10.2026) —
+    der Regler-Knopf daneben ist seither „Fenster & Darstellung“."""
+    return ft.PopupMenuItem(
+        content="Automatische Korrektur …", icon=ft.Icons.AUTO_FIX_HIGH, on_click=oeffnen
+    )
+
+
+__all__ = ["korrektur_blatt", "regler_eintrag", "regler_knopf"]

@@ -356,6 +356,7 @@ def tagesansicht(
                     ft.Text(f"{uebung.name}: gemacht"),
                     action="Rückgängig",
                     on_action=rueckgaengig(eintrag.id),
+                    persist=False,  # mit Aktion bliebe sie stehen (`dialoge.meldung`)
                 )
             )
 
@@ -403,6 +404,7 @@ def tagesansicht(
                     ft.Text(f"„{plan.name}“ ist für heute weg — „Anderen Plan“ holt ihn zurück."),
                     action="Rückgängig",
                     on_action=zurueckholen,
+                    persist=False,  # mit Aktion bliebe sie stehen (`dialoge.meldung`)
                 )
             )
 

@@ -8,7 +8,9 @@ waagrechte Bewegungen, die Seite scrollt weiter.
 
 Zoomen geht über die Fensterbreite (Knöpfe) — eine Zwei-Finger-Geste
 bräuchte in Flet einen Skalier-Erkenner, und der nähme der Seite auch das
-senkrechte Scrollen.
+senkrechte Scrollen. Live und in der Aufzeichnung sind es dieselben vier
+Knöpfe (`breiten_wahl`, Ben 21.10.2026); jede andere Breite tippt man unter
+„Fenster & Darstellung“ ein (`BreiteFeld`).
 
 **Last beim Wischen** (gemessen 14.10.2026, `docs/plan_analyse_leistung.md`):
 Ohne `drag_interval` schickt Flet jede Fingerbewegung als Ereignis, und nach
@@ -28,6 +30,7 @@ zurückgesetzt) — das ist der ganze Weg. Darum zählt hier `local_delta`.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -35,7 +38,20 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core.hrv_einstellungen import FENSTER_MIN_S
+from trainingsapp.core.zeitangabe import breite_lesen, dauer_text
 from trainingsapp.ui.components.layout import ohne_auto_update
+
+#: Breiten der Zeitachse (s) — „Min“ hinten dran (Ben, 19.10.2026), live und in der
+#: Aufzeichnung dieselben (21.10.2026)
+BREITEN: tuple[tuple[int, str], ...] = (
+    (60, "1 Min"),
+    (120, "2 Min"),
+    (300, "5 Min"),
+    (600, "10 Min"),
+)
+#: Was das Feld „Breite der Zeitachse“ versteht
+BREITE_UNLESBAR = "Nicht lesbar — z. B. 3, 1:30 oder 90 s"
 
 #: Höchstens so oft je Sekunde wird beim Wischen neu gezeichnet
 _WISCH_HZ = 8.0
@@ -204,4 +220,110 @@ def zeit_unter(
     return round(von + anteil * (bis - von), 3)
 
 
-__all__ = ["Fenster", "wischbar", "zeit_unter"]
+# ---------------------------------------------------------------------------
+# Breite wählen: vier Knöpfe, jede andere eintippen
+# ---------------------------------------------------------------------------
+
+
+def breiten_auswahl(breite_s: float) -> list[str]:
+    """Der gewählte Knopf zu einer Breite — keiner, wenn sie zu keinem passt.
+
+    >>> breiten_auswahl(120.0), breiten_auswahl(210), breiten_auswahl(0)
+    (['120'], [], [])
+    """
+    return [str(s) for s, _ in BREITEN if abs(breite_s - s) < 0.5]
+
+
+def breiten_wahl(
+    breite_s: float, waehlen: Callable[[float], None], *, kompakt: bool = False
+) -> ft.SegmentedButton:
+    """1 · 2 · 5 · 10 Min — hochkant über die volle Breite, im Vollbild ``kompakt``.
+
+    Jede andere Breite (eingetippt, ein Abschnitt, die ganze Messung) wählt keinen
+    Knopf; das Fenster behält sie trotzdem. Nach einer Änderung von außen stellt
+    `breiten_auswahl` die Wahl nach.
+    """
+
+    def gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+        if e.control.selected:
+            waehlen(float(e.control.selected[0]))
+
+    return ft.SegmentedButton(
+        selected=breiten_auswahl(breite_s),
+        allow_empty_selection=True,
+        show_selected_icon=False,
+        expand=not kompakt,
+        style=ft.ButtonStyle(
+            visual_density=ft.VisualDensity.COMPACT, padding=ft.Padding.symmetric(horizontal=6)
+        )
+        if kompakt
+        else None,
+        segments=[
+            ft.Segment(value=str(s), label=ft.Text(t, size=12 if kompakt else None))
+            for s, t in BREITEN
+        ],
+        on_change=gewaehlt,
+    )
+
+
+class BreiteFeld:
+    """Die Breite der Zeitachse eintippen — unter „Fenster & Darstellung“ (Ben, 21.10.2026).
+
+    Eine Zahl sind Minuten, dazu ``m:ss`` oder „90 s“ (`core.zeitangabe.breite_lesen`);
+    übernommen wird beim Bestätigen, beim Verlassen des Felds und — über `uebernehmen` —
+    beim Schließen des Blatts. Zu klein oder größer als ``max_s`` (live der Puffer, in
+    der Aufzeichnung die Messung) wird an die Grenze gesetzt.
+    """
+
+    def __init__(
+        self, breite_s: float, setzen: Callable[[float], None], *, max_s: float | None = None
+    ) -> None:
+        self._setzen = setzen
+        self._max_s = max_s
+        self._breite_s = float(breite_s)
+        self.control = ft.TextField(
+            label="Breite der Zeitachse",
+            value=dauer_text(breite_s),
+            suffix="min",
+            helper="z. B. 3 · 1:30 · 90 s",
+            dense=True,
+            width=220,
+            keyboard_type=ft.KeyboardType.DATETIME,
+            on_submit=lambda _: self.uebernehmen(),
+            on_blur=lambda _: self.uebernehmen(),
+        )
+
+    def anzeigen(self, breite_s: float) -> None:
+        """Eine Breite, die anders gewählt wurde (ein Knopf), ins Feld schreiben."""
+        self._breite_s = float(breite_s)
+        self.control.value = dauer_text(breite_s)
+        self.control.error = None
+        with contextlib.suppress(Exception):
+            self.control.update()
+
+    def uebernehmen(self) -> None:
+        """Den getippten Wert übernehmen — unverändert passiert nichts."""
+        sekunden = breite_lesen(self.control.value or "")
+        if sekunden is None:
+            self.control.error = BREITE_UNLESBAR
+        else:
+            obergrenze = self._max_s if self._max_s is not None else sekunden
+            sekunden = float(round(min(max(sekunden, FENSTER_MIN_S), max(obergrenze, 1.0))))
+            self.control.error = None
+            self.control.value = dauer_text(sekunden)
+            if abs(sekunden - self._breite_s) >= 0.5:
+                self._breite_s = sekunden
+                self._setzen(sekunden)
+        with contextlib.suppress(Exception):  # Blatt schon zu
+            self.control.update()
+
+
+__all__ = [
+    "BREITEN",
+    "BreiteFeld",
+    "Fenster",
+    "breiten_auswahl",
+    "breiten_wahl",
+    "wischbar",
+    "zeit_unter",
+]

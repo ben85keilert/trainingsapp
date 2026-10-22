@@ -29,6 +29,9 @@ _TAG_S = 86400.0
 
 _DAUER = re.compile(r"^\s*([-−+]?)\s*(?:(\d+):)?(?:(\d+):)?(\d+(?:[.,]\d*)?)\s*(?:s|sek)?\s*$")
 _UHR = re.compile(r"^\s*(\d{1,2})[:.](\d{2})(?::(\d{2}))?\s*(?:Uhr)?\s*$", re.IGNORECASE)
+_BREITE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*(s|sek|sec|m|min|h|std)?\.?\s*$", re.IGNORECASE)
+#: Einheit einer eingetippten Breite → Sekunden; ohne Einheit sind es Minuten
+_BREITE_EINHEIT = {"s": 1, "sek": 1, "sec": 1, "m": 60, "min": 60, "h": 3600, "std": 3600}
 
 
 def dauer_text(sekunden: float) -> str:
@@ -57,6 +60,32 @@ def dauer_lesen(text: str) -> float | None:
     for faktor, wert in zip((60, 3600), reversed(teile), strict=False):
         sekunden += faktor * wert
     return -sekunden if vorzeichen in ("-", "−") else sekunden
+
+
+def breite_lesen(text: str) -> float | None:
+    """Eine eingetippte Breite der Zeitachse in Sekunden (Ben, 21.10.2026).
+
+    Eine Zahl allein heißt **Minuten** — so sind auch die Knöpfe beschriftet;
+    ``m:ss`` und ``h:mm:ss`` wie bei `dauer_lesen`, dazu „90 s“, „1,5 h“. ``None``,
+    wenn nichts Lesbares oder nichts Positives dasteht.
+
+    >>> breite_lesen("3"), breite_lesen("2,5"), breite_lesen("1:30"), breite_lesen("90 s")
+    (180.0, 150.0, 90.0, 90.0)
+    >>> breite_lesen("15 Min"), breite_lesen("1 h"), breite_lesen("1:00:00")
+    (900.0, 3600.0, 3600.0)
+    >>> breite_lesen(""), breite_lesen("abc"), breite_lesen("0"), breite_lesen("-2")
+    (None, None, None, None)
+    """
+    text = (text or "").strip()
+    if ":" in text:
+        sekunden = dauer_lesen(text)
+    else:
+        m = _BREITE.match(text)
+        if m is None:
+            return None
+        zahl, einheit = m.groups()
+        sekunden = float(zahl.replace(",", ".")) * _BREITE_EINHEIT[(einheit or "min").lower()]
+    return sekunden if sekunden is not None and sekunden > 0 else None
 
 
 def _lokal(start_utc: datetime) -> datetime:
@@ -166,6 +195,7 @@ def x_aus_wand(zb: Zeitbezug, t_wall_s: float) -> float | None:
 __all__ = [
     "DAUER",
     "UHR",
+    "breite_lesen",
     "dauer_lesen",
     "dauer_text",
     "tagessekunden",

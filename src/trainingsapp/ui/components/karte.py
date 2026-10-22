@@ -55,34 +55,49 @@ def hinweis(text: str) -> ft.Text:
     return ft.Text(text, size=11, opacity=0.6)
 
 
+def info_zeigen(page: Any, ueberschrift: str, text: str | Callable[[], str]) -> None:
+    """``text`` (Markdown; als Funktion erst jetzt gelesen) in einem Blatt von unten."""
+    inhalt = text() if callable(text) else text
+    page.show_dialog(
+        ft.BottomSheet(
+            show_drag_handle=True,
+            scrollable=True,
+            content=ft.Container(
+                padding=ft.Padding.only(left=20, right=20, bottom=24),
+                content=ft.Column(
+                    tight=True,
+                    spacing=10,
+                    controls=[
+                        ft.Text(ueberschrift, size=17, weight=ft.FontWeight.W_600),
+                        ft.Markdown(inhalt),
+                    ],
+                ),
+            ),
+        )
+    )
+
+
 def info_knopf(page: Any, ueberschrift: str, text: str | Callable[[], str]) -> ft.Control:
     """Ein kleines „i“, das ``text`` in einem Blatt zeigt — für den Kartentitel.
 
     ``text`` darf Markdown sein (Absätze, **fett**, Aufzählungen); als Funktion
     wird er erst beim Antippen gelesen (z. B. je nach Gerät ein anderer).
     """
-
-    def zeigen() -> None:
-        inhalt = text() if callable(text) else text
-        page.show_dialog(
-            ft.BottomSheet(
-                show_drag_handle=True,
-                scrollable=True,
-                content=ft.Container(
-                    padding=ft.Padding.only(left=20, right=20, bottom=24),
-                    content=ft.Column(
-                        tight=True,
-                        spacing=10,
-                        controls=[
-                            ft.Text(ueberschrift, size=17, weight=ft.FontWeight.W_600),
-                            ft.Markdown(inhalt),
-                        ],
-                    ),
-                ),
-            )
-        )
-
-    return ft.IconButton(ft.Icons.INFO_OUTLINE, tooltip=ueberschrift, icon_size=20, on_click=zeigen)
+    return ft.IconButton(
+        ft.Icons.INFO_OUTLINE,
+        tooltip=ueberschrift,
+        icon_size=20,
+        on_click=lambda: info_zeigen(page, ueberschrift, text),
+    )
 
 
-__all__ = ["ABSTAND", "hinweis", "info_knopf", "karte", "titel"]
+def info_eintrag(page: Any, ueberschrift: str, text: str | Callable[[], str]) -> ft.PopupMenuItem:
+    """Dasselbe „i“ als Eintrag eines Menüs (Ben, 21.10.2026: Info ins Menü der Kurven)."""
+    return ft.PopupMenuItem(
+        content=ueberschrift,
+        icon=ft.Icons.INFO_OUTLINE,
+        on_click=lambda: info_zeigen(page, ueberschrift, text),
+    )
+
+
+__all__ = ["ABSTAND", "hinweis", "info_eintrag", "info_knopf", "info_zeigen", "karte", "titel"]

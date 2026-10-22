@@ -38,8 +38,12 @@ STANDARD_GROSS: Final[tuple[str, ...]] = ("hf", "rr")
 UEBERSICHT: Final[str] = "uebersicht"
 KACHELN: Final[str] = "kacheln"
 
-#: Wählbare Breiten des Live-Zeitfensters (s)
+#: Breiten der Knöpfe über der Live-Kurve (s)
 LIVE_FENSTER: Final[tuple[int, ...]] = (60, 120, 300, 600)
+#: Eingetippte Breite der Zeitachse (Ben, 21.10.2026): mindestens 10 s, live höchstens
+#: so viel, wie der Puffer hält (`hrv_core.constants.LIVE_FENSTER_S`, 30 min)
+FENSTER_MIN_S: Final[int] = 10
+FENSTER_MAX_S: Final[int] = 1800
 
 #: Ebenen über der Hauptkurve einer Aufzeichnung (Ben, 19.10.2026, Plan D): Notizen (gelb),
 #: Leistungen der Person (blau, `person/leistung`), Abschnittsbalken — einzeln einblendbar
@@ -73,6 +77,8 @@ class HrvEinstellungen:
     True
     >>> HrvEinstellungen.aus_dict({"fenster_s": 7, "kacheln": "kaputt"}) == HrvEinstellungen()
     True
+    >>> HrvEinstellungen.aus_dict({"fenster_s": 210}).fenster_s  # eingetippt: 3:30 min
+    210
     >>> e = HrvEinstellungen.aus_dict({"live_spektrum_s": 30, "nachrechnen_ms": 7})
     >>> e.live_spektrum_s, e.nachrechnen_ms
     (30, 500)
@@ -90,7 +96,7 @@ class HrvEinstellungen:
     gross: list[str] = field(default_factory=lambda: list(STANDARD_GROSS))
     #: `UEBERSICHT` oder `KACHELN`
     darstellung: str = UEBERSICHT
-    #: Breite des Live-Zeitfensters (s)
+    #: Breite des Live-Zeitfensters (s) — ein Knopf (`LIVE_FENSTER`) oder eingetippt
     fenster_s: int = 120
     #: Live die korrigierte Kurve (Artefakte überbrückt) statt der rohen
     korrigiert: bool = True
@@ -180,7 +186,11 @@ class HrvEinstellungen:
             kacheln=kacheln,
             gross=gross,
             darstellung=darstellung if darstellung in (UEBERSICHT, KACHELN) else UEBERSICHT,
-            fenster_s=fenster if fenster in LIVE_FENSTER else vorgabe.fenster_s,
+            fenster_s=fenster
+            if isinstance(fenster, int)
+            and not isinstance(fenster, bool)
+            and FENSTER_MIN_S <= fenster <= FENSTER_MAX_S
+            else vorgabe.fenster_s,
             korrigiert=schalter("korrigiert"),
             frequenz=schalter("frequenz"),
             nichtlinear=schalter("nichtlinear"),
@@ -211,6 +221,8 @@ __all__ = [
     "BEREICH_FREQUENZ",
     "BEREICH_NICHTLINEAR",
     "BEREICH_ZEIT",
+    "FENSTER_MAX_S",
+    "FENSTER_MIN_S",
     "KACHELN",
     "LIVE_FENSTER",
     "LIVE_SPEKTRUM_S",

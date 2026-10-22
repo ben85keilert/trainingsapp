@@ -10,6 +10,12 @@ einen y-Bereich. Die Reihen der rechten Achse (`Skala`) werden darum in die
 Koordinaten der linken umgerechnet, und beide Achsen beschriften **dieselben
 Rasterlinien** mit eigenen runden Werten (`doppel_raster`) — ein Raster für
 beide Seiten, keine krummen Zahlen, und jede Kurve füllt die Höhe.
+
+**Feste Werteachse** (Ben, 21.10.2026, `Ansicht.y_achsen`): ``y_fest`` bzw.
+`Skala.fest` legen den Bereich fest, statt ihn aus den Werten im Ausschnitt zu
+nehmen — die Achse springt beim Wischen nicht. Was darüber oder darunter liegt,
+wird **abgeschnitten** (`abschneiden`): Die Linie läuft bis zum Rand und reißt dort
+ab. Am Rand entlang geklemmt sähe ein Ausreißer wie ein Plateau aus.
 """
 
 from __future__ import annotations
@@ -107,6 +113,8 @@ class Skala:
     schritt_min: float = 1.0
     #: Farbe der Beschriftung — die der Kurve, wenn es nur eine ist
     farbe: str | None = None
+    #: Fester Bereich ``(von, bis)`` statt der Automatik
+    fest: tuple[float, float] | None = None
 
 
 #: Platz einer beschrifteten y-Achse: Zahlen (``label_size``) plus Titel (px)
@@ -184,6 +192,72 @@ def abschnitte(
     return [_min_max(list(punkte[a:b]), eimer) for a, b in pairwise(grenzen)]
 
 
+def abschneiden(
+    punkte: Sequence[tuple[float, float]], naehte: Sequence[int], unten: float, oben: float
+) -> tuple[list[tuple[float, float]], list[int]]:
+    """Eine Linie an der Zeichenfläche ``unten``–``oben`` abschneiden (feste Werteachse).
+
+    Was darüber oder darunter liegt, fällt weg; die Linie läuft bis zum Rand und reißt
+    dort ab (neue Naht), statt am Rand entlangzulaufen. ``naehte`` zählen in ``punkte``,
+    die Rückgabe in die neue Liste.
+
+    >>> abschneiden([(0, 1), (1, 3), (2, 1)], [], 0, 2)
+    ([(0, 1), (0.5, 2.0), (1.5, 2.0), (2, 1)], [2])
+    >>> abschneiden([(0, 1), (1, 1.5), (2, 2.5), (3, 6)], [1], 0, 2)
+    ([(0, 1), (1, 1.5), (1.5, 2.0)], [1])
+    >>> abschneiden([(0, -1), (1, 3)], [], 0, 2)  # quer hindurch: nur das Stück dazwischen
+    ([(0.25, 0.0), (0.75, 2.0)], [])
+    """
+    vor = set(naehte)
+    out: list[tuple[float, float]] = []
+    neu: list[int] = []
+    #: Gehört der letzte Punkt in ``out`` zur laufenden Linie?
+    offen = False
+
+    def beginnen(p: tuple[float, float]) -> None:
+        if out and (not neu or neu[-1] != len(out)):
+            neu.append(len(out))
+        out.append(p)
+
+    for i, p in enumerate(punkte):
+        if i == 0 or i in vor:  # eine neue Linie beginnt
+            offen = unten <= p[1] <= oben
+            if offen:
+                beginnen(p)
+            continue
+        teil = _im_bereich(punkte[i - 1], p, unten, oben)
+        if teil is None:  # die ganze Strecke liegt draußen
+            offen = False
+            continue
+        a, b = teil
+        if not offen:  # sie kommt von draußen herein
+            beginnen(a)
+        out.append(b)
+        offen = b is p  # draußen geendet: die Linie reißt am Rand ab
+    return out, neu
+
+
+def _im_bereich(
+    a: tuple[float, float], b: tuple[float, float], unten: float, oben: float
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Das Stück der Strecke a–b zwischen ``unten`` und ``oben`` — Enden, die drin liegen,
+    kommen unverändert zurück (dasselbe Objekt)."""
+    (x0, y0), (x1, y1) = a, b
+    if y0 == y1:
+        return (a, b) if unten <= y0 <= oben else None
+    tu, to = (unten - y0) / (y1 - y0), (oben - y0) / (y1 - y0)
+    rein, raus = max(0.0, min(tu, to)), min(1.0, max(tu, to))
+    if rein > raus:
+        return None
+
+    def bei(t: float, grenze: float) -> tuple[float, float]:
+        return (round(x0 + t * (x1 - x0), 6), float(grenze))
+
+    anfang = a if rein <= 0.0 else bei(rein, unten if rein == tu else oben)
+    ende = b if raus >= 1.0 else bei(raus, unten if raus == tu else oben)
+    return anfang, ende
+
+
 def x_schritt(
     spanne: float, schritte: Sequence[float] = X_SCHRITTE, *, max_marken: int = X_MAX_LABELS
 ) -> float:
@@ -234,6 +308,41 @@ def y_raster(
     return unten, oben, schritt
 
 
+def y_raster_fest(lo: float, hi: float, schritt_min: float = 1.0) -> tuple[float, float, float]:
+    """``(unten, oben, schritt)`` für einen **festen** Bereich: die Grenzen selbst beschriftet.
+
+    Gesucht ist ein runder Schritt, auf dessen Vielfachen beide Grenzen liegen (höchstens
+    `Y_MAX_LABELS` Marken); darüber und darunter ein Rand wie in `doppel_raster`, damit
+    die Zahlen an den Grenzen nicht am Rahmen kleben. Passt keiner, stehen runde Marken
+    dazwischen.
+
+    >>> y_raster_fest(500, 1500), y_raster_fest(0, 100)
+    ((470.0, 1530.0, 250), (-3.0, 103.0, 25))
+    >>> y_raster_fest(550, 1450)  # krumme Grenzen: runde Marken dazwischen
+    (523.0, 1477.0, 200)
+    >>> y_raster_fest(0.5, 1.5, schritt_min=0.01)
+    (0.47, 1.53, 0.25)
+    """
+    stellen = 1 if schritt_min >= 1 else 3
+    for s in Y_SCHRITTE:
+        if s < schritt_min or (hi - lo) / s > Y_MAX_LABELS - 1 + 1e-9:
+            continue
+        if all(abs(g / s - round(g / s)) < 1e-6 for g in (lo, hi)):
+            rand = DOPPEL_RAND * s
+            return round(lo - rand, stellen), round(hi + rand, stellen), s
+    rand = 0.03 * (hi - lo)
+    unten, oben = round(lo - rand, stellen), round(hi + rand, stellen)
+    schritt = next(
+        (
+            s
+            for s in Y_SCHRITTE
+            if s >= schritt_min and _anzahl_vielfache(unten, oben, s) <= Y_MAX_LABELS
+        ),
+        Y_SCHRITTE[-1],
+    )
+    return unten, oben, schritt
+
+
 #: Wie viele Rasterabstände zwei Achsen teilen — erst 4, dann 3 und 5 (mehr Füllung gewinnt)
 DOPPEL_LINIEN = (4, 3, 5)
 #: Rand über der obersten und unter der untersten Linie, in Rasterabständen
@@ -241,7 +350,9 @@ DOPPEL_RAND = 0.12
 
 
 def doppel_raster(
-    links: tuple[float, float, float, float], rechts: tuple[float, float, float, float]
+    links: tuple[float, float, float, float],
+    rechts: tuple[float, float, float, float],
+    fest: tuple[bool, bool] = (False, False),
 ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
     """Ein Raster für zwei Werteachsen: ``((unten, oben, schritt), (anker, wert, rschritt))``.
 
@@ -253,20 +364,29 @@ def doppel_raster(
     steht bei ``anker + (r - wert) * schritt / rschritt``, an der Linie ``anker``
     steht rechts ``wert``.
 
+    ``fest``: Diese Seite hat einen festen Bereich (`Ansicht.y_achsen`) — dann zählt
+    zuerst, dass er seine Höhe füllt; sonst wählte die andere Seite beim Wischen
+    jedes Mal ein anderes n, und die feste Achse spränge doch.
+
     >>> doppel_raster((900, 1160, 100, 1), (35, 95, 20, 1))  # RR links, RMSSD rechts
     ((888.0, 1212.0, 100), (900.0, 25.0, 25))
     >>> doppel_raster((60, 75, 10, 1), (0.6, 1.2, 0.5, 0.01))  # Ø HF links, DFA α1 rechts
     ((59.4, 75.6, 5), (60.0, 0.6, 0.2))
+    >>> doppel_raster((0, 100, 0, 1), (900, 1160, 100, 1))  # RMSSD links, RR rechts
+    ((-6.0, 156.0, 50), (0.0, 900.0, 100))
+    >>> doppel_raster((0, 100, 0, 1), (900, 1160, 100, 1), fest=(True, False))  # 0–100 fest
+    ((-3.0, 103.0, 25), (0.0, 800.0, 100))
     """
-    beste: tuple[float, int, tuple[int, float], tuple[int, float]] | None = None
+    beste: tuple[tuple[float, float], int, tuple[int, float], tuple[int, float]] | None = None
     for n in DOPPEL_LINIEN:
         l_ = _passend(*links, n)
         r_ = _passend(*rechts, n)
         if l_ is None or r_ is None:
             continue
-        guete = min(l_[2], r_[2])
-        if beste is None or guete > beste[0] + 1e-9:
-            beste = (guete, n, l_[:2], r_[:2])
+        feste = [f for f, ja in zip((l_[2], r_[2]), fest, strict=True) if ja]
+        rang = (round(min(feste, default=1.0), 9), round(min(l_[2], r_[2]), 9))
+        if beste is None or rang > beste[0]:
+            beste = (rang, n, l_[:2], r_[:2])
     if beste is None:  # nur bei absurden Spannen — dann eben grob
         q = Y_SCHRITTE[-1]
         return y_raster(links[0], links[1], links[2], links[3]), (0.0, 0.0, q)
@@ -431,6 +551,7 @@ def kurve(
     x_null: float = 0.0,
     rechts: Skala | None = None,
     farbe: str | None = None,
+    y_fest: tuple[float, float] | None = None,
 ) -> ft.Control:
     """Ein Liniendiagramm, auf der x-Achse meist die Zeit (s).
 
@@ -441,6 +562,9 @@ def kurve(
     übrigen Reihen werden auf ihren Bereich begrenzt (Flet schneidet nicht ab,
     sie lägen sonst über den Beschriftungen). ``x_text``/``x_schritte``:
     Beschriftung und runde Schritte einer anderen x-Achse (Hz, ms).
+
+    ``y_fest``: fester Bereich ``(von, bis)`` der linken Achse statt der Automatik —
+    Linien darüber und darunter schneidet `abschneiden` ab (Modulbeschreibung).
 
     ``rechts``: eine zweite Werteachse mit eigenen Reihen (`zweite_achse`). Ist
     sie gegeben, steht sie auch ohne Punkte da — sonst spränge die Breite der
@@ -460,35 +584,56 @@ def kurve(
     if x1 <= x0:
         x1 = x0 + 1
     ys = [p[1] for r in reihen if r.skala for p in r.punkte] or [p[1] for p in alle]
+    # Ein fester Bereich gilt, wie er ist — keine kleinste Spanne, die ihn weitet
     links_daten = (
-        y_von if y_von is not None else min(ys, default=0.0),
-        y_bis if y_bis is not None else max(ys, default=1.0),
-        y_spanne_min,
-        y_schritt_min,
+        (y_fest[0], y_fest[1], 0.0, y_schritt_min)
+        if y_fest is not None
+        else (
+            y_von if y_von is not None else min(ys, default=0.0),
+            y_bis if y_bis is not None else max(ys, default=1.0),
+            y_spanne_min,
+            y_schritt_min,
+        )
     )
+    rechts_fest = rechts.fest if rechts is not None else None
     # Ohne rechte Achse wie immer; mit ihr ein gemeinsames Raster (`doppel_raster`).
     # Steht nur rechts etwas im Ausschnitt, rechnet die Kurve in deren Werten.
     anker, wert, rschritt = 0.0, 0.0, 1.0
-    if rechts is not None and rechts_alle:
-        rys = [p[1] for r in rechts.reihen if r.skala for p in r.punkte] or [
-            p[1] for p in rechts_alle
-        ]
-        rechts_daten = (min(rys), max(rys), rechts.spanne_min, rechts.schritt_min)
-        if alle:
+    if rechts is not None and (rechts_alle or rechts_fest is not None):
+        if rechts_fest is not None:
+            rechts_daten = (rechts_fest[0], rechts_fest[1], 0.0, rechts.schritt_min)
+        else:
+            rys = [p[1] for r in rechts.reihen if r.skala for p in r.punkte] or [
+                p[1] for p in rechts_alle
+            ]
+            rechts_daten = (min(rys), max(rys), rechts.spanne_min, rechts.schritt_min)
+        if alle or y_fest is not None:
             (unten, oben, schritt), (anker, wert, rschritt) = doppel_raster(
-                links_daten, rechts_daten
+                links_daten, rechts_daten, fest=(y_fest is not None, rechts_fest is not None)
             )
         else:
-            unten, oben, schritt = y_raster(*rechts_daten)
+            unten, oben, schritt = (
+                y_raster_fest(rechts_fest[0], rechts_fest[1], rechts.schritt_min)
+                if rechts_fest is not None
+                else y_raster(*rechts_daten)
+            )
             rschritt = schritt
+    elif y_fest is not None:
+        unten, oben, schritt = y_raster_fest(y_fest[0], y_fest[1], y_schritt_min)
     else:
         unten, oben, schritt = y_raster(*links_daten)
-    serien = _serien(reihen, unten, oben, x0, x1)
+    serien = _serien(reihen, unten, oben, x0, x1, schneiden=y_fest is not None)
     rechte_achse = None
     if rechts is not None:
         faktor = schritt / rschritt
         serien += _serien(
-            rechts.reihen, unten, oben, x0, x1, nach=lambda r: anker + (r - wert) * faktor
+            rechts.reihen,
+            unten,
+            oben,
+            x0,
+            x1,
+            nach=lambda r: anker + (r - wert) * faktor,
+            schneiden=rechts_fest is not None,
         )
         rechte_achse = _achse_y(
             unten,
@@ -497,7 +642,7 @@ def kurve(
             rechts.einheit,
             wert_an=lambda lage: wert + (lage - anker) / faktor,
             farbe=rechts.farbe,
-            zahlen=bool(rechts_alle),
+            zahlen=bool(rechts_alle) or rechts_fest is not None,
         )
     return fc.LineChart(
         data_series=serien,
@@ -505,7 +650,9 @@ def kurve(
         max_x=x1,
         min_y=unten,
         max_y=oben,
-        left_axis=_achse_y(unten, oben, schritt, einheit, farbe=farbe, zahlen=bool(alle)),
+        left_axis=_achse_y(
+            unten, oben, schritt, einheit, farbe=farbe, zahlen=bool(alle) or y_fest is not None
+        ),
         right_axis=rechte_achse,
         bottom_axis=_achse_x(x0, x1, x_text or _zeit, x_schritte, x_null),
         baseline_x=x_null,
@@ -526,25 +673,36 @@ def _serien(
     x0: float,
     x1: float,
     nach: Callable[[float], float] | None = None,
+    *,
+    schneiden: bool = False,
 ) -> list[fc.LineChartData]:
-    """Die Reihen als Linien des Diagramms; ``nach`` rechnet Werte der rechten Achse um."""
+    """Die Reihen als Linien des Diagramms; ``nach`` rechnet Werte der rechten Achse um.
+
+    ``schneiden`` (feste Achse): Linien enden am Rand der Zeichenfläche (`abschneiden`),
+    Punkte und Marken bleiben am Rand stehen.
+    """
     serien = []
     for r in reihen:
         if not r.punkte:
             continue
         punkte = r.punkte
+        naehte = r.naehte
         if r.band:
             y = oben - (0.04 + 0.06 * r.ebene) * (oben - unten)
             punkte = [(x, y) for x, _ in punkte]
         else:
             if nach is not None:
                 punkte = [(x, nach(y)) for x, y in punkte]
-            if not r.skala:
+            if schneiden and not r.marke and not r.nur_punkte:
+                punkte, naehte = abschneiden(punkte, naehte, unten, oben)
+            elif not r.skala or schneiden:
                 punkte = [(x, min(max(y, unten), oben)) for x, y in punkte]
+        if not punkte:
+            continue
         teile = (
             [ausduennen(punkte)]
             if r.nur_punkte
-            else abschnitte(punkte, r.naehte, min_luecke=(x1 - x0) / BREITE_PX)
+            else abschnitte(punkte, naehte, min_luecke=(x1 - x0) / BREITE_PX)
         )
         for teil in teile:
             # Ein einzelner Punkt zwischen zwei Nähten hat keine Linie — als Punkt zeigen.
@@ -573,6 +731,7 @@ __all__ = [
     "RR_SPANNE_MIN_MS",
     "Reihe",
     "Skala",
+    "abschneiden",
     "abschnitte",
     "ausduennen",
     "doppel_raster",
@@ -580,5 +739,6 @@ __all__ = [
     "x_marken_max",
     "x_schritt",
     "y_raster",
+    "y_raster_fest",
     "zahl_text",
 ]

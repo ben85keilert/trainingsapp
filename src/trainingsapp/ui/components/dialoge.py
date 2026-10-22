@@ -30,6 +30,15 @@ Route nicht kennt — Python schließt ihn, auf dem Bildschirm bleibt er stehen.
 Beim Start passierte genau das (das Routen-Ereignis des Clients baute neu auf,
 während der Backup-Dialog offen war). `app.zeige_route` fragt darum `dialog_offen`
 und holt den Neuaufbau nach, sobald der Dialog zu ist.
+
+**Eine SnackBar mit Aktion bleibt sonst stehen** (Ben, 21.10.2026: „‚Ausfallschritt
+gelöscht‘ … geht aber nicht weg“): Seit Flutter 3.35 verschwindet eine SnackBar mit
+``action`` nicht mehr von selbst, solange ``persist`` nicht ausdrücklich ``False``
+ist — und solange sie steht, warten alle weiteren Meldungen dahinter. Meldungen mit
+„Rückgängig“ entstehen darum über `meldung`.
+
+**Löschen fragt erst** (Ben, 21.10.2026): `loeschen_rueckfrage` — gelöscht wird, wenn
+der Dialog zu ist, danach kommt die Meldung mit „Rückgängig“.
 """
 
 from __future__ import annotations
@@ -89,6 +98,58 @@ def schliessen(dialog: Any) -> None:
     dialog.open = False
     with contextlib.suppress(Exception):  # hängt nicht (mehr) an der Seite
         dialog.update()
+
+
+#: So lange steht eine Meldung mit „Rückgängig“ (ms) — etwas länger als Flutters 4 s,
+#: damit man den Knopf noch trifft
+MELDUNG_MS = 5000
+
+
+def meldung(text: str, rueckgaengig: Callable[[], Any] | None = None) -> ft.SnackBar:
+    """Eine Meldung unten, die von selbst wieder geht — auch mit „Rückgängig“.
+
+    ``persist=False``: Mit Aktion bliebe sie sonst stehen (Moduldocstring).
+
+    >>> m = meldung("„Ruhe“ gelöscht", lambda: None)
+    >>> m.persist, m.action.label, meldung("Gespeichert").action
+    (False, 'Rückgängig', None)
+    """
+    return ft.SnackBar(
+        ft.Text(text),
+        action=ft.SnackBarAction("Rückgängig", on_click=rueckgaengig)
+        if rueckgaengig is not None
+        else None,
+        persist=False,
+        duration=MELDUNG_MS,
+    )
+
+
+def loeschen_rueckfrage(
+    titel: str, text: str, loeschen: Callable[[], Any], *, knopf: str = "Löschen"
+) -> ft.AlertDialog:
+    """„… löschen?“ mit Abbrechen und Löschen (Ben, 21.10.2026: vor dem Löschen fragen).
+
+    ``loeschen`` läuft erst, wenn der Dialog wirklich zu ist (`Nachher`) — so darf es
+    neu zeichnen und eine `meldung` mit „Rückgängig“ zeigen, ohne dass sie im
+    Dialogstapel über dem Dialog liegt.
+    """
+    nachher = Nachher()
+
+    def ja() -> None:
+        nachher.danach(loeschen)
+        schliessen(dialog)
+
+    dialog: ft.AlertDialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text(titel),
+        content=ft.Text(text),
+        actions=[
+            ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+            ft.FilledButton(knopf, icon=ft.Icons.DELETE_OUTLINE, on_click=ja),
+        ],
+        on_dismiss=nachher.bei_schliessen,
+    )
+    return dialog
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,4 +287,13 @@ def reste_dialog(
     return dialog
 
 
-__all__ = ["Erledigt", "Nachher", "dialog_offen", "reste_dialog", "schliessen"]
+__all__ = [
+    "MELDUNG_MS",
+    "Erledigt",
+    "Nachher",
+    "dialog_offen",
+    "loeschen_rueckfrage",
+    "meldung",
+    "reste_dialog",
+    "schliessen",
+]

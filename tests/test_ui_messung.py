@@ -268,6 +268,26 @@ def test_detailansicht_ohne_datei(daten) -> None:
     assert "Die Messdatei fehlt." in _baum_texte(messung_detail_view(_seite(), state, eintrag))
 
 
+def _menue_eintrag(wurzel, text: str):
+    """Ein Eintrag im Menü ⋮ der Kurven — Info und Korrektur stehen seit dem 21.10.2026 dort."""
+    menue = next(
+        c
+        for c in _alle_controls(wurzel)
+        if isinstance(c, ft.PopupMenuButton) and c.icon == ft.Icons.MORE_VERT
+    )
+    return next(i for i in menue.items if i.content == text)
+
+
+def _loeschen_bestaetigen(seite) -> ft.AlertDialog:
+    """Die Rückfrage „… löschen?“ mit „Löschen“ beantworten (Ben, 21.10.2026). Gelöscht wird
+    erst, wenn Flutter den Dialog zu meldet — das ``on_dismiss`` ruft der Test selbst."""
+    frage = seite.aufrufe[-1]
+    assert isinstance(frage, ft.AlertDialog) and frage.title.value.endswith("löschen?")
+    next(b for b in frage.actions if isinstance(b, ft.FilledButton)).on_click()
+    assert not frage.open
+    return frage
+
+
 def _alle_controls(wurzel) -> list:
     gesehen: set[int] = set()
     alle: list = []
@@ -450,13 +470,8 @@ def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None
     assert rr_kurve.max_x == hf_kurve.max_x == rmssd_kurve.max_x == pytest.approx(dauer)
     texte = _baum_texte(ansicht)
     assert any(f"{int(dauer) // 60}:{int(dauer) % 60:02d}" in x for x in texte)
-    # Was Grau heißt, steht hinter dem „i“ im Kartentitel (Ben, 17.10.2026)
-    info = next(
-        c
-        for c in _alle_controls(ansicht)
-        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.INFO_OUTLINE
-    )
-    info.on_click()
+    # Was Grau heißt, steht hinter „Info“ im Menü ⋮ der Kurve (Ben, 17. und 21.10.2026)
+    _menue_eintrag(ansicht, "So liest du die Kurve").on_click()
     blatt = seite.aufrufe[-1]
     assert any(
         "auch verworfene" in c.value for c in _alle_controls(blatt) if isinstance(c, ft.Markdown)
@@ -569,13 +584,9 @@ async def test_messung_live_verity_mit_verlauf_und_wischen(daten) -> None:
     live.on_click()
     assert state.messung_ende_s is None
 
-    # Regler: Blatt öffnet sich, Umschalten wirkt auf den Messlauf
-    regler = next(
-        c
-        for c in _alle_controls(ansicht)
-        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.TUNE
-    )
-    regler.on_click()
+    # Automatische Korrektur im Menü ⋮ (Ben, 21.10.2026): Blatt öffnet sich, Umschalten
+    # wirkt auf den Messlauf
+    _menue_eintrag(ansicht, "Automatische Korrektur …").on_click()
     blatt = seite.aufrufe[-1]
     assert isinstance(blatt, ft.BottomSheet)
     sensor = next(
@@ -630,12 +641,11 @@ def test_detailansicht_regeln_je_messung_und_lupe(daten) -> None:
     rr = next(c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart))
     assert rr.max_x - rr.min_x == pytest.approx(60)
 
-    # Regeln je Messung: dem Sensor folgen, speichern — die Vorgabe bleibt
-    next(
-        c
-        for c in _alle_controls(ansicht)
-        if isinstance(c, ft.IconButton) and c.icon == ft.Icons.TUNE
-    ).on_click()
+    # Regeln je Messung: dem Sensor folgen, speichern — die Vorgabe bleibt. Der Regler der
+    # Karte „Korrektur“ und der Eintrag im Menü ⋮ öffnen dasselbe Blatt.
+    _symbol(ansicht, ft.Icons.TUNE, "Was automatische Korrektur heißt").on_click()
+    assert isinstance(seite.aufrufe[-1], ft.BottomSheet)
+    _menue_eintrag(ansicht, "Automatische Korrektur …").on_click()
     sensor = next(
         c
         for c in _alle_controls(seite.aufrufe[-1])
@@ -760,8 +770,17 @@ def test_detailansicht_notiz_setzen_verschieben_loeschen(daten) -> None:
         and "Atemübung 6/min" in _baum_texte(c)
     )
     zeile.on_click()
+    # Löschen fragt erst (Ben, 21.10.2026) — gelöscht wird, wenn die Rückfrage zu ist
     _symbol(ansicht2, ft.Icons.DELETE_OUTLINE, "Löschen").on_click()
+    frage = _loeschen_bestaetigen(seite)
+    assert frage.content.value.startswith("„Atemübung 6/min“ bei ")
+    assert len(laden(pfad).ereignisse) == 1
+    asyncio.run(frage.on_dismiss(None))
     assert laden(pfad).ereignisse == []
+    meldung = seite.aufrufe[-1]  # „Notiz gelöscht“ geht von selbst wieder weg
+    assert isinstance(meldung, ft.SnackBar) and meldung.persist is False
+    meldung.action.on_click()  # Rückgängig
+    assert [e["text"] for e in laden(pfad).ereignisse] == ["Atemübung 6/min"]
 
 
 async def test_live_notiz_eingefroren_und_jetzt(daten) -> None:
@@ -998,10 +1017,28 @@ def test_aufzeichnung_zuschneiden_und_abschnitte(daten) -> None:
         return [s["name"] for s in json.loads(analyse_pfad(pfad).read_text())["segments"]]
 
     assert segmente() == ["Belastung", "Pause"]
+    # Löschen fragt erst (Ben, 21.10.2026); die Meldung danach geht von selbst wieder weg
     _symbol(view, ft.Icons.CLOSE, "Abschnitt löschen").on_click()
+    frage = _loeschen_bestaetigen(seite)
+    assert "„Belastung“" in frage.content.value and segmente() == ["Belastung", "Pause"]
+    asyncio.run(frage.on_dismiss(None))
     assert segmente() == ["Pause"]
-    seite.aufrufe[-1].action.on_click()  # Rückgängig
+    meldung = seite.aufrufe[-1]
+    assert meldung.persist is False and meldung.content.value == "„Belastung“ gelöscht"
+    meldung.action.on_click()  # Rückgängig
     assert sorted(segmente()) == ["Belastung", "Pause"]
+
+    # „Alle löschen“ fragt ebenso — Abbrechen lässt alles stehen
+    next(i for i in menue.items if i.content == "Alle löschen").on_click()
+    frage = seite.aufrufe[-1]
+    assert frage.title.value == "Alle Abschnitte löschen?"
+    next(b for b in frage.actions if b.content == "Abbrechen").on_click()
+    asyncio.run(frage.on_dismiss(None))
+    assert sorted(segmente()) == ["Belastung", "Pause"]
+    next(i for i in menue.items if i.content == "Alle löschen").on_click()
+    asyncio.run(_loeschen_bestaetigen(seite).on_dismiss(None))
+    assert segmente() == []
+    assert seite.aufrufe[-1].content.value == "2 Abschnitte gelöscht"
 
 
 def _golden_eintrag(state, tmp_path) -> tuple[HrvRecording, object]:
@@ -1177,6 +1214,170 @@ def test_ablesen_zeigt_alle_werte_an_einer_stelle(daten) -> None:
     _symbol(view, ft.Icons.CHEVRON_RIGHT, "Ein Schlag weiter").on_click()
     _symbol(view, ft.Icons.CLOSE, "Ablesen beenden").on_click()
     assert knopf.style is None  # wieder aus: Ziehen blättert die Kurve
+
+
+# ---------------------------------------------------------------------------
+# Wie live: Knöpfe, ganzer Abschnitt, Zeitachse und feste Werteachsen (Ben, 21.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def _titelzeile(wurzel, titel: str) -> ft.Row:
+    """Die Titelzeile der Karte mit der Hauptkurve."""
+    return next(
+        r
+        for r in _alle_controls(wurzel)
+        if isinstance(r, ft.Row)
+        and any(isinstance(c, ft.Text) and c.value == titel for c in r.controls)
+    )
+
+
+def _knoepfe_rechts(zeile: ft.Row) -> list[str]:
+    """Was rechts vom Titel steht: Text der Knöpfe, sonst Tooltip, beim Menü „⋮“."""
+    out = []
+    for c in zeile.controls[1:]:
+        menue = getattr(c, "content", None)
+        if isinstance(menue, ft.PopupMenuButton):
+            out.append("⋮" if menue.icon == ft.Icons.MORE_VERT else "?")
+        elif isinstance(c, ft.TextButton):
+            out.append(str(c.content))
+        else:
+            out.append(str(c.tooltip).split(":")[0].split(" (")[0])
+    return out
+
+
+def test_aufzeichnung_wie_live_ganzer_abschnitt_und_feste_achsen(daten) -> None:
+    import flet_charts as fc
+    from hrv_core.ausschnitte import Abschnitt, zusatz_speichern
+
+    state, tmp_path = daten
+    eintrag, pfad = _golden_eintrag(state, tmp_path)
+    zusatz_speichern(pfad, None, [Abschnitt("Ruhe", 60.0, 240.0)], float)
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+
+    def rr() -> fc.LineChart:
+        return next(c for c in _alle_controls(view) if isinstance(c, fc.LineChart))
+
+    # Titelzeile wie live: Fenster & Darstellung zweiter von rechts, Info und Korrektur im Menü
+    zeile = _titelzeile(view, "RR-TACHOGRAMM")
+    assert _knoepfe_rechts(zeile) == ["Ablesen", "Vollbild", "Fenster & Darstellung", "⋮"]
+    eintraege = [i.content for i in zeile.controls[-1].content.items if i.content]
+    assert eintraege[:3] == [
+        "So liest du die Kurve",
+        "Automatische Korrektur …",
+        "Als Ansicht speichern …",
+    ]
+    assert "Fenster & Darstellung …" not in eintraege
+    knoepfe = _breiten_wahl(view)
+    assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "5 Min", "10 Min"]
+
+    # Ein Tipp auf den Abschnitt-Chip zeigt ihn ganz, mit 30 s Rand …
+    chip = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.Container) and c.on_click is not None and "Ruhe 1:00" in _baum_texte(c)
+    )
+    chip.on_click()
+    assert (rr().min_x, rr().max_x) == (30.0, 270.0) and knoepfe.selected == []
+    # … die Breitenknöpfe zoomen hinein, ein zweiter Tipp zeigt wieder den ganzen
+    knoepfe.on_change(_ereignis("60"))
+    assert rr().max_x - rr().min_x == pytest.approx(60) and knoepfe.selected == ["60"]
+    chip.on_click()
+    assert (rr().min_x, rr().max_x) == (30.0, 270.0)
+    _ganze_messung(view).on_click()
+
+    # Fenster & Darstellung: Breite eintippen …
+    zeile.controls[-2].on_click()
+    blatt = seite.aufrufe[-1]
+    felder = [c for c in _alle_controls(blatt) if isinstance(c, ft.TextField)]
+    assert [f.label for f in felder][:3] == ["Breite der Zeitachse", "von", "bis"]
+    breite, von, bis = felder[:3]
+    breite.value = "1:30"
+    breite.on_submit(None)
+    assert rr().max_x - rr().min_x == pytest.approx(90)
+    # … und die Werteachse der Hauptkurve fest: 500–1500 ms
+    assert "RR-Tachogramm" in _baum_texte(blatt)
+    von.value, bis.value = "500", "1500"
+    bis.on_blur(None)
+    assert state.ansicht().y_achsen == {"rr": (500.0, 1500.0)}
+    assert (rr().min_y, rr().max_y) == (470.0, 1530.0)
+    assert [label.value for label in rr().left_axis.labels] == [500, 750, 1000, 1250, 1500]
+    # Halb ausgefüllt: „Fertig“ sagt, was fehlt, und die Achse bleibt fest
+    fertig = _knopf(blatt, "Fertig")
+    von.value = ""
+    fertig.on_click()
+    assert von.error and state.ansicht().y_achsen == {"rr": (500.0, 1500.0)}
+    bis.value = ""  # beide leer: wieder automatisch
+    fertig.on_click()
+    assert von.error is None and state.ansicht().y_achsen == {}
+    assert rr().min_y > 470.0
+
+
+async def test_live_ablesen_und_knoepfe_wie_in_der_aufzeichnung(daten) -> None:
+    import flet_charts as fc
+
+    state, tmp_path = daten
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    state.messlauf = lauf
+    while lauf.jetzt_s() < 90:
+        await asyncio.sleep(0.01)
+    seite = _seite()
+    ansicht = messung(seite, state)
+    zeile = _titelzeile(ansicht, "RR-TACHOGRAMM")
+    assert _knoepfe_rechts(zeile) == ["Ablesen", "Kurven im Vollbild", "Fenster & Darstellung", "⋮"]
+    knoepfe = _breiten_wahl(ansicht)
+    assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "5 Min", "10 Min"]
+
+    # Ablesen hält die Kurve an und zeigt die Werte am Strich — wie in der Aufzeichnung
+    knopf = _knopf(ansicht, "Ablesen")
+    knopf.on_click()
+    assert state.messung_ende_s is not None and knopf.style is not None
+    texte = _baum_texte(ansicht)
+    assert "RR" in texte and "HF" in texte and any(t.startswith("RMSSD") for t in texte)
+    assert any(t.endswith(" Uhr") for t in texte)
+
+    def strich_x() -> list[float]:
+        kurven = [c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart)]
+        return [
+            s.points[0].x
+            for k in kurven
+            for s in k.data_series
+            if len(s.points) == 2
+            and s.points[0].x == s.points[1].x
+            and s.color == ft.Colors.ON_SURFACE
+        ]
+
+    assert len(strich_x()) >= 2  # in der Hauptkurve und in den Verlaufskurven
+    vorher = strich_x()[0]
+    _symbol(ansicht, ft.Icons.CHEVRON_RIGHT, "Ein Schlag weiter").on_click()
+    assert strich_x()[0] > vorher
+    # Ein Tipp in die Kurve setzt den Strich dorthin (Mitte der Zeichenfläche ≈ Fenstermitte)
+    wisch = next(c for c in _alle_controls(ansicht) if isinstance(c, ft.GestureDetector))
+    wisch.on_tap_down(SimpleNamespace(local_position=SimpleNamespace(x=52 + 10, y=10)))
+    assert strich_x()[0] < vorher
+    _knopf(ansicht, "Live").on_click()  # wieder mitlaufen — Ablesen endet
+    assert state.messung_ende_s is None and knopf.style is None and strich_x() == []
+
+    # Die Breite eintippen — gilt auch beim nächsten Mal
+    zeile.controls[-2].on_click()
+    feld = next(
+        c
+        for c in _alle_controls(seite.aufrufe[-1])
+        if isinstance(c, ft.TextField) and c.label == "Breite der Zeitachse"
+    )
+    feld.value = "3"
+    feld.on_submit(None)
+    assert state.hrv_einstellungen().fenster_s == 180 and knoepfe.selected == []
+    kurve = next(c for c in _alle_controls(ansicht) if isinstance(c, fc.LineChart))
+    assert kurve.max_x - kurve.min_x == pytest.approx(180)
+    # Automatische Korrektur steht jetzt im Menü ⋮
+    _menue_eintrag(ansicht, "Automatische Korrektur …").on_click()
+    assert isinstance(seite.aufrufe[-1], ft.BottomSheet)
+
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
 
 
 async def test_live_titel_landet_in_der_messdatei(daten) -> None:

@@ -35,6 +35,11 @@ zwei Teile für die Karte der Hauptkurve: ``wahl`` (Bereich und Chips — kommen
 **über** die Hauptkurve) und ``control`` (Spektrum bzw. Poincaré und die
 Verlaufskurven — direkt unter die Notizen). Das Menü „Ansichten“ (``menue``) wandert
 in die Titelzeile der Hauptkurve, das „i“ in deren Info-Text (`info_text`).
+
+**Menü ⋮** (Ben, 21.10.2026): oben ``menue_oben`` (Info, automatische Korrektur),
+darunter die Ansichten; „Fenster & Darstellung“ ist ein eigener Knopf daneben. In der
+Aufzeichnung steht das Menü wie live an der Hauptkurve (``menue_im_kopf=False``: nicht
+im Kopf der Karte „Verlauf“).
 """
 
 from __future__ import annotations
@@ -173,6 +178,8 @@ class Analyse:
             Tabelle und Analysefenster).
         eingebettet: keine eigene Karte — ``wahl``, ``control`` und ``menue`` baut
             die Ansicht selbst ein (live, siehe Modulbeschreibung).
+        menue_oben: die ersten Einträge des Menüs (Info, Korrektur) — neu je Aufbau.
+        menue_im_kopf: das Menü im Kopf der eigenen Karte (sonst baut die Ansicht es ein).
     """
 
     def __init__(
@@ -195,8 +202,12 @@ class Analyse:
         live_intervall_s: Callable[[], float] | None = None,
         info_zusatz: Callable[[str], str] | None = None,
         eingebettet: bool = False,
+        menue_oben: Callable[[], list[ft.PopupMenuItem]] | None = None,
+        menue_im_kopf: bool = True,
     ) -> None:
         self._page = page
+        self._menue_oben = menue_oben
+        self._menue_im_kopf = menue_im_kopf and not eingebettet
         self._state = state
         self.bereiche = list(bereiche)
         self._reihe = reihe
@@ -289,7 +300,12 @@ class Analyse:
     def aufbauen(self) -> None:
         """Kopf, Chips und Tabelle — was sich nur bei Bedienung ändert."""
         bereich = self.bereich
-        self.menue.content = ansicht_menue(self._page, self._state, self._geaendert)
+        self.menue.content = ansicht_menue(
+            self._page,
+            self._state,
+            self._geaendert,
+            oben=self._menue_oben() if self._menue_oben is not None else (),
+        )
         # Titelzeile wie in den anderen Karten, die Bereichswahl darunter über die ganze
         # Breite — neben „i“ und Menü brach „Nichtlinear“ auf 412 px Breite um (17.10.2026).
         # Eingebettet trägt die Hauptkurve Titel, „i“ und Menü.
@@ -299,7 +315,7 @@ class Analyse:
                 titel(
                     "Verlauf",
                     info_knopf(self._page, "So liest du den Verlauf", self.info_text),
-                    self.menue,
+                    *([self.menue] if self._menue_im_kopf else []),
                 )
             )
         if len(self.bereiche) > 1:

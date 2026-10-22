@@ -7,6 +7,12 @@ Chips zeigt oder verbirgt eine Kurve; gleiche Achsen teilen sich ein Diagramm,
 verschiedene stehen untereinander — alle mit derselben Zeitachse wie die
 Hauptkurve, sodass ein Wischen alle zugleich verschiebt. Gerechnet wird nichts
 hier: die Werte liefert der Aufrufer (`daten`), aus `hrv_core.trends`.
+
+**Fenster & Darstellung** (`darstellung_blatt`) ist seit dem 21.10.2026 ein eigener
+Knopf neben dem Menü (Ben: „weil man diese Einstellungen vielleicht öfter braucht“)
+und stellt außer Fenster und gleitend/Blöcke auch die **Breite der Zeitachse**
+(eintippen) und **feste Werteachsen** ein (``Ansicht.y_achsen``, z. B. RR 500–1500).
+Das Menü (`ansicht_menue`) nimmt dafür Info und automatische Korrektur auf.
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import math
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import flet as ft
@@ -21,13 +28,35 @@ from hrv_core.trends import KENNZAHLEN, im_bereich, titel, treppe
 
 from trainingsapp.core.hrv_ansicht import BLOCK, GLEITEND, PNN_WAHL, Ansicht
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.karte import titel as abschnitt_titel
 from trainingsapp.ui.components.kurve import Reihe, kurve
+from trainingsapp.ui.components.zeitfenster import BreiteFeld
 from trainingsapp.ui.farben import FARBEN  # feste Farbe je Kurve, hell/dunkel
 
 BEREICH_TITEL = {"zeit": "Zeit", "frequenz": "Frequenz", "nichtlinear": "Nichtlinear"}
 
 #: (Kennzahl, Fenster, Block?) → Punkte
 Daten = Callable[[str, int, bool], Sequence[tuple[float, float]]]
+
+
+@dataclass(frozen=True, slots=True)
+class Werteachse:
+    """Eine y-Achse im Blatt „Fenster & Darstellung“: Schlüssel in ``Ansicht.y_achsen``,
+    die Kurven, die sie teilen, ihre Einheit und Farbe (die der ersten Kurve)."""
+
+    schluessel: str
+    name: str
+    einheit: str
+    farbe: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Zeitachse:
+    """Die Breite der Zeitachse für das Blatt: jetzt, wie sie gesetzt wird, höchstens."""
+
+    breite_s: float
+    setzen: Callable[[float], None]
+    max_s: float | None = None
 
 
 def _achse(kennzahl: str) -> str | None:
@@ -113,6 +142,7 @@ def diagramme(
                 x_bis=x_bis,
                 y_spanne_min=max(KENNZAHLEN[k].spanne_min for k in gruppe),
                 y_schritt_min=schritt_min(gruppe),
+                y_fest=ansicht.y_bereich(_achse(gruppe[0])),
             )
         )
     return out
@@ -213,11 +243,19 @@ def bereich_wahl(
     )
 
 
-def ansicht_menue(page: Any, state: Any, geaendert: Callable[[], None]) -> ft.Control:
-    """Menü „Ansichten": Fenster und Darstellung, speichern, laden, löschen, zurücksetzen.
+def ansicht_menue(
+    page: Any,
+    state: Any,
+    geaendert: Callable[[], None],
+    *,
+    oben: Sequence[ft.PopupMenuItem] = (),
+) -> ft.Control:
+    """Das Menü ⋮ der Kurven: ``oben`` (Info, automatische Korrektur), dann die Ansichten —
+    speichern, laden, löschen, zurücksetzen.
 
-    ``state`` ist der `AppState` (Speicherort: ``app_setting``); ``geaendert``
-    baut die Kurven neu.
+    „Fenster & Darstellung“ steht seit dem 21.10.2026 als eigener Knopf daneben
+    (`darstellung_knopf`), Info und Korrektur dafür hier (Ben). ``state`` ist der
+    `AppState` (Speicherort: ``app_setting``); ``geaendert`` baut die Kurven neu.
     """
     aktuell = state.ansicht()
     gespeichert = state.ansichten()
@@ -240,11 +278,8 @@ def ansicht_menue(page: Any, state: Any, geaendert: Callable[[], None]) -> ft.Co
         geaendert()
 
     eintraege: list[ft.PopupMenuItem] = [
-        ft.PopupMenuItem(
-            content="Fenster & Darstellung …",
-            icon=ft.Icons.TUNE,
-            on_click=lambda: page.show_dialog(darstellung_blatt(page, state, geaendert)),
-        ),
+        *oben,
+        *([ft.PopupMenuItem()] if oben else []),  # Trennlinie
         ft.PopupMenuItem(
             content="Als Ansicht speichern …",
             icon=ft.Icons.SAVE_OUTLINED,
@@ -276,10 +311,131 @@ def ansicht_menue(page: Any, state: Any, geaendert: Callable[[], None]) -> ft.Co
         )
     )
     return ft.PopupMenuButton(
-        icon=ft.Icons.DASHBOARD_CUSTOMIZE_OUTLINED,
-        tooltip=f"Ansicht: {aktuell.name}",
+        icon=ft.Icons.MORE_VERT,
+        tooltip=f"Mehr · Ansicht: {aktuell.name}",
         items=eintraege,
     )
+
+
+def darstellung_knopf(oeffnen: Callable[[], None]) -> ft.IconButton:
+    """Der Knopf „Fenster & Darstellung“ neben dem Menü — zweiter von rechts (Ben, 21.10.2026)."""
+    return ft.IconButton(
+        ft.Icons.TUNE,
+        tooltip="Fenster & Darstellung: Zeitachse, Werteachsen, Fenster",
+        on_click=oeffnen,
+    )
+
+
+#: Was eine Zeile „Werteachse“ sagt, wenn die Zahlen nicht passen
+Y_UNVOLLSTAENDIG = "von und bis eintragen — von kleiner als bis"
+
+
+def _feldzahl(wert: float) -> str:
+    """Zahl für ein Eingabefeld — ohne „k“, mit Komma.
+
+    >>> _feldzahl(1500.0), _feldzahl(0.5), _feldzahl(25000.0)
+    ('1500', '0,5', '25000')
+    """
+    return f"{wert:g}".replace(".", ",") if abs(wert) < 1e15 else str(wert)
+
+
+def _zahl_lesen(text: str | None) -> float | None:
+    """Eine eingetippte Zahl — Komma oder Punkt; ``None``, wenn keine.
+
+    >>> _zahl_lesen("1500"), _zahl_lesen(" 0,5 "), _zahl_lesen(""), _zahl_lesen("abc")
+    (1500.0, 0.5, None, None)
+    """
+    try:
+        wert = float((text or "").strip().replace(" ", "").replace(",", "."))
+    except ValueError:
+        return None
+    return wert if math.isfinite(wert) else None
+
+
+class _YZeile:
+    """Eine Werteachse im Blatt: von, bis, zurück auf automatisch. Leer = automatisch."""
+
+    def __init__(self, achse: Werteachse, ansicht: Ansicht, speichern: Callable[[], None]):
+        self._achse = achse
+        self._ansicht = ansicht
+        self._speichern = speichern
+        bereich = ansicht.y_bereich(achse.schluessel)
+        self._von = self._feld("von", bereich[0] if bereich else None)
+        self._bis = self._feld("bis", bereich[1] if bereich else None)
+        self._auto = ft.IconButton(
+            ft.Icons.RESTART_ALT,
+            icon_size=20,
+            tooltip="Wieder automatisch",
+            visible=bereich is not None,
+            on_click=lambda: self.automatisch(),
+        )
+        self.control = ft.Column(
+            spacing=4,
+            tight=True,
+            controls=[
+                ft.Row(
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Container(
+                            width=10,
+                            height=10,
+                            border_radius=5,
+                            bgcolor=achse.farbe or ft.Colors.PRIMARY,
+                        ),
+                        ft.Text(achse.name, weight=ft.FontWeight.W_600, expand=True),
+                        ft.Text(achse.einheit, size=12, opacity=0.7),
+                    ],
+                ),
+                ft.Row(
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                    controls=[self._von, ft.Text("–", size=16), self._bis, self._auto],
+                ),
+            ],
+        )
+
+    def _feld(self, label: str, wert: float | None) -> ft.TextField:
+        return ft.TextField(
+            label=label,
+            value=_feldzahl(wert) if wert is not None else "",
+            hint_text="auto",
+            dense=True,
+            width=110,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            text_align=ft.TextAlign.RIGHT,
+            on_submit=lambda _: self.uebernehmen(melden=True),
+            on_blur=lambda _: self.uebernehmen(),
+        )
+
+    def uebernehmen(self, *, melden: bool = False) -> bool:
+        """Beide leer → automatisch; beide Zahlen, von < bis → fest. Sonst bleibt die Achse,
+        wie sie war (``False``) — der Hinweis steht nur, wenn ``melden``."""
+        roh = (self._von.value or "").strip(), (self._bis.value or "").strip()
+        lo, hi = _zahl_lesen(roh[0]), _zahl_lesen(roh[1])
+        if not any(roh):
+            neu: tuple[float, float] | None = None
+        elif lo is not None and hi is not None and lo < hi:
+            neu = (lo, hi)
+        else:
+            self._von.error = Y_UNVOLLSTAENDIG if melden else None
+            self._aktualisieren()
+            return False
+        self._von.error = None
+        if neu != self._ansicht.y_bereich(self._achse.schluessel):
+            self._ansicht.y_setzen(self._achse.schluessel, neu)
+            self._speichern()
+        self._auto.visible = neu is not None
+        self._aktualisieren()
+        return True
+
+    def automatisch(self) -> None:
+        self._von.value = self._bis.value = ""
+        self.uebernehmen()
+
+    def _aktualisieren(self) -> None:
+        with contextlib.suppress(Exception):  # Blatt schon zu
+            self.control.update()
 
 
 def darstellung_blatt(
@@ -287,13 +443,22 @@ def darstellung_blatt(
     state: Any,
     geaendert: Callable[[], None],
     kurven: Sequence[str] | None = None,
+    *,
+    achsen: Sequence[Werteachse] = (),
+    zeitachse: Zeitachse | None = None,
 ) -> ft.BottomSheet:
-    """Je gewählter Kurve des Bereichs: Fenster, gleitend oder Blöcke; pNNx-Schwelle.
+    """Zeitachse, Werteachsen und je gewählter Kurve: Fenster, gleitend oder Blöcke; pNNx.
 
     Ein Blatt von unten, kein Dialog: Ein ``AlertDialog`` misst seinen Inhalt
     vorab (intrinsische Größe), und das können Auswahllisten (``Dropdown``) nicht
     — der Dialog blieb unsichtbar, nur der Bildschirm wurde dunkel (14.10.).
     ``kurven``: statt der Kurven des Bereichs diese (das Vollbild: beide Achsen).
+
+    ``zeitachse``: die Breite eintippen (`BreiteFeld`); ``achsen``: die y-Achsen der
+    gezeigten Kurven (`vollbild.werteachsen`) — leer heißt automatisch, zwei Zahlen
+    legen sie fest (Ben, 21.10.2026). Getipptes gilt beim Bestätigen, beim Verlassen
+    des Felds und beim Schließen des Blatts; ein halb ausgefülltes Paar hält „Fertig“
+    mit einem Hinweis auf.
     """
     ansicht = state.ansicht()
     gewaehlt = [
@@ -305,6 +470,18 @@ def darstellung_blatt(
     def speichern() -> None:
         state.ansicht_setzen(ansicht)
         geaendert()
+
+    breite = (
+        BreiteFeld(zeitachse.breite_s, zeitachse.setzen, max_s=zeitachse.max_s)
+        if zeitachse is not None
+        else None
+    )
+    y_zeilen = [_YZeile(a, ansicht, speichern) for a in achsen]
+
+    def alles_uebernehmen(*, melden: bool) -> bool:
+        if breite is not None:
+            breite.uebernehmen()
+        return all([z.uebernehmen(melden=melden) for z in y_zeilen])
 
     def fenster_setzen(k: str) -> Callable[[ft.Event[ft.Dropdown]], None]:
         def handler(e: ft.Event[ft.Dropdown]) -> None:
@@ -403,24 +580,54 @@ def darstellung_blatt(
             opacity=0.65,
         ),
     ]
+    teile: list[ft.Control] = []
+    if breite is not None:
+        teile += [abschnitt_titel("Zeitachse"), breite.control]
+    if y_zeilen:
+        teile += [
+            abschnitt_titel("Werteachsen"),
+            ft.Text(
+                "Leer heißt automatisch: Die Achse folgt den Werten im Ausschnitt. Zwei "
+                "Zahlen legen sie fest, z. B. RR 500 bis 1500 ms — was darüber oder "
+                "darunter liegt, schneidet die Kurve am Rand ab.",
+                size=11,
+                opacity=0.65,
+            ),
+            *(z.control for z in y_zeilen),
+        ]
+    if teile:
+        teile.append(abschnitt_titel("Kurven"))
+
+    def fertig() -> None:
+        if alles_uebernehmen(melden=True):
+            # genau das Blatt — eine SnackBar der Live-Ansicht (Gurt getrennt) läge sonst
+            # oben und `pop_dialog` träfe sie (N18)
+            schliessen(blatt)
+
+    def beim_schliessen(_e: object = None) -> None:
+        """Weggewischt: was vollständig getippt ist, gilt (Blätter speichern beim Schließen)."""
+        alles_uebernehmen(melden=False)
+
     blatt: ft.BottomSheet
     kopf = ft.Row(
         controls=[
             ft.Text("Fenster & Darstellung", size=18, weight=ft.FontWeight.W_600, expand=True),
-            # genau das Blatt — eine SnackBar der Live-Ansicht (Gurt getrennt) läge sonst
-            # oben und `pop_dialog` träfe sie (N18)
-            ft.TextButton("Fertig", on_click=lambda: schliessen(blatt)),
+            ft.TextButton("Fertig", on_click=fertig),
         ]
     )
     blatt = ft.BottomSheet(
         content=ft.Container(
             padding=ft.Padding.only(left=16, top=4, right=16, bottom=16),
             content=ft.Column(
-                spacing=16, tight=True, scroll=ft.ScrollMode.AUTO, controls=[kopf, *zeilen]
+                spacing=16,
+                tight=True,
+                scroll=ft.ScrollMode.AUTO,
+                controls=[kopf, *teile, *zeilen],
             ),
         ),
         scrollable=True,
         show_drag_handle=True,
+        on_dismiss=beim_schliessen,
     )
     return blatt
 
@@ -466,11 +673,14 @@ def speichern_dialog(page: Any, state: Any, geaendert: Callable[[], None]) -> ft
 __all__ = [
     "BEREICH_TITEL",
     "FARBEN",
+    "Werteachse",
+    "Zeitachse",
     "ansicht_menue",
     "bereich_wahl",
     "bezeichnung",
     "chips",
     "darstellung_blatt",
+    "darstellung_knopf",
     "diagramme",
     "fenster_text",
     "kurvengruppen",

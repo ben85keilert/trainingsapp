@@ -114,10 +114,15 @@ def test_live_puls_als_hauptkurve(daten) -> None:
     assert not schalter.visible  # ohne Intervalle nichts zu korrigieren
     kurve = next(c for c in alle if isinstance(c, fc.LineChart))
     assert max(len(s.points) for s in kurve.data_series) == 60
-    # Was die Farben heißen: hinter dem „i“, nicht mehr als grauer Text darunter
+    # Was die Farben heißen: hinter „Info“ im Menü ⋮ (21.10.2026), nicht als grauer Text
     assert not any("Grau: alle Rohwerte" in t for t in texte)
-    info = next(c for c in alle if isinstance(c, ft.IconButton) and c.icon == ft.Icons.INFO_OUTLINE)
-    info.on_click()
+    menue = next(
+        c for c in alle if isinstance(c, ft.PopupMenuButton) and c.icon == ft.Icons.MORE_VERT
+    )
+    eintraege = [i.content for i in menue.items if i.content]
+    assert "So liest du die Kurven" in eintraege
+    assert "Automatische Korrektur …" not in eintraege  # ohne Intervalle nichts zu korrigieren
+    next(i for i in menue.items if i.content == "So liest du die Kurven").on_click()
     (blatt,) = seite.aufrufe
     assert "nur die **Herzfrequenz**" in next(
         c.value for c in _alle(blatt) if isinstance(c, ft.Markdown)

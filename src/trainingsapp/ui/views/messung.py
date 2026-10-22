@@ -13,8 +13,12 @@ Verbindung, von oben nach unten:
    direkt darunter die Notizen, darunter Spektrum bzw. Poincaré und die
    Verlaufskurven (`components.analyse`, eingebettet). Sendet das Gerät nur die
    Herzfrequenz (Uhren im Übertragungsmodus — im Geräteprofil hinterlegt, sonst
-   erkannt), ist die Hauptkurve der Puls in bpm (`nur_puls`, Ben 17.10.2026). Was die
-   Farben heißen, steht hinter dem „i“ im Kartentitel — für beide Kurvenarten.
+   erkannt), ist die Hauptkurve der Puls in bpm (`nur_puls`, Ben 17.10.2026).
+
+**Knöpfe an der Kurve wie in der Aufzeichnung** (Ben, 21.10.2026): Ablesen, Vollbild,
+Fenster & Darstellung (Zeitachse eintippen, feste Werteachsen) und das Menü ⋮ mit
+Info („So liest du die Kurven“), automatischer Korrektur und den Ansichten. Ablesen
+hält die Kurve an wie im Vollbild; „Live“ läuft wieder mit und beendet es.
 
 Das Verbindungsprotokoll (Diagnose) öffnet ein Knopf in der Gerätezeile oben.
 
@@ -52,8 +56,8 @@ from hrv_core.regeln import Korrekturregeln
 from hrv_core.trends import KENNZAHLEN, aktuell, atmung_aktuell, titel
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
-from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM, ROH_MAX_MS, ROH_MIN_MS, Ansicht
-from trainingsapp.core.hrv_einstellungen import LIVE_FENSTER, HrvEinstellungen
+from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM, ROH, ROH_MAX_MS, ROH_MIN_MS, Ansicht
+from trainingsapp.core.hrv_einstellungen import FENSTER_MAX_S, HrvEinstellungen
 from trainingsapp.core.hrv_export import adresse_maskieren, export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.models import HrvRecording
@@ -94,21 +98,48 @@ from trainingsapp.ui.components.kacheln import (
     ohne_intervalle,
     zahl,
 )
-from trainingsapp.ui.components.karte import info_knopf, karte
+from trainingsapp.ui.components.karte import info_eintrag, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
-from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_knopf
+from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_eintrag
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
-from trainingsapp.ui.components.notizen import Notizfeld, uebungs_katalog, uebungsquellen
+from trainingsapp.ui.components.notizen import (
+    Notizfeld,
+    senkrechte,
+    uebungs_katalog,
+    uebungsquellen,
+)
 from trainingsapp.ui.components.titel import (
     geuebte_plaene,
     titel_blatt,
     titel_kopf,
     titel_vorschlaege,
 )
-from trainingsapp.ui.components.verlauf import FARBEN, fenster_text
+from trainingsapp.ui.components.verlauf import (
+    FARBEN,
+    Zeitachse,
+    darstellung_blatt,
+    darstellung_knopf,
+    fenster_text,
+    kurvengruppen,
+)
+from trainingsapp.ui.components.vollbild import (
+    Ablesewert,
+    ablese_karte,
+    geraet_wert,
+    intervall_werte,
+    kennzahl_werte,
+    markieren,
+    werteachsen,
+)
+from trainingsapp.ui.components.vollbild import achse as werteachse
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.components.zeitachse import achse, achsen_knopf
-from trainingsapp.ui.components.zeitfenster import Fenster, wischbar
+from trainingsapp.ui.components.zeitfenster import (
+    Fenster,
+    breiten_auswahl,
+    breiten_wahl,
+    wischbar,
+)
 from trainingsapp.ui.state import AppState
 
 
@@ -212,9 +243,11 @@ def tachogramm(
     hoehe: int = 180,
     x_text: Callable[[float], str] | None = None,
     x_null: float = 0.0,
+    y_fest: tuple[float, float] | None = None,
 ) -> ft.Control:
     """Die Live-Hauptkurve: Rohwerte grau, gewertet farbig, Artefakte rot, dazu ``marken``.
-    ``x_text``/``x_null``: Beschriftung der Zeitachse (`kurve`)."""
+    ``x_text``/``x_null``: Beschriftung der Zeitachse (`kurve`); ``y_fest``: feste
+    Werteachse (`Ansicht.y_achsen`)."""
     return kurve(
         [*tachogramm_reihen(lauf, x_von, x_bis, korrigiert=korrigiert), *marken],
         einheit="PPI ms" if verity else "RR ms",
@@ -224,6 +257,7 @@ def tachogramm(
         y_spanne_min=RR_SPANNE_MIN_MS,
         x_text=x_text,
         x_null=x_null,
+        y_fest=y_fest,
     )
 
 
@@ -263,6 +297,62 @@ def tachogramm_reihen(
     ]
 
 
+# -- Ablesen live: hochkant und im Vollbild dasselbe (Ben, 21.10.2026) -------------------
+
+
+def _schlaege_um(lauf: Messlauf, x: float) -> list[float]:
+    return [p.t_s for p in lauf.live.punkte(seit_s=x - 10) if p.rr_ms > 0 and p.t_s <= x + 10]
+
+
+def schlag_bei_live(lauf: Messlauf, x: float) -> float:
+    """Der Schlag, der ``x`` am nächsten liegt — dort steht der Ablesestrich."""
+    zeiten = _schlaege_um(lauf, x)
+    return min(zeiten, key=lambda t: abs(t - x)) if zeiten else x
+
+
+def strich_anfang_live(lauf: Messlauf, x_von: float, x_bis: float) -> float:
+    """Wo der Strich beim Einschalten steht: mitten in den Daten des Ausschnitts — am
+    Anfang einer Messung reicht das Fenster weiter als die Daten."""
+    return schlag_bei_live(lauf, (max(x_von, 0.0) + min(x_bis, lauf.jetzt_s())) / 2)
+
+
+def schlag_weiter_live(lauf: Messlauf, x: float, richtung: int) -> float:
+    """Der nächste Schlag vor (``richtung`` 1) bzw. hinter ``x`` — ohne einen: ``x``."""
+    weiter = [t for t in _schlaege_um(lauf, x) if (t - x) * richtung > 1e-6]
+    return min(weiter, key=lambda t: abs(t - x)) if weiter else x
+
+
+def ablese_werte_live(
+    lauf: Messlauf,
+    x: float,
+    gesehen: dict[str, tuple[str, list[tuple[float, float]]]],
+    *,
+    korrigiert: bool,
+    verity: bool,
+) -> list[Ablesewert]:
+    """RR bzw. PPI am Strich (korrigiert, wenn die Kurve es zeigt), HF, HF Gerät und die
+    gezeichneten Verlaufskurven (``gesehen``)."""
+    punkte = [p for p in lauf.live.punkte(seit_s=x - 3) if p.rr_ms > 0 and p.t_s <= x + 3]
+    p = min(punkte, key=lambda q: abs(q.t_s - x), default=None)
+    rr = zusatz = None
+    if p is not None:
+        rr = p.rr_korr if korrigiert and p.rr_korr else float(p.rr_ms)
+        zusatz = " (verworfen)" if p.verworfen else " (auffällig)" if p.artefakt else ""
+    return (
+        intervall_werte(rr, zusatz or "", verity=verity)
+        + geraet_wert(lauf.live.hf_reihe(), x)
+        # hf_geraet steht schon da, aus dem Gerät
+        + kennzahl_werte(gesehen, x, ohne=("hf_geraet",))
+    )
+
+
+def ablese_kopf_live(lauf: Messlauf, x: float) -> str:
+    """„2:15 · 14:03:05 Uhr“ — die Stelle des Strichs, mit Uhrzeit, wenn es eine gibt."""
+    zb = lauf.notiz_zeitbezug()
+    uhr = zb.uhr(zb.anker(x)) if zb is not None else ""
+    return _uhr(x) + (f" · {uhr} Uhr" if uhr else "")
+
+
 def ohne_rr() -> list[str]:
     """Bei einem reinen Pulsgeber lässt sich aus RR nichts rechnen — nur „HF Gerät"."""
     return [k for k in KENNZAHLEN if k != "hf_geraet"]
@@ -283,6 +373,7 @@ def pulskurve(
     hoehe: int = 180,
     x_text: Callable[[float], str] | None = None,
     x_null: float = 0.0,
+    y_fest: tuple[float, float] | None = None,
 ) -> ft.Control:
     """Die Hauptkurve eines reinen Pulsgebers: die Herzfrequenz des Geräts in bpm."""
     punkte = [(t, h) for t, h in lauf.live.hf_reihe() if x_von <= t <= x_bis]
@@ -295,6 +386,7 @@ def pulskurve(
         y_spanne_min=HF_SPANNE_MIN_BPM,
         x_text=x_text,
         x_null=x_null,
+        y_fest=y_fest,
     )
 
 
@@ -776,6 +868,13 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     wisch_auftrag = 0
     fenster = Fenster(einst.fenster_s, state.messung_ende_s)
     verity = bool(lauf.profil and lauf.profil.kann("pmd_ppi"))
+    roh_titel = "PPI-Tachogramm" if verity else "RR-Tachogramm"
+    #: Ablesen (Ben, 21.10.2026: live wie in der Aufzeichnung): an/aus, Stelle des Strichs
+    #: und woraus die Karte zuletzt gebaut wurde
+    ablesen: dict[str, Any] = {"an": False, "strich": None, "karte": None}
+    ablese_box = ft.Container(visible=False)
+    #: Hauptkurve als Puls (bpm) statt als Tachogramm — `nur_puls`, `modus_pruefen`
+    modus = {"puls": nur_puls(lauf)}
 
     def anfang() -> float:
         """Ältester Punkt im Live-Puffer — weiter zurück geht es nicht."""
@@ -790,11 +889,13 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             setattr(aktuell_, name, wert)
         state.hrv_einstellungen_setzen(aktuell_)
 
-    def fenster_wechseln(e: ft.Event[ft.SegmentedButton]) -> None:
-        if e.control.selected:
-            fenster.breite_s = int(e.control.selected[0])
-            einstellung_merken(fenster_s=int(fenster.breite_s))
-            aktualisieren(erzwingen=True)
+    def breite_waehlen(breite_s: float) -> None:
+        """Ein Breitenknopf oder die eingetippte Breite (Fenster & Darstellung) — gilt
+        auch beim nächsten Mal."""
+        fenster.breite_s = breite_s
+        einstellung_merken(fenster_s=round(breite_s))
+        breiten_knoepfe.selected = breiten_auswahl(breite_s)
+        aktualisieren(erzwingen=True)
 
     def korrigiert_wechseln(e: ft.Event[ft.Switch]) -> None:
         einstellung_merken(korrigiert=bool(e.control.value))
@@ -802,6 +903,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
 
     def zur_gegenwart() -> None:
         fenster.ende_s = None
+        ablesen["an"] = False  # „Live" heißt: wieder mitlaufen (wie im Vollbild)
         aktualisieren(erzwingen=True)
 
     def atemuebung_an() -> None:
@@ -820,17 +922,81 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         aktualisieren(erzwingen=True)
 
     def gewischt() -> None:
-        """Beim Wischen nur Kurve, Lage und Analyse — nicht die ganze Spalte."""
+        """Beim Wischen nur Kurve, Lage, Analyse und Ablesewerte — nicht die ganze Spalte."""
         nonlocal wischt
         wischt = True
         state.messung_ende_s = fenster.ende_s
         x_von, x_bis = fenster.bereich(lauf.jetzt_s(), anfang())
         rr_box.content = hauptkurve(x_von, x_bis)
         lage_box.content = lage()
-        analyse.zeichnen(x_von, x_bis)
-        for c in (rr_box, lage_box, analyse.wahl, analyse.control):
+        analyse.zeichnen(x_von, x_bis, strich=strich())
+        ablesen_zeichnen()
+        for c in (rr_box, lage_box, analyse.wahl, analyse.control, ablese_box):
             with contextlib.suppress(Exception):
                 c.update()
+
+    # -- Ablesen: hält die Kurve an; Strich und Werte wie in der Aufzeichnung -----------
+
+    def strich() -> float | None:
+        return ablesen["strich"] if ablesen["an"] else None
+
+    def ablesen_umschalten() -> None:
+        ablesen["an"] = not ablesen["an"]
+        if ablesen["an"]:
+            if fenster.ende_s is None:
+                fenster.ende_s = lauf.jetzt_s()  # anhalten, damit man ablesen kann
+            x_von, x_bis = fenster.bereich(lauf.jetzt_s(), anfang())
+            ablesen["strich"] = strich_anfang_live(lauf, x_von, x_bis)
+        aktualisieren(erzwingen=True)
+
+    def strich_setzen(x: float, *, zeichnen: bool = True) -> None:
+        ablesen["strich"] = schlag_bei_live(lauf, x)
+        if zeichnen:
+            aktualisieren(erzwingen=True)
+
+    def strich_schritt(richtung: int) -> None:
+        """Ein Schlag vor oder zurück; die Kurve rückt mit und bleibt angehalten."""
+        jetzt = ablesen["strich"]
+        if jetzt is None:
+            return
+        neu = schlag_weiter_live(lauf, jetzt, richtung)
+        ablesen["strich"] = neu
+        x_von, x_bis = fenster.bereich(lauf.jetzt_s(), anfang())
+        if not x_von <= neu <= x_bis:
+            zeigen(neu)
+            fenster.ende_s = fenster.ende_s or lauf.jetzt_s()
+        aktualisieren(erzwingen=True)
+
+    def ablesen_zeichnen() -> None:
+        """Die Werte am Strich unter der Kurve — neu gebaut nur, wenn sich etwas ändert:
+        Live frischt zweimal je Sekunde auf, und ein neu gebauter Knopf verlöre den Tipp."""
+        x = strich()
+        ablese_box.visible = x is not None
+        if x is None:
+            ablese_box.content, ablesen["karte"] = None, None
+            return
+        kopf = ablese_kopf_live(lauf, x)
+        werte = ablese_werte_live(
+            lauf, x, analyse.gesehen, korrigiert=einst.korrigiert, verity=verity
+        )
+        if (kopf, werte) != ablesen["karte"]:
+            ablesen["karte"] = (kopf, werte)
+            ablese_box.content = ablese_karte(
+                kopf, "", werte, schritt=strich_schritt, schliessen=ablesen_umschalten
+            )
+
+    def kurve_tippen(x: float) -> None:
+        if ablesen["an"]:
+            strich_setzen(x)
+        else:
+            notizfeld.tippen(x)  # „In Kurve": der Tipp setzt die Zeit der Eingabe
+
+    def kurve_greifen(x: float) -> bool:
+        """Beim Ablesen folgt der Strich dem Finger; sonst blättert die Geste."""
+        if not ablesen["an"]:
+            return False
+        strich_setzen(x, zeichnen=False)
+        return True
 
     def wisch_ende() -> None:
         """Nach dem Loslassen und der Latenz: Spektrum für den neuen Ausschnitt."""
@@ -894,6 +1060,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         uebungen_merken=uebungen_merken,
         katalog=(lambda: uebungs_katalog(state)) if einst.notiz_uebungen else None,
         zeit_modus=UHR if einst.achse_uhrzeit else DAUER,
+        dialog=page.show_dialog,
     )
 
     def timer_notizen() -> None:
@@ -906,6 +1073,13 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     def ohne() -> list[str]:
         return [] if lauf.live.kennzahlen().rr_ms else ohne_rr()
 
+    def menue_oben() -> list[ft.PopupMenuItem]:
+        """Info und automatische Korrektur — vorher Knöpfe in der Titelzeile (Ben, 21.10.)."""
+        eintraege = [info_eintrag(page, "So liest du die Kurven", lambda: kurven_info())]
+        if not modus["puls"]:
+            eintraege.append(regler_eintrag(regeln_oeffnen))
+        return eintraege
+
     analyse = Analyse(
         page,
         state,
@@ -915,12 +1089,20 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         ohne=ohne,
         neu_zeichnen=lambda: aktualisieren(erzwingen=True),
         wischen=lambda c: wischbar(
-            c, fenster, lauf.jetzt_s, gewischt, anfang=anfang, losgelassen=wisch_ende
+            c,
+            fenster,
+            lauf.jetzt_s,
+            gewischt,
+            anfang=anfang,
+            tippen=lambda x: strich_setzen(x) if ablesen["an"] else None,
+            greifen=kurve_greifen,
+            losgelassen=wisch_ende,
         ),
         optisch=verity,
         warten=lambda: wischt,
         live_intervall_s=lambda: float(state.hrv_einstellungen().live_spektrum_s),
         eingebettet=True,
+        menue_oben=menue_oben,
     )
 
     async def aufnahme_starten() -> None:
@@ -1345,14 +1527,20 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
 
     def hauptkurve(x_von: float, x_bis: float) -> ft.Control:
         x_text, x_null = achse(lauf.achse_utc, x_von, x_bis, uhrzeit=einst.achse_uhrzeit)
+        marken = notizfeld.marken(x_von, x_bis)
+        x = strich()
+        if x is not None and x_von <= x <= x_bis:
+            marken.append(senkrechte([x], ft.Colors.ON_SURFACE, 1.2, gestrichelt=False))
+        ansicht_ = state.ansicht()
         if modus["puls"]:
             return pulskurve(
                 lauf,
                 x_von,
                 x_bis,
-                marken=notizfeld.marken(x_von, x_bis),
+                marken=marken,
                 x_text=x_text,
                 x_null=x_null,
+                y_fest=ansicht_.y_bereich(werteachse("hf_geraet")),
             )
         return tachogramm(
             lauf,
@@ -1360,9 +1548,10 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             x_bis,
             korrigiert=einst.korrigiert,
             verity=verity,
-            marken=notizfeld.marken(x_von, x_bis),
+            marken=marken,
             x_text=x_text,
             x_null=x_null,
+            y_fest=ansicht_.y_bereich(werteachse(ROH)),
         )
 
     def achse_umschalten() -> None:
@@ -1382,24 +1571,45 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             return
         modus["puls"] = puls
         kurven_titel_text.value = kurven_titel()
-        regler.visible = korrigiert_schalter.visible = not puls
+        korrigiert_schalter.visible = not puls
+        analyse.aufbauen()  # das Menü: automatische Korrektur nur mit Intervallen
 
     async def vollbild() -> None:
         """Die Kurven allein, quer, ohne Leisten (`views.live_vollbild`)."""
         await page.push_route("/live")
 
-    #: Hauptkurve als Puls (bpm) statt als Tachogramm — `nur_puls`, `modus_pruefen`
-    modus = {"puls": nur_puls(lauf)}
+    def darstellung() -> None:
+        """Fenster & Darstellung (Ben, 21.10.2026: eigener Knopf): Breite der Zeitachse
+        eintippen, Werteachsen der Haupt- und der Verlaufskurven, Fenster je Kurve."""
+        a = state.ansicht()
+        haupt = ["hf_geraet"] if modus["puls"] else [ROH]
+        gezeigt = [k for g in kurvengruppen(a, analyse.bereich, ohne()) for k in g]
+        page.show_dialog(
+            darstellung_blatt(
+                page,
+                state,
+                lambda: aktualisieren(erzwingen=True),
+                achsen=werteachsen(a, [*haupt, *gezeigt], roh_titel),
+                zeitachse=Zeitachse(fenster.breite_s, breite_waehlen, max_s=FENSTER_MAX_S),
+            )
+        )
+
     kurven_titel_text = ft.Text(
         kurven_titel(), size=11, weight=ft.FontWeight.BOLD, opacity=0.6, expand=True
     )
-    regler = regler_knopf(regeln_oeffnen)
     korrigiert_schalter = ft.Switch(
         label="korrigiert (Artefakte überbrückt)",
         value=einst.korrigiert,
         on_change=korrigiert_wechseln,
     )
-    regler.visible = korrigiert_schalter.visible = not modus["puls"]
+    korrigiert_schalter.visible = not modus["puls"]
+    ablesen_knopf = ft.TextButton(
+        "Ablesen",
+        icon=ft.Icons.ADS_CLICK,
+        tooltip="Werte an einer Stelle der Kurven ablesen — hält die Kurve an",
+        on_click=lambda: ablesen_umschalten(),
+    )
+    breiten_knoepfe = breiten_wahl(fenster.breite_s, breite_waehlen)
 
     def lage() -> ft.Control:
         """Zurückgeblättert: wie weit, und zurück zur Gegenwart."""
@@ -1427,7 +1637,9 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         kacheln_box.content = anzeige(werte, einst.darstellung)
         rr_box.content = hauptkurve(x_von, x_bis)
         lage_box.content = lage()
-        analyse.zeichnen(x_von, x_bis)
+        analyse.zeichnen(x_von, x_bis, strich=strich())
+        ablesen_zeichnen()  # nach `zeichnen`: liest die eben gezeichneten Verlaufskurven
+        markieren(ablesen_knopf, ablesen["an"])
 
     def aktualisieren(erzwingen: bool = False) -> None:
         """Vom Messlauf nach neuen Werten gerufen — höchstens zweimal je Sekunde."""
@@ -1458,39 +1670,27 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     # Eine Karte für alles (Ben, 21.10.2026: Hauptkurve und Verlaufskurven näher
     # zusammen): Bereich und Chips über der Hauptkurve, die Notizen direkt darunter —
     # dort trifft man die Zeit am genauesten —, dann Spektrum bzw. Poincaré und die
-    # Verlaufskurven. Menü „Ansichten“ und „i“ des Verlaufs sitzen in der Titelzeile.
+    # Verlaufskurven. Titelzeile wie in der Aufzeichnung: Ablesen, Vollbild, Fenster &
+    # Darstellung (zweiter von rechts), Menü ⋮ mit Info und Korrektur (Ben, 21.10.2026).
     haupt_karte = karte(
         ft.Row(
             spacing=4,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 kurven_titel_text,
-                # Was die Farben heißen — vorher grauer Text unter den Notizen (Ben, 17.10.)
-                info_knopf(page, "So liest du die Kurven", kurven_info),
-                regler,
+                ablesen_knopf,
                 ft.IconButton(
                     ft.Icons.FULLSCREEN,
                     tooltip="Kurven im Vollbild (quer)",
                     on_click=vollbild,
                 ),
+                darstellung_knopf(darstellung),
                 analyse.menue,
             ],
         ),
         ft.Row(
             spacing=4,
-            controls=[
-                ft.SegmentedButton(
-                    selected=[str(fenster.breite_s if fenster.breite_s in LIVE_FENSTER else 120)],
-                    show_selected_icon=False,
-                    expand=True,
-                    segments=[
-                        ft.Segment(value=str(s), label=ft.Text(fenster_text(s)))
-                        for s in LIVE_FENSTER
-                    ],
-                    on_change=fenster_wechseln,
-                ),
-                achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten),
-            ],
+            controls=[breiten_knoepfe, achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten)],
         ),
         analyse.wahl,
         korrigiert_schalter,
@@ -1501,9 +1701,11 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             lauf.jetzt_s,
             gewischt,
             anfang=anfang,
-            tippen=notizfeld.tippen,
+            tippen=kurve_tippen,
+            greifen=kurve_greifen,
             losgelassen=wisch_ende,
         ),
+        ablese_box,
         notizfeld.control,
         analyse.control,
     )

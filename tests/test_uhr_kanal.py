@@ -159,3 +159,57 @@ def test_dfa_alle_fuenf_sekunden_nur_bei_ekg() -> None:
     kanal._dfa_zeit = None
     asyncio.run(kanal.schritt())
     assert medien.aufrufe[-1][2].startswith("RMSSD ")
+
+
+def test_zustand_und_protokoll_erklaeren_warum_nichts_kommt() -> None:
+    medien = Attrappe()
+    kanal = MedienKanal(_state(None, an=False), medien)
+    asyncio.run(kanal.schritt())
+    assert kanal.zustand == "aus (Einstellung)"
+    kanal = MedienKanal(_state(None), medien)
+    asyncio.run(kanal.schritt())
+    assert kanal.zustand.startswith("kein Gurt gewählt")
+    lauf = Lauf()
+    lauf.verbunden = False
+    kanal = MedienKanal(_state(lauf), medien)
+    asyncio.run(kanal.schritt())
+    assert kanal.zustand == "Gurt nicht verbunden"
+    lauf.verbunden = True
+    lauf.schlaege(20, 500, 120)
+    asyncio.run(kanal.schritt())
+    assert kanal.zustand.startswith("sendet Seite 1: HF 120")
+    assert any("gestartet: HF 120" in z for z in kanal.protokoll)
+
+
+def test_testseite_steht_60_s_auch_ohne_gurt() -> None:
+    jetzt = [1000.0]
+    medien = Attrappe()
+    kanal = MedienKanal(_state(None, an=False), medien, uhr=lambda: jetzt[0])
+    asyncio.run(kanal.test())
+    assert medien.aufrufe[-1] == ("starten", "Test 123", "hrv-watch", "Uhr", True)
+    assert kanal.zustand == "Testseite gesendet"
+    jetzt[0] += 30
+    asyncio.run(kanal.schritt())  # innerhalb der 60 s: nichts beendet
+    assert medien.aufrufe[-1][0] == "starten"
+    jetzt[0] += 31
+    asyncio.run(kanal.schritt())  # danach räumt der Takt auf
+    assert medien.aufrufe[-1] == ("beenden",) and kanal.zustand == "aus (Einstellung)"
+
+
+def test_fehler_des_dienstes_landen_im_zustand() -> None:
+    class Kaputt(Attrappe):
+        async def starten(self, *a, **k) -> None:
+            raise TimeoutError("Dart antwortet nicht")
+
+    lauf = Lauf()
+    lauf.schlaege(20, 500, 120)
+    kanal = MedienKanal(_state(lauf), Kaputt())
+    asyncio.run(kanal.test())
+    assert kanal.zustand.startswith("Test fehlgeschlagen: TimeoutError")
+    # Im Takt: der Fehler wird festgehalten, die Schleife liefe weiter
+    try:
+        asyncio.run(kanal.schritt())
+    except TimeoutError:
+        pass
+    else:  # pragma: no cover - schritt reicht den Fehler an takt weiter
+        raise AssertionError("schritt sollte den Fehler weiterreichen")

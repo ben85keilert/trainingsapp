@@ -35,6 +35,9 @@ Was das für den Bau heißt:
   Formate: Abschnitt 5b.
 - **Ein Test sichert es ab:** Export-ZIP und Sync-Outbox einer Messung mit
   Strecke enthalten keine Koordinate.
+- **Zur Entscheidung (26.10.2026, P80):** Bewegungsdaten ohne Ort (Tempo, Distanz
+  alle 5 s) im Messungs-Export immer dabei, die Strecke mit Koordinaten nur per Häkchen
+  je Export — das wäre eine Lockerung dieser Regel. Plan: `docs/plan_export_gps.md`.
 - **Forschungsexport einer Einheit** (17.10.2026, `docs/plan_einheit.md` §8):
   ausdrücklich ausgelöst; aus der Strecke nur das Tempo als 5-s-Mittel — keine
   Ortung, keine Richtung, keine Höhenreihe, nicht die Datei. Ebenfalls per Test.

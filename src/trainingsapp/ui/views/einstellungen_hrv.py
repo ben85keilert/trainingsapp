@@ -473,6 +473,29 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
         ),
     )
 
+    # -- Uhr am Handgelenk: Zustand des Kanals und Testseite (Diagnose, 26.10.2026) ----
+    uhr_status = ft.Text("", size=12)
+    uhr_protokoll = ft.Text("", size=11, opacity=0.6, font_family="monospace", selectable=True)
+
+    def uhr_status_neu(_ev: Any = None) -> None:
+        kanal = state.uhr
+        if kanal is None:
+            uhr_status.value = "Kanal nicht verfügbar (nur in der Android-App)"
+            uhr_protokoll.value = ""
+        else:
+            uhr_status.value = f"Kanal: {kanal.zustand}"
+            uhr_protokoll.value = "\n".join(list(kanal.protokoll)[-12:])
+        with contextlib.suppress(Exception):
+            uhr_status.update()
+            uhr_protokoll.update()
+
+    async def uhr_testen(_ev: Any = None) -> None:
+        if state.uhr is not None:
+            await state.uhr.test()
+        uhr_status_neu()
+
+    uhr_status_neu()
+
     standard = HrvEinstellungen()
     inhalt = ft.Column(
         spacing=14,
@@ -590,6 +613,21 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                     "des Intervalls stehen in der Mediensteuerung, solange ein Gurt verbunden "
                     "ist. ▶ blättert, ⏯ setzt eine Marke in die Aufnahme. Es läuft kein Ton.",
                 ),
+                uhr_status,
+                ft.Row(
+                    spacing=8,
+                    wrap=True,
+                    controls=[
+                        ft.OutlinedButton(
+                            "Testseite 60 s senden",
+                            icon=ft.Icons.WATCH,
+                            on_click=uhr_testen,
+                            disabled=state.uhr is None,
+                        ),
+                        ft.TextButton("Status aktualisieren", on_click=uhr_status_neu),
+                    ],
+                ),
+                uhr_protokoll,
             ),
             erweitert_kopf,
             erweitert_teil,

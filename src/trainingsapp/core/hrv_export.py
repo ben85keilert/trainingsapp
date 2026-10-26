@@ -158,12 +158,18 @@ def zugehoerige_dateien(rec_pfad: Path) -> list[Path]:
     return sorted(treffer, key=lambda p: (p.name != rec_pfad.name, p.name))
 
 
-def export_zip(dateien: Iterable[Path], basis: Path) -> bytes:
+def export_zip(
+    dateien: Iterable[Path], basis: Path, *, zusatz: Mapping[str, bytes] | None = None
+) -> bytes:
     """Dateien als ZIP im Speicher, Pfade relativ zu ``basis``.
 
     Jede Datei kommt einmal hinein, auch wenn sie mehrfach übergeben wird. Eine
     Datei außerhalb von ``basis`` landet unter ihrem Namen auf oberster Ebene.
     Jede geht durch `exportkopie` — ohne Bluetooth-Adresse.
+
+    ``zusatz``: erzeugte Dateien (ZIP-Pfad → Inhalt), die es auf dem Gerät so nicht gibt —
+    die Rohspur eines Trainings ohne Ort (`core.bewegung`), GPX-Dateien; ein Pfad, den schon
+    eine Datei belegt, bleibt der Datei.
 
     Raises:
         ValueError: keine einzige Datei.
@@ -181,6 +187,11 @@ def export_zip(dateien: Iterable[Path], basis: Path) -> bytes:
             if name in gepackt:
                 continue
             in_zip_schreiben(archiv, pfad, name)
+            gepackt.add(name)
+        for name, inhalt in (zusatz or {}).items():
+            if name in gepackt:
+                continue
+            archiv.writestr(name, inhalt, compress_type=zipfile.ZIP_DEFLATED)
             gepackt.add(name)
     if not gepackt:
         raise ValueError("Keine Dateien zum Exportieren")

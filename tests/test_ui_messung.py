@@ -102,9 +102,9 @@ def test_messung_ohne_geraet(daten) -> None:
     texte = _baum_texte(messung(_seite(), state))
     assert "Gerät verbinden" in texte
     assert "OHNE GERÄT AUSPROBIEREN" in texte
-    state.messung_tab = 2  # Reiter „Aufzeichnungen" — ohne alles: Unterreiter „Laufen"
+    state.messung_tab = 2  # Reiter „Aufzeichnungen" — ohne alles: Unterreiter „Strecken"
     texte = _baum_texte(messung(_seite(), state))
-    assert state.aufzeichnungen_tab == 0 and "Laufen" in texte and "HRV" in texte
+    assert state.aufzeichnungen_tab == 0 and "Strecken" in texte and "HRV" in texte
     assert any(t.startswith("Noch kein Training.") for t in texte)
     state.aufzeichnungen_tab = 1
     assert any(

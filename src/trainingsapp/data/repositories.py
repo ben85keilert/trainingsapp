@@ -638,6 +638,8 @@ class SettingRepo:
     HRV_ANSICHTEN = "hrv_ansichten"
     #: HRV: Einstellungen der Messung — Kacheln, Fenster, Bereiche (JSON, `core.hrv_einstellungen`)
     HRV_EINSTELLUNGEN = "hrv_einstellungen"
+    #: Training: Karte einfärben, Tempo mit Pausen, Spalten (JSON, `core.training_einstellungen`)
+    TRAINING_EINSTELLUNGEN = "training_einstellungen"
     #: Timer: Profile (JSON, `core.timer`), das zuletzt benutzte und wie er sich
     #: meldet (Ton, Countdown, Vibration, Bildschirm an, Notizen — JSON)
     TIMER_PROFILE = "timer_profile"

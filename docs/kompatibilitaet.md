@@ -109,6 +109,14 @@ byteidentisch. Dasselbe gilt für den Forschungsexport einer Einheit
 Originaldatei auf dem Gerät behält die Adresse.
 Die übrigen Ausschlüsse sind deckungsgleich.
 
+**Seit dem 26.10.2026 liegt neben `Messungen/` der Ordner `Bewegung/`** (Ben: „Für HRV
+reicht die Entfernung — bitte keine GPS-Koordinaten … nimm die Höhe mit“): zu jedem
+Training, das an einer exportierten Messung hängt, die Streckendatei als **Rohspur ohne
+Ort** (Abschnitt 13). Die Messdateien bleiben unverändert; praxis_gui sieht den Ordner
+nicht (es liest nur `Messungen/<Geräteordner>/`), `ist_messdatei()` ebenso wenig.
+Koordinaten enthält kein Messungs-Export — die Strecke mit Koordinaten gibt es nur als
+GPX auf ausdrückliche Handlung (`docs/plan_gps.md` §0, Eigenverantwortung).
+
 ---
 
 ## 3. Schema `raw-v1` — die Messdatei
@@ -689,3 +697,49 @@ Abschnitt 9 — dort mit festgehaltenen Kennzahlen der Golden-Datei.
 
 Für HRV-Kennzahlen liefert `praxis_gui/tools/generate_hrv_dataset.py --corpus`
 15 Szenarien mit Wahrheitsdatei (`truth-v1`) — die Referenz für `hrv_core`.
+
+---
+
+## 13. `spur-ohne-ort-v1` — die Rohspur eines Trainings ohne Ort (seit 26.10.2026)
+
+Eine Datei je Training im Export-ZIP (`Bewegung/<Name der Streckendatei>`, z. B.
+`Bewegung/strecke_2026-10-18_090507.jsonl`), geschrieben von
+`data.strecken.spur_ohne_ort`, Kopf aus `core.bewegung.kopf`. Dasselbe Zeilenformat wie
+die Streckendatei unter `Strecken/` (eine Zeile JSON je Ortung, fehlende Werte fehlen):
+eine **Dateikopie** ohne die Felder `lat`, `lon`, `richtung_grad`, dafür mit `ds_m`.
+Nur praxis-unabhängig: praxis_gui kennt das Format nicht und muss es nicht kennen.
+
+**Kopfzeile** `{"kopf": {…}}`:
+
+| Feld | Bedeutung |
+|---|---|
+| `schema` | `"spur-ohne-ort-v1"` |
+| `app` | `"trainingsapp 0.3.18 (Build …)"` |
+| `sportart`, `titel`, `start_utc`, `ende_utc` | wie die Zeile `strecke` |
+| `strecke_id`, `einheit_id` | Kennungen; `einheit_id` `null` bei Trainings vor dem 17.10.2026 |
+| `hoehe_bezug` | `"msl"` (über dem Meeresspiegel, EGM2008 — seit 26.10.2026) oder `"ellipsoid"` (ältere Dateien ohne Angabe im Kopf, WGS 84) |
+| `kennzahlen` | `distanz_m`, `dauer_s`, `bewegt_s`, `hoehe_auf_m`, `hoehe_ab_m` — wie die App sie zeigt, als Komfort markiert; die Zeilen sind die Wahrheit |
+| `messungen[]` | je verknüpfter Messung `datei` (Pfad im ZIP), `recording_id`, `versatz_s`, `versatz_quelle`: **Ortungszeit `t` + `versatz_s` = `t_wall_s` dieser Messdatei** (Abschnitt 4). `versatz_quelle` `"einheit"`: aus den Versätzen beider Teile der Einheit; `"uhr"`: `−start_utc` der Messdatei (ganze Sekunden, ±1 s) |
+| `felder` | was in den Zeilen stehen kann |
+| `entfernt` | `["lat", "lon", "richtung_grad"]` |
+
+**Eine Zeile je Ortung:**
+
+| Feld | roh? | Bedeutung |
+|---|---|---|
+| `t` | roh | UTC-Sekunden des Empfängers |
+| `ds_m` | abgeleitet | Abstand zum vorigen Fix in Metern (`core.strecke.abstand_m`, Haversine, ungefiltert, jede Ortung); fehlt in der ersten Zeile |
+| `tempo_ms` | roh | Doppler-Tempo des Empfängers |
+| `genauigkeit_m` | roh | horizontaler Fehler — der Leser filtert selbst (die App nimmt 30 m) |
+| `hoehe_m`, `hoehe_genauigkeit_m` | roh | Höhe im Bezug des Kopfs |
+| `t_empfang` | roh | monotone Uhr der App beim Eintreffen |
+| `simuliert` | roh | Ortung aus einer Test-App |
+
+Die **Richtung fehlt mit Absicht**: Abstand plus Richtung je Sekunde wäre Koppelnavigation,
+daraus ließe sich die Strecke bis auf Drehung und Verschiebung zurückrechnen. Alle
+Ableitungen (Genauigkeitsfilter, Auto-Pause, Steigung, Kilometer, Tempo je Fenster) rechnet
+der Leser nach — mit demselben Code wie die App (`core/strecke.py`) oder dem Leser in
+hrv-research (`hrv_research.bewegung`). Dieselbe Datei liegt im Forschungsexport einer
+Einheit (`einheit-v1`, `docs/plan_einheit.md` §8), dort nennt sie die GPS-Beteiligung.
+Tests: `tests/test_ausdauer.py::test_regel_0_keine_koordinate_in_hrv_export_tagebuch_und_sync`,
+`tests/test_strecke.py::test_rohspur_ohne_ort_ist_eine_dateikopie_mit_abstand`.

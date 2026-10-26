@@ -23,10 +23,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from hrv_core.korrektur import Korrigiert, korrektur_laden
+from hrv_core.recording import Recording
+from hrv_core.regeln import Korrekturregeln
 
 from trainingsapp.config import (
     app_version,
@@ -34,9 +39,13 @@ from trainingsapp.config import (
     messungenverzeichnis,
     streckenverzeichnis,
 )
+from trainingsapp.core.bewegung import HOEHE_BEZUG, Messungsbezug, zip_pfad
+from trainingsapp.core.bewegung import kopf as bewegung_kopf
+from trainingsapp.core.bewegung import versatz as bewegung_versatz
 from trainingsapp.core.einheit import Ereignis
 from trainingsapp.core.forschung import dokument, forschung_zip, tempo_reihe
 from trainingsapp.core.hrv_export import zugehoerige_dateien
+from trainingsapp.core.hrv_training import hf_je_zeit
 from trainingsapp.core.laufend import uhr
 from trainingsapp.core.models import Exercise, HrvRecording, Strecke, lokaler_tag
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
@@ -49,7 +58,14 @@ from trainingsapp.core.strecke import (
     rechnen,
 )
 from trainingsapp.data.seed import seed_id
-from trainingsapp.data.strecken import StreckenSchreiber, dateiname, jsonl_lesen, kopf_lesen
+from trainingsapp.data.strecken import (
+    StreckenSchreiber,
+    dateiname,
+    gpx,
+    jsonl_lesen,
+    kopf_lesen,
+    spur_ohne_ort,
+)
 from trainingsapp.devices.strecke_baustein import StreckeErgebnis
 
 
@@ -77,6 +93,8 @@ class Streckendatei:
                 "sportart": self.sportart,
                 "subject_id": self.subject_id,
                 "started_at": start_utc.isoformat(),
+                # was der Empfänger liefert (`flet_gps`: über dem Meeresspiegel, seit 26.10.2026)
+                "hoehe_bezug": HOEHE_BEZUG,
             },
         )
         return self.pfad.relative_to(verzeichnis).as_posix()
@@ -312,6 +330,19 @@ class HrvBezug:
             return t - start_utc.timestamp()
         return None
 
+    def wand_zu_ortung(self, w: float, start_utc: datetime | None) -> float | None:
+        """Die Umkehrung: ``t_wall_s`` der Messdatei → Ortungszeit (UTC-Sekunden).
+
+        >>> b = HrvBezug(Path("x.json"), verschiebung_s=1_000_000.0 - 734.0)
+        >>> b.wand_zu_ortung(744.0, None)
+        1000010.0
+        """
+        if self.verschiebung_s is not None:
+            return w + self.verschiebung_s
+        if start_utc is not None:
+            return w + start_utc.timestamp()
+        return None
+
 
 def hrv_bezug(state: Any, strecke: Strecke) -> HrvBezug | None:
     """Wo die HRV-Aufnahme eines Trainings liegt — ``None`` ohne HRV.
@@ -365,20 +396,27 @@ def forschung_export(state: Any, einheit_id: str) -> tuple[str, bytes]:
     Raises:
         ValueError: Die Einheit gibt es nicht (mehr).
     """
-    name, dok, dateien, basis = _forschung_teile(state, einheit_id)
-    return name, forschung_zip(dok, dateien, basis)
+    name, dok, dateien, basis, auftraege = _forschung_teile(state, einheit_id)
+    return name, forschung_zip(dok, dateien, basis, zusatz=bewegung_packen(auftraege))
 
 
 async def forschung_export_async(state: Any, einheit_id: str) -> tuple[str, bytes]:
     """Wie `forschung_export`, aber das Packen (Messdateien lesen, deflate — bei einer
     4-h-Aufnahme Sekunden) läuft in einem Thread; die Datenbank wird davor im Loop gelesen
     (sqlite-Verbindungen gehören ihrem Thread; H39)."""
-    name, dok, dateien, basis = _forschung_teile(state, einheit_id)
-    return name, await asyncio.to_thread(forschung_zip, dok, dateien, basis)
+    name, dok, dateien, basis, auftraege = _forschung_teile(state, einheit_id)
+
+    def packen() -> bytes:
+        return forschung_zip(dok, dateien, basis, zusatz=bewegung_packen(auftraege))
+
+    return name, await asyncio.to_thread(packen)
 
 
-def _forschung_teile(state: Any, einheit_id: str) -> tuple[str, Any, list[Path], Path]:
-    """Dateiname, Dokument, Messdateien und Basis des Forschungsexports — aus der Datenbank."""
+def _forschung_teile(
+    state: Any, einheit_id: str
+) -> tuple[str, Any, list[Path], Path, list[Bewegungsauftrag]]:
+    """Dateiname, Dokument, Messdateien, Basis und die Rohspur-Aufträge des
+    Forschungsexports — aus der Datenbank (im Loop, H39); gelesen wird beim Packen."""
     kopf = state.einheiten.laden(einheit_id) if state.einheiten is not None else None
     if kopf is None:
         raise ValueError("Diese Einheit gibt es nicht mehr.")
@@ -393,15 +431,27 @@ def _forschung_teile(state: Any, einheit_id: str) -> tuple[str, Any, list[Path],
         archiv[b.datei] = ""
         if pfad.exists():  # sonst läuft die Messung noch — der Teil steht ohne Datei da
             dateien += zugehoerige_dateien(pfad)
-            with contextlib.suppress(ValueError):
-                archiv[b.datei] = pfad.resolve().relative_to(basis.resolve()).as_posix()
+            archiv[b.datei] = archivpfad(pfad, basis)
     tempo: list[tuple[float, float | None]] = []
+    auftraege: list[Bewegungsauftrag] = []
     gps = next((b for b in teile if b.art == "gps" and b.datei), None)
     if gps is not None and gps.versatz_s is not None:
         strecke = streckenverzeichnis() / gps.datei
         if strecke.exists():
             tempo = tempo_reihe(jsonl_lesen(strecke), gps.versatz_s)
-    version, build = app_version()
+    if gps is not None and gps.datei:
+        # Die Rohspur ohne Ort (Ben, 26.10.2026: „das ist der wichtige Teil“) — der Teil
+        # nennt sie über ``archiv``; Lesen und Schreiben erst beim Packen
+        training = state.strecken.zur_einheit(einheit_id)
+        aufnahmen = [
+            r
+            for b in teile
+            if b.art == "hrv" and b.datei and (r := state.hrv.zur_datei(b.datei)) is not None
+        ]
+        auftrag = bewegung_auftrag(state, training, aufnahmen) if training is not None else None
+        if auftrag is not None:
+            archiv[gps.datei] = auftrag.zip_pfad
+            auftraege.append(auftrag)
     dok = dokument(
         einheit_id=kopf.id,
         titel=kopf.titel,
@@ -411,19 +461,213 @@ def _forschung_teile(state: Any, einheit_id: str) -> tuple[str, Any, list[Path],
         ereignisse=state.einheiten.ereignisse(einheit_id),
         tempo=tempo,
         archiv=archiv,
-        app=f"trainingsapp {version}" + (f" (Build {build})" if build else ""),
+        app=app_text(),
     )
     lokal = kopf.started_at.astimezone()
-    return f"einheit_{lokal:%Y-%m-%d_%H%M}.zip", dok, dateien, basis
+    return f"einheit_{lokal:%Y-%m-%d_%H%M}.zip", dok, dateien, basis, auftraege
+
+
+def app_text() -> str:
+    """„trainingsapp 0.3.18 (Build 280)“ — für Kopfzeilen von Exporten."""
+    version, build = app_version()
+    return f"trainingsapp {version}" + (f" (Build {build})" if build else "")
+
+
+def archivpfad(pfad: Path, basis: Path | None = None) -> str:
+    """Pfad einer Datei im Export-ZIP: relativ zum Datenverzeichnis (``Messungen/<Gerät>/…``),
+    außerhalb nur ihr Name — wie `core.hrv_export.export_zip` sie legt."""
+    basis = basis if basis is not None else datenverzeichnis()
+    try:
+        return pfad.resolve().relative_to(basis.resolve()).as_posix()
+    except ValueError:
+        return pfad.name
+
+
+# ---------------------------------------------------------------------------
+# Bewegungsdaten im Export — die Rohspur ohne Ort (`core.bewegung`, Ben 26.10.2026)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Bewegungsauftrag:
+    """Eine Rohspur, die ins ZIP soll: wohin, woraus, mit welchem Kopf — fertig aus der
+    Datenbank, damit das Lesen der Datei in einem Thread laufen kann (H39)."""
+
+    zip_pfad: str
+    pfad: Path
+    kopf: dict[str, Any]
+
+
+def messungsbezuege(state: Any, strecke: Strecke, aufnahmen: Iterable[Any]) -> list[Messungsbezug]:
+    """Je Messung des Trainings der Pfad im ZIP und der Versatz Ortungszeit → ``t_wall_s``
+    — aus den Beteiligungen der Einheit, sonst über den Start der Messdatei."""
+    teile: list[Any] = []
+    if strecke.einheit_id and getattr(state, "einheiten", None) is not None:
+        with contextlib.suppress(Exception):
+            teile = state.einheiten.beteiligungen(strecke.einheit_id)
+    gps = next((b for b in teile if b.art == "gps"), None)
+    aus: list[Messungsbezug] = []
+    for a in aufnahmen:
+        hrv = next((b for b in teile if b.art == "hrv" and b.datei == a.file_path), None)
+        v, quelle = bewegung_versatz(
+            a.started_at,
+            gps.versatz_s if gps is not None else None,
+            hrv.versatz_s if hrv is not None else None,
+        )
+        aus.append(Messungsbezug(archivpfad(messungenverzeichnis() / a.file_path), a.id, v, quelle))
+    return aus
+
+
+def bewegung_auftrag(
+    state: Any, strecke: Strecke, aufnahmen: Iterable[Any]
+) -> Bewegungsauftrag | None:
+    """Der Auftrag für ein Training — ``None`` ohne Streckendatei (Laufband, Datei weg)."""
+    if not strecke.file_path:
+        return None
+    pfad = streckenverzeichnis() / strecke.file_path
+    if not pfad.exists():
+        return None
+    k = bewegung_kopf(
+        strecke,
+        messungsbezuege(state, strecke, aufnahmen),
+        app=app_text(),
+        quell_kopf=kopf_lesen(pfad),
+    )
+    return Bewegungsauftrag(zip_pfad(strecke.file_path), pfad, k)
+
+
+def bewegung_vorbereiten(state: Any, aufnahmen: Iterable[HrvRecording]) -> list[Bewegungsauftrag]:
+    """Zu den exportierten Messungen die Trainings — ein Auftrag je Training, auch wenn
+    zwei Messungen daran hängen (dann zwei Einträge in ``messungen``). Datenbank, im Loop."""
+    je_strecke: dict[str, tuple[Strecke, list[HrvRecording]]] = {}
+    for a in aufnahmen:
+        s = state.strecken.zur_hrv(a.id)
+        if s is not None:
+            je_strecke.setdefault(s.id, (s, []))[1].append(a)
+    return [
+        auftrag
+        for s, recs in je_strecke.values()
+        if (auftrag := bewegung_auftrag(state, s, recs)) is not None
+    ]
+
+
+def bewegung_packen(auftraege: Iterable[Bewegungsauftrag]) -> dict[str, bytes]:
+    """ZIP-Pfad → Rohspur ohne Ort — liest die Streckendateien, darum im Thread."""
+    return {a.zip_pfad: spur_ohne_ort(a.pfad, a.kopf) for a in auftraege}
+
+
+# ---------------------------------------------------------------------------
+# GPX — mit Koordinaten, nur auf ausdrückliche Handlung (Regel 0, Eigenverantwortung)
+# ---------------------------------------------------------------------------
+
+
+def hrv_laden(
+    bezug: HrvBezug | None, vorgabe: Korrekturregeln
+) -> tuple[Recording, Korrigiert] | None:
+    """Die HRV-Aufnahme eines Trainings, korrigiert wie in ihrer Auswertung (Sidecar, Regeln —
+    `hrv_core.korrektur.korrektur_laden`), direkt verknüpft oder über die Einheit
+    (`hrv_bezug`). ``vorgabe``: die gerätelokalen Regeln, wenn das Sidecar keine hat.
+    Liest Dateien und rechnet — in einem Thread aufrufen (H39)."""
+    if bezug is None or not bezug.pfad.exists():
+        return None
+    stand = korrektur_laden(bezug.pfad, vorgabe)
+    return stand.basis.rec, stand.anwenden()
+
+
+def ortung_zu_wand(bezug: HrvBezug | None, rec: Recording, t: float) -> float | None:
+    """Ortungszeit → ``t_wall_s`` der Messdatei: über die Versätze der Einheit, sonst
+    über den Start der Aufnahme (ältere Trainings)."""
+    if bezug is not None:
+        return bezug.ortung_zu_wand(t, rec.start_utc)
+    return t - rec.start_utc.timestamp() if rec.start_utc else None
+
+
+def herz_je_ortung(
+    punkte: Iterable[Punkt], bezug: HrvBezug | None, rec: Recording
+) -> dict[float, int]:
+    """Ortungszeit → Herzfrequenz (Schläge/min) für den GPX-Export — nur Ortungen, zu
+    denen die Messdatei einen Schlag hat."""
+    wand = {p.t: w for p in punkte if (w := ortung_zu_wand(bezug, rec, p.t)) is not None}
+    je_wand = hf_je_zeit(rec, list(wand.values()))
+    return {t: bpm for t, w in wand.items() if (bpm := je_wand.get(w)) is not None}
+
+
+@dataclass(frozen=True, slots=True)
+class GpxAuftrag:
+    """Eine Strecke, die als GPX ins ZIP soll — fertig aus der Datenbank (H39)."""
+
+    zip_pfad: str
+    strecke: Strecke
+    pfad: Path
+    bezug: HrvBezug | None
+    vorgabe: Korrekturregeln
+
+
+def gpx_vorbereiten(state: Any, strecken: Iterable[Strecke]) -> list[GpxAuftrag]:
+    """Je Training mit Streckendatei ein Auftrag — Datenbank, im Loop."""
+    vorgabe = state.korrekturregeln()
+    aus: list[GpxAuftrag] = []
+    for s in strecken:
+        if not s.file_path:
+            continue
+        pfad = streckenverzeichnis() / s.file_path
+        if not pfad.exists():
+            continue
+        lokal = s.started_at.astimezone()
+        aus.append(
+            GpxAuftrag(
+                f"Strecken/{lokal:%Y-%m-%d_%H%M}_{s.sportart}.gpx",
+                s,
+                pfad,
+                hrv_bezug(state, s),
+                vorgabe,
+            )
+        )
+    return aus
+
+
+def gpx_packen(auftraege: Iterable[GpxAuftrag]) -> dict[str, bytes]:
+    """ZIP-Pfad → GPX mit Herzfrequenz (wie „GPX exportieren“ in der Auswertung) — liest
+    Strecken- und Messdateien, darum im Thread."""
+    aus: dict[str, bytes] = {}
+    for a in auftraege:
+        punkte = jsonl_lesen(a.pfad)
+        if not punkte:
+            continue
+        herz: dict[float, int] = {}
+        hrv = hrv_laden(a.bezug, a.vorgabe)
+        if hrv is not None:
+            herz = herz_je_ortung(punkte, a.bezug, hrv[0])
+        lokal = a.strecke.started_at.astimezone()
+        aus[a.zip_pfad] = gpx(
+            punkte,
+            name=f"{SPORT_NAMEN[a.strecke.sportart]} {lokal:%d.%m.%Y %H:%M}",
+            sportart=a.strecke.sportart,
+            herzfrequenz=herz or None,
+        )
+    return aus
 
 
 __all__ = [
+    "Bewegungsauftrag",
+    "GpxAuftrag",
     "HrvBezug",
     "Streckendatei",
+    "app_text",
+    "archivpfad",
+    "bewegung_auftrag",
+    "bewegung_packen",
+    "bewegung_vorbereiten",
     "einheit_eintragen",
     "forschung_export",
+    "gpx_packen",
+    "gpx_vorbereiten",
+    "herz_je_ortung",
     "hrv_bezug",
+    "hrv_laden",
     "lauftext",
+    "messungsbezuege",
+    "ortung_zu_wand",
     "training_eintragen",
     "uebung_fuer",
     "verwaiste_uebernehmen",

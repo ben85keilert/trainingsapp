@@ -63,6 +63,9 @@ from trainingsapp.core.timer import (
     timer_signale_lesen,
     timer_signale_schreiben,
 )
+from trainingsapp.core.training_einstellungen import TrainingEinstellungen
+from trainingsapp.core.training_einstellungen import einstellungen_lesen as training_lesen
+from trainingsapp.core.training_einstellungen import einstellungen_schreiben as training_schreiben
 from trainingsapp.core.update import Release
 from trainingsapp.core.verlauf import MODUS_ZEIT, ZEITRAUM_VORGABE
 from trainingsapp.data.anhaenge import AnhangRepo
@@ -711,6 +714,13 @@ class AppState:
 
     def hrv_einstellungen_setzen(self, e: HrvEinstellungen) -> None:
         self.einstellungen.setzen(SettingRepo.HRV_EINSTELLUNGEN, einstellungen_schreiben(e))
+
+    def training_einstellungen(self) -> TrainingEinstellungen:
+        """Ausdauertraining: Karte einfärben, Tempo mit Pausen, Spalten, Kurve, Auto-Pause."""
+        return training_lesen(self.einstellungen.lesen(SettingRepo.TRAINING_EINSTELLUNGEN))
+
+    def training_einstellungen_setzen(self, e: TrainingEinstellungen) -> None:
+        self.einstellungen.setzen(SettingRepo.TRAINING_EINSTELLUNGEN, training_schreiben(e))
 
     def hrv_zuruecksetzen(self) -> None:
         """Einstellungen, aktuelle Ansicht und Korrekturregeln auf die Vorgaben.

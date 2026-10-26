@@ -29,6 +29,7 @@ Routen:
     /archiv, /papierkorb            Archivierte und gelöschte Übungen (und Pläne)
     /verlauf/<kachel_id>            Kurve der Tagessummen einer Kachel (mit Varianten)
     /einstellungen/hrv              Einstellungen der HRV-Messung
+    /einstellungen/training         Training: Karte einfärben, Tempo mit Pausen, Spalten je km
     /einstellungen/profile          Profile anlegen, umbenennen, löschen
     /einstellungen/tags             Typen und Regionen der Übungen: anlegen, umbenennen, löschen
     /einstellungen/tagesfelder[/<id>|/neu]   Tagesfelder: Liste, Formular (docs/plan_tagesfelder.md)
@@ -94,6 +95,7 @@ from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_anhaenge import einstellungen_anhaenge
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
 from trainingsapp.ui.views.einstellungen_tags import einstellungen_tags_view
+from trainingsapp.ui.views.einstellungen_training import einstellungen_training
 from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
 from trainingsapp.ui.views.gps_test import gps_test_view
@@ -777,6 +779,8 @@ def main(page: ft.Page) -> None:
             ablegen(lambda: einstellungen(page, state, browser))
             if teile[1:2] == ["hrv"]:
                 ablegen(lambda: einstellungen_hrv(page, state))
+            elif teile[1:2] == ["training"]:
+                ablegen(lambda: einstellungen_training(page, state))
             elif teile[1:2] == ["profile"]:
                 ablegen(lambda: profile_view(page, state))
             elif teile[1:2] == ["tags"]:

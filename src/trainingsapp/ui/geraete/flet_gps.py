@@ -78,6 +78,11 @@ class FletGpsQuelle(GpsQuelle):
             accuracy=fgl.GeolocatorPositionAccuracy.BEST,
             distance_filter=0,
             interval_duration=ft.Duration(milliseconds=round(intervall_s * 1000)),
+            # Höhe über dem Meeresspiegel (EGM2008) statt über dem Ellipsoid — wie iOS,
+            # wie Strava und Komoot es erwarten (Ben, 26.10.2026, G-F7); in Deutschland
+            # rund 45 m Unterschied. Liefert das Gerät keine NMEA-Sätze, bleibt es beim
+            # Ellipsoid — der Kopf der Streckendatei nennt den Bezug (`core.bewegung`).
+            use_msl_altitude=True,
         )
         # Die Dart-Seite abonniert den Positionsstrom, sobald ein Handler da ist,
         # und abonniert neu, wenn sich die Einstellung ändert.

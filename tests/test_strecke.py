@@ -197,6 +197,34 @@ def test_jsonl_haengt_an_und_uebersteht_abbruch(tmp_path: Path) -> None:
     assert jsonl_lesen(pfad) == gerade(4)
 
 
+def test_rohspur_ohne_ort_ist_eine_dateikopie_mit_abstand(tmp_path: Path) -> None:
+    """`spur_ohne_ort` (Ben, 26.10.2026): dieselben Zeilen ohne lat/lon/Richtung, dafür
+    ``ds_m`` zum vorigen Fix; Kopf und kaputte Zeilen der Quelle fallen weg."""
+    import json
+
+    from trainingsapp.core.bewegung import ENTFERNT, FELDER
+    from trainingsapp.core.strecke import abstand_m
+    from trainingsapp.data.strecken import spur_ohne_ort
+
+    pfad = tmp_path / "s.jsonl"
+    punkte = gerade(5)
+    with StreckenSchreiber(pfad, kopf={"schema": "strecke-v1", "hoehe_bezug": "msl"}) as s:
+        for p in punkte:
+            s.schreiben(p)
+    with pfad.open("a", encoding="utf-8") as f:
+        f.write('{"t": 9, "lat": 5')  # Absturz
+    zeilen = spur_ohne_ort(pfad, {"schema": "spur-ohne-ort-v1"}).decode().splitlines()
+    assert json.loads(zeilen[0]) == {"kopf": {"schema": "spur-ohne-ort-v1"}}
+    ortungen = [json.loads(z) for z in zeilen[1:]]
+    assert [o["t"] for o in ortungen] == [p.t for p in punkte]
+    assert "ds_m" not in ortungen[0]
+    for vorher, p, o in zip(punkte[:-1], punkte[1:], ortungen[1:], strict=True):
+        assert o["ds_m"] == pytest.approx(abstand_m(vorher, p), abs=0.001)
+    for o in ortungen:
+        assert not set(o) & set(ENTFERNT) and set(o) <= set(FELDER)
+    assert all("52." not in zl and "13.0" not in zl for zl in zeilen[1:])  # keine Koordinate
+
+
 def test_gpx_ist_gueltig_und_in_schemareihenfolge() -> None:
     punkte = gerade(3)
     daten = gpx(punkte, name="Runde <1>", sportart="laufen", herzfrequenz={punkte[1].t: 140})

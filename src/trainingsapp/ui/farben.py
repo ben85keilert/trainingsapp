@@ -85,6 +85,22 @@ REIHEN: tuple[str, ...] = ("reihe_1", "reihe_2", "reihe_3", "reihe_4", "reihe_5"
 
 FARBEN: dict[str, str] = dict(DUNKEL)
 
+#: Farbskalen für die Strecke auf der Karte (langsam → schnell bzw. niedrig → hoch;
+#: Ben, 26.10.2026, P81). Die Karte ist immer hell — eine Skala für beide Helligkeiten;
+#: helle Töne bekommen auf der Karte eine weiße Randlinie (`components.karte_strecke`).
+TEMPO_SKALEN: dict[str, list[str]] = {
+    # die Lesart von Strava und Garmin: Blau langsam, Rot schnell; Gelb und Blau trennen
+    # Rot und Grün
+    "tempo": ["#2166AC", "#4DAC26", "#E6A100", "#F46D43", "#D7191C"],
+    # farbenblind-sicher, Helligkeit steigt monoton — „heller = schneller“ auch ohne Farbe
+    "viridis": ["#440154", "#3B528B", "#21918C", "#5EC962", "#FDE725"],
+    # dunkel → hell, warm
+    "glut": ["#2C0F4A", "#7B2A8A", "#C64C6B", "#F38B3A", "#FBE56A"],
+}
+SKALEN_NAMEN: dict[str, str] = {"tempo": "Tempo", "viridis": "Viridis", "glut": "Glut"}
+#: Stillstand auf der Karte
+PAUSE_FARBE = ft.Colors.GREY_500
+
 
 def helligkeit_setzen(hell: bool) -> None:
     """Füllt `FARBEN` für hellen oder dunklen Grund."""
@@ -92,4 +108,13 @@ def helligkeit_setzen(hell: bool) -> None:
     FARBEN.update(HELL if hell else DUNKEL)
 
 
-__all__ = ["DUNKEL", "FARBEN", "HELL", "REIHEN", "helligkeit_setzen"]
+__all__ = [
+    "DUNKEL",
+    "FARBEN",
+    "HELL",
+    "PAUSE_FARBE",
+    "REIHEN",
+    "SKALEN_NAMEN",
+    "TEMPO_SKALEN",
+    "helligkeit_setzen",
+]

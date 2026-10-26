@@ -531,6 +531,38 @@ async def test_absturz_strecke_und_messung_finden_einander(daten) -> None:
     assert state.strecken.zur_hrv(aufnahme.id).id == strecke.id
 
 
+async def test_sammelexport_der_strecken_gpx_mit_koordinaten(daten) -> None:
+    """Aufzeichnungen → Strecken → „Alle exportieren“ (Ben, 26.10.2026, F4): nach Rückfrage
+    ein ZIP nur mit ``Strecken/*.gpx`` — mit Koordinaten und Herzfrequenz, in eigener
+    Verantwortung; keine Messdatei, keine Rohspur."""
+    from trainingsapp.core.hrv_export import export_zip
+    from trainingsapp.ui.components.strecken_export import erklaerung
+    from trainingsapp.ui.training import gpx_packen, gpx_vorbereiten
+    from trainingsapp.ui.views.messung import messung
+
+    state, tmp_path = daten
+    strecke, punkte = await _training(state, tmp_path)
+    auftraege = gpx_vorbereiten(state, state.strecken.alle(state.profil.id))
+    assert [a.strecke.id for a in auftraege] == [strecke.id]
+    dateien = gpx_packen(auftraege)
+    with zipfile.ZipFile(BytesIO(export_zip([], tmp_path, zusatz=dateien))) as z:
+        namen = z.namelist()
+        assert len(namen) == 1 and namen[0].startswith("Strecken/") and namen[0].endswith(".gpx")
+        text = z.read(namen[0]).decode("utf-8")
+    assert f'lat="{punkte[0].lat:.7f}"' in text and "<gpxtpx:hr>" in text
+    assert "<type>walking</type>" in text
+    assert erklaerung(1).startswith("1 Strecke mit Koordinaten")
+    # Die Ansicht: Reiter „Strecken“ mit dem Knopf
+    state.messung_tab, state.aufzeichnungen_tab = 2, 0
+    import flet as ft
+
+    ansicht = messung(_seite(), state)
+    texte = _texte(ansicht)
+    assert "Strecken (1)" in texte and "1 Strecke" in texte
+    knopf = next(c for c in _alle(ansicht) if isinstance(c, ft.TextButton))
+    assert knopf.content == "Alle exportieren" and "Koordinaten" in knopf.tooltip
+
+
 async def test_regel_0_keine_koordinate_in_hrv_export_tagebuch_und_sync(daten) -> None:
     """GPS-Daten werden nie geteilt: HRV-Datei, Export-ZIP, Notizen, Tagebuch, outbox."""
     from trainingsapp.config import messungenverzeichnis
@@ -543,19 +575,68 @@ async def test_regel_0_keine_koordinate_in_hrv_export_tagebuch_und_sync(daten) -
     breiten = {f"{p.lat:.4f}" for p in punkte[::50]} | {f"{LAT0:.3f}", f"{LON0:.3f}"}
 
     def ortsfrei(text: str) -> bool:
-        return not any(b in text for b in breiten) and '"lat"' not in text
+        # ``"lat":`` als Schlüssel — der Kopf der Rohspur nennt „lat“ nur als entferntes Feld
+        return not any(b in text for b in breiten) and '"lat":' not in text
 
     # Die HRV-Datei — mit den km-Notizen — kennt keinen Ort
     roh = pfad.read_text(encoding="utf-8")
     assert ortsfrei(roh)
     notizen = [e["text"] for e in json.loads(roh)["ereignisse"]]
     assert notizen and all(n.startswith("km ") for n in notizen)
-    # Export-ZIP der Messung: ohne Strecke, ohne Koordinate
+    # Export-ZIP der Messung: ohne Strecke, ohne Koordinate — aber mit der Rohspur ohne
+    # Ort unter ``Bewegung/`` (Ben, 26.10.2026: Abstand, Tempo, Höhe je Fix; keine
+    # Breite, Länge, Richtung)
+    from trainingsapp.core.strecke import MAX_GENAUIGKEIT_M
+    from trainingsapp.ui.training import bewegung_packen, bewegung_vorbereiten, hrv_bezug
+
     dateien = zugehoerige_dateien(pfad)
     assert not any("Strecken" in str(d) or d.suffix in (".jsonl", ".gpx") for d in dateien)
-    with zipfile.ZipFile(BytesIO(export_zip(dateien, tmp_path))) as z:
-        for name in z.namelist():
-            assert ortsfrei(z.read(name).decode("utf-8", "replace")), name
+    auftraege = bewegung_vorbereiten(state, [hrv])
+    zusatz = bewegung_packen(auftraege)
+    with zipfile.ZipFile(BytesIO(export_zip(dateien, tmp_path, zusatz=zusatz))) as z:
+        namen = z.namelist()
+        for name in namen:
+            text = z.read(name).decode("utf-8", "replace")
+            assert ortsfrei(text), name
+            assert '"richtung_grad":' not in text and '"lon":' not in text, name
+        assert not any("Strecken" in n or n.endswith(".gpx") for n in namen)
+        spur = [n for n in namen if n.startswith("Bewegung/")]
+        assert spur == [f"Bewegung/{strecke.file_path}"]
+        zeilen = z.read(spur[0]).decode("utf-8").splitlines()
+    kopf = json.loads(zeilen[0])["kopf"]
+    assert kopf["schema"] == "spur-ohne-ort-v1" and kopf["hoehe_bezug"] == "msl"
+    assert kopf["strecke_id"] == strecke.id and kopf["einheit_id"] == strecke.einheit_id
+    assert kopf["kennzahlen"]["distanz_m"] == strecke.distanz_m
+    (bezug,) = kopf["messungen"]
+    assert bezug["datei"] == f"Messungen/{hrv.file_path}" and bezug["recording_id"] == hrv.id
+    assert bezug["versatz_quelle"] == "einheit"
+    ortungen = [json.loads(zl) for zl in zeilen[1:]]
+    assert len(ortungen) == len(punkte) and "ds_m" not in ortungen[0] and "ds_m" in ortungen[1]
+    assert all(
+        set(o)
+        <= {
+            "t",
+            "ds_m",
+            "tempo_ms",
+            "genauigkeit_m",
+            "hoehe_m",
+            "hoehe_genauigkeit_m",
+            "t_empfang",
+            "simuliert",
+        }
+        for o in ortungen
+    )
+    # Zeitachse: Ortungszeit + Versatz = t_wall_s der Messdatei — wie die Auswertung
+    # (Einheit mit beiden Versätzen) es rechnet
+    b = hrv_bezug(state, strecke)
+    assert b is not None and b.verschiebung_s is not None
+    t0 = ortungen[0]["t"]
+    assert t0 + bezug["versatz_s"] == pytest.approx(b.ortung_zu_wand(t0, None), abs=1e-6)
+    # Roh heißt roh: Die Abstände sind ungefiltert (das Zittern von 1,5 m je Fix zählt
+    # mit — die App dünnt es aus), das Doppler-Tempo integriert ergibt die Distanz der App
+    gut = [o for o in ortungen if o.get("genauigkeit_m", 0) <= MAX_GENAUIGKEIT_M]
+    assert sum(o.get("ds_m", 0.0) for o in gut) >= strecke.distanz_m
+    assert sum(o.get("tempo_ms", 0.0) for o in gut) == pytest.approx(strecke.distanz_m, rel=0.05)
     # Tagebuch und Datenbank: nichts Ortsbezogenes, keine Synchronisation
     eintrag = state.sitzungen.eintrag_laden(strecke.session_entry_id)
     assert set(eintrag.result) <= {"distance", "duration"}
@@ -634,6 +715,42 @@ async def test_auswertung_und_liste_zeigen_das_training(daten) -> None:
     assert "JE KILOMETER" in texte and "STRECKE" in texte
     assert any(isinstance(c, fm.Map) for c in _alle(view))
     assert "3" in texte  # dritter (angefangener) Kilometer in der Tabelle
+    # P81 (26.10.2026): Strecke nach Tempo gefärbt (Stücke je 10 s, weiße Randlinie), Legende;
+    # Karte „Herzfrequenz und Tempo“ mit Achsenwahl; „Je Kilometer“ mit Gesamtzeit, Spalten
+    # und dem Chip „ohne Pausen“
+    import flet as ft
+
+    from trainingsapp.ui.farben import TEMPO_SKALEN
+
+    karten = [c for c in _alle(view) if isinstance(c, fm.Map)]
+    linien = [
+        m
+        for k in karten
+        for schicht in k.layers
+        if isinstance(schicht, fm.PolylineLayer)
+        for m in schicht.polylines
+    ]
+    assert len(linien) > 50 and all(m.border_color == ft.Colors.WHITE for m in linien)
+    assert {m.color for m in linien} <= set(TEMPO_SKALEN["tempo"]) | {ft.Colors.GREY_500}
+    assert any(t.startswith("langsam ") for t in texte) and any(
+        t.startswith("schnell ") for t in texte
+    )
+    assert "HERZFREQUENZ UND TEMPO" in texte
+    achsen = [c for c in _alle(view) if isinstance(c, ft.SegmentedButton)]
+    assert [s.value for s in achsen[0].segments] == ["zeit", "strecke"]
+    i = texte.index("/km")  # der Tabellenkopf (das erste „km“ ist die Einheit im Überblick)
+    assert texte[i - 2 : i + 4] == ["km", "Zeit", "/km", "Ø HF", "DFA α1", "↑ m"]
+    chip = next(c for c in _alle(view) if isinstance(c, ft.Chip))
+    assert chip.label.value == "ohne Pausen"
+    chip.on_click()  # umschalten: Einstellung gemerkt, Ansicht neu gefüllt
+    assert state.training_einstellungen().tempo_mit_pausen
+    texte_mit = _texte(view)
+    assert next(c for c in _alle(view) if isinstance(c, ft.Chip)).label.value == "mit Pausen"
+    assert "Ø Tempo mit Pausen" in texte_mit
+    # Achse auf Strecke: die Kurve bleibt, die Einstellung folgt
+    achsen[0].on_change(SimpleNamespace(control=SimpleNamespace(selected=["strecke"])))
+    assert state.training_einstellungen().kurve_x == "strecke"
+    assert "HERZFREQUENZ UND TEMPO" in _texte(view)
     # Start-Ansicht ohne laufendes Training: Sportarten (Gehen zuerst) und Start
     import flet as ft
 
@@ -643,10 +760,10 @@ async def test_auswertung_und_liste_zeigen_das_training(daten) -> None:
     assert any(
         isinstance(c, ft.FilledButton) and c.content == "Training starten" for c in _alle(start)
     )
-    # Reiter „Messung → Aufzeichnungen": Unterreiter „Laufen" mit dem Training
+    # Reiter „Messung → Aufzeichnungen": Unterreiter „Strecken" mit dem Training
     state.messung_tab = 2
     liste = messung(_seite(), state)
-    assert state.aufzeichnungen_tab == 0 and "Laufen (1)" in _texte(liste)
+    assert state.aufzeichnungen_tab == 0 and "Strecken (1)" in _texte(liste)
     assert any(t.startswith("Gehen · ") and " km · " in t for t in _texte(liste)), _texte(liste)
 
 
@@ -828,7 +945,9 @@ async def test_laufband_intervalle_ohne_strecke(daten) -> None:
 async def test_forschungsexport_ohne_ort(daten) -> None:
     """Stufe 4 (Ben, 17.10.2026): Das ZIP hat die Messdatei byte-genau (ohne die
     Bluetooth-Adresse, S10) und ``einheit-v1.json`` mit Zeitleiste, Versätzen und Tempo
-    alle 5 s — keine Koordinate, keine Richtung, keine Höhe, keine Strecke (Regel 0)."""
+    alle 5 s — keine Koordinate, keine Richtung, keine Strecke (Regel 0). Seit 26.10.2026
+    dazu die Rohspur ohne Ort unter ``Bewegung/`` (Ben: „das ist der wichtige Teil“): Aus
+    Zeitleiste und Rohspur allein ergibt sich, wie schnell man nach einem Abschnitt war."""
     from trainingsapp.config import messungenverzeichnis
     from trainingsapp.core.hrv_export import messdatei_ohne_adresse
     from trainingsapp.core.timer import Abschnitt, TimerProfil
@@ -857,7 +976,8 @@ async def test_forschungsexport_ohne_ort(daten) -> None:
     teile = {t["art"]: t for t in dok["teile"]}
     assert set(teile) == {"hrv", "gps", "timer"}
     assert teile["hrv"]["datei"] == f"Messungen/{hrv.file_path}"
-    assert "datei" not in teile["gps"] and teile["gps"]["versatz_s"] is not None
+    assert teile["gps"]["datei"] == f"Bewegung/{strecke.file_path}" in namen
+    assert teile["gps"]["versatz_s"] is not None
     arten = {(e["quelle"], e["art"]) for e in dok["ereignisse"]}
     assert {("gps", "km"), ("timer", "abschnitt"), ("timer", "ende")} <= arten
     assert [e["nr"] for e in dok["ereignisse"]] == list(range(1, len(dok["ereignisse"]) + 1))
@@ -866,13 +986,25 @@ async def test_forschungsexport_ohne_ort(daten) -> None:
     werte = [v for _, v in reihe if v is not None]
     assert dok["tempo"]["schritt_s"] == 5.0 and len(reihe) >= 230
     assert sum(werte) / len(werte) == pytest.approx(2.5, abs=0.1)
-    # Regel 0: nichts Ortsbezogenes, keine Strecke
+    # Regel 0: nichts Ortsbezogenes, keine Strecke — die Rohspur ohne Ort darf die Höhe
     breiten = {f"{p.lat:.4f}" for p in punkte[::50]} | {f"{LAT0:.3f}", f"{LON0:.3f}"}
     for n, text in texte.items():
         assert not any(b in text for b in breiten), n
-        for schluessel in ('"lat"', '"lon"', "richtung", "hoehe"):
+        for schluessel in ('"lat":', '"lon":', '"richtung_grad":'):
             assert schluessel not in text, (n, schluessel)
-    assert not any("Strecken" in n or n.endswith((".jsonl", ".gpx")) for n in namen)
+        if not n.startswith("Bewegung/"):
+            assert "hoehe" not in text, n
+    assert not any("Strecken" in n or n.endswith(".gpx") for n in namen)
+    # Der wichtige Teil: Tempo in der Minute nach dem ersten Timer-Abschnitt — nur aus
+    # Zeitleiste (t_s) und Rohspur (Ortungszeit + Versatz = t_s), ohne die App
+    ende = next(e for e in dok["ereignisse"] if (e["quelle"], e["art"]) == ("timer", "abschnitt"))
+    zeilen = texte[teile["gps"]["datei"]].splitlines()
+    kopf = json.loads(zeilen[0])["kopf"]
+    assert kopf["schema"] == "spur-ohne-ort-v1" and kopf["messungen"][0]["recording_id"] == hrv.id
+    spur = [json.loads(zl) for zl in zeilen[1:]]
+    von = ende["t_s"] - teile["gps"]["versatz_s"]
+    danach = [o["tempo_ms"] for o in spur if von <= o["t"] < von + 60 and "tempo_ms" in o]
+    assert len(danach) >= 50 and sum(danach) / len(danach) == pytest.approx(2.5, abs=0.1)
 
 
 async def test_forschungsexport_waehrend_die_hrv_weiterlaeuft(daten) -> None:
@@ -890,7 +1022,9 @@ async def test_forschungsexport_waehrend_die_hrv_weiterlaeuft(daten) -> None:
             gesehen["dok"] = json.loads(z.read("einheit-v1.json"))
 
     await _training(state, tmp_path, hrv_vorher=30, vor_dem_stopp=exportieren)
-    assert gesehen["namen"] == ["einheit-v1.json"]
+    # die Messdatei fehlt noch; die Rohspur ohne Ort (26.10.2026) ist schon da
+    assert gesehen["namen"][0] == "einheit-v1.json" and len(gesehen["namen"]) == 2
+    assert gesehen["namen"][1].startswith("Bewegung/")
     (hrv,) = [t for t in gesehen["dok"]["teile"] if t["art"] == "hrv"]
     assert hrv["datei"] is None and hrv["rolle"] == "laeuft_schon"
     assert hrv["versatz_s"] == pytest.approx(-30.0, abs=1e-6)

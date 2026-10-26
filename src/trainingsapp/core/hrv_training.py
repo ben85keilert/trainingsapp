@@ -179,6 +179,36 @@ def zeit_je_bereich(
     return [(name, round(minuten[name], 2)) for name, _, _ in DFA_BEREICHE]
 
 
+def hf_reihe(rec: Recording, korr: Korrigiert, schritt_s: float = 5.0) -> list[tuple[float, float]]:
+    """Herzfrequenz je Fenster von ``schritt_s`` auf der Wanduhr der Messdatei — für die
+    Kurve „Herzfrequenz und Tempo“ der Trainings-Auswertung. Je Fenster das Mittel der
+    korrigierten RR-Werte (plausible), ``(Fenstermitte s, Schläge/min)``; Fenster ohne
+    Schlag fehlen (Lücke in der Kurve).
+
+    >>> from hrv_core.recording import Beat
+    >>> from hrv_core.korrektur import anwenden
+    >>> schlaege = [Beat(i * 0.8, 800 if i < 10 else 600, 75, i * 0.8) for i in range(1, 40)]
+    >>> hf_reihe(Recording(beats=schlaege), anwenden(Recording(beats=schlaege), []), 8.0)
+    [(4.0, 75.0), (12.0, 100.0), (20.0, 100.0), (28.0, 100.0)]
+    """
+    wand = wanduhr(rec, korr)
+    rr = np.asarray(korr.rr_ms, dtype=float)
+    gut = (rr >= RR_MIN_MS) & (rr <= RR_MAX_MS) & np.isfinite(wand)
+    if not gut.any():
+        return []
+    wand, rr = wand[gut], rr[gut]
+    fenster = np.floor(wand / schritt_s).astype(int)
+    fenster -= fenster.min()
+    summen = np.bincount(fenster, weights=60000.0 / rr)
+    anzahl = np.bincount(fenster)
+    erstes = int(np.floor(wand.min() / schritt_s))
+    return [
+        ((erstes + k + 0.5) * schritt_s, float(summen[k] / anzahl[k]))
+        for k in range(len(anzahl))
+        if anzahl[k]
+    ]
+
+
 def hf_je_zeit(
     rec: Recording, zeiten_s: Sequence[float], fenster_s: float = 5.0
 ) -> dict[float, int]:
@@ -216,6 +246,7 @@ __all__ = [
     "dfa_verlauf",
     "herz_aus_messung",
     "hf_je_zeit",
+    "hf_reihe",
     "wanduhr",
     "werte_zwischen",
     "zeit_je_bereich",

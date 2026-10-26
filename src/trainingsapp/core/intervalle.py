@@ -160,10 +160,13 @@ def intervalle(
     jetzt_s: float | None = None,
     strecke: StreckenQuelle | None = None,
     herz: HerzQuelle | None = None,
+    mit_pausen: bool = False,
 ) -> list[Intervall]:
     """Die Tabelle „Intervalle“: je Abschnitt des Timers Zeit, Strecke, Tempo und Herz.
 
     ``jetzt_s``: Der Timer läuft noch — sein Abschnitt ist die letzte Zeile (``laeuft``).
+    ``mit_pausen``: Tempo über die gelaufene Zeit des Abschnitts statt über die
+    Bewegungszeit (Ben, 26.10.2026, `core.training_einstellungen`).
 
     >>> def ab(t, name, runde):
     ...     daten = {"name": name, "runde": runde, "von": 2}
@@ -191,7 +194,7 @@ def intervalle(
             a, b = strecke(g.von_s), strecke(g.bis_s)
             if a is not None and b is not None:
                 distanz = max(0.0, b[0] - a[0])
-                bewegt = max(0.0, b[1] - a[1])
+                bewegt = g.sekunden if mit_pausen else max(0.0, b[1] - a[1])
                 if distanz >= MIN_STRECKE_M and bewegt > 0:
                     tempo = bewegt / (distanz / 1000.0)
         zeilen.append(
@@ -219,24 +222,37 @@ class KmZeile:
     km: int
     #: Zeit vom Anfang bis zum Ende des Splits (s), Pausen eingeschlossen
     sekunden: float
+    #: Tempo (s/km) — über die Bewegungszeit oder mit Pausen (`kilometer(mit_pausen=…)`)
     tempo_s_pro_km: float | None
     herz: Herz = field(default_factory=Herz)
+    #: Gesamtzeit seit dem ersten Split am Ende dieses Splits (s) — die laufende Uhr
+    gesamt_s: float = 0.0
+    #: Stillstand im Split (s)
+    pause_s: float = 0.0
 
 
 def kilometer(
-    splits: Sequence[Split], *, versatz_s: float | None = None, herz: HerzQuelle | None = None
+    splits: Sequence[Split],
+    *,
+    versatz_s: float | None = None,
+    herz: HerzQuelle | None = None,
+    mit_pausen: bool = False,
 ) -> list[KmZeile]:
     """Die Tabelle „Kilometer“: je vollem Split Zeit, Tempo und Herz — ``versatz_s``:
     Ortungszeit + Versatz = ``t_s`` der Einheit (ohne ihn keine Herzwerte).
+    ``mit_pausen``: Tempo über die Echtzeit des Splits (Ben, 26.10.2026).
 
-    >>> s = [Split(1, 1000.0, 100.0, 400.0, 300.0), Split(2, 1000.0, 400.0, 690.0, 290.0)]
+    >>> s = [Split(1, 1000.0, 100.0, 400.0, 300.0), Split(2, 1000.0, 400.0, 690.0, 260.0)]
     >>> def puls(von, bis):
     ...     return Herz(140.0 + von / 100)
-    >>> [(z.km, z.sekunden, z.tempo_s_pro_km, z.herz.hf_bpm)
+    >>> [(z.km, z.sekunden, z.tempo_s_pro_km, z.herz.hf_bpm, z.gesamt_s, z.pause_s)
     ...  for z in kilometer(s, versatz_s=-100.0, herz=puls)]
-    [(1, 300.0, 300.0, 140.0), (2, 290.0, 290.0, 143.0)]
+    [(1, 300.0, 300.0, 140.0, 300.0, 0.0), (2, 290.0, 260.0, 143.0, 590.0, 30.0)]
+    >>> [z.tempo_s_pro_km for z in kilometer(s, mit_pausen=True)]
+    [300.0, 290.0]
     """
     zeilen: list[KmZeile] = []
+    anfang = splits[0].t_start if splits else 0.0
     for s in splits:
         werte = Herz()
         if herz is not None and versatz_s is not None:
@@ -245,8 +261,10 @@ def kilometer(
             KmZeile(
                 round(s.nummer * s.distanz_m / 1000.0),
                 s.t_ende - s.t_start,
-                s.tempo_s_pro_km,
+                s.tempo(mit_pausen=mit_pausen),
                 werte,
+                s.t_ende - anfang,
+                s.pause_s,
             )
         )
     return zeilen

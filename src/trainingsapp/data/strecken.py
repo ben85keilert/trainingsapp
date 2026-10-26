@@ -29,7 +29,8 @@ from types import TracebackType
 from typing import IO, Final
 from xml.sax.saxutils import escape, quoteattr
 
-from trainingsapp.core.strecke import Punkt
+from trainingsapp.core.bewegung import ENTFERNT
+from trainingsapp.core.strecke import Punkt, abstand_m
 
 #: Namen in der GPX-Datei (``<type>``) — frei wählbar, das lesen die meisten Dienste
 GPX_SPORTART: Final[dict[str, str]] = {
@@ -201,6 +202,44 @@ def gpx(
     return "\n".join(zeilen).encode("utf-8")
 
 
+def spur_ohne_ort(pfad: Path, kopf: Mapping[str, object]) -> bytes:
+    """Die Streckendatei als **Rohspur ohne Ort** (``spur-ohne-ort-v1``, `core.bewegung`).
+
+    Dieselben Zeilen wie die Datei — ohne Breite, Länge und Richtung (`ENTFERNT`), dafür
+    mit ``ds_m``, dem Abstand zum vorigen Fix (`abstand_m`, ungefiltert, jede Ortung).
+    Die erste Zeile ist der neue Kopf, Kopf und kaputte Zeilen der Quelle fallen weg wie
+    beim Lesen. Eine Dateikopie, keine Rechnung — der Leser filtert und glättet selbst.
+
+    >>> import tempfile
+    >>> ordner = tempfile.TemporaryDirectory()
+    >>> pfad = Path(ordner.name) / "s.jsonl"
+    >>> with StreckenSchreiber(pfad, kopf={"schema": "strecke-v1"}) as s:
+    ...     s.schreiben(Punkt(1.0, 52.0, 13.0, genauigkeit_m=4.0, hoehe_m=40.0,
+    ...                       tempo_ms=2.5, richtung_grad=90.0))
+    ...     s.schreiben(Punkt(2.0, 52.0, 13.00004, genauigkeit_m=4.0, hoehe_m=40.5))
+    >>> zeilen = spur_ohne_ort(pfad, {"schema": "spur-ohne-ort-v1"}).decode().splitlines()
+    >>> zeilen[0]
+    '{"kopf":{"schema":"spur-ohne-ort-v1"}}'
+    >>> zeilen[1]
+    '{"t":1.0,"genauigkeit_m":4.0,"hoehe_m":40.0,"tempo_ms":2.5}'
+    >>> zeilen[2]
+    '{"t":2.0,"ds_m":2.738,"genauigkeit_m":4.0,"hoehe_m":40.5}'
+    >>> ordner.cleanup()
+    """
+    aus = [json.dumps({"kopf": dict(kopf)}, ensure_ascii=False, separators=(",", ":"))]
+    vorher: Punkt | None = None
+    for p in jsonl_lesen(pfad):
+        werte: dict[str, object] = {"t": p.t}
+        if vorher is not None:
+            werte["ds_m"] = round(abstand_m(vorher, p), 3)
+        for k, v in asdict(p).items():
+            if k != "t" and k not in ENTFERNT and v is not None and v is not False:
+                werte[k] = v
+        aus.append(json.dumps(werte, separators=(",", ":")))
+        vorher = p
+    return ("\n".join(aus) + "\n").encode("utf-8")
+
+
 def _zeit(t: float) -> str:
     """UTC mit Millisekunden: ``2026-10-14T13:02:01.250Z``.
 
@@ -218,5 +257,6 @@ __all__ = [
     "gpx",
     "jsonl_lesen",
     "kopf_lesen",
+    "spur_ohne_ort",
     "verwaiste",
 ]

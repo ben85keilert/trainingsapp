@@ -109,7 +109,12 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
 - **GPS-Daten werden nie geteilt** (Ben, 14.10.2026): Sync, Export-ZIP,
   Teilen, Diagnose — keine Koordinaten. Strecken liegen getrennt von
   `Messungen/` (`config.streckenverzeichnis()`). Einzige Ausnahme: der
-  GPX-Export, den die Person selbst auslöst (`docs/plan_gps.md`, Abschnitt 0).
+  GPX-Export, den die Person selbst auslöst (`docs/plan_gps.md`, Abschnitt 0) — einzeln
+  in der Auswertung, alle unter Aufzeichnungen → Strecken nach Rückfrage, in eigener
+  Verantwortung. **Ortsfrei darf mit** (Ben, 26.10.2026): Messungs- und Forschungsexport
+  legen zu jedem Training die **Rohspur ohne Ort** unter `Bewegung/` (`core/bewegung.py`,
+  `docs/kompatibilitaet.md` §13) — Abstand je Fix, Tempo, Höhe, Genauigkeit roh; nie
+  Breite, Länge oder **Richtung** (Abstand plus Richtung wäre Koppelnavigation).
   Dasselbe gilt für **Anhänge** (Ben, 19.10.2026): Fotos und Videos an Einträgen — seit
   22.10.2026 auch Audioaufnahmen (`.m4a`, flet-audio-recorder, abgespielt mit flet-audio) und
   Anhänge am Tag (Notiz zum Tag: `core.anhaenge.Ziel`, Migration 029) — liegen

@@ -12,9 +12,15 @@ in ein ZIP (Vertrag: ``docs/plan_einheit.md`` §8):
   ``t_s``), die Zeitleiste und das Tempo.
 
 **Ortsfrei** (``docs/plan_gps.md`` §0): Das Tempo ist ein Mittel je `TEMPO_SCHRITT_S` auf
-der Achse der Einheit — keine Koordinate, keine Richtung, keine Höhenreihe. Die Strecke
-selbst (``Strecken/``) und der Dateiname der GPS-Beteiligung bleiben draußen; die
-Zeitleiste ist schon ortsfrei (`core.einheit.daten_pruefen`, hier noch einmal angewandt).
+der Achse der Einheit — keine Koordinate, keine Richtung. Die Strecke selbst
+(``Strecken/``) bleibt draußen; die Zeitleiste ist schon ortsfrei
+(`core.einheit.daten_pruefen`, hier noch einmal angewandt). **Seit dem 26.10.2026** liegt
+dazu die **Rohspur ohne Ort** unter ``Bewegung/`` im ZIP (`core.bewegung`: jede Ortung mit
+Abstand zum vorigen Fix, Tempo, Höhe und Genauigkeit roh — ohne Breite, Länge, Richtung),
+und die GPS-Beteiligung nennt sie (``datei``). Ben: „Das ist der wichtige Teil“ — ein Lauf
+mit Dehnübungen zwischendurch, und man will wissen, wie schnell man in der Erholung nach
+der Dehnung war: Die Zeitleiste sagt wann, die Rohspur wie schnell, die Messdatei, was das
+Herz dabei tat. Die 5-s-Reihe ``tempo`` bleibt als Komfort.
 """
 
 from __future__ import annotations
@@ -103,7 +109,10 @@ def _teil(b: Beteiligung, archiv: Mapping[str, str]) -> dict[str, Any]:
     if b.art == "hrv" and b.datei:
         # der Pfad im Archiv — leer, wenn die Messdatei (noch) fehlt: Sie läuft weiter
         teil["datei"] = archiv.get(b.datei) or None
-    # Die Datei einer GPS-Beteiligung nennt die Strecke — sie geht nie mit (Regel 0)
+    elif b.art == "gps" and b.datei and archiv.get(b.datei):
+        # Die Strecke selbst geht nie mit (Regel 0) — wohl aber ihre Rohspur ohne Ort
+        # unter ``Bewegung/`` (`core.bewegung`, seit 26.10.2026); ``archiv`` nennt den Pfad
+        teil["datei"] = archiv[b.datei]
     return teil
 
 
@@ -170,10 +179,17 @@ def dokument(
     }
 
 
-def forschung_zip(dok: Mapping[str, Any], dateien: Iterable[Path], basis: Path) -> bytes:
+def forschung_zip(
+    dok: Mapping[str, Any],
+    dateien: Iterable[Path],
+    basis: Path,
+    *,
+    zusatz: Mapping[str, bytes] | None = None,
+) -> bytes:
     """Das ZIP: ``einheit-v1.json`` und die Dateien als Exportkopie (ohne Bluetooth-Adresse,
     sonst byte-genau), Pfade relativ zu ``basis`` (dem Datenverzeichnis) — jede einmal; eine
-    Datei außerhalb landet oben mit ihrem Namen."""
+    Datei außerhalb landet oben mit ihrem Namen. ``zusatz``: erzeugte Dateien (ZIP-Pfad →
+    Inhalt), etwa die Rohspur ohne Ort (`core.bewegung`)."""
     wurzel = Path(basis).resolve()
     puffer = io.BytesIO()
     gepackt = {DATEINAME}
@@ -189,6 +205,10 @@ def forschung_zip(dok: Mapping[str, Any], dateien: Iterable[Path], basis: Path) 
                 continue
             in_zip_schreiben(archiv, pfad, name)
             gepackt.add(name)
+        for name, inhalt in (zusatz or {}).items():
+            if name not in gepackt:
+                archiv.writestr(name, inhalt, compress_type=zipfile.ZIP_DEFLATED)
+                gepackt.add(name)
     return puffer.getvalue()
 
 

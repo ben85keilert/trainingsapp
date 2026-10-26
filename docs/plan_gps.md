@@ -29,15 +29,23 @@ Was das für den Bau heißt:
   synchronisierten Datenbankfeldern (`outbox`).
 - **Ortsfreie Werte dürfen mit:** Distanz, Dauer, Tempo, Höhenmeter je km,
   Herzfrequenz je km — sie verraten keinen Ort. Start, Ziel und Route nicht.
+  Seit 26.10.2026 (Ben) auch je Fix: Abstand zum vorigen Fix, Tempo, Höhe, Genauigkeit —
+  **nie die Richtung** (Abstand plus Richtung wäre Koppelnavigation).
 - **Export der eigenen Strecke** ist erlaubt (Ben, 14.10.2026) — aber nur als
   ausdrückliche Handlung der Person („GPX exportieren"), nie automatisch, nie
   im Messungs-Export, in der Synchronisation oder im Diagnoseprotokoll.
   Formate: Abschnitt 5b.
 - **Ein Test sichert es ab:** Export-ZIP und Sync-Outbox einer Messung mit
   Strecke enthalten keine Koordinate.
-- **Zur Entscheidung (26.10.2026, P80):** Bewegungsdaten ohne Ort (Tempo, Distanz
-  alle 5 s) im Messungs-Export immer dabei, die Strecke mit Koordinaten nur per Häkchen
-  je Export — das wäre eine Lockerung dieser Regel. Plan: `docs/plan_export_gps.md`.
+- **Bewegungsdaten im Messungs-Export** (Ben, 26.10.2026, P80): Je Training geht die
+  Streckendatei als **Rohspur ohne Ort** mit — ohne Breite, Länge und Richtung (Abstand
+  plus Richtung wäre Koppelnavigation), dafür Abstand je Fix; Tempo, **Höhe** und
+  Genauigkeit roh. Die ortsfreien Werte oben sind damit um Abstand, Höhe und Genauigkeit
+  je Fix erweitert. Koordinaten gibt es nur über „GPX exportieren“ (einzeln in der
+  Auswertung, alle unter Aufzeichnungen → Strecken nach Rückfrage), auf Eigenverantwortung.
+  Gebaut 26.10.2026: `core/bewegung.py`, `data.strecken.spur_ohne_ort`,
+  `ui/training.bewegung_*`/`gpx_*`, `components/strecken_export.py`; Format
+  `docs/kompatibilitaet.md` §13; Plan `docs/plan_export_gps.md`.
 - **Forschungsexport einer Einheit** (17.10.2026, `docs/plan_einheit.md` §8):
   ausdrücklich ausgelöst; aus der Strecke nur das Tempo als 5-s-Mittel — keine
   Ortung, keine Richtung, keine Höhenreihe, nicht die Datei. Ebenfalls per Test.
@@ -65,7 +73,9 @@ Was das für den Bau heißt:
 
 **Danach** (Aufzeichnung):
 
-- Karte mit Strecke (optional nach Herzfrequenz oder Tempo eingefärbt)
+- Karte mit Strecke (nach Tempo oder Herzfrequenz eingefärbt — gebaut 26.10.2026, P81,
+  `docs/plan_strecken_ansicht.md`; Kurve „Herzfrequenz und Tempo“, Kilometer-Tabelle mit
+  Gesamtzeit und Pausen-Chip, Einstellungen → Training)
 - Tabelle je km: Zeit, Tempo, Ø HF, DFA α1, Höhenmeter
 - Kurven HF, Tempo, DFA α1 über die Zeit (die vorhandenen Verlaufskurven)
 - **DFA-α1-Überblick** (Abschnitt 6) — beschreibend
@@ -247,6 +257,7 @@ Karten-Erweiterung zeigt die Datei an.
 | TCX (Garmin Training Center) | dazu Runden und Sportart (nur Running/Biking/Other) | Strava, Garmin Connect, TrainingPeaks |
 | FIT (Garmin, binär) | alles, auch **RR-Intervalle** | Garmin Connect, Strava, intervals.icu, Runalyze — die beiden letzten rechnen aus den RR-Intervallen DFA α1 |
 | GeoJSON, KML | nur Geometrie | Karten- und GIS-Programme, nicht für Sport-Apps |
+| **Rohspur ohne Ort** (`spur-ohne-ort-v1`, gebaut 26.10.2026) | die Streckendatei ohne Breite, Länge, Richtung; Abstand je Fix, Tempo, Höhe (seit 26.10. über dem Meeresspiegel), Genauigkeit roh; Versatz zur Messdatei | nur wir: Messungs-Export, Forschungsexport, `hrv_research.bewegung` (`docs/kompatibilitaet.md` §13) |
 
 Vorgabe: **GPX 1.1 mit Herzfrequenz** — es deckt fast alles ab. FIT lohnt
 sich später, wenn die RR-Intervalle mit sollen (Auswertung in intervals.icu

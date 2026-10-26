@@ -207,6 +207,7 @@ from trainingsapp.ui.components.zeitfenster import (
 )
 from trainingsapp.ui.components.zurueck import rueckfrage, zurueck_ziel
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.training import bewegung_packen, bewegung_vorbereiten
 from trainingsapp.ui.views.messung import ohne_rr
 
 QUALITAET = {
@@ -598,7 +599,7 @@ def _aufbauen(
                 ),
                 ft.IconButton(
                     ft.Icons.SHARE,
-                    tooltip="Exportieren (ZIP, ohne Bluetooth-Adresse)",
+                    tooltip="Exportieren (ZIP, ohne Bluetooth-Adresse; Training ohne Ort)",
                     on_click=exportieren,
                 ),
                 ft.IconButton(
@@ -620,12 +621,18 @@ def _aufbauen(
 
     async def exportieren() -> None:
         """Rohdatei samt Korrektur und Diagnoseprotokoll als ZIP herausgeben — ohne die
-        Bluetooth-Adresse des Sensors (`core.hrv_export.exportkopie`, S10)."""
+        Bluetooth-Adresse des Sensors (`core.hrv_export.exportkopie`, S10); dazu die Rohspur
+        des Trainings ohne Ort (`core.bewegung`, Ben 26.10.2026)."""
         dateien = zugehoerige_dateien(pfad)
         if not dateien:
             page.show_dialog(ft.SnackBar(ft.Text("Keine Dateien zu dieser Messung gefunden.")))
             return
-        daten = await asyncio.to_thread(export_zip, dateien, datenverzeichnis())
+        auftraege = bewegung_vorbereiten(state, [eintrag])  # Datenbank: im Loop (H39)
+
+        def packen() -> bytes:
+            return export_zip(dateien, datenverzeichnis(), zusatz=bewegung_packen(auftraege))
+
+        daten = await asyncio.to_thread(packen)
         await weitergeben(page, f"{pfad.stem}.zip", daten, "application/zip")
 
     # -- Entfernen -------------------------------------------------------------

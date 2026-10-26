@@ -973,8 +973,10 @@ def _uebersicht(
     platz = ft.Container(visible=False)
     tabelle: dict[str, Any] = {"schluessel": None}
 
+    mit_pausen = state.training_einstellungen().tempo_mit_pausen
+
     def intervalle_auffrischen() -> None:
-        stand_jetzt = live_tabellen(e, hf_reihe)
+        stand_jetzt = live_tabellen(e, hf_reihe, mit_pausen=mit_pausen)
         if not stand_jetzt.runden or not (stand_jetzt.strecke or stand_jetzt.herz):
             platz.visible = False
             return

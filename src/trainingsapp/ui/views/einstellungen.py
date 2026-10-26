@@ -330,6 +330,17 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
                             ft.ListTile(
+                                leading=ft.Icon(ft.Icons.DIRECTIONS_RUN),
+                                title=ft.Text("Training"),
+                                subtitle=ft.Text(
+                                    "Strecke einfärben, Tempo mit Pausen, Spalten je Kilometer",
+                                    size=12,
+                                ),
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/training"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
+                            ft.ListTile(
                                 leading=ft.Icon(ft.Icons.SATELLITE_ALT),
                                 title=ft.Text("GPS-Test"),
                                 subtitle=ft.Text(

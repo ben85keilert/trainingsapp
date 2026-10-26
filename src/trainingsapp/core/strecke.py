@@ -227,6 +227,32 @@ class Split:
     hoehe_ab_m: float = 0.0
 
     @property
+    def dauer_s(self) -> float:
+        """Zeit vom Anfang bis zum Ende (s), Pausen eingeschlossen."""
+        return self.t_ende - self.t_start
+
+    @property
+    def pause_s(self) -> float:
+        """Stillstand im Split (s) — Dauer minus Bewegungszeit.
+
+        >>> Split(1, 1000.0, 100.0, 400.0, 270.0).pause_s
+        30.0
+        """
+        return max(0.0, self.dauer_s - self.bewegt_s)
+
+    def tempo(self, *, mit_pausen: bool) -> float | None:
+        """s/km — über die Bewegungszeit oder die Echtzeit mit Pausen (Ben, 26.10.2026).
+
+        >>> s = Split(1, 1000.0, 100.0, 400.0, 270.0)
+        >>> s.tempo(mit_pausen=False), s.tempo(mit_pausen=True)
+        (270.0, 300.0)
+        """
+        if self.distanz_m < 10:
+            return None
+        zeit = self.dauer_s if mit_pausen else self.bewegt_s
+        return zeit / (self.distanz_m / 1000.0)
+
+    @property
     def tempo_s_pro_km(self) -> float | None:
         """Bewegungszeit je Kilometer.
 
@@ -481,9 +507,12 @@ class StreckenRechner:
         ]
 
 
-def rechnen(punkte: Iterable[Punkt], sportart: str = LAUFEN) -> StreckenRechner:
-    """Alle Ortungen einer gespeicherten Strecke durch denselben Rechner wie live."""
-    r = StreckenRechner(split_m=split_laenge_m(sportart))
+def rechnen(
+    punkte: Iterable[Punkt], sportart: str = LAUFEN, *, stillstand_s: float = STILLSTAND_S
+) -> StreckenRechner:
+    """Alle Ortungen einer gespeicherten Strecke durch denselben Rechner wie live.
+    ``stillstand_s`` unendlich: keine Auto-Pause (`core.training_einstellungen`)."""
+    r = StreckenRechner(split_m=split_laenge_m(sportart), stillstand_s=stillstand_s)
     for p in punkte:
         r.hinzufuegen(p)
     return r

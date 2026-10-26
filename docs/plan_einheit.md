@@ -224,8 +224,15 @@ Messung über mehrere Einheiten, wählt man eine), dann das Teilen-Menü
 Einen Herzschlag auf die Achse: `t_s` = `t_wall_s` + `versatz_s` des HRV-Teils; eine Marke
 der Messdatei (`marke.einheit`, §4) nennt ihre Einheit.
 
-**Ortsfrei** (`docs/plan_gps.md` §0): keine Koordinate, keine Richtung, keine Höhenreihe,
-nicht die Strecke und nicht der Dateiname der GPS-Beteiligung. Ein Test prüft das ZIP
+**Ortsfrei** (`docs/plan_gps.md` §0): keine Koordinate, keine Richtung, nicht die Strecke.
+**Seit 26.10.2026** (Ben, P80: „das ist der wichtige Teil“) liegt dazu die **Rohspur ohne
+Ort** unter `Bewegung/<Name der Streckendatei>` im ZIP (`spur-ohne-ort-v1`,
+`docs/kompatibilitaet.md` §13: jede Ortung mit Abstand zum vorigen Fix, Tempo, Höhe und
+Genauigkeit roh), und die GPS-Beteiligung in `teile[]` nennt sie (`datei` — Feld kommt
+additiv hinzu, Format bleibt `einheit-v1`); die 5-s-Reihe `tempo` bleibt als Komfort.
+Anwendungsfall: ein Lauf mit Dehnübungen zwischendurch — die Zeitleiste sagt, wann die
+Dehnung begann und endete, die Rohspur über `versatz_s`, wie schnell man danach war, die
+Messdatei, was das Herz dabei tat. Ein Test prüft das ZIP und rechnet genau das nach
 (`tests/test_ausdauer.py::test_forschungsexport_ohne_ort`).
 
 ## 9. Leisten und Reiter „Einheit“ (Skizzen 16–19)

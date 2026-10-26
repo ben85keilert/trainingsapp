@@ -48,7 +48,7 @@ from typing import Any
 from trainingsapp.config import datenverzeichnis
 from trainingsapp.core.einheit import Ereignis, Rolle, Zustand
 from trainingsapp.core.laufend import uhr
-from trainingsapp.core.strecke import SPORT_NAMEN
+from trainingsapp.core.strecke import SPORT_NAMEN, STILLSTAND_S
 from trainingsapp.core.timer import TimerLauf, dauer_text
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.einheit import (
@@ -308,7 +308,10 @@ def ausdauer_bereitstellen(
     from trainingsapp.ui.training import Streckendatei
 
     ablage = Streckendatei(sportart, state.profil.id) if quelle is not None else None
-    teil = StreckeBaustein(quelle, sportart, ablage=ablage)
+    auto_pause = state.training_einstellungen().auto_pause
+    teil = StreckeBaustein(
+        quelle, sportart, ablage=ablage, stillstand_s=STILLSTAND_S if auto_pause else math.inf
+    )
     _ersetzen(page, state, teil)
     state.ausdauer = teil
     e = in_vorbereitung(state)

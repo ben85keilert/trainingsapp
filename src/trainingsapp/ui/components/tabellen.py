@@ -131,8 +131,8 @@ def intervall_tabelle(
 
 
 def km_tabelle_live(zeilen: Sequence[KmZeile], sportart: str, *, hf: bool) -> ft.Control:
-    """„Kilometer (vom GPS)“ während des Trainings: je vollem Kilometer (Rad: fünf) Zeit,
-    Tempo und Ø HF."""
+    """„Kilometer (vom GPS)“ während des Trainings: je vollem Kilometer (Rad: fünf) die
+    Gesamtzeit an seinem Ende (die laufende Uhr, Ben 26.10.2026), Tempo und Ø HF."""
     kopf: list[ft.Control] = [
         _zelle("km", kopf=True, links=True),
         _zelle("Zeit", kopf=True),
@@ -144,7 +144,7 @@ def km_tabelle_live(zeilen: Sequence[KmZeile], sportart: str, *, hf: bool) -> ft
     for z in zeilen:
         zellen: list[ft.Control] = [
             _zelle(f"km {z.km}", links=True),
-            _zelle(zeit_text(z.sekunden)),
+            _zelle(zeit_text(z.gesamt_s)),
             _zelle(_tempo_kurz(sportart, z.tempo_s_pro_km)),
         ]
         if hf:
@@ -199,9 +199,10 @@ class LiveTabellen:
         )
 
 
-def live_tabellen(e: Einheitslauf, reihe: HfReihe) -> LiveTabellen:
+def live_tabellen(e: Einheitslauf, reihe: HfReihe, *, mit_pausen: bool = False) -> LiveTabellen:
     """Die Abschnitte des Timers und die Kilometer bis jetzt — mit Strecke, wenn ein
-    Training mit GPS läuft, mit Ø HF, wenn die HRV mitläuft."""
+    Training mit GPS läuft, mit Ø HF, wenn die HRV mitläuft. ``mit_pausen``: Tempo über
+    die Echtzeit (`core.training_einstellungen`)."""
     herz = herz_live(e, reihe)
     teil = e.teil("gps")
     if not isinstance(teil, StreckeBaustein):
@@ -209,8 +210,10 @@ def live_tabellen(e: Einheitslauf, reihe: HfReihe) -> LiveTabellen:
         return LiveTabellen(runden, [], herz is not None, False)
     versatz = teil.versatz_s if teil.mit_gps else None
     strecke = strecke_auf_achse(teil.rechner, versatz) if versatz is not None else None
-    runden = intervalle(e.ereignisse, jetzt_s=e.dauer_s(), strecke=strecke, herz=herz)
-    km = kilometer(teil.rechner.splits, versatz_s=versatz, herz=herz)
+    runden = intervalle(
+        e.ereignisse, jetzt_s=e.dauer_s(), strecke=strecke, herz=herz, mit_pausen=mit_pausen
+    )
+    km = kilometer(teil.rechner.splits, versatz_s=versatz, herz=herz, mit_pausen=mit_pausen)
     return LiveTabellen(runden, km, herz is not None, strecke is not None)
 
 

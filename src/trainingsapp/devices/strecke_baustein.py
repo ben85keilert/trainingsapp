@@ -37,7 +37,14 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from ..core.einheit import Beteiligung, Ereignis, Rolle
-from ..core.strecke import MAX_GENAUIGKEIT_M, Punkt, Split, StreckenRechner, split_laenge_m
+from ..core.strecke import (
+    MAX_GENAUIGKEIT_M,
+    STILLSTAND_S,
+    Punkt,
+    Split,
+    StreckenRechner,
+    split_laenge_m,
+)
 from .gatt import UhrAbgleich
 from .gps import GpsQuelle
 
@@ -96,6 +103,7 @@ class StreckeBaustein:
         jetzt_utc: Callable[[], datetime] = lambda: datetime.now(UTC),
         max_genauigkeit_m: float = MAX_GENAUIGKEIT_M,
         takt_s: float = GPS_TAKT_S,
+        stillstand_s: float = STILLSTAND_S,
     ) -> None:
         self.quelle = quelle
         self.sportart = sportart
@@ -104,7 +112,8 @@ class StreckeBaustein:
         self.max_genauigkeit_m = max_genauigkeit_m
         self.takt_s = takt_s
         self.split_m = split_laenge_m(sportart)
-        self.rechner = StreckenRechner(split_m=self.split_m)
+        #: ``stillstand_s`` unendlich: keine Auto-Pause (`core.training_einstellungen`)
+        self.rechner = StreckenRechner(split_m=self.split_m, stillstand_s=stillstand_s)
         #: Uhr der Einheit (`uhr_uebernehmen`) — allein die der Quelle
         self._uhr: Callable[[], float] = quelle.jetzt if quelle is not None else time.monotonic
         self._abgleich = UhrAbgleich(uhr=self._uhr)

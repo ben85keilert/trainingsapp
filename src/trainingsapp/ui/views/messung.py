@@ -37,7 +37,7 @@ GPS an/aus, „Training starten“ — und läuft eines, seine Zahlen und die Ka
 Zwischenschritt nimm bitte heraus“). Der Bereich wird noch umgebaut (Katalog A17: Tempo
 entlang der Strecke, eingefärbte Kurvenabschnitte, Kurve Strecke/Zeit gegen HF).
 
-**Aufzeichnungen.** Zwei Unterreiter: „Laufen" (die Trainings, `strecken_zeilen`) und
+**Aufzeichnungen.** Zwei Unterreiter: „Strecken" (die Trainings, `strecken_zeilen`) und
 „HRV" (die gespeicherten Messungen des Profils, neueste zuerst, „Alle exportieren").
 """
 
@@ -110,6 +110,7 @@ from trainingsapp.ui.components.notizen import (
     uebungs_katalog,
     uebungsquellen,
 )
+from trainingsapp.ui.components.strecken_export import strecken_export_fragen
 from trainingsapp.ui.components.titel import (
     geuebte_plaene,
     titel_blatt,
@@ -143,6 +144,7 @@ from trainingsapp.ui.components.zeitfenster import (
     wischbar,
 )
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.training import bewegung_packen, bewegung_vorbereiten
 
 
 def _protokoll(lauf: Messlauf, zeilen: int = 20) -> list[str]:
@@ -1750,11 +1752,38 @@ def _leer(text: str) -> ft.Control:
     return ft.Container(padding=24, content=ft.Text(text, opacity=0.7))
 
 
-def _trainings_liste(trainings: list[ft.Control]) -> ft.Control:
-    """Unterreiter „Laufen": die Trainings — Zeilen aus `views.ausdauer.strecken_zeilen`."""
+#: Was der Messungs-Export enthält — am Knopf und in der Hilfe (Ben, 26.10.2026)
+EXPORT_HINWEIS = (
+    "Messdateien mit Korrekturen und Notizen, ohne Bluetooth-Adresse. Zu jedem Training "
+    "Abstand, Tempo und Höhe je Sekunde — ohne Ort."
+)
+
+
+def _strecken_liste(page: ft.Page, state: AppState, trainings: list[ft.Control]) -> ft.Control:
+    """Unterreiter „Strecken": die Trainings — Zeilen aus `views.ausdauer.strecken_zeilen` —
+    und „Alle exportieren“ (GPX mit Koordinaten, nach Rückfrage: Eigenverantwortung)."""
     if not trainings:
         return _leer("Noch kein Training. Unter „GPS“ ein Ausdauertraining starten.")
-    return ft.ListView(expand=True, padding=ft.Padding.only(bottom=24), controls=trainings)
+    kopf = ft.Container(
+        padding=ft.Padding.only(left=16, right=8, top=8),
+        content=ft.Row(
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            controls=[
+                ft.Text(
+                    f"{len(trainings)} {'Strecke' if len(trainings) == 1 else 'Strecken'}",
+                    size=12,
+                    opacity=0.7,
+                ),
+                ft.TextButton(
+                    "Alle exportieren",
+                    icon=ft.Icons.SHARE,
+                    tooltip="Alle Strecken als GPX — mit Koordinaten, in eigener Verantwortung",
+                    on_click=lambda: strecken_export_fragen(page, state),
+                ),
+            ],
+        ),
+    )
+    return ft.ListView(expand=True, padding=ft.Padding.only(bottom=24), controls=[kopf, *trainings])
 
 
 def _hrv_liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
@@ -1768,13 +1797,19 @@ def _hrv_liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Contr
 
     async def alle_exportieren() -> None:
         """Alle Aufzeichnungen dieses Profils samt Beiwerk als ein ZIP — ohne
-        Bluetooth-Adressen (`core.hrv_export.exportkopie`, S10)."""
+        Bluetooth-Adressen (`core.hrv_export.exportkopie`, S10); zu jedem Training die
+        Rohspur ohne Ort (`core.bewegung`, Ben 26.10.2026)."""
         basis = messungenverzeichnis()
         dateien = [d for a in eintraege for d in zugehoerige_dateien(basis / a.file_path)]
         if not dateien:
             page.show_dialog(ft.SnackBar(ft.Text("Keine Messdateien gefunden.")))
             return
-        daten = await asyncio.to_thread(export_zip, dateien, datenverzeichnis())
+        auftraege = bewegung_vorbereiten(state, eintraege)  # Datenbank: im Loop (H39)
+
+        def packen() -> bytes:
+            return export_zip(dateien, datenverzeichnis(), zusatz=bewegung_packen(auftraege))
+
+        daten = await asyncio.to_thread(packen)
         await weitergeben(page, f"messungen_{zeitstempel()}.zip", daten, "application/zip")
 
     if not eintraege:
@@ -1790,7 +1825,10 @@ def _hrv_liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Contr
                 controls=[
                     ft.Text(f"{len(eintraege)} Aufzeichnungen", size=12, opacity=0.7),
                     ft.TextButton(
-                        "Alle exportieren", icon=ft.Icons.SHARE, on_click=alle_exportieren
+                        "Alle exportieren",
+                        icon=ft.Icons.SHARE,
+                        tooltip=EXPORT_HINWEIS,
+                        on_click=alle_exportieren,
                     ),
                 ],
             ),
@@ -1817,7 +1855,8 @@ def _hrv_liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Contr
 
 
 def _aufzeichnungen(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
-    """Reiter „Aufzeichnungen": Unterreiter „Laufen" und „HRV" (Ben, 21.10.2026)."""
+    """Reiter „Aufzeichnungen": Unterreiter „Strecken" (bis 26.10.2026 „Laufen" — er zeigt
+    Gehen, Laufen und Rad) und „HRV" (Ben, 21.10.2026)."""
     from trainingsapp.ui.views.ausdauer import strecken_zeilen
 
     trainings = strecken_zeilen(page, state)
@@ -1835,7 +1874,7 @@ def _aufzeichnungen(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.
     inhalt = (
         _hrv_liste(page, state, eintraege)
         if state.aufzeichnungen_tab == 1
-        else _trainings_liste(trainings)
+        else _strecken_liste(page, state, trainings)
     )
     return ft.Tabs(
         length=2,
@@ -1850,7 +1889,7 @@ def _aufzeichnungen(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.
                     secondary=True,
                     scrollable=False,
                     tabs=[
-                        _reiter(zahl("Laufen", len(trainings)), ft.Icons.DIRECTIONS_RUN),
+                        _reiter(zahl("Strecken", len(trainings)), ft.Icons.ROUTE),
                         _reiter(zahl("HRV", len(eintraege)), ft.Icons.MONITOR_HEART_OUTLINED),
                     ],
                 ),

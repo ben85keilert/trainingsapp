@@ -111,11 +111,15 @@ def uhr_text(start_utc: datetime | None, sekunden: float, *, mit_sekunden: bool 
     return t.strftime("%H:%M:%S" if mit_sekunden else "%H:%M")
 
 
-def uhr_lesen(text: str, start_utc: datetime | None) -> float | None:
+def uhr_lesen(text: str, start_utc: datetime | None, *, einstellig: bool = False) -> float | None:
     """``HH:MM[:SS]`` (lokal) → Sekunden nach ``start_utc``; ``None``, wenn nicht lesbar.
 
     Ohne Datum: höchstens eine Stunde vor dem Aufnahmestart, sonst ist der folgende
     Tag gemeint — eine Messung über Mitternacht bleibt eine Messung.
+
+    ``einstellig``: auch „8:00“ ist eine Uhrzeit — wenn das Feld ohnehin Uhrzeiten
+    erwartet (Ben, 26.10.2026: eine Notiz „um 8:00“ ließ sich nicht setzen). Sonst
+    verlangt eine Uhrzeit zwei Ziffern vor dem Trenner, weil „2:15“ eine Dauer wäre.
 
     >>> from datetime import UTC
     >>> s = datetime(2026, 10, 20, 12, 0, 30, tzinfo=UTC)
@@ -127,6 +131,8 @@ def uhr_lesen(text: str, start_utc: datetime | None) -> float | None:
     72000.0
     >>> uhr_lesen("2:15", s), uhr_lesen("25:00", s), uhr_lesen("14:03", None)
     (None, None, None)
+    >>> uhr_lesen("8:00", s, einstellig=True) == uhr_lesen("08:00", s)
+    True
     """
     m = _UHR.match(text or "")
     if m is None or start_utc is None:
@@ -136,7 +142,7 @@ def uhr_lesen(text: str, start_utc: datetime | None) -> float | None:
         return None
     # Eine zweistellige Angabe mit Punkt oder Doppelpunkt könnte auch „2:15“ (Dauer) sein —
     # eine Uhrzeit verlangt zwei Ziffern vor dem Trenner
-    if len(m.group(1)) < 2:
+    if len(m.group(1)) < 2 and not einstellig:
         return None
     start = _lokal(start_utc)
     punkt = start.replace(hour=h, minute=mi, second=se, microsecond=0)

@@ -40,10 +40,13 @@ KACHELN: Final[str] = "kacheln"
 
 #: Breiten der Knöpfe über der Live-Kurve (s)
 LIVE_FENSTER: Final[tuple[int, ...]] = (60, 120, 300, 600)
+#: Wie lange der Live-Verlauf zurückreicht (s) — der Puffer der Live-Kurven (Ben,
+#: 26.10.2026: einstellbar, mindestens 30 min). Gilt ab der nächsten Verbindung.
+PUFFER_S: Final[tuple[int, ...]] = (1800, 3600, 7200, 14400)
 #: Eingetippte Breite der Zeitachse (Ben, 21.10.2026): mindestens 10 s, live höchstens
-#: so viel, wie der Puffer hält (`hrv_core.constants.LIVE_FENSTER_S`, 30 min)
+#: so viel, wie der Puffer hält (`HrvEinstellungen.puffer_s`)
 FENSTER_MIN_S: Final[int] = 10
-FENSTER_MAX_S: Final[int] = 1800
+FENSTER_MAX_S: Final[int] = max(PUFFER_S)
 
 #: Ebenen über der Hauptkurve einer Aufzeichnung (Ben, 19.10.2026, Plan D): Notizen (gelb),
 #: Leistungen der Person (blau, `person/leistung`), Abschnittsbalken — einzeln einblendbar
@@ -61,6 +64,9 @@ LIVE_SPEKTRUM_S: Final[tuple[int, ...]] = (5, 10, 15, 30, 60)
 #: Längen des verschiebbaren Analysefensters in der Aufzeichnung (s); 5 min ist
 #: die übliche Dauer einer Kurzzeit-HRV
 ANALYSE_LAENGEN: Final[tuple[int, ...]] = (60, 120, 300, 600)
+#: Schrittweite der Pfeile ‹ › am Analysefenster (Ben, 26.10.2026): ein halbes oder ein
+#: ganzes Fenster, sonst Sekunden
+ANALYSE_SCHRITTE: Final[tuple[str, ...]] = ("halb", "ganz", "60", "30", "10")
 
 #: Analysebereiche unter der Hauptkurve
 BEREICH_ZEIT: Final[str] = "zeit"
@@ -79,6 +85,14 @@ class HrvEinstellungen:
     True
     >>> HrvEinstellungen.aus_dict({"fenster_s": 210}).fenster_s  # eingetippt: 3:30 min
     210
+    >>> HrvEinstellungen.aus_dict({"puffer_s": 7200}).puffer_s, HrvEinstellungen().puffer_s
+    (7200, 1800)
+    >>> HrvEinstellungen.aus_dict({"analyse_schritt": "30"}).analyse_schritt
+    '30'
+    >>> HrvEinstellungen.aus_dict({"analyse_schritt": 30}).analyse_schritt  # kein Text: Vorgabe
+    'halb'
+    >>> HrvEinstellungen.aus_dict({"puffer_s": 1800, "fenster_s": 7200}).fenster_s  # passt nicht
+    120
     >>> e = HrvEinstellungen.aus_dict({"live_spektrum_s": 30, "nachrechnen_ms": 7})
     >>> e.live_spektrum_s, e.nachrechnen_ms
     (30, 500)
@@ -98,6 +112,9 @@ class HrvEinstellungen:
     darstellung: str = UEBERSICHT
     #: Breite des Live-Zeitfensters (s) — ein Knopf (`LIVE_FENSTER`) oder eingetippt
     fenster_s: int = 120
+    #: Live-Verlauf: so weit reicht der Puffer zurück (s, `PUFFER_S`) — gilt ab der
+    #: nächsten Verbindung (`devices.messlauf.Messlauf`)
+    puffer_s: int = 1800
     #: Live die korrigierte Kurve (Artefakte überbrückt) statt der rohen
     korrigiert: bool = True
     #: Analysebereiche unter der Hauptkurve: Frequenz und Nichtlinear anbieten. Für
@@ -120,6 +137,8 @@ class HrvEinstellungen:
     live_spektrum_s: int = 15
     #: Zuletzt gewählte Länge des verschiebbaren Analysefensters (s)
     analyse_laenge_s: int = 300
+    #: Schrittweite der Pfeile am Analysefenster (`ANALYSE_SCHRITTE`)
+    analyse_schritt: str = "halb"
     #: Eingeblendete Ebenen über der Kurve (`EBENEN`; Vorgabe alle)
     ebenen: list[str] = field(default_factory=lambda: list(EBENEN))
 
@@ -141,6 +160,7 @@ class HrvEinstellungen:
             "gross": list(self.gross),
             "darstellung": self.darstellung,
             "fenster_s": self.fenster_s,
+            "puffer_s": self.puffer_s,
             "korrigiert": self.korrigiert,
             "frequenz": self.frequenz,
             "nichtlinear": self.nichtlinear,
@@ -151,6 +171,7 @@ class HrvEinstellungen:
             "nachrechnen_ms": self.nachrechnen_ms,
             "live_spektrum_s": self.live_spektrum_s,
             "analyse_laenge_s": self.analyse_laenge_s,
+            "analyse_schritt": self.analyse_schritt,
             "ebenen": list(self.ebenen),
         }
 
@@ -181,6 +202,7 @@ class HrvEinstellungen:
         gross = liste("gross")
         darstellung = d.get("darstellung")
         fenster = d.get("fenster_s")
+        puffer = auswahl("puffer_s", PUFFER_S)
         return cls(
             messung_anzeigen=schalter("messung_anzeigen"),
             kacheln=kacheln,
@@ -189,8 +211,9 @@ class HrvEinstellungen:
             fenster_s=fenster
             if isinstance(fenster, int)
             and not isinstance(fenster, bool)
-            and FENSTER_MIN_S <= fenster <= FENSTER_MAX_S
+            and FENSTER_MIN_S <= fenster <= puffer
             else vorgabe.fenster_s,
+            puffer_s=puffer,
             korrigiert=schalter("korrigiert"),
             frequenz=schalter("frequenz"),
             nichtlinear=schalter("nichtlinear"),
@@ -201,6 +224,9 @@ class HrvEinstellungen:
             nachrechnen_ms=auswahl("nachrechnen_ms", NACHRECHNEN_MS),
             live_spektrum_s=auswahl("live_spektrum_s", LIVE_SPEKTRUM_S),
             analyse_laenge_s=auswahl("analyse_laenge_s", ANALYSE_LAENGEN),
+            analyse_schritt=schritt
+            if (schritt := d.get("analyse_schritt")) in ANALYSE_SCHRITTE
+            else vorgabe.analyse_schritt,
             ebenen=[k for k in liste("ebenen") if k in EBENEN],
         )
 
@@ -218,6 +244,7 @@ def einstellungen_schreiben(e: HrvEinstellungen) -> str:
 
 __all__ = [
     "ANALYSE_LAENGEN",
+    "ANALYSE_SCHRITTE",
     "BEREICH_FREQUENZ",
     "BEREICH_NICHTLINEAR",
     "BEREICH_ZEIT",
@@ -227,6 +254,7 @@ __all__ = [
     "LIVE_FENSTER",
     "LIVE_SPEKTRUM_S",
     "NACHRECHNEN_MS",
+    "PUFFER_S",
     "STANDARD_GROSS",
     "STANDARD_KACHELN",
     "UEBERSICHT",

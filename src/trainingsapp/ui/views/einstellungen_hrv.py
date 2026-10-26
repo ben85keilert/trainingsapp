@@ -10,7 +10,8 @@ für Fachleute — langfristig werden das Profi-Einstellungen.
 
 - Anzeige: Reiter „Messung" ein/aus — ohne Gerät spart das Platz.
 - Kacheln über der Kurve, nach Bereichen gruppiert.
-- Kurven: Live-Fenster, „korrigiert", Kurvenansicht.
+- Kurven: Live-Fenster, Live-Verlauf (wie weit der Puffer zurückreicht), „korrigiert",
+  Kurvenansicht.
 - Analyse: Frequenz und Nichtlinear anbieten (bei optischen Sensoren aus).
 - Notizen: Übungen aus Plänen anbieten.
 - Erweitert: Rechnen (Latenz vor dem Nachrechnen, Takt des Live-Spektrums),
@@ -29,14 +30,14 @@ import flet as ft
 from hrv_core.regeln import Korrekturregeln
 
 from trainingsapp.core.hrv_ansicht import PNN_WAHL, Ansicht
+from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
 from trainingsapp.core.hrv_einstellungen import (
-    FENSTER_MAX_S,
     LIVE_SPEKTRUM_S,
     NACHRECHNEN_MS,
+    PUFFER_S,
     UEBERSICHT,
     HrvEinstellungen,
 )
-from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.kacheln import GRUPPEN, KACHELN
@@ -232,7 +233,29 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
             breite_knoepfe.update()
 
     breite_knoepfe = breiten_wahl(e.fenster_s, breite_gewaehlt)
-    breite_feld = BreiteFeld(e.fenster_s, breite_gewaehlt, max_s=FENSTER_MAX_S)
+    breite_feld = BreiteFeld(e.fenster_s, breite_gewaehlt, max_s=e.puffer_s)
+
+    def puffer_text(sekunden: int) -> str:
+        return f"{sekunden // 60} min" if sekunden < 3600 else f"{sekunden // 3600} h"
+
+    def puffer_gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
+        """Live-Verlauf (Ben, 26.10.2026): wie weit die Live-Kurven zurückreichen. Die
+        Zeitachse darf nicht breiter sein als der Puffer."""
+        if ev.control.value is None:
+            return
+        setzen(puffer_s=int(ev.control.value))
+        breite_feld.max_setzen(e.puffer_s)
+        if e.fenster_s > e.puffer_s:
+            breite_gewaehlt(float(e.puffer_s))
+
+    puffer_wahl = ft.Dropdown(
+        label="Live-Verlauf behalten",
+        value=str(e.puffer_s),
+        options=[ft.DropdownOption(key=str(x), text=puffer_text(x)) for x in PUFFER_S],
+        on_select=puffer_gewaehlt,
+        dense=True,
+        width=260,
+    )
 
     def pnn_gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
         a = state.ansicht()
@@ -498,6 +521,13 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                 ft.Text("Zeitfenster live", size=12, opacity=0.8),
                 breite_knoepfe,
                 breite_feld.control,
+                puffer_wahl,
+                hinweis(
+                    "So weit lässt sich live zurückblättern, so lang darf die Zeitachse "
+                    "höchstens sein, und bis dahin reichen nachgetragene Notizen in die "
+                    "Kurve. Gilt ab der nächsten Verbindung; die Aufnahme selbst ist "
+                    "unbegrenzt. Mehr Verlauf kostet am Handy Speicher und Rechenzeit."
+                ),
                 schalter(
                     "korrigiert",
                     "Live die korrigierte Kurve zeigen",

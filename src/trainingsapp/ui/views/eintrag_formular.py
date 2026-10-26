@@ -40,7 +40,9 @@ def eintrag_formular(
     extra: list[ft.Control] | None = None,
     quick: dict[str, list[Any]] | None = None,
 ) -> ft.View:
-    form = SpecForm(spec, werte, page=page, quick=quick)
+    # Keine Vorgabe des Feldvorrats („3x15“) in leeren Feldern — auch beim Nachtragen
+    # (Ben, 26.10.2026); ``werte`` kommen nur, wenn die Person sie wählt
+    form = SpecForm(spec, werte, page=page, quick=quick, vorgaben=False)
     notizfeld = ft.TextField(
         label="Notiz",
         value=notiz,

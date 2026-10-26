@@ -122,8 +122,9 @@ data/karten.py          Kartenquellen (URL, Namensnennung, User-Agent, ob offlin
                         erlaubt, Höchstmenge je Download), Gebietsrechnung
                         (Kacheln für Ausschnitt oder Korridor, Größe) — Abschnitt 5
 ui/geraete/flet_gps.py  Adapter flet-geolocator → GpsQuelle (wie FletBleTransport)
-ui/views/ausdauer.py    Live-Ansicht und Auswertung (Route /ausdauer, die Route
-                        /training gehört dem Einzeltraining einer Übung);
+ui/views/ausdauer.py    Live-Ansicht und Auswertung (seit 26.10. direkt im Reiter
+                        „Messung → GPS“, `ausdauer_inhalt`; die Seite /ausdauer bleibt
+                        für die Startleiste — /training gehört dem Einzeltraining);
                         ui/components/karte_strecke.py
 ```
 

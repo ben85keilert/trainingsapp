@@ -107,7 +107,9 @@ class _Leistungen:
             spec = var.zum_bearbeiten(
                 eintrag.spec_snapshot, uebung.result_spec, var.von(eintrag.result)
             )
-            form = SpecForm(spec, dict(eintrag.result), page=page)
+            # Nur, was im Eintrag steht — keine Vorgabe „3x15“ in leeren Feldern, die beim
+            # Nachtragen der Zeit still mitgespeichert würde (Ben, 26.10.2026)
+            form = SpecForm(spec, dict(eintrag.result), page=page, vorgaben=False)
             notiz = ft.TextField(
                 label="Notiz",
                 value=eintrag.note,

@@ -192,8 +192,12 @@ class Messlauf:
         backup_basis: Path | None = None,
         regeln: Korrekturregeln | None = None,
         subject_id: str | None = None,
+        puffer_s: float | None = None,
     ) -> None:
         self.quelle = quelle
+        #: Wie weit die Live-Kurven zurückreichen (s) — Einstellung „Live-Verlauf“ (Ben,
+        #: 26.10.2026); ``None`` = Vorgabe von hrv-core (30 min)
+        self.puffer_s = float(puffer_s) if puffer_s else None
         #: Profil, für das gemessen wird — beim Start gemerkt, damit ein Profilwechsel
         #: während der Messung die Aufnahme nicht umhängt (Ben, 15.10.2026)
         self.subject_id = subject_id
@@ -205,7 +209,7 @@ class Messlauf:
         self._jetzt_utc = jetzt_utc
         self._backup_basis = backup_basis
         self._dateiname_fest: str | None = None  # vorab festgelegter Dateiname (F10)
-        self.live = LiveFenster()
+        self.live = self._neues_live_fenster()
         # Live-x-Achse gebündelter PPI-Pakete (Verity Sense): Schlagzeiten aus der
         # Intervallsumme statt aus der streuenden Ankunft (`hrv_core.zeitachse`).
         self._ppi_uhr = Kontinuitaetsuhr()
@@ -238,6 +242,12 @@ class Messlauf:
         #: Wird mit ``layout=True`` gerufen, wenn sich die Verbindung ändert,
         #: sonst nach neuen Messwerten. Fehler im Beobachter stoppen nichts.
         self.beobachter: Callable[[bool], None] | None = None
+
+    def _neues_live_fenster(self, **extra: float) -> LiveFenster:
+        """Ein leerer Live-Puffer in der eingestellten Länge."""
+        if self.puffer_s is not None:
+            extra["max_s"] = self.puffer_s
+        return LiveFenster(**extra)
 
     # -- Zeit ------------------------------------------------------------------
 
@@ -282,7 +292,7 @@ class Messlauf:
         # markierte bei der Verity Sense gesunde Schläge als Artefakt.
         self.profil = self.quelle.profil or self.profil
         quelle = self.profil.intervall_quelle if self.profil else ""
-        self.live = LiveFenster(malik=malik_threshold(quelle))
+        self.live = self._neues_live_fenster(malik=malik_threshold(quelle))
         self.live.regeln_setzen(self.regeln, quelle)
         self._ppi_uhr = Kontinuitaetsuhr()
         self._schlagzeiten.clear()

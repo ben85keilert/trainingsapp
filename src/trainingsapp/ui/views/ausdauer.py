@@ -1,4 +1,10 @@
-"""Ausdauertraining mit GPS — Route `/ausdauer` (live) und `/ausdauer/<id>` (Auswertung).
+"""Ausdauertraining mit GPS — Reiter „Messung → GPS“ (`ausdauer_inhalt`), Route `/ausdauer`
+(dasselbe als eigene Seite, Ziel der Startleiste) und `/ausdauer/<id>` (Auswertung).
+
+Seit 26.10.2026 steht das Training **direkt im Reiter GPS** — Sportart, GPS an/aus,
+„Training starten“, und läuft eines, seine Zahlen und die Karte (Ben: „Jetzt muss man, um an
+GPS ranzukommen, auf ‚Training starten‘ und kommt dann erst zum Menü … Diesen Zwischenschritt
+nimm bitte heraus“). Die Seite `/ausdauer` bleibt für die Startleiste und „Öffnen“.
 
 Gehen, Laufen, Rad (Ben, 14.10.2026: in dieser Reihenfolge) — mit oder ohne
 GPS (Laufband, Halle), mit oder ohne Gurt. Gerechnet wird in
@@ -109,7 +115,6 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.training import (
     HrvBezug,
     hrv_bezug,
-    lauftext,
     verwaiste_uebernehmen,
     zeitleiste_und_versatz,
 )
@@ -248,8 +253,25 @@ def _beenden_text(e: Einheitslauf, teil: StreckeBaustein) -> str:
     return " ".join(saetze)
 
 
-def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
-    """Training vorbereiten und starten — läuft eines, die großen Zahlen und die Karte."""
+def _timer_knopf(page: ft.Page) -> ft.Control:
+    """⏱ — den Timer öffnen, um Intervalle bereitzustellen."""
+
+    async def timer_oeffnen() -> None:
+        await page.push_route("/timer")
+
+    return ft.IconButton(
+        ft.Icons.TIMER_OUTLINED,
+        tooltip="Timer — Intervalle bereitstellen",
+        on_click=timer_oeffnen,
+    )
+
+
+def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False) -> ft.Control:
+    """Training vorbereiten und starten — läuft eines, die großen Zahlen und die Karte.
+
+    ``eingebettet``: im Reiter „Messung → GPS“ (ohne eigene Titelleiste — der Timer-Knopf
+    steht dann in der Karte, und das Ende des Trainings ersetzt keine Route).
+    """
     nummer = state.ausdauer_ansicht = state.ausdauer_ansicht + 1
     inhalt = ft.Column(spacing=14)
     zahlen = ft.Column(spacing=8)
@@ -373,10 +395,13 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
                 page.show_dialog(ft.SnackBar(ft.Text(e.warnung or "Training nicht gespeichert.")))
                 return
             page.show_dialog(ft.SnackBar(ft.Text("Training gespeichert — auch im Tagebuch.")))
-            # Die Auswertung tritt an die Stelle des Trainings — Zurück führt nicht wieder
-            # auf „Training starten“ (`ui/navigation.py`)
-            state.ersetzen_bei = f"/ausdauer/{strecke.id}"
-            await page.push_route(state.ersetzen_bei)
+            ziel = f"/ausdauer/{strecke.id}"
+            if not eingebettet:
+                # Die Auswertung tritt an die Stelle des Trainings — Zurück führt nicht
+                # wieder auf „Training starten“ (`ui/navigation.py`); im Reiter kommt sie
+                # dazu, Zurück führt in den Reiter
+                state.ersetzen_bei = ziel
+            await page.push_route(ziel)
 
         dialog = ft.AlertDialog(
             modal=True,
@@ -388,9 +413,6 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
             ],
         )
         page.show_dialog(dialog)
-
-    async def timer_oeffnen() -> None:
-        await page.push_route("/timer")
 
     def kartenhoehe() -> float:
         """Quer: die Karte füllt die Höhe neben den Zahlen; hochkant klein oder groß."""
@@ -607,12 +629,12 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
             dazu = "„Training starten“ startet alles aus der Startleiste mit."
         else:
             dazu = (
-                "Noch etwas dazu? Oben den Timer öffnen und dort „Bereitstellen“ tippen — "
+                "Noch etwas dazu? Über ⏱ den Timer öffnen und dort „Bereitstellen“ tippen — "
                 "er kommt in die Startleiste, und alles startet gemeinsam."
             )
         inhalt.controls = [
             karte(
-                titel("Training"),
+                titel("Training", *([_timer_knopf(page)] if eingebettet else [])),
                 sportwahl,
                 gps_schalter,
                 karte_schalter,
@@ -706,20 +728,20 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
 
     zeichnen()
     state.groesse_beobachter["ausdauer"] = umbauen
-    jetzt = _training(state)
-    if jetzt is not None:
+    if _training(state) is not None:
         page.run_task(ticker)
+    return inhalt
+
+
+def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
+    """Das Training als eigene Seite — Ziel der Startleiste und von „Öffnen“."""
+    inhalt = ausdauer_inhalt(page, state)
+    jetzt = _training(state)
     return ft.View(
         route="/ausdauer",
         appbar=ft.AppBar(
             title=ft.Text(SPORT_NAMEN[jetzt[1].sportart] if jetzt is not None else "Ausdauer"),
-            actions=[
-                ft.IconButton(
-                    ft.Icons.TIMER_OUTLINED,
-                    tooltip="Timer — Intervalle bereitstellen",
-                    on_click=timer_oeffnen,
-                )
-            ],
+            actions=[_timer_knopf(page)],
         ),
         scroll=ft.ScrollMode.AUTO,
         padding=16,
@@ -1107,37 +1129,8 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
 
 
 # ---------------------------------------------------------------------------
-# Für den Reiter „Messung"
+# Für den Reiter „Messung → Aufzeichnungen"
 # ---------------------------------------------------------------------------
-
-
-def ausdauer_karte(page: ft.Page, state: AppState) -> ft.Control:
-    """Einstieg im Reiter „Messung → Live": Training starten, das bereitgestellte oder
-    das laufende öffnen."""
-
-    async def oeffnen() -> None:
-        await page.push_route("/ausdauer")
-
-    teil = einheit_ui.ausdauer_teil(state)
-    e = einheit_ui.aktuell(state)
-    if teil is not None and e is not None:
-        sport = SPORT_NAMEN.get(teil.sportart, "Training")
-        if e.laeuft:
-            return karte(
-                titel(f"{sport} läuft"),
-                ft.Text(lauftext(e, teil), size=14),
-                ft.FilledButton("Öffnen", icon=ft.Icons.OPEN_IN_NEW, on_click=oeffnen),
-            )
-        return karte(
-            titel(f"{sport} bereitgestellt"),
-            hinweis("Wartet in der Startleiste oben auf „Alle starten“."),
-            ft.FilledTonalButton("Öffnen", icon=ft.Icons.OPEN_IN_NEW, on_click=oeffnen),
-        )
-    return karte(
-        titel("Ausdauer"),
-        hinweis("Gehen, Laufen, Rad — mit GPS und, falls verbunden, mit HRV."),
-        ft.FilledTonalButton("Training starten", icon=ft.Icons.DIRECTIONS_RUN, on_click=oeffnen),
-    )
 
 
 def strecken_zeilen(page: ft.Page, state: AppState) -> list[ft.Control]:
@@ -1176,7 +1169,7 @@ def strecken_zeilen(page: ft.Page, state: AppState) -> list[ft.Control]:
 
 __all__ = [
     "ausdauer_detail_view",
-    "ausdauer_karte",
+    "ausdauer_inhalt",
     "ausdauer_view",
     "km_text",
     "strecken_zeilen",

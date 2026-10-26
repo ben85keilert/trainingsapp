@@ -550,3 +550,17 @@ async def test_stoppen_im_thread_nimmt_keine_schlaege_mehr_auf(tmp_path, monkeyp
     assert await lauf.aufnahme_stoppen_async(tmp_path) is not None and lauf.aufnahme is None
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
+
+
+@pytest.mark.asyncio
+async def test_puffer_laenge_aus_der_einstellung(tmp_path) -> None:
+    """Der Live-Puffer ist so lang wie eingestellt (Ben, 26.10.2026) — auch nach dem
+    Verbinden, das den Puffer neu anlegt; ohne Angabe gilt die Vorgabe von hrv-core."""
+    from hrv_core.constants import LIVE_FENSTER_S
+
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path, puffer_s=7200)
+    assert lauf.live.max_s == 7200.0
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    assert lauf.live.max_s == 7200.0
+    await lauf.trennen()
+    assert Messlauf(SimulatedSource(), backup_basis=tmp_path).live.max_s == LIVE_FENSTER_S

@@ -296,6 +296,8 @@ class AppState:
     groesse_beobachter: dict[str, Callable[[], None]] = field(default_factory=dict)
     #: Klappfeld „Notizen" unter der Hauptkurve aufgeklappt
     notizen_offen: bool = False
+    #: Aufzeichnung: Klappfeld „Abschnitte" über der Hauptkurve aufgeklappt (Ben, 26.10.2026)
+    abschnitte_offen: bool = True
     #: Einstellungen → HRV-Messung: Teil „Erweitert" aufgeklappt
     hrv_erweitert_offen: bool = False
     #: Notizen: Übungen zum Antippen eingeblendet, und aus welchem Plan

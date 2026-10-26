@@ -31,9 +31,11 @@ Live wird nichts an den Rohdaten verändert. Artefakte werden markiert (rote
 Punkte), die korrigierte Kurve ist eine Anzeige; gespeichert werden immer
 die Rohwerte. Korrigiert wird nachträglich in der Aufzeichnung.
 
-**GPS.** Der Einstieg ins Ausdauertraining (`views.ausdauer.ausdauer_karte`) — bis
-21.10.2026 stand er über dem Live-Teil. Der Bereich wird noch umgebaut (Katalog A17:
-Tempo entlang der Strecke, eingefärbte Kurvenabschnitte, Kurve Strecke/Zeit gegen HF).
+**GPS.** Das Ausdauertraining selbst (`views.ausdauer.ausdauer_inhalt`): Sportart,
+GPS an/aus, „Training starten“ — und läuft eines, seine Zahlen und die Karte. Bis
+26.10.2026 stand hier nur ein Knopf, der erst zur Seite `/ausdauer` führte (Ben: „Diesen
+Zwischenschritt nimm bitte heraus“). Der Bereich wird noch umgebaut (Katalog A17: Tempo
+entlang der Strecke, eingefärbte Kurvenabschnitte, Kurve Strecke/Zeit gegen HF).
 
 **Aufzeichnungen.** Zwei Unterreiter: „Laufen" (die Trainings, `strecken_zeilen`) und
 „HRV" (die gespeicherten Messungen des Profils, neueste zuerst, „Alle exportieren").
@@ -57,7 +59,7 @@ from hrv_core.trends import KENNZAHLEN, aktuell, atmung_aktuell, titel
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM, ROH, ROH_MAX_MS, ROH_MIN_MS, Ansicht
-from trainingsapp.core.hrv_einstellungen import FENSTER_MAX_S, HrvEinstellungen
+from trainingsapp.core.hrv_einstellungen import HrvEinstellungen
 from trainingsapp.core.hrv_export import adresse_maskieren, export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.models import HrvRecording
@@ -724,6 +726,7 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             backup_basis=datenverzeichnis(),
             regeln=state.korrekturregeln(),
             subject_id=state.profil.id,
+            puffer_s=state.hrv_einstellungen().puffer_s,
         )
         state.messlauf = lauf
         try:
@@ -891,8 +894,9 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
 
     def breite_waehlen(breite_s: float) -> None:
         """Ein Breitenknopf oder die eingetippte Breite (Fenster & Darstellung) — gilt
-        auch beim nächsten Mal."""
-        fenster.breite_s = breite_s
+        auch beim nächsten Mal. Zurückgeblättert bleibt der linke Rand stehen (Ben,
+        26.10.2026); live folgt die Kurve weiter."""
+        fenster.breite_links(breite_s, lauf.jetzt_s(), anfang())
         einstellung_merken(fenster_s=round(breite_s))
         breiten_knoepfe.selected = breiten_auswahl(breite_s)
         aktualisieren(erzwingen=True)
@@ -1590,7 +1594,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 state,
                 lambda: aktualisieren(erzwingen=True),
                 achsen=werteachsen(a, [*haupt, *gezeigt], roh_titel),
-                zeitachse=Zeitachse(fenster.breite_s, breite_waehlen, max_s=FENSTER_MAX_S),
+                zeitachse=Zeitachse(fenster.breite_s, breite_waehlen, max_s=lauf.live.max_s),
             )
         )
 
@@ -1875,9 +1879,9 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
             # GPS und Listen brauchen keine Live-Werte; nur ein Abriss baut neu.
             lauf.beobachter = lambda layout: state.neu_zeichnen() if layout else None
         if state.messung_tab == 1:
-            from trainingsapp.ui.views.ausdauer import ausdauer_karte
+            from trainingsapp.ui.views.ausdauer import ausdauer_inhalt
 
-            inhalt = liste(ausdauer_karte(page, state))
+            inhalt = liste(ausdauer_inhalt(page, state, eingebettet=True))
         else:
             inhalt = _aufzeichnungen(page, state, eintraege)
     return ft.Tabs(

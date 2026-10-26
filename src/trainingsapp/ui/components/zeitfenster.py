@@ -93,6 +93,34 @@ class Fenster:
         neu = max(bis + delta_s, anfang + self.breite_s)
         self.ende_s = None if neu >= jetzt_s - 0.5 else neu
 
+    def breite_links(
+        self, breite_s: float, jetzt_s: float, anfang: float = 0.0, *, folgen: bool = True
+    ) -> None:
+        """Die Breite ändern, der **linke Rand bleibt** (Ben, 26.10.2026: der Fixpunkt beim
+        Wechsel 1 · 2 · 5 · 10 Min). Folgt das Fenster live der Gegenwart (``folgen``),
+        folgt es weiter — ein stehender linker Rand wäre das Ende des Mitlaufens. In der
+        Aufzeichnung (``folgen=False``) heißt ``ende_s = None`` nur „am Ende“, der linke
+        Rand bleibt auch dann.
+
+        >>> f = Fenster(60, 100.0)
+        >>> f.breite_links(120, 500.0); f.bereich(500.0)
+        (40.0, 160.0)
+        >>> f.breite_links(600, 500.0); f.ende_s is None  # reicht bis ans Ende: folgt
+        True
+        >>> f.breite_links(60, 500.0); f.bereich(500.0)  # folgt weiter, rechts bleibt
+        (440.0, 500.0)
+        >>> g = Fenster(500, None)  # Aufzeichnung, ganze Messung
+        >>> g.breite_links(60, 500.0, folgen=False); g.bereich(500.0)
+        (0.0, 60.0)
+        """
+        if self.ende_s is None and folgen:
+            self.breite_s = breite_s
+            return
+        von, _ = self.bereich(jetzt_s, anfang)
+        self.breite_s = breite_s
+        neu = von + breite_s
+        self.ende_s = None if neu >= jetzt_s - 0.5 else neu
+
 
 def wischbar(
     inhalt: ft.Control,
@@ -300,6 +328,10 @@ class BreiteFeld:
         self.control.error = None
         with contextlib.suppress(Exception):
             self.control.update()
+
+    def max_setzen(self, max_s: float | None) -> None:
+        """Eine neue Obergrenze (live: der Puffer wurde umgestellt)."""
+        self._max_s = max_s
 
     def uebernehmen(self) -> None:
         """Den getippten Wert übernehmen — unverändert passiert nichts."""

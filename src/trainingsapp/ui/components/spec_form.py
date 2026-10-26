@@ -68,8 +68,15 @@ class SpecForm:
         werte: dict[str, Any] | None = None,
         page: ft.Page | None = None,
         quick: dict[str, list[Any]] | None = None,
+        vorgaben: bool = True,
     ) -> None:
-        """``quick`` überschreibt je Feld die Chips der Spezifikation (Plan → Eintrag)."""
+        """``quick`` überschreibt je Feld die Chips der Spezifikation (Plan → Eintrag).
+
+        ``vorgaben``: leere Felder mit der Vorgabe des Felds füllen („3x15“ aus dem
+        Feldvorrat) — für einen neuen Eintrag. Beim Bearbeiten eines bestehenden Eintrags
+        aus (Ben, 26.10.2026): Ein „Gemacht“ ohne Werte zeigte „3x15“, und wer dann nur die
+        Haltezeit nachtrug, speicherte die 3x15 mit, obwohl er sie nie eingegeben hatte.
+        """
         self.spec = spec
         self._page = page
         self._quick = quick or {}
@@ -80,7 +87,7 @@ class SpecForm:
         #: Die Variantenwahl je Variantenfeld (das Widget ist ihre Spalte)
         self._varianten: dict[str, Variantenwahl] = {}
         zeilen: list[ft.Control] = []
-        start = {**spec.defaults(), **(werte or {})}
+        start = {**(spec.defaults() if vorgaben else {}), **(werte or {})}
         for f in spec.fields:
             widget = self._widget(f, start.get(f.key))
             self._widgets[f.key] = widget

@@ -21,6 +21,14 @@ stehen; gerechnet wird, wenn die Ansicht nach dem Loslassen neu zeichnet.
 Live gilt der sichtbare Ausschnitt, aber neu gerechnet wird höchstens alle
 ``live_intervall_s`` (Vorgabe 15 s) und wenn sich die Breite ändert.
 
+**Nur der gewählte Bereich rechnet** (Ben, 26.10.2026: „die nicht linearen sind dabei
+gar nicht so wichtig … das wäre vertane Zeit“): Wer das Fenster im Frequenzraum
+schiebt, lässt Poincaré und DFA ruhen — gerechnet wird ein Bereich erst, wenn man zu
+ihm wechselt, und das Ergebnis bleibt gemerkt. Ergebnisse für **Abschnitte** fallen nie
+aus dem Speicher (dorthin kommt man wieder), Fenster-Ausschnitte fallen zuerst. Auch
+der Bereich **Zeit** hat seit dem 26.10. das Analysefenster: Seine Tabelle (roh und
+korrigiert) folgt ihm; die Tabellen der anderen Bereiche bleiben die ganze Messung.
+
 Live und in der Aufzeichnung dieselbe Karte; die Daten kommen über Funktionen
 herein (``reihe``: Zeit, RR mit NaN für schlechte Werte, Nähte). Verlaufskurven
 merkt sich `trends.verlauf` (``zwischenspeicher``).
@@ -237,6 +245,8 @@ class Analyse:
         #: Womit die Chips gebaut sind — live kommt RR erst nach dem Verbinden
         self._ohne_chips: list[str] = []
         self._kopf = ft.Container()
+        #: Bereich „Zeit“: die Wahl des Analysefensters steht über der Tabelle, die ihr folgt
+        self._fenster_wahl = ft.Container(visible=False)
         self._tabelle = ft.Container()
         self._extra = ft.Container()
         self._chips = ft.Container()
@@ -258,11 +268,12 @@ class Analyse:
                 spacing=12,
                 tight=True,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                controls=[self._tabelle, self._extra, wischen(self._kurven)],
+                controls=[self._fenster_wahl, self._tabelle, self._extra, wischen(self._kurven)],
             )
         else:
             self.control = karte(
                 self._kopf,
+                self._fenster_wahl,
                 self._tabelle,
                 self._extra,
                 self._chips,
@@ -331,6 +342,11 @@ class Analyse:
         self._chips.content = chips(
             self._state.ansicht(), self._umschalten, bereich, ohne=self._ohne_chips
         )
+        self._tabelle_bauen(bereich)
+
+    def _tabelle_bauen(self, bereich: str) -> None:
+        """Die Zusammenfassung des Bereichs — bei „Zeit“ für das Analysefenster, darum auch
+        bei jedem `zeichnen` neu (die Ansicht merkt sich die Zahlen je Fenster)."""
         tabelle = self._tabelle_fuer(bereich) if self._tabelle_fuer else None
         self._tabelle.content = tabelle
         self._tabelle.visible = tabelle is not None
@@ -361,9 +377,18 @@ class Analyse:
 
         if bereich in ("frequenz", "nichtlinear"):
             self._extra.content = self._extra_bauen(bereich, t, rr, naht, x_von, x_bis)
+            self._fenster_wahl.content = None
         else:
+            # Zeit: kein Spektrum — nur die Wahl des Analysefensters über der Tabelle
             self._extra.content = None
+            self._fenster_wahl.content = (
+                self._fenster_kopf()
+                if self._fenster_kopf is not None and self._analysefenster is not None
+                else None
+            )
         self._extra.visible = self._extra.content is not None
+        self._fenster_wahl.visible = self._fenster_wahl.content is not None
+        self._tabelle_bauen(bereich)
         self.gesehen = {}
         marken = (
             [senkrechte([strich], ft.Colors.ON_SURFACE, 1.2, gestrichelt=False)]
@@ -420,8 +445,7 @@ class Analyse:
             else:
                 ergebnis = self._rechnen(bereich, fenster, t, rr, naht)
                 self._fenster_speicher[schluessel] = ergebnis
-                while len(self._fenster_speicher) > FENSTER_SPEICHER:
-                    self._fenster_speicher.popitem(last=False)
+                self._speicher_begrenzen()
         self._zuletzt[bereich] = ergebnis
         teile: list[ft.Control] = []
         kopf = self._fenster_kopf() if self._fenster_kopf is not None else None
@@ -447,6 +471,15 @@ class Analyse:
                 self._poincare_werte(nl),
             ]
         return ft.Column(spacing=8, tight=True, opacity=0.55 if veraltet else 1.0, controls=teile)
+
+    def _speicher_begrenzen(self) -> None:
+        """Höchstens `FENSTER_SPEICHER` Ergebnisse — die ältesten **Fenster-Ausschnitte**
+        fallen zuerst; Abschnitte und die ganze Messung bleiben (Ben, 26.10.2026)."""
+        while len(self._fenster_speicher) > FENSTER_SPEICHER:
+            alt = next((k for k in self._fenster_speicher if k[1].startswith("band:")), None)
+            if alt is None:
+                return
+            del self._fenster_speicher[alt]
 
     def _rechnen(
         self,

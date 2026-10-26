@@ -110,8 +110,16 @@ def test_messung_ohne_geraet(daten) -> None:
     assert any(
         t.startswith("Noch keine Aufzeichnung.") for t in _baum_texte(messung(_seite(), state))
     )
-    state.messung_tab = 1  # Reiter „GPS": der Einstieg ins Ausdauertraining
-    assert "AUSDAUER" in _baum_texte(messung(_seite(), state))
+    state.messung_tab = 1  # Reiter „GPS": das Training direkt, ohne Zwischenschritt (26.10.)
+    gps = messung(_seite(), state)
+    assert "TRAINING" in _baum_texte(gps)
+    assert _knopf(gps, "Training starten") is not None
+    wahl = next(c for c in _alle_controls(gps) if isinstance(c, ft.SegmentedButton))
+    assert [s.value for s in wahl.segments] == ["gehen", "laufen", "rad"]
+    assert any(  # der Timer-Knopf steht in der Karte — der Reiter hat keine Titelleiste
+        isinstance(c, ft.IconButton) and c.icon == ft.Icons.TIMER_OUTLINED
+        for c in _alle_controls(gps)
+    )
 
 
 async def test_messung_live_mit_simulator(daten) -> None:
@@ -471,7 +479,7 @@ def test_detailansicht_zeigt_verworfene_grau_auf_voller_zeitachse(daten) -> None
     texte = _baum_texte(ansicht)
     assert any(f"{int(dauer) // 60}:{int(dauer) % 60:02d}" in x for x in texte)
     # Was Grau heißt, steht hinter „Info“ im Menü ⋮ der Kurve (Ben, 17. und 21.10.2026)
-    _menue_eintrag(ansicht, "So liest du die Kurve").on_click()
+    _menue_eintrag(ansicht, "So liest du die Kurven").on_click()
     blatt = seite.aufrufe[-1]
     assert any(
         "auch verworfene" in c.value for c in _alle_controls(blatt) if isinstance(c, ft.Markdown)
@@ -1263,7 +1271,7 @@ def test_aufzeichnung_wie_live_ganzer_abschnitt_und_feste_achsen(daten) -> None:
     assert _knoepfe_rechts(zeile) == ["Ablesen", "Vollbild", "Fenster & Darstellung", "⋮"]
     eintraege = [i.content for i in zeile.controls[-1].content.items if i.content]
     assert eintraege[:3] == [
-        "So liest du die Kurve",
+        "So liest du die Kurven",
         "Automatische Korrektur …",
         "Als Ansicht speichern …",
     ]
@@ -1553,3 +1561,43 @@ async def test_crash_backup_wird_beim_start_erkannt_und_wiederhergestellt(daten)
     assert backup_uebernehmen(state, backups[0]) is None
     assert not backups[0].exists()
     assert len(state.hrv.alle(start)) == 1
+
+
+def test_uebersicht_zeilen_gleich_hoch_mit_und_ohne_grund() -> None:
+    """Die Atemfrequenz hat mal einen Wert, mal einen Grund mit Knopf — die Zeile bleibt
+    gleich hoch, sonst flackert die Ansicht darunter (Ben, 26.10.2026)."""
+    from trainingsapp.ui.components.kacheln import (
+        HAUPTWERT_HOEHE,
+        ZEILE_HOEHE,
+        KachelWert,
+        uebersicht,
+    )
+
+    mit_grund = KachelWert(
+        "Atemfrequenz 60 s",
+        "–",
+        "/min",
+        grund="langsame Schwingung",
+        aktion=("Atemübung", lambda: None),
+    )
+    mit_wert = KachelWert("Atemfrequenz 60 s", "12,0", "/min")
+
+    def zeilen(w: KachelWert) -> list[ft.Container]:
+        karte = uebersicht([KachelWert("Herzfrequenz", "70", "bpm", gross=True), w])
+        # Container mit Höhe — ohne den Farbpunkt (8 px) vor jeder Zeile
+        return [
+            c
+            for c in _alle_controls(karte)
+            if isinstance(c, ft.Container) and c.height and c.height >= 20
+        ]
+
+    for w in (mit_grund, mit_wert):
+        hoehen = sorted({c.height for c in zeilen(w)})
+        assert hoehen == [ZEILE_HOEHE, HAUPTWERT_HOEHE]
+    # Der Grund bleibt einzeilig — eine zweite Zeile würde die Höhe sprengen
+    grund = next(
+        c
+        for c in _alle_controls(uebersicht([mit_grund]))
+        if isinstance(c, ft.Text) and c.value == "langsame Schwingung"
+    )
+    assert grund.max_lines == 1

@@ -316,16 +316,12 @@ def test_neue_bewegung_innerhalb_der_latenz_verdraengt_den_alten_auftrag(daten) 
         if isinstance(c, ft.SegmentedButton) and any(s.value == "band" for s in c.segments)
     ).on_change(_ereignis("band"))
     weiter = next(
-        c
-        for c in _alle(view)
-        if isinstance(c, ft.IconButton) and c.tooltip == "Fenster ein halbes weiter"
+        c for c in _alle(view) if isinstance(c, ft.IconButton) and c.tooltip == "Fenster weiter"
     )
     weiter.on_click()
     erster = aufgaben[-1]
     next(
-        c
-        for c in _alle(view)
-        if isinstance(c, ft.IconButton) and c.tooltip == "Fenster ein halbes weiter"
+        c for c in _alle(view) if isinstance(c, ft.IconButton) and c.tooltip == "Fenster weiter"
     ).on_click()
     asyncio.run(erster())  # veraltet: rechnet nicht
     assert "Wird nach dem Loslassen neu gerechnet …" in _texte(view)
@@ -455,3 +451,41 @@ def test_ppi_reihen_gemerkt_aber_nicht_geteilt() -> None:
     assert folge is not None and ppi_folge(rec) == folge
     kuerzer = replace(rec, beats=rec.beats[:100])
     assert len(schlagzeiten(kuerzer)) == 100
+
+
+# ---------------------------------------------------------------------------
+# Zeit folgt dem Analysefenster; Schrittweite der Pfeile (Ben, 26.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def test_zeit_tabelle_folgt_dem_analysefenster_mit_schrittweite(daten) -> None:
+    state, tmp_path = daten
+    state.hrv_einstellungen_setzen(HrvEinstellungen(analyse_laenge_s=60, nachrechnen_ms=0))
+    aufgaben: list = []
+    view = messung_detail_view(_seite(aufgaben), state, _h10_eintrag(state, tmp_path))
+    texte = _texte(view)
+    assert "ganze Messung" in texte and "roh" in texte and "korrigiert" in texte
+    # Auch im Bereich „Zeit“: Alles · Abschnitt · Fenster — und ein Band in der Kurve
+    wahl = next(
+        c
+        for c in _alle(view)
+        if isinstance(c, ft.SegmentedButton) and any(s.value == "band" for s in c.segments)
+    )
+    wahl.on_change(_ereignis("band"))
+    texte = _texte(view)
+    assert "60 s · 0:30–1:30" in texte and "ganze Messung" not in texte  # die Tabelle folgt
+    schritt = next(c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "Schritt")
+    assert [o.text for o in schritt.options] == ["½ Fenster", "1 Fenster", "1 min", "30 s", "10 s"]
+    schritt.on_select(_ereignis("10"))
+    assert state.hrv_einstellungen().analyse_schritt == "10"
+    next(
+        c for c in _alle(view) if isinstance(c, ft.IconButton) and c.tooltip == "Fenster weiter"
+    ).on_click()
+    asyncio.run(aufgaben[-1]())
+    assert "60 s · 0:40–1:40" in _texte(view)
+    # Die Zahlen des Fensters unterscheiden sich von denen der ganzen Messung
+    zeile = next(i for i, t in enumerate(_texte(view)) if t == "Schläge")
+    schlaege_fenster = _texte(view)[zeile + 2]
+    wahl.on_change(_ereignis("alles"))
+    zeile = next(i for i, t in enumerate(_texte(view)) if t == "Schläge")
+    assert _texte(view)[zeile + 2] != schlaege_fenster

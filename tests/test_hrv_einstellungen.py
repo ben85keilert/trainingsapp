@@ -152,3 +152,52 @@ def test_einstellungsseiten_bauen_und_schalten(tmp_path) -> None:
         assert state.hrv_einstellungen() == HrvEinstellungen()
     finally:
         state.schliessen()
+
+
+def test_live_verlauf_einstellbar(tmp_path) -> None:
+    """„Live-Verlauf behalten“ (Ben, 26.10.2026): 30 min · 1 h · 2 h · 4 h — die Zeitachse
+    darf nie breiter sein als der Puffer."""
+    ft = pytest.importorskip("flet")
+    from trainingsapp.ui.state import AppState
+    from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
+
+    state = AppState.starten(tmp_path / "app.db")
+    seite = SimpleNamespace(
+        route="/einstellungen/hrv",
+        update=lambda: None,
+        show_dialog=lambda *_: None,
+        pop_dialog=lambda: None,
+    )
+    try:
+        ansicht = einstellungen_hrv(seite, state)
+
+        def alle(x, gesehen=None):
+            gesehen = gesehen if gesehen is not None else set()
+            if not isinstance(x, ft.Control) or id(x) in gesehen:
+                return []
+            gesehen.add(id(x))
+            out = [x]
+            for name in ("controls", "content"):
+                wert = getattr(x, name, None)
+                for k in wert if isinstance(wert, list) else [wert]:
+                    out += alle(k, gesehen)
+            return out
+
+        controls = alle(ansicht)
+        wahl = next(
+            c for c in controls if isinstance(c, ft.Dropdown) and c.label == "Live-Verlauf behalten"
+        )
+        assert [o.text for o in wahl.options] == ["30 min", "1 h", "2 h", "4 h"]
+        feld = next(
+            c for c in controls if isinstance(c, ft.TextField) and c.label == "Breite der Zeitachse"
+        )
+        wahl.on_select(SimpleNamespace(control=SimpleNamespace(value="7200")))
+        assert state.hrv_einstellungen().puffer_s == 7200
+        feld.value = "90 min"  # jetzt möglich — der Puffer hält 2 h
+        feld.on_submit(None)
+        assert state.hrv_einstellungen().fenster_s == 5400 and feld.value == "90:00"
+        wahl.on_select(SimpleNamespace(control=SimpleNamespace(value="1800")))
+        e = state.hrv_einstellungen()
+        assert (e.puffer_s, e.fenster_s) == (1800, 1800)  # die Breite rückt an den Puffer
+    finally:
+        state.schliessen()

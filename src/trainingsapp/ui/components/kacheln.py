@@ -10,6 +10,11 @@ nicht hier: Die Werte kommen fertig herein (`KachelWert`).
 darunter als Liste — Name links, Wert rechts, feine Linien dazwischen. Gibt es
 keinen Wert (Atemfrequenz bei undeutlicher Atmung), steht der Grund klein unter
 dem Namen; manchmal mit einem Knopf, der weiterhilft („Atemübung").
+
+**Feste Höhen** auch in der Übersicht (Ben, 26.10.2026): Die Atemfrequenz hat mal
+einen Wert, mal einen Grund — kam eine Zeile dazu oder fiel weg, sprang die ganze
+Ansicht darunter und flackerte. Jede Zeile und jeder große Wert ist darum gleich hoch,
+der Grund bleibt einzeilig.
 """
 
 from __future__ import annotations
@@ -23,6 +28,9 @@ from hrv_core.trends import KENNZAHLEN
 #: Feste Höhen — ein gleichmäßiges Raster statt Kacheln, die je nach Inhalt springen
 HOEHE = 74
 HOEHE_GROSS = 90
+#: Übersicht: Höhe einer Zeile (Name, darunter ggf. der Grund) und eines großen Werts
+ZEILE_HOEHE = 44
+HAUPTWERT_HOEHE = 84
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +217,7 @@ def uebersicht(werte: list[KachelWert]) -> ft.Control:
 def _hauptwert(w: KachelWert) -> ft.Control:
     return ft.Container(
         expand=True,
+        height=HAUPTWERT_HOEHE,
         padding=ft.Padding.only(bottom=4),
         content=ft.Column(
             spacing=0,
@@ -224,12 +233,13 @@ def _hauptwert(w: KachelWert) -> ft.Control:
                     ],
                 ),
                 ft.Text(w.titel, size=12, opacity=0.7, max_lines=1),
+                # Immer da, auch leer — so bleibt die Höhe, wenn der Grund kommt oder geht
                 ft.Text(
                     w.grund or w.zusatz,
                     size=11,
                     opacity=0.55,
-                    max_lines=2,
-                    visible=bool(w.grund or w.zusatz),
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
                 ),
             ],
         ),
@@ -241,7 +251,9 @@ def _zeile(w: KachelWert) -> ft.Control:
         ft.Text(w.titel, size=14, max_lines=1),
     ]
     if w.grund:
-        links.append(ft.Text(w.grund, size=11, opacity=0.6, max_lines=2))
+        links.append(
+            ft.Text(w.grund, size=11, opacity=0.6, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+        )
     rechts: list[ft.Control] = []
     if w.aktion is not None:
         text, handler = w.aktion
@@ -263,19 +275,22 @@ def _zeile(w: KachelWert) -> ft.Control:
             ],
         )
     )
-    return ft.Row(
-        spacing=10,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        controls=[
-            ft.Container(
-                width=8,
-                height=8,
-                border_radius=4,
-                bgcolor=w.farbe or ft.Colors.TRANSPARENT,
-            ),
-            ft.Column(spacing=0, tight=True, expand=True, controls=links),
-            *rechts,
-        ],
+    return ft.Container(
+        height=ZEILE_HOEHE,
+        content=ft.Row(
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Container(
+                    width=8,
+                    height=8,
+                    border_radius=4,
+                    bgcolor=w.farbe or ft.Colors.TRANSPARENT,
+                ),
+                ft.Column(spacing=0, tight=True, expand=True, controls=links),
+                *rechts,
+            ],
+        ),
     )
 
 

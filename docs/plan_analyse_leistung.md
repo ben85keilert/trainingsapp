@@ -133,6 +133,16 @@ Wischen. Es gehört zu einem **Analysefenster**, das man bewusst wählt:
   das Band; gerechnet wird beim Loslassen — oder auf Knopfdruck, je nach
   Einstellung „Automatisch nach dem Loslassen“ / „Nur per Knopf“.
 
+**Seit 26.10.2026** (Ben): Das Analysefenster gilt auch im Bereich **Zeit** — die Tabelle
+(roh und korrigiert) folgt ihm, mit der Kopfzeile „ganze Messung“, dem Abschnitt oder
+dem Fenster. Die Pfeile ‹ › haben eine wählbare **Schrittweite** (½ Fenster, 1 Fenster,
+1 min, 30 s, 10 s; `HrvEinstellungen.analyse_schritt`). **Gerechnet wird nur der Bereich,
+der gerade offen ist** — wer das Fenster im Frequenzraum schiebt, rechnet kein Poincaré
+und kein DFA; die anderen Bereiche kommen erst beim Wechsel dazu und bleiben dann gemerkt.
+Ergebnisse für Abschnitte und die ganze Messung fallen nie aus dem Speicher
+(`FENSTER_SPEICHER`), Fenster-Ausschnitte zuerst (`Analyse._speicher_begrenzen`). SampEn
+gibt es weiter nur für die ganze Messung bis 3000 Schläge.
+
 Die Zeitbereichswerte des sichtbaren Ausschnitts bleiben live — sie sind
 billig, wenn Stufe 1 steht.
 

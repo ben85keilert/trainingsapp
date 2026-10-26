@@ -322,7 +322,7 @@ class Notizfeld:
         if zb is None:
             return None
         if self._zeit_modus(zb) == UHR:
-            wand = uhr_lesen(text, zb.start_utc)
+            wand = uhr_lesen(text, zb.start_utc, einstellig=True)  # „8:00“ ist hier eine Uhrzeit
             return None if wand is None else x_aus_wand(zb, wand)
         dauer = dauer_lesen(text)
         if dauer is None:

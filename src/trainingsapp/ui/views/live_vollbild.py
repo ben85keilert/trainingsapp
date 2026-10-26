@@ -37,7 +37,6 @@ import flet as ft
 from hrv_core.atmung import ATEMUEBUNG, RUHE
 
 from trainingsapp.core.hrv_ansicht import LINKS, RECHTS, ROH
-from trainingsapp.core.hrv_einstellungen import FENSTER_MAX_S
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.devices.base import Verbindung
@@ -467,8 +466,9 @@ def _vollbild(
         aktualisieren(erzwingen=True)
 
     def breite_waehlen(breite_s: float) -> None:
-        """Ein Breitenknopf oder die eingetippte Breite — dieselbe Einstellung wie hochkant."""
-        fenster.breite_s = breite_s
+        """Ein Breitenknopf oder die eingetippte Breite — dieselbe Einstellung wie hochkant;
+        zurückgeblättert bleibt der linke Rand (Ben, 26.10.2026)."""
+        fenster.breite_links(breite_s, lauf.jetzt_s(), anfang())
         aktuell = state.hrv_einstellungen()
         aktuell.fenster_s = round(breite_s)
         state.hrv_einstellungen_setzen(aktuell)
@@ -495,7 +495,7 @@ def _vollbild(
                 lambda: aktualisieren(erzwingen=True),
                 kurven=[k for k in (*a.links, *a.rechts) if k != ROH],
                 achsen=werteachsen(a, [*links, *rechts], roh_titel),
-                zeitachse=Zeitachse(fenster.breite_s, breite_waehlen, max_s=FENSTER_MAX_S),
+                zeitachse=Zeitachse(fenster.breite_s, breite_waehlen, max_s=lauf.live.max_s),
             )
         )
 

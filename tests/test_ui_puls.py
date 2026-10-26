@@ -202,15 +202,17 @@ def test_aufzeichnung_einer_reinen_pulsmessung(daten) -> None:
     assert "zu wenige gute Schläge" not in texte  # der Grund in einer Kachel
     kurve = next(c for c in alle if isinstance(c, fc.LineChart))
     assert max(len(s.points) for s in kurve.data_series) == 120  # die ersten 2 min
-    # Korrektur und Abschnitte gibt es ohne Intervalle nicht, Zuschneiden ebenso
-    karten = [
-        c
-        for c in alle
-        if isinstance(c, ft.Container)
-        and any(t.value in ("KORREKTUR", "ABSCHNITTE") for t in _alle(c) if isinstance(t, ft.Text))
-        and c.bgcolor is not None
-    ]
-    assert karten and not any(k.visible for k in karten)
+    # Korrektur und Abschnitte gibt es ohne Intervalle nicht, Zuschneiden ebenso: die Karte
+    # „Korrektur“ und das Klappfeld „Abschnitte“ über der Kurve (26.10.2026) sind unsichtbar
+    titel_texte = {
+        t.value for t in alle if isinstance(t, ft.Text) and t.value in ("KORREKTUR", "ABSCHNITTE")
+    }
+    assert titel_texte == {"KORREKTUR", "ABSCHNITTE"}
+    for c in alle:
+        if not isinstance(c, ft.Container | ft.Column) or c.visible:
+            continue
+        titel_texte -= {t.value for t in _alle(c) if isinstance(t, ft.Text)}
+    assert not titel_texte, titel_texte  # jeder Titel liegt in einem unsichtbaren Teil
     schere = next(
         c
         for c in ansicht.appbar.actions
@@ -250,12 +252,18 @@ def test_erklaerungen_der_karten_hinter_dem_i(daten) -> None:
     for tooltip, erklaert in (
         ("So arbeitest du mit Abschnitten", "Werte je Abschnitt"),
         ("So funktioniert die Korrektur", "Vorschläge der Automatik"),
-        ("So liest du den Verlauf", "Über Nähte"),  # Bereich „Zeit“: Kurven und Tabelle
     ):
         knoepfe[tooltip].on_click()
         markdown = next(c.value for c in _alle(seite.aufrufe[-1]) if isinstance(c, ft.Markdown))
         assert erklaert in markdown, tooltip
-    assert "Wo die Kurve abreißt" in markdown
+    # Hauptkurve und Verlaufskurven erklärt ein Eintrag im Menü ⋮ — wie live (26.10.2026:
+    # die Analyse hat keine eigene Karte mehr); Bereich „Zeit“: Kurven und Tabelle
+    menue = next(
+        c for c in alle if isinstance(c, ft.PopupMenuButton) and c.icon == ft.Icons.MORE_VERT
+    )
+    next(i for i in menue.items if i.content == "So liest du die Kurven").on_click()
+    markdown = next(c.value for c in _alle(seite.aufrufe[-1]) if isinstance(c, ft.Markdown))
+    assert "Über Nähte" in markdown and "Wo die Kurve abreißt" in markdown
 
 
 async def test_uhr_im_simulator_bis_zur_aufzeichnung(daten) -> None:

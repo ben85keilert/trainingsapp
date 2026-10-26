@@ -200,3 +200,27 @@ def test_blatt_abbrechen_verwirft_speichern_prueft(page, welt) -> None:
     assert not blatt.open
     asyncio.run(blatt.on_dismiss(None))
     assert [e.result["hold"] for e in _heute(state, uebung)] == [[45, 45], [40]]
+
+
+def test_bearbeiten_fuellt_leere_felder_nicht_mit_der_vorgabe(page, welt) -> None:
+    """Ein „Gemacht“ ohne Werte zeigte „3x30s“ aus dem Feldvorrat; wer dann nur die Notiz
+    oder ein anderes Feld nachtrug, speicherte die Vorgabe mit (Ben, 26.10.2026)."""
+    state, plan, uebung = welt
+    session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
+    state.sitzungen.eintrag_anlegen(session, uebung, {}, "")  # nur abgehakt
+    assert uebung.result_spec.defaults()  # die Übung hätte eine Vorgabe
+    route = f"/plan/{plan.id}/leistungen/{uebung.id}"
+    ansicht = leistungen_view(page, state, route, uebung)
+    haltezeiten = _felder(ansicht, "Haltezeit je Satz")
+    assert [h.value for h in haltezeiten] == ["2x45s", "30s", ""]  # leer bleibt leer
+    _felder(ansicht, "Notiz")[2].value = "nur abgehakt"
+
+    async def confirm_pop(soll: bool) -> None:
+        pass
+
+    ansicht.confirm_pop = confirm_pop
+    page.views = [ft.View(route=f"/plan/{plan.id}"), ansicht]
+    asyncio.run(ansicht.on_confirm_pop(None))
+    eintraege = _heute(state, uebung)
+    assert [e.result.get("hold") for e in eintraege] == [[45, 45], [30], None]
+    assert eintraege[2].note == "nur abgehakt"

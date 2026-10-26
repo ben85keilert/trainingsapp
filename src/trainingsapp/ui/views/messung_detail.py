@@ -39,6 +39,14 @@ Darstellung (Zeitachse eintippen, feste Werteachsen) und das Menü ⋮ (Info,
 automatische Korrektur, Ansichten); dieselben vier Breitenknöpfe. Ein Abschnitt-Chip
 zeigt den **ganzen** Abschnitt, die Breitenknöpfe zoomen hinein. Notizen und
 Abschnitte werden erst nach einer Rückfrage gelöscht.
+
+**Eine Karte, wie live** (Ben, 26.10.2026: „Gleiche die Views Live-Messung und
+Aufzeichnung etwas mehr aneinander an“): Breitenknöpfe und Zeit ↔ Frequenz ↔ Nichtlinear
+oben, darunter das Klappfeld **Abschnitte** (Chips „Ganze Messung“ und je Abschnitt, die
+Liste mit Werten, „+ Abschnitt“), die Ebenen, die Hauptkurve, die Notizen (Klappfeld) und
+direkt darunter Spektrum bzw. Poincaré und die Verlaufskurven (`components.analyse`,
+eingebettet). Beim Wechsel der Breite (1 · 2 · 5 · 10 Min) bleibt der **linke Rand**
+stehen (`Fenster.breite_links`).
 """
 
 from __future__ import annotations
@@ -108,6 +116,7 @@ from trainingsapp.core.hrv_ansicht import (
 )
 from trainingsapp.core.hrv_einstellungen import (
     ANALYSE_LAENGEN,
+    ANALYSE_SCHRITTE,
     EBENE_ABSCHNITTE,
     EBENE_LEISTUNGEN,
     EBENE_NOTIZEN,
@@ -307,6 +316,8 @@ class _Analysewahl:
     griff: float | None = None
     #: Losgelassen, das Nachrechnen ist geplant
     wartet: bool = False
+    #: Schrittweite der Pfeile ‹ › (`ANALYSE_SCHRITTE`)
+    schritt: str = "halb"
     #: Laufende Nummer des Nachrechnen-Auftrags — nur der letzte rechnet
     auftrag: int = 0
 
@@ -360,8 +371,8 @@ KORREKTUR_INFO = (
 
 #: Zur Karte „Verlauf“: was die Tabelle des Bereichs zusammenfasst
 TABELLE_INFO = {
-    "zeit": "**Tabelle:** die ganze Messung, roh und korrigiert. Über Nähte (Lücken, "
-    "Ausschlüsse) wird keine Differenz gebildet.",
+    "zeit": "**Tabelle:** das Analysefenster (ganze Messung, Abschnitt oder Fenster), roh "
+    "und korrigiert. Über Nähte (Lücken, Ausschlüsse) wird keine Differenz gebildet.",
     "frequenz": "**Tabelle:** die ganze Messung (korrigiert), Lomb-Scargle je lückenfreiem "
     "Teilstück; bei langen Messungen LF/HF als Mittel von 5-min-Spektren, VLF von "
     "30-min-Spektren, ULF über die ganze Länge. „gesperrt“: Das Band lässt sich in dieser "
@@ -372,9 +383,11 @@ TABELLE_INFO = {
 }
 
 FENSTER_INFO = (
-    "**Analysefenster** (über Spektrum bzw. Poincaré): die ganze Messung, ein Abschnitt oder "
-    "ein Fenster fester Länge. Das Fenster als Band in der Rohkurve greifen und schieben; "
-    "die Pfeile rücken es um ein halbes weiter."
+    "**Analysefenster** (Alles · Abschnitt · Fenster): die ganze Messung, ein Abschnitt oder "
+    "ein Fenster fester Länge. Bei „Zeit“ folgt ihm die Tabelle, bei „Frequenz“ das Spektrum, "
+    "bei „Nichtlinear“ Poincaré und DFA — gerechnet wird nur der Bereich, der gerade offen "
+    "ist. Das Fenster als Band in der Rohkurve greifen und schieben; die Pfeile rücken es um "
+    "die gewählte Schrittweite."
 )
 
 
@@ -382,11 +395,9 @@ def _verlauf_info(bereich: str) -> str:
     """Was das „i“ der Karte „Verlauf“ in der Aufzeichnung zusätzlich erklärt.
 
     >>> "Analysefenster" in _verlauf_info("frequenz"), "Analysefenster" in _verlauf_info("zeit")
-    (True, False)
+    (True, True)
     """
-    teile = [TABELLE_INFO.get(bereich, "")]
-    if bereich in ("frequenz", "nichtlinear"):
-        teile.append(FENSTER_INFO)
+    teile = [TABELLE_INFO.get(bereich, ""), FENSTER_INFO]
     return "\n\n".join(t for t in teile if t)
 
 
@@ -421,6 +432,9 @@ class _Kurvenmodus:
     #: Wischen bleibt darin — ``None``: die ganze Messung
     bindung: Abschnitt | None = None
 
+
+#: Schrittweite der Pfeile am Analysefenster — Beschriftung je `ANALYSE_SCHRITTE`
+SCHRITT_TEXT = {"halb": "½ Fenster", "ganz": "1 Fenster", "60": "1 min", "30": "30 s", "10": "10 s"}
 
 #: Seitenleisten des Vollbilds
 NOTIZEN = "notizen"
@@ -850,6 +864,14 @@ def _aufbauen(
                 out[-1] = ohne_intervalle(out[-1])
         return out
 
+    def zeitbereich_im_fenster(korrigiert: bool, von: float, bis: float) -> dict[str, Any] | None:
+        """Dieselben Zeitwerte für einen Ausschnitt der Achse (Abschnitt, Fenster)."""
+        korr = z.analyse_korr(roh=not korrigiert)
+        teil = zuschneiden(korr, korr_zeiten(korr, z.achse), von, bis)
+        return compute_time_domain(
+            teil.rr_ms, pnn_threshold_ms=state.ansicht().pnn_ms, breaks=teil.breaks
+        )
+
     def tabelle(bereich: str) -> ft.Control | None:
         if z.nur_puls:
             return None  # ohne Intervalle stünden dort nur Striche
@@ -857,7 +879,22 @@ def _aufbauen(
             return _frequenz_tabelle(frequenz())
         if bereich == "nichtlinear":
             return _nichtlinear_tabelle(nichtlinear(), verity)
-        return _zeit_tabelle(zeitbereich(False), zeitbereich(True), state.ansicht().pnn_ms)
+        # Zeit folgt dem Analysefenster (Ben, 26.10.2026) — gemerkt je Fenster und Korrektur
+        fenster = analysefenster()
+        pnn_ms = state.ansicht().pnn_ms
+        if fenster.schluessel == AW_ALLES:
+            roh, korr = zeitbereich(False), zeitbereich(True)
+            ecke = "ganze Messung" if z.ausschnitt is None else "Zuschnitt"
+        else:
+            roh, korr = z.merken(
+                f"zeit:{fenster.schluessel}:{pnn_ms:g}",
+                lambda: (
+                    zeitbereich_im_fenster(False, fenster.von, fenster.bis),
+                    zeitbereich_im_fenster(True, fenster.von, fenster.bis),
+                ),
+            )
+            ecke = fenster.titel
+        return _zeit_tabelle(roh, korr, pnn_ms, ecke=ecke)
 
     def kopf() -> None:
         teile = [
@@ -1188,6 +1225,7 @@ def _aufbauen(
     # -- Abschnitte (Werte je Teil der Messung) ---------------------------------
 
     abschnitte_box = ft.Column(spacing=2)
+    abschnitt_titel = ft.Text("ABSCHNITTE", size=11, weight=ft.FontWeight.BOLD, opacity=0.6)
 
     def notiz_punkte() -> list[tuple[float, str]]:
         punkte = []
@@ -1277,6 +1315,7 @@ def _aufbauen(
             ]
         else:
             abschnitte_box.controls = [hinweis("Noch keine Abschnitte.")]  # wie: hinter dem „i“
+        abschnitt_titel.value = f"ABSCHNITTE · {len(eigene)}" if eigene else "ABSCHNITTE"
         chips_zeichnen()
 
     def zusatz_sichern() -> None:
@@ -1729,16 +1768,18 @@ def _aufbauen(
     def breite_setzen(
         breite_s: float, mitte: float | None = None, *, zeichnen_: bool = True
     ) -> None:
-        fenster.breite_s = breite_s if breite_s > 0 else (dauer or 1.0)
+        """Die Breite ändern: um ``mitte`` zentriert (Lupe, Editor), sonst bleibt der
+        **linke Rand** stehen (Ben, 26.10.2026); ``breite_s <= 0`` ist die ganze Achse."""
+        neu = breite_s if breite_s > 0 else (dauer or 1.0)
         if mitte is None and m.editor is not None:
             mitte = m.editor.grenze  # im Editor zoomt man auf die gewählte Grenze
-        if mitte is None:
-            fenster.ende_s = None if breite_s <= 0 else fenster.ende_s
+        if mitte is not None:
+            fenster.breite_s, fenster.ende_s = neu, None
+            fenster.verschieben(mitte + neu / 2 - achse_ende(), achse_ende(), achse_anfang())
+        elif breite_s <= 0:
+            fenster.breite_s, fenster.ende_s = neu, None
         else:
-            fenster.ende_s = None
-            fenster.verschieben(
-                mitte + fenster.breite_s / 2 - achse_ende(), achse_ende(), achse_anfang()
-            )
+            fenster.breite_links(neu, achse_ende(), achse_anfang(), folgen=False)
         breiten_zeigen()
         if zeichnen_:
             nur_kurven()
@@ -2026,11 +2067,14 @@ def _aufbauen(
     # wenn innerhalb der Latenz (Einstellungen → Erweitert) nichts nachkommt.
 
     aw = _Analysewahl(
-        laenge_s=einst.analyse_laenge_s if einst.analyse_laenge_s in ANALYSE_LAENGEN else 300
+        laenge_s=einst.analyse_laenge_s if einst.analyse_laenge_s in ANALYSE_LAENGEN else 300,
+        schritt=einst.analyse_schritt if einst.analyse_schritt in ANALYSE_SCHRITTE else "halb",
     )
 
     def band_sichtbar() -> bool:
-        return aw.art == AW_BAND and analyse.bereich in ("frequenz", "nichtlinear")
+        """Das Band gibt es in allen Bereichen (seit 26.10.2026 auch „Zeit“) — nur nicht bei
+        einer reinen Pulsmessung, die keine Analyse hat."""
+        return aw.art == AW_BAND and not z.nur_puls
 
     def band_bereich() -> tuple[float, float]:
         lo, hi = grenzen()
@@ -2099,10 +2143,19 @@ def _aufbauen(
 
         page.run_task(spaeter)
 
+    def schrittweite() -> float:
+        """Die Schrittweite der Pfeile in Sekunden (`ANALYSE_SCHRITTE`)."""
+        von, bis = band_bereich()
+        if aw.schritt == "halb":
+            return (bis - von) / 2
+        if aw.schritt == "ganz":
+            return bis - von
+        return float(aw.schritt)
+
     def band_schieben(richtung: int) -> Callable[[], None]:
         def handler() -> None:
-            von, bis = band_bereich()
-            aw.von = von + richtung * (bis - von) / 2
+            von, _ = band_bereich()
+            aw.von = von + richtung * schrittweite()
             band_bereich()
             nachrechnen_planen()
             mitte = sum(band_bereich()) / 2
@@ -2124,6 +2177,17 @@ def _aufbauen(
         state.hrv_einstellungen_setzen(gespeichert_)
         nachrechnen_planen()
         nur_kurven()
+
+    def schritt_gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
+        """Schrittweite der Pfeile (Ben, 26.10.2026) — gemerkt wie die Länge."""
+        neu = str(e.control.value or aw.schritt)
+        if neu not in ANALYSE_SCHRITTE:
+            return
+        aw.schritt = neu
+        einst.analyse_schritt = neu
+        gespeichert_ = state.hrv_einstellungen()
+        gespeichert_.analyse_schritt = neu
+        state.hrv_einstellungen_setzen(gespeichert_)
 
     def art_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
         if not e.control.selected:
@@ -2204,30 +2268,46 @@ def _aufbauen(
             else:
                 zeilen.append(hinweis("Noch keine Abschnitte — oben unter „Abschnitte“ anlegen."))
         elif aw.art == AW_BAND:
+            # Länge, Schrittweite der Pfeile (Ben, 26.10.2026) und die Pfeile — am Handy
+            # bricht die Zeile um, statt die Knöpfe abzuschneiden
             zeilen.append(
                 ft.Row(
                     spacing=4,
+                    run_spacing=4,
+                    wrap=True,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
                         ft.Dropdown(
                             label="Länge",
                             value=str(aw.laenge_s),
                             dense=True,
-                            width=120,
+                            width=110,
                             options=[
                                 ft.DropdownOption(key=str(x), text=fenster_text(x))
                                 for x in ANALYSE_LAENGEN
                             ],
                             on_select=laenge_gewaehlt,
                         ),
+                        ft.Dropdown(
+                            label="Schritt",
+                            value=aw.schritt,
+                            dense=True,
+                            width=120,
+                            tooltip="Um wie viel die Pfeile das Fenster rücken",
+                            options=[
+                                ft.DropdownOption(key=k, text=SCHRITT_TEXT[k])
+                                for k in ANALYSE_SCHRITTE
+                            ],
+                            on_select=schritt_gewaehlt,
+                        ),
                         ft.IconButton(
                             ft.Icons.CHEVRON_LEFT,
-                            tooltip="Fenster ein halbes zurück",
+                            tooltip="Fenster zurück",
                             on_click=band_schieben(-1),
                         ),
                         ft.IconButton(
                             ft.Icons.CHEVRON_RIGHT,
-                            tooltip="Fenster ein halbes weiter",
+                            tooltip="Fenster weiter",
                             on_click=band_schieben(1),
                         ),
                     ],
@@ -2236,11 +2316,15 @@ def _aufbauen(
         zeilen.append(ft.Text(analysefenster().titel, size=12, weight=ft.FontWeight.W_600))
         return ft.Column(spacing=6, tight=True, controls=zeilen)
 
+    def kurven_info() -> str:
+        """Hauptkurve und Verlaufskurven hinter einem „i“ — wie live; erst beim Antippen
+        gelesen, denn die Analyse entsteht nach dem Menü."""
+        haupt = _kurven_info(z.nur_puls, verworfen)
+        return f"{haupt}\n\n**Verlaufskurven.** {analyse.info_text()}"
+
     def menue_oben() -> list[ft.PopupMenuItem]:
         """Info und automatische Korrektur im Menü ⋮ — wie live (Ben, 21.10.2026)."""
-        eintraege = [
-            info_eintrag(page, "So liest du die Kurve", _kurven_info(z.nur_puls, verworfen))
-        ]
+        eintraege = [info_eintrag(page, "So liest du die Kurven", lambda: kurven_info())]
         if not z.nur_puls:
             eintraege.append(regler_eintrag(lambda: regeln_oeffnen()))
         return eintraege
@@ -2266,12 +2350,14 @@ def _aufbauen(
         optisch=verity,
         hoehe=130,
         analysefenster=analysefenster,
-        fenster_kopf=fenster_kopf,
+        fenster_kopf=None if z.nur_puls else fenster_kopf,  # ohne Intervalle keine Analyse
         warten=lambda: aw.griff is not None or aw.wartet,
         info_zusatz=lambda bereich: "" if z.nur_puls else _verlauf_info(bereich),
-        # Das Menü steht wie live an der Hauptkurve (Ben, 21.10.2026)
+        # Das Menü steht wie live an der Hauptkurve (Ben, 21.10.2026); Bereich und Chips
+        # über der Hauptkurve, Spektrum und Verlaufskurven unter den Notizen (26.10.2026)
         menue_oben=lambda: menue_oben(),
         menue_im_kopf=False,
+        eingebettet=True,
     )
 
     # -- Korrektur ---------------------------------------------------------------
@@ -2924,6 +3010,56 @@ def _aufbauen(
             )
         return ft.Column(spacing=2, controls=zeilen)
 
+    # -- Klappfeld „Abschnitte“ über der Hauptkurve (Ben, 26.10.2026) -------------------
+    # Chips zur Steuerung (Ganze Messung · je Abschnitt), darunter die Liste mit Werten;
+    # der Kopf trägt „+ Abschnitt“ und das Menü — ein Tipp auf den Titel klappt zu.
+
+    abschnitt_pfeil = ft.Icon(ft.Icons.EXPAND_MORE, size=18, opacity=0.6)
+    abschnitt_koerper = ft.Column(
+        spacing=6,
+        tight=True,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        controls=[chips_box, bindung_box, abschnitte_platz[0]],
+    )
+
+    def abschnitte_klappen() -> None:
+        offen = state.abschnitte_offen
+        abschnitt_pfeil.icon = ft.Icons.EXPAND_MORE if offen else ft.Icons.CHEVRON_RIGHT
+        abschnitt_koerper.visible = offen
+
+    def abschnitte_umklappen() -> None:
+        state.abschnitte_offen = not state.abschnitte_offen
+        abschnitte_klappen()
+        for c in (abschnitt_pfeil, abschnitt_koerper):
+            with contextlib.suppress(Exception):
+                c.update()
+
+    abschnitte_klappen()
+    abschnitt_block = ft.Column(
+        spacing=4,
+        tight=True,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        visible=not z.nur_puls,  # ohne Intervalle gibt es keine Abschnitte
+        controls=[
+            ft.Row(
+                spacing=0,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Container(
+                        expand=True,
+                        on_click=lambda: abschnitte_umklappen(),
+                        padding=ft.Padding.symmetric(vertical=6),
+                        content=ft.Row(spacing=4, controls=[abschnitt_pfeil, abschnitt_titel]),
+                    ),
+                    info_knopf(page, "So arbeitest du mit Abschnitten", ABSCHNITTE_INFO),
+                    ft.TextButton("Abschnitt", icon=ft.Icons.ADD, on_click=abschnitt_neu),
+                    abschnitt_menue(),
+                ],
+            ),
+            abschnitt_koerper,
+        ],
+    )
+
     ebenen_zeichnen()
     zoom = getattr(state, "messung_zoom", None)
     if zoom is not None and zoom[0] == eintrag.id:
@@ -2956,14 +3092,18 @@ def _aufbauen(
                     darstellung_knopf(lambda: darstellung()),
                     analyse.menue,
                 ),
-                ebenen_box,
-                bindung_box,
-                kurvengeste(rr_box),
+                # Von oben nach unten wie live (Ben, 26.10.2026): Breite, Bereich und Chips
+                # der Verlaufskurven, Abschnitte (Klappfeld), Ebenen, Hauptkurve, Ablesen,
+                # Editor, Notizen (Klappfeld), Spektrum bzw. Poincaré und Verlaufskurven
                 ft.Row(spacing=4, controls=[breite_wahl, uhr_knopf]),
-                chips_box,
+                analyse.wahl,
+                abschnitt_block,
+                ebenen_box,
+                kurvengeste(rr_box),
                 ablese_box,
                 editor_box,
                 notiz_platz[0],
+                analyse.control,
             ),
             *(
                 [
@@ -2978,16 +3118,6 @@ def _aufbauen(
                 if bezuege_liste
                 else []
             ),
-            nur_mit_intervallen(
-                kartentitel(
-                    "Abschnitte",
-                    info_knopf(page, "So arbeitest du mit Abschnitten", ABSCHNITTE_INFO),
-                    ft.TextButton("Abschnitt", icon=ft.Icons.ADD, on_click=abschnitt_neu),
-                    abschnitt_menue(),
-                ),
-                abschnitte_platz[0],
-            ),
-            analyse.control,
             nur_mit_intervallen(
                 kartentitel(
                     "Korrektur",
@@ -3100,8 +3230,13 @@ def _zeilen_tabelle(
 
 
 def _zeit_tabelle(
-    roh: dict[str, Any] | None, korr: dict[str, Any] | None, pnn_ms: int
+    roh: dict[str, Any] | None,
+    korr: dict[str, Any] | None,
+    pnn_ms: int,
+    ecke: str = "ganze Messung",
 ) -> ft.Control:
+    """Ø HF, Ø RR, RMSSD, SDNN, pNNx, Schläge — roh und korrigiert; ``ecke`` sagt, wofür
+    (ganze Messung, Abschnitt, Fenster)."""
     zeilen = [
         ("Ø Herzfrequenz", "mean_bpm", "bpm", 0),
         ("Ø RR", "mean_rr", "ms", 0),
@@ -3116,7 +3251,7 @@ def _zeit_tabelle(
             (titel_, [f"{_wert(roh, k, n)} {e}".strip(), f"{_wert(korr, k, n)} {e}".strip()])
             for titel_, k, e, n in zeilen
         ],
-        ecke="ganze Messung",
+        ecke=ecke,
     )
 
 

@@ -162,6 +162,16 @@ async def test_mit_echtem_messlauf(tmp_path) -> None:
     assert not any("Fehler" in z for z in kanal.protokoll)
 
 
+def test_flet_loest_den_tastentyp_auf() -> None:
+    """Flet liest den Typ von ``on_taste`` zur Laufzeit; mit String-Annotationen
+    (``from __future__ import annotations`` in flet_medien) stürzte 0.3.20 beim ersten ▶ ab."""
+    from flet.controls.control_event import get_event_field_type
+    from flet_medien import FletMedien, MedienTasteEvent
+
+    medien = FletMedien(on_taste=lambda e: None)
+    assert get_event_field_type(medien, "on_taste") is MedienTasteEvent
+
+
 def test_zeile3_zeigt_aufnahmedauer() -> None:
     lauf = Lauf()
     lauf.schlaege(20, 500, 120)

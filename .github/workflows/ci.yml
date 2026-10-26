@@ -13,8 +13,9 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13"]
 
-    # Beide Repos nebeneinander wie auf dem Entwicklungsrechner: pyproject.toml
-    # bindet hrv-core als Schwesterordner ../hrv-core ein.
+    # Die Repos nebeneinander wie auf dem Entwicklungsrechner: pyproject.toml
+    # bindet hrv-core (../hrv-core) und hrv-watch (../hrv-watch/flet_medien) als
+    # Schwesterordner ein.
     defaults:
       run:
         working-directory: trainingsapp
@@ -45,6 +46,27 @@ jobs:
           repository: ben85keilert/hrv-core
           ref: ${{ steps.hrv_core.outputs.ref }}
           path: hrv-core
+
+      - name: hrv-watch-Stand aus hrv-watch.ref lesen
+        # Pinnt den Commit des Schwesterrepos hrv-watch (Flet-Erweiterung flet_medien,
+        # Uhr am Handgelenk); angehoben von Hand wie hrv-core.ref.
+        id: hrv_watch
+        working-directory: ${{ github.workspace }}
+        run: |
+          ref="$(tr -d '[:space:]' < trainingsapp/hrv-watch.ref)"
+          if ! printf '%s' "$ref" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "::error file=hrv-watch.ref::hrv-watch.ref muss genau einen vollen Commit-SHA (40 Hex-Zeichen) enthalten, gefunden: '$ref'"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: hrv-watch (Uhranbindung, flet_medien) auschecken
+        # Öffentliches Repo — kein eigenes Token nötig.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ben85keilert/hrv-watch
+          ref: ${{ steps.hrv_watch.outputs.ref }}
+          path: hrv-watch
 
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:

@@ -127,6 +127,23 @@ Musik wird für den Ton leiser und spielt weiter. Die Klänge erzeugt
 `flet build` an verschiedenen Orten suchten. Wie `flet_ble` gibt es den Dienst
 nur in der gebauten App; am Rechner bleibt der Timer still.
 
+
+### Uhr am Handgelenk: Mediensteuerung aus dem Schwesterrepo hrv-watch
+
+Die Galaxy Fit3 nimmt keine eigene App an, zeigt aber Titel, Interpret und Album einer
+`MediaSession` des Handys (Befund hrv-watch/docs/TESTPLAN_fit3.md, 26.10.2026). Also werden
+die drei Zeilen zum Textkanal: `core/uhr_seiten.py` baut aus `hrv_core.live.LiveKennzahlen`
+und dem HF-Verlauf geräteunabhängige Seiten (HF mit Tendenz, RMSSD, Gipfel und Tal des
+Intervalls, RR, DFA α1 aus `LiveFenster.dfa_a1` alle 5 s bei EKG-Gurten), `ui/geraete/flet_medien_kanal.py` schickt jede Sekunde die aktuelle Seite —
+nur bei Änderung, denn jede setzt am Band die Laufschrift zurück — über die Flet-Erweiterung
+`flet_medien` (Python + Dart + Java, `MediaSession` ohne androidx) aus `../hrv-watch`. Tasten
+vom Band: ▶ ◀ blättern, ⏯ setzt eine Marke in die Aufnahme, **nie** startet oder stoppt es sie
+(Ben, 26.10.2026). Schalter: Einstellungen → HRV-Messung → „Uhr am Handgelenk“.
+
+Die trainingsapp kennt damit Kanäle, keine Uhren: Uhren-Apps (später Wear OS) und das
+Gerätewissen liegen in hrv-watch (ENTSCHEIDUNGEN #6 dort). Eingebunden wie hrv-core als
+Schwesterordner (`[tool.uv.sources]`, `[tool.flet.dev_packages]`, `hrv-watch.ref` für CI und APK).
+
 ### Der Sensor-Prüfstand
 
 Ob ein Gerät RR-Intervalle sendet, steht in Bit 4 des Flags-Bytes — und ist bei

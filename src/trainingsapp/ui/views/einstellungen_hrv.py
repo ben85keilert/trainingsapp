@@ -581,6 +581,16 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                     "In der Notiz die Übungen eines Plans als Namen zum Antippen einblenden.",
                 ),
             ),
+            karte(
+                titel("Uhr am Handgelenk"),
+                schalter(
+                    "uhr_medien",
+                    "Werte als Mediensteuerung senden",
+                    "Für Bänder ohne eigene App (Galaxy Fit3): HF, RMSSD und die Kennzahlen "
+                    "des Intervalls stehen in der Mediensteuerung, solange ein Gurt verbunden "
+                    "ist. ▶ blättert, ⏯ setzt eine Marke in die Aufnahme. Es läuft kein Ton.",
+                ),
+            ),
             erweitert_kopf,
             erweitert_teil,
             ft.OutlinedButton(

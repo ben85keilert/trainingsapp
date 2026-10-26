@@ -141,6 +141,9 @@ class HrvEinstellungen:
     analyse_schritt: str = "halb"
     #: Eingeblendete Ebenen über der Kurve (`EBENEN`; Vorgabe alle)
     ebenen: list[str] = field(default_factory=lambda: list(EBENEN))
+    #: Uhr am Handgelenk: Werte als Mediensteuerung senden (hrv-watch `flet_medien`,
+    #: Ben, 26.10.2026) — für Bänder ohne eigene App wie die Galaxy Fit3
+    uhr_medien: bool = False
 
     def bereiche(self, *, optisch: bool) -> list[str]:
         """Welche Analysebereiche die Ansicht anbietet (Zeit immer)."""
@@ -173,6 +176,7 @@ class HrvEinstellungen:
             "analyse_laenge_s": self.analyse_laenge_s,
             "analyse_schritt": self.analyse_schritt,
             "ebenen": list(self.ebenen),
+            "uhr_medien": self.uhr_medien,
         }
 
     @classmethod
@@ -228,6 +232,7 @@ class HrvEinstellungen:
             if (schritt := d.get("analyse_schritt")) in ANALYSE_SCHRITTE
             else vorgabe.analyse_schritt,
             ebenen=[k for k in liste("ebenen") if k in EBENEN],
+            uhr_medien=schalter("uhr_medien"),
         )
 
 

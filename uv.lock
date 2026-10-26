@@ -878,6 +878,17 @@ wheels = [
 ]
 
 [[package]]
+name = "flet-medien"
+version = "0.1.0"
+source = { editable = "../hrv-watch/flet_medien" }
+dependencies = [
+    { name = "flet" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "flet", specifier = ">=1.0.3" }]
+
+[[package]]
 name = "flet-permission-handler"
 version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2451,6 +2462,7 @@ dependencies = [
     { name = "flet-geolocator" },
     { name = "flet-hochladen" },
     { name = "flet-map" },
+    { name = "flet-medien" },
     { name = "flet-permission-handler" },
     { name = "flet-ton" },
     { name = "flet-video" },
@@ -2496,6 +2508,7 @@ requires-dist = [
     { name = "flet-geolocator", specifier = "==1.0.*" },
     { name = "flet-hochladen", editable = "erweiterungen/flet_hochladen" },
     { name = "flet-map", specifier = "==1.0.*" },
+    { name = "flet-medien", editable = "../hrv-watch/flet_medien" },
     { name = "flet-permission-handler", specifier = "==1.0.*" },
     { name = "flet-ton", editable = "erweiterungen/flet_ton" },
     { name = "flet-video", specifier = "==1.0.*" },

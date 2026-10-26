@@ -28,8 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
-    # Beide Repos nebeneinander wie auf dem Entwicklungsrechner: `flet build` nimmt
-    # hrv-core aus ../hrv-core ([tool.flet.dev_packages] in pyproject.toml).
+    # Die Repos nebeneinander wie auf dem Entwicklungsrechner: `flet build` nimmt
+    # hrv-core aus ../hrv-core und flet_medien aus ../hrv-watch ([tool.flet.dev_packages]).
     defaults:
       run:
         working-directory: trainingsapp
@@ -73,6 +73,23 @@ jobs:
           repository: ben85keilert/hrv-core
           ref: ${{ steps.hrv_core.outputs.ref }}
           path: hrv-core
+
+      - name: hrv-watch-Stand aus hrv-watch.ref lesen
+        # Schwesterrepo hrv-watch: Flet-Erweiterung flet_medien (Uhr am Handgelenk),
+        # `flet build` nimmt sie aus ../hrv-watch/flet_medien ([tool.flet.dev_packages]).
+        id: hrv_watch
+        working-directory: ${{ github.workspace }}
+        run: |
+          ref="$(tr -d '[:space:]' < trainingsapp/hrv-watch.ref)"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: hrv-watch (Uhranbindung, flet_medien) auschecken
+        # Öffentliches Repo — kein eigenes Token nötig.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ben85keilert/hrv-watch
+          ref: ${{ steps.hrv_watch.outputs.ref }}
+          path: hrv-watch
 
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:

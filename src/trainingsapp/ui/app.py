@@ -428,6 +428,14 @@ def main(page: ft.Page) -> None:
 
         state.hochladen = FletHochladen(on_fortschritt=fortschritt)
         page.services.append(state.hochladen)
+    # Uhr am Handgelenk über die Mediensteuerung (hrv-watch `flet_medien`, Ben 26.10.2026):
+    # Seiten aus `core.uhr_seiten`, Tasten des Bands blättern und setzen Marken
+    try:
+        from trainingsapp.ui.geraete.flet_medien_kanal import anlegen as uhr_anlegen
+
+        state.uhr = uhr_anlegen(page, state)
+    except ImportError:
+        state.uhr = None
 
     #: Die Bauer der Ansichten, die `stapel` und seine Helfer für eine Route ablegen
     ablage: list[Callable[[], ft.View]] = []
@@ -879,6 +887,8 @@ def main(page: ft.Page) -> None:
     # Was läuft (HRV, Training, Timer), steht jede Sekunde in der Benachrichtigung —
     # nur in der Android-App (Ben, 16.10.2026, `ui.laufend`)
     page.run_task(laufend_takt, state)
+    if state.uhr is not None:
+        page.run_task(state.uhr.takt)
     # … und in der App selbst, oben in der Leiste und im Reiter „Einheit“ — auch was in
     # keiner Einheit steckt (Ben, 22.10.2026)
     page.run_task(einheit_ui.anzeige_takt, state)

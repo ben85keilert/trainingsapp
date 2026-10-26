@@ -39,6 +39,10 @@ dependencies = [
     "flet-ble",
     "flet-ton",
     "flet-hochladen",
+    # Uhr am Handgelenk über die Mediensteuerung (Ben, 26.10.2026): Erweiterung aus dem
+    # Schwesterrepo hrv-watch (../hrv-watch/flet_medien), eingebunden wie hrv-core;
+    # CI und APK-Workflow nehmen den Commit aus `hrv-watch.ref`.
+    "flet-medien",
     "flet-camera==1.0.*",
     # Audioaufnahmen an Einträgen und an der Notiz zum Tag (Ben, 22.10.2026): Aufnehmen
     # über flet-audio-recorder (Flutter-Plugin record, schreibt gleich in eine Datei),
@@ -97,6 +101,7 @@ default-groups = ["dev", "flet-dev"]
 flet-ble = { path = "erweiterungen/flet_ble", editable = true }
 flet-ton = { path = "erweiterungen/flet_ton", editable = true }
 flet-hochladen = { path = "erweiterungen/flet_hochladen", editable = true }
+flet-medien = { path = "../hrv-watch/flet_medien", editable = true }
 # Schwesterrepo (siehe Kommentar bei `dependencies`); editierbar, damit eine Änderung
 # an den Algorithmen hier sofort wirkt und beide Apps dieselben Zahlen liefern.
 hrv-core = { path = "../hrv-core", editable = true }
@@ -138,6 +143,7 @@ path = "src"
 flet-ble = "erweiterungen/flet_ble"
 flet-ton = "erweiterungen/flet_ton"
 flet-hochladen = "erweiterungen/flet_hochladen"
+flet-medien = "../hrv-watch/flet_medien"
 # Auch außerhalb des Projektordners erlaubt: flet löst den Pfad relativ zum Projekt
 # auf und übergibt ihn pip als file://-URL (flet_cli build_base, dev_packages).
 hrv-core = "../hrv-core"

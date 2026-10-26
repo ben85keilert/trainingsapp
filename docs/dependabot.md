@@ -88,6 +88,8 @@ dahinter mit; der Kommentar ist also kein Schmuck, sondern das, woran Dependabot
 (und man selbst) die Version erkennt. Beim Mergen eines solchen PR prüft man wie
 sonst die Release-Notizen — am Pin ändert das nichts.
 
+`hrv-watch.ref` pinnt genauso das Schwesterrepo hrv-watch (Flet-Erweiterung `flet_medien`,
+Uhr am Handgelenk; `git -C ../hrv-watch rev-parse origin/main > hrv-watch.ref`).
 `hrv-core.ref` im Wurzelverzeichnis pinnt auf dieselbe Weise die
 Schwesterbibliothek: eine Zeile, der volle Commit-SHA von hrv-core, den CI und
 APK-Build auschecken (CLAUDE.md, „Die HRV-Bibliothek hrv-core“). **Diese Datei

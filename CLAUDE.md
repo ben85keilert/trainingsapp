@@ -20,7 +20,9 @@ ein (`[tool.uv.sources]`, `[tool.flet.dev_packages]`), die CI checkt beide Repos
 Lokal gilt der Ordner `../hrv-core`, wie er gerade steht; **CI und APK-Build nehmen den Commit aus
 `hrv-core.ref`** (eine Zeile, voller SHA) — bei jeder hrv-core-Änderung, die die App braucht, wird
 die Datei bewusst angehoben (`git -C ../hrv-core rev-parse origin/main > hrv-core.ref`), Dependabot
-fasst sie nicht an.
+fasst sie nicht an. **Ebenso `../hrv-watch`** (Uhr am Handgelenk, Ben 26.10.2026): die Flet-Erweiterung
+`flet_medien` kommt aus `../hrv-watch/flet_medien`, CI und APK-Build nehmen den Commit aus
+`hrv-watch.ref` (`git -C ../hrv-watch rev-parse origin/main > hrv-watch.ref`).
 
 ```bash
 git clone https://github.com/ben85keilert/hrv-core.git ../hrv-core   # einmalig, Schwesterordner (öffentlich, AGPL-3.0)

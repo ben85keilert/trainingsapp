@@ -273,6 +273,9 @@ class AppState:
     #: Bluetooth-Zugang (nur Android, `ui.geraete.FletBleTransport`); hält den
     #: Flet-Service stark referenziert, sonst räumt Flet ihn ab.
     ble_transport: Any = None
+    #: Uhr am Handgelenk über die Mediensteuerung (nur Android,
+    #: `ui.geraete.flet_medien_kanal.MedienKanal`); hält den Flet-Service ebenso.
+    uhr: Any = None
     #: Reiter „Messung": 0 = Live, 1 = GPS, 2 = Aufzeichnungen
     messung_tab: int = 0
     #: Unterreiter der Aufzeichnungen: 0 = Laufen, 1 = HRV; None = noch nie gewählt

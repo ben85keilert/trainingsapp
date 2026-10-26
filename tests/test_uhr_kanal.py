@@ -176,6 +176,9 @@ async def test_mit_echtem_messlauf(tmp_path) -> None:
 def test_flet_loest_den_tastentyp_auf() -> None:
     """Flet liest den Typ von ``on_taste`` zur Laufzeit; mit String-Annotationen
     (``from __future__ import annotations`` in flet_medien) stürzte 0.3.20 beim ersten ▶ ab."""
+    import pytest
+
+    pytest.importorskip("flet")  # die CI testet ohne Flet
     from flet.controls.control_event import get_event_field_type
     from flet_medien import FletMedien, MedienTasteEvent
 

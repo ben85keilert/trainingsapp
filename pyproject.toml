@@ -1,6 +1,6 @@
 [project]
 name = "trainingsapp"
-version = "0.3.17"
+version = "0.3.18"
 description = "Trainingsassistent für Bewegungsübungen mit begleitender HRV-Messung"
 readme = "README.md"
 requires-python = ">=3.12"

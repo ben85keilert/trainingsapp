@@ -53,6 +53,7 @@ from hrv_core.zeitachse import Kontinuitaetsuhr
 
 from ..config import app_version
 from ..core.einheit import SPUR_TIMER
+from ..core.gurt_warnung import Artefaktwache
 from ..core.hrv_export import diagnose_pfad, diagnose_text
 from .base import DeviceStatus, HeartRateSource, Messwert, PpiPaket, Verbindung
 from .profiles import GeraeteProfil, profil_fuer_namen
@@ -210,6 +211,8 @@ class Messlauf:
         self._backup_basis = backup_basis
         self._dateiname_fest: str | None = None  # vorab festgelegter Dateiname (F10)
         self.live = self._neues_live_fenster()
+        #: Gurt-Warnung bei zu vielen Artefakten (`core.gurt_warnung`, 26.10.2026)
+        self.artefaktwache = Artefaktwache()
         # Live-x-Achse gebündelter PPI-Pakete (Verity Sense): Schlagzeiten aus der
         # Intervallsumme statt aus der streuenden Ankunft (`hrv_core.zeitachse`).
         self._ppi_uhr = Kontinuitaetsuhr()
@@ -271,6 +274,12 @@ class Messlauf:
     def verbunden(self) -> bool:
         return self.status.verbindung in (Verbindung.VERBUNDEN, Verbindung.VERBINDE)
 
+    @property
+    def warnung(self) -> str | None:
+        """„Gurt prüfen: 12 % Artefakte“, solange die Live-Messung zu viele markierte
+        Schläge hat — ``None`` sonst (`core.gurt_warnung.Artefaktwache`)."""
+        return self.artefaktwache.text
+
     # -- Verbinden und Lesen ---------------------------------------------------------
 
     async def verbinden(self, device_id: str, name: str | None = None) -> None:
@@ -328,6 +337,7 @@ class Messlauf:
                     t_live - self.start_mono, wert.rr_ms, wert.hf_bpm, fehler_ms=fehler
                 )
                 self._verworfene_zeigen()
+                self.artefaktwache.pruefen(self.live.artefaktanteil(), t_live - self.start_mono)
                 if aufnahme is not None:
                     aufnahme.schlag(wert.rr_ms, wert.hf_bpm, wert.t_capture, wert.tw_src)
                     self._backup_wenn_faellig()

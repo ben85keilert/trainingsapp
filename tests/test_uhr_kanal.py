@@ -1,4 +1,4 @@
-"""Uhr über die Mediensteuerung: Takt, Änderungserkennung, Tasten (hrv-watch, ENTSCHEIDUNGEN #6)."""
+"""Uhr über die Mediensteuerung: Takt, Änderungen, Tasten je Seite, Warnung (hrv-watch #6, #7)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ from types import SimpleNamespace
 
 from hrv_core.live import LiveFenster
 
-from trainingsapp.ui.geraete.flet_medien_kanal import MedienKanal
+from trainingsapp.core import uhr_seiten as us
+from trainingsapp.core.uhr_seiten import SEITEN
+from trainingsapp.ui.geraete.flet_medien_kanal import MedienKanal, training_aus
 
 
 class Attrappe:
@@ -24,6 +26,9 @@ class Attrappe:
 
     async def beenden(self) -> None:
         self.aufrufe.append(("beenden",))
+
+    async def warnen(self, titel: str, text: str) -> None:
+        self.aufrufe.append(("warnen", titel, text))
 
 
 class Lauf:
@@ -56,11 +61,17 @@ class Lauf:
         return {"text": text}
 
 
-def _state(lauf: Lauf | None, an: bool = True) -> SimpleNamespace:
+def _state(lauf: Lauf | None, an: bool = True, seiten: list[str] | None = None) -> SimpleNamespace:
+    einstellung = SimpleNamespace(
+        uhr_medien=an, uhr_seiten=list(SEITEN) if seiten is None else seiten
+    )
     return SimpleNamespace(
         messlauf=lauf,
-        hrv_einstellungen=lambda: SimpleNamespace(uhr_medien=an),
+        hrv_einstellungen=lambda: einstellung,
         notiz_beobachter={},
+        timer=None,
+        einheit=None,
+        ausdauer=None,
     )
 
 
@@ -111,8 +122,8 @@ def test_tasten_blaettern_und_markieren() -> None:
     kanal.taste("zurueck")
     asyncio.run(kanal.schritt())
     assert medien.aufrufe[-1][1] == erste
-    # Blättern über das Ende hinaus wickelt um
-    for _ in range(3):
+    # Blättern über das Ende hinaus wickelt um (fünf Seiten)
+    for _ in range(5):
         kanal.taste("weiter")
     asyncio.run(kanal.schritt())
     assert medien.aufrufe[-1][1] == erste
@@ -181,6 +192,111 @@ def test_zeile3_zeigt_aufnahmedauer() -> None:
     assert medien.aufrufe[-1][3] == "Aufnahme 1 min"
 
 
+def test_taste_je_seite_neu_und_hrr() -> None:
+    lauf = Lauf()
+    lauf.schlaege(60, 500, 120)  # 30 s auf 120
+    lauf.schlaege(20, 800, 75)  # dann 16 s auf 75: Gipfel 120, Tal 75
+    lauf.aufnahme = object()
+    medien = Attrappe()
+    kanal = MedienKanal(_state(lauf), medien)
+    kanal.taste("weiter")
+    kanal.taste("weiter")  # Seite 3: Intervall
+    asyncio.run(kanal.schritt())
+    assert medien.aufrufe[-1][1:4] == ("Gipfel 120", "Tal 75, vor 0:15", "⏯ neu ab jetzt")
+    kanal.taste("pause")  # ⏯ auf der Intervallseite: neu ab jetzt, keine Marke
+    assert kanal.seit_s == lauf.jetzt_s() and lauf.notizen == []
+    lauf.schlaege(2, 800, 75)
+    asyncio.run(kanal.schritt())
+    assert medien.aufrufe[-1][1] == "Gipfel 75" and medien.aufrufe[-1][2].startswith("Tal --")
+    kanal.taste("weiter")  # Seite 4: HRR
+    asyncio.run(kanal.schritt())
+    assert medien.aufrufe[-1][1:] == ("HRR30 --", "HRR60 --", "⏯ Ende Belastung")
+    kanal.taste("play")  # ⏯: Ende der Belastung, Notiz „HRR“
+    assert kanal.hrr_t0_s == lauf.jetzt_s() and lauf.notizen == ["HRR"]
+    lauf.schlaege(5, 800, 75)
+    asyncio.run(kanal.schritt())
+    assert (
+        medien.aufrufe[-1][1].startswith("HRR30 in ")
+        and medien.aufrufe[-1][3] == "ab HF 75 · ⏯ neu"
+    )
+    kanal.taste("weiter")  # Seite 5: Training — ⏯ ist wieder eine Marke
+    asyncio.run(kanal.schritt())
+    assert medien.aufrufe[-1][1:3] == ("Timer aus", "kein GPS")
+    kanal.taste("pause")
+    assert lauf.notizen == ["HRR", ""]
+
+
+def test_seitenauswahl_aus_der_einstellung() -> None:
+    lauf = Lauf()
+    lauf.schlaege(20, 500, 120)
+    medien = Attrappe()
+    kanal = MedienKanal(_state(lauf, seiten=["hrr"]), medien)
+    asyncio.run(kanal.schritt())
+    kanal.taste("weiter")
+    asyncio.run(kanal.schritt())
+    assert medien.aufrufe[-1][1] == "HRR30 --"
+    kanal.taste("weiter")  # nur zwei Seiten: zurück auf HF
+    asyncio.run(kanal.schritt())
+    assert medien.aufrufe[-1][1].startswith("HF 120")
+
+
+def test_warnung_geht_als_benachrichtigung_und_in_zeile3() -> None:
+    class Wache:
+        alarme = 0
+        text: str | None = None
+
+    lauf = Lauf()
+    lauf.schlaege(20, 500, 120)
+    lauf.artefaktwache = Wache()
+    lauf.warnung = None
+    medien = Attrappe()
+    kanal = MedienKanal(_state(lauf), medien)
+    asyncio.run(kanal.schritt())
+    assert not any(a[0] == "warnen" for a in medien.aufrufe)
+    lauf.artefaktwache.alarme = 1
+    lauf.artefaktwache.text = lauf.warnung = "Gurt prüfen: 23 % Artefakte"
+    asyncio.run(kanal.schritt())
+    assert ("warnen", "Gurt prüfen", "23 % Artefakte") in medien.aufrufe
+    assert medien.aufrufe[-1][3] == "Gurt prüfen: 23 % A…"
+    asyncio.run(kanal.schritt())  # derselbe Alarm nur einmal
+    assert sum(a[0] == "warnen" for a in medien.aufrufe) == 1
+    # Einstellung aus: Alarm wird gezählt, aber nicht gesendet
+    kanal = MedienKanal(_state(lauf, an=False), medien)
+    lauf.artefaktwache.alarme = 2
+    asyncio.run(kanal.schritt())
+    assert sum(a[0] == "warnen" for a in medien.aufrufe) == 1
+
+
+def test_training_aus_timer_und_strecke() -> None:
+    from trainingsapp.core.timer import Abschnitt, TimerLauf, TimerProfil
+
+    t = [0.0]
+    timer = TimerLauf(
+        TimerProfil(abschnitte=[Abschnitt("Belastung", 60), Abschnitt("Pause", 30)], runden=2),
+        uhr=lambda: t[0],
+    )
+    state = SimpleNamespace(timer=timer, einheit=None, ausdauer=None)
+    assert training_aus(state) == us.Training()
+    timer.start()
+    t[0] = 75.0  # zweiter Abschnitt der ersten Runde, 15 s gelaufen
+    tr = training_aus(state)
+    assert tr.abschnitt == "Pause 1/2" and tr.rest_s is not None and 14 < tr.rest_s <= 15
+
+    class Rechner:
+        distanz_m = 2340.0
+
+        def aktuelles_tempo_ms(self) -> float | None:
+            return 3.2
+
+    state.ausdauer = SimpleNamespace(rechner=Rechner(), fertig=False)
+    tr = training_aus(state)
+    assert (
+        tr.distanz_m == 2340.0 and tr.tempo_s_km is not None and abs(tr.tempo_s_km - 312.5) < 1e-9
+    )
+    Rechner.aktuelles_tempo_ms = lambda self: 0.1  # Stand: kein Tempo
+    assert training_aus(state).tempo_s_km is None
+
+
 def test_dfa_alle_fuenf_sekunden_nur_bei_ekg() -> None:
     import numpy as np
 
@@ -192,21 +308,19 @@ def test_dfa_alle_fuenf_sekunden_nur_bei_ekg() -> None:
         lauf.schlaege(1, int(rr), 75)
     medien = Attrappe()
     kanal = MedienKanal(_state(lauf), medien)
-    kanal.taste("weiter")
-    kanal.taste("weiter")  # Seite 3: RR | DFA α1
     asyncio.run(kanal.schritt())
-    assert medien.aufrufe[-1][2].startswith("DFA α1 ")
+    assert "· α1 0," in medien.aufrufe[-1][2]
     # Innerhalb von 5 s keine Neuberechnung: der Wert bleibt, auch wenn Schläge dazukommen
     erster = kanal._dfa
     lauf.schlaege(2, 800, 75)
     asyncio.run(kanal.schritt())
     assert kanal._dfa == erster
-    # Optischer Sensor: kein α1, Seite 3 zeigt RMSSD
+    # Optischer Sensor: kein α1, kein Platz dafür
     lauf.profil = profil_fuer_namen("Polar Sense 1A2B3C")
     assert lauf.profil is not None and lauf.profil is not POLAR_H10
-    kanal._dfa_zeit = None
+    kanal._rechen_zeit = None
     asyncio.run(kanal.schritt())
-    assert medien.aufrufe[-1][2].startswith("RMSSD ")
+    assert medien.aufrufe[-1][2] == "RR 800 ms"
 
 
 def test_zustand_und_protokoll_erklaeren_warum_nichts_kommt() -> None:

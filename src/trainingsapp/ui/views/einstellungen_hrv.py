@@ -38,6 +38,9 @@ from trainingsapp.core.hrv_einstellungen import (
     UEBERSICHT,
     HrvEinstellungen,
 )
+from trainingsapp.core.uhr_seiten import SEITE_HF as UHR_SEITE_HF
+from trainingsapp.core.uhr_seiten import SEITEN as UHR_SEITEN
+from trainingsapp.core.uhr_seiten import SEITEN_NAMEN as UHR_SEITEN_NAMEN
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.kacheln import GRUPPEN, KACHELN
@@ -496,6 +499,26 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
 
     uhr_status_neu()
 
+    # Welche Seiten die Uhr bekommt (`core.uhr_seiten.SEITEN`; HF immer)
+    def uhr_seite_setzen(key: str, an: bool) -> None:
+        gewaehlt = set(e.uhr_seiten) | {UHR_SEITE_HF}
+        gewaehlt = gewaehlt | {key} if an else gewaehlt - {key}
+        setzen(uhr_seiten=[k for k in UHR_SEITEN if k in gewaehlt])
+
+    uhr_seiten_box = ft.Column(
+        spacing=0,
+        tight=True,
+        controls=[
+            ft.Checkbox(
+                label=UHR_SEITEN_NAMEN[k],
+                value=k == UHR_SEITE_HF or k in e.uhr_seiten,
+                disabled=k == UHR_SEITE_HF,
+                on_change=lambda ev, k=k: uhr_seite_setzen(k, bool(ev.control.value)),
+            )
+            for k in UHR_SEITEN
+        ],
+    )
+
     standard = HrvEinstellungen()
     inhalt = ft.Column(
         spacing=14,
@@ -609,10 +632,15 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                 schalter(
                     "uhr_medien",
                     "Werte als Mediensteuerung senden",
-                    "Für Bänder ohne eigene App (Galaxy Fit3): HF, RMSSD und die Kennzahlen "
-                    "des Intervalls stehen in der Mediensteuerung, solange ein Gurt verbunden "
-                    "ist. ▶ blättert, ⏯ setzt eine Marke in die Aufnahme. Es läuft kein Ton.",
+                    "Für Bänder ohne eigene App (Galaxy Fit3): die Seiten unten stehen in der "
+                    "Mediensteuerung, solange ein Gurt verbunden ist. ▶ blättert; ⏯ setzt eine "
+                    "Marke, auf der Intervallseite beginnen Gipfel und Tal neu, auf der HRR-Seite "
+                    "endet die Belastung. Die Gurt-Warnung kommt als Benachrichtigung — dafür "
+                    "in Galaxy Wearable die Benachrichtigungen dieser App einschalten. "
+                    "Es läuft kein Ton.",
                 ),
+                hinweis("Seiten am Band (HF immer):"),
+                uhr_seiten_box,
                 uhr_status,
                 ft.Row(
                     spacing=8,

@@ -132,13 +132,24 @@ nur in der gebauten App; am Rechner bleibt der Timer still.
 
 Die Galaxy Fit3 nimmt keine eigene App an, zeigt aber Titel, Interpret und Album einer
 `MediaSession` des Handys (Befund hrv-watch/docs/TESTPLAN_fit3.md, 26.10.2026). Also werden
-die drei Zeilen zum Textkanal: `core/uhr_seiten.py` baut aus `hrv_core.live.LiveKennzahlen`
-und dem HF-Verlauf geräteunabhängige Seiten (HF mit Tendenz, RMSSD, Gipfel und Tal des
-Intervalls, RR, DFA α1 aus `LiveFenster.dfa_a1` alle 5 s bei EKG-Gurten), `ui/geraete/flet_medien_kanal.py` schickt jede Sekunde die aktuelle Seite —
-nur bei Änderung, denn jede setzt am Band die Laufschrift zurück — über die Flet-Erweiterung
-`flet_medien` (Python + Dart + Java, `MediaSession` ohne androidx) aus `../hrv-watch`. Tasten
-vom Band: ▶ ◀ blättern, ⏯ setzt eine Marke in die Aufnahme, **nie** startet oder stoppt es sie
-(Ben, 26.10.2026). Schalter: Einstellungen → HRV-Messung → „Uhr am Handgelenk“.
+die drei Zeilen zum Textkanal: `core/uhr_seiten.py` baut aus `hrv_core.live.LiveKennzahlen`,
+dem HF-Verlauf, Timer und Strecke fünf geräteunabhängige Seiten (hrv-watch ENTSCHEIDUNGEN #7):
+HF mit RR und DFA α1 · Atemfrequenz mit RMSSD (Atemübungen) · Gipfel und Tal der HF ·
+Erholung HRR30/HRR60 · Timer-Abschnitt mit Rest, Tempo und Strecke. Welche, wählt
+`HrvEinstellungen.uhr_seiten` (HF immer). `ui/geraete/flet_medien_kanal.py` schickt jede
+Sekunde die aktuelle Seite — nur bei Änderung, denn jede setzt am Band die Laufschrift
+zurück — über die Flet-Erweiterung `flet_medien` (Python + Dart + Java, `MediaSession` ohne
+androidx) aus `../hrv-watch`. DFA α1 (`LiveFenster.dfa_a1`, EKG-Gurte) und Atemfrequenz
+(`LiveFenster.atemfrequenz`) alle 5 s. Tasten vom Band: ▶ ◀ blättern; ⏯ tut, was die Seite
+sagt — Marke in die Aufnahme, auf der Intervallseite Gipfel und Tal neu, auf der HRR-Seite
+Ende der Belastung (Notiz „HRR“); **nie** startet oder stoppt es die Aufnahme (Ben, 26.10.2026).
+Schalter und Seitenauswahl: Einstellungen → HRV-Messung → „Uhr am Handgelenk“.
+
+**Gurt-Warnung:** `LiveFenster.artefaktanteil` (60 s) speist `core/gurt_warnung.Artefaktwache`
+im Messlauf (ab 10 % markierte Schläge, Entwarnung unter 5 %, neuer Alarm höchstens alle
+2 min). Die Statuskarte der Messung zeigt sie rot (`Messlauf.warnung`), am Band verdrängt sie
+Zeile 3, und jeder Alarm geht als Benachrichtigung mit Vibration ans Band
+(`flet_medien.warnen`; Galaxy Wearable muss Benachrichtigungen der App durchlassen).
 
 Die trainingsapp kennt damit Kanäle, keine Uhren: Uhren-Apps (später Wear OS) und das
 Gerätewissen liegen in hrv-watch (ENTSCHEIDUNGEN #6 dort). Eingebunden wie hrv-core als

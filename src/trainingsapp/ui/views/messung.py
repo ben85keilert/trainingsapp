@@ -1404,6 +1404,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             s.batterie_prozent,
             s.hautkontakt,
             s.meldung,
+            lauf.warnung,
             lauf.geraet_name,
             lauf.aufnahme is not None,
             lauf.titel_notiz(),
@@ -1525,6 +1526,13 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 ],
             ),
             ft.Text(s.meldung, size=12, opacity=0.7, visible=bool(s.meldung)),
+            ft.Text(
+                lauf.warnung or "",
+                size=12,
+                color=FARBEN["rot"],
+                weight=ft.FontWeight.W_600,
+                visible=bool(lauf.warnung),
+            ),
             aktion,
             abstand=8,
         )

@@ -17,7 +17,8 @@ EKG-Gurten — bei optischen Pulsintervallen ist α1 unter Belastung nicht valid
 (wie `core.hrv_training`). Nur in der gebauten Android-App (`anlegen`); die Logik
 (`MedienKanal`) ist mit einer Attrappe des Dienstes ohne Bildschirm testbar.
 
-**Diagnose** (26.10.2026, erster Test ohne Werte am Band): `zustand` sagt in einem
+**Diagnose** (26.10.2026, erster Test ohne Werte am Band — Ursache: `jetzt_s` als
+Attribut statt Methode gelesen, die Attrappe im Test hatte das falsch): `zustand` sagt in einem
 Satz, was der Kanal gerade tut oder warum nicht; `protokoll` hält die letzten
 Schritte und Fehler; `test` schickt eine feste Seite auch ohne Gurt, damit sich der
 Kanal unabhängig von der Messung prüfen lässt. Beides zeigt die Einstellungsseite.
@@ -117,13 +118,14 @@ class MedienKanal:
             return None
         lauf = self.state.messlauf
         aufnahme_s = lauf.aufnahme_dauer_s() if lauf.aufnahme is not None else None
-        if self._dfa_zeit is None or lauf.jetzt_s - self._dfa_zeit >= DFA_TAKT_S:
+        jetzt_s = lauf.jetzt_s()  # Methode am Messlauf — nicht Attribut (Fehler in 0.3.18)
+        if self._dfa_zeit is None or jetzt_s - self._dfa_zeit >= DFA_TAKT_S:
             self._dfa = self._dfa_live(lauf)
-            self._dfa_zeit = lauf.jetzt_s
+            self._dfa_zeit = jetzt_s
         return paket(
             lauf.live.kennzahlen(),
             lauf.live.hf_reihe(),
-            lauf.jetzt_s,
+            jetzt_s,
             aufnahme_s=aufnahme_s,
             dfa_a1=self._dfa,
         )

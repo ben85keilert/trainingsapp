@@ -27,19 +27,24 @@ class Attrappe:
 
 
 class Lauf:
-    """Ein Messlauf, so weit der Kanal ihn braucht."""
+    """Ein Messlauf, so weit der Kanal ihn braucht — mit derselben Schnittstelle wie
+    `devices.messlauf.Messlauf` (`jetzt_s()` ist eine Methode; 0.3.18 scheiterte daran).
+    `test_mit_echtem_messlauf` prüft das gegen das Original."""
 
     def __init__(self) -> None:
         self.live = LiveFenster()
         self.verbunden = True
         self.aufnahme: object | None = None
-        self.jetzt_s = 0.0
+        self._t_s = 0.0
         self.notizen: list[str] = []
 
     def schlaege(self, n: int, rr: int, hf: int) -> None:
         for _ in range(n):
-            self.jetzt_s += rr / 1000
-            self.live.hinzufuegen(self.jetzt_s, rr, hf)
+            self._t_s += rr / 1000
+            self.live.hinzufuegen(self._t_s, rr, hf)
+
+    def jetzt_s(self) -> float:
+        return self._t_s
 
     def aufnahme_dauer_s(self) -> float:
         return 90.0
@@ -122,6 +127,39 @@ def test_tasten_blaettern_und_markieren() -> None:
     kanal.taste("stop")
     assert lauf.notizen == ["", ""] and gerufen == ["live", "live"]
     assert lauf.aufnahme is not None  # Stop lässt die Aufnahme in Ruhe
+
+
+async def test_mit_echtem_messlauf(tmp_path) -> None:
+    """Der Kanal gegen `Messlauf` + Simulator statt der Attrappe: Schnittstelle stimmt,
+    jede Sekunde eine Seite, nach dem Trennen `beenden`."""
+    from trainingsapp.devices.messlauf import Messlauf
+    from trainingsapp.devices.simulated import SIM_SYNTH, SimulatedSource
+
+    lauf = Messlauf(SimulatedSource(tempo=60.0, seed=7), backup_basis=tmp_path)
+    medien = Attrappe()
+    kanal = MedienKanal(_state(lauf), medien)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    try:
+        while lauf.jetzt_s() < 30 or len(lauf.live.hf_reihe()) < 10:
+            await asyncio.sleep(0.01)
+        await kanal.schritt()
+        assert medien.aufrufe and medien.aufrufe[-1][0] == "starten", kanal.zustand
+        assert kanal.zustand.startswith("sendet Seite 1: HF ")
+        for seite in (2, 3):
+            kanal.taste("weiter")
+            await kanal.schritt()
+            assert kanal.zustand.startswith(f"sendet Seite {seite}: ")
+        lauf.aufnahme_starten()
+        await kanal.schritt()
+        assert kanal.marke() is True
+    finally:
+        lauf.aufnahme_stoppen(tmp_path)
+        await lauf.trennen()
+        await asyncio.wait_for(task, 5)
+    await kanal.schritt()
+    assert medien.aufrufe[-1] == ("beenden",) and kanal.zustand == "Gurt nicht verbunden"
+    assert not any("Fehler" in z for z in kanal.protokoll)
 
 
 def test_zeile3_zeigt_aufnahmedauer() -> None:

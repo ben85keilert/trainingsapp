@@ -132,6 +132,44 @@ def naechster_stapel(stapel: Sequence[str], route: str, *, ersetzen: bool = Fals
     return [*stapel, route][-MAX_STAPEL:]
 
 
+def uebungsseite(route: str) -> bool:
+    """Eine Seite, auf der geübt wird — sie behält die Leiste unten (Heute · Übungen ·
+    Messung · Verlauf), damit man zwischen Übung und Messung hin- und herwechseln kann
+    (Ben, 27.10.2026): der Plan bzw. die Einzelübung, ihr Timer, der Plan-Ablauf und der
+    Timer einer Übung. Formulare darunter (bearbeiten, einstellen, Eintrag, Leistungen)
+    nicht — dort gilt „Zurück speichert“, die Leiste liefe daran vorbei.
+
+    >>> uebungsseite("/plan/p1"), uebungsseite("/training/u1"), uebungsseite("/plaene/p1")
+    (True, True, False)
+    >>> uebungsseite("/plan/p1/timer"), uebungsseite("/plan/p1/timer/ablauf")
+    (True, True)
+    >>> uebungsseite("/plan/p1/timer/uebung/u1/i1"), uebungsseite("/training/u1/timer/uebung/u1")
+    (True, True)
+    >>> uebungsseite("/plan/p1/timer/uebung/u1/i1/bearbeiten")
+    False
+    >>> uebungsseite("/plan/p1/timer/bearbeiten"), uebungsseite("/plan/p1/timer/signale")
+    (False, False)
+    >>> uebungsseite("/plan/p1/bearbeiten"), uebungsseite("/plan/p1/eintrag/e1"), uebungsseite("/")
+    (False, False, False)
+    >>> uebungsseite("/plan/p1/info/i1"), uebungsseite("/training/u1/info")
+    (False, False)
+    >>> uebungsseite("/uebung/u1"), uebungsseite("/timer")
+    (False, False)
+    """
+    t = teile(route)
+    if t[:1] not in (["plan"], ["training"]) or len(t) < 2:
+        return False
+    rest = t[2:]
+    if not rest:
+        return True
+    if rest[:1] != ["timer"]:
+        return False
+    uhr = rest[1:]
+    if uhr in ([], ["ablauf"]):
+        return True
+    return uhr[:1] == ["uebung"] and 2 <= len(uhr) <= 3
+
+
 __all__ = [
     "MAX_STAPEL",
     "geschwister",
@@ -139,4 +177,5 @@ __all__ = [
     "naechster_stapel",
     "normal",
     "teile",
+    "uebungsseite",
 ]

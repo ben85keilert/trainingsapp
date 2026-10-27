@@ -16,6 +16,7 @@ import flet as ft
 from trainingsapp.core.models import Plan
 from trainingsapp.core.plaene import erledigte, tage_text
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.katalog import katalog, trainieren_knopf
 from trainingsapp.ui.views.kurse import kurse_liste
@@ -126,11 +127,12 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
             opacity=0.6,
         ),
     )
-    return ft.ListView(
+    liste = ft.ListView(
         expand=True,
         padding=ft.Padding.only(bottom=88),
         controls=[hinweis, *[zeile(p) for p in plaene]],
     )
+    return scroll_merken(page, state, "uebungen_plaene", liste)
 
 
 def uebungen(page: ft.Page, state: AppState) -> ft.Control:

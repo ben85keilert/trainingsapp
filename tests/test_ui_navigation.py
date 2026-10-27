@@ -281,3 +281,118 @@ def test_zurueck_auf_heute_beendet_das_schreiben(umgebung) -> None:
     state.vor_dem_verlassen["test"] = lambda: gespeichert.append("ja")
     seite.gehe("/tag/2026-10-17")
     assert gespeichert == ["ja"] and state.vor_dem_verlassen == {}
+
+
+def test_uebungsseite_behaelt_die_leiste_unten(umgebung) -> None:
+    """Ben, 27.10.2026: zwischen Übung und Messung hin und her — die Leiste unten bleibt
+    auf Plan, Einzelübung, Timer und Ablauf; ein Tipp führt in diesen Reiter der
+    Hauptansicht, die Scrollposition der Übungsseite bleibt für die Rückkehr."""
+    from types import SimpleNamespace
+
+    seite, state = umgebung()
+    plan = _plan(state)
+    seite.gehe(f"/plan/{plan.id}")
+    leiste = seite.views[-1].navigation_bar
+    assert leiste is not None
+    assert leiste.destinations[0].label == "Heute"
+    assert leiste.selected_index == 0  # darunter liegt „Heute“
+    state.scroll_offsets[f"/plan/{plan.id}"] = 640.0
+    messung = [d.label for d in leiste.destinations].index("Messung")
+    leiste.selected_index = messung  # der Client setzt den Index, dann kommt das Ereignis
+    asyncio.run(leiste.on_change(SimpleNamespace(control=leiste)))
+    assert seite.routen() == ["/"]
+    assert state.reiter == "messung"
+    assert seite.views[0].navigation_bar.selected_index == messung
+    assert state.scroll_offsets[f"/plan/{plan.id}"] == 640.0  # kein Zurück — bleibt
+    # Zurück zur Übung: die Seite steht wieder an ihrer Stelle, mit Leiste
+    seite.gehe(f"/plan/{plan.id}")
+    assert seite.views[-1].navigation_bar is not None
+    for route in (f"/plan/{plan.id}/timer", f"/plan/{plan.id}/timer/ablauf"):
+        seite.gehe(route)
+        assert seite.views[-1].navigation_bar is not None, route
+    # Formulare darunter nicht — dort gilt „Zurück speichert“
+    seite.gehe(f"/plan/{plan.id}/bearbeiten")
+    assert seite.views[-1].navigation_bar is None
+    seite.gehe("/")
+    seite.gehe(f"/uebung/{seed_id('kniebeuge')}")
+    assert seite.views[-1].navigation_bar is None
+
+
+def test_reiter_merken_ihre_scrollposition(umgebung) -> None:
+    """Ben, 27.10.2026: „Schaue ich mir die Kurve an, gehe weg, komme wieder, möchte ich
+    nicht immer wieder runter scrollen müssen“ — jeder Reiter unten (und die Unterreiter
+    von Messung und Übungen) hängt an `scroll_merken`."""
+    from types import SimpleNamespace
+
+    seite, state = umgebung()
+    erwartet = {
+        ("messung", 0): "messung_live",
+        ("messung", 1): "messung_gps",
+        ("uebungen", 0): "uebungen_katalog",
+        ("verlauf", 0): "verlauf_tage",
+        ("heute", 0): "heute",
+    }
+    for (reiter, unterreiter), schluessel in erwartet.items():
+        state.reiter = reiter
+        state.messung_tab = unterreiter
+        state.aufzeichnungen_tab = 0
+        seite.gehe("/")
+        flaechen = [x for x in _alle(seite.views[0]) if getattr(x, "on_scroll", None)]
+        assert flaechen, (reiter, unterreiter)
+        flaechen[0].on_scroll(SimpleNamespace(pixels=333.0))
+        assert state.scroll_offsets[schluessel] == 333.0, (reiter, unterreiter)
+
+
+def test_heute_haelt_die_uebungsseite_bis_zurueck(umgebung) -> None:
+    """Ben, 27.10.2026: „Man startet eine Übung, die zieht dann einfach zu Heute um als
+    oberste View … bis man zurück geht.“ Über die Leiste verlassen → „Heute“ (Leiste oder
+    Zurück auf einem anderen Reiter) öffnet die Seite wieder; Zurück auf ihr gibt sie frei."""
+    from types import SimpleNamespace
+
+    seite, state = umgebung()
+    plan = _plan(state)
+    route = f"/plan/{plan.id}"
+    seite.gehe(route)
+    leiste = seite.views[-1].navigation_bar
+    labels = [d.label for d in leiste.destinations]
+    leiste.selected_index = labels.index("Messung")
+    asyncio.run(leiste.on_change(SimpleNamespace(control=leiste)))
+    assert seite.routen() == ["/"] and state.heute_haelt == route
+    # „Heute“ in der Hauptansicht: die gehaltene Seite, mit „Heute“ markiert
+    haupt = seite.views[0].navigation_bar
+    haupt.selected_index = labels.index("Heute")
+    asyncio.run(haupt.on_change(SimpleNamespace(control=haupt)))
+    assert seite.routen() == ["/", route]
+    assert seite.views[-1].navigation_bar.selected_index == labels.index("Heute")
+    # „Heute“ auf der gehaltenen Seite: bleiben
+    leiste = seite.views[-1].navigation_bar
+    asyncio.run(leiste.on_change(SimpleNamespace(control=leiste)))
+    assert seite.routen() == ["/", route]
+    # Zurück auf einem anderen Reiter (Startseite) führt auch zur gehaltenen Seite
+    seite.gehe("/")
+    state.reiter = "verlauf"
+    haupt = seite.views[0]
+
+    async def confirm_pop(_soll: bool) -> None:
+        pass
+
+    haupt.confirm_pop = confirm_pop
+    asyncio.run(haupt.on_confirm_pop(None))
+    assert seite.routen() == ["/", route] and state.reiter == "heute"
+    # Zurück auf der Seite gibt sie frei — „Heute“ ist wieder der Tag
+    seite.zurueck()
+    assert seite.routen() == ["/"] and state.heute_haelt is None
+    haupt = seite.views[0].navigation_bar
+    haupt.selected_index = labels.index("Heute")
+    asyncio.run(haupt.on_change(SimpleNamespace(control=haupt)))
+    assert seite.routen() == ["/"]
+    # Gehaltene Seite verschwindet (Plan gelöscht): „Heute“ ist der Tag, nichts hängt
+    seite.gehe(route)
+    leiste = seite.views[-1].navigation_bar
+    leiste.selected_index = labels.index("Messung")
+    asyncio.run(leiste.on_change(SimpleNamespace(control=leiste)))
+    state.plaene.loeschen(plan.id)
+    haupt = seite.views[0].navigation_bar
+    haupt.selected_index = labels.index("Heute")
+    asyncio.run(haupt.on_change(SimpleNamespace(control=haupt)))
+    assert seite.routen() == ["/"] and state.heute_haelt is None

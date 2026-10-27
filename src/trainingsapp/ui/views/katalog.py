@@ -16,6 +16,7 @@ import flet as ft
 
 from trainingsapp.core.models import Exercise, passt_zum_filter
 from trainingsapp.ui.components.icons import symbol
+from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.tagwahl import TagWahl
 from trainingsapp.ui.state import AppState
 
@@ -57,7 +58,9 @@ def trainieren_knopf(on_click: Callable[[], object], tooltip: str) -> ft.Control
 
 
 def katalog(page: ft.Page, state: AppState) -> ft.Control:
+    # Die Position bleibt über Reiterwechsel hinweg (Ben, 27.10.2026, `components/scroll.py`)
     liste = ft.ListView(expand=True, spacing=0, padding=ft.Padding.only(bottom=88))
+    scroll_merken(page, state, "uebungen_katalog", liste)
 
     # -- Handler ---------------------------------------------------------------
     # Die Liste wird in einer Schleife gebaut; jeder Eintrag braucht einen

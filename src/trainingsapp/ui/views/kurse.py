@@ -53,6 +53,7 @@ from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
+from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.katalog import trainieren_knopf
 
@@ -134,11 +135,12 @@ def kurse_liste(page: ft.Page, state: AppState) -> ft.Control:
             opacity=0.6,
         ),
     )
-    return ft.ListView(
+    liste = ft.ListView(
         expand=True,
         padding=ft.Padding.only(bottom=88),
         controls=[erklaerung, *[zeile(k) for k in kurse]],
     )
+    return scroll_merken(page, state, "uebungen_kurse", liste)
 
 
 # ---------------------------------------------------------------------------

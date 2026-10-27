@@ -110,6 +110,7 @@ from trainingsapp.ui.components.notizen import (
     uebungs_katalog,
     uebungsquellen,
 )
+from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.strecken_export import strecken_export_fragen
 from trainingsapp.ui.components.titel import (
     geuebte_plaene,
@@ -1791,7 +1792,10 @@ def _strecken_liste(page: ft.Page, state: AppState, trainings: list[ft.Control])
             ],
         ),
     )
-    return ft.ListView(expand=True, padding=ft.Padding.only(bottom=24), controls=[kopf, *trainings])
+    liste = ft.ListView(
+        expand=True, padding=ft.Padding.only(bottom=24), controls=[kopf, *trainings]
+    )
+    return scroll_merken(page, state, "messung_strecken", liste)
 
 
 def _hrv_liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
@@ -1859,7 +1863,8 @@ def _hrv_liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Contr
                 on_click=oeffner(a.id),
             )
         )
-    return ft.ListView(expand=True, padding=ft.Padding.only(bottom=24), controls=zeilen)
+    liste = ft.ListView(expand=True, padding=ft.Padding.only(bottom=24), controls=zeilen)
+    return scroll_merken(page, state, "messung_hrv", liste)
 
 
 def _aufzeichnungen(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Control:
@@ -1918,17 +1923,23 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
         state.messung_tab = e.control.selected_index or 0
         state.neu_zeichnen()
 
-    def liste(*teile: ft.Control) -> ft.Control:
-        return ft.ListView(
+    def liste(schluessel: str, *teile: ft.Control) -> ft.Control:
+        # Die Position bleibt über Reiterwechsel und Übungsseiten hinweg (Ben, 27.10.2026:
+        # „Schaue ich mir die Kurve an, gehe weg, komme wieder …“) — `components/scroll.py`
+        flaeche = ft.ListView(
             expand=True,
             padding=ft.Padding.only(left=12, right=12, top=12, bottom=24),
             spacing=12,
             controls=list(teile),
         )
+        return scroll_merken(page, state, schluessel, flaeche)
 
     inhalt: ft.Control
     if state.messung_tab == 0:
-        inhalt = liste(_live_teil(page, state, lauf) if verbunden else _verbinden_teil(page, state))
+        inhalt = liste(
+            "messung_live",
+            _live_teil(page, state, lauf) if verbunden else _verbinden_teil(page, state),
+        )
     else:
         if lauf is not None:
             # GPS und Listen brauchen keine Live-Werte; nur ein Abriss baut neu.
@@ -1936,7 +1947,7 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
         if state.messung_tab == 1:
             from trainingsapp.ui.views.ausdauer import ausdauer_inhalt
 
-            inhalt = liste(ausdauer_inhalt(page, state, eingebettet=True))
+            inhalt = liste("messung_gps", ausdauer_inhalt(page, state, eingebettet=True))
         else:
             inhalt = _aufzeichnungen(page, state, eintraege)
     return ft.Tabs(

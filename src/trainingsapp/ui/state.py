@@ -400,6 +400,11 @@ class AppState:
     #: (Einheit, läuft?) bei der letzten Wahl (`ui.einheit.heute_reiter`)
     heute_tab: int = 0
     heute_tab_stand: tuple[str, bool] | None = None
+    #: Die Übungsseite, die „Heute“ hält (Ben, 27.10.2026: „Man startet eine Übung, die
+    #: zieht dann einfach zu Heute um als oberste View, bzw. der ganze Plan“): Wer eine
+    #: Übungsseite über die Leiste unten verlässt, findet sie unter „Heute“ wieder — bis
+    #: er dort Zurück geht (`app.uebungsseiten_leiste`, `app.zurueck`)
+    heute_haelt: str | None = None
     #: Baut den Ansichtsstapel zur aktuellen Route neu — setzt `app.main()`.
     #: Views rufen es nach Änderungen, die die Route nicht wechseln (ein Tipp
     #: auf „gemacht" bleibt auf derselben Planansicht).

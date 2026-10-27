@@ -53,6 +53,16 @@ gültigen Element bzw. fallen aus dem Weg.
 
 Auf der Hauptansicht minimiert Zurück die App nicht: Ein anderer Reiter geht
 zu „Heute“, auf „Heute“ bleibt alles, wie es ist (Ben, 18.10.2026).
+
+**Übungsseiten behalten die Leiste unten** (Ben, 27.10.2026: „Ich möchte zwischen den
+Übungen und der Messung hin und her wechseln können“): Plan, Einzelübung, ihr Timer und
+der Ablauf (`navigation.uebungsseite`) zeigen Heute · Übungen · Messung · Verlauf wie die
+Hauptansicht; ein Tipp führt in diesen Reiter (`uebungsseiten_leiste`). **„Heute“ hält die
+Übungsseite** (Ben: „Man startet eine Übung, die zieht dann einfach zu Heute um als oberste
+View, bzw. der ganze Plan, wenn man von dort aus gestartet ist“): Wer sie über die Leiste
+verlässt, bekommt sie mit „Heute“ zurück (`AppState.heute_haelt`) — auch mit Zurück auf
+einem anderen Reiter —, bis er auf ihr Zurück geht; dann ist „Heute“ wieder der Tag. Jeder
+Reiter merkt sich seine Scrollposition (`components/scroll.py`).
 """
 
 from __future__ import annotations
@@ -162,6 +172,44 @@ def sichtbare_reiter(state: AppState) -> list[tuple[str, str, ft.IconData]]:
     return [r for r in REITER if r[0] != "messung" or zeigen]
 
 
+async def heute_zeigen(page: ft.Page, state: AppState, zeichnen: Callable[[], None]) -> None:
+    """„Heute“ öffnen: die gehaltene Übungsseite (`AppState.heute_haelt`), sonst der Tag."""
+    state.reiter = "heute"
+    if state.heute_haelt is None:
+        zeichnen()
+        return
+    await page.push_route(state.heute_haelt)
+    if len(page.views) <= 1:  # die Seite gibt es nicht mehr (Plan gelöscht)
+        state.heute_haelt = None
+        zeichnen()
+
+
+def uebungsseiten_leiste(page: ft.Page, state: AppState, route: str) -> ft.NavigationBar:
+    """Die Leiste unten auf einer Übungsseite (`navigation.uebungsseite`): dieselben Reiter
+    wie die Hauptansicht, markiert ist der Reiter darunter (`state.reiter`). Ein Tipp —
+    auch auf den markierten — geht in die Hauptansicht in diesen Reiter; „Heute“ hält
+    von da an diese Seite (Moduldocstring), ihre Scrollposition bleibt für die Rückkehr
+    (`zurueck` räumt beides erst beim Zurück)."""
+    reiter = sichtbare_reiter(state)
+    schluessel = [r[0] for r in reiter]
+
+    async def wechseln(e: ft.Event[ft.NavigationBar]) -> None:
+        state.reiter = schluessel[e.control.selected_index]
+        if state.reiter == "heute":
+            state.heute_haelt = route  # „Heute“ ist diese Seite — hier bleiben
+            return
+        state.heute_haelt = route
+        await page.push_route("/")
+
+    return ft.NavigationBar(
+        selected_index=schluessel.index(state.reiter) if state.reiter in schluessel else 0,
+        on_change=wechseln,
+        destinations=[
+            ft.NavigationBarDestination(label=label, icon=icon) for _, label, icon in reiter
+        ],
+    )
+
+
 def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
     """Die Ansicht hinter `/`: Leiste, Inhalt des aktiven Reiters, Navigation."""
     reiter = sichtbare_reiter(state)
@@ -187,8 +235,12 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
         leiste_auffrischen(state)  # auf „Heute“ steht die Einheit im eigenen Reiter
         page.update()
 
-    def wechseln(e: ft.Event[ft.NavigationBar]) -> None:
-        reiter_zeigen(schluessel[e.control.selected_index])
+    async def wechseln(e: ft.Event[ft.NavigationBar]) -> None:
+        gewaehlt = schluessel[e.control.selected_index]
+        if gewaehlt == "heute" and state.heute_haelt is not None:
+            await heute_zeigen(page, state, lambda: reiter_zeigen("heute"))
+        else:
+            reiter_zeigen(gewaehlt)
 
     async def zurueck_auf_der_startseite(_e: object = None) -> None:
         """Die Zurück-Taste auf der Startseite minimiert die App nicht (Ben, 18.10.2026:
@@ -202,7 +254,7 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
             await state.schreiben_beenden()
         elif state.reiter != "heute":
             leiste.selected_index = schluessel.index("heute")
-            reiter_zeigen("heute")
+            await heute_zeigen(page, state, lambda: reiter_zeigen("heute"))
 
     async def zu_einstellungen() -> None:
         await page.push_route("/einstellungen")
@@ -762,6 +814,9 @@ def main(page: ft.Page) -> None:
         haupt = len(page.views) == 1
         if page.views and (leiste := startleiste(page, state, haupt=haupt)) is not None:
             leiste_einsetzen(page.views[-1], leiste)
+        # Übungsseiten behalten die Leiste unten (Ben, 27.10.2026, Moduldocstring)
+        if not haupt and navigation.uebungsseite(oben := str(page.views[-1].route)):
+            page.views[-1].navigation_bar = uebungsseiten_leiste(page, state, oben)
         hintergrund_setzen(page, darstellung)
         page.update()
         # Hochkant ist die Regel; Karten, Kurven und das Live-Vollbild dürfen quer
@@ -872,6 +927,8 @@ def main(page: ft.Page) -> None:
             return
         # Wer eine Ansicht verlässt, beginnt beim nächsten Öffnen wieder oben.
         state.scroll_offsets.pop(page.views[-1].route, None)
+        if navigation.normal(str(page.views[-1].route)) == state.heute_haelt:
+            state.heute_haelt = None  # Zurück auf der gehaltenen Übungsseite: „Heute“ ist der Tag
         if len(page.views) > 1:
             page.views.pop()
         await page.push_route(page.views[-1].route)

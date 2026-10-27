@@ -56,7 +56,7 @@ markiert, entsteht ein neuer.
 | **„Gemacht“** | die Person | schließt den offenen Eintrag (= Abschicken, Fixieren). Ohne offenen: leerer Eintrag, gleich geschlossen (wie heute „abgehakt“). |
 | **Ausprägung geändert** (20 kg → 30 kg, rechts → links, kurz → lang) | die Person | die Markierung verschwindet, Hinweis „Der nächste Wert beginnt einen neuen Eintrag“; der nächste Mengen-Tipp öffnet einen neuen — **der alte bleibt offen** (seit 21.10.2026, P57: je Ausführung ein offener Eintrag, `docs/plan_varianten.md` Teil C). Zurück zur alten Ausprägung → ihr Eintrag ist wieder markiert, der nächste Wert geht dorthin. |
 | **Zeitabstand** | die App | Liegt der letzte Satz länger als `EINTRAG_OFFEN_MIN` zurück (Vorgabe **30 min**, Einstellungen → Übungen), gilt der Eintrag als geschlossen; die Datenschicht schließt ihn beim nächsten Tipp nach. |
-| **Übung endet im Ablauf / Timer fertig** | Ablauf | wie heute: `ended_at` aus der Zeitleiste. |
+| **Übung endet im Ablauf** | Ablauf | wie heute: `ended_at` aus der Zeitleiste. **Ein Timer- oder Stoppuhr-Lauf für sich schließt nicht** (seit 22.10.2026, P79 D1: er sammelt im offenen Eintrag; Ben, 27.10.2026: „Timer zu Ende gilt nicht als Abschluss. Vielleicht mache ich eine Übung mehrmals mit einem Timer“). |
 | **Tageswechsel** | die App | ein offener Eintrag von gestern ist zu (D3 vorausgesetzt). |
 | **Spätere Stelle einer Mehrfachübung** | Plan | ersetzt `eigener_eintrag`/`stelle`: die zweite Stelle öffnet immer einen neuen Eintrag. Damit entfällt D7. |
 

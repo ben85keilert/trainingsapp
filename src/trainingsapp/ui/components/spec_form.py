@@ -328,6 +328,10 @@ class SpecForm:
                 return [sum(saetze)]
             return saetze
         if f.type == FieldType.DURATION:
+            # Mehrere Läufe der Uhr stehen als Liste im Zeitfeld („1:02/0:58“, Ben,
+            # 27.10.2026) — die Notation je Satz liest sie, eine einzelne Zeit bleibt eine Zahl
+            if "/" in text or "," in text:
+                return parse_sets(text, zeit=True)
             return parse_dauer(text)
         wert = einzelwert_lesen(f, text)  # dieselben Grenzen wie in der Notation
         return int(wert) if f.type == FieldType.INT and wert is not None else wert

@@ -1809,9 +1809,14 @@ def plan_view(
             controls=[punkt, ft.Text(text, size=11, opacity=0.75)],
         )
 
-    def eingabe_bereich(item: PlanItem, uebung: Exercise, st: offene.Stand) -> list[ft.Control]:
+    def eingabe_bereich(
+        item: PlanItem, uebung: Exercise, st: offene.Stand, uhr: ft.Control | None = None
+    ) -> list[ft.Control]:
         """Oben die Zone „Ausführung“ (Einstellungen), darunter „EINTRAGEN“ mit den Werten —
-        wie die Darstellung sagt (Skizze C1)."""
+        wie die Darstellung sagt (Skizze C1). Die Uhr-Zeile (``uhr``) steht als **erste Zeile
+        unter „Eintragen“**, vor Wiederholungen und Zeit: Die Stoppuhr zählt als Zeit, also
+        gehört sie zu dem, was gesammelt wird, nicht zu den Einstellungen (Ben, 27.10.2026).
+        Ohne Mengen steht sie allein unter der Ausführung."""
         teile = parameter_abschnitte(item, uebung)
         gewaehlt: str | None = None
         schalter: ft.Control | None = None
@@ -1834,7 +1839,7 @@ def plan_view(
             )
         ausfuehrung = ausfuehrung_abschnitt(item, uebung, st, schalter)
         if not teile and ausfuehrung is None:
-            return []
+            return [uhr] if uhr is not None else []
         bereich: list[ft.Control] = []
         if ausfuehrung is not None:
             bereich.append(ausfuehrung)
@@ -1845,8 +1850,12 @@ def plan_view(
                 if gewaehlt is not None
                 else [bauen() for _, _, bauen in teile]
             )
+            if uhr is not None:
+                zeilen.insert(0, uhr)
             bereich.append(eintragen_karte(zeilen, ziel_hinweis(item, uebung, st)))
         else:  # nur Ausführung (Skala & Co.): wohin der nächste Wert geht
+            if uhr is not None:
+                bereich.append(uhr)
             bereich.append(ziel_hinweis(item, uebung, st))
         return bereich
 
@@ -2092,7 +2101,8 @@ def plan_view(
                     )
                 )
             # Stoppuhr und Timer (Ben, 18.10.2026): als Knöpfe zwischen „Gemacht“ und „Notiz“
-            # oder als eigene Zeile darunter — und, solange sie läuft, ihre Anzeige
+            # oder als erste Zeile unter „Eintragen“ (27.10.2026) — und, solange sie läuft,
+            # ihre Anzeige, auch im zugeklappten Block
             aus_katalog = katalog[item.exercise_id]
             planuebung = None if einzel else item
             uhr = (
@@ -2113,10 +2123,10 @@ def plan_view(
                 knoepfe.append(etikett_knopf(item, st))
             inhalt.append(geleistet_tafel(uebung, item, st))
             inhalt.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=knoepfe))
-            if uhr.zeile is not None and (offen or laufende(state, aus_katalog, planuebung)):
-                inhalt.append(uhr.zeile)
             if offen:
-                inhalt.extend(eingabe_bereich(item, uebung, st))
+                inhalt.extend(eingabe_bereich(item, uebung, st, uhr.zeile))
+            elif uhr.zeile is not None and laufende(state, aus_katalog, planuebung):
+                inhalt.append(uhr.zeile)
 
         return ft.Container(
             padding=ft.Padding.only(left=14, right=10, top=12, bottom=12),

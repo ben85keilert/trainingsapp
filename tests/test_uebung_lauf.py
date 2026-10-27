@@ -92,6 +92,25 @@ async def test_fertig_heisst_gemacht_mit_haltezeit_je_satz(umgebung) -> None:
     )
 
 
+async def test_stoppuhr_zeit_landet_im_zeitfeld_der_uebung(umgebung) -> None:
+    """„Luft anhalten“ führt seine Zeit als ``seconds`` (Vorlage „Zeit als Benchmark“) — die
+    Uhr füllt dieses Feld statt daneben ``duration`` aufzumachen (Ben, 27.10.2026)."""
+    from trainingsapp.core.result_spec import SPEC_BENCHMARK_ZEIT
+
+    state, uhr, gurt, _ = umgebung
+    uebung = Exercise(name="Luft anhalten", result_spec=SPEC_BENCHMARK_ZEIT)
+    state.uebungen.speichern(uebung)
+    kontext = uebung_lauf.kontext_fuer(uebung)
+    assert kontext.zeitfeld == "duration"
+    e = uebung_lauf.starten(Seite(), state, kontext, _profil())
+    await _ticken(state, uhr, gurt, e, 60, bis_ende=True)
+    (lauf,) = uebung_lauf.laeufe_heute(state, uebung.id)
+    assert lauf.eintrag_id is not None and lauf.werte == [30]
+    eintrag = state.sitzungen.eintrag_laden(lauf.eintrag_id)
+    assert eintrag is not None and eintrag.result == {"seconds": 30}
+    assert [f.key for f in eintrag.spec_snapshot.fields] == ["seconds"]
+
+
 async def test_abbrechen_traegt_nichts_ein_laeufe_heute_schon(umgebung) -> None:
     state, uhr, gurt, _ = umgebung
     uebung = _planke(state, "hold", "duration")

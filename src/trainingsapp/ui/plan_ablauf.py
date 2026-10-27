@@ -22,7 +22,7 @@ from trainingsapp.core.models import Plan, SessionEntry, lokaler_tag
 from trainingsapp.core.plan_durchlauf import schritte_fuer
 from trainingsapp.core.standards import mit_plan_spec
 from trainingsapp.core.timer_eintrag import ergebnis, gelaufene_zeiten, ohne_timer
-from trainingsapp.core.uebung_timer import mit_zeitfeldern
+from trainingsapp.core.uebung_timer import mit_zeitfeldern, zeit_werte, zeit_zusammenlegen
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.devices.plan_ablauf import PlanAblaufBaustein
@@ -152,7 +152,7 @@ def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry
         werte = ergebnis(zeiten, zeitfeld)
     else:  # ohne Timer: die Uhr lief von Anfang bis „Gemacht“
         werte = ohne_timer(ende.t_s - start.t_s, zeitfeld) if zeitfeld else {}
-    werte = {**ausfuehrung(uebung, gewaehlt), **werte}
+    werte = zeit_zusammenlegen(uebung, {**ausfuehrung(uebung, gewaehlt), **werte})
     uebung = mit_zeitfeldern(uebung, werte)
     anker = e.zeitbasis.anker_utc
     beginn = anker + timedelta(seconds=start.t_s)
@@ -166,8 +166,11 @@ def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry
         started_at=beginn,
         ended_at=anker + timedelta(seconds=ende.t_s),
     )
-    zahlen = werte.get("hold") or ([werte["duration"]] if "duration" in werte else [])
-    daten: dict[str, Any] = {"eintrag": eintrag.id, "planuebung": item_id, "werte": zahlen}
+    daten: dict[str, Any] = {
+        "eintrag": eintrag.id,
+        "planuebung": item_id,
+        "werte": zeit_werte(uebung, werte),
+    }
     if zeitfeld:
         daten["zeitfeld"] = zeitfeld
     e.nachtragen(Ereignis(ende.t_s, "person", "eintrag", uebung.name, daten))

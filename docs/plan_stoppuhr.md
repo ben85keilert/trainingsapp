@@ -35,7 +35,12 @@ Skizzen „Pause beendet den Satz“ oder vier Stufen zeigen, gilt, was hier ste
   (`core.timer_eintrag`). Seit 22.10.2026 **im offenen Eintrag** wie ein Tipp (P79 D1,
   `SessionRepo.lauf_eintragen`); ob die Zeit zählt, legt die Übung fest
   (`Exercise.zeit_zaehlt`), beim Üben der Knopf „zählt“ in der Leiste für jetzt
-  (`docs/plan_uebungen_einstellen.md`).
+  (`docs/plan_uebungen_einstellen.md`). **Jeder Lauf ist eine eigene Zeit** (Ben,
+  27.10.2026: „Wenn die Stoppuhr 3 mal startet und endet, 3 Zeitleistungen in derselben
+  Einheit. Pause sammelt auf die Zeit“): Das Zeitfeld hält dann eine Liste je Lauf
+  (``[62, 58, 70]``, angezeigt „1:02/0:58/1:10“), nicht mehr die Summe; eine Pause im Lauf
+  zählt zu dessen Zeit. Das Formular liest „1:02/0:58“ als Liste
+  (`components/spec_form.py`), der Verlauf summiert je Tag wie bei Sätzen.
 
 ## 3. Uhr an der Übung und „Zählt als“
 
@@ -50,6 +55,12 @@ dabei, auch ohne Chips/Kachel/wasauchimmer.“
 - **„Zählt als“**: Bietet die Übung (bzw. die Planübung) Haltezeit an, Haltezeit je Satz
   oder Zeit (Vorgabe Haltezeit); sonst immer **Zeit** — auch ohne den Parameter Zeit. Die
   Kopie im Eintrag bekommt das Feld dann dazu (`core.uebung_timer.mit_zeitfeldern`).
+  **„Zeit“ ist das Zeitfeld, das die Übung schon hat** — auch unter anderem Schlüssel
+  („Luft anhalten“ aus der Vorlage „Zeit als Benchmark“: `seconds`); die Uhr füllt es, statt
+  daneben eine zweite Zeile „Zeit“ aufzumachen (Ben, 27.10.2026: sonst stand die Pflichtzeit
+  leer neben der Stoppuhrzeit, und der Nachtrag ließ sich nicht speichern —
+  `core.uebung_timer.zeit_zusammenlegen`, `SessionRepo.lauf_eintragen` addiert in jedes
+  Zeitfeld).
 - Wo: Übung bearbeiten → Timer; Planübung einstellen → „Uhr in diesem Plan“ (wie die Übung,
   an, aus; „Zählt als“ wie die Übung, Haltezeit, Zeit) — Vorrang Planübung > Übung
   (`core.uebung_timer.uhr_an`, `zaehlt_als`).
@@ -65,9 +76,13 @@ Ben: „Kannst du Variante A und B2 einbauen. In den Haupt-Einstellungen kann ma
 umstellen, Standard ist A.“ — Einstellungen → Übungen → „Stoppuhr und Timer in der Übung“
 (`ui/components/uhr.py`):
 
-- **Zeile** (Vorgabe, Skizzen A1–A4): unter „Gemacht | Notiz“ links als Text, was startet
-  („Stoppuhr ▾“ oder „Halten 3 × 1 min ▾“), daneben die Zeit, rechts „Bereitstellen“ und
-  ein einziger Start. ▾ wählt um; dort auch „Timer der Übung …“.
+- **Zeile** (Vorgabe, Skizzen A1–A4): links als Text, was startet („Stoppuhr ▾“ oder
+  „Halten 3 × 1 min ▾“), daneben die Zeit, rechts „Bereitstellen“ und ein einziger Start.
+  ▾ wählt um; dort auch „Timer der Übung …“. Seit 27.10.2026 steht sie als **erste Zeile der
+  Karte „Eintragen“**, vor Wiederholungen und Zeit (Ben: „Stoppuhr zählt zu Zeit, d. h. die
+  Stoppuhr muss dann auch unter die Einstellungen, und am besten als erstes vor den anderen
+  Zählleistungen“); vorher stand sie über der Ausführung unter „Gemacht | Notiz“. Ohne
+  Mengen allein unter der Ausführung; zugeklappt nur die laufende Anzeige.
 - **Knöpfe** (Skizze B2): „Uhr“ (Stoppuhr) und „Timer“ zwischen „Gemacht“ und „Notiz“; der
   Timer-Knopf startet den einen Timer, wählt bei mehreren und führt ohne einen zum Timer
   der Übung.

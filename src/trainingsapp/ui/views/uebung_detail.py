@@ -112,7 +112,7 @@ def uhr_und_timer(uebung: Exercise, item: PlanItem | None = None) -> ft.Control:
             + (
                 "jeder Lauf der Stoppuhr und jeder zählende Abschnitt eines Timers ist ein Satz"
                 if wohin == "hold"
-                else "die gelaufene Zeit kommt dazu, auch ohne den Parameter Zeit"
+                else "jeder Lauf ist eine eigene Zeit, auch ohne den Parameter Zeit"
             )
             + ". Pausen zählen nicht, unter 5 s fällt weg; „Abbrechen“ trägt nichts ein."
         )

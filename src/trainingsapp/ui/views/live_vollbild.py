@@ -221,6 +221,7 @@ def _vollbild(
         breite=lambda: fenster.breite_s,
         zeit_modus=UHR if einst.achse_uhrzeit else DAUER,
         dialog=page.show_dialog,
+        zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
     )
 
     def timer_notizen() -> None:

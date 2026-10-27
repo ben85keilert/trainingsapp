@@ -34,6 +34,7 @@ from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
 from trainingsapp.core.hrv_einstellungen import (
     LIVE_SPEKTRUM_S,
     NACHRECHNEN_MS,
+    NOTIZEN_ZEILEN,
     PUFFER_S,
     UEBERSICHT,
     HrvEinstellungen,
@@ -259,6 +260,23 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
         value=str(e.puffer_s),
         options=[ft.DropdownOption(key=str(x), text=puffer_text(x)) for x in PUFFER_S],
         on_select=puffer_gewaehlt,
+        dense=True,
+        width=260,
+    )
+
+    def notizen_zeilen_gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
+        """Notizliste (Ben, 27.10.2026): ab so vielen Notizen rollt sie, die Kurve bleibt."""
+        if ev.control.value is not None:
+            setzen(notizen_zeilen=int(ev.control.value))
+
+    notizen_zeilen_wahl = ft.Dropdown(
+        label="Notizen in der Liste",
+        value=str(e.notizen_zeilen),
+        options=[
+            ft.DropdownOption(key=str(x), text=f"{x} Zeilen, dann rollen" if x else "alle")
+            for x in NOTIZEN_ZEILEN
+        ],
+        on_select=notizen_zeilen_gewaehlt,
         dense=True,
         width=260,
     )
@@ -576,6 +594,11 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                     "höchstens sein, und bis dahin reichen nachgetragene Notizen in die "
                     "Kurve. Gilt ab der nächsten Verbindung; die Aufnahme selbst ist "
                     "unbegrenzt. Mehr Verlauf kostet am Handy Speicher und Rechenzeit."
+                ),
+                notizen_zeilen_wahl,
+                hinweis(
+                    "Mehr Notizen als Zeilen rollen in der Liste, die Kurve bleibt dabei im "
+                    "Blick — unter der Hauptkurve und im Vollbild."
                 ),
                 schalter(
                     "korrigiert",

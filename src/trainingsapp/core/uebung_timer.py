@@ -13,6 +13,9 @@ Planübung > Timer des Plans > erstes Profil der Übung > keiner.
 - `uhr_an`, `zaehlt_als` — die Uhr in der Übung (Ben, 18.10.2026, `docs/plan_stoppuhr.md`):
   an oder aus (Planübung > Übung), und wohin ihre Zeit kommt — bietet die Übung Haltezeit an,
   nach Wahl Haltezeit oder Zeit, sonst immer Zeit, auch ohne den Parameter Zeit.
+- `zeitfeld_der_uebung`, `zeit_zusammenlegen` — „Zeit“ ist das Zeitfeld, das die Übung schon
+  hat, auch unter anderem Schlüssel (Vorlage „Zeit als Benchmark“: ``seconds``); erst ohne
+  eins kommt ``duration`` dazu (Ben, 27.10.2026: Stoppuhrzeit und Parameterzeit sind eine Zeile).
 
 Rein: Die Profile liegen als JSON an Übung, Plan und Planübung (``core.models``);
 hier werden sie gelesen und gewählt.
@@ -25,7 +28,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from .models import Exercise, Plan, PlanItem
-from .result_spec import FieldSpec, vorrat_feld
+from .result_spec import FieldSpec, FieldType, vorrat_feld
 from .timer import MAX_ABSCHNITT_S, STOPPUHR, Abschnitt, TimerProfil, stoppuhr
 from .timer_eintrag import ZEITFELDER
 
@@ -211,6 +214,59 @@ def zaehlt_als(felder: Sequence[str], uebung: Exercise) -> str:
     return uebung.zaehlt_als if uebung.zaehlt_als in ZEITFELDER else "hold"
 
 
+def zeitfeld_der_uebung(uebung: Exercise) -> str:
+    """In welches Feld „Zeit“ der Uhr kommt: ``duration`` — oder, hat die Übung keins unter
+    diesem Schlüssel, ihr erstes Feld vom Typ Zeit (Ben, 27.10.2026: „Luft anhalten“ aus der
+    Vorlage „Zeit als Benchmark“ führt seine Zeit als ``seconds``; die Uhr darf daneben keine
+    zweite Zeile aufmachen).
+
+    >>> from trainingsapp.core.result_spec import SPEC_BENCHMARK_ZEIT, ResultSpec
+    >>> zeitfeld_der_uebung(Exercise(result_spec=SPEC_BENCHMARK_ZEIT))
+    'seconds'
+    >>> zeitfeld_der_uebung(Exercise()), zeitfeld_der_uebung(Exercise(result_spec=ResultSpec(
+    ...     fields=[vorrat_feld("hold"), vorrat_feld("duration")])))
+    ('duration', 'duration')
+    """
+    felder = uebung.result_spec.fields
+    if any(f.key == "duration" for f in felder):
+        return "duration"
+    return next((f.key for f in felder if f.type == FieldType.DURATION), "duration")
+
+
+def zeit_zusammenlegen(uebung: Exercise, werte: Mapping[str, Any]) -> dict[str, Any]:
+    """Die Werte der Uhr, wie sie in den Eintrag kommen: „Zeit“ (``duration``) landet im
+    Zeitfeld der Übung (`zeitfeld_der_uebung`) — hat sie eins unter anderem Schlüssel, wird
+    umgeschrieben, sonst bleibt alles, wie es ist.
+
+    >>> from trainingsapp.core.result_spec import SPEC_BENCHMARK_ZEIT
+    >>> zeit_zusammenlegen(Exercise(result_spec=SPEC_BENCHMARK_ZEIT), {"duration": 62})
+    {'seconds': 62}
+    >>> zeit_zusammenlegen(Exercise(), {"duration": 62, "weight": 5})
+    {'duration': 62, 'weight': 5}
+    """
+    feld = zeitfeld_der_uebung(uebung)
+    if feld == "duration" or "duration" not in werte:
+        return dict(werte)
+    return {(feld if k == "duration" else k): v for k, v in werte.items()}
+
+
+def zeit_werte(uebung: Exercise, werte: Mapping[str, Any]) -> list[Any]:
+    """Die Zahlen, die die Uhr eintrug — Haltezeiten je Satz oder die eine Zeit (für die
+    Zeitleiste der Einheit, „Läufe heute“ liest sie zurück).
+
+    >>> from trainingsapp.core.result_spec import SPEC_BENCHMARK_ZEIT
+    >>> zeit_werte(Exercise(result_spec=SPEC_BENCHMARK_ZEIT), {"seconds": 62})
+    [62]
+    >>> zeit_werte(Exercise(), {"hold": [30, 30]}), zeit_werte(Exercise(), {"weight": 5})
+    ([30, 30], [])
+    """
+    halten = werte.get("hold")
+    if isinstance(halten, list) and halten:
+        return list(halten)
+    feld = zeitfeld_der_uebung(uebung)
+    return [werte[feld]] if feld in werte else []
+
+
 def mit_zeitfeldern(uebung: Exercise, werte: Mapping[str, Any]) -> Exercise:
     """Die Übung samt den Zeitfeldern, die ``werte`` füllt, ihre Eingabe aber nicht anbietet —
     so zeigt die Kopie im Eintrag die Zeit (die Uhr trägt sie auch ohne den Parameter ein).
@@ -251,4 +307,7 @@ __all__ = [
     "timer_fuer",
     "uhr_an",
     "zaehlt_als",
+    "zeit_werte",
+    "zeit_zusammenlegen",
+    "zeitfeld_der_uebung",
 ]

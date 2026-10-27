@@ -45,6 +45,10 @@ LIVE_FENSTER: Final[tuple[int, ...]] = (60, 120, 300, 600)
 #: Wie lange der Live-Verlauf zurückreicht (s) — der Puffer der Live-Kurven (Ben,
 #: 26.10.2026: einstellbar, mindestens 30 min). Gilt ab der nächsten Verbindung.
 PUFFER_S: Final[tuple[int, ...]] = (1800, 3600, 7200, 14400)
+#: Notizen zur Messung: so viele Zeilen zeigt die Liste, mehr rollt sie (Ben, 27.10.2026:
+#: „bei vielen Notizen ist es schwierig, die Notizen durchzuklicken und an der Kurve zu
+#: beobachten“); 0 = alle, wie bisher
+NOTIZEN_ZEILEN: Final[tuple[int, ...]] = (5, 7, 10, 15, 0)
 #: Eingetippte Breite der Zeitachse (Ben, 21.10.2026): mindestens 10 s, live höchstens
 #: so viel, wie der Puffer hält (`HrvEinstellungen.puffer_s`)
 FENSTER_MIN_S: Final[int] = 10
@@ -87,6 +91,10 @@ class HrvEinstellungen:
     True
     >>> HrvEinstellungen.aus_dict({"fenster_s": 210}).fenster_s  # eingetippt: 3:30 min
     210
+    >>> HrvEinstellungen.aus_dict({"notizen_zeilen": 10}).notizen_zeilen
+    10
+    >>> HrvEinstellungen.aus_dict({"notizen_zeilen": 8}).notizen_zeilen  # nicht zur Wahl
+    7
     >>> HrvEinstellungen.aus_dict({"puffer_s": 7200}).puffer_s, HrvEinstellungen().puffer_s
     (7200, 1800)
     >>> HrvEinstellungen.aus_dict({"analyse_schritt": "30"}).analyse_schritt
@@ -128,6 +136,8 @@ class HrvEinstellungen:
     nichtlinear_optisch: bool = False
     #: In Notizen zur Messung die Übungen aus Plänen zum Antippen anbieten
     notiz_uebungen: bool = True
+    #: Notizliste: so viele Zeilen, dann rollt sie (`NOTIZEN_ZEILEN`; 0 = alle)
+    notizen_zeilen: int = 7
     #: Zeitachse der Kurven mit der Uhrzeit beschriften statt mit der Dauer seit Beginn
     #: (Ben, 20.10.2026) — gilt live und in der Aufzeichnung, Knopf an der Breitenwahl
     achse_uhrzeit: bool = False
@@ -173,6 +183,7 @@ class HrvEinstellungen:
             "nichtlinear": self.nichtlinear,
             "nichtlinear_optisch": self.nichtlinear_optisch,
             "notiz_uebungen": self.notiz_uebungen,
+            "notizen_zeilen": self.notizen_zeilen,
             "achse_uhrzeit": self.achse_uhrzeit,
             "atemuebung": self.atemuebung,
             "nachrechnen_ms": self.nachrechnen_ms,
@@ -228,6 +239,7 @@ class HrvEinstellungen:
             nichtlinear=schalter("nichtlinear"),
             nichtlinear_optisch=schalter("nichtlinear_optisch"),
             notiz_uebungen=schalter("notiz_uebungen"),
+            notizen_zeilen=auswahl("notizen_zeilen", NOTIZEN_ZEILEN),
             achse_uhrzeit=schalter("achse_uhrzeit"),
             atemuebung=schalter("atemuebung"),
             nachrechnen_ms=auswahl("nachrechnen_ms", NACHRECHNEN_MS),

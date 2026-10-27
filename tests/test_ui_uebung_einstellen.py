@@ -246,8 +246,27 @@ def test_lauf_sammelt_zeit_und_zaehlt_nicht_laesst_den_eintrag(state) -> None:
     mit_zeit = mit_zeitfeldern(u, {"duration": 30})
     erster = state.sitzungen.lauf_eintragen(sitzung, mit_zeit, {"duration": 30}, tag)
     zweiter = state.sitzungen.lauf_eintragen(sitzung, mit_zeit, {"duration": 45}, tag)
-    assert erster.ended_at is None and zweiter.result == {"duration": 75}
+    assert erster.ended_at is None and zweiter.result == {"duration": [30, 45]}
     assert state.sitzungen.lauf_eintragen(sitzung, u, {}, tag).id == zweiter.id
+
+
+def test_lauf_sammelt_zeit_im_zeitfeld_der_uebung(state) -> None:
+    """Hat die Übung ihr Zeitfeld unter anderem Schlüssel („Luft anhalten“: ``seconds``),
+    kommt die Uhrzeit dorthin — keine zweite Zeile „Zeit“ (Ben, 27.10.2026)."""
+    from trainingsapp.core.result_spec import SPEC_BENCHMARK_ZEIT
+    from trainingsapp.core.uebung_timer import mit_zeitfeldern, zeit_zusammenlegen
+
+    u = Exercise(name="Luft anhalten", result_spec=SPEC_BENCHMARK_ZEIT)
+    state.uebungen.speichern(u)
+    tag = state.heute()
+    sitzung = state.sitzungen.session_fuer(state.profil.id, None, tag)
+    werte = zeit_zusammenlegen(u, {"duration": 62})
+    assert werte == {"seconds": 62}
+    assert mit_zeitfeldern(u, werte) is u  # kein Feld kommt dazu
+    erster = state.sitzungen.lauf_eintragen(sitzung, u, werte, tag)
+    zweiter = state.sitzungen.lauf_eintragen(sitzung, u, {"seconds": 8}, tag)
+    assert erster.ended_at is None and zweiter.result == {"seconds": [62, 8]}
+    assert [f.key for f in zweiter.spec_snapshot.fields] == ["seconds"]
 
 
 def test_leiste_zaehlt_fuer_jetzt_und_zeit_antippen(page, state) -> None:

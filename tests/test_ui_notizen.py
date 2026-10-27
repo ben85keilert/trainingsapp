@@ -37,6 +37,7 @@ class _Welt:
             if live
             else Zeitbezug(lambda: BEATS, START, achse=lambda: [b.t_s for b in BEATS])
         )
+        self.zeilen = 0
         self.feld = Notizfeld(
             zeitbezug=lambda: zb,
             ereignisse=lambda: list(self.liste),
@@ -47,6 +48,7 @@ class _Welt:
             jetzt=(lambda: self.jetzt) if live else None,
             offen=True,
             zeit_modus=zeit_modus,
+            zeilen=lambda: self.zeilen,
         )
 
     def _speichern(self, liste: list[dict]) -> None:
@@ -81,6 +83,29 @@ def test_neue_notiz_oben_bestehende_unter_ihrer_zeile() -> None:
     f.offen = False
     f.bearbeiten(0)
     assert f._eingabe_box in f._inhalt.controls and f._eingabe_box.margin is None
+
+
+def test_liste_rollt_ab_der_eingestellten_zeilenzahl() -> None:
+    """Mehr Notizen als Zeilen (Ben, 27.10.2026): feste Höhe und Rollbalken, live ans Ende —
+    nicht, solange eine Eingabe offen ist; 0 = alle, wie bisher."""
+    from trainingsapp.ui.components.notizen import ZEILE_PX
+
+    w = _Welt(live=True)
+    f = w.feld
+    assert f._liste.height is None and f._liste.scroll is None  # 0 = alle
+    w.zeilen = 2
+    f.auffrischen()
+    assert f._liste.height == 2 * ZEILE_PX and f._liste.scroll == ft.ScrollMode.AUTO
+    assert f._liste.auto_scroll is True
+    f.bearbeiten(1)
+    assert f._liste.auto_scroll is False  # die Eingabe bleibt in Sicht
+    w.zeilen = 5
+    f.abbrechen()
+    assert f._liste.height is None and f._liste.auto_scroll is False
+    w2 = _Welt(live=False)
+    w2.zeilen = 2
+    w2.feld.auffrischen()
+    assert w2.feld._liste.scroll == ft.ScrollMode.AUTO and w2.feld._liste.auto_scroll is False
 
 
 def test_knoepfe_in_zwei_zeilen() -> None:

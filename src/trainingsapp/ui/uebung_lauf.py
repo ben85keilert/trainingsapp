@@ -35,7 +35,12 @@ from trainingsapp.core.timer_eintrag import (
     ergebnis,
     gelaufene_zeiten,
 )
-from trainingsapp.core.uebung_timer import mit_zeitfeldern, zaehlt_als
+from trainingsapp.core.uebung_timer import (
+    mit_zeitfeldern,
+    zaehlt_als,
+    zeit_werte,
+    zeit_zusammenlegen,
+)
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
 from trainingsapp.ui import einheit as einheit_ui
 
@@ -160,6 +165,7 @@ def _eintragen(
         uebung = mit_plan_spec(item, uebung)
     zeiten = gelaufene_zeiten(ereignisse)
     werte = {**ausfuehrung(uebung, kontext.auspraegung), **ergebnis(zeiten, kontext.zeitfeld)}
+    werte = zeit_zusammenlegen(uebung, werte)  # ins Zeitfeld der Übung (27.10.2026)
     uebung = mit_zeitfeldern(uebung, werte)  # Zeit auch ohne den Parameter (18.10.2026)
     ende_s = max(
         (x.t_s for x in ereignisse if x.quelle in ("timer", "plan", "einheit")), default=0.0
@@ -178,8 +184,7 @@ def _eintragen(
         ende=beginn + timedelta(seconds=ende_s),
     )
     # In die Zeitleiste, was eingetragen wurde — „Läufe heute“ liest es zurück
-    zahlen = werte.get("hold") or ([werte["duration"]] if "duration" in werte else [])
-    daten: dict[str, Any] = {"eintrag": eintrag.id, "werte": zahlen}
+    daten: dict[str, Any] = {"eintrag": eintrag.id, "werte": zeit_werte(uebung, werte)}
     if kontext.zeitfeld:
         daten["zeitfeld"] = kontext.zeitfeld
     if state.einheiten is not None:

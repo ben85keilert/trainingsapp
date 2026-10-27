@@ -1068,6 +1068,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         katalog=(lambda: uebungs_katalog(state)) if einst.notiz_uebungen else None,
         zeit_modus=UHR if einst.achse_uhrzeit else DAUER,
         dialog=page.show_dialog,
+        zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
     )
 
     def timer_notizen() -> None:

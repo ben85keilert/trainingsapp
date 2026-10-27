@@ -1659,14 +1659,22 @@ class SessionRepo:
         22.10.2026, P79 D1: „im letzten aktiven Eintrag gesammelt …, wenn es keine Änderungen
         der Einstellungen oder andere Gründe gibt“).
 
-        Haltezeiten hängen als Sätze an, Zeit kommt zur Zeit dazu. Ein neuer, offener Eintrag
-        beginnt nur dort, wo auch ein Tipp einen begänne: andere Ausführung, abgeschlossen,
-        länger als `offen_min` unberührt, anderer Plan oder Tag (`ziel_eintrag`). Ohne Zeit
-        („zählt“ aus) bleibt ein offener Eintrag, wie er ist; ohne offenen entsteht wie bisher
-        ein abgeschlossenes „gemacht“ von ``beginn`` bis ``ende``.
+        Haltezeiten hängen als Sätze an; **jeder Lauf der Uhr ist eine eigene Zeit** (Ben,
+        27.10.2026: „Wenn die Stoppuhr 3 mal startet und endet, 3 Zeitleistungen in derselben
+        Einheit“ — nicht summiert; eine Pause im Lauf sammelt auf dessen Zeit) — in jedem
+        Zeitfeld der Übung, auch unter anderem Schlüssel
+        (`core.uebung_timer.zeit_zusammenlegen`); aus ``62`` wird ``[62, 58]``. Ein
+        neuer, offener Eintrag beginnt nur dort, wo auch ein Tipp einen begänne: andere
+        Ausführung, abgeschlossen, länger als `offen_min` unberührt, anderer Plan oder Tag
+        (`ziel_eintrag`). Ohne Zeit („zählt“ aus) bleibt ein offener Eintrag, wie er ist; ohne
+        offenen entsteht wie bisher ein abgeschlossenes „gemacht“ von ``beginn`` bis ``ende``.
         """
         kontext = kontext or {}
-        zeit = {k: v for k, v in werte.items() if k in ("hold", "duration")}
+        dauer = {
+            "duration",
+            *(f.key for f in uebung.result_spec.fields if f.type == FieldType.DURATION),
+        }
+        zeit = {k: v for k, v in werte.items() if k == "hold" or k in dauer}
         aktuell = self.ziel_eintrag(session.subject_id, uebung, tag, session.plan_id, kontext)
         if aktuell is None:
             if not zeit:
@@ -1681,12 +1689,10 @@ class SessionRepo:
         kopie = aktuell.spec_snapshot
         fehlt = kopie is None or any(kopie.field_by_key(k) is None for k in zeit)
         basis = werte_modernisieren(aktuell.result) if fehlt else dict(aktuell.result)
-        if "hold" in zeit:
-            bisher = basis.get("hold")
+        for k, wert in zeit.items():
+            bisher = basis.get(k)
             liste = list(bisher) if isinstance(bisher, list) else ([bisher] if bisher else [])
-            basis["hold"] = [*liste, *zeit["hold"]]
-        if "duration" in zeit:
-            basis["duration"] = (basis.get("duration") or 0) + zeit["duration"]
+            basis[k] = [*liste, *(wert if isinstance(wert, list) else [wert])]
         return self.eintrag_korrigieren(
             aktuell.id, basis, spec=uebung.result_spec if fehlt else None
         )

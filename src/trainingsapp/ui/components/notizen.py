@@ -19,6 +19,11 @@ Eine **neue** Notiz entsteht oben, über der Liste. Eine **bestehende** öffnet
 sich direkt unter ihrer Zeile (Ben, 20.10.2026: bei vielen Notizen sah man die
 Eingabe oben sonst nicht) — die Liste bleibt im Blick, die Zeile ist markiert.
 
+**Die Liste rollt** (Ben, 27.10.2026): Mehr als ``zeilen`` Notizen (Einstellungen →
+HRV-Messung → „Notizen in der Liste“, `HrvEinstellungen.notizen_zeilen`, Vorgabe 7) bekommen
+eine feste Höhe und einen Rollbalken — so bleibt die Kurve beim Durchtippen im Blick. Live
+rollt sie zur neuesten Notiz, solange keine Eingabe offen ist.
+
 Marken stehen immer in der Hauptkurve (`marken`). Im Vollbild zeigt ein Tipp
 auf eine Marke ihr **Etikett** (`bei`, `etikett`): Zeit und Text in der Kurve,
 von dort bearbeiten oder löschen. Gespeichert wird das
@@ -74,6 +79,11 @@ ZEIT_UNLESBAR = "Zeit nicht lesbar — 2:15 oder 14:03:05"
 
 #: Quelle „Alle Übungen" in der Auswahl
 ALLE = "alle"
+
+
+#: Höhe einer Notizzeile (Text 13 px, Rand 2 × 4 px) — eine mit Angaben ist höher, die Grenze
+#: bleibt eine Zeilenzahl, kein Pixelmaß
+ZEILE_PX = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,8 +184,11 @@ class Notizfeld:
         ausblenden: Callable[[dict], bool] | None = None,
         zeit_modus: str = DAUER,
         dialog: Callable[[Any], None] | None = None,
+        zeilen: Callable[[], int] | None = None,
     ) -> None:
         self._zeitbezug = zeitbezug
+        #: So viele Zeilen zeigt die Liste, mehr rollt (0 = alle)
+        self._zeilen = zeilen or (lambda: 0)
         self._ereignisse = ereignisse
         self._dialog = dialog
         #: Notizen, die Liste und `marken` nicht zeigen (die Leistungen der Person — sie
@@ -869,6 +882,20 @@ class Notizfeld:
                 if in_liste and i == self.bearbeite:
                     zeilen.append(self._eingabe_box)
         self._liste.controls = zeilen
+        self._rollen(len(sichtbar))
+
+    def _rollen(self, anzahl: int) -> None:
+        """Mehr Notizen als eingestellt: feste Höhe, Rollbalken — live ans Ende (die
+        neueste), außer eine Eingabe ist offen (sie stünde sonst außer Sicht)."""
+        grenze = self._zeilen()
+        if grenze > 0 and anzahl > grenze:
+            self._liste.height = grenze * ZEILE_PX
+            self._liste.scroll = ft.ScrollMode.AUTO
+            self._liste.auto_scroll = self.live and self.bearbeite is None
+        else:
+            self._liste.height = None
+            self._liste.scroll = None
+            self._liste.auto_scroll = False
 
     def _uebungen_fuellen(self) -> None:
         """Die Namen der gewählten Quelle — klein und dicht, damit zehn Übungen passen."""

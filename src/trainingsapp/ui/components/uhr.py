@@ -3,10 +3,12 @@
 Zwei Darstellungen, umschaltbar unter Einstellungen → Übungen
 (`AppState.uhr_darstellung`, Vorgabe die Zeile):
 
-- **Zeile** (Skizzen A1–A4): unter „Gemacht | Notiz“ steht links als Text, was startet —
-  die Stoppuhr oder ein Timer der Übung, ▾ wählt um —, daneben die Zeit, rechts
-  „Bereitstellen“ und ein einziger ▶. So liest sich ▶ nie als „Timer starten“, wenn die
-  Stoppuhr gemeint ist.
+- **Zeile** (Skizzen A1–A4): links als Text, was startet — die Stoppuhr oder ein Timer der
+  Übung, ▾ wählt um —, daneben die Zeit, rechts „Bereitstellen“ und ein einziger ▶. So liest
+  sich ▶ nie als „Timer starten“, wenn die Stoppuhr gemeint ist. Sie steht als **erste Zeile
+  der Karte „Eintragen“**, vor Wiederholungen und Zeit (Ben, 27.10.2026: die Stoppuhr zählt
+  als Zeit, also unter die Einstellungen zu dem, was gesammelt wird); ohne Mengen allein unter
+  der Ausführung, in einem zugeklappten Block nur die laufende Anzeige (`views/plan.py`).
 - **Knöpfe** (Skizze B2): „Uhr“ und „Timer“ zwischen „Gemacht“ und „Notiz“.
 
 Läuft die Uhr dieser Übung, zeigen beide dieselbe Anzeige: die Zeit, Anhalten bzw. Weiter
@@ -136,7 +138,8 @@ def uhr_teile(
     zaehlt_knopf = ft.Chip(
         label=ft.Text("zählt" if zaehlt else "zählt nicht", size=12),
         selected=zaehlt,
-        show_checkmark=True,
+        # Ohne Haken: Das Wort sagt es, und in der Karte „Eintragen“ ist die Zeile schmal
+        show_checkmark=False,
         tooltip=f"Timerzeit zählt als {als} im offenen Eintrag — gilt für jetzt"
         if zaehlt
         else "Timerzeit zählt nicht — nur „gemacht“; gilt für jetzt",
@@ -197,16 +200,19 @@ def uhr_teile(
             padding=ft.Padding.only(left=10, right=6, top=6, bottom=6),
             border_radius=20,
             border=ft.Border.all(1, ft.Colors.OUTLINE),
+            # Der Name kürzt sich mit „…“, der Pfeil bleibt — das Menü füllt den Platz
+            # links der Zeit, dann liest es sich wie ein Auswahlfeld. Ohne Symbol davor
+            # (Skizze A1: „Stoppuhr ▾“): in der Karte „Eintragen“ ist die Zeile schmaler,
+            # das Symbol steht in den Menüpunkten und an der laufenden Anzeige
             content=ft.Row(
-                tight=True,
                 spacing=6,
                 controls=[
-                    ft.Icon(_symbol(profil), size=18),
                     ft.Text(
                         profil.anzeigename,
                         weight=ft.FontWeight.W_600,
                         max_lines=1,
                         overflow=ft.TextOverflow.ELLIPSIS,
+                        expand=True,
                     ),
                     ft.Icon(ft.Icons.ARROW_DROP_DOWN, size=20),
                 ],
@@ -238,12 +244,14 @@ def uhr_teile(
         ],
     )
     zeit = "0:00" if profil.ist_stoppuhr else dauer_text(profil.gesamt_s())
+    # Die Zeile steht in der Karte „Eintragen“ (27.10.2026) — 22 px schmaler als auf dem
+    # Block; enger gesetzt, damit „Stoppuhr ▾“ auf 412 px noch ganz dasteht
     zeile = ft.Container(
-        padding=ft.Padding.only(left=8, right=6, top=6, bottom=6),
+        padding=ft.Padding.only(left=6, right=4, top=6, bottom=6),
         border_radius=16,
         bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
         content=ft.Row(
-            spacing=6,
+            spacing=4,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Container(content=menue, expand=True, alignment=ft.Alignment.CENTER_LEFT),
@@ -257,12 +265,17 @@ def uhr_teile(
                 ft.IconButton(
                     ft.Icons.HOURGLASS_TOP,
                     tooltip="Bereitstellen — startet mit „Alle starten“",
+                    icon_size=22,
+                    padding=ft.Padding.all(4),
+                    size_constraints=ft.BoxConstraints(min_width=40, min_height=40),
                     on_click=bereitstellen(profil),
                 ),
                 ft.IconButton(
                     ft.Icons.PLAY_ARROW,
                     tooltip=f"{profil.anzeigename} starten",
-                    icon_size=30,
+                    icon_size=28,
+                    padding=ft.Padding.all(6),
+                    size_constraints=ft.BoxConstraints(min_width=44, min_height=44),
                     style=ft.ButtonStyle(bgcolor=ft.Colors.PRIMARY, color=ft.Colors.ON_PRIMARY),
                     on_click=starten(profil),
                 ),

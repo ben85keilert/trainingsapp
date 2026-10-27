@@ -17,6 +17,7 @@ subject ──┬── session ──── session_entry ──── entry_me
           │                      │
           │                      └──────────── measurement
           ├── hrv_recording ──── hrv_metrics_cache
+          ├── hrv_title      (gespeicherte Überschriften der Messungen, Migration 030)
           ├── plan ──────── plan_item
           ├── einheit ──┬── einheit_baustein   (Teile: HRV, Timer, GPS, Plan — Migration 018)
           │             └── einheit_ereignis   (Zeitleiste, unveränderlich)
@@ -65,12 +66,13 @@ für Pläne — `default_target_json`, `default_fields_json` (Parameter, seit 01
 Übung unabhängig. Zurück und hin geht es nur ausdrücklich per Knopf
 (`core/standards.py`: `als_standard`, `vom_standard`, `abweichungen`).
 
-**Varianten** (Migration 007): `exercise.family_id` zeigt auf das Original einer
-Variantenfamilie (nie auf eine andere Variante). Im Verlauf bilden Original und
-Varianten eine Kachel; ihre Mengen werden addiert und je Variante ausgewiesen
-(`core/tagesbilanz.py`). Eine Kopie ist zunächst Variante, im Editor lässt sie
-sich eigenständig machen. (Seit 21.10.2026 heißen Varianten auch die leichten innerhalb
-einer Übung, nächster Absatz; die Texte der Kopien sind offen, P61.)
+**Kopien mit gemeinsamer Kachel — ausgebaut** (Migration 007, zurückgenommen mit 031 am
+26.10.2026): `exercise.family_id` ließ eine Kopie im Verlauf die Kachel ihres Originals
+teilen („Im Verlauf zusammen mit“). Ben: „Vielleicht wird man später Verläufe
+zusammenzählen können, aber noch ist das nicht geplant.“ Jede Übung ist jetzt eine Kachel
+(`core/tagesbilanz.kacheln`); die Spalte bleibt leer stehen (SQLite lässt eine Spalte mit
+Fremdschlüssel nicht fallen), der Index ist weg. „Variante“ heißt seit 21.10.2026 das
+Etikett innerhalb einer Übung, nächster Absatz.
 
 **Varianten in der Übung** (Ben, 21.10.2026, `core/varianten.py`, ohne Migration): ein
 Auswahlfeld mit dem Schlüssel `variant` (Name „Variante“) in `exercise.result_spec`. Seine
@@ -167,6 +169,14 @@ Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,
   zurückholt.
 - Bewusst **keine** Übung: Pläne, Kurse, Pakete, Katalog und alle Tagesabfragen über
   `session_entry` sehen Tagesfelder nie.
+
+**Überschriften der HRV-Messungen** (Migration 030, Ben 26.10.2026): `hrv_title` je
+Profil — `name` (eindeutig je Profil), `pinned` (steht im Titel-Blatt oben), `last_used_at`
+(leer = vorab angelegt, nie vergeben). Jede vergebene Überschrift kommt beim Speichern
+hinein (`HrvRepo.titel_merken`); löschen im Titel-Blatt (✕) oder unter Einstellungen →
+HRV-Messung → Überschriften. Nur eine Liste zum Antippen: Der Titel einer Messung steht in
+der Messdatei und als Kopie in `hrv_recording.title`, nie hier. Die Migration übernimmt,
+was schon vergeben war.
 
 ## Die wichtigen Entscheidungen
 

@@ -33,7 +33,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -202,6 +202,18 @@ class TimerBaustein:
                 Ereignis(jetzt - self._t0, "timer", "ende", "Timer beendet", {"grund": "beendet"})
             )
         return out
+
+
+def uhr_angaben(lauf: TimerLauf) -> dict[str, Any]:
+    """Was die Uhr einer Übung vorhat — für die Startnotiz der Übung (Ben, 26.10.2026: der
+    Anfang der Uhr bekommt keine eigene Notiz, „der Tag Timer wird bei der Übung vermerkt“):
+    ``profil`` (Name in den Marken), ``profil_id``, ``soll_s`` des ersten Abschnitts (nicht
+    bei der Stoppuhr)."""
+    d: dict[str, Any] = {"profil": lauf.profil.markenname, "profil_id": lauf.profil.id}
+    erster = lauf.abschnitt(0)
+    if erster is not None and not lauf.vorwaerts:
+        d["soll_s"] = float(erster.dauer_s)
+    return d
 
 
 class HrvBaustein:
@@ -487,6 +499,10 @@ class Einheitslauf:
         self._gestartet: set[int] = set()
         self._nr = 0
         self._zurueck: dict[str, tuple[Ereignis, Projektion]] = {}
+        #: Spuren, auf denen schon ein Anfang in der Messung steht (ein Ende ohne ihn fällt weg)
+        self._begonnen: set[str] = set()
+        #: Ob die Einheit eine eigene Klammer bekam — am Start entschieden, für das Ende gemerkt
+        self._einheit_klammer: bool | None = None
         self._schlaf: float | None = None
         self._kopf_geschrieben = False
 
@@ -728,14 +744,20 @@ class Einheitslauf:
     @property
     def _einheit_spur(self) -> bool:
         """Eine eigene Spur für die Einheit lohnt nur, wenn die HRV-Aufnahme schon lief —
-        und nicht, wenn die Einheit eine einzelne Übung mit ihrem Timer ist (Ben,
-        19.10.2026): „Planke: Start“ und „Planke: Ende“ klammern sie schon, „Start: Planke“
-        und „Ende der Einheit“ wären dieselben Stellen noch einmal. Ein Plan-Ablauf behält
-        die Spur (mehrere Übungen, Pausen dazwischen)."""
+        und nicht, wenn die Einheit eine Übung mit ihrem Timer ist (Ben, 19.10.2026):
+        „Planke: Start“ und „Planke: Ende“ klammern sie schon, „Planke: Start“ und
+        „Planke: Ende“ der Einheit wären dieselben Stellen noch einmal. Auch ein Plan-Ablauf
+        bekommt keine Klammer (Ben, 26.10.2026: „Auch bei Plänen wird oft nur eine Übung
+        gemacht und später dann der Rest“ — Start und Ende lohnen erst bei Workouts, die
+        von vorn bis hinten durchlaufen). Bleibt: Training und Timer mit laufender Messung."""
         hrv = self.hrv
         if hrv is None or hrv.rolle is not Rolle.LAEUFT_SCHON:
             return False
-        return not isinstance(self.teil("plan"), UebungBaustein)
+        if all(t.art == "hrv" for t in self.teile):
+            # Nur die Messung, die schon lief (Einzelstarts, `ui.einheit.platz_machen`):
+            # nichts, was eine Klammer bräuchte (Ben, 26.10.2026: „Start: HRV-Messung“ weg)
+            return False
+        return self.teil("plan") is None
 
     def takt(self) -> list[Ereignis]:
         """Ereignisse aller Teile seit dem letzten Takt sammeln, schreiben, projizieren."""
@@ -779,7 +801,16 @@ class Einheitslauf:
         teil = self.teil("plan")
         if not isinstance(teil, UebungBaustein):
             return liste
-        return [in_uebung(e, teil.kontext.uebung_id, teil.name) for e in liste]
+        # Der Anfang der Uhr fällt mit „Wadenheben: Start“ (t_s = 0) zusammen und wird still
+        # (Ben, 26.10.2026); was die Uhr vorhat, trägt dafür die Startnotiz der Übung
+        timer = self.timer
+        out = []
+        for e in liste:
+            x = in_uebung(e, teil.kontext.uebung_id, teil.name, start_t_s=0.0)
+            if timer is not None and (x.quelle, x.art) == ("plan", "uebung_start"):
+                x = replace(x, daten={**x.daten, **uhr_angaben(timer.lauf)})
+            out.append(x)
+        return out
 
     def _aktiv(self, teil: Baustein) -> bool:
         """Läuft der Teil noch? Ohne Angabe (`aktiv`) gilt er als laufend."""
@@ -855,7 +886,13 @@ class Einheitslauf:
             return
         t0 = self.t0
         for e in neu:
-            p = projektion(e, self.id, einheit_spur=self._einheit_spur)
+            if (e.quelle, e.art) == ("einheit", "start"):
+                # Ob die Einheit eine Klammer bekommt, entscheidet sich am Anfang — das Ende
+                # folgt dem, auch wenn inzwischen ein Teil beitrat
+                self._einheit_klammer = self._einheit_spur
+            klammer = self._einheit_klammer
+            mit_klammer = klammer if klammer is not None else self._einheit_spur
+            p = projektion(e, self.id, einheit_spur=mit_klammer)
             if p is None:
                 continue
             if not p.grenze:
@@ -866,14 +903,19 @@ class Einheitslauf:
             offen = self._zurueck.pop(p.spur, None)
             if offen is not None and e.t_s - offen[0].t_s >= MIN_MARKE_S:
                 hrv.projizieren(offen[1], t0 + offen[0].t_s)
+                self._begonnen.add(p.spur)
             if p.ende:
-                hrv.projizieren(p, t0 + e.t_s)
+                # Ein Ende ohne Anfang auf dieser Spur (alles kürzer als 5 s) bliebe eine
+                # Notiz „… Ende“ im Leeren — weg damit (Ben, 26.10.2026)
+                if p.spur in self._begonnen:
+                    hrv.projizieren(p, t0 + e.t_s)
             else:
                 self._zurueck[p.spur] = (e, p)
         t = jetzt - t0
         for spur, (e, p) in list(self._zurueck.items()):
             if t - e.t_s >= MIN_MARKE_S:
                 hrv.projizieren(p, t0 + e.t_s)
+                self._begonnen.add(spur)
                 del self._zurueck[spur]
 
     async def laufen(self, takt_s: float = TICK_S) -> None:
@@ -957,4 +999,5 @@ __all__ = [
     "TimerBaustein",
     "UebungBaustein",
     "UebungKontext",
+    "uhr_angaben",
 ]

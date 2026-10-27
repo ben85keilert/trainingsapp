@@ -262,9 +262,10 @@ def test_ohne_varianten_keine_zeile_aber_das_etikett(page, state) -> None:
     ]
 
 
-def test_viele_varianten_nur_zeichen(page, state) -> None:
-    """D1: Passen die Namen nicht in eine Zeile und hat jede ein Zeichen, zeigt die Zeile nur
-    die Zeichen — Name und Beschreibung der gewählten darunter."""
+def test_viele_varianten_brechen_auf_zeilen_um(page, state) -> None:
+    """Passen die Namen nicht in eine Zeile, stehen sie als Knöpfe mit Zeichen und Namen in
+    einer umbrechenden Reihe (Ben, 26.10.2026: „lesbar auf mehrere Zeilen“) — bis dahin nur
+    Zeichen ohne Namen (D1). Die Beschreibung der gewählten steht darunter."""
     planke = [
         var.Variante("Unterarm", symbol="crop_square", text="Ellbogen unter den Schultern"),
         var.Variante("Arme gestreckt", symbol="height"),
@@ -277,13 +278,23 @@ def test_viele_varianten_nur_zeichen(page, state) -> None:
     plan, item = _plan(state, state.uebungen.laden(u.id))
     state.auspraegung_wahl[item.id] = {"variant": "Unterarm"}
     ansicht = plan_view(page, state, plan)
-    (zeile,) = [
+    assert not [
         x
         for x in _alle(ansicht)
         if isinstance(x, ft.SegmentedButton) and [s.value for s in x.segments][:1] == ["Unterarm"]
     ]
-    assert all(s.tooltip == s.value for s in zeile.segments)  # nur Zeichen, Name im Tooltip
-    assert "Unterarm – Ellbogen unter den Schultern" in _texte(ansicht)
+    (reihe,) = [
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Row)
+        and x.wrap
+        and len(x.controls) == 4
+        and all(isinstance(k, ft.OutlinedButton | ft.FilledTonalButton) for k in x.controls)
+    ]
+    assert isinstance(reihe.controls[0], ft.FilledTonalButton)  # die gewählte, getönt
+    texte = _texte(ansicht)
+    assert all(n in texte for n in ("Unterarm", "Arme gestreckt", "Seitlich", "Diagonal"))
+    assert "Unterarm – Ellbogen unter den Schultern" in texte
 
 
 def test_varianten_in_den_uebungseinstellungen(page, state) -> None:

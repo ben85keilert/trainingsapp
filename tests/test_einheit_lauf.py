@@ -73,13 +73,13 @@ async def test_hrv_laeuft_schon_timer_startet_auf_die_sekunde(aufbau) -> None:
     rec = laden(ergebnis.pfad)
     wand = {x["text"]: x["t_wall_s"] for x in rec.ereignisse}
     assert wand == {
-        "Start: Intervalle": 60.0,
+        "Intervalle: Start": 60.0,
         "Timer „T“: Belastung (Runde 1/2)": 60.0,
         "Pause (Runde 1/2)": 90.0,
         "Belastung (Runde 2/2)": 105.0,
         "Pause (Runde 2/2)": 135.0,
         "Timer fertig": 150.0,
-        "Ende der Einheit": 180.0,
+        "Intervalle: Ende": 180.0,
     }
     pause = next(x for x in rec.ereignisse if x["text"] == "Pause (Runde 1/2)")
     profil_id = next(b for b in repo.ereignisse(e.id) if b.quelle == "timer").daten["profil_id"]
@@ -178,7 +178,7 @@ async def test_kurze_abschnitte_bekommen_keine_marke(aufbau) -> None:
     rec = laden(lauf.aufnahme_stoppen(tmp_path).pfad)
     texte = [x["text"] for x in rec.ereignisse]
     # Die HRV lief schon vor der Einheit — darum Start und Ende der Einheit als eigene Spur
-    assert texte == ["Start: x", "Timer „ABC“: A", "C", "Timer beendet", "Ende der Einheit"]
+    assert texte == ["x: Start", "Timer „ABC“: A", "C", "Timer beendet", "x: Ende"]
     # Die Zeitleiste behält alles
     assert [x.daten.get("name") for x in repo.ereignisse(e.id) if x.art == "abschnitt"] == [
         "A",
@@ -207,12 +207,12 @@ async def test_pause_beendet_den_abschnitt_weiter_setzt_ihn_fort(aufbau) -> None
     rec = laden(ergebnis.pfad)
     wand = [(x["text"], x["t_wall_s"]) for x in rec.ereignisse]
     assert wand == [
-        ("Start: x", 5.0),
+        ("x: Start", 5.0),
         ("Timer „P“: Halten", 5.0),
         ("Timer angehalten", 25.0),
         ("weiter: Halten", 45.0),
         ("Timer fertig", 85.0),
-        ("Ende der Einheit", 95.0),
+        ("x: Ende", 95.0),
     ]
     _, teile = zusatz_lesen(ergebnis.pfad, float)
     assert [(a.name, round(a.von_s), round(a.bis_s)) for a in teile] == [
@@ -382,3 +382,37 @@ async def test_beitreten_nur_im_lauf() -> None:
     e = Einheitslauf(uhr=Uhr())
     with pytest.raises(RuntimeError):
         e.beitreten(TimerBaustein(TimerLauf(_intervall())))
+
+
+async def test_nur_die_messung_bekommt_keine_klammer(aufbau) -> None:
+    """Ben, 26.10.2026: Nach einem Training lief die Messung als Einheit für sich weiter —
+    „Start: HRV-Messung“ und „Ende der Einheit“ sind dann nur Rauschen."""
+    uhr, gurt, lauf, repo, profil, tmp_path = aufbau
+    lauf.aufnahme_starten()
+    await _sekunden(uhr, gurt, 5)
+    e = _einheit(lauf, uhr, repo, profil, "HRV-Messung")
+    e.hinzufuegen(HrvBaustein(lauf, basis=tmp_path))
+    e.starten()
+    await _sekunden(uhr, gurt, 60, e)
+    e.beenden()
+    await e.abschliessen()
+    rec = laden(lauf.aufnahme_stoppen(tmp_path).pfad)
+    assert rec.ereignisse == []
+    assert [x.art for x in repo.ereignisse(e.id) if x.quelle == "einheit"] == ["start", "ende"]
+
+
+async def test_ende_ohne_anfang_faellt_weg(aufbau) -> None:
+    """Alles kürzer als 5 s: Der Anfang bekommt keine Marke (5-s-Regel) — dann auch kein
+    „x: Ende“ und kein „Timer beendet“ im Leeren (Ben, 26.10.2026)."""
+    uhr, gurt, lauf, repo, profil, tmp_path = aufbau
+    lauf.aufnahme_starten()
+    await _sekunden(uhr, gurt, 5)
+    e = _einheit(lauf, uhr, repo, profil, "x")
+    e.hinzufuegen(HrvBaustein(lauf, basis=tmp_path))
+    e.hinzufuegen(TimerBaustein(TimerLauf(_intervall(), uhr=lauf.uhr)))
+    e.starten()
+    await _sekunden(uhr, gurt, 3, e)
+    e.beenden()
+    await e.abschliessen()
+    rec = laden(lauf.aufnahme_stoppen(tmp_path).pfad)
+    assert [x["text"] for x in rec.ereignisse] == []

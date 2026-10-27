@@ -105,7 +105,7 @@ vorgesehen. Die Kurstexte erklären, sie bewerten nicht.
 | 1 | Kern und Datenbank: `core/kurse.py`, Migration 016, `data/kurse.py`, `plan.course_chapter_id`, Schalter `kurse` | gebaut |
 | 2 | Oberfläche: dritter Reiter, Kurs, Kapitel, Weiter/Freischalten, Pläne aus Kapiteln | gebaut |
 | 3 | Paketformat v2 mit `kurse[]`, erster Kurs im Standardpaket | gebaut |
-| 4 | Kurseditor (eigene Kurse), Inline-Medien und Tonspieler (nach K-F6), Kurszeile auf „Heute“, Export ausgewählter Kurse, Zuweisung in Edition B, Sync des Fortschritts | offen |
+| 4 | Kurseditor (eigene Kurse), Inline-Medien und Tonspieler (nach K-F6), Kurszeile auf „Heute“, Export ausgewählter Kurse, Zuweisung in Edition B, Sync des Fortschritts — Stufen und Fragen: `plan_kurseditor.md` (27.10.2026) | offen |
 
 Tests: `tests/test_kurse.py` (Rechnung, Datenbank, Paketformat, Seed),
 `tests/test_ui_kurse.py` (Liste, Kurs, Kapitel, Weiter, Freischalten, Plan aus

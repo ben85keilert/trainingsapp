@@ -447,7 +447,7 @@ def titel(e: Einheitslauf) -> str:
     if (g := e.teil("gps")) is not None:
         namen.append(SPORT_NAMEN.get(getattr(g, "sportart", ""), "Training"))
     if (t := e.timer) is not None:
-        namen.append(t.lauf.profil.markenname)  # der Titel wird die Marke „Start: …“
+        namen.append(t.lauf.profil.markenname)  # der Titel wird die Marke „…: Start“
     return " · ".join(namen) or "HRV-Messung"
 
 

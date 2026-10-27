@@ -137,7 +137,6 @@ Menge ist **abgehakt** (leerer Haken) und wird getrennt ausgewiesen: „150 Wdh.
 3 Einträgen · zusätzlich abgehakt“. Die Zeitleiste zeigt den Tag nach der Uhr, je
 Plan ein Block (Ben, 18.10.2026: statt „Nach Plan“, „Nach Übung“, „Chronologisch“).
 
-**Verwandte Übungen** (Migration 007, bisher ebenfalls „Varianten“ genannt, P61): Eine
-Kopie einer Übung (`exercise.family_id`) teilt sich im Verlauf die Kachel des Originals
-und ist dort eine eigene Linie. Wer sie getrennt führen will (Liegestütz einarmig),
-macht sie im Editor eigenständig.
+**Kopien** sind eigene Übungen mit eigener Kachel im Verlauf. Bis 26.10.2026 teilte eine
+Kopie die Kachel ihres Originals (`family_id`, „Im Verlauf zusammen mit“, P61) — ausgebaut,
+Verläufe zusammenzuzählen ist nicht geplant (`docs/datenmodell.md`).

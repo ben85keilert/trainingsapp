@@ -1072,3 +1072,33 @@ async def test_forschungsexport_aus_der_hrv_auswertung(daten, monkeypatch) -> No
     with zipfile.ZipFile(BytesIO(archiv)) as z:
         dok = json.loads(z.read("einheit-v1.json"))
     assert dok["einheit"]["id"] == strecke.einheit_id and name.endswith(".zip")
+
+
+async def test_sportart_nachtraeglich_aendern(daten) -> None:
+    """Ben, 26.10.2026: als „Laufen“ gespeichert, aber Rad gefahren — die Zeile bekommt die
+    neue Sportart, der Tagebucheintrag wandert als Korrektur zur Übung „Radfahren“, Werte
+    und Zeiten bleiben; eine unbekannte oder gleiche Sportart ändert nichts."""
+    from trainingsapp.core.strecke import RAD
+    from trainingsapp.ui.training import sportart_aendern, uebung_fuer
+
+    state, tmp_path = daten
+    strecke, _ = await _training(state, tmp_path)
+    alt = state.sitzungen.eintrag_laden(strecke.session_entry_id)
+    assert alt is not None and alt.exercise_id == uebung_fuer(state, strecke.sportart).id
+    assert sportart_aendern(state, strecke, "schwimmen") is strecke and strecke.sportart != RAD
+    sportart_aendern(state, strecke, RAD)
+    neu = state.strecken.laden(strecke.id)
+    assert neu is not None and neu.sportart == RAD and strecke.sportart == RAD
+    eintrag = state.sitzungen.eintrag_laden(neu.session_entry_id)
+    assert eintrag is not None and eintrag.id != alt.id
+    assert eintrag.exercise_id == uebung_fuer(state, RAD).id
+    assert (eintrag.result, eintrag.started_at, eintrag.ended_at) == (
+        alt.result,
+        alt.started_at,
+        alt.ended_at,
+    )
+    assert state.sitzungen.eintrag_laden(alt.id) is not None  # ersetzt, nicht weg
+    assert state.strecken.zu_eintraegen([eintrag.id])[eintrag.id].id == strecke.id
+    # Noch einmal dieselbe Sportart: kein weiterer Eintrag
+    sportart_aendern(state, strecke, RAD)
+    assert state.strecken.laden(strecke.id).session_entry_id == eintrag.id

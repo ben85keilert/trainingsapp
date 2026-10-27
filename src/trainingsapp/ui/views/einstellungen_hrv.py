@@ -82,6 +82,9 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
     e = state.hrv_einstellungen()
     ansicht = state.ansicht()
 
+    async def zu_ueberschriften() -> None:
+        await page.push_route("/einstellungen/hrv/ueberschriften")
+
     def setzen(**werte: Any) -> None:
         for name, wert in werte.items():
             setattr(e, name, wert)
@@ -625,6 +628,19 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                     "notiz_uebungen",
                     "Übungen aus Plänen anbieten",
                     "In der Notiz die Übungen eines Plans als Namen zum Antippen einblenden.",
+                ),
+                ft.ListTile(
+                    dense=True,
+                    content_padding=ft.Padding.only(left=0, right=0),
+                    leading=ft.Icon(ft.Icons.TITLE),
+                    title=ft.Text("Überschriften"),
+                    subtitle=ft.Text(
+                        f"{len(state.hrv.titel_liste(state.profil.id))} gespeichert — zum "
+                        "Antippen im Titel-Blatt; anlegen, anheften, löschen",
+                        size=12,
+                    ),
+                    trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
+                    on_click=zu_ueberschriften,
                 ),
             ),
             karte(

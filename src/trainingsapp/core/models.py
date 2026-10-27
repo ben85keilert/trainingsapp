@@ -153,9 +153,6 @@ class Exercise:
     updated_at: datetime = field(default_factory=jetzt)
     #: Im Papierkorb seit (Migration 005) — ``None`` = nicht gelöscht
     deleted_at: datetime | None = None
-    #: Variante von … (Migration 007): gleiche Kachel im Verlauf; ``None`` =
-    #: eigene Kachel. Zeigt immer auf das Original, nie auf eine andere Variante.
-    family_id: str | None = None
     #: Aus welchem Paket die Übung kam (Migration 014, `core/pakete.py`);
     #: ``None`` = eigene Übung — hier angelegt oder kopiert.
     package_id: str | None = None
@@ -455,6 +452,23 @@ class HrvRecording:
 
 
 @dataclass(slots=True)
+class HrvTitel:
+    """Eine gespeicherte Überschrift für HRV-Messungen (Migration 030).
+
+    Je Profil eine Liste zum Antippen im Titel-Blatt (Ben, 26.10.2026: vordefinieren,
+    auffindbar abrufen, löschen). Jede vergebene Überschrift kommt von selbst hinein;
+    ``angeheftet`` hält sie oben, sonst zählt ``zuletzt`` — ``None``: noch nie vergeben.
+    """
+
+    id: str = field(default_factory=new_id)
+    subject_id: str = ""
+    name: str = ""
+    angeheftet: bool = False
+    zuletzt: datetime | None = None
+    created_at: datetime = field(default_factory=jetzt)
+
+
+@dataclass(slots=True)
 class Strecke:
     """Ein Ausdauertraining (Gehen, Laufen, Rad) — nur Ortsfreies (Migration 012).
 
@@ -485,6 +499,7 @@ class Strecke:
 __all__ = [
     "Exercise",
     "HrvRecording",
+    "HrvTitel",
     "Measurement",
     "Media",
     "MediaKind",

@@ -155,7 +155,8 @@ nächste Wert den alten Eintrag schloss.
 - Farbpunkt-Chips darunter blenden einzelne Linien aus. „Zusammen“, die bisherige
   Summenkurve, ist zuschaltbar und als Vorgabe aus.
 - Das Dropdown „Variante“ (`state.verlauf_variante`) entfällt; verwandte Übungen werden
-  ebenfalls Linien.
+  ebenfalls Linien. (Verwandte Übungen gibt es seit 26.10.2026 nicht mehr — „Im Verlauf
+  zusammen mit“ ist ausgebaut.)
 - „Training Nr.“ zählt über alle Linien gemeinsam.
 - Umsetzung:
   - Kern `core/verlauf.linien(...)`;
@@ -227,14 +228,14 @@ als Segmente etwa 420 px, drei kurze Namen („kurz · lang · weit“) passen.
 **Regel für die Variantenzeile** (eine Funktion im Kern mit Doctests; die Breite schätzt
 sie aus der Zeichenzahl gegen `page.width`):
 1. Passen die Namen in eine Zeile → Segmente mit Namen, ein gesetztes Symbol steht davor.
-2. Passen sie nicht und **jede** Variante hat ein Symbol oder Kürzel → eine Zeile nur mit
-   Symbolen. Name und Beschreibung der gewählten Variante stehen darunter. Langes Drücken
-   oder der Tooltip nennt den Namen (D1).
-3. Sonst → Namen in zwei Spalten, so viele Reihen wie nötig. Auch das ist ein Tipp (D2).
+2. Sonst → Knöpfe mit Symbol und Namen, so breit wie ihr Name, in einer Reihe, die auf so
+   viele Zeilen umbricht, wie sie braucht (Ben, 26.10.2026: vier Varianten „Atmen
+   Bauch/Brust/Schultern/Rücken“ sollen „lesbar auf mehrere Zeilen angeordnet werden
+   können“). Die Beschreibung der gewählten steht darunter.
 
-**Wo der Name wegfällt:** nur in der Variantenzeile. Überall sonst stehen Symbol und
-Name: Heute geleistet, Tagebuch, Tag, Verlauf, Leistungen-Blatt, das Blatt hinter dem
-Etikett.
+Bis 26.10.2026 gab es stattdessen eine Zeile nur mit Symbolen, wenn jede Variante eines
+hatte (D1), sonst zwei Spalten mit abgeschnittenen Namen (D2). Beides ist ausgebaut: Der
+Name steht jetzt überall — Symbol und Kürzel bleiben ein Zusatz davor.
 
 **Je Variante** (D3/D4):
 - **Name** (Pflicht);

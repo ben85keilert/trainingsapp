@@ -73,20 +73,18 @@ def test_tageswerte_mittel_und_hoechster_wert() -> None:
     assert tageswerte(tage, stab) == [(tag, 5.5)]
 
 
-def test_tageszeilen_mit_varianten_und_abgehakt() -> None:
-    """Varianten laufen in einer Zeile zusammen und werden ausgewiesen; ein zusätzliches
-    „Gemacht“ ohne Werte steht dahinter."""
+def test_tageszeilen_je_uebung_und_abgehakt() -> None:
+    """Jede Übung ist eine Zeile — eine Kopie läuft nicht mehr mit dem Original zusammen
+    (26.10.2026); ein zusätzliches „Gemacht“ ohne Werte steht dahinter."""
     namen = {"lgs": "Liegestützen", "wand": "an der Wand"}
     eintraege = [
         _e(SPEC_SAETZE_WDH, "lgs", reps=[14, 14]),
         _e(SPEC_SAETZE_WDH, "wand", reps=[15]),
     ]
-    (z,) = tageszeilen(eintraege, lambda _: "lgs", namen)
-    assert z.wert == 43.0 and z.zeile == "3 Sätze · 14 · 14 · 15"
-    assert z.zusatz.startswith("davon Liegestützen: 28 Wdh.")
-    (z,) = tageszeilen(
-        [_e(SPEC_SAETZE_WDH, "lgs", reps=[10]), _e(SPEC_SAETZE_WDH, "lgs")], lambda x: x, namen
-    )
+    lgs, wand = tageszeilen(eintraege, namen)
+    assert (lgs.kachel_id, lgs.wert, lgs.zeile) == ("lgs", 28.0, "2 Sätze · 14 · 14")
+    assert (wand.kachel_id, wand.wert, wand.zusatz) == ("wand", 15.0, "")
+    (z,) = tageszeilen([_e(SPEC_SAETZE_WDH, "lgs", reps=[10]), _e(SPEC_SAETZE_WDH, "lgs")], namen)
     assert z.zusatz == "zusätzlich abgehakt"
 
 

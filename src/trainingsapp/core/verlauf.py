@@ -399,42 +399,30 @@ def linien(eintraege: Iterable[tuple[date, SessionEntry]], k: Kennzahl) -> list[
     return ergebnis
 
 
-def linie_name(linie: Linie, namen: Mapping[str, str], kachel_id: str) -> str:
-    """Wie eine Linie heißt: ihre Variante („kurz“), ohne Variante „ohne Variante“ — gehört
-    sie zu einer verwandten Übung (gleiche Kachel), steht deren Name davor.
+def linie_name(linie: Linie) -> str:
+    """Wie eine Linie heißt: ihre Variante („kurz“), ohne Variante „ohne Variante“.
 
-    >>> namen = {"lgs": "Liegestütz", "wand": "Liegestütz an der Wand"}
-    >>> linie_name(Linie("lgs", "kurz", ()), namen, "lgs")
+    >>> linie_name(Linie("lgs", "kurz", ()))
     'kurz'
-    >>> linie_name(Linie("wand", "", ()), namen, "lgs")
-    'Liegestütz an der Wand'
-    >>> linie_name(Linie("lgs", "", ()), namen, "lgs")
+    >>> linie_name(Linie("lgs", "", ()))
     'ohne Variante'
     """
-    if linie.exercise_id == kachel_id:
-        return linie.variante or "ohne Variante"
-    name = namen.get(linie.exercise_id, "?")
-    return f"{name} · {linie.variante}" if linie.variante else name
+    return linie.variante or "ohne Variante"
 
 
-def linien_ordnen(
-    liste: Iterable[Linie], kachel_id: str, reihenfolge: Sequence[str], namen: Mapping[str, str]
-) -> list[Linie]:
+def linien_ordnen(liste: Iterable[Linie], reihenfolge: Sequence[str]) -> list[Linie]:
     """Die Varianten der Übung in der Reihenfolge ihrer Einstellungen, dann inzwischen
-    entfernte, dann was ohne Variante eingetragen wurde, zuletzt verwandte Übungen — so
-    behält jede Linie ihre Farbe, welcher Zeitraum auch gezeigt wird.
+    entfernte, zuletzt was ohne Variante eingetragen wurde — so behält jede Linie ihre
+    Farbe, welcher Zeitraum auch gezeigt wird.
 
-    >>> namen = {"lgs": "Liegestütz", "wand": "Liegestütz an der Wand"}
-    >>> l = [Linie("wand", "", ()), Linie("lgs", "", ()), Linie("lgs", "lang", ()),
-    ...      Linie("lgs", "alt", ()), Linie("lgs", "kurz", ())]
-    >>> [linie_name(x, namen, "lgs") for x in linien_ordnen(l, "lgs", ["kurz", "lang"], namen)]
-    ['kurz', 'lang', 'alt', 'ohne Variante', 'Liegestütz an der Wand']
+    >>> l = [Linie("lgs", "", ()), Linie("lgs", "lang", ()), Linie("lgs", "alt", ()),
+    ...      Linie("lgs", "kurz", ())]
+    >>> [linie_name(x) for x in linien_ordnen(l, ["kurz", "lang"])]
+    ['kurz', 'lang', 'alt', 'ohne Variante']
     """
     vorne = list(reihenfolge)
 
     def rang(x: Linie) -> tuple[int, int, str]:
-        if x.exercise_id != kachel_id:
-            return (3, 0, f"{namen.get(x.exercise_id, '')}|{x.variante}")
         if x.variante in vorne:
             return (0, vorne.index(x.variante), "")
         return (1, 0, x.variante) if x.variante else (2, 0, "")
@@ -578,23 +566,20 @@ def ueberblick(werte: Sequence[tuple[date, float]], trainings: int, heute: date)
 
 
 def je_tag_der_woche(
-    eintraege: Iterable[tuple[date, SessionEntry]],
-    kachel_von: Callable[[str], str],
-    beginn: date,
+    eintraege: Iterable[tuple[date, SessionEntry]], beginn: date
 ) -> dict[date, set[str]]:
-    """Welche Übungen (Kacheln) an welchem Tag der Woche ab ``beginn`` dran waren.
+    """Welche Übungen an welchem Tag der Woche ab ``beginn`` dran waren.
 
-    >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
     >>> mo = date(2026, 10, 12)
     >>> liste = [(mo, SessionEntry(exercise_id="a")), (mo + timedelta(days=8), SessionEntry())]
-    >>> je_tag_der_woche(liste, lambda k: k, mo)
+    >>> je_tag_der_woche(liste, mo)
     {datetime.date(2026, 10, 12): {'a'}}
     """
     ende = beginn + timedelta(days=6)
     out: dict[date, set[str]] = {}
     for t, e in eintraege:
         if beginn <= t <= ende:
-            out.setdefault(t, set()).add(kachel_von(e.exercise_id))
+            out.setdefault(t, set()).add(e.exercise_id)
     return out
 
 
@@ -655,8 +640,7 @@ def trend(werte: Sequence[tuple[date, float]], heute: date, tage: int = 28) -> f
 
 @dataclass(frozen=True, slots=True)
 class Tageszeile:
-    """Eine Übung an einem Tag — verwandte Übungen zusammen wie in der Tagesbilanz, jede
-    Variante für sich."""
+    """Eine Übung an einem Tag — jede Variante für sich."""
 
     kachel_id: str
     #: die erste Kennzahl der Übung — ``None``: nur abgehakt
@@ -664,38 +648,34 @@ class Tageszeile:
     wert: float | None
     #: „3 Sätze · 15 · 15 · 13“, sonst die Zusammenfassung („408 m · 5:05 Zeit“)
     zeile: str
-    #: woraus sie besteht (verwandte Übungen, Ausprägungen) oder „zusätzlich abgehakt“
+    #: woraus sie besteht (Ausprägungen) oder „zusätzlich abgehakt“
     zusatz: str = ""
     #: die Variante dieser Zeile — leer ohne (Ben, 21.10.2026)
     variante: str = ""
 
 
-def tageszeilen(
-    eintraege: Iterable[SessionEntry],
-    kachel_von: Callable[[str], str],
-    namen: dict[str, str],
-) -> list[Tageszeile]:
+def tageszeilen(eintraege: Iterable[SessionEntry], namen: dict[str, str]) -> list[Tageszeile]:
     """Die Übungen eines Tages, in der Reihenfolge ihres ersten Eintrags — je Variante eine
     eigene Zeile mit eigener Zahl (Ben, 21.10.2026: „Varianten werden separat gezählt“).
 
     >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
     >>> def e(x, *n, v=""): return SessionEntry(exercise_id=x, spec_snapshot=SPEC_SAETZE_WDH,
     ...     result={"reps": list(n), **({"variant": v} if v else {})})
-    >>> z = tageszeilen([e("lgs", 15, 15), e("lgs", 13), e("kb")], lambda x: x, {})
+    >>> z = tageszeilen([e("lgs", 15, 15), e("lgs", 13), e("kb")], {})
     >>> [(t.kachel_id, t.wert, t.zeile) for t in z]
     [('lgs', 43.0, '3 Sätze · 15 · 15 · 13'), ('kb', None, 'abgehakt')]
     >>> z = tageszeilen([e("lgs", 30, v="kurz"), e("lgs", 15, v="lang"), e("lgs", 30, v="kurz")],
-    ...                 lambda x: x, {})
+    ...                 {})
     >>> [(t.variante, t.wert, t.zusatz) for t in z]
     [('kurz', 60.0, ''), ('lang', 15.0, '')]
     """
     zeilen = []
-    for k in kacheln(eintraege, kachel_von):
+    for k in kacheln(eintraege):
         je_variante: dict[str, list[SessionEntry]] = {}
         for e in (e for b in k.teile for e in b.eintraege):
             je_variante.setdefault(variante_von(e.result), []).append(e)
         for variante, alle in je_variante.items():
-            (teil,) = kacheln(alle, kachel_von)
+            (teil,) = kacheln(alle)
             kz = kennzahlen(alle)
             erste = kz[0] if kz else None
             wert = tageswert(alle, erste) if erste is not None else None

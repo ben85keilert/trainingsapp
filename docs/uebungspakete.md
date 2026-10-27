@@ -26,8 +26,7 @@ Tabelle `package` und Spalte `exercise.package_id` seit Migration 014,
 
 **Paketstand.** Jede Übung eines Pakets trägt ihre Standardwerte aus dem Paket
 (`package_standard_json`, genau die Felder des Dateiformats unten: Name, Beschreibung,
-Symbol, Parameter samt Chips, Ziel, Limits, Typen, Regionen, Videos, „Im Verlauf
-zusammen mit“ — `variante_von`).
+Symbol, Parameter samt Chips, Ziel, Limits, Typen, Regionen, Videos).
 Jeder Import frischt ihn auf; der Start trägt ihn beim Paket „Standard“ nur nach, wo er
 fehlt. Wer einen Typ oder eine Region umbenennt oder löscht, ändert ihn mit — die
 Paketübungen gelten danach nicht als „geändert“ (Ben, 15.10.2026). „Auf Paketstand
@@ -151,8 +150,7 @@ ohne Kurse wird weiter als Version 1 geschrieben, ältere Apps lesen sie:
       "key": "baum_tief",
       "name": "Stehen wie ein Baum, tief",
       "typen": ["Qigong"],
-      "spec": "halten",
-      "variante_von": "baum"
+      "spec": "halten"
     }
   ]
 }
@@ -188,7 +186,7 @@ Je Übung:
 | `zaehlt_als` | nein | „Zählt als“, wenn die Übung Haltezeit anbietet: `hold` (Haltezeit, ein Satz je Lauf) oder `duration` (Zeit); fehlt = Haltezeit. Ohne Haltezeit zählt die Uhr immer als Zeit. Im Drei-Wege-Abgleich ein Feld |
 | `default_felder` | — | **überlesen** seit 22.10.2026 (P79, C2): Was die Übung hat, bieten alle Pläne an; weniger stellt man in der Planübung ein. Der Export schreibt es nicht mehr |
 | `media[]` | nein | `{kind, source, uri, title, license}`; leere `uri` und `source: "local"` fallen weg. `uri` nur `https://…` oder `mailto:…` — andere Schemata (`http://`, `intent://`, `tel:`, `file://`) verwirft der Import still, die Übung bleibt; die App öffnet außerdem vor jedem Tipp nur solche Adressen (`core/links.py`, auch für Links im Kapiteltext) |
-| `variante_von` | nein | „Im Verlauf zusammen mit“: Schlüssel oder ID des Originals (im Paket oder schon auf dem Gerät) — die Kopie steht im Verlauf mit ihm auf einer Kachel |
+| `variante_von` | — | **überlesen** seit 26.10.2026: „Im Verlauf zusammen mit“ (Kopie teilt die Kachel des Originals) ist ausgebaut; der Export schreibt es nicht mehr, `trainingsapp-paket pruefen` prüft es nicht mehr |
 
 Je Kurs (`kurse[]`, Formatversion 2):
 
@@ -219,10 +217,6 @@ Namen „Grundausstattung“ (Konstante `GRUNDAUSSTATTUNG`). Für alle anderen P
 gehört die Paket-ID in die Ableitung, damit zwei Pakete denselben Schlüssel
 verwenden dürfen.
 
-**Varianten:** `variante_von` gilt, wenn das Original nach dem Import da ist. Ist
-das Original selbst Variante, hängt die Übung an dessen Original (keine Ketten);
-eine Übung, die Original anderer ist, bleibt eigenständig.
-
 ## Inhalte pflegen (Inhalte-Repo, `TRAININGSAPP_PAKETE`, `trainingsapp-paket`)
 
 Eigene Pakete entstehen im privaten Repo `trainingsapp-inhalte` als TOML wie
@@ -248,6 +242,8 @@ uv run --project ../trainingsapp trainingsapp-paket pruefen pakete/*.toml
 uv run --project ../trainingsapp trainingsapp-paket bauen pakete/*.toml --ziel dist/
 uv run --project ../trainingsapp trainingsapp-paket index dist/*.json \
   --ziel dist/index.json --basis-url https://…/pakete/ --quelle "Praxis Ebert"
+uv run --project ../trainingsapp trainingsapp-paket uebernehmen .daten/trainingsapp.db \
+  pakete/standard.toml [--probe]          # oder ein Export: ~/Downloads/uebungspaket_Standard.json
 ```
 
 `pruefen` wendet die Regeln des Standardpakets an (Schlüssel, Beschreibung, Variante,
@@ -260,6 +256,32 @@ Größe, Neuigkeiten, reserviertes Feld `signatur`) — das Format, das die App 
 liest. `quelle URL` liest einen veröffentlichten Index wie die App und prüft jede
 Paketdatei samt Prüfsumme. Wie die Dateien auf den Server kommen: Homepage,
 `docs/runbooks/trainingsapp-pakete.md` (rsync mit beschränktem Schlüssel).
+
+**Aus der App zurück ins TOML** (Ben, 27.10.2026): Chips, Ziele, Timer und Varianten
+stellt man leichter in der App ein als in der Datei. `uebernehmen` liest die Quelle und
+trägt je Übung die Felder, die vom Stand der Datei abweichen, in ihren
+`[[exercises]]`-Block ein. Quelle ist die **Datenbank der App** (`.db`, nur lesend —
+im Inhalte-Repo `.daten/trainingsapp.db` nach `./start.sh`): Übungen des Pakets und die
+Pläne, die Kurskapitel angelegt haben; oder ein **Export** aus dem Paketmanager (JSON,
+nur Übungen — die App schreibt kein TOML, `tomllib` liest nur). Zugeordnet wird über die
+ID, die der Leser aus `key` rechnet; `key`, Kommentare, Abschnitte, Reihenfolge und Kurse
+bleiben (`tomlkit`, nur in der Gruppe `dev`). Parameter, die einer Vorlage entsprechen,
+werden wieder `spec = "…"`, andere ein vollständiges `result_spec`. Die Ausgabe nennt je
+Übung die Felder; `git diff` zeigt den Stand. Regeln:
+
+- Gleiches Paket, andere Version → nichts: Die App hat den Stand der Datei nie gesehen,
+  die Quelle brächte Altes zurück. Erst `version` heben, App starten, dann übernehmen.
+- Übungen der Quelle ohne Block (eigene, aus anderen Paketen) werden nur genannt; Übungen
+  der Datei, die nicht in der Quelle sind, bleiben unverändert — ein Export darf eine
+  Auswahl sein.
+- Typen und Regionen gelten als Mengen (die App führt sie in anderer Reihenfolge).
+- **Pläne** (nur aus der Datenbank): Ein Plan mit `kurs_kapitel_id` gehört zur Vorlage
+  gleichen Namens in seinem Kapitel (`plaene[]`); Wochentage und Übungen (mit `key`,
+  Ziel und Felder nur, wo der Plan eigene hat) ersetzen die der Vorlage. Ein Plan ohne
+  Vorlage dieses Namens wird genannt, nicht angelegt; eigene Pläne ohne Kapitel haben im
+  Paketformat keinen Platz. Timer, „automatisch weiter“ und Chips je Planübung kennt
+  die Vorlage nicht — sie bleiben in der App (Erweiterung des Formats: offen).
+- `--probe` zeigt nur. Nach dem Schreiben läuft `pruefen` über die Datei.
 
 ## Paketquellen — Updates online (Ben, 16.10.2026)
 

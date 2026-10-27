@@ -27,8 +27,9 @@ Routen:
     /uebung/neu, /uebung/<id>, /uebung/<id>/bearbeiten   Katalog
     /einstellungen                  Profile und App-Einstellungen
     /archiv, /papierkorb            Archivierte und gelöschte Übungen (und Pläne)
-    /verlauf/<kachel_id>            Kurve der Tagessummen einer Kachel (mit Varianten)
+    /verlauf/<kachel_id>            Kurve der Tagessummen einer Übung (je Variante eine Linie)
     /einstellungen/hrv              Einstellungen der HRV-Messung
+    /einstellungen/hrv/ueberschriften   Gespeicherte Überschriften der Messungen (Migration 030)
     /einstellungen/training         Training: Karte einfärben, Tempo mit Pausen, Spalten je km
     /einstellungen/profile          Profile anlegen, umbenennen, löschen
     /einstellungen/tags             Typen und Regionen der Übungen: anlegen, umbenennen, löschen
@@ -94,6 +95,7 @@ from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view, 
 from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_anhaenge import einstellungen_anhaenge
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
+from trainingsapp.ui.views.einstellungen_hrv_titel import einstellungen_hrv_titel
 from trainingsapp.ui.views.einstellungen_tags import einstellungen_tags_view
 from trainingsapp.ui.views.einstellungen_training import einstellungen_training
 from trainingsapp.ui.views.eintrag import eintrag_view
@@ -779,6 +781,8 @@ def main(page: ft.Page) -> None:
             ablegen(lambda: einstellungen(page, state, browser))
             if teile[1:2] == ["hrv"]:
                 ablegen(lambda: einstellungen_hrv(page, state))
+                if teile[2:3] == ["ueberschriften"]:
+                    ablegen(lambda: einstellungen_hrv_titel(page, state))
             elif teile[1:2] == ["training"]:
                 ablegen(lambda: einstellungen_training(page, state))
             elif teile[1:2] == ["profile"]:

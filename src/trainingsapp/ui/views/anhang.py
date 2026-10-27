@@ -45,11 +45,7 @@ def reihe_fuer(state: AppState, basis: str, a: Anhang) -> list[Anhang]:
     zuerst), sonst durch die Anhänge des Eintrags — bzw. des Tags (Notiz zum Tag)."""
     teile = [t for t in basis.split("/") if t]
     if teile[:1] == ["uebung"] and len(teile) >= 2:
-        uebung = state.uebungen.laden(teile[1], mit_geloeschten=True)
-        ids = [teile[1]]
-        if uebung is not None:
-            ids += [v.id for v in state.uebungen.varianten(uebung.id)]
-        alle = state.anhaenge.je_uebung(state.profil.id, ids)
+        alle = state.anhaenge.je_uebung(state.profil.id, [teile[1]])
         reihe = [x.anhang for x in reversed(alle)]
     elif a.zum_tag is not None:
         reihe = state.anhaenge.zum_tag(a.profil_id or state.profil.id, a.zum_tag)

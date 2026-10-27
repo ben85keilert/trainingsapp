@@ -42,7 +42,6 @@ from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import AUDIO, BILD, VIDEO, Anhang
 from trainingsapp.core.aufnahme_bezug import Bezug, zeit_text
 from trainingsapp.core.models import Exercise, Session, SessionEntry
-from trainingsapp.core.tagesbilanz import kachel
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -437,7 +436,7 @@ def _nachtragen_zeile(
                     ft.TextButton(
                         "Im Verlauf ansehen",
                         icon=ft.Icons.SHOW_CHART,
-                        on_click=weiter_nach(f"/verlauf/{kachel(uebung, uebung.id)}"),
+                        on_click=weiter_nach(f"/verlauf/{uebung.id}"),
                     ),
                 ],
             )

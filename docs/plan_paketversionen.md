@@ -41,7 +41,6 @@ Stand 17.10.2026: **geplant; gebaut ist nur Phase 1** (K6, Abschnitt 7). Heute i
 | Chips und die übrigen Vorgaben der Eingabe (Startwerte, Grenzen) | patch |
 | Ziel (`default_target`), Timer und Limits (`limit_spec`) — `default_felder` entfällt seit 22.10.2026 (P79 C2) | patch |
 | Symbol (`icon_key`), Typen, Regionen | patch |
-| Variante (`variante_von`, teilt die Kachel im Verlauf) | patch |
 
 Kurse — ein Update ersetzt heute den ganzen Kurs (`kurs_stand`); bearbeiten kann man Kurse
 noch nicht:
@@ -175,7 +174,6 @@ zugleich die Prüfung auf umbenannte oder gestrichene keys, die es bisher nicht 
 Noch offen (im Katalog, `docs/offene_fragen.md`, P31–P35):
 
 - Name des Feldes für die Textversion (`versionsname`?).
-- Variante (`variante_von`) als patch — vorgeschlagen, nicht eigens entschieden.
 - Wo der Hinweis nach einem minor-Update steht: Das Label unter dem Zahnrad sagt heute
   „aktualisiert: Standard“ (`AppState.updates_label`) — reicht das, oder dazu die Seite
   „Updates“ und die Übung?

@@ -133,6 +133,18 @@ async def test_ablauf_mit_pausen_traegt_jede_uebung_ein(umgebung) -> None:
         if x.get("marke", {}).get("spur") == "uebung"
     ]
     assert spur[:3] == ["Planke: Start", "Planke: Ende", "Pause"]
+    # Die Uhr der Planke beginnt mit ihr: kein „Halten (Runde 1/2)“, die Startnotiz trägt
+    # die Uhr; die Pause der Uhr bleibt eine Notiz (Ben, 26.10.2026)
+    alle = [x["text"] for x in messlauf.aufnahme.ereignisse]
+    assert "Halten (Runde 1/2)" not in alle and "Pause (Runde 1/2)" in alle
+    # Der Plan-Ablauf bekommt keine Klammer der Einheit (Ben, 26.10.2026: oft wird nur eine
+    # Übung gemacht; Start und Ende lohnen erst bei Workouts)
+    assert "Kräftigung kurz: Start" not in alle and "Kräftigung kurz: Ende" not in alle
+    assert not any(
+        x.get("marke", {}).get("spur") == "einheit" for x in messlauf.aufnahme.ereignisse
+    )
+    start = next(x for x in messlauf.aufnahme.ereignisse if x["text"] == "Planke: Start")
+    assert start["marke"]["soll_s"] == 10.0 and start["marke"].get("profil")
     assert "Atmung: Start" in spur and spur[-1] == "Atmung: Ende"
     assert "Kniebeuge: Start" not in spur  # unter 5 s: keine Marke
     # Die Notizen nennen ihre Übung per Kurzcode (A15) — die Pause nennt keine

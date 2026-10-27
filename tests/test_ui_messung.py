@@ -1502,8 +1502,8 @@ def test_titel_vorschlag_ist_der_geuebte_plan(daten) -> None:
     blatt = seite.aufrufe[-1]
     titel_feld = next(c for c in _alle_controls(blatt) if isinstance(c, ft.TextField))
     assert titel_feld.value == "Beine"
-    chips = [c.label.value for c in _alle_controls(blatt) if isinstance(c, ft.Chip)]
-    assert "Beine" in chips  # auch als Vorschlag zum Antippen
+    zeilen = [c.title.value for c in _alle_controls(blatt) if isinstance(c, ft.ListTile)]
+    assert "Beine" in zeilen  # auch in der Liste zum Antippen (26.10.2026: statt Chips)
 
 
 async def test_crash_backup_wird_beim_start_erkannt_und_wiederhergestellt(daten) -> None:

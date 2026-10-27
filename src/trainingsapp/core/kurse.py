@@ -348,14 +348,12 @@ def bedingung_stand(
     seit: datetime | None,
     eintraege: Iterable[tuple[date, SessionEntry]] = (),
     messungen: Iterable[HrvRecording] = (),
-    familie: Iterable[str] = (),
     plan_uebungen: Iterable[str] = (),
 ) -> Stand:
     """Wie weit die Bedingung erfüllt ist — gerechnet ab ``seit`` (Kapitelstart).
 
     ``eintraege`` sind gültige Einträge mit ihrem lokalen Tag (wie
-    `SessionRepo.eintraege_zwischen`), ``familie`` die Übung der Bedingung samt
-    Varianten, ``plan_uebungen`` die Übungen der Kapitelpläne (für ``tage``;
+    `SessionRepo.eintraege_zwischen`), ``plan_uebungen`` die Übungen der Kapitelpläne (für ``tage``;
     leer = jeder Eintrag zählt). ``seit=None`` heißt: Kapitel noch nicht
     erreicht — nichts zählt.
 
@@ -365,10 +363,10 @@ def bedingung_stand(
     >>> e = [(date(2026, 10, 12 + i), SessionEntry(exercise_id="l", result={"reps": [20, 20]},
     ...       spec_snapshot=SPEC_SAETZE_WDH, started_at=t0 + timedelta(days=i))) for i in range(3)]
     >>> b = Bedingung(SUMME, "l", "reps", 100)
-    >>> s = bedingung_stand(b, t0, e, familie={"l"})
+    >>> s = bedingung_stand(b, t0, e)
     >>> (s.ist, s.soll, s.erfuellt)
     (120.0, 100.0, True)
-    >>> bedingung_stand(b, t0 + timedelta(days=1), e, familie={"l"}).ist  # ab Tag 2
+    >>> bedingung_stand(b, t0 + timedelta(days=1), e).ist  # ab Tag 2
     80.0
     >>> bedingung_stand(Bedingung(TAGE, soll=3), t0, e).ist
     3.0
@@ -382,11 +380,10 @@ def bedingung_stand(
         return Stand(0.0, soll)
     ab = [(t, e) for t, e in eintraege if e.started_at is not None and e.started_at >= seit]
     if bedingung.art == SUMME:
-        ids = set(familie) or {bedingung.exercise_id}
         summe = sum(
             mengen(e.spec_snapshot, e.result).get(bedingung.feld, 0.0)
             for _, e in ab
-            if e.exercise_id in ids
+            if e.exercise_id == bedingung.exercise_id
         )
         return Stand(summe, soll)
     if bedingung.art == TAGE:

@@ -14,9 +14,9 @@ Drei Reiter:
   (mit Wochenleiste, die beim Scrollen mitgeht) oder nach Übungen (`views/tagebuch.py`).
 
 Eine Übung antippen öffnet `/verlauf/<kachel_id>` (`verlauf_kachel.py`): ihre Kurve und
-die Ergebnisse je Tag. Varianten einer Übung laufen zusammen (Kachel,
-`core/tagesbilanz`). Gerechnet wird in `core/verlauf.py`; HRV-Messungen stehen bewusst
-nicht hier (Ben: ohne feste Randbedingungen wenig aussagekräftig, P39).
+die Ergebnisse je Tag — jede Übung ist eine Kachel (`core/tagesbilanz`). Gerechnet wird in
+`core/verlauf.py`; HRV-Messungen stehen bewusst nicht hier (Ben: ohne feste
+Randbedingungen wenig aussagekräftig, P39).
 
 **Einmal lesen, in der Spalte auffrischen** (N23, 19.10.2026): Die Einträge aller Tage
 (`_Daten`) werden je Aufbau der Ansicht einmal gelesen und gehalten. Tag wählen, Woche
@@ -39,7 +39,6 @@ import flet as ft
 from trainingsapp.core import tagesfelder as tf
 from trainingsapp.core import varianten as var
 from trainingsapp.core.models import Exercise, SessionEntry
-from trainingsapp.core.tagesbilanz import kachel
 from trainingsapp.core.verlauf import (
     WOCHENTAGE,
     haeufigkeit,
@@ -86,9 +85,6 @@ class _Daten:
     felder: dict[str, tf.Tagesfeld] = field(default_factory=dict)
     werte: list[tf.Tageswert] = field(default_factory=list)
 
-    def kachel_von(self, exercise_id: str) -> str:
-        return kachel(self.katalog.get(exercise_id), exercise_id)
-
 
 def _daten(state: AppState) -> _Daten:
     heute = state.heute()
@@ -104,7 +100,7 @@ def _daten(state: AppState) -> _Daten:
         state.tageswerte.zwischen(state.profil.id, None, heute),
     )
     for tag, e in eintraege:
-        daten.je_kachel.setdefault(daten.kachel_von(e.exercise_id), []).append((tag, e))
+        daten.je_kachel.setdefault(e.exercise_id, []).append((tag, e))
     return daten
 
 
@@ -241,7 +237,7 @@ def _tage_inhalt(
     jetzt = montag(heute)
     beginn = state.verlauf_woche or jetzt
     woche = [beginn + timedelta(days=i) for i in range(7)]
-    uebungen_je_tag = je_tag_der_woche(daten.eintraege, daten.kachel_von, beginn)
+    uebungen_je_tag = je_tag_der_woche(daten.eintraege, beginn)
     mit_werten = {w.tag for w in daten.werte if woche[0] <= w.tag <= woche[-1]}
     tag = _gewaehlter_tag(
         state.verlauf_tag, woche, heute, sorted(set(uebungen_je_tag) | mit_werten)
@@ -355,7 +351,7 @@ def _tage_inhalt(
     )
 
     eintraege_des_tags = [e for t, e in daten.eintraege if t == tag]
-    zeilen = tageszeilen(eintraege_des_tags, daten.kachel_von, daten.namen)
+    zeilen = tageszeilen(eintraege_des_tags, daten.namen)
     anzahl = f"{len(zeilen)} {'Übung' if len(zeilen) == 1 else 'Übungen'}"
     controls: list[ft.Control] = [
         streifen,

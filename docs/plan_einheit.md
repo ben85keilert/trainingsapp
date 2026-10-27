@@ -94,13 +94,14 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 
 | Ereignis | in der Messdatei | Spur |
 |---|---|---|
-| `einheit/start`, `einheit/ende` | Notiz „Start: …“, Abschnitt der Einheit — nur wenn die HRV schon lief | `einheit` |
-| `timer/abschnitt` | Notiz mit Marke, Abschnitt „Belastung (Runde 2/8)“ | `timer` |
+| `einheit/start`, `einheit/ende` | Notiz „Gehen: Start“ / „Gehen: Ende“ (wie bei den Übungen, Ben 26.10.2026), Abschnitt der Einheit — nur wenn die HRV schon lief **und** ein Training oder Timer dabei ist: keine Klammer für die Messung allein, für eine Übung mit Uhr („Planke: Start/Ende“ klammert schon) und für einen Plan-Ablauf (Ben, 26.10.2026: oft wird nur eine Übung gemacht — Start und Ende lohnen erst bei Workouts, die von vorn bis hinten durchlaufen; kommt demnächst); ob die Klammer kommt, entscheidet der Start, das Ende folgt dem | `einheit` |
+| `timer/abschnitt` | Notiz mit Marke, Abschnitt „Belastung (Runde 2/8)“; in einer Übung **still**, wenn er mit „Wadenheben: Start“ zusammenfällt (Ben, 26.10.2026: keine eigene Notiz, wo schon eine mit anderer Bezeichnung steht — Stoppuhr, erste Runde eines Timers; `profil`/`soll_s` trägt die Startnotiz der Übung, spätere Abschnitte behalten ihre Notiz) | `timer` |
 | `timer/pause`, `timer/weiter` | Notiz, Abschnitt endet bzw. geht weiter | `timer` |
 | `timer/ende` | „Timer fertig“, letzter Abschnitt endet | `timer` |
 | `gps/start` | stille Grenze: „km 1“ (Rad „km 5“) beginnt mit der ersten gezählten Ortung | `km` |
 | `gps/km` | Notiz „km N“ zur Split-Zeit; der nächste Abschnitt heißt nach seinem Ende („km 2“, Rad „km 10“) | `km` |
 | `gps/ende` | stille Grenze, letzter km endet | `km` |
+| `gps/sportart` | Notiz „Jetzt Radfahren“: die Sportart wurde mitten im Lauf gewechselt (Ben, 26.10.2026; `daten`: `sportart`, `split_m`); ab da gilt die neue Splitlänge, die Zeile und das Tagebuch bekommen am Ende die neue Sportart, der Dateikopf behält die vom Start | — |
 | `plan/uebung_start`, `plan/uebung_ende` | Notiz „Planke: Start“ / „Planke: Ende“ mit dem Kurzcode der Übung (`uebungen`, Vertrag §4), Abschnitt der Übung; Anhalten und Weiter ihres Timers heißen „Planke: Pause“ / „Planke: weiter“ (Ben, 19.10.2026) | `uebung` |
 | `plan/pause` | Pause zwischen zwei Übungen eines Plan-Ablaufs, bis „Weiter“ — Abschnitt „Pause“ | `uebung` |
 | `plan/ende`, `person/eintrag` | — (nur Zeitleiste: Ende des Ablaufs, was eingetragen wurde) | |
@@ -108,7 +109,8 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 - **Marken** in der Messdatei: `docs/kompatibilitaet.md` §4. **Spuren**: §9b — eine
   Grenze teilt nur ihre Spur, Abschnitte verschiedener Spuren überlappen sich.
 - **5-s-Regel** (Ben, 17.10.): Ein Abschnitt, der kürzer als `MIN_MARKE_S` lief,
-  bekommt keine Marke und keinen Abschnitt. Die Einheit hält eine Anfangsmarke zurück,
+  bekommt keine Marke und keinen Abschnitt. Ein Ende auf einer Spur, auf der noch kein
+  Anfang in der Messung steht, fällt ebenso weg (26.10.2026: kein „x: Ende“ im Leeren). Die Einheit hält eine Anfangsmarke zurück,
   bis ihr Abschnitt 5 s lief, und setzt sie dann an seine echte Anfangszeit. Die
   Zeitleiste behält alles.
 - Tagebuch: Einträge mit Anfang und Ende (Stufe 3, §7).

@@ -37,7 +37,7 @@ https://claude.ai/artifact/SLbHne6zrpNDYosNKy9fnm (Reihen A–D, Konfliktliste E
 | A2 | „Neue Variante“ bleibt im Etikett-Blatt beim Üben, mit dem Satz „gilt in allen Plänen“; der versteckte Weg ins Formular wird ein Link zur Übungsseite |
 | B1 | Planübungen folgen der Übung ganz, auch Ziel und Parameter (bisher beim Aufnehmen kopiert). Bestehende: gleich → folgt, abweichend → „nur hier“ |
 | B2 | Uhr und Timer der Planübung zählen als Abweichung; ↺ setzt sie zurück |
-| C | „Variante“ heißt nur das Etikett (Knie, gestreckt). Die Kopie heißt „Kopie anlegen“ bzw. „(Kopie)“, die gemeinsame Kachel „Im Verlauf zusammen mit …“ (P61) |
+| C | „Variante“ heißt nur das Etikett (Knie, gestreckt). Die Kopie heißt „Kopie anlegen“ bzw. „(Kopie)“, die gemeinsame Kachel „Im Verlauf zusammen mit …“ (P61) — **die gemeinsame Kachel ist seit 26.10.2026 ausgebaut**, jede Kopie hat ihre eigene |
 | **C2** (Ben) | Kein „in Plänen anbieten“: **Was die Übung hat, bieten alle Pläne an**; weniger stellt man in der Planübung ein. `default_felder` entfällt |
 | D1 | Ein Timer- oder Stoppuhrlauf ist ein **Satz im offenen Eintrag**, wie ein Tipp (ändert P51). Ein neuer Eintrag beginnt nur bei anderer Ausführung, nach „Abschließen“, nach `offen_min` ohne Eintrag, in einem anderen Plan oder an einem anderen Tag |
 | D2 | „Timerzeit zählt“ und „zählt als“ stellt man in der Übung ein; beim Üben in der Leiste für jetzt („zählt“); die Einstellung dafür im Plan entfällt |

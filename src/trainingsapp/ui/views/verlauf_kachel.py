@@ -12,8 +12,8 @@ Zeile.
 - **Zeitraum** 4 Wochen · 3 Monate · Jahr · alles; die Kurve beginnt beim ersten Wert darin.
 - **Achse**: das Datum (Vorgabe) oder die Trainingsnummer (gleiche Abstände) — das Symbol
   rechts über der Kurve schaltet um.
-- **Varianten** (Ben, 21.10.2026, Skizze B2): eine Linie je Variante — und je verwandter
-  Übung, die sich die Kachel teilt —, jede mit fester Farbe (`core.verlauf.linien_ordnen`).
+- **Varianten** (Ben, 21.10.2026, Skizze B2): eine Linie je Variante, jede mit fester
+  Farbe (`core.verlauf.linien_ordnen`).
   Die Farbpunkte unter der Kurve blenden Linien aus; „Zusammen“ (gestrichelt) ist
   zuschaltbar und als Vorgabe aus. Die Trainingsnummer zählt über alle Linien.
 """
@@ -28,7 +28,7 @@ import flet as ft
 
 from trainingsapp.core import varianten as var
 from trainingsapp.core.models import SessionEntry
-from trainingsapp.core.tagesbilanz import kachel, kacheln
+from trainingsapp.core.tagesbilanz import kacheln
 from trainingsapp.core.verlauf import (
     MODUS_NUMMER,
     MODUS_ZEIT,
@@ -65,20 +65,17 @@ def _kachel_kurz(tag: date) -> str:
 
 def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.View:
     heute = state.heute()
-    katalog = {u.id: u for u in state.uebungen.alle(mit_geloeschten=True)}
-    namen = {k: u.name for k, u in katalog.items()}
-    mitglieder = [u for u in katalog.values() if kachel(u, u.id) == kachel_id]
-    original = katalog.get(kachel_id)
+    original = state.uebungen.laden(kachel_id, mit_geloeschten=True)
     alle = state.sitzungen.eintraege_zwischen(
-        state.profil.id, None, heute, exercise_ids=[u.id for u in mitglieder] or [kachel_id]
+        state.profil.id, None, heute, exercise_ids=[kachel_id]
     )
     reihenfolge = var.namen(original.result_spec) if original else []
 
     def ordnen(liste: list[Linie]) -> list[Linie]:
-        return linien_ordnen(liste, kachel_id, reihenfolge, namen)
+        return linien_ordnen(liste, reihenfolge)
 
     def name(linie: Linie) -> str:
-        return linie_name(linie, namen, kachel_id)
+        return linie_name(linie)
 
     # -- Auswahl: Kennzahl, Zeitraum, Achse, Linien --------------------------------------
 
@@ -151,9 +148,6 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
         return handler
 
     inhalt: list[ft.Control] = []
-    verwandte = [u.name for u in mitglieder if u.id != kachel_id]
-    if verwandte:
-        inhalt.append(ft.Text("Mit Varianten: " + ", ".join(verwandte), size=12, opacity=0.7))
     if len(optionen) > 1 and kennzahl is not None:
         # Kennzahlen als Chips statt Dropdown (Ben, 19.10.2026): meist 1–5 Stück, der Platz
         # ist da — die Zeile bricht um, wenn es mehr werden
@@ -190,9 +184,7 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
 
     def markieren(tag: date) -> None:
         """Tipp auf einen Punkt: seine Zeile in den Ergebnissen hervorheben."""
-        ergebnisse.controls = _ergebnisse(
-            im_zeitraum, kennzahl, tag, heute, oeffner, kachel_id, ordnen, name
-        )
+        ergebnisse.controls = _ergebnisse(im_zeitraum, kennzahl, tag, heute, oeffner, ordnen, name)
         with contextlib.suppress(Exception):
             ergebnisse.update()
 
@@ -310,9 +302,7 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
 
     # -- Ergebnisse je Tag -------------------------------------------------------------
 
-    ergebnisse.controls = _ergebnisse(
-        im_zeitraum, kennzahl, None, heute, oeffner, kachel_id, ordnen, name
-    )
+    ergebnisse.controls = _ergebnisse(im_zeitraum, kennzahl, None, heute, oeffner, ordnen, name)
     inhalt.append(
         ft.Text("ERGEBNISSE · NEUESTE ZUERST", size=11, weight=ft.FontWeight.BOLD, opacity=0.6)
     )
@@ -399,7 +389,7 @@ def _saetze(liste: list[SessionEntry], kennzahl: Kennzahl | None) -> str:
     """„12 · 14“ — oder, ohne Sätze, was der Tag sonst war („abgehakt“)."""
     if kennzahl is not None and (saetze := saetze_kurz(liste, kennzahl)):
         return saetze
-    (k,) = kacheln(liste, lambda _: "x")
+    (k,) = kacheln(liste)
     return k.zusammenfassung() or "abgehakt"
 
 
@@ -409,7 +399,6 @@ def _ergebnisse(
     markiert: date | None,
     heute: date,
     oeffner: Callable[[str], Callable[[], object]],
-    kachel_id: str,
     ordnen: Callable[[list[Linie]], list[Linie]],
     name: Callable[[Linie], str],
 ) -> list[ft.Control]:
@@ -453,7 +442,7 @@ def _ergebnisse(
             wert = tageswert(liste, kennzahl) if kennzahl is not None else None
             mitte.append(ft.Text(_saetze(liste, kennzahl), size=13))
             (t,) = teile
-            if t.exercise_id != kachel_id or t.variante:
+            if t.variante:
                 mitte.append(ft.Text(name(t), size=11, opacity=0.7))
         for e in liste:
             if e.note:

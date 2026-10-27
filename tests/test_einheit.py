@@ -120,7 +120,7 @@ def test_einheit_spur_nur_wenn_gewuenscht() -> None:
     start = Ereignis(0.0, "einheit", "start", "Intervalllauf")
     assert projektion(start, einheit_spur=False) is None
     p = projektion(start, "e-1")
-    assert p is not None and p.name == "Intervalllauf" and p.text == "Start: Intervalllauf"
+    assert p is not None and p.name == "Intervalllauf" and p.text == "Intervalllauf: Start"
 
 
 def test_fuenf_sekunden_regel() -> None:

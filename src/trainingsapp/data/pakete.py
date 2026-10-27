@@ -34,9 +34,8 @@ Regeln (Ben, 14.10.2026; `docs/uebungspakete.md`):
 - Fehlende Typen und Regionen legt der Import an. Groß und klein trennen keine
   Tags: „dehnung“ im Paket landet bei „Dehnung“, und ein Name, den es schon als
   Region gibt, bleibt Region.
-- ``variante_von`` gilt, wenn das Original nach dem Import da ist und selbst
-  keine Variante ist (keine Ketten), und wenn die Übung nicht schon Original
-  anderer ist.
+- ``variante_von`` („Im Verlauf zusammen mit“) wird seit 26.10.2026 überlesen —
+  ausgebaut, `core/tagesbilanz.py`.
 
 - **Kurse** (Ben, 15.10.2026; `core/kurse.py`) folgen denselben Regeln wie
   Übungen: neue werden angelegt, Kurse desselben Pakets bekommen den Stand der
@@ -562,7 +561,6 @@ class PaketRepo:
                     typen=list(alt.typen),
                     regionen=list(alt.regionen),
                     archived=False,
-                    family_id=alt.family_id or alt.id,
                 )
                 repo.speichern(kopie)
                 self.con.execute(
@@ -593,20 +591,14 @@ class PaketRepo:
 
         Der Ort bleibt (Katalog, Archiv, Papierkorb). Eigene Übungen und solche
         ohne gespeicherten Paketstand bleiben, wie sie sind. Typen heißen danach
-        wie hier (Groß/klein), eine ungültige Variantenangabe fällt weg — der
-        Paketstand übernimmt beides, damit „geändert“ danach nicht stehen bleibt.
+        wie hier (Groß/klein) — der Paketstand übernimmt das, damit „geändert“
+        danach nicht stehen bleibt.
 
         Returns:
             Wie viele Übungen sich geändert haben.
         """
         repo = ExerciseRepo(self.con)
         bekannte = self._bekannte_tags()
-        zeilen = {
-            r["id"]: r for r in self.con.execute("SELECT id, family_id, purged_at FROM exercise")
-        }
-        originale = {
-            r["family_id"] for r in zeilen.values() if r["family_id"] and r["purged_at"] is None
-        }
         geaendert = 0
         with transaktion(self.con):
             for uebung_id in uebung_ids:
@@ -620,15 +612,6 @@ class PaketRepo:
                     continue
                 _tags_angleichen(neu, bekannte)
                 _lokales_behalten(neu, alt)
-                ziel = zeilen.get(neu.family_id) if neu.family_id else None
-                gueltig = (
-                    ziel is not None
-                    and ziel["purged_at"] is None
-                    and not ziel["family_id"]
-                    and neu.family_id != uebung_id
-                    and uebung_id not in originale
-                )
-                neu.family_id = neu.family_id if gueltig else None
                 neu.archived = alt.archived
                 self._standard_setzen(uebung_id, stand(neu))
                 if stand(neu) == stand(alt):
@@ -670,8 +653,7 @@ class PaketRepo:
             for kurs in kurs_ziele:
                 kurs.deleted_at = None  # ZURUECK: wieder in der Liste
                 kurse.speichern(kurs, package_standard=kurs_stand(kurs))
-            # Originale zuerst: Eine Variante darf nur auf Vorhandenes zeigen.
-            for u in sorted(ziele, key=lambda u: u.family_id is not None):
+            for u in ziele:
                 repo.speichern(u, neue_tags_oben=neue_tags_oben)
             for uebung_id, s in vorschau.status.items():
                 if s == Status.ZURUECK:  # aus Papierkorb oder Grabstein zurück
@@ -755,7 +737,7 @@ class PaketRepo:
         zeilen = {
             r["id"]: r
             for r in self.con.execute(
-                "SELECT id, package_id, deleted_at, purged_at, archived, family_id, "
+                "SELECT id, package_id, deleted_at, purged_at, archived, "
                 "package_standard_json IS NULL AS ohne_stand, package_dropped_at AS entfallen "
                 "FROM exercise"
             )
@@ -798,41 +780,13 @@ class PaketRepo:
             if r is None or r["package_id"] == paket.id:
                 eigenes_paket.append(u)
 
-        # 2. Varianten: wer zeigt nach dem Import auf wen?
-        geschrieben = {u.id: u.family_id for u in kandidaten}  # Angabe im Paket
-        da = {i for i, r in zeilen.items() if r["purged_at"] is None} | set(geschrieben)
-
-        def familie_nachher(uebung_id: str) -> str | None:
-            if uebung_id in geschrieben:
-                return geschrieben[uebung_id]
-            r = zeilen.get(uebung_id)
-            return r["family_id"] if r is not None else None
-
-        def original(u: Exercise) -> str | None:
-            """Wohin ``variante_von`` nach dem Import zeigen darf — ans Original, nie in Ketten."""
-            ziel = u.family_id
-            if ziel and (oben := familie_nachher(ziel)):
-                ziel = oben  # das Original ist selbst Variante: an dessen Original hängen
-            if not ziel or ziel == u.id or ziel not in da or familie_nachher(ziel):
-                return None
-            return ziel
-
-        angaben = {u.id: original(u) for u in eigenes_paket}
-        # Wer Original anderer ist (hier oder im Paket), bleibt selbst eigenständig.
-        originale = {
-            r["family_id"]
-            for i, r in zeilen.items()
-            if r["family_id"] and r["purged_at"] is None and i not in geschrieben
-        } | {angaben[u.id] for u in kandidaten if angaben[u.id]}
-
-        # 3. Zielstand bauen; was gleich bleibt, muss nicht geschrieben werden.
+        # 2. Zielstand bauen; was gleich bleibt, muss nicht geschrieben werden.
         bekannte = self._bekannte_tags()
         repo = ExerciseRepo(self.con)
         ziele: list[Exercise] = []
         staende: dict[str, dict[str, Any]] = {}
         for u in eigenes_paket:
-            familie = None if u.id in originale else angaben[u.id]
-            ziel = replace(u, typen=list(u.typen), regionen=list(u.regionen), family_id=familie)
+            ziel = replace(u, typen=list(u.typen), regionen=list(u.regionen))
             # Nur was geschrieben wird, legt Tags an — die anderen lernen auf einer Kopie.
             schreibt = vorschau.status[u.id] in SCHREIBT
             neue = _tags_angleichen(ziel, bekannte if schreibt else dict(bekannte))
@@ -864,7 +818,6 @@ class PaketRepo:
                         if gemischt_ziel is not None:
                             ziel = gemischt_ziel
                             _tags_angleichen(ziel, bekannte)
-                            ziel.family_id = familie
                             ziel.archived = alt.archived
                     if stand(ziel) == stand(alt):
                         vorschau.status[u.id] = Status.UNVERAENDERT
@@ -874,7 +827,7 @@ class PaketRepo:
                 (vorschau.neue_typen if art == TAG_TYP else vorschau.neue_regionen).append(name)
             ziele.append(ziel)
 
-        # 4. Kurse: dieselben Regeln, verglichen mit dem gespeicherten Paketstand.
+        # 3. Kurse: dieselben Regeln, verglichen mit dem gespeicherten Paketstand.
         kurs_zeilen = {
             r["id"]: r
             for r in self.con.execute(

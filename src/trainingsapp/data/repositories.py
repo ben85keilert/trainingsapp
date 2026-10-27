@@ -36,6 +36,7 @@ from ..core.models import (
     DayNote,
     Exercise,
     HrvRecording,
+    HrvTitel,
     Measurement,
     Media,
     MediaKind,
@@ -128,9 +129,9 @@ class ExerciseRepo:
                     (id, name, category, description, icon_key, image_path,
                      is_builtin, result_spec_json, limit_spec_json,
                      default_target_json, default_input_mode, archived, created_at, updated_at,
-                     family_id, default_fields_json, package_id, timer_json, clock_on,
+                     default_fields_json, package_id, timer_json, clock_on,
                      clock_counts_as, clock_counts)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -143,7 +144,6 @@ class ExerciseRepo:
                     default_input_mode = excluded.default_input_mode,
                     default_fields_json = excluded.default_fields_json,
                     archived = excluded.archived,
-                    family_id = excluded.family_id,
                     package_id = excluded.package_id,
                     timer_json = excluded.timer_json,
                     clock_on = excluded.clock_on,
@@ -167,7 +167,6 @@ class ExerciseRepo:
                     int(uebung.archived),
                     uebung.created_at.isoformat(),
                     uebung.updated_at.isoformat(),
-                    uebung.family_id,
                     uebung.package_id,
                     json.dumps(uebung.timer, ensure_ascii=False),
                     int(uebung.uhr),
@@ -248,21 +247,12 @@ class ExerciseRepo:
         )
 
     def aus_papierkorb(self, uebung_id: str) -> None:
-        """Zurückholen. Ist das Original inzwischen selbst Variante geworden,
-        hängt sich die Übung an dessen Original — Ketten gibt es nicht."""
-        with transaktion(self.con):
-            self.con.execute(
-                "UPDATE exercise SET deleted_at = NULL, archived = 0, updated_at = ?, "
-                "revision = revision + 1 WHERE id = ? AND purged_at IS NULL",
-                (jetzt().isoformat(), uebung_id),
-            )
-            self.con.execute(
-                "UPDATE exercise SET family_id = "
-                "(SELECT o.family_id FROM exercise o WHERE o.id = exercise.family_id) "
-                "WHERE id = ? AND family_id IN "
-                "(SELECT id FROM exercise WHERE family_id IS NOT NULL)",
-                (uebung_id,),
-            )
+        """Zurückholen — auch aus dem Archiv heraus in den Katalog."""
+        self.con.execute(
+            "UPDATE exercise SET deleted_at = NULL, archived = 0, updated_at = ?, "
+            "revision = revision + 1 WHERE id = ? AND purged_at IS NULL",
+            (jetzt().isoformat(), uebung_id),
+        )
 
     def papierkorb(self) -> list[Exercise]:
         """Was im Papierkorb liegt, zuletzt Gelöschtes zuerst."""
@@ -276,20 +266,6 @@ class ExerciseRepo:
         zeilen = self.con.execute(
             "SELECT * FROM exercise WHERE archived = 1 AND deleted_at IS NULL "
             "ORDER BY name COLLATE NOCASE"
-        )
-        return [self._zeile(r) for r in zeilen]
-
-    def varianten(self, uebung_id: str, mit_papierkorb: bool = False) -> list[Exercise]:
-        """Die Varianten eines Originals (ohne das Original selbst).
-
-        ``mit_papierkorb`` zählt auch Varianten im Papierkorb mit — sie können
-        zurückkommen, also bleibt ihr Original ein Original.
-        """
-        bedingung = "purged_at IS NULL" if mit_papierkorb else "deleted_at IS NULL"
-        zeilen = self.con.execute(
-            f"SELECT * FROM exercise WHERE family_id = ? AND {bedingung} "
-            "ORDER BY name COLLATE NOCASE",
-            (uebung_id,),
         )
         return [self._zeile(r) for r in zeilen]
 
@@ -521,7 +497,6 @@ class ExerciseRepo:
             created_at=datetime.fromisoformat(r["created_at"]),
             updated_at=datetime.fromisoformat(r["updated_at"]),
             deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
-            family_id=r["family_id"],
             package_id=r["package_id"],
             timer=_json_lesen(r["timer_json"], []),
             uhr=bool(r["clock_on"]),
@@ -1392,6 +1367,35 @@ class SessionRepo:
             note=alt.note if note is None else note.strip(),
             started_at=alt.started_at,
             ended_at=alt.ended_at if isinstance(ended_at, _Unveraendert) else ended_at,
+        )
+        with transaktion(self.con):
+            self._eintrag_schreiben(neu, ersetzt=alt.id)
+            self.con.execute("DELETE FROM measurement WHERE session_entry_id = ?", (alt.id,))
+            self._kennzahlen_schreiben(session, neu)
+        return neu
+
+    def eintrag_uebung_wechseln(self, alter_eintrag_id: str, uebung: Exercise) -> SessionEntry:
+        """Denselben Eintrag einer anderen Übung zuordnen — als Korrektur (neuer Eintrag
+        mit Verweis), weil Einträge unveränderlich sind. Werte, Notiz und Zeiten bleiben;
+        die Kopie der Spezifikation ist die der neuen Übung. Gedacht für die Sportart
+        eines Trainings (Ben, 26.10.2026: „Laufen“ gestartet, Rad gefahren) — Gehen,
+        Laufen und Rad haben dieselben Felder."""
+        alt = self.eintrag_laden(alter_eintrag_id)
+        if alt is None:
+            raise KeyError(alter_eintrag_id)
+        if alt.exercise_id == uebung.id:
+            return alt
+        session = self.session_laden(alt.session_id)
+        assert session is not None
+        neu = SessionEntry(
+            session_id=alt.session_id,
+            exercise_id=uebung.id,
+            order=alt.order,
+            result=dict(alt.result),
+            spec_snapshot=uebung.result_spec,
+            note=alt.note,
+            started_at=alt.started_at,
+            ended_at=alt.ended_at,
         )
         with transaktion(self.con):
             self._eintrag_schreiben(neu, ersetzt=alt.id)
@@ -2328,6 +2332,79 @@ class HrvRepo:
                 break
         return titel
 
+    # -- Gespeicherte Überschriften (Migration 030) ----------------------------------
+
+    def titel_liste(self, subject_id: str) -> list[HrvTitel]:
+        """Die Überschriften eines Profils: angeheftete zuerst, dann die zuletzt vergebene."""
+        return [
+            self._titel_zeile(r)
+            for r in self.con.execute(
+                "SELECT * FROM hrv_title WHERE subject_id = ? "
+                "ORDER BY pinned DESC, last_used_at DESC, name COLLATE NOCASE",
+                (subject_id,),
+            )
+        ]
+
+    def titel_merken(
+        self, subject_id: str, name: str, *, verwendet: bool = True
+    ) -> HrvTitel | None:
+        """Eine Überschrift in die Liste nehmen — beim Vergeben (``verwendet``: „zuletzt“
+        ist jetzt) oder vorab aus dem Blatt bzw. den Einstellungen. Gibt es sie schon,
+        bleibt sie, wie sie ist (nur „zuletzt“ rückt nach). ``None``: leerer Name."""
+        name = name.strip()
+        if not name:
+            return None
+        wann = jetzt()
+        self.con.execute(
+            "INSERT INTO hrv_title (id, subject_id, name, last_used_at, created_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(subject_id, name) DO UPDATE SET "
+            "last_used_at = CASE WHEN excluded.last_used_at != '' "
+            "THEN excluded.last_used_at ELSE last_used_at END",
+            (new_id(), subject_id, name, wann.isoformat() if verwendet else "", wann.isoformat()),
+        )
+        r = self.con.execute(
+            "SELECT * FROM hrv_title WHERE subject_id = ? AND name = ?", (subject_id, name)
+        ).fetchone()
+        return self._titel_zeile(r)
+
+    def titel_umbenennen(self, titel_id: str, neu: str) -> str | None:
+        """Umbenennen; die Messungen behalten ihren Titel. Gibt den Fehler zurück
+        (leer, schon vorhanden) oder ``None``."""
+        neu = neu.strip()
+        if not neu:
+            return "Bitte einen Namen eingeben."
+        alt = self.con.execute("SELECT * FROM hrv_title WHERE id = ?", (titel_id,)).fetchone()
+        if alt is None:
+            return "Diese Überschrift gibt es nicht mehr."
+        if neu == alt["name"]:
+            return None
+        doppelt = self.con.execute(
+            "SELECT 1 FROM hrv_title WHERE subject_id = ? AND name = ? AND id != ?",
+            (alt["subject_id"], neu, titel_id),
+        ).fetchone()
+        if doppelt is not None:
+            return f"„{neu}“ gibt es schon."
+        self.con.execute("UPDATE hrv_title SET name = ? WHERE id = ?", (neu, titel_id))
+        return None
+
+    def titel_anheften(self, titel_id: str, an: bool) -> None:
+        self.con.execute("UPDATE hrv_title SET pinned = ? WHERE id = ?", (int(an), titel_id))
+
+    def titel_entfernen(self, titel_id: str) -> None:
+        """Aus der Liste nehmen — die Messungen behalten ihren Titel."""
+        self.con.execute("DELETE FROM hrv_title WHERE id = ?", (titel_id,))
+
+    @staticmethod
+    def _titel_zeile(r: sqlite3.Row) -> HrvTitel:
+        return HrvTitel(
+            id=r["id"],
+            subject_id=r["subject_id"],
+            name=r["name"],
+            angeheftet=bool(r["pinned"]),
+            zuletzt=datetime.fromisoformat(r["last_used_at"]) if r["last_used_at"] else None,
+            created_at=datetime.fromisoformat(r["created_at"]) if r["created_at"] else jetzt(),
+        )
+
     def sha1_setzen(self, recording_id: str, sha1: str) -> None:
         """Nach einer eigenen Metadaten-Änderung (Notizen) die Prüfsumme nachführen.
 
@@ -2628,6 +2705,17 @@ class StreckeRepo:
             (einheit_id,),
         ).fetchone()
         return self._zeile(r) if r else None
+
+    def sportart_setzen(
+        self, strecke_id: str, sportart: str, session_entry_id: str | None = None
+    ) -> None:
+        """Die Sportart nachträglich ändern (Ben, 26.10.2026) — mit dem Tagebucheintrag,
+        der sie jetzt trägt (`SessionRepo.eintrag_uebung_wechseln`), wenn es einen gibt."""
+        self.con.execute(
+            "UPDATE strecke SET sportart = ?, session_entry_id = COALESCE(?, session_entry_id) "
+            "WHERE id = ?",
+            (sportart, session_entry_id, strecke_id),
+        )
 
     def titel_setzen(self, strecke_id: str, titel: str) -> None:
         self.con.execute("UPDATE strecke SET title = ? WHERE id = ?", (titel.strip(), strecke_id))

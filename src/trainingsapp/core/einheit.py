@@ -69,6 +69,8 @@ ARTEN: frozenset[str] = frozenset(
         "uebung_ende",
         "satz",
         "km",
+        # GPS: die Sportart mitten im Lauf gewechselt (Ben, 26.10.2026)
+        "sportart",
         "beigetreten",
         "verlassen",
         "eintrag",
@@ -309,6 +311,12 @@ def projektion(
     'km 10'
     >>> projektion(Ereignis(0.0, "einheit", "start", "Intervalllauf"), einheit_spur=False) is None
     True
+    >>> projektion(Ereignis(0.0, "einheit", "start", "Gehen")).text
+    'Gehen: Start'
+    >>> projektion(Ereignis(600.0, "einheit", "ende", "Gehen")).text
+    'Gehen: Ende'
+    >>> projektion(Ereignis(0.0, "timer", "abschnitt", "Stoppuhr", {"still": True})).als_notiz
+    False
     >>> projektion(Ereignis(9.0, "person", "eintrag")) is None
     True
     >>> projektion(Ereignis(5.0, "plan", "uebung_start", "Planke: Start",
@@ -326,10 +334,12 @@ def projektion(
 
     match (e.quelle, e.art):
         case ("einheit", "start") if einheit_spur:
+            # Wie bei den Übungen (Ben, 26.10.2026): „Gehen: Start“, nicht „Start: Gehen“
             name = e.text or "Einheit"
-            return Projektion(SPUR_EINHEIT, f"Start: {name}", name, False, marke(SPUR_EINHEIT))
+            return Projektion(SPUR_EINHEIT, f"{name}: Start", name, False, marke(SPUR_EINHEIT))
         case ("einheit", "ende") if einheit_spur:
-            return Projektion(SPUR_EINHEIT, "Ende der Einheit", "", True, marke(SPUR_EINHEIT))
+            name = e.text or "Einheit"
+            return Projektion(SPUR_EINHEIT, f"{name}: Ende", "", True, marke(SPUR_EINHEIT))
         case ("timer", "abschnitt"):
             name = str(d.get("abschnitt") or e.text)
             m = marke(
@@ -341,7 +351,16 @@ def projektion(
                 soll_s=d.get("soll_s"),
                 profil=_profil(d),
             )
-            return Projektion(SPUR_TIMER, e.text or name, name, False, m, uebungen=_kurzcodes(d))
+            # Still (`in_uebung`): die Stoppuhr einer Übung — „Wadenheben: Start“ sagt es schon
+            return Projektion(
+                SPUR_TIMER,
+                e.text or name,
+                name,
+                False,
+                m,
+                als_notiz=not d.get("still"),
+                uebungen=_kurzcodes(d),
+            )
         case ("timer", "ende"):
             # In einer Übung still (`in_uebung`): „Planke: Ende“ sagt es schon
             return Projektion(
@@ -389,15 +408,10 @@ def projektion(
                 SPUR_KM, "Ende der Strecke", "", True, marke(SPUR_KM), als_notiz=False
             )
         case ("plan", "uebung_start"):
+            # Mit den Angaben der Uhr der Übung (`profil`, `soll_s`) — ihr Anfang ist still
             name = str(d.get("name") or e.text)
-            return Projektion(
-                SPUR_UEBUNG,
-                e.text or name,
-                name,
-                False,
-                marke(SPUR_UEBUNG, name=name),
-                uebungen=_kurzcodes(d),
-            )
+            m = marke(SPUR_UEBUNG, name=name, profil=_profil(d), soll_s=d.get("soll_s"))
+            return Projektion(SPUR_UEBUNG, e.text or name, name, False, m, uebungen=_kurzcodes(d))
         case ("plan", "uebung_ende"):
             return Projektion(
                 SPUR_UEBUNG, e.text, "", True, marke(SPUR_UEBUNG), uebungen=_kurzcodes(d)
@@ -458,16 +472,33 @@ def uebung_ende_text(name: str) -> str:
     return f"{name}: Ende"
 
 
-def in_uebung(e: Ereignis, uebung_id: str, name: str = "") -> Ereignis:
+#: So nah am Start der Übung gilt der Anfang ihrer Uhr als derselbe Augenblick (s)
+UHR_TOLERANZ_S = 0.5
+
+
+def in_uebung(
+    e: Ereignis, uebung_id: str, name: str = "", *, start_t_s: float | None = None
+) -> Ereignis:
     """Ein Timer-Ereignis während einer Übung (Ben, 18.10.2026, P54): Es nennt die Übung
     (``uebung`` → ihr Kurzcode in der Messung), sein Text den Timer nicht mehr — der Name der
     Übung steht schon da —, und das Ende des Timers wird still: „Planke: Ende“ sagt es.
     Anhalten und Weiter heißen nach der Übung (Ben, 19.10.2026): „Planke: Pause“,
     „Planke: weiter“ — mit ``name``; ohne bleibt der Text des Timers.
 
+    ``start_t_s`` (Ben, 26.10.2026: „keine eigene Notiz, wenn die Notiz bereits mit einer
+    anderen Bezeichnung abgehakt ist“): der Augenblick, in dem die Übung begann — ein
+    Abschnitt der Uhr, der dort anfängt (Stoppuhr, erste Runde eines Timers), wird still
+    (``still``): „Wadenheben: Start“ steht schon da und trägt die Angaben der Uhr. Die Grenze
+    auf der Timer-Spur bleibt; spätere Abschnitte („Pause (Runde 1/3)“) behalten ihre Notiz.
+
     >>> x = in_uebung(Ereignis(0.0, "timer", "abschnitt", "Timer „H“: Halten (Runde 1/3)"), "u1")
     >>> x.text, x.daten["uebung"]
     ('Halten (Runde 1/3)', 'u1')
+    >>> in_uebung(Ereignis(0.2, "timer", "abschnitt", "Stoppuhr"), "u1", start_t_s=0.0).daten
+    {'uebung': 'u1', 'still': True}
+    >>> spaeter = Ereignis(10.0, "timer", "abschnitt", "Pause")
+    >>> "still" in in_uebung(spaeter, "u1", start_t_s=0.0).daten
+    False
     >>> in_uebung(Ereignis(9.0, "timer", "ende", "Timer fertig"), "u1").daten["still"]
     True
     >>> in_uebung(Ereignis(9.0, "timer", "pause", "Timer angehalten"), "u1", "Planke").text
@@ -485,6 +516,8 @@ def in_uebung(e: Ereignis, uebung_id: str, name: str = "") -> Ereignis:
     text = e.text
     if e.art == "abschnitt":
         text = name_aus_notiz(e.text)
+        if start_t_s is not None and abs(e.t_s - start_t_s) < UHR_TOLERANZ_S:
+            daten["still"] = True
     elif e.art == "pause" and name:
         text = f"{name}: Pause"
     elif e.art == "weiter" and name:

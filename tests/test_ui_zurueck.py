@@ -252,3 +252,83 @@ def test_titelblatt_speichert_beim_wegwischen() -> None:
     abbrechen.on_click()
     blatt.on_dismiss(None)
     assert gespeichert == [("Alt", "ruhig")]  # „Abbrechen" verwirft
+
+
+def test_titelblatt_liste_filtert_merkt_und_entfernt() -> None:
+    """Ben, 26.10.2026: Überschriften aus der gespeicherten Liste — Tippen filtert, ✕
+    nimmt eine heraus, Neues lässt sich merken; Antippen übernimmt und zeigt wieder alles."""
+    from trainingsapp.core.models import HrvTitel
+    from trainingsapp.ui.components.titel import titel_blatt
+
+    vorrat = [HrvTitel(name="Intervalle Beine"), HrvTitel(name="Ruhe morgens", angeheftet=True)]
+    entfernt: list[str] = []
+    gemerkt: list[str] = []
+
+    def merken(name: str) -> HrvTitel:
+        gemerkt.append(name)
+        return HrvTitel(name=name)
+
+    blatt = titel_blatt(
+        "",
+        "",
+        ["Plan A"],
+        lambda t, b: None,
+        gespeicherte=vorrat,
+        merken=merken,
+        entfernen=lambda t: entfernt.append(t.name),
+    )
+    titel, _ = (c for c in _alle(blatt.content) if isinstance(c, ft.TextField))
+
+    def zeilen() -> list[str]:
+        return [z.title.value for z in _alle(blatt.content) if isinstance(z, ft.ListTile)]
+
+    assert zeilen() == ["Plan A", "Intervalle Beine", "Ruhe morgens"]
+    titel.value = "ruh"
+    titel.on_change(None)
+    assert zeilen() == ["Ruhe morgens", "„ruh“ merken"]
+    merk = next(
+        z for z in _alle(blatt.content) if isinstance(z, ft.ListTile) and "merken" in z.title.value
+    )
+    merk.on_click()
+    assert gemerkt == ["ruh"]
+    assert zeilen() == ["Plan A", "Intervalle Beine", "Ruhe morgens", "ruh"]  # gewählt: alles
+    kreuz = next(
+        z.trailing
+        for z in _alle(blatt.content)
+        if isinstance(z, ft.ListTile) and z.title.value == "Intervalle Beine"
+    )
+    kreuz.on_click()
+    assert entfernt == ["Intervalle Beine"]
+    assert zeilen() == ["Plan A", "Ruhe morgens", "ruh"]
+    next(
+        z for z in _alle(blatt.content) if isinstance(z, ft.ListTile) and z.title.value == "ruh"
+    ).on_click()
+    assert titel.value == "ruh" and zeilen() == ["Plan A", "Ruhe morgens", "ruh"]
+
+
+def test_titelblatt_hoechstens_sieben_zeilen_feste_hoehe() -> None:
+    """Ben, 26.10.2026: höchstens sieben Zeilen („+n weitere“), und die Liste behält beim
+    Filtern ihre Höhe — das Feld darüber wandert nicht."""
+    from trainingsapp.core.models import HrvTitel
+    from trainingsapp.ui.components.titel import MAX_ZEILEN, ZEILE, titel_blatt
+
+    vorrat = [HrvTitel(name=f"Titel {i:02d}") for i in range(10)]
+    blatt = titel_blatt("", "", [], lambda t, b: None, gespeicherte=vorrat)
+    liste = next(
+        c for c in _alle(blatt.content) if isinstance(c, ft.Column) and c.height == 8 * ZEILE
+    )
+    assert len([z for z in liste.controls if isinstance(z, ft.ListTile)]) == MAX_ZEILEN
+    hinweis = [c.value for c in _alle(liste) if isinstance(c, ft.Text) and "weitere" in c.value]
+    assert hinweis == ["+3 weitere — zum Filtern tippen"]
+    titel, _ = (c for c in _alle(blatt.content) if isinstance(c, ft.TextField))
+    titel.value = "Titel 0"
+    titel.on_change(None)
+    assert len([z for z in liste.controls if isinstance(z, ft.ListTile)]) == MAX_ZEILEN
+    assert liste.height == 8 * ZEILE  # unverändert
+    titel.value = "Titel 09"
+    titel.on_change(None)
+    assert [z.title.value for z in liste.controls if isinstance(z, ft.ListTile)] == ["Titel 09"]
+    assert liste.height == 8 * ZEILE
+
+    kurz = titel_blatt("", "", [], lambda t, b: None, gespeicherte=vorrat[:2])
+    assert any(c.height == 2 * ZEILE for c in _alle(kurz.content) if isinstance(c, ft.Column))

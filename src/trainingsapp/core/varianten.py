@@ -13,8 +13,8 @@ lange sind eine ganz andere Übung“). Jede Spec-Kopie eines Eintrags trägt da
 die Anzeige bleibt richtig, auch wenn die Übung sich ändert —, es braucht keine Migration,
 und ein Paket kann Varianten über ``result_spec`` mitbringen.
 
-Nicht zu verwechseln mit der Kopie einer Übung, die sich im Verlauf die Kachel mit dem
-Original teilt (``exercise.family_id``, Migration 007).
+Nicht zu verwechseln mit der Kopie einer Übung — die ist eine eigene Übung mit eigener
+Kachel im Verlauf.
 
 Reiner Kern: kein Flet, keine Datenbank. Symbole sind Namen von Material-Symbolen in
 Kleinschreibung (`SYMBOLE`); die Oberfläche übersetzt sie (`ui.components.varianten`).
@@ -51,17 +51,14 @@ SYMBOLE: Final[tuple[str, ...]] = (
     "accessibility_new",
 )
 
-#: Wie die Variantenzeile beim Eintragen aussieht (`zeilenform`, Skizzen A3, D1, D2)
+#: Wie die Variantenzeile beim Eintragen aussieht (`zeilenform`, Skizze A3; Ben, 26.10.2026)
 NAMEN: Final[str] = "namen"
-ZEICHEN: Final[str] = "zeichen"
-RASTER: Final[str] = "raster"
+ZEILEN: Final[str] = "zeilen"
 
 #: Geschätzte Breite eines Segments mit Namen: je Zeichen, Innenabstand, Symbol davor
 ZEICHEN_PX: Final[float] = 8.0
 INNEN_PX: Final[float] = 32.0
 SYMBOL_PX: Final[float] = 22.0
-#: Kleinste Breite eines Segments nur mit Symbol oder Kürzel
-NUR_ZEICHEN_PX: Final[float] = 48.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,26 +258,22 @@ def segment_breite(v: Variante) -> float:
 
 
 def zeilenform(liste: Sequence[Variante], breite: float) -> str:
-    """Wie die Variantenzeile die Varianten zeigt (Ben, 21.10.2026; Skizzen A3, D1, D2):
+    """Wie die Variantenzeile die Varianten zeigt:
 
-    - `NAMEN` — sie passen in eine Zeile;
-    - `ZEICHEN` — sie passen nicht, aber jede hat ein Symbol oder Kürzel: eine Zeile nur
-      mit den Zeichen, der Name der gewählten steht darunter;
-    - `RASTER` — sonst die Namen in zwei Spalten.
+    - `NAMEN` — sie passen in eine Zeile: Segmente mit Namen (Skizze A3);
+    - `ZEILEN` — sonst Knöpfe mit Zeichen und Namen, die auf so viele Zeilen umbrechen,
+      wie sie brauchen (Ben, 26.10.2026: vier Varianten „lesbar auf mehrere Zeilen“ —
+      bis dahin nur Zeichen ohne Namen oder zwei Spalten mit abgeschnittenen Namen).
 
     >>> zeilenform([Variante("kurz"), Variante("lang")], 300)
     'namen'
-    >>> planke = [Variante("Unterarm", kuerzel="UA"), Variante("Arme gestreckt", symbol="height"),
-    ...           Variante("Seitlich", symbol="swap_horiz"),
-    ...           Variante("diagonal", symbol="north_east")]
-    >>> zeilenform(planke, 300), zeilenform([Variante(v.name) for v in planke], 300)
-    ('zeichen', 'raster')
+    >>> atmen = [Variante("Bauch"), Variante("Brust"), Variante("Schultern"), Variante("Rücken")]
+    >>> zeilenform(atmen, 300)
+    'zeilen'
     """
     if sum(segment_breite(v) for v in liste) <= breite:
         return NAMEN
-    if all(v.hat_zeichen for v in liste) and len(liste) * NUR_ZEICHEN_PX <= breite:
-        return ZEICHEN
-    return RASTER
+    return ZEILEN
 
 
 def zum_bearbeiten(kopie: ResultSpec | None, aktuell: ResultSpec, wert: str = "") -> ResultSpec:
@@ -310,11 +303,9 @@ __all__ = [
     "LABEL",
     "NAMEN",
     "NAME_MAX",
-    "RASTER",
     "SYMBOLE",
     "TEXT_MAX",
     "VARIANTE",
-    "ZEICHEN",
     "Variante",
     "aus_feld",
     "entfernen",

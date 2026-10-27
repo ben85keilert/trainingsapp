@@ -207,6 +207,25 @@ def training_eintragen(
     return strecke
 
 
+def sportart_aendern(state: Any, strecke: Strecke, sportart: str) -> Strecke:
+    """Die Sportart eines gespeicherten Trainings ändern (Ben, 26.10.2026: „Laufen“
+    gestartet, Rad gefahren). Die Zeile bekommt die neue Sportart, der Tagebucheintrag
+    wandert als Korrektur zur Übung der neuen Sportart (`eintrag_uebung_wechseln`); die
+    Auswertung rechnet Kilometer, Tempo und Kurve ohnehin aus der Datei mit der Sportart
+    der Zeile. Der Dateikopf behält die Sportart vom Start (`Streckendatei`)."""
+    if sportart not in SPORTARTEN or sportart == strecke.sportart:
+        return strecke
+    eintrag_id = strecke.session_entry_id
+    if eintrag_id and state.sitzungen.eintrag_laden(eintrag_id) is not None:
+        eintrag_id = state.sitzungen.eintrag_uebung_wechseln(
+            eintrag_id, uebung_fuer(state, sportart)
+        ).id
+    state.strecken.sportart_setzen(strecke.id, sportart, eintrag_id)
+    strecke.sportart = sportart
+    strecke.session_entry_id = eintrag_id
+    return strecke
+
+
 def einheit_eintragen(
     state: Any, e: Any, ergebnis: StreckeErgebnis, hrv_recording_id: str | None = None
 ) -> Strecke:
@@ -668,6 +687,7 @@ __all__ = [
     "lauftext",
     "messungsbezuege",
     "ortung_zu_wand",
+    "sportart_aendern",
     "training_eintragen",
     "uebung_fuer",
     "verwaiste_uebernehmen",

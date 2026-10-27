@@ -4,7 +4,7 @@ Der eine Ort, an dem man die Übung selbst ändert (Ben, 22.10.2026, P79: „Der
 Übungen → Übung → Bearbeiten ist sinnvoll und gut“) — erreichbar über die Übungsseite, nie
 direkt aus dem Üben. Von häufig nach selten: Name, Beschreibung, Videos und Links; Parameter;
 Varianten; Uhr und Timer; Vorgabe für Pläne (das Ziel); zuletzt Ordnen (Typ und Region,
-Symbol, „Im Verlauf zusammen mit“). Aus „Übung hinzufügen“ im Plan-Editor angelegt
+Symbol). Aus „Übung hinzufügen“ im Plan-Editor angelegt
 (`<bearbeiten>/hinzufuegen/neu`), steht die neue Übung danach gleich im Plan.
 
 Die Parameter einer Übung kommen aus dem **Feldvorrat** (`core/result_spec.py`):
@@ -86,13 +86,12 @@ from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.uebung_timer import formular_profil_route
 
-#: Auswahlwert „keine Variante" — ein leerer Schlüssel ist im Dropdown heikel
-EIGENSTAENDIG = "eigenstaendig"
 
-
-def _saetze_knopf(key: str, saetze_an: dict[str, bool], sichtbar: bool) -> ft.Chip:
+def _saetze_knopf(
+    key: str, saetze_an: dict[str, bool], sichtbar: bool, danach: Callable[[], None]
+) -> ft.Chip:
     """„Sätze“ (Ben, 18.10.2026): ausgegraut = aus, eine Zahl je Eintrag („263“);
-    angetippt = an, Eingabe je Satz („3 × 15“)."""
+    angetippt = an, Eingabe je Satz („3 × 15“). ``danach`` läuft nach jedem Umschalten."""
     text = ft.Text("Sätze", opacity=1.0 if saetze_an[key] else 0.55)
 
     def umschalten() -> None:
@@ -101,6 +100,7 @@ def _saetze_knopf(key: str, saetze_an: dict[str, bool], sichtbar: bool) -> ft.Ch
         text.opacity = 1.0 if saetze_an[key] else 0.55
         with contextlib.suppress(Exception):
             knopf.update()
+        danach()
 
     knopf = ft.Chip(
         label=text,
@@ -228,6 +228,7 @@ def uebung_bearbeiten(
             if key == "scale":
                 skala_felder.visible = bool(schalter[key].value)
             uhr_zeichnen()
+            ziel_neu()
             page.update()
 
         return handler
@@ -239,11 +240,13 @@ def uebung_bearbeiten(
             liste = chips_wahl[key]
             chips_wahl[key] = [w for w in liste if w != wert] if wert in liste else [*liste, wert]
             chips_neu(key)
+            ziel_neu()
 
         def ergaenzen(neue: list[Any]) -> None:
             chips_kandidaten[key] = chips_sortiert([*chips_kandidaten[key], *neue])
             chips_wahl[key] = chips_sortiert([*chips_wahl[key], *neue])
             chips_neu(key)
+            ziel_neu()
 
         chips_reihen[key].content = chips_zeile(
             vorlage,
@@ -282,7 +285,9 @@ def uebung_bearbeiten(
         unten: list[ft.Control] = [chips_reihen[vorlage.key]]
         if vorlage.type == FieldType.SET_LIST:
             saetze_an[vorlage.key] = quelle.saetze
-            saetze_knoepfe[vorlage.key] = _saetze_knopf(vorlage.key, saetze_an, aktiv)
+            saetze_knoepfe[vorlage.key] = _saetze_knopf(
+                vorlage.key, saetze_an, aktiv, lambda: ziel_neu()
+            )
             unten.append(saetze_knoepfe[vorlage.key])
         # Schalter oben, Chips darunter eingerückt — nebeneinander passte beides am Handy nicht
         chips_bereiche[vorlage.key] = ft.Container(
@@ -362,6 +367,7 @@ def uebung_bearbeiten(
         varianten_zeichnen()
         with contextlib.suppress(Exception):  # noch nicht auf der Seite
             varianten_spalte.update()
+        ziel_neu()
 
     def varianten_schieber(name_: str) -> Callable[[], None]:
         def handler() -> None:
@@ -535,49 +541,14 @@ def uebung_bearbeiten(
 
     varianten_zeichnen()
 
-    # -- Im Verlauf zusammen mit (P61; bis 22.10.2026 „Kachel im Verlauf“) ------------------
-    # Eine Kopie zeigt auf ein Original; wer selbst Kopien hat, ist ein Original und kann
-    # nicht gleichzeitig zu einem anderen gehören (keine Ketten).
-
-    eigene_varianten = state.uebungen.varianten(uebung.id, mit_papierkorb=True) if uebung else []
-    originale = [
-        u
-        for u in state.uebungen.alle(mit_archivierten=True)
-        if u.family_id is None and (uebung is None or u.id != uebung.id)
-    ]
-    # Liegt das Original im Papierkorb, bleibt es wählbar — sonst zeigte der
-    # Dropdown einen Wert ohne Eintrag.
-    weg = (
-        state.uebungen.laden(uebung.family_id, mit_geloeschten=True)
-        if uebung is not None and uebung.family_id
-        else None
-    )
-    if weg is not None and all(u.id != weg.id for u in originale):
-        originale.append(replace(weg, name=f"{weg.name} (gelöscht)"))
-    familie = ft.Dropdown(
-        label="Im Verlauf zusammen mit",
-        value=uebung.family_id if uebung and uebung.family_id else EIGENSTAENDIG,
-        options=[
-            ft.DropdownOption(key=EIGENSTAENDIG, text="keiner — eigene Kachel"),
-            *[ft.DropdownOption(key=u.id, text=f"„{u.name}“") for u in originale],
-        ],
-        disabled=bool(eigene_varianten),
-        expand=True,
-    )
-
-    # Vorgabe für Pläne: nur noch das Ziel (C2). Es bezieht sich auf die *gespeicherten*
-    # Parameter — wer oben Schalter umlegt, sieht das Ziel dafür nach dem Speichern.
-    ziel_form = (
-        SpecForm(ziel_spec(uebung.result_spec), dict(uebung.default_target), page=page)
-        if uebung is not None and uebung.result_spec.fields
-        else None
-    )
-
-    def ziel_lesen(spec: ResultSpec) -> dict[str, Any]:
-        """Nur Werte, die es in der neuen Spezifikation noch gibt und die etwas sagen."""
-        if ziel_form is None:
-            return ziel_bereinigen(dict(uebung.default_target) if uebung else {}, spec)
-        return ziel_bereinigen(ziel_form.werte(), spec)
+    # Vorgabe für Pläne: nur noch das Ziel (C2). Das Formular folgt den Parametern und
+    # Varianten oben (Ben, 26.10.2026: bis dahin galt es für die *gespeicherten* Parameter,
+    # ein neuer Schalter kam erst nach dem Speichern an): Jeder Schalter, Chip, „Sätze“ und
+    # jede Variante baut es neu — gebaut unter „Speichern“, weil es `felder_lesen` braucht.
+    ziel_bereich = ft.Container()
+    ziel_halter: dict[str, SpecForm] = {}
+    #: Was im Ziel je Feld stand — bleibt über ein Aus- und wieder Einschalten erhalten
+    ziel_gemerkt: dict[str, Any] = dict(uebung.default_target) if uebung else {}
 
     # -- Symbolauswahl -------------------------------------------------------
 
@@ -930,6 +901,42 @@ def uebung_bearbeiten(
         felder.extend(fremde)
         return felder
 
+    def spec_aktuell() -> ResultSpec:
+        """Die Spezifikation, wie „Speichern“ sie jetzt schriebe — für das Ziel."""
+        return var.mit_varianten(spec_bauen(felder_lesen()), varianten_liste)
+
+    def ziel_werte() -> dict[str, Any]:
+        form = ziel_halter.get("form")
+        if form is not None:
+            ziel_gemerkt.update(form.werte())
+        return dict(ziel_gemerkt)
+
+    def ziel_bauen() -> None:
+        werte = ziel_werte()
+        spec = spec_aktuell()
+        if not spec.fields:
+            ziel_halter.pop("form", None)
+            ziel_bereich.content = ft.Text(
+                "Schalte oben Parameter ein — dann lässt sich hier ein Ziel festlegen.",
+                size=12,
+                opacity=0.6,
+            )
+            return
+        form = SpecForm(ziel_spec(spec), werte, page=page)
+        ziel_halter["form"] = form
+        ziel_bereich.content = form.control
+
+    def ziel_neu() -> None:
+        ziel_bauen()
+        with contextlib.suppress(Exception):  # noch nicht auf der Seite
+            ziel_bereich.update()
+
+    ziel_bauen()
+
+    def ziel_lesen(spec: ResultSpec) -> dict[str, Any]:
+        """Nur Werte, die es in der neuen Spezifikation noch gibt und die etwas sagen."""
+        return ziel_bereinigen(ziel_werte(), spec)
+
     def eingelesen() -> Exercise:
         ziel = uebung if uebung is not None else Exercise()
         ziel.name = (name.value or "").strip()
@@ -937,8 +944,6 @@ def uebung_bearbeiten(
         ziel.category = ziel.typen[0] if ziel.typen else ""
         ziel.description = (beschreibung.value or "").strip()
         ziel.icon_key = gewaehlt
-        if not eigene_varianten:
-            ziel.family_id = None if familie.value in (None, EIGENSTAENDIG) else familie.value
         ziel.result_spec = var.mit_varianten(spec_bauen(felder_lesen()), varianten_liste)
         ziel.default_target = ziel_lesen(ziel.result_spec)
         ziel.regionen = regionen_lesen()
@@ -969,8 +974,7 @@ def uebung_bearbeiten(
             sorted(saetze_an.items()),
             skala_name.value or "",
             skala_bereich.value or "",
-            familie.value,
-            ziel_form.werte() if ziel_form is not None else None,
+            ziel_werte(),
             gewaehlt,
             [(t.value or "", a.value or "") for t, a in medien_zeilen],
             [p.als_dict() for p in timer_liste],
@@ -1117,13 +1121,7 @@ def uebung_bearbeiten(
                             size=12,
                             opacity=0.7,
                         ),
-                        ziel_form.control
-                        if ziel_form is not None
-                        else ft.Text(
-                            "Ein Ziel lässt sich nach dem ersten Speichern festlegen.",
-                            size=12,
-                            opacity=0.6,
-                        ),
+                        ziel_bereich,
                         abschnitt("ORDNEN"),
                         tagwahl.control,
                         ft.Row(
@@ -1144,24 +1142,9 @@ def uebung_bearbeiten(
                         ),
                         ft.Text("Symbol", weight=ft.FontWeight.W_600),
                         symbole,
-                        ft.Row(controls=[familie]),
                         ft.Row(
-                            spacing=6,
-                            controls=[
-                                ft.Text(
-                                    "Eine Kopie (Wandsitz 45° und 90°) steht im Verlauf mit "
-                                    "dem Original auf einer Kachel: Mengen werden addiert, die "
-                                    "Kopie wird dazugeschrieben. Weicht sie stark ab "
-                                    "(Liegestütz einarmig), nimm „keiner“."
-                                    if not eigene_varianten
-                                    else "Mit dieser Übung zusammen im Verlauf: "
-                                    + ", ".join(v.name for v in eigene_varianten),
-                                    size=12,
-                                    opacity=0.7,
-                                    expand=True,
-                                ),
-                                hilfe_knopf(page, thema="uebungen"),
-                            ],
+                            alignment=ft.MainAxisAlignment.END,
+                            controls=[hilfe_knopf(page, thema="uebungen")],
                         ),
                     ],
                 ),

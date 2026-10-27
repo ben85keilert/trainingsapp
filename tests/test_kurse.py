@@ -194,12 +194,14 @@ def test_starten_legt_plaene_an_und_abschliessen_deaktiviert_sie(con, profil) ->
     assert [p.id for p in wieder] == [plan.id] and wieder[0].aktiv
 
 
-def test_stand_summe_zaehlt_ab_kapitelstart_mit_varianten(con, profil) -> None:
+def test_stand_summe_zaehlt_ab_kapitelstart_nur_die_eigene_uebung(con, profil) -> None:
+    """Eine Kopie ist eine eigene Übung — ihre Einträge zählen nicht für die Bedingung
+    (seit 26.10.2026 ohne „Im Verlauf zusammen mit“)."""
     repo, uebungen, sitzungen = KursRepo(con), ExerciseRepo(con), SessionRepo(con)
     original = uebungen.laden(seed_id("liegestuetzen"))
     assert original is not None
-    variante = Exercise(name="Liegestütz eng", result_spec=SPEC_SAETZE_WDH, family_id=original.id)
-    uebungen.speichern(variante)
+    kopie = Exercise(name="Liegestütz eng", result_spec=SPEC_SAETZE_WDH)
+    uebungen.speichern(kopie)
     k = kurs_mit_plan(original.id)
     repo.speichern(k)
     lesen, ueben, _ = k.kapitel
@@ -213,10 +215,10 @@ def test_stand_summe_zaehlt_ab_kapitelstart_mit_varianten(con, profil) -> None:
     assert repo.stand(ueben, profil.id, staende) == Stand(0.0, 100.0)
 
     sitzungen.eintrag_anlegen(session, original, {"reps": [20, 20]})
-    sitzungen.eintrag_anlegen(session, variante, {"reps": [30]})  # Variante zählt mit
+    sitzungen.eintrag_anlegen(session, kopie, {"reps": [30]})  # die Kopie zählt nicht
     stand = repo.stand(ueben, profil.id, staende)
-    assert (stand.ist, stand.erfuellt) == (70.0, False)
-    sitzungen.eintrag_anlegen(session, original, {"reps": [30]})
+    assert (stand.ist, stand.erfuellt) == (40.0, False)
+    sitzungen.eintrag_anlegen(session, original, {"reps": [30, 30]})
     assert repo.stand(ueben, profil.id, staende).erfuellt
 
 

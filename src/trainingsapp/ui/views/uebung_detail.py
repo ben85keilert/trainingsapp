@@ -387,10 +387,9 @@ def uebung_detail(
     async def duplizieren() -> None:
         """Kopie — für „links/rechts“, 45° statt 90° und Ähnliches.
 
-        Eine Kopie steht im Verlauf mit dem Original zusammen: Ihre Mengen addieren sich, die
-        Kopie wird ausgewiesen. Im Editor lässt sie sich lösen („Im Verlauf zusammen mit“;
-        Liegestütz einarmig ist eine eigene Liste wert). Sie ist eine eigene Übung — kein
-        Paket-Update ändert sie. „Variante“ heißt seit 22.10.2026 nur noch das Etikett (P61).
+        Sie ist eine eigene Übung mit eigener Kachel im Verlauf — kein Paket-Update ändert
+        sie. „Variante“ heißt seit 22.10.2026 nur noch das Etikett (P61); „Im Verlauf
+        zusammen mit“ ist seit 26.10.2026 ausgebaut.
         """
         kopie = replace(
             uebung,
@@ -402,16 +401,9 @@ def uebung_detail(
             typen=list(uebung.typen),
             regionen=list(uebung.regionen),
             archived=False,
-            family_id=uebung.family_id or uebung.id,
         )
         state.uebungen.speichern(kopie)
-        page.show_dialog(
-            ft.SnackBar(
-                ft.Text(
-                    f"Kopie angelegt — im Verlauf zusammen mit „{uebung.name}“. Jetzt anpassen."
-                )
-            )
-        )
+        page.show_dialog(ft.SnackBar(ft.Text("Kopie angelegt. Jetzt anpassen.")))
         await page.push_route(f"/uebung/{kopie.id}/bearbeiten")
 
     def abbrechen() -> None:

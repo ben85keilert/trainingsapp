@@ -11,9 +11,9 @@ dreimal 50 Liegestütze sind **150 Liegestütze**. Dafür werden Einträge zu
 - **Abgehakt** ohne Werte und **Leistung** mit Werten bleiben getrennt
   sichtbar: „150 Wdh. · zusätzlich 1× abgehakt“.
 
-Für den Verlauf fasst `kachel` zusätzlich Varianten zusammen: Eine Kopie
-einer Übung gehört zur selben Kachel (`Exercise.family_id`), solange man sie
-nicht ausdrücklich eigenständig macht.
+Im Verlauf ist jede Übung eine Kachel (`kacheln`). Bis 26.10.2026 teilten Kopien
+die Kachel ihres Originals (`family_id`, „Im Verlauf zusammen mit“) — ausgebaut, Verläufe
+zusammenzuzählen ist nicht geplant (Ben).
 
 Alles hier ist reine Rechnung ohne Datenbank und ohne Oberfläche.
 """
@@ -24,7 +24,7 @@ from collections.abc import Callable, Hashable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .models import Exercise, SessionEntry
+from .models import SessionEntry
 from .parameter import MENGE, auspraegung, rolle
 from .result_spec import (
     FieldSpec,
@@ -282,21 +282,13 @@ def _nur_auspraegung(e: SessionEntry) -> bool:
     return spec is not None and not any(rolle(f) == MENGE for f in spec.fields)
 
 
-def kachel(uebung: Exercise | None, exercise_id: str) -> str:
-    """Die Kachel im Verlauf: das Original einer Variantenfamilie, sonst die Übung selbst."""
-    if uebung is None:
-        return exercise_id
-    return uebung.family_id or uebung.id
-
-
 @dataclass(slots=True)
 class Kachel:
-    """Eine Kachel im Verlauf: alle Varianten einer Übung, alle Ausprägungen.
+    """Eine Kachel im Verlauf: eine Übung mit allen Ausprägungen.
 
-    Die Teile sind die Bündel je Übung + Ausprägung. Die Kachel addiert ihre
-    Mengen (je Feld, Varianten teilen sich die Feldschlüssel aus dem
-    Feldvorrat) und weist die Teile einzeln aus, wenn es mehrere gibt —
-    „marginale Abweichungen werden notiert“.
+    Die Teile sind die Bündel je Ausprägung. Die Kachel addiert ihre Mengen (je
+    Feld) und weist die Teile einzeln aus, wenn es mehrere gibt — „marginale
+    Abweichungen werden notiert“.
     """
 
     kachel_id: str
@@ -326,7 +318,7 @@ class Kachel:
         return None
 
     def zusammenfassung(self) -> str:
-        """„150 Wdh. · zusätzlich 2× abgehakt“ — über alle Varianten."""
+        """„150 Wdh. · zusätzlich 2× abgehakt“ — über alle Ausprägungen."""
         teile = [
             menge_text(f, summe)
             for key, summe in self.summen.items()
@@ -340,7 +332,7 @@ class Kachel:
         return " · ".join(t for t in teile if t)
 
     def aufschluesselung(self, namen: dict[str, str], ohne: Iterable[str] = ()) -> str:
-        """Woraus die Kachel besteht, wenn mehr als eine Variante/Ausprägung dabei ist.
+        """Woraus die Kachel besteht, wenn mehr als eine Ausprägung dabei ist.
 
         ``namen`` bildet Übungs-IDs auf Namen ab; ``ohne`` wie bei
         `Buendel.auspraegung_text`.
@@ -356,19 +348,18 @@ class Kachel:
         return "davon " + " · ".join(zeilen)
 
 
-def kacheln(eintraege: Iterable[SessionEntry], kachel_von: Callable[[str], str]) -> list[Kachel]:
-    """Einträge zu Kacheln — Varianten zusammen, Teile je Übung + Ausprägung.
+def kacheln(eintraege: Iterable[SessionEntry]) -> list[Kachel]:
+    """Einträge zu Kacheln — eine je Übung, Teile je Ausprägung.
 
     >>> from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
     >>> e = [SessionEntry(exercise_id=x, result={"reps": [n]}, spec_snapshot=SPEC_SAETZE_WDH)
     ...      for x, n in (("eng", 20), ("weit", 30), ("eng", 10))]
-    >>> (k,) = kacheln(e, lambda _: "liegestuetz")
-    >>> k.summen, k.aufschluesselung({"eng": "eng", "weit": "weit"})
-    ({'reps': 60.0}, 'davon eng: 30 Wdh. aus 2 Einträgen · weit: 30 Wdh.')
+    >>> [(k.kachel_id, k.summen) for k in kacheln(e)]
+    [('eng', {'reps': 30.0}), ('weit', {'reps': 30.0})]
     """
     nach_kachel: dict[str, list[SessionEntry]] = {}
     for e in eintraege:
-        nach_kachel.setdefault(kachel_von(e.exercise_id), []).append(e)
+        nach_kachel.setdefault(e.exercise_id, []).append(e)
     return [Kachel(kachel_id=k, teile=buendeln(liste)) for k, liste in nach_kachel.items()]
 
 
@@ -439,7 +430,6 @@ __all__ = [
     "buendeln",
     "ist_leistung",
     "je_variante",
-    "kachel",
     "kacheln",
     "menge_text",
     "mengen",

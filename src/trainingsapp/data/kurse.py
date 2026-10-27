@@ -43,7 +43,6 @@ from ..core.kurse import (
     plan_aus_vorlage,
 )
 from ..core.models import Plan, jetzt, lokaler_tag, new_id
-from ..core.tagesbilanz import kachel
 from .db import transaktion
 from .repositories import ExerciseRepo, HrvRepo, PlanRepo, SessionRepo
 
@@ -324,23 +323,15 @@ class KursRepo:
             return bedingung_stand(b, seit, messungen=HrvRepo(self.con).alle(subject_id))
         sitzungen = SessionRepo(self.con)
         if b.art == SUMME:
-            familie = self._familie(b.exercise_id)
             eintraege = sitzungen.eintraege_zwischen(
-                subject_id, lokaler_tag(seit), heute, exercise_ids=familie
+                subject_id, lokaler_tag(seit), heute, exercise_ids=[b.exercise_id]
             )
-            return bedingung_stand(b, seit, eintraege, familie=familie)
+            return bedingung_stand(b, seit, eintraege)
         uebungen = kapitel.uebungen
         eintraege = sitzungen.eintraege_zwischen(
             subject_id, lokaler_tag(seit), heute, exercise_ids=uebungen or None
         )
         return bedingung_stand(b, seit, eintraege, plan_uebungen=uebungen)
-
-    def _familie(self, exercise_id: str) -> set[str]:
-        """Die Übung samt Varianten (gleiche Kachel im Verlauf) — auch archivierte."""
-        alle = ExerciseRepo(self.con).alle(mit_archivierten=True)
-        katalog = {u.id: u for u in alle}
-        ziel = kachel(katalog.get(exercise_id), exercise_id)
-        return {u.id for u in alle if kachel(u, u.id) == ziel} | {exercise_id}
 
     # -- intern --------------------------------------------------------------
 

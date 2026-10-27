@@ -277,7 +277,7 @@ def test_migration_029_behaelt_anhaenge_und_erlaubt_audio_und_tag(tmp_path) -> N
         (eintrag.id,),
     )
     con.commit()
-    assert migrieren(con) == 29
+    assert migrieren(con) == 31
     repo = AnhangRepo(con, tmp_path / "Anhaenge")
     alt = repo.laden("alt")
     assert alt is not None and (alt.eintrag_id, alt.note, alt.bytes) == (eintrag.id, "links", 300)

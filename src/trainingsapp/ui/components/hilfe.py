@@ -10,7 +10,6 @@
   Rechenvorschrift steht in hrv-core (`hrv_core/atmung.py`).
 - **Varianten** (`VARIANTEN_MD`, Ben 21.10.2026): was das Etikett neben „Notiz“ heißt —
   neben dem Symbol steht kein Wort, die Erklärung kommt in die Hilfedatei (Katalog A3).
-  Die alten „Varianten“ (Kopien mit gemeinsamer Kachel) erklärt noch `UEBUNGEN_MD` (P61).
 """
 
 from __future__ import annotations
@@ -83,14 +82,9 @@ du sie für eine Planübung aus. Ein Ziel kann eine Variante vorgeben.
 
 
 UEBUNGEN_MD = """\
-**Varianten** — Wandsitz 45° und Wandsitz 90°, Liegestütz eng und weit: eigene
-Übungen mit eigener Eingabe, im Verlauf aber **eine Kachel**. Die Mengen werden
-addiert, die Variante wird dazugeschrieben.
-
-Eine Variante entsteht als Kopie (Knopf oben in den Übungsdetails) und gehört
-zur Kachel ihres Originals. Im Editor unter „Verlauf“ machst du sie
-eigenständig — sinnvoll, wenn sie stark abweicht (Liegestütz einarmig) — oder
-hängst eine Übung an ein anderes Original.
+**Kopien** — Wandsitz 45° und Wandsitz 90°, Liegestütz eng und weit: Der Knopf
+„Kopie anlegen“ oben in den Übungsdetails legt eine eigene Übung an, die du dann
+anpasst. Jede Übung hat im Verlauf ihre eigene Kachel.
 
 **Pakete** — Übungen kommen über Pakete. Die mitgelieferten stehen im Paket
 „Standard“, weitere (Qigong, Pilates, Yoga, eine Sammlung von jemand

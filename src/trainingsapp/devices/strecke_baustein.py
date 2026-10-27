@@ -39,6 +39,7 @@ from typing import Protocol
 from ..core.einheit import Beteiligung, Ereignis, Rolle
 from ..core.strecke import (
     MAX_GENAUIGKEIT_M,
+    SPORT_NAMEN,
     STILLSTAND_S,
     Punkt,
     Split,
@@ -132,6 +133,24 @@ class StreckeBaustein:
         self.beteiligung: Beteiligung | None = None
         #: aufgeräumt (GPS aus, Datei zu) — auch, wenn der Teil nie startete
         self.fertig = False
+        #: Sportartwechsel, die der nächste Takt in die Zeitleiste schreibt
+        self._wechsel: list[str] = []
+
+    def sportart_setzen(self, sportart: str) -> None:
+        """Die Sportart mitten im Lauf wechseln (Ben, 26.10.2026: als „Laufen“ gestartet,
+        aber Rad gefahren). Ab jetzt gilt die neue Splitlänge (ein angefangener Abschnitt
+        läuft bis zur neuen Länge weiter), der nächste Takt schreibt ``gps/sportart`` in
+        die Zeitleiste, und `StreckeErgebnis` trägt am Ende die neue Sportart — Zeile und
+        Tagebuch stimmen dann. Der Dateikopf behält die Sportart vom Start: Die Zeile ist
+        die Wahrheit; nur das Nachtragen nach einem Absturz liest den Kopf, und danach
+        lässt sich die Sportart in der Auswertung ändern (`ui.training.sportart_aendern`).
+        """
+        if sportart == self.sportart:
+            return
+        self.sportart = sportart
+        self.split_m = split_laenge_m(sportart)
+        self.rechner.split_m = self.split_m
+        self._wechsel.append(sportart)
 
     # -- Zustand -----------------------------------------------------------------
 
@@ -247,6 +266,11 @@ class StreckeBaustein:
             return []
         t0 = self._t0
         out: list[Ereignis] = []
+        for sportart in self._wechsel:
+            daten = {"sportart": sportart, "split_m": split_laenge_m(sportart)}
+            name = SPORT_NAMEN.get(sportart, sportart)
+            out.append(Ereignis(max(jetzt - t0, 0.0), "gps", "sportart", f"Jetzt {name}", daten))
+        self._wechsel.clear()
         while self._puffer:
             p, empfang = self._puffer.popleft()
             t = self._uhrzeit(p, empfang)

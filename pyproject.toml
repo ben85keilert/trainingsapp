@@ -73,6 +73,9 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
     "mypy>=1.11",
+    # Nur fürs Werkzeug `trainingsapp-paket uebernehmen` (Export der App zurück ins TOML,
+    # Kommentare und Reihenfolge bleiben) — die App liest TOML mit tomllib, schreibt nie.
+    "tomlkit>=0.13",
 ]
 # flet-cli liefert den `flet`-Befehl, flet-desktop den Desktop-Client für
 # `flet run`. Eigene Gruppe statt Teil von `dev`, weil `ci` die Gruppe `dev`

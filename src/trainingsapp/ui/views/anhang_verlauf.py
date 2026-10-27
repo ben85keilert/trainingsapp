@@ -25,8 +25,7 @@ from trainingsapp.ui.views.anhang import anhang_route
 
 def aufnahmen_raster(page: Any, state: AppState, uebung: Exercise) -> ft.Control | None:
     """Der Abschnitt — ``None``, wenn die Übung keine Aufnahmen hat (dann fehlt er ganz)."""
-    ids = [uebung.id] + [v.id for v in state.uebungen.varianten(uebung.id)]
-    alle = [x.anhang for x in state.anhaenge.je_uebung(state.profil.id, ids)]
+    alle = [x.anhang for x in state.anhaenge.je_uebung(state.profil.id, [uebung.id])]
     if not alle:
         return None
     heute = state.heute()

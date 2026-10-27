@@ -554,6 +554,7 @@ def aufnahme_eintragen(
         title=ergebnis.recording.titel,
     )
     state.hrv.anlegen(eintrag)
+    state.hrv.titel_merken(eintrag.subject_id, eintrag.title)
     return eintrag
 
 
@@ -1364,9 +1365,12 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
 
         def speichern(titel: str, text: str) -> None:
             lauf.titel_notiz_setzen(titel, text)
+            # Vergeben heißt gemerkt — auch vor dem Start (Ben, 26.10.2026)
+            state.hrv.titel_merken(lauf.subject_id or state.profil.id, titel)
             aktualisieren(erzwingen=True)
 
         plaene = geuebte_plaene(state, start, utc_jetzt())
+        profil_id = lauf.subject_id or state.profil.id
         page.show_dialog(
             titel_blatt(
                 titel,
@@ -1374,6 +1378,9 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 titel_vorschlaege(state, start, utc_jetzt(), lauf.ereignisse()),
                 speichern,
                 vorgabe=plaene[0] if plaene else "",
+                gespeicherte=state.hrv.titel_liste(profil_id),
+                merken=lambda name: state.hrv.titel_merken(profil_id, name, verwendet=False),
+                entfernen=lambda t: state.hrv.titel_entfernen(t.id),
             )
         )
 

@@ -86,7 +86,7 @@ async def test_fertig_heisst_gemacht_mit_haltezeit_je_satz(umgebung) -> None:
     assert messlauf.aufnahme is not None
     marken = [x for x in messlauf.aufnahme.ereignisse if x.get("marke", {}).get("spur") == "uebung"]
     assert [x["text"] for x in marken] == ["Planke: Start", "Planke: Ende"]
-    # Eine einzelne Übung: „Start: Planke“ / „Ende der Einheit“ fallen weg (Ben, 19.10.2026)
+    # Eine einzelne Übung: „Planke: Start“ / „Planke: Ende“ der Einheit fallen weg (Ben, 19.10.2026)
     assert not any(
         x.get("marke", {}).get("spur") == "einheit" for x in messlauf.aufnahme.ereignisse
     )
@@ -151,11 +151,17 @@ async def test_marken_einer_uebung_nennen_sie_und_den_ablauf(umgebung) -> None:
     await _ticken(state, uhr, gurt, e, 60, bis_ende=True)
     notizen = messlauf.aufnahme.ereignisse
     texte = [x["text"] for x in notizen]
-    assert "Halten (Runde 1/3)" in texte and not any(t.startswith("Timer „") for t in texte)
+    # Der Anfang der Uhr fällt mit „Planke: Start“ zusammen — keine eigene Notiz (Ben,
+    # 26.10.2026), die Startnotiz trägt Profil und Soll; die weiteren Abschnitte bleiben
+    assert texte[:2] == ["Planke: Start", "Pause (Runde 1/3)"]
+    assert "Halten (Runde 1/3)" not in texte and "Halten (Runde 2/3)" in texte
+    assert not any(t.startswith("Timer „") for t in texte)
     assert "Timer fertig" not in texte and "Planke: Ende" in texte
+    start = notizen[0]["marke"]
+    assert start["soll_s"] == 10.0 and start["profil"] == kurzcode(profil.id)
     timer = [x for x in notizen if x.get("marke", {}).get("quelle") == "timer"]
     assert timer and all(x.get("uebungen") == [kurzcode(uebung.id)] for x in timer)
-    halten = next(x for x in timer if x["text"] == "Halten (Runde 1/3)")
+    halten = next(x for x in timer if x["text"] == "Halten (Runde 2/3)")
     assert halten["marke"]["soll_s"] == 10.0 and halten["marke"]["profil"] == kurzcode(profil.id)
 
 
@@ -168,10 +174,15 @@ async def test_stoppuhr_marke_heisst_stoppuhr_ohne_soll(umgebung) -> None:
     await _ticken(state, uhr, gurt, e, 20)
     e.timer.lauf.fertig_machen()
     await _ticken(state, uhr, gurt, e, 2, bis_ende=True)
+    # Die Stoppuhr setzt keine eigene Notiz mehr (Ben, 26.10.2026: „Wadenheben: Start,
+    # Stoppuhr zusammen nehmen“) — was sie vorhat, trägt die Startnotiz der Übung
+    assert [x["text"] for x in messlauf.aufnahme.ereignisse] == ["Planke: Start", "Planke: Ende"]
+    ereignisse = messlauf.aufnahme.ereignisse
+    assert not any(x.get("marke", {}).get("quelle") == "timer" for x in ereignisse)
     (marke,) = [
         x["marke"]
         for x in messlauf.aufnahme.ereignisse
-        if x.get("marke", {}).get("quelle") == "timer"
+        if x.get("marke", {}).get("art") == "uebung_start"
     ]
     assert marke["profil"] == "stoppuhr" and "soll_s" not in marke
     (eintrag,) = [x for x, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]

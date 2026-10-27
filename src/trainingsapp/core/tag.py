@@ -81,7 +81,7 @@ def gemacht(
     ergebnis = []
     for (exercise_id, variante), liste in je_zeile.items():
         nur = [e for e, _ in liste]
-        (zeile,) = tageszeilen(nur, lambda x: x, namen) or [
+        (zeile,) = tageszeilen(nur, namen) or [
             Tageszeile(exercise_id, None, None, "", variante=variante)
         ]
         plaene = tuple(dict.fromkeys(s.plan_id for _, s in liste if s.plan_id))

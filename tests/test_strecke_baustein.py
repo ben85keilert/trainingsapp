@@ -230,3 +230,42 @@ async def test_quelle_mit_eigener_uhr() -> None:
     start = next(x for x in e.ereignisse if x.quelle == "gps")
     assert start.t_s == pytest.approx(0.0, abs=1e-6)
     assert len(ergebnis.rechner.punkte) == 101
+
+
+async def test_sportart_im_lauf_wechseln() -> None:
+    """Ben, 26.10.2026: als „Laufen“ gestartet, aber Rad gefahren — ein Tipp wechselt: ab da
+    die Splitlänge des Rads, ein Ereignis ``gps/sportart`` in der Zeitleiste, das Ergebnis
+    trägt die neue Sportart."""
+    from trainingsapp.core.strecke import RAD
+
+    uhr = Uhr()
+    gps = Empfaenger(uhr)
+    strecke = StreckeBaustein(gps, LAUFEN, jetzt_utc=uhr.utc)
+    e = Einheitslauf(uhr=uhr, jetzt_utc=uhr.utc, titel="Lauf")
+    e.hinzufuegen(strecke)
+    await e.vorbereiten()
+    gps.ortung(0, genauigkeit_m=8)
+    await ruhe()
+    e.starten()
+    for _ in range(90):  # 1,1 km als Lauf: „km 1“ fällt
+        uhr.t += 1
+        gps.ortung()
+        await ruhe()
+        e.takt()
+    strecke.sportart_setzen(LAUFEN)  # gleiche Sportart: nichts
+    strecke.sportart_setzen(RAD)
+    assert strecke.split_m == strecke.rechner.split_m == 5000.0
+    for _ in range(90):
+        uhr.t += 1
+        gps.ortung()
+        await ruhe()
+        e.takt()
+    e.beenden()
+    abschluss = await e.abschliessen()
+    ergebnis = abschluss.teile["gps"]
+    assert isinstance(ergebnis, StreckeErgebnis) and ergebnis.sportart == RAD
+    arten = [(x.art, x.text) for x in e.ereignisse if x.quelle == "gps"]
+    assert arten == [("start", ""), ("km", "km 1"), ("sportart", "Jetzt Radfahren"), ("ende", "")]
+    wechsel = next(x for x in e.ereignisse if x.art == "sportart")
+    assert wechsel.daten == {"sportart": RAD, "split_m": 5000.0}
+    assert 90 <= wechsel.t_s <= 92

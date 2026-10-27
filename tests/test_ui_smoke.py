@@ -449,8 +449,8 @@ def test_archiv_und_papierkorb_ansichten(page, welt) -> None:
     assert rest_tage(None) == 30
 
 
-def test_verlauf_mit_varianten_und_kachelkurve(page, welt) -> None:
-    """Variante + Original an einem Tag: eine Kachel, Kurve der Tagessummen."""
+def test_verlauf_mit_kopie_und_kachelkurve(page, welt) -> None:
+    """Kopie + Original an einem Tag: zwei Kacheln, Kurve der Tagessummen je Übung."""
     from dataclasses import replace
 
     from trainingsapp.core.models import new_id
@@ -458,24 +458,57 @@ def test_verlauf_mit_varianten_und_kachelkurve(page, welt) -> None:
     from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
 
     state, plan, _item, uebung, _ = welt
-    variante = replace(uebung, id=new_id(), name="Variante", family_id=uebung.id, media=[])
-    state.uebungen.speichern(variante)
+    kopie = replace(uebung, id=new_id(), name="Kopie", media=[])
+    state.uebungen.speichern(kopie)
     session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
-    state.sitzungen.eintrag_anlegen(session, variante, {"hold": [30]})
+    state.sitzungen.eintrag_anlegen(session, kopie, {"hold": [30]})
 
     eintraege = state.sitzungen.eintraege_zwischen(
-        state.profil.id, None, state.heute(), [uebung.id, variante.id]
+        state.profil.id, None, state.heute(), [uebung.id, kopie.id]
     )
     assert len(eintraege) == 2
     assert verlauf(page, state) is not None
     assert verlauf_kachel_view(page, state, uebung.id).route == f"/verlauf/{uebung.id}"
-    # Die Kopie ist eine eigene Linie (Skizze B2); „Zusammen“ und Ausblenden bauen neu
+    assert verlauf_kachel_view(page, state, kopie.id).route == f"/verlauf/{kopie.id}"
+    # „Zusammen“ und Ausblenden bauen neu
     state.verlauf_zusammen.add(uebung.id)
-    state.verlauf_aus[uebung.id] = {f"{variante.id}|"}
+    state.verlauf_aus[uebung.id] = {f"{uebung.id}|"}
     assert verlauf_kachel_view(page, state, uebung.id) is not None
     # Eine Kachel nur mit „gemacht“ zeichnet keine Kurve, sondern erklärt das.
     andere = plan.items[1].exercise_id
     assert verlauf_kachel_view(page, state, andere) is not None
+
+
+def test_ziel_folgt_den_parametern_vor_dem_speichern(page, welt) -> None:
+    """Ben, 26.10.2026: Ein Schalter oben steht sofort im Ziel unten — nicht erst nach dem
+    Speichern; was im Ziel eingetragen war, bleibt dabei stehen."""
+    import flet as ft
+
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+
+    state, _plan, _item, uebung, _ = welt
+    uebung.default_target = {"hold": [30, 30]}
+    state.uebungen.speichern(uebung)
+    page.update = lambda: None  # der Schalter zeichnet die Seite neu
+    ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(uebung.id))
+
+    def zielfelder() -> list[str]:
+        return [x.label for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label]
+
+    assert "Wiederholungen je Satz" not in zielfelder() and "Haltezeit je Satz" in zielfelder()
+    schalter = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.Switch) and x.label == "Wiederholungen (Wdh.)"
+    )
+    schalter.value = True
+    schalter.on_change()
+    assert "Wiederholungen je Satz" in zielfelder() and "Haltezeit je Satz" in zielfelder()
+    halten = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Haltezeit je Satz"
+    )
+    assert halten.value == "2x30s"  # das alte Ziel bleibt
+    schalter.value = False
+    schalter.on_change()
+    assert "Wiederholungen je Satz" not in zielfelder()
 
 
 def test_standardziel_im_editor_und_im_plan(page, welt) -> None:
@@ -502,7 +535,7 @@ def test_leeres_zielformular_ergibt_kein_ziel() -> None:
     assert SpecForm(ziel_spec(SPEC_SAETZE_WDH), {}).werte() == {}  # … das Ziel nicht
 
 
-def test_variante_mit_geloeschtem_original_und_formular_mit_winkel(page, welt) -> None:
+def test_kopie_mit_geloeschtem_original_und_formular_mit_winkel(page, welt) -> None:
     from dataclasses import replace
 
     from trainingsapp.core.models import new_id
@@ -510,10 +543,10 @@ def test_variante_mit_geloeschtem_original_und_formular_mit_winkel(page, welt) -
     from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 
     state, plan, item, uebung, _ = welt
-    variante = replace(uebung, id=new_id(), name="V", family_id=uebung.id, media=[])
-    state.uebungen.speichern(variante)
+    kopie = replace(uebung, id=new_id(), name="V", media=[])
+    state.uebungen.speichern(kopie)
     state.uebungen.in_papierkorb(uebung.id)
-    ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(variante.id))
+    ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(kopie.id))
     assert ansicht is not None
 
     state.auspraegung_wahl[item.id] = {"angle": 45}

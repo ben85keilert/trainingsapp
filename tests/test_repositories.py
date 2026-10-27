@@ -947,7 +947,7 @@ def test_migration_028_planuebung_folgt(tmp_path) -> None:
             (f"i{nr}", nr, ziel, felder),
         )
     con.commit()
-    assert migrieren(con) == 29
+    assert migrieren(con) == 31
     zeilen = {
         r["id"]: (r["target_json"], r["fields_json"])
         for r in con.execute("SELECT id, target_json, fields_json FROM plan_item")
@@ -977,22 +977,6 @@ def test_plan_speichern_behaelt_ausgeblendete_uebungen(welt) -> None:
     plaene.speichern(geladen)  # speichert nur, was sichtbar ist …
     uebungen.aus_papierkorb(a.id)
     assert {i.exercise_id for i in plaene.laden(plan.id).items} == {a.id, b.id}  # … a bleibt
-
-
-def test_wiederhergestellte_variante_bildet_keine_kette(con) -> None:
-    uebungen = ExerciseRepo(con)
-    c, o = Exercise(name="C"), Exercise(name="O")
-    uebungen.speichern(c)
-    uebungen.speichern(o)
-    v = Exercise(name="V", family_id=o.id)
-    uebungen.speichern(v)
-
-    uebungen.in_papierkorb(v.id)
-    assert [x.id for x in uebungen.varianten(o.id, mit_papierkorb=True)] == [v.id]
-    o.family_id = c.id  # O wird doch Variante von C
-    uebungen.speichern(o)
-    uebungen.aus_papierkorb(v.id)
-    assert uebungen.laden(v.id).family_id == c.id  # V hängt am Original, nicht an O
 
 
 def test_satz_ohne_winkel_haengt_nicht_an_winkel_eintrag(welt) -> None:
@@ -1715,3 +1699,71 @@ def test_bezug_ueber_zeitleiste_und_zeitlich(welt) -> None:
     # Außerhalb jeder Aufnahme: nichts
     fremd = repo.eintrag_anlegen(sitzung, uebung, {}, started_at=t0 - timedelta(hours=3))
     assert bezuege.zu_eintrag(fremd) is None
+
+
+def test_gespeicherte_ueberschriften(welt) -> None:
+    """Migration 030: Überschriften je Profil — merken, Reihenfolge, anheften, umbenennen,
+    entfernen; die Messungen behalten ihren Titel."""
+    from trainingsapp.core.models import HrvRecording
+    from trainingsapp.data.repositories import HrvRepo
+
+    con, _, ich, _ = welt
+    hrv = HrvRepo(con)
+    assert hrv.titel_merken(ich.id, "   ") is None
+    vorab = hrv.titel_merken(ich.id, " Ruhe morgens ", verwendet=False)
+    assert vorab is not None and vorab.name == "Ruhe morgens" and vorab.zuletzt is None
+    hrv.titel_merken(ich.id, "Intervalle Beine")
+    hrv.titel_merken(ich.id, "Ruhe morgens")  # jetzt vergeben: rückt nach vorn
+    assert [t.name for t in hrv.titel_liste(ich.id)] == ["Ruhe morgens", "Intervalle Beine"]
+    assert hrv.titel_liste("anderes-profil") == []
+    # noch einmal vorab merken ändert „zuletzt“ nicht
+    hrv.titel_merken(ich.id, "Ruhe morgens", verwendet=False)
+    assert hrv.titel_liste(ich.id)[0].zuletzt is not None
+    beine = hrv.titel_liste(ich.id)[1]
+    hrv.titel_anheften(beine.id, True)
+    assert [t.name for t in hrv.titel_liste(ich.id)] == ["Intervalle Beine", "Ruhe morgens"]
+    assert hrv.titel_liste(ich.id)[0].angeheftet
+    assert hrv.titel_umbenennen(beine.id, "") == "Bitte einen Namen eingeben."
+    assert hrv.titel_umbenennen(beine.id, "Ruhe morgens") == "„Ruhe morgens“ gibt es schon."
+    assert hrv.titel_umbenennen(beine.id, "Beine") is None
+    a = HrvRecording(subject_id=ich.id, file_path="PolarH10/sensor_z.json", title="Beine")
+    hrv.anlegen(a)
+    hrv.titel_entfernen(beine.id)
+    assert [t.name for t in hrv.titel_liste(ich.id)] == ["Ruhe morgens"]
+    assert hrv.laden(a.id).title == "Beine"  # die Messung behält ihren Titel
+    assert hrv.titel_umbenennen(beine.id, "x") == "Diese Überschrift gibt es nicht mehr."
+
+
+def test_migration_030_uebernimmt_vergebene_titel(tmp_path) -> None:
+    """Was vor der Migration als Titel vergeben war, steht danach in der Liste — je Profil
+    einmal, mit der jüngsten Messung als „zuletzt“."""
+    from trainingsapp.core.models import HrvRecording
+    from trainingsapp.data.db import MIGRATIONS_DIR, migrieren, verbinden
+    from trainingsapp.data.repositories import HrvRepo
+
+    ordner = tmp_path / "bis029"
+    ordner.mkdir()
+    for datei in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if int(datei.name[:3]) <= 29:
+            (ordner / datei.name).write_text(datei.read_text(encoding="utf-8"), encoding="utf-8")
+    con = verbinden(tmp_path / "alt.db")
+    assert migrieren(con, ordner) == 29
+    seed_einspielen(con)
+    ich = Subject(name="Ich")
+    SubjectRepo(con).speichern(ich)
+    hrv = HrvRepo(con)
+    for i, titel in enumerate(["Morgens", " Morgens", "Abends", ""]):
+        hrv.anlegen(
+            HrvRecording(
+                subject_id=ich.id,
+                file_path=f"P/{i}.json",
+                title=titel,
+                started_at=datetime(2026, 10, 1 + i, tzinfo=UTC),
+            )
+        )
+    con.commit()
+    assert migrieren(con) == 31
+    liste = hrv.titel_liste(ich.id)
+    assert [t.name for t in liste] == ["Abends", "Morgens"]
+    assert liste[1].zuletzt == datetime(2026, 10, 2, tzinfo=UTC)
+    con.close()

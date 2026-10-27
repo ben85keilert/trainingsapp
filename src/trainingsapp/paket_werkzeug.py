@@ -8,6 +8,15 @@ Pakete werden als TOML von Hand gepflegt, die App liest sie beim Start direkt
     trainingsapp-paket bauen pakete/*.toml --ziel dist/
     trainingsapp-paket index dist/*.json --ziel dist/index.json --basis-url https://…/pakete/
     trainingsapp-paket quelle https://…/pakete/index.json   # wie die App: Index + Prüfsummen
+    trainingsapp-paket uebernehmen export.json pakete/standard.toml [--probe]
+    trainingsapp-paket uebernehmen .daten/trainingsapp.db pakete/standard.toml [--probe]
+
+``uebernehmen`` holt, was in der App eingestellt wurde, in die TOML-Datei zurück (Ben,
+27.10.2026): aus dem Export des Paketmanagers (JSON mit IDs) die Übungen, aus der
+Datenbank der App (nur lesend) Übungen und die Pläne, die Kurskapitel angelegt haben.
+Je Übung über die ID dem ``[[exercises]]``-Block zugeordnet, geänderte Felder dort
+eingetragen — ``key``, Kommentare, Abschnitte und Kurse bleiben (``tomlkit``, nur im
+Werkzeug).
 
 Die Wortliste (Sprachregelung der Praxis-Website, Zone 3: erklären, nicht bewerten)
 liegt im privaten Repo der Homepage; das Werkzeug liest nur die Datei, die man
@@ -24,18 +33,28 @@ import argparse
 import hashlib
 import json
 import re
+import sqlite3
 import sys
+import uuid
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
+from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.pakete import (
+    FELDNAMEN,
     FORMAT_VERSION,
+    NAMENSRAUM,
+    Paket,
     PaketFehler,
     Paketinhalt,
     dateiname,
     paket_json,
+    paket_lesen,
+    stand,
 )
 from trainingsapp.core.paketquelle import (
     INDEX_FORMAT,
@@ -45,6 +64,7 @@ from trainingsapp.core.paketquelle import (
     paket_laden,
 )
 from trainingsapp.core.paketquelle import _laden as netz_laden
+from trainingsapp.core.result_spec import VORLAGEN
 from trainingsapp.data.seed import seed_inhalt
 
 #: Typen und Regionen des Pakets „Standard“ — ein Paket darf eigene mitbringen
@@ -138,8 +158,8 @@ def pruefen(
     streng: bool = False,
 ) -> tuple[list[str], list[str]]:
     """``(Fehler, Hinweise)`` zu einer Paketdatei — dieselben Regeln wie der Test des
-    Standardpakets: Schlüssel klein und ohne Umlaute, eindeutig; Beschreibung da; Original
-    einer Variante vorhanden; Symbol aus der Auswahl (``symbole``, sonst ungeprüft).
+    Standardpakets: Schlüssel klein und ohne Umlaute, eindeutig; Beschreibung da; Symbol
+    aus der Auswahl (``symbole``, sonst ungeprüft).
     Typen und Regionen außerhalb des Standardpakets sind Hinweise, keine Fehler; Treffer der
     ``wortliste`` ebenso — mit ``streng`` werden sie Fehler."""
     fehler: list[str] = []
@@ -169,8 +189,6 @@ def pruefen(
             fehler.append(f"{wo}: Beschreibung fehlt")
         if symbolmenge is not None and e.get("icon_key") not in symbolmenge:
             fehler.append(f"{wo}: Symbol {e.get('icon_key')!r} ist nicht in der Auswahl")
-        if (orig := e.get("variante_von")) and orig not in keys:
-            fehler.append(f"{wo}: Original {orig!r} der Variante fehlt im Paket")
         for typ in set(e.get("typen", [])) - STANDARD_TYPEN:
             hinweise.append(f"{wo}: Typ „{typ}“ ist nicht im Standardpaket (gewollt?)")
         for region in set(e.get("regionen", [])) - STANDARD_REGIONEN:
@@ -269,6 +287,289 @@ def index(
     }
 
 
+# ---------------------------------------------------------------------------
+# Übernehmen: aus der App zurück ins TOML
+# ---------------------------------------------------------------------------
+
+#: Vor jeder Tabelle auf oberster Ebene eine Leerzeile — tomlkit lässt sie nach einer
+#: eingefügten Untertabelle weg
+_TABELLE_OHNE_LEERZEILE = re.compile(r"([^\n])\n(\[\[?[A-Za-z_]+\]\]?\n)")
+
+
+def _tomlkit() -> Any:
+    try:
+        import tomlkit
+    except ImportError as fehler:  # nur im Werkzeug nötig, nicht in der App
+        raise PaketFehler(
+            "tomlkit fehlt — in der trainingsapp `uv sync` ausführen (Gruppe dev)"
+        ) from fehler
+    return tomlkit
+
+
+def _toml_wert(wert: Any) -> Any:
+    """Ein Wert fürs TOML: Wörterbücher als Inline-Tabellen (`limit_spec = { rules = … }`),
+    Listen als Arrays in einer Zeile."""
+    tomlkit = _tomlkit()
+    if isinstance(wert, dict):
+        t = tomlkit.inline_table()
+        for k, v in wert.items():
+            t[k] = _toml_wert(v)
+        return t
+    if isinstance(wert, list):
+        a = tomlkit.array()
+        for v in wert:
+            a.append(_toml_wert(v))
+        return a
+    return wert
+
+
+def _toml_tabelle(wert: dict[str, Any]) -> Any:
+    """Ein Wörterbuch als eigene Tabelle (`[exercises.result_spec]`): verschachtelte
+    Wörterbücher werden Untertabellen, Listen von Wörterbüchern `[[…]]`-Blöcke."""
+    tomlkit = _tomlkit()
+    t = tomlkit.table()
+    for k, v in wert.items():
+        if isinstance(v, dict):
+            t[k] = _toml_tabelle(v)
+        elif isinstance(v, list) and v and all(isinstance(e, dict) for e in v):
+            aot = tomlkit.aot()
+            for e in v:
+                aot.append(_toml_tabelle(e))
+            t[k] = aot
+        else:
+            t[k] = _toml_wert(v)
+    return t
+
+
+def _timer_fuers_toml(profile: list[dict[str, Any]], uebung: str) -> list[dict[str, Any]]:
+    """Timer-Profile ohne die IDs, die der Leser ohnehin aus Übung und Stelle rechnet."""
+    ergebnis: list[dict[str, Any]] = []
+    for i, p in enumerate(profile):
+        d = dict(p)
+        if d.get("id") == str(uuid.uuid5(NAMENSRAUM, f"{uebung}/timer/{i}")):
+            del d["id"]
+        ergebnis.append(d)
+    return ergebnis
+
+
+def _feld_setzen(block: Any, feld: str, wert: Any, uebung: Exercise) -> None:
+    """Ein Feld des Paketstands in den TOML-Block schreiben — fehlt der Wert, fällt das
+    Feld weg (Vorgabe). Parameter, die einer Vorlage entsprechen, werden `spec = "…"`."""
+    if feld == "result_spec":
+        for kurz, (_, vorlage) in VORLAGEN.items():
+            if vorlage.to_dict() == wert:
+                block.pop("result_spec", None)
+                block["spec"] = kurz
+                return
+        block.pop("spec", None)
+        block["result_spec"] = _toml_tabelle(wert)
+        return
+    if feld == "timer":
+        wert = _timer_fuers_toml(wert or [], uebung.id)
+        if wert:
+            block["timer"] = _toml_tabelle({"timer": wert})["timer"]
+        else:
+            block.pop("timer", None)
+        return
+    if wert is None or wert == "" or wert == [] or wert == {}:
+        block.pop(feld, None)
+        return
+    block[feld] = _toml_wert(wert)
+
+
+def _anders(feld: str, alt: Any, neu: Any) -> bool:
+    """Typen und Regionen sind Mengen — die App führt sie in anderer Reihenfolge als die Datei.
+
+    >>> _anders("typen", ["A", "B"], ["B", "A"]), _anders("name", "A", "B")
+    (False, True)
+    """
+    if feld in ("typen", "regionen"):
+        return set(alt or []) != set(neu or [])
+    return alt != neu
+
+
+@dataclass
+class Quelle:
+    """Was aus der App kommt: der Paketkopf (Version!), Übungen, bei einer Datenbank auch
+    die Pläne, die Kurskapitel angelegt haben."""
+
+    paket: Paket
+    uebungen: list[Exercise]
+    plaene: list[Plan] = field(default_factory=list)
+
+
+def _quelle_lesen(quelle: Path, paket_id: str) -> Quelle:
+    """Ein Export (JSON) oder eine Datenbank der App (nur lesend, ``mode=ro``)."""
+    if quelle.suffix.lower() in (".db", ".sqlite", ".sqlite3"):
+        from trainingsapp.data.pakete import PaketRepo
+        from trainingsapp.data.repositories import ExerciseRepo, PlanRepo, SubjectRepo
+
+        con = sqlite3.connect(f"file:{quelle}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            paket = PaketRepo(con).laden(paket_id)
+            if paket is None:
+                raise PaketFehler(f"{quelle.name}: Paket {paket_id} ist dort nicht installiert")
+            uebungen = [
+                u for u in ExerciseRepo(con).alle(mit_archivierten=True) if u.package_id == paket_id
+            ]
+            plaene: dict[str, Plan] = {}
+            for subject in SubjectRepo(con).alle():
+                for plan in PlanRepo(con).alle(subject.id):
+                    if plan.kurs_kapitel_id:
+                        plaene[plan.id] = plan
+        finally:
+            con.close()
+        return Quelle(paket, uebungen, list(plaene.values()))
+    inhalt = paket_lesen(quelle.read_bytes(), quelle.stem)
+    return Quelle(inhalt.paket, inhalt.uebungen)
+
+
+def _uebungen_uebernehmen(
+    quelle: Quelle, bloecke: list[Any], uebungen: list[Exercise]
+) -> tuple[list[str], list[str]]:
+    """Je Übung der Quelle den Block mit derselben ID: anders als in der Datei → eintragen.
+    ``(Zeilen je übernommener Übung, Namen ohne Block)``."""
+    je_id = {u.id: (block, u) for block, u in zip(bloecke, uebungen, strict=True)}
+    zeilen: list[str] = []
+    fremd: list[str] = []
+    for u in quelle.uebungen:
+        if u.id not in je_id:
+            fremd.append(u.name)
+            continue
+        block, alt = je_id[u.id]
+        alt_stand, neu_stand = stand(alt), stand(u)
+        geaendert = [
+            feld for feld in FELDNAMEN if _anders(feld, alt_stand.get(feld), neu_stand.get(feld))
+        ]
+        if not geaendert:
+            continue
+        for feld in geaendert:
+            _feld_setzen(block, feld, neu_stand.get(feld), u)
+        zeilen.append(f"{alt.name}: " + ", ".join(FELDNAMEN[feld] for feld in geaendert))
+    return zeilen, fremd
+
+
+def _vorlage_aus_plan(plan: Plan) -> PlanVorlage:
+    """Der Plan, wie ihn ein Kapitel anlegen würde — Ziel und Felder nur, wo der Plan
+    eigene hat (sonst folgt die Planübung der Übung, P79)."""
+    return PlanVorlage(
+        name=plan.name,
+        wochentage=list(plan.wochentage),
+        items=[
+            VorlageItem(
+                exercise_id=i.exercise_id,
+                target=dict(i.target) if i.target else {},
+                felder=None if i.felder is None else list(i.felder),
+            )
+            for i in sorted(plan.items, key=lambda i: i.order)
+        ],
+    )
+
+
+def _plaene_uebernehmen(
+    quelle: Quelle, kurs_bloecke: list[Any], kurse: list[Kurs], schluessel: dict[str, str]
+) -> tuple[list[str], list[str]]:
+    """Pläne, die ein Kurskapitel angelegt hat (``kurs_kapitel_id``), zurück in die Vorlage
+    des Kapitels — zugeordnet über Kapitel-ID und Planname; Wochentage und Übungen (mit
+    ``key`` statt ID) werden ersetzt. ``(Zeilen, Hinweise)``."""
+    kapitel_je_id: dict[str, tuple[Any, Kapitel, str]] = {}
+    for kurs_block, kurs in zip(kurs_bloecke, kurse, strict=True):
+        for kap_block, kap in zip(list(kurs_block.get("kapitel") or []), kurs.kapitel, strict=True):
+            kapitel_je_id[kap.id] = (kap_block, kap, f"{kurs.name}, Kapitel „{kap.titel}“")
+    zeilen: list[str] = []
+    hinweise: list[str] = []
+    for plan in quelle.plaene:
+        if plan.kurs_kapitel_id not in kapitel_je_id:
+            continue  # ein Kapitel eines anderen Pakets
+        kap_block, kap, wo = kapitel_je_id[plan.kurs_kapitel_id]
+        neu = _vorlage_aus_plan(plan)
+        vorlagen = kap.plaene
+        nr = next((i for i, v in enumerate(vorlagen) if v.name == plan.name), None)
+        if nr is None:
+            hinweise.append(f"{wo}: Plan „{plan.name}“ hat dort keine Vorlage — nicht übernommen")
+            continue
+        alt = vorlagen[nr]
+        geaendert: list[str] = []
+        if alt.wochentage != neu.wochentage:
+            geaendert.append("Wochentage")
+        if alt.to_dict()["uebungen"] != neu.to_dict()["uebungen"]:
+            geaendert.append("Übungen")
+        if not geaendert:
+            continue
+        block = kap_block["plaene"][nr]
+        block["wochentage"] = _toml_wert(neu.wochentage)
+        block["uebungen"] = _toml_wert(
+            [
+                {"uebung": schluessel.get(i.exercise_id, i.exercise_id)}
+                | ({"ziel": i.target} if i.target else {})
+                | ({"felder": i.felder} if i.felder is not None else {})
+                for i in neu.items
+            ]
+        )
+        zeilen.append(f"{wo}, Plan „{plan.name}“: " + ", ".join(geaendert))
+    return zeilen, hinweise
+
+
+def uebernehmen(quelle: Path, datei: Path, schreiben: bool = True) -> tuple[list[str], list[str]]:
+    """Was in der App eingestellt wurde, in die TOML-Datei übernehmen — ``(Zeilen, Fehler)``.
+    ``quelle`` ist ein Export aus dem Paketmanager (JSON: Übungen) oder die Datenbank der
+    App (``.db``, nur lesend: Übungen und die Pläne aus Kurskapiteln). Ohne ``schreiben``
+    nur zeigen, was sich änderte.
+
+    Je Übung: der Block mit derselben ID (aus ``key`` gerechnet, wie beim Lesen); je Feld
+    des Paketstands (`core.pakete.stand`): anders als in der Datei → eintragen. Übungen
+    ohne Block (eigene, aus anderen Paketen) werden nur genannt. Gleiches Paket, andere
+    Version → nichts: Dann hat die App den Stand der Datei nie gesehen, und die Quelle
+    brächte Altes zurück."""
+    tomlkit = _tomlkit()
+    try:
+        text = datei.read_text(encoding="utf-8")
+        inhalt_datei = paket_lesen(_roh(datei))
+        inhalt_quelle = _quelle_lesen(quelle, inhalt_datei.paket.id)
+    except (PaketFehler, OSError, ValueError, sqlite3.Error) as grund:
+        return [], [str(grund)]
+    if (
+        inhalt_quelle.paket.id == inhalt_datei.paket.id
+        and inhalt_quelle.paket.version != inhalt_datei.paket.version
+    ):
+        return [], [
+            f"{quelle.name} hat Version {inhalt_quelle.paket.version}, {datei.name} Version "
+            f"{inhalt_datei.paket.version} — erst die App mit diesem Stand starten "
+            "(`version` heben), dann übernehmen"
+        ]
+    dokument = tomlkit.parse(text)
+    bloecke = list(dokument.get("exercises") or [])
+    kurs_bloecke = list(dokument.get("kurse") or [])
+    if len(bloecke) != len(inhalt_datei.uebungen) or len(kurs_bloecke) != len(inhalt_datei.kurse):
+        return [], [f"{datei.name}: Blöcke und gelesene Übungen passen nicht zusammen"]
+    zeilen, fremd = _uebungen_uebernehmen(inhalt_quelle, bloecke, inhalt_datei.uebungen)
+    schluessel = {
+        u.id: str(block.get("key") or "")
+        for block, u in zip(bloecke, inhalt_datei.uebungen, strict=True)
+        if block.get("key")
+    }
+    plan_zeilen, hinweise = _plaene_uebernehmen(
+        inhalt_quelle, kurs_bloecke, inhalt_datei.kurse, schluessel
+    )
+    zeilen += plan_zeilen
+    uebernommen = len(zeilen)
+    if not uebernommen:
+        zeilen.append("Keine Änderung")
+    if fremd:
+        zeilen.append("Nicht übernommen (kein Block mit dieser ID): " + ", ".join(fremd))
+    zeilen += hinweise
+    unberuehrt = len(bloecke) - len({u.id for u in inhalt_quelle.uebungen} & schluessel.keys())
+    if unberuehrt:
+        zeilen.append(f"{unberuehrt} Übung(en) der Datei sind nicht in der Quelle — unverändert")
+    if schreiben and uebernommen:
+        toml_text = _TABELLE_OHNE_LEERZEILE.sub(r"\1\n\n\2", tomlkit.dumps(dokument))
+        datei.write_text(toml_text, encoding="utf-8")
+        fehler, _ = pruefen(datei)
+        return zeilen, [f"{datei.name} nach dem Übernehmen: {text}" for text in fehler]
+    return zeilen, []
+
+
 def _symbole() -> list[str] | None:
     try:
         from trainingsapp.ui.components.icons import AUSWAHL
@@ -294,6 +595,12 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--quelle", default="", help="Name der Quelle, wie die App ihn zeigt")
     q = sub.add_parser("quelle", help="Index einer Quelle lesen und alle Pakete prüfen")
     q.add_argument("url")
+    u = sub.add_parser("uebernehmen", help="Übungen aus einem Export der App ins TOML holen")
+    u.add_argument(
+        "quelle", type=Path, help="Export aus dem Paketmanager (JSON) oder Datenbank der App (.db)"
+    )
+    u.add_argument("datei", type=Path, help="die TOML-Datei des Pakets")
+    u.add_argument("--probe", action="store_true", help="nur zeigen, nichts schreiben")
     args = parser.parse_args(argv)
 
     if args.befehl == "pruefen":
@@ -326,6 +633,15 @@ def main(argv: list[str] | None = None) -> int:
             print(z)
         for f in fehler:
             print(f"FEHLER: {f}")
+        return 1 if fehler else 0
+    if args.befehl == "uebernehmen":
+        zeilen, fehler = uebernehmen(args.quelle, args.datei, schreiben=not args.probe)
+        for z in zeilen:
+            print(z)
+        for f in fehler:
+            print(f"FEHLER: {f}")
+        if not fehler and not args.probe and zeilen[0] != "Keine Änderung":
+            print(f"{args.datei}: geschrieben — `git diff` zeigt, was aus der App kam")
         return 1 if fehler else 0
     if args.befehl == "index":
         vorher = None

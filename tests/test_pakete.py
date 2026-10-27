@@ -67,7 +67,6 @@ def qigong(**aenderungen: object) -> dict:
             "name": "Stehen wie ein Baum, tief",
             "typen": ["Qigong"],
             "spec": "halten",
-            "variante_von": "baum",
         },
     ]
     roh = {"paket": {"name": "Qigong", "version": 1}, "exercises": uebungen}
@@ -116,7 +115,7 @@ def test_standardpaket_ist_sauber_gepflegt() -> None:
         assert e.get("description"), f"{wo}: Beschreibung fehlt"
         assert set(e.get("typen", [])) <= STANDARD_TYPEN, f"{wo}: unbekannter Typ"
         assert set(e.get("regionen", [])) <= STANDARD_REGIONEN, f"{wo}: unbekannte Region"
-        assert e.get("variante_von", keys[0]) in keys, f"{wo}: Original fehlt"
+        assert "variante_von" not in e, f"{wo}: variante_von ist seit 26.10.2026 ausgebaut"
     assert len(seed_inhalt().uebungen) == len(eintraege)  # liest sich auch fehlerfrei
 
 
@@ -139,12 +138,12 @@ def test_tippfehler_im_toml_nennt_die_zeile(tmp_path) -> None:
         seed_inhalt(datei)
 
 
-def test_schluessel_und_variante_werden_zu_ids() -> None:
+def test_schluessel_werden_zu_ids() -> None:
     inhalt = paket_lesen(qigong())
     baum, tief = inhalt.uebungen
     assert inhalt.paket.id == paket_id("Qigong")
     assert baum.id != seed_id("baum")  # eigener Namensraum je Paket
-    assert tief.family_id == baum.id
+    assert tief.id != baum.id
     assert baum.result_spec.fields[0].key == "hold"
 
 
@@ -275,7 +274,7 @@ def test_import_legt_an_und_ergaenzt_tags(con) -> None:
     assert baum.package_id == inhalt.paket.id
     assert baum.typen == ["Qigong", "Dehnung"]  # vorhandene Schreibweise
     assert baum.regionen == ["Meridiane"]
-    assert ExerciseRepo(con).laden(inhalt.uebungen[1].id).family_id == baum.id
+    assert ExerciseRepo(con).laden(inhalt.uebungen[1].id).package_id == inhalt.paket.id
     assert "Qigong" in TagRepo(con).namen("typ")
     assert ("Qigong", 2) in [(p.name, n) for p, n in pakete.alle()]
 
@@ -361,20 +360,20 @@ def test_fremde_und_geloeschte_bleiben(con) -> None:
     assert repo.laden(nacken.id) is None
 
 
-def test_varianten_ohne_ketten(con) -> None:
-    """A → B → C im Paket wird A → C und B → C; ein Original bleibt Original."""
+def test_variante_von_wird_ueberlesen(con) -> None:
+    """Ein altes Paket mit ``variante_von`` lädt noch — die Angabe hat keine Wirkung mehr."""
     roh = {
-        "paket": {"name": "Kette"},
+        "paket": {"name": "Alt"},
         "exercises": [
             {"key": "a", "name": "A", "variante_von": "b"},
-            {"key": "b", "name": "B", "variante_von": "c"},
-            {"key": "c", "name": "C"},
+            {"key": "b", "name": "B"},
         ],
     }
     inhalt = paket_lesen(roh)
     PaketRepo(con).importieren(inhalt)
-    a, b, c = (ExerciseRepo(con).laden(u.id) for u in inhalt.uebungen)
-    assert (a.family_id, b.family_id, c.family_id) == (c.id, c.id, None)
+    a, b = (ExerciseRepo(con).laden(u.id) for u in inhalt.uebungen)
+    assert a is not None and b is not None
+    assert "variante_von" not in paket_json(inhalt.paket, [a, b]).decode()
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +393,7 @@ def test_export_und_import_auf_einem_anderen_geraet(con, tmp_path) -> None:
         media=[Media(uri="https://example.org/wandsitz", title="Video")],
     )
     repo.speichern(original)
-    variante = Exercise(name="Wandsitz 45°", family_id=original.id, typen=["Kräftigung"])
+    variante = Exercise(name="Wandsitz 45°", typen=["Kräftigung"])
     repo.speichern(variante)
     datei = paket_json(Paket(id=paket_id("Beine"), name="Beine"), [original, variante])
 
@@ -414,7 +413,7 @@ def test_export_und_import_auf_einem_anderen_geraet(con, tmp_path) -> None:
     assert b"default_felder" not in datei
     assert [(m.uri, m.title) for m in da.media] == [("https://example.org/wandsitz", "Video")]
     assert da.package_id == paket_id("Beine")
-    assert ExerciseRepo(anderes).laden(variante.id).family_id == original.id
+    assert ExerciseRepo(anderes).laden(variante.id).package_id == paket_id("Beine")
     # Nur Übungen — keine Einträge, Profile, Messungen oder Strecken
     assert set(json.loads(datei)) == {"format", "version", "paket", "exportiert", "exercises"}
     anderes.close()
@@ -503,7 +502,7 @@ def test_entfernen_und_wieder_installieren(con) -> None:
     assert vorschau.anzahl(Status.ZURUECK) == 2
     pakete.importieren(zurueck)
     assert repo.laden(baum.id) is not None
-    assert repo.laden(tief.id).family_id == baum.id
+    assert repo.laden(tief.id) is not None
     assert [p.name for p, _ in pakete.alle()] == ["Standard", "Qigong"]
     assert pakete.entfernte() == []
 
@@ -532,7 +531,7 @@ def test_entfernen_nimmt_uebungen_aus_plaenen_oder_kopiert_sie(con) -> None:
     assert len(geladen.items) == 1  # „tief" ist raus, „baum" lebt als Kopie weiter
     kopie = repo.laden(geladen.items[0].exercise_id)
     assert kopie is not None and kopie.id != baum.id
-    assert kopie.name == baum.name and kopie.package_id is None and kopie.family_id == baum.id
+    assert kopie.name == baum.name and kopie.package_id is None
     assert pakete.standard(kopie.id) is None  # eigene Übung, kein Paketstand
     assert repo.laden(baum.id) is None  # das Original liegt im Papierkorb
     assert pakete.verwendungen(inhalt.paket.id) == []

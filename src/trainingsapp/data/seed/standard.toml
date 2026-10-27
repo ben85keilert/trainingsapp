@@ -29,7 +29,6 @@
 #   icon_key     aus ui/components/icons.py (AUSWAHL)
 #   description  ein, zwei Sätze: Ausgangsstellung und worauf es ankommt.
 #                Einseitige Übungen enden mit „Je Seite.“
-#   variante_von key des Originals
 #   limit_spec   Timer: { rules = [{ type = "timer", seconds = 300 }] }
 #   media        Videos: [{ uri = "https://…", title = "Erklärvideo" }]
 
@@ -287,7 +286,6 @@ description = "Hände schulterbreit, Körper in einer Linie. Brust Richtung Bode
 [[exercises]]
 key = "wandliegestuetz"
 name = "Liegestütz an der Wand"
-variante_von = "liegestuetzen"
 typen = ["Kräftigung"]
 regionen = ["Arm", "Rumpf"]
 icon_key = "back_hand"

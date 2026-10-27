@@ -38,7 +38,7 @@ from ..core.einheit import (
 )
 from ..core.plan_durchlauf import Schritt
 from ..core.timer import TimerLauf, TimerProfil
-from .einheit import TimerBaustein
+from .einheit import TimerBaustein, uhr_angaben
 
 #: Wo der Ablauf steht
 UEBUNG, PAUSE, FERTIG = "uebung", "pause", "fertig"
@@ -76,6 +76,9 @@ class PlanAblaufBaustein:
         self.phase = UEBUNG
         #: der Timer der laufenden Übung — ``None`` ohne Timer
         self.timer: TimerBaustein | None = None
+        #: Beginn der laufenden Übung auf der Achse der Einheit — der Anfang ihrer Uhr dort
+        #: bekommt keine eigene Notiz (`core.einheit.in_uebung`)
+        self._start_t_s: float | None = None
         #: je Planübung, wie sie endete: fertig, gemacht, uebersprungen, abgebrochen, beendet
         self.ergebnisse: dict[str, str] = {}
         #: Planübungen, die schon liefen und für eine andere verlassen wurden (`waehlen`)
@@ -222,7 +225,7 @@ class PlanAblaufBaustein:
         """Die Ereignisse des Timers der laufenden Übung nennen sie (P54) — hier, solange
         sie läuft, nicht erst in der Einheit: Im selben Takt kann schon die nächste beginnen."""
         s = self.schritt
-        return [in_uebung(e, s.uebung_id, s.name) for e in ereignisse]
+        return [in_uebung(e, s.uebung_id, s.name, start_t_s=self._start_t_s) for e in ereignisse]
 
     def _daten(self, s: Schritt) -> dict[str, Any]:
         daten: dict[str, Any] = {
@@ -251,18 +254,20 @@ class PlanAblaufBaustein:
         assert self._t0 is not None
         self.k, self.phase = k, UEBUNG
         self._seit = bei
+        self._start_t_s = bei - self._t0
         s = self.schritt
-        self._ausstehend.append(
-            Ereignis(
-                bei - self._t0, "plan", "uebung_start", uebung_start_text(s.name), self._daten(s)
-            )
-        )
         self.timer = None
+        daten = self._daten(s)
         if s.profil is not None:
             kopie = TimerProfil.aus_dict(s.profil.als_dict())
             assert kopie is not None
             self.timer = TimerBaustein(TimerLauf(kopie, uhr=self._uhr))
             self.timer.starten(self._t0, bei=bei)
+            # Der Anfang der Uhr wird still — die Startnotiz der Übung trägt ihre Angaben
+            daten.update(uhr_angaben(self.timer.lauf))
+        self._ausstehend.append(
+            Ereignis(self._start_t_s, "plan", "uebung_start", uebung_start_text(s.name), daten)
+        )
 
     def _beenden(self, jetzt: float, grund: str) -> None:
         assert self._t0 is not None

@@ -1,16 +1,16 @@
 """Varianten in der Oberfläche — Zeile, Schild, Blatt (Ben, 21.10.2026; `docs/plan_varianten.md`).
 
 - `Variantenwahl`: die Zeile beim Eintragen und im Formular. Passen die Namen in eine
-  Zeile, stehen sie als Segmente da; sonst nur Symbole oder Kürzel, Name und Beschreibung
-  der gewählten darunter; ohne Zeichen die Namen in zwei Spalten
-  (`core.varianten.zeilenform`, Skizzen A3, D1, D2). Ein Tipp wählt, ein zweiter auf
-  dieselbe heißt „ohne“.
+  Zeile, stehen sie als Segmente da; sonst als Knöpfe mit Zeichen und Namen, die auf so
+  viele Zeilen umbrechen, wie sie brauchen (`core.varianten.zeilenform`, Skizze A3; Ben,
+  26.10.2026). Die Beschreibung der gewählten steht darunter. Ein Tipp wählt, ein zweiter
+  auf dieselbe heißt „ohne“.
 - `etikett`: Symbol und Name als kleines Schild in Listen.
 - `varianten_blatt`: hinter dem Etikett-Symbol neben „Notiz“ — ohne, die vorhandenen mit
   Beschreibung, „Neue Variante“ (Skizzen A2, D5).
 
-Nur die Variantenzeile lässt den Namen weg, wenn der Platz fehlt; überall sonst stehen
-Symbol und Name.
+Überall stehen Symbol und Name — seit 26.10.2026 auch in der Variantenzeile; nur ein
+Kürzel oder Symbol ohne Namen gibt es nicht mehr.
 """
 
 from __future__ import annotations
@@ -23,8 +23,6 @@ import flet as ft
 
 from trainingsapp.core.varianten import (
     NAMEN,
-    RASTER,
-    ZEICHEN,
     Variante,
     name_pruefen,
     zeilenform,
@@ -106,7 +104,7 @@ def zeilenbreite(page: Any, rand: float = RAND_PX) -> float:
 
 
 class Variantenwahl:
-    """Die Variantenzeile: ein Segment je Variante — oder nur Zeichen — oder zwei Spalten.
+    """Die Variantenzeile: ein Segment je Variante — oder Knöpfe, die auf Zeilen umbrechen.
 
     ``wert`` ist die gewählte Variante (leer: ohne); ``on_change`` bekommt den neuen Wert.
     """
@@ -128,20 +126,20 @@ class Variantenwahl:
         self.form = zeilenform(self.liste, breite)
         self._beschreibung = ft.Text(size=12, opacity=0.8, visible=False)
         self._segmente: ft.SegmentedButton | None = None
-        self._raster = ft.Column(spacing=6)
-        if self.form == RASTER:
-            self._raster_bauen()
-            auswahl: ft.Control = self._raster
-        else:
+        self._zeilen = ft.Row(wrap=True, spacing=6, run_spacing=6)
+        if self.form == NAMEN:
             self._segmente = ft.SegmentedButton(
                 segments=[self._segment(v) for v in self.liste],
                 selected=[self.wert] if self.wert else [],
                 allow_empty_selection=True,
-                show_selected_icon=self.form == NAMEN,
+                show_selected_icon=True,
                 expand=True,
                 on_change=self._segment_gewaehlt,
             )
-            auswahl = ft.Row(controls=[self._segmente])
+            auswahl: ft.Control = ft.Row(controls=[self._segmente])
+        else:
+            self._zeilen_bauen()
+            auswahl = self._zeilen
         self._beschreibung_setzen()
         self.control = ft.Column(
             spacing=4,
@@ -152,11 +150,6 @@ class Variantenwahl:
     # -- Bauen -------------------------------------------------------------
 
     def _segment(self, v: Variante) -> ft.Segment:
-        if self.form == ZEICHEN:
-            z = zeichen(v, 20)
-            if isinstance(z, ft.Icon):
-                return ft.Segment(value=v.name, icon=z, tooltip=v.name)
-            return ft.Segment(value=v.name, label=z, tooltip=v.name)
         icon = symbol(v.symbol)
         return ft.Segment(
             value=v.name,
@@ -165,14 +158,12 @@ class Variantenwahl:
             tooltip=v.text or None,
         )
 
-    def _raster_bauen(self) -> None:
-        """Zwei Spalten mit Namen (Skizze D2) — gewählt mit Haken und getönt."""
-        knoepfe = [self._raster_knopf(v) for v in self.liste]
-        self._raster.controls = [
-            ft.Row(spacing=6, controls=knoepfe[i : i + 2]) for i in range(0, len(knoepfe), 2)
-        ]
+    def _zeilen_bauen(self) -> None:
+        """Knöpfe mit Zeichen und Namen, so breit wie ihr Name — die Reihe bricht um, so oft
+        es nötig ist. Gewählt mit Haken und getönt."""
+        self._zeilen.controls = [self._knopf(v) for v in self.liste]
 
-    def _raster_knopf(self, v: Variante) -> ft.Control:
+    def _knopf(self, v: Variante) -> ft.Control:
         gewaehlt = v.name == self.wert
         inhalt = ft.Row(
             tight=True,
@@ -180,34 +171,24 @@ class Variantenwahl:
             controls=[
                 *([ft.Icon(ft.Icons.CHECK, size=16)] if gewaehlt else []),
                 *([z] if (z := zeichen(v, 16)) is not None else []),
-                ft.Text(
-                    v.name,
-                    weight=ft.FontWeight.W_600 if gewaehlt else None,
-                    no_wrap=True,
-                    overflow=ft.TextOverflow.ELLIPSIS,
-                ),
+                ft.Text(v.name, weight=ft.FontWeight.W_600 if gewaehlt else None),
             ],
         )
         klasse = ft.FilledTonalButton if gewaehlt else ft.OutlinedButton
         return klasse(
             content=inhalt,
             height=40,
-            expand=True,
             tooltip=v.text or None,
             style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)),
             on_click=lambda _e=None, n=v.name: self._gewaehlt(n),
         )
 
     def _beschreibung_setzen(self) -> None:
-        """Unter der Zeile: in der Zeichenzeile immer der Name der gewählten, sonst ihre
-        Beschreibung, wenn sie eine hat (Skizze D1)."""
+        """Unter der Zeile: die Beschreibung der gewählten, wenn sie eine hat (Skizze D1)."""
         v = next((x for x in self.liste if x.name == self.wert), None)
         text = ""
-        if v is not None and self._mit_beschreibung:
-            if self.form == ZEICHEN:
-                text = f"{v.name} – {v.text}" if v.text else v.name
-            elif v.text:
-                text = f"{v.name} – {v.text}"
+        if v is not None and self._mit_beschreibung and v.text:
+            text = f"{v.name} – {v.text}"
         self._beschreibung.value = text
         self._beschreibung.visible = bool(text)
 
@@ -232,7 +213,7 @@ class Variantenwahl:
         if self._segmente is not None:
             self._segmente.selected = [self.wert] if self.wert else []
         else:
-            self._raster_bauen()
+            self._zeilen_bauen()
         self._beschreibung_setzen()
         with contextlib.suppress(RuntimeError):  # außerhalb einer laufenden App (Tests)
             self.control.update()

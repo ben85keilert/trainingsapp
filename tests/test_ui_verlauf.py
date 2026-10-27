@@ -174,11 +174,13 @@ def test_eine_kennzahl_ohne_auswahl_und_abgehakt_als_saeulen(state) -> None:
     assert "Wie oft je Woche" in _texte(waden) and "abgehakt" in _texte(waden)
 
 
-def test_variante_steht_bei_ihrem_ergebnis(state) -> None:
-    """War an einem Tag nur die Variante dran, nennt die Zeile sie."""
-    _eintragen(state, seed_id("wandliegestuetz"), state.heute(), reps=[15])
-    texte = _texte(verlauf_kachel_view(Seite(), state, LIEGESTUETZ))
-    assert "Liegestütz an der Wand" in texte and "15" in texte
+def test_kopie_hat_ihre_eigene_kachel(state) -> None:
+    """Die Übung an der Wand ist eine eigene Übung — ihr Eintrag steht nicht auf der Kachel
+    der Liegestütze (seit 26.10.2026 ohne „Im Verlauf zusammen mit“)."""
+    wand = seed_id("wandliegestuetz")
+    _eintragen(state, wand, state.heute(), reps=[15])
+    assert "15" not in _texte(verlauf_kachel_view(Seite(), state, LIEGESTUETZ))
+    assert "15" in _texte(verlauf_kachel_view(Seite(), state, wand))
 
 
 def test_tipps_frischen_nur_die_spalte_auf(state, monkeypatch) -> None:

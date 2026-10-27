@@ -132,8 +132,7 @@ class Paket:
 class Paketinhalt:
     """Eine gelesene Paketdatei.
 
-    Jede Übung trägt ``package_id`` = Paket. ``family_id`` ist die Angabe
-    ``variante_von`` als ID — ob sie gilt, entscheidet der Import.
+    Jede Übung trägt ``package_id`` = Paket.
     """
 
     paket: Paket
@@ -274,7 +273,7 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
 
     uebungen: list[Exercise] = []
     ids: set[str] = set()
-    schluessel: dict[str, str] = {}  # Schlüssel → ID, für „variante_von"
+    schluessel: dict[str, str] = {}  # Schlüssel → ID, für die Kurse
     probleme: list[str] = []
     for nr, eintrag in enumerate(eintraege, start=1):
         try:
@@ -293,12 +292,6 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
     if probleme:
         rest = len(probleme) - 3
         raise PaketFehler("\n".join(probleme[:3]) + (f"\n… und {rest} weitere" if rest > 0 else ""))
-    for u in uebungen:  # „variante_von" darf Schlüssel oder ID sein
-        if u.family_id is not None:
-            u.family_id = schluessel.get(u.family_id, u.family_id)
-            if u.family_id == u.id:
-                u.family_id = None
-
     kurse: list[Kurs] = []
     kurs_ids: set[str] = set()
     for nr, eintrag in enumerate(kurs_eintraege, start=1):
@@ -413,8 +406,8 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
     default_target = _objekt(eintrag.get("default_target", {}), "default_target")
     _werte_pruefen(default_target, "default_target")
     # „default_felder“ (Planparameter) wird überlesen: Was die Übung hat, bieten alle Pläne an
-    # (Ben, 22.10.2026, P79 C2) — kein Paket nutzte es
-    variante = str(eintrag.get("variante_von") or "").strip()
+    # (Ben, 22.10.2026, P79 C2) — kein Paket nutzte es. „variante_von“ („Im Verlauf zusammen
+    # mit“) ebenso: ausgebaut am 26.10.2026, Verläufe zusammenzuzählen ist nicht geplant.
     uid = _id_lesen(eintrag.get("id"), "der Übung") or uebung_id(paket, key or name)
     return (
         Exercise(
@@ -434,7 +427,6 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             typen=_texte(eintrag.get("typen", []), "typen"),
             regionen=_texte(eintrag.get("regionen", []), "regionen"),
             package_id=paket,
-            family_id=variante or None,
             timer=_timer_lesen(eintrag.get("timer", []), uid),
             uhr=eintrag.get("uhr") is not False,
             zaehlt_als=_zaehlt_als_lesen(eintrag.get("zaehlt_als")),
@@ -634,8 +626,6 @@ def stand(u: Exercise) -> dict[str, Any]:
     ]
     if medien:
         d["media"] = medien
-    if u.family_id:
-        d["variante_von"] = u.family_id
     return d
 
 
@@ -667,7 +657,6 @@ FELDNAMEN: dict[str, str] = {
     "uhr": "Uhr",
     "zaehlt_als": "Zählt als",
     "media": "Videos",
-    "variante_von": "Im Verlauf zusammen mit",
 }
 
 

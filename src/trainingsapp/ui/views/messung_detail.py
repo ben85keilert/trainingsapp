@@ -2513,6 +2513,7 @@ def _aufbauen(
                 page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
                 return
             state.hrv.titel_setzen(eintrag.id, titel)
+            state.hrv.titel_merken(eintrag.subject_id, titel)
             state.hrv.notiz_setzen(eintrag.id, text)
             state.hrv.sha1_setzen(eintrag.id, sha1)
 
@@ -2529,6 +2530,11 @@ def _aufbauen(
                 titel_vorschlaege(state, von, bis, rec.ereignisse),
                 titel_speichern,
                 vorgabe=plaene[0] if plaene else "",
+                gespeicherte=state.hrv.titel_liste(eintrag.subject_id),
+                merken=lambda name: state.hrv.titel_merken(
+                    eintrag.subject_id, name, verwendet=False
+                ),
+                entfernen=lambda t: state.hrv.titel_entfernen(t.id),
             )
         )
 

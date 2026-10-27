@@ -137,6 +137,7 @@ from trainingsapp.ui.training import (
     hrv_bezug,
     hrv_laden,
     ortung_zu_wand,
+    sportart_aendern,
     verwaiste_uebernehmen,
     zeitleiste_und_versatz,
 )
@@ -149,6 +150,50 @@ SPORT_SYMBOLE = {
     LAUFEN: ft.Icons.DIRECTIONS_RUN,
     RAD: ft.Icons.DIRECTIONS_BIKE,
 }
+
+
+def sportart_dialog(page: ft.Page, aktuell: str, waehlen: Callable[[str], object]) -> None:
+    """Die Sportart wechseln — ein Tipp auf das Symbol im Lauf oder in der Auswertung
+    (Ben, 26.10.2026: als „Laufen“ gestartet, aber Rad gefahren). Drei Zeilen, die
+    gewählte mit Haken; eine andere ruft ``waehlen`` und schließt."""
+    dialog: ft.AlertDialog
+
+    def wahl(sportart: str) -> Callable[[], None]:
+        def handler() -> None:
+            schliessen(dialog)
+            if sportart != aktuell:
+                waehlen(sportart)
+
+        return handler
+
+    dialog = ft.AlertDialog(
+        title=ft.Text("Sportart"),
+        content=ft.Column(
+            tight=True,
+            spacing=0,
+            controls=[
+                ft.ListTile(
+                    leading=ft.Icon(SPORT_SYMBOLE[s]),
+                    title=ft.Text(SPORT_NAMEN[s]),
+                    trailing=ft.Icon(ft.Icons.CHECK) if s == aktuell else None,
+                    on_click=wahl(s),
+                )
+                for s in SPORTARTEN
+            ],
+        ),
+        actions=[ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog))],
+    )
+    page.show_dialog(dialog)
+
+
+def sportart_knopf(page: ft.Page, aktuell: str, waehlen: Callable[[str], object]) -> ft.Control:
+    """Das Sportart-Symbol als Knopf, der `sportart_dialog` öffnet."""
+    return ft.IconButton(
+        SPORT_SYMBOLE.get(aktuell, ft.Icons.DIRECTIONS_RUN),
+        tooltip="Sportart ändern",
+        visual_density=ft.VisualDensity.COMPACT,
+        on_click=lambda: sportart_dialog(page, aktuell, waehlen),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +616,16 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
             legende_platz.content = _tempo_legende(e_t, teil.sportart, grenzen)
             legende_platz.visible = legende_platz.content is not None
 
+    def sportart_wechseln(sportart: str) -> None:
+        """Mitten im Lauf (Ben, 26.10.2026) — Baustein, Benachrichtigung, Karte."""
+        jetzt = _training(state)
+        if jetzt is None:
+            return
+        jetzt[1].sportart_setzen(sportart)
+        einheit_ui.melden(state)
+        zeichnen()
+        page.update()
+
     def zeichnen() -> None:
         nonlocal strecken_karte
         einst_box["e"] = state.training_einstellungen()
@@ -583,7 +638,7 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
             zahlen_karte = karte(
                 ft.Row(
                     controls=[
-                        ft.Icon(SPORT_SYMBOLE[teil.sportart]),
+                        sportart_knopf(page, teil.sportart, sportart_wechseln),
                         titel(f"{SPORT_NAMEN[teil.sportart]} läuft"),
                         pause_text,
                     ],
@@ -963,11 +1018,31 @@ def _hf_tempo_teil(
     else:
         beginn = (strecke.started_at - rec.start_utc).total_seconds() if rec.start_utc else 0.0
     nach_strecke = e.kurve_x == KURVE_STRECKE and r is not None
+    # Beide Kurven decken genau das Training ab (Ben, 26.10.2026: die HRV lief vorher
+    # und nachher weiter — nach Zeit endete das Tempo weit vor dem rechten Rand, nach
+    # Strecke stapelte sich die Herzfrequenz davor bei 0 km und danach beim letzten km,
+    # weil `stand_bei` außerhalb der Ortungen den Rand meldet).
+    dauer_s = (
+        (strecke.ended_at - strecke.started_at).total_seconds()
+        if strecke.ended_at is not None
+        else strecke.dauer_s
+    )
+    ende_min = dauer_s / 60.0 if dauer_s > 0 else None
+    ortung_von = r.erste.t if r is not None and r.erste is not None else None
+    ortung_bis = r.letzter.t if r is not None and r.letzter is not None else None
+    if nach_strecke and r is not None:
+        x_ende: float | None = max(r.distanz_m, strecke.distanz_m) / 1000.0 or None
+    else:
+        x_ende = ende_min
 
     def x_ortung(t: float) -> float | None:
-        """Ortungszeit (UTC) → x: Minuten seit Start oder km."""
+        """Ortungszeit (UTC) → x: Minuten seit Start oder km; außerhalb des Trainings
+        ``None``."""
         if not nach_strecke:
-            return (t - start_utc) / 60.0
+            x = (t - start_utc) / 60.0
+            return x if x >= 0 and (ende_min is None or x <= ende_min) else None
+        if ortung_von is None or ortung_bis is None or not ortung_von <= t <= ortung_bis:
+            return None
         stand = r.stand_bei(t) if r is not None else None
         return stand[0] / 1000.0 if stand is not None else None
 
@@ -986,7 +1061,7 @@ def _hf_tempo_teil(
             hf_punkte.append(None)
         letzte = w
         x = x_wand(w)
-        if x is not None and x >= 0:
+        if x is not None:
             hf_punkte.append((x, bpm))
     reihen = [_reihe_mit_naehten(hf_punkte, FARBEN["hf_rr"])]
     rechts: Skala | None = None
@@ -1016,6 +1091,8 @@ def _hf_tempo_teil(
         y_spanne_min=20,
         y_schritt_min=5,
         rechts=rechts,
+        x_von=0.0,
+        x_bis=x_ende,
         x_text=lambda x: f"{x:g}".replace(".", ","),
         x_schritte=(0.5, 1, 2, 5, 10) if nach_strecke else (1, 2, 5, 10, 15, 30, 60),
     )
@@ -1248,6 +1325,12 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         controls=[sicher(inhalt, expand=False)],
     )
 
+    def sportart_wechseln(sportart: str) -> None:
+        """Nachträglich (Ben, 26.10.2026): Zeile und Tagebucheintrag, dann die Ansicht neu —
+        Kilometer, Tempo und Kurve rechnen mit der neuen Sportart."""
+        sportart_aendern(state, strecke, sportart)
+        state.neu_zeichnen()
+
     def fuellen(hrv: tuple[Recording, Korrigiert] | None, fehler: str | None = None) -> None:
         """Der Inhalt der Ansicht — mit der gelesenen HRV-Aufnahme oder ohne sie."""
         geladen[0] = hrv
@@ -1266,7 +1349,7 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
             karte(
                 ft.Row(
                     controls=[
-                        ft.Icon(SPORT_SYMBOLE.get(strecke.sportart, ft.Icons.DIRECTIONS_RUN)),
+                        sportart_knopf(page, strecke.sportart, sportart_wechseln),
                         titel(SPORT_NAMEN.get(strecke.sportart, strecke.sportart)),
                     ]
                 ),

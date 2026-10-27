@@ -564,3 +564,52 @@ async def test_puffer_laenge_aus_der_einstellung(tmp_path) -> None:
     assert lauf.live.max_s == 7200.0
     await lauf.trennen()
     assert Messlauf(SimulatedSource(), backup_basis=tmp_path).live.max_s == LIVE_FENSTER_S
+
+
+async def test_eigener_abschnitt_live_als_notizpaar(tmp_path) -> None:
+    """Ben, 27.10.2026: „Abschnitt: Start“ / „… Ende“ sind zwei Grenz-Notizen mit derselben
+    Kennung als Spur; die Live-Liste kennt den laufenden, das Sidecar bekommt ihn beim
+    Speichern mit Kennung und Rändern — auch wenn die Notizen danach verschoben wurden."""
+    import json
+
+    from hrv_core.ausschnitte import zusatz_lesen
+    from hrv_core.korrektur import analyse_pfad
+
+    from trainingsapp.core import abschnitte
+
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
+    assert lauf.abschnitt_starten("Behandlung") is None  # ohne Aufnahme keine Grenze
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 12:
+        await asyncio.sleep(0.01)
+    kennung = lauf.abschnitt_starten("Behandlung", kopf_s=-2, endteil_s=3)
+    assert kennung is not None and lauf.offener_abschnitt() == (kennung, "Behandlung")
+    while lauf.aufnahme_dauer_s() < 30:
+        await asyncio.sleep(0.01)
+    (laufend,) = [a for a in lauf.abschnitte() if a.id == kennung]
+    assert laufend.name == "Behandlung" and laufend.bis_s == pytest.approx(lauf.jetzt_s(), abs=1)
+    # Ein zweiter Start beendet den ersten
+    zweite = lauf.abschnitt_starten("Ruhe")
+    assert zweite != kennung and lauf.offener_abschnitt() == (zweite, "Ruhe")
+    while lauf.aufnahme_dauer_s() < 45:
+        await asyncio.sleep(0.01)
+    assert lauf.abschnitt_beenden() and lauf.offener_abschnitt() is None
+    assert not lauf.abschnitt_beenden()
+    texte = [e["text"] for e in lauf.ereignisse()]
+    assert texte == ["Behandlung: Start", "Behandlung: Ende", "Ruhe: Start", "Ruhe: Ende"]
+    assert abschnitte.kennung_von(lauf.ereignisse()[0]) == kennung
+    assert lauf.ereignisse()[0]["marke"]["kopf_s"] == -2
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert ergebnis is not None
+    _, teile = zusatz_lesen(ergebnis.pfad, float)
+    assert [(a.id, a.name, a.kopf_s, a.endteil_s) for a in teile] == [
+        (kennung, "Behandlung", -2, 3),
+        (zweite, "Ruhe", 0, 0),
+    ]
+    assert teile[0].bis_s == pytest.approx(teile[1].von_s, abs=0.5)
+    doc = json.loads(analyse_pfad(ergebnis.pfad).read_text())
+    assert doc["segments"][0]["rand"] == {"kopf_s": -2, "endteil_s": 3}

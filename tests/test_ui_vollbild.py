@@ -286,9 +286,11 @@ def test_auswertung_vollbild_abschnitt_und_marke(daten) -> None:
     _knopf(view, "Speichern").on_click()
     (seg,) = json.loads(analyse_pfad(pfad).read_text())["segments"]
     assert seg["name"] == "Belastung"
+    # … und sein Paar Grenz-Notizen (27.10.2026) steht in der Messdatei
+    assert [x["text"] for x in laden(pfad).ereignisse] == ["Belastung: Start", "Belastung: Ende"]
     # Notiz ohne Text in der Fenstermitte
     _symbol(view, ft.Icons.ADD_COMMENT_OUTLINED).on_click()
-    (e,) = laden(pfad).ereignisse
+    (e,) = [x for x in laden(pfad).ereignisse if "marke" not in x]
     assert e["text"] == ""
 
     _symbol(view, ft.Icons.FULLSCREEN_EXIT).on_click()
@@ -396,4 +398,4 @@ def test_auswertung_vollbild_etiketten_seitenleiste_ablesen(daten) -> None:
     # Zurück hochkant: Notiz und Abschnitt stehen wieder in ihren Karten
     _symbol(view, ft.Icons.FULLSCREEN_EXIT).on_click()
     texte = _baum_texte(view)
-    assert "Ruhe" in texte and "NOTIZEN · 1" in texte
+    assert "Ruhe" in texte and "NOTIZEN · 3" in texte  # Atemübung + Paar „Ruhe: Start/Ende“

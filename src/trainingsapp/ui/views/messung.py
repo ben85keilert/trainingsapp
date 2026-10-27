@@ -90,6 +90,7 @@ from trainingsapp.devices.simulated import (
     SimulatedSource,
 )
 from trainingsapp.ui import einheit as einheit_ui
+from trainingsapp.ui.components.abschnitte import Abschnittsfeld, abschnitt_chip, name_dialog
 from trainingsapp.ui.components.analyse import Analyse
 from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog, schliessen
 from trainingsapp.ui.components.kacheln import (
@@ -937,6 +938,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         x_von, x_bis = fenster.bereich(lauf.jetzt_s(), anfang())
         rr_box.content = hauptkurve(x_von, x_bis)
         lage_box.content = lage()
+        abschnitte_neu()
         analyse.zeichnen(x_von, x_bis, strich=strich())
         ablesen_zeichnen()
         for c in (rr_box, lage_box, analyse.wahl, analyse.control, ablese_box):
@@ -1076,6 +1078,145 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         """Der Timer hat Abschnitte als Notizen in die Aufnahme geschrieben."""
         notizfeld.auffrischen()
         aktualisieren(erzwingen=True)
+
+    # -- Abschnitte (Ben, 27.10.2026): Start/Ende, Chips, Liste — `docs/plan_abschnitte.md`
+    abschnitt_stand: dict[str, Any] = {"schluessel": None, "gebunden": None}
+    #: Die Zeitzeile des laufenden Abschnitts — sie zählt im Sekundentakt mit
+    laufzeit: dict[str, ft.Text] = {}
+    start_knopf = ft.TextButton("Abschnitt: Start", icon=ft.Icons.PLAY_ARROW)
+    abschnittsfeld = Abschnittsfeld(
+        offen=state.abschnitte_offen,
+        offen_merken=lambda offen: setattr(state, "abschnitte_offen", offen),
+        knoepfe=[start_knopf],
+        zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
+    )
+
+    def abschnitt_zeichnen_und_melden() -> None:
+        abschnitte_neu(erzwingen=True)
+        notizfeld.auffrischen()
+        aktualisieren(erzwingen=True)
+
+    def abschnitt_starten(name: str) -> None:
+        lauf.abschnitt_starten(name)
+        abschnitt_zeichnen_und_melden()
+
+    def abschnitt_knopf() -> None:
+        """„Abschnitt: Start“ fragt den Namen; „‹Name› · Ende“ beendet ihn."""
+        if lauf.aufnahme is None:
+            page.show_dialog(ft.SnackBar(ft.Text("Erst die Aufnahme starten.")))
+            return
+        if lauf.offener_abschnitt() is not None:
+            lauf.abschnitt_beenden()
+            abschnitt_zeichnen_und_melden()
+            return
+        page.show_dialog(
+            name_dialog(
+                page,
+                vorschlaege=[t.name for t in state.hrv.titel_liste(state.profil.id)],
+                vorgabe=f"Abschnitt {len(lauf.abschnitte()) + 1}",
+                starten=abschnitt_starten,
+            )
+        )
+
+    start_knopf.on_click = lambda: abschnitt_knopf()
+
+    def abschnitt_binden(a: Any) -> None:
+        """Ein Chip rückt das Fenster auf den Abschnitt (Breite = Dauer, mindestens 1 min);
+        „Ganze Messung“ zeigt den ganzen Puffer. Ein laufender folgt der Gegenwart."""
+        jetzt = lauf.jetzt_s()
+        if a is None:
+            fenster.breite_s = max(60.0, jetzt - anfang())
+            fenster.ende_s = None
+            abschnitt_stand["gebunden"] = None
+        else:
+            fenster.breite_s = max(60.0, a.dauer_s)
+            fenster.ende_s = None if a.bis_s >= jetzt - 1.0 else a.bis_s
+            abschnitt_stand["gebunden"] = a.id
+        breiten_knoepfe.selected = breiten_auswahl(fenster.breite_s)
+        abschnitte_neu(erzwingen=True)
+        aktualisieren(erzwingen=True)
+
+    def zeit_text(a: Any, laeuft: bool) -> str:
+        if laeuft:
+            return f"seit {_uhr(a.von_s)} · läuft ({_uhr(a.dauer_s)})"
+        return f"{_uhr(a.von_s)}–{_uhr(a.bis_s)} ({_uhr(a.dauer_s)})"
+
+    def binder(a: Any) -> Callable[[], None]:
+        return lambda: abschnitt_binden(a)
+
+    def abschnitt_zeile(a: Any, laeuft: bool) -> ft.Control:
+        zeit = ft.Text(zeit_text(a, laeuft), size=12, opacity=0.75)
+        if laeuft:
+            laufzeit[a.id] = zeit
+        return ft.Container(
+            height=44,
+            padding=ft.Padding.only(top=2, bottom=2),
+            on_click=lambda _=None: abschnitt_binden(a),
+            content=ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Container(width=4, height=36, border_radius=2, bgcolor=a.farbe),
+                    ft.Column(
+                        spacing=0,
+                        tight=True,
+                        expand=True,
+                        controls=[
+                            ft.Text(a.name, size=13, weight=ft.FontWeight.W_600, max_lines=1),
+                            zeit,
+                        ],
+                    ),
+                ],
+            ),
+        )
+
+    def abschnitte_neu(erzwingen: bool = False) -> None:
+        """Chips, Liste und Knopf aus den Abschnitten der Aufnahme — nur neu gebaut, wenn
+        sich etwas ändert (im Sekundentakt gerufen); der laufende zählt seine Dauer mit."""
+        teile = lauf.abschnitte()
+        offen = lauf.offener_abschnitt()
+        laufend_id = offen[0] if offen else None
+        schluessel = (
+            tuple(
+                (a.id, a.name, round(a.von_s), None if a.id == laufend_id else round(a.bis_s))
+                for a in teile
+            ),
+            laufend_id,
+            abschnitt_stand["gebunden"],
+            lauf.aufnahme is not None,
+        )
+        if not erzwingen and schluessel == abschnitt_stand["schluessel"]:
+            for a in teile:  # nur die laufende Dauer zählt mit
+                if a.id == laufend_id and (zeit := laufzeit.get(a.id)) is not None:
+                    zeit.value = zeit_text(a, True)
+            return
+        abschnitt_stand["schluessel"] = schluessel
+        laufzeit.clear()
+        if offen is not None:
+            start_knopf.content = f"{offen[1]} · Ende"
+            start_knopf.icon = ft.Icons.STOP
+        else:
+            start_knopf.content = "Abschnitt: Start"
+            start_knopf.icon = ft.Icons.PLAY_ARROW
+        start_knopf.disabled = lauf.aufnahme is None
+        gebunden = abschnitt_stand["gebunden"]
+        chips: list[ft.Control] = [
+            abschnitt_chip(None, gewaehlt=gebunden is None, on_click=binder(None)),
+            *[abschnitt_chip(a, gewaehlt=a.id == gebunden, on_click=binder(a)) for a in teile],
+        ]
+        zeilen = [abschnitt_zeile(a, a.id == laufend_id) for a in teile]
+        if not teile:
+            zeilen = [
+                ft.Text(
+                    "Noch keine Abschnitte — „Abschnitt: Start“ setzt die Grenze bei jetzt, "
+                    "der Timer seine Abschnitte von selbst."
+                    if lauf.aufnahme is not None
+                    else "Abschnitte gibt es in der Aufnahme.",
+                    size=12,
+                    opacity=0.7,
+                )
+            ]
+        abschnittsfeld.fuellen(chips, zeilen, len(teile))
 
     state.notiz_beobachter["live"] = timer_notizen
 
@@ -1660,6 +1801,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         kacheln_box.content = anzeige(werte, einst.darstellung)
         rr_box.content = hauptkurve(x_von, x_bis)
         lage_box.content = lage()
+        abschnitte_neu()
         analyse.zeichnen(x_von, x_bis, strich=strich())
         ablesen_zeichnen()  # nach `zeichnen`: liest die eben gezeichneten Verlaufskurven
         markieren(ablesen_knopf, ablesen["an"])
@@ -1711,6 +1853,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 analyse.menue,
             ],
         ),
+        abschnittsfeld.control,
         ft.Row(
             spacing=4,
             controls=[breiten_knoepfe, achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten)],

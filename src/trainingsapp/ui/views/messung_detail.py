@@ -80,7 +80,7 @@ from hrv_core.ausschnitte import (
     zusatz_speichern,
 )
 from hrv_core.constants import BAND_OK
-from hrv_core.ereignisse import Zeitbezug, metadaten_schreiben
+from hrv_core.ereignisse import Zeitbezug, metadaten_schreiben, sortiert
 from hrv_core.frequency import Fensterspektrum, frequenzbereich
 from hrv_core.korrektur import (
     Kette,
@@ -105,6 +105,7 @@ from hrv_core.time_domain import compute_time_domain
 from hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
+from trainingsapp.core import abschnitte as eigene_abschnitte
 from trainingsapp.core.aufnahme_bezug import RAND_S, Bezug
 from trainingsapp.core.hrv_ansicht import (
     HF_SPANNE_MIN_BPM,
@@ -130,6 +131,7 @@ from trainingsapp.core.timer import ENDE_MARKE
 from trainingsapp.core.timer import name_aus_notiz as abschnittsname
 from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.ui import ausrichtung
+from trainingsapp.ui.components.abschnitte import liste_rollen, raender_text, rand_zeile
 from trainingsapp.ui.components.analyse import Analyse, Analysefenster, verlaufsdaten
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten
 from trainingsapp.ui.components.dialoge import Nachher, loeschen_rueckfrage, meldung, schliessen
@@ -281,10 +283,15 @@ UEBUNGEN_INFO = (
 
 
 def _ist_leistung(e: dict) -> bool:
-    """Eine Notiz mit Marke der Person (`person/leistung`, `person/abschluss`) — sie gehört
-    zur Ebene „Leistungen“, nicht in die Notizliste."""
+    """Eine Leistungs-Notiz der Person (`person/leistung`, `person/abschluss`) — sie gehört
+    zur Ebene „Leistungen“, nicht in die Notizliste. Die Grenz-Notizen eigener Abschnitte
+    (`person/abschnitt`, `person/ende`; `core.abschnitte`) stehen in der Liste."""
     m = e.get("marke")
-    return isinstance(m, dict) and m.get("quelle") == "person"
+    return isinstance(m, dict) and m.get("quelle") == "person" and m.get("art") in LEISTUNG_ARTEN
+
+
+#: Marken-Arten, die zur Ebene „Leistungen“ gehören (`_ist_leistung`)
+LEISTUNG_ARTEN = frozenset({"leistung", "abschluss"})
 
 
 #: So breit öffnet die Aufzeichnung — am Anfang der Messung (Ben, 14.10.2026)
@@ -412,6 +419,8 @@ class _Kurvenmodus:
     #: Der bearbeitete Abschnitt (``None`` = ein neuer)
     abschnitt: Abschnitt | None = None
     name_feld: ft.TextField | None = None
+    #: Kopf und Endteil des bearbeiteten Abschnitts (s, mit Vorzeichen; Ben, 27.10.2026)
+    raender: tuple[float, float] = (0.0, 0.0)
     #: Ablesen: der Strich steht an ``strich`` (s), darunter alle Werte
     ablesen: bool = False
     strich: float | None = None
@@ -516,8 +525,11 @@ class _Geladen:
     zeilen_achse: list[float]
     #: Kurvenachse → Herzuhr der Rohdatei (Sidecar)
     nach_datei: Callable[[float], float]
-    #: Selbst markierte Abschnitte (Sidecar)
+    #: Die Abschnitte: Sidecar und Notizpaare zusammengeführt (`core.abschnitte`)
     eigene: list[Any]
+    #: Prüfsumme der Messdatei, falls `_laden` früheren eigenen Abschnitten ihr Notizpaar
+    #: nachgetragen hat (einmalig) — die Datenbank bekommt sie im Loop
+    nachgetragen_sha1: str | None
 
 
 def _laden(pfad: Path, vorgabe: Korrekturregeln) -> _Geladen:
@@ -542,11 +554,28 @@ def _laden(pfad: Path, vorgabe: Korrekturregeln) -> _Geladen:
     # Crop und eigene Abschnitte stehen im Sidecar auf der Herzuhr der Rohdatei — die
     # hat eine reine Pulsmessung nicht, dort gibt es beides nicht
     nach_datei, nach_achse = achsen_umrechnung(zeilen_achse, [b.t_s for b in rec.beats])
-    if z.nur_puls or sidecar_alt:
-        eigene: list[Any] = []
-    else:
-        z.ausschnitt, eigene = zusatz_lesen(pfad, nach_achse)
-    return _Geladen(z, stand.gespeicherte_regeln, sidecar_alt, zeilen_achse, nach_datei, eigene)
+    eigene: list[Any] = []
+    sha1: str | None = None
+    if not z.nur_puls:
+        if not sidecar_alt:
+            z.ausschnitt, eigene = zusatz_lesen(pfad, nach_achse)
+        # Eigene Abschnitte sind Notizpaare in der Messdatei (Ben, 27.10.2026,
+        # `docs/plan_abschnitte.md`); das Sidecar wird mit ihnen zusammengeführt
+        zb = Zeitbezug(lambda: rec.beats, rec.start_utc, achse=lambda: zeilen_achse)
+        ende = float(zeilen_achse[-1]) if zeilen_achse else 0.0
+        paare = eigene_abschnitte.paare(rec.ereignisse, zb.x, ende)
+        notiz_x = [x for e in rec.ereignisse if (x := zb.x(e)) is not None]
+        eigene, nachzutragen = eigene_abschnitte.zusammenfuehren(eigene, paare, notiz_x)
+        if nachzutragen:  # frühere eigene Abschnitte ohne Paar: einmalig, gleich hier im Thread
+            liste = list(rec.ereignisse)
+            for a in nachzutragen:
+                liste.extend(eigene_abschnitte.grenznotizen(a, zb))
+            rec.ereignisse = sortiert(liste, rec.beats)
+            with contextlib.suppress(OSError, ValueError):
+                sha1 = metadaten_schreiben(pfad, ereignisse=[dict(e) for e in rec.ereignisse])
+    return _Geladen(
+        z, stand.gespeicherte_regeln, sidecar_alt, zeilen_achse, nach_datei, eigene, sha1
+    )
 
 
 def _aufbauen(
@@ -1087,8 +1116,17 @@ def _aufbauen(
                 continue
             if not balken_an and (m.bindung is None or a.id != m.bindung.id):
                 continue
+            ebene = min(lagen[a.id] + versatz, 3)
+            if a.kopf_s or a.endteil_s:  # der Rechenbereich blass unter dem Kern
+                r_von, r_bis = a.rechenbereich(*grenzen())
+                if r_bis >= x_von and r_von <= x_bis:
+                    blass = band(
+                        max(r_von, x_von), min(r_bis, x_bis), ft.Colors.with_opacity(0.35, a.farbe)
+                    )
+                    blass.ebene = ebene
+                    out.append(blass)
             balken = band(max(a.von_s, x_von), min(a.bis_s, x_bis), a.farbe)
-            balken.ebene = min(lagen[a.id] + versatz, 3)
+            balken.ebene = ebene
             out.append(balken)
         return out
 
@@ -1246,8 +1284,9 @@ def _aufbauen(
         return z.ausschnitt if z.ausschnitt is not None else (0.0, dauer)
 
     def werte_von(a: Abschnitt) -> dict[str, Any]:
-        lo, hi = grenzen()
-        von, bis = max(a.von_s, lo), min(a.bis_s, hi)
+        """Die Werte auf dem Rechenbereich — mit Kopf und Endteil (Ben, 27.10.2026: „Die
+        Rechnungen nehmen Kopf und Ende mit. Keine 3 separaten Bereiche“)."""
+        von, bis = a.rechenbereich(*grenzen())
         korr = z.korrigiert()
         pnn_ms = state.ansicht().pnn_ms
         atem_modus = ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE
@@ -1273,6 +1312,8 @@ def _aufbauen(
             teile.append(f"Atem {zahl(w['atem'], 1)}/min")
         if w["lf_hf"] is not None:
             teile.append(f"LF/HF {zahl(w['lf_hf'], 2)}")
+        elif einst.frequenz and w["dauer_s"] < 120:
+            teile.append("LF/HF ab 2 min")  # zu kurz: sagen, nicht verstecken (Ben, 27.10.)
         return teile
 
     def abschnitt_zeile(a: Abschnitt) -> ft.Control:
@@ -1299,7 +1340,7 @@ def _aufbauen(
                             ft.Text(a.name, size=13, weight=ft.FontWeight.W_600, max_lines=1),
                             ft.Text(
                                 f"{_uhr(a.von_s)}–{_uhr(a.bis_s)} ({_uhr(a.dauer_s)})  ·  "
-                                + "  ·  ".join(teile),
+                                + "  ·  ".join([*([r] if (r := raender_text(a)) else []), *teile]),
                                 size=12,
                                 opacity=0.75,
                             ),
@@ -1322,6 +1363,8 @@ def _aufbauen(
             ]
         else:
             abschnitte_box.controls = [hinweis("Noch keine Abschnitte.")]  # wie: hinter dem „i“
+        # Die Liste rollt ab der eingestellten Zeilenzahl, wie die Notizen (Ben, 27.10.2026)
+        liste_rollen(abschnitte_box, len(eigene), state.hrv_einstellungen().notizen_zeilen)
         abschnitt_titel.value = f"ABSCHNITTE · {len(eigene)}" if eigene else "ABSCHNITTE"
         chips_zeichnen()
 
@@ -1338,6 +1381,33 @@ def _aufbauen(
 
         page.run_task(schreiben)
 
+    def eigener(a: Abschnitt) -> bool:
+        """Hat der Abschnitt sein Paar Grenz-Notizen (eigener Abschnitt der Person)?"""
+        return any(eigene_abschnitte.kennung_von(e) == a.id for e in rec.ereignisse)
+
+    def notizen_fuer(a: Abschnitt, *, neu: bool = False) -> None:
+        """Die Grenz-Notizen zum gespeicherten Abschnitt: ein eigener (oder neuer) bekommt
+        sein Paar mit Name, Grenzen, Kopf und Endteil; einem Abschnitt eines Ablaufs
+        (Timer, Übung) kommen Kopf und Endteil an die Start-Notiz — liegt dort keine mit
+        Marke, bekommt auch er ein Paar (`core.abschnitte`)."""
+        liste: list[dict] | None = None
+        if not (neu or eigener(a)):
+            liste = eigene_abschnitte.raender_setzen(rec.ereignisse, a, zeitbezug.x)
+            if liste is None and not (a.kopf_s or a.endteil_s):
+                return  # nichts zu merken
+        if liste is None:
+            liste = eigene_abschnitte.notizen_aktualisieren(rec.ereignisse, a, zeitbezug)
+        notizen_speichern(sortiert(liste, rec.beats))
+        notizfeld.auffrischen()
+
+    def notizen_weg(abschnitte: list[Abschnitt]) -> None:
+        liste = list(rec.ereignisse)
+        for a in abschnitte:
+            liste = eigene_abschnitte.notizen_entfernen(liste, a.id)
+        if len(liste) != len(rec.ereignisse):
+            notizen_speichern(liste)
+            notizfeld.auffrischen()
+
     def abschnitt_loeschen(a: Abschnitt) -> None:
         """Erst fragen (Ben, 21.10.2026), dann löschen — „Rückgängig“ holt ihn zurück."""
         page.show_dialog(
@@ -1351,14 +1421,19 @@ def _aufbauen(
 
     def abschnitt_entfernen(a: Abschnitt) -> None:
         vorher = list(eigene)
+        notizen_vorher = list(rec.ereignisse)
         eigene[:] = [b for b in eigene if b.id != a.id]
         if m.abschnitt is not None and m.abschnitt.id == a.id:
             editor_schliessen(zeichnen_=False)
+        notizen_weg([a])  # das Paar Grenz-Notizen geht mit
         zusatz_sichern()
         zeichnen()
 
         def zurueck() -> None:
             eigene[:] = vorher
+            if notizen_vorher != rec.ereignisse:
+                notizen_speichern(notizen_vorher)
+                notizfeld.auffrischen()
             zusatz_sichern()
             zeichnen()
 
@@ -1382,13 +1457,18 @@ def _aufbauen(
         if not eigene:
             return
         vorher = list(eigene)
+        notizen_vorher = list(rec.ereignisse)
         eigene.clear()
         editor_schliessen(zeichnen_=False)
+        notizen_weg(vorher)
         zusatz_sichern()
         zeichnen()
 
         def zurueck() -> None:
             eigene[:] = vorher
+            if notizen_vorher != rec.ereignisse:
+                notizen_speichern(notizen_vorher)
+                notizfeld.auffrischen()
             zusatz_sichern()
             zeichnen()
 
@@ -1550,6 +1630,42 @@ def _aufbauen(
             capitalization=ft.TextCapitalization.SENTENCES,
         )
         m.name_feld = name if art == ABSCHNITT else None
+        m.raender = (abschnitt.kopf_s, abschnitt.endteil_s) if abschnitt is not None else (0.0, 0.0)
+
+        def rechen_text() -> str:
+            e = m.editor
+            if e is None:
+                return ""
+            probe = Abschnitt("", e.von, e.bis, kopf_s=m.raender[0], endteil_s=m.raender[1])
+            von, bis = probe.rechenbereich(*grenzen())
+            return f"{_uhr(von)}–{_uhr(bis)} · {_uhr(bis - von)}"
+
+        def kopf_setzen(s: float) -> None:
+            m.raender = (s, m.raender[1])
+            nur_kurven(mit_analyse=False)
+
+        def endteil_setzen(s: float) -> None:
+            m.raender = (m.raender[0], s)
+            nur_kurven(mit_analyse=False)
+
+        # Kopf und Endteil erst auf Knopfdruck (Ben, 27.10.2026) — gesetzt: gleich sichtbar
+        rand_box = ft.Container(
+            visible=any(m.raender),
+            content=rand_zeile(
+                page,
+                kopf=lambda: m.raender[0],
+                endteil=lambda: m.raender[1],
+                kopf_setzen=kopf_setzen,
+                endteil_setzen=endteil_setzen,
+                bereich_text=rechen_text,
+            ),
+        )
+
+        def rand_umschalten() -> None:
+            rand_box.visible = not rand_box.visible
+            with contextlib.suppress(Exception):
+                rand_box.update()
+
         if art == CROP:
             ueberschrift = "Zuschneiden"
             erklaerung = (
@@ -1569,6 +1685,12 @@ def _aufbauen(
                 "ziehen die Grenze an, die Stecknadel setzt sie genau auf eine."
             )
             knoepfe = [
+                ft.TextButton(
+                    "Kopf · Endteil",
+                    icon=ft.Icons.SWAP_HORIZ,
+                    tooltip="Rechenbereich über die Grenzen hinaus (+) oder innerhalb (−)",
+                    on_click=lambda: rand_umschalten(),
+                ),
                 *(
                     [
                         ft.TextButton(
@@ -1611,6 +1733,7 @@ def _aufbauen(
                     ),
                     *([name] if art == ABSCHNITT else []),
                     m.editor.control,
+                    *([rand_box] if art == ABSCHNITT else []),
                     ft.Text(erklaerung, size=12, opacity=0.65),
                     ft.Row(
                         spacing=4,
@@ -1687,13 +1810,24 @@ def _aufbauen(
         if e is None:
             return
         name = ((m.name_feld.value if m.name_feld else "") or "").strip()
+        kopf_s, endteil_s = m.raender
+        neu = m.abschnitt is None
         if m.abschnitt is not None:
-            m.abschnitt.name = name or m.abschnitt.name
-            m.abschnitt.von_s, m.abschnitt.bis_s = e.von, e.bis
+            a = m.abschnitt
+            a.name = name or a.name
+            a.von_s, a.bis_s = e.von, e.bis
+            a.kopf_s, a.endteil_s = kopf_s, endteil_s
         else:
-            eigene.append(
-                Abschnitt(name or f"Abschnitt {len(eigene) + 1}", e.von, e.bis, farbe=e.farbe)
+            a = Abschnitt(
+                name or f"Abschnitt {len(eigene) + 1}",
+                e.von,
+                e.bis,
+                farbe=e.farbe,
+                kopf_s=kopf_s,
+                endteil_s=endteil_s,
             )
+            eigene.append(a)
+        notizen_fuer(a, neu=neu)
         zusatz_sichern()
         editor_schliessen()
 
@@ -2069,6 +2203,9 @@ def _aufbauen(
         zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
     )
 
+    if geladen.nachgetragen_sha1 is not None:  # `_laden` schrieb Grenz-Notizen nach
+        state.hrv.sha1_setzen(eintrag.id, geladen.nachgetragen_sha1)
+
     # -- Analysefenster: wofür Spektrum, Poincaré und DFA gelten --------------------
     # Die ganze Messung (Vorgabe), ein Abschnitt oder ein Band fester Länge. Das Band
     # greift man in der Rohkurve und schiebt es; gerechnet wird nach dem Loslassen,
@@ -2215,8 +2352,7 @@ def _aufbauen(
         if aw.art == AW_ABSCHNITT:
             a = next((a for a in eigene if a.id == aw.abschnitt_id), None)
             if a is not None:
-                lo, hi = grenzen()
-                von, bis = max(a.von_s, lo), min(a.bis_s, hi)
+                von, bis = a.rechenbereich(*grenzen())  # mit Kopf und Endteil
                 korr = z.korrigiert()
                 return Analysefenster(
                     f"abschnitt:{a.id}:{von:.3f}:{bis:.3f}",
@@ -3029,11 +3165,13 @@ def _aufbauen(
     # der Kopf trägt „+ Abschnitt“ und das Menü — ein Tipp auf den Titel klappt zu.
 
     abschnitt_pfeil = ft.Icon(ft.Icons.EXPAND_MORE, size=18, opacity=0.6)
+    # Eingeklappt bleibt die Chip-Zeile stehen (Ben, 27.10.2026: „die klickbaren Bereiche
+    # bleiben“) — nur Bindung, Liste und Werte klappen zu
     abschnitt_koerper = ft.Column(
         spacing=6,
         tight=True,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-        controls=[chips_box, bindung_box, abschnitte_platz[0]],
+        controls=[bindung_box, abschnitte_platz[0]],
     )
 
     def abschnitte_klappen() -> None:
@@ -3070,6 +3208,7 @@ def _aufbauen(
                     abschnitt_menue(),
                 ],
             ),
+            chips_box,
             abschnitt_koerper,
         ],
     )

@@ -362,6 +362,7 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
 | `soll_s` | Zahl | die geplante Dauer des Abschnitts in Sekunden — ein „Weiter“ kürzt ihn, Soll gegen Ist zeigt es; fehlt bei der Stoppuhr (seit 18.10.2026) |
 | `profil` | Text | welcher Ablauf lief: der Kurzcode der Profil-ID (8 Zeichen wie bei Übungen), die Stoppuhr `stoppuhr`, der Einmal-Timer `einmal` (seit 19.10.2026) — derselbe Ablauf über Tage, auch nach Umbenennen (seit 18.10.2026) |
 | `feld`, `wert` | Text, Zahl | bei `person/leistung`: das Feld der Übung (`reps`, `hold`, …) und der eingetragene Wert (seit 19.10.2026) — die Ausprägung (Gewicht, Seite) steht im Text („Kniebeuge 20 kg: 10“) |
+| `kopf_s`, `endteil_s` | Zahl (s, mit Vorzeichen) | an der **Start-Notiz** eines Abschnitts (seit 27.10.2026): Kopf und Endteil — der Rechenbereich reicht so weit über die getippten Grenzen hinaus (positiv: davor bzw. danach) oder beginnt dahinter (negativ: innerhalb); `hrv_core.ausschnitte.Abschnitt.rechenbereich`. Fehlt = 0 |
 
 - Nur diese Felder, nur Zahl, Text oder Ja/Nein — `hrv_core.ereignisse.marke_bereinigen`
   wirft alles andere weg. **Nie ein Ort** (Abschnitt 0 in `docs/plan_gps.md`): eine
@@ -387,6 +388,14 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
   ihrem Timer in einer schon laufenden Aufnahme, fehlen „Start: …“ und „Ende der Einheit“ —
   „Planke: Start“ und „Planke: Ende“ klammern sie schon. Ein Plan-Ablauf behält die Spur.
   Ältere Dateien behalten ihre Notizen („Planke beginnt“ / „Planke fertig“).
+- **Eigene Abschnitte der Person** (Ben, 27.10.2026, `docs/plan_abschnitte.md`): Ein
+  Abschnitt, den die Person setzt — live mit „Abschnitt: Start“ / „… Ende“ oder nachträglich
+  mit „+ Abschnitt“ —, ist ein **Paar Notizen** `person/abschnitt` (Start) und `person/ende`
+  mit derselben `spur` = seiner Kennung `seg-…` (zugleich die `id` des Segments im Sidecar,
+  Abschnitt 9b). Name, `kopf_s` und `endteil_s` stehen an der Start-Notiz; Text „Name:
+  Start“ / „Name: Ende“. Die Abschnitte des Timers bleiben ihre Kette (`art=abschnitt` je
+  Grenze); auch ihre Start-Notiz darf `kopf_s`/`endteil_s` tragen.
+  `hrv_core.ausschnitte.paare_aus_notizen`, `trainingsapp.core.abschnitte`.
 - **praxis_gui** liest das Feld nicht und behält es beim Bearbeiten wie `uebungen`.
 - Keine neue Schema-Version: ein zusätzliches, optionales Feld wie `uebungen`; ältere
   Leser übergehen es.
@@ -639,6 +648,14 @@ Felder, die praxis_gui selbst dafür nutzt (`hrv_core/ausschnitte.py`):
   (praxis_gui führt Abschnitte als unabhängige Bereiche). Die Spur selbst steht
   nicht im Sidecar — praxis_gui würde ein eigenes Feld beim Speichern verwerfen —,
   sondern in der `marke` der Notiz, die den Abschnitt begann (Abschnitt 4).
+- **Eigene Abschnitte sind Notizpaare** (seit 27.10.2026, Abschnitt 4): Ihr Segment trägt
+  als `id` die Kennung der Grenz-Notizen (`spur`); die App leitet das Sidecar aus den
+  Notizen ab (beim Speichern der Aufnahme und bei jeder Änderung in der Auswertung). Kopf
+  und Endteil stehen zusätzlich als `rand: {"kopf_s", "endteil_s"}` am Segment — nur wenn
+  gesetzt; praxis_gui behält das Feld beim eigenen Speichern nicht, die Wahrheit ist die
+  Marke der Start-Notiz. `t_start_s`/`t_end_s` bleiben die **getippten** Grenzen. Ein
+  Segment ohne Notizpaar, dessen Anfang auf keiner Notiz liegt (früher selbst gesetzt),
+  bekommt beim Öffnen der Auswertung einmalig sein Paar.
 - Gibt es noch kein Sidecar, entsteht ein knappes (`schema`, `source_file`,
   `source_file_sha1`, die beiden Felder, `updated_utc`).
 - Achtung, umgekehrt: praxis_gui schreibt das Sidecar beim Speichern aus seiner

@@ -41,7 +41,13 @@ from pathlib import Path
 from typing import Any
 
 from hrv_core.aufnahme import Aufnahme, backup_lesen
-from hrv_core.ausschnitte import spuren_speichern
+from hrv_core.ausschnitte import (
+    Abschnitt,
+    aus_grenzen,
+    grenze_aus_notiz,
+    paare_aus_notizen,
+    spuren_speichern,
+)
 from hrv_core.constants import malik_threshold
 from hrv_core.ereignisse import Zeitbezug, anker_aus_wand, notiz
 from hrv_core.live import LiveFenster
@@ -52,6 +58,7 @@ from hrv_core.segments import abdeckung
 from hrv_core.zeitachse import Kontinuitaetsuhr
 
 from ..config import app_version
+from ..core import abschnitte as eigene_abschnitte
 from ..core.einheit import SPUR_TIMER
 from ..core.gurt_warnung import Artefaktwache
 from ..core.hrv_export import diagnose_pfad, diagnose_text
@@ -121,6 +128,7 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
     if not pfad.exists():
         pfad = speichern(rec, backup.parent)
         spuren = _spuren_lesen(zusatz)
+        spuren.update(eigene_abschnitte.grenzen_aus_notizen(rec.ereignisse))
         if spuren:  # Abschnitte je Spur — scheitert das, bleibt die Messung
             with contextlib.suppress(OSError, ValueError, TypeError):
                 spuren_speichern(pfad, rec, spuren)
@@ -588,6 +596,59 @@ class Messlauf:
             self._grenzen.setdefault(spur, []).append((eintrag, name, ende))
         return eintrag
 
+    # -- Eigene Abschnitte der Person (Ben, 27.10.2026; `core.abschnitte`) -------------
+
+    def offener_abschnitt(self) -> tuple[str, str] | None:
+        """``(Kennung, Name)`` des eigenen Abschnitts, der gerade läuft — sonst ``None``."""
+        return eigene_abschnitte.offener(self.ereignisse())
+
+    def abschnitt_starten(
+        self, name: str, *, kopf_s: float = 0.0, endteil_s: float = 0.0
+    ) -> str | None:
+        """„Abschnitt: Start“ — die Start-Notiz bei jetzt; läuft schon einer, endet er hier.
+        Ohne Aufnahme ``None`` (die Grenzen brauchen Schläge)."""
+        if self.aufnahme is None:
+            return None
+        if self.offener_abschnitt() is not None:
+            self.abschnitt_beenden()
+        kennung = eigene_abschnitte.neue_kennung()
+        self.notiz_hinzufuegen(
+            eigene_abschnitte.start_text(name),
+            marke=eigene_abschnitte.start_marke(kennung, name, kopf_s, endteil_s),
+        )
+        return kennung
+
+    def abschnitt_beenden(self) -> bool:
+        """„‹Name› · Ende“ — die Ende-Notiz bei jetzt; ``False``, wenn keiner läuft."""
+        offen = self.offener_abschnitt()
+        if offen is None or self.aufnahme is None:
+            return False
+        kennung, name = offen
+        self.notiz_hinzufuegen(
+            eigene_abschnitte.ende_text(name), marke=eigene_abschnitte.ende_marke(kennung, name)
+        )
+        return True
+
+    def abschnitte(self) -> list[Abschnitt]:
+        """Die Abschnitte der laufenden Aufnahme auf der Live-Achse: die der Abläufe aus
+        ihren Grenzen (Timer, Übung, km — wie sie das Sidecar beim Speichern bekommt) und
+        die eigenen aus den Notizpaaren; ein laufender reicht bis jetzt."""
+        if self.aufnahme is None:
+            return []
+        zb = self.notiz_zeitbezug()
+        jetzt = self.jetzt_s()
+        teile: list[Abschnitt] = []
+        for grenzen in self._grenzen.values():
+            punkte = [
+                grenze_aus_notiz(x, eintrag, name, schluss)
+                for eintrag, name, schluss in grenzen
+                if (x := zb.x(eintrag)) is not None
+            ]
+            teile.extend(aus_grenzen(punkte, 0.0, jetzt))
+        teile.extend(paare_aus_notizen(self.aufnahme.ereignisse, lambda e: zb.x(dict(e)), jetzt))
+        teile.sort(key=lambda a: (a.von_s, a.bis_s))
+        return teile
+
     def nur_puls(self) -> bool:
         """Sendet das Gerät nur die Herzfrequenz (bpm), keine Intervalle von Schlag zu Schlag?
 
@@ -732,6 +793,9 @@ class Messlauf:
             )
         rec = aufnahme.recording()
         spuren = {s: list(gs) for s, gs in self._grenzen.items()}
+        # Eigene Abschnitte der Person: aus ihren Notizpaaren, wie sie jetzt in der
+        # Aufnahme stehen (verschoben, umbenannt, gelöscht — `core.abschnitte`)
+        spuren.update(eigene_abschnitte.grenzen_aus_notizen(rec.ereignisse))
         if any(spuren.values()):  # Abschnitte je Spur — scheitert das, bleibt die Messung
             with contextlib.suppress(OSError, ValueError):
                 spuren_speichern(pfad, rec, spuren)

@@ -296,6 +296,20 @@ def _loeschen_bestaetigen(seite) -> ft.AlertDialog:
     return frage
 
 
+def _schliessen_und_warten(seite, dialog) -> None:
+    """Den Dialog zu melden und alle Aufgaben abwarten, die das anstößt — zwei Schreibvorgänge
+    hintereinander (Notizen, dann Sidecar) warten aufeinander (`sperre`); ein nacktes
+    ``asyncio.run(on_dismiss)`` bräche den zweiten beim Schließen des Loops ab."""
+
+    async def lauf() -> None:
+        await dialog.on_dismiss(None)
+        while seite.aufgaben:
+            aufgaben, seite.aufgaben[:] = list(seite.aufgaben), []
+            await asyncio.gather(*aufgaben)
+
+    asyncio.run(lauf())
+
+
 def _alle_controls(wurzel) -> list:
     gesehen: set[int] = set()
     alle: list = []
@@ -1601,3 +1615,192 @@ def test_uebersicht_zeilen_gleich_hoch_mit_und_ohne_grund() -> None:
         if isinstance(c, ft.Text) and c.value == "langsame Schwingung"
     )
     assert grund.max_lines == 1
+
+
+async def test_live_abschnitt_start_und_ende(daten) -> None:
+    """Live (Ben, 27.10.2026): Klappfeld „Abschnitte“ mit Chips und Liste; „Abschnitt:
+    Start“ fragt den Namen (gespeicherte Überschriften als Vorschlag), der Knopf wird zu
+    „‹Name› · Ende“, die Chips bleiben beim Einklappen stehen."""
+    from trainingsapp.core.models import HrvTitel
+
+    state, tmp_path = daten
+    state.hrv.titel_merken(state.profil.id, "Behandlung Rücken")
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    state.messlauf = lauf
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 15:
+        await asyncio.sleep(0.01)
+    seite = _seite()
+    ansicht = messung(seite, state)
+    texte = _baum_texte(ansicht)
+    assert "ABSCHNITTE" in texte and "Ganze Messung" in texte
+    start = _knopf(ansicht, "Abschnitt: Start")
+    start.on_click()
+    dialog = seite.aufrufe[-1]
+    assert isinstance(dialog, ft.AlertDialog) and dialog.title.value == "Abschnitt: Start"
+    vorschlag = next(  # gespeicherte Überschrift als Knopf
+        c
+        for c in _alle_controls(dialog)
+        if isinstance(c, ft.OutlinedButton) and c.content == "Behandlung Rücken"
+    )
+    vorschlag.on_click()
+    next(b for b in dialog.actions if b.content == "Start").on_click()
+    await dialog.on_dismiss(None)
+    assert lauf.offener_abschnitt() is not None
+    assert start.content == "Behandlung Rücken · Ende"
+    texte = _baum_texte(ansicht)
+    assert "ABSCHNITTE · 1" in texte and "Behandlung Rücken: Start" in texte
+    assert any(t.startswith("Behandlung Rücken 0:") for t in texte)  # der Chip
+    while lauf.aufnahme_dauer_s() < 30:
+        await asyncio.sleep(0.01)
+    start.on_click()  # Ende
+    assert lauf.offener_abschnitt() is None and start.content == "Abschnitt: Start"
+    assert "Behandlung Rücken: Ende" in _baum_texte(ansicht)
+    # Einklappen lässt die Chips stehen
+    feld = next(
+        c for c in _alle_controls(ansicht) if isinstance(c, ft.Text) and c.value == "ABSCHNITTE · 1"
+    )
+    kopf = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.Container) and c.on_click is not None and feld in _alle_controls(c)
+    )
+    kopf.on_click()
+    assert state.abschnitte_offen is False
+    chips = next(c for c in _alle_controls(ansicht) if isinstance(c, ft.Row) and c.scroll)
+    assert "Ganze Messung" in _baum_texte(chips) and chips.visible is not False
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert ergebnis is not None
+    assert isinstance(HrvTitel(), HrvTitel)
+
+
+def test_abschnitt_ist_notizpaar_mit_kopf_und_endteil(daten) -> None:
+    """Auswertung (Ben, 27.10.2026): ein neuer Abschnitt bekommt sein Paar Grenz-Notizen in
+    der Messdatei; „Kopf · Endteil“ blendet die Zeile ein, der Kopf lässt sich eintippen,
+    Werte und Sidecar nehmen ihn mit; Löschen nimmt das Paar mit."""
+    import json
+
+    from hrv_core.korrektur import analyse_pfad
+    from hrv_core.recording import laden
+
+    state, tmp_path = daten
+    eintrag, pfad = _golden_eintrag(state, tmp_path)
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+    _knopf(view, "Abschnitt").on_click()
+    name = next(
+        c for c in _alle_controls(view) if isinstance(c, ft.TextField) and c.label == "Name"
+    )
+    name.value = "Behandlung"
+    rand_knopf = _knopf(view, "Kopf · Endteil")
+    rand_box = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.Container) and c.visible is False and "Kopf · Endteil" in _baum_texte(c)
+    )
+    rand_knopf.on_click()
+    assert rand_box.visible is True
+    kopf = next(
+        c
+        for c in _alle_controls(rand_box)
+        if isinstance(c, ft.OutlinedButton) and c.tooltip and c.tooltip.startswith("Kopf")
+    )
+    kopf.on_click()
+    blatt = seite.aufrufe[-1]
+    assert isinstance(blatt, ft.BottomSheet)
+    feld = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.TextField) and c.label == "oder eintippen"
+    )
+    feld.value = "−0:30"
+    _knopf(blatt, "Übernehmen").on_click()
+    asyncio.run(blatt.on_dismiss(None))
+    assert "−0:30" in _baum_texte(rand_box)
+    _knopf(view, "Speichern").on_click()
+
+    def segmente() -> list[dict]:
+        return json.loads(analyse_pfad(pfad).read_text())["segments"]
+
+    (seg,) = segmente()
+    assert seg["name"] == "Behandlung" and seg["rand"] == {"kopf_s": -30, "endteil_s": 0}
+    grenzen = [e for e in laden(pfad).ereignisse if "marke" in e]
+    assert [e["text"] for e in grenzen] == ["Behandlung: Start", "Behandlung: Ende"]
+    assert grenzen[0]["marke"]["spur"] == seg["id"] and grenzen[0]["marke"]["kopf_s"] == -30
+    assert grenzen[1]["marke"] == {
+        "quelle": "person",
+        "art": "ende",
+        "spur": seg["id"],
+        "name": "Behandlung",
+    }
+    texte = _baum_texte(view)
+    assert any("Kopf −0:30" in t for t in texte)
+    assert "Behandlung: Start" in texte  # in der Notizliste
+    # Noch einmal öffnen: die Zeile steht gleich, der Wert bleibt; umbenennen folgt den Notizen
+    view = messung_detail_view(seite, state, eintrag)
+    zeile = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.Container) and c.on_click is not None and "Behandlung" in _baum_texte(c)
+    )
+    zeile.on_click()
+    rand_box = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.Container) and "Kopf · Endteil" in _baum_texte(c) and c.visible
+    )
+    assert "−0:30" in _baum_texte(rand_box)
+    name = next(
+        c for c in _alle_controls(view) if isinstance(c, ft.TextField) and c.label == "Name"
+    )
+    name.value = "Rücken"
+    _knopf(view, "Speichern").on_click()
+    assert [e["text"] for e in laden(pfad).ereignisse if "marke" in e] == [
+        "Rücken: Start",
+        "Rücken: Ende",
+    ]
+    assert segmente()[0]["id"] == seg["id"]
+    # Löschen nimmt das Paar mit — Notizen und Sidecar schreiben nacheinander (`sperre`)
+    _symbol(view, ft.Icons.CLOSE, "Abschnitt löschen").on_click()
+    _schliessen_und_warten(seite, _loeschen_bestaetigen(seite))
+    assert segmente() == []
+    assert [e for e in laden(pfad).ereignisse if "marke" in e] == []
+
+
+def test_alte_eigene_abschnitte_bekommen_ihr_notizpaar(daten) -> None:
+    """Ein Sidecar-Abschnitt ohne Notizpaar, der auf keiner Notiz liegt (früher selbst
+    gesetzt), bekommt beim Öffnen einmalig seine Grenz-Notizen — ein Timer-Abschnitt nicht."""
+    from hrv_core.ausschnitte import Abschnitt, zusatz_speichern
+    from hrv_core.ereignisse import anker_aus_herz, metadaten_schreiben, notiz
+    from hrv_core.recording import laden
+
+    state, tmp_path = daten
+    eintrag, pfad = _golden_eintrag(state, tmp_path)
+    rec = laden(pfad)
+    timer = notiz(
+        "Belastung",
+        anker_aus_herz(rec.beats, 60),
+        rec.start_utc,
+        marke={"quelle": "timer", "art": "abschnitt", "spur": "timer", "name": "Belastung"},
+    )
+    metadaten_schreiben(pfad, ereignisse=[timer])
+    zusatz_speichern(
+        pfad,
+        None,
+        [
+            Abschnitt("Belastung", 60, 120, id="seg-00000001"),
+            Abschnitt("Alt", 200, 260, id="seg-00000002"),
+        ],
+        float,
+    )
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+    texte = _baum_texte(view)
+    assert "ABSCHNITTE · 2" in texte
+    grenzen = [e for e in laden(pfad).ereignisse if "marke" in e]
+    assert [e["text"] for e in grenzen] == ["Belastung", "Alt: Start", "Alt: Ende"]
+    assert grenzen[1]["marke"]["spur"] == "seg-00000002"

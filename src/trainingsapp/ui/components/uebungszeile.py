@@ -8,10 +8,12 @@ der Wert groß mit der Einheit klein dahinter (Ben, 17.10.2026; Tagesansicht 18.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Any
 
 import flet as ft
 
 from trainingsapp.ui.components.icons import symbol
+from trainingsapp.ui.components.ziele import Ziel, blatt_oeffner, zielsymbol
 
 
 def abschnitt(text: str, rechts: ft.Control | None = None) -> ft.Control:
@@ -68,13 +70,27 @@ def uebungszeile(
     etiketten: Sequence[str] = (),
     variante: ft.Control | None = None,
     unten: ft.Control | None = None,
+    ziel: Ziel | None = None,
+    weitere: Sequence[Ziel] = (),
+    page: Any = None,
+    blatt_untertitel: str = "",
 ) -> ft.Control:
     """Eine Übung als Karte: Symbol, Name und Zeilen darunter, rechts Wert und Mini-Kurve.
 
     ``variante``: das Schild der Variante direkt hinter dem Namen — jede Variante hat ihre
     eigene Zeile mit eigener Zahl (Ben, 21.10.2026, `components/varianten.etikett`).
     ``unten``: etwas über die ganze Breite unter der Zeile, bündig mit dem Namen — die
-    Frontbilder der Fotos und Videos in der Tagesansicht (`components/anhang_reihe`)."""
+    Frontbilder der Fotos und Videos in der Tagesansicht (`components/anhang_reihe`).
+
+    ``ziel``: wohin der Tipp führt (Ben, 28.10.2026, `components/ziele.py`) — dann steht
+    statt des Pfeils sein Symbol rechts; ``weitere`` sind die übrigen Wege: ein Tipp auf das
+    Symbol oder ein Gedrückthalten der Zeile zeigt das Zielblatt (``page``,
+    ``blatt_untertitel`` — meist das Datum). Ohne ``ziel`` wie bisher ``on_click`` + Pfeil."""
+    blatt: Callable[[], None] | None = None
+    if ziel is not None:
+        on_click = ziel.oeffnen
+        if page is not None:
+            blatt = blatt_oeffner(page, titel, blatt_untertitel, weitere, hauptziel=ziel)
     kopf: ft.Control = ft.Text(titel, size=15, weight=ft.FontWeight.W_600)
     if etiketten or variante is not None:
         kopf = ft.Row(
@@ -109,7 +125,13 @@ def uebungszeile(
                 horizontal_alignment=ft.CrossAxisAlignment.END,
                 controls=rechts,
             ),
-            *([ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5)] if on_click is not None else []),
+            *(
+                [zielsymbol(ziel, on_click=blatt)]
+                if ziel is not None
+                else [ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5)]
+                if on_click is not None
+                else []
+            ),
         ],
     )
     inhalt: ft.Control = zeile
@@ -126,6 +148,7 @@ def uebungszeile(
         padding=ft.Padding.only(left=12, right=6, top=10, bottom=10),
         ink=on_click is not None,
         on_click=on_click,
+        on_long_press=blatt,
         content=inhalt,
     )
 

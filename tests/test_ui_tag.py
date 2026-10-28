@@ -124,7 +124,12 @@ def test_plan_karte_chip_hakt_ab_rueckgaengig_und_lang_druecken(page, state) -> 
     ansicht = tagesansicht(page, state, state.heute())
     texte = _texte(ansicht)
     assert "STEHT AN" in texte and any(t.startswith("1 von 3") for t in texte)
-    chips = [x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.on_long_press]
+    # Chips haben eine Umrandung; die gemachte Zeile hat seit 28.10.2026 auch Langdruck
+    chips = [
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container) and x.on_long_press and x.border is not None
+    ]
     assert [_texte(c)[-1] for c in chips] == ["Kniebeuge", "Wandsitz"]
 
     chips[0].on_click()  # Tipp = gemacht, in der Session des Plans
@@ -194,7 +199,7 @@ def test_vergangener_tag_ohne_spaeteren_plan_und_mit_eigener_route(page, state) 
     ansicht = tagesansicht(page, state, vorgestern, basis=basis, mit_datum=False)
     texte = _texte(ansicht)
     assert "PLÄNE" not in texte and "STEHT AN" not in texte
-    assert not [x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.on_long_press]
+    # Langdruck gibt es jetzt an jeder gemachten Zeile (Zielblatt, 28.10.2026) — nur keine Chips
     zeile = next(
         x
         for x in _alle(ansicht)

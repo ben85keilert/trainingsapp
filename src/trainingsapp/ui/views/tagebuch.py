@@ -55,6 +55,7 @@ from trainingsapp.core.tagebuch import (
     zahl_je_tag,
 )
 from trainingsapp.core.verlauf import MONATE, WOCHENTAGE, WOCHENTAGE_LANG, wochen_titel
+from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.notiz import notiz_dialog
@@ -64,6 +65,8 @@ from trainingsapp.ui.components.zeitstrahl import zeitpunkt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang import anhang_route
 from trainingsapp.ui.views.leistungen import leistungen_blatt
+from trainingsapp.ui.views.nachtragen import nachtragen_route
+from trainingsapp.ui.views.ziele import ziele_fuer
 
 #: So viele Tage mit Notizen zeigt das Tagebuch zuerst, „Ältere zeigen“ je so viele mehr
 SEITE = 30
@@ -161,6 +164,35 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
 
     # -- Bearbeiten ---------------------------------------------------------------------
 
+    def ziele_von(n: Notiz) -> tuple[zl.Ziel, list[zl.Ziel]]:
+        """Tipp-Ziel und weitere Wege einer Tagebuchzeile (Ben, 28.10.2026): Übung und
+        Aufnahme → Einträge des Tages, Notiz zum Tag/Plan und Tagesfeld → die Notiz; dazu
+        immer der Tag."""
+        tag_route = f"/tag/{n.tag.isoformat()}"
+        if n.art in (UEBUNG, AUFNAHME) and n.exercise_id:
+            haupt = zl.Ziel(zl.EINTRAEGE, bearbeiter(n))
+            weitere = ziele_fuer(
+                page,
+                state,
+                n.exercise_id,
+                tag=n.tag,
+                plan_ids=[n.plan_id] if n.plan_id else (),
+                hier={zl.EINTRAEGE},
+                danach=neu,
+            )
+            return haupt, weitere
+        tag_ziel = zl.Ziel(zl.TAG, _route(tag_route), untertitel=f"{n.tag:%d.%m.%Y}")
+        if n.art == AUFNAHME:
+            return zl.Ziel(zl.TAG, bearbeiter(n)), []
+        text = "Tagesfeld" if n.art == TAGESFELD else "Notiz"
+        return zl.Ziel(zl.NOTIZ, bearbeiter(n), text=text), [tag_ziel]
+
+    def _route(pfad: str) -> Callable[[], Any]:
+        async def handler() -> None:
+            await page.push_route(pfad)
+
+        return handler
+
     def bearbeiter(n: Notiz) -> Callable[[], None]:
         """Antippen: die Notiz zum Tag und zum Plan im Dialog, die einer Übung in ihren
         Leistungen des Tages."""
@@ -193,7 +225,18 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             elif n.art in (UEBUNG, AUFNAHME) and n.exercise_id:
                 uebung = state.uebungen.laden(n.exercise_id, mit_geloeschten=True)
                 if uebung is not None:
-                    page.show_dialog(leistungen_blatt(page, state, uebung, n.tag, danach=neu))
+                    # Mit `nachtragen=` wie unter Heute: „Nachtragen“ und „Im Verlauf“ im Blatt
+                    basis = "" if n.tag == state.heute() else f"/tag/{n.tag.isoformat()}"
+                    page.show_dialog(
+                        leistungen_blatt(
+                            page,
+                            state,
+                            uebung,
+                            n.tag,
+                            nachtragen=nachtragen_route(basis, n.exercise_id, n.plan_id),
+                            danach=neu,
+                        )
+                    )
             elif n.art == AUFNAHME:
                 # Anhänge am Tag: der Tag, dort stehen sie an der Notiz zum Tag
                 page.run_task(page.push_route, f"/tag/{n.tag.isoformat()}")
@@ -308,12 +351,16 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             inhalt = reihe if reihe is not None else inhalt
             if not mit_datum:
                 etiketten.append(ft.Text(n.text, size=11, opacity=0.6))
+        haupt, weitere = ziele_von(n)
+        blatt = zl.blatt_oeffner(page, titel(n), f"{n.tag:%d.%m.%Y}", weitere, hauptziel=haupt)
+        etiketten.append(zl.zielsymbol(haupt, on_click=blatt, groesse=18))
         return ft.Container(
             bgcolor=KARTE,
             border_radius=14,
             padding=ft.Padding.only(left=12, right=8, top=8, bottom=10),
             ink=True,
             on_click=bearbeiter(n),
+            on_long_press=blatt,
             content=ft.Column(
                 spacing=2,
                 tight=True,

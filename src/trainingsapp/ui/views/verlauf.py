@@ -53,6 +53,7 @@ from trainingsapp.core.verlauf import (
     trend,
     wochen_titel,
 )
+from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.uebungszeile import abschnitt, grosser_wert, uebungszeile
 from trainingsapp.ui.components.varianten import etikett as varianten_etikett
@@ -60,6 +61,7 @@ from trainingsapp.ui.components.verlaufskurve import mini, mini_saeulen
 from trainingsapp.ui.components.wochenleiste import tageszelle
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.tagebuch import tagebuch
+from trainingsapp.ui.views.ziele import ziele_fuer
 
 #: So viele Werte zeigt eine Mini-Kurve
 MINI_WERTE = 8
@@ -389,15 +391,27 @@ def _tage_inhalt(
                 titel=uebung.name if uebung else "?",
                 unter=unter,
                 rechts=rechts,
-                on_click=_oeffner(page, f"/verlauf/{z.kachel_id}"),
+                on_click=None,
                 variante=_schild(uebung, z.variante),
+                # Tipp = Kurve; Symbol oder Gedrückthalten = alle Wege (Ben, 28.10.2026)
+                ziel=zl.Ziel(zl.VERLAUF, _oeffner(page, f"/verlauf/{z.kachel_id}")),
+                weitere=ziele_fuer(
+                    page,
+                    state,
+                    z.kachel_id,
+                    tag=tag,
+                    hier={zl.VERLAUF},
+                    danach=state.neu_zeichnen,  # das Blatt ändert Einträge: neu lesen
+                ),
+                page=page,
+                blatt_untertitel=f"{tag:%d.%m.%Y}",
             )
         )
     if any(z.kennzahl is not None for z in zeilen):
         controls.append(
             ft.Text(
                 "Mini-Kurve: die letzten Male dieser Übung, der Punkt ist dieser Tag. "
-                "Antippen öffnet die Übung.",
+                "Antippen öffnet die Kurve; das Symbol oder Gedrückthalten zeigt alle Wege.",
                 size=11,
                 opacity=0.6,
             )
@@ -752,8 +766,12 @@ def _uebungen_inhalt(
                 titel=uebung.name if uebung else "?",
                 unter=[ft.Text(unter, size=12, opacity=0.75)],
                 rechts=rechts,
-                on_click=_oeffner(page, f"/verlauf/{kachel_id}"),
+                on_click=None,
                 variante=_schild(uebung, variante),
+                ziel=zl.Ziel(zl.VERLAUF, _oeffner(page, f"/verlauf/{kachel_id}")),
+                weitere=ziele_fuer(page, state, kachel_id, tag=None, hier={zl.VERLAUF}),
+                page=page,
+                blatt_untertitel="alle Tage",
             )
         )
         gezeigt += 1

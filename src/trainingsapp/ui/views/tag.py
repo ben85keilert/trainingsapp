@@ -77,6 +77,7 @@ from trainingsapp.core.tag import (
     zusammenfassung,
 )
 from trainingsapp.core.verlauf import MONATE, WOCHENTAGE_LANG, montag
+from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.layout import sicher
@@ -99,6 +100,7 @@ from trainingsapp.ui.views.anhang import anhang_route
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
 from trainingsapp.ui.views.plan_ablauf import plan_ablauf_route
+from trainingsapp.ui.views.ziele import ziele_fuer
 
 WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 #: Die zwei Darstellungen (Ben, 18.10.2026: „A ist die Standardansicht“)
@@ -614,7 +616,8 @@ def tagesansicht(
             ink=True,
             on_click=abhaker(plan, item),
             on_long_press=oeffner(nachtragen_route(basis, item.exercise_id, plan.id)),
-            tooltip="Antippen: gemacht · lang drücken: Werte eintragen",
+            # Kein Tooltip: Flets Tooltip löst am Handy selbst auf Langdruck aus und stritte
+            # mit dem Nachtragen (28.10.2026); die Hilfezeile darunter erklärt beides
             content=ft.Row(
                 tight=True,
                 spacing=6,
@@ -833,16 +836,39 @@ def tagesansicht(
             # Auch Einträge ohne Plan dabei: sagen — sonst wirkt alles wie im Plan
             + (["ohne Plan"] if g.ohne_plan and g.plan_ids else [])
         )
+        haupt, weitere = ziele_der_zeile(g)
         return uebungszeile(
             symbol_key=uebung.icon_key if uebung else None,
             titel=d.name(g.exercise_id),
             unter=unter,
             rechts=rechts,
-            on_click=ziel(g),
+            on_click=None,
             etiketten=etiketten,
             variante=varianten_schild(g),
             unten=aufnahmen_reihe(g),
+            ziel=haupt,
+            weitere=weitere,
+            page=page,
+            blatt_untertitel=f"{tag_jetzt():%d.%m.%Y}",
         )
+
+    def ziele_der_zeile(g: Gemacht) -> tuple[zl.Ziel, list[zl.Ziel]]:
+        """Das Tipp-Ziel der Zeile (Einträge des Tages, bei einem Training die Strecke) und
+        die übrigen Wege (Ben, 28.10.2026, `docs/plan_routing_ziele.md`) — „Tag“ fehlt,
+        man steht auf ihm."""
+        strecke = daten().training(g)
+        haupt = zl.Ziel(zl.STRECKE if strecke is not None else zl.EINTRAEGE, ziel(g))
+        weitere = ziele_fuer(
+            page,
+            state,
+            g.exercise_id,
+            tag=tag_jetzt(),
+            plan_ids=g.plan_ids,
+            hier={zl.TAG, haupt.key},
+            strecke_id=strecke.id if strecke is not None else None,
+            danach=auffrischen,
+        )
+        return haupt, weitere
 
     def varianten_schild(g: Gemacht, klein: bool = False) -> ft.Control | None:
         """Jede Variante hat ihre eigene Zeile (Ben, 21.10.2026) — ihr Schild steht hinter
@@ -869,6 +895,8 @@ def tagesansicht(
                 )
             )
         teile.extend(gemacht_zeile(g) for g in reihen)
+        if reihen:
+            teile.append(_hinweis(zl.HILFE))
         return teile
 
     # -- Notizen ---------------------------------------------------------------------------
@@ -1039,9 +1067,15 @@ def tagesansicht(
             ],
         )
         reihe = aufnahmen_reihe(g)
+        haupt, weitere = ziele_der_zeile(g)
+        blatt = zl.blatt_oeffner(
+            page, daten().name(g.exercise_id), f"{tag_jetzt():%d.%m.%Y}", weitere, hauptziel=haupt
+        )
+        zeile.controls.append(zl.zielsymbol(haupt, on_click=blatt, groesse=18))
         return ft.Container(
             ink=True,
-            on_click=ziel(g),
+            on_click=haupt.oeffnen,
+            on_long_press=blatt,
             border_radius=8,
             padding=ft.Padding.symmetric(horizontal=4, vertical=2),
             content=zeile

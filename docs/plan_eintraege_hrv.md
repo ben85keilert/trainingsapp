@@ -85,7 +85,8 @@ markiert, entsteht ein neuer.
 - Tipp auf einen geschlossenen Eintrag → Blatt mit „Wieder öffnen“, „Bearbeiten“
   (Leistungen-Blatt), „Löschen“.
 - „Gemacht“ bekommt den Text **„Abschließen“** mit Haken, solange ein Eintrag *markiert*
-  ist. Ist keiner markiert (keiner offen, Ausprägung geändert, Zeitabstand überschritten),
+  ist — außer der markierte Eintrag hat nichts außer dem Stempel (keine Menge, keine Notiz):
+  dann heißt er weiter „Gemacht“ und schließt ihn (Ben, 28.10.2026; kein zweiter Stempel). Ist keiner markiert (keiner offen, Ausprägung geändert, Zeitabstand überschritten),
   heißt er „Gemacht“: er legt einen leeren, gleich geschlossenen Eintrag mit der gewählten
   Ausprägung an und schließt einen noch offenen **derselben Ausführung** dabei mit (Skizze
   A2/A3; seit 21.10.2026 bleiben offene Einträge anderer Ausführung offen, P57).

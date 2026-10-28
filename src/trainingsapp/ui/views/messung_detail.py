@@ -2718,6 +2718,22 @@ def _aufbauen(
         von, nach = paar if ins_vollbild else paar[::-1]
         nach.content, von.content = von.content, None
 
+    def editor_umhaengen() -> None:
+        """Mit dem Vollbild wechselt der Bereichseditor den Elternteil — ein umgehängtes
+        Textfeld verliert der Flet-Client (Ben, 27.10.2026, `Notizfeld.neu_gestalten`):
+        darum frisch öffnen, Name und Ränder bleiben."""
+        e = m.editor
+        if e is None:
+            return
+        art, abschnitt, raender = m.art, m.abschnitt, m.raender
+        name = m.name_feld.value if m.name_feld is not None else None
+        von, bis = e.von, e.bis
+        editor_schliessen(zeichnen_=False)
+        editor_oeffnen(art, von, bis, abschnitt)
+        m.raender = raender
+        if m.name_feld is not None and name is not None:
+            m.name_feld.value = name
+
     def kurven_angebot() -> list[str]:
         ohne = [] if rec.hat_rr else ohne_rr()
         return angebot(einst.bereiche(optisch=verity), ohne, roh=rec.hat_rr)
@@ -2925,6 +2941,8 @@ def _aufbauen(
             boxen_umhaengen(voll_boxen)
             umhaengen(notiz_platz, ins_vollbild=True)
             umhaengen(abschnitte_platz, ins_vollbild=True)
+            notizfeld.neu_gestalten()  # umgehängte Textfelder nehmen sonst nichts mehr an
+            editor_umhaengen()
             view.appbar = None
             view.scroll = None
             view.padding = ft.Padding.only(left=4, right=4)
@@ -2936,6 +2954,8 @@ def _aufbauen(
             boxen_umhaengen(normal_boxen)
             umhaengen(notiz_platz, ins_vollbild=False)
             umhaengen(abschnitte_platz, ins_vollbild=False)
+            notizfeld.neu_gestalten()
+            editor_umhaengen()
             view.appbar = leiste_oben
             view.scroll = ft.ScrollMode.AUTO
             view.padding = 12

@@ -115,7 +115,7 @@ from trainingsapp.core.standards import (
     varianten_an,
     ziel_von,
 )
-from trainingsapp.core.tagesbilanz import buendeln, je_variante, mengen
+from trainingsapp.core.tagesbilanz import buendeln, ist_leistung, je_variante, mengen
 from trainingsapp.core.timer_eintrag import vom_timer_text
 from trainingsapp.core.uebung_timer import timer_fuer, uhr_an
 from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
@@ -551,14 +551,20 @@ def plan_view(
             )
         melden(uebung, eintrag)
 
+    def nur_stempel(e: SessionEntry | None) -> bool:
+        """Hat der Eintrag nichts außer dem Stempel „gemacht“ (keine Leistung, keine Notiz)?"""
+        return e is not None and not ist_leistung(e) and not (e.note or "").strip()
+
     def abschliesser(item: PlanItem) -> Callable[[], None]:
-        """„Abschließen“: der markierte Eintrag bekommt sein Ende — und eine Marke."""
+        """„Abschließen“: der markierte Eintrag bekommt sein Ende — und eine Marke. Für einen
+        Eintrag, der nur ein Stempel ist, ist das „Gemacht“ (Ben, 28.10.2026)."""
 
         def handler() -> None:
             uebung = uebung_fuer(item)
             ziel = stand_fuer(item, uebung, frisch=True).ziel
             if ziel is None:
                 return
+            stempel = nur_stempel(ziel)
             with zur_zeit():
                 eintrag = state.sitzungen.eintrag_schliessen(ziel.id)
             if nachtrag is None:
@@ -569,7 +575,9 @@ def plan_view(
                     grenze=grenze_frei(item) and not noch_offen(item, uebung),
                     auspraegung=kontext_text(uebung, eintrag.result),
                 )
-            page.show_dialog(ft.SnackBar(ft.Text(f"{uebung.name}: abgeschlossen")))
+            page.show_dialog(
+                ft.SnackBar(ft.Text(f"{uebung.name}: {'gemacht' if stempel else 'abgeschlossen'}"))
+            )
             auffrischen()
 
         return handler
@@ -672,8 +680,24 @@ def plan_view(
         auffrischen()
 
     def variante_waehler(item: PlanItem) -> Callable[[str], None]:
-        """Die Variantenzeile: ein Tipp wählt, ein zweiter heißt „ohne“ (Skizze A3)."""
-        return lambda name: auspraegung_setzen(item, var.VARIANTE, name or None)
+        """Die Variantenzeile: ein Tipp wählt, ein zweiter heißt „ohne“ (Skizze A3).
+
+        Ist ein Eintrag markiert, der **noch keine Variante** hat (Luft anhalten mit
+        Stoppuhr-Zeiten, dann fällt einem die Variante ein), nimmt er sie an — wie über das
+        Etikett (Ben, 28.10.2026: „nachträglich eine Variante setzen klappt beim Edit in der
+        Übung selbst nicht“). Hat er schon eine, beginnt der nächste Wert wie bisher einen
+        neuen Eintrag (P57: kurz +30, lang +15 sind zwei Einträge)."""
+
+        def handler(name: str) -> None:
+            if name:
+                uebung = uebung_fuer(item)
+                ziel = stand_fuer(item, uebung, frisch=True).ziel
+                if ziel is not None and not var.von(ziel.result):
+                    with zur_zeit():
+                        state.sitzungen.variante_setzen(ziel.id, katalog[item.exercise_id], name)
+            auspraegung_setzen(item, var.VARIANTE, name or None)
+
+        return handler
 
     def ausfuehrung_waehler(
         item: PlanItem, uebung: Exercise, e: SessionEntry
@@ -2077,8 +2101,15 @@ def plan_view(
             # „Gemacht“ und legt einen fertigen an (Ben, 19.10.2026, Skizzen A1–A3)
             # Gefüllt sind nur Knöpfe, die Werte schreiben (Skizze C1): „Wie geplant“ und die
             # „+“-Knöpfe; „Abschließen“/„Gemacht“ stehen umrandet daneben
+            # Ein markierter Eintrag, der nichts hat außer dem Stempel (keine Menge, keine
+            # Notiz), heißt weiter „Gemacht“ — der Knopf schließt ihn, statt einen zweiten
+            # Stempel anzulegen (Ben, 28.10.2026)
             knoepfe: list[ft.Control] = [
-                _umrandet("Abschließen", ft.Icons.CHECK, abschliesser(item))
+                _umrandet(
+                    "Gemacht" if nur_stempel(st.ziel) else "Abschließen",
+                    ft.Icons.CHECK,
+                    abschliesser(item),
+                )
                 if st.zustand == offene.MARKIERT
                 else _umrandet("Gemacht", ft.Icons.CHECK, erlediger(item))
             ]

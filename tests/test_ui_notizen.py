@@ -67,22 +67,26 @@ def _texte(row: ft.Row) -> list[str]:
 
 
 def test_neue_notiz_oben_bestehende_unter_ihrer_zeile() -> None:
+    """Die Eingabe steht fest zwischen den Zeilen davor und danach — sie wechselt nie den
+    Elternteil (Ben, 27.10.2026: sonst verlor der Flet-Client das Textfeld und das
+    Getippte kam nicht mehr an); nur die Zeilen wandern."""
     w = _Welt(live=False)
     f = w.feld
+    assert f._liste.controls == [f._oben, f._eingabe_box, f._unten]
     f.neu()
-    assert f._eingabe_box in f._inhalt.controls and f._eingabe_box not in f._liste.controls
+    assert f._eingabe_box.visible and f._oben.controls == [] and len(f._unten.controls) == 3
     f.bearbeiten(1)
-    assert f._eingabe_box not in f._inhalt.controls
-    zeilen = f._liste.controls
-    assert len(zeilen) == 4 and zeilen[2] is f._eingabe_box  # nach der zweiten Notiz
+    assert f._liste.controls == [f._oben, f._eingabe_box, f._unten]  # nichts umgehängt
+    assert len(f._oben.controls) == 2 and len(f._unten.controls) == 1  # unter der zweiten
     assert f._eingabe_box.margin is not None
     assert w.gezeigt[-1] == 30.0
     f.abbrechen()
-    assert not f._eingabe_box.visible and f._eingabe_box in f._inhalt.controls
-    # Zugeklappt gibt es keine Liste — die Eingabe steht dann wieder oben
+    assert not f._eingabe_box.visible and len(f._unten.controls) == 3
+    # Zugeklappt gibt es keine Zeilen — die Eingabe steht dann für sich, ohne Einzug
     f.offen = False
     f.bearbeiten(0)
-    assert f._eingabe_box in f._inhalt.controls and f._eingabe_box.margin is None
+    assert f._eingabe_box.visible and f._liste.visible
+    assert not f._oben.visible and not f._unten.visible and f._eingabe_box.margin is None
 
 
 def test_liste_rollt_ab_der_eingestellten_zeilenzahl() -> None:

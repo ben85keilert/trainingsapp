@@ -75,7 +75,8 @@ genau das, nur mit eigenen Namen.
 - Was dadurch schon funktioniert:
   - Bündel und Kachel trennen und schlüsseln auf.
   - Der offene Eintrag merkt, wenn die Variante nicht passt (`passt`).
-  - Die Vorbelegung ist „wie zuletzt“ (`auspraegung_vorgabe`).
+  - Die Vorbelegung war „wie zuletzt“ (`auspraegung_vorgabe`) — seit 28.10.2026 nur noch für Gewicht, Winkel, Seite; die **Variante beginnt immer mit „ohne“** (Ben: „keine Variante automatisch“), außer das Ziel nennt eine.
+  - Ein Tipp auf einen Varianten-Chip gibt einem **markierten Eintrag ohne Variante** die Variante (wie das Etikett); hat er schon eine, beginnt der nächste Wert einen neuen Eintrag (P57).
   - Die HRV-Marke heißt „Liegestütz lang: 15“.
   - SpecForm zeigt das Feld als SegmentedButton; Speichern ist eine Korrektur, der Eintrag
     bleibt unveränderlich.

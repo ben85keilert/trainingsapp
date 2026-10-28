@@ -18,6 +18,12 @@ ihre Stelle in die Kurve. Die Eingabe hat vier Zeilen:
 Eine **neue** Notiz entsteht oben, über der Liste. Eine **bestehende** öffnet
 sich direkt unter ihrer Zeile (Ben, 20.10.2026: bei vielen Notizen sah man die
 Eingabe oben sonst nicht) — die Liste bleibt im Blick, die Zeile ist markiert.
+**Die Eingabe wechselt dabei nie den Elternteil** (Ben, 27.10.2026: „Das Speichern und
+Abändern der Notizen klappt öfter nicht“): Die Liste besteht aus den Zeilen *vor* der
+bearbeiteten, der Eingabe und den Zeilen *danach* — nur die Zeilen wandern. Hing die
+Eingabe beim Bearbeiten in die Liste um und für eine neue Notiz wieder nach oben, fand
+der Flet-Client das Textfeld danach nicht mehr in seinem Index und ließ jede getippte
+Änderung fallen: Gespeichert wurde der alte Text, eine neue Notiz blieb leer.
 
 **Die Liste rollt** (Ben, 27.10.2026): Mehr als ``zeilen`` Notizen (Einstellungen →
 HRV-Messung → „Notizen in der Liste“, `HrvEinstellungen.notizen_zeilen`, Vorgabe 7) bekommen
@@ -219,6 +225,14 @@ class Notizfeld:
         self.zeit_modus = zeit_modus if zeit_modus in (DAUER, UHR) else DAUER
         #: Die zuletzt eingetippte Zeit ließ sich nicht lesen — der Hinweis sagt es einmal
         self._zeit_fehler = False
+        self._felder_anlegen()
+        self._inhalt = ft.Column(spacing=4)
+        self.control = ft.Container(content=self._inhalt)
+        self._gestalt()
+        self._aufbauen()
+
+    def _felder_anlegen(self) -> None:
+        """Text- und Zeitfeld, Schreibweisen-Knopf und Zustandstext — frisch."""
         self._text = ft.TextField(
             hint_text="Was ist passiert?",
             dense=True,
@@ -247,10 +261,6 @@ class Notizfeld:
             style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=6)),
         )
         self._zustand = ft.Text(size=11, opacity=0.65)
-        self._inhalt = ft.Column(spacing=4)
-        self.control = ft.Container(content=self._inhalt)
-        self._gestalt()
-        self._aufbauen()
 
     # -- Zustand ---------------------------------------------------------------
 
@@ -600,6 +610,19 @@ class Notizfeld:
         if not self.offen:
             self.umklappen()
 
+    def neu_gestalten(self) -> None:
+        """Alle Controls neu anlegen — nötig, wenn der Aufrufer `control` in einen anderen
+        Elternteil hängt (Vollbild ein/aus): Ein umgehängtes Textfeld findet der Flet-Client
+        nicht mehr in seinem Index, Getipptes käme nicht mehr an (Ben, 27.10.2026). Was in
+        den Feldern steht, bleibt."""
+        text, zeit = self._text.value, self._zeit_feld.value
+        self._felder_anlegen()
+        self._text.value, self._zeit_feld.value = text, zeit
+        self._inhalt = ft.Column(spacing=4)
+        self.control.content = self._inhalt
+        self._gestalt()
+        self._aufbauen()
+
     def auffrischen(self) -> None:
         """Neu aufbauen, z. B. wenn live eine Aufnahme beginnt oder endet."""
         if not self.verfuegbar():
@@ -827,8 +850,11 @@ class Notizfeld:
             ),
         )
         self._hinweis = ft.Text(size=12, opacity=0.6)
-        self._liste = ft.Column(spacing=0)
-        self._inhalt.controls = [self._kopf, self._eingabe_box, self._hinweis, self._liste]
+        # Zeilen vor der Eingabe, die Eingabe, Zeilen danach — die Eingabe bleibt, wo sie ist
+        self._oben = ft.Column(spacing=0, tight=True)
+        self._unten = ft.Column(spacing=0, tight=True)
+        self._liste = ft.Column(spacing=0, controls=[self._oben, self._eingabe_box, self._unten])
+        self._inhalt.controls = [self._kopf, self._hinweis, self._liste]
 
     def _aufbauen(self) -> None:
         zb = self._zeitbezug()
@@ -845,12 +871,6 @@ class Notizfeld:
         in_liste = offen_eingabe and self.offen and verfuegbar and self.bearbeite in sichtbar
         self._eingabe_box.visible = offen_eingabe
         self._eingabe_box.margin = ft.Margin.only(left=12, top=2, bottom=6) if in_liste else None
-        self._inhalt.controls = [
-            self._kopf,
-            *([] if in_liste else [self._eingabe_box]),
-            self._hinweis,
-            self._liste,
-        ]
         if offen_eingabe:
             self._zeit_texte()
             self._einfrieren.icon = (
@@ -868,20 +888,23 @@ class Notizfeld:
             self._loeschen_knopf.visible = self.bearbeite is not None and self.bearbeite >= 0
             self._uebungen_fuellen()
 
-        self._hinweis.visible = self.offen and (not verfuegbar or not sichtbar)
+        leer = not verfuegbar or not sichtbar
+        self._hinweis.visible = self.offen and leer and not offen_eingabe
         self._hinweis.value = (
             "Notizen gehören zu einer Aufnahme."
             if not verfuegbar
             else "Noch keine Notiz. „+ Notiz“ friert den Zeitpunkt sofort ein."
         )
-        self._liste.visible = self.offen and verfuegbar
-        zeilen: list[ft.Control] = []
+        zeilen_sichtbar = self.offen and verfuegbar
+        self._liste.visible = zeilen_sichtbar or offen_eingabe
+        self._oben.visible = self._unten.visible = zeilen_sichtbar
+        oben: list[ft.Control] = []
+        unten: list[ft.Control] = []
         if zb is not None:
+            grenze = self.bearbeite if in_liste and self.bearbeite is not None else -1
             for i in sichtbar:
-                zeilen.append(self._zeile(i, liste[i], zb))
-                if in_liste and i == self.bearbeite:
-                    zeilen.append(self._eingabe_box)
-        self._liste.controls = zeilen
+                (oben if i <= grenze else unten).append(self._zeile(i, liste[i], zb))
+        self._oben.controls, self._unten.controls = oben, unten
         self._rollen(len(sichtbar))
 
     def _rollen(self, anzahl: int) -> None:

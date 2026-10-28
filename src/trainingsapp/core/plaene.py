@@ -21,6 +21,7 @@ from .parameter import kontextfelder
 from .result_spec import ist_leer
 from .standards import aktive_felder, ziel_von
 from .tagesfelder import UHRZEIT_NACHTRAGEN
+from .varianten import VARIANTE
 
 WOCHENTAGE_KURZ = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
@@ -269,6 +270,17 @@ def auspraegung_vorgabe(
     >>> wahl["j"]["w"] = 20   # die Auswahl der Person gilt danach
     >>> auspraegung_vorgabe(wahl, ohne, u, lambda: None)
     {'w': 20}
+
+    Die Variante kommt nie vom letzten Eintrag, nur aus dem Ziel (Ben, 28.10.2026):
+
+    >>> from trainingsapp.core.varianten import mit_varianten, Variante
+    >>> mv = Exercise(id="v", result_spec=mit_varianten(spec, [Variante("kurz"), Variante("lang")]))
+    >>> zuletzt = SessionEntry(result={"variant": "lang", "w": 15, "reps": [8]})
+    >>> auspraegung_vorgabe({}, PlanItem(id="k", exercise_id="v"), mv, lambda: zuletzt)
+    {'w': 15}
+    >>> ziel = PlanItem(id="z", exercise_id="v", target={"variant": "kurz"})
+    >>> auspraegung_vorgabe({}, ziel, mv, lambda: zuletzt)
+    {'variant': 'kurz'}
     """
     felder = kontextfelder(replace(uebung.result_spec, fields=aktive_felder(item, uebung)))
     if not felder:
@@ -277,7 +289,13 @@ def auspraegung_vorgabe(
         quelle: Mapping[str, Any] = ziel_von(item, uebung)
         if not any(not ist_leer(quelle.get(f.key)) for f in felder):
             eintrag = letzter()
-            quelle = eintrag.result if eintrag is not None else {}
+            # Gewicht, Winkel, Seite wie beim letzten Mal — die **Variante nie** (Ben,
+            # 28.10.2026: „keine Variante automatisch“): sie beginnt immer mit „ohne“
+            quelle = {
+                k: v
+                for k, v in (eintrag.result if eintrag is not None else {}).items()
+                if k != VARIANTE
+            }
         wahl[item.id] = {f.key: quelle[f.key] for f in felder if not ist_leer(quelle.get(f.key))}
     keys = {f.key for f in felder}
     return {k: v for k, v in wahl[item.id].items() if k in keys}

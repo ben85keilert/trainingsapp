@@ -389,3 +389,72 @@ def test_tag_und_tagebuch_je_variante(page, state) -> None:
     state.verlauf_tab = 1  # Reiter „Übungen“: je Variante eine Zeile
     texte = _texte(verlauf(page, state))
     assert texte.count("Liegestütz") == 2
+
+
+def test_chip_gibt_markiertem_eintrag_ohne_variante_die_variante(page, state) -> None:
+    """Ben, 28.10.2026: Luft anhalten mit Stoppuhr-Zeiten, dann die Variante setzen — ein
+    Tipp auf den Chip gibt sie dem markierten Eintrag, der noch keine hat (wie das Etikett).
+    Hat er schon eine, beginnt der nächste Wert wie bisher einen neuen Eintrag (P57)."""
+    uebung = _liegestuetz(state)
+    plan, _item = _plan(state, uebung)
+    ansicht = plan_view(page, state, plan)
+    _klick(_plus(ansicht))  # ein offener Eintrag ohne Variante
+    (offen,) = _eintraege(state)
+    assert "variant" not in offen.result and offen.ended_at is None
+    _waehlen(ansicht, "lang")
+    (korrigiert,) = _eintraege(state)
+    assert korrigiert.result["variant"] == "lang" and korrigiert.ended_at is None
+    assert korrigiert.result["reps"] == [10] and korrigiert.id != offen.id  # eine Korrektur
+    ansicht = plan_view(page, state, plan)
+    _klick(_plus(ansicht))  # sammelt weiter in ihm
+    (weiter,) = _eintraege(state)
+    assert weiter.result["reps"] == [10, 10] and weiter.result["variant"] == "lang"
+    # Er hat jetzt eine Variante: „kurz“ wählen ändert ihn nicht, der nächste Wert ist neu
+    _waehlen(ansicht, "kurz")
+    assert [e.result["variant"] for e in _eintraege(state)] == ["lang"]
+    ansicht = plan_view(page, state, plan)
+    _klick(_plus(ansicht))
+    assert sorted(e.result["variant"] for e in _eintraege(state)) == ["kurz", "lang"]
+
+
+def test_keine_variante_automatisch(page, state) -> None:
+    """Ben, 28.10.2026: „keine Variante automatisch“ — der letzte Eintrag gibt Gewicht und
+    Winkel vor, die Variante nicht; sie beginnt mit „ohne“."""
+    uebung = _liegestuetz(state)
+    plan, item = _plan(state, uebung)
+    session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
+    state.sitzungen.eintrag_fertig(session, uebung, {"variant": "lang", "reps": [5]})
+    ansicht = plan_view(page, state, plan)
+    assert "variant" not in state.auspraegung_wahl.get(item.id, {})
+    zeile = _variantenzeile(ansicht)
+    assert zeile is not None and zeile.selected in ([], None)
+
+
+def test_gemacht_schliesst_markierten_eintrag_ohne_leistung(page, state) -> None:
+    """Ben, 28.10.2026: Ein markierter Eintrag, der nichts hat außer dem Stempel, zeigt
+    „Gemacht“ statt „Abschließen“ — der Knopf schließt ihn, ein zweiter Stempel entsteht
+    nicht. Mit Werten heißt er „Abschließen“."""
+    uebung = _liegestuetz(state)
+    plan, _item = _plan(state, uebung)
+    session = state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute())
+    state.sitzungen.eintrag_anlegen(session, uebung, {})  # offen, ohne alles
+    ansicht = plan_view(page, state, plan)
+
+    def knopf(text: str):
+        return next(
+            x
+            for x in _alle(ansicht)
+            if isinstance(x, ft.OutlinedButton) and _texte(x.content) == [text]
+        )
+
+    _klick(knopf("Gemacht"))
+    (eintrag,) = _eintraege(state)
+    assert eintrag.ended_at is not None and eintrag.result == {}
+    assert page.dialoge[-1].content.value == "Liegestütz: gemacht"
+    # Mit einem Wert heißt der Knopf „Abschließen“
+    ansicht = plan_view(page, state, plan)
+    _klick(_plus(ansicht))
+    ansicht = plan_view(page, state, plan)
+    _klick(knopf("Abschließen"))
+    assert all(e.ended_at is not None for e in _eintraege(state)) and len(_eintraege(state)) == 2
+    assert page.dialoge[-1].content.value == "Liegestütz: abgeschlossen"

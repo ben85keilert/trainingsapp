@@ -405,7 +405,9 @@ async def test_aufnahme_mit_vorgegebenem_nullpunkt_und_dateiname(tmp_path) -> No
     assert e is not None and e["t_wall_s"] == pytest.approx(10.0, abs=1.0)
     assert e["marke"] == marke
     spaeter = lauf.notiz_hinzufuegen("später", bei=lauf.uhr() + 100.0)
-    assert spaeter is not None and spaeter["t_wall_s"] <= lauf.aufnahme_dauer_s() + 1.0
+    # Gedeckelt auf „jetzt“ (die Live-Achse), nicht auf den letzten Schlag: Der Simulator
+    # läuft 60-fach, auf einem langsamen Runner liegen zwischen beiden ein paar Sekunden
+    assert spaeter is not None and spaeter["t_wall_s"] <= lauf.aufnahme_dauer_s() + 5.0
     ergebnis = lauf.aufnahme_stoppen(tmp_path)
     assert ergebnis is not None
     assert ergebnis.pfad.relative_to(tmp_path / "Messungen").as_posix() == datei

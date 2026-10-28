@@ -100,7 +100,7 @@ from trainingsapp.ui.views.anhang import anhang_route
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
 from trainingsapp.ui.views.plan_ablauf import plan_ablauf_route
-from trainingsapp.ui.views.ziele import ziele_fuer
+from trainingsapp.ui.views.ziele import plan_ziele, ziele_fuer
 
 WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 #: Die zwei Darstellungen (Ben, 18.10.2026: „A ist die Standardansicht“)
@@ -615,9 +615,22 @@ def tagesansicht(
             padding=ft.Padding.only(left=8, right=10, top=5, bottom=5),
             ink=True,
             on_click=abhaker(plan, item),
-            on_long_press=oeffner(nachtragen_route(basis, item.exercise_id, plan.id)),
-            # Kein Tooltip: Flets Tooltip löst am Handy selbst auf Langdruck aus und stritte
-            # mit dem Nachtragen (28.10.2026); die Hilfezeile darunter erklärt beides
+            # Gedrückt halten: das Zielblatt — Nachtragen zuerst, dazu Üben im Plan, Verlauf,
+            # Übungsseite (Ben, 28.10.2026). Kein Tooltip: er stritte am Handy mit dem Langdruck
+            on_long_press=zl.blatt_oeffner(
+                page,
+                daten().name(item.exercise_id),
+                d_plan_name(plan),
+                [
+                    zl.Ziel(
+                        zl.NACHTRAGEN, oeffner(nachtragen_route(basis, item.exercise_id, plan.id))
+                    ),
+                    zl.Ziel(zl.UEBEN, weiter(plan, item), untertitel=f"Plan „{plan.name}“"),
+                    zl.Ziel(zl.VERLAUF, oeffner(f"/verlauf/{item.exercise_id}")),
+                    zl.Ziel(zl.UEBUNG, oeffner(f"/uebung/{item.exercise_id}")),
+                ],
+                hauptziel=None,
+            ),
             content=ft.Row(
                 tight=True,
                 spacing=6,
@@ -718,7 +731,11 @@ def tagesansicht(
                         *(chip(plan, i) for i in k.offen),
                     ],
                 ),
-                ft.Text("Antippen: gemacht · lang drücken: Werte eintragen", size=11, opacity=0.55),
+                ft.Text(
+                    "Antippen: gemacht · gedrückt halten: Nachtragen, Üben, Verlauf",
+                    size=11,
+                    opacity=0.55,
+                ),
             ]
         return ft.Container(
             bgcolor=KARTE,
@@ -1083,6 +1100,26 @@ def tagesansicht(
             else ft.Column(spacing=6, tight=True, controls=[zeile, reihe]),
         )
 
+    def d_plan_name(plan: Plan) -> str:
+        return f"Plan „{plan.name}“"
+
+    def planblock_ziele(a: Abschnitt) -> tuple[zl.Ziel | None, Callable[[], None]]:
+        """Hauptziel (heute: üben) und Blatt-Öffner des Planblocks der Zeitleiste."""
+        d = daten()
+        plan = state.plaene.laden(a.plan_id) if a.plan_id else None
+        name = d.plan_namen.get(a.plan_id or "", "Plan")
+        if plan is None:
+            return None, zl.blatt_oeffner(page, name, "", [], hauptziel=None)
+        weitere = plan_ziele(page, state, plan, hier=set() if not d.ist_heute else {zl.UEBEN})
+        haupt = (
+            zl.Ziel(zl.UEBEN, oeffner(f"/plan/{plan.id}"), untertitel="heute")
+            if d.ist_heute
+            else None
+        )
+        return haupt, zl.blatt_oeffner(
+            page, name, f"{tag_jetzt():%d.%m.%Y}", weitere, hauptziel=haupt
+        )
+
     def block(a: Abschnitt) -> ft.Control:
         d = daten()
         if a.plan_id is None:
@@ -1128,12 +1165,17 @@ def tagesansicht(
         teile = [k.stand_text()] if k is not None else []
         if dauer := _minuten(a.beginn, a.ende):
             teile.append(dauer)
+        # Der Planblock: Tipp heute = üben („Weiter mit“); Zielsymbol oder Gedrückthalten:
+        # Üben · Bearbeiten · Ablauf starten (Ben, 28.10.2026)
+        plan_haupt, plan_blatt = planblock_ziele(a)
         kopf_zeile = ft.Container(
-            ink=d.ist_heute,
-            on_click=oeffner(f"/plan/{a.plan_id}") if d.ist_heute else None,
+            ink=True,
+            on_click=plan_haupt.oeffnen if plan_haupt is not None else plan_blatt,
+            on_long_press=plan_blatt,
             border_radius=8,
             padding=ft.Padding.symmetric(horizontal=4, vertical=2),
             content=ft.Row(
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     ft.Text(
                         d.plan_namen.get(a.plan_id, "Plan"),
@@ -1142,7 +1184,12 @@ def tagesansicht(
                         expand=True,
                     ),
                     ft.Text(" · ".join(teile), size=12, opacity=0.7),
-                ]
+                    zl.zielsymbol(
+                        plan_haupt or zl.Ziel(zl.BEARBEITEN, plan_blatt),
+                        on_click=plan_blatt,
+                        groesse=18,
+                    ),
+                ],
             ),
         )
         zeilen: list[ft.Control] = [kopf_zeile, *(block_zeile(g) for g in a.zeilen)]

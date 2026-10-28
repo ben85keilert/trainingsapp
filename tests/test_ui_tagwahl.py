@@ -132,10 +132,8 @@ def test_katalog_filtert_beim_ankreuzen(page, state) -> None:
     zeile(typ, "Atmung").on_click()
     assert state.typ_filter == {"Atmung"}
     liste = next(c for c in alle(ansicht) if isinstance(c, ft.ListView))
-    namen = [  # Übungszeilen tragen „Trainieren“ — nicht die Zeile „Paketmanager“
-        z.title.value
-        for z in liste.controls
-        if isinstance(z, ft.ListTile) and isinstance(z.trailing, ft.FilledTonalButton)
+    namen = [  # Übungszeilen haben das Zielblatt (Langdruck) — nicht die Zeile „Paketmanager“
+        z.title.value for z in liste.controls if isinstance(z, ft.ListTile) and z.on_long_press
     ]
     erwartet = [u.name for u in state.uebungen.alle() if "Atmung" in u.typen]
     assert namen and sorted(namen) == sorted(erwartet)

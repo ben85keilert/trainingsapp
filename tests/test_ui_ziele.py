@@ -15,12 +15,15 @@ import pytest
 
 ft = pytest.importorskip("flet")
 
+from trainingsapp.core import tagesfelder as tf  # noqa: E402
 from trainingsapp.core.models import Plan, lokaler_tag  # noqa: E402
 from trainingsapp.data.seed import seed_id  # noqa: E402
 from trainingsapp.ui.components import ziele as zl  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
+from trainingsapp.ui.views.katalog import katalog  # noqa: E402
 from trainingsapp.ui.views.tag import tagesansicht  # noqa: E402
 from trainingsapp.ui.views.tagebuch import tagebuch  # noqa: E402
+from trainingsapp.ui.views.uebungen import plaene_liste  # noqa: E402
 from trainingsapp.ui.views.verlauf import verlauf  # noqa: E402
 
 
@@ -211,3 +214,116 @@ def test_verlauf_und_tagebuch_zeigen_ihr_ziel(page, state) -> None:
     assert zl.SYMBOLE[zl.NOTIZ] in _icons(notiz)
     notiz.on_long_press()
     assert [z[0] for z in _blatt_zeilen(page.dialoge[-1])] == ["Notiz", "Tag"]
+
+
+def _tiles_mit_langdruck(wurzel, text: str) -> ft.ListTile:
+    return next(
+        t
+        for t in _alle(wurzel)
+        if isinstance(t, ft.ListTile) and t.on_long_press and text in _texte(t)
+    )
+
+
+def test_tagesfelder_an_drei_orten(page, state) -> None:
+    """Zweite Runde (28.10.2026): Tagesfeld unter Heute → Eintragen, Blatt mit Verlauf und
+    Feld bearbeiten; im Verlauf → Zum Tag die Kurve, Blatt mit Eintragen; kein Tooltip."""
+    feld = tf.Tagesfeld(subject_id=state.profil.id, name="Schmerz", spec=tf.spec_bauen(tf.SKALA))
+    state.tagesfelder.speichern(feld)
+    ansicht = tagesansicht(page, state, state.heute())
+    zeile = _zeile(ansicht, "Schmerz")
+    assert zeile.tooltip is None and zl.SYMBOLE[zl.EINTRAGEN] in _icons(zeile)
+    zeile.on_long_press()
+    zeilen = [z[0] for z in _blatt_zeilen(page.dialoge[-1])]
+    assert zeilen == ["Eintragen", "Verlauf", "Feld bearbeiten"]
+    _waehlen(page, page.dialoge[-1], "Feld bearbeiten")
+    assert page.routen[-1] == f"/einstellungen/tagesfelder/{feld.id}"
+    state.reiter = "verlauf"
+    state.verlauf_tab = 2
+    ansicht = verlauf(page, state)
+    zeile = _zeile(ansicht, "Schmerz")
+    assert zl.SYMBOLE[zl.VERLAUF] in _icons(zeile)
+    zeile.on_long_press()
+    assert [z[0] for z in _blatt_zeilen(page.dialoge[-1])] == [
+        "Verlauf",
+        "Eintragen",
+        "Feld bearbeiten",
+    ]
+    _waehlen(page, page.dialoge[-1], "Eintragen")
+    assert isinstance(page.dialoge[-1], ft.BottomSheet)  # das Tagesfeld-Blatt für heute
+
+
+def test_katalog_und_plaene_mit_zielblatt(page, state) -> None:
+    """Katalog: Tipp = Übungsseite, „Trainieren“ bleibt, Blatt mit Nachtragen · Üben · Verlauf ·
+    Bearbeiten; Pläne: Tipp = bearbeiten, Blatt mit Üben · Ablauf starten."""
+    tile = _tiles_mit_langdruck(katalog(page, state), "Kniebeuge")
+    assert zl.SYMBOLE[zl.UEBUNG] in _icons(tile)
+    tile.on_long_press()
+    zeilen = _blatt_zeilen(page.dialoge[-1])
+    assert [z[0] for z in zeilen] == ["Übungsseite", "Nachtragen", "Üben", "Verlauf", "Bearbeiten"]
+    assert zeilen[2][1] == "Standardübung"
+    _waehlen(page, page.dialoge[-1], "Bearbeiten")
+    assert page.routen[-1] == f"/uebung/{seed_id('kniebeuge')}/bearbeiten"
+    plan = _plan(state, "kniebeuge", name="Kraft")
+    tile = _tiles_mit_langdruck(plaene_liste(page, state), "Kraft")
+    assert zl.SYMBOLE[zl.BEARBEITEN] in _icons(tile)
+    tile.on_long_press()
+    assert [z[0] for z in _blatt_zeilen(page.dialoge[-1])] == [
+        "Bearbeiten",
+        "Üben",
+        "Ablauf starten",
+    ]
+    _waehlen(page, page.dialoge[-1], "Ablauf starten")
+    assert page.routen[-1] == f"/plan/{plan.id}/timer/ablauf"
+
+
+def test_chip_und_planblock_mit_zielblatt(page, state) -> None:
+    """Chip „Steht an“: Tipp = gemacht, gedrückt halten → Blatt mit Nachtragen zuerst;
+    Zeitleiste-Planblock: Üben als Symbol, Blatt mit Bearbeiten und Ablauf."""
+    from trainingsapp.ui.views.tag import ZEITLEISTE
+
+    plan = _plan(state, "kniebeuge", "liegestuetzen", name="Kraft")
+    _eintragen(state, plan.id, "liegestuetzen", {"reps": [10]})
+    ansicht = tagesansicht(page, state, state.heute())
+    chip = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container) and x.on_long_press and x.border and "Kniebeuge" in _texte(x)
+    )
+    assert chip.tooltip is None
+    chip.on_long_press()
+    assert [z[0] for z in _blatt_zeilen(page.dialoge[-1])] == [
+        "Nachtragen",
+        "Üben",
+        "Verlauf",
+        "Übungsseite",
+    ]
+    _waehlen(page, page.dialoge[-1], "Nachtragen")
+    assert page.routen[-1] == f"/nachtragen/{seed_id('kniebeuge')}/{plan.id}"
+    state.tag_darstellung = ZEITLEISTE
+    ansicht = tagesansicht(page, state, state.heute())
+    kopf = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container) and x.on_long_press and _texte(x)[:1] == ["Kraft"]
+    )
+    assert zl.SYMBOLE[zl.UEBEN] in _icons(kopf)
+    kopf.on_long_press()
+    assert [z[0] for z in _blatt_zeilen(page.dialoge[-1])] == [
+        "Üben",
+        "Bearbeiten",
+        "Ablauf starten",
+    ]
+
+
+def test_aufzeichnung_auswertung_und_tag(page) -> None:
+    from datetime import date
+
+    from trainingsapp.ui import ziele_liste
+
+    haupt, blatt = ziele_liste.auswertung_und_tag(page, "Ruhe", lambda: None, date(2026, 10, 27))
+    assert haupt.key == zl.AUSWERTUNG
+    blatt()
+    zeilen = _blatt_zeilen(page.dialoge[-1])
+    assert zeilen == [("Auswertung", ""), ("Tag", "27.10.2026")]
+    _waehlen(page, page.dialoge[-1], "Tag")
+    assert page.routen[-1] == "/tag/2026-10-27"

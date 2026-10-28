@@ -66,7 +66,7 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang import anhang_route
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_route
-from trainingsapp.ui.views.ziele import ziele_fuer
+from trainingsapp.ui.views.ziele import tagesfeld_ziele, ziele_fuer
 
 #: So viele Tage mit Notizen zeigt das Tagebuch zuerst, „Ältere zeigen“ je so viele mehr
 SEITE = 30
@@ -184,8 +184,10 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
         tag_ziel = zl.Ziel(zl.TAG, _route(tag_route), untertitel=f"{n.tag:%d.%m.%Y}")
         if n.art == AUFNAHME:
             return zl.Ziel(zl.TAG, bearbeiter(n)), []
-        text = "Tagesfeld" if n.art == TAGESFELD else "Notiz"
-        return zl.Ziel(zl.NOTIZ, bearbeiter(n), text=text), [tag_ziel]
+        if n.art == TAGESFELD and (feld := tagesfelder.get(n.feld_id or "")) is not None:
+            weitere = tagesfeld_ziele(page, state, feld, tag=n.tag, hier={zl.EINTRAGEN}, danach=neu)
+            return zl.Ziel(zl.EINTRAGEN, bearbeiter(n)), weitere
+        return zl.Ziel(zl.NOTIZ, bearbeiter(n)), [tag_ziel]
 
     def _route(pfad: str) -> Callable[[], Any]:
         async def handler() -> None:

@@ -78,6 +78,15 @@ class FletBleTransport:
 
     # -- BleTransport --------------------------------------------------------------
 
+    async def adapter_zustand(self) -> str:
+        """Der Zustand des Bluetooth-Adapters (``on``, ``off``, ``unauthorized`` …) — vor
+        Suche und Verbinden geprüft (`devices.gatt.adapter_warnung`); ``unknown``, wenn die
+        Erweiterung nicht antwortet."""
+        try:
+            return await self.ble.adapter_state()
+        except Exception:  # alte Erweiterung ohne den Aufruf, Zeitüberschreitung
+            return "unknown"
+
     async def scan(self, timeout_s: float = 8.0) -> list[DeviceInfo]:
         treffer = await self.ble.scan(timeout_s=timeout_s)
         return [

@@ -15,11 +15,13 @@ import flet as ft
 
 from trainingsapp.core.models import Plan
 from trainingsapp.core.plaene import erledigte, tage_text
+from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.katalog import katalog, trainieren_knopf
 from trainingsapp.ui.views.kurse import kurse_liste
+from trainingsapp.ui.views.ziele import plan_ziele
 
 
 def neuen_plan_anlegen(page: ft.Page, state: AppState) -> Callable[[], None]:
@@ -95,6 +97,13 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
             teile.append("heute dran")
         if gemacht:
             teile.append(f"{gemacht} heute gemacht")
+        # Tipp = bearbeiten, „Trainieren“ daneben; Zielsymbol oder Gedrückthalten zeigt
+        # Üben · Bearbeiten · Ablauf starten (Ben, 28.10.2026)
+        haupt = zl.Ziel(zl.BEARBEITEN, oeffner(plan.id))
+        weitere = plan_ziele(
+            page, state, plan, hier={zl.BEARBEITEN}, ueben=heute_trainieren(page, state, plan.id)
+        )
+        blatt = zl.blatt_oeffner(page, plan.name, "", weitere, hauptziel=haupt)
         return ft.ListTile(
             leading=ft.Icon(
                 ft.Icons.LIST_ALT if plan.aktiv else ft.Icons.PAUSE_CIRCLE_OUTLINE,
@@ -102,11 +111,19 @@ def plaene_liste(page: ft.Page, state: AppState) -> ft.Control:
             ),
             title=ft.Text(plan.name, opacity=1 if plan.aktiv else 0.6),
             subtitle=ft.Text("  ·  ".join(teile), size=12),
-            trailing=trainieren_knopf(
-                heute_trainieren(page, state, plan.id),
-                "Heute trainieren — auch wenn der Plan heute nicht ansteht",
+            trailing=ft.Row(
+                tight=True,
+                spacing=0,
+                controls=[
+                    trainieren_knopf(
+                        heute_trainieren(page, state, plan.id),
+                        "Heute trainieren — auch wenn der Plan heute nicht ansteht",
+                    ),
+                    zl.zielsymbol(haupt, on_click=blatt),
+                ],
             ),
             on_click=oeffner(plan.id),
+            on_long_press=blatt,
         )
 
     if not plaene:

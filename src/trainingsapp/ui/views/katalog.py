@@ -15,10 +15,12 @@ from collections.abc import Callable
 import flet as ft
 
 from trainingsapp.core.models import Exercise, passt_zum_filter
+from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.tagwahl import TagWahl
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.ziele import ziele_fuer
 
 
 def _beispiel(uebung: Exercise) -> str:
@@ -102,18 +104,7 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
             if passt_zum_filter(u, state.typ_filter, state.region_filter)
         ]
         if treffer:
-            liste.controls = [
-                ft.ListTile(
-                    leading=ft.Icon(symbol(u.icon_key)),
-                    title=ft.Text(u.name),
-                    subtitle=_untertitel(u),
-                    trailing=trainieren_knopf(
-                        trainierer(u.id), "Diese Übung jetzt trainieren — ohne Plan"
-                    ),
-                    on_click=oeffner(u.id),
-                )
-                for u in treffer
-            ]
+            liste.controls = [uebungs_zeile(u) for u in treffer]
         else:
             liste.controls = [
                 ft.Container(
@@ -123,6 +114,28 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
                 )
             ]
         liste.controls.extend(ablage_zeilen())
+
+    def uebungs_zeile(u: Exercise) -> ft.Control:
+        """Tipp = Übungsseite, „Trainieren“ daneben; das Zielsymbol oder Gedrückthalten
+        zeigt alle Wege: Nachtragen, Üben, Verlauf, Übungsseite, Bearbeiten (28.10.2026)."""
+        haupt = zl.Ziel(zl.UEBUNG, oeffner(u.id))
+        weitere = ziele_fuer(page, state, u.id, tag=None, hier={zl.UEBUNG}, bearbeiten=True)
+        blatt = zl.blatt_oeffner(page, u.name, "", weitere, hauptziel=haupt)
+        return ft.ListTile(
+            leading=ft.Icon(symbol(u.icon_key)),
+            title=ft.Text(u.name),
+            subtitle=_untertitel(u),
+            trailing=ft.Row(
+                tight=True,
+                spacing=0,
+                controls=[
+                    trainieren_knopf(trainierer(u.id), "Diese Übung jetzt trainieren — ohne Plan"),
+                    zl.zielsymbol(haupt, on_click=blatt),
+                ],
+            ),
+            on_click=oeffner(u.id),
+            on_long_press=blatt,
+        )
 
     def ablage_zeilen() -> list[ft.Control]:
         """Unten im Katalog: der Paketmanager, dazu Archiv und Papierkorb, wenn dort etwas liegt."""

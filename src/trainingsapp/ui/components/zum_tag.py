@@ -18,12 +18,14 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import tagesfelder as tf
+from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.tagesfeld_blatt import (
     gewaehlte_variante,
     schnell_eintragen,
     tagesfeld_blatt,
 )
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.ziele import tagesfeld_ziele
 
 #: Die Route der Einstellungen
 EINSTELLUNGEN = "/einstellungen/tagesfelder"
@@ -136,8 +138,15 @@ def zum_tag_block(
                     ),
                 )
             )
-        elif ist_text:
-            teile.append(ft.Icon(ft.Icons.EDIT_OUTLINED, size=18, opacity=0.6))
+        # Das Zielsymbol statt des Stifts (Ben, 28.10.2026): Tipp = eintragen; Symbol oder
+        # Gedrückthalten = alle Wege (Verlauf, Feld bearbeiten). Kein Tooltip — er stritte
+        # am Handy mit dem Langdruck.
+        haupt = zl.Ziel(zl.EINTRAGEN, blatt_oeffnen(feld))
+        weitere = tagesfeld_ziele(
+            page, state, feld, tag=tag, hier={zl.EINTRAGEN, zl.TAG}, danach=auffrischen
+        )
+        blatt = zl.blatt_oeffner(page, feld.name, f"{tag:%d.%m.%Y}", weitere, hauptziel=haupt)
+        teile.append(zl.zielsymbol(haupt, on_click=blatt, groesse=18))
         return ft.Container(
             col=12 if ist_text else 6,
             height=None if ist_text else 56,
@@ -147,7 +156,7 @@ def zum_tag_block(
             padding=ft.Padding.only(left=12, right=6, top=6, bottom=6),
             ink=True,
             on_click=blatt_oeffnen(feld),
-            tooltip=f"{feld.name}: eintragen",
+            on_long_press=blatt,
             content=ft.Row(
                 spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=teile
             ),

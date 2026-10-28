@@ -75,6 +75,7 @@ from trainingsapp.core.timer import (
 from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.devices.base import DeviceInfo, Verbindung
 from trainingsapp.devices.einheit import Einheitslauf, HrvBaustein, TimerBaustein
+from trainingsapp.devices.gatt import adapter_warnung
 from trainingsapp.devices.messlauf import NUR_PULS_NACH as NUR_PULS_NACH  # Re-Export (H40)
 from trainingsapp.devices.messlauf import (
     Gespeichert,
@@ -90,6 +91,7 @@ from trainingsapp.devices.simulated import (
     SimulatedSource,
 )
 from trainingsapp.ui import einheit as einheit_ui
+from trainingsapp.ui import ziele_liste
 from trainingsapp.ui.components.abschnitte import Abschnittsfeld, abschnitt_chip, name_dialog
 from trainingsapp.ui.components.analyse import Analyse
 from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog, schliessen
@@ -710,6 +712,21 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
 
         return handler
 
+    async def bluetooth_warnung() -> str | None:
+        """Ist der Adapter aus, ohne Berechtigung oder nicht da? Dann die Warnung statt
+        einer Suche ins Leere (Ben, 28.10.2026)."""
+        pruefen = getattr(state.ble_transport, "adapter_zustand", None)
+        if pruefen is None:
+            return None
+        return adapter_warnung(await pruefen())
+
+    def warnen(text: str) -> None:
+        ring.visible = False
+        hinweis_text.value = text
+        hinweis_text.visible = True
+        page.show_dialog(ft.SnackBar(ft.Text(text)))
+        page.update()
+
     async def verbinden(device_id: str, name: str | None) -> None:
         hinweis_text.value = f"Verbinde mit {name or device_id} …"
         hinweis_text.visible = True
@@ -720,6 +737,9 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
         elif state.ble_transport is not None:
             from trainingsapp.devices.polar import PolarQuelle
 
+            if (warnung := await bluetooth_warnung()) is not None:
+                warnen(warnung)
+                return
             quelle = PolarQuelle(state.ble_transport)
         else:
             ring.visible = False
@@ -775,6 +795,9 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             return
         from trainingsapp.devices.polar import PolarQuelle
 
+        if (warnung := await bluetooth_warnung()) is not None:
+            warnen(warnung)
+            return
         ring.visible = True
         hinweis_text.value = "Suche Geräte (8 s) — Gurt anfeuchten bzw. Sensor einschalten …"
         hinweis_text.visible = True
@@ -1997,13 +2020,18 @@ def _hrv_liste(page: ft.Page, state: AppState, eintraege: list[Any]) -> ft.Contr
             unten.insert(0, datum)
         if a.note:
             unten.append(a.note[:40])
+        # Tipp = Auswertung; Zielsymbol oder Gedrückthalten: Auswertung · Tag (28.10.2026)
+        haupt, blatt = ziele_liste.auswertung_und_tag(
+            page, a.title or datum, oeffner(a.id), lokal.date()
+        )
         zeilen.append(
             ft.ListTile(
                 leading=ft.Icon(ft.Icons.MONITOR_HEART_OUTLINED),
                 title=ft.Text(a.title or datum, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                 subtitle=ft.Text("  ·  ".join(unten), size=12, max_lines=2),
-                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),
+                trailing=ziele_liste.symbol(haupt, blatt),
                 on_click=oeffner(a.id),
+                on_long_press=blatt,
             )
         )
     liste = ft.ListView(expand=True, padding=ft.Padding.only(bottom=24), controls=zeilen)

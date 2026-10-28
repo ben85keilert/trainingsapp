@@ -1804,3 +1804,34 @@ def test_alte_eigene_abschnitte_bekommen_ihr_notizpaar(daten) -> None:
     grenzen = [e for e in laden(pfad).ereignisse if "marke" in e]
     assert [e["text"] for e in grenzen] == ["Belastung", "Alt: Start", "Alt: Ende"]
     assert grenzen[1]["marke"]["spur"] == "seg-00000002"
+
+
+async def test_bluetooth_aus_warnt_statt_zu_suchen(daten) -> None:
+    """Ben, 28.10.2026: Ist Bluetooth aus, warnt „Geräte suchen“ sofort und sucht nicht;
+    ebenso ein Tipp auf ein bekanntes Gerät. Ist es an, läuft die Suche."""
+    from types import SimpleNamespace
+
+    state, _ = daten
+    gesucht: list[float] = []
+    zustand = {"wert": "off"}
+
+    async def adapter_zustand() -> str:
+        return zustand["wert"]
+
+    async def scan(timeout_s: float = 8.0) -> list:
+        gesucht.append(timeout_s)
+        return []
+
+    state.ble_transport = SimpleNamespace(adapter_zustand=adapter_zustand, scan=scan)
+    seite = _seite()
+    ansicht = messung(seite, state)
+    await _knopf(ansicht, "Geräte suchen").on_click()
+    texte = _baum_texte(ansicht)
+    assert any(t.startswith("Bluetooth ist ausgeschaltet") for t in texte) and gesucht == []
+    assert seite.aufrufe[-1].content.value.startswith("Bluetooth ist ausgeschaltet")
+    zustand["wert"] = "unauthorized"
+    await _knopf(ansicht, "Geräte suchen").on_click()
+    assert any("Berechtigung" in t for t in _baum_texte(ansicht)) and gesucht == []
+    zustand["wert"] = "on"
+    await _knopf(ansicht, "Geräte suchen").on_click()
+    assert gesucht == [8.0]

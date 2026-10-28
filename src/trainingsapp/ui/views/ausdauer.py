@@ -1507,6 +1507,12 @@ def strecken_zeilen(page: ft.Page, state: AppState) -> list[ft.Control]:
         mit_hrv = bool(s.hrv_recording_id) or (
             bool(s.einheit_id) and hrv_bezug(state, s) is not None
         )
+        from trainingsapp.ui import ziele_liste
+
+        # Tipp = Auswertung; Zielsymbol oder Gedrückthalten: Auswertung · Tag (28.10.2026)
+        haupt, blatt = ziele_liste.auswertung_und_tag(
+            page, " · ".join(teile), oeffner(s.id), lokal.date()
+        )
         zeilen.append(
             ft.ListTile(
                 leading=ft.Icon(SPORT_SYMBOLE.get(s.sportart, ft.Icons.DIRECTIONS_RUN)),
@@ -1515,8 +1521,9 @@ def strecken_zeilen(page: ft.Page, state: AppState) -> list[ft.Control]:
                     f"{lokal:%d.%m.%Y  %H:%M}" + ("  ·  mit HRV" if mit_hrv else ""),
                     size=12,
                 ),
-                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4),
+                trailing=ziele_liste.symbol(haupt, blatt),
                 on_click=oeffner(s.id),
+                on_long_press=blatt,
             )
         )
     return zeilen

@@ -34,6 +34,11 @@ TAG = "tag"
 UEBUNG = "uebung"
 STRECKE = "strecke"
 NOTIZ = "notiz"
+EINTRAGEN = "eintragen"  # Tagesfeld: Wert eintragen (Blatt)
+FELD = "feld"  # Tagesfeld bearbeiten (Einstellungen)
+AUSWERTUNG = "auswertung"  # Messung oder Strecke auswerten
+BEARBEITEN = "bearbeiten"  # Übung oder Plan bearbeiten
+ABLAUF = "ablauf"  # Plan als Ablauf starten
 
 #: Ein Symbol je Ziel — nach dem Vokabular, das die App schon hat: die Reiter Heute und
 #: Verlauf, das i, „Notiz zum Tag“, der runde Knopf „Nachtragen“, der Reiter „Strecken“
@@ -46,6 +51,11 @@ SYMBOLE: dict[str, ft.IconData] = {
     UEBUNG: ft.Icons.INFO_OUTLINE,
     STRECKE: ft.Icons.ROUTE,
     NOTIZ: ft.Icons.EDIT_NOTE,
+    EINTRAGEN: ft.Icons.EDIT,
+    FELD: ft.Icons.TUNE,
+    AUSWERTUNG: ft.Icons.ANALYTICS_OUTLINED,
+    BEARBEITEN: ft.Icons.EDIT_OUTLINED,
+    ABLAUF: ft.Icons.PLAYLIST_PLAY,
 }
 TEXTE: dict[str, str] = {
     EINTRAEGE: "Einträge des Tages",
@@ -56,6 +66,11 @@ TEXTE: dict[str, str] = {
     UEBUNG: "Übungsseite",
     STRECKE: "Strecke",
     NOTIZ: "Notiz",
+    EINTRAGEN: "Eintragen",
+    FELD: "Feld bearbeiten",
+    AUSWERTUNG: "Auswertung",
+    BEARBEITEN: "Bearbeiten",
+    ABLAUF: "Ablauf starten",
 }
 #: Die Hilfezeile unter einer Liste mit Zielsymbolen
 HILFE = "Das Symbol sagt, wohin der Tipp führt · Symbol antippen oder gedrückt halten = alle Wege"
@@ -169,7 +184,12 @@ def blatt_oeffner(
 
 
 __all__ = [
+    "ABLAUF",
+    "AUSWERTUNG",
+    "BEARBEITEN",
     "EINTRAEGE",
+    "EINTRAGEN",
+    "FELD",
     "HILFE",
     "NACHTRAGEN",
     "NOTIZ",

@@ -182,3 +182,29 @@ Heute (Übersicht und Zeitleiste) → Gerätetest Langdruck/Tooltip/Blatt-aus-Bl
   `nachtragen=`, Notiz zum Tag/Plan/Tagesfeld → Notiz + Tag). Chip „Steht an“ ohne Tooltip.
   Tests `tests/test_ui_ziele.py`.
 
+## 10. Zweite Runde (28.10.2026): überall, wo es mehr als einen Weg gibt
+
+Ben: „Schau wo es sonst sinnvoll sein kann, so ein Routingmenü aufzumachen, z. B. bei ‚Zum
+Tag‘ die Tagesfelder oder anderswo“ — und zur Bestandsaufnahme: 1 bis 7 bauen, 8 nicht.
+
+Neue Ziele: Eintragen (`EDIT`, Tagesfeld-Blatt), Feld bearbeiten (`TUNE`), Auswertung
+(`ANALYTICS_OUTLINED`), Bearbeiten (`EDIT_OUTLINED`, wie überall), Ablauf starten
+(`PLAYLIST_PLAY`). Helfer `views/ziele.tagesfeld_ziele`, `plan_ziele`, `ziele_fuer(…,
+bearbeiten=True)`, `ui/ziele_liste.auswertung_und_tag`.
+
+| Ort | Tipp (Symbol) | Gedrückt halten / Symbol |
+|---|---|---|
+| Heute → Zum Tag, Tagesfeld | Eintragen (Blatt) | Verlauf · Feld bearbeiten — kein Tooltip mehr |
+| Verlauf → Zum Tag | Verlauf (Kurve) | Eintragen (heute) · Feld bearbeiten |
+| Tagebuch, Tagesfeld | Eintragen | Verlauf · Feld bearbeiten · Tag |
+| Übungen → Übungen (Katalog) | Übungsseite; Knopf „Trainieren“ bleibt | Nachtragen · Üben (Standardübung) · Verlauf · Bearbeiten |
+| Verlauf-Kurve einer Übung, Liste unten | Tag | Einträge des Tages · Nachtragen · Üben · Übungsseite |
+| Verlauf-Kurve eines Tagesfelds, Liste unten | Tag | Eintragen an dem Tag · Feld bearbeiten |
+| Aufzeichnungen → HRV, Strecken | Auswertung | Tag |
+| Übungen → Pläne | Bearbeiten; Knopf „Trainieren“ bleibt | Üben (heute) · Ablauf starten |
+| Heute → „Steht an“, Chip | gemacht (kein Symbol) | Nachtragen · Üben im Plan · Verlauf · Übungsseite — vorher direkt Nachtragen |
+| Zeitleiste, Planblock-Kopf | heute: Üben; sonst nur das Blatt | Bearbeiten · Ablauf starten |
+
+Nicht angefasst (Punkt 8, siehe Erklärung an Ben): Einheit-Karten, Kurse, Pakete,
+Einstellungen — dort führt der Tipp zu genau einer Seite, es gibt keinen zweiten Weg.
+

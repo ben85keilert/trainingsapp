@@ -61,7 +61,7 @@ from trainingsapp.ui.components.verlaufskurve import mini, mini_saeulen
 from trainingsapp.ui.components.wochenleiste import tageszelle
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.tagebuch import tagebuch
-from trainingsapp.ui.views.ziele import ziele_fuer
+from trainingsapp.ui.views.ziele import tagesfeld_ziele, ziele_fuer
 
 #: So viele Werte zeigt eine Mini-Kurve
 MINI_WERTE = 8
@@ -362,7 +362,7 @@ def _tage_inhalt(
             ft.TextButton("Tag öffnen", on_click=_oeffner(page, f"/tag/{tag.isoformat()}")),
         ),
     ]
-    controls.extend(_tageswerte(page, daten, tag))
+    controls.extend(_tageswerte(page, state, daten, tag))
     if not zeilen and not any(w.tag == tag for w in daten.werte):
         controls.append(
             ft.Container(
@@ -419,7 +419,7 @@ def _tage_inhalt(
     return controls
 
 
-def _tageswerte(page: ft.Page, daten: _Daten, tag: date) -> list[ft.Control]:
+def _tageswerte(page: ft.Page, state: AppState, daten: _Daten, tag: date) -> list[ft.Control]:
     """Reiter „Tage“: die Tagesfelder des gewählten Tags über den Übungen (Skizze C1) — je
     Feld eine Zeile; antippen öffnet das Feld im Verlauf."""
     werte = [w for w in daten.werte if w.tag == tag]
@@ -496,14 +496,14 @@ def _zum_tag(page: ft.Page, state: AppState, daten: Callable[[], _Daten]) -> ft.
         controls=[
             ft.Container(
                 padding=ft.Padding.only(left=12, right=12, top=10, bottom=24),
-                content=ft.Column(spacing=8, controls=_zum_tag_inhalt(page, daten())),
+                content=ft.Column(spacing=8, controls=_zum_tag_inhalt(page, state, daten())),
             )
         ],
     )
     return scroll_merken(page, state, "verlauf_zum_tag", spalte)
 
 
-def _zum_tag_inhalt(page: ft.Page, daten: _Daten) -> list[ft.Control]:
+def _zum_tag_inhalt(page: ft.Page, state: AppState, daten: _Daten) -> list[ft.Control]:
     """Je Tagesfeld eine Zeile: Stand des letzten Tags, Mini-Kurve bzw. -Säulen; darunter
     ausgeschaltete und gelöschte, deren Einträge geblieben sind."""
     heute = daten.heute
@@ -569,13 +569,24 @@ def _zum_tag_inhalt(page: ft.Page, daten: _Daten) -> list[ft.Control]:
                 if zahlen:
                     punkte.append(sum(zahlen) / len(zahlen))
             rechts.append(mini(punkte[-MINI_WERTE:], breite=84, hoehe=28))
-        rechts.append(ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5))
+        haupt = zl.Ziel(zl.VERLAUF, _oeffner(page, f"/verlauf/tagesfeld/{feld.id}"))
+        blatt = zl.blatt_oeffner(
+            page,
+            feld.name,
+            "alle Tage",
+            tagesfeld_ziele(
+                page, state, feld, tag=None, hier={zl.VERLAUF}, danach=state.neu_zeichnen
+            ),
+            hauptziel=haupt,
+        )
+        rechts.append(zl.zielsymbol(haupt, on_click=blatt))
         return ft.Container(
             bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
             border_radius=14,
             padding=ft.Padding.only(left=14, right=6, top=8, bottom=8),
             ink=True,
-            on_click=_oeffner(page, f"/verlauf/tagesfeld/{feld.id}"),
+            on_click=haupt.oeffnen,
+            on_long_press=blatt,
             content=ft.Row(
                 spacing=10,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,

@@ -15,10 +15,15 @@ from collections.abc import Callable, Iterable
 from datetime import date
 from typing import Any
 
+from trainingsapp.core import tagesfelder as tf
+from trainingsapp.core.models import Plan
 from trainingsapp.ui.components import ziele as z
+from trainingsapp.ui.components.tagesfeld_blatt import tagesfeld_blatt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_route
+
+TAGESFELDER_EINSTELLUNGEN = "/einstellungen/tagesfelder"
 
 
 def _route(page: Any, pfad: str) -> Callable[[], Any]:
@@ -69,6 +74,7 @@ def ziele_fuer(
     hier: Iterable[str] = (),
     strecke_id: str | None = None,
     danach: Callable[[], Any] | None = None,
+    bearbeiten: bool = False,
 ) -> list[z.Ziel]:
     """Alle Wege zu dieser Übung, in fester Folge: Einträge · Üben … · Nachtragen · Verlauf ·
     Tag · Übungsseite (Strecke statt Einträge bei einem Training). ``hier``: Schlüssel
@@ -112,7 +118,70 @@ def ziele_fuer(
         )
     if uebung is not None and z.UEBUNG not in weg:
         out.append(z.Ziel(z.UEBUNG, _route(page, f"/uebung/{uebung_id}")))
+    if bearbeiten and uebung is not None and uebung.deleted_at is None:
+        out.append(z.Ziel(z.BEARBEITEN, _route(page, f"/uebung/{uebung_id}/bearbeiten")))
     return out
 
 
-__all__ = ["ueben_ziele", "ziele_fuer"]
+def tagesfeld_ziele(
+    page: Any,
+    state: AppState,
+    feld: tf.Tagesfeld,
+    *,
+    tag: date | None,
+    hier: Iterable[str] = (),
+    danach: Callable[[], Any] | None = None,
+) -> list[z.Ziel]:
+    """Die Wege zu einem Tagesfeld: Eintragen (Blatt, an ``tag`` — ohne Tag heute) · Verlauf
+    · Feld bearbeiten · Tag (Ben, 28.10.2026: „bei ‚Zum Tag‘ die Tagesfelder“)."""
+    weg = set(hier)
+    out: list[z.Ziel] = []
+    an = tag or state.heute()
+    if z.EINTRAGEN not in weg and feld.deleted_at is None:
+
+        def blatt() -> None:
+            page.show_dialog(
+                tagesfeld_blatt(
+                    page,
+                    state,
+                    feld,
+                    an,
+                    danach=danach,
+                    bearbeiten=_route(page, f"{TAGESFELDER_EINSTELLUNGEN}/{feld.id}"),
+                )
+            )
+
+        out.append(z.Ziel(z.EINTRAGEN, blatt, untertitel="" if tag is None else f"{an:%d.%m.%Y}"))
+    if z.VERLAUF not in weg:
+        out.append(z.Ziel(z.VERLAUF, _route(page, f"/verlauf/tagesfeld/{feld.id}")))
+    if z.FELD not in weg and feld.deleted_at is None:
+        out.append(z.Ziel(z.FELD, _route(page, f"{TAGESFELDER_EINSTELLUNGEN}/{feld.id}")))
+    if tag is not None and z.TAG not in weg:
+        out.append(
+            z.Ziel(z.TAG, _route(page, f"/tag/{tag.isoformat()}"), untertitel=f"{tag:%d.%m.%Y}")
+        )
+    return out
+
+
+def plan_ziele(
+    page: Any,
+    state: AppState,
+    plan: Plan,
+    *,
+    hier: Iterable[str] = (),
+    ueben: Callable[[], Any] | None = None,
+) -> list[z.Ziel]:
+    """Die Wege zu einem Plan: Üben (``ueben``: nimmt den Plan für heute auf, sonst nur
+    öffnen) · Bearbeiten · Ablauf starten."""
+    weg = set(hier)
+    out: list[z.Ziel] = []
+    if z.UEBEN not in weg:
+        out.append(z.Ziel(z.UEBEN, ueben or _route(page, f"/plan/{plan.id}"), untertitel="heute"))
+    if z.BEARBEITEN not in weg:
+        out.append(z.Ziel(z.BEARBEITEN, _route(page, f"/plaene/{plan.id}")))
+    if z.ABLAUF not in weg and plan.items:
+        out.append(z.Ziel(z.ABLAUF, _route(page, f"/plan/{plan.id}/timer/ablauf")))
+    return out
+
+
+__all__ = ["plan_ziele", "tagesfeld_ziele", "ueben_ziele", "ziele_fuer"]

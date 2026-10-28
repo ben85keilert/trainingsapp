@@ -47,6 +47,7 @@ from trainingsapp.core.verlauf import (
     ueberblick,
     zeitraum_beginn,
 )
+from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.karte import karte
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.verlaufskurve import Reihe, saeulen
@@ -54,6 +55,7 @@ from trainingsapp.ui.components.verlaufskurve import linien as kurve_linien
 from trainingsapp.ui.farben import FARBEN, REIHEN
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.verlauf import kurz_datum
+from trainingsapp.ui.views.ziele import ziele_fuer
 
 #: Die Linie „Zusammen“ — gestrichelt in der Farbe der Nebentexte
 ZUSAMMEN_FARBE = ft.Colors.ON_SURFACE_VARIANT
@@ -147,6 +149,16 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
 
         return handler
 
+    def tag_blatt(tag: date) -> Callable[[], None]:
+        """Gedrückt halten auf einen Tag unter der Kurve: Tag · Einträge des Tages ·
+        Nachtragen · Üben · Übungsseite (Ben, 28.10.2026)."""
+        haupt = zl.Ziel(zl.TAG, oeffner(f"/tag/{tag.isoformat()}"), untertitel=f"{tag:%d.%m.%Y}")
+        weitere = ziele_fuer(
+            page, state, kachel_id, tag=tag, hier={zl.VERLAUF, zl.TAG}, danach=state.neu_zeichnen
+        )
+        name = original.name if original is not None else "Übung"
+        return zl.blatt_oeffner(page, name, f"{tag:%d.%m.%Y}", weitere, hauptziel=haupt)
+
     inhalt: list[ft.Control] = []
     if len(optionen) > 1 and kennzahl is not None:
         # Kennzahlen als Chips statt Dropdown (Ben, 19.10.2026): meist 1–5 Stück, der Platz
@@ -184,7 +196,9 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
 
     def markieren(tag: date) -> None:
         """Tipp auf einen Punkt: seine Zeile in den Ergebnissen hervorheben."""
-        ergebnisse.controls = _ergebnisse(im_zeitraum, kennzahl, tag, heute, oeffner, ordnen, name)
+        ergebnisse.controls = _ergebnisse(
+            im_zeitraum, kennzahl, tag, heute, oeffner, ordnen, name, tag_blatt
+        )
         with contextlib.suppress(Exception):
             ergebnisse.update()
 
@@ -302,7 +316,9 @@ def verlauf_kachel_view(page: ft.Page, state: AppState, kachel_id: str) -> ft.Vi
 
     # -- Ergebnisse je Tag -------------------------------------------------------------
 
-    ergebnisse.controls = _ergebnisse(im_zeitraum, kennzahl, None, heute, oeffner, ordnen, name)
+    ergebnisse.controls = _ergebnisse(
+        im_zeitraum, kennzahl, None, heute, oeffner, ordnen, name, tag_blatt
+    )
     inhalt.append(
         ft.Text("ERGEBNISSE · NEUESTE ZUERST", size=11, weight=ft.FontWeight.BOLD, opacity=0.6)
     )
@@ -401,6 +417,7 @@ def _ergebnisse(
     oeffner: Callable[[str], Callable[[], object]],
     ordnen: Callable[[list[Linie]], list[Linie]],
     name: Callable[[Linie], str],
+    tag_blatt: Callable[[date], Callable[[], None]] | None = None,
 ) -> list[ft.Control]:
     """Je Tag eine Zeile, neueste zuerst: Sätze (oder „abgehakt“), Notizen und der Wert der
     Kennzahl; der markierte Tag (Tipp auf die Kurve) hervorgehoben. Waren mehrere Varianten
@@ -466,6 +483,7 @@ def _ergebnisse(
                 padding=ft.Padding.only(left=12, right=6, top=8, bottom=8),
                 ink=True,
                 on_click=oeffner(f"/tag/{tag.isoformat()}"),
+                on_long_press=tag_blatt(tag) if tag_blatt is not None else None,
                 content=ft.Row(
                     spacing=10,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,

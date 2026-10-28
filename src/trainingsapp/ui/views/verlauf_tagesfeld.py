@@ -30,6 +30,7 @@ from trainingsapp.core.verlauf import (
     linien,
     zeitraum_beginn,
 )
+from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.karte import karte
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.verlaufskurve import Reihe, Stapel, saeulen, stapel_saeulen
@@ -37,6 +38,7 @@ from trainingsapp.ui.components.verlaufskurve import linien as kurve_linien
 from trainingsapp.ui.farben import FARBEN, REIHEN
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.verlauf import kurz_datum
+from trainingsapp.ui.views.ziele import tagesfeld_ziele
 
 ROUTE = "/verlauf/tagesfeld"
 
@@ -96,6 +98,15 @@ def verlauf_tagesfeld_view(page: Any, state: AppState, feld_id: str) -> ft.View:
             await page.push_route(pfad)
 
         return handler
+
+    def tag_blatt(tag: date) -> Callable[[], None]:
+        """Gedrückt halten auf einen Tag unter der Kurve: Tag · Eintragen an diesem Tag ·
+        Feld bearbeiten (Ben, 28.10.2026)."""
+        haupt = zl.Ziel(zl.TAG, oeffner(f"/tag/{tag.isoformat()}"), untertitel=f"{tag:%d.%m.%Y}")
+        weitere = tagesfeld_ziele(
+            page, state, feld, tag=tag, hier={zl.VERLAUF, zl.TAG}, danach=state.neu_zeichnen
+        )
+        return zl.blatt_oeffner(page, feld.name, f"{tag:%d.%m.%Y}", weitere, hauptziel=haupt)
 
     inhalt: list[ft.Control] = [
         ft.Text(
@@ -230,6 +241,7 @@ def verlauf_tagesfeld_view(page: Any, state: AppState, feld_id: str) -> ft.View:
                 padding=ft.Padding.only(left=12, right=6, top=8, bottom=8),
                 ink=True,
                 on_click=oeffner(f"/tag/{tag.isoformat()}"),
+                on_long_press=tag_blatt(tag),
                 content=ft.Row(
                     vertical_alignment=ft.CrossAxisAlignment.START,
                     controls=[

@@ -140,7 +140,17 @@ def test_plan_karte_chip_hakt_ab_rueckgaengig_und_lang_druecken(page, state) -> 
     meldung.on_action()
     assert len(state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())) == 1
 
-    asyncio.run(chips[1].on_long_press())  # lang drücken = Werte eintragen, mit dem Plan
+    # Gedrückt halten öffnet seit 28.10.2026 das Zielblatt — Nachtragen steht zuerst, mit Plan
+    chips[1].on_long_press()
+    blatt = page.dialoge[-1]
+    nachtragen = next(
+        t
+        for t in _alle(blatt.content)
+        if isinstance(t, ft.ListTile) and t.title.value == "Nachtragen"
+    )
+    blatt.open = True
+    nachtragen.on_click()
+    asyncio.run(blatt.on_dismiss(None))
     assert page.routen[-1] == f"/nachtragen/{seed_id('wandsitz')}/{plan.id}"
 
 

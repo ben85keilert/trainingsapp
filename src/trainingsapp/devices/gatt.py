@@ -136,3 +136,43 @@ class UhrAbgleich:
 
 
 __all__ = ["BleTransport", "Empfaenger", "UhrAbgleich"]
+
+
+#: Zustände des Bluetooth-Adapters, wie `flutter_blue_plus` sie nennt (`flet_ble`,
+#: ``adapter_state``); am Rechner mit bleak gibt es sie nicht (``unknown``)
+ADAPTER_AN = "on"
+
+
+def adapter_warnung(zustand: str | None) -> str | None:
+    """Was der Person zu sagen ist, bevor die App sucht oder verbindet — ``None``: alles gut
+    oder nicht feststellbar (Ben, 28.10.2026: „Das Verbinden klappt nicht, wenn Bluetooth
+    ausgeschaltet ist. Setze eine Warnung“).
+
+    >>> adapter_warnung("on"), adapter_warnung(None), adapter_warnung("unknown")
+    (None, None, None)
+    >>> adapter_warnung("off").startswith("Bluetooth ist ausgeschaltet")
+    True
+    >>> adapter_warnung("unauthorized").startswith("Die App darf Bluetooth nicht nutzen")
+    True
+    >>> adapter_warnung("turningOn")
+    'Bluetooth schaltet sich gerade ein — gleich noch einmal versuchen.'
+    """
+    if zustand in (None, "", ADAPTER_AN, "unknown"):
+        return None
+    if zustand == "off":
+        return (
+            "Bluetooth ist ausgeschaltet. Bitte am Handy einschalten (Schnelleinstellungen), "
+            "dann noch einmal."
+        )
+    if zustand == "unauthorized":
+        return (
+            "Die App darf Bluetooth nicht nutzen — die Berechtigung „Geräte in der Nähe“ in "
+            "den Android-Einstellungen der App erteilen."
+        )
+    if zustand == "unavailable":
+        return "Dieses Gerät hat kein Bluetooth."
+    if zustand == "turningOn":
+        return "Bluetooth schaltet sich gerade ein — gleich noch einmal versuchen."
+    if zustand == "turningOff":
+        return "Bluetooth schaltet sich gerade aus."
+    return f"Bluetooth ist nicht bereit ({zustand})."

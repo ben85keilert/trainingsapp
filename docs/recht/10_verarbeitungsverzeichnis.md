@@ -29,7 +29,7 @@ Patientinnen und Patienten der Praxis.
 | Trainingsdaten | Übungen, Wiederholungen, Notizen | **ja** — Gesundheitsdaten |
 | Messwerte | Herzfrequenz, RR-Intervalle, HRV-Kennzahlen | **ja** |
 | Medien | selbst aufgenommene Übungsvideos, Fotos | **ja** |
-| Tagesfelder | Beschwerden auf einer Skala, Einnahmen (Anzahl), Trinkmenge, Texte zu Themen wie Ernährung | **ja** — Gesundheitsdaten |
+| Tagesfelder | Beschwerden auf einer Skala, Einnahmen (Anzahl), Trinkmenge, Messwerte (Blutdruck, Gewicht, Blutzucker …), Texte zu Themen wie Ernährung | **ja** — Gesundheitsdaten |
 | Nachrichten | Text zwischen Patient und Therapeut | **ja** |
 | Technische Daten | Gerätekennung, Zeitstempel, Protokolle | nein |
 

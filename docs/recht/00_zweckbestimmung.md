@@ -70,9 +70,12 @@ Medikaments, Trinkmenge, Texte zur Ernährung. Das ist Dokumentation wie die Not
 | „Ibu 400 × 2 heute“, „400 · 9 Stück in 4 Wochen“ | „Höchstdosis erreicht“, „zu viel Ibuprofen“ |
 | „Schmerz Knie 3“, Linie über die Zeit | „Schmerz steigt — Arzt aufsuchen“, Trendpfeil als Urteil |
 | Vorschläge zum Anlegen („Schmerz“, „Medikament“) | Erinnerung an Einnahmen, Grenzlinien, Ampelfarben |
+| „Blutdruck 128/82 mmHg“, Linie je Teil über die Zeit, Mittel des Tages (Messwert, 28.10.2026) | „Blutdruck erhöht“, Zielbereich, Einordnung nach Leitlinie, Erinnerung ans Messen |
 
 Die Vorschläge „Schmerz“ und „Medikament“ heißen so, weil die Person ihre Felder selbst
-benennt und wählt; die App wertet keinen Wert aus. **Offen** (Katalog P68): ob diese
+benennt und wählt; die App wertet keinen Wert aus. Die „von/bis“-Grenzen eines Messworts
+(Blutdruck 30–300 mmHg) fangen Tippfehler ab — sie sind keine Grenzwerte und werden nie
+als solche benannt oder gefärbt. **Offen** (Katalog P68): ob diese
 Vorschläge in der Solo-Edition so bleiben dürfen oder neutral heißen sollen — vor einer
 Veröffentlichung im Store mit der Beschreibung dort abgleichen.
 

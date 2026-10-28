@@ -3,11 +3,15 @@
 - **Liste** `/einstellungen/tagesfelder`: oben die aktiven in der Reihenfolge unter Heute
   (↑ ↓ ordnen um), der Schalter schaltet aus — „Ausgeschaltet“ steht darunter und kommt
   mit dem Schalter zurück. Antippen bearbeitet, lang drücken löscht.
-- **Formular** `/einstellungen/tagesfelder/<id>` bzw. `…/neu`: oben Vorschläge (nur beim
-  Anlegen; sie füllen das Formular), darunter Name, Art, Einzelheiten der Art (Bereich,
-  Einheit, Schnellknöpfe), Varianten und „wie oft“. Die Art ist gesperrt, sobald es Werte
-  gibt; alte Werte zeigen sich weiter mit ihrer Spec-Kopie. Speichern und ✕ stehen in der
-  Titelleiste, Zurück speichert (`components/zurueck.py`).
+- **Formular** `/einstellungen/tagesfelder/<id>` bzw. `…/neu`: oben „Vorlage wählen …“ (nur
+  beim Anlegen; das Blatt `components/tagesfeld_vorlagen.py` füllt das Formular), darunter
+  Name, Art, Einzelheiten der Art (Bereich, Einheit, Schnellknöpfe, beim Messwert die Teile),
+  Varianten, „wie oft“ und der Tageswert. Die Art ist gesperrt, sobald es Werte gibt; alte
+  Werte zeigen sich weiter mit ihrer Spec-Kopie. Speichern und ✕ stehen in der Titelleiste,
+  Zurück speichert (`components/zurueck.py`). Das Namensfeld holt die Tastatur nur beim
+  ersten Aufbau (Ben, 28.10.2026: die Art-Knöpfe durchklicken, ohne sie wegzutippen).
+- **Standardfelder** (Ben, 28.10.2026): unten in der Liste die gelöschten Standardfelder
+  (Blutdruck) mit „Wiederherstellen“ (`TagesfeldRepo.wiederherstellen`).
 - **Löschen** fragt nach drei Wegen (B3): nur ausschalten, löschen und die Einträge
   behalten (Verlauf, Kalender, Tagebuch zeigen sie weiter) oder mit allen Einträgen löschen
   — danach „Rückgängig“.
@@ -17,7 +21,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import flet as ft
@@ -30,6 +34,7 @@ from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.karte import hinweis
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.tagesfeld_vorlagen import vorlagen_blatt
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
 
@@ -287,7 +292,55 @@ def tagesfelder_view(page: Any, state: AppState) -> ft.View:
                     "Verlauf, Kalender und Tagebuch."
                 )
             )
+        geloeschte = state.tagesfelder.standard_geloeschte(state.profil.id)
+        if geloeschte:
+            ergebnis.append(_klein("STANDARDFELDER"))
+            ergebnis.extend(standard_zeile(v, f) for v, f in geloeschte)
+            ergebnis.append(
+                hinweis(
+                    "Standardfelder bringt die App mit. Gelöschte legt ein Update nicht wieder "
+                    "an — hier holst du sie zurück, mit ihren Einträgen."
+                )
+            )
         return ergebnis
+
+    def wiederhersteller(v: tf.Vorschlag) -> Callable[[], None]:
+        def handler() -> None:
+            feld = state.tagesfelder.wiederherstellen(v, state.profil.id)
+            page.show_dialog(ft.SnackBar(ft.Text(f"„{feld.name}“ steht wieder unter Heute.")))
+            zeichnen()
+
+        return handler
+
+    def standard_zeile(v: tf.Vorschlag, f: tf.Tagesfeld | None) -> ft.Control:
+        if f is not None and f.deleted_at is not None:
+            unter = f"gelöscht am {f.deleted_at.astimezone():%d.%m.%Y} · " + _umfang_text(
+                state.tageswerte.umfang(f.id)
+            )
+        else:
+            unter = "nicht angelegt"
+        return ft.Container(
+            bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
+            border_radius=14,
+            padding=ft.Padding.only(left=14, right=8, top=6, bottom=6),
+            content=ft.Row(
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Column(
+                        spacing=0,
+                        tight=True,
+                        expand=True,
+                        controls=[
+                            ft.Text(v.name, size=15, weight=ft.FontWeight.W_600, opacity=0.7),
+                            ft.Text(unter, size=12, opacity=0.75),
+                        ],
+                    ),
+                    ft.TextButton(
+                        "Wiederherstellen", icon=ft.Icons.RESTORE, on_click=wiederhersteller(v)
+                    ),
+                ],
+            ),
+        )
 
     spalte.controls = teile()
     return ft.View(
@@ -320,6 +373,12 @@ class _Formular:
     schnell: list[float] = field(default_factory=list)
     varianten: list[str] = field(default_factory=list)
     mehrmals: bool = False
+    #: Messwert: die Teile (Name, Einheit, von, bis, optional)
+    teile: list[tf.Teil] = field(default_factory=list)
+    #: Tageswert — leer: Vorgabe der Art
+    tageswert: str = ""
+    #: Welche Vorlage das Formular gefüllt hat (nur Anzeige)
+    vorlage: str = ""
 
     @classmethod
     def aus(cls, feld: tf.Tagesfeld) -> _Formular:
@@ -334,6 +393,8 @@ class _Formular:
             schnell=list(feld.schnell),
             varianten=feld.varianten,
             mehrmals=feld.mehrmals,
+            teile=tf.teile_lesen(feld.spec) if feld.art == tf.MESSWERT else [],
+            tageswert=feld.tageswert,
         )
 
     def stand(self) -> tuple[Any, ...]:
@@ -347,6 +408,8 @@ class _Formular:
             tuple(self.schnell),
             tuple(self.varianten),
             self.mehrmals,
+            tuple(self.teile),
+            self.tageswert,
         )
 
 
@@ -392,6 +455,17 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
             if schritt <= 0 or schritt > bis - von:
                 return None, "Der Schritt passt nicht in den Bereich."
         einheit = form.einheit.strip() or ("ml" if form.art == tf.MENGE else "")
+        if form.art == tf.MESSWERT:
+            try:
+                teile = tf.teile_pruefen(form.teile)
+            except ValueError as e:
+                return None, str(e)
+            basis = (
+                tf.mit_teilen(vorhanden.spec, teile)
+                if vorhanden is not None and vorhanden.art == form.art
+                else tf.spec_bauen(tf.MESSWERT, teile=teile)
+            )
+            return tf.mit_varianten(basis, form.varianten), None
         if vorhanden is not None and vorhanden.art == form.art:
             spec = tf.mit_angaben(
                 vorhanden.spec,
@@ -436,6 +510,7 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
         feld.name = name
         feld.spec = spec
         feld.mehrmals = form.mehrmals
+        feld.tageswert = form.tageswert if form.tageswert in tf.tageswert_optionen(form.art) else ""
         state.tagesfelder.speichern(feld)
         melden("")
         return None
@@ -453,13 +528,28 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
     def vorschlag(v: tf.Vorschlag) -> Callable[[], None]:
         def handler() -> None:
             muster = _Formular.aus(v.feld())
-            for name in ("name", "art", "von", "bis", "schritt", "einheit", "schnell", "varianten"):
+            for name in (
+                "name",
+                "art",
+                "von",
+                "bis",
+                "schritt",
+                "einheit",
+                "schnell",
+                "varianten",
+                "teile",
+                "tageswert",
+            ):
                 setattr(form, name, getattr(muster, name))
             form.mehrmals = v.mehrmals
+            form.vorlage = v.name
             melden("")
             zeichnen()
 
         return handler
+
+    def vorlagen_oeffnen(_e: object = None) -> None:
+        page.show_dialog(vorlagen_blatt(page, lambda v: vorschlag(v)()))
 
     def textfeld(attr: str, label: str, **kw: Any) -> ft.TextField:
         def geaendert(e: ft.Event[ft.TextField]) -> None:
@@ -475,15 +565,18 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
                 form.art = art
                 form.schnell = list({tf.ANZAHL: [1], tf.MENGE: [250], tf.DAUER: [600]}.get(art, []))
                 form.mehrmals = tf.vorgabe_mehrmals(art)
+                form.tageswert = ""
                 if art == tf.MENGE and not form.einheit:
                     form.einheit = "ml"
+                if art == tf.MESSWERT and not form.teile:
+                    form.teile = [tf.Teil("Wert", form.einheit.strip())]
                 zeichnen()
 
             return handler
 
         knoepfe: list[ft.Control] = [
             ft.Container(
-                col=4,
+                col=3,
                 height=40,
                 border_radius=10,
                 alignment=ft.Alignment.CENTER,
@@ -547,6 +640,8 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
                 )
             ]
         teile: list[ft.Control] = []
+        if form.art == tf.MESSWERT:
+            return [teile_kasten()]
         if form.art in (tf.ANZAHL, tf.MENGE):
             teile.append(
                 kasten(
@@ -563,6 +658,93 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
         if form.art in tf.SUMMIERT:
             teile.append(schnell_kasten())
         return teile
+
+    def teile_kasten() -> ft.Control:
+        """Messwert: ein bis drei Teile — Name, Einheit, von–bis, ab dem zweiten „optional“."""
+
+        def setzer(i: int, attr: str) -> Callable[[ft.Event[ft.TextField]], None]:
+            def handler(e: ft.Event[ft.TextField]) -> None:
+                text = (e.control.value or "").strip()
+                wert: Any = text
+                if attr in ("von", "bis"):
+                    try:
+                        wert = float(text.replace(",", ".")) if text else None
+                    except ValueError:
+                        return
+                form.teile[i] = replace(form.teile[i], **{attr: wert})
+
+            return handler
+
+        def optional_setzer(i: int) -> Callable[[ft.Event[ft.Checkbox]], None]:
+            def handler(e: ft.Event[ft.Checkbox]) -> None:
+                form.teile[i] = replace(form.teile[i], optional=bool(e.control.value))
+
+            return handler
+
+        def entferner(i: int) -> Callable[[], None]:
+            def handler() -> None:
+                del form.teile[i]
+                zeichnen()
+
+            return handler
+
+        def hinzu(_e: object = None) -> None:
+            if len(form.teile) >= tf.TEILE_MAX:
+                melden(f"Höchstens {tf.TEILE_MAX} Teile.")
+                return
+            form.teile.append(tf.Teil(f"Teil {len(form.teile) + 1}", form.teile[-1].einheit))
+            zeichnen()
+
+        zeilen: list[ft.Control] = []
+        for i, t in enumerate(form.teile):
+            felder: list[ft.Control] = [
+                ft.TextField(
+                    label="Name", value=t.name, width=130, dense=True, on_change=setzer(i, "name")
+                ),
+                ft.TextField(
+                    label="Einheit",
+                    value=t.einheit,
+                    width=80,
+                    dense=True,
+                    on_change=setzer(i, "einheit"),
+                ),
+                ft.TextField(
+                    label="von",
+                    value="" if t.von is None else tf.zahl(t.von),
+                    width=70,
+                    dense=True,
+                    keyboard_type=ft.KeyboardType.NUMBER,
+                    on_change=setzer(i, "von"),
+                ),
+                ft.TextField(
+                    label="bis",
+                    value="" if t.bis is None else tf.zahl(t.bis),
+                    width=70,
+                    dense=True,
+                    keyboard_type=ft.KeyboardType.NUMBER,
+                    on_change=setzer(i, "bis"),
+                ),
+            ]
+            if i > 0:
+                felder.append(
+                    ft.Checkbox(label="optional", value=t.optional, on_change=optional_setzer(i))
+                )
+            if len(form.teile) > 1:
+                felder.append(
+                    ft.IconButton(ft.Icons.CLOSE, tooltip="Teil entfernen", on_click=entferner(i))
+                )
+            zeilen.append(ft.Row(wrap=True, spacing=6, run_spacing=6, controls=felder))
+        if len(form.teile) < tf.TEILE_MAX:
+            zeilen.append(
+                ft.Row(controls=[ft.TextButton("Teil", icon=ft.Icons.ADD, on_click=hinzu)])
+            )
+        zeilen.append(
+            hinweis(
+                "Ein Messwert addiert sich nicht — jede Messung steht für sich. „von/bis“ fängt "
+                "nur Tippfehler ab; die App bewertet keinen Wert."
+            )
+        )
+        return kasten("Teile", "zusammengehörige Werte, etwa systolisch / diastolisch", *zeilen)
 
     def schnell_kasten() -> ft.Control:
         f = tf.spec_bauen(form.art).fields[0]
@@ -661,43 +843,83 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
         def gewechselt(e: ft.Event[ft.SegmentedButton]) -> None:
             if e.control.selected:
                 form.mehrmals = e.control.selected[0] == "mehrmals"
+                zeichnen()
 
-        return ft.Column(
-            spacing=6,
-            controls=[
-                ft.Text("Wie oft", size=14, weight=ft.FontWeight.W_600),
-                ft.SegmentedButton(
-                    selected=["mehrmals" if form.mehrmals else "einmal"],
-                    segments=[
-                        ft.Segment(value="einmal", label=ft.Text("einmal am Tag")),
-                        ft.Segment(value="mehrmals", label=ft.Text("mehrmals mit Uhrzeit")),
-                    ],
-                    on_change=gewechselt,
-                ),
-            ],
-        )
+        def tageswert_gewechselt(e: ft.Event[ft.SegmentedButton]) -> None:
+            if e.control.selected:
+                gewaehlt = str(e.control.selected[0])
+                form.tageswert = "" if gewaehlt == tf.tageswert_vorgabe(form.art) else gewaehlt
+
+        teile: list[ft.Control] = [
+            ft.Text("Wie oft", size=14, weight=ft.FontWeight.W_600),
+            ft.SegmentedButton(
+                selected=["mehrmals" if form.mehrmals else "einmal"],
+                segments=[
+                    ft.Segment(value="einmal", label=ft.Text("einmal am Tag")),
+                    ft.Segment(value="mehrmals", label=ft.Text("mehrmals mit Uhrzeit")),
+                ],
+                on_change=gewechselt,
+            ),
+        ]
+        # Von „mehrmals“ auf „einmal“ mit Werten (Plan §5, Punkt 5): sagen, was das heißt
+        if vorhanden is not None and vorhanden.mehrmals and not form.mehrmals:
+            n = state.tageswerte.tage_mit_mehreren(vorhanden.id)
+            if n:
+                teile.append(
+                    hinweis(
+                        f"An {n} {'Tag' if n == 1 else 'Tagen'} gibt es mehrere Einträge — sie "
+                        "bleiben alle; unter Heute gilt dann der Tageswert, das Blatt zeigt sie."
+                    )
+                )
+        optionen = tf.tageswert_optionen(form.art)
+        if optionen and form.mehrmals:
+            gewaehlt = (
+                form.tageswert if form.tageswert in optionen else tf.tageswert_vorgabe(form.art)
+            )
+            teile.extend(
+                [
+                    ft.Text("Tageswert", size=14, weight=ft.FontWeight.W_600),
+                    ft.Text(
+                        "Wie aus mehreren Einträgen eines Tages einer wird — unter Heute, im "
+                        "Tagebuch, in der Kurve. Die Einträge selbst bleiben.",
+                        size=12,
+                        opacity=0.7,
+                    ),
+                    ft.SegmentedButton(
+                        selected=[gewaehlt],
+                        segments=[
+                            ft.Segment(value=k, label=ft.Text(tf.TAGESWERT_NAMEN[k]))
+                            for k in optionen
+                        ],
+                        on_change=tageswert_gewechselt,
+                    ),
+                ]
+            )
+        return ft.Column(spacing=6, controls=teile)
+
+    #: Die Tastatur nur beim ersten Aufbau — nicht nach jedem Tipp auf eine Art (Ben, 28.10.)
+    erster_aufbau = {"ja": True}
 
     def teile() -> list[ft.Control]:
         ergebnis: list[ft.Control] = []
         if neu:
             ergebnis.append(
-                ft.Column(
-                    spacing=6,
+                ft.Row(
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
-                        _klein("VORSCHLÄGE"),
-                        ft.Row(
-                            wrap=True,
-                            spacing=6,
-                            run_spacing=6,
-                            controls=[
-                                ft.Chip(label=ft.Text(v.name), on_click=vorschlag(v))
-                                for v in tf.VORSCHLAEGE
-                            ],
+                        ft.FilledTonalButton(
+                            "Vorlage wählen …", icon=ft.Icons.LIST_ALT, on_click=vorlagen_oeffnen
+                        ),
+                        ft.Text(
+                            f"Vorlage: {form.vorlage}" if form.vorlage else "", size=12, opacity=0.7
                         ),
                     ],
                 )
             )
-        ergebnis.append(textfeld("name", "Name", autofocus=neu, max_length=tf.NAME_MAX))
+        fokus = neu and erster_aufbau["ja"]
+        erster_aufbau["ja"] = False
+        ergebnis.append(textfeld("name", "Name", autofocus=fokus, max_length=tf.NAME_MAX))
         ergebnis.append(art_wahl())
         ergebnis.extend(angaben())
         ergebnis.append(varianten_kasten())

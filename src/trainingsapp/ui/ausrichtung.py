@@ -26,6 +26,9 @@ from typing import Any, Final
 
 import flet as ft
 
+from trainingsapp.ui.wach import QUER as WACH_QUER
+from trainingsapp.ui.wach import wach_setzen
+
 HOCHKANT: Final = "hochkant"
 FREI: Final = "frei"
 QUER: Final = "quer"
@@ -81,6 +84,7 @@ def anwenden(page: Any, state: Any, modus: str) -> None:
     if getattr(state, "ausrichtung", None) == modus:
         return
     state.ausrichtung = modus
+    wach_pruefen(page, state, modus)
     if getattr(page, "platform", None) not in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS):
         return
 
@@ -89,6 +93,27 @@ def anwenden(page: Any, state: Any, modus: str) -> None:
             await page.set_allowed_device_orientations(_ORIENTIERUNGEN[modus])
 
     page.run_task(setzen)
+
+
+def wach_pruefen(page: Any, state: Any, modus: str | None = None) -> None:
+    """Im Querformat bleibt der Bildschirm an (Ben, 28.10.2026: „Wenn das Querformat
+    aktiviert ist, brauche ich die Always-on-Funktion“): im Live-Vollbild immer, in den
+    Ansichten, die drehen dürfen, sobald sie quer liegen — über `ui.wach` mit dem Grund
+    „quer“, damit das Ende des Timers ihn nicht wegnimmt. Beim Drehen ruft `app.py` nach.
+    Ohne Dienst (Tests) nichts."""
+    if getattr(state, "wach", None) is None:
+        return
+    modus = modus or getattr(state, "ausrichtung", None) or HOCHKANT
+    quer = modus == QUER or (modus == FREI and querformat(page))
+    if getattr(state, "wach_quer", None) == quer:
+        return
+    state.wach_quer = quer
+
+    async def setzen() -> None:
+        await wach_setzen(state, quer, WACH_QUER)
+
+    with contextlib.suppress(Exception):
+        page.run_task(setzen)
 
 
 def querformat(page: Any) -> bool:
@@ -102,4 +127,4 @@ def querformat(page: Any) -> bool:
     return bool(breite and hoehe and breite > hoehe)
 
 
-__all__ = ["FREI", "HOCHKANT", "QUER", "anwenden", "modus_fuer_route", "querformat"]
+__all__ = ["FREI", "HOCHKANT", "QUER", "anwenden", "modus_fuer_route", "querformat", "wach_pruefen"]

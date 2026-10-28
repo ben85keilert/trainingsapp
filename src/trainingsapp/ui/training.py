@@ -23,14 +23,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from hrv_core.ereignisse import metadaten_schreiben
 from hrv_core.korrektur import Korrigiert, korrektur_laden
-from hrv_core.recording import Recording
+from hrv_core.recording import Recording, laden
 from hrv_core.regeln import Korrekturregeln
 
 from trainingsapp.config import (
@@ -39,6 +41,7 @@ from trainingsapp.config import (
     messungenverzeichnis,
     streckenverzeichnis,
 )
+from trainingsapp.core import abschnitte as eigene_abschnitte
 from trainingsapp.core.bewegung import HOEHE_BEZUG, Messungsbezug, zip_pfad
 from trainingsapp.core.bewegung import kopf as bewegung_kopf
 from trainingsapp.core.bewegung import versatz as bewegung_versatz
@@ -48,6 +51,16 @@ from trainingsapp.core.hrv_export import zugehoerige_dateien
 from trainingsapp.core.hrv_training import hf_je_zeit
 from trainingsapp.core.laufend import uhr
 from trainingsapp.core.models import Exercise, HrvRecording, Strecke, lokaler_tag
+from trainingsapp.core.nachlauf import (
+    MINDESTDAUER_S,
+    Nachlauf,
+    ereignisse_kuerzen,
+    ist_einheit_ende,
+    nachlauf,
+    notiz_verschieben,
+    punkte_bis,
+    sidecar_kuerzen,
+)
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
 from trainingsapp.core.strecke import (
     GEHEN,
@@ -259,6 +272,152 @@ def einheit_eintragen(
         hrv_recording_id=hrv_recording_id,
         einheit_id=e.id,
     )
+
+
+# ---------------------------------------------------------------------------
+# Ende kürzen — GPS lief weiter, als das Training schon vorbei war (Ben, 28.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def strecken_punkte(strecke: Strecke) -> list[Punkt]:
+    """Die Ortungen eines Trainings aus seiner Datei — leer ohne GPS oder ohne Datei."""
+    if not strecke.file_path:
+        return []
+    pfad = streckenverzeichnis() / strecke.file_path
+    return jsonl_lesen(pfad) if pfad.exists() else []
+
+
+def nachlauf_der_strecke(strecke: Strecke, *, mindestens_s: float | None = None) -> Nachlauf | None:
+    """Der Stillstand am Ende eines gespeicherten Trainings (`core.nachlauf.nachlauf`) —
+    ``mindestens_s`` ``None``: die Vorgabe (fragen beim Speichern), ``0``: immer, sobald es
+    je Bewegung gab (der Knopf „Ende kürzen“ in der Auswertung)."""
+    punkte = strecken_punkte(strecke)
+    if mindestens_s is None:
+        return nachlauf(punkte, strecke.sportart)
+    return nachlauf(punkte, strecke.sportart, mindestens_s=mindestens_s)
+
+
+@dataclass(frozen=True, slots=True)
+class Gekuerzt:
+    """Was `training_kuerzen` getan hat — für die Meldung."""
+
+    strecke: Strecke
+    #: so viele Sekunden Ortungen sind weg
+    entfernt_s: float
+    #: was mit der HRV-Messung geschah (leer: keine)
+    hrv: str = ""
+
+
+def training_kuerzen(state: Any, strecke: Strecke, bis_s: float, *, lauf: Any = None) -> Gekuerzt:
+    """Das Training bei ``bis_s`` Sekunden nach der ersten Ortung enden lassen.
+
+    Ben: „nach hinten raus einen Crop setzen, um die Teile, wo es keine Änderung mehr gab,
+    aus der Aufzeichnung rauszunehmen. Wichtig dabei ist vor allem das korrekte Setzen der
+    Notizen in der HRV-Messung.“ Der Reihe nach:
+
+    1. **Streckendatei**: nur noch die Ortungen bis zum neuen Ende (atomar neu geschrieben,
+       Kopf bleibt) — die entfernten Ortungen sind weg (GPS-Daten, nie geteilt, kein Backup).
+    2. **Zeile** ``strecke``: Ende, Dauer, Bewegungszeit, Strecke und Höhe neu aus den
+       verbliebenen Ortungen (`core.strecke.rechnen`).
+    3. **Tagebucheintrag**: eine Korrektur (`eintrag_korrigieren`, der alte bleibt in der
+       Kette) mit neuer Dauer und Strecke, Ende wie die Zeile.
+    4. **HRV-Messung** (`core.nachlauf`): „‹Einheit›: Ende“ rückt auf das neue Ende, km-Notizen
+       danach fallen weg, eigene Notizen bleiben; die Abschnitte im Sidecar enden dort; endete
+       die Messung mit dem Training, wird die Auswertung dort zugeschnitten (Sidecar-Crop,
+       mit „Ganze Messung“ aufzuheben). Läuft sie noch (``lauf``), rückt die Notiz in der
+       laufenden Aufnahme — Sidecar und Datei folgen beim Speichern.
+
+    Die Zeitleiste der Einheit bleibt, wie sie war: Sie dokumentiert, was geschah.
+
+    Raises:
+        ValueError: ohne Datei, zu kurz, oder es gäbe nichts zu kürzen.
+    """
+    if not strecke.file_path:
+        raise ValueError("Dieses Training hat keine Ortungen.")
+    pfad = streckenverzeichnis() / strecke.file_path
+    punkte = jsonl_lesen(pfad) if pfad.exists() else []
+    if not punkte:
+        raise ValueError("Die Streckendatei ist leer.")
+    if bis_s < MINDESTDAUER_S:
+        raise ValueError(f"Kürzer als {uhr(MINDESTDAUER_S)} geht nicht.")
+    bis_t = punkte[0].t + bis_s
+    neu = punkte_bis(punkte, bis_t)
+    if len(neu) < 2:
+        raise ValueError("So bliebe keine Strecke übrig.")
+    if neu[-1].t >= punkte[-1].t:
+        raise ValueError("Das Ende liegt schon dort — nichts zu kürzen.")
+    entfernt = punkte[-1].t - neu[-1].t
+    # 1. Datei
+    kopf = kopf_lesen(pfad)
+    tmp = pfad.with_name(pfad.name + ".neu")
+    with StreckenSchreiber(tmp, kopf=kopf) as schreiber:
+        for p in neu:
+            schreiber.schreiben(p)
+    os.replace(tmp, pfad)
+    # 2. Zeile
+    r = rechnen(neu, strecke.sportart)
+    ende_alt = strecke.ended_at or strecke.started_at + timedelta(seconds=strecke.dauer_s)
+    strecke.ended_at = ende_alt - timedelta(seconds=entfernt)
+    strecke.dauer_s = max(strecke.dauer_s - entfernt, r.dauer_s, 0.0)
+    strecke.bewegt_s = min(r.bewegt_s, strecke.dauer_s)
+    strecke.distanz_m = r.distanz_m
+    strecke.hoehe_auf_m, strecke.hoehe_ab_m = r.hoehe_auf_m, r.hoehe_ab_m
+    # 3. Tagebuch
+    if strecke.session_entry_id and (
+        alt := state.sitzungen.eintrag_laden(strecke.session_entry_id)
+    ):
+        ergebnis = {k: v for k, v in alt.result.items() if k != "distance"}
+        ergebnis["duration"] = round(strecke.dauer_s)
+        if strecke.distanz_m >= 10:
+            ergebnis["distance"] = round(strecke.distanz_m)
+        korrektur = state.sitzungen.eintrag_korrigieren(alt.id, ergebnis, ended_at=strecke.ended_at)
+        strecke.session_entry_id = korrektur.id
+    state.strecken.kuerzen(strecke)
+    # 4. HRV
+    hrv = _hrv_kuerzen(state, strecke, bis_t, lauf)
+    return Gekuerzt(strecke, entfernt, hrv)
+
+
+def _hrv_kuerzen(state: Any, strecke: Strecke, bis_t: float, lauf: Any) -> str:
+    """Notizen und Abschnitte der HRV-Messung auf das neue Ende — siehe `training_kuerzen`."""
+    bezug = hrv_bezug(state, strecke)
+    if bezug is None:
+        return ""
+    wand = bezug.ortung_zu_wand(bis_t, strecke.started_at)
+    if wand is None:
+        return ""
+    einheit_id = strecke.einheit_id
+    aufnahme = getattr(lauf, "aufnahme", None) if lauf is not None else None
+    if aufnahme is not None and bezug.aufnahme is None:
+        # Die Messung läuft noch: Die Notiz rückt in der Aufnahme — dieselbe Notiz hält
+        # `Messlauf._grenzen`, das Sidecar beim Speichern folgt ihr von selbst
+        getroffen = 0
+        for e in aufnahme.ereignisse:
+            if ist_einheit_ende(e, einheit_id):
+                e.update(notiz_verschieben(e, wand, aufnahme.beats, aufnahme.start_utc))
+                getroffen += 1
+        return "Notiz „Ende“ in der laufenden Messung verschoben" if getroffen else ""
+    if not bezug.pfad.exists():
+        return ""
+    rec = laden(bezug.pfad)
+    neu = ereignisse_kuerzen(
+        rec.ereignisse,
+        bis_wand=wand,
+        beats=rec.beats,
+        start_utc=rec.start_utc,
+        einheit_id=einheit_id,
+    )
+    sha1 = metadaten_schreiben(bezug.pfad, ereignisse=neu)
+    if bezug.aufnahme is not None:
+        state.hrv.sha1_setzen(bezug.aufnahme.id, sha1)
+    eigene = {k for e in neu if (k := eigene_abschnitte.kennung_von(e)) is not None}
+    mit_training = strecke.hrv_recording_id is not None
+    zugeschnitten = sidecar_kuerzen(
+        bezug.pfad, rec, wand, zuschneiden=mit_training, eigener=lambda k: k in eigene
+    )
+    if zugeschnitten and mit_training:
+        return "HRV-Notizen verschoben, Auswertung dort zugeschnitten"
+    return "HRV-Notizen verschoben"
 
 
 # ---------------------------------------------------------------------------
@@ -669,6 +828,7 @@ def gpx_packen(auftraege: Iterable[GpxAuftrag]) -> dict[str, bytes]:
 
 __all__ = [
     "Bewegungsauftrag",
+    "Gekuerzt",
     "GpxAuftrag",
     "HrvBezug",
     "Streckendatei",
@@ -686,9 +846,12 @@ __all__ = [
     "hrv_laden",
     "lauftext",
     "messungsbezuege",
+    "nachlauf_der_strecke",
     "ortung_zu_wand",
     "sportart_aendern",
+    "strecken_punkte",
     "training_eintragen",
+    "training_kuerzen",
     "uebung_fuer",
     "verwaiste_uebernehmen",
     "zeitleiste_und_versatz",

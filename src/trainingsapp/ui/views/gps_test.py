@@ -47,6 +47,7 @@ from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.timer import ton_spielen
+from trainingsapp.ui.wach import GPS_TEST, wach_setzen
 
 #: Wählbare GPS-Intervalle der Strecke (s)
 INTERVALLE = (1.0, 3.0, 10.0)
@@ -222,10 +223,7 @@ _uhr = minuten
 
 
 async def _wach(state: AppState, an: bool) -> None:
-    if state.wach is None:
-        return
-    with contextlib.suppress(Exception):
-        await (state.wach.enable() if an else state.wach.disable())
+    await wach_setzen(state, an, GPS_TEST)
 
 
 async def _signal(state: AppState) -> None:

@@ -24,6 +24,7 @@ from trainingsapp.core.timer import (
     signal,
 )
 from trainingsapp.ui import einheit as einheit_ui
+from trainingsapp.ui import wach
 
 if TYPE_CHECKING:
     from trainingsapp.ui.state import AppState
@@ -78,11 +79,8 @@ async def _melden(state: AppState, art: str, signale: TimerSignale, klang: str) 
 
 
 async def wach_setzen(state: AppState, an: bool) -> None:
-    """Bildschirm anlassen (oder wieder freigeben) — still, wo es nicht geht."""
-    if state.wach is None:
-        return
-    with contextlib.suppress(Exception):
-        await (state.wach.enable() if an else state.wach.disable())
+    """Bildschirm anlassen (oder wieder freigeben), Grund „Timer“ (`ui.wach`)."""
+    await wach.wach_setzen(state, an, wach.TIMER)
 
 
 def _in_messung(state: AppState, marken: list[Marke], signale: TimerSignale) -> None:

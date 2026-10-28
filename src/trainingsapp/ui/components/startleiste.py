@@ -45,6 +45,7 @@ from trainingsapp.devices.plan_ablauf import PAUSE, PlanAblaufBaustein
 from trainingsapp.devices.strecke_baustein import StreckeBaustein
 from trainingsapp.ui import einheit as ablauf
 from trainingsapp.ui.components.fortschritt import Fortschrittsleiste
+from trainingsapp.ui.components.kacheln import leisten_werte
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.tabellen import (
     intervall_tabelle,
@@ -178,13 +179,17 @@ def _selbst_auffrischend(
 # ---------------------------------------------------------------------------
 
 
-def startleiste(page: Any, state: AppState, *, haupt: bool = False) -> ft.Container | None:
+def startleiste(
+    page: Any, state: AppState, *, haupt: bool = False, live: bool = False
+) -> ft.Container | None:
     """Die feste Leiste unter der Titelleiste — ``None``, wenn nichts bereitsteht oder läuft
     (die Ansicht bleibt unverändert). Bereitgestellt die Infoleiste, im Lauf die Laufleiste;
     was außerhalb der Einheit läuft, steht mit darin (Moduldocstring).
 
     ``haupt``: Die Hauptansicht liegt oben. Auf „Heute“ steht dann im Reiter „Einheit“
     keine Leiste (dort steht alles) und im Reiter „Heute“ nur, was läuft.
+    ``live``: Das Live-Vollbild liegt oben — die Laufleiste zeigt die aktuellen Werte groß
+    (`_werte_zeile`, Ben, 28.10.2026).
     """
     e = ablauf.aktuell(state)
     if e is None and not ablauf.ausserhalb(state):
@@ -230,7 +235,7 @@ def startleiste(page: Any, state: AppState, *, haupt: bool = False) -> ft.Contai
         wo, aussen = stand["schluessel"][0], stand["schluessel"][1]
         box.visible = bool(wo or aussen)
         if e is not None and wo == "lauf":
-            _laufleiste(page, state, e, box, stand)
+            _laufleiste(page, state, e, box, stand, live=live)
         elif e is not None and wo == "info":
             _infoleiste(page, state, e, box, stand)
         elif aussen:
@@ -361,17 +366,23 @@ def _lauf_knoepfe(page: Any, state: AppState, e: Any) -> list[ft.Control]:
     return knoepfe
 
 
-def _laufleiste(page: Any, state: AppState, e: Any, box: ft.Container, stand: dict) -> None:
-    """Zeit und Abschnitt, darunter die Teile — und was außerhalb läuft —, ⏸ ⏹ (Skizze 17)."""
+def _laufleiste(
+    page: Any, state: AppState, e: Any, box: ft.Container, stand: dict, *, live: bool = False
+) -> None:
+    """Zeit und Abschnitt, darunter die Teile — und was außerhalb läuft —, ⏸ ⏹ (Skizze 17).
+    Im Live-Vollbild (``live``) dazwischen die aktuellen Werte groß (`_werte_zeile`)."""
     box.bgcolor = ft.Colors.PRIMARY_CONTAINER
     box.padding = ft.Padding.only(left=12, right=6, top=8, bottom=8)
     zeile1 = ft.Text(size=15, weight=ft.FontWeight.W_700, color=ft.Colors.ON_PRIMARY_CONTAINER)
     zeile2 = ft.Text(size=12, color=ft.Colors.ON_PRIMARY_CONTAINER)
+    werte = _werte_zeile(state) if live else None
 
     def texte() -> None:
         oben, unten = ablauf.laufzeilen(e)
         aussen = [b.kurz for b in ablauf.ausserhalb(state)]
         zeile1.value, zeile2.value = oben, " · ".join(t for t in (unten, *aussen) if t)
+        if werte is not None:
+            werte.fuellen()
 
     texte()
     stand["texte"] = texte
@@ -380,10 +391,58 @@ def _laufleiste(page: Any, state: AppState, e: Any, box: ft.Container, stand: di
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         controls=[
             ft.Icon(ft.Icons.FIBER_MANUAL_RECORD, size=14, color=ft.Colors.RED_700),
-            ft.Column(spacing=0, expand=True, tight=True, controls=[zeile1, zeile2]),
+            ft.Column(spacing=0, expand=werte is None, tight=True, controls=[zeile1, zeile2]),
+            *([werte.control] if werte is not None else []),
             *_lauf_knoepfe(page, state, e),
         ],
     )
+
+
+class _werte_zeile:
+    """Die aktuellen Werte im Live-Vollbild, groß in der Laufleiste (Ben, 28.10.2026):
+    Herzfrequenz, RR bzw. PPI und je dazugeschaltete Kurve ihr Wert — Name klein darüber,
+    so hoch wie die zwei Textzeilen links. Mehr, als nebeneinander passt, rollt."""
+
+    def __init__(self, state: AppState) -> None:
+        self.state = state
+        self.control = ft.Row(spacing=16, expand=True, scroll=ft.ScrollMode.AUTO)
+        self._titel: list[str] = []
+        self._werte: list[ft.Text] = []
+
+    def fuellen(self) -> None:
+        liste = leisten_werte(self.state)
+        titel = [w.titel for w in liste]
+        if titel != self._titel:
+            self._titel = titel
+            self._werte = []
+            spalten: list[ft.Control] = []
+            for w in liste:
+                wert = ft.Text(
+                    size=20,
+                    weight=ft.FontWeight.W_700,
+                    color=w.farbe or ft.Colors.ON_PRIMARY_CONTAINER,
+                    max_lines=1,
+                )
+                self._werte.append(wert)
+                spalten.append(
+                    ft.Column(
+                        spacing=0,
+                        tight=True,
+                        controls=[
+                            ft.Text(
+                                w.titel,
+                                size=10,
+                                opacity=0.75,
+                                max_lines=1,
+                                color=ft.Colors.ON_PRIMARY_CONTAINER,
+                            ),
+                            wert,
+                        ],
+                    )
+                )
+            self.control.controls = spalten
+        for w, text in zip(liste, self._werte, strict=True):
+            text.value = f"{w.wert} {w.einheit}".strip() if not w.grund else w.wert
 
 
 def _punkt(bereiche: list[ablauf.Bereich], groesse: int = 10) -> ft.Control:

@@ -14,10 +14,12 @@ from trainingsapp.core.paketquelle import (
     QUELLE_VORGABE,
     IndexEintrag,
     QuellenFehler,
+    datei_eintrag,
     fremde_identitaet,
     gebundene_quelle,
     index_laden,
     index_lesen,
+    link_lesen,
     paket_laden,
     pruefen,
     quelle_passt,
@@ -220,3 +222,49 @@ def test_vorgabe_besteht_die_eigene_adresspruefung() -> None:
     # Die App bringt die Quelle mit; eine Adresse, die url_pruefen ablehnt, könnte die
     # Person in den Einstellungen nicht wieder eintragen, nachdem sie sie entfernt hat.
     assert QUELLE_VORGABE.startswith("https://") and url_pruefen(QUELLE_VORGABE) is None
+
+
+# ---------------------------------------------------------------------------
+# Datei-Link als Quelle, Links erkennen (Ben, 28.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def test_datei_link_wird_beim_pruefen_wie_ein_index_behandelt() -> None:
+    v1 = paket_json(Paket(id="p1", name="Dehnung", version=1), seed_inhalt().uebungen[:1])
+    v2 = paket_json(Paket(id="p1", name="Dehnung", version=2), seed_inhalt().uebungen[:2])
+    antworten = {"https://x/d.json": v2}
+
+    def laden(url: str) -> bytes:
+        if url not in antworten:
+            raise urllib.error.URLError("unbekannt")
+        return antworten[url]
+
+    eintrag, inhalt = datei_eintrag("https://x/d.json", laden)
+    assert (eintrag.id, eintrag.version, eintrag.quelle_url) == ("p1", 2, "https://x/d.json")
+    assert eintrag.sha256 == hashlib.sha256(v2).hexdigest() and len(inhalt.uebungen) == 2
+    # Installiert aus demselben Link, Version 1 → Update; aus einem Index → nicht
+    alt = Paket(id="p1", name="Dehnung", version=1, quelle="https://x/d.json", quelle_art="datei")
+    ergebnis = pruefen([], [alt], laden)
+    assert [u.eintrag.version for u in ergebnis.updates] == [2] and ergebnis.fehler == []
+    assert paket_laden(ergebnis.updates[0].eintrag, laden).paket.version == 2
+    fremd = Paket(id="p1", name="Dehnung", version=1, quelle="https://x/d.json")  # Index-Bindung
+    assert pruefen([], [fremd], laden).updates == []
+    kaputt = Paket(
+        id="p1", name="Dehnung", version=1, quelle="https://x/weg.json", quelle_art="datei"
+    )
+    assert pruefen([], [kaputt], laden).fehler == ["Dehnung (https://x/weg.json): unbekannt"]
+    assert v1 != v2
+
+
+def test_link_lesen_erkennt_index_und_paket() -> None:
+    datei = paket_json(Paket(id="p1", name="Dehnung", version=1), seed_inhalt().uebungen[:1])
+    roh = _index(_eintrag())
+    antworten = {"https://x/i.json": json.dumps(roh).encode(), "https://x/d.json": datei}
+    art, (name, eintraege) = link_lesen("https://x/i.json", antworten.__getitem__)
+    assert art == "index" and name == "Praxis" and [e.id for e in eintraege] == ["p1"]
+    art, (eintrag, inhalt) = link_lesen("https://x/d.json", antworten.__getitem__)
+    assert art == "paket" and eintrag.quelle_url == "https://x/d.json" and inhalt.paket.id == "p1"
+    with pytest.raises(QuellenFehler):
+        link_lesen("http://unsicher/x.json", antworten.__getitem__)
+    with pytest.raises(QuellenFehler):
+        link_lesen("https://x/t.json", lambda _u: b'{"a": 1}')

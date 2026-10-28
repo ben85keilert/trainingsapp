@@ -319,8 +319,9 @@ class AppState:
     #: Signaltöne (`flet_ton.FletTon`, nur in der gebauten App) und ob sie geladen sind
     ton: Any = None
     toene_geladen: bool = False
-    #: Bildschirm anlassen, solange der Timer läuft (Flet-Dienst `Wakelock`)
+    #: Bildschirm anlassen (Flet-Dienst `Wakelock`) und wer ihn gerade hält (`ui.wach`)
     wach: Any = None
+    wach_gruende: set[str] = field(default_factory=set)
     #: Hochladen (`flet_hochladen.FletHochladen`, nur in der gebauten App, P74) und wer den
     #: Fortschritt des Verkleinerns gerade sehen will (die Seite „Hochladen“)
     hochladen: Any = None
@@ -428,6 +429,13 @@ class AppState:
         sitzungen = SessionRepo(con)
         sitzungen.offen_min = _offen_min(einstellungen)
         profil = cls._aktives_profil(profile, einstellungen)
+        # Standardfelder (Blutdruck) und Paketpläne je Profil nachlegen — Gelöschtes bleibt
+        tagesfelder = TagesfeldRepo(con)
+        paketrepo = PaketRepo(con)
+        for p in profile.alle():
+            tagesfelder.standard_einspielen(p.id)
+            with contextlib.suppress(Exception):  # ein kaputter Paketstand kostet nie den Start
+                paketrepo.plaene_nachlegen(p.id)
         offen = cls._papierkorb_aufraeumen(con, einstellungen)
         strecken = StreckeRepo(con)
         try:
@@ -514,6 +522,8 @@ class AppState:
         """Legt ein Profil an und macht es zum aktiven."""
         profil = Subject(name=name.strip(), birth_year=birth_year)
         self.profile.speichern(profil)
+        self.tagesfelder.standard_einspielen(profil.id)
+        self.pakete.plaene_nachlegen(profil.id)
         return self.profil_wechseln(profil.id)
 
     def profil_loeschen(self, profil_id: str) -> None:

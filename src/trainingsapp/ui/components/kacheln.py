@@ -21,9 +21,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Any
 
 import flet as ft
-from hrv_core.trends import KENNZAHLEN
+from hrv_core.atmung import ATEMUEBUNG, RUHE, kurzgrund
+from hrv_core.trends import KENNZAHLEN, aktuell, atmung_aktuell, titel
+
+from trainingsapp.core.hrv_ansicht import Ansicht
+from trainingsapp.core.hrv_einstellungen import HrvEinstellungen
+from trainingsapp.devices.base import Verbindung
+from trainingsapp.devices.messlauf import Messlauf
+from trainingsapp.ui.components.verlauf import fenster_text
+from trainingsapp.ui.farben import FARBEN
 
 #: Feste Höhen — ein gleichmäßiges Raster statt Kacheln, die je nach Inhalt springen
 HOEHE = 74
@@ -299,6 +308,124 @@ def anzeige(werte: list[KachelWert], darstellung: str) -> ft.Control:
     return raster(werte) if darstellung == "kacheln" else uebersicht(werte)
 
 
+def kachel_werte(
+    lauf: Messlauf,
+    einst: HrvEinstellungen,
+    ansicht: Ansicht,
+    verity: bool,
+    atemuebung_an: Callable[[], object] | None = None,
+    *,
+    puls_allein: bool = False,
+) -> list[KachelWert]:
+    """Die eingestellten Werte der Übersicht mit den aktuellen Live-Werten.
+
+    Werte einer Verlaufskurve rechnen mit deren Fenster — der Wert ist der
+    letzte Punkt der Kurve. Die Atemfrequenz gibt es nur bei deutlicher Atmung;
+    sonst steht der Grund da (bei langsamer Schwingung mit dem Knopf
+    „Atemübung", ``atemuebung_an``). Vom Sensor verworfene Intervalle (Verity
+    Sense) erscheinen von selbst, sobald es welche gibt. Sendet das Gerät nur den
+    Puls (``puls_allein``, `nur_puls`), sagen die übrigen Kacheln das statt eines
+    Grunds, der nicht stimmt (`ohne_intervalle`).
+    """
+    k = lauf.live.kennzahlen()
+    t, rr, naht = lauf.live.verlaufsreihe()
+    modus = ATEMUEBUNG if einst.atemuebung else RUHE
+    gross = set(einst.gross)
+    atmung = None
+    out: list[KachelWert] = []
+    for key in einst.kacheln:
+        art = KACHELN.get(key)
+        if art is None:
+            continue
+        g = key in gross
+        bisher = len(out)
+        if key == "hf":
+            hf = k.hf_bpm if k.hf_bpm is not None else lauf.status.hf_bpm
+            out.append(KachelWert("Herzfrequenz", zahl(hf), "bpm", gross=g))
+        elif key == "rr":
+            out.append(KachelWert("PPI" if verity else "RR", zahl(k.rr_ms), "ms", gross=g))
+        elif key == "artefakte":
+            out.append(
+                KachelWert("Artefakte", str(k.artefakte), zusatz=f"von {k.schlaege}", gross=g)
+            )
+        elif key == "schwankung":
+            out.append(KachelWert(art.titel, zahl(k.schwankung_60s, 1), "bpm", gross=g))
+        elif key == "ulf":
+            out.append(
+                KachelWert(art.titel, "–", "ms²", gross=g, grund="ab 4 h, in der Aufzeichnung")
+            )
+        elif key in ("atemfrequenz", "rsa"):
+            kz = KENNZAHLEN[key]
+            fenster = ansicht.fenster_fuer(key, kz.fenster_s)
+            if atmung is None:
+                atmung = atmung_aktuell(t, rr, fenster, atem_modus=modus)
+            wert = atmung.rate_pro_min if key == "atemfrequenz" else atmung.rsa_bpm
+            grund = "" if atmung.gueltig else kurzgrund(atmung.gruende)
+            aktion = None
+            if key == "atemfrequenz" and atemuebung_an is not None:
+                if einst.atemuebung:
+                    aktion = ("Atemübung aus", atemuebung_an)
+                elif "langsame Schwingung" in grund:
+                    aktion = ("Atemübung", atemuebung_an)
+            out.append(
+                KachelWert(
+                    f"{kz.titel} {fenster_text(fenster)}",
+                    zahl(wert if atmung.gueltig else None, kz.nachkomma),
+                    kz.einheit,
+                    farbe=FARBEN[key],
+                    gross=g,
+                    grund=grund,
+                    aktion=aktion,
+                )
+            )
+        elif art.kennzahl is not None:
+            kz = KENNZAHLEN[art.kennzahl]
+            fenster = ansicht.fenster_fuer(art.kennzahl, kz.fenster_s)
+            wert = (
+                aktuell(t, rr, naht, art.kennzahl, fenster, pnn_ms=ansicht.pnn_ms)
+                if t.size
+                else None
+            )
+            out.append(
+                KachelWert(
+                    f"{titel(art.kennzahl, ansicht.pnn_ms)} {fenster_text(fenster)}",
+                    zahl(wert, kz.nachkomma),
+                    kz.einheit,
+                    farbe=FARBEN[art.kennzahl],
+                    gross=g,
+                )
+            )
+        if puls_allein and key not in PULS_KACHELN and len(out) > bisher:
+            out[-1] = ohne_intervalle(out[-1])
+    if k.verworfen:
+        zusatz = (
+            "vom Sensor · selbst geprüft"
+            if lauf.regeln.selbst_pruefen
+            else f"vom Sensor · von {k.schlaege + k.verworfen}"
+        )
+        out.append(KachelWert("Verworfen", str(k.verworfen), zusatz=zusatz))
+    return out
+
+
+def leisten_werte(state: Any) -> list[KachelWert]:
+    """Die Werte für die Laufleiste im Live-Vollbild (Ben, 28.10.2026: „die aktuellen Werte
+    für Gerätetransmit (RR, HF, PPG) und das, was zusätzlich zur Kurve dazugeschaltet ist,
+    groß und leserlich … in die Titelzeile“): Herzfrequenz, RR bzw. PPI und je gezeigter
+    Verlaufskurve ihr aktueller Wert — mit dem Fenster der Kurve, wie die Kacheln."""
+    lauf = getattr(state, "messlauf", None)
+    if lauf is None or lauf.status.verbindung == Verbindung.GETRENNT:
+        return []
+    ansicht = state.ansicht()
+    kurven = [
+        k for k in (*ansicht.links, *ansicht.rechts) if k in KACHELN and k not in ("hf", "rr")
+    ]
+    einst = replace(
+        state.hrv_einstellungen(), kacheln=["hf", "rr", *dict.fromkeys(kurven)], gross=[]
+    )
+    verity = bool(lauf.profil and lauf.profil.kann("pmd_ppi"))
+    return kachel_werte(lauf, einst, ansicht, verity, puls_allein=lauf.nur_puls())
+
+
 __all__ = [
     "GRUPPEN",
     "KACHELN",
@@ -308,6 +435,8 @@ __all__ = [
     "KachelWert",
     "anzeige",
     "kachel",
+    "kachel_werte",
+    "leisten_werte",
     "ohne_intervalle",
     "raster",
     "uebersicht",

@@ -179,8 +179,18 @@ def test_neue_pakete_und_quellen_fehler(page, state, monkeypatch) -> None:
     assert any("HTTP 404" in t for t in texte(ansicht))
 
 
-def test_quellen_verwalten(page, state) -> None:
+def test_quellen_verwalten(page, state, monkeypatch) -> None:
     state.paketquellen_setzen([])  # von einer leeren Liste aus, unabhängig von der Vorgabe
+    geladen: list[str] = []
+
+    async def link_importieren(_page, _state, url: str) -> None:
+        """Der Link wird geladen und mit Rückfrage eingetragen (`components/paket_link`) —
+        hier nur gemerkt und direkt eingetragen."""
+        geladen.append(url)
+        _state.paketquellen_setzen([*_state.paketquellen(), url])
+
+    monkeypatch.setattr(updates, "link_importieren", link_importieren)
+    page.run_task = lambda f, *a: asyncio.run(f(*a))
     ansicht = updates.updates_view(page, state, ft.UrlLauncher())
     feld = next(c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.TextField))
     plus = next(
@@ -194,6 +204,7 @@ def test_quellen_verwalten(page, state) -> None:
     assert feld.error and state.paketquellen() == []
     feld.value = "https://sicher.de/i.json"
     plus.on_click()
+    assert geladen == ["https://sicher.de/i.json"]
     assert state.paketquellen() == ["https://sicher.de/i.json"]
     ansicht = updates.updates_view(page, state, ft.UrlLauncher())
     weg = next(

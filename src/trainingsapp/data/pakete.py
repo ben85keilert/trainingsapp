@@ -64,9 +64,13 @@ from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, Plan
 from ..core.pakete import (
     Paket,
     Paketinhalt,
+    PaketPlan,
     aus_stand,
     kurs_aus_stand,
     kurs_stand,
+    paketplan_aus,
+    plan_id,
+    plan_stand,
     stand,
     zusammenfuehren,
 )
@@ -115,6 +119,9 @@ class Vorschau:
     #: markiert sind — der Import markiert sie (`PaketRepo.entfallene`)
     entfallen: list[str] = field(default_factory=list)
     kurse_entfallen: list[str] = field(default_factory=list)
+    #: Plan-Schlüssel → Status (Formatversion 3, nur mit Profil): `EIGENE` = von der Person
+    #: geändert, bleibt; `GELOESCHT` = im Papierkorb bzw. endgültig weg, bleibt weg
+    plaene: dict[str, Status] = field(default_factory=dict)
 
     def anzahl(self, *stati: Status) -> int:
         return sum(1 for s in self.status.values() if s in stati)
@@ -122,10 +129,17 @@ class Vorschau:
     def anzahl_kurse(self, *stati: Status) -> int:
         return sum(1 for s in self.kurse.values() if s in stati)
 
+    def anzahl_plaene(self, *stati: Status) -> int:
+        return sum(1 for s in self.plaene.values() if s in stati)
+
     @property
     def zu_tun(self) -> bool:
-        """Schreibt der Import überhaupt eine Übung oder einen Kurs?"""
-        return self.anzahl(*SCHREIBT) > 0 or self.anzahl_kurse(*SCHREIBT) > 0
+        """Schreibt der Import überhaupt eine Übung, einen Kurs oder einen Plan?"""
+        return (
+            self.anzahl(*SCHREIBT) > 0
+            or self.anzahl_kurse(*SCHREIBT) > 0
+            or self.anzahl_plaene(*SCHREIBT) > 0
+        )
 
     def zusammenfassung(self) -> list[str]:
         """Was passiert, in Worten — eine Zeile je Fall, für die Rückfrage vor dem Import.
@@ -163,6 +177,15 @@ class Vorschau:
         ):
             if n := self.anzahl_kurse(s):
                 zeilen.append(f"{'1 Kurs' if n == 1 else f'{n} Kurse'} {was}")
+        for s, was in (
+            (Status.NEU, "neu — in deinem Profil"),
+            (Status.GEAENDERT, "aktualisiert"),
+            (Status.UNVERAENDERT, "schon auf dem Stand"),
+            (Status.EIGENE, "von dir geändert — bleibt"),
+            (Status.GELOESCHT, "im Papierkorb — bleibt dort"),
+        ):
+            if n := self.anzahl_plaene(s):
+                zeilen.append(f"{'1 Plan' if n == 1 else f'{n} Pläne'} {was}")
         if n := len(self.entfallen):
             was = (
                 "ist nicht mehr im Paket — bleibt"
@@ -283,6 +306,27 @@ class PaketRepo:
             zeilen.append(Uebungsstand(u, self.abweichungen(u), ort, entfallen))
         return sorted(zeilen, key=lambda z: z.uebung.name.casefold())
 
+    def des_pakets_plaene(self, paket_id: str, subject_id: str) -> list[Plan]:
+        """Die Pläne, die das Paket in diesem Profil angelegt hat (nicht im Papierkorb)."""
+        return PlanRepo(self.con).des_pakets(paket_id, subject_id)
+
+    def paketplaene(self, paket_id: str) -> list[PaketPlan]:
+        """Die Pläne, die das Paket zuletzt mitbrachte (``package.plans_json``)."""
+        r = self.con.execute("SELECT plans_json FROM package WHERE id = ?", (paket_id,)).fetchone()
+        if r is None or not r["plans_json"]:
+            return []
+        try:
+            roh = json.loads(r["plans_json"])
+        except ValueError:
+            return []
+        out: list[PaketPlan] = []
+        for e in roh if isinstance(roh, list) else []:
+            try:
+                out.append(PaketPlan.from_dict(e))
+            except (KeyError, TypeError, ValueError, AttributeError):
+                continue
+        return out
+
     def inhalt(self, paket_id: str) -> Paketinhalt | None:
         """Das Paket aus den gespeicherten Paketständen — „Wieder installieren“ ohne Datei."""
         paket = self.laden(paket_id)
@@ -310,7 +354,10 @@ class PaketRepo:
                 kurse.append(kurs_aus_stand(r["id"], paket_id, json.loads(r[1])))
             except (KeyError, TypeError, ValueError):
                 continue
-        return Paketinhalt(paket, uebungen, kurse) if uebungen or kurse else None
+        plaene = self.paketplaene(paket_id)
+        if not (uebungen or kurse or plaene):
+            return None
+        return Paketinhalt(paket, uebungen, kurse, plaene)
 
     def kurse(self, paket_id: str) -> list[Kurs]:
         """Die Kurse eines Pakets, die in der Liste stehen (nicht entfernt)."""
@@ -399,10 +446,14 @@ class PaketRepo:
             raise ValueError(f"Unbekannter Update-Modus: {modus!r}")
         self.con.execute("UPDATE package SET update_mode = ? WHERE id = ?", (modus, paket_id))
 
-    def quelle_setzen(self, paket_id: str, url: str | None) -> None:
-        """Woher das Paket zuletzt kam (Adresse der Quelle, ihr Index) — nach einem Import
-        aus einer Quelle. Nur diese Quelle darf es fortan aktualisieren (S3)."""
-        self.con.execute("UPDATE package SET source_url = ? WHERE id = ?", (url, paket_id))
+    def quelle_setzen(self, paket_id: str, url: str | None, art: str = "index") -> None:
+        """Woher das Paket zuletzt kam (Adresse der Quelle: ihr Index, oder ``art="datei"``
+        ein direkter Link auf die Paketdatei) — nach einem Import aus einer Quelle. Nur diese
+        Quelle darf es fortan aktualisieren (S3)."""
+        self.con.execute(
+            "UPDATE package SET source_url = ?, source_kind = ? WHERE id = ?",
+            (url, art if url else "index", paket_id),
+        )
 
     # -- Nicht mehr im Paket (Migration 017) ----------------------------------
 
@@ -570,6 +621,10 @@ class PaketRepo:
             for uebung_id in ids:
                 self.con.execute("DELETE FROM plan_item WHERE exercise_id = ?", (uebung_id,))
                 repo.in_papierkorb(uebung_id)
+            # Pläne aus dem Paket in den Papierkorb — aller Profile (Plan §3)
+            plaene = PlanRepo(self.con)
+            for plan in plaene.des_pakets(paket_id):
+                plaene.loeschen(plan.id)
             kurse = KursRepo(self.con)
             for kurs in kurse.des_pakets(paket_id):
                 # Pläne aus Kapiteln des Kurses enden mit ihm — sonst stünde ein
@@ -622,12 +677,18 @@ class PaketRepo:
 
     # -- Import --------------------------------------------------------------
 
-    def vorschau(self, inhalt: Paketinhalt) -> Vorschau:
-        """Was ein Import dieses Pakets täte — ohne etwas zu schreiben."""
-        return self._planen(inhalt, aktualisieren=True)[0]
+    def vorschau(self, inhalt: Paketinhalt, subject_id: str | None = None) -> Vorschau:
+        """Was ein Import dieses Pakets täte — ohne etwas zu schreiben. ``subject_id``: das
+        Profil, in dem die Pläne des Pakets landen (ohne: Pläne bleiben außen vor)."""
+        return self._planen(inhalt, aktualisieren=True, subject_id=subject_id)[0]
 
     def importieren(
-        self, inhalt: Paketinhalt, *, aktualisieren: bool = True, neue_tags_oben: bool = True
+        self,
+        inhalt: Paketinhalt,
+        *,
+        aktualisieren: bool = True,
+        neue_tags_oben: bool = True,
+        subject_id: str | None = None,
     ) -> Vorschau:
         """Installiert, aktualisiert oder installiert wieder (Regeln im Modulkopf).
 
@@ -641,20 +702,37 @@ class PaketRepo:
 
         Schreibt der Import keine Übung und ist das Paket nicht installiert
         (der eigene Export, wieder eingelesen), bleibt alles, wie es ist.
+
+        ``subject_id``: Pläne des Pakets (Formatversion 3) landen in diesem Profil —
+        neu angelegt, oder auf den neuen Stand gebracht, wenn die Person sie nicht
+        geändert hat (`docs/plan_import_links_plaene.md` §3). Andere Profile bekommen sie
+        beim nächsten Start (`plaene_nachlegen`).
         """
-        vorschau, ziele, staende, kurs_ziele = self._planen(inhalt, aktualisieren=aktualisieren)
+        vorschau, ziele, staende, kurs_ziele, plan_ziele = self._planen(
+            inhalt, aktualisieren=aktualisieren, subject_id=subject_id
+        )
         if vorschau.installiert is None and not vorschau.zu_tun:
             return vorschau
         repo = ExerciseRepo(self.con)
         kurse = KursRepo(self.con)
+        plaene = PlanRepo(self.con)
         stempel = jetzt().isoformat()
         with transaktion(self.con):
-            self._eintragen(inhalt.paket, geschrieben=vorschau.zu_tun, installieren=True)
+            self._eintragen(
+                inhalt.paket,
+                geschrieben=vorschau.zu_tun,
+                installieren=True,
+                plaene_json=json.dumps([p.to_dict() for p in inhalt.plaene], ensure_ascii=False)
+                if inhalt.plaene
+                else None,
+            )
             for kurs in kurs_ziele:
                 kurs.deleted_at = None  # ZURUECK: wieder in der Liste
                 kurse.speichern(kurs, package_standard=kurs_stand(kurs))
             for u in ziele:
                 repo.speichern(u, neue_tags_oben=neue_tags_oben)
+            for plan in plan_ziele:  # nach den Übungen: die Planpositionen verweisen auf sie
+                plaene.speichern(plan)
             for uebung_id, s in vorschau.status.items():
                 if s == Status.ZURUECK:  # aus Papierkorb oder Grabstein zurück
                     self.con.execute(
@@ -721,11 +799,70 @@ class PaketRepo:
                 )
         return len(offen)
 
+    def plaene_nachlegen(self, subject_id: str) -> list[Plan]:
+        """Die Pläne aller aktiven Pakete, die dieses Profil noch nicht hat — beim Start und
+        beim Anlegen eines Profils. Eine Zeile, die es schon gab (auch im Papierkorb oder
+        endgültig gelöscht), kommt nicht wieder. Gibt die neu angelegten zurück."""
+        plaene = PlanRepo(self.con)
+        da = {u.id for u in ExerciseRepo(self.con).alle(mit_archivierten=True)}
+        neu: list[Plan] = []
+        for paket, _ in self.alle():
+            if not paket.aktiv:
+                continue
+            for pp in self.paketplaene(paket.id):
+                pid = plan_id(paket.id, pp.key, subject_id)
+                if plaene.zeile_bekannt(pid):
+                    continue
+                plan = _plan_aus_paketplan(pp, paket.id, subject_id, da)
+                if plan.items:
+                    plaene.speichern(plan)
+                    neu.append(plan)
+        return neu
+
+    def _plaene_planen(
+        self, inhalt: Paketinhalt, subject_id: str | None, vorschau: Vorschau
+    ) -> list[Plan]:
+        """Status je Plan des Pakets im Profil und die Pläne, die der Import schreibt."""
+        if subject_id is None or not inhalt.plaene:
+            return []
+        plaene = PlanRepo(self.con)
+        da = {u.id for u in ExerciseRepo(self.con).alle(mit_archivierten=True)}
+        da |= {u.id for u in inhalt.uebungen}
+        ziele: list[Plan] = []
+        for pp in inhalt.plaene:
+            pid = plan_id(inhalt.paket.id, pp.key, subject_id)
+            soll = plan_stand(pp)
+            alt = plaene.laden(pid, mit_geloeschten=True)
+            if alt is None:
+                if plaene.zeile_bekannt(pid):  # endgültig gelöscht (Grabstein)
+                    vorschau.plaene[pp.key] = Status.GELOESCHT
+                    continue
+                vorschau.plaene[pp.key] = Status.NEU
+                ziele.append(_plan_aus_paketplan(pp, inhalt.paket.id, subject_id, da))
+                continue
+            if alt.deleted_at is not None:
+                vorschau.plaene[pp.key] = Status.GELOESCHT
+                continue
+            if alt.package_standard == soll:
+                vorschau.plaene[pp.key] = Status.UNVERAENDERT
+                continue
+            if (
+                alt.package_standard is not None
+                and plan_stand(paketplan_aus(alt, pp.key)) != alt.package_standard
+            ):
+                vorschau.plaene[pp.key] = Status.EIGENE  # von der Person geändert — bleibt
+                continue
+            vorschau.plaene[pp.key] = Status.GEAENDERT
+            neu = _plan_aus_paketplan(pp, inhalt.paket.id, subject_id, da)
+            neu.id, neu.created_at, neu.aktiv = alt.id, alt.created_at, alt.aktiv
+            ziele.append(neu)
+        return ziele
+
     def _planen(
-        self, inhalt: Paketinhalt, aktualisieren: bool
-    ) -> tuple[Vorschau, list[Exercise], dict[str, dict[str, Any]], list[Kurs]]:
+        self, inhalt: Paketinhalt, aktualisieren: bool, subject_id: str | None = None
+    ) -> tuple[Vorschau, list[Exercise], dict[str, dict[str, Any]], list[Kurs], list[Plan]]:
         """Status je Übung, die Übungen so, wie der Import sie schreibt, ihr Paketstand —
-        und die Kurse, die er schreibt."""
+        und die Kurse und Pläne, die er schreibt."""
         paket = inhalt.paket
         da_ist = self.laden(paket.id)
         entfernt = da_ist is not None and da_ist.entfernt is not None
@@ -867,7 +1004,8 @@ class PaketRepo:
             vorschau.kurse[k.id] = s
             if s in SCHREIBT:
                 kurs_ziele.append(k)
-        return vorschau, ziele, staende, kurs_ziele
+        plan_ziele = self._plaene_planen(inhalt, subject_id, vorschau)
+        return vorschau, ziele, staende, kurs_ziele, plan_ziele
 
     def _bekannte_tags(self) -> dict[str, tuple[str, str]]:
         """casefold → (Name, Art) aller Tags — für `_tags_angleichen`."""
@@ -884,13 +1022,20 @@ class PaketRepo:
             (text, uebung_id, text),
         )
 
-    def _eintragen(self, paket: Paket, geschrieben: bool, installieren: bool = False) -> None:
+    def _eintragen(
+        self,
+        paket: Paket,
+        geschrieben: bool,
+        installieren: bool = False,
+        plaene_json: str | None = None,
+    ) -> None:
         """Paketzeile anlegen bzw. Name, Beschreibung, Version auffrischen.
 
         Eine Datei ohne Version lässt die gespeicherte stehen (ein Export
         übernimmt sie ohnehin). ``updated_at`` rückt nur, wenn Übungen
         geschrieben wurden. Nur ein Import (``installieren``) holt ein entferntes
         Paket zurück — `herkunft_nachtragen` lässt ``removed_at`` stehen (K25).
+        ``plaene_json``: die Pläne des Pakets (Formatversion 3) — ohne bleibt es dabei.
         """
         stempel = jetzt().isoformat()
         p = paket
@@ -903,6 +1048,8 @@ class PaketRepo:
             "updated_at = CASE WHEN ? THEN excluded.updated_at ELSE package.updated_at END",
             (p.id, p.name, p.beschreibung, p.version, stempel, stempel, installieren, geschrieben),
         )
+        if plaene_json is not None:  # nur, wenn das Paket Pläne bringt (Migration 033)
+            self.con.execute("UPDATE package SET plans_json = ? WHERE id = ?", (plaene_json, p.id))
 
     @staticmethod
     def _zeile(r: sqlite3.Row) -> Paket:
@@ -917,12 +1064,41 @@ class PaketRepo:
             deaktiviert=datetime.fromisoformat(r["disabled_at"]) if r["disabled_at"] else None,
             update_modus=r["update_mode"] or "auto",
             quelle=r["source_url"],
+            quelle_art=r["source_kind"] or "index",
             verfuegbar=r["available_version"],
             verfuegbar_url=r["available_url"],
             verfuegbar_sha256=r["available_sha256"],
             verfuegbar_neuigkeiten=r["available_news"] or "",
             geprueft=datetime.fromisoformat(r["checked_at"]) if r["checked_at"] else None,
         )
+
+
+def _plan_aus_paketplan(pp: PaketPlan, paket_id: str, subject_id: str, da: set[str]) -> Plan:
+    """Der Plan eines Profils aus einem Paketplan — nur mit Übungen, die es hier gibt."""
+    plan = Plan(
+        id=plan_id(paket_id, pp.key, subject_id),
+        name=pp.vorlage.name,
+        description=pp.beschreibung,
+        subject_id=subject_id,
+        wochentage=list(pp.vorlage.wochentage),
+        timer=dict(pp.timer) if pp.timer else None,
+        weiter_automatisch=pp.weiter_automatisch,
+        pause_ohne_timer=pp.pause_ohne_timer,
+        package_id=paket_id,
+        package_key=pp.key,
+        package_standard=plan_stand(pp),
+    )
+    for nr, item in enumerate(i for i in pp.vorlage.items if i.exercise_id in da):
+        plan.items.append(
+            PlanItem(
+                plan_id=plan.id,
+                exercise_id=item.exercise_id,
+                order=nr,
+                target=dict(item.target) if item.target else None,
+                felder=None if item.felder is None else list(item.felder),
+            )
+        )
+    return plan
 
 
 def _lokales_behalten(ziel: Exercise, alt: Exercise) -> None:

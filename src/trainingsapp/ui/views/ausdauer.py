@@ -117,6 +117,7 @@ from trainingsapp.ui.components.karte_strecke import (
     ganze_strecke,
     legende,
 )
+from trainingsapp.ui.components.kuerzen import kuerzen_blatt
 from trainingsapp.ui.components.kurve import Reihe, Skala, kurve
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.tabellen import (
@@ -136,6 +137,7 @@ from trainingsapp.ui.training import (
     herz_je_ortung,
     hrv_bezug,
     hrv_laden,
+    nachlauf_der_strecke,
     ortung_zu_wand,
     sportart_aendern,
     verwaiste_uebernehmen,
@@ -1232,6 +1234,27 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
         if eintrag is not None:
             await page.push_route(f"/messung/{eintrag.id}")
 
+    def ende_kuerzen() -> None:
+        """„Ende kürzen“ (Ben, 28.10.2026): dasselbe Blatt wie beim Speichern — hier immer,
+        vorgeschlagen ist die letzte Bewegung."""
+        n = nachlauf_der_strecke(strecke, mindestens_s=0.0)
+        if n is None:
+            page.show_dialog(
+                ft.SnackBar(ft.Text("Keine Bewegung in der Aufzeichnung — nichts zu kürzen."))
+            )
+            return
+        page.show_dialog(
+            kuerzen_blatt(
+                page,
+                state,
+                strecke,
+                n,
+                lauf=state.messlauf,
+                beim_speichern=False,
+                danach=state.neu_zeichnen,
+            )
+        )
+
     def ueberblick(e: TrainingEinstellungen) -> ft.Control:
         # Zwei feste Zeilen — Kacheln mit expand in einer umbrechenden Zeile zeigt Flet
         # nur als grauen Fehlerkasten
@@ -1306,6 +1329,12 @@ def ausdauer_detail_view(page: ft.Page, state: AppState, strecke: Strecke) -> ft
                     tooltip="GPX exportieren",
                     on_click=gpx_export,
                     disabled=not punkte,
+                ),
+                ft.IconButton(
+                    ft.Icons.CONTENT_CUT,
+                    tooltip="Ende kürzen",
+                    on_click=lambda: ende_kuerzen(),
+                    visible=bool(punkte),
                 ),
                 ft.IconButton(
                     ft.Icons.SCIENCE_OUTLINED,

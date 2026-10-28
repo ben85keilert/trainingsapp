@@ -205,6 +205,11 @@ async def test_messung_offen_ist_eine_einheit_und_endet_mit_dem_stopp(umgebung) 
     assert e is not None and e.laeuft and e.ende_wenn_alles_fertig
     assert e.hrv is not None and lauf.aufnahme is not None and e.stoppt_am_ende("hrv")
     assert startleiste(seite, state) is not None  # die Laufleiste auf jeder anderen Seite
+    # Im Live-Vollbild stehen die Werte groß in der Leiste (Ben, 28.10.2026)
+    leiste = startleiste(seite, state, live=True)
+    gross = [c for c in _alle(leiste) if isinstance(c, ft.Text) and c.size == 20]
+    klein = [c.value for c in _alle(leiste) if isinstance(c, ft.Text) and c.size == 10]
+    assert gross and klein[:2] == ["Herzfrequenz", "RR"]
     await _sekunden(state, uhr, gurt, 20)
     await _knopf(messung(seite, state), "Stopp & speichern").on_click()
     await _sekunden(state, uhr, gurt, 1)

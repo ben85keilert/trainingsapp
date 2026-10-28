@@ -3,8 +3,10 @@
 
 - **Anzahl, Menge, Dauer**: je Tag eine Säule, die Varianten übereinander in ihren Farben
   (`components/verlaufskurve.stapel_saeulen`); die Chips darunter blenden Varianten aus.
-- **Skala**: eine Linie je Variante wie bei den Übungen (mehrere Werte am Tag: das Mittel),
-  gerechnet von `core.verlauf` über `core.tagesfelder.als_eintraege`.
+- **Skala**: eine Linie je Variante wie bei den Übungen (mehrere Werte am Tag: der
+  Tageswert des Felds), gerechnet von `core.tagesfelder.tageskurve` — eine Rechnung für
+  Säulen, Linien und Kacheln. **Messwert** (Ben, 28.10.2026): je Teil eine Linie, je Einheit
+  eine Kurve (Blutdruck in mmHg, Puls in bpm daneben), der zweite Teil gestrichelt.
 - **Ja/Nein**: an wie vielen Tagen „ja“ je Woche bzw. Monat. **Nur Text**: nur die Liste.
 - Darunter Kacheln je Variante (Summe bzw. Mittel im Zeitraum, an wie vielen Tagen) und die
   Einträge je Tag mit Uhrzeit und Notiz; ein Tag öffnet `/tag/<datum>`.
@@ -24,10 +26,12 @@ import flet as ft
 
 from trainingsapp.core import tagesfelder as tf
 from trainingsapp.core.verlauf import (
+    HOECHSTER,
+    MITTEL,
+    SUMME,
     ZEITRAEUME,
+    Kennzahl,
     haeufigkeit,
-    kennzahlen,
-    linien,
     zeitraum_beginn,
 )
 from trainingsapp.ui.components import ziele as zl
@@ -124,44 +128,75 @@ def verlauf_tagesfeld_view(page: Any, state: AppState, feld_id: str) -> ft.View:
         ),
     ]
 
-    # -- Kurve oder Säulen -------------------------------------------------------------
+    # -- Kurve oder Säulen: eine Rechnung (`core.tagesfelder.tageskurve`, Plan §4) ----------
 
     art = feld.art
-    eintraege = tf.als_eintraege([w for w in im_zeitraum if w.variante in sichtbar])
-    kennzahl = next(iter(kennzahlen([e for _, e in eintraege])), None)
+    kurven = tf.tageskurve(feld, [w for w in im_zeitraum if w.variante in sichtbar])
     von = beginn or (im_zeitraum[0].tag if im_zeitraum else heute)
-    if art in tf.SUMMIERT and kennzahl is not None:
-        stapel = []
-        for v in sichtbar:
-            je_tag: dict[date, float] = {}
-            for w in im_zeitraum:
-                if w.variante == v and isinstance(w.wert, int | float):
-                    je_tag[w.tag] = je_tag.get(w.tag, 0.0) + float(w.wert)
-            stapel.append(Stapel(name(v), farben.get(v, ft.Colors.PRIMARY), je_tag))
-        titel = kennzahl.label + (f" · {kennzahl.einheit}" if kennzahl.einheit else "")
+    tw = feld.wirksamer_tageswert
+    kennzahl_art = {tf.TW_SUMME: SUMME, tf.TW_MITTEL: MITTEL}.get(tw, HOECHSTER)
+
+    def kennzahl_fuer(einheit: str, titel: str) -> Kennzahl:
+        return Kennzahl(
+            tf.WERT, kennzahl_art, titel, "", "" if art == tf.DAUER else einheit, art == tf.DAUER
+        )
+
+    if art in tf.SUMMIERT and kurven:
+        stapel = [
+            Stapel(name(k.variante), farben.get(k.variante, ft.Colors.PRIMARY), dict(k.punkte))
+            for k in kurven
+        ]
+        einheit = kurven[0].einheit
+        titel = tf.kurven_titel(feld) + (f" · {einheit}" if einheit and art != tf.DAUER else "")
         inhalt.append(
             karte(
                 ft.Text(titel, size=14, weight=ft.FontWeight.W_600),
-                stapel_saeulen(stapel, kennzahl, von=von, bis=heute),
+                stapel_saeulen(stapel, kennzahl_fuer(einheit, titel), von=von, bis=heute),
                 *_legende(teile, sichtbar, farben, name, umschalter),
                 abstand=4,
                 padding=12,
             )
         )
-    elif art == tf.SKALA and kennzahl is not None:
-        reihen = [
-            Reihe(x.werte, farben.get(x.variante, ft.Colors.PRIMARY), name(x.variante))
-            for x in linien(eintraege, kennzahl)
-        ]
-        inhalt.append(
-            karte(
-                ft.Text(kennzahl.label, size=14, weight=ft.FontWeight.W_600),
-                kurve_linien(reihen, kennzahl, modus=state.verlauf_modus, bis=heute),
-                *_legende(teile, sichtbar, farben, name, umschalter),
-                abstand=4,
-                padding=12,
+    elif art in (tf.SKALA, tf.MESSWERT) and kurven:
+        # Je Einheit eine Kurve (Blutdruck in mmHg, der Puls in bpm daneben); innerhalb einer
+        # Kurve je Variante eine Farbe, der zweite Teil gestrichelt
+        gruppen: dict[str, list[tf.Kurve]] = {}
+        for k in kurven:
+            gruppen.setdefault(k.einheit, []).append(k)
+        for einheit, liste_k in gruppen.items():
+            teil_namen = list(dict.fromkeys(k.name for k in liste_k if k.name))
+            reihen = [
+                Reihe(
+                    k.punkte,
+                    farben.get(k.variante, ft.Colors.PRIMARY),
+                    " · ".join(
+                        t
+                        for t in (
+                            k.name if len(teil_namen) > 1 or art == tf.MESSWERT else "",
+                            name(k.variante) if len(teile) > 1 else "",
+                        )
+                        if t
+                    ),
+                    gestrichelt=teil_namen.index(k.name) % 2 == 1
+                    if k.name in teil_namen
+                    else False,
+                )
+                for k in liste_k
+            ]
+            titel = tf.kurven_titel(feld) if art == tf.SKALA else " / ".join(teil_namen)
+            if einheit:
+                titel += f" · {einheit}"
+            inhalt.append(
+                karte(
+                    ft.Text(titel, size=14, weight=ft.FontWeight.W_600),
+                    kurve_linien(
+                        reihen, kennzahl_fuer(einheit, titel), modus=state.verlauf_modus, bis=heute
+                    ),
+                    *_legende(teile, sichtbar, farben, name, umschalter),
+                    abstand=4,
+                    padding=12,
+                )
             )
-        )
     elif art == tf.JA_NEIN:
         ja = sorted({w.tag for w in im_zeitraum if w.wert})
         einheit, je = haeufigkeit(ja, ja[0] if ja else heute, heute)

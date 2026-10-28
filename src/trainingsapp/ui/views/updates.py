@@ -28,6 +28,7 @@ import flet as ft
 from trainingsapp.config import app_version, ist_aktiv
 from trainingsapp.core.pakete import Paket
 from trainingsapp.core.paketquelle import (
+    INDEX,
     IndexEintrag,
     Pruefung,
     QuellenFehler,
@@ -41,6 +42,7 @@ from trainingsapp.data.repositories import SettingRepo
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
+from trainingsapp.ui.components.paket_link import link_importieren
 from trainingsapp.ui.state import BENACHRICHTIGUNGEN, AppState, UpdateStand
 from trainingsapp.ui.views.pakete import entfallene_dialog, import_rueckfrage, uebungen_zahl
 
@@ -89,8 +91,10 @@ async def pruefung_ausfuehren(state: AppState) -> UpdateStand:
             continue
         try:
             inhalt = await asyncio.to_thread(paket_laden, u.eintrag)
-            state.pakete.importieren(inhalt)
-            state.pakete.quelle_setzen(u.eintrag.id, u.eintrag.quelle_url or None)
+            state.pakete.importieren(inhalt, subject_id=state.profil.id)
+            state.pakete.quelle_setzen(
+                u.eintrag.id, u.eintrag.quelle_url or None, u.installiert.quelle_art
+            )
             state.pakete.verfuegbar_loeschen(u.eintrag.id)
         except (QuellenFehler, sqlite3.Error) as e:
             ergebnis.fehler.append(f"{u.eintrag.name}: {e}")
@@ -209,7 +213,10 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
                 return
 
             def danach() -> None:
-                state.pakete.quelle_setzen(eintrag.id, eintrag.quelle_url or None)
+                alt = state.pakete.laden(eintrag.id)
+                state.pakete.quelle_setzen(
+                    eintrag.id, eintrag.quelle_url or None, alt.quelle_art if alt else INDEX
+                )
                 state.pakete.verfuegbar_loeschen(eintrag.id)
                 if state.updates is not None:
                     state.updates.pruefung.updates = [
@@ -224,7 +231,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
                     page,
                     state,
                     inhalt,
-                    state.pakete.vorschau(inhalt),
+                    state.pakete.vorschau(inhalt, state.profil.id),
                     danach,
                     quelle=eintrag.quelle_url or None,
                 )
@@ -381,21 +388,21 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
 
     # -- Quellen ------------------------------------------------------------------------------
     neue_quelle = ft.TextField(
-        label="Adresse eines Paketindex (https://…/index.json)",
+        label="Adresse eines Paketindex oder einer Paketdatei (https://…)",
         expand=True,
         keyboard_type=ft.KeyboardType.URL,
     )
 
     def quelle_hinzufuegen() -> None:
+        """Ein Link — Index oder Paketdatei: dasselbe wie „Importieren“ → Link im
+        Paketmanager (`components/paket_link`), mit Rückfrage und Ort (Ben, 28.10.2026)."""
         url = (neue_quelle.value or "").strip()
         if (fehler := url_pruefen(url)) is not None:
             neue_quelle.error = fehler
             page.update()
             return
-        quellen = state.paketquellen()
-        if url not in quellen:
-            state.paketquellen_setzen([*quellen, url])
-        state.neu_zeichnen()
+        neue_quelle.error = None
+        page.run_task(link_importieren, page, state, url)
 
     def quellen_entferner(url: str) -> Callable[[], None]:
         def handler() -> None:

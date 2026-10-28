@@ -171,6 +171,8 @@ async def _training(
     hrv_vorher=0,
     vor_dem_stopp=None,
     timer=None,
+    punkte=None,
+    seite=None,
 ):
     """Ein Training wie in der App — als Einheit (Startleiste, „Training starten“), auf
     einer Uhr-Attrappe: Gurt und GPS ticken im Takt, ohne zu warten.
@@ -196,7 +198,7 @@ async def _training(
             uhr.t += 1
             gurt.schlag(1000)
             await ruhe()
-    seite = Seite()
+    seite = seite if seite is not None else Seite()
     gps = Empfaenger(uhr)
     teil = einheit_ui.ausdauer_bereitstellen(seite, state, sportart, gps)
     if timer is not None:
@@ -206,7 +208,8 @@ async def _training(
     await ruhe()
     e = einheit_ui.alle_starten(seite, state, 0.0)
     assert e is not None and state.ausdauer is teil
-    punkte = _gang(1200, 2.5, rauschen_m=1.5)  # 3 km
+    if punkte is None:
+        punkte = _gang(1200, 2.5, rauschen_m=1.5)  # 3 km
     for i, p in enumerate(punkte):
         uhr.t += 1
         gurt.schlag(1000 if i % 2 else 950)
@@ -252,6 +255,139 @@ async def test_profilwechsel_waehrend_des_trainings_haengt_nichts_um(daten) -> N
         state.sitzungen.eintrag_laden(strecke.session_entry_id).session_id
     )
     assert sitzung.subject_id == start
+
+
+# ---------------------------------------------------------------------------
+# Ende kürzen — GPS lief weiter (Ben, 28.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def _mit_nachlauf(stand_s: int = 300) -> list[Punkt]:
+    """15 min gehen (2,25 km), dann ``stand_s`` Sekunden stehen."""
+    gang = _gang(900, 2.5, rauschen_m=1.5)
+    return gang + _gang(stand_s, 0.0, t0=1_000_900.0, start_m=2250.0, rauschen_m=1.0)
+
+
+def _herz(rec, wand_s: float) -> float:
+    """Wanduhr → Herzuhr der Messdatei (Sidecar-Zeiten)."""
+    from hrv_core.ereignisse import anker_aus_wand
+
+    return float(anker_aus_wand(rec.beats, wand_s)["t_s"])
+
+
+def _sidecar(state, aufnahme) -> dict:
+    import json
+
+    from hrv_core.korrektur import analyse_pfad
+
+    from trainingsapp.config import messungenverzeichnis
+
+    return json.loads(analyse_pfad(messungenverzeichnis() / aufnahme.file_path).read_text())
+
+
+async def test_nachlauf_fragt_beim_speichern_und_kuerzt_alles(daten) -> None:
+    """Stand die Person am Ende ≥ 1 min, fragt ein Blatt; „Kürzen“ nimmt die Ortungen weg,
+    rechnet Zeile und Tagebuch neu, rückt „Gehen: Ende“ in der HRV-Messung, kürzt die
+    Abschnitte im Sidecar und schneidet die Auswertung dort zu."""
+    from hrv_core.recording import laden
+
+    from attrappen import Seite
+    from trainingsapp.config import messungenverzeichnis, streckenverzeichnis
+    from trainingsapp.data.strecken import jsonl_lesen
+    from trainingsapp.ui.training import nachlauf_der_strecke, training_kuerzen
+
+    state, tmp_path = daten
+    seite = Seite()
+    strecke, _ = await _training(state, tmp_path, punkte=_mit_nachlauf(), seite=seite)
+    await asyncio.gather(*seite.aufgaben)
+    import flet as ft
+
+    blaetter = [d for d in seite.dialoge if isinstance(d, ft.BottomSheet)]
+    assert blaetter and any("ohne Bewegung" in t for t in _texte(blaetter[-1]))
+    assert strecke.dauer_s == pytest.approx(1200, abs=3)
+    n = nachlauf_der_strecke(strecke)
+    assert n is not None and n.dauer_s == pytest.approx(300, abs=3)
+    alt_eintrag = strecke.session_entry_id
+
+    ergebnis = training_kuerzen(state, strecke, n.vorschlag_s)
+    assert ergebnis.entfernt_s == pytest.approx(300, abs=3)
+    assert "zugeschnitten" in ergebnis.hrv
+    neu = state.strecken.laden(strecke.id)
+    assert neu.dauer_s == pytest.approx(900, abs=3) and neu.bewegt_s <= neu.dauer_s
+    assert neu.distanz_m == pytest.approx(2250, rel=0.03)
+    assert (neu.ended_at - neu.started_at).total_seconds() == pytest.approx(900, abs=3)
+    assert len(jsonl_lesen(streckenverzeichnis() / neu.file_path)) == pytest.approx(900, abs=2)
+    # Tagebuch: Korrektur mit Verweis, Dauer und Strecke neu
+    assert neu.session_entry_id != alt_eintrag
+    eintrag = state.sitzungen.eintrag_laden(neu.session_entry_id)
+    assert alt_eintrag in state.sitzungen.eintrag_kette(neu.session_entry_id)
+    assert eintrag.result["duration"] == pytest.approx(900, abs=3)
+    assert eintrag.result["distance"] == round(neu.distanz_m)
+    # HRV: Die Messung begann mit dem Training — Start und Ende der Einheit sind dann keine
+    # Notizen (`core.einheit.projektion`, ``einheit_spur``); km 1 und 2 bleiben. Sidecar-
+    # Zeiten stehen auf der Herzuhr (RR 950/1000 ms: ~0,975 s je Sekunde Wanduhr)
+    aufnahme = state.hrv.laden(neu.hrv_recording_id)
+    rec = laden(messungenverzeichnis() / aufnahme.file_path)
+    assert not [e for e in rec.ereignisse if e["text"] == "Gehen: Ende"]
+    assert [e["text"] for e in rec.ereignisse if e["marke"].get("spur") == "km"] == ["km 1", "km 2"]
+    herz_ende = _herz(rec, 900.0)
+    doc = _sidecar(state, aufnahme)
+    assert doc["active_crop"]["t_end_s"] == pytest.approx(herz_ende, abs=3)
+    assert doc["segments"] and all(s["t_end_s"] <= herz_ende + 3 for s in doc["segments"])
+    assert any(s["name"].startswith("km") for s in doc["segments"])
+    # Noch einmal: nichts mehr zu kürzen
+    with pytest.raises(ValueError):
+        training_kuerzen(state, neu, 900.0)
+    with pytest.raises(ValueError):
+        training_kuerzen(state, neu, 5.0)
+
+
+async def test_kuerzen_waehrend_die_hrv_weiterlaeuft(daten) -> None:
+    """Läuft die Messung noch, rückt die Notiz in der laufenden Aufnahme — Datei und
+    Sidecar folgen beim Speichern; kein Zuschnitt, die Messung endete nicht mit dem
+    Training."""
+    from hrv_core.recording import laden
+
+    from trainingsapp.config import messungenverzeichnis
+    from trainingsapp.ui.training import nachlauf_der_strecke, training_kuerzen
+
+    state, tmp_path = daten
+    gesehen: dict = {}
+
+    def kuerzen(strecke) -> None:
+        n = nachlauf_der_strecke(strecke)
+        gesehen["ergebnis"] = training_kuerzen(state, strecke, n.vorschlag_s, lauf=state.messlauf)
+
+    strecke, _ = await _training(
+        state, tmp_path, punkte=_mit_nachlauf(), hrv_vorher=60, vor_dem_stopp=kuerzen
+    )
+    assert "laufenden Messung" in gesehen["ergebnis"].hrv
+    neu = state.strecken.laden(strecke.id)
+    assert neu.dauer_s == pytest.approx(900, abs=3)
+    (aufnahme,) = state.hrv.alle(state.profil.id)
+    rec = laden(messungenverzeichnis() / aufnahme.file_path)
+    ende = [e for e in rec.ereignisse if e["text"] == "Gehen: Ende"]
+    assert len(ende) == 1 and ende[0]["t_wall_s"] == pytest.approx(960, abs=3)
+    doc = _sidecar(state, aufnahme)
+    assert "active_crop" not in doc
+    gehen = next(s for s in doc["segments"] if s["name"] == "Gehen")
+    assert gehen["t_end_s"] == pytest.approx(_herz(rec, 960.0), abs=3)
+
+
+async def test_ohne_nachlauf_kein_blatt_aber_der_knopf(daten) -> None:
+    import flet as ft
+
+    from attrappen import Seite
+    from trainingsapp.ui.views.ausdauer import ausdauer_detail_view
+
+    state, tmp_path = daten
+    seite = Seite()
+    strecke, _ = await _training(state, tmp_path, seite=seite)
+    await asyncio.gather(*seite.aufgaben)
+    assert not any(isinstance(d, ft.BottomSheet) for d in seite.dialoge)
+    ansicht = ausdauer_detail_view(_seite(), state, strecke)
+    knopf = next(c for c in ansicht.appbar.actions if c.tooltip == "Ende kürzen")
+    assert knopf.visible
 
 
 def test_streckendatei_mit_kopf_und_kaputten_zeilen(tmp_path) -> None:

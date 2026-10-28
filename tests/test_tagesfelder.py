@@ -222,3 +222,116 @@ def test_vorschlaege_sind_gueltig() -> None:
         f = v.feld()
         assert f.art == v.art
         assert f.zusammenfassung()
+
+
+# ---------------------------------------------------------------------------
+# Messwert, Tageswert, Standardfelder (Ben, 28.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def _blutdruck(profil: Subject) -> tf.Tagesfeld:
+    return next(v for v in tf.STANDARDFELDER if v.standard_key == "blutdruck").feld(profil.id)
+
+
+def test_migration_032_tageswert_und_standard(con) -> None:
+    assert schema_version(con) >= 32
+    spalten = {r["name"] for r in con.execute("PRAGMA table_info(day_field)")}
+    assert {"tageswert", "standard_key"} <= spalten
+
+
+def test_messwert_eintragen_stand_und_tageswert(felder, werte, profil) -> None:
+    bd = _blutdruck(profil)
+    felder.speichern(bd)
+    geladen = felder.laden(bd.id)
+    assert geladen.art == tf.MESSWERT and geladen.standard_key == "blutdruck"
+    assert geladen.tageswert == tf.TW_MITTEL and len(geladen.teile) == 3
+    werte.hinzufuegen(bd, TAG, _um(8), wert=(128, 82, 70))
+    werte.hinzufuegen(bd, TAG, _um(19), wert=(124, 80, None))
+    liste = [w for w in werte.am_tag(profil.id, TAG) if w.feld_id == bd.id]
+    assert [w.werte for w in liste] == [(128, 82, 70), (124, 80, None)]
+    assert tf.eintrag_text("Blutdruck", liste[0]) == "Blutdruck 128/82 mmHg · 70 bpm"
+    assert tf.eintrag_text("Blutdruck", liste[1]) == "Blutdruck 124/80 mmHg"
+    (stand,) = tf.tagesstand(bd, liste)
+    assert stand.wert == (126.0, 81.0, 70.0) and stand.anzahl == 2
+    assert tf.stand_text(bd, [stand]) == "Ø 126/81 mmHg · 70 bpm · 2×"
+    # Tageswert umstellen: Letzter des Tages
+    bd.tageswert = tf.TW_LETZTER
+    felder.speichern(bd)
+    (stand,) = tf.tagesstand(felder.laden(bd.id), liste)
+    assert stand.wert == (124.0, 80.0, 70.0)
+    assert tf.stand_text(bd, [stand]) == "124/80 mmHg · 70 bpm · 2×"
+    # Höchster je Teil — nicht die Messung mit dem höchsten ersten Teil
+    bd.tageswert = tf.TW_MAX
+    (stand,) = tf.tagesstand(bd, liste)
+    assert stand.wert == (128.0, 82.0, 70.0)
+    # Kacheln: Mittel der Tageswerte je Teil
+    (s,) = tf.summen(bd, liste)
+    assert s.teile[:2] == (128.0, 82.0) and tf.summe_text(bd, s).startswith("Ø 128/82")
+
+
+def test_tageswert_bei_menge(felder, werte, profil) -> None:
+    trinken = tf.Tagesfeld(
+        subject_id=profil.id,
+        name="Trinken",
+        spec=tf.spec_bauen(tf.MENGE, einheit="ml"),
+        mehrmals=True,
+    )
+    felder.speichern(trinken)
+    for ml in (250, 500, 250):
+        werte.hinzufuegen(trinken, TAG, _um(8), wert=ml)
+    liste = werte.am_tag(profil.id, TAG)
+    assert tf.tagesstand(trinken, liste)[0].wert == 1000.0
+    trinken.tageswert = tf.TW_MAX
+    assert tf.tagesstand(trinken, liste)[0].wert == 500.0
+    trinken.tageswert = "unsinn"  # unbekannt: die Vorgabe der Art
+    assert trinken.wirksamer_tageswert == tf.TW_SUMME
+
+
+def test_null_ist_ein_wert(felder, werte, profil) -> None:
+    kaffee = tf.Tagesfeld(subject_id=profil.id, name="Kaffee", spec=tf.spec_bauen(tf.ANZAHL))
+    felder.speichern(kaffee)
+    assert tf.wert_lesen(kaffee.spec, "0") == 0
+    werte.einmal_setzen(kaffee, TAG, wert=0)
+    (w,) = werte.am_tag(profil.id, TAG)
+    assert w.wert == 0 and tf.stand_text(kaffee, tf.tagesstand(kaffee, [w])) == "0"
+    assert tf.dauer_lesen("0") == 0.0
+
+
+def test_standardfelder_je_profil_loeschen_und_wiederherstellen(felder, werte, con) -> None:
+    profile = SubjectRepo(con)
+    a, b = Subject(name="A"), Subject(name="B")
+    profile.speichern(a)
+    profile.speichern(b)
+    assert [f.name for f in felder.standard_einspielen(a.id)] == ["Blutdruck"]
+    assert felder.standard_einspielen(a.id) == []  # nichts doppelt
+    assert felder.alle(b.id) == []  # je Profil
+    (bd,) = felder.alle(a.id)
+    werte.hinzufuegen(bd, TAG, _um(8), wert=(120, 80, None))
+    # Löschen mit Werten: der Start legt es nicht wieder an …
+    stempel = felder.loeschen(bd.id, mit_werten=True)
+    assert stempel and felder.alle(a.id) == [] and felder.standard_einspielen(a.id) == []
+    # … aber die Einstellungen können es wiederherstellen — mit den Werten
+    ((v, zeile),) = felder.standard_geloeschte(a.id)
+    assert v.standard_key == "blutdruck" and zeile is not None and zeile.id == bd.id
+    zurueck = felder.wiederherstellen(v, a.id)
+    assert zurueck.id == bd.id and zurueck.deleted_at is None and zurueck.aktiv
+    assert len(werte.am_tag(a.id, TAG)) == 1
+    assert felder.standard_geloeschte(a.id) == []
+    # Nie angelegt (Profil B): Wiederherstellen legt an
+    ((v, zeile),) = felder.standard_geloeschte(b.id)
+    assert zeile is None
+    neu = felder.wiederherstellen(v, b.id)
+    assert neu.standard_key == "blutdruck" and felder.alle(b.id) == [neu]
+
+
+def test_vorlagen_in_gruppen_und_messwert_lesen() -> None:
+    gruppen = tf.vorlagen_in_gruppen()
+    assert [g for g, _ in gruppen] == list(tf.GRUPPEN)
+    assert all(v.gruppe for v in tf.VORLAGEN)
+    bd = next(v for v in tf.VORLAGEN if v.name == "Blutdruck").feld()
+    assert tf.messwert_lesen(bd.spec, ["128/82/70"]) == (128, 82, 70)
+    assert tf.messwert_lesen(bd.spec, ["128", "82"]) == (128, 82, None)
+    assert tf.messwert_lesen(bd.spec, ["500", "82"]) is None  # außerhalb 30–300
+    assert tf.teile_lesen(bd.spec)[2].optional
+    with pytest.raises(ValueError):
+        tf.teile_pruefen([tf.Teil("a", "x", 10, 5)])

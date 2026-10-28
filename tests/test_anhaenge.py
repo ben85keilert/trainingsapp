@@ -265,7 +265,12 @@ def test_migration_029_behaelt_anhaenge_und_erlaubt_audio_und_tag(tmp_path) -> N
     profil = Subject(name="Alt")
     SubjectRepo(con).speichern(profil)
     plan = Plan(name="P", subject_id=profil.id)
-    PlanRepo(con).speichern(plan)
+    # Schema 28 kennt die Paketspalten des Plans (033) nicht — die Zeile von Hand
+    con.execute(
+        "INSERT INTO plan (id, name, description, subject_id, created_at, updated_at) "
+        "VALUES (?, 'P', '', ?, ?, ?)",
+        (plan.id, profil.id, plan.created_at.isoformat(), plan.created_at.isoformat()),
+    )
     sitzungen = SessionRepo(con)
     session = sitzungen.session_fuer(profil.id, plan.id, lokaler_tag(datetime.now(UTC)))
     uebung = ExerciseRepo(con).laden(seed_id("nacken_dehnung"))
@@ -277,7 +282,7 @@ def test_migration_029_behaelt_anhaenge_und_erlaubt_audio_und_tag(tmp_path) -> N
         (eintrag.id,),
     )
     con.commit()
-    assert migrieren(con) == 31
+    assert migrieren(con) == 33
     repo = AnhangRepo(con, tmp_path / "Anhaenge")
     alt = repo.laden("alt")
     assert alt is not None and (alt.eintrag_id, alt.note, alt.bytes) == (eintrag.id, "links", 300)

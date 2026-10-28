@@ -122,4 +122,5 @@ fehlten in der Notizliste.
   (`paare_aus_notizen` ohne Mindestdauer für Offene).
 - Eine Leistungs-Notiz (`person/leistung`, `person/abschluss`) bleibt aus der Notizliste;
   die Grenz-Notizen der Person stehen darin (`messung_detail._ist_leistung`).
-
+- Seit 28.10.2026 steht das Live-Abschnittsfeld auch quer: `components/live_abschnitte.LiveAbschnitte`
+  ist ein Objekt für Live-Karte (Klappfeld) und Live-Vollbild (Seitenleiste neben den Notizen).

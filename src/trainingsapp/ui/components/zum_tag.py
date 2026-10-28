@@ -131,7 +131,7 @@ def zum_tag_block(
                     tooltip=f"{feld.name} {v} {tf.schnell_text(f, q)}".replace("  ", " "),
                     on_click=schnell(feld, q),
                     content=ft.Text(
-                        tf.schnell_text(f, q),
+                        f"{tf.schnell_text(f, q)} · {v}" if v else tf.schnell_text(f, q),
                         size=13,
                         weight=ft.FontWeight.W_600,
                         color=ft.Colors.ON_PRIMARY,

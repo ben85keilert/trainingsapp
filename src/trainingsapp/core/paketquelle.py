@@ -35,6 +35,7 @@ from typing import Any, Final
 from .models import jetzt
 from .netz import OEFFNER, verschluesselt
 from .pakete import (
+    FORMAT,
     GRUNDAUSSTATTUNG,
     MAX_PAKET_BYTES,
     Paket,
@@ -332,6 +333,74 @@ def updates_finden(
     return updates, neue
 
 
+#: Wie ein Paket an seine Quelle gebunden ist (`Paket.quelle_art`)
+INDEX, DATEI = "index", "datei"
+
+
+def datei_eintrag(
+    url: str, laden: Callable[[str], bytes] = _laden
+) -> tuple[IndexEintrag, Paketinhalt]:
+    """Ein direkter Link auf eine Paketdatei als Eintrag wie aus einem Index (Ben,
+    28.10.2026: „eine URL importieren, die updatefähig ist“) — Prüfsumme der geladenen
+    Datei, ``quelle_url`` = der Link selbst. Wirft `QuellenFehler`."""
+    daten = _holen(url, laden)
+    if len(daten) > MAX_PAKET_BYTES:
+        raise QuellenFehler("Die Paketdatei ist zu groß.")
+    try:
+        inhalt = paket_lesen(daten)
+    except PaketFehler as e:
+        raise QuellenFehler(str(e)) from e
+    eintrag = IndexEintrag(
+        id=inhalt.paket.id,
+        name=inhalt.paket.name,
+        version=inhalt.paket.version,
+        url=url,
+        sha256=hashlib.sha256(daten).hexdigest(),
+        bytes=len(daten),
+        quelle_url=url,
+        beschreibung=inhalt.paket.beschreibung,
+        uebungen=len(inhalt.uebungen),
+        kurse=len(inhalt.kurse),
+        neuigkeiten=inhalt.paket.neuigkeiten,
+    )
+    return eintrag, inhalt
+
+
+def link_lesen(url: str, laden: Callable[[str], bytes] = _laden) -> tuple[str, Any]:
+    """Was unter einem Link liegt: ``("index", (Name, Einträge))`` für einen Paketindex,
+    ``("paket", (Eintrag, Inhalt))`` für eine Paketdatei — sonst `QuellenFehler`.
+
+    >>> import json
+    >>> roh = {"format": INDEX_FORMAT, "version": 1, "quelle": {"name": "P"}, "pakete": []}
+    >>> link_lesen("https://x/i.json", lambda _u: json.dumps(roh).encode())[0]
+    'index'
+    >>> datei = b'{"paket": {"name": "T"}, "exercises": [{"name": "A"}]}'
+    >>> link_lesen("https://x/p.json", lambda _u: datei)[0]
+    'paket'
+    >>> try:
+    ...     link_lesen("https://x/t.txt", lambda _u: b"hallo")
+    ... except QuellenFehler as e:
+    ...     print(e)
+    Unter dieser Adresse liegt weder ein Übungspaket noch ein Paketindex.
+    """
+    if (fehler := url_pruefen(url)) is not None:
+        raise QuellenFehler(fehler)
+    daten = _holen(url, laden)
+    try:
+        roh = json.loads(daten) if len(daten) <= MAX_PAKET_BYTES else None
+    except ValueError:
+        roh = None
+    if isinstance(roh, dict) and roh.get("format") == INDEX_FORMAT:
+        if len(daten) > MAX_INDEX_BYTES:
+            raise QuellenFehler("Der Index ist zu groß.")
+        return INDEX, index_lesen(roh, url)
+    if isinstance(roh, dict) and (
+        roh.get("format") == FORMAT or ("exercises" in roh or "kurse" in roh or "plaene" in roh)
+    ):
+        return "paket", datei_eintrag(url, lambda _u: daten)
+    raise QuellenFehler("Unter dieser Adresse liegt weder ein Übungspaket noch ein Paketindex.")
+
+
 def paket_laden(eintrag: IndexEintrag, laden: Callable[[str], bytes] = _laden) -> Paketinhalt:
     """Die Paketdatei eines Eintrags holen, Prüfsumme und Inhalt prüfen."""
     daten = _holen(eintrag.url, laden)
@@ -370,11 +439,23 @@ def pruefen(
             ergebnis.fehler.append(f"{url}: {e}")
             continue
         eintraege.extend(teil)
+    installierte = list(installierte)
+    # Pakete mit einem Datei-Link als Quelle: die Datei selbst fragen (Plan §1)
+    for p in installierte:
+        if p.quelle and p.quelle_art == DATEI and p.aktiv:
+            try:
+                eintrag, _ = datei_eintrag(p.quelle, laden)
+            except QuellenFehler as e:
+                ergebnis.fehler.append(f"{p.name} ({p.quelle}): {e}")
+                continue
+            eintraege.append(eintrag)
     ergebnis.updates, ergebnis.neue = updates_finden(eintraege, installierte)
     return ergebnis
 
 
 __all__ = [
+    "DATEI",
+    "INDEX",
     "INDEX_FORMAT",
     "INDEX_VERSION",
     "MAX_INDEX_BYTES",
@@ -383,10 +464,12 @@ __all__ = [
     "PaketUpdate",
     "Pruefung",
     "QuellenFehler",
+    "datei_eintrag",
     "fremde_identitaet",
     "gebundene_quelle",
     "index_laden",
     "index_lesen",
+    "link_lesen",
     "paket_laden",
     "pruefen",
     "quelle_passt",

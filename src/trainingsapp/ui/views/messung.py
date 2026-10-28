@@ -51,15 +51,13 @@ from pathlib import Path
 from typing import Any
 
 import flet as ft
-from hrv_core.atmung import ATEMUEBUNG, RUHE, kurzgrund
 from hrv_core.aufnahme import backup_lesen
 from hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
 from hrv_core.regeln import Korrekturregeln
-from hrv_core.trends import KENNZAHLEN, aktuell, atmung_aktuell, titel
+from hrv_core.trends import KENNZAHLEN
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
-from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM, ROH, ROH_MAX_MS, ROH_MIN_MS, Ansicht
-from trainingsapp.core.hrv_einstellungen import HrvEinstellungen
+from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM, ROH, ROH_MAX_MS, ROH_MIN_MS
 from trainingsapp.core.hrv_export import adresse_maskieren, export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.models import HrvRecording
@@ -92,21 +90,17 @@ from trainingsapp.devices.simulated import (
 )
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import ziele_liste
-from trainingsapp.ui.components.abschnitte import Abschnittsfeld, abschnitt_chip, name_dialog
 from trainingsapp.ui.components.analyse import Analyse
 from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog, schliessen
 from trainingsapp.ui.components.kacheln import (
-    KACHELN,
-    PULS_KACHELN,
-    KachelWert,
     anzeige,
-    ohne_intervalle,
-    zahl,
+    kachel_werte,
 )
 from trainingsapp.ui.components.karte import info_eintrag, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt, regler_eintrag
 from trainingsapp.ui.components.kurve import RR_SPANNE_MIN_MS, Reihe, kurve
+from trainingsapp.ui.components.live_abschnitte import LiveAbschnitte
 from trainingsapp.ui.components.notizen import (
     Notizfeld,
     senkrechte,
@@ -126,7 +120,6 @@ from trainingsapp.ui.components.verlauf import (
     Zeitachse,
     darstellung_blatt,
     darstellung_knopf,
-    fenster_text,
     kurvengruppen,
 )
 from trainingsapp.ui.components.vollbild import (
@@ -424,110 +417,6 @@ Welche Geräte das sind, steht im Geräteprofil — etwa Uhren, die ihre Herzfre
 Waagrecht wischen blättert zurück. Titel, Beschreibung und Notizen lassen sich schon
 vor dem Start eintragen; „Aufnahme starten“ beginnt die Kurve neu.
 """
-
-
-# ---------------------------------------------------------------------------
-# Kacheln
-# ---------------------------------------------------------------------------
-
-
-def kachel_werte(
-    lauf: Messlauf,
-    einst: HrvEinstellungen,
-    ansicht: Ansicht,
-    verity: bool,
-    atemuebung_an: Callable[[], object] | None = None,
-    *,
-    puls_allein: bool = False,
-) -> list[KachelWert]:
-    """Die eingestellten Werte der Übersicht mit den aktuellen Live-Werten.
-
-    Werte einer Verlaufskurve rechnen mit deren Fenster — der Wert ist der
-    letzte Punkt der Kurve. Die Atemfrequenz gibt es nur bei deutlicher Atmung;
-    sonst steht der Grund da (bei langsamer Schwingung mit dem Knopf
-    „Atemübung", ``atemuebung_an``). Vom Sensor verworfene Intervalle (Verity
-    Sense) erscheinen von selbst, sobald es welche gibt. Sendet das Gerät nur den
-    Puls (``puls_allein``, `nur_puls`), sagen die übrigen Kacheln das statt eines
-    Grunds, der nicht stimmt (`ohne_intervalle`).
-    """
-    k = lauf.live.kennzahlen()
-    t, rr, naht = lauf.live.verlaufsreihe()
-    modus = ATEMUEBUNG if einst.atemuebung else RUHE
-    gross = set(einst.gross)
-    atmung = None
-    out: list[KachelWert] = []
-    for key in einst.kacheln:
-        art = KACHELN.get(key)
-        if art is None:
-            continue
-        g = key in gross
-        bisher = len(out)
-        if key == "hf":
-            hf = k.hf_bpm if k.hf_bpm is not None else lauf.status.hf_bpm
-            out.append(KachelWert("Herzfrequenz", zahl(hf), "bpm", gross=g))
-        elif key == "rr":
-            out.append(KachelWert("PPI" if verity else "RR", zahl(k.rr_ms), "ms", gross=g))
-        elif key == "artefakte":
-            out.append(
-                KachelWert("Artefakte", str(k.artefakte), zusatz=f"von {k.schlaege}", gross=g)
-            )
-        elif key == "schwankung":
-            out.append(KachelWert(art.titel, zahl(k.schwankung_60s, 1), "bpm", gross=g))
-        elif key == "ulf":
-            out.append(
-                KachelWert(art.titel, "–", "ms²", gross=g, grund="ab 4 h, in der Aufzeichnung")
-            )
-        elif key in ("atemfrequenz", "rsa"):
-            kz = KENNZAHLEN[key]
-            fenster = ansicht.fenster_fuer(key, kz.fenster_s)
-            if atmung is None:
-                atmung = atmung_aktuell(t, rr, fenster, atem_modus=modus)
-            wert = atmung.rate_pro_min if key == "atemfrequenz" else atmung.rsa_bpm
-            grund = "" if atmung.gueltig else kurzgrund(atmung.gruende)
-            aktion = None
-            if key == "atemfrequenz" and atemuebung_an is not None:
-                if einst.atemuebung:
-                    aktion = ("Atemübung aus", atemuebung_an)
-                elif "langsame Schwingung" in grund:
-                    aktion = ("Atemübung", atemuebung_an)
-            out.append(
-                KachelWert(
-                    f"{kz.titel} {fenster_text(fenster)}",
-                    zahl(wert if atmung.gueltig else None, kz.nachkomma),
-                    kz.einheit,
-                    farbe=FARBEN[key],
-                    gross=g,
-                    grund=grund,
-                    aktion=aktion,
-                )
-            )
-        elif art.kennzahl is not None:
-            kz = KENNZAHLEN[art.kennzahl]
-            fenster = ansicht.fenster_fuer(art.kennzahl, kz.fenster_s)
-            wert = (
-                aktuell(t, rr, naht, art.kennzahl, fenster, pnn_ms=ansicht.pnn_ms)
-                if t.size
-                else None
-            )
-            out.append(
-                KachelWert(
-                    f"{titel(art.kennzahl, ansicht.pnn_ms)} {fenster_text(fenster)}",
-                    zahl(wert, kz.nachkomma),
-                    kz.einheit,
-                    farbe=FARBEN[art.kennzahl],
-                    gross=g,
-                )
-            )
-        if puls_allein and key not in PULS_KACHELN and len(out) > bisher:
-            out[-1] = ohne_intervalle(out[-1])
-    if k.verworfen:
-        zusatz = (
-            "vom Sensor · selbst geprüft"
-            if lauf.regeln.selbst_pruefen
-            else f"vom Sensor · von {k.schlaege + k.verworfen}"
-        )
-        out.append(KachelWert("Verworfen", str(k.verworfen), zusatz=zusatz))
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1102,144 +991,20 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         notizfeld.auffrischen()
         aktualisieren(erzwingen=True)
 
-    # -- Abschnitte (Ben, 27.10.2026): Start/Ende, Chips, Liste — `docs/plan_abschnitte.md`
-    abschnitt_stand: dict[str, Any] = {"schluessel": None, "gebunden": None}
-    #: Die Zeitzeile des laufenden Abschnitts — sie zählt im Sekundentakt mit
-    laufzeit: dict[str, ft.Text] = {}
-    start_knopf = ft.TextButton("Abschnitt: Start", icon=ft.Icons.PLAY_ARROW)
-    abschnittsfeld = Abschnittsfeld(
-        offen=state.abschnitte_offen,
-        offen_merken=lambda offen: setattr(state, "abschnitte_offen", offen),
-        knoepfe=[start_knopf],
-        zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
+    # -- Abschnitte (Ben, 27.10.2026): Start/Ende, Chips, Liste — `docs/plan_abschnitte.md`;
+    # dasselbe Feld steht quer als Seitenleiste (`components.live_abschnitte`)
+    live_abschnitte = LiveAbschnitte(
+        page,
+        state,
+        lauf,
+        fenster=fenster,
+        anfang=anfang,
+        breite_gesetzt=lambda b: setattr(breiten_knoepfe, "selected", breiten_auswahl(b)),
+        notizen_auffrischen=lambda: notizfeld.auffrischen(),
+        danach=lambda: aktualisieren(erzwingen=True),
     )
-
-    def abschnitt_zeichnen_und_melden() -> None:
-        abschnitte_neu(erzwingen=True)
-        notizfeld.auffrischen()
-        aktualisieren(erzwingen=True)
-
-    def abschnitt_starten(name: str) -> None:
-        lauf.abschnitt_starten(name)
-        abschnitt_zeichnen_und_melden()
-
-    def abschnitt_knopf() -> None:
-        """„Abschnitt: Start“ fragt den Namen; „‹Name› · Ende“ beendet ihn."""
-        if lauf.aufnahme is None:
-            page.show_dialog(ft.SnackBar(ft.Text("Erst die Aufnahme starten.")))
-            return
-        if lauf.offener_abschnitt() is not None:
-            lauf.abschnitt_beenden()
-            abschnitt_zeichnen_und_melden()
-            return
-        page.show_dialog(
-            name_dialog(
-                page,
-                vorschlaege=[t.name for t in state.hrv.titel_liste(state.profil.id)],
-                vorgabe=f"Abschnitt {len(lauf.abschnitte()) + 1}",
-                starten=abschnitt_starten,
-            )
-        )
-
-    start_knopf.on_click = lambda: abschnitt_knopf()
-
-    def abschnitt_binden(a: Any) -> None:
-        """Ein Chip rückt das Fenster auf den Abschnitt (Breite = Dauer, mindestens 1 min);
-        „Ganze Messung“ zeigt den ganzen Puffer. Ein laufender folgt der Gegenwart."""
-        jetzt = lauf.jetzt_s()
-        if a is None:
-            fenster.breite_s = max(60.0, jetzt - anfang())
-            fenster.ende_s = None
-            abschnitt_stand["gebunden"] = None
-        else:
-            fenster.breite_s = max(60.0, a.dauer_s)
-            fenster.ende_s = None if a.bis_s >= jetzt - 1.0 else a.bis_s
-            abschnitt_stand["gebunden"] = a.id
-        breiten_knoepfe.selected = breiten_auswahl(fenster.breite_s)
-        abschnitte_neu(erzwingen=True)
-        aktualisieren(erzwingen=True)
-
-    def zeit_text(a: Any, laeuft: bool) -> str:
-        if laeuft:
-            return f"seit {_uhr(a.von_s)} · läuft ({_uhr(a.dauer_s)})"
-        return f"{_uhr(a.von_s)}–{_uhr(a.bis_s)} ({_uhr(a.dauer_s)})"
-
-    def binder(a: Any) -> Callable[[], None]:
-        return lambda: abschnitt_binden(a)
-
-    def abschnitt_zeile(a: Any, laeuft: bool) -> ft.Control:
-        zeit = ft.Text(zeit_text(a, laeuft), size=12, opacity=0.75)
-        if laeuft:
-            laufzeit[a.id] = zeit
-        return ft.Container(
-            height=44,
-            padding=ft.Padding.only(top=2, bottom=2),
-            on_click=lambda _=None: abschnitt_binden(a),
-            content=ft.Row(
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Container(width=4, height=36, border_radius=2, bgcolor=a.farbe),
-                    ft.Column(
-                        spacing=0,
-                        tight=True,
-                        expand=True,
-                        controls=[
-                            ft.Text(a.name, size=13, weight=ft.FontWeight.W_600, max_lines=1),
-                            zeit,
-                        ],
-                    ),
-                ],
-            ),
-        )
-
-    def abschnitte_neu(erzwingen: bool = False) -> None:
-        """Chips, Liste und Knopf aus den Abschnitten der Aufnahme — nur neu gebaut, wenn
-        sich etwas ändert (im Sekundentakt gerufen); der laufende zählt seine Dauer mit."""
-        teile = lauf.abschnitte()
-        offen = lauf.offener_abschnitt()
-        laufend_id = offen[0] if offen else None
-        schluessel = (
-            tuple(
-                (a.id, a.name, round(a.von_s), None if a.id == laufend_id else round(a.bis_s))
-                for a in teile
-            ),
-            laufend_id,
-            abschnitt_stand["gebunden"],
-            lauf.aufnahme is not None,
-        )
-        if not erzwingen and schluessel == abschnitt_stand["schluessel"]:
-            for a in teile:  # nur die laufende Dauer zählt mit
-                if a.id == laufend_id and (zeit := laufzeit.get(a.id)) is not None:
-                    zeit.value = zeit_text(a, True)
-            return
-        abschnitt_stand["schluessel"] = schluessel
-        laufzeit.clear()
-        if offen is not None:
-            start_knopf.content = f"{offen[1]} · Ende"
-            start_knopf.icon = ft.Icons.STOP
-        else:
-            start_knopf.content = "Abschnitt: Start"
-            start_knopf.icon = ft.Icons.PLAY_ARROW
-        start_knopf.disabled = lauf.aufnahme is None
-        gebunden = abschnitt_stand["gebunden"]
-        chips: list[ft.Control] = [
-            abschnitt_chip(None, gewaehlt=gebunden is None, on_click=binder(None)),
-            *[abschnitt_chip(a, gewaehlt=a.id == gebunden, on_click=binder(a)) for a in teile],
-        ]
-        zeilen = [abschnitt_zeile(a, a.id == laufend_id) for a in teile]
-        if not teile:
-            zeilen = [
-                ft.Text(
-                    "Noch keine Abschnitte — „Abschnitt: Start“ setzt die Grenze bei jetzt, "
-                    "der Timer seine Abschnitte von selbst."
-                    if lauf.aufnahme is not None
-                    else "Abschnitte gibt es in der Aufnahme.",
-                    size=12,
-                    opacity=0.7,
-                )
-            ]
-        abschnittsfeld.fuellen(chips, zeilen, len(teile))
+    abschnittsfeld = live_abschnitte.feld
+    abschnitte_neu = live_abschnitte.neu
 
     state.notiz_beobachter["live"] = timer_notizen
 
@@ -1247,10 +1012,19 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         return [] if lauf.live.kennzahlen().rr_ms else ohne_rr()
 
     def menue_oben() -> list[ft.PopupMenuItem]:
-        """Info und automatische Korrektur — vorher Knöpfe in der Titelzeile (Ben, 21.10.)."""
+        """Info und automatische Korrektur — vorher Knöpfe in der Titelzeile (Ben, 21.10.);
+        während der Aufnahme „Teil speichern, weiter aufnehmen“ (Ben, 28.10.2026)."""
         eintraege = [info_eintrag(page, "So liest du die Kurven", lambda: kurven_info())]
         if not modus["puls"]:
             eintraege.append(regler_eintrag(regeln_oeffnen))
+        if lauf.aufnahme is not None:
+            eintraege.append(
+                ft.PopupMenuItem(
+                    content="Teil speichern, weiter aufnehmen",
+                    icon=ft.Icons.SAVE_AS_OUTLINED,
+                    on_click=lambda _=None: page.run_task(aufnahme_teilen),
+                )
+            )
         return eintraege
 
     analyse = Analyse(
@@ -1522,6 +1296,32 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         eintrag = aufnahme_eintragen(state, ergebnis, lauf.subject_id)
         page.show_dialog(ft.SnackBar(ft.Text(f"Gespeichert: {ergebnis.pfad.name}")))
         await page.push_route(f"/messung/{eintrag.id}")
+
+    async def aufnahme_teilen() -> None:
+        """Lange Aufnahmen in Teilen (Ben, 28.10.2026): Teil 1 wird Messdatei und Eintrag,
+        die Aufnahme läuft ohne Lücke weiter; zusammenfügen am Rechner mit
+        `hrv_core.zusammenfuegen`."""
+        if stoppt[0]:
+            return
+        stoppt[0] = True
+        try:
+            ergebnis = await lauf.aufnahme_teilen_async(datenverzeichnis())
+        except OSError as fehler:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Teil nicht gespeichert: {fehler}")))
+            return
+        finally:
+            stoppt[0] = False
+        if ergebnis is None:
+            return
+        aufnahme_eintragen(state, ergebnis, lauf.subject_id)
+        page.show_dialog(
+            ft.SnackBar(
+                ft.Text(f"Teil gespeichert: {ergebnis.pfad.name} — die Aufnahme läuft weiter.")
+            )
+        )
+        abschnitte_neu(erzwingen=True)
+        notizfeld.auffrischen()
+        aktualisieren(erzwingen=True)
 
     def titel_bearbeiten() -> None:
         """Titel und Beschreibung — schon vor der Aufnahme (Ben, 17.10.2026), dann übernimmt

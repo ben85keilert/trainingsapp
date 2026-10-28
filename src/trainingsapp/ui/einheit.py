@@ -560,6 +560,7 @@ async def _laufen(
         if t is not None and getattr(state, "timer", None) is t.lauf and not t.lauf.fertig:
             state.timer = None
         abschluss: Abschluss | None = None
+        strecke: Any = None
         with contextlib.suppress(Exception):
             abschluss = await e.abschliessen()
         aufnahme: Any = None
@@ -578,7 +579,7 @@ async def _laufen(
             from trainingsapp.ui.training import einheit_eintragen
 
             try:
-                einheit_eintragen(state, e, training, getattr(aufnahme, "id", None))
+                strecke = einheit_eintragen(state, e, training, getattr(aufnahme, "id", None))
             except Exception as fehler:  # steht in der Einheit; die Ansicht zeigt es
                 e.warnung = f"Training nicht gespeichert: {fehler}"
         uebung = abschluss.teile.get("plan") if abschluss is not None else None
@@ -604,6 +605,34 @@ async def _laufen(
         melden(state)
         with contextlib.suppress(Exception):
             state.neu_zeichnen()
+        if strecke is not None and strecke.file_path:
+            with contextlib.suppress(Exception):
+                _nachlauf_fragen(page, state, strecke)
+
+
+def _nachlauf_fragen(page: Any, state: Any, strecke: Any) -> None:
+    """Stand die Person am Ende länger still (`core.nachlauf.NACHLAUF_MIN_S`), fragt das
+    Blatt „Ende der Strecke kürzen“ — nach jedem Dialog, der gerade offen ist (Reste,
+    Rückfragen), nie darüber (Ben, 28.10.2026)."""
+    from trainingsapp.ui.components.dialoge import dialog_offen
+    from trainingsapp.ui.components.kuerzen import kuerzen_blatt
+    from trainingsapp.ui.training import nachlauf_der_strecke
+
+    n = nachlauf_der_strecke(strecke)
+    if n is None:
+        return
+
+    async def zeigen() -> None:
+        for _ in range(120):
+            if not dialog_offen(page):
+                break
+            await asyncio.sleep(0.5)
+        with contextlib.suppress(Exception):
+            page.show_dialog(
+                kuerzen_blatt(page, state, strecke, n, lauf=state.messlauf, beim_speichern=True)
+            )
+
+    page.run_task(zeigen)
 
 
 def _messung_weiter_zeigen(page: Any, state: Any) -> bool:

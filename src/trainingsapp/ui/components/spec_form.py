@@ -53,6 +53,7 @@ from trainingsapp.ui.components.varianten import Variantenwahl, zeilenbreite
 ZAHLENARTIG = {
     FieldType.INT,
     FieldType.FLOAT,
+    FieldType.READING,
     FieldType.DEGREES,
     FieldType.WEIGHT,
     FieldType.DISTANCE,

@@ -177,13 +177,17 @@ async def test_backup_wiederherstellen_schreibt_messdatei_mit_profil_und_abschni
 async def test_backup_ohne_zusatz_und_mit_vorhandener_messdatei(tmp_path) -> None:
     """Älteres Backup (kein `_wiederherstellung`): Profil unbekannt. Liegt die Messdatei
     schon da, bleibt sie Byte für Byte, das Backup geht trotzdem weg."""
+    from hrv_core.aufnahme import backup_lesen
+
     from trainingsapp.devices.messlauf import backup_wiederherstellen
 
     await _abgestuerzt(tmp_path, subject_id=None)
     backup = next(tmp_path.rglob(".backup_*.json"))
-    doc = json.loads(backup.read_text(encoding="utf-8"))
-    doc.pop("_wiederherstellung")
+    # Ein Backup von vor dem Journal (28.10.2026): die Schläge stehen im Kopf
+    rec, _ = backup_lesen(backup)
+    doc = rec.to_dict()
     backup.write_text(json.dumps(doc), encoding="utf-8")
+    backup.with_name(backup.name + "l").unlink()
 
     ergebnis = backup_wiederherstellen(backup)
     assert ergebnis is not None and ergebnis.subject_id is None
@@ -221,7 +225,8 @@ async def test_backup_jetzt_sichert_sofort(tmp_path) -> None:
     assert len(backups) == 1
     doc = json.loads(backups[0].read_text(encoding="utf-8"))
     assert doc["_wiederherstellung"] == {"subject_id": "p1", "grenzen": []}
-    assert len(doc["messungen"]) == len(lauf.aufnahme.beats)
+    journal = backups[0].with_name(backups[0].name + "l")  # die Schläge im Journal (28.10.)
+    assert len(journal.read_text(encoding="utf-8").splitlines()) == len(lauf.aufnahme.beats)
     await lauf.trennen()
     await asyncio.wait_for(task, 5)
 
@@ -613,3 +618,37 @@ async def test_eigener_abschnitt_live_als_notizpaar(tmp_path) -> None:
     assert teile[0].bis_s == pytest.approx(teile[1].von_s, abs=0.5)
     doc = json.loads(analyse_pfad(ergebnis.pfad).read_text())
     assert doc["segments"][0]["rand"] == {"kopf_s": -2, "endteil_s": 3}
+
+
+async def test_teil_speichern_und_weiter_dann_zusammenfuegen(tmp_path) -> None:
+    """„Teil speichern & weiter“ (Ben, 28.10.2026): Teil 1 wird Messdatei, die Aufnahme läuft
+    ohne Lücke weiter; Backup-Kopf und -Journal von Teil 1 sind weg; `zusammenfuegen` macht
+    aus beiden Teilen eine Messung mit durchlaufender Herzuhr."""
+    from hrv_core.recording import laden
+    from hrv_core.zusammenfuegen import zusammenfuegen
+
+    lauf, task = await _laufend(tmp_path)
+    lauf.titel_notiz_setzen("Nacht", "")
+    lauf.abschnitt_markieren("Ruhe beginnt", name="Ruhe")
+    await _bis(lauf, 10)
+    lauf.backup_jetzt()
+    assert list(tmp_path.rglob(".backup_*.jsonl"))
+    teil1 = await lauf.aufnahme_teilen_async(tmp_path)
+    assert teil1 is not None and teil1.pfad.exists()
+    assert lauf.aufnahme is not None and lauf.aufnahme.titel == "Nacht"
+    assert lauf.aufnahme_dauer_s() < 5  # die neue zählt von vorn
+    assert not list(tmp_path.rglob(".backup_*"))  # Kopf und Journal von Teil 1 sind weg
+    await _bis(lauf, 5)
+    assert lauf.aufnahme.beats  # der Strom läuft in die neue
+    teil2 = await lauf.aufnahme_stoppen_async(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert teil2 is not None and teil2.pfad != teil1.pfad
+    a, b = laden(teil1.pfad), laden(teil2.pfad)
+    assert a.titel == "Nacht" and b.titel == "Nacht"
+    assert any(e.get("text") == "Ruhe beginnt" for e in a.ereignisse) and not b.ereignisse
+    ganz = zusammenfuegen([a, b])
+    assert len(ganz.beats) == len(a.beats) + len(b.beats)
+    herz = [x.t_s for x in ganz.beats]
+    assert herz == sorted(herz)  # die Herzuhr läuft durch; die Wanduhr der Naht prüft hrv-core
+    assert [e["text"] for e in ganz.ereignisse][-1] == "Teil 2"

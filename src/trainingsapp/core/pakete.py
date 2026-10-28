@@ -55,10 +55,11 @@ from .kurse import (
     Kapitel,
     Kurs,
     PlanVorlage,
+    VorlageItem,
     medien_from_list,
     medien_to_list,
 )
-from .models import Exercise, Media, MediaKind, MediaSource, jetzt
+from .models import Exercise, Media, MediaKind, MediaSource, Plan, jetzt
 from .result_spec import VORLAGEN, ResultSpec
 from .timer import TimerProfil
 
@@ -66,7 +67,7 @@ from .timer import TimerProfil
 FORMAT = "trainingsapp-uebungspaket"
 #: Höchste Formatversion, die diese App liest — 2 seit es Kurse gibt (``kurse``);
 #: eine Datei ohne Kurse wird weiter als Version 1 geschrieben
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 #: Namensraum der UUIDv5-IDs — derselbe wie für den Seed vor den Paketen.
 #: Einmal gewählt, nie ändern, sonst bekäme jede Übung eine neue ID.
@@ -113,6 +114,9 @@ class Paket:
     #: Woher das Paket zuletzt kam (Adresse der Quelle, ihr Index; Migration 026) —
     #: ``None`` = Datei/Seed. Nur diese Quelle darf es aktualisieren (`paketquelle.quelle_passt`)
     quelle: str | None = None
+    #: Was die Quelle ist (Migration 033): ``"index"`` (ihr Index) oder ``"datei"`` (ein
+    #: direkter Link auf die Paketdatei, beim Start auf eine neuere Version geprüft)
+    quelle_art: str = "index"
     #: Was die Paketquelle zuletzt meldete (Migration 017): Version, Datei, Prüfsumme,
     #: Neuigkeiten — ``verfuegbar`` ``None`` = nichts Neueres bekannt
     verfuegbar: int | None = None
@@ -129,6 +133,92 @@ class Paket:
 
 
 @dataclass(slots=True)
+class PaketPlan:
+    """Ein Plan im Paket (Formatversion 3, Ben 28.10.2026: „Pläne ohne Kurse müssen mit
+    importierbar sein“) — dieselbe Vorlage wie in einem Kurskapitel, dazu Beschreibung,
+    Timer und die Ablauf-Schalter. Der Import legt ihn je Profil an
+    (`plan_id`), `docs/plan_import_links_plaene.md` §3."""
+
+    key: str
+    vorlage: PlanVorlage
+    beschreibung: str = ""
+    timer: dict[str, Any] | None = None
+    weiter_automatisch: bool = False
+    pause_ohne_timer: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"key": self.key, **self.vorlage.to_dict()}
+        if self.beschreibung:
+            d["beschreibung"] = self.beschreibung
+        if self.timer:
+            d["timer"] = dict(self.timer)
+        if self.weiter_automatisch:
+            d["weiter_automatisch"] = True
+        if not self.pause_ohne_timer:
+            d["pause_ohne_timer"] = False
+        return d
+
+    @classmethod
+    def from_dict(cls, roh: Mapping[str, Any]) -> PaketPlan:
+        """Liest, was `to_dict` schreibt; ``key`` fehlt → aus dem Namen.
+
+        >>> p = PaketPlan.from_dict({"name": "Atmung", "uebungen": [{"uebung": "a"}]})
+        >>> p.key, p.vorlage.items[0].exercise_id, p.pause_ohne_timer
+        ('atmung', 'a', True)
+        """
+        vorlage = PlanVorlage.from_dict(roh)
+        key = str(roh.get("key") or "").strip() or vorlage.name.strip().casefold()
+        timer = roh.get("timer")
+        return cls(
+            key=key,
+            vorlage=vorlage,
+            beschreibung=str(roh.get("beschreibung") or "").strip(),
+            timer=dict(timer) if isinstance(timer, Mapping) and timer else None,
+            weiter_automatisch=bool(roh.get("weiter_automatisch", False)),
+            pause_ohne_timer=bool(roh.get("pause_ohne_timer", True)),
+        )
+
+
+def plan_id(paket: str, key: str, subject_id: str) -> str:
+    """Die ID eines Paketplans in **diesem** Profil — zwei Profile dürfen denselben haben.
+
+    >>> plan_id("p1", "atmung", "s1") != plan_id("p1", "atmung", "s2")
+    True
+    """
+    return str(uuid.uuid5(NAMENSRAUM, f"{paket}/plan:{key}/{subject_id}"))
+
+
+def plan_stand(p: PaketPlan) -> dict[str, Any]:
+    """Der Paketstand eines Plans — womit der Import Geändertes erkennt (wie `kurs_stand`)."""
+    return json.loads(json.dumps(p.to_dict(), ensure_ascii=False, sort_keys=True))
+
+
+def paketplan_aus(plan: Plan, key: str | None = None) -> PaketPlan:
+    """Ein Plan der App als Paketplan (Export; `paket_werkzeug uebernehmen`): Ziel und Felder
+    nur, wo der Plan eigene hat (sonst folgt die Planübung der Übung, P79)."""
+    vorlage = PlanVorlage(
+        name=plan.name,
+        wochentage=list(plan.wochentage),
+        items=[
+            VorlageItem(
+                exercise_id=i.exercise_id,
+                target=dict(i.target) if i.target else {},
+                felder=None if i.felder is None else list(i.felder),
+            )
+            for i in sorted(plan.items, key=lambda i: i.order)
+        ],
+    )
+    return PaketPlan(
+        key=key or plan.package_key or plan.name.strip().casefold(),
+        vorlage=vorlage,
+        beschreibung=plan.description,
+        timer=dict(plan.timer) if plan.timer else None,
+        weiter_automatisch=plan.weiter_automatisch,
+        pause_ohne_timer=plan.pause_ohne_timer,
+    )
+
+
+@dataclass(slots=True)
 class Paketinhalt:
     """Eine gelesene Paketdatei.
 
@@ -139,6 +229,8 @@ class Paketinhalt:
     uebungen: list[Exercise] = field(default_factory=list)
     #: Kurse des Pakets (Formatversion 2) — jeder trägt ``package_id`` = Paket
     kurse: list[Kurs] = field(default_factory=list)
+    #: Pläne des Pakets (Formatversion 3)
+    plaene: list[PaketPlan] = field(default_factory=list)
 
 
 def paket_id(name: str) -> str:
@@ -247,7 +339,10 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
     kurs_eintraege = roh.get("kurse", [])
     if not isinstance(kurs_eintraege, list):
         raise PaketFehler("Das ist keine Paketdatei (Kursliste unlesbar).")
-    if not eintraege and not kurs_eintraege:
+    plan_eintraege = roh.get("plaene", [])
+    if not isinstance(plan_eintraege, list):
+        raise PaketFehler("Das ist keine Paketdatei (Planliste unlesbar).")
+    if not eintraege and not kurs_eintraege and not plan_eintraege:
         raise PaketFehler("Das Paket enthält keine Übungen.")
 
     kopf = roh.get("paket", {})
@@ -309,7 +404,38 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
     if probleme:
         rest = len(probleme) - 3
         raise PaketFehler("\n".join(probleme[:3]) + (f"\n… und {rest} weitere" if rest > 0 else ""))
-    return Paketinhalt(paket, uebungen, kurse)
+    plaene: list[PaketPlan] = []
+    plan_keys: set[str] = set()
+    for nr, eintrag in enumerate(plan_eintraege, start=1):
+        try:
+            plan = _plan_lesen(eintrag, schluessel)
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as grund:
+            titel = eintrag.get("name") if isinstance(eintrag, dict) else None
+            probleme.append(f"Plan {nr}{f' („{titel}“)' if titel else ''}: {grund}")
+            continue
+        if plan.key in plan_keys:
+            probleme.append(f"Plan {nr} („{plan.vorlage.name}“) steht doppelt im Paket.")
+            continue
+        plan_keys.add(plan.key)
+        plaene.append(plan)
+    if probleme:
+        rest = len(probleme) - 3
+        raise PaketFehler("\n".join(probleme[:3]) + (f"\n… und {rest} weitere" if rest > 0 else ""))
+    return Paketinhalt(paket, uebungen, kurse, plaene)
+
+
+def _plan_lesen(eintrag: Any, schluessel: Mapping[str, str]) -> PaketPlan:
+    """Ein Plan aus ``plaene[]`` — Übungsschlüssel des Pakets werden IDs."""
+    if not isinstance(eintrag, dict):
+        raise ValueError("kein Eintrag mit Feldern")
+    if not " ".join(str(eintrag.get("name") or "").split()):
+        raise ValueError("der Name fehlt")
+    plan = PaketPlan.from_dict(eintrag)
+    if not _KEY_ERLAUBT.fullmatch(plan.key):
+        raise ValueError(f"key {plan.key!r}: nur Buchstaben, Ziffern, - und _")
+    plan.vorlage = _vorlage_lesen(eintrag, schluessel)
+    _werte_pruefen(plan.timer, "timer")
+    return plan
 
 
 def _kurs_lesen(eintrag: Any, paket: str, schluessel: Mapping[str, str]) -> Kurs:
@@ -360,11 +486,18 @@ def _kurs_lesen(eintrag: Any, paket: str, schluessel: Mapping[str, str]) -> Kurs
 
 
 def _vorlage_lesen(roh: Any, schluessel: Mapping[str, str]) -> PlanVorlage:
+    """Platzhalter (``$auswahl``, ``$test.…`` — Kurs stellt den Plan aus einer Auswahl
+    zusammen, P90, noch nicht gebaut) werden überlesen, nicht abgelehnt: eine ältere App
+    legt den Plan ohne sie an."""
     vorlage = PlanVorlage.from_dict(_objekt(roh, "plaene"))
+    vorlage.items = [i for i in vorlage.items if not i.exercise_id.startswith("$")]
     if not vorlage.items:
         raise ValueError(f"Plan „{vorlage.name}“ hat keine Übung")
     for item in vorlage.items:
         item.exercise_id = schluessel.get(item.exercise_id, item.exercise_id)
+        item.target = {
+            k: v for k, v in item.target.items() if not (isinstance(v, str) and v.startswith("$"))
+        }
         _werte_pruefen(item.target, "ziel")
     return vorlage
 
@@ -471,6 +604,7 @@ def _timer_lesen(roh: Any, uebung: str) -> list[dict[str, Any]]:
 #: das; `/`, `?` oder Leerzeichen brächen die Routen (`/uebung/<id>/…`), Leeres oder
 #: Kilobytes landeten in der Datenbank (S6)
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_KEY_ERLAUBT = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def _id_lesen(roh: Any, was: str) -> str | None:
@@ -805,10 +939,12 @@ def paket_bauen(
     kurse: list[Kurs] | None = None,
     *,
     mit_zeitstempel: bool = True,
+    plaene: list[PaketPlan] | None = None,
 ) -> dict[str, Any]:
     """Die Paketdatei als Wörterbuch — `paket_json` macht Bytes daraus.
 
-    Ohne Kurse bleibt die Datei Formatversion 1 — ältere Apps lesen sie weiter.
+    Ohne Kurse bleibt die Datei Formatversion 1, ohne Pläne höchstens 2 — ältere Apps
+    lesen sie weiter.
 
     >>> u = Exercise(name="Baum", typen=["Qigong"])
     >>> zurueck = paket_lesen(paket_bauen(Paket(id="p1", name="Qigong"), [u])).uebungen[0]
@@ -818,6 +954,10 @@ def paket_bauen(
     >>> roh = paket_bauen(Paket(id="p1", name="Qigong"), [u], kurse=[k])
     >>> roh["version"], paket_lesen(roh).kurse[0].name
     (2, 'HRV')
+    >>> pp = PaketPlan("atmung", PlanVorlage("Atmung", [0, 2], [VorlageItem(u.id)]))
+    >>> roh = paket_bauen(Paket(id="p1", name="Qigong"), [u], plaene=[pp])
+    >>> roh["version"], paket_lesen(roh).plaene[0].vorlage.items[0].exercise_id == u.id
+    (3, True)
     """
     kopf: dict[str, Any] = {"id": paket.id, "name": paket.name}
     if paket.beschreibung:
@@ -828,7 +968,7 @@ def paket_bauen(
         kopf["neuigkeiten"] = paket.neuigkeiten
     roh: dict[str, Any] = {
         "format": FORMAT,
-        "version": FORMAT_VERSION if kurse else 1,
+        "version": 3 if plaene else 2 if kurse else 1,
         "paket": kopf,
         "exercises": [{"id": u.id, **stand(u)} for u in uebungen],
     }
@@ -838,6 +978,8 @@ def paket_bauen(
         roh["exportiert"] = (exportiert or jetzt()).isoformat(timespec="seconds")
     if kurse:
         roh["kurse"] = [{"id": k.id, **kurs_stand(k)} for k in kurse]
+    if plaene:
+        roh["plaene"] = [p.to_dict() for p in plaene]
     return roh
 
 
@@ -847,11 +989,12 @@ def paket_json(
     kurse: list[Kurs] | None = None,
     *,
     mit_zeitstempel: bool = True,
+    plaene: list[PaketPlan] | None = None,
 ) -> bytes:
     """Die Datei zum Weitergeben: lesbar eingerückt, Umlaute im Klartext.
 
     ``mit_zeitstempel=False`` (Werkzeug): ohne ``exportiert`` — reproduzierbar (K28)."""
-    roh = paket_bauen(paket, uebungen, kurse=kurse, mit_zeitstempel=mit_zeitstempel)
+    roh = paket_bauen(paket, uebungen, kurse=kurse, mit_zeitstempel=mit_zeitstempel, plaene=plaene)
     return (json.dumps(roh, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
@@ -878,6 +1021,7 @@ __all__ = [
     "NAMENSRAUM",
     "Paket",
     "PaketFehler",
+    "PaketPlan",
     "Paketinhalt",
     "abweichungen",
     "aus_stand",
@@ -891,6 +1035,9 @@ __all__ = [
     "paket_id",
     "paket_json",
     "paket_lesen",
+    "paketplan_aus",
+    "plan_id",
+    "plan_stand",
     "stand",
     "stand_tag_nachziehen",
     "uebung_id",

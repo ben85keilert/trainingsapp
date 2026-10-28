@@ -337,6 +337,11 @@ class StreckenRechner:
     def letzter(self) -> Punkt | None:
         return self._letzter
 
+    @property
+    def letzte_bewegung_t(self) -> float | None:
+        """Ortungszeit der letzten Bewegung — ``None`` vor der ersten (`core.nachlauf`)."""
+        return self._letzte_bewegung
+
     def hinzufuegen(self, p: Punkt) -> list[Split]:
         """Eine Ortung einrechnen; zurück kommen die dabei vollendeten Splits (km-Signal)."""
         if p.genauigkeit_m is not None and p.genauigkeit_m > self.max_genauigkeit_m:

@@ -1086,3 +1086,124 @@ def test_paketstand_mit_altem_feldnamen_gilt_als_unveraendert() -> None:
     assert abweichungen(u, alt) == []
     soll = stand(u) | {"description": "neu"}
     assert zusammenfuehren(alt, stand(u), soll)["description"] == "neu"
+
+
+# ---------------------------------------------------------------------------
+# Pläne im Paket (Formatversion 3, Ben 28.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def qigong_mit_plan(**aenderungen: object) -> dict:
+    roh = qigong(**aenderungen)
+    roh["plaene"] = [
+        {
+            "key": "morgen",
+            "name": "Morgenroutine",
+            "beschreibung": "Fünf Minuten stehen.",
+            "wochentage": [0, 2, 4],
+            "uebungen": [{"uebung": "baum", "ziel": {"hold": [300]}}, {"uebung": "baum_tief"}],
+        }
+    ]
+    return roh
+
+
+def _profil(con, name: str = "Ich"):
+    from trainingsapp.core.models import Subject
+    from trainingsapp.data.repositories import SubjectRepo
+
+    s = Subject(name=name)
+    SubjectRepo(con).speichern(s)
+    return s
+
+
+def test_plaene_im_paket_lesen_bauen_und_platzhalter_ueberlesen() -> None:
+    inhalt = paket_lesen(qigong_mit_plan())
+    (plan,) = inhalt.plaene
+    assert plan.key == "morgen" and plan.vorlage.wochentage == [0, 2, 4]
+    assert plan.vorlage.items[0].exercise_id == inhalt.uebungen[0].id  # Schlüssel → ID
+    roh = paket_bauen(inhalt.paket, inhalt.uebungen, plaene=inhalt.plaene)
+    assert roh["version"] == 3 and roh["plaene"][0]["key"] == "morgen"
+    assert paket_lesen(roh).plaene[0].vorlage.items[1].exercise_id == inhalt.uebungen[1].id
+    # Platzhalter eines künftigen Kurses (P90) werden überlesen, nicht abgelehnt
+    roh2 = qigong_mit_plan()
+    roh2["plaene"][0]["uebungen"].append(
+        {"uebung": "$auswahl", "ziel": {"duration": "$test.duration"}}
+    )
+    roh2["plaene"][0]["uebungen"][0]["ziel"]["duration"] = "$test.duration"
+    gelesen = paket_lesen(roh2)
+    assert [i.exercise_id for i in gelesen.plaene[0].vorlage.items] == [
+        inhalt.uebungen[0].id,
+        inhalt.uebungen[1].id,
+    ]
+    assert gelesen.plaene[0].vorlage.items[0].target == {"hold": [300]}
+    with pytest.raises(PaketFehler):
+        paket_lesen({"paket": {"name": "X"}, "plaene": [{"key": "a"}]})  # ohne Name
+    with pytest.raises(PaketFehler):
+        paket_lesen({"paket": {"name": "X"}, "plaene": [{"name": "A", "uebungen": []}]})
+
+
+def test_import_legt_plaene_im_profil_an_und_laesst_geaenderte(con) -> None:
+    pakete, plaene = PaketRepo(con), PlanRepo(con)
+    ich, du = _profil(con, "Ich"), _profil(con, "Du")
+    inhalt = paket_lesen(qigong_mit_plan())
+    vorschau = pakete.vorschau(inhalt, ich.id)
+    assert vorschau.plaene == {"morgen": Status.NEU}
+    assert "1 Plan neu — in deinem Profil" in vorschau.zusammenfassung()
+    pakete.importieren(inhalt, subject_id=ich.id)
+    (plan,) = plaene.des_pakets(inhalt.paket.id, ich.id)
+    assert plan.name == "Morgenroutine" and plan.subject_id == ich.id
+    assert plan.package_id == inhalt.paket.id and plan.package_key == "morgen"
+    assert [i.exercise_id for i in plan.items] == [u.id for u in inhalt.uebungen]
+    assert plan.items[0].target == {"hold": [300]} and plan.wochentage == [0, 2, 4]
+    assert plan in plaene.alle(ich.id) and plaene.des_pakets(inhalt.paket.id, du.id) == []
+    # Das andere Profil bekommt ihn beim Start nachgelegt
+    assert [p.name for p in pakete.plaene_nachlegen(du.id)] == ["Morgenroutine"]
+    assert pakete.plaene_nachlegen(du.id) == []
+    # Unverändert → der Import schreibt nichts; neue Fassung → bekommt den Stand
+    assert pakete.vorschau(inhalt, ich.id).plaene == {"morgen": Status.UNVERAENDERT}
+    neu = qigong_mit_plan(version=2)
+    neu["plaene"][0]["wochentage"] = [1, 3]
+    pakete.importieren(paket_lesen(neu), subject_id=ich.id)
+    assert plaene.laden(plan.id).wochentage == [1, 3]
+    # Von der Person geändert → bleibt
+    geaendert = plaene.laden(plan.id)
+    geaendert.wochentage = [5]
+    plaene.speichern(geaendert)
+    neu2 = qigong_mit_plan(version=3)
+    neu2["plaene"][0]["wochentage"] = [0]
+    vorschau = pakete.vorschau(paket_lesen(neu2), ich.id)
+    assert vorschau.plaene == {"morgen": Status.EIGENE}
+    pakete.importieren(paket_lesen(neu2), subject_id=ich.id)
+    assert plaene.laden(plan.id).wochentage == [5]
+    # Im Papierkorb → bleibt dort, auch beim Nachlegen
+    plaene.loeschen(plan.id)
+    assert pakete.vorschau(paket_lesen(neu2), ich.id).plaene == {"morgen": Status.GELOESCHT}
+    assert pakete.plaene_nachlegen(ich.id) == []
+
+
+def test_paket_entfernen_nimmt_seine_plaene_und_inhalt_kennt_sie(con) -> None:
+    pakete, plaene = PaketRepo(con), PlanRepo(con)
+    ich = _profil(con)
+    inhalt = paket_lesen(qigong_mit_plan())
+    pakete.importieren(inhalt, subject_id=ich.id)
+    (plan,) = plaene.des_pakets(inhalt.paket.id, ich.id)
+    assert [p.key for p in pakete.paketplaene(inhalt.paket.id)] == ["morgen"]
+    assert [p.key for p in pakete.inhalt(inhalt.paket.id).plaene] == ["morgen"]
+    pakete.deaktivieren(inhalt.paket.id)
+    assert plan.id not in [p.id for p in plaene.alle(ich.id)]  # unsichtbar wie die Übungen
+    pakete.aktivieren(inhalt.paket.id)
+    assert plan.id in [p.id for p in plaene.alle(ich.id)]
+    pakete.entfernen(inhalt.paket.id)
+    assert plaene.laden(plan.id) is None and plaene.laden(plan.id, mit_geloeschten=True).deleted_at
+    assert plan.id in [p.id for p in plaene.papierkorb(ich.id)]
+
+
+def test_quelle_art_datei(con) -> None:
+    pakete = PaketRepo(con)
+    inhalt = paket_lesen(qigong())
+    pakete.importieren(inhalt)
+    pakete.quelle_setzen(inhalt.paket.id, "https://x/q.json", "datei")
+    p = pakete.laden(inhalt.paket.id)
+    assert p.quelle == "https://x/q.json" and p.quelle_art == "datei"
+    pakete.quelle_setzen(inhalt.paket.id, None)
+    assert pakete.laden(inhalt.paket.id).quelle_art == "index"

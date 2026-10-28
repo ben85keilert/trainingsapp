@@ -21,7 +21,14 @@ from typing import Any
 
 from trainingsapp.core.models import iso_utc, jetzt
 from trainingsapp.core.result_spec import ResultSpec
-from trainingsapp.core.tagesfelder import Tagesfeld, Tageswert, einmal_ziel, ergebnis
+from trainingsapp.core.tagesfelder import (
+    Tagesfeld,
+    Tageswert,
+    Vorschlag,
+    einmal_ziel,
+    ergebnis,
+    standardfelder_fehlend,
+)
 
 from .db import transaktion
 
@@ -61,6 +68,8 @@ class TagesfeldRepo:
             reihenfolge=int(r["sort_order"]),
             created_at=datetime.fromisoformat(r["created_at"]),
             deleted_at=_zeit(r["deleted_at"]),
+            tageswert=r["tageswert"] or "",
+            standard_key=r["standard_key"],
         )
 
     def alle(self, subject_id: str, *, mit_geloeschten: bool = False) -> list[Tagesfeld]:
@@ -96,8 +105,8 @@ class TagesfeldRepo:
                 feld.reihenfolge = int(r["n"])
                 self.con.execute(
                     "INSERT INTO day_field (id, subject_id, name, spec_json, mehrmals, "
-                    "sort_order, active, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "sort_order, active, created_at, updated_at, tageswert, standard_key) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         feld.id,
                         feld.subject_id,
@@ -108,17 +117,20 @@ class TagesfeldRepo:
                         int(feld.aktiv),
                         iso_utc(feld.created_at),
                         stempel,
+                        feld.tageswert,
+                        feld.standard_key,
                     ),
                 )
                 return
             self.con.execute(
                 "UPDATE day_field SET name = ?, spec_json = ?, mehrmals = ?, active = ?, "
-                "updated_at = ?, revision = revision + 1 WHERE id = ?",
+                "tageswert = ?, updated_at = ?, revision = revision + 1 WHERE id = ?",
                 (
                     feld.name,
                     json.dumps(feld.spec.to_dict(), ensure_ascii=False),
                     int(feld.mehrmals),
                     int(feld.aktiv),
+                    feld.tageswert,
                     stempel,
                     feld.id,
                 ),
@@ -158,6 +170,68 @@ class TagesfeldRepo:
                     (stempel, feld_id),
                 )
         return stempel
+
+    # -- Standardfelder (Ben, 28.10.2026) ----------------------------------------------
+
+    def standard_einspielen(self, subject_id: str) -> list[Tagesfeld]:
+        """Die Standardfelder anlegen, die das Profil noch nicht hat — beim Start und beim
+        Anlegen eines Profils, **ausgeschaltet** (Einstellungen → Tagesfelder → Ausgeschaltet;
+        der Schalter holt sie unter Heute). Gelöschte bleiben gelöscht (ihre Zeile zählt als
+        vorhanden). Gibt die neu angelegten zurück."""
+        vorhandene = self.alle(subject_id, mit_geloeschten=True)
+        neu: list[Tagesfeld] = []
+        for v in standardfelder_fehlend(vorhandene):
+            feld = v.feld(subject_id)
+            feld.aktiv = False  # steht erst unter Heute, wenn die Person es einschaltet
+            self.speichern(feld)
+            neu.append(feld)
+        return neu
+
+    def standard_geloeschte(self, subject_id: str) -> list[tuple[Vorschlag, Tagesfeld | None]]:
+        """Standardfelder, die es im Profil gerade nicht gibt — gelöscht (mit ihrer Zeile) oder
+        nie angelegt (``None``): die Liste „Standardfelder wiederherstellen“."""
+        zeilen = {
+            f.standard_key: f for f in self.alle(subject_id, mit_geloeschten=True) if f.standard_key
+        }
+        from trainingsapp.core.tagesfelder import STANDARDFELDER
+
+        out: list[tuple[Vorschlag, Tagesfeld | None]] = []
+        for v in STANDARDFELDER:
+            f = zeilen.get(v.standard_key or "")
+            if f is None or f.deleted_at is not None:
+                out.append((v, f))
+        return out
+
+    def wiederherstellen(self, v: Vorschlag, subject_id: str) -> Tagesfeld:
+        """Ein gelöschtes Standardfeld zurück — mit seinen Werten, falls sie mitgelöscht
+        wurden; gab es nie eins, wird es angelegt."""
+        alt = next(
+            (
+                f
+                for f in self.alle(subject_id, mit_geloeschten=True)
+                if f.standard_key == v.standard_key
+            ),
+            None,
+        )
+        if alt is None:
+            feld = v.feld(subject_id)
+            self.speichern(feld)
+            return feld
+        stempel = alt.deleted_at.isoformat() if alt.deleted_at else ""
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE day_field SET deleted_at = NULL, active = 1, updated_at = ?, "
+                "revision = revision + 1 WHERE id = ?",
+                (jetzt().isoformat(), alt.id),
+            )
+            if stempel:
+                self.con.execute(
+                    "UPDATE day_value SET deleted_at = NULL WHERE field_id = ? AND deleted_at = ?",
+                    (alt.id, stempel),
+                )
+        geladen = self.laden(alt.id)
+        assert geladen is not None
+        return geladen
 
     def loeschen_rueckgaengig(self, feld_id: str, stempel: str) -> None:
         with transaktion(self.con):
@@ -243,6 +317,16 @@ class TageswertRepo:
                 (subject_id, von.isoformat(), bis.isoformat()),
             )
         }
+
+    def tage_mit_mehreren(self, feld_id: str) -> int:
+        """An wie vielen Tagen das Feld mehr als einen Eintrag hat — der Hinweis beim Wechsel
+        von „mehrmals“ auf „einmal am Tag“ (Plan §5, Punkt 5)."""
+        r = self.con.execute(
+            f"SELECT COUNT(*) AS n FROM (SELECT date FROM ({_GUELTIGE} AND v.field_id = ?) "
+            "GROUP BY date HAVING COUNT(*) > 1)",
+            (feld_id,),
+        ).fetchone()
+        return int(r["n"])
 
     def umfang(self, feld_id: str) -> tuple[int, int, date | None]:
         """Wie viele Werte an wie vielen Tagen, seit wann — für die Rückfrage beim Löschen."""

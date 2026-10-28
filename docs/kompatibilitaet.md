@@ -487,8 +487,14 @@ Ordner ab wie die spätere Messdatei:
 Messungen/<Geräteordner>/.backup_<YYYY-MM-DD>_<HHMMSS>.json     # UTC-Startzeit
 ```
 
-- Inhalt: derselbe `raw-v1`-Kopf und dieselben `messungen`/`ppi_pakete` wie die
-  Messdatei, kompakt geschrieben (`separators=(",", ":")`), atomar über `.tmp`.
+- Inhalt bei praxis_gui: derselbe `raw-v1`-Kopf und dieselben `messungen`/`ppi_pakete` wie
+  die Messdatei, kompakt geschrieben (`separators=(",", ":")`), atomar über `.tmp`.
+  **Wir seit 28.10.2026 (hrv-core 0.3, lange Aufnahmen): Kopf und Journal** — der Kopf
+  `.backup_<start>.json` ohne `messungen` (mit `_journal`), die Schläge und PPI-Pakete
+  Zeile für Zeile angehängt in `.backup_<start>.jsonl`; `hrv_core.aufnahme.backup_lesen`
+  setzt beides zusammen und liest auch Köpfe mit `messungen` (alte Backups, praxis_gui).
+  So kostet das 15-s-Backup nach 36 h dasselbe wie nach einer Minute (vorher 11 MB je
+  Backup). Vertrag in hrv-core: `docs/formate.md`.
 - praxis_gui legt zusätzlich einen `hrv`-Block mit Live-Werten hinein
   (`"_scope": "live_window"`). **Wir nicht** — ein Backup ist Rohdatenrettung,
   keine Analyse.

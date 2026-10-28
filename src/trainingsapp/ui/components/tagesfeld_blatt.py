@@ -12,8 +12,11 @@
   vorbelegt (Ben: „Zeit festlegen, dabei soll die alte Zeit genommen werden als
   Vorlage“, `core.tagesfelder.uhrzeit_vorlage`); ein geänderter Eintrag behält seine Zeit,
   bis man sie ändert.
-- Die Einträge des Tags stehen darunter: antippen ändert Uhrzeit, Variante, Wert und Notiz,
-  ✕ löscht.
+- **Messwert** (Ben, 28.10.2026): die Teile als Zahlenfelder nebeneinander („sys · dia ·
+  Puls“), „128/82“ ins erste Feld verteilt sich; kein Schnellknopf, nichts addiert sich.
+- Die Einträge des Tags stehen darunter — auch bei „einmal am Tag“ (Plan §5, Punkt 4):
+  antippen ändert Uhrzeit, Variante (auch eine inzwischen entfernte), Wert und Notiz, ✕
+  löscht. Einheiten stehen an jedem Feld (Ben: „Immer Einheiten mit angeben“).
 
 Was sofort geschrieben wird (Tipps, Loslassen), steht sofort in der Datenbank; Texte
 (Notiz, nur Text, freier Wert bei „einmal“) speichern beim Schließen („Zurück speichert“).
@@ -25,7 +28,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Callable
 from datetime import date, datetime, time
-from typing import Any
+from typing import Any, cast
 
 import flet as ft
 
@@ -100,7 +103,8 @@ def schnell_eintragen(
             zeit=None if alt else neue_zeit(state, feld, tag),
         )
     name = f"{feld.name} {variante}".strip()
-    return w, f"{name} {knopf}"
+    stand = tf.stand_text(feld, tf.tagesstand(feld, werte_des_felds(state, feld, tag)))
+    return w, f"{name} {knopf} → {stand}"
 
 
 def tagesfeld_blatt(
@@ -487,6 +491,105 @@ def tagesfeld_blatt(
         teile.append(notiz_feld(alt))
         return teile
 
+    def messwert_teile() -> list[ft.Control]:
+        """Messwert: je Teil ein Zahlenfeld, der erste nimmt auch „128/82“ für alle."""
+        teile_spec = tf.teile_von(feld.spec)
+        alt = None if feld.mehrmals else ziel()
+
+        def feld_fuer(i: int, f: Any) -> ft.TextField:
+            wert = alt.werte[i] if alt is not None and i < len(alt.werte) else None
+            return ft.TextField(
+                label=f.label + (f" ({f.unit})" if f.unit else ""),
+                value="" if wert is None else tf.zahl(float(wert)),
+                hint_text="optional"
+                if not f.required
+                else ("128/82" if i == 0 and len(teile_spec) > 1 else None),
+                width=max(96, 12 * len(f.label) + 40),
+                dense=True,
+                keyboard_type=ft.KeyboardType.NUMBER
+                if len(teile_spec) == 1
+                else ft.KeyboardType.TEXT,
+            )
+
+        felder = [feld_fuer(i, f) for i, f in enumerate(teile_spec)]
+
+        def lesen() -> tuple[Any, ...] | None:
+            werte_ = tf.messwert_lesen(feld.spec, [x.value or "" for x in felder])
+            if werte_ is None:
+                grenzen = ", ".join(
+                    f"{f.label} {tf.zahl(f.min)}–{tf.zahl(f.max)}"
+                    for f in teile_spec
+                    if f.min is not None and f.max is not None
+                )
+                melden("Bitte alle Pflichtteile als Zahl" + (f" ({grenzen})." if grenzen else "."))
+                return None
+            melden("")
+            return werte_
+
+        if feld.mehrmals:
+
+            def los(_e: object = None) -> None:
+                werte_ = lesen()
+                if werte_ is None:
+                    return
+                for x in felder:
+                    x.value = ""
+                eintragen(werte_)
+
+            for x in felder:
+                x.on_submit = los
+            return [
+                ft.Row(
+                    wrap=True, spacing=8, run_spacing=8, controls=cast(list[ft.Control], felder)
+                ),
+                ft.Row(
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        uhrzeit,
+                        ft.FilledButton("Eintragen", icon=ft.Icons.ADD, on_click=los, expand=True),
+                    ],
+                ),
+            ]
+
+        def setzen(_e: object = None) -> None:
+            ausstehend.pop("messwert", None)
+            if all(not (x.value or "").strip() for x in felder):
+                einmal_loeschen()
+                return
+            werte_ = lesen()
+            if werte_ is not None:
+                einmal(werte_)
+
+        def still_sichern() -> None:
+            """Zurück speichert: lesbare Teile übernehmen, sonst lassen."""
+            if all(not (x.value or "").strip() for x in felder):
+                return
+            werte_ = tf.messwert_lesen(feld.spec, [x.value or "" for x in felder])
+            if werte_ is not None and (alt is None or werte_ != alt.werte[: len(werte_)]):
+                einmal(werte_)
+
+        for x in felder:
+            x.on_submit = setzen
+        ausstehend["messwert"] = still_sichern
+        return [
+            ft.Text(
+                tf.wert_text(feld.spec, alt.werte) if alt is not None else "–",
+                size=28,
+                weight=ft.FontWeight.W_700,
+            ),
+            ft.Row(
+                wrap=True,
+                spacing=8,
+                run_spacing=8,
+                controls=[
+                    *felder,
+                    ft.IconButton(ft.Icons.CHECK, tooltip="Setzen", on_click=setzen),
+                ],
+            ),
+            ft.Text("Einmal am Tag: Ein neuer Wert ändert den des Tages.", size=12, opacity=0.7),
+            notiz_feld(alt),
+        ]
+
     def schnell(menge: float) -> Callable[[object], None]:
         def handler(_e: object = None) -> None:
             ausstehende_speichern()
@@ -631,13 +734,30 @@ def tagesfeld_blatt(
         zeit_feld = ft.TextField(
             label="Uhrzeit", value=f"{w.zeit.astimezone():%H:%M}", width=110, dense=True
         )
+        f_alt = tf.wertfeld(w.spec)
+        einheit = (
+            f" in {f_alt.unit}" if f_alt is not None and f_alt.unit and art != tf.DAUER else ""
+        )
         wert_feld = ft.TextField(
-            label="Wert",
+            label=("Dauer" if art == tf.DAUER else "Wert") + einheit,
             value=tf.eingabe_text(w.spec, w.wert),
+            hint_text="Minuten oder 1:30" if art == tf.DAUER else None,
             expand=True,
             dense=True,
             visible=art in tf.SUMMIERT or art == tf.SKALA,
         )
+        teil_felder: list[ft.TextField] = []
+        if art == tf.MESSWERT:
+            for i, f in enumerate(tf.teile_von(w.spec)):
+                wert_i = w.werte[i] if i < len(w.werte) else None
+                teil_felder.append(
+                    ft.TextField(
+                        label=f.label + (f" ({f.unit})" if f.unit else ""),
+                        value="" if wert_i is None else tf.zahl(float(wert_i)),
+                        width=max(96, 12 * len(f.label) + 40),
+                        dense=True,
+                    )
+                )
         notiz = ft.TextField(
             label="Text" if art == tf.TEXT else "Notiz",
             value=w.note,
@@ -645,14 +765,21 @@ def tagesfeld_blatt(
             min_lines=1,
             max_lines=6,
         )
+        # Eine inzwischen entfernte Variante bleibt wählbar (Plan §5, Punkt 7)
+        namen = list(feld.varianten)
+        if w.variante and w.variante not in namen:
+            namen.append(w.variante)
         wahl = (
             ft.Dropdown(
                 label="Variante",
                 value=w.variante or None,
-                options=[ft.DropdownOption(key=n, text=n) for n in feld.varianten],
+                options=[
+                    ft.DropdownOption(key=n, text=n if n in feld.varianten else f"{n} (entfernt)")
+                    for n in namen
+                ],
                 dense=True,
             )
-            if feld.varianten
+            if namen
             else None
         )
 
@@ -665,8 +792,13 @@ def tagesfeld_blatt(
             if w.tag == heute and neue > jetzt():
                 melden("Die Uhrzeit liegt in der Zukunft.")
                 return
-            wert = w.wert
-            if wert_feld.visible:
+            wert: Any = w.wert
+            if teil_felder:
+                wert = tf.messwert_lesen(w.spec, [x.value or "" for x in teil_felder])
+                if wert is None:
+                    melden("Bitte alle Pflichtteile als Zahl.")
+                    return
+            elif wert_feld.visible:
                 wert = tf.wert_lesen(w.spec, wert_feld.value or "")
                 if wert is None:
                     melden("Diesen Wert verstehe ich nicht.")
@@ -683,7 +815,7 @@ def tagesfeld_blatt(
             merken()
             zeichnen()
 
-        zeile1: list[ft.Control] = [zeit_feld, wert_feld]
+        zeile1: list[ft.Control] = [zeit_feld, *(teil_felder or [wert_feld])]
         if wahl is not None:
             zeile1.append(wahl)
         return ft.Container(
@@ -715,7 +847,7 @@ def tagesfeld_blatt(
 
     def liste() -> list[ft.Control]:
         eintraege = sorted(werte(), key=lambda w: w.zeit, reverse=True)
-        if not feld.mehrmals or not eintraege:
+        if not eintraege:
             return []
         return [
             ft.Text(
@@ -737,6 +869,8 @@ def tagesfeld_blatt(
         mitte: list[ft.Control]
         if art == tf.SKALA:
             mitte = skala_teile()
+        elif art == tf.MESSWERT:
+            mitte = messwert_teile()
         elif art in tf.SUMMIERT:
             mitte = summen_teile()
         elif art == tf.JA_NEIN:

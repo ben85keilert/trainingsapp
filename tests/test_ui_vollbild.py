@@ -20,6 +20,7 @@ from test_ui_messung import (  # noqa: E402
 from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
 from trainingsapp.devices.simulated import SIM_SYNTH, SimulatedSource  # noqa: E402
 from trainingsapp.ui import ausrichtung  # noqa: E402
+from trainingsapp.ui.components.vollbild import SEITE_PX  # noqa: E402
 from trainingsapp.ui.components.zeitfenster import _ACHSE_PX, _BREITE_VORGABE, Fenster  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.live_vollbild import live_vollbild_view  # noqa: E402
@@ -399,3 +400,50 @@ def test_auswertung_vollbild_etiketten_seitenleiste_ablesen(daten) -> None:
     _symbol(view, ft.Icons.FULLSCREEN_EXIT).on_click()
     texte = _baum_texte(view)
     assert "Ruhe" in texte and "NOTIZEN · 3" in texte  # Atemübung + Paar „Ruhe: Start/Ende“
+
+
+async def test_live_vollbild_abschnitte_seitenleiste(daten) -> None:
+    """Quer gibt es Abschnitte wie hochkant (Ben, 28.10.2026): der Knopf öffnet die
+    Seitenleiste mit „Abschnitt: Start“, Chips und Liste; Start → Name → der Abschnitt läuft."""
+    state, tmp_path = daten
+    lauf = Messlauf(SimulatedSource(tempo=30.0), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, "Simulator H10")
+    task = asyncio.create_task(lauf.laufen())
+    state.messlauf = lauf
+    seite = _seite()
+    seite.height, seite.width = 412, 915
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 20:
+        await asyncio.sleep(0.01)
+    ansicht = live_vollbild_view(seite, state)
+    knopf = _symbol(ansicht, ft.Icons.VIEW_TIMELINE_OUTLINED, "Abschnitte: Start/Ende, Liste")
+    seiten = [
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.Container) and c.width == SEITE_PX and c.content is not None
+    ]
+    assert seiten and not seiten[0].visible
+    knopf.on_click()
+    assert seiten[0].visible
+    texte = _baum_texte(ansicht)
+    assert "ABSCHNITTE" in texte and any(t.startswith("Noch keine Abschnitte") for t in texte)
+    start = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.TextButton) and c.content == "Abschnitt: Start"
+    )
+    start.on_click()
+    dialog = seite.aufrufe[-1]
+    feld = next(c for c in _alle_controls(dialog) if isinstance(c, ft.TextField))
+    feld.value = "Behandlung"
+    feld.on_submit(None)
+    await dialog.on_dismiss(None)  # erst zu, dann starten (`Nachher`)
+    assert lauf.offener_abschnitt() is not None and lauf.offener_abschnitt()[1] == "Behandlung"
+    lauf.beobachter(False)  # ein Takt: Knopf heißt jetzt „Behandlung · Ende“
+    assert "Behandlung · Ende" in [
+        c.content for c in _alle_controls(ansicht) if isinstance(c, ft.TextButton)
+    ]
+    chips = [c for c in _alle_controls(ansicht) if isinstance(c, ft.Container) and c.border]
+    assert chips  # Ganze Messung · Behandlung
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)

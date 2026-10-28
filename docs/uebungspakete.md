@@ -122,8 +122,9 @@ sie schreiben — der Kurseditor bringt den Export mit).
 
 ## Dateiformat
 
-JSON, UTF-8. Version 1 (Übungen); **Version 2** fügt `kurse[]` hinzu — eine Datei
-ohne Kurse wird weiter als Version 1 geschrieben, ältere Apps lesen sie:
+JSON, UTF-8. Version 1 (Übungen); **Version 2** fügt `kurse[]` hinzu, **Version 3**
+`plaene[]` (Ben, 28.10.2026) — eine Datei ohne Kurse und Pläne wird weiter als Version 1
+geschrieben, ohne Pläne als Version 2; ältere Apps lesen sie:
 
 ```json
 {
@@ -210,6 +211,20 @@ Import: Kurse folgen den Regeln der Übungen (neu → anlegen; gleiches Paket �
 Stand der Datei, Kapitel gleicher ID behalten den Fortschritt; eigene/fremde →
 bleiben). Entfernen nimmt die Kurse aus der Liste, „Wieder installieren“ holt sie
 aus dem Paketstand (`course.package_standard_json`) zurück.
+
+Je Plan (`plaene[]`, Formatversion 3, `docs/plan_import_links_plaene.md` §3): `name`
+(Pflicht), `key` (nie ändern — die Plan-ID folgt daraus, je Profil: UUIDv5 aus Paket,
+`plan:<key>` und Profil), `beschreibung`, `wochentage`, `uebungen[]` wie in der
+Kapitel-Vorlage, dazu `timer` (Plan-Timer), `weiter_automatisch`, `pause_ohne_timer`.
+
+Import: Ein Paketplan wird **im aktiven Profil** angelegt; andere Profile bekommen ihn beim
+nächsten Start (`PaketRepo.plaene_nachlegen`). Ein neuer Stand gilt nur für einen Plan, den
+die Person nicht geändert hat (Vergleich mit `plan.package_standard_json`); im Papierkorb
+bleibt er dort. Entfernen des Pakets legt seine Pläne in den Papierkorb, Deaktivieren
+versteckt sie wie die Übungen. Nicht mehr im Paket → bleibt (ein Plan ist etwas Eigenes,
+sobald er geübt wird). Export: die Gruppe „Pläne“ im Exportdialog — ein Plan nimmt seine
+Übungen mit. **Platzhalter** (`$auswahl`, `$test.duration` — Kurs stellt den Plan aus
+einer Auswahl zusammen, P90, nicht gebaut) überliest diese App, statt die Datei abzulehnen.
 
 **IDs von „Standard“:** Sie bleiben, wie sie vor den Paketen waren —
 UUIDv5 nur aus dem Schlüssel (`seed_id`); die Paket-ID stammt aus dem früheren
@@ -311,6 +326,14 @@ kann (`core/paketquelle.py`).
 - **Sicherheit:** HTTPS sichert die Herkunft, die Prüfsumme den Download (stimmt sie
   nicht, wird nichts geschrieben), die Datei muss zur ID im Index passen, maximal
   5 MB. Eine Signatur kommt, wenn Pakete von Dritten kommen.
+- **Links importieren** (Ben, 28.10.2026, `docs/plan_import_links_plaene.md` §1):
+  Paketmanager → „Importieren“ → Link (oder die Adresse unter Updates → Quellen). Liegt
+  dort ein **Index**, fragt die App „Als Quelle eintragen?“ und nennt den Ort
+  (Einstellungen → Updates → Quellen); liegt dort eine **Paketdatei**, kommt die bekannte
+  Rückfrage, und die Adresse bleibt am Paket (`package.source_url`, `source_kind =
+  'datei'`) — beim Start lädt die App die Datei und prüft die Version wie bei einem Index
+  (`paketquelle.datei_eintrag`). Wo ein Paket herkommt, steht in Liste und Paketseite
+  („Quelle: …“, „Quelle (Paketdatei): …“, „aus Datei importiert“, „mitgeliefert“).
 - **Quellenbindung** (Sicherheitsdurchsicht S3, Ben, 20.10.2026): Ein Paket bekommt
   Updates nur aus der Quelle, die es zuletzt lieferte — `package.source_url` hält die
   Adresse ihres Index (seit Migration 026; die Bindung entsteht beim ersten Einspielen

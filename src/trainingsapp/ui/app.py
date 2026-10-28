@@ -812,7 +812,8 @@ def main(page: ft.Page) -> None:
         # (Ben, 17.10.2026), mit allem, was außerhalb läuft (22.10.2026) — läuft nichts,
         # bleibt jede Ansicht, wie sie ist; auf „Heute“ steht es im Reiter „Einheit“
         haupt = len(page.views) == 1
-        if page.views and (leiste := startleiste(page, state, haupt=haupt)) is not None:
+        live = str(page.views[-1].route) == "/live" if page.views else False
+        if page.views and (leiste := startleiste(page, state, haupt=haupt, live=live)) is not None:
             leiste_einsetzen(page.views[-1], leiste)
         # Übungsseiten behalten die Leiste unten (Ben, 27.10.2026, Moduldocstring)
         if not haupt and navigation.uebungsseite(oben := str(page.views[-1].route)):
@@ -824,6 +825,7 @@ def main(page: ft.Page) -> None:
 
     def groesse_geaendert(e: ft.PageResizeEvent) -> None:
         """Drehen oder Fenster ziehen: Ansichten bauen ihr Layout um — kein Neubau des Stapels."""
+        ausrichtung.wach_pruefen(page, state)  # quer: Bildschirm an (Ben, 28.10.2026)
         for beobachter in list(state.groesse_beobachter.values()):
             with suppress(Exception):
                 beobachter()

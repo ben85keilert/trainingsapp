@@ -43,6 +43,7 @@ from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.messlauf import Messlauf
 from trainingsapp.ui.components.analyse import verlaufsdaten
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.live_abschnitte import LiveAbschnitte
 from trainingsapp.ui.components.notizen import (
     Notizfeld,
     senkrechte,
@@ -92,6 +93,9 @@ _KOPF_PX = 56
 
 #: Eine Schreibweise für alle Zeiten (abgeschnitten, nicht gerundet — wie die Achse; N26)
 _uhr = minuten
+#: Die Seitenleisten
+NOTIZEN = "notizen"
+ABSCHNITTE = "abschnitte"
 
 
 @dataclass
@@ -106,8 +110,8 @@ class _Stand:
     strich: float | None = None
     #: Notiz, deren Etikett in der Kurve steht (Index in den Ereignissen)
     etikett: int | None = None
-    #: Seitenleiste „Notizen" offen
-    notizen: bool = False
+    #: Seitenleiste: „Notizen“, „Abschnitte“ oder zu (Ben, 28.10.2026)
+    seite: str | None = None
     #: Womit die Kopfzeile gebaut ist — neu nur bei Änderung, sonst schlösse
     #: das Auffrischen eine offene Liste
     kopf: tuple[Any, ...] = ()
@@ -223,10 +227,23 @@ def _vollbild(
         dialog=page.show_dialog,
         zeilen=lambda: state.hrv_einstellungen().notizen_zeilen,
     )
+    # Abschnitte wie hochkant, als Seitenleiste (Ben, 28.10.2026; `components.live_abschnitte`)
+    live_abschnitte = LiveAbschnitte(
+        page,
+        state,
+        lauf,
+        fenster=fenster,
+        anfang=anfang,
+        breite_gesetzt=lambda b: setattr(breiten_knoepfe, "selected", breiten_auswahl(b)),
+        notizen_auffrischen=lambda: notizfeld.auffrischen(),
+        danach=lambda: aktualisieren(erzwingen=True),
+        offen=True,
+    )
 
     def timer_notizen() -> None:
         """Der Timer hat Abschnitte als Notizen in die Aufnahme geschrieben."""
         notizfeld.auffrischen()
+        live_abschnitte.neu(erzwingen=True)
         aktualisieren(erzwingen=True)
 
     state.notiz_beobachter["live"] = timer_notizen
@@ -239,15 +256,16 @@ def _vollbild(
         if not notizfeld.marke_setzen(x):
             page.show_dialog(ft.SnackBar(ft.Text("Hier lässt sich gerade keine Notiz setzen.")))
 
-    def notizen_umschalten() -> None:
-        st.notizen = not st.notizen
-        if st.notizen:
+    def seite_umschalten(welche: str) -> None:
+        """Notizen oder Abschnitte neben der Kurve — ein zweiter Tipp schließt."""
+        st.seite = None if st.seite == welche else welche
+        if st.seite == NOTIZEN:
             notizfeld.aufklappen()
         aktualisieren(erzwingen=True)
 
     def notiz_bearbeiten(i: int) -> None:
         st.etikett = None
-        st.notizen = True
+        st.seite = NOTIZEN
         notizfeld.aufklappen()
         notizfeld.bearbeiten(i)
 
@@ -428,8 +446,12 @@ def _vollbild(
         etikett_zeichnen(x_von, x_bis)
         ablesen_zeichnen(x_von, x_bis)
         markieren(ablesen_knopf, st.ablesen)
-        markieren(notizen_knopf, st.notizen)
-        seite_box.visible = st.notizen
+        markieren(notizen_knopf, st.seite == NOTIZEN)
+        markieren(abschnitte_knopf, st.seite == ABSCHNITTE)
+        notiz_seite.visible = st.seite == NOTIZEN
+        abschnitt_seite.visible = st.seite == ABSCHNITTE
+        seite_box.visible = st.seite is not None
+        live_abschnitte.neu()
 
     def aktualisieren(erzwingen: bool = False) -> None:
         if state.live_ansicht != meine_nummer:
@@ -512,15 +534,33 @@ def _vollbild(
         ft.Icons.ADS_CLICK, "Ablesen: Werte an einer Stelle", lambda: ablesen_umschalten()
     )
     notizen_knopf = werkzeug(
-        ft.Icons.NOTES, "Notizen: Liste, Text, Zeit", lambda: notizen_umschalten()
+        ft.Icons.NOTES, "Notizen: Liste, Text, Zeit", lambda: seite_umschalten(NOTIZEN)
+    )
+    abschnitte_knopf = werkzeug(
+        ft.Icons.VIEW_TIMELINE_OUTLINED,
+        "Abschnitte: Start/Ende, Liste",
+        lambda: seite_umschalten(ABSCHNITTE),
+    )
+    notiz_seite = ft.Column(
+        spacing=4,
+        tight=True,
+        visible=False,
+        controls=[seitenkopf("Notizen", lambda: seite_umschalten(NOTIZEN)), notizfeld.control],
+    )
+    abschnitt_seite = ft.Column(
+        spacing=4,
+        tight=True,
+        visible=False,
+        controls=[
+            seitenkopf("Abschnitte", lambda: seite_umschalten(ABSCHNITTE)),
+            live_abschnitte.control,
+        ],
     )
     seite_box = ft.Container(
         visible=False,
         width=SEITE_PX,
         content=ft.Column(
-            spacing=4,
-            scroll=ft.ScrollMode.AUTO,
-            controls=[seitenkopf("Notizen", lambda: notizen_umschalten()), notizfeld.control],
+            spacing=4, scroll=ft.ScrollMode.AUTO, controls=[notiz_seite, abschnitt_seite]
         ),
     )
     #: Dieselben Knöpfe wie hochkant und in der Aufzeichnung (Ben, 21.10.2026)
@@ -577,6 +617,7 @@ def _vollbild(
                     lambda: marke(),
                 ),
                 notizen_knopf,
+                abschnitte_knopf,
                 werkzeug(ft.Icons.TUNE, "Fenster & Darstellung der Kurven", lambda: darstellung()),
             ),
         ],

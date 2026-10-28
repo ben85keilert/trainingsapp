@@ -46,7 +46,6 @@ from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
 from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.pakete import (
     FELDNAMEN,
-    FORMAT_VERSION,
     NAMENSRAUM,
     Paket,
     PaketFehler,
@@ -121,6 +120,11 @@ def _texte(roh: dict[str, Any]) -> list[tuple[str, str]]:
             wo = f"Übung „{e.get('name', e.get('key', '?'))}“"
             texte.append((f"{wo}, Name", str(e.get("name") or "")))
             texte.append((f"{wo}, Beschreibung", str(e.get("description") or "")))
+    for pl in roh.get("plaene", []):
+        if isinstance(pl, dict):
+            wo = f"Plan „{pl.get('name', pl.get('key', '?'))}“"
+            texte.append((f"{wo}, Name", str(pl.get("name") or "")))
+            texte.append((f"{wo}, Beschreibung", str(pl.get("beschreibung") or "")))
     for k in roh.get("kurse", []):
         if not isinstance(k, dict):
             continue
@@ -220,7 +224,8 @@ def quelle_pruefen(
             continue
         zeilen.append(
             f"  {eintrag.name} Version {eintrag.version}: {len(inhalt.uebungen)} Übungen, "
-            f"{len(inhalt.kurse)} Kurs(e), {eintrag.bytes} B, Prüfsumme in Ordnung"
+            f"{len(inhalt.kurse)} Kurs(e), {len(inhalt.plaene)} Plan/Pläne, {eintrag.bytes} B, "
+            "Prüfsumme in Ordnung"
         )
     return zeilen, fehler
 
@@ -231,7 +236,15 @@ def bauen(datei: Path, ziel: Path) -> Path:
     ziel.mkdir(parents=True, exist_ok=True)
     pfad = ziel / dateiname(inhalt.paket)
     # ohne Zeitstempel: derselbe Quelltext ergibt dieselbe Datei und Prüfsumme (K28)
-    pfad.write_bytes(paket_json(inhalt.paket, inhalt.uebungen, inhalt.kurse, mit_zeitstempel=False))
+    pfad.write_bytes(
+        paket_json(
+            inhalt.paket,
+            inhalt.uebungen,
+            inhalt.kurse,
+            mit_zeitstempel=False,
+            plaene=inhalt.plaene or None,
+        )
+    )
     return pfad
 
 
@@ -273,9 +286,10 @@ def index(
                 "bytes": len(daten),
                 "uebungen": len(inhalt.uebungen),
                 "kurse": len(inhalt.kurse),
+                "plaene": len(inhalt.plaene),
                 "neuigkeiten": inhalt.paket.neuigkeiten,
                 "veroeffentlicht": bekannt.get(sha256) or datetime.now(UTC).date().isoformat(),
-                "format_version": FORMAT_VERSION if inhalt.kurse else 1,
+                "format_version": 3 if inhalt.plaene else 2 if inhalt.kurse else 1,
                 "signatur": None,
             }
         )

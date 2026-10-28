@@ -81,6 +81,12 @@ def _knopf(c, text: str):
     raise AssertionError(f"kein Knopf „{text}“ in {_texte(c)}")
 
 
+def _vorlage(blatt, name: str):
+    return next(
+        x for x in _alle(blatt) if isinstance(x, ft.Container) and x.ink and _texte(x)[:1] == [name]
+    )
+
+
 def _ausfuehren(ergebnis) -> None:
     if asyncio.iscoroutine(ergebnis):
         asyncio.run(ergebnis)
@@ -148,11 +154,12 @@ def test_schnellknopf_traegt_ein_mit_rueckgaengig(page, state) -> None:
 
     f = _felder(state)
     ansicht = tagesansicht(page, state, state.heute(), mit_datum=False)
-    _knopf(ansicht, "+250").on_click()
+    _knopf(ansicht, "+250 ml").on_click()
     (w,) = state.tageswerte.am_tag(state.profil.id, state.heute())
     assert (w.feld_id, w.wert) == (f["trinken"].id, 250)
     meldung = page.dialoge[-1]
     assert isinstance(meldung, ft.SnackBar) and meldung.action == "Rückgängig"
+    assert _texte(meldung) == ["Trinken +250 ml → 250 ml"]  # mit dem neuen Stand (Plan §5.6)
     assert meldung.persist is False
     meldung.on_action()
     assert state.tageswerte.am_tag(state.profil.id, state.heute()) == []
@@ -163,7 +170,7 @@ def test_schnellknopf_traegt_die_gewaehlte_variante_ein(page, state) -> None:
 
     f = _felder(state)
     state.tagesfeld_varianten[f["ibu"].id] = "800"
-    _knopf(tagesansicht(page, state, state.heute(), mit_datum=False), "+1").on_click()
+    _knopf(tagesansicht(page, state, state.heute(), mit_datum=False), "+1 · 800").on_click()
     (w,) = state.tageswerte.am_tag(state.profil.id, state.heute())
     assert (w.variante, w.wert) == ("800", 1)
 
@@ -314,7 +321,7 @@ def test_liste_aktiv_und_ausgeschaltet(page, state) -> None:
     f = _felder(state)
     state.tagesfelder.schalten(f["essen"].id, False)
     texte = _texte(tagesfelder_view(page, state))
-    assert "AKTIV · 3" in texte and "AUSGESCHALTET · 1" in texte
+    assert "AKTIV · 3" in texte and "AUSGESCHALTET · 2" in texte  # dazu Blutdruck (Standard)
     assert "Anzahl · 400, 800 · mehrmals mit Uhrzeit" in texte
 
 
@@ -322,9 +329,16 @@ def test_formular_mit_vorschlag_speichert(page, state) -> None:
     from trainingsapp.ui.views.tagesfelder import tagesfeld_formular_view
 
     ansicht = tagesfeld_formular_view(page, state, None)
-    chip = next(x for x in _alle(ansicht) if isinstance(x, ft.Chip) and _texte(x) == ["Medikament"])
-    chip.on_click()
     name = next(x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Name")
+    assert name.autofocus  # beim ersten Aufbau die Tastatur …
+    _knopf(ansicht, "Vorlage wählen …").on_click(None)
+    blatt = page.dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet) and "MESSWERTE" in _texte(blatt)
+    _vorlage(blatt, "Medikament").on_click(None)
+    asyncio.run(blatt.on_dismiss(None))  # gewählt wird nach dem Schließen (`Nachher`)
+    name = next(x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Name")
+    assert not name.autofocus  # … nach dem Neuaufbau nicht mehr (Ben, 28.10.2026)
+    assert "Vorlage: Medikament" in _texte(ansicht)
     name.value = "Ibu"
     name.on_change(SimpleNamespace(control=name))
     variante = next(
@@ -334,7 +348,7 @@ def test_formular_mit_vorschlag_speichert(page, state) -> None:
     variante.on_submit(None)
     speichern = ansicht.appbar.actions[-2]
     _ausfuehren(speichern.on_click(None))
-    (feld,) = state.tagesfelder.alle(state.profil.id)
+    (feld,) = [f for f in state.tagesfelder.alle(state.profil.id) if not f.standard_key]
     assert (feld.name, feld.art, feld.varianten, feld.mehrmals) == ("Ibu", tf.ANZAHL, ["400"], True)
 
 
@@ -442,3 +456,166 @@ def test_tagebuch_mit_werten_und_texten(page, state) -> None:
     texte = _texte(tagebuch(page, state))
     assert "Ernährung" in texte and "Ibu" in texte
     assert "Übungen und Felder" in texte
+
+
+# ---------------------------------------------------------------------------
+# Messwert, Standardfelder, einmal-Liste (Ben, 28.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def _blutdruck(state: AppState) -> tf.Tagesfeld:
+    """Das Standardfeld — angelegt beim Start, ausgeschaltet; hier eingeschaltet."""
+    bd = next(f for f in state.tagesfelder.alle(state.profil.id) if f.standard_key == "blutdruck")
+    assert not bd.aktiv
+    state.tagesfelder.schalten(bd.id, True)
+    return state.tagesfelder.laden(bd.id)
+
+
+def _teilfeld(c, label: str) -> ft.TextField:
+    return next(x for x in _alle(c) if isinstance(x, ft.TextField) and x.label.startswith(label))
+
+
+def test_blutdruck_blatt_eintragen_und_aendern(page, state) -> None:
+    from trainingsapp.ui.views.tag import tagesansicht
+
+    bd = _blutdruck(state)
+    blatt = tagesfeld_blatt(page, state, bd, state.heute())
+    assert "+" not in "".join(t for t in _texte(blatt) if t.startswith("+"))  # kein Schnellknopf
+    sys = _teilfeld(blatt, "systolisch")
+    assert _teilfeld(blatt, "Puls").hint_text == "optional"
+    sys.value = "128/82"  # ein Feld für alles
+    _knopf(blatt, "Eintragen").on_click(None)
+    (w,) = state.tageswerte.am_tag(state.profil.id, state.heute())
+    assert w.werte == (128, 82, None)
+    assert "128/82 mmHg" in _texte(blatt)  # die Liste des Tags
+    # Unter Heute steht der Stand, kein Schnellknopf
+    texte = _texte(tagesansicht(page, state, state.heute(), mit_datum=False))
+    assert "128/82 mmHg" in texte and not any(t.startswith("+") for t in texte if "mmHg" in t)
+    # Eintrag antippen → Teile im Bearbeiter, Puls nachtragen
+    zeile = next(
+        x
+        for x in _alle(blatt)
+        if isinstance(x, ft.Container)
+        and x.ink
+        and callable(x.on_click)
+        and "128/82 mmHg" in _texte(x)
+    )
+    zeile.on_click(None)
+    puls = [x for x in _alle(blatt) if isinstance(x, ft.TextField) and x.label.startswith("Puls")]
+    puls[-1].value = "70"
+    _knopf(blatt, "Übernehmen").on_click(None)
+    (neu,) = state.tageswerte.am_tag(state.profil.id, state.heute())
+    assert neu.ersetzt == w.id and neu.werte == (128, 82, 70)
+    # Zweite Messung: der Stand ist das Mittel, die Zahl der Messungen steht dabei
+    state.tageswerte.hinzufuegen(bd, state.heute(), _um(state, 19), wert=(124, 80, None))
+    texte = _texte(tagesansicht(page, state, state.heute(), mit_datum=False))
+    assert "Ø 126/81 mmHg · 70 bpm · 2×" in texte
+    # Pflichtteil fehlt → Meldung, nichts geschrieben
+    blatt = tagesfeld_blatt(page, state, bd, state.heute())
+    _teilfeld(blatt, "systolisch").value = "128"
+    _knopf(blatt, "Eintragen").on_click(None)
+    assert len(state.tageswerte.am_tag(state.profil.id, state.heute())) == 2
+    assert any(t.startswith("Bitte alle Pflichtteile") for t in _texte(blatt))
+
+
+def test_einmal_am_tag_zeigt_die_liste_mit_uhrzeit(page, state) -> None:
+    f = _felder(state)["schmerz"]
+    state.tageswerte.einmal_setzen(
+        f, state.heute(), wert=3, variante="Knie", zeit=_um(state, 9, 15)
+    )
+    blatt = tagesfeld_blatt(page, state, f, state.heute())
+    assert "HEUTE EINGETRAGEN" in _texte(blatt) and "09:15" in _texte(blatt)
+    zeile = next(
+        x
+        for x in _alle(blatt)
+        if isinstance(x, ft.Container) and x.ink and callable(x.on_click) and "09:15" in _texte(x)
+    )
+    zeile.on_click(None)
+    uhr = [x for x in _alle(blatt) if isinstance(x, ft.TextField) and x.label == "Uhrzeit"]
+    uhr[-1].value = "7:30"
+    _knopf(blatt, "Übernehmen").on_click(None)
+    (w,) = state.tageswerte.am_tag(state.profil.id, state.heute())
+    assert w.zeit.astimezone().strftime("%H:%M") == "07:30"
+
+
+def test_entfernte_variante_bleibt_im_bearbeiter_waehlbar(page, state) -> None:
+    f = _felder(state)["ibu"]
+    state.tageswerte.hinzufuegen(f, state.heute(), _um(state, 8), wert=1, variante="800")
+    f.spec = tf.mit_varianten(f.spec, ["400"])  # 800 entfernt
+    state.tagesfelder.speichern(f)
+    blatt = tagesfeld_blatt(page, state, state.tagesfelder.laden(f.id), state.heute())
+    zeile = next(
+        x
+        for x in _alle(blatt)
+        if isinstance(x, ft.Container) and x.ink and callable(x.on_click) and "08:00" in _texte(x)
+    )
+    zeile.on_click(None)
+    wahl = next(x for x in _alle(blatt) if isinstance(x, ft.Dropdown))
+    assert [o.text for o in wahl.options] == ["400", "800 (entfernt)"] and wahl.value == "800"
+
+
+def test_standardfeld_loeschen_und_in_der_liste_wiederherstellen(page, state) -> None:
+    from trainingsapp.ui.views.tagesfelder import tagesfelder_view
+
+    bd = _blutdruck(state)
+    state.tageswerte.hinzufuegen(bd, state.heute(), _um(state, 8), wert=(120, 80, None))
+    state.tagesfelder.loeschen(bd.id, mit_werten=True)
+    ansicht = tagesfelder_view(page, state)
+    texte = _texte(ansicht)
+    assert "STANDARDFELDER" in texte and any(t.startswith("gelöscht am") for t in texte)
+    _knopf(ansicht, "Wiederherstellen").on_click()
+    zurueck = state.tagesfelder.laden(bd.id)
+    assert zurueck.deleted_at is None and zurueck.aktiv
+    assert len(state.tageswerte.am_tag(state.profil.id, state.heute())) == 1
+    assert "STANDARDFELDER" not in _texte(tagesfelder_view(page, state))
+
+
+def test_formular_messwert_mit_teilen_und_tageswert(page, state) -> None:
+    from trainingsapp.ui.views.tagesfelder import tagesfeld_formular_view
+
+    ansicht = tagesfeld_formular_view(page, state, None)
+    name = next(x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Name")
+    name.value = "Beweglichkeit"
+    name.on_change(SimpleNamespace(control=name))
+    _knopf(ansicht, "Messwert").on_click()
+    assert "Teile" in _texte(ansicht)
+    _knopf(ansicht, "Teil").on_click(None)  # zweiter Teil
+    namen = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Name"]
+    teil_namen = namen[1:]  # das erste „Name“ ist der Feldname
+    assert len(teil_namen) == 2
+    for feld, text in zip(teil_namen, ("links", "rechts"), strict=True):
+        feld.value = text
+        feld.on_change(SimpleNamespace(control=feld))
+    einheiten = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Einheit"]
+    for feld in einheiten:
+        feld.value = "cm"
+        feld.on_change(SimpleNamespace(control=feld))
+    # mehrmals → Tageswert wählbar; „Höchster“
+    segmente = [x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton)]
+    wie_oft = next(x for x in segmente if any(s.value == "mehrmals" for s in x.segments))
+    wie_oft.selected = ["mehrmals"]
+    wie_oft.on_change(SimpleNamespace(control=wie_oft))
+    segmente = [x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton)]
+    tageswert = next(x for x in segmente if any(s.value == "max" for s in x.segments))
+    tageswert.selected = ["max"]
+    tageswert.on_change(SimpleNamespace(control=tageswert))
+    _ausfuehren(ansicht.appbar.actions[-2].on_click(None))
+    feld = next(f for f in state.tagesfelder.alle(state.profil.id) if f.name == "Beweglichkeit")
+    assert feld.art == tf.MESSWERT and [t.name for t in tf.teile_lesen(feld.spec)] == [
+        "links",
+        "rechts",
+    ]
+    assert feld.tageswert == tf.TW_MAX and feld.mehrmals
+
+
+def test_feldansicht_messwert_je_einheit_eine_kurve(page, state) -> None:
+    from trainingsapp.ui.views.verlauf_tagesfeld import verlauf_tagesfeld_view
+
+    bd = _blutdruck(state)
+    gestern = state.heute() - timedelta(days=1)
+    state.tageswerte.hinzufuegen(bd, gestern, _um(state, 8, 0, gestern), wert=(130, 85, 72))
+    state.tageswerte.hinzufuegen(bd, state.heute(), _um(state, 8), wert=(126, 81, None))
+    state.tageswerte.hinzufuegen(bd, state.heute(), _um(state, 19), wert=(122, 79, 68))
+    texte = _texte(verlauf_tagesfeld_view(page, state, bd.id))
+    assert "systolisch / diastolisch · mmHg" in texte and "Puls · bpm" in texte
+    assert any(t.startswith("Ø 127/82") for t in texte)  # Kachel: Mittel der Tageswerte

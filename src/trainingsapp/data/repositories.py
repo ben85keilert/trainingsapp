@@ -85,6 +85,9 @@ _PLAN_PAKET_AKTIV = (
     " JOIN package pk ON pk.id = c.package_id"
     " WHERE cc.id = plan.course_chapter_id"
     " AND (pk.disabled_at IS NOT NULL OR pk.removed_at IS NOT NULL))"
+    # Pläne aus einem deaktivierten Paket verschwinden wie seine Übungen (Migration 033)
+    " AND NOT EXISTS (SELECT 1 FROM package pp WHERE pp.id = plan.package_id"
+    " AND (pp.disabled_at IS NOT NULL OR pp.removed_at IS NOT NULL))"
 )
 
 
@@ -699,8 +702,9 @@ class PlanRepo:
                 """
                 INSERT INTO plan (id, name, description, subject_id, created_at, updated_at,
                                   active, weekdays_json, course_chapter_id, timer_json,
-                                  auto_next, pause_no_timer)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  auto_next, pause_no_timer, package_id, package_key,
+                                  package_standard_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -712,6 +716,9 @@ class PlanRepo:
                     timer_json = excluded.timer_json,
                     auto_next = excluded.auto_next,
                     pause_no_timer = excluded.pause_no_timer,
+                    package_id = excluded.package_id,
+                    package_key = excluded.package_key,
+                    package_standard_json = excluded.package_standard_json,
                     revision = revision + 1
                 """,
                 (
@@ -727,6 +734,11 @@ class PlanRepo:
                     json.dumps(plan.timer, ensure_ascii=False) if plan.timer else None,
                     int(plan.weiter_automatisch),
                     int(plan.pause_ohne_timer),
+                    plan.package_id,
+                    plan.package_key,
+                    json.dumps(plan.package_standard, ensure_ascii=False, sort_keys=True)
+                    if plan.package_standard is not None
+                    else None,
                 ),
             )
             # Versteckte bleiben stehen: Übungen im Papierkorb und aus deaktivierten
@@ -929,6 +941,27 @@ class PlanRepo:
             return None
         return self._mit_items([self._zeile(r)])[0]
 
+    def des_pakets(self, paket_id: str, subject_id: str | None = None) -> list[Plan]:
+        """Die Pläne eines Pakets — aller Profile oder eines; auch deaktivierte, aber nicht
+        die im Papierkorb."""
+        sql = "SELECT * FROM plan WHERE package_id = ? AND deleted_at IS NULL"
+        args: list[object] = [paket_id]
+        if subject_id is not None:
+            sql += " AND subject_id = ?"
+            args.append(subject_id)
+        zeilen = self.con.execute(sql + " ORDER BY created_at", args)
+        return self._mit_items([self._zeile(r) for r in zeilen])
+
+    def zeile_bekannt(self, plan_id: str) -> bool:
+        """Gibt es die Zeile — auch gelöscht oder endgültig gelöscht (Grabstein)?"""
+        return (
+            self.con.execute("SELECT 1 FROM plan WHERE id = ?", (plan_id,)).fetchone() is not None
+            or self.con.execute(
+                "SELECT 1 FROM tombstone WHERE entity = 'plan' AND entity_id = ?", (plan_id,)
+            ).fetchone()
+            is not None
+        )
+
     def alle(self, subject_id: str) -> list[Plan]:
         """Pläne des Profils plus profilfreie (etwa mitgelieferte)."""
         zeilen = self.con.execute(
@@ -1086,6 +1119,9 @@ class PlanRepo:
             timer=_json_lesen(r["timer_json"], {}) or None,
             weiter_automatisch=bool(r["auto_next"]),
             pause_ohne_timer=bool(r["pause_no_timer"]),
+            package_id=r["package_id"],
+            package_key=r["package_key"],
+            package_standard=_json_lesen(r["package_standard_json"], {}) or None,
         )
 
 
@@ -2725,6 +2761,24 @@ class StreckeRepo:
 
     def titel_setzen(self, strecke_id: str, titel: str) -> None:
         self.con.execute("UPDATE strecke SET title = ? WHERE id = ?", (titel.strip(), strecke_id))
+
+    def kuerzen(self, s: Strecke) -> None:
+        """Ende und Kennzahlen nach dem Kürzen der Strecke (Ben, 28.10.2026,
+        `ui.training.training_kuerzen`) — mit dem Tagebucheintrag, der sie jetzt trägt."""
+        self.con.execute(
+            "UPDATE strecke SET ended_at = ?, distanz_m = ?, dauer_s = ?, bewegt_s = ?, "
+            "hoehe_auf_m = ?, hoehe_ab_m = ?, session_entry_id = ? WHERE id = ?",
+            (
+                s.ended_at.isoformat() if s.ended_at else None,
+                s.distanz_m,
+                s.dauer_s,
+                s.bewegt_s,
+                s.hoehe_auf_m,
+                s.hoehe_ab_m,
+                s.session_entry_id,
+                s.id,
+            ),
+        )
 
     def dateipfade(self) -> set[str]:
         """``file_path`` aller Zeilen, auch gelöschter — was nicht dabei ist, ist verwaist."""

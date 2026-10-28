@@ -402,6 +402,11 @@ class Plan:
     #: Wartet der Ablauf auf einen Tipp: auch nach einer Übung ohne Timer (Migration 021,
     #: Vorgabe) — sonst beginnt nach „Gemacht“ gleich die nächste
     pause_ohne_timer: bool = True
+    #: Aus einem Paket (Migration 033, `docs/plan_import_links_plaene.md` §3): das Paket, der
+    #: Schlüssel des Plans darin und der Paketstand, mit dem ein Update Geändertes erkennt
+    package_id: str | None = None
+    package_key: str | None = None
+    package_standard: dict[str, Any] | None = None
 
     def steht_an(self, tag: date) -> bool:
         """Ob der Plan an diesem Tag von sich aus auf „Heute" erscheint.

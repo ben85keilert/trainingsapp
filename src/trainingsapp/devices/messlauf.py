@@ -40,7 +40,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from hrv_core.aufnahme import Aufnahme, backup_lesen
+from hrv_core.aufnahme import Aufnahme, backup_entfernen, backup_lesen
 from hrv_core.ausschnitte import (
     Abschnitt,
     aus_grenzen,
@@ -122,7 +122,7 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
     """
     rec, zusatz = backup_lesen(backup)
     if not rec.beats:
-        backup.unlink(missing_ok=True)
+        backup_entfernen(backup)
         return None
     pfad = backup.parent / rec.dateiname()
     if not pfad.exists():
@@ -132,7 +132,7 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
         if spuren:  # Abschnitte je Spur — scheitert das, bleibt die Messung
             with contextlib.suppress(OSError, ValueError, TypeError):
                 spuren_speichern(pfad, rec, spuren)
-    backup.unlink(missing_ok=True)
+    backup_entfernen(backup)  # Kopf und Journal
     subject_id = zusatz.get("subject_id")
     return _gespeichert(
         pfad,
@@ -765,6 +765,38 @@ class Messlauf:
         self._stopp_beenden(gespeichert=True)
         return ergebnis
 
+    async def aufnahme_teilen_async(self, basis: Path) -> Gespeichert | None:
+        """„Teil speichern & weiter“ (Ben, 28.10.2026, lange Aufnahmen): die bisherige
+        Aufnahme als Messdatei speichern und **ohne Lücke** eine neue beginnen — der
+        Strom läuft sofort in die neue, Teil 1 schreibt ein Thread. Titel geht mit, die
+        Abschnittsgrenzen der Abläufe bleiben bei Teil 1 (ein offener eigener Abschnitt
+        endet dort mit dem Teil). Zusammenfügen: `hrv_core.zusammenfuegen`.
+        ``None``, wenn nichts aufgezeichnet ist oder gerade gespeichert wird.
+        Scheitert das Schreiben, bleibt das Backup von Teil 1 liegen (Wiederherstellung
+        beim nächsten Start) — die neue Aufnahme läuft trotzdem weiter.
+        """
+        alt = self.aufnahme
+        if alt is None or not alt.beats or self._wird_gespeichert:
+            return None
+        jetzt = self._uhr()
+        neu = Aufnahme(
+            geraet=alt.geraet,
+            geraet_profil=alt.geraet_profil,
+            adresse=alt.adresse,
+            intervall_quelle=alt.intervall_quelle,
+            start_mono=jetzt,
+            start_utc=self._jetzt_utc(),
+            ppi=alt.ppi,
+            simulation=self.simulation,
+        )
+        neu.batterie_prozent = self.status.batterie_prozent
+        neu.titel = alt.titel
+        grenzen_alt, self._grenzen = self._grenzen, {}
+        self._dateiname_fest = None
+        self.aufnahme = neu
+        self._letztes_backup = jetzt
+        return await asyncio.to_thread(self._schreiben, alt, basis, grenzen_alt)
+
     def _stopp_beginnen(self) -> Aufnahme | None:
         """Die Aufnahme beenden: ab jetzt kein Schlag mehr hinein. ``None``: nichts
         aufgezeichnet — oder ein anderer Aufruf speichert sie gerade (der trägt sie ein)."""
@@ -783,16 +815,27 @@ class Messlauf:
             self.aufnahme = None
             self._grenzen = {}
 
-    def _schreiben(self, aufnahme: Aufnahme, basis: Path) -> Gespeichert:
+    def _schreiben(
+        self,
+        aufnahme: Aufnahme,
+        basis: Path,
+        grenzen: dict[str, list[tuple[dict, str, bool]]] | None = None,
+    ) -> Gespeichert:
         """Messdatei, Abschnitte je Spur und Diagnoseprotokoll schreiben — liest ``self``
-        nur, darum auch in einem Thread möglich."""
+        nur, darum auch in einem Thread möglich. ``grenzen``: die Spuren dieser Aufnahme
+        (ohne Angabe die laufenden)."""
         pfad = aufnahme.speichern(self._ordner(basis))
-        if self._dateiname_fest is not None and pfad.name != self._dateiname_fest:
+        if (
+            grenzen is None
+            and self._dateiname_fest is not None
+            and pfad.name != self._dateiname_fest
+        ):
             logging.getLogger(__name__).warning(
                 "Messdatei heißt %s, angekündigt war %s", pfad.name, self._dateiname_fest
             )
         rec = aufnahme.recording()
-        spuren = {s: list(gs) for s, gs in self._grenzen.items()}
+        quelle = self._grenzen if grenzen is None else grenzen
+        spuren = {s: list(gs) for s, gs in quelle.items()}
         # Eigene Abschnitte der Person: aus ihren Notizpaaren, wie sie jetzt in der
         # Aufnahme stehen (verschoben, umbenannt, gelöscht — `core.abschnitte`)
         spuren.update(eigene_abschnitte.grenzen_aus_notizen(rec.ereignisse))

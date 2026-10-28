@@ -113,9 +113,17 @@ def test_import_ueber_die_oberflaeche(page, state, monkeypatch) -> None:
     dialoge: list = []
     page.show_dialog = dialoge.append
     page.pop_dialog = lambda: None
+    page.aufgaben = []
+    page.run_task = lambda f, *a: page.aufgaben.append(asyncio.ensure_future(f(*a)))
     ansicht = pakete_view(page, state)
     knopf = next(c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.FilledButton))
-    asyncio.run(knopf.on_click())
+    knopf.on_click()  # das Blatt: Datei oder Link (28.10.2026)
+    blatt = dialoge[-1]
+    assert isinstance(blatt, ft.BottomSheet)
+    datei_knopf = next(c for c in alle(blatt) if isinstance(c, ft.FilledTonalButton))
+    assert datei_knopf.content == "Datei wählen"
+    datei_knopf.on_click(None)
+    _schliessen(page, blatt)  # erst zu, dann die Dateiwahl (`Nachher`)
 
     frage = dialoge[-1]
     assert frage.title.value == "„Qigong“ importieren?"
@@ -401,3 +409,183 @@ def test_entfallene_dialog_uebernimmt_oder_loescht(page, state) -> None:
     dialog = entfallene_dialog(page, state, paket, [], [])
     dialog.actions[1].on_click()
     assert state.entfallene == []
+
+
+# ---------------------------------------------------------------------------
+# Links importieren, Quelle am Paket, Pläne im Export (Ben, 28.10.2026)
+# ---------------------------------------------------------------------------
+
+
+def _dialog_texte(d) -> list[str]:
+    return [c.value for c in alle(d) if isinstance(c, ft.Text) and isinstance(c.value, str)]
+
+
+def _schliessen(page, dialog) -> None:
+    """Den Dialog schließen und abwarten, was danach läuft (`Nachher` → ``run_task``) — in
+    **einem** Loop, sonst bräche `asyncio.run` die zweite Aufgabe ab."""
+    import asyncio as _asyncio
+
+    async def lauf() -> None:
+        await dialog.on_dismiss(None)
+        offen = [t for t in page.aufgaben if isinstance(t, _asyncio.Future)]
+        if offen:
+            await _asyncio.gather(*offen)
+
+    _asyncio.run(lauf())
+
+
+def _seite_mit_dialogen():
+    import asyncio as _asyncio
+
+    dialoge: list = []
+    aufgaben: list = []
+    routen: list[str] = []
+
+    async def push_route(r: str) -> None:
+        routen.append(r)
+
+    def run_task(f, *args):
+        aufgabe = _asyncio.ensure_future(f(*args))
+        aufgaben.append(aufgabe)
+        return aufgabe
+
+    return SimpleNamespace(
+        route="/",
+        views=[],
+        update=lambda: None,
+        show_dialog=dialoge.append,
+        pop_dialog=lambda: None,
+        run_task=run_task,
+        push_route=push_route,
+        dialoge=dialoge,
+        aufgaben=aufgaben,
+        routen=routen,
+    )
+
+
+def test_link_auf_paketdatei_importiert_und_merkt_die_adresse(state, monkeypatch) -> None:
+    import asyncio
+
+    from trainingsapp.core.pakete import Paket, paket_json
+    from trainingsapp.ui.components import paket_link
+
+    datei = paket_json(Paket(id="p1", name="Dehnung", version=1), [Exercise(name="Nacken rollen")])
+    page = _seite_mit_dialogen()
+    asyncio.run(
+        paket_link.link_importieren(page, state, "https://x/d.json", laden=lambda _u: datei)
+    )
+    frage = page.dialoge[-1]
+    assert frage.title.value == "„Dehnung“ importieren?"
+    inhalte = _dialog_texte(frage)
+    assert "https://x/d.json" in inhalte
+    assert any("Die Adresse wird am Paket hinterlegt" in t for t in inhalte)
+    frage.actions[1].on_click()  # Importieren
+    p = state.pakete.laden("p1")
+    assert p is not None and p.quelle == "https://x/d.json" and p.quelle_art == "datei"
+    # Die Liste nennt die Quelle
+    assert any(
+        t.startswith("Quelle (Paketdatei): https://x/d.json")
+        for t in texte(pakete_view(page, state))
+    )
+    # Ein unbrauchbarer Link: Meldung, nichts geschrieben
+    asyncio.run(paket_link.link_importieren(page, state, "https://x/t.txt", laden=lambda _u: b"x"))
+    assert isinstance(page.dialoge[-1], ft.SnackBar)
+    assert "Nicht geladen" in _dialog_texte(page.dialoge[-1])[0]
+    asyncio.run(paket_link.link_importieren(page, state, "http://unsicher/x.json"))
+    assert isinstance(page.dialoge[-1], ft.SnackBar)
+
+
+def test_link_auf_index_traegt_die_quelle_ein(state, monkeypatch) -> None:
+    import asyncio
+
+    from trainingsapp.core.paketquelle import INDEX_FORMAT
+    from trainingsapp.ui.components import paket_link
+    from trainingsapp.ui.views import updates
+
+    async def leer(_state):
+        return None
+
+    monkeypatch.setattr(updates, "pruefung_ausfuehren", leer)
+    state.paketquellen_setzen([])
+    roh = {"format": INDEX_FORMAT, "version": 1, "quelle": {"name": "Praxis"}, "pakete": []}
+    page = _seite_mit_dialogen()
+    asyncio.run(
+        paket_link.link_importieren(
+            page, state, "https://x/i.json", laden=lambda _u: json.dumps(roh).encode()
+        )
+    )
+    frage = page.dialoge[-1]
+    assert frage.title.value == "Paketquelle gefunden"
+    assert any("Einstellungen → Updates → Quellen" in t for t in _dialog_texte(frage))
+    frage.actions[1].on_click()  # Eintragen
+    _schliessen(page, frage)
+    assert state.paketquellen() == ["https://x/i.json"]
+    assert page.routen[-1:] == [updates.ROUTE]
+
+
+def test_import_blatt_hat_datei_und_link(page, state) -> None:
+    from trainingsapp.ui.components.paket_link import import_blatt
+
+    async def datei() -> None:
+        return None
+
+    blatt = import_blatt(page, state, datei)
+    knoepfe = [c for c in alle(blatt) if isinstance(c, ft.FilledTonalButton | ft.FilledButton)]
+    assert [k.content for k in knoepfe] == ["Datei wählen", "Link laden"]
+    feld = next(c for c in alle(blatt) if isinstance(c, ft.TextField))
+    feld.value = "ftp://x"
+    knoepfe[1].on_click(None)
+    assert feld.error  # nur https://
+
+
+def test_export_mit_plan_nimmt_die_uebungen_mit(page, state, monkeypatch) -> None:
+    import asyncio
+
+    import trainingsapp.ui.views.pakete as modul
+
+    gesendet: list[tuple[str, bytes]] = []
+
+    async def weitergeben(_page, name, daten, _mime):
+        gesendet.append((name, daten))
+
+    monkeypatch.setattr(modul, "weitergeben", weitergeben)
+    page.update = lambda: None
+    u = Exercise(name="Meine Übung")
+    state.uebungen.speichern(u)
+    plan = Plan(name="Mein Plan", subject_id=state.profil.id, wochentage=[0, 3])
+    plan.items.append(PlanItem(plan_id=plan.id, exercise_id=u.id, order=0))
+    state.plaene.speichern(plan)
+    ansicht = paket_export_view(page, state)
+    haken = next(
+        c
+        for v in ansicht.controls
+        for c in alle(v)
+        if isinstance(c, ft.Checkbox) and c.label.startswith("Mein Plan")
+    )
+    haken.on_change()
+    name = next(c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.TextField))
+    knopf = next(c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.FilledButton))
+    assert "1 Plan" in knopf.content
+    name.value = "Für Anna"
+    asyncio.run(knopf.on_click())
+    roh = json.loads(gesendet[-1][1])
+    assert roh["version"] == 3 and roh["plaene"][0]["name"] == "Mein Plan"
+    assert (
+        roh["plaene"][0]["wochentage"] == [0, 3]
+        and roh["plaene"][0]["uebungen"][0]["uebung"] == u.id
+    )
+    assert [x["name"] for x in roh["exercises"]] == ["Meine Übung"]
+
+
+def test_neues_profil_bekommt_die_paketplaene(state) -> None:
+    from trainingsapp.core.pakete import paket_lesen
+
+    roh = {
+        "paket": {"name": "Qigong", "version": 1},
+        "exercises": [{"key": "baum", "name": "Baum"}],
+        "plaene": [{"key": "morgen", "name": "Morgen", "uebungen": [{"uebung": "baum"}]}],
+    }
+    state.pakete.importieren(paket_lesen(roh), subject_id=state.profil.id)
+    assert [p.name for p in state.plaene.alle(state.profil.id)] == ["Morgen"]
+    neu = state.profil_anlegen("Zweites")
+    assert [p.name for p in state.plaene.alle(neu.id)] == ["Morgen"]

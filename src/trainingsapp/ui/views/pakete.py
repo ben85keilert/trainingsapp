@@ -4,8 +4,13 @@
 „Exportieren“, darunter die installierten Pakete, die eigenen Übungen (die zu
 keinem Paket gehören) und, falls es welche gibt, die entfernten Pakete.
 
-- **Importieren** liest eine Paketdatei und fragt mit einer Vorschau nach
-  (`Vorschau.zusammenfassung`), bevor es schreibt.
+- **Importieren** (Blatt `components/paket_link.import_blatt`, Ben 28.10.2026): eine
+  Paketdatei oder ein Link — auf eine Paketdatei (die Adresse bleibt am Paket, Updates
+  kommen von dort) oder auf eine Paketquelle (wird unter Updates eingetragen). Vor dem
+  Schreiben die Vorschau (`Vorschau.zusammenfassung`) — mit den Plänen des Pakets
+  (Formatversion 3), die im aktiven Profil landen.
+- **Quelle am Paket**: Zeile und Paketseite nennen die Adresse, von der das Paket kommt
+  (Ben: „zur Sicherheit für die User, um zu wissen, wo ein Paket hinführt“).
 - **Ein Paket** (`<basis>/<paket-id>`): seine Übungen mit Stand („wie im
   Paket“, „geändert: …“), „Auf Paketstand setzen“ einzeln oder für alle,
   „Deaktivieren“ (nichts davon sichtbar, alles bleibt — Ben, 16.10.2026),
@@ -16,8 +21,9 @@ keinem Paket gehören) und, falls es welche gibt, die entfernten Pakete.
   bleiben) oder löschen. Beim Start für alles, was noch offen ist (`app.py`).
 - **Wieder installieren** holt ein entferntes Paket zurück — ohne Datei, aus
   dem Paketstand, den jede seiner Übungen trägt.
-- **Exportieren** (`<basis>/export[/<paket-id>]`) schreibt ausgewählte Übungen
-  in eine Paketdatei und gibt sie weiter (Teilen bzw. Speichern unter).
+- **Exportieren** (`<basis>/export[/<paket-id>]`) schreibt ausgewählte Übungen — und
+  wahlweise Pläne des Profils, die ihre Übungen mitnehmen — in eine Paketdatei und gibt
+  sie weiter (Teilen bzw. Speichern unter).
 
 Regeln: `data/pakete.py`; Format: `core/pakete.py`; beides in
 `docs/uebungspakete.md`.
@@ -34,8 +40,9 @@ import flet as ft
 
 from trainingsapp.config import medienverzeichnis
 from trainingsapp.core.kurse import Kurs
-from trainingsapp.core.models import Exercise
+from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.pakete import (
+    GRUNDAUSSTATTUNG,
     Paket,
     PaketFehler,
     Paketinhalt,
@@ -44,14 +51,16 @@ from trainingsapp.core.pakete import (
     paket_id,
     paket_json,
     paket_lesen,
+    paketplan_aus,
 )
-from trainingsapp.core.paketquelle import fremde_identitaet
+from trainingsapp.core.paketquelle import DATEI, fremde_identitaet
 from trainingsapp.data.pakete import ARCHIV, KATALOG, PAPIERKORB, Status, Uebungsstand, Vorschau
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.paket_link import import_blatt
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.state import AppState
 
@@ -174,16 +183,18 @@ def import_rueckfrage(
     vorschau: Vorschau,
     danach: Callable[[], None] | None = None,
     quelle: str | None = None,
+    zusatz: str = "",
 ) -> ft.AlertDialog:
     """Die Rückfrage vor dem Schreiben: was der Import tut — auch für „Wieder installieren“
     und für Pakete aus einer Quelle (``quelle`` = ihre Adresse, ``None`` = Datei; ``danach``
-    läuft nach dem Schreiben, etwa Quelle merken)."""
+    läuft nach dem Schreiben, etwa Quelle merken; ``zusatz``: ein Satz dazu, etwa wo die
+    Adresse hinterlegt wird). Pläne des Pakets landen im aktiven Profil."""
     wieder = vorschau.entfernt is not None
     nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
 
     def ausfuehren() -> None:
         try:
-            ergebnis = state.pakete.importieren(inhalt)
+            ergebnis = state.pakete.importieren(inhalt, subject_id=state.profil.id)
             if danach is not None:
                 danach()
         except sqlite3.Error as fehler:  # Datenbank voll, gesperrt …
@@ -215,6 +226,7 @@ def import_rueckfrage(
                 (ergebnis.anzahl(Status.ZURUECK), "zurück"),
                 (ergebnis.anzahl(Status.GEAENDERT), "aktualisiert"),
                 (len(ergebnis.entfallen), "nicht mehr im Paket"),
+                (ergebnis.anzahl_plaene(Status.NEU, Status.GEAENDERT), "Pläne"),
             )
             if n
         ]
@@ -222,16 +234,18 @@ def import_rueckfrage(
         text = f"„{inhalt.paket.name}“ {was}: " + (", ".join(teile) or "nichts geändert")
         page.show_dialog(ft.SnackBar(ft.Text(text)))
 
-    zeilen: list[ft.Control] = [
-        ft.Text(
-            f"{uebungen_zahl(len(inhalt.uebungen))} · {_versionstext(vorschau)}",
-            size=12,
-            opacity=0.7,
-        )
-    ]
+    kopfteile = [uebungen_zahl(len(inhalt.uebungen))]
+    if inhalt.plaene:
+        kopfteile.append("1 Plan" if len(inhalt.plaene) == 1 else f"{len(inhalt.plaene)} Pläne")
+    kopfteile.append(_versionstext(vorschau))
+    zeilen: list[ft.Control] = [ft.Text(" · ".join(kopfteile), size=12, opacity=0.7)]
+    if quelle:
+        zeilen.append(ft.Text(quelle, size=12, opacity=0.7, selectable=True))
     if inhalt.paket.beschreibung:
         zeilen.append(ft.Text(inhalt.paket.beschreibung, size=13, italic=True))
     zeilen += [ft.Text(f"• {z}") for z in vorschau.zusammenfassung()]
+    if zusatz:
+        zeilen.append(hinweis(zusatz))
     # Offen für alle (Ben, 15.10.2026) — aber nie still: Gibt sich die Datei als
     # mitgeliefertes Paket oder als eines aus einer Quelle aus, steht das hier (S3);
     # der vorige Stand kommt per „Wieder installieren“ zurück. Entscheiden tut die Person.
@@ -259,6 +273,32 @@ def import_rueckfrage(
     )
 
 
+def plan_geaendert(plan: Plan) -> bool:
+    """Hat die Person einen Paketplan verändert (Übungen, Ziel, Tage, Timer)?"""
+    if plan.package_standard is None:
+        return False
+    from trainingsapp.core.pakete import plan_stand
+
+    return plan_stand(paketplan_aus(plan)) != plan.package_standard
+
+
+def quelle_text(paket: Paket) -> str:
+    """Woher das Paket kommt — die Adresse, damit man weiß, wo ein Paket hinführt (Ben,
+    28.10.2026); ohne Adresse „aus Datei“ bzw. „mitgeliefert“.
+
+    >>> quelle_text(Paket(id="p", name="Q", quelle="https://x/i.json"))
+    'Quelle: https://x/i.json'
+    >>> quelle_text(Paket(id="p", name="Q", quelle="https://x/q.json", quelle_art="datei"))
+    'Quelle (Paketdatei): https://x/q.json'
+    >>> quelle_text(Paket(id="p", name="Q")), quelle_text(Paket(id=GRUNDAUSSTATTUNG, name="S"))
+    ('aus Datei importiert', 'mitgeliefert')
+    """
+    if paket.quelle:
+        art = " (Paketdatei)" if paket.quelle_art == DATEI else ""
+        return f"Quelle{art}: {paket.quelle}"
+    return "mitgeliefert" if paket.id == GRUNDAUSSTATTUNG else "aus Datei importiert"
+
+
 def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.View:
     """Der Paketmanager. ``basis`` ist die eigene Route: aus dem Katalog `/pakete`, aus
     den Einstellungen `/einstellungen/pakete` — so führt „zurück“ dorthin, woher man kam."""
@@ -274,7 +314,10 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
 
     # -- Import ------------------------------------------------------------------
 
-    async def importieren() -> None:
+    def importieren() -> None:
+        page.show_dialog(import_blatt(page, state, datei_importieren))
+
+    async def datei_importieren() -> None:
         try:
             dateien = await ft.FilePicker().pick_files(
                 dialog_title="Übungspaket wählen (.json)", with_data=True
@@ -306,7 +349,9 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
                 )
             )
             return
-        page.show_dialog(import_rueckfrage(page, state, inhalt, state.pakete.vorschau(inhalt)))
+        page.show_dialog(
+            import_rueckfrage(page, state, inhalt, state.pakete.vorschau(inhalt, state.profil.id))
+        )
 
     def wieder_installieren(paket_id: str) -> Callable[[], None]:
         """Ohne Datei: aus dem Paketstand, den jede Übung des Pakets trägt."""
@@ -316,7 +361,11 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
             if inhalt is None:
                 melden("Für dieses Paket ist kein Stand gespeichert — bitte die Datei importieren.")
                 return
-            page.show_dialog(import_rueckfrage(page, state, inhalt, state.pakete.vorschau(inhalt)))
+            page.show_dialog(
+                import_rueckfrage(
+                    page, state, inhalt, state.pakete.vorschau(inhalt, state.profil.id)
+                )
+            )
 
         return handler
 
@@ -343,6 +392,7 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
         ]
         if paket.beschreibung:
             texte.append(ft.Text(paket.beschreibung, size=12, opacity=0.75))
+        texte.append(ft.Text(quelle_text(paket), size=11, opacity=0.6, max_lines=1))
         return ft.Container(
             ink=True,
             border_radius=10,
@@ -448,7 +498,7 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
                                 ft.FilledButton(
                                     "Importieren",
                                     icon=ft.Icons.FILE_OPEN_OUTLINED,
-                                    on_click=importieren,
+                                    on_click=lambda: importieren(),
                                 ),
                                 ft.OutlinedButton(
                                     "Exportieren",
@@ -695,6 +745,9 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
     teile.append(uebungen_zahl(len(staende)))
     if kurse:
         teile.append("1 Kurs" if len(kurse) == 1 else f"{len(kurse)} Kurse")
+    paketplaene = state.pakete.des_pakets_plaene(paket.id, state.profil.id)
+    if paketplaene:
+        teile.append("1 Plan" if len(paketplaene) == 1 else f"{len(paketplaene)} Pläne")
     if paket.version is not None:
         teile.append(f"Version {paket.version}")
     teile.append(groesse_text(*state.pakete.groesse(paket.id, medienverzeichnis())))
@@ -705,6 +758,27 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
     if paket.beschreibung:
         kopf.append(ft.Text(paket.beschreibung))
     kopf.append(ft.Text("  ·  ".join(teile), size=12, opacity=0.7))
+    # Woher das Paket kommt — zur Sicherheit (Ben, 28.10.2026), auswählbar zum Kopieren
+    quelle_zeile = [quelle_text(paket)]
+    if paket.quelle:
+        quelle_zeile.append(
+            "Updates automatisch" if paket.update_modus == "auto" else "Updates manuell"
+        )
+        if paket.geprueft is not None:
+            quelle_zeile.append(f"zuletzt geprüft {_datum(paket.geprueft)}")
+    kopf.append(ft.Text("  ·  ".join(quelle_zeile), size=12, opacity=0.7, selectable=True))
+    if paketplaene:
+        kopf.append(
+            ft.Text(
+                "Pläne aus dem Paket: "
+                + ", ".join(
+                    f"„{p.name}“" + (" (geändert)" if plan_geaendert(p) else "")
+                    for p in paketplaene
+                ),
+                size=12,
+                opacity=0.7,
+            )
+        )
     offen: list[ft.Control] = []
     if entfallene or entfallene_kurse:
         n = len(entfallene) + len(entfallene_kurse)
@@ -820,6 +894,11 @@ def paket_export_view(
         if mitglieder:
             gruppen.append((paket.name, mitglieder))
     gewaehlt = {u.id for u in uebungen if u.package_id == (vorlage.id if vorlage else None)}
+    # Pläne des Profils (Ben, 28.10.2026: „Pläne ohne Kurse müssen mit importierbar sein“) —
+    # ein Plan nimmt seine Übungen mit
+    plaene = [p for p in state.plaene.alle(state.profil.id) if p.items and not p.kurs_kapitel_id]
+    gewaehlte_plaene: set[str] = set()
+    plan_haken: dict[str, ft.Checkbox] = {}
 
     name = ft.TextField(
         label="Name des Pakets",
@@ -848,7 +927,13 @@ def paket_export_view(
             kasten.value = gruppenwert(mitglieder)
         for uebung_id, kasten in haken.items():
             kasten.value = uebung_id in gewaehlt
-        knopf.content = f"Exportieren ({uebungen_zahl(len(gewaehlt))})"
+        for pid, kasten in plan_haken.items():
+            kasten.value = pid in gewaehlte_plaene
+        text = uebungen_zahl(len(gewaehlt))
+        if gewaehlte_plaene:
+            n = len(gewaehlte_plaene)
+            text += f", {'1 Plan' if n == 1 else f'{n} Pläne'}"
+        knopf.content = f"Exportieren ({text})"
         knopf.disabled = not gewaehlt
 
     def umschalter(uebung_id: str) -> Callable[[], None]:
@@ -871,6 +956,31 @@ def paket_export_view(
             page.update()
 
         return handler
+
+    def planschalter(plan: Plan) -> Callable[[], None]:
+        def handler() -> None:
+            if plan.id in gewaehlte_plaene:
+                gewaehlte_plaene.discard(plan.id)
+            else:
+                gewaehlte_plaene.add(plan.id)
+                gewaehlt.update(i.exercise_id for i in plan.items)  # nimmt seine Übungen mit
+            auffrischen()
+            page.update()
+
+        return handler
+
+    def plangruppe() -> ft.Control:
+        zeilen: list[ft.Control] = [
+            ft.Text("Pläne", weight=ft.FontWeight.BOLD),
+            ft.Text("Ein Plan nimmt seine Übungen mit.", size=12, opacity=0.7),
+        ]
+        for p in plaene:
+            kasten = ft.Checkbox(
+                label=f"{p.name} ({uebungen_zahl(len(p.items))})", on_change=planschalter(p)
+            )
+            plan_haken[p.id] = kasten
+            zeilen.append(ft.Container(padding=ft.Padding.only(left=24), content=kasten))
+        return karte(*zeilen, abstand=0)
 
     def gruppe(titel_text: str, mitglieder: list[Exercise]) -> ft.Control:
         kopf = ft.Checkbox(
@@ -905,12 +1015,18 @@ def paket_export_view(
             version=vorhanden.version if vorhanden else None,
         )
         auswahl_liste = [u for u in uebungen if u.id in gewaehlt]
+        plan_liste = [paketplan_aus(p) for p in plaene if p.id in gewaehlte_plaene]
         await weitergeben(
-            page, dateiname(paket), paket_json(paket, auswahl_liste), "application/json"
+            page,
+            dateiname(paket),
+            paket_json(paket, auswahl_liste, plaene=plan_liste or None),
+            "application/json",
         )
 
     knopf.on_click = exportieren
     karten = [gruppe(t, m) for t, m in gruppen]
+    if plaene:
+        karten.append(plangruppe())
     auffrischen()
 
     return ft.View(

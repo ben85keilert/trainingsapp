@@ -57,6 +57,10 @@ class FieldType(StrEnum):
     BOOL = "bool"
     SCALE = "scale"  # Skala, z. B. Schmerz 0–10 oder Borg 6–20
     CHOICE = "choice"  # Auswahl aus festen Werten; die Optionen stehen in `quick`
+    # Ein abgelesener Wert mit Einheit, der sich nicht addiert (Blutdruck, Gewicht —
+    # Tagesfeld „Messwert“, Ben 28.10.2026). Mehrere Teile = mehrere Felder (`value`,
+    # `value_2`, `value_3`). Keine Kennzahl im Übungsverlauf (dort gälte „Summe des Tages“).
+    READING = "reading"
 
 
 class Layout(StrEnum):

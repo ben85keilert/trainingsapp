@@ -881,7 +881,8 @@ def tagesfeld_formular_view(page: Any, state: AppState, feld_id: str | None) -> 
                     ft.Text("Tageswert", size=14, weight=ft.FontWeight.W_600),
                     ft.Text(
                         "Wie aus mehreren Einträgen eines Tages einer wird — unter Heute, im "
-                        "Tagebuch, in der Kurve. Die Einträge selbst bleiben.",
+                        "Tagebuch, in der Kurve. Die Kacheln im Verlauf zeigen das Mittel dieser "
+                        "Tageswerte; jeder Tag zählt gleich. Die Einträge selbst bleiben.",
                         size=12,
                         opacity=0.7,
                     ),

@@ -3,7 +3,8 @@
 Derselbe Umschalter wie live (`hf_sicht.sicht_wahl`), dahinter: Kacheln der ganzen Aufnahme,
 die HF-Kurve mit Grenzen und Abschnitten, die **Abschnittstabelle mit HF-Spalten**, die
 Erholungen aus den Marken, die **Kandidaten** (Ruhe-HF einer Morgenmessung, HFmax als
-höchstes 30-s-Mittel, Talk-Test-Marker, Nacht-HF eines Schlafabschnitts) — je als Vorschlag
+höchstes 30-s-Mittel, Talk-Test-Marker, Nacht-HF eines Schlafabschnitts oder des
+Nachtfensters 20–10 Uhr) — je als Vorschlag
 mit „übernehmen“, nie von selbst gesetzt —, die **vorgeschlagenen Abschnitte** aus der HF,
 das Tagesprofil, HF je Tempo (mit Strecke), die sRPE-Zeile und „nicht mitrechnen“.
 
@@ -32,6 +33,7 @@ from hrv_core.recording import Recording
 
 from trainingsapp.core import tagesfelder as tf
 from trainingsapp.core.hf_auswertung import (
+    NACHT_FENSTER,
     AbschnittWand,
     HfAuswertung,
     auswerten,
@@ -669,9 +671,15 @@ class HfAuswertungSicht:
         if n and n.get("wert") is not None:
             w = float(n["wert"])
             grund = "" if n.get("gueltig") else " · " + "; ".join(n.get("gruende") or [])
+            wo = (
+                "im Schlafabschnitt"
+                if n.get("grundlage") != NACHT_FENSTER
+                else f"zwischen {uhrzeit(self.k.rec, float(n.get('von_s') or 0))} und "
+                f"{uhrzeit(self.k.rec, float(n.get('bis_s') or 0))}, ohne Schlafabschnitt"
+            )
             zeilen.append(
                 zeile(
-                    f"Nacht-HF (tiefstes 2-h-Mittel im Schlafabschnitt): {w:.0f} bpm{grund}",
+                    f"Nacht-HF (tiefstes 2-h-Mittel {wo}): {w:.0f} bpm{grund}",
                     ft.TextButton(
                         "Als Nacht-HF übernehmen",
                         icon=ft.Icons.BEDTIME_OUTLINED,
@@ -684,6 +692,7 @@ class HfAuswertungSicht:
                             herkunft={
                                 "fenster": [n.get("t_von"), n.get("t_bis")],
                                 "abschnitt": n.get("abschnitt_id"),
+                                "grundlage": n.get("grundlage"),
                             },
                         ),
                     ),

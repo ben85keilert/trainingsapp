@@ -1,7 +1,8 @@
 """Cache der Herzfrequenz-Auswertung je Aufzeichnung — Tabelle ``hf_cache`` (Migration 035).
 
 Nachrechenbar aus Datei + Profil (`core/hf_auswertung.py`); hier nur Ablage und die Frage,
-ob ein Stand noch gilt (`algo_version`, `profil_stand`).
+ob ein Stand noch gilt (`algo_version` aus hrv-core, `AUSWERTUNG_VERSION` der App,
+`profil_stand`).
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from typing import Any
 
 from hrv_core.constants import ALGO_VERSION
 
-from trainingsapp.core.hf_auswertung import HfAuswertung
+from trainingsapp.core.hf_auswertung import AUSWERTUNG_VERSION, HfAuswertung
 from trainingsapp.core.models import jetzt
 
 
@@ -29,7 +30,7 @@ class CacheStand:
     def veraltet(self, heutiger_profil_stand: dict[str, Any] | None = None) -> bool:
         """Veraltet, wenn die Rechenvorschrift gesprungen ist oder (auf Wunsch) das Profil
         nicht mehr das von damals ist."""
-        if self.algo_version != ALGO_VERSION:
+        if self.algo_version != ALGO_VERSION or self.auswertung.version != AUSWERTUNG_VERSION:
             return True
         return heutiger_profil_stand is not None and heutiger_profil_stand != self.profil_stand
 
@@ -99,14 +100,17 @@ class HfCacheRepo:
         return out
 
     def fehlende(self, subject_id: str) -> list[str]:
-        """IDs der Aufzeichnungen eines Profils ohne Cache (für „alle nachrechnen“)."""
+        """IDs der Aufzeichnungen eines Profils ohne gültigen Cache — keiner, oder einer mit
+        veralteter Rechenvorschrift (für „alle nachrechnen“)."""
         return [
             r["id"]
             for r in self.con.execute(
                 "SELECT h.id FROM hrv_recording h LEFT JOIN hf_cache c ON c.recording_id = h.id "
-                "WHERE h.subject_id = ? AND h.deleted_at IS NULL AND c.recording_id IS NULL "
+                "WHERE h.subject_id = ? AND h.deleted_at IS NULL AND (c.recording_id IS NULL "
+                "OR c.algo_version IS NOT ? "
+                "OR json_extract(c.werte_json, '$.version') IS NOT ?) "
                 "ORDER BY h.started_at",
-                (subject_id,),
+                (subject_id, ALGO_VERSION, AUSWERTUNG_VERSION),
             )
         ]
 

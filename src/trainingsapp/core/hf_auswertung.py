@@ -5,7 +5,8 @@ der Auswertung zeigt und der Cache behält (`data/hf_cache.py`): die Werte der g
 Aufnahme, je Abschnitt (mit Erholung am Ende, wenn der Endteil sie hergibt), die
 Erholungen aus den Marken ``person/erholung``, der **HFmax-Kandidat** (höchstes 30-s-Mittel
 mit Plateau — ein Vorschlag, nie gesetzt), der **Ruhe-HF-Kandidat** einer kurzen
-Morgenmessung, die **Nacht-HF** eines bestätigten Schlafabschnitts, das Tagesprofil und die
+Morgenmessung, die **Nacht-HF** (Schlafabschnitt oder, ohne einen, das Nachtfenster 20–10 Uhr
+der Aufnahme mit ≥ 4 h Daten — übernommen wird sie erst auf Tippen), das Tagesprofil und die
 **vorgeschlagenen Abschnitte** aus der HF (Belastung, Ruhe, Schlaf), die die Person erst
 bestätigt (hrv-research Entscheidungen 12, 14, 15).
 
@@ -27,7 +28,7 @@ from typing import Any, Final
 
 import numpy as np
 from hrv_core import herzfrequenz as hz
-from hrv_core.constants import ALGO_VERSION
+from hrv_core.constants import ALGO_VERSION, HF_NACHT_MIN_S
 from hrv_core.recording import Recording
 
 from trainingsapp.core.hf_profil import HfProfil, grenzen_bpm
@@ -41,11 +42,19 @@ RUHE_INTERLIVE_S: Final[float] = 600.0
 ERHOLUNG_NACHLAUF_S: Final[float] = 60.0
 #: Drift erst ab dieser Abschnittsdauer
 DRIFT_AB_S: Final[float] = 1200.0
-#: Name eines Abschnitts, der als bestätigte Schlafzeit gilt
+#: Anfang eines Abschnittsnamens, der als bestätigte Schlafzeit gilt („Schlaf“, „Schlafen“,
+#: „Nacht“, „Nachtruhe“ …)
 SCHLAF_NAMEN: Final[tuple[str, ...]] = ("schlaf", "nacht")
-#: Nachtfenster für den Schlafkandidaten (Ortszeit): 20 Uhr bis 10 Uhr
+#: Nachtfenster (Ortszeit) für den Schlafkandidaten und die Nacht-HF ohne Schlafabschnitt:
+#: 20 Uhr bis 10 Uhr
 NACHT_VON_H: Final[int] = 20
 NACHT_BIS_H: Final[int] = 10
+#: Stand dieser Auswertung (neben `ALGO_VERSION` aus hrv-core): springt sie, gilt jeder Cache
+#: als veraltet. 1 = v0.3.31; 2 = Nacht-HF auch ohne Schlafabschnitt aus dem Nachtfenster.
+AUSWERTUNG_VERSION: Final[int] = 2
+#: Grundlage der Nacht-HF: ein Schlafabschnitt oder das Nachtfenster der Aufnahme
+NACHT_ABSCHNITT: Final[str] = "abschnitt"
+NACHT_FENSTER: Final[str] = "nachtfenster"
 #: Ein Vorschlag, der sich zu mehr als diesem Anteil mit einem Abschnitt deckt, entfällt
 VORSCHLAG_DECKUNG_MAX: Final[float] = 0.5
 
@@ -148,6 +157,7 @@ class HfAuswertung:
     aktivitaet: dict[str, Any] | None
     profil_stand: dict[str, Any]
     algo_version: int = ALGO_VERSION
+    version: int = AUSWERTUNG_VERSION
     reihe: hz.HfReihe | None = field(default=None, repr=False, compare=False)
 
     def als_dict(self) -> dict[str, Any]:
@@ -163,6 +173,7 @@ class HfAuswertung:
             "aktivitaet": self.aktivitaet,
             "profil_stand": self.profil_stand,
             "algo_version": self.algo_version,
+            "version": self.version,
         }
 
     @classmethod
@@ -179,6 +190,7 @@ class HfAuswertung:
             aktivitaet=d.get("aktivitaet"),
             profil_stand=dict(d.get("profil_stand") or {}),
             algo_version=int(d.get("algo_version") or 0),
+            version=int(d.get("version") or 0),
         )
 
 
@@ -214,9 +226,18 @@ def _json(x: Any) -> Any:
     return x
 
 
+def ist_schlafabschnitt(name: str) -> bool:
+    """Gilt der Abschnittsname als bestätigte Schlafzeit?
+
+    >>> ist_schlafabschnitt("Schlafen 23:10–06:30"), ist_schlafabschnitt("Stufe 2")
+    (True, False)
+    """
+    return name.strip().casefold().startswith(SCHLAF_NAMEN)
+
+
 def _nachtfenster(rec: Recording, reihe: hz.HfReihe) -> tuple[float, float] | None:
     """20–10 Uhr Ortszeit auf der Wanduhr der Aufnahme — das Fenster für den Schlafkandidaten
-    (das erste, das die Aufnahme überlappt)."""
+    und die Nacht-HF ohne Schlafabschnitt (das erste, das die Aufnahme überlappt)."""
     if rec.start_utc is None or reihe.n == 0:
         return None
     start = rec.start_utc.astimezone()
@@ -319,13 +340,23 @@ def auswerten(
         ruhe_k = r.als_dict()
         ruhe_k["quelle"] = "messung_morgen_10" if dauer >= RUHE_INTERLIVE_S else "messung_morgen_5"
     nacht: dict[str, Any] | None = None
-    schlaf = [a for a in abschnitte if a.name.strip().casefold().split(" ")[0] in SCHLAF_NAMEN]
+    schlaf = [a for a in abschnitte if ist_schlafabschnitt(a.name)]
+    nachtfenster = _nachtfenster(rec, reihe)
     if schlaf:
         s = max(schlaf, key=lambda a: a.bis_s - a.von_s)
         n = hz.nacht_hf(reihe, s.von_s, s.bis_s)
         nacht = n.als_dict()
+        nacht["grundlage"] = NACHT_ABSCHNITT
         nacht["abschnitt_id"] = s.id
         nacht["von_s"], nacht["bis_s"] = s.von_s, s.bis_s
+    elif nachtfenster is not None and reihe.abgedeckt_s(*nachtfenster) >= HF_NACHT_MIN_S:
+        # Eine Nachtaufnahme ohne eingetragenen Schlafabschnitt: das tiefste 2-h-Mittel im
+        # Nachtfenster. Die Bestätigung der Schlafzeit (INTERLIVE) ist das Übernehmen selbst.
+        n = hz.nacht_hf(reihe, *nachtfenster)
+        nacht = n.als_dict()
+        nacht["grundlage"] = NACHT_FENSTER
+        nacht["abschnitt_id"] = None
+        nacht["von_s"], nacht["bis_s"] = nachtfenster
 
     talk: dict[str, Any] | None = None
     marken_talk = talk_marken(rec)
@@ -355,9 +386,8 @@ def auswerten(
         if tagmin is not None:
             ruhephasen = hz.ruhephasen(reihe, tagmin + 10.0)
             phasen.extend(ruhephasen)
-            fenster = _nachtfenster(rec, reihe)
-            if fenster is not None and not schlaf:
-                kandidat = hz.schlaf_kandidat(ruhephasen, *fenster)
+            if nachtfenster is not None and not schlaf:
+                kandidat = hz.schlaf_kandidat(ruhephasen, *nachtfenster)
                 if kandidat is not None:
                     phasen.append(kandidat)
         for p in phasen:
@@ -415,11 +445,13 @@ def phase_name(art: str, rec: Recording, von_s: float, bis_s: float) -> str:
 
 
 __all__ = [
+    "AUSWERTUNG_VERSION",
     "AbschnittWand",
     "HfAuswertung",
     "achse_zu_wand",
     "auswerten",
     "erholungs_marken",
+    "ist_schlafabschnitt",
     "phase_name",
     "profil_stand",
     "talk_marken",

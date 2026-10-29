@@ -196,8 +196,10 @@ was schon vergeben war.
   geht in keine Baseline, keinen Median, kein Feldmaximum.
 - `hf_cache` (Migration 035): je Aufzeichnung die Herzfrequenz-Auswertung
   (`core/hf_auswertung.py`: Werte der Aufnahme und je Abschnitt, Erholungen, Kandidaten,
-  Vorschläge, Tagesprofil) als JSON mit `algo_version` und `profil_stand_json` (Ruhe-HF, HFmax,
-  Grenzen von damals). Reiner Cache: aus Datei + Profil nachrechenbar; weicht das heutige
+  Vorschläge, Tagesprofil) als JSON mit `algo_version` (hrv-core), `version`
+  (`AUSWERTUNG_VERSION` der App, im JSON) und `profil_stand_json` (Ruhe-HF, HFmax,
+  Grenzen von damals). Reiner Cache: aus Datei + Profil nachrechenbar; springt eine der beiden
+  Versionen, gilt der Stand als veraltet und „Alle nachrechnen“ holt ihn nach; weicht das heutige
   Profil ab, zeigt die Auswertung die damaligen Werte und bietet das Nachrechnen an (gespeichert
   nur nach Rückfrage). Wochenlast, Testreihen und der Forschungsexport (`…_hf.json`) lesen hier.
 - `day_field.fest`: feste Felder der App (Anstrengung/sRPE, Blutdruck, Gewicht, Ruhepuls,

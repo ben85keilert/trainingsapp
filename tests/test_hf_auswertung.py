@@ -144,17 +144,37 @@ def test_auswertung_ohne_profil_und_nacht() -> None:
     assert a.ruhe_kandidat is None  # zu lang für eine Morgenmessung
     schlaf = [v for v in a.vorschlaege if v["art"] == "schlaf"]
     assert len(schlaf) == 1 and schlaf[0]["von_s"] == pytest.approx(3600.0, abs=120)
-    # bestätigter Schlafabschnitt → Nacht-HF, kein Schlafvorschlag mehr
+    # ohne Schlafabschnitt zählt das Nachtfenster 20–10 Uhr der Aufnahme (≥ 4 h Daten)
+    assert a.nacht is not None and a.nacht["gueltig"] and a.nacht["wert"] == pytest.approx(50.0)
+    assert a.nacht["grundlage"] == "nachtfenster" and a.nacht["abschnitt_id"] is None
+    assert a.nacht["von_s"] < 0 and a.nacht["bis_s"] - a.nacht["von_s"] == pytest.approx(14 * 3600)
+    # bestätigter Schlafabschnitt → Nacht-HF daraus, kein Schlafvorschlag mehr
     b = auswerten(
         rec,
         profil=profil,
         bereiche=[],
-        abschnitte=[AbschnittWand("seg-s", "Schlaf", 3600.0, 21600.0)],
+        abschnitte=[AbschnittWand("seg-s", "Schlafen bis 6", 3600.0, 21600.0)],
     )
     assert b.nacht is not None and b.nacht["gueltig"] and b.nacht["wert"] == pytest.approx(50.0)
-    assert b.nacht["abschnitt_id"] == "seg-s"
+    assert b.nacht["abschnitt_id"] == "seg-s" and b.nacht["grundlage"] == "abschnitt"
     assert not any(v["art"] == "schlaf" for v in b.vorschlaege)
     assert erholungs_marken(rec) == []
+    # eine echte Nacht schwankt: 21–6 Uhr, Wachphasen und REM-Anstiege, trotzdem Nacht-HF
+    rng = np.random.default_rng(1)
+    hf = [68.0] * 1800  # 8 Stunden Schlaf mit 90-min-Zyklen 44–56 bpm, dann wach
+    hf += [50.0 + 6 * np.sin(i / 5400 * 2 * np.pi) + rng.normal(0, 2) for i in range(8 * 3600)]
+    hf += [66.0] * 1800
+    nacht = _rec(hf, start=datetime(2026, 10, 28, 19, 0, tzinfo=UTC))  # 21:00 MESZ
+    c = auswerten(nacht, profil=profil, bereiche=[])
+    assert c.nacht is not None and c.nacht["gueltig"] and 44 < c.nacht["wert"] < 52
+    assert c.nacht["grundlage"] == "nachtfenster"
+    # kurze Aufnahme am Abend: kein Nachtwert
+    kurz = auswerten(
+        _rec([60.0] * 3600, start=datetime(2026, 10, 28, 20, 0, tzinfo=UTC)),
+        profil=profil,
+        bereiche=[],
+    )
+    assert kurz.nacht is None
 
 
 def test_leere_aufzeichnung() -> None:
@@ -194,6 +214,10 @@ def test_hf_cache_schreiben_lesen_veraltet(con) -> None:
     anderes = profil_stand(_profil(), bereiche_fuer(_profil(), HfEinstellungen(modell="acsm")))
     assert stand.veraltet(anderes) and not stand.veraltet()
     assert repo.fehlende(s.id) == [] and len(repo.alle(s.id)) == 1
+    # eine ältere Rechenvorschrift der App: veraltet, und „Alle nachrechnen“ holt sie nach
+    alt_stand = HfAuswertung.aus_dict({**a.als_dict(), "version": 1})
+    repo.schreiben(r.id, alt_stand)
+    assert repo.lesen(r.id).veraltet() and repo.fehlende(s.id) == [r.id]
     repo.schreiben(r.id, a)  # Upsert
     assert len(repo.alle(s.id)) == 1
     repo.loeschen(r.id)

@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from trainingsapp.core.uhr_seiten import SEITEN as UHR_SEITEN
+from trainingsapp.core.uhr_seiten import SEITEN_VORGABE as UHR_SEITEN_VORGABE
 
 #: Werte der Übersicht über der Kurve, wenn nichts eingestellt ist (Reihenfolge zählt)
 STANDARD_KACHELN: Final[tuple[str, ...]] = (
@@ -73,6 +74,11 @@ ANALYSE_LAENGEN: Final[tuple[int, ...]] = (60, 120, 300, 600)
 #: Schrittweite der Pfeile ‹ › am Analysefenster (Ben, 26.10.2026): ein halbes oder ein
 #: ganzes Fenster, sonst Sekunden
 ANALYSE_SCHRITTE: Final[tuple[str, ...]] = ("halb", "ganz", "60", "30", "10")
+
+#: Die zwei Sichten der Hauptkarte (Ben, 29.10.2026, Entscheidung 10): Herzfrequenz oder HRV
+SICHT_HF: Final[str] = "hf"
+SICHT_HRV: Final[str] = "hrv"
+SICHTEN: Final[tuple[str, ...]] = (SICHT_HF, SICHT_HRV)
 
 #: Analysebereiche unter der Hauptkurve
 BEREICH_ZEIT: Final[str] = "zeit"
@@ -157,7 +163,11 @@ class HrvEinstellungen:
     #: Ben, 26.10.2026) — für Bänder ohne eigene App wie die Galaxy Fit3
     uhr_medien: bool = False
     #: Welche Seiten die Uhr bekommt (`core.uhr_seiten.SEITEN`; „hf“ immer)
-    uhr_seiten: list[str] = field(default_factory=lambda: list(UHR_SEITEN))
+    uhr_seiten: list[str] = field(default_factory=lambda: list(UHR_SEITEN_VORGABE))
+    #: Welche Sicht die Hauptkarte öffnet (`SICHTEN`); Vorgabe Herzfrequenz
+    standard_sicht: str = SICHT_HF
+    #: Die zuletzt gewählte Sicht beim nächsten Öffnen wiederherstellen
+    sicht_merken: bool = True
 
     def bereiche(self, *, optisch: bool) -> list[str]:
         """Welche Analysebereiche die Ansicht anbietet (Zeit immer)."""
@@ -193,6 +203,8 @@ class HrvEinstellungen:
             "ebenen": list(self.ebenen),
             "uhr_medien": self.uhr_medien,
             "uhr_seiten": list(self.uhr_seiten),
+            "standard_sicht": self.standard_sicht,
+            "sicht_merken": self.sicht_merken,
         }
 
     @classmethod
@@ -251,6 +263,10 @@ class HrvEinstellungen:
             ebenen=[k for k in liste("ebenen") if k in EBENEN],
             uhr_medien=schalter("uhr_medien"),
             uhr_seiten=[k for k in liste("uhr_seiten") if k in UHR_SEITEN],
+            standard_sicht=sicht
+            if (sicht := d.get("standard_sicht")) in SICHTEN
+            else vorgabe.standard_sicht,
+            sicht_merken=schalter("sicht_merken"),
         )
 
 
@@ -278,6 +294,9 @@ __all__ = [
     "LIVE_SPEKTRUM_S",
     "NACHRECHNEN_MS",
     "PUFFER_S",
+    "SICHTEN",
+    "SICHT_HF",
+    "SICHT_HRV",
     "STANDARD_GROSS",
     "STANDARD_KACHELN",
     "UEBERSICHT",

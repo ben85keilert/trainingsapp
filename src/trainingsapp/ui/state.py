@@ -15,7 +15,7 @@ import json
 import sqlite3
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,10 @@ from trainingsapp.config import (
 from trainingsapp.core.anhaenge import ZEITRAUM_VORGABE as ANHAENGE_ZEITRAUM_VORGABE
 from trainingsapp.core.darstellung import Darstellung, darstellung_lesen, darstellung_schreiben
 from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
+from trainingsapp.core.hf_einstellungen import HfEinstellungen
+from trainingsapp.core.hf_einstellungen import einstellungen_lesen as hf_lesen
+from trainingsapp.core.hf_einstellungen import einstellungen_schreiben as hf_schreiben
+from trainingsapp.core.hf_profil import TAGESFELD_TAGE, HfProfil, hf_profil, tagesfeld_eintraege
 from trainingsapp.core.hrv_ansicht import (
     Ansicht,
     ansicht_lesen,
@@ -40,6 +44,7 @@ from trainingsapp.core.hrv_ansicht import (
     ansichten_schreiben,
 )
 from trainingsapp.core.hrv_einstellungen import (
+    SICHTEN,
     HrvEinstellungen,
     einstellungen_lesen,
     einstellungen_schreiben,
@@ -51,6 +56,8 @@ from trainingsapp.core.paketquelle import QUELLE_VORGABE, Pruefung, url_pruefen
 from trainingsapp.core.sicherung import Sicherung
 from trainingsapp.core.sicherung import setzen as sicherung_setzen
 from trainingsapp.core.sicherung import stand as sicherung_stand
+from trainingsapp.core.tagesfelder import STANDARD_RUHEPULS as TF_RUHEPULS
+from trainingsapp.core.tagesfelder import standardfeld as tf_standardfeld
 from trainingsapp.core.timer import (
     EINMAL,
     STOPPUHR,
@@ -72,6 +79,8 @@ from trainingsapp.data.anhaenge import AnhangRepo
 from trainingsapp.data.bezuege import BezugRepo
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.einheiten import EinheitRepo
+from trainingsapp.data.hf_cache import HfCacheRepo
+from trainingsapp.data.hf_profil import ProfilwertRepo, RechenAusnahmeRepo
 from trainingsapp.data.kurse import KursRepo
 from trainingsapp.data.pakete import PaketRepo
 from trainingsapp.data.repositories import (
@@ -188,6 +197,10 @@ class AppState:
     anhaenge: AnhangRepo
     #: Tagesfelder und ihre Werte (Migration 027, `core/tagesfelder.py`) — je Profil
     tagesfelder: TagesfeldRepo
+    #: Herzfrequenz: Profilwerte mit Herkunft und Rechen-Ausnahmen (Migration 034)
+    profilwerte: ProfilwertRepo
+    ausnahmen: RechenAusnahmeRepo
+    hf_cache: HfCacheRepo
     tageswerte: TageswertRepo
     profil: Subject
     #: Welcher Reiter der Navigationsleiste aktiv ist — als Schlüssel, nicht als
@@ -304,6 +317,15 @@ class AppState:
     notizen_offen: bool = False
     #: Aufzeichnung: Klappfeld „Abschnitte" über der Hauptkurve aufgeklappt (Ben, 26.10.2026)
     abschnitte_offen: bool = True
+    #: Herzfrequenz-Sicht (Ben, 29.10.2026): die Akkumulatoren der laufenden Aufnahme
+    #: (`core.hf_training.LiveHf`) — überleben den Neuaufbau der Ansicht; ihr Schlüssel
+    #: (Profil, Ruhe, HFmax, Grenzen) sagt, wann sie neu gebaut werden
+    live_hf: Any = None
+    live_hf_schluessel: tuple | None = None
+    #: Bezug der Zeit je Bereich: aufnahme | abschnitt | fenster
+    hf_bezug: str = "aufnahme"
+    #: Laufende Erholung: t0 auf der Live-Achse, Kontext, Haltung — None: keine
+    hf_erholung: dict[str, Any] | None = None
     #: Einstellungen → HRV-Messung: Teil „Erweitert" aufgeklappt
     hrv_erweitert_offen: bool = False
     #: Notizen: Übungen zum Antippen eingeblendet, und aus welchem Plan
@@ -469,6 +491,9 @@ class AppState:
             anhaenge=AnhangRepo(con, anhaengeverzeichnis()),
             tagesfelder=TagesfeldRepo(con),
             tageswerte=TageswertRepo(con),
+            profilwerte=ProfilwertRepo(con),
+            ausnahmen=RechenAusnahmeRepo(con),
+            hf_cache=HfCacheRepo(con),
             profil=profil,
             neu_eingespielt=neu,
             entfallene=PaketRepo(con).entfallene_offen(),
@@ -736,6 +761,54 @@ class AppState:
 
     def training_einstellungen_setzen(self, e: TrainingEinstellungen) -> None:
         self.einstellungen.setzen(SettingRepo.TRAINING_EINSTELLUNGEN, training_schreiben(e))
+
+    # -- Herzfrequenz (Ben, 29.10.2026) ----------------------------------------------
+
+    def hf_einstellungen(self, profil_id: str | None = None) -> HfEinstellungen:
+        """Bereichsmodell und eigene Grenzen — **je Profil** (`core.hf_einstellungen`)."""
+        pid = profil_id or self.profil.id
+        return hf_lesen(self.einstellungen.lesen(f"{SettingRepo.HF_EINSTELLUNGEN}:{pid}"))
+
+    def hf_einstellungen_setzen(self, e: HfEinstellungen, profil_id: str | None = None) -> None:
+        pid = profil_id or self.profil.id
+        self.einstellungen.setzen(f"{SettingRepo.HF_EINSTELLUNGEN}:{pid}", hf_schreiben(e))
+
+    def hf_profil(self, heute: date | None = None) -> HfProfil:
+        """Die geltenden HF-Werte des aktiven Profils (Wertehierarchie, Formel-Startwert)."""
+        tag = heute or self.heute()
+        eintraege = self.profilwerte.alle(self.profil.id)
+        # Das feste Tagesfeld „Ruhepuls“ zählt als Quelle ``tagesfeld`` (Rang zuletzt)
+        feld = tf_standardfeld(self.tagesfelder.alle(self.profil.id), TF_RUHEPULS)
+        if feld is not None:
+            werte = self.tageswerte.zwischen(
+                self.profil.id, tag - timedelta(days=TAGESFELD_TAGE), tag, feld_ids=[feld.id]
+            )
+            eintraege = [
+                *eintraege,
+                *tagesfeld_eintraege(
+                    self.profil.id, werte, ausgenommen=self.ausnahmen.tage(self.profil.id)
+                ),
+            ]
+        return hf_profil(eintraege, self.profil, tag, formel=self.hf_einstellungen().formel)
+
+    def hrv_sicht(self) -> str:
+        """Welche Sicht die Hauptkarte öffnet: die gemerkte, sonst die Vorgabe."""
+        e = self.hrv_einstellungen()
+        if e.sicht_merken:
+            gemerkt = self.einstellungen.lesen(SettingRepo.HRV_SICHT)
+            if gemerkt in SICHTEN:
+                return gemerkt
+        return e.standard_sicht
+
+    def hrv_sicht_setzen(self, sicht: str) -> None:
+        if sicht in SICHTEN:
+            self.einstellungen.setzen(SettingRepo.HRV_SICHT, sicht)
+
+    def profil_speichern(self, profil: Subject) -> None:
+        """Jahrgang, Geschlecht, Notiz eines Profils ändern (Name: `profil_umbenennen_id`)."""
+        self.profile.speichern(profil)
+        if self.profil.id == profil.id:
+            self.profil = profil
 
     def hrv_zuruecksetzen(self) -> None:
         """Einstellungen, aktuelle Ansicht und Korrekturregeln auf die Vorgaben.

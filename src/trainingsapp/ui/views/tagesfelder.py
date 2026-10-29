@@ -199,12 +199,21 @@ def tagesfelder_view(page: Any, state: AppState) -> ft.View:
 
     def loescher(feld: tf.Tagesfeld) -> Callable[[], None]:
         def handler() -> None:
+            if feld.fest:  # festes Feld der App (Ben, 29.10.2026): nur ausschalten
+                page.show_dialog(
+                    ft.SnackBar(
+                        ft.Text(f"„{feld.name}“ ist ein festes Feld — ausschalten statt löschen.")
+                    )
+                )
+                return
             page.show_dialog(loeschen_dialog(page, state, feld, zeichnen))
 
         return handler
 
     def zeile(feld: tf.Tagesfeld, i: int, n: int) -> ft.Control:
         unter = feld.zusammenfassung()
+        if feld.fest:
+            unter += " · fest"
         if not feld.aktiv:
             unter += " · " + _umfang_text(state.tageswerte.umfang(feld.id))
         rechts: list[ft.Control] = []
@@ -288,8 +297,9 @@ def tagesfelder_view(page: Any, state: AppState) -> ft.View:
         if alle:
             ergebnis.append(
                 hinweis(
-                    "Antippen bearbeitet, lang drücken löscht. Ausgeschaltete stehen weiter in "
-                    "Verlauf, Kalender und Tagebuch."
+                    "Antippen bearbeitet, lang drücken löscht. Feste Felder der App (Ruhepuls, "
+                    "Anstrengung, Störung …) lassen sich nur ausschalten. Ausgeschaltete stehen "
+                    "weiter in Verlauf, Kalender und Tagebuch."
                 )
             )
         geloeschte = state.tagesfelder.standard_geloeschte(state.profil.id)

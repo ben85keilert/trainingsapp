@@ -70,6 +70,7 @@ class TagesfeldRepo:
             deleted_at=_zeit(r["deleted_at"]),
             tageswert=r["tageswert"] or "",
             standard_key=r["standard_key"],
+            fest=bool(r["fest"]),
         )
 
     def alle(self, subject_id: str, *, mit_geloeschten: bool = False) -> list[Tagesfeld]:
@@ -105,8 +106,8 @@ class TagesfeldRepo:
                 feld.reihenfolge = int(r["n"])
                 self.con.execute(
                     "INSERT INTO day_field (id, subject_id, name, spec_json, mehrmals, "
-                    "sort_order, active, created_at, updated_at, tageswert, standard_key) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "sort_order, active, created_at, updated_at, tageswert, standard_key, fest) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         feld.id,
                         feld.subject_id,
@@ -119,6 +120,7 @@ class TagesfeldRepo:
                         stempel,
                         feld.tageswert,
                         feld.standard_key,
+                        int(feld.fest),
                     ),
                 )
                 return
@@ -156,7 +158,11 @@ class TagesfeldRepo:
 
     def loeschen(self, feld_id: str, *, mit_werten: bool) -> str:
         """Löschen — die Werte bleiben, außer ``mit_werten``. Gibt den Stempel für
-        `loeschen_rueckgaengig` zurück."""
+        `loeschen_rueckgaengig` zurück. Ein **festes** Feld lässt sich nicht löschen, nur
+        ausschalten (``ValueError``, Ben 29.10.2026)."""
+        feld = self.laden(feld_id)
+        if feld is not None and feld.fest:
+            raise ValueError(f"„{feld.name}“ ist ein festes Feld — ausschalten statt löschen.")
         stempel = jetzt().isoformat()
         with transaktion(self.con):
             self.con.execute(

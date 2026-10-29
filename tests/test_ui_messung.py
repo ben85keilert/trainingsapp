@@ -27,6 +27,9 @@ from trainingsapp.ui.views.messung_detail import messung_detail_view  # noqa: E4
 def daten(tmp_path, monkeypatch):
     monkeypatch.setenv("TRAININGSAPP_DATA_DIR", str(tmp_path))
     state = AppState.starten(tmp_path / "app.db")
+    # Diese Tests prüfen die HRV-Sicht der Hauptkarte; Vorgabe ist seit dem 29.10.2026 die
+    # Herzfrequenz-Sicht (`tests/test_ui_herzfrequenz.py`)
+    state.hrv_sicht_setzen("hrv")
     yield state, tmp_path
     state.schliessen()
 
@@ -104,7 +107,7 @@ def test_messung_ohne_geraet(daten) -> None:
     assert "OHNE GERÄT AUSPROBIEREN" in texte
     state.messung_tab = 2  # Reiter „Aufzeichnungen" — ohne alles: Unterreiter „Strecken"
     texte = _baum_texte(messung(_seite(), state))
-    assert state.aufzeichnungen_tab == 0 and "Strecken" in texte and "HRV" in texte
+    assert state.aufzeichnungen_tab == 0 and "Strecken" in texte and "Messungen" in texte
     assert any(t.startswith("Noch kein Training.") for t in texte)
     state.aufzeichnungen_tab = 1
     assert any(
@@ -208,7 +211,7 @@ def test_detailansicht_mit_artefakt_korrigieren_und_speichern(daten) -> None:
     # öffnet sich gleich der Unterreiter „HRV"
     state.messung_tab = 2
     liste = messung(seite, state)
-    assert state.aufzeichnungen_tab == 1 and "HRV (1)" in _baum_texte(liste)
+    assert state.aufzeichnungen_tab == 1 and "Messungen (1)" in _baum_texte(liste)
     assert "Noch keine Aufzeichnung." not in _baum_texte(liste)
     export = [
         c

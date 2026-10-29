@@ -39,6 +39,7 @@ FELD = "feld"  # Tagesfeld bearbeiten (Einstellungen)
 AUSWERTUNG = "auswertung"  # Messung oder Strecke auswerten
 BEARBEITEN = "bearbeiten"  # Übung oder Plan bearbeiten
 ABLAUF = "ablauf"  # Plan als Ablauf starten
+AUSNAHME = "ausnahme"  # Messung, Strecke oder Tag „nicht mitrechnen“ (Ben, 29.10.2026)
 
 #: Ein Symbol je Ziel — nach dem Vokabular, das die App schon hat: die Reiter Heute und
 #: Verlauf, das i, „Notiz zum Tag“, der runde Knopf „Nachtragen“, der Reiter „Strecken“
@@ -54,6 +55,7 @@ SYMBOLE: dict[str, ft.IconData] = {
     EINTRAGEN: ft.Icons.EDIT,
     FELD: ft.Icons.TUNE,
     AUSWERTUNG: ft.Icons.ANALYTICS_OUTLINED,
+    AUSNAHME: ft.Icons.DO_NOT_DISTURB_ON_OUTLINED,
     BEARBEITEN: ft.Icons.EDIT_OUTLINED,
     ABLAUF: ft.Icons.PLAYLIST_PLAY,
 }
@@ -69,6 +71,7 @@ TEXTE: dict[str, str] = {
     EINTRAGEN: "Eintragen",
     FELD: "Feld bearbeiten",
     AUSWERTUNG: "Auswertung",
+    AUSNAHME: "Nicht mitrechnen",
     BEARBEITEN: "Bearbeiten",
     ABLAUF: "Ablauf starten",
 }
@@ -185,6 +188,7 @@ def blatt_oeffner(
 
 __all__ = [
     "ABLAUF",
+    "AUSNAHME",
     "AUSWERTUNG",
     "BEARBEITEN",
     "EINTRAEGE",

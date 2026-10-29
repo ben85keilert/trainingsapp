@@ -302,26 +302,36 @@ def test_standardfelder_je_profil_loeschen_und_wiederherstellen(felder, werte, c
     a, b = Subject(name="A"), Subject(name="B")
     profile.speichern(a)
     profile.speichern(b)
-    assert [f.name for f in felder.standard_einspielen(a.id)] == ["Blutdruck"]
+    assert [f.name for f in felder.standard_einspielen(a.id)] == [
+        "Anstrengung (sRPE)",
+        "Blutdruck",
+        "Gewicht",
+        "Ruhepuls",
+        "Störung",
+    ]
     assert felder.standard_einspielen(a.id) == []  # nichts doppelt
     assert felder.alle(b.id) == []  # je Profil
-    (bd,) = felder.alle(a.id)
+    alle = felder.alle(a.id)
+    assert all(f.fest and not f.aktiv for f in alle)  # fest, ausgeschaltet angelegt
+    bd = tf.standardfeld(alle, "blutdruck")
     werte.hinzufuegen(bd, TAG, _um(8), wert=(120, 80, None))
-    # Löschen mit Werten: der Start legt es nicht wieder an …
-    stempel = felder.loeschen(bd.id, mit_werten=True)
-    assert stempel and felder.alle(a.id) == [] and felder.standard_einspielen(a.id) == []
-    # … aber die Einstellungen können es wiederherstellen — mit den Werten
-    ((v, zeile),) = felder.standard_geloeschte(a.id)
-    assert v.standard_key == "blutdruck" and zeile is not None and zeile.id == bd.id
-    zurueck = felder.wiederherstellen(v, a.id)
-    assert zurueck.id == bd.id and zurueck.deleted_at is None and zurueck.aktiv
-    assert len(werte.am_tag(a.id, TAG)) == 1
-    assert felder.standard_geloeschte(a.id) == []
+    # Feste Felder (Ben, 29.10.2026) lassen sich nicht löschen, nur ausschalten
+    with pytest.raises(ValueError):
+        felder.loeschen(bd.id, mit_werten=True)
+    assert len(felder.alle(a.id)) == 5 and felder.standard_geloeschte(a.id) == []
+    felder.schalten(bd.id, True)
+    assert felder.laden(bd.id).aktiv
     # Nie angelegt (Profil B): Wiederherstellen legt an
-    ((v, zeile),) = felder.standard_geloeschte(b.id)
-    assert zeile is None
-    neu = felder.wiederherstellen(v, b.id)
-    assert neu.standard_key == "blutdruck" and felder.alle(b.id) == [neu]
+    fehlend = felder.standard_geloeschte(b.id)
+    assert [v.standard_key for v, zeile in fehlend] == [
+        "srpe",
+        "blutdruck",
+        "gewicht",
+        "ruhepuls",
+        "stoerung",
+    ] and all(zeile is None for _, zeile in fehlend)
+    neu = felder.wiederherstellen(fehlend[1][0], b.id)
+    assert neu.standard_key == "blutdruck" and neu.fest and felder.alle(b.id) == [neu]
 
 
 def test_vorlagen_in_gruppen_und_messwert_lesen() -> None:

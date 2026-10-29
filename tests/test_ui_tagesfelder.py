@@ -321,7 +321,7 @@ def test_liste_aktiv_und_ausgeschaltet(page, state) -> None:
     f = _felder(state)
     state.tagesfelder.schalten(f["essen"].id, False)
     texte = _texte(tagesfelder_view(page, state))
-    assert "AKTIV · 3" in texte and "AUSGESCHALTET · 2" in texte  # dazu Blutdruck (Standard)
+    assert "AKTIV · 3" in texte and "AUSGESCHALTET · 6" in texte  # dazu 5 feste Felder
     assert "Anzahl · 400, 800 · mehrmals mit Uhrzeit" in texte
 
 
@@ -554,20 +554,29 @@ def test_entfernte_variante_bleibt_im_bearbeiter_waehlbar(page, state) -> None:
     assert [o.text for o in wahl.options] == ["400", "800 (entfernt)"] and wahl.value == "800"
 
 
-def test_standardfeld_loeschen_und_in_der_liste_wiederherstellen(page, state) -> None:
+def test_festes_feld_laesst_sich_nicht_loeschen(page, state) -> None:
+    """Ben, 29.10.2026: feste Felder der App (Blutdruck, Ruhepuls, Anstrengung, Gewicht,
+    Störung) sind nicht löschbar, nur ausschaltbar — langes Drücken sagt das."""
     from trainingsapp.ui.views.tagesfelder import tagesfelder_view
 
     bd = _blutdruck(state)
     state.tageswerte.hinzufuegen(bd, state.heute(), _um(state, 8), wert=(120, 80, None))
-    state.tagesfelder.loeschen(bd.id, mit_werten=True)
+    with pytest.raises(ValueError):
+        state.tagesfelder.loeschen(bd.id, mit_werten=True)
     ansicht = tagesfelder_view(page, state)
     texte = _texte(ansicht)
-    assert "STANDARDFELDER" in texte and any(t.startswith("gelöscht am") for t in texte)
-    _knopf(ansicht, "Wiederherstellen").on_click()
-    zurueck = state.tagesfelder.laden(bd.id)
-    assert zurueck.deleted_at is None and zurueck.aktiv
-    assert len(state.tageswerte.am_tag(state.profil.id, state.heute())) == 1
-    assert "STANDARDFELDER" not in _texte(tagesfelder_view(page, state))
+    assert "STANDARDFELDER" not in texte  # alle da — nichts wiederherzustellen
+    assert any(t.endswith("· fest") or "· fest ·" in t for t in texte)
+    zeile = next(
+        c
+        for c in _alle(ansicht)
+        if isinstance(c, ft.Container)
+        and c.on_long_press is not None
+        and any(getattr(x, "value", None) == "Blutdruck" for x in _alle(c))
+    )
+    zeile.on_long_press()
+    assert any("festes Feld" in t for t in _texte(page.dialoge[-1]))
+    assert state.tagesfelder.laden(bd.id).deleted_at is None
 
 
 def test_formular_messwert_mit_teilen_und_tageswert(page, state) -> None:

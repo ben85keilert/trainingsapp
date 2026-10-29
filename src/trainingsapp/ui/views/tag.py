@@ -111,6 +111,42 @@ KARTE = ft.Colors.SURFACE_CONTAINER_LOWEST
 FERTIG_KARTE = ft.Colors.SURFACE_CONTAINER
 
 
+def tag_ausnahme_menue(page: Any, state: AppState, tag: date) -> ft.Control:
+    """⋮ mit „Tag nicht mitrechnen“ / „Tag wieder mitrechnen“ (Ben, 29.10.2026, Frage 5): ein
+    ausgenommener Tag geht in keine Baseline, keinen Median, kein Feldmaximum — das Tagesfeld
+    „Störung“ hält den Grund fest, die App fragt nicht nach."""
+    from trainingsapp.data.hf_profil import RechenAusnahmeRepo
+
+    ist = state.ausnahmen.ist(state.profil.id, RechenAusnahmeRepo.TAG, tag.isoformat())
+
+    def umschalten(_e: object = None) -> None:
+        jetzt_aus = state.ausnahmen.umschalten(
+            state.profil.id, RechenAusnahmeRepo.TAG, tag.isoformat()
+        )
+        page.show_dialog(
+            ft.SnackBar(
+                ft.Text(
+                    f"{tag:%d.%m.%Y} zählt nicht mehr für Mittelwerte und Baseline."
+                    if jetzt_aus
+                    else f"{tag:%d.%m.%Y} zählt wieder mit."
+                )
+            )
+        )
+        state.neu_zeichnen()
+
+    return ft.PopupMenuButton(
+        icon=ft.Icons.MORE_VERT,
+        tooltip="Mehr",
+        items=[
+            ft.PopupMenuItem(
+                content="Tag wieder mitrechnen" if ist else "Tag nicht mitrechnen",
+                icon=ft.Icons.DO_NOT_DISTURB_ON_OUTLINED,
+                on_click=umschalten,
+            )
+        ],
+    )
+
+
 def tag_titel(tag: date, heute: date) -> str:
     """„Heute, 12.10." oder „Mo, 05.10."."""
     if tag == heute:
@@ -1425,6 +1461,7 @@ def tag_view(page: Any, state: AppState, tag: date) -> ft.View:
                     tooltip="Anderen Tag wählen",
                     on_click=lambda: tag_waehlen(page, state, tag),
                 ),
+                tag_ausnahme_menue(page, state, tag),
             ],
         ),
         floating_action_button=nachtragen_knopf(page, state, tag, basis) if tag <= heute else None,

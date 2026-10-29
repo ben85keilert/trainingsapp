@@ -1536,11 +1536,36 @@ def strecken_zeilen(page: ft.Page, state: AppState) -> list[ft.Control]:
         mit_hrv = bool(s.hrv_recording_id) or (
             bool(s.einheit_id) and hrv_bezug(state, s) is not None
         )
+        # Tipp = Auswertung; Zielsymbol oder Gedrückthalten: Auswertung · Tag (28.10.2026)
+        from trainingsapp.data.hf_profil import RechenAusnahmeRepo
         from trainingsapp.ui import ziele_liste
 
-        # Tipp = Auswertung; Zielsymbol oder Gedrückthalten: Auswertung · Tag (28.10.2026)
+        def ausnahme_umschalter(strecke_id: str) -> Callable[[], None]:
+            def handler() -> None:
+                jetzt_aus = state.ausnahmen.umschalten(
+                    state.profil.id, RechenAusnahmeRepo.STRECKE, strecke_id
+                )
+                page.show_dialog(
+                    ft.SnackBar(
+                        ft.Text(
+                            "Strecke zählt nicht mehr für Mittelwerte."
+                            if jetzt_aus
+                            else "Strecke zählt wieder mit."
+                        )
+                    )
+                )
+
+            return handler
+
         haupt, blatt = ziele_liste.auswertung_und_tag(
-            page, " · ".join(teile), oeffner(s.id), lokal.date()
+            page,
+            " · ".join(teile),
+            oeffner(s.id),
+            lokal.date(),
+            ausnahme=(
+                state.ausnahmen.ist(state.profil.id, RechenAusnahmeRepo.STRECKE, s.id),
+                ausnahme_umschalter(s.id),
+            ),
         )
         zeilen.append(
             ft.ListTile(

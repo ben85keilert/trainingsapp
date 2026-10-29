@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from hrv_core.live import LiveFenster
 
 from trainingsapp.core import uhr_seiten as us
-from trainingsapp.core.uhr_seiten import SEITEN
 from trainingsapp.ui.geraete.flet_medien_kanal import MedienKanal, training_aus
 
 
@@ -63,7 +62,7 @@ class Lauf:
 
 def _state(lauf: Lauf | None, an: bool = True, seiten: list[str] | None = None) -> SimpleNamespace:
     einstellung = SimpleNamespace(
-        uhr_medien=an, uhr_seiten=list(SEITEN) if seiten is None else seiten
+        uhr_medien=an, uhr_seiten=list(us.SEITEN_VORGABE) if seiten is None else seiten
     )
     return SimpleNamespace(
         messlauf=lauf,

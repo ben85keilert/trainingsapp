@@ -353,7 +353,7 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
 | Feld | Werte | Bedeutung |
 |---|---|---|
 | `quelle` | `einheit`, `timer`, `plan`, `gps`, `person` | wer die Marke setzte — `person`: ein Tipp in der Übungsausführung (seit 19.10.2026) |
-| `art` | `start`, `ende`, `abschnitt`, `pause`, `weiter`, `uebung_start`, `uebung_ende`, `km`, `leistung`, `abschluss` | was sie bedeutet — `leistung`: „geleistet bis hierher“ (die **Tippzeit**, nie der Beginn des Satzes), `abschluss`: der Eintrag ist fertig |
+| `art` | `start`, `ende`, `abschnitt`, `pause`, `weiter`, `uebung_start`, `uebung_ende`, `km`, `leistung`, `abschluss`, `erholung` | was sie bedeutet — `leistung`: „geleistet bis hierher“ (die **Tippzeit**, nie der Beginn des Satzes), `abschluss`: der Eintrag ist fertig, `erholung`: Ende einer Belastung, ab hier zählt die HF-Erholung; `talk`: Talk-Test, „Sprechen wird schwer“ — die HF der 30 s davor ist der Marker für Schwelle 1 (beide seit 29.10.2026, `docs/plan_herzfrequenz.md`) |
 | `spur` | `timer`, `uebung`, `km` | die Abschnittsspur, die sie teilt (Abschnitt 9b) |
 | `einheit` | Text (UUID) | der gemeinsame Ablauf in der App, dessen Zeitleiste die Marke kommt (`docs/plan_einheit.md`) |
 | `name` | Text | Abschnittsname ohne Zusatz („Belastung“, „Planke“) |
@@ -363,6 +363,7 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
 | `profil` | Text | welcher Ablauf lief: der Kurzcode der Profil-ID (8 Zeichen wie bei Übungen), die Stoppuhr `stoppuhr`, der Einmal-Timer `einmal` (seit 19.10.2026) — derselbe Ablauf über Tage, auch nach Umbenennen (seit 18.10.2026) |
 | `feld`, `wert` | Text, Zahl | bei `person/leistung`: das Feld der Übung (`reps`, `hold`, …) und der eingetragene Wert (seit 19.10.2026) — die Ausprägung (Gewicht, Seite) steht im Text („Kniebeuge 20 kg: 10“) |
 | `kopf_s`, `endteil_s` | Zahl (s, mit Vorzeichen) | an der **Start-Notiz** eines Abschnitts (seit 27.10.2026): Kopf und Endteil — der Rechenbereich reicht so weit über die getippten Grenzen hinaus (positiv: davor bzw. danach) oder beginnt dahinter (negativ: innerhalb); `hrv_core.ausschnitte.Abschnitt.rechenbereich`. Fehlt = 0 |
+| `kontext`, `haltung` | Text | bei `person/erholung` (seit 29.10.2026, `docs/plan_herzfrequenz.md`): woran die Person sich erholt (`dauer`, `intervall`, `sprint`, `satz`, `test_submaximal`, `test_maximal`) und in welcher Haltung (`steht`, `sitzt`, `liegt`, `geht`). HRR-Werte sind nur innerhalb gleicher Paare vergleichbar (`hrv_core.herzfrequenz.hrr_erholung`); die Person darf beides nachträglich ändern — die Marke wird fortgeschrieben |
 
 - Nur diese Felder, nur Zahl, Text oder Ja/Nein — `hrv_core.ereignisse.marke_bereinigen`
   wirft alles andere weg. **Nie ein Ort** (Abschnitt 0 in `docs/plan_gps.md`): eine

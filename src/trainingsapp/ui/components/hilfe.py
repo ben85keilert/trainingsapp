@@ -144,12 +144,33 @@ spürbare Schwankung, mindestens drei Herzschläge je Atemzug und ein Puls unter
 eine falsche — die Werte beschreiben, sie bewerten nicht.
 """
 
+HERZFREQUENZ_MD = """\
+**Herzfrequenz-Sicht** (Ben, 29.10.2026). Die große Zahl ist die Herzfrequenz aus den
+Schlagabständen — bei reinen Pulsgebern die des Geräts. Daneben der Anteil an deiner
+**Herzfrequenzreserve**: Ruhe-HF = 0 %, HFmax = 100 %.
+
+- **Ruhe-HF** kommt aus einem Eintrag, einer Morgenmessung (tiefstes 30-s-Mittel), einer
+  Nacht (tiefstes 2-h-Mittel) oder dem Tagesfeld „Ruhepuls“. **HFmax** aus Ergometrie,
+  Feld-Maximaltest, dem Feldmaximum deiner Aufzeichnungen (nach deiner Bestätigung) oder,
+  als Startwert, aus der Formel 211 − 0,64 · Alter (Streuung ± 11 bpm). Welcher Wert gilt,
+  entscheidet die genaueste vorhandene Quelle; „festsetzen“ pinnt einen Wert.
+- **Bereiche** sind Stufen deiner Reserve — drei (an den Schwellen), fünf (Leitlinie),
+  zehn (je 10 %) oder eigene. Helle Streifen an den Grenzen zeigen die Unsicherheit.
+- **Zeit je Bereich** zählt für den Bezug Aufnahme, Abschnitt oder 5 min.
+- **Erholung (HRR):** HF am Ende der Belastung minus HF nach 30 / 60 / 120 s. Woran und in
+  welcher Haltung — nur gleiche Paare sind vergleichbar.
+
+Die App zeigt, wo du bist und warst. Sie bewertet nichts und gibt keinen Rat; die Bereiche
+sind deine Werte wie ein Timer. Einstellungen → Herzfrequenz.
+"""
+
 #: Thema → (Titel, Text, Tooltip des Knopfs)
 THEMEN: dict[str, tuple[str, str, str]] = {
     "notation": ("So wird eingegeben", NOTATION_MD, "Wie gebe ich ein?"),
     "varianten": ("Varianten", VARIANTEN_MD, "Was sind Varianten?"),
     "uebungen": ("Varianten und Pakete", UEBUNGEN_MD, "Varianten und Pakete"),
     "atmung": ("Atemfrequenz und Atemübung", ATMUNG_MD, "Was heißt „Atemübung“?"),
+    "herzfrequenz": ("Herzfrequenz-Sicht", HERZFREQUENZ_MD, "Was zeigt die Herzfrequenz-Sicht?"),
 }
 
 

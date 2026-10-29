@@ -41,6 +41,7 @@ from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.srpe import srpe_zeile
 from trainingsapp.ui.state import AppState
 
 #: Was am Ende einer Übung steht
@@ -178,6 +179,10 @@ def plan_ablauf_view(page: Any, state: AppState, basis: str, plan: Plan) -> ft.V
             if werte:
                 unten = f"{_werte_text(werte)} · {unten}"
             zeilen.append(ft.Text(f"{s.name}: {unten}", size=13))
+        # Anstrengung der Einheit — dezent, kein Dialog (Ben, 29.10.2026, Frage 8)
+        srpe = srpe_zeile(page, state, state.heute())
+        if srpe is not None:
+            zeilen.append(srpe)
         zeilen.append(hinweis("Ändern oder löschen: unter „Heute geleistet“ im Plan."))
         return [
             ft.Container(

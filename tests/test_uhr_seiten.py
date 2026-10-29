@@ -76,7 +76,7 @@ def test_erholung_zaehlt_herunter_und_rechnet_hrr() -> None:
 
 def test_seiten_reihenfolge_auswahl_und_laenge() -> None:
     s = us.seiten(_werte(aufnahme_s=119))
-    assert [x.art for x in s] == list(us.SEITEN)
+    assert [x.art for x in s] == list(us.SEITEN_VORGABE)  # „Bereich“ erst nach dem Ankreuzen
     assert all(len(z) <= us.BREITE for x in s for z in (x.titel, x.zeile2, x.zeile3))
     # Auswahl: HF immer, Rest in fester Reihenfolge, egal wie angekreuzt
     assert [x.art for x in us.seiten(_werte(), ["training", "atmung"])] == [

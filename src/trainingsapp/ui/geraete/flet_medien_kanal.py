@@ -42,7 +42,7 @@ from typing import Any
 
 from trainingsapp.core.uhr_seiten import (
     SEITE_HF,
-    SEITEN,
+    SEITEN_VORGABE,
     TASTE_HRR,
     TASTE_JE_SEITE,
     TASTE_MARKE,
@@ -176,13 +176,14 @@ class MedienKanal:
         if self._rechen_zeit is None or jetzt_s - self._rechen_zeit >= RECHEN_TAKT_S:
             self._dfa = self._rechnen(lauf, "dfa_a1") if dfa_moeglich else None
             self._atmung = self._rechnen(lauf, "atemfrequenz")
+            self._bereich = self._bereich_rechnen(lauf)
             self._rechen_zeit = jetzt_s
         auswahl = getattr(self._einstellung(), "uhr_seiten", None)
         return paket(
             lauf.live.kennzahlen(),
             lauf.live.hf_reihe(),
             jetzt_s,
-            auswahl=SEITEN if auswahl is None else auswahl,
+            auswahl=SEITEN_VORGABE if auswahl is None else auswahl,
             seit_s=self.seit_s,
             hrr_t0_s=self.hrr_t0_s,
             aufnahme_s=aufnahme_s,
@@ -191,7 +192,27 @@ class MedienKanal:
             atmung=self._atmung,
             training=training_aus(self.state),
             warnung=getattr(lauf, "warnung", None),
+            bereich=getattr(self, "_bereich", None),
         )
+
+    def _bereich_rechnen(self, lauf: Any) -> tuple[str, float | None] | None:
+        """Seite „Bereich“ (Ben, 29.10.2026): Name des Bereichs und % der Reserve aus Profil
+        und Einstellungen — eine Datenbankabfrage je Takt, darum im 5-s-Takt."""
+        try:
+            from trainingsapp.core.hf_profil import bereich_von, bereiche_fuer
+
+            profil = self.state.hf_profil()
+            if not profil.vollstaendig:
+                return None
+            k = lauf.live.kennzahlen()
+            hf = float(k.hf_bpm) if k.hf_bpm else None
+            if hf is None:
+                return None
+            bereiche = bereiche_fuer(profil, self.state.hf_einstellungen())
+            b = bereich_von(hf, bereiche)
+            return (b.name if b is not None else "Bereich --", profil.prozent(hf))
+        except Exception:
+            return None
 
     @staticmethod
     def _dfa_moeglich(lauf: Any) -> bool:

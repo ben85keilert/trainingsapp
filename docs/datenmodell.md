@@ -178,6 +178,34 @@ HRV-Messung → Überschriften. Nur eine Liste zum Antippen: Der Titel einer Mes
 der Messdatei und als Kopie in `hrv_recording.title`, nie hier. Die Migration übernimmt,
 was schon vergeben war.
 
+**Herzfrequenz** (Migration 034, Ben 29.10.2026, `docs/plan_herzfrequenz.md`;
+`core/hf_profil.py`, `data/hf_profil.py`):
+- `subject.geschlecht` (`w` | `m` | `d` | NULL) — nur für die HFmax-Formel (Gulati) und die
+  TRIMP-Gewichte.
+- `profil_wert` je Profil: `groesse` (`ruhe_hf`, `hf_max`, `hf_vt1`, `hf_vt2`), `wert`,
+  `einheit`, **`quelle`** (`eintrag`, `nacht`, `messung_morgen_5`, `ergometrie`, `feldmaximum`,
+  `talk_test` … — die Schlüssel aus `hrv_core.herzfrequenz.RANGFOLGE`), `unsicherheit`,
+  `datum` (lokaler Tag), `fest` (von der Person festgesetzt: schlägt jede Quelle), `geraet`,
+  `hrv_recording_id`, `herkunft_json` (woraus eine Automatik den Wert nahm), `note`.
+  **Unveränderlich** wie `session_entry`: Korrektur und Festsetzen sind neue Zeilen mit
+  `replaces_id`; gültig ist, was nicht gelöscht ist und keine lebende Zeile ersetzt. Welcher
+  Eintrag gilt, rechnet `hrv_core.herzfrequenz.geltender_wert` (Wertehierarchie) — nie die
+  Datenbank.
+- `rechen_ausnahme` je Profil: `ziel` (`tag` | `einheit` | `hrv_recording` | `strecke`) und
+  `ziel_id` (Datum `YYYY-MM-DD` bzw. ID), `grund`; eindeutig je aktiver Zeile. Was hier steht,
+  geht in keine Baseline, keinen Median, kein Feldmaximum.
+- `hf_cache` (Migration 035): je Aufzeichnung die Herzfrequenz-Auswertung
+  (`core/hf_auswertung.py`: Werte der Aufnahme und je Abschnitt, Erholungen, Kandidaten,
+  Vorschläge, Tagesprofil) als JSON mit `algo_version` und `profil_stand_json` (Ruhe-HF, HFmax,
+  Grenzen von damals). Reiner Cache: aus Datei + Profil nachrechenbar; weicht das heutige
+  Profil ab, zeigt die Auswertung die damaligen Werte und bietet das Nachrechnen an (gespeichert
+  nur nach Rückfrage). Wochenlast, Testreihen und der Forschungsexport (`…_hf.json`) lesen hier.
+- `day_field.fest`: feste Felder der App (Anstrengung/sRPE, Blutdruck, Gewicht, Ruhepuls,
+  Störung) — nicht löschbar, nur `active = 0`; die Migration holt gelöschte Standardfelder
+  ausgeschaltet zurück. Die Bereichseinstellungen (Modell, eigene Grenzen) liegen **je Profil**
+  in `app_setting` unter `hf_einstellungen:<profil-id>` (`core/hf_einstellungen.py`), die
+  Vorgabe-Sicht gerätelokal in `hrv_einstellungen` (`standard_sicht`, `sicht_merken`).
+
 ## Die wichtigen Entscheidungen
 
 **Es gibt keine Tabelle für einzelne Herzschläge.** `hrv_recording` verweist mit

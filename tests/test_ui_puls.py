@@ -107,9 +107,18 @@ def test_live_puls_als_hauptkurve(daten) -> None:
     alle = list(_alle(ansicht))
     texte = [c.value for c in alle if isinstance(c, ft.Text) and c.value]
     assert "HERZFREQUENZ" in texte and "RR-TACHOGRAMM" not in texte
-    # Kacheln ohne Puls sagen, warum — nicht „zu wenige gute Schläge“
-    assert "Gerät sendet nur den Puls" in texte
-    assert "zu wenige gute Schläge" not in texte  # der Grund in einer Kachel
+    # Reine Pulsgeber öffnen die Herzfrequenz-Sicht (Ben, 29.10.2026): HF-Kacheln statt
+    # HRV-Kacheln, der Umschalter bietet HRV nicht an
+    assert "Reserve" in texte and "zu wenige gute Schläge" not in texte
+    umschalter = next(
+        c
+        for c in alle
+        if isinstance(c, ft.SegmentedButton) and [s.value for s in c.segments] == ["hf", "hrv"]
+    )
+    assert umschalter.segments[1].disabled and umschalter.selected == ["hf"]
+    # Die HRV-Sicht lässt sich nicht erzwingen
+    umschalter.on_change(SimpleNamespace(control=SimpleNamespace(selected=["hrv"])))
+    assert state.hrv_sicht() == "hf"
     schalter = next(c for c in alle if isinstance(c, ft.Switch))
     assert not schalter.visible  # ohne Intervalle nichts zu korrigieren
     kurve = next(c for c in alle if isinstance(c, fc.LineChart))

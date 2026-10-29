@@ -192,6 +192,9 @@ class Subject:
     name: str = ""
     birth_year: int | None = None
     note: str = ""
+    #: 'w' | 'm' | 'd' | None — nur für HFmax-Formel (Gulati) und TRIMP-Gewichte
+    #: (Migration 034, Ben 29.10.2026)
+    geschlecht: str | None = None
 
 
 @dataclass(slots=True)

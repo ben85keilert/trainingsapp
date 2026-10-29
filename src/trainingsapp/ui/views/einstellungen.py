@@ -183,6 +183,13 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
     hrv_text = f"{len(e.kacheln)} Kacheln · Reiter „Messung“ " + (
         "sichtbar" if e.messung_anzeigen else "ausgeblendet"
     )
+    hf = state.hf_profil()
+    hf_text = (
+        f"Ruhe {hf.ruhe_bpm:.0f} · HFmax {hf.hfmax_bpm:.0f}"
+        + (" (geschätzt)" if hf.hfmax_geschaetzt else "")
+        if hf.vollstaendig
+        else "Ruhe-HF und HFmax fehlen"
+    )
 
     ansicht = ft.View(
         route="/einstellungen",
@@ -307,6 +314,18 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                         darstellung_karte(page, state),
                         karte(
                             titel("Messung und Werkzeuge"),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.FAVORITE_BORDER),
+                                title=ft.Text("Herzfrequenz"),
+                                subtitle=ft.Text(
+                                    "Ruhe-HF, HFmax, Schwellen mit Herkunft · Bereiche · "
+                                    f"Sicht · {hf_text}",
+                                    size=12,
+                                ),
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/herzfrequenz"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
                             ft.ListTile(
                                 leading=ft.Icon(ft.Icons.MONITOR_HEART_OUTLINED),
                                 title=ft.Text("HRV-Messung"),

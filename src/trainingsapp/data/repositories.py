@@ -552,16 +552,25 @@ class SubjectRepo:
         stempel = jetzt().isoformat()
         self.con.execute(
             """
-            INSERT INTO subject (id, name, birth_year, note, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO subject (id, name, birth_year, note, geschlecht, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 birth_year = excluded.birth_year,
                 note = excluded.note,
+                geschlecht = excluded.geschlecht,
                 updated_at = excluded.updated_at,
                 revision = revision + 1
             """,
-            (profil.id, profil.name, profil.birth_year, profil.note, stempel, stempel),
+            (
+                profil.id,
+                profil.name,
+                profil.birth_year,
+                profil.note,
+                profil.geschlecht,
+                stempel,
+                stempel,
+            ),
         )
 
     def laden(self, profil_id: str) -> Subject | None:
@@ -593,7 +602,13 @@ class SubjectRepo:
 
     @staticmethod
     def _zeile(r: sqlite3.Row) -> Subject:
-        return Subject(id=r["id"], name=r["name"], birth_year=r["birth_year"], note=r["note"])
+        return Subject(
+            id=r["id"],
+            name=r["name"],
+            birth_year=r["birth_year"],
+            note=r["note"],
+            geschlecht=r["geschlecht"],
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -616,6 +631,11 @@ class SettingRepo:
     HRV_ANSICHTEN = "hrv_ansichten"
     #: HRV: Einstellungen der Messung — Kacheln, Fenster, Bereiche (JSON, `core.hrv_einstellungen`)
     HRV_EINSTELLUNGEN = "hrv_einstellungen"
+    #: HRV: die zuletzt gewählte Sicht der Hauptkarte („hf“ | „hrv“, Ben 29.10.2026)
+    HRV_SICHT = "hrv_sicht"
+    #: Herzfrequenz: Bereichsmodell und eigene Grenzen — **je Profil**:
+    #: Schlüssel `hf_einstellungen:<profil-id>` (JSON, `core.hf_einstellungen`)
+    HF_EINSTELLUNGEN = "hf_einstellungen"
     #: Training: Karte einfärben, Tempo mit Pausen, Spalten (JSON, `core.training_einstellungen`)
     TRAINING_EINSTELLUNGEN = "training_einstellungen"
     #: Timer: Profile (JSON, `core.timer`), das zuletzt benutzte und wie er sich

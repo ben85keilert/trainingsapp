@@ -78,6 +78,20 @@ KACHELN: dict[str, KachelArt] = {
         "nur in der Aufzeichnung.",
     ),
     **{k: _aus_kurve(k) for k in ("sd1", "sd2", "dfa_alpha1")},
+    # Herzfrequenz (Ben, 29.10.2026, Stufe 4): aus Profil und Bereichen — nur mit Ruhe-HF
+    # und HFmax; der Bezug ist die Aufnahme (ohne Aufnahme die letzten 5 min)
+    "hf_prozent": KachelArt(
+        "Reserve", erklaerung="Anteil an der Herzfrequenzreserve: Ruhe-HF = 0 %, HFmax = 100 %."
+    ),
+    "hf_bereich": KachelArt(
+        "Bereich", erklaerung="Der Bereich deiner Einstellungen, in dem die Herzfrequenz liegt."
+    ),
+    "hf_zeit_bereich": KachelArt(
+        "Zeit im Bereich", erklaerung="Wie lange die Aufnahme im aktuellen Bereich war."
+    ),
+    "trimp": KachelArt(
+        "TRIMP", erklaerung="Trainingsimpuls nach Banister über die Aufnahme — eine Konvention."
+    ),
 }
 
 #: Gruppen für die Auswahl in den Einstellungen
@@ -87,7 +101,10 @@ GRUPPEN: list[tuple[str, list[str]]] = [
     ("Zeit", ["hf_rr", "mean_rr", "rmssd", "sdnn", "pnnx"]),
     ("Frequenz", ["lf_power", "hf_power", "lf_hf", "gipfel", "vlf_power", "ulf"]),
     ("Nichtlinear", ["sd1", "sd2", "dfa_alpha1"]),
+    ("Herzfrequenz", ["hf_prozent", "hf_bereich", "hf_zeit_bereich", "trimp"]),
 ]
+#: Kacheln der Gruppe „Herzfrequenz“ — brauchen `hf` in `kachel_werte`
+HF_KACHELN = frozenset({"hf_prozent", "hf_bereich", "hf_zeit_bereich", "trimp"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,6 +333,7 @@ def kachel_werte(
     atemuebung_an: Callable[[], object] | None = None,
     *,
     puls_allein: bool = False,
+    herz: tuple[Any, Any, dict[str, Any] | None] | None = None,
 ) -> list[KachelWert]:
     """Die eingestellten Werte der Übersicht mit den aktuellen Live-Werten.
 
@@ -325,7 +343,8 @@ def kachel_werte(
     „Atemübung", ``atemuebung_an``). Vom Sensor verworfene Intervalle (Verity
     Sense) erscheinen von selbst, sobald es welche gibt. Sendet das Gerät nur den
     Puls (``puls_allein``, `nur_puls`), sagen die übrigen Kacheln das statt eines
-    Grunds, der nicht stimmt (`ohne_intervalle`).
+    Grunds, der nicht stimmt (`ohne_intervalle`). ``herz`` = (HfProfil, Bereiche,
+    Zusammenfassung des Bezugs) für die Gruppe „Herzfrequenz“ (Ben, 29.10.2026).
     """
     k = lauf.live.kennzahlen()
     t, rr, naht = lauf.live.verlaufsreihe()
@@ -354,6 +373,8 @@ def kachel_werte(
             out.append(
                 KachelWert(art.titel, "–", "ms²", gross=g, grund="ab 4 h, in der Aufzeichnung")
             )
+        elif key in HF_KACHELN:
+            out.append(_hf_kachel(key, art, g, lauf, herz))
         elif key in ("atemfrequenz", "rsa"):
             kz = KENNZAHLEN[key]
             fenster = ansicht.fenster_fuer(key, kz.fenster_s)
@@ -407,6 +428,40 @@ def kachel_werte(
     return out
 
 
+def _hf_kachel(
+    key: str, art: KachelArt, gross: bool, lauf: Messlauf, hf: tuple[Any, Any, dict | None] | None
+) -> KachelWert:
+    """Eine Kachel der Gruppe „Herzfrequenz“ — ohne Profil der Grund statt eines Werts."""
+    from trainingsapp.core.hf_profil import bereich_von
+
+    if hf is None or not hf[0].vollstaendig:
+        return KachelWert(art.titel, "–", gross=gross, grund="Ruhe-HF und HFmax fehlen")
+    profil, bereiche, zus = hf
+    k = lauf.live.kennzahlen()
+    jetzt = (
+        float(k.hf_bpm) if k.hf_bpm else (float(lauf.status.hf_bpm) if lauf.status.hf_bpm else None)
+    )
+    b = bereich_von(jetzt, list(bereiche))
+    z = zus or {}
+    if key == "hf_prozent":
+        p = profil.prozent(jetzt)
+        return KachelWert(art.titel, "–" if p is None else f"{p:.0f}", "%", gross=gross)
+    if key == "hf_bereich":
+        return KachelWert(art.titel, b.name if b is not None else "–", gross=gross)
+    if key == "hf_zeit_bereich":
+        sek = z.get("sekunden_je_bereich")
+        zeit = None
+        if b is not None and sek and len(sek) == len(bereiche):
+            zeit = sek[list(bereiche).index(b)]
+        return KachelWert(
+            art.titel,
+            "–" if zeit is None else f"{int(zeit // 60)}:{int(zeit % 60):02d}",
+            zusatz=b.name if b is not None else "",
+            gross=gross,
+        )
+    return KachelWert(art.titel, zahl(z.get("trimp"), 1), zusatz="Aufnahme", gross=gross)
+
+
 def leisten_werte(state: Any) -> list[KachelWert]:
     """Die Werte für die Laufleiste im Live-Vollbild (Ben, 28.10.2026: „die aktuellen Werte
     für Gerätetransmit (RR, HF, PPG) und das, was zusätzlich zur Kurve dazugeschaltet ist,
@@ -428,6 +483,7 @@ def leisten_werte(state: Any) -> list[KachelWert]:
 
 __all__ = [
     "GRUPPEN",
+    "HF_KACHELN",
     "KACHELN",
     "NUR_PULS_GRUND",
     "PULS_KACHELN",

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -574,27 +575,30 @@ def forschung_export(state: Any, einheit_id: str) -> tuple[str, bytes]:
     Raises:
         ValueError: Die Einheit gibt es nicht (mehr).
     """
-    name, dok, dateien, basis, auftraege = _forschung_teile(state, einheit_id)
-    return name, forschung_zip(dok, dateien, basis, zusatz=bewegung_packen(auftraege))
+    name, dok, dateien, basis, auftraege, zusatz = _forschung_teile(state, einheit_id)
+    return name, forschung_zip(dok, dateien, basis, zusatz={**bewegung_packen(auftraege), **zusatz})
 
 
 async def forschung_export_async(state: Any, einheit_id: str) -> tuple[str, bytes]:
     """Wie `forschung_export`, aber das Packen (Messdateien lesen, deflate — bei einer
     4-h-Aufnahme Sekunden) läuft in einem Thread; die Datenbank wird davor im Loop gelesen
     (sqlite-Verbindungen gehören ihrem Thread; H39)."""
-    name, dok, dateien, basis, auftraege = _forschung_teile(state, einheit_id)
+    name, dok, dateien, basis, auftraege, zusatz = _forschung_teile(state, einheit_id)
 
     def packen() -> bytes:
-        return forschung_zip(dok, dateien, basis, zusatz=bewegung_packen(auftraege))
+        return forschung_zip(dok, dateien, basis, zusatz={**bewegung_packen(auftraege), **zusatz})
 
     return name, await asyncio.to_thread(packen)
 
 
 def _forschung_teile(
     state: Any, einheit_id: str
-) -> tuple[str, Any, list[Path], Path, list[Bewegungsauftrag]]:
-    """Dateiname, Dokument, Messdateien, Basis und die Rohspur-Aufträge des
-    Forschungsexports — aus der Datenbank (im Loop, H39); gelesen wird beim Packen."""
+) -> tuple[str, Any, list[Path], Path, list[Bewegungsauftrag], dict[str, bytes]]:
+    """Dateiname, Dokument, Messdateien, Basis, die Rohspur-Aufträge und die Zusatzdateien
+    des Forschungsexports — aus der Datenbank (im Loop, H39); gelesen wird beim Packen.
+    Zusatz (Ben, 29.10.2026, Frage 10): je Aufnahme die Herzfrequenz-Auswertung aus dem
+    Cache als ``<Messdatei>_hf.json`` — nachrechenbar aus Datei und Profil, zur eigenen
+    Systematik."""
     kopf = state.einheiten.laden(einheit_id) if state.einheiten is not None else None
     if kopf is None:
         raise ValueError("Diese Einheit gibt es nicht mehr.")
@@ -602,6 +606,7 @@ def _forschung_teile(
     basis = datenverzeichnis()
     dateien: list[Path] = []
     archiv: dict[str, str] = {}
+    zusatz: dict[str, bytes] = {}
     for b in teile:
         if b.art != "hrv" or not b.datei or b.datei in archiv:
             continue
@@ -610,6 +615,23 @@ def _forschung_teile(
         if pfad.exists():  # sonst läuft die Messung noch — der Teil steht ohne Datei da
             dateien += zugehoerige_dateien(pfad)
             archiv[b.datei] = archivpfad(pfad, basis)
+            aufnahme = state.hrv.zur_datei(b.datei)
+            cache = state.hf_cache.lesen(aufnahme.id) if aufnahme is not None else None
+            if cache is not None and aufnahme is not None:
+                name = archiv[b.datei]
+                name = (name[:-5] if name.endswith(".json") else name) + "_hf.json"
+                zusatz[name] = json.dumps(
+                    {
+                        "format": "hf-auswertung-v1",
+                        "recording_id": aufnahme.id,
+                        "algo_version": cache.algo_version,
+                        "profil_stand": cache.profil_stand,
+                        "computed_at": cache.computed_at.isoformat(),
+                        **cache.auswertung.als_dict(),
+                    },
+                    ensure_ascii=False,
+                    indent=1,
+                ).encode("utf-8")
     tempo: list[tuple[float, float | None]] = []
     auftraege: list[Bewegungsauftrag] = []
     gps = next((b for b in teile if b.art == "gps" and b.datei), None)
@@ -642,7 +664,7 @@ def _forschung_teile(
         app=app_text(),
     )
     lokal = kopf.started_at.astimezone()
-    return f"einheit_{lokal:%Y-%m-%d_%H%M}.zip", dok, dateien, basis, auftraege
+    return f"einheit_{lokal:%Y-%m-%d_%H%M}.zip", dok, dateien, basis, auftraege, zusatz
 
 
 def app_text() -> str:

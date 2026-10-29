@@ -336,6 +336,9 @@ class Tagesfeld:
     tageswert: str = ""
     #: aus den Standardfeldern der App (`STANDARDFELDER`), etwa ``"blutdruck"``
     standard_key: str | None = None
+    #: festes Feld der App (Ben, 29.10.2026): nicht löschbar, nur ausschaltbar — gekoppelt
+    #: mit der HF-Messung (Ruhepuls, Anstrengung), Migration 034
+    fest: bool = False
 
     @property
     def art(self) -> str:
@@ -1237,6 +1240,8 @@ class Vorschlag:
     tageswert: str = ""
     #: Standardfeld: sein Schlüssel (`STANDARDFELDER`)
     standard_key: str | None = None
+    #: festes Feld: nicht löschbar (alle Standardfelder seit 29.10.2026)
+    fest: bool = False
 
     def feld(self, subject_id: str = "") -> Tagesfeld:
         return Tagesfeld(
@@ -1254,6 +1259,7 @@ class Vorschlag:
             mehrmals=self.mehrmals,
             tageswert=self.tageswert,
             standard_key=self.standard_key,
+            fest=self.fest,
         )
 
 
@@ -1269,13 +1275,29 @@ BLUTDRUCK_TEILE: Final[tuple[Teil, ...]] = (
     Teil("Puls", "bpm", 20, 250, optional=True),
 )
 
+#: Störungen eines Tages (Ben, 29.10.2026, Frage 5): nur ein Feld zum Festhalten — die App
+#: fragt nicht nach und bewertet nichts; ein markierter Tag kann aus der Rechenautomatik
+#: fallen („nicht mitrechnen“, `data.hf_profil.RechenAusnahmeRepo`).
+STOERUNG_VARIANTEN: Final[tuple[str, ...]] = ("Infekt", "Alkohol", "Hitze", "Reise", "wenig Schlaf")
+
 #: Die Vorlagen beim Anlegen (Blatt „Vorlage wählen“, in Gruppen). Neutral benannt
 #: (`docs/recht/00_zweckbestimmung.md`): Die App hält fest, was die Person einträgt — sie
-#: bewertet nichts und erinnert an nichts.
+#: bewertet nichts und erinnert an nichts. Die **festen** Felder (Ben, 29.10.2026: nicht
+#: löschbar, nur ausschaltbar) sind mit der Herzfrequenz-Messung gekoppelt: Ruhepuls
+#: (Morgenmessung → Vorschlag, Eintrag → Profil), Anstrengung (sRPE nach der Einheit),
+#: Störung (Tag aus der Rechenautomatik).
 VORLAGEN: Final[tuple[Vorschlag, ...]] = (
     Vorschlag("Schmerz", SKALA, gruppe=BESCHWERDEN),
     Vorschlag("Stimmung", SKALA, gruppe=BESCHWERDEN),
     Vorschlag("Belastung", SKALA, gruppe=BESCHWERDEN),
+    Vorschlag(
+        "Anstrengung (sRPE)",
+        SKALA,
+        gruppe=BESCHWERDEN,
+        tageswert=TW_MAX,
+        standard_key="srpe",
+        fest=True,
+    ),
     Vorschlag(
         "Blutdruck",
         MESSWERT,
@@ -1284,8 +1306,16 @@ VORLAGEN: Final[tuple[Vorschlag, ...]] = (
         teile=BLUTDRUCK_TEILE,
         tageswert=TW_MITTEL,
         standard_key="blutdruck",
+        fest=True,
     ),
-    Vorschlag("Gewicht", MESSWERT, gruppe=MESSWERTE, teile=(Teil("Gewicht", "kg", 1, 500),)),
+    Vorschlag(
+        "Gewicht",
+        MESSWERT,
+        gruppe=MESSWERTE,
+        teile=(Teil("Gewicht", "kg", 1, 500),),
+        standard_key="gewicht",
+        fest=True,
+    ),
     Vorschlag(
         "Blutzucker",
         MESSWERT,
@@ -1304,7 +1334,15 @@ VORLAGEN: Final[tuple[Vorschlag, ...]] = (
         teile=(Teil("Temperatur", "°C", 30, 45),),
         tageswert=TW_MAX,
     ),
-    Vorschlag("Ruhepuls", MESSWERT, gruppe=MESSWERTE, teile=(Teil("Ruhepuls", "bpm", 20, 250),)),
+    Vorschlag(
+        "Ruhepuls",
+        MESSWERT,
+        gruppe=MESSWERTE,
+        teile=(Teil("Ruhepuls", "bpm", 20, 250),),
+        tageswert=TW_MIN,
+        standard_key="ruhepuls",
+        fest=True,
+    ),
     Vorschlag("Trinken", MENGE, mehrmals=True, einheit="ml", schnell=(250, 500), gruppe=EINNAHMEN),
     Vorschlag("Medikament", ANZAHL, mehrmals=True, schnell=(1,), gruppe=EINNAHMEN),
     Vorschlag("Kaffee", ANZAHL, mehrmals=True, schnell=(1,), gruppe=EINNAHMEN),
@@ -1312,11 +1350,30 @@ VORLAGEN: Final[tuple[Vorschlag, ...]] = (
     Vorschlag("Spazieren", DAUER, mehrmals=True, schnell=(900, 1800), gruppe=ALLTAG),
     Vorschlag("Meditation", DAUER, mehrmals=True, schnell=(600,), gruppe=ALLTAG),
     Vorschlag("Ernährung", TEXT, gruppe=ALLTAG),
+    Vorschlag(
+        "Störung",
+        JA_NEIN,
+        mehrmals=True,
+        varianten=STOERUNG_VARIANTEN,
+        gruppe=ALLTAG,
+        standard_key="stoerung",
+        fest=True,
+    ),
 )
 #: Bisheriger Name — die Tests und das Formular kennen ihn
 VORSCHLAEGE: Final[tuple[Vorschlag, ...]] = VORLAGEN
-#: Standardfelder: in jedem Profil angelegt, löschbar, wiederherstellbar (Ben, 28.10.2026)
+#: Standardfelder: in jedem Profil angelegt (ausgeschaltet, Ben 28.10.2026); seit 29.10.2026
+#: **fest** — nicht löschbar, nur ausschaltbar (`Vorschlag.fest`)
 STANDARDFELDER: Final[tuple[Vorschlag, ...]] = tuple(v for v in VORLAGEN if v.standard_key)
+#: Schlüssel der festen Felder, mit denen die Herzfrequenz-Messung spricht
+STANDARD_RUHEPULS: Final[str] = "ruhepuls"
+STANDARD_SRPE: Final[str] = "srpe"
+STANDARD_STOERUNG: Final[str] = "stoerung"
+
+
+def standardfeld(felder: Iterable[Tagesfeld], key: str) -> Tagesfeld | None:
+    """Das (nicht gelöschte) Standardfeld eines Profils mit diesem Schlüssel."""
+    return next((f for f in felder if f.standard_key == key and f.deleted_at is None), None)
 
 
 def vorlagen_in_gruppen(suche: str = "") -> list[tuple[str, list[Vorschlag]]]:
@@ -1339,9 +1396,9 @@ def standardfelder_fehlend(vorhandene: Iterable[Tagesfeld]) -> list[Vorschlag]:
     (der Start legt sie nicht wieder an; „Wiederherstellen“ ist Sache der Einstellungen).
 
     >>> [v.name for v in standardfelder_fehlend([])]
-    ['Blutdruck']
-    >>> standardfelder_fehlend([Tagesfeld(standard_key="blutdruck", deleted_at=jetzt())])
-    []
+    ['Anstrengung (sRPE)', 'Blutdruck', 'Gewicht', 'Ruhepuls', 'Störung']
+    >>> [v.name for v in standardfelder_fehlend([Tagesfeld(standard_key="ruhepuls")])]
+    ['Anstrengung (sRPE)', 'Blutdruck', 'Gewicht', 'Störung']
     """
     da = {f.standard_key for f in vorhandene if f.standard_key}
     return [v for v in STANDARDFELDER if v.standard_key not in da]

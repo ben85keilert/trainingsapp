@@ -263,7 +263,11 @@ def test_migration_029_behaelt_anhaenge_und_erlaubt_audio_und_tag(tmp_path) -> N
     assert migrieren(con, ordner) == 28
     seed_einspielen(con)
     profil = Subject(name="Alt")
-    SubjectRepo(con).speichern(profil)
+    # Schema 28 kennt `geschlecht` (034) nicht — das Profil roh
+    con.execute(
+        "INSERT INTO subject (id, name, created_at, updated_at) VALUES (?, ?, 'x', 'x')",
+        (profil.id, profil.name),
+    )
     plan = Plan(name="P", subject_id=profil.id)
     # Schema 28 kennt die Paketspalten des Plans (033) nicht — die Zeile von Hand
     con.execute(
@@ -282,7 +286,7 @@ def test_migration_029_behaelt_anhaenge_und_erlaubt_audio_und_tag(tmp_path) -> N
         (eintrag.id,),
     )
     con.commit()
-    assert migrieren(con) == 33
+    assert migrieren(con) == 35
     repo = AnhangRepo(con, tmp_path / "Anhaenge")
     alt = repo.laden("alt")
     assert alt is not None and (alt.eintrag_id, alt.note, alt.bytes) == (eintrag.id, "links", 300)

@@ -107,6 +107,7 @@ from hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core import abschnitte as eigene_abschnitte
 from trainingsapp.core.aufnahme_bezug import RAND_S, Bezug
+from trainingsapp.core.hf_auswertung import AbschnittWand, achse_zu_wand, wand_zu_achse
 from trainingsapp.core.hrv_ansicht import (
     HF_SPANNE_MIN_BPM,
     LINKS,
@@ -122,6 +123,8 @@ from trainingsapp.core.hrv_einstellungen import (
     EBENE_LEISTUNGEN,
     EBENE_NOTIZEN,
     EBENEN,
+    SICHT_HF,
+    SICHT_HRV,
 )
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
@@ -136,6 +139,8 @@ from trainingsapp.ui.components.analyse import Analyse, Analysefenster, verlaufs
 from trainingsapp.ui.components.bereich import BereichEditor, band, schatten
 from trainingsapp.ui.components.dialoge import Nachher, loeschen_rueckfrage, meldung, schliessen
 from trainingsapp.ui.components.forschung import forschung_fragen
+from trainingsapp.ui.components.hf_auswertung_sicht import HfAuswertungSicht, HfKontext
+from trainingsapp.ui.components.hf_sicht import sicht_wahl
 from trainingsapp.ui.components.kacheln import (
     KACHELN,
     PULS_KACHELN,
@@ -1842,6 +1847,8 @@ def _aufbauen(
         ]
         speichern_knopf.disabled = not z.geaendert(gespeicherte_regeln)
         zurueck_pruefen()
+        if gebaut:  # nach dem ersten Aufbau: Abschnitte oder Korrektur geändert
+            hf_sicht.auffrischen()
         if aktualisieren:
             page.update()
 
@@ -3238,17 +3245,111 @@ def _aufbauen(
     if zoom is not None and zoom[0] == eintrag.id:
         state.messung_zoom = None
         zoom_auf(float(zoom[1]), float(zoom[2]), zeichnen_=False)
+    # -- Herzfrequenz-Sicht (Ben, 29.10.2026, Stufe 2): derselbe Umschalter wie live ------
+
+    wand = [float(b.t_wall_s) if b.t_wall_s is not None else float(b.t_s) for b in rec.beats]
+
+    def artefakt_maske() -> list[bool]:
+        """Je Zeile der Datei: von der Korrektur markiert (interpoliert, gelöscht,
+        ausgeschlossen)."""
+        from hrv_core.korrektur import auf_zeilen
+
+        maske = [False] * len(rec.beats)
+        with contextlib.suppress(Exception):
+            for k in auf_zeilen(z.korrekturen(), z.basis, rec):
+                lo, hi = k.span()
+                for i in range(max(0, lo), min(len(maske) - 1, hi) + 1):
+                    maske[i] = True
+        return maske
+
+    def abschnitte_wand() -> list[AbschnittWand]:
+        return [
+            AbschnittWand(
+                a.id,
+                a.name,
+                achse_zu_wand(zeilen_achse, wand, a.von_s),
+                achse_zu_wand(zeilen_achse, wand, a.bis_s),
+                kopf_s=a.kopf_s,
+                endteil_s=a.endteil_s,
+            )
+            for a in eigene
+        ]
+
+    def abschnitt_aus_vorschlag(name: str, von_w: float, bis_w: float) -> None:
+        """Ein übernommener HF-Vorschlag wird ein eigener Abschnitt wie über „+ Abschnitt“."""
+        a = Abschnitt(
+            name,
+            wand_zu_achse(zeilen_achse, wand, von_w),
+            wand_zu_achse(zeilen_achse, wand, bis_w),
+            farbe=ABSCHNITT_FARBEN[len(eigene) % len(ABSCHNITT_FARBEN)],
+        )
+        eigene.append(a)
+        notizen_fuer(a, neu=True)
+        zusatz_sichern()
+        zeichnen()
+
+    def tempo_der_strecke() -> tuple[list[float], list[float]] | None:
+        """Tempo (m/s) auf der Wanduhr der Datei, wenn ein Training dazugehört."""
+        from trainingsapp.core.forschung import tempo_reihe
+        from trainingsapp.ui.training import hrv_bezug, strecken_punkte
+
+        strecke = state.strecken.zur_hrv(eintrag.id)
+        if strecke is None:
+            return None
+        bezug = hrv_bezug(state, strecke)
+        if bezug is None:
+            return None
+        punkte = strecken_punkte(strecke)
+        if not punkte:
+            return None
+        # Die Reihe läuft ab der ersten Ortung (wie in `views.ausdauer`); mit Versatz 0 auf
+        # UTC-Sekunden hätte sie ein Fenster je 5 s seit 1970 — Hunderte Millionen (Speicher!)
+        t0 = min(p.t for p in punkte)
+        ts: list[float] = []
+        vs: list[float] = []
+        for t_s, v in tempo_reihe(punkte, -t0):
+            w = bezug.ortung_zu_wand(t0 + t_s, rec.start_utc)
+            if w is not None and v is not None:
+                ts.append(w)
+                vs.append(float(v))
+        return (ts, vs) if ts else None
+
+    hf_sicht = HfAuswertungSicht(
+        HfKontext(
+            page,
+            state,
+            eintrag,
+            rec,
+            artefakt=artefakt_maske,
+            abschnitte_wand=abschnitte_wand,
+            abschnitt_anlegen=abschnitt_aus_vorschlag,
+            tempo=tempo_der_strecke,
+            abschnitte_moeglich=not z.nur_puls,
+        )
+    )
+    sicht = {"wert": SICHT_HF if z.nur_puls else state.hrv_sicht()}
+
+    def sicht_anwenden() -> None:
+        hf_an = sicht["wert"] == SICHT_HF
+        hrv_teil.visible = not hf_an
+        hf_sicht.zeigen(hf_an)
+        with contextlib.suppress(Exception):
+            normal_inhalt.update()
+
+    def sicht_waehlen(neu: str) -> None:
+        if neu == SICHT_HRV and z.nur_puls:
+            return
+        sicht["wert"] = neu
+        state.hrv_sicht_setzen(neu)
+        sicht_anwenden()
+
+    sicht_knopf = sicht_wahl(sicht["wert"], sicht_waehlen, hrv_moeglich=not z.nur_puls)
+
     titel_zeichnen()
     zeichnen(aktualisieren=False)
-    normal_inhalt = ft.Column(
+    hrv_teil = ft.Column(
         spacing=12,
         controls=[
-            ft.Container(
-                padding=ft.Padding.symmetric(horizontal=4),
-                content=ft.Column(
-                    spacing=4, controls=[titel_box, kopf_text, hinweis_text, sidecar_text]
-                ),
-            ),
             kacheln_box,
             karte(
                 # Wie live (Ben, 21.10.2026): Ablesen, Vollbild, Fenster & Darstellung
@@ -3302,9 +3403,24 @@ def _aufbauen(
                 ketten_box,
                 speichern_knopf,
             ),
+        ],
+    )
+    normal_inhalt = ft.Column(
+        spacing=12,
+        controls=[
+            ft.Container(
+                padding=ft.Padding.symmetric(horizontal=4),
+                content=ft.Column(
+                    spacing=4, controls=[titel_box, kopf_text, hinweis_text, sidecar_text]
+                ),
+            ),
+            sicht_knopf,
+            hf_sicht.control,
+            hrv_teil,
             ft.Text(f"Datei: {eintrag.file_path}", size=11, opacity=0.5, selectable=True),
         ],
     )
+    sicht_anwenden()
     ansicht([normal_inhalt])
     view.on_confirm_pop = zurueck_im_vollbild
     gebaut.append(view)

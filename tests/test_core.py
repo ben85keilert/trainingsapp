@@ -260,7 +260,7 @@ def test_physiologische_steuerung_nur_in_der_praxis(monkeypatch) -> None:
 
 def test_migration_erzeugt_das_schema(tmp_path) -> None:
     con = oeffnen(tmp_path / "test.db")
-    assert schema_version(con) == 33
+    assert schema_version(con) == 35
 
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     for erwartet in (
@@ -295,8 +295,8 @@ def test_migration_ist_wiederholbar(tmp_path) -> None:
     """Ein zweiter Lauf darf nichts tun und nicht scheitern."""
     pfad = tmp_path / "test.db"
     con = oeffnen(pfad)
-    assert migrieren(con) == 33
-    assert migrieren(con) == 33
+    assert migrieren(con) == 35
+    assert migrieren(con) == 35
     con.close()
 
 
@@ -322,7 +322,7 @@ def test_kaputte_migration_laesst_nichts_zurueck(tmp_path) -> None:
     with pytest.raises(RuntimeError, match="999_kaputt"):
         migrieren(con, ordner)
     assert not con.in_transaction
-    assert schema_version(con) == 33  # alle echten Migrationen, die kaputte nicht
+    assert schema_version(con) == 35  # alle echten Migrationen, die kaputte nicht
     tabellen = {r["name"] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "halb" not in tabellen
     # Repariert läuft sie durch — der nächste Start scheitert nicht an „schon vorhanden"

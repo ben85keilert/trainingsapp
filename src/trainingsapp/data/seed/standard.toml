@@ -41,7 +41,8 @@ version = 1
 id = "2c1194ea-67ba-536d-aa7d-bf74bc3c73d4"
 name = "Standard"
 beschreibung = "Die wichtigsten Übungen zum Einstieg: Atmung, Mobilisation, Dehnung, Kräftigung, Gleichgewicht und Messwerte zum Vergleichen."
-version = 1
+version = 3
+neuigkeiten = "Vier Messungen für die Herzfrequenz: Ruhe-HF morgens (10 min), Submaximaltest, Talk-Test und Feld-Maximaltest — mit Timer-Stufen, ausgewertet in der Herzfrequenz-Sicht."
 
 
 # ── Atmung ──────────────────────────────────────────────────────────────────
@@ -62,7 +63,7 @@ typen = ["Atmung", "Entspannung", "HRV"]
 spec = "halten"
 icon_key = "air"
 limit_spec = { rules = [{ type = "timer", seconds = 300 }] }
-description = "Vier Sekunden einatmen, sieben halten, acht ausatmen. Beruhigt und ist gut als Einstieg in eine HRV-Messung geeignet."
+description = "Vier Sekunden einatmen, sieben halten, acht ausatmen. Gut geeignet als Einstieg in eine HRV-Messung."
 
 [[exercises]]
 key = "kohaerenzatmung"
@@ -348,6 +349,118 @@ icon_key = "monitor_heart"
 limit_spec = { rules = [{ type = "timer", seconds = 300 }] }
 description = "Fünf Minuten ruhig sitzen oder liegen, gleichmäßig atmen, nicht sprechen. Möglichst immer zur gleichen Tageszeit."
 
+[[exercises]]
+key = "hf_ruhemessung_10"
+name = "Ruhe-HF morgens (10 min)"
+typen = ["Messung", "HRV"]
+spec = "halten"
+icon_key = "monitor_heart"
+limit_spec = { rules = [{ type = "timer", seconds = 600 }] }
+description = "Zehn Minuten liegend, gleich nach dem Aufstehen, vor Kaffee und Frühstück, mit Brustgurt. Die Auswertung bietet das tiefste 30-Sekunden-Mittel als Ruhe-HF an. Möglichst immer zur gleichen Tageszeit."
+
+[[exercises]]
+key = "hf_submaximaltest"
+name = "Submaximaltest (Laufen oder Rad)"
+typen = ["Messung", "Ausdauer"]
+spec = "halten"
+icon_key = "directions_run"
+uhr = true
+description = "Immer derselbe Weg, dasselbe Gerät. Drei Stufen mit gleichbleibender Herzfrequenz: Stufe 1 locker, Stufe 2 zügig, Stufe 3 hart, die Zielwerte stehen in der Herzfrequenz-Sicht. Nach Stufe 3 sofort stehen bleiben und 60 Sekunden ruhig stehen: Die Erholung in dieser Minute ist der Vergleichswert von Woche zu Woche."
+
+[[exercises.timer]]
+name = "Submaximaltest 6/6/3 + 1"
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 1"
+dauer_s = 360
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 2"
+dauer_s = 360
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 3"
+dauer_s = 180
+
+[[exercises.timer.abschnitte]]
+name = "Stehen"
+dauer_s = 60
+zaehlt = false
+
+[[exercises]]
+key = "hf_talk_test"
+name = "Talk-Test (Steigerung)"
+typen = ["Messung", "Ausdauer"]
+spec = "halten"
+icon_key = "directions_walk"
+uhr = true
+description = "Sechs Stufen zu drei Minuten, jede etwas schneller als die vorige: Gehen, zügig gehen, traben, laufen. Sprich in jeder Stufe ein paar Sätze laut. Sobald Sprechen nicht mehr bequem geht, in der Herzfrequenz-Sicht „Sprechen wird schwer“ antippen: Die Herzfrequenz davor ist dein Marker für Schwelle 1."
+
+[[exercises.timer]]
+name = "Talk-Test 6 × 3 min"
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 1"
+dauer_s = 180
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 2"
+dauer_s = 180
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 3"
+dauer_s = 180
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 4"
+dauer_s = 180
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 5"
+dauer_s = 180
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 6"
+dauer_s = 180
+
+[[exercises]]
+key = "hf_feld_maximaltest"
+name = "Feld-Maximaltest"
+typen = ["Messung", "Ausdauer"]
+spec = "halten"
+icon_key = "directions_run"
+uhr = true
+description = "Eine Ausbelastung — nur für Gesunde und Trainierte, nicht bei Infekt, Herz-Kreislauf-Erkrankung oder Beschwerden; im Zweifel vorher ärztlich abklären, bei Schwindel, Brustschmerz oder Luftnot sofort abbrechen. Zehn Minuten einlaufen, dann drei Stufen zu drei Minuten, jede deutlich schneller, die letzte Minute alles geben, danach 60 Sekunden ruhig stehen. Die Auswertung bietet das höchste 30-Sekunden-Mittel als HFmax an."
+
+[[exercises.timer]]
+name = "Feld-Maximaltest 10 + 3 × 3 + 1 + 1"
+
+[[exercises.timer.abschnitte]]
+name = "Einlaufen"
+dauer_s = 600
+zaehlt = false
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 1"
+dauer_s = 180
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 2"
+dauer_s = 180
+
+[[exercises.timer.abschnitte]]
+name = "Stufe 3"
+dauer_s = 180
+
+[[exercises.timer.abschnitte]]
+name = "Alles"
+dauer_s = 60
+
+[[exercises.timer.abschnitte]]
+name = "Stehen"
+dauer_s = 60
+zaehlt = false
+
 
 # ── Kurse ───────────────────────────────────────────────────────────────────
 #
@@ -493,7 +606,7 @@ key = "einstellungen"
 titel = "Einstellungen, Export und wie es weitergeht"
 text = """
 Unter **Einstellungen → HRV-Messung** stellst du ein, welche Kacheln über der
-Kurve stehen, wie breit das Zeitfenster ist und ob die **Frequenzanalyse**
+Kurve stehen, wie breit das Zeitfenster ist und ob die Werte im **Frequenzbereich**
 (Spektrum, LF/HF) und die nichtlinearen Kennzahlen gerechnet werden. Für den
 Anfang sind sie aus — die Zeitbereichswerte reichen.
 
@@ -502,5 +615,5 @@ ZIP weiter oder sicherst sie; das Format ist dasselbe wie in der Praxisanwendung
 GPS-Daten eines Trainings gehen dabei nie mit.
 
 Damit hast du das Wichtigste gesehen. Miss am besten regelmäßig zur gleichen
-Tageszeit — erst der Verlauf über Wochen macht die Zahlen für dich lesbar.
+Tageszeit. Dann lassen sich die Messungen untereinander vergleichen.
 """

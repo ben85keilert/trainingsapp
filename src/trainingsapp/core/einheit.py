@@ -78,6 +78,8 @@ ARTEN: frozenset[str] = frozenset(
         # Leistung der Person in der Übungsausführung (Ben, 19.10.2026, Plan B)
         "leistung",
         "abschluss",
+        # Ende einer Belastung — HF-Erholung ab hier (Ben, 29.10.2026, Entscheidung 14)
+        "erholung",
     }
 )
 
@@ -132,6 +134,9 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         "wert",
         "erster",
         "grenze",
+        # Erholung (person/erholung): woran und in welcher Haltung (`hrv_core.herzfrequenz`)
+        "kontext",
+        "haltung",
         # Die Ausführung einer Übung (Ben, 21.10.2026): Variante und die Ausprägungen des
         # Feldvorrats — „Läufe heute“ trägt einen abgebrochenen Lauf später mit ihnen ein.
         # Nur in der Zeitleiste; die Marken der Messdatei nennen ihre Felder einzeln.

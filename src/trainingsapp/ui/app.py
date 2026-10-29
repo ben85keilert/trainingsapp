@@ -29,12 +29,14 @@ Routen:
     /archiv, /papierkorb            Archivierte und gelöschte Übungen (und Pläne)
     /verlauf/<kachel_id>            Kurve der Tagessummen einer Übung (je Variante eine Linie)
     /einstellungen/hrv              Einstellungen der HRV-Messung
+    /einstellungen/herzfrequenz     Herzfrequenz: Profilwerte mit Herkunft, Bereiche, Sicht
     /einstellungen/hrv/ueberschriften   Gespeicherte Überschriften der Messungen (Migration 030)
     /einstellungen/training         Training: Karte einfärben, Tempo mit Pausen, Spalten je km
     /einstellungen/profile          Profile anlegen, umbenennen, löschen
     /einstellungen/tags             Typen und Regionen der Übungen: anlegen, umbenennen, löschen
     /einstellungen/tagesfelder[/<id>|/neu]   Tagesfelder: Liste, Formular (docs/plan_tagesfelder.md)
     /verlauf/tagesfeld/<id>         Ein Tagesfeld im Verlauf: Säulen bzw. Linien je Variante
+    /verlauf/herzfrequenz           Ruhe-/Nacht-HF mit Baseline, Wochenlast, Tests (29.10.2026)
     /pakete[/<id>|/export[/<id>]]   Paketmanager: Pakete, ein Paket, Export (auch /einstellungen/…)
     /einstellungen/gps-test         GPS-Vorabtest: Strecke und Dauertest (docs/plan_gps.md)
     /ausdauer                       Ausdauertraining mit GPS: starten, live
@@ -104,6 +106,7 @@ from trainingsapp.ui.views.anhang_ton import anhang_ton_view
 from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view, verwaiste_dialog
 from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_anhaenge import einstellungen_anhaenge
+from trainingsapp.ui.views.einstellungen_herzfrequenz import einstellungen_herzfrequenz
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
 from trainingsapp.ui.views.einstellungen_hrv_titel import einstellungen_hrv_titel
 from trainingsapp.ui.views.einstellungen_tags import einstellungen_tags_view
@@ -151,6 +154,7 @@ from trainingsapp.ui.views.updates import ROUTE as UPDATES_ROUTE
 from trainingsapp.ui.views.updates import beim_start as updates_beim_start
 from trainingsapp.ui.views.updates import updates_view
 from trainingsapp.ui.views.verlauf import verlauf
+from trainingsapp.ui.views.verlauf_herzfrequenz import verlauf_herzfrequenz_view
 from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
 from trainingsapp.ui.views.verlauf_tagesfeld import verlauf_tagesfeld_view
 
@@ -842,6 +846,8 @@ def main(page: ft.Page) -> None:
                     ablegen(lambda: einstellungen_hrv_titel(page, state))
             elif teile[1:2] == ["training"]:
                 ablegen(lambda: einstellungen_training(page, state))
+            elif teile[1:2] == ["herzfrequenz"]:
+                ablegen(lambda: einstellungen_herzfrequenz(page, state))
             elif teile[1:2] == ["profile"]:
                 ablegen(lambda: profile_view(page, state))
             elif teile[1:2] == ["tags"]:
@@ -867,6 +873,8 @@ def main(page: ft.Page) -> None:
             ablegen(lambda: papierkorb_view(page, state))
         elif teile[:2] == ["verlauf", "tagesfeld"] and len(teile) >= 3:
             ablegen(lambda: verlauf_tagesfeld_view(page, state, teile[2]))
+        elif teile[:2] == ["verlauf", "herzfrequenz"]:
+            ablegen(lambda: verlauf_herzfrequenz_view(page, state))
         elif teile[:1] == ["verlauf"] and len(teile) >= 2:
             ablegen(lambda: verlauf_kachel_view(page, state, teile[1]))
         elif teile[:1] == ["uebung"] and len(teile) >= 2:

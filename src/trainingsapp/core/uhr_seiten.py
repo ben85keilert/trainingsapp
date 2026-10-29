@@ -58,10 +58,23 @@ SEITE_ATMUNG = "atmung"
 SEITE_INTERVALL = "intervall"
 SEITE_HRR = "hrr"
 SEITE_TRAINING = "training"
-SEITEN: tuple[str, ...] = (SEITE_HF, SEITE_ATMUNG, SEITE_INTERVALL, SEITE_HRR, SEITE_TRAINING)
+#: Bereich und Anteil an der Reserve (Ben, 29.10.2026, Stufe 4) — nur mit Ruhe-HF und HFmax
+SEITE_BEREICH = "bereich"
+SEITEN: tuple[str, ...] = (
+    SEITE_HF,
+    SEITE_ATMUNG,
+    SEITE_INTERVALL,
+    SEITE_HRR,
+    SEITE_TRAINING,
+    SEITE_BEREICH,
+)
+#: Vorgabe der Einstellung: alle außer „Bereich“ — die kommt erst nach dem Ankreuzen (Ben,
+#: 29.10.2026), damit die Uhr nicht von selbst eine Seite mehr blättert
+SEITEN_VORGABE: tuple[str, ...] = tuple(s for s in SEITEN if s != SEITE_BEREICH)
 #: Was die Einstellung je Seite zeigt
 SEITEN_NAMEN: dict[str, str] = {
     SEITE_HF: "HF, RR, DFA α1",
+    SEITE_BEREICH: "Bereich und % der Reserve (Einstellungen → Herzfrequenz)",
     SEITE_ATMUNG: "Atemfrequenz, RMSSD (Atemübungen)",
     SEITE_INTERVALL: "Gipfel und Tal der HF — ⏯ beginnt neu",
     SEITE_HRR: "Erholung HRR30, HRR60 — ⏯ Ende der Belastung",
@@ -73,6 +86,7 @@ TASTE_NEU = "neu"
 TASTE_HRR = "hrr"
 TASTE_JE_SEITE: dict[str, str] = {
     SEITE_HF: TASTE_MARKE,
+    SEITE_BEREICH: TASTE_MARKE,
     SEITE_ATMUNG: TASTE_MARKE,
     SEITE_INTERVALL: TASTE_NEU,
     SEITE_HRR: TASTE_HRR,
@@ -149,6 +163,8 @@ class Werte:
     training: Training | None = None
     #: Verdrängt Zeile 3 auf allen Seiten (Gurt prüfen)
     warnung: str | None = None
+    #: Seite „Bereich“: (Name des Bereichs, % der Reserve) — None ohne Profil
+    bereich: tuple[str, float | None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,7 +301,7 @@ def _tempo(s_km: float | None) -> str | None:
     return f"{_mmss(s_km)}/km"
 
 
-def seiten(w: Werte, auswahl: Sequence[str] = SEITEN, breite: int = BREITE) -> list[Seite]:
+def seiten(w: Werte, auswahl: Sequence[str] = SEITEN_VORGABE, breite: int = BREITE) -> list[Seite]:
     """Die Textseiten in `SEITEN`-Reihenfolge, nur die aus ``auswahl`` (``hf`` immer).
 
     >>> from hrv_core.live import LiveKennzahlen
@@ -368,6 +384,14 @@ def seiten(w: Werte, auswahl: Sequence[str] = SEITEN, breite: int = BREITE) -> l
         " · ".join(teile) if teile else ("Rest --" if tr.abschnitt else "kein GPS"),
         dritte,
     )
+    # Bereich und Reserve zuletzt (Ben, 29.10.2026): die bisherige Reihenfolge der Seiten
+    # bleibt, die Seite kommt erst nach dem Ankreuzen in den Einstellungen
+    if w.bereich is None:
+        seite(SEITE_BEREICH, "Bereich --", "Ruhe-HF/HFmax fehlen", stand)
+    else:
+        name, prozent = w.bereich
+        pz = "--" if prozent is None else f"{prozent:.0f} %"
+        seite(SEITE_BEREICH, name, f"{pz} Reserve · HF {hf}", stand)
     return out
 
 
@@ -376,7 +400,7 @@ def paket(
     verlauf: Verlauf,
     jetzt_s: float,
     *,
-    auswahl: Sequence[str] = SEITEN,
+    auswahl: Sequence[str] = SEITEN_VORGABE,
     seit_s: float | None = None,
     hrr_t0_s: float | None = None,
     aufnahme_s: float | None = None,
@@ -385,6 +409,7 @@ def paket(
     atmung: float | None = None,
     training: Training | None = None,
     warnung: str | None = None,
+    bereich: tuple[str, float | None] | None = None,
     breite: int = BREITE,
 ) -> Uhrpaket:
     """Seiten, Zahlen und Verlauf für alle Kanäle auf einmal.
@@ -403,6 +428,7 @@ def paket(
         erholung=None if hrr_t0_s is None else erholung(verlauf, hrr_t0_s, jetzt_s),
         training=training,
         warnung=warnung,
+        bereich=bereich,
     )
     return Uhrpaket(
         seiten=seiten(w, auswahl, breite),

@@ -34,12 +34,14 @@ import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from hrv_core.ekg import EKG_RATE_HZ
 from hrv_core.recording import laden
 
 from .base import (
     QUEUE_MAXSIZE,
     DeviceInfo,
     DeviceStatus,
+    EkgPaket,
     HeartRateSource,
     Messwert,
     PpiPaket,
@@ -86,8 +88,12 @@ class SimulatedSource(HeartRateSource):
         ppi: bool = False,
         blocker_anteil: float = 0.05,
         dauer_s: float | None = None,
+        ekg: bool = False,
     ) -> None:
         super().__init__()
+        #: Synthetisches EKG (130 Hz, je Schlag ein Rahmen mit R-Zacke) — wie der H10 auf
+        #: Wunsch, zum Testen des Beiwerks ohne Gurt
+        self.ekg = bool(ekg)
         self.datei = Path(datei) if datei else None
         self.tempo = max(tempo, 0.0)
         self.bpm = bpm
@@ -172,7 +178,7 @@ class SimulatedSource(HeartRateSource):
     # -- Erzeugung ----------------------------------------------------------
 
     async def _laufen(self) -> None:
-        quelle: AsyncIterator[Messwert | PpiPaket]
+        quelle: AsyncIterator[Messwert | PpiPaket | EkgPaket]
         if self._modus == "datei":
             quelle = self._aus_datei()
             ende = "Wiedergabe beendet"
@@ -245,7 +251,7 @@ class SimulatedSource(HeartRateSource):
         rsa = self.rsa_amplitude_ms * math.sin(2 * math.pi * (self.atem_bpm / 60.0) * t_s)
         return max(300.0, basis_rr + rsa + self._rng.gauss(0.0, 8.0))
 
-    async def _synthetisch(self) -> AsyncIterator[Messwert | PpiPaket]:
+    async def _synthetisch(self) -> AsyncIterator[Messwert | PpiPaket | EkgPaket]:
         t_s = 0.0
         while self.dauer_s is None or t_s < self.dauer_s:
             rr = self._naechstes_rr(t_s)
@@ -253,6 +259,19 @@ class SimulatedSource(HeartRateSource):
             virt = self._t0_virt + t_s
             await self._bis(virt)
             yield Messwert(self._device_id, round(rr), round(60000.0 / rr), virt, "m")
+            if self.ekg:
+                yield self._ekg_rahmen(t_s, rr, virt)
+
+    def _ekg_rahmen(self, t_s: float, rr: float, virt: float) -> EkgPaket:
+        """Ein Rahmen je Schlag: Grundlinie mit Rauschen, eine R-Zacke am Anfang."""
+        n = max(1, round(rr / 1000.0 * EKG_RATE_HZ))
+        werte = []
+        for i in range(n):
+            wert = self._rng.gauss(0.0, 15.0)
+            if i < 4:
+                wert += (1200.0, 2500.0, -600.0, -150.0)[i]
+            werte.append(round(wert))
+        return EkgPaket(self._device_id, virt, round(t_s * 1e9), tuple(werte))
 
     async def _puls_synthetisch(self) -> AsyncIterator[Messwert | PpiPaket]:
         """Wie eine Uhr im Übertragungsmodus: jede Sekunde die Herzfrequenz, kein Intervall.

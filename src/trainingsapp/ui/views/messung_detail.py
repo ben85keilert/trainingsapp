@@ -80,6 +80,7 @@ from hrv_core.ausschnitte import (
     zusatz_speichern,
 )
 from hrv_core.constants import BAND_OK
+from hrv_core.ekg import ekg_laden, ekg_pfad
 from hrv_core.ereignisse import Zeitbezug, metadaten_schreiben, sortiert
 from hrv_core.frequency import Fensterspektrum, frequenzbereich
 from hrv_core.korrektur import (
@@ -301,6 +302,8 @@ LEISTUNG_ARTEN = frozenset({"leistung", "abschluss"})
 
 #: So breit öffnet die Aufzeichnung — am Anfang der Messung (Ben, 14.10.2026)
 START_BREITE_S = 120
+#: Ausschnitt des EKG-Rohsignals (s) — kurz, damit R-Zacken sichtbar bleiben
+EKG_FENSTER_S = 6.0
 
 #: Analysefenster: wofür Spektrum, Poincaré und DFA gerechnet werden
 AW_ALLES = "alles"
@@ -3316,6 +3319,127 @@ def _aufbauen(
                 vs.append(float(v))
         return (ts, vs) if ts else None
 
+    # -- EKG-Rohsignal (Beiwerk ``_ecg.json``, Ben 30.10.2026) --------------------------
+    # Nur ansehen, nicht rechnen: kurze Ausschnitte mit eigener µV-Skala, weil das Signal
+    # anders skaliert ist als die RR-Kurve („problematisch ist, dass die Ansicht anders
+    # skaliert ist“). Geladen im Thread, erst wenn die Datei da ist.
+    ekg_box = ft.Column(spacing=6, visible=False)
+    ekg_stand: dict[str, Any] = {"ekg": None, "mitte": 0.0}
+    ekg_datei = ekg_pfad(pfad)
+
+    def ekg_update() -> None:
+        with contextlib.suppress(Exception):
+            ekg_box.update()
+
+    def ekg_blaettern(delta_s: float) -> None:
+        e = ekg_stand["ekg"]
+        if e is None:
+            return
+        t = e.zeit_s()
+        if not t.size:
+            return
+        lo, hi = float(t[0]) + EKG_FENSTER_S / 2, max(float(t[-1]) - EKG_FENSTER_S / 2, float(t[0]))
+        ekg_stand["mitte"] = min(max(ekg_stand["mitte"] + delta_s, lo), hi)
+        ekg_zeichnen()
+
+    def ekg_zum_strich() -> None:
+        if m.strich is None:
+            return
+        ekg_stand["mitte"] = achse_zu_wand(zeilen_achse, wand, m.strich)
+        ekg_zeichnen()
+
+    def ekg_zeichnen() -> None:
+        e = ekg_stand["ekg"]
+        if e is None:
+            return
+        von = ekg_stand["mitte"] - EKG_FENSTER_S / 2
+        bis = von + EKG_FENSTER_S
+        t, uv = e.ausschnitt(von, bis)
+        punkte = [(float(a), float(b)) for a, b in zip(t.tolist(), uv.tolist(), strict=True)]
+        akku = " → ".join(f"{int(b[1])} %" for b in e.batterie) if e.batterie else "–"
+        kopf = ft.Text(
+            f"{e.rate_hz} Hz · {e.n} Proben · {minuten(e.dauer_s)} · "
+            f"{len(e.gaps)} Lücken · Akku {akku}",
+            size=12,
+            opacity=0.8,
+        )
+        zeile = ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.IconButton(
+                    ft.Icons.CHEVRON_LEFT,
+                    tooltip="5 s zurück",
+                    on_click=lambda _=None: ekg_blaettern(-5.0),
+                ),
+                ft.Text(
+                    f"{minuten(max(von, 0.0))}–{minuten(max(bis, 0.0))}",
+                    size=12,
+                    expand=True,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.IconButton(
+                    ft.Icons.CHEVRON_RIGHT,
+                    tooltip="5 s weiter",
+                    on_click=lambda _=None: ekg_blaettern(5.0),
+                ),
+                ft.TextButton(
+                    "Zum Strich",
+                    icon=ft.Icons.VERTICAL_ALIGN_CENTER,
+                    visible=m.ablesen and m.strich is not None,
+                    on_click=lambda _=None: ekg_zum_strich(),
+                ),
+            ],
+        )
+        bild: ft.Control
+        if punkte:
+            bild = kurve(
+                [Reihe(punkte, breite=1.2)],
+                einheit="µV",
+                hoehe=150,
+                x_von=von,
+                x_bis=bis,
+                x_schritte=(1, 2),
+                x_text=minuten,
+                y_spanne_min=500.0,
+                y_schritt_min=100.0,
+            )
+        else:
+            bild = hinweis("In diesem Ausschnitt keine Proben (Lücke).")
+        ekg_box.controls = [
+            karte(
+                kartentitel("EKG-Rohsignal"),
+                kopf,
+                zeile,
+                bild,
+                hinweis(
+                    "Das rohe Signal des Gurts (Polar H10, Beiwerk „…_ecg.json“), nicht "
+                    "gerechnet — eigene Skala in µV. Lücken und der Akkuverlauf zeigen, wie "
+                    "sich der Gurt verhält. Beim Weitergeben ist die Datei dabei."
+                ),
+            )
+        ]
+        ekg_box.visible = True
+        ekg_update()
+
+    async def ekg_laden_task() -> None:
+        try:
+            e = await asyncio.to_thread(ekg_laden, ekg_datei)
+        except Exception as exc:  # kaputte Datei: sagen, nicht abstürzen
+            ekg_box.controls = [
+                karte(kartentitel("EKG-Rohsignal"), hinweis(f"Beiwerk nicht lesbar: {exc}"))
+            ]
+            ekg_box.visible = True
+            ekg_update()
+            return
+        ekg_stand["ekg"] = e
+        t = e.zeit_s()
+        ekg_stand["mitte"] = (float(t[0]) + EKG_FENSTER_S / 2) if t.size else 0.0
+        ekg_zeichnen()
+
+    if ekg_datei.exists():
+        page.run_task(ekg_laden_task)
+
     hf_sicht = HfAuswertungSicht(
         HfKontext(
             page,
@@ -3419,6 +3543,7 @@ def _aufbauen(
             sicht_knopf,
             hf_sicht.control,
             hrv_teil,
+            ekg_box,
             ft.Text(f"Datei: {eintrag.file_path}", size=11, opacity=0.5, selectable=True),
         ],
     )

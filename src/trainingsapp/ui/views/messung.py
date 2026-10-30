@@ -648,15 +648,16 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
         hinweis_text.visible = True
         ring.visible = True
         page.update()
+        ekg = state.hrv_einstellungen().ekg_mitschreiben
         if device_id.startswith(SIM_PREFIX):
-            quelle: Any = SimulatedSource()
+            quelle: Any = SimulatedSource(ekg=ekg)
         elif state.ble_transport is not None:
             from trainingsapp.devices.polar import PolarQuelle
 
             if (warnung := await bluetooth_warnung()) is not None:
                 warnen(warnung)
                 return
-            quelle = PolarQuelle(state.ble_transport)
+            quelle = PolarQuelle(state.ble_transport, ekg=ekg)
         else:
             ring.visible = False
             hinweis_text.value = "Bluetooth gibt es nur in der App auf dem Handy."

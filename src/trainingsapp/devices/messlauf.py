@@ -49,6 +49,7 @@ from hrv_core.ausschnitte import (
     spuren_speichern,
 )
 from hrv_core.constants import malik_threshold
+from hrv_core.ekg import EkgSammler, ekg_journal_pfad, ekg_pfad
 from hrv_core.ereignisse import Zeitbezug, anker_aus_wand, notiz
 from hrv_core.live import LiveFenster
 from hrv_core.ppi import messluecken
@@ -62,7 +63,7 @@ from ..core import abschnitte as eigene_abschnitte
 from ..core.einheit import SPUR_TIMER
 from ..core.gurt_warnung import Artefaktwache
 from ..core.hrv_export import diagnose_pfad, diagnose_text
-from .base import DeviceStatus, HeartRateSource, Messwert, PpiPaket, Verbindung
+from .base import DeviceStatus, EkgPaket, HeartRateSource, Messwert, PpiPaket, Verbindung
 from .profiles import GeraeteProfil, profil_fuer_namen
 
 #: Alle so viele Sekunden schreibt die Aufnahme ein Backup (praxis_gui: 15 s).
@@ -132,6 +133,15 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
         if spuren:  # Abschnitte je Spur — scheitert das, bleibt die Messung
             with contextlib.suppress(OSError, ValueError, TypeError):
                 spuren_speichern(pfad, rec, spuren)
+    # Das EKG-Journal (Rohsignal auf Wunsch) wird zum Beiwerk neben der Messdatei
+    journal = ekg_journal_pfad(backup)
+    if journal.exists():
+        with contextlib.suppress(OSError, ValueError):
+            sammler = EkgSammler.aus_journal(journal)
+            if sammler.n and not ekg_pfad(pfad).exists():
+                sammler.schreiben(pfad)
+        with contextlib.suppress(OSError):
+            journal.unlink()
     backup_entfernen(backup)  # Kopf und Journal
     subject_id = zusatz.get("subject_id")
     return _gespeichert(
@@ -212,6 +222,9 @@ class Messlauf:
         self.subject_id = subject_id
         #: Erkennungsregeln der Live-Anzeige (`regeln_setzen`)
         self.regeln = regeln or Korrekturregeln()
+        #: EKG-Rohsignal der laufenden Aufnahme (Polar H10 auf Wunsch; Ben, 30.10.2026) —
+        #: entsteht mit dem ersten Rahmen, wird als Beiwerk ``_ecg.json`` gespeichert
+        self.ekg: EkgSammler | None = None
         # Die Uhr der Quelle — beim Simulator läuft sie ``tempo``-fach, bei echten
         # Geräten ist sie time.monotonic(). t_capture der Messwerte passt dazu.
         self._uhr: Callable[[], float] = getattr(quelle, "jetzt", time.monotonic)
@@ -338,6 +351,16 @@ class Messlauf:
                         )
                     self._ppi_paket_erwarten(wert)
                     continue
+                if isinstance(wert, EkgPaket):
+                    # Nur mitschreiben, nicht rechnen; vor der Aufnahme verfällt der Rahmen
+                    if aufnahme is not None:
+                        if self.ekg is None:
+                            self.ekg = EkgSammler()
+                            aufnahme.ecg_aufzeichnung = True
+                        t_wall = wert.t_capture - aufnahme.start_mono
+                        self.ekg.rahmen(wert.zeitstempel_ns, wert.uv, t_wall_s=t_wall)
+                        self.ekg.batterie_melden(t_wall, self.status.batterie_prozent)
+                    continue
                 if not isinstance(wert, Messwert):
                     continue
                 t_live, fehler = self._live_zeit(wert)
@@ -405,6 +428,10 @@ class Messlauf:
             self.status = s
             if self.aufnahme is not None and s.batterie_prozent is not None:
                 self.aufnahme.batterie_prozent = s.batterie_prozent
+                if self.ekg is not None:
+                    self.ekg.batterie_melden(
+                        self._uhr() - self.aufnahme.start_mono, s.batterie_prozent
+                    )
             self._melden(s.verbindung != vorher)
 
     def diagnose(self, **zusatz: str) -> str:
@@ -469,6 +496,7 @@ class Messlauf:
             simulation=self.simulation,
         )
         self.aufnahme.batterie_prozent = self.status.batterie_prozent
+        self.ekg = None
         self._grenzen = {}
         self._letztes_backup = start
         self.live.leeren()
@@ -710,7 +738,9 @@ class Messlauf:
             return
         self._letztes_backup = self._uhr()
         with contextlib.suppress(OSError):
-            self.aufnahme.backup(self._ordner(self._backup_basis), zusatz=self._zusatz())
+            kopf = self.aufnahme.backup(self._ordner(self._backup_basis), zusatz=self._zusatz())
+            if self.ekg is not None and self.ekg.n:
+                self.ekg.journal_anhaengen(ekg_journal_pfad(kopf))
 
     def _zusatz(self) -> dict[str, object]:
         """Was das Backup über die Datei hinaus braucht (`backup_wiederherstellen`)."""
@@ -803,6 +833,7 @@ class Messlauf:
         aufnahme = self.aufnahme
         if aufnahme is None or not aufnahme.beats:
             self.aufnahme = None
+            self.ekg = None
             return None
         if self._wird_gespeichert:
             return None
@@ -813,6 +844,7 @@ class Messlauf:
         self._wird_gespeichert = False
         if gespeichert:
             self.aufnahme = None
+            self.ekg = None
             self._grenzen = {}
 
     def _schreiben(
@@ -825,6 +857,16 @@ class Messlauf:
         nur, darum auch in einem Thread möglich. ``grenzen``: die Spuren dieser Aufnahme
         (ohne Angabe die laufenden)."""
         pfad = aufnahme.speichern(self._ordner(basis))
+        ekg = self.ekg
+        if ekg is not None and ekg.n and grenzen is None:
+            # Das Beiwerk neben die Messdatei; das Journal des Backups ist damit erledigt
+            with contextlib.suppress(OSError):
+                ekg.schreiben(pfad)
+            if self._backup_basis is not None:
+                with contextlib.suppress(OSError):
+                    ekg_journal_pfad(
+                        self._ordner(self._backup_basis) / aufnahme.backup_name()
+                    ).unlink(missing_ok=True)
         if (
             grenzen is None
             and self._dateiname_fest is not None
@@ -845,7 +887,16 @@ class Messlauf:
         # Das Verbindungsprotokoll gehört zur Messung: Ohne adb ist es die einzige
         # Spur, warum ein Sensor (Verity Sense) Lücken oder keine Intervalle hatte.
         text = self.diagnose(
-            Aufnahme=f"{pfad.name}, {len(rec.beats)} Zeilen, {len(rec.ppi_pakete or [])} PPI-Pakete"
+            Aufnahme=f"{pfad.name}, {len(rec.beats)} Zeilen, "
+            f"{len(rec.ppi_pakete or [])} PPI-Pakete",
+            **(
+                {
+                    "EKG": f"{ekg.n} Proben in {ekg.n_rahmen} Rahmen, {len(ekg.luecken())} Lücken, "
+                    f"Akku {' → '.join(str(int(b[1])) for b in ekg.batterie) or '–'} %"
+                }
+                if ekg is not None and ekg.n
+                else {}
+            ),
         )
         if text:
             with contextlib.suppress(OSError):

@@ -1838,3 +1838,52 @@ async def test_bluetooth_aus_warnt_statt_zu_suchen(daten) -> None:
     zustand["wert"] = "on"
     await _knopf(ansicht, "Geräte suchen").on_click()
     assert gesucht == [8.0]
+
+
+async def test_detailansicht_zeigt_ekg_beiwerk_mit_eigener_skala(daten) -> None:
+    """Ben, 30.10.2026: das EKG-Rohsignal in kurzen Ausschnitten (6 s) mit µV-Skala,
+    blätterbar; Lücken und Akkuverlauf im Kopf."""
+    from hrv_core.ekg import EkgSammler
+
+    state, tmp_path = daten
+    beats, t = [], 0.0
+    for _ in range(90):
+        t += 0.8
+        beats.append(Beat(t_s=round(t, 3), rr_ms=800, hf_bpm=75, t_wall_s=round(t, 3)))
+    rec = Recording(beats=beats, geraet="Polar H10 TEST", geraet_profil="polar_h10")
+    pfad = speichern(rec, tmp_path / "Messungen" / "PolarH10")
+    s = EkgSammler()
+    t_ns = 0
+    for k in range(90):  # ein Rahmen je Schlag, 104 Proben
+        t_ns += round(0.8 * 1e9) + (round(3e9) if k == 50 else 0)  # eine Lücke von 3 s
+        s.rahmen(t_ns, [(-200 if i == 3 else 10 * (i % 5)) for i in range(104)], t_wall_s=0.8 * k)
+    s.batterie_melden(0.0, 60)
+    s.batterie_melden(40.0, 55)
+    s.schreiben(pfad)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet="Polar H10 TEST",
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    seite = _seite()
+    ansicht = messung_detail_view(seite, state, eintrag)
+    while seite.aufgaben:
+        aufgaben = list(seite.aufgaben)
+        seite.aufgaben.clear()
+        await asyncio.gather(*aufgaben, return_exceptions=True)
+    texte = _baum_texte(ansicht)
+    assert "EKG-ROHSIGNAL" in texte
+    kopf = next(x for x in texte if x.startswith("130 Hz · 9360 Proben"))
+    assert "1 Lücken" in kopf and "Akku 60 % → 55 %" in kopf
+    assert any("eigene Skala in µV" in x for x in texte)  # eigene Werteachse, nicht die RR-Kurve
+    weiter = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.IconButton) and c.tooltip == "5 s weiter"
+    )
+    bereich = next(x for x in _baum_texte(ansicht) if "–" in x and x.startswith("0:0"))
+    weiter.on_click()
+    texte2 = _baum_texte(ansicht)
+    assert bereich not in texte2 and any(x.startswith("0:0") and "–" in x for x in texte2)

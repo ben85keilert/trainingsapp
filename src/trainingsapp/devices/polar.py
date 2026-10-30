@@ -61,6 +61,7 @@ from .base import (
     HR_MEASUREMENT_UUID,
     HR_SERVICE_UUID,
     DeviceInfo,
+    EkgPaket,
     HeartRateSource,
     Verbindung,
     hautkontakt_aus_flags,
@@ -69,7 +70,10 @@ from .base import (
 )
 from .gatt import BleTransport, Empfaenger
 from .pmd import (
+    ECG_START,
+    ECG_STOP,
     FEHLER_LAEUFT_BEREITS,
+    MEAS_ECG,
     MEAS_PPI,
     OP_START,
     PMD_CONTROL_UUID,
@@ -78,6 +82,7 @@ from .pmd import (
     PPI_START,
     PPI_STOP,
     parse_control_antwort,
+    parse_ekg_proben,
     parse_feature_antwort,
     parse_pmd_rahmen,
     parse_ppi_proben,
@@ -201,8 +206,16 @@ class PolarQuelle(HeartRateSource):
         uhr: Callable[[], float] = time.monotonic,
         schlafen: Schlafen = asyncio.sleep,
         protokoll: Callable[[str], None] | None = None,
+        ekg: bool = False,
     ) -> None:
         super().__init__()
+        #: EKG-Rohsignal über den PMD-Dienst mitlesen (Polar H10; Ben, 30.10.2026) — aus,
+        #: solange die Person es nicht einschaltet: kostet den Gurt spürbar Akku
+        self._ekg_wunsch = bool(ekg)
+        self._ekg_modus = False  # diese Verbindung streamt EKG
+        self._ekg_gesehen = False
+        self._ekg_rahmen = 0
+        self._ekg_neugestartet = False
         self._transport = transport
         self._uhr = uhr
         self._schlafen = schlafen
@@ -445,6 +458,20 @@ class PolarQuelle(HeartRateSource):
         if self._ppi_modus:
             await self._ppi_einrichten(gen)
 
+        self._ekg_modus = (
+            self._ekg_wunsch
+            and hat_pmd
+            and profil.kann(CAP_PMD_ECG)
+            and (typen is None or "ecg" in typen)
+        )
+        self._ekg_gesehen = False
+        self._ekg_rahmen = 0
+        self._ekg_neugestartet = False
+        if self._ekg_wunsch and not self._ekg_modus:
+            self._log("EKG gewünscht, aber dieses Gerät bietet keinen PMD-EKG-Strom")
+        elif self._ekg_modus:
+            await self._ekg_einrichten(gen)
+
         if self._getrennt_gemeldet:
             raise ConnectionError("Gerät hat während des Verbindungsaufbaus getrennt")
 
@@ -516,6 +543,76 @@ class PolarQuelle(HeartRateSource):
                 self._log(f"PMD-Einrichtung {versuch}/{PMD_VERSUCHE} gescheitert: {e!r}")
                 self._status_aendern(meldung=f"Pulsintervalle einrichten … ({_kurz(e)})")
                 await self._schlafen(PMD_PAUSE_S)
+
+    async def _ekg_einrichten(self, gen: int) -> None:
+        """PMD-Control und -Data abonnieren (sofern PPI das nicht schon tat) und den
+        EKG-Strom starten (130 Hz, 14 bit). Scheitert das, läuft die Messung ohne EKG
+        weiter — die Intervalle kommen unabhängig davon über 0x2A37."""
+        dev = self._device_id
+        try:
+            if not self._ppi_modus:
+                await self._gatt(
+                    self._transport.subscribe(
+                        dev,
+                        PMD_SERVICE_UUID,
+                        PMD_CONTROL_UUID,
+                        self._empfaenger(self._control_empfangen, gen),
+                    )
+                )
+                await self._gatt(
+                    self._transport.subscribe(
+                        dev,
+                        PMD_SERVICE_UUID,
+                        PMD_DATA_UUID,
+                        self._empfaenger(self._pmd_empfangen, gen),
+                    )
+                )
+            await self._ekg_start_senden()
+        except Exception as e:
+            self._ekg_modus = False
+            self._log(f"EKG-Einrichtung gescheitert: {e!r}")
+            self._status_aendern(
+                meldung=f"EKG-Rohsignal nicht gestartet ({_kurz(e)}) — Messung läuft ohne"
+            )
+
+    async def _ekg_start_senden(self) -> None:
+        await self._gatt(
+            self._transport.write(
+                self._device_id, PMD_SERVICE_UUID, PMD_CONTROL_UUID, ECG_START, mit_antwort=True
+            )
+        )
+        self._log("EKG-Start gesendet (02 00, 130 Hz, 14 bit)")
+
+    def _ekg_neu_starten(self, grund: str) -> None:
+        """EKG stoppen und neu starten — je Verbindung höchstens einmal."""
+        if self._ekg_neugestartet or not self._ekg_modus or not self._laeuft:
+            return
+        self._ekg_neugestartet = True
+        self._log(f"EKG neu starten: {grund}")
+        gen = self._generation
+
+        async def neustart() -> None:
+            try:
+                await self._gatt(
+                    self._transport.write(
+                        self._device_id,
+                        PMD_SERVICE_UUID,
+                        PMD_CONTROL_UUID,
+                        ECG_STOP,
+                        mit_antwort=True,
+                    )
+                )
+                await self._schlafen(0.5)
+                if gen == self._generation and self._laeuft:
+                    await self._ekg_start_senden()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._log(f"EKG-Neustart gescheitert: {e!r}")
+
+        self._tasks.append(
+            asyncio.get_running_loop().create_task(neustart(), name="polar-ekg-neustart")
+        )
 
     async def _ppi_start_senden(self) -> None:
         await self._gatt(
@@ -764,12 +861,29 @@ class PolarQuelle(HeartRateSource):
         self._lebenszeichen(bpm, hautkontakt_aus_flags(daten))
 
     def _pmd_empfangen(self, gen: int, daten: bytes, t_capture: float) -> None:
-        """PMD-Datenrahmen: nur PPI wird ausgewertet, alles andere still verworfen."""
+        """PMD-Datenrahmen: PPI wird ausgewertet, EKG (auf Wunsch) roh durchgereicht,
+        alles andere still verworfen."""
         if gen != self._generation or not self._laeuft:
             return
         self._daten_da()
         rahmen = parse_pmd_rahmen(daten)
-        if rahmen is None or rahmen.typ != MEAS_PPI:
+        if rahmen is None:
+            return
+        if rahmen.typ == MEAS_ECG:
+            if not self._ekg_modus:
+                return
+            ekg_proben = parse_ekg_proben(rahmen.nutzdaten)
+            if not ekg_proben:
+                return
+            self._ekg_rahmen += 1
+            if not self._ekg_gesehen:
+                self._ekg_gesehen = True
+                self._log(f"Erster EKG-Rahmen ({len(ekg_proben)} Proben)")
+            self._push_messwert(
+                EkgPaket(self._device_id, t_capture, rahmen.zeitstempel_ns, tuple(ekg_proben))
+            )
+            return
+        if rahmen.typ != MEAS_PPI:
             return
         proben = parse_ppi_proben(rahmen.nutzdaten)
         if not proben:
@@ -806,6 +920,14 @@ class PolarQuelle(HeartRateSource):
             self._log(f"PMD-Control: {antwort.text}")
             if antwort.opcode == OP_START and antwort.typ == MEAS_PPI:
                 self._ppi_neu_starten("Gerät meldet „läuft bereits“")
+            elif antwort.opcode == OP_START and antwort.typ == MEAS_ECG:
+                self._ekg_neu_starten("Gerät meldet „läuft bereits“")
+            return
+        if antwort.opcode == OP_START and antwort.typ == MEAS_ECG:
+            # Nur das EKG lehnt das Gerät ab — die Messung läuft ohne weiter
+            self._ekg_modus = False
+            self._log(f"PMD-Control FEHLER (EKG): {antwort.text}")
+            self._status_aendern(meldung=f"EKG-Rohsignal abgelehnt — {antwort.text}")
             return
         self._log(f"PMD-Control FEHLER: {antwort.text}")
         self._status_aendern(meldung=f"Gerät lehnt ab — {antwort.text}")

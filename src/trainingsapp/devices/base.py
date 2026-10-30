@@ -119,6 +119,20 @@ class PpiPaket:
     kontakt: tuple[int, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class EkgPaket:
+    """Ein PMD-EKG-Rahmen (Polar H10, 130 Hz) roh — für das Beiwerk ``_ecg.json``
+    (`hrv_core.ekg.EkgSammler`). Nur auf Wunsch (Einstellung „EKG mitschreiben“); die App
+    rechnet damit nichts, sie schreibt es mit (Ben, 30.10.2026)."""
+
+    device_id: str
+    t_capture: float
+    #: Gerätezeit der letzten Probe (ns)
+    zeitstempel_ns: int
+    #: Proben in µV
+    uv: tuple[int, ...]
+
+
 #: Alter Name aus der Zeit vor `Messwert` — nur noch als Alias.
 Sample = Messwert
 
@@ -138,7 +152,7 @@ class HeartRateSource(ABC):
     """
 
     def __init__(self) -> None:
-        self._messwerte: asyncio.Queue[Messwert | PpiPaket | None] = asyncio.Queue()
+        self._messwerte: asyncio.Queue[Messwert | PpiPaket | EkgPaket | None] = asyncio.Queue()
         self._status: asyncio.Queue[DeviceStatus] = asyncio.Queue(maxsize=STATUS_QUEUE_MAXSIZE)
         self._status_aktuell = DeviceStatus()
         self._ende_gesendet = False
@@ -179,7 +193,7 @@ class HeartRateSource(ABC):
 
     # -- Konsumentenseite ---------------------------------------------------
 
-    async def stream(self) -> AsyncIterator[Messwert | PpiPaket]:
+    async def stream(self) -> AsyncIterator[Messwert | PpiPaket | EkgPaket]:
         """Messwerte und PPI-Pakete, in der Reihenfolge des Eintreffens.
 
         Endet, wenn die Quelle das Ende signalisiert (`disconnect()`,
@@ -215,7 +229,7 @@ class HeartRateSource(ABC):
             self._ende_gesendet = False
             self._puffer_gewarnt = False
 
-    def _push_messwert(self, wert: Messwert | PpiPaket) -> None:
+    def _push_messwert(self, wert: Messwert | PpiPaket | EkgPaket) -> None:
         """Messwert einreihen. Nie blockierend, nie verlierend — wir sind im BLE-Callback."""
         self._messwerte.put_nowait(wert)
         groesse = self._messwerte.qsize()
@@ -404,6 +418,7 @@ __all__ = [
     "STATUS_QUEUE_MAXSIZE",
     "DeviceInfo",
     "DeviceStatus",
+    "EkgPaket",
     "HeartRateSource",
     "Messwert",
     "PpiPaket",

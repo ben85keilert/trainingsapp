@@ -68,7 +68,7 @@ Abweichung ist für praxis_gui folgenlos.
 | `sensor_*.json` | Messdatei (`raw-v1`) — **das ist unser Ziel** |
 | `sensor_*_analyzed.json` | Analyse-Sidecar (`analysis-v1`) — wir schreiben eine Teilmenge (Abschnitt 9) |
 | `sensor_*/meta.json` | Analyse-Ordner (`analysis-v3`) von praxis_gui — wir lesen und schreiben ihn nicht |
-| `sensor_*_ecg.json` | EKG-Rohsignal |
+| `sensor_*_ecg.json` | EKG-Rohsignal — von praxis_gui; seit 30.10.2026 auch von dieser App (Polar H10, nur mit Schalter „EKG mitschreiben“; `hrv_core.ekg`, Erweiterungen `frame_t_ns`, `gaps`, `t_wall_start_s`, `batterie`) |
 | `sensor_*_ppg.json` | optisches Rohsignal (PPG) |
 | `sensor_*_truth.json` | Wahrheitsdatei des Generators (`truth-v1`) |
 | `sensor_*__c01.json` | korrigierte Fassung (`corrected-v1`) |

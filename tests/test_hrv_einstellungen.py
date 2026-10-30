@@ -94,6 +94,13 @@ def test_einstellungsseiten_bauen_und_schalten(tmp_path) -> None:
         )
         schalter.on_change(SimpleNamespace(control=SimpleNamespace(value=False)))
         assert not state.hrv_einstellungen().messung_anzeigen
+        # EKG-Rohsignal (Ben, 30.10.2026): standardmäßig aus, Schalter stellt es an
+        ekg = next(
+            c for c in controls if isinstance(c, ft.Switch) and c.label == "EKG mitschreiben"
+        )
+        assert ekg.value is False and not state.hrv_einstellungen().ekg_mitschreiben
+        ekg.on_change(SimpleNamespace(control=SimpleNamespace(value=True)))
+        assert state.hrv_einstellungen().ekg_mitschreiben is True
         # Hinzufügen per Chip, groß per Stern, umordnen, entfernen
         chip = next(
             c

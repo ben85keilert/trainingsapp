@@ -654,3 +654,79 @@ async def test_teil_speichern_und_weiter_dann_zusammenfuegen(tmp_path) -> None:
     herz = [x.t_s for x in ganz.beats]
     assert herz == sorted(herz)  # die Herzuhr läuft durch; die Wanduhr der Naht prüft hrv-core
     assert [e["text"] for e in ganz.ereignisse][-1] == "Teil 2"
+
+
+# ---------------------------------------------------------------------------
+# EKG-Rohsignal mitschreiben (Ben, 30.10.2026)
+# ---------------------------------------------------------------------------
+
+
+async def test_ekg_wird_als_beiwerk_mitgeschrieben(tmp_path) -> None:
+    """Mit eingeschaltetem EKG schreibt der Messlauf die Rahmen als ``_ecg.json`` neben die
+    Messdatei, die Messdatei trägt ``ecg_aufzeichnung``; gerechnet wird damit nichts."""
+    from hrv_core.ekg import ekg_laden, ekg_pfad
+
+    quelle = SimulatedSource(tempo=60.0, seed=7, ekg=True)
+    lauf = Messlauf(quelle, backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 20:
+        await asyncio.sleep(0.01)
+    lauf.backup_jetzt()
+    journal = next(tmp_path.rglob(".backup_*_ecg.jsonl"))
+    assert journal.read_text(encoding="utf-8").startswith('["k", 130')
+    while lauf.aufnahme_dauer_s() < 40:
+        await asyncio.sleep(0.01)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert ergebnis is not None
+    doc = json.loads(ergebnis.pfad.read_text(encoding="utf-8"))
+    assert doc["ecg_aufzeichnung"] is True
+    beiwerk = ekg_pfad(ergebnis.pfad)
+    assert beiwerk.exists() and not journal.exists() and not list(tmp_path.rglob(".backup_*"))
+    e = ekg_laden(beiwerk)
+    assert (
+        e.rate_hz == 130 and e.n > 130 * 30 and len(e.frame_sample_counts) == len(doc["messungen"])
+    )
+    assert e.gaps == [] and abs(e.dauer_s - e.n / 130) < 0.1
+    assert e.t_wall_start_s is not None and -1.0 < e.t_wall_start_s < 2.0
+    # Die Messdatei selbst bleibt, wie sie ist (keine Proben darin), das Diagnoseprotokoll
+    # nennt das EKG nicht (der Simulator führt keins) — das Beiwerk ist eigenständig lesbar
+    assert "uv" not in doc
+
+
+async def test_ekg_journal_wird_beim_wiederherstellen_zum_beiwerk(tmp_path) -> None:
+    from hrv_core.ekg import ekg_laden, ekg_pfad
+
+    from trainingsapp.devices.messlauf import backup_wiederherstellen
+
+    quelle = SimulatedSource(tempo=60.0, seed=3, ekg=True)
+    lauf = Messlauf(quelle, backup_basis=tmp_path, subject_id="p1")
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    while lauf.aufnahme_dauer_s() < 15:
+        await asyncio.sleep(0.01)
+    lauf.backup_jetzt()
+    n_rahmen = lauf.ekg.n_rahmen
+    # „Absturz“: die App ist weg, nur Kopf, Journal und EKG-Journal liegen da
+    lauf.aufnahme = None
+    lauf.ekg = None
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    backup = next(tmp_path.rglob(".backup_*.json"))
+    ergebnis = backup_wiederherstellen(backup)
+    assert ergebnis is not None
+    e = ekg_laden(ekg_pfad(ergebnis.pfad))
+    assert e.n > 0 and len(e.frame_sample_counts) == n_rahmen
+    assert not list(tmp_path.rglob(".backup_*"))
+
+
+async def test_ohne_einstellung_kein_ekg(tmp_path) -> None:
+    from hrv_core.ekg import ekg_pfad
+
+    _, ergebnis, _ = await _messen(tmp_path, SIM_SYNTH, 10)
+    assert ergebnis is not None and not ekg_pfad(ergebnis.pfad).exists()
+    assert json.loads(ergebnis.pfad.read_text(encoding="utf-8"))["ecg_aufzeichnung"] is False

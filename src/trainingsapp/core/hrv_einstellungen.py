@@ -150,6 +150,9 @@ class HrvEinstellungen:
     breiten_eigen: list[int] = field(default_factory=list)
     #: Live die korrigierte Kurve (Artefakte überbrückt) statt der rohen
     korrigiert: bool = True
+    #: EKG-Rohsignal des Polar H10 mitschreiben (PMD, 130 Hz) — aus, bis die Person es
+    #: einschaltet; nur gespeichert (Beiwerk ``_ecg.json``), nicht gerechnet (Ben, 30.10.2026)
+    ekg_mitschreiben: bool = False
     #: Analysebereiche unter der Hauptkurve: Frequenz und Nichtlinear anbieten. Für
     #: Laien uninteressant — deshalb aus; wer es braucht, schaltet es ein.
     frequenz: bool = False
@@ -222,6 +225,7 @@ class HrvEinstellungen:
             "breiten_satz": self.breiten_satz,
             "breiten_eigen": list(self.breiten_eigen),
             "korrigiert": self.korrigiert,
+            "ekg_mitschreiben": self.ekg_mitschreiben,
             "frequenz": self.frequenz,
             "nichtlinear": self.nichtlinear,
             "nichtlinear_optisch": self.nichtlinear_optisch,
@@ -286,6 +290,7 @@ class HrvEinstellungen:
             else vorgabe.breiten_satz,
             breiten_eigen=eigen,
             korrigiert=schalter("korrigiert"),
+            ekg_mitschreiben=schalter("ekg_mitschreiben"),
             frequenz=schalter("frequenz"),
             nichtlinear=schalter("nichtlinear"),
             nichtlinear_optisch=schalter("nichtlinear_optisch"),

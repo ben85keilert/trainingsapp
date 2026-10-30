@@ -793,6 +793,19 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                 ),
                 uhr_protokoll,
             ),
+            karte(
+                titel("EKG-Rohsignal (Polar H10)"),
+                schalter(
+                    "ekg_mitschreiben",
+                    "EKG mitschreiben",
+                    "Der H10 sendet zusätzlich sein EKG (130 Hz). Die App speichert es neben der "
+                    "Messung als „…_ecg.json“ — nur gespeichert, nicht gerechnet; in der "
+                    "Auswertung lässt es sich in kurzen Ausschnitten ansehen, beim Weitergeben "
+                    "und im Forschungsexport ist es dabei. Kostet den Gurt spürbar Akku und "
+                    "etwa 3 MB je Stunde; der Akkustand wird mitgeschrieben. Gilt ab der "
+                    "nächsten Verbindung; nur mit diesem Gurt.",
+                ),
+            ),
             erweitert_kopf,
             erweitert_teil,
             ft.OutlinedButton(

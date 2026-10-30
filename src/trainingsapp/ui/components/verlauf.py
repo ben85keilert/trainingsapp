@@ -27,6 +27,7 @@ import flet as ft
 from hrv_core.trends import KENNZAHLEN, im_bereich, titel, treppe
 
 from trainingsapp.core.hrv_ansicht import BLOCK, GLEITEND, PNN_WAHL, Ansicht
+from trainingsapp.core.hrv_einstellungen import PUFFER_S
 from trainingsapp.core.zeitangabe import breite_lesen
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import titel as abschnitt_titel
@@ -61,6 +62,12 @@ class Zeitachse:
     #: Die Wahl des Knopfsatzes (`zeitfenster.BreitenSatz.control`) — erster Eintrag der
     #: Zeitachse, über der Breite (Ben, 30.10.2026)
     satz: ft.Control | None = None
+    #: Uhrzeit statt Dauer auf der Zeitachse — Stand und Umschalten (None: nicht anbieten)
+    uhrzeit: bool | None = None
+    uhrzeit_setzen: Callable[[], None] | None = None
+    #: Live: wie weit der Verlauf zurückreicht (s, `PUFFER_S`) — begrenzt die Zeitachse
+    puffer_s: int | None = None
+    puffer_setzen: Callable[[int], None] | None = None
 
 
 def _achse(kennzahl: str) -> str | None:
@@ -653,11 +660,47 @@ def darstellung_blatt(
         ),
     ]
     teile: list[ft.Control] = []
-    if breite is not None:
+    if breite is not None and zeitachse is not None:
         teile += [abschnitt_titel("Zeitachse")]
-        if zeitachse is not None and zeitachse.satz is not None:
+        if zeitachse.satz is not None:
             teile.append(zeitachse.satz)
         teile.append(breite.control)
+        if zeitachse.uhrzeit is not None and zeitachse.uhrzeit_setzen is not None:
+            setzen_uhr = zeitachse.uhrzeit_setzen
+
+            def uhrzeit_gewechselt(_e: ft.Event[ft.Switch]) -> None:
+                setzen_uhr()
+
+            teile.append(
+                ft.Switch(
+                    label="Uhrzeit statt Dauer seit Beginn",
+                    value=bool(zeitachse.uhrzeit),
+                    on_change=uhrzeit_gewechselt,
+                )
+            )
+        if zeitachse.puffer_s is not None and zeitachse.puffer_setzen is not None:
+            setzen_puffer = zeitachse.puffer_setzen
+
+            def puffer_gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
+                if e.control.value is not None:
+                    setzen_puffer(int(e.control.value))
+
+            teile.append(
+                ft.Dropdown(
+                    label="Live-Verlauf behalten",
+                    value=str(zeitachse.puffer_s),
+                    options=[
+                        ft.DropdownOption(
+                            key=str(x), text=f"{x // 60} min" if x < 3600 else f"{x // 3600} h"
+                        )
+                        for x in PUFFER_S
+                    ],
+                    on_select=puffer_gewaehlt,
+                    dense=True,
+                    width=220,
+                    tooltip="Gilt ab der nächsten Verbindung; so lang darf die Zeitachse sein",
+                )
+            )
     if y_zeilen:
         teile += [
             abschnitt_titel("Werteachsen"),
@@ -694,7 +737,7 @@ def darstellung_blatt(
         content=ft.Container(
             padding=ft.Padding.only(left=16, top=4, right=16, bottom=16),
             content=ft.Column(
-                spacing=16,
+                spacing=20,  # Luft zwischen den Gruppen (Ben, 30.10.2026)
                 tight=True,
                 scroll=ft.ScrollMode.AUTO,
                 controls=[kopf, *teile, *zeilen],

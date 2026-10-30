@@ -528,6 +528,8 @@ def _vollbild(
                     breite_waehlen,
                     max_s=lauf.live.max_s,
                     satz=breiten_satz().control,
+                    uhrzeit=einst.achse_uhrzeit,
+                    uhrzeit_setzen=achse_umschalten,
                 ),
             )
         )

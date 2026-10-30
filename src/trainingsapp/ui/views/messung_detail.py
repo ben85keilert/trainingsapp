@@ -151,7 +151,7 @@ from trainingsapp.ui.components.kacheln import (
     ohne_intervalle,
     zahl,
 )
-from trainingsapp.ui.components.karte import hinweis, info_eintrag, info_knopf, karte
+from trainingsapp.ui.components.karte import gruppe, hinweis, info_eintrag, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import (
     korrektur_blatt,
@@ -778,6 +778,14 @@ def _aufbauen(
         gespeichert_.achse_uhrzeit = einst.achse_uhrzeit
         state.hrv_einstellungen_setzen(gespeichert_)
         nur_kurven()
+
+    def uhrzeit_im_blatt() -> None:
+        """Dasselbe aus dem Blatt „Fenster & Darstellung“ — beide Knöpfe tönen mit."""
+        achse_umschalten()
+        for knopf in (uhr_knopf, uhr_knopf_voll):
+            markieren(knopf, einst.achse_uhrzeit)
+            with contextlib.suppress(Exception):
+                knopf.update()
 
     #: Zwei Knöpfe, weil die Karte und die Kopfzeile des Vollbilds je einen brauchen
     uhr_knopf = achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten)
@@ -2935,6 +2943,8 @@ def _aufbauen(
             lambda s: breite_setzen(s),
             max_s=achse_ende() - achse_anfang(),
             satz=breiten_satz().control,
+            uhrzeit=einst.achse_uhrzeit,
+            uhrzeit_setzen=uhrzeit_im_blatt,
         )
         if m.vollbild:
             links, rechts = a.achsen(m.angebot)
@@ -3568,17 +3578,17 @@ def _aufbauen(
                     darstellung_knopf(lambda: darstellung()),
                     analyse.menue,
                 ),
-                # Von oben nach unten wie live (Ben, 26.10.2026): Breite, Bereich und Chips
-                # der Verlaufskurven, Abschnitte (Klappfeld), Ebenen, Hauptkurve, Ablesen,
-                # Editor, Notizen (Klappfeld), Spektrum bzw. Poincaré und Verlaufskurven
-                ft.Row(spacing=4, controls=[breite_wahl, uhr_knopf]),
-                analyse.wahl,
+                # Sortierung nach der Skizze vom 30.10.2026: Zeitachse und Abschnitte
+                # über der Hauptkurve, Ablesen, Editor, Ebenen, Notizen (Klappfeld), dann
+                # Bereich und Chips direkt über den Verlaufskurven, die sie steuern
+                gruppe("Zeitachse", ft.Row(spacing=4, controls=[breite_wahl, uhr_knopf])),
                 abschnitt_block,
-                ebenen_box,
                 kurvengeste(rr_box),
                 ablese_box,
                 editor_box,
+                gruppe("Ebenen", ebenen_box),
                 notiz_platz[0],
+                gruppe("Verlaufskurven", analyse.wahl),
                 analyse.control,
             ),
             *(

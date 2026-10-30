@@ -119,8 +119,10 @@ def test_live_puls_als_hauptkurve(daten) -> None:
     # Die HRV-Sicht lässt sich nicht erzwingen
     umschalter.on_change(SimpleNamespace(control=SimpleNamespace(selected=["hrv"])))
     assert state.hrv_sicht() == "hf"
-    schalter = next(c for c in alle if isinstance(c, ft.Switch))
-    assert not schalter.visible  # ohne Intervalle nichts zu korrigieren
+    korrigiert = next(
+        c for c in alle if isinstance(c, ft.IconButton) and str(c.tooltip).startswith("korrigiert")
+    )
+    assert not korrigiert.visible  # ohne Intervalle nichts zu korrigieren (Symbol, 30.10.)
     kurve = next(c for c in alle if isinstance(c, fc.LineChart))
     assert max(len(s.points) for s in kurve.data_series) == 60
     # Was die Farben heißen: hinter „Info“ im Menü ⋮ (21.10.2026), nicht als grauer Text

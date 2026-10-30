@@ -339,8 +339,16 @@ def hauptansicht(page: ft.Page, state: AppState) -> ft.View:
         ):
             # Nachtragen (Ben, 18.10.2026) — nur im Tag, nicht über der Einheit
             ansicht.floating_action_button = nachtragen_knopf(page, state, None, "")
+        elif state.reiter == "messung" and state.live_fab is not None:
+            # Der kleine HF/HRV-Knopf der Live-Karte (Ben, 30.10.2026) — rechts oben
+            ansicht.floating_action_button = state.live_fab
         else:
             ansicht.floating_action_button = None
+        ansicht.floating_action_button_location = (
+            ft.FloatingActionButtonLocation.MINI_END_TOP
+            if state.reiter == "messung" and state.live_fab is not None
+            else ft.FloatingActionButtonLocation.END_FLOAT
+        )
 
     hauptansicht_aktualisieren()
     return ansicht

@@ -27,6 +27,9 @@ def scroll_merken(page: ft.Page, state: AppState, schluessel: str, flaeche: Any)
 
     def gescrollt(e: ft.OnScrollEvent) -> None:
         state.scroll_offsets[schluessel] = e.pixels
+        beobachter = state.scroll_beobachter.get(schluessel)
+        if beobachter is not None:
+            beobachter(float(e.pixels or 0.0))
 
     flaeche.on_scroll = gescrollt
     offset = state.scroll_offsets.get(schluessel)

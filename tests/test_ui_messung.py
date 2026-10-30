@@ -1355,9 +1355,64 @@ async def test_live_ablesen_und_knoepfe_wie_in_der_aufzeichnung(daten) -> None:
     seite = _seite()
     ansicht = messung(seite, state)
     zeile = _titelzeile(ansicht, "RR-TACHOGRAMM")
-    assert _knoepfe_rechts(zeile) == ["Ablesen", "Kurven im Vollbild", "Fenster & Darstellung", "⋮"]
+    # Skizze vom 30.10.2026: „korrigiert“ als Symbol in der Titelzeile, die Zeilen mit
+    # Überschrift, Bereich und Chips der Verlaufskurven unter den Notizen
+    assert _knoepfe_rechts(zeile) == [
+        "korrigiert",
+        "Ablesen",
+        "Kurven im Vollbild",
+        "Fenster & Darstellung",
+        "⋮",
+    ]
+    texte = _baum_texte(ansicht)
+    assert texte.index("ZEITACHSE") < texte.index("ABSCHNITTE") < texte.index("VERLAUFSKURVEN")
+    korrigiert = zeile.controls[1]
+    assert isinstance(korrigiert, ft.IconButton) and state.hrv_einstellungen().korrigiert
+    korrigiert.on_click()
+    assert not state.hrv_einstellungen().korrigiert
+    korrigiert.on_click()
+    assert state.hrv_einstellungen().korrigiert
     knoepfe = _breiten_wahl(ansicht)
     assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "10 Min"]
+    # Der kleine HF/HRV-Knopf rechts oben hängt am State und folgt der Scrollposition
+    fab = state.live_fab
+    assert fab is not None and not fab.visible and fab.content == "Herzfrequenz"
+    state.scroll_beobachter["messung_live"](300.0)
+    assert fab.visible
+    state.scroll_offsets["messung_live"] = 300.0
+    fab.on_click()
+    assert state.hrv_sicht() == "hf" and fab.content == "HRV"
+    assert state.live_scroll_lage["hrv"] == 300.0
+    umschalter = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.SegmentedButton) and [s.value for s in c.segments] == ["hf", "hrv"]
+    )
+    assert umschalter.selected == ["hf"]
+    umschalter.on_change(_ereignis("hrv"))
+    assert state.hrv_sicht() == "hrv" and state.scroll_offsets["messung_live"] == 300.0
+    while seite.aufgaben:
+        aufgaben = list(seite.aufgaben)
+        seite.aufgaben.clear()
+        await asyncio.gather(*aufgaben, return_exceptions=True)
+    # Blatt „Fenster & Darstellung“ live: Uhrzeit-Schalter und Live-Verlauf unter Zeitachse
+    zeile.controls[-2].on_click()
+    blatt = seite.aufrufe[-1]
+    uhr = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.Switch) and c.label == "Uhrzeit statt Dauer seit Beginn"
+    )
+    assert uhr.value is False
+    uhr.on_change(_ereignis(True))
+    assert state.hrv_einstellungen().achse_uhrzeit
+    puffer = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.Dropdown) and c.label == "Live-Verlauf behalten"
+    )
+    puffer.on_select(_ereignis("3600"))
+    assert state.hrv_einstellungen().puffer_s == 3600
 
     # Ablesen hält die Kurve an und zeigt die Werte am Strich — wie in der Aufzeichnung
     knopf = _knopf(ansicht, "Ablesen")

@@ -171,8 +171,13 @@ danach rechnet die App mit dem letzten Wert weiter und zeigt sein Datum. Ob Infe
 oder Pause die Ruhe-HF verschieben, siehst du im Verlauf an der 7-Tage-Baseline — die App
 fragt nicht nach.
 
+**Signal über einer Grenze:** Wenn du willst, spielt die App leise einen Klang (Vorgabe
+Klangschale), solange deine Herzfrequenz über einer Grenze liegt, die du selbst setzt —
+höchstens alle 3 bis 10 s. Einstellungen → Herzfrequenz oder das Blatt „Fenster &
+Darstellung“ der Herzfrequenz-Sicht; Lautstärke und Regler wie bei den Timer-Signalen.
+
 Die App zeigt, wo du bist und warst. Sie bewertet nichts und gibt keinen Rat; die Bereiche
-sind deine Werte wie ein Timer. Einstellungen → Herzfrequenz.
+und das Signal sind deine Werte wie ein Timer. Einstellungen → Herzfrequenz.
 """
 
 #: Thema → (Titel, Text, Tooltip des Knopfs)

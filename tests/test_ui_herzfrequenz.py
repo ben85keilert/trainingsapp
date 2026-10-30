@@ -372,3 +372,116 @@ def test_einstellungen_zeigen_herzfrequenz_kachel(daten) -> None:
     seite.platform = None
     texte = _texte(einstellungen(seite, state, SimpleNamespace()))
     assert "Herzfrequenz" in texte and any("Ruhe-HF und HFmax fehlen" in t for t in texte)
+
+
+class _Ton:
+    """Attrappe des Tondienstes: merkt, was gespielt wurde."""
+
+    def __init__(self) -> None:
+        self.gespielt: list[tuple[str, float, str]] = []
+
+    async def laden(self, name: str, wav: bytes) -> None:
+        pass
+
+    async def spielen(self, name: str, lautstaerke: float = 1.0, quelle: str = "medien") -> None:
+        self.gespielt.append((name, lautstaerke, quelle))
+
+
+async def _aufgaben(seite) -> None:
+    while seite.aufgaben:
+        aufgaben = list(seite.aufgaben)
+        seite.aufgaben.clear()
+        await asyncio.gather(*aufgaben, return_exceptions=True)
+
+
+async def test_hf_blatt_mittel_bereiche_und_signal(daten) -> None:
+    """Ben, 30.10.2026: In der HF-Sicht hat „Fenster & Darstellung“ HF-Einstellungen (Mittel,
+    Bereiche im Bild oder alle, HF-Achse, Signal an der Grenze) — keine Verlaufskurven. Das
+    Signal spielt leise höchstens alle paar Sekunden, solange die HF über der Grenze liegt."""
+    state, tmp_path = daten
+    _profil_fuellen(state)
+    ton = _Ton()
+    state.ton, state.toene_geladen = ton, True
+    e = state.hf_einstellungen()
+    e.alarm_an, e.alarm_bpm = True, 40  # der Simulator liegt sicher darüber
+    state.hf_einstellungen_setzen(e)
+    lauf, task = await _lauf(state, tmp_path)
+    try:
+        seite = _seite()
+        ansicht = messung(seite, state)
+        texte = _texte(ansicht)
+        assert any(t.startswith("Signal ab 40 bpm") and "Klangschale" in t for t in texte)
+        await _aufgaben(seite)
+        assert [g[0] for g in ton.gespielt] == ["schale"]
+        # Innerhalb des Takts kein zweiter Klang
+        lauf.beobachter(False)
+        await _aufgaben(seite)
+        assert len(ton.gespielt) == 1
+        # Das Blatt der HF-Sicht
+        knopf = next(
+            c
+            for c in _alle(ansicht)
+            if isinstance(c, ft.IconButton) and str(c.tooltip).startswith("Fenster & Darstellung")
+        )
+        knopf.on_click()
+        blatt = seite.aufrufe[-1]
+        assert isinstance(blatt, ft.BottomSheet)
+        btexte = _texte(blatt)
+        assert "ZEITACHSE" in btexte and "HERZFREQUENZ" in btexte and "SIGNAL" in btexte
+        assert "WERTEACHSEN" in btexte and "KURVEN" not in btexte
+        assert not any(t.startswith("RMSSD") for t in btexte)
+        mittel = next(
+            c
+            for c in _alle(blatt)
+            if isinstance(c, ft.Dropdown) and c.label == "Kurve als Mittel über"
+        )
+        mittel.on_select(SimpleNamespace(control=SimpleNamespace(value="10")))
+        assert state.hrv_einstellungen().hf_mittel_s == 10
+        bereiche = _segment(blatt, ["bild", "alle"])
+        bereiche.on_change(SimpleNamespace(control=SimpleNamespace(selected=["alle"])))
+        assert state.hrv_einstellungen().hf_bereiche_alle
+        chart = next(
+            c
+            for c in _alle(messung(seite, state))
+            if isinstance(c, fc.LineChart) and c.left_axis.title.value == "HF bpm"
+        )
+        assert chart.min_y <= 55 and chart.max_y >= 185  # Ruhe-HF bis HFmax im Bild
+        grenze = next(
+            c for c in _alle(blatt) if isinstance(c, ft.TextField) and c.label == "Grenze"
+        )
+        grenze.value = "150"
+        grenze.on_submit(None)
+        assert state.hf_einstellungen().alarm_bpm == 150
+        schalter = next(
+            c
+            for c in _alle(blatt)
+            if isinstance(c, ft.Switch) and c.label == "Signal über einer Grenze"
+        )
+        schalter.on_change(SimpleNamespace(control=SimpleNamespace(value=False)))
+        assert state.hf_einstellungen().alarm_grenze() is None
+        grenze.value = "500"  # außerhalb 40–230: Hinweis, der alte Wert bleibt
+        grenze.on_submit(None)
+        assert grenze.error and state.hf_einstellungen().alarm_bpm == 150
+    finally:
+        await _ende(lauf, task)
+
+
+def test_einstellungen_herzfrequenz_signal_karte(daten) -> None:
+    state, _ = daten
+    ton = _Ton()
+    state.ton, state.toene_geladen = ton, True
+    seite = _seite()
+    view = einstellungen_herzfrequenz(seite, state)
+    assert "SIGNAL ÜBER EINER GRENZE" in _texte(view)
+    klang = next(c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "Klang")
+    assert [o.key for o in klang.options][:2] == ["wechsel", "glocke1"]
+    assert "schale" in [o.key for o in klang.options]
+    klang.on_select(SimpleNamespace(control=SimpleNamespace(value="holz")))
+    assert state.hf_einstellungen().alarm_klang == "holz"
+    asyncio.run(_aufgaben(seite))
+    assert [g[0] for g in ton.gespielt] == ["holz"]  # vorgespielt
+    takt = next(
+        c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "höchstens alle"
+    )
+    takt.on_select(SimpleNamespace(control=SimpleNamespace(value="10")))
+    assert state.hf_einstellungen().alarm_takt_s == 10

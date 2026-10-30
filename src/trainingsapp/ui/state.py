@@ -266,9 +266,10 @@ class AppState:
     scroll_offsets: dict[str, float] = field(default_factory=dict)
     #: Wer beim Scrollen einer gemerkten Fläche Bescheid will (Schlüssel → Rückruf mit px)
     scroll_beobachter: dict[str, Any] = field(default_factory=dict)
-    #: Live (Ben, 30.10.2026): der kleine HF/HRV-Knopf rechts oben, die scrollende Fläche
-    #: des Reiters und die gemerkte Scrollposition je Sicht
-    live_fab: Any = None
+    #: Live (Ben, 30.10.2026): die andere Sicht (HF ↔ HRV) ansteuern — der Reiter „Live“
+    #: ruft es, wenn er schon gewählt ist; setzt `views.messung._live_teil`. Dazu die
+    #: scrollende Fläche des Reiters und die gemerkte Scrollposition je Sicht
+    live_sicht_wechsel: Any = None
     live_flaeche: Any = None
     live_scroll_lage: dict[str, float] = field(default_factory=dict)
     #: Zählt jeden Routenwechsel — verzögerte Rechnungen einer verlassenen Ansicht

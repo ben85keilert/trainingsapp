@@ -13,7 +13,7 @@ import asyncio
 import contextlib
 from typing import TYPE_CHECKING, Any
 
-from trainingsapp.core.klang import GLOCKEN, TOENE, glocke, wav
+from trainingsapp.core.klang import GLOCKEN, LAUTSTAERKE, TOENE, glocke, wav
 from trainingsapp.core.timer import (
     COUNTDOWN,
     ENDE,
@@ -47,7 +47,9 @@ async def toene_laden(state: AppState) -> None:
             await state.ton.laden(name, wav(folge))
         state.toene_geladen = True
         for name, (teiltoene, grund, dauer) in GLOCKEN.items():
-            daten = await asyncio.to_thread(glocke, teiltoene, grund, dauer)
+            daten = await asyncio.to_thread(
+                glocke, teiltoene, grund, dauer, LAUTSTAERKE.get(name, 0.7)
+            )
             await state.ton.laden(name, daten)
 
 

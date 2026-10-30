@@ -12,14 +12,22 @@ hier wird nur gebaut.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable, Sequence
 from typing import Any
 
 import flet as ft
 from hrv_core import herzfrequenz as hz
 
+from trainingsapp.core.hf_einstellungen import (
+    ALARM_MAX_BPM,
+    ALARM_MIN_BPM,
+    ALARM_TAKT_S,
+    HfEinstellungen,
+)
 from trainingsapp.core.hf_profil import HfProfil, bereich_von
 from trainingsapp.core.hf_training import BEZUEGE, BEZUG_ABSCHNITT, BEZUG_NAMEN
+from trainingsapp.core.klang import KLAENGE
 from trainingsapp.core.laufend import minuten
 from trainingsapp.ui.components.kacheln import KachelWert, zahl
 from trainingsapp.ui.components.kurve import Band
@@ -294,6 +302,117 @@ def sicht_wahl(
     )
 
 
+def alarm_text(e: HfEinstellungen) -> str:
+    """„Signal ab 150 bpm · Klangschale“ — leer, wenn kein Signal gilt."""
+    grenze = e.alarm_grenze()
+    if grenze is None:
+        return ""
+    return f"Signal ab {grenze:.0f} bpm · {KLAENGE.get(e.alarm_klang, e.alarm_klang)}"
+
+
+def alarm_zeilen(
+    state: Any,
+    *,
+    vorspielen: Callable[[str], None] | None = None,
+    geaendert: Callable[[], None] | None = None,
+) -> list[ft.Control]:
+    """Signal über einer selbst gesetzten Grenze (Ben, 30.10.2026: „piepen alle 3–5 Sekunden,
+    wenn man über einer bestimmten HF ist … nicht aufdringlich“): Schalter, Grenze in bpm,
+    Takt und Klang — je Profil (`HfEinstellungen`). Steht im Blatt der Live-Sicht und unter
+    Einstellungen → Herzfrequenz; ``vorspielen`` spielt den gewählten Klang zur Probe.
+    """
+    e = state.hf_einstellungen()
+    feld = ft.TextField(
+        label="Grenze",
+        suffix=ft.Text("bpm"),
+        value=f"{e.alarm_bpm:g}" if e.alarm_bpm else "",
+        dense=True,
+        width=130,
+        border_radius=8,
+        keyboard_type=ft.KeyboardType.NUMBER,
+        text_align=ft.TextAlign.RIGHT,
+    )
+
+    def speichern() -> None:
+        state.hf_einstellungen_setzen(e)
+        if geaendert is not None:
+            geaendert()
+
+    def grenze_uebernehmen(_ev: object = None) -> None:
+        roh = (feld.value or "").strip().replace(",", ".")
+        if not roh:
+            e.alarm_bpm = None
+            feld.error = "Grenze eintragen" if e.alarm_an else None
+        else:
+            try:
+                wert = float(roh)
+            except ValueError:
+                wert = -1.0
+            if ALARM_MIN_BPM <= wert <= ALARM_MAX_BPM:
+                e.alarm_bpm, feld.error = wert, None
+            else:
+                feld.error = f"{ALARM_MIN_BPM:.0f} bis {ALARM_MAX_BPM:.0f} bpm"
+        speichern()
+        with contextlib.suppress(Exception):
+            feld.update()
+
+    def umgeschaltet(ev: ft.Event[ft.Switch]) -> None:
+        e.alarm_an = bool(ev.control.value)
+        grenze_uebernehmen()
+
+    def takt_gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
+        if ev.control.value is not None:
+            e.alarm_takt_s = int(ev.control.value)
+            speichern()
+
+    def klang_gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
+        if ev.control.value:
+            e.alarm_klang = str(ev.control.value)
+            speichern()
+            if vorspielen is not None:
+                vorspielen(e.alarm_klang)
+
+    feld.on_submit = grenze_uebernehmen
+    feld.on_blur = grenze_uebernehmen
+    return [
+        ft.Switch(label="Signal über einer Grenze", value=e.alarm_an, on_change=umgeschaltet),
+        ft.Row(
+            spacing=8,
+            wrap=True,
+            run_spacing=6,
+            controls=[
+                feld,
+                ft.Dropdown(
+                    label="höchstens alle",
+                    value=str(e.alarm_takt_s),
+                    options=[ft.DropdownOption(key=str(x), text=f"{x} s") for x in ALARM_TAKT_S],
+                    on_select=takt_gewaehlt,
+                    dense=True,
+                    width=130,
+                    border_radius=8,
+                ),
+                ft.Dropdown(
+                    label="Klang",
+                    value=e.alarm_klang,
+                    options=[
+                        ft.DropdownOption(key=k, text=t) for k, t in KLAENGE.items() if k != "ende"
+                    ],
+                    on_select=klang_gewaehlt,
+                    dense=True,
+                    width=190,
+                    border_radius=8,
+                ),
+            ],
+        ),
+        ft.Text(
+            "Ein leiser Klang, solange die Herzfrequenz über deiner Grenze liegt — wie ein "
+            "Timer, keine Bewertung. Töne gibt es nur in der installierten App.",
+            size=11,
+            opacity=0.65,
+        ),
+    ]
+
+
 def hf_kacheln(
     hf: float | None,
     profil: HfProfil,
@@ -481,6 +600,8 @@ __all__ = [
     "HALTUNG_NAMEN",
     "HF_INFO",
     "KONTEXT_NAMEN",
+    "alarm_text",
+    "alarm_zeilen",
     "bandfarbe",
     "bezug_wahl",
     "erholung_block",

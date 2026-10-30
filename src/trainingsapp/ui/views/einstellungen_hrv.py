@@ -30,8 +30,9 @@ import flet as ft
 from hrv_core.regeln import Korrekturregeln
 
 from trainingsapp.core.hrv_ansicht import PNN_WAHL, Ansicht
-from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
 from trainingsapp.core.hrv_einstellungen import (
+    ACHSEN_NAMEN,
+    ACHSEN_VORGABE,
     LIVE_SPEKTRUM_S,
     NACHRECHNEN_MS,
     NOTIZEN_ZEILEN,
@@ -39,6 +40,7 @@ from trainingsapp.core.hrv_einstellungen import (
     UEBERSICHT,
     HrvEinstellungen,
 )
+from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
 from trainingsapp.core.uhr_seiten import SEITE_HF as UHR_SEITE_HF
 from trainingsapp.core.uhr_seiten import SEITEN as UHR_SEITEN
 from trainingsapp.core.uhr_seiten import SEITEN_NAMEN as UHR_SEITEN_NAMEN
@@ -278,6 +280,84 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
         dense=True,
         width=260,
     )
+
+    # Standardwerte der festen Werteachsen (Ben, 30.10.2026): je Achse von–bis; das Blatt
+    # „Fenster & Darstellung“ schaltet sie ein und stellt sie mit ↺ wieder her
+    achsen_felder: dict[str, tuple[ft.TextField, ft.TextField]] = {}
+
+    def achsen_zahl(text: str | None) -> float | None:
+        try:
+            return float((text or "").strip().replace(",", "."))
+        except ValueError:
+            return None
+
+    def achse_uebernehmen(k: str) -> Callable[[Any], None]:
+        def handler(_ev: Any = None) -> None:
+            von, bis = achsen_felder[k]
+            lo, hi = achsen_zahl(von.value), achsen_zahl(bis.value)
+            if lo is None or hi is None or lo >= hi:
+                von.error = "zwei Zahlen, von < bis"
+            else:
+                von.error = None
+                if e.achsen_standard.get(k) != (lo, hi):
+                    e.achsen_standard[k] = (lo, hi)
+                    setzen(achsen_standard=dict(e.achsen_standard))
+            with contextlib.suppress(Exception):
+                von.update()
+
+        return handler
+
+    def achsen_zahl_text(wert: float) -> str:
+        return f"{wert:g}".replace(".", ",")
+
+    def achsen_feld(k: str, label: str, wert: float) -> ft.TextField:
+        return ft.TextField(
+            label=label,
+            value=achsen_zahl_text(wert),
+            dense=True,
+            width=96,
+            border_radius=8,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            text_align=ft.TextAlign.RIGHT,
+            on_submit=achse_uebernehmen(k),
+            on_blur=achse_uebernehmen(k),
+        )
+
+    def achsen_zeile(k: str) -> ft.Control:
+        name, einheit = ACHSEN_NAMEN[k]
+        lo, hi = e.achse_standard(k) or ACHSEN_VORGABE[k]
+        von, bis = achsen_feld(k, "von", lo), achsen_feld(k, "bis", hi)
+        achsen_felder[k] = (von, bis)
+        return ft.Row(
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Column(
+                    spacing=0,
+                    tight=True,
+                    expand=True,
+                    controls=[
+                        ft.Text(name, size=13),
+                        ft.Text(einheit, size=11, opacity=0.65, visible=bool(einheit)),
+                    ],
+                ),
+                von,
+                ft.Text("–"),
+                bis,
+            ],
+        )
+
+    def achsen_vorgabe() -> None:
+        e.achsen_standard = dict(ACHSEN_VORGABE)
+        setzen(achsen_standard=dict(e.achsen_standard))
+        for k, (von, bis) in achsen_felder.items():
+            lo, hi = ACHSEN_VORGABE[k]
+            von.value, bis.value, von.error = achsen_zahl_text(lo), achsen_zahl_text(hi), None
+            for f in (von, bis):
+                with contextlib.suppress(Exception):
+                    f.update()
+
+    achsen_zeilen = [achsen_zeile(k) for k in ACHSEN_VORGABE]
 
     def notizen_zeilen_gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
         """Notizliste (Ben, 27.10.2026): ab so vielen Notizen rollt sie, die Kurve bleibt."""
@@ -637,6 +717,20 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                     [ft.Text("Gespeicherte Ansichten", size=12, opacity=0.8), *ansichten_liste]
                     if ansichten_liste
                     else []
+                ),
+            ),
+            karte(
+                titel("Werteachsen"),
+                hinweis(
+                    "Standardwerte, die den ganzen Bereich abdecken. Im Blatt „Fenster & "
+                    "Darstellung“ schaltet man eine Achse fest, stellt sie nach oder setzt "
+                    "mit ↺ diese Werte wieder ein. Welche Achse eine Kurve hat, steht dort."
+                ),
+                *achsen_zeilen,
+                ft.TextButton(
+                    "Auf Vorgabe",
+                    icon=ft.Icons.RESTART_ALT,
+                    on_click=lambda _=None: achsen_vorgabe(),
                 ),
             ),
             karte(

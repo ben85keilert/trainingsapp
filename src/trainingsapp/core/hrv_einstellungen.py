@@ -44,8 +44,9 @@ KACHELN: Final[str] = "kacheln"
 #: Breiten der Knöpfe über der Live-Kurve (s)
 LIVE_FENSTER: Final[tuple[int, ...]] = (60, 120, 300, 600)
 #: Wie lange der Live-Verlauf zurückreicht (s) — der Puffer der Live-Kurven (Ben,
-#: 26.10.2026: einstellbar, mindestens 30 min). Gilt ab der nächsten Verbindung.
-PUFFER_S: Final[tuple[int, ...]] = (1800, 3600, 7200, 14400)
+#: 26.10.2026: einstellbar, mindestens 30 min; 30.10.2026: bis 12 h, damit der lange
+#: Knopfsatz 1·3·6 h auch live greift). Gilt ab der nächsten Verbindung.
+PUFFER_S: Final[tuple[int, ...]] = (1800, 3600, 7200, 14400, 21600, 43200)
 #: Notizen zur Messung: so viele Zeilen zeigt die Liste, mehr rollt sie (Ben, 27.10.2026:
 #: „bei vielen Notizen ist es schwierig, die Notizen durchzuklicken und an der Kurve zu
 #: beobachten“); 0 = alle, wie bisher
@@ -54,14 +55,51 @@ NOTIZEN_ZEILEN: Final[tuple[int, ...]] = (5, 7, 10, 15, 0)
 #: so viel, wie der Puffer hält (`HrvEinstellungen.puffer_s`)
 FENSTER_MIN_S: Final[int] = 10
 FENSTER_MAX_S: Final[int] = max(PUFFER_S)
-#: Knöpfe der Zeitachse (s) — zwei Sätze zur Wahl und ein eigener (Ben, 30.10.2026:
-#: „Kurz 1-2-10, Lang 2-5-15 … darunter die Möglichkeit, eigene Intervalle zu setzen“)
+#: Knöpfe der Zeitachse (s) — drei Sätze zur Wahl und ein eigener (Ben, 30.10.2026:
+#: „kurz 1-2-10, mittel 2-5-15, lang 1-3-6 Std, eigene“)
 BREITEN_KURZ: Final[str] = "kurz"
+BREITEN_MITTEL: Final[str] = "mittel"
 BREITEN_LANG: Final[str] = "lang"
 BREITEN_EIGEN: Final[str] = "eigen"
 BREITEN_SAETZE: Final[dict[str, tuple[int, ...]]] = {
     BREITEN_KURZ: (60, 120, 600),
-    BREITEN_LANG: (120, 300, 900),
+    BREITEN_MITTEL: (120, 300, 900),
+    BREITEN_LANG: (3600, 10800, 21600),
+}
+BREITEN_NAMEN: Final[dict[str, str]] = {
+    BREITEN_KURZ: "Kurz",
+    BREITEN_MITTEL: "Mittel",
+    BREITEN_LANG: "Lang",
+    BREITEN_EIGEN: "Eigene",
+}
+#: Die Herzfrequenz-Kurve: Mittel über so viele Sekunden (Ben, 30.10.2026: „In HF braucht
+#: es Fenstereinstellungen für HF“)
+HF_MITTEL_S: Final[tuple[int, ...]] = (1, 5, 10, 30, 60)
+#: Standardwerte der festen Werteachsen (Ben, 30.10.2026: „vorgegebene Standardwerte, die den
+#: ganzen Bereich abdecken von HF, RR usw., nachstellbar, aktivierbar und auf Standard wieder
+#: herstellbar“). Schlüssel sind die Werteachsen der Kennzahlen (`hrv_core.trends`,
+#: ``achse_schluessel``); die Bedeutung kennt die Oberfläche (`ACHSEN_NAMEN`).
+ACHSEN_VORGABE: Final[dict[str, tuple[float, float]]] = {
+    "bpm": (40.0, 200.0),
+    "rr": (300.0, 1500.0),
+    "var": (0.0, 200.0),
+    "%": (0.0, 100.0),
+    "permin": (0.0, 40.0),
+    "rsa": (0.0, 40.0),
+    "ms2": (0.0, 5000.0),
+    "ratio": (0.0, 10.0),
+    "alpha": (0.0, 2.0),
+}
+ACHSEN_NAMEN: Final[dict[str, tuple[str, str]]] = {
+    "bpm": ("Herzfrequenz", "bpm"),
+    "rr": ("RR bzw. PPI", "ms"),
+    "var": ("Variabilität (RMSSD, SDNN, SD1, SD2)", "ms"),
+    "%": ("pNNx", "%"),
+    "permin": ("Atemfrequenz, Gipfel", "/min"),
+    "rsa": ("Atemschwankung", "bpm"),
+    "ms2": ("Spektrale Leistung (VLF, LF, HF)", "ms²"),
+    "ratio": ("LF/HF", ""),
+    "alpha": ("DFA α1", ""),
 }
 #: Eigene Breiten: so viele höchstens, zwischen `FENSTER_MIN_S` und einem Tag (eine Nacht
 #: braucht 6-h-Fenster; live begrenzt der Puffer ohnehin)
@@ -150,6 +188,17 @@ class HrvEinstellungen:
     breiten_eigen: list[int] = field(default_factory=list)
     #: Live die korrigierte Kurve (Artefakte überbrückt) statt der rohen
     korrigiert: bool = True
+    #: Herzfrequenz-Sicht: alle Bereiche in der Kurve zeigen (die Werteachse reicht dann von
+    #: der untersten bis zur obersten Grenze) statt nur die, die der Ausschnitt trifft
+    hf_bereiche_alle: bool = False
+    #: Herzfrequenz-Sicht: die Kurve ist ein Mittel über so viele Sekunden (`HF_MITTEL_S`)
+    hf_mittel_s: int = 5
+    #: Standardwerte der festen Werteachsen je Achsenschlüssel — die Vorgabe `ACHSEN_VORGABE`,
+    #: unter Einstellungen → HRV-Messung → Kurven nachstellbar; im Blatt „Fenster &
+    #: Darstellung“ schaltet man sie je Achse ein und stellt sie wieder her
+    achsen_standard: dict[str, tuple[float, float]] = field(
+        default_factory=lambda: dict(ACHSEN_VORGABE)
+    )
     #: EKG-Rohsignal des Polar H10 mitschreiben (PMD, 130 Hz) — aus, bis die Person es
     #: einschaltet; nur gespeichert (Beiwerk ``_ecg.json``), nicht gerechnet (Ben, 30.10.2026)
     ekg_mitschreiben: bool = False
@@ -192,8 +241,10 @@ class HrvEinstellungen:
     def breiten(self) -> tuple[int, ...]:
         """Die Breitenknöpfe (s) — eigene ohne Einträge fallen auf „kurz“ zurück.
 
-        >>> HrvEinstellungen().breiten(), HrvEinstellungen(breiten_satz="lang").breiten()
+        >>> HrvEinstellungen().breiten(), HrvEinstellungen(breiten_satz="mittel").breiten()
         ((60, 120, 600), (120, 300, 900))
+        >>> HrvEinstellungen(breiten_satz="lang").breiten()
+        (3600, 10800, 21600)
         >>> HrvEinstellungen(breiten_satz="eigen", breiten_eigen=[1800, 7200]).breiten()
         (1800, 7200)
         >>> HrvEinstellungen(breiten_satz="eigen").breiten()
@@ -202,6 +253,16 @@ class HrvEinstellungen:
         if self.breiten_satz == BREITEN_EIGEN and self.breiten_eigen:
             return tuple(self.breiten_eigen)
         return BREITEN_SAETZE.get(self.breiten_satz, BREITEN_SAETZE[BREITEN_KURZ])
+
+    def achse_standard(self, achse: str) -> tuple[float, float] | None:
+        """Der Standardbereich einer Werteachse — die eigene Einstellung, sonst die Vorgabe.
+
+        >>> HrvEinstellungen().achse_standard("rr"), HrvEinstellungen().achse_standard("x")
+        ((300.0, 1500.0), None)
+        >>> HrvEinstellungen(achsen_standard={"rr": (500.0, 1200.0)}).achse_standard("rr")
+        (500.0, 1200.0)
+        """
+        return self.achsen_standard.get(achse) or ACHSEN_VORGABE.get(achse)
 
     def bereiche(self, *, optisch: bool) -> list[str]:
         """Welche Analysebereiche die Ansicht anbietet (Zeit immer)."""
@@ -225,6 +286,9 @@ class HrvEinstellungen:
             "breiten_satz": self.breiten_satz,
             "breiten_eigen": list(self.breiten_eigen),
             "korrigiert": self.korrigiert,
+            "hf_bereiche_alle": self.hf_bereiche_alle,
+            "hf_mittel_s": self.hf_mittel_s,
+            "achsen_standard": {k: list(v) for k, v in self.achsen_standard.items()},
             "ekg_mitschreiben": self.ekg_mitschreiben,
             "frequenz": self.frequenz,
             "nichtlinear": self.nichtlinear,
@@ -290,6 +354,9 @@ class HrvEinstellungen:
             else vorgabe.breiten_satz,
             breiten_eigen=eigen,
             korrigiert=schalter("korrigiert"),
+            hf_bereiche_alle=schalter("hf_bereiche_alle"),
+            hf_mittel_s=auswahl("hf_mittel_s", HF_MITTEL_S),
+            achsen_standard=achsen_pruefen(d.get("achsen_standard")),
             ekg_mitschreiben=schalter("ekg_mitschreiben"),
             frequenz=schalter("frequenz"),
             nichtlinear=schalter("nichtlinear"),
@@ -312,6 +379,29 @@ class HrvEinstellungen:
             else vorgabe.standard_sicht,
             sicht_merken=schalter("sicht_merken"),
         )
+
+
+def achsen_pruefen(roh: Any) -> dict[str, tuple[float, float]]:
+    """Gespeicherte Standardwerte der Werteachsen — Unbrauchbares fällt auf die Vorgabe zurück.
+
+    >>> achsen_pruefen({"rr": [500, 1200], "var": [9, 3], "x": [0, 1]})["rr"]
+    (500.0, 1200.0)
+    >>> achsen_pruefen({"var": [9, 3]})["var"], "x" in achsen_pruefen({"x": [0, 1]})
+    ((0.0, 200.0), False)
+    >>> achsen_pruefen("kaputt") == ACHSEN_VORGABE
+    True
+    """
+    out = dict(ACHSEN_VORGABE)
+    if not isinstance(roh, dict):
+        return out
+    for k, v in roh.items():
+        if k not in ACHSEN_VORGABE or not isinstance(v, list | tuple) or len(v) != 2:
+            continue
+        lo, hi = v
+        zahlen = all(isinstance(x, int | float) and not isinstance(x, bool) for x in (lo, hi))
+        if zahlen and lo < hi:
+            out[k] = (float(lo), float(hi))
+    return out
 
 
 def breiten_pruefen(werte: Any) -> list[int]:
@@ -347,6 +437,8 @@ def einstellungen_schreiben(e: HrvEinstellungen) -> str:
 
 
 __all__ = [
+    "ACHSEN_NAMEN",
+    "ACHSEN_VORGABE",
     "ANALYSE_LAENGEN",
     "ANALYSE_SCHRITTE",
     "BEREICH_FREQUENZ",
@@ -356,10 +448,13 @@ __all__ = [
     "BREITEN_EIGEN_MAX",
     "BREITEN_KURZ",
     "BREITEN_LANG",
+    "BREITEN_MITTEL",
+    "BREITEN_NAMEN",
     "BREITEN_SAETZE",
     "BREITE_EIGEN_MAX_S",
     "FENSTER_MAX_S",
     "FENSTER_MIN_S",
+    "HF_MITTEL_S",
     "KACHELN",
     "LIVE_FENSTER",
     "LIVE_SPEKTRUM_S",
@@ -372,6 +467,7 @@ __all__ = [
     "STANDARD_KACHELN",
     "UEBERSICHT",
     "HrvEinstellungen",
+    "achsen_pruefen",
     "breiten_pruefen",
     "einstellungen_lesen",
     "einstellungen_schreiben",

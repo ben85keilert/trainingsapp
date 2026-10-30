@@ -424,10 +424,17 @@ class HfAuswertungSicht:
         reihe = a.reihe
         if reihe is None or reihe.n == 0:
             return karte(titel("Herzfrequenz"), hinweis("Keine Herzfrequenz in der Datei."))
-        glatt = hz.rollmittel(reihe.hf, 5.0, min_anteil=0.5)
+        einst = self.k.state.hrv_einstellungen()
+        glatt = hz.rollmittel(reihe.hf, float(einst.hf_mittel_s), min_anteil=0.5)
         punkte = ausduennen(
             [(float(t), float(w)) for t, w in zip(reihe.t, glatt, strict=True) if w == w]
         )
+        y_von = y_bis = None
+        if einst.hf_bereiche_alle and bereiche and punkte:
+            # Wie live: die Achse reicht über alle Bereiche (Blatt „Fenster & Darstellung“)
+            werte = [w for _, w in punkte]
+            y_von = min(bereiche[0].von_bpm, *werte)
+            y_bis = max(bereiche[-1].bis_bpm, *werte)
         x0, x1 = float(reihe.t[0]), float(reihe.t[-1] + reihe.raster_s)
         reihen = [Reihe(punkte, farbe=ft.Colors.PRIMARY)]
         for i, ab in enumerate(a.abschnitte):
@@ -450,6 +457,8 @@ class HfAuswertungSicht:
                 hoehe=200,
                 x_von=x0,
                 x_bis=x1,
+                y_von=y_von,
+                y_bis=y_bis,
                 y_spanne_min=HF_SPANNE_MIN_BPM,
                 baender=hf_baender(bereiche),  # Belastungszonen im Koordinatensystem
             ),

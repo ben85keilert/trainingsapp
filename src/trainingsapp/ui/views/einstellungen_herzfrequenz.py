@@ -47,10 +47,11 @@ from trainingsapp.core.hf_profil import (
 )
 from trainingsapp.core.hrv_einstellungen import SICHT_HF, SICHT_HRV
 from trainingsapp.data.hf_profil import RechenAusnahmeRepo
-from trainingsapp.ui.components.hf_sicht import stufenfarbe
+from trainingsapp.ui.components.hf_sicht import alarm_zeilen, stufenfarbe
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.timer_takt import ton_spielen
 
 ROUTE = "/einstellungen/herzfrequenz"
 
@@ -632,6 +633,26 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
             ),
         )
 
+    # -- Signal über einer Grenze (Ben, 30.10.2026; P90) -------------------------------
+
+    def alarm_karte() -> ft.Control:
+        def vorspielen(klang: str) -> None:
+            async def spielen() -> None:
+                if not await ton_spielen(state, klang):
+                    melden("Töne gibt es nur in der installierten App.")
+
+            with contextlib.suppress(Exception):
+                page.run_task(spielen)
+
+        return karte(
+            titel("Signal über einer Grenze"),
+            *alarm_zeilen(state, vorspielen=vorspielen),
+            hinweis(
+                "Gilt live in beiden Sichten, mit Lautstärke und Regler der Timer-Signale. "
+                "Auch im Blatt „Fenster & Darstellung“ der Herzfrequenz-Sicht einstellbar."
+            ),
+        )
+
     # -- Ausnahmen -------------------------------------------------------------------
 
     def ausnahmen_karte() -> ft.Control:
@@ -699,6 +720,7 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
             groesse_karte(hz.GROESSE_VT1),
             groesse_karte(hz.GROESSE_VT2),
             bereiche_karte(),
+            alarm_karte(),
             sicht_karte(),
             ausnahmen_karte(),
         ]

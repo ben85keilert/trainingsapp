@@ -48,6 +48,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -70,7 +71,12 @@ from trainingsapp.core.hf_training import (
     hf_je_schlag,
 )
 from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM, ROH, ROH_MAX_MS, ROH_MIN_MS
-from trainingsapp.core.hrv_einstellungen import SICHT_HF, SICHT_HRV, HrvEinstellungen
+from trainingsapp.core.hrv_einstellungen import (
+    HF_MITTEL_S,
+    SICHT_HF,
+    SICHT_HRV,
+    HrvEinstellungen,
+)
 from trainingsapp.core.hrv_export import adresse_maskieren, export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.models import HrvRecording
@@ -111,6 +117,8 @@ from trainingsapp.ui.components.hf_sicht import (
 )
 from trainingsapp.ui.components.hf_sicht import (
     HF_INFO,
+    alarm_text,
+    alarm_zeilen,
     bezug_wahl,
     erholung_block,
     hf_baender,
@@ -145,7 +153,10 @@ from trainingsapp.ui.components.titel import (
     titel_vorschlaege,
 )
 from trainingsapp.ui.components.verlauf import (
+    ECKIG,
+    ECKIG_RADIUS,
     FARBEN,
+    Werteachse,
     Zeitachse,
     darstellung_blatt,
     darstellung_knopf,
@@ -172,6 +183,7 @@ from trainingsapp.ui.components.zeitfenster import (
     wischbar,
 )
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.timer_takt import ton_spielen
 from trainingsapp.ui.training import bewegung_packen, bewegung_vorbereiten
 
 
@@ -807,7 +819,18 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
 # ---------------------------------------------------------------------------
 
 
-def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
+@dataclass
+class _LiveReiter:
+    """Der Reiter „Live“ oben: Text und Symbol, die der Sichtwechsel umschreibt (Ben,
+    30.10.2026: „wenn man daran vorbei scrollt, rutscht der Button in das Live“)."""
+
+    text: ft.Text
+    symbol: ft.Icon
+
+
+def _live_teil(
+    page: ft.Page, state: AppState, lauf: Messlauf, reiter: _LiveReiter | None = None
+) -> ft.Control:
     meine_nummer = state.live_ansicht
     einst = state.hrv_einstellungen()
     status_box = ft.Container()
@@ -1456,6 +1479,39 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     def hf_einstellungen_oeffnen() -> None:
         page.run_task(zu_hf_einstellungen)
 
+    # -- Signal über einer Grenze (Ben, 30.10.2026; P90): ein leiser Klang höchstens alle
+    # `alarm_takt_s` Sekunden, solange die HF der letzten 5 s über der Grenze liegt. Die
+    # Einstellungen liest die Ansicht alle paar Sekunden neu (das Blatt und Einstellungen →
+    # Herzfrequenz ändern sie); gespielt wird über den Tondienst des Timers.
+    alarm_stand: dict[str, Any] = {"zuletzt": 0.0, "einst": None, "gelesen": 0.0}
+
+    def alarm_einst() -> Any:
+        jetzt = time.monotonic()
+        if alarm_stand["einst"] is None or jetzt - alarm_stand["gelesen"] > 5.0:
+            alarm_stand["einst"] = state.hf_einstellungen()
+            alarm_stand["gelesen"] = jetzt
+        return alarm_stand["einst"]
+
+    def alarm_an() -> bool:
+        return alarm_einst().alarm_grenze() is not None
+
+    def klang_vorspielen(klang: str) -> None:
+        alarm_stand["einst"] = None  # frisch lesen: der Klang wurde eben gewählt
+        with contextlib.suppress(Exception):
+            page.run_task(ton_spielen, state, klang)
+
+    def alarm_pruefen(hf: float | None) -> None:
+        e = alarm_einst()
+        grenze = e.alarm_grenze()
+        if grenze is None or hf is None or hf <= grenze:
+            return
+        jetzt = time.monotonic()
+        if jetzt - alarm_stand["zuletzt"] < e.alarm_takt_s:
+            return
+        alarm_stand["zuletzt"] = jetzt
+        with contextlib.suppress(Exception):
+            page.run_task(ton_spielen, state, e.alarm_klang)
+
     def sicht_waehlen(neu: str) -> None:
         if (neu == SICHT_HRV and modus["puls"]) or neu == sicht["wert"]:
             return
@@ -1467,7 +1523,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         with contextlib.suppress(Exception):
             sicht_knopf.update()
         aktualisieren(erzwingen=True)
-        fab_nachziehen()
+        reiter_nachziehen()
         ziel = state.live_scroll_lage.get(neu, 0.0)
         state.scroll_offsets["messung_live"] = ziel
 
@@ -1542,8 +1598,10 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         x_text: Callable[[float], str] | None,
         x_null: float,
     ) -> ft.Control:
-        """HF aus RR im 5-s-Mittel (bpm-Rückfall) mit den Bereichsgrenzen als Linien."""
-        roh = hf_punkte(x_von - 10.0)
+        """HF aus RR als Mittel über `hf_mittel_s` (bpm-Rückfall) mit den Bereichen als
+        Bändern — alle Bereiche, wenn so eingestellt (Blatt „Fenster & Darstellung“)."""
+        mittel = float(einst.hf_mittel_s)
+        roh = hf_punkte(x_von - mittel - 5.0)
         punkte: list[tuple[float, float]] = []
         if roh:
             reihe = hz.hf_reihe(
@@ -1552,19 +1610,27 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 [p[2] for p in roh],
                 artefakt=[p[3] for p in roh],
             )
-            glatt = hz.rollmittel(reihe.hf, 5.0, min_anteil=0.5)
+            glatt = hz.rollmittel(reihe.hf, mittel, min_anteil=0.5)
             punkte = [
                 (float(t) + 1.0, float(w))
                 for t, w in zip(reihe.t, glatt, strict=True)
                 if w == w and x_von <= t + 1.0 <= x_bis
             ]
         reihen = [Reihe(punkte, farbe=ft.Colors.PRIMARY)]
+        y_von = y_bis = None
+        if einst.hf_bereiche_alle and hf_bereiche:
+            # Die Achse reicht über alle Bereiche — und weiter, wenn die Kurve darüber liegt
+            werte = [w for _, w in punkte]
+            y_von = min(hf_bereiche[0].von_bpm, *werte) if werte else hf_bereiche[0].von_bpm
+            y_bis = max(hf_bereiche[-1].bis_bpm, *werte) if werte else hf_bereiche[-1].bis_bpm
         return kurve(
             [*reihen, *marken],
             einheit="HF bpm",
             hoehe=180,
             x_von=x_von,
             x_bis=x_bis,
+            y_von=y_von,
+            y_bis=y_bis,
             y_spanne_min=HF_SPANNE_MIN_BPM,
             x_text=x_text,
             x_null=x_null,
@@ -1692,6 +1758,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             controls=[
                 hf_kopf(hf, hf_profil_, hf_bereiche, einstellungen=hf_einstellungen_oeffnen),
                 skala(hf_bereiche, hf_profil_, hf),
+                ft.Text(alarm_text(alarm_einst()), size=11, opacity=0.65, visible=alarm_an()),
                 ft.Row(
                     spacing=6,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -1924,10 +1991,98 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         """Die Kurven allein, quer, ohne Leisten (`views.live_vollbild`)."""
         await page.push_route("/live")
 
+    def hf_gruppen() -> list[tuple[str, list[ft.Control]]]:
+        """Die Gruppe „Herzfrequenz“ des Blatts (Ben, 30.10.2026: „In HF braucht es
+        Fenstereinstellungen für HF, wie Bereiche nur teilweise oder alle anzeigen“)."""
+
+        def mittel_gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
+            if e.control.value is not None:
+                einstellung_merken(hf_mittel_s=int(e.control.value))
+                aktualisieren(erzwingen=True)
+
+        def bereiche_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+            if e.control.selected:
+                einstellung_merken(hf_bereiche_alle=e.control.selected[0] == "alle")
+                aktualisieren(erzwingen=True)
+
+        return [
+            (
+                "Herzfrequenz",
+                [
+                    ft.Dropdown(
+                        label="Kurve als Mittel über",
+                        value=str(einst.hf_mittel_s),
+                        options=[ft.DropdownOption(key=str(x), text=f"{x} s") for x in HF_MITTEL_S],
+                        on_select=mittel_gewaehlt,
+                        dense=True,
+                        border_radius=ECKIG_RADIUS,
+                    ),
+                    ft.Row(
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.Text("Bereiche in der Kurve", size=13, expand=True),
+                            ft.SegmentedButton(
+                                selected=["alle" if einst.hf_bereiche_alle else "bild"],
+                                show_selected_icon=False,
+                                style=ECKIG,
+                                segments=[
+                                    ft.Segment(value="bild", label=ft.Text("im Bild", size=12)),
+                                    ft.Segment(value="alle", label=ft.Text("alle", size=12)),
+                                ],
+                                on_change=bereiche_gewaehlt,
+                            ),
+                        ],
+                    ),
+                    ft.Text(
+                        "Im Bild: Die Achse folgt der Kurve, Bereiche sind nur zu sehen, wo sie "
+                        "liegt. Alle: Die Achse reicht von der untersten bis zur obersten Grenze.",
+                        size=11,
+                        opacity=0.65,
+                    ),
+                ],
+            )
+        ]
+
     def darstellung() -> None:
         """Fenster & Darstellung (Ben, 21.10.2026: eigener Knopf): Breite der Zeitachse
-        eintippen, Werteachsen der Haupt- und der Verlaufskurven, Fenster je Kurve."""
+        eintippen, Werteachsen der Haupt- und der Verlaufskurven, Fenster je Kurve. In der
+        Herzfrequenz-Sicht (Ben, 30.10.2026) stattdessen Mittel, Bereiche, HF-Achse und das
+        Signal an der Grenze — Verlaufskurven gibt es dort nicht."""
         a = state.ansicht()
+        zeit = Zeitachse(
+            fenster.breite_s,
+            breite_waehlen,
+            max_s=lauf.live.max_s,
+            satz=breiten_satz().control,
+            uhrzeit=einst.achse_uhrzeit,
+            uhrzeit_setzen=uhrzeit_im_blatt,
+            puffer_s=einst.puffer_s,
+            puffer_setzen=lambda s: einstellung_merken(puffer_s=s),
+        )
+        if sicht["wert"] == SICHT_HF or modus["puls"]:
+            page.show_dialog(
+                darstellung_blatt(
+                    page,
+                    state,
+                    lambda: aktualisieren(erzwingen=True),
+                    achsen=[Werteachse(werteachse("hf_geraet") or "bpm", "Herzfrequenz", "bpm")],
+                    zeitachse=zeit,
+                    kurven_teil=False,
+                    gruppen_vor=hf_gruppen(),
+                    gruppen_nach=[
+                        (
+                            "Signal",
+                            alarm_zeilen(
+                                state,
+                                vorspielen=klang_vorspielen,
+                                geaendert=lambda: aktualisieren(erzwingen=True),
+                            ),
+                        )
+                    ],
+                )
+            )
+            return
         haupt = ["hf_geraet"] if modus["puls"] else [ROH]
         gezeigt = [k for g in kurvengruppen(a, analyse.bereich, ohne()) for k in g]
         page.show_dialog(
@@ -1936,16 +2091,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 state,
                 lambda: aktualisieren(erzwingen=True),
                 achsen=werteachsen(a, [*haupt, *gezeigt], roh_titel),
-                zeitachse=Zeitachse(
-                    fenster.breite_s,
-                    breite_waehlen,
-                    max_s=lauf.live.max_s,
-                    satz=breiten_satz().control,
-                    uhrzeit=einst.achse_uhrzeit,
-                    uhrzeit_setzen=uhrzeit_im_blatt,
-                    puffer_s=einst.puffer_s,
-                    puffer_setzen=lambda s: einstellung_merken(puffer_s=s),
-                ),
+                zeitachse=zeit,
             )
         )
 
@@ -1971,40 +2117,45 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     sicht_knopf = sicht_wahl(sicht["wert"], sicht_waehlen, hrv_moeglich=not modus["puls"])
     uhr_knopf = achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten)
 
-    # Der kleine HF/HRV-Knopf rechts oben beim Runterscrollen (Ben, 30.10.2026) — er hängt
-    # an der Hauptansicht (`app.hauptansicht_aktualisieren`), die Scrollfläche meldet die
-    # Lage über `state.scroll_beobachter`; die Position je Sicht merkt `state.live_scroll_lage`
-    FAB_AB_PX = 140.0
+    # Der Sichtwechsel wandert in den Reiter „Live“ (Ben, 30.10.2026): Scrollt die
+    # Sichtwahl unter dem Status aus dem Bild, zeigt der Reiter die andere Sicht an, und ein
+    # Tipp auf den schon gewählten Reiter wechselt sie (`messung`: `TabBar.on_click`). Die
+    # Scrollfläche meldet die Lage über `state.scroll_beobachter`; die Position je Sicht
+    # merkt `state.live_scroll_lage`.
+    REITER_AB_PX = 140.0
+    reiter_stand = {"wechsel": False}
 
-    def fab_sichtbar(px: float) -> bool:
-        return px > FAB_AB_PX and not modus["puls"]
+    def andere_sicht() -> str:
+        return SICHT_HRV if sicht["wert"] == SICHT_HF else SICHT_HF
 
-    fab = ft.FloatingActionButton(
-        content="HRV" if sicht["wert"] == SICHT_HF else "Herzfrequenz",
-        icon=ft.Icons.SHOW_CHART if sicht["wert"] == SICHT_HF else ft.Icons.FAVORITE_BORDER,
-        mini=True,
-        visible=fab_sichtbar(state.scroll_offsets.get("messung_live", 0.0)),
-        tooltip="Zur anderen Sicht — an der gemerkten Stelle",
-        on_click=lambda _=None: sicht_waehlen(SICHT_HRV if sicht["wert"] == SICHT_HF else SICHT_HF),
-    )
-
-    def fab_nachziehen() -> None:
-        hf = sicht["wert"] == SICHT_HF
-        fab.content = "HRV" if hf else "Herzfrequenz"
-        fab.icon = ft.Icons.SHOW_CHART if hf else ft.Icons.FAVORITE_BORDER
-        fab.visible = fab_sichtbar(state.scroll_offsets.get("messung_live", 0.0))
-        with contextlib.suppress(Exception):
-            fab.update()
+    def reiter_nachziehen() -> None:
+        if reiter is None:
+            return
+        px = state.scroll_offsets.get("messung_live", 0.0)
+        wechsel = px > REITER_AB_PX and not modus["puls"]
+        reiter_stand["wechsel"] = wechsel
+        if wechsel:
+            reiter.text.value = "Live ⇄ " + ("HRV" if andere_sicht() == SICHT_HRV else "HF")
+            reiter.symbol.icon = ft.Icons.SWAP_HORIZ
+        else:
+            reiter.text.value = "Live"
+            reiter.symbol.icon = ft.Icons.SENSORS
+        for c in (reiter.text, reiter.symbol):
+            with contextlib.suppress(Exception):
+                c.update()
 
     def bei_scroll(px: float) -> None:
-        zeigen = fab_sichtbar(px)
-        if fab.visible != zeigen:
-            fab.visible = zeigen
-            with contextlib.suppress(Exception):
-                fab.update()
+        if (px > REITER_AB_PX and not modus["puls"]) != reiter_stand["wechsel"]:
+            reiter_nachziehen()
 
-    state.live_fab = fab
+    def sicht_wechseln() -> None:
+        """Der Reiter „Live“, schon gewählt: zur anderen Sicht — wo man dort zuletzt war."""
+        if not modus["puls"]:
+            sicht_waehlen(andere_sicht())
+
+    state.live_sicht_wechsel = sicht_wechseln
     state.scroll_beobachter["messung_live"] = bei_scroll
+    reiter_nachziehen()
     ablesen_knopf = ft.TextButton(
         "Ablesen",
         icon=ft.Icons.ADS_CLICK,
@@ -2047,7 +2198,10 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             hf, zus, bezug_name, abschnitt_laeuft = hf_live_werte()
             werte = hf_kacheln(hf, hf_profil_, hf_bereiche, zus, bezug_name)
             hf_box.content = hf_teil(hf, zus, bezug_name, abschnitt_laeuft)
+            alarm_pruefen(hf)
         else:
+            if alarm_an():
+                alarm_pruefen(hf_jetzt())
             hf_tupel = None
             if any(k in HF_KACHELN for k in einst.kacheln):
                 _, zus, _, _ = hf_live_werte()
@@ -2113,7 +2267,6 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
     # „korrigiert“ als Symbol in der Titelzeile; jede Zeile mit kleiner Überschrift (`gruppe`).
     verlauf_gruppe = gruppe("Verlaufskurven", analyse.wahl)
     haupt_karte = karte(
-        sicht_knopf,
         hf_box,
         ft.Row(
             spacing=4,
@@ -2149,9 +2302,11 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         verlauf_gruppe,
         analyse.control,
     )
+    # Die Sichtwahl direkt unter Gerät und Aufnahme (Ben, 30.10.2026) — scrollt sie weg,
+    # übernimmt der Reiter „Live“ (`reiter_nachziehen`)
     spalte = ft.Column(
         spacing=12,
-        controls=[status_box, kacheln_box, haupt_karte],
+        controls=[status_box, sicht_knopf, kacheln_box, haupt_karte],
     )
     # Erstbefüllung ohne update() — die Spalte hängt noch nicht an der Seite.
     fuellen()
@@ -2366,11 +2521,25 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
     state.live_ansicht += 1  # eine ältere Live-Ansicht hört auf zu rechnen
     verbunden = lauf is not None and lauf.status.verbindung != Verbindung.GETRENNT
     eintraege = state.hrv.alle(state.profil.id)  # einmal je Aufbau (N28)
-    state.live_fab = None  # setzt `_live_teil`, wenn es ihn gibt
+    state.live_sicht_wechsel = None  # setzt `_live_teil`, wenn es ihn gibt
+    live_reiter = _LiveReiter(
+        ft.Text("Live", size=14),
+        ft.Icon(ft.Icons.SENSORS if verbunden else ft.Icons.BLUETOOTH_SEARCHING, size=18),
+    )
 
     def wechseln(e: ft.Event[ft.Tabs]) -> None:
         state.messung_tab = e.control.selected_index or 0
         state.neu_zeichnen()
+
+    def reiter_getippt(e: ft.Event[ft.TabBar]) -> None:
+        """Der schon gewählte Reiter „Live“ wechselt zwischen Herzfrequenz und HRV (Ben,
+        30.10.2026: „Wenn man dort ist und nochmal Live klickt, wechselt HF ↔ HRV“)."""
+        try:
+            index = int(e.data)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return
+        if index == 0 and state.messung_tab == 0 and state.live_sicht_wechsel is not None:
+            state.live_sicht_wechsel()
 
     def liste(schluessel: str, *teile: ft.Control) -> ft.Control:
         # Die Position bleibt über Reiterwechsel und Übungsseiten hinweg (Ben, 27.10.2026:
@@ -2389,7 +2558,9 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
     if state.messung_tab == 0:
         inhalt = liste(
             "messung_live",
-            _live_teil(page, state, lauf) if verbunden else _verbinden_teil(page, state),
+            _live_teil(page, state, lauf, live_reiter)
+            if verbunden
+            else _verbinden_teil(page, state),
         )
     else:
         if lauf is not None:
@@ -2413,10 +2584,14 @@ def messung(page: ft.Page, state: AppState) -> ft.Control:
                 # Gleich breit über die ganze Zeile, wie unter „Übungen" (Ben, 16.10.2026)
                 ft.TabBar(
                     scrollable=False,
+                    on_click=reiter_getippt,
                     tabs=[
-                        _reiter(
-                            "Live",
-                            ft.Icons.SENSORS if verbunden else ft.Icons.BLUETOOTH_SEARCHING,
+                        ft.Tab(
+                            label=ft.Row(
+                                tight=True,
+                                spacing=6,
+                                controls=[live_reiter.symbol, live_reiter.text],
+                            )
                         ),
                         _reiter("GPS", ft.Icons.GPS_FIXED),
                         _reiter("Aufzeichnungen", ft.Icons.FOLDER_OPEN_OUTLINED),

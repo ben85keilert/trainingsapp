@@ -14,6 +14,9 @@ mit dem Profil in `core.hf_profil.bereiche_fuer`.
 True
 >>> HfEinstellungen.aus_dict({"modell": "fuenf"}).modell
 'auto'
+>>> a = HfEinstellungen.aus_dict({"alarm_an": True, "alarm_bpm": 150, "alarm_takt_s": 9})
+>>> a.alarm_grenze(), a.alarm_takt_s, HfEinstellungen.aus_dict({"alarm_bpm": 500}).alarm_bpm
+(150.0, 4, None)
 """
 
 from __future__ import annotations
@@ -60,6 +63,12 @@ FORMEL_NAMEN: Final[dict[str, str]] = {
     "tanaka": "Tanaka 2001 (älter, kleinere Stichprobe): 208 − 0,7 · Alter",
 }
 EIGENE_MAX: Final[int] = 8
+#: Signal über einer selbst gesetzten Grenze (Ben, 30.10.2026: „Ein Alarm, piepen alle 3–5
+#: Sekunden, wenn man über einer bestimmten HF ist … nicht aufdringlich“): so oft höchstens (s)
+ALARM_TAKT_S: Final[tuple[int, ...]] = (3, 4, 5, 10)
+ALARM_KLANG: Final[str] = "schale"
+ALARM_MIN_BPM: Final[float] = 40.0
+ALARM_MAX_BPM: Final[float] = 230.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +112,21 @@ class HfEinstellungen:
     #: Namen der eigenen Bereiche (eine mehr als Grenzen); leer = „Bereich 1…n“
     namen: list[str] = field(default_factory=list)
     formel: str = "auto"
+    #: Signal über einer Grenze: an, Grenze (bpm), Klang (`core.klang.KLAENGE`), Takt (s)
+    alarm_an: bool = False
+    alarm_bpm: float | None = None
+    alarm_klang: str = ALARM_KLANG
+    alarm_takt_s: int = 4
+
+    def alarm_grenze(self) -> float | None:
+        """Die wirksame Grenze — nur mit Schalter und Wert.
+
+        >>> HfEinstellungen(alarm_an=True, alarm_bpm=150).alarm_grenze()
+        150.0
+        >>> HfEinstellungen(alarm_bpm=150).alarm_grenze() is None
+        True
+        """
+        return float(self.alarm_bpm) if self.alarm_an and self.alarm_bpm else None
 
     def als_dict(self) -> dict[str, Any]:
         return {
@@ -110,6 +134,10 @@ class HfEinstellungen:
             "eigene": [g.als_dict() for g in self.eigene],
             "namen": list(self.namen),
             "formel": self.formel,
+            "alarm_an": self.alarm_an,
+            "alarm_bpm": self.alarm_bpm,
+            "alarm_klang": self.alarm_klang,
+            "alarm_takt_s": self.alarm_takt_s,
         }
 
     @classmethod
@@ -131,11 +159,20 @@ class HfEinstellungen:
             else []
         )
         formel = d.get("formel")
+        bpm = _zahl(d.get("alarm_bpm"))
+        takt = d.get("alarm_takt_s")
+        klang = d.get("alarm_klang")
         return cls(
             modell=modell if modell in MODELLE else vorgabe.modell,
             eigene=eigene[:EIGENE_MAX],
             namen=namen,
             formel=formel if formel in FORMELN else vorgabe.formel,
+            alarm_an=d.get("alarm_an") is True,
+            alarm_bpm=bpm if bpm is not None and ALARM_MIN_BPM <= bpm <= ALARM_MAX_BPM else None,
+            alarm_klang=klang if isinstance(klang, str) and klang else vorgabe.alarm_klang,
+            alarm_takt_s=takt
+            if isinstance(takt, int) and not isinstance(takt, bool) and takt in ALARM_TAKT_S
+            else vorgabe.alarm_takt_s,
         )
 
 
@@ -151,6 +188,10 @@ def einstellungen_schreiben(e: HfEinstellungen) -> str:
 
 
 __all__ = [
+    "ALARM_KLANG",
+    "ALARM_MAX_BPM",
+    "ALARM_MIN_BPM",
+    "ALARM_TAKT_S",
     "EIGENE_MAX",
     "FORMELN",
     "FORMEL_NAMEN",

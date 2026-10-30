@@ -1324,8 +1324,15 @@ def test_aufzeichnung_wie_live_ganzer_abschnitt_und_feste_achsen(daten) -> None:
     breite.value = "1:30"
     breite.on_submit(None)
     assert rr().max_x - rr().min_x == pytest.approx(90)
-    # … und die Werteachse der Hauptkurve fest: 500–1500 ms
+    # … und die Werteachse der Hauptkurve fest: 500–1500 ms (Schalter „fest“ an, 30.10.2026)
     assert "RR-Tachogramm" in _baum_texte(blatt)
+    fest = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.Switch) and c.tooltip == "Achse festlegen"
+    )
+    fest.value = True
+    fest.on_change(_ereignis(True))
     von.value, bis.value = "500", "1500"
     bis.on_blur(None)
     assert state.ansicht().y_achsen == {"rr": (500.0, 1500.0)}
@@ -1374,21 +1381,31 @@ async def test_live_ablesen_und_knoepfe_wie_in_der_aufzeichnung(daten) -> None:
     assert state.hrv_einstellungen().korrigiert
     knoepfe = _breiten_wahl(ansicht)
     assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "10 Min"]
-    # Der kleine HF/HRV-Knopf rechts oben hängt am State und folgt der Scrollposition
-    fab = state.live_fab
-    assert fab is not None and not fab.visible and fab.content == "Herzfrequenz"
-    state.scroll_beobachter["messung_live"](300.0)
-    assert fab.visible
-    state.scroll_offsets["messung_live"] = 300.0
-    fab.on_click()
-    assert state.hrv_sicht() == "hf" and fab.content == "HRV"
-    assert state.live_scroll_lage["hrv"] == 300.0
+    # Die Sichtwahl steht direkt unter Gerät und Aufnahme (Ben, 30.10.2026) — nicht in der
+    # Kurvenkarte; weggescrollt übernimmt der Reiter „Live“ den Wechsel
     umschalter = next(
         c
         for c in _alle_controls(ansicht)
         if isinstance(c, ft.SegmentedButton) and [s.value for s in c.segments] == ["hf", "hrv"]
     )
-    assert umschalter.selected == ["hf"]
+    spalte = next(
+        c for c in _alle_controls(ansicht) if isinstance(c, ft.Column) and umschalter in c.controls
+    )
+    assert spalte.controls.index(umschalter) == 1  # nach dem Status, vor den Kacheln
+    tabbar = next(c for c in _alle_controls(ansicht) if isinstance(c, ft.TabBar))
+    live_symbol, live_text = tabbar.tabs[0].label.controls
+    assert live_text.value == "Live" and live_symbol.icon == ft.Icons.SENSORS
+    state.scroll_offsets["messung_live"] = 300.0
+    state.scroll_beobachter["messung_live"](300.0)
+    assert live_text.value == "Live ⇄ HF" and live_symbol.icon == ft.Icons.SWAP_HORIZ
+    tabbar.on_click(SimpleNamespace(data="0"))  # der gewählte Reiter: zur anderen Sicht
+    assert state.hrv_sicht() == "hf" and live_text.value == "Live ⇄ HRV"
+    assert state.live_scroll_lage["hrv"] == 300.0 and umschalter.selected == ["hf"]
+    state.scroll_offsets["messung_live"] = 20.0
+    state.scroll_beobachter["messung_live"](20.0)
+    assert live_text.value == "Live" and live_symbol.icon == ft.Icons.SENSORS
+    tabbar.on_click(SimpleNamespace(data="1"))  # ein anderer Reiter wechselt nicht
+    assert state.hrv_sicht() == "hf"
     umschalter.on_change(_ereignis("hrv"))
     assert state.hrv_sicht() == "hrv" and state.scroll_offsets["messung_live"] == 300.0
     while seite.aufgaben:
@@ -1715,7 +1732,10 @@ async def test_live_abschnitt_start_und_ende(daten) -> None:
     texte = _baum_texte(ansicht)
     assert "ABSCHNITTE · 1" in texte and "Behandlung Rücken: Start" in texte
     assert any(t.startswith("Behandlung Rücken 0:") for t in texte)  # der Chip
-    while lauf.aufnahme_dauer_s() < 30:
+    # Der Abschnitt braucht Länge — ab dem Start gerechnet, nicht ab der Aufnahme (auf einem
+    # langsamen Rechner liegt der Start sonst schon hinter der 30-s-Marke)
+    start_s = lauf.jetzt_s()
+    while lauf.jetzt_s() < start_s + 15:
         await asyncio.sleep(0.01)
     start.on_click()  # Ende
     assert lauf.offener_abschnitt() is None and start.content == "Abschnitt: Start"
@@ -2000,21 +2020,58 @@ async def test_sichtwechsel_knopf_rutscht_nach_oben_rechts_und_merkt_die_lage(da
         for c in _alle_controls(blatt)
         if isinstance(c, ft.SegmentedButton) and any(s.value == "lang" for s in c.segments)
     )
-    satz.on_change(_ereignis("lang"))
-    assert state.hrv_einstellungen().breiten_satz == "lang"
-    lang = next(
+    satz.on_change(_ereignis("mittel"))
+    assert state.hrv_einstellungen().breiten_satz == "mittel"
+    mittel = next(
         c
         for c in _alle_controls(view)
         if isinstance(c, ft.SegmentedButton) and any(s.value == "900" for s in c.segments)
     )
-    assert [s.label.value for s in lang.segments] == ["2 Min", "5 Min", "15 Min"]
-    # … und ein eigenes Fenster für eine Verlaufskurve (30 min)
-    eigen = next(
-        c for c in _alle_controls(blatt) if isinstance(c, ft.TextField) and c.label == "eigenes"
+    assert [s.label.value for s in mittel.segments] == ["2 Min", "5 Min", "15 Min"]
+    satz.on_change(_ereignis("lang"))
+    assert [s.label.value for s in mittel.segments] == ["1 h", "3 h", "6 h"]
+    # … und ein eigenes Fenster für eine Verlaufskurve (30 min): „Eigenes …“ in der Auswahl
+    # öffnet das Feld (30.10.2026, aufgeräumtes Blatt)
+    wahl = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.Dropdown) and any(o.key == "eigen" for o in c.options)
     )
+    eigen = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.TextField) and c.label == "Eigenes Fenster"
+    )
+    assert not eigen.visible
+    wahl.on_select(_ereignis("eigen"))
+    assert eigen.visible
     eigen.value = "30 min"
     eigen.on_submit(None)
-    assert 1800 in state.ansicht().fenster.values()
+    assert 1800 in state.ansicht().fenster.values() and wahl.value == "1800" and not eigen.visible
+    wahl.on_select(_ereignis("eigen"))
     eigen.value = "1"
     eigen.on_submit(None)
     assert eigen.error  # unter 3 s
+    # Werteachsen: Schalter „fest“, Standard aus den Einstellungen, ↺ stellt ihn her
+    schalter = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.Switch) and c.tooltip == "Achse festlegen"
+    )
+    zeile = next(
+        c for c in _alle_controls(blatt) if isinstance(c, ft.Row) and schalter in c.controls
+    )
+    von, bis = (c for c in zeile.controls if isinstance(c, ft.TextField))
+    assert not schalter.value and von.disabled and von.value == "300" and bis.value == "1500"
+    schalter.value = True
+    schalter.on_change(_ereignis(True))
+    assert state.ansicht().y_bereich("rr") == (300.0, 1500.0) and not von.disabled
+    von.value = "500"
+    von.on_submit(None)
+    assert state.ansicht().y_bereich("rr") == (500.0, 1500.0)
+    zurueck = next(c for c in zeile.controls if isinstance(c, ft.IconButton))
+    zurueck.on_click()
+    assert state.ansicht().y_bereich("rr") == (300.0, 1500.0)
+    schalter.value = False
+    schalter.on_change(_ereignis(False))
+    assert state.ansicht().y_bereich("rr") is None and von.disabled and von.value == "300"

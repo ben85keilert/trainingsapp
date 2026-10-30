@@ -13,6 +13,13 @@ Knopf neben dem Menü (Ben: „weil man diese Einstellungen vielleicht öfter br
 und stellt außer Fenster und gleitend/Blöcke auch die **Breite der Zeitachse**
 (eintippen) und **feste Werteachsen** ein (``Ansicht.y_achsen``, z. B. RR 500–1500).
 Das Menü (`ansicht_menue`) nimmt dafür Info und automatische Korrektur auf.
+
+**Aufgeräumt am 30.10.2026** (Ben: „Die Werte passen nicht ganz rein, der Mix aus eckigen
+Eingabefeldern und runden Buttons wirkt komisch“): alle Bedienelemente im Blatt haben
+dieselbe Form (`ECKIG`, Radius 8), je Kurve stehen Fenster und Darstellung in einer Zeile,
+ein eigenes Fenster ist ein Eintrag der Auswahl („Eigenes …“) und öffnet das Feld erst dann.
+Werteachsen haben einen Schalter „fest“, Standardwerte aus den Einstellungen
+(`HrvEinstellungen.achsen_standard`) und einen Knopf, der sie wiederherstellt.
 """
 
 from __future__ import annotations
@@ -27,7 +34,7 @@ import flet as ft
 from hrv_core.trends import KENNZAHLEN, im_bereich, titel, treppe
 
 from trainingsapp.core.hrv_ansicht import BLOCK, GLEITEND, PNN_WAHL, Ansicht
-from trainingsapp.core.hrv_einstellungen import PUFFER_S
+from trainingsapp.core.hrv_einstellungen import PUFFER_S, HrvEinstellungen
 from trainingsapp.core.zeitangabe import breite_lesen
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import titel as abschnitt_titel
@@ -36,6 +43,17 @@ from trainingsapp.ui.components.zeitfenster import BreiteFeld
 from trainingsapp.ui.farben import FARBEN  # feste Farbe je Kurve, hell/dunkel
 
 BEREICH_TITEL = {"zeit": "Zeit", "frequenz": "Frequenz", "nichtlinear": "Nichtlinear"}
+#: Eine Form für alles im Blatt: Felder, Auswahlen und Knopfreihen mit Radius 8
+ECKIG_RADIUS: Final[int] = 8
+ECKIG: Final[ft.ButtonStyle] = ft.ButtonStyle(
+    shape=ft.RoundedRectangleBorder(radius=ECKIG_RADIUS),
+    visual_density=ft.VisualDensity.COMPACT,
+    padding=ft.Padding.symmetric(horizontal=10),
+)
+#: Schlüssel des Eintrags „Eigenes …“ in der Fensterauswahl
+FENSTER_EIGEN: Final[str] = "eigen"
+#: Eine Gruppe im Blatt: Überschrift und ihre Bedienelemente
+Gruppe = tuple[str, Sequence[ft.Control]]
 
 #: (Kennzahl, Fenster, Block?) → Punkte
 Daten = Callable[[str, int, bool], Sequence[tuple[float, float]]]
@@ -393,24 +411,47 @@ def _zahl_lesen(text: str | None) -> float | None:
 
 
 class _YZeile:
-    """Eine Werteachse im Blatt: von, bis, zurück auf automatisch. Leer = automatisch."""
+    """Eine Werteachse im Blatt: Schalter „fest“, von, bis, Standard wiederherstellen.
 
-    def __init__(self, achse: Werteachse, ansicht: Ansicht, speichern: Callable[[], None]):
+    Aus: die Achse folgt den Werten im Ausschnitt (Felder grau, behalten ihren Text). An:
+    der eingetragene Bereich gilt — leer, dann der Standard aus den Einstellungen
+    (`HrvEinstellungen.achse_standard`). Der Knopf ↺ schreibt den Standard hinein und
+    schaltet an (Ben, 30.10.2026: „aktivierbar und auf Standard wieder herstellbar“).
+    """
+
+    def __init__(
+        self,
+        achse: Werteachse,
+        ansicht: Ansicht,
+        speichern: Callable[[], None],
+        standard: tuple[float, float] | None,
+    ):
         self._achse = achse
         self._ansicht = ansicht
         self._speichern = speichern
+        self._standard = standard
         bereich = ansicht.y_bereich(achse.schluessel)
-        self._von = self._feld("von", bereich[0] if bereich else None)
-        self._bis = self._feld("bis", bereich[1] if bereich else None)
-        self._auto = ft.IconButton(
+        fest = bereich is not None
+        werte = bereich or standard
+        self._von = self._feld("von", werte[0] if werte else None, fest)
+        self._bis = self._feld("bis", werte[1] if werte else None, fest)
+        self._fest = ft.Switch(
+            value=fest, on_change=lambda _e: self._umschalten(), tooltip="Achse festlegen"
+        )
+        standard_text = (
+            f"Standard {_feldzahl(standard[0])}–{_feldzahl(standard[1])} {achse.einheit}".strip()
+            if standard
+            else "Kein Standard für diese Achse"
+        )
+        self._standard_knopf = ft.IconButton(
             ft.Icons.RESTART_ALT,
             icon_size=20,
-            tooltip="Wieder automatisch",
-            visible=bereich is not None,
-            on_click=lambda: self.automatisch(),
+            tooltip=standard_text,
+            disabled=standard is None,
+            on_click=lambda _e=None: self.standard(),
         )
         self.control = ft.Column(
-            spacing=4,
+            spacing=2,
             tight=True,
             controls=[
                 ft.Row(
@@ -429,49 +470,86 @@ class _YZeile:
                 ),
                 ft.Row(
                     spacing=6,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
-                    controls=[self._von, ft.Text("–", size=16), self._bis, self._auto],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        self._fest,
+                        self._von,
+                        ft.Text("–", size=16),
+                        self._bis,
+                        self._standard_knopf,
+                    ],
                 ),
             ],
         )
 
-    def _feld(self, label: str, wert: float | None) -> ft.TextField:
+    def _feld(self, label: str, wert: float | None, an: bool) -> ft.TextField:
         return ft.TextField(
             label=label,
             value=_feldzahl(wert) if wert is not None else "",
             hint_text="auto",
             dense=True,
-            width=110,
+            width=96,
+            border_radius=ECKIG_RADIUS,
+            disabled=not an,
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.RIGHT,
             on_submit=lambda _: self.uebernehmen(melden=True),
             on_blur=lambda _: self.uebernehmen(),
         )
 
+    def _umschalten(self) -> None:
+        """Schalter: an → der Bereich der Felder gilt (leer: der Standard); aus → automatisch."""
+        an = bool(self._fest.value)
+        for f in (self._von, self._bis):
+            f.disabled = not an
+        leer = not any(((self._von.value or "").strip(), (self._bis.value or "").strip()))
+        if an and leer and self._standard is not None:
+            self._von.value = _feldzahl(self._standard[0])
+            self._bis.value = _feldzahl(self._standard[1])
+        self.uebernehmen(melden=an)
+
     def uebernehmen(self, *, melden: bool = False) -> bool:
-        """Beide leer → automatisch; beide Zahlen, von < bis → fest. Sonst bleibt die Achse,
-        wie sie war (``False``) — der Hinweis steht nur, wenn ``melden``."""
+        """Aus → automatisch. An: beide Zahlen, von < bis → fest; sonst bleibt die Achse, wie
+        sie war (``False``) — der Hinweis steht nur, wenn ``melden``."""
         roh = (self._von.value or "").strip(), (self._bis.value or "").strip()
-        lo, hi = _zahl_lesen(roh[0]), _zahl_lesen(roh[1])
-        if not any(roh):
+        if self._fest.value and not any(roh):
+            # Beide Felder geleert: wieder automatisch, der Schalter geht mit
+            self._fest.value = False
+            for f in (self._von, self._bis):
+                f.disabled = True
+        if not self._fest.value:
             neu: tuple[float, float] | None = None
-        elif lo is not None and hi is not None and lo < hi:
-            neu = (lo, hi)
+            self._von.error = None
         else:
-            self._von.error = Y_UNVOLLSTAENDIG if melden else None
-            self._aktualisieren()
-            return False
-        self._von.error = None
+            lo, hi = _zahl_lesen(roh[0]), _zahl_lesen(roh[1])
+            if lo is not None and hi is not None and lo < hi:
+                neu = (lo, hi)
+            else:
+                self._von.error = Y_UNVOLLSTAENDIG if melden else None
+                self._aktualisieren()
+                return False
+            self._von.error = None
         if neu != self._ansicht.y_bereich(self._achse.schluessel):
             self._ansicht.y_setzen(self._achse.schluessel, neu)
             self._speichern()
-        self._auto.visible = neu is not None
         self._aktualisieren()
         return True
 
+    def standard(self) -> None:
+        """↺: Standardwerte eintragen und die Achse damit festlegen."""
+        if self._standard is None:
+            return
+        self._von.value = _feldzahl(self._standard[0])
+        self._bis.value = _feldzahl(self._standard[1])
+        self._fest.value = True
+        for f in (self._von, self._bis):
+            f.disabled = False
+        self.uebernehmen(melden=True)
+
     def automatisch(self) -> None:
-        self._von.value = self._bis.value = ""
-        self.uebernehmen()
+        """Wieder der Automatik überlassen (Schalter aus)."""
+        self._fest.value = False
+        self._umschalten()
 
     def _aktualisieren(self) -> None:
         with contextlib.suppress(Exception):  # Blatt schon zu
@@ -486,6 +564,9 @@ def darstellung_blatt(
     *,
     achsen: Sequence[Werteachse] = (),
     zeitachse: Zeitachse | None = None,
+    kurven_teil: bool = True,
+    gruppen_vor: Sequence[Gruppe] = (),
+    gruppen_nach: Sequence[Gruppe] = (),
 ) -> ft.BottomSheet:
     """Zeitachse, Werteachsen und je gewählter Kurve: Fenster, gleitend oder Blöcke; pNNx.
 
@@ -495,17 +576,27 @@ def darstellung_blatt(
     ``kurven``: statt der Kurven des Bereichs diese (das Vollbild: beide Achsen).
 
     ``zeitachse``: die Breite eintippen (`BreiteFeld`); ``achsen``: die y-Achsen der
-    gezeigten Kurven (`vollbild.werteachsen`) — leer heißt automatisch, zwei Zahlen
-    legen sie fest (Ben, 21.10.2026). Getipptes gilt beim Bestätigen, beim Verlassen
-    des Felds und beim Schließen des Blatts; ein halb ausgefülltes Paar hält „Fertig“
-    mit einem Hinweis auf.
+    gezeigten Kurven (`vollbild.werteachsen`) mit Schalter, Standard und Feldern (`_YZeile`;
+    Ben, 21. und 30.10.2026). Getipptes gilt beim Bestätigen, beim Verlassen des Felds und
+    beim Schließen des Blatts; ein halb ausgefülltes Paar hält „Fertig“ mit einem Hinweis auf.
+
+    ``kurven_teil=False``: ohne den Abschnitt „Kurven“ (die Herzfrequenz-Sicht hat keine
+    Verlaufskurven); ``gruppen_vor``/``gruppen_nach``: eigene Gruppen des Aufrufers vor bzw.
+    nach den Werteachsen (Herzfrequenz: Mittel und Bereiche, Signal an der Grenze).
     """
     ansicht = state.ansicht()
-    gewaehlt = [
-        k
-        for k in (kurven if kurven is not None else im_bereich(ansicht.bereich))
-        if k in KENNZAHLEN and KENNZAHLEN[k].rechnet and (kurven is not None or k in ansicht.kurven)
-    ]
+    einstellungen: HrvEinstellungen = state.hrv_einstellungen()
+    gewaehlt = (
+        [
+            k
+            for k in (kurven if kurven is not None else im_bereich(ansicht.bereich))
+            if k in KENNZAHLEN
+            and KENNZAHLEN[k].rechnet
+            and (kurven is not None or k in ansicht.kurven)
+        ]
+        if kurven_teil
+        else []
+    )
 
     def speichern() -> None:
         state.ansicht_setzen(ansicht)
@@ -516,43 +607,52 @@ def darstellung_blatt(
         if zeitachse is not None
         else None
     )
-    y_zeilen = [_YZeile(a, ansicht, speichern) for a in achsen]
+    y_zeilen = [
+        _YZeile(a, ansicht, speichern, einstellungen.achse_standard(a.schluessel)) for a in achsen
+    ]
 
     def alles_uebernehmen(*, melden: bool) -> bool:
         if breite is not None:
             breite.uebernehmen()
         return all([z.uebernehmen(melden=melden) for z in y_zeilen])
 
-    def fenster_setzen(k: str) -> Callable[[ft.Event[ft.Dropdown]], None]:
-        def handler(e: ft.Event[ft.Dropdown]) -> None:
+    def fenster_optionen(kz: Any, jetzt: int) -> list[ft.DropdownOption]:
+        werte = sorted({*kz.fenster_wahl, jetzt})
+        return [
+            *(ft.DropdownOption(key=str(x), text=fenster_text(x)) for x in werte),
+            ft.DropdownOption(key=FENSTER_EIGEN, text="Eigenes …"),
+        ]
+
+    def kurvenzeile(k: str, kz: Any) -> ft.Control:
+        """Name und Darstellung in der ersten Zeile, das Fenster in der zweiten; „Eigenes …“
+        öffnet ein Feld (Ben, 30.10.2026: Sekunden, „2 min“, „1 h“ — auch ein 30-min-Mittel
+        über eine Nacht)."""
+        jetzt = ansicht.fenster_fuer(k, kz.fenster_s)
+        feld = ft.TextField(
+            label="Eigenes Fenster",
+            hint_text="z. B. 45, 2 min, 1 h — 3 s bis 24 h",
+            dense=True,
+            visible=False,
+            border_radius=ECKIG_RADIUS,
+            keyboard_type=ft.KeyboardType.DATETIME,
+        )
+        wahl = ft.Dropdown(
+            value=str(jetzt),
+            options=fenster_optionen(kz, jetzt),
+            dense=True,
+            expand=True,
+            border_radius=ECKIG_RADIUS,
+        )
+
+        def gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
+            if e.control.value == FENSTER_EIGEN:
+                feld.visible = True
+                with contextlib.suppress(Exception):
+                    feld.update()
+                return
             with contextlib.suppress(TypeError, ValueError):
                 ansicht.fenster[k] = int(e.control.value or 0)
                 speichern()
-
-        return handler
-
-    def fenster_wahl(k: str, kz: Any) -> ft.Dropdown:
-        """Die Auswahl der Kennzahl — ein eigenes Fenster steht als zusätzlicher Eintrag."""
-        jetzt = ansicht.fenster_fuer(k, kz.fenster_s)
-        werte = sorted({*kz.fenster_wahl, jetzt})
-        return ft.Dropdown(
-            value=str(jetzt),
-            options=[ft.DropdownOption(key=str(s), text=fenster_text(s)) for s in werte],
-            on_select=fenster_setzen(k),
-            dense=True,
-            width=110,
-        )
-
-    def eigenes_fenster(k: str, kz: Any, wahl: ft.Dropdown) -> ft.TextField:
-        """Ein Fenster eintippen (Ben, 30.10.2026): Sekunden, „2 min“, „1 h“ — damit sich
-        auch langsame Wellen abbilden lassen (30-min-Mittel über eine Nacht)."""
-        feld = ft.TextField(
-            label="eigenes",
-            dense=True,
-            width=96,
-            hint_text="s · min · h",
-            keyboard_type=ft.KeyboardType.DATETIME,
-        )
 
         def uebernehmen(_e: object = None) -> None:
             if not (feld.value or "").strip():
@@ -566,17 +666,43 @@ def darstellung_blatt(
             feld.error = None
             ansicht.fenster[k] = sek
             speichern()
-            werte = sorted({*kz.fenster_wahl, sek})
-            wahl.options = [ft.DropdownOption(key=str(s), text=fenster_text(s)) for s in werte]
+            wahl.options = fenster_optionen(kz, sek)
             wahl.value = str(sek)
             feld.value = ""
+            feld.visible = False
             for c in (wahl, feld):
                 with contextlib.suppress(Exception):
                     c.update()
 
+        wahl.on_select = gewaehlt
         feld.on_submit = uebernehmen
         feld.on_blur = uebernehmen
-        return feld
+        return ft.Column(
+            spacing=6,
+            tight=True,
+            controls=[
+                ft.Row(
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Container(width=10, height=10, border_radius=5, bgcolor=FARBEN[k]),
+                        ft.Text(titel(k, ansicht.pnn_ms), weight=ft.FontWeight.W_600, expand=True),
+                        ft.SegmentedButton(
+                            selected=[ansicht.modus_fuer(k)],
+                            show_selected_icon=False,
+                            style=ECKIG,
+                            segments=[
+                                ft.Segment(value=GLEITEND, label=ft.Text("gleitend", size=12)),
+                                ft.Segment(value=BLOCK, label=ft.Text("Blöcke", size=12)),
+                            ],
+                            on_change=modus_setzen(k),
+                        ),
+                    ],
+                ),
+                ft.Row(spacing=6, controls=[wahl]),
+                feld,
+            ],
+        )
 
     def modus_setzen(k: str) -> Callable[[ft.Event[ft.SegmentedButton]], None]:
         def handler(e: ft.Event[ft.SegmentedButton]) -> None:
@@ -598,43 +724,10 @@ def darstellung_blatt(
         ansicht.gemeinsam = bool(e.control.value)
         speichern()
 
-    zeilen: list[ft.Control] = []
-    for k in gewaehlt:
-        kz = KENNZAHLEN[k]
-        zeilen.append(
-            ft.Column(
-                spacing=6,
-                tight=True,
-                controls=[
-                    ft.Row(
-                        spacing=6,
-                        controls=[
-                            ft.Container(width=10, height=10, border_radius=5, bgcolor=FARBEN[k]),
-                            ft.Text(titel(k, ansicht.pnn_ms), weight=ft.FontWeight.W_600),
-                        ],
-                    ),
-                    ft.Row(
-                        spacing=8,
-                        wrap=True,
-                        run_spacing=6,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        controls=[
-                            (wahl := fenster_wahl(k, kz)),
-                            eigenes_fenster(k, kz, wahl),
-                            ft.SegmentedButton(
-                                selected=[ansicht.modus_fuer(k)],
-                                show_selected_icon=False,
-                                segments=[
-                                    ft.Segment(value=GLEITEND, label=ft.Text("gleitend")),
-                                    ft.Segment(value=BLOCK, label=ft.Text("Blöcke")),
-                                ],
-                                on_change=modus_setzen(k),
-                            ),
-                        ],
-                    ),
-                ],
-            )
-        )
+    def gruppe(text: str, inhalt: Sequence[ft.Control]) -> list[ft.Control]:
+        return [abschnitt_titel(text), *inhalt]
+
+    zeilen: list[ft.Control] = [kurvenzeile(k, KENNZAHLEN[k]) for k in gewaehlt]
     if "pnnx" in gewaehlt:
         zeilen.append(
             ft.Dropdown(
@@ -643,35 +736,39 @@ def darstellung_blatt(
                 options=[ft.DropdownOption(key=str(x), text=f"{x} ms") for x in PNN_WAHL],
                 on_select=pnn_setzen,
                 dense=True,
+                border_radius=ECKIG_RADIUS,
             )
         )
-    if not zeilen:
-        zeilen.append(ft.Text("Keine gewählte Kurve hat ein Fenster.", size=12, opacity=0.7))
-    zeilen += [
-        ft.Switch(
-            label="Gleiche Achse in einem Diagramm", value=ansicht.gemeinsam, on_change=gemeinsam
-        ),
-        ft.Text(
-            "Gleitend: Je länger das Fenster, desto ruhiger die Kurve und desto "
-            "später zeigt sie eine Änderung. Blöcke: ein Wert je Fenster, ohne "
-            "Überlappung — gut zum Vergleichen von Abschnitten.",
-            size=11,
-            opacity=0.65,
-        ),
-    ]
+    if kurven_teil:
+        if not zeilen:
+            zeilen.append(ft.Text("Keine gewählte Kurve hat ein Fenster.", size=12, opacity=0.7))
+        zeilen += [
+            ft.Switch(
+                label="Gleiche Achse in einem Diagramm",
+                value=ansicht.gemeinsam,
+                on_change=gemeinsam,
+            ),
+            ft.Text(
+                "Gleitend: Je länger das Fenster, desto ruhiger die Kurve und desto "
+                "später zeigt sie eine Änderung. Blöcke: ein Wert je Fenster, ohne "
+                "Überlappung — gut zum Vergleichen von Abschnitten.",
+                size=11,
+                opacity=0.65,
+            ),
+        ]
     teile: list[ft.Control] = []
     if breite is not None and zeitachse is not None:
-        teile += [abschnitt_titel("Zeitachse")]
+        zeit: list[ft.Control] = []
         if zeitachse.satz is not None:
-            teile.append(zeitachse.satz)
-        teile.append(breite.control)
+            zeit.append(zeitachse.satz)
+        zeit.append(breite.control)
         if zeitachse.uhrzeit is not None and zeitachse.uhrzeit_setzen is not None:
             setzen_uhr = zeitachse.uhrzeit_setzen
 
             def uhrzeit_gewechselt(_e: ft.Event[ft.Switch]) -> None:
                 setzen_uhr()
 
-            teile.append(
+            zeit.append(
                 ft.Switch(
                     label="Uhrzeit statt Dauer seit Beginn",
                     value=bool(zeitachse.uhrzeit),
@@ -685,7 +782,7 @@ def darstellung_blatt(
                 if e.control.value is not None:
                     setzen_puffer(int(e.control.value))
 
-            teile.append(
+            zeit.append(
                 ft.Dropdown(
                     label="Live-Verlauf behalten",
                     value=str(zeitachse.puffer_s),
@@ -697,23 +794,30 @@ def darstellung_blatt(
                     ],
                     on_select=puffer_gewaehlt,
                     dense=True,
-                    width=220,
+                    border_radius=ECKIG_RADIUS,
                     tooltip="Gilt ab der nächsten Verbindung; so lang darf die Zeitachse sein",
                 )
             )
+        teile += gruppe("Zeitachse", zeit)
+    for text, inhalt in gruppen_vor:
+        teile += gruppe(text, inhalt)
     if y_zeilen:
-        teile += [
-            abschnitt_titel("Werteachsen"),
-            ft.Text(
-                "Leer heißt automatisch: Die Achse folgt den Werten im Ausschnitt. Zwei "
-                "Zahlen legen sie fest, z. B. RR 500 bis 1500 ms — was darüber oder "
-                "darunter liegt, schneidet die Kurve am Rand ab.",
-                size=11,
-                opacity=0.65,
-            ),
-            *(z.control for z in y_zeilen),
-        ]
-    if teile:
+        teile += gruppe(
+            "Werteachsen",
+            [
+                ft.Text(
+                    "Aus: Die Achse folgt den Werten im Ausschnitt. An: Sie reicht von–bis, "
+                    "z. B. RR 500 bis 1500 ms — was darüber oder darunter liegt, schneidet die "
+                    "Kurve am Rand ab. ↺ setzt den Standard aus den Einstellungen ein.",
+                    size=11,
+                    opacity=0.65,
+                ),
+                *(z.control for z in y_zeilen),
+            ],
+        )
+    for text, inhalt in gruppen_nach:
+        teile += gruppe(text, inhalt)
+    if teile and kurven_teil:
         teile.append(abschnitt_titel("Kurven"))
 
     def fertig() -> None:
@@ -790,7 +894,10 @@ def speichern_dialog(page: Any, state: Any, geaendert: Callable[[], None]) -> ft
 
 __all__ = [
     "BEREICH_TITEL",
+    "ECKIG",
+    "ECKIG_RADIUS",
     "FARBEN",
+    "Gruppe",
     "Werteachse",
     "Zeitachse",
     "ansicht_menue",

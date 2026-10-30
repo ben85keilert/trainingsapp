@@ -174,8 +174,9 @@ Automatiken (Stufe 2/3).
 - **Forschungsexport**: je Aufnahme `…_hf.json` (`hf-auswertung-v1`: Profilstand, Werte,
   Abschnitte, Erholungen, Kandidaten) aus dem Cache (`ui/training._forschung_teile`).
 
-Offen (bewusst, Fragen 1b/11/`hf_spec`): Signalton an einer eigenen Grenze, Behandlungs-
-Dreiteilung in solo, HF-Vorbelegung je Übung. Dazu P93–P95 (`docs/offene_fragen.md`).
+Offen (bewusst, Fragen 11/`hf_spec`): Behandlungs-Dreiteilung in solo, HF-Vorbelegung je
+Übung. Frage 1b (Signalton) ist seit dem 30.10.2026 gebaut (unten). Dazu P93–P95
+(`docs/offene_fragen.md`).
 
 ### 3.1 Nachträge (Ben, 30.10.2026)
 
@@ -199,6 +200,21 @@ Dreiteilung in solo, HF-Vorbelegung je Übung. Dazu P93–P95 (`docs/offene_frag
   grau. Übernommen: Quelle `dfa_alpha1` (Rang hinter Labor, vor Talk-Test; 6 bpm; 90 Tage),
   Herkunft „α1 = 0,75 · 30 Fenster · r² 0,91“. `AUSWERTUNG_VERSION` 3; die Fensterreihe
   (`alpha1.reihe`) liegt im Cache und im Forschungsexport. Kurve α1 gegen HF: später.
+- **Korrekturen vom 30.10. abends (0.3.38):** Knopfsätze Kurz 1·2·10 · Mittel 2·5·15 · Lang
+  1·3·6 h · Eigene (Live-Puffer bis 12 h). Die Sichtwahl Herzfrequenz | HRV steht direkt unter
+  Gerät und Aufnahme; scrollt sie weg, zeigt der Reiter „Live“ die andere Sicht („Live ⇄ HRV“),
+  und ein Tipp auf den schon gewählten Reiter wechselt — von GPS oder Aufzeichnungen aus führt
+  „Live“ wie bisher zur Live-Ansicht. Die HF-Sicht hat ihr eigenes Blatt „Fenster &
+  Darstellung“: Zeitachse, Kurve als Mittel über 1–60 s, Bereiche im Bild oder alle (Achse von
+  der untersten bis zur obersten Grenze; gilt auch in der Auswertung), HF-Achse fest, Signal.
+- **Signal über einer Grenze** (Frage 1b/P90, Ben: „piepen alle 3–5 Sekunden, wenn man über
+  einer bestimmten HF ist … nicht aufdringlich, Holzschale/Tempelklang“): je Profil
+  (`HfEinstellungen.alarm_an/alarm_bpm/alarm_klang/alarm_takt_s`), Vorgabe Klangschale (leise,
+  `core.klang.SCHALE`), höchstens alle 3/4/5/10 s, solange die HF der letzten 5 s über der
+  Grenze liegt — live in beiden Sichten, über den Tondienst des Timers mit dessen Lautstärke
+  und Regler. Einstellbar unter Einstellungen → Herzfrequenz → „Signal über einer Grenze“ (mit
+  Vorspielen) und im HF-Blatt; die HF-Sicht zeigt „Signal ab 150 bpm · Klangschale“. Rechtlich
+  wie ein Timer an einer selbst gesetzten Grenze: keine Bewertung, kein Rat (Stufe B).
 
 ### 3.2 Für das Tutorial: wann die App Werte vorschlägt (Ben, 30.10.2026: „Wie oft ok,
 schreibe das aber transparent nieder“)

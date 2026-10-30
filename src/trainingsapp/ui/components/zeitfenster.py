@@ -43,7 +43,7 @@ from trainingsapp.core.hrv_einstellungen import (
     BREITEN_EIGEN,
     BREITEN_EIGEN_MAX,
     BREITEN_KURZ,
-    BREITEN_LANG,
+    BREITEN_NAMEN,
     BREITEN_SAETZE,
     FENSTER_MIN_S,
     HrvEinstellungen,
@@ -335,9 +335,11 @@ def breiten_nachziehen(
 
 
 class BreitenSatz:
-    """Kurz 1·2·10 · Lang 2·5·15 · Eigene — welcher Satz Breitenknöpfe an den Kurven steht,
-    dazu das Feld für eigene Breiten (Ben, 30.10.2026). Steht unter Einstellungen → HRV-Messung
-    → Kurven und im Blatt „Fenster & Darstellung“ als erster Eintrag der Zeitachse.
+    """Kurz 1·2·10 · Mittel 2·5·15 · Lang 1·3·6 h · Eigene — welcher Satz Breitenknöpfe an den
+    Kurven steht, dazu das Feld für eigene Breiten (Ben, 30.10.2026). Steht unter Einstellungen
+    → HRV-Messung → Kurven und im Blatt „Fenster & Darstellung“ als erster Eintrag der
+    Zeitachse. Die Knöpfe tragen nur den Namen (vier nebeneinander), die Zeile darunter nennt
+    die Breiten.
 
     ``lesen`` liefert die Einstellungen, ``speichern`` schreibt sie, ``geaendert`` bekommt die
     geänderten Einstellungen (die Ansicht stellt ihre Knöpfe um, `breiten_nachziehen`).
@@ -357,10 +359,17 @@ class BreitenSatz:
             selected=[e.breiten_satz],
             show_selected_icon=False,
             on_change=self._satz_gewaehlt,
+            style=ft.ButtonStyle(
+                visual_density=ft.VisualDensity.COMPACT,
+                padding=ft.Padding.symmetric(horizontal=8),
+            ),
             segments=[
-                ft.Segment(value=BREITEN_KURZ, label=ft.Text(self._satz_text(BREITEN_KURZ))),
-                ft.Segment(value=BREITEN_LANG, label=ft.Text(self._satz_text(BREITEN_LANG))),
-                ft.Segment(value=BREITEN_EIGEN, label=ft.Text("Eigene")),
+                ft.Segment(
+                    value=satz,
+                    label=ft.Text(name, size=12),
+                    tooltip=self._satz_text(satz) if satz in BREITEN_SAETZE else "Selbst eingeben",
+                )
+                for satz, name in BREITEN_NAMEN.items()
             ],
         )
         self.feld = ft.TextField(
@@ -377,9 +386,11 @@ class BreitenSatz:
 
     @staticmethod
     def _satz_text(satz: str) -> str:
-        return ("Kurz " if satz == BREITEN_KURZ else "Lang ") + "·".join(
-            str(s // 60) for s in BREITEN_SAETZE[satz]
-        )
+        """„Kurz 1·2·10 Min“, „Lang 1·3·6 h“ — fürs Tooltip."""
+        breiten = BREITEN_SAETZE[satz]
+        stunden = all(s >= 3600 for s in breiten)
+        zahlen = "·".join(str(s // 3600 if stunden else s // 60) for s in breiten)
+        return f"{BREITEN_NAMEN[satz]} {zahlen} {'h' if stunden else 'Min'}"
 
     @staticmethod
     def _zeile_text(e: HrvEinstellungen) -> str:

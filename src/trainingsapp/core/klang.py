@@ -99,6 +99,13 @@ GONG: Final[tuple[tuple[float, float, float], ...]] = (
 )
 #: Klangholz: zwei kurze, harte Teiltöne
 HOLZ: Final[tuple[tuple[float, float, float], ...]] = ((1.0, 1.0, 1.0), (2.76, 0.5, 1.6))
+#: Klangschale (Ben, 30.10.2026: „ein Klicken vielleicht Holzschale/Tempelklang, irgendwas
+#: Nettes, was fast nicht auffällt“): weich angeschlagen, wenige Teiltöne, kurzer Nachklang
+SCHALE: Final[tuple[tuple[float, float, float], ...]] = (
+    (1.0, 1.0, 1.0),
+    (2.71, 0.3, 1.9),
+    (4.9, 0.08, 2.8),
+)
 
 #: Angeschlagene Klänge: Teiltöne, Grundton (Hz), Nachklang (s). Tiefer als
 #: etwa 500 Hz geben Handylautsprecher wenig her — darum liegt Glocke 3 dort.
@@ -108,7 +115,11 @@ GLOCKEN: Final[dict[str, tuple[tuple[tuple[float, float, float], ...], float, fl
     "glocke3": (GLOCKE, 523.3, 2.0),  # C5, tief
     "gong": (GONG, 330.0, 2.4),
     "holz": (HOLZ, 1150.0, 0.18),
+    "schale": (SCHALE, 660.0, 0.7),
 }
+#: Leiser als die übrigen (Spitze statt 0,7): der Hinweis an der HF-Grenze soll nebenbei
+#: hörbar sein, nicht aufschrecken
+LAUTSTAERKE: Final[dict[str, float]] = {"schale": 0.4}
 
 #: Klänge zur Wahl, in der Reihenfolge der Auswahl — Schlüssel → Anzeigename.
 #: ``wechsel`` (Piep) ist die Vorgabe; ``countdown`` steht nicht zur Wahl.
@@ -119,6 +130,7 @@ KLAENGE: Final[dict[str, str]] = {
     "glocke3": "Glocke 3 · tief",
     "gong": "Gong",
     "holz": "Klangholz",
+    "schale": "Klangschale · leise",
     "ende": "Fanfare",
 }
 
@@ -174,14 +186,14 @@ def toene() -> dict[str, bytes]:
     """Alle Klänge des Timers als WAV-Bytes — Signale und Klänge zur Wahl.
 
     >>> sorted(toene())
-    ['countdown', 'ende', 'glocke1', 'glocke2', 'glocke3', 'gong', 'holz', 'wechsel']
+    ['countdown', 'ende', 'glocke1', 'glocke2', 'glocke3', 'gong', 'holz', 'schale', 'wechsel']
     >>> set(KLAENGE) <= set(toene())
     True
     """
     daten = {name: wav(folge) for name, folge in TOENE.items()}
     for name, (teiltoene, grund, dauer) in GLOCKEN.items():
-        daten[name] = glocke(teiltoene, grund, dauer)
+        daten[name] = glocke(teiltoene, grund, dauer, LAUTSTAERKE.get(name, 0.7))
     return daten
 
 
-__all__ = ["GLOCKEN", "KLAENGE", "RATE", "TOENE", "glocke", "toene", "wav"]
+__all__ = ["GLOCKEN", "KLAENGE", "LAUTSTAERKE", "RATE", "TOENE", "glocke", "toene", "wav"]

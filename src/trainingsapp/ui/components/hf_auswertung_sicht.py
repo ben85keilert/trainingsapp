@@ -671,6 +671,10 @@ class HfAuswertungSicht:
         if n and n.get("wert") is not None:
             w = float(n["wert"])
             grund = "" if n.get("gueltig") else " · " + "; ".join(n.get("gruende") or [])
+            abschnitt_name = next(
+                (s.name for s in self.k.abschnitte_wand() if s.id == n.get("abschnitt_id")),
+                None,
+            )
             wo = (
                 "im Schlafabschnitt"
                 if n.get("grundlage") != NACHT_FENSTER
@@ -692,6 +696,7 @@ class HfAuswertungSicht:
                             herkunft={
                                 "fenster": [n.get("t_von"), n.get("t_bis")],
                                 "abschnitt": n.get("abschnitt_id"),
+                                "abschnitt_name": abschnitt_name,
                                 "grundlage": n.get("grundlage"),
                             },
                         ),

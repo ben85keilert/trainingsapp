@@ -120,14 +120,36 @@ def test_einstellungsseiten_bauen_und_schalten(tmp_path) -> None:
         )
         weg.on_click()
         assert "dfa_alpha1" not in state.hrv_einstellungen().kacheln
-        # Zeitfenster live: dieselben vier Knöpfe wie an der Kurve, jede andere Breite
+        # Zeitfenster live: dieselben Knöpfe wie an der Kurve, jede andere Breite
         # eingetippt (Ben, 21.10.2026) — auch über den Knöpfen hinaus, bis 30 min
         knoepfe = next(
             c
             for c in controls
             if isinstance(c, ft.SegmentedButton) and any(s.value == "600" for s in c.segments)
         )
-        assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "5 Min", "10 Min"]
+        assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "10 Min"]
+        # Knopfsätze (Ben, 30.10.2026): Kurz 1·2·10, Lang 2·5·15, Eigene
+        satz = next(
+            c
+            for c in controls
+            if isinstance(c, ft.SegmentedButton) and any(s.value == "lang" for s in c.segments)
+        )
+        satz.on_change(SimpleNamespace(control=SimpleNamespace(selected=["lang"])))
+        assert state.hrv_einstellungen().breiten() == (120, 300, 900)
+        assert [s.label.value for s in knoepfe.segments] == ["2 Min", "5 Min", "15 Min"]
+        eigene = next(
+            c for c in controls if isinstance(c, ft.TextField) and c.label == "Eigene Breiten"
+        )
+        satz.on_change(SimpleNamespace(control=SimpleNamespace(selected=["eigen"])))
+        assert state.hrv_einstellungen().breiten_satz == "lang"  # noch keine eigenen
+        eigene.value = "2, 30, 6 h"
+        eigene.on_submit(None)
+        assert state.hrv_einstellungen().breiten() == (120, 1800, 21600)
+        assert [s.label.value for s in knoepfe.segments] == ["2 Min", "30 Min", "6 h"]
+        eigene.value = "abc"
+        eigene.on_submit(None)
+        assert eigene.error and state.hrv_einstellungen().breiten() == (120, 1800, 21600)
+        satz.on_change(SimpleNamespace(control=SimpleNamespace(selected=["kurz"])))
         feld = next(
             c for c in controls if isinstance(c, ft.TextField) and c.label == "Breite der Zeitachse"
         )

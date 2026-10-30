@@ -862,7 +862,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         26.10.2026); live folgt die Kurve weiter."""
         fenster.breite_links(breite_s, lauf.jetzt_s(), anfang())
         einstellung_merken(fenster_s=round(breite_s))
-        breiten_knoepfe.selected = breiten_auswahl(breite_s)
+        breiten_knoepfe.selected = breiten_auswahl(breite_s, einst.breiten())
         aktualisieren(erzwingen=True)
 
     def korrigiert_wechseln(e: ft.Event[ft.Switch]) -> None:
@@ -1046,7 +1046,9 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         lauf,
         fenster=fenster,
         anfang=anfang,
-        breite_gesetzt=lambda b: setattr(breiten_knoepfe, "selected", breiten_auswahl(b)),
+        breite_gesetzt=lambda b: setattr(
+            breiten_knoepfe, "selected", breiten_auswahl(b, einst.breiten())
+        ),
         notizen_auffrischen=lambda: notizfeld.auffrischen(),
         danach=lambda: aktualisieren(erzwingen=True),
     )
@@ -1938,7 +1940,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         tooltip="Werte an einer Stelle der Kurven ablesen — hält die Kurve an",
         on_click=lambda: ablesen_umschalten(),
     )
-    breiten_knoepfe = breiten_wahl(fenster.breite_s, breite_waehlen)
+    breiten_knoepfe = breiten_wahl(fenster.breite_s, breite_waehlen, breiten=einst.breiten())
 
     def lage() -> ft.Control:
         """Zurückgeblättert: wie weit, und zurück zur Gegenwart."""

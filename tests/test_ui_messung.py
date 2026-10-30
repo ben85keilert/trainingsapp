@@ -1294,7 +1294,7 @@ def test_aufzeichnung_wie_live_ganzer_abschnitt_und_feste_achsen(daten) -> None:
     ]
     assert "Fenster & Darstellung …" not in eintraege
     knoepfe = _breiten_wahl(view)
-    assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "5 Min", "10 Min"]
+    assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "10 Min"]
 
     # Ein Tipp auf den Abschnitt-Chip zeigt ihn ganz, mit 30 s Rand …
     chip = next(
@@ -1353,7 +1353,7 @@ async def test_live_ablesen_und_knoepfe_wie_in_der_aufzeichnung(daten) -> None:
     zeile = _titelzeile(ansicht, "RR-TACHOGRAMM")
     assert _knoepfe_rechts(zeile) == ["Ablesen", "Kurven im Vollbild", "Fenster & Darstellung", "⋮"]
     knoepfe = _breiten_wahl(ansicht)
-    assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "5 Min", "10 Min"]
+    assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "10 Min"]
 
     # Ablesen hält die Kurve an und zeigt die Werte am Strich — wie in der Aufzeichnung
     knopf = _knopf(ansicht, "Ablesen")

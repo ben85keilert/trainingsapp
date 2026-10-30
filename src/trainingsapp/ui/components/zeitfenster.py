@@ -32,24 +32,36 @@ from __future__ import annotations
 
 import contextlib
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.hrv_einstellungen import FENSTER_MIN_S
+from trainingsapp.core.hrv_einstellungen import BREITEN_KURZ, BREITEN_SAETZE, FENSTER_MIN_S
 from trainingsapp.core.zeitangabe import breite_lesen, dauer_text
 from trainingsapp.ui.components.layout import ohne_auto_update
 
-#: Breiten der Zeitachse (s) — „Min“ hinten dran (Ben, 19.10.2026), live und in der
-#: Aufzeichnung dieselben (21.10.2026)
-BREITEN: tuple[tuple[int, str], ...] = (
-    (60, "1 Min"),
-    (120, "2 Min"),
-    (300, "5 Min"),
-    (600, "10 Min"),
-)
+#: Breiten der Zeitachse (s), wenn der Aufrufer keine mitgibt — „Min“ hinten dran (Ben,
+#: 19.10.2026), live und in der Aufzeichnung dieselben (21.10.2026). Welcher Satz an den
+#: Kurven steht, wählt die Person (`HrvEinstellungen.breiten`, 30.10.2026).
+BREITEN: tuple[int, ...] = BREITEN_SAETZE[BREITEN_KURZ]
+
+
+def breite_text(sekunden: float) -> str:
+    """Beschriftung eines Breitenknopfs: Minuten, ab einer Stunde Stunden.
+
+    >>> breite_text(60), breite_text(90), breite_text(600), breite_text(5400), breite_text(21600)
+    ('1 Min', '1:30 Min', '10 Min', '1,5 h', '6 h')
+    """
+    s = round(sekunden)
+    if s >= 3600:
+        return f"{s / 3600:g} h".replace(".", ",")
+    if s % 60 == 0:
+        return f"{s // 60} Min"
+    return f"{s // 60}:{s % 60:02d} Min"
+
+
 #: Was das Feld „Breite der Zeitachse“ versteht
 BREITE_UNLESBAR = "Nicht lesbar — z. B. 3, 1:30 oder 90 s"
 
@@ -253,19 +265,24 @@ def zeit_unter(
 # ---------------------------------------------------------------------------
 
 
-def breiten_auswahl(breite_s: float) -> list[str]:
+def breiten_auswahl(breite_s: float, breiten: Sequence[int] = BREITEN) -> list[str]:
     """Der gewählte Knopf zu einer Breite — keiner, wenn sie zu keinem passt.
 
     >>> breiten_auswahl(120.0), breiten_auswahl(210), breiten_auswahl(0)
     (['120'], [], [])
     """
-    return [str(s) for s, _ in BREITEN if abs(breite_s - s) < 0.5]
+    return [str(s) for s in breiten if abs(breite_s - s) < 0.5]
 
 
 def breiten_wahl(
-    breite_s: float, waehlen: Callable[[float], None], *, kompakt: bool = False
+    breite_s: float,
+    waehlen: Callable[[float], None],
+    *,
+    kompakt: bool = False,
+    breiten: Sequence[int] = BREITEN,
 ) -> ft.SegmentedButton:
-    """1 · 2 · 5 · 10 Min — hochkant über die volle Breite, im Vollbild ``kompakt``.
+    """1 · 2 · 10 Min (oder der gewählte Satz) — hochkant über die volle Breite, im
+    Vollbild ``kompakt``.
 
     Jede andere Breite (eingetippt, ein Abschnitt, die ganze Messung) wählt keinen
     Knopf; das Fenster behält sie trotzdem. Nach einer Änderung von außen stellt
@@ -277,7 +294,7 @@ def breiten_wahl(
             waehlen(float(e.control.selected[0]))
 
     return ft.SegmentedButton(
-        selected=breiten_auswahl(breite_s),
+        selected=breiten_auswahl(breite_s, breiten),
         allow_empty_selection=True,
         show_selected_icon=False,
         expand=not kompakt,
@@ -287,8 +304,8 @@ def breiten_wahl(
         if kompakt
         else None,
         segments=[
-            ft.Segment(value=str(s), label=ft.Text(t, size=12 if kompakt else None))
-            for s, t in BREITEN
+            ft.Segment(value=str(s), label=ft.Text(breite_text(s), size=12 if kompakt else None))
+            for s in breiten
         ],
         on_change=gewaehlt,
     )

@@ -21,7 +21,7 @@ heißen Vorschlag, Grenzen sind Werte der Person.
 from __future__ import annotations
 
 import contextlib
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import flet as ft
@@ -101,6 +101,49 @@ def wert_text(p: Profilwert | None, *, formel: hz.Formelwert | None = None) -> s
     if formel is not None and formel.gueltig and formel.wert is not None:
         return f"{formel.wert:.0f} bpm · geschätzt ({formel.name}) · ± {formel.see:.1f}"
     return "kein Wert"
+
+
+def herkunft_text(p: Profilwert, state: AppState) -> str:
+    """Die Herkunft eines Werts in Worten statt als Kennungen (Ben, 30.10.2026): „Messung
+    29.10.2026 21:03 · Polar H10 · Fenster 02:14–04:14 · Abschnitt „Schlafen“ · Artefakte
+    1,2 %“ — leer bei einem Eintrag von Hand ohne Notiz."""
+    h = p.herkunft or {}
+    teile: list[str] = []
+    start = None
+    if p.hrv_recording_id:
+        rec = state.hrv.laden(p.hrv_recording_id)
+        if rec is not None:
+            start = rec.started_at.astimezone()
+            teile.append(f"Messung {start:%d.%m.%Y %H:%M}")
+        else:
+            teile.append("Messung (nicht mehr vorhanden)")
+    if p.geraet:
+        teile.append(p.geraet)
+
+    def uhr(t: Any) -> str | None:
+        if start is None or isinstance(t, bool) or not isinstance(t, int | float):
+            return None
+        return (start + timedelta(seconds=float(t))).strftime("%H:%M")
+
+    f = h.get("fenster")
+    if isinstance(f, list | tuple) and len(f) == 2:
+        a, b = uhr(f[0]), uhr(f[1])
+        if a and b:
+            teile.append(f"Fenster {a}–{b}")
+    if h.get("grundlage") == "nachtfenster":
+        teile.append("Nachtfenster 20–10 Uhr")
+    if name := h.get("abschnitt_name"):
+        teile.append(f"Abschnitt „{name}“")
+    elif h.get("abschnitt"):
+        teile.append("Abschnitt der Messung")
+    if marke := uhr(h.get("t_wall_s")):
+        teile.append(f"Marke um {marke}")
+    art = h.get("artefaktanteil")
+    if isinstance(art, int | float) and not isinstance(art, bool):
+        teile.append(f"Artefakte {100 * art:.1f} %".replace(".", ","))
+    if p.note:
+        teile.append(p.note)
+    return " · ".join(teile)
 
 
 def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
@@ -201,44 +244,62 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
         verlauf: list[ft.Control] = []
         for p in reversed(alle[-6:]):
             gilt = geltend is not None and p.id == geltend.id
-            verlauf.append(
-                ft.Row(
-                    spacing=4,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            knoepfe: list[ft.Control] = [
+                ft.IconButton(
+                    ft.Icons.PUSH_PIN if p.fest else ft.Icons.PUSH_PIN_OUTLINED,
+                    icon_size=18,
+                    tooltip="Festsetzung lösen" if p.fest else "Festsetzen (gilt über alles)",
+                    on_click=lambda _=None, wid=p.id, f=p.fest: festsetzen(wid, not f),
+                ),
+                ft.IconButton(
+                    ft.Icons.DELETE_OUTLINE,
+                    icon_size=18,
+                    tooltip="Eintrag entfernen",
+                    on_click=lambda _=None, wid=p.id: entfernen(wid),
+                ),
+            ]
+            if p.hrv_recording_id and state.hrv.laden(p.hrv_recording_id) is not None:
+                knoepfe.insert(
+                    0,
+                    ft.IconButton(
+                        ft.Icons.OPEN_IN_NEW,
+                        icon_size=18,
+                        tooltip="Messung öffnen",
+                        on_click=lambda _=None, rid=p.hrv_recording_id: page.run_task(
+                            messung_oeffnen, rid
+                        ),
+                    ),
+                )
+            zeile: ft.Control = ft.Row(
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Icon(
+                        ft.Icons.CHECK_CIRCLE if gilt else ft.Icons.CIRCLE_OUTLINED,
+                        size=16,
+                        opacity=1 if gilt else 0.4,
+                        tooltip="gilt" if gilt else None,
+                    ),
+                    ft.Text(wert_text(p), size=12, expand=True),
+                    *knoepfe,
+                ],
+            )
+            # Die Herkunft leserlich direkt darunter (Ben, 30.10.2026) — Tag, Uhrzeit,
+            # Fenster, Abschnitt — statt einer Kennung
+            herkunft = herkunft_text(p, state)
+            if herkunft:
+                zeile = ft.Column(
+                    spacing=0,
+                    tight=True,
                     controls=[
-                        ft.Icon(
-                            ft.Icons.CHECK_CIRCLE if gilt else ft.Icons.CIRCLE_OUTLINED,
-                            size=16,
-                            opacity=1 if gilt else 0.4,
-                            tooltip="gilt" if gilt else None,
-                        ),
-                        ft.Text(wert_text(p), size=12, expand=True),
-                        ft.IconButton(
-                            ft.Icons.PUSH_PIN if p.fest else ft.Icons.PUSH_PIN_OUTLINED,
-                            icon_size=18,
-                            tooltip="Festsetzung lösen"
-                            if p.fest
-                            else "Festsetzen (gilt über alles)",
-                            on_click=lambda _=None, wid=p.id, f=p.fest: festsetzen(wid, not f),
-                        ),
-                        ft.IconButton(
-                            ft.Icons.DELETE_OUTLINE,
-                            icon_size=18,
-                            tooltip="Eintrag entfernen",
-                            on_click=lambda _=None, wid=p.id: entfernen(wid),
+                        zeile,
+                        ft.Container(
+                            padding=ft.Padding.only(left=22, bottom=4),
+                            content=ft.Text(herkunft, size=11, opacity=0.7),
                         ),
                     ],
                 )
-            )
-        if p_herkunft := (geltend.herkunft if geltend is not None else None):
-            verlauf.append(
-                hinweis(
-                    "Herkunft: "
-                    + ", ".join(
-                        f"{k} {v}" for k, v in p_herkunft.items() if not isinstance(v, dict | list)
-                    )
-                )
-            )
+            verlauf.append(zeile)
         quellen = EINTRAG_QUELLEN[groesse]
         wert = ft.TextField(
             label="Wert (bpm)", dense=True, width=120, keyboard_type=ft.KeyboardType.NUMBER
@@ -320,6 +381,9 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
                 ],
             ),
         )
+
+    async def messung_oeffnen(recording_id: str) -> None:
+        await page.push_route(f"/messung/{recording_id}")
 
     def festsetzen(wert_id: str, fest: bool) -> None:
         state.profilwerte.festsetzen(wert_id, fest)

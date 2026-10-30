@@ -54,6 +54,19 @@ NOTIZEN_ZEILEN: Final[tuple[int, ...]] = (5, 7, 10, 15, 0)
 #: so viel, wie der Puffer hält (`HrvEinstellungen.puffer_s`)
 FENSTER_MIN_S: Final[int] = 10
 FENSTER_MAX_S: Final[int] = max(PUFFER_S)
+#: Knöpfe der Zeitachse (s) — zwei Sätze zur Wahl und ein eigener (Ben, 30.10.2026:
+#: „Kurz 1-2-10, Lang 2-5-15 … darunter die Möglichkeit, eigene Intervalle zu setzen“)
+BREITEN_KURZ: Final[str] = "kurz"
+BREITEN_LANG: Final[str] = "lang"
+BREITEN_EIGEN: Final[str] = "eigen"
+BREITEN_SAETZE: Final[dict[str, tuple[int, ...]]] = {
+    BREITEN_KURZ: (60, 120, 600),
+    BREITEN_LANG: (120, 300, 900),
+}
+#: Eigene Breiten: so viele höchstens, zwischen `FENSTER_MIN_S` und einem Tag (eine Nacht
+#: braucht 6-h-Fenster; live begrenzt der Puffer ohnehin)
+BREITEN_EIGEN_MAX: Final[int] = 5
+BREITE_EIGEN_MAX_S: Final[int] = 86400
 
 #: Ebenen über der Hauptkurve einer Aufzeichnung (Ben, 19.10.2026, Plan D): Notizen (gelb),
 #: Leistungen der Person (blau, `person/leistung`), Abschnittsbalken — einzeln einblendbar
@@ -131,6 +144,10 @@ class HrvEinstellungen:
     #: Live-Verlauf: so weit reicht der Puffer zurück (s, `PUFFER_S`) — gilt ab der
     #: nächsten Verbindung (`devices.messlauf.Messlauf`)
     puffer_s: int = 1800
+    #: Welcher Satz Breitenknöpfe an den Kurven steht (`BREITEN_SAETZE` oder `BREITEN_EIGEN`)
+    breiten_satz: str = BREITEN_KURZ
+    #: Die eigenen Breiten (s), aufsteigend — gelten bei `breiten_satz == BREITEN_EIGEN`
+    breiten_eigen: list[int] = field(default_factory=list)
     #: Live die korrigierte Kurve (Artefakte überbrückt) statt der rohen
     korrigiert: bool = True
     #: Analysebereiche unter der Hauptkurve: Frequenz und Nichtlinear anbieten. Für
@@ -169,6 +186,20 @@ class HrvEinstellungen:
     #: Die zuletzt gewählte Sicht beim nächsten Öffnen wiederherstellen
     sicht_merken: bool = True
 
+    def breiten(self) -> tuple[int, ...]:
+        """Die Breitenknöpfe (s) — eigene ohne Einträge fallen auf „kurz“ zurück.
+
+        >>> HrvEinstellungen().breiten(), HrvEinstellungen(breiten_satz="lang").breiten()
+        ((60, 120, 600), (120, 300, 900))
+        >>> HrvEinstellungen(breiten_satz="eigen", breiten_eigen=[1800, 7200]).breiten()
+        (1800, 7200)
+        >>> HrvEinstellungen(breiten_satz="eigen").breiten()
+        (60, 120, 600)
+        """
+        if self.breiten_satz == BREITEN_EIGEN and self.breiten_eigen:
+            return tuple(self.breiten_eigen)
+        return BREITEN_SAETZE.get(self.breiten_satz, BREITEN_SAETZE[BREITEN_KURZ])
+
     def bereiche(self, *, optisch: bool) -> list[str]:
         """Welche Analysebereiche die Ansicht anbietet (Zeit immer)."""
         out = [BEREICH_ZEIT]
@@ -188,6 +219,8 @@ class HrvEinstellungen:
             "darstellung": self.darstellung,
             "fenster_s": self.fenster_s,
             "puffer_s": self.puffer_s,
+            "breiten_satz": self.breiten_satz,
+            "breiten_eigen": list(self.breiten_eigen),
             "korrigiert": self.korrigiert,
             "frequenz": self.frequenz,
             "nichtlinear": self.nichtlinear,
@@ -235,6 +268,8 @@ class HrvEinstellungen:
         darstellung = d.get("darstellung")
         fenster = d.get("fenster_s")
         puffer = auswahl("puffer_s", PUFFER_S)
+        satz = d.get("breiten_satz")
+        eigen = breiten_pruefen(d.get("breiten_eigen"))
         return cls(
             messung_anzeigen=schalter("messung_anzeigen"),
             kacheln=kacheln,
@@ -246,6 +281,10 @@ class HrvEinstellungen:
             and FENSTER_MIN_S <= fenster <= puffer
             else vorgabe.fenster_s,
             puffer_s=puffer,
+            breiten_satz=satz
+            if satz in BREITEN_SAETZE or (satz == BREITEN_EIGEN and eigen)
+            else vorgabe.breiten_satz,
+            breiten_eigen=eigen,
             korrigiert=schalter("korrigiert"),
             frequenz=schalter("frequenz"),
             nichtlinear=schalter("nichtlinear"),
@@ -270,6 +309,27 @@ class HrvEinstellungen:
         )
 
 
+def breiten_pruefen(werte: Any) -> list[int]:
+    """Eigene Breiten bereinigen: ganze Sekunden im erlaubten Bereich, aufsteigend, ohne
+    Doppelte, höchstens `BREITEN_EIGEN_MAX` — Unbrauchbares fällt weg.
+
+    >>> breiten_pruefen([600, 120.0, "x", 120, 5, 99999, 7200])
+    [120, 600, 7200]
+    >>> breiten_pruefen("kaputt"), breiten_pruefen(None)
+    ([], [])
+    """
+    if not isinstance(werte, list | tuple):
+        return []
+    out: set[int] = set()
+    for w in werte:
+        if isinstance(w, bool) or not isinstance(w, int | float):
+            continue
+        sek = round(w)
+        if FENSTER_MIN_S <= sek <= BREITE_EIGEN_MAX_S:
+            out.add(sek)
+    return sorted(out)[:BREITEN_EIGEN_MAX]
+
+
 def einstellungen_lesen(text: str | None) -> HrvEinstellungen:
     try:
         return HrvEinstellungen.aus_dict(json.loads(text or ""))
@@ -287,6 +347,12 @@ __all__ = [
     "BEREICH_FREQUENZ",
     "BEREICH_NICHTLINEAR",
     "BEREICH_ZEIT",
+    "BREITEN_EIGEN",
+    "BREITEN_EIGEN_MAX",
+    "BREITEN_KURZ",
+    "BREITEN_LANG",
+    "BREITEN_SAETZE",
+    "BREITE_EIGEN_MAX_S",
     "FENSTER_MAX_S",
     "FENSTER_MIN_S",
     "KACHELN",
@@ -301,6 +367,7 @@ __all__ = [
     "STANDARD_KACHELN",
     "UEBERSICHT",
     "HrvEinstellungen",
+    "breiten_pruefen",
     "einstellungen_lesen",
     "einstellungen_schreiben",
 ]

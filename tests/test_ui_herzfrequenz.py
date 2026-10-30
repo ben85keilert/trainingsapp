@@ -294,6 +294,49 @@ def test_einstellungen_herzfrequenz_eintragen_und_modell(daten) -> None:
     assert state.ausnahmen.alle(state.profil.id) == {}
 
 
+def test_herkunft_eines_werts_steht_leserlich_darunter(daten) -> None:
+    """Ben, 30.10.2026: Tag, Uhrzeit, Fenster und Abschnitt statt einer Kennung."""
+    from datetime import UTC, datetime, timedelta
+
+    from trainingsapp.core.models import HrvRecording
+    from trainingsapp.ui.views.einstellungen_herzfrequenz import herkunft_text
+
+    state, _ = daten
+    start = datetime(2026, 10, 28, 20, 3, tzinfo=UTC)
+    rec = HrvRecording(subject_id=state.profil.id, file_path="P/n.json", started_at=start)
+    state.hrv.anlegen(rec)
+    p = Profilwert(
+        state.profil.id,
+        "ruhe_hf",
+        51,
+        "nacht",
+        state.heute(),
+        geraet="Polar H10",
+        hrv_recording_id=rec.id,
+        herkunft={
+            "messung": rec.id,
+            "fenster": [3 * 3600, 5 * 3600],
+            "abschnitt": "seg-1",
+            "abschnitt_name": "Schlafen",
+            "grundlage": "abschnitt",
+        },
+    )
+    state.profilwerte.hinzufuegen(p)
+    ortszeit = start.astimezone()
+    text = herkunft_text(p, state)
+    assert text.startswith(f"Messung {ortszeit:%d.%m.%Y %H:%M} · Polar H10 · Fenster ")
+    von = (ortszeit + timedelta(hours=3)).strftime("%H:%M")
+    assert f"Fenster {von}–" in text and "Abschnitt „Schlafen“" in text and "seg-1" not in text
+    ansicht = einstellungen_herzfrequenz(_seite(), state)
+    assert text in _texte(ansicht)
+    assert any(
+        isinstance(c, ft.IconButton) and c.icon == ft.Icons.OPEN_IN_NEW for c in _alle(ansicht)
+    )
+    # ein Eintrag von Hand ohne Notiz: keine Herkunftszeile
+    leer = Profilwert(state.profil.id, "ruhe_hf", 55, "eintrag", state.heute())
+    assert herkunft_text(leer, state) == ""
+
+
 def test_einstellungen_zeigen_herzfrequenz_kachel(daten) -> None:
     from trainingsapp.ui.views.einstellungen import einstellungen
 

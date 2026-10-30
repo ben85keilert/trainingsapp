@@ -748,9 +748,11 @@ def _aufbauen(
     ketten_box = ft.Column(spacing=0)
     # Dieselben vier Knöpfe wie live (Ben, 21.10.2026); ein Abschnitt, die ganze Messung
     # oder eine eingetippte Breite wählt keinen — `breiten_auswahl`
-    breite_wahl = breiten_wahl(fenster.breite_s, lambda s: breite_setzen(s))
+    breite_wahl = breiten_wahl(
+        fenster.breite_s, lambda s: breite_setzen(s), breiten=einst.breiten()
+    )
     breite_wahl_voll = breiten_wahl(  # dieselbe Wahl in der Kopfzeile des Vollbilds
-        fenster.breite_s, lambda s: breite_setzen(s), kompakt=True
+        fenster.breite_s, lambda s: breite_setzen(s), kompakt=True, breiten=einst.breiten()
     )
 
     def achse_umschalten() -> None:
@@ -1935,7 +1937,7 @@ def _aufbauen(
     def breiten_zeigen() -> None:
         """Die Breitenknöpfe nach dem Fenster — keiner, wenn die Breite zu keinem passt."""
         for wahl in (breite_wahl, breite_wahl_voll):
-            wahl.selected = breiten_auswahl(fenster.breite_s)
+            wahl.selected = breiten_auswahl(fenster.breite_s, einst.breiten())
 
     def zentrieren(x: float) -> None:
         """Die Kurve auf eine Zeit rücken (Notiz antippen); bei „Alles" bleibt sie."""

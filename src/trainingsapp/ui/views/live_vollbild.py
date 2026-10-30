@@ -234,7 +234,9 @@ def _vollbild(
         lauf,
         fenster=fenster,
         anfang=anfang,
-        breite_gesetzt=lambda b: setattr(breiten_knoepfe, "selected", breiten_auswahl(b)),
+        breite_gesetzt=lambda b: setattr(
+            breiten_knoepfe, "selected", breiten_auswahl(b, einst.breiten())
+        ),
         notizen_auffrischen=lambda: notizfeld.auffrischen(),
         danach=lambda: aktualisieren(erzwingen=True),
         offen=True,
@@ -495,7 +497,7 @@ def _vollbild(
         aktuell = state.hrv_einstellungen()
         aktuell.fenster_s = round(breite_s)
         state.hrv_einstellungen_setzen(aktuell)
-        breiten_knoepfe.selected = breiten_auswahl(breite_s)
+        breiten_knoepfe.selected = breiten_auswahl(breite_s, einst.breiten())
         aktualisieren(erzwingen=True)
 
     def achse_umschalten() -> None:
@@ -564,7 +566,9 @@ def _vollbild(
         ),
     )
     #: Dieselben Knöpfe wie hochkant und in der Aufzeichnung (Ben, 21.10.2026)
-    breiten_knoepfe = breiten_wahl(fenster.breite_s, breite_waehlen, kompakt=True)
+    breiten_knoepfe = breiten_wahl(
+        fenster.breite_s, breite_waehlen, kompakt=True, breiten=einst.breiten()
+    )
     kopf = ft.Row(
         spacing=2,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,

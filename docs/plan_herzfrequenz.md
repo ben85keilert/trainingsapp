@@ -159,8 +159,13 @@ Automatiken (Stufe 2/3).
   **Wochenlast** (Σ TRIMP, Σ sRPE-Last, Minuten, Monotonie, Strain nach Foster — Zahlen),
   **Tests** (Submaximaltest: HRR60 nach „Stufe 3“ und Ø „Stufe 2“; Talk-Test; Feld-Maximaltest:
   HFmax-Kandidat), „Alle nachrechnen“ für Aufnahmen ohne Cache. Rechnung `core/hf_verlauf.py`.
-- **Nacht-HF**: ein Abschnitt „Schlaf“ (auch aus dem HF-Vorschlag) liefert das tiefste
-  2-h-Mittel; übernommen wird es als Ruhe-HF mit Quelle `nacht` (Rang 1 nach Festsetzung).
+- **Nacht-HF**: ein Abschnitt „Schlaf…“/„Nacht…“ (auch aus dem HF-Vorschlag) liefert das
+  tiefste 2-h-Mittel; **ohne Abschnitt** zählt das Nachtfenster 20–10 Uhr der Aufnahme, sobald
+  dort ≥ 4 h Daten liegen (Ben 30.10.: „aus einer Nachtaufnahme von 21 bis 6 den niedrigsten
+  Puls“ — der Schlaf-Vorschlag verlangte 4 h am Stück unter Tagesminimum + 10, was echte Nächte
+  selten liefern). Übernommen wird sie als Ruhe-HF mit Quelle `nacht` (Rang 1 nach
+  Festsetzung); das Übernehmen ist die Bestätigung der Schlafzeit nach INTERLIVE.
+  `AUSWERTUNG_VERSION` (`core/hf_auswertung.py`) macht alte Caches veraltet.
 - **Kacheln**: Gruppe „Herzfrequenz“ (Reserve, Bereich, Zeit im Bereich, TRIMP) auch in der
   HRV-Sicht (`components/kacheln.py`, Bezug Aufnahme bzw. 5 min).
 - **Uhr**: Seite „Bereich“ (Name des Bereichs, % der Reserve, HF) in `core/uhr_seiten.py`,
@@ -170,7 +175,19 @@ Automatiken (Stufe 2/3).
   Abschnitte, Erholungen, Kandidaten) aus dem Cache (`ui/training._forschung_teile`).
 
 Offen (bewusst, Fragen 1b/11/`hf_spec`): Signalton an einer eigenen Grenze, Behandlungs-
-Dreiteilung in solo, HF-Vorbelegung je Übung.
+Dreiteilung in solo, HF-Vorbelegung je Übung. Dazu P93–P95 (`docs/offene_fragen.md`).
+
+### 3.1 Nachträge (Ben, 30.10.2026)
+
+- **Herkunft leserlich** unter jedem Verlaufseintrag im Profil (`herkunft_text`): „Messung
+  29.10.2026 21:03 · Polar H10 · Fenster 02:14–04:14 · Abschnitt „Schlafen“ · Artefakte 1,2 %“
+  statt Kennungen; Knopf „Messung öffnen“. Die Übernahme schreibt den Abschnittsnamen mit.
+- **HFmax-Formeln** in der Reihenfolge automatisch – Gulati (Frauen) – Nes (HUNT) – Tanaka (älter).
+- **Stichtag** (hrv-core 0.4.1, Entscheidung 19): eine Aufnahme rechnet mit dem jüngsten
+  Profilwert bis zu ihrem Tag, nie mit einem späteren; korrigieren durch Löschen oder einen
+  neuen Eintrag mit Datum, dann „Mit heutigem Profil nachrechnen“.
+- **Breitensätze** der Zeitachse (Einstellungen → HRV-Messung → Kurven): Kurz 1·2·10, Lang
+  2·5·15 oder eigene (bis 5, 10 s bis 24 h) — live und in der Aufzeichnung dieselben.
 
 ## 4. Was Stufe A/B/C heißt (Rechtsrahmen)
 

@@ -51,12 +51,13 @@ MODELL_ERKLAERUNG: Final[dict[str, str]] = {
     hz.MODELL_EIGEN: "Deine Grenzen in bpm oder % der Reserve, mit eigenen Namen.",
 }
 #: Vorgabe-Formel: „auto“ wählt nach Geschlecht (Gulati für Frauen, sonst Nes/HUNT)
-FORMELN: Final[tuple[str, ...]] = ("auto", "nes", "tanaka", "gulati")
+#: Reihenfolge im Menü (Ben, 30.10.2026): automatisch – Frauen – Nes – Tanaka (älter)
+FORMELN: Final[tuple[str, ...]] = ("auto", "gulati", "nes", "tanaka")
 FORMEL_NAMEN: Final[dict[str, str]] = {
-    "auto": "Automatisch (Nes/HUNT, Frauen Gulati)",
-    "nes": "Nes 2013 (HUNT): 211 − 0,64 · Alter",
-    "tanaka": "Tanaka 2001: 208 − 0,7 · Alter",
+    "auto": "Automatisch (Frauen Gulati, sonst Nes/HUNT)",
     "gulati": "Gulati 2010 (Frauen): 206 − 0,88 · Alter",
+    "nes": "Nes 2013 (HUNT, Männer und Frauen): 211 − 0,64 · Alter",
+    "tanaka": "Tanaka 2001 (älter, kleinere Stichprobe): 208 − 0,7 · Alter",
 }
 EIGENE_MAX: Final[int] = 8
 

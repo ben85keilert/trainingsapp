@@ -31,6 +31,7 @@ zurückgesetzt) — das ist der ganze Weg. Darum zählt hier `local_delta`.
 from __future__ import annotations
 
 import contextlib
+import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -38,7 +39,16 @@ from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.hrv_einstellungen import BREITEN_KURZ, BREITEN_SAETZE, FENSTER_MIN_S
+from trainingsapp.core.hrv_einstellungen import (
+    BREITEN_EIGEN,
+    BREITEN_EIGEN_MAX,
+    BREITEN_KURZ,
+    BREITEN_LANG,
+    BREITEN_SAETZE,
+    FENSTER_MIN_S,
+    HrvEinstellungen,
+    breiten_pruefen,
+)
 from trainingsapp.core.zeitangabe import breite_lesen, dauer_text
 from trainingsapp.ui.components.layout import ohne_auto_update
 
@@ -309,6 +319,114 @@ def breiten_wahl(
         ],
         on_change=gewaehlt,
     )
+
+
+def breiten_nachziehen(
+    knopf: ft.SegmentedButton, breiten: Sequence[int], breite_s: float, *, kompakt: bool = False
+) -> None:
+    """Die Knöpfe einer Breitenwahl auf einen anderen Satz umstellen (Ben, 30.10.2026)."""
+    knopf.segments = [
+        ft.Segment(value=str(s), label=ft.Text(breite_text(s), size=12 if kompakt else None))
+        for s in breiten
+    ]
+    knopf.selected = breiten_auswahl(breite_s, breiten)
+    with contextlib.suppress(Exception):
+        knopf.update()
+
+
+class BreitenSatz:
+    """Kurz 1·2·10 · Lang 2·5·15 · Eigene — welcher Satz Breitenknöpfe an den Kurven steht,
+    dazu das Feld für eigene Breiten (Ben, 30.10.2026). Steht unter Einstellungen → HRV-Messung
+    → Kurven und im Blatt „Fenster & Darstellung“ als erster Eintrag der Zeitachse.
+
+    ``lesen`` liefert die Einstellungen, ``speichern`` schreibt sie, ``geaendert`` bekommt die
+    geänderten Einstellungen (die Ansicht stellt ihre Knöpfe um, `breiten_nachziehen`).
+    """
+
+    def __init__(
+        self,
+        lesen: Callable[[], HrvEinstellungen],
+        speichern: Callable[[HrvEinstellungen], None],
+        geaendert: Callable[[HrvEinstellungen], None],
+    ) -> None:
+        self._lesen = lesen
+        self._speichern = speichern
+        self._geaendert = geaendert
+        e = lesen()
+        self.wahl = ft.SegmentedButton(
+            selected=[e.breiten_satz],
+            show_selected_icon=False,
+            on_change=self._satz_gewaehlt,
+            segments=[
+                ft.Segment(value=BREITEN_KURZ, label=ft.Text(self._satz_text(BREITEN_KURZ))),
+                ft.Segment(value=BREITEN_LANG, label=ft.Text(self._satz_text(BREITEN_LANG))),
+                ft.Segment(value=BREITEN_EIGEN, label=ft.Text("Eigene")),
+            ],
+        )
+        self.feld = ft.TextField(
+            label="Eigene Breiten",
+            value=", ".join(breite_text(s).removesuffix(" Min") for s in e.breiten_eigen),
+            helper="Minuten, durch Komma getrennt — auch 90 s, 1:30 oder 6 h",
+            dense=True,
+            visible=e.breiten_satz == BREITEN_EIGEN,
+            on_submit=self._eigene_uebernehmen,
+            on_blur=self._eigene_uebernehmen,
+        )
+        self.zeile = ft.Text(self._zeile_text(e), size=12, opacity=0.8)
+        self.control = ft.Column(spacing=6, tight=True, controls=[self.wahl, self.feld, self.zeile])
+
+    @staticmethod
+    def _satz_text(satz: str) -> str:
+        return ("Kurz " if satz == BREITEN_KURZ else "Lang ") + "·".join(
+            str(s // 60) for s in BREITEN_SAETZE[satz]
+        )
+
+    @staticmethod
+    def _zeile_text(e: HrvEinstellungen) -> str:
+        return "An den Kurven: " + " · ".join(breite_text(s) for s in e.breiten())
+
+    def _nachziehen(self, e: HrvEinstellungen) -> None:
+        self.zeile.value = self._zeile_text(e)
+        self.feld.visible = e.breiten_satz == BREITEN_EIGEN
+        for c in (self.zeile, self.feld, self.wahl):
+            with contextlib.suppress(Exception):
+                c.update()
+        self._geaendert(e)
+
+    def _satz_gewaehlt(self, ev: ft.Event[ft.SegmentedButton]) -> None:
+        if not ev.control.selected:
+            return
+        wahl = str(ev.control.selected[0])
+        e = self._lesen()
+        if wahl == BREITEN_EIGEN and not e.breiten_eigen:
+            # noch keine eigenen: erst das Feld zeigen, der Satz wechselt mit gültigen Breiten
+            self.feld.visible = True
+            with contextlib.suppress(Exception):
+                self.feld.update()
+            return
+        e.breiten_satz = wahl
+        self._speichern(e)
+        self._nachziehen(e)
+
+    def _eigene_uebernehmen(self, _ev: object = None) -> None:
+        """„1, 2, 10“ (Minuten), auch „90 s“, „1:30“, „6 h“ — durch Komma oder Semikolon
+        getrennt; eine Zahl allein sind Minuten wie bei den Knöpfen."""
+        teile = [t for t in re.split(r"[;,]", self.feld.value or "") if t.strip()]
+        sekunden = [breite_lesen(t) for t in teile]
+        gueltig = breiten_pruefen([s for s in sekunden if s is not None])
+        if not gueltig or len(gueltig) != len(teile):
+            self.feld.error = (
+                f"Bis zu {BREITEN_EIGEN_MAX} Breiten, z. B. 2, 30, 6 h — ab 10 s bis 24 h"
+            )
+            with contextlib.suppress(Exception):
+                self.feld.update()
+            return
+        self.feld.error = None
+        e = self._lesen()
+        e.breiten_eigen, e.breiten_satz = gueltig, BREITEN_EIGEN
+        self._speichern(e)
+        self.wahl.selected = [BREITEN_EIGEN]
+        self._nachziehen(e)
 
 
 class BreiteFeld:

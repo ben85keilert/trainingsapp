@@ -138,8 +138,11 @@ async def test_hf_sicht_ist_vorgabe_und_umschaltbar(daten) -> None:
         assert any("HFmax 185" in t and "geschätzt" in t for t in texte)  # Formel-Startwert
         chart = next(c for c in _alle(ansicht) if isinstance(c, fc.LineChart))
         assert chart.left_axis.title.value == "HF bpm"
-        # Bereichsgrenzen als gestrichelte Linien in der Kurve (zehn Cluster: 9 Grenzen)
-        assert sum(1 for s in chart.data_series if s.dash_pattern) >= 9
+        # Bereiche als Bänder hinter der Kurve, rechts beschriftet (zehn Cluster, Ben 30.10.)
+        assert sum(1 for s in chart.data_series if s.below_line_bgcolor) >= 1
+        assert chart.right_axis is not None and any(
+            lbl.label.value.startswith("Bereich") for lbl in chart.right_axis.labels
+        )
         # Umschalten auf HRV: Tachogramm, HRV-Kacheln — und gemerkt
         umschalter = _segment(ansicht, ["hf", "hrv"])
         assert umschalter.selected == ["hf"] and not umschalter.segments[1].disabled

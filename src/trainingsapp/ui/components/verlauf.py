@@ -21,12 +21,13 @@ import contextlib
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 import flet as ft
 from hrv_core.trends import KENNZAHLEN, im_bereich, titel, treppe
 
 from trainingsapp.core.hrv_ansicht import BLOCK, GLEITEND, PNN_WAHL, Ansicht
+from trainingsapp.core.zeitangabe import breite_lesen
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.karte import titel as abschnitt_titel
 from trainingsapp.ui.components.kurve import Reihe, kurve
@@ -57,6 +58,9 @@ class Zeitachse:
     breite_s: float
     setzen: Callable[[float], None]
     max_s: float | None = None
+    #: Die Wahl des Knopfsatzes (`zeitfenster.BreitenSatz.control`) — erster Eintrag der
+    #: Zeitachse, über der Breite (Ben, 30.10.2026)
+    satz: ft.Control | None = None
 
 
 def _achse(kennzahl: str) -> str | None:
@@ -71,7 +75,36 @@ def fenster_text(sekunden: float) -> str:
     ('30 s', '2 min', '90 s')
     """
     s = int(sekunden)
+    if s >= 3600 and s % 1800 == 0:
+        return f"{s / 3600:g} h".replace(".", ",")
     return f"{s // 60} min" if s >= 120 and s % 60 == 0 else f"{s} s"
+
+
+#: Eigene Fenster der Verlaufskurven (Ben, 30.10.2026: „einen manuellen Wert eingeben“):
+#: von 3 s bis zu einem Tag — ein 30-min-Mittel der RR über eine Nacht ist aufschlussreich
+FENSTER_EIGEN_MIN_S: Final[int] = 3
+FENSTER_EIGEN_MAX_S: Final[int] = 86400
+
+
+def fenster_lesen(text: str) -> int | None:
+    """Ein eingetipptes Fenster in Sekunden: eine Zahl allein sind **Sekunden** (wie die
+    Auswahl daneben), sonst „2 min“, „1:30“, „1 h“ (`zeitangabe.breite_lesen`).
+
+    >>> fenster_lesen("45"), fenster_lesen("2 min"), fenster_lesen("1 h"), fenster_lesen("1:30")
+    (45, 120, 3600, 90)
+    >>> fenster_lesen("2"), fenster_lesen("abc"), fenster_lesen("30 h")
+    (None, None, None)
+    """
+    t = (text or "").strip().replace(",", ".")
+    try:
+        sek = float(t)
+    except ValueError:
+        wert = breite_lesen(t)
+        if wert is None:
+            return None
+        sek = wert
+    s = round(sek)
+    return s if FENSTER_EIGEN_MIN_S <= s <= FENSTER_EIGEN_MAX_S else None
 
 
 def bezeichnung(kennzahl: str, ansicht: Ansicht) -> str:
@@ -491,6 +524,53 @@ def darstellung_blatt(
 
         return handler
 
+    def fenster_wahl(k: str, kz: Any) -> ft.Dropdown:
+        """Die Auswahl der Kennzahl — ein eigenes Fenster steht als zusätzlicher Eintrag."""
+        jetzt = ansicht.fenster_fuer(k, kz.fenster_s)
+        werte = sorted({*kz.fenster_wahl, jetzt})
+        return ft.Dropdown(
+            value=str(jetzt),
+            options=[ft.DropdownOption(key=str(s), text=fenster_text(s)) for s in werte],
+            on_select=fenster_setzen(k),
+            dense=True,
+            width=110,
+        )
+
+    def eigenes_fenster(k: str, kz: Any, wahl: ft.Dropdown) -> ft.TextField:
+        """Ein Fenster eintippen (Ben, 30.10.2026): Sekunden, „2 min“, „1 h“ — damit sich
+        auch langsame Wellen abbilden lassen (30-min-Mittel über eine Nacht)."""
+        feld = ft.TextField(
+            label="eigenes",
+            dense=True,
+            width=96,
+            hint_text="s · min · h",
+            keyboard_type=ft.KeyboardType.DATETIME,
+        )
+
+        def uebernehmen(_e: object = None) -> None:
+            if not (feld.value or "").strip():
+                return
+            sek = fenster_lesen(feld.value or "")
+            if sek is None:
+                feld.error = "3 s bis 24 h"
+                with contextlib.suppress(Exception):
+                    feld.update()
+                return
+            feld.error = None
+            ansicht.fenster[k] = sek
+            speichern()
+            werte = sorted({*kz.fenster_wahl, sek})
+            wahl.options = [ft.DropdownOption(key=str(s), text=fenster_text(s)) for s in werte]
+            wahl.value = str(sek)
+            feld.value = ""
+            for c in (wahl, feld):
+                with contextlib.suppress(Exception):
+                    c.update()
+
+        feld.on_submit = uebernehmen
+        feld.on_blur = uebernehmen
+        return feld
+
     def modus_setzen(k: str) -> Callable[[ft.Event[ft.SegmentedButton]], None]:
         def handler(e: ft.Event[ft.SegmentedButton]) -> None:
             if e.control.selected:
@@ -532,16 +612,8 @@ def darstellung_blatt(
                         run_spacing=6,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
-                            ft.Dropdown(
-                                value=str(ansicht.fenster_fuer(k, kz.fenster_s)),
-                                options=[
-                                    ft.DropdownOption(key=str(s), text=fenster_text(s))
-                                    for s in kz.fenster_wahl
-                                ],
-                                on_select=fenster_setzen(k),
-                                dense=True,
-                                width=110,
-                            ),
+                            (wahl := fenster_wahl(k, kz)),
+                            eigenes_fenster(k, kz, wahl),
                             ft.SegmentedButton(
                                 selected=[ansicht.modus_fuer(k)],
                                 show_selected_icon=False,
@@ -582,7 +654,10 @@ def darstellung_blatt(
     ]
     teile: list[ft.Control] = []
     if breite is not None:
-        teile += [abschnitt_titel("Zeitachse"), breite.control]
+        teile += [abschnitt_titel("Zeitachse")]
+        if zeitachse is not None and zeitachse.satz is not None:
+            teile.append(zeitachse.satz)
+        teile.append(breite.control)
     if y_zeilen:
         teile += [
             abschnitt_titel("Werteachsen"),
@@ -682,6 +757,7 @@ __all__ = [
     "darstellung_blatt",
     "darstellung_knopf",
     "diagramme",
+    "fenster_lesen",
     "fenster_text",
     "kurvengruppen",
     "speichern_dialog",

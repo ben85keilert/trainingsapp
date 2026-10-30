@@ -69,7 +69,7 @@ from trainingsapp.core.hf_training import (
     hf_je_schlag,
 )
 from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM, ROH, ROH_MAX_MS, ROH_MIN_MS
-from trainingsapp.core.hrv_einstellungen import SICHT_HF, SICHT_HRV
+from trainingsapp.core.hrv_einstellungen import SICHT_HF, SICHT_HRV, HrvEinstellungen
 from trainingsapp.core.hrv_export import adresse_maskieren, export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.models import HrvRecording
@@ -112,6 +112,7 @@ from trainingsapp.ui.components.hf_sicht import (
     HF_INFO,
     bezug_wahl,
     erholung_block,
+    hf_baender,
     hf_kacheln,
     hf_kopf,
     sicht_wahl,
@@ -162,8 +163,10 @@ from trainingsapp.ui.components.vollbild import achse as werteachse
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
 from trainingsapp.ui.components.zeitachse import achse, achsen_knopf
 from trainingsapp.ui.components.zeitfenster import (
+    BreitenSatz,
     Fenster,
     breiten_auswahl,
+    breiten_nachziehen,
     breiten_wahl,
     wischbar,
 )
@@ -1543,15 +1546,6 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 if w == w and x_von <= t + 1.0 <= x_bis
             ]
         reihen = [Reihe(punkte, farbe=ft.Colors.PRIMARY)]
-        for g in hf_grenzen:
-            reihen.append(
-                Reihe(
-                    [(x_von, g), (x_bis, g)],
-                    farbe=ft.Colors.with_opacity(0.5, ft.Colors.ON_SURFACE),
-                    breite=1.0,
-                    gestrichelt=True,
-                )
-            )
         return kurve(
             [*reihen, *marken],
             einheit="HF bpm",
@@ -1562,6 +1556,7 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
             x_text=x_text,
             x_null=x_null,
             y_fest=state.ansicht().y_bereich(werteachse("hf_geraet")),
+            baender=hf_baender(hf_bereiche),  # Belastungszonen hinter der Kurve
         )
 
     def erholung_reihe(t0: float) -> hz.HfReihe:
@@ -1921,7 +1916,12 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
                 state,
                 lambda: aktualisieren(erzwingen=True),
                 achsen=werteachsen(a, [*haupt, *gezeigt], roh_titel),
-                zeitachse=Zeitachse(fenster.breite_s, breite_waehlen, max_s=lauf.live.max_s),
+                zeitachse=Zeitachse(
+                    fenster.breite_s,
+                    breite_waehlen,
+                    max_s=lauf.live.max_s,
+                    satz=breiten_satz().control,
+                ),
             )
         )
 
@@ -1942,6 +1942,15 @@ def _live_teil(page: ft.Page, state: AppState, lauf: Messlauf) -> ft.Control:
         on_click=lambda: ablesen_umschalten(),
     )
     breiten_knoepfe = breiten_wahl(fenster.breite_s, breite_waehlen, breiten=einst.breiten())
+
+    def breiten_satz() -> BreitenSatz:
+        """Kurz · Lang · Eigene im Blatt (Ben, 30.10.2026) — die Knöpfe folgen sofort."""
+
+        def geaendert(neu: HrvEinstellungen) -> None:
+            einst.breiten_satz, einst.breiten_eigen = neu.breiten_satz, list(neu.breiten_eigen)
+            breiten_nachziehen(breiten_knoepfe, neu.breiten(), fenster.breite_s)
+
+        return BreitenSatz(state.hrv_einstellungen, state.hrv_einstellungen_setzen, geaendert)
 
     def lage() -> ft.Control:
         """Zurückgeblättert: wie weit, und zurück zur Gegenwart."""

@@ -47,7 +47,6 @@ from trainingsapp.core.hf_profil import (
     HfProfil,
     Profilwert,
     bereiche_fuer,
-    grenzen_bpm,
 )
 from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM
 from trainingsapp.core.laufend import minuten
@@ -56,6 +55,7 @@ from trainingsapp.data.hf_profil import RechenAusnahmeRepo
 from trainingsapp.ui.components.hf_sicht import (
     HALTUNG_NAMEN,
     KONTEXT_NAMEN,
+    hf_baender,
     prozent_text,
     stufenfarbe,
     zeit_je_bereich,
@@ -430,15 +430,6 @@ class HfAuswertungSicht:
         )
         x0, x1 = float(reihe.t[0]), float(reihe.t[-1] + reihe.raster_s)
         reihen = [Reihe(punkte, farbe=ft.Colors.PRIMARY)]
-        for g in grenzen_bpm(list(bereiche)):
-            reihen.append(
-                Reihe(
-                    [(x0, g), (x1, g)],
-                    farbe=ft.Colors.with_opacity(0.5, ft.Colors.ON_SURFACE),
-                    breite=1.0,
-                    gestrichelt=True,
-                )
-            )
         for i, ab in enumerate(a.abschnitte):
             reihen.append(
                 Reihe(
@@ -460,6 +451,7 @@ class HfAuswertungSicht:
                 x_von=x0,
                 x_bis=x1,
                 y_spanne_min=HF_SPANNE_MIN_BPM,
+                baender=hf_baender(bereiche),  # Belastungszonen im Koordinatensystem
             ),
             zeit_je_bereich(a.gesamt.get("sekunden_je_bereich") if bereiche else None, bereiche),
             *([hinweis(f"Grenzen: {grenz_namen}")] if grenz_namen else []),

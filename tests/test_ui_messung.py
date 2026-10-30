@@ -1314,7 +1314,11 @@ def test_aufzeichnung_wie_live_ganzer_abschnitt_und_feste_achsen(daten) -> None:
     # Fenster & Darstellung: Breite eintippen …
     zeile.controls[-2].on_click()
     blatt = seite.aufrufe[-1]
-    felder = [c for c in _alle_controls(blatt) if isinstance(c, ft.TextField)]
+    felder = [
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.TextField) and c.label not in ("Eigene Breiten", "eigenes")
+    ]
     assert [f.label for f in felder][:3] == ["Breite der Zeitachse", "von", "bis"]
     breite, von, bis = felder[:3]
     breite.value = "1:30"
@@ -1887,3 +1891,75 @@ async def test_detailansicht_zeigt_ekg_beiwerk_mit_eigener_skala(daten) -> None:
     weiter.on_click()
     texte2 = _baum_texte(ansicht)
     assert bereich not in texte2 and any(x.startswith("0:0") and "–" in x for x in texte2)
+
+
+async def test_sichtwechsel_knopf_rutscht_nach_oben_rechts_und_merkt_die_lage(daten) -> None:
+    """Ben, 30.10.2026: Wechsel HF/HRV als Knopf oben; beim Runterscrollen verkleinert rechts
+    oben; die Scrollposition je Sicht bleibt gemerkt. Dazu Kurz/Lang/Eigene und ein eigenes
+    Fenster im Blatt „Fenster & Darstellung“."""
+    state, tmp_path = daten
+    beats, t = [], 0.0
+    for _ in range(300):
+        t += 0.8
+        beats.append(Beat(t_s=round(t, 3), rr_ms=800, hf_bpm=75, t_wall_s=round(t, 3)))
+    rec = Recording(beats=beats, geraet="Polar H10 TEST", geraet_profil="polar_h10")
+    pfad = speichern(rec, tmp_path / "Messungen" / "PolarH10")
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet="Polar H10 TEST",
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+    while seite.aufgaben:  # die Ansicht baut sich im Loop auf (Datei im Thread)
+        aufgaben = list(seite.aufgaben)
+        seite.aufgaben.clear()
+        await asyncio.gather(*aufgaben, return_exceptions=True)
+    fab = view.floating_action_button
+    assert fab is not None and not fab.visible and view.on_scroll is not None
+    view.on_scroll(SimpleNamespace(pixels=300.0))
+    assert fab.visible and fab.content == "Herzfrequenz"  # HRV-Sicht → Knopf führt zur HF
+    umschalter = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.SegmentedButton) and [s.value for s in c.segments] == ["hf", "hrv"]
+    )
+    fab.on_click()
+    assert state.hrv_sicht() == "hf" and umschalter.selected == ["hf"] and fab.content == "HRV"
+    view.on_scroll(SimpleNamespace(pixels=50.0))
+    assert not fab.visible
+    umschalter.on_change(_ereignis("hrv"))  # zurück: die HRV-Lage (300 px) wird angesteuert
+    assert state.hrv_sicht() == "hrv"
+    while seite.aufgaben:
+        aufgaben = list(seite.aufgaben)
+        seite.aufgaben.clear()
+        await asyncio.gather(*aufgaben, return_exceptions=True)
+    # Blatt „Fenster & Darstellung“: Kurz/Lang/Eigene als erster Eintrag der Zeitachse
+    zeile = _titelzeile(view, "RR-TACHOGRAMM")
+    zeile.controls[-2].on_click()
+    blatt = seite.aufrufe[-1]
+    satz = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.SegmentedButton) and any(s.value == "lang" for s in c.segments)
+    )
+    satz.on_change(_ereignis("lang"))
+    assert state.hrv_einstellungen().breiten_satz == "lang"
+    lang = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.SegmentedButton) and any(s.value == "900" for s in c.segments)
+    )
+    assert [s.label.value for s in lang.segments] == ["2 Min", "5 Min", "15 Min"]
+    # … und ein eigenes Fenster für eine Verlaufskurve (30 min)
+    eigen = next(
+        c for c in _alle_controls(blatt) if isinstance(c, ft.TextField) and c.label == "eigenes"
+    )
+    eigen.value = "30 min"
+    eigen.on_submit(None)
+    assert 1800 in state.ansicht().fenster.values()
+    eigen.value = "1"
+    eigen.on_submit(None)
+    assert eigen.error  # unter 3 s

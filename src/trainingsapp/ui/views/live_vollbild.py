@@ -37,6 +37,7 @@ import flet as ft
 from hrv_core.atmung import ATEMUEBUNG, RUHE
 
 from trainingsapp.core.hrv_ansicht import LINKS, RECHTS, ROH
+from trainingsapp.core.hrv_einstellungen import HrvEinstellungen
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.devices.base import Verbindung
@@ -71,8 +72,10 @@ from trainingsapp.ui.components.vollbild import (
 )
 from trainingsapp.ui.components.zeitachse import achse, achsen_knopf
 from trainingsapp.ui.components.zeitfenster import (
+    BreitenSatz,
     Fenster,
     breiten_auswahl,
+    breiten_nachziehen,
     breiten_wahl,
     wischbar,
 )
@@ -520,7 +523,12 @@ def _vollbild(
                 lambda: aktualisieren(erzwingen=True),
                 kurven=[k for k in (*a.links, *a.rechts) if k != ROH],
                 achsen=werteachsen(a, [*links, *rechts], roh_titel),
-                zeitachse=Zeitachse(fenster.breite_s, breite_waehlen, max_s=lauf.live.max_s),
+                zeitachse=Zeitachse(
+                    fenster.breite_s,
+                    breite_waehlen,
+                    max_s=lauf.live.max_s,
+                    satz=breiten_satz().control,
+                ),
             )
         )
 
@@ -569,6 +577,14 @@ def _vollbild(
     breiten_knoepfe = breiten_wahl(
         fenster.breite_s, breite_waehlen, kompakt=True, breiten=einst.breiten()
     )
+
+    def breiten_satz() -> BreitenSatz:
+        def geaendert(neu: HrvEinstellungen) -> None:
+            einst.breiten_satz, einst.breiten_eigen = neu.breiten_satz, list(neu.breiten_eigen)
+            breiten_nachziehen(breiten_knoepfe, neu.breiten(), fenster.breite_s, kompakt=True)
+
+        return BreitenSatz(state.hrv_einstellungen, state.hrv_einstellungen_setzen, geaendert)
+
     kopf = ft.Row(
         spacing=2,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,

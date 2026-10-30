@@ -126,6 +126,7 @@ from trainingsapp.core.hrv_einstellungen import (
     EBENEN,
     SICHT_HF,
     SICHT_HRV,
+    HrvEinstellungen,
 )
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
@@ -208,8 +209,10 @@ from trainingsapp.ui.components.vollbild import achse as werteachse
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.components.zeitachse import achse, achsen_knopf
 from trainingsapp.ui.components.zeitfenster import (
+    BreitenSatz,
     Fenster,
     breiten_auswahl,
+    breiten_nachziehen,
     breiten_wahl,
     wischbar,
 )
@@ -757,6 +760,16 @@ def _aufbauen(
     breite_wahl_voll = breiten_wahl(  # dieselbe Wahl in der Kopfzeile des Vollbilds
         fenster.breite_s, lambda s: breite_setzen(s), kompakt=True, breiten=einst.breiten()
     )
+
+    def breiten_satz() -> BreitenSatz:
+        """Kurz · Lang · Eigene im Blatt „Fenster & Darstellung“ (Ben, 30.10.2026)."""
+
+        def geaendert(neu: HrvEinstellungen) -> None:
+            einst.breiten_satz, einst.breiten_eigen = neu.breiten_satz, list(neu.breiten_eigen)
+            breiten_nachziehen(breite_wahl, neu.breiten(), fenster.breite_s)
+            breiten_nachziehen(breite_wahl_voll, neu.breiten(), fenster.breite_s, kompakt=True)
+
+        return BreitenSatz(state.hrv_einstellungen, state.hrv_einstellungen_setzen, geaendert)
 
     def achse_umschalten() -> None:
         """Zeitachse: Uhrzeit statt Dauer (Ben, 20.10.2026) — dieselbe Einstellung wie live."""
@@ -2918,7 +2931,10 @@ def _aufbauen(
         Im Vollbild die Kurven beider Achsen, hochkant Hauptkurve und Bereich."""
         a = state.ansicht()
         zeit = Zeitachse(
-            fenster.breite_s, lambda s: breite_setzen(s), max_s=achse_ende() - achse_anfang()
+            fenster.breite_s,
+            lambda s: breite_setzen(s),
+            max_s=achse_ende() - achse_anfang(),
+            satz=breiten_satz().control,
         )
         if m.vollbild:
             links, rechts = a.achsen(m.angebot)
@@ -2957,6 +2973,7 @@ def _aufbauen(
             editor_umhaengen()
             view.appbar = None
             view.scroll = None
+            view.floating_action_button = None  # der Sichtwechsel gehört nicht ins Vollbild
             view.padding = ft.Padding.only(left=4, right=4)
             view.can_pop = False  # Zurück verlässt erst das Vollbild
             view.controls = [sicher(vollbild_inhalt)]
@@ -2970,6 +2987,7 @@ def _aufbauen(
             editor_umhaengen()
             view.appbar = leiste_oben
             view.scroll = ft.ScrollMode.AUTO
+            view.floating_action_button = fab
             view.padding = 12
             view.can_pop = kann_zurueck()  # sonst speichert Zurück erst
             view.controls = [sicher(normal_inhalt, expand=False)]
@@ -3462,14 +3480,72 @@ def _aufbauen(
         with contextlib.suppress(Exception):
             normal_inhalt.update()
 
+    # Die Scrollposition je Sicht (Ben, 30.10.2026: „Die Position in HR/HRV wird gemerkt,
+    # dass man gut hin und her wechseln kann“); der Wechsel steht als Knopf oben und rutscht
+    # beim Runterscrollen verkleinert in die rechte obere Ecke (`fab`).
+    scroll_lage: dict[str, float] = {SICHT_HF: 0.0, SICHT_HRV: 0.0}
+    scroll_jetzt = {"px": 0.0}
+    FAB_AB_PX = 140.0
+
+    def fab_text() -> str:
+        return "HRV" if sicht["wert"] == SICHT_HF else "Herzfrequenz"
+
+    def fab_icon() -> ft.IconData:
+        return ft.Icons.SHOW_CHART if sicht["wert"] == SICHT_HF else ft.Icons.FAVORITE_BORDER
+
+    def fab_wechsel(_e: object = None) -> None:
+        sicht_waehlen(SICHT_HRV if sicht["wert"] == SICHT_HF else SICHT_HF)
+
+    fab = ft.FloatingActionButton(
+        content=fab_text(),
+        icon=fab_icon(),
+        mini=True,
+        visible=False,
+        tooltip="Zur anderen Sicht — an der gemerkten Stelle",
+        on_click=fab_wechsel,
+    )
+
+    def fab_sichtbar() -> bool:
+        return scroll_jetzt["px"] > FAB_AB_PX and not m.vollbild and not z.nur_puls
+
+    def fab_nachziehen() -> None:
+        fab.content, fab.icon = fab_text(), fab_icon()
+        fab.visible = fab_sichtbar()
+        with contextlib.suppress(Exception):
+            fab.update()
+
+    def bei_scroll(e: ft.OnScrollEvent) -> None:
+        scroll_jetzt["px"] = float(getattr(e, "pixels", 0.0) or 0.0)
+        scroll_lage[sicht["wert"]] = scroll_jetzt["px"]
+        if fab.visible != fab_sichtbar():
+            fab.visible = fab_sichtbar()
+            with contextlib.suppress(Exception):
+                fab.update()
+
+    async def zur_lage(px: float) -> None:
+        with contextlib.suppress(Exception):
+            await view.scroll_to(offset=px, duration=150)
+
     def sicht_waehlen(neu: str) -> None:
         if neu == SICHT_HRV and z.nur_puls:
             return
+        if neu == sicht["wert"]:
+            return
+        scroll_lage[sicht["wert"]] = scroll_jetzt["px"]
         sicht["wert"] = neu
         state.hrv_sicht_setzen(neu)
+        sicht_knopf.selected = [neu]
+        with contextlib.suppress(Exception):
+            sicht_knopf.update()
         sicht_anwenden()
+        fab_nachziehen()
+        page.run_task(zur_lage, scroll_lage[neu])
 
     sicht_knopf = sicht_wahl(sicht["wert"], sicht_waehlen, hrv_moeglich=not z.nur_puls)
+    view.on_scroll = bei_scroll
+    view.scroll_interval = 100
+    view.floating_action_button = fab
+    view.floating_action_button_location = ft.FloatingActionButtonLocation.MINI_END_TOP
 
     titel_zeichnen()
     zeichnen(aktualisieren=False)

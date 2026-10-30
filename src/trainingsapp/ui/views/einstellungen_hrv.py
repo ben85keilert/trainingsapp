@@ -23,7 +23,6 @@ Unter Namen gespeicherte Kurvenansichten bleiben beim Zurücksetzen erhalten.
 from __future__ import annotations
 
 import contextlib
-import re
 from collections.abc import Callable
 from typing import Any
 
@@ -31,25 +30,18 @@ import flet as ft
 from hrv_core.regeln import Korrekturregeln
 
 from trainingsapp.core.hrv_ansicht import PNN_WAHL, Ansicht
+from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
 from trainingsapp.core.hrv_einstellungen import (
-    BREITEN_EIGEN,
-    BREITEN_EIGEN_MAX,
-    BREITEN_KURZ,
-    BREITEN_LANG,
-    BREITEN_SAETZE,
     LIVE_SPEKTRUM_S,
     NACHRECHNEN_MS,
     NOTIZEN_ZEILEN,
     PUFFER_S,
     UEBERSICHT,
     HrvEinstellungen,
-    breiten_pruefen,
 )
-from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
 from trainingsapp.core.uhr_seiten import SEITE_HF as UHR_SEITE_HF
 from trainingsapp.core.uhr_seiten import SEITEN as UHR_SEITEN
 from trainingsapp.core.uhr_seiten import SEITEN_NAMEN as UHR_SEITEN_NAMEN
-from trainingsapp.core.zeitangabe import breite_lesen
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.kacheln import GRUPPEN, KACHELN
@@ -59,8 +51,9 @@ from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.verlauf import FARBEN
 from trainingsapp.ui.components.zeitfenster import (
     BreiteFeld,
-    breite_text,
+    BreitenSatz,
     breiten_auswahl,
+    breiten_nachziehen,
     breiten_wahl,
 )
 from trainingsapp.ui.state import AppState
@@ -256,84 +249,13 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
     breite_feld = BreiteFeld(e.fenster_s, breite_gewaehlt, max_s=e.puffer_s)
 
     # Welche Knöpfe an den Kurven stehen (Ben, 30.10.2026): zwei Sätze oder eigene Breiten
-    def saetze_text() -> str:
-        return " · ".join(breite_text(s) for s in e.breiten())
+    def satz_geaendert(neu: HrvEinstellungen) -> None:
+        breiten_nachziehen(breite_knoepfe, neu.breiten(), e.fenster_s)
 
-    def knoepfe_nachziehen() -> None:
-        breite_knoepfe.segments = [
-            ft.Segment(value=str(s), label=ft.Text(breite_text(s))) for s in e.breiten()
-        ]
-        breite_knoepfe.selected = breiten_auswahl(e.fenster_s, e.breiten())
-        satz_zeile.value = f"An den Kurven: {saetze_text()}"
-        eigene_feld.visible = e.breiten_satz == BREITEN_EIGEN
-        with contextlib.suppress(Exception):
-            breite_knoepfe.update()
-            satz_zeile.update()
-            eigene_feld.update()
+    def satz_speichern(neu: HrvEinstellungen) -> None:
+        setzen(breiten_satz=neu.breiten_satz, breiten_eigen=list(neu.breiten_eigen))
 
-    def satz_gewaehlt(ev: ft.Event[ft.SegmentedButton]) -> None:
-        if not ev.control.selected:
-            return
-        wahl = str(ev.control.selected[0])
-        if wahl == BREITEN_EIGEN and not e.breiten_eigen:
-            # noch keine eigenen: Feld zeigen, Satz erst mit gültigen Breiten umstellen
-            eigene_feld.visible = True
-            with contextlib.suppress(Exception):
-                eigene_feld.update()
-            return
-        setzen(breiten_satz=wahl)
-        knoepfe_nachziehen()
-
-    def eigene_uebernehmen(_ev: object = None) -> None:
-        """„1, 2, 10“ (Minuten), auch „90 s“, „1:30“, „6 h“ — durch Komma oder Semikolon
-        getrennt; eine Zahl allein sind Minuten wie bei den Knöpfen."""
-        teile = [t for t in re.split(r"[;,]", eigene_feld.value or "") if t.strip()]
-        sekunden = [breite_lesen(t) for t in teile]
-        gueltig = breiten_pruefen([s for s in sekunden if s is not None])
-        if not gueltig or len(gueltig) != len(teile):
-            eigene_feld.error = (
-                f"Bis zu {BREITEN_EIGEN_MAX} Breiten, z. B. 2, 30, 6 h — ab 10 s bis 24 h"
-            )
-            with contextlib.suppress(Exception):
-                eigene_feld.update()
-            return
-        eigene_feld.error = None
-        setzen(breiten_eigen=gueltig, breiten_satz=BREITEN_EIGEN)
-        satz_wahl.selected = [BREITEN_EIGEN]
-        with contextlib.suppress(Exception):
-            satz_wahl.update()
-        knoepfe_nachziehen()
-
-    satz_wahl = ft.SegmentedButton(
-        selected=[e.breiten_satz],
-        show_selected_icon=False,
-        on_change=satz_gewaehlt,
-        segments=[
-            ft.Segment(
-                value=BREITEN_KURZ,
-                label=ft.Text(
-                    "Kurz " + "·".join(str(s // 60) for s in BREITEN_SAETZE[BREITEN_KURZ])
-                ),
-            ),
-            ft.Segment(
-                value=BREITEN_LANG,
-                label=ft.Text(
-                    "Lang " + "·".join(str(s // 60) for s in BREITEN_SAETZE[BREITEN_LANG])
-                ),
-            ),
-            ft.Segment(value=BREITEN_EIGEN, label=ft.Text("Eigene")),
-        ],
-    )
-    eigene_feld = ft.TextField(
-        label="Eigene Breiten",
-        value=", ".join(breite_text(s).removesuffix(" Min") for s in e.breiten_eigen),
-        helper="Minuten, durch Komma getrennt — auch 90 s, 1:30 oder 6 h",
-        dense=True,
-        visible=e.breiten_satz == BREITEN_EIGEN,
-        on_submit=eigene_uebernehmen,
-        on_blur=eigene_uebernehmen,
-    )
-    satz_zeile = ft.Text(f"An den Kurven: {saetze_text()}", size=12, opacity=0.8)
+    breiten_satz = BreitenSatz(lambda: e, satz_speichern, satz_geaendert)
 
     def puffer_text(sekunden: int) -> str:
         return f"{sekunden // 60} min" if sekunden < 3600 else f"{sekunden // 3600} h"
@@ -679,9 +601,7 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
             karte(
                 titel("Kurven"),
                 ft.Text("Knöpfe der Zeitachse (live und Aufzeichnung)", size=12, opacity=0.8),
-                satz_wahl,
-                eigene_feld,
-                satz_zeile,
+                breiten_satz.control,
                 ft.Text("Zeitfenster live", size=12, opacity=0.8),
                 breite_knoepfe,
                 breite_feld.control,

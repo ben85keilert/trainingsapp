@@ -22,6 +22,7 @@ from trainingsapp.core.hf_profil import HfProfil, bereich_von
 from trainingsapp.core.hf_training import BEZUEGE, BEZUG_ABSCHNITT, BEZUG_NAMEN
 from trainingsapp.core.laufend import minuten
 from trainingsapp.ui.components.kacheln import KachelWert, zahl
+from trainingsapp.ui.components.kurve import Band
 
 #: Route des Einstellungsbereichs „Herzfrequenz“ (Shortlink aus der Messung)
 EINSTELLUNGEN = "/einstellungen/herzfrequenz"
@@ -44,6 +45,21 @@ HALTUNG_NAMEN: dict[str, str] = {
     "liegt": "liegt",
     "geht": "geht / läuft aus",
 }
+
+
+def bandfarbe(i: int, n: int) -> str:
+    """Die blasse Füllung des ``i``-ten von ``n`` Bereichen hinter einer Kurve — heller als
+    `stufenfarbe`, damit die Linie lesbar bleibt; nach oben hin kräftiger."""
+    if n <= 1:
+        return ft.Colors.with_opacity(0.08, ft.Colors.PRIMARY)
+    return ft.Colors.with_opacity(0.06 + 0.16 * i / (n - 1), ft.Colors.PRIMARY)
+
+
+def hf_baender(bereiche: Sequence[hz.Bereich]) -> list[Band]:
+    """Die Bereiche als Bänder für `kurve` (Ben, 30.10.2026: Belastungszonen im
+    Koordinatensystem, rechts die Namen)."""
+    n = len(bereiche)
+    return [Band(b.von_bpm, b.bis_bpm, bandfarbe(i, n), b.name) for i, b in enumerate(bereiche)]
 
 
 def stufenfarbe(i: int, n: int) -> str:
@@ -465,8 +481,10 @@ __all__ = [
     "HALTUNG_NAMEN",
     "HF_INFO",
     "KONTEXT_NAMEN",
+    "bandfarbe",
     "bezug_wahl",
     "erholung_block",
+    "hf_baender",
     "hf_kacheln",
     "hf_kopf",
     "prozent_text",

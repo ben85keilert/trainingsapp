@@ -104,6 +104,18 @@ class Reihe:
 
 
 @dataclass(slots=True)
+class Band:
+    """Ein waagrechtes Band hinter den Kurven — ein Belastungsbereich (Ben, 30.10.2026:
+    „die verschiedenen Belastungszonen … rechts noch die Beschriftung“): ``von``/``bis`` auf
+    der linken Achse, Füllfarbe, Name an der rechten Achse."""
+
+    von: float
+    bis: float
+    farbe: str
+    name: str = ""
+
+
+@dataclass(slots=True)
 class Skala:
     """Die rechte Werteachse: ihre Reihen, Einheit und kleinste Spanne."""
 
@@ -552,8 +564,13 @@ def kurve(
     rechts: Skala | None = None,
     farbe: str | None = None,
     y_fest: tuple[float, float] | None = None,
+    baender: Sequence[Band] = (),
 ) -> ft.Control:
     """Ein Liniendiagramm, auf der x-Achse meist die Zeit (s).
+
+    ``baender``: waagrechte Bereiche hinter den Kurven (`Band`), beschriftet an der rechten
+    Achse, wenn dort keine zweite Werteachse steht; was außerhalb der Werteachse liegt,
+    wird abgeschnitten.
 
     ``x_null``: Nullpunkt der Achsenmarken — sie stehen an ``x_null + k · Schritt``
     (Uhrzeit-Achse: runde Uhrzeiten statt runder Dauern).
@@ -623,6 +640,8 @@ def kurve(
     else:
         unten, oben, schritt = y_raster(*links_daten)
     serien = _serien(reihen, unten, oben, x0, x1, schneiden=y_fest is not None)
+    if baender:
+        serien = _band_serien(baender, unten, oben, x0, x1) + serien
     rechte_achse = None
     if rechts is not None:
         faktor = schritt / rschritt
@@ -644,6 +663,8 @@ def kurve(
             farbe=rechts.farbe,
             zahlen=bool(rechts_alle) or rechts_fest is not None,
         )
+    if rechte_achse is None and baender:
+        rechte_achse = _band_achse(baender, unten, oben)
     return fc.LineChart(
         data_series=serien,
         min_x=x0,
@@ -663,6 +684,63 @@ def kurve(
         animation=None,
         height=hoehe,
         expand=True,
+    )
+
+
+def _band_serien(
+    baender: Sequence[Band], unten: float, oben: float, x0: float, x1: float
+) -> list[fc.LineChartData]:
+    """Jedes Band als unsichtbare Linie an seiner Oberkante, gefüllt bis zur Unterkante
+    (``below_line_cutoff_y``) — zuerst gezeichnet, also hinter den Kurven."""
+    out: list[fc.LineChartData] = []
+    for b in baender:
+        lo, hi = max(float(b.von), unten), min(float(b.bis), oben)
+        if hi <= lo:
+            continue
+        out.append(
+            fc.LineChartData(
+                points=[fc.LineChartDataPoint(x=x0, y=hi), fc.LineChartDataPoint(x=x1, y=hi)],
+                color=ft.Colors.TRANSPARENT,
+                stroke_width=0,
+                point=False,
+                below_line_bgcolor=b.farbe,
+                below_line_cutoff_y=lo,
+            )
+        )
+    return out
+
+
+def _band_achse(baender: Sequence[Band], unten: float, oben: float) -> fc.ChartAxis | None:
+    """Die Namen der sichtbaren Bänder an der rechten Achse, je in der Bandmitte.
+
+    Flet beschriftet nur Vielfache von ``label_spacing``: die Mitte wird gerundet und der
+    Abstand ist 1 — zu groß geratene Namen überlappen eher, als dass sie fehlen.
+    """
+    labels: list[fc.ChartAxisLabel] = []
+    for b in baender:
+        lo, hi = max(float(b.von), unten), min(float(b.bis), oben)
+        if hi <= lo or not b.name:
+            continue
+        labels.append(
+            fc.ChartAxisLabel(
+                value=float(round((lo + hi) / 2)),
+                label=ft.Text(
+                    b.name,
+                    size=9,
+                    no_wrap=True,
+                    color=ft.Colors.with_opacity(0.8, ft.Colors.ON_SURFACE),
+                ),
+            )
+        )
+    if not labels:
+        return None
+    return fc.ChartAxis(
+        labels=labels,
+        label_spacing=1,
+        show_labels=True,
+        show_min=False,
+        show_max=False,
+        label_size=66,
     )
 
 
@@ -729,6 +807,7 @@ __all__ = [
     "HF_SPANNE_MIN_BPM",
     "MAX_PUNKTE",
     "RR_SPANNE_MIN_MS",
+    "Band",
     "Reihe",
     "Skala",
     "abschneiden",

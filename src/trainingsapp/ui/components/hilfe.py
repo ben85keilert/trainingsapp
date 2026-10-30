@@ -159,6 +159,17 @@ Schlagabständen — bei reinen Pulsgebern die des Geräts. Daneben der Anteil a
 - **Zeit je Bereich** zählt für den Bezug Aufnahme, Abschnitt oder 5 min.
 - **Erholung (HRR):** HF am Ende der Belastung minus HF nach 30 / 60 / 120 s. Woran und in
   welcher Haltung — nur gleiche Paare sind vergleichbar.
+- **Schwellen** kommen aus Labor, Laktat, DFA α1 (EKG-Gurt: HF, bei der α1 in einer Rampe
+  durch 0,75 bzw. 0,5 geht) oder dem Talk-Test — sonst geschätzt.
+
+**Wann die App dir Werte vorschlägt — und wann nicht.** Nie beim Üben, nie als Dialog. Nach
+einer Aufnahme stehen in ihrer Auswertung unter „Vorschläge fürs Profil“ nur Zeilen mit
+Knopf: Ruhe-HF nach einer Messung von 4–20 min, Nacht-HF nach einer Nacht (≥ 4 h zwischen
+20 und 10 Uhr), HFmax nach einem Feldmaximum, Schwellen nach Talk-Test oder α1-Rampe. Gesetzt
+wird nur, was du antippst. Messwerte gelten 14 Tage (Ruhe-HF), Tests 90 Tage, Labor ein Jahr;
+danach rechnet die App mit dem letzten Wert weiter und zeigt sein Datum. Ob Infekt, Urlaub
+oder Pause die Ruhe-HF verschieben, siehst du im Verlauf an der 7-Tage-Baseline — die App
+fragt nicht nach.
 
 Die App zeigt, wo du bist und warst. Sie bewertet nichts und gibt keinen Rat; die Bereiche
 sind deine Werte wie ein Timer. Einstellungen → Herzfrequenz.

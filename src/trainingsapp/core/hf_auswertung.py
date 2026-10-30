@@ -28,7 +28,14 @@ from typing import Any, Final
 
 import numpy as np
 from hrv_core import herzfrequenz as hz
-from hrv_core.constants import ALGO_VERSION, HF_NACHT_MIN_S
+from hrv_core.constants import (
+    ALGO_VERSION,
+    HF_ALPHA1_VT1,
+    HF_ALPHA1_VT2,
+    HF_ARTEFAKT_MAX,
+    HF_NACHT_MIN_S,
+    QUALITAET_RR_EKG,
+)
 from hrv_core.recording import Recording
 
 from trainingsapp.core.hf_profil import HfProfil, grenzen_bpm
@@ -50,8 +57,11 @@ SCHLAF_NAMEN: Final[tuple[str, ...]] = ("schlaf", "nacht")
 NACHT_VON_H: Final[int] = 20
 NACHT_BIS_H: Final[int] = 10
 #: Stand dieser Auswertung (neben `ALGO_VERSION` aus hrv-core): springt sie, gilt jeder Cache
-#: als veraltet. 1 = v0.3.31; 2 = Nacht-HF auch ohne Schlafabschnitt aus dem Nachtfenster.
-AUSWERTUNG_VERSION: Final[int] = 2
+#: als veraltet. 1 = v0.3.31; 2 = Nacht-HF auch ohne Schlafabschnitt aus dem Nachtfenster;
+#: 3 = Schwellen aus DFA α1 (EKG-Gurte).
+AUSWERTUNG_VERSION: Final[int] = 3
+#: Schwellen aus DFA α1 nur bis zu dieser Dauer — eine Nacht ist keine Rampe
+ALPHA1_MAX_DAUER_S: Final[float] = 4 * 3600.0
 #: Grundlage der Nacht-HF: ein Schlafabschnitt oder das Nachtfenster der Aufnahme
 NACHT_ABSCHNITT: Final[str] = "abschnitt"
 NACHT_FENSTER: Final[str] = "nachtfenster"
@@ -158,6 +168,9 @@ class HfAuswertung:
     profil_stand: dict[str, Any]
     algo_version: int = ALGO_VERSION
     version: int = AUSWERTUNG_VERSION
+    #: Schwellen aus DFA α1 (nur EKG-Gurte): ``vt1``/``vt2`` je `hz.Alpha1Schwelle.als_dict`,
+    #: ``n_fenster``, ``artefaktanteil``, ``reihe`` (t, hf, alpha1 je Fenster)
+    alpha1: dict[str, Any] | None = None
     reihe: hz.HfReihe | None = field(default=None, repr=False, compare=False)
 
     def als_dict(self) -> dict[str, Any]:
@@ -174,6 +187,7 @@ class HfAuswertung:
             "profil_stand": self.profil_stand,
             "algo_version": self.algo_version,
             "version": self.version,
+            "alpha1": self.alpha1,
         }
 
     @classmethod
@@ -191,6 +205,7 @@ class HfAuswertung:
             profil_stand=dict(d.get("profil_stand") or {}),
             algo_version=int(d.get("algo_version") or 0),
             version=int(d.get("version") or 0),
+            alpha1=d.get("alpha1"),
         )
 
 
@@ -250,6 +265,50 @@ def _nachtfenster(rec: Recording, reihe: hz.HfReihe) -> tuple[float, float] | No
     if bis <= 0 or von >= ende:
         return None
     return von, bis
+
+
+def _alpha1_schwellen(
+    rec: Recording, reihe: hz.HfReihe, artefakt: Sequence[bool] | None
+) -> dict[str, Any] | None:
+    """Schwellen aus DFA α1 (Entscheidung 20) — nur bei RR aus einem EKG-Gurt, nicht für
+    Aufnahmen über 4 h. Artefakte gehen als NaN in die Fenster; über 5 % gilt nichts."""
+    if rec.effektive_qualitaet() != QUALITAET_RR_EKG or reihe.n == 0:
+        return None
+    if reihe.dauer_s > ALPHA1_MAX_DAUER_S or len(rec.beats) < 100:
+        return None
+    t = np.asarray(hz.wanduhr(rec.beats), dtype=float)
+    rr = np.asarray([float(b.rr_ms) if b.rr_ms else np.nan for b in rec.beats], dtype=float)
+    if artefakt is not None and len(artefakt) == rr.size:
+        rr[np.asarray(artefakt, dtype=bool)] = np.nan
+    # Naht: vor dem Schlag fehlt Zeit, die kein Intervall erklärt (Lücke der Verbindung)
+    naht = np.zeros(rr.size, dtype=bool)
+    if rr.size > 1:
+        luecke = np.diff(t) - np.nan_to_num(rr[1:], nan=0.0) / 1000.0
+        naht[1:] = luecke > 1.0
+    te, hf, a1 = hz.alpha1_paare(t, rr, naht)
+    if te.size == 0:
+        return None
+    anteil = reihe.artefaktanteil(None, None)
+    schwellen: dict[str, Any] = {}
+    for name, ziel in (("vt1", HF_ALPHA1_VT1), ("vt2", HF_ALPHA1_VT2)):
+        s = hz.schwelle_alpha1(hf, a1, ziel).als_dict()
+        if anteil is not None and anteil > HF_ARTEFAKT_MAX:
+            s["gruende"] = [
+                *s["gruende"],
+                f"Artefaktanteil {100 * anteil:.1f} % über {100 * HF_ARTEFAKT_MAX:.0f} %",
+            ]
+            s["gueltig"] = False
+        schwellen[name] = s
+    return {
+        **schwellen,
+        "n_fenster": int(te.size),
+        "artefaktanteil": anteil,
+        "reihe": {
+            "t": [round(float(x), 1) for x in te],
+            "hf": [round(float(x), 1) for x in hf],
+            "alpha1": [round(float(x), 3) for x in a1],
+        },
+    }
 
 
 def _deckung(a_von: float, a_bis: float, b_von: float, b_bis: float) -> float:
@@ -372,6 +431,8 @@ def auswerten(
                 "n_marken": len(marken_talk),
             }
 
+    alpha1 = _alpha1_schwellen(rec, reihe, artefakt)
+
     # -- Vorschläge aus der HF ---------------------------------------------------------
     vorschlaege: list[dict[str, Any]] = []
     if reihe.n:
@@ -421,6 +482,7 @@ def auswerten(
         aktivitaet=_json(aktivitaet),
         profil_stand=_json(profil_stand(profil, bereiche)),
         reihe=reihe,
+        alpha1=_json(alpha1),
     )
 
 

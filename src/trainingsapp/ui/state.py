@@ -36,7 +36,13 @@ from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.core.hf_einstellungen import HfEinstellungen
 from trainingsapp.core.hf_einstellungen import einstellungen_lesen as hf_lesen
 from trainingsapp.core.hf_einstellungen import einstellungen_schreiben as hf_schreiben
-from trainingsapp.core.hf_profil import TAGESFELD_TAGE, HfProfil, hf_profil, tagesfeld_eintraege
+from trainingsapp.core.hf_profil import (
+    TAGESFELD_TAGE,
+    HfProfil,
+    Profilwert,
+    hf_profil,
+    tagesfeld_eintraege,
+)
 from trainingsapp.core.hrv_ansicht import (
     Ansicht,
     ansicht_lesen,
@@ -773,11 +779,12 @@ class AppState:
         pid = profil_id or self.profil.id
         self.einstellungen.setzen(f"{SettingRepo.HF_EINSTELLUNGEN}:{pid}", hf_schreiben(e))
 
-    def hf_profil(self, heute: date | None = None) -> HfProfil:
-        """Die geltenden HF-Werte des aktiven Profils (Wertehierarchie, Formel-Startwert)."""
+    def hf_eintraege(self, heute: date | None = None) -> list[Profilwert]:
+        """Alle Einträge, aus denen das HF-Profil am Stichtag gerechnet wird: die Profilwerte
+        plus die Werte des festen Tagesfelds „Ruhepuls“ der letzten 14 Tage (Quelle
+        ``tagesfeld``, Rang zuletzt, Kennung ``tagesfeld:<Tageswert>``)."""
         tag = heute or self.heute()
         eintraege = self.profilwerte.alle(self.profil.id)
-        # Das feste Tagesfeld „Ruhepuls“ zählt als Quelle ``tagesfeld`` (Rang zuletzt)
         feld = tf_standardfeld(self.tagesfelder.alle(self.profil.id), TF_RUHEPULS)
         if feld is not None:
             werte = self.tageswerte.zwischen(
@@ -789,7 +796,14 @@ class AppState:
                     self.profil.id, werte, ausgenommen=self.ausnahmen.tage(self.profil.id)
                 ),
             ]
-        return hf_profil(eintraege, self.profil, tag, formel=self.hf_einstellungen().formel)
+        return eintraege
+
+    def hf_profil(self, heute: date | None = None) -> HfProfil:
+        """Die geltenden HF-Werte des aktiven Profils (Wertehierarchie, Formel-Startwert)."""
+        tag = heute or self.heute()
+        return hf_profil(
+            self.hf_eintraege(tag), self.profil, tag, formel=self.hf_einstellungen().formel
+        )
 
     def hrv_sicht(self) -> str:
         """Welche Sicht die Hauptkarte öffnet: die gemerkte, sonst die Vorgabe."""

@@ -188,6 +188,38 @@ Dreiteilung in solo, HF-Vorbelegung je Übung. Dazu P93–P95 (`docs/offene_frag
   neuen Eintrag mit Datum, dann „Mit heutigem Profil nachrechnen“.
 - **Breitensätze** der Zeitachse (Einstellungen → HRV-Messung → Kurven): Kurz 1·2·10, Lang
   2·5·15 oder eigene (bis 5, 10 s bis 24 h) — live und in der Aufzeichnung dieselben.
+- **Ruhepuls aus dem Tagesfeld** steht im Verlauf der Ruhe-HF-Karte wie ein Eintrag (Quelle
+  „Tagesfeld „Ruhepuls““, kein Pin) und lässt sich dort entfernen — das löscht den Tageswert
+  (`AppState.hf_eintraege`). Vorher war er geltender Wert ohne Zeile, also „nicht löschbar“.
+- **Schwellen aus DFA α1** (Ben: „Schwelle bei EKG ja“; hrv-core 0.5.0, Entscheidung 20):
+  `auswerten` rechnet bei RR aus einem EKG-Gurt (Aufnahmen bis 4 h) α1 in gleitenden
+  2-min-Fenstern gegen die HF des Fensters und löst die Gerade bei 0,75 (Schwelle 1) und 0,5
+  (Schwelle 2). Gültig nur mit ≥ 12 Fenstern im Band, abgedecktem Durchgang, fallender
+  Geraden, r² ≥ 0,5 und Artefakten < 5 %; sonst steht der Wert mit Grund da, der Knopf ist
+  grau. Übernommen: Quelle `dfa_alpha1` (Rang hinter Labor, vor Talk-Test; 6 bpm; 90 Tage),
+  Herkunft „α1 = 0,75 · 30 Fenster · r² 0,91“. `AUSWERTUNG_VERSION` 3; die Fensterreihe
+  (`alpha1.reihe`) liegt im Cache und im Forschungsexport. Kurve α1 gegen HF: später.
+
+### 3.2 Für das Tutorial: wann die App Werte vorschlägt (Ben, 30.10.2026: „Wie oft ok,
+schreibe das aber transparent nieder“)
+
+- **Nie beim Üben, nie als Dialog.** Vorschläge stehen nur in der Auswertung einer Aufnahme
+  (HF-Sicht, Karte „Vorschläge fürs Profil“) als Zeile mit Knopf; nichts wird von selbst
+  gesetzt. Die HRV-Sicht bleibt frei davon (Ben: „sonst wird es zuviel“).
+- **Ruhe-HF:** nach jeder Aufnahme von 4–20 min (tiefstes 30-s-Mittel, Quelle Morgenmessung
+  5 bzw. 10 min, Artefakte < 5 %). **Nacht-HF:** nach jeder Aufnahme mit ≥ 4 h zwischen 20 und
+  10 Uhr, oder aus einem Abschnitt „Schlaf…“. **HFmax:** höchstes 30-s-Mittel mit Plateau.
+  **Schwellen:** Talk-Test-Marke; α1-Rampe (EKG-Gurt).
+- **Gültigkeit:** Messwerte der Ruhe-HF 14 Tage, Tagesfeld 14 Tage, Eintrag 90 Tage, Talk-Test
+  und α1 90 Tage, Labor und Feldmaximum ein Jahr, Formel unbegrenzt. Abgelaufen heißt: die App
+  rechnet mit dem letzten Wert bis zum Stichtag weiter und zeigt sein Datum; ein späterer Wert
+  gilt nie rückwirkend (Entscheidung 19).
+- **Verschiebungen** (Infekt, Urlaub, Pause) sieht man im Verlauf → Herzfrequenz an der
+  7-Tage-Baseline (Median, Band ± 1 SD); ausgenommene Tage (langes Drücken) zählen nicht. Die
+  App fragt nicht nach und bewertet nicht.
+- **Rückwirkend korrigieren:** Einträge haben Datum und lassen sich löschen oder mit altem
+  Wert und neuem Datum neu setzen; danach in der Aufnahme „Mit heutigem Profil nachrechnen“,
+  gespeichert nur nach Rückfrage.
 
 ## 4. Was Stufe A/B/C heißt (Rechtsrahmen)
 

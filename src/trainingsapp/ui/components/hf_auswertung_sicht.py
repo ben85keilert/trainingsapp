@@ -667,6 +667,42 @@ class HfAuswertungSicht:
                     ),
                 )
             )
+        for schluessel, groesse, name in (
+            ("vt1", hz.GROESSE_VT1, "Schwelle 1"),
+            ("vt2", hz.GROESSE_VT2, "Schwelle 2"),
+        ):
+            d = (a.alpha1 or {}).get(schluessel)
+            if not d or d.get("wert") is None:
+                continue
+            w = float(d["wert"])
+            r2 = d.get("r2")
+            grund = "" if d.get("gueltig") else " · " + "; ".join(d.get("gruende") or [])
+            zeilen.append(
+                zeile(
+                    f"{name} aus DFA α1 = {float(d.get('ziel') or 0):g}: {w:.0f} bpm "
+                    f"({int(d.get('n') or 0)} Fenster"
+                    + (f", r² {float(r2):.2f}" if r2 is not None else "")
+                    + f"){grund}",
+                    ft.TextButton(
+                        f"Als {name} übernehmen",
+                        icon=ft.Icons.SHOW_CHART,
+                        disabled=not d.get("gueltig"),
+                        on_click=lambda _=None, w=w, d=d, g=groesse: self._profilwert(
+                            g,
+                            w,
+                            "dfa_alpha1",
+                            unsicherheit=None,
+                            herkunft={
+                                "ziel": d.get("ziel"),
+                                "n": d.get("n"),
+                                "r2": d.get("r2"),
+                                "hf_von": d.get("hf_von"),
+                                "hf_bis": d.get("hf_bis"),
+                            },
+                        ),
+                    ),
+                )
+            )
         n = a.nacht
         if n and n.get("wert") is not None:
             w = float(n["wert"])

@@ -337,6 +337,30 @@ def test_herkunft_eines_werts_steht_leserlich_darunter(daten) -> None:
     assert herkunft_text(leer, state) == ""
 
 
+def test_ruhepuls_aus_dem_tagesfeld_steht_in_der_liste_und_ist_entfernbar(daten) -> None:
+    """Ben, 30.10.2026: „Einträge Ruhe-HF lassen sich nicht löschen“ — der geltende Wert kam
+    aus dem Tagesfeld und stand in keiner Liste."""
+    from trainingsapp.core import tagesfelder as tf
+
+    state, _ = daten
+    feld = tf.standardfeld(state.tagesfelder.alle(state.profil.id), tf.STANDARD_RUHEPULS)
+    state.tageswerte.einmal_setzen(feld, state.heute(), wert=(57,))
+    assert state.hf_profil().ruhe is not None and state.hf_profil().ruhe.quelle == "tagesfeld"
+    ansicht = einstellungen_herzfrequenz(_seite(), state)
+    texte = _texte(ansicht)
+    assert any("Tagesfeld „Ruhepuls“" in t and "57" in t for t in texte)
+    assert any(t.startswith("aus dem Tagesfeld „Ruhepuls“ vom") for t in texte)
+    muell = [
+        c
+        for c in _alle(ansicht)
+        if isinstance(c, ft.IconButton) and c.tooltip == "Tageswert entfernen"
+    ]
+    assert len(muell) == 1
+    muell[0].on_click()
+    assert state.tageswerte.am_tag(state.profil.id, state.heute()) == []
+    assert state.hf_profil().ruhe is None
+
+
 def test_einstellungen_zeigen_herzfrequenz_kachel(daten) -> None:
     from trainingsapp.ui.views.einstellungen import einstellungen
 

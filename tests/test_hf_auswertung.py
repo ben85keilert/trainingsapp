@@ -177,6 +177,32 @@ def test_auswertung_ohne_profil_und_nacht() -> None:
     assert kurz.nacht is None
 
 
+def test_alpha1_schwellen_nur_bei_ekg_und_mit_gruenden() -> None:
+    """Entscheidung 20: α1-Fenster gegen HF; weißes Rauschen hat α1 ≈ 0,5 und keinen
+    Durchgang durch 0,75 — Struktur da, Schwelle ungültig mit Grund. Optisch: nichts."""
+    rng = np.random.default_rng(5)
+    beats, t = [], 0.0
+    for i in range(1200):
+        rr = 750 - i * 0.15 + rng.normal(0, 25)  # leichte Rampe 80 → 100 bpm, Rauschen
+        t += rr / 1000
+        beats.append(Beat(round(t, 3), int(rr), int(60000 / rr), round(t, 3)))
+    rec = Recording(beats=beats, geraet="Polar H10", geraet_profil="polar_h10")
+    a = auswerten(rec, profil=_profil(), bereiche=[])
+    assert a.alpha1 is not None and a.alpha1["n_fenster"] > 20
+    assert a.alpha1["vt1"]["gueltig"] is False and a.alpha1["vt1"]["gruende"]
+    assert len(a.alpha1["reihe"]["alpha1"]) == a.alpha1["n_fenster"]
+    assert 0.3 < np.median(a.alpha1["reihe"]["alpha1"]) < 0.75
+    assert HfAuswertung.aus_dict(a.als_dict()).alpha1 == a.alpha1
+    # Artefakte über 5 % → ungültig, auch wenn die Regression etwas hergäbe
+    b = auswerten(rec, profil=_profil(), bereiche=[], artefakt=[i % 10 == 0 for i in range(1200)])
+    assert any("Artefaktanteil" in g for g in b.alpha1["vt1"]["gruende"])
+    # optischer Sensor: keine α1-Schwellen
+    optisch = Recording(
+        beats=beats, geraet="Verity", geraet_profil="verity_sense", intervall_quelle="ppg_ppi"
+    )
+    assert auswerten(optisch, profil=_profil(), bereiche=[]).alpha1 is None
+
+
 def test_leere_aufzeichnung() -> None:
     a = auswerten(Recording(), profil=_profil(), bereiche=[])
     assert a.gesamt["mittel_bpm"] is None and a.hfmax_kandidat is None and a.vorschlaege == []

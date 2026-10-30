@@ -12,6 +12,7 @@ import pytest
 
 ft = pytest.importorskip("flet")
 
+from hrv_core import herzfrequenz as hz  # noqa: E402
 from hrv_core.recording import Beat, Recording, speichern  # noqa: E402
 
 from attrappen import aufgabe_starten  # noqa: E402
@@ -229,6 +230,53 @@ async def test_hf_sicht_der_auswertung_mit_kandidaten_und_vorschlag(daten) -> No
     )
     assert state.hrv_sicht() == "hrv"
     assert any(t.startswith("Datei: ") for t in _texte(ansicht))
+
+
+async def test_alpha1_schwelle_uebernehmen(daten) -> None:
+    """Eine gültige α1-Schwelle im Cache wird als Kandidat angeboten; übernommen steht sie
+    mit Quelle DFA α1 im Profil, die Herkunft nennt Ziel, Fenster und r²."""
+    from trainingsapp.core.hf_auswertung import auswerten
+    from trainingsapp.core.hf_profil import bereiche_fuer
+    from trainingsapp.ui.views.einstellungen_herzfrequenz import herkunft_text
+
+    state, tmp_path = daten
+    _profil(state)
+    hf = [60.0] * 300 + [120.0 + i * 0.05 for i in range(600)] + [100.0] * 180
+    eintrag, _pfad = _aufzeichnung(state, tmp_path, hf)
+    from hrv_core.recording import laden
+
+    rec = laden(tmp_path / "Messungen" / eintrag.file_path)
+    profil = state.hf_profil()
+    a = auswerten(rec, profil=profil, bereiche=bereiche_fuer(profil, state.hf_einstellungen()))
+    a.alpha1 = {
+        "vt1": {"ziel": 0.75, "wert": 142.4, "n": 30, "r2": 0.91, "gueltig": True, "gruende": []},
+        "vt2": {
+            "ziel": 0.5,
+            "wert": 168.0,
+            "n": 9,
+            "r2": 0.4,
+            "gueltig": False,
+            "gruende": ["zu wenige Fenster im Band (9, nötig 12)"],
+        },
+        "n_fenster": 60,
+        "artefaktanteil": 0.0,
+        "reihe": {"t": [], "hf": [], "alpha1": []},
+    }
+    state.hf_cache.schreiben(eintrag.id, a)
+    seite = _seite()
+    ansicht = await _hf_sicht(seite, state, eintrag)
+    texte = _texte(ansicht)
+    assert any(
+        t.startswith("Schwelle 1 aus DFA α1 = 0.75: 142 bpm (30 Fenster, r² 0.91)") for t in texte
+    )
+    assert any("Schwelle 2 aus DFA α1 = 0.5: 168 bpm" in t and "zu wenige" in t for t in texte)
+    knopf2 = _knopf(ansicht, "Als Schwelle 2 übernehmen")
+    assert knopf2.disabled
+    _knopf(ansicht, "Als Schwelle 1 übernehmen").on_click()
+    (w,) = state.profilwerte.alle(state.profil.id, hz.GROESSE_VT1)
+    assert w.quelle == "dfa_alpha1" and w.wert == pytest.approx(142.4)
+    assert state.hf_profil().vt1.quelle == "dfa_alpha1" and state.hf_profil().individuelle_schwelle
+    assert "α1 = 0,75 · 30 Fenster · r² 0,91" in herkunft_text(w, state)
 
 
 async def test_hf_sicht_ohne_profil_und_hrv_vorgabe(daten) -> None:

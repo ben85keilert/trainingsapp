@@ -138,9 +138,19 @@ def herkunft_text(p: Profilwert, state: AppState) -> str:
         teile.append("Abschnitt der Messung")
     if marke := uhr(h.get("t_wall_s")):
         teile.append(f"Marke um {marke}")
+    ziel = h.get("ziel")
+    if isinstance(ziel, int | float) and not isinstance(ziel, bool):
+        a1 = f"α1 = {float(ziel):g}".replace(".", ",")
+        if h.get("n"):
+            a1 += f" · {int(h['n'])} Fenster"
+        if isinstance(h.get("r2"), int | float):
+            a1 += f" · r² {float(h['r2']):.2f}".replace(".", ",")
+        teile.append(a1)
     art = h.get("artefaktanteil")
     if isinstance(art, int | float) and not isinstance(art, bool):
         teile.append(f"Artefakte {100 * art:.1f} %".replace(".", ","))
+    if h.get("tagesfeld"):
+        teile.append(f"aus dem Tagesfeld „Ruhepuls“ vom {p.datum:%d.%m.%Y}")
     if p.note:
         teile.append(p.note)
     return " · ".join(teile)
@@ -240,21 +250,29 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
             hz.GROESSE_VT2: hf.vt2,
         }[groesse]
         formel = hf.formel if groesse == hz.GROESSE_MAX else None
-        alle = state.profilwerte.alle(state.profil.id, groesse)
+        # Auch die Werte des Tagesfelds „Ruhepuls“ stehen hier — sie zählen mit und lassen
+        # sich hier entfernen (Ben, 30.10.2026: „Einträge Ruhe-HF lassen sich nicht löschen“:
+        # der geltende Wert kam aus dem Tagesfeld und stand in keiner Liste)
+        alle = sorted(
+            (e for e in state.hf_eintraege() if e.groesse == groesse),
+            key=lambda e: (e.datum, e.created_at),
+        )
         verlauf: list[ft.Control] = []
         for p in reversed(alle[-6:]):
             gilt = geltend is not None and p.id == geltend.id
+            aus_tagesfeld = p.quelle == "tagesfeld"
             knoepfe: list[ft.Control] = [
                 ft.IconButton(
                     ft.Icons.PUSH_PIN if p.fest else ft.Icons.PUSH_PIN_OUTLINED,
                     icon_size=18,
                     tooltip="Festsetzung lösen" if p.fest else "Festsetzen (gilt über alles)",
+                    visible=not aus_tagesfeld,
                     on_click=lambda _=None, wid=p.id, f=p.fest: festsetzen(wid, not f),
                 ),
                 ft.IconButton(
                     ft.Icons.DELETE_OUTLINE,
                     icon_size=18,
-                    tooltip="Eintrag entfernen",
+                    tooltip="Tageswert entfernen" if aus_tagesfeld else "Eintrag entfernen",
                     on_click=lambda _=None, wid=p.id: entfernen(wid),
                 ),
             ]
@@ -391,8 +409,12 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
         neu_zeichnen()
 
     def entfernen(wert_id: str) -> None:
-        state.profilwerte.loeschen(wert_id)
-        melden("Eintrag entfernt.")
+        if wert_id.startswith("tagesfeld:"):
+            state.tageswerte.loeschen(wert_id.removeprefix("tagesfeld:"))
+            melden("Tageswert „Ruhepuls“ entfernt.")
+        else:
+            state.profilwerte.loeschen(wert_id)
+            melden("Eintrag entfernt.")
         neu_zeichnen()
 
     # -- Bereiche -------------------------------------------------------------------

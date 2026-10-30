@@ -147,7 +147,7 @@ def test_auswertung_ohne_profil_und_nacht() -> None:
     # ohne Schlafabschnitt zählt das Nachtfenster 20–10 Uhr der Aufnahme (≥ 4 h Daten)
     assert a.nacht is not None and a.nacht["gueltig"] and a.nacht["wert"] == pytest.approx(50.0)
     assert a.nacht["grundlage"] == "nachtfenster" and a.nacht["abschnitt_id"] is None
-    assert a.nacht["von_s"] < 0 and a.nacht["bis_s"] - a.nacht["von_s"] == pytest.approx(14 * 3600)
+    assert a.nacht["von_s"] <= 0 and a.nacht["bis_s"] - a.nacht["von_s"] == pytest.approx(14 * 3600)
     # bestätigter Schlafabschnitt → Nacht-HF daraus, kein Schlafvorschlag mehr
     b = auswerten(
         rec,

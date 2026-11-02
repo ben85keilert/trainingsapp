@@ -19,6 +19,14 @@ Schönheit, Wartung.
 
 | # | Woher | Frage | Stand / Vorschlag |
 |---|---|---|---|
+| P98 | `docs/plan_tagesnotizen.md` (2.11.) | **Neue Notiz zum Tag:** ist „Tagebuch“ vorgewählt? Weitere Tags als Vorgabe (Kraft, Ausdauer, Isometrie)? | Vorschlag: „Tagebuch“ vorgewählt, solange er aktiv ist; keine weiteren Vorgaben — man legt sie beim Schreiben selbst an |
+| P99 | `docs/plan_tagesnotizen.md` | **Anhänge** (Foto, Video, Audio) bleiben am Tag oder hängen an einer bestimmten Notiz? | Vorschlag: am Tag wie heute (keine Änderung an `entry_media`); eine Spalte `day_note_id` später, wenn gewünscht |
+| P100 | `docs/plan_tagesnotizen.md` | **Kürzen im Tagebuch:** 10 Zeilen wie das Feld unter Heute, oder kürzer (4–5) für den Überblick? | Vorschlag: 10 wie gewünscht; 4–5 wären übersichtlicher — ein Wort genügt |
+| P101 | `docs/plan_tagesnotizen.md` | **Bearbeiten ohne Popup:** der Editor von Heute in der Tagebuchliste (an Ort und Stelle), oder Antippen öffnet die Tagesseite `/tag/<datum>` mit der Notiz offen? | Vorschlag: in der Liste; die Tagesseite als Ausweichweg, falls Tastatur und Fokus in der Liste haken |
+| P102 | `docs/plan_tagesnotizen.md` | **Abschnitt „Notizen“ im Tagebuch:** mehrere Tags im Filter = ODER? Aufnahmen am Tag mit in der Liste? | Vorschlag: ODER, Chip „ohne Tag“ dazu; Aufnahmen am Tag ja |
+| P103 | `docs/plan_tagesnotizen.md` | **Plan- und Übungsnotizen** auch ohne Popup bearbeiten? | Vorschlag: später, eigener Punkt — erst die Notizen zum Tag |
+| P104 | `docs/plan_tagesnotizen.md` | **Tagesfeld „nur Text“** („Ernährung“) neben getaggter Notiz („Ernährung“ als Tag) — beides lassen? | Vorschlag: ja, keine Umwandlung; Tagesfelder sind Werte je Tag, Tags Etiketten am Text |
+| P105 | `docs/plan_tagesnotizen.md` | **Volltextsuche** über die Notizen („später danach gesucht werden“)? | Vorschlag: erst der Tag-Filter; Suchfeld über „Notizen“ später (`LIKE`, ggf. FTS5) |
 | P91 | `docs/plan_herzfrequenz.md` | **Behandlung in solo**: die Dreiteilung vorher/während/nachher eines Kopf/Endteil-Abschnitts als Zahlen zeigen (Behandler mit eigenem Gurt), oder ganz nach praxis_gui, weil Patientenbezug? | Frage 11 (Ben: „wie meinen“) — erklärt in hrv-research `KONZEPT_HF_APP.md` §12; Vorschlag: zeigen, weil es Zahlen eines eigenen Abschnitts sind |
 | P92 | `docs/plan_herzfrequenz.md` | **`hf_spec` an der Übung** (Erholung nach jedem Teil, Kontext, Haltung vorbelegen) | Ben 29.10.: zurückgestellt, bringt wenig, solange die Erholung immer anders abläuft; mit gesammelten Erholungen benchmarken, dann entscheiden |
 | P1 | Plan, 14.10. | **Planblock: welche der drei Darstellungen** (untereinander = Vorgabe, umschalten, aufklappen) bleibt? Die anderen beiden sind dann zu entfernen (`ui.state.PLAN_DARSTELLUNGEN`). | Wahl steht aus. |

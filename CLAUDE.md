@@ -189,7 +189,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Tagesabfragen über `session_entry` sehen sie nie. Kurven entstehen über
   `core.tagesfelder.als_eintraege` → `core.verlauf`. Es gibt nur Zahlen, keine Bewertung,
   Grenze oder Erinnerung (`docs/recht/00_zweckbestimmung.md`). Vertrag:
-  `docs/plan_tagesfelder.md`.
+  `docs/plan_tagesfelder.md`. **Nicht dasselbe wie die Notiz-Tags** (Ben, 2.11.2026, P104):
+  Ein Tagesfeld „nur Text“ ist ein Feld mit Einträgen, das mitsamt ihnen als Stapel gelöscht
+  werden darf; ein Notiz-Tag ist ein langlebiges Etikett am Tagebuchtext, abgesichert gegen
+  Löschen — es nimmt nie Text mit. Beides bleibt nebeneinander.
 
 - **Updates** (Ben, 16.10.2026): `core/update.py` fragt die GitHub-Releases der App ab
   (Version und Build-Nummer gegen `config.app_version()` — in der gebauten App aus

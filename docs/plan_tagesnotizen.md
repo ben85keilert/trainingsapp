@@ -34,8 +34,13 @@ mit demselben Editor wie auf der Tagesseite. P102 ja — Filter ODER, Aufnahmen 
 die Suche („möglichst clever“: jedes Wort muss vorkommen, im Text oder in einem Tag, ohne
 Groß und klein). P103 alle Popups für Schreibnotizen weg (`components/notiz.py` gelöscht):
 Notiz zum Tag und zum Plan unter Heute und im Tagebuch an Ort und Stelle
-(`components/notizeditor.py`, `Textnotiz`). P104 beides bleibt. P105 ja, Suchfeld im
-Abschnitt „Notizen“.
+(`components/notizeditor.py`, `Textnotiz`). P104 beides bleibt — Ben: „Die Tagebuchtags sind
+super speziell und langlebig und sollen abgesichert sein gegen Löschung. Die ‚Zum Tag‘-Notiz-
+Tagesfelder könnten als Stapel gelöscht werden, wenn das Feld wieder entfernt wird.“ Darum
+zwei Dinge: Ein **Tag** ist ein Etikett am Tagebuchtext, das lange lebt und dessen Löschen
+nie Text mitnimmt; ein **Tagesfeld „nur Text“** ist ein Feld mit Einträgen, das mitsamt
+seinen Einträgen gelöscht werden darf („Löschen mit allen Einträgen“,
+`docs/plan_tagesfelder.md` P69). P105 ja, Suchfeld im Abschnitt „Notizen“.
 
 Abweichungen vom Plan unten beim Bauen: Anhänge hängen an der Notiz, nicht am Tag (A, C);
 `Tagesnotiz` ist eine Unterklasse des allgemeinen `Notizeditor`; der Editor in der

@@ -42,11 +42,13 @@ def anhang_route(basis: str, anhang_id: str) -> str:
 
 def reihe_fuer(state: AppState, basis: str, a: Anhang) -> list[Anhang]:
     """Wodurch die Pfeile blättern: unter einer Übung durch alle ihre Aufnahmen (älteste
-    zuerst), sonst durch die Anhänge des Eintrags — bzw. des Tags (Notiz zum Tag)."""
+    zuerst), sonst durch die Anhänge des Eintrags — bzw. der Notiz zum Tag."""
     teile = [t for t in basis.split("/") if t]
     if teile[:1] == ["uebung"] and len(teile) >= 2:
         alle = state.anhaenge.je_uebung(state.profil.id, [teile[1]])
         reihe = [x.anhang for x in reversed(alle)]
+    elif a.notiz_id is not None:
+        reihe = state.anhaenge.zur_notiz(a.notiz_id)
     elif a.zum_tag is not None:
         reihe = state.anhaenge.zum_tag(a.profil_id or state.profil.id, a.zum_tag)
     else:

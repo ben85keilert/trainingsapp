@@ -26,6 +26,8 @@ from typing import Any
 from .einheit import MIN_MARKE_S, Ereignis, ganzzahl_lesen
 
 #: Die Zeitfelder, die der Timer füllen kann — in dieser Reihenfolge der Vorgabe
+from .result_spec import basis_key
+
 ZEITFELDER: tuple[str, ...] = ("hold", "duration")
 
 
@@ -141,8 +143,11 @@ def zeitfeld(felder: Iterable[str], gemerkt: str | None = None) -> str | None:
 
     >>> zeitfeld(["reps", "hold"]), zeitfeld(["duration", "hold"], "duration"), zeitfeld(["reps"])
     ('hold', 'duration', None)
+    >>> zeitfeld(["reps", "hold_2"]), zeitfeld(["hold", "hold_2"], "hold_2")
+    ('hold_2', 'hold_2')
     """
-    angeboten = [f for f in ZEITFELDER if f in set(felder)]
+    angeboten = [f for f in felder if basis_key(f) in ZEITFELDER]
+    angeboten.sort(key=lambda f: ZEITFELDER.index(basis_key(f)))
     if not angeboten:
         return None
     return gemerkt if gemerkt in angeboten else angeboten[0]
@@ -161,10 +166,11 @@ def ergebnis(zeiten: Sequence[Gelaufen], feld: str | None) -> dict[str, Any]:
     ({'hold': [58, 60]}, {'duration': 118}, {})
     """
     zaehlend = [z for z in zeiten if z.zaehlt]
-    if feld == "hold" and zaehlend:
-        return {"hold": [round(z.sekunden) for z in zaehlend]}
-    if feld == "duration" and (summe := round(sum(z.sekunden for z in zaehlend))) > 0:
-        return {"duration": summe}
+    art = basis_key(feld) if feld else None
+    if art == "hold" and zaehlend and feld:
+        return {feld: [round(z.sekunden) for z in zaehlend]}
+    if art == "duration" and feld and (summe := round(sum(z.sekunden for z in zaehlend))) > 0:
+        return {feld: summe}
     return {}
 
 

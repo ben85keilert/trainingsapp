@@ -28,7 +28,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from .models import Exercise, Plan, PlanItem
-from .result_spec import FieldSpec, FieldType, vorrat_feld
+from .result_spec import FieldSpec, FieldType, basis_key, vorrat_feld
 from .timer import MAX_ABSCHNITT_S, STOPPUHR, Abschnitt, TimerProfil, stoppuhr
 from .timer_eintrag import ZEITFELDER
 
@@ -204,14 +204,29 @@ def zaehlt_als(felder: Sequence[str], uebung: Exercise) -> str:
     Parameter Zeit nicht aktiviert ist („Ist die Uhr ein, hat man automatisch Zeit mit
     dabei“). Die Planübung hat dazu seit 22.10.2026 nichts mehr (P79 D2).
 
+    Seit 2.11.2026 (P106) ist „zählt als“ ein **Zeitfeld der Übung** — auch ``hold_2`` oder
+    ``duration_2``; ohne Haltezeit zählt die Uhr als Zeit (``duration``, auch ohne Parameter).
+
     >>> zaehlt_als(["reps"], Exercise()), zaehlt_als(["hold"], Exercise())
     ('duration', 'hold')
     >>> zaehlt_als(["hold", "duration"], Exercise(zaehlt_als="duration"))
     'duration'
+    >>> zaehlt_als(["hold", "hold_2"], Exercise(zaehlt_als="hold_2"))
+    'hold_2'
+    >>> zaehlt_als(["hold_2"], Exercise(zaehlt_als="hold_3"))
+    'hold_2'
     """
-    if "hold" not in felder:
+    halten = [f for f in felder if basis_key(f) == "hold"]
+    gewaehlt = uebung.zaehlt_als
+    if (
+        gewaehlt
+        and basis_key(gewaehlt) in ZEITFELDER
+        and (gewaehlt in felder or gewaehlt == "duration")
+    ):
+        return gewaehlt
+    if not halten:
         return "duration"
-    return uebung.zaehlt_als if uebung.zaehlt_als in ZEITFELDER else "hold"
+    return halten[0]
 
 
 def zeitfeld_der_uebung(uebung: Exercise) -> str:
@@ -260,8 +275,11 @@ def zeit_werte(uebung: Exercise, werte: Mapping[str, Any]) -> list[Any]:
     >>> zeit_werte(Exercise(), {"hold": [30, 30]}), zeit_werte(Exercise(), {"weight": 5})
     ([30, 30], [])
     """
-    halten = werte.get("hold")
-    if isinstance(halten, list) and halten:
+    halten = next(
+        (v for k, v in werte.items() if basis_key(k) == "hold" and isinstance(v, list) and v),
+        None,
+    )
+    if halten:
         return list(halten)
     feld = zeitfeld_der_uebung(uebung)
     return [werte[feld]] if feld in werte else []
@@ -288,7 +306,7 @@ def mit_zeitfeldern(uebung: Exercise, werte: Mapping[str, Any]) -> Exercise:
     neu = [
         FieldSpec.from_dict(f.to_dict())  # eine Kopie, nicht das Feld des Vorrats
         for k in werte
-        if k in ZEITFELDER and k not in da and (f := vorrat_feld(k)) is not None
+        if basis_key(k) in ZEITFELDER and k not in da and (f := vorrat_feld(k)) is not None
     ]
     if not neu:
         return uebung

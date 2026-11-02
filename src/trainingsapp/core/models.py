@@ -269,17 +269,48 @@ class Measurement:
 
 @dataclass(slots=True)
 class DayNote:
-    """Die Notiz zu einem Tag — die oberste Ebene des Tagebuchs.
+    """Eine Notiz zu einem Tag — die oberste Ebene des Tagebuchs. Je Tag beliebig viele
+    (Ben, 2.11.2026, Migration 036), jede mit Uhrzeit (`created_at` — ihr Anker in der
+    Zeitleiste) und Tags (`tag_ids` → `NoteTag`). Anhänge hängen an der Notiz
+    (`entry_media.day_note_id`); eine Notiz ohne Text und ohne Anhänge gibt es nicht.
 
     Darunter liegen die Notizen je Training (`Session.note`) und je Übung
     (`SessionEntry.note`). Das Tagebuch ist keine eigene Tabelle, sondern
-    eine Abfrage über diese drei Quellen.
+    eine Abfrage über diese Quellen.
     """
 
     id: str = field(default_factory=new_id)
     subject_id: str = ""
     date: date = field(default_factory=lambda: lokaler_tag(jetzt()))
     text: str = ""
+    created_at: datetime | None = None
+    tag_ids: tuple[str, ...] = ()
+
+    def leer(self) -> bool:
+        return not self.text.strip()
+
+
+#: Der feste Tag jedes Profils (Ben, 2.11.2026: „nicht löschen, aber deaktivieren“)
+TAGEBUCH_TAG = "Tagebuch"
+
+
+@dataclass(slots=True)
+class NoteTag:
+    """Ein Tag (Merkmal) an Notizen zum Tag, je Profil (Migration 036, Ben 2.11.2026):
+    „Tagebuch“ ist fest (`fest`), die anderen legt man selbst an. `active` = 0 heißt
+    ausgeschaltet: wird beim Schreiben nicht mehr angeboten, Notizen behalten ihn."""
+
+    id: str = field(default_factory=new_id)
+    subject_id: str = ""
+    name: str = ""
+    sort: int = 0
+    fest: bool = False
+    active: bool = True
+    deleted_at: datetime | None = None
+
+    @property
+    def aktiv(self) -> bool:
+        return self.active and self.deleted_at is None
 
 
 # ---------------------------------------------------------------------------

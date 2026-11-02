@@ -37,8 +37,11 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core.models import DayNote
 from trainingsapp.core.tagebuch import (
     AUFNAHME,
+    NOTIZ_ZEILEN,
+    OHNE_TAG,
     PLAN,
     TAG,
     TAGESFELD,
@@ -49,6 +52,7 @@ from trainingsapp.core.tagebuch import (
     nach_tagen,
     nach_uebungen,
     naechster_tag_mit,
+    nur_tag,
     oben,
     sammeln,
     woche,
@@ -58,8 +62,9 @@ from trainingsapp.core.verlauf import MONATE, WOCHENTAGE, WOCHENTAGE_LANG, woche
 from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
 from trainingsapp.ui.components.icons import symbol
-from trainingsapp.ui.components.notiz import notiz_dialog
+from trainingsapp.ui.components.notizeditor import Notizeditor, Textnotiz
 from trainingsapp.ui.components.tagesfeld_blatt import tagesfeld_blatt
+from trainingsapp.ui.components.tagesnotiz import Tagesnotiz, tag_etiketten
 from trainingsapp.ui.components.wochenleiste import tageszelle
 from trainingsapp.ui.components.zeitstrahl import zeitpunkt
 from trainingsapp.ui.state import AppState
@@ -74,8 +79,11 @@ SEITE = 30
 ABSTAND = 14
 #: Höhe eines Tags, solange er seine wirkliche nicht gemeldet hat (px)
 SCHAETZUNG_KOPF, SCHAETZUNG_NOTIZ = 40.0, 76.0
-#: Darstellungen
-TAGE, UEBUNGEN = "tage", "uebungen"
+#: Darstellungen — „Notizen“ (Ben, 2.11.2026): nur die Notizen zum Tag, nach Tags gefiltert
+#: und durchsuchbar, fortlaufend wie „Tage“ mit derselben Wochenleiste
+TAGE, UEBUNGEN, NOTIZEN = "tage", "uebungen", "notizen"
+#: Die neue Notiz zu heute in der Liste (`AppState.tagebuch_bearbeitet`)
+NEU = "neu"
 KARTE = ft.Colors.SURFACE_CONTAINER_LOWEST
 
 
@@ -113,6 +121,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
     aufnahmen = state.anhaenge.alle(profil, mit_geloeschten=False)
     nach_id = {x.anhang.id: x.anhang for x in aufnahmen}
     tagesfelder = {f.id: f for f in state.tagesfelder.alle(profil, mit_geloeschten=True)}
+    notiz_tags = state.notiz_tags.alle(profil)
+    tag_namen = {t.id: t.name for t in notiz_tags}
     alle = sammeln(
         state.tagesnotizen.alle(profil),
         state.sitzungen.session_notizen(profil),
@@ -120,11 +130,18 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
         aufnahmen,
         state.tageswerte.zwischen(profil, None, None),
         tagesfelder,
+        tag_namen,
     )
     katalog = {u.id: u for u in state.uebungen.alle(mit_geloeschten=True)}
     plan_namen: dict[str, str] = {p.id: p.name for p in state.plaene.alle(profil)}
-    zahl = zahl_je_tag(alle)
-    tage = nach_tagen(alle)
+    #: Im Abschnitt „Notizen“ nur die Notizen zum Tag — nach Tags und Suchtext
+    gezeigte = (
+        nur_tag(alle, state.tagebuch_tags, state.tagebuch_suche)
+        if state.tagebuch_ordnung == NOTIZEN
+        else alle
+    )
+    zahl = zahl_je_tag(gezeigte)
+    tage = nach_tagen(gezeigte)
     gezeigt = tage[: max(state.tagebuch_anzahl, SEITE)]
     #: der Tag oben in der Liste — die Wochenleiste zeigt seine Woche
     stand: dict[str, Any] = {"oben": gezeigt[0].tag if gezeigt else heute}
@@ -195,32 +212,70 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
 
         return handler
 
+    def schluessel_von(n: Notiz) -> str | None:
+        """Womit `AppState.tagebuch_bearbeitet` diese Notiz meint — Notizen zum Tag und zum
+        Plan werden in der Liste bearbeitet (Ben, 2.11.2026, P101/P103: kein Popup)."""
+        if n.art == TAG and n.bezug_id:
+            return f"tag:{n.bezug_id}"
+        if n.art == PLAN and n.bezug_id:
+            return f"plan:{n.bezug_id}"
+        return None
+
+    def bearbeiten(schluessel: str) -> None:
+        """Die Notiz in der Liste öffnen — ihr Editor steht statt der Karte."""
+        if state.tagebuch_bearbeitet != schluessel:
+            state.tagebuch_bearbeitet = schluessel
+            state.tagebuch_editor = None
+        neu()
+
+    def geschlossen() -> None:
+        """Fertig oder Abbrechen im Editor: wieder die Karte."""
+        state.tagebuch_bearbeitet = None
+        state.tagebuch_editor = None
+        neu()
+
+    def editor(schluessel: str, n: Notiz | None) -> Notizeditor | None:
+        """Der Editor zur bearbeiteten Notiz — einmal je Notiz, über den Neubau der Ansicht
+        hinweg (`AppState.tagebuch_editor`). ``None``, wenn es sie nicht mehr gibt."""
+        gemerkt = state.tagebuch_editor
+        if isinstance(gemerkt, tuple) and gemerkt[0] == schluessel:
+            return gemerkt[1]
+        e: Notizeditor | None = None
+        art, _, rest = schluessel.partition(":")
+        if schluessel == NEU:
+            notiz = DayNote(subject_id=profil, date=heute)
+            e = Tagesnotiz(page, state, notiz, tags=notiz_tags, danach=geschlossen)
+        elif art == "tag":
+            geladen = state.tagesnotizen.laden(rest)
+            if geladen is not None:
+                angebot = [t for t in notiz_tags if t.aktiv or t.id in geladen.tag_ids]
+                e = Tagesnotiz(page, state, geladen, tags=angebot, danach=geschlossen)
+        elif art == "plan" and n is not None:
+
+            def sichern(text: str, session_id: str = rest) -> None:
+                state.sitzungen.notiz_setzen(session_id, text)
+
+            e = Textnotiz(
+                page,
+                state,
+                n.text,
+                sichern,
+                schluessel=schluessel,
+                hinweis="Wie ging das Training? Tippen oder diktieren.",
+                danach=geschlossen,
+            )
+        if e is not None:
+            e.fokus = True
+            state.tagebuch_editor = (schluessel, e)
+        return e
+
     def bearbeiter(n: Notiz) -> Callable[[], None]:
-        """Antippen: die Notiz zum Tag und zum Plan im Dialog, die einer Übung in ihren
+        """Antippen: die Notiz zum Tag und zum Plan in der Liste, die einer Übung in ihren
         Leistungen des Tages."""
 
         def handler() -> None:
-            if n.art == TAG:
-                page.show_dialog(
-                    notiz_dialog(
-                        f"Notiz zum Tag · {n.tag:%d.%m.}",
-                        n.text,
-                        lambda text: state.tagesnotizen.setzen(profil, n.tag, text),
-                        danach=neu,
-                        hinweis="Wie lief der Tag? Tippen oder diktieren.",
-                    )
-                )
-            elif n.art == PLAN and n.bezug_id:
-                session_id = n.bezug_id
-                page.show_dialog(
-                    notiz_dialog(
-                        f"Notiz: {titel(n)}",
-                        n.text,
-                        lambda text: state.sitzungen.notiz_setzen(session_id, text),
-                        danach=neu,
-                        hinweis="Wie ging das Training? Tippen oder diktieren.",
-                    )
-                )
+            if (schluessel := schluessel_von(n)) is not None:
+                bearbeiten(schluessel)
             elif n.art == TAGESFELD and (feld := tagesfelder.get(n.feld_id or "")) is not None:
                 if feld.deleted_at is None:
                     page.show_dialog(tagesfeld_blatt(page, state, feld, n.tag, danach=neu))
@@ -252,15 +307,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
         return handler
 
     def notiz_zum_tag() -> None:
-        page.show_dialog(
-            notiz_dialog(
-                "Notiz zum Tag",
-                state.tagesnotizen.lesen(profil, heute),
-                lambda text: state.tagesnotizen.setzen(profil, heute, text),
-                danach=neu,
-                hinweis="Wie lief der Tag? Tippen oder diktieren.",
-            )
-        )
+        """„+“ im Kopf: eine neue Notiz zu heute, oben in der Liste."""
+        bearbeiten(NEU)
 
     # -- Kopf ---------------------------------------------------------------------------
 
@@ -273,6 +321,66 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
         state.tagebuch_kalender = not state.tagebuch_kalender
         neu()
 
+    def tag_filter(tag_id: str) -> Callable[[Any], None]:
+        def handler(_e: object = None) -> None:
+            state.tagebuch_tags.symmetric_difference_update({tag_id})
+            neu()
+
+        return handler
+
+    def suchen(e: Any) -> None:
+        state.tagebuch_suche = str(e.control.value or "").strip()
+        neu()
+
+    def suche_leeren() -> None:
+        state.tagebuch_suche = ""
+        neu()
+
+    def filter_zeile() -> ft.Control:
+        """Im Abschnitt „Notizen“: ein Chip je Tag (ODER), „ohne Tag“ und die Suche — jedes
+        Wort muss vorkommen, im Text oder in einem Tag."""
+        chips: list[ft.Control] = [
+            ft.Chip(
+                label=ft.Text(t.name, size=12),
+                selected=t.id in state.tagebuch_tags,
+                show_checkmark=False,
+                visual_density=ft.VisualDensity.COMPACT,
+                padding=ft.Padding.symmetric(horizontal=2),
+                on_select=tag_filter(t.id),
+            )
+            for t in notiz_tags
+        ]
+        chips.append(
+            ft.Chip(
+                label=ft.Text("ohne Tag", size=12),
+                selected=OHNE_TAG in state.tagebuch_tags,
+                show_checkmark=False,
+                visual_density=ft.VisualDensity.COMPACT,
+                padding=ft.Padding.symmetric(horizontal=2),
+                on_select=tag_filter(OHNE_TAG),
+            )
+        )
+        suche = ft.TextField(
+            value=state.tagebuch_suche,
+            hint_text="Suchen … (Enter)",
+            dense=True,
+            text_size=13,
+            prefix_icon=ft.Icons.SEARCH,
+            suffix_icon=ft.IconButton(ft.Icons.CLOSE, icon_size=16, on_click=suche_leeren)
+            if state.tagebuch_suche
+            else None,
+            content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+            on_submit=suchen,
+        )
+        return ft.Container(
+            padding=ft.Padding.only(left=12, right=12, bottom=4),
+            content=ft.Column(
+                spacing=4,
+                tight=True,
+                controls=[ft.Row(wrap=True, spacing=4, run_spacing=0, controls=chips), suche],
+            ),
+        )
+
     kopf = ft.Container(
         padding=ft.Padding.only(left=12, right=4, top=8, bottom=4),
         content=ft.Row(
@@ -284,7 +392,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                     show_selected_icon=False,
                     segments=[
                         ft.Segment(value=TAGE, label=ft.Text("Tage")),
-                        ft.Segment(value=UEBUNGEN, label=ft.Text("Übungen und Felder")),
+                        ft.Segment(value=UEBUNGEN, label=ft.Text("Übungen · Felder")),
+                        ft.Segment(value=NOTIZEN, label=ft.Text("Notizen")),
                     ],
                     on_change=ordnung_gewaehlt,
                 ),
@@ -297,21 +406,52 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                     if state.tagebuch_kalender
                     else "Wochenleiste zeigen",
                     selected=state.tagebuch_kalender,
-                    visible=state.tagebuch_ordnung == TAGE,
+                    visible=state.tagebuch_ordnung in (TAGE, NOTIZEN),
                     on_click=kalender_umschalten,
                 ),
-                ft.IconButton(
-                    ft.Icons.EDIT_NOTE, tooltip="Notiz zum Tag (heute)", on_click=notiz_zum_tag
-                ),
+                ft.IconButton(ft.Icons.ADD, tooltip="Neue Notiz zu heute", on_click=notiz_zum_tag),
             ],
         ),
     )
 
     # -- Einträge -----------------------------------------------------------------------
 
+    def editor_karte(e: Notizeditor, zu: str, icon: Any) -> ft.Control:
+        """Der Editor statt der Karte — mit derselben Kopfzeile."""
+        return ft.Container(
+            bgcolor=KARTE,
+            border_radius=14,
+            padding=ft.Padding.only(left=12, right=8, top=8, bottom=10),
+            content=ft.Column(
+                spacing=4,
+                tight=True,
+                controls=[
+                    ft.Row(
+                        spacing=6,
+                        controls=[
+                            ft.Icon(icon, size=16, opacity=0.7),
+                            ft.Text(zu, size=12, weight=ft.FontWeight.W_600, opacity=0.75),
+                        ],
+                    ),
+                    e.control(),
+                ],
+            ),
+        )
+
     def notiz_karte(n: Notiz, mit_datum: bool = False) -> ft.Control:
-        """Eine Notiz: oben wozu (Tag, Plan, Übung), darunter der Text — antippen bearbeitet."""
+        """Eine Notiz: oben wozu (Tag, Plan, Übung), darunter der Text — antippen bearbeitet,
+        Notizen zum Tag und zum Plan gleich hier (Ben, 2.11.2026). Eine Notiz zum Tag zeigt
+        höchstens `NOTIZ_ZEILEN` Zeilen (P100) und ihre Tags."""
         zu = titel(n)
+        schluessel = schluessel_von(n)
+        if schluessel is not None and state.tagebuch_bearbeitet == schluessel:
+            e = editor(schluessel, n)
+            if e is not None:
+                return editor_karte(
+                    e,
+                    zu if not mit_datum else f"{zu} · {n.tag:%d.%m.}",
+                    ft.Icons.WB_SUNNY_OUTLINED if n.art == TAG else ft.Icons.LIST_ALT,
+                )
         if mit_datum:
             zu = f"{WOCHENTAGE[n.tag.weekday()]} {n.tag:%d.%m.}" + (
                 f" · {_uhr(n)}" if _uhr(n) else ""
@@ -319,6 +459,8 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
         etiketten: list[ft.Control] = []
         if n.art == UEBUNG and n.plan_id and not mit_datum:
             etiketten.append(ft.Text(plan_name(n.plan_id), size=11, opacity=0.6))
+        if n.art == TAG and n.tags:
+            etiketten.extend(tag_etiketten(n.tags))
         symbol_name = (
             katalog[n.exercise_id].icon_key
             if n.art in (UEBUNG, AUFNAHME) and n.exercise_id in katalog
@@ -330,7 +472,11 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             AUFNAHME: ft.Icons.ATTACH_FILE,
             TAGESFELD: ft.Icons.LABEL_OUTLINE,
         }.get(n.art) or symbol(symbol_name)
-        inhalt: ft.Control = ft.Text(n.text, size=14, selectable=False)
+        inhalt: ft.Control = (
+            ft.Text(n.text, size=14, max_lines=NOTIZ_ZEILEN, overflow=ft.TextOverflow.ELLIPSIS)
+            if n.art == TAG
+            else ft.Text(n.text, size=14, selectable=False)
+        )
         if n.art == TAG and n.werte:
             # Die Werte der Tagesfelder an diesem Tag (Skizze C4)
             zeile = ft.Container(
@@ -451,27 +597,37 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
             ft.Container(
                 padding=ft.Padding.only(left=4, top=8, right=4),
                 content=ft.Text(
-                    "Noch keine Notizen. Sie entstehen beim Üben (Knopf „Notiz“), auf „Heute“ "
-                    "(„Notiz zum Tag“, zum Plan) — oder hier oben rechts.",
+                    "Keine Notizen"
+                    + (
+                        " zu diesem Filter."
+                        if state.tagebuch_ordnung == NOTIZEN
+                        and (state.tagebuch_tags or state.tagebuch_suche)
+                        else ". Sie entstehen beim Üben (Knopf „Notiz“), auf „Heute“ "
+                        "(„Notiz zum Tag“, zum Plan) — oder hier oben rechts."
+                    ),
                     size=13,
                     opacity=0.7,
                 ),
             ),
             ft.Row(
                 controls=[
-                    ft.FilledTonalButton(
-                        "Notiz zum Tag", icon=ft.Icons.EDIT_NOTE, on_click=notiz_zum_tag
-                    )
+                    ft.FilledTonalButton("Notiz zum Tag", icon=ft.Icons.ADD, on_click=notiz_zum_tag)
                 ]
             ),
         ]
 
-    if not alle:
-        eintraege: list[ft.Control] = leer()
+    eintraege: list[ft.Control] = []
+    if state.tagebuch_bearbeitet == NEU and (neuer := editor(NEU, None)) is not None:
+        # Die neue Notiz zu heute oben in der Liste (Ben, 2.11.2026)
+        eintraege.append(
+            editor_karte(neuer, f"Neue Notiz · {tag_kopf(heute, heute)}", ft.Icons.ADD)
+        )
+    if not gezeigte:
+        eintraege.extend(leer())
     elif state.tagebuch_ordnung == UEBUNGEN:
-        eintraege = [gruppen_block(g) for g in nach_uebungen(alle)]
+        eintraege.extend(gruppen_block(g) for g in nach_uebungen(alle))
     else:
-        eintraege = [tages_block(g) for g in gezeigt]
+        eintraege.extend(tages_block(g) for g in gezeigt)
         if len(tage) > len(gezeigt):
             eintraege.append(
                 ft.Row(
@@ -500,7 +656,9 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
 
     # -- Wochenleiste ---------------------------------------------------------------------
 
-    mit_leiste = state.tagebuch_kalender and state.tagebuch_ordnung == TAGE and bool(gezeigt)
+    mit_leiste = (
+        state.tagebuch_kalender and state.tagebuch_ordnung in (TAGE, NOTIZEN) and bool(gezeigt)
+    )
     leiste = ft.Container(visible=mit_leiste)
 
     async def springen(tag: date) -> None:
@@ -614,7 +772,11 @@ def tagebuch(page: Any, state: AppState) -> ft.Control:
                 await liste.scroll_to(offset=versatz, duration=0)
 
         page.run_task(zurueckspringen)
-    return ft.Column(expand=True, spacing=0, controls=[kopf, leiste, liste])
+    teile: list[ft.Control] = [kopf]
+    if state.tagebuch_ordnung == NOTIZEN:
+        teile.append(filter_zeile())
+    teile.extend([leiste, liste])
+    return ft.Column(expand=True, spacing=0, controls=teile)
 
 
-__all__ = ["SEITE", "TAGE", "UEBUNGEN", "tag_kopf", "tagebuch"]
+__all__ = ["NEU", "NOTIZEN", "SEITE", "TAGE", "UEBUNGEN", "tag_kopf", "tagebuch"]

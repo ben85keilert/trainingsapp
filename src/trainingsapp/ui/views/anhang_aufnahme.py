@@ -1,6 +1,6 @@
 """Foto oder Video an einen Eintrag hängen — Route
 ``<basis>/anhang/aufnehmen/<ziel>/<foto|video>`` (Ben, 19.10.2026; `docs/plan_anhaenge.md`,
-Teil B). ``<ziel>`` ist die ID des Eintrags oder, seit 22.10.2026, ``tag/<datum>`` für die
+Teil B). ``<ziel>`` ist die ID des Eintrags oder, seit 2.11.2026, ``notiz/<id>`` für die
 Notiz zum Tag (`core.anhaenge.Ziel`); ``…/audio`` führt zum Rekorder (`views/anhang_ton.py`).
 
 Die Kamera läuft **in der App** (`flet-camera`): So sind die drei Qualitätsstufen
@@ -79,15 +79,19 @@ def aufnahme_route(basis: str, ziel: Ziel | str, art: str) -> str:
     >>> aufnahme_route("/", "e1", BILD), aufnahme_route("/tag/2026-10-20", "e1", VIDEO)
     ('/anhang/aufnehmen/e1/foto', '/tag/2026-10-20/anhang/aufnehmen/e1/video')
     >>> from datetime import date
-    >>> aufnahme_route("/", Ziel.fuer_tag("p", date(2026, 10, 22)), AUDIO)
-    '/anhang/aufnehmen/tag/2026-10-22/audio'
+    >>> aufnahme_route("/", Ziel.fuer_notiz("p", date(2026, 10, 22), "n1"), AUDIO)
+    '/anhang/aufnehmen/notiz/n1/audio'
     """
     teil = ziel.teil if isinstance(ziel, Ziel) else ziel
     return f"{basis.rstrip('/')}/{ANHANG}/{AUFNEHMEN}/{teil}/{WORT.get(art, 'foto')}"
 
 
 def ziel_name(state: AppState, ziel: Ziel) -> str:
-    """Wofür aufgenommen wird — der Name der Übung des Eintrags, beim Tag „Zum Tag · 22.10.“."""
+    """Wofür aufgenommen wird — der Name der Übung des Eintrags, beim Tag „Zum Tag · 22.10.“,
+    beim Bild einer Übung „Symbol: Kniebeuge“."""
+    if ziel.uebung_id is not None:
+        u = state.uebungen.laden(ziel.uebung_id, mit_geloeschten=True)
+        return f"Symbol: {u.name if u is not None else 'Übung'}"
     if ziel.zum_tag is not None:
         return f"Zum Tag · {ziel.zum_tag:%d.%m.}"
     eintrag = state.sitzungen.eintrag_laden(ziel.eintrag_id) if ziel.eintrag_id else None
@@ -471,6 +475,20 @@ class _Aufnahme:
     async def behalten(self) -> None:
         if self.daten is None:
             return
+        if self.ziel.uebung_id is not None:
+            # Das Bild einer Übung (2.11.2026): in die Ablage, nicht an einen Eintrag
+            daten = self.daten
+            try:
+                # Nur die Bytes im Thread — die SQLite-Verbindung gehört dem Event-Loop
+                rel = await asyncio.to_thread(self.state.uebungsbilder.schreiben, daten)
+                self.state.uebungsbilder.setzen(self.ziel.uebung_id, rel)
+            except (OSError, sqlite3.Error) as fehler:
+                self.melden(f"Nicht gespeichert: {fehler}")
+                return
+            self.daten = None
+            self.page.show_dialog(ft.SnackBar(ft.Text("Bild gespeichert")))
+            await self.zurueck()
+            return
         a: Anhang = neuer_anhang(
             self.ziel,
             self.art,
@@ -506,6 +524,10 @@ class _Aufnahme:
 
     async def zurueck(self) -> None:
         await self.aufraeumen()
+        # Eine Notiz zum Tag, die nur für diesen Anhang entstand, verschwindet wieder, wenn
+        # nichts behalten wurde (`components/tagesnotiz.py`)
+        if self.ziel.notiz_id is not None:
+            self.state.tagesnotizen.aufraeumen(self.ziel.notiz_id)
         await self.page.push_route(zurueck_ziel(self.page, self.ansicht))
 
     async def aufraeumen(self) -> None:

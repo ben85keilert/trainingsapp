@@ -16,8 +16,10 @@ ft = pytest.importorskip("flet")
 
 from trainingsapp.core.models import Plan  # noqa: E402
 from trainingsapp.data.seed import seed_id  # noqa: E402
+from trainingsapp.ui.components.notizeditor import Textnotiz  # noqa: E402
+from trainingsapp.ui.components.tagesnotiz import Tagesnotiz  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
-from trainingsapp.ui.views.tagebuch import UEBUNGEN, tagebuch  # noqa: E402
+from trainingsapp.ui.views.tagebuch import NEU, NOTIZEN, TAGE, UEBUNGEN, tagebuch  # noqa: E402
 
 
 @pytest.fixture
@@ -69,7 +71,8 @@ def _welt(state: AppState):
         session, kniebeuge, {"reps": [15]}, "links enger", started_at=um
     )
     state.sitzungen.notiz_setzen(session.id, "zäh heute")
-    state.tagesnotizen.setzen(state.profil.id, state.heute(), "Schulter fest")
+    tagebuch_tag = state.notiz_tags.sicherstellen(state.profil.id)
+    state.tagesnotizen.anlegen(state.profil.id, state.heute(), "Schulter fest", [tagebuch_tag.id])
     return plan, gestern, kniebeuge
 
 
@@ -95,7 +98,7 @@ def test_scrollen_nimmt_die_woche_mit(page, state) -> None:
     """Steht ein älterer Tag oben, zeigt die Leiste seine Woche (Höhen gemeldet)."""
     _welt(state)
     vor_zwei_wochen = state.heute() - timedelta(days=15)
-    state.tagesnotizen.setzen(state.profil.id, vor_zwei_wochen, "lange her")
+    state.tagesnotizen.anlegen(state.profil.id, vor_zwei_wochen, "lange her")
     ansicht = tagebuch(page, state)
     liste = next(x for x in _alle(ansicht) if isinstance(x, ft.Column) and x.on_scroll)
     bloecke = [x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.on_size_change]
@@ -110,7 +113,9 @@ def test_scrollen_nimmt_die_woche_mit(page, state) -> None:
     assert wochen_titel(beginn) in _texte(ansicht)
 
 
-def test_nach_uebungen_und_antippen_bearbeitet(page, state) -> None:
+def test_nach_uebungen_und_antippen_bearbeitet_in_der_liste(page, state) -> None:
+    """Ben, 2.11.2026 (P101, P103): kein Popup — die Notiz zum Tag und die zum Plan öffnen
+    sich als Editor an Ort und Stelle; die einer Übung in ihren Leistungen des Tages."""
     _plan, _gestern, _ = _welt(state)
     state.tagebuch_ordnung = UEBUNGEN
     ansicht = tagebuch(page, state)
@@ -129,25 +134,120 @@ def test_nach_uebungen_und_antippen_bearbeitet(page, state) -> None:
         for x in _alle(ansicht)
         if isinstance(x, ft.Container) and x.on_click and "Schulter fest" in _texte(x)
     )
+    assert "Tagebuch" in _texte(tag_karte)  # das Etikett des festen Tags
     tag_karte.on_click()
-    dialog = page.dialoge[-1]
-    assert isinstance(dialog, ft.AlertDialog) and dialog.content.value == "Schulter fest"
-    dialog.content.value = "Schulter frei"
-    dialog.actions[-1].on_click()  # Speichern
-    assert state.tagesnotizen.lesen(state.profil.id, state.heute()) == "Schulter frei"
+    assert len(page.dialoge) == 1  # kein Dialog dazu
+    (notiz,) = state.tagesnotizen.zum_tag(state.profil.id, state.heute())
+    assert state.tagebuch_bearbeitet == f"tag:{notiz.id}"
+    ansicht = tagebuch(page, state)  # die Ansicht neu — mit dem Editor statt der Karte
+    (feld,) = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.multiline]
+    assert feld.value == "Schulter fest" and feld.autofocus
+    editor = feld.on_change.__self__
+    assert isinstance(editor, Tagesnotiz)
+    assert [c.label.value for c in editor.chips.values()] == ["Tagebuch"]
+    feld.value = "Schulter frei"
+    feld.on_change(SimpleNamespace(control=feld))
+    asyncio.run(editor.fertig())
+    assert state.tagesnotizen.laden(notiz.id).text == "Schulter frei"
+    assert state.tagebuch_bearbeitet is None and state.tagebuch_editor is None
+    # Die Notiz zum Plan ebenso — ein Texteditor ohne Tags
+    ansicht = tagebuch(page, state)
+    plan_karte = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container) and x.on_click and "zäh heute" in _texte(x)
+    )
+    plan_karte.on_click()
+    assert state.tagebuch_bearbeitet.startswith("plan:")
+    ansicht = tagebuch(page, state)
+    (feld,) = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.multiline]
+    assert feld.value == "zäh heute"
+    editor = feld.on_change.__self__
+    assert isinstance(editor, Textnotiz)
+    feld.value = "zäh, aber gut"
+    feld.on_change(SimpleNamespace(control=feld))
+    asyncio.run(editor.fertig())
+    session_notizen = {s.note for s, _ in state.sitzungen.session_notizen(state.profil.id)}
+    assert "zäh, aber gut" in session_notizen and len(page.dialoge) == 1
 
 
 def test_leer_und_neue_notiz_zum_tag(page, state) -> None:
+    """„+“ im Kopf (und im leeren Tagebuch): eine neue Notiz zu heute oben in der Liste —
+    als Editor, kein Dialog."""
     ansicht = tagebuch(page, state)
-    assert any(t.startswith("Noch keine Notizen") for t in _texte(ansicht))
+    assert any(t.startswith("Keine Notizen") for t in _texte(ansicht))
     knopf = next(
-        x for x in _alle(ansicht) if isinstance(x, ft.IconButton) and x.icon == ft.Icons.EDIT_NOTE
+        x for x in _alle(ansicht) if isinstance(x, ft.IconButton) and x.icon == ft.Icons.ADD
     )
     knopf.on_click()
-    dialog = page.dialoge[-1]
-    dialog.content.value = "erster Eintrag"
-    asyncio.run(dialog.on_dismiss(None))  # daneben getippt — gilt als gespeichert
-    assert state.tagesnotizen.lesen(state.profil.id, state.heute()) == "erster Eintrag"
+    assert state.tagebuch_bearbeitet == NEU
+    ansicht = tagebuch(page, state)
+    assert any(t.startswith("Neue Notiz · Heute") for t in _texte(ansicht))
+    (feld,) = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.multiline]
+    editor = feld.on_change.__self__
+    feld.value = "erster Eintrag"
+    feld.on_change(SimpleNamespace(control=feld))
+    asyncio.run(editor.fertig())
+    assert [n.text for n in state.tagesnotizen.zum_tag(state.profil.id, state.heute())] == [
+        "erster Eintrag"
+    ]
+    assert page.dialoge == [] and state.tagebuch_bearbeitet is None
+    assert "erster Eintrag" in _texte(tagebuch(page, state))
+
+
+def test_notizen_abschnitt_mit_filter_suche_und_wochenleiste(page, state) -> None:
+    """Ben, 2.11.2026 (Punkt 4): ein dritter Abschnitt nur für die Notizen zum Tag, filterbar
+    nach Tags (ODER, „ohne Tag“), durchsuchbar, fortlaufend wie „Tage“ und mit derselben
+    ein-/ausblendbaren Wochenleiste; gekürzt auf die Zeilen von Heute (Punkt 3)."""
+    _plan, gestern, _ = _welt(state)
+    kraft = state.notiz_tags.anlegen(state.profil.id, "Kraft")
+    state.tagesnotizen.anlegen(state.profil.id, gestern, "Kniebeuge schwer", [kraft.id])
+    state.tagesnotizen.anlegen(state.profil.id, gestern, "ohne Etikett")
+    state.tagebuch_ordnung = NOTIZEN
+    ansicht = tagebuch(page, state)
+    texte = _texte(ansicht)
+    assert {"Schulter fest", "Kniebeuge schwer", "ohne Etikett"} <= set(texte)
+    assert "zäh heute" not in texte and "links enger" not in texte  # nur Notizen zum Tag
+    kalender = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.IconButton) and x.icon == ft.Icons.CALENDAR_VIEW_WEEK
+    )
+    assert kalender.visible
+    zellen = [x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.tooltip]
+    assert "1 Notiz" in [z.tooltip for z in zellen]  # die Wochenleiste
+    # Gekürzt wie das Feld unter Heute
+    from trainingsapp.core.tagebuch import NOTIZ_ZEILEN
+
+    karte = next(x for x in _alle(ansicht) if isinstance(x, ft.Text) and x.value == "Schulter fest")
+    assert karte.max_lines == NOTIZ_ZEILEN
+    # Filter: Chip „Kraft“ (ODER mit „ohne Tag“)
+    chips = {c.label.value: c for c in _alle(ansicht) if isinstance(c, ft.Chip)}
+    assert set(chips) == {"Tagebuch", "Kraft", "ohne Tag"}
+    chips["Kraft"].on_select(None)
+    assert state.tagebuch_tags == {kraft.id}
+    texte = _texte(tagebuch(page, state))
+    assert "Kniebeuge schwer" in texte and "Schulter fest" not in texte
+    chips = {c.label.value: c for c in _alle(tagebuch(page, state)) if isinstance(c, ft.Chip)}
+    chips["ohne Tag"].on_select(None)
+    texte = _texte(tagebuch(page, state))
+    assert "Kniebeuge schwer" in texte and "ohne Etikett" in texte and "Schulter fest" not in texte
+    state.tagebuch_tags.clear()
+    # Suche: jedes Wort muss vorkommen — im Text oder im Tag
+    suche = next(x for x in _alle(tagebuch(page, state)) if isinstance(x, ft.TextField))
+    suche.value = "kraft SCHWER"
+    suche.on_submit(SimpleNamespace(control=suche))
+    assert state.tagebuch_suche == "kraft SCHWER"
+    texte = _texte(tagebuch(page, state))
+    assert "Kniebeuge schwer" in texte and "Schulter fest" not in texte
+    suche = next(x for x in _alle(tagebuch(page, state)) if isinstance(x, ft.TextField))
+    suche.value = "Gemüse"
+    suche.on_submit(SimpleNamespace(control=suche))
+    assert any(
+        t.startswith("Keine Notizen zu diesem Filter") for t in _texte(tagebuch(page, state))
+    )
+    state.tagebuch_suche = ""
+    state.tagebuch_ordnung = TAGE
 
 
 def test_der_verlauf_hat_vier_reiter(page, state) -> None:

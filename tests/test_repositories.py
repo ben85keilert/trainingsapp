@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 
 from trainingsapp.core.models import (
+    DayNote,
     Exercise,
     Media,
     MediaKind,
@@ -25,6 +26,7 @@ from trainingsapp.data.db import oeffnen, schema_version
 from trainingsapp.data.repositories import (
     DayNoteRepo,
     ExerciseRepo,
+    NoteTagRepo,
     PlanRepo,
     SessionRepo,
     SettingRepo,
@@ -456,17 +458,54 @@ def test_plaene_je_profil_und_profilfrei(con) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_tagesnotiz(con) -> None:
+def test_tagesnotizen_mehrere_je_tag_mit_tags(con) -> None:
+    """Ben, 2.11.2026: mehrere Notizen je Tag, jede mit Tags; „Tagebuch“ ist fest; ein
+    gelöschter Tag nimmt der Notiz nur das Etikett, der Text bleibt."""
     profile = SubjectRepo(con)
     ich = Subject(name="Ich")
     profile.speichern(ich)
-    notizen = DayNoteRepo(con)
+    notizen, tags = DayNoteRepo(con), NoteTagRepo(con)
     tag = date(2026, 10, 12)
-    assert notizen.lesen(ich.id, tag) == ""
-    notizen.setzen(ich.id, tag, "Erster Versuch ")
-    notizen.setzen(ich.id, tag, "Zweiter Versuch")
-    assert notizen.lesen(ich.id, tag) == "Zweiter Versuch"
-    assert con.execute("SELECT COUNT(*) FROM day_note").fetchone()[0] == 1
+    assert notizen.zum_tag(ich.id, tag) == []
+    tagebuch = tags.sicherstellen(ich.id)
+    assert tagebuch.fest and tagebuch.name == "Tagebuch" and tags.sicherstellen(ich.id) == tagebuch
+    kraft = tags.anlegen(ich.id, "  Kraft ")
+    assert [t.name for t in tags.alle(ich.id)] == ["Tagebuch", "Kraft"]
+    with pytest.raises(ValueError):
+        tags.anlegen(ich.id, "kraft")  # Groß und klein trennen keine Tags
+    with pytest.raises(ValueError):
+        tags.anlegen(ich.id, "   ")
+    erste = DayNote(subject_id=ich.id, date=tag, text="Erster Versuch ", tag_ids=(tagebuch.id,))
+    notizen.speichern(erste)
+    zweite = DayNote(subject_id=ich.id, date=tag, text="Kniebeuge schwer", tag_ids=(kraft.id,))
+    notizen.speichern(zweite)
+    assert [n.text for n in notizen.zum_tag(ich.id, tag)] == ["Erster Versuch", "Kniebeuge schwer"]
+    assert erste.created_at is not None
+    erste.text = "Zweiter Versuch"
+    erste.tag_ids = (tagebuch.id, kraft.id)
+    notizen.speichern(erste)
+    geladen = notizen.laden(erste.id)
+    assert geladen is not None and geladen.text == "Zweiter Versuch"
+    assert geladen.tag_ids == (tagebuch.id, kraft.id) and geladen.created_at == erste.created_at
+    assert notizen.anzahl_mit_tag(kraft.id) == 2
+    # Tag löschen: die Notiz behält den Text und verliert das Etikett
+    tags.loeschen(kraft.id)
+    assert [n.tag_ids for n in notizen.zum_tag(ich.id, tag)] == [(tagebuch.id,), ()]
+    assert [t.name for t in tags.alle(ich.id)] == ["Tagebuch"]
+    with pytest.raises(ValueError):
+        tags.loeschen(tagebuch.id)
+    with pytest.raises(ValueError):
+        tags.umbenennen(tagebuch.id, "Journal")
+    tags.umschalten(tagebuch.id, False)
+    assert not tags.alle(ich.id)[0].aktiv and tags.alle(ich.id, mit_ausgeschalteten=False) == []
+    # Weich löschen
+    notizen.loeschen(zweite.id)
+    assert [n.id for n in notizen.alle(ich.id)] == [erste.id]
+    assert con.execute("SELECT COUNT(*) FROM day_note").fetchone()[0] == 2
+    leer = DayNote(subject_id=ich.id, date=tag, text="")
+    notizen.speichern(leer)
+    assert [n.id for n in notizen.alle(ich.id)] == [erste.id]
+    assert [n.id for n in notizen.alle(ich.id, mit_leeren=True)] == [erste.id, leer.id]
 
 
 # ---------------------------------------------------------------------------
@@ -947,7 +986,7 @@ def test_migration_028_planuebung_folgt(tmp_path) -> None:
             (f"i{nr}", nr, ziel, felder),
         )
     con.commit()
-    assert migrieren(con) == 35
+    assert migrieren(con) == 36
     zeilen = {
         r["id"]: (r["target_json"], r["fields_json"])
         for r in con.execute("SELECT id, target_json, fields_json FROM plan_item")
@@ -1374,14 +1413,14 @@ def test_tagesnotiz_weiss_wann_sie_entstand(welt) -> None:
     con, _repo, ich, _sitzung = welt
     notizen = DayNoteRepo(con)
     tag = date(2026, 10, 16)
-    assert notizen.angelegt(ich.id, tag) is None
-    notizen.setzen(ich.id, tag, "Beine schwer")
-    erst = notizen.angelegt(ich.id, tag)
+    n = DayNote(subject_id=ich.id, date=tag, text="Beine schwer")
+    notizen.speichern(n)
+    erst = n.created_at
     assert erst is not None
-    notizen.setzen(ich.id, tag, "Beine schwer, trotzdem gut")
-    assert notizen.angelegt(ich.id, tag) == erst
-    notizen.setzen(ich.id, tag, "")
-    assert notizen.angelegt(ich.id, tag) is None
+    n.text = "Beine schwer, trotzdem gut"
+    notizen.speichern(n)
+    geladen = notizen.laden(n.id)
+    assert geladen is not None and geladen.created_at == erst
 
 
 def test_nachtrag_spaet_am_abend_bleibt_in_seinem_tag(welt) -> None:
@@ -1766,7 +1805,7 @@ def test_migration_030_uebernimmt_vergebene_titel(tmp_path) -> None:
             )
         )
     con.commit()
-    assert migrieren(con) == 35
+    assert migrieren(con) == 36
     liste = hrv.titel_liste(ich.id)
     assert [t.name for t in liste] == ["Abends", "Morgens"]
     assert liste[1].zuletzt == datetime(2026, 10, 2, tzinfo=UTC)

@@ -19,7 +19,7 @@ from trainingsapp.core.anhaenge import (
     neuer_anhang,
     verwaiste,
 )
-from trainingsapp.core.models import Plan, Subject, lokaler_tag
+from trainingsapp.core.models import DayNote, Plan, Subject, lokaler_tag
 from trainingsapp.data.anhaenge import (
     AnhangRepo,
     qualitaet_lesen,
@@ -29,6 +29,7 @@ from trainingsapp.data.anhaenge import (
 )
 from trainingsapp.data.db import oeffnen
 from trainingsapp.data.repositories import (
+    DayNoteRepo,
     ExerciseRepo,
     PlanRepo,
     SessionRepo,
@@ -286,7 +287,7 @@ def test_migration_029_behaelt_anhaenge_und_erlaubt_audio_und_tag(tmp_path) -> N
         (eintrag.id,),
     )
     con.commit()
-    assert migrieren(con) == 35
+    assert migrieren(con) == 36
     repo = AnhangRepo(con, tmp_path / "Anhaenge")
     alt = repo.laden("alt")
     assert alt is not None and (alt.eintrag_id, alt.note, alt.bytes) == (eintrag.id, "links", 300)
@@ -323,18 +324,24 @@ def test_audio_und_anhaenge_am_tag(welt) -> None:
     Überblick, in der Summe und beim Aufräumen."""
     repo, profil, eintrag = welt.repo, welt.profil, welt.eintrag
     heute = lokaler_tag(datetime.now(UTC))
-    ton = neuer_anhang(Ziel.fuer_tag(profil.id, heute), AUDIO, Qualitaet.MITTEL, dauer_s=8.5)
+    notiz = DayNote(subject_id=profil.id, date=heute, text="")
+    DayNoteRepo(repo.con).speichern(notiz)
+    ziel = Ziel.fuer_notiz(profil.id, heute, notiz.id)
+    ton = neuer_anhang(ziel, AUDIO, Qualitaet.MITTEL, dauer_s=8.5)
     repo.anlegen(ton, M4A)
-    foto = neuer_anhang(Ziel.fuer_tag(profil.id, heute), BILD, Qualitaet.MITTEL)
+    foto = neuer_anhang(ziel, BILD, Qualitaet.MITTEL)
     repo.anlegen(foto, JPEG)
     am_eintrag = neuer_anhang(eintrag.id, AUDIO, Qualitaet.KLEIN, dauer_s=3.0)
     repo.anlegen(am_eintrag, M4A)
 
     assert [a.id for a in repo.zum_tag(profil.id, heute)] == [ton.id, foto.id]
+    assert [a.id for a in repo.zur_notiz(notiz.id)] == [ton.id, foto.id]
+    assert repo.zu_notizen([notiz.id, "x"]) == {notiz.id: repo.zur_notiz(notiz.id)}
     assert repo.zum_tag(profil.id, heute - timedelta(days=1)) == []
     geladen = repo.laden(ton.id)
     assert geladen is not None and geladen.ist_audio and geladen.am_tag
     assert (geladen.profil_id, geladen.zum_tag, geladen.dauer_s) == (profil.id, heute, 8.5)
+    assert geladen.notiz_id == notiz.id and geladen.ziel == ziel
     assert geladen.pfad.endswith(".m4a") and geladen.mime == "audio/mp4"
     assert [a.id for a in repo.je_eintrag(eintrag.id)] == [am_eintrag.id]
     assert repo.je_uebung(profil.id, [welt.uebung.id])[0].anhang.id == am_eintrag.id
@@ -358,6 +365,63 @@ def test_audio_und_anhaenge_am_tag(welt) -> None:
 def test_ziel_und_tag_in_der_route() -> None:
     from trainingsapp.core.anhaenge import ziel_lesen
 
-    z = Ziel.fuer_tag("p1", date(2026, 10, 22))
-    assert ziel_lesen([*z.teil.split("/"), "audio"], "p1") == (z, ["audio"])
+    z = Ziel.fuer_notiz("p1", date(2026, 10, 22), "n1")
+    # Die Route nennt nur die Notiz — ihren Tag trägt die App nach (`app.anhang_ziel`)
+    assert ziel_lesen([*z.teil.split("/"), "audio"], "p1") == (
+        Ziel(profil_id="p1", notiz_id="n1"),
+        ["audio"],
+    )
     assert ziel_lesen(["e1", "foto"], "p1") == (Ziel.fuer_eintrag("e1"), ["foto"])
+
+
+def test_migration_036_notizen_mit_tagebuch_und_anhaengen(tmp_path) -> None:
+    """Ben, 2.11.2026: Jede bisherige Notiz mit Text bekommt den festen Tag „Tagebuch“; die
+    eine Notiz je Tag darf jetzt mehrere sein; Anhänge am Tag hängen an der Notiz des Tags —
+    ohne Notiz entsteht eine ohne Text; leere Notizen ohne Anhänge verschwinden."""
+    from trainingsapp.data.db import MIGRATIONS_DIR, migrieren, verbinden
+    from trainingsapp.data.repositories import DayNoteRepo, NoteTagRepo
+
+    ordner = tmp_path / "bis035"
+    ordner.mkdir()
+    for datei in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if int(datei.name[:3]) <= 35:
+            (ordner / datei.name).write_text(datei.read_text(encoding="utf-8"), encoding="utf-8")
+    con = verbinden(tmp_path / "alt.db")
+    assert migrieren(con, ordner) == 35
+    con.execute(
+        "INSERT INTO subject (id, name, created_at, updated_at) VALUES ('p', 'Alt', 'x', 'x')"
+    )
+    t = "2026-10-20T10:00:00+00:00"
+    con.execute(
+        "INSERT INTO day_note (id, subject_id, date, text, created_at, updated_at) VALUES "
+        "('n1', 'p', '2026-10-20', 'müde', ?, ?), ('n2', 'p', '2026-10-21', '', ?, ?)",
+        (t, t, t, t),
+    )
+    con.execute(
+        "INSERT INTO entry_media (id, subject_id, day, kind, uri, recorded_at) VALUES "
+        "('a1', 'p', '2026-10-20', 'image', 'a.jpg', ?), "
+        "('a2', 'p', '2026-10-22', 'audio', 'b.m4a', '2026-10-22T08:00:00+00:00')",
+        (t,),
+    )
+    con.commit()
+    assert migrieren(con) == 36
+    notizen, tags = DayNoteRepo(con), NoteTagRepo(con)
+    (tagebuch,) = tags.alle("p")
+    assert tagebuch.fest and tagebuch.name == "Tagebuch"
+    alle = {n.id: n for n in notizen.alle("p", mit_leeren=True)}
+    assert alle["n1"].tag_ids == (tagebuch.id,) and "n2" not in alle  # leer, ohne Anhang: weg
+    repo = AnhangRepo(con, tmp_path / "Anhaenge")
+    a1, a2 = repo.laden("a1"), repo.laden("a2")
+    assert a1 is not None and a1.notiz_id == "n1"
+    assert a2 is not None and a2.notiz_id is not None and a2.notiz_id != "n1"
+    neue = alle[a2.notiz_id]
+    assert neue.text == "" and neue.date == date(2026, 10, 22) and neue.tag_ids == ()
+    assert neue.created_at == datetime(2026, 10, 22, 8, tzinfo=UTC)
+    # Mehrere je Tag gehen jetzt
+    con.execute(
+        "INSERT INTO day_note (id, subject_id, date, text, created_at, updated_at) VALUES "
+        "('n3', 'p', '2026-10-20', 'zweite', ?, ?)",
+        (t, t),
+    )
+    assert [n.id for n in notizen.zum_tag("p", date(2026, 10, 20))] == ["n1", "n3"]
+    con.close()

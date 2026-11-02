@@ -10,6 +10,9 @@
   Rechenvorschrift steht in hrv-core (`hrv_core/atmung.py`).
 - **Varianten** (`VARIANTEN_MD`, Ben 21.10.2026): was das Etikett neben „Notiz“ heißt —
   neben dem Symbol steht kein Wort, die Erklärung kommt in die Hilfedatei (Katalog A3).
+- **Parameter, Uhr, Symbol** (`PARAMETER_MD`, `UHR_MD`, `SYMBOL_MD`, Ben 2.11.2026: „Erklärtexte
+  in das i, um die Übung weniger überladen zu halten“): die Texte, die bis dahin unter jeder
+  Überschrift von „Übung bearbeiten“ standen.
 """
 
 from __future__ import annotations
@@ -76,8 +79,60 @@ Zeile, zeigt die Ausführung nur die Symbole — Name und Beschreibung der gewä
 darunter. Umbenennen kann die bisherigen Einträge mitnehmen; Entfernen lässt sie, wie
 sie sind.
 
-**Im Plan** steht die Zeile in jeder Planübung; unter „Einstellen“ und beim i schaltest
-du sie für eine Planübung aus. Ein Ziel kann eine Variante vorgeben.
+**Im Plan** steht die Zeile in jeder Planübung; unter „Im Plan einstellen“ schaltest du
+sie für eine Planübung aus. Das Ziel der Übung kann eine Variante vorgeben („Ziel-Variante“
+unter den Varianten).
+"""
+
+
+PARAMETER_MD = """\
+**Parameter** sind, was du beim Üben als geleistet antippst — in jedem Plan (weniger stellst
+du in „Im Plan einstellen“ ein). Oben die Knöpfe: ein Tipp schaltet einen Parameter ein oder
+aus. Darunter je eingeschaltetem Parameter seine Karte.
+
+**Name**: Jeder Parameter trägt in dieser Übung seinen eigenen Namen — „Haltezeit“ darf
+„Hängen“ heißen, die Skala „Anstrengung“. Die Einheit bleibt.
+
+**Chips** sind die Werte, die beim Üben als Knöpfe stehen (`+15`, `45°`). Angetippt =
+angeboten; „eigener“ ergänzt einen Wert; ein nicht gewählter Chip hat ein ✕ und verschwindet
+damit aus der Wahl — ein eigener für immer, ein Vorschlag des Vorrats (10, 15, 20) steht beim
+nächsten Öffnen wieder da. Ohne gewählten Chip gibt es beim Üben nur das freie Feld.
+
+**Sätze** (bei Wiederholungen und Haltezeit): an = Eingabe je Satz (3 × 15); aus = eine Zahl
+je Eintrag („263 Liegestütze heute“), angezeigt wird die Summe.
+
+**Menge oder Ausprägung**: Wiederholungen und Zeiten werden addiert (3 × 50 = 150). Winkel,
+Gewicht und Seite wählst du vorher aus — sie trennen: Wandsitz 45° ist nicht Wandsitz 90°.
+Ja/Nein, Skala und Freitext gelten für den offenen Eintrag — sie trennen nicht.
+
+**Ziel**: Was auf der Karte unter „Ziel“ steht (3 × 15, 45 s), trägt „Wie geplant“ beim Üben
+mit einem Tipp ein. Es gilt in jedem Plan, der kein eigenes hat — in „Im Plan einstellen“
+kann ein Plan abweichen. Leer heißt: kein Ziel.
+"""
+
+UHR_MD = """\
+**Stoppuhr und Timer beim Üben**: aus heißt keine Uhr in der Übung — „Gemacht“ hakt nur ab.
+
+**Timerzeit zählt**: Jeder Lauf von Stoppuhr oder Timer ist ein Satz im offenen Eintrag —
+als **Haltezeit** (je Satz) oder als **Zeit** (gesamt), das stellst du unter „Zählt als“ ein,
+sobald die Übung Haltezeit hat; ohne Haltezeit zählt die Uhr immer als Zeit. Beim Üben
+schaltest du „zählt“ in der Leiste für jetzt um. Aus: Läufe tragen nur „gemacht“ ein.
+
+**Timer**: Das erste Profil ist die Vorgabe; ein Plan kann in „Im Plan einstellen“ ein
+anderes nehmen. Teile (Vorbereitung, Training, Cooldown) und „zählt“ je Abschnitt stellst
+du im Timer-Editor ein — er speichert vorher die Übung. „Timer hinzufügen“ legt ein neues
+Profil an oder übernimmt eine Kopie aus der Timer-Bibliothek. Ohne eigenes Profil gilt die
+Timer-Regel der Übung.
+"""
+
+SYMBOL_MD = """\
+**Symbol oder Bild**: Ein Tipp auf das Symbol oben öffnet die Auswahl — die Symbole, oder
+ein eigenes Foto aus der Fotoauswahl (verkleinert, ohne Ortsangabe) oder aus der Kamera.
+Ein Foto zeigt die Übung überall rund statt des Symbols.
+
+**Die Ablage** oben in der Auswahl sind alle eigenen Bilder. Ein Tipp nimmt eines für diese
+Übung; das ✕ löscht es aus der Ablage — Übungen, die es trugen, zeigen wieder ihr Symbol.
+Bilder bleiben auf diesem Gerät: nie im Paket, im Export oder in der Sicherung über das Netz.
 """
 
 
@@ -184,6 +239,9 @@ und das Signal sind deine Werte wie ein Timer. Einstellungen → Herzfrequenz.
 THEMEN: dict[str, tuple[str, str, str]] = {
     "notation": ("So wird eingegeben", NOTATION_MD, "Wie gebe ich ein?"),
     "varianten": ("Varianten", VARIANTEN_MD, "Was sind Varianten?"),
+    "parameter": ("Parameter, Chips und Ziel", PARAMETER_MD, "Parameter, Chips und Ziel"),
+    "uhr": ("Uhr und Timer", UHR_MD, "Uhr, Timerzeit, zählt als"),
+    "symbol": ("Symbol oder Bild", SYMBOL_MD, "Symbol oder eigenes Bild"),
     "uebungen": ("Varianten und Pakete", UEBUNGEN_MD, "Varianten und Pakete"),
     "atmung": ("Atemfrequenz und Atemübung", ATMUNG_MD, "Was heißt „Atemübung“?"),
     "herzfrequenz": ("Herzfrequenz-Sicht", HERZFREQUENZ_MD, "Was zeigt die Herzfrequenz-Sicht?"),

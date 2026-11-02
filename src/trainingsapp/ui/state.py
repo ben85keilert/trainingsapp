@@ -26,6 +26,7 @@ from trainingsapp.config import (
     anhaengeverzeichnis,
     datenbankpfad,
     datenverzeichnis,
+    medienverzeichnis,
     messungenverzeichnis,
     paketordner,
     streckenverzeichnis,
@@ -93,6 +94,7 @@ from trainingsapp.data.repositories import (
     DayNoteRepo,
     ExerciseRepo,
     HrvRepo,
+    NoteTagRepo,
     PlanRepo,
     SessionRepo,
     SettingRepo,
@@ -103,6 +105,7 @@ from trainingsapp.data.repositories import (
 from trainingsapp.data.seed import pakete_aus_ordner, seed_einspielen
 from trainingsapp.data.strecken import verwaiste as strecken_verwaiste
 from trainingsapp.data.tagesfelder import TagesfeldRepo, TageswertRepo
+from trainingsapp.data.uebungsbilder import UebungsbildRepo
 from trainingsapp.data.upgrade import datenformat_aktualisieren
 from trainingsapp.devices.bekannte import (
     BekanntesGeraet,
@@ -190,6 +193,8 @@ class AppState:
     plaene: PlanRepo
     sitzungen: SessionRepo
     tagesnotizen: DayNoteRepo
+    #: Die Tags an den Notizen zum Tag (Migration 036, Ben 2.11.2026)
+    notiz_tags: NoteTagRepo
     hrv: HrvRepo
     #: Ausdauertrainings mit GPS (Migration 012) — nie synchronisiert
     strecken: StreckeRepo
@@ -201,6 +206,8 @@ class AppState:
     kurse: KursRepo
     #: Fotos und Videos an Einträgen (Migration 025, `core/anhaenge.py`) — nie geteilt
     anhaenge: AnhangRepo
+    #: Eigene Bilder als Symbol einer Übung (`data/uebungsbilder.py`, Ben 2.11.2026)
+    uebungsbilder: UebungsbildRepo
     #: Tagesfelder und ihre Werte (Migration 027, `core/tagesfelder.py`) — je Profil
     tagesfelder: TagesfeldRepo
     #: Herzfrequenz: Profilwerte mit Herkunft und Rechen-Ausnahmen (Migration 034)
@@ -249,6 +256,13 @@ class AppState:
     tagebuch_ordnung: str = "tage"
     tagebuch_kalender: bool = True
     tagebuch_anzahl: int = 0
+    #: Abschnitt „Notizen“ (Ben, 2.11.2026): Filter nach Tags (IDs, `core.tagebuch.OHNE_TAG`
+    #: = ohne), Suchtext; welche Notiz in der Liste bearbeitet wird (``tag:<id>``,
+    #: ``plan:<session>``, ``neu``) und ihr Editor (überlebt den Neubau der Ansicht)
+    tagebuch_tags: set[str] = field(default_factory=set)
+    tagebuch_suche: str = ""
+    tagebuch_bearbeitet: str | None = None
+    tagebuch_editor: Any = None
     #: Aufnahmen im Verlauf der Übung (`core.anhaenge.ZEITRAEUME`): gezeigter Zeitraum
     anhaenge_zeitraum: str = ANHAENGE_ZEITRAUM_VORGABE
     #: Kurve einer Übung: Zeitraum, X-Achse, Kennzahl je Kachel; je Kachel die
@@ -369,6 +383,10 @@ class AppState:
     #: Zurück auf „Heute“, während man dort schreibt: Schreiben beenden (gespeichert ist
     #: schon) statt nichts zu tun — setzt `components/tagesnotiz.py`
     schreiben_beenden: Callable[[], Awaitable[None]] | None = None
+    #: Solange man die Notiz zum Tag schreibt: was der Finger neben dem Feld tut — "scroll"
+    #: (die Fläche scrollt, `components/scroll.py`) oder "tipp" (aufgesetzt und abgehoben,
+    #: ohne zu ziehen; `views/tag.py`). Setzt `components/tagesnotiz.py` (Ben, 2.11.2026)
+    schreib_gesten: Callable[[str], None] | None = None
     #: GPS: Ortungsquelle (`devices.gps.GpsQuelle` — auf Android `FletGpsQuelle`,
     #: in `app.py` angelegt; sonst beim ersten Bedarf ein Simulator) und der
     #: laufende Vorabtest (`ui.views.gps_test.GpsTestLauf`) mit seinen Vorgaben
@@ -493,6 +511,7 @@ class AppState:
             plaene=PlanRepo(con),
             sitzungen=sitzungen,
             tagesnotizen=DayNoteRepo(con),
+            notiz_tags=NoteTagRepo(con),
             hrv=HrvRepo(con),
             strecken=strecken,
             verwaiste_strecken=verwaist,
@@ -503,6 +522,7 @@ class AppState:
             pakete=PaketRepo(con),
             kurse=KursRepo(con),
             anhaenge=AnhangRepo(con, anhaengeverzeichnis()),
+            uebungsbilder=UebungsbildRepo(con, medienverzeichnis()),
             tagesfelder=TagesfeldRepo(con),
             tageswerte=TageswertRepo(con),
             profilwerte=ProfilwertRepo(con),

@@ -2,7 +2,7 @@
 ``<basis>/anhang/hochladen/<ziel>`` (Ben, 21.10.2026, P74: „Ermögliche das Hochladen von
 Anhängen. Dabei Vorsicht mit den Nutzerrechten, hier nicht zu aggressiv sein“; Skizzen
 I1/I2 https://claude.ai/artifact/7JzRndHG41e3ZfeCm7huCH). ``<ziel>``: die ID des Eintrags
-oder, seit 22.10.2026, ``tag/<datum>`` für die Notiz zum Tag (`core.anhaenge.Ziel`).
+oder, seit 2.11.2026, ``notiz/<id>`` für die Notiz zum Tag (`core.anhaenge.Ziel`).
 
 Die Seite öffnet gleich die Fotoauswahl von Android (`flet_hochladen`): Die App bekommt nur
 die gewählte Datei, eine Berechtigung für Fotos oder Speicher braucht sie nicht. Danach wird
@@ -244,6 +244,23 @@ class _Hochladen:
     async def behalten(self) -> None:
         if not self.fertig or self.ziel is None or self.art is None:
             return
+        if self.woran.uebung_id is not None:
+            # Das Bild einer Übung (2.11.2026): in die Ablage, nicht an einen Eintrag
+            if self.art != BILD:
+                self.melden("Als Symbol geht nur ein Foto.")
+                return
+            try:
+                # Verschieben im Thread, die Zeile im Event-Loop (die Verbindung gehört ihm)
+                rel = await asyncio.to_thread(self.state.uebungsbilder.uebernehmen, self.ziel)
+                self.state.uebungsbilder.setzen(self.woran.uebung_id, rel)
+            except (OSError, sqlite3.Error) as fehler:
+                self.melden(f"Nicht gespeichert: {fehler}")
+                return
+            self.fertig = False
+            self.ziel = self.frontbild = None
+            self.page.show_dialog(ft.SnackBar(ft.Text("Bild gespeichert")))
+            await self.zurueck()
+            return
         a: Anhang = neuer_anhang(
             self.woran,
             self.art,
@@ -275,6 +292,10 @@ class _Hochladen:
 
     async def zurueck(self) -> None:
         await self.aufraeumen()
+        # Eine Notiz zum Tag, die nur für diesen Anhang entstand, verschwindet wieder, wenn
+        # nichts behalten wurde (`components/tagesnotiz.py`)
+        if self.woran.notiz_id is not None:
+            self.state.tagesnotizen.aufraeumen(self.woran.notiz_id)
         await self.page.push_route(zurueck_ziel(self.page, self.ansicht))
 
     async def aufraeumen(self) -> None:

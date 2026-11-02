@@ -210,7 +210,7 @@ CREATE INDEX idx_day_value_feld ON day_value(field_id, date)   WHERE deleted_at 
   - Anzahl, Menge und Dauer: großer „+“-Knopf, Uhrzeit „jetzt“ oder früher, die Liste
     von heute (antippen ändert, ✕ löscht).
   - Ja/Nein: zwei Knöpfe.
-  - Text: wie `notiz_dialog`, speichert beim Schließen („Zurück speichert“).
+  - Text: wie der frühere Notizdialog, speichert beim Schließen („Zurück speichert“).
   - Varianten stehen oben als Segment wie in der Übung.
 - Ein **vergangener Tag** (`/tag/<datum>`) zeigt dieselben Knöpfe. Die Uhrzeit ist mit
   12:00 vorbelegt wie beim Nachtragen.

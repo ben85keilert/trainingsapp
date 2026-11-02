@@ -574,7 +574,8 @@ async def test_audio_aufnehmen_anhalten_und_am_tag_behalten(welt, page) -> None:
     from trainingsapp.ui.views.anhang_ton import _Ton
 
     heute = welt.state.heute()
-    t = _Ton(page, welt.state, Ziel.fuer_tag(welt.state.profil.id, heute))
+    notiz = welt.state.tagesnotizen.anlegen(welt.state.profil.id, heute, "")
+    t = _Ton(page, welt.state, Ziel.fuer_notiz(welt.state.profil.id, heute, notiz.id))
     t.rekorder = _Rekorder()
     await t.starten()
     assert t.laeuft and t.datei is not None and t.datei.parent.name == ".aufnahme"
@@ -591,6 +592,7 @@ async def test_audio_aufnehmen_anhalten_und_am_tag_behalten(welt, page) -> None:
     await t.behalten()
     am_tag = welt.state.anhaenge.zum_tag(welt.state.profil.id, heute)
     assert [(a.art, a.note, a.eintrag_id) for a in am_tag] == [(AUDIO, "nach dem Laufen", None)]
+    assert am_tag[0].notiz_id == notiz.id
     assert am_tag[0].pfad.endswith(".m4a") and welt.state.anhaenge.vorhanden(am_tag[0])
     assert not list(welt.state.anhaenge.aufnahme_ordner().iterdir())
     assert page.routen == ["/"]
@@ -650,8 +652,9 @@ def test_audioseite_und_ansicht(welt, page) -> None:
     from trainingsapp.ui.views.anhang_ton import anhang_ton_view
 
     heute = welt.state.heute()
-    ziel = Ziel.fuer_tag(welt.state.profil.id, heute)
-    seite = anhang_ton_view(page, welt.state, f"/anhang/aufnehmen/tag/{heute}/audio", ziel)
+    notiz = welt.state.tagesnotizen.anlegen(welt.state.profil.id, heute, "")
+    ziel = Ziel.fuer_notiz(welt.state.profil.id, heute, notiz.id)
+    seite = anhang_ton_view(page, welt.state, f"/anhang/aufnehmen/notiz/{notiz.id}/audio", ziel)
     assert seite.can_pop is False and seite.on_confirm_pop is not None
     texte = _texte(seite)
     assert f"Audio: Zum Tag · {heute:%d.%m.}" in texte
@@ -682,7 +685,9 @@ def test_audio_in_leistungen_tagebuch_und_einstellungen(welt, page) -> None:
     assert "Audio aufnehmen" in [i.content.value for i in klammer.items]
 
     heute = welt.state.heute()
-    ton = neuer_anhang(Ziel.fuer_tag(welt.state.profil.id, heute), AUDIO, Qualitaet.MITTEL)
+    notiz = welt.state.tagesnotizen.anlegen(welt.state.profil.id, heute, "")
+    ziel = Ziel.fuer_notiz(welt.state.profil.id, heute, notiz.id)
+    ton = neuer_anhang(ziel, AUDIO, Qualitaet.MITTEL)
     ton.dauer_s = 12.0
     welt.state.anhaenge.anlegen(ton, M4A)
     kontrolle = tagebuch(page, welt.state)

@@ -5,8 +5,10 @@ reflektiert …“ — als dritter Reiter im Verlauf. Das Tagebuch ist keine eig
 (Migration 003): Es fragt die drei Ebenen der Notizen ab — zum Tag (`day_note`), zum Plan
 an einem Tag (`session.note`) und zur Übung (`session_entry.note`) — und ordnet sie:
 
-- **nach Tagen** (`nach_tagen`): der neueste Tag oben; im Tag zuerst die Notiz zum Tag,
-  dann die übrigen nach der Uhr (ein Zeitstrahl wie die Zeitleiste auf „Heute“);
+- **nach Tagen** (`nach_tagen`): der neueste Tag oben; im Tag alles nach der Uhr (ein
+  Zeitstrahl wie die Zeitleiste auf „Heute“) — seit 2.11.2026 auch die Notizen zum Tag an
+  ihrer Uhrzeit, denn es sind mehrere je Tag (Ben: „mehrere erstellbar mit einem ‚+‘“), mit
+  Tags (`Notiz.tags`); `nur_tag` ist der dritte Abschnitt „Notizen“ mit Filter und Suche;
 - **nach Übungen** (`nach_uebungen`): je Übung und je Plan eine Gruppe, die zuletzt
   beschriebene oben, darin die neueste Notiz zuerst; die Notizen zum Tag für sich.
 
@@ -32,7 +34,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
 from .anhaenge import AnhangMitBezug, zusammenfassung
-from .models import Session, SessionEntry, lokaler_tag
+from .models import DayNote, Session, SessionEntry, lokaler_tag
 from .tagesfelder import TEXT as NUR_TEXT
 from .tagesfelder import Tagesfeld, Tageswert, eintrag_text, tageszeile
 from .varianten import von as variante_von
@@ -40,6 +42,11 @@ from .varianten import von as variante_von
 #: Woran eine Notiz hängt — `AUFNAHME`: Fotos und Videos an einem Eintrag, `TAGESFELD`: Text
 #: oder Notiz eines Tagesfelds
 TAG, PLAN, UEBUNG, AUFNAHME, TAGESFELD = "tag", "plan", "uebung", "aufnahme", "tagesfeld"
+#: So viele Zeilen zeigt eine Notiz zum Tag, bevor sie abgeschnitten wird — das Feld unter
+#: Heute (``max_lines``) und die Karte im Tagebuch gleichermaßen (Ben, 2.11.2026, P100)
+NOTIZ_ZEILEN = 10
+#: Im Filter des Abschnitts „Notizen“: Notizen ohne Tag
+OHNE_TAG = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,9 +69,12 @@ class Notiz:
     #: Tagesfeld: welches, und wie die Notiz heißt („Ibu 400“, „Ernährung“)
     feld_id: str | None = None
     titel: str = ""
-    #: `AUFNAHME`: die Anhänge, die älteste zuerst — an einem Eintrag oder am Tag (dann ohne
-    #: Übung, Ben 22.10.2026)
+    #: `AUFNAHME`: die Anhänge, die älteste zuerst — an einem Eintrag oder an einer Notiz zum
+    #: Tag (dann ohne Übung, Ben 22.10.2026; `bezug_id` ist die Notiz)
     anhang_ids: tuple[str, ...] = ()
+    #: Notiz zum Tag: ihre Tags — IDs und Namen in derselben Reihenfolge (Ben, 2.11.2026)
+    tag_ids: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
 
     def sortierzeit(self) -> float:
         return self.zeit.timestamp() if self.zeit is not None else 0.0
@@ -72,7 +82,7 @@ class Notiz:
 
 @dataclass(frozen=True, slots=True)
 class Tagesgruppe:
-    """Ein Tag im Tagebuch: zuerst die Notiz zum Tag, dann nach der Uhr."""
+    """Ein Tag im Tagebuch: alles nach der Uhr (die Notizen zum Tag an ihrer)."""
 
     tag: date
     notizen: tuple[Notiz, ...]
@@ -89,17 +99,19 @@ class Gruppe:
 
 
 def sammeln(
-    tage: Iterable[tuple[date, str, datetime | None]],
+    tage: Iterable[DayNote],
     sessions: Iterable[tuple[Session, datetime | None]],
     eintraege: Iterable[tuple[SessionEntry, Session]],
     aufnahmen: Iterable[AnhangMitBezug] = (),
     tageswerte: Iterable[Tageswert] = (),
     tagesfelder: Mapping[str, Tagesfeld] | None = None,
+    tag_namen: Mapping[str, str] | None = None,
 ) -> list[Notiz]:
-    """Die Ebenen als Notizen — ``tage`` (Tag, Text, angelegt), ``sessions`` (mit ihrem
-    ersten Eintrag), ``eintraege`` (mit ihrer Session), ``aufnahmen`` (Anhänge mit ihrem
-    Eintrag — je Eintrag eine Notiz `AUFNAHME`), ``tageswerte`` mit ihren ``tagesfelder``
-    (Wertezeile an der Notiz zum Tag, Texte als `TAGESFELD`). Leere Notizen fallen weg.
+    """Die Ebenen als Notizen — ``tage`` (die Notizen zum Tag, `DayNote`, mit ``tag_namen``
+    ID → Name ihrer Tags), ``sessions`` (mit ihrem ersten Eintrag), ``eintraege`` (mit ihrer
+    Session), ``aufnahmen`` (Anhänge mit ihrem Eintrag — je Eintrag eine Notiz `AUFNAHME`),
+    ``tageswerte`` mit ihren ``tagesfelder`` (Wertezeile an der ersten Notiz des Tags, Texte
+    als `TAGESFELD`). Leere Notizen fallen weg.
 
     >>> from datetime import UTC
     >>> from .anhaenge import Anhang
@@ -107,11 +119,13 @@ def sammeln(
     ...             started_at=datetime(2026, 10, 17, 7, tzinfo=UTC))
     >>> e = SessionEntry(id="e1", session_id="s1", exercise_id="kb", note="eng",
     ...                  started_at=datetime(2026, 10, 17, 7, 5, tzinfo=UTC))
-    >>> n = sammeln([(date(2026, 10, 17), "müde", None)], [(s, None)], [(e, s)])
+    >>> d = DayNote(id="n1", date=date(2026, 10, 17), text="müde", tag_ids=("t1",),
+    ...             created_at=datetime(2026, 10, 17, 6, tzinfo=UTC))
+    >>> n = sammeln([d], [(s, None)], [(e, s)], tag_namen={"t1": "Tagebuch"})
     >>> [(x.art, x.text, x.bezug_id) for x in n]
-    [('tag', 'müde', None), ('plan', 'zäh', 's1'), ('uebung', 'eng', 'e1')]
-    >>> [(x.plan_id, x.exercise_id) for x in n]
-    [(None, None), ('p', None), ('p', 'kb')]
+    [('tag', 'müde', 'n1'), ('plan', 'zäh', 's1'), ('uebung', 'eng', 'e1')]
+    >>> [(x.plan_id, x.exercise_id) for x in n], n[0].tags, n[0].zeit.hour
+    ([(None, None), ('p', None), ('p', 'kb')], ('Tagebuch',), 6)
     >>> lang = SessionEntry(id="e2", session_id="s1", exercise_id="lgs", note="zäh",
     ...                     result={"variant": "lang"}, started_at=e.started_at)
     >>> [x.variante for x in sammeln([], [], [(lang, s)])]
@@ -121,12 +135,15 @@ def sammeln(
     >>> [(x.art, x.text, x.bezug_id, x.exercise_id) for x in sammeln([], [], [], [a, b])]
     [('aufnahme', '1 Foto, 1 Video', 'e1', 'kb')]
 
-    Anhänge am Tag (Notiz zum Tag) sind je Tag eine Aufnahme ohne Übung:
+    Anhänge an einer Notiz zum Tag sind je Notiz eine Aufnahme ohne Übung (`bezug_id` die
+    Notiz):
 
     >>> c = AnhangMitBezug(Anhang(None, "audio", id="c", aufgenommen=e.started_at,
-    ...                           profil_id="p1", zum_tag=date(2026, 10, 17)), None, None)
-    >>> [(x.art, x.text, x.exercise_id, x.anhang_ids) for x in sammeln([], [], [], [c])]
-    [('aufnahme', '1 Audioaufnahme', None, ('c',))]
+    ...                           profil_id="p1", zum_tag=date(2026, 10, 17), notiz_id="n1"),
+    ...                    None, None)
+    >>> [(x.art, x.text, x.exercise_id, x.anhang_ids, x.bezug_id)
+    ...  for x in sammeln([], [], [], [c])]
+    [('aufnahme', '1 Audioaufnahme', None, ('c',), 'n1')]
     >>> from . import tagesfelder as tf
     >>> ibu = tf.Tagesfeld(id="ibu", name="Ibu", spec=tf.spec_bauen(tf.ANZAHL, varianten=["400"]))
     >>> ess = tf.Tagesfeld(id="ess", name="Ernährung", spec=tf.spec_bauen(tf.TEXT))
@@ -134,14 +151,27 @@ def sammeln(
     >>> w = [tf.Tageswert(feld_id="ibu", tag=t, result=tf.ergebnis(1, "400"), spec=ibu.spec,
     ...                   note="nach dem Laufen"),
     ...      tf.Tageswert(feld_id="ess", tag=t, note="Gemüse", spec=ess.spec)]
-    >>> n = sammeln([(t, "müde", None)], [], [], [], w, {"ibu": ibu, "ess": ess})
+    >>> n = sammeln([DayNote(date=t, text="müde")], [], [], [], w, {"ibu": ibu, "ess": ess})
     >>> for x in n:
     ...     print(x.art, "|", x.text, "|", x.werte or x.titel)
     tag | müde | Ibu 400 × 1
     tagesfeld | nach dem Laufen | Ibu 400
     tagesfeld | Gemüse | Ernährung
     """
-    ergebnis = [Notiz(t, TAG, text.strip(), zeit) for t, text, zeit in tage if text.strip()]
+    namen = tag_namen or {}
+    ergebnis = [
+        Notiz(
+            d.date,
+            TAG,
+            d.text.strip(),
+            d.created_at,
+            bezug_id=d.id,
+            tag_ids=tuple(t for t in d.tag_ids if t in namen),
+            tags=tuple(namen[t] for t in d.tag_ids if t in namen),
+        )
+        for d in tage
+        if d.text.strip()
+    ]
     ergebnis = _mit_tageswerten(ergebnis, list(tageswerte), tagesfelder or {})
     for s, erst in sessions:
         if s.note.strip():
@@ -163,12 +193,13 @@ def sammeln(
                     variante_von(e.result),
                 )
             )
-    # Je Eintrag eine Notiz `AUFNAHME` — die Anhänge am Tag (Notiz zum Tag) je Tag eine
+    # Je Eintrag eine Notiz `AUFNAHME` — die Anhänge am Tag je Notiz zum Tag eine (ohne
+    # Notiz, aus alten Daten: je Tag)
     je_eintrag: dict[str, list[AnhangMitBezug]] = {}
-    je_tag: dict[date, list[AnhangMitBezug]] = {}
+    je_tag: dict[tuple[date, str | None], list[AnhangMitBezug]] = {}
     for x in aufnahmen:
         if x.anhang.zum_tag is not None:
-            je_tag.setdefault(x.anhang.zum_tag, []).append(x)
+            je_tag.setdefault((x.anhang.zum_tag, x.anhang.notiz_id), []).append(x)
         elif x.anhang.eintrag_id is not None:
             je_eintrag.setdefault(x.anhang.eintrag_id, []).append(x)
     for eintrag_id, liste in je_eintrag.items():
@@ -186,7 +217,7 @@ def sammeln(
                 anhang_ids=_reihenfolge(liste),
             )
         )
-    for tag, liste in je_tag.items():
+    for (tag, notiz_id), liste in je_tag.items():
         erste = min(liste, key=lambda x: x.anhang.aufgenommen)
         ergebnis.append(
             Notiz(
@@ -194,9 +225,57 @@ def sammeln(
                 AUFNAHME,
                 zusammenfassung(x.anhang for x in liste).text,
                 erste.anhang.aufgenommen,
+                bezug_id=notiz_id,
                 anhang_ids=_reihenfolge(liste),
             )
         )
+    return ergebnis
+
+
+def nur_tag(notizen: Iterable[Notiz], tag_ids: Iterable[str] = (), suche: str = "") -> list[Notiz]:
+    """Der Abschnitt „Notizen“ (Ben, 2.11.2026): nur die Notizen zum Tag und die Aufnahmen an
+    ihnen. ``tag_ids`` filtert (ODER; `OHNE_TAG` = ohne Tag), ``suche`` verlangt jedes Wort
+    im Text oder in einem Tag-Namen — ohne Groß und klein (P102: „möglichst clever“).
+    Aufnahmen bleiben bei ihrer Notiz, wenn die durch den Filter kommt.
+
+    >>> a = Notiz(date(2026, 10, 17), TAG, "Kniebeuge schwer", bezug_id="n1",
+    ...           tag_ids=("k",), tags=("Kraft",))
+    >>> b = Notiz(date(2026, 10, 17), TAG, "müde", bezug_id="n2")
+    >>> f = Notiz(date(2026, 10, 17), AUFNAHME, "1 Foto", bezug_id="n1", anhang_ids=("x",))
+    >>> p = Notiz(date(2026, 10, 17), PLAN, "zäh", plan_id="p")
+    >>> [n.text for n in nur_tag([a, b, f, p])]
+    ['Kniebeuge schwer', 'müde', '1 Foto']
+    >>> [n.text for n in nur_tag([a, b, f, p], ["k"])]
+    ['Kniebeuge schwer', '1 Foto']
+    >>> [n.text for n in nur_tag([a, b, f, p], [OHNE_TAG])]
+    ['müde']
+    >>> [n.text for n in nur_tag([a, b, f, p], suche="KRAFT schwer")]
+    ['Kniebeuge schwer', '1 Foto']
+    >>> nur_tag([a, b, f, p], suche="Gemüse")
+    []
+    """
+    gewollt = set(tag_ids)
+    woerter = [w.casefold() for w in suche.split()]
+    alle = list(notizen)
+    bleibt: set[str | None] = set()
+    ergebnis: list[Notiz] = []
+    for n in alle:
+        if n.art != TAG:
+            continue
+        if gewollt and not (set(n.tag_ids) & gewollt or (OHNE_TAG in gewollt and not n.tag_ids)):
+            continue
+        heuhaufen = " ".join((n.text, *n.tags)).casefold()
+        if any(w not in heuhaufen for w in woerter):
+            continue
+        ergebnis.append(n)
+        bleibt.add(n.bezug_id)
+    for n in alle:
+        if (
+            n.art == AUFNAHME
+            and not n.exercise_id
+            and (not (gewollt or woerter) or n.bezug_id in bleibt)
+        ):
+            ergebnis.append(n)
     return ergebnis
 
 
@@ -214,19 +293,29 @@ def _mit_tageswerten(
     je_tag: dict[date, list[Tageswert]] = {}
     for w in werte:
         je_tag.setdefault(w.tag, []).append(w)
-    zum_tag = {n.tag: n for n in notizen if n.art == TAG}
-    ergebnis = [n for n in notizen if n.art != TAG]
+    # Die Wertezeile steht an der ersten Notiz des Tags (mehrere seit 2.11.2026)
+    zum_tag: dict[date, Notiz] = {}
+    for n in notizen:
+        if n.art == TAG and (
+            n.tag not in zum_tag or n.sortierzeit() < zum_tag[n.tag].sortierzeit()
+        ):
+            zum_tag[n.tag] = n
+    ergebnis: list[Notiz] = []
+    zeilen: dict[date, str] = {}
     for tag in sorted(set(zum_tag) | set(je_tag)):
         teile = [
             text
             for feld in felder.values()
             if (text := tageszeile(feld, [w for w in je_tag.get(tag, []) if w.feld_id == feld.id]))
         ]
-        notiz = zum_tag.get(tag)
-        if notiz is not None:
-            ergebnis.append(replace(notiz, werte=" · ".join(teile)))
-        elif teile:
-            ergebnis.append(Notiz(tag, TAG, "", None, werte=" · ".join(teile)))
+        zeilen[tag] = " · ".join(teile)
+        if tag not in zum_tag and teile:
+            ergebnis.append(Notiz(tag, TAG, "", None, werte=zeilen[tag]))
+    for n in notizen:
+        if n.art == TAG and zum_tag.get(n.tag) is n:
+            ergebnis.append(replace(n, werte=zeilen.get(n.tag, "")))
+        else:
+            ergebnis.append(n)
     for w in werte:
         if not w.note.strip():
             continue
@@ -262,15 +351,18 @@ def nach_tagen(notizen: Iterable[Notiz]) -> list[Tagesgruppe]:
     >>> c = Notiz(date(2026, 10, 18), PLAN, "gut", datetime(2026, 10, 18, 7, tzinfo=UTC))
     >>> [(g.tag.day, [n.text for n in g.notizen]) for g in nach_tagen([a, b, c])]
     [(18, ['gut']), (17, ['Schulter fest', 'links enger'])]
+
+    Im Tag nach der Uhr — eine Notiz zum Tag mit Uhrzeit steht dort, nicht vornweg:
+
+    >>> d = Notiz(date(2026, 10, 17), TAG, "abends", datetime(2026, 10, 17, 20, tzinfo=UTC))
+    >>> [n.text for n in nach_tagen([a, b, d])[0].notizen]
+    ['Schulter fest', 'links enger', 'abends']
     """
     je_tag: dict[date, list[Notiz]] = {}
     for n in notizen:
         je_tag.setdefault(n.tag, []).append(n)
     return [
-        Tagesgruppe(
-            tag,
-            tuple(sorted(je_tag[tag], key=lambda n: (n.art != TAG, n.sortierzeit()))),
-        )
+        Tagesgruppe(tag, tuple(sorted(je_tag[tag], key=lambda n: n.sortierzeit())))
         for tag in sorted(je_tag, reverse=True)
     ]
 
@@ -375,6 +467,8 @@ def woche(tag: date) -> list[date]:
 
 __all__ = [
     "AUFNAHME",
+    "NOTIZ_ZEILEN",
+    "OHNE_TAG",
     "PLAN",
     "TAG",
     "TAGESFELD",
@@ -385,6 +479,7 @@ __all__ = [
     "nach_tagen",
     "nach_uebungen",
     "naechster_tag_mit",
+    "nur_tag",
     "oben",
     "sammeln",
     "woche",

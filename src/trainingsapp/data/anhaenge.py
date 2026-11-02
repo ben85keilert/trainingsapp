@@ -13,8 +13,9 @@ Eintrag mit ``replaces_entry_id`` — darum folgt `je_eintraegen` der Kette zur�
 Anhang in der Speicherübersicht sichtbar („Eintrag gelöscht“), bis die Person ihn löscht.
 
 Seit Migration 029 (Ben, 22.10.2026) hängt ein Anhang auch **am Tag** (Notiz zum Tag:
-``subject_id`` + ``day``, `zum_tag`), und es gibt **Audio** (``.m4a``). Was nach Übungen
-fragt (`je_eintraegen`, `je_uebung`, `je_tag`), sieht Anhänge am Tag nicht; die
+``subject_id`` + ``day``, `zum_tag`), und es gibt **Audio** (``.m4a``); seit Migration 036
+(2.11.2026) an einer bestimmten **Notiz** des Tags (``day_note_id``, `zur_notiz`). Was nach
+Übungen fragt (`je_eintraegen`, `je_uebung`, `je_tag`), sieht Anhänge am Tag nicht; die
 Speicherübersicht, das Tagebuch und das Aufräumen (`alle`, `gesamt`, `alle_zeilen`) schon.
 """
 
@@ -213,14 +214,15 @@ class AnhangRepo:
             a.created_at = jetzt()
         with transaktion(self.con):
             self.con.execute(
-                "INSERT INTO entry_media (id, session_entry_id, subject_id, day, kind, uri, "
-                "recorded_at, bytes, dauer_s, breite, hoehe, vorschau, qualitaet, note, "
-                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO entry_media (id, session_entry_id, subject_id, day, day_note_id, "
+                "kind, uri, recorded_at, bytes, dauer_s, breite, hoehe, vorschau, qualitaet, "
+                "note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     a.id,
                     a.eintrag_id,
                     a.profil_id if a.am_tag else None,
                     a.zum_tag.isoformat() if a.zum_tag is not None else None,
+                    a.notiz_id,
                     a.art,
                     a.pfad,
                     iso_utc(a.aufgenommen),
@@ -323,8 +325,33 @@ class AnhangRepo:
             )
         ]
 
+    def zur_notiz(self, notiz_id: str) -> list[Anhang]:
+        """Die Anhänge einer Notiz zum Tag, älteste zuerst."""
+        return [
+            self._zeile(r)
+            for r in self.con.execute(
+                "SELECT * FROM entry_media WHERE day_note_id = ? ORDER BY recorded_at, rowid",
+                (notiz_id,),
+            )
+        ]
+
+    def zu_notizen(self, notiz_ids: Iterable[str]) -> dict[str, list[Anhang]]:
+        """Notiz-ID → ihre Anhänge (älteste zuerst) — eine Abfrage für einen ganzen Tag."""
+        ids = list(dict.fromkeys(notiz_ids))
+        if not ids:
+            return {}
+        platzhalter = ",".join("?" * len(ids))
+        ergebnis: dict[str, list[Anhang]] = {}
+        for r in self.con.execute(
+            f"SELECT * FROM entry_media WHERE day_note_id IN ({platzhalter}) "
+            "ORDER BY recorded_at, rowid",
+            ids,
+        ):
+            ergebnis.setdefault(r["day_note_id"], []).append(self._zeile(r))
+        return ergebnis
+
     def zum_tag(self, subject_id: str, tag: date) -> list[Anhang]:
-        """Die Anhänge am Tag selbst (Notiz zum Tag), älteste zuerst."""
+        """Die Anhänge am Tag selbst (an allen Notizen des Tags), älteste zuerst."""
         return [
             self._zeile(r)
             for r in self.con.execute(
@@ -387,6 +414,7 @@ class AnhangRepo:
             created_at=datetime.fromisoformat(r["created_at"]) if r["created_at"] else None,
             profil_id=r["subject_id"],
             zum_tag=date.fromisoformat(r["day"]) if r["day"] else None,
+            notiz_id=r["day_note_id"],
         )
 
     def _bezug(self, r: sqlite3.Row) -> AnhangMitBezug:

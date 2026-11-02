@@ -184,7 +184,7 @@ def test_zeitleiste_mit_plan_training_und_notiz(page, state) -> None:
     state.sitzungen.notiz_setzen(
         state.sitzungen.session_fuer(state.profil.id, plan.id, state.heute()).id, "gut gegangen"
     )
-    state.tagesnotizen.setzen(state.profil.id, state.heute(), "Schulter fest")
+    state.tagesnotizen.anlegen(state.profil.id, state.heute(), "Schulter fest")
 
     uebersicht = tagesansicht(page, state, state.heute())
     texte = _texte(uebersicht)

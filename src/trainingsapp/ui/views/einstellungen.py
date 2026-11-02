@@ -180,6 +180,10 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
     felder_text = f"{aktiv} aktiv" + (
         f" · {len(felder) - aktiv} aus" if len(felder) > aktiv else ""
     )
+    notiz_tags = state.notiz_tags.alle(state.profil.id)
+    notiz_tag_text = " · ".join(t.name for t in notiz_tags[:4]) + (
+        f" · +{len(notiz_tags) - 4}" if len(notiz_tags) > 4 else ""
+    )
     hrv_text = f"{len(e.kacheln)} Kacheln · Reiter „Messung“ " + (
         "sichtbar" if e.messung_anzeigen else "ausgeblendet"
     )
@@ -227,6 +231,18 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 ),
                                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
                                 on_click=oeffner("/einstellungen/tagesfelder"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.SELL_OUTLINED),
+                                title=ft.Text("Notiz-Tags"),
+                                subtitle=ft.Text(
+                                    "Merkmale der Notizen zum Tag: anlegen, umbenennen, "
+                                    f"ausschalten, löschen · {notiz_tag_text}",
+                                    size=12,
+                                ),
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/notiz-tags"),
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
                         ),

@@ -57,10 +57,10 @@ from trainingsapp.core.paketquelle import DATEI, fremde_identitaet
 from trainingsapp.data.pakete import ARCHIV, KATALOG, PAPIERKORB, Status, Uebungsstand, Vorschau
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.hilfe import hilfe_knopf
-from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.paket_link import import_blatt
+from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.state import AppState
 
@@ -690,7 +690,12 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
         return ft.Row(
             spacing=10,
             controls=[
-                ft.Icon(symbol(z.uebung.icon_key), opacity=0.5 if z.ort != KATALOG else 1),
+                uebungsbild(
+                    state,
+                    z.uebung.icon_key,
+                    z.uebung.image_path,
+                    opacity=0.5 if z.ort != KATALOG else 1.0,
+                ),
                 ft.Container(
                     expand=True,
                     on_click=oeffnen,

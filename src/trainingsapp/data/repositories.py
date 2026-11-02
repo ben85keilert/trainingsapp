@@ -33,6 +33,7 @@ from ..core.models import (
     EINGABE_HAKEN,
     TAG_REGION,
     TAG_TYP,
+    TAGEBUCH_TAG,
     DayNote,
     Exercise,
     HrvRecording,
@@ -41,6 +42,7 @@ from ..core.models import (
     Media,
     MediaKind,
     MediaSource,
+    NoteTag,
     Plan,
     PlanItem,
     Session,
@@ -56,7 +58,7 @@ from ..core.models import (
 )
 from ..core.pakete import stand_tag_nachziehen
 from ..core.parameter import kontextfelder, modus_aus_felder
-from ..core.result_spec import FieldType, ResultSpec, werte_modernisieren
+from ..core.result_spec import FieldType, ResultSpec, basis_key, werte_modernisieren
 from .db import transaktion
 
 #: Nach so vielen Tagen leert sich der Papierkorb von selbst (abschaltbar)
@@ -1730,7 +1732,7 @@ class SessionRepo:
             "duration",
             *(f.key for f in uebung.result_spec.fields if f.type == FieldType.DURATION),
         }
-        zeit = {k: v for k, v in werte.items() if k == "hold" or k in dauer}
+        zeit = {k: v for k, v in werte.items() if basis_key(k) == "hold" or k in dauer}
         aktuell = self.ziel_eintrag(session.subject_id, uebung, tag, session.plan_id, kontext)
         if aktuell is None:
             if not zeit:
@@ -2238,53 +2240,263 @@ class SessionRepo:
 
 
 class DayNoteRepo:
-    """Die Notiz zum Tag (Migration 003). Je Profil und Tag genau eine."""
+    """Die Notizen zum Tag (Migration 003, seit 036 mehrere je Tag mit Tags). Veränderlich,
+    „letzter Schreiber gewinnt“; Entfernen ist weich (`deleted_at`). Welche Notiz es
+    überhaupt gibt, entscheidet die Oberfläche (`components/tagesnotiz.py`): ohne Text und
+    ohne Anhänge wird sie gelöscht — hier wird nur gespeichert, was man hergibt."""
 
     def __init__(self, con: sqlite3.Connection) -> None:
         self.con = con
 
-    def lesen(self, subject_id: str, tag: date) -> str:
-        r = self.con.execute(
-            "SELECT text FROM day_note WHERE subject_id = ? AND date = ? AND deleted_at IS NULL",
-            (subject_id, tag.isoformat()),
-        ).fetchone()
-        return r["text"] if r else ""
+    def _tags(self, note_ids: list[str]) -> dict[str, tuple[str, ...]]:
+        """Die Tags je Notiz — ohne gelöschte Tags (die Notiz hat ihn „verloren“)."""
+        if not note_ids:
+            return {}
+        platzhalter = ",".join("?" * len(note_ids))
+        je_notiz: dict[str, list[str]] = defaultdict(list)
+        for r in self.con.execute(
+            "SELECT l.note_id, l.tag_id FROM day_note_tag l JOIN note_tag t ON t.id = l.tag_id "
+            f"WHERE t.deleted_at IS NULL AND l.note_id IN ({platzhalter}) ORDER BY t.sort, t.name",
+            note_ids,
+        ):
+            je_notiz[r["note_id"]].append(r["tag_id"])
+        return {k: tuple(v) for k, v in je_notiz.items()}
 
-    def alle(self, subject_id: str) -> list[tuple[date, str, datetime]]:
-        """Alle Notizen zum Tag (nicht leer) mit Tag, Text und wann angelegt — das Tagebuch."""
+    def _zeilen(self, zeilen: list[sqlite3.Row]) -> list[DayNote]:
+        tags = self._tags([r["id"] for r in zeilen])
         return [
-            (date.fromisoformat(r["date"]), r["text"], datetime.fromisoformat(r["created_at"]))
+            DayNote(
+                id=r["id"],
+                subject_id=r["subject_id"],
+                date=date.fromisoformat(r["date"]),
+                text=r["text"],
+                created_at=datetime.fromisoformat(r["created_at"]),
+                tag_ids=tags.get(r["id"], ()),
+            )
+            for r in zeilen
+        ]
+
+    def laden(self, note_id: str) -> DayNote | None:
+        r = self.con.execute(
+            "SELECT * FROM day_note WHERE id = ? AND deleted_at IS NULL", (note_id,)
+        ).fetchone()
+        return self._zeilen([r])[0] if r else None
+
+    def zum_tag(self, subject_id: str, tag: date) -> list[DayNote]:
+        """Die Notizen eines Tags, die älteste zuerst — auch die ohne Text (mit Anhängen)."""
+        return self._zeilen(
+            self.con.execute(
+                "SELECT * FROM day_note WHERE subject_id = ? AND date = ? AND deleted_at IS NULL "
+                "ORDER BY created_at, rowid",
+                (subject_id, tag.isoformat()),
+            ).fetchall()
+        )
+
+    def alle(self, subject_id: str, *, mit_leeren: bool = False) -> list[DayNote]:
+        """Alle Notizen eines Profils nach Tag und Uhrzeit — das Tagebuch. Ohne Text nur
+        mit ``mit_leeren`` (sie tragen Anhänge, sonst gäbe es sie nicht)."""
+        leer = "" if mit_leeren else "AND text != '' "
+        return self._zeilen(
+            self.con.execute(
+                f"SELECT * FROM day_note WHERE subject_id = ? AND deleted_at IS NULL {leer}"
+                "ORDER BY date, created_at, rowid",
+                (subject_id,),
+            ).fetchall()
+        )
+
+    def speichern(self, notiz: DayNote) -> None:
+        """Anlegen oder ändern — Text und Tags; `created_at` setzt das erste Speichern."""
+        stempel = jetzt()
+        if notiz.created_at is None:
+            notiz.created_at = stempel
+        notiz.text = notiz.text.strip()
+        with transaktion(self.con):
+            self.con.execute(
+                """
+                INSERT INTO day_note (id, subject_id, date, text, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    text = excluded.text,
+                    updated_at = excluded.updated_at,
+                    deleted_at = NULL,
+                    revision = revision + 1
+                """,
+                (
+                    notiz.id,
+                    notiz.subject_id,
+                    notiz.date.isoformat(),
+                    notiz.text,
+                    iso_utc(notiz.created_at),
+                    iso_utc(stempel),
+                ),
+            )
+            self.con.execute("DELETE FROM day_note_tag WHERE note_id = ?", (notiz.id,))
+            self.con.executemany(
+                "INSERT OR IGNORE INTO day_note_tag (note_id, tag_id) VALUES (?, ?)",
+                [(notiz.id, t) for t in dict.fromkeys(notiz.tag_ids)],
+            )
+
+    def anlegen(
+        self, subject_id: str, tag: date, text: str, tag_ids: Iterable[str] = ()
+    ) -> DayNote:
+        """Eine neue Notiz mit Text und Tags — die Abkürzung für Tests und Importe."""
+        notiz = DayNote(subject_id=subject_id, date=tag, text=text, tag_ids=tuple(tag_ids))
+        self.speichern(notiz)
+        return notiz
+
+    def loeschen(self, note_id: str) -> None:
+        """Weich — die Zeile bleibt als Grabstein (Abgleich), ihre Anhänge bleiben Zeilen
+        mit Verweis (die Oberfläche löscht sie vorher, wenn sie weg sollen)."""
+        self.con.execute(
+            "UPDATE day_note SET deleted_at = ?, updated_at = ?, revision = revision + 1 "
+            "WHERE id = ? AND deleted_at IS NULL",
+            (iso_utc(jetzt()), iso_utc(jetzt()), note_id),
+        )
+
+    def aufraeumen(self, note_id: str) -> bool:
+        """Eine Notiz ohne Text und ohne Anhänge (weich) löschen — der Rest einer Aufnahme,
+        die nicht behalten wurde (`components/tagesnotiz.py`). ``True``, wenn sie weg ist."""
+        r = self.con.execute(
+            "SELECT 1 FROM day_note n WHERE n.id = ? AND n.deleted_at IS NULL AND n.text = '' "
+            "AND NOT EXISTS (SELECT 1 FROM entry_media m WHERE m.day_note_id = n.id)",
+            (note_id,),
+        ).fetchone()
+        if not r:
+            return False
+        self.loeschen(note_id)
+        return True
+
+    def anzahl_mit_tag(self, tag_id: str) -> int:
+        r = self.con.execute(
+            "SELECT COUNT(*) FROM day_note_tag l JOIN day_note n ON n.id = l.note_id "
+            "WHERE l.tag_id = ? AND n.deleted_at IS NULL",
+            (tag_id,),
+        ).fetchone()
+        return int(r[0])
+
+
+class NoteTagRepo:
+    """Die Tags (Merkmale) an Notizen zum Tag, je Profil (Migration 036). „Tagebuch“ ist
+    fest: `sicherstellen` legt ihn an, wo er fehlt (neues Profil); löschen und umbenennen
+    lehnt er ab, ausschalten geht. Löschen ist weich: Die Notizen behalten die Verknüpfung,
+    sehen den Tag aber nicht mehr (`DayNoteRepo._tags`)."""
+
+    def __init__(self, con: sqlite3.Connection) -> None:
+        self.con = con
+
+    @staticmethod
+    def _zeile(r: sqlite3.Row) -> NoteTag:
+        return NoteTag(
+            id=r["id"],
+            subject_id=r["subject_id"],
+            name=r["name"],
+            sort=int(r["sort"] or 0),
+            fest=bool(r["fest"]),
+            active=bool(r["active"]),
+            deleted_at=datetime.fromisoformat(r["deleted_at"]) if r["deleted_at"] else None,
+        )
+
+    def sicherstellen(self, subject_id: str) -> NoteTag:
+        """Der feste Tag „Tagebuch“ des Profils — angelegt, wenn er fehlt."""
+        r = self.con.execute(
+            "SELECT * FROM note_tag WHERE subject_id = ? AND fest = 1 AND deleted_at IS NULL",
+            (subject_id,),
+        ).fetchone()
+        if r:
+            return self._zeile(r)
+        tag = NoteTag(subject_id=subject_id, name=TAGEBUCH_TAG, fest=True)
+        self._einfuegen(tag)
+        return tag
+
+    def alle(self, subject_id: str, *, mit_ausgeschalteten: bool = True) -> list[NoteTag]:
+        """„Tagebuch“ zuerst, dann die eigenen — neue oben (`sort`), bei Gleichstand nach
+        Namen. Ohne gelöschte; ausgeschaltete nur mit ``mit_ausgeschalteten``."""
+        self.sicherstellen(subject_id)
+        aktiv = "" if mit_ausgeschalteten else "AND active = 1 "
+        return [
+            self._zeile(r)
             for r in self.con.execute(
-                "SELECT date, text, created_at FROM day_note WHERE subject_id = ? "
-                "AND deleted_at IS NULL AND text != '' ORDER BY date",
+                f"SELECT * FROM note_tag WHERE subject_id = ? AND deleted_at IS NULL {aktiv}"
+                "ORDER BY fest DESC, sort DESC, name COLLATE NOCASE",
                 (subject_id,),
             )
         ]
 
-    def angelegt(self, subject_id: str, tag: date) -> datetime | None:
-        """Wann die Notiz zum ersten Mal geschrieben wurde — ihr Platz in der Zeitleiste."""
-        r = self.con.execute(
-            "SELECT created_at FROM day_note WHERE subject_id = ? AND date = ? "
-            "AND deleted_at IS NULL AND text != ''",
-            (subject_id, tag.isoformat()),
-        ).fetchone()
-        return datetime.fromisoformat(r["created_at"]) if r else None
+    def laden(self, tag_id: str) -> NoteTag | None:
+        r = self.con.execute("SELECT * FROM note_tag WHERE id = ?", (tag_id,)).fetchone()
+        return self._zeile(r) if r else None
 
-    def setzen(self, subject_id: str, tag: date, text: str) -> None:
-        stempel = jetzt().isoformat()
-        notiz = DayNote(subject_id=subject_id, date=tag, text=text.strip())
+    def namen(self, subject_id: str) -> dict[str, str]:
+        """ID → Name aller nicht gelöschten Tags (auch ausgeschaltete) — für Karten und Filter."""
+        return {t.id: t.name for t in self.alle(subject_id)}
+
+    def _pruefen(self, subject_id: str, name: str, ausser: str | None = None) -> str:
+        """Der bereinigte Name — `ValueError` mit Hinweis, wenn leer oder schon vergeben
+        (Groß und klein trennen keine Tags)."""
+        sauber = " ".join(name.split())
+        if not sauber:
+            raise ValueError("Bitte einen Namen eingeben.")
+        for t in self.alle(subject_id):
+            if t.id != ausser and t.name.casefold() == sauber.casefold():
+                raise ValueError(f"„{t.name}“ gibt es schon.")
+        return sauber
+
+    def _einfuegen(self, tag: NoteTag) -> None:
+        stempel = iso_utc(jetzt())
         self.con.execute(
-            """
-            INSERT INTO day_note (id, subject_id, date, text, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(subject_id, date) DO UPDATE SET
-                text = excluded.text,
-                updated_at = excluded.updated_at,
-                deleted_at = NULL,
-                revision = revision + 1
-            """,
-            (notiz.id, notiz.subject_id, notiz.date.isoformat(), notiz.text, stempel, stempel),
+            "INSERT INTO note_tag (id, subject_id, name, sort, fest, active, created_at, "
+            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                tag.id,
+                tag.subject_id,
+                tag.name,
+                tag.sort,
+                int(tag.fest),
+                int(tag.active),
+                stempel,
+                stempel,
+            ),
         )
+
+    def anlegen(self, subject_id: str, name: str) -> NoteTag:
+        """Neuer Tag oben in der Liste — `ValueError` bei leerem oder vergebenem Namen."""
+        sauber = self._pruefen(subject_id, name)
+        r = self.con.execute(
+            "SELECT COALESCE(MAX(sort), 0) FROM note_tag WHERE subject_id = ?", (subject_id,)
+        ).fetchone()
+        tag = NoteTag(subject_id=subject_id, name=sauber, sort=int(r[0]) + 1)
+        self._einfuegen(tag)
+        return tag
+
+    def _aendern(self, tag_id: str, **felder: Any) -> None:
+        zuweisung = ", ".join(f"{k} = ?" for k in felder)
+        self.con.execute(
+            f"UPDATE note_tag SET {zuweisung}, updated_at = ?, revision = revision + 1 "
+            "WHERE id = ?",
+            (*felder.values(), iso_utc(jetzt()), tag_id),
+        )
+
+    def umbenennen(self, tag_id: str, name: str) -> None:
+        """`ValueError`, wenn der Tag fest ist oder der Name leer bzw. vergeben."""
+        tag = self.laden(tag_id)
+        if tag is None:
+            return
+        if tag.fest:
+            raise ValueError(f"„{tag.name}“ lässt sich nicht umbenennen.")
+        self._aendern(tag_id, name=self._pruefen(tag.subject_id, name, ausser=tag_id))
+
+    def umschalten(self, tag_id: str, active: bool) -> None:
+        """Aus- oder einschalten — auch „Tagebuch“."""
+        self._aendern(tag_id, active=int(active))
+
+    def loeschen(self, tag_id: str) -> None:
+        """Weich; `ValueError` beim festen Tag. Die Notizen verlieren ihn, ihr Text bleibt."""
+        tag = self.laden(tag_id)
+        if tag is None:
+            return
+        if tag.fest:
+            raise ValueError(f"„{tag.name}“ lässt sich nicht löschen, nur ausschalten.")
+        self._aendern(tag_id, deleted_at=iso_utc(jetzt()))
 
 
 # ---------------------------------------------------------------------------

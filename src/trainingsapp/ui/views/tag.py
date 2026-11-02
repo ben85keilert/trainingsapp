@@ -27,7 +27,10 @@ für den ganzen Tag (`AnhangRepo.je_eintraegen`).
 **Die Notiz zum Tag** schreibt man direkt (Ben, 22.10.2026: „Ermögliche direktes Eintragen
 mit Autosave und zurück und vor Button …“) — in der Übersicht oben im Block „Zum Tag“, in der
 Zeitleiste an ihrer Uhrzeit (noch ohne Notiz am Ende); dazu Foto, Video und Audio zum Tag
-(`components/tagesnotiz.py`). Ihr Stand lebt über das Auffrischen der Spalte hinweg.
+(`components/tagesnotiz.py`). Ihr Stand lebt über das Auffrischen der Spalte hinweg. Um die
+ganze Ansicht liegt ein durchlässiger Gestenfänger: Ein kurzer Tipp ins Leere (abgehoben, ohne
+zu ziehen) beendet das Schreiben sofort, Ziehen ist Scrollen und lässt die Tastatur offen
+(`AppState.schreib_gesten`, Ben 2.11.2026).
 
 Ein Plan ist ein Rahmen, in dem man variiert: Die Karte sagt „2 von 5“ und zeigt je Übung
 ein Stück, sie zählt keine Prozente.
@@ -1424,9 +1427,20 @@ def tagesansicht(
         return teile + plan_teile() + gemacht_teile() + notiz_teile() + zum_tag_teile()
 
     spalte.controls = aufbauen()
-    # Unten Platz für den runden Knopf „Nachtragen“
-    return ft.Container(
-        padding=ft.Padding.only(left=12, right=12, top=8, bottom=96), content=spalte
+
+    def daneben_getippt(_e: object = None) -> None:
+        """Aufgesetzt und abgehoben, ohne zu ziehen, nicht auf einem Knopf (der gewänne die
+        Geste): Wer gerade die Notiz schreibt, ist damit fertig (Moduldocstring)."""
+        if state.schreib_gesten is not None:
+            state.schreib_gesten("tipp")
+
+    # Unten Platz für den runden Knopf „Nachtragen“; der Gestenfänger ist durchlässig
+    # (Flet: ``HitTestBehavior.translucent``) — Knöpfe und das Feld bekommen ihre Tipps
+    return ft.GestureDetector(
+        on_tap_up=daneben_getippt,
+        content=ft.Container(
+            padding=ft.Padding.only(left=12, right=12, top=8, bottom=96), content=spalte
+        ),
     )
 
 

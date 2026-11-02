@@ -19,8 +19,19 @@ Video.“
   **Fertig** schließt die Tastatur; gespeichert ist ohnehin schon.
 - **Daneben tippen** beendet das Schreiben wie „Fertig“ (Ben, 22.10.2026: „der Klick aus dem
   Fenster raus soll … speichern“). Am Handy nähme Flutter dem Feld von sich aus nie den Fokus.
-  Den Tipp meldet es schon beim Aufsetzen (``on_tap_outside``), auch auf ↶ und ↷ — darum
-  wartet die Notiz `NACHFRIST_S`, ob einer der beiden kommt.
+  Den Tipp meldet es schon beim Aufsetzen (``on_tap_outside``), auch auf ↶ und ↷ und auch,
+  wenn der Finger danach zieht — darum wartet die Notiz `NACHFRIST_S`, was folgt
+  (`AppState.schreib_gesten`): **Scrollen** (Ben, 2.11.2026: „Wenn man außerhalb klickt und
+  scrollt, verliert sich der Fokus … bei gedrückt halten nicht [erwünscht]“) lässt das Feld in
+  Ruhe, die Tastatur bleibt; ein **kurzer Tipp** ins Leere (abgehoben, ohne zu ziehen — der
+  Gestenfänger um die Tagesansicht, `views/tag.py`) beendet sofort; ↶ und ↷ nehmen den Tipp
+  zurück; sonst (ein Knopf daneben) läuft die Nachfrist ab. Hält man länger als die Nachfrist
+  still, bevor man zieht, ist die Tastatur schon zu — den Moment des Abhebens kennt Python
+  nicht.
+- **Platz beim Schreiben** (Ben, 2.11.2026: „Klickt man wieder in das Feld, wird das
+  Texteingabefeld überdeckt“): ``scroll_padding`` hält unter der Schreibmarke Platz für die
+  Leiste, wenn Flutter das Feld über die Tastatur holt (`SICHT_UNTER_FELD_PX`), und der runde
+  Knopf „Nachtragen“ der Ansicht verschwindet, solange man schreibt — er lag über dem Feld.
 - **Anhänge am Tag:** Ohne Schreiben steht an derselben Stelle Foto · Video · Audio (· aus
   der Fotoauswahl, nur mit der Erweiterung); die Aufnahmen hängen am Tag
   (`core.anhaenge.Ziel`), ihre Kacheln stehen darunter, ein Tipp öffnet die Ansicht.
@@ -58,9 +69,13 @@ from trainingsapp.ui.state import AppState
 
 #: So lange nach der letzten Änderung wird gespeichert (s)
 SPEICHERN_NACH_S = 1.0
-#: So lange nach einem Tipp neben das Feld wartet die Notiz, ob es ↶ oder ↷ war (s) — deren
-#: Klick kommt erst beim Loslassen
-NACHFRIST_S = 0.5
+#: So lange nach einem Tipp neben das Feld wartet die Notiz, was folgt (s): ↶ oder ↷ (deren
+#: Klick kommt erst beim Loslassen) oder Scrollen (der Finger zieht); ein kurzer Tipp ins
+#: Leere endet früher (Moduldocstring)
+NACHFRIST_S = 0.8
+#: So viel Platz (px) bleibt unter der Schreibmarke, wenn Flutter das Feld über die Tastatur
+#: holt — die Leiste ↶ ↷ … Fertig (48) und etwas Luft
+SICHT_UNTER_FELD_PX = 72
 #: Hinweis im leeren Feld
 HINWEIS = "Notiz zum Tag … Wie lief der Tag? Tippen oder diktieren."
 #: Schlüssel in `AppState.vor_dem_verlassen`
@@ -133,6 +148,7 @@ class Tagesnotiz:
             fill_color=ft.Colors.SURFACE_CONTAINER_LOWEST,
             border=ft.OutlineInputBorder(border_radius=12),
             content_padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            scroll_padding=ft.Padding(left=20, top=20, right=20, bottom=SICHT_UNTER_FELD_PX),
             capitalization=ft.TextCapitalization.SENTENCES,
             on_change=self._geaendert,
             on_focus=self._angetippt,
@@ -243,6 +259,8 @@ class Tagesnotiz:
             self.verlauf.schritt_beenden()
             self.state.vor_dem_verlassen[SICHERN] = self.speichern
             self.state.schreiben_beenden = self.fertig
+            self.state.schreib_gesten = self.geste
+            self._nachtragen_knopf(False)
             self._zeigen()
 
     def _geaendert(self, e: Any) -> None:
@@ -263,7 +281,8 @@ class Tagesnotiz:
         self._zeigen()
 
     def _daneben(self, _e: object = None) -> None:
-        """Neben das Feld getippt: nach der Nachfrist fertig, wenn nicht ↶ oder ↷ kam."""
+        """Neben das Feld aufgesetzt: nach der Nachfrist fertig, wenn nicht ↶, ↷ oder Scrollen
+        kam (`geste`)."""
         if self.schreibt:
             self._daneben_um = zeit = time.monotonic()
             self.page.run_task(self._nach_daneben, zeit)
@@ -272,6 +291,25 @@ class Tagesnotiz:
         await asyncio.sleep(NACHFRIST_S)
         if self.schreibt and self._daneben_um == zeit:
             await self.fertig()
+
+    def geste(self, art: str) -> None:
+        """Was der Finger nach dem Aufsetzen daneben tut (`AppState.schreib_gesten`):
+        ``"scroll"`` — er zieht, das Schreiben geht weiter; ``"tipp"`` — er hebt ab, ohne
+        gezogen zu haben: sofort fertig, nicht erst nach der Nachfrist."""
+        if self._daneben_um is None or not self.schreibt:
+            return
+        self._daneben_um = None
+        if art == "tipp":
+            self.page.run_task(self.fertig)
+
+    def _nachtragen_knopf(self, sichtbar: bool) -> None:
+        """Den runden Knopf der Ansicht (meist „Nachtragen“) ausblenden, solange man schreibt —
+        über der Tastatur lag er auf dem Feld (Ben, 2.11.2026)."""
+        with contextlib.suppress(Exception):  # ohne Ansicht (Tests) oder ohne Knopf
+            knopf = self.page.views[-1].floating_action_button
+            if knopf is not None and knopf.visible != sichtbar:
+                knopf.visible = sichtbar
+                knopf.update()
 
     async def _spaeter_speichern(self) -> None:
         """Speichern, sobald `SPEICHERN_NACH_S` lang nichts mehr kam."""
@@ -367,6 +405,9 @@ class Tagesnotiz:
             del self.state.vor_dem_verlassen[SICHERN]
         if self.state.schreiben_beenden == self.fertig:
             self.state.schreiben_beenden = None
+        if self.state.schreib_gesten == self.geste:
+            self.state.schreib_gesten = None
+        self._nachtragen_knopf(True)
         self._loslassen()
         self._zeigen()
 
@@ -379,4 +420,11 @@ class Tagesnotiz:
             self.feld.update()
 
 
-__all__ = ["HINWEIS", "NACHFRIST_S", "SPEICHERN_NACH_S", "Notizfeld", "Tagesnotiz"]
+__all__ = [
+    "HINWEIS",
+    "NACHFRIST_S",
+    "SICHT_UNTER_FELD_PX",
+    "SPEICHERN_NACH_S",
+    "Notizfeld",
+    "Tagesnotiz",
+]

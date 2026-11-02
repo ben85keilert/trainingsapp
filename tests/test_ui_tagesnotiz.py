@@ -231,6 +231,66 @@ async def test_daneben_tippen_beendet_das_schreiben(page, state, monkeypatch) ->
     assert page.aufgaben == []
 
 
+async def test_scrollen_daneben_laesst_die_tastatur_offen(page, state) -> None:
+    """Ben, 2.11.2026: „Wenn man außerhalb davon klickt und scrollt, verliert sich der Fokus.
+    Bei Kurzklick ist der Fokusverlust erwünscht. Bei gedrückt halten nicht.“ — Zieht der
+    Finger nach dem Aufsetzen (die Fläche scrollt), bleibt das Schreiben; hebt er ab, ohne zu
+    ziehen (Gestenfänger der Tagesansicht), ist sofort fertig — ohne Nachfrist."""
+    ansicht = tagesansicht(page, state, state.heute(), mit_datum=False)
+    assert isinstance(ansicht, ft.GestureDetector) and ansicht.on_tap_up
+    notiz = _notiz(_feld(ansicht))
+    assert state.schreib_gesten is None
+    notiz.feld.on_focus(None)
+    assert state.schreib_gesten == notiz.geste
+    _tippen(notiz, "Knie gut")
+    notiz.feld.on_tap_outside(None)  # der Finger setzt daneben auf …
+    zeit = notiz._daneben_um
+    state.schreib_gesten("scroll")  # … und zieht: die Ansicht scrollt
+    await notiz._nach_daneben(zeit)  # die Nachfrist läuft ins Leere
+    assert notiz.schreibt and notiz._daneben_um is None and not notiz.feld.blur
+    page.aufgaben.clear()
+    ansicht.on_tap_up(None)  # abheben ohne vorheriges Aufsetzen daneben: nichts
+    assert page.aufgaben == [] and notiz.schreibt
+    notiz.feld.on_tap_outside(None)  # aufsetzen (die Nachfrist beginnt) …
+    ansicht.on_tap_up(None)  # … und gleich abheben: der kurze Tipp ins Leere
+    assert page.aufgaben == [notiz._nach_daneben, notiz.fertig]
+    await notiz.fertig()
+    assert not notiz.schreibt and notiz.feld.blur and state.schreib_gesten is None
+    ansicht.on_tap_up(None)  # ohne Schreiben: nichts
+    assert state.schreib_gesten is None
+
+
+def test_scroll_helfer_meldet_das_ziehen(page, state) -> None:
+    """`components/scroll.py` sagt dem Schreibenden, dass gescrollt wird — bei Start und
+    Fortgang, nicht beim Ende; ohne Schreibenden nichts (auch ohne Ereignisart, wie die
+    Navigationstests scrollen)."""
+    from trainingsapp.ui.components.scroll import scroll_merken
+
+    gesten: list[str] = []
+    spalte = scroll_merken(page, state, "heute", ft.Column(scroll=ft.ScrollMode.AUTO))
+    spalte.on_scroll(SimpleNamespace(pixels=5.0))
+    state.schreib_gesten = gesten.append
+    spalte.on_scroll(SimpleNamespace(pixels=5.0))
+    spalte.on_scroll(SimpleNamespace(pixels=20.0, event_type=ft.ScrollType.START))
+    spalte.on_scroll(SimpleNamespace(pixels=40.0, event_type=ft.ScrollType.UPDATE))
+    spalte.on_scroll(SimpleNamespace(pixels=40.0, event_type=ft.ScrollType.END))
+    assert gesten == ["scroll", "scroll"] and state.scroll_offsets["heute"] == 40.0
+
+
+async def test_platz_beim_schreiben(page, state) -> None:
+    """Ben, 2.11.2026: „Klickt man wieder in das Feld, wird das Texteingabefeld überdeckt“ —
+    unter der Schreibmarke bleibt Platz für die Leiste, und der runde Knopf der Ansicht
+    verschwindet, solange man schreibt."""
+    knopf = ft.FloatingActionButton(icon=ft.Icons.ADD)
+    page.views.append(SimpleNamespace(floating_action_button=knopf))
+    notiz = _notiz(_feld(tagesansicht(page, state, state.heute(), mit_datum=False)))
+    assert notiz.feld.scroll_padding.bottom == tn.SICHT_UNTER_FELD_PX >= 48
+    notiz.feld.on_focus(None)
+    assert knopf.visible is False
+    await notiz.fertig()
+    assert knopf.visible is True
+
+
 def test_auffrischen_behaelt_den_stand(page, state) -> None:
     """Baut die Ansicht die Spalte neu (hier: Darstellung umschalten), entsteht ein neues Feld
     mit demselben Text — und demselben Verlauf."""

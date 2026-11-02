@@ -369,6 +369,10 @@ class AppState:
     #: Zurück auf „Heute“, während man dort schreibt: Schreiben beenden (gespeichert ist
     #: schon) statt nichts zu tun — setzt `components/tagesnotiz.py`
     schreiben_beenden: Callable[[], Awaitable[None]] | None = None
+    #: Solange man die Notiz zum Tag schreibt: was der Finger neben dem Feld tut — "scroll"
+    #: (die Fläche scrollt, `components/scroll.py`) oder "tipp" (aufgesetzt und abgehoben,
+    #: ohne zu ziehen; `views/tag.py`). Setzt `components/tagesnotiz.py` (Ben, 2.11.2026)
+    schreib_gesten: Callable[[str], None] | None = None
     #: GPS: Ortungsquelle (`devices.gps.GpsQuelle` — auf Android `FletGpsQuelle`,
     #: in `app.py` angelegt; sonst beim ersten Bedarf ein Simulator) und der
     #: laufende Vorabtest (`ui.views.gps_test.GpsTestLauf`) mit seinen Vorgaben

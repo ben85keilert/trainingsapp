@@ -24,10 +24,12 @@ mit Zahl). Ein Tipp auf ein Bild öffnet die Ansicht (`…/anhang/<id>`), kein V
 die Bilder sind klein dekodiert (`components/anhang_reihe`), gelesen wird mit einer Abfrage
 für den ganzen Tag (`AnhangRepo.je_eintraegen`).
 
-**Die Notiz zum Tag** schreibt man direkt (Ben, 22.10.2026: „Ermögliche direktes Eintragen
-mit Autosave und zurück und vor Button …“) — in der Übersicht oben im Block „Zum Tag“, in der
-Zeitleiste an ihrer Uhrzeit (noch ohne Notiz am Ende); dazu Foto, Video und Audio zum Tag
-(`components/tagesnotiz.py`). Ihr Stand lebt über das Auffrischen der Spalte hinweg. Um die
+**Die Notizen zum Tag** schreibt man direkt (Ben, 22.10.2026: „Ermögliche direktes Eintragen
+mit Autosave und zurück und vor Button …“; seit 2.11.2026 mehrere je Tag mit Tags und „+“) —
+in der Übersicht oben im Block „Zum Tag“ (`Tagesnotizen`: Karten, ein Editor, „+ Notiz“), in
+der Zeitleiste jede an ihrer Uhrzeit und der Editor einer neuen am Ende; dazu Foto, Video und
+Audio an der Notiz (`components/tagesnotiz.py`). Ihr Stand lebt über das Auffrischen der
+Spalte hinweg. Um die
 ganze Ansicht liegt ein durchlässiger Gestenfänger: Ein kurzer Tipp ins Leere (abgehoben, ohne
 zu ziehen) beendet das Schreiben sofort, Ziehen ist Scrollen und lässt die Tastatur offen
 (`AppState.schreib_gesten`, Ben 2.11.2026).
@@ -54,6 +56,7 @@ from trainingsapp.core import tagesfelder as tf
 from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import Anhang
 from trainingsapp.core.models import (
+    DayNote,
     Exercise,
     Plan,
     PlanItem,
@@ -84,10 +87,10 @@ from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.notiz import notiz_dialog
+from trainingsapp.ui.components.notizeditor import Textnotiz
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.tagesfeld_blatt import tagesfeld_blatt
-from trainingsapp.ui.components.tagesnotiz import Tagesnotiz
+from trainingsapp.ui.components.tagesnotiz import Tagesnotizen
 from trainingsapp.ui.components.uebungszeile import (
     abschnitt,
     etikett,
@@ -214,8 +217,9 @@ class _Daten:
     #: Eintrag-ID → Fotos und Videos (`data.AnhangRepo.je_eintraegen`) — ihre Frontbilder
     anhaenge: dict[str, list[Anhang]]
     vom_timer: set[str]
-    tagesnotiz: str
-    notiz_zeit: datetime | None
+    #: Die Notizen zum Tag (mehrere seit 2.11.2026) — mit Text; die nur mit Anhängen zeigt
+    #: der Block selbst (`Tagesnotizen`)
+    notizen_zum_tag: list[DayNote]
     #: Tagesfelder (Ben, 21.10.2026): die aktiven (Block „Zum Tag“), alle mit gelöschten
     #: (Namen in der Zeitleiste) und die Werte des Tags
     felder: list[tf.Tagesfeld]
@@ -253,7 +257,7 @@ class _Daten:
         return list({s.id: s for _, s in self.eintraege}.values())
 
     def notizen(self) -> int:
-        return bool(self.tagesnotiz) + sum(1 for s in self.sessions() if s.note)
+        return len(self.notizen_zum_tag) + sum(1 for s in self.sessions() if s.note)
 
     def tageswerte(self) -> int:
         """Wie viele Tagesfelder an diesem Tag etwas haben."""
@@ -292,8 +296,9 @@ def _lesen(state: AppState, tag: date) -> _Daten:
             if state.einheiten is not None and ids
             else set()
         ),
-        tagesnotiz=state.tagesnotizen.lesen(state.profil.id, tag),
-        notiz_zeit=state.tagesnotizen.angelegt(state.profil.id, tag),
+        notizen_zum_tag=[
+            n for n in state.tagesnotizen.zum_tag(state.profil.id, tag) if not n.leer()
+        ],
         felder=[f for f in alle_felder.values() if f.aktiv and f.deleted_at is None],
         alle_felder=alle_felder,
         werte=state.tageswerte.am_tag(state.profil.id, tag),
@@ -371,21 +376,23 @@ def tagesansicht(
 
     stand: dict[str, _Daten] = {"daten": _lesen(state, tag_jetzt())}
     spalte = ft.Column(spacing=8, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
-    #: Die Notiz zum Tag zum direkten Schreiben — ihr Stand (Text, ↶ ↷) überlebt das
-    #: Auffrischen der Spalte
-    notiz_stand: dict[str, Tagesnotiz] = {}
+    #: Die Notizen zum Tag zum direkten Schreiben — ihr Stand (Text, ↶ ↷, welche offen ist)
+    #: überlebt das Auffrischen der Spalte
+    notiz_stand: dict[str, Tagesnotizen] = {}
 
     def daten() -> _Daten:
         return stand["daten"]
 
-    def tagesnotiz() -> Tagesnotiz:
-        """Die Notiz des Tags beim Tippen — nach Mitternacht (Heute) oder einem
-        Profilwechsel eine neue; die alte ist vorher gespeichert."""
+    def tagesnotiz() -> Tagesnotizen:
+        """Die Notizen des Tags beim Tippen — nach Mitternacht (Heute) oder einem
+        Profilwechsel neue; die alten sind vorher gespeichert."""
         n = notiz_stand.get("notiz")
         if n is None or n.tag != tag_jetzt() or n.profil_id != state.profil.id:
-            if n is not None:
-                n.speichern()
-            n = notiz_stand["notiz"] = Tagesnotiz(page, state, tag_jetzt(), basis=basis)
+            if n is not None and (e := n.offener_editor()) is not None:
+                e.speichern()
+            n = notiz_stand["notiz"] = Tagesnotizen(
+                page, state, tag_jetzt(), basis=basis, auffrischen=auffrischen
+            )
         return n
 
     def auffrischen() -> None:
@@ -533,19 +540,45 @@ def tagesansicht(
     def session_titel(s: Session) -> str:
         return daten().plan_namen.get(s.plan_id, "Plan") if s.plan_id else "Ohne Plan"
 
-    def session_notiz(s: Session) -> Callable[[], None]:
-        def handler() -> None:
-            page.show_dialog(
-                notiz_dialog(
-                    f"Notiz: {session_titel(s)}",
-                    s.note,
-                    lambda text: state.sitzungen.notiz_setzen(s.id, text),
-                    danach=auffrischen,
-                    hinweis="Wie ging das Training? Tippen oder diktieren.",
-                )
+    #: Die Notiz zu einem Plan am Tag, ohne Popup (Ben, 2.11.2026, P103): welche Session
+    #: offen ist und je Session ihr Editor — über das Auffrischen der Spalte hinweg
+    plan_notiz_stand: dict[str, Any] = {"offen": None, "editoren": {}}
+
+    def plan_editor(s: Session) -> Textnotiz:
+        editoren: dict[str, Textnotiz] = plan_notiz_stand["editoren"]
+        e = editoren.get(s.id)
+        if e is None:
+
+            def sichern(text: str, session_id: str = s.id) -> None:
+                state.sitzungen.notiz_setzen(session_id, text)
+
+            def geschlossen() -> None:
+                plan_notiz_stand["offen"] = None
+                auffrischen()
+
+            e = editoren[s.id] = Textnotiz(
+                page,
+                state,
+                s.note,
+                sichern,
+                schluessel=f"plan:{s.id}",
+                hinweis="Wie ging das Training? Tippen oder diktieren.",
+                danach=geschlossen,
             )
+        return e
+
+    def session_notiz(s: Session) -> Callable[[], None]:
+        """Antippen der Notiz (oder „Notiz zu …“): der Editor an Ort und Stelle."""
+
+        def handler() -> None:
+            plan_notiz_stand["offen"] = s.id
+            plan_editor(s).fokus = True
+            auffrischen()
 
         return handler
+
+    def plan_notiz_offen(s: Session) -> bool:
+        return plan_notiz_stand["offen"] == s.id
 
     def ziel(g: Gemacht) -> Callable[[], Any]:
         """Eine gemachte Übung antippen: ihre Einträge des Tags als Blatt von unten (Ben,
@@ -988,7 +1021,28 @@ def tagesansicht(
         karten: list[ft.Control] = []
         knoepfe: list[ft.Control] = []
         for s in d.sessions():
-            if s.note:
+            if plan_notiz_offen(s):
+                karten.append(
+                    ft.Container(
+                        bgcolor=KARTE,
+                        border_radius=16,
+                        padding=ft.Padding.only(left=12, right=8, top=8, bottom=8),
+                        content=ft.Column(
+                            spacing=4,
+                            tight=True,
+                            controls=[
+                                ft.Text(
+                                    session_titel(s),
+                                    size=12,
+                                    weight=ft.FontWeight.W_600,
+                                    opacity=0.7,
+                                ),
+                                plan_editor(s).control(),
+                            ],
+                        ),
+                    )
+                )
+            elif s.note:
                 karten.append(notiz_karte(session_titel(s), s.note, session_notiz(s)))
             elif s.plan_id:
                 knoepfe.append(
@@ -1232,7 +1286,9 @@ def tagesansicht(
             ),
         )
         zeilen: list[ft.Control] = [kopf_zeile, *(block_zeile(g) for g in a.zeilen)]
-        if a.session is not None and a.session.note:
+        if a.session is not None and plan_notiz_offen(a.session):
+            zeilen.append(plan_editor(a.session).control())
+        elif a.session is not None and a.session.note:
             zeilen.append(
                 ft.Container(
                     ink=True,
@@ -1317,50 +1373,46 @@ def tagesansicht(
             (a.beginn, block(a)) for a in zeitleiste(d.eintraege, d.namen(), d.ist_training)
         ]
         einmal = einmal_zeile()
-        notiz = tagesnotiz()
-        # Mit Text oder Anhängen steht die Notiz an ihrer Uhrzeit, sonst am Ende
-        an_der_uhrzeit = bool(d.tagesnotiz or notiz.anhaenge)
-        if an_der_uhrzeit or einmal:
-            zeit = d.notiz_zeit if d.notiz_zeit and lokaler_tag(d.notiz_zeit) == tag else None
-            if zeit is None and notiz.anhaenge:
-                erste = min(a.aufgenommen for a in notiz.anhaenge)
-                zeit = erste if lokaler_tag(erste) == tag else None
-            if zeit is None and not an_der_uhrzeit:
-                zeit = min(
-                    (
-                        w.zeit
-                        for w in d.werte
-                        if (f := d.alle_felder.get(w.feld_id)) and not f.mehrmals
-                    ),
-                    default=None,
-                )
-            zeilen: list[ft.Control] = [
-                ft.Text(
-                    "Notiz zum Tag" if an_der_uhrzeit else "Zum Tag",
-                    size=12,
-                    weight=ft.FontWeight.W_600,
-                    opacity=0.7,
-                )
-            ]
-            if an_der_uhrzeit:
-                zeilen.append(notiz.control())
-            if einmal:
-                zeilen.append(
-                    ft.Container(
-                        bgcolor=ft.Colors.SURFACE_CONTAINER,
-                        border_radius=8,
-                        padding=ft.Padding.symmetric(horizontal=8, vertical=3),
-                        content=ft.Text(einmal, size=12),
-                    )
-                )
+        notizen = tagesnotiz()
+
+        def notiz_container(titel: str, inhalt: list[ft.Control]) -> ft.Control:
+            return ft.Container(
+                bgcolor=KARTE,
+                border_radius=14,
+                padding=ft.Padding.only(left=12, right=8, top=8, bottom=8),
+                content=ft.Column(
+                    spacing=4,
+                    tight=True,
+                    controls=[
+                        ft.Text(titel, size=12, weight=ft.FontWeight.W_600, opacity=0.7),
+                        *inhalt,
+                    ],
+                ),
+            )
+
+        # Jede Notiz mit Text oder Anhängen an ihrer Uhrzeit (mehrere seit 2.11.2026) —
+        # als Karte, die offene als Editor
+        for n in notizen.mit_inhalt:
+            zeit = n.created_at if n.created_at and lokaler_tag(n.created_at) == tag else None
+            punkte.append((zeit, notiz_container("Notiz zum Tag", [notizen.teil(n)])))
+        if einmal:
+            zeit = min(
+                (w.zeit for w in d.werte if (f := d.alle_felder.get(w.feld_id)) and not f.mehrmals),
+                default=None,
+            )
             punkte.append(
                 (
                     zeit,
-                    ft.Container(
-                        bgcolor=KARTE,
-                        border_radius=14,
-                        padding=ft.Padding.only(left=12, right=8, top=8, bottom=8),
-                        content=ft.Column(spacing=4, tight=True, controls=zeilen),
+                    notiz_container(
+                        "Zum Tag",
+                        [
+                            ft.Container(
+                                bgcolor=ft.Colors.SURFACE_CONTAINER,
+                                border_radius=8,
+                                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                                content=ft.Text(einmal, size=12),
+                            )
+                        ],
                     ),
                 )
             )
@@ -1395,25 +1447,9 @@ def tagesansicht(
             if d.ist_heute:
                 linie.append(zeitpunkt("jetzt", ft.Container(height=6), hohl=True))
             teile.append(ft.Column(spacing=0, controls=linie))
-        if not an_der_uhrzeit:
-            # Noch keine Notiz: das Feld am Ende, gleich zum Schreiben
-            teile.append(
-                ft.Container(
-                    bgcolor=KARTE,
-                    border_radius=14,
-                    padding=ft.Padding.only(left=12, right=8, top=8, bottom=8),
-                    content=ft.Column(
-                        spacing=4,
-                        tight=True,
-                        controls=[
-                            ft.Text(
-                                "Notiz zum Tag", size=12, weight=ft.FontWeight.W_600, opacity=0.7
-                            ),
-                            notiz.control(),
-                        ],
-                    ),
-                )
-            )
+        # Am Ende: der Editor einer neuen Notiz (ohne Notiz gleich zum Schreiben) oder „+“
+        if (ende := notizen.ende()) is not None:
+            teile.append(notiz_container("Notiz zum Tag", [ende]))
         if d.felder:
             teile.extend(zum_tag_teile(mit_notiz=False))
         return teile

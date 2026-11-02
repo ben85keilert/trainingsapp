@@ -231,14 +231,16 @@ def test_nur_der_vorfahr_baubar_faellt_aus_dem_weg(umgebung) -> None:
 
 def test_aufnahmen_zum_tag_und_audio_liegen_ueber_der_ansicht(umgebung) -> None:
     """Ben, 22.10.2026: Foto, Video und Audio auch zur Notiz zum Tag — der Weg trägt
-    ``tag/<datum>`` statt einer Eintrags-ID; ein Tag in der Zukunft fällt aus dem Weg."""
+    ``notiz/<id>`` statt einer Eintrags-ID (seit 2.11.2026 die Notiz, nicht der Tag); eine
+    Notiz, die es nicht gibt, fällt aus dem Weg."""
     from datetime import timedelta
 
     from trainingsapp.ui.views.anhang_ton import anhang_ton_view
 
     seite, state = umgebung()
     heute = state.heute()
-    audio = f"/anhang/aufnehmen/tag/{heute.isoformat()}/audio"
+    notiz = state.tagesnotizen.anlegen(state.profil.id, heute, "")
+    audio = f"/anhang/aufnehmen/notiz/{notiz.id}/audio"
     seite.gehe(audio)
     assert seite.routen() == ["/", audio]
     assert seite.views[-1].can_pop is False  # die Systemtaste räumt den Rekorder auf
@@ -248,12 +250,12 @@ def test_aufnahmen_zum_tag_und_audio_liegen_ueber_der_ansicht(umgebung) -> None:
     )
     # Über einem anderen Tag (Kaltstart baut den Weg hierarchisch)
     gestern = (heute - timedelta(days=1)).isoformat()
-    foto = f"/tag/{gestern}/anhang/aufnehmen/tag/{gestern}/foto"
+    foto = f"/tag/{gestern}/anhang/aufnehmen/notiz/{notiz.id}/foto"
     neu, _ = umgebung(foto)
     assert neu.routen() == ["/", f"/tag/{gestern}", foto]
-    morgen = f"/anhang/aufnehmen/tag/{(heute + timedelta(days=1)).isoformat()}/audio"
-    zukunft, _ = umgebung(morgen)
-    assert zukunft.routen() == ["/"]
+    fremd = "/anhang/aufnehmen/notiz/gibt-es-nicht/audio"
+    nirgends, _ = umgebung(fremd)
+    assert nirgends.routen() == ["/"]
     assert anhang_ton_view.__name__  # die Seite gibt es (Import im Router)
 
 

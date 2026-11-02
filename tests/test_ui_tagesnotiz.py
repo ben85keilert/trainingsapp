@@ -1,6 +1,7 @@
-"""Die Notiz zum Tag direkt schreiben (Ben, 22.10.2026) — `components/tagesnotiz.py` in der
-Tagesansicht: Feld statt Dialog, Autosave, ↶ ↷, Abbrechen, Fertig, Zurück speichert, und
-Foto · Video · Audio zum Tag."""
+"""Die Notizen zum Tag direkt schreiben (Ben, 22.10.2026; mehrere je Tag mit Tags seit
+2.11.2026) — `components/tagesnotiz.py` und `components/notizeditor.py` in der Tagesansicht:
+Karten und ein Editor statt Dialog, „+ Notiz“, Tag-Chips, Autosave, ↶ ↷, Abbrechen, Fertig,
+Zurück speichert, und Foto · Video · Audio an der Notiz."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import pytest
 ft = pytest.importorskip("flet")
 
 from trainingsapp.core.anhaenge import AUDIO, Qualitaet, Ziel, neuer_anhang  # noqa: E402
+from trainingsapp.ui.components import notizeditor as ne  # noqa: E402
 from trainingsapp.ui.components import tagesnotiz as tn  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.tag import UEBERSICHT, ZEITLEISTE, tagesansicht  # noqa: E402
@@ -69,9 +71,13 @@ def _texte(c) -> list[str]:
 
 def _feld(wurzel) -> ft.TextField:
     (feld,) = [
-        x for x in _alle(wurzel) if isinstance(x, ft.TextField) and x.hint_text == tn.HINWEIS
+        x for x in _alle(wurzel) if isinstance(x, ft.TextField) and x.hint_text == ne.HINWEIS
     ]
     return feld
+
+
+def _felder(wurzel) -> list[ft.TextField]:
+    return [x for x in _alle(wurzel) if isinstance(x, ft.TextField) and x.hint_text == ne.HINWEIS]
 
 
 def _notiz(feld: ft.TextField) -> tn.Tagesnotiz:
@@ -79,6 +85,21 @@ def _notiz(feld: ft.TextField) -> tn.Tagesnotiz:
     notiz = feld.on_change.__self__
     assert isinstance(notiz, tn.Tagesnotiz)
     return notiz
+
+
+def _karte(wurzel, text: str) -> ft.Container:
+    """Die Karte einer fertigen Notiz mit diesem Text — Antippen öffnet sie."""
+    return next(
+        x
+        for x in _alle(wurzel)
+        if isinstance(x, ft.Container) and x.ink and x.on_click and text in _texte(x)
+    )
+
+
+def _oeffnen(wurzel, text: str) -> tn.Tagesnotiz:
+    """Die Karte antippen: Die Ansicht baut sich neu, der Editor steht da."""
+    _karte(wurzel, text).on_click()
+    return _notiz(_feld(wurzel))
 
 
 def _tippen(notiz: tn.Tagesnotiz, text: str) -> None:
@@ -90,19 +111,26 @@ def _symbole(c) -> list:
     return [x.icon for x in _alle(c) if isinstance(x, ft.IconButton)]
 
 
-def _gespeichert(state: AppState) -> str:
-    return state.tagesnotizen.lesen(state.profil.id, state.heute())
+def _knopf(c, text: str) -> ft.TextButton:
+    return next(x for x in _alle(c) if isinstance(x, ft.TextButton) and x.content == text)
 
 
-async def test_feld_statt_dialog_mit_autosave(page, state, monkeypatch) -> None:
-    """Kein Dialog mehr: Das Feld steht im Block, gespeichert wird nach einer Pause."""
-    monkeypatch.setattr(tn, "SPEICHERN_NACH_S", 0.0)
-    state.tagesnotizen.setzen(state.profil.id, state.heute(), "Schulter fest")
+def _gespeichert(state: AppState) -> list[str]:
+    return [n.text for n in state.tagesnotizen.zum_tag(state.profil.id, state.heute())]
+
+
+async def test_karte_und_editor_statt_dialog_mit_autosave(page, state, monkeypatch) -> None:
+    """Kein Dialog: Eine gespeicherte Notiz steht als Karte im Block, Antippen öffnet den
+    Editor; gespeichert wird nach einer Pause."""
+    monkeypatch.setattr(ne, "SPEICHERN_NACH_S", 0.0)
+    state.tagesnotizen.anlegen(state.profil.id, state.heute(), "Schulter fest")
     ansicht = tagesansicht(page, state, state.heute(), mit_datum=False)
-    feld = _feld(ansicht)
-    assert feld.value == "Schulter fest" and feld.multiline
-    notiz = _notiz(feld)
-    # Ohne Schreiben: Foto · Video · Audio zum Tag statt ↶ ↷
+    assert "Schulter fest" in _texte(ansicht) and _felder(ansicht) == []
+    assert _knopf(ansicht, "Notiz").icon == ft.Icons.ADD  # „+ Notiz“
+    notiz = _oeffnen(ansicht, "Schulter fest")
+    feld = notiz.feld
+    assert feld.value == "Schulter fest" and feld.multiline and feld.autofocus
+    # Ohne Schreiben: Foto · Video · Audio zur Notiz statt ↶ ↷
     assert notiz.anhang_leiste.visible and not notiz.schreib_leiste.visible
     assert _symbole(notiz.anhang_leiste)[:3] == [
         ft.Icons.CAMERA_ALT_OUTLINED,
@@ -121,9 +149,72 @@ async def test_feld_statt_dialog_mit_autosave(page, state, monkeypatch) -> None:
     _tippen(notiz, "Schulter fest, Knie gut")
     assert page.aufgaben  # das Speichern wartet auf die Pause
     await notiz._spaeter_speichern()
-    assert _gespeichert(state) == "Schulter fest, Knie gut"
+    assert _gespeichert(state) == ["Schulter fest, Knie gut"]
     assert notiz.stand.value == "gespeichert"
     assert page.dialoge == []  # kein Popup
+    # Fertig: wieder die Karte, kein Feld mehr
+    await notiz.fertig()
+    assert "Schulter fest, Knie gut" in _texte(ansicht) and _felder(ansicht) == []
+
+
+async def test_mehrere_notizen_mit_plus_und_tags(page, state, monkeypatch) -> None:
+    """Ben, 2.11.2026: „mehrere erstellbar mit einem ‚+‘“, mit Tags (Merkmalen): „Tagebuch“
+    ist fest, eigene legt man in der Chip-Zeile an; eine neue Notiz hat keinen Tag vorgewählt
+    (P98); ein Tipp auf einen Chip speichert sofort; leer bleibt keine Notiz (P99)."""
+    monkeypatch.setattr(ne, "SPEICHERN_NACH_S", 0.0)
+    ansicht = tagesansicht(page, state, state.heute(), mit_datum=False)
+    erste = _notiz(_feld(ansicht))  # ohne Notiz: gleich zum Schreiben
+    assert not erste.vorhanden and erste.notiz.tag_ids == ()
+    (tagebuch_chip,) = [c for c in _alle(erste.tag_zeile) if isinstance(c, ft.Chip) and c.on_select]
+    assert tagebuch_chip.label.value == "Tagebuch" and not tagebuch_chip.selected
+    plus_tag = next(c for c in _alle(erste.tag_zeile) if isinstance(c, ft.Chip) and c.on_click)
+    assert plus_tag.label.value == "+ Tag" and not erste.tag_feld.visible
+    # Ein Chip ohne Text legt noch nichts an — erst der Text
+    tagebuch = state.notiz_tags.sicherstellen(state.profil.id)
+    tagebuch_chip.on_select(None)
+    assert erste.notiz.tag_ids == (tagebuch.id,) and tagebuch_chip.selected
+    assert _gespeichert(state) == []
+    erste.feld.on_focus(None)
+    _tippen(erste, "Morgens müde")
+    await erste._spaeter_speichern()
+    assert _gespeichert(state) == ["Morgens müde"]
+    (gespeichert,) = state.tagesnotizen.zum_tag(state.profil.id, state.heute())
+    assert gespeichert.tag_ids == (tagebuch.id,)
+    # Neuen Tag anlegen — in der Zeile, kein Dialog
+    plus_tag.on_click(None)
+    assert erste.tag_feld.visible
+    erste.tag_feld.value = "Kraft"
+    erste.tag_feld.on_submit(None)
+    kraft = next(t for t in state.notiz_tags.alle(state.profil.id) if t.name == "Kraft")
+    assert state.tagesnotizen.laden(gespeichert.id).tag_ids == (tagebuch.id, kraft.id)
+    assert [c.label.value for c in erste.chips.values()] == ["Tagebuch", "Kraft"]
+    assert page.dialoge == []
+    erste.tag_feld.value = "kraft"
+    erste.tag_feld.on_submit(None)
+    assert erste.tag_feld.error  # gibt es schon
+    await erste.fertig()
+    assert _felder(ansicht) == []  # Karte
+    assert "Kraft" in _texte(ansicht) and "Tagebuch" in _texte(ansicht)  # die Etiketten
+    # „+“: eine zweite Notiz, leer, ohne Tag
+    _knopf(ansicht, "Notiz").on_click()
+    zweite = _notiz(_feld(ansicht))
+    assert zweite is not erste and not zweite.vorhanden and zweite.feld.autofocus
+    assert zweite.notiz.tag_ids == ()
+    zweite.feld.on_focus(None)
+    _tippen(zweite, "Kniebeuge schwer")
+    await zweite._spaeter_speichern()
+    assert _gespeichert(state) == ["Morgens müde", "Kniebeuge schwer"]
+    # Leer gemacht: weg
+    _tippen(zweite, "")
+    await zweite._spaeter_speichern()
+    assert _gespeichert(state) == ["Morgens müde"] and not zweite.vorhanden
+    await zweite.fertig()
+    assert "Kniebeuge schwer" not in _texte(ansicht)
+    # „+“ und gleich Fertig: nichts bleibt
+    _knopf(ansicht, "Notiz").on_click()
+    dritte = _notiz(_feld(ansicht))
+    await dritte.fertig()
+    assert _gespeichert(state) == ["Morgens müde"] and _felder(ansicht) == []
 
 
 async def test_rueckgaengig_holt_ein_geloeschtes_stueck_zurueck(page, state) -> None:
@@ -135,28 +226,31 @@ async def test_rueckgaengig_holt_ein_geloeschtes_stueck_zurueck(page, state) -> 
     _tippen(notiz, "Schulter fest, Knie gut")
     _tippen(notiz, "Schulter fest")  # markiert und gelöscht
     notiz.feld.on_blur(None)
-    assert _gespeichert(state) == "Schulter fest"
+    assert _gespeichert(state) == ["Schulter fest"]
     assert not notiz.zurueck_knopf.disabled and notiz.vor_knopf.disabled
     await notiz.rueckgaengig()
-    assert notiz.feld.value == "Schulter fest, Knie gut" == _gespeichert(state)
+    assert notiz.feld.value == "Schulter fest, Knie gut" and _gespeichert(state) == [
+        "Schulter fest, Knie gut"
+    ]
     await notiz.wiederholen()
-    assert notiz.feld.value == "Schulter fest" == _gespeichert(state)
+    assert notiz.feld.value == "Schulter fest" and _gespeichert(state) == ["Schulter fest"]
 
 
 async def test_abbrechen_stellt_den_anfang_her_mit_rueckgaengig(page, state) -> None:
-    state.tagesnotizen.setzen(state.profil.id, state.heute(), "alt")
-    notiz = _notiz(_feld(tagesansicht(page, state, state.heute(), mit_datum=False)))
+    state.tagesnotizen.anlegen(state.profil.id, state.heute(), "alt")
+    ansicht = tagesansicht(page, state, state.heute(), mit_datum=False)
+    notiz = _oeffnen(ansicht, "alt")
     notiz.feld.on_focus(None)
     _tippen(notiz, "ganz neu")
     notiz.feld.on_blur(None)
-    assert _gespeichert(state) == "ganz neu"
+    assert _gespeichert(state) == ["ganz neu"]
     await notiz.abbrechen()
-    assert notiz.feld.value == "alt" == _gespeichert(state)
-    assert not notiz.schreibt and notiz.anhang_leiste.visible
+    assert notiz.feld.value == "alt" and _gespeichert(state) == ["alt"]
+    assert not notiz.schreibt and "alt" in _texte(ansicht) and _felder(ansicht) == []
     (meldung,) = page.dialoge
     assert isinstance(meldung, ft.SnackBar) and meldung.action == "Rückgängig"
     meldung.on_action()  # war ein Versehen
-    assert notiz.feld.value == "ganz neu" == _gespeichert(state)
+    assert _gespeichert(state) == ["ganz neu"] and "ganz neu" in _texte(ansicht)
 
 
 async def test_fertig_und_zurueck_auf_heute_beenden_das_schreiben(page, state) -> None:
@@ -166,12 +260,12 @@ async def test_fertig_und_zurueck_auf_heute_beenden_das_schreiben(page, state) -
     notiz.feld.on_focus(None)
     assert state.schreiben_beenden == notiz.fertig
     _tippen(notiz, "vor dem Wegwischen")
-    state.vor_dem_verlassen[tn.SICHERN]()  # App geht in den Hintergrund
-    assert _gespeichert(state) == "vor dem Wegwischen"
+    state.vor_dem_verlassen[notiz.sichern_schluessel]()  # App geht in den Hintergrund
+    assert _gespeichert(state) == ["vor dem Wegwischen"]
     assert state.schreiben_beenden is not None
     await state.schreiben_beenden()
     assert not notiz.schreibt and state.schreiben_beenden is None
-    assert tn.SICHERN not in state.vor_dem_verlassen
+    assert notiz.sichern_schluessel not in state.vor_dem_verlassen
     # Der Verlauf bleibt: wieder hineintippen, ↶ geht noch
     notiz.feld.on_focus(None)
     assert notiz.verlauf.kann_rueckgaengig
@@ -182,7 +276,7 @@ def test_feld_ueber_die_ganze_breite(page, state) -> None:
     Textfeld feste 300 px — die Spalte streckt es."""
     notiz = _notiz(_feld(tagesansicht(page, state, state.heute(), mit_datum=False)))
     spalte = notiz.control()
-    assert notiz.feld in spalte.controls
+    assert notiz.feld in spalte.controls and spalte.controls[0] is notiz.tag_zeile
     assert spalte.horizontal_alignment == ft.CrossAxisAlignment.STRETCH
     assert notiz.feld.width is None and not notiz.feld.expand
 
@@ -192,26 +286,28 @@ async def test_fertig_und_abbrechen_nehmen_dem_feld_den_fokus(page, state) -> No
     seiner Leiste verschwand — Flutter gab ihn dem Feld zurück, die Tastatur ging wieder auf.
     Jetzt nimmt ``blur`` dem Feld den Fokus, jedes Mal mit einem neuen Wert."""
     notiz = _notiz(_feld(tagesansicht(page, state, state.heute(), mit_datum=False)))
-    assert isinstance(notiz.feld, tn.Notizfeld) and notiz.feld.blur is None
+    assert isinstance(notiz.feld, ne.Notizfeld) and notiz.feld.blur is None
     assert notiz.feld._c == "TextField"  # Flet zeichnet ein gewöhnliches Textfeld
     notiz.feld.on_focus(None)
     _tippen(notiz, "fertig geschrieben")
     await notiz.fertig()
     erster = notiz.feld.blur
     assert erster and not notiz.schreibt and notiz.anhang_leiste.visible
-    assert _gespeichert(state) == "fertig geschrieben"
+    assert _gespeichert(state) == ["fertig geschrieben"]
     notiz.feld.on_focus(None)
     _tippen(notiz, "doch nicht")
     await notiz.abbrechen()
     assert notiz.feld.blur not in (None, erster)
-    assert notiz.feld.value == "fertig geschrieben" == _gespeichert(state)
+    assert notiz.feld.value == "fertig geschrieben" and _gespeichert(state) == [
+        "fertig geschrieben"
+    ]
 
 
 async def test_daneben_tippen_beendet_das_schreiben(page, state, monkeypatch) -> None:
     """„Der Klick aus dem Fenster raus soll … speichern“: Ein Tipp neben das Feld beendet das
-    Schreiben wie „Fertig“ — nach der Nachfrist, denn auch ↶ und ↷ liegen daneben, und Flutter
-    meldet den Tipp schon beim Aufsetzen, ihren Klick erst beim Loslassen."""
-    monkeypatch.setattr(tn, "NACHFRIST_S", 0.0)
+    Schreiben wie „Fertig“ — nach der Nachfrist, denn auch ↶, ↷ und die Chips liegen daneben,
+    und Flutter meldet den Tipp schon beim Aufsetzen, ihren Klick erst beim Loslassen."""
+    monkeypatch.setattr(ne, "NACHFRIST_S", 0.0)
     notiz = _notiz(_feld(tagesansicht(page, state, state.heute(), mit_datum=False)))
     notiz.feld.on_focus(None)
     _tippen(notiz, "Knie gut, Schulter fest")
@@ -221,11 +317,18 @@ async def test_daneben_tippen_beendet_das_schreiben(page, state, monkeypatch) ->
     await notiz.rueckgaengig()  # … und hebt ab
     await notiz._nach_daneben(zeit)
     assert notiz.schreibt and notiz.feld.value == "Knie gut, Schulter fest"
+    notiz.feld.on_tap_outside(None)  # auf einen Chip
+    zeit = notiz._daneben_um
+    (chip,) = [c for c in _alle(notiz.tag_zeile) if isinstance(c, ft.Chip) and c.on_select]
+    chip.on_select(None)
+    await notiz._nach_daneben(zeit)
+    assert notiz.schreibt
     notiz.feld.on_tap_outside(None)  # irgendwo sonst
     await notiz._nach_daneben(notiz._daneben_um)
     assert not notiz.schreibt and notiz.anhang_leiste.visible and notiz.feld.blur
-    assert _gespeichert(state) == "Knie gut, Schulter fest"
-    assert tn.SICHERN not in state.vor_dem_verlassen and state.schreiben_beenden is None
+    assert _gespeichert(state) == ["Knie gut, Schulter fest"]
+    assert notiz.sichern_schluessel not in state.vor_dem_verlassen
+    assert state.schreiben_beenden is None
     page.aufgaben.clear()
     notiz.feld.on_tap_outside(None)  # ohne Schreiben: nichts
     assert page.aufgaben == []
@@ -284,7 +387,7 @@ async def test_platz_beim_schreiben(page, state) -> None:
     knopf = ft.FloatingActionButton(icon=ft.Icons.ADD)
     page.views.append(SimpleNamespace(floating_action_button=knopf))
     notiz = _notiz(_feld(tagesansicht(page, state, state.heute(), mit_datum=False)))
-    assert notiz.feld.scroll_padding.bottom == tn.SICHT_UNTER_FELD_PX >= 48
+    assert notiz.feld.scroll_padding.bottom == ne.SICHT_UNTER_FELD_PX >= 48
     notiz.feld.on_focus(None)
     assert knopf.visible is False
     await notiz.fertig()
@@ -309,43 +412,78 @@ def test_auffrischen_behaelt_den_stand(page, state) -> None:
     state.tag_darstellung = UEBERSICHT
 
 
-def test_zeitleiste_feld_am_ende_oder_an_der_uhrzeit(page, state) -> None:
+def test_zeitleiste_feld_am_ende_oder_karten_an_der_uhrzeit(page, state) -> None:
     state.tag_darstellung = ZEITLEISTE
     ohne = tagesansicht(page, state, state.heute(), mit_datum=False)
-    assert _feld(ohne).value == ""  # gleich zum Schreiben, kein „+ Notiz zum Tag“
+    assert _feld(ohne).value == ""  # gleich zum Schreiben, kein „+ Notiz“
     assert "Notiz zum Tag" in _texte(ohne)
-    state.tagesnotizen.setzen(state.profil.id, state.heute(), "Schulter fest")
+    state.tagesnotizen.anlegen(state.profil.id, state.heute(), "Schulter fest")
+    state.tagesnotizen.anlegen(state.profil.id, state.heute(), "abends locker")
     mit = tagesansicht(page, state, state.heute(), mit_datum=False)
-    assert _feld(mit).value == "Schulter fest"
-    knoepfe = [x.content for x in _alle(mit) if isinstance(x, ft.TextButton)]
-    assert "Notiz zum Tag" not in knoepfe
+    texte = _texte(mit)
+    # Je eine Karte an ihrer Uhrzeit, dazu „+ Notiz“ am Ende unter derselben Überschrift
+    assert _felder(mit) == [] and texte.count("Notiz zum Tag") == 3
+    assert texte.index("Schulter fest") < texte.index("abends locker")
+    assert _knopf(mit, "Notiz").icon == ft.Icons.ADD  # „+ Notiz“ am Ende
+    _oeffnen(mit, "abends locker")  # Karte → Editor an ihrer Stelle, kein „+“
+    assert len(_felder(mit)) == 1 and not [
+        x for x in _alle(mit) if isinstance(x, ft.TextButton) and x.content == "Notiz"
+    ]
     state.tag_darstellung = UEBERSICHT
 
 
-async def test_foto_video_audio_zum_tag(page, state) -> None:
-    """Die Knöpfe führen zur Aufnahme für den Tag; Anhänge am Tag stehen als Kacheln unter
-    der Notiz — eine Audioaufnahme mit Klangsymbol."""
+async def test_foto_video_audio_zur_notiz(page, state) -> None:
+    """Die Knöpfe führen zur Aufnahme für die Notiz; ihre Anhänge stehen als Kacheln unter
+    der Karte — eine Audioaufnahme mit Klangsymbol. Eine Notiz nur mit Anhang bleibt."""
     heute = state.heute()
-    ton = neuer_anhang(Ziel.fuer_tag(state.profil.id, heute), AUDIO, Qualitaet.MITTEL)
+    notiz = state.tagesnotizen.anlegen(state.profil.id, heute, "")
+    ton = neuer_anhang(Ziel.fuer_notiz(state.profil.id, heute, notiz.id), AUDIO, Qualitaet.MITTEL)
     state.anhaenge.anlegen(ton, M4A)
     ansicht = tagesansicht(page, state, heute, mit_datum=False)
-    notiz = _notiz(_feld(ansicht))
-    kamera, video, mikro = [x for x in _alle(notiz.anhang_leiste) if isinstance(x, ft.IconButton)][
-        :3
-    ]
-    await mikro.on_click()
-    await kamera.on_click()
-    assert page.routen == [
-        f"/anhang/aufnehmen/tag/{heute.isoformat()}/audio",
-        f"/anhang/aufnehmen/tag/{heute.isoformat()}/foto",
-    ]
-    assert video.tooltip == "Video zum Tag"
+    assert [n.id for n in state.tagesnotizen.zum_tag(state.profil.id, heute)] == [notiz.id]
     assert any(isinstance(x, ft.Icon) and x.icon == ft.Icons.GRAPHIC_EQ for x in _alle(ansicht))
     kachel = next(
         x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.width == 64 and x.on_click
     )
     await kachel.on_click()
     assert page.routen[-1] == f"/anhang/{ton.id}"
+    karte = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Container) and x.ink and x.on_click and x.width is None
+    )
+    karte.on_click()
+    editor = _notiz(_feld(ansicht))
+    assert editor.id == notiz.id and editor.anhaenge == [ton]
+    kamera, video, mikro = [x for x in _alle(editor.anhang_leiste) if isinstance(x, ft.IconButton)][
+        :3
+    ]
+    await mikro.on_click()
+    await kamera.on_click()
+    assert page.routen[-2:] == [
+        f"/anhang/aufnehmen/notiz/{notiz.id}/audio",
+        f"/anhang/aufnehmen/notiz/{notiz.id}/foto",
+    ]
+    assert video.tooltip == "Video zur Notiz"
+
+
+async def test_der_weg_zur_kamera_legt_die_notiz_an(page, state) -> None:
+    """Der Anhang braucht die ID der Notiz: Vor dem Weg zur Kamera steht sie in der
+    Datenbank — leer; kommt nichts, räumt der nächste Aufbau sie weg."""
+    ansicht = tagesansicht(page, state, state.heute(), mit_datum=False)
+    notiz = _notiz(_feld(ansicht))
+    kamera = next(x for x in _alle(notiz.anhang_leiste) if isinstance(x, ft.IconButton))
+    await kamera.on_click()
+    assert page.routen == [f"/anhang/aufnehmen/notiz/{notiz.id}/foto"]
+    (zeile,) = state.tagesnotizen.zum_tag(state.profil.id, state.heute())
+    assert zeile.id == notiz.id and zeile.text == ""
+    # Heute baut sich unter der Kamera neu — die leere Notiz bleibt (versteckt), sonst fände
+    # die Aufnahme sie nicht; weg kommt sie beim Verlassen der Kamera ohne Foto
+    neu = tagesansicht(page, state, state.heute(), mit_datum=False)
+    assert _notiz(_feld(neu)).id != notiz.id  # ein frischer Editor, keine Karte der leeren
+    assert [n.id for n in state.tagesnotizen.zum_tag(state.profil.id, state.heute())] == [notiz.id]
+    assert state.tagesnotizen.aufraeumen(notiz.id)
+    assert state.tagesnotizen.zum_tag(state.profil.id, state.heute()) == []
 
 
 def test_tagesansicht_eines_anderen_tags(page, state) -> None:
@@ -353,8 +491,9 @@ def test_tagesansicht_eines_anderen_tags(page, state) -> None:
     from datetime import timedelta
 
     gestern = state.heute() - timedelta(days=1)
-    state.tagesnotizen.setzen(state.profil.id, gestern, "gestern")
+    n = state.tagesnotizen.anlegen(state.profil.id, gestern, "gestern")
     basis = f"/tag/{gestern.isoformat()}"
-    notiz = _notiz(_feld(tagesansicht(page, state, gestern, basis=basis, mit_datum=False)))
-    assert notiz.feld.value == "gestern" and notiz.tag == gestern
-    assert notiz._anhang_wege()[0][2] == f"{basis}/anhang/aufnehmen/tag/{gestern}/foto"
+    ansicht = tagesansicht(page, state, gestern, basis=basis, mit_datum=False)
+    notiz = _oeffnen(ansicht, "gestern")
+    assert notiz.feld.value == "gestern" and notiz.tag == gestern and notiz.id == n.id
+    assert notiz._anhang_wege()[0][2] == f"{basis}/anhang/aufnehmen/notiz/{n.id}/foto"

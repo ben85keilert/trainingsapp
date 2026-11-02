@@ -93,6 +93,7 @@ from trainingsapp.data.repositories import (
     DayNoteRepo,
     ExerciseRepo,
     HrvRepo,
+    NoteTagRepo,
     PlanRepo,
     SessionRepo,
     SettingRepo,
@@ -190,6 +191,8 @@ class AppState:
     plaene: PlanRepo
     sitzungen: SessionRepo
     tagesnotizen: DayNoteRepo
+    #: Die Tags an den Notizen zum Tag (Migration 036, Ben 2.11.2026)
+    notiz_tags: NoteTagRepo
     hrv: HrvRepo
     #: Ausdauertrainings mit GPS (Migration 012) — nie synchronisiert
     strecken: StreckeRepo
@@ -249,6 +252,13 @@ class AppState:
     tagebuch_ordnung: str = "tage"
     tagebuch_kalender: bool = True
     tagebuch_anzahl: int = 0
+    #: Abschnitt „Notizen“ (Ben, 2.11.2026): Filter nach Tags (IDs, `core.tagebuch.OHNE_TAG`
+    #: = ohne), Suchtext; welche Notiz in der Liste bearbeitet wird (``tag:<id>``,
+    #: ``plan:<session>``, ``neu``) und ihr Editor (überlebt den Neubau der Ansicht)
+    tagebuch_tags: set[str] = field(default_factory=set)
+    tagebuch_suche: str = ""
+    tagebuch_bearbeitet: str | None = None
+    tagebuch_editor: Any = None
     #: Aufnahmen im Verlauf der Übung (`core.anhaenge.ZEITRAEUME`): gezeigter Zeitraum
     anhaenge_zeitraum: str = ANHAENGE_ZEITRAUM_VORGABE
     #: Kurve einer Übung: Zeitraum, X-Achse, Kennzahl je Kachel; je Kachel die
@@ -497,6 +507,7 @@ class AppState:
             plaene=PlanRepo(con),
             sitzungen=sitzungen,
             tagesnotizen=DayNoteRepo(con),
+            notiz_tags=NoteTagRepo(con),
             hrv=HrvRepo(con),
             strecken=strecken,
             verwaiste_strecken=verwaist,

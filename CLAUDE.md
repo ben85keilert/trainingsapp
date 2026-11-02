@@ -218,10 +218,16 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
 - **Zurück speichert** (Ben, 16.10.2026): Formulare mit „Speichern“ hängen an
   `ui/components/zurueck.zurueck_speichert` (`can_pop`/`on_confirm_pop`) — Zurück speichert
   Geändertes, Unvollständiges fragt, „Abbrechen“ verwirft; Blätter und Notizdialoge speichern
-  beim Schließen. Neue Formulare ebenso. Die **Notiz zum Tag** schreibt man direkt unter
-  Heute (Ben, 22.10.2026): Autosave nach 1 s, vor jedem Neuaufbau und vor dem Hintergrund
-  (`AppState.vor_dem_verlassen`), ↶ ↷ aus `core/textverlauf.py`, „Abbrechen“ = Text vom
-  Antippen (`components/tagesnotiz.py`) — das Speichern frischt die Ansicht nie auf (Fokus).
+  beim Schließen. Neue Formulare ebenso. **Schreibnotizen nie als Popup** (Ben, 2.11.2026,
+  P103): `components/notizeditor.py` ist der Editor an Ort und Stelle — Autosave nach 1 s,
+  vor jedem Neuaufbau und vor dem Hintergrund (`AppState.vor_dem_verlassen`), ↶ ↷ aus
+  `core/textverlauf.py`, „Abbrechen“ = Text vom Antippen, „Fertig“ = Karte — das Speichern
+  frischt die Ansicht nie auf (Fokus). Darauf die **Notizen zum Tag**
+  (`components/tagesnotiz.py`, `docs/plan_tagesnotizen.md`): mehrere je Tag mit „+“, Tags
+  als Chips (Migration 036, „Tagebuch“ fest, Einstellungen → Notiz-Tags), Anhänge an der
+  Notiz, Karten gekürzt auf `core.tagebuch.NOTIZ_ZEILEN`; im Tagebuch der Abschnitt
+  „Notizen“ mit Tag-Filter und Suche, bearbeitet wird in der Liste (`Textnotiz` für die
+  Plan-Notiz).
   Tippen daneben = „Fertig“, Scrollen daneben nicht (Ben, 2.11.2026: `AppState.schreib_gesten`
   — `components/scroll.py` meldet Ziehen, der Gestenfänger in `views/tag.py` den kurzen Tipp;
   der runde Knopf verschwindet beim Schreiben); die Tastatur schließt `Notizfeld.blur` — nie

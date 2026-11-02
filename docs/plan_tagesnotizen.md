@@ -1,7 +1,8 @@
 # Plan: Notizen zum Tag – mehrere je Tag, mit Tags, im Tagebuch ohne Popup
 
-Stand 2.11.2026: **geplant, nichts gebaut.** Anlass sind Bens fünf Punkte vom 2.11.2026 zum
-Textfeld unter Heute:
+Stand 2.11.2026: **gebaut** (Migration 036, 0.3.39) nach Bens Antworten vom selben Tag auf
+P98–P105 (unten, „Entschieden“). Anlass sind Bens fünf Punkte vom 2.11.2026 zum Textfeld
+unter Heute:
 
 > 1) Füge den zum Tag Notizen Tags (Merkmale) hinzu. Feste implementiert ist erstmal
 >    „Tagebuch“. Ich möchte meine persönlichen Gedanken ebenfalls hier festhalten und brauche
@@ -26,8 +27,20 @@ Abschnitte **im** Reiter Tagebuch (`SegmentedButton` in `ui/views/tagebuch.py`, 
 ein-/ausblendbare Wochenleiste). Der Verlauf selbst hat die Reiter Tage · Übungen · Zum Tag ·
 Tagebuch; die bleiben. Der dritte Abschnitt „Notizen“ kommt ins Tagebuch.
 
-Offene Fragen daraus: P98–P105 in `docs/offene_fragen.md`. Jede hat einen Vorschlag; ohne
-Antwort wird nach Vorschlag gebaut.
+**Entschieden (Ben, 2.11.2026):** P98 kein Tag vorgewählt. P99 Anhänge an der Notiz
+(`entry_media.day_note_id`); eine Notiz darf leer sein, wenn sie Anhänge trägt, ihr leerer
+Text wird nirgends gezeigt. P100 zehn Zeilen wie unter Heute. P101 bearbeiten in der Liste,
+mit demselben Editor wie auf der Tagesseite. P102 ja — Filter ODER, Aufnahmen dabei, dazu
+die Suche („möglichst clever“: jedes Wort muss vorkommen, im Text oder in einem Tag, ohne
+Groß und klein). P103 alle Popups für Schreibnotizen weg (`components/notiz.py` gelöscht):
+Notiz zum Tag und zum Plan unter Heute und im Tagebuch an Ort und Stelle
+(`components/notizeditor.py`, `Textnotiz`). P104 beides bleibt. P105 ja, Suchfeld im
+Abschnitt „Notizen“.
+
+Abweichungen vom Plan unten beim Bauen: Anhänge hängen an der Notiz, nicht am Tag (A, C);
+`Tagesnotiz` ist eine Unterklasse des allgemeinen `Notizeditor`; der Editor in der
+Tagebuchliste lebt in `AppState.tagebuch_editor`, die bearbeitete Notiz in
+`AppState.tagebuch_bearbeitet` (``tag:<id>``, ``plan:<session>``, ``neu``).
 
 ## Was heute gilt
 

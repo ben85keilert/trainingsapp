@@ -19,6 +19,10 @@ Schönheit, Wartung.
 
 | # | Woher | Frage | Stand / Vorschlag |
 |---|---|---|---|
+| P106 | `docs/plan_uebung_bearbeiten.md` (2.11.) | **Mehrfachfelder einer Art** (`hold_2`, `scale_2`: zwei Zeiten, zwei Skalen in einer Übung) — jetzt oder erst bei Bedarf? Bens Entwurf „Parameterlogik neu“ (Punkt 6) im Mittelweg | Vorschlag: erst bei Bedarf; Schlüssel bleiben, Namen sind je Übung schon frei |
+| P107 | `docs/plan_uebung_bearbeiten.md` | **„Im Plan einstellen“** in dieselbe Ordnung (Parameter-Chips oben, Ziel am Parameter)? | Vorschlag: ja, zweiter Schritt nach der Version |
+| P108 | `docs/plan_uebung_bearbeiten.md` | **Gegliederte Beschreibung** (Ausführung, Worauf achten, Fehler) statt eines Textes — Paketformat 3? | Vorschlag: später, wenn gewünscht |
+| P109 | `docs/plan_uebung_bearbeiten.md` | **Fotos als Symbol**: überall rund zugeschnitten statt des Symbols, oder nur auf der Übungsseite groß? | Vorschlag: überall rund |
 | P91 | `docs/plan_herzfrequenz.md` | **Behandlung in solo**: die Dreiteilung vorher/während/nachher eines Kopf/Endteil-Abschnitts als Zahlen zeigen (Behandler mit eigenem Gurt), oder ganz nach praxis_gui, weil Patientenbezug? | Frage 11 (Ben: „wie meinen“) — erklärt in hrv-research `KONZEPT_HF_APP.md` §12; Vorschlag: zeigen, weil es Zahlen eines eigenen Abschnitts sind |
 | P92 | `docs/plan_herzfrequenz.md` | **`hf_spec` an der Übung** (Erholung nach jedem Teil, Kontext, Haltung vorbelegen) | Ben 29.10.: zurückgestellt, bringt wenig, solange die Erholung immer anders abläuft; mit gesammelten Erholungen benchmarken, dann entscheiden |
 | P1 | Plan, 14.10. | **Planblock: welche der drei Darstellungen** (untereinander = Vorgabe, umschalten, aufklappen) bleibt? Die anderen beiden sind dann zu entfernen (`ui.state.PLAN_DARSTELLUNGEN`). | Wahl steht aus. |

@@ -15,9 +15,9 @@ from collections.abc import Callable
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, passt_zum_filter
-from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.tagwahl import TagWahl
+from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.state import AppState
 
 
@@ -59,7 +59,7 @@ def plan_hinzufuegen_view(
         ]
         liste.controls = [
             ft.ListTile(
-                leading=ft.Icon(symbol(u.icon_key)),
+                leading=uebungsbild(state, u.icon_key, u.image_path),
                 title=ft.Text(u.name),
                 subtitle=ft.Text(was, size=12) if (was := _einordnung(u)) else None,
                 trailing=_anzahl_marke(enthalten[u.id]),

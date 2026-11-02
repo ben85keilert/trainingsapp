@@ -124,7 +124,12 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Ortsangabe** — die App prüft nach) und gehen nie in Export, Backup oder Sync — nur
   „Teilen“ am Einzelbild. Kein Video läuft
   außerhalb der Ansicht `/anhang/<id>`; Tag, Tagebuch und Übung zeigen Frontbilder
-  (`ui/components/anhang_reihe.py`). Vertrag: `docs/plan_anhaenge.md`.
+  (`ui/components/anhang_reihe.py`). Vertrag: `docs/plan_anhaenge.md`. **Eigene Bilder als
+  Symbol einer Übung** (Ben, 2.11.2026) liegen in der Ablage `Medien/Symbole/`
+  (`data/uebungsbilder.py`, `exercise.image_path`; Weg ``uebung/<id>`` in Kamera und
+  Fotoauswahl, Blatt `components/symbol_blatt.py`), gezeigt über
+  `components/uebungsbild.uebungsbild` statt `ft.Icon(symbol(…))` — ebenfalls nie in Paket,
+  Export oder Sync.
 
 - **Zwei Editionen aus einem Quelltext.** `config.ist_aktiv("funktion")` beantwortet
   „darf ich X?" statt „bin ich Edition B?". Ein Schalter je Fähigkeit, nicht je
@@ -152,7 +157,12 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   für jetzt (`docs/plan_uebungen_einstellen.md`). Jeder `SessionEntry` speichert eine Kopie der
   Spec, mit der er erfasst wurde (`spec_snapshot_json`); angezeigt wird **immer** mit der
   Kopie, nie mit der aktuellen Definition. Neuer `FieldType` → hier ergänzen und in
-  `ui/components/spec_form.py` ein Widget registrieren.
+  `ui/components/spec_form.py` ein Widget registrieren. **„Übung bearbeiten“** (Ben,
+  2.11.2026, `docs/plan_uebung_bearbeiten.md`): Parameter als Knöpfe, je eingeschaltetem
+  eine Karte mit eigenem Namen (`FieldSpec.label` gehört der Übung), Chips (✕ nimmt einen
+  ungenutzten aus der Wahl), Sätze und dem **Ziel** (`default_target`) — die Schlüssel des
+  Feldvorrats bleiben (P106: Mehrfachfelder erst bei Bedarf); Erklärtexte im (i)
+  (`components/hilfe.py`), keine inline.
 
 - **Übungen kommen über Pakete** (Ben, 14.10.2026). Der mitgelieferte Katalog ist
   das Paket „Standard“ (`data/seed/standard.toml` — TOML, weil von Hand gepflegt; IDs per UUIDv5

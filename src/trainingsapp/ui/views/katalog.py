@@ -16,9 +16,9 @@ import flet as ft
 
 from trainingsapp.core.models import Exercise, passt_zum_filter
 from trainingsapp.ui.components import ziele as zl
-from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.tagwahl import TagWahl
+from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.ziele import ziele_fuer
 
@@ -122,7 +122,7 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
         weitere = ziele_fuer(page, state, u.id, tag=None, hier={zl.UEBUNG}, bearbeiten=True)
         blatt = zl.blatt_oeffner(page, u.name, "", weitere, hauptziel=haupt)
         return ft.ListTile(
-            leading=ft.Icon(symbol(u.icon_key)),
+            leading=uebungsbild(state, u.icon_key, u.image_path),
             title=ft.Text(u.name),
             subtitle=_untertitel(u),
             trailing=ft.Row(

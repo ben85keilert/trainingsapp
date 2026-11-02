@@ -594,6 +594,11 @@ def main(page: ft.Page) -> None:
         if gelesen is None:
             return None
         ziel, rest = gelesen
+        if ziel.uebung_id is not None:
+            # Das Bild einer Übung (2.11.2026) — nur Fotos, und nur eine, die es gibt
+            if rest[:1] not in (["foto"], []) and rest:
+                return None
+            return gelesen if state.uebungen.laden(ziel.uebung_id) is not None else None
         if ziel.notiz_id is not None:
             notiz = state.tagesnotizen.laden(ziel.notiz_id)
             if notiz is None or notiz.subject_id != state.profil.id:

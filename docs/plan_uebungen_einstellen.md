@@ -97,3 +97,5 @@ https://claude.ai/artifact/SLbHne6zrpNDYosNKy9fnm (Reihen A–D, Konfliktliste E
    - Zeit antippen → Räder plus Tippfeld (Leiste, Timer der Übung, Reiter Timer).
    - Der Verlauf rechnet Timerzeit wie getippte; dabei werden die Befunde aus dem Überblick
      behoben (▶ ohne Plan, veralteter Hinweis, Kurve).
+
+**Nachtrag 2.11.2026:** „Übung bearbeiten“ ist aufgeräumt — Symbol oder Bild oben, Beschreibung als Editor, Parameter als Knöpfe mit einer Karte je Parameter (Name, Chips, Sätze, Ziel), Erklärtexte im (i). Vertrag: `docs/plan_uebung_bearbeiten.md`.

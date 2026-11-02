@@ -26,6 +26,7 @@ from trainingsapp.config import (
     anhaengeverzeichnis,
     datenbankpfad,
     datenverzeichnis,
+    medienverzeichnis,
     messungenverzeichnis,
     paketordner,
     streckenverzeichnis,
@@ -104,6 +105,7 @@ from trainingsapp.data.repositories import (
 from trainingsapp.data.seed import pakete_aus_ordner, seed_einspielen
 from trainingsapp.data.strecken import verwaiste as strecken_verwaiste
 from trainingsapp.data.tagesfelder import TagesfeldRepo, TageswertRepo
+from trainingsapp.data.uebungsbilder import UebungsbildRepo
 from trainingsapp.data.upgrade import datenformat_aktualisieren
 from trainingsapp.devices.bekannte import (
     BekanntesGeraet,
@@ -204,6 +206,8 @@ class AppState:
     kurse: KursRepo
     #: Fotos und Videos an Einträgen (Migration 025, `core/anhaenge.py`) — nie geteilt
     anhaenge: AnhangRepo
+    #: Eigene Bilder als Symbol einer Übung (`data/uebungsbilder.py`, Ben 2.11.2026)
+    uebungsbilder: UebungsbildRepo
     #: Tagesfelder und ihre Werte (Migration 027, `core/tagesfelder.py`) — je Profil
     tagesfelder: TagesfeldRepo
     #: Herzfrequenz: Profilwerte mit Herkunft und Rechen-Ausnahmen (Migration 034)
@@ -518,6 +522,7 @@ class AppState:
             pakete=PaketRepo(con),
             kurse=KursRepo(con),
             anhaenge=AnhangRepo(con, anhaengeverzeichnis()),
+            uebungsbilder=UebungsbildRepo(con, medienverzeichnis()),
             tagesfelder=TagesfeldRepo(con),
             tageswerte=TageswertRepo(con),
             profilwerte=ProfilwertRepo(con),

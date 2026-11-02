@@ -1,6 +1,7 @@
 # Plan: Übung bearbeiten – aufgeräumt, Symbol oben, Parameter als Knöpfe, Ziel am Parameter
 
-Stand 2.11.2026: **geplant, Umsetzung läuft** (Teile A–H). Anlass sind Bens sieben Punkte vom
+Stand 2.11.2026: **gebaut** (Teile A–H, 0.3.40; P107 „Im Plan einstellen“ und P106
+Mehrfachfelder offen). Anlass sind Bens sieben Punkte vom
 2.11.2026 („Bald kommt eine neue Version. Vorher muss aber noch der Edit der Übungen verbessert
 werden“):
 
@@ -49,6 +50,13 @@ gezeigt).
 | F | **Videos und Links** und **Ordnen** (Typ, Region) am Ende — selten, darum unten. | |
 | G | **Erklärtexte ins (i):** jede Überschrift trägt rechts das (i) (`hilfe_knopf`), das das Hilfefenster zum Thema öffnet: `parameter` (mit Chips, Sätze, Ziel), `varianten`, `uhr` (Timerzeit zählt, zählt als), `symbol` (Ablage, Bild ohne Ort). Die inline-Texte fallen weg. | `components/hilfe.py` |
 | H | Doku, Tests, `docs/plan_uebungen_einstellen.md` (Schritt 3 „aufräumen“ erledigt). | |
+
+**Beim Bauen entschieden:** Das ✕ an einem Chip nimmt ihn aus der Wahl — ein eigener Chip
+ist damit weg, ein Vorschlag des Vorrats (10, 15, 20) steht beim nächsten Öffnen wieder zur
+Wahl (Ben, 18.10.2026: „leer heißt leer“ — die Vorschläge bleiben Vorschläge, gespeichert
+wird nur, was gewählt ist). Das Zielfeld je Karte heißt „Ziel“ bzw. „Ziel je Satz“; die
+Ziel-Variante steht unter den Varianten. Am Rechner nimmt „Foto hochladen“ den Dateidialog
+(JPEG, ohne Verkleinern, Metadaten werden entfernt); am Handy die Fotoauswahl der App.
 
 **Im Plan einstellen** (`plan_einstellen.py`) bekommt dieselbe Ordnung in einem zweiten
 Schritt (P107): Parameter als Chips, Karten mit Chips und Ziel, Schilde „wie die Übung“ / „nur

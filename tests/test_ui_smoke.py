@@ -492,23 +492,25 @@ def test_ziel_folgt_den_parametern_vor_dem_speichern(page, welt) -> None:
     page.update = lambda: None  # der Schalter zeichnet die Seite neu
     ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(uebung.id))
 
-    def zielfelder() -> list[str]:
-        return [x.label for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label]
+    def zielfelder() -> list[ft.TextField]:
+        """Das Ziel steht je Parameter auf seiner Karte (2.11.2026)."""
+        return [
+            x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Ziel je Satz"
+        ]
 
-    assert "Wiederholungen je Satz" not in zielfelder() and "Haltezeit je Satz" in zielfelder()
+    assert [z.value for z in zielfelder()] == ["2x30s"]  # nur Haltezeit ist an
     schalter = next(
-        x for x in _alle(ansicht) if isinstance(x, ft.Switch) and x.label == "Wiederholungen (Wdh.)"
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Chip)
+        and isinstance(x.label, ft.Text)
+        and x.label.value == "Wiederholungen"
     )
-    schalter.value = True
-    schalter.on_change()
-    assert "Wiederholungen je Satz" in zielfelder() and "Haltezeit je Satz" in zielfelder()
-    halten = next(
-        x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Haltezeit je Satz"
-    )
-    assert halten.value == "2x30s"  # das alte Ziel bleibt
-    schalter.value = False
-    schalter.on_change()
-    assert "Wiederholungen je Satz" not in zielfelder()
+    assert not schalter.selected
+    schalter.on_select()
+    assert schalter.selected and [z.value for z in zielfelder()] == ["", "2x30s"]  # alt bleibt
+    schalter.on_select()
+    assert [z.value for z in zielfelder()] == ["2x30s"]
 
 
 def test_standardziel_im_editor_und_im_plan(page, welt) -> None:
@@ -917,12 +919,17 @@ def test_editor_typ_mit_plus_und_skala_mit_namen(page, welt) -> None:
     dialoge[-1].actions[1].on_click()
     assert dialoge[-1].content.error == "„Bein“ ist schon eine Region."
 
-    # Skala einschalten und benennen
-    skala = next(c for c in alle if isinstance(c, ft.Switch) and c.label == "Skala")
-    skala.value = True
-    skala.on_change()
-    name = next(c for c in alle if isinstance(c, ft.TextField) and c.label == "Name der Skala")
-    assert name.value == "Skala"
+    # Skala einschalten und benennen (2.11.2026: der Knopf oben, der Name auf der Karte)
+    skala = next(
+        c
+        for c in alle
+        if isinstance(c, ft.Chip) and isinstance(c.label, ft.Text) and c.label.value == "Skala"
+    )
+    skala.on_select()
+    alle = [c for v in ansicht.controls for c in _alle(v)]
+    name = next(
+        c for c in alle if isinstance(c, ft.TextField) and c.label == "Name" and c.value == "Skala"
+    )
     name.value = "Stabilität"
     speichern = _knopf_mit_text(ansicht, "Speichern")
     asyncio.run(speichern.on_click())
@@ -1241,7 +1248,11 @@ def test_was_die_uebung_hat_bieten_alle_plaene_an(page, welt) -> None:
     ansicht = uebung_bearbeiten(page, state, None, plan=plan, basis=basis)
     assert ansicht.route == f"{basis}/hinzufuegen/neu"
     texte = _texte(ansicht)
-    assert "STANDARD FÜR PLÄNE" not in texte and "VORGABE FÜR PLÄNE" in texte
+    assert "STANDARD FÜR PLÄNE" not in texte and "VORGABE FÜR PLÄNE" not in texte
+    # Das Ziel steht auf der Karte des Parameters (2.11.2026)
+    assert [x.label for x in _alle(ansicht) if isinstance(x, ft.TextField)].count(
+        "Ziel je Satz"
+    ) == 1
     name = next(c for c in _alle(ansicht) if isinstance(c, ft.TextField) and c.label == "Name")
     name.value = "Kniebeuge tief"
     asyncio.run(_knopf_mit_text(ansicht, "Speichern").on_click())

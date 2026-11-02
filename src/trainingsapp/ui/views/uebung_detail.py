@@ -46,10 +46,10 @@ from trainingsapp.core.uebung_timer import (
     zaehlt_als,
 )
 from trainingsapp.ui.components.dialoge import Nachher, meldung, schliessen
-from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.components.planstand import stand_zeile
+from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.varianten import plakette
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang_verlauf import aufnahmen_raster
@@ -611,9 +611,14 @@ def uebung_detail(
                     width=64,
                     height=64,
                     border_radius=16,
-                    bgcolor=ft.Colors.SECONDARY_CONTAINER,
+                    bgcolor=None if uebung.image_path else ft.Colors.SECONDARY_CONTAINER,
                     alignment=ft.Alignment.CENTER,
-                    content=ft.Icon(symbol(uebung.icon_key), size=36),
+                    content=uebungsbild(
+                        state,
+                        uebung.icon_key,
+                        uebung.image_path,
+                        groesse=64 if uebung.image_path else 36,
+                    ),
                 ),
                 ft.Column(
                     spacing=2,

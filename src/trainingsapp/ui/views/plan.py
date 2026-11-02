@@ -122,11 +122,11 @@ from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
 from trainingsapp.ui import marken
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
-from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.planstand import nur_hier, wie_die_uebung
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.skala_regler import skala_regler
+from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile
 from trainingsapp.ui.components.varianten import Variantenwahl, varianten_blatt, zeilenbreite
 from trainingsapp.ui.components.werte import wert_leiste
@@ -1334,7 +1334,7 @@ def plan_view(
             vertical_alignment=ft.CrossAxisAlignment.START,
             controls=[
                 *griff,
-                ft.Icon(symbol(uebung.icon_key), size=24, opacity=0.8),
+                uebungsbild(state, uebung.icon_key, uebung.image_path, groesse=24, opacity=0.8),
                 ft.Column(
                     spacing=0,
                     expand=True,

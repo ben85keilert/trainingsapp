@@ -244,6 +244,23 @@ class _Hochladen:
     async def behalten(self) -> None:
         if not self.fertig or self.ziel is None or self.art is None:
             return
+        if self.woran.uebung_id is not None:
+            # Das Bild einer Übung (2.11.2026): in die Ablage, nicht an einen Eintrag
+            if self.art != BILD:
+                self.melden("Als Symbol geht nur ein Foto.")
+                return
+            try:
+                # Verschieben im Thread, die Zeile im Event-Loop (die Verbindung gehört ihm)
+                rel = await asyncio.to_thread(self.state.uebungsbilder.uebernehmen, self.ziel)
+                self.state.uebungsbilder.setzen(self.woran.uebung_id, rel)
+            except (OSError, sqlite3.Error) as fehler:
+                self.melden(f"Nicht gespeichert: {fehler}")
+                return
+            self.fertig = False
+            self.ziel = self.frontbild = None
+            self.page.show_dialog(ft.SnackBar(ft.Text("Bild gespeichert")))
+            await self.zurueck()
+            return
         a: Anhang = neuer_anhang(
             self.woran,
             self.art,

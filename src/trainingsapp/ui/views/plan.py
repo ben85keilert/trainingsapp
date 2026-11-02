@@ -384,8 +384,10 @@ def plan_view(
     #: Blöcke, die heute einen eigenen Eintrag angelegt haben (spätere Stelle einer
     #: Übung): Weitere Sätze gehen dorthin, nicht in noch einen Eintrag (D7)
     eigene: set[str] = set()
-    #: Unter welchen Mengen „…“ den eigenen Wert aufgeklappt hat — (Planübung, Feld)
-    frei_offen: set[tuple[str, str]] = set()
+    #: Unter welchen Mengen „…“ den eigenen Wert zugeklappt hat — (Planübung, Feld).
+    #: Sätze × Wert steht standardmäßig offen (Ben, 2.11.2026: „Ich brauche die manuellen
+    #: Felder standardmäßig offen“); „…“ klappt sie zu und wieder auf
+    frei_zu: set[tuple[str, str]] = set()
     #: Die Einträge des Tages mit ihrer Session — einmal gelesen; alles Weitere (Anzahl je
     #: Übung, offener Eintrag, Ziel eines Tipps, „vom Timer“) leitet sich daraus ab (N24)
     tages_paare = state.sitzungen.eintraege_am_tag(state.profil.id, heute())
@@ -1652,9 +1654,9 @@ def plan_view(
     def menge_zeile(item: PlanItem, feld: FieldSpec) -> ft.Control:
         """Eine Menge (Wiederholungen, Haltezeit, Strecke …) als Zeile der Karte „Eintragen“
         (Ben, 21.10.2026, P70 = Skizze E2): der Name, die gefüllten „+“-Knöpfe — jeder Tipp
-        trägt sofort ein —, „…“ klappt den eigenen Wert auf (Sätze × Wert). Ohne Chips steht
-        das Zahlenfeld gleich da; ohne Sätze (``FieldSpec.saetze``) zählt ein Chip zur Summe
-        des Tages dazu."""
+        trägt sofort ein —, darunter der eigene Wert (Sätze × Wert), der offen steht; „…“
+        klappt ihn zu und wieder auf. Ohne Chips steht das Zahlenfeld gleich da; ohne Sätze
+        (``FieldSpec.saetze``) zählt ein Chip zur Summe des Tages dazu."""
         liste = feld.type == FieldType.SET_LIST
         werte = chips_fuer(item, feld)
         zusatz = zeilen_zusatz(feld)
@@ -1683,14 +1685,14 @@ def plan_view(
         mehr: list[ft.Control] = []
         frei_box = ft.Container(
             content=frei,
-            visible=schluessel in frei_offen,
+            visible=schluessel not in frei_zu,
             padding=ft.Padding.only(left=70),
         )
         if frei is not None:
 
             def umschalten() -> None:
-                frei_offen.symmetric_difference_update({schluessel})
-                frei_box.visible = schluessel in frei_offen
+                frei_zu.symmetric_difference_update({schluessel})
+                frei_box.visible = schluessel not in frei_zu
                 _zeigen(frei_box)
 
             mehr.append(
@@ -1698,7 +1700,11 @@ def plan_view(
                     content=ft.Text("…", size=15, weight=ft.FontWeight.W_700),
                     width=44,
                     height=44,
-                    tooltip="Eigener Wert (Sätze × Wert)" if liste else "Eigener Wert",
+                    tooltip=(
+                        "Eigener Wert (Sätze × Wert) ein-/ausblenden"
+                        if liste
+                        else "Eigener Wert ein-/ausblenden"
+                    ),
                     style=ft.ButtonStyle(
                         shape=ft.RoundedRectangleBorder(radius=22),
                         side=ft.BorderSide(2, ft.Colors.PRIMARY),

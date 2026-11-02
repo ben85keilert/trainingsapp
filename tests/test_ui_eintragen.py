@@ -80,7 +80,7 @@ def _eintraege(state: AppState) -> list:
 
 def test_eine_karte_je_menge_eine_zeile(page, state) -> None:
     """Ben: „Wdh. und Zeit nebeneinander … sonst werden das zu viele Fenster.“ — eine Karte,
-    je Menge eine Zeile; „…“ klappt Sätze × Wert auf."""
+    je Menge eine Zeile; Sätze × Wert steht offen (Ben, 2.11.2026), „…“ klappt es zu."""
     plan, _item, _u = _plan(state, "reps", "hold")
     ansicht = plan_view(page, state, plan)
     texte = _texte(ansicht)
@@ -98,7 +98,8 @@ def test_eine_karte_je_menge_eine_zeile(page, state) -> None:
     reihe = next(x for x in _alle(ansicht) if isinstance(x, ft.ResponsiveRow))
     assert [k.col for k in reihe.controls] == [4, 4, 4, 4]
 
-    # Sätze × Wert ist erst nach „…“ zu sehen — der Kasten ist unter den Knöpfen eingerückt
+    # Sätze × Wert steht gleich da — der Kasten ist unter den Knöpfen eingerückt;
+    # „…“ klappt ihn zu und wieder auf
     kasten = next(
         x
         for x in _alle(ansicht)
@@ -106,6 +107,8 @@ def test_eine_karte_je_menge_eine_zeile(page, state) -> None:
         and isinstance(x.padding, ft.Padding)
         and x.padding.left == 70
     )
+    assert kasten.visible
+    mehr[0].on_click()
     assert not kasten.visible
     mehr[0].on_click()
     assert kasten.visible

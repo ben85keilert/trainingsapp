@@ -315,15 +315,7 @@ def test_nachtragen_ohne_plan_und_zurueck_schliesst(page, state) -> None:
     assert uhrzeit.value == "12:00"  # ohne frühere Einträge
     uhrzeit.value = "7:30"
     uhrzeit.on_change()
-    # „…“: Sätze × Wert
-    mehr = next(
-        x
-        for x in _alle(ansicht)
-        if isinstance(x, ft.OutlinedButton)
-        and isinstance(x.content, ft.Text)
-        and x.content.value == "…"
-    )
-    mehr.on_click()
+    # Sätze × Wert steht offen (Ben, 2.11.2026) — ohne „…“ anzutippen
     kasten = next(
         x
         for x in _alle(ansicht)

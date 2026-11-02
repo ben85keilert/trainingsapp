@@ -211,7 +211,7 @@ def test_im_plan_einstellen_uebernehmen_mit_vorschau(page, state) -> None:
         next(
             x
             for x in _alle(ansicht)
-            if isinstance(x, ft.OutlinedButton) and x.content == "+ Gewicht"
+            if isinstance(x, ft.Chip) and "„Gewicht“" in (x.tooltip or "") and not x.selected
         )
     )
     _klick(

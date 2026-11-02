@@ -22,6 +22,7 @@ from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.icons import AUSWAHL, symbol
+from trainingsapp.ui.components.uebungsbild import ECKE
 from trainingsapp.ui.state import AppState
 
 #: Kantenlänge der Kacheln (px)
@@ -105,7 +106,7 @@ def symbol_blatt(
                     top=10,
                     width=KACHEL,
                     height=KACHEL,
-                    border_radius=KACHEL / 2,
+                    border_radius=KACHEL * ECKE,
                     clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
                     border=ft.Border.all(
                         3, ft.Colors.PRIMARY if gewaehlt else ft.Colors.TRANSPARENT

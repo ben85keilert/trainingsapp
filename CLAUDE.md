@@ -128,8 +128,8 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Symbol einer Übung** (Ben, 2.11.2026) liegen in der Ablage `Medien/Symbole/`
   (`data/uebungsbilder.py`, `exercise.image_path`; Weg ``uebung/<id>`` in Kamera und
   Fotoauswahl, Blatt `components/symbol_blatt.py`), gezeigt über
-  `components/uebungsbild.uebungsbild` statt `ft.Icon(symbol(…))` — ebenfalls nie in Paket,
-  Export oder Sync.
+  `components/uebungsbild.uebungsbild` statt `ft.Icon(symbol(…))`, quadratisch mit runden
+  Ecken (P109, auch PNG) — ebenfalls nie in Paket, Export oder Sync.
 
 - **Zwei Editionen aus einem Quelltext.** `config.ist_aktiv("funktion")` beantwortet
   „darf ich X?" statt „bin ich Edition B?". Ein Schalter je Fähigkeit, nicht je
@@ -160,9 +160,14 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `ui/components/spec_form.py` ein Widget registrieren. **„Übung bearbeiten“** (Ben,
   2.11.2026, `docs/plan_uebung_bearbeiten.md`): Parameter als Knöpfe, je eingeschaltetem
   eine Karte mit eigenem Namen (`FieldSpec.label` gehört der Übung), Chips (✕ nimmt einen
-  ungenutzten aus der Wahl), Sätze und dem **Ziel** (`default_target`) — die Schlüssel des
-  Feldvorrats bleiben (P106: Mehrfachfelder erst bei Bedarf); Erklärtexte im (i)
-  (`components/hilfe.py`), keine inline.
+  ungenutzten aus der Wahl), Sätze und dem **Ziel** (`default_target`); Erklärtexte im (i)
+  (`components/hilfe.py`), keine inline. **Mehrfachfelder einer Art** (P106, Ben 2.11.2026):
+  ``hold_2``, ``scale_2`` … — die Schlüssel des Vorrats bleiben die *Art*
+  (`core.result_spec.basis_key`, `vorrat_feld`, `naechster_key`); wer nach der Art fragt
+  (Haltezeit, Zeit, Timer „zählt als“ je Zeitfeld), vergleicht `basis_key`, nie den
+  Schlüssel. **Beschreibung in Abschnitten** (P108): ein Text mit ``## Name``-Zeilen
+  (`core/beschreibung.py`), nie ein zweites Feld. „Im Plan einstellen“ hat dieselbe Ordnung
+  (P107). Vertrag: `docs/plan_uebung_bearbeiten.md`.
 
 - **Übungen kommen über Pakete** (Ben, 14.10.2026). Der mitgelieferte Katalog ist
   das Paket „Standard“ (`data/seed/standard.toml` — TOML, weil von Hand gepflegt; IDs per UUIDv5

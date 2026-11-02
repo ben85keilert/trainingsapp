@@ -45,6 +45,7 @@ import flet as ft
 
 from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import BILD, Ziel
+from trainingsapp.core.beschreibung import Abschnitt, abschnitte, zusammen
 from trainingsapp.core.models import (
     TAG_REGION,
     TAG_TYP,
@@ -62,8 +63,11 @@ from trainingsapp.core.result_spec import (
     FieldType,
     Layout,
     ResultSpec,
+    basis_key,
     basis_label,
+    instanzen,
     kennzahl_keys,
+    naechster_key,
     skala_bereich_text,
     skala_lesen,
     vorrat_feld,
@@ -155,8 +159,6 @@ def uebung_bearbeiten(
     else:
         route = "/uebung/neu" if uebung is None else f"/uebung/{uebung.id}/bearbeiten"
     vorhanden = {f.key: f for f in (uebung.result_spec.fields if uebung else [])}
-    # Eine neue Übung beginnt mit Wiederholungen — der häufigste Fall.
-    eingeschaltet = set(vorhanden) if uebung is not None else {"reps"}
     #: Die ID nach dem ersten Speichern — eine neue Übung hat erst dann eine
     gespeichert: dict[str, str] = {}
 
@@ -202,7 +204,7 @@ def uebung_bearbeiten(
             return
         try:
             dateien = await ft.FilePicker().pick_files(
-                dialog_title="Foto als Symbol", allowed_extensions=["jpg", "jpeg"]
+                dialog_title="Bild als Symbol", allowed_extensions=["jpg", "jpeg", "png"]
             )
         except Exception as fehler:
             page.show_dialog(ft.SnackBar(ft.Text(f"Auswahl: {fehler}")))
@@ -247,82 +249,187 @@ def uebung_bearbeiten(
         capitalization=ft.TextCapitalization.SENTENCES,
     )
 
-    # -- Beschreibung: Karte, Editor an Ort und Stelle -----------------------------------
+    # -- Beschreibung: Abschnitte (Name + Inhalt), Editor an Ort und Stelle (P108) -------
+    # Ben, 2.11.2026: „den Text als ‚Name‘ + ‚Inhalt‘ setzen … Nur die Reihenfolge ist wichtig“
+    # — gespeichert bleibt ein Text mit ``## Name``-Zeilen (`core/beschreibung.py`).
 
-    beschreibung_stand: dict[str, Any] = {
-        "text": uebung.description if uebung else "",
-        "offen": False,
-    }
-    beschreibung_bereich = ft.Container()
-    editor_halter: dict[str, Textnotiz] = {}
+    abschnitt_stand: list[dict[str, Any]] = [
+        {"id": new_id(), "name": a.name, "text": a.text}
+        for a in abschnitte(uebung.description if uebung else "")
+    ]
+    beschreibung_spalte = ft.Column(spacing=8, tight=True)
+    #: Der offene Abschnitt (seine ID), je Abschnitt sein Editor und sein Namensfeld
+    beschreibung_offen: dict[str, str | None] = {"id": None}
+    editoren: dict[str, Textnotiz] = {}
+    abschnitt_namen: dict[str, ft.TextField] = {}
+
+    def abschnitt_text(a: dict[str, Any]) -> str:
+        e = editoren.get(a["id"])
+        if e is not None and beschreibung_offen["id"] == a["id"]:
+            return e.text.strip()
+        return str(a["text"]).strip()
+
+    def abschnitt_name(a: dict[str, Any]) -> str:
+        feld = abschnitt_namen.get(a["id"])
+        return ((feld.value if feld is not None else a["name"]) or "").strip()
 
     def beschreibung_text() -> str:
-        e = editor_halter.get("e")
-        if e is not None and beschreibung_stand["offen"]:
-            return e.text.strip()
-        return str(beschreibung_stand["text"]).strip()
+        return zusammen(Abschnitt(abschnitt_name(a), abschnitt_text(a)) for a in abschnitt_stand)
 
-    def beschreibung_geschlossen() -> None:
-        e = editor_halter.get("e")
-        if e is not None:
-            beschreibung_stand["text"] = e.text.strip()
-        beschreibung_stand["offen"] = False
+    def beschreibung_neu() -> None:
         beschreibung_zeichnen()
         with contextlib.suppress(Exception):
-            beschreibung_bereich.update()
+            beschreibung_spalte.update()
 
-    def beschreibung_oeffnen() -> None:
-        beschreibung_stand["offen"] = True
-        e = editor_halter.get("e")
-        if e is None:
+    def abschnitt_geschlossen() -> None:
+        aid = beschreibung_offen["id"]
+        a = next((x for x in abschnitt_stand if x["id"] == aid), None)
+        if a is not None:
+            a["text"], a["name"] = abschnitt_text(a), abschnitt_name(a)
+        beschreibung_offen["id"] = None
+        beschreibung_neu()
 
-            def sichern_text(text: str) -> None:
-                beschreibung_stand["text"] = text
+    def abschnitt_oeffner(a: dict[str, Any]) -> Callable[[], None]:
+        def handler() -> None:
+            beschreibung_offen["id"] = a["id"]
+            e = editoren.get(a["id"])
+            if e is None:
 
-            e = editor_halter["e"] = Textnotiz(
-                page,
-                state,
-                str(beschreibung_stand["text"]),
-                sichern_text,
-                schluessel=f"uebung:{uebung.id if uebung is not None else 'neu'}",
-                hinweis="Beschreibung … Ausführung, worauf achten. Tippen oder diktieren.",
-                danach=beschreibung_geschlossen,
+                def sichern_text(text: str, ziel: dict[str, Any] = a) -> None:
+                    ziel["text"] = text
+
+                e = editoren[a["id"]] = Textnotiz(
+                    page,
+                    state,
+                    str(a["text"]),
+                    sichern_text,
+                    schluessel=f"uebung:{uebung.id if uebung is not None else 'neu'}:{a['id']}",
+                    hinweis="Inhalt … Ausführung, worauf achten. Tippen oder diktieren.",
+                    danach=abschnitt_geschlossen,
+                )
+            e.fokus = True
+            beschreibung_neu()
+
+        return handler
+
+    def abschnitt_hoch(a: dict[str, Any]) -> Callable[[], None]:
+        def handler() -> None:
+            k = abschnitt_stand.index(a)
+            if k > 0:
+                abschnitt_stand.insert(k - 1, abschnitt_stand.pop(k))
+            beschreibung_neu()
+
+        return handler
+
+    def abschnitt_entferner(a: dict[str, Any]) -> Callable[[], None]:
+        def handler() -> None:
+            abschnitt_stand.remove(a)
+            editoren.pop(a["id"], None)
+            abschnitt_namen.pop(a["id"], None)
+            if beschreibung_offen["id"] == a["id"]:
+                beschreibung_offen["id"] = None
+            beschreibung_neu()
+
+        return handler
+
+    def abschnitt_hinzufuegen() -> None:
+        a = {"id": new_id(), "name": "", "text": ""}
+        abschnitt_stand.append(a)
+        abschnitt_oeffner(a)()
+
+    def abschnitt_karte(a: dict[str, Any], k: int) -> ft.Control:
+        aid = a["id"]
+        offen = beschreibung_offen["id"] == aid
+        if aid not in abschnitt_namen:
+            abschnitt_namen[aid] = ft.TextField(
+                label="Name des Abschnitts",
+                value=str(a["name"]),
+                hint_text="z. B. Ausführung, Worauf achten, Für mich",
+                dense=True,
+                expand=True,
+                capitalization=ft.TextCapitalization.SENTENCES,
             )
-        e.fokus = True
-        beschreibung_zeichnen()
-        with contextlib.suppress(Exception):
-            beschreibung_bereich.update()
+        if offen:
+            inhalt: list[ft.Control] = [
+                ft.Row(
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        abschnitt_namen[aid],
+                        ft.IconButton(
+                            ft.Icons.ARROW_UPWARD,
+                            tooltip="Nach oben",
+                            visible=k > 0,
+                            on_click=abschnitt_hoch(a),
+                        ),
+                        ft.IconButton(
+                            ft.Icons.DELETE_OUTLINE,
+                            tooltip="Abschnitt entfernen",
+                            on_click=abschnitt_entferner(a),
+                        ),
+                    ],
+                ),
+                editoren[aid].control(),
+            ]
+            return ft.Container(
+                bgcolor=KARTE,
+                border_radius=14,
+                padding=ft.Padding.only(left=12, right=10, top=8, bottom=10),
+                content=ft.Column(spacing=6, tight=True, controls=inhalt),
+            )
+        name_ = abschnitt_name(a)
+        text = abschnitt_text(a)
+        return ft.Container(
+            bgcolor=KARTE,
+            border_radius=14,
+            padding=ft.Padding.only(left=12, right=10, top=8, bottom=10),
+            ink=True,
+            on_click=abschnitt_oeffner(a),
+            content=ft.Column(
+                spacing=4,
+                tight=True,
+                controls=[
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        controls=[
+                            ft.Text(
+                                name_ or ("Beschreibung" if k == 0 else "Abschnitt"),
+                                size=12,
+                                weight=ft.FontWeight.W_600,
+                                opacity=0.7,
+                            ),
+                            ft.Icon(ft.Icons.EDIT_OUTLINED, size=16, opacity=0.5),
+                        ],
+                    ),
+                    ft.Text(
+                        text or "Noch nichts — antippen und beschreiben.",
+                        size=14,
+                        opacity=1.0 if text else 0.55,
+                    ),
+                ],
+            ),
+        )
 
     def beschreibung_zeichnen() -> None:
-        kopf = ft.Text("BESCHREIBUNG", size=11, weight=ft.FontWeight.BOLD, opacity=0.6)
-        if beschreibung_stand["offen"]:
-            inhalt: ft.Control = editor_halter["e"].control()
-            beschreibung_bereich.content = ft.Column(spacing=6, tight=True, controls=[kopf, inhalt])
-            beschreibung_bereich.ink = False
-            beschreibung_bereich.on_click = None
-            return
-        text = beschreibung_text()
-        beschreibung_bereich.content = ft.Column(
-            spacing=6,
-            tight=True,
-            controls=[
-                ft.Row(
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    controls=[kopf, ft.Icon(ft.Icons.EDIT_OUTLINED, size=16, opacity=0.5)],
-                ),
-                ft.Text(
-                    text or "Noch keine — antippen und beschreiben, wie die Übung geht.",
-                    size=14,
-                    opacity=1.0 if text else 0.55,
-                ),
-            ],
+        karten: list[ft.Control] = [abschnitt_karte(a, k) for k, a in enumerate(abschnitt_stand)]
+        if not abschnitt_stand:
+            karten.append(
+                ft.Text("Noch keine Beschreibung — „Abschnitt hinzufügen“.", size=12, opacity=0.6)
+            )
+        karten.append(
+            ft.Row(
+                controls=[
+                    ft.TextButton(
+                        "Abschnitt hinzufügen",
+                        icon=ft.Icons.ADD,
+                        tooltip="Ein Abschnitt mit Name und Inhalt — z. B. vom Paket, für dich",
+                        on_click=abschnitt_hinzufuegen,
+                    )
+                ]
+            )
         )
-        beschreibung_bereich.ink = True
-        beschreibung_bereich.on_click = beschreibung_oeffnen
+        beschreibung_spalte.controls = karten
 
-    beschreibung_bereich.bgcolor = KARTE
-    beschreibung_bereich.border_radius = 14
-    beschreibung_bereich.padding = ft.Padding.only(left=12, right=10, top=8, bottom=10)
     beschreibung_zeichnen()
 
     # -- Typen und Regionen ------------------------------------------------
@@ -349,61 +456,93 @@ def uebung_bearbeiten(
         return list(tagwahl.regionen)
 
     # -- Parameter: Knöpfe oben, je eingeschaltetem eine Karte --------------------------
-    # Eingeschaltet, wenn die Übung das Feld schon hat; zur Wahl stehen die Chips der Übung
-    # und die des Vorrats. Das ✕ an einem ungenutzten Chip nimmt ihn aus der Wahl (Punkt 4):
-    # ein eigener Chip ist damit weg, ein Vorschlag des Vorrats steht beim nächsten Öffnen
-    # wieder da (Ben, 18.10.2026: „leer heißt leer“ — die Vorschläge bleiben Vorschläge).
+    # Ein Knopf je **Art** aus dem Feldvorrat; eingeschaltet, wenn die Übung ein Feld dieser
+    # Art hat. Seit 2.11.2026 (P106) darf eine Übung mehrere Felder derselben Art tragen —
+    # ``hold`` und ``hold_2``, zwei Skalen (`core.result_spec.naechster_key`): „+“ auf der
+    # Karte legt das nächste an, ✕ nimmt eins weg. Zur Wahl stehen die Chips der Übung und
+    # die des Vorrats; das ✕ an einem ungenutzten Chip nimmt ihn aus der Wahl (Punkt 4): ein
+    # eigener Chip ist damit weg, ein Vorschlag des Vorrats steht beim nächsten Öffnen wieder
+    # da (Ben, 18.10.2026: „leer heißt leer“ — die Vorschläge bleiben Vorschläge).
 
-    #: Ein Chip je Vorratsfeld — ``selected`` ist der Schalter
+    #: Ein Chip je Art — ``selected`` ist der Schalter
     schalter: dict[str, ft.Chip] = {}
-    #: Je Parameter der eigene Name (`FieldSpec.label`) — Punkt 6: „Einheiten benennen“
+    #: Je Art die eingeschalteten Felder (``hold``, ``hold_2`` …) — und was zuletzt an war,
+    #: damit ein Aus- und Einschalten der Art sie zurückbringt
+    aktiv: dict[str, list[str]] = {v.key: [] for v in FELDVORRAT}
+    gemerkt_aktiv: dict[str, list[str]] = {}
+    #: Je Feld der eigene Name (`FieldSpec.label`) — Punkt 6: „Einheiten benennen“
     namen: dict[str, ft.TextField] = {}
-    #: Je Parameter die Chips zur Wahl und die angetippten (P79: antippen statt Kommaliste)
+    #: Je Feld die Chips zur Wahl und die angetippten (P79: antippen statt Kommaliste)
     chips_kandidaten: dict[str, list[Any]] = {}
     chips_wahl: dict[str, list[Any]] = {}
     chips_reihen: dict[str, ft.Container] = {}
     #: Satzlisten: zählen die Sätze? Aus = eine Zahl je Eintrag (Ben, 18.10.2026)
     saetze_an: dict[str, bool] = {}
     saetze_knoepfe: dict[str, ft.Chip] = {}
-    #: Das Ziel je Parameter — ein kleines Formular je Karte, die Werte gemerkt über ein Aus-
+    #: Skala: eigener Bereich statt fest 0–10 — auch negativ, Kommazahlen als solche
+    skala_bereiche: dict[str, ft.TextField] = {}
+    #: Das Ziel je Feld — ein kleines Formular je Karte, die Werte gemerkt über ein Aus-
     #: und wieder Einschalten (Punkt 7: Einstellung und Ziel auf einer Karte)
     ziel_formulare: dict[str, SpecForm] = {}
     ziel_gemerkt: dict[str, Any] = dict(uebung.default_target) if uebung else {}
     karten_spalte = ft.Column(spacing=10)
-    # Skala: eigener Bereich statt fest 0–10 — auch negativ, Kommazahlen als solche
-    skala_alt = vorhanden.get("scale")
-    skala_bereich = ft.TextField(
-        label="Bereich",
-        value=skala_bereich_text(
-            skala_alt or vorrat_feld("scale") or FieldSpec("scale", FieldType.SCALE, "Skala")
-        ),
-        hint_text="0 - 10 · -5 - 5 · 0.0 - 10.0",
-        helper="Kommazahlen so: 0.0 - 10.0",
-        dense=True,
-        width=200,
-    )
 
-    for vorlage in FELDVORRAT:
-        quelle = vorhanden.get(vorlage.key)
-        namen[vorlage.key] = ft.TextField(
+    def instanz_anlegen(key: str) -> None:
+        """Der Stand eines Felds (Name, Chips, Sätze, Bereich) — aus der Übung oder, neu, aus
+        dem Vorrat."""
+        if key in namen:
+            return
+        vorlage = vorrat_feld(key)
+        assert vorlage is not None
+        quelle = vorhanden.get(key)
+        namen[key] = ft.TextField(
             label="Name",
             value=basis_label(quelle) if quelle is not None else parameter_name(vorlage),
             dense=True,
             expand=True,
             capitalization=ft.TextCapitalization.SENTENCES,
         )
-        if vorlage.type not in (FieldType.SCALE, FieldType.BOOL, FieldType.TEXT):
+        if vorlage.type == FieldType.SCALE:
+            skala_bereiche[key] = ft.TextField(
+                label="Bereich",
+                value=skala_bereich_text(quelle or vorlage),
+                hint_text="0 - 10 · -5 - 5 · 0.0 - 10.0",
+                helper="Kommazahlen so: 0.0 - 10.0",
+                dense=True,
+                width=200,
+            )
+        elif vorlage.type not in (FieldType.BOOL, FieldType.TEXT):
             # Leer heißt leer (Ben, 18.10.2026): ohne angetippten Chip nur das freie Feld
-            chips_kandidaten[vorlage.key] = chips_sortiert(
+            chips_kandidaten[key] = chips_sortiert(
                 [*vorlage.quick, *(quelle.quick if quelle is not None else [])]
             )
-            chips_wahl[vorlage.key] = chips_sortiert(list((quelle or vorlage).quick))
-            chips_reihen[vorlage.key] = ft.Container()
+            chips_wahl[key] = chips_sortiert(list((quelle or vorlage).quick))
+            chips_reihen[key] = ft.Container()
         if vorlage.type == FieldType.SET_LIST:
-            saetze_an[vorlage.key] = quelle.saetze if quelle is not None else True
+            saetze_an[key] = quelle.saetze if quelle is not None else True
+
+    # (``basis`` ist der Weg zum Plan — die Art heißt hier ``art``)
+    for key in vorhanden:
+        art = basis_key(key)
+        if art in aktiv and not var.ist_variante(vorhanden[key]):
+            instanz_anlegen(key)
+            aktiv[art].append(key)
+    for art, keys in aktiv.items():
+        aktiv[art] = instanzen(art, keys)
+    if uebung is None:
+        instanz_anlegen("reps")
+        aktiv["reps"] = ["reps"]
+
+    def aktive_keys() -> list[str]:
+        """Alle eingeschalteten Felder in der Ordnung des Vorrats, je Art nach Nummer."""
+        return [k for v in FELDVORRAT for k in aktiv[v.key]]
+
+    def an(basis: str) -> bool:
+        return bool(aktiv[basis])
 
     def chips_zeichnen(key: str) -> None:
-        vorlage = next(f for f in FELDVORRAT if f.key == key)
+        vorlage = vorrat_feld(key)
+        assert vorlage is not None
 
         def umschalten(wert: Any) -> None:
             liste = chips_wahl[key]
@@ -440,14 +579,44 @@ def uebung_bearbeiten(
         with contextlib.suppress(Exception):  # noch nicht auf der Seite
             chips_reihen[key].update()
 
-    def an(key: str) -> bool:
-        return bool(schalter[key].selected)
+    def schalter_zeichnen(basis: str) -> None:
+        schalter[basis].selected = an(basis)
+        with contextlib.suppress(Exception):
+            schalter[basis].update()
 
-    def parameter_umschalter(key: str) -> Callable[[Any], None]:
+    def parameter_umschalter(basis: str) -> Callable[[Any], None]:
         def handler(_e: object = None) -> None:
-            schalter[key].selected = not schalter[key].selected
-            with contextlib.suppress(Exception):
-                schalter[key].update()
+            if aktiv[basis]:
+                gemerkt_aktiv[basis] = list(aktiv[basis])
+                aktiv[basis] = []
+            else:
+                aktiv[basis] = gemerkt_aktiv.get(basis) or [basis]
+                for key in aktiv[basis]:
+                    instanz_anlegen(key)
+            schalter_zeichnen(basis)
+            karten_neu()
+            uhr_zeichnen()
+
+        return handler
+
+    def noch_eine(basis: str) -> Callable[[], None]:
+        """„+“ auf der Karte: ein weiteres Feld dieser Art — gleicher Typ, eigener Name,
+        eigene Chips (P106)."""
+
+        def handler() -> None:
+            key = naechster_key(basis, aktive_keys())
+            instanz_anlegen(key)
+            aktiv[basis] = instanzen(basis, [*aktiv[basis], key])
+            karten_neu()
+            uhr_zeichnen()
+
+        return handler
+
+    def instanz_entferner(key: str) -> Callable[[], None]:
+        def handler() -> None:
+            basis = basis_key(key)
+            aktiv[basis] = [k for k in aktiv[basis] if k != key]
+            schalter_zeichnen(basis)
             karten_neu()
             uhr_zeichnen()
 
@@ -456,7 +625,7 @@ def uebung_bearbeiten(
     for vorlage in FELDVORRAT:
         schalter[vorlage.key] = ft.Chip(
             label=ft.Text(parameter_name(vorlage)),
-            selected=vorlage.key in eingeschaltet,
+            selected=an(vorlage.key),
             show_checkmark=True,
             tooltip=f"{vorlage.label}{f' ({vorlage.unit})' if vorlage.unit else ''}",
             on_select=parameter_umschalter(vorlage.key),
@@ -466,7 +635,9 @@ def uebung_bearbeiten(
     )
     # Felder, die nicht im Vorrat stehen (ältere oder besondere), bleiben erhalten — die
     # Varianten haben ihren eigenen Abschnitt.
-    fremde = [f for key, f in vorhanden.items() if key not in schalter and not var.ist_variante(f)]
+    fremde = [
+        f for key, f in vorhanden.items() if basis_key(key) not in aktiv and not var.ist_variante(f)
+    ]
 
     def ziel_werte() -> dict[str, Any]:
         """Alles, was in den Zielformularen steht — auch für ausgeschaltete gemerkt."""
@@ -477,24 +648,39 @@ def uebung_bearbeiten(
     def ziel_feld_fuer(key: str) -> FieldSpec | None:
         return next((f for f in ziel_spec(spec_aktuell()).fields if f.key == key), None)
 
-    def karte(vorlage: FieldSpec) -> ft.Control:
-        """Die Karte eines eingeschalteten Parameters: Name und Einheit, Chips (mit „Sätze“),
-        Bereich der Skala — und das Ziel."""
-        key = vorlage.key
-        teile: list[ft.Control] = [
-            ft.Row(
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    namen[key],
-                    ft.Text(vorlage.unit or "", size=13, opacity=0.7)
-                    if vorlage.unit
-                    else ft.Container(),
-                ],
+    def karte(key: str) -> ft.Control:
+        """Die Karte eines eingeschalteten Felds: Name und Einheit, „+“ für ein weiteres
+        dieser Art, ✕ (ab dem zweiten), Chips (mit „Sätze“), Bereich der Skala — und das
+        Ziel."""
+        vorlage = vorrat_feld(key)
+        assert vorlage is not None
+        basis = basis_key(key)
+        kopf: list[ft.Control] = [namen[key]]
+        if vorlage.unit:
+            kopf.append(ft.Text(vorlage.unit, size=13, opacity=0.7))
+        if vorlage.type not in (FieldType.BOOL, FieldType.TEXT):
+            kopf.append(
+                ft.IconButton(
+                    ft.Icons.ADD,
+                    icon_size=20,
+                    tooltip=f"Noch ein Feld „{parameter_name(vorlage)}“ — eigener Name und Chips",
+                    on_click=noch_eine(basis),
+                )
             )
+        if len(aktiv[basis]) > 1:
+            kopf.append(
+                ft.IconButton(
+                    ft.Icons.CLOSE,
+                    icon_size=18,
+                    tooltip="Dieses Feld entfernen",
+                    on_click=instanz_entferner(key),
+                )
+            )
+        teile: list[ft.Control] = [
+            ft.Row(spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER, controls=kopf)
         ]
         if vorlage.type == FieldType.SCALE:
-            teile.append(skala_bereich)
+            teile.append(skala_bereiche[key])
         elif key in chips_reihen:
             if key in saetze_an and key not in saetze_knoepfe:
                 saetze_knoepfe[key] = _saetze_knopf(key, saetze_an, True, ziel_neu)
@@ -534,7 +720,7 @@ def uebung_bearbeiten(
     def karten_zeichnen() -> None:
         ziel_werte()  # die Werte der alten Formulare merken, bevor sie ersetzt werden
         ziel_formulare.clear()
-        karten: list[ft.Control] = [karte(v) for v in FELDVORRAT if an(v.key)]
+        karten: list[ft.Control] = [karte(k) for k in aktive_keys()]
         if fremde:
             karten.append(
                 ft.Text(
@@ -967,14 +1153,37 @@ def uebung_bearbeiten(
         on_change=lambda: uhr_zeichnen(),
     )
     zaehlt_als_wahl = ft.SegmentedButton(
-        segments=[
-            ft.Segment(value="hold", label=ft.Text("Haltezeit")),
-            ft.Segment(value="duration", label=ft.Text("Zeit")),
-        ],
+        segments=[ft.Segment(value="hold", label=ft.Text("Haltezeit"))],
         selected=[uhr_vorher or "hold"],
         allow_empty_selection=False,
         show_selected_icon=False,
     )
+
+    def zeitfelder() -> list[str]:
+        """Die Zeitfelder der Übung (Haltezeiten, Zeiten) — „Zeit“ immer, auch ohne den
+        Parameter (die Uhr trägt sie ein)."""
+        keys = [k for k in aktive_keys() if basis_key(k) in ("hold", "duration")]
+        return keys if "duration" in keys else [*keys, "duration"]
+
+    def zaehlt_als_zeichnen() -> None:
+        """Die Wahl „zählt als“ folgt den Zeitfeldern (P106: je Zeitfeld ein Knopf, mit
+        seinem Namen)."""
+        keys = zeitfelder()
+
+        def beschriftung(k: str) -> str:
+            if k not in namen:
+                return "Zeit"
+            vorlage = vorrat_feld(k)
+            return (namen[k].value or "").strip() or (vorlage.label if vorlage else k)
+
+        zaehlt_als_wahl.segments = [
+            ft.Segment(value=k, label=ft.Text(beschriftung(k))) for k in keys
+        ]
+        gewaehlt = next(iter(zaehlt_als_wahl.selected or []), "")
+        if gewaehlt not in keys:
+            halten = [k for k in keys if basis_key(k) == "hold"]
+            zaehlt_als_wahl.selected = [halten[0] if halten else "duration"]
+
     zaehlt_als_zeile = ft.Row(
         spacing=12,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -991,6 +1200,7 @@ def uebung_bearbeiten(
         an_ = bool(uhr_schalter.value)
         zaehlt = bool(zaehlt_schalter.value)
         halten = an("hold")
+        zaehlt_als_zeichnen()
         zaehlt_schalter.visible = an_
         zaehlt_als_zeile.visible = an_ and zaehlt and halten
         if not an_:
@@ -1007,8 +1217,9 @@ def uebung_bearbeiten(
     def zaehlt_als_lesen() -> str:
         """Die Vorgabe (Haltezeit) bleibt leer, solange nie etwas anderes gewählt war — eine
         Paketübung gilt sonst als „geändert: Zählt als“."""
-        wahl = next(iter(zaehlt_als_wahl.selected or []), "hold")
-        return "" if wahl == "hold" and not uhr_vorher else str(wahl)
+        wahl = str(next(iter(zaehlt_als_wahl.selected or []), "hold"))
+        vorgabe = next((k for k in zeitfelder() if basis_key(k) == "hold"), "hold")
+        return "" if wahl == vorgabe and not uhr_vorher else wahl
 
     async def wechseln(
         ziel: str | Callable[[str], str] | None = None, profil_id: str | None = None
@@ -1108,23 +1319,24 @@ def uebung_bearbeiten(
 
     def felder_lesen() -> list[FieldSpec]:
         felder: list[FieldSpec] = []
-        for vorlage_feld in FELDVORRAT:
-            if not an(vorlage_feld.key):
-                continue
-            alt = vorhanden.get(vorlage_feld.key)
+        for key in aktive_keys():
+            vorlage_feld = vorrat_feld(key)
+            assert vorlage_feld is not None
+            alt = vorhanden.get(key)
             chips = chips_wahl.get(
-                vorlage_feld.key, list((alt or vorlage_feld).quick)
+                key, list((alt or vorlage_feld).quick)
             )  # Skala, Ja/Nein, Freitext: wie sie sind
-            label = (namen[vorlage_feld.key].value or "").strip() or parameter_name(vorlage_feld)
+            label = (namen[key].value or "").strip() or parameter_name(vorlage_feld)
             feld = replace(
                 vorlage_feld,
                 label=label,
                 quick=chips_sortiert(chips),
                 default=alt.default if alt is not None else vorlage_feld.default,
-                saetze=saetze_an.get(vorlage_feld.key, True),
+                saetze=saetze_an.get(key, True),
             )
             if feld.type == FieldType.SCALE:
-                lo, hi, schritt = skala_lesen(skala_bereich.value or "") or (0.0, 10.0, 1.0)
+                bereich = skala_bereiche[key].value or ""
+                lo, hi, schritt = skala_lesen(bereich) or (0.0, 10.0, 1.0)
                 ganz = float(schritt).is_integer()
                 feld = replace(
                     feld,
@@ -1182,9 +1394,16 @@ def uebung_bearbeiten(
             beschreibung_text(),
             typen_lesen(),
             regionen_lesen(),
-            [(k, an(k), list(chips_wahl.get(k, [])), namen[k].value or "") for k in schalter],
+            [
+                (
+                    k,
+                    list(chips_wahl.get(k, [])),
+                    namen[k].value or "",
+                    (skala_bereiche[k].value or "") if k in skala_bereiche else "",
+                )
+                for k in aktive_keys()
+            ],
             sorted(saetze_an.items()),
-            skala_bereich.value or "",
             ziel_werte(),
             bild_stand["key"],
             bild_stand["bild"],
@@ -1204,11 +1423,13 @@ def uebung_bearbeiten(
             page.update()
             return "Ein Name muss sein."
         name.error = None
-        if an("scale") and skala_lesen(skala_bereich.value or "") is None:
-            skala_bereich.error = "z. B. 0 - 10 oder -5 - 5 oder 0.0 - 10.0"
-            page.update()
-            return "Der Bereich der Skala ist unlesbar (z. B. 0 - 10)."
-        skala_bereich.error = None
+        for key in aktiv["scale"]:
+            feld = skala_bereiche[key]
+            if skala_lesen(feld.value or "") is None:
+                feld.error = "z. B. 0 - 10 oder -5 - 5 oder 0.0 - 10.0"
+                page.update()
+                return "Der Bereich der Skala ist unlesbar (z. B. 0 - 10)."
+            feld.error = None
         ziel = eingelesen()
         state.uebungen.speichern(ziel)
         if im_plan and plan is not None and not gespeichert.get("im_plan"):
@@ -1268,7 +1489,8 @@ def uebung_bearbeiten(
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,
                             controls=[symbol_kachel, name],
                         ),
-                        beschreibung_bereich,
+                        abschnitt("BESCHREIBUNG"),
+                        beschreibung_spalte,
                         abschnitt("PARAMETER", hilfe_knopf(page, thema="parameter")),
                         parameter_knoepfe,
                         karten_spalte,

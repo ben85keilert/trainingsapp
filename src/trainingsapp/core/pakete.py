@@ -60,7 +60,7 @@ from .kurse import (
     medien_to_list,
 )
 from .models import Exercise, Media, MediaKind, MediaSource, Plan, jetzt
-from .result_spec import VORLAGEN, ResultSpec
+from .result_spec import VORLAGEN, ResultSpec, basis_key
 from .timer import TimerProfil
 
 #: Kennung im Feld ``format`` — andere JSON-Dateien (Messungen) sind kein Paket
@@ -569,12 +569,15 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
 
 
 def _zaehlt_als_lesen(roh: Any) -> str:
-    """„Zählt als“ der Übung — ``hold`` oder ``duration``, sonst leer (die Vorgabe).
+    """„Zählt als“ der Übung — ein Zeitfeld (``hold``, ``duration``, auch ``hold_2``), sonst
+    leer (die Vorgabe).
 
     >>> _zaehlt_als_lesen("duration"), _zaehlt_als_lesen("Minuten"), _zaehlt_als_lesen(None)
     ('duration', '', '')
+    >>> _zaehlt_als_lesen("hold_2")
+    'hold_2'
     """
-    return roh if roh in ("hold", "duration") else ""
+    return roh if isinstance(roh, str) and basis_key(roh) in ("hold", "duration") else ""
 
 
 def _timer_lesen(roh: Any, uebung: str) -> list[dict[str, Any]]:

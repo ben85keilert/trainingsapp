@@ -310,12 +310,13 @@ def test_planuebung_parameter_und_chips_einstellen(page, welt) -> None:
     page.show_dialog = lambda d: None
     ansicht = plan_einstellen(page, state, plan, item, u)
 
-    def schalter(name: str) -> ft.Switch:
+    def schalter(name: str) -> ft.Chip:
+        """Der Knopf eines Parameters (seit 2.11.2026 ein Chip, P107)."""
         return next(
             c
             for v in ansicht.controls
             for c in _alle(v)
-            if isinstance(c, ft.Switch) and f"„{name}“" in (c.tooltip or "")
+            if isinstance(c, ft.Chip) and f"„{name}“" in (c.tooltip or "")
         )
 
     def knopf(text: str):
@@ -337,7 +338,7 @@ def test_planuebung_parameter_und_chips_einstellen(page, welt) -> None:
         ]
 
     assert "nur hier" not in texte()  # alles wie die Übung
-    schalter("Skala 0–10").on_change()  # Skala aus → nur Wiederholungen
+    schalter("Skala 0–10").on_select()  # Skala aus → nur Wiederholungen
     assert "nur hier" in texte()
     chip_15 = next(
         c
@@ -1159,7 +1160,12 @@ def test_i_symbol_holt_parameter_aus_dem_feldvorrat(page, welt) -> None:
     # Herholen geht jetzt über „Im Plan einstellen“ (P79, A) — gespeichert mit „Speichern“
     seite = plan_einstellen(page, state, plan, item, uebung, f"/plan/{plan.id}/bearbeiten")
     assert "Weitere Parameter holen" in _texte(seite)
-    _knopf_mit_text(seite, "+ Gewicht").on_click()
+    gewicht = next(
+        c
+        for c in _alle(seite)
+        if isinstance(c, ft.Chip) and "„Gewicht“" in (c.tooltip or "") and not c.selected
+    )
+    gewicht.on_select()
     asyncio.run(_knopf_mit_text(seite, "Speichern").on_click())
     assert "weight" in state.plaene.item_laden(item.id).felder
     assert state.uebungen.laden(uebung.id).result_spec.field_by_key("weight") is None

@@ -1,7 +1,7 @@
 # Plan: Übung bearbeiten – aufgeräumt, Symbol oben, Parameter als Knöpfe, Ziel am Parameter
 
-Stand 2.11.2026: **gebaut** (Teile A–H, 0.3.40; P107 „Im Plan einstellen“ und P106
-Mehrfachfelder offen). Anlass sind Bens sieben Punkte vom
+Stand 2.11.2026: **gebaut** (Teile A–H, 0.3.40; P106–P109 nach Bens Antworten in 0.3.41,
+unten „Entschieden“). Anlass sind Bens sieben Punkte vom
 2.11.2026 („Bald kommt eine neue Version. Vorher muss aber noch der Edit der Übungen verbessert
 werden“):
 
@@ -158,3 +158,34 @@ eigenes; im Plan einstellen kann es abweichen.“ Falls du etwas anderes meintes
 | P107 | „Im Plan einstellen“ in dieselbe Ordnung bringen (Chips oben, Ziel am Parameter)? | ja, zweiter Schritt nach der Version |
 | P108 | Gegliederte Beschreibung (Ausführung, Worauf achten, Fehler) — Paketformat 3? | später, wenn gewünscht |
 | P109 | Fotos als Symbol: rund zugeschnitten überall, oder nur auf der Übungsseite groß und sonst das Symbol? | überall rund (B2) |
+
+## Entschieden (Ben, 2.11.2026) und gebaut (0.3.41)
+
+- **P106 — ja, Mehrfachfelder sofort.** Ben: „Zeitfelder können der Stoppuhr zugeordnet
+  werden. Mehrere Skalen machen eh Sinn. Freitext und Textfeld getrennt, klar.
+  Migrationsrisiko müssen wir einfach mehrfach gegenchecken. … Gewichte kann man Hanteln
+  direkt schreiben usw.“ Gebaut nach dem Mittelweg: Die Schlüssel des Vorrats bleiben die
+  Art, ein weiteres Feld heißt ``hold_2``, ``scale_2`` … (`core.result_spec.basis_key`,
+  `vorrat_feld`, `naechster_key`, `instanzen`). Auf der Karte legt „+“ das nächste Feld an
+  (eigener Name, eigene Chips, eigener Bereich), ✕ nimmt es weg. **Zählt als** bietet jedes
+  Zeitfeld der Übung an (`core.uebung_timer.zaehlt_als`, auch ``hold_2``; Timer und
+  Stoppuhr tragen dort ein, `core.timer_eintrag.ergebnis`). Keine Migration: alte Übungen
+  tragen nur Grundschlüssel; Pakete dürfen ``hold_2`` tragen (`_zaehlt_als_lesen`). Was
+  nach der Art fragt (Haltezeit je Satz, Zeit, Summen, Kurven) nimmt `basis_key`. Ben will
+  die Praktikabilität selbst herausfinden (etwa Liegestütz kurz/lang als zwei
+  Wiederholungsfelder statt Varianten).
+- **P107 — ja, gleich mit in die Version.** „Im Plan einstellen“ in derselben Ordnung:
+  Parameter als Chips (die der Übung; darunter „Weitere Parameter holen“ mit den Chips des
+  Vorrats), je eingeschaltetem eine Karte mit Chips und dem Ziel dieses Parameters, Schilde
+  „wie die Übung“ / „nur hier“ mit ↺ an Chips, Ziel und den Knöpfen; Ziel-Variante unter den
+  Varianten; die Hilfe-Themen `parameter`, `varianten`, `uhr`.
+- **P108 — Beschreibung als Abschnitte „Name“ + „Inhalt“** in eigener Reihenfolge (Ben:
+  „z. B. die Beschreibung vom Paket, individueller Text für einen Patienten, eigener Text“).
+  Gespeichert bleibt ein Text mit ``## Name``-Zeilen (`core/beschreibung.py`) — Pakete,
+  praxis_gui und ältere Stände lesen ihn weiter als Text, der Drei-Wege-Abgleich sieht ein
+  Feld. Im Formular je Abschnitt eine Karte (Name, Editor an Ort und Stelle, ↑, ✕),
+  „Abschnitt hinzufügen“; die Übungsseite zeigt die Abschnitte mit Namen.
+- **P109 — quadratisch mit runden Ecken** (Ben: „lässt einfachere Symbolerstellung zu. Ein
+  rundes PNG gerne rund“): `components/uebungsbild.ECKE` = 22 % der Kante, PNG erlaubt (ein
+  rundes oder freigestelltes PNG zeigt seine Form). Die Symbole und Bilder werden später ein
+  eigenes Kapitel.

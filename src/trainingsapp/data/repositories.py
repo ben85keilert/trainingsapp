@@ -58,7 +58,7 @@ from ..core.models import (
 )
 from ..core.pakete import stand_tag_nachziehen
 from ..core.parameter import kontextfelder, modus_aus_felder
-from ..core.result_spec import FieldType, ResultSpec, werte_modernisieren
+from ..core.result_spec import FieldType, ResultSpec, basis_key, werte_modernisieren
 from .db import transaktion
 
 #: Nach so vielen Tagen leert sich der Papierkorb von selbst (abschaltbar)
@@ -1732,7 +1732,7 @@ class SessionRepo:
             "duration",
             *(f.key for f in uebung.result_spec.fields if f.type == FieldType.DURATION),
         }
-        zeit = {k: v for k, v in werte.items() if k == "hold" or k in dauer}
+        zeit = {k: v for k, v in werte.items() if basis_key(k) == "hold" or k in dauer}
         aktuell = self.ziel_eintrag(session.subject_id, uebung, tag, session.plan_id, kontext)
         if aktuell is None:
             if not zeit:

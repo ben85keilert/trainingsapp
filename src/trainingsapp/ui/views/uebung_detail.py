@@ -23,6 +23,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import varianten as var
+from trainingsapp.core.beschreibung import abschnitte
 from trainingsapp.core.models import (
     Exercise,
     Media,
@@ -30,7 +31,7 @@ from trainingsapp.core.models import (
     PlanItem,
     new_id,
 )
-from trainingsapp.core.result_spec import format_wert
+from trainingsapp.core.result_spec import basis_key, format_wert
 from trainingsapp.core.standards import (
     abweichungen,
     aktive_felder,
@@ -57,18 +58,21 @@ from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 
 
 def _beschreibung(uebung: Exercise, herkunft: str) -> ft.Control:
-    """Die Beschreibung, dahinter leise die Herkunft: „(Paket „Standard“)“."""
-    return ft.Text(
-        uebung.description or "—",
-        spans=[
-            ft.TextSpan(
-                f"  ({herkunft})",
-                style=ft.TextStyle(
-                    size=12, color=ft.Colors.with_opacity(0.55, ft.Colors.ON_SURFACE)
-                ),
-            )
-        ],
+    """Die Beschreibung in ihren Abschnitten (Name fett, darunter der Inhalt — Ben,
+    2.11.2026, P108), dahinter leise die Herkunft: „(Paket „Standard“)“."""
+    teile = abschnitte(uebung.description)
+    herkunft_span = ft.TextSpan(
+        f"  ({herkunft})",
+        style=ft.TextStyle(size=12, color=ft.Colors.with_opacity(0.55, ft.Colors.ON_SURFACE)),
     )
+    if not teile:
+        return ft.Text("—", spans=[herkunft_span])
+    zeilen: list[ft.Control] = []
+    for k, a in enumerate(teile):
+        if a.name:
+            zeilen.append(ft.Text(a.name, size=13, weight=ft.FontWeight.W_600, opacity=0.8))
+        zeilen.append(ft.Text(a.text or "—", spans=[herkunft_span] if k == len(teile) - 1 else []))
+    return ft.Column(spacing=2, tight=True, controls=zeilen)
 
 
 def _abschnitt(titel: str, inhalt: ft.Control) -> ft.Control:
@@ -104,7 +108,7 @@ def uhr_und_timer(uebung: Exercise, item: PlanItem | None = None) -> ft.Control:
             if item is not None
             else [f.key for f in uebung.result_spec.fields]
         )
-        wohin = zaehlt_als(felder, uebung)
+        wohin = basis_key(zaehlt_als(felder, uebung))
         zaehlt = "Haltezeit je Satz" if wohin == "hold" else "Zeit"
         # Ein Lauf geht in den offenen Eintrag wie ein Tipp (P79 D1)
         erklaerung = (

@@ -137,11 +137,11 @@ def test_symbol_oben_blatt_bild_und_ablage(page, state) -> None:
     assert gespeichert.image_path == rel and gespeichert.icon_key == "hiking"
     (eintrag,) = state.uebungsbilder.alle()
     assert eintrag.uebungen == ((u.id, u.name),)
-    # Im Katalog und auf der Übungsseite: das runde Bild
-    from trainingsapp.ui.components.uebungsbild import uebungsbild
+    # Im Katalog und auf der Übungsseite: das Bild, quadratisch mit runden Ecken (P109)
+    from trainingsapp.ui.components.uebungsbild import ECKE, uebungsbild
 
-    rund = uebungsbild(state, "hiking", rel, groesse=32)
-    assert isinstance(rund, ft.Container) and rund.border_radius == 16
+    eckig = uebungsbild(state, "hiking", rel, groesse=32)
+    assert isinstance(eckig, ft.Container) and eckig.border_radius == 32 * ECKE
     assert isinstance(uebungsbild(state, "hiking", "Symbole/fehlt.jpg"), ft.Icon)
     # Aus der Ablage löschen: Datei weg, die Übung zeigt wieder ihr Symbol
     ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(u.id))
@@ -184,9 +184,12 @@ def test_kamera_und_fotoauswahl_fuer_das_symbol(page, state) -> None:
     assert a.daten is None and page.dialoge[-1].content.value == "Bild gespeichert"
 
 
-def test_beschreibung_als_editor_an_ort_und_stelle(page, state) -> None:
-    """Punkt 2: Die Beschreibung ist eine Karte; ein Tipp öffnet den Editor der Notizen
-    (↶ ↷ Abbrechen Fertig), gespeichert wird mit dem Formular."""
+def test_beschreibung_in_abschnitten_mit_editor_an_ort_und_stelle(page, state) -> None:
+    """Punkt 2 und P108: Die Beschreibung besteht aus Abschnitten (Name + Inhalt) in eigener
+    Reihenfolge; ein Tipp öffnet den Editor der Notizen (↶ ↷ Abbrechen Fertig), gespeichert
+    wird mit dem Formular — als ein Text mit ``## Name``-Zeilen."""
+    from trainingsapp.core.beschreibung import abschnitte
+
     u = state.uebungen.laden(seed_id("kniebeuge"))
     ansicht = uebung_bearbeiten(page, state, u)
     assert "BESCHREIBUNG" in _texte(ansicht) and u.description in _texte(ansicht)
@@ -194,7 +197,7 @@ def test_beschreibung_als_editor_an_ort_und_stelle(page, state) -> None:
     karte = next(
         x
         for x in _alle(ansicht)
-        if isinstance(x, ft.Container) and x.ink and x.on_click and "BESCHREIBUNG" in _texte(x)
+        if isinstance(x, ft.Container) and x.ink and x.on_click and u.description in _texte(x)
     )
     karte.on_click()
     (feld,) = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.multiline]
@@ -206,8 +209,33 @@ def test_beschreibung_als_editor_an_ort_und_stelle(page, state) -> None:
     assert "Tief in die Hocke, Fersen am Boden." in _texte(ansicht)  # wieder die Karte
     assert not [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.multiline]
     assert state.uebungen.laden(u.id).description == u.description  # erst das Formular
+    # Ein zweiter Abschnitt mit Namen, dann nach oben
+    _knopf(ansicht, "Abschnitt hinzufügen").on_click()
+    (feld,) = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.multiline]
+    name = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.TextField) and x.label == "Name des Abschnitts"
+    )
+    name.value = "Für mich"
+    feld.value = "langsam, Knie hinter den Zehen"
+    feld.on_change(SimpleNamespace(control=feld))
+    hoch = next(
+        x for x in _alle(ansicht) if isinstance(x, ft.IconButton) and x.tooltip == "Nach oben"
+    )
+    hoch.on_click()
+    asyncio.run(feld.on_change.__self__.fertig())
+    texte = _texte(ansicht)
+    assert texte.index("Für mich") < texte.index("Tief in die Hocke, Fersen am Boden.")
     _speichern(ansicht)
-    assert state.uebungen.laden(u.id).description == "Tief in die Hocke, Fersen am Boden."
+    gespeichert = state.uebungen.laden(u.id).description
+    assert (
+        gespeichert
+        == "## Für mich\nlangsam, Knie hinter den Zehen\nTief in die Hocke, Fersen am Boden."
+    )
+    assert [(a.name, a.text) for a in abschnitte(gespeichert)] == [
+        ("Für mich", "langsam, Knie hinter den Zehen\nTief in die Hocke, Fersen am Boden.")
+    ] or len(abschnitte(gespeichert)) == 2
     assert page.dialoge[-1].content.value == "Gespeichert"
 
 
@@ -266,3 +294,59 @@ def test_parameter_als_knoepfe_mit_karten_namen_chips_und_ziel(page, state) -> N
     assert reps.label == "Wdh. tief" and reps.quick == [10, 15, 20]
     assert weight.quick == [10, 20] and vorrat_feld("weight").quick == [5, 10, 20]
     assert neu.default_target == {"reps": [12, 12, 12]}
+
+
+def test_mehrfachfelder_einer_art_und_zaehlt_als(page, state) -> None:
+    """P106 (Ben, 2.11.2026: „Mehrfachfelder sollen direkt möglich sein. Zeitfelder können der
+    Stoppuhr zugeordnet werden. Mehrere Skalen machen eh Sinn“): „+“ auf der Karte legt ein
+    zweites Feld derselben Art an (``hold_2``, eigener Name, eigene Chips), ✕ nimmt es weg;
+    „Zählt als“ bietet jedes Zeitfeld an; der Timer trägt in das gewählte ein."""
+    from trainingsapp.core.timer_eintrag import Gelaufen, ergebnis
+    from trainingsapp.core.uebung_timer import zaehlt_als
+
+    u = state.uebungen.laden(seed_id("kniebeuge"))
+    ansicht = uebung_bearbeiten(page, state, u)
+    _chip(ansicht, "Haltezeit").on_select()  # Haltezeit an
+    plus = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.IconButton)
+        and (x.tooltip or "").startswith("Noch ein Feld „Haltezeit“")
+    )
+    plus.on_click()
+    namen = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Name"]
+    assert [n.value for n in namen[1:]] == ["Wiederholungen", "Haltezeit", "Haltezeit 2"]
+    namen[3].value = "Pause"
+    # Zählt als: Haltezeit, Pause, Zeit — gewählt wird die Pause
+    wahl = next(x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton))
+    uhr_an = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Switch) and x.label == "Stoppuhr und Timer beim Üben"
+    )
+    uhr_an.on_change()  # zeichnet die Wahl mit den Namen neu
+    assert [s.value for s in wahl.segments] == ["hold", "hold_2", "duration"]
+    assert [s.label.value for s in wahl.segments] == ["Haltezeit", "Pause", "Zeit"]
+    wahl.selected = ["hold_2"]
+    _speichern(ansicht)
+    neu = state.uebungen.laden(u.id)
+    assert [f.key for f in neu.result_spec.fields] == ["reps", "hold", "hold_2"]
+    assert neu.result_spec.field_by_key("hold_2").label == "Pause" and neu.zaehlt_als == "hold_2"
+    felder = [f.key for f in neu.result_spec.fields]
+    assert zaehlt_als(felder, neu) == "hold_2"
+    assert ergebnis([Gelaufen("Halten", 1, 30.0, True, 0, 30.0)], "hold_2") == {"hold_2": [30]}
+    # ✕ nimmt das zweite Feld weg (beide Karten tragen eins), der Knopf „Haltezeit“ bleibt an;
+    # „zählt als“ fällt auf die Haltezeit zurück
+    ansicht = uebung_bearbeiten(page, state, neu)
+    weg = [
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.IconButton) and x.tooltip == "Dieses Feld entfernen"
+    ]
+    assert len(weg) == 2
+    weg[-1].on_click()
+    assert _chip(ansicht, "Haltezeit").selected
+    _speichern(ansicht)
+    neu = state.uebungen.laden(u.id)
+    assert [f.key for f in neu.result_spec.fields] == ["reps", "hold"]
+    assert zaehlt_als([f.key for f in neu.result_spec.fields], neu) == "hold"

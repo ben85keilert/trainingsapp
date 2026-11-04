@@ -347,3 +347,29 @@ async def test_marken_leiste_art_aus_dem_kontext_chip_rueckgaengig_stoerung(page
     lauf.diagnose_aktiv = False
     ml.aktualisieren(page, state)
     assert page.overlay == [] and state.diagnose_leiste is None
+
+
+async def test_geraeteprobe_ansicht_verbindet_startet_und_zeigt_den_punkt(page, state) -> None:
+    from test_geraeteprobe import Attrappe
+    from trainingsapp.ui.views.geraeteprobe import geraeteprobe_view
+
+    state.ble_transport = Attrappe()
+    state.probe_ziel = ("AA:BB:CC:DD:EE:FF", "Gurt X 12345678")
+    ansicht = geraeteprobe_view(page, state)
+    await asyncio.gather(*page.aufgaben)
+    alles = " ".join(texte(ansicht))
+    assert "Herzfrequenz (0x180D)" in alles and "herstellereigen (6e400001…)" in alles
+    start = next(c for c in alle(ansicht) if isinstance(c, ft.FilledButton))
+    assert start.content == "Rohmitschnitt starten"
+    await start.on_click()
+    probe = state.geraeteprobe
+    assert probe is not None and probe.laeuft and len(page.overlay) == 1  # der rote Punkt
+    probe.marke("still")
+    await probe.beenden({"was": "still gesessen"})
+    state.geraeteprobe = None
+    diagnose_punkt.aktualisieren(page, state)
+    assert page.overlay == []
+    neu = geraeteprobe_view(page, state)
+    assert any("still gesessen" in t for t in texte(neu))
+    for aufgabe in page.aufgaben:
+        aufgabe.cancel()

@@ -116,6 +116,8 @@ from trainingsapp.ui.views.einstellungen_tags import einstellungen_tags_view
 from trainingsapp.ui.views.einstellungen_training import einstellungen_training
 from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
+from trainingsapp.ui.views.geraeteprobe import ROUTE as PROBE_ROUTE
+from trainingsapp.ui.views.geraeteprobe import geraeteprobe_view
 from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.kurse import kapitel_view, kurs_view
@@ -916,6 +918,8 @@ def main(page: ft.Page) -> None:
                     ablegen(lambda: kapitel_view(page, state, kurs, kapitel, browser))
         elif teile[:1] == ["live"]:
             ablegen(lambda: live_vollbild_view(page, state))
+        elif teile[:1] == [PROBE_ROUTE.strip("/")]:
+            ablegen(lambda: geraeteprobe_view(page, state))
         elif teile[:1] == ["ausdauer"]:
             if len(teile) == 1:
                 ablegen(lambda: ausdauer_view(page, state))

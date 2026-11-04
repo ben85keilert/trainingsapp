@@ -31,8 +31,13 @@ _NAMEN = {"hr": "Herzfrequenz", "ecg": "EKG", "acc": "Beschleunigung", "ppi": "P
 
 
 def _aktiv(state: Any) -> bool:
+    """Zeichnet der Diagnosemodus auf — an einer Messung oder als Geräteprobe?"""
     lauf = getattr(state, "messlauf", None)
-    return bool(lauf is not None and getattr(lauf, "diagnose_aktiv", False))
+    probe = getattr(state, "geraeteprobe", None)
+    return bool(
+        (lauf is not None and getattr(lauf, "diagnose_aktiv", False))
+        or (probe is not None and getattr(probe, "laeuft", False))
+    )
 
 
 def aktualisieren(page: ft.Page, state: Any) -> None:
@@ -138,9 +143,18 @@ def stand_blatt(page: ft.Page, state: Any) -> ft.BottomSheet:
     blatt: ft.BottomSheet
 
     def neu() -> None:
-        if lauf is None:
+        probe = getattr(state, "geraeteprobe", None)
+        if probe is not None and probe.laeuft:
+            s = probe.stand()
+            text.value = (
+                f"Geräteprobe {probe.name}: seit {dg.dauer_text(s['seit_s'])} · "
+                f"{dg.groesse_text(s['bytes'])} · Pakete "
+                + (", ".join(f"{k} {v}" for k, v in s["pakete"].items()) or "–")
+            )
+        elif lauf is not None:
+            text.value = "\n".join(stand_text(lauf.diagnose_stand(), offen["akku_handy"]))
+        else:
             return
-        text.value = "\n".join(stand_text(lauf.diagnose_stand(), offen["akku_handy"]))
         with contextlib.suppress(Exception):
             text.update()
 

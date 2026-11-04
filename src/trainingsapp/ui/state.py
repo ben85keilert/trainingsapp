@@ -373,6 +373,10 @@ class AppState:
     #: Stand der Marken-Leiste (`components.marken_leiste.LeistenStand`) und ihr Control
     diagnose_leiste: Any = None
     diagnose_leiste_control: Any = None
+    #: Geräteprobe (`devices.erkundung.Geraeteprobe`, Rohmitschnitt ohne Messung) und das
+    #: gewählte Gerät aus der Suche: (Adresse, Name)
+    geraeteprobe: Any = None
+    probe_ziel: tuple[str, str] | None = None
     #: Signaltöne (`flet_ton.FletTon`, nur in der gebauten App) und ob sie geladen sind
     ton: Any = None
     toene_geladen: bool = False

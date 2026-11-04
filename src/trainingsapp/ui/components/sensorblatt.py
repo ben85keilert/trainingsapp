@@ -72,10 +72,15 @@ def sensorblatt(
         state.hrv_einstellungen_setzen(e)
 
     def kopf_neu() -> None:
+        from trainingsapp.devices.profiles import reifegrad_text
+
         s = lauf.status
         teile = [lauf.geraet_name or "Gerät", "verbunden" if lauf.verbunden else "getrennt"]
         if s.batterie_prozent is not None:
             teile.append(f"Akku {s.batterie_prozent} %")
+        # Reifegrad des Treibers in hrv-core (`hrv_core.geraete.treiber`, Plan §8.3)
+        reife = reifegrad_text(lauf.profil.id) if lauf.profil is not None else None
+        teile.append(f"Treiber {reife or 'unbekannt'}")
         kopf_text.value = " · ".join(teile)
 
     def zeilen_neu() -> None:

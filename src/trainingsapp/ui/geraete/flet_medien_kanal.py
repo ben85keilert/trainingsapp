@@ -11,7 +11,14 @@ hrv-watch ENTSCHEIDUNGEN #7): auf HF, Atmung und Training eine Marke (Notiz ohne
 Text) in die laufende Aufnahme; auf der Intervallseite beginnen Gipfel und Tal neu;
 auf der HRR-Seite ist jetzt das Ende der Belastung (Notiz „HRR“, dann HRR30/60).
 **Nie** startet oder stoppt ⏯ die Aufnahme (Ben, 26.10.2026). Die Session meldet
-immer PLAYING; so schickt das Band bei ⏯ zuverlässig „pause“.
+immer PLAYING; so schickt das Band bei ⏯ zuverlässig „pause“. Die Marke trägt
+``marke {quelle: uhr, art: marke}`` (P113, Vertrag §4).
+
+**Diagnosemodus** (hrv-watch ENTSCHEIDUNGEN #8, `docs/plan_diagnosemodus.md` §6): vorn die
+Seite „Diagnose“ (`components.marken_leiste.uhr_zeilen`); ⏯ dort setzt eine Diagnosemarke
+der gültigen Art mit Quelle „uhr“ — zur Zeit des Drucks: ``flet_medien`` stempelt jede
+Taste auf der Dart-Seite, der Kanal rechnet sie mit einem eigenen `UhrAbgleich` um. Beginnt
+eine Übung oder ein neuer Satz, springt das Band auf diese Seite.
 
 Kein Rechnen hier: Kennzahlen kommen aus `hrv_core.live`, die Seiten aus
 `core.uhr_seiten`. DFA α1 (`LiveFenster.dfa_a1`, 200 Schläge) und Atemfrequenz
@@ -43,6 +50,7 @@ from typing import Any
 from trainingsapp.core.uhr_seiten import (
     SEITE_HF,
     SEITEN_VORGABE,
+    TASTE_DIAGNOSE,
     TASTE_HRR,
     TASTE_JE_SEITE,
     TASTE_MARKE,
@@ -52,7 +60,11 @@ from trainingsapp.core.uhr_seiten import (
     Uhrpaket,
     paket,
 )
+from trainingsapp.devices.gatt import UhrAbgleich
 from trainingsapp.devices.profiles import QUELLE_EKG_RR
+
+#: Marke einer ⏯-Notiz (Vertrag §4, P113)
+UHR_MARKE: dict[str, str] = {"quelle": "uhr", "art": "marke"}
 
 log = logging.getLogger(__name__)
 
@@ -97,6 +109,10 @@ class MedienKanal:
         self.zustand = "noch kein Takt"
         #: Die letzten Schritte und Fehler, neueste zuletzt
         self.protokoll: deque[str] = deque(maxlen=30)
+        #: Dart-Uhr der Tasten → Uhr der App (eigener Abgleich: eigene Stoppuhr in flet_medien)
+        self._abgleich = UhrAbgleich()
+        #: Kontext der letzten Diagnose-Seite — ändert er sich zu einer Übung, springt das Band
+        self._diagnose_kontext: Any = None
 
     def _log(self, text: str) -> None:
         self.protokoll.append(f"{datetime.now():%H:%M:%S} {text}")
@@ -109,22 +125,24 @@ class MedienKanal:
             return SEITE_HF
         return self._seiten[self.seite % len(self._seiten)].art
 
-    def taste(self, name: str) -> None:
+    def taste(self, name: str, t_mono_us: int = 0) -> None:
         """Eine Taste vom Band: ``weiter``/``zurueck`` blättern, ``play``/``pause`` tun,
-        was die Seite sagt."""
+        was die Seite sagt. ``t_mono_us``: Stempel der Dart-Seite (0: keiner, ältere APK)."""
         self._log(f"Taste {name} auf {self.aktuelle_art()}")
         if name == "weiter":
             self.seite += 1
         elif name == "zurueck":
             self.seite -= 1
         elif name in ("play", "pause"):
-            self._taste_der_seite()
+            self._taste_der_seite(t_mono_us)
         # "stop": nichts — die Aufnahme bleibt, wie sie ist
 
-    def _taste_der_seite(self) -> None:
+    def _taste_der_seite(self, t_mono_us: int = 0) -> None:
         was = TASTE_JE_SEITE.get(self.aktuelle_art(), TASTE_MARKE)
         lauf = self.state.messlauf
-        if was == TASTE_NEU:
+        if was == TASTE_DIAGNOSE:
+            self._diagnosemarke(t_mono_us)
+        elif was == TASTE_NEU:
             self.seit_s = None if lauf is None else lauf.jetzt_s()
             self._log("Gipfel und Tal neu ab jetzt")
         elif was == TASTE_HRR:
@@ -134,10 +152,25 @@ class MedienKanal:
         else:
             self.marke()
 
+    def _diagnosemarke(self, t_mono_us: int) -> None:
+        """⏯ auf der Seite „Diagnose“: eine Marke der gültigen Art, Quelle „uhr“, zur Zeit
+        des Drucks (umgerechnet), sonst der Ankunft."""
+        from trainingsapp.ui.components import marken_leiste
+
+        t_ns = None
+        if t_mono_us:
+            with contextlib.suppress(Exception):
+                t_ns = round(self._abgleich.umrechnen(t_mono_us / 1e6) * 1e9)
+        zeile = marken_leiste.marke_setzen(
+            self.state, quelle="uhr", t_ns=t_ns, tm=t_mono_us or None
+        )
+        self._log("Diagnosemarke gesetzt" if zeile else "Diagnosemarke: keine Diagnose")
+
     def marke(self, text: str = "") -> bool:
-        """Eine Notiz an „jetzt“ (ohne Text: eine Marke) — ``False`` ohne laufende Aufnahme."""
+        """Eine Notiz an „jetzt“ (ohne Text: eine Marke) — ``False`` ohne laufende Aufnahme.
+        Die bloße Marke trägt ``uhr/marke`` (P113), eine Notiz mit Text (HRR) nicht."""
         lauf = self.state.messlauf
-        if lauf is None or lauf.notiz_hinzufuegen(text) is None:
+        if lauf is None or lauf.notiz_hinzufuegen(text, **self._marke_fuer(text)) is None:
             self._log("Marke: keine laufende Aufnahme")
             return False
         self._log("Marke gesetzt" if not text else f"Notiz „{text}“ gesetzt")
@@ -146,7 +179,32 @@ class MedienKanal:
                 beobachter()
         return True
 
+    @staticmethod
+    def _marke_fuer(text: str) -> dict[str, Any]:
+        return {} if text else {"marke": dict(UHR_MARKE)}
+
     # -- Werte ----------------------------------------------------------------
+
+    def _diagnose_zeilen(self) -> tuple[str, str] | None:
+        """Die Seite „Diagnose“, solange der Diagnosemodus aufzeichnet und ⏯ dafür gilt;
+        springt bei einer neuen Übung oder einem neuen Satz auf diese Seite."""
+        lauf = self.state.messlauf
+        if not getattr(lauf, "diagnose_aktiv", False):
+            self._diagnose_kontext = None
+            return None
+        if not getattr(self._einstellung(), "diagnose_uhr", True):
+            return None
+        from trainingsapp.ui.components import marken_leiste
+
+        with contextlib.suppress(Exception):
+            k, _ = marken_leiste.kontext(self.state)
+            schluessel = (k.uebung_code, k.satz)
+            if schluessel != self._diagnose_kontext:
+                if k.phase == "uebung" and self._diagnose_kontext is not None:
+                    self.seite = 0  # die Seite „Diagnose“ steht vorn
+                    self._log(f"Diagnose: neuer Satz — Band auf die Seite ({k.text()})")
+                self._diagnose_kontext = schluessel
+        return marken_leiste.uhr_zeilen(self.state)
 
     def _einstellung(self) -> Any:
         return self.state.hrv_einstellungen()
@@ -193,6 +251,7 @@ class MedienKanal:
             training=training_aus(self.state),
             warnung=getattr(lauf, "warnung", None),
             bereich=getattr(self, "_bereich", None),
+            diagnose=self._diagnose_zeilen(),
         )
 
     def _bereich_rechnen(self, lauf: Any) -> tuple[str, float | None] | None:
@@ -349,7 +408,7 @@ def anlegen(page: Any, state: Any) -> MedienKanal | None:
 
     def taste(e: Any) -> None:
         if kanal is not None:
-            kanal.taste(str(getattr(e, "taste", "")))
+            kanal.taste(str(getattr(e, "taste", "")), int(getattr(e, "t_mono_us", 0) or 0))
 
     medien = flet_medien.FletMedien(on_taste=taste)
     page.services.append(medien)

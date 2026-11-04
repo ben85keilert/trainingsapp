@@ -154,10 +154,17 @@ def aktualisieren(page: ft.Page, state: Any) -> None:
         page.update()
 
 
-def tippen(page: ft.Page, state: Any, typ: str | None = None) -> dict[str, Any] | None:
-    """Eine Marke setzen — die der Leiste (``typ=None``: Art aus dem Kontext) oder eine
-    Störung. Gibt die Zeile zurück (``None``: keine Diagnose)."""
-    ohne_auto_update()
+def marke_setzen(
+    state: Any,
+    *,
+    quelle: str = mt.QUELLE_HANDY,
+    typ: str | None = None,
+    t_ns: int | None = None,
+    tm: int | None = None,
+) -> dict[str, Any] | None:
+    """Eine Marke in den Mitschnitt — ``typ=None``: die Art aus dem Kontext (mit Nummer im
+    Satz), sonst etwa eine Störung. ``t_ns``: Zeitpunkt auf der Uhr der Messung (⏯ an der
+    Uhr: der Druck, umgerechnet), ``tm``: Zeit der Dart-Seite (µs). ``None`` ohne Diagnose."""
     lauf = _lauf(state)
     if lauf is None:
         return None
@@ -165,10 +172,35 @@ def tippen(page: ft.Page, state: Any, typ: str | None = None) -> dict[str, Any] 
     k, art = kontext(state)
     wahl = typ or art
     nr = stand.zaehler.weiter(wahl, k) if typ is None else None
-    zeile = lauf.marke(wahl, quelle=mt.QUELLE_HANDY, nr=nr, kontext=k.als_dict())
+    zeile = lauf.marke(wahl, quelle=quelle, nr=nr, kontext=k.als_dict(), t=t_ns, tm=tm)
     if zeile is not None and typ is None:
         stand.marken.append(int(zeile["id"]))
     _nachziehen(state, k, art)
+    return zeile
+
+
+def uhr_zeilen(state: Any) -> tuple[str, str] | None:
+    """Zeile 1 und 2 der Seite „Diagnose“ am Band: („Wdh 12“, „Kniebeuge S2“) — ``None``
+    ohne Diagnose."""
+    if _lauf(state) is None:
+        return None
+    stand = _stand(state)
+    k, art = kontext(state)
+    kurz = {dg.WDH: "Wdh", dg.ATEM: "Atem"}.get(art, art)
+    if k.uebung:
+        zweite = k.uebung + (f" S{k.satz}" if k.satz else "")
+    else:
+        zweite = "Pause" if k.phase == "pause" else "Messung"
+    return f"{kurz} {stand.zaehler.stand(art, k)}", zweite
+
+
+def tippen(page: ft.Page, state: Any, typ: str | None = None) -> dict[str, Any] | None:
+    """Ein Tipp in der Leiste (oder „Störung“): Marke mit Quelle „handy“ jetzt, Vibration.
+    Gibt die Zeile zurück (``None``: keine Diagnose)."""
+    ohne_auto_update()
+    zeile = marke_setzen(state, typ=typ)
+    if zeile is None:
+        return None
     haptik = getattr(state, "haptik", None)
     if haptik is not None:
         with contextlib.suppress(Exception):
@@ -361,8 +393,10 @@ __all__ = [
     "aktualisieren",
     "art_waehlen",
     "kontext",
+    "marke_setzen",
     "platz",
     "platz_einsetzen",
     "tippen",
+    "uhr_zeilen",
     "zuruecknehmen",
 ]

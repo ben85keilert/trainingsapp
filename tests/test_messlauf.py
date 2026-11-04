@@ -635,10 +635,15 @@ async def test_teil_speichern_und_weiter_dann_zusammenfuegen(tmp_path) -> None:
     await _bis(lauf, 10)
     lauf.backup_jetzt()
     assert list(tmp_path.rglob(".backup_*.jsonl"))
+    alt = lauf.aufnahme
     teil1 = await lauf.aufnahme_teilen_async(tmp_path)
     assert teil1 is not None and teil1.pfad.exists()
-    assert lauf.aufnahme is not None and lauf.aufnahme.titel == "Nacht"
-    assert lauf.aufnahme_dauer_s() < 5  # die neue zählt von vorn
+    assert lauf.aufnahme is not None and lauf.aufnahme is not alt
+    assert lauf.aufnahme.titel == "Nacht"
+    # Die neue zählt von vorn: ihre Uhr beginnt beim Teilen, nicht beim Start von Teil 1.
+    # Nicht an ihrer Dauer prüfen — während Teil 1 im Thread geschrieben wird, laufen die
+    # Schläge des 60-fach schnellen Simulators schon in die neue (CI, 4.11.2026: 6,1 s).
+    assert lauf.aufnahme.start_mono >= alt.start_mono + 10
     assert not list(tmp_path.rglob(".backup_*"))  # Kopf und Journal von Teil 1 sind weg
     await _bis(lauf, 5)
     assert lauf.aufnahme.beats  # der Strom läuft in die neue

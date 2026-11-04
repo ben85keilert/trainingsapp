@@ -1,7 +1,7 @@
 # Plan: Beschleunigungssensor in Übungen — Wiederholungen zählen, Atmung erfassen, Ein- und Ausatmung in der HRV
 
-Stand 4.11.2026: **Entwurf mit Bens Entscheidungen** — Ben: „Plane das beides durch“. P117–P120
-und P122–P126 sind entschieden (Abschnitt 12), offen ist nur P121 (das Band). Die Verfahren
+Stand 4.11.2026: **angenommen** — Ben: „Plane das beides durch“, danach P117–P126 entschieden
+(Abschnitt 12) und „Falls nicht [noch Fragen offen], kannst du anfangen den Plan umzusetzen“. Die Verfahren
 entstehen in hrv-research (dort `beschleunigung/docs/PLAN_ZAEHLEN_ATEMPHASEN.md`); hier steht,
 was die Apps bauen. Neu daraus als eigene Aufgabe: der **Taktgeber** im Timer (Abschnitt 7.6,
 `docs/offene_fragen.md` A18).
@@ -75,7 +75,7 @@ gemessen werden. Das ist der Knopf. +/-1 ist die Korrektur dafür.“
 | hrv-research (privat) | Verfahren entwickeln und prüfen: Live-Zählen, Vorlagen, Atemzüge und Atemphasen, Atem-HRV, später die Atmung je Wiederholung. Die Wahrheit kommt aus Video, Marken und Metronom; die Rohdaten aus dem Diagnosemodus und der Brustgurt-Diagnose. Plan dort: `beschleunigung/docs/PLAN_ZAEHLEN_ATEMPHASEN.md`. |
 | hrv-core (öffentlich) | Prototypen (`prototyp.wiederholungen` erweitert, `prototyp.atemzuege` und `prototyp.atem_hrv` neu), der Katalog der Vorlagen und das Ergebnisformat `atem-v1` (Atemphasen neben der Messdatei). Nur numpy. |
 | trainingsapp | Karte an der Übung, Strom, Zähl-Dienst, Knopf, Eintrag, Atem-Ebene, Taktgeber. Keine Rechenlogik in `ui/`. |
-| hrv-watch | später die Seite „Zählen“ am Band (A6, P121 offen) |
+| hrv-watch | nichts Neues: ⏯ je Wiederholung bleibt Diagnose und Algorithmusentwicklung (P121) |
 | praxis_gui | dieselben Funktionen und Formate aus hrv-core; die Bedienung baut es selbst (Abschnitt 9) |
 
 ## 3. A1: Die Karte „Beschleunigungssensor“ an der Übung
@@ -174,7 +174,7 @@ wofür taugt, klärt hrv-research offline an den Rohdaten aus dem Diagnosemodus.
 | Infoleiste und Laufleiste oben (`components/startleiste.py`, `ui/einheit.py`) | das Zählen als eigener Dienst neben HRV, Timer und GPS: „Zählen · Kniebeuge · 12“ (P119). Antippen führt zur Übung zurück |
 | Laufende Uhr und Timer der Übung (`components/uhr.py`, `views/uebung_timer.py`) | laufen Uhr und Zählen zugleich, steht die Zahl mit ±1 auch dort; die Karte „Sätze“ zeigt je Satz Zeit und Wiederholungen |
 | Marken-Leiste im Diagnosemodus | „Sensor 11“ live neben der Zahl der Tipps (Prüfung, Abschnitt 6) |
-| Band (hrv-watch) | später (A6, P121 offen) |
+| Band (hrv-watch) | kein Zählen am Band (P121): „Wer tippt 30 mal auf eine Uhr, um fit zu werden?“ ⏯ je Wiederholung bleibt im Diagnosemodus |
 
 ### 4.3 Ablauf
 
@@ -492,7 +492,7 @@ Patientenmessungen entwickelt; Läufe darauf startet Ben selbst.
 | **T** | Taktgeber im Timer, Animation getakteter Übungen mit Geschwindigkeitsregler, GIFs an der Übung, Spur `atemtakt` (A18, eigener Plan) | trainingsapp | M |
 | **B2** | Atem-HRV (`prototyp.atem_hrv`); Kennzahlen im Licht der Atmung (DFA α1, LF/HF …) | hrv-research → hrv-core → trainingsapp | M |
 | **A5** | Live-Zähler, der jede Wiederholung zählt, wenn sie geschieht; Vorlagen; Umkehrpunkt | hrv-research → hrv-core → trainingsapp | L |
-| **A6** | Band (Seite „Zählen“, P121); „Im Plan einstellen“; praxis_gui | hrv-watch, trainingsapp, praxis_gui | M |
+| **A6** | „Im Plan einstellen“; praxis_gui | trainingsapp, praxis_gui | M |
 | später | Atmung je Wiederholung; vergleichen, wie geatmet wurde (Konzept C3) | hrv-research | — |
 
 A1 und A2 brauchen nichts Neues aus hrv-core. Damit lässt sich sofort prüfen, wie gut der Sensor
@@ -513,5 +513,6 @@ einer APK.
 | P125 | Protokollfeld „Atmung“ | **ja**, aber es gibt noch keine Taktung: Taktgeber im Timer als neue Aufgabe (7.6, A18) |
 | P126 | Vorlagen schon am Anfang? | **erst nur „Automatisch“** |
 
-**Offen:** P121. Kommt am Band eine Seite „Zählen“ mit der Zahl, auf der ⏯ +1 ist (auf den
-anderen Seiten bleibt ⏯ die Marke wie heute, P113)? Vorschlag: ja, in A6.
+| P121 | Am Band eine Seite „Zählen“, ⏯ = +1? | **nein:** „Das Klicken für eine Wiederholung ist eigentlich nur für Diagnose und Algorithmusentwicklung. In einer Übung selbst macht das keinen Sinn, wer tippt 30 mal auf eine Uhr, um fit zu werden?“ |
+
+P117 bestätigt (Ben): die Schalter sitzen an jeder Übung, nicht einer für alle.

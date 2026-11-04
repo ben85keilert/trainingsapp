@@ -743,8 +743,10 @@ async def test_teil_speichern_nimmt_das_ekg_mit(tmp_path) -> None:
     await _bis(lauf, 15)
     lauf.backup_jetzt()
     assert list(tmp_path.rglob(".backup_*_ecg.jsonl"))
+    alt = lauf.aufnahme
     teil1 = await lauf.aufnahme_teilen_async(tmp_path)
-    assert teil1 is not None
+    neu = lauf.aufnahme
+    assert teil1 is not None and alt is not None and neu is not None
     assert not list(tmp_path.rglob(".backup_*"))  # auch das EKG-Journal von Teil 1 ist weg
     await _bis(lauf, 15)
     lauf.backup_jetzt()
@@ -756,7 +758,15 @@ async def test_teil_speichern_nimmt_das_ekg_mit(tmp_path) -> None:
     assert teil2 is not None and teil2.pfad != teil1.pfad
     e1, e2 = ekg_laden(ekg_pfad(teil1.pfad)), ekg_laden(ekg_pfad(teil2.pfad))
     assert e1.n > 130 * 10 and e2.n > 130 * 10
-    assert e2.t_wall_start_s is not None and -1.0 < e2.t_wall_start_s < 2.0  # bezogen auf Teil 2
+    # Teil 2 rechnet ab seinem eigenen Start und schließt ohne Lücke an Teil 1 an. Geprüft an
+    # der Naht, nicht am Wert allein: Hängt die Verarbeitung hinterher, kommen Rahmen von vor
+    # dem Teilen erst danach an und beginnen Teil 2 mit negativer Zeit — beim 60-fachen
+    # Simulator auf einem langsamen Runner um 20 s (CI, 4.11.2026: −19,8). Bezöge sich Teil 2
+    # auf Teil 1, läge die Naht um die Dauer von Teil 1 (≥ 15 s) daneben.
+    assert e1.t_wall_start_s is not None and e2.t_wall_start_s is not None
+    ende1 = e1.t_wall_start_s + e1.n / e1.rate_hz
+    anfang2 = (neu.start_mono - alt.start_mono) + e2.t_wall_start_s
+    assert abs(anfang2 - ende1) < 0.5
     for teil in (teil1, teil2):
         assert json.loads(teil.pfad.read_text(encoding="utf-8"))["ecg_aufzeichnung"] is True
     assert not list(tmp_path.rglob(".backup_*"))

@@ -36,6 +36,7 @@ uv run pytest tests/test_messlauf.py::test_name -q   # ein einzelner Test
 uv run pytest --doctest-modules src/trainingsapp/core src/trainingsapp/devices   # Doctests (laufen in CI)
 uv run ruff check . && uv run ruff format --check .   # Linter + Formatprüfung
 uv run mypy                                    # Typprüfung (Paket ist in pyproject konfiguriert)
+uv run python scripts/pruefe_flet_beispiele.py   # Flet-Skripte des Lernpfads ohne Bildschirm (CI)
 ```
 
 Vor jedem Pull Request muss laufen:
@@ -302,4 +303,8 @@ App-Tests (Notizen, Export, UI), die eine echte Messdatei brauchen.
 
 Die App entsteht entlang eines Lernpfads (`docs/tutorial/`); `ui/` ist bewusst noch eine
 Hülle mit Platzhalteransichten. Die Tutorial-Beispielskripte laufen in CI mit — wenn ein
-Beispiel bricht, ist der Lernpfad kaputt.
+Beispiel bricht, ist der Lernpfad kaputt. Flet-freie Beispiele stehen als Liste im Schritt
+„Beispiele des Lernpfads“; jedes Skript, das `flet` importiert (dazu `src/main.py`), findet
+`scripts/pruefe_flet_beispiele.py` am Ende des Jobs `test` selbst — mit den
+Laufzeitabhängigkeiten wie in der gebauten App, Control-Baum mit `page`-Attrappe,
+`DeprecationWarning` = Fehler. Ereignis-Handler und Code in `.md`-Dateien prüft es nicht.

@@ -54,7 +54,7 @@ from typing import Any
 
 import flet as ft
 from hrv_core import herzfrequenz as hz
-from hrv_core.aufnahme import backup_lesen
+from hrv_core.aufnahme import backup_entfernen, backup_lesen
 from hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
 from hrv_core.regeln import Korrekturregeln
 from hrv_core.trends import KENNZAHLEN
@@ -563,7 +563,9 @@ def backup_dialog(page: ft.Page, state: AppState) -> ft.AlertDialog:
         return Erledigt("Messung wiederhergestellt.", f"/messung/{eintrag.id}")
 
     def loeschen(pfad: Path) -> Erledigt:
-        pfad.unlink(missing_ok=True)
+        # Kopf, Journal der Schläge und alle Journale des Beiwerks (EKG, Mitschnitt) — vorher
+        # blieben die Journale liegen (V5, `docs/plan_diagnosemodus.md`)
+        backup_entfernen(pfad)
         state.hrv_backups = [p for p in state.hrv_backups if p != pfad]
         return Erledigt("Sicherung gelöscht.")
 

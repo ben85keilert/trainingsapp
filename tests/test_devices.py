@@ -953,3 +953,21 @@ async def test_fehlversuche_zaehlen_erst_nach_stabiler_phase_von_vorn() -> None:
     await zeit.vorspulen(3)
     assert transport.anzahl("connect") == n + 1  # wieder Versuch 1: 3 s
     await quelle.disconnect()
+
+
+async def test_pmd_rahmen_halten_den_watchdog_nicht_wach() -> None:
+    """Lebenszeichen ist 0x2A37: Kommen nur noch PMD-Rahmen (EKG, Beschleunigung), warnt der
+    Watchdog nach 3 s und verbindet nach 8 s neu (`docs/plan_diagnosemodus.md`, V2)."""
+    quelle, transport, zeit, _s = await verbinde(H10_NAME, H10_DIENSTE)
+    transport.senden(HR_MEASUREMENT_UUID, bytes([0x10, 60, 0x00, 0x04]), zeit.t)
+    await _ruhe()
+    for _ in range(3):
+        quelle._pmd_empfangen(quelle._generation, rahmen_bauen(MEAS_ECG, 1, b"\x00" * 3), zeit.t)
+        await zeit.vorspulen(1)
+    assert quelle.aktueller_status.meldung.startswith("Keine Daten seit 3 s")
+    assert quelle.letzte_pmd is not None
+    for _ in range(5):
+        quelle._pmd_empfangen(quelle._generation, rahmen_bauen(MEAS_ECG, 1, b"\x00" * 3), zeit.t)
+        await zeit.vorspulen(1)
+    assert transport.anzahl("disconnect") == 1
+    await quelle.disconnect()

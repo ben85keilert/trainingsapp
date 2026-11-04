@@ -28,6 +28,7 @@ import flet as ft
 from trainingsapp.core.laufend import Benachrichtigung
 from trainingsapp.devices.base import DeviceInfo
 from trainingsapp.devices.gatt import UhrAbgleich
+from trainingsapp.ui.components.layout import ohne_auto_update
 
 Empfaenger = Callable[[bytes, float], None]
 
@@ -65,7 +66,14 @@ class FletBleTransport:
     # -- Ereignisse aus Dart ------------------------------------------------------
 
     def _notification(self, e: Any) -> None:
-        """Synchron — so bleibt die Reihenfolge der Pakete erhalten."""
+        """Synchron — so bleibt die Reihenfolge der Pakete erhalten.
+
+        Ohne Auto-Update: Mit EKG und Beschleunigung kommen acht Pakete je Sekunde, und
+        Flet verglich nach jedem die ganze Seite — in der Brustgurt-Diagnose (hrv-research)
+        die Ursache einer Verzögerung, die die App unbedienbar machte. Angezeigt wird ohnehin
+        aus den Schleifen der Ansichten (`docs/plan_diagnosemodus.md`, V1).
+        """
+        ohne_auto_update()
         ziel = self._empfaenger.get(_schluessel(e.device_id, e.service, e.characteristic))
         if ziel is None:
             return

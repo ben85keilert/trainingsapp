@@ -200,6 +200,13 @@ def _an_den_anfang(e: dict, start_utc: datetime | None) -> dict:
 NUR_PULS_NACH = 10
 
 
+class _Laufend:
+    """Platzhalter in `Messlauf._schreiben`: „der laufende EKG-Sammler“ (``None`` heißt keiner)."""
+
+
+_LAUFEND = _Laufend()
+
+
 class Messlauf:
     """Verbindet eine Quelle mit Live-Anzeige und Aufnahme."""
 
@@ -822,10 +829,14 @@ class Messlauf:
         neu.batterie_prozent = self.status.batterie_prozent
         neu.titel = alt.titel
         grenzen_alt, self._grenzen = self._grenzen, {}
+        # Das EKG bis hier gehört zu Teil 1: sein Sammler geht mit, Teil 2 beginnt mit dem
+        # nächsten Rahmen einen neuen (mit eigenem Journal und `ecg_aufzeichnung`) — vorher
+        # bekam Teil 1 kein `_ecg.json`, und alles landete neben dem letzten Teil (V4)
+        ekg_alt, self.ekg = self.ekg, None
         self._dateiname_fest = None
         self.aufnahme = neu
         self._letztes_backup = jetzt
-        return await asyncio.to_thread(self._schreiben, alt, basis, grenzen_alt)
+        return await asyncio.to_thread(self._schreiben, alt, basis, grenzen_alt, ekg_alt)
 
     def _stopp_beginnen(self) -> Aufnahme | None:
         """Die Aufnahme beenden: ab jetzt kein Schlag mehr hinein. ``None``: nichts
@@ -852,13 +863,16 @@ class Messlauf:
         aufnahme: Aufnahme,
         basis: Path,
         grenzen: dict[str, list[tuple[dict, str, bool]]] | None = None,
+        ekg: EkgSammler | _Laufend | None = _LAUFEND,
     ) -> Gespeichert:
         """Messdatei, Abschnitte je Spur und Diagnoseprotokoll schreiben — liest ``self``
         nur, darum auch in einem Thread möglich. ``grenzen``: die Spuren dieser Aufnahme
-        (ohne Angabe die laufenden)."""
+        (ohne Angabe die laufenden); ``ekg``: der EKG-Sammler dieser Aufnahme (ohne Angabe
+        der laufende)."""
         pfad = aufnahme.speichern(self._ordner(basis))
-        ekg = self.ekg
-        if ekg is not None and ekg.n and grenzen is None:
+        if isinstance(ekg, _Laufend):
+            ekg = self.ekg
+        if ekg is not None and ekg.n:
             # Das Beiwerk neben die Messdatei; das Journal des Backups ist damit erledigt
             with contextlib.suppress(OSError):
                 ekg.schreiben(pfad)

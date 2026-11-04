@@ -250,6 +250,8 @@ class PolarQuelle(HeartRateSource):
         self._rr_ignoriert_gemeldet = False
 
         self._letzte_daten = 0.0
+        #: Ankunft des letzten PMD-Rahmens (Uhr der Quelle) — zur Anzeige, nicht für den Watchdog
+        self.letzte_pmd: float | None = None
         self._daten_gesehen = False
         self._gewarnt = False
         self._meldung_warten = ""
@@ -862,10 +864,15 @@ class PolarQuelle(HeartRateSource):
 
     def _pmd_empfangen(self, gen: int, daten: bytes, t_capture: float) -> None:
         """PMD-Datenrahmen: PPI wird ausgewertet, EKG (auf Wunsch) roh durchgereicht,
-        alles andere still verworfen."""
+        alles andere still verworfen.
+
+        PMD hält den Watchdog **nicht** wach: Lebenszeichen ist 0x2A37, das immer abonniert ist
+        und auch im PPI-Modus jede Sekunde kommt. Liefen EKG und Beschleunigung weiter, während
+        die Herzfrequenz schweigt, verbände die Quelle sonst nie neu (`plan_diagnosemodus.md`, V2).
+        """
         if gen != self._generation or not self._laeuft:
             return
-        self._daten_da()
+        self.letzte_pmd = self._uhr()
         rahmen = parse_pmd_rahmen(daten)
         if rahmen is None:
             return

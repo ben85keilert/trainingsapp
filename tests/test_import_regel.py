@@ -100,3 +100,35 @@ def test_domaene_ist_ohne_flet_importierbar() -> None:
         "trainingsapp.devices",
     ):
         importlib.import_module(modul)
+
+
+def test_uhrkanal_laeuft_ohne_flet() -> None:
+    """Die Tests des Uhrkanals laufen auch ohne flet, wie in der CI (``uv sync --only-group
+    ci``): ⏯ setzt Diagnosemarken über `components.marken_stand`, nie über die Leiste, die flet
+    braucht — auch nicht über einen Import erst in der Funktion. Im Kindprozess ist flet
+    gesperrt, damit ein Verstoß schon lokal auffällt, wo flet installiert ist."""
+    import os
+    import subprocess
+    import sys
+
+    datei = Path(__file__).with_name("test_uhr_kanal.py")
+    # Ein Finder, der flet nicht findet — wie in der CI, wo es nicht installiert ist. Plugins
+    # lädt pytest dafür nicht selbst: flet bringt eins mit, und pytest würde flet dann an
+    # diesem Finder vorbei laden (Assertion-Umschreibung). pytest-asyncio kommt ausdrücklich.
+    code = (
+        "import sys\n"
+        "class OhneFlet:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name == 'flet' or name.startswith('flet.'):\n"
+        "            raise ModuleNotFoundError(\"No module named 'flet' (gesperrt)\")\n"
+        "        return None\n"
+        "sys.meta_path.insert(0, OhneFlet())\n"
+        "import pytest\n"
+        "sys.exit(pytest.main(['-q', '-p', 'no:cacheprovider', '-p', 'pytest_asyncio.plugin',"
+        f" {str(datei)!r}]))\n"
+    )
+    umgebung = {**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+    lauf = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, env=umgebung
+    )
+    assert lauf.returncode == 0, (lauf.stdout + lauf.stderr)[-3000:]

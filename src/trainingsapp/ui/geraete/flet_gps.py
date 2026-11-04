@@ -24,6 +24,7 @@ import flet_geolocator as fgl
 
 from trainingsapp.core.strecke import Punkt
 from trainingsapp.devices.gps import GpsQuelle
+from trainingsapp.ui.components.layout import ohne_auto_update
 
 #: Berechtigung im Klartext für die Oberfläche
 ERTEILT = "erteilt"
@@ -103,6 +104,7 @@ class FletGpsQuelle(GpsQuelle):
     # -- Ereignisse aus Dart ------------------------------------------------------
 
     def _position(self, e: Any) -> None:
+        ohne_auto_update()  # jede Sekunde eine Position — nie die ganze Seite vergleichen
         p = e.position
         if p is None or p.latitude is None or p.longitude is None:
             return

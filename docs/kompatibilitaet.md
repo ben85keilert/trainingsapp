@@ -73,6 +73,9 @@ Abweichung ist für praxis_gui folgenlos.
 | `sensor_*_truth.json` | Wahrheitsdatei des Generators (`truth-v1`) |
 | `sensor_*__c01.json` | korrigierte Fassung (`corrected-v1`) |
 | `sensor_*_diagnose.txt` | Verbindungsprotokoll der trainingsapp (Text, nur zur Fehlersuche). Kein JSON, darum für praxis_gui unsichtbar — dort bleibt es beim Löschen einer Messung liegen |
+| `sensor_*_mitschnitt.jsonl` | Rohmitschnitt des Diagnosemodus (`mitschnitt-v1`, seit 4.11.2026, Abschnitt 14): jedes Bluetooth-Paket, Marken, Kontext. JSON Lines, für praxis_gui unsichtbar |
+| `.backup_<start>_ecg.jsonl`, `.backup_<start>_mitschnitt.jsonl` | Begleit-Journale des Crash-Backups (Abschnitt 6a) |
+| `Diagnose/<ts>_<gerät>/` | Rohmitschnitt **ohne** Messung (unbekanntes Gerät, Geräteprobe) — absichtlich nicht unter `Messungen/` |
 | `.backup_<start>.json` | Crash-Backup, kein Analyse-Artefakt (Abschnitt 6a) |
 | `*.json.tmp` | Zwischenstand eines atomaren Schreibvorgangs |
 | `Messungen/Sitzungen/sitzung_*.json` | Mehrgeräte-Sitzung (`sitzung-v1`), nur lesen |
@@ -88,7 +91,9 @@ Abweichung ist für praxis_gui folgenlos.
 
 - `_analyzed.json`, `_ecg.json`, `_ppg.json`, `_truth.json` (Beiwerk),
 - `__c<NN>.json` (korrigierte Fassung — sie gehört zur Rohdatei, nicht daneben),
-- `.backup_*` und `*.tmp` (fallen schon durch Präfix bzw. Endung heraus).
+- `.backup_*`, `*.tmp` und `*.jsonl` (fallen schon durch Präfix bzw. Endung heraus —
+  darum braucht der Mitschnitt keinen Eintrag in der Liste; `hrv_core.deid` kennt seine
+  Endung trotzdem als Beiwerk, `BEIWERK_SUFFIXE`).
 
 praxis_gui zählt `__cNN` als Messdatei mit; wir zeigen nur die Rohdatei.
 
@@ -106,7 +111,10 @@ denselben Parametern geschrieben wie das Original (`ensure_ascii=False, indent=2
 und ist bis auf diese Zeile byteidentisch; Dateien ohne `adresse` bleiben
 byteidentisch. Dasselbe gilt für den Forschungsexport einer Einheit
 (`core.forschung`) und das Teilen des Protokolls aus der Live-Ansicht. Die
-Originaldatei auf dem Gerät behält die Adresse.
+Originaldatei auf dem Gerät behält die Adresse. Der **Rohmitschnitt** (Abschnitt 14)
+geht nur bereinigt hinaus: Zeile für Zeile durch `hrv_core.deid.mitschnitt_zeilen`
+(Adressen maskiert, Gerätename auf das Modell gekürzt, Zeilen von Gerätename,
+Systemkennung und Seriennummer entfernt, Unbekanntes entfernt).
 Die übrigen Ausschlüsse sind deckungsgleich.
 
 **Seit dem 26.10.2026 liegt neben `Messungen/` der Ordner `Bewegung/`** (Ben: „Für HRV
@@ -352,8 +360,8 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
 
 | Feld | Werte | Bedeutung |
 |---|---|---|
-| `quelle` | `einheit`, `timer`, `plan`, `gps`, `person` | wer die Marke setzte — `person`: ein Tipp in der Übungsausführung (seit 19.10.2026) |
-| `art` | `start`, `ende`, `abschnitt`, `pause`, `weiter`, `uebung_start`, `uebung_ende`, `km`, `leistung`, `abschluss`, `erholung` | was sie bedeutet — `leistung`: „geleistet bis hierher“ (die **Tippzeit**, nie der Beginn des Satzes), `abschluss`: der Eintrag ist fertig, `erholung`: Ende einer Belastung, ab hier zählt die HF-Erholung; `talk`: Talk-Test, „Sprechen wird schwer“ — die HF der 30 s davor ist der Marker für Schwelle 1 (beide seit 29.10.2026, `docs/plan_herzfrequenz.md`) |
+| `quelle` | `einheit`, `timer`, `plan`, `gps`, `person`, `uhr` | wer die Marke setzte — `person`: ein Tipp in der Übungsausführung (seit 19.10.2026); `uhr`: ⏯ am Band (hrv-watch, seit 4.11.2026, P113) |
+| `art` | `start`, `ende`, `abschnitt`, `pause`, `weiter`, `uebung_start`, `uebung_ende`, `km`, `leistung`, `abschluss`, `erholung`, `marke` | was sie bedeutet — `marke`: eine bloße Marke ohne Text (⏯ am Band, `uhr/marke`; vorher eine leere Notiz ohne `marke`, nicht von anderen zu unterscheiden) — `leistung`: „geleistet bis hierher“ (die **Tippzeit**, nie der Beginn des Satzes), `abschluss`: der Eintrag ist fertig, `erholung`: Ende einer Belastung, ab hier zählt die HF-Erholung; `talk`: Talk-Test, „Sprechen wird schwer“ — die HF der 30 s davor ist der Marker für Schwelle 1 (beide seit 29.10.2026, `docs/plan_herzfrequenz.md`) |
 | `spur` | `timer`, `uebung`, `km` | die Abschnittsspur, die sie teilt (Abschnitt 9b) |
 | `einheit` | Text (UUID) | der gemeinsame Ablauf in der App, dessen Zeitleiste die Marke kommt (`docs/plan_einheit.md`) |
 | `name` | Text | Abschnittsname ohne Zusatz („Belastung“, „Planke“) |
@@ -527,6 +535,13 @@ Messungen/<Geräteordner>/.backup_<YYYY-MM-DD>_<HHMMSS>.json     # UTC-Startzeit
   sie ist. Das Diagnoseprotokoll (`_diagnose.txt`) entsteht dabei nicht.
 - Zusätzlich zum 15-s-Takt sichert die App, sobald sie in den Hintergrund geht
   (`page.on_app_lifecycle_state_change` → `Messlauf.backup_jetzt`).
+- **Begleit-Journale** am Stamm des Kopfs: `.backup_<start>_ecg.jsonl` (EKG-Rohsignal,
+  seit 30.10.2026, `hrv_core.ekg`) und `.backup_<start>_mitschnitt.jsonl` (Rohmitschnitt
+  des Diagnosemodus, seit 4.11.2026, Abschnitt 14). Beim Speichern und beim
+  Wiederherstellen werden sie zum Beiwerk der Messdatei (`sensor_<start>_ecg.json`,
+  `sensor_<start>_mitschnitt.jsonl`); „Löschen“ im Dialog löscht sie mit
+  (`hrv_core.aufnahme.backup_entfernen`, seit hrv-core 0.6.0). Beide werden nur
+  angehängt, mit `fsync`; eine halbe letzte Zeile nach einem Absturz übergeht der Leser.
 
 ## 7. Regeln beim Lesen
 
@@ -767,3 +782,38 @@ hrv-research (`hrv_research.bewegung`). Dieselbe Datei liegt im Forschungsexport
 Einheit (`einheit-v1`, `docs/plan_einheit.md` §8), dort nennt sie die GPS-Beteiligung.
 Tests: `tests/test_ausdauer.py::test_regel_0_keine_koordinate_in_hrv_export_tagebuch_und_sync`,
 `tests/test_strecke.py::test_rohspur_ohne_ort_ist_eine_dateikopie_mit_abstand`.
+
+---
+
+## 14. `mitschnitt-v1` — Rohmitschnitt des Diagnosemodus (seit 4.11.2026)
+
+Plan: `docs/plan_diagnosemodus.md`; Format, Schreiber und Leser in hrv-core
+(`hrv_core.mitschnitt`, Feldliste in `hrv-core/docs/formate.md`), gemeinsam mit der
+Brustgurt-Diagnose in hrv-research (P116: gleiche Grundlage, verschiedene Eingänge).
+Nur trainingsapp-intern und für die Auswertung: praxis_gui kennt das Format nicht und muss
+es nicht kennen.
+
+- **Datei:** `Messungen/<Geräteordner>/sensor_<start>_mitschnitt.jsonl` neben der
+  Messdatei, während der Aufnahme `.backup_<start>_mitschnitt.jsonl` (Abschnitt 6a); ohne
+  Messung `Diagnose/<ts>_<gerät>/mitschnitt.jsonl`. JSON Lines, nur angehängt.
+- **Zeilen:** `{"art": …, "t": …}` mit `t` = monotone Uhr der App in ns — dieselbe Uhr wie
+  `t_capture` der Messwerte; die Wanduhr der Messung (`t_wall_s`) folgt über die Uhrpaare.
+  Arten: `kopf`, `n` (Benachrichtigung, Hex), `w` (Kommando), `r` (Lesen), `v` (Verbindung
+  und Protokoll), `uhr` (alle 10 s monotone Uhr ↔ UTC), `probe` (Akku, Verzug), `marke`,
+  `marke_weg`, `kontext`.
+- **Marken** stehen hier, **nicht** in `ereignisse` der Messdatei (Plan §3.4): hunderte je
+  Messung würden die Notizliste und praxis_gui fluten. Eine Marke hat `id`, `typ` (`wdh`,
+  `atem`, `stoerung`, `marke`), `quelle` (`handy`, `uhr`), `nr` im Satz und `kontext`;
+  `marke_weg` nimmt eine zurück, gelöscht wird nie.
+- **Nie im Mitschnitt:** GPS (Regel 0 in `docs/plan_gps.md`), die Seriennummer (0x2A25) und
+  die Systemkennung (0x2A23) — die App liest beide nie. Die Bluetooth-Adresse steht nur in
+  der Datei auf dem Gerät; hinaus geht der Mitschnitt nur bereinigt (Abschnitt 2, Export).
+- **Geräteprobe ohne Messung** (Stufe 6): `Diagnose/<UTC-Start>_<Modell>/mitschnitt.jsonl`
+  (Kopf mit `geraet.art = unbekannt` und dem Abbild der Dienste) und `probe.json`
+  (`format: geraeteprobe-v1` — `geraet` {`name`, `modell`}, `formular` {`hersteller`, `was`,
+  `vergleich`}, `dienste`, `gelesen`, `abonniert`, `fehler`, `zusammenfassung`). Nie
+  geschrieben wird auf das Gerät; Seriennummer und Systemkennung liest die App nie. Geteilt als
+  ZIP mit bereinigtem Mitschnitt (`devices.erkundung.probe_zip`).
+- **Messdatei unverändert:** raw-v1 bekommt kein neues Feld; die Messung ist auch ohne den
+  Mitschnitt vollständig. Löschen des Mitschnitts („Diagnose löschen“) lässt die Messung
+  stehen; Löschen der Messung nimmt ihr Beiwerk mit.

@@ -54,11 +54,12 @@ from typing import Any
 
 import flet as ft
 from hrv_core import herzfrequenz as hz
-from hrv_core.aufnahme import backup_lesen
+from hrv_core.aufnahme import backup_entfernen, backup_lesen
 from hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
 from hrv_core.regeln import Korrekturregeln
 from hrv_core.trends import KENNZAHLEN
 
+from trainingsapp import config
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.hf_profil import bereiche_fuer, grenzen_bpm
 from trainingsapp.core.hf_training import (
@@ -100,7 +101,7 @@ from trainingsapp.devices.messlauf import (
     Messlauf,
     backup_wiederherstellen,
 )
-from trainingsapp.devices.profiles import geraeteart
+from trainingsapp.devices.profiles import geraeteart, reifegrad_text
 from trainingsapp.devices.simulated import (
     SIM_PPI,
     SIM_PREFIX,
@@ -145,6 +146,7 @@ from trainingsapp.ui.components.notizen import (
     uebungsquellen,
 )
 from trainingsapp.ui.components.scroll import scroll_merken
+from trainingsapp.ui.components.sensorblatt import diagnosemodus_knopf
 from trainingsapp.ui.components.strecken_export import strecken_export_fragen
 from trainingsapp.ui.components.titel import (
     geuebte_plaene,
@@ -563,7 +565,9 @@ def backup_dialog(page: ft.Page, state: AppState) -> ft.AlertDialog:
         return Erledigt("Messung wiederhergestellt.", f"/messung/{eintrag.id}")
 
     def loeschen(pfad: Path) -> Erledigt:
-        pfad.unlink(missing_ok=True)
+        # Kopf, Journal der Schläge und alle Journale des Beiwerks (EKG, Mitschnitt) — vorher
+        # blieben die Journale liegen (V5, `docs/plan_diagnosemodus.md`)
+        backup_entfernen(pfad)
         state.hrv_backups = [p for p in state.hrv_backups if p != pfad]
         return Erledigt("Sicherung gelöscht.")
 
@@ -587,17 +591,46 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
     hinweis_text = ft.Text("", size=12, opacity=0.7, visible=False)
     ring = ft.ProgressRing(width=18, height=18, stroke_width=2, visible=False)
 
+    def diagnose_angeboten() -> bool:
+        return config.ist_aktiv("diagnosemodus") and state.hrv_einstellungen().diagnose_anbieten
+
     def zeile(info: DeviceInfo) -> ft.Control:
         # Ehrlich: „Brustgurt" nur, wenn Name oder Profil es sicher sagen
         teile = [geraeteart(info.name, info.profil_id)]
         if info.rssi is not None:
             teile.append(f"{info.rssi} dBm")
+        knoepfe: list[ft.Control] = []
+        if diagnose_angeboten():
+            # Diagnosemodus: Reifegrad des Treibers (hrv-core) und Rohmitschnitt ohne Messung —
+            # auch für Geräte ohne Herzfrequenz-Dienst (Plan §2.8)
+            teile.append(f"Treiber {reifegrad_text(info.profil_id) or 'unbekannt'}")
+            knoepfe.append(
+                ft.IconButton(
+                    ft.Icons.BUG_REPORT_OUTLINED,
+                    tooltip="Rohmitschnitt ohne Messung (Geräteprobe)",
+                    on_click=probe_oeffner(info),
+                )
+            )
+        if info.profil_id or not diagnose_angeboten():
+            knoepfe.append(ft.FilledTonalButton("Verbinden", on_click=verbinder(info)))
         return ft.ListTile(
             leading=ft.Icon(ft.Icons.BLUETOOTH),
             title=ft.Text(info.name or info.id),
             subtitle=ft.Text("  ·  ".join(teile), size=12),
-            trailing=ft.FilledTonalButton("Verbinden", on_click=verbinder(info)),
+            trailing=ft.Row(tight=True, spacing=4, controls=knoepfe),
         )
+
+    def probe_oeffner(info: DeviceInfo) -> Callable[[], Any]:
+        async def handler() -> None:
+            if state.messlauf is not None and state.messlauf.verbunden:
+                warnen("Erst die Messung trennen — ein Gerät hat nur eine Verbindung.")
+                return
+            state.probe_ziel = (info.id, info.name)
+            if state.geraeteprobe is not None and not state.geraeteprobe.laeuft:
+                state.geraeteprobe = None
+            await page.push_route("/geraeteprobe")
+
+        return handler
 
     def bekannte_zeichnen() -> None:
         """„Zuletzt verbunden" — ein Tipp verbindet direkt, ohne Suche."""
@@ -673,7 +706,16 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             if (warnung := await bluetooth_warnung()) is not None:
                 warnen(warnung)
                 return
-            quelle = PolarQuelle(state.ble_transport, ekg=ekg)
+            einst = state.hrv_einstellungen()
+            if config.ist_aktiv("diagnosemodus") and einst.diagnose_anbieten:
+                # Diagnosemodus angeboten: ein Transport, der mithören kann — ohne
+                # angehängten Mitschnitt zählt er nur (`devices.mitschnitt`, Plan §5)
+                from trainingsapp.devices.mitschnitt import MitschnittTransport
+
+                transport = MitschnittTransport(state.ble_transport)
+                quelle = PolarQuelle(transport, ekg=ekg, protokoll=transport.protokoll)
+            else:
+                quelle = PolarQuelle(state.ble_transport, ekg=ekg)
         else:
             ring.visible = False
             hinweis_text.value = "Bluetooth gibt es nur in der App auf dem Handy."
@@ -1857,6 +1899,11 @@ def _live_teil(
                             ft.TextButton(
                                 "Trennen", icon=ft.Icons.BLUETOOTH_DISABLED, on_click=trennen
                             ),
+                            # Diagnosemodus (Ben, 4.11.2026): nur wenn angeboten — öffnet
+                            # das Sensorblatt (`components.sensorblatt`)
+                            diagnosemodus_knopf(
+                                page, state, lauf, aufnahme_starten=aufnahme_starten
+                            ),
                         ],
                     ),
                     # Schon vor dem Start (Ben, 17.10.2026) — der Start übernimmt beides
@@ -1889,6 +1936,9 @@ def _live_teil(
                             dauer,
                             ft.FilledButton(
                                 "Stopp & speichern", icon=ft.Icons.STOP, on_click=aufnahme_stoppen
+                            ),
+                            diagnosemodus_knopf(
+                                page, state, lauf, aufnahme_starten=aufnahme_starten
                             ),
                         ],
                     ),

@@ -82,6 +82,10 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     # Paketquellen (core/paketquelle.py): Übungspakete online auf neue Stände prüfen.
     # Die Praxis-Edition bekommt ihre Pakete von der Praxis.
     "paket_quellen": {Edition.SOLO},
+    # Diagnosemodus: Rohmitschnitt, Zusatzströme, Marken (docs/plan_diagnosemodus.md) — in
+    # beiden Editionen (Ben, 4.11.2026, P112): Die Daten bleiben auf dem Gerät, hinaus nur
+    # über „Teilen“ und dann bereinigt; keine Netzverbindung.
+    "diagnosemodus": {Edition.SOLO, Edition.PRAXIS},
 }
 
 

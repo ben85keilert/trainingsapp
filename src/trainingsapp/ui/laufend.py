@@ -63,6 +63,9 @@ def _hrv(state: Any) -> Laufend | None:
     with contextlib.suppress(Exception):
         if hf := lauf.live.kennzahlen().hf_bpm:
             teile.append(f"HF {hf}")
+    # Der Diagnosemodus kostet Akku — auch bei ausgeschaltetem Display sichtbar (Plan §2.4)
+    if getattr(lauf, "diagnose_aktiv", False):
+        teile.append("● Diagnose")
     return Laufend("HRV-Messung", " · ".join(teile), f"HRV {dauer}", lauf.aufnahme.start_utc)
 
 

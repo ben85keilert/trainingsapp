@@ -14,6 +14,8 @@ für Fachleute — langfristig werden das Profi-Einstellungen.
   Kurvenansicht.
 - Analyse: Frequenz und Nichtlinear anbieten (bei optischen Sensoren aus).
 - Notizen: Übungen aus Plänen anbieten.
+- Diagnosemodus (Ben, 4.11.2026, `docs/plan_diagnosemodus.md` §2.1): anbieten, Form der
+  Marken-Leiste, ⏯ an der Uhr, Ablage der Mitschnitte mit „Alle Diagnosedaten löschen“.
 - Erweitert: Rechnen (Latenz vor dem Nachrechnen, Takt des Live-Spektrums),
   Kennzahlen (pNNx-Schwelle), automatische Korrektur (`hrv_core.regeln`).
 
@@ -29,6 +31,8 @@ from typing import Any
 import flet as ft
 from hrv_core.regeln import Korrekturregeln
 
+from trainingsapp import config
+from trainingsapp.core import diagnose as dg
 from trainingsapp.core.hrv_ansicht import PNN_WAHL, Ansicht
 from trainingsapp.core.hrv_einstellungen import (
     ACHSEN_NAMEN,
@@ -635,6 +639,95 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
         ],
     )
 
+    # -- Diagnosemodus: anbieten, Leiste, Uhr, Ablage (Plan §2.1) ----------------------
+    ablage_text = ft.Text("", size=12)
+    ablage_loeschen = ft.OutlinedButton(
+        "Alle Diagnosedaten löschen", icon=ft.Icons.DELETE_SWEEP_OUTLINED
+    )
+
+    def ablage_neu() -> None:
+        anzahl, groesse = dg.ablage(config.datenverzeichnis())
+        if not anzahl:
+            ablage_text.value = "Auf dem Handy liegen keine Mitschnitte."
+        else:
+            ablage_text.value = (
+                f"Auf dem Handy: {anzahl} Mitschnitt{'e' if anzahl != 1 else ''}, "
+                f"{dg.groesse_text(groesse)}"
+                + (
+                    " — viel Speicher; nach dem Teilen lassen sie sich löschen."
+                    if groesse >= dg.HINWEIS_AB_BYTES
+                    else ""
+                )
+            )
+        ablage_loeschen.disabled = not anzahl
+        with contextlib.suppress(Exception):
+            ablage_text.update()
+            ablage_loeschen.update()
+
+    def ablage_fragen() -> None:
+        dialog: ft.AlertDialog
+        lauf = state.messlauf
+        laufend = [lauf.mitschnitt.pfad] if lauf is not None and lauf.mitschnitt is not None else []
+
+        def loeschen() -> None:
+            n = dg.alle_loeschen(config.datenverzeichnis(), ausser=laufend)
+            schliessen(dialog)
+            ablage_neu()
+            page.show_dialog(ft.SnackBar(ft.Text(f"{n} Mitschnitte gelöscht.")))
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Alle Diagnosedaten löschen?"),
+            content=ft.Text(
+                "Die Rohmitschnitte und Marken gehen weg — die Messungen bleiben, wie sie sind. "
+                "Ein laufender Mitschnitt bleibt."
+            ),
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+                ft.FilledButton("Löschen", on_click=loeschen),
+            ],
+        )
+        page.show_dialog(dialog)
+
+    ablage_loeschen.on_click = ablage_fragen
+
+    def leiste_gewaehlt(ev: ft.Event[ft.SegmentedButton]) -> None:
+        if ev.control.selected:
+            setzen(diagnose_leiste=str(ev.control.selected[0]))
+
+    diagnose_karte = karte(
+        titel("Diagnosemodus"),
+        schalter(
+            "diagnose_anbieten",
+            "Diagnosemodus anbieten",
+            "Zum Sammeln im echten Training: An der Gerätezeile der Messung steht dann der "
+            "Knopf „Diagnosemodus“, gestartet wird je Messung. Die App schneidet jedes "
+            "Bluetooth-Paket mit (beim H10 auch EKG und Beschleunigung) und nimmt Marken an — "
+            "mit der Leiste unten oder mit ⏯ an der Uhr. Kostet mehr Akku an Gurt und Handy "
+            "und etwa 15 MB je Stunde; solange es läuft, blinkt oben rechts ein roter Punkt. "
+            "Alles bleibt auf dem Handy, hinaus nur über „Teilen“ — ohne Bluetooth-Adresse.",
+        ),
+        hinweis("Marken-Leiste:"),
+        ft.SegmentedButton(
+            selected=[e.diagnose_leiste],
+            show_selected_icon=False,
+            segments=[
+                ft.Segment(value="unten", label=ft.Text("Unten (ein Drittel)")),
+                ft.Segment(value="knopf", label=ft.Text("Schwebender Knopf")),
+            ],
+            on_change=leiste_gewaehlt,
+        ),
+        schalter(
+            "diagnose_uhr",
+            "⏯ an der Uhr setzt Diagnosemarken",
+            "Nur mit „Uhr am Handgelenk“: Im Diagnosemodus zeigt das Band eine eigene Seite "
+            "(„Wdh 7“), ⏯ setzt dort eine Marke der gerade gültigen Art.",
+        ),
+        ablage_text,
+        ablage_loeschen,
+    )
+    ablage_neu()
+
     standard = HrvEinstellungen()
     inhalt = ft.Column(
         spacing=14,
@@ -820,6 +913,7 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                     "nächsten Verbindung; nur mit diesem Gurt.",
                 ),
             ),
+            *([diagnose_karte] if config.ist_aktiv("diagnosemodus") else []),
             erweitert_kopf,
             erweitert_teil,
             ft.OutlinedButton(

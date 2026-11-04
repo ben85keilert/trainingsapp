@@ -65,6 +65,7 @@ from typing import Any
 
 import flet as ft
 import numpy as np
+from hrv_core import mitschnitt as mt
 from hrv_core.atmung import ATEMUEBUNG, RUHE, atemfrequenz, kurzgrund
 from hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
 from hrv_core.ausschnitte import (
@@ -107,6 +108,7 @@ from hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core import abschnitte as eigene_abschnitte
+from trainingsapp.core import diagnose as dg
 from trainingsapp.core.aufnahme_bezug import RAND_S, Bezug
 from trainingsapp.core.hf_auswertung import AbschnittWand, achse_zu_wand, wand_zu_achse
 from trainingsapp.core.hrv_ansicht import (
@@ -1061,11 +1063,36 @@ def _aufbauen(
         xs = notizfeld.positionen(x_von, x_bis, _ist_leistung)
         return [senkrechte(xs, FARBEN["leistung"], 2.0, gestrichelt=False)] if xs else []
 
+    # Diagnosemarken aus dem Rohmitschnitt (Plan Diagnosemodus §2.7): eine eigene Ebene, nicht
+    # in der Notizliste — Wanduhrzeiten je Art, geladen im Thread (`diagnose_laden`)
+    diagnose_marken: dict[str, list[float]] = {}
+
+    def diagnose_reihen(x_von: float, x_bis: float) -> list[Reihe]:
+        if not diagnose_marken:
+            return []
+        out: list[Reihe] = []
+        for typ, farbe in (
+            (mt.MARKE_WDH, FARBEN["gipfel"]),
+            (mt.MARKE_ATEM, FARBEN["atemfrequenz"]),
+            (mt.MARKE_STOERUNG, FARBEN["rot"]),
+            (mt.MARKE_FREI, FARBEN["notiz"]),
+        ):
+            xs = [
+                x
+                for t in diagnose_marken.get(typ, [])
+                if x_von <= (x := wand_zu_achse(zeilen_achse, wand, t)) <= x_bis
+            ]
+            if xs:
+                out.append(senkrechte(xs, farbe, 1.0, gestrichelt=True))
+        return out
+
     def marken_reihen(x_von: float, x_bis: float) -> list[Reihe]:
-        """Notizen (gelb), Leistungen (blau), Grenzen des Editors und der Ablesestrich — über
-        den Kurven; Notizen und Leistungen nur, wenn ihre Ebene eingeblendet ist."""
+        """Notizen (gelb), Leistungen (blau), Diagnosemarken, Grenzen des Editors und der
+        Ablesestrich — über den Kurven; Notizen und Leistungen nur, wenn ihre Ebene
+        eingeblendet ist."""
         strich = m.strich if m.ablesen else None
         return [
+            *diagnose_reihen(x_von, x_bis),
             *(notizfeld.marken(x_von, x_bis) if EBENE_NOTIZEN in einst.ebenen else []),
             *(leistungs_reihen(x_von, x_bis) if EBENE_LEISTUNGEN in einst.ebenen else []),
             *(m.editor.reihen(x_von, x_bis) if m.editor is not None else []),
@@ -3468,6 +3495,109 @@ def _aufbauen(
     if ekg_datei.exists():
         page.run_task(ekg_laden_task)
 
+    # -- Diagnose (Rohmitschnitt ``_mitschnitt.jsonl``, Plan Diagnosemodus §2.7) ----------
+    diagnose_box = ft.Column(spacing=6, visible=False)
+    mitschnitt_datei = mt.mitschnitt_pfad(pfad)
+
+    def diagnose_zeigen(text: str, *, mit_knoepfen: bool = True) -> None:
+        diagnose_box.controls = [
+            karte(
+                kartentitel("Diagnose"),
+                ft.Text(text, size=13),
+                hinweis(
+                    "Rohmitschnitt aller Bluetooth-Pakete mit den Marken — gestrichelt über der "
+                    "Kurve (Wiederholung, Atemzug, Störung). Nicht gerechnet; zum Auswerten "
+                    "in hrv-research. Teilen gibt ihn ohne Bluetooth-Adresse weiter."
+                ),
+                ft.Row(
+                    spacing=8,
+                    wrap=True,
+                    visible=mit_knoepfen,
+                    controls=[
+                        ft.OutlinedButton(
+                            "Diagnosepaket teilen", icon=ft.Icons.SHARE, on_click=diagnose_teilen
+                        ),
+                        ft.TextButton(
+                            "Diagnose löschen",
+                            icon=ft.Icons.DELETE_OUTLINE,
+                            on_click=lambda: diagnose_loeschen_fragen(),
+                        ),
+                    ],
+                ),
+            )
+        ]
+        diagnose_box.visible = True
+        with contextlib.suppress(Exception):
+            diagnose_box.update()
+
+    async def diagnose_laden() -> None:
+        def lesen() -> tuple[str, dict[str, list[float]]]:
+            mitschnitt = mt.laden(mitschnitt_datei)
+            marken: dict[str, list[float]] = {}
+            for z in mitschnitt.marken():
+                t = mitschnitt.wanduhr_s(int(z.get("t") or 0))
+                if t is not None:
+                    marken.setdefault(str(z.get("typ")), []).append(t)
+            groesse = mitschnitt_datei.stat().st_size
+            return dg.zusammenfassung_text(mt.zusammenfassen(mitschnitt), groesse), marken
+
+        try:
+            text, marken = await asyncio.to_thread(lesen)
+        except Exception as exc:  # kaputte Datei: sagen, nicht abstürzen
+            diagnose_zeigen(f"Mitschnitt nicht lesbar: {exc}")
+            return
+        diagnose_marken.clear()
+        diagnose_marken.update(marken)
+        diagnose_zeigen(text)
+        if marken:
+            with contextlib.suppress(Exception):
+                kurven()
+
+    async def diagnose_teilen() -> None:
+        """Messung, EKG, Mitschnitt (bereinigt) und Protokoll als ZIP — wie der Export, ohne
+        Bewegung; danach die Frage, ob der Mitschnitt jetzt weg darf (P114)."""
+
+        def packen() -> bytes:
+            return export_zip(zugehoerige_dateien(pfad), datenverzeichnis())
+
+        daten = await asyncio.to_thread(packen)
+        await weitergeben(page, f"diagnose_{pfad.stem}.zip", daten, "application/zip")
+        diagnose_loeschen_fragen(nach_teilen=True)
+
+    def diagnose_loeschen_fragen(*, nach_teilen: bool = False) -> None:
+        dialog: ft.AlertDialog
+
+        def loeschen() -> None:
+            with contextlib.suppress(OSError):
+                mitschnitt_datei.unlink()
+            diagnose_marken.clear()
+            schliessen(dialog)
+            diagnose_box.visible = False
+            with contextlib.suppress(Exception):
+                diagnose_box.update()
+                kurven()
+            page.show_dialog(ft.SnackBar(ft.Text("Mitschnitt gelöscht — die Messung bleibt.")))
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Mitschnitt jetzt löschen?" if nach_teilen else "Diagnose löschen?"),
+            content=ft.Text(
+                "Nur der Rohmitschnitt mit den Marken geht weg (etwa 15 MB je Stunde); "
+                "die Messung, das EKG und die Notizen bleiben."
+            ),
+            actions=[
+                ft.TextButton(
+                    "Behalten" if nach_teilen else "Abbrechen", on_click=lambda: schliessen(dialog)
+                ),
+                ft.FilledButton("Löschen", on_click=loeschen),
+            ],
+        )
+        page.show_dialog(dialog)
+
+    if mitschnitt_datei.exists():
+        diagnose_zeigen("Mitschnitt wird gelesen …", mit_knoepfen=False)
+        page.run_task(diagnose_laden)
+
     hf_sicht = HfAuswertungSicht(
         HfKontext(
             page,
@@ -3630,6 +3760,7 @@ def _aufbauen(
             hf_sicht.control,
             hrv_teil,
             ekg_box,
+            diagnose_box,
             ft.Text(f"Datei: {eintrag.file_path}", size=11, opacity=0.5, selectable=True),
         ],
     )

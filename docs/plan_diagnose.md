@@ -1,5 +1,10 @@
 # Planung: Diagnosemodus (17.10.2026)
 
+> **Fortgeschrieben am 4.11.2026 in [`plan_diagnosemodus.md`](plan_diagnosemodus.md)** (Ben:
+> Schalter in den Einstellungen, Knopf „Diagnosemodus“ an der Gerätezeile, roter Punkt,
+> Sensorübersicht, Rohmitschnitt auch unbekannter Geräte, Treiber in hrv-core). Hier bleiben der
+> Anlass H18 und der erste Entwurf; was dort steht, gilt weiter, eingeordnet in die Stufen dort.
+
 Ben, 17.10.2026 (über die Auswertung eigener Messungen in hrv-research): In den
 Einstellungen soll es eine **Diagnosefunktion** geben, die mehr Akku kosten darf und
 dafür ausführlicher protokolliert und prüft. **Noch nicht bauen** („wir machen das aber

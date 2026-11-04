@@ -36,6 +36,7 @@ uv run pytest tests/test_messlauf.py::test_name -q   # ein einzelner Test
 uv run pytest --doctest-modules src/trainingsapp/core src/trainingsapp/devices   # Doctests (laufen in CI)
 uv run ruff check . && uv run ruff format --check .   # Linter + Formatprüfung
 uv run mypy                                    # Typprüfung (Paket ist in pyproject konfiguriert)
+uv run python scripts/pruefe_flet_beispiele.py   # Flet-Skripte des Lernpfads ohne Bildschirm (CI)
 ```
 
 Vor jedem Pull Request muss laufen:
@@ -221,6 +222,19 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Zahnrad (`AppState.updates_label`, einmal je Stand). Schalter `update_pruefung` und
   `paket_quellen` nur Solo. Stufe 2 (Installation in der App) ist Katalog A8.
 
+- **Diagnosemodus** (Ben, 4.11.2026, `docs/plan_diagnosemodus.md`, Vertrag §14): in den
+  Einstellungen angeboten, je Messung gestartet (Sensorblatt mit Vorabtest), roter Punkt oben
+  rechts im Overlay. Rohmitschnitt `mitschnitt-v1` aus hrv-core (`hrv_core.mitschnitt`) über
+  `devices/mitschnitt.MitschnittTransport`, Beschleunigung in `PolarQuelle` (`acc=`,
+  `stroeme_setzen`), Lebenszyklus im `Messlauf` (neben dem Backup, beim Speichern Beiwerk);
+  **Marken** (Wdh/Atem/Störung, `core/diagnose.kontext_aus_notizen`) aus der Leiste im Overlay
+  (`components/marken_leiste`, Tipp beim Aufsetzen) oder mit ⏯ an der Uhr (Seite „Diagnose“,
+  Dart-Stempel) — **nie in den Notizen**, immer im Mitschnitt; nach dem Satz Marken · Zähler
+  (`hrv_core.prototyp`, nur angezeigt) · eingetragen. Unbekannte Geräte: Geräteprobe ohne
+  Messung (`devices/erkundung.py`, `/geraeteprobe`), nie schreiben, nie 0x2A25/0x2A23 lesen.
+  Hinaus nur bereinigt (`hrv_core.deid.mitschnitt_zeilen`). In hochfrequenten Ereignissen
+  immer `ohne_auto_update()` (V1).
+
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`
   über eine begrenzte `asyncio.Queue`. Messwerte und Status laufen getrennt — Batterie
@@ -289,4 +303,8 @@ App-Tests (Notizen, Export, UI), die eine echte Messdatei brauchen.
 
 Die App entsteht entlang eines Lernpfads (`docs/tutorial/`); `ui/` ist bewusst noch eine
 Hülle mit Platzhalteransichten. Die Tutorial-Beispielskripte laufen in CI mit — wenn ein
-Beispiel bricht, ist der Lernpfad kaputt.
+Beispiel bricht, ist der Lernpfad kaputt. Flet-freie Beispiele stehen als Liste im Schritt
+„Beispiele des Lernpfads“; jedes Skript, das `flet` importiert (dazu `src/main.py`), findet
+`scripts/pruefe_flet_beispiele.py` am Ende des Jobs `test` selbst — mit den
+Laufzeitabhängigkeiten wie in der gebauten App, Control-Baum mit `page`-Attrappe,
+`DeprecationWarning` = Fehler. Ereignis-Handler und Code in `.md`-Dateien prüft es nicht.

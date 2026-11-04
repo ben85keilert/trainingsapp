@@ -81,6 +81,23 @@
   Der Export einer Messung, der Forschungsexport einer Einheit und das geteilte
   Verbindungsprotokoll enthalten die Kopie ohne das Feld `adresse` bzw. mit maskierter
   Adresse (`core/hrv_export.py`, `docs/kompatibilitaet.md`, „Export“).
+- **Diagnosemodus** (seit 4.11.2026, `docs/plan_diagnosemodus.md`, beide Editionen): neue
+  Datenarten nur auf ausdrücklichen Start je Messung — der **Rohmitschnitt** aller
+  Bluetooth-Pakete des gewählten Geräts (`sensor_<ts>_mitschnitt.jsonl`, beim Polar H10 mit
+  EKG und **Beschleunigung des Gurts**), **Marken** (Wiederholung, Atemzug, Störung) mit dem
+  Kontext der Übung und Zustandsproben (Akku von Gurt und Handy, Verzug der App). Ohne Messung
+  die **Geräteprobe** eines unbekannten Geräts (`Diagnose/<ts>_<Modell>/`). Solange
+  aufgezeichnet wird, blinkt oben rechts ein roter Punkt; in der Benachrichtigung steht
+  „● Diagnose“. Keine Netzverbindung, kein GPS, keine anderen Geräte in der Nähe; die App
+  liest nie Seriennummer und Systemkennung und schreibt bei der Geräteprobe nie auf das Gerät.
+  Die Beschleunigung des Gurts enthält keine Himmelsrichtung (kein Gyroskop, kein
+  Magnetometer) — keine Koppelnavigation. Hinaus nur über „Teilen“ bzw. den Export, dann
+  bereinigt (Adressen maskiert, Gerätename auf das Modell gekürzt, Kennungs-Merkmale entfernt;
+  `hrv_core.deid.mitschnitt_zeilen`). Aufbewahrung bis zum Löschen; Einstellungen → HRV-Messung
+  → Diagnosemodus zeigt Zahl und Größe und löscht alles auf einmal, die Auswertung den
+  einzelnen Mitschnitt; nach dem Teilen fragt die App, ob er weg darf (P114). Geräteproben
+  mit dem Puls einer anderen Person nur mit deren Einwilligung weitergeben; Proben anderer
+  kommen nie in ein Repository (P115).
 - **Vorgabe-Paketquelle** `trainingsapp.osteo-ebert.de` (seit 16.10.2026; Übergang,
   bis die Website der App steht): ein angemieteter Server in Deutschland, den der
   Hersteller selbst betreibt; Anbieter Hetzner Online GmbH, mit Vertrag zur

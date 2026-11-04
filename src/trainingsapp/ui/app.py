@@ -86,6 +86,7 @@ from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lok
 from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.ui import ausrichtung, navigation
 from trainingsapp.ui import einheit as einheit_ui
+from trainingsapp.ui.components import diagnose_punkt, marken_leiste
 from trainingsapp.ui.components.dialoge import dialog_offen
 from trainingsapp.ui.components.startleiste import (
     leiste_auffrischen,
@@ -115,6 +116,8 @@ from trainingsapp.ui.views.einstellungen_tags import einstellungen_tags_view
 from trainingsapp.ui.views.einstellungen_training import einstellungen_training
 from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
+from trainingsapp.ui.views.geraeteprobe import ROUTE as PROBE_ROUTE
+from trainingsapp.ui.views.geraeteprobe import geraeteprobe_view
 from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.kurse import kapitel_view, kurs_view
@@ -834,6 +837,13 @@ def main(page: ft.Page) -> None:
         if not haupt and navigation.uebungsseite(oben := str(page.views[-1].route)):
             page.views[-1].navigation_bar = uebungsseiten_leiste(page, state, oben)
         hintergrund_setzen(page, darstellung)
+        # Der rote Punkt des Diagnosemodus liegt im Overlay — der Neuaufbau lässt ihn stehen,
+        # hier kommt er hinzu oder geht (`components.diagnose_punkt`)
+        with suppress(Exception):
+            diagnose_punkt.aktualisieren(page, state)
+            # Die Marken-Leiste liegt ebenso im Overlay; die Ansicht bekommt unten Platz
+            marken_leiste.platz_einsetzen(page, state)
+            marken_leiste.aktualisieren(page, state)
         page.update()
         # Hochkant ist die Regel; Karten, Kurven und das Live-Vollbild dürfen quer
         ausrichtung.anwenden(page, state, ausrichtung.modus_fuer_route(page.route))
@@ -908,6 +918,8 @@ def main(page: ft.Page) -> None:
                     ablegen(lambda: kapitel_view(page, state, kurs, kapitel, browser))
         elif teile[:1] == ["live"]:
             ablegen(lambda: live_vollbild_view(page, state))
+        elif teile[:1] == [PROBE_ROUTE.strip("/")]:
+            ablegen(lambda: geraeteprobe_view(page, state))
         elif teile[:1] == ["ausdauer"]:
             if len(teile) == 1:
                 ablegen(lambda: ausdauer_view(page, state))

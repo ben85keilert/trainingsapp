@@ -635,10 +635,15 @@ async def test_teil_speichern_und_weiter_dann_zusammenfuegen(tmp_path) -> None:
     await _bis(lauf, 10)
     lauf.backup_jetzt()
     assert list(tmp_path.rglob(".backup_*.jsonl"))
+    alt = lauf.aufnahme
     teil1 = await lauf.aufnahme_teilen_async(tmp_path)
     assert teil1 is not None and teil1.pfad.exists()
-    assert lauf.aufnahme is not None and lauf.aufnahme.titel == "Nacht"
-    assert lauf.aufnahme_dauer_s() < 5  # die neue zählt von vorn
+    assert lauf.aufnahme is not None and lauf.aufnahme is not alt
+    assert lauf.aufnahme.titel == "Nacht"
+    # Die neue zählt von vorn: ihre Uhr beginnt beim Teilen, nicht beim Start von Teil 1.
+    # Nicht an ihrer Dauer prüfen — während Teil 1 im Thread geschrieben wird, laufen die
+    # Schläge des 60-fach schnellen Simulators schon in die neue (CI, 4.11.2026: 6,1 s).
+    assert lauf.aufnahme.start_mono >= alt.start_mono + 10
     assert not list(tmp_path.rglob(".backup_*"))  # Kopf und Journal von Teil 1 sind weg
     await _bis(lauf, 5)
     assert lauf.aufnahme.beats  # der Strom läuft in die neue
@@ -721,6 +726,39 @@ async def test_ekg_journal_wird_beim_wiederherstellen_zum_beiwerk(tmp_path) -> N
     assert ergebnis is not None
     e = ekg_laden(ekg_pfad(ergebnis.pfad))
     assert e.n > 0 and len(e.frame_sample_counts) == n_rahmen
+    assert not list(tmp_path.rglob(".backup_*"))
+
+
+async def test_teil_speichern_nimmt_das_ekg_mit(tmp_path) -> None:
+    """„Teil speichern & weiter“ mit EKG (V4, `docs/plan_diagnosemodus.md`): Teil 1 bekommt
+    sein ``_ecg.json``, Teil 2 ein eigenes mit eigenem Journal und ``ecg_aufzeichnung``; kein
+    Journal von Teil 1 bleibt liegen."""
+    from hrv_core.ekg import ekg_laden, ekg_pfad
+
+    quelle = SimulatedSource(tempo=60.0, seed=5, ekg=True)
+    lauf = Messlauf(quelle, backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    await _bis(lauf, 15)
+    lauf.backup_jetzt()
+    assert list(tmp_path.rglob(".backup_*_ecg.jsonl"))
+    teil1 = await lauf.aufnahme_teilen_async(tmp_path)
+    assert teil1 is not None
+    assert not list(tmp_path.rglob(".backup_*"))  # auch das EKG-Journal von Teil 1 ist weg
+    await _bis(lauf, 15)
+    lauf.backup_jetzt()
+    journal2 = next(tmp_path.rglob(".backup_*_ecg.jsonl"))
+    assert journal2.read_text(encoding="utf-8").startswith('["k", 130')  # eigener Kopf
+    teil2 = await lauf.aufnahme_stoppen_async(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert teil2 is not None and teil2.pfad != teil1.pfad
+    e1, e2 = ekg_laden(ekg_pfad(teil1.pfad)), ekg_laden(ekg_pfad(teil2.pfad))
+    assert e1.n > 130 * 10 and e2.n > 130 * 10
+    assert e2.t_wall_start_s is not None and -1.0 < e2.t_wall_start_s < 2.0  # bezogen auf Teil 2
+    for teil in (teil1, teil2):
+        assert json.loads(teil.pfad.read_text(encoding="utf-8"))["ecg_aufzeichnung"] is True
     assert not list(tmp_path.rglob(".backup_*"))
 
 

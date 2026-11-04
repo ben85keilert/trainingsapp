@@ -58,8 +58,8 @@ Läuft die Uhr einer Übung mit Wiederholungen, heißt ein Tipp „Wiederholung�
 Atemübungen, in Satzpausen und in einer Messung ohne Übung „Atemzug“. Ein Chip in der Leiste
 schaltet um. Dazu ein kleiner Knopf **„Störung“** (Husten, Gurt gerichtet, Handy aufgehoben) —
 Gegenwahrheit, die jeder Zähler kennen muss. Beides in einem Satz zu tippen ist ohnehin
-unrealistisch; Atemzüge in den Satzpausen zu tippen hat im Pilot gut geklappt (hrv-research,
-Satzpausen: 95 % der Fenster beantwortet).
+unrealistisch; Atemzüge in den Satzpausen zu tippen hat im Pilot gut geklappt (Befund in
+hrv-research, Entscheidung 21).
 
 **Stufen** (Abschnitt 10): 0 Voraussetzungen · 1 Schalter, Sensorblatt, roter Punkt ·
 2 Rohmitschnitt (Format in hrv-core) · 3 Marken-Leiste · 4 Uhr · 5 Auswertung in hrv-research ·
@@ -482,7 +482,7 @@ Erweiterungen dabei sind — einer APK, die Ben baut.
 | 5 | Einlesen der Diagnosepakete, Marken je Satz, Uhr gegen Leiste, Bericht; Diagnose-App auf hrv-core-Dekoder; gleiche Ströme aus beiden Lesern geprüft | hrv-research `trainingsapp_diagnose.py`, Entscheidung 22 |
 | 6 | Geräteprobe ohne Messung: Dienste mit Namen, Rohmitschnitt, Marken bewegt/still, Formular, Teilen | `devices/erkundung.py`, `ui/views/geraeteprobe.py` |
 | 7 | GATT-Namen, Dekoder 0x2A37 und Treiber mit Reifegrad in hrv-core; Reifegrad in Suche und Sensorblatt | hrv-core 0.7.0 (`geraete/gatt.py`, `treiber.py`) |
-| 8 | Wiederholungszähler (hrv-research, an Sitzung P: 11/11, 15/15, 20/20) als Prototyp in hrv-core; nach dem Satz „Marken · Zähler (Prototyp) · eingetragen“ | hrv-core 0.8.0, `messlauf._satz_vergleichen` |
+| 8 | Wiederholungszähler (hrv-research, Befund in Entscheidung 22) als Prototyp in hrv-core; nach dem Satz „Marken · Zähler (Prototyp) · eingetragen“ | hrv-core 0.8.0, `messlauf._satz_vergleichen` |
 
 **Offen und bewusst zurückgestellt:**
 

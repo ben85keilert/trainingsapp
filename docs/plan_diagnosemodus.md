@@ -496,6 +496,15 @@ Erweiterungen dabei sind — einer APK, die Ben baut.
 - Zähler: welcher Umkehrpunkt (oben/unten) gezählt wird; Eingang in `hrv_core.prototyp` mit
   Ausnahme (eine Sitzung) — die nächsten entstehen mit diesem Modus.
 
-**Für Ben:** neue APK bauen (`flet_medien` geändert); die Tags `v0.6.0`, `v0.6.1`, `v0.7.0` und
-`v0.8.0` liegen in `../hrv-core` nur lokal (der Push von Tags ist in der Cloud-Sitzung gesperrt):
-`git -C ../hrv-core push origin --tags`. Am Band TESTPLAN_fit3 Teil 4 (F10–F13).
+**Für Ben:** neue APK (`flet_medien` geändert — der Lauf „APK“ am Branch baut sie); am Band
+TESTPLAN_fit3 Teil 4 (F10–F13). Die Tags `v0.6.0` bis `v0.8.0` fehlen auf GitHub (der Push von
+Tags ist in der Cloud-Sitzung gesperrt) und werden an den Commits gesetzt:
+
+```bash
+git -C ../hrv-core pull
+git -C ../hrv-core tag v0.6.0 ba9d392
+git -C ../hrv-core tag v0.6.1 6e335f7
+git -C ../hrv-core tag v0.7.0 e755df8
+git -C ../hrv-core tag v0.8.0 dabc777
+git -C ../hrv-core push origin v0.6.0 v0.6.1 v0.7.0 v0.8.0
+```

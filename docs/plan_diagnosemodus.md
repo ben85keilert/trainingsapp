@@ -240,7 +240,7 @@ JSON Lines, jede Zeile mit `art` und `t` (monoton, ns, dieselbe Uhr wie `t_captu
 | `kontext` | Übung Start/Ende (Übung, Plan, Felder), Timer Start/Pause/Abschnitt/Ende, eingetragener Satz (Zahl) |
 
 Das ist eine Obermenge von `roh.jsonl` — hrv-research liest es mit dem Code, der heute die
-Diagnose-App liest (`hrv_research/brustgurt.py`), auch den Uhrabgleich je Paket, der Ankunft und
+Diagnose-App liest (`hrv_research/beschleunigung/brustgurt.py`), auch den Uhrabgleich je Paket, der Ankunft und
 Gerätezeit jedes Rahmens braucht. Das EKG-Beiwerk speichert dafür zu wenig (nur die Ankunft des
 ersten Rahmens).
 
@@ -342,12 +342,14 @@ zu welcher Übung, Zähler je Satz). Tests nach dem Muster `tests/test_uhr_kanal
 
 ## 7. Auswertung in hrv-research
 
-- **Einlesen:** `scripts/diagnose_einlesen.py` (nur eigene Pakete, wie `brustgurt_einlesen.py`)
-  nach `daten/selbst/trainingsapp_diagnose/<id>/`; die Datenprüfung (`pruefe_daten.py`) kennt
+- **Einlesen:** `beschleunigung/scripts/diagnose_einlesen.py` (nur eigene Pakete, wie
+  `brustgurt_einlesen.py`) nach `beschleunigung/daten/selbst/<gerät>/trainingsapp_diagnose/<id>/`
+  (seit 4.11.2026 im Themenordner `beschleunigung/` von hrv-research); die Datenprüfung (`pruefe_daten.py`) kennt
   `mitschnitt-v1` nach Feldliste (keine unmaskierte Adresse, kein GPS).
-- **Lesen:** über den Leser aus hrv-core (8.1) oder übergangsweise `hrv_research.brustgurt`.
+- **Lesen:** über den Leser aus hrv-core (8.1) oder übergangsweise
+  `hrv_research.beschleunigung.brustgurt`.
 - **Je Satz:** Marken gegen eingetragene Zahl gegen Zähler (der Wiederholungszähler mit
-  Satzgrenzen aus `docs/KONZEPT_GENAUIGKEIT.md` B3); Zeitversatz der Marke zum Umkehrpunkt im
+  Satzgrenzen aus `beschleunigung/docs/KONZEPT_GENAUIGKEIT.md` B3); Zeitversatz der Marke zum Umkehrpunkt im
   Signal, je Quelle (Handy, Uhr) und Übung — das ist auch die Messung des Wegs Band → Handy.
 - **Je Pause und Atemübung:** Atemmarken gegen K2–K4 (Notebook 05).
 - **Ergebnis:** ein Bericht je Paket (wie der Prüfbericht A–D, dazu Ebene E: Marken) und der

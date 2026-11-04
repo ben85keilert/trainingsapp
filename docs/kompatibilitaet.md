@@ -808,6 +808,12 @@ es nicht kennen.
 - **Nie im Mitschnitt:** GPS (Regel 0 in `docs/plan_gps.md`), die Seriennummer (0x2A25) und
   die Systemkennung (0x2A23) — die App liest beide nie. Die Bluetooth-Adresse steht nur in
   der Datei auf dem Gerät; hinaus geht der Mitschnitt nur bereinigt (Abschnitt 2, Export).
+- **Geräteprobe ohne Messung** (Stufe 6): `Diagnose/<UTC-Start>_<Modell>/mitschnitt.jsonl`
+  (Kopf mit `geraet.art = unbekannt` und dem Abbild der Dienste) und `probe.json`
+  (`format: geraeteprobe-v1` — `geraet` {`name`, `modell`}, `formular` {`hersteller`, `was`,
+  `vergleich`}, `dienste`, `gelesen`, `abonniert`, `fehler`, `zusammenfassung`). Nie
+  geschrieben wird auf das Gerät; Seriennummer und Systemkennung liest die App nie. Geteilt als
+  ZIP mit bereinigtem Mitschnitt (`devices.erkundung.probe_zip`).
 - **Messdatei unverändert:** raw-v1 bekommt kein neues Feld; die Messung ist auch ohne den
   Mitschnitt vollständig. Löschen des Mitschnitts („Diagnose löschen“) lässt die Messung
   stehen; Löschen der Messung nimmt ihr Beiwerk mit.

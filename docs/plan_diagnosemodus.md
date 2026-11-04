@@ -1,7 +1,7 @@
 # Plan: Diagnosemodus — Sensoren, Rohmitschnitt, Marken, unbekannte Geräte (4.11.2026)
 
 Stand 4.11.2026: **angenommen** (Ben: „Der Plan ist gut“, Fragen P110–P116 entschieden — Abschnitt 11;
-„Mach gleich alles“: Stufen 0–8). Er schreibt den Diagnosemodus
+„Mach gleich alles“: Stufen 0–8) und **umgesetzt** — Abschnitt 12 sagt, was gebaut ist und was offen. Er schreibt den Diagnosemodus
 aus `docs/plan_diagnose.md` (17.10.2026, P30) fort; was dort zu H18, Protokoll und
 Zustandsproben steht, gilt weiter und ist hier eingeordnet (Abschnitt 4 und 10).
 
@@ -469,3 +469,33 @@ Erweiterungen dabei sind — einer APK, die Ben baut.
 | P115 | Geräteproben anderer | vorerst nur Bens Proben; fremde nie online, aber lokal für Korrekturrechnungen und Treiber nutzbar |
 | P116 | Brustgurt-Diagnose-App | läuft parallel, **gleiche Grundlage** (Format `mitschnitt-v1`, Dekoder und Beschleunigung aus hrv-core bzw. der trainingsapp), verschiedene Eingänge: die Diagnose-App fragegerichtet (Protokolle), die trainingsapp alltagspraktisch |
 | — | Umfang | „Mach gleich alles“ — Stufen 0–8 |
+
+## 12. Umsetzungsstand (4.11.2026)
+
+| Stufe | Gebaut | Wo |
+|---|---|---|
+| 0 | V1 Auto-Update aus in BLE- und GPS-Ereignissen · V2 Watchdog nur am HF-Strom · V4 EKG bei „Teil speichern“ · V5 „Löschen“ räumt alle Journale weg · V6 EKG-Journal mit fsync · V8 Diagnose-App ohne doppelten ACC-Start | trainingsapp 7ff2f12, hrv-core 0.6.0, hrv-research be5b465 |
+| 1 | Karte in den Einstellungen, Knopf an der Gerätezeile, Sensorblatt (geprüft/laut Profil/nur roh, MB je Stunde, Vorabtest bis 20 s), roter Punkt mit Stand-Blatt, „● Diagnose“ | `ui/components/sensorblatt.py`, `diagnose_punkt.py` |
+| 2 | `mitschnitt-v1` und PMD-Dekoder mit Beschleunigung in hrv-core; `MitschnittTransport`; Beschleunigung in `PolarQuelle`; Mitschnitt neben Backup → Beiwerk; Teilen, Löschen, Export bereinigt; Diagnose-Karte in der Auswertung | hrv-core 0.6.0/0.6.1, `devices/mitschnitt.py`, `messlauf.py` |
+| 3 | Marken-Leiste im Overlay (unten ein Drittel/Knopf), Art aus dem Kontext, Chips, Störung, ↶; Kontextzeilen aus allen automatischen Notizen; Marken als Ebene über der Kurve | `ui/components/marken_leiste.py`, `core/diagnose.py` |
+| 4 | Seite „Diagnose“ am Band, ⏯ mit Dart-Stempel, Sprung beim neuen Satz; ⏯ außerhalb als `uhr/marke` (P113) | hrv-watch fa8d037 (#8), `core/uhr_seiten.py`, `flet_medien_kanal.py` |
+| 5 | Einlesen der Diagnosepakete, Marken je Satz, Uhr gegen Leiste, Bericht; Diagnose-App auf hrv-core-Dekoder; gleiche Ströme aus beiden Lesern geprüft | hrv-research `trainingsapp_diagnose.py`, Entscheidung 22 |
+| 6 | Geräteprobe ohne Messung: Dienste mit Namen, Rohmitschnitt, Marken bewegt/still, Formular, Teilen | `devices/erkundung.py`, `ui/views/geraeteprobe.py` |
+| 7 | GATT-Namen, Dekoder 0x2A37 und Treiber mit Reifegrad in hrv-core; Reifegrad in Suche und Sensorblatt | hrv-core 0.7.0 (`geraete/gatt.py`, `treiber.py`) |
+| 8 | Wiederholungszähler (hrv-research, an Sitzung P: 11/11, 15/15, 20/20) als Prototyp in hrv-core; nach dem Satz „Marken · Zähler (Prototyp) · eingetragen“ | hrv-core 0.8.0, `messlauf._satz_vergleichen` |
+
+**Offen und bewusst zurückgestellt:**
+
+- *Allgemeine Quelle statt `PolarQuelle`* (8.3): Die Apps führen den Ablauf eines Treibers noch
+  nicht selbst aus — `PolarQuelle` bleibt; hrv-core liefert Dekoder, Namen und Reifegrad. Ein
+  Umbau berührt praxis_gui und den am Gerät erprobten Verbindungsablauf (H18).
+- PPG, Gyroskop, Magnetometer sind im Sensorblatt nur „vorhanden · noch nicht einschaltbar“
+  (kein am Gerät erprobtes Startkommando; Magnetometer nur ausdrücklich, §9).
+- Der Simulator hat keinen Bluetooth-Transport — der Diagnosemodus braucht ein echtes Gerät
+  (Tests nutzen eine Attrappe des Transports).
+- Zähler: welcher Umkehrpunkt (oben/unten) gezählt wird; Eingang in `hrv_core.prototyp` mit
+  Ausnahme (eine Sitzung) — die nächsten entstehen mit diesem Modus.
+
+**Für Ben:** neue APK bauen (`flet_medien` geändert); die Tags `v0.6.0`, `v0.6.1`, `v0.7.0` und
+`v0.8.0` liegen in `../hrv-core` nur lokal (der Push von Tags ist in der Cloud-Sitzung gesperrt):
+`git -C ../hrv-core push origin --tags`. Am Band TESTPLAN_fit3 Teil 4 (F10–F13).

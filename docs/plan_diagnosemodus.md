@@ -1,6 +1,7 @@
 # Plan: Diagnosemodus — Sensoren, Rohmitschnitt, Marken, unbekannte Geräte (4.11.2026)
 
-Stand 4.11.2026: **Plan, nicht gebaut** — Ben sieht ihn sich an. Er schreibt den Diagnosemodus
+Stand 4.11.2026: **angenommen** (Ben: „Der Plan ist gut“, Fragen P110–P116 entschieden — Abschnitt 11;
+„Mach gleich alles“: Stufen 0–8). Er schreibt den Diagnosemodus
 aus `docs/plan_diagnose.md` (17.10.2026, P30) fort; was dort zu H18, Protokoll und
 Zustandsproben steht, gilt weiter und ist hier eingeordnet (Abschnitt 4 und 10).
 
@@ -416,15 +417,18 @@ gegen den H10 nach `docs/geraete/ble_uebertragung_pruefen.md`) → *empfohlen*.
 **Datenschutz:** Eine Geräteprobe enthält Gesundheitsdaten (Puls, ggf. EKG) einer anderen
 Person. Wer Proben annimmt, verarbeitet sie (Art. 9 DSGVO): Einwilligung, Zweck, Löschfrist,
 Hinweis vor dem Teilen (was drin ist, Vorschau), Kürzung auf das Nötige (Vorschlag: höchstens
-2 min, nur das gewählte Gerät, Adresse maskiert, keine Seriennummer). hrv-core versioniert heute
-nur synthetische Daten, PhysioNet und Bens eigene Aufnahmen — für Community-Proben braucht es
-eine eigene Regel (P115). Bis das geklärt ist: Geräteproben nur von Ben selbst.
+2 min, nur das gewählte Gerät, Adresse maskiert, keine Seriennummer). **Entschieden (P115):**
+„vorerst nur meine Proben. Fremde Daten gehen nicht online, aber werden für Korrekturrechnungen
+verwendet bzw. zur Treibererstellung“ — fremde Proben bleiben lokal bei Ben und kommen nie in ein
+Repo; in hrv-core landen nur der Treiber und synthetische Nachbauten nach dem entschlüsselten
+Protokoll. Eine Eingangsvorlage für die Community gibt es erst nach rechtlicher Klärung.
 
 ## 9. Editionen, Recht, Datenschutz
 
-- Ein Schalter je Fähigkeit: `diagnosemodus` in `config._FUNKTIONEN`. Solo ja. **Praxis:** dort
-  wären es Messungen von Patienten — Rohdaten von Patienten gehören nicht in
-  Entwicklungsdaten (hrv-research Regel 2); Vorschlag: in Praxis nur am eigenen Profil (P112).
+- Ein Schalter je Fähigkeit: `diagnosemodus` in `config._FUNKTIONEN`, **in beiden Editionen**
+  (P112, Ben: „In Praxis bleiben die Daten erstmal lokal. Ins Repo kommt nur, was ich selbst
+  ablege, bzw. Anonymisiertes — trainingsapp ebenso“). Die App gibt nichts von selbst weiter;
+  Teilen exportiert maskiert (Adresse, Gerätename), und was in ein Repo geht, entscheidet Ben.
 - **Kein GPS** im Mitschnitt. Die Beschleunigung des Gurts enthält keine Himmelsrichtung (ohne
   Gyroskop und Magnetometer keine Koppelnavigation) — im Sinn der Regel „ortsfrei darf mit“
   (Ben, 26.10.2026). Andere Geräte in der Nähe werden nie protokolliert. Ein Gerät mit
@@ -453,14 +457,15 @@ Mit Stufe 0–3 lässt sich sammeln, mit 4 die Uhr nutzen, mit 5 zeigt sich, ob 
 klappt. 6–8 bauen den Community-Weg. Jede Stufe endet mit Tests, Doku und — wo neue
 Erweiterungen dabei sind — einer APK, die Ben baut.
 
-## 11. Offene Fragen (Katalog `docs/offene_fragen.md`)
+## 11. Entschieden (Ben, 4.11.2026)
 
-| # | Frage | Vorschlag |
+| # | Frage | Entscheidung |
 |---|---|---|
-| P110 | Roter Punkt oben rechts oder links? | rechts — links liegt der Zurück-Pfeil |
-| P111 | Marken-Leiste: unten ein Drittel oder schwebender Knopf als Vorgabe? | unten ein Drittel, zum Knopf einklappbar |
-| P112 | Diagnosemodus in der Praxis-Edition? | nur am eigenen Profil, nie bei Patienten |
-| P113 | ⏯ außerhalb des Diagnosemodus: künftig mit `marke` (`quelle: uhr`)? | ja — heute ununterscheidbar |
-| P114 | Wie lange bleiben Mitschnitte liegen? | bis man sie löscht; Hinweis ab 500 MB; nach dem Teilen „jetzt löschen?“ |
-| P115 | Regel für Community-Geräteproben in hrv-core (öffentlich): echte Proben nie im Repo, nur synthetische Nachbauten nach dem entschlüsselten Protokoll? Wer nimmt Proben an, auf welchem Weg? | ja, nur Nachbauten im Repo; Eingang erst nach rechtlicher Klärung, bis dahin nur Bens Proben |
-| P116 | Brustgurt-Diagnose-App: weiterführen oder in den Diagnosemodus aufgehen lassen? | weiterführen für geführte Protokolle (Takt, Video), bis die trainingsapp das kann |
+| P110 | Roter Punkt | oben rechts |
+| P111 | Marken-Leiste | unten ein Drittel, zum Knopf einklappbar; „schwebender Knopf“ in den Einstellungen wählbar |
+| P112 | Praxis-Edition | in beiden Editionen; Daten bleiben lokal, ins Repo nur, was Ben selbst ablegt, oder Anonymisiertes |
+| P113 | ⏯ außerhalb des Diagnosemodus | `marke {quelle: uhr, art: marke}` (Vertrag §4 zuerst) |
+| P114 | Aufbewahrung | bis zum Löschen; Hinweis ab 500 MB; nach dem Teilen „jetzt löschen?“ |
+| P115 | Geräteproben anderer | vorerst nur Bens Proben; fremde nie online, aber lokal für Korrekturrechnungen und Treiber nutzbar |
+| P116 | Brustgurt-Diagnose-App | läuft parallel, **gleiche Grundlage** (Format `mitschnitt-v1`, Dekoder und Beschleunigung aus hrv-core bzw. der trainingsapp), verschiedene Eingänge: die Diagnose-App fragegerichtet (Protokolle), die trainingsapp alltagspraktisch |
+| — | Umfang | „Mach gleich alles“ — Stufen 0–8 |

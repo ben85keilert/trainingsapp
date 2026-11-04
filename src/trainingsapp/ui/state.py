@@ -370,7 +370,7 @@ class AppState:
     #: (`components.diagnose_punkt`) und die Marken-Leiste (offen oder zum Knopf eingeklappt)
     diagnose_punkt: Any = None
     diagnose_leiste_offen: bool = True
-    #: Stand der Marken-Leiste (`components.marken_leiste.LeistenStand`) und ihr Control
+    #: Stand der Marken-Leiste (`components.marken_stand.LeistenStand`) und ihr Control
     diagnose_leiste: Any = None
     diagnose_leiste_control: Any = None
     #: Geräteprobe (`devices.erkundung.Geraeteprobe`, Rohmitschnitt ohne Messung) und das

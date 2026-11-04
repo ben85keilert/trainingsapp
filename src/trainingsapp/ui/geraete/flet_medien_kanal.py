@@ -15,7 +15,7 @@ immer PLAYING; so schickt das Band bei ⏯ zuverlässig „pause“. Die Marke t
 ``marke {quelle: uhr, art: marke}`` (P113, Vertrag §4).
 
 **Diagnosemodus** (hrv-watch ENTSCHEIDUNGEN #8, `docs/plan_diagnosemodus.md` §6): vorn die
-Seite „Diagnose“ (`components.marken_leiste.uhr_zeilen`); ⏯ dort setzt eine Diagnosemarke
+Seite „Diagnose“ (`components.marken_stand.uhr_zeilen`); ⏯ dort setzt eine Diagnosemarke
 der gültigen Art mit Quelle „uhr“ — zur Zeit des Drucks: ``flet_medien`` stempelt jede
 Taste auf der Dart-Seite, der Kanal rechnet sie mit einem eigenen `UhrAbgleich` um. Beginnt
 eine Übung oder ein neuer Satz, springt das Band auf diese Seite.
@@ -62,6 +62,7 @@ from trainingsapp.core.uhr_seiten import (
 )
 from trainingsapp.devices.gatt import UhrAbgleich
 from trainingsapp.devices.profiles import QUELLE_EKG_RR
+from trainingsapp.ui.components import marken_stand
 
 #: Marke einer ⏯-Notiz (Vertrag §4, P113)
 UHR_MARKE: dict[str, str] = {"quelle": "uhr", "art": "marke"}
@@ -155,15 +156,11 @@ class MedienKanal:
     def _diagnosemarke(self, t_mono_us: int) -> None:
         """⏯ auf der Seite „Diagnose“: eine Marke der gültigen Art, Quelle „uhr“, zur Zeit
         des Drucks (umgerechnet), sonst der Ankunft."""
-        from trainingsapp.ui.components import marken_leiste
-
         t_ns = None
         if t_mono_us:
             with contextlib.suppress(Exception):
                 t_ns = round(self._abgleich.umrechnen(t_mono_us / 1e6) * 1e9)
-        zeile = marken_leiste.marke_setzen(
-            self.state, quelle="uhr", t_ns=t_ns, tm=t_mono_us or None
-        )
+        zeile = marken_stand.marke_setzen(self.state, quelle="uhr", t_ns=t_ns, tm=t_mono_us or None)
         self._log("Diagnosemarke gesetzt" if zeile else "Diagnosemarke: keine Diagnose")
 
     def marke(self, text: str = "") -> bool:
@@ -194,17 +191,15 @@ class MedienKanal:
             return None
         if not getattr(self._einstellung(), "diagnose_uhr", True):
             return None
-        from trainingsapp.ui.components import marken_leiste
-
         with contextlib.suppress(Exception):
-            k, _ = marken_leiste.kontext(self.state)
+            k, _ = marken_stand.kontext(self.state)
             schluessel = (k.uebung_code, k.satz)
             if schluessel != self._diagnose_kontext:
                 if k.phase == "uebung" and self._diagnose_kontext is not None:
                     self.seite = 0  # die Seite „Diagnose“ steht vorn
                     self._log(f"Diagnose: neuer Satz — Band auf die Seite ({k.text()})")
                 self._diagnose_kontext = schluessel
-        return marken_leiste.uhr_zeilen(self.state)
+        return marken_stand.uhr_zeilen(self.state)
 
     def _einstellung(self) -> Any:
         return self.state.hrv_einstellungen()

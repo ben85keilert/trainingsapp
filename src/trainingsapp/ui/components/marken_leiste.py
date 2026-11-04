@@ -12,6 +12,9 @@ lässt sie stehen, ein Tipp geht nie verloren. Die oberste Ansicht bekommt unten
 - **Störung** ist ein eigener Knopf, **↶** nimmt die letzte Marke zurück (als eigene Zeile,
   nichts wird gelöscht), **▾** klappt zum schwebenden Knopf ein, **▴** wieder auf.
 
+Zustand und Marken (Art, Nummer, Zeile im Mitschnitt) liegen ohne flet in
+`components.marken_stand` — ⏯ an der Uhr setzt Marken über dieselben Funktionen.
+
 Gezeichnet wird je Tipp nur die Zahl und die Kopfzeile — nie die Leiste neu (sonst gingen
 Tipps verloren, wie beim Sekundentakt der Messansicht).
 """
@@ -19,16 +22,23 @@ Tipps verloren, wie beim Sekundentakt der Messansicht).
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import Any
 
 import flet as ft
 from hrv_core import mitschnitt as mt
 
 from trainingsapp.core import diagnose as dg
-from trainingsapp.core.kurzcode import kurzcode
 from trainingsapp.ui.components.layout import ohne_auto_update
+from trainingsapp.ui.components.marken_stand import (
+    LeistenStand,
+    art_waehlen,
+    diagnose_lauf,
+    kontext,
+    leistenstand,
+    marke_setzen,
+    nachziehen,
+    uhr_zeilen,
+)
 
 #: Anteil der Höhe, den die offene Leiste einnimmt
 ANTEIL = 1 / 3
@@ -39,64 +49,6 @@ HOEHE_MAX = 340.0
 NAVI_PX = 80.0
 #: Durchmesser des schwebenden Knopfs (px)
 KNOPF_PX = 76.0
-
-
-@dataclass
-class LeistenStand:
-    """Was die Leiste über Neuaufbauten hinweg weiß (lebt im `AppState`)."""
-
-    zaehler: dg.MarkenZaehler = field(default_factory=dg.MarkenZaehler)
-    #: Wahl im Chip: (Art, Kontext-Schlüssel) — gilt, bis sich der Kontext ändert
-    wahl: tuple[str, tuple[Any, ...]] | None = None
-    #: IDs der gesetzten Marken, neueste zuletzt (für ↶)
-    marken: list[int] = field(default_factory=list)
-    #: Wiederholungen je Kurzcode (aus dem Katalog, einmal gelesen)
-    wdh_je_code: dict[str, bool] | None = None
-    #: die Controls, die ein Tipp nachzieht
-    zahl: ft.Text | None = None
-    kopf: ft.Text | None = None
-    #: der Vergleich nach dem letzten Satz (Marken · Zähler · eingetragen, Stufe 8)
-    vergleich: ft.Text | None = None
-    chips: dict[str, ft.Control] = field(default_factory=dict)
-
-
-def _stand(state: Any) -> LeistenStand:
-    stand = getattr(state, "diagnose_leiste", None)
-    if not isinstance(stand, LeistenStand):
-        stand = LeistenStand()
-        state.diagnose_leiste = stand
-    return stand
-
-
-def _lauf(state: Any) -> Any:
-    lauf = getattr(state, "messlauf", None)
-    return lauf if lauf is not None and getattr(lauf, "diagnose_aktiv", False) else None
-
-
-def _wiederholungen(state: Any, stand: LeistenStand) -> Callable[[str], bool]:
-    if stand.wdh_je_code is None:
-        tabelle: dict[str, bool] = {}
-        with contextlib.suppress(Exception):
-            for u in state.uebungen.alle(mit_archivierten=True):
-                tabelle[kurzcode(u.id)] = dg.hat_wiederholungen(u.result_spec)
-        stand.wdh_je_code = tabelle
-    tabelle = stand.wdh_je_code
-    return lambda code: bool(tabelle.get(code) or tabelle.get(code[:6]))
-
-
-def kontext(state: Any) -> tuple[dg.MarkenKontext, str]:
-    """Der Kontext der nächsten Marke und ihre Art (mit der Wahl im Chip)."""
-    stand = _stand(state)
-    lauf = _lauf(state)
-    ereignisse = list(lauf.ereignisse()) if lauf is not None else []
-    k = dg.kontext_aus_notizen(ereignisse, _wiederholungen(state, stand))
-    art = k.art
-    if stand.wahl is not None:
-        if stand.wahl[1] == k.schluessel:
-            art = stand.wahl[0]
-        else:
-            stand.wahl = None  # der Kontext hat sich geändert
-    return k, art
 
 
 def _hoehe(page: ft.Page) -> float:
@@ -114,7 +66,7 @@ def _unten(page: ft.Page) -> float:
 
 def platz(page: ft.Page, state: Any) -> float:
     """Wie viel Platz die oberste Ansicht unten freihalten soll (0: keine Leiste)."""
-    if _lauf(state) is None:
+    if diagnose_lauf(state) is None:
         return 0.0
     if getattr(state, "diagnose_leiste_offen", True):
         return _hoehe(page)
@@ -138,14 +90,14 @@ def aktualisieren(page: ft.Page, state: Any) -> None:
     if alt is not None:
         page.overlay[:] = [p for p in page.overlay if p is not alt]
         state.diagnose_leiste_control = None
-    if _lauf(state) is None:
+    if diagnose_lauf(state) is None:
         stand = getattr(state, "diagnose_leiste", None)
         if isinstance(stand, LeistenStand):
             state.diagnose_leiste = None  # neue Diagnose, neue Zählung
         with contextlib.suppress(Exception):
             page.update()
         return
-    lauf = _lauf(state)
+    lauf = diagnose_lauf(state)
     if lauf is not None and hasattr(lauf, "diagnose_satz_beobachter"):
         lauf.diagnose_satz_beobachter = lambda v: _satz_melden(page, state, v)
     neu = (
@@ -157,46 +109,6 @@ def aktualisieren(page: ft.Page, state: Any) -> None:
     state.diagnose_leiste_control = neu
     with contextlib.suppress(Exception):
         page.update()
-
-
-def marke_setzen(
-    state: Any,
-    *,
-    quelle: str = mt.QUELLE_HANDY,
-    typ: str | None = None,
-    t_ns: int | None = None,
-    tm: int | None = None,
-) -> dict[str, Any] | None:
-    """Eine Marke in den Mitschnitt — ``typ=None``: die Art aus dem Kontext (mit Nummer im
-    Satz), sonst etwa eine Störung. ``t_ns``: Zeitpunkt auf der Uhr der Messung (⏯ an der
-    Uhr: der Druck, umgerechnet), ``tm``: Zeit der Dart-Seite (µs). ``None`` ohne Diagnose."""
-    lauf = _lauf(state)
-    if lauf is None:
-        return None
-    stand = _stand(state)
-    k, art = kontext(state)
-    wahl = typ or art
-    nr = stand.zaehler.weiter(wahl, k) if typ is None else None
-    zeile = lauf.marke(wahl, quelle=quelle, nr=nr, kontext=k.als_dict(), t=t_ns, tm=tm)
-    if zeile is not None and typ is None:
-        stand.marken.append(int(zeile["id"]))
-    _nachziehen(state, k, art)
-    return zeile
-
-
-def uhr_zeilen(state: Any) -> tuple[str, str] | None:
-    """Zeile 1 und 2 der Seite „Diagnose“ am Band: („Wdh 12“, „Kniebeuge S2“) — ``None``
-    ohne Diagnose."""
-    if _lauf(state) is None:
-        return None
-    stand = _stand(state)
-    k, art = kontext(state)
-    kurz = {dg.WDH: "Wdh", dg.ATEM: "Atem"}.get(art, art)
-    if k.uebung:
-        zweite = k.uebung + (f" S{k.satz}" if k.satz else "")
-    else:
-        zweite = "Pause" if k.phase == "pause" else "Messung"
-    return f"{kurz} {stand.zaehler.stand(art, k)}", zweite
 
 
 def tippen(page: ft.Page, state: Any, typ: str | None = None) -> dict[str, Any] | None:
@@ -216,36 +128,14 @@ def tippen(page: ft.Page, state: Any, typ: str | None = None) -> dict[str, Any] 
 def zuruecknehmen(page: ft.Page, state: Any) -> None:
     """↶ — die letzte Marke zurück (eine Zeile ``marke_weg``)."""
     ohne_auto_update()
-    lauf = _lauf(state)
-    stand = _stand(state)
+    lauf = diagnose_lauf(state)
+    stand = leistenstand(state)
     if lauf is None or not stand.marken:
         return
     lauf.marke_weg(stand.marken.pop(), quelle=mt.QUELLE_HANDY)
     stand.zaehler.zurueck()
     k, art = kontext(state)
-    _nachziehen(state, k, art)
-
-
-def art_waehlen(state: Any, art: str) -> None:
-    """Chip: diese Art, bis sich der Kontext ändert."""
-    stand = _stand(state)
-    k, _ = kontext(state)
-    stand.wahl = (art, k.schluessel)
-    _nachziehen(state, k, art)
-
-
-def _nachziehen(state: Any, k: dg.MarkenKontext, art: str) -> None:
-    stand = _stand(state)
-    if stand.zahl is not None:
-        stand.zahl.value = str(stand.zaehler.stand(art, k))
-    if stand.kopf is not None:
-        stand.kopf.value = k.text(art)
-    for name, chip in stand.chips.items():
-        chip.selected = name == art  # type: ignore[attr-defined]
-    with contextlib.suppress(Exception):
-        for c in (stand.zahl, stand.kopf, *stand.chips.values()):
-            if c is not None:
-                c.update()
+    nachziehen(state, k, art)
 
 
 def _satz_melden(page: ft.Page, state: Any, v: dict[str, Any]) -> None:
@@ -254,7 +144,7 @@ def _satz_melden(page: ft.Page, state: Any, v: dict[str, Any]) -> None:
     from trainingsapp.ui.components.dialoge import dialog_offen
 
     text = dg.satz_text(v)
-    stand = _stand(state)
+    stand = leistenstand(state)
     if stand.vergleich is not None:
         stand.vergleich.value = text
         stand.vergleich.visible = True
@@ -270,12 +160,12 @@ def _hinweis(art: str) -> str:
 
 
 def _leiste(page: ft.Page, state: Any) -> ft.Control:
-    stand = _stand(state)
+    stand = leistenstand(state)
     k, art = kontext(state)
     stand.zahl = ft.Text(str(stand.zaehler.stand(art, k)), size=60, weight=ft.FontWeight.W_700)
     stand.kopf = ft.Text(k.text(art), size=14, weight=ft.FontWeight.W_600, expand=True)
     hinweis = ft.Text(_hinweis(art), size=12, opacity=0.7)
-    letzter = getattr(_lauf(state), "letzter_satz", None)
+    letzter = getattr(diagnose_lauf(state), "letzter_satz", None)
     stand.vergleich = ft.Text(
         dg.satz_text(letzter) if letzter else "", size=12, opacity=0.8, visible=bool(letzter)
     )
@@ -369,7 +259,7 @@ def _leiste(page: ft.Page, state: Any) -> ft.Control:
 
 
 def _knopf(page: ft.Page, state: Any) -> ft.Control:
-    stand = _stand(state)
+    stand = leistenstand(state)
     k, art = kontext(state)
     stand.zahl = ft.Text(str(stand.zaehler.stand(art, k)), size=24, weight=ft.FontWeight.W_700)
     stand.kopf = None

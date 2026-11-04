@@ -263,6 +263,19 @@ DEFAULT_PROFIL = BLE_GENERIC
 _NACH_ID = {p.id: p for p in PROFILE}
 
 
+def reifegrad_text(profil_id: str) -> str | None:
+    """Der Reifegrad des Treibers in hrv-core (`hrv_core.geraete.treiber`) — „empfohlen“,
+    „geprüft“, „Prototyp“, „erkannt“; ``None`` für ein unbekanntes Gerät.
+
+    >>> reifegrad_text("polar_h10"), reifegrad_text("verity_sense"), reifegrad_text("")
+    ('empfohlen', 'geprüft', None)
+    """
+    from hrv_core.geraete import treiber
+
+    t = treiber.treiber(profil_id)
+    return t.reifegrad_text if t is not None else None
+
+
 def profil_nach_id(profil_id: str) -> GeraeteProfil:
     return _NACH_ID.get(profil_id, DEFAULT_PROFIL)
 

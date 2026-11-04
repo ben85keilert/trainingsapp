@@ -244,69 +244,93 @@ def countdown_text(art: str, rest_s: int, max_s: int) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Ziel:
-    """Woran ein neuer Anhang hängt: an einem Eintrag — oder am Tag selbst, bei der Notiz zum
-    Tag (Ben, 22.10.2026). Steht als ein Routenteil in den Wegen zur Kamera, zum Rekorder und
-    zur Fotoauswahl (`teil`, `ziel_lesen`).
+    """Woran ein neuer Anhang hängt: an einem Eintrag — oder an einer Notiz zum Tag (Ben,
+    22.10.2026 am Tag, seit 2.11.2026 an der Notiz: `notiz_id`, dazu Profil und Tag der
+    Notiz). Steht als ein Routenteil in den Wegen zur Kamera, zum Rekorder und zur
+    Fotoauswahl (`teil`, `ziel_lesen`).
 
-    >>> Ziel.fuer_eintrag("e1").teil, Ziel.fuer_tag("p1", date(2026, 10, 22)).teil
-    ('e1', 'tag/2026-10-22')
+    >>> Ziel.fuer_eintrag("e1").teil, Ziel.fuer_notiz("p1", date(2026, 10, 22), "n1").teil
+    ('e1', 'notiz/n1')
+    >>> Ziel.fuer_uebung("u1").teil, Ziel.fuer_uebung("u1").ist_uebung
+    ('uebung/u1', True)
+
+    Seit 2.11.2026 auch **das Bild einer Übung** (`uebung_id`, `data/uebungsbilder.py`): kein
+    Anhang, sondern ihr Symbol — die Kamera und die Fotoauswahl liefern es.
     """
 
     eintrag_id: str | None = None
     profil_id: str | None = None
     zum_tag: date | None = None
+    notiz_id: str | None = None
+    uebung_id: str | None = None
 
     @classmethod
     def fuer_eintrag(cls, eintrag_id: str) -> Ziel:
         return cls(eintrag_id=eintrag_id)
 
     @classmethod
-    def fuer_tag(cls, profil_id: str, tag: date) -> Ziel:
-        return cls(profil_id=profil_id, zum_tag=tag)
+    def fuer_notiz(cls, profil_id: str, tag: date, notiz_id: str) -> Ziel:
+        return cls(profil_id=profil_id, zum_tag=tag, notiz_id=notiz_id)
+
+    @classmethod
+    def fuer_uebung(cls, uebung_id: str) -> Ziel:
+        return cls(uebung_id=uebung_id)
 
     @property
-    def ist_tag(self) -> bool:
-        return self.zum_tag is not None
+    def ist_notiz(self) -> bool:
+        return self.notiz_id is not None
+
+    @property
+    def ist_uebung(self) -> bool:
+        return self.uebung_id is not None
 
     @property
     def teil(self) -> str:
-        """Der Routenteil: die ID des Eintrags oder ``tag/<datum>``."""
-        if self.zum_tag is not None:
-            return f"{TAG_TEIL}/{self.zum_tag.isoformat()}"
+        """Der Routenteil: die ID des Eintrags, ``notiz/<id>`` oder ``uebung/<id>``."""
+        if self.notiz_id is not None:
+            return f"{NOTIZ_TEIL}/{self.notiz_id}"
+        if self.uebung_id is not None:
+            return f"{UEBUNG_TEIL}/{self.uebung_id}"
         return self.eintrag_id or ""
 
 
-#: Routenteil für den Tag als Ziel — eine Eintrags-ID (UUID) heißt nie so
-TAG_TEIL = "tag"
+#: Routenteile für die Notiz zum Tag und die Übung als Ziel — eine Eintrags-ID (UUID) heißt
+#: nie so
+NOTIZ_TEIL = "notiz"
+UEBUNG_TEIL = "uebung"
 
 
 def ziel_lesen(teile: list[str], profil_id: str) -> tuple[Ziel, list[str]] | None:
     """Das Ziel vorn in ``teile`` (nach ``aufnehmen``/``hochladen``) und was danach kommt —
-    ``None``, wenn dort keins steht. Der Tag gilt für das aktive Profil.
+    ``None``, wenn dort keins steht. Eine Notiz gilt für das aktive Profil; ihren Tag trägt
+    erst die Ansicht nach, die sie lädt (`app.anhang_ziel`).
 
     >>> ziel_lesen(["e1", "foto"], "p1")
-    (Ziel(eintrag_id='e1', profil_id=None, zum_tag=None), ['foto'])
-    >>> z, rest = ziel_lesen(["tag", "2026-10-22", "audio"], "p1")
-    >>> z.zum_tag, z.profil_id, rest
-    (datetime.date(2026, 10, 22), 'p1', ['audio'])
-    >>> ziel_lesen(["tag", "gestern"], "p1"), ziel_lesen([], "p1")
+    (Ziel(eintrag_id='e1', profil_id=None, zum_tag=None, notiz_id=None, uebung_id=None), ['foto'])
+    >>> z, rest = ziel_lesen(["notiz", "n1", "audio"], "p1")
+    >>> z.notiz_id, z.profil_id, z.zum_tag, rest
+    ('n1', 'p1', None, ['audio'])
+    >>> ziel_lesen(["notiz"], "p1"), ziel_lesen([], "p1")
     (None, None)
+    >>> ziel_lesen(["uebung", "u1", "foto"], "p1")[0].uebung_id
+    'u1'
     """
     if not teile:
         return None
-    if teile[0] == TAG_TEIL:
-        try:
-            tag = date.fromisoformat(teile[1]) if len(teile) > 1 else None
-        except ValueError:
-            tag = None
-        return (Ziel.fuer_tag(profil_id, tag), teile[2:]) if tag is not None else None
+    if teile[0] in (NOTIZ_TEIL, UEBUNG_TEIL):
+        if len(teile) < 2 or not teile[1]:
+            return None
+        if teile[0] == UEBUNG_TEIL:
+            return Ziel.fuer_uebung(teile[1]), teile[2:]
+        return Ziel(profil_id=profil_id, notiz_id=teile[1]), teile[2:]
     return Ziel.fuer_eintrag(teile[0]), teile[1:]
 
 
 @dataclass(slots=True)
 class Anhang:
     """Eine Zeile ``entry_media``: ein Foto, Video oder eine Audioaufnahme — an einem Eintrag
-    (`eintrag_id`) oder am Tag (`profil_id` und `zum_tag`, Notiz zum Tag)."""
+    (`eintrag_id`) oder an einer Notiz zum Tag (`notiz_id`; dazu `profil_id` und `zum_tag`
+    für die Tagesabfragen)."""
 
     eintrag_id: str | None
     art: str = BILD
@@ -323,9 +347,11 @@ class Anhang:
     qualitaet: str = Qualitaet.MITTEL.value
     note: str = ""
     created_at: datetime | None = None
-    #: Am Tag statt an einem Eintrag (seit 22.10.2026): wessen Tag und welcher
+    #: Am Tag statt an einem Eintrag (seit 22.10.2026): wessen Tag und welcher — und seit
+    #: 2.11.2026 an welcher Notiz des Tags (Migration 036)
     profil_id: str | None = None
     zum_tag: date | None = None
+    notiz_id: str | None = None
 
     @property
     def ist_video(self) -> bool:
@@ -342,7 +368,7 @@ class Anhang:
 
     @property
     def ziel(self) -> Ziel:
-        return Ziel(self.eintrag_id, self.profil_id, self.zum_tag)
+        return Ziel(self.eintrag_id, self.profil_id, self.zum_tag, self.notiz_id)
 
     @property
     def bild(self) -> str:
@@ -436,9 +462,9 @@ def neuer_anhang(
     (True, True, 'klein')
     >>> neuer_anhang("e1", BILD, Qualitaet.MITTEL).vorschau is None
     True
-    >>> t = neuer_anhang(Ziel.fuer_tag("p1", date(2026, 10, 22)), AUDIO, Qualitaet.MITTEL)
-    >>> t.pfad.endswith(".m4a"), t.vorschau, t.eintrag_id, t.zum_tag, t.am_tag
-    (True, None, None, datetime.date(2026, 10, 22), True)
+    >>> t = neuer_anhang(Ziel.fuer_notiz("p1", date(2026, 10, 22), "n1"), AUDIO, Qualitaet.MITTEL)
+    >>> t.pfad.endswith(".m4a"), t.vorschau, t.eintrag_id, t.zum_tag, t.notiz_id, t.am_tag
+    (True, None, None, datetime.date(2026, 10, 22), 'n1', True)
     >>> neuer_anhang("e1", AUDIO, Qualitaet.MITTEL, endung="wav").pfad.endswith(".wav")
     True
     """
@@ -454,6 +480,7 @@ def neuer_anhang(
         note=note.strip(),
         profil_id=z.profil_id,
         zum_tag=z.zum_tag,
+        notiz_id=z.notiz_id,
     )
     name = dateiname(art, a.aufgenommen, a.id)
     if endung:
@@ -812,11 +839,12 @@ __all__ = [
     "HOCHLADEN_VIDEO_MAX_S",
     "MIME",
     "NAMEN",
+    "NOTIZ_TEIL",
     "REIHE_MAX",
     "SETTING_QUALITAET",
     "SETTING_VIDEO_MAX",
-    "TAG_TEIL",
     "TIMER_STUFEN",
+    "UEBUNG_TEIL",
     "VIDEO",
     "VIDEO_MAX_VORGABE_S",
     "VIDEO_MAX_WAHL",

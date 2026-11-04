@@ -125,16 +125,16 @@ def test_zum_tag_steht_unter_gemacht_am_ende(page, state) -> None:
     from trainingsapp.ui.views.tag import tagesansicht
 
     f = _felder(state)
-    state.tagesnotizen.setzen(state.profil.id, state.heute(), "Schulter fest")
+    state.tagesnotizen.anlegen(state.profil.id, state.heute(), "Schulter fest")
     state.tageswerte.hinzufuegen(f["ibu"], state.heute(), _um(state, 0, 1), wert=1, variante="400")
     ansicht = tagesansicht(page, state, state.heute(), mit_datum=False)
     texte = _texte(ansicht)
     gemacht = next(i for i, t in enumerate(texte) if t.startswith("GEMACHT"))
     zum_tag = texte.index("Zum Tag")
     assert zum_tag > gemacht
-    # Die Notiz steht direkt zum Schreiben im Block (Ben, 22.10.2026: kein Dialog mehr)
-    felder = [x for x in _alle(ansicht) if isinstance(x, ft.TextField)]
-    assert [x.value for x in felder] == ["Schulter fest"]
+    # Die Notiz steht als Karte im Block, darunter „+ Notiz“ (Ben, 2.11.2026: mehrere je Tag)
+    assert texte.index("Schulter fest") > zum_tag
+    assert not [x for x in _alle(ansicht) if isinstance(x, ft.TextField)]
     assert texte.index("Ibu") > zum_tag and "400 × 1" in texte
     assert texte.index("Ernährung") > zum_tag
     assert any(t.endswith("1 Tageswert") for t in texte)  # Kopfzeile
@@ -455,7 +455,7 @@ def test_tagebuch_mit_werten_und_texten(page, state) -> None:
     state.tagebuch_ordnung = UEBUNGEN
     texte = _texte(tagebuch(page, state))
     assert "Ernährung" in texte and "Ibu" in texte
-    assert "Übungen und Felder" in texte
+    assert "Übungen · Felder" in texte
 
 
 # ---------------------------------------------------------------------------
@@ -532,10 +532,13 @@ def test_einmal_am_tag_zeigt_die_liste_mit_uhrzeit(page, state) -> None:
     )
     zeile.on_click(None)
     uhr = [x for x in _alle(blatt) if isinstance(x, ft.TextField) and x.label == "Uhrzeit"]
-    uhr[-1].value = "7:30"
+    # eine Uhrzeit, die schon vorbei ist — das Blatt lehnt die Zukunft ab (lief vor 7:30 rot)
+    jetzt = datetime.now().astimezone()
+    ziel = jetzt - timedelta(hours=1) if jetzt.hour >= 1 else jetzt.replace(hour=0, minute=0)
+    uhr[-1].value = f"{ziel:%H:%M}"
     _knopf(blatt, "Übernehmen").on_click(None)
     (w,) = state.tageswerte.am_tag(state.profil.id, state.heute())
-    assert w.zeit.astimezone().strftime("%H:%M") == "07:30"
+    assert w.zeit.astimezone().strftime("%H:%M") == f"{ziel:%H:%M}"
 
 
 def test_entfernte_variante_bleibt_im_bearbeiter_waehlbar(page, state) -> None:

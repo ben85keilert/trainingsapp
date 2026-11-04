@@ -34,6 +34,7 @@ Routen:
     /einstellungen/training         Training: Karte einfärben, Tempo mit Pausen, Spalten je km
     /einstellungen/profile          Profile anlegen, umbenennen, löschen
     /einstellungen/tags             Typen und Regionen der Übungen: anlegen, umbenennen, löschen
+    /einstellungen/notiz-tags       Tags der Notizen zum Tag (docs/plan_tagesnotizen.md)
     /einstellungen/tagesfelder[/<id>|/neu]   Tagesfelder: Liste, Formular (docs/plan_tagesfelder.md)
     /verlauf/tagesfeld/<id>         Ein Tagesfeld im Verlauf: Säulen bzw. Linien je Variante
     /verlauf/herzfrequenz           Ruhe-/Nacht-HF mit Baseline, Wochenlast, Tests (29.10.2026)
@@ -85,6 +86,7 @@ from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lok
 from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.ui import ausrichtung, navigation
 from trainingsapp.ui import einheit as einheit_ui
+from trainingsapp.ui.components import diagnose_punkt, marken_leiste
 from trainingsapp.ui.components.dialoge import dialog_offen
 from trainingsapp.ui.components.startleiste import (
     leiste_auffrischen,
@@ -109,10 +111,13 @@ from trainingsapp.ui.views.einstellungen_anhaenge import einstellungen_anhaenge
 from trainingsapp.ui.views.einstellungen_herzfrequenz import einstellungen_herzfrequenz
 from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
 from trainingsapp.ui.views.einstellungen_hrv_titel import einstellungen_hrv_titel
+from trainingsapp.ui.views.einstellungen_notiz_tags import einstellungen_notiz_tags_view
 from trainingsapp.ui.views.einstellungen_tags import einstellungen_tags_view
 from trainingsapp.ui.views.einstellungen_training import einstellungen_training
 from trainingsapp.ui.views.eintrag import eintrag_view
 from trainingsapp.ui.views.eintrag_formular import eintrag_formular
+from trainingsapp.ui.views.geraeteprobe import ROUTE as PROBE_ROUTE
+from trainingsapp.ui.views.geraeteprobe import geraeteprobe_view
 from trainingsapp.ui.views.gps_test import gps_test_view
 from trainingsapp.ui.views.heute import heute
 from trainingsapp.ui.views.kurse import kapitel_view, kurs_view
@@ -585,14 +590,23 @@ def main(page: ft.Page) -> None:
             ablegen(lambda: formular_korrektur(page, state, eintrag, basis))
 
     def anhang_ziel(teile: list[str]) -> tuple[Ziel, list[str]] | None:
-        """Das Ziel einer Aufnahme vorn in ``teile`` — ein Eintrag, den es gibt, oder ein Tag,
-        der nicht in der Zukunft liegt (Notiz zum Tag, 22.10.2026)."""
+        """Das Ziel einer Aufnahme vorn in ``teile`` — ein Eintrag, den es gibt, oder eine
+        Notiz zum Tag des aktiven Profils (22.10.2026 am Tag, seit 2.11.2026 an der Notiz —
+        die Route nennt nur ihre ID, den Tag trägt die Notiz)."""
         gelesen = ziel_lesen(teile, state.profil.id)
         if gelesen is None:
             return None
-        ziel = gelesen[0]
-        if ziel.zum_tag is not None:
-            return gelesen if ziel.zum_tag <= state.heute() else None
+        ziel, rest = gelesen
+        if ziel.uebung_id is not None:
+            # Das Bild einer Übung (2.11.2026) — nur Fotos, und nur eine, die es gibt
+            if rest[:1] not in (["foto"], []) and rest:
+                return None
+            return gelesen if state.uebungen.laden(ziel.uebung_id) is not None else None
+        if ziel.notiz_id is not None:
+            notiz = state.tagesnotizen.laden(ziel.notiz_id)
+            if notiz is None or notiz.subject_id != state.profil.id:
+                return None
+            return Ziel.fuer_notiz(state.profil.id, notiz.date, notiz.id), rest
         eintrag = state.sitzungen.eintrag_laden(ziel.eintrag_id or "")
         return gelesen if eintrag is not None else None
 
@@ -823,6 +837,13 @@ def main(page: ft.Page) -> None:
         if not haupt and navigation.uebungsseite(oben := str(page.views[-1].route)):
             page.views[-1].navigation_bar = uebungsseiten_leiste(page, state, oben)
         hintergrund_setzen(page, darstellung)
+        # Der rote Punkt des Diagnosemodus liegt im Overlay — der Neuaufbau lässt ihn stehen,
+        # hier kommt er hinzu oder geht (`components.diagnose_punkt`)
+        with suppress(Exception):
+            diagnose_punkt.aktualisieren(page, state)
+            # Die Marken-Leiste liegt ebenso im Overlay; die Ansicht bekommt unten Platz
+            marken_leiste.platz_einsetzen(page, state)
+            marken_leiste.aktualisieren(page, state)
         page.update()
         # Hochkant ist die Regel; Karten, Kurven und das Live-Vollbild dürfen quer
         ausrichtung.anwenden(page, state, ausrichtung.modus_fuer_route(page.route))
@@ -852,6 +873,8 @@ def main(page: ft.Page) -> None:
                 ablegen(lambda: profile_view(page, state))
             elif teile[1:2] == ["tags"]:
                 ablegen(lambda: einstellungen_tags_view(page, state))
+            elif teile[1:2] == ["notiz-tags"]:
+                ablegen(lambda: einstellungen_notiz_tags_view(page, state))
             elif teile[1:2] == ["pakete"]:
                 paket_routen("/einstellungen/pakete", teile[2:])
             elif teile[1:2] == ["gps-test"]:
@@ -895,6 +918,8 @@ def main(page: ft.Page) -> None:
                     ablegen(lambda: kapitel_view(page, state, kurs, kapitel, browser))
         elif teile[:1] == ["live"]:
             ablegen(lambda: live_vollbild_view(page, state))
+        elif teile[:1] == [PROBE_ROUTE.strip("/")]:
+            ablegen(lambda: geraeteprobe_view(page, state))
         elif teile[:1] == ["ausdauer"]:
             if len(teile) == 1:
                 ablegen(lambda: ausdauer_view(page, state))

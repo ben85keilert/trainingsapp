@@ -36,6 +36,7 @@ uv run pytest tests/test_messlauf.py::test_name -q   # ein einzelner Test
 uv run pytest --doctest-modules src/trainingsapp/core src/trainingsapp/devices   # Doctests (laufen in CI)
 uv run ruff check . && uv run ruff format --check .   # Linter + Formatprüfung
 uv run mypy                                    # Typprüfung (Paket ist in pyproject konfiguriert)
+uv run python scripts/pruefe_flet_beispiele.py   # Flet-Skripte des Lernpfads ohne Bildschirm (CI)
 ```
 
 Vor jedem Pull Request muss laufen:
@@ -124,7 +125,12 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Ortsangabe** — die App prüft nach) und gehen nie in Export, Backup oder Sync — nur
   „Teilen“ am Einzelbild. Kein Video läuft
   außerhalb der Ansicht `/anhang/<id>`; Tag, Tagebuch und Übung zeigen Frontbilder
-  (`ui/components/anhang_reihe.py`). Vertrag: `docs/plan_anhaenge.md`.
+  (`ui/components/anhang_reihe.py`). Vertrag: `docs/plan_anhaenge.md`. **Eigene Bilder als
+  Symbol einer Übung** (Ben, 2.11.2026) liegen in der Ablage `Medien/Symbole/`
+  (`data/uebungsbilder.py`, `exercise.image_path`; Weg ``uebung/<id>`` in Kamera und
+  Fotoauswahl, Blatt `components/symbol_blatt.py`), gezeigt über
+  `components/uebungsbild.uebungsbild` statt `ft.Icon(symbol(…))`, quadratisch mit runden
+  Ecken (P109, auch PNG) — ebenfalls nie in Paket, Export oder Sync.
 
 - **Zwei Editionen aus einem Quelltext.** `config.ist_aktiv("funktion")` beantwortet
   „darf ich X?" statt „bin ich Edition B?". Ein Schalter je Fähigkeit, nicht je
@@ -152,7 +158,17 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   für jetzt (`docs/plan_uebungen_einstellen.md`). Jeder `SessionEntry` speichert eine Kopie der
   Spec, mit der er erfasst wurde (`spec_snapshot_json`); angezeigt wird **immer** mit der
   Kopie, nie mit der aktuellen Definition. Neuer `FieldType` → hier ergänzen und in
-  `ui/components/spec_form.py` ein Widget registrieren.
+  `ui/components/spec_form.py` ein Widget registrieren. **„Übung bearbeiten“** (Ben,
+  2.11.2026, `docs/plan_uebung_bearbeiten.md`): Parameter als Knöpfe, je eingeschaltetem
+  eine Karte mit eigenem Namen (`FieldSpec.label` gehört der Übung), Chips (✕ nimmt einen
+  ungenutzten aus der Wahl), Sätze und dem **Ziel** (`default_target`); Erklärtexte im (i)
+  (`components/hilfe.py`), keine inline. **Mehrfachfelder einer Art** (P106, Ben 2.11.2026):
+  ``hold_2``, ``scale_2`` … — die Schlüssel des Vorrats bleiben die *Art*
+  (`core.result_spec.basis_key`, `vorrat_feld`, `naechster_key`); wer nach der Art fragt
+  (Haltezeit, Zeit, Timer „zählt als“ je Zeitfeld), vergleicht `basis_key`, nie den
+  Schlüssel. **Beschreibung in Abschnitten** (P108): ein Text mit ``## Name``-Zeilen
+  (`core/beschreibung.py`), nie ein zweites Feld. „Im Plan einstellen“ hat dieselbe Ordnung
+  (P107). Vertrag: `docs/plan_uebung_bearbeiten.md`.
 
 - **Übungen kommen über Pakete** (Ben, 14.10.2026). Der mitgelieferte Katalog ist
   das Paket „Standard“ (`data/seed/standard.toml` — TOML, weil von Hand gepflegt; IDs per UUIDv5
@@ -189,7 +205,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Tagesabfragen über `session_entry` sehen sie nie. Kurven entstehen über
   `core.tagesfelder.als_eintraege` → `core.verlauf`. Es gibt nur Zahlen, keine Bewertung,
   Grenze oder Erinnerung (`docs/recht/00_zweckbestimmung.md`). Vertrag:
-  `docs/plan_tagesfelder.md`.
+  `docs/plan_tagesfelder.md`. **Nicht dasselbe wie die Notiz-Tags** (Ben, 2.11.2026, P104):
+  Ein Tagesfeld „nur Text“ ist ein Feld mit Einträgen, das mitsamt ihnen als Stapel gelöscht
+  werden darf; ein Notiz-Tag ist ein langlebiges Etikett am Tagebuchtext, abgesichert gegen
+  Löschen — es nimmt nie Text mit. Beides bleibt nebeneinander.
 
 - **Updates** (Ben, 16.10.2026): `core/update.py` fragt die GitHub-Releases der App ab
   (Version und Build-Nummer gegen `config.app_version()` — in der gebauten App aus
@@ -202,6 +221,19 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `build/solo.toml`), spielt Pakete im Modus „auto“ ein und hängt das Label unter das
   Zahnrad (`AppState.updates_label`, einmal je Stand). Schalter `update_pruefung` und
   `paket_quellen` nur Solo. Stufe 2 (Installation in der App) ist Katalog A8.
+
+- **Diagnosemodus** (Ben, 4.11.2026, `docs/plan_diagnosemodus.md`, Vertrag §14): in den
+  Einstellungen angeboten, je Messung gestartet (Sensorblatt mit Vorabtest), roter Punkt oben
+  rechts im Overlay. Rohmitschnitt `mitschnitt-v1` aus hrv-core (`hrv_core.mitschnitt`) über
+  `devices/mitschnitt.MitschnittTransport`, Beschleunigung in `PolarQuelle` (`acc=`,
+  `stroeme_setzen`), Lebenszyklus im `Messlauf` (neben dem Backup, beim Speichern Beiwerk);
+  **Marken** (Wdh/Atem/Störung, `core/diagnose.kontext_aus_notizen`) aus der Leiste im Overlay
+  (`components/marken_leiste`, Tipp beim Aufsetzen) oder mit ⏯ an der Uhr (Seite „Diagnose“,
+  Dart-Stempel) — **nie in den Notizen**, immer im Mitschnitt; nach dem Satz Marken · Zähler
+  (`hrv_core.prototyp`, nur angezeigt) · eingetragen. Unbekannte Geräte: Geräteprobe ohne
+  Messung (`devices/erkundung.py`, `/geraeteprobe`), nie schreiben, nie 0x2A25/0x2A23 lesen.
+  Hinaus nur bereinigt (`hrv_core.deid.mitschnitt_zeilen`). In hochfrequenten Ereignissen
+  immer `ohne_auto_update()` (V1).
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`
@@ -218,12 +250,20 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
 - **Zurück speichert** (Ben, 16.10.2026): Formulare mit „Speichern“ hängen an
   `ui/components/zurueck.zurueck_speichert` (`can_pop`/`on_confirm_pop`) — Zurück speichert
   Geändertes, Unvollständiges fragt, „Abbrechen“ verwirft; Blätter und Notizdialoge speichern
-  beim Schließen. Neue Formulare ebenso. Die **Notiz zum Tag** schreibt man direkt unter
-  Heute (Ben, 22.10.2026): Autosave nach 1 s, vor jedem Neuaufbau und vor dem Hintergrund
-  (`AppState.vor_dem_verlassen`), ↶ ↷ aus `core/textverlauf.py`, „Abbrechen“ = Text vom
-  Antippen (`components/tagesnotiz.py`) — das Speichern frischt die Ansicht nie auf (Fokus).
-  Tippen daneben = „Fertig“; die Tastatur schließt `Notizfeld.blur` — nie den Fokus an einen
-  Knopf geben, der danach verschwindet (Flutter gibt ihn dem Feld zurück). Flutter-Menüs
+  beim Schließen. Neue Formulare ebenso. **Schreibnotizen nie als Popup** (Ben, 2.11.2026,
+  P103): `components/notizeditor.py` ist der Editor an Ort und Stelle — Autosave nach 1 s,
+  vor jedem Neuaufbau und vor dem Hintergrund (`AppState.vor_dem_verlassen`), ↶ ↷ aus
+  `core/textverlauf.py`, „Abbrechen“ = Text vom Antippen, „Fertig“ = Karte — das Speichern
+  frischt die Ansicht nie auf (Fokus). Darauf die **Notizen zum Tag**
+  (`components/tagesnotiz.py`, `docs/plan_tagesnotizen.md`): mehrere je Tag mit „+“, Tags
+  als Chips (Migration 036, „Tagebuch“ fest, Einstellungen → Notiz-Tags), Anhänge an der
+  Notiz, Karten gekürzt auf `core.tagebuch.NOTIZ_ZEILEN`; im Tagebuch der Abschnitt
+  „Notizen“ mit Tag-Filter und Suche, bearbeitet wird in der Liste (`Textnotiz` für die
+  Plan-Notiz).
+  Tippen daneben = „Fertig“, Scrollen daneben nicht (Ben, 2.11.2026: `AppState.schreib_gesten`
+  — `components/scroll.py` meldet Ziehen, der Gestenfänger in `views/tag.py` den kurzen Tipp;
+  der runde Knopf verschwindet beim Schreiben); die Tastatur schließt `Notizfeld.blur` — nie
+  den Fokus an einen Knopf geben, der danach verschwindet (Flutter gibt ihn dem Feld zurück). Flutter-Menüs
   reichen den Tipp, der sie schließt, an das Darunter weiter — Filter schirmen ihre Liste ab
   (`TagWahl.abschirmen`). **Dialoge exakt schließen:** `page.pop_dialog()`
   trifft den obersten Eintrag — auch eine SnackBar —, darum `components/dialoge.schliessen`
@@ -263,4 +303,8 @@ App-Tests (Notizen, Export, UI), die eine echte Messdatei brauchen.
 
 Die App entsteht entlang eines Lernpfads (`docs/tutorial/`); `ui/` ist bewusst noch eine
 Hülle mit Platzhalteransichten. Die Tutorial-Beispielskripte laufen in CI mit — wenn ein
-Beispiel bricht, ist der Lernpfad kaputt.
+Beispiel bricht, ist der Lernpfad kaputt. Flet-freie Beispiele stehen als Liste im Schritt
+„Beispiele des Lernpfads“; jedes Skript, das `flet` importiert (dazu `src/main.py`), findet
+`scripts/pruefe_flet_beispiele.py` am Ende des Jobs `test` selbst — mit den
+Laufzeitabhängigkeiten wie in der gebauten App, Control-Baum mit `page`-Attrappe,
+`DeprecationWarning` = Fehler. Ereignis-Handler und Code in `.md`-Dateien prüft es nicht.

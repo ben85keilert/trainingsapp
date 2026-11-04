@@ -65,6 +65,7 @@ from typing import Any
 
 import flet as ft
 import numpy as np
+from hrv_core import mitschnitt as mt
 from hrv_core.atmung import ATEMUEBUNG, RUHE, atemfrequenz, kurzgrund
 from hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
 from hrv_core.ausschnitte import (
@@ -80,6 +81,7 @@ from hrv_core.ausschnitte import (
     zusatz_speichern,
 )
 from hrv_core.constants import BAND_OK
+from hrv_core.ekg import ekg_laden, ekg_pfad
 from hrv_core.ereignisse import Zeitbezug, metadaten_schreiben, sortiert
 from hrv_core.frequency import Fensterspektrum, frequenzbereich
 from hrv_core.korrektur import (
@@ -106,6 +108,7 @@ from hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core import abschnitte as eigene_abschnitte
+from trainingsapp.core import diagnose as dg
 from trainingsapp.core.aufnahme_bezug import RAND_S, Bezug
 from trainingsapp.core.hf_auswertung import AbschnittWand, achse_zu_wand, wand_zu_achse
 from trainingsapp.core.hrv_ansicht import (
@@ -125,6 +128,7 @@ from trainingsapp.core.hrv_einstellungen import (
     EBENEN,
     SICHT_HF,
     SICHT_HRV,
+    HrvEinstellungen,
 )
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
 from trainingsapp.core.laufend import minuten
@@ -149,7 +153,7 @@ from trainingsapp.ui.components.kacheln import (
     ohne_intervalle,
     zahl,
 )
-from trainingsapp.ui.components.karte import hinweis, info_eintrag, info_knopf, karte
+from trainingsapp.ui.components.karte import gruppe, hinweis, info_eintrag, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.korrektur_blatt import (
     korrektur_blatt,
@@ -207,8 +211,10 @@ from trainingsapp.ui.components.vollbild import achse as werteachse
 from trainingsapp.ui.components.weitergeben import weitergeben
 from trainingsapp.ui.components.zeitachse import achse, achsen_knopf
 from trainingsapp.ui.components.zeitfenster import (
+    BreitenSatz,
     Fenster,
     breiten_auswahl,
+    breiten_nachziehen,
     breiten_wahl,
     wischbar,
 )
@@ -301,6 +307,8 @@ LEISTUNG_ARTEN = frozenset({"leistung", "abschluss"})
 
 #: So breit öffnet die Aufzeichnung — am Anfang der Messung (Ben, 14.10.2026)
 START_BREITE_S = 120
+#: Ausschnitt des EKG-Rohsignals (s) — kurz, damit R-Zacken sichtbar bleiben
+EKG_FENSTER_S = 6.0
 
 #: Analysefenster: wofür Spektrum, Poincaré und DFA gerechnet werden
 AW_ALLES = "alles"
@@ -748,10 +756,22 @@ def _aufbauen(
     ketten_box = ft.Column(spacing=0)
     # Dieselben vier Knöpfe wie live (Ben, 21.10.2026); ein Abschnitt, die ganze Messung
     # oder eine eingetippte Breite wählt keinen — `breiten_auswahl`
-    breite_wahl = breiten_wahl(fenster.breite_s, lambda s: breite_setzen(s))
-    breite_wahl_voll = breiten_wahl(  # dieselbe Wahl in der Kopfzeile des Vollbilds
-        fenster.breite_s, lambda s: breite_setzen(s), kompakt=True
+    breite_wahl = breiten_wahl(
+        fenster.breite_s, lambda s: breite_setzen(s), breiten=einst.breiten()
     )
+    breite_wahl_voll = breiten_wahl(  # dieselbe Wahl in der Kopfzeile des Vollbilds
+        fenster.breite_s, lambda s: breite_setzen(s), kompakt=True, breiten=einst.breiten()
+    )
+
+    def breiten_satz() -> BreitenSatz:
+        """Kurz · Lang · Eigene im Blatt „Fenster & Darstellung“ (Ben, 30.10.2026)."""
+
+        def geaendert(neu: HrvEinstellungen) -> None:
+            einst.breiten_satz, einst.breiten_eigen = neu.breiten_satz, list(neu.breiten_eigen)
+            breiten_nachziehen(breite_wahl, neu.breiten(), fenster.breite_s)
+            breiten_nachziehen(breite_wahl_voll, neu.breiten(), fenster.breite_s, kompakt=True)
+
+        return BreitenSatz(state.hrv_einstellungen, state.hrv_einstellungen_setzen, geaendert)
 
     def achse_umschalten() -> None:
         """Zeitachse: Uhrzeit statt Dauer (Ben, 20.10.2026) — dieselbe Einstellung wie live."""
@@ -760,6 +780,14 @@ def _aufbauen(
         gespeichert_.achse_uhrzeit = einst.achse_uhrzeit
         state.hrv_einstellungen_setzen(gespeichert_)
         nur_kurven()
+
+    def uhrzeit_im_blatt() -> None:
+        """Dasselbe aus dem Blatt „Fenster & Darstellung“ — beide Knöpfe tönen mit."""
+        achse_umschalten()
+        for knopf in (uhr_knopf, uhr_knopf_voll):
+            markieren(knopf, einst.achse_uhrzeit)
+            with contextlib.suppress(Exception):
+                knopf.update()
 
     #: Zwei Knöpfe, weil die Karte und die Kopfzeile des Vollbilds je einen brauchen
     uhr_knopf = achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten)
@@ -1035,11 +1063,36 @@ def _aufbauen(
         xs = notizfeld.positionen(x_von, x_bis, _ist_leistung)
         return [senkrechte(xs, FARBEN["leistung"], 2.0, gestrichelt=False)] if xs else []
 
+    # Diagnosemarken aus dem Rohmitschnitt (Plan Diagnosemodus §2.7): eine eigene Ebene, nicht
+    # in der Notizliste — Wanduhrzeiten je Art, geladen im Thread (`diagnose_laden`)
+    diagnose_marken: dict[str, list[float]] = {}
+
+    def diagnose_reihen(x_von: float, x_bis: float) -> list[Reihe]:
+        if not diagnose_marken:
+            return []
+        out: list[Reihe] = []
+        for typ, farbe in (
+            (mt.MARKE_WDH, FARBEN["gipfel"]),
+            (mt.MARKE_ATEM, FARBEN["atemfrequenz"]),
+            (mt.MARKE_STOERUNG, FARBEN["rot"]),
+            (mt.MARKE_FREI, FARBEN["notiz"]),
+        ):
+            xs = [
+                x
+                for t in diagnose_marken.get(typ, [])
+                if x_von <= (x := wand_zu_achse(zeilen_achse, wand, t)) <= x_bis
+            ]
+            if xs:
+                out.append(senkrechte(xs, farbe, 1.0, gestrichelt=True))
+        return out
+
     def marken_reihen(x_von: float, x_bis: float) -> list[Reihe]:
-        """Notizen (gelb), Leistungen (blau), Grenzen des Editors und der Ablesestrich — über
-        den Kurven; Notizen und Leistungen nur, wenn ihre Ebene eingeblendet ist."""
+        """Notizen (gelb), Leistungen (blau), Diagnosemarken, Grenzen des Editors und der
+        Ablesestrich — über den Kurven; Notizen und Leistungen nur, wenn ihre Ebene
+        eingeblendet ist."""
         strich = m.strich if m.ablesen else None
         return [
+            *diagnose_reihen(x_von, x_bis),
             *(notizfeld.marken(x_von, x_bis) if EBENE_NOTIZEN in einst.ebenen else []),
             *(leistungs_reihen(x_von, x_bis) if EBENE_LEISTUNGEN in einst.ebenen else []),
             *(m.editor.reihen(x_von, x_bis) if m.editor is not None else []),
@@ -1935,7 +1988,7 @@ def _aufbauen(
     def breiten_zeigen() -> None:
         """Die Breitenknöpfe nach dem Fenster — keiner, wenn die Breite zu keinem passt."""
         for wahl in (breite_wahl, breite_wahl_voll):
-            wahl.selected = breiten_auswahl(fenster.breite_s)
+            wahl.selected = breiten_auswahl(fenster.breite_s, einst.breiten())
 
     def zentrieren(x: float) -> None:
         """Die Kurve auf eine Zeit rücken (Notiz antippen); bei „Alles" bleibt sie."""
@@ -2913,7 +2966,12 @@ def _aufbauen(
         Im Vollbild die Kurven beider Achsen, hochkant Hauptkurve und Bereich."""
         a = state.ansicht()
         zeit = Zeitachse(
-            fenster.breite_s, lambda s: breite_setzen(s), max_s=achse_ende() - achse_anfang()
+            fenster.breite_s,
+            lambda s: breite_setzen(s),
+            max_s=achse_ende() - achse_anfang(),
+            satz=breiten_satz().control,
+            uhrzeit=einst.achse_uhrzeit,
+            uhrzeit_setzen=uhrzeit_im_blatt,
         )
         if m.vollbild:
             links, rechts = a.achsen(m.angebot)
@@ -2952,6 +3010,7 @@ def _aufbauen(
             editor_umhaengen()
             view.appbar = None
             view.scroll = None
+            view.floating_action_button = None  # der Sichtwechsel gehört nicht ins Vollbild
             view.padding = ft.Padding.only(left=4, right=4)
             view.can_pop = False  # Zurück verlässt erst das Vollbild
             view.controls = [sicher(vollbild_inhalt)]
@@ -2965,6 +3024,7 @@ def _aufbauen(
             editor_umhaengen()
             view.appbar = leiste_oben
             view.scroll = ft.ScrollMode.AUTO
+            view.floating_action_button = fab
             view.padding = 12
             view.can_pop = kann_zurueck()  # sonst speichert Zurück erst
             view.controls = [sicher(normal_inhalt, expand=False)]
@@ -3314,6 +3374,230 @@ def _aufbauen(
                 vs.append(float(v))
         return (ts, vs) if ts else None
 
+    # -- EKG-Rohsignal (Beiwerk ``_ecg.json``, Ben 30.10.2026) --------------------------
+    # Nur ansehen, nicht rechnen: kurze Ausschnitte mit eigener µV-Skala, weil das Signal
+    # anders skaliert ist als die RR-Kurve („problematisch ist, dass die Ansicht anders
+    # skaliert ist“). Geladen im Thread, erst wenn die Datei da ist.
+    ekg_box = ft.Column(spacing=6, visible=False)
+    ekg_stand: dict[str, Any] = {"ekg": None, "mitte": 0.0}
+    ekg_datei = ekg_pfad(pfad)
+
+    def ekg_update() -> None:
+        with contextlib.suppress(Exception):
+            ekg_box.update()
+
+    def ekg_blaettern(delta_s: float) -> None:
+        e = ekg_stand["ekg"]
+        if e is None:
+            return
+        t = e.zeit_s()
+        if not t.size:
+            return
+        lo, hi = float(t[0]) + EKG_FENSTER_S / 2, max(float(t[-1]) - EKG_FENSTER_S / 2, float(t[0]))
+        ekg_stand["mitte"] = min(max(ekg_stand["mitte"] + delta_s, lo), hi)
+        ekg_zeichnen()
+
+    def ekg_zum_strich() -> None:
+        if m.strich is None:
+            return
+        ekg_stand["mitte"] = achse_zu_wand(zeilen_achse, wand, m.strich)
+        ekg_zeichnen()
+
+    def ekg_zeichnen() -> None:
+        e = ekg_stand["ekg"]
+        if e is None:
+            return
+        von = ekg_stand["mitte"] - EKG_FENSTER_S / 2
+        bis = von + EKG_FENSTER_S
+        t, uv = e.ausschnitt(von, bis)
+        punkte = [(float(a), float(b)) for a, b in zip(t.tolist(), uv.tolist(), strict=True)]
+        akku = " → ".join(f"{int(b[1])} %" for b in e.batterie) if e.batterie else "–"
+        kopf = ft.Text(
+            f"{e.rate_hz} Hz · {e.n} Proben · {minuten(e.dauer_s)} · "
+            f"{len(e.gaps)} Lücken · Akku {akku}",
+            size=12,
+            opacity=0.8,
+        )
+        zeile = ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.IconButton(
+                    ft.Icons.CHEVRON_LEFT,
+                    tooltip="5 s zurück",
+                    on_click=lambda _=None: ekg_blaettern(-5.0),
+                ),
+                ft.Text(
+                    f"{minuten(max(von, 0.0))}–{minuten(max(bis, 0.0))}",
+                    size=12,
+                    expand=True,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.IconButton(
+                    ft.Icons.CHEVRON_RIGHT,
+                    tooltip="5 s weiter",
+                    on_click=lambda _=None: ekg_blaettern(5.0),
+                ),
+                ft.TextButton(
+                    "Zum Strich",
+                    icon=ft.Icons.VERTICAL_ALIGN_CENTER,
+                    visible=m.ablesen and m.strich is not None,
+                    on_click=lambda _=None: ekg_zum_strich(),
+                ),
+            ],
+        )
+        bild: ft.Control
+        if punkte:
+            bild = kurve(
+                [Reihe(punkte, breite=1.2)],
+                einheit="µV",
+                hoehe=150,
+                x_von=von,
+                x_bis=bis,
+                x_schritte=(1, 2),
+                x_text=minuten,
+                y_spanne_min=500.0,
+                y_schritt_min=100.0,
+            )
+        else:
+            bild = hinweis("In diesem Ausschnitt keine Proben (Lücke).")
+        ekg_box.controls = [
+            karte(
+                kartentitel("EKG-Rohsignal"),
+                kopf,
+                zeile,
+                bild,
+                hinweis(
+                    "Das rohe Signal des Gurts (Polar H10, Beiwerk „…_ecg.json“), nicht "
+                    "gerechnet — eigene Skala in µV. Lücken und der Akkuverlauf zeigen, wie "
+                    "sich der Gurt verhält. Beim Weitergeben ist die Datei dabei."
+                ),
+            )
+        ]
+        ekg_box.visible = True
+        ekg_update()
+
+    async def ekg_laden_task() -> None:
+        try:
+            e = await asyncio.to_thread(ekg_laden, ekg_datei)
+        except Exception as exc:  # kaputte Datei: sagen, nicht abstürzen
+            ekg_box.controls = [
+                karte(kartentitel("EKG-Rohsignal"), hinweis(f"Beiwerk nicht lesbar: {exc}"))
+            ]
+            ekg_box.visible = True
+            ekg_update()
+            return
+        ekg_stand["ekg"] = e
+        t = e.zeit_s()
+        ekg_stand["mitte"] = (float(t[0]) + EKG_FENSTER_S / 2) if t.size else 0.0
+        ekg_zeichnen()
+
+    if ekg_datei.exists():
+        page.run_task(ekg_laden_task)
+
+    # -- Diagnose (Rohmitschnitt ``_mitschnitt.jsonl``, Plan Diagnosemodus §2.7) ----------
+    diagnose_box = ft.Column(spacing=6, visible=False)
+    mitschnitt_datei = mt.mitschnitt_pfad(pfad)
+
+    def diagnose_zeigen(text: str, *, mit_knoepfen: bool = True) -> None:
+        diagnose_box.controls = [
+            karte(
+                kartentitel("Diagnose"),
+                ft.Text(text, size=13),
+                hinweis(
+                    "Rohmitschnitt aller Bluetooth-Pakete mit den Marken — gestrichelt über der "
+                    "Kurve (Wiederholung, Atemzug, Störung). Nicht gerechnet; zum Auswerten "
+                    "in hrv-research. Teilen gibt ihn ohne Bluetooth-Adresse weiter."
+                ),
+                ft.Row(
+                    spacing=8,
+                    wrap=True,
+                    visible=mit_knoepfen,
+                    controls=[
+                        ft.OutlinedButton(
+                            "Diagnosepaket teilen", icon=ft.Icons.SHARE, on_click=diagnose_teilen
+                        ),
+                        ft.TextButton(
+                            "Diagnose löschen",
+                            icon=ft.Icons.DELETE_OUTLINE,
+                            on_click=lambda: diagnose_loeschen_fragen(),
+                        ),
+                    ],
+                ),
+            )
+        ]
+        diagnose_box.visible = True
+        with contextlib.suppress(Exception):
+            diagnose_box.update()
+
+    async def diagnose_laden() -> None:
+        def lesen() -> tuple[str, dict[str, list[float]]]:
+            mitschnitt = mt.laden(mitschnitt_datei)
+            marken: dict[str, list[float]] = {}
+            for z in mitschnitt.marken():
+                t = mitschnitt.wanduhr_s(int(z.get("t") or 0))
+                if t is not None:
+                    marken.setdefault(str(z.get("typ")), []).append(t)
+            groesse = mitschnitt_datei.stat().st_size
+            return dg.zusammenfassung_text(mt.zusammenfassen(mitschnitt), groesse), marken
+
+        try:
+            text, marken = await asyncio.to_thread(lesen)
+        except Exception as exc:  # kaputte Datei: sagen, nicht abstürzen
+            diagnose_zeigen(f"Mitschnitt nicht lesbar: {exc}")
+            return
+        diagnose_marken.clear()
+        diagnose_marken.update(marken)
+        diagnose_zeigen(text)
+        if marken:
+            with contextlib.suppress(Exception):
+                kurven()
+
+    async def diagnose_teilen() -> None:
+        """Messung, EKG, Mitschnitt (bereinigt) und Protokoll als ZIP — wie der Export, ohne
+        Bewegung; danach die Frage, ob der Mitschnitt jetzt weg darf (P114)."""
+
+        def packen() -> bytes:
+            return export_zip(zugehoerige_dateien(pfad), datenverzeichnis())
+
+        daten = await asyncio.to_thread(packen)
+        await weitergeben(page, f"diagnose_{pfad.stem}.zip", daten, "application/zip")
+        diagnose_loeschen_fragen(nach_teilen=True)
+
+    def diagnose_loeschen_fragen(*, nach_teilen: bool = False) -> None:
+        dialog: ft.AlertDialog
+
+        def loeschen() -> None:
+            with contextlib.suppress(OSError):
+                mitschnitt_datei.unlink()
+            diagnose_marken.clear()
+            schliessen(dialog)
+            diagnose_box.visible = False
+            with contextlib.suppress(Exception):
+                diagnose_box.update()
+                kurven()
+            page.show_dialog(ft.SnackBar(ft.Text("Mitschnitt gelöscht — die Messung bleibt.")))
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Mitschnitt jetzt löschen?" if nach_teilen else "Diagnose löschen?"),
+            content=ft.Text(
+                "Nur der Rohmitschnitt mit den Marken geht weg (etwa 15 MB je Stunde); "
+                "die Messung, das EKG und die Notizen bleiben."
+            ),
+            actions=[
+                ft.TextButton(
+                    "Behalten" if nach_teilen else "Abbrechen", on_click=lambda: schliessen(dialog)
+                ),
+                ft.FilledButton("Löschen", on_click=loeschen),
+            ],
+        )
+        page.show_dialog(dialog)
+
+    if mitschnitt_datei.exists():
+        diagnose_zeigen("Mitschnitt wird gelesen …", mit_knoepfen=False)
+        page.run_task(diagnose_laden)
+
     hf_sicht = HfAuswertungSicht(
         HfKontext(
             page,
@@ -3336,14 +3620,72 @@ def _aufbauen(
         with contextlib.suppress(Exception):
             normal_inhalt.update()
 
+    # Die Scrollposition je Sicht (Ben, 30.10.2026: „Die Position in HR/HRV wird gemerkt,
+    # dass man gut hin und her wechseln kann“); der Wechsel steht als Knopf oben und rutscht
+    # beim Runterscrollen verkleinert in die rechte obere Ecke (`fab`).
+    scroll_lage: dict[str, float] = {SICHT_HF: 0.0, SICHT_HRV: 0.0}
+    scroll_jetzt = {"px": 0.0}
+    FAB_AB_PX = 140.0
+
+    def fab_text() -> str:
+        return "HRV" if sicht["wert"] == SICHT_HF else "Herzfrequenz"
+
+    def fab_icon() -> ft.IconData:
+        return ft.Icons.SHOW_CHART if sicht["wert"] == SICHT_HF else ft.Icons.FAVORITE_BORDER
+
+    def fab_wechsel(_e: object = None) -> None:
+        sicht_waehlen(SICHT_HRV if sicht["wert"] == SICHT_HF else SICHT_HF)
+
+    fab = ft.FloatingActionButton(
+        content=fab_text(),
+        icon=fab_icon(),
+        mini=True,
+        visible=False,
+        tooltip="Zur anderen Sicht — an der gemerkten Stelle",
+        on_click=fab_wechsel,
+    )
+
+    def fab_sichtbar() -> bool:
+        return scroll_jetzt["px"] > FAB_AB_PX and not m.vollbild and not z.nur_puls
+
+    def fab_nachziehen() -> None:
+        fab.content, fab.icon = fab_text(), fab_icon()
+        fab.visible = fab_sichtbar()
+        with contextlib.suppress(Exception):
+            fab.update()
+
+    def bei_scroll(e: ft.OnScrollEvent) -> None:
+        scroll_jetzt["px"] = float(getattr(e, "pixels", 0.0) or 0.0)
+        scroll_lage[sicht["wert"]] = scroll_jetzt["px"]
+        if fab.visible != fab_sichtbar():
+            fab.visible = fab_sichtbar()
+            with contextlib.suppress(Exception):
+                fab.update()
+
+    async def zur_lage(px: float) -> None:
+        with contextlib.suppress(Exception):
+            await view.scroll_to(offset=px, duration=150)
+
     def sicht_waehlen(neu: str) -> None:
         if neu == SICHT_HRV and z.nur_puls:
             return
+        if neu == sicht["wert"]:
+            return
+        scroll_lage[sicht["wert"]] = scroll_jetzt["px"]
         sicht["wert"] = neu
         state.hrv_sicht_setzen(neu)
+        sicht_knopf.selected = [neu]
+        with contextlib.suppress(Exception):
+            sicht_knopf.update()
         sicht_anwenden()
+        fab_nachziehen()
+        page.run_task(zur_lage, scroll_lage[neu])
 
     sicht_knopf = sicht_wahl(sicht["wert"], sicht_waehlen, hrv_moeglich=not z.nur_puls)
+    view.on_scroll = bei_scroll
+    view.scroll_interval = 100
+    view.floating_action_button = fab
+    view.floating_action_button_location = ft.FloatingActionButtonLocation.MINI_END_TOP
 
     titel_zeichnen()
     zeichnen(aktualisieren=False)
@@ -3366,17 +3708,17 @@ def _aufbauen(
                     darstellung_knopf(lambda: darstellung()),
                     analyse.menue,
                 ),
-                # Von oben nach unten wie live (Ben, 26.10.2026): Breite, Bereich und Chips
-                # der Verlaufskurven, Abschnitte (Klappfeld), Ebenen, Hauptkurve, Ablesen,
-                # Editor, Notizen (Klappfeld), Spektrum bzw. Poincaré und Verlaufskurven
-                ft.Row(spacing=4, controls=[breite_wahl, uhr_knopf]),
-                analyse.wahl,
+                # Sortierung nach der Skizze vom 30.10.2026: Zeitachse und Abschnitte
+                # über der Hauptkurve, Ablesen, Editor, Ebenen, Notizen (Klappfeld), dann
+                # Bereich und Chips direkt über den Verlaufskurven, die sie steuern
+                gruppe("Zeitachse", ft.Row(spacing=4, controls=[breite_wahl, uhr_knopf])),
                 abschnitt_block,
-                ebenen_box,
                 kurvengeste(rr_box),
                 ablese_box,
                 editor_box,
+                gruppe("Ebenen", ebenen_box),
                 notiz_platz[0],
+                gruppe("Verlaufskurven", analyse.wahl),
                 analyse.control,
             ),
             *(
@@ -3417,6 +3759,8 @@ def _aufbauen(
             sicht_knopf,
             hf_sicht.control,
             hrv_teil,
+            ekg_box,
+            diagnose_box,
             ft.Text(f"Datei: {eintrag.file_path}", size=11, opacity=0.5, selectable=True),
         ],
     )

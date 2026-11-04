@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
@@ -617,8 +617,71 @@ FELDVORRAT: list[FieldSpec] = [
 ]
 
 
+#: Ein weiteres Feld derselben Art (Ben, 2.11.2026, P106): ``hold_2``, ``scale_3`` — der
+#: Vorrat kennt die Art über `basis_key`
+_MEHRFACH = re.compile(r"^(?P<basis>[a-z_]+?)_(?P<nr>[2-9]|[1-9]\d+)$")
+
+
+def basis_key(key: str) -> str:
+    """Die Art eines Schlüssels: ``hold_2`` → ``hold``; ein Vorratsschlüssel bleibt er selbst,
+    ein fremder auch.
+
+    >>> basis_key("hold_2"), basis_key("hold"), basis_key("seconds"), basis_key("value_2")
+    ('hold', 'hold', 'seconds', 'value_2')
+    """
+    m = _MEHRFACH.match(key)
+    if m is not None and any(f.key == m.group("basis") for f in FELDVORRAT):
+        return m.group("basis")
+    return key
+
+
 def vorrat_feld(key: str) -> FieldSpec | None:
-    return next((replace(f) for f in FELDVORRAT if f.key == key), None)
+    """Die Vorlage des Vorrats zu einem Schlüssel — auch zu ``hold_2`` (mit diesem Schlüssel
+    und dem Namen „Haltezeit 2“).
+
+    >>> vorrat_feld("hold").label, vorrat_feld("hold_2").key, vorrat_feld("hold_2").label
+    ('Haltezeit', 'hold_2', 'Haltezeit 2')
+    >>> vorrat_feld("x") is None
+    True
+    """
+    basis = basis_key(key)
+    vorlage = next((f for f in FELDVORRAT if f.key == basis), None)
+    if vorlage is None:
+        return None
+    if basis == key:
+        return replace(vorlage)
+    nr = key[len(basis) + 1 :]
+    return replace(vorlage, key=key, label=f"{vorlage.label} {nr}")
+
+
+def naechster_key(basis: str, vorhandene: Iterable[str]) -> str:
+    """Der Schlüssel für ein weiteres Feld dieser Art: ``hold``, dann ``hold_2``, ``hold_3`` …
+
+    >>> naechster_key("hold", []), naechster_key("hold", ["hold"])
+    ('hold', 'hold_2')
+    >>> naechster_key("hold", ["hold", "hold_3"])
+    'hold_2'
+    """
+    da = set(vorhandene)
+    if basis not in da:
+        return basis
+    nr = 2
+    while f"{basis}_{nr}" in da:
+        nr += 1
+    return f"{basis}_{nr}"
+
+
+def instanzen(basis: str, keys: Iterable[str]) -> list[str]:
+    """Die Schlüssel dieser Art unter ``keys``, in ihrer Nummernfolge.
+
+    >>> instanzen("hold", ["reps", "hold_3", "hold", "hold_2", "seconds"])
+    ['hold', 'hold_2', 'hold_3']
+    """
+
+    def nummer(k: str) -> int:
+        return 1 if k == basis else int(k[len(basis) + 1 :])
+
+    return sorted((k for k in keys if basis_key(k) == basis), key=nummer)
 
 
 #: Feldtypen, aus denen Kennzahlen (und damit Kurven im Verlauf) entstehen
@@ -799,13 +862,16 @@ __all__ = [
     "Layout",
     "ParameterWert",
     "ResultSpec",
+    "basis_key",
     "basis_label",
     "einzelwert_lesen",
     "format_wert",
+    "instanzen",
     "ist_altes_satzformat",
     "ist_leer",
     "kennzahl_keys",
     "modernisieren",
+    "naechster_key",
     "parameter_werte",
     "skala_bereich_text",
     "skala_lesen",

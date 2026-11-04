@@ -28,6 +28,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
+from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.timer import Abschnitt, TimerProfil, dauer_text, einmal_timer
 from trainingsapp.core.timer_eintrag import gelaufene_zeiten
 from trainingsapp.core.uebung_timer import (
@@ -48,8 +49,17 @@ from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.timer import Profilziel
 
-#: Feldnamen im Tagebuch
+#: Feldnamen im Tagebuch — nach der Art des Zeitfelds (`feldname`)
 FELDNAMEN = {"hold": "Haltezeit je Satz", "duration": "Zeit"}
+
+
+def feldname(feld: str | None) -> str:
+    """„Haltezeit je Satz“, „Zeit“ oder „gemacht“ — auch für ``hold_2`` (P106).
+
+    >>> feldname("hold_2"), feldname("duration"), feldname(None)
+    ('Haltezeit je Satz', 'Zeit', 'gemacht')
+    """
+    return FELDNAMEN.get(basis_key(feld) if feld else "", "gemacht")
 
 
 def uebung_timer_route(basis: str, uebung: Exercise, item: PlanItem | None = None) -> str:
@@ -404,7 +414,7 @@ def uebung_timer_view(
                         spacing=0,
                         controls=[
                             ft.Text(
-                                f"Eingetragen · {FELDNAMEN.get(feld or '', 'gemacht')}",
+                                f"Eingetragen · {feldname(feld)}",
                                 size=12,
                                 weight=ft.FontWeight.W_600,
                                 opacity=0.75,
@@ -548,7 +558,7 @@ def uebung_timer_view(
     def zaehlt_teil() -> ft.Control:
         """Wofür die Zeit zählt (Ben, 22.10.2026, P79: „beim Timer/Stoppuhr-Werkzeug selbst mit
         angegeben“) — für jetzt umschaltbar, die Vorgabe steht in der Übung."""
-        als = "Haltezeit je Satz" if zaehlt_als(felder, uebung) == "hold" else "Zeit"
+        als = feldname(zaehlt_als(felder, uebung))
         return karte(
             ft.Row(
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,

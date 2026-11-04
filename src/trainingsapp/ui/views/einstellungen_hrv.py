@@ -14,6 +14,8 @@ für Fachleute — langfristig werden das Profi-Einstellungen.
   Kurvenansicht.
 - Analyse: Frequenz und Nichtlinear anbieten (bei optischen Sensoren aus).
 - Notizen: Übungen aus Plänen anbieten.
+- Diagnosemodus (Ben, 4.11.2026, `docs/plan_diagnosemodus.md` §2.1): anbieten, Form der
+  Marken-Leiste, ⏯ an der Uhr, Ablage der Mitschnitte mit „Alle Diagnosedaten löschen“.
 - Erweitert: Rechnen (Latenz vor dem Nachrechnen, Takt des Live-Spektrums),
   Kennzahlen (pNNx-Schwelle), automatische Korrektur (`hrv_core.regeln`).
 
@@ -29,9 +31,12 @@ from typing import Any
 import flet as ft
 from hrv_core.regeln import Korrekturregeln
 
+from trainingsapp import config
+from trainingsapp.core import diagnose as dg
 from trainingsapp.core.hrv_ansicht import PNN_WAHL, Ansicht
-from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
 from trainingsapp.core.hrv_einstellungen import (
+    ACHSEN_NAMEN,
+    ACHSEN_VORGABE,
     LIVE_SPEKTRUM_S,
     NACHRECHNEN_MS,
     NOTIZEN_ZEILEN,
@@ -39,6 +44,7 @@ from trainingsapp.core.hrv_einstellungen import (
     UEBERSICHT,
     HrvEinstellungen,
 )
+from trainingsapp.core.hrv_einstellungen import KACHELN as KACHELN_DARSTELLUNG
 from trainingsapp.core.uhr_seiten import SEITE_HF as UHR_SEITE_HF
 from trainingsapp.core.uhr_seiten import SEITEN as UHR_SEITEN
 from trainingsapp.core.uhr_seiten import SEITEN_NAMEN as UHR_SEITEN_NAMEN
@@ -49,7 +55,13 @@ from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.korrektur_blatt import korrektur_blatt
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.verlauf import FARBEN
-from trainingsapp.ui.components.zeitfenster import BreiteFeld, breiten_auswahl, breiten_wahl
+from trainingsapp.ui.components.zeitfenster import (
+    BreiteFeld,
+    BreitenSatz,
+    breiten_auswahl,
+    breiten_nachziehen,
+    breiten_wahl,
+)
 from trainingsapp.ui.state import AppState
 
 
@@ -234,13 +246,22 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
 
     def breite_gewaehlt(breite_s: float) -> None:
         setzen(fenster_s=round(breite_s))
-        breite_knoepfe.selected = breiten_auswahl(breite_s)
+        breite_knoepfe.selected = breiten_auswahl(breite_s, e.breiten())
         breite_feld.anzeigen(breite_s)
         with contextlib.suppress(Exception):
             breite_knoepfe.update()
 
-    breite_knoepfe = breiten_wahl(e.fenster_s, breite_gewaehlt)
+    breite_knoepfe = breiten_wahl(e.fenster_s, breite_gewaehlt, breiten=e.breiten())
     breite_feld = BreiteFeld(e.fenster_s, breite_gewaehlt, max_s=e.puffer_s)
+
+    # Welche Knöpfe an den Kurven stehen (Ben, 30.10.2026): zwei Sätze oder eigene Breiten
+    def satz_geaendert(neu: HrvEinstellungen) -> None:
+        breiten_nachziehen(breite_knoepfe, neu.breiten(), e.fenster_s)
+
+    def satz_speichern(neu: HrvEinstellungen) -> None:
+        setzen(breiten_satz=neu.breiten_satz, breiten_eigen=list(neu.breiten_eigen))
+
+    breiten_satz = BreitenSatz(lambda: e, satz_speichern, satz_geaendert)
 
     def puffer_text(sekunden: int) -> str:
         return f"{sekunden // 60} min" if sekunden < 3600 else f"{sekunden // 3600} h"
@@ -263,6 +284,84 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
         dense=True,
         width=260,
     )
+
+    # Standardwerte der festen Werteachsen (Ben, 30.10.2026): je Achse von–bis; das Blatt
+    # „Fenster & Darstellung“ schaltet sie ein und stellt sie mit ↺ wieder her
+    achsen_felder: dict[str, tuple[ft.TextField, ft.TextField]] = {}
+
+    def achsen_zahl(text: str | None) -> float | None:
+        try:
+            return float((text or "").strip().replace(",", "."))
+        except ValueError:
+            return None
+
+    def achse_uebernehmen(k: str) -> Callable[[Any], None]:
+        def handler(_ev: Any = None) -> None:
+            von, bis = achsen_felder[k]
+            lo, hi = achsen_zahl(von.value), achsen_zahl(bis.value)
+            if lo is None or hi is None or lo >= hi:
+                von.error = "zwei Zahlen, von < bis"
+            else:
+                von.error = None
+                if e.achsen_standard.get(k) != (lo, hi):
+                    e.achsen_standard[k] = (lo, hi)
+                    setzen(achsen_standard=dict(e.achsen_standard))
+            with contextlib.suppress(Exception):
+                von.update()
+
+        return handler
+
+    def achsen_zahl_text(wert: float) -> str:
+        return f"{wert:g}".replace(".", ",")
+
+    def achsen_feld(k: str, label: str, wert: float) -> ft.TextField:
+        return ft.TextField(
+            label=label,
+            value=achsen_zahl_text(wert),
+            dense=True,
+            width=96,
+            border_radius=8,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            text_align=ft.TextAlign.RIGHT,
+            on_submit=achse_uebernehmen(k),
+            on_blur=achse_uebernehmen(k),
+        )
+
+    def achsen_zeile(k: str) -> ft.Control:
+        name, einheit = ACHSEN_NAMEN[k]
+        lo, hi = e.achse_standard(k) or ACHSEN_VORGABE[k]
+        von, bis = achsen_feld(k, "von", lo), achsen_feld(k, "bis", hi)
+        achsen_felder[k] = (von, bis)
+        return ft.Row(
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Column(
+                    spacing=0,
+                    tight=True,
+                    expand=True,
+                    controls=[
+                        ft.Text(name, size=13),
+                        ft.Text(einheit, size=11, opacity=0.65, visible=bool(einheit)),
+                    ],
+                ),
+                von,
+                ft.Text("–"),
+                bis,
+            ],
+        )
+
+    def achsen_vorgabe() -> None:
+        e.achsen_standard = dict(ACHSEN_VORGABE)
+        setzen(achsen_standard=dict(e.achsen_standard))
+        for k, (von, bis) in achsen_felder.items():
+            lo, hi = ACHSEN_VORGABE[k]
+            von.value, bis.value, von.error = achsen_zahl_text(lo), achsen_zahl_text(hi), None
+            for f in (von, bis):
+                with contextlib.suppress(Exception):
+                    f.update()
+
+    achsen_zeilen = [achsen_zeile(k) for k in ACHSEN_VORGABE]
 
     def notizen_zeilen_gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
         """Notizliste (Ben, 27.10.2026): ab so vielen Notizen rollt sie, die Kurve bleibt."""
@@ -540,6 +639,95 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
         ],
     )
 
+    # -- Diagnosemodus: anbieten, Leiste, Uhr, Ablage (Plan §2.1) ----------------------
+    ablage_text = ft.Text("", size=12)
+    ablage_loeschen = ft.OutlinedButton(
+        "Alle Diagnosedaten löschen", icon=ft.Icons.DELETE_SWEEP_OUTLINED
+    )
+
+    def ablage_neu() -> None:
+        anzahl, groesse = dg.ablage(config.datenverzeichnis())
+        if not anzahl:
+            ablage_text.value = "Auf dem Handy liegen keine Mitschnitte."
+        else:
+            ablage_text.value = (
+                f"Auf dem Handy: {anzahl} Mitschnitt{'e' if anzahl != 1 else ''}, "
+                f"{dg.groesse_text(groesse)}"
+                + (
+                    " — viel Speicher; nach dem Teilen lassen sie sich löschen."
+                    if groesse >= dg.HINWEIS_AB_BYTES
+                    else ""
+                )
+            )
+        ablage_loeschen.disabled = not anzahl
+        with contextlib.suppress(Exception):
+            ablage_text.update()
+            ablage_loeschen.update()
+
+    def ablage_fragen() -> None:
+        dialog: ft.AlertDialog
+        lauf = state.messlauf
+        laufend = [lauf.mitschnitt.pfad] if lauf is not None and lauf.mitschnitt is not None else []
+
+        def loeschen() -> None:
+            n = dg.alle_loeschen(config.datenverzeichnis(), ausser=laufend)
+            schliessen(dialog)
+            ablage_neu()
+            page.show_dialog(ft.SnackBar(ft.Text(f"{n} Mitschnitte gelöscht.")))
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Alle Diagnosedaten löschen?"),
+            content=ft.Text(
+                "Die Rohmitschnitte und Marken gehen weg — die Messungen bleiben, wie sie sind. "
+                "Ein laufender Mitschnitt bleibt."
+            ),
+            actions=[
+                ft.TextButton("Abbrechen", on_click=lambda: schliessen(dialog)),
+                ft.FilledButton("Löschen", on_click=loeschen),
+            ],
+        )
+        page.show_dialog(dialog)
+
+    ablage_loeschen.on_click = ablage_fragen
+
+    def leiste_gewaehlt(ev: ft.Event[ft.SegmentedButton]) -> None:
+        if ev.control.selected:
+            setzen(diagnose_leiste=str(ev.control.selected[0]))
+
+    diagnose_karte = karte(
+        titel("Diagnosemodus"),
+        schalter(
+            "diagnose_anbieten",
+            "Diagnosemodus anbieten",
+            "Zum Sammeln im echten Training: An der Gerätezeile der Messung steht dann der "
+            "Knopf „Diagnosemodus“, gestartet wird je Messung. Die App schneidet jedes "
+            "Bluetooth-Paket mit (beim H10 auch EKG und Beschleunigung) und nimmt Marken an — "
+            "mit der Leiste unten oder mit ⏯ an der Uhr. Kostet mehr Akku an Gurt und Handy "
+            "und etwa 15 MB je Stunde; solange es läuft, blinkt oben rechts ein roter Punkt. "
+            "Alles bleibt auf dem Handy, hinaus nur über „Teilen“ — ohne Bluetooth-Adresse.",
+        ),
+        hinweis("Marken-Leiste:"),
+        ft.SegmentedButton(
+            selected=[e.diagnose_leiste],
+            show_selected_icon=False,
+            segments=[
+                ft.Segment(value="unten", label=ft.Text("Unten (ein Drittel)")),
+                ft.Segment(value="knopf", label=ft.Text("Schwebender Knopf")),
+            ],
+            on_change=leiste_gewaehlt,
+        ),
+        schalter(
+            "diagnose_uhr",
+            "⏯ an der Uhr setzt Diagnosemarken",
+            "Nur mit „Uhr am Handgelenk“: Im Diagnosemodus zeigt das Band eine eigene Seite "
+            "(„Wdh 7“), ⏯ setzt dort eine Marke der gerade gültigen Art.",
+        ),
+        ablage_text,
+        ablage_loeschen,
+    )
+    ablage_neu()
+
     standard = HrvEinstellungen()
     inhalt = ft.Column(
         spacing=14,
@@ -585,6 +773,8 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
             ),
             karte(
                 titel("Kurven"),
+                ft.Text("Knöpfe der Zeitachse (live und Aufzeichnung)", size=12, opacity=0.8),
+                breiten_satz.control,
                 ft.Text("Zeitfenster live", size=12, opacity=0.8),
                 breite_knoepfe,
                 breite_feld.control,
@@ -620,6 +810,20 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                     [ft.Text("Gespeicherte Ansichten", size=12, opacity=0.8), *ansichten_liste]
                     if ansichten_liste
                     else []
+                ),
+            ),
+            karte(
+                titel("Werteachsen"),
+                hinweis(
+                    "Standardwerte, die den ganzen Bereich abdecken. Im Blatt „Fenster & "
+                    "Darstellung“ schaltet man eine Achse fest, stellt sie nach oder setzt "
+                    "mit ↺ diese Werte wieder ein. Welche Achse eine Kurve hat, steht dort."
+                ),
+                *achsen_zeilen,
+                ft.TextButton(
+                    "Auf Vorgabe",
+                    icon=ft.Icons.RESTART_ALT,
+                    on_click=lambda _=None: achsen_vorgabe(),
                 ),
             ),
             karte(
@@ -696,6 +900,20 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
                 ),
                 uhr_protokoll,
             ),
+            karte(
+                titel("EKG-Rohsignal (Polar H10)"),
+                schalter(
+                    "ekg_mitschreiben",
+                    "EKG mitschreiben",
+                    "Der H10 sendet zusätzlich sein EKG (130 Hz). Die App speichert es neben der "
+                    "Messung als „…_ecg.json“ — nur gespeichert, nicht gerechnet; in der "
+                    "Auswertung lässt es sich in kurzen Ausschnitten ansehen, beim Weitergeben "
+                    "und im Forschungsexport ist es dabei. Kostet den Gurt spürbar Akku und "
+                    "etwa 3 MB je Stunde; der Akkustand wird mitgeschrieben. Gilt ab der "
+                    "nächsten Verbindung; nur mit diesem Gurt.",
+                ),
+            ),
+            *([diagnose_karte] if config.ist_aktiv("diagnosemodus") else []),
             erweitert_kopf,
             erweitert_teil,
             ft.OutlinedButton(

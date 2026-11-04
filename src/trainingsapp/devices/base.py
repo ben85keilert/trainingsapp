@@ -32,6 +32,8 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from hrv_core.geraete import gatt as _gatt
+
 if TYPE_CHECKING:
     from .profiles import GeraeteProfil
 
@@ -119,6 +121,20 @@ class PpiPaket:
     kontakt: tuple[int, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class EkgPaket:
+    """Ein PMD-EKG-Rahmen (Polar H10, 130 Hz) roh — für das Beiwerk ``_ecg.json``
+    (`hrv_core.ekg.EkgSammler`). Nur auf Wunsch (Einstellung „EKG mitschreiben“); die App
+    rechnet damit nichts, sie schreibt es mit (Ben, 30.10.2026)."""
+
+    device_id: str
+    t_capture: float
+    #: Gerätezeit der letzten Probe (ns)
+    zeitstempel_ns: int
+    #: Proben in µV
+    uv: tuple[int, ...]
+
+
 #: Alter Name aus der Zeit vor `Messwert` — nur noch als Alias.
 Sample = Messwert
 
@@ -138,7 +154,7 @@ class HeartRateSource(ABC):
     """
 
     def __init__(self) -> None:
-        self._messwerte: asyncio.Queue[Messwert | PpiPaket | None] = asyncio.Queue()
+        self._messwerte: asyncio.Queue[Messwert | PpiPaket | EkgPaket | None] = asyncio.Queue()
         self._status: asyncio.Queue[DeviceStatus] = asyncio.Queue(maxsize=STATUS_QUEUE_MAXSIZE)
         self._status_aktuell = DeviceStatus()
         self._ende_gesendet = False
@@ -179,7 +195,7 @@ class HeartRateSource(ABC):
 
     # -- Konsumentenseite ---------------------------------------------------
 
-    async def stream(self) -> AsyncIterator[Messwert | PpiPaket]:
+    async def stream(self) -> AsyncIterator[Messwert | PpiPaket | EkgPaket]:
         """Messwerte und PPI-Pakete, in der Reihenfolge des Eintreffens.
 
         Endet, wenn die Quelle das Ende signalisiert (`disconnect()`,
@@ -215,7 +231,7 @@ class HeartRateSource(ABC):
             self._ende_gesendet = False
             self._puffer_gewarnt = False
 
-    def _push_messwert(self, wert: Messwert | PpiPaket) -> None:
+    def _push_messwert(self, wert: Messwert | PpiPaket | EkgPaket) -> None:
         """Messwert einreihen. Nie blockierend, nie verlierend — wir sind im BLE-Callback."""
         self._messwerte.put_nowait(wert)
         groesse = self._messwerte.qsize()
@@ -267,84 +283,11 @@ BATTERY_SERVICE_UUID = "0000180f-0000-1000-8000-00805f9b34fb"
 BATTERY_LEVEL_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
 
 
-def parse_hr_measurement(data: bytes) -> tuple[int, list[int]]:
-    """Zerlegt eine Notification der Characteristic 0x2A37.
-
-    Aufbau: Flags-Byte, dann Herzfrequenz (8 oder 16 Bit), optional
-    „energy expended" (2 Byte), dann **beliebig viele** RR-Intervalle zu je
-    2 Byte in Einheiten von 1/1024 s.
-
-    > ⚠️ **Der Fehler, der sich hier anbietet:** ein Gerät sendet bei Pulsen über
-    > 60 bpm regelmäßig **zwei** RR-Werte pro Notification. Wer nur den ersten
-    > liest, verliert rund die Hälfte aller Intervalle. In praxis_gui führte
-    > genau das zu 84 Sekunden Drift in 28 Minuten Messung.
-    > Deshalb die Schleife bis zum Paketende.
-
-    Den Hautkontakt aus demselben Flags-Byte liefert `hautkontakt_aus_flags`.
-
-    Returns:
-        ``(bpm, rr_ms_liste)``. Die Liste ist leer, wenn Bit 4 der Flags nicht
-        gesetzt ist — dann liefert das Gerät keine RR-Intervalle und es ist
-        keine HRV-Analyse möglich, nur ein Pulsverlauf.
-
-    >>> parse_hr_measurement(bytes([0x10, 60, 0x00, 0x04]))   # Flags: RR present
-    (60, [1000])
-    >>> parse_hr_measurement(bytes([0x10, 60, 0x00, 0x04, 0x48, 0x03]))  # zwei RR
-    (60, [1000, 820])
-    >>> parse_hr_measurement(bytes([0x00, 72]))               # nur BPM
-    (72, [])
-    """
-    if not data:
-        return 0, []
-
-    flags = data[0]
-    hf_16bit = bool(flags & 0x01)
-    energie_vorhanden = bool((flags >> 3) & 0x01)
-    rr_vorhanden = bool((flags >> 4) & 0x01)
-
-    idx = 1
-    if hf_16bit:
-        bpm = int.from_bytes(data[idx : idx + 2], "little")
-        idx += 2
-    else:
-        bpm = data[idx] if idx < len(data) else 0
-        idx += 1
-
-    if energie_vorhanden:
-        idx += 2
-
-    rr_ms: list[int] = []
-    if rr_vorhanden:
-        while idx + 1 < len(data):
-            roh = int.from_bytes(data[idx : idx + 2], "little")
-            rr_ms.append(round(roh * 1000 / 1024))
-            idx += 2
-
-    return bpm, rr_ms
-
-
-def hautkontakt_aus_flags(data: bytes) -> bool | None:
-    """Hautkontakt aus dem Flags-Byte einer 0x2A37-Notification.
-
-    Bit 2 sagt, ob das Gerät Kontakt überhaupt erkennt; nur dann bedeutet
-    Bit 1 „Kontakt da“. Ohne Bit 2 ist die Antwort ``None`` (unbekannt), nicht
-    ``False`` — sonst stünde bei jedem Gurt ohne Erkennung „kein Kontakt“.
-
-    >>> hautkontakt_aus_flags(bytes([0x16, 60, 0x00, 0x04]))   # erkannt, Kontakt
-    True
-    >>> hautkontakt_aus_flags(bytes([0x14, 60]))               # erkannt, kein Kontakt
-    False
-    >>> hautkontakt_aus_flags(bytes([0x12, 60])) is None       # Bit 1 ohne Bit 2
-    True
-    >>> hautkontakt_aus_flags(b"") is None
-    True
-    """
-    if not data:
-        return None
-    flags = data[0]
-    if not flags & 0x04:
-        return None
-    return bool(flags & 0x02)
+# Der Dekoder 0x2A37 und das Hautkontakt-Bit liegen seit hrv-core 0.7.0 in
+# `hrv_core.geraete.gatt` (gemeinsam mit praxis_gui und der Brustgurt-Diagnose); hier nur
+# durchgereicht, damit ``from trainingsapp.devices.base import parse_hr_measurement`` weiter gilt.
+parse_hr_measurement = _gatt.parse_hr_measurement
+hautkontakt_aus_flags = _gatt.hautkontakt_aus_flags
 
 
 def rr_auf_zeitachse(
@@ -404,6 +347,7 @@ __all__ = [
     "STATUS_QUEUE_MAXSIZE",
     "DeviceInfo",
     "DeviceStatus",
+    "EkgPaket",
     "HeartRateSource",
     "Messwert",
     "PpiPaket",

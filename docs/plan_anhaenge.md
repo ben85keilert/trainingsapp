@@ -294,7 +294,11 @@ beschreibbar (`ui/components/tagesnotiz.py`, Autosave, ↶ ↷ aus `core/textver
   desselben Tags. Abfragen nach Übungen (`je_eintraegen`, `je_uebung`, `je_tag`) sehen sie
   nicht; Speicherübersicht, Summe, Tagebuch und Aufräumen schon. Im Tagebuch: je Tag eine
   Karte „Aufnahmen · Zum Tag“ (Tipp → der Tag), nach Übungen geordnet bei den Notizen zum Tag.
-  Die Anhänge gehören zum Tag, nicht zum Text: Leert man die Notiz, bleiben sie.
+  **Seit 2.11.2026 hängt ein Anhang an einer bestimmten Notiz des Tags** (Migration 036,
+  `entry_media.day_note_id`, Weg ``notiz/<id>``, `Ziel.fuer_notiz`; Ben, P99: „der Anhang am
+  Notizfeld“): Foto · Video · Audio stehen im Editor der Notiz, die Kacheln an ihrer Karte.
+  Eine Notiz nur mit Anhängen bleibt (ohne Text), im Tagebuch je Notiz eine Karte „Aufnahmen
+  · Zum Tag“. Vertrag: `docs/plan_tagesnotizen.md`.
 - **Leistungen:** Foto · Video · Audio (· Hochladen) — am Handy zu zweit in zwei Zeilen, auf
   breitem Bildschirm in einer; an der Büroklammer „Audio aufnehmen“.
 - **Regeln wie bisher:** app-privat, ohne Ort, nie in Export, Diagnose oder Sync; hinaus nur

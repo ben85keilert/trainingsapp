@@ -191,9 +191,10 @@ Bedeutungen: Aufklappen, Abschicken und die Überschrift.
 **Nachgezogen 21.10.2026 abends** (P70, P71; Skizzen
 https://claude.ai/artifact/7JzRndHG41e3ZfeCm7huCH):
 - „Eintragen“ ist **eine** weiße Karte für alle Mengen, je Feld eine Zeile (E2): kurzer
-  Name („Wdh.“, „Haltezeit“) mit „je Satz“ darunter, bis zu drei „+“-Knöpfe, „…“ klappt
-  Sätze × Wert auf. Ab vier Knöpfen stehen sie zu dritt in einer eigenen Reihe; ohne
-  Chips steht das Zahlenfeld gleich in der Zeile.
+  Name („Wdh.“, „Haltezeit“) mit „je Satz“ darunter, bis zu drei „+“-Knöpfe, darunter
+  Sätze × Wert — seit 2.11.2026 standardmäßig offen, „…“ klappt es zu und wieder auf. Ab
+  vier Knöpfen stehen sie zu dritt in einer eigenen Reihe; ohne Chips steht das
+  Zahlenfeld gleich in der Zeile.
 - Ja/Nein, Skala und Freitext werden **keine** Wert-Knöpfe (anders als oben „für alle
   drei“): Sie stehen in der Ausführung unter „gilt für den offenen Eintrag“, zeigen und
   ändern dessen Wert und trennen keine Einträge. Die Skala ist der Schiebebalken der

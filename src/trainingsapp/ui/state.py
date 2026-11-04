@@ -26,6 +26,7 @@ from trainingsapp.config import (
     anhaengeverzeichnis,
     datenbankpfad,
     datenverzeichnis,
+    medienverzeichnis,
     messungenverzeichnis,
     paketordner,
     streckenverzeichnis,
@@ -36,7 +37,13 @@ from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.core.hf_einstellungen import HfEinstellungen
 from trainingsapp.core.hf_einstellungen import einstellungen_lesen as hf_lesen
 from trainingsapp.core.hf_einstellungen import einstellungen_schreiben as hf_schreiben
-from trainingsapp.core.hf_profil import TAGESFELD_TAGE, HfProfil, hf_profil, tagesfeld_eintraege
+from trainingsapp.core.hf_profil import (
+    TAGESFELD_TAGE,
+    HfProfil,
+    Profilwert,
+    hf_profil,
+    tagesfeld_eintraege,
+)
 from trainingsapp.core.hrv_ansicht import (
     Ansicht,
     ansicht_lesen,
@@ -87,6 +94,7 @@ from trainingsapp.data.repositories import (
     DayNoteRepo,
     ExerciseRepo,
     HrvRepo,
+    NoteTagRepo,
     PlanRepo,
     SessionRepo,
     SettingRepo,
@@ -97,6 +105,7 @@ from trainingsapp.data.repositories import (
 from trainingsapp.data.seed import pakete_aus_ordner, seed_einspielen
 from trainingsapp.data.strecken import verwaiste as strecken_verwaiste
 from trainingsapp.data.tagesfelder import TagesfeldRepo, TageswertRepo
+from trainingsapp.data.uebungsbilder import UebungsbildRepo
 from trainingsapp.data.upgrade import datenformat_aktualisieren
 from trainingsapp.devices.bekannte import (
     BekanntesGeraet,
@@ -184,6 +193,8 @@ class AppState:
     plaene: PlanRepo
     sitzungen: SessionRepo
     tagesnotizen: DayNoteRepo
+    #: Die Tags an den Notizen zum Tag (Migration 036, Ben 2.11.2026)
+    notiz_tags: NoteTagRepo
     hrv: HrvRepo
     #: Ausdauertrainings mit GPS (Migration 012) — nie synchronisiert
     strecken: StreckeRepo
@@ -195,6 +206,8 @@ class AppState:
     kurse: KursRepo
     #: Fotos und Videos an Einträgen (Migration 025, `core/anhaenge.py`) — nie geteilt
     anhaenge: AnhangRepo
+    #: Eigene Bilder als Symbol einer Übung (`data/uebungsbilder.py`, Ben 2.11.2026)
+    uebungsbilder: UebungsbildRepo
     #: Tagesfelder und ihre Werte (Migration 027, `core/tagesfelder.py`) — je Profil
     tagesfelder: TagesfeldRepo
     #: Herzfrequenz: Profilwerte mit Herkunft und Rechen-Ausnahmen (Migration 034)
@@ -243,6 +256,13 @@ class AppState:
     tagebuch_ordnung: str = "tage"
     tagebuch_kalender: bool = True
     tagebuch_anzahl: int = 0
+    #: Abschnitt „Notizen“ (Ben, 2.11.2026): Filter nach Tags (IDs, `core.tagebuch.OHNE_TAG`
+    #: = ohne), Suchtext; welche Notiz in der Liste bearbeitet wird (``tag:<id>``,
+    #: ``plan:<session>``, ``neu``) und ihr Editor (überlebt den Neubau der Ansicht)
+    tagebuch_tags: set[str] = field(default_factory=set)
+    tagebuch_suche: str = ""
+    tagebuch_bearbeitet: str | None = None
+    tagebuch_editor: Any = None
     #: Aufnahmen im Verlauf der Übung (`core.anhaenge.ZEITRAEUME`): gezeigter Zeitraum
     anhaenge_zeitraum: str = ANHAENGE_ZEITRAUM_VORGABE
     #: Kurve einer Übung: Zeitraum, X-Achse, Kennzahl je Kachel; je Kachel die
@@ -258,6 +278,14 @@ class AppState:
     #: Scrollposition je scrollbarer Fläche (Schlüssel meist die Route) — damit
     #: der Neubau nach einem Tipp nicht wieder oben beginnt
     scroll_offsets: dict[str, float] = field(default_factory=dict)
+    #: Wer beim Scrollen einer gemerkten Fläche Bescheid will (Schlüssel → Rückruf mit px)
+    scroll_beobachter: dict[str, Any] = field(default_factory=dict)
+    #: Live (Ben, 30.10.2026): die andere Sicht (HF ↔ HRV) ansteuern — der Reiter „Live“
+    #: ruft es, wenn er schon gewählt ist; setzt `views.messung._live_teil`. Dazu die
+    #: scrollende Fläche des Reiters und die gemerkte Scrollposition je Sicht
+    live_sicht_wechsel: Any = None
+    live_flaeche: Any = None
+    live_scroll_lage: dict[str, float] = field(default_factory=dict)
     #: Zählt jeden Routenwechsel — verzögerte Rechnungen einer verlassenen Ansicht
     #: erkennen daran, dass sie nicht mehr gebraucht werden
     route_nummer: int = 0
@@ -338,6 +366,17 @@ class AppState:
     timer_aufgabe: Any = None
     #: Vibration (Flet-Dienst `HapticFeedback`), setzt `app.main()`
     haptik: Any = None
+    #: Diagnosemodus (`docs/plan_diagnosemodus.md`): der rote Punkt in ``page.overlay``
+    #: (`components.diagnose_punkt`) und die Marken-Leiste (offen oder zum Knopf eingeklappt)
+    diagnose_punkt: Any = None
+    diagnose_leiste_offen: bool = True
+    #: Stand der Marken-Leiste (`components.marken_stand.LeistenStand`) und ihr Control
+    diagnose_leiste: Any = None
+    diagnose_leiste_control: Any = None
+    #: Geräteprobe (`devices.erkundung.Geraeteprobe`, Rohmitschnitt ohne Messung) und das
+    #: gewählte Gerät aus der Suche: (Adresse, Name)
+    geraeteprobe: Any = None
+    probe_ziel: tuple[str, str] | None = None
     #: Signaltöne (`flet_ton.FletTon`, nur in der gebauten App) und ob sie geladen sind
     ton: Any = None
     toene_geladen: bool = False
@@ -355,6 +394,10 @@ class AppState:
     #: Zurück auf „Heute“, während man dort schreibt: Schreiben beenden (gespeichert ist
     #: schon) statt nichts zu tun — setzt `components/tagesnotiz.py`
     schreiben_beenden: Callable[[], Awaitable[None]] | None = None
+    #: Solange man die Notiz zum Tag schreibt: was der Finger neben dem Feld tut — "scroll"
+    #: (die Fläche scrollt, `components/scroll.py`) oder "tipp" (aufgesetzt und abgehoben,
+    #: ohne zu ziehen; `views/tag.py`). Setzt `components/tagesnotiz.py` (Ben, 2.11.2026)
+    schreib_gesten: Callable[[str], None] | None = None
     #: GPS: Ortungsquelle (`devices.gps.GpsQuelle` — auf Android `FletGpsQuelle`,
     #: in `app.py` angelegt; sonst beim ersten Bedarf ein Simulator) und der
     #: laufende Vorabtest (`ui.views.gps_test.GpsTestLauf`) mit seinen Vorgaben
@@ -479,6 +522,7 @@ class AppState:
             plaene=PlanRepo(con),
             sitzungen=sitzungen,
             tagesnotizen=DayNoteRepo(con),
+            notiz_tags=NoteTagRepo(con),
             hrv=HrvRepo(con),
             strecken=strecken,
             verwaiste_strecken=verwaist,
@@ -489,6 +533,7 @@ class AppState:
             pakete=PaketRepo(con),
             kurse=KursRepo(con),
             anhaenge=AnhangRepo(con, anhaengeverzeichnis()),
+            uebungsbilder=UebungsbildRepo(con, medienverzeichnis()),
             tagesfelder=TagesfeldRepo(con),
             tageswerte=TageswertRepo(con),
             profilwerte=ProfilwertRepo(con),
@@ -773,11 +818,12 @@ class AppState:
         pid = profil_id or self.profil.id
         self.einstellungen.setzen(f"{SettingRepo.HF_EINSTELLUNGEN}:{pid}", hf_schreiben(e))
 
-    def hf_profil(self, heute: date | None = None) -> HfProfil:
-        """Die geltenden HF-Werte des aktiven Profils (Wertehierarchie, Formel-Startwert)."""
+    def hf_eintraege(self, heute: date | None = None) -> list[Profilwert]:
+        """Alle Einträge, aus denen das HF-Profil am Stichtag gerechnet wird: die Profilwerte
+        plus die Werte des festen Tagesfelds „Ruhepuls“ der letzten 14 Tage (Quelle
+        ``tagesfeld``, Rang zuletzt, Kennung ``tagesfeld:<Tageswert>``)."""
         tag = heute or self.heute()
         eintraege = self.profilwerte.alle(self.profil.id)
-        # Das feste Tagesfeld „Ruhepuls“ zählt als Quelle ``tagesfeld`` (Rang zuletzt)
         feld = tf_standardfeld(self.tagesfelder.alle(self.profil.id), TF_RUHEPULS)
         if feld is not None:
             werte = self.tageswerte.zwischen(
@@ -789,7 +835,14 @@ class AppState:
                     self.profil.id, werte, ausgenommen=self.ausnahmen.tage(self.profil.id)
                 ),
             ]
-        return hf_profil(eintraege, self.profil, tag, formel=self.hf_einstellungen().formel)
+        return eintraege
+
+    def hf_profil(self, heute: date | None = None) -> HfProfil:
+        """Die geltenden HF-Werte des aktiven Profils (Wertehierarchie, Formel-Startwert)."""
+        tag = heute or self.heute()
+        return hf_profil(
+            self.hf_eintraege(tag), self.profil, tag, formel=self.hf_einstellungen().formel
+        )
 
     def hrv_sicht(self) -> str:
         """Welche Sicht die Hauptkarte öffnet: die gemerkte, sonst die Vorgabe."""

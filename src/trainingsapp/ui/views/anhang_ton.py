@@ -276,6 +276,10 @@ class _Ton:
 
     async def zurueck(self) -> None:
         await self.aufraeumen()
+        # Eine Notiz zum Tag, die nur für diesen Anhang entstand, verschwindet wieder, wenn
+        # nichts behalten wurde (`components/tagesnotiz.py`)
+        if self.ziel.notiz_id is not None:
+            self.state.tagesnotizen.aufraeumen(self.ziel.notiz_id)
         await self.page.push_route(zurueck_ziel(self.page, self.ansicht))
 
     async def aufraeumen(self) -> None:

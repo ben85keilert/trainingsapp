@@ -1,203 +1,238 @@
-"""Die Notiz zum Tag direkt schreiben — unter Heute und in `/tag/<datum>` (Ben, 22.10.2026).
+"""Die Notizen zum Tag — unter Heute, in `/tag/<datum>` und im Tagebuch (Ben, 22.10.2026;
+mehrere je Tag mit Tags seit 2.11.2026, `docs/plan_tagesnotizen.md`).
 
-Ben: „Zum Eingeben von ‚Notizen zum Tag‘ öffnet ein Popup. Ermögliche direktes Eintragen mit
-Autosave und zurück und vor Button, falls man aus Versehen was löscht. Zurück macht Autosave
-und ein Abbrechenbutton muss rein. Auch eine Audioaufnahme soll möglich sein + Photo +
-Video.“
+Ben (2.11.): „Füge den zum Tag Notizen Tags (Merkmale) hinzu … Die Tagebuchnotizen zum Tag
+lassen sich fertig stellen und nachbearbeiten, aber es sollen mehrere erstellbar sein mit
+einem ‚+‘.“
 
-- **Direkt:** Das Textfeld steht im Block „Zum Tag“ (Übersicht) bzw. an der Notiz in der
-  Zeitleiste — kein Dialog mehr.
-- **Autosave:** Gespeichert wird, sobald man einen Augenblick nicht tippt
-  (`SPEICHERN_NACH_S`), beim Verlassen des Felds, bevor die Ansichten neu entstehen und
-  bevor die App in den Hintergrund geht (`AppState.vor_dem_verlassen`). Zurück speichert
-  damit immer; auf „Heute“ beendet die Systemtaste das Schreiben wie „Fertig“
-  (`AppState.schreiben_beenden`).
-- **Leiste beim Schreiben:** ↶ Rückgängig, ↷ Wiederholen (`core/textverlauf.py`: Schritte,
-  nicht Tastendrücke — ein gelöschtes Stück ist ein Schritt für sich), „gespeichert“,
-  „Abbrechen“ und „Fertig“. **Abbrechen** stellt den Text her, der beim Antippen dastand —
-  auch in der Datenbank — und bietet 5 s lang „Rückgängig“ an, falls das ein Versehen war.
-  **Fertig** schließt die Tastatur; gespeichert ist ohnehin schon.
-- **Daneben tippen** beendet das Schreiben wie „Fertig“ (Ben, 22.10.2026: „der Klick aus dem
-  Fenster raus soll … speichern“). Am Handy nähme Flutter dem Feld von sich aus nie den Fokus.
-  Den Tipp meldet es schon beim Aufsetzen (``on_tap_outside``), auch auf ↶ und ↷ — darum
-  wartet die Notiz `NACHFRIST_S`, ob einer der beiden kommt.
-- **Anhänge am Tag:** Ohne Schreiben steht an derselben Stelle Foto · Video · Audio (· aus
-  der Fotoauswahl, nur mit der Erweiterung); die Aufnahmen hängen am Tag
-  (`core.anhaenge.Ziel`), ihre Kacheln stehen darunter, ein Tipp öffnet die Ansicht.
+- `Tagesnotiz` — **eine** Notiz (`core.models.DayNote`) im Editor (`components/notizeditor`):
+  über dem Feld die Chip-Zeile ihrer Tags (ein Tipp setzt oder nimmt einen und speichert
+  sofort; „+ Tag“ legt einen neuen an — in der Zeile, kein Dialog), ohne Schreiben Foto ·
+  Video · Audio **an dieser Notiz** (`core.anhaenge.Ziel.fuer_notiz`, P99) und darunter ihre
+  Kacheln.
+- `Tagesnotizen` — die Notizen **eines Tags**: fertige als Karten (`notiz_karte`: Uhrzeit,
+  Tags, Text bis `NOTIZ_ZEILEN`, Antippen öffnet sie wieder), höchstens eine offen als
+  Editor, darunter „+ Notiz“. Ihr Stand lebt über das Auffrischen der Ansicht hinweg
+  (`views/tag.py` hält das Objekt).
 
-Der Stand (Text, Verlauf, Text beim Antippen) lebt in diesem Objekt, nicht im Control:
-Baut die Tagesansicht ihre Spalte neu, entsteht ein neues Feld mit demselben Stand. Das
-Speichern frischt die Ansicht bewusst **nicht** auf — ein Neuaufbau nähme dem Feld den
-Fokus und schlösse die Tastatur. Auch die beiden Leisten entstehen nur mit dem Feld; danach
-ändern sich nur Eigenschaften (sichtbar, gesperrt, Text): Am Rechner nimmt schon der Klick
-auf ↶ dem Feld den Fokus — ein dabei ersetzter Knopf bekäme den Klick nicht mehr.
-
-Das Feld steht in einer gestreckten Spalte: Ohne ``expand`` oder ``width`` gibt Flet einem
-Textfeld feste 300 px (Ben, 22.10.2026: „setze das Feld auf die ganze Breite“). Die Tastatur
-schließt `Notizfeld` mit ``blur``, nicht der Fokus auf einem Knopf: Verschwindet ein
-fokussierter Knopf mit seiner Leiste, gibt Flutter den Fokus dem zuvor fokussierten zurück —
-dem Feld. Bis v0.3.15 ging so die Tastatur zu und gleich wieder auf, die Ansicht sprang, und
-das Schreiben begann von vorn („der Fertig-Button macht nicht fertig“).
+**Eine Notiz gibt es nur mit Text oder Anhängen** (P99: „leerer Text soll halt nicht
+angezeigt werden“). Neu angelegt wird sie beim ersten Zeichen — oder vor dem Weg zur Kamera,
+denn der Anhang braucht ihre ID. Wird der Text leer und hängt nichts dran, löscht
+`speichern` die Zeile wieder (weich); was von einer Aufnahme bleibt, die nicht behalten wurde,
+räumen die Aufnahmeseiten beim Verlassen weg (`DayNoteRepo.aufraeumen`). Eine neue Notiz hat
+**keinen** Tag vorgewählt (P98).
 """
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import time
-from collections.abc import Callable
-from datetime import date
+from collections.abc import Callable, Sequence
+from datetime import date, datetime
 from typing import Any
 
 import flet as ft
 
 from trainingsapp.core.anhaenge import AUDIO, BILD, VIDEO, Anhang, Ziel
-from trainingsapp.core.textverlauf import Textverlauf, stelle
+from trainingsapp.core.models import DayNote, NoteTag
+from trainingsapp.core.tagebuch import NOTIZ_ZEILEN
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
+from trainingsapp.ui.components.notizeditor import (
+    HINWEIS,
+    NACHFRIST_S,
+    SICHERN,
+    SICHT_UNTER_FELD_PX,
+    SPEICHERN_NACH_S,
+    Notizeditor,
+    Notizfeld,
+)
 from trainingsapp.ui.state import AppState
 
-#: So lange nach der letzten Änderung wird gespeichert (s)
-SPEICHERN_NACH_S = 1.0
-#: So lange nach einem Tipp neben das Feld wartet die Notiz, ob es ↶ oder ↷ war (s) — deren
-#: Klick kommt erst beim Loslassen
-NACHFRIST_S = 0.5
-#: Hinweis im leeren Feld
-HINWEIS = "Notiz zum Tag … Wie lief der Tag? Tippen oder diktieren."
-#: Schlüssel in `AppState.vor_dem_verlassen`
-SICHERN = "tagesnotiz"
+#: Hinweis im Feld für einen neuen Tag
+TAG_HINWEIS = "Neuer Tag"
+#: Die Karte einer fertigen Notiz
+KARTE = ft.Colors.SURFACE_CONTAINER_LOWEST
 
 
-@ft.control
-class Notizfeld(ft.TextField):
-    """Ein Textfeld, dem man den Fokus nehmen kann: Ein neuer Wert in ``blur`` ruft auf der
-    Dart-Seite ``unfocus()``. Flet liest die Eigenschaft beim Aufbau (`textfield.dart`, 1.0.3
-    bis 1.0.5), nur die Python-Klasse führt sie nicht."""
-
-    blur: str | None = None
+def uhr(zeit: datetime | None) -> str:
+    """„07:35“ in Ortszeit — leer ohne Zeit."""
+    return f"{zeit.astimezone():%H:%M}" if zeit is not None else ""
 
 
-class Tagesnotiz:
-    """Die Notiz zum Tag ``tag`` des aktiven Profils — `control` baut Feld, Leiste und
-    Kacheln (bei jedem Aufbau der Ansicht neu, mit dem Stand dieses Objekts)."""
+def tag_etiketten(namen: Sequence[str]) -> list[ft.Control]:
+    """Die Tags einer fertigen Notiz als kleine Pillen (Karte, Tagebuch)."""
+    return [
+        ft.Container(
+            bgcolor=ft.Colors.SECONDARY_CONTAINER,
+            border_radius=8,
+            padding=ft.Padding.symmetric(horizontal=7, vertical=1),
+            content=ft.Text(name, size=11, color=ft.Colors.ON_SECONDARY_CONTAINER),
+        )
+        for name in namen
+    ]
 
-    def __init__(self, page: Any, state: AppState, tag: date, *, basis: str = "/") -> None:
-        self.page, self.state, self.tag = page, state, tag
+
+def notiz_karte(
+    notiz: DayNote,
+    tag_namen: dict[str, str],
+    *,
+    on_click: Callable[[], Any] | None = None,
+    kacheln: ft.Control | None = None,
+    kopf: str | None = None,
+) -> ft.Control:
+    """Eine fertige Notiz: oben Uhrzeit (oder ``kopf``) und Tags, darunter der Text bis
+    `NOTIZ_ZEILEN` Zeilen (Ben, 2.11.2026, P100: „10 Zeilen wie heute“), dann die Kacheln
+    ihrer Anhänge. Antippen (``on_click``) öffnet sie zum Bearbeiten."""
+    namen = [tag_namen[t] for t in notiz.tag_ids if t in tag_namen]
+    oben: list[ft.Control] = [
+        ft.Text(
+            kopf if kopf is not None else uhr(notiz.created_at),
+            size=12,
+            weight=ft.FontWeight.W_600,
+            opacity=0.7,
+        ),
+        *tag_etiketten(namen),
+    ]
+    zeilen: list[ft.Control] = [ft.Row(wrap=True, spacing=6, run_spacing=2, controls=oben)]
+    if notiz.text.strip():
+        zeilen.append(
+            ft.Text(
+                notiz.text.strip(),
+                size=14,
+                max_lines=NOTIZ_ZEILEN,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            )
+        )
+    if kacheln is not None:
+        zeilen.append(ft.Container(padding=ft.Padding.only(top=2), content=kacheln))
+    return ft.Container(
+        bgcolor=KARTE,
+        border_radius=12,
+        padding=ft.Padding.only(left=12, right=10, top=8, bottom=8),
+        ink=on_click is not None,
+        on_click=on_click,
+        content=ft.Column(spacing=4, tight=True, controls=zeilen),
+    )
+
+
+class Tagesnotiz(Notizeditor):
+    """Eine Notiz zum Tag im Editor. ``notiz``: die `DayNote` — mit ``created_at`` aus der
+    Datenbank, ohne = noch nicht angelegt. ``tags``: was die Chip-Zeile anbietet (die aktiven
+    des Profils und die, die die Notiz schon trägt). ``danach`` läuft nach Fertig und
+    Abbrechen — die Ansicht zeigt die Notiz dann als Karte."""
+
+    def __init__(
+        self,
+        page: Any,
+        state: AppState,
+        notiz: DayNote,
+        *,
+        basis: str = "/",
+        tags: Sequence[NoteTag] = (),
+        danach: Callable[[], None] | None = None,
+    ) -> None:
+        #: Steht die Zeile in der Datenbank?
+        self.vorhanden = notiz.created_at is not None
+        super().__init__(
+            page,
+            state,
+            notiz.text if self.vorhanden else "",
+            schluessel=notiz.id,
+            danach=danach,
+        )
+        if not self.vorhanden and notiz.text:
+            self.verlauf = type(self.verlauf)(notiz.text)
+        self.notiz = notiz
+        self.tag = notiz.date
+        self.profil_id = notiz.subject_id
         #: Route der Ansicht, über der Aufnahme und Ansicht eines Anhangs liegen
         self.basis = basis or "/"
-        self.profil_id = state.profil.id
-        text = state.tagesnotizen.lesen(self.profil_id, tag)
-        #: Was in der Datenbank steht
-        self.gespeichert = text
-        self.verlauf = Textverlauf(text)
-        #: Der Text beim Antippen — „Abbrechen“ kehrt dorthin zurück; ``None``: es wird
-        #: gerade nicht geschrieben
-        self.anfang: str | None = None
-        self.anhaenge: list[Anhang] = state.anhaenge.zum_tag(self.profil_id, tag)
-        #: Wann zuletzt geändert (`time.monotonic`) und das wartende Speichern
-        self._letzte = 0.0
-        self._aufgabe: Any = None
-        #: Wann zuletzt neben das Feld getippt wurde, solange die Nachfrist läuft
-        self._daneben_um: float | None = None
-        #: Zähler für ``Notizfeld.blur`` — jeder neue Wert nimmt den Fokus
-        self._losgelassen = 0
-        #: Die Controls des letzten Aufbaus — Feld, die Leiste beim Schreiben (↶ ↷ …) und die
-        #: mit den Anhängen; je nach `schreibt` ist eine der beiden sichtbar
-        self.feld = Notizfeld()
-        self.zurueck_knopf = ft.IconButton()
-        self.vor_knopf = ft.IconButton()
-        self.stand = ft.Text()
-        self.schreib_leiste = ft.Row()
-        self.anhang_leiste = ft.Row()
+        self.tags = list(tags)
+        #: Welche Tags in der Datenbank stehen
+        self.gespeicherte_tags: tuple[str, ...] = tuple(notiz.tag_ids) if self.vorhanden else ()
+        self.anhaenge: list[Anhang] = state.anhaenge.zur_notiz(notiz.id) if self.vorhanden else []
+        self.tag_zeile = ft.Row()
+        self.tag_feld = ft.TextField()
+        self.chips: dict[str, ft.Chip] = {}
 
     @property
-    def text(self) -> str:
-        return self.verlauf.text
-
-    @property
-    def schreibt(self) -> bool:
-        """Es wird gerade geschrieben (Leiste mit ↶ ↷ statt der Anhänge)."""
-        return self.anfang is not None
+    def id(self) -> str:
+        return self.notiz.id
 
     # -- Aufbau --------------------------------------------------------------------------
 
-    def control(self) -> ft.Control:
-        """Feld, Leiste und Kacheln — neu, mit dem Stand dieses Objekts."""
-        self.feld = Notizfeld(
-            value=self.text,
-            hint_text=HINWEIS,
-            multiline=True,
-            min_lines=2,
-            max_lines=10,
-            text_size=14,
-            filled=True,
-            fill_color=ft.Colors.SURFACE_CONTAINER_LOWEST,
-            border=ft.OutlineInputBorder(border_radius=12),
-            content_padding=ft.Padding.symmetric(horizontal=12, vertical=10),
-            capitalization=ft.TextCapitalization.SENTENCES,
-            on_change=self._geaendert,
-            on_focus=self._angetippt,
-            on_blur=self._verlassen,
-            on_tap_outside=self._daneben,
-        )
-        self.zurueck_knopf = ft.IconButton(
-            ft.Icons.UNDO, tooltip="Rückgängig", on_click=self.rueckgaengig
-        )
-        self.vor_knopf = ft.IconButton(
-            ft.Icons.REDO, tooltip="Wiederholen", on_click=self.wiederholen
-        )
-        self.stand = ft.Text(
-            "", size=12, opacity=0.6, expand=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS
-        )
-        self.schreib_leiste = ft.Row(
-            spacing=0,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                self.zurueck_knopf,
-                self.vor_knopf,
-                self.stand,
-                ft.TextButton(
-                    "Abbrechen", tooltip="Zurück zum Text beim Antippen", on_click=self.abbrechen
-                ),
-                ft.FilledTonalButton("Fertig", on_click=self.fertig),
-            ],
-        )
-        self.anhang_leiste = ft.Row(
-            spacing=0,
-            controls=[
-                ft.IconButton(symbol, tooltip=tooltip, icon_size=22, on_click=self._oeffner(ziel))
-                for symbol, tooltip, ziel in self._anhang_wege()
-            ],
-        )
-        self._stand_setzen()
-        teile: list[ft.Control] = [self.feld, self.schreib_leiste, self.anhang_leiste]
-        if (reihe := self._kacheln()) is not None:
-            teile.append(ft.Container(padding=ft.Padding.only(left=4, bottom=4), content=reihe))
-        # Gestreckt: das Feld über die ganze Breite (Moduldocstring)
-        return ft.Column(
-            spacing=2,
-            tight=True,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            controls=teile,
-        )
+    def _oben(self) -> list[ft.Control]:
+        self._tag_zeile_bauen()
+        return [self.tag_zeile]
 
-    def _stand_setzen(self) -> None:
-        """Welche Leiste, was gesperrt ist, „gespeichert“ — nur Eigenschaften (Moduldocstring)."""
-        self.schreib_leiste.visible = self.schreibt
-        self.anhang_leiste.visible = not self.schreibt
-        self.zurueck_knopf.disabled = not self.verlauf.kann_rueckgaengig
-        self.vor_knopf.disabled = not self.verlauf.kann_wiederholen
-        self.stand.value = self._stand_text() if self.schreibt else ""
+    def _ohne_schreiben(self) -> list[ft.Control]:
+        return [
+            ft.IconButton(symbol, tooltip=tooltip, icon_size=22, on_click=self._oeffner(ziel))
+            for symbol, tooltip, ziel in self._anhang_wege()
+        ]
+
+    def _unten(self) -> list[ft.Control]:
+        reihe = self._kacheln()
+        if reihe is None:
+            return []
+        return [ft.Container(padding=ft.Padding.only(left=4, bottom=4), content=reihe)]
+
+    def _tag_zeile_bauen(self) -> None:
+        """Ein Chip je angebotenem Tag, dann „+ Tag“ und das (verborgene) Feld dafür."""
+        self.chips = {}
+        for t in self.tags:
+            self.chips[t.id] = ft.Chip(
+                label=ft.Text(t.name, size=12),
+                selected=t.id in self.notiz.tag_ids,
+                show_checkmark=False,
+                visual_density=ft.VisualDensity.COMPACT,
+                padding=ft.Padding.symmetric(horizontal=2),
+                tooltip=None if t.aktiv else f"{t.name} (ausgeschaltet)",
+                on_select=self._tag_umschalter(t.id),
+            )
+        self.tag_feld = ft.TextField(
+            hint_text=TAG_HINWEIS,
+            visible=False,
+            width=150,
+            dense=True,
+            text_size=12,
+            content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+            capitalization=ft.TextCapitalization.SENTENCES,
+            on_submit=self._tag_anlegen,
+            on_blur=self._tag_feld_zu,
+        )
+        plus = ft.Chip(
+            label=ft.Text("+ Tag", size=12),
+            visual_density=ft.VisualDensity.COMPACT,
+            padding=ft.Padding.symmetric(horizontal=2),
+            tooltip="Neuen Tag anlegen",
+            on_click=self._tag_feld_auf,
+        )
+        self.tag_zeile = ft.Row(
+            wrap=True,
+            spacing=4,
+            run_spacing=0,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[*self.chips.values(), plus, self.tag_feld],
+        )
 
     def _anhang_wege(self) -> list[tuple[Any, str, str]]:
         """Foto, Video, Audio — und aus der Fotoauswahl, wo die Erweiterung da ist."""
         from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
         from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 
-        ziel = Ziel.fuer_tag(self.profil_id, self.tag)
+        ziel = Ziel.fuer_notiz(self.profil_id, self.tag, self.notiz.id)
         wege: list[tuple[Any, str, str]] = [
-            (ft.Icons.CAMERA_ALT_OUTLINED, "Foto zum Tag", aufnahme_route(self.basis, ziel, BILD)),
-            (ft.Icons.VIDEOCAM_OUTLINED, "Video zum Tag", aufnahme_route(self.basis, ziel, VIDEO)),
-            (ft.Icons.MIC_NONE, "Audio zum Tag", aufnahme_route(self.basis, ziel, AUDIO)),
+            (
+                ft.Icons.CAMERA_ALT_OUTLINED,
+                "Foto zur Notiz",
+                aufnahme_route(self.basis, ziel, BILD),
+            ),
+            (
+                ft.Icons.VIDEOCAM_OUTLINED,
+                "Video zur Notiz",
+                aufnahme_route(self.basis, ziel, VIDEO),
+            ),
+            (ft.Icons.MIC_NONE, "Audio zur Notiz", aufnahme_route(self.basis, ziel, AUDIO)),
         ]
         if self.state.hochladen is not None:
             wege.append(
@@ -219,164 +254,285 @@ class Tagesnotiz:
         )
 
     def _oeffner(self, route: str) -> Callable[[], Any]:
+        """Der Weg zu Kamera, Rekorder, Fotoauswahl oder Anhang — die Notiz steht vorher in
+        der Datenbank, denn der Anhang braucht ihre ID."""
+
         async def handler() -> None:
-            self.speichern()
+            self.speichern(auch_leer=True)
             await self.page.push_route(route)
 
         return handler
 
-    def _stand_text(self) -> str:
-        return "gespeichert" if self.text.strip() == self.gespeichert else ""
+    # -- Tags ----------------------------------------------------------------------------
 
-    def _zeigen(self) -> None:
-        """Die Leisten auffrischen (das Feld nicht — es gehört gerade der Tastatur)."""
-        self._stand_setzen()
-        for leiste in (self.schreib_leiste, self.anhang_leiste):
-            with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
-                leiste.update()
+    def _tag_umschalter(self, tag_id: str) -> Callable[[Any], None]:
+        def handler(_e: object = None) -> None:
+            self.tipp_war_eigener()
+            ids = list(self.notiz.tag_ids)
+            if tag_id in ids:
+                ids.remove(tag_id)
+            else:
+                ids.append(tag_id)
+            self.notiz.tag_ids = tuple(ids)
+            chip = self.chips.get(tag_id)
+            if chip is not None:
+                chip.selected = tag_id in ids
+                with contextlib.suppress(Exception):
+                    chip.update()
+            self.speichern()
 
-    # -- Schreiben -----------------------------------------------------------------------
+        return handler
 
-    def _angetippt(self, _e: object = None) -> None:
-        if self.anfang is None:
-            self.anfang = self.gespeichert
-            self.verlauf.schritt_beenden()
-            self.state.vor_dem_verlassen[SICHERN] = self.speichern
-            self.state.schreiben_beenden = self.fertig
-            self._zeigen()
+    def _tag_feld_auf(self, _e: object = None) -> None:
+        self.tipp_war_eigener()
+        self.tag_feld.visible = True
+        self.tag_feld.value = ""
+        with contextlib.suppress(Exception):
+            self.tag_feld.update()
+            self.page.run_task(self.tag_feld.focus)
 
-    def _geaendert(self, e: Any) -> None:
-        neu = str(e.control.value or "")
-        if self.anfang is None:  # getippt, ohne dass ``on_focus`` kam
-            self._angetippt()
-        self._letzte = time.monotonic()
-        neuer_schritt = self.verlauf.aendern(neu, self._letzte)
-        if self._aufgabe is None:
-            self._aufgabe = self.page.run_task(self._spaeter_speichern)
-        if neuer_schritt or self.stand.value:
-            self._zeigen()
+    def _tag_feld_zu(self, _e: object = None) -> None:
+        self.tag_feld.visible = False
+        with contextlib.suppress(Exception):
+            self.tag_feld.update()
 
-    def _verlassen(self, _e: object = None) -> None:
-        """Das Feld verliert den Fokus: gleich speichern. Die Leiste bleibt — am Rechner
-        nimmt schon der Klick auf ↶ dem Feld den Fokus."""
-        self.speichern()
-        self._zeigen()
-
-    def _daneben(self, _e: object = None) -> None:
-        """Neben das Feld getippt: nach der Nachfrist fertig, wenn nicht ↶ oder ↷ kam."""
-        if self.schreibt:
-            self._daneben_um = zeit = time.monotonic()
-            self.page.run_task(self._nach_daneben, zeit)
-
-    async def _nach_daneben(self, zeit: float) -> None:
-        await asyncio.sleep(NACHFRIST_S)
-        if self.schreibt and self._daneben_um == zeit:
-            await self.fertig()
-
-    async def _spaeter_speichern(self) -> None:
-        """Speichern, sobald `SPEICHERN_NACH_S` lang nichts mehr kam."""
+    def _tag_anlegen(self, _e: object = None) -> None:
+        """Enter im Feld „Neuer Tag“: anlegen, an die Notiz, als Chip in die Zeile."""
+        name = self.tag_feld.value or ""
         try:
-            while (rest := self._letzte + SPEICHERN_NACH_S - time.monotonic()) > 0:
-                await asyncio.sleep(rest)
-        finally:
-            self._aufgabe = None
+            tag = self.state.notiz_tags.anlegen(self.profil_id, name)
+        except ValueError as fehler:
+            self.tag_feld.error = str(fehler)
+            with contextlib.suppress(Exception):
+                self.tag_feld.update()
+            return
+        self.tag_feld.error = None
+        self.tags.append(tag)
+        self.notiz.tag_ids = (*self.notiz.tag_ids, tag.id)
         self.speichern()
-        self._zeigen()
+        self._tag_zeile_bauen()
+        with contextlib.suppress(Exception):
+            self.tag_zeile.update()
 
-    def speichern(self) -> None:
-        """Den Text speichern, wenn er sich geändert hat (leer = Notiz entfernt)."""
+    # -- Speichern -----------------------------------------------------------------------
+
+    def _sichern(self, text: str) -> None:  # pragma: no cover — `speichern` geht eigene Wege
+        self.notiz.text = text
+        self.state.tagesnotizen.speichern(self.notiz)
+
+    def speichern(self, *, auch_leer: bool = False) -> None:
+        """Text und Tags speichern, wenn sich etwas geändert hat. Ohne Text und ohne
+        Anhänge gibt es die Notiz nicht: Dann wird sie (weich) gelöscht — außer ``auch_leer``
+        (vor dem Weg zur Kamera)."""
         text = self.text.strip()
-        if text == self.gespeichert:
+        tags = tuple(self.notiz.tag_ids)
+        behalten = bool(text) or bool(self.anhaenge) or auch_leer
+        if not behalten:
+            if self.vorhanden:
+                self.state.tagesnotizen.loeschen(self.notiz.id)
+                self.vorhanden = False
+                self.notiz.created_at = None
+            self.gespeichert, self.gespeicherte_tags = "", ()
             return
-        self.state.tagesnotizen.setzen(self.profil_id, self.tag, text)
-        self.gespeichert = text
+        if self.vorhanden and text == self.gespeichert and tags == self.gespeicherte_tags:
+            return
+        self.notiz.text = text
+        self.state.tagesnotizen.speichern(self.notiz)
+        self.vorhanden = True
+        self.gespeichert, self.gespeicherte_tags = text, tags
 
-    # -- Leiste --------------------------------------------------------------------------
 
-    async def rueckgaengig(self) -> None:
-        self._daneben_um = None  # der Tipp daneben war dieser Knopf
-        alt = self.text
-        if (neu := self.verlauf.rueckgaengig()) is not None:
-            await self._setzen(neu, stelle(alt, neu))
+class Tagesnotizen:
+    """Die Notizen eines Tags (Ben, 2.11.2026): fertige als Karten, höchstens eine offen als
+    Editor, darunter „+ Notiz“. Hält je Notiz ihr `Tagesnotiz`-Objekt, damit Text und
+    Verlauf das Auffrischen der Ansicht überleben; ``auffrischen`` baut die Ansicht neu
+    (Karte ↔ Editor)."""
 
-    async def wiederholen(self) -> None:
-        self._daneben_um = None
-        alt = self.text
-        if (neu := self.verlauf.wiederholen()) is not None:
-            await self._setzen(neu, stelle(alt, neu))
+    def __init__(
+        self,
+        page: Any,
+        state: AppState,
+        tag: date,
+        *,
+        basis: str = "/",
+        auffrischen: Callable[[], None] | None = None,
+    ) -> None:
+        self.page, self.state, self.tag = page, state, tag
+        self.basis = basis or "/"
+        self.profil_id = state.profil.id
+        self.auffrischen = auffrischen
+        self.notizen: list[DayNote] = []
+        self.editoren: dict[str, Tagesnotiz] = {}
+        #: Die offene Notiz (ihr Editor steht statt der Karte)
+        self.offen: str | None = None
+        self.tags: list[NoteTag] = []
+        self._anhaenge: dict[str, list[Anhang]] = {}
+        self.laden()
 
-    async def _setzen(self, text: str, schreibmarke: int) -> None:
-        """Einen Stand aus dem Verlauf ins Feld — gespeichert, die Schreibmarke ans Ende
-        dessen, was sich änderte."""
-        self.feld.value = text
-        self.speichern()
-        self._zeigen()
-        with contextlib.suppress(Exception):
-            self.feld.update()
-            await self.feld.focus()
-            self.feld.selection = ft.TextSelection(
-                base_offset=schreibmarke, extent_offset=schreibmarke
+    def laden(self) -> None:
+        """Die Notizen des Tags aus der Datenbank — leere ohne Anhänge bleiben draußen (die
+        offene ausgenommen): Sie entstehen auf dem Weg zur Kamera, und die Aufnahmeseiten
+        räumen sie weg, wenn nichts behalten wird (`DayNoteRepo.aufraeumen`). Löschen darf
+        das Laden sie nicht — der Routenaufbau baut Heute unter der Kamera neu, bevor die
+        Aufnahme ihre Notiz gefunden hat."""
+        self.tags = self.state.notiz_tags.alle(self.profil_id)
+        notizen = self.state.tagesnotizen.zum_tag(self.profil_id, self.tag)
+        self._anhaenge = self.state.anhaenge.zu_notizen([n.id for n in notizen])
+        self.notizen = [
+            n for n in notizen if not n.leer() or self._anhaenge.get(n.id) or n.id == self.offen
+        ]
+        # Editoren, deren Notiz es nicht mehr gibt, fallen weg — die offene bleibt
+        ids = {n.id for n in self.notizen}
+        for notiz_id in list(self.editoren):
+            if notiz_id != self.offen and notiz_id not in ids:
+                del self.editoren[notiz_id]
+
+    @property
+    def tag_namen(self) -> dict[str, str]:
+        return {t.id: t.name for t in self.tags}
+
+    @property
+    def mit_inhalt(self) -> list[DayNote]:
+        """Die Notizen, die es zu zeigen gibt: mit Text oder Anhängen."""
+        return [n for n in self.notizen if not n.leer() or self._anhaenge.get(n.id)]
+
+    def anhaenge(self, notiz: DayNote) -> list[Anhang]:
+        return self._anhaenge.get(notiz.id, [])
+
+    def alle_anhaenge(self) -> list[Anhang]:
+        return [a for n in self.notizen for a in self.anhaenge(n)]
+
+    def editor(self, notiz: DayNote) -> Tagesnotiz:
+        """Das `Tagesnotiz`-Objekt der Notiz — einmal je Notiz."""
+        e = self.editoren.get(notiz.id)
+        if e is None:
+            e = self.editoren[notiz.id] = Tagesnotiz(
+                self.page,
+                self.state,
+                notiz,
+                basis=self.basis,
+                tags=self._angebot(notiz),
+                danach=self._geschlossen,
             )
-            self.feld.update()
+        return e
 
-    def _ersetzen(self, text: str) -> None:
-        """Den ganzen Text ersetzen — als eigener Schritt im Verlauf (↶ holt den alten
-        zurück) und gleich gespeichert."""
-        self.verlauf.schritt_beenden()
-        self.verlauf.aendern(text, time.monotonic())
-        self.verlauf.schritt_beenden()
-        self.feld.value = text
-        self.speichern()
-        with contextlib.suppress(Exception):
-            self.feld.update()
+    def _angebot(self, notiz: DayNote) -> list[NoteTag]:
+        """Die aktiven Tags und die, die die Notiz schon trägt (auch ausgeschaltete)."""
+        return [t for t in self.tags if t.aktiv or t.id in notiz.tag_ids]
 
-    async def abbrechen(self) -> None:
-        """Zurück zum Text beim Antippen — mit „Rückgängig“, falls es ein Versehen war."""
-        if self.anfang is None:
-            return
-        verworfen, anfang = self.text, self.anfang
-        self._ersetzen(anfang)
-        self._beenden()
-        if verworfen.strip() == anfang.strip():
-            return
+    def offener_editor(self) -> Tagesnotiz | None:
+        if self.offen is None:
+            return None
+        notiz = next((n for n in self.notizen if n.id == self.offen), None)
+        return self.editor(notiz) if notiz is not None else None
 
-        def zurueckholen() -> None:
-            self._ersetzen(verworfen)
-            self._zeigen()
+    def oeffnen(self, notiz: DayNote) -> None:
+        """Eine Karte wurde angetippt: ihr Editor, mit Fokus."""
+        self.offen = notiz.id
+        self.editor(notiz).fokus = True
+        self._neu_zeichnen()
 
-        self.page.show_dialog(
-            ft.SnackBar(
-                ft.Text("Änderungen an der Notiz verworfen"),
-                action="Rückgängig",
-                on_action=zurueckholen,
-                persist=False,  # mit Aktion bliebe sie stehen (`dialoge.meldung`)
-            )
+    def neu(self) -> Tagesnotiz:
+        """„+ Notiz“: eine neue, leere Notiz — ohne Tag vorgewählt (P98) — offen, mit Fokus."""
+        e = self.neu_ohne_zeichnen()
+        e.fokus = True
+        self._neu_zeichnen()
+        return e
+
+    def neu_ohne_zeichnen(self) -> Tagesnotiz:
+        """Wie `neu`, ohne die Ansicht neu zu bauen (beim Aufbau selbst)."""
+        notiz = DayNote(subject_id=self.profil_id, date=self.tag)
+        self.notizen.append(notiz)
+        self.offen = notiz.id
+        return self.editor(notiz)
+
+    def _geschlossen(self) -> None:
+        """Fertig oder Abbrechen im offenen Editor: zur Karte — oder weg, wenn leer."""
+        if self.offen is not None:
+            e = self.editoren.get(self.offen)
+            if e is not None and not e.vorhanden:
+                self.notizen = [n for n in self.notizen if n.id != self.offen]
+                del self.editoren[self.offen]
+        self.offen = None
+        self.laden()
+        self._neu_zeichnen()
+
+    def _neu_zeichnen(self) -> None:
+        if self.auffrischen is not None:
+            self.auffrischen()
+
+    # -- Controls ------------------------------------------------------------------------
+
+    def karte(self, notiz: DayNote) -> ft.Control:
+        """Die Karte einer fertigen Notiz — Antippen öffnet sie."""
+        from trainingsapp.ui.views.anhang import anhang_route
+
+        def oeffner(a: Anhang) -> Callable[[], Any]:
+            async def handler() -> None:
+                await self.page.push_route(anhang_route(self.basis, a.id))
+
+            return handler
+
+        kacheln = anhang_reihe(self.anhaenge(notiz), self.state.anhaenge.bild, oeffner)
+        return notiz_karte(
+            notiz, self.tag_namen, on_click=lambda: self.oeffnen(notiz), kacheln=kacheln
         )
 
-    async def fertig(self) -> None:
-        """Gespeichert ist schon — die Tastatur zu und die Leiste wieder mit den Anhängen.
-        Der Verlauf bleibt: Wer wieder hineintippt, hat ↶ noch."""
-        self.speichern()
-        self._beenden()
+    def teil(self, notiz: DayNote) -> ft.Control:
+        """Editor oder Karte — je nachdem, ob die Notiz offen ist."""
+        if notiz.id == self.offen:
+            return self.editor(notiz).control()
+        return self.karte(notiz)
 
-    def _beenden(self) -> None:
-        self.anfang = None
-        self._daneben_um = None
-        # Nur die eigenen Haken — eine neue Ansicht kann schon ihre angemeldet haben
-        if self.state.vor_dem_verlassen.get(SICHERN) == self.speichern:
-            del self.state.vor_dem_verlassen[SICHERN]
-        if self.state.schreiben_beenden == self.fertig:
-            self.state.schreiben_beenden = None
-        self._loslassen()
-        self._zeigen()
+    def plus(self) -> ft.Control:
+        return ft.Row(
+            controls=[
+                ft.TextButton(
+                    "Notiz", icon=ft.Icons.ADD, tooltip="Neue Notiz zum Tag", on_click=self.neu
+                )
+            ]
+        )
 
-    def _loslassen(self) -> None:
-        """Dem Feld den Fokus nehmen — die Tastatur geht zu (über ``blur``, nicht über den
-        Fokus eines Knopfs: Moduldocstring)."""
-        self._losgelassen += 1
-        self.feld.blur = str(self._losgelassen)
-        with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
-            self.feld.update()
+    def control(self) -> ft.Control:
+        """Alle Notizen des Tags untereinander, dann „+ Notiz“. Ohne Notiz steht gleich ein
+        Editor da (wie bisher: gleich zum Schreiben)."""
+        if not self.notizen:
+            self.neu_ohne_zeichnen()
+        teile = [self.teil(n) for n in self.notizen]
+        if self.offen is None:
+            teile.append(self.plus())
+        return ft.Column(
+            spacing=6,
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            controls=teile,
+        )
+
+    def ende(self) -> ft.Control | None:
+        """Für die Zeitleiste, die jede Notiz an ihrer Uhrzeit zeigt: was ans Ende gehört —
+        der Editor einer neuen Notiz (ohne Notiz gleich zum Schreiben), sonst „+ Notiz“,
+        solange keine offen ist."""
+        if not self.notizen:
+            self.neu_ohne_zeichnen()
+        mit = {n.id for n in self.mit_inhalt}
+        offen = self.offener_editor()
+        if offen is not None and offen.id not in mit:
+            return offen.control()
+        return self.plus() if offen is None else None
 
 
-__all__ = ["HINWEIS", "NACHFRIST_S", "SPEICHERN_NACH_S", "Notizfeld", "Tagesnotiz"]
+__all__ = [
+    "HINWEIS",
+    "KARTE",
+    "NACHFRIST_S",
+    "SICHERN",
+    "SICHT_UNTER_FELD_PX",
+    "SPEICHERN_NACH_S",
+    "TAG_HINWEIS",
+    "Notizfeld",
+    "Tagesnotiz",
+    "Tagesnotizen",
+    "notiz_karte",
+    "tag_etiketten",
+    "uhr",
+]

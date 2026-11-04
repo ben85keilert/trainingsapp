@@ -15,6 +15,11 @@ Die fünf Seiten (hrv-watch ENTSCHEIDUNGEN #7, Ben 26.10.2026), jede mit ihrer
 4. ``hrr``: Erholung HRR30 und HRR60 — ⏯ setzt das Ende der Belastung
 5. ``training``: Timer-Abschnitt mit Rest, GPS-Tempo und Strecke — ⏯ Marke
 
+Im **Diagnosemodus** (`docs/plan_diagnosemodus.md` §6, hrv-watch ENTSCHEIDUNGEN #8) kommt
+vorn die Seite ``diagnose`` dazu — ``Wdh 12`` · ``Kniebeuge S2`` · ``⏯ Marke`` —, ⏯ setzt
+dort eine Diagnosemarke der gerade gültigen Art. Sie steht in keiner Auswahl: Sie gibt es,
+solange der Diagnosemodus aufzeichnet und „⏯ an der Uhr setzt Diagnosemarken“ an ist.
+
 Welche davon die Uhr bekommt, wählt die Einstellung (``hf`` immer). Zeile 3 ist der
 Stand der Messung („Aufnahme 12 min“, höchstens einmal je Minute anders) oder, wo ⏯
 etwas anderes tut als eine Marke, der Hinweis darauf; eine Warnung (Gurt prüfen)
@@ -60,6 +65,8 @@ SEITE_HRR = "hrr"
 SEITE_TRAINING = "training"
 #: Bereich und Anteil an der Reserve (Ben, 29.10.2026, Stufe 4) — nur mit Ruhe-HF und HFmax
 SEITE_BEREICH = "bereich"
+#: Diagnosemodus: Marken mit ⏯ (nur solange er aufzeichnet; nicht in `SEITEN`)
+SEITE_DIAGNOSE = "diagnose"
 SEITEN: tuple[str, ...] = (
     SEITE_HF,
     SEITE_ATMUNG,
@@ -84,7 +91,9 @@ SEITEN_NAMEN: dict[str, str] = {
 TASTE_MARKE = "marke"
 TASTE_NEU = "neu"
 TASTE_HRR = "hrr"
+TASTE_DIAGNOSE = "diagnose"
 TASTE_JE_SEITE: dict[str, str] = {
+    SEITE_DIAGNOSE: TASTE_DIAGNOSE,
     SEITE_HF: TASTE_MARKE,
     SEITE_BEREICH: TASTE_MARKE,
     SEITE_ATMUNG: TASTE_MARKE,
@@ -165,6 +174,9 @@ class Werte:
     warnung: str | None = None
     #: Seite „Bereich“: (Name des Bereichs, % der Reserve) — None ohne Profil
     bereich: tuple[str, float | None] | None = None
+    #: Seite „Diagnose“: (Zeile 1, Zeile 2), etwa („Wdh 12“, „Kniebeuge S2“) — None ohne
+    #: Diagnosemodus
+    diagnose: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,13 +341,16 @@ def seiten(w: Werte, auswahl: Sequence[str] = SEITEN_VORGABE, breite: int = BREI
     out: list[Seite] = []
 
     def seite(art: str, titel: str, zeile2: str, zeile3: str) -> None:
-        if art != SEITE_HF and art not in auswahl:
+        if art not in (SEITE_HF, SEITE_DIAGNOSE) and art not in auswahl:
             return
         dritte = w.warnung if w.warnung else zeile3
         out.append(
             Seite(kuerzen(titel, breite), kuerzen(zeile2, breite), kuerzen(dritte, breite), art)
         )
 
+    if w.diagnose is not None:
+        # Vorn — springt die App beim Start eines Satzes hierher, ist sie die erste Seite
+        seite(SEITE_DIAGNOSE, w.diagnose[0], w.diagnose[1], "⏯ Marke")
     if w.dfa_moeglich:
         alpha = "--" if w.dfa_a1 is None else _komma(w.dfa_a1, 2)
         zweite = f"RR {rr} · α1 {alpha}"
@@ -410,6 +425,7 @@ def paket(
     training: Training | None = None,
     warnung: str | None = None,
     bereich: tuple[str, float | None] | None = None,
+    diagnose: tuple[str, str] | None = None,
     breite: int = BREITE,
 ) -> Uhrpaket:
     """Seiten, Zahlen und Verlauf für alle Kanäle auf einmal.
@@ -429,6 +445,7 @@ def paket(
         training=training,
         warnung=warnung,
         bereich=bereich,
+        diagnose=diagnose,
     )
     return Uhrpaket(
         seiten=seiten(w, auswahl, breite),
@@ -447,10 +464,12 @@ __all__ = [
     "SEITEN",
     "SEITEN_NAMEN",
     "SEITE_ATMUNG",
+    "SEITE_DIAGNOSE",
     "SEITE_HF",
     "SEITE_HRR",
     "SEITE_INTERVALL",
     "SEITE_TRAINING",
+    "TASTE_DIAGNOSE",
     "TASTE_HRR",
     "TASTE_JE_SEITE",
     "TASTE_MARKE",

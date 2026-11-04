@@ -2,16 +2,18 @@
 
 Die eine Seite für alles, was nur in diesem Plan gilt; sie ersetzt „Planübung einstellen“ und
 die i-Seite (`docs/plan_uebungen_einstellen.md`, Skizzen B2–B4). Erreichbar über „Einstellen“
-im Plan-Editor und über die Übungsseite (Karte „In diesem Plan“, „In Plänen“). Von oben nach
-unten, in derselben Reihenfolge wie in „Übung bearbeiten“:
+im Plan-Editor und über die Übungsseite (Karte „In diesem Plan“, „In Plänen“). Seit 2.11.2026
+(P107, `docs/plan_uebung_bearbeiten.md`) in derselben Ordnung wie „Übung bearbeiten“:
 
-1. **Parameter** — je Parameter der Übung eine Zeile mit Schalter und Chips zum Antippen
-   (`components/chips_wahl.py`), darunter „Weitere Parameter holen“: Felder aus dem Vorrat,
-   die die Übung nicht hat (Ben, 14.10.2026: „die ganze Übungsauswahl herholen“).
-2. **Varianten** (P58) — beim Eintragen zeigen oder nicht; sie gehören der Übung.
+1. **Parameter** als Knöpfe — ein Chip je Feld der Übung, dazu unter „Weitere Parameter
+   holen“ die Felder des Vorrats, die die Übung nicht hat (Ben, 14.10.2026: „die ganze
+   Übungsauswahl herholen“). Darunter je eingeschaltetem Parameter eine **Karte**: Chips zum
+   Antippen (`components/chips_wahl.py`) und das **Ziel** für diesen Parameter — was „Wie
+   geplant“ einträgt.
+2. **Varianten** (P58) — beim Eintragen zeigen oder nicht; sie gehören der Übung. Dazu die
+   Ziel-Variante.
 3. **Uhr und Timer** — Uhr wie die Übung, an oder aus; Timer wie die Übung oder ein anderer nur
    hier. Ob Timerzeit zählt, legt die Übung fest (D2).
-4. **Ziel** — was „Wie geplant“ einträgt.
 
 Jede Einstellung trägt „wie die Übung“ oder „nur hier“ mit ↺ (`components/planstand.py`).
 Unten „Alles wie die Übung“ (setzt die Seite zurück; gespeichert wird mit Speichern) und „In
@@ -34,7 +36,13 @@ import flet as ft
 from trainingsapp.core import varianten as var
 from trainingsapp.core.models import Exercise, Plan, PlanItem, new_id
 from trainingsapp.core.parameter import chips_sortiert
-from trainingsapp.core.result_spec import FieldSpec, FieldType, skala_titel, skala_werte
+from trainingsapp.core.result_spec import (
+    FieldSpec,
+    FieldType,
+    ResultSpec,
+    skala_titel,
+    skala_werte,
+)
 from trainingsapp.core.standards import (
     als_standard,
     bereinigt,
@@ -61,6 +69,9 @@ from trainingsapp.ui.components.planstand import schild
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
+
+#: Die Karte eines Parameters
+KARTE = ft.Colors.SURFACE_CONTAINER_HIGHEST
 
 
 def _titel(f: FieldSpec) -> str:
@@ -127,21 +138,28 @@ def plan_einstellen(
     def uhr_wert() -> str:
         return str(next(iter(uhr_wahl.selected or []), "uebung"))
 
-    spec = plan_spec(item, uebung)
-    ziel_bereich = ft.Container()
-    form_halter: dict[str, SpecForm] = {}
-
-    def form_bauen(werte: dict[str, Any]) -> None:
-        form_halter["form"] = SpecForm(ziel_spec(spec), werte, page=page)
-        ziel_bereich.content = form_halter["form"].control
-
-    form_bauen(ziel_von(item, uebung))
+    #: Das Ziel je Parameter — ein kleines Formular je Karte (P107 wie „Übung bearbeiten“),
+    #: die Werte gemerkt über ein Aus- und wieder Einschalten
+    ziel_formulare: dict[str, SpecForm] = {}
+    ziel_gemerkt: dict[str, Any] = dict(ziel_von(item, uebung))
     inhalt = ft.Column(spacing=16)
+
+    def felder_jetzt() -> list[str]:
+        return [f.key for f in planbar if f.key in aktiv]
+
+    def spec_aktuell() -> ResultSpec:
+        """Die Spec, mit der diese Planübung erfasst würde — mit den geholten Feldern."""
+        return plan_spec(replace(item, felder=felder_jetzt()), uebung)
+
+    def ziel_werte() -> dict[str, Any]:
+        for form in ziel_formulare.values():
+            ziel_gemerkt.update(form.werte())
+        return dict(ziel_gemerkt)
 
     # -- Zustand → Planübung ------------------------------------------------------------
 
     def ziel() -> dict[str, Any]:
-        return ziel_bereinigen(form_halter["form"].werte(), spec)
+        return ziel_bereinigen(ziel_werte(), spec_aktuell())
 
     def eingestellt() -> PlanItem:
         """Die Planübung, wie sie gerade auf dem Bildschirm steht — was der Übung gleicht,
@@ -155,7 +173,7 @@ def plan_einstellen(
         neu = replace(
             item,
             target=ziel(),
-            felder=[f.key for f in planbar if f.key in aktiv],
+            felder=felder_jetzt(),
             quick=quick,
             timer=TimerWahl(timer.profil_id, timer.eigen, uhr=timer.uhr).als_dict(),
         )
@@ -169,8 +187,9 @@ def plan_einstellen(
         with contextlib.suppress(Exception):  # außerhalb einer laufenden App (Tests)
             page.update()
 
-    def umschalten(key: str) -> Callable[[], None]:
-        def handler() -> None:
+    def umschalter(key: str) -> Callable[[Any], None]:
+        def handler(_e: object = None) -> None:
+            ziel_werte()
             aktiv.symmetric_difference_update({key})
             neu_zeichnen()
 
@@ -180,6 +199,7 @@ def plan_einstellen(
         """↺ an einem Parameter: wie die Übung — ihre Felder an, mit ihren Chips; geholte weg."""
 
         def handler() -> None:
+            ziel_werte()
             if f.key in eigene_keys:
                 aktiv.add(f.key)
                 gewaehlt[f.key] = chips_fuer(PlanItem(), f)
@@ -189,37 +209,82 @@ def plan_einstellen(
 
         return handler
 
-    def parameter_zeile(f: FieldSpec) -> ft.Control:
-        an = f.key in aktiv
-        eigen = (f.key not in eigene_keys) or not an
-        if an and f.key in eigene_keys:
-            eigen = chips_sortiert(gewaehlt[f.key]) != chips_fuer(PlanItem(), f)
+    def ziel_zuruecksetzer(key: str) -> Callable[[], None]:
+        def handler() -> None:
+            ziel_werte()
+            ziel_gemerkt[key] = uebung.default_target.get(key)
+            neu_zeichnen()
+
+        return handler
+
+    def parameter_zurueck() -> None:
+        """↺ an den Knöpfen: die Parameter wie die Übung — ihre Felder an, geholte weg."""
+        ziel_werte()
+        aktiv.clear()
+        aktiv.update(eigene_keys)
+        neu_zeichnen()
+
+    def parameter_chip(f: FieldSpec) -> ft.Control:
+        return ft.Chip(
+            label=ft.Text(f.label),
+            selected=f.key in aktiv,
+            show_checkmark=True,
+            tooltip=f"„{f.label}“ in diesem Plan anbieten",
+            on_select=umschalter(f.key),
+        )
+
+    def ziel_teil(f: FieldSpec) -> ft.Control | None:
+        """Das Ziel dieses Parameters — mit Schild „nur hier“, wenn es vom Ziel der Übung
+        abweicht."""
+        felder = ziel_spec(ResultSpec(fields=[f])).fields
+        if not felder:
+            return None
+        form = SpecForm(
+            ResultSpec(fields=[replace(felder[0], label="Ziel")]),
+            {f.key: ziel_gemerkt.get(f.key)},
+            page=page,
+            vorgaben=False,
+        )
+        ziel_formulare[f.key] = form
+        eigen = ziel_bereinigen({f.key: ziel_gemerkt.get(f.key)}, ResultSpec(fields=[f])) != (
+            ziel_bereinigen({f.key: uebung.default_target.get(f.key)}, ResultSpec(fields=[f]))
+        )
+        return ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Container(expand=True, content=form.control),
+                schild(eigen, ziel_zuruecksetzer(f.key) if eigen else None),
+            ],
+        )
+
+    def parameter_karte(f: FieldSpec) -> ft.Control:
+        eigen = (f.key not in eigene_keys) or chips_sortiert(gewaehlt[f.key]) != chips_fuer(
+            PlanItem(), f
+        )
         kopf = ft.Row(
             spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Text(_titel(f), weight=ft.FontWeight.W_600, expand=True),
                 schild(eigen, zuruecksetzen(f) if eigen else None),
-                ft.Switch(
-                    value=an,
-                    tooltip=f"„{f.label}“ in diesem Plan anbieten",
-                    on_change=umschalten(f.key),
-                ),
             ],
         )
         teile: list[ft.Control] = [kopf]
-        if an and f.type not in (FieldType.BOOL, FieldType.TEXT):
+        if f.type not in (FieldType.BOOL, FieldType.TEXT):
 
             def chip_schalter(wert: Any) -> None:
                 liste = gewaehlt[f.key]
                 gewaehlt[f.key] = (
                     [w for w in liste if w != wert] if wert in liste else [*liste, wert]
                 )
+                ziel_werte()
                 neu_zeichnen()
 
             def ergaenzen(neue: list[Any]) -> None:
                 kandidaten[f.key] = chips_sortiert([*kandidaten[f.key], *neue])
                 gewaehlt[f.key] = chips_sortiert([*gewaehlt[f.key], *neue])
+                ziel_werte()
                 neu_zeichnen()
 
             teile.append(
@@ -232,7 +297,7 @@ def plan_einstellen(
                     plus=True,
                 )
             )
-        elif an:
+        else:
             teile.append(
                 ft.Text(
                     "Beim Üben ein Schalter zum Antippen."
@@ -242,24 +307,20 @@ def plan_einstellen(
                     opacity=0.65,
                 )
             )
+        if (ziel_ := ziel_teil(f)) is not None:
+            teile.append(ziel_)
         return ft.Container(
             padding=ft.Padding.only(left=12, top=4, right=4, bottom=8),
             border_radius=12,
-            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            bgcolor=KARTE,
             border=ft.Border.all(1, ft.Colors.TERTIARY) if eigen else None,
             content=ft.Column(spacing=4, controls=teile),
         )
 
-    def holer(key: str) -> Callable[[], None]:
-        def handler() -> None:
-            aktiv.add(key)
-            neu_zeichnen()
-
-        return handler
-
     def abschnitt(text: str, rechts: ft.Control | None = None) -> ft.Control:
         return ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Text(text, size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
                 rechts or ft.Container(),
@@ -372,35 +433,38 @@ def plan_einstellen(
             ft.TextButton(
                 "Anderen Timer nur hier …", icon=ft.Icons.TIMER_OUTLINED, on_click=timer_waehlen
             ),
-            ft.Text(
-                "Ob Timerzeit zählt, legt die Übung fest. Beim Üben schaltest du es in der "
-                "Leiste für jetzt um.",
-                size=12,
-                opacity=0.65,
-            ),
         ]
 
-    # -- Ziel ----------------------------------------------------------------------------
+    # -- Ziel-Variante -----------------------------------------------------------------------
 
-    def ziel_zurueck() -> None:
-        form_bauen(dict(uebung.default_target))
-        neu_zeichnen()
-
-    def ziel_kopf() -> ft.Control:
-        eigen = ziel() != dict(uebung.default_target)
+    def ziel_variante_teil() -> ft.Control | None:
+        """Welche Variante „Wie geplant“ wählt — unter den Varianten, wie in der Übung."""
+        feld = var.feld(spec_aktuell())
+        if feld is None:
+            return None
+        form = SpecForm(
+            ResultSpec(fields=[replace(feld, default=None, label="Ziel-Variante")]),
+            {var.VARIANTE: ziel_gemerkt.get(var.VARIANTE)},
+            page=page,
+            vorgaben=False,
+        )
+        ziel_formulare[var.VARIANTE] = form
+        eigen = (ziel_gemerkt.get(var.VARIANTE) or None) != (
+            uebung.default_target.get(var.VARIANTE) or None
+        )
         return ft.Row(
             spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
-                ft.Text("ZIEL", size=11, weight=ft.FontWeight.BOLD, opacity=0.6, expand=True),
-                schild(eigen, ziel_zurueck if eigen else None),
-                hilfe_knopf(page),
+                ft.Container(expand=True, content=form.control),
+                schild(eigen, ziel_zuruecksetzer(var.VARIANTE) if eigen else None),
             ],
         )
 
     def zeichnen() -> None:
+        ziel_werte()
+        ziel_formulare.clear()
         geholte = [f for f in vorrat if f.key in aktiv]
-        zu_holen = [f for f in vorrat if f.key not in aktiv]
         teile: list[ft.Control] = [
             ft.Text(
                 spans=[
@@ -415,9 +479,33 @@ def plan_einstellen(
                 size=12,
                 opacity=0.75,
             ),
-            abschnitt("PARAMETER"),
-            *(parameter_zeile(f) for f in [*eigene, *geholte]),
+            abschnitt("PARAMETER", hilfe_knopf(page, thema="parameter")),
+            ft.Row(
+                wrap=True,
+                spacing=6,
+                run_spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    *(parameter_chip(f) for f in eigene),
+                    # Weniger oder mehr als die Übung: „nur hier“ mit ↺ an den Knöpfen
+                    schild(
+                        set(felder_jetzt()) != eigene_keys,
+                        parameter_zurueck if set(felder_jetzt()) != eigene_keys else None,
+                    ),
+                ],
+            ),
         ]
+        if vorrat:
+            teile += [
+                ft.Text("Weitere Parameter holen", size=12, opacity=0.7),
+                ft.Row(
+                    wrap=True,
+                    spacing=6,
+                    run_spacing=6,
+                    controls=[parameter_chip(f) for f in vorrat],
+                ),
+            ]
+        teile.extend(parameter_karte(f) for f in [*eigene, *geholte] if f.key in aktiv)
         if not aktiv:
             teile.append(
                 ft.Text(
@@ -427,18 +515,6 @@ def plan_einstellen(
                     opacity=0.75,
                 )
             )
-        if zu_holen:
-            teile += [
-                ft.Text("Weitere Parameter holen", weight=ft.FontWeight.W_600),
-                ft.Row(
-                    wrap=True,
-                    spacing=6,
-                    run_spacing=6,
-                    controls=[
-                        ft.OutlinedButton(f"+ {f.label}", on_click=holer(f.key)) for f in zu_holen
-                    ],
-                ),
-            ]
         if varianten_liste:
 
             def varianten_zurueck() -> None:
@@ -448,7 +524,7 @@ def plan_einstellen(
             aus = not varianten_schalter.value
 
             teile += [
-                abschnitt("VARIANTEN"),
+                abschnitt("VARIANTEN", hilfe_knopf(page, thema="varianten")),
                 ft.Row(
                     spacing=8,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -464,14 +540,11 @@ def plan_einstellen(
                     opacity=0.7,
                 ),
             ]
+            if not aus and (ziel_variante := ziel_variante_teil()) is not None:
+                teile.append(ziel_variante)
         teile += [
-            abschnitt("UHR UND TIMER"),
+            abschnitt("UHR UND TIMER", hilfe_knopf(page, thema="uhr")),
             *uhr_und_timer(),
-            ziel_kopf(),
-            ziel_bereich,
-            ft.Text(
-                "Ein Tipp auf „Wie geplant“ trägt genau diese Werte ein.", size=12, opacity=0.7
-            ),
             ft.Divider(),
             ft.Row(
                 wrap=True,
@@ -494,9 +567,12 @@ def plan_einstellen(
 
     # -- Speichern, zurücksetzen, übernehmen -----------------------------------------------
 
+    def pruefen() -> list[str]:
+        return [p for form in ziel_formulare.values() for p in form.pruefen()]
+
     def sichern() -> str | None:
         """Prüfen und speichern — ``None`` = gespeichert, sonst warum nicht."""
-        if probleme := form_halter["form"].pruefen():
+        if probleme := pruefen():
             page.update()
             return "Im Ziel ist etwas unlesbar: " + ", ".join(probleme) + "."
         state.plaene.item_speichern(eingestellt())
@@ -529,7 +605,9 @@ def plan_einstellen(
         varianten_schalter.value = True
         wahl.profil_id, wahl.eigen = "", None
         uhr_wahl.selected = ["uebung"]
-        form_bauen(dict(uebung.default_target))
+        ziel_formulare.clear()
+        ziel_gemerkt.clear()
+        ziel_gemerkt.update(uebung.default_target)
         neu_zeichnen()
 
     uebernommen = Nachher()
@@ -537,7 +615,7 @@ def plan_einstellen(
     def uebernehmen_fragen() -> None:
         """„In die Übung übernehmen …“ (Skizze B4): erst sagen, was sich ändert und wen es
         trifft."""
-        if form_halter["form"].pruefen():
+        if pruefen():
             page.update()
             return
         jetzt = eingestellt()
@@ -603,4 +681,4 @@ def plan_einstellen(
     )
 
 
-__all__ = ["plan_einstellen"]
+__all__ = ["KARTE", "plan_einstellen"]

@@ -159,8 +159,13 @@ Automatiken (Stufe 2/3).
   **Wochenlast** (Σ TRIMP, Σ sRPE-Last, Minuten, Monotonie, Strain nach Foster — Zahlen),
   **Tests** (Submaximaltest: HRR60 nach „Stufe 3“ und Ø „Stufe 2“; Talk-Test; Feld-Maximaltest:
   HFmax-Kandidat), „Alle nachrechnen“ für Aufnahmen ohne Cache. Rechnung `core/hf_verlauf.py`.
-- **Nacht-HF**: ein Abschnitt „Schlaf“ (auch aus dem HF-Vorschlag) liefert das tiefste
-  2-h-Mittel; übernommen wird es als Ruhe-HF mit Quelle `nacht` (Rang 1 nach Festsetzung).
+- **Nacht-HF**: ein Abschnitt „Schlaf…“/„Nacht…“ (auch aus dem HF-Vorschlag) liefert das
+  tiefste 2-h-Mittel; **ohne Abschnitt** zählt das Nachtfenster 20–10 Uhr der Aufnahme, sobald
+  dort ≥ 4 h Daten liegen (Ben 30.10.: „aus einer Nachtaufnahme von 21 bis 6 den niedrigsten
+  Puls“ — der Schlaf-Vorschlag verlangte 4 h am Stück unter Tagesminimum + 10, was echte Nächte
+  selten liefern). Übernommen wird sie als Ruhe-HF mit Quelle `nacht` (Rang 1 nach
+  Festsetzung); das Übernehmen ist die Bestätigung der Schlafzeit nach INTERLIVE.
+  `AUSWERTUNG_VERSION` (`core/hf_auswertung.py`) macht alte Caches veraltet.
 - **Kacheln**: Gruppe „Herzfrequenz“ (Reserve, Bereich, Zeit im Bereich, TRIMP) auch in der
   HRV-Sicht (`components/kacheln.py`, Bezug Aufnahme bzw. 5 min).
 - **Uhr**: Seite „Bereich“ (Name des Bereichs, % der Reserve, HF) in `core/uhr_seiten.py`,
@@ -169,8 +174,68 @@ Automatiken (Stufe 2/3).
 - **Forschungsexport**: je Aufnahme `…_hf.json` (`hf-auswertung-v1`: Profilstand, Werte,
   Abschnitte, Erholungen, Kandidaten) aus dem Cache (`ui/training._forschung_teile`).
 
-Offen (bewusst, Fragen 1b/11/`hf_spec`): Signalton an einer eigenen Grenze, Behandlungs-
-Dreiteilung in solo, HF-Vorbelegung je Übung.
+Offen (bewusst, Fragen 11/`hf_spec`): Behandlungs-Dreiteilung in solo, HF-Vorbelegung je
+Übung. Frage 1b (Signalton) ist seit dem 30.10.2026 gebaut (unten). Dazu P93–P95
+(`docs/offene_fragen.md`).
+
+### 3.1 Nachträge (Ben, 30.10.2026)
+
+- **Herkunft leserlich** unter jedem Verlaufseintrag im Profil (`herkunft_text`): „Messung
+  29.10.2026 21:03 · Polar H10 · Fenster 02:14–04:14 · Abschnitt „Schlafen“ · Artefakte 1,2 %“
+  statt Kennungen; Knopf „Messung öffnen“. Die Übernahme schreibt den Abschnittsnamen mit.
+- **HFmax-Formeln** in der Reihenfolge automatisch – Gulati (Frauen) – Nes (HUNT) – Tanaka (älter).
+- **Stichtag** (hrv-core 0.4.1, Entscheidung 19): eine Aufnahme rechnet mit dem jüngsten
+  Profilwert bis zu ihrem Tag, nie mit einem späteren; korrigieren durch Löschen oder einen
+  neuen Eintrag mit Datum, dann „Mit heutigem Profil nachrechnen“.
+- **Breitensätze** der Zeitachse (Einstellungen → HRV-Messung → Kurven): Kurz 1·2·10, Lang
+  2·5·15 oder eigene (bis 5, 10 s bis 24 h) — live und in der Aufzeichnung dieselben.
+- **Ruhepuls aus dem Tagesfeld** steht im Verlauf der Ruhe-HF-Karte wie ein Eintrag (Quelle
+  „Tagesfeld „Ruhepuls““, kein Pin) und lässt sich dort entfernen — das löscht den Tageswert
+  (`AppState.hf_eintraege`). Vorher war er geltender Wert ohne Zeile, also „nicht löschbar“.
+- **Schwellen aus DFA α1** (Ben: „Schwelle bei EKG ja“; hrv-core 0.5.0, Entscheidung 20):
+  `auswerten` rechnet bei RR aus einem EKG-Gurt (Aufnahmen bis 4 h) α1 in gleitenden
+  2-min-Fenstern gegen die HF des Fensters und löst die Gerade bei 0,75 (Schwelle 1) und 0,5
+  (Schwelle 2). Gültig nur mit ≥ 12 Fenstern im Band, abgedecktem Durchgang, fallender
+  Geraden, r² ≥ 0,5 und Artefakten < 5 %; sonst steht der Wert mit Grund da, der Knopf ist
+  grau. Übernommen: Quelle `dfa_alpha1` (Rang hinter Labor, vor Talk-Test; 6 bpm; 90 Tage),
+  Herkunft „α1 = 0,75 · 30 Fenster · r² 0,91“. `AUSWERTUNG_VERSION` 3; die Fensterreihe
+  (`alpha1.reihe`) liegt im Cache und im Forschungsexport. Kurve α1 gegen HF: später.
+- **Korrekturen vom 30.10. abends (0.3.38):** Knopfsätze Kurz 1·2·10 · Mittel 2·5·15 · Lang
+  1·3·6 h · Eigene (Live-Puffer bis 12 h). Die Sichtwahl Herzfrequenz | HRV steht direkt unter
+  Gerät und Aufnahme; scrollt sie weg, zeigt der Reiter „Live“ die andere Sicht („Live ⇄ HRV“),
+  und ein Tipp auf den schon gewählten Reiter wechselt — von GPS oder Aufzeichnungen aus führt
+  „Live“ wie bisher zur Live-Ansicht. Die HF-Sicht hat ihr eigenes Blatt „Fenster &
+  Darstellung“: Zeitachse, Kurve als Mittel über 1–60 s, Bereiche im Bild oder alle (Achse von
+  der untersten bis zur obersten Grenze; gilt auch in der Auswertung), HF-Achse fest, Signal.
+- **Signal über einer Grenze** (Frage 1b/P90, Ben: „piepen alle 3–5 Sekunden, wenn man über
+  einer bestimmten HF ist … nicht aufdringlich, Holzschale/Tempelklang“): je Profil
+  (`HfEinstellungen.alarm_an/alarm_bpm/alarm_klang/alarm_takt_s`), Vorgabe Klangschale (leise,
+  `core.klang.SCHALE`), höchstens alle 3/4/5/10 s, solange die HF der letzten 5 s über der
+  Grenze liegt — live in beiden Sichten, über den Tondienst des Timers mit dessen Lautstärke
+  und Regler. Einstellbar unter Einstellungen → Herzfrequenz → „Signal über einer Grenze“ (mit
+  Vorspielen) und im HF-Blatt; die HF-Sicht zeigt „Signal ab 150 bpm · Klangschale“. Rechtlich
+  wie ein Timer an einer selbst gesetzten Grenze: keine Bewertung, kein Rat (Stufe B).
+
+### 3.2 Für das Tutorial: wann die App Werte vorschlägt (Ben, 30.10.2026: „Wie oft ok,
+schreibe das aber transparent nieder“)
+
+- **Nie beim Üben, nie als Dialog.** Vorschläge stehen nur in der Auswertung einer Aufnahme
+  (HF-Sicht, Karte „Vorschläge fürs Profil“) als Zeile mit Knopf; nichts wird von selbst
+  gesetzt. Die HRV-Sicht bleibt frei davon (Ben: „sonst wird es zuviel“).
+- **Ruhe-HF:** nach jeder Aufnahme von 4–20 min (tiefstes 30-s-Mittel, Quelle Morgenmessung
+  5 bzw. 10 min, Artefakte < 5 %). **Nacht-HF:** nach jeder Aufnahme mit ≥ 4 h zwischen 20 und
+  10 Uhr, oder aus einem Abschnitt „Schlaf…“. **HFmax:** höchstes 30-s-Mittel mit Plateau.
+  **Schwellen:** Talk-Test-Marke; α1-Rampe (EKG-Gurt).
+- **Gültigkeit:** Messwerte der Ruhe-HF 14 Tage, Tagesfeld 14 Tage, Eintrag 90 Tage, Talk-Test
+  und α1 90 Tage, Labor und Feldmaximum ein Jahr, Formel unbegrenzt. Abgelaufen heißt: die App
+  rechnet mit dem letzten Wert bis zum Stichtag weiter und zeigt sein Datum; ein späterer Wert
+  gilt nie rückwirkend (Entscheidung 19).
+- **Verschiebungen** (Infekt, Urlaub, Pause) sieht man im Verlauf → Herzfrequenz an der
+  7-Tage-Baseline (Median, Band ± 1 SD); ausgenommene Tage (langes Drücken) zählen nicht. Die
+  App fragt nicht nach und bewertet nicht.
+- **Rückwirkend korrigieren:** Einträge haben Datum und lassen sich löschen oder mit altem
+  Wert und neuem Datum neu setzen; danach in der Aufnahme „Mit heutigem Profil nachrechnen“,
+  gespeichert nur nach Rückfrage.
 
 ## 4. Was Stufe A/B/C heißt (Rechtsrahmen)
 

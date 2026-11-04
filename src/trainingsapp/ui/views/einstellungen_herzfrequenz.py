@@ -21,7 +21,7 @@ heißen Vorschlag, Grenzen sind Werte der Person.
 from __future__ import annotations
 
 import contextlib
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import flet as ft
@@ -47,10 +47,11 @@ from trainingsapp.core.hf_profil import (
 )
 from trainingsapp.core.hrv_einstellungen import SICHT_HF, SICHT_HRV
 from trainingsapp.data.hf_profil import RechenAusnahmeRepo
-from trainingsapp.ui.components.hf_sicht import stufenfarbe
+from trainingsapp.ui.components.hf_sicht import alarm_zeilen, stufenfarbe
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.timer_takt import ton_spielen
 
 ROUTE = "/einstellungen/herzfrequenz"
 
@@ -101,6 +102,59 @@ def wert_text(p: Profilwert | None, *, formel: hz.Formelwert | None = None) -> s
     if formel is not None and formel.gueltig and formel.wert is not None:
         return f"{formel.wert:.0f} bpm · geschätzt ({formel.name}) · ± {formel.see:.1f}"
     return "kein Wert"
+
+
+def herkunft_text(p: Profilwert, state: AppState) -> str:
+    """Die Herkunft eines Werts in Worten statt als Kennungen (Ben, 30.10.2026): „Messung
+    29.10.2026 21:03 · Polar H10 · Fenster 02:14–04:14 · Abschnitt „Schlafen“ · Artefakte
+    1,2 %“ — leer bei einem Eintrag von Hand ohne Notiz."""
+    h = p.herkunft or {}
+    teile: list[str] = []
+    start = None
+    if p.hrv_recording_id:
+        rec = state.hrv.laden(p.hrv_recording_id)
+        if rec is not None:
+            start = rec.started_at.astimezone()
+            teile.append(f"Messung {start:%d.%m.%Y %H:%M}")
+        else:
+            teile.append("Messung (nicht mehr vorhanden)")
+    if p.geraet:
+        teile.append(p.geraet)
+
+    def uhr(t: Any) -> str | None:
+        if start is None or isinstance(t, bool) or not isinstance(t, int | float):
+            return None
+        return (start + timedelta(seconds=float(t))).strftime("%H:%M")
+
+    f = h.get("fenster")
+    if isinstance(f, list | tuple) and len(f) == 2:
+        a, b = uhr(f[0]), uhr(f[1])
+        if a and b:
+            teile.append(f"Fenster {a}–{b}")
+    if h.get("grundlage") == "nachtfenster":
+        teile.append("Nachtfenster 20–10 Uhr")
+    if name := h.get("abschnitt_name"):
+        teile.append(f"Abschnitt „{name}“")
+    elif h.get("abschnitt"):
+        teile.append("Abschnitt der Messung")
+    if marke := uhr(h.get("t_wall_s")):
+        teile.append(f"Marke um {marke}")
+    ziel = h.get("ziel")
+    if isinstance(ziel, int | float) and not isinstance(ziel, bool):
+        a1 = f"α1 = {float(ziel):g}".replace(".", ",")
+        if h.get("n"):
+            a1 += f" · {int(h['n'])} Fenster"
+        if isinstance(h.get("r2"), int | float):
+            a1 += f" · r² {float(h['r2']):.2f}".replace(".", ",")
+        teile.append(a1)
+    art = h.get("artefaktanteil")
+    if isinstance(art, int | float) and not isinstance(art, bool):
+        teile.append(f"Artefakte {100 * art:.1f} %".replace(".", ","))
+    if h.get("tagesfeld"):
+        teile.append(f"aus dem Tagesfeld „Ruhepuls“ vom {p.datum:%d.%m.%Y}")
+    if p.note:
+        teile.append(p.note)
+    return " · ".join(teile)
 
 
 def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
@@ -197,48 +251,74 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
             hz.GROESSE_VT2: hf.vt2,
         }[groesse]
         formel = hf.formel if groesse == hz.GROESSE_MAX else None
-        alle = state.profilwerte.alle(state.profil.id, groesse)
+        # Auch die Werte des Tagesfelds „Ruhepuls“ stehen hier — sie zählen mit und lassen
+        # sich hier entfernen (Ben, 30.10.2026: „Einträge Ruhe-HF lassen sich nicht löschen“:
+        # der geltende Wert kam aus dem Tagesfeld und stand in keiner Liste)
+        alle = sorted(
+            (e for e in state.hf_eintraege() if e.groesse == groesse),
+            key=lambda e: (e.datum, e.created_at),
+        )
         verlauf: list[ft.Control] = []
         for p in reversed(alle[-6:]):
             gilt = geltend is not None and p.id == geltend.id
-            verlauf.append(
-                ft.Row(
-                    spacing=4,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            aus_tagesfeld = p.quelle == "tagesfeld"
+            knoepfe: list[ft.Control] = [
+                ft.IconButton(
+                    ft.Icons.PUSH_PIN if p.fest else ft.Icons.PUSH_PIN_OUTLINED,
+                    icon_size=18,
+                    tooltip="Festsetzung lösen" if p.fest else "Festsetzen (gilt über alles)",
+                    visible=not aus_tagesfeld,
+                    on_click=lambda _=None, wid=p.id, f=p.fest: festsetzen(wid, not f),
+                ),
+                ft.IconButton(
+                    ft.Icons.DELETE_OUTLINE,
+                    icon_size=18,
+                    tooltip="Tageswert entfernen" if aus_tagesfeld else "Eintrag entfernen",
+                    on_click=lambda _=None, wid=p.id: entfernen(wid),
+                ),
+            ]
+            if p.hrv_recording_id and state.hrv.laden(p.hrv_recording_id) is not None:
+                knoepfe.insert(
+                    0,
+                    ft.IconButton(
+                        ft.Icons.OPEN_IN_NEW,
+                        icon_size=18,
+                        tooltip="Messung öffnen",
+                        on_click=lambda _=None, rid=p.hrv_recording_id: page.run_task(
+                            messung_oeffnen, rid
+                        ),
+                    ),
+                )
+            zeile: ft.Control = ft.Row(
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Icon(
+                        ft.Icons.CHECK_CIRCLE if gilt else ft.Icons.CIRCLE_OUTLINED,
+                        size=16,
+                        opacity=1 if gilt else 0.4,
+                        tooltip="gilt" if gilt else None,
+                    ),
+                    ft.Text(wert_text(p), size=12, expand=True),
+                    *knoepfe,
+                ],
+            )
+            # Die Herkunft leserlich direkt darunter (Ben, 30.10.2026) — Tag, Uhrzeit,
+            # Fenster, Abschnitt — statt einer Kennung
+            herkunft = herkunft_text(p, state)
+            if herkunft:
+                zeile = ft.Column(
+                    spacing=0,
+                    tight=True,
                     controls=[
-                        ft.Icon(
-                            ft.Icons.CHECK_CIRCLE if gilt else ft.Icons.CIRCLE_OUTLINED,
-                            size=16,
-                            opacity=1 if gilt else 0.4,
-                            tooltip="gilt" if gilt else None,
-                        ),
-                        ft.Text(wert_text(p), size=12, expand=True),
-                        ft.IconButton(
-                            ft.Icons.PUSH_PIN if p.fest else ft.Icons.PUSH_PIN_OUTLINED,
-                            icon_size=18,
-                            tooltip="Festsetzung lösen"
-                            if p.fest
-                            else "Festsetzen (gilt über alles)",
-                            on_click=lambda _=None, wid=p.id, f=p.fest: festsetzen(wid, not f),
-                        ),
-                        ft.IconButton(
-                            ft.Icons.DELETE_OUTLINE,
-                            icon_size=18,
-                            tooltip="Eintrag entfernen",
-                            on_click=lambda _=None, wid=p.id: entfernen(wid),
+                        zeile,
+                        ft.Container(
+                            padding=ft.Padding.only(left=22, bottom=4),
+                            content=ft.Text(herkunft, size=11, opacity=0.7),
                         ),
                     ],
                 )
-            )
-        if p_herkunft := (geltend.herkunft if geltend is not None else None):
-            verlauf.append(
-                hinweis(
-                    "Herkunft: "
-                    + ", ".join(
-                        f"{k} {v}" for k, v in p_herkunft.items() if not isinstance(v, dict | list)
-                    )
-                )
-            )
+            verlauf.append(zeile)
         quellen = EINTRAG_QUELLEN[groesse]
         wert = ft.TextField(
             label="Wert (bpm)", dense=True, width=120, keyboard_type=ft.KeyboardType.NUMBER
@@ -321,14 +401,21 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
             ),
         )
 
+    async def messung_oeffnen(recording_id: str) -> None:
+        await page.push_route(f"/messung/{recording_id}")
+
     def festsetzen(wert_id: str, fest: bool) -> None:
         state.profilwerte.festsetzen(wert_id, fest)
         melden("Festgesetzt — gilt über alle Quellen." if fest else "Festsetzung gelöst.")
         neu_zeichnen()
 
     def entfernen(wert_id: str) -> None:
-        state.profilwerte.loeschen(wert_id)
-        melden("Eintrag entfernt.")
+        if wert_id.startswith("tagesfeld:"):
+            state.tageswerte.loeschen(wert_id.removeprefix("tagesfeld:"))
+            melden("Tageswert „Ruhepuls“ entfernt.")
+        else:
+            state.profilwerte.loeschen(wert_id)
+            melden("Eintrag entfernt.")
         neu_zeichnen()
 
     # -- Bereiche -------------------------------------------------------------------
@@ -546,6 +633,26 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
             ),
         )
 
+    # -- Signal über einer Grenze (Ben, 30.10.2026; P90) -------------------------------
+
+    def alarm_karte() -> ft.Control:
+        def vorspielen(klang: str) -> None:
+            async def spielen() -> None:
+                if not await ton_spielen(state, klang):
+                    melden("Töne gibt es nur in der installierten App.")
+
+            with contextlib.suppress(Exception):
+                page.run_task(spielen)
+
+        return karte(
+            titel("Signal über einer Grenze"),
+            *alarm_zeilen(state, vorspielen=vorspielen),
+            hinweis(
+                "Gilt live in beiden Sichten, mit Lautstärke und Regler der Timer-Signale. "
+                "Auch im Blatt „Fenster & Darstellung“ der Herzfrequenz-Sicht einstellbar."
+            ),
+        )
+
     # -- Ausnahmen -------------------------------------------------------------------
 
     def ausnahmen_karte() -> ft.Control:
@@ -613,6 +720,7 @@ def einstellungen_herzfrequenz(page: Any, state: AppState) -> ft.View:
             groesse_karte(hz.GROESSE_VT1),
             groesse_karte(hz.GROESSE_VT2),
             bereiche_karte(),
+            alarm_karte(),
             sicht_karte(),
             ausnahmen_karte(),
         ]

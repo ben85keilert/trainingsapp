@@ -1294,7 +1294,7 @@ def test_aufzeichnung_wie_live_ganzer_abschnitt_und_feste_achsen(daten) -> None:
     ]
     assert "Fenster & Darstellung …" not in eintraege
     knoepfe = _breiten_wahl(view)
-    assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "5 Min", "10 Min"]
+    assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "10 Min"]
 
     # Ein Tipp auf den Abschnitt-Chip zeigt ihn ganz, mit 30 s Rand …
     chip = next(
@@ -1314,14 +1314,25 @@ def test_aufzeichnung_wie_live_ganzer_abschnitt_und_feste_achsen(daten) -> None:
     # Fenster & Darstellung: Breite eintippen …
     zeile.controls[-2].on_click()
     blatt = seite.aufrufe[-1]
-    felder = [c for c in _alle_controls(blatt) if isinstance(c, ft.TextField)]
+    felder = [
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.TextField) and c.label not in ("Eigene Breiten", "eigenes")
+    ]
     assert [f.label for f in felder][:3] == ["Breite der Zeitachse", "von", "bis"]
     breite, von, bis = felder[:3]
     breite.value = "1:30"
     breite.on_submit(None)
     assert rr().max_x - rr().min_x == pytest.approx(90)
-    # … und die Werteachse der Hauptkurve fest: 500–1500 ms
+    # … und die Werteachse der Hauptkurve fest: 500–1500 ms (Schalter „fest“ an, 30.10.2026)
     assert "RR-Tachogramm" in _baum_texte(blatt)
+    fest = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.Switch) and c.tooltip == "Achse festlegen"
+    )
+    fest.value = True
+    fest.on_change(_ereignis(True))
     von.value, bis.value = "500", "1500"
     bis.on_blur(None)
     assert state.ansicht().y_achsen == {"rr": (500.0, 1500.0)}
@@ -1351,9 +1362,74 @@ async def test_live_ablesen_und_knoepfe_wie_in_der_aufzeichnung(daten) -> None:
     seite = _seite()
     ansicht = messung(seite, state)
     zeile = _titelzeile(ansicht, "RR-TACHOGRAMM")
-    assert _knoepfe_rechts(zeile) == ["Ablesen", "Kurven im Vollbild", "Fenster & Darstellung", "⋮"]
+    # Skizze vom 30.10.2026: „korrigiert“ als Symbol in der Titelzeile, die Zeilen mit
+    # Überschrift, Bereich und Chips der Verlaufskurven unter den Notizen
+    assert _knoepfe_rechts(zeile) == [
+        "korrigiert",
+        "Ablesen",
+        "Kurven im Vollbild",
+        "Fenster & Darstellung",
+        "⋮",
+    ]
+    texte = _baum_texte(ansicht)
+    assert texte.index("ZEITACHSE") < texte.index("ABSCHNITTE") < texte.index("VERLAUFSKURVEN")
+    korrigiert = zeile.controls[1]
+    assert isinstance(korrigiert, ft.IconButton) and state.hrv_einstellungen().korrigiert
+    korrigiert.on_click()
+    assert not state.hrv_einstellungen().korrigiert
+    korrigiert.on_click()
+    assert state.hrv_einstellungen().korrigiert
     knoepfe = _breiten_wahl(ansicht)
-    assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "5 Min", "10 Min"]
+    assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "10 Min"]
+    # Die Sichtwahl steht direkt unter Gerät und Aufnahme (Ben, 30.10.2026) — nicht in der
+    # Kurvenkarte; weggescrollt übernimmt der Reiter „Live“ den Wechsel
+    umschalter = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.SegmentedButton) and [s.value for s in c.segments] == ["hf", "hrv"]
+    )
+    spalte = next(
+        c for c in _alle_controls(ansicht) if isinstance(c, ft.Column) and umschalter in c.controls
+    )
+    assert spalte.controls.index(umschalter) == 1  # nach dem Status, vor den Kacheln
+    tabbar = next(c for c in _alle_controls(ansicht) if isinstance(c, ft.TabBar))
+    live_symbol, live_text = tabbar.tabs[0].label.controls
+    assert live_text.value == "Live" and live_symbol.icon == ft.Icons.SENSORS
+    state.scroll_offsets["messung_live"] = 300.0
+    state.scroll_beobachter["messung_live"](300.0)
+    assert live_text.value == "Live ⇄ HF" and live_symbol.icon == ft.Icons.SWAP_HORIZ
+    tabbar.on_click(SimpleNamespace(data="0"))  # der gewählte Reiter: zur anderen Sicht
+    assert state.hrv_sicht() == "hf" and live_text.value == "Live ⇄ HRV"
+    assert state.live_scroll_lage["hrv"] == 300.0 and umschalter.selected == ["hf"]
+    state.scroll_offsets["messung_live"] = 20.0
+    state.scroll_beobachter["messung_live"](20.0)
+    assert live_text.value == "Live" and live_symbol.icon == ft.Icons.SENSORS
+    tabbar.on_click(SimpleNamespace(data="1"))  # ein anderer Reiter wechselt nicht
+    assert state.hrv_sicht() == "hf"
+    umschalter.on_change(_ereignis("hrv"))
+    assert state.hrv_sicht() == "hrv" and state.scroll_offsets["messung_live"] == 300.0
+    while seite.aufgaben:
+        aufgaben = list(seite.aufgaben)
+        seite.aufgaben.clear()
+        await asyncio.gather(*aufgaben, return_exceptions=True)
+    # Blatt „Fenster & Darstellung“ live: Uhrzeit-Schalter und Live-Verlauf unter Zeitachse
+    zeile.controls[-2].on_click()
+    blatt = seite.aufrufe[-1]
+    uhr = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.Switch) and c.label == "Uhrzeit statt Dauer seit Beginn"
+    )
+    assert uhr.value is False
+    uhr.on_change(_ereignis(True))
+    assert state.hrv_einstellungen().achse_uhrzeit
+    puffer = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.Dropdown) and c.label == "Live-Verlauf behalten"
+    )
+    puffer.on_select(_ereignis("3600"))
+    assert state.hrv_einstellungen().puffer_s == 3600
 
     # Ablesen hält die Kurve an und zeigt die Werte am Strich — wie in der Aufzeichnung
     knopf = _knopf(ansicht, "Ablesen")
@@ -1656,7 +1732,10 @@ async def test_live_abschnitt_start_und_ende(daten) -> None:
     texte = _baum_texte(ansicht)
     assert "ABSCHNITTE · 1" in texte and "Behandlung Rücken: Start" in texte
     assert any(t.startswith("Behandlung Rücken 0:") for t in texte)  # der Chip
-    while lauf.aufnahme_dauer_s() < 30:
+    # Der Abschnitt braucht Länge — ab dem Start gerechnet, nicht ab der Aufnahme (auf einem
+    # langsamen Rechner liegt der Start sonst schon hinter der 30-s-Marke)
+    start_s = lauf.jetzt_s()
+    while lauf.jetzt_s() < start_s + 15:
         await asyncio.sleep(0.01)
     start.on_click()  # Ende
     assert lauf.offener_abschnitt() is None and start.content == "Abschnitt: Start"
@@ -1838,3 +1917,161 @@ async def test_bluetooth_aus_warnt_statt_zu_suchen(daten) -> None:
     zustand["wert"] = "on"
     await _knopf(ansicht, "Geräte suchen").on_click()
     assert gesucht == [8.0]
+
+
+async def test_detailansicht_zeigt_ekg_beiwerk_mit_eigener_skala(daten) -> None:
+    """Ben, 30.10.2026: das EKG-Rohsignal in kurzen Ausschnitten (6 s) mit µV-Skala,
+    blätterbar; Lücken und Akkuverlauf im Kopf."""
+    from hrv_core.ekg import EkgSammler
+
+    state, tmp_path = daten
+    beats, t = [], 0.0
+    for _ in range(90):
+        t += 0.8
+        beats.append(Beat(t_s=round(t, 3), rr_ms=800, hf_bpm=75, t_wall_s=round(t, 3)))
+    rec = Recording(beats=beats, geraet="Polar H10 TEST", geraet_profil="polar_h10")
+    pfad = speichern(rec, tmp_path / "Messungen" / "PolarH10")
+    s = EkgSammler()
+    t_ns = 0
+    for k in range(90):  # ein Rahmen je Schlag, 104 Proben
+        t_ns += round(0.8 * 1e9) + (round(3e9) if k == 50 else 0)  # eine Lücke von 3 s
+        s.rahmen(t_ns, [(-200 if i == 3 else 10 * (i % 5)) for i in range(104)], t_wall_s=0.8 * k)
+    s.batterie_melden(0.0, 60)
+    s.batterie_melden(40.0, 55)
+    s.schreiben(pfad)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet="Polar H10 TEST",
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    seite = _seite()
+    ansicht = messung_detail_view(seite, state, eintrag)
+    while seite.aufgaben:
+        aufgaben = list(seite.aufgaben)
+        seite.aufgaben.clear()
+        await asyncio.gather(*aufgaben, return_exceptions=True)
+    texte = _baum_texte(ansicht)
+    assert "EKG-ROHSIGNAL" in texte
+    kopf = next(x for x in texte if x.startswith("130 Hz · 9360 Proben"))
+    assert "1 Lücken" in kopf and "Akku 60 % → 55 %" in kopf
+    assert any("eigene Skala in µV" in x for x in texte)  # eigene Werteachse, nicht die RR-Kurve
+    weiter = next(
+        c
+        for c in _alle_controls(ansicht)
+        if isinstance(c, ft.IconButton) and c.tooltip == "5 s weiter"
+    )
+    bereich = next(x for x in _baum_texte(ansicht) if "–" in x and x.startswith("0:0"))
+    weiter.on_click()
+    texte2 = _baum_texte(ansicht)
+    assert bereich not in texte2 and any(x.startswith("0:0") and "–" in x for x in texte2)
+
+
+async def test_sichtwechsel_knopf_rutscht_nach_oben_rechts_und_merkt_die_lage(daten) -> None:
+    """Ben, 30.10.2026: Wechsel HF/HRV als Knopf oben; beim Runterscrollen verkleinert rechts
+    oben; die Scrollposition je Sicht bleibt gemerkt. Dazu Kurz/Lang/Eigene und ein eigenes
+    Fenster im Blatt „Fenster & Darstellung“."""
+    state, tmp_path = daten
+    beats, t = [], 0.0
+    for _ in range(300):
+        t += 0.8
+        beats.append(Beat(t_s=round(t, 3), rr_ms=800, hf_bpm=75, t_wall_s=round(t, 3)))
+    rec = Recording(beats=beats, geraet="Polar H10 TEST", geraet_profil="polar_h10")
+    pfad = speichern(rec, tmp_path / "Messungen" / "PolarH10")
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet="Polar H10 TEST",
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    seite = _seite()
+    view = messung_detail_view(seite, state, eintrag)
+    while seite.aufgaben:  # die Ansicht baut sich im Loop auf (Datei im Thread)
+        aufgaben = list(seite.aufgaben)
+        seite.aufgaben.clear()
+        await asyncio.gather(*aufgaben, return_exceptions=True)
+    fab = view.floating_action_button
+    assert fab is not None and not fab.visible and view.on_scroll is not None
+    view.on_scroll(SimpleNamespace(pixels=300.0))
+    assert fab.visible and fab.content == "Herzfrequenz"  # HRV-Sicht → Knopf führt zur HF
+    umschalter = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.SegmentedButton) and [s.value for s in c.segments] == ["hf", "hrv"]
+    )
+    fab.on_click()
+    assert state.hrv_sicht() == "hf" and umschalter.selected == ["hf"] and fab.content == "HRV"
+    view.on_scroll(SimpleNamespace(pixels=50.0))
+    assert not fab.visible
+    umschalter.on_change(_ereignis("hrv"))  # zurück: die HRV-Lage (300 px) wird angesteuert
+    assert state.hrv_sicht() == "hrv"
+    while seite.aufgaben:
+        aufgaben = list(seite.aufgaben)
+        seite.aufgaben.clear()
+        await asyncio.gather(*aufgaben, return_exceptions=True)
+    # Blatt „Fenster & Darstellung“: Kurz/Lang/Eigene als erster Eintrag der Zeitachse
+    zeile = _titelzeile(view, "RR-TACHOGRAMM")
+    zeile.controls[-2].on_click()
+    blatt = seite.aufrufe[-1]
+    satz = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.SegmentedButton) and any(s.value == "lang" for s in c.segments)
+    )
+    satz.on_change(_ereignis("mittel"))
+    assert state.hrv_einstellungen().breiten_satz == "mittel"
+    mittel = next(
+        c
+        for c in _alle_controls(view)
+        if isinstance(c, ft.SegmentedButton) and any(s.value == "900" for s in c.segments)
+    )
+    assert [s.label.value for s in mittel.segments] == ["2 Min", "5 Min", "15 Min"]
+    satz.on_change(_ereignis("lang"))
+    assert [s.label.value for s in mittel.segments] == ["1 h", "3 h", "6 h"]
+    # … und ein eigenes Fenster für eine Verlaufskurve (30 min): „Eigenes …“ in der Auswahl
+    # öffnet das Feld (30.10.2026, aufgeräumtes Blatt)
+    wahl = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.Dropdown) and any(o.key == "eigen" for o in c.options)
+    )
+    eigen = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.TextField) and c.label == "Eigenes Fenster"
+    )
+    assert not eigen.visible
+    wahl.on_select(_ereignis("eigen"))
+    assert eigen.visible
+    eigen.value = "30 min"
+    eigen.on_submit(None)
+    assert 1800 in state.ansicht().fenster.values() and wahl.value == "1800" and not eigen.visible
+    wahl.on_select(_ereignis("eigen"))
+    eigen.value = "1"
+    eigen.on_submit(None)
+    assert eigen.error  # unter 3 s
+    # Werteachsen: Schalter „fest“, Standard aus den Einstellungen, ↺ stellt ihn her
+    schalter = next(
+        c
+        for c in _alle_controls(blatt)
+        if isinstance(c, ft.Switch) and c.tooltip == "Achse festlegen"
+    )
+    zeile = next(
+        c for c in _alle_controls(blatt) if isinstance(c, ft.Row) and schalter in c.controls
+    )
+    von, bis = (c for c in zeile.controls if isinstance(c, ft.TextField))
+    assert not schalter.value and von.disabled and von.value == "300" and bis.value == "1500"
+    schalter.value = True
+    schalter.on_change(_ereignis(True))
+    assert state.ansicht().y_bereich("rr") == (300.0, 1500.0) and not von.disabled
+    von.value = "500"
+    von.on_submit(None)
+    assert state.ansicht().y_bereich("rr") == (500.0, 1500.0)
+    zurueck = next(c for c in zeile.controls if isinstance(c, ft.IconButton))
+    zurueck.on_click()
+    assert state.ansicht().y_bereich("rr") == (300.0, 1500.0)
+    schalter.value = False
+    schalter.on_change(_ereignis(False))
+    assert state.ansicht().y_bereich("rr") is None and von.disabled and von.value == "300"

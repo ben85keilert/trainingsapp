@@ -25,7 +25,7 @@ from trainingsapp.core.einheit import AUSFUEHRUNG_SCHLUESSEL, Ereignis
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.core.parameter import kontextfelder
 from trainingsapp.core.plaene import auspraegung_vorgabe, einzel_plan
-from trainingsapp.core.result_spec import ist_leer
+from trainingsapp.core.result_spec import basis_key, ist_leer
 from trainingsapp.core.standards import aktive_felder, mit_plan_spec
 from trainingsapp.core.timer import TimerLauf, TimerProfil
 from trainingsapp.core.timer_eintrag import (
@@ -93,7 +93,7 @@ def kontext_fuer(
     im Block gewählt ist (Variante, Gewicht …) — sie kommt mit in den Eintrag (21.10.2026)."""
     eintragen = uebung.zeit_zaehlt if zeit_eintragen is None else zeit_eintragen
     felder = felder_der_uebung(uebung, item)
-    if feld in ZEITFELDER and (feld == "duration" or "hold" in felder):
+    if feld and basis_key(feld) in ZEITFELDER and (feld == "duration" or feld in felder):
         gewaehlt: str = feld
     else:
         gewaehlt = zaehlt_als(felder, uebung)

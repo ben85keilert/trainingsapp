@@ -377,3 +377,86 @@ def test_fehler_des_dienstes_landen_im_zustand() -> None:
         pass
     else:  # pragma: no cover - schritt reicht den Fehler an takt weiter
         raise AssertionError("schritt sollte den Fehler weiterreichen")
+
+
+class DiagnoseLauf(Lauf):
+    """Mit laufendem Diagnosemodus: Notizen für den Kontext, Marken gesammelt."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.aufnahme = object()
+        self.diagnose_aktiv = True
+        self.notiz_marken: list[dict | None] = []
+        self.marken: list[dict] = []
+        self.ereignis_liste: list[dict] = []
+
+    def notiz_hinzufuegen(self, text: str, **felder: object) -> dict | None:
+        self.notiz_marken.append(felder.get("marke"))  # type: ignore[arg-type]
+        return super().notiz_hinzufuegen(text)
+
+    def ereignisse(self) -> list[dict]:
+        return self.ereignis_liste
+
+    def marke(self, typ: str, **felder: object) -> dict:
+        zeile = {"art": "marke", "id": len(self.marken) + 1, "typ": typ, **felder}
+        self.marken.append(zeile)
+        return zeile
+
+
+def _diagnose_state(lauf: Lauf) -> SimpleNamespace:
+    from trainingsapp.core.hrv_einstellungen import HrvEinstellungen
+
+    e = HrvEinstellungen(uhr_medien=True, diagnose_anbieten=True)
+    return SimpleNamespace(
+        messlauf=lauf,
+        hrv_einstellungen=lambda: e,
+        uebungen=SimpleNamespace(alle=lambda **_: []),
+        notiz_beobachter={},
+        diagnose_leiste=None,
+    )
+
+
+def test_ausserhalb_der_diagnose_traegt_die_marke_quelle_uhr() -> None:
+    lauf = DiagnoseLauf()
+    lauf.diagnose_aktiv = False
+    kanal = MedienKanal(_diagnose_state(lauf), Attrappe())
+    lauf.schlaege(30, 1000, 60)
+    asyncio.run(kanal.schritt())
+    assert kanal.aktuelle_art() == us.SEITE_HF
+    kanal.taste("pause")
+    assert lauf.notiz_marken == [{"quelle": "uhr", "art": "marke"}]
+
+
+def test_diagnose_seite_vorn_marke_mit_zeit_des_drucks_und_sprung() -> None:
+    lauf = DiagnoseLauf()
+    state = _diagnose_state(lauf)
+    medien = Attrappe()
+    kanal = MedienKanal(state, medien)
+    lauf.schlaege(30, 1000, 60)
+    asyncio.run(kanal.schritt())
+    assert medien.aufrufe[0][:4] == ("starten", "Atem 0", "Messung", "⏯ Marke")
+    assert kanal.aktuelle_art() == us.SEITE_DIAGNOSE
+    # ⏯ mit Stempel der Dart-Seite: Marke der gültigen Art, Quelle uhr, Zeit umgerechnet
+    kanal.taste("pause", t_mono_us=5_000_000)
+    (m,) = lauf.marken
+    assert m["typ"] == "atem" and m["quelle"] == "uhr" and m["tm"] == 5_000_000
+    assert isinstance(m["t"], int) and m["nr"] == 1
+    asyncio.run(kanal.schritt())
+    assert medien.aufrufe[-1][:3] == ("zeigen", "Atem 1", "Messung")
+    # Weitergeblättert — eine Übung beginnt: das Band springt zurück auf die Seite
+    kanal.taste("weiter")
+    asyncio.run(kanal.schritt())
+    assert kanal.aktuelle_art() == us.SEITE_HF
+    lauf.ereignis_liste.append(
+        {
+            "uebungen": ["KB"],
+            "marke": {"quelle": "plan", "art": "uebung_start", "name": "Kniebeuge"},
+        }
+    )
+    asyncio.run(kanal.schritt())
+    assert kanal.aktuelle_art() == us.SEITE_DIAGNOSE
+    assert medien.aufrufe[-1][:3] == ("zeigen", "Atem 0", "Kniebeuge S1")
+    # Ohne „⏯ an der Uhr setzt Diagnosemarken“ gibt es die Seite nicht
+    state.hrv_einstellungen().diagnose_uhr = False
+    asyncio.run(kanal.schritt())
+    assert kanal.aktuelle_art() != us.SEITE_DIAGNOSE

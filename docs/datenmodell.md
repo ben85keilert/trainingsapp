@@ -32,7 +32,9 @@ exercise ──┬── exercise_media
 device        external_ref     outbox     tombstone
 
 app_setting   (gerätelokal, Migration 002 — wird nie synchronisiert)
-day_note      (Tagesnotiz je Profil und lokalem Tag, Migration 003)
+day_note      (Notizen zum Tag je Profil und lokalem Tag, Migration 003; seit 036 mehrere je Tag)
+note_tag      (Tags der Notizen zum Tag je Profil, „Tagebuch“ fest, Migration 036)
+day_note_tag  (welche Notiz welchen Tag trägt, Migration 036)
 day_field ──── day_value   (Tagesfelder je Profil und ihre Werte, Migration 027)
 ```
 
@@ -149,6 +151,17 @@ Mitternacht nach UTC um; alle Tagesabfragen (Tagesansicht, Kalender,
 „x von n heute") vergleichen `session_entry.started_at` mit diesen Grenzen.
 `day_note.date` speichert den lokalen Tag als `YYYY-MM-DD`. Eine Session ist
 „ein Plan an einem Tag" und entsteht beim ersten Eintrag automatisch.
+
+**Notizen zum Tag** (Migration 036, Ben 2.11.2026, `docs/plan_tagesnotizen.md`): je Tag
+beliebig viele `day_note`-Zeilen (kein `UNIQUE` mehr), jede mit `created_at` als Anker in der
+Zeitleiste; Entfernen ist weich (`deleted_at`). Tags je Profil in `note_tag` (`fest` = 1 ist
+„Tagebuch“: nicht löschbar, nicht umbenennbar, nur `active` = 0; sonst veränderlich wie
+`day_field`), die Verknüpfung in `day_note_tag`. Ein gelöschter Tag (`deleted_at`) bleibt
+verknüpft, aber unsichtbar — die Notiz verliert ihn, der Text bleibt. Anhänge am Tag hängen
+an einer Notiz (`entry_media.day_note_id`; `subject_id` und `day` bleiben für die
+Tagesabfragen). Eine Notiz ohne Text und ohne Anhänge gibt es nicht (die Oberfläche löscht
+sie). Die Migration gibt jeder bisherigen Notiz mit Text den Tag „Tagebuch“ und hängt Anhänge
+am Tag an die Notiz des Tags (ohne Notiz: eine ohne Text).
 
 **Tagesfelder** (Migration 027, Ben 21.10.2026, `core/tagesfelder.py`,
 `docs/plan_tagesfelder.md`): Parameter und Tags an der Tagesnotiz — „Schmerz“ (Skala),

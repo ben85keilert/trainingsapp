@@ -68,9 +68,10 @@ In Satzlisten trennt das Komma Sätze — Kommazahlen dort mit Punkt (`12.5`).
 
 Im Planblock steht eine Karte „Eintragen“ mit einer Zeile je Menge (Ben, 21.10.2026,
 P70): links der kurze Name („Wdh.“, „Haltezeit“) mit „je Satz“, daneben die Knöpfe
-`+10` `+15` `+20` (aus den Chips der Übung, im Plan überschreibbar) und „…“. „…“ klappt
-zwei Zahlenfelder **Sätze × Wert** mit „Eintragen“ auf (leer bei Sätze heißt einer;
-Zeiten nehmen auch `1:30`); ohne Chips stehen sie gleich in der Zeile. Jeder Tipp hängt
+`+10` `+15` `+20` (aus den Chips der Übung, im Plan überschreibbar) und „…“. Darunter
+stehen zwei Zahlenfelder **Sätze × Wert** mit „Eintragen“ (leer bei Sätze heißt einer;
+Zeiten nehmen auch `1:30`) — standardmäßig offen (Ben, 2.11.2026), „…“ klappt sie zu und
+wieder auf; ohne Chips stehen sie gleich in der Zeile. Jeder Tipp hängt
 Sätze an den heutigen Eintrag dieser Übung an oder legt ihn an.
 Technisch ist jedes Plus eine Korrektur mit Verweis auf den vorherigen Stand
 (`replaces_entry_id`); der Eintrag bleibt unveränderlich, die Historie zeigt

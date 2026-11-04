@@ -200,7 +200,7 @@ def test_verlauf_und_tagebuch_zeigen_ihr_ziel(page, state) -> None:
     zeilen = [z[0] for z in _blatt_zeilen(page.dialoge[-1])]
     assert "Tag" not in zeilen and "Einträge des Tages" not in zeilen and "Üben" in zeilen
     # Tagebuch: die Notiz der Übung → Einträge des Tages, Notiz zum Tag → Notiz
-    state.tagesnotizen.setzen(state.profil.id, gestern, "ruhiger Tag")
+    state.tagesnotizen.anlegen(state.profil.id, gestern, "ruhiger Tag")
     ansicht = tagebuch(page, state)
     uebung = _zeile(ansicht, "lief gut")
     assert zl.SYMBOLE[zl.EINTRAEGE] in _icons(uebung)

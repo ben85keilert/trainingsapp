@@ -50,6 +50,20 @@ def titel(text: str, *rechts: ft.Control) -> ft.Control:
     )
 
 
+def gruppe(text: str, *inhalt: ft.Control) -> ft.Column:
+    """Eine Zeile des Steuerungsfelds mit kleiner Überschrift darüber (Ben, 30.10.2026:
+    „eine Aufgabe je Zeile“ — Zeitachse, Abschnitte, Ebenen, Verlaufskurven)."""
+    return ft.Column(
+        spacing=2,
+        tight=True,
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        controls=[
+            ft.Text(text.upper(), size=10, weight=ft.FontWeight.W_600, opacity=0.55),
+            *inhalt,
+        ],
+    )
+
+
 def hinweis(text: str) -> ft.Text:
     """Kleiner, leiser Erklärtext."""
     return ft.Text(text, size=11, opacity=0.6)
@@ -100,4 +114,13 @@ def info_eintrag(page: Any, ueberschrift: str, text: str | Callable[[], str]) ->
     )
 
 
-__all__ = ["ABSTAND", "hinweis", "info_eintrag", "info_knopf", "info_zeigen", "karte", "titel"]
+__all__ = [
+    "ABSTAND",
+    "gruppe",
+    "hinweis",
+    "info_eintrag",
+    "info_knopf",
+    "info_zeigen",
+    "karte",
+    "titel",
+]

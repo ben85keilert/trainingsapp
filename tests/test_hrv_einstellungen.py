@@ -94,6 +94,13 @@ def test_einstellungsseiten_bauen_und_schalten(tmp_path) -> None:
         )
         schalter.on_change(SimpleNamespace(control=SimpleNamespace(value=False)))
         assert not state.hrv_einstellungen().messung_anzeigen
+        # EKG-Rohsignal (Ben, 30.10.2026): standardmäßig aus, Schalter stellt es an
+        ekg = next(
+            c for c in controls if isinstance(c, ft.Switch) and c.label == "EKG mitschreiben"
+        )
+        assert ekg.value is False and not state.hrv_einstellungen().ekg_mitschreiben
+        ekg.on_change(SimpleNamespace(control=SimpleNamespace(value=True)))
+        assert state.hrv_einstellungen().ekg_mitschreiben is True
         # Hinzufügen per Chip, groß per Stern, umordnen, entfernen
         chip = next(
             c
@@ -120,14 +127,40 @@ def test_einstellungsseiten_bauen_und_schalten(tmp_path) -> None:
         )
         weg.on_click()
         assert "dfa_alpha1" not in state.hrv_einstellungen().kacheln
-        # Zeitfenster live: dieselben vier Knöpfe wie an der Kurve, jede andere Breite
+        # Zeitfenster live: dieselben Knöpfe wie an der Kurve, jede andere Breite
         # eingetippt (Ben, 21.10.2026) — auch über den Knöpfen hinaus, bis 30 min
         knoepfe = next(
             c
             for c in controls
             if isinstance(c, ft.SegmentedButton) and any(s.value == "600" for s in c.segments)
         )
-        assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "5 Min", "10 Min"]
+        assert [s.label.value for s in knoepfe.segments] == ["1 Min", "2 Min", "10 Min"]
+        # Knopfsätze (Ben, 30.10.2026): Kurz 1·2·10, Mittel 2·5·15, Lang 1·3·6 h, Eigene
+        satz = next(
+            c
+            for c in controls
+            if isinstance(c, ft.SegmentedButton) and any(s.value == "lang" for s in c.segments)
+        )
+        assert [s.label.value for s in satz.segments] == ["Kurz", "Mittel", "Lang", "Eigene"]
+        satz.on_change(SimpleNamespace(control=SimpleNamespace(selected=["mittel"])))
+        assert state.hrv_einstellungen().breiten() == (120, 300, 900)
+        assert [s.label.value for s in knoepfe.segments] == ["2 Min", "5 Min", "15 Min"]
+        satz.on_change(SimpleNamespace(control=SimpleNamespace(selected=["lang"])))
+        assert state.hrv_einstellungen().breiten() == (3600, 10800, 21600)
+        assert [s.label.value for s in knoepfe.segments] == ["1 h", "3 h", "6 h"]
+        eigene = next(
+            c for c in controls if isinstance(c, ft.TextField) and c.label == "Eigene Breiten"
+        )
+        satz.on_change(SimpleNamespace(control=SimpleNamespace(selected=["eigen"])))
+        assert state.hrv_einstellungen().breiten_satz == "lang"  # noch keine eigenen
+        eigene.value = "2, 30, 6 h"
+        eigene.on_submit(None)
+        assert state.hrv_einstellungen().breiten() == (120, 1800, 21600)
+        assert [s.label.value for s in knoepfe.segments] == ["2 Min", "30 Min", "6 h"]
+        eigene.value = "abc"
+        eigene.on_submit(None)
+        assert eigene.error and state.hrv_einstellungen().breiten() == (120, 1800, 21600)
+        satz.on_change(SimpleNamespace(control=SimpleNamespace(selected=["kurz"])))
         feld = next(
             c for c in controls if isinstance(c, ft.TextField) and c.label == "Breite der Zeitachse"
         )
@@ -187,7 +220,7 @@ def test_live_verlauf_einstellbar(tmp_path) -> None:
         wahl = next(
             c for c in controls if isinstance(c, ft.Dropdown) and c.label == "Live-Verlauf behalten"
         )
-        assert [o.text for o in wahl.options] == ["30 min", "1 h", "2 h", "4 h"]
+        assert [o.text for o in wahl.options] == ["30 min", "1 h", "2 h", "4 h", "6 h", "12 h"]
         feld = next(
             c for c in controls if isinstance(c, ft.TextField) and c.label == "Breite der Zeitachse"
         )
@@ -199,5 +232,56 @@ def test_live_verlauf_einstellbar(tmp_path) -> None:
         wahl.on_select(SimpleNamespace(control=SimpleNamespace(value="1800")))
         e = state.hrv_einstellungen()
         assert (e.puffer_s, e.fenster_s) == (1800, 1800)  # die Breite rückt an den Puffer
+    finally:
+        state.schliessen()
+
+
+def test_werteachsen_standard_in_den_einstellungen(tmp_path) -> None:
+    """Ben, 30.10.2026: Standardwerte der Werteachsen (ganzer Bereich) stehen in den
+    Einstellungen, sind nachstellbar und auf die Vorgabe zurücksetzbar."""
+    ft = pytest.importorskip("flet")
+    from trainingsapp.ui.state import AppState
+    from trainingsapp.ui.views.einstellungen_hrv import einstellungen_hrv
+
+    state = AppState.starten(tmp_path / "app.db")
+    seite = SimpleNamespace(
+        route="/einstellungen/hrv", update=lambda: None, show_dialog=lambda d: None
+    )
+    try:
+        ansicht = einstellungen_hrv(seite, state)
+
+        def alle(x, gesehen=None):
+            gesehen = gesehen if gesehen is not None else set()
+            if not isinstance(x, ft.Control) or id(x) in gesehen:
+                return []
+            gesehen.add(id(x))
+            out = [x]
+            for name in ("controls", "content"):
+                wert = getattr(x, name, None)
+                for k in wert if isinstance(wert, list) else [wert]:
+                    out += alle(k, gesehen)
+            return out
+
+        controls = alle(ansicht)
+        rr = next(
+            c
+            for c in controls
+            if isinstance(c, ft.Row)
+            and any(isinstance(t, ft.Text) and t.value == "RR bzw. PPI" for t in alle(c))
+        )
+        von, bis = (c for c in alle(rr) if isinstance(c, ft.TextField))
+        assert (von.value, bis.value) == ("300", "1500")
+        von.value = "500"
+        von.on_submit(None)
+        assert state.hrv_einstellungen().achse_standard("rr") == (500.0, 1500.0)
+        bis.value = "400"  # unter „von“: bleibt, Hinweis am Feld
+        bis.on_submit(None)
+        assert von.error and state.hrv_einstellungen().achse_standard("rr") == (500.0, 1500.0)
+        vorgabe = next(
+            c for c in controls if isinstance(c, ft.TextButton) and c.content == "Auf Vorgabe"
+        )
+        vorgabe.on_click()
+        assert state.hrv_einstellungen().achse_standard("rr") == (300.0, 1500.0)
+        assert (von.value, bis.value) == ("300", "1500") and not von.error
     finally:
         state.schliessen()

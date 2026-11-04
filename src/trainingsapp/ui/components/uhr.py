@@ -35,6 +35,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
+from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.timer import TimerProfil, dauer_text, einmal_timer, stoppuhr
 from trainingsapp.core.uebung_timer import profile_zur_wahl, timer_fuer, zaehlt_als
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
@@ -132,7 +133,7 @@ def uhr_teile(
 
     als = (
         "Haltezeit"
-        if zaehlt_als(uebung_lauf.felder_der_uebung(uebung, item), uebung) == "hold"
+        if basis_key(zaehlt_als(uebung_lauf.felder_der_uebung(uebung, item), uebung)) == "hold"
         else "Zeit"
     )
     zaehlt_knopf = ft.Chip(

@@ -17,6 +17,9 @@ import flet as ft
 
 from trainingsapp.ui.state import AppState
 
+#: Die Scroll-Ereignisse, die sagen: Der Finger zieht (nicht Ende, nicht Richtungswechsel)
+SCROLLT: frozenset[ft.ScrollType] = frozenset({ft.ScrollType.START, ft.ScrollType.UPDATE})
+
 
 def scroll_merken(page: ft.Page, state: AppState, schluessel: str, flaeche: Any) -> Any:
     """Verbindet eine scrollbare Fläche mit der gemerkten Position; gibt sie zurück.
@@ -27,6 +30,14 @@ def scroll_merken(page: ft.Page, state: AppState, schluessel: str, flaeche: Any)
 
     def gescrollt(e: ft.OnScrollEvent) -> None:
         state.scroll_offsets[schluessel] = e.pixels
+        beobachter = state.scroll_beobachter.get(schluessel)
+        if beobachter is not None:
+            beobachter(float(e.pixels or 0.0))
+        # Wer gerade die Notiz zum Tag schreibt, will wissen, dass der Finger daneben
+        # scrollt statt tippt (`components/tagesnotiz.py`); Start und Fortgang reichen
+        art = getattr(e, "event_type", None)
+        if state.schreib_gesten is not None and art in SCROLLT:
+            state.schreib_gesten("scroll")
 
     flaeche.on_scroll = gescrollt
     offset = state.scroll_offsets.get(schluessel)

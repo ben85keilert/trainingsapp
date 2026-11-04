@@ -47,7 +47,6 @@ from trainingsapp.core.hf_profil import (
     HfProfil,
     Profilwert,
     bereiche_fuer,
-    grenzen_bpm,
 )
 from trainingsapp.core.hrv_ansicht import HF_SPANNE_MIN_BPM
 from trainingsapp.core.laufend import minuten
@@ -56,6 +55,7 @@ from trainingsapp.data.hf_profil import RechenAusnahmeRepo
 from trainingsapp.ui.components.hf_sicht import (
     HALTUNG_NAMEN,
     KONTEXT_NAMEN,
+    hf_baender,
     prozent_text,
     stufenfarbe,
     zeit_je_bereich,
@@ -424,21 +424,19 @@ class HfAuswertungSicht:
         reihe = a.reihe
         if reihe is None or reihe.n == 0:
             return karte(titel("Herzfrequenz"), hinweis("Keine Herzfrequenz in der Datei."))
-        glatt = hz.rollmittel(reihe.hf, 5.0, min_anteil=0.5)
+        einst = self.k.state.hrv_einstellungen()
+        glatt = hz.rollmittel(reihe.hf, float(einst.hf_mittel_s), min_anteil=0.5)
         punkte = ausduennen(
             [(float(t), float(w)) for t, w in zip(reihe.t, glatt, strict=True) if w == w]
         )
+        y_von = y_bis = None
+        if einst.hf_bereiche_alle and bereiche and punkte:
+            # Wie live: die Achse reicht über alle Bereiche (Blatt „Fenster & Darstellung“)
+            werte = [w for _, w in punkte]
+            y_von = min(bereiche[0].von_bpm, *werte)
+            y_bis = max(bereiche[-1].bis_bpm, *werte)
         x0, x1 = float(reihe.t[0]), float(reihe.t[-1] + reihe.raster_s)
         reihen = [Reihe(punkte, farbe=ft.Colors.PRIMARY)]
-        for g in grenzen_bpm(list(bereiche)):
-            reihen.append(
-                Reihe(
-                    [(x0, g), (x1, g)],
-                    farbe=ft.Colors.with_opacity(0.5, ft.Colors.ON_SURFACE),
-                    breite=1.0,
-                    gestrichelt=True,
-                )
-            )
         for i, ab in enumerate(a.abschnitte):
             reihen.append(
                 Reihe(
@@ -459,7 +457,10 @@ class HfAuswertungSicht:
                 hoehe=200,
                 x_von=x0,
                 x_bis=x1,
+                y_von=y_von,
+                y_bis=y_bis,
                 y_spanne_min=HF_SPANNE_MIN_BPM,
+                baender=hf_baender(bereiche),  # Belastungszonen im Koordinatensystem
             ),
             zeit_je_bereich(a.gesamt.get("sekunden_je_bereich") if bereiche else None, bereiche),
             *([hinweis(f"Grenzen: {grenz_namen}")] if grenz_namen else []),
@@ -667,10 +668,50 @@ class HfAuswertungSicht:
                     ),
                 )
             )
+        for schluessel, groesse, name in (
+            ("vt1", hz.GROESSE_VT1, "Schwelle 1"),
+            ("vt2", hz.GROESSE_VT2, "Schwelle 2"),
+        ):
+            d = (a.alpha1 or {}).get(schluessel)
+            if not d or d.get("wert") is None:
+                continue
+            w = float(d["wert"])
+            r2 = d.get("r2")
+            grund = "" if d.get("gueltig") else " · " + "; ".join(d.get("gruende") or [])
+            zeilen.append(
+                zeile(
+                    f"{name} aus DFA α1 = {float(d.get('ziel') or 0):g}: {w:.0f} bpm "
+                    f"({int(d.get('n') or 0)} Fenster"
+                    + (f", r² {float(r2):.2f}" if r2 is not None else "")
+                    + f"){grund}",
+                    ft.TextButton(
+                        f"Als {name} übernehmen",
+                        icon=ft.Icons.SHOW_CHART,
+                        disabled=not d.get("gueltig"),
+                        on_click=lambda _=None, w=w, d=d, g=groesse: self._profilwert(
+                            g,
+                            w,
+                            "dfa_alpha1",
+                            unsicherheit=None,
+                            herkunft={
+                                "ziel": d.get("ziel"),
+                                "n": d.get("n"),
+                                "r2": d.get("r2"),
+                                "hf_von": d.get("hf_von"),
+                                "hf_bis": d.get("hf_bis"),
+                            },
+                        ),
+                    ),
+                )
+            )
         n = a.nacht
         if n and n.get("wert") is not None:
             w = float(n["wert"])
             grund = "" if n.get("gueltig") else " · " + "; ".join(n.get("gruende") or [])
+            abschnitt_name = next(
+                (s.name for s in self.k.abschnitte_wand() if s.id == n.get("abschnitt_id")),
+                None,
+            )
             wo = (
                 "im Schlafabschnitt"
                 if n.get("grundlage") != NACHT_FENSTER
@@ -692,6 +733,7 @@ class HfAuswertungSicht:
                             herkunft={
                                 "fenster": [n.get("t_von"), n.get("t_bis")],
                                 "abschnitt": n.get("abschnitt_id"),
+                                "abschnitt_name": abschnitt_name,
                                 "grundlage": n.get("grundlage"),
                             },
                         ),

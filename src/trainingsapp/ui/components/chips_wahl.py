@@ -3,6 +3,9 @@
 Bis dahin trug man die Chips einer Übung als Kommaliste ein und tippte sie in der Planübung an.
 Jetzt sieht es an beiden Orten gleich aus: Die Chips stehen zur Wahl, angetippt heißt
 angeboten, ein Feld „eigener“ ergänzt einen Wert. Was gewählt ist, hält der Aufrufer.
+Ein nicht gewählter Chip trägt ein ✕ und lässt sich aus der Wahl nehmen (Ben, 2.11.2026:
+„Nicht gebrauchte Chips sollen gelöscht werden können“), wenn der Aufrufer ``entfernen``
+mitgibt.
 """
 
 from __future__ import annotations
@@ -39,11 +42,13 @@ def chips_zeile(
     ergaenzen: Callable[[list[Any]], None],
     plus: bool = False,
     dazu: Sequence[ft.Control] = (),
+    entfernen: Callable[[Any], None] | None = None,
 ) -> ft.Control:
     """Die Chips eines Parameters: angetippt = angeboten, dazu ein Feld für eigene.
 
     ``plus``: Satzlisten zeigen „+15“ (so stehen sie beim Üben). ``dazu`` steht am Ende der
-    Zeile (der Knopf „Sätze“).
+    Zeile (der Knopf „Sätze“). ``entfernen``: nicht gewählte Chips bekommen ein ✕, das den
+    Wert aus der Wahl nimmt.
     """
     eigener = ft.TextField(
         hint_text="eigener",
@@ -68,6 +73,15 @@ def chips_zeile(
 
         return handler
 
+    def loescher(wert: Any) -> Callable[[], None] | None:
+        if entfernen is None:
+            return None
+
+        def handler() -> None:
+            entfernen(wert)
+
+        return handler
+
     eigener.on_submit = lambda _: hinzufuegen()
     vorne = "+" if plus and f.type == FieldType.SET_LIST else ""
     return ft.Row(
@@ -81,6 +95,8 @@ def chips_zeile(
                     label=ft.Text(vorne + chip_text(f, w)),
                     selected=w in gewaehlt,
                     on_select=schalter(w),
+                    on_delete=None if w in gewaehlt else loescher(w),
+                    delete_icon_tooltip="Aus der Wahl nehmen",
                 )
                 for w in kandidaten
             ),

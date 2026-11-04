@@ -47,6 +47,7 @@ QUELLEN: Final[dict[str, str]] = {
     "formel_tanaka": "Formel Tanaka",
     "formel_gulati": "Formel Gulati",
     "talk_test": "Talk-Test",
+    "dfa_alpha1": "DFA α1 (Rogers 2021)",
     "schaetzung_milani": "Schätzung (Milani)",
     "prozent_hrr": "% der Reserve (42/77)",
 }
@@ -246,9 +247,10 @@ class HfProfil:
 
     @property
     def individuelle_schwelle(self) -> bool:
-        """Eine Schwelle aus Labor oder Talk-Test liegt vor (dann ist „drei“ die Vorgabe)."""
+        """Eine Schwelle aus Labor, DFA α1 oder Talk-Test liegt vor (dann ist „drei“ die
+        Vorgabe)."""
         return any(
-            s is not None and s.quelle in ("spiroergometrie", "laktat", "talk_test")
+            s is not None and s.quelle in ("spiroergometrie", "laktat", "dfa_alpha1", "talk_test")
             for s in (self.vt1, self.vt2)
         )
 
@@ -302,6 +304,7 @@ def hf_profil(
 _SCHWELLEN_UNSICHERHEIT: Final[dict[str, float]] = {
     "spiroergometrie": hz.GRENZE_UNSICHERHEIT_PROZENT["labor"],
     "laktat": hz.GRENZE_UNSICHERHEIT_PROZENT["labor"],
+    "dfa_alpha1": hz.GRENZE_UNSICHERHEIT_PROZENT["dfa_alpha1"],
     "talk_test": hz.GRENZE_UNSICHERHEIT_PROZENT["talk_test"],
     "schaetzung_milani": hz.GRENZE_UNSICHERHEIT_PROZENT["milani"],
 }

@@ -118,3 +118,13 @@ jobs:
           done
         env:
           PYTHONPATH: src
+
+      # Ab hier mit flet: Bis hierher lief alles flet-frei (Importregel). Jetzt
+      # kommt genau das dazu, was in eine gebaute App gehört (Laufzeitabhängigkeiten,
+      # keine Dev-Gruppen), und jedes Flet-Skript des Lernpfads läuft ohne
+      # Bildschirm — so fällt eine von Flet entfernte API sofort auf.
+      - name: Laufzeitabhängigkeiten wie in der gebauten App
+        run: uv sync --locked --no-default-groups
+
+      - name: Flet-Beispiele des Lernpfads
+        run: uv run --no-sync python scripts/pruefe_flet_beispiele.py

@@ -22,8 +22,8 @@ import flet as ft
 from trainingsapp.core.models import Exercise, jetzt
 from trainingsapp.data.repositories import PAPIERKORB_TAGE, SettingRepo
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
-from trainingsapp.ui.components.icons import symbol
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.state import AppState
 
 
@@ -71,7 +71,7 @@ def archiv_view(page: ft.Page, state: AppState) -> ft.View:
 
     zeilen: list[ft.Control] = [
         ft.ListTile(
-            leading=ft.Icon(symbol(u.icon_key)),
+            leading=uebungsbild(state, u.icon_key, u.image_path),
             title=ft.Text(u.name),
             subtitle=ft.Text(", ".join(u.typen), size=12),
             on_click=_uebung_oeffner(page, u.id),
@@ -269,7 +269,7 @@ def papierkorb_view(page: ft.Page, state: AppState) -> ft.View:
         zeilen.append(_ueberschrift("Übungen"))
         zeilen.extend(
             ft.ListTile(
-                leading=ft.Icon(symbol(u.icon_key), opacity=0.6),
+                leading=uebungsbild(state, u.icon_key, u.image_path, opacity=0.6),
                 title=ft.Text(u.name),
                 subtitle=ft.Text(frist(u.deleted_at), size=12),
                 on_click=_uebung_oeffner(page, u.id),

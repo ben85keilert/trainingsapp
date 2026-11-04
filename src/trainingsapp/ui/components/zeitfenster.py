@@ -31,25 +31,47 @@ zurückgesetzt) — das ist der ganze Weg. Darum zählt hier `local_delta`.
 from __future__ import annotations
 
 import contextlib
+import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.hrv_einstellungen import FENSTER_MIN_S
+from trainingsapp.core.hrv_einstellungen import (
+    BREITEN_EIGEN,
+    BREITEN_EIGEN_MAX,
+    BREITEN_KURZ,
+    BREITEN_NAMEN,
+    BREITEN_SAETZE,
+    FENSTER_MIN_S,
+    HrvEinstellungen,
+    breiten_pruefen,
+)
 from trainingsapp.core.zeitangabe import breite_lesen, dauer_text
 from trainingsapp.ui.components.layout import ohne_auto_update
 
-#: Breiten der Zeitachse (s) — „Min“ hinten dran (Ben, 19.10.2026), live und in der
-#: Aufzeichnung dieselben (21.10.2026)
-BREITEN: tuple[tuple[int, str], ...] = (
-    (60, "1 Min"),
-    (120, "2 Min"),
-    (300, "5 Min"),
-    (600, "10 Min"),
-)
+#: Breiten der Zeitachse (s), wenn der Aufrufer keine mitgibt — „Min“ hinten dran (Ben,
+#: 19.10.2026), live und in der Aufzeichnung dieselben (21.10.2026). Welcher Satz an den
+#: Kurven steht, wählt die Person (`HrvEinstellungen.breiten`, 30.10.2026).
+BREITEN: tuple[int, ...] = BREITEN_SAETZE[BREITEN_KURZ]
+
+
+def breite_text(sekunden: float) -> str:
+    """Beschriftung eines Breitenknopfs: Minuten, ab einer Stunde Stunden.
+
+    >>> breite_text(60), breite_text(90), breite_text(600), breite_text(5400), breite_text(21600)
+    ('1 Min', '1:30 Min', '10 Min', '1,5 h', '6 h')
+    """
+    s = round(sekunden)
+    if s >= 3600:
+        return f"{s / 3600:g} h".replace(".", ",")
+    if s % 60 == 0:
+        return f"{s // 60} Min"
+    return f"{s // 60}:{s % 60:02d} Min"
+
+
 #: Was das Feld „Breite der Zeitachse“ versteht
 BREITE_UNLESBAR = "Nicht lesbar — z. B. 3, 1:30 oder 90 s"
 
@@ -253,19 +275,24 @@ def zeit_unter(
 # ---------------------------------------------------------------------------
 
 
-def breiten_auswahl(breite_s: float) -> list[str]:
+def breiten_auswahl(breite_s: float, breiten: Sequence[int] = BREITEN) -> list[str]:
     """Der gewählte Knopf zu einer Breite — keiner, wenn sie zu keinem passt.
 
     >>> breiten_auswahl(120.0), breiten_auswahl(210), breiten_auswahl(0)
     (['120'], [], [])
     """
-    return [str(s) for s, _ in BREITEN if abs(breite_s - s) < 0.5]
+    return [str(s) for s in breiten if abs(breite_s - s) < 0.5]
 
 
 def breiten_wahl(
-    breite_s: float, waehlen: Callable[[float], None], *, kompakt: bool = False
+    breite_s: float,
+    waehlen: Callable[[float], None],
+    *,
+    kompakt: bool = False,
+    breiten: Sequence[int] = BREITEN,
 ) -> ft.SegmentedButton:
-    """1 · 2 · 5 · 10 Min — hochkant über die volle Breite, im Vollbild ``kompakt``.
+    """1 · 2 · 10 Min (oder der gewählte Satz) — hochkant über die volle Breite, im
+    Vollbild ``kompakt``.
 
     Jede andere Breite (eingetippt, ein Abschnitt, die ganze Messung) wählt keinen
     Knopf; das Fenster behält sie trotzdem. Nach einer Änderung von außen stellt
@@ -277,7 +304,7 @@ def breiten_wahl(
             waehlen(float(e.control.selected[0]))
 
     return ft.SegmentedButton(
-        selected=breiten_auswahl(breite_s),
+        selected=breiten_auswahl(breite_s, breiten),
         allow_empty_selection=True,
         show_selected_icon=False,
         expand=not kompakt,
@@ -287,11 +314,130 @@ def breiten_wahl(
         if kompakt
         else None,
         segments=[
-            ft.Segment(value=str(s), label=ft.Text(t, size=12 if kompakt else None))
-            for s, t in BREITEN
+            ft.Segment(value=str(s), label=ft.Text(breite_text(s), size=12 if kompakt else None))
+            for s in breiten
         ],
         on_change=gewaehlt,
     )
+
+
+def breiten_nachziehen(
+    knopf: ft.SegmentedButton, breiten: Sequence[int], breite_s: float, *, kompakt: bool = False
+) -> None:
+    """Die Knöpfe einer Breitenwahl auf einen anderen Satz umstellen (Ben, 30.10.2026)."""
+    knopf.segments = [
+        ft.Segment(value=str(s), label=ft.Text(breite_text(s), size=12 if kompakt else None))
+        for s in breiten
+    ]
+    knopf.selected = breiten_auswahl(breite_s, breiten)
+    with contextlib.suppress(Exception):
+        knopf.update()
+
+
+class BreitenSatz:
+    """Kurz 1·2·10 · Mittel 2·5·15 · Lang 1·3·6 h · Eigene — welcher Satz Breitenknöpfe an den
+    Kurven steht, dazu das Feld für eigene Breiten (Ben, 30.10.2026). Steht unter Einstellungen
+    → HRV-Messung → Kurven und im Blatt „Fenster & Darstellung“ als erster Eintrag der
+    Zeitachse. Die Knöpfe tragen nur den Namen (vier nebeneinander), die Zeile darunter nennt
+    die Breiten.
+
+    ``lesen`` liefert die Einstellungen, ``speichern`` schreibt sie, ``geaendert`` bekommt die
+    geänderten Einstellungen (die Ansicht stellt ihre Knöpfe um, `breiten_nachziehen`).
+    """
+
+    def __init__(
+        self,
+        lesen: Callable[[], HrvEinstellungen],
+        speichern: Callable[[HrvEinstellungen], None],
+        geaendert: Callable[[HrvEinstellungen], None],
+    ) -> None:
+        self._lesen = lesen
+        self._speichern = speichern
+        self._geaendert = geaendert
+        e = lesen()
+        self.wahl = ft.SegmentedButton(
+            selected=[e.breiten_satz],
+            show_selected_icon=False,
+            on_change=self._satz_gewaehlt,
+            style=ft.ButtonStyle(
+                visual_density=ft.VisualDensity.COMPACT,
+                padding=ft.Padding.symmetric(horizontal=8),
+            ),
+            segments=[
+                ft.Segment(
+                    value=satz,
+                    label=ft.Text(name, size=12),
+                    tooltip=self._satz_text(satz) if satz in BREITEN_SAETZE else "Selbst eingeben",
+                )
+                for satz, name in BREITEN_NAMEN.items()
+            ],
+        )
+        self.feld = ft.TextField(
+            label="Eigene Breiten",
+            value=", ".join(breite_text(s).removesuffix(" Min") for s in e.breiten_eigen),
+            helper="Minuten, durch Komma getrennt — auch 90 s, 1:30 oder 6 h",
+            dense=True,
+            visible=e.breiten_satz == BREITEN_EIGEN,
+            on_submit=self._eigene_uebernehmen,
+            on_blur=self._eigene_uebernehmen,
+        )
+        self.zeile = ft.Text(self._zeile_text(e), size=12, opacity=0.8)
+        self.control = ft.Column(spacing=6, tight=True, controls=[self.wahl, self.feld, self.zeile])
+
+    @staticmethod
+    def _satz_text(satz: str) -> str:
+        """„Kurz 1·2·10 Min“, „Lang 1·3·6 h“ — fürs Tooltip."""
+        breiten = BREITEN_SAETZE[satz]
+        stunden = all(s >= 3600 for s in breiten)
+        zahlen = "·".join(str(s // 3600 if stunden else s // 60) for s in breiten)
+        return f"{BREITEN_NAMEN[satz]} {zahlen} {'h' if stunden else 'Min'}"
+
+    @staticmethod
+    def _zeile_text(e: HrvEinstellungen) -> str:
+        return "An den Kurven: " + " · ".join(breite_text(s) for s in e.breiten())
+
+    def _nachziehen(self, e: HrvEinstellungen) -> None:
+        self.zeile.value = self._zeile_text(e)
+        self.feld.visible = e.breiten_satz == BREITEN_EIGEN
+        for c in (self.zeile, self.feld, self.wahl):
+            with contextlib.suppress(Exception):
+                c.update()
+        self._geaendert(e)
+
+    def _satz_gewaehlt(self, ev: ft.Event[ft.SegmentedButton]) -> None:
+        if not ev.control.selected:
+            return
+        wahl = str(ev.control.selected[0])
+        e = self._lesen()
+        if wahl == BREITEN_EIGEN and not e.breiten_eigen:
+            # noch keine eigenen: erst das Feld zeigen, der Satz wechselt mit gültigen Breiten
+            self.feld.visible = True
+            with contextlib.suppress(Exception):
+                self.feld.update()
+            return
+        e.breiten_satz = wahl
+        self._speichern(e)
+        self._nachziehen(e)
+
+    def _eigene_uebernehmen(self, _ev: object = None) -> None:
+        """„1, 2, 10“ (Minuten), auch „90 s“, „1:30“, „6 h“ — durch Komma oder Semikolon
+        getrennt; eine Zahl allein sind Minuten wie bei den Knöpfen."""
+        teile = [t for t in re.split(r"[;,]", self.feld.value or "") if t.strip()]
+        sekunden = [breite_lesen(t) for t in teile]
+        gueltig = breiten_pruefen([s for s in sekunden if s is not None])
+        if not gueltig or len(gueltig) != len(teile):
+            self.feld.error = (
+                f"Bis zu {BREITEN_EIGEN_MAX} Breiten, z. B. 2, 30, 6 h — ab 10 s bis 24 h"
+            )
+            with contextlib.suppress(Exception):
+                self.feld.update()
+            return
+        self.feld.error = None
+        e = self._lesen()
+        e.breiten_eigen, e.breiten_satz = gueltig, BREITEN_EIGEN
+        self._speichern(e)
+        self.wahl.selected = [BREITEN_EIGEN]
+        self._nachziehen(e)
 
 
 class BreiteFeld:

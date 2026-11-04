@@ -138,8 +138,11 @@ async def test_hf_sicht_ist_vorgabe_und_umschaltbar(daten) -> None:
         assert any("HFmax 185" in t and "geschätzt" in t for t in texte)  # Formel-Startwert
         chart = next(c for c in _alle(ansicht) if isinstance(c, fc.LineChart))
         assert chart.left_axis.title.value == "HF bpm"
-        # Bereichsgrenzen als gestrichelte Linien in der Kurve (zehn Cluster: 9 Grenzen)
-        assert sum(1 for s in chart.data_series if s.dash_pattern) >= 9
+        # Bereiche als Bänder hinter der Kurve, rechts beschriftet (zehn Cluster, Ben 30.10.)
+        assert sum(1 for s in chart.data_series if s.below_line_bgcolor) >= 1
+        assert chart.right_axis is not None and any(
+            lbl.label.value.startswith("Bereich") for lbl in chart.right_axis.labels
+        )
         # Umschalten auf HRV: Tachogramm, HRV-Kacheln — und gemerkt
         umschalter = _segment(ansicht, ["hf", "hrv"])
         assert umschalter.selected == ["hf"] and not umschalter.segments[1].disabled
@@ -294,6 +297,73 @@ def test_einstellungen_herzfrequenz_eintragen_und_modell(daten) -> None:
     assert state.ausnahmen.alle(state.profil.id) == {}
 
 
+def test_herkunft_eines_werts_steht_leserlich_darunter(daten) -> None:
+    """Ben, 30.10.2026: Tag, Uhrzeit, Fenster und Abschnitt statt einer Kennung."""
+    from datetime import UTC, datetime, timedelta
+
+    from trainingsapp.core.models import HrvRecording
+    from trainingsapp.ui.views.einstellungen_herzfrequenz import herkunft_text
+
+    state, _ = daten
+    start = datetime(2026, 10, 28, 20, 3, tzinfo=UTC)
+    rec = HrvRecording(subject_id=state.profil.id, file_path="P/n.json", started_at=start)
+    state.hrv.anlegen(rec)
+    p = Profilwert(
+        state.profil.id,
+        "ruhe_hf",
+        51,
+        "nacht",
+        state.heute(),
+        geraet="Polar H10",
+        hrv_recording_id=rec.id,
+        herkunft={
+            "messung": rec.id,
+            "fenster": [3 * 3600, 5 * 3600],
+            "abschnitt": "seg-1",
+            "abschnitt_name": "Schlafen",
+            "grundlage": "abschnitt",
+        },
+    )
+    state.profilwerte.hinzufuegen(p)
+    ortszeit = start.astimezone()
+    text = herkunft_text(p, state)
+    assert text.startswith(f"Messung {ortszeit:%d.%m.%Y %H:%M} · Polar H10 · Fenster ")
+    von = (ortszeit + timedelta(hours=3)).strftime("%H:%M")
+    assert f"Fenster {von}–" in text and "Abschnitt „Schlafen“" in text and "seg-1" not in text
+    ansicht = einstellungen_herzfrequenz(_seite(), state)
+    assert text in _texte(ansicht)
+    assert any(
+        isinstance(c, ft.IconButton) and c.icon == ft.Icons.OPEN_IN_NEW for c in _alle(ansicht)
+    )
+    # ein Eintrag von Hand ohne Notiz: keine Herkunftszeile
+    leer = Profilwert(state.profil.id, "ruhe_hf", 55, "eintrag", state.heute())
+    assert herkunft_text(leer, state) == ""
+
+
+def test_ruhepuls_aus_dem_tagesfeld_steht_in_der_liste_und_ist_entfernbar(daten) -> None:
+    """Ben, 30.10.2026: „Einträge Ruhe-HF lassen sich nicht löschen“ — der geltende Wert kam
+    aus dem Tagesfeld und stand in keiner Liste."""
+    from trainingsapp.core import tagesfelder as tf
+
+    state, _ = daten
+    feld = tf.standardfeld(state.tagesfelder.alle(state.profil.id), tf.STANDARD_RUHEPULS)
+    state.tageswerte.einmal_setzen(feld, state.heute(), wert=(57,))
+    assert state.hf_profil().ruhe is not None and state.hf_profil().ruhe.quelle == "tagesfeld"
+    ansicht = einstellungen_herzfrequenz(_seite(), state)
+    texte = _texte(ansicht)
+    assert any("Tagesfeld „Ruhepuls“" in t and "57" in t for t in texte)
+    assert any(t.startswith("aus dem Tagesfeld „Ruhepuls“ vom") for t in texte)
+    muell = [
+        c
+        for c in _alle(ansicht)
+        if isinstance(c, ft.IconButton) and c.tooltip == "Tageswert entfernen"
+    ]
+    assert len(muell) == 1
+    muell[0].on_click()
+    assert state.tageswerte.am_tag(state.profil.id, state.heute()) == []
+    assert state.hf_profil().ruhe is None
+
+
 def test_einstellungen_zeigen_herzfrequenz_kachel(daten) -> None:
     from trainingsapp.ui.views.einstellungen import einstellungen
 
@@ -302,3 +372,116 @@ def test_einstellungen_zeigen_herzfrequenz_kachel(daten) -> None:
     seite.platform = None
     texte = _texte(einstellungen(seite, state, SimpleNamespace()))
     assert "Herzfrequenz" in texte and any("Ruhe-HF und HFmax fehlen" in t for t in texte)
+
+
+class _Ton:
+    """Attrappe des Tondienstes: merkt, was gespielt wurde."""
+
+    def __init__(self) -> None:
+        self.gespielt: list[tuple[str, float, str]] = []
+
+    async def laden(self, name: str, wav: bytes) -> None:
+        pass
+
+    async def spielen(self, name: str, lautstaerke: float = 1.0, quelle: str = "medien") -> None:
+        self.gespielt.append((name, lautstaerke, quelle))
+
+
+async def _aufgaben(seite) -> None:
+    while seite.aufgaben:
+        aufgaben = list(seite.aufgaben)
+        seite.aufgaben.clear()
+        await asyncio.gather(*aufgaben, return_exceptions=True)
+
+
+async def test_hf_blatt_mittel_bereiche_und_signal(daten) -> None:
+    """Ben, 30.10.2026: In der HF-Sicht hat „Fenster & Darstellung“ HF-Einstellungen (Mittel,
+    Bereiche im Bild oder alle, HF-Achse, Signal an der Grenze) — keine Verlaufskurven. Das
+    Signal spielt leise höchstens alle paar Sekunden, solange die HF über der Grenze liegt."""
+    state, tmp_path = daten
+    _profil_fuellen(state)
+    ton = _Ton()
+    state.ton, state.toene_geladen = ton, True
+    e = state.hf_einstellungen()
+    e.alarm_an, e.alarm_bpm = True, 40  # der Simulator liegt sicher darüber
+    state.hf_einstellungen_setzen(e)
+    lauf, task = await _lauf(state, tmp_path)
+    try:
+        seite = _seite()
+        ansicht = messung(seite, state)
+        texte = _texte(ansicht)
+        assert any(t.startswith("Signal ab 40 bpm") and "Klangschale" in t for t in texte)
+        await _aufgaben(seite)
+        assert [g[0] for g in ton.gespielt] == ["schale"]
+        # Innerhalb des Takts kein zweiter Klang
+        lauf.beobachter(False)
+        await _aufgaben(seite)
+        assert len(ton.gespielt) == 1
+        # Das Blatt der HF-Sicht
+        knopf = next(
+            c
+            for c in _alle(ansicht)
+            if isinstance(c, ft.IconButton) and str(c.tooltip).startswith("Fenster & Darstellung")
+        )
+        knopf.on_click()
+        blatt = seite.aufrufe[-1]
+        assert isinstance(blatt, ft.BottomSheet)
+        btexte = _texte(blatt)
+        assert "ZEITACHSE" in btexte and "HERZFREQUENZ" in btexte and "SIGNAL" in btexte
+        assert "WERTEACHSEN" in btexte and "KURVEN" not in btexte
+        assert not any(t.startswith("RMSSD") for t in btexte)
+        mittel = next(
+            c
+            for c in _alle(blatt)
+            if isinstance(c, ft.Dropdown) and c.label == "Kurve als Mittel über"
+        )
+        mittel.on_select(SimpleNamespace(control=SimpleNamespace(value="10")))
+        assert state.hrv_einstellungen().hf_mittel_s == 10
+        bereiche = _segment(blatt, ["bild", "alle"])
+        bereiche.on_change(SimpleNamespace(control=SimpleNamespace(selected=["alle"])))
+        assert state.hrv_einstellungen().hf_bereiche_alle
+        chart = next(
+            c
+            for c in _alle(messung(seite, state))
+            if isinstance(c, fc.LineChart) and c.left_axis.title.value == "HF bpm"
+        )
+        assert chart.min_y <= 55 and chart.max_y >= 185  # Ruhe-HF bis HFmax im Bild
+        grenze = next(
+            c for c in _alle(blatt) if isinstance(c, ft.TextField) and c.label == "Grenze"
+        )
+        grenze.value = "150"
+        grenze.on_submit(None)
+        assert state.hf_einstellungen().alarm_bpm == 150
+        schalter = next(
+            c
+            for c in _alle(blatt)
+            if isinstance(c, ft.Switch) and c.label == "Signal über einer Grenze"
+        )
+        schalter.on_change(SimpleNamespace(control=SimpleNamespace(value=False)))
+        assert state.hf_einstellungen().alarm_grenze() is None
+        grenze.value = "500"  # außerhalb 40–230: Hinweis, der alte Wert bleibt
+        grenze.on_submit(None)
+        assert grenze.error and state.hf_einstellungen().alarm_bpm == 150
+    finally:
+        await _ende(lauf, task)
+
+
+def test_einstellungen_herzfrequenz_signal_karte(daten) -> None:
+    state, _ = daten
+    ton = _Ton()
+    state.ton, state.toene_geladen = ton, True
+    seite = _seite()
+    view = einstellungen_herzfrequenz(seite, state)
+    assert "SIGNAL ÜBER EINER GRENZE" in _texte(view)
+    klang = next(c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "Klang")
+    assert [o.key for o in klang.options][:2] == ["wechsel", "glocke1"]
+    assert "schale" in [o.key for o in klang.options]
+    klang.on_select(SimpleNamespace(control=SimpleNamespace(value="holz")))
+    assert state.hf_einstellungen().alarm_klang == "holz"
+    asyncio.run(_aufgaben(seite))
+    assert [g[0] for g in ton.gespielt] == ["holz"]  # vorgespielt
+    takt = next(
+        c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "höchstens alle"
+    )
+    takt.on_select(SimpleNamespace(control=SimpleNamespace(value="10")))
+    assert state.hf_einstellungen().alarm_takt_s == 10

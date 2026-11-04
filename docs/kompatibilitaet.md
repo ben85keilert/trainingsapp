@@ -360,8 +360,8 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
 
 | Feld | Werte | Bedeutung |
 |---|---|---|
-| `quelle` | `einheit`, `timer`, `plan`, `gps`, `person` | wer die Marke setzte — `person`: ein Tipp in der Übungsausführung (seit 19.10.2026) |
-| `art` | `start`, `ende`, `abschnitt`, `pause`, `weiter`, `uebung_start`, `uebung_ende`, `km`, `leistung`, `abschluss`, `erholung` | was sie bedeutet — `leistung`: „geleistet bis hierher“ (die **Tippzeit**, nie der Beginn des Satzes), `abschluss`: der Eintrag ist fertig, `erholung`: Ende einer Belastung, ab hier zählt die HF-Erholung; `talk`: Talk-Test, „Sprechen wird schwer“ — die HF der 30 s davor ist der Marker für Schwelle 1 (beide seit 29.10.2026, `docs/plan_herzfrequenz.md`) |
+| `quelle` | `einheit`, `timer`, `plan`, `gps`, `person`, `uhr` | wer die Marke setzte — `person`: ein Tipp in der Übungsausführung (seit 19.10.2026); `uhr`: ⏯ am Band (hrv-watch, seit 4.11.2026, P113) |
+| `art` | `start`, `ende`, `abschnitt`, `pause`, `weiter`, `uebung_start`, `uebung_ende`, `km`, `leistung`, `abschluss`, `erholung`, `marke` | was sie bedeutet — `marke`: eine bloße Marke ohne Text (⏯ am Band, `uhr/marke`; vorher eine leere Notiz ohne `marke`, nicht von anderen zu unterscheiden) — `leistung`: „geleistet bis hierher“ (die **Tippzeit**, nie der Beginn des Satzes), `abschluss`: der Eintrag ist fertig, `erholung`: Ende einer Belastung, ab hier zählt die HF-Erholung; `talk`: Talk-Test, „Sprechen wird schwer“ — die HF der 30 s davor ist der Marker für Schwelle 1 (beide seit 29.10.2026, `docs/plan_herzfrequenz.md`) |
 | `spur` | `timer`, `uebung`, `km` | die Abschnittsspur, die sie teilt (Abschnitt 9b) |
 | `einheit` | Text (UUID) | der gemeinsame Ablauf in der App, dessen Zeitleiste die Marke kommt (`docs/plan_einheit.md`) |
 | `name` | Text | Abschnittsname ohne Zusatz („Belastung“, „Planke“) |

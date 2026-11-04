@@ -17,13 +17,15 @@ Keine Bewertung, keine Rechnung an Messwerten — nur Zahlen und Zustände.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from hrv_core import mitschnitt as mt
 from hrv_core.geraete.pmd import PMD_SERVICE_UUID
+
+from trainingsapp.core.result_spec import ResultSpec, basis_key
 
 #: Ordner der Rohmitschnitte ohne Messung (unbekannte Geräte, Stufe 6) im Datenverzeichnis
 DIAGNOSE_ORDNER: Final[str] = "Diagnose"
@@ -191,6 +193,215 @@ def fehlende(zeilen: Iterable[SensorZeile]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Marken: Art aus dem Kontext, Nummer im Satz (Plan §2.5, Stufe 3)
+# ---------------------------------------------------------------------------
+
+#: Arten der Marke für die Leiste (Störung ist ein eigener Knopf, keine Art)
+WDH: Final[str] = mt.MARKE_WDH
+ATEM: Final[str] = mt.MARKE_ATEM
+ART_NAMEN: Final[dict[str, str]] = {
+    mt.MARKE_WDH: "Wiederholung",
+    mt.MARKE_ATEM: "Atemzug",
+    mt.MARKE_STOERUNG: "Störung",
+    mt.MARKE_FREI: "Marke",
+}
+
+
+def hat_wiederholungen(spec: ResultSpec | None) -> bool:
+    """Zählt die Übung Wiederholungen (ein Feld der Art ``reps``)? Sonst gelten Atemzüge.
+
+    >>> from trainingsapp.core.result_spec import FieldSpec, FieldType
+    >>> hat_wiederholungen(ResultSpec(fields=[FieldSpec("reps", FieldType.SET_LIST, "Wdh.")]))
+    True
+    >>> hat_wiederholungen(ResultSpec(fields=[FieldSpec("hold", FieldType.SET_LIST, "Halten",
+    ...     unit="s")])), hat_wiederholungen(None)
+    (False, False)
+    """
+    if spec is None:
+        return False
+    return any(basis_key(f.key) == "reps" for f in spec.fields)
+
+
+@dataclass(frozen=True, slots=True)
+class MarkenKontext:
+    """Was ein Tipp in der Leiste gerade bedeutet."""
+
+    art: str  # WDH oder ATEM
+    uebung: str | None = None  # Name der laufenden Übung
+    uebung_code: str | None = None  # Kurzcode (raw-v1 ``uebungen``)
+    satz: int | None = None
+    phase: str = "frei"  # uebung, pause, frei
+
+    @property
+    def schluessel(self) -> tuple[str | None, int | None, str]:
+        """Ändert sich er, gilt eine Wahl im Chip nicht mehr (Plan §2.5)."""
+        return (self.uebung_code, self.satz, self.phase)
+
+    def als_dict(self) -> dict[str, object]:
+        """``kontext`` der Marke im Mitschnitt."""
+        d: dict[str, object] = {"phase": self.phase}
+        if self.uebung:
+            d["uebung"] = self.uebung
+        if self.uebung_code:
+            d["uebung_id"] = self.uebung_code
+        if self.satz:
+            d["satz"] = self.satz
+        return d
+
+    def text(self, art: str | None = None) -> str:
+        """Die Kopfzeile der Leiste: „Wiederholung · Kniebeuge S2“."""
+        teile = [ART_NAMEN.get(art or self.art, art or self.art)]
+        if self.uebung:
+            teile.append(self.uebung + (f" S{self.satz}" if self.satz else ""))
+        elif self.phase == "pause":
+            teile.append("Pause")
+        return " · ".join(teile)
+
+
+def kontext_aus_notizen(
+    ereignisse: Iterable[dict], wiederholungen: Callable[[str], bool]
+) -> MarkenKontext:
+    """Die Art der nächsten Marke aus den automatischen Notizen der laufenden Aufnahme.
+
+    Zwischen „Übung: Start“ und „Übung: Ende“ (Plan-Ablauf, Uhr der Übung) gilt die Übung;
+    hat sie Wiederholungen (``wiederholungen(kurzcode)``), ist ein Tipp eine Wiederholung —
+    außer in einem Abschnitt des Timers, der nicht zählt (Pause), und solange der Timer
+    angehalten ist. Ein eingetragener Satz (``person/leistung``) zählt den Satz weiter.
+    Sonst — Halte- und Atemübungen, Pausen, Messung ohne Übung — ein Atemzug.
+
+    >>> start = {"marke": {"quelle": "plan", "art": "uebung_start", "name": "Kniebeuge"},
+    ...          "uebungen": ["KB000001"]}
+    >>> satz = {"marke": {"quelle": "person", "art": "leistung", "feld": "reps", "wert": 12}}
+    >>> pause = {"marke": {"quelle": "timer", "art": "abschnitt", "name": "Pause",
+    ...                    "zaehlt": False}}
+    >>> wdh = lambda code: code == "KB000001"
+    >>> kontext_aus_notizen([], wdh).art
+    'atem'
+    >>> k = kontext_aus_notizen([start, satz], wdh)
+    >>> k.art, k.uebung, k.satz, k.text()
+    ('wdh', 'Kniebeuge', 2, 'Wiederholung · Kniebeuge S2')
+    >>> kontext_aus_notizen([start, pause], wdh).art
+    'atem'
+    >>> ende = {"marke": {"quelle": "plan", "art": "uebung_ende"}, "uebungen": ["KB000001"]}
+    >>> kontext_aus_notizen([start, ende], wdh).text()
+    'Atemzug'
+    """
+    code: str | None = None
+    name: str | None = None
+    satz = 0
+    phase = "frei"
+    for e in ereignisse:
+        m = e.get("marke") if isinstance(e, dict) else None
+        if not isinstance(m, dict):
+            continue
+        art, quelle = m.get("art"), m.get("quelle")
+        codes = [c for c in e.get("uebungen") or [] if isinstance(c, str)]
+        if art == "uebung_start":
+            code = codes[0] if codes else None
+            name = str(m.get("name") or e.get("text") or "") or None
+            satz, phase = 1, "uebung"
+        elif art == "uebung_ende":
+            code = name = None
+            satz, phase = 0, "frei"
+        elif quelle == "person" and art == "leistung":
+            if code is not None:
+                satz += 1
+        elif quelle == "timer" and art == "abschnitt":
+            phase = "pause" if m.get("zaehlt") is False else ("uebung" if code else "frei")
+        elif art == "pause":
+            phase = "pause"
+        elif art == "weiter":
+            phase = "uebung" if code else "frei"
+    art_ = WDH if phase == "uebung" and code is not None and wiederholungen(code) else ATEM
+    return MarkenKontext(art_, name, code, satz or None, phase)
+
+
+class MarkenZaehler:
+    """Die Nummer einer Marke im Satz — je Art, Übung und Satz ab 1; ↶ zählt zurück.
+
+    >>> z = MarkenZaehler()
+    >>> k = MarkenKontext(WDH, "Kniebeuge", "KB", 1, "uebung")
+    >>> z.weiter(WDH, k), z.weiter(WDH, k), z.zurueck(), z.weiter(WDH, k)
+    (1, 2, 1, 2)
+    >>> z.weiter(WDH, MarkenKontext(WDH, "Kniebeuge", "KB", 2, "uebung"))   # neuer Satz
+    1
+    >>> z.stand(WDH, MarkenKontext(WDH, "Kniebeuge", "KB", 1, "uebung"))
+    2
+    """
+
+    def __init__(self) -> None:
+        self._n: dict[tuple[str, str | None, int | None], int] = {}
+        self._letzte: list[tuple[str, str | None, int | None]] = []
+
+    def _schluessel(self, art: str, k: MarkenKontext) -> tuple[str, str | None, int | None]:
+        return (art, k.uebung_code, k.satz)
+
+    def weiter(self, art: str, k: MarkenKontext) -> int:
+        s = self._schluessel(art, k)
+        self._n[s] = self._n.get(s, 0) + 1
+        self._letzte.append(s)
+        return self._n[s]
+
+    def zurueck(self) -> int:
+        """Die letzte Marke zurücknehmen — gibt den neuen Stand ihres Satzes zurück."""
+        if not self._letzte:
+            return 0
+        s = self._letzte.pop()
+        self._n[s] = max(0, self._n.get(s, 0) - 1)
+        return self._n[s]
+
+    def stand(self, art: str, k: MarkenKontext) -> int:
+        return self._n.get(self._schluessel(art, k), 0)
+
+
+def kontext_zeile(notiz: dict) -> tuple[str, dict[str, object]] | None:
+    """Eine automatische Notiz als ``kontext``-Zeile des Mitschnitts: ``(was, felder)`` —
+    ``None`` für Notizen ohne Marke (was die Person schreibt, bleibt in der Messdatei).
+
+    >>> kontext_zeile({"text": "Kniebeuge: Start", "uebungen": ["KB000001"],
+    ...     "marke": {"quelle": "plan", "art": "uebung_start", "name": "Kniebeuge"}})
+    ('uebung_start', {'uebung': 'Kniebeuge', 'uebung_id': 'KB000001'})
+    >>> kontext_zeile({"marke": {"quelle": "person", "art": "leistung", "feld": "reps",
+    ...     "wert": 12}})
+    ('satz', {'feld': 'reps', 'wert': 12})
+    >>> kontext_zeile({"marke": {"quelle": "timer", "art": "abschnitt", "name": "Pause",
+    ...     "runde": 1, "von": 3, "zaehlt": False, "soll_s": 60}})  # doctest: +NORMALIZE_WHITESPACE
+    ('timer_abschnitt', {'abschnitt': 'Pause', 'runde': 1, 'von': 3, 'soll_s': 60,
+     'phase': 'pause'})
+    >>> kontext_zeile({"text": "frei"}) is None
+    True
+    """
+    m = notiz.get("marke")
+    if not isinstance(m, dict):
+        return None
+    quelle, art = str(m.get("quelle") or ""), str(m.get("art") or "")
+    codes = [c for c in notiz.get("uebungen") or [] if isinstance(c, str)]
+    felder: dict[str, object] = {}
+    if quelle == "person" and art == "leistung":
+        was = "satz"
+    elif quelle == "plan" and art in ("uebung_start", "uebung_ende", "pause"):
+        was = art
+    elif quelle == "timer":
+        was = f"timer_{art}"
+    else:
+        was = f"{quelle}_{art}" if quelle else art
+    name = m.get("name")
+    if was == "timer_abschnitt":
+        if name:
+            felder["abschnitt"] = name
+    elif name:
+        felder["uebung"] = name
+    if codes:
+        felder["uebung_id"] = codes[0]
+    for schluessel in ("feld", "wert", "runde", "von", "profil", "soll_s"):
+        if m.get(schluessel) not in (None, ""):
+            felder[schluessel] = m[schluessel]
+    if was == "timer_abschnitt":
+        felder["phase"] = "pause" if m.get("zaehlt") is False else "uebung"
+    return was, felder
+
+
+# ---------------------------------------------------------------------------
 # Ablage
 # ---------------------------------------------------------------------------
 
@@ -296,6 +507,8 @@ def dauer_text(s: float) -> str:
 
 
 __all__ = [
+    "ART_NAMEN",
+    "ATEM",
     "DIAGNOSE_ORDNER",
     "FEHLT",
     "GEPRUEFT",
@@ -303,12 +516,18 @@ __all__ = [
     "HR_DIENST",
     "LAUT_PROFIL",
     "NUR_ROH",
+    "WDH",
+    "MarkenKontext",
+    "MarkenZaehler",
     "SensorZeile",
     "ablage",
     "alle_loeschen",
     "dauer_text",
     "fehlende",
     "groesse_text",
+    "hat_wiederholungen",
+    "kontext_aus_notizen",
+    "kontext_zeile",
     "menge_mb_h",
     "mitschnitte",
     "sensoren",

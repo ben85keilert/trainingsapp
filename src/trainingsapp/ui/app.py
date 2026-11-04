@@ -86,7 +86,7 @@ from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lok
 from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.ui import ausrichtung, navigation
 from trainingsapp.ui import einheit as einheit_ui
-from trainingsapp.ui.components import diagnose_punkt
+from trainingsapp.ui.components import diagnose_punkt, marken_leiste
 from trainingsapp.ui.components.dialoge import dialog_offen
 from trainingsapp.ui.components.startleiste import (
     leiste_auffrischen,
@@ -839,6 +839,9 @@ def main(page: ft.Page) -> None:
         # hier kommt er hinzu oder geht (`components.diagnose_punkt`)
         with suppress(Exception):
             diagnose_punkt.aktualisieren(page, state)
+            # Die Marken-Leiste liegt ebenso im Overlay; die Ansicht bekommt unten Platz
+            marken_leiste.platz_einsetzen(page, state)
+            marken_leiste.aktualisieren(page, state)
         page.update()
         # Hochkant ist die Regel; Karten, Kurven und das Live-Vollbild dürfen quer
         ausrichtung.anwenden(page, state, ausrichtung.modus_fuer_route(page.route))

@@ -21,6 +21,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import diagnose as dg
+from trainingsapp.ui.components import marken_leiste
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import schliessen
 
@@ -161,12 +162,14 @@ def stand_blatt(page: ft.Page, state: Any) -> ft.BottomSheet:
         if lauf is not None:
             await lauf.diagnose_beenden()
         aktualisieren(page, state)
+        marken_leiste.aktualisieren(page, state)
         state.neu_zeichnen()
         page.show_dialog(ft.SnackBar(ft.Text("Diagnose beendet — die Messung läuft weiter.")))
 
     def leiste_zeigen() -> None:
         state.diagnose_leiste_offen = True
         schliessen(blatt)
+        marken_leiste.aktualisieren(page, state)
         state.neu_zeichnen()
 
     def zu(_e: Any = None) -> None:

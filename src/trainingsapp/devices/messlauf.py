@@ -69,6 +69,7 @@ from hrv_core.zeitachse import Kontinuitaetsuhr
 
 from ..config import app_version
 from ..core import abschnitte as eigene_abschnitte
+from ..core.diagnose import kontext_zeile as diagnose_kontext
 from ..core.einheit import SPUR_TIMER
 from ..core.gurt_warnung import Artefaktwache
 from ..core.hrv_export import diagnose_pfad, diagnose_text
@@ -640,7 +641,15 @@ class Messlauf:
         zb = self.notiz_zeitbezug()
         jetzt = self.jetzt_s()
         x = jetzt - max(vor_s, 0.0) if bei is None else min(bei - self.start_mono, jetzt)
-        return notiz(text, zb.anker(x), zb.start_utc, uebungen=uebungen or None, marke=marke)
+        eintrag = notiz(text, zb.anker(x), zb.start_utc, uebungen=uebungen or None, marke=marke)
+        if marke is not None and self.diagnose_aktiv and self.mitschnitt is not None:
+            # Im Diagnosemodus steht jede automatische Notiz auch als Kontext im Mitschnitt —
+            # Übung, Timer, eingetragener Satz (Plan §3.1), an ihrer Stelle auf der Uhr
+            with contextlib.suppress(Exception):
+                if (zeile := diagnose_kontext(eintrag)) is not None:
+                    was, felder = zeile
+                    self.mitschnitt.kontext(was, t=round((self.start_mono + x) * 1e9), **felder)
+        return eintrag
 
     def abschnitt_markieren(
         self,

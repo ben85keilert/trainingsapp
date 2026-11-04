@@ -265,3 +265,85 @@ async def test_auswertung_zeigt_diagnose_und_marken_als_ebene(page, state, tmp_p
         if isinstance(c, ft.OutlinedButton) and c.content == "Diagnosepaket teilen"
     ]
     assert len(knoepfe) == 1
+
+
+class LeistenLauf(Lauf):
+    """Mit Notizen und einem Mitschnitt, der die Marken sammelt."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.diagnose_aktiv = True
+        self.notizen: list[dict] = []
+        self.marken: list[dict] = []
+        self.weg: list[int] = []
+
+    def ereignisse(self) -> list[dict]:
+        return self.notizen
+
+    def marke(self, typ, **felder):
+        zeile = {"art": "marke", "id": len(self.marken) + 1, "typ": typ, **felder}
+        self.marken.append(zeile)
+        return zeile
+
+    def marke_weg(self, marke_id, **felder):
+        self.weg.append(marke_id)
+        return {"art": "marke_weg", "id": marke_id}
+
+
+async def test_marken_leiste_art_aus_dem_kontext_chip_rueckgaengig_stoerung(page, state) -> None:
+    from trainingsapp.core.kurzcode import kurzcode
+    from trainingsapp.core.models import Exercise
+    from trainingsapp.core.result_spec import SPEC_SAETZE_WDH
+    from trainingsapp.ui.components import marken_leiste as ml
+
+    uebung = Exercise(name="Kniebeuge", result_spec=SPEC_SAETZE_WDH)
+    state.uebungen.speichern(uebung)
+    lauf = LeistenLauf()
+    state.messlauf = lauf
+    ml.aktualisieren(page, state)
+    assert len(page.overlay) == 1
+    # Ohne Übung: Atemzug
+    ml.tippen(page, state)
+    assert lauf.marken[-1]["typ"] == "atem" and lauf.marken[-1]["nr"] == 1
+    # Übung mit Wiederholungen beginnt: Wiederholung, Zählung je Satz ab 1
+    lauf.notizen.append(
+        {
+            "text": "Kniebeuge: Start",
+            "uebungen": [kurzcode(uebung.id)],
+            "marke": {"quelle": "plan", "art": "uebung_start", "name": "Kniebeuge"},
+        }
+    )
+    ml.tippen(page, state)
+    ml.tippen(page, state)
+    assert [(m["typ"], m["nr"]) for m in lauf.marken[1:]] == [("wdh", 1), ("wdh", 2)]
+    assert lauf.marken[-1]["kontext"] == {
+        "phase": "uebung",
+        "uebung": "Kniebeuge",
+        "uebung_id": kurzcode(uebung.id),
+        "satz": 1,
+    }
+    stand = state.diagnose_leiste
+    assert stand.zahl.value == "2" and stand.kopf.value == "Wiederholung · Kniebeuge S1"
+    # ↶: die letzte zurück, die Zahl folgt
+    ml.zuruecknehmen(page, state)
+    assert lauf.weg == [3] and stand.zahl.value == "1"
+    # Chip „Atem“ gilt, bis sich der Kontext ändert (neuer Satz)
+    ml.art_waehlen(state, "atem")
+    ml.tippen(page, state)
+    assert lauf.marken[-1]["typ"] == "atem"
+    lauf.notizen.append({"marke": {"quelle": "person", "art": "leistung", "feld": "reps"}})
+    ml.tippen(page, state)
+    assert (lauf.marken[-1]["typ"], lauf.marken[-1]["nr"]) == ("wdh", 1)
+    assert lauf.marken[-1]["kontext"]["satz"] == 2
+    # Störung: eine eigene Marke ohne Nummer, die Zählung bleibt
+    ml.tippen(page, state, "stoerung")
+    assert lauf.marken[-1]["typ"] == "stoerung" and lauf.marken[-1]["nr"] is None
+    # Einklappen: der schwebende Knopf ersetzt die Leiste; die Ansicht bekommt weniger Platz
+    hoch = ml.platz(page, state)
+    state.diagnose_leiste_offen = False
+    ml.aktualisieren(page, state)
+    assert len(page.overlay) == 1 and ml.platz(page, state) < hoch
+    # Ende der Diagnose: weg, und die nächste Diagnose zählt neu
+    lauf.diagnose_aktiv = False
+    ml.aktualisieren(page, state)
+    assert page.overlay == [] and state.diagnose_leiste is None

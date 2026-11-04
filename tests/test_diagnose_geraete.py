@@ -238,6 +238,13 @@ async def test_messlauf_mitschnitt_vom_backup_zur_messdatei(tmp_path) -> None:
         _schlaege(lauf, innen, zeit, 5)
         innen.senden(pmd.PMD_DATA_UUID, innen.acc_rahmen(9_000_000_000), zeit.t)
         await _ruhe()
+        # Eine automatische Notiz (Übung beginnt) steht auch als Kontext im Mitschnitt
+        lauf.notiz_hinzufuegen(
+            "Kniebeuge: Start",
+            marke={"quelle": "plan", "art": "uebung_start", "name": "Kniebeuge"},
+            uebungen=["KB000001"],
+        )
+        lauf.notiz_hinzufuegen("frei geschrieben")  # ohne Marke: nur in der Messdatei
         marke = lauf.marke(mt.MARKE_WDH, nr=1, kontext={"uebung": "Kniebeuge", "satz": 1})
         assert marke is not None and marke["id"] == 1
         lauf.kontext("satz", uebung="Kniebeuge", feld="reps", wert=12)
@@ -259,7 +266,8 @@ async def test_messlauf_mitschnitt_vom_backup_zur_messdatei(tmp_path) -> None:
         assert m.wanduhr_s(erste["t"]) == pytest.approx(6.0)  # 1 s Start, 5 Schläge
         arten = {z["art"] for z in m.zeilen}
         assert {"kopf", "n", "w", "v", "marke", "kontext"} <= arten
-        assert [z["was"] for z in m.art("kontext")] == ["diagnose_start", "satz"]
+        assert [z["was"] for z in m.art("kontext")] == ["diagnose_start", "uebung_start", "satz"]
+        assert m.art("kontext")[1]["uebung_id"] == "KB000001"
         assert mt.zusammenfassen(m)["stroeme"]["acc"]["proben"] == 36
         # t im Mitschnitt ist die Uhr der Quelle (wie t_capture der Messwerte)
         n = m.benachrichtigungen("hr")

@@ -28,7 +28,7 @@ import flet as ft
 
 from trainingsapp.core import diagnose as dg
 from trainingsapp.core.hrv_einstellungen import ACC_BEREICHE, ACC_RATEN
-from trainingsapp.ui.components import diagnose_punkt
+from trainingsapp.ui.components import diagnose_punkt, marken_leiste
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import schliessen
 from trainingsapp.ui.state import AppState
@@ -250,7 +250,9 @@ def sensorblatt(
         schliessen(blatt)
         if lauf.aufnahme is None:
             await aufnahme_starten()
+        state.diagnose_leiste_offen = e.diagnose_leiste == "unten"
         diagnose_punkt.aktualisieren(page, state)
+        marken_leiste.aktualisieren(page, state)
         state.neu_zeichnen()
 
     def zu(_e: Any = None) -> None:

@@ -413,6 +413,17 @@ class AppState:
     #: Der letzte Lauf je Übung, der aus ihrem Timer gestartet wurde (Einheit-ID) — für
     #: die Karte „gemacht“ nach dem Ende
     uebung_laeufe: dict[str, str] = field(default_factory=dict)
+    #: Wiederholungen zählen mit dem Beschleunigungssensor (Ben, 4.11.2026,
+    #: ``docs/plan_beschleunigung.md``): der letzte Zähllauf je Übung (Einheit-ID) — für das
+    #: Ergebnis danach (`ui.uebung_lauf.zaehlen_starten`) —, …
+    zaehl_laeufe: dict[str, str] = field(default_factory=dict)
+    #: … die Meldung „Kniebeuge · 12 Wdh. nicht eingetragen“, wenn ein Start das Zählen einer
+    #: anderen Übung beendete (`ui.einheit.ZaehlMeldung`; einmal abgeholt mit
+    #: `ui.uebung_lauf.meldung_abholen`) …
+    zaehl_meldung: Any = None
+    #: … und die Zählzeilen, deren Zahl jeder Takt nachzieht (Name →
+    #: `components.zaehl_stand.ZaehlAnzeige`)
+    zaehl_anzeigen: dict[str, Any] = field(default_factory=dict)
     #: Uhr in der Übung (Ben, 18.10.2026): je Planübung bzw. Übung die gewählte oder zuletzt
     #: gestartete — nur für diese Sitzung, keine Einstellung (`ui.components.uhr`)
     uhr_wahl: dict[str, str] = field(default_factory=dict)

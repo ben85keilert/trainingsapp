@@ -19,6 +19,7 @@ from enum import StrEnum
 from typing import Any
 
 from .result_spec import ResultSpec
+from .zaehlen import SensorWahl
 
 
 def new_id() -> str:
@@ -168,6 +169,10 @@ class Exercise:
     #: Timerzeit zählt (Migration 028, P79 D2): Läufe von Stoppuhr und Timer tragen Zeit ein —
     #: aus: nur „gemacht“. Beim Üben in der Leiste für jetzt umschaltbar.
     zeit_zaehlt: bool = True
+    #: Die Karte „Beschleunigungssensor“ (Migration 037, ``acc_json``; Paketfeld
+    #: ``beschleunigung``): Wiederholungen zählen, Atmung erfassen — leer = Vorgabe aus der
+    #: Übung (`core.zaehlen.wiederholungen_an`, `atmung_an`)
+    beschleunigung: SensorWahl = field(default_factory=SensorWahl)
 
     def __post_init__(self) -> None:
         # Wer nur `category` angibt (Altbestand, Tutorial), bekommt sie als Typ.

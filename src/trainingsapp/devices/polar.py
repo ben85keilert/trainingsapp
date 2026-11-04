@@ -238,6 +238,8 @@ class PolarQuelle(HeartRateSource):
         #: Beschleunigung im Diagnosemodus (Rate, Bereich) — ``None`` aus
         self._acc_wunsch: AccWunsch | None = acc
         self._acc_modus = False  # diese Verbindung streamt Beschleunigung
+        #: Mit dieser Einstellung (Rate, Bereich) wurde die Beschleunigung zuletzt gestartet
+        self._acc_gestartet: AccWunsch | None = None
         self._acc_gesehen = False
         self._acc_neugestartet = False
         #: ACC-Rahmen dieser Verbindung (zur Anzeige)
@@ -340,6 +342,14 @@ class PolarQuelle(HeartRateSource):
     @property
     def acc_wunsch(self) -> AccWunsch | None:
         return self._acc_wunsch
+
+    @property
+    def acc_gestartet(self) -> AccWunsch | None:
+        """Womit die Beschleunigung gerade läuft (Rate, Bereich) — ``None``, wenn sie nicht
+        läuft. Nicht dasselbe wie `acc_wunsch`: `stroeme_setzen` setzt den Wunsch sofort,
+        schaltet aber erst nach dem EKG um — bis dahin kommen Rahmen der alten Einstellung
+        (der Messlauf legt sie mit dieser Rate ab, `Messlauf._acc_empfangen`)."""
+        return self._acc_gestartet if self._acc_modus else None
 
     @property
     def ekg_wunsch(self) -> bool:
@@ -694,6 +704,7 @@ class PolarQuelle(HeartRateSource):
     async def _acc_start_senden(self) -> None:
         rate, bereich = self._acc_wunsch or (ACC_RATE_HZ, ACC_BEREICH_G)
         kommando = acc_start(rate, bereich)
+        self._acc_gestartet = (rate, bereich)
         await self._gatt(
             self._transport.write(
                 self._device_id, PMD_SERVICE_UUID, PMD_CONTROL_UUID, kommando, mit_antwort=True
@@ -733,11 +744,14 @@ class PolarQuelle(HeartRateSource):
         )
 
     async def stroeme_setzen(self, *, ekg: bool, acc: AccWunsch | None) -> None:
-        """Zusatzströme der laufenden Verbindung an- oder abschalten (Diagnosemodus).
+        """Zusatzströme der laufenden Verbindung an- oder abschalten (Diagnosemodus, Zählen).
 
         Merkt sich den Wunsch auch für jeden späteren Neuaufbau. Ohne Verbindung oder
         während eines Aufbaus wirkt er erst beim nächsten Aufbau. Was das Gerät nicht
-        kann, bleibt aus (mit einer Zeile im Protokoll). Wirft nie.
+        kann, bleibt aus (mit einer Zeile im Protokoll). Läuft die Beschleunigung schon mit
+        anderer Rate oder anderem Bereich (das Zählen mit 50 Hz, dann der Diagnosemodus mit
+        200 Hz), wird sie gestoppt und mit der neuen Einstellung neu gestartet — Rahmen
+        dazwischen verfallen. Wirft nie.
         """
         self._ekg_wunsch = bool(ekg)
         self._acc_wunsch = acc
@@ -761,6 +775,15 @@ class PolarQuelle(HeartRateSource):
                 self._acc_gesehen = False
                 self._acc_neugestartet = False
                 await self._acc_einrichten(gen)
+            elif acc_soll and self._acc_modus and acc != self._acc_gestartet:
+                self._acc_modus = False  # Rahmen der alten Einstellung verfallen
+                await self._kommando(ACC_STOP, "ACC-Stopp gesendet (03 02) — neue Einstellung")
+                await self._schlafen(PMD_KOMMANDO_PAUSE_S)
+                if gen == self._generation and self._laeuft:
+                    self._acc_gesehen = False
+                    self._acc_neugestartet = False
+                    self._acc_modus = True
+                    await self._acc_start_senden()
             elif not acc_soll and self._acc_modus:
                 self._acc_modus = False
                 await self._kommando(ACC_STOP, "ACC-Stopp gesendet (03 02)")

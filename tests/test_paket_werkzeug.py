@@ -263,6 +263,81 @@ def test_uebernehmen_findet_zur_vorlage_zurueck_und_ergaenzt_skalar_neben_tabell
     assert gelesen.uebungen[1].zaehlt_als == "duration"
 
 
+def test_uebernehmen_schreibt_beschleunigung_als_inline_tabelle(tmp_path) -> None:
+    """Die Karte „Beschleunigungssensor“ (Paketfeld ``beschleunigung``) kommt als eine Zeile
+    ins TOML und geht zurück zur Vorgabe, indem die Zeile wegfällt."""
+    from trainingsapp.core.zaehlen import SensorWahl
+
+    def aendern(roh):
+        roh["exercises"][0]["beschleunigung"] = {"wiederholungen": False, "atmung": True}
+
+    export, datei = _export(tmp_path, QIGONG, aendern)
+    assert uebernehmen(export, datei) == (["Baum: Beschleunigungssensor"], [])
+    text = datei.read_text("utf-8")
+    assert "beschleunigung = {wiederholungen = false, atmung = true}" in text
+    gelesen = paket_lesen(tomllib.loads(text))
+    assert [u.beschleunigung for u in gelesen.uebungen] == [
+        SensorWahl(wiederholungen=False, atmung=True),
+        SensorWahl(),
+    ]
+    assert pruefen(datei, symbole=None)[0] == []
+    # Dasselbe gebaut ist wieder der Export
+    wieder = json.loads(bauen(datei, tmp_path / "dist2").read_text("utf-8"))
+    assert wieder["exercises"][0]["beschleunigung"] == {"wiederholungen": False, "atmung": True}
+    assert "beschleunigung" not in wieder["exercises"][1]
+
+    roh = json.loads(export.read_text("utf-8"))
+    del roh["exercises"][0]["beschleunigung"]
+    export.write_text(json.dumps(roh, ensure_ascii=False), encoding="utf-8")
+    assert uebernehmen(export, datei) == (["Baum: Beschleunigungssensor"], [])
+    assert "beschleunigung" not in datei.read_text("utf-8")
+
+
+def test_pruefen_meldet_unsinn_in_beschleunigung(tmp_path) -> None:
+    """Die App liest ``beschleunigung`` tolerant (Unsinn = Vorgabe) — das Werkzeug sagt es
+    vorher: ein falscher Typ ist ein Fehler (die Wahl ginge verloren), ein unbekannter
+    Schlüssel ein Hinweis (Tippfehler oder neuere App), wie Typen außerhalb des Standards."""
+    from trainingsapp.core.zaehlen import SensorWahl
+
+    datei = tmp_path / "x.toml"
+    datei.write_text(
+        QIGONG.replace(
+            'spec = "halten"\nicon_key = "fitness_center"',
+            'spec = "halten"\nicon_key = "fitness_center"\n'
+            'beschleunigung = {wiederholungen = "nein", atmung = 1, wiederholung = false}',
+        ).replace(
+            'icon_key = "self_improvement"',
+            'icon_key = "self_improvement"\nbeschleunigung = {atmung = true, feld = "reps"}',
+        ),
+        encoding="utf-8",
+    )
+    fehler, hinweise = pruefen(datei, symbole=None)
+    assert fehler == [
+        'Übung „Baum“: beschleunigung: „wiederholungen“ muss true oder false sein, nicht "nein"',
+        "Übung „Baum“: beschleunigung: „atmung“ muss true oder false sein, nicht 1",
+    ]
+    assert [h for h in hinweise if "beschleunigung" in h] == [
+        "Übung „Baum“: beschleunigung: unbekannter Schlüssel „wiederholung“ — wird überlesen "
+        "(bekannt: wiederholungen, atmung, vorlage, feld)"
+    ]
+    # Die App liest dasselbe Paket weiter — mit der Vorgabe, wo Unsinn stand
+    gelesen = paket_lesen(tomllib.loads(datei.read_text("utf-8")))
+    assert [u.beschleunigung for u in gelesen.uebungen] == [
+        SensorWahl(),
+        SensorWahl(atmung=True, feld="reps"),
+    ]
+    # Keine Tabelle: ein Fehler, nichts sonst
+    datei.write_text(
+        QIGONG.replace('typen = ["Entspannung"]', 'typen = ["Entspannung"]\nbeschleunigung = true'),
+        encoding="utf-8",
+    )
+    fehler, _ = pruefen(datei, symbole=None)
+    assert fehler == [
+        "Übung „Lotus“: beschleunigung: keine Tabelle (etwa { wiederholungen = true }), sondern "
+        "true — alles gilt als Vorgabe"
+    ]
+
+
 def test_uebernehmen_probe_version_und_fremde(tmp_path, capsys) -> None:
     def aendern(roh):
         roh["exercises"][0]["name"] = "Anders"

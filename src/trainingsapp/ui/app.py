@@ -93,6 +93,7 @@ from trainingsapp.ui.components.startleiste import (
     leiste_einsetzen,
     startleiste,
 )
+from trainingsapp.ui.components.zaehlen import meldung_zeigen as zaehlen_meldung_zeigen
 from trainingsapp.ui.flet_absicherung import methodenantworten_absichern, snackbars_absichern
 from trainingsapp.ui.laufend import takt as laufend_takt
 from trainingsapp.ui.state import AppState
@@ -804,6 +805,7 @@ def main(page: ft.Page) -> None:
             state.notiz_beobachter,
         ):
             beobachter.clear()
+        state.zaehl_anzeigen.clear()  # die Zählzeilen melden sich beim Bauen neu an
         # Was läuft, zeigt dieser Aufbau — `einheit_ui.anzeige_takt` zeichnet neu, wenn sich
         # das ändert (vor dem Bauen gesetzt: ein Fehler beim Bauen soll nicht jede Sekunde
         # einen neuen Versuch auslösen)
@@ -845,6 +847,11 @@ def main(page: ft.Page) -> None:
             marken_leiste.platz_einsetzen(page, state)
             marken_leiste.aktualisieren(page, state)
         page.update()
+        # Beendete ein Start eben ein Zählen einer anderen Übung: „Kniebeuge · 12 Wdh. nicht
+        # eingetragen“ mit „Eintragen“ — erst jetzt, auf der fertigen Ansicht, nie über einem
+        # Dialog (`components.zaehlen.meldung_zeigen`)
+        with suppress(Exception):
+            zaehlen_meldung_zeigen(page, state)
         # Hochkant ist die Regel; Karten, Kurven und das Live-Vollbild dürfen quer
         ausrichtung.anwenden(page, state, ausrichtung.modus_fuer_route(page.route))
 

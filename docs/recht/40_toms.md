@@ -98,6 +98,18 @@
   einzelnen Mitschnitt; nach dem Teilen fragt die App, ob er weg darf (P114). Geräteproben
   mit dem Puls einer anderen Person nur mit deren Einwilligung weitergeben; Proben anderer
   kommen nie in ein Repository (P115).
+- **Beschleunigungssensor in Übungen** (seit 4.11.2026, `docs/plan_beschleunigung.md` §8 und
+  §10, beide Editionen): Zählt der Sensor die Wiederholungen einer Übung („Wdh. zählen“),
+  schaltet die App die Beschleunigung des Geräts erst mit dem Tipp ein und mit dem Ende des
+  Zählens wieder aus. Sie rechnet live und speichert im Alltag nur **abgeleitete
+  Bewegungsdaten**: die Wiederholungen je Satz mit den Zeiten, zu denen sie gezählt wurden,
+  die Korrekturen ±1 mit Zeit, den Grund des Endes und das Gerätemodell (Zeitleiste der
+  Einheit), dazu die Zahl im Trainingseintrag — gekennzeichnet als Prototyp. **Keine Rohdaten
+  der Beschleunigung:** Die Proben liegen nur in einem Puffer im Arbeitsspeicher, der mit dem
+  Ende des Zählens geleert wird; auf den Speicher kommen sie nur im Diagnosemodus (oben). Keine
+  Richtung, kein Ort, keine neue Netzverbindung. Die Daten bleiben auf dem Gerät; hinaus gehen
+  sie wie die übrige Zeitleiste nur mit dem ausdrücklichen Forschungsexport einer Einheit
+  (`einheit-v1`) und mit dem Geräte-Backup, wenn die Person es einschaltet.
 - **Vorgabe-Paketquelle** `trainingsapp.osteo-ebert.de` (seit 16.10.2026; Übergang,
   bis die Website der App steht): ein angemieteter Server in Deutschland, den der
   Hersteller selbst betreibt; Anbieter Hetzner Online GmbH, mit Vertrag zur

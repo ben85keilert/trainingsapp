@@ -229,11 +229,25 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `stroeme_setzen`), Lebenszyklus im `Messlauf` (neben dem Backup, beim Speichern Beiwerk);
   **Marken** (Wdh/Atem/Störung, `core/diagnose.kontext_aus_notizen`) aus der Leiste im Overlay
   (`components/marken_leiste`, Tipp beim Aufsetzen) oder mit ⏯ an der Uhr (Seite „Diagnose“,
-  Dart-Stempel) — **nie in den Notizen**, immer im Mitschnitt; nach dem Satz Marken · Zähler
-  (`hrv_core.prototyp`, nur angezeigt) · eingetragen. Unbekannte Geräte: Geräteprobe ohne
+  Dart-Stempel) — **nie in den Notizen**, immer im Mitschnitt; nach dem Satz Marken · Sensor
+  (Zähl-Teil, sonst `hrv_core.prototyp`; nur angezeigt) · Korrektur · eingetragen. Unbekannte Geräte: Geräteprobe ohne
   Messung (`devices/erkundung.py`, `/geraeteprobe`), nie schreiben, nie 0x2A25/0x2A23 lesen.
   Hinaus nur bereinigt (`hrv_core.deid.mitschnitt_zeilen`). In hochfrequenten Ereignissen
   immer `ohne_auto_update()` (V1).
+
+- **Beschleunigungssensor in Übungen** (Ben, 4.11.2026, Vertrag `docs/plan_beschleunigung.md`):
+  je Übung die Karte „Beschleunigungssensor“ (Wiederholungen, Atmung; `core/zaehlen.SensorWahl`,
+  `exercise.acc_json`, Migration 037, Paketfeld `beschleunigung`). Hat das Gerät einen
+  (`CAP_PMD_ACC`), ist **der Knopf die Messung** („Wdh. zählen“), **±1 nur ihre Korrektur** —
+  ohne Sensor kein Knopf, kein Handzähler. Das Zählen ist der Einheit-Teil `zaehlen`
+  (`devices/zaehlen.ZaehlBaustein`), **unabhängig von der Uhr** (mit der Uhr derselben Übung in
+  einer Einheit), Strom erst ab dem Tipp, aus mit dem Ende (`Messlauf.acc_anfordern`/
+  `acc_freigeben`). Ende: „Fertig“, Abhaken, Timer durch = eingetragen (`person/eintrag` mit
+  `teil`, nie doppelt); Abbrechen, andere Übung, 60 s ohne Bewegung, Trennen = abgebrochen,
+  nachtragbar unter „Läufe heute“; ein Wechsel der Ansicht beendet nichts. **Entweder zählt die
+  Person oder der Sensor** (P122; beides nur im Diagnosemodus, A2). Im Alltag nur Ergebnisse
+  (Zeitleiste `zaehlung`/`korrektur`/`zaehlen_ende`, `reps` im Eintrag), **nie Rohdaten der
+  Beschleunigung** (P123).
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`

@@ -59,6 +59,7 @@ from ..core.models import (
 from ..core.pakete import stand_tag_nachziehen
 from ..core.parameter import kontextfelder, modus_aus_felder
 from ..core.result_spec import FieldType, ResultSpec, basis_key, werte_modernisieren
+from ..core.zaehlen import SensorWahl
 from .db import transaktion
 
 #: Nach so vielen Tagen leert sich der Papierkorb von selbst (abschaltbar)
@@ -135,8 +136,8 @@ class ExerciseRepo:
                      is_builtin, result_spec_json, limit_spec_json,
                      default_target_json, default_input_mode, archived, created_at, updated_at,
                      default_fields_json, package_id, timer_json, clock_on,
-                     clock_counts_as, clock_counts)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
+                     clock_counts_as, clock_counts, acc_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -154,6 +155,7 @@ class ExerciseRepo:
                     clock_on = excluded.clock_on,
                     clock_counts_as = excluded.clock_counts_as,
                     clock_counts = excluded.clock_counts,
+                    acc_json = excluded.acc_json,
                     updated_at = excluded.updated_at,
                     revision = revision + 1
                 """,
@@ -177,6 +179,7 @@ class ExerciseRepo:
                     int(uebung.uhr),
                     uebung.zaehlt_als,
                     int(uebung.zeit_zaehlt),
+                    json.dumps(uebung.beschleunigung.als_dict(), ensure_ascii=False),
                 ),
             )
             # Medien: alle Verweise neu schreiben. Einfacher als Abgleich, und
@@ -507,6 +510,7 @@ class ExerciseRepo:
             uhr=bool(r["clock_on"]),
             zaehlt_als=r["clock_counts_as"] or "",
             zeit_zaehlt=bool(r["clock_counts"]),
+            beschleunigung=SensorWahl.aus_dict(_json_lesen(r["acc_json"], {})),
         )
 
 
@@ -1541,12 +1545,31 @@ class SessionRepo:
             geschlossen.append(self.eintrag_schliessen(e.id, ende))
         return geschlossen
 
-    def eintrag_schliessen(self, eintrag_id: str, bei: datetime | None = None) -> SessionEntry:
-        """„Abschließen“: der Eintrag bekommt sein Ende (Korrektur, Werte bleiben)."""
+    def eintrag_schliessen(
+        self,
+        eintrag_id: str,
+        bei: datetime | None = None,
+        *,
+        werte: dict[str, Any] | None = None,
+        uebung: Exercise | None = None,
+    ) -> SessionEntry:
+        """„Abschließen“: der Eintrag bekommt sein Ende (Korrektur, Werte bleiben).
+
+        ``werte`` kommen dabei hinzu, in derselben Korrektur — der Chip, der mit einem Wert
+        abhakt, während der Sensor zählte: Wiederholungen und Wert in einem Eintrag (Plan
+        Beschleunigung, Leitentscheidung 7). Kennt die Kopie ein Feld nicht, bekommt der
+        Eintrag die Spezifikation von ``uebung`` samt übersetzten Werten (wie `wert_setzen`)."""
         alt = self.eintrag_laden(eintrag_id)
         if alt is None:
             raise KeyError(eintrag_id)
-        return self.eintrag_korrigieren(alt.id, dict(alt.result), ended_at=bei or self._jetzt())
+        basis, kopie = dict(alt.result), None
+        if werte:
+            spec = alt.spec_snapshot
+            fehlt = spec is None or any(spec.field_by_key(k) is None for k in werte)
+            if fehlt and uebung is not None:
+                basis, kopie = werte_modernisieren(alt.result), uebung.result_spec
+            basis.update(werte)
+        return self.eintrag_korrigieren(alt.id, basis, spec=kopie, ended_at=bei or self._jetzt())
 
     def eintrag_oeffnen(self, eintrag_id: str) -> SessionEntry:
         """„Wieder öffnen“: das Ende fällt weg, weitere Sätze hängen wieder hier an — ein
@@ -1726,13 +1749,25 @@ class SessionRepo:
         Ausführung, abgeschlossen, länger als `offen_min` unberührt, anderer Plan oder Tag
         (`ziel_eintrag`). Ohne Zeit („zählt“ aus) bleibt ein offener Eintrag, wie er ist; ohne
         offenen entsteht wie bisher ein abgeschlossenes „gemacht“ von ``beginn`` bis ``ende``.
+
+        **Wiederholungen** vom Beschleunigungssensor (Ben, 4.11.2026, Plan Beschleunigung
+        §4.3: ein Wert je Satz) hängen ebenso an — jedes Feld der Art ``reps``; ohne offenen
+        Eintrag beginnt ein offener. Zählt das Feld keine Sätze (``saetze=False``), kommt die
+        Summe des Laufs als ein Wert dazu.
         """
         kontext = kontext or {}
         dauer = {
             "duration",
             *(f.key for f in uebung.result_spec.fields if f.type == FieldType.DURATION),
         }
-        zeit = {k: v for k, v in werte.items() if basis_key(k) == "hold" or k in dauer}
+        werte = dict(werte)
+        for k, v in list(werte.items()):
+            if basis_key(k) != "reps" or not isinstance(v, list):
+                continue
+            f = uebung.result_spec.field_by_key(k)
+            if f is not None and f.type == FieldType.SET_LIST and not f.saetze and len(v) > 1:
+                werte[k] = [sum(v)]  # ohne Sätze: der Lauf als ein Wert
+        zeit = {k: v for k, v in werte.items() if basis_key(k) in ("hold", "reps") or k in dauer}
         aktuell = self.ziel_eintrag(session.subject_id, uebung, tag, session.plan_id, kontext)
         if aktuell is None:
             if not zeit:

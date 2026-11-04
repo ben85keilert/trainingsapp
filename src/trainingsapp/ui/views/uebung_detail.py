@@ -23,6 +23,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import varianten as var
+from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.beschreibung import abschnitte
 from trainingsapp.core.models import (
     Exercise,
@@ -154,6 +155,21 @@ def _uhr_zeile(icon: ft.IconData, name: str, text: str) -> ft.Control:
             ),
         ],
     )
+
+
+def beschleunigung_zeile(uebung: Exercise) -> ft.Control | None:
+    """„Beschleunigungssensor: Wiederholungen · Atmung (Prototyp)“ (Ben, 4.11.2026,
+    ``docs/plan_beschleunigung.md`` §3.4) — ``None``, wenn beides aus ist. Bei mehreren
+    Wiederholungsfeldern dazu, in welches gezählt wird."""
+    wdh, atem = zl.wiederholungen_an(uebung), zl.atmung_an(uebung)
+    if not (wdh or atem):
+        return None
+    name = " · ".join(n for n, an in (("Wiederholungen", wdh), ("Atmung", atem)) if an)
+    text = "Prototyp"
+    if wdh and len(zl.wdh_felder(uebung)) > 1 and (feld := zl.zaehlt_in(uebung)):
+        spec = uebung.result_spec.field_by_key(feld)
+        text += f" · zählt in {spec.label if spec is not None else feld}"
+    return _uhr_zeile(ft.Icons.SENSORS, name, text)
 
 
 def aufnahmen_liste(page: Any, state: AppState, uebung: Exercise) -> ft.Control:
@@ -656,6 +672,11 @@ def uebung_detail(
             else []
         ),
         _abschnitt("Uhr und Timer", uhr_und_timer(uebung, item)),
+        *(
+            [_abschnitt("Beschleunigungssensor", zeile)]
+            if (zeile := beschleunigung_zeile(uebung)) is not None
+            else []
+        ),
         _abschnitt("In Plänen", ft.Column(spacing=0, controls=verwendungen)),
         _abschnitt("Aufnahmen mit dieser Übung", aufnahmen_liste(page, state, uebung)),
         # Eigene Fotos und Videos (Ben, 19.10.2026; `views/anhang_verlauf.py`) — nur mit Aufnahmen

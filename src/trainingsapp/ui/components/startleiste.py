@@ -62,10 +62,12 @@ SYMBOLE: dict[str, Any] = {
     "timer": ft.Icons.TIMER_OUTLINED,
     "gps": ft.Icons.LOCATION_ON_OUTLINED,
     "plan": ft.Icons.LIST_ALT,
+    # Wiederholungen zählen mit dem Beschleunigungssensor (Ben, 4.11.2026)
+    "zaehlen": ft.Icons.SENSORS,
 }
 
 #: Kurzname je Teil — für die eine Zeile der Infoleiste
-KURZ = {"hrv": "HRV", "timer": "Timer", "gps": "GPS", "plan": "Plan"}
+KURZ = {"hrv": "HRV", "timer": "Timer", "gps": "GPS", "plan": "Plan", "zaehlen": "Zählen"}
 
 
 def _teil_titel(teil: Any) -> str:
@@ -76,6 +78,10 @@ def _teil_titel(teil: Any) -> str:
         return f"{sport} · GPS" if getattr(teil, "quelle", None) is not None else sport
     if teil.art == "plan" and getattr(teil, "name", ""):
         return f"{'Plan-Ablauf' if hasattr(teil, 'schritte') else 'Übung'} · {teil.name}"
+    if teil.art == "zaehlen":
+        # Antippen führt zur Übung zurück (`ui.einheit.teil_route`); der Wert ist der Stand
+        # („Kniebeuge · 12“, `ZaehlBaustein.status`)
+        return f"Zählen · {teil.name}" if getattr(teil, "name", "") else "Zählen"
     return {"hrv": "HRV-Messung", "plan": "Plan"}.get(teil.art, teil.art)
 
 
@@ -124,6 +130,7 @@ def _oeffner(page: Any, state: AppState, teil: Any) -> Callable[[], Any] | None:
         return None
 
     async def oeffnen() -> None:
+        ablauf.ziel_merken(state, teil)  # das Zählen im Plan: die Liste beginnt bei der Übung
         await page.push_route(route)
 
     return oeffnen

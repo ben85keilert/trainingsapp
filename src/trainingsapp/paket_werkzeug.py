@@ -64,6 +64,7 @@ from trainingsapp.core.paketquelle import (
 )
 from trainingsapp.core.paketquelle import _laden as netz_laden
 from trainingsapp.core.result_spec import VORLAGEN
+from trainingsapp.core.zaehlen import wahl_pruefen
 from trainingsapp.data.seed import seed_inhalt
 
 #: Typen und Regionen des Pakets „Standard“ — ein Paket darf eigene mitbringen
@@ -165,7 +166,9 @@ def pruefen(
     Standardpakets: Schlüssel klein und ohne Umlaute, eindeutig; Beschreibung da; Symbol
     aus der Auswahl (``symbole``, sonst ungeprüft).
     Typen und Regionen außerhalb des Standardpakets sind Hinweise, keine Fehler; Treffer der
-    ``wortliste`` ebenso — mit ``streng`` werden sie Fehler."""
+    ``wortliste`` ebenso — mit ``streng`` werden sie Fehler. In ``beschleunigung`` (Karte
+    „Beschleunigungssensor“) ist ein falscher Typ ein Fehler, ein unbekannter Schlüssel ein
+    Hinweis (`core.zaehlen.wahl_pruefen`) — die App läse beides still als Vorgabe."""
     fehler: list[str] = []
     hinweise: list[str] = []
     try:
@@ -197,6 +200,10 @@ def pruefen(
             hinweise.append(f"{wo}: Typ „{typ}“ ist nicht im Standardpaket (gewollt?)")
         for region in set(e.get("regionen", [])) - STANDARD_REGIONEN:
             hinweise.append(f"{wo}: Region „{region}“ ist nicht im Standardpaket (gewollt?)")
+        if "beschleunigung" in e:
+            f_acc, h_acc = wahl_pruefen(e["beschleunigung"])
+            fehler.extend(f"{wo}: beschleunigung: {x}" for x in f_acc)
+            hinweise.extend(f"{wo}: beschleunigung: {x}" for x in h_acc)
     if inhalt.paket.version is None:
         hinweise.append("Kopf ohne `version` — ohne sie erkennt kein Gerät ein Update")
     for treffer in wortliste_pruefen(roh, wortliste):

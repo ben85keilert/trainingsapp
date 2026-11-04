@@ -83,6 +83,8 @@ from trainingsapp.core.tag import (
     zusammenfassung,
 )
 from trainingsapp.core.verlauf import MONATE, WOCHENTAGE_LANG, montag
+from trainingsapp.core.zaehlen import ENDE_ABGEHAKT
+from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.anhang_reihe import anhang_reihe
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -411,11 +413,30 @@ def tagesansicht(
     # -- Handlungen ---------------------------------------------------------------
 
     def abhaker(plan: Plan, item: PlanItem) -> Callable[[], None]:
-        """Ein Chip: gemacht — wie „Erledigt“ im Plan, mit Rückgängig."""
+        """Ein Chip: gemacht — wie „Erledigt“ im Plan, mit Rückgängig.
+
+        Zählt der Sensor gerade bei dieser Übung (Ben, 4.11.2026, Leitentscheidung 7), endet
+        das Zählen als „abgehakt“: Die Wiederholungen stehen im offenen Eintrag, das Abhaken
+        schließt ihn — ohne Rückgängig, denn das Zählen ist vorbei und eingetragen. Der Eintrag
+        liegt in diesem Plan, auch wenn das Zählen auf der Übungsseite begann (``ort``: der
+        Kontext des Abhakens gewinnt)."""
 
         def handler() -> None:
             uebung = daten().katalog.get(item.exercise_id)
             if uebung is None:
+                return
+            gezaehlt = uebung_lauf.zaehlen_beenden(
+                state, item.exercise_id, item.id, ENDE_ABGEHAKT, ort=(plan.id, item.id)
+            )
+            if gezaehlt is not None:
+                fertig = state.sitzungen.eintrag_schliessen(gezaehlt.id)
+                auffrischen()
+                page.show_dialog(
+                    ft.SnackBar(
+                        ft.Text(f"{uebung.name}: {fertig.shorthand() or 'gemacht'}"),
+                        persist=False,
+                    )
+                )
                 return
             eff = mit_plan_spec(item, uebung)
             session = state.sitzungen.session_fuer(state.profil.id, plan.id, tag_jetzt())

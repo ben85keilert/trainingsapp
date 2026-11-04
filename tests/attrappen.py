@@ -8,6 +8,7 @@ etwas wirklich begann.
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -44,11 +45,25 @@ class Uhr:
 
 
 class Gurt(HeartRateSource):
-    """Ein Brustgurt auf der Uhr: `schlag` schickt ein RR-Intervall."""
+    """Ein Brustgurt auf der Uhr: `schlag` schickt ein RR-Intervall.
+
+    Wie ein H10 hat er auf Wunsch Beschleunigung (`stroeme_setzen`, `acc_beobachter`):
+    `beschleunigung` schickt die ACC-Rahmen bis zur Uhr — Wiederholungen als Sinus mit
+    ``wdh_periode_s``, ohne ``bewegung`` nur die Atmung. Gerätezeit = Uhr (Anker 0).
+    """
 
     def __init__(self, uhr: Uhr) -> None:
         super().__init__()
         self._uhr = uhr
+        self._acc_wunsch: tuple[int, int] | None = None
+        self.acc_beobachter = None
+        #: was `stroeme_setzen` bekam: (EKG, Beschleunigung)
+        self.stroeme: list[tuple[bool, tuple[int, int] | None]] = []
+        self.bewegung = True
+        self.wdh_periode_s = 2.5
+        self.acc_hub_mg = 300.0
+        self.acc_rahmen_s = 0.18
+        self._acc_t: float | None = None
 
     async def scan(self, timeout: float = 8.0) -> list[DeviceInfo]:
         return []
@@ -70,6 +85,53 @@ class Gurt(HeartRateSource):
 
     def schlag(self, rr_ms: int = 1000) -> None:
         self._push_messwert(Messwert("gurt", rr_ms, 60, self._uhr(), "m"))
+
+    @property
+    def acc_wunsch(self) -> tuple[int, int] | None:
+        return self._acc_wunsch
+
+    @property
+    def acc_modus(self) -> bool:
+        return self._acc_wunsch is not None
+
+    @property
+    def ekg_wunsch(self) -> bool:
+        return False
+
+    async def stroeme_setzen(self, *, ekg: bool, acc: tuple[int, int] | None) -> None:
+        self.stroeme.append((bool(ekg), acc))
+        if acc != self._acc_wunsch:
+            self._acc_t = self._uhr() if acc is not None else None  # ab jetzt
+        self._acc_wunsch = acc
+
+    def beschleunigung(self) -> int:
+        """Die ACC-Rahmen bis zur Uhr an den Beobachter — gibt zurück, wie viele."""
+        wunsch = self._acc_wunsch
+        if wunsch is None:
+            self._acc_t = None
+            return 0
+        rate = float(wunsch[0])
+        n = max(1, round(rate * self.acc_rahmen_s))
+        if self._acc_t is None:
+            self._acc_t = self._uhr()
+        k = 0
+        while self._acc_t + (n - 1) / rate <= self._uhr() + 1e-9:
+            proben = []
+            for i in range(n):
+                t = self._acc_t + i / rate
+                hub = (
+                    self.acc_hub_mg * math.sin(2 * math.pi * t / self.wdh_periode_s)
+                    if self.bewegung
+                    else 0.0
+                )
+                atem = 25.0 * math.sin(2 * math.pi * t / 10.0)
+                proben.append((round(0.2 * hub), round(-1000 + hub), round(atem)))
+            t_letzte = self._acc_t + (n - 1) / rate
+            self._acc_t += n / rate
+            k += 1
+            if self.acc_beobachter is not None:
+                self.acc_beobachter(round(t_letzte * 1e9), proben, t_letzte)
+        return k
 
 
 class Empfaenger(GpsQuelle):

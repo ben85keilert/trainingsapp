@@ -19,7 +19,7 @@ subject ──┬── session ──── session_entry ──── entry_me
           ├── hrv_recording ──── hrv_metrics_cache
           ├── hrv_title      (gespeicherte Überschriften der Messungen, Migration 030)
           ├── plan ──────── plan_item
-          ├── einheit ──┬── einheit_baustein   (Teile: HRV, Timer, GPS, Plan — Migration 018)
+          ├── einheit ──┬── einheit_baustein   (Teile: HRV, Timer, GPS, Plan — Migration 018; Zählen seit 037)
           │             └── einheit_ereignis   (Zeitleiste, unveränderlich)
           ├── strecke        (Ausdauertraining, Migration 012 — nie synchronisiert)
           └── consent
@@ -144,6 +144,18 @@ Kopie, Zeitfeld, „Zeit eintragen“). Vorrang: Planübung > Plan > erstes Prof
 `ended_at`) — sonst steht dort nur der Zeitpunkt des Tippens. Migration 021:
 `plan.pause_no_timer` = im Ablauf auch nach einer Übung ohne Timer auf „Weiter“ warten
 (Vorgabe 1; 0 = nach „Gemacht“ gleich die nächste).
+
+**Beschleunigungssensor an der Übung** (Migration 037, Ben 4.11.2026,
+`docs/plan_beschleunigung.md` §3.3, §5.3): `exercise.acc_json` = die Karte
+„Beschleunigungssensor“ (`core.zaehlen.SensorWahl.als_dict`: `wiederholungen`, `atmung`,
+`vorlage`, `feld` — nur, was von der Vorgabe abweicht; `{}` = Wiederholungen an, wenn die Übung
+ein Feld der Art `reps` hat, Atmung an bei Typ „Atmung“, Bewegung „Automatisch“, zählt ins
+erste Wiederholungsfeld). Reist im Paket als `beschleunigung`. `einheit_baustein.art` erlaubt
+dazu `zaehlen` (Neubau der Tabelle wie in 029, `rowid` bleibt): Ein Zähllauf ist eine Einheit
+aus Übung und Zählen. Was der Sensor zählte, steht nur als Ergebnis in der Zeitleiste
+(`zaehlung` je Satz mit den Zeiten der Wiederholungen, `korrektur`, `zaehlen_ende`) und als
+`reps` im Eintrag — **keine Rohdaten der Beschleunigung** in der Datenbank (P123; die gibt es
+nur im Mitschnitt des Diagnosemodus).
 
 **Der Tag ist die Bezugsgröße.** Zeitstempel sind UTC, aber „heute" ist ein
 lokaler Kalendertag. `core.models.tagesgrenzen()` rechnet die lokale

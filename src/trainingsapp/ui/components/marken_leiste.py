@@ -17,6 +17,10 @@ Zustand und Marken (Art, Nummer, Zeile im Mitschnitt) liegen ohne flet in
 
 Gezeichnet wird je Tipp nur die Zahl und die Kopfzeile — nie die Leiste neu (sonst gingen
 Tipps verloren, wie beim Sekundentakt der Messansicht).
+
+**Sensor neben den Tipps** (A2, Ben 4.11.2026, ``docs/plan_beschleunigung.md`` §6): Zählt der
+Beschleunigungssensor („Wdh. zählen“), steht neben der Zahl der Tipps live „Sensor 11“ — die
+Einheit zieht nur diesen Text nach (`components.zaehl_stand.sensor_text`).
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ import flet as ft
 from hrv_core import mitschnitt as mt
 
 from trainingsapp.core import diagnose as dg
+from trainingsapp.ui.components import zaehl_stand
 from trainingsapp.ui.components.layout import ohne_auto_update
 from trainingsapp.ui.components.marken_stand import (
     LeistenStand,
@@ -49,6 +54,8 @@ HOEHE_MAX = 340.0
 NAVI_PX = 80.0
 #: Durchmesser des schwebenden Knopfs (px)
 KNOPF_PX = 76.0
+#: Unter diesem Namen zieht die Einheit „Sensor 11“ nach (``state.einheit_beobachter``)
+SENSOR_BEOBACHTER = "marken_sensor"
 
 
 def _hoehe(page: ft.Page) -> float:
@@ -94,6 +101,9 @@ def aktualisieren(page: ft.Page, state: Any) -> None:
         stand = getattr(state, "diagnose_leiste", None)
         if isinstance(stand, LeistenStand):
             state.diagnose_leiste = None  # neue Diagnose, neue Zählung
+        beobachter = getattr(state, "einheit_beobachter", None)
+        if isinstance(beobachter, dict):
+            beobachter.pop(SENSOR_BEOBACHTER, None)
         with contextlib.suppress(Exception):
             page.update()
         return
@@ -155,6 +165,21 @@ def _satz_melden(page: ft.Page, state: Any, v: dict[str, Any]) -> None:
             page.show_dialog(ft.SnackBar(ft.Text(text)))
 
 
+def sensor_nachziehen(state: Any) -> None:
+    """„Sensor 11“ neben der Zahl der Tipps nachziehen — nur der Text; ohne Leiste nichts."""
+    stand = getattr(state, "diagnose_leiste", None)
+    sensor = stand.sensor if isinstance(stand, LeistenStand) else None
+    if sensor is None:
+        return
+    text = zaehl_stand.sensor_text(state)
+    if sensor.value == text and sensor.visible == bool(text):
+        return
+    sensor.value = text
+    sensor.visible = bool(text)
+    with contextlib.suppress(Exception):
+        sensor.update()
+
+
 def _hinweis(art: str) -> str:
     return "Tippen am unteren Punkt" if art == dg.WDH else "Tippen beim Einatmen"
 
@@ -169,6 +194,17 @@ def _leiste(page: ft.Page, state: Any) -> ft.Control:
     stand.vergleich = ft.Text(
         dg.satz_text(letzter) if letzter else "", size=12, opacity=0.8, visible=bool(letzter)
     )
+    sensor = zaehl_stand.sensor_text(state)
+    stand.sensor = ft.Text(
+        sensor,
+        size=18,
+        weight=ft.FontWeight.W_600,
+        opacity=0.75,
+        visible=bool(sensor),  # ohne Tooltip: die ganze Fläche ist der Knopf
+    )
+    beobachter = getattr(state, "einheit_beobachter", None)
+    if isinstance(beobachter, dict):
+        beobachter[SENSOR_BEOBACHTER] = lambda: sensor_nachziehen(state)
 
     def chip(name: str, text: str) -> ft.Control:
         c = ft.Chip(
@@ -196,7 +232,15 @@ def _leiste(page: ft.Page, state: Any) -> ft.Control:
                 tight=True,
                 spacing=0,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[stand.zahl, hinweis],
+                controls=[
+                    ft.Row(
+                        tight=True,
+                        spacing=14,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[stand.zahl, stand.sensor],
+                    ),
+                    hinweis,
+                ],
             ),
         ),
     )
@@ -264,6 +308,7 @@ def _knopf(page: ft.Page, state: Any) -> ft.Control:
     stand.zahl = ft.Text(str(stand.zaehler.stand(art, k)), size=24, weight=ft.FontWeight.W_700)
     stand.kopf = None
     stand.vergleich = None
+    stand.sensor = None
     stand.chips = {}
 
     def aufklappen() -> None:

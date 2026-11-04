@@ -23,6 +23,11 @@ die Timerzeit als Haltezeit bzw. Zeit in den offenen Eintrag geht; er gilt für 
 (`AppState.uhr_zaehlt`), die Vorgabe kommt aus der Übung (`Exercise.zeit_zaehlt`). Ein **Tipp
 auf die Zeit** stellt einen Timer ohne Ablauf (Räder und Tippfeld, `components/zeit_stellen.py`)
 und startet ihn; er bleibt für diese Sitzung zur Wahl (`AppState.uhr_einmal`).
+
+Ben, 4.11.2026 (``docs/plan_beschleunigung.md`` §4.2): Zählt der Beschleunigungssensor in der
+Einheit der Uhr dieselbe Übung („Wdh. zählen“, `components.zaehlen`), steht die Zahl mit −1/+1
+auch in der laufenden Uhr; „Fertig“ der Uhr beendet beides. Beendete ein Start ein Zählen einer
+anderen Übung, kommt dessen Meldung mit „Eintragen“ (`components.zaehlen.meldung_zeigen`).
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from trainingsapp.core.uebung_timer import profile_zur_wahl, timer_fuer, zaehlt_
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
+from trainingsapp.ui.components import zaehlen
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.state import UHR_KNOEPFE
 
@@ -156,6 +162,7 @@ def uhr_teile(
                 melden(str(fehler))
                 return
             state.uebung_laeufe[uebung.id] = lauf.id
+            zaehlen.meldung_zeigen(page, state)  # ein Zählen einer anderen Übung endete
             state.neu_zeichnen()
 
         return handler
@@ -168,7 +175,8 @@ def uhr_teile(
                 melden(str(fehler))
                 return
             state.uebung_laeufe[uebung.id] = lauf.id
-            melden(f"{uebung.name}: {profil.anzeigename} steht bereit — oben „Alle starten“")
+            if not zaehlen.meldung_zeigen(page, state):
+                melden(f"{uebung.name}: {profil.anzeigename} steht bereit — oben „Alle starten“")
             state.neu_zeichnen()
 
         return handler
@@ -345,11 +353,19 @@ def _knoepfe(
 
 def _laufend(page: Any, state: Any, e: Einheitslauf) -> ft.Control:
     """Die laufende Uhr der Übung: Zeit, Anhalten bzw. Weiter, Fertig, Abbrechen — sie
-    zählt im Takt des Tickers mit (`AppState.timer_beobachter`)."""
+    zählt im Takt des Tickers mit (`AppState.timer_beobachter`). Zählt der Sensor mit, steht
+    darunter die Zahl mit ±1 (`components.zaehlen.neben_der_uhr`, im Takt der Einheit)."""
     assert e.timer is not None
     lauf = e.timer.lauf
     teil = e.teil("plan")
     zaehlt = isinstance(teil, UebungBaustein) and teil.kontext.zeitfeld is not None
+    zaehl_zeilen = (
+        zaehlen.neben_der_uhr(
+            page, state, e, teil.kontext.uebung_id, teil.kontext.item_id, name="uhr"
+        )
+        if isinstance(teil, UebungBaustein)
+        else []
+    )
     zeit = ft.Text(size=40, weight=ft.FontWeight.BOLD)
     oben = ft.Text(size=14, opacity=0.85, expand=True)
     pause = ft.OutlinedButton(height=48, style=ft.ButtonStyle(shape=ECKEN), expand=True)
@@ -412,6 +428,7 @@ def _laufend(page: Any, state: Any, e: Einheitslauf) -> ft.Control:
                     ],
                 ),
                 zeit,
+                *zaehl_zeilen,
                 ft.Row(
                     spacing=8,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,

@@ -62,6 +62,7 @@ from .kurse import (
 from .models import Exercise, Media, MediaKind, MediaSource, Plan, jetzt
 from .result_spec import VORLAGEN, ResultSpec, basis_key
 from .timer import TimerProfil
+from .zaehlen import SensorWahl
 
 #: Kennung im Feld ``format`` — andere JSON-Dateien (Messungen) sind kein Paket
 FORMAT = "trainingsapp-uebungspaket"
@@ -563,6 +564,9 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             timer=_timer_lesen(eintrag.get("timer", []), uid),
             uhr=eintrag.get("uhr") is not False,
             zaehlt_als=_zaehlt_als_lesen(eintrag.get("zaehlt_als")),
+            # Tolerant wie `uhr` und `zaehlt_als`: Unbrauchbares gilt als Vorgabe, das Paket
+            # bleibt lesbar (`core.zaehlen.SensorWahl.aus_dict`).
+            beschleunigung=SensorWahl.aus_dict(eintrag.get("beschleunigung")),
         ),
         key,
     )
@@ -731,6 +735,13 @@ def stand(u: Exercise) -> dict[str, Any]:
 
     >>> stand(Exercise(name="Baum", typen=["Qigong"]))["typen"]
     ['Qigong']
+
+    Was der Vorgabe folgt, steht nicht darin — etwa die Karte „Beschleunigungssensor“:
+
+    >>> "beschleunigung" in stand(Exercise(name="Baum"))
+    False
+    >>> stand(Exercise(name="Baum", beschleunigung=SensorWahl(atmung=True)))["beschleunigung"]
+    {'atmung': True}
     """
     d: dict[str, Any] = {"name": u.name}
     if u.description:
@@ -748,6 +759,10 @@ def stand(u: Exercise) -> dict[str, Any]:
         d["uhr"] = False
     if u.zaehlt_als:
         d["zaehlt_als"] = u.zaehlt_als
+    # Leer fällt weg: sonst gälte jede installierte Paketübung gegen ihren gespeicherten
+    # Paketstand als „geändert: Beschleunigungssensor“ (`abweichungen`).
+    if beschleunigung := u.beschleunigung.als_dict():
+        d["beschleunigung"] = beschleunigung
     if u.default_target:
         d["default_target"] = u.default_target
     medien = [
@@ -793,6 +808,7 @@ FELDNAMEN: dict[str, str] = {
     "timer": "Timer",
     "uhr": "Uhr",
     "zaehlt_als": "Zählt als",
+    "beschleunigung": "Beschleunigungssensor",
     "media": "Videos",
 }
 

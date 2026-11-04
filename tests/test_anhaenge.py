@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
@@ -19,7 +20,8 @@ from trainingsapp.core.anhaenge import (
     neuer_anhang,
     verwaiste,
 )
-from trainingsapp.core.models import DayNote, Plan, Subject, lokaler_tag
+from trainingsapp.core.models import DayNote, Exercise, Plan, Subject, lokaler_tag
+from trainingsapp.core.result_spec import SPEC_HALTEN
 from trainingsapp.data.anhaenge import (
     AnhangRepo,
     qualitaet_lesen,
@@ -262,7 +264,19 @@ def test_migration_029_behaelt_anhaenge_und_erlaubt_audio_und_tag(tmp_path) -> N
             (ordner / datei.name).write_text(datei.read_text(encoding="utf-8"), encoding="utf-8")
     con = verbinden(tmp_path / "alt.db")
     assert migrieren(con, ordner) == 28
-    seed_einspielen(con)
+    # Schema 28 kennt `acc_json` (037) nicht — die Übung roh, wie die Datenbank sie damals hatte
+    uebung = Exercise(id=seed_id("nacken_dehnung"), name="Nackendehnung", result_spec=SPEC_HALTEN)
+    con.execute(
+        "INSERT INTO exercise (id, name, category, result_spec_json, created_at, updated_at) "
+        "VALUES (?, ?, 'Dehnung', ?, ?, ?)",
+        (
+            uebung.id,
+            uebung.name,
+            json.dumps(uebung.result_spec.to_dict(), ensure_ascii=False),
+            uebung.created_at.isoformat(),
+            uebung.updated_at.isoformat(),
+        ),
+    )
     profil = Subject(name="Alt")
     # Schema 28 kennt `geschlecht` (034) nicht — das Profil roh
     con.execute(
@@ -278,7 +292,6 @@ def test_migration_029_behaelt_anhaenge_und_erlaubt_audio_und_tag(tmp_path) -> N
     )
     sitzungen = SessionRepo(con)
     session = sitzungen.session_fuer(profil.id, plan.id, lokaler_tag(datetime.now(UTC)))
-    uebung = ExerciseRepo(con).laden(seed_id("nacken_dehnung"))
     eintrag = sitzungen.eintrag_anlegen(session, uebung, {"hold": [30]}, "")
     con.execute(
         "INSERT INTO entry_media (id, session_entry_id, kind, uri, recorded_at, bytes, note, "
@@ -287,7 +300,7 @@ def test_migration_029_behaelt_anhaenge_und_erlaubt_audio_und_tag(tmp_path) -> N
         (eintrag.id,),
     )
     con.commit()
-    assert migrieren(con) == 36
+    assert migrieren(con) == 37
     repo = AnhangRepo(con, tmp_path / "Anhaenge")
     alt = repo.laden("alt")
     assert alt is not None and (alt.eintrag_id, alt.note, alt.bytes) == (eintrag.id, "links", 300)
@@ -404,7 +417,7 @@ def test_migration_036_notizen_mit_tagebuch_und_anhaengen(tmp_path) -> None:
         (t,),
     )
     con.commit()
-    assert migrieren(con) == 36
+    assert migrieren(con) == 37
     notizen, tags = DayNoteRepo(con), NoteTagRepo(con)
     (tagebuch,) = tags.alle("p")
     assert tagebuch.fest and tagebuch.name == "Tagebuch"

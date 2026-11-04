@@ -23,6 +23,12 @@ ja trotzdem noch verketten“): Ein Teil kann einer laufenden Einheit beitreten
 solchen Einzelstarts entstand, endet von selbst, wenn nichts in ihr mehr läuft
 (`ende_wenn_alles_fertig`, `aktiv` je Teil).
 
+**Zählen** (Ben, 4.11.2026, ``docs/plan_beschleunigung.md`` §5.2): Der Teil ``zaehlen``
+(`devices.zaehlen.ZaehlBaustein`) zählt Wiederholungen mit dem Beschleunigungssensor. Ein
+Zähllauf ist eine Einheit aus Übung und Zählen (und der HRV, die schon aufnimmt) und endet mit
+dem Zählen (`Einheitslauf.ende_mit_zaehlen`); läuft schon die Uhr derselben Übung, tritt er ihr
+bei. Satzgrenzen eines Timers sieht er über ``beobachten`` (die Ereignisse der Einheit).
+
 Die Teile kennen einander nicht. Kein flet: Speichern in die Datenbank und das
 Eintragen einer Aufnahme bleiben beim Aufrufer (UI), wie bei `Messlauf`.
 """
@@ -49,6 +55,7 @@ from ..core.einheit import (
     Senke,
     Zeitbasis,
     Zustand,
+    daten_pruefen,
     in_uebung,
     projektion,
     uebung_ende_text,
@@ -360,6 +367,25 @@ class UebungKontext:
     auspraegung: dict[str, Any] = field(default_factory=dict)
 
 
+def kontext_daten(k: UebungKontext) -> dict[str, Any]:
+    """Was die Zeitleiste über die Übung festhält — genug, um einen abgebrochenen Lauf später
+    doch einzutragen („Läufe heute“). Übung und Zählen schreiben es an ihre Beteiligung.
+
+    >>> kontext_daten(UebungKontext("u1", "Planke", item_id="i1", auspraegung={"side": "links"}))
+    {'uebung': 'u1', 'name': 'Planke', 'planuebung': 'i1', 'side': 'links'}
+    """
+    daten: dict[str, Any] = {"uebung": k.uebung_id, "name": k.name}
+    if k.plan_id:
+        daten["plan"] = k.plan_id
+    if k.item_id:
+        daten["planuebung"] = k.item_id
+    if k.zeitfeld:
+        daten["zeitfeld"] = k.zeitfeld
+    # Flach, wie im Eintrag — die Zeitleiste nimmt nur einfache Werte (`daten_pruefen`)
+    daten.update({s: k.auspraegung[s] for s in AUSFUEHRUNG_SCHLUESSEL if s in k.auspraegung})
+    return daten
+
+
 class UebungBaustein:
     """Eine Übung als Teil einer Einheit (Ben, 17.10.2026): Anfang und Ende in der
     Zeitleiste (``plan/uebung_start``, ``plan/uebung_ende``) — in einer laufenden
@@ -375,6 +401,7 @@ class UebungBaustein:
         self._t0: float | None = None
         self._gemeldet = False
         self._ende_gemeldet = False
+        self._beteiligung: Beteiligung | None = None
 
     @property
     def name(self) -> str:
@@ -391,23 +418,20 @@ class UebungBaustein:
         return None
 
     def _daten(self) -> dict[str, Any]:
-        """Was die Zeitleiste über die Übung festhält — genug, um einen abgebrochenen
-        Lauf später doch einzutragen („Läufe heute“)."""
-        k = self.kontext
-        daten: dict[str, Any] = {"uebung": k.uebung_id, "name": k.name}
-        if k.plan_id:
-            daten["plan"] = k.plan_id
-        if k.item_id:
-            daten["planuebung"] = k.item_id
-        if k.zeitfeld:
-            daten["zeitfeld"] = k.zeitfeld
-        # Flach, wie im Eintrag — die Zeitleiste nimmt nur einfache Werte (`daten_pruefen`)
-        daten.update({s: k.auspraegung[s] for s in AUSFUEHRUNG_SCHLUESSEL if s in k.auspraegung})
-        return daten
+        return kontext_daten(self.kontext)
+
+    def kontext_setzen(self, kontext: UebungKontext) -> None:
+        """Ein neuer Kontext mitten im Lauf: Die Uhr tritt einem Zähllauf derselben Übung bei
+        und bringt ihre Wahl mit (Zeitfeld, Ausführung — ``ui.uebung_lauf.starten``). Die
+        Beteiligung schreibt die Einheit mit ihrem Ende neu (`Einheitslauf.beenden`)."""
+        self.kontext = kontext
+        if self._beteiligung is not None:
+            self._beteiligung.daten = daten_pruefen(self._daten())
 
     def starten(self, t0: float) -> Beteiligung:
         self._t0 = t0
-        return Beteiligung("plan", Rolle.MITSTARTEN, daten=self._daten())
+        self._beteiligung = Beteiligung("plan", Rolle.MITSTARTEN, daten=self._daten())
+        return self._beteiligung
 
     def takt(self, jetzt: float) -> list[Ereignis]:
         if self._t0 is None or self._gemeldet:
@@ -481,6 +505,9 @@ class Einheitslauf:
         self.ende_mit_timer = False
         #: Ende der Einheit, wenn ein Plan-Ablauf durch ist (``plan/ende``)
         self.ende_mit_plan = False
+        #: Ende der Einheit, wenn das Zählen endet (``zaehlen/zaehlen_ende``) — ein Zähllauf
+        #: ist eine Einheit aus Übung und Zählen (Plan Beschleunigung, Leitentscheidung 1)
+        self.ende_mit_zaehlen = False
         #: Ende, sobald kein Teil mehr läuft (`aktiv`) — für Einheiten aus Einzelstarts
         #: (Ben, 18.10.2026): der Timer allein endet mit ihm, eine Messung mit ihrem Stopp
         self.ende_wenn_alles_fertig = False
@@ -514,8 +541,12 @@ class Einheitslauf:
             raise RuntimeError("Teile kommen vor dem Start dazu")
         if any(t.art == teil.art for t in self.teile):
             raise ValueError(f"{teil.art} ist schon dabei")
+        from .zaehlen import ZaehlBaustein  # spät: das Zählen baut auf dieser Datei auf
+
         self.teile.append(teil)
-        if isinstance(teil, HrvBaustein):  # mit HRV gilt die Uhr der Quelle (Simulator!)
+        if isinstance(teil, HrvBaustein) or (isinstance(teil, ZaehlBaustein) and self.hrv is None):
+            # Mit HRV (oder dem Zählen, das ihren Puffer liest) gilt die Uhr der Quelle
+            # (Simulator!)
             self.uhr = teil.messlauf.uhr
             self.echtzeit = bool(getattr(teil.messlauf.quelle, "echtzeit", True))
         self._uhr_weitergeben()
@@ -539,10 +570,16 @@ class Einheitslauf:
         tritt sie nur bei). Was so dazukam, hat die Einheit nicht gestartet: Eine
         HRV-Aufnahme läuft nach ihrem Ende weiter (`am_ende_stoppen`), ein Timer endet mit.
 
+        Das Zählen beginnt jetzt (rückwirkend wird nichts gezählt) und sieht danach einmal
+        alle bisherigen Ereignisse (``beobachten``): Läuft gerade eine Pause des Timers, wartet
+        es auf den nächsten zählenden Abschnitt.
+
         Raises:
             RuntimeError: Die Einheit läuft nicht (vorbereitet, im Countdown, beendet).
             ValueError: Ein Teil dieser Art ist schon dabei.
         """
+        from .zaehlen import ZaehlBaustein  # spät: das Zählen baut auf dieser Datei auf
+
         if self.zustand is not Zustand.LAEUFT or self.t0 is None or self.zeitbasis is None:
             raise RuntimeError("Beitreten geht nur, solange die Einheit läuft")
         if any(t.art == teil.art for t in self.teile):
@@ -558,7 +595,7 @@ class Einheitslauf:
             b = teil.starten(self.t0)
             if neu:
                 self.am_ende_stoppen.setdefault("hrv", False)
-        elif isinstance(teil, TimerBaustein):
+        elif isinstance(teil, TimerBaustein | ZaehlBaustein):
             b = teil.starten(self.t0, bei=jetzt)
         else:
             b = teil.starten(self.t0)
@@ -576,7 +613,11 @@ class Einheitslauf:
             daten.update({"datei": b.datei, "versatz_s": b.versatz_s})
         elif isinstance(teil, TimerBaustein):
             daten["profil"] = teil.lauf.profil.markenname
+        elif isinstance(teil, ZaehlBaustein):
+            daten.update({"uebung": teil.kontext.uebung_id, "name": teil.name})
         self._aufnehmen([Ereignis(t, teil.art, "beigetreten", "", daten)], jetzt)
+        # Was bisher geschah (läuft der Timer, zählt sein Abschnitt?) — nur dem Neuen
+        self._beobachten([teil], list(self.ereignisse))
 
     def teil(self, art: str) -> Baustein | None:
         return next((t for t in self.teile if t.art == art), None)
@@ -757,7 +798,8 @@ class Einheitslauf:
             # Nur die Messung, die schon lief (Einzelstarts, `ui.einheit.platz_machen`):
             # nichts, was eine Klammer bräuchte (Ben, 26.10.2026: „Start: HRV-Messung“ weg)
             return False
-        return self.teil("plan") is None
+        # Auch das Zählen nicht: es gehört zu einer Übung, deren Start und Ende klammern
+        return self.teil("plan") is None and self.teil("zaehlen") is None
 
     def takt(self) -> list[Ereignis]:
         """Ereignisse aller Teile seit dem letzten Takt sammeln, schreiben, projizieren."""
@@ -777,6 +819,7 @@ class Einheitslauf:
         gesammelt.extend(self._schlaf_pruefen(jetzt))
         gesammelt.sort(key=lambda e: e.t_s)
         gesammelt = self._mit_uebung(gesammelt)
+        self._beobachten(self.teile, gesammelt)
         self._aufnehmen(gesammelt, jetzt)
         neu.extend(gesammelt)
         if neu and self.beobachter is not None:
@@ -792,6 +835,10 @@ class Einheitslauf:
         if self.ende_mit_timer and any(e.quelle == "timer" and e.art == "ende" for e in neu):
             return True
         if self.ende_mit_plan and any(e.quelle == "plan" and e.art == "ende" for e in neu):
+            return True
+        if self.ende_mit_zaehlen and any(
+            e.quelle == "zaehlen" and e.art == "zaehlen_ende" for e in neu
+        ):
             return True
         return self.ende_wenn_alles_fertig and not any(self._aktiv(t) for t in self.teile)
 
@@ -811,6 +858,17 @@ class Einheitslauf:
                 x = replace(x, daten={**x.daten, **uhr_angaben(timer.lauf)})
             out.append(x)
         return out
+
+    def _beobachten(self, teile: Sequence[Baustein], ereignisse: Sequence[Ereignis]) -> None:
+        """Die Ereignisse der Einheit an die Teile, die zusehen wollen (``beobachten``,
+        freiwillig) — ein Fehler darin stoppt nichts."""
+        if not ereignisse:
+            return
+        for teil in teile:
+            sehen = getattr(teil, "beobachten", None)
+            if callable(sehen) and id(teil) in self._gestartet:
+                with contextlib.suppress(Exception):
+                    sehen(ereignisse)
 
     def _aktiv(self, teil: Baustein) -> bool:
         """Läuft der Teil noch? Ohne Angabe (`aktiv`) gilt er als laufend."""
@@ -951,6 +1009,7 @@ class Einheitslauf:
         grund = "abgebrochen" if self.zustand is Zustand.COUNTDOWN else ""
         gesammelt.sort(key=lambda e: e.t_s)
         gesammelt = self._mit_uebung(gesammelt)
+        self._beobachten(self.teile, gesammelt)
         ende = Ereignis(
             max(t, 0.0), "einheit", "ende", self.titel, {"grund": grund} if grund else {}
         )
@@ -999,5 +1058,6 @@ __all__ = [
     "TimerBaustein",
     "UebungBaustein",
     "UebungKontext",
+    "kontext_daten",
     "uhr_angaben",
 ]

@@ -26,7 +26,8 @@ Tabelle `package` und Spalte `exercise.package_id` seit Migration 014,
 
 **Paketstand.** Jede Übung eines Pakets trägt ihre Standardwerte aus dem Paket
 (`package_standard_json`, genau die Felder des Dateiformats unten: Name, Beschreibung,
-Symbol, Parameter samt Chips, Ziel, Limits, Typen, Regionen, Videos).
+Symbol, Parameter samt Chips, Ziel, Limits, Typen, Regionen, Timer, Uhr, Zählt als,
+Beschleunigungssensor, Videos).
 Jeder Import frischt ihn auf; der Start trägt ihn beim Paket „Standard“ nur nach, wo er
 fehlt. Wer einen Typ oder eine Region umbenennt oder löscht, ändert ihn mit — die
 Paketübungen gelten danach nicht als „geändert“ (Ben, 15.10.2026). „Auf Paketstand
@@ -185,6 +186,7 @@ Je Übung:
 | `timer[]` | nein | Timer-Profile der Übung (Ben, 17.10.2026; `docs/plan_einheit.md`, Stufe 3): je Profil `name`, `abschnitte[]` (`name`, `dauer_s`, `klang`, `zaehlt` — fehlt `zaehlt`, zählt der Abschnitt), `runden`, für eine Folge `teil_name` und `teile[]` (`name`, `runden`, `abschnitte[]`). `id` schreibt der Export; ohne sie eine feste aus Übung und Stelle. Fehlt `timer`, gilt eine Timer-Regel im `limit_spec` als Einzeltimer. Im Drei-Wege-Abgleich ein Feld |
 | `uhr` | nein | Stoppuhr und Timer stehen in der Übung bereit (Ben, 18.10.2026; `docs/plan_stoppuhr.md`); fehlt = an, `false` = aus. Im Drei-Wege-Abgleich ein Feld |
 | `zaehlt_als` | nein | „Zählt als“, wenn die Übung Haltezeit anbietet: `hold` (Haltezeit, ein Satz je Lauf) oder `duration` (Zeit); fehlt = Haltezeit. Ohne Haltezeit zählt die Uhr immer als Zeit. Im Drei-Wege-Abgleich ein Feld |
+| `beschleunigung` | nein | Die Karte „Beschleunigungssensor“ (Ben, 4.11.2026; `docs/plan_beschleunigung.md` §3): eine Tabelle, etwa `beschleunigung = { wiederholungen = true, atmung = true }`, mit `wiederholungen` (Wahrheitswert; fehlt = an, wenn die Übung ein Feld der Art `reps` hat — ohne eins nie), `atmung` (Wahrheitswert; fehlt = an bei Typ „Atmung“), `vorlage` (Bewegung; fehlt = `auto`, „Automatisch“ — ein Schlüssel, den hrv-core nicht kennt, zählt wie `auto`) und `feld` („Zählt in“ bei mehreren Wiederholungsfeldern, etwa `reps_2`; fehlt = das erste). Fehlt das Feld, gilt überall die Vorgabe; der Export schreibt nur, was davon abweicht. Unbrauchbare Werte gelten als Vorgabe, das Paket bleibt lesbar — `trainingsapp-paket pruefen` meldet einen falschen Typ als Fehler, einen unbekannten Schlüssel als Hinweis; ältere Apps übergehen das Feld (keine neue Formatversion). In der App `exercise.acc_json` (Migration 037). Im Drei-Wege-Abgleich ein Feld |
 | `default_felder` | — | **überlesen** seit 22.10.2026 (P79, C2): Was die Übung hat, bieten alle Pläne an; weniger stellt man in der Planübung ein. Der Export schreibt es nicht mehr |
 | `media[]` | nein | `{kind, source, uri, title, license}`; leere `uri` und `source: "local"` fallen weg. `uri` nur `https://…` oder `mailto:…` — andere Schemata (`http://`, `intent://`, `tel:`, `file://`) verwirft der Import still, die Übung bleibt; die App öffnet außerdem vor jedem Tipp nur solche Adressen (`core/links.py`, auch für Links im Kapiteltext) |
 | `variante_von` | — | **überlesen** seit 26.10.2026: „Im Verlauf zusammen mit“ (Kopie teilt die Kachel des Originals) ist ausgebaut; der Export schreibt es nicht mehr, `trainingsapp-paket pruefen` prüft es nicht mehr |
@@ -263,7 +265,8 @@ uv run --project ../trainingsapp trainingsapp-paket uebernehmen .daten/trainings
 
 `pruefen` wendet die Regeln des Standardpakets an (Schlüssel, Beschreibung, Variante,
 Symbol — Symbole nur mit flet); Typen und Regionen außerhalb des Standardpakets sind
-Hinweise. `--wortliste DATEI` sucht Begriffe, die in Pakettexten nichts verloren haben
+Hinweise. In `beschleunigung` ist ein falscher Typ ein Fehler (die App läse ihn still als
+Vorgabe), ein unbekannter Schlüssel ein Hinweis. `--wortliste DATEI` sucht Begriffe, die in Pakettexten nichts verloren haben
 (Sprachregelung der Praxis-Website: erklären, nicht bewerten — die Liste liegt im privaten
 Repo der Homepage, `docs/wortliste-zone3.txt`); Treffer sind Hinweise, mit `--streng`
 Fehler. `index` schreibt den Index einer Paketquelle (ID, Name, Version, URL, SHA-256,

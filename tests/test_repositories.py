@@ -65,6 +65,26 @@ def test_speichern_und_laden(repo) -> None:
     assert zurueck.created_at == u.created_at
 
 
+def test_beschleunigung_reist_durch_die_datenbank(repo) -> None:
+    """Die Karte „Beschleunigungssensor“ (Migration 037, ``acc_json``): gespeichert wird nur,
+    was von der Vorgabe abweicht; ein Update ändert sie, Kaputtes liest sich als Vorgabe."""
+    from trainingsapp.core.zaehlen import SensorWahl
+
+    u = Exercise(name="Kniebeuge", result_spec=SPEC_SAETZE_WDH)
+    repo.speichern(u)
+    zeile = repo.con.execute("SELECT acc_json FROM exercise WHERE id = ?", (u.id,)).fetchone()
+    assert zeile["acc_json"] == "{}"
+    assert repo.laden(u.id).beschleunigung == SensorWahl()
+
+    u.beschleunigung = SensorWahl(wiederholungen=False, atmung=True, feld="reps")
+    repo.speichern(u)
+    assert repo.laden(u.id).beschleunigung == u.beschleunigung
+    assert [x.beschleunigung for x in repo.alle() if x.id == u.id] == [u.beschleunigung]
+
+    repo.con.execute("UPDATE exercise SET acc_json = '[1' WHERE id = ?", (u.id,))
+    assert repo.laden(u.id).beschleunigung == SensorWahl()
+
+
 def test_unbekannte_id_liefert_none(repo) -> None:
     """None, keine Ausnahme — die Ansicht soll das behandeln können."""
     assert repo.laden("gibt-es-nicht") is None
@@ -986,7 +1006,7 @@ def test_migration_028_planuebung_folgt(tmp_path) -> None:
             (f"i{nr}", nr, ziel, felder),
         )
     con.commit()
-    assert migrieren(con) == 36
+    assert migrieren(con) == 37
     zeilen = {
         r["id"]: (r["target_json"], r["fields_json"])
         for r in con.execute("SELECT id, target_json, fields_json FROM plan_item")
@@ -994,6 +1014,92 @@ def test_migration_028_planuebung_folgt(tmp_path) -> None:
     assert zeilen == {"i0": ("null", '["hold"]'), "i1": ('{"hold": [45]}', '["hold", "weight"]')}
     zeile = con.execute("SELECT default_fields_json, clock_counts FROM exercise").fetchone()
     assert tuple(zeile) == (None, 1)
+
+
+def test_migration_037_beschleunigung(tmp_path) -> None:
+    """Migration 037: alte Übungen bekommen ``acc_json = '{}'`` (Vorgabe aus der Übung), und
+    `einheit_baustein` kennt den Teil 'zaehlen' — ohne dass eine Beteiligung verloren geht,
+    ihre Reihenfolge sich ändert oder die übrigen Prüfungen wegfallen."""
+    import sqlite3
+
+    from trainingsapp.core.zaehlen import SensorWahl
+    from trainingsapp.data.db import MIGRATIONS_DIR, migrieren, verbinden
+    from trainingsapp.data.einheiten import EinheitRepo
+
+    ordner = tmp_path / "bis036"
+    ordner.mkdir()
+    for datei in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if int(datei.name[:3]) <= 36:
+            (ordner / datei.name).write_text(datei.read_text(encoding="utf-8"), encoding="utf-8")
+    con = verbinden(tmp_path / "alt.db")
+    assert migrieren(con, ordner) == 36
+    jetzt = "2026-11-04T12:00:00+00:00"
+    con.execute(
+        "INSERT INTO exercise (id, name, category, result_spec_json, created_at, updated_at) "
+        "VALUES ('u', 'Kniebeuge', '', ?, ?, ?)",
+        ('{"fields": [{"key": "reps", "type": "set_list", "label": "Wdh."}]}', jetzt, jetzt),
+    )
+    con.execute(
+        "INSERT INTO subject (id, name, created_at, updated_at) VALUES ('ich', 'Ich', ?, ?)",
+        (jetzt, jetzt),
+    )
+    con.execute(
+        "INSERT INTO einheit (id, subject_id, titel, started_at) VALUES ('e', 'ich', 'A', ?)",
+        (jetzt,),
+    )
+    # Gleiches ``von_s``: Die Reihenfolge kommt aus der rowid — „z“ wurde vor „a“ angelegt
+    for bid, art, datei in [("z", "hrv", "P/1.json"), ("a", "timer", ""), ("m", "plan", "")]:
+        con.execute(
+            "INSERT INTO einheit_baustein (id, einheit_id, art, rolle, datei, von_s, daten_json) "
+            "VALUES (?, 'e', ?, 'mitstarten', ?, 0, ?)",
+            (bid, art, datei, '{"uebung": "u"}' if art == "plan" else "{}"),
+        )
+    with pytest.raises(sqlite3.IntegrityError):  # vorher nicht erlaubt
+        con.execute(
+            "INSERT INTO einheit_baustein (id, einheit_id, art, rolle) "
+            "VALUES ('x', 'e', 'zaehlen', 'mitstarten')"
+        )
+    con.commit()
+
+    assert migrieren(con) == 37
+    zeile = con.execute("SELECT acc_json FROM exercise WHERE id = 'u'").fetchone()
+    assert zeile["acc_json"] == "{}"
+    uebung = ExerciseRepo(con).laden("u")
+    assert uebung is not None and uebung.beschleunigung == SensorWahl()
+    beteiligungen = EinheitRepo(con).beteiligungen("e")
+    assert [(b.art, b.datei) for b in beteiligungen] == [
+        ("hrv", "P/1.json"),
+        ("timer", ""),
+        ("plan", ""),
+    ]
+    assert beteiligungen[2].daten == {"uebung": "u"}
+    indizes = {
+        r["name"]
+        for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'einheit_baustein'"
+        )
+    }
+    assert {"idx_einheit_baustein", "idx_einheit_datei"} <= indizes
+    # Jetzt darf der Zähl-Dienst teilnehmen; unbekannte Teile und Rollen bleiben verboten
+    con.execute(
+        "INSERT INTO einheit_baustein (id, einheit_id, art, rolle) "
+        "VALUES ('x', 'e', 'zaehlen', 'mitstarten')"
+    )
+    for art, rolle in [("handzaehler", "mitstarten"), ("zaehlen", "x")]:
+        with pytest.raises(sqlite3.IntegrityError):
+            con.execute(
+                "INSERT INTO einheit_baustein (id, einheit_id, art, rolle) VALUES ('y', 'e', ?, ?)",
+                (art, rolle),
+            )
+    with pytest.raises(sqlite3.IntegrityError):  # der Fremdschlüssel gilt weiter
+        con.execute(
+            "INSERT INTO einheit_baustein (id, einheit_id, art, rolle) "
+            "VALUES ('y', 'gibt-es-nicht', 'zaehlen', 'mitstarten')"
+        )
+    assert con.execute("PRAGMA foreign_key_check").fetchall() == []
+    con.execute("DELETE FROM einheit WHERE id = 'e'")  # ON DELETE CASCADE bleibt
+    assert con.execute("SELECT COUNT(*) FROM einheit_baustein").fetchone()[0] == 0
+    con.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1571,6 +1677,37 @@ def test_abschliessen_und_wieder_oeffnen(welt) -> None:
     assert e.result == {"reps": [15, 15]}  # hängt wieder am ersten an
 
 
+def test_abschliessen_mit_werten_in_einer_korrektur(welt) -> None:
+    """Der Chip, der mit einem Wert abhakt, während der Sensor zählte (Plan Beschleunigung,
+    Leitentscheidung 7): Der Wert kommt beim Schließen in denselben Eintrag, in einer
+    Korrektur. Kennt die Kopie das Feld nicht, bekommt er die Spezifikation der Übung."""
+    from dataclasses import replace
+
+    from trainingsapp.core.result_spec import vorrat_feld
+
+    con, repo, _ich, sitzung = welt
+    uebung = _wadenheben(con)
+    heute = lokaler_tag(jetzt())
+    a = repo.lauf_eintragen(sitzung, uebung, {"reps": [12]}, heute)
+    assert a.ended_at is None
+    mit_zeit = replace(
+        uebung,
+        result_spec=replace(
+            uebung.result_spec, fields=[*uebung.result_spec.fields, vorrat_feld("duration")]
+        ),
+    )
+    zu = repo.eintrag_schliessen(a.id, werte={"duration": 300}, uebung=mit_zeit)
+    assert zu.ended_at is not None and zu.result == {"reps": [12], "duration": 300}
+    assert zu.spec_snapshot is not None and zu.spec_snapshot.field_by_key("duration")
+    (nur,) = repo.eintraege(sitzung.id)  # eine Korrektur, kein zweiter Eintrag
+    assert nur.id == zu.id
+    # Kennt die Kopie das Feld, bleibt sie, wie sie ist
+    b = repo.lauf_eintragen(sitzung, mit_zeit, {"reps": [10]}, heute)
+    wieder = repo.eintrag_schliessen(b.id, werte={"duration": 60}, uebung=mit_zeit)
+    assert wieder.result == {"reps": [10], "duration": 60}
+    assert wieder.spec_snapshot == b.spec_snapshot
+
+
 def test_gemacht_schliesst_nur_dieselbe_ausfuehrung(welt) -> None:
     """„Gemacht“ ohne markierten Eintrag (Ausführung gewechselt): ein fertiger Eintrag mit
     der neuen Ausführung — der offene mit anderer Ausführung bleibt offen (Ben, 21.10.2026,
@@ -1787,7 +1924,6 @@ def test_migration_030_uebernimmt_vergebene_titel(tmp_path) -> None:
             (ordner / datei.name).write_text(datei.read_text(encoding="utf-8"), encoding="utf-8")
     con = verbinden(tmp_path / "alt.db")
     assert migrieren(con, ordner) == 29
-    seed_einspielen(con)
     ich = Subject(name="Ich")
     # Altstand ohne `geschlecht` (Migration 034): das Profil roh schreiben
     con.execute(
@@ -1805,7 +1941,7 @@ def test_migration_030_uebernimmt_vergebene_titel(tmp_path) -> None:
             )
         )
     con.commit()
-    assert migrieren(con) == 36
+    assert migrieren(con) == 37
     liste = hrv.titel_liste(ich.id)
     assert [t.name for t in liste] == ["Abends", "Morgens"]
     assert liste[1].zuletzt == datetime(2026, 10, 2, tzinfo=UTC)

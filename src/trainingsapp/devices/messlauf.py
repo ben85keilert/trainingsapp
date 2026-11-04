@@ -24,6 +24,16 @@ dem Backup ``.backup_<ts>_mitschnitt.jsonl``, beim Speichern ``sensor_<ts>_mitsc
 eine Zustandsprobe (Akku von Gerät und Handy, Verzug der Ereignisschleife, Pakete).
 `diagnose_beenden` stellt die Ströme zurück; die Messung läuft weiter.
 
+**Beschleunigung: ein Strom, mehrere Abnehmer** (Ben, 4.11.2026, ``docs/plan_beschleunigung.md``
+§5.1): Diagnosemodus und Zählen fordern sie an (`acc_anfordern`, `acc_freigeben`); gestellt wird
+die höchste gewünschte Rate, und mit der letzten Freigabe geht der Strom sofort auf den Stand von
+vorher zurück — ohne Nachlauf, der Akku geht vor. Der Puffer (`acc_reihe`, `acc_fenster`) füllt
+sich, solange jemand anfordert; die Zeiten der Proben kommen aus dem Gerätezeitstempel, die
+Ankunft ist nur der Anker. Je Rahmen gilt die Rate, mit der die Quelle ihn wirklich schickt
+(``acc_gestartet``, nicht der neue Wunsch); wechselt sie im Fenster, taktet `acc_reihe` die
+übrigen Rahmen auf die jüngste um (`umtakten`), statt sie wegzulassen. Gespeichert wird daraus
+im Alltag nichts (P123).
+
 **Eine neue Aufnahme beginnt mit leeren Kurven** (Ben, 16.10.2026):
 `aufnahme_starten` leert das Live-Fenster und setzt die Live-Achse auf 0.
 **Titel und Beschreibung schon vor der Aufnahme** (Ben, 17.10.2026: `titel_notiz`)
@@ -48,6 +58,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from hrv_core import mitschnitt as mt
 from hrv_core.aufnahme import Aufnahme, backup_entfernen, backup_lesen
 from hrv_core.ausschnitte import (
@@ -84,11 +95,78 @@ PROBE_S = 30.0
 VORABTEST_S = 20.0
 #: So viele ACC-Rahmen hält der Puffer (200 Hz, 36 Proben je Rahmen: gut 10 min)
 ACC_PUFFER_RAHMEN = 3600
+#: Rate, wenn die Quelle keine nennt (Vorgabe des H10 in hrv-core)
+ACC_RATE_VORGABE_HZ = 200
+#: Springt die Gerätezeit gegen die Ankunft um mehr als das (s), gilt ein neuer Anker
+#: (Neuverbinden, neue Zählung im Gerät)
+ACC_ANKER_SPRUNG_S = 2.0
 #: Takt, in dem der Verzug der Ereignisschleife gemessen wird (s)
 VERZUG_TAKT_S = 0.25
+#: Ab so vielen fehlenden Proben (in Abständen der Rate) ist zwischen zwei Rahmen eine Lücke —
+#: `umtakten` füllt sie nicht
+ACC_LUECKE_PROBEN = 3.0
 
 #: Alle so viele Sekunden schreibt die Aufnahme ein Backup (praxis_gui: 15 s).
 BACKUP_S = 15.0
+
+
+@dataclass(frozen=True, slots=True)
+class AccReihe:
+    """Beschleunigung aus dem Puffer (`Messlauf.acc_reihe`): Proben in einem Takt, mit der
+    Zeit jeder Probe auf der Uhr der Quelle — über eine Lücke im Strom hinweg springt ``t``."""
+
+    #: Proben n × 3 (mG)
+    xyz: np.ndarray
+    rate_hz: float
+    #: Zeit jeder Probe (s, Uhr der Quelle), aufsteigend
+    t: np.ndarray
+
+
+def umtakten(
+    xyz: np.ndarray, t: np.ndarray, rate_hz: float, ziel_hz: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Proben einer Rate auf eine andere bringen — je lückenlosem Stück linear auf ein
+    gleichmäßiges Raster der Zielrate; geht es herunter, vorher über die Rahmenbreite gemittelt
+    (sonst fiele das Rauschen ungeglättet hinein). Lücken im Strom bleiben Lücken.
+
+    >>> t = np.arange(0, 2, 1 / 200)
+    >>> xyz = np.column_stack([t * 100, np.zeros_like(t), np.ones_like(t)])
+    >>> neu, tn = umtakten(xyz, t, 200, 50)
+    >>> neu.shape, float(tn[1] - tn[0]), round(float(neu[40, 0]), 6)
+    ((100, 3), 0.02, 80.0)
+    >>> luecke = np.concatenate([t, t + 10])
+    >>> _, tl = umtakten(np.vstack([xyz, xyz]), luecke, 200, 50)
+    >>> tl.shape[0], bool(tl.max() > 11), bool(((tl > 2.5) & (tl < 9.5)).any())
+    (200, True, False)
+    """
+    xyz = np.asarray(xyz, dtype=np.float64).reshape(-1, 3)
+    t = np.asarray(t, dtype=np.float64)
+    if xyz.shape[0] == 0 or rate_hz == ziel_hz:
+        return xyz, t
+    breite = max(1, round(rate_hz / ziel_hz)) | 1  # ungerade: das Mittel bleibt zentriert
+    grenze = ACC_LUECKE_PROBEN / rate_hz
+    schnitte = np.flatnonzero(np.diff(t) > grenze) + 1
+    teile_xyz: list[np.ndarray] = []
+    teile_t: list[np.ndarray] = []
+    for von, bis in zip(
+        np.concatenate([[0], schnitte]), np.concatenate([schnitte, [t.shape[0]]]), strict=True
+    ):
+        stueck_t, stueck = t[von:bis], xyz[von:bis]
+        ordnung = np.argsort(stueck_t, kind="stable")  # Anker-Schwankung: nie rückwärts
+        stueck_t, stueck = stueck_t[ordnung], stueck[ordnung]
+        if breite > 1 and stueck.shape[0] >= breite:
+            kern = np.ones(breite) / breite
+            gewicht = np.convolve(np.ones(stueck.shape[0]), kern, mode="same")
+            stueck = np.column_stack(
+                [np.convolve(stueck[:, k], kern, mode="same") / gewicht for k in range(3)]
+            )
+        raster = np.arange(stueck_t[0], stueck_t[-1] + 0.5 / ziel_hz, 1.0 / ziel_hz)
+        raster = raster[raster <= stueck_t[-1] + 1e-9]
+        teile_t.append(raster)
+        teile_xyz.append(
+            np.column_stack([np.interp(raster, stueck_t, stueck[:, k]) for k in range(3)])
+        )
+    return np.concatenate(teile_xyz), np.concatenate(teile_t)
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +311,31 @@ class _Laufend:
 _LAUFEND = _Laufend()
 
 
+class _Ungesetzt:
+    """Platzhalter für `Messlauf._acc_vorher`: „noch nichts gemerkt“ (``None`` heißt aus)."""
+
+
+_UNGESETZT = _Ungesetzt()
+
+
+def _gleiche_uebung(stand: dict[str, Any], felder: dict[str, Any]) -> bool:
+    """Gehört der Satz des Zähl-Teils zur Übung der Notiz? Über den Kurzcode (beide aus
+    `core.kurzcode`), sonst über den Namen; weiß eine Seite nichts, gilt er.
+
+    >>> _gleiche_uebung({"uebung_id": "AAAA"}, {"uebung_id": "AAAA", "uebung": "x"})
+    True
+    >>> _gleiche_uebung({"uebung_id": "AAAA", "uebung": "Kniebeuge"}, {"uebung_id": "BBBB"})
+    False
+    >>> _gleiche_uebung({"uebung": "Kniebeuge"}, {"uebung": "Liegestütz"}), _gleiche_uebung({}, {})
+    (False, True)
+    """
+    for schluessel in ("uebung_id", "uebung"):
+        a, b = stand.get(schluessel), felder.get(schluessel)
+        if a and b:
+            return bool(a == b)
+    return True
+
+
 class Messlauf:
     """Verbindet eine Quelle mit Live-Anzeige und Aufnahme."""
 
@@ -263,8 +366,22 @@ class Messlauf:
         self.mitschnitt: mt.Schreiber | None = None
         #: Seit wann der Diagnosemodus aufzeichnet (Uhr der Quelle)
         self.diagnose_seit: float | None = None
-        #: Zusatzströme vor dem Diagnosemodus — `diagnose_beenden` stellt sie wieder her
-        self._diagnose_vorher: tuple[bool, tuple[int, int] | None] | None = None
+        #: EKG vor dem Diagnosemodus — `diagnose_beenden` stellt es wieder her (die
+        #: Beschleunigung gibt er frei, `acc_freigeben`)
+        self._diagnose_vorher: bool | None = None
+        #: EKG, das der Messlauf will (Diagnosemodus, Vorabtest) — ``None``: wie die Quelle
+        self._ekg_soll: bool | None = None
+        #: Wer die Beschleunigung braucht: Zweck (``diagnose``, ``zaehlen``) → (Rate, Bereich)
+        self._acc_anforderungen: dict[str, tuple[int, int]] = {}
+        #: Stand der Quelle vor der ersten Anforderung — die letzte Freigabe stellt ihn her
+        self._acc_vorher: tuple[int, int] | _Ungesetzt | None = _UNGESETZT
+        #: Gerätezeit → Uhr der Quelle (s): der Anker der Probenzeiten (`_acc_empfangen`)
+        self._acc_versatz: float | None = None
+        #: Ankunft des letzten ACC-Rahmens (Uhr der Quelle) — ``None``: noch keiner
+        self.acc_zuletzt: float | None = None
+        #: Die Ströme der Quelle werden eines nach dem anderen umgeschaltet (der Steuerpunkt
+        #: beantwortet ein Kommando nach dem anderen) — jeder Auftrag stellt den neuesten Stand
+        self._stroeme_lock = asyncio.Lock()
         #: Vorgemerkt im Sensorblatt: (EKG, Beschleunigung, Kopf) — beginnt mit der Aufnahme
         self._diagnose_wunsch: tuple[bool, tuple[int, int] | None, dict[str, Any]] | None = None
         self._probe_task: asyncio.Task[None] | None = None
@@ -274,8 +391,9 @@ class Messlauf:
         #: Verzug der Ereignisschleife (ms): letzter Wert und Spitze seit der letzten Probe
         self.verzug_ms = 0
         self._verzug_spitze_ms = 0
-        #: Beschleunigung der letzten Minuten (Ankunft, Proben) für den Zähler-Prototyp (Stufe 8)
-        self._acc_puffer: deque[tuple[float, list[tuple[int, int, int]]]] = deque(
+        #: Beschleunigung der letzten Minuten für den Zähler-Prototyp: je Rahmen (Ankunft,
+        #: Gerätezeit ns, Rate, Proben n × 3 mG, Zeit der letzten Probe auf der Uhr der Quelle)
+        self._acc_puffer: deque[tuple[float, int, int, np.ndarray, float]] = deque(
             maxlen=ACC_PUFFER_RAHMEN
         )
         #: Marken dieser Diagnose: (Uhr, Typ, ID) — für den Vergleich nach dem Satz
@@ -284,8 +402,12 @@ class Messlauf:
         self._satz_beginn: float | None = None
         #: Wer den Vergleich nach dem Satz zeigt (Oberfläche) — Fehler darin stoppen nichts
         self.diagnose_satz_beobachter: Callable[[dict[str, Any]], None] | None = None
-        #: Der letzte Vergleich (Übung, Satz, Marken, Zähler, eingetragen)
+        #: Der letzte Vergleich (Übung, Satz, Marken, Sensor, Korrektur, eingetragen)
         self.letzter_satz: dict[str, Any] | None = None
+        #: Der Satz des laufenden Zähl-Teils (`devices.zaehlen.ZaehlBaustein` setzt und löscht
+        #: den Haken): ``{"satz", "sensor", "korrektur", "wert", "feld"}`` — der Vergleich nach
+        #: dem Satz nimmt dann dessen Wert (ein Zähler, nicht zwei; Plan §5.2)
+        self.zaehl_satz: Callable[[], dict[str, Any] | None] | None = None
         # Die Uhr der Quelle — beim Simulator läuft sie ``tempo``-fach, bei echten
         # Geräten ist sie time.monotonic(). t_capture der Messwerte passt dazu.
         self._uhr: Callable[[], float] = getattr(quelle, "jetzt", time.monotonic)
@@ -1075,24 +1197,17 @@ class Messlauf:
         if schreiber is None:
             return None
         self._vorher_merken()
-        quelle: Any = self.quelle
-        if hasattr(quelle, "acc_beobachter"):
-            quelle.acc_beobachter = self._acc_empfangen
-        setzen = getattr(self.quelle, "stroeme_setzen", None)
-        if setzen is not None:
-            with contextlib.suppress(RuntimeError):  # ohne Ereignisschleife (Test)
-                self._stroeme_task = asyncio.get_running_loop().create_task(
-                    setzen(ekg=ekg, acc=acc), name="diagnose-stroeme"
-                )
+        # Die Beschleunigung über die Anforderung (Plan Beschleunigung §5.1): endet der
+        # Diagnosemodus, zählt ein laufendes Zählen weiter — und umgekehrt
+        self._ekg_soll = bool(ekg)
+        self._acc_setzen("diagnose", acc)
+        self._stroeme_anwenden()
         self._melden(True)
         return schreiber
 
     def _vorher_merken(self) -> None:
         if self._diagnose_vorher is None:
-            self._diagnose_vorher = (
-                bool(getattr(self.quelle, "ekg_wunsch", False)),
-                getattr(self.quelle, "acc_wunsch", None),
-            )
+            self._diagnose_vorher = bool(getattr(self.quelle, "ekg_wunsch", False))
 
     async def diagnose_beenden(self) -> None:
         """Zusatzströme zurück, Mitschnitt schließen — die Messung läuft weiter. Die Datei
@@ -1115,9 +1230,9 @@ class Messlauf:
         sieht über `vorabtest_stand`, ob sie mit ihrer Rate kommen."""
         self._vorher_merken()
         self.vorabtest_seit = self._uhr()
-        setzen = getattr(self.quelle, "stroeme_setzen", None)
-        if setzen is not None:
-            await setzen(ekg=ekg, acc=acc)
+        self._ekg_soll = bool(ekg)
+        self._acc_setzen("diagnose", acc)
+        await self._abwarten(self._stroeme_anwenden())
 
     def vorabtest_stand(self, *, ekg: bool, acc: tuple[int, int] | None) -> dict[str, Any]:
         """Je gewähltem Strom die Rate seit Testbeginn gegen das Soll: ``{"hr": {"rate",
@@ -1166,33 +1281,203 @@ class Messlauf:
         self._diagnose_marken = [m for m in self._diagnose_marken if m[2] != marke_id]
         return self.mitschnitt.marke_weg(marke_id, **felder)
 
-    # -- Zähler-Prototyp nach dem Satz (Stufe 8) ----------------------------------------
+    # -- Beschleunigung: ein Strom, mehrere Abnehmer (Plan Beschleunigung §5.1) -----------
+
+    @property
+    def acc_anforderungen(self) -> dict[str, tuple[int, int]]:
+        """Wer die Beschleunigung gerade braucht: Zweck → (Rate Hz, Bereich g)."""
+        return dict(self._acc_anforderungen)
+
+    @property
+    def acc_soll(self) -> tuple[int, int] | None:
+        """Was die Quelle liefern soll: die höchste gewünschte Rate und der größte Bereich —
+        nie weniger als vor der ersten Anforderung. Ohne Anforderung der Stand von vorher
+        (nach der letzten Freigabe), sonst der der Quelle."""
+        vorher = self._acc_vorher
+        if not self._acc_anforderungen:
+            if isinstance(vorher, _Ungesetzt):
+                return getattr(self.quelle, "acc_wunsch", None)
+            return vorher
+        wuensche = list(self._acc_anforderungen.values())
+        if isinstance(vorher, tuple):
+            wuensche.append(vorher)
+        return max(r for r, _ in wuensche), max(g for _, g in wuensche)
+
+    def acc_anfordern(self, zweck: str, rate_hz: int, bereich_g: int) -> None:
+        """Die Beschleunigung für ``zweck`` (``diagnose``, ``zaehlen``) — synchron: ab jetzt
+        füllt sich der Puffer, und ein Hintergrundauftrag stellt die Quelle um (ohne
+        Ereignisschleife nur der Wunsch). Eine zweite Anforderung desselben Zwecks ersetzt
+        die erste."""
+        if self._acc_setzen(zweck, (int(rate_hz), int(bereich_g))):
+            self._stroeme_anwenden()
+
+    def acc_freigeben(self, zweck: str) -> None:
+        """``zweck`` braucht die Beschleunigung nicht mehr. Mit der letzten Freigabe geht der
+        Strom sofort auf den Stand vor der ersten Anforderung (P119b: der Akku geht vor), der
+        Beobachter der Quelle wird frei und der Puffer leer."""
+        if self._acc_setzen(zweck, None):
+            self._stroeme_anwenden()
+
+    def _acc_setzen(self, zweck: str, wunsch: tuple[int, int] | None) -> bool:
+        """Eine Anforderung setzen oder (``None``) freigeben — ohne die Quelle umzustellen.
+        Gibt zurück, ob sich etwas änderte."""
+        alt = self._acc_anforderungen.get(zweck)
+        if wunsch == alt:
+            return False
+        quelle: Any = self.quelle
+        if wunsch is None:
+            del self._acc_anforderungen[zweck]
+            if not self._acc_anforderungen:
+                if getattr(quelle, "acc_beobachter", None) == self._acc_empfangen:
+                    quelle.acc_beobachter = None
+                self._acc_leeren()
+            return True
+        if not self._acc_anforderungen:
+            # Die erste Anforderung: was vorher war, merken; ab jetzt kommt alles in den Puffer
+            if isinstance(self._acc_vorher, _Ungesetzt):
+                self._acc_vorher = getattr(quelle, "acc_wunsch", None)
+            self._acc_leeren()
+            if hasattr(quelle, "acc_beobachter"):
+                quelle.acc_beobachter = self._acc_empfangen
+        self._acc_anforderungen[zweck] = (int(wunsch[0]), int(wunsch[1]))
+        return True
+
+    def _acc_leeren(self) -> None:
+        self._acc_puffer.clear()
+        self._acc_versatz = None
+        self.acc_zuletzt = None
+
+    def _stroeme_anwenden(self) -> asyncio.Task[None] | None:
+        """Die Ströme der Quelle auf den neuesten Stand bringen — ein Auftrag im Hintergrund
+        (`_stroeme_task`); ohne Ereignisschleife (Test) nichts."""
+        if getattr(self.quelle, "stroeme_setzen", None) is None:
+            return None
+        with contextlib.suppress(RuntimeError):  # ohne Ereignisschleife
+            self._stroeme_task = asyncio.get_running_loop().create_task(
+                self._stroeme_stellen(), name="messlauf-stroeme"
+            )
+            return self._stroeme_task
+        return None
+
+    async def _stroeme_stellen(self) -> None:
+        """Unter dem Schloss: EKG und Beschleunigung, wie sie *jetzt* sein sollen — ein
+        späterer Auftrag findet so nichts Veraltetes vor. Wirft nie."""
+        async with self._stroeme_lock:
+            setzen = getattr(self.quelle, "stroeme_setzen", None)
+            if setzen is None:
+                return
+            quelle: Any = self.quelle
+            ekg = self._ekg_soll
+            if ekg is None:
+                ekg = bool(getattr(quelle, "ekg_wunsch", False))
+            with contextlib.suppress(Exception):
+                await setzen(ekg=ekg, acc=self.acc_soll)
+            if not self._acc_anforderungen:
+                self._acc_vorher = _UNGESETZT  # wiederhergestellt
+            if self._diagnose_vorher is None:
+                self._ekg_soll = None
+
+    @staticmethod
+    async def _abwarten(task: asyncio.Task[None] | None) -> None:
+        if task is not None:
+            with contextlib.suppress(Exception):
+                await task
 
     def _acc_empfangen(
         self, zeitstempel_ns: int, proben: list[tuple[int, int, int]], t_capture: float
     ) -> None:
-        self._acc_puffer.append((t_capture, proben))
+        """Ein ACC-Rahmen in den Puffer. Die Zeit der letzten Probe kommt aus der Gerätezeit
+        plus Anker: die kleinste Verspätung bisher (ein Rahmen kommt nie vor seiner letzten
+        Probe an); springt die Gerätezeit, ein neuer Anker."""
+        if not proben:
+            return
+        # Die Rate, mit der die Quelle den Rahmen wirklich schickt: Zwischen neuem Wunsch und
+        # Neustart (`PolarQuelle.stroeme_setzen` wartet auf das EKG-Kommando) kommen noch
+        # Rahmen der alten — mit der neuen Rate abgelegt lägen sie gestreckt auf der Zeitachse
+        quelle: Any = self.quelle
+        stand = (
+            getattr(quelle, "acc_gestartet", None)
+            or getattr(quelle, "acc_wunsch", None)
+            or self.acc_soll
+        )
+        rate = int(stand[0]) if stand else ACC_RATE_VORGABE_HZ
+        geraet_s = zeitstempel_ns / 1e9
+        verspaetung = t_capture - geraet_s
+        if self._acc_versatz is None or abs(verspaetung - self._acc_versatz) > ACC_ANKER_SPRUNG_S:
+            self._acc_versatz = verspaetung
+        else:
+            self._acc_versatz = min(self._acc_versatz, verspaetung)
+        werte = np.asarray(proben, dtype=np.float64).reshape(-1, 3)
+        self._acc_puffer.append(
+            (t_capture, int(zeitstempel_ns), rate, werte, geraet_s + self._acc_versatz)
+        )
+        self.acc_zuletzt = t_capture
 
-    def _acc_fenster(self, von: float, bis: float) -> tuple[Any, float] | None:
-        """Proben (n × 3) im Fenster [von, bis) auf der Uhr der Quelle, dazu die Rate."""
-        import numpy as np
+    @property
+    def acc_rate_hz(self) -> int | None:
+        """Die Rate des jüngsten Rahmens im Puffer — ``None`` ohne Rahmen."""
+        return int(self._acc_puffer[-1][2]) if self._acc_puffer else None
 
-        wunsch = getattr(self.quelle, "acc_wunsch", None)
-        rate = float(wunsch[0]) if wunsch else 200.0
-        zeilen: list[tuple[int, int, int]] = []
-        for t_ankunft, proben in self._acc_puffer:
-            n = len(proben)
-            for i, probe in enumerate(proben):
-                t = t_ankunft - (n - 1 - i) / rate
-                if von <= t < bis:
-                    zeilen.append(probe)
-        if len(zeilen) < rate * 2:  # unter 2 s gibt es nichts zu zählen
+    def acc_reihe(
+        self, von: float, bis: float, *, rate: float | None = None, min_s: float = 2.0
+    ) -> AccReihe | None:
+        """Die gepufferten Proben im Fenster [von, bis) auf der Uhr der Quelle, in einem Takt:
+        ``rate`` (Vorgabe: die des jüngsten Rahmens im Fenster). Rahmen einer anderen Rate
+        (sie wechselte mitten im Satz, 50 → 200 Hz, wenn die Diagnose beginnt) taktet
+        `umtakten` um — der Prototyp braucht einen gleichmäßigen Takt, und weglassen hieße,
+        die Wiederholungen davor zu verlieren. ``t`` ist die Zeit jeder Probe, auch über eine
+        Lücke im Strom hinweg. ``None`` unter ``min_s`` Sekunden Daten."""
+        laeufe: list[tuple[int, list[np.ndarray], list[np.ndarray]]] = []
+        for _ankunft, _ns, r, werte, t_letzte in self._acc_puffer:
+            n = werte.shape[0]
+            t_erste = t_letzte - (n - 1) / r
+            if t_letzte < von or t_erste >= bis:
+                continue
+            zeiten = t_erste + np.arange(n) / r
+            if laeufe and laeufe[-1][0] == r:
+                laeufe[-1][1].append(werte)
+                laeufe[-1][2].append(zeiten)
+            else:
+                laeufe.append((r, [werte], [zeiten]))
+        if not laeufe:
             return None
-        return np.asarray(zeilen, dtype=np.float64), rate
+        ziel = float(rate) if rate else float(laeufe[-1][0])
+        teile_xyz: list[np.ndarray] = []
+        teile_t: list[np.ndarray] = []
+        for r, werte_liste, zeiten_liste in laeufe:
+            xyz, t = np.concatenate(werte_liste), np.concatenate(zeiten_liste)
+            if r != ziel:
+                xyz, t = umtakten(xyz, t, r, ziel)
+            maske = (t >= von) & (t < bis)
+            if maske.any():
+                teile_xyz.append(xyz[maske])
+                teile_t.append(t[maske])
+        if not teile_xyz:
+            return None
+        reihe = AccReihe(
+            np.concatenate(teile_xyz).astype(np.float64), ziel, np.concatenate(teile_t)
+        )
+        if reihe.xyz.shape[0] < ziel * min_s:
+            return None
+        return reihe
+
+    def acc_fenster(
+        self, von: float, bis: float, *, min_s: float = 2.0
+    ) -> tuple[np.ndarray, float, float] | None:
+        """Wie `acc_reihe` in der jüngsten Rate, kurz: ``(xyz n × 3 mG, Rate, Zeit der ersten
+        Probe)`` — ``None`` unter ``min_s`` Sekunden Daten."""
+        reihe = self.acc_reihe(von, bis, min_s=min_s)
+        if reihe is None:
+            return None
+        return reihe.xyz, reihe.rate_hz, float(reihe.t[0])
+
+    # -- Zähler-Prototyp nach dem Satz (Stufe 8) ----------------------------------------
 
     def _satz_vergleichen(self, felder: dict[str, Any], t_satz: float) -> None:
-        """Nach einem eingetragenen Satz: Marken, Zähler (Prototyp) und Eingabe nebeneinander
-        — als Kontextzeile im Mitschnitt und an den Beobachter (Plan §0, Stufe 8)."""
+        """Nach einem eingetragenen Satz: Marken, Sensor (Prototyp), Korrektur und Eingabe
+        nebeneinander — als Kontextzeile im Mitschnitt und an den Beobachter (Plan §0,
+        Stufe 8). Lief ein Zähl-Teil (`zaehl_satz`), gilt dessen Satz: ein Zähler, nicht zwei
+        (Plan Beschleunigung §5.2, §6); sonst zählt der Prototyp den Puffer seit Satzbeginn."""
         from hrv_core.prototyp import wiederholungen
 
         von = self._satz_beginn
@@ -1202,11 +1487,22 @@ class Messlauf:
         marken = sum(
             1 for t, typ, _ in self._diagnose_marken if typ == mt.MARKE_WDH and von <= t < t_satz
         )
-        zaehler: int | None = None
-        fenster = self._acc_fenster(von, t_satz)
-        if fenster is not None:
+        sensor: int | None = None
+        korrektur = 0
+        stand: dict[str, Any] | None = None
+        if self.zaehl_satz is not None:
             with contextlib.suppress(Exception):
-                zaehler = wiederholungen.zaehlen(fenster[0], fenster[1]).anzahl
+                stand = self.zaehl_satz()
+        if stand is not None and not _gleiche_uebung(stand, felder):
+            stand = None  # der Zähl-Teil zählt eine andere Übung — sein Wert gilt hier nicht
+        if stand is not None:
+            sensor = stand.get("sensor")
+            korrektur = int(stand.get("korrektur") or 0)
+        else:
+            fenster = self.acc_fenster(von, t_satz)
+            if fenster is not None:
+                with contextlib.suppress(Exception):
+                    sensor = wiederholungen.zaehlen(fenster[0], fenster[1]).anzahl
         # Übung und Satz, wie die Leiste sie sah — die Notiz dieses Satzes steht noch nicht drin
         k = diagnose_marken_kontext(self.ereignisse(), lambda _code: True)
         vergleich = {
@@ -1214,19 +1510,63 @@ class Messlauf:
             "satz": k.satz,
             "feld": felder.get("feld"),
             "marken": marken,
-            "zaehler": zaehler,
+            "sensor": sensor,
+            "korrektur": korrektur,
+            # wie bis Stufe 8 (hrv-research liest es so): was der Sensor zählte
+            "zaehler": sensor,
             "eingetragen": felder.get("wert"),
             "art": "prototyp",
         }
         self.letzter_satz = vergleich
-        if self.mitschnitt is not None and zaehler is not None:
+        if self.mitschnitt is not None and sensor is not None:
             with contextlib.suppress(Exception):
                 self.mitschnitt.kontext(
-                    "zaehler", feld=felder.get("feld"), wert=zaehler, phase="prototyp"
+                    "zaehler", feld=felder.get("feld"), wert=sensor, satz=k.satz, phase="prototyp"
                 )
         if self.diagnose_satz_beobachter is not None:
             with contextlib.suppress(Exception):
                 self.diagnose_satz_beobachter(vergleich)
+
+    def zaehlsatz_vergleichen(
+        self,
+        *,
+        uebung: str,
+        satz: int,
+        feld: str | None,
+        von: float,
+        bis: float,
+        sensor: int | None,
+        korrektur: int,
+        eingetragen: int | None,
+    ) -> dict[str, Any] | None:
+        """Nach einem Satz, den der Sensor zählte (A2, Plan Beschleunigung §6): die Tipps der
+        Marken-Leiste in [von, bis] (Uhr der Quelle) neben Sensor, Korrektur und dem, was
+        eingetragen wird — wie `_satz_vergleichen` nach einem Satz von Hand, an denselben
+        Beobachter. Der Zähl-Teil schreibt seine Kontextzeilen selbst (``zaehler``,
+        ``zaehlung``). Nur im Diagnosemodus; sonst ``None``."""
+        if not self.diagnose_aktiv or self.mitschnitt is None:
+            return None
+        marken = sum(
+            1 for t, typ, _ in self._diagnose_marken if typ == mt.MARKE_WDH and von <= t <= bis
+        )
+        vergleich: dict[str, Any] = {
+            "uebung": uebung,
+            "satz": satz,
+            "feld": feld,
+            "marken": marken,
+            "sensor": sensor,
+            "korrektur": int(korrektur),
+            "zaehler": sensor,
+            "eingetragen": eingetragen,
+            "art": "prototyp",
+        }
+        self.letzter_satz = vergleich
+        if self._satz_beginn is not None and self._satz_beginn < bis:
+            self._satz_beginn = bis  # ein Satz von Hand danach zählt diese Tipps nicht noch einmal
+        if self.diagnose_satz_beobachter is not None:
+            with contextlib.suppress(Exception):
+                self.diagnose_satz_beobachter(vergleich)
+        return vergleich
 
     def kontext(self, was: str, **felder: Any) -> dict[str, Any] | None:
         """Kontext in den Mitschnitt: Übung, Timer, eingetragener Satz (Plan §3.1)."""
@@ -1325,10 +1665,8 @@ class Messlauf:
         transport = self.mitschnitt_transport
         if transport is not None and transport.schreiber is schreiber:
             transport.abhaengen()
-        quelle: Any = self.quelle
-        if getattr(quelle, "acc_beobachter", None) == self._acc_empfangen:
-            quelle.acc_beobachter = None
-        self._acc_puffer.clear()
+        # Beobachter und Puffer der Beschleunigung gehören der Anforderung (`acc_freigeben`):
+        # ein laufendes Zählen braucht sie weiter
         self._diagnose_marken.clear()
         self._satz_beginn = None
         if self._probe_task is not None:
@@ -1361,14 +1699,15 @@ class Messlauf:
             schreiber.pfad.unlink(missing_ok=True)
 
     async def _stroeme_zurueck(self) -> None:
-        """Die Zusatzströme wie vor dem Diagnosemodus."""
+        """Die Zusatzströme wie vor dem Diagnosemodus: EKG zurück, Beschleunigung freigeben —
+        was ein anderer Zweck (Zählen) angefordert hat, läuft weiter."""
         vorher, self._diagnose_vorher = self._diagnose_vorher, None
-        if vorher is None:
+        frei = self._acc_setzen("diagnose", None)
+        if vorher is None and not frei:
             return
-        setzen = getattr(self.quelle, "stroeme_setzen", None)
-        if setzen is not None:
-            with contextlib.suppress(Exception):
-                await setzen(ekg=vorher[0], acc=vorher[1])
+        if vorher is not None:
+            self._ekg_soll = vorher
+        await self._abwarten(self._stroeme_anwenden())
 
     async def _probe_schleife(self, schreiber: mt.Schreiber) -> None:
         """Alle `PROBE_S` eine Zustandsprobe; dazwischen den Verzug der Schleife messen."""
@@ -1406,5 +1745,13 @@ class Messlauf:
             schreiber.zeile(mt.PROBE, **felder)
 
     async def trennen(self) -> None:
+        # Ohne Verbindung braucht niemand die Beschleunigung mehr — wer sie wieder will,
+        # fordert sie neu an
+        self._acc_anforderungen.clear()
+        quelle: Any = self.quelle
+        if getattr(quelle, "acc_beobachter", None) == self._acc_empfangen:
+            quelle.acc_beobachter = None
+        self._acc_leeren()
+        self._acc_vorher = _UNGESETZT
         await self.quelle.disconnect()
         self.status = replace(self.status, verbindung=Verbindung.GETRENNT)

@@ -13,6 +13,9 @@
 - **Parameter, Uhr, Symbol** (`PARAMETER_MD`, `UHR_MD`, `SYMBOL_MD`, Ben 2.11.2026: „Erklärtexte
   in das i, um die Übung weniger überladen zu halten“): die Texte, die bis dahin unter jeder
   Überschrift von „Übung bearbeiten“ standen.
+- **Beschleunigungssensor** (`BESCHLEUNIGUNG_MD`, Ben 4.11.2026, `docs/plan_beschleunigung.md`
+  §3.4): was gemessen wird, welche Geräte es können, dass es ein Prototyp ist, dass im Alltag
+  nur Ergebnisse gespeichert werden — und warum „Wiederholungen“ ausgegraut sein kann.
 """
 
 from __future__ import annotations
@@ -123,6 +126,34 @@ anderes nehmen. Teile (Vorbereitung, Training, Cooldown) und „zählt“ je Abs
 du im Timer-Editor ein — er speichert vorher die Übung. „Timer hinzufügen“ legt ein neues
 Profil an oder übernimmt eine Kopie aus der Timer-Bibliothek. Ohne eigenes Profil gilt die
 Timer-Regel der Übung.
+"""
+
+BESCHLEUNIGUNG_MD = """\
+**Was gemessen wird:** Hat das verbundene Gerät einen Beschleunigungssensor, steht beim Üben
+in der Karte „Eintragen“ der Knopf **„Wdh. zählen“**. Ab dem Tipp zählt der Sensor die
+Wiederholungen aus der Bewegung — rückwirkend nichts, und erst ab dann läuft der Sensor (das
+schont den Akku). **−1** und **+1** korrigieren, was er zählt; angezeigt und eingetragen wird
+Sensor plus Korrektur. „Fertig“ und das Abhaken der Übung tragen die Zahl als Satz in den
+offenen Eintrag; „Zählen abbrechen“, eine andere Übung oder eine Minute ohne Bewegung tragen
+nichts ein — der Lauf steht dann unter „Läufe heute“ und lässt sich dort eintragen.
+
+**Wiederholungen** gibt es nur bei einer Übung mit einem Parameter der Art
+„Wiederholungen“ — ohne ihn ist der Schalter ausgegraut: Der Sensor wüsste nicht, wohin mit
+der Zahl. Hat die Übung mehrere, wählst du unter „Zählt in“, welches. **Bewegung:**
+zuerst nur „Automatisch“ (die Hauptachse der Bewegung); Vorlagen je Übung kommen später.
+
+**Atmung** geht in jeder Übung, denn jede kann eine Atemkomponente haben; von selbst an ist
+sie bei Übungen vom Typ „Atmung“. Die Atemzüge erfasst erst eine spätere Stufe — bis dahin
+steht beim Üben „Atmung: Prototyp folgt“.
+
+**Geräte:** heute Polar H10 (Brustgurt) und Polar Verity Sense — bei der Verity Sense ist der
+erste gezählte Satz zugleich die Probe. Verbunden genügt, eine Aufnahme braucht es nicht.
+
+**Prototyp:** Das Verfahren ist noch in Entwicklung (hrv-core, `prototyp.wiederholungen`);
+die Zahl kann anfangs springen und erscheint meist ab der dritten Wiederholung. Gespeichert
+werden nur Ergebnisse — Wiederholungen je Satz mit ihren Zeiten und deine Korrekturen —, nie
+die Rohdaten der Beschleunigung; die gibt es nur im Diagnosemodus. Entweder zählst du oder der
+Sensor: Beides zugleich ist nur zum Prüfen gedacht (Diagnosemodus).
 """
 
 SYMBOL_MD = """\
@@ -241,6 +272,11 @@ THEMEN: dict[str, tuple[str, str, str]] = {
     "varianten": ("Varianten", VARIANTEN_MD, "Was sind Varianten?"),
     "parameter": ("Parameter, Chips und Ziel", PARAMETER_MD, "Parameter, Chips und Ziel"),
     "uhr": ("Uhr und Timer", UHR_MD, "Uhr, Timerzeit, zählt als"),
+    "beschleunigung": (
+        "Beschleunigungssensor",
+        BESCHLEUNIGUNG_MD,
+        "Was misst der Beschleunigungssensor?",
+    ),
     "symbol": ("Symbol oder Bild", SYMBOL_MD, "Symbol oder eigenes Bild"),
     "uebungen": ("Varianten und Pakete", UEBUNGEN_MD, "Varianten und Pakete"),
     "atmung": ("Atemfrequenz und Atemübung", ATMUNG_MD, "Was heißt „Atemübung“?"),
@@ -280,6 +316,7 @@ def hilfe_oeffner(page: ft.Page, thema: str = "notation") -> Callable[[], None]:
 
 __all__ = [
     "ATMUNG_MD",
+    "BESCHLEUNIGUNG_MD",
     "NOTATION_MD",
     "THEMEN",
     "UEBUNGEN_MD",

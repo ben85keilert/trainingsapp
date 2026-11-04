@@ -105,18 +105,23 @@ def schliessen(dialog: Any) -> None:
 MELDUNG_MS = 5000
 
 
-def meldung(text: str, rueckgaengig: Callable[[], Any] | None = None) -> ft.SnackBar:
-    """Eine Meldung unten, die von selbst wieder geht — auch mit „Rückgängig“.
+def meldung(
+    text: str, rueckgaengig: Callable[[], Any] | None = None, *, aktion: str = "Rückgängig"
+) -> ft.SnackBar:
+    """Eine Meldung unten, die von selbst wieder geht — auch mit „Rückgängig“ (oder einer
+    anderen Aktion, ``aktion``: „Eintragen“ beim Zählen, Ben 4.11.2026).
 
     ``persist=False``: Mit Aktion bliebe sie sonst stehen (Moduldocstring).
 
     >>> m = meldung("„Ruhe“ gelöscht", lambda: None)
     >>> m.persist, m.action.label, meldung("Gespeichert").action
     (False, 'Rückgängig', None)
+    >>> meldung("Kniebeuge · 12 Wdh.", lambda: None, aktion="Eintragen").action.label
+    'Eintragen'
     """
     return ft.SnackBar(
         ft.Text(text),
-        action=ft.SnackBarAction("Rückgängig", on_click=rueckgaengig)
+        action=ft.SnackBarAction(aktion, on_click=rueckgaengig)
         if rueckgaengig is not None
         else None,
         persist=False,

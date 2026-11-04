@@ -26,6 +26,7 @@ from hrv_core import mitschnitt as mt
 from hrv_core.geraete.pmd import PMD_SERVICE_UUID
 
 from trainingsapp.core.result_spec import ResultSpec, basis_key
+from trainingsapp.core.zaehlen import mit_vorzeichen
 
 #: Ordner der Rohmitschnitte ohne Messung (unbekannte Geräte, Stufe 6) im Datenverzeichnis
 DIAGNOSE_ORDNER: Final[str] = "Diagnose"
@@ -402,23 +403,31 @@ def kontext_zeile(notiz: dict) -> tuple[str, dict[str, object]] | None:
 
 
 def satz_text(v: dict[str, object]) -> str:
-    """Der Vergleich nach dem Satz (Stufe 8): Marken, Zähler (Prototyp), eingetragen.
+    """Der Vergleich nach dem Satz (Stufe 8, Plan Beschleunigung §6): Marken (die Tipps der
+    Person), Sensor (Prototyp), Korrektur (±1 am Zähler, nur wenn es eine gab), eingetragen.
+    Ältere Vergleiche nennen den Sensor ``zaehler``.
 
+    >>> satz_text({"uebung": "Kniebeuge", "satz": 1, "marken": 12, "sensor": 11,
+    ...            "korrektur": 1, "eingetragen": 12})
+    'Kniebeuge S1: Marken 12 · Sensor 11 · Korrektur +1 · eingetragen 12'
     >>> satz_text({"uebung": "Kniebeuge", "satz": 1, "marken": 12, "zaehler": 11,
     ...            "eingetragen": 12})
-    'Kniebeuge S1: Marken 12 · Zähler 11 (Prototyp) · eingetragen 12'
-    >>> satz_text({"uebung": None, "satz": None, "marken": 0, "zaehler": None,
-    ...            "eingetragen": 8})
-    'Satz: Marken 0 · Zähler – · eingetragen 8'
+    'Kniebeuge S1: Marken 12 · Sensor 11 · eingetragen 12'
+    >>> satz_text({"uebung": None, "satz": None, "marken": 0, "sensor": None,
+    ...            "korrektur": -2, "eingetragen": 8})
+    'Satz: Marken 0 · Sensor – · Korrektur −2 · eingetragen 8'
     """
     wer = str(v.get("uebung") or "Satz")
     if v.get("uebung") and v.get("satz"):
         wer += f" S{v['satz']}"
-    zaehler = v.get("zaehler")
-    z = "–" if zaehler is None else f"{zaehler} (Prototyp)"
+    sensor = v.get("sensor", v.get("zaehler"))
+    teile = [f"Marken {v.get('marken', 0)}", f"Sensor {'–' if sensor is None else sensor}"]
+    korrektur = v.get("korrektur")
+    if isinstance(korrektur, int) and korrektur:
+        teile.append(f"Korrektur {mit_vorzeichen(korrektur)}")
     eingetragen = v.get("eingetragen")
-    e = "–" if eingetragen is None else str(eingetragen)
-    return f"{wer}: Marken {v.get('marken', 0)} · Zähler {z} · eingetragen {e}"
+    teile.append(f"eingetragen {'–' if eingetragen is None else eingetragen}")
+    return f"{wer}: " + " · ".join(teile)
 
 
 # ---------------------------------------------------------------------------

@@ -412,10 +412,14 @@ async def test_nach_dem_satz_marken_zaehler_und_eingabe(tmp_path) -> None:
     (v,) = gemeldet
     assert v["uebung"] == "Kniebeuge" and v["satz"] == 1 and v["eingetragen"] == 12
     assert v["marken"] == 12 and abs(v["zaehler"] - 12) <= 1 and v["art"] == "prototyp"
+    # Ohne Zähl-Teil zählt der Prototyp den Puffer selbst — ohne Korrektur (Plan
+    # Beschleunigung §6: „Marken · Sensor · Korrektur · eingetragen“)
+    assert v["sensor"] == v["zaehler"] and v["korrektur"] == 0
     assert lauf.letzter_satz == v
     zeilen = list(mt.lesen(lauf.mitschnitt.pfad))
     (z,) = [z for z in zeilen if z.get("was") == "zaehler"]
     assert z["wert"] == v["zaehler"] and z["phase"] == "prototyp" and z["feld"] == "reps"
+    assert z["satz"] == 1
     await lauf.diagnose_beenden()
     assert quelle.acc_beobachter is None
     lauf.aufnahme = None

@@ -1,6 +1,7 @@
 # Plan: Beschleunigungssensor in Übungen — Wiederholungen zählen, Atmung erfassen, Ein- und Ausatmung in der HRV
 
-Stand 4.11.2026: **angenommen** — Ben: „Plane das beides durch“, danach P117–P126 entschieden
+Stand 4.11.2026: **A1 und A2 gebaut** (Version 0.3.44, Abschnitt 13); A3, B1, T, B2, A5 und A6
+folgen. Der Plan ist **angenommen** — Ben: „Plane das beides durch“, danach P117–P126 entschieden
 (Abschnitt 12) und „Falls nicht [noch Fragen offen], kannst du anfangen den Plan umzusetzen“. Die Verfahren
 entstehen in hrv-research (dort `beschleunigung/docs/PLAN_ZAEHLEN_ATEMPHASEN.md`); hier steht,
 was die Apps bauen. Neu daraus als eigene Aufgabe: der **Taktgeber** im Timer (Abschnitt 7.6,
@@ -176,6 +177,19 @@ wofür taugt, klärt hrv-research offline an den Rohdaten aus dem Diagnosemodus.
 | Marken-Leiste im Diagnosemodus | „Sensor 11“ live neben der Zahl der Tipps (Prüfung, Abschnitt 6) |
 | Band (hrv-watch) | kein Zählen am Band (P121): „Wer tippt 30 mal auf eine Uhr, um fit zu werden?“ ⏯ je Wiederholung bleibt im Diagnosemodus |
 
+Umsetzung A1 (`ui/components/zaehlen.py`, Zustand ohne flet in `components/zaehl_stand.py`):
+Zeigt die Karte „Eintragen“ die laufende Uhr und zählt der Sensor in ihrer Einheit, steht die
+Zahl mit ±1 und „Zählen abbrechen“ in der Uhr — die Zählzeile darunter wiederholt sie nicht,
+und „Fertig“ der Uhr beendet beides. Unter dem Knopf stehen die Zählläufe von heute, deren
+Wiederholungen noch fehlen, mit „Eintragen“ (`components/laeufe_heute.py`, dieselbe Zeile wie
+„Läufe heute“ im Timer) — so auch an einer Übung ohne Uhr. Die Meldung „… nicht eingetragen“
+zeigt der Start, der das Zählen beendete, oder der nächste Aufbau der Ansicht, nie über einem
+Dialog. Auf „Heute“ hakt der Chip mit den gezählten Wiederholungen ab, ohne „Rückgängig“.
+Den Knopf gibt es in einer Planübung nur, wenn sie ein Wiederholungsfeld anbietet (P79: keiner =
+nur abhaken; auch eines, das nur der Plan hat). Endet nur das Zählen und die Uhr läuft weiter,
+bleibt dort die Zahl ohne −1/+1 stehen. Die Zählläufe von heute, deren Wiederholungen fehlen,
+lassen sich auch ohne verbundenes Gerät eintragen.
+
 ### 4.3 Ablauf
 
 1. **Beginn.** Der Tipp startet das Zählen, und erst ab dann läuft der Sensor (P119: „Akku hat
@@ -205,9 +219,17 @@ wofür taugt, klärt hrv-research offline an den Rohdaten aus dem Diagnosemodus.
    | „Fertig“ am Zähler; die Übung wird abgehakt („Gemacht“); „Fertig“ der Uhr; der Timer ist durch (auch mit „automatisch weiter“ im Plan) | **abgeschlossen:** der Satzwert (Sensor plus Korrektur) geht als Wiederholungen des Satzes in den offenen Eintrag (`lauf_eintragen`: ein Wert je Satz, angehängt wie die Haltezeit; bei `saetze=False` zählt die Summe), die Zeit wie bisher, wenn „zählt“ an ist |
    | „Abbrechen“ | **abgebrochen:** nichts wird eingetragen; der Lauf bleibt mit seiner Zahl unter „Läufe heute“ und lässt sich dort mit einem Tipp eintragen, wie bei der Uhr |
    | Eine andere Übung startet (ihr Zählen, ihre Uhr, ihr Timer) | abgebrochen wie oben; dazu 5 s lang die Meldung „Kniebeuge · 12 Wdh. nicht eingetragen“ mit „Eintragen“ |
-   | **Keine Bewegung:** 60 s ohne gezählte Wiederholung (Ben: „evtl. mit Timer“) | abgebrochen wie oben. Die 60 s sind ein Startwert; reicht das bei langen Pausen im Satz nicht, wird er einstellbar |
+   | **Keine Bewegung:** 60 s ohne gezählte Wiederholung (Ben: „evtl. mit Timer“) | abgebrochen wie oben; dazu die Meldung „Kniebeuge · 12 Wdh. nicht eingetragen — 60 s ohne Bewegung“ (5 s, „Eintragen“). Die 60 s sind ein Startwert; reicht das bei langen Pausen im Satz nicht, wird er einstellbar |
    | Nur Atmung: das Gerät liefert 2 min lang keinen erkennbaren Atemzug (abgelegt, verrutscht) | abgebrochen wie oben. „Keine Bewegung“ gilt hier nicht, denn bei einer Atemübung ist Stille gewollt |
+   | Das Gerät wird getrennt (Umsetzung A1) | abgebrochen wie oben, sofort, mit dem Grund `abbruch` — nicht erst 60 s später als „keine Bewegung“; die Meldung endet auf „— Sensor getrennt“ |
 
+   Abgehakt wird auch mit einem Chip, der einen Wert einträgt (Zeit, Strecke, Seite): Der Wert
+   kommt zu den Wiederholungen in denselben Eintrag, der dann schließt — nicht noch das Ziel.
+   Wo abgehakt wird, dort steht der Eintrag: Begann das Zählen auf der Übungsseite und wird auf
+   „Heute“ am Chip eines Plans abgehakt, gehört er in diesen Plan (mit ihm die Zeit der Uhr,
+   die in derselben Einheit läuft). Bietet die Planübung dort kein Wiederholungsfeld an (P79),
+   endet das Zählen abgebrochen und bleibt nachtragbar, wo es begann; das Abhaken stempelt wie
+   sonst.
 7. **Danach** („Läufe heute“): „Satz 1 · 12 Wdh. (Sensor 11, +1)“. Ändern geht wie immer unter
    „Heute geleistet“; die Zeitleiste behält, was der Sensor zählte.
 
@@ -246,8 +268,13 @@ Ist „Atmung“ an, erfasst derselbe Dienst die Atemzüge (ab A3; das braucht
 - Der Puffer füllt sich mit jedem ACC-Rahmen, nicht nur im Diagnosemodus. Je Rahmen merkt er
   sich die Rate, falls sie mitten im Satz wechselt (50 → 200 Hz). Die Zeiten der Proben kommen
   aus dem Gerätezeitstempel (`zeitstempel_ns`), die Ankunft dient nur als Anker, wie beim EKG
-  (`frame_t_ns`). Statt eines Beobachters gibt es eine Liste, damit Mitschnitt und Zähler nicht
-  um den Platz streiten. **Gespeichert wird aus dem Puffer im Alltag nichts** (P123).
+  (`frame_t_ns`). Umsetzung A1: Die Rate eines Rahmens ist die, mit der die Quelle gerade
+  sendet (`PolarQuelle.acc_gestartet`), nicht der neue Wunsch — bis zum Neustart kommen noch
+  Rahmen der alten. Ein Fenster über einen Wechsel kommt in der jüngsten Rate: die übrigen
+  Rahmen umgetaktet (`Messlauf.acc_reihe`, `umtakten`; herunter vorher gemittelt), nicht
+  weggelassen, mit der Zeit jeder Probe — auch über eine Lücke im Strom hinweg. Statt eines
+  Beobachters gibt es eine Liste, damit Mitschnitt und Zähler nicht um den Platz streiten.
+  **Gespeichert wird aus dem Puffer im Alltag nichts** (P123).
 - Der Simulator (`devices/simulated.py`) bekommt eine synthetische Beschleunigung:
   Wiederholungen als Sinus mit Streuung, dazu Atmung und Rauschen. Sie dient den Tests und der
   Vorschau am Rechner.
@@ -306,7 +333,10 @@ beide zählen: im **Diagnosemodus**.
 - Die Person tippt in der Marken-Leiste jede Wiederholung (die Wahrheit), der Sensor zählt mit.
   Die Leiste zeigt „Sensor 11“ live neben der Zahl der Tipps.
 - Nach dem Satz steht „Marken 12 · Sensor 11 · Korrektur +1 · eingetragen 12“ (Stufe 8,
-  erweitert um die Korrektur).
+  erweitert um die Korrektur). Umsetzung A2: nach einem Satz von Hand (Chip) mit dem Wert des
+  Zähl-Teils, wenn er dieselbe Übung zählt; nach einem Zähllauf am Ende je Satz
+  (`Messlauf.zaehlsatz_vergleichen`) — „eingetragen“ ist dann der Satzwert, wenn das Zählen
+  mit `fertig` oder `abgehakt` endet, sonst „–“.
 - Der Mitschnitt hat dazu die Rohdaten. hrv-research rechnet daraus die Genauigkeit je Übung und
   Gerät (`diagnose_bericht.py`) und prüft dort neue Verfahren.
 - Im Alltag zeigt die App keine Trefferquote, denn niemand hat nachgezählt. Sie zeigt nur, was
@@ -507,12 +537,92 @@ einer APK.
 | P118 | Ohne Beschleunigungssensor ein Handzähler (nur +1/−1)? | nein: „Wenn ein Gerät einen Beschleunigungssensor hat, soll die Wiederholung damit gemessen werden. Das ist der Knopf. +/-1 ist die Korrektur dafür.“ |
 | P119 | Wie startet und endet das Zählen? | **unabhängig von der Uhr**, als Dienst in der Infoleiste. Es endet bei Abbruch, beim Start einer anderen Übung, bei „Fertig“ oder dem Abhaken, und ohne Bewegung (mit Zeitgrenze); ein Wechsel der Ansicht beendet es nicht. Gezählt wird **erst ab dem Tipp**: „Akku hat in diesem Fall Prio“ |
 | P120 | Atemzüge eintragen? | erst einmal **an der Messung** festhalten, mit Abbildung in den Messaufzeichnungen; ins Tagebuch, wenn klar ist, was an der Atmung wichtig ist |
+| P121 | Am Band eine Seite „Zählen“, ⏯ = +1? | **nein:** „Das Klicken für eine Wiederholung ist eigentlich nur für Diagnose und Algorithmusentwicklung. In einer Übung selbst macht das keinen Sinn, wer tippt 30 mal auf eine Uhr, um fit zu werden?“ |
 | P122 | Wahrheit beim Zählen | **entweder–oder:** „Entweder zähle ich, oder der Sensor. Beides gleichzeitig ist nur Überprüfung und Debugging“ |
 | P123 | Beschleunigung im Alltag mitschreiben? | **nie**, nur im Diagnosemodus: „Die reguläre Anwendung soll zeigen, dass die App smart ist. Brute force alles aufzeichnen ist für die Entwicklung“ — gespeichert werden Ergebnisse (Abschnitt 8) |
 | P124 | Was heißt „HRV verbessern“? | **(a) und (b):** Auswertung und Biofeedback, „und: Auswertung von DFA a1, LF/HF und co“ |
 | P125 | Protokollfeld „Atmung“ | **ja**, aber es gibt noch keine Taktung: Taktgeber im Timer als neue Aufgabe (7.6, A18) |
 | P126 | Vorlagen schon am Anfang? | **erst nur „Automatisch“** |
 
-| P121 | Am Band eine Seite „Zählen“, ⏯ = +1? | **nein:** „Das Klicken für eine Wiederholung ist eigentlich nur für Diagnose und Algorithmusentwicklung. In einer Übung selbst macht das keinen Sinn, wer tippt 30 mal auf eine Uhr, um fit zu werden?“ |
-
 P117 bestätigt (Ben): die Schalter sitzen an jeder Übung, nicht einer für alle.
+
+## 13. Umsetzungsstand (4.11.2026, Version 0.3.44)
+
+A1 und A2 sind gebaut, ohne Änderung an hrv-core (0.8.0, `hrv-core.ref` unverändert): Der
+Zähler ist `hrv_core.prototyp.wiederholungen`, die Kontextzeilen nutzen nur Felder, die
+`hrv_core.deid` schon kennt.
+
+| Stufe | Gebaut | Wo |
+|---|---|---|
+| A1 Karte | `SensorWahl` (Wiederholungen, Atmung als ``bool \| None`` = Vorgabe aus der Übung, `vorlage`, `feld`), Vorgaben, Texte, Ende-Gründe und Grenzen (`KEINE_BEWEGUNG_S` 60, `KEIN_ATEM_S` 120, `MIN_RATE_HZ` 50, `BEREICH_G` 8); Migration 037 (`exercise.acc_json`, `einheit_baustein.art` `zaehlen`); Paketfeld `beschleunigung` im Drei-Wege-Abgleich; Karte „Beschleunigungssensor“ nach „Uhr und Timer“ mit Prototyp und (i), „Zählt in“ ab zwei Wiederholungsfeldern; Zeile an der Übungsseite | `core/zaehlen.py`, `core/models.py`, `data/migrations/037_beschleunigung.sql`, `data/repositories.py`, `core/pakete.py`, `views/uebung_bearbeiten.py`, `views/uebung_detail.py`, `components/hilfe.py` |
+| A1 Strom | `acc_anfordern`/`acc_freigeben` mit den Zwecken `diagnose` und `zaehlen` (höchste Rate gewinnt, die letzte Freigabe stellt den Stand von vorher her und leert den Puffer); Zeiten aus dem Gerätezeitstempel mit Anker; über einen Ratenwechsel umgetaktet auf die jüngste Rate (`acc_reihe`); Neustart der ACC beim Ratenwechsel (`PolarQuelle.acc_gestartet`); `trennen()` beendet das Zählen sofort als `abbruch`; Simulator mit synthetischer Beschleunigung (`bewegung_setzen`) | `devices/messlauf.py`, `devices/polar.py`, `devices/simulated.py` |
+| A1 Zähl-Dienst | `ZaehlBaustein`, Teil `zaehlen` der Einheit: Strom ab dem Tipp (H10 50 Hz, Verity Sense 52 Hz), jede Sekunde der Prototyp auf dem Satzfenster, ein Satz je Zähllauf bzw. je zählendem Timer-Abschnitt (über `beobachten`), „Anhalten“ der Uhr hält an, ±1 je Satz, Ende-Regeln aus 4.3; `Einheitslauf.ende_mit_zaehlen`; Uhr und Zählen derselben Übung teilen eine Einheit (`UebungBaustein.kontext_setzen`); Zeitleiste `zaehlung`, `person/korrektur`, `zaehlen_ende` (Vertrag `docs/plan_einheit.md` §4) | `devices/zaehlen.py`, `devices/einheit.py`, `core/einheit.py` |
+| A1 Eintrag | Wiederholungen je Satz in den offenen Eintrag (bei `saetze=False` die Summe), Zeit und Wiederholungen in **einen** Eintrag, `person/eintrag` je Teil mit `teil` (nie doppelt); „Abhaken“ trägt sofort ein und schließt den Eintrag; eine andere Übung beendet ein Zählen ohne Uhr mit `andere_uebung` und der Meldung „… nicht eingetragen“ (5 s, „Eintragen“), eine laufende Uhr nie still; „Läufe heute“ mit „Satz 1 · 12 Wdh. (Sensor 11, +1)“ trägt abgebrochene Zählläufe nach, auch ohne Uhr an der Übung und ohne Gerät | `core/zaehlen_eintrag.py`, `SessionRepo.lauf_eintragen`, `ui/uebung_lauf.py`, `ui/einheit.py`, `components/laeufe_heute.py` |
+| A1 Oberfläche | Zählzeile in der Karte „Eintragen“ unter der Uhr (Knopf `knopf_text`, große Zahl, −1/+1 als Flächen, „Sensor 11 · +1 · Prototyp“, „Fertig“, „Zählen abbrechen“), Zustand ohne flet; Zahl mit ±1 in der laufenden Uhr und im Timer „Während“, „Sätze“ mit Zeit und Wiederholungen; Zähl-Dienst in Info- und Laufleiste und in der Benachrichtigung (`docs/plan_einheit.md` §9); Abhaken in Plan und auf „Heute“ | `components/zaehlen.py`, `components/zaehl_stand.py`, `components/uhr.py`, `views/uebung_timer.py`, `components/startleiste.py`, `views/plan.py`, `views/tag.py`, `ui/app.py` |
+| A2 | „Sensor 11“ live in der Marken-Leiste; nach dem Satz „Marken 12 · Sensor 11 · Korrektur +1 · eingetragen 12“ mit dem Wert des Zähl-Teils (nur dieselbe Übung), nach einem Zähllauf je Satz (`zaehlsatz_vergleichen`); Kontextzeilen `zaehler`, `zaehlung`, `korrektur`, `zaehlen_ende` (`docs/kompatibilitaet.md` §14) | `components/marken_leiste.py`, `marken_stand.py`, `devices/messlauf.py`, `core/diagnose.py` |
+
+Tests (ohne flet, wo es geht; die flet-freien laufen auch im gesperrten Kindprozess von
+`tests/test_import_regel.py`): `test_zaehlen.py`, `test_zaehlen_geraete.py`,
+`test_zaehlen_eintrag.py`, `test_zaehl_ablauf.py`, `test_zaehl_stand.py`, `test_ui_zaehlen.py`,
+dazu Migration 037 und die Paket-Rundreise in `test_repositories.py`, `test_pakete.py`,
+`test_paket_werkzeug.py`.
+
+**Bewusst noch nicht gebaut** (Abschnitt 11):
+
+- **A3** Atem-Prototyp `prototyp.atemzuege` und `atem-v1`: Bis dahin zeigt „Atmung erfassen“
+  nur „Atmung: Prototyp folgt“, ohne Zahl und ohne ±1; es endet mit „Fertig“, „Zählen
+  abbrechen“, dem Abhaken oder einer anderen Übung. `kein_atem` und `KEIN_ATEM_S` gibt es schon,
+  ausgelöst wird der Grund noch nicht.
+- **B1** Ebene „Atmung“ in der Auswertung, Live-Anzeige, Biofeedback, Protokollfeld „Atmung“.
+- **T** Taktgeber im Timer (A18, eigener Plan).
+- **B2** Atem-HRV (`prototyp.atem_hrv`), Kennzahlen im Licht der Atmung.
+- **A5** Live-Zähler je Wiederholung, Vorlagen (heute nur „Automatisch“), Umkehrpunkt; bis dahin
+  zählt der Prototyp jede Sekunde das ganze Satzfenster neu.
+- **A6** die Karte in „Im Plan einstellen“ und praxis_gui. Die Planübung folgt der Übung;
+  den Knopf gibt es in einer Planübung nur, wenn sie ein Wiederholungsfeld anbietet.
+
+**Nicht am Gerät geprüft:** Laufzeit je Rechnung am Handy (Ziel unter 20 ms; am Rechner etwa
+2–11 ms), STOP/START der ACC beim Ratenwechsel am echten H10 und an der Verity Sense (nur gegen
+den Fake-Transport), Größe der Flächen ±1 und die Breite der Zählzeile, die Meldung nach einem
+Blatt. Ob das Umtakten 200 → 50 Hz den Prototyp verfälscht, prüft hrv-research an den
+200-Hz-Mitschnitten.
+
+**Lücken der ersten Runde — erledigt** (4.11.2026, zweite Runde; jede mit einem Test, der
+ohne die Änderung scheitert):
+
+- **Chip mit Wert** (`chip_erlediger` in `views/plan.py`): Zählt der Sensor, endet das Zählen
+  zuerst als `abgehakt` (`uebung_lauf.zaehlen_beenden`); der Wert des Chips kommt beim
+  Schließen in den Eintrag mit den Wiederholungen (`SessionRepo.eintrag_schliessen` mit
+  ``werte``, eine Korrektur) — kein zweiter Stempel, nicht noch das Ziel (wie „Wie geplant“).
+  Tests: `test_ui_zaehlen.py::test_chip_mit_wert_beendet_das_zaehlen_und_schliesst_einen_eintrag`,
+  `test_repositories.py::test_abschliessen_mit_werten_in_einer_korrektur`.
+- **Laufleiste in den Plan** (`ui.einheit.ziel_merken`, aufgerufen von
+  `components/startleiste._oeffner` beim Tipp): Das Zählen einer Planübung setzt
+  `state.plan_ziel` und `plan_offen` — die Liste beginnt bei der Übung, aufgeklappt, wie
+  „Weiter mit …“ auf „Heute“. Test: `test_ui_zaehlen.py::test_laufleiste_fuehrt_im_plan_zur_uebung`.
+- **Der Kontext des Abhakens gewinnt** (`zaehlen_beenden(…, ort=(Plan, Planübung))`,
+  `_ort_uebernehmen`; `UebungBaustein`/`ZaehlBaustein.kontext_setzen`): Begann das Zählen auf
+  der Übungsseite und wird auf „Heute“ oder im Plan abgehakt, landet der Eintrag in der
+  Sitzung dieses Plans, einmal; die Uhr derselben Einheit trägt später ebenfalls dort ein, die
+  Beteiligungen nennen den Plan. Bietet die Planübung kein Wiederholungsfeld an (P79), endet
+  das Zählen als `abbruch` und bleibt nachtragbar, wo es begann. Tests:
+  `test_zaehl_ablauf.py::test_abhaken_im_plan_nach_dem_start_ohne_plan_landet_im_plan`,
+  `…::test_abhaken_im_plan_neben_der_uhr_nimmt_die_uhr_mit`,
+  `…::test_abhaken_in_einer_planuebung_ohne_wiederholungen_bricht_das_zaehlen_ab`,
+  `test_ui_zaehlen.py::test_abhaken_auf_heute_nach_dem_start_auf_der_uebungsseite`.
+- **Meldung, wenn das Zählen von selbst endet** (`ui.einheit._von_selbst_melden`,
+  `core.zaehlen_eintrag.von_selbst_text`, `ZaehlBaustein.getrennt`): 60 s ohne Bewegung oder
+  das Gerät getrennt, abgebrochen, etwas gezählt — 5 s „Kniebeuge · 12 Wdh. nicht eingetragen
+  — 60 s ohne Bewegung“ bzw. „— Sensor getrennt“ mit „Eintragen“, dieselbe `ZaehlMeldung` wie
+  bei einer anderen Übung: gezeigt beim nächsten Aufbau der Ansicht (`ui.app`), nie über einem
+  Dialog, einmal (`meldung_abholen`). Auf einen Tipp („Zählen abbrechen“, Abhaken) und beim
+  Abbruch der Uhr gibt es keine. Tests: `test_zaehl_ablauf.py::test_von_selbst_beendet_meldet_sich_einmal`,
+  `…::test_getrennt_meldet_sich_mit_grund`,
+  `test_ui_zaehlen.py::test_von_selbst_beendet_zeigt_die_meldung_einmal`.
+- **`trainingsapp-paket pruefen`** prüft `beschleunigung` (`core.zaehlen.wahl_pruefen`): ein
+  falscher Typ (`wiederholungen = "nein"`, `atmung = 1`, keine Tabelle) ist ein Fehler wie eine
+  fehlende Beschreibung — die Wahl ginge beim Einlesen still verloren —, ein unbekannter
+  Schlüssel ein Hinweis wie ein Typ außerhalb des Standardpakets (Tippfehler oder neuere App).
+  Die App liest weiter tolerant. Test:
+  `test_paket_werkzeug.py::test_pruefen_meldet_unsinn_in_beschleunigung`, Doctests in
+  `core/zaehlen.py`.

@@ -26,7 +26,7 @@ Patientinnen und Patienten der Praxis.
 | Kategorie | Beispiele | Besondere Kategorie (Art. 9)? |
 |---|---|---|
 | Stammdaten | Name, Geburtsjahr, Kennung | nein |
-| Trainingsdaten | Übungen, Wiederholungen, Notizen | **ja** — Gesundheitsdaten |
+| Trainingsdaten | Übungen, Wiederholungen (auch vom Beschleunigungssensor gezählt, mit Zeiten und Korrekturen), Notizen | **ja** — Gesundheitsdaten |
 | Messwerte | Herzfrequenz, RR-Intervalle, HRV-Kennzahlen | **ja** |
 | Medien | selbst aufgenommene Übungsvideos, Fotos | **ja** |
 | Tagesfelder | Beschwerden auf einer Skala, Einnahmen (Anzahl), Trinkmenge, Messwerte (Blutdruck, Gewicht, Blutzucker …), Texte zu Themen wie Ernährung | **ja** — Gesundheitsdaten |
@@ -66,6 +66,18 @@ selbst; die App bewertet nichts, zeigt keine Grenzen und erinnert an nichts
 Speicher, Tabellen `day_field`, `day_value`); sie folgen den Trainingsdaten in Geräte-Backup
 (nur wenn eingeschaltet) und künftiger Synchronisation. Löschung durch die Person je Wert
 oder je Feld „mit allen Einträgen“.
+
+**Wiederholungen vom Beschleunigungssensor** (gebaut 4.11.2026,
+`docs/plan_beschleunigung.md`): Auf Tipp der Person („Wdh. zählen“) zählt die App die
+Wiederholungen einer Übung mit dem Beschleunigungssensor des verbundenen Geräts (Polar H10,
+Verity Sense); die Person korrigiert mit ±1. Zweck: der Trainingseintrag ohne Mitzählen —
+beschreibend, die App bewertet nichts und empfiehlt nichts (`00_zweckbestimmung.md`).
+Gespeichert werden nur **abgeleitete Bewegungsdaten**: je Satz die Zahl mit den Zeiten der
+gezählten Wiederholungen, die Korrekturen, der Grund des Endes und das Gerätemodell (Zeitleiste
+der Einheit, Tabellen `einheit_ereignis`, `einheit_baustein`) sowie die Zahl im Eintrag
+(`session_entry`). **Keine Rohdaten der Beschleunigung** — die entstehen nur im Diagnosemodus
+auf ausdrücklichen Start (`40_toms.md`). Speicherort, Geräte-Backup, Synchronisation und
+Löschung wie die Trainingsdaten; lokal, ohne Netzverbindung; kein Ort, keine Richtung.
 
 ### Rechtsgrundlage
 

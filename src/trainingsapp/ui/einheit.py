@@ -29,6 +29,14 @@ jede Sekunde mit und zeichnet neu, wenn etwas erscheint oder verschwindet. Endet
 Einheit oder wird sie geleert, steht eine weiterlaufende Aufnahme wieder als eigene da
 (`_messung_weiter_zeigen`).
 
+**Zählen mit dem Beschleunigungssensor** (Ben, 4.11.2026, ``docs/plan_beschleunigung.md``
+§4.3): Ein Zähllauf ist eine Einheit aus Übung und Zählen, dazu die HRV, die schon aufnimmt
+(`ui.uebung_lauf.zaehlen_starten`). Steht er für sich (ohne Uhr), macht er Platz wie eine reine
+Messung (`platz_machen`): Das Zählen endet mit ``andere_uebung`` — abgebrochen, unter „Läufe
+heute“ einzutragen — und `ZaehlMeldung` sagt es 5 s lang. Eine laufende Uhr wird nie still
+beendet. Endet das Zählen von selbst (60 s ohne Bewegung, getrennt), sagt es dieselbe Meldung
+mit Grund (`_von_selbst_melden`).
+
 Ohne flet-Import (wie ``ui/laufend.py``): ``page`` braucht nur ``run_task``. Die
 Timer-Ansicht (Töne) und das Eintragen der Aufnahme kommen erst beim Aufruf dazu.
 Vertrag: ``docs/plan_einheit.md``.
@@ -50,6 +58,8 @@ from trainingsapp.core.einheit import Ereignis, Rolle, Zustand
 from trainingsapp.core.laufend import uhr
 from trainingsapp.core.strecke import SPORT_NAMEN, STILLSTAND_S
 from trainingsapp.core.timer import TimerLauf, dauer_text
+from trainingsapp.core.zaehlen import ENDE_ANDERE_UEBUNG
+from trainingsapp.core.zaehlen_eintrag import nicht_eingetragen_text, von_selbst_text
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.einheit import (
     Abschluss,
@@ -57,10 +67,13 @@ from trainingsapp.devices.einheit import (
     HrvBaustein,
     TimerBaustein,
     UebungBaustein,
+    UebungKontext,
 )
 from trainingsapp.devices.gps import GpsQuelle
 from trainingsapp.devices.plan_ablauf import PAUSE, PlanAblaufBaustein
 from trainingsapp.devices.strecke_baustein import StreckeBaustein
+from trainingsapp.devices.zaehlen import ZaehlBaustein
+from trainingsapp.ui.components import zaehl_stand
 
 #: So oft frischt die Laufleiste ihre Zeiten auf (s)
 ANZEIGE_S = 1.0
@@ -109,11 +122,45 @@ def _nur_messung(e: Einheitslauf) -> bool:
     return e.ende_wenn_alles_fertig and bool(aktive) and all(t.art == "hrv" for t in aktive)
 
 
+def nur_zaehlen(e: Einheitslauf) -> bool:
+    """Ein Zähllauf für sich: Übung und Zählen, dazu höchstens die HRV, die schon aufnahm —
+    ohne Uhr (`Einheitslauf.ende_mit_zaehlen`; tritt die Uhr bei, endet die Einheit mit ihr)."""
+    return (
+        e.ende_mit_zaehlen
+        and e.timer is None
+        and isinstance(e.teil("zaehlen"), ZaehlBaustein)
+        and all(t.art in ("plan", "zaehlen", "hrv") for t in e.teile)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ZaehlMeldung:
+    """Ein Zähllauf, der für eine andere Übung Platz machte (``andere_uebung``): 5 s lang
+    „Kniebeuge · 12 Wdh. nicht eingetragen“ mit „Eintragen“
+    (`ui.uebung_lauf.lauf_eintragen` mit ``einheit_id``). Endete das Zählen von selbst und
+    bleibt abgebrochen (`_von_selbst_melden`), steht ``warum`` dahinter: „… — 60 s ohne
+    Bewegung“."""
+
+    einheit_id: str
+    uebung_id: str
+    name: str
+    #: was gezählt wurde (Sensor plus Korrektur, alle Sätze)
+    wdh: int
+    #: warum es von selbst endete (`core.zaehlen_eintrag.von_selbst_text`) — leer: eine
+    #: andere Übung
+    warum: str = ""
+
+    @property
+    def text(self) -> str:
+        return nicht_eingetragen_text(self.name, self.wdh, self.warum)
+
+
 def platz_frei(state: Any) -> bool:
     """Kann eine neue Einheit beginnen (Übung, Plan-Ablauf, Training, Bereitstellen)? Ja,
-    wenn keine läuft — oder nur eine für sich gestartete HRV-Messung (`platz_machen`)."""
+    wenn keine läuft — oder nur eine für sich gestartete HRV-Messung oder ein Zähllauf ohne
+    Uhr (`platz_machen`)."""
     e = laeuft(state)
-    return e is None or _nur_messung(e)
+    return e is None or _nur_messung(e) or nur_zaehlen(e)
 
 
 def platz_machen(state: Any) -> bool:
@@ -121,9 +168,18 @@ def platz_machen(state: Any) -> bool:
     Einheit (seit v0.3.4), endet diese Einheit, die **Aufnahme läuft weiter**: Die neue
     nimmt sie als „läuft schon“ auf, wie vor dem 18.10.2026 (in v0.3.4 verweigerten Übung,
     Plan-Ablauf und Training den Start). Endet die neue, steht die Messung wieder für sich
-    in der Leiste (`_messung_weiter_zeigen`). ``False``: Es läuft etwas anderes."""
+    in der Leiste (`_messung_weiter_zeigen`).
+
+    Ein Zähllauf ohne Uhr (`nur_zaehlen`) macht ebenso Platz: Das Zählen endet mit
+    ``andere_uebung`` (abgebrochen, nichts eingetragen), die Aufnahme läuft weiter, und
+    ``state.zaehl_meldung`` hält die Meldung, wenn gezählt wurde (`ZaehlMeldung`). Wer das
+    Zählen derselben Übung fortsetzen will (ihre Uhr startet), fragt vorher
+    (`ui.uebung_lauf.starten`). ``False``: Es läuft etwas anderes."""
     e = laeuft(state)
     if e is None:
+        return True
+    if nur_zaehlen(e):
+        _zaehlen_platz_machen(state, e)
         return True
     if not _nur_messung(e):
         return False
@@ -131,6 +187,22 @@ def platz_machen(state: Any) -> bool:
     e.beenden()
     melden(state)
     return True
+
+
+def _zaehlen_platz_machen(state: Any, e: Einheitslauf) -> None:
+    """Der Zähllauf endet für eine andere Übung — ``andere_uebung``, die Aufnahme läuft
+    weiter. Eingetragen wird nichts (`ui.uebung_lauf.nach_dem_ende`)."""
+    z = e.teil("zaehlen")
+    meldung: ZaehlMeldung | None = None
+    if isinstance(z, ZaehlBaustein) and z.abbrechen(ENDE_ANDERE_UEBUNG):
+        wdh = sum(s.wert for s in z.saetze) if z.wdh else 0
+        if wdh > 0:  # nichts gezählt: nichts einzutragen, keine Meldung
+            meldung = ZaehlMeldung(e.id, z.kontext.uebung_id, z.name, wdh)
+    e.am_ende_stoppen["hrv"] = False
+    e.beenden()
+    if meldung is not None:
+        state.zaehl_meldung = meldung
+    melden(state)
 
 
 def _neue(state: Any) -> Einheitslauf:
@@ -258,11 +330,7 @@ def einzeln_starten(page: Any, state: Any, teil: Any) -> Einheitslauf | None:
             return None
         if isinstance(teil, TimerBaustein) and (e.timer is not None or e.teil("plan")):
             return None  # ein Plan-Ablauf oder eine Übung führt ihre Timer selbst
-        e.beitreten(teil)
-        if isinstance(teil, TimerBaustein):
-            _timer_ticken(page, state, e)
-        melden(state)
-        state.neu_zeichnen()
+        teil_beitreten(page, state, e, teil)
         return e
     if in_vorbereitung(state) is not None:
         return None
@@ -270,6 +338,22 @@ def einzeln_starten(page: Any, state: Any, teil: Any) -> Einheitslauf | None:
     e.hinzufuegen(teil)
     e.ende_wenn_alles_fertig = True
     return alle_starten(page, state, 0.0)
+
+
+def teil_beitreten(page: Any, state: Any, e: Einheitslauf, teil: Any) -> None:
+    """Ein Teil tritt der laufenden Einheit bei (`Einheitslauf.beitreten`) — ein Timer tickt
+    dann in der Oberfläche mit (Töne, Leiste). So treten Uhr und Zählen derselben Übung
+    einander bei (`ui.uebung_lauf`).
+
+    Raises:
+        RuntimeError: Die Einheit läuft nicht (vorbereitet, im Countdown, beendet).
+        ValueError: Ein Teil dieser Art ist schon dabei.
+    """
+    e.beitreten(teil)
+    if isinstance(teil, TimerBaustein):
+        _timer_ticken(page, state, e)
+    melden(state)
+    state.neu_zeichnen()
 
 
 def timer_bereitstellen(
@@ -444,6 +528,8 @@ def titel(e: Einheitslauf) -> str:
     namen: list[str] = []
     if isinstance(u := e.teil("plan"), UebungBaustein | PlanAblaufBaustein) and u.name:
         return u.name
+    if isinstance(z := e.teil("zaehlen"), ZaehlBaustein) and z.name:
+        return z.name  # Zählen ohne Übung — die App baut das nicht, es bleibt lesbar
     if (g := e.teil("gps")) is not None:
         namen.append(SPORT_NAMEN.get(getattr(g, "sportart", ""), "Training"))
     if (t := e.timer) is not None:
@@ -528,6 +614,41 @@ def _ereignisse(page: Any, state: Any, e: Einheitslauf, neu: list[Ereignis]) -> 
             with contextlib.suppress(Exception):
                 beobachter()
     melden(state)
+    _von_selbst_melden(state, e, neu)
+    if (
+        not e.ende_mit_zaehlen
+        and any((x.quelle, x.art) == ("zaehlen", "zaehlen_ende") for x in neu)
+        and not getattr(e.teil("zaehlen"), "von_aussen", False)
+    ):
+        # Das Zählen endete von selbst (keine Bewegung, getrennt), die Uhr der Einheit läuft
+        # weiter: einmal neu zeichnen, sonst stünden in Uhr und Timer noch −1/+1
+        # (`components.zaehlen`). Endete es auf einen Tipp (`uebung_lauf.zaehlen_beenden`:
+        # „Fertig“, „Zählen abbrechen“, Abhaken), zeichnet der Handler selbst — erst nach dem
+        # Eintragen; ein Neubau hier, mitten im Handler, zeigte den Stand davor
+        with contextlib.suppress(Exception):
+            state.neu_zeichnen()
+
+
+def _von_selbst_melden(state: Any, e: Einheitslauf, neu: list[Ereignis]) -> None:
+    """Endete das Zählen eben von selbst (`core.zaehlen.KEINE_BEWEGUNG_S` ohne Wiederholung,
+    das Gerät getrennt) und bleibt abgebrochen, sagt es dieselbe Meldung wie bei einer anderen
+    Übung — mit Grund und „Eintragen“: „Kniebeuge · 12 Wdh. nicht eingetragen — 60 s ohne
+    Bewegung“ (`ZaehlMeldung`). Nichts gezählt: nichts einzutragen, keine Meldung; endete es auf
+    einen Tipp, sieht die Person es selbst.
+
+    Sie liegt in ``state.zaehl_meldung``; gezeigt wird sie mit dem nächsten Aufbau der
+    Ansicht (`ui.app`: nie über einem Dialog) — ohne Uhr endet die Einheit und zeichnet neu
+    (`_laufen`), mit Uhr zeichnet `_ereignisse` neu. Wer sie zeigt, holt sie ab
+    (`ui.uebung_lauf.meldung_abholen`) — so kommt sie einmal."""
+    if not any((x.quelle, x.art) == ("zaehlen", "zaehlen_ende") for x in neu):
+        return
+    z = e.teil("zaehlen")
+    if not isinstance(z, ZaehlBaustein) or z.von_aussen or not z.wdh:
+        return
+    warum = von_selbst_text(z.grund, getrennt=z.getrennt)
+    wdh = sum(s.wert for s in z.saetze)
+    if warum and wdh > 0:
+        state.zaehl_meldung = ZaehlMeldung(e.id, z.kontext.uebung_id, z.name, wdh, warum)
 
 
 async def _km_signal(state: Any) -> None:
@@ -583,7 +704,12 @@ async def _laufen(
             except Exception as fehler:  # steht in der Einheit; die Ansicht zeigt es
                 e.warnung = f"Training nicht gespeichert: {fehler}"
         uebung = abschluss.teile.get("plan") if abschluss is not None else None
-        if uebung is not None:
+        if uebung is None and abschluss is not None:
+            # Zählen ohne Übung (baut die App nicht): sein Kontext nennt die Übung
+            uebung = getattr(abschluss.teile.get("zaehlen"), "kontext", None)
+        if isinstance(uebung, UebungKontext):
+            # Uhr und Zählen: eingetragen wird hier, einmal — was schon eingetragen ist
+            # (abgehakt, `ui.uebung_lauf.zaehlen_beenden`), nicht noch einmal
             from trainingsapp.ui.uebung_lauf import nach_dem_ende
 
             try:
@@ -723,7 +849,21 @@ def teil_route(teil: Any) -> str | None:
     '/training/u1/timer/uebung/u1'
     >>> teil_route(StreckeBaustein(None, "laufen"))
     '/ausdauer'
+
+    Das Zählen führt zur Übung zurück (§4.2), dorthin, wo seine Zählzeile steht — die Karte
+    „Eintragen“ im Plan (die Liste beginnt dann bei der Übung, `ziel_merken`) bzw. die
+    Übungsseite:
+
+    >>> from types import SimpleNamespace as NS
+    >>> lauf = NS(profil=None, uhr=lambda: 0.0)
+    >>> teil_route(ZaehlBaustein(lauf, UebungKontext("u1", "Kniebeuge", "p1", "i1")))
+    '/plan/p1'
+    >>> teil_route(ZaehlBaustein(lauf, UebungKontext("u1", "Kniebeuge")))
+    '/training/u1'
     """
+    if isinstance(teil, ZaehlBaustein):
+        k = teil.kontext
+        return f"/plan/{k.plan_id}" if k.plan_id else f"/training/{k.uebung_id}"
     if isinstance(teil, PlanAblaufBaustein):
         return f"/plan/{teil.plan_id}/timer/ablauf"
     if isinstance(teil, UebungBaustein):
@@ -736,6 +876,29 @@ def teil_route(teil: Any) -> str | None:
     if isinstance(teil, TimerBaustein):
         return "/timer"
     return None
+
+
+def ziel_merken(state: Any, teil: Any) -> None:
+    """Vor dem Weg nach `teil_route`: Führt er in einen Plan (das Zählen einer Planübung,
+    ``/plan/<id>``), beginnt die Planliste bei dieser Übung, aufgeklappt — wie „Weiter mit …“
+    auf „Heute“ (`AppState.plan_ziel`, `plan_offen`). Die Uhr einer Planübung braucht das
+    nicht, ihre Route nennt die Planübung (der Timer liegt über dem Plan). Erst beim Tipp
+    aufrufen: Das Ziel gilt für den nächsten Aufbau des Plans, einmal.
+
+    >>> from types import SimpleNamespace as NS
+    >>> from trainingsapp.devices.einheit import UebungKontext
+    >>> state, lauf = NS(plan_ziel=None, plan_offen=None), NS(profil=None, uhr=lambda: 0.0)
+    >>> ziel_merken(state, ZaehlBaustein(lauf, UebungKontext("u1", "Kniebeuge", "p1", "i1")))
+    >>> state.plan_ziel, state.plan_offen
+    ('i1', 'i1')
+    >>> state = NS(plan_ziel=None, plan_offen=None)
+    >>> ziel_merken(state, ZaehlBaustein(lauf, UebungKontext("u1", "Kniebeuge")))
+    >>> state.plan_ziel is None
+    True
+    """
+    if isinstance(teil, ZaehlBaustein) and teil.kontext.plan_id and teil.kontext.item_id:
+        state.plan_offen = teil.kontext.item_id
+        state.plan_ziel = teil.kontext.item_id
 
 
 def timer_route(e: Einheitslauf) -> str:
@@ -772,6 +935,8 @@ def laufzeilen(e: Einheitslauf) -> tuple[str, str]:
             oben.append(ablauf.schritt.name)
     if timer := timer_text(e):
         oben.append(timer)
+    elif isinstance(z := e.teil("zaehlen"), ZaehlBaustein):
+        oben.append(zaehl_stand.kurz_text(z))  # ohne Uhr: die Zahl (auch in der Benachrichtigung)
     return " · ".join(oben), _teile_text(e)
 
 
@@ -808,6 +973,8 @@ def _teile_text(e: Einheitslauf) -> str:
     teile: list[str] = []
     if isinstance(ablauf := e.teil("plan"), PlanAblaufBaustein):
         teile.append(f"Übung {ablauf.k + 1} von {len(ablauf.schritte)}")
+    if isinstance(z := e.teil("zaehlen"), ZaehlBaustein):
+        teile.append(zaehl_stand.leisten_text(z))
     if (h := e.hrv) is not None:
         lauf = h.messlauf
         if lauf.aufnahme is not None:
@@ -977,6 +1144,7 @@ __all__ = [
     "REITER_EINHEIT",
     "REITER_TAG",
     "Bereich",
+    "ZaehlMeldung",
     "aktuell",
     "alle_beenden",
     "alle_starten",
@@ -998,9 +1166,11 @@ __all__ = [
     "laufzeilen",
     "leeren",
     "melden",
+    "nur_zaehlen",
     "platz_frei",
     "platz_machen",
     "stopp_vorgabe",
+    "teil_beitreten",
     "teil_bereitstellen",
     "teil_route",
     "timer_bereitstellen",
@@ -1009,6 +1179,7 @@ __all__ = [
     "timer_text",
     "timer_titel",
     "titel",
+    "ziel_merken",
     "zu_zeigen",
     "zuruecknehmen",
 ]

@@ -10,8 +10,13 @@ Die Uhr neben dem i im Plan (oder in der Übung) öffnet ihn:
   Restzeit, die Sätze, „Anhalten“, „Weiter“, „Fertig“ (beide nehmen die gelaufene Zeit)
   und „Abbrechen“ (trägt nichts ein).
 - **Danach:** was eingetragen wurde, „Läufe heute“ (ein abgebrochener Lauf lässt sich
-  doch eintragen), „Nochmal“, „Nächste Übung“. Ändern und löschen geht unter „Heute
-  geleistet“.
+  doch eintragen, `components.laeufe_heute`), „Nochmal“, „Nächste Übung“. Ändern und löschen
+  geht unter „Heute geleistet“.
+
+Zählt der Beschleunigungssensor dieselbe Übung mit (Ben, 4.11.2026,
+``docs/plan_beschleunigung.md`` §4.2), steht im Lauf die Zahl mit −1/+1
+(`components.zaehlen.neben_der_uhr`), und die Karte „Sätze“ zeigt je Satz Zeit und
+Wiederholungen; „Läufe heute“ nennt die gezählten Sätze.
 
 Beim Üben gilt jede Wahl hier **für jetzt** (P79): Profil, „zählt“ und die gestellte Zeit
 stehen im `AppState` (`uhr_wahl`, `uhr_zaehlt`, `uhr_einmal` — dieselben wie in der Leiste,
@@ -39,10 +44,13 @@ from trainingsapp.core.uebung_timer import (
     zaehlt_als,
 )
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein
+from trainingsapp.devices.zaehlen import ZaehlBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
+from trainingsapp.ui.components import zaehl_stand, zaehlen
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
+from trainingsapp.ui.components.laeufe_heute import eintragen_handler, laeufe_karte, werte_text
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.uhr import schluessel
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
@@ -68,11 +76,12 @@ def uebung_timer_route(basis: str, uebung: Exercise, item: PlanItem | None = Non
 
 
 def _laufende(state: AppState, uebung_id: str) -> Einheitslauf | None:
-    """Die laufende Einheit, wenn sie diese Übung ist."""
+    """Die laufende Einheit, wenn sie diese Übung mit ihrer Uhr ist — ein Zähllauf ohne Uhr
+    (`ui.uebung_lauf.zaehlen_starten`) nicht: „Starten“ lässt die Uhr ihm beitreten."""
     e = einheit_ui.laeuft(state)
     teil = e.teil("plan") if e is not None else None
     if isinstance(teil, UebungBaustein) and teil.kontext.uebung_id == uebung_id:
-        return e
+        return e if e is not None and e.timer is not None else None
     return None
 
 
@@ -180,8 +189,8 @@ def _kopie(p: TimerProfil) -> TimerProfil:
 
 
 def _werte_text(werte: Sequence[float]) -> str:
-    """„1:00 · 1:00 · 0:45“ — leer heißt „gemacht“."""
-    return " · ".join(dauer_text(w) for w in werte) if werte else "gemacht"
+    """„1:00 · 1:00 · 0:45“ — leer heißt „gemacht“ (`components.laeufe_heute.werte_text`)."""
+    return werte_text(werte)
 
 
 def _balken(folge: list[tuple[Abschnitt, float]], hoehe: int = 10) -> ft.Control:
@@ -282,6 +291,7 @@ def uebung_timer_view(
             melden(str(fehler))
             return
         state.uebung_laeufe[uebung.id] = e.id
+        zaehlen.meldung_zeigen(page, state)  # ein Zählen einer anderen Übung endete
 
     def zeit_stellen() -> None:
         """Ein Tipp auf die Zeit: Timer ohne Ablauf stellen und gleich starten (P79 D4)."""
@@ -307,18 +317,10 @@ def uebung_timer_view(
             melden(str(fehler))
             return
         state.uebung_laeufe[uebung.id] = e.id
+        zaehlen.meldung_zeigen(page, state)
 
     def eintragen(einheit_id: str) -> Callable[[], None]:
-        def handler() -> None:
-            eintrag = uebung_lauf.lauf_eintragen(state, einheit_id)
-            melden(
-                f"{uebung.name}: {eintrag.shorthand() or 'gemacht'}"
-                if eintrag
-                else "Schon eingetragen."
-            )
-            neu_zeichnen()
-
-        return handler
+        return eintragen_handler(page, state, uebung, einheit_id, neu_zeichnen)
 
     async def zum_plan() -> None:
         await page.push_route(basis)
@@ -342,49 +344,6 @@ def uebung_timer_view(
         await page.push_route(state.ersetzen_bei)
 
     # -- Teile der Ansicht --------------------------------------------------------------------
-
-    def laeufe_karte() -> ft.Control | None:
-        laeufe = uebung_lauf.laeufe_heute(state, uebung.id)
-        if not laeufe:
-            return None
-        zeilen: list[ft.Control] = [kartentitel("Läufe heute")]
-        for lauf in laeufe:
-            uhrzeit = f"{lauf.beginn.astimezone():%H:%M}"
-            if lauf.eintrag_id is not None:
-                text, unten = f"{uhrzeit} · {_werte_text(lauf.werte)}", "eingetragen"
-                rechts: ft.Control = ft.Container(
-                    padding=ft.Padding.symmetric(horizontal=10, vertical=4),
-                    border_radius=12,
-                    bgcolor=ft.Colors.SECONDARY_CONTAINER,
-                    content=ft.Text("eingetragen", size=12, weight=ft.FontWeight.W_700),
-                )
-            elif lauf.offen:
-                text, unten = f"{uhrzeit} · läuft", ""
-                rechts = ft.Container()
-            else:
-                grund = "abgebrochen" if lauf.abgebrochen else "nicht eingetragen"
-                text, unten = (
-                    f"{uhrzeit} · {dauer_text(lauf.dauer_s)}",
-                    f"{grund} · nicht eingetragen",
-                )
-                rechts = ft.FilledTonalButton("Eintragen", on_click=eintragen(lauf.einheit_id))
-            zeilen.append(
-                ft.Row(
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Column(
-                            spacing=0,
-                            expand=True,
-                            controls=[
-                                ft.Text(text, size=14, weight=ft.FontWeight.W_600),
-                                ft.Text(unten, size=12, opacity=0.7, visible=bool(unten)),
-                            ],
-                        ),
-                        rechts,
-                    ],
-                )
-            )
-        return karte(*zeilen, abstand=8)
 
     def ergebnis_karte() -> ft.Control | None:
         """Nach einem Lauf aus dieser Ansicht: gemacht und eingetragen — oder abgebrochen."""
@@ -686,10 +645,15 @@ def uebung_timer_view(
 
         halt_knopf.on_click = anhalten
         anzeigen(e)
+        # Zählt der Sensor mit: die Zahl mit ±1 — einmal gebaut, die Einheit zieht nur Texte nach
+        zaehl = zaehlen.neben_der_uhr(
+            page, state, e, uebung.id, item.id if item is not None else None, name="timer"
+        )
         return [
             ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[zeit_text]),
             ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[stand_text]),
             balken_platz,
+            *([karte(*zaehl, abstand=4, padding=10)] if zaehl else []),
             karte(saetze_spalte, abstand=0, padding=10),
             ft.Row(
                 spacing=8,
@@ -747,19 +711,31 @@ def uebung_timer_view(
             else:
                 anteile.append((a, -1.0 if not stand.fertig else 1.0))
         balken_platz.content = None if lauf.vorwaerts else _balken(anteile, hoehe=12)
-        # Sätze: was zählt, mit der gelaufenen Zeit aus der Zeitleiste
-        fertig = {(z.name, z.runde): z.sekunden for z in gelaufene_zeiten(e.ereignisse)}
+        # Sätze: was zählt, mit der gelaufenen Zeit aus der Zeitleiste — und, zählt der Sensor
+        # mit, den Wiederholungen je Satz (4.11.2026)
+        fertig = {(z.name, z.runde): z for z in gelaufene_zeiten(e.ereignisse)}
+        gezaehlt = e.teil("zaehlen")
+        zaehl = gezaehlt if isinstance(gezaehlt, ZaehlBaustein) and gezaehlt.wdh else None
         zeilen: list[ft.Control] = []
         for k, n in enumerate(zaehlend):
             _, runde, _, a = folge[n]
+            wdh: int | None = None
             if n < stand.nummer or stand.fertig:
-                wert = dauer_text(fertig.get((a.name, runde), 0))
+                g = fertig.get((a.name, runde))
+                wert = dauer_text(g.sekunden if g is not None else 0)
+                if g is not None:
+                    wdh = zaehl_stand.wdh_im_abschnitt(zaehl, g.von_s, g.bis_s)
                 text, fett = f"Satz {k + 1}", False
             elif n == stand.nummer:
                 wert = dauer_text(stand.abschnitt_s - stand.rest_s)
+                satz = zaehl.satz if zaehl is not None else None
+                if satz is not None and satz.bis_s is None:
+                    wdh = satz.wert  # der laufende Satz des Zählens
                 text, fett = f"Satz {k + 1} · läuft", True
             else:
                 wert, text, fett = "–", f"Satz {k + 1}", False
+            if wdh is not None:
+                wert = f"{wert} · {wdh} Wdh."
             zeilen.append(
                 ft.Container(
                     padding=ft.Padding.symmetric(horizontal=4, vertical=8),
@@ -808,7 +784,7 @@ def uebung_timer_view(
         state.timer_beobachter.pop("uebung", None)
         oben = ergebnis_karte()
         inhalt.controls = [*([oben] if oben is not None else []), *vorher()]
-    if (laeufe := laeufe_karte()) is not None:
+    if (laeufe := laeufe_karte(page, state, uebung, neu_zeichnen)) is not None:
         inhalt.controls.append(laeufe)
     if plan is not None and laufend is None:
         inhalt.controls.append(

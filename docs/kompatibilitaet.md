@@ -805,6 +805,13 @@ es nicht kennen.
   Messung würden die Notizliste und praxis_gui fluten. Eine Marke hat `id`, `typ` (`wdh`,
   `atem`, `stoerung`, `marke`), `quelle` (`handy`, `uhr`), `nr` im Satz und `kontext`;
   `marke_weg` nimmt eine zurück, gelöscht wird nie.
+- **Kontext** (`was`): die automatischen Notizen (Übung, Timer, eingetragener Satz),
+  `diagnose_start`/`diagnose_ende` und `zaehler` (was der Sensor im Satz zählte, `wert`,
+  `satz`, `feld`, `phase` = `prototyp`). Seit 4.11.2026 aus dem Zählen mit dem
+  Beschleunigungssensor (`docs/plan_beschleunigung.md` §5.3, §6) dazu `zaehlung` (`wert` =
+  Sensor plus Korrektur, `satz`, `feld`, `dauer_s`), `korrektur` (`wert` = ±1, `satz`,
+  `feld`) und `zaehlen_ende` (`phase` = Grund) — nur Felder, die die Weißliste in
+  `hrv_core.deid` schon kennt, nie ein Feld `art`; `t` ist immer der Zeitstempel.
 - **Nie im Mitschnitt:** GPS (Regel 0 in `docs/plan_gps.md`), die Seriennummer (0x2A25) und
   die Systemkennung (0x2A23) — die App liest beide nie. Die Bluetooth-Adresse steht nur in
   der Datei auf dem Gerät; hinaus geht der Mitschnitt nur bereinigt (Abschnitt 2, Export).

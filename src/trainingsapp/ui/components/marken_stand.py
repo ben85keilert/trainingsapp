@@ -42,6 +42,9 @@ class LeistenStand:
     kopf: ft.Text | None = None
     #: der Vergleich nach dem letzten Satz (Marken · Zähler · eingetragen, Stufe 8)
     vergleich: ft.Text | None = None
+    #: „Sensor 11“ neben der Zahl der Tipps, solange der Sensor zählt (A2,
+    #: `components.zaehl_stand.sensor_text`)
+    sensor: ft.Text | None = None
     chips: dict[str, ft.Control] = field(default_factory=dict)
 
 

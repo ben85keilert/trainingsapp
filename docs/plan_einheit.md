@@ -14,7 +14,7 @@ https://claude.ai/artifact/5m4q9AhyKnw5nMjWcwPjUs
 | Begriff | Bedeutung |
 |---|---|
 | **Einheit** | die Klammer um alles, was zusammen läuft (`core/einheit.py`, `devices/einheit.py`) |
-| **Teil** | HRV-Messung, Timer, Ausdauertraining, Plan-Ablauf (`Baustein`). Das Training ist der Teil `gps` (`devices/strecke_baustein.StreckeBaustein`) — mit GPS eine Strecke, ohne GPS (Laufband, Halle) nur die Zeit, wie eine `Strecke` ohne Datei |
+| **Teil** | HRV-Messung, Timer, Ausdauertraining, Plan-Ablauf, Zählen (`Baustein`). Das Training ist der Teil `gps` (`devices/strecke_baustein.StreckeBaustein`) — mit GPS eine Strecke, ohne GPS (Laufband, Halle) nur die Zeit, wie eine `Strecke` ohne Datei. Das Zählen mit dem Beschleunigungssensor ist der Teil `zaehlen` (`devices/zaehlen.ZaehlBaustein`, seit 4.11.2026, Migration 037; §7 „Zähllauf“) |
 | **Bereitstellen** | ein Teil macht sich fertig und wartet auf den gemeinsamen Start: Gurt verbunden, GPS hat Empfang, Profil geladen. Ein zweiter Knopf neben „Start“ (Ben, 17.10.: nicht der Sammelmodus mit Fahne) |
 | **Startleiste** | was bereitsteht: oben auf jeder Seite als **Infoleiste** (eine Zeile), ausführlich als **Startkarte** im Reiter „Einheit“ auf „Heute“ — jeder Teil mit Stand, „Wenn der Timer fertig ist …“, Countdown, „Alle starten“ (§9) |
 | **Laufleiste** | dieselbe Stelle nach dem Start: eine Zeit, der laufende Abschnitt, ⏸ ⏹ für alle; im Reiter „Einheit“ statt ihrer die **Übersicht** mit der Fortschrittsleiste des Timers (§9) |
@@ -104,7 +104,8 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 | `gps/sportart` | Notiz „Jetzt Radfahren“: die Sportart wurde mitten im Lauf gewechselt (Ben, 26.10.2026; `daten`: `sportart`, `split_m`); ab da gilt die neue Splitlänge, die Zeile und das Tagebuch bekommen am Ende die neue Sportart, der Dateikopf behält die vom Start | — |
 | `plan/uebung_start`, `plan/uebung_ende` | Notiz „Planke: Start“ / „Planke: Ende“ mit dem Kurzcode der Übung (`uebungen`, Vertrag §4), Abschnitt der Übung; Anhalten und Weiter ihres Timers heißen „Planke: Pause“ / „Planke: weiter“ (Ben, 19.10.2026) | `uebung` |
 | `plan/pause` | Pause zwischen zwei Übungen eines Plan-Ablaufs, bis „Weiter“ — Abschnitt „Pause“ | `uebung` |
-| `plan/ende`, `person/eintrag` | — (nur Zeitleiste: Ende des Ablaufs, was eingetragen wurde) | |
+| `plan/ende`, `person/eintrag` | — (nur Zeitleiste: Ende des Ablaufs, was eingetragen wurde; `person/eintrag` nennt mit `teil` — `uhr` oder `zaehlen`, fehlt: `uhr` —, welcher Teil eingetragen ist) | |
+| `zaehlen/zaehlung`, `person/korrektur`, `zaehlen/zaehlen_ende` | — (nur Zeitleiste, Teil `zaehlen`: Wiederholungen mit dem Beschleunigungssensor, `docs/plan_beschleunigung.md` §5.3). `zaehlung` einmal je Satz am Satzende mit `satz`, `zaehlart` (`wdh`/`atem` — `art` ist ein Feld des Ereignisses), `sensor`, `korrektur`, `wert` (= max(0, Sensor + Korrektur)), `feld`, `vorlage`, `zeiten_s` (die gezählten Umkehrpunkte auf der Achse der Einheit), `geraet` (Profil), `prototyp` (`"hrv_core.prototyp.wiederholungen@<Version>"`); `korrektur` je ±1 mit `delta` und `satz`; `zaehlen_ende` mit `grund` (`fertig`, `abgehakt` — eingetragen —, `abbruch`, `andere_uebung`, `keine_bewegung`, `kein_atem` — abgebrochen). Ein Satz ist der Zähllauf, mit Timer jeder zählende Abschnitt | |
 
 - **Marken** in der Messdatei: `docs/kompatibilitaet.md` §4. **Spuren**: §9b — eine
   Grenze teilt nur ihre Spur, Abschnitte verschiedener Spuren überlappen sich.
@@ -167,6 +168,24 @@ einzelnen Übung“ — und: „Aus dem Text heraus weiß die App nicht, was Üb
   gesamt; Pausen des Timers zählen nicht, unter `MIN_MARKE_S` fällt ein Abschnitt weg.
   Der Eintrag bekommt Anfang und Ende, die Zeitleiste `person/eintrag`. Abgebrochen:
   nichts — „Läufe heute“ bietet „Eintragen“ an (`lauf_eintragen`).
+- **Zähllauf** (Ben, 4.11.2026, `docs/plan_beschleunigung.md` §4.3; `ui/uebung_lauf.py`
+  `zaehlen_starten`): „Wdh. zählen“ startet eine Einheit aus Übung und Zählen
+  (`devices/zaehlen.ZaehlBaustein`), dazu die HRV, die schon aufnimmt; sie endet mit dem
+  Zählen (`ende_mit_zaehlen`). **Uhr und Zählen derselben Übung teilen eine Einheit:** wer
+  zweit startet, tritt bei — die Uhr bringt dabei ihre Wahl mit
+  (`UebungBaustein.kontext_setzen`), und die Einheit endet dann mit dem Timer. Ein Zähllauf
+  ohne Uhr macht für alles andere Platz wie eine reine Messung (`ui.einheit.platz_machen`):
+  das Zählen endet mit `andere_uebung`, die Meldung „Kniebeuge · 12 Wdh. nicht eingetragen“
+  hält `ui.einheit.ZaehlMeldung`; eine laufende Uhr wird nie still beendet. Eingetragen wird
+  am Ende in **einen** Eintrag (Zeit und Wiederholungen), `person/eintrag` je Teil mit
+  `teil` (`uhr`, `zaehlen`) — so nie doppelt; „abgehakt“ trägt die Wiederholungen sofort ein
+  (`zaehlen_beenden`, über `Einheitslauf.nachtragen`) — dort, wo abgehakt wurde: Übung und
+  Zählen nehmen dann Plan und Planübung des Abhakens an (`kontext_setzen`, ``ort``). Bricht die
+  Uhr ab, ist der ganze Lauf abgebrochen; „Läufe heute“ trägt später nach, was fehlt. Wird das
+  Gerät getrennt (`Messlauf.trennen` nimmt die Anforderung zurück), endet das Zählen mit dem
+  nächsten Takt als `abbruch`. Endet es so oder nach 60 s ohne Bewegung von selbst, sagt es
+  dieselbe `ZaehlMeldung` mit Grund („… — 60 s ohne Bewegung“, `_von_selbst_melden`). In einer Planübung zählt der Sensor nur, wenn sie ein Wiederholungsfeld
+  anbietet (P79: keiner = nur abhaken), und nur in dieses.
 - **Plan-Ablauf** (`core/plan_durchlauf.py`, `devices/plan_ablauf.py`, `ui/plan_ablauf.py`):
   aus dem Timer des Plans („Ablauf öffnen“). Übung für Übung mit ihrem Timer (auf derselben
   Achse: ein `TimerBaustein` je Übung mit Bezug t0), ohne Timer zum Abhaken; danach Pause
@@ -219,7 +238,7 @@ Messung über mehrere Einheiten, wählt man eine), dann das Teilen-Menü
 | `format` | `"einheit-v1"` |
 | `app` | `"trainingsapp 0.2.1 (Build 139)"` |
 | `einheit` | `id`, `titel`, `start_utc` (= `t_s` 0, ISO 8601), `ende_utc` (`null`: abgebrochen und nicht geschlossen) |
-| `teile[]` | je Beteiligung `art` (`hrv`, `gps`, `timer`, `plan`), `rolle`, `versatz_s` (Zeit des Teils + `versatz_s` = `t_s`; HRV: `t_wall_s` der Messdatei; GPS: UTC-Sekunden der Ortung), `von_s`, `bis_s`, `daten`; HRV dazu `datei` = Pfad im ZIP (`null`: Messung lief beim Export noch) |
+| `teile[]` | je Beteiligung `art` (`hrv`, `gps`, `timer`, `plan`, `zaehlen`), `rolle`, `versatz_s` (Zeit des Teils + `versatz_s` = `t_s`; HRV: `t_wall_s` der Messdatei; GPS: UTC-Sekunden der Ortung), `von_s`, `bis_s`, `daten`; HRV dazu `datei` = Pfad im ZIP (`null`: Messung lief beim Export noch) |
 | `ereignisse[]` | die Zeitleiste in ihrer Folge: `nr` (ab 1), `t_s`, `quelle`, `art`, `text`, `daten` (§4, nur `DATEN_SCHLUESSEL`) |
 | `tempo` | `schritt_s` (5), `einheit` (`"m/s"`), `reihe`: `[[t_s, m/s oder null], …]` je Fenster ab `t_s` = 0 — Mittel des Doppler-Tempos, ohne Doppler Weg je Zeit zwischen den Ortungen; Ortungen über 30 m Genauigkeit zählen nicht; `null` = keine Ortung (Tunnel) |
 
@@ -279,6 +298,16 @@ ausführlich steht die Einheit nur noch auf „Heute“, überall sonst eine Zei
   Messung mit Dauer oder Ablauf (nur HRV und Timer) in der Statuskarte „Wenn die 5 min um
   sind – auch jetzt noch änderbar: Messung beenden | Weiterlaufen“ (`core.timer.ende_frage`).
   Ist der Timer durch, verschwindet die Wahl.
+- **Zähl-Dienst** (Ben, 4.11.2026, `docs/plan_beschleunigung.md` §4.2, P119): Das Zählen ist
+  ein eigener Teil neben HRV, Timer und GPS — Symbol `SENSORS`, kurz „Zählen“, als Zeile
+  „Zählen · Kniebeuge“ mit dem Stand „Kniebeuge · 12“ (`ZaehlBaustein.status`; vorher
+  „Sensor startet …“ bzw. „…“, im Timer „Pause“). Es steht nie bereit, sondern beginnt mit
+  dem Tipp auf „Wdh. zählen“. In der Laufleiste unten „Zählen · Kniebeuge · 12“
+  (`ui.einheit._teile_text`), oben ohne Uhr die Zahl neben der Laufzeit, ebenso in der
+  Benachrichtigung (`laufzeilen`); der Titel der Einheit ist der Name der Übung. Antippen
+  führt zur Zählzeile zurück (`teil_route`: `/plan/<id>` bzw. `/training/<übung>`), nicht in
+  den Timer; im Plan beginnt die Liste bei der Übung (`ziel_merken` setzt `plan_ziel`). Die Zahl mit ±1 zieht `components/zaehl_stand.nachziehen` nach, ohne Knöpfe neu
+  zu bauen (die Tipps gingen sonst verloren).
 - Alles frischt sich im Sekundentakt der Einheit auf (`ui.einheit.melden`) und baut Knöpfe
   nur neu, wenn sich an ihnen etwas ändert; Verdecktes (anderer Reiter, eine Seite darüber)
   frischt nicht auf. Nach einem Wechsel der Navigationsleiste ohne Neuaufbau zeigt

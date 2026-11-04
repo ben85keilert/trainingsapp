@@ -54,8 +54,9 @@ from .models import new_id
 from .timer import dauer_text, name_aus_notiz
 
 #: Woher ein Ereignis kommt — ``einheit``, ``timer``, ``plan``, ``gps`` heißen in der
-#: Messdatei ebenso (``marke.quelle``); ``hrv`` und ``person`` bleiben in der Zeitleiste
-QUELLEN: frozenset[str] = frozenset({"einheit", "hrv", "timer", "plan", "gps", "person"})
+#: Messdatei ebenso (``marke.quelle``); ``hrv``, ``person`` und ``zaehlen`` (der
+#: Beschleunigungssensor zählt, ``docs/plan_beschleunigung.md`` §5.3) bleiben in der Zeitleiste
+QUELLEN: frozenset[str] = frozenset({"einheit", "hrv", "timer", "plan", "gps", "person", "zaehlen"})
 
 #: Was ein Ereignis bedeutet
 ARTEN: frozenset[str] = frozenset(
@@ -80,6 +81,12 @@ ARTEN: frozenset[str] = frozenset(
         "abschluss",
         # Ende einer Belastung — HF-Erholung ab hier (Ben, 29.10.2026, Entscheidung 14)
         "erholung",
+        # Zählen mit dem Beschleunigungssensor (Ben, 4.11.2026): ein Satz gezählt
+        # (``zaehlen/zaehlung``), ±1 der Person (``person/korrektur``), Ende mit Grund
+        # (``zaehlen/zaehlen_ende``) — nur Zeitleiste, keine Notiz in der Messdatei
+        "zaehlung",
+        "korrektur",
+        "zaehlen_ende",
     }
 )
 
@@ -89,8 +96,9 @@ SPUR_TIMER = "timer"
 SPUR_UEBUNG = "uebung"
 SPUR_KM = "km"
 
-#: Teile einer Einheit
-TEILE: tuple[str, ...] = ("hrv", "timer", "gps", "plan")
+#: Teile einer Einheit — ``zaehlen``: Wiederholungen mit dem Beschleunigungssensor
+#: (``devices/zaehlen.ZaehlBaustein``, Migration 037)
+TEILE: tuple[str, ...] = ("hrv", "timer", "gps", "plan", "zaehlen")
 
 #: Kürzer als das (s) gilt ein Abschnitt als versehentlich — keine Marke (Ben, 17.10.2026)
 MIN_MARKE_S = 5.0
@@ -141,6 +149,20 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         # Feldvorrats — „Läufe heute“ trägt einen abgebrochenen Lauf später mit ihnen ein.
         # Nur in der Zeitleiste; die Marken der Messdatei nennen ihre Felder einzeln.
         *AUSFUEHRUNG_SCHLUESSEL,
+        # Zählen (``zaehlen/zaehlung`` je Satz, ``person/korrektur``): Satz, was gezählt wird
+        # (``zaehlart`` wdh/atem — ``art`` ist ein Feld des Ereignisses), was der Sensor zählte,
+        # die Korrektur der Person (Summe bzw. ``delta`` ±1), Vorlage der Bewegung, die Zeiten
+        # der gezählten Umkehrpunkte (``t_s``), das Profil des Geräts und der Prototyp
+        # (``"hrv_core.prototyp.wiederholungen@0.8.0"``, flach) — Ergebnisse, keine Rohdaten
+        "satz",
+        "zaehlart",
+        "sensor",
+        "korrektur",
+        "delta",
+        "vorlage",
+        "zeiten_s",
+        "geraet",
+        "prototyp",
         # Teile
         "teil",
         "rolle",
@@ -324,6 +346,12 @@ def projektion(
     False
     >>> projektion(Ereignis(9.0, "person", "eintrag")) is None
     True
+
+    Das Zählen bleibt in der Zeitleiste — in die Notizen kommt nichts Neues (§5.3):
+
+    >>> [projektion(Ereignis(9.0, q, a, "", {"satz": 1, "wert": 12})) for q, a in
+    ...  (("zaehlen", "zaehlung"), ("person", "korrektur"), ("zaehlen", "zaehlen_ende"))]
+    [None, None, None]
     >>> projektion(Ereignis(5.0, "plan", "uebung_start", "Planke: Start",
     ...     {"uebung": "2b0c6f0e-0000-4000-8000-000000000001", "name": "Planke"})).uebungen
     ('2ATPZCAY',)
@@ -670,7 +698,7 @@ class Senke(Protocol):
 
 
 class Baustein(Protocol):
-    """Ein Teil einer Einheit — HRV, Timer, GPS, Plan (``devices/einheit.py``).
+    """Ein Teil einer Einheit — HRV, Timer, GPS, Plan, Zählen (``devices/einheit.py``).
 
     ``starten`` ist **synchron** und darf nicht scheitern: Was dauert, geschieht in
     ``vorbereiten``. Zeiten sind die der Uhr der Einheit; ``takt`` liefert die
@@ -691,6 +719,13 @@ class Baustein(Protocol):
     def takt(self, jetzt: float) -> list[Ereignis]: ...
 
     def beenden(self, jetzt: float) -> list[Ereignis]: ...
+
+    # Freiwillig (die Einheit fragt mit ``getattr``): ``aktiv`` (läuft der Teil noch?),
+    # ``uhr_uebernehmen(uhr)`` (die Uhr der Einheit), ``async abschliessen_async(stoppen)``
+    # (was er hinterlässt, `Abschluss.teile`) und ``beobachten(ereignisse)`` — die Ereignisse
+    # der Einheit nach jedem Takt (beim Beitreten einmal alle bisherigen, beim Ende die
+    # letzten). So sieht das Zählen die Satzgrenzen des Timers, ohne ihn zu kennen
+    # (``docs/plan_beschleunigung.md`` §5.2); Fehler darin stoppen nichts.
 
 
 __all__ = [

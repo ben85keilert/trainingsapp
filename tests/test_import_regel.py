@@ -98,6 +98,8 @@ def test_domaene_ist_ohne_flet_importierbar() -> None:
         "trainingsapp.data.db",
         "hrv_core",
         "trainingsapp.devices",
+        "trainingsapp.devices.zaehlen",
+        "trainingsapp.core.zaehlen_eintrag",
     ):
         importlib.import_module(modul)
 
@@ -106,12 +108,24 @@ def test_uhrkanal_laeuft_ohne_flet() -> None:
     """Die Tests des Uhrkanals laufen auch ohne flet, wie in der CI (``uv sync --only-group
     ci``): ⏯ setzt Diagnosemarken über `components.marken_stand`, nie über die Leiste, die flet
     braucht — auch nicht über einen Import erst in der Funktion. Im Kindprozess ist flet
-    gesperrt, damit ein Verstoß schon lokal auffällt, wo flet installiert ist."""
+    gesperrt, damit ein Verstoß schon lokal auffällt, wo flet installiert ist. Ebenso die
+    Tests des Zählens mit dem Beschleunigungssensor (Geräte, Zeitleiste, Eintrag) und seiner
+    Abläufe in der Oberfläche: `components.zaehl_stand` (Texte, ±1, Nachziehen) und
+    `ui.uebung_lauf`/`ui.einheit` (Uhr und Zählen, andere Übung, abgehakt, Läufe heute)."""
     import os
     import subprocess
     import sys
 
-    datei = Path(__file__).with_name("test_uhr_kanal.py")
+    dateien = [
+        str(Path(__file__).with_name(name))
+        for name in (
+            "test_uhr_kanal.py",
+            "test_zaehlen_geraete.py",
+            "test_zaehlen_eintrag.py",
+            "test_zaehl_stand.py",
+            "test_zaehl_ablauf.py",
+        )
+    ]
     # Ein Finder, der flet nicht findet — wie in der CI, wo es nicht installiert ist. Plugins
     # lädt pytest dafür nicht selbst: flet bringt eins mit, und pytest würde flet dann an
     # diesem Finder vorbei laden (Assertion-Umschreibung). pytest-asyncio kommt ausdrücklich.
@@ -125,7 +139,7 @@ def test_uhrkanal_laeuft_ohne_flet() -> None:
         "sys.meta_path.insert(0, OhneFlet())\n"
         "import pytest\n"
         "sys.exit(pytest.main(['-q', '-p', 'no:cacheprovider', '-p', 'pytest_asyncio.plugin',"
-        f" {str(datei)!r}]))\n"
+        f" *{dateien!r}]))\n"
     )
     umgebung = {**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
     lauf = subprocess.run(

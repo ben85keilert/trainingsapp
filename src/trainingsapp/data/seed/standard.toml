@@ -31,6 +31,8 @@
 #                Einseitige Übungen enden mit „Je Seite.“
 #   limit_spec   Timer: { rules = [{ type = "timer", seconds = 300 }] }
 #   media        Videos: [{ uri = "https://…", title = "Erklärvideo" }]
+#   beschleunigung { wiederholungen = false, atmung = true } — nur, was von der
+#                Vorgabe abweicht (Wdh. bei Feld reps, Atmung bei Typ Atmung)
 
 format = "trainingsapp-uebungspaket"
 version = 1

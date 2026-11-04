@@ -840,6 +840,76 @@ def test_uhr_und_zaehlt_als_reisen_im_paket(con) -> None:
     assert geladen is not None and (geladen.uhr, geladen.zaehlt_als) == (False, "duration")
 
 
+def test_beschleunigung_reist_im_paket(con, tmp_path) -> None:
+    """Ben, 4.11.2026 (`docs/plan_beschleunigung.md` §3.3): Die Karte „Beschleunigungssensor“
+    ist ein Paketfeld — nur, wenn sie von der Vorgabe abweicht; Unsinn darin gilt als Vorgabe,
+    ohne das Paket abzulehnen; im Drei-Wege-Abgleich ein Feld, und wer sie hier ändert,
+    behält sie. Eine neue Formatversion braucht es nicht."""
+    from trainingsapp.core.pakete import (
+        FELDNAMEN,
+        FORMAT_VERSION,
+        aus_stand,
+        stand,
+        zusammenfuehren,
+    )
+    from trainingsapp.core.zaehlen import SensorWahl
+
+    assert list(FELDNAMEN).index("beschleunigung") == list(FELDNAMEN).index("zaehlt_als") + 1
+    assert FELDNAMEN["beschleunigung"] == "Beschleunigungssensor"
+    wahl = SensorWahl(wiederholungen=False, atmung=True, vorlage="neigung_zy")
+    u = Exercise(name="Kniebeuge", beschleunigung=wahl)
+    d = stand(u)
+    assert d["beschleunigung"] == {"wiederholungen": False, "atmung": True, "vorlage": "neigung_zy"}
+    assert "beschleunigung" not in stand(Exercise(name="Planke"))  # die Vorgabe schreibt sich nicht
+    assert aus_stand(u.id, "p1", d).beschleunigung == wahl
+    # Drei-Wege-Abgleich: hier geändert, im Paket unverändert → bleibt; hier unverändert, im
+    # Paket geändert → kommt
+    hier = {**d, "beschleunigung": {"atmung": False}}
+    neu = {**d, "description": "Tiefer.", "beschleunigung": {"atmung": True}}
+    assert zusammenfuehren(d, hier, neu)["beschleunigung"] == {"atmung": False}
+    assert zusammenfuehren(d, d, neu)["beschleunigung"] == {"atmung": True}
+    ohne = {k: v for k, v in d.items() if k != "beschleunigung"}  # im Paket zurück zur Vorgabe
+    assert "beschleunigung" not in zusammenfuehren(d, d, ohne)
+
+    # Von Hand geschrieben, mit Unsinn: gelesen wird die Vorgabe, das Paket bleibt gültig
+    roh = qigong()
+    baum, tief = roh["exercises"]
+    baum["beschleunigung"] = {"atmung": True}
+    tief["beschleunigung"] = {"wiederholungen": "ja", "atmung": 1, "feld": None}
+    inhalt = paket_lesen(roh)
+    assert [x.beschleunigung for x in inhalt.uebungen] == [SensorWahl(atmung=True), SensorWahl()]
+    assert paket_lesen({**roh, "exercises": [{**tief, "beschleunigung": "kaputt"}]}).uebungen
+    datei = paket_json(Paket(id=paket_id("Beine"), name="Beine"), [u])
+    assert json.loads(datei)["version"] <= FORMAT_VERSION
+
+    # Installiert: Paketstand ohne Abweichung; hier geändert → „geändert“, zurücksetzbar
+    pakete, repo = PaketRepo(con), ExerciseRepo(con)
+    pakete.importieren(inhalt)
+    da = repo.laden(inhalt.uebungen[0].id)
+    assert da.beschleunigung == SensorWahl(atmung=True)
+    assert pakete.abweichungen(da) == []
+    assert pakete.abweichungen(repo.laden(inhalt.uebungen[1].id)) == []
+    da.beschleunigung = SensorWahl(atmung=False)
+    repo.speichern(da)
+    assert pakete.abweichungen(repo.laden(da.id)) == ["Beschleunigungssensor"]
+    # Ein Update des Pakets behält die Wahl hier
+    baum["description"] = "Knie weich, Scheitel nach oben, länger."
+    pakete.importieren(paket_lesen(qigong(version=2) | {"exercises": [baum, tief]}))
+    nach_update = repo.laden(da.id)
+    assert nach_update.description.endswith("länger.")
+    assert nach_update.beschleunigung == SensorWahl(atmung=False)
+    assert pakete.zuruecksetzen([da.id]) == 1
+    assert repo.laden(da.id).beschleunigung == SensorWahl(atmung=True)
+
+    # Export → Import auf einem anderen Gerät
+    repo.speichern(u)
+    anderes = oeffnen(tmp_path / "anderes.db")
+    seed_einspielen(anderes)
+    PaketRepo(anderes).importieren(paket_lesen(paket_json(Paket(id=paket_id("B"), name="B"), [u])))
+    assert ExerciseRepo(anderes).laden(u.id).beschleunigung == wahl
+    anderes.close()
+
+
 def test_plan_speichern_behaelt_uebungen_deaktivierter_pakete(con) -> None:
     """D4: `laden` blendet Übungen deaktivierter Pakete aus, `speichern` darf sie nicht
     löschen — Aktivieren stellt den Plan vollständig her (Migration 017)."""

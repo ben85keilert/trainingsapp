@@ -75,6 +75,7 @@ from trainingsapp.core.result_spec import (
 from trainingsapp.core.standards import ziel_bereinigen, ziel_spec
 from trainingsapp.core.timer import TimerProfil
 from trainingsapp.core.uebung_timer import profile_der_uebung
+from trainingsapp.core.zaehlen import WDH_ART, SensorWahl, atmung_an, knopf_text
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
@@ -444,7 +445,8 @@ def uebung_bearbeiten(
         [*state.tags.namen(TAG_REGION), *(uebung.regionen if uebung else [])],
         uebung.typen if uebung else [],
         uebung.regionen if uebung else [],
-        on_change=lambda _typen, _regionen: None,  # gelesen wird beim Speichern
+        # Gelesen wird beim Speichern — nur „Atmung“ folgt dem Typ, solange es nicht umgelegt ist
+        on_change=lambda _typen, _regionen: acc_neu(),
         neu_anlegen=True,
         page=page,
     )
@@ -1213,6 +1215,8 @@ def uebung_bearbeiten(
             uhr_text.value = "Jeder Lauf zählt als Zeit im offenen Eintrag."
         with contextlib.suppress(Exception):  # noch nicht auf der Seite
             uhr_spalte.update()
+        # Die Karte „Beschleunigungssensor“ folgt den Wiederholungsfeldern
+        acc_neu()
 
     def zaehlt_als_lesen() -> str:
         """Die Vorgabe (Haltezeit) bleibt leer, solange nie etwas anderes gewählt war — eine
@@ -1220,6 +1224,129 @@ def uebung_bearbeiten(
         wahl = str(next(iter(zaehlt_als_wahl.selected or []), "hold"))
         vorgabe = next((k for k in zeitfelder() if basis_key(k) == "hold"), "hold")
         return "" if wahl == vorgabe and not uhr_vorher else wahl
+
+    # -- Beschleunigungssensor (Ben, 4.11.2026, `docs/plan_beschleunigung.md` §3): jede Übung
+    # hat die Karte (P117: „da jede Übung eine Atemkomponente haben kann“). Die Schalter
+    # bleiben ``None`` (= wie die Übung: Wiederholungen mit einem Feld der Art „reps“, Atmung
+    # beim Typ „Atmung“), bis man sie umlegt — wie „Zählt als“: eine Paketübung gälte sonst
+    # als „geändert: Beschleunigungssensor“ ------------------------------------------------
+    acc_vorher = uebung.beschleunigung if uebung is not None else SensorWahl()
+    acc_wahl: dict[str, bool | None] = {
+        "wiederholungen": acc_vorher.wiederholungen,
+        "atmung": acc_vorher.atmung,
+    }
+
+    def wdh_keys() -> list[str]:
+        """Die Wiederholungsfelder, wie sie jetzt eingeschaltet sind (``reps``, ``reps_2`` …)."""
+        return [k for k in aktive_keys() if basis_key(k) == WDH_ART]
+
+    def acc_vorgabe(schluessel: str) -> bool:
+        """Was gilt, solange nichts umgelegt ist — aus den Feldern und Typen von jetzt."""
+        if schluessel == "wiederholungen":
+            return bool(wdh_keys())
+        return atmung_an(Exercise(typen=typen_lesen()))
+
+    def acc_umschalten(schluessel: str, schalter_: ft.Switch) -> None:
+        """Umgelegt: eine eigene Wahl — zurück auf die Vorgabe wieder „wie die Übung“."""
+        wert = bool(schalter_.value)
+        vorher = getattr(acc_vorher, schluessel)
+        acc_wahl[schluessel] = None if vorher is None and wert == acc_vorgabe(schluessel) else wert
+        acc_neu()
+
+    # Kleine Schalter (§3.1) — „Wiederholungen“ ausgeschrieben, nie „Wdh.“
+    wdh_schalter: ft.Switch = ft.Switch(label="Wiederholungen")
+    atmung_schalter: ft.Switch = ft.Switch(label="Atmung")
+    wdh_schalter.on_change = lambda: acc_umschalten("wiederholungen", wdh_schalter)
+    atmung_schalter.on_change = lambda: acc_umschalten("atmung", atmung_schalter)
+    bewegung_zeile = ft.Row(
+        spacing=12,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[
+            ft.Text("Bewegung", weight=ft.FontWeight.W_600),
+            # Vorlagen kommen später aus hrv-core (P126) — zuerst nur die Hauptachse
+            ft.Text("Automatisch", opacity=0.8),
+        ],
+    )
+    zaehlt_in_wahl = ft.SegmentedButton(
+        segments=[ft.Segment(value="reps", label=ft.Text("Wiederholungen"))],
+        selected=[acc_vorher.feld or "reps"],
+        allow_empty_selection=False,
+        show_selected_icon=False,
+    )
+    zaehlt_in_zeile = ft.Row(
+        spacing=12,
+        wrap=True,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[ft.Text("Zählt in", weight=ft.FontWeight.W_600), zaehlt_in_wahl],
+    )
+    acc_text = ft.Text(size=12, opacity=0.7)
+    acc_karte = ft.Container(
+        bgcolor=KARTE,
+        border_radius=14,
+        padding=ft.Padding.only(left=12, right=10, top=6, bottom=10),
+        content=ft.Column(
+            spacing=8,
+            tight=True,
+            controls=[wdh_schalter, bewegung_zeile, zaehlt_in_zeile, atmung_schalter, acc_text],
+        ),
+    )
+
+    def zaehlt_in_zeichnen(keys: list[str]) -> None:
+        """„Zählt in“ unter den Namen der Karten (P106) — die Wahl bleibt, solange es ihr Feld
+        gibt, sonst das erste."""
+
+        def beschriftung(k: str) -> str:
+            vorlage = vorrat_feld(k)
+            name_ = namen[k].value if k in namen else ""
+            return (name_ or "").strip() or (vorlage.label if vorlage else k)
+
+        zaehlt_in_wahl.segments = [
+            ft.Segment(value=k, label=ft.Text(beschriftung(k))) for k in keys
+        ] or [ft.Segment(value="reps", label=ft.Text("Wiederholungen"))]
+        gewaehlt = next(iter(zaehlt_in_wahl.selected or []), "")
+        if keys and gewaehlt not in keys:
+            zaehlt_in_wahl.selected = [keys[0]]
+
+    def acc_zeichnen() -> None:
+        """Schalter, „Bewegung“ und „Zählt in“ nach dem Stand — ohne Feld der Art „reps“ ist
+        „Wiederholungen“ ausgegraut (warum: im (i)). Der Stand in einem Satz."""
+        keys = wdh_keys()
+        wdh_schalter.disabled = not keys
+        wdh_schalter.value = bool(keys) and acc_wahl["wiederholungen"] is not False
+        gewaehlt = acc_wahl["atmung"]
+        atmung_schalter.value = acc_vorgabe("atmung") if gewaehlt is None else bool(gewaehlt)
+        wdh = bool(wdh_schalter.value)
+        zaehlt_in_zeichnen(keys)
+        bewegung_zeile.visible = wdh
+        zaehlt_in_zeile.visible = wdh and len(keys) > 1
+        knopf = knopf_text(wdh, bool(atmung_schalter.value))
+        acc_text.value = (
+            f"Beim Üben der Knopf „{knopf}“, wenn ein Gerät mit Beschleunigungssensor "
+            "verbunden ist."
+            if knopf
+            else "Aus — an dieser Übung zählt der Sensor nicht."
+        )
+
+    def acc_neu() -> None:
+        acc_zeichnen()
+        with contextlib.suppress(Exception):  # noch nicht auf der Seite
+            acc_karte.update()
+
+    def zaehlt_in_lesen() -> str | None:
+        """Das erste Wiederholungsfeld ist die Vorgabe — leer, solange nie anderes gewählt war."""
+        keys = wdh_keys()
+        if len(keys) < 2:
+            return acc_vorher.feld  # nichts zu wählen: wie es war
+        wahl = str(next(iter(zaehlt_in_wahl.selected or []), keys[0]))
+        return None if wahl == keys[0] and not acc_vorher.feld else wahl
+
+    def acc_lesen() -> SensorWahl:
+        return SensorWahl(
+            wiederholungen=acc_wahl["wiederholungen"],
+            atmung=acc_wahl["atmung"],
+            vorlage=acc_vorher.vorlage,
+            feld=zaehlt_in_lesen(),
+        )
 
     async def wechseln(
         ziel: str | Callable[[str], str] | None = None, profil_id: str | None = None
@@ -1375,6 +1502,7 @@ def uebung_bearbeiten(
         ziel.uhr = bool(uhr_schalter.value)
         ziel.zeit_zaehlt = bool(zaehlt_schalter.value)
         ziel.zaehlt_als = zaehlt_als_lesen()
+        ziel.beschleunigung = acc_lesen()
         ziel.media = [
             Media(
                 kind=MediaKind.VIDEO,
@@ -1412,6 +1540,7 @@ def uebung_bearbeiten(
             bool(uhr_schalter.value),
             bool(zaehlt_schalter.value),
             zaehlt_als_lesen(),
+            acc_lesen().als_dict(),
             [(v.name, v.symbol, v.kuerzel, v.text) for v in varianten_liste],
             list(umbenennen),
         )
@@ -1521,6 +1650,19 @@ def uebung_bearbeiten(
                                 ),
                             ],
                         ),
+                        abschnitt(
+                            "BESCHLEUNIGUNGSSENSOR",
+                            ft.Row(
+                                tight=True,
+                                spacing=0,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                controls=[
+                                    ft.Text("Prototyp", size=11, italic=True, opacity=0.7),
+                                    hilfe_knopf(page, thema="beschleunigung"),
+                                ],
+                            ),
+                        ),
+                        acc_karte,
                         abschnitt("VIDEOS UND LINKS"),
                         medien_spalte,
                         ft.TextButton(

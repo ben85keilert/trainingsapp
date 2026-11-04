@@ -110,16 +110,22 @@ class EinheitRepo:
         ).fetchone()
         return self._kopf(r) if r else None
 
-    def alle(self, subject_id: str) -> list[EinheitKopf]:
-        """Neueste zuerst."""
-        return [
-            self._kopf(r)
-            for r in self.con.execute(
+    def alle(self, subject_id: str, *, seit: datetime | None = None) -> list[EinheitKopf]:
+        """Neueste zuerst — mit ``seit`` nur die, die ab da begannen (etwa heute: „Läufe
+        heute“ liest so nicht jedes Mal alle Einheiten)."""
+        if seit is None:
+            zeilen = self.con.execute(
                 "SELECT * FROM einheit WHERE subject_id = ? AND deleted_at IS NULL "
                 "ORDER BY started_at DESC",
                 (subject_id,),
             )
-        ]
+        else:
+            zeilen = self.con.execute(
+                "SELECT * FROM einheit WHERE subject_id = ? AND deleted_at IS NULL "
+                "AND started_at >= ? ORDER BY started_at DESC",
+                (subject_id, iso_utc(seit)),
+            )
+        return [self._kopf(r) for r in zeilen]
 
     def offene(self) -> list[str]:
         """Einheiten ohne Ende — beim Start der App: abgebrochen (Prozess beendet, Akku leer)."""

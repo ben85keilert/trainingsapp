@@ -485,6 +485,7 @@ Erweiterungen dabei sind — einer APK, die Ben baut.
 | 6 | Geräteprobe ohne Messung: Dienste mit Namen, Rohmitschnitt, Marken bewegt/still, Formular, Teilen | `devices/erkundung.py`, `ui/views/geraeteprobe.py` |
 | 7 | GATT-Namen, Dekoder 0x2A37 und Treiber mit Reifegrad in hrv-core; Reifegrad in Suche und Sensorblatt | hrv-core 0.7.0 (`geraete/gatt.py`, `treiber.py`) |
 | 8 | Wiederholungszähler (hrv-research, Befund in Entscheidung 22) als Prototyp in hrv-core; nach dem Satz „Marken · Zähler (Prototyp) · eingetragen“ | hrv-core 0.8.0, `messlauf._satz_vergleichen` |
+| A2 | Beschleunigung über `acc_anfordern`/`acc_freigeben` (Zwecke `diagnose`, `zaehlen`): das Ende der Diagnose schaltet ein laufendes Zählen nicht ab; nach dem Satz „Marken · Sensor · Korrektur · eingetragen“ mit dem Wert des Zähl-Teils (`Messlauf.zaehl_satz`, nur für dieselbe Übung — Kurzcode), auch ohne Chip am Ende des Zähllaufs je Satz (`Messlauf.zaehlsatz_vergleichen`, eingetragen nur bei `fertig`/`abgehakt`), Kontextzeilen `zaehlung`, `korrektur`, `zaehlen_ende` (`docs/plan_beschleunigung.md` §5–6) | `messlauf.py`, `devices/zaehlen.py`, `core/diagnose.satz_text` |
 
 **Offen und bewusst zurückgestellt:**
 

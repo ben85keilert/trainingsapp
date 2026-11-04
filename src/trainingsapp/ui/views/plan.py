@@ -119,7 +119,8 @@ from trainingsapp.core.tagesbilanz import buendeln, ist_leistung, je_variante, m
 from trainingsapp.core.timer_eintrag import vom_timer_text
 from trainingsapp.core.uebung_timer import timer_fuer, uhr_an
 from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
-from trainingsapp.ui import marken
+from trainingsapp.core.zaehlen import ENDE_ABGEHAKT
+from trainingsapp.ui import marken, uebung_lauf
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
@@ -130,6 +131,7 @@ from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile
 from trainingsapp.ui.components.varianten import Variantenwahl, varianten_blatt, zeilenbreite
 from trainingsapp.ui.components.werte import wert_leiste
+from trainingsapp.ui.components.zaehlen import laeuft_hier, zaehl_zeile
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AUFKLAPPEN, PLAN_DARSTELLUNGEN, UMSCHALTEN, AppState
 from trainingsapp.ui.views.leistungen import leistungen_blatt
@@ -553,6 +555,36 @@ def plan_view(
             )
         melden(uebung, eintrag)
 
+    def gezaehlt_abhaken(item: PlanItem) -> SessionEntry | None:
+        """Zählt der Sensor gerade bei dieser Übung, endet das Zählen jetzt als „abgehakt“:
+        Die Wiederholungen stehen dann schon im offenen Eintrag (Leitentscheidung 7,
+        `ui.uebung_lauf.zaehlen_beenden`) — das Abhaken schließt ihn, statt einen zweiten
+        Stempel „gemacht“ anzulegen. Der Eintrag liegt hier, in diesem Plan (ohne Plan auf der
+        Übungsseite), auch wenn das Zählen anderswo begann (``ort``). ``None``: es zählte
+        nichts (oder nichts wurde gezählt)."""
+        if nachtrag is not None:
+            return None
+        planuebung = None if einzel else item.id
+        return uebung_lauf.zaehlen_beenden(
+            state, item.exercise_id, planuebung, ENDE_ABGEHAKT, ort=(sitzungsplan, planuebung)
+        )
+
+    def gezaehlt_schliessen(
+        item: PlanItem, gezaehlt: SessionEntry, werte: dict[str, Any] | None = None
+    ) -> None:
+        """Den Eintrag mit den gezählten Wiederholungen schließen — mit Marke wie „Gemacht“;
+        ``werte`` (der Wert eines Chips) kommen dabei dazu."""
+        uebung = uebung_fuer(item)
+        eintrag = state.sitzungen.eintrag_schliessen(gezaehlt.id, werte=werte, uebung=uebung)
+        marken.abschluss(
+            state,
+            uebung,
+            eintrag,
+            grenze=grenze_frei(item) and not noch_offen(item, uebung),
+            auspraegung=kontext_text(uebung, eintrag.result),
+        )
+        melden(uebung, eintrag)
+
     def nur_stempel(e: SessionEntry | None) -> bool:
         """Hat der Eintrag nichts außer dem Stempel „gemacht“ (keine Leistung, keine Notiz)?"""
         return e is not None and not ist_leistung(e) and not (e.note or "").strip()
@@ -562,6 +594,9 @@ def plan_view(
         Eintrag, der nur ein Stempel ist, ist das „Gemacht“ (Ben, 28.10.2026)."""
 
         def handler() -> None:
+            if (gezaehlt := gezaehlt_abhaken(item)) is not None:
+                gezaehlt_schliessen(item, gezaehlt)
+                return
             uebung = uebung_fuer(item)
             ziel = stand_fuer(item, uebung, frisch=True).ziel
             if ziel is None:
@@ -619,12 +654,21 @@ def plan_view(
 
     def erlediger(item: PlanItem) -> Callable[[], None]:
         def handler() -> None:
+            if (gezaehlt := gezaehlt_abhaken(item)) is not None:
+                gezaehlt_schliessen(item, gezaehlt)
+                return
             eintragen(item, kontext(item, uebung_fuer(item)))
 
         return handler
 
     def ziel_erlediger(item: PlanItem) -> Callable[[], None]:
+        """„Wie geplant“ — zählte der Sensor, gilt, was er zählte (P122: entweder die Person
+        oder der Sensor), nicht noch einmal das Ziel."""
+
         def handler() -> None:
+            if (gezaehlt := gezaehlt_abhaken(item)) is not None:
+                gezaehlt_schliessen(item, gezaehlt)
+                return
             eintragen(
                 item,
                 {**ziel_frei(item), **kontext(item, uebung_fuer(item))},
@@ -645,11 +689,18 @@ def plan_view(
         melden(uebung, eintrag)
 
     def chip_erlediger(item: PlanItem, feld: FieldSpec, wert: Any) -> Callable[[], None]:
+        """Ein Chip: ein Satz (Satzliste), ein Wert in den Eintrag (Beiwerk) — oder abhaken mit
+        diesem Wert (Strecke, Dauer, Auswahl …). Zählt dabei der Sensor, endet das Zählen als
+        „abgehakt“ wie bei „Gemacht“; der Wert kommt zu den Wiederholungen in denselben
+        Eintrag, der dann schließt (P122: was der Sensor zählte, gilt — nicht noch das Ziel)."""
+
         def handler() -> None:
             if feld.type == FieldType.SET_LIST:
                 anhaengen(item, feld, [float(wert)])
             elif rolle(feld) == BEIWERK:
                 wert_setzer(item, feld, wert)
+            elif (gezaehlt := gezaehlt_abhaken(item)) is not None:
+                gezaehlt_schliessen(item, gezaehlt, {feld.key: wert})
             else:
                 zusatz = kontext(item, uebung_fuer(item))
                 eintragen(item, {**ziel_frei(item), **zusatz, feld.key: wert})
@@ -1840,13 +1891,16 @@ def plan_view(
         )
 
     def eingabe_bereich(
-        item: PlanItem, uebung: Exercise, st: offene.Stand, uhr: ft.Control | None = None
+        item: PlanItem, uebung: Exercise, st: offene.Stand, oben: list[ft.Control] | None = None
     ) -> list[ft.Control]:
         """Oben die Zone „Ausführung“ (Einstellungen), darunter „EINTRAGEN“ mit den Werten —
-        wie die Darstellung sagt (Skizze C1). Die Uhr-Zeile (``uhr``) steht als **erste Zeile
-        unter „Eintragen“**, vor Wiederholungen und Zeit: Die Stoppuhr zählt als Zeit, also
-        gehört sie zu dem, was gesammelt wird, nicht zu den Einstellungen (Ben, 27.10.2026).
-        Ohne Mengen steht sie allein unter der Ausführung."""
+        wie die Darstellung sagt (Skizze C1). Die Uhr-Zeile steht als **erste Zeile unter
+        „Eintragen“**, vor Wiederholungen und Zeit: Die Stoppuhr zählt als Zeit, also gehört
+        sie zu dem, was gesammelt wird, nicht zu den Einstellungen (Ben, 27.10.2026); direkt
+        darunter die Zählzeile des Beschleunigungssensors (4.11.2026). ``oben``: diese Zeilen,
+        in dieser Folge. Ohne Mengen stehen sie allein unter der Ausführung — auch bei einer
+        Übung nur mit „Atmung“."""
+        oben = oben or []
         teile = parameter_abschnitte(item, uebung)
         gewaehlt: str | None = None
         schalter: ft.Control | None = None
@@ -1869,7 +1923,7 @@ def plan_view(
             )
         ausfuehrung = ausfuehrung_abschnitt(item, uebung, st, schalter)
         if not teile and ausfuehrung is None:
-            return [uhr] if uhr is not None else []
+            return list(oben)
         bereich: list[ft.Control] = []
         if ausfuehrung is not None:
             bereich.append(ausfuehrung)
@@ -1880,12 +1934,10 @@ def plan_view(
                 if gewaehlt is not None
                 else [bauen() for _, _, bauen in teile]
             )
-            if uhr is not None:
-                zeilen.insert(0, uhr)
+            zeilen[0:0] = oben
             bereich.append(eintragen_karte(zeilen, ziel_hinweis(item, uebung, st)))
         else:  # nur Ausführung (Skala & Co.): wohin der nächste Wert geht
-            if uhr is not None:
-                bereich.append(uhr)
+            bereich.extend(oben)
             bereich.append(ziel_hinweis(item, uebung, st))
         return bereich
 
@@ -2160,10 +2212,30 @@ def plan_view(
                 knoepfe.append(etikett_knopf(item, st))
             inhalt.append(geleistet_tafel(uebung, item, st))
             inhalt.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=knoepfe))
+            # Wiederholungen zählen (Ben, 4.11.2026): direkt unter der Zeile der Uhr. Zeigt
+            # die Karte die laufende Uhr und zählt der Sensor in ihrer Einheit, steht die Zahl
+            # dort — die Zählzeile wiederholt sie nicht
+            # (`laufende` nennt auch einen Zähllauf ohne Uhr — die Uhr läuft nur mit Timer)
+            einheit = laufende(state, aus_katalog, planuebung) if uhr.zeile is not None else None
+            uhr_laeuft = einheit is not None and einheit.timer is not None
+            zaehl = zaehl_zeile(
+                page,
+                state,
+                uebung=aus_katalog,
+                plan=None if einzel else plan,
+                item=planuebung,
+                nachtrag=nachtrag,
+                neben_uhr=uhr_laeuft,
+            )
+            oben = [z for z in (uhr.zeile, zaehl) if z is not None]
             if offen:
-                inhalt.extend(eingabe_bereich(item, uebung, st, uhr.zeile))
-            elif uhr.zeile is not None and laufende(state, aus_katalog, planuebung):
-                inhalt.append(uhr.zeile)
+                inhalt.extend(eingabe_bereich(item, uebung, st, oben))
+            else:
+                # Zugeklappt nur, was läuft — die Uhr und das Zählen
+                if uhr.zeile is not None and uhr_laeuft:
+                    inhalt.append(uhr.zeile)
+                if zaehl is not None and laeuft_hier(state, aus_katalog, planuebung):
+                    inhalt.append(zaehl)
 
         return ft.Container(
             padding=ft.Padding.only(left=14, right=10, top=12, bottom=12),

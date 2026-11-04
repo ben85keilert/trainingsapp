@@ -59,6 +59,7 @@ from hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
 from hrv_core.regeln import Korrekturregeln
 from hrv_core.trends import KENNZAHLEN
 
+from trainingsapp import config
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core.hf_profil import bereiche_fuer, grenzen_bpm
 from trainingsapp.core.hf_training import (
@@ -145,6 +146,7 @@ from trainingsapp.ui.components.notizen import (
     uebungsquellen,
 )
 from trainingsapp.ui.components.scroll import scroll_merken
+from trainingsapp.ui.components.sensorblatt import diagnosemodus_knopf
 from trainingsapp.ui.components.strecken_export import strecken_export_fragen
 from trainingsapp.ui.components.titel import (
     geuebte_plaene,
@@ -675,7 +677,16 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             if (warnung := await bluetooth_warnung()) is not None:
                 warnen(warnung)
                 return
-            quelle = PolarQuelle(state.ble_transport, ekg=ekg)
+            einst = state.hrv_einstellungen()
+            if config.ist_aktiv("diagnosemodus") and einst.diagnose_anbieten:
+                # Diagnosemodus angeboten: ein Transport, der mithören kann — ohne
+                # angehängten Mitschnitt zählt er nur (`devices.mitschnitt`, Plan §5)
+                from trainingsapp.devices.mitschnitt import MitschnittTransport
+
+                transport = MitschnittTransport(state.ble_transport)
+                quelle = PolarQuelle(transport, ekg=ekg, protokoll=transport.protokoll)
+            else:
+                quelle = PolarQuelle(state.ble_transport, ekg=ekg)
         else:
             ring.visible = False
             hinweis_text.value = "Bluetooth gibt es nur in der App auf dem Handy."
@@ -1859,6 +1870,11 @@ def _live_teil(
                             ft.TextButton(
                                 "Trennen", icon=ft.Icons.BLUETOOTH_DISABLED, on_click=trennen
                             ),
+                            # Diagnosemodus (Ben, 4.11.2026): nur wenn angeboten — öffnet
+                            # das Sensorblatt (`components.sensorblatt`)
+                            diagnosemodus_knopf(
+                                page, state, lauf, aufnahme_starten=aufnahme_starten
+                            ),
                         ],
                     ),
                     # Schon vor dem Start (Ben, 17.10.2026) — der Start übernimmt beides
@@ -1891,6 +1907,9 @@ def _live_teil(
                             dauer,
                             ft.FilledButton(
                                 "Stopp & speichern", icon=ft.Icons.STOP, on_click=aufnahme_stoppen
+                            ),
+                            diagnosemodus_knopf(
+                                page, state, lauf, aufnahme_starten=aufnahme_starten
                             ),
                         ],
                     ),

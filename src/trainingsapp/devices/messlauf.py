@@ -17,6 +17,13 @@ keinen Timer-Abschnitt (`hrv_core.ausschnitte.spuren_speichern`). Automatische
 Notizen tragen eine `marke` (Vertrag §4), und eine Einheit gibt den genauen
 Zeitpunkt (`bei`) und beim gemeinsamen Start den Nullpunkt der Aufnahme vor.
 
+**Diagnosemodus** (Ben, 4.11.2026, `docs/plan_diagnosemodus.md`): `diagnose_starten`
+hängt an die laufende Aufnahme einen Rohmitschnitt (``mitschnitt-v1``, Vertrag §14) — neben
+dem Backup ``.backup_<ts>_mitschnitt.jsonl``, beim Speichern ``sensor_<ts>_mitschnitt.jsonl``
+— und schaltet die gewählten Zusatzströme der Quelle ein (EKG, Beschleunigung). Alle 30 s
+eine Zustandsprobe (Akku von Gerät und Handy, Verzug der Ereignisschleife, Pakete).
+`diagnose_beenden` stellt die Ströme zurück; die Messung läuft weiter.
+
 **Eine neue Aufnahme beginnt mit leeren Kurven** (Ben, 16.10.2026):
 `aufnahme_starten` leert das Live-Fenster und setzt die Live-Achse auf 0.
 **Titel und Beschreibung schon vor der Aufnahme** (Ben, 17.10.2026: `titel_notiz`)
@@ -32,6 +39,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import os
 import time
 from collections import deque
 from collections.abc import Callable, Sequence
@@ -40,6 +48,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from hrv_core import mitschnitt as mt
 from hrv_core.aufnahme import Aufnahme, backup_entfernen, backup_lesen
 from hrv_core.ausschnitte import (
     Abschnitt,
@@ -64,7 +73,15 @@ from ..core.einheit import SPUR_TIMER
 from ..core.gurt_warnung import Artefaktwache
 from ..core.hrv_export import diagnose_pfad, diagnose_text
 from .base import DeviceStatus, EkgPaket, HeartRateSource, Messwert, PpiPaket, Verbindung
+from .mitschnitt import MitschnittTransport
 from .profiles import GeraeteProfil, profil_fuer_namen
+
+#: Abstand der Zustandsproben im Diagnosemodus (s)
+PROBE_S = 30.0
+#: Längste Dauer des Vorabtests im Sensorblatt (s)
+VORABTEST_S = 20.0
+#: Takt, in dem der Verzug der Ereignisschleife gemessen wird (s)
+VERZUG_TAKT_S = 0.25
 
 #: Alle so viele Sekunden schreibt die Aufnahme ein Backup (praxis_gui: 15 s).
 BACKUP_S = 15.0
@@ -142,7 +159,12 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
                 sammler.schreiben(pfad)
         with contextlib.suppress(OSError):
             journal.unlink()
-    backup_entfernen(backup)  # Kopf und Journal
+    # Ebenso der Rohmitschnitt des Diagnosemodus — er bleibt, wie er ist, und heißt nur neu
+    mitschnitt_journal = mt.journal_pfad(backup)
+    if mitschnitt_journal.exists() and not mt.mitschnitt_pfad(pfad).exists():
+        with contextlib.suppress(OSError):
+            os.replace(mitschnitt_journal, mt.mitschnitt_pfad(pfad))
+    backup_entfernen(backup)  # Kopf, Journal und was an Begleit-Journalen übrig ist
     subject_id = zusatz.get("subject_id")
     return _gespeichert(
         pfad,
@@ -232,6 +254,22 @@ class Messlauf:
         #: EKG-Rohsignal der laufenden Aufnahme (Polar H10 auf Wunsch; Ben, 30.10.2026) —
         #: entsteht mit dem ersten Rahmen, wird als Beiwerk ``_ecg.json`` gespeichert
         self.ekg: EkgSammler | None = None
+        #: Rohmitschnitt der laufenden Aufnahme im Diagnosemodus (offen, solange er läuft;
+        #: geschlossen bis zum Speichern, dann umbenannt) — `diagnose_starten`
+        self.mitschnitt: mt.Schreiber | None = None
+        #: Seit wann der Diagnosemodus aufzeichnet (Uhr der Quelle)
+        self.diagnose_seit: float | None = None
+        #: Zusatzströme vor dem Diagnosemodus — `diagnose_beenden` stellt sie wieder her
+        self._diagnose_vorher: tuple[bool, tuple[int, int] | None] | None = None
+        #: Vorgemerkt im Sensorblatt: (EKG, Beschleunigung, Kopf) — beginnt mit der Aufnahme
+        self._diagnose_wunsch: tuple[bool, tuple[int, int] | None, dict[str, Any]] | None = None
+        self._probe_task: asyncio.Task[None] | None = None
+        self._stroeme_task: asyncio.Task[None] | None = None
+        #: Beginn des Vorabtests (Uhr der Quelle) — ``None``: keiner
+        self.vorabtest_seit: float | None = None
+        #: Verzug der Ereignisschleife (ms): letzter Wert und Spitze seit der letzten Probe
+        self.verzug_ms = 0
+        self._verzug_spitze_ms = 0
         # Die Uhr der Quelle — beim Simulator läuft sie ``tempo``-fach, bei echten
         # Geräten ist sie time.monotonic(). t_capture der Messwerte passt dazu.
         self._uhr: Callable[[], float] = getattr(quelle, "jetzt", time.monotonic)
@@ -513,6 +551,10 @@ class Messlauf:
         self.aufnahme.ereignisse = [_an_den_anfang(e, self.aufnahme.start_utc) for e in vorab]
         self.aufnahme.titel, self.aufnahme.notiz = self._vorab_titel, self._vorab_notiz
         self._vorab_titel = self._vorab_notiz = ""
+        # Im Sensorblatt vorgemerkt: der Rohmitschnitt beginnt mit der Aufnahme (auch mit
+        # Vorlauf einer Einheit, die sie erst später startet)
+        if self._diagnose_wunsch is not None and self.diagnose_moeglich:
+            self._diagnose_beginnen()
 
     def notiz_zeitbezug(self) -> Zeitbezug:
         """Zeitbezug der Live-Achse für Notizen — mit und ohne Aufnahme.
@@ -748,6 +790,8 @@ class Messlauf:
             kopf = self.aufnahme.backup(self._ordner(self._backup_basis), zusatz=self._zusatz())
             if self.ekg is not None and self.ekg.n:
                 self.ekg.journal_anhaengen(ekg_journal_pfad(kopf))
+        if self.mitschnitt is not None:
+            self.mitschnitt.sichern()
 
     def _zusatz(self) -> dict[str, object]:
         """Was das Backup über die Datei hinaus braucht (`backup_wiederherstellen`)."""
@@ -793,6 +837,7 @@ class Messlauf:
         """
         aufnahme = self._stopp_beginnen()
         if aufnahme is None:
+            await self._stroeme_zurueck()
             return None
         try:
             ergebnis = await asyncio.to_thread(self._schreiben, aufnahme, basis)
@@ -800,6 +845,7 @@ class Messlauf:
             self._stopp_beenden(gespeichert=False)
             raise
         self._stopp_beenden(gespeichert=True)
+        await self._stroeme_zurueck()
         return ergebnis
 
     async def aufnahme_teilen_async(self, basis: Path) -> Gespeichert | None:
@@ -833,10 +879,17 @@ class Messlauf:
         # nächsten Rahmen einen neuen (mit eigenem Journal und `ecg_aufzeichnung`) — vorher
         # bekam Teil 1 kein `_ecg.json`, und alles landete neben dem letzten Teil (V4)
         ekg_alt, self.ekg = self.ekg, None
+        # Ebenso der Rohmitschnitt: Teil 1 behält seinen, Teil 2 schreibt ohne Lücke einen
+        # neuen weiter, solange der Diagnosemodus läuft
+        mitschnitt_alt, self.mitschnitt = self.mitschnitt, None
         self._dateiname_fest = None
         self.aufnahme = neu
         self._letztes_backup = jetzt
-        return await asyncio.to_thread(self._schreiben, alt, basis, grenzen_alt, ekg_alt)
+        if mitschnitt_alt is not None and mitschnitt_alt.offen:
+            self._mitschnitt_oeffnen(mitschnitt_alt.pfad.name)
+        return await asyncio.to_thread(
+            self._schreiben, alt, basis, grenzen_alt, ekg_alt, mitschnitt_alt
+        )
 
     def _stopp_beginnen(self) -> Aufnahme | None:
         """Die Aufnahme beenden: ab jetzt kein Schlag mehr hinein. ``None``: nichts
@@ -845,6 +898,7 @@ class Messlauf:
         if aufnahme is None or not aufnahme.beats:
             self.aufnahme = None
             self.ekg = None
+            self._mitschnitt_verwerfen()
             return None
         if self._wird_gespeichert:
             return None
@@ -856,6 +910,9 @@ class Messlauf:
         if gespeichert:
             self.aufnahme = None
             self.ekg = None
+            self.mitschnitt = None
+            self.diagnose_seit = None
+            self._diagnose_wunsch = None  # je Messung (Plan §2.2)
             self._grenzen = {}
 
     def _schreiben(
@@ -864,12 +921,17 @@ class Messlauf:
         basis: Path,
         grenzen: dict[str, list[tuple[dict, str, bool]]] | None = None,
         ekg: EkgSammler | _Laufend | None = _LAUFEND,
+        mitschnitt: mt.Schreiber | _Laufend | None = _LAUFEND,
     ) -> Gespeichert:
         """Messdatei, Abschnitte je Spur und Diagnoseprotokoll schreiben — liest ``self``
         nur, darum auch in einem Thread möglich. ``grenzen``: die Spuren dieser Aufnahme
         (ohne Angabe die laufenden); ``ekg``: der EKG-Sammler dieser Aufnahme (ohne Angabe
         der laufende)."""
         pfad = aufnahme.speichern(self._ordner(basis))
+        if isinstance(mitschnitt, _Laufend):
+            mitschnitt = self.mitschnitt
+        if mitschnitt is not None:
+            self._mitschnitt_ablegen(mitschnitt, pfad)
         if isinstance(ekg, _Laufend):
             ekg = self.ekg
         if ekg is not None and ekg.n:
@@ -916,6 +978,330 @@ class Messlauf:
             with contextlib.suppress(OSError):
                 diagnose_pfad(pfad).write_text(text, encoding="utf-8")
         return _gespeichert(pfad, rec, dauer_s=aufnahme.dauer_s())
+
+    # -- Diagnosemodus (docs/plan_diagnosemodus.md) -------------------------------------------
+
+    @property
+    def mitschnitt_transport(self) -> MitschnittTransport | None:
+        """Der mithörende Transport der Quelle — ``None`` (Simulator, Desktop ohne ihn)."""
+        transport = getattr(self.quelle, "transport", None)
+        return transport if isinstance(transport, MitschnittTransport) else None
+
+    @property
+    def diagnose_aktiv(self) -> bool:
+        """Zeichnet der Diagnosemodus gerade auf? (Der rote Punkt.)"""
+        return self.mitschnitt is not None and self.mitschnitt.offen
+
+    @property
+    def diagnose_moeglich(self) -> bool:
+        """Lässt sich hier ein Rohmitschnitt anhängen (mithörender Transport, Ablage)?"""
+        return self.mitschnitt_transport is not None and self._backup_basis is not None
+
+    @property
+    def diagnose_vorgemerkt(self) -> bool:
+        """Im Sensorblatt gewählt, die Aufnahme hat aber noch nicht begonnen."""
+        return self._diagnose_wunsch is not None and not self.diagnose_aktiv
+
+    def diagnose_vormerken(
+        self,
+        *,
+        ekg: bool = True,
+        acc: tuple[int, int] | None = None,
+        kopf: dict[str, Any] | None = None,
+    ) -> None:
+        """Den Diagnosemodus für diese Messung wählen: läuft schon eine Aufnahme, beginnt er
+        sofort, sonst mit ihr (`aufnahme_starten`). Die Zusatzströme schaltet ein Hintergrund-
+        auftrag ein (meist laufen sie schon seit dem Vorabtest)."""
+        self._diagnose_wunsch = (bool(ekg), acc, dict(kopf or {}))
+        self.vorabtest_seit = None
+        if self.aufnahme is not None and not self.diagnose_aktiv and self.diagnose_moeglich:
+            self._diagnose_beginnen()
+
+    async def diagnose_starten(
+        self,
+        *,
+        ekg: bool = True,
+        acc: tuple[int, int] | None = None,
+        kopf: dict[str, Any] | None = None,
+    ) -> Path | None:
+        """Den Rohmitschnitt der laufenden Aufnahme beginnen und die Zusatzströme einschalten
+        — und darauf warten. ``None``, wenn es nicht geht: keine Aufnahme, kein mithörender
+        Transport, keine Ablage — oder er läuft schon."""
+        if self.aufnahme is None or self.diagnose_aktiv or not self.diagnose_moeglich:
+            return None
+        self._diagnose_wunsch = (bool(ekg), acc, dict(kopf or {}))
+        schreiber = self._diagnose_beginnen()
+        if schreiber is None:
+            return None
+        if self._stroeme_task is not None:
+            with contextlib.suppress(Exception):
+                await self._stroeme_task
+        return schreiber.pfad
+
+    def _diagnose_beginnen(self) -> mt.Schreiber | None:
+        wunsch = self._diagnose_wunsch
+        if wunsch is None:
+            return None
+        ekg, acc, kopf = wunsch
+        schreiber = self._mitschnitt_oeffnen(kopf=kopf, ekg=ekg, acc=acc)
+        if schreiber is None:
+            return None
+        self._vorher_merken()
+        setzen = getattr(self.quelle, "stroeme_setzen", None)
+        if setzen is not None:
+            with contextlib.suppress(RuntimeError):  # ohne Ereignisschleife (Test)
+                self._stroeme_task = asyncio.get_running_loop().create_task(
+                    setzen(ekg=ekg, acc=acc), name="diagnose-stroeme"
+                )
+        self._melden(True)
+        return schreiber
+
+    def _vorher_merken(self) -> None:
+        if self._diagnose_vorher is None:
+            self._diagnose_vorher = (
+                bool(getattr(self.quelle, "ekg_wunsch", False)),
+                getattr(self.quelle, "acc_wunsch", None),
+            )
+
+    async def diagnose_beenden(self) -> None:
+        """Zusatzströme zurück, Mitschnitt schließen — die Messung läuft weiter. Die Datei
+        bleibt neben dem Backup und wird beim Speichern zum Beiwerk der Messdatei. Auch eine
+        bloße Vormerkung oder ein Vorabtest endet hier."""
+        self._diagnose_wunsch = None
+        self.vorabtest_seit = None
+        schreiber = self.mitschnitt
+        if schreiber is not None and schreiber.offen:
+            schreiber.kontext("diagnose_ende")
+            self._mitschnitt_schliessen(schreiber)
+        self.diagnose_seit = None
+        await self._stroeme_zurueck()
+        self._melden(True)
+
+    # -- Vorabtest (Sensorblatt, Plan §2.3) ---------------------------------------------
+
+    async def vorabtest_beginnen(self, *, ekg: bool, acc: tuple[int, int] | None) -> None:
+        """Die gewählten Ströme einschalten, ohne Aufnahme und ohne Mitschnitt — das Blatt
+        sieht über `vorabtest_stand`, ob sie mit ihrer Rate kommen."""
+        self._vorher_merken()
+        self.vorabtest_seit = self._uhr()
+        setzen = getattr(self.quelle, "stroeme_setzen", None)
+        if setzen is not None:
+            await setzen(ekg=ekg, acc=acc)
+
+    def vorabtest_stand(self, *, ekg: bool, acc: tuple[int, int] | None) -> dict[str, Any]:
+        """Je gewähltem Strom die Rate seit Testbeginn gegen das Soll: ``{"hr": {"rate",
+        "soll", "ok"}, …}``, dazu ``fertig`` (alles da oder 20 s vorbei) und ``seit_s``."""
+        transport = self.mitschnitt_transport
+        seit = self._uhr() - self.vorabtest_seit if self.vorabtest_seit is not None else 0.0
+        fenster = min(10.0, max(2.0, seit))
+        soll: dict[str, float] = {"hr": 1.0}
+        if ekg:
+            soll["ecg"] = 130.0
+        if acc is not None:
+            soll["acc"] = float(acc[0])
+        stroeme: dict[str, Any] = {}
+        jetzt = self._uhr()
+        for name, sollrate in soll.items():
+            rate = 0.0
+            if transport is not None and name in transport.zaehler.stroeme:
+                pakete_s, proben_s = transport.zaehler.stroeme[name].rate(jetzt, fenster)
+                rate = pakete_s if name == "hr" else proben_s
+            stroeme[name] = {
+                "rate": round(rate, 1),
+                "soll": sollrate,
+                "ok": seit >= 2.0 and rate >= 0.8 * sollrate,
+            }
+        fertig = seit >= VORABTEST_S or (seit >= 3.0 and all(v["ok"] for v in stroeme.values()))
+        return {"seit_s": round(seit, 1), "fertig": fertig, "stroeme": stroeme}
+
+    async def vorabtest_abbrechen(self) -> None:
+        """Blatt zu ohne Start: Ströme wie vorher, keine Vormerkung."""
+        if self._diagnose_wunsch is not None or self.diagnose_aktiv:
+            return
+        self.vorabtest_seit = None
+        await self._stroeme_zurueck()
+
+    def marke(self, typ: str, **felder: Any) -> dict[str, Any] | None:
+        """Eine Diagnosemarke in den Mitschnitt (`hrv_core.mitschnitt.Schreiber.marke`)."""
+        if not self.diagnose_aktiv or self.mitschnitt is None:
+            return None
+        return self.mitschnitt.marke(typ, **felder)
+
+    def marke_weg(self, marke_id: int, **felder: Any) -> dict[str, Any] | None:
+        if not self.diagnose_aktiv or self.mitschnitt is None:
+            return None
+        return self.mitschnitt.marke_weg(marke_id, **felder)
+
+    def kontext(self, was: str, **felder: Any) -> dict[str, Any] | None:
+        """Kontext in den Mitschnitt: Übung, Timer, eingetragener Satz (Plan §3.1)."""
+        if not self.diagnose_aktiv or self.mitschnitt is None:
+            return None
+        return self.mitschnitt.kontext(was, **felder)
+
+    def diagnose_stand(self) -> dict[str, Any]:
+        """Was der Diagnosemodus gerade aufzeichnet — für das Stand-Blatt und die
+        Benachrichtigung."""
+        schreiber = self.mitschnitt
+        transport = self.mitschnitt_transport
+        jetzt = self._uhr()
+        quelle = self.quelle
+        return {
+            "aktiv": self.diagnose_aktiv,
+            "seit_s": round(jetzt - self.diagnose_seit, 1) if self.diagnose_seit else 0.0,
+            "bytes": schreiber.bytes if schreiber is not None else 0,
+            "zeilen": schreiber.zeilen if schreiber is not None else 0,
+            "schreibfehler": schreiber.fehler if schreiber is not None else 0,
+            "stroeme": transport.zaehler.stand(jetzt) if transport is not None else {},
+            "seq_luecken": transport.zaehler.seq_luecken if transport is not None else 0,
+            "trennungen": transport.zaehler.trennungen if transport is not None else 0,
+            "akku": self.status.batterie_prozent,
+            "ekg": bool(getattr(quelle, "ekg_modus", False)),
+            "acc": bool(getattr(quelle, "acc_modus", False)),
+            "verzug_ms": self.verzug_ms,
+            "pfad": str(schreiber.pfad) if schreiber is not None else "",
+        }
+
+    def _mitschnitt_oeffnen(
+        self,
+        name: str | None = None,
+        *,
+        kopf: dict[str, Any] | None = None,
+        ekg: bool | None = None,
+        acc: tuple[int, int] | None = None,
+    ) -> mt.Schreiber | None:
+        """Den Schreiber neben dem Backup der laufenden Aufnahme öffnen und anhängen."""
+        aufnahme, transport, basis = self.aufnahme, self.mitschnitt_transport, self._backup_basis
+        if aufnahme is None or transport is None or basis is None:
+            return None
+        ordner = self._ordner(basis)
+        pfad = mt.journal_pfad(ordner / aufnahme.backup_name())
+        quelle = self.quelle
+        if ekg is None:
+            ekg = bool(getattr(quelle, "ekg_modus", False))
+        if acc is None:
+            acc = getattr(quelle, "acc_wunsch", None)
+        stroeme: dict[str, Any] = {
+            "hr": {"merkmal": "0x2A37"},
+            "merkmale": sorted(getattr(quelle, "pmd_merkmale", None) or []),
+            "einstellungen": dict(getattr(quelle, "pmd_einstellungen", {}) or {}),
+        }
+        if ekg:
+            stroeme["ecg"] = {"rate_hz": 130, "aufloesung_bit": 14}
+        if acc is not None:
+            stroeme["acc"] = {"rate_hz": acc[0], "bereich_g": acc[1], "aufloesung_bit": 16}
+        inhalt: dict[str, Any] = {
+            "app": f"trainingsapp {app_version()[0]}",
+            "messdatei": aufnahme.dateiname(),
+            # Nullpunkt der Messung auf der Uhr der Zeilen (hrv-core 0.6.1): Marken und Pakete
+            # liegen damit genau auf t_wall_s der Messdatei
+            "aufnahme": {
+                "start_mono_ns": round(aufnahme.start_mono * 1e9),
+                "start_utc": aufnahme.start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+            "geraet": {
+                "name": self.geraet_name,
+                "id": self.device_id,
+                "profil": self.profil.id if self.profil else "",
+            },
+            "stroeme": stroeme,
+            "dienste": transport.dienste_abbild or sorted(transport.dienste),
+            **(kopf or {}),
+        }
+        if name is not None and name != pfad.name:
+            logging.getLogger(__name__).info("Mitschnitt %s folgt auf %s", pfad.name, name)
+        try:
+            schreiber = mt.Schreiber(pfad, inhalt, uhr_ns=lambda: round(self._uhr() * 1e9))
+        except OSError as fehler:
+            logging.getLogger(__name__).warning("Mitschnitt nicht angelegt: %s", fehler)
+            return None
+        transport.anhaengen(schreiber)
+        schreiber.kontext("diagnose_start")
+        self.mitschnitt = schreiber
+        if self.diagnose_seit is None:
+            self.diagnose_seit = self._uhr()
+        # Endet von selbst, sobald der Schreiber zu ist (auch nach dem Speichern im Thread)
+        self._probe_task = asyncio.get_running_loop().create_task(
+            self._probe_schleife(schreiber), name="diagnose-probe"
+        )
+        return schreiber
+
+    def _mitschnitt_schliessen(self, schreiber: mt.Schreiber) -> None:
+        transport = self.mitschnitt_transport
+        if transport is not None and transport.schreiber is schreiber:
+            transport.abhaengen()
+        if self._probe_task is not None:
+            self._probe_task.cancel()
+            self._probe_task = None
+        schreiber.schliessen()
+
+    def _mitschnitt_ablegen(self, schreiber: mt.Schreiber, messdatei: Path) -> None:
+        """Nach dem Speichern: schließen und als Beiwerk neben die Messdatei. Liegt dort schon
+        einer, bleibt dieser neben dem Backup liegen (nichts wird ersetzt).
+
+        Läuft im Thread des Speicherns (`_schreiben`): nur Dateiarbeit und das Abhängen —
+        die Zustandsprobe endet von selbst, sobald der Schreiber zu ist."""
+        transport = self.mitschnitt_transport
+        if transport is not None and transport.schreiber is schreiber:
+            transport.abhaengen()
+        schreiber.schliessen()
+        with contextlib.suppress(OSError):
+            if schreiber.pfad.exists():
+                schreiber.umbenennen(mt.mitschnitt_pfad(messdatei))
+
+    def _mitschnitt_verwerfen(self) -> None:
+        """Eine Aufnahme ohne Schlag wird nicht gespeichert — ihr Mitschnitt auch nicht."""
+        schreiber, self.mitschnitt = self.mitschnitt, None
+        self.diagnose_seit = None
+        if schreiber is None:
+            return
+        self._mitschnitt_schliessen(schreiber)
+        with contextlib.suppress(OSError):
+            schreiber.pfad.unlink(missing_ok=True)
+
+    async def _stroeme_zurueck(self) -> None:
+        """Die Zusatzströme wie vor dem Diagnosemodus."""
+        vorher, self._diagnose_vorher = self._diagnose_vorher, None
+        if vorher is None:
+            return
+        setzen = getattr(self.quelle, "stroeme_setzen", None)
+        if setzen is not None:
+            with contextlib.suppress(Exception):
+                await setzen(ekg=vorher[0], acc=vorher[1])
+
+    async def _probe_schleife(self, schreiber: mt.Schreiber) -> None:
+        """Alle `PROBE_S` eine Zustandsprobe; dazwischen den Verzug der Schleife messen."""
+        letzte_probe = time.monotonic()
+        while schreiber.offen:
+            soll = time.monotonic() + VERZUG_TAKT_S
+            await asyncio.sleep(VERZUG_TAKT_S)
+            verzug = max(0, round((time.monotonic() - soll) * 1000))
+            self.verzug_ms = verzug
+            self._verzug_spitze_ms = max(self._verzug_spitze_ms, verzug)
+            if time.monotonic() - letzte_probe < PROBE_S:
+                continue
+            letzte_probe = time.monotonic()
+            await self._probe(schreiber)
+
+    async def _probe(self, schreiber: mt.Schreiber) -> None:
+        transport = self.mitschnitt_transport
+        felder: dict[str, Any] = {
+            "akku": self.status.batterie_prozent,
+            "verzug_ms": self.verzug_ms,
+            "verzug_spitze_ms": self._verzug_spitze_ms,
+            "mb": round(schreiber.bytes / 1e6, 2),
+        }
+        self._verzug_spitze_ms = 0
+        if transport is not None:
+            felder["pakete"] = {k: int(v["pakete"]) for k, v in transport.zaehler.stand(0).items()}
+            akku = getattr(transport.innen, "akku", None)
+            if callable(akku):
+                with contextlib.suppress(Exception):
+                    werte = await asyncio.wait_for(akku(), timeout=5.0)
+                    if isinstance(werte, dict):
+                        felder["akku_handy"] = werte.get("prozent")
+                        felder["laedt"] = werte.get("laedt")
+        with contextlib.suppress(Exception):
+            schreiber.zeile(mt.PROBE, **felder)
 
     async def trennen(self) -> None:
         await self.quelle.disconnect()

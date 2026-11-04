@@ -25,6 +25,13 @@ from typing import Any, Final
 from trainingsapp.core.uhr_seiten import SEITEN as UHR_SEITEN
 from trainingsapp.core.uhr_seiten import SEITEN_VORGABE as UHR_SEITEN_VORGABE
 
+#: Diagnosemodus (`docs/plan_diagnosemodus.md`): Form der Marken-Leiste — unten ein Drittel
+#: (Vorgabe, P111) oder ein schwebender Knopf
+DIAGNOSE_LEISTEN: Final[tuple[str, ...]] = ("unten", "knopf")
+#: Beschleunigung des Polar H10: Raten (Hz) und Bereiche (g), die das Gerät kennt
+ACC_RATEN: Final[tuple[int, ...]] = (25, 50, 100, 200)
+ACC_BEREICHE: Final[tuple[int, ...]] = (2, 4, 8)
+
 #: Werte der Übersicht über der Kurve, wenn nichts eingestellt ist (Reihenfolge zählt)
 STANDARD_KACHELN: Final[tuple[str, ...]] = (
     "hf",
@@ -237,6 +244,18 @@ class HrvEinstellungen:
     standard_sicht: str = SICHT_HF
     #: Die zuletzt gewählte Sicht beim nächsten Öffnen wiederherstellen
     sicht_merken: bool = True
+    #: Diagnosemodus anbieten (Ben, 4.11.2026): ein Knopf an der Gerätezeile, gestartet
+    #: wird je Messung — Rohmitschnitt, Zusatzströme, Marken (`docs/plan_diagnosemodus.md`)
+    diagnose_anbieten: bool = False
+    #: Form der Marken-Leiste (`DIAGNOSE_LEISTEN`)
+    diagnose_leiste: str = "unten"
+    #: ⏯ an der Uhr setzt im Diagnosemodus Diagnosemarken
+    diagnose_uhr: bool = True
+    #: Zuletzt gewählte Ströme im Sensorblatt
+    diagnose_ekg: bool = True
+    diagnose_acc: bool = True
+    diagnose_acc_hz: int = 200
+    diagnose_acc_g: int = 8
 
     def breiten(self) -> tuple[int, ...]:
         """Die Breitenknöpfe (s) — eigene ohne Einträge fallen auf „kurz“ zurück.
@@ -306,6 +325,13 @@ class HrvEinstellungen:
             "uhr_seiten": list(self.uhr_seiten),
             "standard_sicht": self.standard_sicht,
             "sicht_merken": self.sicht_merken,
+            "diagnose_anbieten": self.diagnose_anbieten,
+            "diagnose_leiste": self.diagnose_leiste,
+            "diagnose_uhr": self.diagnose_uhr,
+            "diagnose_ekg": self.diagnose_ekg,
+            "diagnose_acc": self.diagnose_acc,
+            "diagnose_acc_hz": self.diagnose_acc_hz,
+            "diagnose_acc_g": self.diagnose_acc_g,
         }
 
     @classmethod
@@ -378,6 +404,15 @@ class HrvEinstellungen:
             if (sicht := d.get("standard_sicht")) in SICHTEN
             else vorgabe.standard_sicht,
             sicht_merken=schalter("sicht_merken"),
+            diagnose_anbieten=schalter("diagnose_anbieten"),
+            diagnose_leiste=leiste
+            if (leiste := d.get("diagnose_leiste")) in DIAGNOSE_LEISTEN
+            else vorgabe.diagnose_leiste,
+            diagnose_uhr=schalter("diagnose_uhr"),
+            diagnose_ekg=schalter("diagnose_ekg"),
+            diagnose_acc=schalter("diagnose_acc"),
+            diagnose_acc_hz=auswahl("diagnose_acc_hz", ACC_RATEN),
+            diagnose_acc_g=auswahl("diagnose_acc_g", ACC_BEREICHE),
         )
 
 
@@ -437,6 +472,8 @@ def einstellungen_schreiben(e: HrvEinstellungen) -> str:
 
 
 __all__ = [
+    "ACC_BEREICHE",
+    "ACC_RATEN",
     "ACHSEN_NAMEN",
     "ACHSEN_VORGABE",
     "ANALYSE_LAENGEN",

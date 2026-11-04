@@ -15,6 +15,11 @@ zusammenführen ließen. Jede Kopie, die das Gerät verlässt, geht durch
 `exportkopie`: Die Messdatei ohne den Schlüssel ``adresse`` (sonst byteidentisch,
 geschrieben wie von `hrv_core.recording`), das Diagnoseprotokoll mit maskierten
 Adressen (`adresse_maskieren`). Dateien ohne Adresse bleiben byteidentisch.
+
+**Der Rohmitschnitt des Diagnosemodus** (``sensor_<ts>_mitschnitt.jsonl``, Vertrag §14)
+geht Zeile für Zeile durch `hrv_core.deid.mitschnitt_zeilen`: Adressen maskiert, der
+Gerätename auf das Modell gekürzt (auch in den Protokollzeilen), Zeilen von Gerätename,
+Systemkennung und Seriennummer und alles Unbekannte entfernt.
 """
 
 from __future__ import annotations
@@ -25,6 +30,9 @@ import re
 import zipfile
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+
+from hrv_core import deid
+from hrv_core import mitschnitt as mt
 
 #: Endung des Verbindungsprotokolls neben der Rohdatei
 DIAGNOSE_ENDUNG = "_diagnose.txt"
@@ -97,6 +105,8 @@ def exportkopie(pfad: Path) -> bytes:
     wandert byteidentisch. Die Datei auf dem Gerät bleibt unberührt.
     """
     pfad = Path(pfad)
+    if mt.ist_mitschnitt(pfad):
+        return mitschnitt_exportkopie(pfad)
     daten = pfad.read_bytes()
     if pfad.suffix == ".json":
         return messdatei_ohne_adresse(daten)
@@ -105,6 +115,14 @@ def exportkopie(pfad: Path) -> bytes:
         text = daten.decode("utf-8", "surrogateescape")
         return adresse_maskieren(text).encode("utf-8", "surrogateescape")
     return daten
+
+
+def mitschnitt_exportkopie(pfad: Path) -> bytes:
+    """Ein Rohmitschnitt, wie er das Gerät verlassen darf (`hrv_core.deid.mitschnitt_zeilen`)."""
+    zeilen = deid.mitschnitt_zeilen(mt.lesen(pfad))
+    return "".join(
+        json.dumps(z, ensure_ascii=False, separators=(",", ":")) + "\n" for z in zeilen
+    ).encode("utf-8")
 
 
 def in_zip_schreiben(archiv: zipfile.ZipFile, pfad: Path, name: str) -> None:
@@ -139,7 +157,8 @@ def zugehoerige_dateien(rec_pfad: Path) -> list[Path]:
     """Die Rohdatei und alles, was an ihrem Stamm hängt — nur vorhandene Dateien.
 
     Beiwerk sind ``sensor_<ts>_*`` (``_analyzed.json``, ``_ecg.json``,
-    ``_ppg.json``, ``_truth.json``, ``_diagnose.txt``) und ``sensor_<ts>__c*``.
+    ``_ppg.json``, ``_truth.json``, ``_diagnose.txt``, ``_mitschnitt.jsonl``) und
+    ``sensor_<ts>__c*``.
     Halbfertige ``*.tmp`` und Ordner (``analysis-v3`` von praxis_gui) bleiben
     außen vor. Die Rohdatei steht vorn, der Rest nach Namen.
     """
@@ -208,5 +227,6 @@ __all__ = [
     "exportkopie",
     "in_zip_schreiben",
     "messdatei_ohne_adresse",
+    "mitschnitt_exportkopie",
     "zugehoerige_dateien",
 ]

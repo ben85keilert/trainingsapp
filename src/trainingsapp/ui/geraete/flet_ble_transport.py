@@ -48,12 +48,15 @@ class FletBleTransport:
     _inhalt: Benachrichtigung | None = None
     #: Steht die gewöhnliche Benachrichtigung (ohne Dienst) gerade da?
     _einfach: bool = False
+    #: Folgenummer und Zeiten der Dart-Seite zum zuletzt zugestellten Paket
+    letzte_meta: dict[str, Any] | None = None
 
     def __init__(self, page: ft.Page) -> None:
         import flet_ble  # nur hier — die Erweiterung gibt es nur im App-Build
 
         self._empfaenger: dict[tuple[str, str, str], Empfaenger] = {}
         self._bei_trennung: dict[str, Callable[[str | None], None]] = {}
+        self._abbild: dict[str, list[dict[str, Any]]] = {}
         self._uhr = UhrAbgleich()
         #: Wer den Vordergrunddienst gerade braucht: Zweck → (Titel, Text)
         self._zwecke: dict[str, tuple[str, str]] = {}
@@ -77,6 +80,13 @@ class FletBleTransport:
         ziel = self._empfaenger.get(_schluessel(e.device_id, e.service, e.characteristic))
         if ziel is None:
             return
+        # Folgenummer und Zeiten der Dart-Seite für den Rohmitschnitt (`devices.mitschnitt`):
+        # Die Empfänger laufen synchron, er liest so genau die Werte dieses Pakets
+        self.letzte_meta = {
+            "seq": getattr(e, "seq", None),
+            "t_mono_us": getattr(e, "t_mono_us", None),
+            "t_wall_us": getattr(e, "t_wall_us", None),
+        }
         t = self._uhr.umrechnen(e.t_mono_us / 1e6, time.monotonic())
         ziel(bytes(e.value), t)
 
@@ -124,7 +134,36 @@ class FletBleTransport:
         await self.ble.disconnect(device_id)
 
     async def discover(self, device_id: str) -> set[str]:
-        return {s.uuid.lower() for s in await self.ble.discover_services(device_id)}
+        dienste = await self.ble.discover_services(device_id)
+        # Das Abbild samt Merkmalen für den Kopf des Rohmitschnitts (`devices.mitschnitt`)
+        self._abbild[device_id] = [
+            {
+                "uuid": d.uuid.lower(),
+                "merkmale": [
+                    {
+                        "uuid": m.uuid.lower(),
+                        "eigenschaften": [
+                            name
+                            for name, an in (
+                                ("lesen", m.read),
+                                ("schreiben", m.write),
+                                ("schreiben_ohne_antwort", m.write_without_response),
+                                ("benachrichtigen", m.notify),
+                                ("anzeigen", m.indicate),
+                            )
+                            if an
+                        ],
+                    }
+                    for m in d.characteristics
+                ],
+            }
+            for d in dienste
+        ]
+        return {d.uuid.lower() for d in dienste}
+
+    async def dienste_abbild(self, device_id: str) -> list[dict[str, Any]]:
+        """Dienste mit Merkmalen und Eigenschaften der letzten Suche (`discover`)."""
+        return list(self._abbild.get(device_id, []))
 
     async def read(self, device_id: str, service: str, characteristic: str) -> bytes:
         return bytes(await self.ble.read(device_id, service, characteristic))

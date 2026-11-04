@@ -86,6 +86,7 @@ from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lok
 from trainingsapp.core.result_spec import ResultSpec
 from trainingsapp.ui import ausrichtung, navigation
 from trainingsapp.ui import einheit as einheit_ui
+from trainingsapp.ui.components import diagnose_punkt
 from trainingsapp.ui.components.dialoge import dialog_offen
 from trainingsapp.ui.components.startleiste import (
     leiste_auffrischen,
@@ -834,6 +835,10 @@ def main(page: ft.Page) -> None:
         if not haupt and navigation.uebungsseite(oben := str(page.views[-1].route)):
             page.views[-1].navigation_bar = uebungsseiten_leiste(page, state, oben)
         hintergrund_setzen(page, darstellung)
+        # Der rote Punkt des Diagnosemodus liegt im Overlay — der Neuaufbau lässt ihn stehen,
+        # hier kommt er hinzu oder geht (`components.diagnose_punkt`)
+        with suppress(Exception):
+            diagnose_punkt.aktualisieren(page, state)
         page.update()
         # Hochkant ist die Regel; Karten, Kurven und das Live-Vollbild dürfen quer
         ausrichtung.anwenden(page, state, ausrichtung.modus_fuer_route(page.route))

@@ -35,6 +35,13 @@ Daten (Regeln aus praxis_gui):
   PMD-PPI: Rückrechnung über alle Intervalle des Pakets, danach blockierte und
   0-Werte auslassen (`pmd.ppi_messwerte`); zusätzlich das rohe `PpiPaket`.
 
+Zusatzströme über PMD (Polar H10): EKG-Rohsignal (``ekg=``, Ben 30.10.2026) und im
+Diagnosemodus die Beschleunigung (``acc=``, `docs/plan_diagnosemodus.md` §2.3, V3) —
+beim Aufbau gestartet, zur Laufzeit mit `stroeme_setzen` an- und abgeschaltet, nach jedem
+Reconnect neu gestartet. Zwischen zwei Startkommandos liegt eine kurze Pause: Der Steuerpunkt
+beantwortet ein Kommando nach dem anderen (so in der Brustgurt-Diagnose am H10 erprobt).
+Lehnt das Gerät einen Zusatzstrom ab, läuft die Messung ohne ihn weiter.
+
 Watchdog (1 Hz): Warnung nach 3 s ohne Daten, Neuverbinden nach 8 s — vor dem
 ersten Paket einer Verbindung erst nach ``profil.ersttelegramm_s`` (ein Gurt
 ohne Hautkontakt sendet nichts; ein Reconnect im 8-s-Takt würde nur die frische
@@ -70,17 +77,27 @@ from .base import (
 )
 from .gatt import BleTransport, Empfaenger
 from .pmd import (
+    ACC_BEREICH_G,
+    ACC_EINSTELLUNGEN,
+    ACC_RATE_HZ,
+    ACC_STOP,
+    ECG_EINSTELLUNGEN,
     ECG_START,
     ECG_STOP,
     FEHLER_LAEUFT_BEREITS,
+    MEAS_ACC,
     MEAS_ECG,
     MEAS_PPI,
+    OP_GET_SETTINGS,
     OP_START,
     PMD_CONTROL_UUID,
     PMD_DATA_UUID,
     PMD_SERVICE_UUID,
     PPI_START,
     PPI_STOP,
+    TYP_NAME,
+    acc_proben,
+    acc_start,
     parse_control_antwort,
     parse_ekg_proben,
     parse_feature_antwort,
@@ -90,6 +107,7 @@ from .pmd import (
 )
 from .profiles import (
     BLE_GENERIC,
+    CAP_PMD_ACC,
     CAP_PMD_ECG,
     CAP_PMD_PPI,
     DEFAULT_PROFIL,
@@ -131,6 +149,13 @@ TIMEOUT_GATT_S = 10.0
 TIMEOUT_TRENNEN_S = 3.0
 #: Länge des Diagnoseprotokolls (`PolarQuelle.protokoll`)
 PROTOKOLL_ZEILEN = 500
+#: Pause zwischen zwei PMD-Kommandos (s) — der Steuerpunkt antwortet eines nach dem anderen
+PMD_KOMMANDO_PAUSE_S = 0.3
+
+#: Beschleunigung im Diagnosemodus: (Rate Hz, Bereich g)
+AccWunsch = tuple[int, int]
+#: Beobachter der Beschleunigung: (Gerätezeit der letzten Probe ns, Proben x/y/z mG, Ankunft)
+AccBeobachter = Callable[[int, list[tuple[int, int, int]], float], None]
 
 #: Profile, die als „Polar“ in der Geräteliste nach oben wandern
 _POLAR_PROFILE = frozenset({POLAR_H10.id, POLAR_H9.id, VERITY_SENSE.id, POLAR_UHR.id})
@@ -207,8 +232,24 @@ class PolarQuelle(HeartRateSource):
         schlafen: Schlafen = asyncio.sleep,
         protokoll: Callable[[str], None] | None = None,
         ekg: bool = False,
+        acc: AccWunsch | None = None,
     ) -> None:
         super().__init__()
+        #: Beschleunigung im Diagnosemodus (Rate, Bereich) — ``None`` aus
+        self._acc_wunsch: AccWunsch | None = acc
+        self._acc_modus = False  # diese Verbindung streamt Beschleunigung
+        self._acc_gesehen = False
+        self._acc_neugestartet = False
+        #: ACC-Rahmen dieser Verbindung (zur Anzeige)
+        self.acc_rahmen = 0
+        #: Wer die Beschleunigung live sehen will (Zähler-Prototyp, Stufe 8) — Fehler darin
+        #: stoppen nichts
+        self.acc_beobachter: AccBeobachter | None = None
+        #: Die PMD-Merkmalsliste des Geräts, sobald gelesen (``None``: nicht gelesen)
+        self.pmd_merkmale: frozenset[str] | None = None
+        #: Gemeldete Einstellungen je Strom (Antwort auf „Einstellungen abfragen“)
+        self.pmd_einstellungen: dict[str, dict[str, list[int]]] = {}
+        self._pmd_abo = -1  # Generation, in der PMD-Control und -Data abonniert sind
         #: EKG-Rohsignal über den PMD-Dienst mitlesen (Polar H10; Ben, 30.10.2026) — aus,
         #: solange die Person es nicht einschaltet: kostet den Gurt spürbar Akku
         self._ekg_wunsch = bool(ekg)
@@ -277,6 +318,32 @@ class PolarQuelle(HeartRateSource):
     @property
     def verbunden(self) -> bool:
         return self._verbunden
+
+    @property
+    def transport(self) -> BleTransport:
+        """Der Transport — im Diagnosemodus ein `devices.mitschnitt.MitschnittTransport`."""
+        return self._transport
+
+    @property
+    def dienste(self) -> frozenset[str]:
+        """Die gemeldeten Dienste der letzten Verbindung (klein geschrieben)."""
+        return frozenset(self._dienste)
+
+    @property
+    def ekg_modus(self) -> bool:
+        return self._ekg_modus
+
+    @property
+    def acc_modus(self) -> bool:
+        return self._acc_modus
+
+    @property
+    def acc_wunsch(self) -> AccWunsch | None:
+        return self._acc_wunsch
+
+    @property
+    def ekg_wunsch(self) -> bool:
+        return self._ekg_wunsch
 
     def jetzt(self) -> float:
         return self._uhr()
@@ -442,6 +509,8 @@ class PolarQuelle(HeartRateSource):
             # die Abonnenten weiter — danach sähe die Antwort wie eine Indication aus.
             typen = await self._pmd_features()
 
+        if typen is not None:
+            self.pmd_merkmale = typen
         ohne_ppi = typen is not None and "ppi" not in typen and bool(typen)
         self._ppi_modus = hat_pmd and profil.kann(CAP_PMD_PPI) and not ohne_ppi
         if profil.kann(CAP_PMD_PPI) and not hat_pmd:
@@ -460,12 +529,7 @@ class PolarQuelle(HeartRateSource):
         if self._ppi_modus:
             await self._ppi_einrichten(gen)
 
-        self._ekg_modus = (
-            self._ekg_wunsch
-            and hat_pmd
-            and profil.kann(CAP_PMD_ECG)
-            and (typen is None or "ecg" in typen)
-        )
+        self._ekg_modus = self._ekg_moeglich(profil, typen)
         self._ekg_gesehen = False
         self._ekg_rahmen = 0
         self._ekg_neugestartet = False
@@ -473,6 +537,16 @@ class PolarQuelle(HeartRateSource):
             self._log("EKG gewünscht, aber dieses Gerät bietet keinen PMD-EKG-Strom")
         elif self._ekg_modus:
             await self._ekg_einrichten(gen)
+
+        self._acc_modus = False
+        self._acc_gesehen = False
+        self._acc_neugestartet = False
+        self.acc_rahmen = 0
+        if self._acc_wunsch is not None:
+            if self._acc_moeglich(profil, typen):
+                await self._acc_einrichten(gen)
+            else:
+                self._log("Beschleunigung gewünscht, aber dieses Gerät bietet keinen PMD-ACC-Strom")
 
         if self._getrennt_gemeldet:
             raise ConnectionError("Gerät hat während des Verbindungsaufbaus getrennt")
@@ -537,6 +611,7 @@ class PolarQuelle(HeartRateSource):
                         self._empfaenger(self._pmd_empfangen, gen),
                     )
                 )
+                self._pmd_abo = gen
                 await self._ppi_start_senden()
                 return
             except Exception as e:
@@ -550,25 +625,9 @@ class PolarQuelle(HeartRateSource):
         """PMD-Control und -Data abonnieren (sofern PPI das nicht schon tat) und den
         EKG-Strom starten (130 Hz, 14 bit). Scheitert das, läuft die Messung ohne EKG
         weiter — die Intervalle kommen unabhängig davon über 0x2A37."""
-        dev = self._device_id
         try:
             if not self._ppi_modus:
-                await self._gatt(
-                    self._transport.subscribe(
-                        dev,
-                        PMD_SERVICE_UUID,
-                        PMD_CONTROL_UUID,
-                        self._empfaenger(self._control_empfangen, gen),
-                    )
-                )
-                await self._gatt(
-                    self._transport.subscribe(
-                        dev,
-                        PMD_SERVICE_UUID,
-                        PMD_DATA_UUID,
-                        self._empfaenger(self._pmd_empfangen, gen),
-                    )
-                )
+                await self._pmd_abonnieren(gen)
             await self._ekg_start_senden()
         except Exception as e:
             self._ekg_modus = False
@@ -576,6 +635,172 @@ class PolarQuelle(HeartRateSource):
             self._status_aendern(
                 meldung=f"EKG-Rohsignal nicht gestartet ({_kurz(e)}) — Messung läuft ohne"
             )
+
+    async def _pmd_abonnieren(self, gen: int) -> None:
+        """PMD-Control und -Data abonnieren — je Verbindung einmal."""
+        if self._pmd_abo == gen:
+            return
+        dev = self._device_id
+        await self._gatt(
+            self._transport.subscribe(
+                dev,
+                PMD_SERVICE_UUID,
+                PMD_CONTROL_UUID,
+                self._empfaenger(self._control_empfangen, gen),
+            )
+        )
+        await self._gatt(
+            self._transport.subscribe(
+                dev,
+                PMD_SERVICE_UUID,
+                PMD_DATA_UUID,
+                self._empfaenger(self._pmd_empfangen, gen),
+            )
+        )
+        self._pmd_abo = gen
+
+    def _ekg_moeglich(self, profil: GeraeteProfil, typen: frozenset[str] | None) -> bool:
+        return (
+            self._ekg_wunsch
+            and PMD_SERVICE_UUID in self._dienste
+            and profil.kann(CAP_PMD_ECG)
+            and (typen is None or "ecg" in typen)
+        )
+
+    def _acc_moeglich(self, profil: GeraeteProfil, typen: frozenset[str] | None) -> bool:
+        return (
+            self._acc_wunsch is not None
+            and PMD_SERVICE_UUID in self._dienste
+            and profil.kann(CAP_PMD_ACC)
+            and (typen is None or "acc" in typen)
+        )
+
+    async def _acc_einrichten(self, gen: int) -> None:
+        """PMD abonnieren (falls noch nicht) und die Beschleunigung starten. Scheitert das,
+        läuft die Messung ohne sie weiter — wie beim EKG."""
+        try:
+            await self._pmd_abonnieren(gen)
+            if self._ekg_modus or self._ppi_modus:
+                await self._schlafen(PMD_KOMMANDO_PAUSE_S)
+            self._acc_modus = True
+            await self._acc_start_senden()
+        except Exception as e:
+            self._acc_modus = False
+            self._log(f"Beschleunigung nicht eingerichtet: {e!r}")
+            self._status_aendern(
+                meldung=f"Beschleunigung nicht gestartet ({_kurz(e)}) — Messung läuft ohne"
+            )
+
+    async def _acc_start_senden(self) -> None:
+        rate, bereich = self._acc_wunsch or (ACC_RATE_HZ, ACC_BEREICH_G)
+        kommando = acc_start(rate, bereich)
+        await self._gatt(
+            self._transport.write(
+                self._device_id, PMD_SERVICE_UUID, PMD_CONTROL_UUID, kommando, mit_antwort=True
+            )
+        )
+        self._log(f"ACC-Start gesendet ({kommando[:2].hex(' ')}, {rate} Hz, {bereich} g, 16 bit)")
+
+    def _acc_neu_starten(self, grund: str) -> None:
+        """Beschleunigung stoppen und neu starten — je Verbindung höchstens einmal."""
+        if self._acc_neugestartet or not self._acc_modus or not self._laeuft:
+            return
+        self._acc_neugestartet = True
+        self._log(f"Beschleunigung neu starten: {grund}")
+        gen = self._generation
+
+        async def neustart() -> None:
+            try:
+                await self._gatt(
+                    self._transport.write(
+                        self._device_id,
+                        PMD_SERVICE_UUID,
+                        PMD_CONTROL_UUID,
+                        ACC_STOP,
+                        mit_antwort=True,
+                    )
+                )
+                await self._schlafen(0.5)
+                if gen == self._generation and self._laeuft:
+                    await self._acc_start_senden()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._log(f"ACC-Neustart gescheitert: {e!r}")
+
+        self._tasks.append(
+            asyncio.get_running_loop().create_task(neustart(), name="polar-acc-neustart")
+        )
+
+    async def stroeme_setzen(self, *, ekg: bool, acc: AccWunsch | None) -> None:
+        """Zusatzströme der laufenden Verbindung an- oder abschalten (Diagnosemodus).
+
+        Merkt sich den Wunsch auch für jeden späteren Neuaufbau. Ohne Verbindung oder
+        während eines Aufbaus wirkt er erst beim nächsten Aufbau. Was das Gerät nicht
+        kann, bleibt aus (mit einer Zeile im Protokoll). Wirft nie.
+        """
+        self._ekg_wunsch = bool(ekg)
+        self._acc_wunsch = acc
+        profil = self._profil
+        if not self._laeuft or not self._verbunden or self._verbinde_gerade or profil is None:
+            return
+        gen = self._generation
+        typen = self.pmd_merkmale
+        try:
+            ekg_soll = self._ekg_moeglich(profil, typen)
+            if ekg_soll and not self._ekg_modus:
+                self._ekg_modus = True
+                self._ekg_gesehen = False
+                self._ekg_neugestartet = False
+                await self._ekg_einrichten(gen)
+            elif not ekg_soll and self._ekg_modus:
+                self._ekg_modus = False
+                await self._kommando(ECG_STOP, "EKG-Stopp gesendet (03 00)")
+            acc_soll = self._acc_moeglich(profil, typen)
+            if acc_soll and not self._acc_modus:
+                self._acc_gesehen = False
+                self._acc_neugestartet = False
+                await self._acc_einrichten(gen)
+            elif not acc_soll and self._acc_modus:
+                self._acc_modus = False
+                await self._kommando(ACC_STOP, "ACC-Stopp gesendet (03 02)")
+        except Exception as e:  # die Messung läuft weiter
+            self._log(f"Zusatzströme nicht umgeschaltet: {e!r}")
+
+    async def _kommando(self, kommando: bytes, zeile: str) -> None:
+        await self._gatt(
+            self._transport.write(
+                self._device_id, PMD_SERVICE_UUID, PMD_CONTROL_UUID, kommando, mit_antwort=True
+            )
+        )
+        self._log(zeile)
+
+    async def merkmale_lesen(self) -> frozenset[str] | None:
+        """Die PMD-Merkmalsliste lesen (Sensorblatt) — ``None`` ohne PMD oder Verbindung."""
+        if not self._verbunden or PMD_SERVICE_UUID not in self._dienste:
+            return None
+        typen = await self._pmd_features()
+        if typen is not None:
+            self.pmd_merkmale = typen
+        return typen
+
+    async def einstellungen_abfragen(self) -> None:
+        """Fragt EKG- und ACC-Einstellungen ab; die Antworten landen in `pmd_einstellungen`
+        (und im Rohmitschnitt). Ohne PMD passiert nichts; Fehler stehen im Protokoll."""
+        profil = self._profil
+        if not self._verbunden or PMD_SERVICE_UUID not in self._dienste or profil is None:
+            return
+        try:
+            await self._pmd_abonnieren(self._generation)
+            for kann, kommando in (
+                (CAP_PMD_ECG, ECG_EINSTELLUNGEN),
+                (CAP_PMD_ACC, ACC_EINSTELLUNGEN),
+            ):
+                if profil.kann(kann):
+                    await self._kommando(kommando, f"Einstellungen abgefragt ({kommando.hex(' ')})")
+                    await self._schlafen(PMD_KOMMANDO_PAUSE_S)
+        except Exception as e:
+            self._log(f"Einstellungen nicht abgefragt: {e!r}")
 
     async def _ekg_start_senden(self) -> None:
         await self._gatt(
@@ -890,6 +1115,9 @@ class PolarQuelle(HeartRateSource):
                 EkgPaket(self._device_id, t_capture, rahmen.zeitstempel_ns, tuple(ekg_proben))
             )
             return
+        if rahmen.typ == MEAS_ACC:
+            self._acc_empfangen(rahmen.zeitstempel_ns, rahmen, t_capture)
+            return
         if rahmen.typ != MEAS_PPI:
             return
         proben = parse_ppi_proben(rahmen.nutzdaten)
@@ -912,6 +1140,22 @@ class PolarQuelle(HeartRateSource):
         kontakt = letzte.hautkontakt if letzte.hautkontakt_unterstuetzt else None
         self._lebenszeichen(werte[-1].hf_bpm if werte else None, kontakt)
 
+    def _acc_empfangen(self, zeitstempel_ns: int, rahmen: Any, t_capture: float) -> None:
+        """Ein ACC-Rahmen: gezählt und an den Beobachter — keine Messwerte, keine Warteschlange.
+        Die Wahrheit ist der Rohmitschnitt (Plan §3.3)."""
+        if not self._acc_modus:
+            return
+        proben = acc_proben(rahmen)
+        if not proben:
+            return
+        self.acc_rahmen += 1
+        if not self._acc_gesehen:
+            self._acc_gesehen = True
+            self._log(f"Erste Beschleunigung ({len(proben)} Proben, Frame-Typ {rahmen.frame_typ})")
+        if self.acc_beobachter is not None:
+            with contextlib.suppress(Exception):
+                self.acc_beobachter(zeitstempel_ns, proben, t_capture)
+
     def _control_empfangen(self, gen: int, daten: bytes, t_capture: float) -> None:
         """Antwort auf ein PMD-Kommando prüfen; Ablehnung → Statusmeldung."""
         if gen != self._generation or not self._laeuft:
@@ -921,7 +1165,17 @@ class PolarQuelle(HeartRateSource):
             self._log(f"PMD-Control: unerwartete Antwort {daten.hex(' ')}")
             return
         if antwort.ok:
+            if antwort.opcode == OP_GET_SETTINGS:
+                einstellungen = antwort.einstellungen()
+                self.pmd_einstellungen[TYP_NAME.get(antwort.typ, str(antwort.typ))] = einstellungen
+                self._log(
+                    f"PMD-Einstellungen {TYP_NAME.get(antwort.typ, antwort.typ)}: {einstellungen}"
+                )
+                return
             self._log(f"PMD-Control ok: {antwort.text}")
+            return
+        if antwort.opcode == OP_GET_SETTINGS:  # nur eine Auskunft — nichts abschalten
+            self._log(f"PMD-Control: {antwort.text}")
             return
         if antwort.fehler == FEHLER_LAEUFT_BEREITS:
             self._log(f"PMD-Control: {antwort.text}")
@@ -929,6 +1183,14 @@ class PolarQuelle(HeartRateSource):
                 self._ppi_neu_starten("Gerät meldet „läuft bereits“")
             elif antwort.opcode == OP_START and antwort.typ == MEAS_ECG:
                 self._ekg_neu_starten("Gerät meldet „läuft bereits“")
+            elif antwort.opcode == OP_START and antwort.typ == MEAS_ACC:
+                self._acc_neu_starten("Gerät meldet „läuft bereits“")
+            return
+        if antwort.opcode == OP_START and antwort.typ == MEAS_ACC:
+            # Nur die Beschleunigung lehnt das Gerät ab — die Messung läuft ohne weiter (V3)
+            self._acc_modus = False
+            self._log(f"PMD-Control FEHLER (Beschleunigung): {antwort.text}")
+            self._status_aendern(meldung=f"Beschleunigung abgelehnt — {antwort.text}")
             return
         if antwort.opcode == OP_START and antwort.typ == MEAS_ECG:
             # Nur das EKG lehnt das Gerät ab — die Messung läuft ohne weiter

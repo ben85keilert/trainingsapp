@@ -1,7 +1,9 @@
 # Plan: Beschleunigungssensor in Übungen — Wiederholungen und Atemzüge zählen, Ein- und Ausatmung in der HRV
 
-Stand 4.11.2026: **Entwurf** — Ben: „Plane das beides durch“. Fragen P117–P126 stehen in
-Abschnitt 12 und in `docs/offene_fragen.md`. Die Verfahren entstehen in hrv-research (dort
+Stand 4.11.2026: **Entwurf** — Ben: „Plane das beides durch“. Danach zum Knopf: „Wenn ein
+Gerät einen Beschleunigungssensor hat, soll die Wiederholung damit gemessen werden. Das ist der
+Knopf. +/-1 ist die Korrektur dafür.“ Damit sind P117 und P118 entschieden; offen sind P119–P126
+(Abschnitt 12 und `docs/offene_fragen.md`). Die Verfahren entstehen in hrv-research (dort
 `beschleunigung/docs/PLAN_ZAEHLEN_ATEMPHASEN.md`); hier steht, was die Apps bauen.
 
 Anlass (Ben, 4.11.2026):
@@ -23,13 +25,14 @@ Anlass (Ben, 4.11.2026):
 - **Teil A: Zählen.** Jede Übung bekommt in „Übung bearbeiten“ die Karte
   **„Beschleunigungssensor“**. Darin wählt man das Zählen (*aus · Wiederholungen · Atmung*)
   und die **Bewegung**: zuerst nur „Automatisch“, später Vorlagen aus hrv-core wie
-  „Kniebeuge: Hub“ oder „Liegestütz: Neigung z–y“. Läuft die Übung mit Stoppuhr oder Timer,
-  und läuft dazu eine Messung mit einem Gurt, der Beschleunigung liefert (H10, Verity Sense),
-  dann steht neben der Zeit der Knopf **„Wdh. zählen“** (bei Atemübungen „Atemzüge zählen“).
-  Die Zahl wächst mit, **−1** und **+1** korrigieren sie. Am Satzende geht sie als
-  Wiederholungen des Satzes in den offenen Eintrag, so wie heute die Zeit. Ein
-  **Zählprotokoll** an der Übung zeigt je Satz, was der Gurt zählte, was korrigiert und was
-  eingetragen wurde. So sieht man im Alltag, wie genau der Gurt zählt.
+  „Kniebeuge: Hub“ oder „Liegestütz: Neigung z–y“. Hat das verbundene Gerät einen
+  Beschleunigungssensor (heute H10 und Verity Sense), steht neben der Zeit der laufenden Übung
+  der Knopf **„Wdh. zählen“** (bei Atemübungen „Atemzüge zählen“): Er misst die Wiederholungen
+  mit diesem Sensor. Die Zahl wächst mit; **−1** und **+1** sind die Korrektur dafür, kein
+  eigener Zähler. Am Satzende geht sie als Wiederholungen des Satzes in den offenen Eintrag,
+  so wie heute die Zeit. Ein **Zählprotokoll** an der Übung zeigt je Satz, was der Sensor
+  zählte, was korrigiert und was eingetragen wurde. So sieht man im Alltag, wie genau der
+  Sensor zählt.
 - **Teil B: Ein- und Ausatmung in der HRV.** Bei Atemübungen legt die App die Atemphasen über
   die Herzfrequenz. Sie kommen aus dem Takt des Timers (Soll) und aus der Beschleunigung (Ist).
   Daraus entstehen je Atemzug die Atemspanne (Gipfel–Tal), die Phasenlage, das Verhältnis
@@ -47,7 +50,7 @@ Anlass (Ben, 4.11.2026):
 
 | Baustein | Stand | Wo |
 |---|---|---|
-| Beschleunigung des Gurts | PMD-Strom (Vorgabe 200 Hz, 8 g), eingeschaltet nur im Diagnosemodus; ein Beobachter (`acc_beobachter`), Puffer für gut 10 min | `devices/polar.py` (`stroeme_setzen`), `devices/messlauf.py` (`_acc_puffer`, `_acc_fenster`), Dekoder `hrv_core.geraete.pmd` |
+| Beschleunigung des Geräts | PMD-Strom (Vorgabe 200 Hz, 8 g), eingeschaltet nur im Diagnosemodus; ein Beobachter (`acc_beobachter`), Puffer für gut 10 min | `devices/polar.py` (`stroeme_setzen`), `devices/messlauf.py` (`_acc_puffer`, `_acc_fenster`), Dekoder `hrv_core.geraete.pmd` |
 | Fähigkeit je Gerät | `CAP_PMD_ACC` bei H10 und Verity Sense | `devices/profiles.py` |
 | Zähler-Prototyp | `wiederholungen.zaehlen(xyz, rate_hz, t0_s)` → `Zaehlung(anzahl, zeiten_s, periode_s, gleichmaessigkeit, art="prototyp")`; zählt einen ganzen Satz | `hrv_core.prototyp.wiederholungen` (0.8.0) |
 | Vergleich nach dem Satz | im Diagnosemodus „Marken · Zähler (Prototyp) · eingetragen“ | `Messlauf._satz_vergleichen`, `components/marken_leiste.py` |
@@ -91,7 +94,7 @@ Parametern, kein Code in der App:
 
 - **Signal:** Hauptachse (gerätefrei), Betrag, eine feste Achse (x, y, z) oder die Neigung in
   einer Ebene (z–y, z–x). Die Neigung zählt gegen die Lage zu Satzbeginn, damit der Sitz des
-  Gurts weniger stört.
+  Sensors weniger stört.
 - **Zähltyp** (Konzept B2 in hrv-research): periodisch oder als Zustandsfolge (Burpee). Dazu
   kommen die erwartete Dauer einer Wiederholung, der Umkehrpunkt (oben oder unten) und der
   Mindesthub.
@@ -123,19 +126,27 @@ nicht Satz für Satz am Gerät ausprobieren (P126).
   E in `docs/plan_uebung_bearbeiten.md`). Oben die Chips *Aus · Wiederholungen · Atmung*,
   darunter je nach Wahl „Bewegung“ und „Zählt in“. Rechts oben stehen „Prototyp“ und das (i)
   mit dem Hilfethema `beschleunigung` (`components/hilfe.py`). Das (i) sagt, was gezählt wird,
-  welche Gurte es können, dass es ein Prototyp ist und dass die Daten auf dem Gerät bleiben.
-- Übungsseite (`views/uebung_detail.py`): eine Zeile „Zählt mit dem Gurt: Wiederholungen
-  (Prototyp)“, dazu das Zählprotokoll (Abschnitt 6).
-- Einstellungen → Training: der Schalter **„Zählen mit dem Gurt (Prototyp)“** (P117), Vorgabe
-  aus. Ohne ihn erscheinen weder die Karte noch der Knopf.
+  welche Geräte es können, dass es ein Prototyp ist und dass die Daten auf dem Gerät bleiben.
+- Übungsseite (`views/uebung_detail.py`): eine Zeile „Zählt mit dem Beschleunigungssensor:
+  Wiederholungen (Prototyp)“, dazu das Zählprotokoll (Abschnitt 6).
+- Einen eigenen Schalter in den Einstellungen gibt es nicht (P117). Ob der Knopf kommt, sagen
+  das Gerät (hat es einen Beschleunigungssensor?) und die Übung (die Karte; „Aus“ schaltet ihn
+  für diese Übung ab).
 
 ## 4. A1: Der Knopf in der laufenden Übung
 
 ### 4.1 Wann er erscheint
 
-- Der Schalter ist an (P117), die Übung zählt (3.1), eine Messung läuft, und ihre Quelle kann
-  Beschleunigung (`profil.kann(CAP_PMD_ACC)`). Sonst gibt es keinen Knopf (P118: ein Handzähler
-  ohne Gurt?).
+- **Der Knopf ist die Messung mit dem Beschleunigungssensor** (Ben, 4.11.2026). Er erscheint,
+  wenn das verbundene Gerät einen hat und die Übung zählt (3.1). Heute heißt das
+  `profil.kann(CAP_PMD_ACC)`: H10 und Verity Sense. Künftig gilt es für jedes Gerät, dessen
+  Treiber in hrv-core einen Strom `acc` nennt (`hrv_core.geraete.treiber`). Beim H10 ist der
+  Strom am Gerät erprobt; bei der Verity Sense steht er nur im Treiber (52 Hz), dort ist der
+  erste gezählte Satz zugleich die Probe.
+- Eine laufende Aufnahme ist der übliche Fall, aber keine Bedingung: verbunden genügt. Ohne
+  Aufnahme fehlen nur die Notiz zum Satz und das Beiwerk an der Messdatei.
+- **±1 ist nur die Korrektur** dieser Messung, kein Handzähler. Ohne Beschleunigungssensor gibt
+  es weder Knopf noch ±1 (P118).
 - **Name:** „Wdh. zählen“ bzw. „Atemzüge zählen“, nicht „Zählen“. Daneben steht schon „zählt“:
   ob die Zeit in den Eintrag geht (P79 D1).
 
@@ -143,10 +154,10 @@ nicht Satz für Satz am Gerät ausprobieren (P126).
 
 | Ort | Was |
 |---|---|
-| Laufende Uhr in der Karte „Eintragen“ und als Knöpfe (`components/uhr.py`) | der Knopf neben „zählt“. Während er zählt, steht dort groß die Zahl, links **−1**, rechts **+1**, als große Flächen (beim Liegestütz liegt das Handy am Boden); klein darunter „Gurt 11 · +1 · Prototyp“ |
+| Laufende Uhr in der Karte „Eintragen“ und als Knöpfe (`components/uhr.py`) | der Knopf neben „zählt“. Während er zählt, steht dort groß die Zahl, links **−1**, rechts **+1**, als große Flächen (beim Liegestütz liegt das Handy am Boden); klein darunter „Sensor 11 · +1 · Prototyp“ |
 | Timer der Übung (`views/uebung_timer.py`, „Während“) | die Zahl unter der Zeit, −1 und +1 darunter; die Karte „Sätze“ zeigt je Satz Zeit und Wiederholungen |
 | Laufleiste oben (`ui/einheit.py`) | „Liegestütz · 0:42 · 12 Wdh.“ |
-| Marken-Leiste im Diagnosemodus | „Gurt 11“ live neben der Zahl der Tipps |
+| Marken-Leiste im Diagnosemodus | „Sensor 11“ live neben der Zahl der Tipps |
 | Band (hrv-watch) | später (A6, P121) |
 
 ### 4.3 Ablauf
@@ -155,9 +166,10 @@ nicht Satz für Satz am Gerät ausprobieren (P126).
    zusammen. Läuft keine Uhr, startet der Knopf die Stoppuhr mit; ein Tipp heißt dann „der Satz
    beginnt“. Mitten im Lauf gedrückt, zählt er rückwirkend ab Satzbeginn, wenn der Strom schon
    lief, sonst ab jetzt (P119).
-2. **Strom.** Der Messlauf schaltet die Beschleunigung ein. Vorschlag: 50 Hz und 8 g, denn
-   Sprünge überschreiten 2 g; ob 50 Hz reichen, prüft hrv-research an den 200-Hz-Mitschnitten.
-   Bis der Gurt Proben schickt, vergehen ein bis zwei Sekunden; so lange steht dort „Gurt
+2. **Strom.** Der Messlauf schaltet die Beschleunigung ein. Vorschlag: die kleinste Rate ab
+   50 Hz, die der Treiber anbietet (H10 50 Hz, Verity Sense 52 Hz), und 8 g, denn Sprünge
+   überschreiten 2 g. Ob 50 Hz reichen, prüft hrv-research an den 200-Hz-Mitschnitten.
+   Bis das Gerät Proben schickt, vergehen ein bis zwei Sekunden; so lange steht dort „Sensor
    startet …“. Läuft der Diagnosemodus, gilt seine Wahl (200 Hz). Mit P119 läuft der Strom ab
    dem Start der Uhr jeder Zählübung.
 3. **Satz.** Mit der Stoppuhr ist der ganze Lauf ein Satz. Mit dem Timer ist jeder Abschnitt
@@ -168,15 +180,15 @@ nicht Satz für Satz am Gerät ausprobieren (P126).
    der dritten Wiederholung (vorher „…“). Anfangs kann sie springen. Mit A5 kommt ein
    Live-Zähler, der jede Wiederholung zählt, wenn sie geschieht.
 5. **Korrektur.** +1 heißt eine Wiederholung mehr, −1 eine weniger; beides wird mit Zeit und
-   Satz festgehalten. Angezeigt wird Gurt plus Korrektur, nie weniger als 0. Ab A5 hängt eine
+   Satz festgehalten. Angezeigt wird Sensor plus Korrektur, nie weniger als 0. Ab A5 hängt eine
    Korrektur an der Wiederholung, die sie meint: −1 nimmt die zuletzt gezählte weg.
 6. **Satzende** („Weiter“, Abschnitt fertig, „Fertig“). Der Prototyp zählt das Fenster ein
-   letztes Mal bis zum Ende. Eingetragen wird, was dasteht: Gurt plus Korrektur, als
+   letztes Mal bis zum Ende. Eingetragen wird, was dasteht: Sensor plus Korrektur, als
    Wiederholungen dieses Satzes im offenen Eintrag (`lauf_eintragen`: ein Wert je Satz,
    angehängt wie die Haltezeit; bei `saetze=False` zählt die Summe). Die Zeit kommt wie bisher
    dazu, wenn „zählt“ an ist. „Abbrechen“ trägt nichts ein.
-7. **Danach** („Läufe heute“): „Satz 1 · 12 Wdh. (Gurt 11, +1)“. Ändern geht wie immer unter
-   „Heute geleistet“; die Zeitleiste behält, was der Gurt zählte.
+7. **Danach** („Läufe heute“): „Satz 1 · 12 Wdh. (Sensor 11, +1)“. Ändern geht wie immer
+   unter „Heute geleistet“; die Zeitleiste behält, was der Sensor zählte.
 
 ### 4.4 Atmung
 
@@ -184,6 +196,9 @@ Atemübungen bekommen denselben Ablauf mit „Atemzüge zählen“ (ab A3; das b
 `prototyp.atemzuege`). Angezeigt werden die Atemzüge, die Rate je Minute und die Phase jetzt
 (▲ ein / ▼ aus, Teil B); ±1 wirkt wie oben. Eingetragen wird nichts, denn Atemzüge sind kein
 Parameter der Übung (P120). Sie stehen in der Zeitleiste und, mit Teil B, an der Messung.
+Die Atemwelle sieht ein Sensor an der Brust am deutlichsten (Gurt); ob ein Sensor am Arm
+(Verity Sense) genügt, prüft hrv-research. Der Knopf folgt trotzdem Bens Regel: Hat das Gerät
+einen Beschleunigungssensor, erscheint er.
 
 ## 5. A1: Technik
 
@@ -222,8 +237,9 @@ Parameter der Übung (P120). Sie stehen in der Zeitleiste und, mit Teil B, an de
 
 - **Zeitleiste** (Vertrag `docs/plan_einheit.md` §4, **zuerst** dort eintragen): Teil und
   Quelle `zaehlen` mit zwei neuen Arten. `zaehlung` steht einmal je Satz, mit `satz`, `art`
-  (wdh oder atem), `gurt`, `korrektur`, `wert`, `feld`, `vorlage`, `zeiten_s` (die gezählten
-  Umkehrpunkte) und `prototyp` (Modul und hrv-core-Version). `korrektur` kommt von der Quelle
+  (wdh oder atem), `sensor`, `korrektur`, `wert`, `feld`, `vorlage`, `zeiten_s` (die gezählten
+  Umkehrpunkte), `geraet` (Profil, von dem die Beschleunigung kam) und `prototyp` (Modul und
+  hrv-core-Version). `korrektur` kommt von der Quelle
   `person`, mit `delta` (±1) und `satz`. Messwerte stehen dort nicht, nur ein Ergebnis mit
   Zeiten, wie bei `km`.
 - **Eintrag:** `core/zaehlen_eintrag.py` (wie `core/timer_eintrag.py`) liest die Wiederholungen
@@ -231,20 +247,20 @@ Parameter der Übung (P120). Sie stehen in der Zeitleiste und, mit Teil B, an de
 - **Messdatei:** nichts Neues. Die Notiz zum Satz entsteht wie bisher beim Eintragen. Eine Marke
   je Wiederholung kommt **nicht** in die Notizen, wie im Diagnosemodus.
 - **Diagnosemodus:** zusätzlich stehen `zaehlung` und `korrektur` als Kontextzeilen im
-  Mitschnitt. Damit liegen Gurt, Korrektur, die Tipps der Leiste und die Rohdaten auf einer
+  Mitschnitt. Damit liegen Sensor, Korrektur, die Tipps der Leiste und die Rohdaten auf einer
   Achse; hrv-research liest sie mit `trainingsapp_diagnose.py`.
 - Der Forschungsexport `einheit-v1` (`docs/plan_einheit.md` §8) trägt die Zeitleiste und damit
   die Zählungen mit.
 
-## 6. A2: Wie genau zählt der Gurt? (Zählprotokoll)
+## 6. A2: Wie genau zählt der Sensor? (Zählprotokoll)
 
 - Die Übungsseite bekommt den Abschnitt „Zähler (Prototyp)“. Er listet die letzten Sätze mit
-  Tag, Vorlage, Gurt, Korrektur und eingetragenem Wert; darüber steht „exakt n von m ·
+  Tag, Gerät, Vorlage, Sensor, Korrektur und eingetragenem Wert; darüber steht „exakt n von m ·
   höchstens 1 daneben k von m“. Das ist eine Aussage über den Zähler, nicht über die Person.
 - **Die Wahrheit ist der eingetragene Wert.** Sie ist nur so gut wie die Korrektur: Wer nicht
-  mitzählt, lässt den Gurt genauer aussehen, als er ist (P122).
-- Teilen: das Protokoll als CSV (Übung, Zeit, Vorlage, Gurt, Korrektur, eingetragen; kein Ort)
-  über „Teilen“, für das Einlesen in hrv-research.
+  mitzählt, lässt den Sensor genauer aussehen, als er ist (P122).
+- Teilen: das Protokoll als CSV (Übung, Zeit, Gerät, Vorlage, Sensor, Korrektur, eingetragen;
+  kein Ort) über „Teilen“, für das Einlesen in hrv-research.
 - Rohdaten für bessere Zähler liefert der Diagnosemodus ohnehin (Mitschnitt). Im Alltag kommt
   mit A4 das Beiwerk `_acc.json` dazu. Dann wird jeder korrigierte Satz ein Lernbeispiel
   (Konzept „Kreislauf“ in hrv-research).
@@ -381,7 +397,7 @@ Patientenmessungen entwickelt; Läufe darauf startet Ben selbst.
 
 | Stufe | Inhalt | Repos | Umfang |
 |---|---|---|---|
-| **A1** | Schalter; Karte „Beschleunigungssensor“ (Migration 037, Paketfeld); Strom mit mehreren Abnehmern; Simulator mit Beschleunigung; Zähl-Baustein mit dem vorhandenen Prototyp; Knopf mit −1/+1 an Uhr und Timer; Wiederholungen je Satz in den Eintrag; Zeitleiste | trainingsapp | L |
+| **A1** | Karte „Beschleunigungssensor“ (Migration 037, Paketfeld); Knopf je nach Gerät; Strom mit mehreren Abnehmern; Simulator mit Beschleunigung; Zähl-Baustein mit dem vorhandenen Prototyp; Knopf mit −1/+1 an Uhr und Timer; Wiederholungen je Satz in den Eintrag; Zeitleiste | trainingsapp | L |
 | **A2** | Zählprotokoll an der Übung, als CSV teilbar; Live-Zahl in der Marken-Leiste | trainingsapp | S |
 | **A3** | Atemzüge: K3 mit Prüfung → `prototyp.atemzuege`; „Atemzüge zählen“ | hrv-research → hrv-core → trainingsapp | M |
 | **A4** | Beiwerk `acc-v1`: Format, Schreiber mit Journal, Einlesen in hrv-research | hrv-core, trainingsapp, hrv-research | M |
@@ -391,15 +407,23 @@ Patientenmessungen entwickelt; Läufe darauf startet Ben selbst.
 | **A6** | Band (Seite „Zählen“); „Im Plan einstellen“; praxis_gui | hrv-watch, trainingsapp, praxis_gui | M |
 
 A1 und A2 brauchen nichts Neues aus hrv-core. Damit lässt sich sofort im Alltag prüfen, wie gut
-der Gurt Wiederholungen zählt. Jede Stufe endet mit Tests (ohne flet, wo es geht), Doku und,
+der Sensor Wiederholungen zählt. Jede Stufe endet mit Tests (ohne flet, wo es geht), Doku und,
 wo nötig, einer APK.
 
 ## 12. Fragen an Ben (P117–P126)
 
+**Entschieden** (Ben, 4.11.2026: „Wenn ein Gerät einen Beschleunigungssensor hat, soll die
+Wiederholung damit gemessen werden. Das ist der Knopf. +/-1 ist die Korrektur dafür.“):
+
+| # | Frage | Entscheidung |
+|---|---|---|
+| P117 | Ein eigener Schalter für Karte und Knopf? | nein — der Knopf hängt am Gerät (Beschleunigungssensor) und an der Übung („Aus“ in der Karte) |
+| P118 | Ohne Beschleunigungssensor ein Handzähler (nur +1/−1)? | nein — der Knopf ist die Messung mit dem Sensor, ±1 nur ihre Korrektur |
+
+**Offen:**
+
 | # | Frage | Vorschlag |
 |---|---|---|
-| P117 | Ein Schalter „Zählen mit dem Gurt (Prototyp)“ in den Einstellungen, oder sind Karte und Knopf immer da? | Schalter, Vorgabe aus (die App ist öffentlich, der Zähler ein Prototyp) |
-| P118 | Ohne Gurt mit Beschleunigung: kein Knopf, oder ein Handzähler (nur +1/−1)? | in A1 kein Knopf; ein Handzähler später, wenn gewünscht |
 | P119 | Startet der Knopf ohne laufende Uhr die Stoppuhr mit? Und mitten im Satz: rückwirkend ab Satzbeginn (dann läuft der Strom ab dem Start der Uhr jeder Zählübung) oder ab jetzt? | ja; rückwirkend |
 | P120 | Atemzüge eintragen (als eigener Parameter), oder nur anzeigen und an der Messung festhalten? | nur anzeigen und an der Messung |
 | P121 | Am Band eine Seite „Zählen“ mit der Zahl, und ⏯ ist auf dieser Seite +1 (sonst eine Marke wie heute, P113)? | ja, in A6 |

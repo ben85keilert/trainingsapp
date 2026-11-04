@@ -55,6 +55,8 @@ class LeistenStand:
     #: die Controls, die ein Tipp nachzieht
     zahl: ft.Text | None = None
     kopf: ft.Text | None = None
+    #: der Vergleich nach dem letzten Satz (Marken · Zähler · eingetragen, Stufe 8)
+    vergleich: ft.Text | None = None
     chips: dict[str, ft.Control] = field(default_factory=dict)
 
 
@@ -143,6 +145,9 @@ def aktualisieren(page: ft.Page, state: Any) -> None:
         with contextlib.suppress(Exception):
             page.update()
         return
+    lauf = _lauf(state)
+    if lauf is not None and hasattr(lauf, "diagnose_satz_beobachter"):
+        lauf.diagnose_satz_beobachter = lambda v: _satz_melden(page, state, v)
     neu = (
         _leiste(page, state)
         if getattr(state, "diagnose_leiste_offen", True)
@@ -243,6 +248,23 @@ def _nachziehen(state: Any, k: dg.MarkenKontext, art: str) -> None:
                 c.update()
 
 
+def _satz_melden(page: ft.Page, state: Any, v: dict[str, Any]) -> None:
+    """Nach dem Satz: in der Leiste stehen lassen; eingeklappt als kurze Meldung — aber nie
+    über einem offenen Dialog (`components.dialoge`)."""
+    from trainingsapp.ui.components.dialoge import dialog_offen
+
+    text = dg.satz_text(v)
+    stand = _stand(state)
+    if stand.vergleich is not None:
+        stand.vergleich.value = text
+        stand.vergleich.visible = True
+        with contextlib.suppress(Exception):
+            stand.vergleich.update()
+    elif not dialog_offen(page):
+        with contextlib.suppress(Exception):
+            page.show_dialog(ft.SnackBar(ft.Text(text)))
+
+
 def _hinweis(art: str) -> str:
     return "Tippen am unteren Punkt" if art == dg.WDH else "Tippen beim Einatmen"
 
@@ -253,6 +275,10 @@ def _leiste(page: ft.Page, state: Any) -> ft.Control:
     stand.zahl = ft.Text(str(stand.zaehler.stand(art, k)), size=60, weight=ft.FontWeight.W_700)
     stand.kopf = ft.Text(k.text(art), size=14, weight=ft.FontWeight.W_600, expand=True)
     hinweis = ft.Text(_hinweis(art), size=12, opacity=0.7)
+    letzter = getattr(_lauf(state), "letzter_satz", None)
+    stand.vergleich = ft.Text(
+        dg.satz_text(letzter) if letzter else "", size=12, opacity=0.8, visible=bool(letzter)
+    )
 
     def chip(name: str, text: str) -> ft.Control:
         c = ft.Chip(
@@ -304,6 +330,7 @@ def _leiste(page: ft.Page, state: Any) -> ft.Control:
                         ),
                     ],
                 ),
+                stand.vergleich,
                 flaeche,
                 ft.Row(
                     spacing=6,
@@ -346,6 +373,7 @@ def _knopf(page: ft.Page, state: Any) -> ft.Control:
     k, art = kontext(state)
     stand.zahl = ft.Text(str(stand.zaehler.stand(art, k)), size=24, weight=ft.FontWeight.W_700)
     stand.kopf = None
+    stand.vergleich = None
     stand.chips = {}
 
     def aufklappen() -> None:

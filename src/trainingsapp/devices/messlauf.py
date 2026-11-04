@@ -69,6 +69,7 @@ from hrv_core.zeitachse import Kontinuitaetsuhr
 
 from ..config import app_version
 from ..core import abschnitte as eigene_abschnitte
+from ..core.diagnose import kontext_aus_notizen as diagnose_marken_kontext
 from ..core.diagnose import kontext_zeile as diagnose_kontext
 from ..core.einheit import SPUR_TIMER
 from ..core.gurt_warnung import Artefaktwache
@@ -81,6 +82,8 @@ from .profiles import GeraeteProfil, profil_fuer_namen
 PROBE_S = 30.0
 #: Längste Dauer des Vorabtests im Sensorblatt (s)
 VORABTEST_S = 20.0
+#: So viele ACC-Rahmen hält der Puffer (200 Hz, 36 Proben je Rahmen: gut 10 min)
+ACC_PUFFER_RAHMEN = 3600
 #: Takt, in dem der Verzug der Ereignisschleife gemessen wird (s)
 VERZUG_TAKT_S = 0.25
 
@@ -271,6 +274,18 @@ class Messlauf:
         #: Verzug der Ereignisschleife (ms): letzter Wert und Spitze seit der letzten Probe
         self.verzug_ms = 0
         self._verzug_spitze_ms = 0
+        #: Beschleunigung der letzten Minuten (Ankunft, Proben) für den Zähler-Prototyp (Stufe 8)
+        self._acc_puffer: deque[tuple[float, list[tuple[int, int, int]]]] = deque(
+            maxlen=ACC_PUFFER_RAHMEN
+        )
+        #: Marken dieser Diagnose: (Uhr, Typ, ID) — für den Vergleich nach dem Satz
+        self._diagnose_marken: list[tuple[float, str, int]] = []
+        #: Beginn des laufenden Satzes (Uhr): Start der Übung bzw. der letzte eingetragene Satz
+        self._satz_beginn: float | None = None
+        #: Wer den Vergleich nach dem Satz zeigt (Oberfläche) — Fehler darin stoppen nichts
+        self.diagnose_satz_beobachter: Callable[[dict[str, Any]], None] | None = None
+        #: Der letzte Vergleich (Übung, Satz, Marken, Zähler, eingetragen)
+        self.letzter_satz: dict[str, Any] | None = None
         # Die Uhr der Quelle — beim Simulator läuft sie ``tempo``-fach, bei echten
         # Geräten ist sie time.monotonic(). t_capture der Messwerte passt dazu.
         self._uhr: Callable[[], float] = getattr(quelle, "jetzt", time.monotonic)
@@ -649,6 +664,10 @@ class Messlauf:
                 if (zeile := diagnose_kontext(eintrag)) is not None:
                     was, felder = zeile
                     self.mitschnitt.kontext(was, t=round((self.start_mono + x) * 1e9), **felder)
+                    if was == "uebung_start":
+                        self._satz_beginn = self.start_mono + x
+                    elif was == "satz":
+                        self._satz_vergleichen(felder, self.start_mono + x)
         return eintrag
 
     def abschnitt_markieren(
@@ -1056,6 +1075,9 @@ class Messlauf:
         if schreiber is None:
             return None
         self._vorher_merken()
+        quelle: Any = self.quelle
+        if hasattr(quelle, "acc_beobachter"):
+            quelle.acc_beobachter = self._acc_empfangen
         setzen = getattr(self.quelle, "stroeme_setzen", None)
         if setzen is not None:
             with contextlib.suppress(RuntimeError):  # ohne Ereignisschleife (Test)
@@ -1134,12 +1156,77 @@ class Messlauf:
         """Eine Diagnosemarke in den Mitschnitt (`hrv_core.mitschnitt.Schreiber.marke`)."""
         if not self.diagnose_aktiv or self.mitschnitt is None:
             return None
-        return self.mitschnitt.marke(typ, **felder)
+        zeile = self.mitschnitt.marke(typ, **felder)
+        self._diagnose_marken.append((int(zeile["t"]) / 1e9, typ, int(zeile["id"])))
+        return zeile
 
     def marke_weg(self, marke_id: int, **felder: Any) -> dict[str, Any] | None:
         if not self.diagnose_aktiv or self.mitschnitt is None:
             return None
+        self._diagnose_marken = [m for m in self._diagnose_marken if m[2] != marke_id]
         return self.mitschnitt.marke_weg(marke_id, **felder)
+
+    # -- Zähler-Prototyp nach dem Satz (Stufe 8) ----------------------------------------
+
+    def _acc_empfangen(
+        self, zeitstempel_ns: int, proben: list[tuple[int, int, int]], t_capture: float
+    ) -> None:
+        self._acc_puffer.append((t_capture, proben))
+
+    def _acc_fenster(self, von: float, bis: float) -> tuple[Any, float] | None:
+        """Proben (n × 3) im Fenster [von, bis) auf der Uhr der Quelle, dazu die Rate."""
+        import numpy as np
+
+        wunsch = getattr(self.quelle, "acc_wunsch", None)
+        rate = float(wunsch[0]) if wunsch else 200.0
+        zeilen: list[tuple[int, int, int]] = []
+        for t_ankunft, proben in self._acc_puffer:
+            n = len(proben)
+            for i, probe in enumerate(proben):
+                t = t_ankunft - (n - 1 - i) / rate
+                if von <= t < bis:
+                    zeilen.append(probe)
+        if len(zeilen) < rate * 2:  # unter 2 s gibt es nichts zu zählen
+            return None
+        return np.asarray(zeilen, dtype=np.float64), rate
+
+    def _satz_vergleichen(self, felder: dict[str, Any], t_satz: float) -> None:
+        """Nach einem eingetragenen Satz: Marken, Zähler (Prototyp) und Eingabe nebeneinander
+        — als Kontextzeile im Mitschnitt und an den Beobachter (Plan §0, Stufe 8)."""
+        from hrv_core.prototyp import wiederholungen
+
+        von = self._satz_beginn
+        self._satz_beginn = t_satz
+        if von is None:
+            return
+        marken = sum(
+            1 for t, typ, _ in self._diagnose_marken if typ == mt.MARKE_WDH and von <= t < t_satz
+        )
+        zaehler: int | None = None
+        fenster = self._acc_fenster(von, t_satz)
+        if fenster is not None:
+            with contextlib.suppress(Exception):
+                zaehler = wiederholungen.zaehlen(fenster[0], fenster[1]).anzahl
+        # Übung und Satz, wie die Leiste sie sah — die Notiz dieses Satzes steht noch nicht drin
+        k = diagnose_marken_kontext(self.ereignisse(), lambda _code: True)
+        vergleich = {
+            "uebung": k.uebung,
+            "satz": k.satz,
+            "feld": felder.get("feld"),
+            "marken": marken,
+            "zaehler": zaehler,
+            "eingetragen": felder.get("wert"),
+            "art": "prototyp",
+        }
+        self.letzter_satz = vergleich
+        if self.mitschnitt is not None and zaehler is not None:
+            with contextlib.suppress(Exception):
+                self.mitschnitt.kontext(
+                    "zaehler", feld=felder.get("feld"), wert=zaehler, phase="prototyp"
+                )
+        if self.diagnose_satz_beobachter is not None:
+            with contextlib.suppress(Exception):
+                self.diagnose_satz_beobachter(vergleich)
 
     def kontext(self, was: str, **felder: Any) -> dict[str, Any] | None:
         """Kontext in den Mitschnitt: Übung, Timer, eingetragener Satz (Plan §3.1)."""
@@ -1238,6 +1325,12 @@ class Messlauf:
         transport = self.mitschnitt_transport
         if transport is not None and transport.schreiber is schreiber:
             transport.abhaengen()
+        quelle: Any = self.quelle
+        if getattr(quelle, "acc_beobachter", None) == self._acc_empfangen:
+            quelle.acc_beobachter = None
+        self._acc_puffer.clear()
+        self._diagnose_marken.clear()
+        self._satz_beginn = None
         if self._probe_task is not None:
             self._probe_task.cancel()
             self._probe_task = None

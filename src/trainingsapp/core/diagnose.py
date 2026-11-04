@@ -401,6 +401,26 @@ def kontext_zeile(notiz: dict) -> tuple[str, dict[str, object]] | None:
     return was, felder
 
 
+def satz_text(v: dict[str, object]) -> str:
+    """Der Vergleich nach dem Satz (Stufe 8): Marken, Zähler (Prototyp), eingetragen.
+
+    >>> satz_text({"uebung": "Kniebeuge", "satz": 1, "marken": 12, "zaehler": 11,
+    ...            "eingetragen": 12})
+    'Kniebeuge S1: Marken 12 · Zähler 11 (Prototyp) · eingetragen 12'
+    >>> satz_text({"uebung": None, "satz": None, "marken": 0, "zaehler": None,
+    ...            "eingetragen": 8})
+    'Satz: Marken 0 · Zähler – · eingetragen 8'
+    """
+    wer = str(v.get("uebung") or "Satz")
+    if v.get("uebung") and v.get("satz"):
+        wer += f" S{v['satz']}"
+    zaehler = v.get("zaehler")
+    z = "–" if zaehler is None else f"{zaehler} (Prototyp)"
+    eingetragen = v.get("eingetragen")
+    e = "–" if eingetragen is None else str(eingetragen)
+    return f"{wer}: Marken {v.get('marken', 0)} · Zähler {z} · eingetragen {e}"
+
+
 # ---------------------------------------------------------------------------
 # Ablage
 # ---------------------------------------------------------------------------
@@ -530,6 +550,7 @@ __all__ = [
     "kontext_zeile",
     "menge_mb_h",
     "mitschnitte",
+    "satz_text",
     "sensoren",
     "zusammenfassung_text",
 ]

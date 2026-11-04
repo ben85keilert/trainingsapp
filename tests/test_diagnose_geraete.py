@@ -368,3 +368,55 @@ def test_export_nimmt_den_mitschnitt_nur_bereinigt_mit(tmp_path) -> None:
     assert "Polar H10 [E2:B4:CC:xx:xx:xx]" in text
     # Das Original auf dem Gerät bleibt, wie es ist
     assert "3F:08:44" in mt.mitschnitt_pfad(messdatei).read_text(encoding="utf-8")
+
+
+async def test_nach_dem_satz_marken_zaehler_und_eingabe(tmp_path) -> None:
+    """Stufe 8: Nach dem eingetragenen Satz zählt der Prototyp aus hrv-core die Wiederholungen
+    in der gepufferten Beschleunigung — neben den Marken und der Eingabe."""
+    import math
+
+    zeit = FakeZeit()
+    lauf, quelle, innen = await _messlauf(tmp_path, zeit)
+    gemeldet: list[dict] = []
+    lauf.diagnose_satz_beobachter = gemeldet.append
+    lauf.aufnahme_starten()
+    start = asyncio.create_task(lauf.diagnose_starten(ekg=False, acc=(200, 8)))
+    await zeit.vorspulen(1.0)
+    await start
+    lauf.notiz_hinzufuegen(
+        "Kniebeuge: Start",
+        marke={"quelle": "plan", "art": "uebung_start", "name": "Kniebeuge"},
+        uebungen=["KB000001"],
+    )
+    t0, t_geraet = zeit.t, 10**12
+    for k in range(int(24 / 0.18)):  # 24 s, 12 Wiederholungen à 2 s, Rahmen zu 36 Proben
+        proben = []
+        for i in range(36):
+            t = (k * 36 + i) / 200
+            hub = 300 * math.sin(2 * math.pi * t / 2.0)
+            proben.append((round(0.2 * hub), round(-1000 + hub), 0))
+        t_geraet += 180_000_000
+        zeit.t = t0 + (k + 1) * 0.18
+        innen.senden(
+            pmd.PMD_DATA_UUID,
+            pmd.rahmen_bauen(pmd.MEAS_ACC, t_geraet, pmd.acc_kodieren(proben), 1),
+            zeit.t,
+        )
+        if k % 11 == 5:  # gut alle 2 s eine Marke
+            lauf.marke(mt.MARKE_WDH)
+    lauf.notiz_hinzufuegen(
+        "Kniebeuge: 12",
+        marke={"quelle": "person", "art": "leistung", "feld": "reps", "wert": 12},
+        uebungen=["KB000001"],
+    )
+    (v,) = gemeldet
+    assert v["uebung"] == "Kniebeuge" and v["satz"] == 1 and v["eingetragen"] == 12
+    assert v["marken"] == 12 and abs(v["zaehler"] - 12) <= 1 and v["art"] == "prototyp"
+    assert lauf.letzter_satz == v
+    zeilen = list(mt.lesen(lauf.mitschnitt.pfad))
+    (z,) = [z for z in zeilen if z.get("was") == "zaehler"]
+    assert z["wert"] == v["zaehler"] and z["phase"] == "prototyp" and z["feld"] == "reps"
+    await lauf.diagnose_beenden()
+    assert quelle.acc_beobachter is None
+    lauf.aufnahme = None
+    await lauf.trennen()

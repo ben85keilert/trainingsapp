@@ -65,6 +65,7 @@ from trainingsapp.core.sicherung import setzen as sicherung_setzen
 from trainingsapp.core.sicherung import stand as sicherung_stand
 from trainingsapp.core.tagesfelder import STANDARD_RUHEPULS as TF_RUHEPULS
 from trainingsapp.core.tagesfelder import standardfeld as tf_standardfeld
+from trainingsapp.core.takt import Takt, takte_lesen, takte_schreiben
 from trainingsapp.core.timer import (
     EINMAL,
     STOPPUHR,
@@ -433,6 +434,12 @@ class AppState:
     #: Ein schnell gestellter Timer ohne Ablauf in Sekunden — je Planübung bzw. Übung, nur für
     #: diese Sitzung (P79 D3/D4, `components/zeit_stellen.py`)
     uhr_einmal: dict[str, int] = field(default_factory=dict)
+    #: Taktgeber (`docs/plan_taktgeber.md` §5): der Takt „für jetzt“ je Planübung bzw. Übung
+    #: (Takt-Knopf an der Uhr; `core.takt.AUS` = keiner, auch nicht der der Übung; fehlt =
+    #: Abschnitt > Übung) und der Tempo-Regler für jetzt (P139) — nur für diese Sitzung;
+    #: der Reiter „Timer“ hält seine Wahl unter dem Schlüssel ``timer``
+    uhr_takt: dict[str, Takt] = field(default_factory=dict)
+    uhr_tempo: dict[str, float] = field(default_factory=dict)
     #: Der letzte Ablauf je Plan (Einheit-ID) — für die Karte „fertig“ danach
     plan_ablaeufe: dict[str, str] = field(default_factory=dict)
     #: … und welche Planübungen in ihm liefen (Ben, 18.10.2026: Erledigtes bleibt draußen)
@@ -928,6 +935,22 @@ class AppState:
         uhren = einmaluhren_lesen(self.einstellungen.lesen(SettingRepo.TIMER_EINMAL))
         uhren[profil.id] = profil
         self.einstellungen.setzen(SettingRepo.TIMER_EINMAL, einmaluhren_schreiben(uhren))
+
+    # -- Taktgeber -------------------------------------------------------------------
+
+    def takt_bibliothek(self) -> list[Takt]:
+        """Eigene Takte (Takt-Blatt → „In die Bibliothek“), gerätelokal wie die Timer-Profile."""
+        return takte_lesen(self.einstellungen.lesen(SettingRepo.TAKT_BIBLIOTHEK))
+
+    def takt_bibliothek_setzen(self, takte: list[Takt]) -> None:
+        self.einstellungen.setzen(SettingRepo.TAKT_BIBLIOTHEK, takte_schreiben(takte))
+
+    def takt_vibration(self) -> bool:
+        """Kurze Vibration am Phasenwechsel eines Takts — Vorgabe an (P140 offen, so gebaut)."""
+        return self.einstellungen.lesen(SettingRepo.TAKT_VIBRATION, "1") == "1"
+
+    def takt_vibration_setzen(self, an: bool) -> None:
+        self.einstellungen.setzen(SettingRepo.TAKT_VIBRATION, "1" if an else "0")
 
     def timer_signale(self) -> TimerSignale:
         """Ton, Countdown, Vibration, Bildschirm an, Notizen — alles an, wenn nichts gespeichert."""

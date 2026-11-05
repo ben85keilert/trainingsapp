@@ -61,6 +61,7 @@ from .kurse import (
 )
 from .models import Exercise, Media, MediaKind, MediaSource, Plan, jetzt
 from .result_spec import VORLAGEN, ResultSpec, basis_key
+from .takt import Takt
 from .timer import TimerProfil
 from .zaehlen import SensorWahl
 
@@ -567,6 +568,8 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             # Tolerant wie `uhr` und `zaehlt_als`: Unbrauchbares gilt als Vorgabe, das Paket
             # bleibt lesbar (`core.zaehlen.SensorWahl.aus_dict`).
             beschleunigung=SensorWahl.aus_dict(eintrag.get("beschleunigung")),
+            # Ebenso tolerant: ohne brauchbare Phase kein Takt (`core.takt.Takt.aus_dict`)
+            takt=Takt.aus_dict(eintrag.get("takt")),
         ),
         key,
     )
@@ -742,6 +745,9 @@ def stand(u: Exercise) -> dict[str, Any]:
     False
     >>> stand(Exercise(name="Baum", beschleunigung=SensorWahl(atmung=True)))["beschleunigung"]
     {'atmung': True}
+    >>> from trainingsapp.core.takt import VORLAGEN
+    >>> stand(Exercise(name="Atmen", takt=VORLAGEN["atmung_4_6"]))["takt"]["name"]
+    'Atmung 4-6'
     """
     d: dict[str, Any] = {"name": u.name}
     if u.description:
@@ -763,6 +769,8 @@ def stand(u: Exercise) -> dict[str, Any]:
     # Paketstand als „geändert: Beschleunigungssensor“ (`abweichungen`).
     if beschleunigung := u.beschleunigung.als_dict():
         d["beschleunigung"] = beschleunigung
+    if u.takt is not None and not u.takt.leer:
+        d["takt"] = u.takt.als_dict()
     if u.default_target:
         d["default_target"] = u.default_target
     medien = [
@@ -809,6 +817,7 @@ FELDNAMEN: dict[str, str] = {
     "uhr": "Uhr",
     "zaehlt_als": "Zählt als",
     "beschleunigung": "Beschleunigungssensor",
+    "takt": "Takt",
     "media": "Videos",
 }
 

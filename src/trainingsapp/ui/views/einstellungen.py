@@ -90,6 +90,9 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
     def uhr_setzen(e: ft.Event[ft.Dropdown]) -> None:
         state.uhr_darstellung_setzen(str(e.control.value))
 
+    def takt_vibration_setzen(e: ft.Event[ft.Switch]) -> None:
+        state.takt_vibration_setzen(bool(e.control.value))
+
     def oeffner(route: str) -> Callable[[], object]:
         async def handler() -> None:
             await page.push_route(route)
@@ -325,6 +328,16 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                             hinweis(
                                 "Ob und wie die Zeit zählt, steht an jeder Übung (Übung "
                                 "bearbeiten → Timer: Uhr an/aus, „Zählt als“)."
+                            ),
+                            ft.Switch(
+                                label="Vibration am Phasenwechsel",
+                                value=state.takt_vibration(),
+                                on_change=takt_vibration_setzen,
+                            ),
+                            hinweis(
+                                "Läuft ein Takt (Atmung, Bewegung), vibriert das Handy kurz zu "
+                                "jeder neuen Phase — zusätzlich zum Klang. Die Vibration des "
+                                "Timers selbst steht unter Timer → Signale."
                             ),
                         ),
                         darstellung_karte(page, state),

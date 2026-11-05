@@ -275,6 +275,24 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   steht unter DFA α1, und Schwellen aus α1 (`core/hf_auswertung`, `AUSWERTUNG_VERSION` 4) gelten
   nur bei spontaner Atmung ab 9/min oder unbekannter Lage — sonst Grund statt Schwelle.
 
+- **Taktgeber** (Ben, 5.11.2026, Vertrag `docs/plan_taktgeber.md`; Teil 1 T1–T3 gebaut): ein
+  **Takt** ist eine Folge von Phasen (Name, Sekunden, Art `ein`/`aus`/`halten`/`ab`/`auf`/`frei`,
+  Klang) mit Tempo, als Schleife, solange die Uhr läuft. Die Rechnung lebt **nur** in `core/takt.py`
+  (`Takt`, `lage` aus der Uhr — nie mitgezählt —, `wechsel`, `TaktLauf` für Tempo ohne Sprung,
+  `VORLAGEN`, `animation_fuer`, `soll_phasen`); `ui/` zeichnet nur. Drei Orte, Vorrang Uhr „für
+  jetzt“ (`AppState.uhr_takt`, `takt.AUS` = keiner) > Timer-Abschnitt (`Abschnitt.takt`) > Übung
+  (`Exercise.takt`, Migration 038 `takt_json`, Paketfeld `takt`, Drei-Wege-Abgleich ein Feld) —
+  `core.uebung_timer.takt_fuer`, am Lauf `TimerLauf.takt_aktuell`/`takt_lage`. Der Ticker
+  (`ui/timer_takt.py`) spielt je neuer Phase ihren Klang (Vorgabe je Art, `KLANG_VORGABE`) und
+  vibriert kurz (Einstellungen → Übungen, Vorgabe an, P140 offen); `TimerBaustein` schreibt
+  `timer/takt` am Abschnittsbeginn und je Tempoänderung (`plan_einheit` §4). Takt-Blatt
+  (`components/takt_blatt.py`, `blatt_spalte`) mit Vorschau und Tempo-Regler; der Regler **im
+  Lauf** (`TempoRegler`) ist `TimerLauf.tempo_setzen` — für jetzt (P139). Die Animation
+  (`components/takt_anzeige.TaktAnzeige`, nach Phasenzahl: Puls, Kreis, Kreis mit Halten, Box,
+  Balken, Welle) wird **einmal gebaut**, `nachziehen` setzt je Tick nur Werte, `animate_scale` mit
+  der Phasendauer (V1). Teil 2 (Marke `atemtakt`, `atmung` getaktet, Soll-Phasen in `atem-v1`,
+  „Takt zählt“, GIFs) folgt.
+
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`
   über eine begrenzte `asyncio.Queue`. Messwerte und Status laufen getrennt — Batterie

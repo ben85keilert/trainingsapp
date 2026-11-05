@@ -73,6 +73,7 @@ from trainingsapp.core.result_spec import (
     vorrat_feld,
 )
 from trainingsapp.core.standards import ziel_bereinigen, ziel_spec
+from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import TimerProfil
 from trainingsapp.core.uebung_timer import profile_der_uebung
 from trainingsapp.core.zaehlen import (
@@ -94,6 +95,7 @@ from trainingsapp.ui.components.notizeditor import Textnotiz
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.symbol_blatt import symbol_blatt
 from trainingsapp.ui.components.tagwahl import TagWahl
+from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.varianten import plakette
 from trainingsapp.ui.components.varianten import symbol as varianten_symbol
@@ -1133,6 +1135,37 @@ def uebung_bearbeiten(
         with contextlib.suppress(Exception):  # noch nicht auf der Seite
             timer_spalte.update()
 
+    # -- Takt (Ben, 5.11.2026, `docs/plan_taktgeber.md` §5): die Zeile „Takt: 4-7-8 · 4/min“
+    # mit Stift (Takt-Blatt → „In die Übung“) und ✕ — im Formular gehalten, gespeichert mit
+    # der Übung; „Abbrechen“ verwirft auch hier ----------------------------------------------
+    takt_stand: dict[str, Takt | None] = {"takt": uebung.takt if uebung is not None else None}
+    takt_platz = ft.Container()
+
+    def takt_setzen(neu: Takt | None) -> None:
+        takt_stand["takt"] = neu if neu is not None and not neu.leer else None
+        takt_zeichnen()
+        with contextlib.suppress(Exception):  # noch nicht auf der Seite
+            takt_platz.update()
+
+    def takt_bearbeiten() -> None:
+        page.show_dialog(
+            takt_blatt(
+                page,
+                state,
+                takt=takt_stand["takt"],
+                titel="Takt der Übung",
+                in_die_uebung=takt_setzen,
+                uebung_name=(name.value or "").strip(),
+            )
+        )
+
+    def takt_zeichnen() -> None:
+        takt_platz.content = takt_zeile(
+            takt_stand["takt"], bearbeiten=takt_bearbeiten, entfernen=lambda: takt_setzen(None)
+        )
+
+    takt_zeichnen()
+
     def timer_nach_oben(k: int) -> Callable[[], None]:
         def handler() -> None:
             timer_liste.insert(0, timer_liste.pop(k))
@@ -1548,6 +1581,7 @@ def uebung_bearbeiten(
         ziel.zeit_zaehlt = bool(zaehlt_schalter.value)
         ziel.zaehlt_als = zaehlt_als_lesen()
         ziel.beschleunigung = acc_lesen()
+        ziel.takt = takt_stand["takt"]
         ziel.media = [
             Media(
                 kind=MediaKind.VIDEO,
@@ -1586,6 +1620,7 @@ def uebung_bearbeiten(
             bool(zaehlt_schalter.value),
             zaehlt_als_lesen(),
             acc_lesen().als_dict(),
+            takt_stand["takt"].als_dict() if takt_stand["takt"] is not None else None,
             [(v.name, v.symbol, v.kuerzel, v.text) for v in varianten_liste],
             list(umbenennen),
         )
@@ -1679,6 +1714,14 @@ def uebung_bearbeiten(
                         abschnitt("UHR UND TIMER", hilfe_knopf(page, thema="uhr")),
                         uhr_spalte,
                         timer_spalte,
+                        ft.Row(
+                            spacing=0,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            controls=[
+                                ft.Container(content=takt_platz, expand=True),
+                                hilfe_knopf(page, thema="takt"),
+                            ],
+                        ),
                         ft.Row(
                             wrap=True,
                             spacing=8,

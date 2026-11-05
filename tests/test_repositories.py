@@ -85,6 +85,53 @@ def test_beschleunigung_reist_durch_die_datenbank(repo) -> None:
     assert repo.laden(u.id).beschleunigung == SensorWahl()
 
 
+def test_takt_reist_durch_die_datenbank(repo) -> None:
+    """Der Takt der Übung (Migration 038, ``takt_json``): ``{}`` = keiner; gespeichert wird
+    `Takt.als_dict`; Kaputtes liest sich als „kein Takt“."""
+    from trainingsapp.core.takt import VORLAGEN, Takt
+
+    u = Exercise(name="Atmen", result_spec=SPEC_HALTEN)
+    repo.speichern(u)
+    zeile = repo.con.execute("SELECT takt_json FROM exercise WHERE id = ?", (u.id,)).fetchone()
+    assert zeile["takt_json"] == "{}"
+    assert repo.laden(u.id).takt is None
+
+    u.takt = VORLAGEN["atmung_4_7_8"].mit_tempo(1.5)
+    repo.speichern(u)
+    assert repo.laden(u.id).takt == u.takt
+    assert [x.takt for x in repo.alle() if x.id == u.id] == [u.takt]
+    assert Takt.aus_dict(u.takt.als_dict()) == u.takt
+
+    repo.con.execute("UPDATE exercise SET takt_json = '[1' WHERE id = ?", (u.id,))
+    assert repo.laden(u.id).takt is None
+
+
+def test_migration_038_takt(tmp_path) -> None:
+    """Migration 038: alte Übungen bekommen ``takt_json = '{}'`` — kein Takt."""
+    from trainingsapp.data.db import MIGRATIONS_DIR, migrieren, verbinden
+
+    ordner = tmp_path / "bis037"
+    ordner.mkdir()
+    for datei in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if int(datei.name[:3]) <= 37:
+            (ordner / datei.name).write_text(datei.read_text(encoding="utf-8"), encoding="utf-8")
+    con = verbinden(tmp_path / "alt.db")
+    assert migrieren(con, ordner) == 37
+    jetzt = "2026-11-05T12:00:00+00:00"
+    con.execute(
+        "INSERT INTO exercise (id, name, category, result_spec_json, created_at, updated_at) "
+        "VALUES ('u', 'Atmen', '', '{\"fields\": []}', ?, ?)",
+        (jetzt, jetzt),
+    )
+    con.commit()
+    assert migrieren(con) == 38
+    zeile = con.execute("SELECT takt_json FROM exercise WHERE id = 'u'").fetchone()
+    assert zeile["takt_json"] == "{}"
+    uebung = ExerciseRepo(con).laden("u")
+    assert uebung is not None and uebung.takt is None
+    con.close()
+
+
 def test_unbekannte_id_liefert_none(repo) -> None:
     """None, keine Ausnahme — die Ansicht soll das behandeln können."""
     assert repo.laden("gibt-es-nicht") is None
@@ -1006,7 +1053,7 @@ def test_migration_028_planuebung_folgt(tmp_path) -> None:
             (f"i{nr}", nr, ziel, felder),
         )
     con.commit()
-    assert migrieren(con) == 37
+    assert migrieren(con) == 38
     zeilen = {
         r["id"]: (r["target_json"], r["fields_json"])
         for r in con.execute("SELECT id, target_json, fields_json FROM plan_item")
@@ -1061,7 +1108,7 @@ def test_migration_037_beschleunigung(tmp_path) -> None:
         )
     con.commit()
 
-    assert migrieren(con) == 37
+    assert migrieren(con) == 38
     zeile = con.execute("SELECT acc_json FROM exercise WHERE id = 'u'").fetchone()
     assert zeile["acc_json"] == "{}"
     uebung = ExerciseRepo(con).laden("u")
@@ -1941,7 +1988,7 @@ def test_migration_030_uebernimmt_vergebene_titel(tmp_path) -> None:
             )
         )
     con.commit()
-    assert migrieren(con) == 37
+    assert migrieren(con) == 38
     liste = hrv.titel_liste(ich.id)
     assert [t.name for t in liste] == ["Abends", "Morgens"]
     assert liste[1].zuletzt == datetime(2026, 10, 2, tzinfo=UTC)

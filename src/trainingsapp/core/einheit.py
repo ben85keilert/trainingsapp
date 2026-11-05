@@ -87,6 +87,9 @@ ARTEN: frozenset[str] = frozenset(
         "zaehlung",
         "korrektur",
         "zaehlen_ende",
+        # Taktgeber (``timer/takt``, 5.11.2026, `docs/plan_taktgeber.md` §3): ein Takt beginnt
+        # mit einem Abschnitt, oder sein Tempo ändert sich — nur Zeitleiste
+        "takt",
     }
 )
 
@@ -171,6 +174,11 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         # Atmung (``zaehlart`` atem, ``satz`` 0 = der ganze Lauf, A3): die letzte gültige
         # Atemrate je Minute des Prototyps — ``zeiten_s`` sind dort die Einatemzeiten
         "rate",
+        # Taktgeber (``timer/takt``): Tempo-Faktor, die Dauern der Phasen (s, mit Tempo) und
+        # ihre Arten als Text „ein/halten/aus“ — Rate und Rundendauer stehen in ``wert``/``soll_s``
+        "tempo",
+        "phasen_s",
+        "arten",
         # Teile
         "teil",
         "rolle",

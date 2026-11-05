@@ -19,6 +19,7 @@ from enum import StrEnum
 from typing import Any
 
 from .result_spec import ResultSpec
+from .takt import Takt
 from .zaehlen import SensorWahl
 
 
@@ -173,6 +174,10 @@ class Exercise:
     #: ``beschleunigung``): Wiederholungen zählen, Atmung erfassen — leer = Vorgabe aus der
     #: Übung (`core.zaehlen.wiederholungen_an`, `atmung_an`)
     beschleunigung: SensorWahl = field(default_factory=SensorWahl)
+    #: Der Takt der Übung (Migration 038, ``takt_json``; Paketfeld ``takt``;
+    #: `docs/plan_taktgeber.md`): Phasen für Atmung oder Bewegung, die überall gelten, wo die
+    #: Übung geübt wird — ein Timer-Abschnitt und die Uhr „für jetzt“ gehen vor
+    takt: Takt | None = None
 
     def __post_init__(self) -> None:
         # Wer nur `category` angibt (Altbestand, Tutorial), bekommt sie als Typ.

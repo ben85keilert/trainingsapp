@@ -34,6 +34,7 @@ import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
 from trainingsapp.core.result_spec import basis_key
+from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import Abschnitt, TimerProfil, dauer_text, einmal_timer
 from trainingsapp.core.timer_eintrag import gelaufene_zeiten
 from trainingsapp.core.uebung_timer import (
@@ -52,6 +53,8 @@ from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.laeufe_heute import eintragen_handler, laeufe_karte, werte_text
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
+from trainingsapp.ui.components.takt_blatt import TempoRegler, takt_anbringen, takt_knopf
 from trainingsapp.ui.components.uhr import schluessel
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.state import AppState
@@ -290,8 +293,20 @@ def uebung_timer_view(
         except RuntimeError as fehler:
             melden(str(fehler))
             return
+        takt_an_den_lauf(e)
         state.uebung_laeufe[uebung.id] = e.id
         zaehlen.meldung_zeigen(page, state)  # ein Zählen einer anderen Übung endete
+
+    def takt_an_den_lauf(e: Einheitslauf) -> None:
+        """Takt für jetzt, Vorgabe der Übung und Tempo an den Timer der Einheit (Taktgeber)."""
+        if e.timer is not None:
+            takt_anbringen(state, e.timer.lauf, key, uebung.takt)
+
+    def takt_starten(takt: Takt) -> None:
+        """„Takt starten“ aus dem Blatt: für jetzt, und die gewählte Uhr läuft los — ohne
+        Timer ein Timer ohne Ablauf (§4: es gibt immer eine Uhr)."""
+        state.uhr_takt[key] = takt
+        starten(profil or einmal_timer(state.uhr_einmal.get(key, 300)))
 
     def zeit_stellen() -> None:
         """Ein Tipp auf die Zeit: Timer ohne Ablauf stellen und gleich starten (P79 D4)."""
@@ -316,6 +331,7 @@ def uebung_timer_view(
         except RuntimeError as fehler:
             melden(str(fehler))
             return
+        takt_an_den_lauf(e)
         state.uebung_laeufe[uebung.id] = e.id
         zaehlen.meldung_zeigen(page, state)
 
@@ -542,6 +558,35 @@ def uebung_timer_view(
             abstand=0,
         )
 
+    def takt_zeile_vorher() -> ft.Control:
+        """Welcher Takt beim Start gilt (für jetzt > Übung) und der Knopf zum Blatt."""
+        gewaehlt = state.uhr_takt.get(key)
+        takt = gewaehlt if gewaehlt is not None else uebung.takt
+        an = takt is not None and not takt.leer
+        text = (
+            f"Takt: {takt.anzeigename} · {takt.kurztext()}"
+            if takt is not None and not takt.leer
+            else "Kein Takt"
+        )
+        if gewaehlt is not None:
+            text += " · für jetzt"
+        return ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Text(text, size=13, expand=True, opacity=0.9 if an else 0.6),
+                takt_knopf(
+                    page,
+                    state,
+                    key=key,
+                    takt=uebung.takt,
+                    starten=takt_starten,
+                    titel=f"Takt · {uebung.name}",
+                    klein=True,
+                ),
+            ],
+        )
+
     def vorher() -> list[ft.Control]:
         chips: list[ft.Control] = [
             ft.Chip(
@@ -569,6 +614,7 @@ def uebung_timer_view(
             ),
             kartentitel("Timer dieser Übung"),
             ft.Row(wrap=True, spacing=8, run_spacing=8, controls=chips),
+            takt_zeile_vorher(),
         ]
         if profil is None:
             teile += [
@@ -619,6 +665,10 @@ def uebung_timer_view(
     zeit_text = ft.Text(size=72, weight=ft.FontWeight.W_600, text_align=ft.TextAlign.CENTER)
     stand_text = ft.Text(size=15, opacity=0.8, text_align=ft.TextAlign.CENTER)
     balken_platz = ft.Container()
+    # Taktgeber (§5): die Animation unter der Leiste, der Tempo-Regler für jetzt — einmal
+    # gebaut, der Ticker zieht nur Werte nach
+    takt_anzeige = TaktAnzeige(groesse=180)
+    tempo_platz = ft.Container()
     saetze_spalte = ft.Column(spacing=0)
     halt_knopf = ft.FilledTonalButton(expand=True)
 
@@ -644,6 +694,7 @@ def uebung_timer_view(
             auffrischen()
 
         halt_knopf.on_click = anhalten
+        tempo_platz.content = TempoRegler(state, key, lauf).control
         anzeigen(e)
         # Zählt der Sensor mit: die Zahl mit ±1 — einmal gebaut, die Einheit zieht nur Texte nach
         zaehl = zaehlen.neben_der_uhr(
@@ -653,6 +704,8 @@ def uebung_timer_view(
             ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[zeit_text]),
             ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[stand_text]),
             balken_platz,
+            ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[takt_anzeige.control]),
+            tempo_platz,
             *([karte(*zaehl, abstand=4, padding=10)] if zaehl else []),
             karte(saetze_spalte, abstand=0, padding=10),
             ft.Row(
@@ -711,6 +764,10 @@ def uebung_timer_view(
             else:
                 anteile.append((a, -1.0 if not stand.fertig else 1.0))
         balken_platz.content = None if lauf.vorwaerts else _balken(anteile, hoehe=12)
+        lage = lauf.takt_lage()
+        takt_anzeige.nachziehen(lauf.takt_aktuell(stand.nummer) if lage else None, lage)
+        if isinstance(tempo_platz.content, ft.Row):
+            tempo_platz.content.visible = lage is not None
         # Sätze: was zählt, mit der gelaufenen Zeit aus der Zeitleiste — und, zählt der Sensor
         # mit, den Wiederholungen je Satz (4.11.2026)
         fertig = {(z.name, z.runde): z for z in gelaufene_zeiten(e.ereignisse)}

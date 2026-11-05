@@ -14,9 +14,12 @@ import contextlib
 from typing import TYPE_CHECKING, Any
 
 from trainingsapp.core.klang import GLOCKEN, LAUTSTAERKE, TOENE, glocke, wav
+from trainingsapp.core.takt import PHASE, Lage, TaktEreignis
+from trainingsapp.core.takt import wechsel as takt_wechsel
 from trainingsapp.core.timer import (
     COUNTDOWN,
     ENDE,
+    WECHSEL,
     Marke,
     TimerSignale,
     TimerStand,
@@ -80,6 +83,29 @@ async def _melden(state: AppState, art: str, signale: TimerSignale, klang: str) 
                 await haptik.vibrate()
 
 
+async def takt_melden(
+    state: AppState, ereignisse: list[TaktEreignis], signale: TimerSignale, *, still: bool = False
+) -> list[str]:
+    """Klang und kurze Vibration zu den Phasenwechseln eines Takts (`docs/plan_taktgeber.md`
+    §3): je neuer Phase ihr Klang (eigener, sonst Vorgabe je Art) über den Tonregler der
+    Signale; die Vibration hat ihren eigenen Schalter (Einstellungen → Übungen, Vorgabe an).
+    ``still``: ein Timer-Signal spielte in diesem Takt schon — der Abschnittsklang bleibt, die
+    erste Phase tönt nicht noch einmal darüber. Zurück kommen die gespielten Klänge (Tests)."""
+    gespielt: list[str] = []
+    phasen = [e for e in ereignisse if e.art == PHASE and e.phase is not None]
+    if not phasen or still:
+        return gespielt
+    klang = phasen[-1].phase.klang_fuer  # type: ignore[union-attr]
+    if signale.ton and await ton_spielen(state, klang, signale):
+        gespielt.append(klang)
+    haptik = getattr(state, "haptik", None)
+    vibrieren = getattr(state, "takt_vibration", None)
+    if haptik is not None and (vibrieren() if callable(vibrieren) else True):
+        with contextlib.suppress(Exception):
+            await haptik.vibrate()
+    return gespielt
+
+
 async def wach_setzen(state: AppState, an: bool) -> None:
     """Bildschirm anlassen (oder wieder freigeben), Grund „Timer“ (`ui.wach`)."""
     await wach.wach_setzen(state, an, wach.TIMER)
@@ -100,6 +126,17 @@ def _in_messung(state: AppState, marken: list[Marke], signale: TimerSignale) -> 
                 beobachter()
 
 
+def _lage_beim_start(lauf: Any) -> Lage | None:
+    """Die Lage im Takt, wenn der Ticker anläuft — ``None``, wenn der Takt gerade erst beginnt
+    (die erste Phase tönt dann), sonst die Lage von jetzt (nichts tönt nach „Weiter“)."""
+    if lauf is None:
+        return None
+    lage = lauf.takt_lage()
+    if lage is None or (lage.runde == 1 and lage.t_runde_s <= 2 * TICK_S):
+        return None
+    return lage
+
+
 def ticker_starten(page: Any, state: AppState) -> None:
     """Eine Aufgabe, die läuft, solange der Timer läuft — nie zwei zugleich.
 
@@ -111,14 +148,26 @@ def ticker_starten(page: Any, state: AppState) -> None:
 
     async def ticken() -> None:
         alt: TimerStand | None = None
+        # Nach „Weiter“ steht der Takt mitten in einer Phase — die tönt nicht noch einmal;
+        # nur ein Takt, der gerade erst beginnt, meldet seine erste Phase
+        takt_alt: Lage | None = _lage_beim_start(state.timer)
         wach = False
         try:
             while (lauf := state.timer) is not None:
                 stand = lauf.stand()
-                if not lauf.vorwaerts and (art := signal(alt, stand)) is not None:
+                art = signal(alt, stand) if not lauf.vorwaerts else None
+                if art is not None:
                     signale = state.timer_signale()
                     klang = klang_fuer(art, stand, lauf.profil, signale)
                     await _melden(state, art, signale, klang)
+                # Taktgeber: die Lage aus der Uhr, Klang und Vibration am Phasenwechsel —
+                # nicht über ein Timer-Signal desselben Takts (der Abschnittsklang bleibt)
+                takt_neu = lauf.takt_lage() if stand.laeuft else takt_alt
+                if (ereignisse := takt_wechsel(takt_alt, takt_neu)) and stand.laeuft:
+                    await takt_melden(
+                        state, ereignisse, state.timer_signale(), still=art in (WECHSEL, ENDE)
+                    )
+                takt_alt = takt_neu
                 # Gehört der Timer einer Einheit, holt sie die Marken (ein Abnehmer)
                 if not einheit_ui.besitzt_timer(state, lauf) and (marken := lauf.neue_marken()):
                     _in_messung(state, marken, state.timer_signale())
@@ -145,4 +194,4 @@ def ticker_starten(page: Any, state: AppState) -> None:
         raise
 
 
-__all__ = ["TICK_S", "ticker_starten", "toene_laden", "ton_spielen", "wach_setzen"]
+__all__ = ["TICK_S", "takt_melden", "ticker_starten", "toene_laden", "ton_spielen", "wach_setzen"]

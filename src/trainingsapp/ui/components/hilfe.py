@@ -128,6 +128,25 @@ Profil an oder übernimmt eine Kopie aus der Timer-Bibliothek. Ohne eigenes Prof
 Timer-Regel der Übung.
 """
 
+TAKT_MD = """\
+**Ein Takt** ist eine Folge von Phasen — jede mit Namen, Sekunden, Art und Klang — die als
+Schleife läuft, solange die Uhr läuft: *ein · halten · aus · halten*, *ab · halten · auf* oder
+ein einzelner Metronomschlag.
+
+- **Art** sagt, was die Phase bedeutet: *Einatmen*, *Ausatmen*, *Halten* (Atmung) oder *Ab*,
+  *Auf* (Bewegung), sonst *Frei*. Die Auswertung der Messung liest später die Soll-Phasen
+  daraus; der Name ist nur die Anzeige.
+- **Tempo** (0,5×–2×) dehnt oder rafft alle Phasen. Während die Uhr läuft, wirkt der Regler
+  sofort und nur für jetzt — gespeichert wird über das Blatt („In die Übung“, „In den
+  Abschnitt“, „In die Bibliothek“).
+- **Wo er gilt:** an der Übung überall, wo sie geübt wird; an einem Timer-Abschnitt nur
+  dort (vor der Übung); über den Takt-Knopf an der Uhr „für jetzt“ (geht vor allem anderen).
+- **Takt zählt** (jede volle Runde eine Wiederholung) kommt in einem späteren Schritt.
+
+Die Vorlagen sind feste Zahlen ohne Wirkversprechen: Die App empfiehlt keine Rate aus
+Messwerten.
+"""
+
 BESCHLEUNIGUNG_MD = """\
 **Was gemessen wird:** Hat das verbundene Gerät einen Beschleunigungssensor, steht beim Üben
 in der Karte „Eintragen“ der Knopf **„Wdh. zählen“**. Ab dem Tipp zählt der Sensor die
@@ -286,6 +305,7 @@ THEMEN: dict[str, tuple[str, str, str]] = {
     "varianten": ("Varianten", VARIANTEN_MD, "Was sind Varianten?"),
     "parameter": ("Parameter, Chips und Ziel", PARAMETER_MD, "Parameter, Chips und Ziel"),
     "uhr": ("Uhr und Timer", UHR_MD, "Uhr, Timerzeit, zählt als"),
+    "takt": ("Takt", TAKT_MD, "Takt, Tempo und „Takt zählt“"),
     "beschleunigung": (
         "Beschleunigungssensor",
         BESCHLEUNIGUNG_MD,
@@ -332,6 +352,7 @@ __all__ = [
     "ATMUNG_MD",
     "BESCHLEUNIGUNG_MD",
     "NOTATION_MD",
+    "TAKT_MD",
     "THEMEN",
     "UEBUNGEN_MD",
     "VARIANTEN_MD",

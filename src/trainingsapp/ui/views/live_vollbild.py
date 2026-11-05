@@ -34,6 +34,7 @@ eine Schätzung aus ``page.height``.
 from __future__ import annotations
 
 import contextlib
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -135,6 +136,16 @@ class _Stand:
     #: Woraus die Ablesewerte zuletzt gebaut wurden — gleich: nicht neu bauen (ein neuer
     #: Knopf verlöre einen Tipp, der gerade läuft)
     ablese_karte: tuple[Any, ...] | None = None
+
+
+def takt_kopf_text(state: Any) -> str:
+    """„Soll ▲ ein 3 s“ — die Lage im Takt der laufenden Uhr; leer ohne Takt."""
+    lauf = getattr(state, "timer", None)
+    lage = lauf.takt_lage() if lauf is not None else None
+    if lage is None:
+        return ""
+    pfeil = {"ein": "▲ ", "aus": "▼ "}.get(lage.phase.art, "")
+    return f"Soll {pfeil}{lage.phase.anzeigename} {max(math.ceil(lage.rest_s - 1e-6), 0)} s"
 
 
 def live_vollbild_view(page: ft.Page, state: AppState) -> ft.View:
@@ -459,6 +470,8 @@ def _vollbild(
         lage_box.content = lage()
         atem_text.value = zaehl_stand.atem_kopf_text(state)
         atem_text.visible = bool(atem_text.value)
+        takt_text.value = takt_kopf_text(state)
+        takt_text.visible = bool(takt_text.value)
         etikett_zeichnen(x_von, x_bis)
         ablesen_zeichnen(x_von, x_bis)
         markieren(ablesen_knopf, st.ablesen)
@@ -607,6 +620,13 @@ def _vollbild(
         tooltip="Atmung aus dem Beschleunigungssensor: Rate, Phase (▲ ein, ▼ aus) und die "
         "Atemspanne des letzten Atemzugs — sie kommt nach dem nächsten Prüffenster (Prototyp)",
     )
+    #: Das Soll des Taktgebers neben dem Ist des Sensors („Soll ▲ ein 3 s“), solange eine Uhr
+    #: mit Takt läuft (`docs/plan_taktgeber.md` §5)
+    takt_text = ft.Text(
+        size=13,
+        weight=ft.FontWeight.W_600,
+        tooltip="Der Takt der laufenden Uhr: Phase und Rest — das Soll zum Ist des Sensors",
+    )
     kopf = ft.Row(
         spacing=2,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -614,6 +634,7 @@ def _vollbild(
             ft.IconButton(ft.Icons.CLOSE, tooltip="Vollbild verlassen", on_click=schliessen),
             links_box,
             ft.Container(expand=True),
+            takt_text,
             atem_text,
             lage_box,
             breiten_knoepfe,

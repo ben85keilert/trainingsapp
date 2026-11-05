@@ -113,7 +113,8 @@ def test_uhrkanal_laeuft_ohne_flet() -> None:
     Abläufe in der Oberfläche: `components.zaehl_stand` (Texte, ±1, Nachziehen) und
     `ui.uebung_lauf`/`ui.einheit` (Uhr und Zählen, andere Übung, abgehakt, Läufe heute),
     dazu die Atmung in der Auswertung (`core.atem_auswertung`) und das Protokollfeld
-    (`core.atem_protokoll`, B1)."""
+    (`core.atem_protokoll`, B1) und der Taktgeber (`core.takt`, Zeitleiste, der Ticker in
+    `ui.timer_takt` — Klang und Vibration je Phase ohne Bildschirm)."""
     import os
     import subprocess
     import sys
@@ -128,6 +129,7 @@ def test_uhrkanal_laeuft_ohne_flet() -> None:
             "test_zaehl_ablauf.py",
             "test_atem_auswertung.py",
             "test_atem_protokoll.py",
+            "test_takt.py",
         )
     ]
     # Ein Finder, der flet nicht findet — wie in der CI, wo es nicht installiert ist. Plugins

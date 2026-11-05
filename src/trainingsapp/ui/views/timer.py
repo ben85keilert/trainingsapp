@@ -53,6 +53,7 @@ import flet as ft
 
 from trainingsapp.core.klang import KLAENGE
 from trainingsapp.core.models import new_id
+from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import (
     EINMAL,
     EINMAL_DAUERN_S,
@@ -77,6 +78,14 @@ from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
+from trainingsapp.ui.components.takt_blatt import (
+    TempoRegler,
+    takt_anbringen,
+    takt_blatt,
+    takt_knopf,
+    takt_zeile,
+)
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
@@ -100,6 +109,10 @@ def timer_route(basis: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+#: Schlüssel der Takt-Wahl „für jetzt“ im Reiter „Timer“ (`AppState.uhr_takt`)
+TAKT_KEY = "timer"
+
+
 def lauf_fuer(state: AppState, profil: TimerProfil) -> TimerLauf:
     """Der Lauf zum Profil — ein anderes Profil (oder ein geändertes) beginnt neu.
 
@@ -121,6 +134,7 @@ def lauf_fuer(state: AppState, profil: TimerProfil) -> TimerLauf:
         return lauf  # eine laufende Einmaluhr: neue Einstellungen gelten ab dem nächsten Start
     if lauf is None or lauf.profil != profil:
         lauf = TimerLauf(profil)
+        takt_anbringen(state, lauf, TAKT_KEY, None)  # der Takt „für jetzt“ des Reiters
         state.timer = lauf
         e = einheit_ui.in_vorbereitung(state)
         if e is not None and (teil := e.timer) is not None:
@@ -210,6 +224,11 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         height=56, style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=28))
     )
     ablauf = ft.Column(spacing=2)
+    # Taktgeber (`docs/plan_taktgeber.md` §5): die Animation unter der Zeit, der Tempo-Regler
+    # für jetzt, die Zeile mit dem gewählten Takt — einmal gebaut, je Tick nachgezogen
+    takt_anzeige = TaktAnzeige(groesse=200)
+    tempo_regler = TempoRegler(state, TAKT_KEY, lauf)
+    takt_text = ft.Text(size=12, opacity=0.75, text_align=ft.TextAlign.CENTER)
 
     def ablauf_zeilen(stand: TimerStand) -> list[ft.Control]:
         """Die Abschnitte je Teil — eine Folge (Vorbereitung, Training, Cooldown) mit
@@ -301,6 +320,12 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             haupt_knopf.content = _knopf_inhalt(ft.Icons.PLAY_ARROW, text)
             haupt_knopf.on_click = starten
         ablauf.controls = [] if lauf.vorwaerts else ablauf_zeilen(stand)
+        takt = lauf.takt_aktuell(stand.nummer) if not stand.fertig else None
+        lage = lauf.takt_lage()
+        takt_anzeige.nachziehen(takt, lage)
+        tempo_regler.nachziehen(lage is not None)
+        takt_text.value = f"Takt: {takt.anzeigename} · {takt.kurztext()}" if takt else ""
+        takt_text.visible = bool(takt_text.value) and lage is None
 
     def auffrischen() -> None:
         anzeigen()
@@ -582,6 +607,24 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
     fertig_knopf = ft.IconButton(
         ft.Icons.STOP, tooltip="Fertig", icon_size=28, on_click=fertig, visible=False
     )
+
+    def takt_starten(takt: Takt) -> None:
+        """„Takt starten“ aus dem Blatt: dieser Takt für jetzt, und die Uhr läuft los."""
+        state.uhr_takt[TAKT_KEY] = takt
+        lauf.takt_jetzt = takt
+        if not lauf.laeuft:
+            starten()
+        state.neu_zeichnen()
+
+    takt_wahl = takt_knopf(
+        page,
+        state,
+        key=TAKT_KEY,
+        takt=lauf.takt_aktuell(),
+        lauf=lauf,
+        starten=None if laufend else takt_starten,
+        titel="Takt für jetzt",
+    )
     ohne_abschnitte = profil.ist_stoppuhr or (profil.ist_einmal and profil.einfach)
     steuerung = ft.Row(
         alignment=ft.MainAxisAlignment.CENTER,
@@ -607,6 +650,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 visible=not ohne_abschnitte,
             ),
             fertig_knopf,
+            takt_wahl,
         ],
     )
     if reiter == PROFILE:
@@ -658,6 +702,9 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 ),
                 fortschritt,
                 stand_text,
+                takt_anzeige.control,
+                tempo_regler.control,
+                takt_text,
                 ft.Container(height=4),
                 steuerung,
                 abstand=10,
@@ -1103,6 +1150,8 @@ class _Zeile:
     dauer: ft.TextField
     klang: ft.Dropdown
     zaehlt: bool = True
+    #: Der Takt dieses Abschnitts (`docs/plan_taktgeber.md`) — ``None``: wie die Übung
+    takt: Takt | None = None
 
 
 @dataclass
@@ -1175,6 +1224,7 @@ def timer_bearbeiten_view(
             ),
             _klang_wahl(page, state, a.klang, "Standardklang"),
             a.zaehlt,
+            a.takt,
         )
 
     def teil_felder(teil: Teil) -> _TeilFelder:
@@ -1201,6 +1251,31 @@ def timer_bearbeiten_view(
             z = teile_ed[k].zeilen[i]
             z.zaehlt = not z.zaehlt
             neu_zeichnen()
+
+        return handler
+
+    def takt_setzer(k: int, i: int) -> Callable[[Takt | None], None]:
+        def handler(takt: Takt | None) -> None:
+            teile_ed[k].zeilen[i].takt = takt if takt is not None and not takt.leer else None
+            neu_zeichnen()
+
+        return handler
+
+    def takt_entferner(k: int, i: int) -> Callable[[], None]:
+        return lambda: takt_setzer(k, i)(None)
+
+    def takt_bearbeiter(k: int, i: int) -> Callable[[], None]:
+        def handler() -> None:
+            z = teile_ed[k].zeilen[i]
+            page.show_dialog(
+                takt_blatt(
+                    page,
+                    state,
+                    takt=z.takt,
+                    titel=f"Takt: {(z.name.value or '').strip() or 'Abschnitt'}",
+                    in_den_abschnitt=takt_setzer(k, i),
+                )
+            )
 
         return handler
 
@@ -1254,7 +1329,8 @@ def timer_bearbeiten_view(
                 hinweis(
                     "Je Abschnitt ein Name, die Dauer in Minuten:Sekunden und der Klang, mit "
                     "dem er beginnt — etwa Glocke 1 für Belastung, Glocke 3 für die Pause. "
-                    "„zählt“: seine Zeit wird als Übungszeit eingetragen."
+                    "„zählt“: seine Zeit wird als Übungszeit eingetragen. Ein Takt (Phasen "
+                    "für Atmung oder Bewegung) gilt nur in seinem Abschnitt."
                 )
             )
         zeilen: list[ft.Control] = [
@@ -1287,6 +1363,16 @@ def timer_bearbeiten_view(
                                 on_click=zaehlt_umschalter(k, i),
                             ),
                         ],
+                    ),
+                    # Der Takt je Abschnitt (`docs/plan_taktgeber.md` §5): dieselbe Zeile wie
+                    # in „Übung bearbeiten“ — leer heißt „wie die Übung“
+                    ft.Container(
+                        padding=ft.Padding.only(left=4),
+                        content=takt_zeile(
+                            z.takt,
+                            bearbeiten=takt_bearbeiter(k, i),
+                            entfernen=takt_entferner(k, i),
+                        ),
                     ),
                 ],
             )
@@ -1326,7 +1412,13 @@ def timer_bearbeiten_view(
                 (
                     t.name.value or "",
                     [
-                        (z.name.value or "", z.dauer.value or "", z.klang.value, z.zaehlt)
+                        (
+                            z.name.value or "",
+                            z.dauer.value or "",
+                            z.klang.value,
+                            z.zaehlt,
+                            z.takt.als_dict() if z.takt is not None else None,
+                        )
                         for z in t.zeilen
                     ],
                     t.runden,
@@ -1350,7 +1442,11 @@ def timer_bearbeiten_view(
                 if dauer:
                     abschnitte.append(
                         Abschnitt(
-                            (z.name.value or "").strip(), dauer, _klang_wert(z.klang), z.zaehlt
+                            (z.name.value or "").strip(),
+                            dauer,
+                            _klang_wert(z.klang),
+                            z.zaehlt,
+                            takt=z.takt,
                         )
                     )
             teile_neu.append(Teil(abschnitte, t.runden, (t.name.value or "").strip()))

@@ -64,6 +64,7 @@ from trainingsapp.core.paketquelle import (
 )
 from trainingsapp.core.paketquelle import _laden as netz_laden
 from trainingsapp.core.result_spec import VORLAGEN
+from trainingsapp.core.takt import takt_pruefen
 from trainingsapp.core.zaehlen import wahl_pruefen
 from trainingsapp.data.seed import seed_inhalt
 
@@ -168,7 +169,9 @@ def pruefen(
     Typen und Regionen außerhalb des Standardpakets sind Hinweise, keine Fehler; Treffer der
     ``wortliste`` ebenso — mit ``streng`` werden sie Fehler. In ``beschleunigung`` (Karte
     „Beschleunigungssensor“) ist ein falscher Typ ein Fehler, ein unbekannter Schlüssel ein
-    Hinweis (`core.zaehlen.wahl_pruefen`) — die App läse beides still als Vorgabe."""
+    Hinweis (`core.zaehlen.wahl_pruefen`) — die App läse beides still als Vorgabe. Für ``takt``
+    (`core.takt.takt_pruefen`) ebenso: unbrauchbare Dauer oder Tempo ein Fehler, unbekannte
+    Art, Klang oder Schlüssel ein Hinweis."""
     fehler: list[str] = []
     hinweise: list[str] = []
     try:
@@ -204,6 +207,10 @@ def pruefen(
             f_acc, h_acc = wahl_pruefen(e["beschleunigung"])
             fehler.extend(f"{wo}: beschleunigung: {x}" for x in f_acc)
             hinweise.extend(f"{wo}: beschleunigung: {x}" for x in h_acc)
+        if "takt" in e:
+            f_takt, h_takt = takt_pruefen(e["takt"])
+            fehler.extend(f"{wo}: takt: {x}" for x in f_takt)
+            hinweise.extend(f"{wo}: takt: {x}" for x in h_takt)
     if inhalt.paket.version is None:
         hinweise.append("Kopf ohne `version` — ohne sie erkennt kein Gerät ein Update")
     for treffer in wortliste_pruefen(roh, wortliste):

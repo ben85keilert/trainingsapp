@@ -64,7 +64,8 @@ from ..core.einheit import (
 from ..core.laufend import uhr as uhr_text
 from ..core.limits import TICK_S
 from ..core.models import new_id
-from ..core.timer import TimerLauf
+from ..core.takt import Takt
+from ..core.timer import Marke, TimerLauf
 from .base import Verbindung
 from .messlauf import Gespeichert, Messlauf
 
@@ -108,6 +109,8 @@ class TimerBaustein:
         self._t0: float | None = None
         self._lief = False
         self._abgebrochen_gemeldet = False
+        #: Der Abschnitt, für den ``timer/takt`` zuletzt geschrieben wurde (`_takt_melden`)
+        self._takt_gemeldet: int | None = None
 
     def uhr_uebernehmen(self, uhr: Callable[[], float]) -> None:
         """Die Uhr der Einheit — beim HRV-Simulator läuft sie schneller (`Einheitslauf`)."""
@@ -191,7 +194,51 @@ class TimerBaustein:
             if not m.zaehlt:
                 daten["zaehlt"] = False
             out.append(Ereignis(t, "timer", "abschnitt", m.text, daten))
+        out.extend(self._takt_melden(jetzt, marken))
         return out
+
+    def _takt_melden(self, jetzt: float, marken: list[Marke]) -> list[Ereignis]:
+        """``timer/takt`` (`docs/plan_einheit.md` §4, Taktgeber §3): einmal am Beginn eines
+        Abschnitts, in dem ein Takt gilt — zur Zeit seiner Marke —, und noch einmal bei jeder
+        Tempoänderung mit dem Regler. Rundenenden und Phasen nie (zu viele)."""
+        assert self._t0 is not None
+        t0 = self._t0
+        out: list[Ereignis] = []
+        stand = self.lauf.stand()
+        if stand.fertig:
+            self.lauf.tempo_aenderungen.clear()
+            return out
+        if stand.nummer != self._takt_gemeldet and (stand.laeuft or marken):
+            self._takt_gemeldet = stand.nummer
+            takt = self.lauf.takt_aktuell(stand.nummer)
+            if takt is not None:
+                anfaenge = [m.bei for m in marken if not m.ende and m.bei is not None]
+                bei = anfaenge[-1] if anfaenge else jetzt
+                out.append(self._takt_ereignis(bei - t0, takt, self.lauf.tempo_faktor))
+        for bei in self.lauf.tempo_aenderungen:
+            takt = self.lauf.takt_aktuell(stand.nummer)
+            if takt is not None:
+                out.append(self._takt_ereignis(bei - t0, takt, self.lauf.tempo_faktor))
+        self.lauf.tempo_aenderungen.clear()
+        return out
+
+    @staticmethod
+    def _takt_ereignis(t: float, takt: Takt, faktor: float) -> Ereignis:
+        eff = takt.mit_tempo(takt.tempo * faktor)
+        return Ereignis(
+            t,
+            "timer",
+            "takt",
+            f"Takt {eff.anzeigename}",
+            {
+                "name": eff.anzeigename,
+                "wert": round(eff.rate_pro_min, 3),
+                "soll_s": eff.rundendauer_s,
+                "tempo": round(eff.tempo, 3),
+                "phasen_s": [eff.dauer_s(k) for k in range(len(eff.phasen))],
+                "arten": "/".join(p.art for p in eff.phasen),
+            },
+        )
 
     def _ablauf(self, abschnitt: Any) -> dict[str, Any]:
         """Welcher Ablauf und wie lang geplant (P54): ``profil_id``, ``soll_s`` (nicht bei

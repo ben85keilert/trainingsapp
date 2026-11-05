@@ -98,6 +98,18 @@ def uhr_und_timer(uebung: Exercise, item: PlanItem | None = None) -> ft.Control:
     for k, p in enumerate(profile_der_uebung(uebung)):
         name = p.name + (" · Vorgabe" if k == 0 and len(uebung.timer) > 1 else "")
         zeilen.append(_uhr_zeile(ft.Icons.TIMER_OUTLINED, name, p.kurztext()))
+    if uebung.takt is not None and not uebung.takt.leer:
+        # Der Takt der Übung (`docs/plan_taktgeber.md`): Phasen und Rate — gilt überall, wo sie
+        # geübt wird; ein Timer-Abschnitt oder die Uhr „für jetzt“ gehen vor
+        zeilen.append(
+            _uhr_zeile(
+                ft.Icons.GRAPHIC_EQ,
+                f"Takt: {uebung.takt.anzeigename}",
+                uebung.takt.kurztext()
+                + " · "
+                + " · ".join(p.anzeigename for p in uebung.takt.phasen),
+            )
+        )
     if not an:
         zaehlt, erklaerung = "nichts (Uhr aus)", "Keine Uhr in der Übung — „Gemacht“ hakt nur ab."
     elif not uebung.zeit_zaehlt:

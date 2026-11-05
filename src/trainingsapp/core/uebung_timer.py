@@ -29,6 +29,7 @@ from typing import Any
 
 from .models import Exercise, Plan, PlanItem
 from .result_spec import FieldSpec, FieldType, basis_key, vorrat_feld
+from .takt import Takt, takt_waehlen
 from .timer import MAX_ABSCHNITT_S, STOPPUHR, Abschnitt, TimerProfil, stoppuhr
 from .timer_eintrag import ZEITFELDER
 
@@ -229,6 +230,26 @@ def zaehlt_als(felder: Sequence[str], uebung: Exercise) -> str:
     return halten[0]
 
 
+def takt_fuer(
+    uebung: Exercise | None, abschnitt: Abschnitt | None = None, wahl: Takt | None = None
+) -> Takt | None:
+    """Welcher Takt gilt (`docs/plan_taktgeber.md` §2): Uhr für jetzt (``wahl``; `takt.AUS` =
+    keiner) > Abschnitt des Timers > Übung > keiner.
+
+    >>> from trainingsapp.core.takt import AUS, VORLAGEN
+    >>> u = Exercise(name="Atmen", takt=VORLAGEN["atmung_4_6"])
+    >>> takt_fuer(u).name, takt_fuer(Exercise()) is None
+    ('Atmung 4-6', True)
+    >>> takt_fuer(u, Abschnitt("Box", 60, takt=VORLAGEN["box_4"])).name
+    'Box 4-4-4-4'
+    >>> takt_fuer(u, None, VORLAGEN["metronom_1"]).name, takt_fuer(u, None, AUS)
+    ('Metronom 1 s', None)
+    """
+    return takt_waehlen(
+        wahl, abschnitt.takt if abschnitt is not None else None, uebung.takt if uebung else None
+    )
+
+
 def zeitfeld_der_uebung(uebung: Exercise) -> str:
     """In welches Feld „Zeit“ der Uhr kommt: ``duration`` — oder, hat die Übung keins unter
     diesem Schlüssel, ihr erstes Feld vom Typ Zeit (Ben, 27.10.2026: „Luft anhalten“ aus der
@@ -322,6 +343,7 @@ __all__ = [
     "plan_timer",
     "profile_der_uebung",
     "profile_zur_wahl",
+    "takt_fuer",
     "timer_fuer",
     "uhr_an",
     "zaehlt_als",

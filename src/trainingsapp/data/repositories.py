@@ -59,6 +59,7 @@ from ..core.models import (
 from ..core.pakete import stand_tag_nachziehen
 from ..core.parameter import kontextfelder, modus_aus_felder
 from ..core.result_spec import FieldType, ResultSpec, basis_key, werte_modernisieren
+from ..core.takt import Takt
 from ..core.zaehlen import SensorWahl
 from .db import transaktion
 
@@ -136,8 +137,8 @@ class ExerciseRepo:
                      is_builtin, result_spec_json, limit_spec_json,
                      default_target_json, default_input_mode, archived, created_at, updated_at,
                      default_fields_json, package_id, timer_json, clock_on,
-                     clock_counts_as, clock_counts, acc_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+                     clock_counts_as, clock_counts, acc_json, takt_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -156,6 +157,7 @@ class ExerciseRepo:
                     clock_counts_as = excluded.clock_counts_as,
                     clock_counts = excluded.clock_counts,
                     acc_json = excluded.acc_json,
+                    takt_json = excluded.takt_json,
                     updated_at = excluded.updated_at,
                     revision = revision + 1
                 """,
@@ -180,6 +182,7 @@ class ExerciseRepo:
                     uebung.zaehlt_als,
                     int(uebung.zeit_zaehlt),
                     json.dumps(uebung.beschleunigung.als_dict(), ensure_ascii=False),
+                    json.dumps(uebung.takt.als_dict() if uebung.takt else {}, ensure_ascii=False),
                 ),
             )
             # Medien: alle Verweise neu schreiben. Einfacher als Abgleich, und
@@ -511,6 +514,7 @@ class ExerciseRepo:
             zaehlt_als=r["clock_counts_as"] or "",
             zeit_zaehlt=bool(r["clock_counts"]),
             beschleunigung=SensorWahl.aus_dict(_json_lesen(r["acc_json"], {})),
+            takt=Takt.aus_dict(_json_lesen(r["takt_json"], {})),
         )
 
 
@@ -659,6 +663,10 @@ class SettingRepo:
     PLAN_DARSTELLUNG = "plan_darstellung"
     #: Wo Stoppuhr und Timer in der Übung stehen (`ui.state.UHR_DARSTELLUNGEN`)
     UHR_DARSTELLUNG = "uhr_darstellung"
+    #: Taktgeber (`core.takt`): eigene Takte (JSON-Liste, `takte_lesen`) und ob am
+    #: Phasenwechsel vibriert wird ("1" = ja, Vorgabe; P140 offen, so gebaut)
+    TAKT_BIBLIOTHEK = "takt_bibliothek"
+    TAKT_VIBRATION = "takt_vibration"
     #: Minuten ohne Satz, nach denen ein Eintrag als geschlossen gilt (`core.eintraege`)
     EINTRAG_OFFEN_MIN = "eintrag_offen_min"
     #: Paketquellen: JSON-Liste von Index-Adressen (`core.paketquelle`); fehlt der

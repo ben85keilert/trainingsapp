@@ -41,12 +41,15 @@ import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
 from trainingsapp.core.result_spec import basis_key
+from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import TimerProfil, dauer_text, einmal_timer, stoppuhr
 from trainingsapp.core.uebung_timer import profile_zur_wahl, timer_fuer, zaehlt_als
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import zaehlen
+from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
+from trainingsapp.ui.components.takt_blatt import TempoRegler, takt_anbringen, takt_knopf
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.state import UHR_KNOEPFE
 
@@ -137,6 +140,27 @@ def uhr_teile(
         state.uhr_zaehlt[key] = not zaehlt
         state.neu_zeichnen()
 
+    def takt_an_den_lauf(e: Einheitslauf) -> None:
+        """Takt für jetzt, Vorgabe der Übung und Tempo an den Timer der Einheit (Taktgeber)."""
+        if e.timer is not None:
+            takt_anbringen(state, e.timer.lauf, key, uebung.takt)
+
+    def takt_starten(takt: Takt) -> None:
+        """„Takt starten“ aus dem Blatt: dieser Takt für jetzt, die gesetzte Uhr läuft los —
+        es gibt immer eine Uhr (§4: ohne Timer die Stoppuhr)."""
+        state.uhr_takt[key] = takt
+        starten(gesetzt(state, uebung, plan, item))()
+
+    takt_wahl = takt_knopf(
+        page,
+        state,
+        key=key,
+        takt=uebung.takt,
+        starten=takt_starten,
+        titel=f"Takt · {uebung.name}",
+        klein=True,
+    )
+
     als = (
         "Haltezeit"
         if basis_key(zaehlt_als(uebung_lauf.felder_der_uebung(uebung, item), uebung)) == "hold"
@@ -161,6 +185,7 @@ def uhr_teile(
             except RuntimeError as fehler:
                 melden(str(fehler))
                 return
+            takt_an_den_lauf(lauf)
             state.uebung_laeufe[uebung.id] = lauf.id
             zaehlen.meldung_zeigen(page, state)  # ein Zählen einer anderen Übung endete
             state.neu_zeichnen()
@@ -174,6 +199,7 @@ def uhr_teile(
             except RuntimeError as fehler:
                 melden(str(fehler))
                 return
+            takt_an_den_lauf(lauf)
             state.uebung_laeufe[uebung.id] = lauf.id
             if not zaehlen.meldung_zeigen(page, state):
                 melden(f"{uebung.name}: {profil.anzeigename} steht bereit — oben „Alle starten“")
@@ -183,7 +209,7 @@ def uhr_teile(
 
     if state.uhr_darstellung() == UHR_KNOEPFE:
         knoepfe = _knoepfe(uebung, plan, item, starten, timer_oeffnen)
-        return UhrTeile(knoepfe=[*knoepfe, zaehlt_knopf])
+        return UhrTeile(knoepfe=[*knoepfe, zaehlt_knopf, takt_wahl])
     profil = gesetzt(state, uebung, plan, item)
 
     def zeit_stellen() -> None:
@@ -271,6 +297,7 @@ def uhr_teile(
                     on_click=zeit_stellen,
                 ),
                 zaehlt_knopf,
+                takt_wahl,
                 ft.IconButton(
                     ft.Icons.HOURGLASS_TOP,
                     tooltip="Bereitstellen — startet mit „Alle starten“",
@@ -369,10 +396,21 @@ def _laufend(page: Any, state: Any, e: Einheitslauf) -> ft.Control:
     zeit = ft.Text(size=40, weight=ft.FontWeight.BOLD)
     oben = ft.Text(size=14, opacity=0.85, expand=True)
     pause = ft.OutlinedButton(height=48, style=ft.ButtonStyle(shape=ECKEN), expand=True)
+    # Taktgeber (§5): klein neben der Zeit, antippen → groß; der Tempo-Regler für jetzt
+    key = (
+        schluessel_fuer(teil.kontext.uebung_id, teil.kontext.item_id)
+        if isinstance(teil, UebungBaustein)
+        else "uhr"
+    )
+    takt_klein = TaktAnzeige(groesse=56, klein=True, on_click=lambda: takt_gross(page, state, lauf))
+    tempo_regler = TempoRegler(state, key, lauf)
 
     def beschriften() -> None:
         stand = lauf.stand()
         zeit.value = lauf.anzeige()
+        lage = lauf.takt_lage()
+        takt_klein.nachziehen(lauf.takt_aktuell(stand.nummer) if lage else None, lage)
+        tempo_regler.nachziehen(lage is not None)
         name = lauf.profil.anzeigename
         if not lauf.vorwaerts and not stand.fertig:
             name = f"{name}: {lauf.abschnittsname(stand.nummer)}"  # „Halten (Runde 1/3)“
@@ -428,6 +466,8 @@ def _laufend(page: Any, state: Any, e: Einheitslauf) -> ft.Control:
                     ],
                 ),
                 zeit,
+                takt_klein.control,
+                tempo_regler.control,
                 *zaehl_zeilen,
                 ft.Row(
                     spacing=8,
@@ -460,6 +500,36 @@ def _laufend(page: Any, state: Any, e: Einheitslauf) -> ft.Control:
     return anzeige
 
 
+def schluessel_fuer(uebung_id: str, item_id: str | None) -> str:
+    """`schluessel` aus den IDs — für die laufende Uhr, die nur den Kontext kennt."""
+    return item_id if item_id is not None else uebung_id
+
+
+def takt_gross(page: Any, state: Any, lauf: Any) -> None:
+    """Die Takt-Anzeige groß (ein Tipp auf die kleine): ein Dialog, der im Takt des Tickers
+    nachzieht und sich beim Schließen wieder abmeldet."""
+    anzeige = TaktAnzeige(groesse=240)
+
+    def nachziehen() -> None:
+        stand = lauf.stand()
+        lage = lauf.takt_lage()
+        anzeige.nachziehen(lauf.takt_aktuell(stand.nummer) if lage else None, lage)
+        with contextlib.suppress(Exception):
+            anzeige.control.update()
+
+    def zu(_e: object = None) -> None:
+        state.timer_beobachter.pop("takt_gross", None)
+
+    nachziehen()
+    state.timer_beobachter["takt_gross"] = nachziehen
+    dialog = ft.AlertDialog(
+        on_dismiss=zu,
+        content=ft.Container(width=300, content=anzeige.control, alignment=ft.Alignment.CENTER),
+        actions=[ft.TextButton("Schließen", on_click=lambda: page.pop_dialog())],
+    )
+    page.show_dialog(dialog)
+
+
 def _knopf(text: str, icon: ft.IconData, on_click: Callable[[], object]) -> ft.Control:
     """Wie „Gemacht“ im Plan, nur nicht betont."""
     return ft.FilledTonalButton(
@@ -481,4 +551,4 @@ def _kopie(p: TimerProfil) -> TimerProfil:
     return neu
 
 
-__all__ = ["UhrTeile", "angebot", "gesetzt", "laufende", "schluessel", "uhr_teile"]
+__all__ = ["UhrTeile", "angebot", "gesetzt", "laufende", "schluessel", "takt_gross", "uhr_teile"]

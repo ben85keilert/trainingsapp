@@ -1,6 +1,6 @@
 # Plan: Taktgeber — Phasen für Atmung und Bewegung in Uhr, Timer und Übung
 
-Stand 5.11.2026: **angenommen** (Ben: „So bauen“; Aufgabe A18, Ben 4.11.2026: „z. B. 3 min und dann Phasen setzen
+Stand 5.11.2026: **angenommen**, Teil 1 (T1–T3) gebaut (Version 0.3.50, Abschnitt 9) (Ben: „So bauen“; Aufgabe A18, Ben 4.11.2026: „z. B. 3 min und dann Phasen setzen
 können, diese optisch interessant gestalten … Animation/Visualisierung getakteter Übung mit
 Geschwindigkeitsregler“; 5.11.2026: „Takt ist in der Uhr/Timer (beides). Dieser sollte doch direkt
 (Uhr) oder über die Übung zugänglich sein? Evtl. Wiederholungszähler auch ohne Stoppuhr, aber mit
@@ -174,3 +174,44 @@ Konzept angenommen („So bauen“: T1–T6 hintereinander, dann Prüfrunde).
 | P139 | Tempo-Regler während des Laufs: sofort wirksam und nur „für jetzt“ (nicht gespeichert), oder speichert er in Übung/Abschnitt? | **für jetzt**; speichern nur über das Blatt |
 | P140 | Vibration am Phasenwechsel zusätzlich zum Klang? | offen (nicht gefragt) — Vorschlag: ja, kurz, abschaltbar |
 | P141 | Soll-Phasen ins Beiwerk `atem-v1` (Feld `takt`, Format-Erweiterung) oder nur die Marke `atemtakt` in der Messdatei? | **ins Beiwerk** (Format-Erweiterung `atem-v1`, Vertrag §15 zuerst) |
+
+## 9. Umsetzungsstand (5.11.2026, Version 0.3.50) — Teil 1: T1–T3
+
+hrv-core bleibt 0.13.0 (`hrv-core.ref` unverändert); Teil 1 braucht nichts aus der Bibliothek.
+Die Vibration am Phasenwechsel ist **so gebaut, Vorgabe an** (P140 offen, Schalter unter
+Einstellungen → Übungen).
+
+| Stufe | Gebaut | Wo |
+|---|---|---|
+| T1 Kern | `core/takt.py` (flet-frei, Doctests): `Phase(name, dauer_s, art, klang)`, `ART_*`, `Takt(phasen, name, tempo, runden, animation, zaehlt)` — unveränderlich wie `SensorWahl`, `als_dict`/`aus_dict` defensiv (unbrauchbare Phasen fallen weg, Unbekanntes wird Vorgabe, nie eine Ausnahme), `rundendauer_s`, `rate_pro_min`, `mit_tempo` (Faktor 0,5–2, `tempo_lesen` begrenzt), `ist_atmung`, `ist_bewegung`, `kurztext` („4-7-8 · 3,2/min“); `AUS` = der leere Takt („für jetzt keiner“); `VORLAGEN` (acht feste Schlüssel; Liegestütz 2-0-1 als `liegestuetz_2_1`, eine Phase von 0 s gibt es nicht); `animation_fuer` (Puls 1, Kreis 2, Kreis mit Halten 3, Box 4, Balken ≥ 5; `Takt.animation` überschreibt, etwa Welle); `lage(takt, t_s)` rein aus der Uhr (mit `fertig` bei erreichter Rundenzahl), `wechsel(alt, neu)` → `TaktEreignis` (`phase`, `runde`, `ende`), `soll_phasen` (nur Atemtakte, „halten“ verlängert), `TaktLauf` (Tempoänderung ohne Sprung: gelaufene Runden samt Anteil bleiben), `takt_pruefen` fürs Werkzeug, Bibliothek `takte_lesen`/`takte_schreiben`/`in_bibliothek`, `takt_waehlen` (für jetzt > Abschnitt > Übung) | `core/takt.py` |
+| T1 Modell | `Abschnitt.takt` (im Dict nur gesetzt; `_abschnitte_lesen` tolerant — Rundreise in Kopie, Paket und Editor), `Exercise.takt` (Migration 038 `exercise.takt_json TEXT NOT NULL DEFAULT '{}'`, `ExerciseRepo`), Paketfeld `takt` (`_uebung_lesen` tolerant, `stand()` nur gesetzt, `FELDNAMEN["takt"] = "Takt"` nach `beschleunigung`; `trainingsapp-paket pruefen` meldet falsche Typen als Fehler, unbekannte Art/Klang/Schlüssel als Hinweis), `core.uebung_timer.takt_fuer(uebung, abschnitt, wahl)`, Bibliothek eigener Takte in `app_setting` (`takt_bibliothek`), Schalter `takt_vibration` | `core/timer.py`, `core/models.py`, `data/migrations/038_takt.sql`, `data/repositories.py`, `core/pakete.py`, `paket_werkzeug.py`, `core/uebung_timer.py`, `ui/state.py` |
+| T1 Blatt und Zeilen | `components/takt_blatt.py` (`blatt_spalte`): Vorlagen und eigene Takte als Chips, Name, Phasen-Zeilen (Name, Sekunden mit Zehnteln, Art, Klang mit der Vorgabe je Art im Menü, ✕), „+ Phase“ (Art wechselt ein ↔ aus, ab ↔ auf), Animation wählbar, Tempo-Regler 0,5×–2× mit Rate, Rundendauer und Phasenzahl, die **Vorschau** läuft im Blatt (eigene Aufgabe, endet mit dem Blatt), Knöpfe nach Herkunft: „Takt starten“, „Für jetzt“, „In den Abschnitt“, „In die Übung „…““, „In die Bibliothek“ (braucht einen Namen; gleicher Name ersetzt), „Kein Takt“, „Wie eingestellt“ (nimmt die Wahl für jetzt zurück). „Übung bearbeiten“ → Uhr und Timer: die Zeile „Takt: 4-7-8 · 4-7-8 · 3,2/min“ mit Stift, ✕ und (i) (`hilfe.THEMEN["takt"]`), im Formular gehalten, Zurück speichert; Timer-Editor: dieselbe Zeile je Abschnitt (`_Zeile.takt`); die Übungsseite nennt den Takt unter „Uhr und Timer“ | `components/takt_blatt.py`, `components/hilfe.py`, `views/uebung_bearbeiten.py`, `views/timer.py`, `views/uebung_detail.py` |
+| T2 Lauf | `TimerLauf.takt_jetzt`/`takt_uebung`/`tempo_faktor`, `takt_aktuell(nummer)`, `takt_lage()` (Zeit im Abschnitt = `abschnitt_s − rest_s`, Stoppuhr: gelaufene Zeit; angehalten steht sie; je Abschnitt ein `TaktLauf`), `tempo_setzen` (P139, für jetzt; `tempo_aenderungen` für die Zeitleiste). Der Ticker (`ui/timer_takt.py`) rechnet je Tick die Lage, `wechsel` → `takt_melden`: Klang der neuen Phase (eigener, sonst Vorgabe je Art: ein Glocke 1, aus Glocke 3, halten Klangholz, ab/auf Piep, frei Klangschale) über `ton_spielen` mit Regler und Lautstärke der Signale, Vibration kurz (Schalter, Vorgabe an); nicht über ein Timer-Signal desselben Takts (der Abschnittsklang bleibt), nach „Weiter“ tönt die laufende Phase nicht erneut (`_lage_beim_start`). `TimerBaustein._takt_melden`: `timer/takt` am Abschnittsbeginn mit Takt (zur Zeit der Marke) und je Tempoänderung (`core.einheit.ARTEN` += `takt`, `DATEN_SCHLUESSEL` += `tempo`, `phasen_s`, `arten`; Vertrag `docs/plan_einheit.md` §4). Takt-Knopf an der Uhr (`takt_knopf`, Zeile und Knöpfe neben „zählt“; im Timer der Übung über den Chips; im Reiter „Timer“ in der Steuerung, Schlüssel `timer`): „Für jetzt“ → `AppState.uhr_takt[key]` (`AUS` = keiner), „Takt starten“ startet die gesetzte Uhr (ohne Timer die Stoppuhr; im Timer der Übung ein Timer ohne Ablauf) mit diesem Takt; `takt_anbringen` hängt Wahl, Vorgabe der Übung und `uhr_tempo` beim Start und Bereitstellen an den Lauf; der **Tempo-Regler live** (`TempoRegler`) steht in der laufenden Uhr, im Timer der Übung und im Reiter „Timer“, solange ein Takt läuft — sofort wirksam, nur für jetzt | `core/timer.py`, `ui/timer_takt.py`, `devices/einheit.py`, `core/einheit.py`, `components/takt_blatt.py`, `components/uhr.py`, `views/uebung_timer.py`, `views/timer.py` |
+| T3 Animation | `components/takt_anzeige.TaktAnzeige(groesse, klein, on_click)`: Puls (Ring füllt sich, die Mitte blitzt am Schlag), Kreis (`animate_scale` mit der Phasendauer, `EASE_IN_OUT`: ein/auf groß, aus/ab klein, halten bleibt mit leuchtendem Rand, frei wechselt), Box (dazu vier Rahmenseiten mit Lauflicht), Balken (Segmente nach Dauer, der laufende füllt sich), Welle (32 Stützstellen einer Sinuslinie, der Punkt wandert); Farbe je Art (ein kühl, aus warm, halten neutral, ab/auf Primärfarbe), Name und Restsekunden in der Mitte, Runde, Rate und Tempo darunter. **Einmal gebaut**, `nachziehen(takt, lage)` setzt je Tick nur Werte, baut nur beim Wechsel von Takt oder Animation neu (V1). Steht im Reiter „Timer“ unter der Zeit, im Timer der Übung („Während“) unter der Leiste, in der laufenden Uhr klein (antippen → groß, `takt_gross`, ein Dialog am Ticker) und im Live-Vollbild als Kopfzeile „Soll ▲ ein 3 s“ neben der Atmung des Sensors (`takt_kopf_text`) | `components/takt_anzeige.py`, `views/timer.py`, `views/uebung_timer.py`, `components/uhr.py`, `views/live_vollbild.py` |
+
+Tests: `tests/test_takt.py` (flet-frei, in `test_import_regel` geführt: Vorlagen, Lage, Wechsel,
+Tempo ohne Sprung, Soll-Phasen, Rundreise, Prüfung, Vorrang, Paket, Werkzeug, Lage aus der
+Uhr, Zeitleiste, `takt_melden`, Ticker), `tests/test_ui_takt.py` (Blatt, Bibliothek, Formular,
+Timer-Editor, Anzeige ohne Neubau je Tick, Takt-Knopf, laufende Uhr, Reiter „Timer“,
+Einstellung, Vollbild), `tests/test_repositories.py` (Rundreise, Migration 038), Doctests.
+
+**Beim Bauen entschieden:** (1) Der Tempo-Regler im Lauf ist ein eigener Faktor am
+`TimerLauf` (`tempo_faktor`, Takt-Tempo × Regler, begrenzt auf 0,5–2) — der gespeicherte Takt
+behält sein Tempo; im Blatt stellt der Regler das Tempo des Takts, das mitgespeichert wird.
+(2) „Kein Takt“ für jetzt ist `takt.AUS` in `uhr_takt` (schaltet auch Abschnitt und Übung ab);
+„Wie eingestellt“ nimmt die Wahl zurück — ohne diesen dritten Zustand käme man nicht zur
+Vorgabe zurück. (3) `timer/takt` schreibt die Dauern **mit Tempo** (`phasen_s`, `soll_s`), dazu
+`tempo` — so ist das Ereignis für sich lesbar. (4) Die Animation ist am Takt gespeichert
+(`Takt.animation`, auch im Paket); leer heißt nach Phasenzahl. (5) `Takt.zaehlt` ist im Format
+schon da (Paketfeld, Dict), aber ohne Wirkung und ohne Schalter — T5 nimmt es. (6) Die Stoppuhr
+mit Takt rechnet ab ihrem Start; ein Abschnitt ohne Takt (Pause) beendet den Takt (`ende`), die
+nächste Runde beginnt ihn von vorn. (7) Material kennt kein Metronom-Symbol — `GRAPHIC_EQ`
+steht für den Takt.
+
+**Noch nicht (Teil 2, T4–T6):** Marke `atemtakt` und `atmung` `getaktet` in der Messdatei,
+Soll-Phasen ins Beiwerk `atem-v1` (`Messlauf.atem_takt_*`), Auswertung Soll gegen Ist, „Takt
+zählt“ (Zähl-Teil mit Quelle `takt`), GIF/Bild der Bewegung an der Übung. Offen aus Teil 1:
+P140 (Vibration am Phasenwechsel — gebaut mit Schalter, Vorgabe an; nicht entschieden); die
+Zeile in „Im Plan einstellen“ (ein Takt je Planübung) ist nicht gebaut — der Vertrag sieht
+Übung, Abschnitt und Uhr für jetzt vor; das Querformat/Live-Vollbild zeigt den Takt nur als
+Kopfzeile, nicht als Animation (Platz).

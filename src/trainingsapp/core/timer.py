@@ -68,6 +68,7 @@ from hrv_core.ausschnitte import FARBEN
 
 from .klang import KLAENGE
 from .models import new_id
+from .takt import Lage, Takt, TaktLauf, takt_waehlen
 
 #: Längster Abschnitt (s) — 99:59, mehr passt nicht in mm:ss
 MAX_ABSCHNITT_S: Final[int] = 99 * 60 + 59
@@ -169,14 +170,24 @@ class Abschnitt:
     #: Zählt seine Zeit als Übungszeit (Haltezeit, Zeit)? Vorgabe ja — die App
     #: rät nicht aus dem Namen, umschalten geht je Abschnitt (Ben, 17.10.2026)
     zaehlt: bool = True
+    #: Ein Takt für diesen Abschnitt (`docs/plan_taktgeber.md`): Phasen, die hier laufen —
+    #: überschreibt die Vorgabe der Übung; ``None`` = wie die Übung
+    takt: Takt | None = None
 
     def als_dict(self) -> dict[str, Any]:
-        """Klang und „zählt nicht“ nur, wenn gesetzt — ältere Profile bleiben gleich."""
+        """Klang, „zählt nicht“ und Takt nur, wenn gesetzt — ältere Profile bleiben gleich.
+
+        >>> from trainingsapp.core.takt import Phase
+        >>> Abschnitt("Atmen", 180, takt=Takt((Phase("ein", 4, "ein"),))).als_dict()["takt"]
+        {'name': '', 'phasen': [{'name': 'ein', 'dauer_s': 4.0, 'art': 'ein'}]}
+        """
         d: dict[str, Any] = {"name": self.name, "dauer_s": self.dauer_s}
         if self.klang:
             d["klang"] = self.klang
         if not self.zaehlt:
             d["zaehlt"] = False
+        if self.takt is not None and not self.takt.leer:
+            d["takt"] = self.takt.als_dict()
         return d
 
 
@@ -403,6 +414,11 @@ def _abschnitte_lesen(roh: Any) -> list[Abschnitt]:
     ['A']
     >>> _abschnitte_lesen([{"name": "P", "dauer_s": 30, "zaehlt": False}])[0].zaehlt
     False
+    >>> takt = {"phasen": [{"name": "ein", "dauer_s": 4, "art": "ein"}]}
+    >>> _abschnitte_lesen([{"name": "A", "dauer_s": 60, "takt": takt}])[0].takt.phasen[0].name
+    'ein'
+    >>> _abschnitte_lesen([{"name": "A", "dauer_s": 60, "takt": "kaputt"}])[0].takt is None
+    True
     """
     abschnitte: list[Abschnitt] = []
     for a in roh if isinstance(roh, list) else []:
@@ -419,6 +435,7 @@ def _abschnitte_lesen(roh: Any) -> list[Abschnitt]:
                     dauer,
                     _klang_lesen(a.get("klang")),
                     zaehlt=a.get("zaehlt") is not False,
+                    takt=Takt.aus_dict(a.get("takt")),
                 )
             )
     return abschnitte
@@ -890,6 +907,16 @@ class TimerLauf:
         self.angehalten_bei: float | None = None
         #: Abgebrochen (`abbrechen`): angehalten, und nichts wird eingetragen
         self.abgebrochen = False
+        #: Taktgeber (`docs/plan_taktgeber.md`): der Takt „für jetzt“ (Takt-Knopf an der Uhr;
+        #: `takt.AUS` = keiner, auch nicht der der Übung), die Vorgabe der Übung und der
+        #: Tempo-Regler für jetzt (P139) — je Abschnitt gilt für jetzt > Abschnitt > Übung
+        self.takt_jetzt: Takt | None = None
+        self.takt_uebung: Takt | None = None
+        self.tempo_faktor: float = 1.0
+        #: Wann das Tempo mit dem Regler geändert wurde (Uhr) — die Einheit holt es ab
+        self.tempo_aenderungen: list[float] = []
+        self._takt_lauf: TaktLauf | None = None
+        self._takt_nummer: int | None = None
 
     @property
     def gesamt_s(self) -> float:
@@ -1204,6 +1231,88 @@ class TimerLauf:
         if self._start is None or laufzeit < self._basis_s:
             return self._uhr()
         return self._start + (laufzeit - self._basis_s)
+
+    # -- Takt ------------------------------------------------------------------
+
+    def takt_aktuell(self, nummer: int | None = None) -> Takt | None:
+        """Der Takt, der im Abschnitt ``nummer`` (Vorgabe: dem laufenden) gilt — Uhr für
+        jetzt > Abschnitt > Übung > keiner (`core.takt.takt_waehlen`).
+
+        >>> from trainingsapp.core.takt import AUS, Phase
+        >>> t = [0.0]
+        >>> takt = Takt((Phase("ein", 4, "ein"), Phase("aus", 6, "aus")), name="4-6")
+        >>> p = TimerProfil(abschnitte=[Abschnitt("Atmen", 60, takt=takt), Abschnitt("Pause", 30)])
+        >>> lauf = TimerLauf(p, uhr=lambda: t[0])
+        >>> lauf.takt_aktuell(0).name, lauf.takt_aktuell(1)
+        ('4-6', None)
+        >>> lauf.takt_uebung = Takt((Phase("Schlag", 1),), name="Metronom")
+        >>> lauf.takt_aktuell(1).name, lauf.takt_aktuell(0).name
+        ('Metronom', '4-6')
+        >>> lauf.takt_jetzt = AUS; lauf.takt_aktuell(0) is None
+        True
+        """
+        if nummer is None:
+            nummer = self.stand().nummer
+        a = self.abschnitt(nummer)
+        return takt_waehlen(self.takt_jetzt, a.takt if a is not None else None, self.takt_uebung)
+
+    def takt_lage(self) -> Lage | None:
+        """Die Lage im Takt des laufenden Abschnitts — aus der Zeit im Abschnitt (Stoppuhr: die
+        gelaufene Zeit), nie mitgezählt. ``None`` ohne Takt, vor dem Start und nach dem Ende.
+
+        >>> from trainingsapp.core.takt import Phase
+        >>> t = [0.0]
+        >>> takt = Takt((Phase("ein", 4, "ein"), Phase("aus", 6, "aus")))
+        >>> p = TimerProfil(abschnitte=[Abschnitt("Atmen", 30, takt=takt)], runden=2)
+        >>> lauf = TimerLauf(p, uhr=lambda: t[0])
+        >>> lauf.takt_lage() is None, lauf.start(), t.__setitem__(0, 15.0)
+        (True, None, None)
+        >>> l = lauf.takt_lage(); (l.phase.name, l.runde, l.t_runde_s)
+        ('aus', 2, 5.0)
+        >>> t[0] = 32.0; l = lauf.takt_lage(); (l.phase.name, l.runde, l.t_runde_s)  # neue Runde
+        ('ein', 1, 2.0)
+        >>> lauf.pause(); t[0] = 50.0; lauf.takt_lage().t_runde_s  # angehalten: steht
+        2.0
+        """
+        if not self.begonnen:
+            self._takt_lauf, self._takt_nummer = None, None
+            return None
+        stand = self.stand()
+        if stand.fertig:
+            return None
+        takt = self.takt_aktuell(stand.nummer)
+        if takt is None:
+            self._takt_lauf, self._takt_nummer = None, None
+            return None
+        if (
+            self._takt_lauf is None
+            or self._takt_nummer != stand.nummer
+            or self._takt_lauf.takt is not takt
+        ):
+            self._takt_lauf = TaktLauf(takt, self.tempo_faktor)
+            self._takt_nummer = stand.nummer
+        return self._takt_lauf.lage(stand.abschnitt_s - stand.rest_s)
+
+    def tempo_setzen(self, faktor: float) -> None:
+        """Der Tempo-Regler während des Laufs — für jetzt (P139): Die Lage springt nicht, die
+        gelaufene Rundenzeit bleibt, die Phase wird neu skaliert (`TaktLauf.tempo_setzen`).
+
+        >>> from trainingsapp.core.takt import Phase
+        >>> t = [0.0]
+        >>> takt = Takt((Phase("ein", 4, "ein"), Phase("aus", 6, "aus")))
+        >>> lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 60, takt=takt)]), lambda: t[0])
+        >>> lauf.start(); t[0] = 12.0; lauf.takt_lage().t_runde_s
+        2.0
+        >>> lauf.tempo_setzen(2.0); l = lauf.takt_lage(); (l.index, l.t_runde_s, l.dauer_s)
+        (0, 4.0, 8.0)
+        >>> lauf.tempo_faktor, lauf.tempo_aenderungen
+        (2.0, [12.0])
+        """
+        self.tempo_faktor = faktor
+        if self._takt_lauf is not None:
+            stand = self.stand()
+            self._takt_lauf.tempo_setzen(stand.abschnitt_s - stand.rest_s, faktor)
+        self.tempo_aenderungen.append(self._uhr())
 
     # -- Abfrage ---------------------------------------------------------------
 

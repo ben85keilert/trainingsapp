@@ -263,6 +263,8 @@ Ist „Atmung“ an, erfasst derselbe Dienst die Atemzüge (ab A3; das braucht
 - **Festgehalten wird die Atmung an der Messung, nicht im Tagebuch** (P120): als Abbildung in den
   Messaufzeichnungen (Teil B, 7.3). Ins Tagebuch kommt sie erst, wenn klar ist, was an der
   Atmung wichtig ist.
+- **Die Atmung läuft nebenbei** (Ben, 5.11.2026, P133): Sie hängt nicht an Sätzen, Chips oder
+  Timer-Abschnitten — ein Chip beendet den Satz des Wiederholungszählers, nie die Atem-Erfassung.
 - Die Atemwelle sieht ein Sensor an der Brust am deutlichsten (Gurt). Ob ein Sensor am Arm
   (Verity Sense) genügt, prüft hrv-research. Der Knopf folgt trotzdem Bens Regel: Hat das Gerät
   einen Beschleunigungssensor, erscheint er.
@@ -738,6 +740,14 @@ der ohne sie scheitert):
   bis zum Ende des Zählens mehr (`core.zaehlen_eintrag.uhr_bis`), lieber eine Lücke.
 - Der Einmal-Timer (eine Runde) misst wie die Stoppuhr den Satz, der schon zählt.
 
-**Offen (Ben):** §10 verlangt „Prototyp“ an jeder Zahl eines Prototyps; die Texte aus 4.2/4.3
-(„Zählen · Kniebeuge · 12“, „Satz 1 · 12 Wdh. (Sensor 11, +1)“, „… nicht eingetragen“, in der
-Marken-Leiste „Sensor 11“) tragen es nicht — so gebaut wie in 4.2/4.3, bis Ben entscheidet.
+**Entschieden (Ben, 5.11.2026)** zu den Fragen aus den Prüfrunden:
+
+| # | Frage | Entscheidung |
+|---|---|---|
+| P127 | „Prototyp“ an jeder Zahl (§10) — Leiste, Benachrichtigung, „Läufe heute“, Meldungen tragen es nicht | **lassen**, wie in 4.2/4.3 gebaut; §10 gilt für Karten und Zählzeile |
+| P128 | Zählen im Plan-Ablauf | **später** (Katalog A19); der Knopf bleibt dort ausgeblendet |
+| P129 | Zwischenstände der `zaehlung` alle 15 s, es gilt die letzte je Satz | **ja** |
+| P130 | Funkabriss oder 15 s ohne Daten: sofort abgebrochen, Meldung mit „Eintragen“, keine Schonfrist | **passt** |
+| P131 | Lange Sätze: Rechnung gedrosselt bis alle 5 s, dauerhaft der Live-Zähler (A5) | **gut** |
+| P132 | Chip im Diagnosemodus neben dem Sensor | **„Chip und Satz sollen sich ergänzen“**: der Chip ist der eingetragene Wert des Satzes, den der Sensor zählte (`von_hand`), das Zählen läuft weiter. Wer von Hand eintragen oder nachtragen will, bricht das Sensorzählen ab und macht es direkt in den Leistungen — der Sensor und die Chips teilen sich außerhalb der Diagnose nie ein Feld (P122) |
+| P133 | Mit der Uhr beendet ein Chip den Satz seines Abschnitts; der Rest des Abschnitts zählt nicht mehr | **genau** — **außer die Atmung**: Wird sie für die HRV erfasst, läuft sie nebenbei weiter, unabhängig von Sätzen, Chips und Abschnitten (ein Chip rührt einen Atem-Lauf nicht an, `von_hand` gilt nur für Wiederholungen; für A3 verbindlich) |

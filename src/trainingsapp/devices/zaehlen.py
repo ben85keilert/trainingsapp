@@ -337,6 +337,10 @@ class ZaehlBaustein:
         self._atem_bis_quelle: float | None = None
         #: Einatemzeiten (Achse der Einheit) — bestätigte Phasen „ein“
         self._atem_zeiten: list[float] = []
+        #: alle bestätigten Phasen ``(t_s, "ein" | "aus")`` auf der Achse der Einheit — für die
+        #: Schattierung des Einatmens live (`atem_phasen_s`, Plan §7.3); ohne Aufnahme der
+        #: einzige Ort, an dem sie stehen
+        self._atem_phasen: list[tuple[float, str]] = []
         #: die jüngste Einatemzeit bzw. der Start — für `KEIN_ATEM_S`
         self._atem_letztes_ein_s = 0.0
         #: Momentaufnahme des Prototyps nach dem letzten Füttern
@@ -434,6 +438,20 @@ class ZaehlBaustein:
     def atem_rate(self) -> float | None:
         """Die letzte gültige Atemrate je Minute — ``None``, solange kein Fenster eine nannte."""
         return self._atem_rate
+
+    @property
+    def atem_phasen_s(self) -> list[tuple[float, str]]:
+        """Die bestätigten Atemphasen ``(t_s, "ein" | "aus")`` dieses Laufs auf der Achse der
+        Einheit, zeitlich sortiert — die laufende Phase (`atem_phase`) steht noch nicht darin.
+        Auf die Achse des Messlaufs (`Messlauf.jetzt_s`) bringt sie `auf_messlauf`."""
+        return list(self._atem_phasen)
+
+    def auf_messlauf(self, t_s: float) -> float:
+        """Eine Stelle der Achse der Einheit auf der des Messlaufs (Sekunden seit
+        `Messlauf.start_mono`, wie `Messlauf.jetzt_s`) — für die Live-Kurven."""
+        if self._t0 is None:
+            return t_s
+        return self._auf_quelle(t_s) - self.messlauf.start_mono
 
     @property
     def atem_phase(self) -> str | None:
@@ -1038,6 +1056,7 @@ class ZaehlBaustein:
         for e in ereignisse:
             if isinstance(e, prototyp_atem.Phase):
                 self._messlauf_atem("atem_phase", e.t_s, e.art)
+                self._atem_phasen.append((round(self._von_quelle(e.t_s), 2), str(e.art)))
                 if e.art == prototyp_atem.EIN:
                     t_e = round(self._von_quelle(e.t_s), 2)
                     self._atem_zeiten.append(t_e)

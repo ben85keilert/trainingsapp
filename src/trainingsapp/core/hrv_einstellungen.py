@@ -118,7 +118,10 @@ BREITE_EIGEN_MAX_S: Final[int] = 86400
 EBENE_NOTIZEN: Final[str] = "notizen"
 EBENE_LEISTUNGEN: Final[str] = "leistungen"
 EBENE_ABSCHNITTE: Final[str] = "abschnitte"
-EBENEN: Final[tuple[str, ...]] = (EBENE_NOTIZEN, EBENE_LEISTUNGEN, EBENE_ABSCHNITTE)
+#: Einatmen schattiert und die Läufe „Atmung erfassen“ als Band — nur angeboten, wenn die
+#: Messung ein Atem-Beiwerk hat (`docs/plan_beschleunigung.md` §7.3, B1)
+EBENE_ATMUNG: Final[str] = "atmung"
+EBENEN: Final[tuple[str, ...]] = (EBENE_NOTIZEN, EBENE_LEISTUNGEN, EBENE_ABSCHNITTE, EBENE_ATMUNG)
 
 #: Erweitert — Latenz, nach der ein losgelassenes Analysefenster neu rechnet (ms).
 #: Kommt in dieser Zeit noch eine Bewegung nach, wird erst danach gerechnet.

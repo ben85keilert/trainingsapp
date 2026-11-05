@@ -180,7 +180,7 @@ gelesenen Datei bleiben beim Schreiben erhalten und stehen am Ende.
 | `adresse` | str | **optional**, seit 19.10.2026: BLE-Adresse des Geräts (Android/Linux MAC, macOS/iOS UUID), nie bei Simulation. Pseudo-Identifikator — `hrv_core.deid` leert das Feld; praxis_gui erhält es als unbekanntes Feld. Dateien ohne Adresse haben den Schlüssel nicht. **Der Export entfernt das Feld** (seit 20.10.2026, S10): nur die Originaldatei auf dem Gerät trägt es, keine Kopie, die das Gerät verlässt (Abschnitt 2, „Export“) |
 | `intervall_quelle` | str | **Pflicht** — `ekg_rr` oder `ppg_ppi` |
 | `datenqualitaet` | str | **unsere Erweiterung**, direkt hinter `intervall_quelle`: `rr_ekg`, `ppi_optisch`, `bpm_only` (Abschnitt 5) |
-| `atmung` | dict | **unsere Erweiterung**, seit 5.11.2026 (geplant B1): Protokollfeld „Atmung“ — wie geatmet wurde (`spontan`, `getaktet`, `uebung`), direkt hinter `datenqualitaet`; fehlt = unbekannt (Abschnitt 5) |
+| `atmung` | dict | **unsere Erweiterung**, seit 5.11.2026 (geschrieben seit 0.3.46): Protokollfeld „Atmung“ — wie geatmet wurde (`spontan`, `getaktet`, `uebung`), direkt hinter `datenqualitaet`; fehlt = unbekannt (Abschnitt 5) |
 | `simulation` | bool | `true` ⇒ Ablage unter `Messungen/Generator/` |
 | `generator_config` | dict \| null | Syntheseparameter, nur bei Simulation |
 | `schema` | str | `"raw-v1"` |
@@ -467,7 +467,7 @@ unbekannte Felder — der Vertrag bleibt unverletzt.
 Für `bpm_only` passt `raw-v1` bereits: `rr_ms = 0`, wie praxis_gui es bei
 Notifications ohne RR-Feld selbst schreibt.
 
-### Unsere Erweiterung: `atmung` (seit 5.11.2026, geplant B1)
+### Unsere Erweiterung: `atmung` (seit 5.11.2026)
 
 Das **Protokollfeld „Atmung“** (`docs/plan_beschleunigung.md` §7.4, P125): zusätzlicher
 Schlüssel im Kopf, direkt hinter `datenqualitaet`. Es sagt, **wie** während der Messung
@@ -496,7 +496,11 @@ zurück — der Vertrag bleibt unverletzt.
   vergleichbar — Atmung unter 9/min (0,15 Hz) liegt im LF-Band, dann treiben schon die
   Atemzüge LF/HF (Plan §7.1); getaktet und spontan werden darum getrennt verglichen.
 - Reihenfolge wie immer: zuerst dieser Eintrag, dann hrv-core (`docs/formate.md`,
-  `deid.REGELN`), dann der Code in der App (B1).
+  `deid.REGELN`), dann der Code in der App. **Seit 0.3.46 geschrieben** (B1,
+  `core/atem_protokoll.py`): der `Messlauf` bestimmt das Feld im Loop aus den Kurzcodes in
+  den Ereignissen (Haken `atmung_protokoll`, belegt von der Oberfläche mit dem Katalog), das
+  Backup trägt es im Block `_wiederherstellung`, beim Speichern und Wiederherstellen kommt es
+  an seinen Platz hinter `datenqualitaet`. Die Auswertung zeigt es in der Karte „Atmung“.
 
 ---
 

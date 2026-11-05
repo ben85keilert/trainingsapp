@@ -26,11 +26,14 @@ Eintragen führt `ui.uebung_lauf`.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from trainingsapp.core import atem_protokoll
 from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.einheit import Zustand
+from trainingsapp.core.kurzcode import katalog_aufloesen
 from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.zaehlen_eintrag import ende_text
 from trainingsapp.devices.base import Verbindung
@@ -342,6 +345,52 @@ def wdh_im_abschnitt(z: ZaehlBaustein | None, von_s: float, bis_s: float | None)
     return sum(s.wert for s in saetze) if saetze else None
 
 
+def atem_teil(state: Any) -> ZaehlBaustein | None:
+    """Der Zähl-Teil der laufenden Einheit, solange er die Atmung erfasst — sonst ``None``
+    (für die Schattierung des Einatmens live, Plan §7.3)."""
+    e = getattr(state, "einheit", None)
+    z = e.teil("zaehlen") if e is not None and e.laeuft else None
+    if not isinstance(z, ZaehlBaustein) or not z.aktiv or not z.atem:
+        return None
+    return z
+
+
+def atem_phasen_live(state: Any) -> list[tuple[float, str]]:
+    """Die bestätigten Atemphasen des laufenden Atem-Laufs auf der Achse des Messlaufs
+    (`Messlauf.jetzt_s`) — leer, wenn keine Atmung erfasst wird."""
+    z = atem_teil(state)
+    if z is None:
+        return []
+    return [(z.auf_messlauf(t), art) for t, art in z.atem_phasen_s]
+
+
+def atem_kopf_text(state: Any) -> str:
+    """Für den Kopf des Live-Vollbilds: „Atmung 12/min ▲“ — leer ohne Atem-Lauf oder
+    solange keine Proben kamen."""
+    z = atem_teil(state)
+    if z is None or z.atem_sensor is None:
+        return ""
+    return f"Atmung {zl.atem_text(z.atem_rate, z.atem_phase)}"
+
+
+def atmung_protokoll(state: Any) -> Callable[[list[dict[str, Any]]], dict[str, Any] | None]:
+    """Der Haken `Messlauf.atmung_protokoll` mit dem Übungskatalog: Ereignisse der Aufnahme →
+    Protokollfeld „Atmung“ (`core.atem_protokoll.protokoll`, Vertrag §5). Ein Kurzcode zählt
+    als Atemübung, wenn an der Übung „Atmung“ an ist (`core.zaehlen.atmung_an`); Unbekanntes
+    (gelöscht, fremd) als andere Übung. Gerufen im Loop (Backup, Speichern), nie im Thread."""
+
+    def haken(ereignisse: list[dict[str, Any]]) -> dict[str, Any] | None:
+        nach_id = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
+
+        def ist_atemuebung(code: str) -> bool | None:
+            ids = katalog_aufloesen([code], nach_id)
+            return zl.atmung_an(nach_id[ids[0]]) if ids else None
+
+        return atem_protokoll.protokoll(ereignisse, ist_atemuebung)
+
+    return haken
+
+
 def sensor_text(state: Any) -> str:
     """Für die Marken-Leiste im Diagnosemodus (A2): „Sensor 11“ live neben der Zahl der Tipps
     — leer, solange nichts zählt."""
@@ -430,10 +479,14 @@ __all__ = [
     "abmelden",
     "anmelden",
     "anzeigen",
+    "atem_kopf_text",
     "atem_phase",
+    "atem_phasen_live",
     "atem_rate_text",
+    "atem_teil",
     "atem_text",
     "atemzuege",
+    "atmung_protokoll",
     "bereitgestellt",
     "geraet_kann_zaehlen",
     "im_plan_ablauf",

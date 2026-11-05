@@ -251,7 +251,13 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   neben den Sätzen (`hrv_core.prototyp.atemzuege.AtemLive`, Phasen ▲/▼ und Fenster ins Beiwerk
   `_atem.json` der laufenden Messung, Zeitleiste `zaehlung` mit `zaehlart` atem / `satz` 0) —
   sie läuft nebenbei (P133: Chips, Sätze, Anhalten berühren sie nicht), nur Atmung ±1 und
-  `kein_atem`, **nie ins Tagebuch** (P120).
+  `kein_atem`, **nie ins Tagebuch** (P120). **B1** (5.11.2026): die Auswertung zeigt das
+  Beiwerk als Ebene „Atmung“ (Einatmen schattiert) und Karte „Atmung (Prototyp)“ mit dem
+  Hinweis „Atmung < 9/min — liegt im LF-Band“ an HF-Power, LF/HF und DFA α1 (Startregel F6 in
+  `core/atem_auswertung.py`, nichts gespeichert, keine Wertung), live liegt das Einatmen der
+  letzten 60 s hinter den Kurven (`components/atem_live.py`), und die Messdatei bekommt das
+  Protokollfeld `atmung` (`core/atem_protokoll.py`: Atemübung → `uebung`, keine Übung →
+  `spontan`, sonst kein Feld; Vertrag §5).
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`

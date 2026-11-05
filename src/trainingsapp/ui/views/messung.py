@@ -111,7 +111,9 @@ from trainingsapp.devices.simulated import (
 )
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import ziele_liste
+from trainingsapp.ui.components import zaehl_stand
 from trainingsapp.ui.components.analyse import Analyse
+from trainingsapp.ui.components.atem_live import einatem_schatten
 from trainingsapp.ui.components.dialoge import Erledigt, reste_dialog, schliessen
 from trainingsapp.ui.components.hf_sicht import (
     EINSTELLUNGEN as HF_EINSTELLUNGEN,
@@ -728,6 +730,8 @@ def _verbinden_teil(page: ft.Page, state: AppState) -> ft.Control:
             subject_id=state.profil.id,
             puffer_s=state.hrv_einstellungen().puffer_s,
         )
+        # Das Protokollfeld „Atmung“ der Messdatei aus den Übungen der Aufnahme (Vertrag §5)
+        lauf.atmung_protokoll = zaehl_stand.atmung_protokoll(state)
         state.messlauf = lauf
         try:
             await lauf.verbinden(device_id, name)
@@ -1658,7 +1662,12 @@ def _live_teil(
                 for t, w in zip(reihe.t, glatt, strict=True)
                 if w == w and x_von <= t + 1.0 <= x_bis
             ]
-        reihen = [Reihe(punkte, farbe=ft.Colors.PRIMARY)]
+        # Das Einatmen der letzten 60 s hinter der Kurve, solange die Atmung erfasst wird
+        # (Plan Beschleunigung §7.3, `components.atem_live`)
+        reihen = [
+            *einatem_schatten(state, lauf.jetzt_s(), x_von, x_bis),
+            Reihe(punkte, farbe=ft.Colors.PRIMARY),
+        ]
         y_von = y_bis = None
         if einst.hf_bereiche_alle and hf_bereiche:
             # Die Achse reicht über alle Bereiche — und weiter, wenn die Kurve darüber liegt

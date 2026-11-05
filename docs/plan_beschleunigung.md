@@ -1,6 +1,6 @@
 # Plan: Beschleunigungssensor in Übungen — Wiederholungen zählen, Atmung erfassen, Ein- und Ausatmung in der HRV
 
-Stand 5.11.2026: **A1, A2 und A3 gebaut** (Version 0.3.45, Abschnitt 13); B1, T, B2, A5 und A6
+Stand 5.11.2026: **A1, A2, A3 und B1 gebaut** (Version 0.3.46, Abschnitt 13); T, B2, A5 und A6
 folgen. Der Plan ist **angenommen** — Ben: „Plane das beides durch“, danach P117–P126 entschieden
 (Abschnitt 12) und „Falls nicht [noch Fragen offen], kannst du anfangen den Plan umzusetzen“. Die Verfahren
 entstehen in hrv-research (dort `beschleunigung/docs/PLAN_ZAEHLEN_ATEMPHASEN.md`); hier steht,
@@ -566,12 +566,14 @@ einer APK.
 
 P117 bestätigt (Ben): die Schalter sitzen an jeder Übung, nicht einer für alle.
 
-## 13. Umsetzungsstand (5.11.2026, Version 0.3.45)
+## 13. Umsetzungsstand (5.11.2026, Version 0.3.46)
 
 A1 und A2 sind gebaut, ohne Änderung an hrv-core (0.8.0): Der Zähler ist
 `hrv_core.prototyp.wiederholungen`, die Kontextzeilen nutzen nur Felder, die `hrv_core.deid`
 schon kennt. **A3** (5.11.2026) nimmt hrv-core 0.9.1 (`hrv-core.ref` angehoben; 0.9.1 behebt den Rechenfehler nach Stillstand):
-`prototyp.atemzuege` (Entscheidung 24 in hrv-research) und das Beiwerk `atem-v1`.
+`prototyp.atemzuege` (Entscheidung 24 in hrv-research) und das Beiwerk `atem-v1`. **B1**
+(5.11.2026, 0.3.46) zeigt das Beiwerk in Auswertung und live und schreibt das Protokollfeld
+„Atmung“ — ohne neue Rechenvorschrift (hrv-core bleibt 0.9.1).
 
 | Stufe | Gebaut | Wo |
 |---|---|---|
@@ -584,13 +586,31 @@ schon kennt. **A3** (5.11.2026) nimmt hrv-core 0.9.1 (`hrv-core.ref` angehoben; 
 | A3 Atem-Spur | Ist „Atmung“ an, läuft im `ZaehlBaustein` neben den Sätzen die **Atem-Spur**: `hrv_core.prototyp.atemzuege.AtemLive` in der Rate des Laufs (50/52 Hz; wechselt die Rate, taktet `Messlauf.acc_reihe` um), jeden Takt nur die neuen Proben (nie gedrosselt — unter 1 ms, das Prüffenster alle 5 s einige ms), je lückenlosem Stück ein Rahmen. Phasen „ein“/„aus“ und Fenster gehen ans Beiwerk `_atem.json` der laufenden Messung (`Messlauf.atem_sammler`, `atem_lauf_beginn/ende`, `atem_phase`, `atem_fenster`, Vertrag §15; ohne Aufnahme fehlen nur sie). Stand: `atemzuege` (Sensor + Korrektur), `atem_sensor`, `atem_rate` (letztes gültiges Fenster), `atem_phase` (▲/▼/–). **Läuft nebenbei** (P133): Sätze, Chips, Abschnitte, „Anhalten“ berühren sie nicht; das Ende des Laufs beendet beide Spuren (`AtemLive.abschluss`). Nur Atmung: ±1 korrigiert die Atemzüge (`person/korrektur` mit `zaehlart` atem, `satz` 0), `KEIN_ATEM_S` ohne Atemzug → `kein_atem` mit Meldung „— 2 min kein Atemzug erkannt“ (ohne „Eintragen“); `ohne_daten`/`getrennt` für beide Spuren. Zeitleiste: `zaehlung` mit `zaehlart` atem, `satz` 0 (= der ganze Lauf), `sensor`, `korrektur`, `wert`, `rate`, `zeiten_s` (Einatemzeiten), `geraet`, `prototyp` `hrv_core.prototyp.atemzuege@0.9.0` — am Ende und alle 15 s; `core.zaehlen_eintrag` übergeht sie (nichts ins Tagebuch, P120). Diagnosemodus: eine Kontextzeile `atem` (Atemzüge, `satz` 0, Rate als `phase`) am Ende, keine je Atemzug. Wirft der Prototyp, zählt ein frischer weiter (`atem_fehler`, die Zahl bleibt). Simulator und Gurt-Attrappe mit dem Vorzeichen der Brust: z fällt beim Einatmen, (x − z) steigt; RSA dazu konsistent (RR zu Beginn des Einatmens am längsten, an dessen Ende am kürzesten) | `devices/zaehlen.py`, `devices/messlauf.py`, `core/zaehlen.py` (`rate_text`, `phase_pfeil`, `atem_text`), `core/einheit.py` (`rate`), `core/zaehlen_eintrag.py`, `devices/simulated.py`, `tests/attrappen.py` |
 | A3 Oberfläche | Nur Atmung: große Zahl = Atemzüge mit ±1-Flächen („Ein Atemzug mehr“), darunter „Atmung 14 · 12/min ▲ · Prototyp“; Wdh + Atmung: Zahl = Wiederholungen, dritte Zeile „Atmung 12/min ▲“ (`ZaehlAnzeige.atem`, nur Texte nachgezogen); Status „Box Breathing · Atmung · 14 · 12/min ▲“ bzw. „Kniebeuge · 12 · Atmung 12/min ▲“ in Info-, Laufleiste und Benachrichtigung; Hilfetext „Beschleunigungssensor“ mit einem Absatz zur Atmung | `components/zaehl_stand.py`, `components/zaehlen.py`, `components/hilfe.py`, `ui/einheit.py` (`ZaehlMeldung.atmung`) |
 
+| B1 Auswertung | Gibt es das Beiwerk `_atem.json`, lädt die Auswertung es im Thread (wie EKG und Diagnose): die **Ebene „Atmung“** (`EBENE_ATMUNG`, Chip in der Farbe der Atemfrequenz, Knopf im Vollbild, gemerkt wie die anderen Ebenen; nur angeboten, wenn das Beiwerk da ist) schattiert das **Einatmen** über dem Tachogramm und im Vollbild und legt die Läufe „Atmung erfassen“ als feines Band oben — außerhalb der Läufe nichts (Vertrag §15). Die **Karte „Atmung (Prototyp)“** (nach dem HRV-Teil, vor EKG und Diagnose) nennt je Messung und je Abschnitt (Rechenbereich wie `werte_von`, nur wo erfasst wurde): Atemzüge (Phasen „ein“), Rate (Median der gültigen Fenster, „–“ ohne), Ein:Aus („1 : 1,4“, Median des Ausatmens je Einatmen), Gleichmäßigkeit (CV der Atemzugdauern), gültige Fenster, Dauer erfasst, Quelle „Sensor · Prototyp · Gerät“, das Protokollfeld in Worten und daneben die **Atmung aus RR** als Vergleich — eine Abweichung über 2/min wird genannt, nicht gewertet. Alles beim Anzeigen gerechnet (`core/atem_auswertung.py`, flet-frei), nichts gespeichert (§7.4), keine Wertung (§10) | `core/atem_auswertung.py`, `core/hrv_einstellungen.py`, `views/messung_detail.py` |
+| B1 Hinweis | **„Atmung < 9/min — liegt im LF-Band“** (§7.1): Kacheln LF/HF und DFA α1 bekommen den Hinweis als Grundzeile, die Kachel HF-Power zeigt „–“ mit „nicht ausgewiesen“; in den Tabellen Frequenz und Nichtlinear steht er unter den Zeilen, die HF-Zeile als „nicht ausgewiesen“; die Karte „Atmung“ sagt es dazu. Welche Rate gilt, ist die **Startregel F6** (in hrv-research offen, `atem_auswertung.hinweis_rate`): die Rate des Sensors, wenn mindestens die Hälfte der Prüffenster gültig war, sonst die Atmung aus RR (`hrv_core.atmung`, vorhandene Kachel), sonst keine | `core/atem_auswertung.py`, `views/messung_detail.py` |
+| B1 Live | Erfasst ein Zähl-Teil die Atmung, liegt im Live-Vollbild (`doppelkurve(hinten=…)`) und in der HF-Kurve der Messung das **Einatmen der letzten 60 s** als Schatten hinter den Kurven, die laufende Einatmung bis jetzt; im Kopf des Vollbilds „Atmung 12/min ▲“. Die Phasen hält der `ZaehlBaustein` selbst (`atem_phasen_s`, Achse der Einheit; `auf_messlauf` bringt sie auf die Achse der Kurven) — das geht auch **ohne Aufnahme**; `zaehl_stand.atem_teil`/`atem_phasen_live`/`atem_kopf_text` sind flet-frei, `components/atem_live.einatem_schatten` baut die Reihen. Nachgezogen über die vorhandenen Beobachter (Messlauf je Schlag, Einheit je Takt unter `einheit_beobachter["live_vollbild"]`), nur Reihen und Texte, keine Knöpfe. Beschreibend (P124): keine Atemspanne, keine Wertung — die Atemspanne des letzten Atemzugs kommt mit B2 | `devices/zaehlen.py`, `components/zaehl_stand.py`, `components/atem_live.py`, `views/live_vollbild.py`, `views/messung.py` |
+| B1 Protokollfeld | **`atmung`** im Kopf der Messdatei (Vertrag §5, P125), direkt hinter `datenqualitaet`: `Messlauf.atmung_protokoll` ist ein Haken (Ereignisse der Aufnahme → Feld), den die Oberfläche mit dem Übungskatalog belegt (`zaehl_stand.atmung_protokoll`: Kurzcodes aus `uebungen` der Notizen, `core.zaehlen.atmung_an`); die Regel in `core/atem_protokoll.py`: Atemübung gelaufen → `uebung` mit Kurzcode, gar keine Übung → `spontan`, nur andere Übungen → kein Feld (unbekannt, es wird nicht geraten); `getaktet` erst mit dem Taktgeber (A18). Bestimmt im Loop (Backup alle 15 s im Block `_wiederherstellung`, vor dem Speichern), geschrieben nach `Aufnahme.speichern` an seinen Platz (`kopffeld_schreiben`); `backup_wiederherstellen` nimmt es aus dem Backup. `Recording.extra` hält es, `deid` behält es; Altdateien ohne Feld bleiben lesbar | `core/atem_protokoll.py`, `devices/messlauf.py`, `components/zaehl_stand.py`, `views/messung.py` |
+
 Tests (ohne flet, wo es geht; die flet-freien laufen auch im gesperrten Kindprozess von
 `tests/test_import_regel.py`): `test_zaehlen.py`, `test_zaehlen_geraete.py` (A3: Abschnitt
 „Atmung“ — Atemzüge, Rate, Phasen im Beiwerk, ±1, `kein_atem`, Wdh + Atmung, Chip und
 Anhalten, Trennen, Ratenwechsel, Rechenzeit, Simulator, Kontextzeile, Fehler im Prototyp),
 `test_zaehlen_eintrag.py`, `test_zaehl_ablauf.py`, `test_zaehl_stand.py`, `test_ui_zaehlen.py`,
 dazu Migration 037 und die Paket-Rundreise in `test_repositories.py`, `test_pakete.py`,
-`test_paket_werkzeug.py`.
+`test_paket_werkzeug.py`. B1: `test_atem_auswertung.py` (Größen je Messung und Abschnitt,
+Schattenbereiche, F6, Vergleich), `test_atem_protokoll.py` (Regel, Platz im Kopf, Rundreise
+über `Recording.extra` und `deid`, Messlauf: Backup, Speichern synchron und im Thread,
+Wiederherstellen, Haken ohne und mit Fehler), `test_ui_atmung.py` (Auswertung: Ebene, Karte,
+Hinweis, Schatten-Reihen, Chip; live: Schatten und Kopf mit der Gurt-Attrappe ohne Aufnahme,
+Live-Vollbild), dazu die Doctests der beiden Kernmodule.
+
+**Bis B2 fehlt** (`prototyp.atem_hrv`, Entscheidung in hrv-research): die Atemspanne je
+Atemzug (Gipfel–Tal der Herzfrequenz nach Trendbereinigung), die Phasenlage (Ende des
+Einatmens bis zum HF-Gipfel), RR je Phase — alles, was Phasen **und** RR-Abstände zusammen
+braucht; damit auch die Atemspanne des letzten Atemzugs live (7.3) und die Kennzahlen je
+Abschnitt „im Licht der Atmung“ über den Hinweis hinaus. Die Startregel F6 bleibt bis zu
+einem Befund in hrv-research eine Setzung im Code (`MIN_FENSTER_ANTEIL`). Takt (Soll gegen
+Ist) und `getaktet` kommen mit T.
 
 **Grenzen von A3** (Entscheidung 24 in hrv-research, `hrv_core.prototyp.atemzuege`): Der
 Prototyp ist an **zwei Sitzungen eines Menschen** mit dem H10 am unteren Brustbein eingestellt
@@ -607,7 +627,8 @@ einem konstanten Signal (Rundung der laufenden Summe unter 0 vor `sqrt`) — die
 
 **Bewusst noch nicht gebaut** (Abschnitt 11):
 
-- **B1** Ebene „Atmung“ in der Auswertung, Live-Anzeige, Biofeedback, Protokollfeld „Atmung“.
+- **B1 Rest** Biofeedback mit Atemspanne (braucht B2) und das Resonanzprotokoll (nur Praxis,
+  `physiologische_steuerung`, 7.1 b).
 - **T** Taktgeber im Timer (A18, eigener Plan).
 - **B2** Atem-HRV (`prototyp.atem_hrv`), Kennzahlen im Licht der Atmung.
 - **A5** Live-Zähler je Wiederholung, Vorlagen (heute nur „Automatisch“), Umkehrpunkt; bis dahin

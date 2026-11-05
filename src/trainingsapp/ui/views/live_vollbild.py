@@ -19,6 +19,11 @@ Seit dem 16.10.2026 (Ben) gebaut wie das Vollbild der Aufzeichnung
 - **Etikett:** Ein Tipp auf eine Notizmarke zeigt Zeit und Text in der Kurve,
   mit Bearbeiten und Löschen; jede Marke lässt sich mit dem Finger an ihre
   Stelle ziehen (`Notizfeld.greifen`).
+- **Atmung** (Plan Beschleunigung §7.3, B1): Erfasst ein Zähl-Teil der Einheit gerade die
+  Atmung (`zaehl_stand.atem_teil`), liegt das Einatmen der letzten 60 s als
+  Schatten hinter den Kurven (`components.atem_live`), und der Kopf nennt Rate und Phase
+  („Atmung 12/min ▲“) — nur Zahlen, keine Wertung (P124). Nachgezogen über die vorhandenen
+  Beobachter (Messlauf je Schlag, Einheit je Takt), nur Reihen und Texte.
 
 Die Größe der Kurvenfläche wird gemessen (``on_size_change``), weil die Ansicht
 noch hochkant gebaut wird und erst danach gedreht erscheint; bis dahin gilt
@@ -42,7 +47,9 @@ from trainingsapp.core.laufend import minuten
 from trainingsapp.core.zeitangabe import DAUER, UHR
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.messlauf import Messlauf
+from trainingsapp.ui.components import zaehl_stand
 from trainingsapp.ui.components.analyse import verlaufsdaten
+from trainingsapp.ui.components.atem_live import einatem_schatten
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.live_abschnitte import LiveAbschnitte
 from trainingsapp.ui.components.notizen import (
@@ -382,6 +389,7 @@ def _vollbild(
             hoehe=int(st.hoehe),
             roh_einheit="PPI ms" if verity else "RR ms",
             marken=marken,
+            hinten=einatem_schatten(state, lauf.jetzt_s(), x_von, x_bis),
             gesehen=st.gesehen,
             x_text=x_text,
             x_null=x_null,
@@ -448,6 +456,8 @@ def _vollbild(
         kopf_zeichnen()
         kurven_box.content = kurve_bauen(x_von, x_bis)
         lage_box.content = lage()
+        atem_text.value = zaehl_stand.atem_kopf_text(state)
+        atem_text.visible = bool(atem_text.value)
         etikett_zeichnen(x_von, x_bis)
         ablesen_zeichnen(x_von, x_bis)
         markieren(ablesen_knopf, st.ablesen)
@@ -587,6 +597,8 @@ def _vollbild(
 
         return BreitenSatz(state.hrv_einstellungen, state.hrv_einstellungen_setzen, geaendert)
 
+    #: Rate und Phase der Atmung, solange ein Zähl-Teil sie erfasst („Atmung 12/min ▲“)
+    atem_text = ft.Text(size=13, weight=ft.FontWeight.W_600, color=FARBEN["atemfrequenz"])
     kopf = ft.Row(
         spacing=2,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -594,6 +606,7 @@ def _vollbild(
             ft.IconButton(ft.Icons.CLOSE, tooltip="Vollbild verlassen", on_click=schliessen),
             links_box,
             ft.Container(expand=True),
+            atem_text,
             lage_box,
             breiten_knoepfe,
             achsen_knopf(lambda: einst.achse_uhrzeit, achse_umschalten),
@@ -647,6 +660,8 @@ def _vollbild(
     spalte = ft.Column(spacing=0, expand=True, controls=[kopf, koerper])
     fuellen()
     lauf.beobachter = beobachten
+    # Die Atem-Spur meldet sich über den Takt der Einheit (Phasen kommen ohne Schlag)
+    state.einheit_beobachter["live_vollbild"] = lambda: aktualisieren()
     return ft.View(
         route="/live",
         padding=ft.Padding.only(left=4, right=4, top=0, bottom=0),

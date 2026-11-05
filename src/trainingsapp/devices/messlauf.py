@@ -81,6 +81,7 @@ from hrv_core.zeitachse import Kontinuitaetsuhr
 
 from ..config import app_version
 from ..core import abschnitte as eigene_abschnitte
+from ..core.atem_protokoll import feld_lesen, kopffeld_schreiben
 from ..core.diagnose import kontext_aus_notizen as diagnose_marken_kontext
 from ..core.diagnose import kontext_zeile as diagnose_kontext
 from ..core.einheit import SPUR_TIMER
@@ -229,6 +230,10 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
     pfad = backup.parent / rec.dateiname()
     if not pfad.exists():
         pfad = speichern(rec, backup.parent)
+        # Das Protokollfeld „Atmung“, wie das Backup es zuletzt bestimmte (`Messlauf._zusatz`)
+        if (atmung := feld_lesen(zusatz)) is not None:
+            with contextlib.suppress(OSError, ValueError):
+                kopffeld_schreiben(pfad, atmung)
         spuren = _spuren_lesen(zusatz)
         spuren.update(eigene_abschnitte.grenzen_aus_notizen(rec.ereignisse))
         if spuren:  # Abschnitte je Spur — scheitert das, bleibt die Messung
@@ -382,6 +387,10 @@ class Messlauf:
         #: `docs/plan_beschleunigung.md` §7.4) — legt `atem_sammler` an, sobald eine Einheit
         #: „Atmung erfassen“ einschaltet; gespeichert als Beiwerk ``_atem.json`` (Vertrag §15)
         self.atem: AtemSammler | None = None
+        #: Protokollfeld „Atmung“ der Messdatei (`core.atem_protokoll`, Vertrag §5, P125): die
+        #: Oberfläche belegt den Haken mit dem Übungskatalog (Ereignisse der Aufnahme → Feld
+        #: oder ``None`` = unbekannt); gerufen im Loop beim Backup und vor dem Speichern
+        self.atmung_protokoll: Callable[[list[dict[str, Any]]], dict[str, Any] | None] | None = None
         #: Rohmitschnitt der laufenden Aufnahme im Diagnosemodus (offen, solange er läuft;
         #: geschlossen bis zum Speichern, dann umbenannt) — `diagnose_starten`
         self.mitschnitt: mt.Schreiber | None = None
@@ -1072,7 +1081,24 @@ class Messlauf:
         andere = {s: [list(g) for g in gs] for s, gs in self._grenzen.items() if s != SPUR_TIMER}
         if any(andere.values()):
             zusatz["spuren"] = {s: gs for s, gs in andere.items() if gs}
+        # Das Protokollfeld „Atmung“ nach dem Stand von jetzt — so bekommt es auch eine
+        # wiederhergestellte Messdatei (`backup_wiederherstellen`), ohne den Katalog
+        if (feld := self.atmung_feld(self.aufnahme)) is not None:
+            zusatz["atmung"] = feld
         return zusatz
+
+    def atmung_feld(self, aufnahme: Aufnahme | None) -> dict[str, Any] | None:
+        """Das Protokollfeld „Atmung“ dieser Aufnahme (`atmung_protokoll`) — ``None`` ohne
+        Haken, ohne Aufnahme oder wenn der Haken es nicht weiß; ein Fehler im Haken kostet
+        nur das Feld, nie die Messung."""
+        if aufnahme is None or self.atmung_protokoll is None:
+            return None
+        try:
+            feld = self.atmung_protokoll([dict(e) for e in aufnahme.ereignisse])
+        except Exception:
+            logging.getLogger(__name__).exception("Protokollfeld „Atmung“ nicht bestimmt")
+            return None
+        return feld_lesen({"atmung": feld}) if feld is not None else None
 
     # -- Atemphasen (Beiwerk ``_atem.json``, docs/plan_beschleunigung.md §7.4) ---------------
 
@@ -1155,8 +1181,11 @@ class Messlauf:
         if aufnahme is None:
             await self._stroeme_zurueck()
             return None
+        atmung = self.atmung_feld(aufnahme)  # im Loop (der Haken liest den Katalog)
         try:
-            ergebnis = await asyncio.to_thread(self._schreiben, aufnahme, basis)
+            ergebnis = await asyncio.to_thread(
+                self._schreiben, aufnahme, basis, None, _LAUFEND, _LAUFEND, _LAUFEND, atmung
+            )
         except BaseException:
             self._stopp_beenden(gespeichert=False)
             raise
@@ -1212,8 +1241,9 @@ class Messlauf:
         self._letztes_backup = jetzt
         if mitschnitt_alt is not None and mitschnitt_alt.offen:
             self._mitschnitt_oeffnen(mitschnitt_alt.pfad.name)
+        atmung_alt = self.atmung_feld(alt)  # im Loop (der Haken liest den Katalog)
         return await asyncio.to_thread(
-            self._schreiben, alt, basis, grenzen_alt, ekg_alt, mitschnitt_alt, atem_alt
+            self._schreiben, alt, basis, grenzen_alt, ekg_alt, mitschnitt_alt, atem_alt, atmung_alt
         )
 
     def _stopp_beginnen(self) -> Aufnahme | None:
@@ -1250,12 +1280,21 @@ class Messlauf:
         ekg: EkgSammler | _Laufend | None = _LAUFEND,
         mitschnitt: mt.Schreiber | _Laufend | None = _LAUFEND,
         atem: AtemSammler | _Laufend | None = _LAUFEND,
+        atmung: dict[str, Any] | _Laufend | None = _LAUFEND,
     ) -> Gespeichert:
         """Messdatei, Abschnitte je Spur und Diagnoseprotokoll schreiben — liest ``self``
         nur, darum auch in einem Thread möglich. ``grenzen``: die Spuren dieser Aufnahme
         (ohne Angabe die laufenden); ``ekg`` und ``atem``: EKG- und Atem-Sammler dieser
-        Aufnahme (ohne Angabe die laufenden)."""
+        Aufnahme (ohne Angabe die laufenden); ``atmung``: das Protokollfeld „Atmung“ (ohne
+        Angabe aus dem Haken — die Loop-Aufrufer bestimmen es vorher, `atmung_feld`)."""
+        if isinstance(atmung, _Laufend):
+            atmung = self.atmung_feld(aufnahme)
         pfad = aufnahme.speichern(self._ordner(basis))
+        if atmung is not None:
+            # Das Protokollfeld in den Kopf, hinter `datenqualitaet` (Vertrag §3/§5) — scheitert
+            # das, bleibt die Messung ohne das Feld (= unbekannt)
+            with contextlib.suppress(OSError, ValueError):
+                kopffeld_schreiben(pfad, atmung)
         if isinstance(mitschnitt, _Laufend):
             mitschnitt = self.mitschnitt
         if mitschnitt is not None:

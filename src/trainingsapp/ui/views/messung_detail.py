@@ -66,6 +66,7 @@ from typing import Any
 import flet as ft
 import numpy as np
 from hrv_core import mitschnitt as mt
+from hrv_core.atem import atem_laden, atem_pfad
 from hrv_core.atmung import ATEMUEBUNG, RUHE, atemfrequenz, kurzgrund
 from hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
 from hrv_core.ausschnitte import (
@@ -108,6 +109,8 @@ from hrv_core.trends import DFA_MIN_SCHLAEGE, KENNZAHLEN, reihe, titel
 
 from trainingsapp.config import datenverzeichnis, messungenverzeichnis
 from trainingsapp.core import abschnitte as eigene_abschnitte
+from trainingsapp.core import atem_auswertung as aa
+from trainingsapp.core import atem_protokoll
 from trainingsapp.core import diagnose as dg
 from trainingsapp.core.aufnahme_bezug import RAND_S, Bezug
 from trainingsapp.core.hf_auswertung import AbschnittWand, achse_zu_wand, wand_zu_achse
@@ -123,6 +126,7 @@ from trainingsapp.core.hrv_einstellungen import (
     ANALYSE_LAENGEN,
     ANALYSE_SCHRITTE,
     EBENE_ABSCHNITTE,
+    EBENE_ATMUNG,
     EBENE_LEISTUNGEN,
     EBENE_NOTIZEN,
     EBENEN,
@@ -281,6 +285,7 @@ EBENEN_TEXT = {
     EBENE_NOTIZEN: "Notizen",
     EBENE_LEISTUNGEN: "Leistungen",
     EBENE_ABSCHNITTE: "Abschnitte",
+    EBENE_ATMUNG: "Atmung",
 }
 UEBUNGEN_INFO = (
     "Hier stehen die **Tagebucheinträge**, die in dieser Aufnahme liegen — gefunden über die "
@@ -856,6 +861,17 @@ def _aufbauen(
             "atmung" + ("_uebung" if state.hrv_einstellungen().atemuebung else ""), rechnen
         )
 
+    def atem_hinweis() -> str:
+        """„Atmung < 9/min — liegt im LF-Band“ (Plan Beschleunigung §7.1) für HF-Power, LF/HF
+        und DFA α1 — die Rate nach der Startregel F6 (`core.atem_auswertung.hinweis_rate`:
+        Sensor, wenn genug Fenster gültig, sonst die Atmung aus RR); leer, wenn er nicht gilt."""
+        if z.nur_puls:
+            return ""
+        sensor = atem_stand["kennzahlen"]
+        # Die Atmung aus RR erst rechnen, wenn der Sensor nicht reicht (über Stunden teuer)
+        rate = aa.hinweis_rate(sensor, None) or aa.hinweis_rate(sensor, atmung()["rate"])
+        return aa.lf_hinweis(rate[0] if rate is not None else None)
+
     def kachel_werte() -> list[KachelWert]:
         """Dieselben Werte wie live, für die ganze Messung."""
         a = state.ansicht()
@@ -920,12 +936,18 @@ def _aufbauen(
             elif art.kennzahl is not None:
                 k = art.kennzahl
                 kz = KENNZAHLEN[k]
+                wert_ = _gesamtwert(k, td, frequenz, nichtlinear, kz.nachkomma)
+                hinweis_lf = atem_hinweis() if k in aa.LF_KENNZAHLEN else ""
+                if hinweis_lf and k == "hf_power":  # Plan §7.1: nicht ausgewiesen
+                    wert_ = ("–", "", "")
+                    hinweis_lf = f"{aa.NICHT_AUSGEWIESEN} — {hinweis_lf}"
                 out.append(
                     KachelWert(
                         titel(k, a.pnn_ms),
-                        *_gesamtwert(k, td, frequenz, nichtlinear, kz.nachkomma),
+                        *wert_,
                         farbe=FARBEN[k],
                         gross=g,
+                        grund=hinweis_lf,
                     )
                 )
             # Ohne Intervalle: der Grund statt „zu wenige gute Schläge“ (Ben, 17.10.2026)
@@ -945,9 +967,9 @@ def _aufbauen(
         if z.nur_puls:
             return None  # ohne Intervalle stünden dort nur Striche
         if bereich == "frequenz":
-            return _frequenz_tabelle(frequenz())
+            return _frequenz_tabelle(frequenz(), atem_hinweis())
         if bereich == "nichtlinear":
-            return _nichtlinear_tabelle(nichtlinear(), verity)
+            return _nichtlinear_tabelle(nichtlinear(), verity, atem_hinweis())
         # Zeit folgt dem Analysefenster (Ben, 26.10.2026) — gemerkt je Fenster und Korrektur
         fenster = analysefenster()
         pnn_ms = state.ansicht().pnn_ms
@@ -1066,6 +1088,9 @@ def _aufbauen(
     # Diagnosemarken aus dem Rohmitschnitt (Plan Diagnosemodus §2.7): eine eigene Ebene, nicht
     # in der Notizliste — Wanduhrzeiten je Art, geladen im Thread (`diagnose_laden`)
     diagnose_marken: dict[str, list[float]] = {}
+    # Das Atem-Beiwerk ``_atem.json`` (Plan Beschleunigung §7.3, B1): Phasen und Läufe auf der
+    # Wanduhr, geladen im Thread (`atem_laden_task`); die Ebene „Atmung“ gibt es nur damit
+    atem_stand: dict[str, Any] = {"atem": None, "kennzahlen": None}
 
     def diagnose_reihen(x_von: float, x_bis: float) -> list[Reihe]:
         if not diagnose_marken:
@@ -1084,6 +1109,37 @@ def _aufbauen(
             ]
             if xs:
                 out.append(senkrechte(xs, farbe, 1.0, gestrichelt=True))
+        return out
+
+    def atem_reihen(x_von: float, x_bis: float) -> list[Reihe]:
+        """Ebene „Atmung“: Einatmen schattiert, die Läufe „Atmung erfassen“ als feines Band
+        oben — außerhalb der Läufe nichts (Vertrag §15: dort wurde nicht gemessen)."""
+        atem = atem_stand["atem"]
+        if atem is None or EBENE_ATMUNG not in einst.ebenen:
+            return []
+        farbe = FARBEN["atemfrequenz"]
+        von_w = achse_zu_wand(zeilen_achse, wand, x_von)
+        bis_w = achse_zu_wand(zeilen_achse, wand, x_bis)
+
+        def x(t: float) -> float:
+            return min(max(wand_zu_achse(zeilen_achse, wand, t), x_von), x_bis)
+
+        out: list[Reihe] = [
+            Reihe(
+                [(x(a), 1e9), (x(b), 1e9)],
+                farbe=ft.Colors.with_opacity(0.6, farbe),
+                breite=2.5,
+                skala=False,
+                marke=True,
+                band=True,
+            )
+            for a, b in aa.erfasst_bereiche(atem, von_w, bis_w)
+        ]
+        schatten_farbe = ft.Colors.with_opacity(0.16, farbe)
+        out.extend(
+            schatten(x(a), x(b), schatten_farbe)
+            for a, b in aa.einatem_bereiche(atem.phasen, von_w, bis_w)
+        )
         return out
 
     def marken_reihen(x_von: float, x_bis: float) -> list[Reihe]:
@@ -1105,7 +1161,11 @@ def _aufbauen(
 
     def kurven(mit_analyse: bool = True) -> None:
         x_von, x_bis = sichtbar()
-        hinten = [*bereich_reihen(x_von, x_bis), *band_reihen(x_von, x_bis)]
+        hinten = [
+            *atem_reihen(x_von, x_bis),
+            *bereich_reihen(x_von, x_bis),
+            *band_reihen(x_von, x_bis),
+        ]
         if m.vollbild:
             vollbild_kurven(x_von, x_bis, hinten)
             return
@@ -1425,6 +1485,8 @@ def _aufbauen(
         liste_rollen(abschnitte_box, len(eigene), state.hrv_einstellungen().notizen_zeilen)
         abschnitt_titel.value = f"ABSCHNITTE · {len(eigene)}" if eigene else "ABSCHNITTE"
         chips_zeichnen()
+        if (atem_karte := atem_stand.get("zeichnen")) is not None:
+            atem_karte()  # die Karte „Atmung“ je Abschnitt zieht mit
 
     def zusatz_sichern() -> None:
         """Crop und Abschnitte ins Sidecar — ein Thread schreibt den Stand von jetzt (H39)."""
@@ -2168,9 +2230,12 @@ def _aufbauen(
             EBENE_NOTIZEN: FARBEN["notiz"],
             EBENE_LEISTUNGEN: FARBEN["leistung"],
             EBENE_ABSCHNITTE: ft.Colors.PRIMARY,
+            EBENE_ATMUNG: FARBEN["atemfrequenz"],
         }
         chips: list[ft.Control] = []
         for name in EBENEN:
+            if name == EBENE_ATMUNG and atem_stand["atem"] is None:
+                continue  # die Ebene gibt es nur mit dem Beiwerk
             an = name in einst.ebenen
             chips.append(
                 ft.Container(
@@ -2199,6 +2264,7 @@ def _aufbauen(
         ebenen_box.content = ft.Row(spacing=6, wrap=True, controls=chips)
         for name, knopf in ebenen_knoepfe_voll.items():
             markieren(knopf, name in einst.ebenen)
+            knopf.visible = name != EBENE_ATMUNG or atem_stand["atem"] is not None
         for c in (ebenen_box, *ebenen_knoepfe_voll.values()):
             with contextlib.suppress(Exception):
                 c.update()
@@ -3076,6 +3142,7 @@ def _aufbauen(
         (EBENE_NOTIZEN, ft.Icons.STICKY_NOTE_2_OUTLINED),
         (EBENE_LEISTUNGEN, ft.Icons.FITNESS_CENTER),
         (EBENE_ABSCHNITTE, ft.Icons.VIEW_TIMELINE_OUTLINED),
+        (EBENE_ATMUNG, ft.Icons.AIR),
     ):
         ebenen_knoepfe_voll[_name] = werkzeug(
             _icon,
@@ -3598,6 +3665,104 @@ def _aufbauen(
         diagnose_zeigen("Mitschnitt wird gelesen …", mit_knoepfen=False)
         page.run_task(diagnose_laden)
 
+    # -- Atmung (Beiwerk ``_atem.json``, Plan Beschleunigung §7.3, B1) --------------------
+    # Die Karte „Atmung (Prototyp)“ je Messung und je Abschnitt, die Ebene über dem Tachogramm
+    # und der Hinweis an HF-Power, LF/HF und DFA α1 — alles aus den Phasen beim Anzeigen
+    # gerechnet (`core.atem_auswertung`), nichts davon gespeichert (§7.4).
+    atem_box = ft.Column(spacing=6, visible=False)
+    atem_datei = atem_pfad(pfad)
+
+    def atem_abschnitt_zeilen() -> list[ft.Control]:
+        atem = atem_stand["atem"]
+        if atem is None:
+            return []
+        zeilen: list[ft.Control] = []
+        for a in sorted(eigene, key=lambda a: a.von_s):
+            von, bis = a.rechenbereich(*grenzen())
+            k = aa.kennzahlen(
+                atem, achse_zu_wand(zeilen_achse, wand, von), achse_zu_wand(zeilen_achse, wand, bis)
+            )
+            if k.dauer_erfasst_s <= 0:
+                continue  # dort wurde nicht erfasst
+            zeilen.append(
+                ft.Row(
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Container(width=4, height=28, border_radius=2, bgcolor=a.farbe),
+                        ft.Column(
+                            spacing=0,
+                            tight=True,
+                            expand=True,
+                            controls=[
+                                ft.Text(a.name, size=12, weight=ft.FontWeight.W_600, max_lines=1),
+                                ft.Text(aa.zeile_text(k), size=12, opacity=0.8),
+                            ],
+                        ),
+                    ],
+                )
+            )
+        return zeilen
+
+    def atem_karte_zeichnen() -> None:
+        atem, k = atem_stand["atem"], atem_stand["kennzahlen"]
+        if atem is None or k is None:
+            atem_box.visible = False
+            return
+        rr_rate = None if z.nur_puls else atmung()["rate"]
+        hinweis_lf = atem_hinweis()
+        protokoll = atem_protokoll.text(atem_protokoll.feld_lesen(rec.extra))
+        zeilen: list[ft.Control] = [
+            kartentitel("Atmung (Prototyp)"),
+            ft.Text(aa.zeile_text(k), size=13),
+            ft.Text(
+                " · ".join(t for t in (aa.quelle_text(k, rec.geraet), protokoll) if t),
+                size=12,
+                opacity=0.8,
+            ),
+            ft.Text(aa.vergleich_text(k.rate, rr_rate), size=12, opacity=0.8),
+        ]
+        if hinweis_lf:
+            zeilen.append(
+                ft.Text(
+                    f"{hinweis_lf}: LF/HF und DFA α1 mit Hinweis, HF-Power nicht ausgewiesen.",
+                    size=12,
+                    color=FARBEN["atemfrequenz"],
+                )
+            )
+        zeilen.extend(atem_abschnitt_zeilen())
+        zeilen.append(
+            hinweis(
+                "Atemphasen aus dem Beschleunigungssensor, gefunden von "
+                f"{atem.prototyp or 'einem Prototyp'} (hrv-core {atem.hrv_core or '–'}) — nur "
+                "beschrieben, nicht bewertet. Atemspanne und Phasenlage je Atemzug folgen."
+            )
+        )
+        atem_box.controls = [karte(*zeilen)]
+        atem_box.visible = True
+
+    async def atem_laden_task() -> None:
+        try:
+            atem = await asyncio.to_thread(atem_laden, atem_datei)
+        except Exception as exc:  # kaputtes Beiwerk: sagen, nicht abstürzen
+            atem_box.controls = [karte(kartentitel("Atmung (Prototyp)"), ft.Text(str(exc)))]
+            atem_box.visible = True
+            with contextlib.suppress(Exception):
+                atem_box.update()
+            return
+        if state.route_nummer != ansicht_nummer:
+            return
+        atem_stand["atem"] = atem
+        atem_stand["kennzahlen"] = aa.kennzahlen(atem)
+        atem_karte_zeichnen()
+        with contextlib.suppress(Exception):
+            ebenen_zeichnen()  # der Chip „Atmung“ gibt es erst jetzt
+            zeichnen()  # Kacheln (Hinweis), Tabellen und Kurven mit dem Beiwerk
+
+    atem_stand["zeichnen"] = atem_karte_zeichnen
+    if atem_datei.exists():
+        page.run_task(atem_laden_task)
+
     hf_sicht = HfAuswertungSicht(
         HfKontext(
             page,
@@ -3759,6 +3924,7 @@ def _aufbauen(
             sicht_knopf,
             hf_sicht.control,
             hrv_teil,
+            atem_box,
             ekg_box,
             diagnose_box,
             ft.Text(f"Datei: {eintrag.file_path}", size=11, opacity=0.5, selectable=True),
@@ -3888,7 +4054,9 @@ def _zeit_tabelle(
     )
 
 
-def _frequenz_tabelle(f: dict[str, Any] | None) -> ft.Control:
+def _frequenz_tabelle(f: dict[str, Any] | None, atem_hinweis: str = "") -> ft.Control:
+    """``atem_hinweis``: „Atmung < 9/min — liegt im LF-Band“ (Plan Beschleunigung §7.1) — dann
+    wird HF-Power nicht ausgewiesen, LF/HF bekommt den Hinweis."""
     if f is None:
         return _zeilen_tabelle(
             [], [], "Für die Frequenzanalyse fehlen gute Schläge (mindestens 60)."
@@ -3904,7 +4072,7 @@ def _frequenz_tabelle(f: dict[str, Any] | None) -> ft.Control:
         ("ULF unter 0,003 Hz", [band("ulf")]),
         ("VLF 0,003–0,04 Hz", [band("vlf")]),
         ("LF 0,04–0,15 Hz", [band("lf")]),
-        ("HF 0,15–0,40 Hz", [band("hf")]),
+        ("HF 0,15–0,40 Hz", [aa.NICHT_AUSGEWIESEN if atem_hinweis else band("hf")]),
         ("LF/HF", [zahl(f.get("lf_hf"), 2)]),
         ("LF n.u. / HF n.u.", [f"{zahl(f.get('lf_n'))} / {zahl(f.get('hf_n'))} %"]),
         ("Gipfel", [f"{zahl(gipfel, 2)} Hz · {zahl(gipfel * 60)}/min" if gipfel else "–"]),
@@ -3915,10 +4083,16 @@ def _frequenz_tabelle(f: dict[str, Any] | None) -> ft.Control:
         if b in f["band_reason"]
     ]
     text = "Gesperrt — " + "; ".join(gruende) + "." if gruende else ""
+    if atem_hinweis:
+        text = " ".join(
+            t
+            for t in (text, f"{atem_hinweis}: HF-Power nicht ausgewiesen, LF/HF mit Hinweis.")
+            if t
+        )
     return _zeilen_tabelle(["ganze Messung"], zeilen, text)
 
 
-def _nichtlinear_tabelle(n: dict[str, Any], optisch: bool) -> ft.Control:
+def _nichtlinear_tabelle(n: dict[str, Any], optisch: bool, atem_hinweis: str = "") -> ft.Control:
     zeilen = [
         ("SD1", [f"{zahl(n.get('sd1'), 1)} ms"]),
         ("SD2", [f"{zahl(n.get('sd2'), 1)} ms"]),
@@ -3927,6 +4101,8 @@ def _nichtlinear_tabelle(n: dict[str, Any], optisch: bool) -> ft.Control:
         ("SampEn", [zahl(n.get("sampen"), 2)]),
     ]
     text = "Bei optischen Pulsintervallen nicht belastbar." if optisch else ""
+    if atem_hinweis:
+        text = " ".join(t for t in (text, f"DFA α1: {atem_hinweis}.") if t)
     return _zeilen_tabelle(["ganze Messung"], zeilen, text)
 
 

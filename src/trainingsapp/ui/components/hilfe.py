@@ -143,8 +143,12 @@ der Zahl. Hat die Übung mehrere, wählst du unter „Zählt in“, welches. **B
 zuerst nur „Automatisch“ (die Hauptachse der Bewegung); Vorlagen je Übung kommen später.
 
 **Atmung** geht in jeder Übung, denn jede kann eine Atemkomponente haben; von selbst an ist
-sie bei Übungen vom Typ „Atmung“. Die Atemzüge erfasst erst eine spätere Stufe — bis dahin
-steht beim Üben „Atmung: Prototyp folgt“.
+sie bei Übungen vom Typ „Atmung“. Ein Prototyp (hrv-core, `prototyp.atemzuege`) erkennt aus
+der Atemwelle des Gurts die Atemzüge und die Phase jetzt (▲ einatmen, ▼ ausatmen) und nennt
+die Rate je Minute, sobald ein halbes Minutenfenster ruhig und gleichmäßig war. Die Atmung
+läuft nebenbei — Sätze, Chips und die Uhr berühren sie nicht — und bleibt als Beiwerk neben
+der laufenden Messung; ins Tagebuch kommt davon nichts. Erprobt ist das mit dem Brustgurt
+sitzend und liegend; langsames **und** flaches Atmen zählt der Prototyp noch unsicher.
 
 **Geräte:** heute Polar H10 (Brustgurt) und Polar Verity Sense — bei der Verity Sense ist der
 erste gezählte Satz zugleich die Probe. Verbunden genügt, eine Aufnahme braucht es nicht.

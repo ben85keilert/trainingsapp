@@ -309,7 +309,7 @@ def von_selbst_text(
     wenn es nicht von selbst endete (ein Tipp, die Uhr brach ab) oder eingetragen wird.
 
     >>> von_selbst_text("keine_bewegung"), von_selbst_text("kein_atem")
-    ('60 s ohne Bewegung', '120 s ohne Atemzug')
+    ('60 s ohne Bewegung', '2 min kein Atemzug erkannt')
     >>> von_selbst_text("abbruch", getrennt=True), von_selbst_text("abbruch")
     ('Sensor getrennt', '')
     >>> von_selbst_text("abbruch", ohne_daten=True), von_selbst_text("abbruch", zu_lang=True)
@@ -320,7 +320,7 @@ def von_selbst_text(
     if grund == ENDE_KEINE_BEWEGUNG:
         return f"{KEINE_BEWEGUNG_S:.0f} s ohne Bewegung"
     if grund == ENDE_KEIN_ATEM:
-        return f"{KEIN_ATEM_S:.0f} s ohne Atemzug"
+        return f"{KEIN_ATEM_S / 60:.0f} min kein Atemzug erkannt"
     if grund == ENDE_ABBRUCH and getrennt:
         return "Sensor getrennt"
     if grund == ENDE_ABBRUCH and ohne_daten:

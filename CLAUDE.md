@@ -247,7 +247,11 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   nachtragbar unter „Läufe heute“; ein Wechsel der Ansicht beendet nichts. **Entweder zählt die
   Person oder der Sensor** (P122; beides nur im Diagnosemodus, A2). Im Alltag nur Ergebnisse
   (Zeitleiste `zaehlung`/`korrektur`/`zaehlen_ende`, `reps` im Eintrag), **nie Rohdaten der
-  Beschleunigung** (P123).
+  Beschleunigung** (P123). **Atmung** (A3, Ben 5.11.2026): dieselbe Einheit, die **Atem-Spur**
+  neben den Sätzen (`hrv_core.prototyp.atemzuege.AtemLive`, Phasen ▲/▼ und Fenster ins Beiwerk
+  `_atem.json` der laufenden Messung, Zeitleiste `zaehlung` mit `zaehlart` atem / `satz` 0) —
+  sie läuft nebenbei (P133: Chips, Sätze, Anhalten berühren sie nicht), nur Atmung ±1 und
+  `kein_atem`, **nie ins Tagebuch** (P120).
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`

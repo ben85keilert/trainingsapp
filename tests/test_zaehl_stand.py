@@ -156,10 +156,69 @@ def test_korrektur_nie_unter_null_und_nur_atmung() -> None:
     assert zs.korrigieren(state, "u1", None, -1) and zs.zahl_text(z) == "0"
     assert not zs.korrigieren(state, "u1", None, -1)  # unter 0 geht es nicht
 
-    state, _, e, z = _zaehllauf(wiederholungen=False, atmung=True)
+
+def test_texte_der_atmung() -> None:
+    """Nur Atmung (A3): die große Zahl sind die Atemzüge, darunter „Atmung 14 · 12/min ▲ ·
+    Prototyp“, ±1 korrigiert die Atemzüge; bei Wdh + Atmung bleibt die Zahl die der
+    Wiederholungen, und `atem_text` gibt die Zeile „Atmung 12/min ▲“ dazu. Was der Prototyp
+    meldet, setzt der Test als Momentaufnahme."""
+    from hrv_core.prototyp.atemzuege import Stand
+
+    state, lauf, e, z = _zaehllauf(wiederholungen=False, atmung=True)
     e.starten()
-    assert zs.klein_text(z) == "Atmung: Prototyp folgt" and zs.kurz_text(z) == "Atmung"
+    assert lauf.angefordert == {"zaehlen": (50, 8)}
+    assert zs.zahl_text(z) == "0" and zs.klein_text(z) == "Sensor startet …"
+    assert zs.kurz_text(z) == "Sensor startet …"
     assert zs.sensor_text(state) == ""  # die Marken-Leiste zeigt nur gezählte Wiederholungen
+    lauf.acc_zuletzt = lauf.t
+    assert zs.klein_text(z) == "…" and zs.kurz_text(z) == "Atmung 0 · –"
+    assert zs.atem_rate_text(z) == "–" and zs.atem_phase(z) == "" and zs.atem_text(z) == ""
+    live = z._atem_live
+    assert live is not None
+    z._atem_stand = Stand(100.0, 14, "ein", 12.0, True, ())
+    live.stand = lambda: z._atem_stand  # type: ignore[method-assign]  # auch am Ende
+    z._atem_rate = 12.0
+    assert zs.zahl_text(z) == "14" and zs.atemzuege(z) == 14
+    assert zs.klein_text(z) == "Atmung 14 · 12/min ▲ · Prototyp"
+    assert zs.kurz_text(z) == "Atmung 14 · 12/min ▲"
+    assert zs.leisten_text(z) == "Zählen · Kniebeuge · Atmung · 14 · 12/min ▲"
+    assert zs.atem_rate_text(z) == "12/min" and zs.atem_phase(z) == "▲"
+    assert zs.atem_text(z) == ""  # die dritte Zeile gibt es nur bei Wdh + Atmung
+    # ±1 gilt den Atemzügen — nie unter 0
+    assert zs.korrigieren(state, "u1", "i1", +1) and zs.zahl_text(z) == "15"
+    assert zs.klein_text(z) == "Atmung 14 · +1 · 12/min ▲ · Prototyp"
+    z._atem_stand = Stand(101.0, 14, "aus", 12.0, True, ())
+    assert zs.korrigieren(state, "u1", "i1", -1) and zs.korrigieren(state, "u1", "i1", -1)
+    assert zs.zahl_text(z) == "13" and zs.klein_text(z) == "Atmung 14 · −1 · 12/min ▼ · Prototyp"
+    assert [x.daten for x in e.takt() if x.art == "korrektur"] == [
+        {"delta": 1, "satz": 0, "zaehlart": "atem"},
+        {"delta": -1, "satz": 0, "zaehlart": "atem"},
+        {"delta": -1, "satz": 0, "zaehlart": "atem"},
+    ]
+    assert z.fertig()
+    assert zs.klein_text(z) == "Atmung fertig" and zs.kurz_text(z) == "13 Atemzüge"
+    assert not zs.korrigieren(state, "u1", "i1", +1)
+
+    state, lauf, e, z = _zaehllauf(atmung=True)
+    e.starten()
+    lauf.acc_zuletzt = lauf.t
+    assert z.satz is not None
+    z.satz.sensor = 11
+    assert zs.zahl_text(z) == "11" and zs.klein_text(z) == "Sensor 11 · Prototyp"
+    assert zs.atem_text(z) == ""  # noch keine Proben beim Atem-Prototyp
+    live = z._atem_live
+    assert live is not None
+    z._atem_stand = Stand(100.0, 3, "aus", None, False, ("zu_kurz",))
+    live.stand = lambda: z._atem_stand  # type: ignore[method-assign]
+    assert (
+        zs.atem_text(z) == "Atmung – ▼"
+        and zs.leisten_text(z) == "Zählen · Kniebeuge · 11 · Atmung – ▼"
+    )
+    z._atem_rate = 12.0
+    assert zs.atem_text(z) == "Atmung 12/min ▼"
+    assert zs.korrigieren(state, "u1", "i1", +1) and zs.zahl_text(z) == "12"  # ±1: die Sätze
+    assert z.atem_korrektur == 0 and z.korrektur == 1
+    assert z.fertig() and zs.atem_text(z) == "Atmung 3 · 12/min"
 
 
 def test_nachziehen_aendert_nur_texte() -> None:
@@ -169,7 +228,8 @@ def test_nachziehen_aendert_nur_texte() -> None:
     state, lauf, e, z = _zaehllauf()
     zahl, klein = Text(), Text()
     fremd = Text()
-    zs.anmelden(state, "plan", zs.ZaehlAnzeige("u1", "i1", zahl=zahl, klein=klein))
+    atem = Text()
+    zs.anmelden(state, "plan", zs.ZaehlAnzeige("u1", "i1", zahl=zahl, klein=klein, atem=atem))
     zs.anmelden(state, "andere", zs.ZaehlAnzeige("u2", None, zahl=fremd))
     zs.anmelden(state, "kaputt", zs.ZaehlAnzeige("u1", None, zahl=Text(kaputt=True)))
     assert set(state.zaehl_anzeigen) == {"plan", "andere", "kaputt"}
@@ -182,8 +242,8 @@ def test_nachziehen_aendert_nur_texte() -> None:
     assert z.satz is not None
     z.satz.sensor = 7
     beobachter()
-    assert (zahl.value, klein.value) == ("7", "Sensor 7 · Prototyp")
-    assert zahl.updates == klein.updates == 1
+    assert (zahl.value, klein.value, atem.value) == ("7", "Sensor 7 · Prototyp", "")
+    assert zahl.updates == klein.updates == atem.updates == 1  # ohne „Atmung“: leer
     assert fremd.value is None and fremd.updates == 0
     # ±1 zieht sofort nach, ohne auf den Takt zu warten
     assert zs.korrigieren(state, "u1", "i1", +1)

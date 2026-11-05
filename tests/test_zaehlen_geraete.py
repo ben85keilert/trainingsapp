@@ -12,6 +12,7 @@ import asyncio
 import itertools
 import math
 
+import hrv_core
 import numpy as np
 import pytest
 from hrv_core import mitschnitt as mt
@@ -29,7 +30,11 @@ from trainingsapp.core.zaehlen import (
     ENDE_ABBRUCH,
     ENDE_ANDERE_UEBUNG,
     ENDE_FERTIG,
+    ENDE_KEIN_ATEM,
     ENDE_KEINE_BEWEGUNG,
+    KEIN_ATEM_S,
+    ZAEHLART_ATEM,
+    ZAEHLART_WDH,
 )
 from trainingsapp.devices import pmd
 from trainingsapp.devices import zaehlen as zaehlen_modul
@@ -50,6 +55,7 @@ from trainingsapp.devices.zaehlen import (
     PHASE_STARTET,
     PHASE_ZAEHLT,
     PROTOTYP,
+    PROTOTYP_ATEM,
     ZaehlBaustein,
     zaehl_rate,
 )
@@ -104,7 +110,11 @@ def _saetze(e: Einheitslauf | list[Ereignis]) -> list[Ereignis]:
     """Je Satz die letzte ``zaehlung`` — sie gilt (`core.zaehlen_eintrag.zaehlungen`); davor
     stehen Zwischenstände und der Stand vor einer Korrektur in der Pause (gegen den Absturz)."""
     liste = e.ereignisse if isinstance(e, Einheitslauf) else e
-    je_satz = {x.daten["satz"]: x for x in liste if x.art == "zaehlung"}
+    je_satz = {
+        x.daten["satz"]: x
+        for x in liste
+        if x.art == "zaehlung" and x.daten.get("zaehlart", ZAEHLART_WDH) == ZAEHLART_WDH
+    }
     return [je_satz[k] for k in sorted(je_satz)]
 
 
@@ -405,18 +415,376 @@ async def test_abbrechen_korrektur_und_falsche_eingaben(aufbau) -> None:
     assert _arten(e, "zaehlen_ende")[0].text == "Kniebeuge: Zählen abgebrochen (andere Übung)"
 
 
-async def test_nur_atmung_zaehlt_in_a1_noch_nichts(aufbau) -> None:
+# -- Atmung (A3, Plan §4.5) ----------------------------------------------------------------
+
+
+def _atem(e: Einheitslauf | list[Ereignis]) -> Ereignis | None:
+    """Die letzte ``zaehlung`` der Atem-Spur (``zaehlart`` atem, ``satz`` 0) — sie gilt."""
+    liste = e.ereignisse if isinstance(e, Einheitslauf) else e
+    atem = [x for x in liste if x.art == "zaehlung" and x.daten.get("zaehlart") == ZAEHLART_ATEM]
+    return atem[-1] if atem else None
+
+
+async def test_nur_atmung_zaehlt_atemzuege_rate_und_phase(aufbau) -> None:
+    """Nur Atmung: Der Prototyp zählt die Atemzüge (Gurt-Attrappe 6/min: nach dem Anlauf einer
+    je 10 s, ±1), nennt nach dem ersten Fenster die Rate und die Phase jetzt (▲/▼ wechseln);
+    die Phasen landen im Beiwerk der laufenden Messung auf der Wanduhr, die Zusammenfassung
+    als ``zaehlung`` mit ``zaehlart`` atem und ``satz`` 0 in der Zeitleiste — nichts ins
+    Tagebuch (P120)."""
     a = aufbau
+    a.gurt.bewegung = False
+    a.lauf.aufnahme_starten()
     e, z = _zaehllauf(a, wiederholungen=False, atmung=True)
     e.starten()
     await ruhe()
     assert a.lauf.acc_anforderungen == {"zaehlen": (50, 8)}
-    assert z.phase == PHASE_ATMUNG and z.status() == "Kniebeuge · Atmung: Prototyp folgt"
-    await _sekunden(a, 130, e)  # bei einer Atemübung ist Stille gewollt — kein Ende
-    assert z.aktiv and not z.korrigieren(1)
+    assert z.phase == PHASE_STARTET and z.status() == "Kniebeuge · Atmung · Sensor startet …"
+    assert z.zaehlart == ZAEHLART_ATEM and z.atem_sensor is None and z.atemzuege == 0
+    assert a.lauf.atem is not None and a.lauf.atem.offen  # der Lauf im Beiwerk begann
+    phasen: set[str | None] = set()
+    for _ in range(130):
+        await _sekunden(a, 1, e)
+        phasen.add(z.atem_phase)
+    assert z.phase == PHASE_ATMUNG and z.aktiv and z.grund is None
+    assert abs(z.atemzuege - 13) <= 1 and z.atem_sensor == z.atemzuege  # 130 s · 6/min
+    assert z.atem_rate is not None and abs(z.atem_rate - 6.0) <= 0.3
+    assert {"ein", "aus"} <= phasen
+    assert (
+        z.status()
+        == f"Kniebeuge · Atmung · {z.atemzuege} · 6/min {'▲' if z.atem_phase == 'ein' else '▼'}"
+    )
+    # Die Phasen im Beiwerk: Wanduhr der Aufnahme, Einatmen im Tal der Welle (t ≡ 7,5 mod 10
+    # auf der Uhr, Ansatz am Ende der Sohle), Fenster alle 5 s ab 30 s mit Rate
+    beiwerk = a.lauf.atem
+    ein = [t for t, art in beiwerk.phasen if art == "ein"]
+    aus = [t for t, art in beiwerk.phasen if art == "aus"]
+    assert len(ein) >= 12 and len(aus) >= 12
+    assert all(7.4 <= t % 10 <= 9.5 for t in ein) and all(2.4 <= t % 10 <= 4.5 for t in aus)
+    assert [f[2] for f in beiwerk.fenster_liste][:3] == [True, True, True]
+    assert beiwerk.fenster_liste[0][0] == pytest.approx(30.0, abs=0.3)
+    # Zwischenstände alle 15 s (gegen den Absturz) — es gilt die letzte
+    zwischen = [x for x in e.ereignisse if x.art == "zaehlung"]
+    assert len(zwischen) >= 6 and all(x.daten["satz"] == 0 for x in zwischen)
     z.fertig()
     e.takt()
-    assert _saetze(e) == [] and ze.zaehl_ende(e.ereignisse) == ENDE_FERTIG
+    assert e.zustand is Zustand.BEENDET and ze.zaehl_ende(e.ereignisse) == ENDE_FERTIG
+    atem = _atem(e)
+    assert atem is not None and atem.t_s == pytest.approx(130.0, abs=0.01)
+    assert atem.daten["zaehlart"] == ZAEHLART_ATEM and atem.daten["satz"] == 0
+    assert atem.daten["sensor"] == z.atemzuege and atem.daten["wert"] == z.atemzuege
+    assert atem.daten["korrektur"] == 0 and atem.daten["geraet"] == "polar_h10"
+    assert (
+        atem.daten["prototyp"]
+        == PROTOTYP_ATEM
+        == f"hrv_core.prototyp.atemzuege@{hrv_core.__version__}"
+    )
+    assert atem.daten["rate"] == pytest.approx(z.atem_rate)
+    zeiten = atem.daten["zeiten_s"]
+    assert len(zeiten) == z.atemzuege and zeiten == sorted(zeiten) and zeiten[-1] <= 130.0
+    assert atem.text == f"Kniebeuge: {z.atemzuege} Atemzüge"
+    # Nichts ins Tagebuch: keine Wiederholungen, keine Zeile unter „Läufe heute“
+    assert _saetze(e) == [] and ze.wiederholungen(e.ereignisse) == []
+    assert ze.zaehl_texte(e.ereignisse) == []
+    assert not beiwerk.offen and beiwerk.laeufe[0][1] == pytest.approx(130.0, abs=0.01)
+    assert z.status() == f"Kniebeuge · {z.atemzuege} Atemzüge"
+    gezaehlt = (await e.abschliessen()).teile["zaehlen"]
+    assert gezaehlt.saetze == () and gezaehlt.atem == atem.daten
+
+
+async def test_nur_atmung_plus_minus_korrigiert_die_atemzuege(aufbau) -> None:
+    """±1 bei nur Atmung gilt den Atemzügen: ``person/korrektur`` mit ``zaehlart`` atem und
+    ``satz`` 0, angezeigt Sensor plus Korrektur, nie unter 0; die Zusammenfassung trägt die
+    Korrektur."""
+    a = aufbau
+    a.gurt.bewegung = False
+    e, z = _zaehllauf(a, wiederholungen=False, atmung=True)
+    e.starten()
+    await ruhe()
+    assert not z.korrigieren(-1)  # unter 0 geht es nicht
+    assert z.korrigieren(+1) and z.atemzuege == 1 and z.atem_korrektur == 1
+    await _sekunden(a, 40, e)
+    sensor = z.atem_sensor
+    assert sensor is not None and sensor >= 3 and z.atemzuege == sensor + 1
+    assert z.korrigieren(-1) and z.korrigieren(-1) and z.atemzuege == sensor - 1
+    e.takt()
+    korrekturen = _arten(e, "korrektur")
+    assert [k.daten for k in korrekturen] == [
+        {"delta": 1, "satz": 0, "zaehlart": ZAEHLART_ATEM},
+        {"delta": -1, "satz": 0, "zaehlart": ZAEHLART_ATEM},
+        {"delta": -1, "satz": 0, "zaehlart": ZAEHLART_ATEM},
+    ]
+    assert korrekturen[0].text == "Kniebeuge: +1 Atemzug"
+    z.fertig()
+    e.takt()
+    atem = _atem(e)
+    assert atem is not None and atem.daten["korrektur"] == -1
+    assert atem.daten["wert"] == atem.daten["sensor"] - 1
+    assert not z.korrigieren(+1)  # nach dem Ende nicht mehr
+
+
+async def test_kein_atem_beendet_nach_zwei_minuten(aufbau) -> None:
+    """Nur Atmung: `KEIN_ATEM_S` ohne erkannten Atemzug (abgelegt, verrutscht) → ``kein_atem``,
+    abgebrochen und von selbst — die Meldung sagt „2 min kein Atemzug erkannt“. Bei einer
+    Atemübung ist Stille gewollt: 60 s reichen nicht."""
+    a = aufbau
+    a.gurt.bewegung = False
+    a.gurt.atem_mg = 0.0  # die Person hält den Atem an (oder der Gurt liegt auf dem Tisch)
+    e, z = _zaehllauf(a, wiederholungen=False, atmung=True)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 70, e)
+    assert z.aktiv and z.atem_sensor == 0 and z.atem_phase is None
+    await _sekunden(a, 55, e)
+    assert z.grund == ENDE_KEIN_ATEM and not z.von_aussen and e.zustand is Zustand.BEENDET
+    (ende,) = _arten(e, "zaehlen_ende")
+    assert ende.t_s == pytest.approx(120.0) and ende.daten == {"grund": ENDE_KEIN_ATEM}
+    assert ende.text == "Kniebeuge: Zählen abgebrochen (kein Atemzug)"
+    assert ze.von_selbst_text(z.grund) == "2 min kein Atemzug erkannt"
+    assert ze.zaehl_abgebrochen(e.ereignisse) and a.lauf.acc_anforderungen == {}
+    atem = _atem(e)
+    assert atem is not None and atem.daten["sensor"] == 0 and "rate" not in atem.daten
+
+    # Atmet die Person, zählt jeder Atemzug die Frist neu — nach dem letzten Atemzug 120 s
+    a.gurt.atem_mg = 25.0
+    e, z = _zaehllauf(a, wiederholungen=False, atmung=True)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 60, e)
+    assert len(z._atem_zeiten) >= 5
+    a.gurt.atem_mg = 0.0  # die Welle hört auf (der Hochpass klingt noch kurz nach)
+    await _sekunden(a, 100, e)
+    assert z.aktiv  # 100 s nach dem letzten Atemzug: noch nicht
+    await _sekunden(a, 50, e)
+    assert z.grund == ENDE_KEIN_ATEM
+    letzter = z._atem_zeiten[-1]
+    assert 45.0 <= letzter <= 80.0
+    assert _arten(e, "zaehlen_ende")[0].t_s == pytest.approx(letzter + KEIN_ATEM_S, abs=1.0)
+
+
+async def test_wdh_und_atmung_laufen_nebeneinander(aufbau) -> None:
+    """Wdh + Atmung: Die Sätze zählen wie ohne Atmung, daneben die Atem-Spur — bewegt sieht der
+    Atem-Prototyp nichts, in der Ruhe danach die Atemzüge; ±1 gilt den Sätzen; die Zeitleiste
+    hält beides, ins Tagebuch kommen nur die Wiederholungen. „Keine Bewegung“ urteilt weiter
+    über die Sätze (60 s ohne Wiederholung), nicht `KEIN_ATEM_S`."""
+    a = aufbau
+    e, z = _zaehllauf(a, atmung=True)
+    e.starten()
+    await ruhe()
+    assert z.wdh and z.atem and z.zaehlart == ZAEHLART_WDH
+    await _sekunden(a, 20, e)
+    wdh = z.sensor
+    assert wdh is not None and abs(wdh - 8) <= 1
+    assert z.status() == f"Kniebeuge · {wdh} · Atmung –" and z.atem_sensor == 0  # bewegt
+    assert z.korrigieren(+1) and z.korrektur == 1 and z.atem_korrektur == 0
+    a.gurt.bewegung = False
+    await _sekunden(a, 35, e)
+    assert z.aktiv and z.atem_sensor is not None and z.atem_sensor >= 2
+    assert z.status().startswith(f"Kniebeuge · {wdh + 1} · Atmung ")
+    await _sekunden(a, 30, e)  # 60 s nach der letzten Wiederholung (bei ~20 s)
+    assert z.grund == ENDE_KEINE_BEWEGUNG and e.zustand is Zustand.BEENDET
+    (satz,) = _saetze(e)
+    assert satz.daten["satz"] == 1 and satz.daten["zaehlart"] == ZAEHLART_WDH
+    assert satz.daten["wert"] == wdh + 1 and satz.daten["prototyp"] == PROTOTYP
+    atem = _atem(e)
+    assert atem is not None and atem.daten["satz"] == 0 and atem.daten["sensor"] >= 3
+    assert atem.daten["korrektur"] == 0 and all(t >= 20.0 for t in atem.daten["zeiten_s"])
+    assert ze.wiederholungen(e.ereignisse) == [wdh + 1]  # die Atmung nicht
+    assert len(ze.zaehl_texte(e.ereignisse)) == 1
+
+
+async def test_chip_und_anhalten_beruehren_die_atem_spur_nicht(aufbau) -> None:
+    """P133: Ein Satz von Hand (Chip, Diagnosemodus) schließt den Satz des Sensors, „Anhalten“
+    der Uhr hält das Zählen an — die Atem-Spur läuft weiter (Atmen geht weiter). Erst das
+    Ende des Laufs (hier: Trennen) beendet beide Spuren."""
+    a = aufbau
+    a.gurt.bewegung = False
+    timer = TimerBaustein(TimerLauf(stoppuhr(), uhr=a.lauf.uhr))
+    z = ZaehlBaustein(a.lauf, KNIEBEUGE, feld="reps", atmung=True)
+    e = _einheit(a, UebungBaustein(KNIEBEUGE), timer, z)
+    e.ende_mit_timer = True
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 30, e)
+    vorher = z.atemzuege
+    assert vorher >= 1
+    assert z.von_hand()  # der Chip: der Satz des Sensors endet, der nächste beginnt mit der Uhr
+    assert z.saetze and z.saetze[-1].von_hand and z._atem_live is not None
+    await _sekunden(a, 20, e)
+    assert z.atemzuege >= vorher + 1  # die Atem-Spur zählte weiter
+    timer.lauf.pause()
+    await _sekunden(a, 1, e)
+    assert z.angehalten and z.phase == PHASE_PAUSE
+    im_stopp = z.atemzuege
+    await _sekunden(a, 30, e)
+    assert z.atemzuege >= im_stopp + 2 and z.aktiv  # angehalten: die Atmung nicht
+    timer.lauf.fortsetzen()
+    await _sekunden(a, 5, e)
+    await a.lauf.trennen()
+    e.takt()
+    assert z.grund == ENDE_ABBRUCH and z.getrennt and z._atem_live is None
+    atem = _atem(e)
+    assert atem is not None and atem.daten["sensor"] == z.atem_sensor >= im_stopp + 2
+    assert _arten(e, "zaehlen_ende")[0].daten == {"grund": ENDE_ABBRUCH}
+
+
+async def test_ratenwechsel_mitten_im_atem_lauf(aufbau) -> None:
+    """Beginnt der Diagnosemodus mitten im Lauf (50 → 200 Hz) oder endet er, bekommt der
+    Atem-Prototyp weiter seine 50 Hz — der Messlauf taktet um (`acc_reihe`); kein Atemzug
+    fehlt, keiner kommt doppelt."""
+    a = aufbau
+    a.gurt.bewegung = False
+    e, z = _zaehllauf(a, wiederholungen=False, atmung=True)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 40, e)
+    a.lauf.acc_anfordern("diagnose", 200, 8)
+    await ruhe()
+    await _sekunden(a, 60, e)
+    assert a.lauf.acc_rate_hz == 200 and z._atem_live is not None
+    assert z._atem_live.rate_hz == 50.0
+    a.lauf.acc_freigeben("diagnose")
+    await ruhe()
+    await _sekunden(a, 30, e)
+    assert a.lauf.acc_rate_hz == 50 and z.aktiv
+    assert abs(z.atemzuege - 13) <= 1 and z.atem_rate is not None  # 130 s · 6/min
+    assert abs(z.atem_rate - 6.0) <= 0.5
+    zeiten = z._atem_zeiten
+    assert all(8.0 <= b - a_ <= 12.0 for a_, b in itertools.pairwise(zeiten))  # nie doppelt
+    z.fertig()
+
+
+async def test_atem_rechnung_ist_billig(aufbau) -> None:
+    """Die Atem-Spur rechnet jeden Takt ohne Drossel — je Takt ein paar Zehntel ms, nur das
+    Prüffenster alle 5 s (Lomb-Scargle über 30 s) kostet einige ms."""
+    a = aufbau
+    a.gurt.bewegung = False
+    e, z = _zaehllauf(a, wiederholungen=False, atmung=True)
+    e.starten()
+    await ruhe()
+    zeiten: list[float] = []
+    for _ in range(90):
+        await _sekunden(a, 1, e)
+        zeiten.append(z.atem_laufzeit_ms)
+    assert max(zeiten) < 150.0 and sorted(zeiten)[len(zeiten) // 2] < 10.0
+    z.fertig()
+
+
+async def test_atmung_mit_dem_simulator(tmp_path, monkeypatch) -> None:
+    """Ende zu Ende mit dem Simulator (Atmung 12/min auf z mit Rauschen, keine Bewegung,
+    fünfzigfach schnell): Atemzüge ≈ Dauer · Rate, die Rate stimmt — und ohne Atemwelle
+    (``atem_bpm=0``) endet der Lauf nach `KEIN_ATEM_S` als ``kein_atem``. Dafür rauscht der
+    Simulator nicht (der Gurt liegt auf dem Tisch): Aus seinen 15 mG je Achse — und noch aus
+    2 mG — zählt der Prototyp Pseudo-Atemzüge ohne gültige Rate (Befund für hrv-research)."""
+    from trainingsapp.devices import simulated
+
+    async def lauf_mit(quelle: SimulatedSource) -> ZaehlBaustein:
+        quelle.bewegung_setzen(False)
+        lauf = Messlauf(quelle)
+        await lauf.verbinden(SIM_SYNTH, "Simulator (synthetisch)")
+        z = ZaehlBaustein(lauf, KNIEBEUGE, wiederholungen=False, atmung=True)
+        e = Einheitslauf(uhr=lauf.uhr)
+        e.hinzufuegen(UebungBaustein(KNIEBEUGE))
+        e.hinzufuegen(z)
+        e.ende_mit_zaehlen = True
+        e.starten()
+        leser = asyncio.create_task(lauf.laufen())
+        while not leser.done():
+            await asyncio.sleep(0.005)
+            if z.bereit:  # die Quelle endet mit ``dauer_s`` — danach wäre es „getrennt“
+                e.takt()
+        await asyncio.wait_for(leser, 10.0)
+        if z.aktiv:
+            z.fertig()
+        e.takt()
+        return z
+
+    z = await lauf_mit(SimulatedSource(tempo=50.0, dauer_s=90.0, seed=7, atem_bpm=12.0))
+    assert z.grund == ENDE_FERTIG and abs(z.atemzuege - 18) <= 2
+    assert z.atem_rate is not None and abs(z.atem_rate - 12.0) <= 1.0
+    monkeypatch.setattr(simulated, "ACC_RAUSCHEN_MG", 0.0)
+    z = await lauf_mit(SimulatedSource(tempo=50.0, dauer_s=130.0, seed=7, atem_bpm=0.0))
+    assert z.grund == ENDE_KEIN_ATEM and z.atem_sensor == 0 and not z.atem_fehler
+
+
+async def test_fehler_im_atem_prototyp_stoppt_nichts(aufbau, monkeypatch) -> None:
+    """Wirft der Atem-Prototyp (ein Befund: ``math domain error`` beim Übergang von der
+    Welle zu einem konstanten Signal, 0.9.0), läuft das Zählen weiter — ein frischer Prototyp
+    zählt ab da, die Atemzüge bis dahin bleiben, der Fehler steht in `atem_fehler`; der Takt
+    der Einheit (Enden, Trennen) bleibt heil."""
+    a = aufbau
+    a.gurt.bewegung = False
+    e, z = _zaehllauf(a, wiederholungen=False, atmung=True)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 60, e)
+    vorher = z.atemzuege
+    assert vorher >= 5 and not z.atem_fehler
+    echt = zaehlen_modul.prototyp_atem.AtemLive.rahmen
+    einmal = [True]
+
+    def kaputt(self, xyz, t0_s):
+        if einmal:
+            einmal.clear()
+            raise ValueError("math domain error")
+        return echt(self, xyz, t0_s)
+
+    monkeypatch.setattr(zaehlen_modul.prototyp_atem.AtemLive, "rahmen", kaputt)
+    await _sekunden(a, 1, e)
+    assert z.atem_fehler == "ValueError: math domain error" and z.aktiv and not e.warnung
+    assert z.atemzuege == vorher and z.atem_phase is None  # ein neues Stück beginnt
+    await _sekunden(a, 40, e)
+    assert z.atemzuege >= vorher + 3 and z.atem_rate is not None
+    z.fertig()
+    e.takt()
+    atem = _atem(e)
+    assert atem is not None and atem.daten["sensor"] == z.atemzuege
+
+
+async def test_atem_kontext_im_mitschnitt(tmp_path) -> None:
+    """Diagnosemodus: Am Ende eine Kontextzeile ``atem`` (Atemzüge, ``satz`` 0, Rate als
+    ``phase``) — keine je Atemzug; bereinigt bleibt sie (`hrv_core.deid`)."""
+    zeit, lauf, innen, _gemeldet = await _diagnose_mit_zaehlen(tmp_path)
+    z = ZaehlBaustein(lauf, KNIEBEUGE, wiederholungen=False, atmung=True)
+    e = Einheitslauf(uhr=lauf.uhr)
+    e.hinzufuegen(UebungBaustein(KNIEBEUGE))
+    e.hinzufuegen(z)
+    e.ende_mit_zaehlen = True
+    e.starten()
+    await _ruhe()
+    n = round(200 * 0.18)
+    for k in range(int(70 / 0.18)):  # 70 s Atmung 12/min bei 200 Hz, keine Bewegung
+        zeit.t += 0.18
+        proben = []
+        for i in range(n):
+            t = (k * n + i) / 200
+            proben.append((0, -1000, round(-20 * math.sin(2 * math.pi * t / 5.0))))
+        rahmen = pmd.rahmen_bauen(
+            pmd.MEAS_ACC, 10**12 + k * 180_000_000, pmd.acc_kodieren(proben), 1
+        )
+        innen.senden(pmd.PMD_DATA_UUID, rahmen, zeit.t)
+        if k % 5 == 0:
+            e.takt()
+    e.takt()
+    assert z.atem_sensor is not None and abs(z.atem_sensor - 13) <= 2
+    assert lauf.atem is not None and len(lauf.atem.phasen) >= 20  # das Beiwerk der Aufnahme
+    z.fertig()
+    e.takt()
+    assert lauf.mitschnitt is not None
+    zeilen = list(mt.lesen(lauf.mitschnitt.pfad))
+    kontext = [x for x in zeilen if x.get("art") == mt.KONTEXT]
+    (atem,) = [x for x in kontext if x["was"] == "atem"]
+    assert atem["wert"] == z.atemzuege and atem["satz"] == 0
+    assert atem["phase"] == pytest.approx(12.0, abs=1.0)
+    assert sum(1 for x in kontext if x["was"] == "atem") == 1
+    (ab,) = [x for x in mitschnitt_zeilen(zeilen) if x.get("was") == "atem"]
+    assert {k: ab[k] for k in ("wert", "satz", "phase")} == {
+        "wert": atem["wert"],
+        "satz": 0,
+        "phase": atem["phase"],
+    }
+    await lauf.diagnose_beenden()
+    lauf.aufnahme = None
+    await lauf.trennen()
 
 
 async def test_beenden_mit_der_einheit_gilt_als_fertig(aufbau) -> None:

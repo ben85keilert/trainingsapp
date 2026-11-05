@@ -12,6 +12,9 @@ Funktion): Die CI testet es flet-frei, und die Uhr am Band nimmt später denselb
 - Welcher Zähl-Teil zu einer Übung gehört (`passt`, `zaehl_teil`).
 - Die Texte: `zahl_text` (die große Zahl), `klein_text` (darunter), `kurz_text` (Laufleiste und
   Benachrichtigung), `leisten_text` (Teile der Laufleiste), `sensor_text` (Marken-Leiste).
+  Atmung (A3): nur Atmung ist die große Zahl die der Atemzüge, darunter „Atmung 14 · 12/min ▲ ·
+  Prototyp“; bei Wdh + Atmung bleibt die Zahl die der Wiederholungen, und eine Zeile
+  `atem_text` („Atmung 12/min ▲“) kommt dazu (`atemzuege`, `atem_rate_text`, `atem_phase`).
 - ±1 (`korrigieren`) und das Nachziehen (`ZaehlAnzeige`, `anmelden`, `nachziehen`): nur Texte,
   nie neu gebaute Knöpfe — ein Tipp ginge sonst verloren.
 
@@ -238,20 +241,58 @@ def zaehl_notizen(state: Any) -> contextlib.AbstractContextManager[None]:
 
 
 def zahl_text(z: ZaehlBaustein) -> str:
-    """Die große Zahl: Sensor plus Korrektur des Satzes, nie unter 0 (`core.zaehlen.anzeige`)."""
-    return str(z.wert)
+    """Die große Zahl: Sensor plus Korrektur des Satzes, nie unter 0 (`core.zaehlen.anzeige`)
+    — nur Atmung: die Atemzüge."""
+    return str(z.atemzuege if not z.wdh else z.wert)
+
+
+def atemzuege(z: ZaehlBaustein) -> int:
+    """Atemzüge, Sensor plus Korrektur (`ZaehlBaustein.atemzuege`)."""
+    return z.atemzuege
+
+
+def atem_rate_text(z: ZaehlBaustein) -> str:
+    """„12/min“ — „–“, solange kein gültiges Fenster eine Rate nannte."""
+    return zl.rate_text(z.atem_rate)
+
+
+def atem_phase(z: ZaehlBaustein) -> str:
+    """▲ beim Einatmen, ▼ beim Ausatmen, leer sonst."""
+    return zl.phase_pfeil(z.atem_phase)
+
+
+def atem_text(z: ZaehlBaustein) -> str:
+    """Die Zeile der Atem-Spur bei Wdh + Atmung: „Atmung 12/min ▲“ — leer ohne „Atmung“ oder
+    solange keine Proben kamen; nach dem Ende die Atemzüge."""
+    if not (z.wdh and z.atem) or z.atem_sensor is None:
+        return ""
+    if z.phase == PHASE_ENDE:
+        return f"Atmung {z.atemzuege} · {atem_rate_text(z)}"
+    return f"Atmung {zl.atem_text(z.atem_rate, z.atem_phase)}"
+
+
+def _atem_klein(z: ZaehlBaustein) -> str:
+    """Nur Atmung, unter der Zahl: „Atmung 14 · 12/min ▲ · Prototyp“, mit Korrektur „Atmung 13
+    · +1 · 12/min ▲ · Prototyp“; „…“, bis die ersten Phasen da sind."""
+    sensor, korrektur = z.atem_sensor, z.atem_korrektur
+    if sensor is None and not korrektur:
+        return "…"
+    zahl = f"Atmung {'…' if sensor is None else sensor}"
+    if korrektur:
+        zahl = f"{zahl} · {zl.mit_vorzeichen(korrektur)}"
+    return f"{zahl} · {zl.atem_text(z.atem_rate, z.atem_phase)} · Prototyp"
 
 
 def klein_text(z: ZaehlBaustein) -> str:
     """Die kleine Zeile unter der Zahl: „Sensor 11 · +1 · Prototyp“ — bis die ersten Proben
     kommen „Sensor startet …“, ohne erkennbare Periode „…“; in der Pause des Timers „Pause“
-    (davor, was der letzte Satz zählte), nach dem Ende der Grund."""
+    (davor, was der letzte Satz zählte), nach dem Ende der Grund. Nur Atmung: `_atem_klein`."""
     phase = z.phase
     if phase == PHASE_ENDE:
-        return f"Zählen {ende_text(z.grund)}"
+        return f"{'Zählen' if z.wdh else 'Atmung'} {ende_text(z.grund)}"
     if phase == PHASE_ATMUNG:
-        return "Atmung: Prototyp folgt"
-    if phase == PHASE_STARTET and not z.korrektur:
+        return _atem_klein(z)
+    if phase == PHASE_STARTET and not (z.korrektur or z.atem_korrektur):
         return "Sensor startet …"
     if phase == PHASE_PAUSE:
         if z.satz is None:
@@ -267,10 +308,10 @@ def kurz_text(z: ZaehlBaustein) -> str:
     0:42 · 12 Wdh.“) — nach dem Ende die Summe aller Sätze."""
     phase = z.phase
     if phase == PHASE_ATMUNG:
-        return "Atmung"
+        return f"Atmung {z.atemzuege} · {zl.atem_text(z.atem_rate, z.atem_phase)}"
     if phase == PHASE_ENDE:
-        return f"{z.summe} Wdh."
-    if phase == PHASE_STARTET and not z.korrektur:
+        return f"{z.summe} Wdh." if z.wdh else f"{z.atemzuege} Atemzüge"
+    if phase == PHASE_STARTET and not (z.korrektur or z.atem_korrektur):
         return "Sensor startet …"
     if phase == PHASE_SAMMELT and not z.korrektur:
         return "…"
@@ -327,6 +368,8 @@ class ZaehlAnzeige:
     zahl: ft.Text | None = None
     #: die kleine Zeile darunter
     klein: ft.Text | None = None
+    #: die Zeile der Atem-Spur bei Wdh + Atmung („Atmung 12/min ▲“, `atem_text`)
+    atem: ft.Text | None = None
 
 
 def anzeigen(state: Any) -> dict[str, ZaehlAnzeige]:
@@ -362,8 +405,10 @@ def nachziehen(state: Any) -> None:
             a.zahl.value = zahl_text(z)
         if a.klein is not None:
             a.klein.value = klein_text(z)
+        if a.atem is not None:
+            a.atem.value = atem_text(z)
         with contextlib.suppress(Exception):
-            for c in (a.zahl, a.klein):
+            for c in (a.zahl, a.klein, a.atem):
                 if c is not None:
                     c.update()
 
@@ -385,6 +430,10 @@ __all__ = [
     "abmelden",
     "anmelden",
     "anzeigen",
+    "atem_phase",
+    "atem_rate_text",
+    "atem_text",
+    "atemzuege",
     "bereitgestellt",
     "geraet_kann_zaehlen",
     "im_plan_ablauf",

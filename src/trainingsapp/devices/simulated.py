@@ -325,7 +325,11 @@ class SimulatedSource(HeartRateSource):
         HRV — ohne sie sähen Spektren unrealistisch flach aus.
         """
         basis_rr = 60000.0 / self.bpm
-        rsa = self.rsa_amplitude_ms * math.sin(2 * math.pi * (self.atem_bpm / 60.0) * t_s)
+        # Dieselbe Atemwelle wie in der Beschleunigung (`_acc_probe`): Einatmen, wo die
+        # Welle (x − z) steigt. Das Herz wird über das Einatmen hinweg schneller, über das
+        # Ausatmen langsamer — das RR ist zu Beginn des Einatmens am längsten und an dessen
+        # Ende am kürzesten (Lehrbuch-RSA), darum +cos zur Welle −sin auf z.
+        rsa = self.rsa_amplitude_ms * math.cos(2 * math.pi * (self.atem_bpm / 60.0) * t_s)
         return max(300.0, basis_rr + rsa + self._rng.gauss(0.0, 8.0))
 
     async def _synthetisch(self) -> AsyncIterator[Messwert | PpiPaket | EkgPaket]:
@@ -374,7 +378,9 @@ class SimulatedSource(HeartRateSource):
 
     def _acc_probe(self, t: float, rate: float) -> tuple[int, int, int]:
         """Eine Probe (mG): Schwerkraft auf y, Wiederholungen längs einer schrägen Achse,
-        Atmung auf z, Rauschen auf allen."""
+        Atmung auf z, Rauschen auf allen. Vorzeichen wie auf der Brust (Gurt sitzend, Befund
+        F4 in hrv-core): z fällt beim Einatmen, die feste Richtung ``(x − z)`` des Prototyps
+        ``hrv_core.prototyp.atemzuege`` steigt — das Einatmen beginnt im Tal der Welle."""
         hub = 0.0
         if self.bewegung:
             self._acc_phase += 1.0 / (rate * self._acc_periode)
@@ -383,7 +389,7 @@ class SimulatedSource(HeartRateSource):
                 streuung = self._acc_rng.gauss(0.0, self.wdh_streuung)
                 self._acc_periode = self.wdh_periode_s * max(0.5, 1.0 + streuung)
             hub = self.acc_hub_mg * math.sin(2 * math.pi * self._acc_phase)
-        atem = ACC_ATEM_MG * math.sin(2 * math.pi * (self.atem_bpm / 60.0) * t)
+        atem = -ACC_ATEM_MG * math.sin(2 * math.pi * (self.atem_bpm / 60.0) * t)
         g = self._acc_rng.gauss
         return (
             round(0.2 * hub + g(0.0, ACC_RAUSCHEN_MG)),

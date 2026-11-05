@@ -13,7 +13,8 @@ Ben, 4.11.2026 (`docs/plan_beschleunigung.md` §3, §4, §12):
   Gefragt wird nach der *Art* des Feldes (`core.result_spec.basis_key`), nie nach dem
   Schlüssel: ``reps_2`` ist auch ein Wiederholungsfeld (P106).
 - `knopf_text`, `anzeige`, `korrektur_text`, `mit_vorzeichen` — Texte der Zählzeile. ±1 ist
-  nur die Korrektur der Messung, kein Handzähler (P118).
+  nur die Korrektur der Messung, kein Handzähler (P118). `rate_text`, `phase_pfeil`,
+  `atem_text` — die Atmung in Worten („12/min ▲“, A3).
 - `rate_waehlen` — die Rate, die das Zählen beim Gerät anfordert (P119b: Akku vor).
 - Ende-Gründe ``ENDE_*`` (Zeitleiste, Art ``zaehlen_ende``) und die Grenzen
   ``KEINE_BEWEGUNG_S``, ``KEIN_ATEM_S``, ``KEINE_DATEN_S``, ``MIN_RATE_HZ``, ``BEREICH_G``.
@@ -370,6 +371,37 @@ def korrektur_text(sensor: int | None, korrektur: int) -> str:
     """
     text = f"Sensor {'…' if sensor is None else sensor}"
     return f"{text} · {mit_vorzeichen(korrektur)}" if korrektur else text
+
+
+#: Die Atemphase als Pfeil: Einatmen ▲, Ausatmen ▼ (Plan §4.5, §7.3)
+PHASE_PFEILE: Final = {"ein": "▲", "aus": "▼"}
+
+
+def rate_text(rate: float | None) -> str:
+    """Die Atemrate je Minute — „–“, solange kein gültiges Fenster eine nannte.
+
+    >>> rate_text(12.0), rate_text(5.96), rate_text(None)
+    ('12/min', '6/min', '–')
+    """
+    return f"{rate:.0f}/min" if rate is not None else "–"
+
+
+def phase_pfeil(phase: str | None) -> str:
+    """▲ beim Einatmen, ▼ beim Ausatmen, leer, wenn der Prototyp es nicht weiß.
+
+    >>> phase_pfeil("ein"), phase_pfeil("aus"), phase_pfeil(None), phase_pfeil("x")
+    ('▲', '▼', '', '')
+    """
+    return PHASE_PFEILE.get(phase or "", "")
+
+
+def atem_text(rate: float | None, phase: str | None) -> str:
+    """Rate und Phase in einem: „12/min ▲“, ohne Phase „12/min“, ohne Rate „– ▼“.
+
+    >>> atem_text(12.0, "ein"), atem_text(12.0, None), atem_text(None, "aus")
+    ('12/min ▲', '12/min', '– ▼')
+    """
+    return f"{rate_text(rate)} {phase_pfeil(phase)}".rstrip()
 
 
 def rate_waehlen(raten_hz: Iterable[int]) -> int:

@@ -166,6 +166,9 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         # … und ob die Person den Satz von Hand eintrug (Diagnosemodus, beide zählen): dann
         # trägt ihn der Sensor nicht noch einmal ein (``core.zaehlen_eintrag.wiederholungen``)
         "von_hand",
+        # Atmung (``zaehlart`` atem, ``satz`` 0 = der ganze Lauf, A3): die letzte gültige
+        # Atemrate je Minute des Prototyps — ``zeiten_s`` sind dort die Einatemzeiten
+        "rate",
         # Teile
         "teil",
         "rolle",

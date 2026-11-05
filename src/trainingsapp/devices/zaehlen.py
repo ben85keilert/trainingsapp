@@ -40,10 +40,26 @@ Laufleiste und der Reiter „Einheit“ ihn ohne Sonderweg.
   gezählte Wiederholung → ``keine_bewegung``. Bricht der Timer ab, gilt der ganze Lauf als
   abgebrochen (``abbruch``), ebenso, wenn das Gerät getrennt wird (`Messlauf.trennen` nimmt
   die Anforderung zurück, oder ein Funkabriss: nicht mehr „verbunden“) oder `KEINE_DATEN_S`
-  lang keine Beschleunigung kommt (``ohne_daten``). Nur Atmung: in A1 gibt es noch keinen
-  Atem-Prototyp — der Dienst zeigt „Atmung: Prototyp folgt“ und endet nur von außen.
+  lang keine Beschleunigung kommt (``ohne_daten``). Nur Atmung: `KEIN_ATEM_S` ohne erkannten
+  Atemzug → ``kein_atem`` (abgebrochen; bei Wdh + Atmung gilt weiter „keine Bewegung“).
   `von_aussen` sagt, ob ein Aufruf (`abbrechen`) das Ende auslöste — dann zeichnet der
   Aufrufer die Oberfläche neu.
+- **Atmung** (A3, Plan §4.5): Ist „Atmung“ an, läuft neben den Sätzen die **Atem-Spur** —
+  der Prototyp ``hrv_core.prototyp.atemzuege.AtemLive`` bekommt in jedem Takt die seit dem
+  letzten Takt neu angekommenen Proben (`Messlauf.acc_reihe` in der Rate des Laufs; wechselt
+  die Rate, taktet der Messlauf um) und meldet Atemphasen („ein“ im Tal, „aus“ auf dem Gipfel
+  der festen Richtung ``x − z``) und alle 5 s ein Prüffenster mit Rate je Minute. Die Phasen
+  gehen ans Beiwerk ``_atem.json`` der laufenden Messung (`Messlauf.atem_phase`,
+  `atem_fenster`, Vertrag ``docs/kompatibilitaet.md`` §15; ohne Aufnahme fehlen nur sie),
+  gezählt werden die Einatemphasen (`atemzuege`), dazu die letzte gültige Rate (`atem_rate`)
+  und die Phase jetzt (`atem_phase`). **Die Atmung läuft nebenbei** (P133): Sätze, Chips,
+  Abschnitte und „Anhalten“ der Uhr berühren sie nicht — Atmen geht weiter; nur das Ende des
+  Laufs beendet beide Spuren. ±1 korrigiert bei nur Atmung die Atemzüge (`atem_korrektur`),
+  bei Wdh + Atmung die Sätze. In der Zeitleiste steht die Atem-Spur als ``zaehlung`` mit
+  ``zaehlart = "atem"`` und ``satz = 0`` (der ganze Lauf; am Ende und alle
+  `ZWISCHENSTAND_S`, es gilt die letzte): Atemzüge, Korrektur, Wert, ``rate``, die
+  Einatemzeiten (``zeiten_s``), Gerät, Prototyp — **nichts ins Tagebuch** (P120,
+  `core.zaehlen_eintrag` übergeht sie). Im Diagnosemodus eine Kontextzeile ``atem`` am Ende.
 - **Zeitleiste** (Vertrag ``docs/plan_einheit.md`` §4): ``zaehlen/zaehlung`` je Satz,
   ``person/korrektur`` je ±1, ``zaehlen/zaehlen_ende`` mit Grund — Ergebnisse mit Zeiten, keine
   Rohdaten (P123). Eingetragen wird daraus am Ende der Einheit (`core.zaehlen_eintrag`).
@@ -72,6 +88,7 @@ Synchron und ohne flet; wer das Ende sofort in der Zeitleiste braucht (abgehakt)
 from __future__ import annotations
 
 import contextlib
+import itertools
 import math
 import time
 from collections.abc import Callable, Sequence
@@ -80,6 +97,7 @@ from typing import Any
 
 import hrv_core
 import numpy as np
+from hrv_core.prototyp import atemzuege as prototyp_atem
 from hrv_core.prototyp import wiederholungen as prototyp_wdh
 
 from ..core.einheit import (
@@ -98,20 +116,23 @@ from ..core.zaehlen import (
     ENDE_ABBRUCH,
     ENDE_FERTIG,
     ENDE_GRUENDE,
+    ENDE_KEIN_ATEM,
     ENDE_KEINE_BEWEGUNG,
+    KEIN_ATEM_S,
     KEINE_BEWEGUNG_S,
     KEINE_DATEN_S,
     VORLAGE_AUTO,
     ZAEHLART_ATEM,
     ZAEHLART_WDH,
     anzeige,
+    atem_text,
     mit_vorzeichen,
     rate_waehlen,
 )
 from ..core.zaehlen_eintrag import ende_text
 from .base import Verbindung
 from .einheit import UebungKontext, kontext_daten
-from .messlauf import Messlauf
+from .messlauf import ACC_LUECKE_PROBEN, Messlauf
 from .profiles import GeraeteProfil
 
 #: So oft zählt der Prototyp das Satzfenster neu (s) — der Takt der Einheit ist 0,25 s
@@ -134,13 +155,18 @@ MIN_SATZ_S = MIN_MARKE_S
 ZWECK = "zaehlen"
 #: Womit gezählt wird — steht an jeder Zählung (Zeitleiste ``prototyp``, flach)
 PROTOTYP = f"hrv_core.prototyp.wiederholungen@{hrv_core.__version__}"
+#: … und womit die Atmung erfasst wird (Atem-Spur, ``zaehlart`` atem)
+PROTOTYP_ATEM = f"hrv_core.prototyp.atemzuege@{hrv_core.__version__}"
+
+#: Was der Atem-Prototyp je Rahmen liefert
+AtemEreignis = prototyp_atem.Phase | prototyp_atem.Fenster
 
 #: Phasen der Anzeige (`ZaehlBaustein.phase`)
 PHASE_STARTET = "startet"  # noch kein ACC-Rahmen seit dem Tipp — „Sensor startet …“
 PHASE_SAMMELT = "sammelt"  # Daten kommen, noch keine Zahl — „…“
 PHASE_ZAEHLT = "zaehlt"  # der Sensor hat eine Zahl
 PHASE_PAUSE = "pause"  # Pause des Timers oder angehalten
-PHASE_ATMUNG = "atmung"  # nur Atmung: in A1 noch ohne Prototyp
+PHASE_ATMUNG = "atmung"  # nur Atmung: der Prototyp erfasst Atemzüge
 PHASE_ENDE = "ende"
 
 
@@ -241,6 +267,10 @@ class Gezaehlt:
     #: je Satz ``{"satz", "sensor", "korrektur", "wert"}``
     saetze: tuple[dict[str, Any], ...]
     grund: str | None
+    #: die Atem-Spur, wenn „Atmung“ an war und Proben kamen: wie ihre ``zaehlung`` in der
+    #: Zeitleiste (``sensor``, ``korrektur``, ``wert``, ``rate``, ``zeiten_s`` …) — nur zur
+    #: Anzeige, nie für den Eintrag (P120)
+    atem: dict[str, Any] | None = None
 
 
 class ZaehlBaustein:
@@ -262,8 +292,9 @@ class ZaehlBaustein:
     ) -> None:
         self.messlauf = messlauf
         self.kontext = kontext
-        #: Wiederholungen zählen (sonst nur Atmung, in A1 ohne Prototyp)
+        #: Wiederholungen zählen (sonst nur Atmung)
         self.wdh = bool(wiederholungen)
+        #: Atmung erfassen — die Atem-Spur neben den Sätzen (Modultext)
         self.atem = bool(atmung)
         #: das Feld, in das die Wiederholungen kommen (`core.zaehlen.zaehlt_in`)
         self.feld = feld
@@ -294,8 +325,31 @@ class ZaehlBaustein:
         #: zählte nur noch das Ende (lieber eine Lücke als ein falscher Wert); die Zahl davor
         #: bleibt nachtragbar
         self.zu_lang = False
+        #: Dauer der letzten Rechnung der Atem-Spur (ms) — sie ist billig und nie gedrosselt
+        self.atem_laufzeit_ms = 0.0
+        #: Summe der ±1 an den Atemzügen (nur Atmung; bei Wdh + Atmung korrigiert ±1 die Sätze)
+        self.atem_korrektur = 0
         #: wann nach der letzten Rechnung die nächste kommt (`takt_nach`)
         self._takt_s = ZAEHL_TAKT_S
+        #: der Atem-Prototyp, solange die Atem-Spur läuft (ab `starten`, wenn „Atmung“ an)
+        self._atem_live: prototyp_atem.AtemLive | None = None
+        #: bis wohin (Uhr der Quelle) die Proben dem Prototyp gefüttert sind — nur Neues
+        self._atem_bis_quelle: float | None = None
+        #: Einatemzeiten (Achse der Einheit) — bestätigte Phasen „ein“
+        self._atem_zeiten: list[float] = []
+        #: die jüngste Einatemzeit bzw. der Start — für `KEIN_ATEM_S`
+        self._atem_letztes_ein_s = 0.0
+        #: Momentaufnahme des Prototyps nach dem letzten Füttern
+        self._atem_stand: prototyp_atem.Stand | None = None
+        #: Atemzüge der Prototypen vor einem Neustart (`_atem_neu_beginnen`)
+        self._atem_basis = 0
+        #: Der letzte Fehler des Atem-Prototyps (``"ValueError: …"``) — er darf das Zählen nie
+        #: stoppen: ein frischer Prototyp zählt weiter (wie ein neues ruhiges Stück)
+        self.atem_fehler = ""
+        #: die letzte gültige Rate je Minute (Prüffenster)
+        self._atem_rate: float | None = None
+        #: was zuletzt als ``zaehlung`` der Atem-Spur ging: (Sensor, Korrektur, ``t_s``)
+        self._atem_geschrieben: tuple[int | None, int, float] | None = None
         self._uhr: Callable[[], float] = messlauf.uhr
         #: (Uhr der Einheit, Uhr der Quelle) beim Start — für `_auf_quelle`
         self._anker: tuple[float, float] | None = None
@@ -361,13 +415,38 @@ class ZaehlBaustein:
     def angehalten(self) -> bool:
         return self._angehalten_seit is not None
 
+    # -- Atem-Spur (Stand) ------------------------------------------------------------------
+
+    @property
+    def atem_sensor(self) -> int | None:
+        """Was der Atem-Prototyp zählte (Einatemphasen) — ``None``, bevor Proben kamen oder
+        ohne „Atmung“."""
+        if self._atem_stand is None:
+            return None
+        return self._atem_basis + self._atem_stand.atemzuege
+
+    @property
+    def atemzuege(self) -> int:
+        """Atemzüge: Sensor plus Korrektur, nie weniger als 0 (`core.zaehlen.anzeige`)."""
+        return anzeige(self.atem_sensor, self.atem_korrektur)
+
+    @property
+    def atem_rate(self) -> float | None:
+        """Die letzte gültige Atemrate je Minute — ``None``, solange kein Fenster eine nannte."""
+        return self._atem_rate
+
+    @property
+    def atem_phase(self) -> str | None:
+        """Die Phase jetzt: ``"ein"`` (▲), ``"aus"`` (▼) oder ``None`` (bewegt, unbekannt)."""
+        return self._atem_stand.phase if self._atem_stand is not None else None
+
     @property
     def phase(self) -> str:
         """Was die Anzeige zeigt (``PHASE_*``)."""
         if self.grund is not None:
             return PHASE_ENDE
         if not self.wdh:
-            return PHASE_ATMUNG
+            return PHASE_STARTET if self.messlauf.acc_zuletzt is None else PHASE_ATMUNG
         if self._offen is None or self._angehalten_seit is not None:
             return PHASE_PAUSE
         if self.messlauf.acc_zuletzt is None:
@@ -375,21 +454,33 @@ class ZaehlBaustein:
         return PHASE_SAMMELT if self._offen.sensor is None else PHASE_ZAEHLT
 
     def status(self) -> str:
-        """Für Infoleiste und Laufleiste: „Kniebeuge · 12“."""
+        """Für Infoleiste und Laufleiste: „Kniebeuge · 12“ — nur Atmung „Box Breathing ·
+        Atmung · 14 · 12/min ▲“, beides „Kniebeuge · 12 · Atmung 12/min ▲“."""
         if self._t0 is None:
             return "zählt ab dem Tipp"
         phase = self.phase
         if not self.wdh:
-            return f"{self.name} · Atmung" + (": Prototyp folgt" if phase == PHASE_ATMUNG else "")
+            if phase == PHASE_STARTET and not self.atem_korrektur:
+                return f"{self.name} · Atmung · Sensor startet …"
+            if phase == PHASE_ENDE:
+                return f"{self.name} · {self.atemzuege} Atemzüge"
+            return f"{self.name} · Atmung · {self.atemzuege} · {self._atem_text()}"
+        dazu = ""
+        if self.atem and self.atem_sensor is not None:
+            dazu = f" · Atmung {self._atem_text()}"
         if phase == PHASE_STARTET and not self.korrektur:
             return f"{self.name} · Sensor startet …"
         if phase == PHASE_SAMMELT and not self.korrektur:
-            return f"{self.name} · …"
+            return f"{self.name} · …{dazu}"
         if phase == PHASE_PAUSE and self.satz is None:
-            return f"{self.name} · Pause"
+            return f"{self.name} · Pause{dazu}"
         if phase == PHASE_ENDE:
-            return f"{self.name} · {self.summe} Wdh."
-        return f"{self.name} · {self.wert}"
+            return f"{self.name} · {self.summe} Wdh.{dazu}"
+        return f"{self.name} · {self.wert}{dazu}"
+
+    def _atem_text(self) -> str:
+        """„12/min ▲“ (`core.zaehlen.atem_text`)."""
+        return atem_text(self.atem_rate, self.atem_phase)
 
     def _daten(self) -> dict[str, Any]:
         daten = kontext_daten(self.kontext)
@@ -419,6 +510,8 @@ class ZaehlBaustein:
         self.messlauf.zaehl_satz = self._fuer_diagnose
         if self.wdh:
             self._satz_beginnen(self._start_s)
+        if self.atem:
+            self._atem_beginnen()
         self.beteiligung = Beteiligung(
             "zaehlen", Rolle.MITSTARTEN, von_s=self._start_s, daten=self._daten()
         )
@@ -443,6 +536,7 @@ class ZaehlBaustein:
                 self._enden(bei, grund)
             else:
                 self._rechnen(t)  # was bis jetzt kam, zählt noch
+                self._atem_fuettern(t)  # die Atem-Spur: nur das Neue, jeden Takt
                 if not self.zu_lang and self._gerechnet != t and self._keine_bewegung(t):
                     # Gedrosselt (`takt_nach`) ist der Stand bis zu `MAX_TAKT_S` alt — vor dem
                     # Urteil „keine Bewegung“ zählt der Prototyp bis jetzt: Die Wiederholungen
@@ -452,6 +546,9 @@ class ZaehlBaustein:
                     self._enden(t, ENDE_ABBRUCH)
                 elif self._keine_bewegung(t):
                     self._enden(t, ENDE_KEINE_BEWEGUNG)
+                elif self._kein_atem(t):
+                    # Nur Atmung: abgelegt, verrutscht — nichts zu erfassen
+                    self._enden(t, ENDE_KEIN_ATEM)
                 elif self._getrennt():
                     # Getrennt (`Messlauf.trennen`, ein Funkabriss): es kommen keine Proben
                     # mehr — sofort abgebrochen, nicht 60 s später als „keine Bewegung“; die
@@ -524,6 +621,7 @@ class ZaehlBaustein:
             feld=self.feld,
             saetze=tuple(s.als_dict() for s in self.saetze),
             grund=self.grund,
+            atem=self._atem_daten() if self._atem_erfasst() else None,
         )
 
     # -- Von außen -----------------------------------------------------------------------
@@ -551,6 +649,8 @@ class ZaehlBaustein:
             raise ValueError("Korrektur je Tipp: +1 oder −1")
         if self._t0 is None or self.grund is not None:
             return False
+        if not self.wdh:
+            return self._atem_korrigieren(delta)
         satz = self._offen
         if satz is None and self.saetze and not self.saetze[-1].gemeldet:
             satz = self.saetze[-1]
@@ -742,6 +842,11 @@ class ZaehlBaustein:
             and t - satz.ruhe_seit_s >= KEINE_BEWEGUNG_S
         )
 
+    def _kein_atem(self, t: float) -> bool:
+        """Nur Atmung: `KEIN_ATEM_S` ohne bestätigten Atemzug seit dem Start bzw. dem letzten
+        — bei Wdh + Atmung urteilt „keine Bewegung“ (`_keine_bewegung`)."""
+        return not self.wdh and self.atem and t - self._atem_letztes_ein_s >= KEIN_ATEM_S
+
     def _getrennt(self) -> bool:
         """Nahm jemand anders die Anforderung zurück (`Messlauf.trennen`) — oder riss die
         Verbindung ab (die Quelle verbindet neu, Status nicht mehr „verbunden“)?"""
@@ -754,9 +859,9 @@ class ZaehlBaustein:
 
     def _ohne_daten(self) -> bool:
         """Kam `KEINE_DATEN_S` lang kein Rahmen der Beschleunigung (seit dem Tipp bzw. seit
-        dem letzten)? Nur beim Zählen der Wiederholungen — „Anhalten“ und Pausen des Timers
-        halten den Strom nicht an."""
-        if not self.wdh or self._anker is None:
+        dem letzten)? Für beide Spuren — „Anhalten“ und Pausen des Timers halten den Strom
+        nicht an."""
+        if self._anker is None:
             return False
         zuletzt = self.messlauf.acc_zuletzt  # Uhr der Quelle
         seit = self._anker[1] if zuletzt is None else max(zuletzt, self._anker[1])
@@ -866,6 +971,181 @@ class ZaehlBaustein:
             # Zahl: zählt der Prototyp das wachsende Fenster neu, darf die Zahl kurz sinken
             satz.ruhe_seit_s = max(satz.ruhe_seit_s, min(zeiten[-1], t))
 
+    # -- Atem-Spur ----------------------------------------------------------------------
+
+    def _atem_beginnen(self) -> None:
+        """Die Atem-Spur beginnt mit dem Lauf: Prototyp in der Rate des Laufs, Sammler und
+        Lauf am Messlauf (ohne Aufnahme tut der nichts)."""
+        self._atem_live = prototyp_atem.AtemLive(float(self.rate_hz))
+        quelle_s = self._auf_quelle(self._start_s)
+        self._atem_bis_quelle = quelle_s
+        self._atem_letztes_ein_s = self._start_s
+        self._messlauf_atem("atem_sammler", geraet=self.geraet, rate_hz=self.rate_hz)
+        self._messlauf_atem("atem_lauf_beginn", quelle_s)
+
+    def _atem_fuettern(self, t: float) -> None:
+        """Die seit dem letzten Takt neu angekommenen Proben dem Prototyp geben — in der
+        Rate des Laufs (`Messlauf.acc_reihe` taktet andere um), je lückenlosem Stück ein
+        Rahmen (über eine Lücke hinweg sieht der Prototyp den Sprung der Zeit). Nicht
+        gedrosselt: Die Rechnung ist billig, und die Phasen sollen pünktlich kommen."""
+        live = self._atem_live
+        if live is None or self._t0 is None or self._atem_bis_quelle is None:
+            return
+        bis = self._auf_quelle(t)
+        if bis <= self._atem_bis_quelle:
+            return
+        reihe = self.messlauf.acc_reihe(self._atem_bis_quelle, bis, rate=self.rate_hz, min_s=0.0)
+        if reihe is None or reihe.xyz.shape[0] == 0:
+            return
+        rate = float(reihe.rate_hz)
+        self._atem_bis_quelle = float(reihe.t[-1]) + 0.5 / rate  # ab der nächsten Probe
+        beginn = time.perf_counter()
+        try:
+            schnitte = np.flatnonzero(np.diff(reihe.t) > ACC_LUECKE_PROBEN / rate) + 1
+            grenzen = [0, *schnitte.tolist(), reihe.t.shape[0]]
+            for von, bis_i in itertools.pairwise(grenzen):
+                if bis_i > von:
+                    stueck = reihe.xyz[von:bis_i]
+                    self._atem_ereignisse(live.rahmen(stueck, float(reihe.t[von])))
+            self._atem_stand = live.stand()
+        except Exception as fehler:  # der Prototyp darf das Zählen nie stoppen
+            self.atem_fehler = f"{type(fehler).__name__}: {fehler}"
+            self._atem_neu_beginnen()
+        finally:
+            self.atem_laufzeit_ms = (time.perf_counter() - beginn) * 1000.0
+        self._atem_zwischenstand(t)
+
+    def _atem_neu_beginnen(self) -> None:
+        """Nach einem Fehler des Prototyps (`atem_fehler`): ein frischer zählt weiter — die
+        Atemzüge bis dahin bleiben (`_atem_basis`), noch unbestätigte Wendepunkte des alten
+        sind weg (höchstens eine Sekunde), die letzte Rate bleibt bis zum nächsten Fenster."""
+        alt = self._atem_stand
+        if alt is not None:
+            self._atem_basis += alt.atemzuege
+        self._atem_live = prototyp_atem.AtemLive(float(self.rate_hz))
+        self._atem_stand = prototyp_atem.Stand(
+            t_s=alt.t_s if alt is not None else 0.0,
+            atemzuege=0,
+            phase=None,
+            rate_pro_min=None,
+            gueltig=False,
+            gruende=("neustart",),
+        )
+
+    def _atem_ereignisse(self, ereignisse: Sequence[AtemEreignis]) -> None:
+        """Phasen ans Beiwerk und in die eigene Zählung, Fenster ans Beiwerk und die letzte
+        gültige Rate merken. Die Zeiten liegen auf der Uhr der Quelle (`AccReihe.t`)."""
+        for e in ereignisse:
+            if isinstance(e, prototyp_atem.Phase):
+                self._messlauf_atem("atem_phase", e.t_s, e.art)
+                if e.art == prototyp_atem.EIN:
+                    t_e = round(self._von_quelle(e.t_s), 2)
+                    self._atem_zeiten.append(t_e)
+                    self._atem_letztes_ein_s = max(self._atem_letztes_ein_s, t_e)
+            else:
+                grund = e.gruende[0] if e.gruende else ""
+                self._messlauf_atem("atem_fenster", e.bis_s, e.rate_pro_min, e.gueltig, grund)
+                if e.gueltig and e.rate_pro_min is not None:
+                    self._atem_rate = float(e.rate_pro_min)
+
+    def _atem_enden(self, t: float) -> None:
+        """Die Atem-Spur endet mit dem Lauf: offene Wendepunkte bestätigen (es kommt keine
+        Bewegung mehr), die Zusammenfassung in die Zeitleiste, Lauf-Ende ans Beiwerk, eine
+        Kontextzeile im Diagnosemodus."""
+        live = self._atem_live
+        if live is None:
+            return
+        self._atem_fuettern(t)  # was bis jetzt kam
+        self._atem_ereignisse(live.abschluss())
+        self._atem_stand = live.stand()
+        if self._atem_erfasst():
+            self._atem_zaehlung_schreiben(t)
+            self._kontext(
+                "atem",
+                wert=self.atemzuege,
+                satz=0,
+                phase=self._atem_rate if self._atem_rate is not None else "",
+                t=self._quelle_ns(t),
+            )
+        self._messlauf_atem("atem_lauf_ende", self._auf_quelle(t))
+        self._atem_live = None
+
+    def _atem_erfasst(self) -> bool:
+        """Gab es etwas zu melden — Proben kamen, oder die Person korrigierte?"""
+        return self.atem and (self.atem_sensor is not None or bool(self.atem_korrektur))
+
+    def _atem_korrigieren(self, delta: int) -> bool:
+        """±1 an den Atemzügen (nur Atmung): ``person/korrektur`` mit ``zaehlart`` atem und
+        ``satz`` 0. Unter 0 geht es nicht."""
+        if self._atem_live is None or (delta < 0 and self.atemzuege == 0):
+            return False
+        self.atem_korrektur += delta
+        t = max(self._uhr() - self._t0, self._start_s) if self._t0 is not None else 0.0
+        self._neu.append(
+            Ereignis(
+                t,
+                "person",
+                "korrektur",
+                f"{self.name}: {mit_vorzeichen(delta)} Atemzug",
+                {"delta": delta, "satz": 0, "zaehlart": ZAEHLART_ATEM},
+            )
+        )
+        return True
+
+    def _atem_zwischenstand(self, t: float) -> None:
+        """Wie `_zwischenstand`: die Atem-Spur alle `ZWISCHENSTAND_S` in die Zeitleiste,
+        wenn sich ihr Stand änderte."""
+        if not self._atem_erfasst():
+            return
+        alt = self._atem_geschrieben
+        seit = alt[2] if alt is not None else self._start_s
+        if t - seit < ZWISCHENSTAND_S or (
+            alt is not None and alt[:2] == (self.atem_sensor, self.atem_korrektur)
+        ):
+            return
+        self._atem_zaehlung_schreiben(t)
+
+    def _atem_daten(self) -> dict[str, Any]:
+        """Die Atem-Spur als Daten der ``zaehlung`` (``satz`` 0 = der ganze Lauf)."""
+        daten: dict[str, Any] = {
+            "satz": 0,
+            "zaehlart": ZAEHLART_ATEM,
+            "sensor": self.atem_sensor,
+            "korrektur": self.atem_korrektur,
+            "wert": self.atemzuege,
+            "zeiten_s": list(self._atem_zeiten),
+            "prototyp": PROTOTYP_ATEM,
+        }
+        if self._atem_rate is not None:
+            daten["rate"] = self._atem_rate
+        if self.geraet:
+            daten["geraet"] = self.geraet
+        return daten
+
+    def _atem_zaehlung_schreiben(self, t_s: float) -> None:
+        stand = (self.atem_sensor, self.atem_korrektur, round(t_s, 3))
+        if self._atem_geschrieben == stand:
+            return
+        self._atem_geschrieben = stand
+        self._neu.append(
+            Ereignis(
+                t_s,
+                "zaehlen",
+                "zaehlung",
+                f"{self.name}: {self.atemzuege} Atemzüge",
+                self._atem_daten(),
+            )
+        )
+
+    def _messlauf_atem(self, was: str, *args: Any, **felder: Any) -> None:
+        """Eine Hülle des Messlaufs für die Atem-Spur (`Messlauf.atem_sammler`, `atem_phase`
+        …) — fehlt sie (eine Attrappe) oder wirft sie, läuft das Zählen weiter."""
+        ruf = getattr(self.messlauf, was, None)
+        if not callable(ruf):
+            return
+        with contextlib.suppress(Exception):
+            ruf(*args, **felder)
+
     # -- Ende und Zeitleiste ---------------------------------------------------------------
 
     def _enden(self, t: float, grund: str) -> None:
@@ -874,6 +1154,7 @@ class ZaehlBaustein:
                 self._rechnen(t, erzwingen=True)
             self._satz_schliessen(t)
         self._melden()
+        self._atem_enden(t)
         self.grund = grund
         self._neu.append(
             Ereignis(
@@ -1065,6 +1346,7 @@ __all__ = [
     "PHASE_STARTET",
     "PHASE_ZAEHLT",
     "PROTOTYP",
+    "PROTOTYP_ATEM",
     "ZAEHL_TAKT_S",
     "ZIEL_MS",
     "ZWECK",

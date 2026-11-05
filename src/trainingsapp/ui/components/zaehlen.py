@@ -88,6 +88,9 @@ def meldung_zeigen(page: Any, state: Any, meldung: ZaehlMeldung | None = None) -
         state.zaehl_meldung = meldung
         return False
     gemeldet = meldung
+    if gemeldet.atmung:  # nur Atmung: nichts einzutragen (P120)
+        _melden(page, gemeldet.text)
+        return True
 
     def eintragen() -> None:
         eintrag = uebung_lauf.lauf_eintragen(state, gemeldet.einheit_id)
@@ -106,8 +109,12 @@ def meldung_zeigen(page: Any, state: Any, meldung: ZaehlMeldung | None = None) -
     return False
 
 
-def _flaeche(delta: int, hoehe: int, on_click: Callable[[], None]) -> ft.Control:
-    """Eine große Fläche −1 bzw. +1 — man trifft sie auch vom Boden aus."""
+def _flaeche(
+    delta: int, hoehe: int, on_click: Callable[[], None], *, atmung: bool = False
+) -> ft.Control:
+    """Eine große Fläche −1 bzw. +1 — man trifft sie auch vom Boden aus. Nur Atmung
+    (``atmung``): die Korrektur gilt den Atemzügen."""
+    was = "Atemzug" if atmung else "Wiederholung"
     return ft.Container(
         expand=True,
         height=hoehe,
@@ -115,7 +122,7 @@ def _flaeche(delta: int, hoehe: int, on_click: Callable[[], None]) -> ft.Control
         ink=True,
         bgcolor=ft.Colors.SECONDARY_CONTAINER,
         alignment=ft.Alignment.CENTER,
-        tooltip="Eine Wiederholung mehr" if delta > 0 else "Eine Wiederholung weniger",
+        tooltip=f"Ein{'' if atmung else 'e'} {was} {'mehr' if delta > 0 else 'weniger'}",
         content=ft.Text(
             "+1" if delta > 0 else "−1",
             size=26 if hoehe >= FLAECHE_PX else 20,
@@ -146,15 +153,16 @@ def zahl_reihe(
 ) -> ft.Control:
     """Die Zahl mit −1/+1 und der kleinen Zeile — in der laufenden Uhr und im Timer
     (``kompakt``) und in der Zählzeile. Angemeldet unter ``name`` (`zaehl_stand.anmelden`):
-    die Einheit zieht Zahl und Zeile nach, die Flächen bleiben. Zählt der Sensor nicht mehr
+    die Einheit zieht Zahl und Zeilen nach, die Flächen bleiben. Zählt der Sensor nicht mehr
     (abgebrochen, keine Bewegung — die Uhr läuft weiter), gibt es keine Flächen: ±1 ginge ins
-    Leere (`zaehl_stand.korrigieren` korrigiert nur, solange gezählt wird)."""
+    Leere (`zaehl_stand.korrigieren` korrigiert nur, solange gezählt wird). Nur Atmung: die
+    Zahl sind die Atemzüge, ±1 korrigiert sie, darunter Rate und ▲/▼; bei Wdh + Atmung steht
+    die Atem-Spur als dritte Zeile („Atmung 12/min ▲“, Plan §4.5)."""
     zahl = ft.Text(
         zaehl_stand.zahl_text(z),
         size=34 if kompakt else 56,
         weight=ft.FontWeight.BOLD,
         text_align=ft.TextAlign.CENTER,
-        visible=z.wdh,  # nur Atmung: in A1 ohne Zahl (Prototyp folgt)
     )
     klein = ft.Text(
         zaehl_stand.klein_text(z),
@@ -162,23 +170,39 @@ def zahl_reihe(
         opacity=0.8,
         text_align=ft.TextAlign.CENTER,
     )
-    zaehl_stand.anmelden(state, name, zaehl_stand.ZaehlAnzeige(uebung_id, item_id, zahl, klein))
+    atem = (
+        ft.Text(
+            zaehl_stand.atem_text(z),
+            size=11 if kompakt else 12,
+            opacity=0.8,
+            text_align=ft.TextAlign.CENTER,
+        )
+        if z.wdh and z.atem
+        else None
+    )
+    zaehl_stand.anmelden(
+        state, name, zaehl_stand.ZaehlAnzeige(uebung_id, item_id, zahl, klein, atem)
+    )
+    zeilen: list[ft.Control] = [zahl, klein]
+    if atem is not None:
+        zeilen.append(atem)
     mitte = ft.Column(
         spacing=0,
         tight=True,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        controls=[zahl, klein],
+        controls=zeilen,
     )
-    if not z.wdh or not z.aktiv:
+    if not z.aktiv:
         return ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[mitte])
     hoehe = FLAECHE_KOMPAKT_PX if kompakt else FLAECHE_PX
+    nur_atmung = not z.wdh
     return ft.Row(
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
         controls=[
-            _flaeche(-1, hoehe, _korrigierer(state, uebung_id, item_id, -1)),
+            _flaeche(-1, hoehe, _korrigierer(state, uebung_id, item_id, -1), atmung=nur_atmung),
             ft.Container(expand=True, alignment=ft.Alignment.CENTER, content=mitte),
-            _flaeche(+1, hoehe, _korrigierer(state, uebung_id, item_id, +1)),
+            _flaeche(+1, hoehe, _korrigierer(state, uebung_id, item_id, +1), atmung=nur_atmung),
         ],
     )
 

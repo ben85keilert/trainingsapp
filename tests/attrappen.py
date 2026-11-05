@@ -62,6 +62,8 @@ class Gurt(HeartRateSource):
         self.bewegung = True
         self.wdh_periode_s = 2.5
         self.acc_hub_mg = 300.0
+        #: Atmung 6/min auf z (mG) — 0: die Person hält den Atem an (Ende ``kein_atem``)
+        self.atem_mg = 25.0
         self.acc_rahmen_s = 0.18
         self._acc_t: float | None = None
 
@@ -124,7 +126,9 @@ class Gurt(HeartRateSource):
                     if self.bewegung
                     else 0.0
                 )
-                atem = 25.0 * math.sin(2 * math.pi * t / 10.0)
+                # Wie auf der Brust: z fällt beim Einatmen, (x − z) steigt (Prototyp
+                # ``hrv_core.prototyp.atemzuege``) — das Einatmen beginnt bei t ≡ 7,5 mod 10
+                atem = -self.atem_mg * math.sin(2 * math.pi * t / 10.0)
                 proben.append((round(0.2 * hub), round(-1000 + hub), round(atem)))
             t_letzte = self._acc_t + (n - 1) / rate
             self._acc_t += n / rate

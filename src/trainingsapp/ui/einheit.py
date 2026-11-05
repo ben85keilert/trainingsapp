@@ -149,9 +149,14 @@ class ZaehlMeldung:
     #: warum es von selbst endete (`core.zaehlen_eintrag.von_selbst_text`) — leer: eine
     #: andere Übung
     warum: str = ""
+    #: nur Atmung (A3): „Box Breathing · Atmung beendet — 2 min kein Atemzug erkannt“; es gibt
+    #: nichts einzutragen (P120), darum kein „Eintragen“
+    atmung: bool = False
 
     @property
     def text(self) -> str:
+        if self.atmung:
+            return f"{self.name} · Atmung beendet — {self.warum}"
         return nicht_eingetragen_text(self.name, self.wdh, self.warum)
 
 
@@ -645,13 +650,20 @@ def _von_selbst_melden(state: Any, e: Einheitslauf, neu: list[Ereignis]) -> None
     if not any((x.quelle, x.art) == ("zaehlen", "zaehlen_ende") for x in neu):
         return
     z = e.teil("zaehlen")
-    if not isinstance(z, ZaehlBaustein) or z.von_aussen or not z.wdh:
+    if not isinstance(z, ZaehlBaustein) or z.von_aussen:
         return
     warum = von_selbst_text(
         z.grund, getrennt=z.getrennt, ohne_daten=z.ohne_daten, zu_lang=z.zu_lang
     )
+    if not warum:
+        return
+    if not z.wdh:
+        # Nur Atmung: nichts einzutragen — die Meldung sagt nur, warum es endete
+        # („— 2 min kein Atemzug erkannt“, Plan §4.5)
+        state.zaehl_meldung = ZaehlMeldung(e.id, z.kontext.uebung_id, z.name, 0, warum, atmung=True)
+        return
     wdh = z.summe
-    if warum and wdh > 0:
+    if wdh > 0:
         state.zaehl_meldung = ZaehlMeldung(e.id, z.kontext.uebung_id, z.name, wdh, warum)
 
 

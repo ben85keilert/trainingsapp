@@ -33,6 +33,7 @@ from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.plan import einzel_plan, plan_view  # noqa: E402
 
 MEHR, WENIGER = "Eine Wiederholung mehr", "Eine Wiederholung weniger"
+ATEM_MEHR, ATEM_WENIGER = "Ein Atemzug mehr", "Ein Atemzug weniger"
 
 
 @pytest.fixture
@@ -665,7 +666,8 @@ async def test_ohne_mengen_und_zugeklappt(umgebung) -> None:
     z = _zaehl_teil(state)
     assert not z.wdh and z.atem
     ansicht = _ansicht(seite, state, atem)
-    assert "Atmung: Prototyp folgt" in _texte(ansicht) and not _flaechen(ansicht, MEHR)
+    assert "Sensor startet …" in _texte(ansicht) and not _flaechen(ansicht, MEHR)
+    assert len(_flaechen(ansicht, ATEM_MEHR)) == 1  # ±1 gilt den Atemzügen (A3)
     _knopf(ansicht, "Zählen abbrechen").on_click()
     await _bis_vorbei(state, uhr, gurt)
     assert _eintraege(state) == []  # nur Atmung: nichts einzutragen
@@ -690,6 +692,66 @@ async def test_ohne_mengen_und_zugeklappt(umgebung) -> None:
     assert len(_knoepfe(ansicht, "Wdh. zählen")) == 1  # der Knopf nur im offenen Block
     uebung_lauf.zaehlen_beenden(state, kniebeuge.id, plan.items[0].id)
     await _bis_vorbei(state, uhr, gurt)
+
+
+async def test_atmung_erfassen_zeigt_atemzuege_rate_und_phase(umgebung) -> None:
+    """A3: „Atmung erfassen“ zeigt groß die Atemzüge, darunter „Atmung 4 · 6/min ▲ ·
+    Prototyp“; ±1 korrigiert die Atemzüge, nur die Texte ziehen nach. Hört die Atmung auf,
+    endet der Lauf nach 2 min als ``kein_atem`` mit der Meldung „— 2 min kein Atemzug erkannt“
+    (ohne „Eintragen“: ins Tagebuch kommt nichts, P120). Mit Wiederholungen dazu bleibt die
+    Zahl die der Wiederholungen, die Atem-Spur steht als dritte Zeile."""
+    state, uhr, gurt = umgebung
+    gurt.bewegung = False
+    seite = Seite()
+    atem = Exercise(name="Box Breathing", typen=["Atmung"], uhr=False)
+    state.uebungen.speichern(atem)
+    _knopf(_ansicht(seite, state, atem), "Atmung erfassen").on_click()
+    await _sekunden(state, uhr, gurt, 45)
+    z = _zaehl_teil(state)
+    assert not z.wdh and z.atem and z.atemzuege >= 3 and z.atem_rate is not None
+    ansicht = _ansicht(seite, state, atem)
+    texte = _texte(ansicht)
+    assert str(z.atemzuege) in texte and zaehl_stand.klein_text(z) in texte
+    assert "6/min" in zaehl_stand.klein_text(z) and zaehl_stand.atem_phase(z) in ("▲", "▼")
+    assert _knopf(ansicht, "Fertig").tooltip == "Atmung beenden — ins Tagebuch kommt nichts"
+    (mehr,) = _flaechen(ansicht, ATEM_MEHR)
+    vorher = z.atemzuege
+    mehr.on_click()
+    assert z.atem_korrektur == 1 and z.atemzuege == vorher + 1
+    assert str(vorher + 1) in _texte(ansicht)  # nachgezogen, nicht neu gebaut
+    assert "· +1 ·" in zaehl_stand.klein_text(z)
+    gurt.atem_mg = 0.0  # der Gurt liegt still
+    await _sekunden(state, uhr, gurt, 135)
+    assert z.grund == "kein_atem"
+    await _bis_vorbei(state, uhr, gurt)  # ein Zähllauf endet mit dem Zählen
+    meldung = uebung_lauf.meldung_abholen(state)
+    assert meldung is not None and meldung.atmung
+    assert meldung.text == "Box Breathing · Atmung beendet — 2 min kein Atemzug erkannt"
+    (lauf,) = uebung_lauf.laeufe_heute(state, atem.id)  # steht da, aber nichts nachzutragen
+    assert _eintraege(state) == [] and lauf.zaehlart == "atem" and not lauf.nachzutragen
+    gurt.atem_mg, gurt.bewegung = 25.0, True
+
+    # Wdh + Atmung: die Zahl sind die Wiederholungen, die Atem-Spur eine Zeile darunter
+    u = _kniebeuge(state, "Kniebeuge", "reps", beschleunigung=SensorWahl(atmung=True))
+    _knopf(_ansicht(seite, state, u), "Wdh. zählen · Atmung").on_click()
+    await _sekunden(state, uhr, gurt, 12)
+    gurt.bewegung = False
+    await _sekunden(state, uhr, gurt, 25)
+    z = _zaehl_teil(state)
+    assert z.wdh and z.atem and z.wert >= 3 and z.atem_sensor is not None
+    ansicht = _ansicht(seite, state, u)
+    texte = _texte(ansicht)
+    assert str(z.wert) in texte and zaehl_stand.atem_text(z) in texte
+    assert zaehl_stand.atem_text(z).startswith("Atmung ")
+    assert len(_flaechen(ansicht, MEHR)) == 1 and not _flaechen(ansicht, ATEM_MEHR)
+    uebung_lauf.zaehlen_beenden(state, u.id)
+    await _bis_vorbei(state, uhr, gurt)
+    for _ in range(100):  # das Eintragen kommt mit dem Abschluss der Einheit (`_laufen`)
+        if _eintraege(state):
+            break
+        await asyncio.sleep(0.01)
+    (eintrag,) = _eintraege(state)
+    assert eintrag.result["reps"] == [z.wert]  # die Atmung nicht
 
 
 async def test_keine_bewegung_neben_der_uhr_zeichnet_neu(umgebung) -> None:

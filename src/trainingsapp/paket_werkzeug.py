@@ -141,6 +141,33 @@ def _texte(roh: dict[str, Any]) -> list[tuple[str, str]]:
     return texte
 
 
+def _plaene_mit_ort(roh: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """``(Wo, Plan)`` aller Pläne eines Pakets: ``plaene[]`` und die der Kurskapitel.
+
+    >>> roh = {"plaene": [{"name": "Morgen"}], "kurse": [{"name": "K", "kapitel": [
+    ...     {"titel": "T", "plaene": [{"name": "Stehen"}]}]}]}
+    >>> [wo for wo, _ in _plaene_mit_ort(roh)]
+    ['Plan „Morgen“', 'Kurs „K“, Kapitel „T“, Plan „Stehen“']
+    """
+    out: list[tuple[str, dict[str, Any]]] = []
+    for pl in roh.get("plaene") or []:
+        if isinstance(pl, dict):
+            out.append((f"Plan „{pl.get('name', pl.get('key', '?'))}“", pl))
+    for k in roh.get("kurse") or []:
+        if not isinstance(k, dict):
+            continue
+        wo = f"Kurs „{k.get('name', k.get('key', '?'))}“"
+        for kap in k.get("kapitel") or []:
+            if not isinstance(kap, dict):
+                continue
+            titel = kap.get("titel", kap.get("key", "?"))
+            for pl in kap.get("plaene") or []:
+                if isinstance(pl, dict):
+                    name = pl.get("name", "?")
+                    out.append((f"{wo}, Kapitel „{titel}“, Plan „{name}“", pl))
+    return out
+
+
 def wortliste_pruefen(roh: dict[str, Any], begriffe: Iterable[str]) -> list[str]:
     """Treffer der Wortliste in den Texten — Groß/klein egal, je Stelle ein Satz.
 
@@ -171,7 +198,9 @@ def pruefen(
     „Beschleunigungssensor“) ist ein falscher Typ ein Fehler, ein unbekannter Schlüssel ein
     Hinweis (`core.zaehlen.wahl_pruefen`) — die App läse beides still als Vorgabe. Für ``takt``
     (`core.takt.takt_pruefen`) ebenso: unbrauchbare Dauer oder Tempo ein Fehler, unbekannte
-    Art, Klang oder Schlüssel ein Hinweis."""
+    Art, Klang oder Schlüssel ein Hinweis. Beides auch **je Planübung** in
+    ``plaene[].uebungen[]`` und ``kurse[].kapitel[].plaene[].uebungen[]`` (A6) — mit dem Weg
+    dorthin; ein unlesbarer Takt heißt dort „die Planübung folgt der Übung“."""
     fehler: list[str] = []
     hinweise: list[str] = []
     try:
@@ -211,6 +240,19 @@ def pruefen(
             f_takt, h_takt = takt_pruefen(e["takt"])
             fehler.extend(f"{wo}: takt: {x}" for x in f_takt)
             hinweise.extend(f"{wo}: takt: {x}" for x in h_takt)
+    for wo, pl in _plaene_mit_ort(roh):
+        for pe in pl.get("uebungen") or []:
+            if not isinstance(pe, dict):
+                continue
+            wo_pe = f"{wo}, Übung „{pe.get('uebung', '?')}“"
+            if "beschleunigung" in pe:
+                f_acc, h_acc = wahl_pruefen(pe["beschleunigung"])
+                fehler.extend(f"{wo_pe}: beschleunigung: {x}" for x in f_acc)
+                hinweise.extend(f"{wo_pe}: beschleunigung: {x}" for x in h_acc)
+            if "takt" in pe and pe["takt"] != {}:  # `takt = {}` = ausdrücklich keiner
+                f_takt, h_takt = takt_pruefen(pe["takt"], ohne="die Planübung folgt der Übung")
+                fehler.extend(f"{wo_pe}: takt: {x}" for x in f_takt)
+                hinweise.extend(f"{wo_pe}: takt: {x}" for x in h_takt)
     if inhalt.paket.version is None:
         hinweise.append("Kopf ohne `version` — ohne sie erkennt kein Gerät ein Update")
     for treffer in wortliste_pruefen(roh, wortliste):

@@ -442,3 +442,52 @@ def test_uebernehmen_aus_der_datenbank_mit_kapitelplan(tmp_path) -> None:
     datei.write_text(text.replace("version = 2", "version = 3"), encoding="utf-8")
     zeilen, fehler = uebernehmen(db, datei)
     assert zeilen == [] and "Version 2" in fehler[0]
+
+
+def test_pruefen_sieht_takt_und_beschleunigung_je_planuebung(tmp_path) -> None:
+    """Prüfrunde A6, Befund 2: `pruefen` meldet Unsinn in `takt`/`beschleunigung` auch an
+    `plaene[].uebungen[]` und in den Plänen der Kurskapitel — mit dem Weg dorthin; ein
+    unlesbarer Takt heißt dort „die Planübung folgt der Übung“ (so liest ihn die App), nie
+    „kein Takt“. `takt = {}` (ausdrücklich keiner) ist in Ordnung."""
+    from trainingsapp.core.takt import AUS
+
+    text = (
+        QIGONG_MIT_KURS.replace(
+            'uebungen = [{ uebung = "baum" }]',
+            'uebungen = [{ uebung = "baum", takt = { phasen = "x" }, '
+            'beschleunigung = { atmung = "ja", wdh = true } }]',
+        )
+        + """
+[[plaene]]
+key = "morgen"
+name = "Morgen"
+uebungen = [
+  { uebung = "baum", takt = { phasen = [{ dauer_s = "x", art = "tanz" }] } },
+  { uebung = "lotus", takt = {}, beschleunigung = { atmung = true } },
+]
+"""
+    )
+    datei = tmp_path / "x.toml"
+    datei.write_text(text, encoding="utf-8")
+    fehler, hinweise = pruefen(datei, symbole=None)
+    assert fehler == [
+        "Plan „Morgen“, Übung „baum“: takt: Phase 1: „dauer_s“ muss eine Zahl zwischen 0.1 und "
+        '600 sein, nicht "x" — die Phase fällt weg',
+        "Kurs „Einstieg“, Kapitel „Stehen üben“, Plan „Stehen“, Übung „baum“: beschleunigung: "
+        '„atmung“ muss true oder false sein, nicht "ja"',
+        "Kurs „Einstieg“, Kapitel „Stehen üben“, Plan „Stehen“, Übung „baum“: takt: „phasen“ "
+        'muss eine Liste von Tabellen sein, nicht "x" — die Planübung folgt der Übung',
+    ]
+    assert [h for h in hinweise if "Plan" in h] == [
+        "Plan „Morgen“, Übung „baum“: takt: Phase 1: unbekannte Art „tanz“ — gilt als „frei“ "
+        "(bekannt: ein, aus, halten, ab, auf, frei)",
+        "Kurs „Einstieg“, Kapitel „Stehen üben“, Plan „Stehen“, Übung „baum“: beschleunigung: "
+        "unbekannter Schlüssel „wdh“ — wird überlesen (bekannt: wiederholungen, atmung, "
+        "vorlage, feld)",
+    ]
+    # Die App liest dasselbe Paket: der kaputte Takt heißt „wie die Übung“, `{}` keiner
+    gelesen = paket_lesen(tomllib.loads(text))
+    (kapitelplan,) = gelesen.kurse[0].kapitel[1].plaene
+    assert kapitelplan.items[0].takt is None
+    morgen_baum, morgen_lotus = gelesen.plaene[0].vorlage.items
+    assert morgen_baum.takt is None and morgen_lotus.takt is AUS

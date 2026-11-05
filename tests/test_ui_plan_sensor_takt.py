@@ -370,6 +370,24 @@ def test_uebungsseite_zeigt_sensor_und_takt_der_planuebung(page, state) -> None:
     assert not any(t.startswith("Takt: Kniebeuge") for t in texte)
 
 
+def test_timer_knopf_der_uebungsseite_im_plan_oeffnet_den_timer_der_planuebung(page, state) -> None:
+    """Prüfrunde A6, Befund 5: Unter `/plan/<id>/info/<item>` führt der Timer-Knopf oben zum
+    Timer **der Planübung** (`…/timer/uebung/<Übung>/<Planübung>` über dieser Seite), wie die
+    Uhr im Plan — dort gilt der Takt der Planübung. Für sich bleibt es der Timer der Übung."""
+    from trainingsapp.ui.views.uebung_detail import uebung_detail
+
+    u = _kniebeuge(state, "reps", takt=VORLAGEN["kniebeuge_2_1_2"])
+    plan, item = _plan(state, u, takt=AUS)
+    browser = SimpleNamespace(launch_url=None)
+    route = f"/plan/{plan.id}/info/{item.id}"
+    ansicht = uebung_detail(page, state, u, browser, item=item, plan=plan, route=route)
+    _klick(_symbol(ansicht.appbar, ft.Icons.TIMER_OUTLINED, "Timer dieser Übung"))
+    assert page.routen == [f"{route}/timer/uebung/{u.id}/{item.id}"]
+    page.routen.clear()
+    _klick(_symbol(uebung_detail(page, state, u, browser).appbar, ft.Icons.TIMER_OUTLINED))
+    assert page.routen == [f"/uebung/{u.id}/timer/uebung/{u.id}"]
+
+
 # -- Beim Üben gilt die Planübung ----------------------------------------------------------------
 
 

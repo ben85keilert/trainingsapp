@@ -207,8 +207,12 @@ der **Fortschritt der Nutzer hängt daran**; ohne `key` zählt die Nummer), `tex
 (Markdown; Bilder `![…](https://…)` darin lädt die App erst, wenn die Person es unter Einstellungen → Updates einschaltet — bis dahin stehen sie als Link „[Bild: …]“, `core/kapiteltext.py`, Sicherheitsdurchsicht S2), `media[]` (wie bei Übungen, zusätzlich `kind: "audio"`), `plaene[]`
 (`{name, wochentage: [0..6], uebungen: [{uebung: <key|id>, ziel?, felder?, beschleunigung?,
 takt?}]}` — `beschleunigung` und `takt` je Planübung wie an der Übung, A6 5.11.2026: fehlt =
-wie die Übung, `takt = {}` = ausdrücklich keiner; Unbrauchbares gilt als „wie die Übung“, ältere
-Apps übergehen beide, der Export schreibt sie nur, wo die Planübung eigene hat) und
+wie die Übung, `takt = {}` = ausdrücklich keiner; was keine Tabelle ist, gilt als „wie die
+Übung“ — ebenso ein `takt` ohne brauchbare Phase (Prüfrunde A6: nie „keiner“, sonst schaltete
+ein Tippfehler den Takt der Übung ab); eine Tabelle `beschleunigung` ist immer eine eigene
+Karte, Unbrauchbares darin die Vorgabe wie an der Übung; `trainingsapp-paket pruefen` meldet
+beides auch hier, mit Plan und Übung als Ort. Ältere Apps übergehen beide, der Export schreibt
+sie nur, wo die Planübung eigene hat) und
 `bedingung` (`{art: "gelesen"}` Vorgabe · `{art: "summe", uebung, feld, soll}` ·
 `{art: "tage", soll}` · `{art: "messung", soll}` in Minuten). `uebung` ist der
 Schlüssel einer Übung desselben Pakets oder eine ID.
@@ -270,7 +274,8 @@ uv run --project ../trainingsapp trainingsapp-paket uebernehmen .daten/trainings
 `pruefen` wendet die Regeln des Standardpakets an (Schlüssel, Beschreibung, Variante,
 Symbol — Symbole nur mit flet); Typen und Regionen außerhalb des Standardpakets sind
 Hinweise. In `beschleunigung` ist ein falscher Typ ein Fehler (die App läse ihn still als
-Vorgabe), ein unbekannter Schlüssel ein Hinweis. `--wortliste DATEI` sucht Begriffe, die in Pakettexten nichts verloren haben
+Vorgabe), ein unbekannter Schlüssel ein Hinweis — an Übungen wie an Planübungen
+(`plaene[].uebungen[]`, auch in Kurskapiteln; seit Prüfrunde A6). `--wortliste DATEI` sucht Begriffe, die in Pakettexten nichts verloren haben
 (Sprachregelung der Praxis-Website: erklären, nicht bewerten — die Liste liegt im privaten
 Repo der Homepage, `docs/wortliste-zone3.txt`); Treffer sind Hinweise, mit `--streng`
 Fehler. `index` schreibt den Index einer Paketquelle (ID, Name, Version, URL, SHA-256,

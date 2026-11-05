@@ -653,6 +653,42 @@ async def test_zaehlen_beenden_zeichnet_nicht_vor_dem_eintragen(umgebung) -> Non
     await _ticken(state, uhr, gurt, 80, bis_ende=True)
 
 
+async def test_fehltext_wenn_die_planuebung_den_sensor_abschaltet(ohne_aufnahme) -> None:
+    """Prüfrunde A6, Befund 6: Schaltet die Karte der Planübung ab, was die Übung zählte, sagt
+    die Meldung das — „keine Wiederholungen“ nur, wenn der Plan kein Wiederholungsfeld anbietet."""
+    from trainingsapp.core.zaehlen import SensorWahl
+
+    state, _uhr, _gurt, _ = ohne_aufnahme
+    atmen = Exercise(name="Box Breathing", typen=["Atmung"])
+    state.uebungen.speichern(atmen)
+    u = _uebung(state)
+    plan = Plan(
+        name="P",
+        subject_id=state.profil.id,
+        items=[
+            PlanItem(exercise_id=atmen.id, acc=SensorWahl(atmung=False)),
+            PlanItem(exercise_id=u.id, acc=SensorWahl(wiederholungen=False)),
+            PlanItem(exercise_id=u.id, felder=["weight"]),
+        ],
+    )
+    state.plaene.speichern(plan)
+    kein_atem, kein_wdh, kein_feld = plan.items
+    for uebung, item in ((atmen, kein_atem), (u, kein_wdh)):
+        with pytest.raises(RuntimeError, match="Beschleunigungssensor in diesem Plan aus"):
+            uebung_lauf.zaehlen_starten(
+                Seite(),
+                state,
+                uebung_lauf.kontext_fuer(uebung, plan, item),
+                uebung=uebung,
+                item=item,
+            )
+    with pytest.raises(RuntimeError, match="keine Wiederholungen"):
+        uebung_lauf.zaehlen_starten(
+            Seite(), state, uebung_lauf.kontext_fuer(u, plan, kein_feld), uebung=u, item=kein_feld
+        )
+    assert state.einheit is None or not state.einheit.laeuft
+
+
 # -- Lücken der ersten Runde (4.11.2026) -------------------------------------------------------
 
 

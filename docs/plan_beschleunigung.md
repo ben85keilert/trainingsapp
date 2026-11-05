@@ -736,6 +736,15 @@ hat. Der Plan-Ablauf bleibt ohne Zählen (A19, P128). Tests: `tests/test_planueb
 (flet-frei: Auflösung, Standards, Rundreise, Migration 039, Paket),
 `tests/test_ui_plan_sensor_takt.py` (Karte mit ↺, Knopf nur mit Wiederholungsfeld, „Zählt in“,
 Takt-Zeile, Übungsseite, Üben nimmt den Plan-Wert, Uhr mit Takt der Planübung).
+**Prüfrunde A6** (5.11.2026, 0.3.54, sechs Befunde, je einer mit Test): der Paket-Import baut
+die Planübung über `VorlageItem.als_planitem` (Sensor-Karte und Takt kamen nicht mit — der Plan
+galt bei der nächsten Fassung als von der Person geändert), kaputte Spalten
+`plan_item.acc_json`/`takt_json` und unlesbare Paketfelder heißen „wie die Übung“ (nie eine
+eigene Karte oder „kein Takt“), `trainingsapp-paket pruefen` sieht `plaene[].uebungen[]`, das
+Protokollfeld `atmung` fragt `atmung_an(uebung, item)` mit der Planübung aus der Zeitleiste
+der Einheit (`marke.einheit`), der Timer-Knopf der Übungsseite unter dem Plan öffnet den Timer
+der Planübung, und die Meldung beim Zählen sagt „Beschleunigungssensor in diesem Plan aus“,
+wenn die Karte der Planübung abschaltet (nicht „keine Wiederholungen“).
 
 **Nicht am Gerät geprüft:** Rechenlast des Live-Zählers am Handy (Ziel unter 20 ms je Sekunde
 Daten, `ZIEL_MS_JE_S`; am Rechner etwa 1 ms, unabhängig von der Satzlänge — bis A5: 2–11 ms je

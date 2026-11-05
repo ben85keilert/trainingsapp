@@ -534,15 +534,17 @@ def _sensor_json(acc: SensorWahl | None) -> str | None:
 
 
 def _sensor_lesen(text: str | None) -> SensorWahl | None:
-    """NULL = wie die Übung; Kaputtes gilt als eigene Wahl mit den Vorgaben (das Schild sagt
-    „nur hier“, ↺ holt die Übung zurück).
+    """NULL = wie die Übung; eine Tabelle (auch ``{}``) ist eine eigene Wahl, Unbrauchbares
+    darin gilt als Vorgabe wie an der Übung. Kaputtes JSON heißt **wie die Übung** — nicht eine
+    eigene Karte, die die Einstellung der Übung in diesem Plan überstimmte (Prüfrunde A6).
 
     >>> _sensor_lesen(None), _sensor_lesen('{"atmung": true}').atmung
     (None, True)
-    >>> _sensor_lesen("{kaputt") == SensorWahl()
-    True
+    >>> _sensor_lesen("{}") == SensorWahl(), _sensor_lesen("{kaputt"), _sensor_lesen("[1]")
+    (True, None, None)
     """
-    return None if text is None else SensorWahl.aus_dict(_json_lesen(text, {}))
+    tabelle = _tabelle_lesen(text)
+    return None if tabelle is None else SensorWahl.aus_dict(tabelle)
 
 
 def _takt_json(takt: Takt | None) -> str | None:
@@ -553,14 +555,37 @@ def _takt_json(takt: Takt | None) -> str | None:
 
 
 def _takt_lesen(text: str | None) -> Takt | None:
-    """NULL = wie die Übung; ``{}`` oder Kaputtes = ausdrücklich kein Takt (`core.takt.AUS`).
+    """NULL = wie die Übung; ``{}`` = ausdrücklich kein Takt (`core.takt.AUS`). Kaputtes JSON
+    oder ein Takt ohne brauchbare Phase heißt **wie die Übung**, nie „keiner“ — sonst schaltete
+    eine kaputte Spalte den Takt der Übung in diesem Plan ab (Prüfrunde A6; dieselbe Regel wie
+    im Paketfeld, `core.kurse.VorlageItem.from_dict`).
 
-    >>> _takt_lesen(None), _takt_lesen("{}").leer, _takt_lesen("{kaputt").leer
-    (None, True, True)
+    >>> _takt_lesen(None), _takt_lesen("{}").leer, _takt_lesen("{kaputt"), _takt_lesen("x")
+    (None, True, None, None)
+    >>> _takt_lesen('{"phasen": "x"}') is None
+    True
     """
-    if text is None:
+    tabelle = _tabelle_lesen(text)
+    if tabelle is None:
         return None
-    return Takt.aus_dict(_json_lesen(text, {})) or AUS
+    return AUS if not tabelle else Takt.aus_dict(tabelle)
+
+
+def _tabelle_lesen(text: str | None) -> dict[str, Any] | None:
+    """Eine JSON-Spalte, die eine Tabelle halten soll — NULL, Kaputtes oder ein anderer Typ
+    ist ``None`` (anders als `_json_lesen` ohne Vorgabe: der Aufrufer unterscheidet „keine
+    Tabelle“ von der leeren).
+
+    >>> _tabelle_lesen(None), _tabelle_lesen("{kaputt"), _tabelle_lesen("[1]"), _tabelle_lesen("{}")
+    (None, None, None, {})
+    """
+    if not text:
+        return None
+    try:
+        wert = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return wert if isinstance(wert, dict) else None
 
 
 def _json_lesen(text: str | None, vorgabe: Any) -> Any:

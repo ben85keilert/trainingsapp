@@ -312,6 +312,11 @@ Vorgabe; „Takt zählt“ tritt damit auch mit einem Takt der Planübung an. Pa
 `plaene[].uebungen[]` das Feld `takt` (wie an der Übung; `{}` = keiner; `docs/uebungspakete.md`),
 tolerant gelesen, nur geschrieben, wo die Planübung einen eigenen hat. Tests:
 `tests/test_planuebung_sensor_takt.py` (flet-frei), `tests/test_ui_plan_sensor_takt.py`.
+**Prüfrunde A6** (5.11.2026, 0.3.54): ein Takt ohne brauchbare Phase — im Paketfeld wie in der
+Spalte `takt_json` — heißt **wie die Übung** (`None`), nie „keiner“ (`AUS` nur für `{}`); der
+Paket-Import trägt den Takt je Planübung (`VorlageItem.als_planitem`), `pruefen` prüft ihn auch
+dort („die Planübung folgt der Übung“), und der Timer-Knopf der Übungsseite unter einem Plan
+öffnet `…/timer/uebung/<Übung>/<Planübung>` mit dem Takt der Planübung.
 **Nicht gebaut:** der Takt im Plan-Ablauf (dort läuft auch der Sensor noch nicht, A19); das
 Takt-Blatt aus „Im Plan einstellen“ kennt „In diesen Plan“ und „In die Bibliothek“, nicht
 „Für jetzt“ (das gehört an die Uhr).

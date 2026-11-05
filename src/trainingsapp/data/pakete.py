@@ -1088,16 +1088,11 @@ def _plan_aus_paketplan(pp: PaketPlan, paket_id: str, subject_id: str, da: set[s
         package_key=pp.key,
         package_standard=plan_stand(pp),
     )
+    # Dieselbe Umwandlung wie im Kurskapitel (`VorlageItem.als_planitem`): Ziel, Felder,
+    # Sensor-Karte und Takt — fehlte eins, stimmte der Plan nie mit seinem Paketstand überein
+    # und galt bei der nächsten Fassung als von der Person geändert (Prüfrunde A6, Befund 1)
     for nr, item in enumerate(i for i in pp.vorlage.items if i.exercise_id in da):
-        plan.items.append(
-            PlanItem(
-                plan_id=plan.id,
-                exercise_id=item.exercise_id,
-                order=nr,
-                target=dict(item.target) if item.target else None,
-                felder=None if item.felder is None else list(item.felder),
-            )
-        )
+        plan.items.append(item.als_planitem(plan.id, nr))
     return plan
 
 

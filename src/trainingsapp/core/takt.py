@@ -369,11 +369,14 @@ def _runden_lesen(roh: Any) -> int | None:
     return runden if 1 <= runden <= MAX_RUNDEN else None
 
 
-def takt_pruefen(roh: Any) -> tuple[list[str], list[str]]:
+def takt_pruefen(
+    roh: Any, *, ohne: str = "die Übung bekommt keinen Takt"
+) -> tuple[list[str], list[str]]:
     """Was `Takt.aus_dict` still verwirft oder als Vorgabe liest, in Worten — ``(Fehler,
     Hinweise)`` für ``trainingsapp-paket pruefen``, wie `core.zaehlen.wahl_pruefen`: ein
     falscher Typ ist ein Fehler (die Angabe ginge verloren), eine unbekannte Art, ein
-    unbekannter Klang oder Schlüssel ein Hinweis.
+    unbekannter Klang oder Schlüssel ein Hinweis. ``ohne``: was gilt, wenn kein Takt
+    lesbar ist — an der Übung „bekommt keinen Takt“, an einer Planübung „folgt der Übung“.
 
     >>> takt_pruefen({"name": "4-6", "phasen": [{"name": "ein", "dauer_s": 4, "art": "ein"},
     ...                                         {"name": "aus", "dauer_s": 6, "art": "aus"}]})
@@ -392,19 +395,19 @@ def takt_pruefen(roh: Any) -> tuple[list[str], list[str]]:
     ['keine Tabelle (etwa { phasen = [ … ] }), sondern true — die Übung bekommt keinen Takt']
     >>> takt_pruefen({"phasen": "x"})[0]
     ['„phasen“ muss eine Liste von Tabellen sein, nicht "x" — die Übung bekommt keinen Takt']
+    >>> takt_pruefen({"phasen": "x"}, ohne="die Planübung folgt der Übung")[0]
+    ['„phasen“ muss eine Liste von Tabellen sein, nicht "x" — die Planübung folgt der Übung']
     """
     if not isinstance(roh, Mapping):
         return [
-            f"keine Tabelle (etwa {{ phasen = [ … ] }}), sondern {_wert_text(roh)} — die Übung "
-            "bekommt keinen Takt"
+            f"keine Tabelle (etwa {{ phasen = [ … ] }}), sondern {_wert_text(roh)} — {ohne}"
         ], []
     fehler: list[str] = []
     hinweise: list[str] = []
     phasen = roh.get("phasen")
     if not isinstance(phasen, list):
         fehler.append(
-            f"„phasen“ muss eine Liste von Tabellen sein, nicht {_wert_text(phasen)} — die "
-            "Übung bekommt keinen Takt"
+            f"„phasen“ muss eine Liste von Tabellen sein, nicht {_wert_text(phasen)} — {ohne}"
         )
         phasen = []
     for k, p in enumerate(phasen, start=1):

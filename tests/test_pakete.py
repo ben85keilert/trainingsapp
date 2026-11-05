@@ -1262,6 +1262,50 @@ def test_import_legt_plaene_im_profil_an_und_laesst_geaenderte(con) -> None:
     assert pakete.plaene_nachlegen(ich.id) == []
 
 
+def test_import_traegt_sensor_und_takt_je_planuebung_und_plan_bleibt_paketplan(con) -> None:
+    """Prüfrunde A6, Befund 1: `beschleunigung`/`takt` je Planübung kommen beim Import in die
+    Planübung (Installation, Nachlegen, neue Fassung) — und der Plan stimmt danach mit seinem
+    Paketstand überein, sonst gälte er bei der nächsten Fassung als von der Person geändert
+    (`Status.EIGENE`) und bekäme kein Update mehr."""
+    from trainingsapp.core.pakete import paketplan_aus, plan_stand
+    from trainingsapp.core.takt import AUS
+    from trainingsapp.core.zaehlen import SensorWahl
+
+    takt = {
+        "name": "4-6",
+        "phasen": [{"name": "ein", "dauer_s": 4, "art": "ein"}, {"dauer_s": 6, "art": "aus"}],
+    }
+
+    def fassung(version: int, wochentage: list[int]) -> dict:
+        roh = qigong_mit_plan(version=version)
+        roh["plaene"][0]["wochentage"] = wochentage
+        roh["plaene"][0]["uebungen"][0]["takt"] = takt
+        roh["plaene"][0]["uebungen"][1]["beschleunigung"] = {"atmung": True}
+        roh["plaene"][0]["uebungen"][1]["takt"] = {}
+        return roh
+
+    pakete, plaene = PaketRepo(con), PlanRepo(con)
+    ich, du = _profil(con, "Ich"), _profil(con, "Du")
+    inhalt = paket_lesen(fassung(1, [0, 2, 4]))
+    pakete.importieren(inhalt, subject_id=ich.id)
+    (plan,) = plaene.des_pakets(inhalt.paket.id, ich.id)
+    baum, tief = plan.items
+    assert baum.takt is not None and baum.takt.name == "4-6" and baum.acc is None
+    assert tief.acc == SensorWahl(atmung=True) and tief.takt is AUS
+    assert plan_stand(paketplan_aus(plan, "morgen")) == plan.package_standard
+    # Nachgelegt im anderen Profil: dasselbe
+    (nachgelegt,) = pakete.plaene_nachlegen(du.id)
+    assert nachgelegt.items[0].takt is not None and nachgelegt.items[0].takt.name == "4-6"
+    assert nachgelegt.items[1].acc == SensorWahl(atmung=True) and nachgelegt.items[1].takt is AUS
+    # Neue Fassung: der Plan ist nicht von der Person geändert — er bekommt den Stand
+    neu = paket_lesen(fassung(2, [1, 3]))
+    assert pakete.vorschau(neu, ich.id).plaene == {"morgen": Status.GEAENDERT}
+    pakete.importieren(neu, subject_id=ich.id)
+    plan = plaene.laden(plan.id)
+    assert plan.wochentage == [1, 3] and plan.items[0].takt.name == "4-6"
+    assert plan.items[1].acc == SensorWahl(atmung=True) and plan.items[1].takt is AUS
+
+
 def test_paket_entfernen_nimmt_seine_plaene_und_inhalt_kennt_sie(con) -> None:
     pakete, plaene = PaketRepo(con), PlanRepo(con)
     ich = _profil(con)

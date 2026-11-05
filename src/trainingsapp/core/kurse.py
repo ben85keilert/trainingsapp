@@ -160,6 +160,28 @@ class VorlageItem:
             takt=item.takt,
         )
 
+    def als_planitem(self, plan_id: str, order: int) -> PlanItem:
+        """Die Planübung zu dieser Vorlage — das Gegenstück zu `aus_planitem`, für Kurskapitel
+        (`plan_aus_vorlage`) und Paketpläne (`data.pakete`) gleichermaßen: ohne Ziel folgt
+        die Planübung der Übung (P79), Sensor-Karte und Takt kommen mit (A6, Prüfrunde:
+        ein Paketplan ohne sie galt bei der nächsten Fassung als von der Person geändert).
+
+        >>> i = VorlageItem("a", target={"reps": 10}, takt=AUS).als_planitem("p1", 2)
+        >>> (i.plan_id, i.exercise_id, i.order, i.target, i.felder, i.acc, i.takt is AUS)
+        ('p1', 'a', 2, {'reps': 10}, None, None, True)
+        >>> VorlageItem("a").als_planitem("p1", 0).target is None
+        True
+        """
+        return PlanItem(
+            plan_id=plan_id,
+            exercise_id=self.exercise_id,
+            order=order,
+            target=dict(self.target) if self.target else None,
+            felder=None if self.felder is None else list(self.felder),
+            acc=self.beschleunigung,
+            takt=self.takt,
+        )
+
     def to_dict(self, uebung: str | None = None) -> dict[str, Any]:
         """Der Eintrag in ``uebungen[]`` — ``uebung`` ersetzt die ID (Paketschlüssel).
 
@@ -182,11 +204,17 @@ class VorlageItem:
     @classmethod
     def from_dict(cls, e: Mapping[str, Any]) -> VorlageItem:
         """Liest, was `to_dict` schreibt — tolerant: ``beschleunigung``/``takt`` nur als
-        Tabelle (sonst wie die Übung), ``takt = {}`` ist ausdrücklich keiner.
+        Tabelle (sonst wie die Übung). ``takt = {}`` ist ausdrücklich keiner; eine Takt-Tabelle
+        ohne brauchbare Phase heißt **wie die Übung**, nie „keiner“ (sonst schaltete ein
+        Tippfehler im Paket den Takt der Übung in diesem Plan ab). Eine Tabelle
+        ``beschleunigung`` ist immer eine eigene Karte — Unbrauchbares darin gilt als Vorgabe,
+        wie an der Übung (`SensorWahl.aus_dict`).
 
         >>> i = VorlageItem.from_dict({"uebung": "a", "takt": {}, "beschleunigung": "x"})
         >>> i.takt.leer, i.beschleunigung
         (True, None)
+        >>> VorlageItem.from_dict({"uebung": "a", "takt": {"phasen": "x"}}).takt is None
+        True
         """
         felder = e.get("felder")
         acc, takt = e.get("beschleunigung"), e.get("takt")
@@ -195,8 +223,22 @@ class VorlageItem:
             target=dict(e.get("ziel") or {}),
             felder=None if felder is None else [str(k) for k in felder],
             beschleunigung=SensorWahl.aus_dict(acc) if isinstance(acc, Mapping) else None,
-            takt=(Takt.aus_dict(takt) or AUS) if isinstance(takt, Mapping) else None,
+            takt=_takt_lesen(takt),
         )
+
+
+def _takt_lesen(roh: Any) -> Takt | None:
+    """Das Paketfeld ``takt`` einer Planübung: keine Tabelle oder keine brauchbare Phase =
+    wie die Übung (``None``), ``{}`` = ausdrücklich keiner (`AUS`).
+
+    >>> _takt_lesen(None), _takt_lesen(3), _takt_lesen({"phasen": []}), _takt_lesen({}) is AUS
+    (None, None, None, True)
+    """
+    if not isinstance(roh, Mapping):
+        return None
+    if not roh:
+        return AUS
+    return Takt.aus_dict(roh)
 
 
 @dataclass(slots=True)
@@ -531,18 +573,7 @@ def plan_aus_vorlage(
         kurs_kapitel_id=kapitel.id,
     )
     for nr, item in enumerate(i for i in vorlage.items if i.exercise_id in da):
-        plan.items.append(
-            PlanItem(
-                plan_id=plan.id,
-                exercise_id=item.exercise_id,
-                order=nr,
-                # Ohne Ziel in der Vorlage folgt die Planübung der Übung (P79)
-                target=dict(item.target) if item.target else None,
-                felder=None if item.felder is None else list(item.felder),
-                acc=item.beschleunigung,
-                takt=item.takt,
-            )
-        )
+        plan.items.append(item.als_planitem(plan.id, nr))
     return plan
 
 

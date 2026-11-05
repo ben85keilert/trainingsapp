@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from trainingsapp.core.models import Exercise
+from trainingsapp.core.einheit import Ereignis
+from trainingsapp.core.kurzcode import kurzcode
+from trainingsapp.core.models import Exercise, PlanItem
 from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
+from trainingsapp.core.zaehlen import SensorWahl
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
 from trainingsapp.devices.profiles import POLAR_H10, UHR_BROADCAST, VERITY_SENSE
@@ -254,3 +257,41 @@ def test_nachziehen_aendert_nur_texte() -> None:
     z.satz.sensor = 9
     beobachter()
     assert zahl.value == "8"  # abgemeldet: bleibt stehen
+
+
+def test_protokollfeld_atmung_kennt_die_planuebung() -> None:
+    """Prüfrunde A6, Befund 4: Lief die Atemübung als Planübung, die „Atmung“ in ihrer Karte
+    abschaltet, ist die Messung keine Atemübung (`atmung_an(uebung, item)`). Die Notiz der
+    Messdatei nennt Kurzcode und Einheit; deren Zeitleiste (Repository oder die laufende im
+    Speicher) nennt die Planübung."""
+    atmen = Exercise(name="Box Breathing", typen=["Atmung"])
+    aus = PlanItem(exercise_id=atmen.id, acc=SensorWahl(atmung=False))
+    zeitleiste = {
+        "e1": [
+            Ereignis(0.0, "plan", "uebung_start", "", {"uebung": atmen.id, "planuebung": aus.id})
+        ],
+        "e2": [Ereignis(0.0, "plan", "uebung_start", "", {"uebung": atmen.id})],
+    }
+    state = SimpleNamespace(
+        uebungen=SimpleNamespace(alle=lambda mit_archivierten=False: [atmen]),
+        plaene=SimpleNamespace(item_laden=lambda i: aus if i == aus.id else None),
+        einheiten=SimpleNamespace(ereignisse=lambda i: zeitleiste.get(i, [])),
+        einheit=None,
+    )
+    haken = zs.atmung_protokoll(state)
+
+    def notiz(einheit: str) -> dict:
+        return {
+            "text": "Box Breathing: Start",
+            "uebungen": [kurzcode(atmen.id)],
+            "marke": {"quelle": "plan", "art": "uebung_start", "einheit": einheit},
+        }
+
+    assert haken([notiz("e1")]) is None  # es lief eine andere Übung: kein Feld
+    assert haken([notiz("e2")]) == {"art": "uebung", "uebung": kurzcode(atmen.id)}
+    assert haken([notiz("e1"), notiz("e2")]) == {"art": "uebung", "uebung": kurzcode(atmen.id)}
+    # Die laufende Einheit zählt aus dem Speicher, auch ohne Repository
+    laufend = SimpleNamespace(id="e3", ereignisse=zeitleiste["e1"])
+    state.einheit, state.einheiten = laufend, None
+    assert haken([notiz("e3")]) is None
+    assert haken([notiz("unbekannt")]) == {"art": "uebung", "uebung": kurzcode(atmen.id)}

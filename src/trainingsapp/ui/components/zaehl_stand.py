@@ -399,19 +399,63 @@ def atem_kopf_text(state: Any) -> str:
 def atmung_protokoll(state: Any) -> Callable[[list[dict[str, Any]]], dict[str, Any] | None]:
     """Der Haken `Messlauf.atmung_protokoll` mit dem Übungskatalog: Ereignisse der Aufnahme →
     Protokollfeld „Atmung“ (`core.atem_protokoll.protokoll`, Vertrag §5). Ein Kurzcode zählt
-    als Atemübung, wenn an der Übung „Atmung“ an ist (`core.zaehlen.atmung_an`); Unbekanntes
-    (gelöscht, fremd) als andere Übung. Gerufen im Loop (Backup, Speichern), nie im Thread."""
+    als Atemübung, wenn „Atmung“ an ist — **so, wie die Planübung es einstellt** (A6,
+    `core.zaehlen.atmung_an(uebung, item)`): Die Notiz der Messdatei nennt nur den Kurzcode
+    und die Einheit (``marke.einheit``), deren Zeitleiste (`AppState.einheiten`, die laufende
+    im Speicher) sagt, als welche Planübung die Übung lief (``planuebung``,
+    `devices.einheit.kontext_daten`); lief sie mehrfach, zählt sie als Atemübung, sobald es
+    eine ihrer Planübungen war. Unbekanntes (gelöscht, fremd) als andere Übung. Gerufen im
+    Loop (Backup, Speichern), nie im Thread."""
 
     def haken(ereignisse: list[dict[str, Any]]) -> dict[str, Any] | None:
         nach_id = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
+        planuebungen = _planuebungen_der_einheiten(state, ereignisse)
 
         def ist_atemuebung(code: str) -> bool | None:
             ids = katalog_aufloesen([code], nach_id)
-            return zl.atmung_an(nach_id[ids[0]]) if ids else None
+            if not ids:
+                return None
+            uebung = nach_id[ids[0]]
+            items = planuebungen.get(uebung.id)
+            if not items:
+                return zl.atmung_an(uebung)
+            return any(zl.atmung_an(uebung, item) for item in items)
 
         return atem_protokoll.protokoll(ereignisse, ist_atemuebung)
 
     return haken
+
+
+def _planuebungen_der_einheiten(
+    state: Any, ereignisse: list[dict[str, Any]]
+) -> dict[str, list[PlanItem | None]]:
+    """Übungs-ID → die Planübungen (``None`` = ohne Plan), als die sie in den Einheiten dieser
+    Aufnahme lief — aus den Zeitleisten der Einheiten, die die Notizen nennen."""
+    einheiten: dict[str, None] = {}
+    for e in ereignisse:
+        m = e.get("marke") if isinstance(e, dict) else None
+        if isinstance(m, dict) and isinstance(m.get("einheit"), str) and m["einheit"]:
+            einheiten.setdefault(m["einheit"], None)
+    out: dict[str, list[PlanItem | None]] = {}
+    repo = getattr(state, "einheiten", None)
+    laufende = getattr(state, "einheit", None)
+    for einheit_id in einheiten:
+        if laufende is not None and getattr(laufende, "id", None) == einheit_id:
+            zeitleiste = list(getattr(laufende, "ereignisse", []))
+        elif repo is not None:
+            zeitleiste = repo.ereignisse(einheit_id)
+        else:
+            continue
+        for x in zeitleiste:
+            uebung_id = x.daten.get("uebung")
+            if not isinstance(uebung_id, str) or not uebung_id:
+                continue
+            item_id = x.daten.get("planuebung")
+            item = state.plaene.item_laden(str(item_id)) if item_id else None
+            liste = out.setdefault(uebung_id, [])
+            if item not in liste:
+                liste.append(item)
+    return out
 
 
 def sensor_text(state: Any) -> str:

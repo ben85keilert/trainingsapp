@@ -148,11 +148,22 @@ def test_rundreise_null_heisst_wie_die_uebung_leer_heisst_keiner(tmp_path) -> No
     wieder = plaene.item_laden(item.id)
     assert wieder is not None and wieder.acc == SensorWahl()
     assert wieder.takt is not None and wieder.takt.name == "Box 4-4-4-4"
-    # Der Plan mit seinen Übungen liest dieselben Spalten; Kaputtes wird zur Vorgabe
+    # Der Plan mit seinen Übungen liest dieselben Spalten; Kaputtes heißt „wie die Übung“ —
+    # nicht eine eigene Karte oder „kein Takt“, die die Übung überstimmten (Prüfrunde A6,
+    # Befund 3); ein Takt ohne brauchbare Phase ebenso
     con.execute("UPDATE plan_item SET acc_json = '[1', takt_json = 'x' WHERE id = ?", (item.id,))
     con.commit()
     (im_plan,) = plaene.laden(plan.id).items
-    assert im_plan.acc == SensorWahl() and im_plan.takt is AUS
+    assert im_plan.acc is None and im_plan.takt is None
+    geladen = plaene.item_laden(item.id)
+    assert geladen is not None and geladen.acc is None and geladen.takt is None
+    con.execute(
+        "UPDATE plan_item SET acc_json = '[]', takt_json = '{\"phasen\": \"x\"}' WHERE id = ?",
+        (item.id,),
+    )
+    con.commit()
+    (im_plan,) = plaene.laden(plan.id).items
+    assert im_plan.acc is None and im_plan.takt is None
     # Zurück auf „wie die Übung“
     plaene.sensor_takt_setzen(item.id, None, None)
     wieder = plaene.item_laden(item.id)
@@ -227,7 +238,10 @@ def test_paketplan_traegt_sensor_und_takt_je_planuebung() -> None:
 
 def test_paketfeld_je_planuebung_tolerant() -> None:
     """Unbrauchbares gilt als „wie die Übung“ — eine ältere Datei und eine neuere App lesen
-    sich gegenseitig; `takt = {}` ist ausdrücklich keiner."""
+    sich gegenseitig; `takt = {}` ist ausdrücklich keiner. Eine Takt-Tabelle ohne brauchbare
+    Phase (Tippfehler) ist **nicht** „keiner“ — sie schaltete sonst den Takt der Übung in
+    diesem Plan ab (Prüfrunde A6, Befund 2). Eine Tabelle `beschleunigung` ist immer eine
+    eigene Karte, Unbrauchbares darin die Vorgabe (wie an der Übung)."""
     v = PlanVorlage.from_dict(
         {
             "name": "P",
@@ -235,11 +249,14 @@ def test_paketfeld_je_planuebung_tolerant() -> None:
                 {"uebung": "a", "beschleunigung": "ja", "takt": 3},
                 {"uebung": "b", "beschleunigung": {"atmung": 1, "vorlage": "kniebeuge"}},
                 {"uebung": "c", "takt": {"phasen": "kaputt"}},
+                {"uebung": "d", "takt": {"phasen": [{"dauer_s": "x"}]}},
+                {"uebung": "e", "takt": {}, "beschleunigung": {}},
             ],
         }
     )
-    a, b, c = v.items
+    a, b, c, d, e = v.items
     assert a.beschleunigung is None and a.takt is None
     assert b.beschleunigung == SensorWahl(vorlage="kniebeuge")
-    assert c.takt is AUS
+    assert c.takt is None and d.takt is None  # wie die Übung, nie AUS
+    assert e.takt is AUS and e.beschleunigung == SensorWahl()
     assert VorlageItem("a").to_dict("k") == {"uebung": "k"}

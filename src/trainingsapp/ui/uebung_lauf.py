@@ -336,8 +336,13 @@ def zaehlen_starten(
         raise RuntimeError("Kein Gerät mit Beschleunigungssensor verbunden.")
     if not zaehl_stand.zaehlen_an(uebung, item):
         if item is not None and zaehl_stand.zaehlen_an(uebung):
-            # P79: Die Planübung bietet kein Wiederholungsfeld an (nur abhaken, nur Gewicht …)
-            raise RuntimeError(f"„{uebung.name}“ erfasst in diesem Plan keine Wiederholungen.")
+            if zl.wiederholungen_an(uebung) and not zl.hat_wdh_feld(uebung, item):
+                # P79: Die Planübung bietet kein Wiederholungsfeld an (nur abhaken, nur Gewicht …)
+                raise RuntimeError(f"„{uebung.name}“ erfasst in diesem Plan keine Wiederholungen.")
+            # A6: Die Karte der Planübung schaltet ab, was die Übung zählte
+            raise RuntimeError(
+                f"An „{uebung.name}“ ist der Beschleunigungssensor in diesem Plan aus."
+            )
         raise RuntimeError(f"An „{uebung.name}“ ist der Beschleunigungssensor aus.")
     e = einheit_ui.laeuft(state)
     if e is not None:

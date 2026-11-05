@@ -759,7 +759,9 @@ def uebung_detail(
             ft.IconButton(
                 ft.Icons.TIMER if profile_der_uebung(uebung) else ft.Icons.TIMER_OUTLINED,
                 tooltip="Timer dieser Übung",
-                on_click=gehe_zu(uebung_timer_route(f"/uebung/{uebung.id}", uebung)),
+                # Aus dem Plan der Timer der Planübung (Takt, Profil der Planübung), wie die
+                # Uhr im Plan (`views/plan.py`) — über dieser Seite, Zurück führt hierher
+                on_click=gehe_zu(uebung_timer_route(route or f"/uebung/{uebung.id}", uebung, item)),
             ),
             ft.IconButton(
                 ft.Icons.EDIT_OUTLINED,

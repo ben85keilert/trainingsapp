@@ -74,7 +74,8 @@ Abweichung ist für praxis_gui folgenlos.
 | `sensor_*__c01.json` | korrigierte Fassung (`corrected-v1`) |
 | `sensor_*_diagnose.txt` | Verbindungsprotokoll der trainingsapp (Text, nur zur Fehlersuche). Kein JSON, darum für praxis_gui unsichtbar — dort bleibt es beim Löschen einer Messung liegen |
 | `sensor_*_mitschnitt.jsonl` | Rohmitschnitt des Diagnosemodus (`mitschnitt-v1`, seit 4.11.2026, Abschnitt 14): jedes Bluetooth-Paket, Marken, Kontext. JSON Lines, für praxis_gui unsichtbar |
-| `.backup_<start>_ecg.jsonl`, `.backup_<start>_mitschnitt.jsonl` | Begleit-Journale des Crash-Backups (Abschnitt 6a) |
+| `sensor_*_atem.json` | Atemphasen aus dem Prototyp (`atem-v1`, seit 5.11.2026, Abschnitt 15): Beiwerk neben der Messdatei — Beginn von Ein- und Ausatmen, Rate je Prüffenster, erfasste Läufe; Zeiten auf der Wanduhr der Messung. Ergebnis, keine Rohdaten; für praxis_gui unbekanntes Beiwerk |
+| `.backup_<start>_ecg.jsonl`, `.backup_<start>_mitschnitt.jsonl`, `.backup_<start>_atem.jsonl` | Begleit-Journale des Crash-Backups (Abschnitt 6a) |
 | `Diagnose/<ts>_<gerät>/` | Rohmitschnitt **ohne** Messung (unbekanntes Gerät, Geräteprobe) — absichtlich nicht unter `Messungen/` |
 | `.backup_<start>.json` | Crash-Backup, kein Analyse-Artefakt (Abschnitt 6a) |
 | `*.json.tmp` | Zwischenstand eines atomaren Schreibvorgangs |
@@ -89,7 +90,8 @@ Abweichung ist für praxis_gui folgenlos.
 `hrv_core.recording.ist_messdatei()` erkennt eine Messung, wenn der Name mit
 `sensor_` beginnt und auf `.json` endet, **außer**:
 
-- `_analyzed.json`, `_ecg.json`, `_ppg.json`, `_truth.json` (Beiwerk),
+- `_analyzed.json`, `_ecg.json`, `_ppg.json`, `_truth.json` und seit 5.11.2026 `_atem.json`
+  (Beiwerk, `hrv_core.recording._KEINE_MESSDATEI`),
 - `__c<NN>.json` (korrigierte Fassung — sie gehört zur Rohdatei, nicht daneben),
 - `.backup_*`, `*.tmp` und `*.jsonl` (fallen schon durch Präfix bzw. Endung heraus —
   darum braucht der Mitschnitt keinen Eintrag in der Liste; `hrv_core.deid` kennt seine
@@ -115,6 +117,10 @@ Originaldatei auf dem Gerät behält die Adresse. Der **Rohmitschnitt** (Abschni
 geht nur bereinigt hinaus: Zeile für Zeile durch `hrv_core.deid.mitschnitt_zeilen`
 (Adressen maskiert, Gerätename auf das Modell gekürzt, Zeilen von Gerätename,
 Systemkennung und Seriennummer entfernt, Unbekanntes entfernt).
+Das **Atem-Beiwerk** `sensor_<ts>_atem.json` (Abschnitt 15, seit 5.11.2026) geht wie das
+EKG-Beiwerk mit: Dateikopie am Stamm, byteidentisch; `hrv_core.deid` behält alle Felder
+(`REGELN["atem-v1"]`) — die Datei trägt nur die Profil-ID des Geräts, nie Name, Adresse,
+Seriennummer oder Ort.
 Die übrigen Ausschlüsse sind deckungsgleich.
 
 **Seit dem 26.10.2026 liegt neben `Messungen/` der Ordner `Bewegung/`** (Ben: „Für HRV
@@ -158,7 +164,8 @@ Feldreihenfolge wie im Original-Schreiber. `json.dump(..., ensure_ascii=False, i
 
 Bei Geräten mit PPI (Verity Sense) steht zwischen `ppg_aufzeichnung` und `titel`
 zusätzlich `ppi_pakete` (Abschnitt 3b). Unsere Erweiterung `datenqualitaet`
-(Abschnitt 5) steht direkt hinter `intervall_quelle`. Unbekannte Felder einer
+(Abschnitt 5) steht direkt hinter `intervall_quelle`, unsere Erweiterung `atmung`
+(Abschnitt 5, seit 5.11.2026) direkt hinter `datenqualitaet`. Unbekannte Felder einer
 gelesenen Datei bleiben beim Schreiben erhalten und stehen am Ende.
 
 ### Kopffelder
@@ -172,6 +179,8 @@ gelesenen Datei bleiben beim Schreiben erhalten und stehen am Ende.
 | `geraet_profil` | str | Profil-ID, siehe Abschnitt 5 |
 | `adresse` | str | **optional**, seit 19.10.2026: BLE-Adresse des Geräts (Android/Linux MAC, macOS/iOS UUID), nie bei Simulation. Pseudo-Identifikator — `hrv_core.deid` leert das Feld; praxis_gui erhält es als unbekanntes Feld. Dateien ohne Adresse haben den Schlüssel nicht. **Der Export entfernt das Feld** (seit 20.10.2026, S10): nur die Originaldatei auf dem Gerät trägt es, keine Kopie, die das Gerät verlässt (Abschnitt 2, „Export“) |
 | `intervall_quelle` | str | **Pflicht** — `ekg_rr` oder `ppg_ppi` |
+| `datenqualitaet` | str | **unsere Erweiterung**, direkt hinter `intervall_quelle`: `rr_ekg`, `ppi_optisch`, `bpm_only` (Abschnitt 5) |
+| `atmung` | dict | **unsere Erweiterung**, seit 5.11.2026 (geplant B1): Protokollfeld „Atmung“ — wie geatmet wurde (`spontan`, `getaktet`, `uebung`), direkt hinter `datenqualitaet`; fehlt = unbekannt (Abschnitt 5) |
 | `simulation` | bool | `true` ⇒ Ablage unter `Messungen/Generator/` |
 | `generator_config` | dict \| null | Syntheseparameter, nur bei Simulation |
 | `schema` | str | `"raw-v1"` |
@@ -458,6 +467,37 @@ unbekannte Felder — der Vertrag bleibt unverletzt.
 Für `bpm_only` passt `raw-v1` bereits: `rr_ms = 0`, wie praxis_gui es bei
 Notifications ohne RR-Feld selbst schreibt.
 
+### Unsere Erweiterung: `atmung` (seit 5.11.2026, geplant B1)
+
+Das **Protokollfeld „Atmung“** (`docs/plan_beschleunigung.md` §7.4, P125): zusätzlicher
+Schlüssel im Kopf, direkt hinter `datenqualitaet`. Es sagt, **wie** während der Messung
+geatmet wurde — nicht wann (das steht im Beiwerk `atem-v1`, Abschnitt 15). `praxis_gui`
+liest defensiv, behält das Feld als unbekanntes Feld (`extra`) und schreibt es unverändert
+zurück — der Vertrag bleibt unverletzt.
+
+```json
+"atmung": {"art": "getaktet", "takt_pro_min": 6.0}
+```
+
+| Feld | Typ | Bedeutung |
+|---|---|---|
+| `art` | str | `spontan` (frei geatmet), `getaktet` (nach dem Taktgeber), `uebung` (die Messung lief während einer Atemübung) |
+| `takt_pro_min` | float | **nur** bei `getaktet`: Atemzüge je Minute, die der Taktgeber vorgab |
+| `uebung` | str | **nur** bei `uebung`: Kurzcode der Übung |
+
+- **Automatisch**, nie von Hand: die App setzt es aus der Übung der Einheit und dem Taktgeber
+  des Timers (Taktgeber = A18, `docs/offene_fragen.md`; bis er da ist, kommt nur `spontan`
+  und `uebung` vor). Eine Bewertung ist es nicht — es beschreibt die Bedingung der Messung.
+- **Fehlt = unbekannt.** Altdateien, Dateien aus praxis_gui und Messungen ohne Einheit haben
+  den Schlüssel nicht; der Leser setzt keinen Standardwert und rät nicht aus den Daten.
+- `hrv_core.deid` behält das Feld als Ganzes (`RAW_REGELN`): es enthält nichts über die
+  Person, nur über die Messung.
+- **Warum:** Ohne die Angabe sind HF-Power, LF/HF und DFA α1 zwischen Messungen nicht
+  vergleichbar — Atmung unter 9/min (0,15 Hz) liegt im LF-Band, dann treiben schon die
+  Atemzüge LF/HF (Plan §7.1); getaktet und spontan werden darum getrennt verglichen.
+- Reihenfolge wie immer: zuerst dieser Eintrag, dann hrv-core (`docs/formate.md`,
+  `deid.REGELN`), dann der Code in der App (B1).
+
 ---
 
 ## 6. Regeln beim Schreiben
@@ -536,12 +576,16 @@ Messungen/<Geräteordner>/.backup_<YYYY-MM-DD>_<HHMMSS>.json     # UTC-Startzeit
 - Zusätzlich zum 15-s-Takt sichert die App, sobald sie in den Hintergrund geht
   (`page.on_app_lifecycle_state_change` → `Messlauf.backup_jetzt`).
 - **Begleit-Journale** am Stamm des Kopfs: `.backup_<start>_ecg.jsonl` (EKG-Rohsignal,
-  seit 30.10.2026, `hrv_core.ekg`) und `.backup_<start>_mitschnitt.jsonl` (Rohmitschnitt
-  des Diagnosemodus, seit 4.11.2026, Abschnitt 14). Beim Speichern und beim
-  Wiederherstellen werden sie zum Beiwerk der Messdatei (`sensor_<start>_ecg.json`,
-  `sensor_<start>_mitschnitt.jsonl`); „Löschen“ im Dialog löscht sie mit
-  (`hrv_core.aufnahme.backup_entfernen`, seit hrv-core 0.6.0). Beide werden nur
-  angehängt, mit `fsync`; eine halbe letzte Zeile nach einem Absturz übergeht der Leser.
+  seit 30.10.2026, `hrv_core.ekg`), `.backup_<start>_mitschnitt.jsonl` (Rohmitschnitt
+  des Diagnosemodus, seit 4.11.2026, Abschnitt 14) und `.backup_<start>_atem.jsonl`
+  (Atemphasen aus dem Prototyp, seit 5.11.2026, `hrv_core.atem`, Abschnitt 15). Beim
+  Speichern und beim Wiederherstellen werden sie zum Beiwerk der Messdatei
+  (`sensor_<start>_ecg.json`, `sensor_<start>_mitschnitt.jsonl`, `sensor_<start>_atem.json`);
+  „Löschen“ im Dialog löscht sie mit (`hrv_core.aufnahme.backup_entfernen`, seit hrv-core
+  0.6.0). Alle drei werden nur angehängt, mit `fsync`; eine halbe letzte Zeile nach einem
+  Absturz übergeht der Leser. Das Atem-Journal hängt der `Messlauf` im selben Takt an wie
+  das EKG-Journal (`backup_jetzt`); ein beim Absturz offener Lauf (`bis_s = null`) wird beim
+  Wiederherstellen geschlossen.
 
 ## 7. Regeln beim Lesen
 
@@ -832,3 +876,76 @@ es nicht kennen.
 - **Messdatei unverändert:** raw-v1 bekommt kein neues Feld; die Messung ist auch ohne den
   Mitschnitt vollständig. Löschen des Mitschnitts („Diagnose löschen“) lässt die Messung
   stehen; Löschen der Messung nimmt ihr Beiwerk mit.
+
+---
+
+## 15. `atem-v1` — Atemphasen neben der Messdatei (seit 5.11.2026)
+
+Plan: `docs/plan_beschleunigung.md` §7.4 (Ablage) und §8 (Ergebnisse statt Rohdaten,
+P123); Format, Schreiber und Leser in hrv-core (`hrv_core.atem`, Feldliste in
+`hrv-core/docs/formate.md`). `hrv_core.atem` ist ein **stabiles Modul, kein Prototyp**: das
+Dateiformat steht fest; was darin steht, stammt aus dem Prototyp `hrv_core.prototyp.atemzuege`
+und sagt das selbst (`art`, `prototyp`, `hrv_core`). Nur trainingsapp-intern und für die
+Auswertung: praxis_gui kennt das Format nicht und muss es nicht kennen; weil Leser und
+Schreiber in hrv-core liegen, kann es die Datei später ohne eigene Übersetzung lesen.
+
+- **Datei:** `Messungen/<Geräteordner>/sensor_<start>_atem.json` neben der Messdatei
+  (`hrv_core.atem.atem_pfad(messdatei)`), während der Aufnahme
+  `.backup_<start>_atem.jsonl` (Abschnitt 6a, `atem_journal_pfad(backup)`). Sie entsteht
+  nur, wenn „Atmung erfassen“ in einer Einheit an war, während eine Aufnahme lief; ohne
+  einen Atem-Lauf gibt es keine Datei (`AtemSammler.leer`). Geschrieben wird atomar
+  (`.tmp`, `os.replace`), kompakt (`ensure_ascii=False`, ohne Einrückung — die Phasenliste wird lang).
+- **Felder** (Reihenfolge wie hier):
+
+  | Feld | Typ | Bedeutung |
+  |---|---|---|
+  | `schema` | str | `"atem-v1"` |
+  | `art` | str | `"prototyp"` — das Verfahren hat keinen `ALGO_VERSION` und keinen Golden Master (`hrv_core.prototyp`) |
+  | `prototyp` | str | Modul, das die Phasen fand: `"hrv_core.prototyp.atemzuege"` |
+  | `hrv_core` | str | Version der Bibliothek beim Schreiben (`hrv_core.__version__`) |
+  | `quelle` | str | `"sensor"` (Beschleunigung des Gurts). `"takt"` ist für den Taktgeber reserviert (A18) |
+  | `geraet` | str | Profil-ID (`polar_h10`, `verity_sense`, Abschnitt 5) — nie Name, Adresse oder Seriennummer |
+  | `rate_hz` | int | Abtastrate der Beschleunigung, aus der gerechnet wurde (nur zur Einordnung; Proben enthält die Datei nicht) |
+  | `erfasst` | list | Läufe von „Atmung erfassen“: `[[von_s, bis_s], …]`, ein Eintrag je Lauf, beim Schreiben alle geschlossen |
+  | `phasen` | list | `[[t_s, "ein"], [t_s, "aus"], …]` — Beginn von Ein- bzw. Ausatmen, zeitlich sortiert |
+  | `fenster` | list | `[[t_ende_s, rate_pro_min, gueltig, grund], …]` — laufende Rate je Prüffenster (alle 5 s, 30 s lang, Zeit = Fensterende); `rate_pro_min` `null`, wenn ungültig; `gueltig` bool; `grund` leer oder ein snake_case-Code des Prototyps (`bewegung`, `amplitude_klein`, `unregelmaessig`, `zu_wenig_zyklen`, `kein_gipfel`, …) |
+
+  Alle Zeiten in **Sekunden auf der Wanduhr der Messung** (`t_wall_s` wie die Schläge,
+  Abschnitt 4), 3 Nachkommastellen — so legt die Auswertung Phasen und RR-Abstände ohne
+  Umrechnung übereinander. Der Leser `atem_laden` ist tolerant: fehlende Listen gelten als
+  leer, Unbekanntes bleibt liegen.
+- **Journal** `.backup_<start>_atem.jsonl` (JSON Lines, nur angehängt, jede Zeile für sich
+  abgeschlossen, `fsync` wie das EKG-Journal): `["k", {Kopf ohne die Listen}]` einmal am
+  Anfang, `["e", von_s]` Lauf auf, `["x", bis_s]` Lauf zu, `["p", t_s, "ein" | "aus"]`
+  Phase, `["f", t_ende_s, rate_pro_min, gueltig, grund]` Fenster. `journal_anhaengen`
+  schreibt nur, was seit dem letzten Mal dazukam (wie `hrv_core.ekg`); `aus_journal` setzt
+  die Datei wieder zusammen und übergeht eine halbe letzte Zeile; ein offener Lauf
+  (`bis_s = null`) wird beim Schreiben geschlossen. Beim Speichern der Messdatei wird das
+  Journal zur Datei und gelöscht; beim Wiederherstellen eines Backups ebenso.
+- **Regeln:**
+  - **Ergebnisse statt Rohdaten** (P123): keine Rohproben der Beschleunigung, nichts aus dem
+    Puffer — nur Phasen, Fenster und Läufe. Rohdaten gibt es ausschließlich im Mitschnitt des
+    Diagnosemodus (Abschnitt 14).
+  - **Prototyp gekennzeichnet:** `art`, `prototyp` und `hrv_core` sagen, womit gerechnet
+    wurde. Wird der Prototyp besser, behalten alte Messungen ihre alten Phasen (Plan §7.4,
+    bewusst so); neu rechnen lässt sich nur, was im Diagnosemodus mit Rohdaten aufgenommen
+    wurde. Nichts aus dieser Datei wird je als Kennzahl in den Cache (`hrv_metrics_cache`)
+    geschrieben.
+  - **`erfasst` unterscheidet gemessen von Lücke:** Ohne einen Lauf, der eine Zeit abdeckt,
+    heißt „keine Phase“ *nicht gemessen*, nicht *kein Atemzug*. Die Auswertung zeigt
+    außerhalb der Läufe nichts, auch keine Rate.
+  - **Keine Korrekturen:** Die Datei wird nach dem Schreiben nicht verändert, keine ±1, kein
+    Verschieben einer Phase. Was die Person am Zählen korrigiert, steht in der Zeitleiste
+    der Einheit (`korrektur`, `docs/plan_beschleunigung.md` §5.3), nie hier.
+  - **Nie Ort, nie Magnetometer:** keine Koordinaten (Regel 0, `docs/plan_gps.md`), nichts
+    zur Richtung; `geraet` ist nur die Profil-ID, die Bluetooth-Adresse steht nirgends.
+- **deid und Export:** `hrv_core.deid` kennt die Endung als Beiwerk (`BEIWERK_SUFFIXE`),
+  erkennt das Format am `schema` und am Suffix (`format_erkennen`) und behält alle Felder
+  (`REGELN["atem-v1"]`, Listen als Ganzes) — es gibt nichts zu bereinigen. Export-ZIP,
+  Forschungsexport einer Einheit und Teilen nehmen die Datei als **Dateikopie** am Stamm mit
+  (Abschnitt 2, Export; `core.hrv_export.zugehoerige_dateien`), wie das EKG-Beiwerk.
+- **Messdatei unverändert:** `raw-v1` bekommt für die Phasen kein neues Feld; die Messung ist
+  auch ohne das Beiwerk vollständig. Das Protokollfeld `atmung` (Abschnitt 5) ist davon
+  unabhängig: es sagt, *wie* geatmet wurde, die Datei hier, *wann*. Die Datenbank hält keinen
+  Verweis auf das Beiwerk (`hrv_recording` ohne Beiwerk-Spalte) — es hängt am Stamm der
+  Messdatei; Löschen der Messung nimmt es mit.

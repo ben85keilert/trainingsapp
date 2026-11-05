@@ -60,6 +60,7 @@ from typing import Any
 
 import numpy as np
 from hrv_core import mitschnitt as mt
+from hrv_core.atem import QUELLE_SENSOR, AtemSammler, atem_journal_pfad, atem_pfad
 from hrv_core.aufnahme import Aufnahme, backup_entfernen, backup_lesen
 from hrv_core.ausschnitte import (
     Abschnitt,
@@ -242,6 +243,16 @@ def backup_wiederherstellen(backup: Path) -> Gespeichert | None:
                 sammler.schreiben(pfad)
         with contextlib.suppress(OSError):
             journal.unlink()
+    # Ebenso das Atem-Journal (Phasen aus dem Prototyp, Vertrag §15) — ein beim Absturz
+    # offener Lauf endet mit dem letzten bekannten Zeitpunkt (`AtemSammler.dokument`)
+    atem_journal = atem_journal_pfad(backup)
+    if atem_journal.exists():
+        with contextlib.suppress(OSError, ValueError):
+            sammler_atem = AtemSammler.aus_journal(atem_journal)
+            if not sammler_atem.leer and not atem_pfad(pfad).exists():
+                sammler_atem.schreiben(pfad)
+        with contextlib.suppress(OSError):
+            atem_journal.unlink()
     # Ebenso der Rohmitschnitt des Diagnosemodus — er bleibt, wie er ist, und heißt nur neu
     mitschnitt_journal = mt.journal_pfad(backup)
     if mitschnitt_journal.exists() and not mt.mitschnitt_pfad(pfad).exists():
@@ -304,9 +315,14 @@ def _an_den_anfang(e: dict, start_utc: datetime | None) -> dict:
 #: als reiner Pulsgeber — auch ohne Angabe im Geräteprofil (`Messlauf.nur_puls`)
 NUR_PULS_NACH = 10
 
+#: Das Verfahren, das die Atemphasen findet — steht als Kennzeichnung im Beiwerk ``atem-v1``
+#: (`hrv_core.atem`, Vertrag `docs/kompatibilitaet.md` §15): Prototyp, kein ``ALGO_VERSION``
+ATEM_PROTOTYP = "hrv_core.prototyp.atemzuege"
+
 
 class _Laufend:
-    """Platzhalter in `Messlauf._schreiben`: „der laufende EKG-Sammler“ (``None`` heißt keiner)."""
+    """Platzhalter in `Messlauf._schreiben`: „der laufende EKG- bzw. Atem-Sammler“
+    (``None`` heißt keiner)."""
 
 
 _LAUFEND = _Laufend()
@@ -362,6 +378,10 @@ class Messlauf:
         #: EKG-Rohsignal der laufenden Aufnahme (Polar H10 auf Wunsch; Ben, 30.10.2026) —
         #: entsteht mit dem ersten Rahmen, wird als Beiwerk ``_ecg.json`` gespeichert
         self.ekg: EkgSammler | None = None
+        #: Atemphasen der laufenden Aufnahme aus dem Beschleunigungssensor (Ben, 5.11.2026,
+        #: `docs/plan_beschleunigung.md` §7.4) — legt `atem_sammler` an, sobald eine Einheit
+        #: „Atmung erfassen“ einschaltet; gespeichert als Beiwerk ``_atem.json`` (Vertrag §15)
+        self.atem: AtemSammler | None = None
         #: Rohmitschnitt der laufenden Aufnahme im Diagnosemodus (offen, solange er läuft;
         #: geschlossen bis zum Speichern, dann umbenannt) — `diagnose_starten`
         self.mitschnitt: mt.Schreiber | None = None
@@ -700,6 +720,7 @@ class Messlauf:
         )
         self.aufnahme.batterie_prozent = self.status.batterie_prozent
         self.ekg = None
+        self.atem = None
         self._grenzen = {}
         self._letztes_backup = start
         self.live.leeren()
@@ -1036,6 +1057,8 @@ class Messlauf:
             kopf = self.aufnahme.backup(self._ordner(self._backup_basis), zusatz=self._zusatz())
             if self.ekg is not None and self.ekg.n:
                 self.ekg.journal_anhaengen(ekg_journal_pfad(kopf))
+            if self.atem is not None and not self.atem.leer:
+                self.atem.journal_anhaengen(atem_journal_pfad(kopf))
         if self.mitschnitt is not None:
             self.mitschnitt.sichern()
 
@@ -1050,6 +1073,53 @@ class Messlauf:
         if any(andere.values()):
             zusatz["spuren"] = {s: gs for s, gs in andere.items() if gs}
         return zusatz
+
+    # -- Atemphasen (Beiwerk ``_atem.json``, docs/plan_beschleunigung.md §7.4) ---------------
+
+    def atem_sammler(self, *, geraet: str, rate_hz: int | float | None) -> AtemSammler | None:
+        """Der Atem-Sammler der laufenden Aufnahme — beim ersten Aufruf angelegt
+        (``quelle="sensor"``, Prototyp `ATEM_PROTOTYP`), danach derselbe; ``geraet`` ist die
+        Profil-ID (``polar_h10``), ``rate_hz`` die Abtastrate der Beschleunigung.
+
+        ``None`` ohne Aufnahme: Phasen gibt es nur als Beiwerk einer Messdatei (Plan §4.1 —
+        ohne Aufnahme fehlen nur die Atemphasen an der Messdatei, das Zählen läuft trotzdem).
+        """
+        if self.aufnahme is None:
+            return None
+        if self.atem is None:
+            self.atem = AtemSammler(QUELLE_SENSOR, geraet, rate_hz, prototyp=ATEM_PROTOTYP)
+        return self.atem
+
+    def _atem_wand(self, t_quelle_s: float) -> tuple[AtemSammler, float] | None:
+        """Sammler und Wanduhr der Aufnahme (``t − start_mono``, wie beim EKG) — ``None``
+        ohne Aufnahme oder ohne Sammler (`atem_sammler` zuerst)."""
+        aufnahme, sammler = self.aufnahme, self.atem
+        if aufnahme is None or sammler is None:
+            return None
+        return sammler, t_quelle_s - aufnahme.start_mono
+
+    def atem_lauf_beginn(self, t_quelle_s: float) -> None:
+        """„Atmung erfassen“ beginnt (Uhr der Quelle); ohne Aufnahme passiert nichts."""
+        if (w := self._atem_wand(t_quelle_s)) is not None:
+            w[0].lauf_beginn(w[1])
+
+    def atem_lauf_ende(self, t_quelle_s: float) -> None:
+        """„Atmung erfassen“ endet (Uhr der Quelle); ohne Aufnahme passiert nichts."""
+        if (w := self._atem_wand(t_quelle_s)) is not None:
+            w[0].lauf_ende(w[1])
+
+    def atem_phase(self, t_quelle_s: float, art: str) -> None:
+        """Beginn des Ein- (``"ein"``) oder Ausatmens (``"aus"``) auf der Uhr der Quelle."""
+        if (w := self._atem_wand(t_quelle_s)) is not None:
+            w[0].phase(w[1], art)
+
+    def atem_fenster(
+        self, t_ende_quelle_s: float, rate: float | None, gueltig: bool, grund: str = ""
+    ) -> None:
+        """Ergebnis eines Prüffensters (Ende auf der Uhr der Quelle, Rate je Minute, gültig,
+        Grund als snake_case-Code des Prototyps); ohne Aufnahme passiert nichts."""
+        if (w := self._atem_wand(t_ende_quelle_s)) is not None:
+            w[0].fenster(w[1], rate, gueltig, grund)
 
     def aufnahme_stoppen(self, basis: Path) -> Gespeichert | None:
         """Speichert atomar und beendet die Aufnahme. ``None``, wenn nichts aufgezeichnet wurde.
@@ -1125,6 +1195,15 @@ class Messlauf:
         # nächsten Rahmen einen neuen (mit eigenem Journal und `ecg_aufzeichnung`) — vorher
         # bekam Teil 1 kein `_ecg.json`, und alles landete neben dem letzten Teil (V4)
         ekg_alt, self.ekg = self.ekg, None
+        # Die Atemphasen bis hier ebenso: ein offener Lauf „Atmung erfassen“ endet in Teil 1
+        # an der Naht und beginnt in Teil 2 bei 0 neu — jeder Teil trägt seine Läufe
+        atem_alt, self.atem = self.atem, None
+        if atem_alt is not None and atem_alt.offen:
+            atem_alt.lauf_ende(jetzt - alt.start_mono)
+            self.atem = AtemSammler(
+                atem_alt.quelle, atem_alt.geraet, atem_alt.rate_hz, prototyp=atem_alt.prototyp
+            )
+            self.atem.lauf_beginn(jetzt - neu.start_mono)
         # Ebenso der Rohmitschnitt: Teil 1 behält seinen, Teil 2 schreibt ohne Lücke einen
         # neuen weiter, solange der Diagnosemodus läuft
         mitschnitt_alt, self.mitschnitt = self.mitschnitt, None
@@ -1134,7 +1213,7 @@ class Messlauf:
         if mitschnitt_alt is not None and mitschnitt_alt.offen:
             self._mitschnitt_oeffnen(mitschnitt_alt.pfad.name)
         return await asyncio.to_thread(
-            self._schreiben, alt, basis, grenzen_alt, ekg_alt, mitschnitt_alt
+            self._schreiben, alt, basis, grenzen_alt, ekg_alt, mitschnitt_alt, atem_alt
         )
 
     def _stopp_beginnen(self) -> Aufnahme | None:
@@ -1144,6 +1223,7 @@ class Messlauf:
         if aufnahme is None or not aufnahme.beats:
             self.aufnahme = None
             self.ekg = None
+            self.atem = None
             self._mitschnitt_verwerfen()
             return None
         if self._wird_gespeichert:
@@ -1156,6 +1236,7 @@ class Messlauf:
         if gespeichert:
             self.aufnahme = None
             self.ekg = None
+            self.atem = None
             self.mitschnitt = None
             self.diagnose_seit = None
             self._diagnose_wunsch = None  # je Messung (Plan §2.2)
@@ -1168,11 +1249,12 @@ class Messlauf:
         grenzen: dict[str, list[tuple[dict, str, bool]]] | None = None,
         ekg: EkgSammler | _Laufend | None = _LAUFEND,
         mitschnitt: mt.Schreiber | _Laufend | None = _LAUFEND,
+        atem: AtemSammler | _Laufend | None = _LAUFEND,
     ) -> Gespeichert:
         """Messdatei, Abschnitte je Spur und Diagnoseprotokoll schreiben — liest ``self``
         nur, darum auch in einem Thread möglich. ``grenzen``: die Spuren dieser Aufnahme
-        (ohne Angabe die laufenden); ``ekg``: der EKG-Sammler dieser Aufnahme (ohne Angabe
-        der laufende)."""
+        (ohne Angabe die laufenden); ``ekg`` und ``atem``: EKG- und Atem-Sammler dieser
+        Aufnahme (ohne Angabe die laufenden)."""
         pfad = aufnahme.speichern(self._ordner(basis))
         if isinstance(mitschnitt, _Laufend):
             mitschnitt = self.mitschnitt
@@ -1187,6 +1269,17 @@ class Messlauf:
             if self._backup_basis is not None:
                 with contextlib.suppress(OSError):
                     ekg_journal_pfad(
+                        self._ordner(self._backup_basis) / aufnahme.backup_name()
+                    ).unlink(missing_ok=True)
+        if isinstance(atem, _Laufend):
+            atem = self.atem
+        if atem is not None and not atem.leer:
+            # Die Atemphasen ebenso als Beiwerk; ohne einen Lauf gibt es keine Datei (§15)
+            with contextlib.suppress(OSError):
+                atem.schreiben(pfad)
+            if self._backup_basis is not None:
+                with contextlib.suppress(OSError):
+                    atem_journal_pfad(
                         self._ordner(self._backup_basis) / aufnahme.backup_name()
                     ).unlink(missing_ok=True)
         if (
@@ -1217,6 +1310,14 @@ class Messlauf:
                     f"Akku {' → '.join(str(int(b[1])) for b in ekg.batterie) or '–'} %"
                 }
                 if ekg is not None and ekg.n
+                else {}
+            ),
+            **(
+                {
+                    "Atmung": f"{len(atem.phasen)} Phasen, {len(atem.fenster_liste)} Fenster "
+                    f"in {len(atem.laeufe)} Läufen ({atem.prototyp})"
+                }
+                if atem is not None and not atem.leer
                 else {}
             ),
         )

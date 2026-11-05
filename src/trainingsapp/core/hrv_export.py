@@ -157,8 +157,8 @@ def zugehoerige_dateien(rec_pfad: Path) -> list[Path]:
     """Die Rohdatei und alles, was an ihrem Stamm hängt — nur vorhandene Dateien.
 
     Beiwerk sind ``sensor_<ts>_*`` (``_analyzed.json``, ``_ecg.json``,
-    ``_ppg.json``, ``_truth.json``, ``_diagnose.txt``, ``_mitschnitt.jsonl``) und
-    ``sensor_<ts>__c*``.
+    ``_ppg.json``, ``_truth.json``, ``_diagnose.txt``, ``_mitschnitt.jsonl``,
+    ``_atem.json``) und ``sensor_<ts>__c*``.
     Halbfertige ``*.tmp`` und Ordner (``analysis-v3`` von praxis_gui) bleiben
     außen vor. Die Rohdatei steht vorn, der Rest nach Namen.
     """

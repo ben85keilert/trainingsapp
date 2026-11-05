@@ -778,3 +778,206 @@ async def test_ohne_einstellung_kein_ekg(tmp_path) -> None:
     _, ergebnis, _ = await _messen(tmp_path, SIM_SYNTH, 10)
     assert ergebnis is not None and not ekg_pfad(ergebnis.pfad).exists()
     assert json.loads(ergebnis.pfad.read_text(encoding="utf-8"))["ecg_aufzeichnung"] is False
+
+
+# ---------------------------------------------------------------------------
+# Atemphasen als Beiwerk ``_atem.json`` (Ben, 5.11.2026, docs/kompatibilitaet.md §15)
+# ---------------------------------------------------------------------------
+
+
+async def test_atemphasen_werden_als_beiwerk_mitgeschrieben(tmp_path) -> None:
+    """Was eine Einheit über `atem_sammler` und die Hüllen meldet, steht nach dem Speichern
+    als ``_atem.json`` neben der Messdatei — Läufe, Phasen und Fenster auf der Wanduhr der
+    Aufnahme (``t − start_mono``), das Journal nach `backup_jetzt` daneben, nach dem
+    Speichern weg; die Messdatei bleibt, wie sie ist."""
+    from hrv_core.atem import atem_laden, atem_pfad
+    from hrv_core.recording import ist_messdatei
+
+    from trainingsapp.core.hrv_export import diagnose_pfad
+
+    quelle = SimulatedSource(tempo=60.0, seed=7)
+    quelle.protokoll = ["08:15:00 Verbunden"]  # type: ignore[attr-defined]
+    lauf = Messlauf(quelle, backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    lauf.aufnahme_starten()
+    aufnahme = lauf.aufnahme
+    assert aufnahme is not None
+    start = aufnahme.start_mono
+    sammler = lauf.atem_sammler(geraet="polar_h10", rate_hz=50)
+    assert sammler is not None and lauf.atem is sammler
+    assert lauf.atem_sammler(geraet="x", rate_hz=25) is sammler  # einmal je Aufnahme
+    # Zeiten auf der Uhr der Quelle — der Messlauf rechnet sie auf die Wanduhr um
+    lauf.atem_lauf_beginn(start + 5.0)
+    lauf.atem_phase(start + 6.0, "ein")
+    lauf.atem_phase(start + 8.5004, "aus")
+    lauf.atem_fenster(start + 35.0, 6.0, True)
+    lauf.atem_fenster(start + 40.0, None, False, "bewegung")
+    await _bis(lauf, 20)
+    lauf.backup_jetzt()
+    journal = next(tmp_path.rglob(".backup_*_atem.jsonl"))
+    zeilen = journal.read_text(encoding="utf-8").splitlines()
+    assert json.loads(zeilen[0])[0] == "k" and json.loads(zeilen[0])[1]["schema"] == "atem-v1"
+    assert json.loads(zeilen[1]) == ["e", 5.0]
+    lauf.atem_lauf_ende(start + 42.0)
+    await _bis(lauf, 45)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert ergebnis is not None and lauf.atem is None
+    beiwerk = atem_pfad(ergebnis.pfad)
+    assert beiwerk.exists() and not journal.exists() and not list(tmp_path.rglob(".backup_*"))
+    assert not ist_messdatei(beiwerk)
+    a = atem_laden(beiwerk)
+    assert (a.quelle, a.geraet, a.rate_hz, a.art) == ("sensor", "polar_h10", 50, "prototyp")
+    assert a.prototyp == "hrv_core.prototyp.atemzuege"
+    assert a.erfasst == [(5.0, 42.0)]
+    assert a.phasen == [(6.0, "ein"), (8.5, "aus")]
+    assert a.fenster == [(35.0, 6.0, True, ""), (40.0, None, False, "bewegung")]
+    doc = json.loads(ergebnis.pfad.read_text(encoding="utf-8"))
+    assert "phasen" not in doc and "atem" not in doc and "erfasst" not in doc
+    text = diagnose_pfad(ergebnis.pfad).read_text(encoding="utf-8")
+    assert "Atmung: 2 Phasen, 2 Fenster in 1 Läufen (hrv_core.prototyp.atemzuege)" in text
+
+
+async def test_atem_journal_wird_beim_wiederherstellen_zum_beiwerk(tmp_path) -> None:
+    """Nach einem Absturz macht `backup_wiederherstellen` aus dem Atem-Journal das Beiwerk;
+    ein offener Lauf endet mit dem letzten bekannten Zeitpunkt."""
+    from hrv_core.atem import atem_laden, atem_pfad
+
+    from trainingsapp.devices.messlauf import backup_wiederherstellen
+
+    lauf, task = await _laufend(tmp_path)
+    assert lauf.aufnahme is not None
+    start = lauf.aufnahme.start_mono
+    assert lauf.atem_sammler(geraet="polar_h10", rate_hz=50) is not None
+    lauf.atem_lauf_beginn(start + 2.0)
+    lauf.atem_phase(start + 3.0, "ein")
+    lauf.atem_fenster(start + 12.0, 7.5, True)
+    await _bis(lauf, 15)
+    lauf.backup_jetzt()
+    assert list(tmp_path.rglob(".backup_*_atem.jsonl"))
+    # „Absturz“: die App ist weg, nur Kopf, Journal und Atem-Journal liegen da
+    lauf.aufnahme = None
+    lauf.atem = None
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    backup = next(tmp_path.rglob(".backup_*.json"))
+    ergebnis = backup_wiederherstellen(backup)
+    assert ergebnis is not None
+    a = atem_laden(atem_pfad(ergebnis.pfad))
+    assert a.geraet == "polar_h10" and a.rate_hz == 50
+    assert a.erfasst == [(2.0, 12.0)] and a.phasen == [(3.0, "ein")]
+    assert a.fenster == [(12.0, 7.5, True, "")]
+    assert not list(tmp_path.rglob(".backup_*"))
+
+
+async def test_teil_speichern_nimmt_die_atemphasen_mit(tmp_path) -> None:
+    """„Teil speichern & weiter“: Teil 1 bekommt sein ``_atem.json`` mit dem an der Naht
+    geschlossenen Lauf, Teil 2 beginnt den Lauf bei 0 neu und zählt ab seinem Start."""
+    from hrv_core.atem import atem_laden, atem_pfad
+
+    lauf, task = await _laufend(tmp_path)
+    alt = lauf.aufnahme
+    assert alt is not None
+    assert lauf.atem_sammler(geraet="polar_h10", rate_hz=50) is not None
+    lauf.atem_lauf_beginn(alt.start_mono + 5.0)
+    lauf.atem_phase(alt.start_mono + 7.0, "ein")
+    await _bis(lauf, 15)
+    lauf.backup_jetzt()
+    assert list(tmp_path.rglob(".backup_*_atem.jsonl"))
+    teil1 = await lauf.aufnahme_teilen_async(tmp_path)
+    neu = lauf.aufnahme
+    assert teil1 is not None and neu is not None and neu is not alt
+    assert not list(tmp_path.rglob(".backup_*"))  # auch das Atem-Journal von Teil 1 ist weg
+    naht = round(neu.start_mono - alt.start_mono, 3)
+    a1 = atem_laden(atem_pfad(teil1.pfad))
+    assert a1.erfasst == [(5.0, naht)] and a1.phasen == [(7.0, "ein")]
+    # Teil 2: derselbe Lauf, neu begonnen bei 0 — mit Gerät und Rate von Teil 1
+    sammler2 = lauf.atem
+    assert sammler2 is not None and sammler2.offen and sammler2.laeufe == [[0.0, None]]
+    assert sammler2.geraet == "polar_h10" and sammler2.rate_hz == 50 and not sammler2.phasen
+    lauf.atem_phase(neu.start_mono + 3.0, "aus")
+    lauf.atem_lauf_ende(neu.start_mono + 8.0)
+    await _bis(lauf, 10)
+    teil2 = await lauf.aufnahme_stoppen_async(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert teil2 is not None and teil2.pfad != teil1.pfad
+    a2 = atem_laden(atem_pfad(teil2.pfad))
+    assert a2.erfasst == [(0.0, 8.0)] and a2.phasen == [(3.0, "aus")]
+    assert not list(tmp_path.rglob(".backup_*"))
+
+
+async def test_teil_speichern_ohne_offenen_atem_lauf_beginnt_keinen(tmp_path) -> None:
+    """Ist der Lauf vor dem Teilen zu, hat Teil 2 keinen Sammler — und kein Beiwerk."""
+    from hrv_core.atem import atem_pfad
+
+    lauf, task = await _laufend(tmp_path)
+    alt = lauf.aufnahme
+    assert alt is not None
+    assert lauf.atem_sammler(geraet="polar_h10", rate_hz=50) is not None
+    lauf.atem_lauf_beginn(alt.start_mono + 1.0)
+    lauf.atem_lauf_ende(alt.start_mono + 9.0)
+    await _bis(lauf, 12)
+    teil1 = await lauf.aufnahme_teilen_async(tmp_path)
+    neu = lauf.aufnahme
+    assert teil1 is not None and neu is not None
+    assert atem_pfad(teil1.pfad).exists() and lauf.atem is None
+    lauf.atem_phase(neu.start_mono + 1.0, "ein")  # ohne Sammler: nichts
+    await _bis(lauf, 8)
+    teil2 = await lauf.aufnahme_stoppen_async(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert teil2 is not None and not atem_pfad(teil2.pfad).exists()
+
+
+async def test_ohne_aufnahme_keine_atemphasen(tmp_path) -> None:
+    """Läuft keine Aufnahme, gibt es keinen Sammler und kein Beiwerk — die Hüllen tun
+    nichts und werfen nichts (Plan §4.1)."""
+    from hrv_core.atem import atem_pfad
+
+    lauf = Messlauf(SimulatedSource(tempo=60.0, seed=7), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    assert lauf.atem_sammler(geraet="polar_h10", rate_hz=50) is None
+    t = lauf.start_mono + 1.0
+    lauf.atem_lauf_beginn(t)
+    lauf.atem_phase(t + 1.0, "ein")
+    lauf.atem_fenster(t + 30.0, 6.0, True)
+    lauf.atem_lauf_ende(t + 40.0)
+    assert lauf.atem is None
+    lauf.aufnahme_starten()
+    await _bis(lauf, 10)
+    assert lauf.atem is None  # nichts von vorher wandert in die Aufnahme
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert ergebnis is not None and not atem_pfad(ergebnis.pfad).exists()
+    assert not list(tmp_path.rglob("*_atem.*"))
+
+
+async def test_leerer_atem_sammler_schreibt_nichts(tmp_path) -> None:
+    """Ein angelegter Sammler ohne Lauf, Phase und Fenster: kein Journal, kein Beiwerk —
+    und eine Aufnahme ohne Schlag nimmt ihren Sammler mit ins Nichts."""
+    from hrv_core.atem import atem_pfad
+
+    lauf, task = await _laufend(tmp_path)
+    assert lauf.atem_sammler(geraet="polar_h10", rate_hz=50) is not None
+    await _bis(lauf, 20)
+    lauf.backup_jetzt()
+    assert list(tmp_path.rglob(".backup_*.json")) and not list(tmp_path.rglob("*_atem.jsonl"))
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert ergebnis is not None and not atem_pfad(ergebnis.pfad).exists()
+    assert not list(tmp_path.rglob("*_atem.*")) and not list(tmp_path.rglob(".backup_*"))
+    # Ohne einen einzigen Schlag wird nichts gespeichert — auch keine Atemphasen
+    leer = Messlauf(SimulatedSource(tempo=1.0), backup_basis=tmp_path)
+    await leer.verbinden(SIM_SYNTH, None)
+    leer.aufnahme_starten()
+    assert leer.atem_sammler(geraet="polar_h10", rate_hz=50) is not None
+    leer.atem_lauf_beginn(leer.start_mono + 1.0)
+    assert leer.aufnahme_stoppen(tmp_path) is None and leer.atem is None
+    await leer.trennen()
+    assert not list(tmp_path.rglob("*_atem.*"))

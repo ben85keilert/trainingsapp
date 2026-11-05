@@ -35,6 +35,7 @@ def test_zugehoerige_dateien_rohdatei_zuerst_ohne_fremde(tmp_path) -> None:
         "sensor_2026-10-13_081500_analyzed.json",
         "sensor_2026-10-13_081500_diagnose.txt",
         "sensor_2026-10-13_081500__c01.json",
+        "sensor_2026-10-13_081500_atem.json",  # Atemphasen (§15)
         "sensor_2026-10-13_081500_analyzed.json.tmp",  # halbfertig
         "sensor_2026-10-13_091500.json",  # andere Messung
         ".backup_2026-10-13_081500.json",
@@ -48,6 +49,7 @@ def test_zugehoerige_dateien_rohdatei_zuerst_ohne_fremde(tmp_path) -> None:
         "sensor_2026-10-13_081500.json",
         "sensor_2026-10-13_081500__c01.json",
         "sensor_2026-10-13_081500_analyzed.json",
+        "sensor_2026-10-13_081500_atem.json",
         "sensor_2026-10-13_081500_diagnose.txt",
     ]
     assert zugehoerige_dateien(tmp_path / "fehlt" / "sensor_x.json") == []
@@ -209,3 +211,40 @@ def test_forschungsexport_nimmt_denselben_weg(tmp_path) -> None:
     }
     assert not any(MAC in t for t in texte.values())
     assert "adresse" not in json.loads(texte["Messungen/PolarH10/" + pfad.name])
+
+
+def test_atem_beiwerk_geht_als_dateikopie_mit_und_deid_behaelt_es(tmp_path) -> None:
+    """Das Atem-Beiwerk (``_atem.json``, Vertrag §15) hängt am Stamm: Export-ZIP und
+    Forschungsexport nehmen es byteidentisch mit, `hrv_core.deid` erkennt es und lässt jedes
+    Feld stehen — es gibt nichts zu bereinigen."""
+    from hrv_core import deid
+    from hrv_core.atem import AtemSammler, atem_pfad
+
+    pfad, _ = _mit_adresse(tmp_path, MAC)
+    sammler = AtemSammler("sensor", "polar_h10", 50, prototyp="hrv_core.prototyp.atemzuege")
+    sammler.lauf_beginn(5.0)
+    sammler.phase(6.0, "ein")
+    sammler.phase(8.5, "aus")
+    sammler.fenster(35.0, 6.0, True)
+    sammler.fenster(40.0, None, False, "bewegung")
+    sammler.lauf_ende(42.0)
+    beiwerk = sammler.schreiben(pfad)
+    assert beiwerk == atem_pfad(pfad)
+    roh = beiwerk.read_bytes()
+
+    assert beiwerk in zugehoerige_dateien(pfad)
+    assert exportkopie(beiwerk) == roh
+    daten = export_zip(zugehoerige_dateien(pfad), tmp_path)
+    with zipfile.ZipFile(io.BytesIO(daten)) as z:
+        assert z.read("Messungen/PolarH10/" + beiwerk.name) == roh
+    daten = forschung_zip({"format": "einheit-v1"}, zugehoerige_dateien(pfad), tmp_path)
+    with zipfile.ZipFile(io.BytesIO(daten)) as z:
+        assert z.read("Messungen/PolarH10/" + beiwerk.name) == roh
+
+    doc = json.loads(roh)
+    assert deid.format_erkennen(doc, beiwerk.name) == "atem-v1"
+    bereinigt, meldungen = deid.deidentifizieren_dict(doc, beiwerk.name)
+    assert bereinigt == doc and meldungen == []
+    ziele = deid.deidentifizieren(pfad, tmp_path / "deid", mit_beiwerk=True)
+    kopie = next(z for z in ziele if z.name == beiwerk.name)
+    assert json.loads(kopie.read_text(encoding="utf-8")) == doc

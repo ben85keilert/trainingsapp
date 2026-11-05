@@ -37,6 +37,7 @@ gelaufenen Zeiten, und ``person/eintrag`` hält fest, was eingetragen wurde.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -466,6 +467,31 @@ def zaehlen_beenden(
     )
 
 
+def vor_dem_satz_von_hand(
+    state: Any, uebung_id: str, item_id: str | None, feld_key: str
+) -> list[int]:
+    """Diagnosemodus, beide zählen (P122, Plan Beschleunigung §6): vor einem Satz von Hand
+    (Chip, „Sätze × Wert“) im Feld, in das der Sensor zählt — aufzurufen vor dem Eintragen.
+
+    Der Chip ist der Satz des Sensors (`ZaehlBaustein.von_hand`). Gingen ihm Sätze voraus, die
+    nur der Sensor zählte (mit der Uhr), kämen die erst mit dem Ende ins Tagebuch und in den
+    Mitschnitt, der Chip sofort: Die Wiederholungen stünden gegen die Haltezeiten verschoben,
+    und hrv-research legte den Chip zu Satz 1. Sie kommen darum jetzt dran
+    (`ZaehlBaustein.vorziehen`: Vergleich und Zeile ``satz`` jetzt, am Ende nicht noch einmal)
+    — gibt ihre Werte zurück; die Oberfläche trägt sie vor dem Chip ein, ihre Notizen in
+    `zaehl_stand.zaehl_notizen`. Der laufende Satz wird bis jetzt gezählt, damit der Vergleich
+    der Notiz einen frischen Stand nimmt. Das Zählen läuft weiter."""
+    z = zaehl_stand.zaehlt_in(state, uebung_id, item_id, feld_key)
+    if z is None or zaehl_stand.zaehlt_der_sensor(state, uebung_id, item_id, feld_key):
+        return []  # ohne Diagnosemodus zählt dort nur der Sensor (P122) — kein Satz von Hand
+    werte = z.vorziehen()
+    z.bis_jetzt_zaehlen()
+    e = einheit_ui.laeuft(state)
+    if werte and e is not None:
+        e.takt()  # die Sätze stehen sofort als „von Hand“ in der Zeitleiste
+    return werte
+
+
 def _ort_uebernehmen(
     state: Any, e: Einheitslauf, z: ZaehlBaustein, ort: tuple[str | None, str | None]
 ) -> str:
@@ -640,8 +666,11 @@ def _eintragen(
         if kontext.zeitfeld:
             daten["zeitfeld"] = kontext.zeitfeld
         neu.append(Ereignis(ende_s, "person", "eintrag", uebung.name, daten))
+    notizen = False
     if wdh and feld and _lebt(einheit, einheit_id):
-        neu.extend(_satz_notizen(uebung, eintrag, feld, ereignisse, wdh, kontext.auspraegung))
+        satz_notizen = _satz_notizen(uebung, eintrag, feld, ereignisse, wdh, kontext.auspraegung)
+        neu.extend(satz_notizen)
+        notizen = bool(satz_notizen)
     if wdh:
         neu.append(
             Ereignis(
@@ -652,7 +681,12 @@ def _eintragen(
                 {"eintrag": eintrag.id, "werte": list(wdh), "feld": feld, "teil": TEIL_ZAEHLEN},
             )
         )
-    _zeitleiste(state, einheit_id, neu, einheit)
+    # Die Notizen zu den gezählten Sätzen: Im Diagnosemodus stehen ihre Zeilen ``satz`` und
+    # Vergleiche schon im Mitschnitt (`Messlauf.zaehl_notizen`)
+    lauf = getattr(getattr(einheit, "hrv", None), "messlauf", None) if notizen else None
+    haken = getattr(lauf, "zaehl_notizen", None)
+    with haken() if callable(haken) else contextlib.nullcontext():
+        _zeitleiste(state, einheit_id, neu, einheit)
     return eintrag
 
 

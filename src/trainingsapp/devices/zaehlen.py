@@ -51,7 +51,19 @@ Laufleiste und der Reiter „Einheit“ ihn ohne Sonderweg.
   ``korrektur``, ``zaehlen_ende``) und der Haken `Messlauf.zaehl_satz` — der Vergleich nach dem
   Satz nimmt diesen Zähler statt eines zweiten. Am Ende des Laufs je Satz der Vergleich
   „Marken · Sensor · Korrektur · eingetragen“ (`Messlauf.zaehlsatz_vergleichen`) — eingetragen
-  ist der Satzwert, wenn das Zählen so endet, dass er in den Eintrag kommt.
+  ist der Satzwert, wenn das Zählen so endet, dass er in den Eintrag kommt. Der Haken gibt
+  der Marken-Leiste auch die **Satznummer** und, solange ein Satz zählt, Übung und Phase
+  (`core.diagnose.kontext_aus_notizen`): Mit der Uhr kommt bis zum Ende keine Notiz zum Satz,
+  und die Anfangsnotizen warten 5 s. Die Nummer ist die der Zeile ``satz``, die der Satz im
+  Mitschnitt bekommen wird (`ZaehlSatz.diag_nr`, `Messlauf.naechster_satz`: die Zeilen seit
+  ``uebung_start`` plus die gezählten Sätze, deren Zeile erst mit dem Ende kommt) — dieselbe
+  an Marken, Vergleich und Kontextzeilen; die Zeitleiste zählt je Lauf ab 1.
+- **Satz von Hand** (Diagnosemodus, beide zählen, `von_hand`): Ein Chip im Feld, in das der
+  Sensor zählt, ist dessen Satz — der laufende, in der Pause der Uhr der letzte. Er endet dort;
+  ohne Uhr beginnt sofort der nächste, mit der Uhr erst der nächste zählende Abschnitt. Gingen
+  ihm Sätze voraus, die nur der Sensor zählte (mit der Uhr), kommen sie vor ihm ins Tagebuch
+  und in den Mitschnitt (`vorziehen`, `ui.uebung_lauf.vor_dem_satz_von_hand`) — sonst stünde
+  der Chip vor ihnen. Das Zählen läuft weiter.
 
 Synchron und ohne flet; wer das Ende sofort in der Zeitleiste braucht (abgehakt), ruft danach
 `Einheitslauf.takt` — der Takt holt die Ereignisse ab.
@@ -70,9 +82,16 @@ import hrv_core
 import numpy as np
 from hrv_core.prototyp import wiederholungen as prototyp_wdh
 
-from ..core.einheit import MIN_MARKE_S, Beteiligung, Ereignis, Rolle, daten_pruefen
+from ..core.einheit import (
+    MIN_MARKE_S,
+    Beteiligung,
+    Ereignis,
+    Rolle,
+    daten_pruefen,
+    ganzzahl_lesen,
+)
 from ..core.kurzcode import kurzcode
-from ..core.timer import STOPPUHR
+from ..core.timer import EINMAL, STOPPUHR
 from ..core.zaehlen import (
     BEREICH_G,
     EINGETRAGEN,
@@ -181,6 +200,9 @@ class ZaehlSatz:
     #: Die Person trug diesen Satz von Hand ein (Diagnosemodus, ein Chip im Feld, in das der
     #: Sensor zählt — `ZaehlBaustein.von_hand`): verglichen, aber nicht vom Sensor eingetragen
     von_hand: bool = False
+    #: Diagnosemodus: seine Nummer an Marken, Vergleich und Kontextzeilen — die der Zeile
+    #: ``satz``, die er im Mitschnitt bekommt (`ZaehlBaustein._naechste_diagnose_nr`)
+    diag_nr: int | None = None
 
     @property
     def wert(self) -> int:
@@ -285,6 +307,9 @@ class ZaehlBaustein:
         self._vorgemerkt: tuple[str, float] | None = None
         self._neu: list[Ereignis] = []
         self._freigegeben = False
+        #: Sah der Teil schon einen Abschnitt einer Uhr? Dann ist jeder zählende Abschnitt ein
+        #: Satz — ein Satz von Hand beginnt keinen neuen mitten darin (`von_hand`)
+        self._mit_uhr = False
 
     # -- Stand -------------------------------------------------------------------------
 
@@ -469,10 +494,18 @@ class ZaehlBaustein:
                 continue
             t = max(e.t_s, self._start_s)
             if e.art == "abschnitt":
+                # Der erste Abschnitt einer Einmaluhr mit einer Runde (Stoppuhr, Einmal-Timer):
+                # ein Lauf von ihr ist ein Satz — sie misst den, der schon zählt
+                einmal = (
+                    not self._mit_uhr
+                    and e.daten.get("profil_id") in (STOPPUHR, EINMAL)
+                    and ganzzahl_lesen(e.daten.get("von"), 1) <= 1
+                )
+                self._mit_uhr = True
                 if e.daten.get("zaehlt") is False:
                     self._abschnitt_pause(t)
                 else:
-                    self._abschnitt_zaehlt(t, stoppuhr=e.daten.get("profil_id") == STOPPUHR)
+                    self._abschnitt_zaehlt(t, einmal=einmal)
             elif e.art == "pause":
                 self._anhalten(t)
             elif e.art == "weiter":
@@ -534,7 +567,7 @@ class ZaehlBaustein:
                 {"delta": delta, "satz": satz.nr},
             )
         )
-        self._kontext("korrektur", wert=delta, satz=satz.nr, feld=self.feld)
+        self._kontext("korrektur", wert=delta, satz=self._diagnose_nr(satz), feld=self.feld)
         if satz is not self._offen and satz.bis_s is not None:
             self._zaehlung_schreiben(satz, satz.bis_s)  # in der Pause: der Satz neu
         return True
@@ -542,29 +575,71 @@ class ZaehlBaustein:
     def von_hand(self) -> bool:
         """Diagnosemodus (P122: beides zugleich nur zum Prüfen): Die Person trug eben einen Satz
         von Hand ein, mit einem Chip im Feld, in das der Sensor zählt. Der Satz des Sensors —
-        der laufende, in der Pause des Timers der letzte — gilt damit als eingetragen: Er
-        endet hier (ohne Uhr beginnt der nächste), verglichen hat ihn die Notiz zum Satz
+        der laufende, in der Pause des Timers der letzte (`_ziel`) — gilt damit als
+        eingetragen: Er endet hier, verglichen hat ihn die Notiz zum Satz
         (`Messlauf._satz_vergleichen` nimmt `Messlauf.zaehl_satz`), und am Ende trägt der
         Sensor ihn nicht noch einmal ein (`core.zaehlen_eintrag.wiederholungen` lässt ihn
-        aus). ``False``, wenn es keinen Satz gab."""
+        aus). Ohne Uhr beginnt sofort der nächste; mit der Uhr ist jeder zählende Abschnitt ein
+        Satz — der nächste beginnt mit dem nächsten (`_abschnitt_zaehlt`), nicht mitten in
+        diesem, und nicht, während sie angehalten ist. ``False``, wenn es keinen Satz gab
+        (etwa der zweite Satz eines „2 × 6“): Dann zählt ihn der Sensor nicht."""
         if self._t0 is None or self.grund is not None or not self.wdh:
             return False
         t = max(self._uhr() - self._t0, self._start_s)
-        satz = self._offen
-        if satz is not None:
+        satz = self._ziel()
+        if satz is None:
+            return False
+        satz.von_hand = True
+        if satz is self._offen:
             if self._angehalten_seit is None:
-                self._rechnen(t, erzwingen=True)
+                self._rechnen(t, erzwingen=self._gerechnet != t)
+            self._satz_schliessen(t)  # ein Satz von Hand bleibt einer, auch unter 5 s
+            if not self._mit_uhr and self._angehalten_seit is None:
+                self._satz_beginnen(t)  # was danach kommt, zählt der Sensor als nächsten Satz
+        elif satz.bis_s is not None:
+            self._zaehlung_schreiben(satz, satz.bis_s, immer=True)
+        return True
+
+    def vorziehen(self) -> list[int]:
+        """Diagnosemodus, vor einem Satz von Hand: Die Sätze vor dem, den er meint (`_ziel`),
+        die nur der Sensor zählte, kommen jetzt ins Tagebuch — mit der Uhr kämen sie erst mit
+        dem Ende, der Chip sofort: Die Wiederholungen stünden gegen die Haltezeiten verschoben,
+        und im Mitschnitt stünde seine Zeile ``satz`` vor ihren (hrv-research legte ihn zu Satz
+        1). Jeder wird jetzt verglichen (seine Zeile ``satz`` an seinem Ende, `Messlauf.
+        zaehlsatz_vergleichen`), gilt als eingetragen (`von_hand`: nicht noch einmal am Ende)
+        und steht so in der Zeitleiste. Gibt die Werte zurück, die die Oberfläche vor dem Chip
+        einträgt (ohne leere Sätze); das Zählen läuft weiter."""
+        if self._t0 is None or self.grund is not None or not self.wdh:
+            return []
+        ziel = self._ziel()
+        werte: list[int] = []
+        for satz in self.saetze:
+            if satz.bis_s is None or satz.von_hand or satz is ziel:
+                continue
             satz.von_hand = True
-            self._satz_schliessen(t)
-            self._satz_beginnen(t)  # was danach kommt, zählt der Sensor als nächsten Satz
-            return True
+            self._zaehlung_schreiben(satz, satz.bis_s, immer=True)
+            eingetragen = satz.wert if satz.wert > 0 else None
+            self._vergleich(satz, eingetragen)
+            if eingetragen is not None:
+                werte.append(eingetragen)
+        return werte
+
+    def bis_jetzt_zaehlen(self) -> None:
+        """Den laufenden Satz jetzt zählen — vor der Notiz eines Satzes von Hand, deren
+        Vergleich den Stand nimmt (`Messlauf.zaehl_satz`): gedrosselt (`takt_nach`) wäre er bis
+        zu `MAX_TAKT_S` alt."""
+        if self._t0 is None or self.grund is not None:
+            return
+        self._rechnen(max(self._uhr() - self._t0, self._start_s), erzwingen=True)
+
+    def _ziel(self) -> ZaehlSatz | None:
+        """Der Satz, den ein Satz von Hand jetzt meint: der laufende — in der Pause der Uhr der
+        letzte, solange der nächste nicht begann und er nicht schon von Hand ist."""
+        if self._offen is not None:
+            return self._offen
         if self.saetze and not self.saetze[-1].gemeldet and not self.saetze[-1].von_hand:
-            letzter = self.saetze[-1]
-            letzter.von_hand = True
-            if letzter.bis_s is not None:
-                self._zaehlung_schreiben(letzter, letzter.bis_s, immer=True)
-            return True
-        return False
+            return self.saetze[-1]
+        return None
 
     # -- Sätze ---------------------------------------------------------------------------
 
@@ -572,6 +647,7 @@ class ZaehlBaustein:
         self._melden()  # der vorige steht jetzt fest
         nr = 1 + sum(1 for s in self.saetze if s.bis_s is not None)
         satz = ZaehlSatz(nr=nr, von_s=t, stuecke=[[t, None]], ruhe_seit_s=t)
+        satz.diag_nr = self._naechste_diagnose_nr()
         self.saetze.append(satz)
         self._offen = satz
         self._gerechnet = None
@@ -583,8 +659,10 @@ class ZaehlBaustein:
         if satz.stuecke and satz.stuecke[-1][1] is None:
             satz.stuecke[-1][1] = t
         satz.bis_s = t
-        if self._fehlstart(satz, t) and satz.geschrieben is None:
-            self.saetze.remove(satz)  # kein Satz — bekommt auch keine Nummer
+        if self._fehlstart(satz, t) and satz.geschrieben is None and not satz.von_hand:
+            # Kein Satz — bekommt auch keine Nummer. Einer von Hand bleibt: Er steht im
+            # Tagebuch und im Mitschnitt, sonst verlöre er sein Kennzeichen
+            self.saetze.remove(satz)
         else:  # was schon in der Zeitleiste steht, bleibt ein Satz
             self._zaehlung_schreiben(satz, t)  # gleich, nicht erst mit dem nächsten Satz
 
@@ -593,16 +671,19 @@ class ZaehlBaustein:
         """Kurz und unkorrigiert: kein Satz."""
         return satz.korrektur == 0 and satz.dauer_s(t) < MIN_SATZ_S
 
-    def _abschnitt_zaehlt(self, t: float, *, stoppuhr: bool = False) -> None:
+    def _abschnitt_zaehlt(self, t: float, *, einmal: bool = False) -> None:
         """Ein zählender Abschnitt des Timers beginnt: ein neuer Satz — hat der laufende noch
         nichts gezählt oder war er ein Fehlstart, beginnt er nur neu (Zählen getippt, dann
-        die Uhr gestartet). Tritt die **Stoppuhr** einem Satz bei, der schon zählt, läuft er
-        weiter: Ein Lauf der Stoppuhr ist ein Satz (`core.timer.stoppuhr`), sie misst den, der
-        schon läuft — die große Zahl springt nicht auf 0, und ein Satz bleibt einer."""
+        die Uhr gestartet). Tritt eine **Einmaluhr** (``einmal``: Stoppuhr oder Einmal-Timer
+        mit einer Runde, ihr erster Abschnitt) einem Satz bei, der schon zählt, läuft er
+        weiter: Ein Lauf von ihr ist ein Satz (`core.timer.stoppuhr`, `einmal_timer`), sie
+        misst den, der schon läuft — die große Zahl springt nicht auf 0, und ein Satz bleibt
+        einer."""
         satz = self._offen
         if (
             satz is not None
             and satz.geschrieben is None
+            and not satz.von_hand
             and (satz.leer or self._fehlstart(satz, t))
         ):
             satz.von_s = satz.ruhe_seit_s = t
@@ -613,8 +694,8 @@ class ZaehlBaustein:
             self._angehalten_seit = None
             self._gerechnet = None
             return
-        if stoppuhr and satz is not None and self._angehalten_seit is None:
-            return  # die Stoppuhr misst den Satz, der schon zählt
+        if einmal and satz is not None and self._angehalten_seit is None:
+            return  # die Einmaluhr misst den Satz, der schon zählt
         if satz is not None:
             if self._angehalten_seit is None:
                 self._rechnen(t, erzwingen=True)
@@ -814,25 +895,30 @@ class ZaehlBaustein:
         eingetragen ist der Satzwert, wenn das Zählen so endet, dass er in den Eintrag kommt
         (`core.zaehlen.EINGETRAGEN`; die Uhr brach nicht ab). Der Messlauf zählt die Tipps der
         Marken-Leiste im Satz; ohne Diagnosemodus geschieht nichts."""
-        vergleichen = getattr(self.messlauf, "zaehlsatz_vergleichen", None)
-        if not self.wdh or not callable(vergleichen):
+        if not self.wdh:
             return
         for satz in self.saetze:
             if satz.bis_s is None or satz.von_hand:
-                continue  # von Hand: verglichen hat ihn seine Notiz (`von_hand`)
-            eingetragen = satz.wert if grund in EINGETRAGEN and satz.wert > 0 else None
-            with contextlib.suppress(Exception):  # der Vergleich darf das Ende nie stoppen
-                vergleichen(
-                    uebung=self.name,
-                    satz=satz.nr,
-                    feld=self.feld,
-                    von=self._auf_quelle(satz.von_s),
-                    bis=self._auf_quelle(satz.bis_s),
-                    sensor=satz.sensor,
-                    korrektur=satz.korrektur,
-                    eingetragen=eingetragen,
-                    uebung_id=kurzcode(self.kontext.uebung_id),
-                )
+                continue  # von Hand: verglichen hat ihn seine Notiz (`von_hand`, `vorziehen`)
+            self._vergleich(satz, satz.wert if grund in EINGETRAGEN and satz.wert > 0 else None)
+
+    def _vergleich(self, satz: ZaehlSatz, eingetragen: int | None) -> None:
+        """Ein abgeschlossener Satz in den Vergleich des Diagnosemodus (`_vergleichen`)."""
+        vergleichen = getattr(self.messlauf, "zaehlsatz_vergleichen", None)
+        if not callable(vergleichen) or satz.bis_s is None:
+            return
+        with contextlib.suppress(Exception):  # der Vergleich darf das Ende nie stoppen
+            vergleichen(
+                uebung=self.name,
+                satz=self._diagnose_nr(satz),
+                feld=self.feld,
+                von=self._auf_quelle(satz.von_s),
+                bis=self._auf_quelle(satz.bis_s),
+                sensor=satz.sensor,
+                korrektur=satz.korrektur,
+                eingetragen=eingetragen,
+                uebung_id=kurzcode(self.kontext.uebung_id),
+            )
 
     def _zaehlung_schreiben(self, satz: ZaehlSatz, t_s: float, *, immer: bool = False) -> None:
         """Den Satz als ``zaehlung`` in die Zeitleiste — wenn sich seit dem letzten Mal etwas
@@ -875,19 +961,22 @@ class ZaehlBaustein:
                 continue
             self._zaehlung_schreiben(satz, satz.bis_s)
             t_ns = self._quelle_ns(satz.bis_s)
-            if satz.sensor is not None:
+            nr = self._diagnose_nr(satz)  # wie die Marken des Satzes
+            # Von Hand: Seinen Zähler schrieb der Vergleich der Notiz zum Satz — nicht zwei
+            # Zeilen ``zaehler`` mit derselben Nummer
+            if satz.sensor is not None and not satz.von_hand:
                 self._kontext(
                     "zaehler",
                     feld=self.feld,
                     wert=satz.sensor,
-                    satz=satz.nr,
+                    satz=nr,
                     phase="prototyp",
                     t=t_ns,
                 )
             self._kontext(
                 "zaehlung",
                 wert=satz.wert,
-                satz=satz.nr,
+                satz=nr,
                 feld=self.feld,
                 dauer_s=round(satz.dauer_s(satz.bis_s), 1),
                 t=t_ns,
@@ -907,18 +996,47 @@ class ZaehlBaustein:
             self.messlauf.zaehl_satz = None
 
     def _fuer_diagnose(self) -> dict[str, Any] | None:
-        """Der Satz für den Vergleich im Diagnosemodus (`Messlauf.zaehl_satz`)."""
-        satz = self.satz
+        """Der Satz für den Vergleich und die Marken-Leiste im Diagnosemodus
+        (`Messlauf.zaehl_satz`): der, den ein Satz von Hand jetzt meinte (`_ziel`) — ``satz``
+        ist seine Nummer (`_diagnose_nr`), ``offen``, ob er gerade zählt (dann gelten in der
+        Leiste seine Übung und die Phase „Übung“, auch bevor die Anfangsnotizen nach 5 s
+        kommen). ``None``, wenn keiner es ist (nach dem Satz von Hand mit der Uhr): Dann nimmt
+        die Leiste die Nummer aus dem Mitschnitt (`Messlauf.marken_satz`)."""
+        satz = self._ziel()
         if satz is None:
             return None
-        # Die Übung kommt mit: der Vergleich nimmt den Satz nur für dieselbe (Kurzcode wie in
-        # den Notizen, `core.kurzcode`)
+        # Die Übung kommt mit: der Vergleich und die Leiste nehmen den Satz nur für dieselbe
+        # (Kurzcode wie in den Notizen, `core.kurzcode`)
         return {
             **satz.als_dict(),
+            "satz": self._diagnose_nr(satz),
             "feld": self.feld,
             "uebung": self.name,
             "uebung_id": kurzcode(self.kontext.uebung_id),
+            "offen": satz is self._offen and self._angehalten_seit is None,
         }
+
+    def _naechste_diagnose_nr(self) -> int:
+        """Die Nummer eines Satzes, der jetzt beginnt (Diagnosemodus): die seiner Zeile ``satz``
+        im Mitschnitt — die Zeilen seit ``uebung_start`` (`Messlauf.naechster_satz`; Sätze von
+        Hand, auch vor dem Zählen) plus die Sätze dieses Laufs, die nur der Sensor zählte: deren
+        Zeile kommt erst mit dem Ende (`Messlauf.zaehlsatz_vergleichen`). Ohne Mitschnitt die
+        Nummer des Laufs."""
+        geschlossen = [s for s in self.saetze if s.bis_s is not None]
+        naechster = getattr(self.messlauf, "naechster_satz", None)
+        basis: Any = None
+        if callable(naechster):
+            with contextlib.suppress(Exception):  # die Leiste darf das Zählen nie stoppen
+                basis = naechster(kurzcode(self.kontext.uebung_id))
+        if not isinstance(basis, int) or isinstance(basis, bool) or basis < 1:
+            return 1 + len(geschlossen)
+        return basis + sum(1 for s in geschlossen if not s.von_hand)
+
+    @staticmethod
+    def _diagnose_nr(satz: ZaehlSatz) -> int:
+        """Die Nummer des Satzes im Diagnosemodus — in der Marken-Leiste, am Vergleich nach
+        dem Satz und in den Kontextzeilen des Mitschnitts (die Zeitleiste zählt je Lauf ab 1)."""
+        return satz.diag_nr if satz.diag_nr is not None else satz.nr
 
     def _quelle_ns(self, t_s: float) -> int | None:
         """Eine Stelle der Achse der Einheit auf der Uhr der Quelle (ns, wie im Mitschnitt)."""

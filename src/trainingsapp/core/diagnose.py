@@ -17,10 +17,10 @@ Keine Bewertung, keine Rechnung an Messwerten — nur Zahlen und Zustände.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from hrv_core import mitschnitt as mt
 from hrv_core.geraete.pmd import PMD_SERVICE_UUID
@@ -260,7 +260,9 @@ class MarkenKontext:
 
 
 def kontext_aus_notizen(
-    ereignisse: Iterable[dict], wiederholungen: Callable[[str], bool]
+    ereignisse: Iterable[dict],
+    wiederholungen: Callable[[str], bool],
+    zaehlsatz: Mapping[str, Any] | None = None,
 ) -> MarkenKontext:
     """Die Art der nächsten Marke aus den automatischen Notizen der laufenden Aufnahme.
 
@@ -269,6 +271,17 @@ def kontext_aus_notizen(
     außer in einem Abschnitt des Timers, der nicht zählt (Pause), und solange der Timer
     angehalten ist. Ein eingetragener Satz (``person/leistung``) zählt den Satz weiter.
     Sonst — Halte- und Atemübungen, Pausen, Messung ohne Übung — ein Atemzug.
+
+    **Im Diagnosemodus** kommt die Nummer aus dem Mitschnitt (``zaehlsatz``,
+    `devices.messlauf.Messlauf.marken_satz`, mit ``uebung_id`` und ``satz``): die des Satzes,
+    den der Sensor zählt, sonst die der nächsten Zeile ``satz`` — hrv-research ordnet die
+    k-te Zeile nach dem Start der Übung dem Satz k zu. Eine Uhr mit mehreren zählenden
+    Abschnitten schreibt bis zum Ende keine Leistung (sonst trügen alle Marken „S1“), und ein
+    gezählter Satz, der nicht eingetragen wird, hat eine Zeile, aber keine Leistung. Gilt die
+    Nummer, zählen die Leistungen nicht dazu. **Zählt der Satz gerade** (``offen``), gelten
+    seine Übung und die Phase „Übung“: Die Notizen „Übung: Start“ und die eines Abschnitts
+    der Uhr warten 5 s (die 5-s-Regel der Einheit) — sonst wären die ersten Tipps jedes Satzes
+    Atemzüge.
 
     >>> start = {"marke": {"quelle": "plan", "art": "uebung_start", "name": "Kniebeuge"},
     ...          "uebungen": ["KB000001"]}
@@ -286,6 +299,28 @@ def kontext_aus_notizen(
     >>> ende = {"marke": {"quelle": "plan", "art": "uebung_ende"}, "uebungen": ["KB000001"]}
     >>> kontext_aus_notizen([start, ende], wdh).text()
     'Atemzug'
+
+    Der Sensor zählt (Uhr, Satz 2 ohne Notiz; mit der Notiz eines Satzes von Hand nicht S3):
+
+    >>> zs = {"satz": 2, "uebung_id": "KB000001"}
+    >>> kontext_aus_notizen([start], wdh, zs).text()
+    'Wiederholung · Kniebeuge S2'
+    >>> kontext_aus_notizen([start, satz], wdh, zs).satz
+    2
+    >>> kontext_aus_notizen([start, satz], wdh, {"satz": 5, "uebung_id": "ANDERE1"}).satz
+    2
+    >>> kontext_aus_notizen([], wdh, zs).satz is None   # ohne Übung kein Satz
+    True
+
+    Der Satz zählt schon, die Notizen kommen erst nach 5 s (der Anfang, der zweite Abschnitt):
+
+    >>> offen = {"satz": 1, "uebung_id": "KB000001", "uebung": "Kniebeuge", "offen": True}
+    >>> kontext_aus_notizen([], wdh, offen).text()
+    'Wiederholung · Kniebeuge S1'
+    >>> kontext_aus_notizen([start, pause], wdh, {**offen, "satz": 2}).text()
+    'Wiederholung · Kniebeuge S2'
+    >>> kontext_aus_notizen([start, pause], wdh, {**offen, "satz": 2, "offen": False}).art
+    'atem'
     """
     code: str | None = None
     name: str | None = None
@@ -313,6 +348,16 @@ def kontext_aus_notizen(
             phase = "pause"
         elif art == "weiter":
             phase = "uebung" if code else "frei"
+    if zaehlsatz is not None and zaehlsatz.get("offen") is True:
+        zs_code = zaehlsatz.get("uebung_id")
+        if isinstance(zs_code, str) and code in (None, zs_code):
+            if code is None:
+                code, name = zs_code, str(zaehlsatz.get("uebung") or "") or None
+            phase = "uebung"  # der Satz zählt — die Notiz des Abschnitts kommt erst nach 5 s
+    if code is not None and zaehlsatz is not None and zaehlsatz.get("uebung_id") == code:
+        nr = zaehlsatz.get("satz")
+        if isinstance(nr, int) and not isinstance(nr, bool) and nr > 0:
+            satz = nr  # der Satz des Zähl-Teils — die Leistungen seither zählen nicht dazu
     art_ = WDH if phase == "uebung" and code is not None and wiederholungen(code) else ATEM
     return MarkenKontext(art_, name, code, satz or None, phase)
 

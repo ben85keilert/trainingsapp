@@ -143,7 +143,10 @@ def uhr_bis(ereignisse: Iterable[Ereignis]) -> float | None:
     die Stelle des letzten — bis dorthin zählt der Abschnitt. So passen Zeit und Wiederholungen
     zusammen, ein Stand für beide (sonst hätte der Satz Wiederholungen, aber keine Haltezeit).
     ``None``: Die Uhr endete, lief nicht, steht in einem Abschnitt, der nicht zählt, oder der
-    offene Abschnitt hat noch keinen Zwischenstand (dann fehlt er in beiden).
+    offene Abschnitt hat noch keinen Zwischenstand (dann fehlt er in beiden). Endete das
+    Zählen in diesem Abschnitt (``zaehlen_ende``: abgebrochen, keine Bewegung, getrennt) und
+    die Uhr lief weiter, ist seine letzte ``zaehlung`` nur das Ende des Zählens, nicht das der
+    Uhr — dann auch ``None``: lieber eine Lücke als eine zu kurze Zeit.
 
     >>> ab = lambda t, **d: Ereignis(t, "timer", "abschnitt", "", {"name": "Halten", **d})
     >>> satz = lambda t, n: Ereignis(t, "zaehlen", "zaehlung", "", {"satz": n, "wert": 9})
@@ -152,6 +155,9 @@ def uhr_bis(ereignisse: Iterable[Ereignis]) -> float | None:
     >>> uhr_bis([ab(0.0), satz(30.0, 1), ab(30.0, zaehlt=False)]) is None  # in der Pause
     True
     >>> uhr_bis([ab(0.0), satz(15.0, 1), Ereignis(20.0, "timer", "ende", "")]) is None
+    True
+    >>> abbruch = Ereignis(21.0, "zaehlen", "zaehlen_ende", "", {"grund": "abbruch"})
+    >>> uhr_bis([ab(0.0), satz(15.0, 1), satz(21.0, 1), abbruch]) is None  # die Uhr lief weiter
     True
     """
     beginn: float | None = None
@@ -165,6 +171,8 @@ def uhr_bis(ereignisse: Iterable[Ereignis]) -> float | None:
         elif beginn is not None and e.quelle == "zaehlen" and e.art == "zaehlung":
             if e.t_s > beginn:  # die ``zaehlung`` des Satzes davor steht an der Grenze
                 bis = e.t_s if bis is None else max(bis, e.t_s)
+        elif e.quelle == "zaehlen" and e.art == "zaehlen_ende":
+            bis = None  # das Ende des Zählens — die Uhr lief weiter, wie lange, weiß niemand
     return bis
 
 

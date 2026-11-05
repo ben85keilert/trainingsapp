@@ -1041,6 +1041,66 @@ async def test_im_diagnosemodus_steht_ein_satz_von_hand_nicht_doppelt_da(
     assert eintrag.result == {"reps": [10.0, 10.0]}  # vorher: [10.0, 10.0, 18]
 
 
+async def test_im_diagnosemodus_folgt_ein_chip_neben_der_uhr_ihren_saetzen(
+    umgebung, monkeypatch
+) -> None:
+    """Diagnosemodus, Wandsitz mit Uhr 3 × (20 s / 10 s) und „Wdh. zählen“: Satz 1 zählt nur
+    der Sensor, mitten in Halten 2 tippt die Person „+10“, Satz 3 wieder nur der Sensor. Vorher
+    stand der Chip vor Satz 1 im Tagebuch, und der Rest von Halten 2 kam als eigener Satz hinein
+    (vier Wiederholungswerte für drei Haltezeiten). Jetzt kommt Satz 1 vor dem Chip, der Chip
+    beendet Halten 2, und Halten 3 ist Satz 3 (Runde 5)."""
+    from trainingsapp.core.timer import Abschnitt, TimerProfil
+
+    state, uhr, gurt = umgebung
+    monkeypatch.setattr(Messlauf, "diagnose_aktiv", property(lambda self: True))
+    seite = Seite()
+    profil = TimerProfil(
+        name="3 × 20 s",
+        abschnitte=[Abschnitt("Halten", 20), Abschnitt("Pause", 10, zaehlt=False)],
+        runden=3,
+    )
+    u = _kniebeuge(state, "Wandsitz", "reps", "hold", timer=[profil.als_dict()])
+    _symbol(_ansicht(seite, state, u), ft.Icons.PLAY_ARROW, "starten").on_click()
+    await _sekunden(state, uhr, gurt, 1)
+    _knopf(_ansicht(seite, state, u), "Wdh. zählen").on_click()
+    await _sekunden(state, uhr, gurt, 41)  # Satz 1, die Pause, 12 s von Halten 2
+    z = _zaehl_teil(state)
+    assert len(z.saetze) == 2 and z.saetze[0].wert > 0
+    _knopf(_ansicht(seite, state, u), "+10").on_click()
+    assert z.aktiv and [s.von_hand for s in z.saetze] == [True, True]  # kein Satz mitten darin
+    await _bis_vorbei(state, uhr, gurt)
+    assert [s.von_hand for s in z.saetze] == [True, True, False]
+    s1, _s2, s3 = z.saetze
+    (eintrag,) = _eintraege(state)
+    assert eintrag.result["reps"] == [s1.wert, 10.0, s3.wert]  # vorher: [10.0, s1, Rest, s3]
+    assert len(eintrag.result["hold"]) == 3
+
+
+async def test_im_diagnosemodus_sind_saetze_mal_wert_zwei_saetze(umgebung, monkeypatch) -> None:
+    """„Sätze × Wert“ 2 × 6 während des Zählens im Diagnosemodus: zwei Sätze von Hand — der
+    erste ist der des Sensors, der zweite kein gezählter. Vorher endete nur einer, und die
+    Nummern im Mitschnitt liefen den Sätzen davon (Runde 5)."""
+    state, uhr, gurt = umgebung
+    monkeypatch.setattr(Messlauf, "diagnose_aktiv", property(lambda self: True))
+    seite = Seite()
+    u = _kniebeuge(state)
+    _knopf(_ansicht(seite, state, u), "Wdh. zählen").on_click()
+    await _sekunden(state, uhr, gurt, 12)
+    z = _zaehl_teil(state)
+    ansicht = _ansicht(seite, state, u)
+    felder = [f for f in _alle(ansicht) if isinstance(f, ft.TextField)]
+    i = next(i for i, f in enumerate(felder) if f.label == "Sätze")
+    felder[i].value, felder[i + 1].value = "2", "6"  # Sätze × Wert
+    (eintragen,) = [k for k in _knoepfe(ansicht, "Eintragen") if isinstance(k, ft.OutlinedButton)]
+    eintragen.on_click()
+    assert [s.von_hand for s in z.saetze] == [True, True, False]  # vorher: [True, False]
+    await _sekunden(state, uhr, gurt, 10)
+    _knopf(_ansicht(seite, state, u), "Fertig").on_click()
+    await _bis_vorbei(state, uhr, gurt)
+    (eintrag,) = _eintraege(state)
+    assert eintrag.result["reps"] == [6.0, 6.0, z.saetze[-1].wert]
+
+
 async def test_wie_geplant_fehlt_solange_der_sensor_zaehlt(umgebung) -> None:
     """„Wie geplant · 3x15“ hakte während des Zählens mit der Zahl des Sensors ab, nicht mit dem
     Ziel — Text und Wirkung passten nicht (Runde 3, Befund 8). Solange der Sensor zählt, steht

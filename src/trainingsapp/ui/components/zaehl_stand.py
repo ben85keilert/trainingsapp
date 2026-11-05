@@ -189,7 +189,7 @@ def zaehl_teil(
     return z
 
 
-def _zaehlt_in(
+def zaehlt_in(
     state: Any, uebung_id: str, item_id: str | None, feld_key: str
 ) -> ZaehlBaustein | None:
     """Der Zähl-Teil, der gerade in dieses Feld dieser (Plan-)Übung zählt — sonst ``None``."""
@@ -207,7 +207,7 @@ def zaehlt_der_sensor(state: Any, uebung_id: str, item_id: str | None, feld_key:
     korrigiert höchstens mit ±1“); ein Chip „+10“ hängte sonst einen zweiten Satz neben den
     gezählten. Beides zugleich gibt es nur zum Prüfen, im Diagnosemodus (Abschnitt 6) — dort
     ``False`` (ein Satz von Hand beendet dann den des Sensors, `von_hand_eingetragen`)."""
-    if _zaehlt_in(state, uebung_id, item_id, feld_key) is None:
+    if zaehlt_in(state, uebung_id, item_id, feld_key) is None:
         return False
     lauf = getattr(state, "messlauf", None)
     return not (lauf is not None and getattr(lauf, "diagnose_aktiv", False))
@@ -217,10 +217,19 @@ def von_hand_eingetragen(state: Any, uebung_id: str, item_id: str | None, feld_k
     """Diagnosemodus: Die Person trug eben einen Satz von Hand in das Feld ein, in das der
     Sensor zählt (ein Chip) — sein Satz gilt damit als eingetragen und endet hier
     (`ZaehlBaustein.von_hand`); am Ende trägt der Sensor ihn nicht noch einmal ein. Aufzurufen
-    nach der Notiz zum Satz: Deren Vergleich nimmt noch den Satz des Sensors. ``False``, wenn
-    der Sensor dort nicht zählt."""
-    z = _zaehlt_in(state, uebung_id, item_id, feld_key)
+    nach der Notiz zum Satz (deren Vergleich nimmt noch den Satz des Sensors), je Satz einmal
+    — „2 × 6“ sind zwei. Davor `ui.uebung_lauf.vor_dem_satz_von_hand`. ``False``, wenn der
+    Sensor dort nicht zählt."""
+    z = zaehlt_in(state, uebung_id, item_id, feld_key)
     return z is not None and z.von_hand()
+
+
+def zaehl_notizen(state: Any) -> contextlib.AbstractContextManager[None]:
+    """Die Notizen zu Sätzen, die der Sensor zählte, kommen (`Messlauf.zaehl_notizen`): Im
+    Diagnosemodus stehen ihre Zeilen ``satz`` und Vergleiche schon im Mitschnitt — die Notiz
+    schreibt keine zweite. Ohne Messlauf ein leerer Rahmen."""
+    haken = getattr(getattr(state, "messlauf", None), "zaehl_notizen", None)
+    return haken() if callable(haken) else contextlib.nullcontext()
 
 
 # ---------------------------------------------------------------------------

@@ -815,7 +815,11 @@ es nicht kennen.
   eingetragenen Satz eines gezählten Satzes (`satz`, hier mit der Nummer `satz`) schreibt der
   Vergleich an seinem Ende, vor `uebung_ende` (seit 5.11.2026; die Notiz zum Satz kommt erst
   nach dem Ende der Einheit und schreibt keine zweite) — die k-te `satz`-Zeile nach
-  `uebung_start` bleibt Satz k.
+  `uebung_start` bleibt Satz k. Darum bekommt **jeder** gezählte Satz eine, ein nicht
+  eingetragener (Sensor 0, abgebrochen) ohne `feld`/`wert` — „eingetragen –“; wird er später
+  doch eingetragen, bleibt es bei dieser Zeile. Ein Satz von Hand neben dem Zählen kommt nach
+  den gezählten Sätzen davor; seine Zeile trägt die Nummer ebenfalls (`satz`, wenn die Übung
+  die des letzten `uebung_start` ist), und die Marken tragen dieselbe (`kontext.satz`).
 - **Nie im Mitschnitt:** GPS (Regel 0 in `docs/plan_gps.md`), die Seriennummer (0x2A25) und
   die Systemkennung (0x2A23) — die App liest beide nie. Die Bluetooth-Adresse steht nur in
   der Datei auf dem Gerät; hinaus geht der Mitschnitt nur bereinigt (Abschnitt 2, Export).

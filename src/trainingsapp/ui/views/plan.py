@@ -637,6 +637,17 @@ def plan_view(
             # einen Satz im Eintrag (der von Hand und der gezählte)
             page.show_dialog(ft.SnackBar(ft.Text(SENSOR_ZAEHLT)))
             return
+        planuebung = None if einzel else item.id
+        # Diagnosemodus (beide zählen): Sätze davor, die nur der Sensor zählte, kommen zuerst
+        # ins Tagebuch — mit der Uhr stünde der Chip sonst vor ihnen
+        vorab: list[float] = []
+        if nachtrag is None:
+            vorab = [
+                float(w)
+                for w in uebung_lauf.vor_dem_satz_von_hand(
+                    state, item.exercise_id, planuebung, feld.key
+                )
+            ]
         uebung = uebung_fuer(item)
         session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
         eintrag = None
@@ -649,29 +660,31 @@ def plan_view(
         erster = (ziel is None or not mengen(ziel.spec_snapshot, ziel.result)) and not (
             st is not None and st.andere
         )
-        for wert in werte:
+        for i, wert in enumerate([*vorab, *werte]):
+            gezaehlt = i < len(vorab)  # ein Satz des Sensors, vor dem Chip eingetragen
             with zur_zeit():
                 eintrag = state.sitzungen.satz_anhaengen(
                     session, uebung, feld.key, wert, heute(), kontext(item, uebung), neu=neu
                 )
             if nachtrag is None:
-                marken.leistung(
-                    state,
-                    uebung,
-                    eintrag,
-                    feld.key,
-                    wert,
-                    erster=erster,
-                    grenze=grenze_frei(item),
-                    auspraegung=kontext_text(uebung, eintrag.result),
-                )
+                # Seine Zeile ``satz`` und sein Vergleich stehen schon im Mitschnitt
+                with zaehl_stand.zaehl_notizen(state) if gezaehlt else contextlib.nullcontext():
+                    marken.leistung(
+                        state,
+                        uebung,
+                        eintrag,
+                        feld.key,
+                        wert,
+                        erster=erster,
+                        grenze=grenze_frei(item),
+                        auspraegung=kontext_text(uebung, eintrag.result),
+                    )
+                if not gezaehlt:
+                    # Diagnosemodus (beide zählen): Der Satz von Hand ist der des Sensors — der
+                    # endet hier und kommt am Ende nicht noch einmal hinein (sonst stand jeder
+                    # Satz doppelt da). Je Wert: „2 × 6“ sind zwei Sätze, nicht einer
+                    zaehl_stand.von_hand_eingetragen(state, item.exercise_id, planuebung, feld.key)
             neu = erster = False
-        if eintrag is not None and nachtrag is None:
-            # Diagnosemodus (beide zählen): Der Satz von Hand ist der des Sensors — der endet
-            # hier und kommt am Ende nicht noch einmal hinein (sonst stand jeder Satz doppelt da)
-            zaehl_stand.von_hand_eingetragen(
-                state, item.exercise_id, None if einzel else item.id, feld.key
-            )
         if eintrag is not None:
             melden(uebung, eintrag)
 

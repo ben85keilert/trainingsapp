@@ -402,6 +402,31 @@ async def test_stoppuhr_dazu_misst_den_laufenden_satz(umgebung) -> None:
     _nummern_stimmen(state, e)
 
 
+async def test_einmal_timer_dazu_misst_den_laufenden_satz(umgebung) -> None:
+    """Wie die Stoppuhr: Der Einmal-Timer (ein Abschnitt, eine Runde), gestartet, während der
+    Sensor schon zählt, misst den laufenden Satz — vorher teilte er ihn (die Zahl sprang auf 0,
+    im Tagebuch ``{'hold': [30], 'reps': [4, 12]}``: zwei Werte für eine Zeit)."""
+    from trainingsapp.core.timer import einmal_timer
+
+    state, uhr, gurt, _ = umgebung
+    u = _uebung(state, "Wandsitz", "hold", "reps")
+    kontext = uebung_lauf.kontext_fuer(u)
+    e, _ = uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+    await _ticken(state, uhr, gurt, 12)
+    z = e.teil("zaehlen")
+    assert isinstance(z, ZaehlBaustein) and z.wert > 0
+    vorher = z.wert
+    assert uebung_lauf.starten(Seite(), state, kontext, einmal_timer(30)) is e
+    await _ticken(state, uhr, gurt, 1)
+    assert len(z.saetze) == 1 and z.wert >= vorher  # vorher: ein neuer Satz, die Zahl bei 0
+    await _ticken(state, uhr, gurt, 40, bis_ende=True)
+    await _warten(lambda: bool(_eintraege(state)))
+    (eintrag,) = _eintraege(state)
+    assert eintrag.result["reps"] == [z.saetze[0].wert]  # vorher: [4, 12]
+    assert eintrag.result["hold"] == [30]
+    _nummern_stimmen(state, e)
+
+
 async def test_abbruch_der_uhr_bricht_den_ganzen_lauf_ab(umgebung) -> None:
     state, uhr, gurt, _ = umgebung
     u = _uebung(state, "Wandsitz", "hold", "reps")
@@ -989,6 +1014,38 @@ def _nach_dem_absturz(state, tmp_path, name: str = "absturz.db") -> AppState:
     return AppState.starten(pfad)
 
 
+async def test_absturz_nach_dem_ende_des_zaehlens_kuerzt_die_uhr_nicht(umgebung, tmp_path) -> None:
+    """Uhr „Halten 120 s“, „Wdh. zählen“, nach 20 s „Zählen abbrechen“ — die Person hält
+    weiter, bei 91 s stirbt die App. Die letzte ``zaehlung`` ist das Ende des Zählens, nicht
+    der Stand der Uhr: Vorher trug „Eintragen“ ``{'hold': [21], 'reps': [7]}`` ein, gehalten
+    waren mindestens 91 s. Jetzt fehlt die Haltezeit (lieber eine Lücke als ein falscher Wert),
+    die Wiederholungen kommen hinein."""
+    state, uhr, gurt, _ = umgebung
+    u = _uebung(state, "Wandsitz", "hold", "reps")
+    kontext = uebung_lauf.kontext_fuer(u)
+    profil = TimerProfil(name="Halten 120 s", abschnitte=[Abschnitt("Halten", 120)])
+    e = uebung_lauf.starten(Seite(), state, kontext, profil)
+    await _ticken(state, uhr, gurt, 1)
+    uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+    await _ticken(state, uhr, gurt, 20)
+    uebung_lauf.zaehlen_beenden(state, u.id, None, ENDE_ABBRUCH)  # „Zählen abbrechen“
+    await _ticken(state, uhr, gurt, 70)  # die Uhr hält weiter
+    assert e.laeuft
+    neu = _nach_dem_absturz(state, tmp_path)
+    try:
+        ereignisse = neu.einheiten.ereignisse(e.id)
+        assert ze.uhr_bis(ereignisse) is None  # vorher: das Ende des Zählens
+        (lauf,) = uebung_lauf.laeufe_heute(neu, u.id)
+        eintrag = uebung_lauf.lauf_eintragen(neu, lauf.einheit_id)
+        assert eintrag is not None
+        assert "hold" not in eintrag.result and eintrag.result["reps"] == lauf.wdh
+    finally:
+        neu.schliessen()
+    assert e.timer is not None
+    e.timer.lauf.abbrechen()
+    await _ticken(state, uhr, gurt, 2, bis_ende=True)
+
+
 async def test_absturz_in_der_pause_verliert_keinen_fertigen_satz(umgebung, tmp_path) -> None:
     """Stirbt die App in der Pause nach Satz 2, stehen beide Sätze in der Zeitleiste — passend
     zu den Zeiten der Uhr. Vorher kam ein Satz erst mit dem nächsten hinein: „Eintragen“ trug
@@ -1117,18 +1174,34 @@ async def _diagnose_umgebung(tmp_path, monkeypatch):
     return state, zeit, lauf, innen, gemeldet
 
 
-async def _diagnose_aus(state, lauf) -> None:
-    await lauf.diagnose_beenden()
+async def _diagnose_aus(state, lauf, zeit=None) -> None:
+    """Aufräumen — mit ``zeit`` auch, wenn noch gezählt wird (ein Test scheiterte mitten im
+    Lauf): Dann stellt das Ende die Rate um, und die Attrappe des Gurts antwortet erst, wenn
+    die Zeit weiterläuft (wie beim Start)."""
+    ende = asyncio.create_task(lauf.diagnose_beenden())
+    if zeit is not None:
+        await zeit.vorspulen(5.0)
+    await ende
     lauf.aufnahme = None
     await lauf.trennen()
     state.schliessen()
 
 
 async def _rahmen(
-    lauf, innen, zeit, e, k0: int, sekunden: float, *, tipps: int = 0, bewegung: bool = True
+    lauf,
+    innen,
+    zeit,
+    e,
+    k0: int,
+    sekunden: float,
+    *,
+    tipps: int = 0,
+    bewegung: bool = True,
+    marke=None,
 ) -> int:
     """``sekunden`` Beschleunigung (200 Hz, eine Kniebeuge je 2 s; ohne ``bewegung`` still)
-    und ``tipps`` Marken der Leiste, gleichmäßig verteilt — gibt das nächste ``k`` zurück."""
+    und ``tipps`` Marken der Leiste, gleichmäßig verteilt — gibt das nächste ``k`` zurück.
+    ``marke``: so wird getippt (Vorgabe: eine Wiederholung direkt in den Mitschnitt)."""
     from hrv_core import mitschnitt as mt
 
     from test_zaehlen_geraete import _wdh_rahmen
@@ -1141,7 +1214,10 @@ async def _rahmen(
         rahmen = _wdh_rahmen(innen, k, 10**12 + k * 180_000_000, periode=2.0 if bewegung else 1e9)
         innen.senden(pmd.PMD_DATA_UUID, rahmen, zeit.t)
         if k - k0 in alle:
-            lauf.marke(mt.MARKE_WDH)
+            if marke is None:
+                lauf.marke(mt.MARKE_WDH)
+            else:
+                marke()
         if k % 5 == 0 and e.laeuft:
             e.takt()
         if k % 25 == 0:
@@ -1268,6 +1344,482 @@ async def test_im_diagnosemodus_vergleicht_der_nachtrag_neben_der_uhr_nicht_noch
         await _warten(lambda: vorbei(state))
     finally:
         await _diagnose_aus(state, lauf)
+
+
+def _tippen(state):
+    """Ein Tipp in die Marken-Leiste (`components.marken_stand`, wie ⏯ an der Uhr)."""
+    from trainingsapp.ui.components import marken_stand
+
+    return lambda: marken_stand.marke_setzen(state)
+
+
+def _kopf(state) -> str:
+    """Die Kopfzeile der Marken-Leiste: „Wiederholung · Kniebeuge S2“."""
+    from trainingsapp.ui.components import marken_stand
+
+    k, art = marken_stand.kontext(state)
+    return k.text(art)
+
+
+def _wdh_marken(lauf) -> list[dict]:
+    """Die Wiederholungsmarken im Mitschnitt, mit ihrem Kontext."""
+    from hrv_core import mitschnitt as mt
+
+    lauf.mitschnitt.sichern()
+    return [
+        z
+        for z in mt.lesen(lauf.mitschnitt.pfad)
+        if z.get("art") == mt.MARKE and z.get("typ") == mt.MARKE_WDH
+    ]
+
+
+def _chip(state, uebung: Exercise, wert: int, saetze: int = 1) -> None:
+    """Ein Chip „+wert“ (mit ``saetze`` „Sätze × Wert“) wie `views.plan.anhaengen` (dort mit
+    flet): zuerst die Sätze davor, die nur der Sensor zählte (`uebung_lauf.
+    vor_dem_satz_von_hand`, ihre Notizen in `zaehl_stand.zaehl_notizen`), dann je Satz der Wert,
+    die Notiz zum Satz (`ui.marken.leistung`; ohne Grenze, die Übung klammert) und im
+    Diagnosemodus das Ende des Satzes des Sensors (`zaehl_stand.von_hand_eingetragen`)."""
+    import contextlib
+
+    from trainingsapp.ui import marken
+
+    vorab = uebung_lauf.vor_dem_satz_von_hand(state, uebung.id, None, "reps")
+    session = state.sitzungen.session_fuer(state.profil.id, None, state.heute())
+    for i, w in enumerate([*vorab, *[wert] * saetze]):
+        gezaehlt = i < len(vorab)
+        eintrag = state.sitzungen.satz_anhaengen(
+            session, uebung, "reps", float(w), state.heute(), {}
+        )
+        with zaehl_stand.zaehl_notizen(state) if gezaehlt else contextlib.nullcontext():
+            assert marken.leistung(
+                state, uebung, eintrag, "reps", float(w), erster=False, grenze=False
+            )
+        if not gezaehlt:
+            zaehl_stand.von_hand_eingetragen(state, uebung.id, None, "reps")
+
+
+async def test_im_diagnosemodus_tragen_die_marken_den_satz_des_zaehlens(
+    tmp_path, monkeypatch
+) -> None:
+    """Uhr mit drei zählenden Abschnitten und „Wdh. zählen“, ohne einen Chip: Bis zum Ende
+    kommt keine Leistung in die Notizen — die Marken trugen alle „S1“, ihre Nummer lief durch,
+    Kopfzeile und Seite „Diagnose“ an der Uhr sagten „S1“, und hrv-research legte alle Marken
+    zu Satz 1 (Runde 3, Verdacht). Während des Zählens gilt die Nummer des Zähl-Teils: je Satz seine
+    Marken ab 1, und Satz k der Marken ist Satz k der Eingaben."""
+    from collections import Counter
+
+    from trainingsapp.core.kurzcode import kurzcode
+    from trainingsapp.ui.components import marken_stand
+
+    state, zeit, lauf, innen, gemeldet = await _diagnose_umgebung(tmp_path, monkeypatch)
+    try:
+        u = _uebung(state, "Wandsitz", "hold", "reps")
+        kontext = uebung_lauf.kontext_fuer(u)
+        profil = TimerProfil(
+            name="Halten 3 × 20 s",
+            abschnitte=[Abschnitt("Halten", 20), Abschnitt("Pause", 10, zaehlt=False)],
+            runden=3,
+        )
+        e = uebung_lauf.starten(Seite(), state, kontext, profil)
+        k = await _rahmen(lauf, innen, zeit, e, 0, 0.5)
+        uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+        koepfe, uhr = [], []
+        for runde in range(3):
+            k = await _rahmen(lauf, innen, zeit, e, k, 12.0, tipps=6, marke=_tippen(state))
+            koepfe.append(_kopf(state))
+            uhr.append(marken_stand.uhr_zeilen(state))
+            sekunden = 7.5 if runde == 0 else 8.0
+            k = await _rahmen(lauf, innen, zeit, e, k, sekunden, tipps=4, marke=_tippen(state))
+            k = await _rahmen(lauf, innen, zeit, e, k, 10.0)
+        k = await _rahmen(lauf, innen, zeit, e, k, 3.0)
+        await _warten(lambda: bool(_personen_eintraege(state, e.id)))
+        await _warten(lambda: vorbei(state))
+        assert koepfe == [f"Wiederholung · Wandsitz S{n}" for n in (1, 2, 3)]  # vorher: S1 S1 S1
+        assert [z for _, z in uhr] == ["Wandsitz S1", "Wandsitz S2", "Wandsitz S3"]
+        marken = _wdh_marken(lauf)
+        je_satz = Counter(m["kontext"].get("satz") for m in marken)
+        assert set(je_satz) == {1, 2, 3}  # vorher: {1: 21}
+        for satz in (1, 2, 3):  # die Nummer im Satz beginnt je Satz bei 1
+            assert next(m["nr"] for m in marken if m["kontext"].get("satz") == satz) == 1
+        assert [v["satz"] for v in gemeldet] == [1, 2, 3]
+        code = kurzcode(u.id)
+        assert (
+            {(m["kontext"].get("uebung_id"), m["kontext"].get("satz")) for m in marken}
+            == set(_eingaben_wie_hrv_research(_kontextzeilen(lauf)))
+            == {(code, 1), (code, 2), (code, 3)}
+        )
+    finally:
+        await _diagnose_aus(state, lauf, zeit)
+
+
+async def test_im_diagnosemodus_zaehlt_ein_satz_von_hand_die_nummer_einmal_weiter(
+    tmp_path, monkeypatch
+) -> None:
+    """Kommt während des Zählens doch eine Notiz zum Satz — ein Chip im Diagnosemodus (P122:
+    beide zählen, der Satz von Hand beendet den des Sensors) —, zählt die Nummer einmal
+    weiter, nicht für Notiz und Zähl-Teil je einmal. Und tritt das Zählen einer Uhr bei,
+    nachdem schon ein Satz von Hand eingetragen war, zählt es von dort weiter, nicht ab S1."""
+    state, zeit, lauf, innen, _gemeldet = await _diagnose_umgebung(tmp_path, monkeypatch)
+    try:
+        u = _uebung(state)
+        wandsitz = _uebung(state, "Wandsitz", "hold", "reps")  # vor dem ersten Tipp (Katalog)
+        e, _ = uebung_lauf.zaehlen_starten(Seite(), state, uebung_lauf.kontext_fuer(u))
+        await asyncio.sleep(0)
+        k = await _rahmen(lauf, innen, zeit, e, 0, 12.0, tipps=6, marke=_tippen(state))
+        assert _kopf(state) == "Wiederholung · Kniebeuge S1"
+        _chip(state, u, 6)
+        assert _kopf(state) == "Wiederholung · Kniebeuge S2"  # nicht S3
+        k = await _rahmen(lauf, innen, zeit, e, k, 10.0, tipps=5, marke=_tippen(state))
+        assert _kopf(state) == "Wiederholung · Kniebeuge S2"
+        uebung_lauf.zaehlen_beenden(state, u.id, None, ENDE_FERTIG)
+        await _warten(lambda: vorbei(state))
+        # Auch die ersten Tipps, vor der Notiz „Kniebeuge: Start“ (die 5-s-Regel der Einheit):
+        # Der Satz zählt schon — Wiederholungen von Satz 1 (vorher Atemzüge ohne Übung), nach
+        # dem Chip alle fünf Satz 2
+        satz_je_marke = [m["kontext"].get("satz") for m in _wdh_marken(lauf)]
+        assert satz_je_marke == [1] * 6 + [2] * 5
+
+        # Die Uhr läuft, ein Satz von Hand, dann „Wdh. zählen“: der Satz des Sensors ist S2
+        kontext = uebung_lauf.kontext_fuer(wandsitz)
+        profil = TimerProfil(name="Halten 3 min", abschnitte=[Abschnitt("Halten", 180)])
+        mit_uhr = uebung_lauf.starten(Seite(), state, kontext, profil)
+        k = await _rahmen(lauf, innen, zeit, mit_uhr, k, 8.0)
+        assert _kopf(state) == "Wiederholung · Wandsitz S1"
+        _chip(state, wandsitz, 10)
+        assert _kopf(state) == "Wiederholung · Wandsitz S2"
+        uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+        k = await _rahmen(lauf, innen, zeit, mit_uhr, k, 1.0)  # die Anforderung geht durch
+        assert _kopf(state) == "Wiederholung · Wandsitz S2"  # nicht wieder S1
+        k = await _rahmen(lauf, innen, zeit, mit_uhr, k, 12.0, tipps=6, marke=_tippen(state))
+        assert _kopf(state) == "Wiederholung · Wandsitz S2"
+        wandsitz_marken = [
+            m["kontext"].get("satz")
+            for m in _wdh_marken(lauf)
+            if m["kontext"].get("uebung") == "Wandsitz"
+        ]
+        assert wandsitz_marken == [2] * 6
+        mit_uhr.timer.lauf.abbrechen()
+        await _rahmen(lauf, innen, zeit, mit_uhr, k, 2.0)
+        await _warten(lambda: vorbei(state))
+    finally:
+        await _diagnose_aus(state, lauf, zeit)
+
+
+# -- Befunde der fünften Runde: Satz von Hand neben dem Sensor, Zeilen ``satz`` ---------------
+
+
+def _drei_runden(halten: float = 20) -> TimerProfil:
+    return TimerProfil(
+        name=f"Halten 3 × {halten:g} s",
+        abschnitte=[Abschnitt("Halten", halten), Abschnitt("Pause", 10, zaehlt=False)],
+        runden=3,
+    )
+
+
+def _wandsitz_marken(lauf) -> dict:
+    from collections import Counter
+
+    return dict(
+        Counter(
+            m["kontext"].get("satz")
+            for m in _wdh_marken(lauf)
+            if m["kontext"].get("uebung") == "Wandsitz"
+        )
+    )
+
+
+async def test_im_diagnosemodus_kommt_ein_chip_neben_der_uhr_nach_den_saetzen_davor(
+    tmp_path, monkeypatch
+) -> None:
+    """Uhr 3 × (20 s / 10 s) mit „Wdh. zählen“; Satz 1 zählt nur der Sensor, für Satz 2 tippt
+    die Person in der Pause danach „+15“, Satz 3 wieder nur der Sensor. Vorher stand der Chip
+    sofort im Tagebuch und im Mitschnitt, die Sätze des Sensors erst mit dem Ende: Tagebuch
+    ``[15.0, 10, 10]``, hrv-research legte 15 zu Satz 1, und der Vergleich des Chips zählte
+    die Marken ab dem Start der Übung (14 statt 7). Jetzt kommt Satz 1 vor dem Chip hinein, das
+    Zählen läuft weiter. Und die ersten Tipps jedes Abschnitts sind Wiederholungen ihres Satzes,
+    nicht Atemzüge (die Notiz des Abschnitts kommt erst nach 5 s)."""
+    from trainingsapp.core.kurzcode import kurzcode
+
+    state, zeit, lauf, innen, gemeldet = await _diagnose_umgebung(tmp_path, monkeypatch)
+    try:
+        u = _uebung(state, "Wandsitz", "hold", "reps")
+        kontext = uebung_lauf.kontext_fuer(u)
+        e = uebung_lauf.starten(Seite(), state, kontext, _drei_runden())
+        k = await _rahmen(lauf, innen, zeit, e, 0, 0.5)
+        uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+        z = e.teil("zaehlen")
+        assert isinstance(z, ZaehlBaustein)
+        k = await _rahmen(lauf, innen, zeit, e, k, 19.5, tipps=10, marke=_tippen(state))
+        k = await _rahmen(lauf, innen, zeit, e, k, 10.0, bewegung=False)
+        k = await _rahmen(lauf, innen, zeit, e, k, 20.0, tipps=10, marke=_tippen(state))
+        k = await _rahmen(lauf, innen, zeit, e, k, 2.0, bewegung=False)
+        _chip(state, u, 15)
+        assert z.aktiv and [s.von_hand for s in z.saetze] == [True, True]  # läuft weiter
+        k = await _rahmen(lauf, innen, zeit, e, k, 8.0, bewegung=False)
+        k = await _rahmen(lauf, innen, zeit, e, k, 20.0, tipps=10, marke=_tippen(state))
+        assert _kopf(state) == "Wiederholung · Wandsitz S3"
+        k = await _rahmen(lauf, innen, zeit, e, k, 12.0, bewegung=False)
+        await _warten(lambda: bool(_personen_eintraege(state, e.id)))
+        await _warten(lambda: vorbei(state))
+        s1, _s2, s3 = z.saetze
+        (eintrag,) = _eintraege(state)
+        assert eintrag.result["reps"] == [s1.wert, 15.0, s3.wert]  # vorher: [15.0, 10, 10]
+        assert eintrag.result["hold"] == [20, 20, 20]
+        code = kurzcode(u.id)
+        assert _eingaben_wie_hrv_research(_kontextzeilen(lauf)) == {
+            (code, 1): s1.wert,
+            (code, 2): 15.0,
+            (code, 3): s3.wert,
+        }  # vorher: Satz 1 = 15
+        assert _wandsitz_marken(lauf) == {1: 10, 2: 10, 3: 10}  # vorher: je 7 (3 Atemzüge)
+        (chip,) = [v for v in gemeldet if v["eingetragen"] == 15.0]
+        assert (chip["satz"], chip["marken"]) == (2, 10)  # vorher: S2, Marken 14
+        assert [v["satz"] for v in gemeldet] == [1, 2, 3]
+    finally:
+        await _diagnose_aus(state, lauf, zeit)
+
+
+@pytest.mark.parametrize(
+    ("chip_nach_s", "danach_bewegung"), [(12.0, True), (12.0, False), (2.0, True)]
+)
+async def test_im_diagnosemodus_beginnt_ein_chip_mitten_im_abschnitt_keinen_satz(
+    tmp_path, monkeypatch, chip_nach_s: float, danach_bewegung: bool
+) -> None:
+    """Mit der Uhr ist jeder zählende Abschnitt ein Satz: Ein Chip mitten in Halten 2 beendet
+    dessen Satz, ein neuer beginnt erst mit Halten 3. Vorher begann sofort einer — der Rest
+    des Abschnitts kam als eigener Satz ins Tagebuch (``[15.0, 10, 4, 10]`` für drei
+    Haltezeiten) oder verbrauchte still eine Nummer (Halten 3 hieß „S4“). Und ein Chip in den
+    ersten 5 s (2 s nach dem Signal) verlor sein Kennzeichen mit dem Fehlstart: Der Sensor trug
+    alle Sätze ein, zusätzlich zum Chip (``[15.0, 10, 9, 10]``)."""
+    from trainingsapp.core.kurzcode import kurzcode
+
+    state, zeit, lauf, innen, gemeldet = await _diagnose_umgebung(tmp_path, monkeypatch)
+    try:
+        u = _uebung(state, "Wandsitz", "hold", "reps")
+        kontext = uebung_lauf.kontext_fuer(u)
+        e = uebung_lauf.starten(Seite(), state, kontext, _drei_runden())
+        k = await _rahmen(lauf, innen, zeit, e, 0, 0.5)
+        uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+        z = e.teil("zaehlen")
+        assert isinstance(z, ZaehlBaustein)
+        k = await _rahmen(lauf, innen, zeit, e, k, 19.5, tipps=10, marke=_tippen(state))
+        k = await _rahmen(lauf, innen, zeit, e, k, 10.0, bewegung=False)
+        tipps = round(chip_nach_s / 2)
+        k = await _rahmen(lauf, innen, zeit, e, k, chip_nach_s, tipps=tipps, marke=_tippen(state))
+        _chip(state, u, 15)
+        assert len(z.saetze) == 2 and z.saetze[1].von_hand  # kein dritter, der Rest zählt nicht
+        rest = 20.0 - chip_nach_s
+        k = await _rahmen(lauf, innen, zeit, e, k, rest, bewegung=danach_bewegung)
+        k = await _rahmen(lauf, innen, zeit, e, k, 10.0, bewegung=False)
+        k = await _rahmen(lauf, innen, zeit, e, k, 20.0, tipps=10, marke=_tippen(state))
+        assert _kopf(state) == "Wiederholung · Wandsitz S3"  # vorher: S4
+        k = await _rahmen(lauf, innen, zeit, e, k, 12.0, bewegung=False)
+        await _warten(lambda: bool(_personen_eintraege(state, e.id)))
+        await _warten(lambda: vorbei(state))
+        assert [s.von_hand for s in z.saetze] == [True, True, False]
+        s1, _s2, s3 = z.saetze
+        (eintrag,) = _eintraege(state)
+        assert eintrag.result["reps"] == [s1.wert, 15.0, s3.wert]
+        assert eintrag.result["hold"] == [20, 20, 20]
+        code = kurzcode(u.id)
+        assert _eingaben_wie_hrv_research(_kontextzeilen(lauf)) == {
+            (code, 1): s1.wert,
+            (code, 2): 15.0,
+            (code, 3): s3.wert,
+        }
+        assert _wandsitz_marken(lauf) == {1: 10, 2: tipps, 3: 10}
+        assert [v["satz"] for v in gemeldet] == [1, 2, 3]
+    finally:
+        await _diagnose_aus(state, lauf, zeit)
+
+
+async def test_im_diagnosemodus_zaehlt_ein_chip_bei_angehaltener_uhr_nichts_doppelt(
+    tmp_path, monkeypatch
+) -> None:
+    """Uhr „Halten 3 min“, „Wdh. zählen“; nach 20 s „Anhalten“, Chip „+10“, „Weiter“. Vorher
+    begann der Chip den nächsten Satz, während das Zählen angehalten war, „Weiter“ hängte ein
+    zweites offenes Stück an, und der Prototyp zählte dieselben Daten zweimal: Satz 2 kam mit
+    20 statt 10 ins Tagebuch. Mit der Uhr ist der Abschnitt ein Satz — der Chip war er."""
+    state, zeit, lauf, innen, gemeldet = await _diagnose_umgebung(tmp_path, monkeypatch)
+    try:
+        u = _uebung(state, "Wandsitz", "hold", "reps")
+        kontext = uebung_lauf.kontext_fuer(u)
+        profil = TimerProfil(name="Halten 3 min", abschnitte=[Abschnitt("Halten", 180)])
+        e = uebung_lauf.starten(Seite(), state, kontext, profil)
+        k = await _rahmen(lauf, innen, zeit, e, 0, 0.5)
+        uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+        z = e.teil("zaehlen")
+        assert isinstance(z, ZaehlBaustein)
+        k = await _rahmen(lauf, innen, zeit, e, k, 20.0, tipps=10, marke=_tippen(state))
+        assert e.timer is not None
+        e.timer.lauf.pause()  # „Anhalten“
+        k = await _rahmen(lauf, innen, zeit, e, k, 3.0, bewegung=False)
+        assert z.angehalten
+        _chip(state, u, 10)
+        k = await _rahmen(lauf, innen, zeit, e, k, 10.0, bewegung=False)
+        e.timer.lauf.fortsetzen()  # „Weiter“
+        k = await _rahmen(lauf, innen, zeit, e, k, 20.0, tipps=10, marke=_tippen(state))
+        assert [s.von_hand for s in z.saetze] == [True]  # vorher: ein zweiter, zwei Stücke offen
+        assert all(bis is not None for _, bis in z.saetze[0].stuecke)
+        e.timer.lauf.fertig_machen()
+        await _rahmen(lauf, innen, zeit, e, k, 2.0, bewegung=False)
+        await _warten(lambda: bool(_personen_eintraege(state, e.id)))
+        await _warten(lambda: vorbei(state))
+        (eintrag,) = _eintraege(state)
+        assert eintrag.result["reps"] == [10.0]  # vorher: [10.0, 20]
+        assert len(eintrag.result["hold"]) == 1
+        assert [v["eingetragen"] for v in gemeldet] == [10.0]
+    finally:
+        await _diagnose_aus(state, lauf, zeit)
+
+
+async def test_im_diagnosemodus_bekommt_jeder_gezaehlte_satz_eine_zeile(
+    tmp_path, monkeypatch
+) -> None:
+    """Sieht der Sensor in Halten 2 keine Wiederholung (die Person tippt 8), wird der Satz
+    nicht eingetragen — vorher bekam er auch keine Zeile ``satz``, und hrv-research legte die
+    Eingabe von Satz 3 zu Satz 2. Jetzt hat er eine ohne ``feld``/``wert`` („eingetragen –“),
+    und die Marken tragen dieselben Nummern."""
+    from trainingsapp.core.kurzcode import kurzcode
+
+    state, zeit, lauf, innen, gemeldet = await _diagnose_umgebung(tmp_path, monkeypatch)
+    try:
+        u = _uebung(state, "Wandsitz", "hold", "reps")
+        kontext = uebung_lauf.kontext_fuer(u)
+        e = uebung_lauf.starten(Seite(), state, kontext, _drei_runden())
+        k = await _rahmen(lauf, innen, zeit, e, 0, 0.5)
+        uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+        z = e.teil("zaehlen")
+        assert isinstance(z, ZaehlBaustein)
+        k = await _rahmen(lauf, innen, zeit, e, k, 19.5, tipps=10, marke=_tippen(state))
+        k = await _rahmen(lauf, innen, zeit, e, k, 10.0, bewegung=False)
+        k = await _rahmen(
+            lauf, innen, zeit, e, k, 20.0, tipps=8, bewegung=False, marke=_tippen(state)
+        )
+        k = await _rahmen(lauf, innen, zeit, e, k, 10.0, bewegung=False)
+        k = await _rahmen(lauf, innen, zeit, e, k, 20.0, tipps=10, marke=_tippen(state))
+        k = await _rahmen(lauf, innen, zeit, e, k, 12.0, bewegung=False)
+        await _warten(lambda: bool(_personen_eintraege(state, e.id)))
+        await _warten(lambda: vorbei(state))
+        s1, s2, s3 = z.saetze
+        assert s2.wert == 0 and s1.wert > 0 and s3.wert > 0
+        (eintrag,) = _eintraege(state)
+        assert eintrag.result["reps"] == [s1.wert, s3.wert]
+        code = kurzcode(u.id)
+        zeilen = _kontextzeilen(lauf)
+        assert _eingaben_wie_hrv_research(zeilen) == {
+            (code, 1): s1.wert,
+            (code, 2): None,  # gezählt, nicht eingetragen
+            (code, 3): s3.wert,
+        }  # vorher: {(code, 1): s1, (code, 2): s3}
+        leer = [zz for zz in zeilen if zz.get("was") == "satz" and zz.get("satz") == 2]
+        assert len(leer) == 1 and "feld" not in leer[0] and "wert" not in leer[0]
+        assert _wandsitz_marken(lauf) == {1: 10, 2: 8, 3: 10}
+        assert [(v["satz"], v["eingetragen"]) for v in gemeldet] == [
+            (1, s1.wert),
+            (2, None),
+            (3, s3.wert),
+        ]
+    finally:
+        await _diagnose_aus(state, lauf, zeit)
+
+
+async def test_im_diagnosemodus_haelt_ein_chip_nach_dem_abbruch_keinen_satz_fuer_den_nachtrag(
+    tmp_path, monkeypatch
+) -> None:
+    """Uhr 3 × (40 s / 10 s), „Wdh. zählen“, nach 20 s „Zählen abbrechen“; danach zählt die
+    Person von Hand weiter. Ein Chip mit zufällig demselben Wert wie der abgebrochene Satz galt
+    als dessen Nachtrag: Satz 2 wurde nie verglichen, und der Vergleich von Satz 3 nahm Marken
+    und Sensor von Satz 2 und 3 zusammen. Nur die Notizen beim Eintragen eines gezählten Satzes
+    gehören zu ihm (`Messlauf.zaehl_notizen`)."""
+    from trainingsapp.core.kurzcode import kurzcode
+    from trainingsapp.core.zaehlen import ENDE_ABBRUCH as ABBRUCH
+
+    state, zeit, lauf, innen, gemeldet = await _diagnose_umgebung(tmp_path, monkeypatch)
+    try:
+        u = _uebung(state, "Wandsitz", "hold", "reps")
+        kontext = uebung_lauf.kontext_fuer(u)
+        e = uebung_lauf.starten(Seite(), state, kontext, _drei_runden(40))
+        k = await _rahmen(lauf, innen, zeit, e, 0, 0.5)
+        uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+        z = e.teil("zaehlen")
+        assert isinstance(z, ZaehlBaustein)
+        k = await _rahmen(lauf, innen, zeit, e, k, 20.0, tipps=10, marke=_tippen(state))
+        uebung_lauf.zaehlen_beenden(state, u.id, None, ABBRUCH)
+        abgebrochen = z.saetze[0].wert
+        assert abgebrochen > 0 and e.laeuft
+        k = await _rahmen(lauf, innen, zeit, e, k, 19.5, bewegung=False)
+        k = await _rahmen(lauf, innen, zeit, e, k, 10.0, bewegung=False)
+        k = await _rahmen(lauf, innen, zeit, e, k, 20.0, tipps=10, marke=_tippen(state))
+        vorher = len(gemeldet)
+        _chip(state, u, abgebrochen)  # Satz 2 von Hand, zufällig gleich viele
+        assert len(gemeldet) == vorher + 1
+        satz2 = gemeldet[-1]
+        assert satz2["satz"] == 2 and satz2["eingetragen"] == abgebrochen  # vorher: S1, Nachtrag
+        assert satz2["marken"] == _wandsitz_marken(lauf)[2]
+        k = await _rahmen(lauf, innen, zeit, e, k, 20.0, bewegung=False)
+        k = await _rahmen(lauf, innen, zeit, e, k, 10.0, bewegung=False)
+        k = await _rahmen(lauf, innen, zeit, e, k, 26.0, tipps=13, marke=_tippen(state))
+        _chip(state, u, 13)
+        satz3 = gemeldet[-1]
+        # vorher: „S2: Marken 15 · Sensor 22“ — Satz 2 und 3 zusammen
+        assert satz3["satz"] == 3 and satz3["marken"] == _wandsitz_marken(lauf)[3]
+        assert satz3["sensor"] is not None and satz3["sensor"] <= 14
+        code = kurzcode(u.id)
+        assert _eingaben_wie_hrv_research(_kontextzeilen(lauf)) == {
+            (code, 1): None,  # abgebrochen, nicht eingetragen
+            (code, 2): float(abgebrochen),
+            (code, 3): 13.0,
+        }
+        assert set(_wandsitz_marken(lauf)) == {1, 2, 3}
+        assert e.timer is not None
+        e.timer.lauf.abbrechen()
+        await _rahmen(lauf, innen, zeit, e, k, 2.0)
+        await _warten(lambda: vorbei(state))
+    finally:
+        await _diagnose_aus(state, lauf, zeit)
+
+
+async def test_im_diagnosemodus_sind_saetze_mal_wert_mehrere_saetze(tmp_path, monkeypatch) -> None:
+    """„Sätze × Wert“ 2 × 6 während des Zählens: zwei Sätze von Hand — der erste ist der des
+    Sensors, der zweite einer ohne Sensor. Vorher endete nur einer, die Zeilen ``satz`` zählten
+    zwei: Der nächste Satz des Sensors bekam die Eingabe des zweiten, und Satz 1 hatte drei
+    Zeilen ``zaehler``."""
+    from trainingsapp.core.kurzcode import kurzcode
+
+    state, zeit, lauf, innen, gemeldet = await _diagnose_umgebung(tmp_path, monkeypatch)
+    try:
+        u = _uebung(state)
+        e, _ = uebung_lauf.zaehlen_starten(Seite(), state, uebung_lauf.kontext_fuer(u))
+        await asyncio.sleep(0)
+        z = e.teil("zaehlen")
+        assert isinstance(z, ZaehlBaustein)
+        k = await _rahmen(lauf, innen, zeit, e, 0, 12.0, tipps=6, marke=_tippen(state))
+        _chip(state, u, 6, saetze=2)
+        assert _kopf(state) == "Wiederholung · Kniebeuge S3"  # vorher: S2
+        k = await _rahmen(lauf, innen, zeit, e, k, 16.0, tipps=8, marke=_tippen(state))
+        uebung_lauf.zaehlen_beenden(state, u.id, None, ENDE_FERTIG)
+        await _warten(lambda: vorbei(state))
+        letzter = z.saetze[-1]
+        assert [s.von_hand for s in z.saetze] == [True, True, False]
+        (eintrag,) = _eintraege(state)
+        assert eintrag.result["reps"] == [6.0, 6.0, letzter.wert]
+        assert [(v["satz"], v["marken"]) for v in gemeldet] == [(1, 6), (2, 0), (3, 8)]
+        code = kurzcode(u.id)
+        zeilen = _kontextzeilen(lauf)
+        assert _eingaben_wie_hrv_research(zeilen) == {
+            (code, 1): 6.0,
+            (code, 2): 6.0,
+            (code, 3): letzter.wert,
+        }  # vorher: Satz 3 ohne Eingabe, die 8 Marken bei „eingetragen 6“
+        zaehler = [zz.get("satz") for zz in zeilen if zz.get("was") == "zaehler"]
+        assert zaehler.count(1) == 1  # vorher: drei
+        assert _wandsitz_marken(lauf) == {}
+        from collections import Counter
+
+        assert dict(Counter(m["kontext"].get("satz") for m in _wdh_marken(lauf))) == {1: 6, 3: 8}
+    finally:
+        await _diagnose_aus(state, lauf, zeit)
 
 
 # -- Der Kontext, wenn er mitten im Lauf wechselt ---------------------------------------------

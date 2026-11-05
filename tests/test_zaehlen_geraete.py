@@ -147,6 +147,7 @@ async def test_zaehlt_ab_dem_tipp_mit_korrektur_und_traegt_den_satz_in_die_zeitl
         # die Übung, damit der Vergleich ihn nur für dieselbe nimmt (Kurzcode wie die Notiz)
         "uebung": "Kniebeuge",
         "uebung_id": kurzcode("u-kniebeuge"),
+        "offen": True,  # er zählt gerade: Übung und Phase gelten in der Leiste
     }
     assert z.fertig() and not z.aktiv and not z.fertig()
     # Aus mit dem Ende, sofort und synchron — kein Nachlauf
@@ -1182,7 +1183,8 @@ async def test_notiz_zum_gezaehlten_satz_vergleicht_nicht_noch_einmal(tmp_path) 
             uebungen=[KB],
         )
 
-    satz_notiz(wert)  # die Notiz zum gezählten Satz
+    with lauf.zaehl_notizen():  # wie beim Eintragen (`ui.uebung_lauf._eintragen`)
+        satz_notiz(wert)  # die Notiz zum gezählten Satz
     assert gemeldet == [v] and lauf.letzter_satz == v  # vorher: ein zweiter Vergleich
     _satz_senden(lauf, innen, zeit, e, k, 10.0, tipps=5)
     satz_notiz(wert)  # ein Satz von Hand, zufällig gleich viele

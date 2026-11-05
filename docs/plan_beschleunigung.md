@@ -194,9 +194,10 @@ bleibt dort die Zahl ohne −1/+1 stehen; „Eintragen“ der Meldung trägt dan
 Wiederholungen ein, die Zeit kommt mit dem Ende der Uhr. Solange der Sensor in ein Feld zählt,
 hat dessen Zeile weder Chips noch eigenen Wert und die Karte kein „Wie geplant“ (4.4; im
 Diagnosemodus Chips und eigener Wert: ein Satz von Hand beendet dort den Satz des Sensors, der
-ihn dann nicht noch einmal einträgt). Steht eine Einheit bereit oder läuft ein Plan-Ablauf, gibt
-es keinen Knopf. Die Zählläufe von heute, deren Wiederholungen fehlen, lassen sich auch ohne
-verbundenes Gerät eintragen.
+ihn dann nicht noch einmal einträgt — mit der Uhr den ihres Abschnitts; Sätze davor, die nur der
+Sensor zählte, kommen vor ihm ins Tagebuch). Steht eine Einheit bereit oder läuft ein
+Plan-Ablauf, gibt es keinen Knopf. Die Zählläufe von heute, deren Wiederholungen fehlen, lassen
+sich auch ohne verbundenes Gerät eintragen.
 
 ### 4.3 Ablauf
 
@@ -696,6 +697,12 @@ ohne die Änderung scheitert):
   urteilte ein bis zu 5 s alter Stand.
 - Die Stoppuhr, gestartet, während ein Satz schon zählt, misst diesen Satz (ein Lauf der
   Stoppuhr ist ein Satz); Intervall-Timer beginnen weiter je zählendem Abschnitt einen.
+- Marken-Leiste im Diagnosemodus: Während eines Zähllaufs kommt die Satznummer der Marken aus dem
+  Zähl-Teil derselben Übung (`Messlauf.zaehl_satz` → `core.diagnose.kontext_aus_notizen`);
+  eine Notiz zum Satz während des Laufs (ein Chip, `von_hand`) zählt nicht noch einmal.
+  Vergleich und Kontextzeilen tragen dieselbe Nummer. Vorher trugen mit der Uhr (mehrere
+  zählende Abschnitte, kein Chip) alle Marken „S1“, Kopfzeile und Uhr ebenso, und hrv-research
+  legte sie alle zu Satz 1. (Seit der fünften Runde kommt die Nummer aus den Zeilen ``satz``.)
 - Wechselt der Kontext mitten im Lauf (die Uhr tritt bei, abgehakt in einem Plan), steht er sofort
   in der Zeitleiste (`Einheitslauf.fortschreiben`), und „Eintragen“ einer lebenden Einheit nimmt
   den im Speicher — nach einem Absturz wie ohne ihn derselbe Plan, dasselbe Zeitfeld.
@@ -704,6 +711,32 @@ ohne die Änderung scheitert):
   etwas bereitsteht; „Läufe heute“ nennt einen Zähllauf ohne Zahl „nichts gezählt“ bzw. „Atmung“
   statt „gemacht“, ohne Nullsatz, „Fertig“ der Atmung verspricht kein Eintragen; in der Karte
   „Eintragen“ heißt der Knopf eines Laufs „Nachtragen“.
+
+**Fünfte Prüfrunde** (5.11.2026; Diagnosemodus, beide zählen — jede Korrektur mit einem Test,
+der ohne sie scheitert):
+
+- Die Satznummer der Marken, des Vergleichs und der Kontextzeilen ist die der Zeile ``satz``, die
+  hrv-research dem Satz zuordnet (die k-te nach ``uebung_start``): `Messlauf.marken_satz`,
+  `naechster_satz`, `ZaehlSatz.diag_nr` — die Zeilen seit dem Start plus die gezählten Sätze,
+  deren Zeile erst mit dem Ende kommt. Jeder gezählte Satz bekommt eine Zeile, ein nicht
+  eingetragener ohne ``feld``/``wert`` (`docs/kompatibilitaet.md` §14); vorher rückten die
+  Eingaben nach einem leeren Satz um einen.
+- Satz von Hand neben dem Sensor (`ZaehlBaustein.von_hand`): Mit der Uhr beginnt der nächste Satz
+  erst mit dem nächsten zählenden Abschnitt — nicht mitten darin, nicht bei angehaltener Uhr
+  (vorher zählte der Rest als eigener Satz bzw. dieselben Daten doppelt); ein Satz von Hand unter
+  5 s bleibt einer; „2 × 6“ sind zwei Sätze (`views/plan.anhaengen` je Wert). Gingen ihm Sätze
+  voraus, die nur der Sensor zählte, kommen sie zuerst ins Tagebuch und in den Mitschnitt
+  (`ZaehlBaustein.vorziehen`, `ui.uebung_lauf.vor_dem_satz_von_hand`; ``von_hand`` in der
+  Zeitleiste); das Zählen läuft weiter. Ein Satz von Hand hat eine Zeile ``zaehler``, nicht zwei.
+- Nur die Notizen beim Eintragen eines gezählten Satzes gehören zu ihm (`Messlauf.zaehl_notizen`
+  um `ui.uebung_lauf._eintragen`): Ein Chip mit zufällig gleichem Wert galt sonst als Nachtrag
+  eines abgebrochenen Satzes und wurde nie verglichen.
+- Zählt ein Satz, gelten in der Leiste seine Übung und die Phase „Übung“ (``offen``) — vorher
+  waren die Tipps der ersten 5 s jedes Abschnitts Atemzüge (die Notizen warten 5 s). Die Uhr
+  allein (ohne Zählen) hat diese 5 s weiter.
+- Absturz, nachdem das Zählen mitten im Abschnitt endete und die Uhr weiterlief: keine Haltezeit
+  bis zum Ende des Zählens mehr (`core.zaehlen_eintrag.uhr_bis`), lieber eine Lücke.
+- Der Einmal-Timer (eine Runde) misst wie die Stoppuhr den Satz, der schon zählt.
 
 **Offen (Ben):** §10 verlangt „Prototyp“ an jeder Zahl eines Prototyps; die Texte aus 4.2/4.3
 („Zählen · Kniebeuge · 12“, „Satz 1 · 12 Wdh. (Sensor 11, +1)“, „… nicht eingetragen“, in der

@@ -74,12 +74,30 @@ def _wiederholungen(state: Any, stand: LeistenStand) -> Callable[[str], bool]:
     return lambda code: bool(tabelle.get(code) or tabelle.get(code[:6]))
 
 
+def _zaehlsatz(lauf: Any) -> dict[str, Any] | None:
+    """Die Nummer des Satzes aus dem Mitschnitt (`Messlauf.marken_satz`): die des Satzes, den
+    der Sensor zählt, sonst die der nächsten Zeile ``satz`` — unter ihr findet hrv-research die
+    Eingabe des Satzes. Mit der Uhr kommt bis zum Ende keine Notiz zum Satz, und ein gezählter
+    Satz, der nicht eingetragen wird, hat keine. Ein Fehler darin kostet nur die Nummer, nie
+    den Tipp."""
+    haken = getattr(lauf, "marken_satz", None)
+    if not callable(haken):
+        return None
+    try:
+        satz = haken()
+    except Exception:
+        return None
+    return satz if isinstance(satz, dict) else None
+
+
 def kontext(state: Any) -> tuple[dg.MarkenKontext, str]:
-    """Der Kontext der nächsten Marke und ihre Art (mit der Wahl im Chip)."""
+    """Der Kontext der nächsten Marke und ihre Art (mit der Wahl im Chip) — die Satznummer aus
+    dem Mitschnitt, während eines Zähllaufs aus dem Zähl-Teil
+    (`core.diagnose.kontext_aus_notizen`)."""
     stand = leistenstand(state)
     lauf = diagnose_lauf(state)
     ereignisse = list(lauf.ereignisse()) if lauf is not None else []
-    k = dg.kontext_aus_notizen(ereignisse, _wiederholungen(state, stand))
+    k = dg.kontext_aus_notizen(ereignisse, _wiederholungen(state, stand), _zaehlsatz(lauf))
     art = k.art
     if stand.wahl is not None:
         if stand.wahl[1] == k.schluessel:

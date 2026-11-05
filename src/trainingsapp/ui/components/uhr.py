@@ -48,6 +48,7 @@ from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKon
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import zaehlen
+from trainingsapp.ui.components.dialoge import schliessen
 from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
 from trainingsapp.ui.components.takt_blatt import TempoRegler, takt_anbringen, takt_knopf
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
@@ -413,7 +414,7 @@ def _laufend(page: Any, state: Any, e: Einheitslauf) -> ft.Control:
         stand = lauf.stand()
         zeit.value = lauf.anzeige()
         lage = lauf.takt_lage()
-        takt_klein.nachziehen(lauf.takt_aktuell(stand.nummer) if lage else None, lage)
+        takt_klein.nachziehen(lauf.takt_effektiv() if lage else None, lage)  # mit Tempo
         tempo_regler.nachziehen(lage is not None)
         name = lauf.profil.anzeigename
         if not lauf.vorwaerts and not stand.fertig:
@@ -515,9 +516,8 @@ def takt_gross(page: Any, state: Any, lauf: Any) -> None:
     anzeige = TaktAnzeige(groesse=240)
 
     def nachziehen() -> None:
-        stand = lauf.stand()
         lage = lauf.takt_lage()
-        anzeige.nachziehen(lauf.takt_aktuell(stand.nummer) if lage else None, lage)
+        anzeige.nachziehen(lauf.takt_effektiv() if lage else None, lage)  # mit Tempo
         with contextlib.suppress(Exception):
             anzeige.control.update()
 
@@ -526,10 +526,10 @@ def takt_gross(page: Any, state: Any, lauf: Any) -> None:
 
     nachziehen()
     state.timer_beobachter["takt_gross"] = nachziehen
-    dialog = ft.AlertDialog(
+    dialog: ft.AlertDialog = ft.AlertDialog(
         on_dismiss=zu,
         content=ft.Container(width=300, content=anzeige.control, alignment=ft.Alignment.CENTER),
-        actions=[ft.TextButton("Schließen", on_click=lambda: page.pop_dialog())],
+        actions=[ft.TextButton("Schließen", on_click=lambda: schliessen(dialog))],
     )
     page.show_dialog(dialog)
 

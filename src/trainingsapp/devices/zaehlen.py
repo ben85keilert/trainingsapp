@@ -247,8 +247,9 @@ class ZaehlSatz:
     #: steht fest (der nächste Satz begann oder der Lauf endete) — danach keine Korrektur
     #: mehr, die Kontextzeilen des Mitschnitts sind geschrieben
     gemeldet: bool = False
-    #: was zuletzt als ``zaehlung`` in die Zeitleiste ging: (Sensor, Korrektur, ``t_s``)
-    geschrieben: tuple[int | None, int, float] | None = None
+    #: was zuletzt als ``zaehlung`` in die Zeitleiste ging: (Sensor, Korrektur, ``t_s``,
+    #: Takt) — der Takt zählt mit, damit ein Zwischenstand auch ihn sieht (Befund 5)
+    geschrieben: tuple[int | None, int, float, int | None] | None = None
     #: Die Person trug diesen Satz von Hand ein (Diagnosemodus, ein Chip im Feld, in das der
     #: Sensor zählt — `ZaehlBaustein.von_hand`): verglichen, aber nicht vom Sensor eingetragen
     von_hand: bool = False
@@ -403,6 +404,10 @@ class ZaehlBaustein:
         self.atem = bool(atmung) and quelle == QUELLE_SENSOR
         #: das Feld, in das die Wiederholungen kommen (`core.zaehlen.zaehlt_in`)
         self.feld = feld
+        #: die gewünschte Rate (``None`` = die des Geräts) und Vorlage — für ein Gerät, das
+        #: erst später dazukommt (`sensor_dazu` ohne Gerät)
+        self._rate_wunsch = int(rate_hz) if rate_hz else None
+        self._vorlage_wunsch = vorlage or VORLAGE_AUTO
         self.rate_hz = int(rate_hz) if rate_hz else zaehl_rate(self.messlauf.profil)
         self.bereich_g = int(bereich_g)
         #: das Profil, von dem die Beschleunigung kommt
@@ -410,7 +415,7 @@ class ZaehlBaustein:
         #: womit gezählt wird (`core.zaehlen.vorlage_waehlen`): die Vorlage der Übung mit dem
         #: Umkehrpunkt oben — oder Automatisch mit Grund (`VorlageWahl.rueckfall`), wenn sie
         #: die Achsen eines anderen Geräts meint oder hrv-core sie nicht kennt
-        self.vorlage_wahl: VorlageWahl = vorlage_waehlen(vorlage or VORLAGE_AUTO, self.geraet)
+        self.vorlage_wahl: VorlageWahl = vorlage_waehlen(self._vorlage_wunsch, self.geraet)
         #: der Schlüssel der Vorlage, mit der gezählt wird (Zeitleiste ``vorlage``)
         self.vorlage = self.vorlage_wahl.schluessel
         self.beteiligung: Beteiligung | None = None
@@ -489,6 +494,9 @@ class ZaehlBaustein:
         self._uhr: Callable[[], float] = self.messlauf.uhr
         #: (Uhr der Einheit, Uhr der Quelle) beim Start — für `_auf_quelle`
         self._anker: tuple[float, float] | None = None
+        #: Uhr der Quelle, seit der der Strom angefordert ist (`starten`, `sensor_dazu`) — ab
+        #: da zählt `KEINE_DATEN_S`, nicht ab dem Start des Laufs (Prüfrunde 1, Befund 1)
+        self._strom_seit: float | None = None
         self._t0: float | None = None
         self._start_s = 0.0
         self._offen: ZaehlSatz | None = None
@@ -714,8 +722,7 @@ class ZaehlBaustein:
         self._start_s = round(max((t0 if bei is None else bei) - t0, 0.0), 3)
         self._anker = (self._uhr(), self.messlauf.uhr())
         if self.quelle == QUELLE_SENSOR:
-            self.messlauf.acc_anfordern(ZWECK, self.rate_hz, self.bereich_g)
-            self._acc_angefordert = True
+            self._strom_anfordern()
         self.messlauf.zaehl_satz = self._fuer_diagnose
         if self.wdh:
             self._satz_beginnen(self._start_s)
@@ -784,18 +791,28 @@ class ZaehlBaustein:
                 satz.ruhe_seit_s = max(satz.ruhe_seit_s, t_s)
         self._zwischenstand(satz, max(self._uhr() - self._t0, self._start_s))
 
-    def sensor_dazu(self) -> bool:
-        """„Wdh. zählen“, während der Takt schon zählt: Ab jetzt zählt der Sensor (die Quelle
-        des Laufs wechselt, der Takt bleibt daneben) — der Strom beginnt, ein frischer
-        Live-Zähler für den laufenden Satz. ``False``, wenn es kein Gerät gibt oder der Sensor
-        schon zählt."""
-        if self.quelle == QUELLE_SENSOR or isinstance(self.messlauf, _OhneGeraet):
-            return False
-        if self._t0 is None or self.grund is not None:
-            return False
-        self.quelle = QUELLE_SENSOR
+    def _strom_anfordern(self) -> None:
+        """Die Beschleunigung beim Messlauf anfordern — ab jetzt zählt `KEINE_DATEN_S`."""
         self.messlauf.acc_anfordern(ZWECK, self.rate_hz, self.bereich_g)
         self._acc_angefordert = True
+        self._strom_seit = self.messlauf.uhr()
+
+    def sensor_dazu(self, messlauf: Messlauf | None = None) -> bool:
+        """„Wdh. zählen“, während der Takt schon zählt: Ab jetzt zählt der Sensor (die Quelle
+        des Laufs wechselt, der Takt bleibt daneben) — der Strom beginnt, ein frischer
+        Live-Zähler für den laufenden Satz. Zählte der Takt **ohne Gerät** (`_OhneGeraet`),
+        kommt der Messlauf hier nach (``messlauf``: das Gerät, das inzwischen verbunden ist —
+        Prüfrunde 1, Befund 7): Profil, Rate und Vorlage gelten ab jetzt für ihn, die Uhren
+        werden neu verankert (`_auf_quelle`). ``False``, wenn es kein Gerät gibt oder der
+        Sensor schon zählt."""
+        if self.quelle == QUELLE_SENSOR or self._t0 is None or self.grund is not None:
+            return False
+        if isinstance(self.messlauf, _OhneGeraet):
+            if messlauf is None or messlauf.profil is None:
+                return False
+            self._messlauf_nachreichen(messlauf)
+        self.quelle = QUELLE_SENSOR
+        self._strom_anfordern()
         t = max(self._uhr() - self._t0, self._start_s)
         satz = self._offen
         if satz is not None:
@@ -805,6 +822,19 @@ class ZaehlBaustein:
         if self.beteiligung is not None:
             self.beteiligung.daten = daten_pruefen(self._daten())
         return True
+
+    def _messlauf_nachreichen(self, messlauf: Messlauf) -> None:
+        """Den Stand-in `_OhneGeraet` gegen das Gerät tauschen (`sensor_dazu`): Profil, Rate
+        (wenn keine gesetzt war), Vorlage und der Haken für den Diagnosemodus wie im
+        Konstruktor; die Uhr der Einheit bleibt, der Anker kommt neu."""
+        self.messlauf = messlauf
+        self.geraet = messlauf.profil.id if messlauf.profil is not None else ""
+        if self._rate_wunsch is None:
+            self.rate_hz = zaehl_rate(messlauf.profil)
+        self.vorlage_wahl = vorlage_waehlen(self._vorlage_wunsch, self.geraet)
+        self.vorlage = self.vorlage_wahl.schluessel
+        self._anker = (self._uhr(), messlauf.uhr())
+        messlauf.zaehl_satz = self._fuer_diagnose
 
     def beenden(self, jetzt: float) -> list[Ereignis]:
         """Mit der Einheit (⏹, Timer durch) — gezählt ist gezählt: ``fertig``, außer der
@@ -1104,10 +1134,10 @@ class ZaehlBaustein:
         """Kam `KEINE_DATEN_S` lang kein Rahmen der Beschleunigung (seit dem Tipp bzw. seit
         dem letzten)? Für beide Spuren — „Anhalten“ und Pausen des Timers halten den Strom
         nicht an."""
-        if self._anker is None:
+        if self._strom_seit is None:
             return False
         zuletzt = self.messlauf.acc_zuletzt  # Uhr der Quelle
-        seit = self._anker[1] if zuletzt is None else max(zuletzt, self._anker[1])
+        seit = self._strom_seit if zuletzt is None else max(zuletzt, self._strom_seit)
         return self.messlauf.uhr() - seit >= KEINE_DATEN_S
 
     # -- Uhren ---------------------------------------------------------------------------
@@ -1230,7 +1260,7 @@ class ZaehlBaustein:
         alt = satz.geschrieben
         seit = alt[2] if alt is not None else satz.von_s
         if t - seit < ZWISCHENSTAND_S or (
-            alt is not None and alt[:2] == (satz.sensor, satz.korrektur)
+            alt is not None and (alt[0], alt[1], alt[3]) == (satz.sensor, satz.korrektur, satz.takt)
         ):
             return
         self._zaehlung_schreiben(satz, t)
@@ -1532,7 +1562,7 @@ class ZaehlBaustein:
         ``t_s``: sein Ende bzw. jetzt (Zwischenstand)."""
         if not self.wdh:
             return
-        stand = (satz.sensor, satz.korrektur, round(t_s, 3))
+        stand = (satz.sensor, satz.korrektur, round(t_s, 3), satz.takt)
         if satz.geschrieben == stand and not immer:
             return
         satz.geschrieben = stand

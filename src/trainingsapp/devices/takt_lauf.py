@@ -7,7 +7,13 @@ was seit dem letzten Tick geschah (`TaktNeu`):
 
 - ein **Takt-Lauf** begann (``beginn``: Uhrzeit und der wirksame Takt mit Tempo) oder endete
   (``ende``) — je Abschnitt, in dem ein Takt gilt, und je Tempoänderung ein eigener Lauf, wie
-  ``timer/takt`` in der Zeitleiste und ``takt.laeufe`` im Beiwerk ``atem-v1``;
+  ``timer/takt`` in der Zeitleiste und ``takt.laeufe`` im Beiwerk ``atem-v1``. Ein Lauf beginnt
+  mit seinem Abschnitt, wenn der seit dem letzten Tick begann (die Zeit kommt aus
+  `TimerLauf.abschnitt_uhr`), sonst **jetzt** (Takt „für jetzt“ mitten im Abschnitt, Tempo,
+  ein Verfolger, der spät dazukommt) — der alte endet, wo der neue beginnt: Läufe überlappen
+  nie, und kein Beginn liegt vor einem Ende (Prüfrunde 1, Befund 4). Endet ein eben begonnener
+  Lauf im selben Zug wieder (⏹ im Tick eines Abschnittswechsels), steht das in
+  ``ende_danach`` (Befund 13);
 - **Soll-Phasen** ``(Uhrzeit, "ein" | "aus")`` eines Atemtakts — „halten“ verlängert die
   laufende Phase, ein Bewegungstakt liefert keine (`core.takt.soll_phasen` sagt dasselbe für
   einen Zeitraum; hier kommt es Tick für Tick, auf der Uhr);
@@ -34,6 +40,10 @@ from ..core.takt import ART_AUS, ART_EIN, PHASE, RUNDE, Lage, Takt
 from ..core.takt import wechsel as takt_wechsel
 from ..core.timer import TimerLauf
 
+#: Beim ersten Tick eines Verfolgers: so lange darf der Abschnitt schon laufen, damit der
+#: Takt-Lauf noch auf seinen Anfang datiert wird (der Ticker kommt gleich nach dem Start)
+SPAET_S = 2.0
+
 
 @dataclass(frozen=True)
 class TaktNeu:
@@ -47,10 +57,19 @@ class TaktNeu:
     phasen: list[tuple[float, str]] = field(default_factory=list)
     #: volle Runden ``(Uhrzeit, Runde, zaehlt)`` — ``zaehlt``: der Takt zählt Wiederholungen
     runden: list[tuple[float, int, bool]] = field(default_factory=list)
+    #: der in ``beginn`` begonnene Lauf endete gleich wieder (nach den Phasen; nur beim
+    #: Zusammenlegen zweier Takte, `devices.einheit.TimerBaustein._takt_sammeln`)
+    ende_danach: float | None = None
 
     @property
     def leer(self) -> bool:
-        return self.ende is None and self.beginn is None and not self.phasen and not self.runden
+        return (
+            self.ende is None
+            and self.beginn is None
+            and not self.phasen
+            and not self.runden
+            and self.ende_danach is None
+        )
 
 
 class TaktVerfolger:
@@ -72,8 +91,8 @@ class TaktVerfolger:
     [(104.0, 'aus')]
     >>> t[0] = 110.2; neu = v.nachziehen(t[0]); neu.phasen, neu.runden
     ([(110.0, 'ein')], [(110.0, 1, False)])
-    >>> t[0] = 131.0; neu = v.nachziehen(t[0]); neu.ende, neu.beginn   # Pause: der Takt endet
-    (131.0, None)
+    >>> t[0] = 131.0; neu = v.nachziehen(t[0]); neu.ende, neu.beginn   # Pause ab 130: Ende dort
+    (130.0, None)
     >>> t[0] = 145.0; v.nachziehen(t[0]).leer                           # der Timer ist durch
     True
     """
@@ -84,6 +103,8 @@ class TaktVerfolger:
         #: Kennung des laufenden Takt-Laufs: (Abschnittsnummer, Takt, Tempo-Faktor)
         self._kennung: tuple[int, Takt, float] | None = None
         self._takt: Takt | None = None
+        #: Uhr beim letzten Tick — ein Abschnitt, der seither begann, datiert den Lauf
+        self._zuletzt: float | None = None
 
     @property
     def offen(self) -> bool:
@@ -115,13 +136,22 @@ class TaktVerfolger:
         phasen: list[tuple[float, str]] = []
         runden: list[tuple[float, int, bool]] = []
         if kennung != self._kennung:
+            # Wo der Wechsel liegt: am Anfang des Abschnitts, wenn der seit dem letzten Tick
+            # begann, sonst jetzt — derselbe Zeitpunkt für Ende und Beginn (nie überlappend)
+            alt_nummer = self._kennung[0] if self._kennung is not None else None
+            neu_nummer = lauf.stand().nummer if lauf.begonnen and not lauf.abgebrochen else None
+            wechsel_bei = (
+                self._wechsel_bei(neu_nummer, jetzt)
+                if neu_nummer is not None and neu_nummer != alt_nummer
+                else jetzt
+            )
             if self._kennung is not None:
                 if fertig and roh is not None and self._alt is not None:
                     alter = self._kennung[1]
                     for e in takt_wechsel(self._alt, roh):
                         if e.art == RUNDE:
                             runden.append((round(jetzt, 3), e.runde, alter.zaehlt))
-                ende = jetzt
+                ende = wechsel_bei
             if kennung is not None and takt is not None and lage is not None:
                 eff = takt.mit_tempo(takt.tempo * lauf.tempo_faktor)
                 tempo_wechsel = (
@@ -129,14 +159,10 @@ class TaktVerfolger:
                     and self._kennung[0] == kennung[0]
                     and self._kennung[1] is kennung[1]
                 )
-                if tempo_wechsel:
-                    # Nur das Tempo: der Lauf beginnt jetzt, die laufende Phase bleibt gemeldet
-                    beginn = (jetzt, eff)
-                    self._alt = lage
-                else:
-                    gelaufen = max(lage.runde - 1, 0) * eff.rundendauer_s + lage.t_runde_s
-                    beginn = (round(jetzt - gelaufen, 3), eff)
-                    self._alt = None
+                beginn = (wechsel_bei, eff)
+                # Nur das Tempo: die laufende Phase bleibt gemeldet; sonst gilt die Lage als
+                # neu, und die laufende Phase wird gemeldet (zur Zeit ihres Beginns)
+                self._alt = lage if tempo_wechsel else None
                 self._takt = eff
             else:
                 self._takt = None
@@ -151,7 +177,19 @@ class TaktVerfolger:
                 elif e.art == RUNDE:
                     runden.append((round(jetzt - lage.t_runde_s, 3), e.runde, takt.zaehlt))
             self._alt = lage
+        self._zuletzt = jetzt
         return TaktNeu(ende=ende, beginn=beginn, phasen=phasen, runden=runden)
+
+    def _wechsel_bei(self, nummer: int, jetzt: float) -> float:
+        """Wann ein Takt-Lauf wechselt, wenn Abschnitt ``nummer`` der neue ist: sein Anfang,
+        wenn er seit dem letzten Tick begann (beim ersten Tick: höchstens `SPAET_S` her —
+        ein Verfolger an einem Lauf, der schon lange läuft, beginnt jetzt), sonst jetzt. Nie
+        vor dem letzten Tick, nie nach jetzt."""
+        anfang = self.lauf.abschnitt_uhr(nummer)
+        frueh = self._zuletzt if self._zuletzt is not None else jetzt - SPAET_S
+        if anfang < frueh - 1e-6:
+            return jetzt
+        return round(min(max(anfang, frueh), jetzt), 3)
 
     def beenden(self, jetzt: float) -> TaktNeu:
         """Der Timer endet (⏹, durch, abgebrochen): ein offener Takt-Lauf endet jetzt."""
@@ -187,6 +225,8 @@ def in_die_messung(messlauf: Any, neu: TaktNeu, *, profil: str = "") -> None:
         if callable(phase):
             for t, art in neu.phasen:
                 phase(t, art)
+        if neu.ende_danach is not None and callable(ende):
+            ende(neu.ende_danach)
     except Exception:  # pragma: no cover — nur Beiwerk
         return
 

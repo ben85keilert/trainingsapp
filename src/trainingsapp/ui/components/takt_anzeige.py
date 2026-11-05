@@ -133,6 +133,8 @@ class TaktAnzeige:
         self.kreis: ft.Container | None = None
         self.ring: ft.ProgressRing | None = None
         self.seiten: list[ft.ProgressBar] = []
+        #: die vier Rahmenseiten der Box, in den Stack gelegt (oben, rechts, unten, links)
+        self.rahmen: list[ft.Container] = []
         self.balken: list[ft.ProgressBar] = []
         self.wellen: list[ft.Container] = []
 
@@ -167,21 +169,24 @@ class TaktAnzeige:
                 ft.ProgressBar(value=0, bar_height=5, border_radius=3, color=FARBE_FREI)
                 for _ in range(4)
             ]
+            # Jede Seite ein Balken der Breite g − 16, gedreht um seine **Mitte** — die bleibt,
+            # wo sie liegt: oben und unten bei x = g/2, rechts bei x = g − 2,5 und links bei
+            # x = 2,5 (Prüfrunde 1, Befund 6: beide senkrechten standen in der Mitte). Die
+            # Drehung gibt die Laufrichtung des Lichts im Uhrzeigersinn: rechts abwärts, unten
+            # von rechts nach links, links aufwärts.
             breite = g - 16
-            waagerecht = [
-                ft.Container(width=breite, content=s) for s in (self.seiten[0], self.seiten[2])
+            balken = [
+                ft.Container(width=breite, content=s, rotate=ft.Rotate(angle=w) if w else None)
+                for s, w in zip(self.seiten, (0.0, math.pi / 2, math.pi, -math.pi / 2), strict=True)
             ]
-            senkrecht = [
-                ft.Container(width=breite, content=s, rotate=ft.Rotate(angle=math.pi / 2))
-                for s in (self.seiten[1], self.seiten[3])
+            mitte_y = (g - 5) / 2
+            self.rahmen = [
+                ft.Container(content=balken[0], top=0, left=8),
+                ft.Container(content=balken[1], top=mitte_y, left=g - 2.5 - breite / 2),
+                ft.Container(content=balken[2], bottom=0, left=8),
+                ft.Container(content=balken[3], top=mitte_y, left=2.5 - breite / 2),
             ]
-            teile = [
-                ft.Container(content=waagerecht[0], top=0, left=8),
-                ft.Container(content=waagerecht[1], bottom=0, left=8),
-                ft.Container(content=senkrecht[0], top=(g - 5) / 2, left=8),
-                ft.Container(content=senkrecht[1], top=(g - 5) / 2, left=8),
-                *teile,
-            ]
+            teile = [*self.rahmen, *teile]
         return ft.Stack(
             width=g if not self.klein else self.groesse,
             height=g,

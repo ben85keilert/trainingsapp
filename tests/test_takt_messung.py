@@ -6,6 +6,7 @@ Quelle ``takt``, neben dem Sensor, Eintrag, Diagnose-Vergleich) und der Ticker o
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 from dataclasses import replace
 
@@ -607,3 +608,250 @@ async def test_uhr_der_uebung_bringt_den_takt_zaehler_mit_und_der_sensor_kommt_d
         await lauf.trennen()
         await asyncio.wait_for(lesen, 5)
         state.schliessen()
+
+
+# -- Prüfrunde 1 (0.3.52) -------------------------------------------------------------------
+
+
+async def test_sensor_dazu_nach_20_s_takt_zaehlen_bricht_nicht_ab(aufbau: Aufbau) -> None:
+    """Befund 1: `KEINE_DATEN_S` zählt ab der Anforderung des Stroms, nicht ab dem Start."""
+    a = aufbau
+    lauf = TimerLauf(stoppuhr())
+    lauf.takt_uebung = KNIEBEUGE
+    z = ZaehlBaustein(a.lauf, KONTEXT, feld="reps", quelle=QUELLE_TAKT)
+    e = _einheit(a, UebungBaustein(KONTEXT), TimerBaustein(lauf), z, titel="Kniebeuge")
+    e.ende_mit_timer = True
+    e.starten()
+    await _sekunden(a, 20, e)
+    assert z.grund is None and z.quelle == QUELLE_TAKT and z.satz is not None
+    assert z.satz.takt == 4
+    assert z.sensor_dazu()
+    await ruhe()
+    # Einige Takte der Einheit, bevor der erste ACC-Rahmen vom Gerät kommt
+    for _ in range(4):
+        a.uhr.t = round(a.uhr.t + 0.25, 6)
+        e.takt()
+    assert z.grund is None and not z.ohne_daten and z.quelle == QUELLE_SENSOR
+    # Erst 15 s ohne Rahmen nach der Anforderung sind „keine Daten“
+    for _ in range(4 * 15):
+        a.uhr.t = round(a.uhr.t + 0.25, 6)
+        e.takt()
+    assert z.grund == "abbruch" and z.ohne_daten
+
+
+async def test_sensor_dazu_ohne_geraet_reicht_den_messlauf_nach(aufbau: Aufbau) -> None:
+    """Befund 7: Der Takt zählte ohne Gerät; das Gerät kommt — der Sensor misst ab jetzt."""
+    a = aufbau
+    lauf = TimerLauf(stoppuhr())
+    lauf.takt_uebung = KNIEBEUGE
+    z = ZaehlBaustein(None, KONTEXT, feld="reps", quelle=QUELLE_TAKT)
+    e = _einheit(a, UebungBaustein(KONTEXT), TimerBaustein(lauf), z, titel="Kniebeuge")
+    e.ende_mit_timer = True
+    e.starten()
+    await _sekunden(a, 20, e)
+    assert z.ohne_geraet and z.geraet == "" and z.satz is not None and z.satz.takt == 4
+    assert not z.sensor_dazu() and not z.sensor_dazu(None)  # ohne Gerät bleibt es beim Takt
+    assert z.quelle == QUELLE_TAKT
+    assert z.sensor_dazu(a.lauf)
+    await ruhe()
+    assert not z.ohne_geraet and z.messlauf is a.lauf and z.geraet == "polar_h10"
+    assert z.quelle == QUELLE_SENSOR and z.satz.quelle == QUELLE_SENSOR and z.takt_zaehlt
+    assert a.gurt.acc_wunsch is not None and a.lauf.zaehl_satz is not None
+    for _ in range(4 * 10):
+        a.uhr.t = round(a.uhr.t + 0.25, 6)
+        a.gurt.beschleunigung()
+        await ruhe()
+        e.takt()
+    assert z.grund is None and z.satz.sensor is not None and z.satz.takt == 6
+    assert z.wert == z.satz.wert and z.beteiligung is not None
+    assert z.beteiligung.daten.get("geraet") == "polar_h10"
+    e.beenden()
+    await ruhe()
+    assert z.grund == ENDE_FERTIG and a.gurt.acc_wunsch is None  # der Strom ist wieder frei
+
+
+def test_takt_zaehler_schreibt_zwischenstaende_alle_15_s() -> None:
+    """Befund 5: Mit Quelle ``takt`` änderte sich „Sensor“ nie — der Zwischenstand kam nur
+    einmal; jetzt zählt der Takt-Stand mit."""
+    from trainingsapp.devices.zaehlen import ZWISCHENSTAND_S
+
+    uhr = Uhr()
+    z = ZaehlBaustein(None, KONTEXT, feld="reps", quelle=QUELLE_TAKT)
+    z.uhr_uebernehmen(uhr)
+    z.starten(uhr.t)
+    t0 = uhr.t
+    ereignisse: list[Ereignis] = []
+    for sek in range(1, 80):
+        uhr.t = t0 + sek
+        if sek % 3 == 0:
+            z.takt_runden([(float(sek), sek // 3, True)])
+        ereignisse += z.takt(uhr.t)
+    zwischen = [e for e in ereignisse if e.art == "zaehlung"]
+    staende = [e.daten["takt"] for e in zwischen]
+    assert len(zwischen) >= 4 and staende == sorted(set(staende))
+    abstaende = [b.t_s - a.t_s for a, b in itertools.pairwise(zwischen)]
+    assert all(d >= ZWISCHENSTAND_S for d in abstaende)
+    uhr.t = t0 + 80
+    ende = z.beenden(uhr.t)
+    assert [e.art for e in ende] == ["zaehlung", "zaehlen_ende"] and ende[0].daten["takt"] == 26
+
+
+def test_verfolger_neuer_lauf_beginnt_jetzt_oder_mit_seinem_abschnitt_nie_ueberlappend() -> None:
+    """Befund 4: Ein Takt „für jetzt“ mitten im Abschnitt beginnt jetzt; ein Abschnittswechsel
+    zwischen zwei Ticks liegt am Abschnittsanfang — das Ende des alten Laufs am selben Punkt."""
+    uhr = Uhr(100.0)
+    lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("Atmen", 120, takt=ATMUNG)]), uhr=uhr)
+    lauf.start()
+    v = TaktVerfolger(lauf)
+    for t in (100.2, 110.1, 120.1):
+        uhr.t = t
+        v.nachziehen(t)
+    lauf.takt_jetzt = VORLAGEN["box_4"]
+    uhr.t = 120.3
+    neu = v.nachziehen(120.3)
+    assert neu.ende == 120.3 and neu.beginn is not None
+    assert neu.beginn[0] == 120.3 and neu.beginn[1].name == "Box 4-4-4-4"
+    # Abschnittswechsel zwischen den Ticks: beide Zeiten am Anfang des neuen Abschnitts
+    uhr = Uhr(0.0)
+    p = TimerProfil(
+        abschnitte=[Abschnitt("A", 10, takt=ATMUNG), Abschnitt("B", 10, takt=VORLAGEN["box_4"])]
+    )
+    lauf = TimerLauf(p, uhr=uhr)
+    lauf.start()
+    v = TaktVerfolger(lauf)
+    gemeldet = []
+    for t in (0.2, 9.9, 10.1):
+        uhr.t = t
+        gemeldet.append(v.nachziehen(t))
+    assert gemeldet[0].beginn is not None and gemeldet[0].beginn[0] == 0.0
+    assert gemeldet[2].ende == 10.0 and gemeldet[2].beginn is not None
+    assert gemeldet[2].beginn[0] == 10.0 and gemeldet[2].phasen == [(10.0, "ein")]
+    # Ein Verfolger, der spät an einen laufenden Timer kommt, beginnt seinen Lauf jetzt
+    uhr.t = 15.0
+    spaet = TaktVerfolger(lauf)
+    neu = spaet.nachziehen(15.0)
+    assert neu.beginn is not None and neu.beginn[0] == 15.0 and neu.ende is None
+    # Nach einer Pause: der Takt-Lauf läuft weiter, kein neuer Beginn
+    lauf.pause()
+    uhr.t = 30.0
+    assert v.nachziehen(30.0).leer
+    lauf.fortsetzen()
+    uhr.t = 30.3
+    assert v.nachziehen(30.3).beginn is None and v.offen
+
+
+def test_abgebrochener_timer_schliesst_seinen_takt_lauf(aufbau: Aufbau) -> None:
+    """Befund 11: In einer Einheit, die nicht mit dem Timer endet, bleibt der Atemtakt-Lauf
+    sonst bis zum Ende der Einheit offen."""
+    a = aufbau
+    a.lauf.aufnahme_starten()
+    lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("Atmen", 120, takt=ATMUNG)]))
+    e = _einheit(a, HrvBaustein(a.lauf), TimerBaustein(lauf))
+    e.starten()
+    for _ in range(4 * 5):
+        a.uhr.t = round(a.uhr.t + 0.25, 6)
+        e.takt()
+    assert a.lauf.takt_laufend is not None
+    lauf.abbrechen()
+    halt = a.uhr.t
+    a.uhr.t = round(a.uhr.t + 0.25, 6)
+    neu = e.takt()
+    assert any(x.quelle == "timer" and x.art == "ende" for x in neu) and e.laeuft
+    assert a.lauf.takt_laufend is None
+    s = a.lauf.atem
+    assert s is not None and s.takt_laeufe[-1][1] is not None
+    assert abs(s.takt_laeufe[-1][1] - (halt - a.lauf.aufnahme.start_mono)) < 1e-6
+    a.uhr.t = round(a.uhr.t + 30, 6)
+    e.takt()
+    e.beenden()
+    assert s.takt_laeufe[-1][1] < 10.0  # nicht bis zum Ende der Einheit
+
+
+def test_stopp_im_tick_eines_abschnittsbeginns_haelt_die_reihenfolge_ende_beginn_ende() -> None:
+    """Befund 13: `TimerBaustein.beenden` legte Beginn (aus `takt`) und Ende (aus dem
+    Verfolger) zusammen — Ende vor Beginn, der neue Lauf blieb offen."""
+    uhr = Uhr()
+    p = TimerProfil(
+        abschnitte=[Abschnitt("A", 10, takt=ATMUNG), Abschnitt("B", 10, takt=VORLAGEN["box_4"])]
+    )
+    lauf = TimerLauf(p, uhr=uhr)
+    tb = TimerBaustein(lauf)
+    tb.starten(uhr.t)
+    uhr.t = 1009.9
+    tb.takt(uhr.t)
+    tb.takt_abholen()
+    uhr.t = 1010.1
+    tb.beenden(uhr.t)
+    neu = tb.takt_abholen()
+    assert neu is not None and not neu.leer
+    assert neu.ende == 1010.0 and neu.beginn is not None and neu.beginn[0] == 1010.0
+    assert neu.ende_danach == 1010.1 and not tb.verfolger.offen
+    messlauf = _Messlauf(uhr)
+    in_die_messung(messlauf, neu, profil="P")
+    assert [r[:2] for r in messlauf.rufe] == [
+        ("ende", 1010.0),
+        ("beginn", 1010.0),
+        ("phase", 1010.0),
+        ("ende", 1010.1),
+    ]
+
+
+async def test_ticker_ohne_einheit_behaelt_den_takt_lauf_ueber_eine_pause() -> None:
+    """Befund 4b: Anhalten beendet den Ticker, Weiter baut ihn neu — derselbe Verfolger
+    läuft weiter, kein zweiter Takt-Lauf, kein Paar Notizen für eine Pause."""
+    from types import SimpleNamespace
+
+    uhr = Uhr()
+    lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("Atmen", 8, takt=ATMUNG)]), uhr=uhr)
+    messlauf = _Messlauf(uhr)
+    state = SimpleNamespace(
+        timer=lauf,
+        timer_aufgabe=None,
+        messlauf=messlauf,
+        ton=None,
+        toene_geladen=False,
+        haptik=None,
+        timer_signale=lambda: TimerSignale(notizen=True),
+        timer_beobachter={},
+        notiz_beobachter={},
+        einheit=None,
+        takt_vibration=lambda: False,
+    )
+    aufgaben: list = []
+    page = SimpleNamespace(run_task=lambda f: aufgaben.append(asyncio.ensure_future(f())))
+    lauf.start()
+    ticker_starten(page, state)
+    for _ in range(2):
+        await asyncio.sleep(0.25)
+        uhr.t += 1.0
+    lauf.pause()
+    await asyncio.wait_for(aufgaben[0], 5)
+    assert state.takt_verfolger is not None and state.takt_verfolger.lauf is lauf
+    uhr.t += 30.0  # die Pause
+    lauf.fortsetzen()
+    ticker_starten(page, state)
+    for _ in range(8):
+        await asyncio.sleep(0.25)
+        uhr.t += 1.0
+    await asyncio.wait_for(aufgaben[1], 5)
+    arten = [r[0] for r in messlauf.rufe]
+    assert arten.count("beginn") == 1 and arten.count("ende") == 1 and arten[-1] == "ende"
+    assert messlauf.rufe[0] == ("beginn", 1000.0, "Atmung 4-6", lauf.profil.markenname)
+
+
+def test_takt_rate_der_auswertung_nimmt_den_laengsten_lauf() -> None:
+    """Befund 8: Beiwerk und Protokollfeld sagten Verschiedenes über dieselbe Messung."""
+    from hrv_core.atem import Atem
+    from hrv_core.atem import Takt as AtemTakt
+
+    from trainingsapp.core import atem_auswertung as aa
+
+    takt = AtemTakt(
+        name="Atmung 4-6",
+        rate_pro_min=3.0,  # der letzte Lauf (§15)
+        phasen=[(0.0, "ein")],
+        laeufe=[(0.0, 240.0, "Atmung 4-6", 6.0), (240.0, 270.0, "Atmung 4-6", 3.0)],
+    )
+    feld = {"art": "getaktet", "takt_pro_min": 6.0}
+    assert aa.takt_rate(Atem(takt=takt), feld) == 6.0 == aa.takt_rate(Atem(takt=takt), None)
+    assert aa.takt_rate_in(Atem(takt=takt), 250.0, 260.0) == 3.0

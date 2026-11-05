@@ -256,8 +256,9 @@ def _laufend(
         return handler
 
     def sensor_dazu() -> None:
-        """Der Takt zählt — mit Sensor misst ab jetzt der Sensor, der Takt steht daneben."""
-        if z.sensor_dazu():
+        """Der Takt zählt — mit Sensor misst ab jetzt der Sensor, der Takt steht daneben; kam
+        das Gerät erst nach dem Start dazu, reicht der Messlauf nach (Prüfrunde 1, Befund 7)."""
+        if z.sensor_dazu(state.messlauf):
             e = einheit_ui.laeuft(state)
             if e is not None:
                 e.fortschreiben(z)

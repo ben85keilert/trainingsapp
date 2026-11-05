@@ -777,7 +777,7 @@ def uebung_timer_view(
                 anteile.append((a, -1.0 if not stand.fertig else 1.0))
         balken_platz.content = None if lauf.vorwaerts else _balken(anteile, hoehe=12)
         lage = lauf.takt_lage()
-        takt_anzeige.nachziehen(lauf.takt_aktuell(stand.nummer) if lage else None, lage)
+        takt_anzeige.nachziehen(lauf.takt_effektiv() if lage else None, lage)  # mit Tempo
         if isinstance(tempo_platz.content, ft.Row):
             tempo_platz.content.visible = lage is not None
         # Sätze: was zählt, mit der gelaufenen Zeit aus der Zeitleiste — und, zählt der Sensor

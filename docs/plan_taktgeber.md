@@ -258,3 +258,29 @@ Soll-Phasen im Live-Vollbild als Linien (nur die Kopfzeile aus Teil 1); ein Time
 bekommt den Takt nur mit dem Schalter „Notizen“ in die Messung, und eine Aufnahme, die nach dem
 Start einer Einheit ohne HRV-Teil beginnt, bekommt weder Abschnittsnotizen noch Takt (wie bisher
 bei den Abschnitten).
+
+**Prüfrunde 1 (0.3.52)** — 14 Befunde der Prüfung von Teil 1+2, alle behoben, je einer mit
+Test, der vorher rot war (`tests/test_takt_messung.py`, `test_takt.py`, `test_ui_takt.py`,
+`test_ui_takt2.py`, Abschnitt „Prüfrunde 1“): (1) „Sensor dazu“ nach ≥ 15 s Takt-Zählen brach
+sofort ab — `KEINE_DATEN_S` zählt jetzt ab der Anforderung des Stroms (`ZaehlBaustein.
+_strom_seit`), nicht ab dem Start. (2, 12) `TimerLauf.zuruecksetzen` vergisst den `TaktLauf`
+samt Tempoanker und leert `tempo_aenderungen` — ein zweites ▶ desselben Laufs beginnt in Runde 1,
+der Faktor bleibt (P139). (3) Der Tempo-Regler setzt das Tempo erst beim Loslassen
+(`on_change_end`), beim Ziehen zieht nur der Text nach — ein `timer/takt`, ein Takt-Lauf, ein
+Notizpaar je Änderung. (4) Ein neuer Takt-Lauf beginnt mit seinem Abschnitt, wenn der seit dem
+letzten Tick begann (`TimerLauf.abschnitt_uhr`), sonst jetzt; der alte endet am selben Punkt —
+nie überlappend, kein Beginn vor einem Ende; der Verfolger des Timers ohne Einheit lebt am
+Zustand (`AppState.takt_verfolger`) und überlebt Anhalten/Weiter. (5) Der Zwischenstand gegen
+den Absturz vergleicht auch den Takt-Stand (`ZaehlSatz.geschrieben` mit `takt`). (6) Die
+senkrechten Seiten der Box liegen rechts und links (um die Mitte gedreht, `TaktAnzeige.rahmen`),
+Lauflicht im Uhrzeigersinn. (7) Zählte der Takt **ohne Gerät** und kommt der Gurt später, reicht
+„Sensor dazu“/„Wdh. zählen“ den Messlauf nach (`ZaehlBaustein.sensor_dazu(messlauf)`: Profil,
+Rate, Vorlage, Diagnose-Haken, neuer Uhren-Anker) — der Sensor misst wirklich, statt den Knopf
+zu verstecken: der Teil braucht vom Messlauf nur Puffer und Uhr, beides lässt sich nachreichen.
+(8) `atem_auswertung.takt_rate` nennt wie das Protokollfeld den **längsten** Lauf
+(`takt_rate_in` über die ganze Spanne); §15 behält `name`/`rate_pro_min` des letzten Laufs im
+Format. (9) Anzeigen zeigen den wirksamen Takt (`TimerLauf.takt_effektiv`): „3,0/min · 2,0ד.
+(10) `takt_gross` und die Rückfrage im Bewegungsbild-Blatt schließen mit `dialoge.schliessen`.
+(11) Ein abgebrochener Timer schließt seinen Takt-Lauf sofort (`TimerBaustein.takt`). (13)
+`TaktNeu.ende_danach`: ⏹ im Tick eines Abschnittsbeginns hält Ende · Beginn · Ende. (14)
+`takt_pruefen` nennt `bild`.

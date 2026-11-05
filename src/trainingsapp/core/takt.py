@@ -379,7 +379,7 @@ def takt_pruefen(roh: Any) -> tuple[list[str], list[str]]:
     ...                                         {"name": "aus", "dauer_s": 6, "art": "aus"}]})
     ([], [])
     >>> fehler, hinweise = takt_pruefen({"phasen": [{"dauer_s": "x", "art": "tanz"},
-    ...     {"dauer_s": 2, "klang": "trompete", "farbe": 1}], "tempo": "schnell", "runden": 0})
+    ...     {"dauer_s": 2, "klang": "trompete", "x": 1}], "tempo": "schnell", "runden": 0})
     >>> for f in fehler: print(f)
     Phase 1: „dauer_s“ muss eine Zahl zwischen 0.1 und 600 sein, nicht "x" — die Phase fällt weg
     „tempo“ muss eine Zahl zwischen 0.5 und 2 sein, nicht "schnell" — gilt als 1
@@ -387,7 +387,7 @@ def takt_pruefen(roh: Any) -> tuple[list[str], list[str]]:
     >>> for h in hinweise: print(h)
     Phase 1: unbekannte Art „tanz“ — gilt als „frei“ (bekannt: ein, aus, halten, ab, auf, frei)
     Phase 2: unbekannter Klang „trompete“ — gilt als Vorgabe der Art
-    Phase 2: unbekannter Schlüssel „farbe“ — wird überlesen (bekannt: name, dauer_s, art, klang)
+    Phase 2: unbekannter Schlüssel „x“ — wird überlesen (bekannt: name, dauer_s, art, klang, bild)
     >>> takt_pruefen(True)[0]
     ['keine Tabelle (etwa { phasen = [ … ] }), sondern true — die Übung bekommt keinen Takt']
     >>> takt_pruefen({"phasen": "x"})[0]
@@ -434,7 +434,7 @@ def takt_pruefen(roh: Any) -> tuple[list[str], list[str]]:
             if schluessel not in ("name", "dauer_s", "art", "klang", "bild"):
                 hinweise.append(
                     f"Phase {k}: unbekannter Schlüssel „{schluessel}“ — wird überlesen "
-                    "(bekannt: name, dauer_s, art, klang)"
+                    "(bekannt: name, dauer_s, art, klang, bild)"
                 )
     tempo = roh.get("tempo")
     if tempo is not None and (

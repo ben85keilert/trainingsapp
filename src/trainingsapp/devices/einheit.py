@@ -166,6 +166,9 @@ class TimerBaustein:
                         halt - t0, "timer", "ende", "Timer abgebrochen", {"grund": "abgebrochen"}
                     )
                 )
+                # Ein offener Takt-Lauf endet mit dem Abbruch — nicht erst mit der Einheit
+                # (Prüfrunde 1, Befund 11: ein Training lief sonst mit „Takt“ bis zum Schluss)
+                self._takt_sammeln(self.verfolger.beenden(halt))
             self._lief = False
             return out
         if self._lief and not laeuft and not self.lauf.fertig:
@@ -206,18 +209,30 @@ class TimerBaustein:
 
     def _takt_sammeln(self, neu: TaktNeu) -> None:
         """Was der Verfolger meldet, bis zum Abholen aufheben (zwei Takte ohne Abholen:
-        zusammenlegen — Ende und Beginn des späteren gelten, Phasen und Runden beide)."""
+        zusammenlegen — Ende und Beginn des späteren gelten, Phasen und Runden beide). Endet
+        im späteren nur der Lauf, der im früheren begann (⏹ im Tick eines Abschnittsbeginns),
+        bleibt die Reihenfolge Ende · Beginn · Ende (``ende_danach``, Prüfrunde 1, Befund 13)."""
         if neu.leer:
             return
         alt = self._takt_neu
         if alt is None or alt.leer:
             self._takt_neu = neu
             return
+        if alt.beginn is not None and neu.beginn is None and neu.ende is not None:
+            self._takt_neu = TaktNeu(
+                ende=alt.ende,
+                beginn=alt.beginn,
+                phasen=[*alt.phasen, *neu.phasen],
+                runden=[*alt.runden, *neu.runden],
+                ende_danach=neu.ende,
+            )
+            return
         self._takt_neu = TaktNeu(
             ende=neu.ende if neu.ende is not None else alt.ende,
             beginn=neu.beginn if neu.beginn is not None else alt.beginn,
             phasen=[*alt.phasen, *neu.phasen],
             runden=[*alt.runden, *neu.runden],
+            ende_danach=neu.ende_danach if neu.beginn is not None else alt.ende_danach,
         )
 
     def takt_abholen(self) -> TaktNeu | None:

@@ -367,6 +367,9 @@ class AppState:
     #: Ansichtswechsel überlebt; die Aufgabe, die ihn ticken lässt
     timer: Any = None
     timer_aufgabe: Any = None
+    #: Der `TaktVerfolger` des Timers ohne Einheit (`ui.timer_takt`) — er überlebt Anhalten
+    #: und Weiter, sonst begänne nach jeder Pause ein neuer Takt-Lauf (Befund 4)
+    takt_verfolger: Any = None
     #: Vibration (Flet-Dienst `HapticFeedback`), setzt `app.main()`
     haptik: Any = None
     #: Diagnosemodus (`docs/plan_diagnosemodus.md`): der rote Punkt in ``page.overlay``

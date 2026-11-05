@@ -322,7 +322,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         ablauf.controls = [] if lauf.vorwaerts else ablauf_zeilen(stand)
         takt = lauf.takt_aktuell(stand.nummer) if not stand.fertig else None
         lage = lauf.takt_lage()
-        takt_anzeige.nachziehen(takt, lage)
+        takt_anzeige.nachziehen(lauf.takt_effektiv() if lage else None, lage)  # mit Tempo
         tempo_regler.nachziehen(lage is not None)
         takt_text.value = f"Takt: {takt.anzeigename} · {takt.kurztext()}" if takt else ""
         takt_text.visible = bool(takt_text.value) and lage is None

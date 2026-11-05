@@ -976,7 +976,10 @@ Schreiber in hrv-core liegen, kann es die Datei später ohne eigene Übersetzung
     nächsten Soll-„ein“ (Median, `core.atem_auswertung.soll_ist_versatz`) und rechnet die
     Atem-HRV einmal gegen Ist und einmal gegen Soll (Entscheidung 25 Frage 7: beides zeigen).
     Für die Regel F6 ist die Takt-Rate die **dritte Quelle**, wenn Sensor und RR-Atmung fehlen.
-    Nichts davon wird gespeichert.
+    Die Takt-Rate der ganzen Messung ist dabei die des **längsten** Laufs aus `takt.laeufe`
+    (wie `takt_pro_min` im Protokollfeld, §5; `core.atem_auswertung.takt_rate`), je Bereich die
+    des Laufs, der ihn am längsten abdeckt — `name`/`rate_pro_min` im Feld bleiben die des
+    letzten Laufs (Prüfrunde 1, 0.3.52). Nichts davon wird gespeichert.
   - **`erfasst` unterscheidet gemessen von Lücke:** Ohne einen Lauf, der eine Zeit abdeckt,
     heißt „keine Phase“ *nicht gemessen*, nicht *kein Atemzug*. Die Auswertung zeigt
     außerhalb der Läufe nichts, auch keine Rate, und paart Phasen nur innerhalb eines Laufs

@@ -539,3 +539,55 @@ class contextlib_suppress:
 
     def __exit__(self, *_: object) -> bool:
         return True
+
+
+# -- Prüfrunde 1 (0.3.52) -------------------------------------------------------------------
+
+
+def test_neustart_desselben_laufs_beginnt_den_takt_von_vorn() -> None:
+    """Befund 2 und 12: Nach einer Tempoänderung stand der Takt beim zweiten ▶ desselben
+    `TimerLauf` mitten im Lauf (Runde 6), und die Änderungen blieben liegen."""
+    uhr = Uhr(0.0)
+    p = TimerProfil(abschnitte=[Abschnitt("Atmen", 120, takt=VORLAGEN["atmung_4_6"])])
+    lauf = TimerLauf(p, uhr=uhr)
+    lauf.start()
+    uhr.t = 100.0
+    lauf.tempo_setzen(2.0)
+    assert lauf.tempo_aenderungen == [100.0]
+    uhr.t = 125.0
+    assert lauf.stand().fertig and lauf.takt_lage() is None
+    lauf.zuruecksetzen()  # wie `TimerBaustein.starten` und ▶ im Reiter „Timer“
+    assert lauf.tempo_aenderungen == []
+    uhr.t = 200.0
+    lauf.start(bei=200.0)
+    uhr.t = 200.2
+    lage = lauf.takt_lage()
+    assert lage is not None and (lage.runde, lage.index) == (1, 0)
+    assert abs(lage.t_runde_s - 0.2) < 1e-6 and lage.dauer_s == 8.0  # der Faktor bleibt (P139)
+    assert lauf.tempo_faktor == 2.0 and lauf.tempo_aenderungen == []
+
+
+def test_takt_effektiv_traegt_das_tempo_des_reglers() -> None:
+    """Befund 9: Anzeigen bekommen den wirksamen Takt — Rate und „2,0ד mit dem Regler."""
+    uhr = Uhr(0.0)
+    p = TimerProfil(abschnitte=[Abschnitt("Atmen", 120, takt=VORLAGEN["atmung_4_6"])])
+    lauf = TimerLauf(p, uhr=uhr)
+    assert lauf.takt_effektiv() is None
+    lauf.start()
+    uhr.t = 12.0
+    eff = lauf.takt_effektiv()
+    assert eff is not None and eff.rate_pro_min == 6.0 and eff.tempo == 1.0
+    lauf.tempo_setzen(2.0)
+    eff = lauf.takt_effektiv()
+    assert eff is not None and eff.rate_pro_min == 3.0 and eff.tempo == 2.0
+    assert eff.phasen == VORLAGEN["atmung_4_6"].phasen  # derselbe Takt, nur gedehnt
+    assert lauf.takt_aktuell(0) is VORLAGEN["atmung_4_6"]  # die Wahl bleibt der gespeicherte
+
+
+def test_takt_pruefen_nennt_bild_unter_den_bekannten_schluesseln() -> None:
+    """Befund 14: ``bild`` wird gelesen, der Hinweis nannte es nicht."""
+    _fehler, hinweise = takt_pruefen({"phasen": [{"dauer_s": 2, "bild": "x.png", "farbe": "rot"}]})
+    assert hinweise == [
+        "Phase 1: unbekannter Schlüssel „farbe“ — wird überlesen (bekannt: name, dauer_s, "
+        "art, klang, bild)"
+    ]

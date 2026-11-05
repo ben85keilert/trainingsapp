@@ -391,9 +391,16 @@ def test_takt_knopf_fuer_jetzt_und_am_lauf(state) -> None:
     assert regler.text.value == "1,5×" and regler.control.visible is False
     regler.nachziehen(True)
     assert regler.control.visible
+    # Beim Ziehen nur der Text (Befund 3), beim Loslassen das Tempo — eine Änderung im Lauf
+    neu.start()
+    regler.regler.on_change(_ereignis(regler.regler, 0.9))
     regler.regler.on_change(_ereignis(regler.regler, 0.75))
+    assert regler.text.value == "0,75×" and neu.tempo_faktor == 1.5
+    assert "u1" not in state.uhr_tempo or state.uhr_tempo["u1"] == 1.5
+    assert neu.tempo_aenderungen == []
+    regler.regler.on_change_end(_ereignis(regler.regler, 0.75))
     assert neu.tempo_faktor == 0.75 and state.uhr_tempo["u1"] == 0.75
-    assert regler.text.value == "0,75×"
+    assert regler.text.value == "0,75×" and len(neu.tempo_aenderungen) == 1
 
 
 def test_uhr_zeile_und_laufende_uhr_zeigen_den_takt(state) -> None:
@@ -495,3 +502,68 @@ def test_einstellung_vibration_und_vollbild_soll(state) -> None:
     state.timer = lauf
     lauf.start()
     assert takt_kopf_text(state) == "Soll ▲ ein 4 s"
+
+
+# -- Prüfrunde 1 (0.3.52) -------------------------------------------------------------------
+
+
+def test_box_rahmen_seiten_liegen_rechts_und_links() -> None:
+    """Befund 6: Beide senkrechten Seiten standen in der Mitte des Kreises."""
+    g = 120
+    anzeige = TaktAnzeige(groesse=g)
+    box = VORLAGEN["box_4"]
+    anzeige.nachziehen(box, lage(box, 1.0))
+    oben, rechts, unten, links = anzeige.rahmen
+    breite = g - 16
+    assert oben.top == 0 and unten.bottom == 0 and oben.left == unten.left == 8
+    # Um die Mitte gedreht: die Mitte des rechten Balkens liegt am rechten Rand, die des
+    # linken am linken — nicht beide bei g/2
+    assert rechts.left + breite / 2 == pytest.approx(g - 2.5)
+    assert links.left + breite / 2 == pytest.approx(2.5)
+    assert rechts.top == links.top == pytest.approx((g - 5) / 2)
+    # Lauflicht im Uhrzeigersinn: rechts abwärts, unten rückwärts, links aufwärts
+    assert rechts.content.rotate.angle > 0 > links.content.rotate.angle
+    assert unten.content.rotate.angle == pytest.approx(3.141592653589793)
+
+
+def test_laufende_uhr_zeigt_rate_und_tempo_des_wirksamen_takts(state) -> None:
+    """Befund 9: Unter dem Kreis stand die Rate des gespeicherten Takts ohne „2,0ד."""
+    from trainingsapp.devices.einheit import (
+        Einheitslauf,
+        TimerBaustein,
+        UebungBaustein,
+        UebungKontext,
+    )
+    from trainingsapp.ui.components.uhr import _laufend
+
+    page = Seite()
+    u = Exercise(
+        name="Atmen",
+        result_spec=ResultSpec(layout=Layout.TIMED, fields=[vorrat_feld("hold")]),
+        takt=VORLAGEN["atmung_4_6"],
+    )
+    state.uebungen.speichern(u)
+    uhr = SimpleNamespace(t=1000.0)
+    e = Einheitslauf(uhr=lambda: uhr.t, titel="Atmen")
+    lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("Atmen", 60)]))
+    e.hinzufuegen(UebungBaustein(UebungKontext(u.id, u.name, zeitfeld="hold")))
+    e.hinzufuegen(TimerBaustein(lauf))
+    takt_anbringen(state, lauf, u.id, u.takt)
+    e.starten()
+    uhr.t += 5
+    anzeige = _laufend(page, state, e)
+    assert "Runde 1 · 6,0/min" in _texte(anzeige)
+    lauf.tempo_setzen(2.0)
+    state.timer_beobachter["uhr_in_der_uebung"]()
+    assert "Runde 1 · 3,0/min · 2,0×" in _texte(anzeige)
+    # Groß ebenso — und „Schließen“ trifft genau diesen Dialog (Befund 10)
+    gross = next(
+        k for k in _alle(anzeige) if isinstance(k, ft.Container) and k.on_click and _texte(k)
+    )
+    gross.on_click()
+    dialog = page.dialoge[-1]
+    assert isinstance(dialog, ft.AlertDialog) and "Runde 1 · 3,0/min · 2,0×" in _texte(dialog)
+    dialog.open = True
+    page.dialoge.append("meldung")  # eine SnackBar obenauf
+    _knopf(dialog, "Schließen").on_click()
+    assert dialog.open is False and page.dialoge[-1] == "meldung"

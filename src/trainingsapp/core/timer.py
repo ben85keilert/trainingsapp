@@ -1016,6 +1016,12 @@ class TimerLauf:
         self._gemeldet = None  # der nächste Start meldet den ersten Abschnitt wieder
         self.angehalten_bei = None
         self.abgebrochen = False
+        # Der Takt beginnt mit dem nächsten Start von vorn: ein `TaktLauf` mit Tempoanker aus
+        # dem alten Lauf stünde sonst mitten in einer Runde (Prüfrunde 1, Befund 2); Änderungen
+        # des Reglers aus dem alten Lauf gehen nicht in die Zeitleiste des neuen (Befund 12).
+        # Der Faktor selbst bleibt — er gilt für jetzt, bis zur nächsten Wahl (P139)
+        self._takt_lauf, self._takt_nummer = None, None
+        self.tempo_aenderungen.clear()
 
     def abbrechen(self) -> None:
         """Abbrechen (Ben, 17.10.2026): anhalten und als abgebrochen markieren — daraus
@@ -1193,7 +1199,7 @@ class TimerLauf:
         self._gemeldet = stand.nummer
         marken: list[Marke] = []
         for k in nummern:
-            bei = self._uhr_bei(k)
+            bei = self.abschnitt_uhr(k)
             name, runde, von = self.angaben(k)
             a = self.abschnitt(k)
             marken.append(
@@ -1225,8 +1231,9 @@ class TimerLauf:
         k, runde, index, a = self._folge[nummer]
         return a.name or f"Abschnitt {index + 1}", runde, max(self._teile[k].runden, 1)
 
-    def _uhr_bei(self, nummer: int) -> float:
-        """Wann Abschnitt ``nummer`` begann — seit dem letzten Start genau, sonst jetzt."""
+    def abschnitt_uhr(self, nummer: int) -> float:
+        """Wann Abschnitt ``nummer`` begann (Uhr) — seit dem letzten Start genau, sonst jetzt
+        (begann er vor einer Pause, gilt er für Marken und Takt-Läufe als „eben“)."""
         laufzeit = self.anfang_s(nummer)
         if self._start is None or laufzeit < self._basis_s:
             return self._uhr()
@@ -1292,6 +1299,24 @@ class TimerLauf:
             self._takt_lauf = TaktLauf(takt, self.tempo_faktor)
             self._takt_nummer = stand.nummer
         return self._takt_lauf.lage(stand.abschnitt_s - stand.rest_s)
+
+    def takt_effektiv(self) -> Takt | None:
+        """Der **wirksame** Takt von jetzt — der des laufenden Abschnitts mit dem Tempo des
+        Reglers (`TaktLauf.effektiv`); für Anzeigen (Rate, „2,0ד), nicht für die Wahl.
+        ``None`` wie `takt_lage`.
+
+        >>> from trainingsapp.core.takt import Phase
+        >>> t = [0.0]
+        >>> takt = Takt((Phase("ein", 4, "ein"), Phase("aus", 6, "aus")))
+        >>> lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 60, takt=takt)]), lambda: t[0])
+        >>> lauf.takt_effektiv() is None, lauf.start(), lauf.takt_effektiv().rate_pro_min
+        (True, None, 6.0)
+        >>> lauf.tempo_setzen(2.0); e = lauf.takt_effektiv(); (e.rate_pro_min, e.tempo)
+        (3.0, 2.0)
+        """
+        if self.takt_lage() is None or self._takt_lauf is None:
+            return None
+        return self._takt_lauf.effektiv
 
     def tempo_setzen(self, faktor: float) -> None:
         """Der Tempo-Regler während des Laufs — für jetzt (P139): Die Lage springt nicht, die

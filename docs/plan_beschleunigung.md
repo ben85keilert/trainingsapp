@@ -899,3 +899,9 @@ Korrektur mit einem Test, der ohne sie scheitert):
 | P131 | Lange Sätze: Rechnung gedrosselt bis alle 5 s, dauerhaft der Live-Zähler (A5) | **gut** — seit A5 (5.11.2026) der Live-Zähler, keine Drosselung mehr |
 | P132 | Chip im Diagnosemodus neben dem Sensor | **„Chip und Satz sollen sich ergänzen“**: der Chip ist der eingetragene Wert des Satzes, den der Sensor zählte (`von_hand`), das Zählen läuft weiter. Wer von Hand eintragen oder nachtragen will, bricht das Sensorzählen ab und macht es direkt in den Leistungen — der Sensor und die Chips teilen sich außerhalb der Diagnose nie ein Feld (P122) |
 | P133 | Mit der Uhr beendet ein Chip den Satz seines Abschnitts; der Rest des Abschnitts zählt nicht mehr | **genau** — **außer die Atmung**: Wird sie für die HRV erfasst, läuft sie nebenbei weiter, unabhängig von Sätzen, Chips und Abschnitten (ein Chip rührt einen Atem-Lauf nicht an, `von_hand` gilt nur für Wiederholungen; für A3 verbindlich) |
+
+**Prüfrunde 1 Taktgeber (0.3.52), Zähl-Teil:** „Sensor dazu“ zählt `KEINE_DATEN_S` ab der
+Anforderung des Stroms, nicht ab dem Start des Takt-Zählens (Befund 1); der Zwischenstand alle
+15 s sieht auch den Takt-Stand (Befund 5); zählte der Takt ohne Gerät, reicht „Sensor dazu“ den
+später verbundenen Messlauf nach — `ZaehlBaustein.sensor_dazu(messlauf)` (Befund 7;
+`docs/plan_taktgeber.md` §10).

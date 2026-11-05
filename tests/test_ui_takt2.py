@@ -24,7 +24,7 @@ from trainingsapp.core.models import Exercise, HrvRecording  # noqa: E402
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld  # noqa: E402
 from trainingsapp.core.takt import VORLAGEN  # noqa: E402
 from trainingsapp.core.timer import Abschnitt, TimerProfil  # noqa: E402
-from trainingsapp.core.zaehlen import QUELLE_TAKT  # noqa: E402
+from trainingsapp.core.zaehlen import QUELLE_SENSOR, QUELLE_TAKT  # noqa: E402
 from trainingsapp.devices.einheit import UebungKontext  # noqa: E402
 from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
 from trainingsapp.devices.zaehlen import ZaehlBaustein  # noqa: E402
@@ -392,3 +392,89 @@ async def test_bild_der_bewegung_laeuft_im_waehrend(umgebung) -> None:
     bilder = [c for c in alle(laufend) if isinstance(c, ft.Image)]
     assert any(b.src.endswith(gif.split("/")[-1]) and b.gapless_playback for b in bilder)
     state.einheit.beenden()
+
+
+# -- Prüfrunde 1 (0.3.52) -------------------------------------------------------------------
+
+
+def test_bild_loeschen_rueckfrage_schliesst_genau_ihren_dialog(page, state) -> None:
+    """Befund 10: `page.pop_dialog()` traf die oberste Meldung, nicht die Rückfrage."""
+    u1 = Exercise(name="Kniebeuge", takt=VORLAGEN["kniebeuge_2_1_2"])
+    u2 = Exercise(name="Ausfallschritt", takt=VORLAGEN["kniebeuge_2_1_2"])
+    state.uebungen.speichern(u1)
+    state.uebungen.speichern(u2)
+    gif = state.bewegungsbilder.schreiben(GIF, u1.id)
+    state.bewegungsbilder.setzen(u2.id, gif)
+    blatt = bewegungsbild_blatt(
+        page,
+        state,
+        uebung_id=u1.id,
+        bild=gif,
+        waehlen=lambda _b: None,
+        hochladen=None,
+        aufnehmen=None,
+    )
+    kreuz = next(
+        c
+        for c in alle(blatt)
+        if isinstance(c, ft.Container) and c.tooltip == "Aus der Ablage löschen"
+    )
+    kreuz.on_click()
+    frage = page.dialoge[-1]
+    assert isinstance(frage, ft.AlertDialog) and "Bild aus der Ablage löschen?" in texte(frage)
+    frage.open = True
+    page.dialoge.append("meldung")  # eine SnackBar obenauf
+    knopf(frage, "Abbrechen").on_click()
+    assert frage.open is False and page.dialoge[-1] == "meldung"
+    assert state.bewegungsbilder.alle()
+    kreuz.on_click()
+    frage = page.dialoge[-1]
+    frage.open = True
+    page.dialoge.append("meldung2")
+    knopf(frage, "Löschen").on_click()
+    assert frage.open is False and page.dialoge[-1] == "meldung2"
+    assert state.bewegungsbilder.alle() == []
+
+
+async def test_sensor_dazu_nach_spaet_verbundenem_geraet(umgebung, monkeypatch) -> None:
+    """Befund 7: Die Uhr startete ohne Gerät (der Takt zählt); dann kommt der H10 — „Sensor
+    dazu“ in der Zählzeile tat nichts. Jetzt misst der Sensor."""
+    from trainingsapp.ui import einheit as einheit_ui
+
+    state, uhr, gurt = umgebung
+    # Ohne Gerät läuft die Einheit auf `time.monotonic` — hier auf der Uhr der Attrappe
+    monkeypatch.setattr(einheit_ui, "time", SimpleNamespace(monotonic=uhr))
+    uebung = _kniebeuge(state)
+    seite = Seite()
+    basis = f"/uebung/{uebung.id}"
+    lauf, state.messlauf = state.messlauf, None  # beim Start kein Gerät
+    knopf(uebung_timer_view(seite, state, basis, uebung), "Starten").on_click()
+    e = state.einheit
+    assert e is not None and e.laeuft
+    z = e.teil("zaehlen")
+    assert isinstance(z, ZaehlBaustein) and z.ohne_geraet and z.quelle == QUELLE_TAKT
+    for _ in range(6 * 4):
+        uhr.t += 0.25
+        await ruhe()
+        e.takt()
+    assert z.satz is not None and z.satz.takt == 1
+    state.messlauf = lauf  # das Gerät ist jetzt verbunden
+    from trainingsapp.ui.components.zaehlen import zaehl_zeile
+
+    zeile = zaehl_zeile(seite, state, uebung=uebung, plan=None, item=None)
+    assert zeile is not None and "Takt zählt" in texte(zeile)
+    knopf(zeile, "Sensor dazu").on_click()
+    assert z.quelle == QUELLE_SENSOR and not z.ohne_geraet and z.geraet == "polar_h10"
+    await ruhe()
+    assert gurt.acc_wunsch is not None
+    for _ in range(4 * 4):
+        uhr.t += 0.25
+        gurt.beschleunigung()
+        await ruhe()
+        e.takt()
+    assert z.grund is None and z.satz.sensor is not None and z.satz.takt == 2
+    assert z.takt_text == "Takt 2"  # der Takt steht neben dem Sensor
+    assert uebung_timer_view(seite, state, basis, uebung) is not None
+    e.beenden()
+    await ruhe()
+    assert gurt.acc_wunsch is None

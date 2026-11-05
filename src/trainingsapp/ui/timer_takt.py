@@ -140,6 +140,20 @@ def _takt_in_messung(state: AppState, lauf: Any, verfolger: TaktVerfolger, *, en
     in_die_messung(messlauf, neu, profil=lauf.profil.markenname)
 
 
+def _verfolger_fuer(state: AppState, lauf: Any) -> TaktVerfolger | None:
+    """Der `TaktVerfolger` zu diesem Lauf — einer je `TimerLauf`, am Zustand gehalten: Nach
+    Anhalten und Weiter läuft derselbe weiter (der Takt-Lauf im Beiwerk bleibt offen), ein
+    anderer Lauf bekommt einen neuen (Prüfrunde 1, Befund 4b)."""
+    if lauf is None:
+        return None
+    verfolger = getattr(state, "takt_verfolger", None)
+    if not isinstance(verfolger, TaktVerfolger) or verfolger.lauf is not lauf:
+        verfolger = TaktVerfolger(lauf)
+        with contextlib.suppress(Exception):
+            state.takt_verfolger = verfolger
+    return verfolger
+
+
 def _lage_beim_start(lauf: Any) -> Lage | None:
     """Die Lage im Takt, wenn der Ticker anläuft — ``None``, wenn der Takt gerade erst beginnt
     (die erste Phase tönt dann), sonst die Lage von jetzt (nichts tönt nach „Weiter“)."""
@@ -167,11 +181,11 @@ def ticker_starten(page: Any, state: AppState) -> None:
         takt_alt: Lage | None = _lage_beim_start(state.timer)
         wach = False
         # Ohne Einheit bringt der Ticker den Atemtakt selbst in die Messung (Teil 2)
-        verfolger = TaktVerfolger(state.timer) if state.timer is not None else None
+        verfolger = _verfolger_fuer(state, state.timer)
         try:
             while (lauf := state.timer) is not None:
-                if verfolger is not None and verfolger.lauf is not lauf:
-                    verfolger = TaktVerfolger(lauf)
+                if verfolger is None or verfolger.lauf is not lauf:
+                    verfolger = _verfolger_fuer(state, lauf)
                 stand = lauf.stand()
                 art = signal(alt, stand) if not lauf.vorwaerts else None
                 if art is not None:

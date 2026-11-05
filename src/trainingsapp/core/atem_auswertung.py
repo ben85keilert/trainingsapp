@@ -75,6 +75,7 @@ Median über den Bereich trägt.
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -1192,16 +1193,26 @@ def soll_ist_versatz(atem: Atem, von_s: float | None = None, bis_s: float | None
 
 
 def takt_rate(atem: Atem | None, feld: Mapping[str, Any] | None = None) -> float | None:
-    """Die Rate des Takts: aus dem Beiwerk (der letzte Lauf), sonst aus dem Protokollfeld
+    """Die Rate des Takts der ganzen Messung: aus dem Beiwerk der **längste** Lauf (wie das
+    Protokollfeld ``getaktet``, Vertrag §5 — `takt_rate_in` über die ganze Spanne; das Feld
+    ``rate_pro_min`` im Beiwerk nennt den letzten Lauf, §15), sonst aus dem Protokollfeld
     ``atmung`` (``takt_pro_min`` bei ``getaktet``) — ``None`` ohne beides.
 
     >>> takt_rate(Atem(takt=AtemTakt(rate_pro_min=6.0, phasen=[(0.0, "ein")])), None)
     6.0
+    >>> t = AtemTakt(rate_pro_min=3.0, phasen=[(0.0, "ein")],
+    ...              laeufe=[(0.0, 240.0, "A", 6.0), (240.0, 270.0, "A", 3.0)])
+    >>> takt_rate(Atem(takt=t), {"art": "getaktet", "takt_pro_min": 6.0})
+    6.0
     >>> takt_rate(None, {"art": "getaktet", "takt_pro_min": 5.5}), takt_rate(None, None)
     (5.5, None)
     """
-    if atem is not None and atem.takt is not None and atem.takt.rate_pro_min:
-        return float(atem.takt.rate_pro_min)
+    if atem is not None and atem.takt is not None:
+        rate = takt_rate_in(atem, -math.inf, math.inf)
+        if rate is None and not atem.takt.laeufe and atem.takt.rate_pro_min:
+            rate = float(atem.takt.rate_pro_min)
+        if rate is not None:
+            return rate
     if feld is not None and feld.get("art") == ART_GETAKTET:
         rate = feld.get("takt_pro_min")
         if isinstance(rate, int | float) and not isinstance(rate, bool) and rate > 0:

@@ -349,7 +349,8 @@ def zaehlen_starten(
             # Zählt hier schon — zählt bisher nur der Takt (P138), kommt der Sensor dazu:
             # ab jetzt misst er, der Takt steht daneben (`ZaehlBaustein.sensor_dazu`)
             if z.quelle == zl.QUELLE_TAKT:
-                z.sensor_dazu()
+                # Zählte der Takt ohne Gerät, kommt der Messlauf jetzt nach (Befund 7)
+                z.sensor_dazu(state.messlauf)
                 e.fortschreiben(z)
             return e, None
         u = e.teil("plan")

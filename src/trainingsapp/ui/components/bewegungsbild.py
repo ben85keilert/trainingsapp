@@ -98,24 +98,23 @@ def bewegungsbild_blatt(
                 return
 
             def ja() -> None:
-                page.pop_dialog()
+                schliessen(frage)
                 loeschen(b)
 
-            page.show_dialog(
-                ft.AlertDialog(
-                    modal=True,
-                    title=ft.Text("Bild aus der Ablage löschen?"),
-                    content=ft.Text(
-                        "Es ist das Bild der Bewegung von: "
-                        + ", ".join(andere)
-                        + ". Diese Übungen zeigen danach keins mehr."
-                    ),
-                    actions=[
-                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
-                        ft.FilledButton("Löschen", on_click=ja),
-                    ],
-                )
+            frage: ft.AlertDialog = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Bild aus der Ablage löschen?"),
+                content=ft.Text(
+                    "Es ist das Bild der Bewegung von: "
+                    + ", ".join(andere)
+                    + ". Diese Übungen zeigen danach keins mehr."
+                ),
+                actions=[
+                    ft.TextButton("Abbrechen", on_click=lambda: schliessen(frage)),
+                    ft.FilledButton("Löschen", on_click=ja),
+                ],
             )
+            page.show_dialog(frage)
 
         return fragen
 

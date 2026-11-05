@@ -569,6 +569,7 @@ class TempoRegler:
             round=2,
             expand=True,
             on_change=self._gezogen,
+            on_change_end=self._losgelassen,
         )
         self.control = ft.Row(
             spacing=4,
@@ -588,7 +589,17 @@ class TempoRegler:
         self.text.value = tempo_text(faktor)
 
     def _gezogen(self, e: ft.Event[ft.Slider]) -> None:
-        ohne_auto_update()  # beim Ziehen dauernd (V1) — nur der Text zieht nach
+        """Beim Ziehen (je Teilstrich): nur der Text zieht nach — der Lauf bekommt das Tempo
+        erst beim Loslassen (`_losgelassen`), sonst wäre jeder Zwischenwert ein ``timer/takt``,
+        ein Takt-Lauf und ein Notizpaar (Prüfrunde 1, Befund 3)."""
+        ohne_auto_update()  # beim Ziehen dauernd (V1)
+        self._zeigen(tempo_lesen(e.control.value))
+        with contextlib.suppress(Exception):
+            self.text.update()
+
+    def _losgelassen(self, e: ft.Event[ft.Slider]) -> None:
+        """Losgelassen: eine abgeschlossene Änderung — ein Tempo für den Lauf und die Sitzung."""
+        ohne_auto_update()
         faktor = tempo_lesen(e.control.value)
         self.lauf.tempo_setzen(faktor)
         with contextlib.suppress(Exception):

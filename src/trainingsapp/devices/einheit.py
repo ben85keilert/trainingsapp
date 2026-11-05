@@ -423,7 +423,8 @@ class UebungBaustein:
     def kontext_setzen(self, kontext: UebungKontext) -> None:
         """Ein neuer Kontext mitten im Lauf: Die Uhr tritt einem Zähllauf derselben Übung bei
         und bringt ihre Wahl mit (Zeitfeld, Ausführung — ``ui.uebung_lauf.starten``). Die
-        Beteiligung schreibt die Einheit mit ihrem Ende neu (`Einheitslauf.beenden`)."""
+        Beteiligung schreibt die Einheit gleich neu (`Einheitslauf.fortschreiben`, ruft der
+        Aufrufer) und mit ihrem Ende noch einmal (`Einheitslauf.beenden`)."""
         self.kontext = kontext
         if self._beteiligung is not None:
             self._beteiligung.daten = daten_pruefen(self._daten())
@@ -618,6 +619,19 @@ class Einheitslauf:
         self._aufnehmen([Ereignis(t, teil.art, "beigetreten", "", daten)], jetzt)
         # Was bisher geschah (läuft der Timer, zählt sein Abschnitt?) — nur dem Neuen
         self._beobachten([teil], list(self.ereignisse))
+
+    def fortschreiben(self, teil: Baustein) -> None:
+        """Die Beteiligung eines Teils jetzt neu in die Zeitleiste — wenn sich mitten im Lauf
+        sein Kontext änderte (`UebungBaustein.kontext_setzen`: die Uhr tritt bei, abgehakt
+        anderswo). Sonst stünde bis zum Ende der alte da, und stirbt die App vorher, trüge
+        „Läufe heute“ mit ihm ein (anderer Plan, altes Zeitfeld)."""
+        b = self._beteiligungen.get(id(teil))
+        if b is None or self.senke is None or not self._kopf_geschrieben:
+            return
+        try:
+            self.senke.beteiligung(self.id, b)
+        except Exception as fehler:  # die Einheit läuft trotzdem
+            self.warnung = f"Zeitleiste nicht gespeichert: {fehler}"
 
     def teil(self, art: str) -> Baustein | None:
         return next((t for t in self.teile if t.art == art), None)

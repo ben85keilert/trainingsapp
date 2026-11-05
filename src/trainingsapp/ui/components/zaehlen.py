@@ -261,7 +261,10 @@ def _laufend(
                             height=48,
                             expand=True,
                             style=ft.ButtonStyle(shape=ECKEN),
-                            tooltip="Zählen beenden und eintragen",
+                            # Nur Atmung trägt nichts ins Tagebuch (P120: an der Messung)
+                            tooltip="Zählen beenden und eintragen"
+                            if z.wdh
+                            else "Atmung beenden — ins Tagebuch kommt nichts",
                             on_click=beenden(ENDE_FERTIG),
                         ),
                         ft.OutlinedButton(

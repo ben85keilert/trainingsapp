@@ -666,6 +666,12 @@ def plan_view(
                     auspraegung=kontext_text(uebung, eintrag.result),
                 )
             neu = erster = False
+        if eintrag is not None and nachtrag is None:
+            # Diagnosemodus (beide zählen): Der Satz von Hand ist der des Sensors — der endet
+            # hier und kommt am Ende nicht noch einmal hinein (sonst stand jeder Satz doppelt da)
+            zaehl_stand.von_hand_eingetragen(
+                state, item.exercise_id, None if einzel else item.id, feld.key
+            )
         if eintrag is not None:
             melden(uebung, eintrag)
 
@@ -2196,7 +2202,13 @@ def plan_view(
                 if st.zustand == offene.MARKIERT
                 else _umrandet("Gemacht", ft.Icons.CHECK, erlediger(item))
             ]
-            if ziel:
+            # Zählt der Sensor die Wiederholungen, hakte „Wie geplant“ mit seiner Zahl ab, nicht
+            # mit dem Ziel (P122) — der Knopf versprach etwas anderes; „Gemacht“ und „Fertig“
+            # der Zählzeile tun dasselbe und sagen es
+            zaehlt = zaehl_stand.zaehl_teil(
+                state, item.exercise_id, None if einzel else item.id, nur_aktiv=True
+            )
+            if ziel and not (zaehlt is not None and zaehlt.wdh and nachtrag is None):
                 knoepfe.append(
                     _knopf(
                         f"Wie geplant · {ziel}", ft.Icons.FLAG, ziel_erlediger(item), betont=True

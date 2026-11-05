@@ -163,6 +163,9 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         "zeiten_s",
         "geraet",
         "prototyp",
+        # … und ob die Person den Satz von Hand eintrug (Diagnosemodus, beide zählen): dann
+        # trägt ihn der Sensor nicht noch einmal ein (``core.zaehlen_eintrag.wiederholungen``)
+        "von_hand",
         # Teile
         "teil",
         "rolle",

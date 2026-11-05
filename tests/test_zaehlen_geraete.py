@@ -1192,6 +1192,42 @@ async def test_notiz_zum_gezaehlten_satz_vergleicht_nicht_noch_einmal(tmp_path) 
     await lauf.trennen()
 
 
+async def test_nicht_eingetragener_satz_haelt_einen_satz_von_hand_nicht_auf(tmp_path) -> None:
+    """Ein abgebrochener gezählter Satz wartet nur, solange seine Einheit lebt, auf eine Notiz
+    („Eintragen“ der Meldung neben der Uhr). Ist sie vorbei, vergleicht ein Satz von Hand mit
+    gleichem Wert wie immer — er wird nicht für den Nachtrag gehalten."""
+    zeit, lauf, innen, gemeldet = await _diagnose_mit_zaehlen(tmp_path)
+    z = ZaehlBaustein(lauf, KNIEBEUGE, feld="reps")
+    e = Einheitslauf(uhr=lauf.uhr)
+    e.hinzufuegen(UebungBaustein(KNIEBEUGE))
+    e.hinzufuegen(z)
+    e.ende_mit_zaehlen = True
+    e.starten()
+    await _ruhe()
+    k = _satz_senden(lauf, innen, zeit, e, 0, 24.0, tipps=12)
+    assert z.abbrechen()
+    e.takt()
+    await e.abschliessen()
+    (v,) = gemeldet
+    assert v["eingetragen"] is None and z.wert > 0
+    _satz_senden(lauf, innen, zeit, e, k, 10.0, tipps=5)
+    lauf.notiz_hinzufuegen(
+        f"Kniebeuge: {z.wert}",
+        marke={
+            "quelle": "person",
+            "art": "leistung",
+            "name": "Kniebeuge",
+            "feld": "reps",
+            "wert": z.wert,
+        },
+        uebungen=[KB],
+    )
+    assert len(gemeldet) == 2 and gemeldet[-1]["marken"] == 5
+    await lauf.diagnose_beenden()
+    lauf.aufnahme = None
+    await lauf.trennen()
+
+
 async def test_funkabriss_beendet_das_zaehlen_sofort_als_getrennt(aufbau) -> None:
     """Reißt die Funkverbindung ab, verbindet die Quelle selbst neu (Status „verbinde“) — die
     Anforderung bleibt. Das Zählen endet trotzdem sofort als ``abbruch`` mit ``getrennt``
@@ -1272,6 +1308,29 @@ async def test_lange_rechnung_rechnet_seltener(aufbau, monkeypatch) -> None:
     assert z.laufzeit_ms == pytest.approx(60.0) and zaehlen_modul.takt_nach(60.0) == 3.0
     assert 6 <= len(aufrufe) <= 12  # vorher: je Sekunde eine, gut 30
     assert z.sensor is not None and abs(z.sensor - 12) <= 2
+    z.fertig()
+
+
+async def test_gedrosselt_urteilt_keine_bewegung_erst_nach_einer_rechnung(
+    aufbau, monkeypatch
+) -> None:
+    """Rechnet der Teil seltener (`takt_nach`, bis 5 s), ist sein Stand so alt — „keine
+    Bewegung“ urteilte damit: Ein Lauf brach ab, obwohl die Person schon wieder übte, und am
+    Anfang der Ruhe fehlten die letzten Wiederholungen (aus 60 s wurden gut 55). Vor dem Urteil
+    zählt der Prototyp jetzt bis jetzt (Runde 3, Befund 4)."""
+    a = aufbau
+    monkeypatch.setattr(zaehlen_modul, "takt_nach", lambda _ms: 5.0)
+    e, z = _zaehllauf(a)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 20, e, schritt=0.25)
+    a.gurt.bewegung = False
+    await _sekunden(a, 56, e, schritt=0.25)  # bis t = 76 s; gerechnet zuletzt bei 75,25 s
+    assert z.aktiv and z.satz is not None and z.satz.ruhe_seit_s < 20.5
+    a.gurt.bewegung = True  # wieder Kniebeugen — keine 60 s nach der letzten
+    await _sekunden(a, 9, e, schritt=0.25)
+    assert z.aktiv and z.grund is None  # vorher: keine_bewegung bei t = 79,5 s
+    assert z.satz.ruhe_seit_s > 76.0
     z.fertig()
 
 

@@ -181,8 +181,9 @@ Umsetzung A1 (`ui/components/zaehlen.py`, Zustand ohne flet in `components/zaehl
 Zeigt die Karte „Eintragen“ die laufende Uhr und zählt der Sensor in ihrer Einheit, steht die
 Zahl mit ±1 und „Zählen abbrechen“ in der Uhr — die Zählzeile darunter wiederholt sie nicht,
 und „Fertig“ der Uhr beendet beides. Unter dem Knopf stehen die Zählläufe von heute, deren
-Wiederholungen noch fehlen, mit „Eintragen“ (`components/laeufe_heute.py`, dieselbe Zeile wie
-„Läufe heute“ im Timer) — so auch an einer Übung ohne Uhr. Die Meldung „… nicht eingetragen“
+Wiederholungen noch fehlen, mit „Nachtragen“ (`components/laeufe_heute.py`, dieselbe Zeile wie
+„Läufe heute“ im Timer, dort „Eintragen“ — in dieser Karte heißt schon „Eintragen“ der Sätze ×
+Wert so) — so auch an einer Übung ohne Uhr. Die Meldung „… nicht eingetragen“
 zeigt der Start, der das Zählen beendete, oder der nächste Aufbau der Ansicht, nie über einem
 Dialog. Auf „Heute“ hakt der Chip mit den gezählten Wiederholungen ab, ohne „Rückgängig“.
 Den Knopf gibt es in einer Planübung nur, wenn sie ein Wiederholungsfeld anbietet (P79: keiner =
@@ -191,8 +192,11 @@ die (Plan-)Übung der Uhr eines anbietet, denn eingetragen wird, wo die Uhr läu
 das Zählen Platz wie für eine andere Übung. Endet nur das Zählen und die Uhr läuft weiter,
 bleibt dort die Zahl ohne −1/+1 stehen; „Eintragen“ der Meldung trägt dann nur die
 Wiederholungen ein, die Zeit kommt mit dem Ende der Uhr. Solange der Sensor in ein Feld zählt,
-hat dessen Zeile weder Chips noch eigenen Wert (4.4; im Diagnosemodus beides). Die Zählläufe
-von heute, deren Wiederholungen fehlen, lassen sich auch ohne verbundenes Gerät eintragen.
+hat dessen Zeile weder Chips noch eigenen Wert und die Karte kein „Wie geplant“ (4.4; im
+Diagnosemodus Chips und eigener Wert: ein Satz von Hand beendet dort den Satz des Sensors, der
+ihn dann nicht noch einmal einträgt). Steht eine Einheit bereit oder läuft ein Plan-Ablauf, gibt
+es keinen Knopf. Die Zählläufe von heute, deren Wiederholungen fehlen, lassen sich auch ohne
+verbundenes Gerät eintragen.
 
 ### 4.3 Ablauf
 
@@ -669,6 +673,37 @@ ohne die Änderung scheitert):
 - Absturz: Die `zaehlung` steht mit dem Ende des Satzes in der Zeitleiste (ein laufender alle
   15 s, `ZWISCHENSTAND_S`) — passend zur Zeit der Uhr nachtragbar.
 - Laufzeit: Dauert eine Rechnung länger als 20 ms, wird seltener gerechnet (§5.2, `takt_nach`).
+
+**Vierte Prüfrunde** (5.11.2026; jede Korrektur mit einem Test, der ohne sie scheitert):
+
+- Mitschnitt: Die Kontextzeile `satz` eines gezählten Satzes, der mit dem Ende eingetragen wird,
+  schreibt `Messlauf.zaehlsatz_vergleichen` an seinem Ende, vor `uebung_ende` (mit `satz`); die
+  Notiz zum Satz, die erst nach dem Ende der Einheit kommt, schreibt keine zweite. Vorher stand
+  sie hinter `uebung_ende`, hrv-research legte jeden gezählten Satz in eine Gruppe ohne Übung.
+- Diagnosemodus: Wird ein abgebrochener Satz neben der laufenden Uhr doch eingetragen („Eintragen“
+  der Meldung), bekommt sein Vergleich den Wert, statt dass ein zweiter mit leerem Fenster ihn
+  ersetzt (`Messlauf._nachgetragen`); nicht eingetragene Sätze warten darauf nur, solange ihre
+  Einheit lebt (`Messlauf.zaehlsaetze_vergessen`).
+- Diagnosemodus, beide zählen: Ein Chip im Feld, in das der Sensor zählt, ist der Satz des
+  Sensors — er endet dort (`ZaehlBaustein.von_hand`, in der Pause der Uhr der letzte), `zaehlung`
+  bekommt `von_hand` (`docs/plan_einheit.md` §4), und am Ende trägt der Sensor ihn nicht noch
+  einmal ein. Vorher stand jeder Satz doppelt da.
+- Absturz mitten in einem zählenden Abschnitt: Werden Zeit und Wiederholungen zusammen
+  nachgetragen, zählt der Abschnitt bis zum letzten Zwischenstand seines Satzes
+  (`core.zaehlen_eintrag.zeiten_der_uhr`) — ein Stand für beide; vorher fehlte seine Haltezeit,
+  die Listen waren verschoben. Ohne die Wiederholungen fehlt er wie bisher.
+- Gedrosselt (`takt_nach`) zählt der Prototyp vor dem Urteil „keine Bewegung“ bis jetzt — vorher
+  urteilte ein bis zu 5 s alter Stand.
+- Die Stoppuhr, gestartet, während ein Satz schon zählt, misst diesen Satz (ein Lauf der
+  Stoppuhr ist ein Satz); Intervall-Timer beginnen weiter je zählendem Abschnitt einen.
+- Wechselt der Kontext mitten im Lauf (die Uhr tritt bei, abgehakt in einem Plan), steht er sofort
+  in der Zeitleiste (`Einheitslauf.fortschreiben`), und „Eintragen“ einer lebenden Einheit nimmt
+  den im Speicher — nach einem Absturz wie ohne ihn derselbe Plan, dasselbe Zeitfeld.
+- Oberfläche: Im Reiter „Einheit“ hat ein Zähllauf ohne Uhr keine Zeile „Übung · … — trägt die
+  Zeit ein“ mehr; „Wie geplant“ fehlt, solange der Sensor zählt; kein Knopf „Wdh. zählen“, solange
+  etwas bereitsteht; „Läufe heute“ nennt einen Zähllauf ohne Zahl „nichts gezählt“ bzw. „Atmung“
+  statt „gemacht“, ohne Nullsatz, „Fertig“ der Atmung verspricht kein Eintragen; in der Karte
+  „Eintragen“ heißt der Knopf eines Laufs „Nachtragen“.
 
 **Offen (Ben):** §10 verlangt „Prototyp“ an jeder Zahl eines Prototyps; die Texte aus 4.2/4.3
 („Zählen · Kniebeuge · 12“, „Satz 1 · 12 Wdh. (Sensor 11, +1)“, „… nicht eingetragen“, in der

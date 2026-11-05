@@ -22,10 +22,14 @@ import flet as ft
 
 from trainingsapp.core.models import Exercise
 from trainingsapp.core.timer import dauer_text
+from trainingsapp.core.zaehlen import ZAEHLART_ATEM
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components.karte import karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.uebung_lauf import TEIL_UHR, TEIL_ZAEHLEN, Lauf
+
+#: Der Knopf eines Laufs in der Karte „Eintragen“ (`zaehllaeufe_offen`)
+NACHTRAGEN = "Nachtragen"
 
 
 def werte_text(werte: Sequence[float]) -> str:
@@ -34,7 +38,9 @@ def werte_text(werte: Sequence[float]) -> str:
 
 
 def _kurz(lauf: Lauf) -> str:
-    """Was der Lauf brachte: die Zeit der Uhr (eingetragen: die Werte), die Wiederholungen."""
+    """Was der Lauf brachte: die Zeit der Uhr (eingetragen: die Werte), die Wiederholungen —
+    „gemacht“ nur, wenn die Uhr lief (sie trägt dann „gemacht“ ein); ein Zähllauf ohne Zahl
+    hat nichts gemacht, was ins Tagebuch käme: „nichts gezählt“, nur Atmung „Atmung“."""
     teile: list[str] = []
     if lauf.zeiten or TEIL_UHR in lauf.eingetragen:
         teile.append(
@@ -42,7 +48,11 @@ def _kurz(lauf: Lauf) -> str:
         )
     if lauf.wdh:
         teile.append(f"{sum(lauf.wdh)} Wdh.")
-    return " · ".join(teile) or "gemacht"
+    if teile:
+        return " · ".join(teile)
+    if lauf.mit_uhr or lauf.zaehlart is None:
+        return "gemacht"
+    return "Atmung" if lauf.zaehlart == ZAEHLART_ATEM else "nichts gezählt"
 
 
 def _fehlt_text(lauf: Lauf) -> str:
@@ -78,10 +88,17 @@ def eintragen_handler(
 
 
 def lauf_zeile(
-    page: Any, state: Any, uebung: Exercise, lauf: Lauf, danach: Callable[[], None]
+    page: Any,
+    state: Any,
+    uebung: Exercise,
+    lauf: Lauf,
+    danach: Callable[[], None],
+    *,
+    knopf: str = "Eintragen",
 ) -> ft.Control:
     """Ein Lauf: Uhrzeit und was er brachte, darunter je gezähltem Satz eine Zeile; rechts
-    „eingetragen“ oder der Knopf „Eintragen“."""
+    „eingetragen“ oder der Knopf „Eintragen“ — ``knopf``: sein Name (in der Karte
+    „Eintragen“ „Nachtragen“, denn dort steht schon „Eintragen“ der Sätze × Wert)."""
     uhrzeit = f"{lauf.beginn.astimezone():%H:%M}"
     rechts: ft.Control = ft.Container()
     if lauf.offen:
@@ -89,7 +106,9 @@ def lauf_zeile(
     elif lauf.nachtragbar:
         text, unten = f"{uhrzeit} · {_kurz(lauf)}", _fehlt_text(lauf)
         rechts = ft.FilledTonalButton(
-            "Eintragen", on_click=eintragen_handler(page, state, uebung, lauf.einheit_id, danach)
+            knopf,
+            tooltip="Was dieser Lauf lief und zählte, jetzt ins Tagebuch",
+            on_click=eintragen_handler(page, state, uebung, lauf.einheit_id, danach),
         )
     elif lauf.eintrag_id is not None:
         text, unten = f"{uhrzeit} · {_kurz(lauf)}", "eingetragen"
@@ -134,12 +153,21 @@ def zaehllaeufe_offen(
     page: Any, state: Any, uebung: Exercise, danach: Callable[[], None]
 ) -> list[ft.Control]:
     """Die Zählläufe von heute, deren Wiederholungen noch nicht eingetragen sind (abgebrochen,
-    andere Übung, keine Bewegung) — für die Zählzeile, auch ohne Uhr an der Übung."""
+    andere Übung, keine Bewegung) — für die Zählzeile, auch ohne Uhr an der Übung. Der Knopf
+    heißt dort „Nachtragen“: Die Karte „Eintragen“ hat schon „Eintragen“ (Sätze × Wert), und
+    ein Wort mit zwei Bedeutungen in einer Karte hatte Ben schon einmal ersetzt („Werte“)."""
     return [
-        lauf_zeile(page, state, uebung, lauf, danach)
+        lauf_zeile(page, state, uebung, lauf, danach, knopf=NACHTRAGEN)
         for lauf in uebung_lauf.laeufe_heute(state, uebung.id)
         if lauf.nachtragbar and TEIL_ZAEHLEN in lauf.nachzutragen
     ]
 
 
-__all__ = ["eintragen_handler", "laeufe_karte", "lauf_zeile", "werte_text", "zaehllaeufe_offen"]
+__all__ = [
+    "NACHTRAGEN",
+    "eintragen_handler",
+    "laeufe_karte",
+    "lauf_zeile",
+    "werte_text",
+    "zaehllaeufe_offen",
+]

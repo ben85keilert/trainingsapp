@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from trainingsapp.core import zaehlen as zl
+from trainingsapp.core.einheit import Zustand
 from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.zaehlen_eintrag import ende_text
 from trainingsapp.devices.base import Verbindung
@@ -122,17 +123,32 @@ def im_plan_ablauf(state: Any) -> bool:
     return e is not None and e.laeuft and isinstance(e.teil("plan"), PlanAblaufBaustein)
 
 
+def bereitgestellt(state: Any) -> bool:
+    """Steht eine Einheit bereit (Infoleiste „Bereitgestellt“, noch nicht gestartet)? Dann
+    zählt der Sensor nicht (`ui.uebung_lauf.zaehlen_starten`: „erst oben starten oder
+    leeren“) — einen Knopf, der nur das meldete, gibt es darum nicht.
+
+    >>> from types import SimpleNamespace as NS
+    >>> bereitgestellt(NS(einheit=None))
+    False
+    """
+    e = getattr(state, "einheit", None)
+    return e is not None and e.zustand in (Zustand.VORBEREITUNG, Zustand.BEREIT)
+
+
 def sichtbar(
     state: Any, uebung: Exercise, *, item: PlanItem | None = None, nachtrag: Any = None
 ) -> bool:
     """Ob die Karte „Eintragen“ den Knopf der Zählzeile zeigt: nicht beim Nachtragen, an der
     (Plan-)Übung ein Schalter an, ein Gerät mit Beschleunigungssensor verbunden (P118: sonst
-    gibt es weder Knopf noch ±1) und kein Plan-Ablauf im Gang (`im_plan_ablauf`)."""
+    gibt es weder Knopf noch ±1), kein Plan-Ablauf im Gang (`im_plan_ablauf`) und nichts
+    bereitgestellt (`bereitgestellt`)."""
     return (
         nachtrag is None
         and zaehlen_an(uebung, item)
         and geraet_kann_zaehlen(getattr(state, "messlauf", None))
         and not im_plan_ablauf(state)
+        and not bereitgestellt(state)
     )
 
 
@@ -173,19 +189,38 @@ def zaehl_teil(
     return z
 
 
+def _zaehlt_in(
+    state: Any, uebung_id: str, item_id: str | None, feld_key: str
+) -> ZaehlBaustein | None:
+    """Der Zähl-Teil, der gerade in dieses Feld dieser (Plan-)Übung zählt — sonst ``None``."""
+    z = zaehl_teil(state, uebung_id, item_id, nur_aktiv=True)
+    if z is None or not z.wdh:
+        return None
+    if z.feld != feld_key and not (z.feld is None and basis_key(feld_key) == zl.WDH_ART):
+        return None
+    return z
+
+
 def zaehlt_der_sensor(state: Any, uebung_id: str, item_id: str | None, feld_key: str) -> bool:
     """Zählt der Sensor gerade in dieses Feld dieser (Plan-)Übung? Dann gibt es dafür keine
     Eingabe von Hand (P122, Plan §4.4: entweder die Person oder der Sensor — „die Person
     korrigiert höchstens mit ±1“); ein Chip „+10“ hängte sonst einen zweiten Satz neben den
     gezählten. Beides zugleich gibt es nur zum Prüfen, im Diagnosemodus (Abschnitt 6) — dort
-    ``False``."""
-    z = zaehl_teil(state, uebung_id, item_id, nur_aktiv=True)
-    if z is None or not z.wdh:
-        return False
-    if z.feld != feld_key and not (z.feld is None and basis_key(feld_key) == zl.WDH_ART):
+    ``False`` (ein Satz von Hand beendet dann den des Sensors, `von_hand_eingetragen`)."""
+    if _zaehlt_in(state, uebung_id, item_id, feld_key) is None:
         return False
     lauf = getattr(state, "messlauf", None)
     return not (lauf is not None and getattr(lauf, "diagnose_aktiv", False))
+
+
+def von_hand_eingetragen(state: Any, uebung_id: str, item_id: str | None, feld_key: str) -> bool:
+    """Diagnosemodus: Die Person trug eben einen Satz von Hand in das Feld ein, in das der
+    Sensor zählt (ein Chip) — sein Satz gilt damit als eingetragen und endet hier
+    (`ZaehlBaustein.von_hand`); am Ende trägt der Sensor ihn nicht noch einmal ein. Aufzurufen
+    nach der Notiz zum Satz: Deren Vergleich nimmt noch den Satz des Sensors. ``False``, wenn
+    der Sensor dort nicht zählt."""
+    z = _zaehlt_in(state, uebung_id, item_id, feld_key)
+    return z is not None and z.von_hand()
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +260,7 @@ def kurz_text(z: ZaehlBaustein) -> str:
     if phase == PHASE_ATMUNG:
         return "Atmung"
     if phase == PHASE_ENDE:
-        return f"{sum(s.wert for s in z.saetze)} Wdh."
+        return f"{z.summe} Wdh."
     if phase == PHASE_STARTET and not z.korrektur:
         return "Sensor startet …"
     if phase == PHASE_SAMMELT and not z.korrektur:
@@ -341,6 +376,7 @@ __all__ = [
     "abmelden",
     "anmelden",
     "anzeigen",
+    "bereitgestellt",
     "geraet_kann_zaehlen",
     "im_plan_ablauf",
     "klein_text",
@@ -352,6 +388,7 @@ __all__ = [
     "passt",
     "sensor_text",
     "sichtbar",
+    "von_hand_eingetragen",
     "wdh_im_abschnitt",
     "zaehl_teil",
     "zaehlen_an",

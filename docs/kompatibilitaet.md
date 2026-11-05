@@ -811,7 +811,11 @@ es nicht kennen.
   Beschleunigungssensor (`docs/plan_beschleunigung.md` §5.3, §6) dazu `zaehlung` (`wert` =
   Sensor plus Korrektur, `satz`, `feld`, `dauer_s`), `korrektur` (`wert` = ±1, `satz`,
   `feld`) und `zaehlen_ende` (`phase` = Grund) — nur Felder, die die Weißliste in
-  `hrv_core.deid` schon kennt, nie ein Feld `art`; `t` ist immer der Zeitstempel.
+  `hrv_core.deid` schon kennt, nie ein Feld `art`; `t` ist immer der Zeitstempel. Den
+  eingetragenen Satz eines gezählten Satzes (`satz`, hier mit der Nummer `satz`) schreibt der
+  Vergleich an seinem Ende, vor `uebung_ende` (seit 5.11.2026; die Notiz zum Satz kommt erst
+  nach dem Ende der Einheit und schreibt keine zweite) — die k-te `satz`-Zeile nach
+  `uebung_start` bleibt Satz k.
 - **Nie im Mitschnitt:** GPS (Regel 0 in `docs/plan_gps.md`), die Seriennummer (0x2A25) und
   die Systemkennung (0x2A23) — die App liest beide nie. Die Bluetooth-Adresse steht nur in
   der Datei auf dem Gerät; hinaus geht der Mitschnitt nur bereinigt (Abschnitt 2, Export).

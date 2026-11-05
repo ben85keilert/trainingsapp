@@ -998,9 +998,14 @@ def _uebersicht(
         karten.append(karte(_bei_timer_ende(state, e, im_lauf=True), abstand=0))
 
     zeilen: list[ft.Control] = []
+    zaehllauf = ablauf.nur_zaehlen(e)
     for teil in e.teile:
         if teil.art == "timer":
             continue  # steht oben mit seiner Fortschrittsleiste
+        if zaehllauf and teil.art == "plan":
+            # Ein Zähllauf ohne Uhr: Die Zeile „Zählen · Kniebeuge“ ist die Übung — die der
+            # Übung sagte „trägt die Zeit ein“ und führte in einen Timer ohne Zahl und ±1
+            continue
         wert = ft.Text(size=13, opacity=0.85)
 
         def wert_auffrischen(teil: Any = teil, wert: ft.Text = wert) -> None:

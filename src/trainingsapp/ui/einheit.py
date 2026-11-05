@@ -195,7 +195,7 @@ def _zaehlen_platz_machen(state: Any, e: Einheitslauf) -> None:
     z = e.teil("zaehlen")
     meldung: ZaehlMeldung | None = None
     if isinstance(z, ZaehlBaustein) and z.abbrechen(ENDE_ANDERE_UEBUNG):
-        wdh = sum(s.wert for s in z.saetze) if z.wdh else 0
+        wdh = z.summe if z.wdh else 0
         if wdh > 0:  # nichts gezählt: nichts einzutragen, keine Meldung
             meldung = ZaehlMeldung(e.id, z.kontext.uebung_id, z.name, wdh)
     e.am_ende_stoppen["hrv"] = False
@@ -650,7 +650,7 @@ def _von_selbst_melden(state: Any, e: Einheitslauf, neu: list[Ereignis]) -> None
     warum = von_selbst_text(
         z.grund, getrennt=z.getrennt, ohne_daten=z.ohne_daten, zu_lang=z.zu_lang
     )
-    wdh = sum(s.wert for s in z.saetze)
+    wdh = z.summe
     if warum and wdh > 0:
         state.zaehl_meldung = ZaehlMeldung(e.id, z.kontext.uebung_id, z.name, wdh, warum)
 

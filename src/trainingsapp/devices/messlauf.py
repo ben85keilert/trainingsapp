@@ -406,9 +406,12 @@ class Messlauf:
         self._diagnose_marken: list[tuple[float, str, int]] = []
         #: Beginn des laufenden Satzes (Uhr): Start der Übung bzw. der letzte eingetragene Satz
         self._satz_beginn: float | None = None
-        #: Sätze, die der Zähl-Teil schon verglich und die eingetragen werden: (Kurzcode,
-        #: Wert) — ihre Notiz zum Satz (`ui.uebung_lauf`) vergleicht nicht noch einmal
-        self._gezaehlt_verglichen: deque[tuple[str | None, int]] = deque(maxlen=32)
+        #: Sätze, die der Zähl-Teil schon verglich (`zaehlsatz_vergleichen`): (Kurzcode, Wert,
+        #: der Vergleich, ob die Kontextzeile ``satz`` schon im Mitschnitt steht) — ihre Notiz
+        #: zum Satz (`ui.uebung_lauf`) vergleicht nicht noch einmal
+        self._gezaehlt_verglichen: deque[tuple[str | None, int, dict[str, Any], bool]] = deque(
+            maxlen=32
+        )
         #: Wer den Vergleich nach dem Satz zeigt (Oberfläche) — Fehler darin stoppen nichts
         self.diagnose_satz_beobachter: Callable[[dict[str, Any]], None] | None = None
         #: Der letzte Vergleich (Übung, Satz, Marken, Sensor, Korrektur, eingetragen)
@@ -794,12 +797,20 @@ class Messlauf:
             with contextlib.suppress(Exception):
                 if (zeile := diagnose_kontext(eintrag)) is not None:
                     was, felder = zeile
-                    self.mitschnitt.kontext(was, t=round((self.start_mono + x) * 1e9), **felder)
+                    # Ein Satz, den der Zähl-Teil schon verglich: Seine Zeile ``satz`` schrieb
+                    # `zaehlsatz_vergleichen`, wenn er mit dem Ende eingetragen wird — die Notiz
+                    # kommt erst mit dem Eintragen, nach „uebung_ende“ (hrv-research ordnet die
+                    # k-te ``satz``-Zeile nach dem Start der Übung dem Satz k zu)
+                    frueher = self._schon_verglichen(felder) if was == "satz" else None
+                    if frueher is None or not frueher[3]:
+                        self.mitschnitt.kontext(was, t=round((self.start_mono + x) * 1e9), **felder)
                     if was == "uebung_start":
                         self._satz_beginn = self.start_mono + x
                         self._gezaehlt_verglichen.clear()
-                    elif was == "satz" and not self._schon_verglichen(felder):
+                    elif was == "satz" and frueher is None:
                         self._satz_vergleichen(felder, self.start_mono + x)
+                    elif was == "satz" and frueher is not None and not frueher[3]:
+                        self._nachgetragen(frueher[2], felder)
         return eintrag
 
     def abschnitt_markieren(
@@ -1496,16 +1507,33 @@ class Messlauf:
 
     # -- Zähler-Prototyp nach dem Satz (Stufe 8) ----------------------------------------
 
-    def _schon_verglichen(self, felder: dict[str, Any]) -> bool:
+    def _schon_verglichen(
+        self, felder: dict[str, Any]
+    ) -> tuple[str | None, int, dict[str, Any], bool] | None:
         """Ist die Notiz zum Satz die eines Satzes, den der Zähl-Teil schon verglich
         (`zaehlsatz_vergleichen`)? Dann kein zweiter Vergleich — sonst ersetzte einer ohne
-        Marken und ohne Sensor den richtigen. Nimmt ihn aus der Liste."""
+        Marken und ohne Sensor den richtigen. Gibt ihn zurück und nimmt ihn aus der Liste;
+        ``None``: ein Satz von Hand (oder einer, den niemand verglich)."""
         code, wert = felder.get("uebung_id"), felder.get("wert")
-        for i, (c, w) in enumerate(self._gezaehlt_verglichen):
+        for i, satz in enumerate(self._gezaehlt_verglichen):
+            c, w = satz[0], satz[1]
             if w == wert and (c is None or code is None or c == code):
                 del self._gezaehlt_verglichen[i]
-                return True
-        return False
+                return satz
+        return None
+
+    def _nachgetragen(self, vergleich: dict[str, Any], felder: dict[str, Any]) -> None:
+        """Ein gezählter Satz, der beim Vergleich nicht eingetragen war (das Zählen endete von
+        selbst, die Uhr lief weiter), kommt doch ins Tagebuch („Eintragen“ der Meldung): Ist
+        sein Vergleich noch der letzte, zeigt die Leiste ihn neu, mit dem eingetragenen Wert —
+        Marken und Sensor bleiben (kein zweiter Vergleich mit leerem Fenster)."""
+        if self.letzter_satz is not vergleich:
+            return  # inzwischen kam ein anderer Satz — die Leiste zeigt den
+        neu = {**vergleich, "eingetragen": felder.get("wert")}
+        self.letzter_satz = neu
+        if self.diagnose_satz_beobachter is not None:
+            with contextlib.suppress(Exception):
+                self.diagnose_satz_beobachter(neu)
 
     def _satz_vergleichen(self, felder: dict[str, Any], t_satz: float) -> None:
         """Nach einem eingetragenen Satz: Marken, Sensor (Prototyp), Korrektur und Eingabe
@@ -1579,7 +1607,13 @@ class Messlauf:
         eingetragen wird — wie `_satz_vergleichen` nach einem Satz von Hand, an denselben
         Beobachter. Der Zähl-Teil schreibt seine Kontextzeilen selbst (``zaehler``,
         ``zaehlung``). Nur im Diagnosemodus; sonst ``None``. ``uebung_id``: der Kurzcode — die
-        Notiz zum Satz, die beim Eintragen folgt, vergleicht dann nicht noch einmal."""
+        Notiz zum Satz, die beim Eintragen folgt, vergleicht dann nicht noch einmal.
+
+        Wird der Satz eingetragen, steht hier auch seine Kontextzeile ``satz`` (wie die Notiz zum
+        Satz sie schriebe), an seinem Ende ``bis``: Eingetragen wird erst nach dem Ende der
+        Einheit, die Notiz käme hinter „uebung_ende“ — hrv-research zählt die ``satz``-Zeilen
+        nach dem Start der Übung (die k-te gehört zu Satz k). Ein Satz, der nicht eingetragen
+        wird, bekommt sie, wenn er doch noch eingetragen wird (seine Notiz, `_nachgetragen`)."""
         if not self.diagnose_aktiv or self.mitschnitt is None:
             return None
         marken = sum(
@@ -1597,14 +1631,32 @@ class Messlauf:
             "art": "prototyp",
         }
         self.letzter_satz = vergleich
+        zeile = False
         if eingetragen is not None:
-            self._gezaehlt_verglichen.append((uebung_id, int(eingetragen)))
+            felder: dict[str, Any] = {"uebung": uebung, "feld": feld, "wert": int(eingetragen)}
+            if uebung_id:
+                felder["uebung_id"] = uebung_id
+            with contextlib.suppress(Exception):
+                self.mitschnitt.kontext("satz", t=round(bis * 1e9), satz=satz, **felder)
+                zeile = True
+        wert = int(eingetragen) if eingetragen is not None else max(0, (sensor or 0) + korrektur)
+        if wert > 0:  # ein leerer Satz kommt nie ins Tagebuch, also auch keine Notiz
+            self._gezaehlt_verglichen.append((uebung_id, wert, vergleich, zeile))
         if self._satz_beginn is not None and self._satz_beginn < bis:
             self._satz_beginn = bis  # ein Satz von Hand danach zählt diese Tipps nicht noch einmal
         if self.diagnose_satz_beobachter is not None:
             with contextlib.suppress(Exception):
                 self.diagnose_satz_beobachter(vergleich)
         return vergleich
+
+    def zaehlsaetze_vergessen(self, uebung_id: str | None = None) -> None:
+        """Die Einheit des Zähl-Teils ist vorbei: Seine Sätze, die nicht eingetragen waren,
+        bekommen keine Notiz mehr (ein Nachtrag unter „Läufe heute“ hat keine Marke) — ein
+        Satz von Hand mit gleichem Wert vergleicht danach wie immer. Die eingetragenen warten
+        auf ihre Notiz (sie kommt nach dem Ende)."""
+        for satz in list(self._gezaehlt_verglichen):
+            if not satz[3] and (uebung_id is None or satz[0] in (None, uebung_id)):
+                self._gezaehlt_verglichen.remove(satz)
 
     def kontext(self, was: str, **felder: Any) -> dict[str, Any] | None:
         """Kontext in den Mitschnitt: Übung, Timer, eingetragener Satz (Plan §3.1)."""

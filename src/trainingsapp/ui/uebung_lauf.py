@@ -114,6 +114,10 @@ class Lauf:
     eingetragen: frozenset[str] = frozenset()
     #: welche sich noch eintragen lassen (`einzutragen`, nachträglich)
     nachzutragen: frozenset[str] = frozenset()
+    #: lief die Uhr mit (sonst ein Zähllauf für sich)
+    mit_uhr: bool = True
+    #: was gezählt wurde (`core.zaehlen.ZAEHLART_*`) — ``None``: kein Zählen
+    zaehlart: str | None = None
 
     @property
     def dauer_s(self) -> float:
@@ -258,10 +262,12 @@ def _uhr_beitreten(
     u = e.teil("plan")
     if isinstance(u, UebungBaustein):
         u.kontext_setzen(kontext)
+        e.fortschreiben(u)  # gleich in die Zeitleiste: stirbt die App, gilt schon die Uhr
     z = e.teil("zaehlen")
     if isinstance(z, ZaehlBaustein):
         # Wo die Uhr läuft, wird eingetragen — die Beteiligungen nennen es (wie beim Abhaken)
         z.kontext_setzen(replace(z.kontext, plan_id=kontext.plan_id, item_id=kontext.item_id))
+        e.fortschreiben(z)
     e.ende_mit_timer = True
     e.ende_mit_zaehlen = False
     einheit_ui.teil_beitreten(page, state, e, TimerBaustein(TimerLauf(profil)))
@@ -484,7 +490,9 @@ def _ort_uebernehmen(
             return zl.ENDE_ABBRUCH
     if uebung_teil is not None:
         uebung_teil.kontext_setzen(replace(uebung_teil.kontext, plan_id=plan_id, item_id=item_id))
+        e.fortschreiben(uebung_teil)  # die Uhr läuft weiter — stirbt die App, gilt der Plan
     z.kontext_setzen(replace(z.kontext, plan_id=plan_id, item_id=item_id))
+    e.fortschreiben(z)
     return zl.ENDE_ABGEHAKT
 
 
@@ -590,7 +598,12 @@ def _eintragen(
     # Die Planübung entscheidet, welches Wiederholungsfeld es gibt (vor `mit_zeitfeldern`)
     feld = _zaehl_feld(uebung, item, ereignisse) if TEIL_ZAEHLEN in teile else None
     if TEIL_UHR in teile:
-        werte.update(ergebnis(gelaufene_zeiten(ereignisse), kontext.zeitfeld))
+        # Nach einem Absturz mitten im Satz, mit seinen Wiederholungen: die Zeit bis zum
+        # Zwischenstand — sonst hätte er Wiederholungen, aber keine Haltezeit
+        zeiten = (
+            ze.zeiten_der_uhr(ereignisse) if TEIL_ZAEHLEN in teile else gelaufene_zeiten(ereignisse)
+        )
+        werte.update(ergebnis(zeiten, kontext.zeitfeld))
         werte = zeit_zusammenlegen(uebung, werte)  # ins Zeitfeld der Übung (27.10.2026)
         uebung = mit_zeitfeldern(uebung, werte)  # Zeit auch ohne den Parameter (18.10.2026)
     wdh = ze.wiederholungen(ereignisse, feld) if feld else []
@@ -744,11 +757,19 @@ def laeufe_heute(state: Any, uebung_id: str, tag: Any = None) -> list[Lauf]:
         )
         uhr = any(b.art == "timer" for b in teile) or any(x.quelle == "timer" for x in ereignisse)
         zaehl_abgebrochen = ze.zaehl_abgebrochen(ereignisse)
+        zaehlart = next(
+            (str(b.daten.get("zaehlart") or "") or None for b in teile if b.art == "zaehlen"),
+            None,
+        )
+        nachzutragen = einzutragen(ereignisse, nachtraeglich=True)
         laeufe.append(
             Lauf(
                 einheit_id=kopf.id,
                 beginn=kopf.started_at,
-                zeiten=gelaufene_zeiten(ereignisse),
+                # wie „Eintragen“ sie nähme (`_eintragen`)
+                zeiten=ze.zeiten_der_uhr(ereignisse)
+                if TEIL_ZAEHLEN in nachzutragen
+                else gelaufene_zeiten(ereignisse),
                 abgebrochen=abgebrochen(ereignisse) or (not uhr and zaehl_abgebrochen),
                 eintrag_id=str(eintraege[0].daten.get("eintrag")) if eintraege else None,
                 werte=list(uhr_eintrag.daten.get("werte") or []) if uhr_eintrag else [],
@@ -758,7 +779,9 @@ def laeufe_heute(state: Any, uebung_id: str, tag: Any = None) -> list[Lauf]:
                 zaehl_texte=ze.zaehl_texte(ereignisse),
                 zaehl_abgebrochen=zaehl_abgebrochen,
                 eingetragen=ze.eingetragen(ereignisse),
-                nachzutragen=einzutragen(ereignisse, nachtraeglich=True),
+                nachzutragen=nachzutragen,
+                mit_uhr=uhr,
+                zaehlart=zaehlart,
             )
         )
     return laeufe
@@ -807,6 +830,15 @@ def lauf_eintragen(state: Any, einheit_id: str) -> SessionEntry | None:
         zeitfeld=str(d["zeitfeld"]) if d.get("zeitfeld") else None,
         auspraegung={k: d[k] for k in AUSFUEHRUNG_SCHLUESSEL if k in d},
     )
+    if einheit is not None:
+        # Im Speicher gilt der Kontext von jetzt (die Uhr trat bei, abgehakt im Plan) — dort
+        # trägt auch die Uhr später ein: in denselben Eintrag, nicht in eine andere Sitzung
+        u = einheit.teil("plan")
+        z = einheit.teil("zaehlen")
+        if isinstance(u, UebungBaustein):
+            kontext = u.kontext
+        elif isinstance(z, ZaehlBaustein):
+            kontext = z.kontext
     return _eintragen(
         state,
         einheit_id,

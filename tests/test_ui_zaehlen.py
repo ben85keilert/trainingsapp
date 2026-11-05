@@ -129,8 +129,8 @@ def _knopf(c, text: str):
 
 
 def _nachtragen(c) -> list:
-    """„Eintragen“ eines Laufs (`components.laeufe_heute`) — nicht der Knopf der Sätze."""
-    return [x for x in _knoepfe(c, "Eintragen") if isinstance(x, ft.FilledTonalButton)]
+    """„Nachtragen“ eines Laufs in der Karte „Eintragen“ (`components.laeufe_heute`)."""
+    return _knoepfe(c, "Nachtragen")
 
 
 def _flaechen(c, tipp: str) -> list[ft.Container]:
@@ -431,7 +431,10 @@ async def test_zaehlen_abbrechen_bleibt_unter_laeufe_heute(umgebung) -> None:
     texte = _texte(timer)
     assert "LÄUFE HEUTE" in texte and any(t.startswith("Satz 1 · ") for t in texte)
 
-    (nachtragen,) = _nachtragen(danach)  # neben „Eintragen“ der Sätze × Wert
+    (nachtragen,) = _nachtragen(danach)
+    # Kein zweites „Eintragen“ mit anderer Bedeutung in derselben Karte (Runde 3, Befund 11)
+    assert not [x for x in _knoepfe(danach, "Eintragen") if isinstance(x, ft.FilledTonalButton)]
+    assert nachtragen.tooltip
     nachtragen.on_click()
     (eintrag,) = _eintraege(state)
     assert eintrag.result["reps"] == [gezaehlt]
@@ -864,6 +867,24 @@ async def test_laufleiste_fuehrt_im_plan_zur_uebung(umgebung) -> None:
     await _bis_vorbei(state, uhr, gurt)
 
 
+async def test_reiter_einheit_zeigt_den_zaehllauf_ohne_zeile_der_uhr(umgebung) -> None:
+    """Ein Zähllauf ohne Uhr steht im Reiter „Einheit“ als „Zählen · Kniebeuge“ — nicht mehr
+    daneben „Übung · Kniebeuge — trägt die Zeit ein“, die in den Timer der Übung führte, wo
+    weder Zahl noch ±1 stehen (Runde 3, Befund 7). Läuft die Uhr mit, bleibt ihre Zeile."""
+    from trainingsapp.ui.components import startleiste as sl
+
+    state, uhr, gurt = umgebung
+    seite = Seite()
+    u = _kniebeuge(state)
+    uebung_lauf.zaehlen_starten(seite, state, uebung_lauf.kontext_fuer(u))
+    await _sekunden(state, uhr, gurt, 20)
+    texte = _texte(sl.einheit_reiter(seite, state))
+    assert "Zählen · Kniebeuge" in texte
+    assert "Übung · Kniebeuge" not in texte and "trägt die Zeit ein" not in texte  # vorher: da
+    uebung_lauf.zaehlen_beenden(state, u.id, None, ENDE_ABBRUCH)
+    await _bis_vorbei(state, uhr, gurt)
+
+
 async def test_abhaken_auf_heute_nach_dem_start_auf_der_uebungsseite(umgebung) -> None:
     """Zählen auf der Übungsseite gestartet (ohne Plan), auf „Heute“ am Chip eines Plans
     abgehakt: Der Kontext des Abhakens gewinnt — der Eintrag steht im Plan, nicht unter „Ohne
@@ -993,6 +1014,97 @@ async def test_waehrend_der_sensor_zaehlt_keine_menge_von_hand(umgebung, monkeyp
     assert _knoepfe(_ansicht(seite, state, u), "+10")
     uebung_lauf.zaehlen_beenden(state, u.id, None, ENDE_ABBRUCH)
     await _bis_vorbei(state, uhr, gurt)
+
+
+async def test_im_diagnosemodus_steht_ein_satz_von_hand_nicht_doppelt_da(
+    umgebung, monkeypatch
+) -> None:
+    """Im Diagnosemodus zählen Person und Sensor zugleich (P122, §6): Ein Chip „+10“ ist der
+    Satz, den der Sensor gerade zählt — er endet dort, und „Fertig“ trägt ihn nicht noch einmal
+    ein. Vorher stand ``[10.0, 10.0, 18]`` für zwei Sätze im Tagebuch (Runde 3, Befund 5)."""
+    state, uhr, gurt = umgebung
+    monkeypatch.setattr(Messlauf, "diagnose_aktiv", property(lambda self: True))
+    seite = Seite()
+    u = _kniebeuge(state)
+    _knopf(_ansicht(seite, state, u), "Wdh. zählen").on_click()
+    await _sekunden(state, uhr, gurt, 25)
+    z = _zaehl_teil(state)
+    _knopf(_ansicht(seite, state, u), "+10").on_click()
+    assert z.aktiv and len(z.saetze) == 2 and z.saetze[0].von_hand  # der Sensor zählt weiter
+    assert z.wert == 0  # der nächste Satz beginnt
+    await _sekunden(state, uhr, gurt, 20)
+    _knopf(_ansicht(seite, state, u), "+10").on_click()
+    assert [s.von_hand for s in z.saetze] == [True, True, False]
+    _knopf(_ansicht(seite, state, u), "Fertig").on_click()
+    await _bis_vorbei(state, uhr, gurt)
+    (eintrag,) = _eintraege(state)
+    assert eintrag.result == {"reps": [10.0, 10.0]}  # vorher: [10.0, 10.0, 18]
+
+
+async def test_wie_geplant_fehlt_solange_der_sensor_zaehlt(umgebung) -> None:
+    """„Wie geplant · 3x15“ hakte während des Zählens mit der Zahl des Sensors ab, nicht mit dem
+    Ziel — Text und Wirkung passten nicht (Runde 3, Befund 8). Solange der Sensor zählt, steht
+    der Knopf nicht da; danach wieder."""
+    state, uhr, gurt = umgebung
+    seite = Seite()
+    u = _kniebeuge(state, default_target={"reps": [15, 15, 15]})
+    assert _knoepfe(_ansicht(seite, state, u), "Wie geplant · 3x15")
+    _knopf(_ansicht(seite, state, u), "Wdh. zählen").on_click()
+    await _sekunden(state, uhr, gurt, 20)
+    ansicht = _ansicht(seite, state, u)
+    assert not _knoepfe(ansicht, "Wie geplant · 3x15")  # vorher: da, trug [7] ein
+    assert _knoepfe(ansicht, "Gemacht")
+    _knopf(ansicht, "Fertig").on_click()
+    await _bis_vorbei(state, uhr, gurt)
+    assert _knoepfe(_ansicht(seite, state, u), "Wie geplant · 3x15")
+
+
+async def test_bereitgestellt_gibt_es_keinen_knopf_der_nie_zaehlt(umgebung) -> None:
+    """Steht eine Einheit bereit (etwa die Uhr der Übung), zählt der Sensor nicht — der Knopf
+    „Wdh. zählen“ meldete nur „Es steht eine Einheit bereit“ (Runde 3, Befund 9). Er fehlt,
+    bis oben gestartet oder geleert wird."""
+    from trainingsapp.core.timer import Abschnitt, TimerProfil
+
+    state, _uhr, _gurt = umgebung
+    seite = Seite()
+    u = _kniebeuge(state, "Wandsitz", "hold", "reps")
+    assert _knoepfe(_ansicht(seite, state, u), "Wdh. zählen")
+    profil = TimerProfil(name="Halten 40 s", abschnitte=[Abschnitt("Halten", 40)])
+    uebung_lauf.bereitstellen(seite, state, uebung_lauf.kontext_fuer(u), profil)
+    assert zaehl_stand.bereitgestellt(state)
+    assert not _knoepfe(_ansicht(seite, state, u), "Wdh. zählen")  # vorher: ein Knopf
+    einheit_ui.leeren(seite, state)
+    assert not zaehl_stand.bereitgestellt(state)
+    assert _knoepfe(_ansicht(seite, state, u), "Wdh. zählen")
+
+
+async def test_laeufe_heute_nennt_einen_leeren_zaehllauf_nicht_gemacht(umgebung) -> None:
+    """Ein Zähllauf ohne Zahl hat nichts eingetragen: „Läufe heute“ sagte „gemacht“, dazu
+    „Satz 1 · 0 Wdh. (Sensor)“; „Atmung erfassen“ hieß ebenso „gemacht“, und „Fertig“
+    versprach „eintragen“ (Runde 3, Befund 10). Jetzt „nichts gezählt“ bzw. „Atmung“."""
+    from trainingsapp.ui.components.laeufe_heute import laeufe_karte
+
+    state, uhr, gurt = umgebung
+    seite = Seite()
+    u = _kniebeuge(state)
+    gurt.bewegung = False
+    _knopf(_ansicht(seite, state, u), "Wdh. zählen").on_click()
+    await _sekunden(state, uhr, gurt, 8)
+    _knopf(_ansicht(seite, state, u), "Zählen abbrechen").on_click()
+    await _bis_vorbei(state, uhr, gurt)
+    texte = _texte(laeufe_karte(seite, state, u, lambda: None))
+    assert any(t.endswith(" · nichts gezählt") for t in texte)  # vorher: „… · gemacht“
+    assert not any("0 Wdh." in t for t in texte) and "nichts einzutragen" in texte
+
+    atem = _kniebeuge(state, "Box Breathing", "duration", typen=["Atmung"])
+    _knopf(_ansicht(seite, state, atem), "Atmung erfassen").on_click()
+    await _sekunden(state, uhr, gurt, 5)
+    (fertig,) = _knoepfe(_ansicht(seite, state, atem), "Fertig")
+    assert "eintragen" not in (fertig.tooltip or "")  # P120: nichts ins Tagebuch
+    fertig.on_click()
+    await _bis_vorbei(state, uhr, gurt)
+    texte = _texte(laeufe_karte(seite, state, atem, lambda: None))
+    assert any(t.endswith(" · Atmung") for t in texte) and _eintraege(state) == []
 
 
 async def test_im_plan_ablauf_gibt_es_keinen_knopf_der_nie_zaehlt(umgebung) -> None:

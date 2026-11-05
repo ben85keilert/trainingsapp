@@ -11,6 +11,8 @@ Wert je Satz, angehängt wie die Haltezeit; ohne Sätze zählt die Summe). Wie
 - `zaehl_ende`, `zaehl_abgebrochen` — ``zaehlen/zaehlen_ende``: eingetragen wird bei
   ``fertig`` und ``abgehakt``, die übrigen Gründe sind **abgebrochen** (der Lauf bleibt unter
   „Läufe heute“ und lässt sich dort eintragen);
+- `zeiten_der_uhr`, `uhr_bis` — die Zeit der Uhr passend zu den Wiederholungen, auch nach
+  einem Absturz mitten in einem zählenden Abschnitt (bis zum letzten Zwischenstand);
 - `eingetragen` — welche Teile ``person/eintrag`` schon eingetragen hat (``teil`` = ``uhr``
   oder ``zaehlen``; ein altes ``person/eintrag`` ohne ``teil`` gilt für die Uhr): so wird nichts
   doppelt eingetragen, wenn Uhr und Zählen eine Einheit teilen;
@@ -25,9 +27,11 @@ Rein und ohne flet.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 from typing import Any, Final
 
 from .einheit import Ereignis, ganzzahl_lesen
+from .timer_eintrag import Gelaufen, gelaufene_zeiten
 from .zaehlen import (
     EINGETRAGEN,
     ENDE_ABBRUCH,
@@ -84,17 +88,19 @@ def zaehlungen(ereignisse: Iterable[Ereignis]) -> list[dict[str, Any]]:
 
 def wiederholungen(ereignisse: Iterable[Ereignis], feld: str | None = None) -> list[int]:
     """Die Wiederholungen je Satz (``wert``: Sensor plus Korrektur) — ohne Sätze, in denen
-    nichts gezählt wurde; mit ``feld`` nur die für dieses Feld.
+    nichts gezählt wurde, und ohne die, die die Person von Hand eintrug (``von_hand``,
+    Diagnosemodus); mit ``feld`` nur die für dieses Feld.
 
     >>> ev = [Ereignis(20.0, "zaehlen", "zaehlung", "", {"satz": 1, "wert": 12, "feld": "reps"}),
     ...       Ereignis(50.0, "zaehlen", "zaehlung", "", {"satz": 2, "wert": 0}),
-    ...       Ereignis(80.0, "zaehlen", "zaehlung", "", {"satz": 3, "wert": 11, "feld": "reps"})]
+    ...       Ereignis(80.0, "zaehlen", "zaehlung", "", {"satz": 3, "wert": 11, "feld": "reps"}),
+    ...       Ereignis(99.0, "zaehlen", "zaehlung", "", {"satz": 4, "wert": 9, "von_hand": True})]
     >>> wiederholungen(ev), wiederholungen(ev, "reps_2")
     ([12, 11], [])
     """
     out: list[int] = []
     for z in zaehlungen(ereignisse):
-        if z.get("zaehlart", ZAEHLART_WDH) != ZAEHLART_WDH:
+        if z.get("zaehlart", ZAEHLART_WDH) != ZAEHLART_WDH or z.get("von_hand"):
             continue
         if feld is not None and z.get("feld") not in (None, feld):
             continue
@@ -122,13 +128,65 @@ def satz_zeiten(ereignisse: Iterable[Ereignis], feld: str | None = None) -> list
     out: list[float] = []
     for k in sorted(je_satz):
         t_s, z = je_satz[k]
-        if z.get("zaehlart", ZAEHLART_WDH) != ZAEHLART_WDH:
+        if z.get("zaehlart", ZAEHLART_WDH) != ZAEHLART_WDH or z.get("von_hand"):
             continue
         if feld is not None and z.get("feld") not in (None, feld):
             continue
         if max(0, ganzzahl_lesen(z.get("wert"))):
             out.append(float(t_s))
     return out
+
+
+def uhr_bis(ereignisse: Iterable[Ereignis]) -> float | None:
+    """Starb die App mitten in einem zählenden Abschnitt der Uhr (kein ``timer/ende``), und
+    steht dessen Satz schon als Zwischenstand da (``zaehlung`` nach dem Beginn des Abschnitts):
+    die Stelle des letzten — bis dorthin zählt der Abschnitt. So passen Zeit und Wiederholungen
+    zusammen, ein Stand für beide (sonst hätte der Satz Wiederholungen, aber keine Haltezeit).
+    ``None``: Die Uhr endete, lief nicht, steht in einem Abschnitt, der nicht zählt, oder der
+    offene Abschnitt hat noch keinen Zwischenstand (dann fehlt er in beiden).
+
+    >>> ab = lambda t, **d: Ereignis(t, "timer", "abschnitt", "", {"name": "Halten", **d})
+    >>> satz = lambda t, n: Ereignis(t, "zaehlen", "zaehlung", "", {"satz": n, "wert": 9})
+    >>> uhr_bis([ab(0.0), satz(30.0, 1), ab(30.0, zaehlt=False), ab(40.0), satz(55.0, 2)])
+    55.0
+    >>> uhr_bis([ab(0.0), satz(30.0, 1), ab(30.0, zaehlt=False)]) is None  # in der Pause
+    True
+    >>> uhr_bis([ab(0.0), satz(15.0, 1), Ereignis(20.0, "timer", "ende", "")]) is None
+    True
+    """
+    beginn: float | None = None
+    bis: float | None = None
+    for e in ereignisse:
+        if e.quelle == "timer" and e.art == "ende":
+            return None
+        if e.quelle == "timer" and e.art == "abschnitt":
+            beginn = e.t_s if e.daten.get("zaehlt") is not False else None
+            bis = None
+        elif beginn is not None and e.quelle == "zaehlen" and e.art == "zaehlung":
+            if e.t_s > beginn:  # die ``zaehlung`` des Satzes davor steht an der Grenze
+                bis = e.t_s if bis is None else max(bis, e.t_s)
+    return bis
+
+
+def zeiten_der_uhr(ereignisse: Iterable[Ereignis]) -> list[Gelaufen]:
+    """Die gelaufenen Zeiten der Uhr (`core.timer_eintrag.gelaufene_zeiten`) — nach einem
+    Absturz mitten in einem zählenden Abschnitt mit ihm bis zum letzten Zwischenstand
+    (`uhr_bis`), passend zu dessen Wiederholungen. Nur, wenn beide zusammen eingetragen werden
+    (sonst ist es nur eine untere Grenze der Zeit: dann fehlt der Abschnitt, wie ohne Zählen).
+
+    >>> ab = lambda t, **d: Ereignis(t, "timer", "abschnitt", "", {"name": "Halten", **d})
+    >>> satz = lambda t, n: Ereignis(t, "zaehlen", "zaehlung", "", {"satz": n, "wert": 9})
+    >>> ev = [ab(0.0), satz(30.0, 1), ab(30.0, zaehlt=False), ab(40.0), satz(55.0, 2)]
+    >>> [(z.name, z.sekunden, z.laeuft) for z in zeiten_der_uhr(ev) if z.zaehlt]
+    [('Halten', 30.0, False), ('Halten', 15.0, False)]
+    """
+    ereignisse = list(ereignisse)
+    bis = uhr_bis(ereignisse)
+    if bis is None:
+        return gelaufene_zeiten(ereignisse)
+    bis_dahin = [e for e in ereignisse if e.t_s <= bis]
+    # Er läuft nicht mehr — er endete mit der App, dort steht sein letzter Stand
+    return [replace(z, laeuft=False) for z in gelaufene_zeiten(bis_dahin, jetzt_s=bis)]
 
 
 def zaehl_ende(ereignisse: Iterable[Ereignis]) -> str | None:
@@ -200,16 +258,21 @@ def zaehl_text(z: Mapping[str, Any]) -> str:
 
 
 def zaehl_texte(ereignisse: Iterable[Ereignis]) -> list[str]:
-    """Je gezähltem Satz eine Zeile (`zaehl_text`).
+    """Je gezähltem Satz eine Zeile (`zaehl_text`) — nicht für einen Satz, in dem nichts
+    gezählt wurde (er kommt auch nicht ins Tagebuch, `wiederholungen`), und nicht für einen,
+    den die Person von Hand eintrug.
 
     >>> zaehl_texte([Ereignis(20.0, "zaehlen", "zaehlung", "",
-    ...              {"satz": 1, "wert": 12, "sensor": 11, "korrektur": 1})])
+    ...              {"satz": 1, "wert": 12, "sensor": 11, "korrektur": 1}),
+    ...              Ereignis(40.0, "zaehlen", "zaehlung", "", {"satz": 2, "wert": 0})])
     ['Satz 1 · 12 Wdh. (Sensor 11, +1)']
     """
     return [
         zaehl_text(z)
         for z in zaehlungen(ereignisse)
         if z.get("zaehlart", ZAEHLART_WDH) == ZAEHLART_WDH
+        and not z.get("von_hand")
+        and max(0, ganzzahl_lesen(z.get("wert")))
     ]
 
 
@@ -266,6 +329,7 @@ __all__ = [
     "ende_text",
     "nicht_eingetragen_text",
     "satz_zeiten",
+    "uhr_bis",
     "von_selbst_text",
     "wiederholungen",
     "zaehl_abgebrochen",
@@ -273,4 +337,5 @@ __all__ = [
     "zaehl_text",
     "zaehl_texte",
     "zaehlungen",
+    "zeiten_der_uhr",
 ]

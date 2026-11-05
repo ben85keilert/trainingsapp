@@ -63,6 +63,12 @@ TYP_ATMUNG: Final = "Atmung"
 #: des Ereignisses
 ZAEHLART_WDH: Final = "wdh"
 ZAEHLART_ATEM: Final = "atem"
+#: Wer zählt (``quelle`` im Ereignis ``zaehlung``, Taktgeber Teil 2 T5, P138): der Sensor
+#: (eine Messung) oder der Takt (jede volle Runde eine Wiederholung — eine Vorgabe, keine
+#: Messung; die Zählzeile sagt „Takt“, nie „Prototyp“). Mit Sensor zählt der Sensor, der Takt
+#: steht daneben; ohne Sensor ist der Takt die Quelle
+QUELLE_SENSOR: Final = "sensor"
+QUELLE_TAKT: Final = "takt"
 
 #: Ende-Gründe des Zählens (``grund`` im Ereignis ``zaehlen_ende``, §4.3 Punkt 6)
 ENDE_FERTIG: Final = "fertig"  # „Fertig“ am Zähler, Timer durch oder „Fertig“ der Uhr, ⏹
@@ -498,17 +504,45 @@ def mit_vorzeichen(n: int) -> str:
     return "±0"
 
 
-def korrektur_text(sensor: int | None, korrektur: int) -> str:
-    """Die kleine Zeile unter der Zahl: was der Sensor zählte, dahinter die Korrektur, wenn
-    es eine gibt. Ohne Zahl vom Sensor „…“.
+def quelle_name(quelle: str) -> str:
+    """„Sensor“ oder „Takt“ — wer zählt (`QUELLE_SENSOR`, `QUELLE_TAKT`).
+
+    >>> quelle_name("sensor"), quelle_name("takt"), quelle_name("x")
+    ('Sensor', 'Takt', 'Sensor')
+    """
+    return "Takt" if quelle == QUELLE_TAKT else "Sensor"
+
+
+def korrektur_text(sensor: int | None, korrektur: int, quelle: str = QUELLE_SENSOR) -> str:
+    """Die kleine Zeile unter der Zahl: was der Sensor (oder der Takt) zählte, dahinter die
+    Korrektur, wenn es eine gibt. Ohne Zahl vom Sensor „…“.
 
     >>> korrektur_text(11, 1), korrektur_text(11, 0), korrektur_text(11, -2)
     ('Sensor 11 · +1', 'Sensor 11', 'Sensor 11 · −2')
-    >>> korrektur_text(None, 1)
-    'Sensor … · +1'
+    >>> korrektur_text(None, 1), korrektur_text(12, 1, "takt")
+    ('Sensor … · +1', 'Takt 12 · +1')
     """
-    text = f"Sensor {'…' if sensor is None else sensor}"
+    text = f"{quelle_name(quelle)} {'…' if sensor is None else sensor}"
     return f"{text} · {mit_vorzeichen(korrektur)}" if korrektur else text
+
+
+def takt_zeile(takt: int | None, korrektur: int = 0) -> str:
+    """Die kleine Zeile, wenn der Takt zählt (P138): „Takt 12“, mit Korrektur „Takt 12 · +1“
+    — nie „Prototyp“: die Zahl ist eine Vorgabe, keine Messung. Vor der ersten Runde „Takt …“.
+
+    >>> takt_zeile(12), takt_zeile(12, 1), takt_zeile(None)
+    ('Takt 12', 'Takt 12 · +1', 'Takt …')
+    """
+    return korrektur_text(takt, korrektur, QUELLE_TAKT)
+
+
+def takt_neben_text(takt: int | None) -> str:
+    """Der Takt neben dem Sensor („Takt 12 · Sensor 11“): sein Teil, leer ohne Takt.
+
+    >>> takt_neben_text(12), takt_neben_text(None)
+    ('Takt 12', '')
+    """
+    return f"Takt {takt}" if takt is not None else ""
 
 
 def sensor_zeile(sensor: int | None, korrektur: int, halbe: int = 0, vorlage: str = "") -> str:

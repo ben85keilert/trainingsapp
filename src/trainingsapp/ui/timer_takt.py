@@ -26,6 +26,7 @@ from trainingsapp.core.timer import (
     klang_fuer,
     signal,
 )
+from trainingsapp.devices.takt_lauf import TaktVerfolger, in_die_messung
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import wach
 
@@ -126,6 +127,19 @@ def _in_messung(state: AppState, marken: list[Marke], signale: TimerSignale) -> 
                 beobachter()
 
 
+def _takt_in_messung(state: AppState, lauf: Any, verfolger: TaktVerfolger, *, ende: bool) -> None:
+    """Ein Timer **ohne** Einheit (die Einheit füttert ihren Timer selbst, `Einheitslauf.
+    _takt_verteilen`): Soll-Phasen, Takt-Läufe und Marken des Atemtakts in die laufende
+    Aufnahme (`devices.takt_lauf.in_die_messung`, Vertrag §4 und §15) — wie die Abschnittsnotizen
+    in `_in_messung`, wenn Notizen eingestellt sind."""
+    messlauf = state.messlauf
+    if messlauf is None or lauf is None or not state.timer_signale().notizen:
+        return
+    jetzt = messlauf.uhr()
+    neu = verfolger.beenden(jetzt) if ende else verfolger.nachziehen(jetzt)
+    in_die_messung(messlauf, neu, profil=lauf.profil.markenname)
+
+
 def _lage_beim_start(lauf: Any) -> Lage | None:
     """Die Lage im Takt, wenn der Ticker anläuft — ``None``, wenn der Takt gerade erst beginnt
     (die erste Phase tönt dann), sonst die Lage von jetzt (nichts tönt nach „Weiter“)."""
@@ -152,8 +166,12 @@ def ticker_starten(page: Any, state: AppState) -> None:
         # nur ein Takt, der gerade erst beginnt, meldet seine erste Phase
         takt_alt: Lage | None = _lage_beim_start(state.timer)
         wach = False
+        # Ohne Einheit bringt der Ticker den Atemtakt selbst in die Messung (Teil 2)
+        verfolger = TaktVerfolger(state.timer) if state.timer is not None else None
         try:
             while (lauf := state.timer) is not None:
+                if verfolger is not None and verfolger.lauf is not lauf:
+                    verfolger = TaktVerfolger(lauf)
                 stand = lauf.stand()
                 art = signal(alt, stand) if not lauf.vorwaerts else None
                 if art is not None:
@@ -169,8 +187,13 @@ def ticker_starten(page: Any, state: AppState) -> None:
                     )
                 takt_alt = takt_neu
                 # Gehört der Timer einer Einheit, holt sie die Marken (ein Abnehmer)
-                if not einheit_ui.besitzt_timer(state, lauf) and (marken := lauf.neue_marken()):
-                    _in_messung(state, marken, state.timer_signale())
+                if not einheit_ui.besitzt_timer(state, lauf):
+                    if marken := lauf.neue_marken():
+                        _in_messung(state, marken, state.timer_signale())
+                    if verfolger is not None:
+                        _takt_in_messung(
+                            state, lauf, verfolger, ende=not stand.laeuft and stand.fertig
+                        )
                 alt = stand
                 for beobachter in list(state.timer_beobachter.values()):
                     with contextlib.suppress(Exception):

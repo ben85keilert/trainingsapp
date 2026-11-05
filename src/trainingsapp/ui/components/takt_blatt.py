@@ -268,6 +268,7 @@ def takt_blatt(
         stand["runden"] = t.runden
         stand["animation"] = t.animation
         stand["zaehlt"] = t.zaehlt
+        zaehlt_schalter.value = t.zaehlt
         regler.value = t.tempo
         animation_wahl.value = t.animation
         zeichnen()
@@ -327,6 +328,20 @@ def takt_blatt(
         round=2,
         expand=True,
         on_change=tempo_gezogen,
+    )
+
+    def zaehlt_geschaltet(e: ft.Event[ft.Switch]) -> None:
+        stand["zaehlt"] = bool(e.control.value)
+
+    # „Takt zählt“ (P138, Teil 2 T5): jede volle Runde eine Wiederholung — ein Zähl-Teil mit
+    # Quelle „takt“, auch ohne Sensor; bei Atemtakten erlaubt (Atemzüge in ein
+    # Wiederholungsfeld), von Haus aus nur bei den Bewegungs-Vorlagen an
+    zaehlt_schalter = ft.Switch(
+        label="Takt zählt Wiederholungen",
+        value=bool(stand["zaehlt"]),
+        label_position=ft.LabelPosition.LEFT,
+        tooltip="Jede volle Runde eine Wiederholung — auch ohne Sensor (gekennzeichnet „Takt“)",
+        on_change=zaehlt_geschaltet,
     )
 
     def animation_gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
@@ -525,10 +540,11 @@ def takt_blatt(
                     controls=[ft.Icon(ft.Icons.SPEED, size=18), tempo_text_ctl, rate_text_ctl],
                 ),
                 regler,
+                ft.Row(alignment=ft.MainAxisAlignment.END, controls=[zaehlt_schalter]),
                 fehler_text,
             ],
             [ft.Row(wrap=True, spacing=6, run_spacing=6, controls=knoepfe)],
-            geschaetzt=560,
+            geschaetzt=600,
         ),
     )
     with contextlib.suppress(Exception):  # ohne Seite (Tests): die Vorschau steht

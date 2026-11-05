@@ -296,8 +296,10 @@ def klein_text(z: ZaehlBaustein) -> str:
     """Die kleine Zeile unter der Zahl: „Sensor 11 · +1 · 2 halbe · Kniebeuge · Prototyp“ —
     bis die ersten Proben kommen „Sensor startet …“, bis zur ersten Wiederholung „…“; in der
     Pause des Timers „Pause“ (davor, was der letzte Satz zählte), nach dem Ende der Grund. Nur
-    Atmung: `_atem_klein`."""
+    Atmung: `_atem_klein`. Zählt der Takt (P138): „Takt 12 · +1“ — ohne „Prototyp“, die Zahl
+    ist eine Vorgabe; neben dem Sensor steht er dazu („Sensor 11 · Takt 12 · Prototyp“)."""
     phase = z.phase
+    takt = getattr(z, "quelle", zl.QUELLE_SENSOR) == zl.QUELLE_TAKT
     if phase == PHASE_ENDE:
         return f"{'Zählen' if z.wdh else 'Atmung'} {ende_text(z.grund)}"
     if phase == PHASE_ATMUNG:
@@ -307,7 +309,9 @@ def klein_text(z: ZaehlBaustein) -> str:
     if phase == PHASE_PAUSE:
         if z.satz is None:
             return "Pause"
-        return f"Pause · {_sensor_zeile(z)} · Prototyp"
+        return f"Pause · {_sensor_zeile(z)}" if takt else f"Pause · {_sensor_zeile(z)} · Prototyp"
+    if takt:
+        return zl.takt_zeile(z.takt_zahl, z.korrektur)
     if z.sensor is None and not z.korrektur:
         return "…"
     return f"{_sensor_zeile(z)} · Prototyp"
@@ -315,8 +319,14 @@ def klein_text(z: ZaehlBaustein) -> str:
 
 def _sensor_zeile(z: ZaehlBaustein) -> str:
     """„Sensor 11 · +1 · 2 halbe · Kniebeuge“ (A5, `core.zaehlen.sensor_zeile`): die halben
-    Wiederholungen daneben, nicht mitgezählt, und die Vorlage, wenn eine gewählt ist."""
-    return zl.sensor_zeile(z.sensor, z.korrektur, z.halbe, z.vorlage_text)
+    Wiederholungen daneben, nicht mitgezählt, und die Vorlage, wenn eine gewählt ist — zählt
+    der Takt, „Takt 12 · +1“; zählt er daneben, „Sensor 11 · Takt 12“ (P138)."""
+    if getattr(z, "quelle", zl.QUELLE_SENSOR) == zl.QUELLE_TAKT:
+        return zl.takt_zeile(z.takt_zahl, z.korrektur)
+    teile = [zl.sensor_zeile(z.sensor, z.korrektur, z.halbe, z.vorlage_text)]
+    if getattr(z, "takt_text", ""):
+        teile.insert(1, z.takt_text)
+    return " · ".join(teile)
 
 
 def kurz_text(z: ZaehlBaustein) -> str:
@@ -411,7 +421,10 @@ def sensor_text(state: Any) -> str:
     z = e.teil("zaehlen") if e is not None and e.laeuft else None
     if not isinstance(z, ZaehlBaustein) or not z.aktiv or not z.wdh:
         return ""
-    return f"Sensor {'…' if z.sensor is None else z.sensor}"
+    if z.quelle == zl.QUELLE_TAKT:
+        return zl.takt_zeile(z.takt_zahl)
+    text = f"Sensor {'…' if z.sensor is None else z.sensor}"
+    return f"{text} · {z.takt_text}" if z.takt_text else text
 
 
 # ---------------------------------------------------------------------------

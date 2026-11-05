@@ -179,6 +179,12 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         "tempo",
         "phasen_s",
         "arten",
+        # „Takt zählt“ (P138, Teil 2 T5) an ``zaehlen/zaehlung``: ``quelle`` (``sensor`` oder
+        # ``takt`` — wessen Zahl der Wert ist), ``takt`` (volle Runden des Takts im Satz, auch
+        # neben dem Sensor) und ``takt_zeiten_s`` (ihre Rundenenden auf der Achse der Einheit)
+        "quelle",
+        "takt",
+        "takt_zeiten_s",
         # Teile
         "teil",
         "rolle",

@@ -100,6 +100,19 @@ Laufleiste und der Reiter „Einheit“ ihn ohne Sonderweg.
   und in den Mitschnitt (`vorziehen`, `ui.uebung_lauf.vor_dem_satz_von_hand`) — sonst stünde
   der Chip vor ihnen. Das Zählen läuft weiter.
 
+- **Takt zählt** (Taktgeber Teil 2 T5, P138, ``docs/plan_taktgeber.md`` §4): Läuft die Uhr mit
+  einem Takt, der zählt (`core.takt.Takt.zaehlt`), ist jede volle Runde eine Wiederholung —
+  die Einheit bringt die Runden vom Timer-Teil hierher (`takt_runden`, Achse der Einheit;
+  `Einheitslauf._takt_verteilen`), nicht über die Zeitleiste. **Ohne Sensor** ist der Takt die
+  Quelle (``quelle = "takt"``, auch ohne Gerät — `_OhneGeraet` steht für den Messlauf): kein
+  Strom, kein „keine Bewegung“, kein Prototyp; die Zahl ist eine Vorgabe, keine Messung, und
+  die Zählzeile sagt „Takt 12“. ±1 korrigiert sie wie beim Sensor, eingetragen wird sie wie
+  beim Sensor (``zaehlung`` mit ``quelle`` takt, ``takt``, ``takt_zeiten_s``). **Mit Sensor**
+  zählt der Sensor, der Takt steht daneben („Takt 12 · Sensor 11“, `takt_zaehlt`): beide in
+  der Zeitleiste (``takt`` neben ``sensor``), nur der Sensor im Eintrag (P122 sinngemäß); im
+  Diagnosemodus ist er die dritte Spalte des Vergleichs. Ein Satz ist wie sonst der Zähllauf
+  bzw. der zählende Abschnitt der Uhr; ein Takt, der nicht zählt, zählt auch hier nichts.
+
 Synchron und ohne flet; wer das Ende sofort in der Zeitleiste braucht (abgehakt), ruft danach
 `Einheitslauf.takt` — der Takt holt die Ereignisse ab.
 """
@@ -112,6 +125,7 @@ import math
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
+from types import SimpleNamespace
 from typing import Any
 
 import hrv_core
@@ -141,6 +155,8 @@ from ..core.zaehlen import (
     KEIN_ATEM_S,
     KEINE_BEWEGUNG_S,
     KEINE_DATEN_S,
+    QUELLE_SENSOR,
+    QUELLE_TAKT,
     VORLAGE_AUTO,
     ZAEHLART_ATEM,
     ZAEHLART_WDH,
@@ -149,6 +165,7 @@ from ..core.zaehlen import (
     atem_text,
     mit_vorzeichen,
     rate_waehlen,
+    takt_neben_text,
     vorlage_waehlen,
 )
 from ..core.zaehlen_eintrag import ende_text
@@ -238,15 +255,31 @@ class ZaehlSatz:
     #: Diagnosemodus: seine Nummer an Marken, Vergleich und Kontextzeilen — die der Zeile
     #: ``satz``, die er im Mitschnitt bekommt (`ZaehlBaustein._naechste_diagnose_nr`)
     diag_nr: int | None = None
+    #: Wer zählt (`core.zaehlen.QUELLE_SENSOR` / `QUELLE_TAKT`): wessen Zahl der Wert ist
+    quelle: str = QUELLE_SENSOR
+    #: volle Runden des zählenden Takts im Satz (P138) — ``None``: noch keine (oder kein Takt)
+    takt: int | None = None
+    #: ihre Rundenenden auf der Achse der Einheit
+    takt_zeiten_s: list[float] = field(default_factory=list)
+
+    @property
+    def gezaehlt(self) -> int | None:
+        """Die Zahl der Quelle: Sensor — oder Takt, wenn der zählt."""
+        return self.takt if self.quelle == QUELLE_TAKT else self.sensor
 
     @property
     def wert(self) -> int:
-        """Sensor plus Korrektur, nie weniger als 0 — was eingetragen wird."""
-        return anzeige(self.sensor, self.korrektur)
+        """Die Zahl der Quelle plus Korrektur, nie weniger als 0 — was eingetragen wird."""
+        return anzeige(self.gezaehlt, self.korrektur)
 
     @property
     def leer(self) -> bool:
-        return not self.sensor and not self.korrektur
+        return not self.gezaehlt and not self.korrektur
+
+    def takt_runde(self, t_s: float) -> None:
+        """Eine volle Runde des zählenden Takts (Achse der Einheit)."""
+        self.takt = (self.takt or 0) + 1
+        self.takt_zeiten_s.append(round(t_s, 2))
 
     def dauer_s(self, jetzt_s: float) -> float:
         """Wie lange in diesem Satz gezählt wurde (ohne Anhalten)."""
@@ -261,6 +294,10 @@ class ZaehlSatz:
             "korrektur": self.korrektur,
             "wert": self.wert,
         }
+        if self.quelle != QUELLE_SENSOR:
+            d["quelle"] = self.quelle
+        if self.takt is not None:
+            d["takt"] = self.takt
         if self.von_hand:
             d["von_hand"] = True
         return d
@@ -302,6 +339,34 @@ class Gezaehlt:
     atem: dict[str, Any] | None = None
 
 
+class _OhneGeraet:
+    """Steht für den Messlauf, wenn der Takt ohne Gerät zählt (Quelle ``takt``): eine Uhr,
+    kein Profil, kein Strom — jede Hülle des Messlaufs, die der Takt nicht braucht, tut nichts."""
+
+    def __init__(self) -> None:
+        self.uhr: Callable[[], float] = time.monotonic
+        self.quelle = None
+        self.profil: GeraeteProfil | None = None
+        self.status = SimpleNamespace(verbindung=Verbindung.GETRENNT)
+        self.acc_zuletzt: float | None = None
+        self.zaehl_satz: Callable[[], dict[str, Any] | None] | None = None
+        self.start_mono = 0.0
+        self.diagnose_aktiv = False
+        self.aufnahme = None
+
+    def acc_anfordern(self, *_a: Any, **_k: Any) -> None:
+        return None
+
+    def acc_freigeben(self, *_a: Any, **_k: Any) -> None:
+        return None
+
+    def acc_reihe(self, *_a: Any, **_k: Any) -> None:
+        return None
+
+    def kontext(self, *_a: Any, **_k: Any) -> None:
+        return None
+
+
 class ZaehlBaustein:
     """Das Zählen als Teil einer Einheit (Modultext)."""
 
@@ -309,7 +374,7 @@ class ZaehlBaustein:
 
     def __init__(
         self,
-        messlauf: Messlauf,
+        messlauf: Messlauf | None,
         kontext: UebungKontext,
         *,
         wiederholungen: bool = True,
@@ -318,19 +383,30 @@ class ZaehlBaustein:
         vorlage: str = VORLAGE_AUTO,
         rate_hz: int | None = None,
         bereich_g: int = BEREICH_G,
+        quelle: str = QUELLE_SENSOR,
+        takt_zaehlt: bool = False,
     ) -> None:
-        self.messlauf = messlauf
+        if quelle not in (QUELLE_SENSOR, QUELLE_TAKT):
+            raise ValueError(f"unbekannte Quelle: {quelle}")
+        if messlauf is None and quelle != QUELLE_TAKT:
+            raise ValueError("ohne Messlauf zählt nur der Takt")
+        #: Der Messlauf — ohne Gerät (nur der Takt zählt) ein Stand-in (`_OhneGeraet`)
+        self.messlauf: Any = messlauf if messlauf is not None else _OhneGeraet()
         self.kontext = kontext
-        #: Wiederholungen zählen (sonst nur Atmung)
-        self.wdh = bool(wiederholungen)
-        #: Atmung erfassen — die Atem-Spur neben den Sätzen (Modultext)
-        self.atem = bool(atmung)
+        #: Wer zählt: der Sensor oder der Takt (P138, Modultext)
+        self.quelle = quelle
+        #: Der Takt zählt mit (auch neben dem Sensor): volle Runden kommen über `takt_runden`
+        self.takt_zaehlt = bool(takt_zaehlt) or quelle == QUELLE_TAKT
+        #: Wiederholungen zählen (sonst nur Atmung) — der Takt zählt immer Wiederholungen
+        self.wdh = bool(wiederholungen) or quelle == QUELLE_TAKT
+        #: Atmung erfassen — die Atem-Spur neben den Sätzen (Modultext); ohne Sensor nie
+        self.atem = bool(atmung) and quelle == QUELLE_SENSOR
         #: das Feld, in das die Wiederholungen kommen (`core.zaehlen.zaehlt_in`)
         self.feld = feld
-        self.rate_hz = int(rate_hz) if rate_hz else zaehl_rate(messlauf.profil)
+        self.rate_hz = int(rate_hz) if rate_hz else zaehl_rate(self.messlauf.profil)
         self.bereich_g = int(bereich_g)
         #: das Profil, von dem die Beschleunigung kommt
-        self.geraet = messlauf.profil.id if messlauf.profil is not None else ""
+        self.geraet = self.messlauf.profil.id if self.messlauf.profil is not None else ""
         #: womit gezählt wird (`core.zaehlen.vorlage_waehlen`): die Vorlage der Übung mit dem
         #: Umkehrpunkt oben — oder Automatisch mit Grund (`VorlageWahl.rueckfall`), wenn sie
         #: die Achsen eines anderen Geräts meint oder hrv-core sie nicht kennt
@@ -410,7 +486,7 @@ class ZaehlBaustein:
         self._atem_fenster_quelle: list[tuple[float, bool]] = []
         #: die Atemspanne des letzten gerechneten Atemzugs (ms) — `atem_spanne_ms`
         self._atem_spanne: float | None = None
-        self._uhr: Callable[[], float] = messlauf.uhr
+        self._uhr: Callable[[], float] = self.messlauf.uhr
         #: (Uhr der Einheit, Uhr der Quelle) beim Start — für `_auf_quelle`
         self._anker: tuple[float, float] | None = None
         self._t0: float | None = None
@@ -420,6 +496,9 @@ class ZaehlBaustein:
         self._vorgemerkt: tuple[str, float] | None = None
         self._neu: list[Ereignis] = []
         self._freigegeben = False
+        #: ob die Beschleunigung angefordert ist (nur mit Sensor) — die Freigabe gibt nur zurück,
+        #: was angefordert war
+        self._acc_angefordert = False
         #: Sah der Teil schon einen Abschnitt einer Uhr? Dann ist jeder zählende Abschnitt ein
         #: Satz — ein Satz von Hand beginnt keinen neuen mitten darin (`von_hand`)
         self._mit_uhr = False
@@ -436,7 +515,26 @@ class ZaehlBaustein:
 
     @property
     def bereit(self) -> bool:
+        if self.quelle == QUELLE_TAKT:
+            return True  # der Takt braucht kein Gerät
         return self.messlauf.status.verbindung == Verbindung.VERBUNDEN
+
+    @property
+    def ohne_geraet(self) -> bool:
+        """Ob kein Messlauf dahintersteht (nur der Takt zählt) — die Einheit nimmt dann nicht
+        seine Uhr, und seine Uhr folgt der Einheit."""
+        return isinstance(self.messlauf, _OhneGeraet)
+
+    @property
+    def takt_zahl(self) -> int | None:
+        """Volle Runden des zählenden Takts im Satz — ``None`` ohne Takt oder vor der ersten."""
+        s = self.satz
+        return s.takt if s is not None else None
+
+    @property
+    def takt_text(self) -> str:
+        """„Takt 12“ neben dem Sensor (`core.zaehlen.takt_neben_text`) — leer ohne Takt."""
+        return takt_neben_text(self.takt_zahl) if self.takt_zaehlt else ""
 
     @property
     def aktiv(self) -> bool:
@@ -548,6 +646,8 @@ class ZaehlBaustein:
             return PHASE_STARTET if self.messlauf.acc_zuletzt is None else PHASE_ATMUNG
         if self._offen is None or self._angehalten_seit is not None:
             return PHASE_PAUSE
+        if self.quelle == QUELLE_TAKT:  # kein Strom — der Takt zählt ab der ersten Runde
+            return PHASE_SAMMELT if self._offen.takt is None else PHASE_ZAEHLT
         if self.messlauf.acc_zuletzt is None:
             return PHASE_STARTET
         return PHASE_SAMMELT if self._offen.sensor is None else PHASE_ZAEHLT
@@ -567,15 +667,18 @@ class ZaehlBaustein:
         dazu = ""
         if self.atem and self.atem_sensor is not None:
             dazu = f" · Atmung {self._atem_text()}"
+        if self.quelle == QUELLE_SENSOR and self.takt_text:
+            dazu = f" · {self.takt_text}{dazu}"  # „Kniebeuge · 11 · Takt 12“
+        takt = " (Takt)" if self.quelle == QUELLE_TAKT else ""
         if phase == PHASE_STARTET and not self.korrektur:
             return f"{self.name} · Sensor startet …"
         if phase == PHASE_SAMMELT and not self.korrektur:
-            return f"{self.name} · …{dazu}"
+            return f"{self.name} · …{takt}{dazu}"
         if phase == PHASE_PAUSE and self.satz is None:
             return f"{self.name} · Pause{dazu}"
         if phase == PHASE_ENDE:
-            return f"{self.name} · {self.summe} Wdh.{dazu}"
-        return f"{self.name} · {self.wert}{dazu}"
+            return f"{self.name} · {self.summe} Wdh.{takt}{dazu}"
+        return f"{self.name} · {self.wert}{takt}{dazu}"
 
     def _atem_text(self) -> str:
         """„12/min ▲“ (`core.zaehlen.atem_text`)."""
@@ -583,7 +686,9 @@ class ZaehlBaustein:
 
     def _daten(self) -> dict[str, Any]:
         daten = kontext_daten(self.kontext)
-        daten.update({"zaehlart": self.zaehlart, "vorlage": self.vorlage})
+        daten.update({"zaehlart": self.zaehlart, "quelle": self.quelle})
+        if self.quelle == QUELLE_SENSOR:
+            daten["vorlage"] = self.vorlage
         if self.feld:
             daten["feld"] = self.feld
         if self.geraet:
@@ -593,8 +698,11 @@ class ZaehlBaustein:
     # -- Baustein ------------------------------------------------------------------------
 
     def uhr_uebernehmen(self, uhr: Callable[[], float]) -> None:
-        """Die Uhr der Einheit — Zeiten der Ereignisse; die Proben liegen auf der der Quelle."""
+        """Die Uhr der Einheit — Zeiten der Ereignisse; die Proben liegen auf der der Quelle.
+        Ohne Gerät gibt es keine Quelle: dann ist es dieselbe Uhr."""
         self._uhr = uhr
+        if self.ohne_geraet:
+            self.messlauf.uhr = uhr
 
     async def vorbereiten(self) -> None:
         return None
@@ -605,7 +713,9 @@ class ZaehlBaustein:
         self._t0 = t0
         self._start_s = round(max((t0 if bei is None else bei) - t0, 0.0), 3)
         self._anker = (self._uhr(), self.messlauf.uhr())
-        self.messlauf.acc_anfordern(ZWECK, self.rate_hz, self.bereich_g)
+        if self.quelle == QUELLE_SENSOR:
+            self.messlauf.acc_anfordern(ZWECK, self.rate_hz, self.bereich_g)
+            self._acc_angefordert = True
         self.messlauf.zaehl_satz = self._fuer_diagnose
         if self.wdh:
             self._satz_beginnen(self._start_s)
@@ -633,6 +743,8 @@ class ZaehlBaustein:
             if self._vorgemerkt is not None:
                 grund, bei = self._vorgemerkt
                 self._enden(bei, grund)
+            elif self.quelle == QUELLE_TAKT:
+                pass  # der Takt zählt (`takt_runden`): kein Strom, nichts endet von selbst
             else:
                 self._wdh_fuettern(t)  # der Live-Zähler: nur das Neue, jeden Takt
                 self._atem_fuettern(t)  # die Atem-Spur ebenso
@@ -653,6 +765,46 @@ class ZaehlBaustein:
                     self.ohne_daten = True
                     self._enden(t, ENDE_ABBRUCH)
         return self._abholen()
+
+    def takt_runden(self, runden: Sequence[tuple[float, int, bool]]) -> None:
+        """Volle Runden des Takts von der Einheit (`Einheitslauf._takt_verteilen`): ``(t_s auf
+        der Achse der Einheit, Runde, zaehlt)`` — nur Runden eines Takts, der zählt, nur im
+        laufenden Satz (angehalten nichts; in der Pause der Uhr nichts), nur ab dem Start des
+        Zählens. Ohne „Takt zählt“ (`takt_zaehlt`) geschieht nichts."""
+        if not self.takt_zaehlt or self._t0 is None or self.grund is not None:
+            return
+        satz = self._offen
+        if satz is None or self._angehalten_seit is not None:
+            return
+        for t_s, _runde, zaehlt in runden:
+            if not zaehlt or t_s < self._start_s - 1e-6:
+                continue
+            satz.takt_runde(t_s)
+            if self.quelle == QUELLE_TAKT:
+                satz.ruhe_seit_s = max(satz.ruhe_seit_s, t_s)
+        self._zwischenstand(satz, max(self._uhr() - self._t0, self._start_s))
+
+    def sensor_dazu(self) -> bool:
+        """„Wdh. zählen“, während der Takt schon zählt: Ab jetzt zählt der Sensor (die Quelle
+        des Laufs wechselt, der Takt bleibt daneben) — der Strom beginnt, ein frischer
+        Live-Zähler für den laufenden Satz. ``False``, wenn es kein Gerät gibt oder der Sensor
+        schon zählt."""
+        if self.quelle == QUELLE_SENSOR or isinstance(self.messlauf, _OhneGeraet):
+            return False
+        if self._t0 is None or self.grund is not None:
+            return False
+        self.quelle = QUELLE_SENSOR
+        self.messlauf.acc_anfordern(ZWECK, self.rate_hz, self.bereich_g)
+        self._acc_angefordert = True
+        t = max(self._uhr() - self._t0, self._start_s)
+        satz = self._offen
+        if satz is not None:
+            satz.quelle = QUELLE_SENSOR
+            satz.ruhe_seit_s = t
+            self._wdh_neu(t)
+        if self.beteiligung is not None:
+            self.beteiligung.daten = daten_pruefen(self._daten())
+        return True
 
     def beenden(self, jetzt: float) -> list[Ereignis]:
         """Mit der Einheit (⏹, Timer durch) — gezählt ist gezählt: ``fertig``, außer der
@@ -835,7 +987,7 @@ class ZaehlBaustein:
     def _satz_beginnen(self, t: float) -> None:
         self._melden()  # der vorige steht jetzt fest
         nr = 1 + sum(1 for s in self.saetze if s.bis_s is not None)
-        satz = ZaehlSatz(nr=nr, von_s=t, stuecke=[[t, None]], ruhe_seit_s=t)
+        satz = ZaehlSatz(nr=nr, von_s=t, stuecke=[[t, None]], ruhe_seit_s=t, quelle=self.quelle)
         satz.diag_nr = self._naechste_diagnose_nr()
         self.saetze.append(satz)
         self._offen = satz
@@ -882,6 +1034,8 @@ class ZaehlBaustein:
             satz.wdh = []
             satz.sensor = None
             satz.halbe = 0
+            satz.takt = None
+            satz.takt_zeiten_s = []
             self._angehalten_seit = None
             self._wdh_neu(t)  # ein frischer Zähler: die Lage zu Satzbeginn ist jetzt
             return
@@ -925,6 +1079,7 @@ class ZaehlBaustein:
         satz = self._offen
         return (
             self.wdh
+            and self.quelle == QUELLE_SENSOR
             and satz is not None
             and self._angehalten_seit is None
             and t - satz.ruhe_seit_s >= KEINE_BEWEGUNG_S
@@ -986,7 +1141,7 @@ class ZaehlBaustein:
     def _wdh_neu(self, t: float) -> None:
         """Ein frischer Live-Zähler für den Satz, der bei ``t`` (Achse der Einheit) beginnt —
         in der Rate des Laufs, mit der Vorlage der Übung (Umkehrpunkt oben)."""
-        if not self.wdh or self._t0 is None:
+        if not self.wdh or self._t0 is None or self.quelle != QUELLE_SENSOR:
             return
         self._wdh_live = prototyp_wdh.WdhLive(float(self.rate_hz), self.vorlage_wahl.vorlage)
         self._wdh_bis_quelle = self._auf_quelle(t)
@@ -1368,6 +1523,7 @@ class ZaehlBaustein:
                 korrektur=satz.korrektur,
                 eingetragen=eingetragen,
                 uebung_id=kurzcode(self.kontext.uebung_id),
+                takt=satz.takt if self.takt_zaehlt else None,
             )
 
     def _zaehlung_schreiben(self, satz: ZaehlSatz, t_s: float, *, immer: bool = False) -> None:
@@ -1383,18 +1539,28 @@ class ZaehlBaustein:
         daten: dict[str, Any] = {
             "satz": satz.nr,
             "zaehlart": self.zaehlart,
-            "sensor": satz.sensor,
+            "quelle": satz.quelle,
             "korrektur": satz.korrektur,
             "wert": satz.wert,
-            "vorlage": self.vorlage,
-            "zeiten_s": list(satz.zeiten_s),
-            "halbe": satz.halbe,
-            "prototyp": PROTOTYP,
         }
+        if satz.quelle == QUELLE_SENSOR:
+            # Der Sensor misst — mit Vorlage und Prototyp; der Takt ist eine Vorgabe, ohne
+            daten.update(
+                {
+                    "sensor": satz.sensor,
+                    "vorlage": self.vorlage,
+                    "zeiten_s": list(satz.zeiten_s),
+                    "halbe": satz.halbe,
+                    "prototyp": PROTOTYP,
+                }
+            )
+            if self.geraet:
+                daten["geraet"] = self.geraet
+        if self.takt_zaehlt and satz.takt is not None:
+            daten["takt"] = satz.takt
+            daten["takt_zeiten_s"] = list(satz.takt_zeiten_s)
         if self.feld:
             daten["feld"] = self.feld
-        if self.geraet:
-            daten["geraet"] = self.geraet
         if satz.von_hand:
             daten["von_hand"] = True  # eingetragen hat ihn die Person (Diagnosemodus)
         self._neu.append(
@@ -1424,6 +1590,10 @@ class ZaehlBaustein:
                     phase="prototyp",
                     t=t_ns,
                 )
+            if self.takt_zaehlt and satz.takt is not None and not satz.von_hand:
+                self._kontext(
+                    "zaehler", feld=self.feld, wert=satz.takt, satz=nr, phase="takt", t=t_ns
+                )
             self._kontext(
                 "zaehlung",
                 wert=satz.wert,
@@ -1442,7 +1612,8 @@ class ZaehlBaustein:
         if self._freigegeben or self._t0 is None:
             return
         self._freigegeben = True
-        self.messlauf.acc_freigeben(ZWECK)
+        if self._acc_angefordert:
+            self.messlauf.acc_freigeben(ZWECK)
         if self.messlauf.zaehl_satz == self._fuer_diagnose:
             self.messlauf.zaehl_satz = None
 

@@ -42,8 +42,10 @@ from .zaehlen import (
     ENDE_KEINE_BEWEGUNG,
     KEIN_ATEM_S,
     KEINE_BEWEGUNG_S,
+    QUELLE_TAKT,
     ZAEHLART_WDH,
     mit_vorzeichen,
+    quelle_name,
 )
 
 #: Welcher Teil eingetragen ist (``teil`` an ``person/eintrag``)
@@ -264,15 +266,32 @@ def zaehl_text(z: Mapping[str, Any]) -> str:
     'Satz 2 · 10 Wdh. (Sensor)'
     >>> zaehl_text({"satz": 1, "wert": 2, "sensor": None, "korrektur": 2})
     'Satz 1 · 2 Wdh. (Sensor –, +2)'
+
+    Zählt der Takt (P138, ``quelle`` takt), heißt es so — und neben dem Sensor steht er dazu:
+
+    >>> zaehl_text({"satz": 1, "wert": 12, "takt": 12, "korrektur": 0, "quelle": "takt"})
+    'Satz 1 · 12 Wdh. (Takt)'
+    >>> zaehl_text({"satz": 1, "wert": 11, "takt": 12, "korrektur": -1, "quelle": "takt"})
+    'Satz 1 · 11 Wdh. (Takt 12, −1)'
+    >>> zaehl_text({"satz": 2, "wert": 11, "sensor": 11, "korrektur": 0, "takt": 12})
+    'Satz 2 · 11 Wdh. (Sensor · Takt 12)'
     """
     satz = ganzzahl_lesen(z.get("satz"), 1)
     wert = max(0, ganzzahl_lesen(z.get("wert")))
-    sensor = z.get("sensor")
+    quelle = str(z.get("quelle") or "")
+    takt_zahl = z.get("takt")
+    sensor = takt_zahl if quelle == QUELLE_TAKT else z.get("sensor")
     korrektur = ganzzahl_lesen(z.get("korrektur"))
+    wer = quelle_name(quelle)
+    daneben = (
+        f" · Takt {ganzzahl_lesen(takt_zahl)}"
+        if quelle != QUELLE_TAKT and takt_zahl is not None
+        else ""
+    )
     if not korrektur:
-        return f"Satz {satz} · {wert} Wdh. (Sensor)"
+        return f"Satz {satz} · {wert} Wdh. ({wer}{daneben})"
     gezaehlt = "–" if sensor is None else str(ganzzahl_lesen(sensor))
-    return f"Satz {satz} · {wert} Wdh. (Sensor {gezaehlt}, {mit_vorzeichen(korrektur)})"
+    return f"Satz {satz} · {wert} Wdh. ({wer} {gezaehlt}, {mit_vorzeichen(korrektur)}{daneben})"
 
 
 def zaehl_texte(ereignisse: Iterable[Ereignis]) -> list[str]:

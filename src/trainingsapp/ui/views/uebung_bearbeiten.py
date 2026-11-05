@@ -46,6 +46,7 @@ import flet as ft
 from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import BILD, Ziel
 from trainingsapp.core.beschreibung import Abschnitt, abschnitte, zusammen
+from trainingsapp.core.bewegungsbild import bewegungsbild, mit_bewegungsbild
 from trainingsapp.core.models import (
     TAG_REGION,
     TAG_TYP,
@@ -85,6 +86,7 @@ from trainingsapp.core.zaehlen import (
     knopf_text,
     vorlagen_angebot,
 )
+from trainingsapp.ui.components.bewegungsbild import bewegungsbild_blatt
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
@@ -251,6 +253,108 @@ def uebung_bearbeiten(
 
     symbol_kachel.on_click = symbol_waehlen
     symbol_zeichnen()
+
+    # -- Bild der Bewegung (Taktgeber Teil 2 T6): ein Medium der Übung, Ablage Medien/Bewegung/
+    bewegung_stand: dict[str, str | None] = {
+        "bild": bewegungsbild(uebung.media) if uebung is not None else None
+    }
+    bewegung_platz = ft.Container()
+
+    def bewegung_setzen(bild: str | None) -> None:
+        bewegung_stand["bild"] = bild
+        bewegung_zeichnen()
+        with contextlib.suppress(Exception):
+            bewegung_platz.update()
+
+    async def bewegung_hochladen() -> None:
+        """Wie `foto_hochladen`, nur in die Ablage der Bewegung — am Rechner auch ein GIF."""
+        if state.hochladen is not None:
+            await wechseln(
+                lambda formular: hochladen_route(formular, Ziel.fuer_bewegung(gespeichert["id"]))
+            )
+            return
+        try:
+            dateien = await ft.FilePicker().pick_files(
+                dialog_title="Bild der Bewegung", allowed_extensions=["jpg", "jpeg", "png", "gif"]
+            )
+        except Exception as fehler:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Auswahl: {fehler}")))
+            return
+        pfad = next((d.path for d in dateien or [] if getattr(d, "path", None)), None)
+        if not pfad:
+            return
+        try:
+            rel = state.bewegungsbilder.schreiben(Path(pfad).read_bytes())
+        except OSError as fehler:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht gespeichert: {fehler}")))
+            return
+        bewegung_setzen(rel)
+
+    async def bewegung_aufnehmen() -> None:
+        await wechseln(
+            lambda formular: aufnahme_route(formular, Ziel.fuer_bewegung(gespeichert["id"]), BILD)
+        )
+
+    def bewegung_waehlen() -> None:
+        page.show_dialog(
+            bewegungsbild_blatt(
+                page,
+                state,
+                uebung_id=uebung.id if uebung is not None else None,
+                bild=bewegung_stand["bild"],
+                waehlen=bewegung_setzen,
+                hochladen=bewegung_hochladen,
+                aufnehmen=bewegung_aufnehmen,
+            )
+        )
+
+    def bewegung_zeichnen() -> None:
+        bild = bewegung_stand["bild"]
+        da = bool(bild) and state.bewegungsbilder.vorhanden(bild)
+        vorschau: ft.Control = (
+            ft.Container(
+                width=40,
+                height=40,
+                border_radius=8,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                content=ft.Image(
+                    src=str(state.bewegungsbilder.datei(bild or "")),
+                    width=40,
+                    height=40,
+                    fit=ft.BoxFit.COVER,
+                ),
+            )
+            if da
+            else ft.Icon(ft.Icons.GIF_BOX_OUTLINED, size=24, opacity=0.6)
+        )
+        bewegung_platz.content = ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                vorschau,
+                ft.Text(
+                    "Bild der Bewegung" + ("" if da else ": keins"),
+                    size=13,
+                    expand=True,
+                    tooltip="Läuft neben der Takt-Anzeige im Timer, als Schleife",
+                ),
+                ft.IconButton(
+                    ft.Icons.EDIT_OUTLINED,
+                    tooltip="Bild der Bewegung wählen",
+                    icon_size=20,
+                    on_click=bewegung_waehlen,
+                ),
+                ft.IconButton(
+                    ft.Icons.CLOSE,
+                    tooltip="Kein Bild",
+                    icon_size=20,
+                    visible=da,
+                    on_click=lambda: bewegung_setzen(None),
+                ),
+            ],
+        )
+
+    bewegung_zeichnen()
     name = ft.TextField(
         label="Name",
         value=uebung.name if uebung else "",
@@ -1582,7 +1686,7 @@ def uebung_bearbeiten(
         ziel.zaehlt_als = zaehlt_als_lesen()
         ziel.beschleunigung = acc_lesen()
         ziel.takt = takt_stand["takt"]
-        ziel.media = [
+        videos = [
             Media(
                 kind=MediaKind.VIDEO,
                 source=MediaSource.URL,
@@ -1592,6 +1696,8 @@ def uebung_bearbeiten(
             for titel, adresse in medien_zeilen
             if (adresse.value or "").strip()
         ]
+        # Das Bild der Bewegung (T6) bleibt als Medium neben den Videos
+        ziel.media = mit_bewegungsbild(videos, bewegung_stand["bild"])
         return ziel
 
     def stand() -> tuple[Any, ...]:
@@ -1621,6 +1727,7 @@ def uebung_bearbeiten(
             zaehlt_als_lesen(),
             acc_lesen().als_dict(),
             takt_stand["takt"].als_dict() if takt_stand["takt"] is not None else None,
+            bewegung_stand["bild"],
             [(v.name, v.symbol, v.kuerzel, v.text) for v in varianten_liste],
             list(umbenennen),
         )
@@ -1722,6 +1829,7 @@ def uebung_bearbeiten(
                                 hilfe_knopf(page, thema="takt"),
                             ],
                         ),
+                        bewegung_platz,
                         ft.Row(
                             wrap=True,
                             spacing=8,

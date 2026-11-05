@@ -608,7 +608,7 @@ def uebung_detail(
             on_click=oeffner(m),
         )
         for m in uebung.media
-        if m.uri
+        if m.uri and str(m.source) != "local"  # das Bild der Bewegung (T6) ist kein Link
     ]
 
     abschnitte: list[ft.Control] = []

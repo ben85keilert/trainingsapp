@@ -56,6 +56,16 @@ und die Live-Schattierung (`views/live_vollbild.py`) zeigen:
   langsames oder getaktetes Atmen bleibt die Regel von Entscheidung 20): sonst steht der
   Grund da (`schwellen_hinweis`), keine Wertung.
 
+- **Taktgeber Teil 2 (T4)**: Trägt das Beiwerk die Soll-Phasen des Takts (`Atem.takt`,
+  Vertrag §15), legt `soll_ist_versatz` je Atemzug das Ist-„ein“ des Sensors an das nächste
+  Soll-„ein“ (Median und Quartile des Versatzes, nur innerhalb der Takt-Läufe und der Läufe
+  „Atmung erfassen“), `soll_atem` macht aus dem Takt ein zweites `Atem` (Phasen = Soll, Läufe =
+  Takt-Läufe), damit `atem_hrv_zuege` die Atem-HRV auch **gegen Soll** rechnet (Entscheidung
+  25 Frage 7: beides zeigen, `phasenlage_soll_text`), `takt_text` ist die Zeile der Karte
+  („Takt: Atmung 4-6 · 6,0/min · Soll–Ist Versatz Median +0,4 s“), und für Regel F6 ist die
+  Takt-Rate (`takt_rate`: aus dem Beiwerk, sonst aus dem Protokollfeld) die **dritte Quelle**,
+  wenn Sensor und RR-Atmung nichts hergeben (`hinweis_rate(…, takt_rate=)`).
+
 Was hier herauskommt, wird nie gespeichert (§7.4) und ist beschreibend: keine Bewertung,
 keine Empfehlung (`docs/recht/00_zweckbestimmung.md`). Die Atem-HRV ist ein Prototyp
 (`hrv_core.prototyp`, Eingang mit Ausnahme, P134): eine Sitzung mit Takt, eine unter Störung;
@@ -74,6 +84,7 @@ from typing import Any, Final
 import numpy as np
 from hrv_core import herzfrequenz as hz
 from hrv_core.atem import PHASEN, Atem
+from hrv_core.atem import Takt as AtemTakt
 from hrv_core.atmung import ATEMLAGE_UNBEKANNT, ATEMUEBUNG, RUHE, atemlage
 from hrv_core.frequency import ATEM_FELDER, Fensterspektrum, bandleistung_atem
 from hrv_core.prototyp import atem_hrv as ah
@@ -126,6 +137,8 @@ VERGLEICH_ABWEICHUNG_PRO_MIN: Final[float] = 2.0
 #: Quelle der Rate für den Hinweis
 QUELLE_SENSOR: Final[str] = "sensor"
 QUELLE_RR: Final[str] = "rr"
+#: … und die Takt-Rate (T4): die dritte Quelle für F6, wenn Sensor und RR fehlen
+QUELLE_TAKT: Final[str] = "takt"
 #: Wie die Karte die Quelle nennt
 QUELLE_TEXT: Final[str] = "Sensor · Prototyp"
 
@@ -571,8 +584,10 @@ def quelle_text(k: AtemKennzahlen, geraet_name: str = "") -> str:
     >>> quelle_text(AtemKennzahlen(0, None, 0, 0, 0.0, None, None, geraet="polar_h10"), "Polar H10")
     'Sensor · Prototyp · Polar H10'
     >>> quelle_text(AtemKennzahlen(0, None, 0, 0, 0.0, None, None, quelle="takt"))
-    'Takt'
+    'nur Takt (Soll) — kein Sensor'
     """
+    if k.quelle == QUELLE_TAKT:
+        return "nur Takt (Soll) — kein Sensor"
     teile = [QUELLE_TEXT if k.quelle in ("", "sensor") else k.quelle.capitalize()]
     if geraet_name or k.geraet:
         teile.append(geraet_name or k.geraet)
@@ -738,7 +753,7 @@ def licht_text(rate: tuple[float, str] | None, ein_aus: float | None, protokoll:
     """
     if rate is None and ein_aus is None and not protokoll:
         return ""
-    quelle = {QUELLE_SENSOR: "Sensor", QUELLE_RR: "aus RR"}
+    quelle = {QUELLE_SENSOR: "Sensor", QUELLE_RR: "aus RR", QUELLE_TAKT: "Takt"}
     teile = [
         f"Atmung {rate_text(rate[0])} ({quelle.get(rate[1], rate[1])})" if rate else "Atmung –"
     ]
@@ -801,10 +816,13 @@ def rr_modus(feld: Mapping[str, Any] | None, atemuebung: bool) -> str:
     return ATEMUEBUNG if atemuebung else RUHE
 
 
-def hinweis_rate(sensor: AtemKennzahlen | None, rr_rate: float | None) -> tuple[float, str] | None:
+def hinweis_rate(
+    sensor: AtemKennzahlen | None, rr_rate: float | None, takt_rate: float | None = None
+) -> tuple[float, str] | None:
     """Welche Atemrate für den Hinweis gilt — Regel F6 (P136), **je Bereich**: die Rate des
     Sensors, wenn sie für den Bereich spricht (`sensor_rate_gilt`: genug Fenster gültig, genug
     abgedeckt), sonst die Atmung aus RR **desselben Bereichs** (im Modus nach `rr_modus`),
+    sonst die Rate des **Takts** (T4: eine Vorgabe — sie gilt nur, wenn nichts gemessen wurde),
     sonst keine. ``(rate, Quelle)``. Widersprechen sich beide, gilt der Sensor — der Vergleich
     (`vergleich_text`) nennt die Abweichung.
 
@@ -819,12 +837,16 @@ def hinweis_rate(sensor: AtemKennzahlen | None, rr_rate: float | None) -> tuple[
     >>> kurz = AtemKennzahlen(6, 6.0, 7, 7, 60.0, 1.5, 0.0, bereich_s=1200.0)  # 60 s von 20 min
     >>> hinweis_rate(kurz, 15.0)
     (15.0, 'rr')
+    >>> hinweis_rate(None, None, 6.0), hinweis_rate(None, 9.5, 6.0)
+    ((6.0, 'takt'), (9.5, 'rr'))
     """
     if sensor_rate_gilt(sensor):
         assert sensor is not None and sensor.rate is not None
         return sensor.rate, QUELLE_SENSOR
     if rr_rate is not None:
         return float(rr_rate), QUELLE_RR
+    if takt_rate is not None and takt_rate > 0:
+        return float(takt_rate), QUELLE_TAKT
     return None
 
 
@@ -1060,6 +1082,217 @@ def spektrum_der_messung(f: Mapping[str, Any] | None) -> Fensterspektrum | None:
     if fs is None or f is None or f.get("atem_band_hz") is None:
         return fs
     return replace(fs, werte={**fs.werte, **{k: f.get(k) for k in ATEM_FELDER}})
+
+
+# ---------------------------------------------------------------------------
+# Taktgeber Teil 2 (T4): Soll gegen Ist
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class SollIst:
+    """Der Versatz Ist-„ein“ (Sensor) gegen das nächste Soll-„ein“ (Takt) je Atemzug —
+    positiv: das Einatmen kam nach dem Takt, negativ: davor."""
+
+    #: Atemzüge, die verglichen wurden
+    n: int
+    median_s: float | None
+    q25_s: float | None
+    q75_s: float | None
+
+
+def takt_laeufe(atem: Atem) -> list[tuple[float, float]]:
+    """Die Takt-Läufe ``(von_s, bis_s)`` des Beiwerks — leer ohne Takt; ohne Läufe (altes
+    Feld) die Spanne der Soll-Phasen.
+
+    >>> takt_laeufe(Atem()), takt_laeufe(Atem(takt=AtemTakt(phasen=[(2.0, "ein"), (6.0, "aus")])))
+    ([], [(2.0, 6.0)])
+    """
+    t: AtemTakt | None = atem.takt
+    if t is None or not t.phasen:
+        return []
+    if t.laeufe:
+        return [(von, bis) for von, bis, _, _ in t.laeufe]
+    return [(t.phasen[0][0], t.phasen[-1][0])]
+
+
+def takt_bereiche(atem: Atem, von_s: float, bis_s: float) -> list[tuple[float, float]]:
+    """Die Takt-Läufe, auf ``[von_s, bis_s]`` beschnitten — für das Band der Ebene."""
+    return [
+        (max(a, von_s), min(b, bis_s))
+        for a, b in takt_laeufe(atem)
+        if b > von_s and a < bis_s and min(b, bis_s) > max(a, von_s)
+    ]
+
+
+def soll_phasen_in(atem: Atem, von_s: float, bis_s: float) -> list[tuple[float, str]]:
+    """Die Soll-Phasen des Takts in ``[von_s, bis_s]`` — für die feinen Linien der Ebene."""
+    return atem.takt_phasen_zwischen(von_s, bis_s)
+
+
+def soll_atem(atem: Atem) -> Atem | None:
+    """Der Takt als zweites `Atem`: Phasen = Soll-Phasen, Läufe = Takt-Läufe, Quelle ``takt``
+    — damit `atem_hrv_zuege` die Atem-HRV gegen Soll rechnet. ``None`` ohne Takt.
+
+    >>> a = Atem(takt=AtemTakt(name="A", rate_pro_min=6.0, phasen=[(0.0, "ein"), (4.0, "aus")],
+    ...                        laeufe=[(0.0, 10.0, "A", 6.0)]))
+    >>> s = soll_atem(a); s.quelle, s.erfasst, s.phasen, soll_atem(Atem()) is None
+    ('takt', [(0.0, 10.0)], [(0.0, 'ein'), (4.0, 'aus')], True)
+    """
+    if atem.takt is None or not atem.takt.phasen:
+        return None
+    return Atem(
+        quelle=QUELLE_TAKT,
+        geraet=atem.geraet,
+        art=atem.art,
+        erfasst=takt_laeufe(atem),
+        phasen=list(atem.takt.phasen),
+    )
+
+
+def soll_ist_versatz(atem: Atem, von_s: float | None = None, bis_s: float | None = None) -> SollIst:
+    """Je Ist-„ein“ des Sensors (innerhalb der Läufe „Atmung erfassen“ **und** eines
+    Takt-Laufs, im Bereich) der Abstand zum nächstgelegenen Soll-„ein“ des Takts — Median und
+    Quartile in Sekunden, Vorzeichen: Ist minus Soll. Ohne Takt oder ohne Sensor ``n = 0``.
+
+    >>> takt = AtemTakt(phasen=[(10.0 * k + p, a) for k in range(4) for p, a in ((0.0, "ein"),
+    ...                                                                       (4.0, "aus"))],
+    ...                 laeufe=[(0.0, 40.0, "A", 6.0)])
+    >>> ist = [(10.0 * k + p, a) for k in range(4) for p, a in ((0.5, "ein"), (4.2, "aus"))]
+    >>> a = Atem(erfasst=[(0.0, 40.0)], phasen=ist, takt=takt)
+    >>> v = soll_ist_versatz(a); v.n, v.median_s, v.q25_s, v.q75_s
+    (4, 0.5, 0.5, 0.5)
+    >>> soll_ist_versatz(a, 15.0, 40.0).n, soll_ist_versatz(Atem(phasen=ist)).n
+    (2, 0)
+    """
+    laeufe = takt_laeufe(atem)
+    if not laeufe or atem.takt is None:
+        return SollIst(0, None, None, None)
+    lo = -float("inf") if von_s is None else von_s
+    hi = float("inf") if bis_s is None else bis_s
+    soll = sorted(t for t, art in atem.takt.phasen if art == EIN)
+    if not soll:
+        return SollIst(0, None, None, None)
+    ist = [
+        t
+        for g, _ in je_lauf(atem.phasen, atem.erfasst)
+        for t, art in g
+        if art == EIN and lo <= t <= hi and any(a - _EPS <= t <= b + _EPS for a, b in laeufe)
+    ]
+    versatz: list[float] = []
+    for t in ist:
+        k = int(np.searchsorted(soll, t))
+        kandidaten = [soll[j] for j in (k - 1, k) if 0 <= j < len(soll)]
+        naechste = min(kandidaten, key=lambda s: abs(t - s))
+        versatz.append(t - naechste)
+    if not versatz:
+        return SollIst(0, None, None, None)
+    q25, q50, q75 = (float(x) for x in np.percentile(versatz, (25, 50, 75)))
+    return SollIst(len(versatz), round(q50, 2), round(q25, 2), round(q75, 2))
+
+
+def takt_rate(atem: Atem | None, feld: Mapping[str, Any] | None = None) -> float | None:
+    """Die Rate des Takts: aus dem Beiwerk (der letzte Lauf), sonst aus dem Protokollfeld
+    ``atmung`` (``takt_pro_min`` bei ``getaktet``) — ``None`` ohne beides.
+
+    >>> takt_rate(Atem(takt=AtemTakt(rate_pro_min=6.0, phasen=[(0.0, "ein")])), None)
+    6.0
+    >>> takt_rate(None, {"art": "getaktet", "takt_pro_min": 5.5}), takt_rate(None, None)
+    (5.5, None)
+    """
+    if atem is not None and atem.takt is not None and atem.takt.rate_pro_min:
+        return float(atem.takt.rate_pro_min)
+    if feld is not None and feld.get("art") == ART_GETAKTET:
+        rate = feld.get("takt_pro_min")
+        if isinstance(rate, int | float) and not isinstance(rate, bool) and rate > 0:
+            return float(rate)
+    return None
+
+
+def takt_rate_in(atem: Atem | None, von_s: float, bis_s: float) -> float | None:
+    """Die Takt-Rate eines Bereichs: die des Takt-Laufs, der ihn am längsten abdeckt —
+    ``None``, wenn dort keiner lief.
+
+    >>> t = AtemTakt(phasen=[(0.0, "ein")], laeufe=[(0.0, 20.0, "A", 6.0), (20.0, 60.0, "A", 4.0)])
+    >>> takt_rate_in(Atem(takt=t), 10.0, 50.0), takt_rate_in(Atem(takt=t), 70.0, 80.0)
+    (4.0, None)
+    """
+    if atem is None or atem.takt is None or not atem.takt.laeufe:
+        return None
+    beste: tuple[float, float | None] | None = None
+    for von, bis, _, rate in atem.takt.laeufe:
+        dauer = min(bis, bis_s) - max(von, von_s)
+        if dauer > 0 and (beste is None or dauer > beste[0]):
+            beste = (dauer, rate)
+    return float(beste[1]) if beste is not None and beste[1] else None
+
+
+def versatz_text(v: SollIst) -> str:
+    """„Soll–Ist Versatz Median +0,5 s (IQR +0,3 bis +0,8, 12 Atemzüge)“ — leer ohne Vergleich.
+
+    >>> versatz_text(SollIst(12, 0.5, 0.3, 0.8)), versatz_text(SollIst(0, None, None, None))
+    ('Soll–Ist Versatz Median +0,5 s (IQR +0,3 bis +0,8 s, 12 Atemzüge)', '')
+    """
+    if not v.n or v.median_s is None:
+        return ""
+
+    def z(x: float | None) -> str:
+        return ("+" if x is not None and x >= 0 else "") + _zahl(x or 0.0).replace("-", "−")
+
+    return (
+        f"Soll–Ist Versatz Median {z(v.median_s)} s (IQR {z(v.q25_s)} bis {z(v.q75_s)} s, "
+        f"{v.n} Atemzüge)"
+    )
+
+
+def takt_text(atem: Atem, v: SollIst | None = None) -> str:
+    """Die Zeile der Karte „Atmung“: „Takt: Atmung 4-6 · 6,0/min · Soll–Ist Versatz …“ —
+    ohne Sensor „… · kein Sensor, nur Soll“; leer ohne Takt.
+
+    >>> t = AtemTakt(name="Atmung 4-6", rate_pro_min=6.0, phasen=[(0.0, "ein")],
+    ...              laeufe=[(0.0, 60.0, "Atmung 4-6", 6.0)])
+    >>> takt_text(Atem(takt=t), SollIst(0, None, None, None))
+    'Takt: Atmung 4-6 · 6,0/min · 1:00 · kein Sensor, nur Soll'
+    >>> takt_text(Atem(takt=t), SollIst(9, 0.4, 0.2, 0.6)).split(" · ")[3:]
+    ['Soll–Ist Versatz Median +0,4 s (IQR +0,2 bis +0,6 s, 9 Atemzüge)']
+    >>> takt_text(Atem())
+    ''
+    """
+    t = atem.takt
+    if t is None or not t.phasen:
+        return ""
+    teile = ["Takt: " + (t.name or "Takt")]
+    if t.rate_pro_min:
+        teile.append(rate_text(t.rate_pro_min))
+    dauer = sum(b - a for a, b in takt_laeufe(atem))
+    if dauer > 0:
+        teile.append(minuten(dauer))
+    if v is not None and v.n:
+        teile.append(versatz_text(v))
+    else:
+        teile.append("kein Sensor, nur Soll")
+    return " · ".join(teile)
+
+
+def phasenlage_soll_text(ist: AtemHrvBereich, soll: AtemHrvBereich | None) -> str:
+    """Die Phasenlage gegen Ist **und** gegen Soll (Entscheidung 25 Frage 7): „HF-Gipfel 4,0 s
+    nach Einatembeginn (Ist) · 3,6 s (Soll)“ — ohne Soll wie `phasenlage_text`.
+
+    >>> h = _beispiel()
+    >>> phasenlage_soll_text(h, None)
+    'HF-Gipfel 4,0 s nach Einatembeginn'
+    >>> phasenlage_soll_text(h, h)
+    'HF-Gipfel 4,0 s nach Einatembeginn (Ist) · 4,0 s (Soll)'
+    >>> phasenlage_soll_text(atem_hrv([]), h)
+    'HF-Gipfel – (Ist) · 4,0 s (Soll)'
+    """
+    if soll is None:
+        return phasenlage_text(ist)
+    links = (
+        "–" if ist.gipfel_ab_ein_s is None else f"{_zahl(ist.gipfel_ab_ein_s)} s nach Einatembeginn"
+    )
+    rechts = "–" if soll.gipfel_ab_ein_s is None else f"{_zahl(soll.gipfel_ab_ein_s)} s"
+    return f"HF-Gipfel {links} (Ist) · {rechts} (Soll)"
 
 
 __all__ = [

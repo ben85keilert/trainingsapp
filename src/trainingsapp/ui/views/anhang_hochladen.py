@@ -244,15 +244,22 @@ class _Hochladen:
     async def behalten(self) -> None:
         if not self.fertig or self.ziel is None or self.art is None:
             return
-        if self.woran.uebung_id is not None:
-            # Das Bild einer Übung (2.11.2026): in die Ablage, nicht an einen Eintrag
+        bild_von = self.woran.uebung_id or self.woran.bewegung_id
+        if bild_von is not None:
+            # Das Bild einer Übung (2.11.2026) oder das Bild der Bewegung (5.11.2026, T6): in
+            # die Ablage, nicht an einen Eintrag
             if self.art != BILD:
-                self.melden("Als Symbol geht nur ein Foto.")
+                self.melden("Als Bild geht nur ein Foto.")
                 return
+            repo = (
+                self.state.bewegungsbilder
+                if self.woran.bewegung_id is not None
+                else self.state.uebungsbilder
+            )
             try:
                 # Verschieben im Thread, die Zeile im Event-Loop (die Verbindung gehört ihm)
-                rel = await asyncio.to_thread(self.state.uebungsbilder.uebernehmen, self.ziel)
-                self.state.uebungsbilder.setzen(self.woran.uebung_id, rel)
+                rel = await asyncio.to_thread(repo.uebernehmen, self.ziel)
+                repo.setzen(bild_von, rel)
             except (OSError, sqlite3.Error) as fehler:
                 self.melden(f"Nicht gespeichert: {fehler}")
                 return

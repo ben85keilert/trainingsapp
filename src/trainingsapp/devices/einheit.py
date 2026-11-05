@@ -68,6 +68,7 @@ from ..core.takt import Takt
 from ..core.timer import Marke, TimerLauf
 from .base import Verbindung
 from .messlauf import Gespeichert, Messlauf
+from .takt_lauf import TaktNeu, TaktVerfolger, in_die_messung
 
 #: So viel Tiefschlaf (s) zwischen zwei Takten wird ein Ereignis ``einheit/schlaf``
 SCHLAF_AB_S = 2.0
@@ -111,6 +112,11 @@ class TimerBaustein:
         self._abgebrochen_gemeldet = False
         #: Der Abschnitt, für den ``timer/takt`` zuletzt geschrieben wurde (`_takt_melden`)
         self._takt_gemeldet: int | None = None
+        #: Der Takt Tick für Tick (Teil 2, `devices.takt_lauf`): Takt-Läufe, Soll-Phasen und
+        #: volle Runden — die Einheit holt sie ab (`takt_abholen`) und bringt sie zur HRV
+        #: (Beiwerk, Marken) und zum Zähl-Teil („Takt zählt“), nicht über die Zeitleiste
+        self.verfolger = TaktVerfolger(lauf)
+        self._takt_neu: TaktNeu | None = None
 
     def uhr_uebernehmen(self, uhr: Callable[[], float]) -> None:
         """Die Uhr der Einheit — beim HRV-Simulator läuft sie schneller (`Einheitslauf`)."""
@@ -195,7 +201,29 @@ class TimerBaustein:
                 daten["zaehlt"] = False
             out.append(Ereignis(t, "timer", "abschnitt", m.text, daten))
         out.extend(self._takt_melden(jetzt, marken))
+        self._takt_sammeln(self.verfolger.nachziehen(jetzt))
         return out
+
+    def _takt_sammeln(self, neu: TaktNeu) -> None:
+        """Was der Verfolger meldet, bis zum Abholen aufheben (zwei Takte ohne Abholen:
+        zusammenlegen — Ende und Beginn des späteren gelten, Phasen und Runden beide)."""
+        if neu.leer:
+            return
+        alt = self._takt_neu
+        if alt is None or alt.leer:
+            self._takt_neu = neu
+            return
+        self._takt_neu = TaktNeu(
+            ende=neu.ende if neu.ende is not None else alt.ende,
+            beginn=neu.beginn if neu.beginn is not None else alt.beginn,
+            phasen=[*alt.phasen, *neu.phasen],
+            runden=[*alt.runden, *neu.runden],
+        )
+
+    def takt_abholen(self) -> TaktNeu | None:
+        """Was der Takt seit dem letzten Abholen tat — ``None``, wenn nichts."""
+        neu, self._takt_neu = self._takt_neu, None
+        return neu
 
     def _takt_melden(self, jetzt: float, marken: list[Marke]) -> list[Ereignis]:
         """``timer/takt`` (`docs/plan_einheit.md` §4, Taktgeber §3): einmal am Beginn eines
@@ -255,6 +283,7 @@ class TimerBaustein:
             out.append(
                 Ereignis(jetzt - self._t0, "timer", "ende", "Timer beendet", {"grund": "beendet"})
             )
+        self._takt_sammeln(self.verfolger.beenden(jetzt))  # ein offener Takt-Lauf endet mit
         return out
 
 
@@ -592,7 +621,9 @@ class Einheitslauf:
         from .zaehlen import ZaehlBaustein  # spät: das Zählen baut auf dieser Datei auf
 
         self.teile.append(teil)
-        if isinstance(teil, HrvBaustein) or (isinstance(teil, ZaehlBaustein) and self.hrv is None):
+        if isinstance(teil, HrvBaustein) or (
+            isinstance(teil, ZaehlBaustein) and self.hrv is None and not teil.ohne_geraet
+        ):
             # Mit HRV (oder dem Zählen, das ihren Puffer liest) gilt die Uhr der Quelle
             # (Simulator!)
             self.uhr = teil.messlauf.uhr
@@ -881,6 +912,7 @@ class Einheitslauf:
         gesammelt.sort(key=lambda e: e.t_s)
         gesammelt = self._mit_uebung(gesammelt)
         self._beobachten(self.teile, gesammelt)
+        self._takt_verteilen()
         self._aufnehmen(gesammelt, jetzt)
         neu.extend(gesammelt)
         if neu and self.beobachter is not None:
@@ -889,6 +921,29 @@ class Einheitslauf:
         if self._zu_ende(neu):
             self.beenden()
         return neu
+
+    def _takt_verteilen(self) -> None:
+        """Taktgeber Teil 2: was der Timer-Teil im Takt sah (`TimerBaustein.takt_abholen`),
+        an die HRV — Soll-Phasen und Takt-Läufe ins Beiwerk ``atem-v1``, das Paar Notizen
+        `timer/takt` … `timer/ende` auf der Spur ``atemtakt`` (`devices.takt_lauf.in_die_messung`,
+        Vertrag §4 und §15; nur Atemtakte) — und die vollen Runden an den Zähl-Teil („Takt
+        zählt“, P138, `ZaehlBaustein.takt_runden`; Zeiten auf der Achse der Einheit). Nicht
+        über die Zeitleiste: Phasen und Runden wären zu viele (`plan_einheit` §4)."""
+        timer = self.timer
+        if timer is None or self.t0 is None:
+            return
+        neu = timer.takt_abholen()
+        if neu is None or neu.leer:
+            return
+        hrv = self.hrv
+        if hrv is not None and id(hrv) in self._gestartet:
+            in_die_messung(hrv.messlauf, neu, profil=timer.lauf.profil.markenname)
+        z = self.teil("zaehlen")
+        runden = getattr(z, "takt_runden", None)
+        if z is not None and callable(runden) and neu.runden and id(z) in self._gestartet:
+            t0 = self.t0
+            with contextlib.suppress(Exception):  # der Zähl-Teil darf den Takt nie stoppen
+                runden([(round(t - t0, 3), runde, zaehlt) for t, runde, zaehlt in neu.runden])
 
     def _zu_ende(self, neu: Sequence[Ereignis]) -> bool:
         """Endet die Einheit jetzt? Mit dem Timer bzw. dem Plan-Ablauf, wenn so eingestellt —
@@ -1071,6 +1126,7 @@ class Einheitslauf:
         gesammelt.sort(key=lambda e: e.t_s)
         gesammelt = self._mit_uebung(gesammelt)
         self._beobachten(self.teile, gesammelt)
+        self._takt_verteilen()
         ende = Ereignis(
             max(t, 0.0), "einheit", "ende", self.titel, {"grund": grund} if grund else {}
         )

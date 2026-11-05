@@ -255,7 +255,12 @@ class Ziel:
     ('uebung/u1', True)
 
     Seit 2.11.2026 auch **das Bild einer Übung** (`uebung_id`, `data/uebungsbilder.py`): kein
-    Anhang, sondern ihr Symbol — die Kamera und die Fotoauswahl liefern es.
+    Anhang, sondern ihr Symbol — die Kamera und die Fotoauswahl liefern es. Seit 5.11.2026 das
+    **Bild der Bewegung** (`bewegung_id`, Taktgeber Teil 2 T6, Ablage ``Medien/Bewegung/``):
+    ein Medium an der Übung, gezeigt neben der Takt-Anzeige.
+
+    >>> Ziel.fuer_bewegung("u1").teil, Ziel.fuer_bewegung("u1").ist_bewegung
+    ('bewegung/u1', True)
     """
 
     eintrag_id: str | None = None
@@ -263,6 +268,7 @@ class Ziel:
     zum_tag: date | None = None
     notiz_id: str | None = None
     uebung_id: str | None = None
+    bewegung_id: str | None = None
 
     @classmethod
     def fuer_eintrag(cls, eintrag_id: str) -> Ziel:
@@ -276,6 +282,14 @@ class Ziel:
     def fuer_uebung(cls, uebung_id: str) -> Ziel:
         return cls(uebung_id=uebung_id)
 
+    @classmethod
+    def fuer_bewegung(cls, uebung_id: str) -> Ziel:
+        return cls(bewegung_id=uebung_id)
+
+    @property
+    def ist_bewegung(self) -> bool:
+        return self.bewegung_id is not None
+
     @property
     def ist_notiz(self) -> bool:
         return self.notiz_id is not None
@@ -286,18 +300,22 @@ class Ziel:
 
     @property
     def teil(self) -> str:
-        """Der Routenteil: die ID des Eintrags, ``notiz/<id>`` oder ``uebung/<id>``."""
+        """Der Routenteil: die ID des Eintrags, ``notiz/<id>``, ``uebung/<id>`` oder
+        ``bewegung/<id>``."""
         if self.notiz_id is not None:
             return f"{NOTIZ_TEIL}/{self.notiz_id}"
         if self.uebung_id is not None:
             return f"{UEBUNG_TEIL}/{self.uebung_id}"
+        if self.bewegung_id is not None:
+            return f"{BEWEGUNG_TEIL}/{self.bewegung_id}"
         return self.eintrag_id or ""
 
 
-#: Routenteile für die Notiz zum Tag und die Übung als Ziel — eine Eintrags-ID (UUID) heißt
-#: nie so
+#: Routenteile für die Notiz zum Tag, die Übung und das Bild der Bewegung als Ziel — eine
+#: Eintrags-ID (UUID) heißt nie so
 NOTIZ_TEIL = "notiz"
 UEBUNG_TEIL = "uebung"
+BEWEGUNG_TEIL = "bewegung"
 
 
 def ziel_lesen(teile: list[str], profil_id: str) -> tuple[Ziel, list[str]] | None:
@@ -305,8 +323,9 @@ def ziel_lesen(teile: list[str], profil_id: str) -> tuple[Ziel, list[str]] | Non
     ``None``, wenn dort keins steht. Eine Notiz gilt für das aktive Profil; ihren Tag trägt
     erst die Ansicht nach, die sie lädt (`app.anhang_ziel`).
 
-    >>> ziel_lesen(["e1", "foto"], "p1")
-    (Ziel(eintrag_id='e1', profil_id=None, zum_tag=None, notiz_id=None, uebung_id=None), ['foto'])
+    >>> z, rest = ziel_lesen(["e1", "foto"], "p1")
+    >>> z.eintrag_id, z.notiz_id, z.uebung_id, z.bewegung_id, rest
+    ('e1', None, None, None, ['foto'])
     >>> z, rest = ziel_lesen(["notiz", "n1", "audio"], "p1")
     >>> z.notiz_id, z.profil_id, z.zum_tag, rest
     ('n1', 'p1', None, ['audio'])
@@ -314,14 +333,18 @@ def ziel_lesen(teile: list[str], profil_id: str) -> tuple[Ziel, list[str]] | Non
     (None, None)
     >>> ziel_lesen(["uebung", "u1", "foto"], "p1")[0].uebung_id
     'u1'
+    >>> ziel_lesen(["bewegung", "u1", "foto"], "p1")[0].bewegung_id
+    'u1'
     """
     if not teile:
         return None
-    if teile[0] in (NOTIZ_TEIL, UEBUNG_TEIL):
+    if teile[0] in (NOTIZ_TEIL, UEBUNG_TEIL, BEWEGUNG_TEIL):
         if len(teile) < 2 or not teile[1]:
             return None
         if teile[0] == UEBUNG_TEIL:
             return Ziel.fuer_uebung(teile[1]), teile[2:]
+        if teile[0] == BEWEGUNG_TEIL:
+            return Ziel.fuer_bewegung(teile[1]), teile[2:]
         return Ziel(profil_id=profil_id, notiz_id=teile[1]), teile[2:]
     return Ziel.fuer_eintrag(teile[0]), teile[1:]
 
@@ -833,6 +856,7 @@ def fehlende(anhaenge: Iterable[Anhang], vorhanden: Iterable[str]) -> list[Anhan
 __all__ = [
     "AUDIO",
     "AUDIO_MAX_S",
+    "BEWEGUNG_TEIL",
     "BILD",
     "BLITZ",
     "ENDUNG",

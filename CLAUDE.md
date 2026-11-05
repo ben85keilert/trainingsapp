@@ -290,8 +290,24 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Lauf** (`TempoRegler`) ist `TimerLauf.tempo_setzen` — für jetzt (P139). Die Animation
   (`components/takt_anzeige.TaktAnzeige`, nach Phasenzahl: Puls, Kreis, Kreis mit Halten, Box,
   Balken, Welle) wird **einmal gebaut**, `nachziehen` setzt je Tick nur Werte, `animate_scale` mit
-  der Phasendauer (V1). Teil 2 (Marke `atemtakt`, `atmung` getaktet, Soll-Phasen in `atem-v1`,
-  „Takt zählt“, GIFs) folgt.
+  der Phasendauer (V1). **Teil 2** (5.11.2026, 0.3.51, `docs/plan_taktgeber.md` §10): der
+  `TaktVerfolger` (`devices/takt_lauf.py`) sagt je Tick der Einheit, was im Takt geschah
+  (Takt-Lauf begann/endete, Soll-Phasen, volle Runden) — die Einheit bringt es **nicht über die
+  Zeitleiste**, sondern direkt zur HRV (`Messlauf.atem_takt_beginn/phase/ende`: Feld `takt` im
+  Beiwerk `atem-v1`, ein Paar Notizen `timer/takt` … `timer/ende` auf der Spur `atemtakt` ohne
+  Abschnittsgrenze und ohne 5-s-Regel, Protokollfeld `atmung` `getaktet` mit der Rate des
+  längsten Laufs — nur Atemtakte) und zum Zähl-Teil (`ZaehlBaustein.takt_runden`). Die
+  Auswertung legt Soll über Ist (feine Linien, Versatz-Median je Atemzug, Phasenlage gegen Ist
+  und Soll, `core/atem_auswertung.soll_ist_versatz`/`soll_atem`), die Takt-Rate ist für F6 die
+  **dritte** Quelle (ein Soll ist keine Messung). **Takt zählt** (P138): `Takt.zaehlt`
+  (Schalter im Blatt, Bewegungs-Vorlagen an) → `uebung_lauf.takt_zaehlen_anbringen` lässt mit
+  der Uhr der Übung einen Zähl-Teil mit `quelle="takt"` antreten, auch **ohne Gerät**
+  (`messlauf=None`, `_OhneGeraet`); jede volle Runde eine Wiederholung, Zählzeile „Takt 12“ (nie
+  „Prototyp“), mit Sensor zählt der Sensor und der Takt steht daneben (`zaehlung` mit `quelle`,
+  `takt`, `takt_zeiten_s`; nur der Sensor im Eintrag). Das **Bild der Bewegung** ist ein Medium
+  der Übung (`core/bewegungsbild.py`, Ablage `Medien/Bewegung/`, `BewegungsbildRepo`, Weg
+  `bewegung/<id>`), läuft als `ft.Image`-Schleife neben der Takt-Anzeige im „Während“ — nie in
+  Paket, Export oder Sync.
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`

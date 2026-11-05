@@ -52,7 +52,7 @@ import logging
 import os
 import time
 from collections import deque
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,7 +60,7 @@ from typing import Any
 
 import numpy as np
 from hrv_core import mitschnitt as mt
-from hrv_core.atem import QUELLE_SENSOR, AtemSammler, atem_journal_pfad, atem_pfad
+from hrv_core.atem import QUELLE_SENSOR, QUELLE_TAKT, AtemSammler, atem_journal_pfad, atem_pfad
 from hrv_core.aufnahme import Aufnahme, backup_entfernen, backup_lesen
 from hrv_core.ausschnitte import (
     Abschnitt,
@@ -81,7 +81,7 @@ from hrv_core.zeitachse import Kontinuitaetsuhr
 
 from ..config import app_version
 from ..core import abschnitte as eigene_abschnitte
-from ..core.atem_protokoll import feld_lesen, kopffeld_schreiben
+from ..core.atem_protokoll import SPUR_ATEMTAKT, feld_lesen, kopffeld_schreiben
 from ..core.diagnose import kontext_aus_notizen as diagnose_marken_kontext
 from ..core.diagnose import kontext_zeile as diagnose_kontext
 from ..core.einheit import SPUR_TIMER
@@ -394,6 +394,14 @@ class Messlauf:
         self.atem_aktiv = False
         #: Gerät (Profil-ID) und Rate der Atem-Spur, wie `atem_sammler` sie zuletzt nannte
         self._atem_vorgabe: tuple[str, int | float | None] = ("", None)
+        #: Der Atemtakt des Taktgebers, der gerade läuft (`atem_takt_beginn` bis
+        #: `atem_takt_ende`; Teil 2 T4, Vertrag §4 und §15): ``name``, ``rate_pro_min``,
+        #: ``soll_s``, ``profil`` — auch ohne Aufnahme gemerkt, damit eine Aufnahme, die mitten
+        #: im Takt beginnt, ihren Lauf ab 0 und die Beginn-Notiz bekommt
+        self.takt_laufend: dict[str, Any] | None = None
+        #: ob die laufende Aufnahme eine Beginn-Notiz des Takts hat (dann bekommt sie die Ende-
+        #: Notiz) — nie ein „Ende“ im Leeren
+        self._takt_notiz_offen = False
         #: Protokollfeld „Atmung“ der Messdatei (`core.atem_protokoll`, Vertrag §5, P125): die
         #: Oberfläche belegt den Haken mit dem Übungskatalog (Ereignisse der Aufnahme → Feld
         #: oder ``None`` = unbekannt); gerufen im Loop beim Backup und vor dem Speichern
@@ -737,7 +745,7 @@ class Messlauf:
         self.aufnahme.batterie_prozent = self.status.batterie_prozent
         self.ekg = None
         self.atem = None
-        self._atem_laufend_anlegen()
+        self._takt_notiz_offen = False
         self._grenzen = {}
         self._letztes_backup = start
         self.live.leeren()
@@ -747,6 +755,9 @@ class Messlauf:
         self.aufnahme.ereignisse = [_an_den_anfang(e, self.aufnahme.start_utc) for e in vorab]
         self.aufnahme.titel, self.aufnahme.notiz = self._vorab_titel, self._vorab_notiz
         self._vorab_titel = self._vorab_notiz = ""
+        # Erst jetzt (die Notizen stehen): eine laufende Atem-Spur oder ein laufender Atemtakt
+        # bekommt seinen Lauf ab 0 — und der Takt seine Beginn-Notiz
+        self._atem_laufend_anlegen()
         # Im Sensorblatt vorgemerkt: der Rohmitschnitt beginnt mit der Aufnahme (auch mit
         # Vorlauf einer Einheit, die sie erst später startet)
         if self._diagnose_wunsch is not None and self.diagnose_moeglich:
@@ -1121,22 +1132,36 @@ class Messlauf:
         self._atem_vorgabe = (geraet, rate_hz)
         return self._atem_anlegen()
 
-    def _atem_anlegen(self) -> AtemSammler | None:
+    def _atem_anlegen(self, *, quelle: str = QUELLE_SENSOR) -> AtemSammler | None:
         """Der Sammler der laufenden Aufnahme nach `_atem_vorgabe` — angelegt, wenn er fehlt;
-        ``None`` ohne Aufnahme."""
+        ``None`` ohne Aufnahme. ``quelle``: wer ihn braucht — der Sensor (``sensor``, mit
+        Prototyp) oder nur der Taktgeber (``takt``, ohne Prototyp, Vertrag §15); meldet sich
+        der Sensor an einem Sammler, den der Takt anlegte, wird er zum Sensor-Sammler."""
         if self.aufnahme is None:
             return None
+        geraet, rate_hz = self._atem_vorgabe
         if self.atem is None:
-            geraet, rate_hz = self._atem_vorgabe
-            self.atem = AtemSammler(QUELLE_SENSOR, geraet, rate_hz, prototyp=ATEM_PROTOTYP)
+            self.atem = AtemSammler(
+                quelle, geraet, rate_hz, prototyp=ATEM_PROTOTYP if quelle == QUELLE_SENSOR else ""
+            )
+        elif quelle == QUELLE_SENSOR and self.atem.quelle != QUELLE_SENSOR:
+            self.atem.quelle, self.atem.prototyp = QUELLE_SENSOR, ATEM_PROTOTYP
+            self.atem.geraet, self.atem.rate_hz = geraet, self.atem.rate_hz or rate_hz
         return self.atem
 
     def _atem_laufend_anlegen(self) -> None:
-        """Läuft gerade eine Atem-Spur (`atem_aktiv`), bekommt eine Aufnahme, die jetzt
-        beginnt (Start, zweite Aufnahme, Teil 2 nach dem Teilen), ihren Sammler mit einem
-        Lauf ab ihrem Start — die Spur war die ganze Zeit an, nur das Beiwerk fehlte."""
+        """Läuft gerade eine Atem-Spur (`atem_aktiv`) oder ein Atemtakt (`takt_laufend`),
+        bekommt eine Aufnahme, die jetzt beginnt (Start, zweite Aufnahme, Teil 2 nach dem
+        Teilen), ihren Sammler mit einem Lauf ab ihrem Start — die Spur war die ganze Zeit an,
+        nur das Beiwerk fehlte; der Takt bekommt dazu seine Beginn-Notiz bei 0 (Vertrag §4)."""
         if self.atem_aktiv and self.atem is None and (s := self._atem_anlegen()) is not None:
             s.lauf_beginn(0.0)
+        takt = self.takt_laufend
+        if takt is not None and self.aufnahme is not None:
+            s = self._atem_anlegen(quelle=QUELLE_TAKT)
+            if s is not None and not s.takt_offen:
+                s.takt_beginn(0.0, str(takt["name"]), takt["rate_pro_min"])
+                self._takt_notiz(self.aufnahme.start_mono, takt, ende=False)
 
     def _atem_wand(self, t_quelle_s: float) -> tuple[AtemSammler, float] | None:
         """Sammler und Wanduhr der Aufnahme (``t − start_mono``, wie beim EKG) — ``None``
@@ -1179,6 +1204,85 @@ class Messlauf:
         passiert nichts."""
         if (w := self._atem_wand(t_ende_quelle_s)) is not None and w[1] >= 0.0:
             w[0].fenster(w[1], rate, gueltig, grund)
+
+    # -- Atemtakt des Taktgebers (Teil 2 T4, Vertrag §4 und §15) -----------------------------
+
+    def _takt_notiz(self, bei: float, takt: Mapping[str, Any], *, ende: bool) -> None:
+        """Die Notiz mit Marke zum Beginn bzw. Ende eines Atemtakts (Vertrag §4): keine
+        Abschnittsgrenze, sofort, nur Felder aus `hrv_core.ereignisse.MARKE_FELDER`."""
+        name = str(takt.get("name") or "Takt")
+        if ende:
+            marke: dict[str, Any] = {
+                "quelle": "timer",
+                "art": "ende",
+                "spur": SPUR_ATEMTAKT,
+                "name": name,
+            }
+            text = f"Takt {name}: Ende"
+        else:
+            marke = {"quelle": "timer", "art": "takt", "spur": SPUR_ATEMTAKT, "name": name}
+            rate = takt.get("rate_pro_min")
+            if isinstance(rate, int | float) and rate > 0:
+                marke["wert"] = round(float(rate), 3)
+            soll = takt.get("soll_s")
+            if isinstance(soll, int | float) and soll > 0:
+                marke["soll_s"] = round(float(soll), 3)
+            if takt.get("profil"):
+                marke["profil"] = str(takt["profil"])
+            text = f"Takt {name}: Start"
+        if self.notiz_hinzufuegen(text, bei=bei, marke=marke) is not None:
+            self._takt_notiz_offen = not ende
+
+    def atem_takt_beginn(
+        self,
+        t_quelle_s: float,
+        *,
+        name: str,
+        rate_pro_min: float | None,
+        soll_s: float | None = None,
+        profil: str = "",
+    ) -> None:
+        """Ein Atemtakt beginnt (Uhr der Quelle) — auch nach einer Tempoänderung ein neuer
+        Lauf mit der neuen Rate (ein offener endet hier). Gemerkt auch ohne Aufnahme
+        (`takt_laufend`); mit Aufnahme: Takt-Lauf im Beiwerk (`AtemSammler.takt_beginn`) und
+        die Beginn-Notiz mit Marke (Vertrag §4). Ein Bewegungstakt kommt hier nie an
+        (`devices.takt_lauf.in_die_messung` prüft `Takt.ist_atmung`)."""
+        if self.takt_laufend is not None:
+            self.atem_takt_ende(t_quelle_s)
+        self.takt_laufend = {
+            "name": str(name or ""),
+            "rate_pro_min": rate_pro_min,
+            "soll_s": soll_s,
+            "profil": profil,
+        }
+        aufnahme = self.aufnahme
+        if aufnahme is None:
+            return
+        s = self._atem_anlegen(quelle=QUELLE_TAKT)
+        if s is None:
+            return
+        s.takt_beginn(max(t_quelle_s - aufnahme.start_mono, 0.0), str(name or ""), rate_pro_min)
+        self._takt_notiz(max(t_quelle_s, aufnahme.start_mono), self.takt_laufend, ende=False)
+
+    def atem_takt_phase(self, t_quelle_s: float, art: str) -> None:
+        """Soll-Beginn des Ein- (``"ein"``) oder Ausatmens (``"aus"``) laut Takt (Uhr der
+        Quelle); ohne Aufnahme oder von vor ihrem Start passiert nichts."""
+        if self.takt_laufend is None:
+            return
+        if (w := self._atem_wand(t_quelle_s)) is not None and w[1] >= 0.0:
+            w[0].takt_phase(w[1], art)
+
+    def atem_takt_ende(self, t_quelle_s: float) -> None:
+        """Der Atemtakt endet (Uhr der Quelle): der Lauf im Beiwerk schließt, die Ende-Notiz
+        kommt — nur, wenn die Aufnahme die Beginn-Notiz hat (kein „Ende“ im Leeren)."""
+        takt, self.takt_laufend = self.takt_laufend, None
+        if takt is None:
+            return
+        if (w := self._atem_wand(t_quelle_s)) is not None:
+            w[0].takt_ende(max(w[1], 0.0))
+        if self._takt_notiz_offen and self.aufnahme is not None:
+            self._takt_notiz(max(t_quelle_s, self.aufnahme.start_mono), takt, ende=True)
+        self._takt_notiz_offen = False
 
     def aufnahme_stoppen(self, basis: Path) -> Gespeichert | None:
         """Speichert atomar und beendet die Aufnahme. ``None``, wenn nichts aufgezeichnet wurde.
@@ -1264,6 +1368,9 @@ class Messlauf:
         atem_alt, self.atem = self.atem, None
         if atem_alt is not None and atem_alt.offen:
             atem_alt.lauf_ende(jetzt - alt.start_mono)
+        if atem_alt is not None and atem_alt.takt_offen:
+            atem_alt.takt_ende(jetzt - alt.start_mono)  # Teil 2 beginnt ihn bei 0 neu
+        self._takt_notiz_offen = False
         # Ebenso der Rohmitschnitt: Teil 1 behält seinen, Teil 2 schreibt ohne Lücke einen
         # neuen weiter, solange der Diagnosemodus läuft
         mitschnitt_alt, self.mitschnitt = self.mitschnitt, None
@@ -1296,6 +1403,8 @@ class Messlauf:
         # und bekommt mit der nächsten Aufnahme einen neuen (fünfte Prüfrunde, B5)
         if self.atem is not None and self.atem.offen:
             self.atem.lauf_ende(max(self._uhr() - aufnahme.start_mono, 0.0))
+        if self.atem is not None and self.atem.takt_offen:
+            self.atem.takt_ende(max(self._uhr() - aufnahme.start_mono, 0.0))
         return aufnahme
 
     def _stopp_beenden(self, *, gespeichert: bool) -> None:
@@ -1304,6 +1413,7 @@ class Messlauf:
             self.aufnahme = None
             self.ekg = None
             self.atem = None
+            self._takt_notiz_offen = False
             self.mitschnitt = None
             self.diagnose_seit = None
             self._diagnose_wunsch = None  # je Messung (Plan §2.2)
@@ -1864,6 +1974,7 @@ class Messlauf:
         korrektur: int,
         eingetragen: int | None,
         uebung_id: str | None = None,
+        takt: int | None = None,
     ) -> dict[str, Any] | None:
         """Nach einem Satz, den der Sensor zählte (A2, Plan Beschleunigung §6): die Tipps der
         Marken-Leiste in [von, bis] (Uhr der Quelle) neben Sensor, Korrektur und dem, was
@@ -1896,6 +2007,8 @@ class Messlauf:
             "eingetragen": eingetragen,
             "art": "prototyp",
         }
+        if takt is not None:
+            vergleich["takt"] = int(takt)  # „Takt zählt“ (P138): die dritte Spalte
         self.letzter_satz = vergleich
         felder: dict[str, Any] = {"uebung": uebung, "satz": satz}
         if uebung_id:

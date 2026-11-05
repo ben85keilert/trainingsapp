@@ -49,6 +49,7 @@ from trainingsapp.devices.zaehlen import ZaehlBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import zaehl_stand, zaehlen
+from trainingsapp.ui.components.bewegungsbild import bewegungsbild_control
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.laeufe_heute import eintragen_handler, laeufe_karte, werte_text
@@ -298,9 +299,12 @@ def uebung_timer_view(
         zaehlen.meldung_zeigen(page, state)  # ein Zählen einer anderen Übung endete
 
     def takt_an_den_lauf(e: Einheitslauf) -> None:
-        """Takt für jetzt, Vorgabe der Übung und Tempo an den Timer der Einheit (Taktgeber)."""
+        """Takt für jetzt, Vorgabe der Übung und Tempo an den Timer der Einheit (Taktgeber) —
+        und „Takt zählt“ (P138) als Zähl-Teil mit Quelle „takt“."""
         if e.timer is not None:
             takt_anbringen(state, e.timer.lauf, key, uebung.takt)
+            with contextlib.suppress(Exception):  # der Zähler darf die Uhr nie aufhalten
+                uebung_lauf.takt_zaehlen_anbringen(page, state, e, uebung, item)
 
     def takt_starten(takt: Takt) -> None:
         """„Takt starten“ aus dem Blatt: für jetzt, und die gewählte Uhr läuft los — ohne
@@ -700,11 +704,19 @@ def uebung_timer_view(
         zaehl = zaehlen.neben_der_uhr(
             page, state, e, uebung.id, item.id if item is not None else None, name="timer"
         )
+        # Das Bild der Bewegung (T6) neben der Takt-Anzeige, als Schleife
+        bild = bewegungsbild_control(state, uebung)
         return [
             ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[zeit_text]),
             ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[stand_text]),
             balken_platz,
-            ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[takt_anzeige.control]),
+            ft.Row(
+                alignment=ft.MainAxisAlignment.CENTER,
+                wrap=True,
+                spacing=12,
+                run_spacing=8,
+                controls=[takt_anzeige.control, *([bild] if bild is not None else [])],
+            ),
             tempo_platz,
             *([karte(*zaehl, abstand=4, padding=10)] if zaehl else []),
             karte(saetze_spalte, abstand=0, padding=10),

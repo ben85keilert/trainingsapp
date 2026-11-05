@@ -92,6 +92,9 @@ def ziel_name(state: AppState, ziel: Ziel) -> str:
     if ziel.uebung_id is not None:
         u = state.uebungen.laden(ziel.uebung_id, mit_geloeschten=True)
         return f"Symbol: {u.name if u is not None else 'Übung'}"
+    if ziel.bewegung_id is not None:
+        u = state.uebungen.laden(ziel.bewegung_id, mit_geloeschten=True)
+        return f"Bewegung: {u.name if u is not None else 'Übung'}"
     if ziel.zum_tag is not None:
         return f"Zum Tag · {ziel.zum_tag:%d.%m.}"
     eintrag = state.sitzungen.eintrag_laden(ziel.eintrag_id) if ziel.eintrag_id else None
@@ -475,13 +478,20 @@ class _Aufnahme:
     async def behalten(self) -> None:
         if self.daten is None:
             return
-        if self.ziel.uebung_id is not None:
-            # Das Bild einer Übung (2.11.2026): in die Ablage, nicht an einen Eintrag
+        bild_von = self.ziel.uebung_id or self.ziel.bewegung_id
+        if bild_von is not None:
+            # Das Bild einer Übung (2.11.2026) oder das Bild der Bewegung (5.11.2026, T6): in
+            # die Ablage, nicht an einen Eintrag
             daten = self.daten
+            repo = (
+                self.state.bewegungsbilder
+                if self.ziel.bewegung_id is not None
+                else self.state.uebungsbilder
+            )
             try:
                 # Nur die Bytes im Thread — die SQLite-Verbindung gehört dem Event-Loop
-                rel = await asyncio.to_thread(self.state.uebungsbilder.schreiben, daten)
-                self.state.uebungsbilder.setzen(self.ziel.uebung_id, rel)
+                rel = await asyncio.to_thread(repo.schreiben, daten)
+                repo.setzen(bild_von, rel)
             except (OSError, sqlite3.Error) as fehler:
                 self.melden(f"Nicht gespeichert: {fehler}")
                 return

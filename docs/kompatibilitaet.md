@@ -74,7 +74,7 @@ Abweichung ist für praxis_gui folgenlos.
 | `sensor_*__c01.json` | korrigierte Fassung (`corrected-v1`) |
 | `sensor_*_diagnose.txt` | Verbindungsprotokoll der trainingsapp (Text, nur zur Fehlersuche). Kein JSON, darum für praxis_gui unsichtbar — dort bleibt es beim Löschen einer Messung liegen |
 | `sensor_*_mitschnitt.jsonl` | Rohmitschnitt des Diagnosemodus (`mitschnitt-v1`, seit 4.11.2026, Abschnitt 14): jedes Bluetooth-Paket, Marken, Kontext. JSON Lines, für praxis_gui unsichtbar |
-| `sensor_*_atem.json` | Atemphasen aus dem Prototyp (`atem-v1`, seit 5.11.2026, Abschnitt 15): Beiwerk neben der Messdatei — Beginn von Ein- und Ausatmen, Rate je Prüffenster, erfasste Läufe; Zeiten auf der Wanduhr der Messung. Ergebnis, keine Rohdaten; für praxis_gui unbekanntes Beiwerk |
+| `sensor_*_atem.json` | Atemphasen aus dem Prototyp (`atem-v1`, seit 5.11.2026, Abschnitt 15): Beiwerk neben der Messdatei — Beginn von Ein- und Ausatmen, Rate je Prüffenster, erfasste Läufe, seit Teil 2 des Taktgebers dazu die Soll-Phasen des Takts (Feld `takt`); Zeiten auf der Wanduhr der Messung. Ergebnis, keine Rohdaten; für praxis_gui unbekanntes Beiwerk |
 | `.backup_<start>_ecg.jsonl`, `.backup_<start>_mitschnitt.jsonl`, `.backup_<start>_atem.jsonl` | Begleit-Journale des Crash-Backups (Abschnitt 6a) |
 | `Diagnose/<ts>_<gerät>/` | Rohmitschnitt **ohne** Messung (unbekanntes Gerät, Geräteprobe) — absichtlich nicht unter `Messungen/` |
 | `.backup_<start>.json` | Crash-Backup, kein Analyse-Artefakt (Abschnitt 6a) |
@@ -370,15 +370,15 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
 | Feld | Werte | Bedeutung |
 |---|---|---|
 | `quelle` | `einheit`, `timer`, `plan`, `gps`, `person`, `uhr` | wer die Marke setzte — `person`: ein Tipp in der Übungsausführung (seit 19.10.2026); `uhr`: ⏯ am Band (hrv-watch, seit 4.11.2026, P113) |
-| `art` | `start`, `ende`, `abschnitt`, `pause`, `weiter`, `uebung_start`, `uebung_ende`, `km`, `leistung`, `abschluss`, `erholung`, `marke` | was sie bedeutet — `marke`: eine bloße Marke ohne Text (⏯ am Band, `uhr/marke`; vorher eine leere Notiz ohne `marke`, nicht von anderen zu unterscheiden) — `leistung`: „geleistet bis hierher“ (die **Tippzeit**, nie der Beginn des Satzes), `abschluss`: der Eintrag ist fertig, `erholung`: Ende einer Belastung, ab hier zählt die HF-Erholung; `talk`: Talk-Test, „Sprechen wird schwer“ — die HF der 30 s davor ist der Marker für Schwelle 1 (beide seit 29.10.2026, `docs/plan_herzfrequenz.md`) |
-| `spur` | `timer`, `uebung`, `km` | die Abschnittsspur, die sie teilt (Abschnitt 9b) |
+| `art` | `start`, `ende`, `abschnitt`, `pause`, `weiter`, `uebung_start`, `uebung_ende`, `km`, `leistung`, `abschluss`, `erholung`, `marke`, `takt` | was sie bedeutet — `takt`: ein Atemtakt des Taktgebers beginnt (seit 5.11.2026, Spur `atemtakt`, unten) — `marke`: eine bloße Marke ohne Text (⏯ am Band, `uhr/marke`; vorher eine leere Notiz ohne `marke`, nicht von anderen zu unterscheiden) — `leistung`: „geleistet bis hierher“ (die **Tippzeit**, nie der Beginn des Satzes), `abschluss`: der Eintrag ist fertig, `erholung`: Ende einer Belastung, ab hier zählt die HF-Erholung; `talk`: Talk-Test, „Sprechen wird schwer“ — die HF der 30 s davor ist der Marker für Schwelle 1 (beide seit 29.10.2026, `docs/plan_herzfrequenz.md`) |
+| `spur` | `timer`, `uebung`, `km`, `atemtakt` | die Abschnittsspur, die sie teilt (Abschnitt 9b) — `atemtakt`: der Atemtakt des Taktgebers (keine Abschnittsgrenze, nur ein Paar Notizen, unten) |
 | `einheit` | Text (UUID) | der gemeinsame Ablauf in der App, dessen Zeitleiste die Marke kommt (`docs/plan_einheit.md`) |
 | `name` | Text | Abschnittsname ohne Zusatz („Belastung“, „Planke“) |
 | `runde`, `von` | Zahl | Runde r von n |
 | `zaehlt` | Ja/Nein | der Abschnitt zählt als Übungszeit (im Timer einstellbar) |
 | `soll_s` | Zahl | die geplante Dauer des Abschnitts in Sekunden — ein „Weiter“ kürzt ihn, Soll gegen Ist zeigt es; fehlt bei der Stoppuhr (seit 18.10.2026) |
 | `profil` | Text | welcher Ablauf lief: der Kurzcode der Profil-ID (8 Zeichen wie bei Übungen), die Stoppuhr `stoppuhr`, der Einmal-Timer `einmal` (seit 19.10.2026) — derselbe Ablauf über Tage, auch nach Umbenennen (seit 18.10.2026) |
-| `feld`, `wert` | Text, Zahl | bei `person/leistung`: das Feld der Übung (`reps`, `hold`, …) und der eingetragene Wert (seit 19.10.2026) — die Ausprägung (Gewicht, Seite) steht im Text („Kniebeuge 20 kg: 10“) |
+| `feld`, `wert` | Text, Zahl | bei `person/leistung`: das Feld der Übung (`reps`, `hold`, …) und der eingetragene Wert (seit 19.10.2026) — die Ausprägung (Gewicht, Seite) steht im Text („Kniebeuge 20 kg: 10“); bei `timer/takt` ist `wert` die **Rate des Takts je Minute** (60 / Rundendauer, mit Tempo) |
 | `kopf_s`, `endteil_s` | Zahl (s, mit Vorzeichen) | an der **Start-Notiz** eines Abschnitts (seit 27.10.2026): Kopf und Endteil — der Rechenbereich reicht so weit über die getippten Grenzen hinaus (positiv: davor bzw. danach) oder beginnt dahinter (negativ: innerhalb); `hrv_core.ausschnitte.Abschnitt.rechenbereich`. Fehlt = 0 |
 | `kontext`, `haltung` | Text | bei `person/erholung` (seit 29.10.2026, `docs/plan_herzfrequenz.md`): woran die Person sich erholt (`dauer`, `intervall`, `sprint`, `satz`, `test_submaximal`, `test_maximal`) und in welcher Haltung (`steht`, `sitzt`, `liegt`, `geht`). HRR-Werte sind nur innerhalb gleicher Paare vergleichbar (`hrv_core.herzfrequenz.hrr_erholung`); die Person darf beides nachträglich ändern — die Marke wird fortgeschrieben |
 
@@ -395,6 +395,23 @@ gegen RMSSD je Belastung). Die Marke steht hinter `text` bzw. `uebungen`:
   **nicht** der 5-s-Regel (zwei Sätze in drei Sekunden sind zwei Sätze). praxis_gui zeigt
   sie als normale Notizen; Nachträge und Korrekturen bekommen keine Marke.
 - Abschnitte unter 5 s bekommen keine Marke (versehentliches „Weiter“).
+- **Atemtakt des Taktgebers** (Ben, 5.11.2026, `docs/plan_taktgeber.md` §3, Teil 2 T4): Läuft
+  während der Aufnahme ein **Atemtakt** (Arten ein/aus/halten — ein Bewegungstakt setzt nichts),
+  bekommt die Messdatei ein **Paar Notizen** mit Marke auf der Spur `atemtakt`: am Beginn
+  `quelle=timer, art=takt` mit `name` (Name des Takts, etwa „Atmung 4-6“), `wert` (Rate je
+  Minute), `soll_s` (Rundendauer in s, mit Tempo) und `profil` (der Ablauf, wie beim Abschnitt;
+  Text „Takt Atmung 4-6: Start“), am Ende `quelle=timer, art=ende, spur=atemtakt` mit `name`
+  („Takt Atmung 4-6: Ende“). **Keine Abschnittsgrenze** (die Takt-Läufe stehen vollständig im
+  Beiwerk `atem-v1`, Abschnitt 15; eine weitere Spur mit Abschnitten füllte die Abschnittsliste
+  mit jedem Tempowechsel) und darum **nicht der 5-s-Regel unterworfen**: Beide Notizen kommen
+  sofort — so weiß das Protokollfeld `atmung` (Abschnitt 5) schon im Crash-Backup, dass getaktet
+  wurde. Eine **Tempoänderung** ist Ende plus neuer Beginn mit der neuen Rate (wie `timer/takt`
+  in der Zeitleiste und `takt.laeufe` im Beiwerk). Beginnt die Aufnahme mitten in einem Takt
+  (zweite Aufnahme, Teil 2 nach dem Teilen), steht der Beginn bei 0 s; endet sie mitten im Takt,
+  fehlt die Ende-Notiz (die Aufnahme ist zu Ende, das sagt genug). Nie eine Notiz je Phase
+  (`MIN_MARKE_S` ist dafür nicht der Grund — es wären hunderte). Ohne Aufnahme nichts.
+  `hrv_core.ereignisse.MARKE_FELDER` kennt alle Felder schon; praxis_gui zeigt die Notizen wie
+  jede andere.
 - **Marken einer Übung** (Ben, 18.10.2026, P54): Läuft eine Übung (Timer der Übung, Stoppuhr,
   Plan-Ablauf), tragen **alle** ihre Marken den Kurzcode in `uebungen`, auch die Abschnitte des
   Timers — die Auswertung muss nichts über die Zeit zuordnen. Der Text nennt dann den Timer
@@ -489,8 +506,14 @@ zurück — der Vertrag bleibt unverletzt.
 | `uebung` | str | **nur** bei `uebung`: Kurzcode der Übung |
 
 - **Automatisch**, nie von Hand: die App setzt es aus der Übung der Einheit und dem Taktgeber
-  des Timers (Taktgeber = A18, `docs/offene_fragen.md`; bis er da ist, kommt nur `spontan`
-  und `uebung` vor). Eine Bewertung ist es nicht — es beschreibt die Bedingung der Messung.
+  der Uhr (`docs/plan_taktgeber.md`). **Der Takt geht vor** (seit 5.11.2026, Teil 2 T4): Lief
+  während der Aufnahme ein Atemtakt — die Messdatei trägt ein Paar Notizen `timer/takt` …
+  `timer/ende` auf der Spur `atemtakt` (Abschnitt 4) —, ist die Art `getaktet` mit
+  `takt_pro_min` = der Rate des **längsten** Takt-Laufs (nach einer Tempoänderung gibt es
+  mehrere; ein beim Ende der Aufnahme offener Lauf reicht bis dorthin); erst sonst gilt die
+  Übungsregel (Atemübung → `uebung`, keine Übung → `spontan`, nur andere Übungen → kein
+  Feld). Ein Bewegungstakt (ab/auf) setzt keine Marke und kein `getaktet`. Eine Bewertung ist
+  es nicht — es beschreibt die Bedingung der Messung.
 - **Fehlt = unbekannt.** Altdateien, Dateien aus praxis_gui und Messungen ohne Einheit haben
   den Schlüssel nicht; der Leser setzt keinen Standardwert und rät nicht aus den Daten.
 - `hrv_core.deid` behält das Feld als Ganzes (`RAW_REGELN`): es enthält nichts über die
@@ -917,11 +940,12 @@ Schreiber in hrv-core liegen, kann es die Datei später ohne eigene Übersetzung
   | `art` | str | `"prototyp"` — das Verfahren hat keinen `ALGO_VERSION` und keinen Golden Master (`hrv_core.prototyp`) |
   | `prototyp` | str | Modul, das die Phasen fand: `"hrv_core.prototyp.atemzuege"` |
   | `hrv_core` | str | Version der Bibliothek beim Schreiben (`hrv_core.__version__`) |
-  | `quelle` | str | `"sensor"` (Beschleunigung des Gurts). `"takt"` ist für den Taktgeber reserviert (A18) |
+  | `quelle` | str | `"sensor"` (Beschleunigung des Gurts); `"takt"`, wenn **nur** der Taktgeber schrieb (Soll-Phasen ohne Sensor, Feld `takt` — `erfasst`, `phasen` und `fenster` sind dann leer, `prototyp` leer); mit Sensor **und** Takt bleibt es `"sensor"`, der Takt steht im Feld `takt` |
   | `geraet` | str | Profil-ID (`polar_h10`, `verity_sense`, Abschnitt 5) — nie Name, Adresse oder Seriennummer |
   | `rate_hz` | int \| float \| null | Abtastrate der Beschleunigung, aus der gerechnet wurde (nur zur Einordnung; Proben enthält die Datei nicht): ganzzahlig als int, sonst float, `null` ohne Rate |
   | `erfasst` | list | Läufe von „Atmung erfassen“: `[[von_s, bis_s], …]`, ein Eintrag je Lauf, beim Schreiben alle geschlossen. Ein Lauf beginnt mit der **ersten Probe** des Sensors (nicht mit dem Tipp — die Anlaufzeit ist nicht erfasst; ohne eine Probe kein Lauf) bzw. bei 0, wenn die Aufnahme während der laufenden Erfassung beginnt (auch eine zweite Aufnahme, auch Teil 2 nach dem Teilen); er endet mit dem Ende der Erfassung, am Stopp der Aufnahme oder an der Naht beim Teilen |
   | `phasen` | list | `[[t_s, "ein"], [t_s, "aus"], …]` — Beginn von Ein- bzw. Ausatmen, zeitlich sortiert; nie vor 0 (eine Phase, deren Ansatz vor dem Start der Aufnahme lag, gehört nicht in diese Datei) |
+  | `takt` | dict | **optional** (P141, Taktgeber Teil 2 T4, 5.11.2026; hrv-core 0.13.0 `hrv_core.atem.Takt`): die **Soll-Phasen des Taktgebers** — `{"name", "rate_pro_min", "phasen", "laeufe"}`: `phasen` `[[t_s, "ein" \| "aus"], …]` wie oben (Wanduhr, 3 Nachkommastellen, zeitlich sortiert, **alle** Takt-Läufe in einer Liste; „halten“ verlängert die laufende Phase, `core.takt.soll_phasen`), `laeufe` `[[von_s, bis_s, name, rate_pro_min], …]` je Takt-Lauf (ein neuer je Start eines Abschnitts mit Atemtakt und je Tempoänderung; ohne Lauf ist eine Lücke „kein Takt“, wie `erfasst`), `name` und `rate_pro_min` die des **letzten** Laufs. Nur Atemtakte (`Takt.ist_atmung`), nie Bewegungstakte. Steht nur in der Datei, wenn es Soll-Phasen gibt; alte Dateien ohne das Feld lesen sich unverändert (`Atem.takt = None`), ältere Leser übergehen es. Gespeist vom `Messlauf` (`atem_takt_beginn`/`atem_takt_phase`/`atem_takt_ende`, Quelluhr → Wanduhr wie `atem_phase`; ohne Aufnahme nichts; beginnt die Aufnahme mitten im Takt, beginnt der Lauf bei 0) aus dem `TaktVerfolger` des Timer-Teils (`devices/takt_lauf.py`) — die Lage je Tick der Einheit, ohne Oberfläche |
   | `fenster` | list | `[[t_ende_s, rate_pro_min, gueltig, grund], …]` — laufende Rate je Prüffenster (alle 5 s, 30 s lang, Zeit = Fensterende); `rate_pro_min` `null`, wenn ungültig; `gueltig` bool; `grund` leer oder ein snake_case-Code des Prototyps — der **erste** Grund seiner Prüfreihenfolge (`hrv_core.prototyp.atemzuege`): `bewegung` → `amplitude_klein` → `kein_gipfel` / `gipfel_undeutlich` → `zu_wenig_zyklen` → `ungleichmaessig` / `zyklen_passen_nicht` (`devices/zaehlen.py` schreibt `gruende[0]`) |
 
   Alle Zeiten in **Sekunden auf der Wanduhr der Messung** (`t_wall_s` wie die Schläge,
@@ -931,7 +955,9 @@ Schreiber in hrv-core liegen, kann es die Datei später ohne eigene Übersetzung
 - **Journal** `.backup_<start>_atem.jsonl` (JSON Lines, nur angehängt, jede Zeile für sich
   abgeschlossen, `fsync` wie das EKG-Journal): `["k", {Kopf ohne die Listen}]` einmal am
   Anfang, `["e", von_s]` Lauf auf, `["x", bis_s]` Lauf zu, `["p", t_s, "ein" | "aus"]`
-  Phase, `["f", t_ende_s, rate_pro_min, gueltig, grund]` Fenster. `journal_anhaengen`
+  Phase, `["f", t_ende_s, rate_pro_min, gueltig, grund]` Fenster; Taktgeber (seit hrv-core
+  0.13.0): `["t", t_s, name, rate_pro_min]` Takt-Lauf auf, `["q", t_s, "ein" | "aus"]`
+  Soll-Phase, `["u", t_s]` Takt-Lauf zu. `journal_anhaengen`
   schreibt nur, was seit dem letzten Mal dazukam (wie `hrv_core.ekg`); `aus_journal` setzt
   die Datei wieder zusammen und übergeht eine halbe letzte Zeile; ein offener Lauf
   (`bis_s = null`) wird beim Schreiben geschlossen. Beim Speichern der Messdatei wird das
@@ -945,6 +971,12 @@ Schreiber in hrv-core liegen, kann es die Datei später ohne eigene Übersetzung
     bewusst so); neu rechnen lässt sich nur, was im Diagnosemodus mit Rohdaten aufgenommen
     wurde. Nichts aus dieser Datei wird je als Kennzahl in den Cache (`hrv_metrics_cache`)
     geschrieben.
+  - **Soll gegen Ist** (T4): Die Auswertung legt `takt.phasen` als feine Linien über den
+    Ist-Schatten (nur innerhalb der Takt-Läufe), nennt je Atemzug den Versatz des Ist-„ein“ zum
+    nächsten Soll-„ein“ (Median, `core.atem_auswertung.soll_ist_versatz`) und rechnet die
+    Atem-HRV einmal gegen Ist und einmal gegen Soll (Entscheidung 25 Frage 7: beides zeigen).
+    Für die Regel F6 ist die Takt-Rate die **dritte Quelle**, wenn Sensor und RR-Atmung fehlen.
+    Nichts davon wird gespeichert.
   - **`erfasst` unterscheidet gemessen von Lücke:** Ohne einen Lauf, der eine Zeit abdeckt,
     heißt „keine Phase“ *nicht gemessen*, nicht *kein Atemzug*. Die Auswertung zeigt
     außerhalb der Läufe nichts, auch keine Rate, und paart Phasen nur innerhalb eines Laufs

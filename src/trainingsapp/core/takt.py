@@ -176,13 +176,18 @@ class Phase:
     >>> Phase.aus_dict(p.als_dict()) == p, Phase.aus_dict({"dauer_s": 0}), Phase.aus_dict("x")
     (True, None, None)
     >>> Phase.aus_dict({"name": "x", "dauer_s": "2,5", "art": "tanz", "klang": "trompete"})
-    Phase(name='x', dauer_s=2.5, art='frei', klang='')
+    Phase(name='x', dauer_s=2.5, art='frei', klang='', bild='')
     """
 
     name: str
     dauer_s: float
     art: str = ART_FREI
     klang: str = ""
+    #: Ein Bild je Phase (Teil 2 T6, nur vorbereitet: Dict-Rundreise, keine Oberfläche) — der
+    #: relative Pfad in der Ablage ``Medien/Bewegung/``; leer = keins. Später schaltet der Takt
+    #: die Bildfolge je Phase (`docs/plan_taktgeber.md` §5); das Bild der Bewegung an der
+    #: Übung läuft davon unabhängig als Schleife.
+    bild: str = ""
 
     @property
     def klang_fuer(self) -> str:
@@ -200,12 +205,20 @@ class Phase:
             d["art"] = self.art
         if self.klang:
             d["klang"] = self.klang
+        if self.bild:
+            d["bild"] = self.bild
         return d
 
     @classmethod
     def aus_dict(cls, d: Any) -> Phase | None:
         """Defensiv: ohne brauchbare Dauer keine Phase; unbekannte Art = frei, unbekannter
-        Klang = Vorgabe."""
+        Klang = Vorgabe; ``bild`` nur als Text (Pfad in der Ablage), sonst leer.
+
+        >>> Phase.aus_dict({"dauer_s": 2, "bild": "Bewegung/b.gif"}).als_dict()["bild"]
+        'Bewegung/b.gif'
+        >>> Phase.aus_dict({"dauer_s": 2, "bild": 3}).bild
+        ''
+        """
         if not isinstance(d, Mapping):
             return None
         dauer = dauer_lesen(d.get("dauer_s"))
@@ -213,11 +226,13 @@ class Phase:
             return None
         art = d.get("art")
         klang = d.get("klang")
+        bild = d.get("bild")
         return cls(
             name=" ".join(str(d.get("name") or "").split()),
             dauer_s=dauer,
             art=art if isinstance(art, str) and art in ARTEN else ART_FREI,
             klang=klang if isinstance(klang, str) and klang in KLAENGE else "",
+            bild=bild.strip() if isinstance(bild, str) else "",
         )
 
 
@@ -250,7 +265,9 @@ class Takt:
     runden: int | None = None
     #: Animation (`ANIMATIONEN`) — leer: nach der Phasenzahl (`animation_fuer`)
     animation: str = ""
-    #: „Takt zählt“ (P138): jede volle Runde eine Wiederholung — wirksam erst mit T5
+    #: „Takt zählt“ (P138, Teil 2 T5): jede volle Runde eine Wiederholung — der Zähl-Teil mit
+    #: Quelle ``takt`` (`devices.zaehlen`); Vorgabe an bei den Bewegungs-Vorlagen, bei Atemtakten
+    #: aus (wer Atemzüge in ein Wiederholungsfeld zählen will, schaltet es ein)
     zaehlt: bool = False
 
     @property
@@ -414,7 +431,7 @@ def takt_pruefen(roh: Any) -> tuple[list[str], list[str]]:
                 f"Phase {k}: unbekannter Klang {_anf(klang)} — gilt als Vorgabe der Art"
             )
         for schluessel in p:
-            if schluessel not in ("name", "dauer_s", "art", "klang"):
+            if schluessel not in ("name", "dauer_s", "art", "klang", "bild"):
                 hinweise.append(
                     f"Phase {k}: unbekannter Schlüssel „{schluessel}“ — wird überlesen "
                     "(bekannt: name, dauer_s, art, klang)"
@@ -489,12 +506,35 @@ VORLAGEN: Final[dict[str, Takt]] = {
     "gleich_5_5": _atem("Gleichtakt 5-5", ("ein", 5, ART_EIN), ("aus", 5, ART_AUS)),
     "gleich_2_5": _atem("Gleichtakt 2,5-2,5", ("ein", 2.5, ART_EIN), ("aus", 2.5, ART_AUS)),
     "metronom_1": Takt((Phase("Schlag", 1, ART_FREI, "holz"),), name="Metronom 1 s"),
-    "kniebeuge_2_1_2": _atem(
-        "Kniebeuge 2-1-2", ("ab", 2, ART_AB), ("halten", 1, ART_HALTEN), ("auf", 2, ART_AUF)
+    # Bewegungstakte zählen von Haus aus (P138): jede Runde eine Wiederholung
+    "kniebeuge_2_1_2": replace(
+        _atem("Kniebeuge 2-1-2", ("ab", 2, ART_AB), ("halten", 1, ART_HALTEN), ("auf", 2, ART_AUF)),
+        zaehlt=True,
     ),
     # Liegestütz 2-0-1: eine Phase von 0 s gibt es nicht — ab 2 s, auf 1 s
-    "liegestuetz_2_1": _atem("Liegestütz 2-1", ("ab", 2, ART_AB), ("auf", 1, ART_AUF)),
+    "liegestuetz_2_1": replace(
+        _atem("Liegestütz 2-1", ("ab", 2, ART_AB), ("auf", 1, ART_AUF)), zaehlt=True
+    ),
 }
+
+
+def zaehlender_takt(
+    wahl: Takt | None, abschnitte: Iterable[Takt | None], uebung: Takt | None
+) -> bool:
+    """Ob in einem Lauf irgendwo ein Takt zählt (P138) — die Wahl für jetzt, sonst je
+    Abschnitt dessen Takt oder der der Übung (`takt_waehlen`); ohne Abschnitt mit Takt der der
+    Übung allein. Dann tritt der Zähl-Teil mit Quelle ``takt`` an (`ui.uebung_lauf`).
+
+    >>> k = VORLAGEN["kniebeuge_2_1_2"]; a = VORLAGEN["atmung_4_6"]
+    >>> zaehlender_takt(None, [None, None], k), zaehlender_takt(None, [a, None], k)
+    (True, True)
+    >>> zaehlender_takt(a, [k], k), zaehlender_takt(AUS, [k], k), zaehlender_takt(None, [], a)
+    (False, False, False)
+    """
+    liste = list(abschnitte) or [None]
+    return any(
+        (t := takt_waehlen(wahl, a, uebung)) is not None and t.zaehlt and not t.leer for a in liste
+    )
 
 
 def animation_fuer(takt: Takt) -> str:
@@ -836,4 +876,5 @@ __all__ = [
     "tempo_lesen",
     "tempo_text",
     "wechsel",
+    "zaehlender_takt",
 ]

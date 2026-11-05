@@ -141,7 +141,15 @@ ein einzelner Metronomschlag.
   Abschnitt“, „In die Bibliothek“).
 - **Wo er gilt:** an der Übung überall, wo sie geübt wird; an einem Timer-Abschnitt nur
   dort (vor der Übung); über den Takt-Knopf an der Uhr „für jetzt“ (geht vor allem anderen).
-- **Takt zählt** (jede volle Runde eine Wiederholung) kommt in einem späteren Schritt.
+- **Takt zählt:** Ist der Schalter an (bei den Bewegungs-Vorlagen von Haus aus), ist jede
+  volle Runde eine Wiederholung — auch ohne Sensor und ohne Stoppuhr-Zeit. Die Zahl steht als
+  „Takt 12“ in der Zählzeile, ±1 korrigiert sie, „Fertig“ trägt sie ein; sie ist eine Vorgabe,
+  keine Messung. Zählt der Sensor, zählt er — der Takt steht daneben („Takt 12 · Sensor 11“).
+- **In der Messung:** Läuft eine Aufnahme, bekommt ein Atemtakt Beginn und Ende als Notiz,
+  das Protokollfeld „Atmung“ wird „getaktet“, und die Soll-Phasen stehen neben den
+  gemessenen im Beiwerk — die Auswertung zeigt Soll gegen Ist.
+- **Bild der Bewegung:** Ein eigenes Bild (auch ein GIF) an der Übung läuft neben der
+  Takt-Anzeige, als Schleife — nicht synchron zum Takt.
 
 Die Vorlagen sind feste Zahlen ohne Wirkversprechen: Die App empfiehlt keine Rate aus
 Messwerten.

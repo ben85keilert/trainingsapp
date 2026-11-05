@@ -1,6 +1,7 @@
 # Plan: Taktgeber — Phasen für Atmung und Bewegung in Uhr, Timer und Übung
 
-Stand 5.11.2026: **angenommen**, Teil 1 (T1–T3) gebaut (Version 0.3.50, Abschnitt 9) (Ben: „So bauen“; Aufgabe A18, Ben 4.11.2026: „z. B. 3 min und dann Phasen setzen
+Stand 5.11.2026: **angenommen**, Teil 1 (T1–T3) gebaut (Version 0.3.50, Abschnitt 9), Teil 2
+(T4–T6) gebaut (Version 0.3.51, Abschnitt 10) (Ben: „So bauen“; Aufgabe A18, Ben 4.11.2026: „z. B. 3 min und dann Phasen setzen
 können, diese optisch interessant gestalten … Animation/Visualisierung getakteter Übung mit
 Geschwindigkeitsregler“; 5.11.2026: „Takt ist in der Uhr/Timer (beides). Dieser sollte doch direkt
 (Uhr) oder über die Übung zugänglich sein? Evtl. Wiederholungszähler auch ohne Stoppuhr, aber mit
@@ -208,10 +209,52 @@ mit Takt rechnet ab ihrem Start; ein Abschnitt ohne Takt (Pause) beendet den Tak
 nächste Runde beginnt ihn von vorn. (7) Material kennt kein Metronom-Symbol — `GRAPHIC_EQ`
 steht für den Takt.
 
-**Noch nicht (Teil 2, T4–T6):** Marke `atemtakt` und `atmung` `getaktet` in der Messdatei,
-Soll-Phasen ins Beiwerk `atem-v1` (`Messlauf.atem_takt_*`), Auswertung Soll gegen Ist, „Takt
-zählt“ (Zähl-Teil mit Quelle `takt`), GIF/Bild der Bewegung an der Übung. Offen aus Teil 1:
-P140 (Vibration am Phasenwechsel — gebaut mit Schalter, Vorgabe an; nicht entschieden); die
-Zeile in „Im Plan einstellen“ (ein Takt je Planübung) ist nicht gebaut — der Vertrag sieht
-Übung, Abschnitt und Uhr für jetzt vor; das Querformat/Live-Vollbild zeigt den Takt nur als
-Kopfzeile, nicht als Animation (Platz).
+**Offen aus Teil 1:** P140 (Vibration am Phasenwechsel — gebaut mit Schalter, Vorgabe an;
+nicht entschieden); die Zeile in „Im Plan einstellen“ (ein Takt je Planübung) ist nicht gebaut —
+der Vertrag sieht Übung, Abschnitt und Uhr für jetzt vor; das Querformat/Live-Vollbild zeigt
+den Takt nur als Kopfzeile, nicht als Animation (Platz). Teil 2 steht in Abschnitt 10.
+
+## 10. Umsetzungsstand (5.11.2026, Version 0.3.51) — Teil 2: T4–T6
+
+hrv-core bleibt 0.13.0 (`hrv-core.ref` unverändert): das Feld `takt` im Beiwerk `atem-v1`,
+die Journalzeilen `t`/`q`/`u` und `Atem.takt` sind dort seit 0.13.0 — Teil 2 nimmt sie.
+Verträge zuerst: `docs/kompatibilitaet.md` §4 (Marke, `art` `takt`, `spur` `atemtakt`, keine
+5-s-Regel), §5 (`getaktet`, Takt vor Übungsregel), §15 (Feld `takt`); `docs/plan_einheit.md` §4
+(`zaehlung` mit `quelle`, `takt`, `takt_zeiten_s`; der Takt geht nicht über die Zeitleiste).
+
+| Stufe | Gebaut | Wo |
+|---|---|---|
+| T4 Lauf | `devices/takt_lauf.py` (flet-frei, Doctests): `TaktVerfolger(lauf)` rechnet je Tick der Einheit aus `TimerLauf.takt_lage` (nie mitgezählt), was seit dem letzten Tick geschah — `TaktNeu`: **Takt-Lauf** begann/endete (je Abschnitt mit Takt und je Tempoänderung ein Lauf, wie `timer/takt`; der Beginn rückgerechnet auf den Abschnittsanfang, eine Tempoänderung meldet die laufende Phase nicht noch einmal), **Soll-Phasen** `(Uhr, ein/aus)` eines Atemtakts (Zeit = jetzt − verstrichene Phasenzeit, auf Zehntel genau trotz 0,25-s-Tick; „halten“ verlängert; Bewegungstakte liefern keine), **volle Runden** `(Uhr, Runde, zaehlt)`; angehalten geschieht nichts, die Rundenzahl erreicht endet der Lauf. `TimerBaustein` führt ihn (`takt_abholen`), `Einheitslauf._takt_verteilen` bringt ihn je Takt an die HRV (`in_die_messung`) und an den Zähl-Teil (`takt_runden`) — **nicht über die Zeitleiste** (Phasen und Runden wären zu viele). Ein Timer **ohne** Einheit (nur, wenn eine andere Einheit bereitsteht) füttert die Messung aus dem Ticker (`ui/timer_takt._takt_in_messung`, wie seine Abschnittsnotizen, mit dem Schalter „Notizen“) | `devices/takt_lauf.py`, `devices/einheit.py`, `ui/timer_takt.py` |
+| T4 Messung | `Messlauf.atem_takt_beginn(t, name=, rate_pro_min=, soll_s=, profil=)` / `atem_takt_phase(t, art)` / `atem_takt_ende(t)` (Quelluhr → Wanduhr wie `atem_phase`): Takt-Lauf und Soll-Phasen in den `AtemSammler` (angelegt mit `quelle = takt` und leerem `prototyp`, wenn nur der Takt schreibt; meldet sich der Sensor, wird er zum Sensor-Sammler), dazu das **Paar Notizen** `timer/takt` („Takt Atmung 4-6: Start“, `name`, `wert` = Rate, `soll_s`, `profil`) und `timer/ende` auf der Spur `atemtakt` — sofort, keine Abschnittsgrenze (die Läufe stehen im Beiwerk), nie ohne Beginn-Notiz ein Ende. `takt_laufend` merkt den Takt auch ohne Aufnahme: eine Aufnahme, die mitten im Takt beginnt (zweite Aufnahme, Teil 2 nach dem Teilen), bekommt Lauf und Beginn-Notiz bei 0; Stopp und Teilen schließen den offenen Lauf. Nur Atemtakte (`in_die_messung` prüft `Takt.ist_atmung`). **Protokollfeld** `getaktet` mit `takt_pro_min` = Rate des längsten Takt-Laufs aus den Marken (`core.atem_protokoll.takt_laeufe`/`takt_rate`, vor der Übungsregel; ein offener Lauf reicht bis `ende_s`) | `devices/messlauf.py`, `core/atem_protokoll.py` |
+| T4 Auswertung | Ebene „Atmung“: die Soll-„ein“ als feine Linien, Soll-„aus“ gestrichelt, über dem Ist-Schatten, die Takt-Läufe als zweites Band; Karte „Atmung“: Zeile „Takt: Atmung 4-6 · 6,0/min · 1:30 · Soll–Ist Versatz Median +0,4 s (IQR …, 9 Atemzüge)“ (`core.atem_auswertung.soll_ist_versatz`: je Ist-„ein“ innerhalb eines Takt-Laufs das nächste Soll-„ein“, Vorzeichen Ist − Soll; ohne Sensor „kein Sensor, nur Soll“), die Phasenlage **gegen Ist und Soll** („HF-Gipfel 4,0 s nach Einatembeginn (Ist) · 3,6 s (Soll)“, `soll_atem` macht aus dem Takt ein zweites `Atem` für `atem_hrv_zuege`; ohne Sensor die Atem-HRV nur gegen Soll), Quelle „nur Takt (Soll) — kein Sensor“; **Regel F6**: `getaktet` → Modus Atemübung (war schon so), die Takt-Rate als **dritte Quelle** (`hinweis_rate(…, takt_rate=)`, `takt_rate`/`takt_rate_in` je Bereich; Text „(Takt)“ in der Licht-Zeile) — nur, wenn Sensor und RR-Atmung nichts hergeben: ein Soll ist keine Messung | `core/atem_auswertung.py`, `views/messung_detail.py` |
+| T5 Takt zählt | `ZaehlBaustein(messlauf, kontext, quelle="takt" \| "sensor", takt_zaehlt=)`: Quelle `takt` ohne Strom, ohne „keine Bewegung“, ohne Prototyp — auch **ohne Gerät** (`messlauf=None`, Stand-in `_OhneGeraet`, die Uhr folgt der Einheit); `takt_runden` nimmt die vollen Runden der Einheit (nur Takte mit `zaehlt`, nur im laufenden Satz, nicht angehalten), `ZaehlSatz.takt`/`takt_zeiten_s`, `wert` = Takt + Korrektur, ±1 wie beim Sensor, Satz je zählendem Abschnitt, Ende mit der Uhr; `zaehlung` mit `quelle`, `takt`, `takt_zeiten_s` (bei `takt` ohne `sensor`, `prototyp`, `vorlage`), `core.zaehlen_eintrag` trägt den Wert wie beim Sensor ein („Satz 1 · 12 Wdh. (Takt)“). **Mit Sensor** (`takt_zaehlt=True` am Sensor-Teil) zählt der Sensor, der Takt steht daneben („Sensor 11 · Takt 12 · Prototyp“, Status „Kniebeuge · 11 · Takt 12“), beide in der Zeitleiste, nur der Sensor im Eintrag; `sensor_dazu()` wechselt einen Takt-Zähler mitten im Lauf auf den Sensor — über „Wdh. zählen“ (`uebung_lauf.zaehlen_starten`) oder den Knopf „Sensor dazu“ in der Zählzeile (nur mit Gerät, das zählen kann). Diagnose: `zaehlsatz_vergleichen(…, takt=)`, `satz_text` „Marken 12 · Sensor 11 · Takt 12 · eingetragen 11“, Kontextzeile `zaehler` mit `phase` takt. **Oberfläche:** Schalter „Takt zählt Wiederholungen“ im Takt-Blatt (`Takt.zaehlt`; die Bewegungs-Vorlagen Kniebeuge und Liegestütz bringen ihn an, Atemtakte aus — einschaltbar, Atemzüge in ein Wiederholungsfeld), `uebung_lauf.takt_zaehlen_anbringen` tritt nach `takt_anbringen` an: läuft die Uhr der Übung mit einem zählenden Takt (`core.takt.zaehlender_takt`: Wahl für jetzt, Abschnitte, Übung) und hat sie ein Wiederholungsfeld, tritt ein Zähl-Teil mit Quelle `takt` bei (oder steht bereit); die Zählzeile sagt „Takt 12“, Kopf „Takt zählt · Vorgabe“ (nie „Prototyp“), in der Marken-Leiste „Takt 12“ | `devices/zaehlen.py`, `core/zaehlen.py`, `core/zaehlen_eintrag.py`, `core/einheit.py`, `core/diagnose.py`, `devices/messlauf.py`, `components/takt_blatt.py`, `components/zaehl_stand.py`, `components/zaehlen.py`, `ui/uebung_lauf.py`, `components/uhr.py`, `views/uebung_timer.py` |
+| T6 Bild | Das **Bild der Bewegung** ist ein Medium der Übung (`core/bewegungsbild.py`: `kind` image, `source` local, `uri` `Bewegung/bewegung_<id>.jpg|png|gif`, `title` „Bewegung“ — `bewegungsbild`, `mit_bewegungsbild`), Ablage `Medien/Bewegung/` (`data.uebungsbilder.BewegungsbildRepo`, GIF bleibt GIF; `setzen` schreibt die `exercise_media`-Zeile), Wege `Ziel.fuer_bewegung` → `bewegung/<id>` in Kamera und Fotoauswahl (Fotoauswahl verkleinert zu JPEG — ein GIF kommt nur am Rechner oder von Hand in den Ordner), Blatt „Bild der Bewegung“ (`components/bewegungsbild.py`: Ablage, Hochladen, Aufnehmen, Kein Bild) in „Übung bearbeiten“ unter dem Takt, gezeigt neben der Takt-Anzeige im „Während“ als `ft.Image` mit `gapless_playback` (Flutter spielt ein GIF als Schleife, nicht synchron zum Takt). Nie in Paket, Export, Sync (`core.pakete` lässt `local` weg); die Übungsseite zeigt es nicht als Link. `Phase.bild` ist vorbereitet (Dict-Rundreise, keine Oberfläche) | `core/bewegungsbild.py`, `data/uebungsbilder.py`, `core/anhaenge.py`, `components/bewegungsbild.py`, `views/uebung_bearbeiten.py`, `views/uebung_timer.py`, `views/anhang_hochladen.py`, `views/anhang_aufnahme.py` |
+
+Tests: `tests/test_takt_messung.py` (flet-frei: Verfolger, Beiwerk mit `takt`, Journal, Marken,
+`getaktet`, Takt zählt ohne und mit Sensor, Eintrag, `sensor_dazu`, Vergleich, ohne Gerät,
+Ticker ohne Einheit), `tests/test_bewegungsbild.py` (Kern, Ablage mit GIF, Medium, Paket, Ziel),
+`tests/test_ui_takt2.py` (Schalter im Blatt, Zählzeile, Zähl-Teil mit der Uhr und Eintrag,
+Auswertung Soll gegen Ist mit und ohne Sensor, Bild der Bewegung im Formular, Blatt und
+„Während“), dazu Erweiterungen in `test_atem_auswertung.py`-Doctests.
+
+**Beim Bauen entschieden:** (1) Die Marke des Atemtakts ist ein **Paar Notizen ohne
+Abschnittsgrenze** (`art` `takt` / `ende`, `spur` `atemtakt`, keine 5-s-Regel): Die Läufe
+stehen vollständig im Beiwerk; eine weitere Spur mit Abschnitten füllte die Abschnittsliste der
+Auswertung mit jedem Tempowechsel. (2) Der Takt geht **nicht über die Zeitleiste** zur HRV und
+zum Zähl-Teil, sondern Tick für Tick aus dem Timer-Teil — `plan_einheit` §4 bleibt bei
+`timer/takt` am Abschnittsbeginn und je Tempoänderung. (3) **Atemtakte dürfen zählen**
+(Schalter), Vorgabe aus: Wer „10 Atemzüge Box“ als Wiederholungen führt, bekommt sie —
+gekennzeichnet „Takt“; Bewegungs-Vorlagen zählen von Haus aus. (4) Ohne Sensor gibt es keinen
+Knopf „Wdh. zählen“ (§4.1 bleibt): Der Takt-Zähler tritt **von selbst** mit der Uhr an, sobald
+ein zählender Takt gilt — die Uhr ist der Knopf. (5) Ohne Gerät steht `_OhneGeraet` für den
+Messlauf: der Zähl-Teil braucht keine Quelle, nur eine Uhr. (6) Die Takt-Rate ist für F6 die
+**dritte** Quelle, nie die erste: ein Soll ist keine Messung. (7) Das GIF kommt über die
+Fotoauswahl **nicht** animiert an (`flet_hochladen` verkleinert zu JPEG — Dart-Änderung,
+eigener Schritt); die Ablage und `ft.Image` spielen es, wenn es da ist.
+
+**Nicht gebaut:** die Bildfolge je Phase (nur `Phase.bild`); eine GIF-Durchreiche in
+`flet_hochladen`; der Takt-Zähler im Plan-Ablauf (dort zählt auch der Sensor noch nicht, §13);
+Soll-Phasen im Live-Vollbild als Linien (nur die Kopfzeile aus Teil 1); ein Timer ohne Einheit
+bekommt den Takt nur mit dem Schalter „Notizen“ in die Messung, und eine Aufnahme, die nach dem
+Start einer Einheit ohne HRV-Teil beginnt, bekommt weder Abschnittsnotizen noch Takt (wie bisher
+bei den Abschnitten).

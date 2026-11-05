@@ -39,7 +39,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
-from trainingsapp.core.zaehlen import ENDE_ABBRUCH, ENDE_FERTIG, knopf_text
+from trainingsapp.core.zaehlen import ENDE_ABBRUCH, ENDE_FERTIG, QUELLE_TAKT, knopf_text
 from trainingsapp.devices.zaehlen import ZaehlBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
@@ -255,6 +255,29 @@ def _laufend(
 
         return handler
 
+    def sensor_dazu() -> None:
+        """Der Takt zählt — mit Sensor misst ab jetzt der Sensor, der Takt steht daneben."""
+        if z.sensor_dazu():
+            e = einheit_ui.laeuft(state)
+            if e is not None:
+                e.fortschreiben(z)
+        with contextlib.suppress(Exception):
+            state.neu_zeichnen()
+
+    # Zählt nur der Takt und hat das Gerät einen Beschleunigungssensor: der Sensor darf dazu
+    sensor_knopf: list[ft.Control] = (
+        [
+            ft.TextButton(
+                "Sensor dazu",
+                icon=ft.Icons.SENSORS,
+                tooltip="Ab jetzt misst der Sensor — der Takt steht daneben",
+                on_click=sensor_dazu,
+            )
+        ]
+        if z.quelle == QUELLE_TAKT and zaehl_stand.geraet_kann_zaehlen(state.messlauf)
+        else []
+    )
+
     return ft.Container(
         padding=ft.Padding.only(left=12, right=8, top=8, bottom=10),
         border_radius=16,
@@ -267,12 +290,28 @@ def _laufend(
                 ft.Row(
                     spacing=8,
                     controls=[
-                        ft.Icon(ft.Icons.SENSORS, size=18, opacity=0.85),
-                        ft.Text(knopf_text(z.wdh, z.atem), size=14, opacity=0.85, expand=True),
-                        ft.Text("Prototyp", size=11, italic=True, opacity=0.7),
+                        ft.Icon(
+                            ft.Icons.GRAPHIC_EQ if z.quelle == QUELLE_TAKT else ft.Icons.SENSORS,
+                            size=18,
+                            opacity=0.85,
+                        ),
+                        ft.Text(
+                            "Takt zählt" if z.quelle == QUELLE_TAKT else knopf_text(z.wdh, z.atem),
+                            size=14,
+                            opacity=0.85,
+                            expand=True,
+                        ),
+                        # Der Takt ist eine Vorgabe, kein Prototyp (P138)
+                        ft.Text(
+                            "Vorgabe" if z.quelle == QUELLE_TAKT else "Prototyp",
+                            size=11,
+                            italic=True,
+                            opacity=0.7,
+                        ),
                     ],
                 ),
                 zahl_reihe(page, state, z, uebung.id, item_id, name=name, kompakt=False),
+                *sensor_knopf,
                 ft.Row(
                     spacing=8,
                     controls=[

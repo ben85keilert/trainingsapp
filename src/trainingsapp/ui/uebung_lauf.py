@@ -58,6 +58,7 @@ from trainingsapp.core.parameter import kontextfelder
 from trainingsapp.core.plaene import auspraegung_vorgabe, einzel_plan
 from trainingsapp.core.result_spec import basis_key, format_wert, ist_leer
 from trainingsapp.core.standards import aktive_felder, mit_plan_spec
+from trainingsapp.core.takt import zaehlender_takt
 from trainingsapp.core.timer import TimerLauf, TimerProfil
 from trainingsapp.core.timer_eintrag import (
     ZEITFELDER,
@@ -345,7 +346,12 @@ def zaehlen_starten(
             and z.aktiv
             and zaehl_stand.passt(z.kontext, kontext.uebung_id, kontext.item_id)
         ):
-            return e, None  # zählt hier schon
+            # Zählt hier schon — zählt bisher nur der Takt (P138), kommt der Sensor dazu:
+            # ab jetzt misst er, der Takt steht daneben (`ZaehlBaustein.sensor_dazu`)
+            if z.quelle == zl.QUELLE_TAKT:
+                z.sensor_dazu()
+                e.fortschreiben(z)
+            return e, None
         u = e.teil("plan")
         if (
             e.timer is not None
@@ -393,6 +399,45 @@ def zaehlen_starten(
     assert gestartet is not None
     state.zaehl_laeufe[uebung.id] = gestartet.id
     return gestartet, meldung
+
+
+def takt_zaehlen_anbringen(
+    page: Any, state: Any, e: Einheitslauf, uebung: Exercise, item: PlanItem | None = None
+) -> ZaehlBaustein | None:
+    """„Takt zählt“ (P138, `docs/plan_taktgeber.md` §4): Läuft die Uhr dieser Übung mit einem
+    Takt, der zählt (`core.takt.zaehlender_takt` über Wahl für jetzt, Abschnitte und Übung),
+    zählt jede volle Runde eine Wiederholung — ein Zähl-Teil mit Quelle ``takt``, der der
+    Einheit beitritt (läuft sie) oder bereitsteht (steht sie bereit); auch ohne Gerät. Zählt
+    schon der Sensor in dieser Einheit, zählt der Takt daneben (`ZaehlBaustein.takt_zaehlt`).
+    Nach `takt_anbringen` zu rufen — der Lauf muss seinen Takt kennen. Ohne Wiederholungsfeld
+    (P79: die Planübung bietet keins an) zählt nichts: Die Zahl wüsste nicht, wohin.
+    Gibt den Zähl-Teil zurück, der jetzt den Takt zählt — ``None``, wenn keiner."""
+    timer = e.timer
+    if timer is None:
+        return None
+    lauf = timer.lauf
+    if not zaehlender_takt(
+        lauf.takt_jetzt, [a.takt for a in lauf.profil.abschnitte], lauf.takt_uebung
+    ):
+        return None
+    z = e.teil("zaehlen")
+    if isinstance(z, ZaehlBaustein):
+        z.takt_zaehlt = True
+        return z
+    feld = zl.zaehlt_in(uebung, item)
+    if feld is None:
+        return None
+    u = e.teil("plan")
+    kontext = u.kontext if isinstance(u, UebungBaustein) else kontext_fuer(uebung, None, item)
+    teil = ZaehlBaustein(state.messlauf, kontext, feld=feld, quelle=zl.QUELLE_TAKT, atmung=False)
+    if e.laeuft:
+        einheit_ui.teil_beitreten(page, state, e, teil)
+    elif e.zustand in (Zustand.VORBEREITUNG, Zustand.BEREIT):
+        einheit_ui.teil_bereitstellen(page, state, teil, zeichnen=False)
+    else:
+        return None
+    state.zaehl_laeufe[uebung.id] = e.id
+    return teil
 
 
 def meldung_abholen(state: Any) -> ZaehlMeldung | None:

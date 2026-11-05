@@ -945,32 +945,65 @@ def _aufbauen(
             achse_zu_wand(zeilen_achse, wand, bis),
         )
 
-    def atem_hrv_zeilen(h: aa.AtemHrvBereich, size: int) -> list[ft.Control]:
+    def soll_hrv_zuege() -> list[Any]:
+        """Die Atem-HRV gegen die **Soll-Phasen** des Takts (T4, Entscheidung 25 Frage 7) —
+        derselbe Weg wie `atem_hrv_zuege`, nur mit dem Takt als Phasenquelle
+        (`core.atem_auswertung.soll_atem`); leer ohne Takt."""
+        atem = atem_stand["atem"]
+        soll = aa.soll_atem(atem) if atem is not None else None
+        if soll is None or z.nur_puls:
+            return []
+
+        def rechnen() -> list[Any]:
+            korr = z.korrigiert()
+            t_wand = achse_zu_wand_reihe(zeilen_achse, wand, zeiten_korr())
+            return aa.atem_hrv_zuege(soll, t_wand, korr.rr_ms)
+
+        return z.merken("atem_hrv_soll", rechnen)
+
+    def soll_hrv_bereich(von: float, bis: float) -> aa.AtemHrvBereich | None:
+        zuege = soll_hrv_zuege()
+        if not zuege:
+            return None
+        return aa.atem_hrv(
+            zuege, achse_zu_wand(zeilen_achse, wand, von), achse_zu_wand(zeilen_achse, wand, bis)
+        )
+
+    def atem_hrv_zeilen(
+        h: aa.AtemHrvBereich, size: int, soll: aa.AtemHrvBereich | None = None
+    ) -> list[ft.Control]:
         """Die vier Zeilen der Atem-HRV (B2): Atemspanne, Phasenlage in Sekunden ab
-        Einatembeginn (P135; der Winkel im Tooltip), RR je Phase, gültige Atemzüge mit
-        Gründen — nur Zahlen, keine Wertung."""
+        Einatembeginn (P135; der Winkel im Tooltip) — mit Takt gegen Ist **und** Soll (T4) —,
+        RR je Phase, gültige Atemzüge mit Gründen — nur Zahlen, keine Wertung."""
         return [
             ft.Text(aa.spanne_text(h), size=size),
-            ft.Text(aa.phasenlage_text(h), size=size, tooltip=aa.winkel_text(h) or None),
+            ft.Text(aa.phasenlage_soll_text(h, soll), size=size, tooltip=aa.winkel_text(h) or None),
             ft.Text(aa.rr_phasen_text(h), size=size),
             ft.Text(aa.gueltig_text(h), size=size, opacity=0.8),
         ]
 
     def rate_aus(
-        sensor: aa.AtemKennzahlen | None, rr_rate: Callable[[], float | None]
+        sensor: aa.AtemKennzahlen | None,
+        rr_rate: Callable[[], float | None],
+        takt_rate: float | None = None,
     ) -> tuple[float, str] | None:
         """Die Atemrate eines Bereichs nach der Startregel F6 (`core.atem_auswertung.hinweis_rate`:
         Sensor, wenn genug Fenster gültig und genug des Bereichs erfasst, sonst die Atmung aus
-        RR desselben Bereichs) — ``(rate, Quelle)``, ``None`` ohne; nie bei reinem Puls. Sie
-        trägt den Hinweis „Atmung < 9/min“ (B1), das Atemband (B2b) und die Atemlage."""
+        RR desselben Bereichs, sonst die Rate des Takts — T4) — ``(rate, Quelle)``, ``None``
+        ohne; nie bei reinem Puls. Sie trägt den Hinweis „Atmung < 9/min“ (B1), das Atemband
+        (B2b) und die Atemlage."""
         if z.nur_puls:
             return None
         # Die Atmung aus RR erst rechnen, wenn der Sensor nicht reicht (über Stunden teuer)
-        return aa.hinweis_rate(sensor, None) or aa.hinweis_rate(sensor, rr_rate())
+        return aa.hinweis_rate(sensor, None) or aa.hinweis_rate(sensor, rr_rate(), takt_rate)
 
     def messungs_rate() -> tuple[float, str] | None:
         """Die Rate für die ganze Messung (bzw. den Zuschnitt)."""
-        return rate_aus(atem_stand["kennzahlen"], lambda: atmung()["rate"])
+        return rate_aus(
+            atem_stand["kennzahlen"],
+            lambda: atmung()["rate"],
+            aa.takt_rate(atem_stand["atem"], atem_protokoll.feld_lesen(rec.extra)),
+        )
 
     def bereich_rate(
         von: float, bis: float, rr_rate: float | None = None
@@ -980,6 +1013,11 @@ def _aufbauen(
         return rate_aus(
             atem_kennzahlen(von, bis),
             lambda: rr_atmung_in([(von, bis)]) if rr_rate is None else rr_rate,
+            aa.takt_rate_in(
+                atem_stand["atem"],
+                achse_zu_wand(zeilen_achse, wand, von),
+                achse_zu_wand(zeilen_achse, wand, bis),
+            ),
         )
 
     def atem_hinweis() -> str:
@@ -1292,6 +1330,29 @@ def _aufbauen(
             schatten(x(a), x(b), schatten_farbe)
             for a, b in aa.einatem_bereiche(atem.phasen, von_w, bis_w, erfasst=atem.erfasst)
         )
+        # Der Takt (T4): die Soll-Phasen als feine Linien über dem Ist-Schatten — „ein“
+        # durchgezogen, „aus“ gestrichelt —, die Takt-Läufe als Band unter dem der Erfassung
+        if atem.takt is not None:
+            out.extend(
+                Reihe(
+                    [(x(a), 1e9), (x(b), 1e9)],
+                    farbe=ft.Colors.with_opacity(0.35, farbe),
+                    breite=2.5,
+                    skala=False,
+                    marke=True,
+                    band=True,
+                )
+                for a, b in aa.takt_bereiche(atem, von_w, bis_w)
+            )
+            soll = aa.soll_phasen_in(atem, von_w, bis_w)
+            for art, gestrichelt in ((aa.EIN, False), (aa.AUS, True)):
+                xs = [x(t) for t, a in soll if a == art]
+                if xs:
+                    out.append(
+                        senkrechte(
+                            xs, ft.Colors.with_opacity(0.55, farbe), 0.8, gestrichelt=gestrichelt
+                        )
+                    )
         return out
 
     def marken_reihen(x_von: float, x_bis: float) -> list[Reihe]:
@@ -3924,8 +3985,23 @@ def _aufbauen(
             ),
             ft.Text(aa.vergleich_text(k.rate, rr_rate), size=12, opacity=0.8),
         ]
-        if not z.nur_puls:  # die Atem-HRV der Messung (B2): vier Zeilen
-            zeilen.extend(atem_hrv_zeilen(atem_hrv_bereich(*grenzen()), 12))
+        if atem.takt is not None:  # der Takt (T4): Soll gegen Ist, nur genannt
+            lo_w, hi_w = (achse_zu_wand(zeilen_achse, wand, g) for g in grenzen())
+            zeilen.append(
+                ft.Text(
+                    aa.takt_text(atem, aa.soll_ist_versatz(atem, lo_w, hi_w)),
+                    size=12,
+                    color=FARBEN["atemfrequenz"],
+                )
+            )
+        if not z.nur_puls and k.dauer_erfasst_s > 0:  # die Atem-HRV der Messung (B2)
+            zeilen.extend(
+                atem_hrv_zeilen(atem_hrv_bereich(*grenzen()), 12, soll_hrv_bereich(*grenzen()))
+            )
+        elif not z.nur_puls and (soll := soll_hrv_bereich(*grenzen())) is not None:
+            # Ohne Sensor: die Atem-HRV nur gegen Soll (Phasenlage, Spanne je Soll-Atemzug)
+            zeilen.append(ft.Text("Atem-HRV gegen Soll (kein Sensor):", size=12, opacity=0.8))
+            zeilen.extend(atem_hrv_zeilen(soll, 12))
         if hinweis_lf:
             zeilen.append(
                 ft.Text(
@@ -3935,10 +4011,16 @@ def _aufbauen(
                 )
             )
         zeilen.extend(atem_abschnitt_zeilen())
+        woher = (
+            "Soll-Phasen des Taktgebers (kein Sensor)"
+            if k.quelle == aa.QUELLE_TAKT
+            else "Atemphasen aus dem Beschleunigungssensor, gefunden von "
+            f"{atem.prototyp or 'einem Prototyp'} (hrv-core {atem.hrv_core or '–'})"
+            + ("; dazu die Soll-Phasen des Taktgebers" if atem.takt is not None else "")
+        )
         zeilen.append(
             hinweis(
-                "Atemphasen aus dem Beschleunigungssensor, gefunden von "
-                f"{atem.prototyp or 'einem Prototyp'} (hrv-core {atem.hrv_core or '–'}); "
+                f"{woher}; "
                 "Atemspanne, Phasenlage (Sekunden ab Einatembeginn) und RR je Phase aus "
                 f"hrv_core.prototyp.atem_hrv (hrv-core {hrv_core.__version__}) — nur "
                 "beschrieben, nicht bewertet, nichts davon gespeichert."

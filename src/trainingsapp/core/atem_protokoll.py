@@ -11,7 +11,12 @@ DFA α1 zwischen Messungen nicht vergleichbar (§7.1). **Automatisch, nie von Ha
 - Lief gar keine Übung, ist die Messung ``spontan`` (frei geatmet).
 - Liefen nur andere Übungen (Kniebeugen, Laufen), bleibt das Feld weg: unbekannt — wer bei
   Kniebeugen wie atmet, weiß niemand, und der Leser rät nicht (Vertrag §5).
-- ``getaktet`` kommt erst mit dem Taktgeber im Timer (A18, Plan §7.6).
+- **Der Takt geht vor** (Taktgeber Teil 2 T4, `docs/plan_taktgeber.md` §3): Lief ein Atemtakt —
+  die Messdatei trägt dann ein Paar Notizen ``timer/takt`` … ``timer/ende`` auf der Spur
+  ``atemtakt`` (Vertrag §4, `takt_laeufe`) —, ist es ``getaktet`` mit ``takt_pro_min`` = der
+  Rate des **längsten** Takt-Laufs (nach einer Tempoänderung gibt es mehrere; ein am Ende
+  offener Lauf reicht bis zum Ende der Aufnahme, `takt_rate`). Ein Bewegungstakt setzt keine
+  Marke und also kein ``getaktet``.
 
 Der `Messlauf` bekommt dafür den Haken ``atmung_protokoll`` (Ereignisse → Feld), den die
 Oberfläche mit dem Übungskatalog belegt (`protokoll` mit `ist_atemuebung`); geschrieben wird
@@ -29,6 +34,12 @@ from typing import Any, Final
 
 from hrv_core.recording import json_atomar_schreiben
 
+#: Die Marke des Atemtakts in den Ereignissen (Vertrag §4): Beginn ``timer/takt``, Ende
+#: ``timer/ende``, beide auf der Spur ``atemtakt``
+MARKE_QUELLE: Final[str] = "timer"
+MARKE_ART_TAKT: Final[str] = "takt"
+MARKE_ART_ENDE: Final[str] = "ende"
+SPUR_ATEMTAKT: Final[str] = "atemtakt"
 #: Der Schlüssel im Kopf der Messdatei
 FELD: Final[str] = "atmung"
 #: Die Arten (Vertrag §5)
@@ -60,14 +71,91 @@ def kurzcodes(ereignisse: Iterable[Mapping[str, Any]]) -> list[str]:
     return list(out)
 
 
+def _zeit(e: Mapping[str, Any]) -> float | None:
+    """Die Wanduhr einer Notiz (``t_wall_s``, sonst ``t_s``) — ``None`` ohne Zahl."""
+    for k in ("t_wall_s", "t_s"):
+        wert = e.get(k)
+        if isinstance(wert, int | float) and not isinstance(wert, bool):
+            return float(wert)
+    return None
+
+
+def takt_laeufe(
+    ereignisse: Iterable[Mapping[str, Any]], ende_s: float | None = None
+) -> list[tuple[float, float, float]]:
+    """Die Takt-Läufe aus den Marken der Messdatei (Vertrag §4, Spur ``atemtakt``):
+    ``(von_s, bis_s, rate_pro_min)`` je Paar Beginn (``timer/takt`` mit ``wert``) und Ende
+    (``timer/ende`` auf der Spur); ein offener Lauf reicht bis ``ende_s`` (sonst bis zu seinem
+    Beginn — Dauer 0). Notizen ohne Zeit oder ohne Rate fallen weg.
+
+    >>> m = lambda art, **f: {"quelle": "timer", "art": art, "spur": "atemtakt", **f}
+    >>> takt_laeufe([{"t_wall_s": 10.0, "marke": m("takt", wert=6.0, name="A")},
+    ...              {"t_wall_s": 70.0, "marke": m("ende", name="A")},
+    ...              {"t_wall_s": 80.0, "marke": m("takt", wert=5.0)}], ende_s=100.0)
+    [(10.0, 70.0, 6.0), (80.0, 100.0, 5.0)]
+    >>> takt_laeufe([{"t_wall_s": 1.0, "marke": {"quelle": "timer", "art": "abschnitt"}}])
+    []
+    """
+    out: list[tuple[float, float, float]] = []
+    offen: tuple[float, float] | None = None
+    for e in ereignisse:
+        if not isinstance(e, Mapping):
+            continue
+        m = e.get("marke")
+        if not isinstance(m, Mapping) or m.get("spur") != SPUR_ATEMTAKT:
+            continue
+        if m.get("quelle") != MARKE_QUELLE:
+            continue
+        t = _zeit(e)
+        if t is None:
+            continue
+        if m.get("art") == MARKE_ART_TAKT:
+            rate = m.get("wert")
+            if offen is not None:
+                out.append((offen[0], max(offen[0], t), offen[1]))
+                offen = None
+            if isinstance(rate, int | float) and not isinstance(rate, bool) and rate > 0:
+                offen = (t, float(rate))
+        elif m.get("art") == MARKE_ART_ENDE and offen is not None:
+            out.append((offen[0], max(offen[0], t), offen[1]))
+            offen = None
+    if offen is not None:
+        bis = offen[0] if ende_s is None else max(offen[0], ende_s)
+        out.append((offen[0], bis, offen[1]))
+    return out
+
+
+def takt_rate(ereignisse: Iterable[Mapping[str, Any]], ende_s: float | None = None) -> float | None:
+    """Die Rate des längsten Takt-Laufs (je Minute, zwei Nachkommastellen) — ``None``, wenn
+    keiner lief.
+
+    >>> m = lambda art, **f: {"quelle": "timer", "art": art, "spur": "atemtakt", **f}
+    >>> takt_rate([{"t_wall_s": 0.0, "marke": m("takt", wert=6.0)},
+    ...            {"t_wall_s": 20.0, "marke": m("ende")},
+    ...            {"t_wall_s": 20.0, "marke": m("takt", wert=4.5)}], ende_s=100.0)
+    4.5
+    >>> takt_rate([]) is None
+    True
+    """
+    laeufe = takt_laeufe(ereignisse, ende_s)
+    if not laeufe:
+        return None
+    _von, _bis, rate = max(laeufe, key=lambda lauf: (lauf[1] - lauf[0], lauf[0]))
+    return round(rate, 2)
+
+
 def protokoll(
-    ereignisse: Iterable[Mapping[str, Any]], ist_atemuebung: Callable[[str], bool | None]
+    ereignisse: Iterable[Mapping[str, Any]],
+    ist_atemuebung: Callable[[str], bool | None],
+    *,
+    ende_s: float | None = None,
 ) -> dict[str, Any] | None:
     """Das Protokollfeld aus den Ereignissen der Aufnahme — ``None`` = unbekannt (kein Feld).
 
     ``ist_atemuebung(kurzcode)``: ``True`` für eine Übung vom Typ „Atmung“, ``False`` für eine
     andere, ``None`` für einen Code, den der Katalog nicht kennt (zählt wie eine andere Übung:
-    es lief etwas, nur was, ist unklar).
+    es lief etwas, nur was, ist unklar). ``ende_s``: das Ende der Aufnahme auf der Wanduhr —
+    so weit reicht ein offener Takt-Lauf (`takt_rate`).
 
     >>> atem = {"ATEMATEM": True, "KNIEBEUG": False}.get
     >>> protokoll([], atem)
@@ -80,7 +168,18 @@ def protokoll(
     True
     >>> protokoll([{"uebungen": ["UNBEKANN"]}], atem) is None
     True
+
+    Der Takt geht vor (T4): ein Atemtakt macht die Messung ``getaktet``, auch in einer
+    Atemübung —
+
+    >>> takt = {"t_wall_s": 5.0, "uebungen": ["ATEMATEM"],
+    ...         "marke": {"quelle": "timer", "art": "takt", "spur": "atemtakt", "wert": 6.0}}
+    >>> protokoll([takt], atem, ende_s=65.0)
+    {'art': 'getaktet', 'takt_pro_min': 6.0}
     """
+    rate = takt_rate(ereignisse := list(ereignisse), ende_s)
+    if rate is not None:
+        return {"art": ART_GETAKTET, "takt_pro_min": rate}
     codes = kurzcodes(ereignisse)
     if not codes:
         return {"art": ART_SPONTAN}
@@ -179,5 +278,7 @@ __all__ = [
     "kopffeld_schreiben",
     "kurzcodes",
     "protokoll",
+    "takt_laeufe",
+    "takt_rate",
     "text",
 ]

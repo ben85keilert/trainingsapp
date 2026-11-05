@@ -141,9 +141,13 @@ def uhr_teile(
         state.neu_zeichnen()
 
     def takt_an_den_lauf(e: Einheitslauf) -> None:
-        """Takt für jetzt, Vorgabe der Übung und Tempo an den Timer der Einheit (Taktgeber)."""
+        """Takt für jetzt, Vorgabe der Übung und Tempo an den Timer der Einheit (Taktgeber) —
+        und „Takt zählt“ (P138) als Zähl-Teil mit Quelle „takt“
+        (`uebung_lauf.takt_zaehlen_anbringen`)."""
         if e.timer is not None:
             takt_anbringen(state, e.timer.lauf, key, uebung.takt)
+            with contextlib.suppress(Exception):  # der Zähler darf die Uhr nie aufhalten
+                uebung_lauf.takt_zaehlen_anbringen(page, state, e, uebung, item)
 
     def takt_starten(takt: Takt) -> None:
         """„Takt starten“ aus dem Blatt: dieser Takt für jetzt, die gesetzte Uhr läuft los —

@@ -461,12 +461,20 @@ def satz_text(v: dict[str, object]) -> str:
     >>> satz_text({"uebung": None, "satz": None, "marken": 0, "sensor": None,
     ...            "korrektur": -2, "eingetragen": 8})
     'Satz: Marken 0 · Sensor – · Korrektur −2 · eingetragen 8'
+
+    Zählt der Takt mit (Taktgeber Teil 2 T5, P138), ist er die dritte Spalte:
+
+    >>> satz_text({"uebung": "Kniebeuge", "satz": 1, "marken": 12, "sensor": 11,
+    ...            "korrektur": 0, "takt": 12, "eingetragen": 11})
+    'Kniebeuge S1: Marken 12 · Sensor 11 · Takt 12 · eingetragen 11'
     """
     wer = str(v.get("uebung") or "Satz")
     if v.get("uebung") and v.get("satz"):
         wer += f" S{v['satz']}"
     sensor = v.get("sensor", v.get("zaehler"))
     teile = [f"Marken {v.get('marken', 0)}", f"Sensor {'–' if sensor is None else sensor}"]
+    if v.get("takt") is not None:
+        teile.append(f"Takt {v['takt']}")
     korrektur = v.get("korrektur")
     if isinstance(korrektur, int) and korrektur:
         teile.append(f"Korrektur {mit_vorzeichen(korrektur)}")

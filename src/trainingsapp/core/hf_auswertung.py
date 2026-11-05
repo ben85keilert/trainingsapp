@@ -28,6 +28,7 @@ from typing import Any, Final
 
 import numpy as np
 from hrv_core import herzfrequenz as hz
+from hrv_core.atmung import ATEMLAGE_UNBEKANNT
 from hrv_core.constants import (
     ALGO_VERSION,
     HF_ALPHA1_VT1,
@@ -38,6 +39,7 @@ from hrv_core.constants import (
 )
 from hrv_core.recording import Recording
 
+from trainingsapp.core import atem_auswertung as aa
 from trainingsapp.core.hf_profil import HfProfil, grenzen_bpm
 
 #: Eine Aufnahme zwischen 4 und 20 min gilt als mögliche Morgenmessung (Ruhe-HF-Kandidat)
@@ -58,8 +60,10 @@ NACHT_VON_H: Final[int] = 20
 NACHT_BIS_H: Final[int] = 10
 #: Stand dieser Auswertung (neben `ALGO_VERSION` aus hrv-core): springt sie, gilt jeder Cache
 #: als veraltet. 1 = v0.3.31; 2 = Nacht-HF auch ohne Schlafabschnitt aus dem Nachtfenster;
-#: 3 = Schwellen aus DFA α1 (EKG-Gurte).
-AUSWERTUNG_VERSION: Final[int] = 3
+#: 3 = Schwellen aus DFA α1 (EKG-Gurte); 4 = die Atemlage dazu (B2b, hrv-core 0.12.0): die
+#: Schwellen gelten nur bei spontaner Atmung ab 9/min — ein Cache ohne ``atemlage`` ist
+#: veraltet und wird beim Anzeigen neu gerechnet.
+AUSWERTUNG_VERSION: Final[int] = 4
 #: Schwellen aus DFA α1 nur bis zu dieser Dauer — eine Nacht ist keine Rampe
 ALPHA1_MAX_DAUER_S: Final[float] = 4 * 3600.0
 #: Grundlage der Nacht-HF: ein Schlafabschnitt oder das Nachtfenster der Aufnahme
@@ -192,6 +196,9 @@ class HfAuswertung:
     #: Schwellen aus DFA α1 (nur EKG-Gurte): ``vt1``/``vt2`` je `hz.Alpha1Schwelle.als_dict`,
     #: ``n_fenster``, ``artefaktanteil``, ``reihe`` (t, hf, alpha1 je Fenster)
     alpha1: dict[str, Any] | None = None
+    #: Atemlage der Aufnahme (`hrv_core.atmung.atemlage`, B2b): ``unter_9``, ``9_bis_15``,
+    #: ``ueber_15`` (je mit ``_getaktet``) oder ``unbekannt`` — ``None`` in alten Caches
+    atemlage: str | None = None
     reihe: hz.HfReihe | None = field(default=None, repr=False, compare=False)
 
     def als_dict(self) -> dict[str, Any]:
@@ -209,6 +216,7 @@ class HfAuswertung:
             "algo_version": self.algo_version,
             "version": self.version,
             "alpha1": self.alpha1,
+            "atemlage": self.atemlage,
         }
 
     @classmethod
@@ -227,6 +235,7 @@ class HfAuswertung:
             algo_version=int(d.get("algo_version") or 0),
             version=int(d.get("version") or 0),
             alpha1=d.get("alpha1"),
+            atemlage=d.get("atemlage"),
         )
 
 
@@ -289,10 +298,16 @@ def _nachtfenster(rec: Recording, reihe: hz.HfReihe) -> tuple[float, float] | No
 
 
 def _alpha1_schwellen(
-    rec: Recording, reihe: hz.HfReihe, artefakt: Sequence[bool] | None
+    rec: Recording,
+    reihe: hz.HfReihe,
+    artefakt: Sequence[bool] | None,
+    atemlage: str = ATEMLAGE_UNBEKANNT,
 ) -> dict[str, Any] | None:
     """Schwellen aus DFA α1 (Entscheidung 20) — nur bei RR aus einem EKG-Gurt, nicht für
-    Aufnahmen über 4 h. Artefakte gehen als NaN in die Fenster; über 5 % gilt nichts."""
+    Aufnahmen über 4 h. Artefakte gehen als NaN in die Fenster; über 5 % gilt nichts. Die
+    Schwellen gelten nur bei **spontaner Atmung ab 9/min** (B2b, `aa.schwellen_erlaubt`):
+    langsames oder getaktetes Atmen hebt α1, ohne dass sich im Nervensystem etwas ändert —
+    dann steht der Grund da (`aa.schwellen_hinweis`), der Wert bleibt sichtbar."""
     if rec.effektive_qualitaet() != QUALITAET_RR_EKG or reihe.n == 0:
         return None
     if reihe.dauer_s > ALPHA1_MAX_DAUER_S or len(rec.beats) < 100:
@@ -310,6 +325,7 @@ def _alpha1_schwellen(
     if te.size == 0:
         return None
     anteil = reihe.artefaktanteil(None, None)
+    lage_grund = aa.schwellen_hinweis(atemlage)
     schwellen: dict[str, Any] = {}
     for name, ziel in (("vt1", HF_ALPHA1_VT1), ("vt2", HF_ALPHA1_VT2)):
         s = hz.schwelle_alpha1(hf, a1, ziel).als_dict()
@@ -319,11 +335,15 @@ def _alpha1_schwellen(
                 f"Artefaktanteil {100 * anteil:.1f} % über {100 * HF_ARTEFAKT_MAX:.0f} %",
             ]
             s["gueltig"] = False
+        if lage_grund:
+            s["gruende"] = [*s["gruende"], lage_grund]
+            s["gueltig"] = False
         schwellen[name] = s
     return {
         **schwellen,
         "n_fenster": int(te.size),
         "artefaktanteil": anteil,
+        "atemlage": atemlage,
         "reihe": {
             "t": [round(float(x), 1) for x in te],
             "hf": [round(float(x), 1) for x in hf],
@@ -346,10 +366,14 @@ def auswerten(
     abschnitte: Sequence[AbschnittWand] = (),
     artefakt: Sequence[bool] | None = None,
     tagesminimum_bpm: float | None = None,
+    atemlage: str | None = None,
 ) -> HfAuswertung:
     """Alles aus einer Aufzeichnung (Modulkopf). ``artefakt`` je Zeile der Datei (aus der
-    Korrektur), ``abschnitte`` auf der Wanduhr."""
+    Korrektur), ``abschnitte`` auf der Wanduhr. ``atemlage`` (B2b): die Lage nach Regel F6,
+    wenn der Aufrufer ein Atem-Beiwerk kennt; sonst die Vorgabe der Bibliothek aus der
+    Atmung aus RR (`aa.atemlage_der_messung`)."""
     reihe = hz.reihe_aus_beats(rec.beats, artefakt=artefakt)
+    lage = atemlage if atemlage is not None else aa.atemlage_der_messung(rec)
     grenzen = grenzen_bpm(list(bereiche))
     voll = profil.vollstaendig
     ruhe = profil.ruhe_bpm if voll else None
@@ -452,7 +476,7 @@ def auswerten(
                 "n_marken": len(marken_talk),
             }
 
-    alpha1 = _alpha1_schwellen(rec, reihe, artefakt)
+    alpha1 = _alpha1_schwellen(rec, reihe, artefakt, lage)
 
     # -- Vorschläge aus der HF ---------------------------------------------------------
     vorschlaege: list[dict[str, Any]] = []
@@ -504,6 +528,7 @@ def auswerten(
         profil_stand=_json(profil_stand(profil, bereiche)),
         reihe=reihe,
         alpha1=_json(alpha1),
+        atemlage=lage,
     )
 
 

@@ -147,7 +147,8 @@ async def test_auswertung_zeigt_atmung_als_ebene_karte_und_hinweis(page, state, 
     assert "Sensor · Prototyp · Polar H10 TEST" in alles and "Atmung aus RR: –" in alles
     # Der Hinweis: Sensor-Rate 6/min (alle Fenster gültig) → LF/HF und DFA α1 mit Hinweis,
     # HF-Power nicht ausgewiesen — in Kacheln und Tabellen
-    assert alles.count(aa.LF_HINWEIS) == 2  # LF/HF und DFA α1
+    assert alles.count(aa.LF_HINWEIS) == 1  # LF/HF; DFA α1 trägt die Atemlage dazu (B2b)
+    assert "Atmung < 9/min, spontan — liegt im LF-Band" in alles  # DFA α1
     assert f"{aa.NICHT_AUSGEWIESEN} — {aa.LF_HINWEIS}" in alles  # HF-Power
     assert any(t.startswith(aa.LF_HINWEIS + ": LF/HF und DFA α1") for t in alles)
     # Die Ebene „Atmung“ ist da und an: neun Schatten des Einatmens über dem Tachogramm, dazu
@@ -178,7 +179,7 @@ def _bandleiste(wurzel) -> dict[str, str]:
             isinstance(c, ft.Row)
             and len(c.controls) == 4
             and isinstance(c.controls[1], ft.Text)
-            and c.controls[1].value in ("LF", "HF", "LF/HF")
+            and c.controls[1].value in ("LF", "HF", "LF/HF", "HF (Atemband)", "LF/HF (Atemband)")
         ):
             out[str(c.controls[1].value)] = str(c.controls[2].value)
     return out
@@ -398,9 +399,91 @@ async def test_karte_zeigt_atem_hrv_je_messung_und_abschnitt(
     a1 = next(k for t, k in nach_titel.items() if "α1" in t)
     hf = next(k for t, k in nach_titel.items() if t.startswith("HF"))
     assert lf_hf.wert != "–" and lf_hf.grund == aa.LF_HINWEIS
-    assert a1.wert != "–" and a1.grund == aa.LF_HINWEIS
+    # DFA α1: die Atemlage als Untertitel (B2b) — getaktet laut Protokollfeld (Übung)
+    assert a1.wert != "–" and a1.grund == "Atmung < 9/min, getaktet — liegt im LF-Band"
     assert hf.wert == "–" and hf.grund.startswith(aa.NICHT_AUSGEWIESEN)
     assert "nicht bewertet, nichts davon gespeichert." in " ".join(alles)
+
+
+async def test_kacheln_tabelle_und_bandleiste_zeigen_das_atemband(
+    page, state, tmp_path, monkeypatch
+) -> None:
+    """B2b: Mit der Rate nach F6 (Sensor 6/min) stehen „HF (Atemband)“ mit dem Band als
+    Grundzeile und „LF/HF (Atemband)“ neben den festen Bändern — in den Kacheln, der
+    Frequenztabelle und der Bandleiste des Analysefensters (mit dem Band als Zeile und zwei
+    Kanten im Spektrum); DFA α1 trägt die Atemlage. Ohne Rate „–“ mit „keine Atemrate“."""
+    kacheln = _kacheln_mitlesen(monkeypatch)
+    # 400 s: unter 5 min wäre LF gesperrt, und LF/HF (Atemband) stünde als „gesperrt“ da
+    eintrag, _ = _messung_rsa(state, tmp_path, art="spontan", atemuebung=False, dauer_s=400.0)
+    einst = state.hrv_einstellungen()
+    einst.kacheln = [*einst.kacheln, "hf_atem", "lf_hf_atem"]
+    state.hrv_einstellungen_setzen(einst)
+    a = state.ansicht()
+    a.bereich = "frequenz"
+    state.ansicht_setzen(a)
+    ansicht = messung_detail_view(page, state, eintrag)
+    await warten(page)
+    alles = texte(ansicht)
+    nach_titel = {k.titel: k for k in kacheln[-1]}
+    hf_atem, lf_hf_atem = nach_titel["HF (Atemband)"], nach_titel["LF/HF (Atemband)"]
+    assert hf_atem.wert not in ("–", "") and hf_atem.grund == "0,07–0,15 Hz"
+    assert lf_hf_atem.wert not in ("–", "") and lf_hf_atem.grund == "0,07–0,15 Hz"
+    assert nach_titel["HF-Band"].wert == "–"  # das feste Band bleibt nicht ausgewiesen (B1)
+    assert nach_titel["DFA α1"].grund == "Atmung < 9/min, spontan — liegt im LF-Band"
+    # Frequenztabelle: die beiden Zeilen hinter LF/HF
+    assert "HF Atemband 0,07–0,15 Hz" in alles and "LF/HF (Atemband)" in alles
+    hf_zeile = next(t for t in alles if t.endswith(" ms²") and not t.startswith("–"))
+    assert hf_zeile.split()[0] == hf_atem.wert
+    # Bandleiste des Analysefensters „Alles“ (dieselben Zahlen) und die Zeile mit dem Band
+    leiste = _bandleiste(ansicht)
+    assert leiste["HF (Atemband)"] == hf_atem.wert and leiste["HF"] == "–"
+    assert leiste["LF/HF (Atemband)"] == lf_hf_atem.wert
+    assert any(t.startswith("Atemband 0,07–0,15 Hz um die gemessene Atemfrequenz.") for t in alles)
+    kanten = [
+        s
+        for c in alle(ansicht)
+        if isinstance(c, fc.LineChart)
+        for s in c.data_series
+        if s.dash_pattern and len(s.points) == 2 and s.points[0].x == s.points[1].x
+    ]
+    assert sorted(s.points[0].x for s in kanten) == [0.065, 0.15]
+    # Nichtlinear-Tabelle: die Lage unter DFA α1
+    einst = state.hrv_einstellungen()
+    einst.nichtlinear = True
+    state.hrv_einstellungen_setzen(einst)
+    a = state.ansicht()
+    a.bereich = "nichtlinear"
+    state.ansicht_setzen(a)
+    ansicht = messung_detail_view(page, state, eintrag)
+    await warten(page)
+    assert any("DFA α1: Atmung < 9/min, spontan." in t for t in texte(ansicht))
+
+
+async def test_atemband_kacheln_ohne_rate(page, state, tmp_path, monkeypatch) -> None:
+    """Ohne Beiwerk und ohne lesbare Atmung aus RR gibt es keine Rate: die Kacheln des
+    Atembands zeigen „–“ mit „keine Atemrate“, die Tabelle ebenso; DFA α1 ohne Untertitel."""
+    kacheln = _kacheln_mitlesen(monkeypatch)
+    einst = state.hrv_einstellungen()
+    einst.kacheln = [*einst.kacheln, "hf_atem", "lf_hf_atem", "dfa_alpha1"]
+    einst.frequenz = True
+    state.hrv_einstellungen_setzen(einst)
+    a = state.ansicht()
+    a.bereich = "frequenz"
+    state.ansicht_setzen(a)
+    eintrag = _messung(state, tmp_path)
+    for p in (tmp_path / "Messungen").rglob("*_atem.json"):
+        p.unlink()
+    ansicht = messung_detail_view(page, state, eintrag)
+    await warten(page)
+    alles = texte(ansicht)
+    nach_titel = {k.titel: k for k in kacheln[-1]}
+    assert nach_titel["HF (Atemband)"].wert == "–"
+    assert nach_titel["HF (Atemband)"].grund == aa.KEINE_RATE
+    assert nach_titel["LF/HF (Atemband)"].wert == "–"
+    assert nach_titel["DFA α1"].grund == ""
+    assert "HF Atemband" in alles and f"– ({aa.KEINE_RATE})" in alles
+    assert "HF (Atemband)" not in _bandleiste(ansicht)
+    assert not any(t.startswith("Atemband ") for t in alles)
 
 
 async def test_modus_spontan_geht_vor_der_einstellung(page, state, tmp_path) -> None:
@@ -412,7 +495,8 @@ async def test_modus_spontan_geht_vor_der_einstellung(page, state, tmp_path) -> 
     alles = texte(ansicht)
     assert "Atmung aus RR: –" in alles
     assert "Atmung 6,0/min (Sensor) · Ein:Aus 1 : 1,5 · spontan geatmet" in alles
-    assert alles.count(aa.LF_HINWEIS) == 2
+    assert alles.count(aa.LF_HINWEIS) == 1  # LF/HF
+    assert "Atmung < 9/min, spontan — liegt im LF-Band" in alles  # DFA α1
 
 
 async def test_auswertung_ohne_beiwerk_ohne_ebene_und_karte(page, state, tmp_path) -> None:

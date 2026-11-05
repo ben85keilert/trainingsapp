@@ -267,7 +267,13 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Wiederholung sofort, **Umkehrpunkt oben** (P143, `core.zaehlen.vorlage_waehlen` überschreibt
   den Katalogwert), halbe daneben, nie mitgezählt; Vorlagen in der Karte nur Automatisch ·
   Kniebeuge · Liegestütz (`VORLAGEN_ANGEBOT`), die Achsen eines anderen Geräts → Automatisch mit
-  Grund; `zaehlen_fenster` nur noch als Rückfall im Diagnose-Vergleich ohne Zähl-Teil.
+  Grund; `zaehlen_fenster` nur noch als Rückfall im Diagnose-Vergleich ohne Zähl-Teil. **B2b**
+  (5.11.2026, hrv-core 0.12.0, `ALGO_VERSION` bleibt 8): dieselbe Rate nach F6 geht an
+  `frequenzbereich(atemrate_pro_min=)` — Kacheln „HF (Atemband)“/„LF/HF (Atemband)“, Tabelle und
+  Bandleiste zeigen `hf_atem`/`lf_hf_atem` **neben** den festen Bändern (Fensterspektren über
+  `core.atem_auswertung.mit_atemband`), kein Cache; die **Atemlage** (`hrv_core.atmung.atemlage`)
+  steht unter DFA α1, und Schwellen aus α1 (`core/hf_auswertung`, `AUSWERTUNG_VERSION` 4) gelten
+  nur bei spontaner Atmung ab 9/min oder unbekannter Lage — sonst Grund statt Schwelle.
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`

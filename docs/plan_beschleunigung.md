@@ -1,6 +1,6 @@
 # Plan: Beschleunigungssensor in Übungen — Wiederholungen zählen, Atmung erfassen, Ein- und Ausatmung in der HRV
 
-Stand 5.11.2026: **A1, A2, A3, B1, B2 und A5 gebaut** (Version 0.3.48, Abschnitt 13); T und A6
+Stand 5.11.2026: **A1, A2, A3, B1, B2, A5 und B2b gebaut** (Version 0.3.49, Abschnitt 13); T und A6
 folgen. Der Plan ist **angenommen** — Ben: „Plane das beides durch“, danach P117–P126 entschieden
 (Abschnitt 12) und „Falls nicht [noch Fragen offen], kannst du anfangen den Plan umzusetzen“. Die Verfahren
 entstehen in hrv-research (dort `beschleunigung/docs/PLAN_ZAEHLEN_ATEMPHASEN.md`); hier steht,
@@ -593,7 +593,7 @@ einer APK.
 
 P117 bestätigt (Ben): die Schalter sitzen an jeder Übung, nicht einer für alle.
 
-## 13. Umsetzungsstand (5.11.2026, Version 0.3.48)
+## 13. Umsetzungsstand (5.11.2026, Version 0.3.49)
 
 A1 und A2 sind gebaut, ohne Änderung an hrv-core (0.8.0): Der Zähler ist
 `hrv_core.prototyp.wiederholungen`, die Kontextzeilen nutzen nur Felder, die `hrv_core.deid`
@@ -651,6 +651,29 @@ den vier Zeilen, Phasenlage in Sekunden mit Winkel im Tooltip, Abschnittszeile, 
 Modus aus dem Protokollfeld; LF/HF und α1 bleiben als Zahl mit Hinweis; live: Spanne mit der
 Gurt-Attrappe und laufender Aufnahme, ohne Aufnahme keine), Doctests in
 `core/atem_auswertung.py`, `core/zaehlen.py`, `core/hf_auswertung.py`.
+
+**B2b** (5.11.2026, 0.3.49, hrv-core 0.12.0/0.13.0 — `hrv-core.ref` unverändert auf 0.13.0;
+Entscheidung 27 in hrv-research, P137/P142: `ALGO_VERSION` bleibt 8): die neuen Frequenzfelder
+neben den festen Bändern und die **Atemlage** neben DFA α1 — stabile Felder, keine Prototyp-Regel.
+
+| Stufe | Gebaut | Wo |
+|---|---|---|
+| B2b Rechnung | Die Rate nach Regel F6 (`messungs_rate`, je Bereich `bereich_rate`; Sensor, sonst Atmung aus RR desselben Bereichs) geht an `hrv_core.frequency.frequenzbereich(..., atemrate_pro_min=)` — gemerkt je Rate, denn sie wechselt, wenn das Beiwerk im Thread nachkommt oder der Modus der RR-Atmung sich ändert. So kommen `hf_atem`, `lf_atem`, `lf_hf_atem`, `atem_band_hz` aus hrv-core selbst (Teilstücke der festen Bänder). Fenster- und Abschnittsspektren (`fensterspektrum`, `abschnitt_spektrum`, ohne die Felder) bekommen sie beim Zeigen nachgerechnet (`core.atem_auswertung.mit_atemband` → `bandleistung_atem` auf Kurve, Rate und mittlerem Puls des Fensters; das gemerkte Spektrum bleibt), „Alles“ nimmt die exakten Felder der Gesamtrechnung (`spektrum_der_messung`). **Kein Cache:** `hrv_metrics_cache` wird nirgends gelesen oder geschrieben (`docs/offene_fragen.md` H7), alles entsteht beim Anzeigen — die vier Felder sind darum keine Cache-Schlüssel (`docs/kompatibilitaet.md` §10) | `core/atem_auswertung.py`, `views/messung_detail.py`, `components/analyse.py` |
+| B2b Anzeige | Kacheln **„HF (Atemband)“** (`hf_atem`, Band als Grundzeile „0,07–0,15 Hz“) und **„LF/HF (Atemband)“** (`lf_hf_atem`; „gesperrt“ mit Grund, wenn LF zu kurz) in der Gruppe Frequenz der Einstellungen — neben den festen Bändern, nie statt; ohne Rate „–“ mit „keine Atemrate“; live „–“ mit „in der Aufzeichnung“. Frequenztabelle: die Zeilen „HF Atemband 0,07–0,15 Hz“ und „LF/HF (Atemband)“ hinter LF/HF. Bandleiste des Analysefensters: „HF (Atemband)“ und „LF/HF (Atemband)“ dahinter, die Zeile „Atemband 0,07–0,15 Hz um die gemessene Atemfrequenz.“, im Spektrum die beiden Kanten gestrichelt in der Farbe der Atmung. Der Hinweis „Atmung < 9/min“ (B1/B2) bleibt: HF-Power im festen Band „nicht ausgewiesen“, dafür steht `hf_atem` als Leistung im Atemband (Entscheidung 25, Punkt 4) | `components/kacheln.py`, `components/spektrum.py`, `views/messung_detail.py` |
+| B2b Atemlage | `hrv_core.atmung.atemlage(rate, getaktet)` mit der Rate nach F6 und `getaktet` aus dem Protokollfeld (`uebung`/`getaktet`; ohne Feld spontan) — `core.atem_auswertung.atemlage_aus`; ohne Beiwerk die Vorgabe der Bibliothek `atemlage_der_messung` (`hrv_core.referenz.atemrate`: Atmung aus RR im Modus des Protokollfelds). Kachel DFA α1: die Lage als Untertitel („Atmung 9–15/min, spontan“, „Atmung < 9/min, getaktet — liegt im LF-Band“), Tabelle Nichtlinear: „DFA α1: Atmung …“. **Schwellen aus α1** (Entscheidung 20, `core/hf_auswertung`): gelten nur bei **spontaner Atmung ab 9/min** — bei `unter_9*` und jeder `_getaktet`-Lage werden `vt1`/`vt2` ungültig mit dem Grund „… — Schwellen aus α1 nur bei spontaner Atmung ab 9/min“, der Wert bleibt sichtbar, der Knopf grau; bei **unbekannter** Lage gelten sie wie bisher (bei einem Training ist die Atmung aus RR meist nicht lesbar — ohne Hinweis auf langsames oder getaktetes Atmen bleibt Entscheidung 20). `HfAuswertung.atemlage`, `alpha1.atemlage`, `AUSWERTUNG_VERSION` 4: alte Cache-Zeilen ohne das Feld sind veraltet und werden beim Anzeigen neu gerechnet; die Lage kommt aus der Ansicht (`HfKontext.atemlage`, im Loop bestimmt, der Thread rechnet nur). DFA-Überblick der Ausdauer (`_dfa_teil`): eine Zeile „Atmung < 9/min, …: DFA α1 liegt dann höher … — Vergleiche nur innerhalb derselben Atemlage.“, wenn die Lage nicht spontan ab 9/min ist; die Wertebereiche selbst bleiben neutral | `core/atem_auswertung.py`, `core/hf_auswertung.py`, `components/hf_auswertung_sicht.py`, `views/messung_detail.py`, `views/ausdauer.py` |
+
+Tests B2b: `test_atem_auswertung.py` (Rate → Felder in `frequenzbereich`, feste Bänder unverändert,
+`spektrum_der_messung`, `mit_atemband` auf einem Fensterspektrum mit Pulsgrenze, Atemlage und
+Schwellenregel), `test_hf_auswertung.py` (Schwellen ungültig mit Grund bei `unter_9_getaktet`,
+gültig bei `ueber_15` und `unbekannt`, Vorgabe aus RR und Protokollfeld, alte Cache-Zeile ohne
+`atemlage` veraltet), `test_ui_atmung.py` (Kacheln, Tabelle, Bandleiste und Kanten mit Rate;
+ohne Rate „keine Atemrate“; α1-Untertitel spontan/getaktet; Nichtlinear-Tabelle), Doctests.
+
+**Nicht gebaut in B2b:** `hf_atem` als Verlaufskurve (Verlauf-Tab) — `hrv_core.trends` kennt
+die Größe nicht, und ein Cache, der sie trüge, gibt es nicht (hrv-core-Aufgabe, wenn gewünscht);
+das Atemband live (die Live-Bandleiste bleibt ohne — die Rate des Zähl-Teils liegt nur im
+`ZaehlBaustein`); das Atemband je Abschnitt in der Abschnittszeile (dort nur LF/HF; das
+Analysefenster „Abschnitt“ zeigt es in der Bandleiste); praxis_gui.
 
 **Grenzen von B2** (Entscheidung 25 in hrv-research, Eingang mit Ausnahme): geprüft an **einer
 Sitzung mit Takt** (Simulator und Mensch) und einer unter Störung — nicht an zwei unabhängigen;

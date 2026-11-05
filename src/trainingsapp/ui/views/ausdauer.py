@@ -62,6 +62,7 @@ from hrv_core.recording import Recording
 from hrv_core.trends import aktuell, reihe
 
 from trainingsapp.config import streckenverzeichnis
+from trainingsapp.core import atem_auswertung as aa
 from trainingsapp.core.forschung import tempo_reihe
 from trainingsapp.core.hrv_training import (
     dfa_verlauf,
@@ -1106,7 +1107,9 @@ def _dfa_teil(
     """DFA-α1-Überblick: Verlauf, Zeit je Wertebereich — beschreibend, ohne Empfehlung.
 
     ``beginn_s``: ``t_wall_s`` der Messdatei beim Start des Trainings (Einheit); sonst
-    aus den Startzeiten."""
+    aus den Startzeiten. Die **Atemlage** (B2b, `core.atem_auswertung.atemlage_der_messung`:
+    Atmung aus RR im Modus des Protokollfelds) steht als Einordnung darunter, wenn sie nicht
+    spontan ab 9/min ist — Wertebereiche vergleicht man nur innerhalb derselben Lage."""
     rec, korr = hrv
     achse = schlagzeiten(rec)
     zeiten = korr_zeiten(korr, achse)
@@ -1128,6 +1131,7 @@ def _dfa_teil(
         linien[-1].append(((te - versatz) / 60.0, wert))
     reihen = [Reihe(teil, farbe=ft.Colors.PURPLE_400) for teil in linien if teil]
     bereiche = zeit_je_bereich(punkte)
+    lage = aa.dfa_lage_hinweis(aa.atemlage_der_messung(rec))
     return ft.Column(
         spacing=8,
         controls=[
@@ -1149,6 +1153,7 @@ def _dfa_teil(
                     for name, minuten in bereiche
                 ],
             ),
+            *([ft.Text(lage, size=12, color=FARBEN["atemfrequenz"])] if lage else []),
             hinweis(
                 "DFA α1 beschreibt, wie gleichmäßig sich die Herzschlag-Abstände verändern — "
                 "ein Schätzwert, nur mit EKG-Gurt. Fenster mit 3 % oder mehr korrigierten "

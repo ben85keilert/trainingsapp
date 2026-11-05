@@ -71,6 +71,18 @@ KACHELN: dict[str, KachelArt] = {
     **{k: _aus_kurve(k) for k in ("atemfrequenz", "rsa")},
     **{k: _aus_kurve(k) for k in ("hf_rr", "mean_rr", "rmssd", "sdnn", "pnnx")},
     **{k: _aus_kurve(k) for k in ("lf_power", "hf_power", "lf_hf", "gipfel", "vlf_power")},
+    # Atemband (B2b, hrv-core 0.12.0): HF um die gemessene Atemfrequenz — neben den festen
+    # Bändern, nie statt; nur in der Aufzeichnung (dort gilt die Rate nach Regel F6)
+    "hf_atem": KachelArt(
+        "HF (Atemband)",
+        erklaerung="Leistung im Band um die gemessene Atemfrequenz (0,65- bis 1,5-fach) — "
+        "auch bei langsamer Atmung, wo das feste HF-Band nichts zeigt. Nur in der Aufzeichnung.",
+    ),
+    "lf_hf_atem": KachelArt(
+        "LF/HF (Atemband)",
+        erklaerung="LF unter dem Atemband geteilt durch die Leistung im Atemband. "
+        "Nur in der Aufzeichnung.",
+    ),
     # ULF braucht Stunden (mindestens 4 h) — nur als Wert der ganzen Aufzeichnung
     "ulf": KachelArt(
         "ULF-Band",
@@ -99,12 +111,17 @@ GRUPPEN: list[tuple[str, list[str]]] = [
     ("Grundwerte", ["hf", "rr", "artefakte"]),
     ("Atmung", ["atemfrequenz", "rsa", "schwankung"]),
     ("Zeit", ["hf_rr", "mean_rr", "rmssd", "sdnn", "pnnx"]),
-    ("Frequenz", ["lf_power", "hf_power", "lf_hf", "gipfel", "vlf_power", "ulf"]),
+    (
+        "Frequenz",
+        ["lf_power", "hf_power", "lf_hf", "gipfel", "vlf_power", "ulf", "hf_atem", "lf_hf_atem"],
+    ),
     ("Nichtlinear", ["sd1", "sd2", "dfa_alpha1"]),
     ("Herzfrequenz", ["hf_prozent", "hf_bereich", "hf_zeit_bereich", "trimp"]),
 ]
 #: Kacheln der Gruppe „Herzfrequenz“ — brauchen `hf` in `kachel_werte`
 HF_KACHELN = frozenset({"hf_prozent", "hf_bereich", "hf_zeit_bereich", "trimp"})
+#: Kacheln des Atembands (B2b) → Farbe der festen Kennzahl, zu der sie gehören
+ATEM_KACHELN: dict[str, str] = {"hf_atem": "hf_power", "lf_hf_atem": "lf_hf"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -373,6 +390,17 @@ def kachel_werte(
             out.append(
                 KachelWert(art.titel, "–", "ms²", gross=g, grund="ab 4 h, in der Aufzeichnung")
             )
+        elif key in ATEM_KACHELN:
+            out.append(
+                KachelWert(
+                    art.titel,
+                    "–",
+                    "ms²" if key == "hf_atem" else "",
+                    farbe=FARBEN[ATEM_KACHELN[key]],
+                    gross=g,
+                    grund="in der Aufzeichnung",
+                )
+            )
         elif key in HF_KACHELN:
             out.append(_hf_kachel(key, art, g, lauf, herz))
         elif key in ("atemfrequenz", "rsa"):
@@ -482,6 +510,7 @@ def leisten_werte(state: Any) -> list[KachelWert]:
 
 
 __all__ = [
+    "ATEM_KACHELN",
     "GRUPPEN",
     "HF_KACHELN",
     "KACHELN",

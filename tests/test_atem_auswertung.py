@@ -1,11 +1,15 @@
 """Atmung in der Auswertung ohne Bildschirm (`core.atem_auswertung`, Plan Beschleunigung §7.1):
 Größen je Messung und je Abschnitt aus dem Beiwerk ``atem-v1``, Schattenbereiche, die
-Startregel F6 für den Hinweis „Atmung < 9/min“ und der Vergleich mit der Atmung aus RR."""
+Startregel F6 für den Hinweis „Atmung < 9/min“ und der Vergleich mit der Atmung aus RR. B2b
+(hrv-core 0.12.0): die Rate schaltet das Atemband in `frequenzbereich` zu, Fenster- und
+Abschnittsspektren bekommen es nachgerechnet, die Atemlage ordnet DFA α1 ein."""
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from hrv_core.atem import Atem, AtemSammler, atem_laden
+from hrv_core.frequency import fensterspektrum, frequenzbereich
 
 from trainingsapp.core import atem_auswertung as aa
 
@@ -313,3 +317,95 @@ def test_licht_text() -> None:
         == "Atmung – · Ein:Aus 1 : 1,5 · spontan geatmet"
     )
     assert aa.licht_text(None, None, "") == ""
+
+
+# -- B2b: Atemband und Atemlage ----------------------------------------------------------------
+
+
+def _rsa_reihe(rate_pro_min: float, dauer_s: float = 400.0) -> tuple[np.ndarray, np.ndarray]:
+    """RR mit Atemschwankung ±40 ms bei ``rate_pro_min`` — Zeit und RR."""
+    t, rr = 0.0, []
+    ts = []
+    while t < dauer_s:
+        r = 900.0 + 40.0 * np.sin(2 * np.pi * rate_pro_min / 60.0 * t)
+        t += r / 1000.0
+        ts.append(t)
+        rr.append(r)
+    return np.asarray(ts), np.asarray(rr)
+
+
+def test_rate_schaltet_das_atemband_zu() -> None:
+    """Die Rate nach F6 geht an `frequenzbereich(atemrate_pro_min=)`: bei 6/min liegt das Band
+    0,065–0,15 Hz im LF-Band, die Leistung dort ist die der Atmung; ohne Rate stehen die vier
+    Felder auf None — die festen Bänder bleiben gleich (neben, nie statt). Unter 5 min wäre LF
+    gesperrt und ``lf_atem`` None — darum 400 s."""
+    t, rr = _rsa_reihe(6.0)
+    mit = frequenzbereich(rr, t, atemrate_pro_min=6.0)
+    ohne = frequenzbereich(rr, t)
+    assert mit is not None and ohne is not None
+    assert mit["atem_band_hz"] == (0.065, 0.15) and mit["hf_atem"] > 0
+    assert mit["lf_hf_atem"] == mit["lf_atem"] / mit["hf_atem"]
+    assert all(ohne[k] is None for k in ("hf_atem", "lf_atem", "lf_hf_atem", "atem_band_hz"))
+    assert (mit["lf"], mit["hf"], mit["lf_hf"]) == (ohne["lf"], ohne["hf"], ohne["lf_hf"])
+    # Das Spektrum der ganzen Messung trägt die Felder (die Analysekarte „Alles“) …
+    fs = aa.spektrum_der_messung(mit)
+    assert fs is not None and fs.werte["atem_band_hz"] == (0.065, 0.15)
+    assert fs.werte["hf_atem"] == mit["hf_atem"]
+    # … und `mit_atemband` lässt sie, wie sie sind — mit einer anderen Rate rechnet es nichts
+    assert aa.mit_atemband(fs, 12.0) is fs
+    assert aa.atemband_text(mit["atem_band_hz"]) == "0,07–0,15 Hz"
+
+
+def test_fensterspektrum_bekommt_das_atemband_nachgerechnet() -> None:
+    """Abschnitte und Analysefenster rechnen ihr Spektrum selbst (`fensterspektrum`, ohne die
+    Felder): `mit_atemband` ergänzt sie aus Kurve, Rate und Puls — der Puls begrenzt das Band
+    nach oben (halbe Schlagfrequenz)."""
+    t, rr = _rsa_reihe(12.0, 180.0)
+    fs = fensterspektrum(t, rr, 0.0, 180.0)
+    assert fs is not None and "atem_band_hz" not in fs.werte
+    mit = aa.mit_atemband(fs, 12.0, aa.puls_hz(rr))
+    assert mit is not None and mit.werte["atem_band_hz"] == (0.13, 0.3)
+    assert mit.werte["hf_atem"] > 0 and mit.werte["lf_atem"] > 0
+    assert mit.werte["lf_hf_atem"] == pytest.approx(mit.werte["lf_atem"] / mit.werte["hf_atem"])
+    assert fs.werte == {k: v for k, v in mit.werte.items() if k in fs.werte}  # nichts geändert
+    # Puls 50 bpm: die Obergrenze ist 0,417 Hz — bei 20/min (0,5 Hz · 1,5) greift sie
+    langsam = aa.mit_atemband(fs, 20.0, 50.0 / 60.0)
+    assert langsam is not None and langsam.werte["atem_band_hz"][1] == pytest.approx(0.4166667)
+    assert aa.mit_atemband(fs, None) is fs and aa.mit_atemband(None, 6.0) is None
+    assert aa.puls_hz(rr) == pytest.approx(1000.0 / float(np.mean(rr)))
+
+
+def test_atemlage_und_schwellen_aus_alpha1() -> None:
+    """Die Atemlage aus Rate (F6) und Protokollfeld; Schwellen aus α1 (Entscheidung 20) gelten
+    nur bei spontaner Atmung ab 9/min — und bei unbekannter Lage (kein Hinweis auf langsames
+    oder getaktetes Atmen); sonst steht der Grund da."""
+    uebung = {"art": "uebung", "uebung": "ATEMATEM"}
+    assert aa.atemlage_aus((6.1, "sensor"), uebung) == "unter_9_getaktet"
+    assert aa.atemlage_aus((6.1, "rr"), {"art": "spontan"}) == "unter_9"
+    assert aa.atemlage_aus((12.0, "rr"), None) == "9_bis_15"
+    assert aa.atemlage_aus((16.0, "sensor"), {"art": "getaktet", "takt_pro_min": 16}) == (
+        "ueber_15_getaktet"
+    )
+    assert aa.atemlage_aus(None, uebung) == "unbekannt"
+    for lage, erlaubt in (
+        ("9_bis_15", True),
+        ("ueber_15", True),
+        ("unbekannt", True),
+        ("unter_9", False),
+        ("unter_9_getaktet", False),
+        ("9_bis_15_getaktet", False),
+        ("ueber_15_getaktet", False),
+    ):
+        assert aa.schwellen_erlaubt(lage) is erlaubt, lage
+        assert (aa.schwellen_hinweis(lage) == "") is erlaubt, lage
+        assert (aa.dfa_lage_hinweis(lage) == "") is erlaubt, lage
+    assert aa.schwellen_hinweis("9_bis_15_getaktet") == (
+        "Atmung 9–15/min, getaktet — Schwellen aus α1 nur bei spontaner Atmung ab 9/min"
+    )
+    # Untertitel der Kachel DFA α1: die Lage, dazu der Hinweis (B1 bleibt)
+    assert aa.atemlage_text("ueber_15_getaktet") == "Atmung > 15/min, getaktet"
+    assert aa.alpha1_untertitel("unter_9_getaktet", aa.LF_HINWEIS) == (
+        "Atmung < 9/min, getaktet — liegt im LF-Band"
+    )
+    assert aa.alpha1_untertitel("9_bis_15") == "Atmung 9–15/min, spontan"
+    assert aa.alpha1_untertitel("unbekannt") == "" and aa.KEINE_RATE == "keine Atemrate"

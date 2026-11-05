@@ -87,6 +87,9 @@ class HfKontext:
     tempo: Callable[[], tuple[list[float], list[float]] | None] = lambda: None
     #: Abschnitte lassen sich anlegen (nicht bei reinem Puls ohne Herzuhr)
     abschnitte_moeglich: bool = True
+    #: Die Atemlage der Aufnahme nach Regel F6 (B2b; `core.atem_auswertung.atemlage_aus`) —
+    #: ``None`` = die Vorgabe der Bibliothek aus der Atmung aus RR (`auswerten`)
+    atemlage: Callable[[], str | None] = lambda: None
 
 
 @dataclass
@@ -127,13 +130,18 @@ class HfAuswertungSicht:
         profil = self.k.state.hf_profil(self.tag)
         return profil, bereiche_fuer(profil, self.k.state.hf_einstellungen())
 
-    def _rechnen(self, profil: HfProfil, bereiche: list[hz.Bereich]) -> HfAuswertung:
+    def _rechnen(
+        self, profil: HfProfil, bereiche: list[hz.Bereich], atemlage: str | None
+    ) -> HfAuswertung:
+        """Im Thread — ``atemlage`` kommt aus dem Loop (`HfKontext.atemlage` liest
+        Einstellungen aus der Datenbank, die gehört dem Loop)."""
         return auswerten(
             self.k.rec,
             profil=profil,
             bereiche=bereiche,
             abschnitte=self.k.abschnitte_wand(),
             artefakt=self.k.artefakt(),
+            atemlage=atemlage,
         )
 
     def _tempo_lesen(self) -> tuple[list[float], list[float]] | None:
@@ -191,7 +199,7 @@ class HfAuswertungSicht:
                 self.stand.cache_profil = cache.profil_stand
                 self.stand.ungespeichert = False
             else:
-                a = await asyncio.to_thread(self._rechnen, profil, bereiche)
+                a = await asyncio.to_thread(self._rechnen, profil, bereiche, self.k.atemlage())
                 if heutiges_profil:
                     self.stand.cache_profil = None
                     self.stand.ungespeichert = True

@@ -200,6 +200,11 @@ Offen (bewusst, Fragen 11/`hf_spec`): Behandlungs-Dreiteilung in solo, HF-Vorbel
   grau. Übernommen: Quelle `dfa_alpha1` (Rang hinter Labor, vor Talk-Test; 6 bpm; 90 Tage),
   Herkunft „α1 = 0,75 · 30 Fenster · r² 0,91“. `AUSWERTUNG_VERSION` 3; die Fensterreihe
   (`alpha1.reihe`) liegt im Cache und im Forschungsexport. Kurve α1 gegen HF: später.
+  **Atemlage** (B2b, 5.11.2026, `docs/plan_beschleunigung.md` §13): die Schwellen gelten nur
+  bei spontaner Atmung ab 9/min (`hrv_core.atmung.atemlage`, Rate nach Regel F6 aus der
+  Auswertung, sonst Atmung aus RR im Modus des Protokollfelds) — bei langsamer oder getakteter
+  Atmung ungültig mit Grund, bei unbekannter Lage wie bisher; `HfAuswertung.atemlage`,
+  `AUSWERTUNG_VERSION` 4 (alte Caches werden beim Anzeigen neu gerechnet).
 - **Korrekturen vom 30.10. abends (0.3.38):** Knopfsätze Kurz 1·2·10 · Mittel 2·5·15 · Lang
   1·3·6 h · Eigene (Live-Puffer bis 12 h). Die Sichtwahl Herzfrequenz | HRV steht direkt unter
   Gerät und Aufnahme; scrollt sie weg, zeigt der Reiter „Live“ die andere Sicht („Live ⇄ HRV“),

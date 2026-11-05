@@ -9,6 +9,7 @@ import pytest
 from hrv_core.constants import ALGO_VERSION
 from hrv_core.recording import Beat, Recording
 
+from trainingsapp.core.atem_auswertung import atemlage_der_messung
 from trainingsapp.core.hf_auswertung import (
     AbschnittWand,
     HfAuswertung,
@@ -201,6 +202,66 @@ def test_alpha1_schwellen_nur_bei_ekg_und_mit_gruenden() -> None:
         beats=beats, geraet="Verity", geraet_profil="verity_sense", intervall_quelle="ppg_ppi"
     )
     assert auswerten(optisch, profil=_profil(), bereiche=[]).alpha1 is None
+    # B2b: ohne Hinweis auf langsames oder getaktetes Atmen (Rauschen: Atmung aus RR nicht
+    # lesbar) bleibt die Lage unbekannt — die Schwellen gelten wie bisher
+    assert a.atemlage == "unbekannt" and a.alpha1["atemlage"] == "unbekannt"
+    assert not any("Schwellen aus α1" in g for g in a.alpha1["vt1"]["gruende"])
+
+
+def test_alpha1_schwellen_nur_bei_spontaner_atmung_ab_9(con) -> None:
+    """B2b (hrv-core 0.12.0, Entscheidung 27): kennt der Aufrufer die Atemlage (Regel F6 mit
+    Beiwerk), gelten die Schwellen aus α1 nur bei spontaner Atmung ab 9/min — sonst steht der
+    Grund da, der Wert bleibt. Ohne Angabe nimmt `auswerten` die Vorgabe der Bibliothek: die
+    Atmung aus RR im Modus des Protokollfelds. Ein alter Cache ohne ``atemlage`` ist veraltet."""
+    rng = np.random.default_rng(5)
+    beats, t = [], 0.0
+    for i in range(1200):
+        rr = 750 - i * 0.15 + rng.normal(0, 25)
+        t += rr / 1000
+        beats.append(Beat(round(t, 3), int(rr), int(60000 / rr), round(t, 3)))
+    rec = Recording(beats=beats, geraet="Polar H10", geraet_profil="polar_h10")
+    profil = _profil()
+    getaktet = auswerten(rec, profil=profil, bereiche=[], atemlage="unter_9_getaktet")
+    assert getaktet.atemlage == "unter_9_getaktet"
+    for name in ("vt1", "vt2"):
+        s = getaktet.alpha1[name]
+        frei = auswerten(rec, profil=profil, bereiche=[], atemlage="9_bis_15").alpha1[name]
+        assert s["gueltig"] is False and s["wert"] == frei["wert"]  # der Wert bleibt
+        assert s["gruende"][-1] == (
+            "Atmung < 9/min, getaktet — Schwellen aus α1 nur bei spontaner Atmung ab 9/min"
+        )
+    spontan = auswerten(rec, profil=profil, bereiche=[], atemlage="ueber_15")
+    assert spontan.atemlage == "ueber_15"
+    assert not any("Schwellen aus α1" in g for g in spontan.alpha1["vt1"]["gruende"])
+    assert HfAuswertung.aus_dict(getaktet.als_dict()).atemlage == "unter_9_getaktet"
+    # Die Vorgabe ohne Beiwerk: RSA bei 6/min, das Protokollfeld nennt eine Übung → getaktet
+    beats, t = [], 0.0
+    while t < 600:
+        rr = 900.0 + 40.0 * np.sin(2 * np.pi * 0.1 * t)
+        t += rr / 1000
+        beats.append(Beat(round(t, 3), int(rr), int(60000 / rr), round(t, 3)))
+    langsam = Recording(beats=beats, geraet="Polar H10", geraet_profil="polar_h10")
+    langsam.extra["atmung"] = {"art": "uebung", "uebung": "ATEMATEM"}
+    assert atemlage_der_messung(langsam) == "unter_9_getaktet"
+    vorgabe = auswerten(langsam, profil=profil, bereiche=[])
+    assert vorgabe.atemlage == "unter_9_getaktet"
+    if vorgabe.alpha1 is not None:
+        assert vorgabe.alpha1["vt1"]["gueltig"] is False
+    # Alte Cache-Zeile (Version 3, ohne ``atemlage``): veraltet → beim Anzeigen neu gerechnet
+    alt = {k: v for k, v in spontan.als_dict().items() if k != "atemlage"}
+    alt["version"] = 3
+    assert HfAuswertung.aus_dict(alt).atemlage is None
+    s_ = Subject(name="Ich")
+    SubjectRepo(con).speichern(s_)
+    r = HrvRecording(
+        subject_id=s_.id, file_path="P/b.json", started_at=datetime(2026, 11, 5, tzinfo=UTC)
+    )
+    HrvRepo(con).anlegen(r)
+    repo = HfCacheRepo(con)
+    repo.schreiben(r.id, HfAuswertung.aus_dict(alt))
+    assert repo.lesen(r.id).veraltet() and repo.fehlende(s_.id) == [r.id]
+    repo.schreiben(r.id, spontan)
+    assert not repo.lesen(r.id).veraltet() and repo.fehlende(s_.id) == []
 
 
 def test_leere_aufzeichnung() -> None:

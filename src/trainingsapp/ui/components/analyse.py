@@ -64,6 +64,7 @@ from hrv_core.atmung import ATEMUEBUNG, RUHE
 from hrv_core.frequency import Fensterspektrum, fensterspektrum
 from hrv_core.trends import aktuell, verlauf
 
+from trainingsapp.core import atem_auswertung as aa
 from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.karte import info_knopf, karte, titel
 from trainingsapp.ui.components.notizen import senkrechte
@@ -188,8 +189,10 @@ class Analyse:
             die Ansicht selbst ein (live, siehe Modulbeschreibung).
         menue_oben: die ersten Einträge des Menüs (Info, Korrektur) — neu je Aufbau.
         menue_im_kopf: das Menü im Kopf der eigenen Karte (sonst baut die Ansicht es ein).
-        atem_hinweis: der Hinweis „Atmung < 9/min“ für ein Analysefenster (Aufzeichnung,
-            ``None`` = der sichtbare Ausschnitt) — leer, wenn er nicht gilt.
+        atem_rate: die Atemrate je Minute für ein Analysefenster (Aufzeichnung, Regel F6;
+            ``None`` = der sichtbare Ausschnitt) — ``None`` ohne Rate. Daraus folgen der
+            Hinweis „Atmung < 9/min“ (`core.atem_auswertung.lf_hinweis`) und das Atemband
+            des Spektrums (`mit_atemband`, B2b).
     """
 
     def __init__(
@@ -214,12 +217,12 @@ class Analyse:
         eingebettet: bool = False,
         menue_oben: Callable[[], list[ft.PopupMenuItem]] | None = None,
         menue_im_kopf: bool = True,
-        atem_hinweis: Callable[[Analysefenster | None], str] | None = None,
+        atem_rate: Callable[[Analysefenster | None], float | None] | None = None,
     ) -> None:
         self._page = page
-        #: „Atmung < 9/min — liegt im LF-Band“ für das Analysefenster (Plan Beschleunigung
-        #: §7.1): die Bandleiste weist HF-Power dann nicht aus — ``None`` live
-        self._atem_hinweis = atem_hinweis
+        #: Atemrate des Analysefensters (Plan Beschleunigung §7.1, B2b): unter 9/min weist
+        #: die Bandleiste HF-Power nicht aus, mit Rate zeigt sie das Atemband — ``None`` live
+        self._atem_rate = atem_rate
         self._menue_oben = menue_oben
         self._menue_im_kopf = menue_im_kopf and not eingebettet
         self._state = state
@@ -467,8 +470,12 @@ class Analyse:
                 )
             )
         if bereich == "frequenz":
-            hinweis = self._atem_hinweis(fenster) if self._atem_hinweis is not None else ""
-            teile += [spektrum_kurve(ergebnis), band_leiste(ergebnis, self._optisch, hinweis)]
+            rate = self._atem_rate(fenster) if self._atem_rate is not None else None
+            # Das Atemband erst beim Zeigen — die Rate kann sich ändern (Beiwerk kommt im
+            # Thread), das gemerkte Spektrum bleibt
+            fs = aa.mit_atemband(ergebnis, rate, self._puls_hz(t, rr, fenster, x_von, x_bis))
+            hinweis = aa.lf_hinweis(rate)
+            teile += [spektrum_kurve(fs), band_leiste(fs, self._optisch, hinweis)]
         else:
             nl: _Nichtlinear = ergebnis
             teile += [
@@ -478,6 +485,20 @@ class Analyse:
                 self._poincare_werte(nl),
             ]
         return ft.Column(spacing=8, tight=True, opacity=0.55 if veraltet else 1.0, controls=teile)
+
+    @staticmethod
+    def _puls_hz(
+        t: np.ndarray,
+        rr: np.ndarray,
+        fenster: Analysefenster | None,
+        x_von: float,
+        x_bis: float,
+    ) -> float | None:
+        """Mittlere Schlagfrequenz im Fenster — die Obergrenze des Atembands."""
+        von, bis = (fenster.von, fenster.bis) if fenster is not None else (x_von, x_bis)
+        if not t.size:
+            return None
+        return aa.puls_hz(rr[(t > von) & (t <= bis)])
 
     def _speicher_begrenzen(self) -> None:
         """Höchstens `FENSTER_SPEICHER` Ergebnisse — die ältesten **Fenster-Ausschnitte**

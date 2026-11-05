@@ -85,7 +85,7 @@ from hrv_core.ausschnitte import (
 from hrv_core.constants import BAND_OK
 from hrv_core.ekg import ekg_laden, ekg_pfad
 from hrv_core.ereignisse import Zeitbezug, metadaten_schreiben, sortiert
-from hrv_core.frequency import Fensterspektrum, frequenzbereich
+from hrv_core.frequency import frequenzbereich
 from hrv_core.korrektur import (
     Kette,
     Korrektur,
@@ -157,6 +157,7 @@ from trainingsapp.ui.components.forschung import forschung_fragen
 from trainingsapp.ui.components.hf_auswertung_sicht import HfAuswertungSicht, HfKontext
 from trainingsapp.ui.components.hf_sicht import sicht_wahl
 from trainingsapp.ui.components.kacheln import (
+    ATEM_KACHELN,
     KACHELN,
     PULS_KACHELN,
     KachelWert,
@@ -821,8 +822,16 @@ def _aufbauen(
         )
 
     def frequenz() -> dict[str, Any] | None:
+        """Frequenzbereich der ganzen Messung — mit der Atemrate nach Regel F6 (B2b): so
+        kommen ``hf_atem``, ``lf_atem``, ``lf_hf_atem`` und ``atem_band_hz`` aus hrv-core
+        selbst (auf den Teilstücken der festen Bänder). Gemerkt je Rate — sie wechselt, wenn
+        das Beiwerk im Thread nachkommt oder der Modus der RR-Atmung sich ändert."""
         korr = z.analyse_korr()
-        return z.merken("frequenz", lambda: frequenzbereich(korr.rr_ms, korr.t_s, korr.breaks))
+        rate = aa.rate_wert(messungs_rate())
+        return z.merken(
+            f"frequenz:{rate}",
+            lambda: frequenzbereich(korr.rr_ms, korr.t_s, korr.breaks, atemrate_pro_min=rate),
+        )
 
     def nichtlinear() -> dict[str, Any]:
         def rechnen() -> dict[str, Any]:
@@ -947,30 +956,46 @@ def _aufbauen(
             ft.Text(aa.gueltig_text(h), size=size, opacity=0.8),
         ]
 
-    def atem_hinweis_aus(
+    def rate_aus(
         sensor: aa.AtemKennzahlen | None, rr_rate: Callable[[], float | None]
-    ) -> str:
-        """„Atmung < 9/min — liegt im LF-Band“ (Plan Beschleunigung §7.1) für HF-Power, LF/HF
-        und DFA α1 — die Rate nach der Startregel F6 (`core.atem_auswertung.hinweis_rate`:
+    ) -> tuple[float, str] | None:
+        """Die Atemrate eines Bereichs nach der Startregel F6 (`core.atem_auswertung.hinweis_rate`:
         Sensor, wenn genug Fenster gültig und genug des Bereichs erfasst, sonst die Atmung aus
-        RR desselben Bereichs); leer, wenn er nicht gilt."""
+        RR desselben Bereichs) — ``(rate, Quelle)``, ``None`` ohne; nie bei reinem Puls. Sie
+        trägt den Hinweis „Atmung < 9/min“ (B1), das Atemband (B2b) und die Atemlage."""
         if z.nur_puls:
-            return ""
+            return None
         # Die Atmung aus RR erst rechnen, wenn der Sensor nicht reicht (über Stunden teuer)
-        rate = aa.hinweis_rate(sensor, None) or aa.hinweis_rate(sensor, rr_rate())
-        return aa.lf_hinweis(rate[0] if rate is not None else None)
+        return aa.hinweis_rate(sensor, None) or aa.hinweis_rate(sensor, rr_rate())
 
-    def atem_hinweis() -> str:
-        """Der Hinweis für die ganze Messung (bzw. den Zuschnitt)."""
-        return atem_hinweis_aus(atem_stand["kennzahlen"], lambda: atmung()["rate"])
+    def messungs_rate() -> tuple[float, str] | None:
+        """Die Rate für die ganze Messung (bzw. den Zuschnitt)."""
+        return rate_aus(atem_stand["kennzahlen"], lambda: atmung()["rate"])
 
-    def atem_hinweis_bereich(von: float, bis: float, rr_rate: float | None = None) -> str:
-        """Der Hinweis für einen Bereich der Achse (Abschnitt, Analysefenster) mit den
+    def bereich_rate(
+        von: float, bis: float, rr_rate: float | None = None
+    ) -> tuple[float, str] | None:
+        """Die Rate für einen Bereich der Achse (Abschnitt, Analysefenster) mit den
         Kennzahlen dieses Bereichs; ``rr_rate``: seine Atmung aus RR, wenn schon gerechnet."""
-        return atem_hinweis_aus(
+        return rate_aus(
             atem_kennzahlen(von, bis),
             lambda: rr_atmung_in([(von, bis)]) if rr_rate is None else rr_rate,
         )
+
+    def atem_hinweis() -> str:
+        """„Atmung < 9/min — liegt im LF-Band“ (Plan Beschleunigung §7.1) für HF-Power, LF/HF
+        und DFA α1 der ganzen Messung; leer, wenn er nicht gilt."""
+        return aa.lf_hinweis(aa.rate_wert(messungs_rate()))
+
+    def atem_hinweis_bereich(von: float, bis: float, rr_rate: float | None = None) -> str:
+        """Derselbe Hinweis für einen Bereich der Achse."""
+        return aa.lf_hinweis(aa.rate_wert(bereich_rate(von, bis, rr_rate)))
+
+    def atemlage() -> str:
+        """Die Atemlage der Messung (B2b, `hrv_core.atmung.atemlage`): Rate nach F6, spontan
+        oder getaktet nach dem Protokollfeld — der Untertitel von DFA α1 und die Grenze, in der
+        Schwellen aus α1 gelten (`core.hf_auswertung`)."""
+        return aa.atemlage_aus(messungs_rate(), atem_protokoll.feld_lesen(rec.extra))
 
     def kachel_werte() -> list[KachelWert]:
         """Dieselben Werte wie live, für die ganze Messung."""
@@ -1033,6 +1058,31 @@ def _aufbauen(
                         grund=hinweis_atmung if key == "atemfrequenz" else "",
                     )
                 )
+            elif key in ATEM_KACHELN:
+                # Atemband (B2b): die Leistung um die gemessene Atemfrequenz, das Band als
+                # Grundzeile; ohne Rate „–“ mit „keine Atemrate“ — neben den festen Bändern
+                f = frequenz() or {}
+                band = f.get("atem_band_hz")
+                wert = f.get(key)
+                text, einheit = zahl(wert, 0 if key == "hf_atem" else 2), ""
+                grund = aa.atemband_text(band) if band is not None else aa.KEINE_RATE
+                if key == "hf_atem":
+                    einheit = "ms²"
+                elif wert is None and band is not None and f.get("lf_atem") is None:
+                    # LF gesperrt (zu kurz): das sagt die Kachel wie die feste LF/HF-Kachel
+                    gesperrt = f.get("band_status", {}).get("lf") not in (None, BAND_OK)
+                    if gesperrt:
+                        text, grund = "gesperrt", _kurzgrund(f["band_reason"].get("lf", ""))
+                out.append(
+                    KachelWert(
+                        art.titel,
+                        text,
+                        einheit,
+                        farbe=FARBEN[ATEM_KACHELN[key]],
+                        gross=g,
+                        grund=grund,
+                    )
+                )
             elif art.kennzahl is not None:
                 k = art.kennzahl
                 kz = KENNZAHLEN[k]
@@ -1041,6 +1091,8 @@ def _aufbauen(
                 if hinweis_lf and k == "hf_power":  # Plan §7.1: nicht ausgewiesen
                     wert_ = ("–", "", "")
                     hinweis_lf = f"{aa.NICHT_AUSGEWIESEN} — {hinweis_lf}"
+                if k == "dfa_alpha1" and not z.nur_puls:  # B2b: die Atemlage als Untertitel
+                    hinweis_lf = aa.alpha1_untertitel(atemlage(), hinweis_lf)
                 out.append(
                     KachelWert(
                         titel(k, a.pnn_ms),
@@ -1069,7 +1121,7 @@ def _aufbauen(
         if bereich == "frequenz":
             return _frequenz_tabelle(frequenz(), atem_hinweis())
         if bereich == "nichtlinear":
-            return _nichtlinear_tabelle(nichtlinear(), verity, atem_hinweis())
+            return _nichtlinear_tabelle(nichtlinear(), verity, atem_hinweis(), atemlage())
         # Zeit folgt dem Analysefenster (Ben, 26.10.2026) — gemerkt je Fenster und Korrektur
         fenster = analysefenster()
         pnn_ms = state.ansicht().pnn_ms
@@ -2065,10 +2117,7 @@ def _aufbauen(
         if k is None and not protokoll:
             licht_text.visible = False
             return
-        rate = None
-        if not z.nur_puls:
-            # Die Atmung aus RR erst rechnen, wenn der Sensor nicht reicht (über Stunden teuer)
-            rate = aa.hinweis_rate(k, None) or aa.hinweis_rate(k, atmung()["rate"])
+        rate = messungs_rate()
         licht_text.value = aa.licht_text(rate, k.ein_aus if k is not None else None, protokoll)
         licht_text.visible = bool(licht_text.value)
 
@@ -2624,7 +2673,7 @@ def _aufbauen(
             lo,
             hi,
             "Ganze Messung" if z.ausschnitt is None else f"Zuschnitt {_uhr(lo)}–{_uhr(hi)}",
-            ganzes=lambda: Fensterspektrum.aus_frequenzbereich(frequenz()),
+            ganzes=lambda: aa.spektrum_der_messung(frequenz()),
         )
 
     def fenster_kopf() -> ft.Control:
@@ -2745,11 +2794,9 @@ def _aufbauen(
         fenster_kopf=None if z.nur_puls else fenster_kopf,  # ohne Intervalle keine Analyse
         warten=lambda: aw.griff is not None or aw.wartet,
         info_zusatz=lambda bereich: "" if z.nur_puls else _verlauf_info(bereich),
-        # „Atmung < 9/min“ für die Bandleiste — im Bereich des Analysefensters (C3)
-        atem_hinweis=lambda f: (
-            atem_hinweis()
-            if f is None or f.schluessel == AW_ALLES
-            else atem_hinweis_bereich(f.von, f.bis)
+        # Atemrate für Hinweis und Atemband der Bandleiste — im Bereich des Analysefensters (C3)
+        atem_rate=lambda f: aa.rate_wert(
+            messungs_rate() if f is None or f.schluessel == AW_ALLES else bereich_rate(f.von, f.bis)
         ),
         # Das Menü steht wie live an der Hauptkurve (Ben, 21.10.2026); Bereich und Chips
         # über der Hauptkurve, Spektrum und Verlaufskurven unter den Notizen (26.10.2026)
@@ -3934,6 +3981,7 @@ def _aufbauen(
             abschnitt_anlegen=abschnitt_aus_vorschlag,
             tempo=tempo_der_strecke,
             abschnitte_moeglich=not z.nur_puls,
+            atemlage=lambda: None if z.nur_puls else atemlage(),
         )
     )
     sicht = {"wert": SICHT_HF if z.nur_puls else state.hrv_sicht()}
@@ -4229,12 +4277,19 @@ def _frequenz_tabelle(f: dict[str, Any] | None, atem_hinweis: str = "") -> ft.Co
         return "gesperrt" if f["band_status"].get(key) != BAND_OK else "–"
 
     gipfel = f.get("gipfel_hz")
+    atem_band = f.get("atem_band_hz")
     zeilen = [
         ("ULF unter 0,003 Hz", [band("ulf")]),
         ("VLF 0,003–0,04 Hz", [band("vlf")]),
         ("LF 0,04–0,15 Hz", [band("lf")]),
         ("HF 0,15–0,40 Hz", [aa.NICHT_AUSGEWIESEN if atem_hinweis else band("hf")]),
         ("LF/HF", [zahl(f.get("lf_hf"), 2)]),
+        # Atemband (B2b): neben den festen Bändern, nie statt — ohne Rate „–“
+        (
+            f"HF Atemband {aa.atemband_text(atem_band)}" if atem_band else "HF Atemband",
+            [f"{zahl(f.get('hf_atem'))} ms²" if atem_band else f"– ({aa.KEINE_RATE})"],
+        ),
+        ("LF/HF (Atemband)", [zahl(f.get("lf_hf_atem"), 2) if atem_band else "–"]),
         (
             "LF n.u. / HF n.u.",
             [
@@ -4264,7 +4319,11 @@ def _frequenz_tabelle(f: dict[str, Any] | None, atem_hinweis: str = "") -> ft.Co
     return _zeilen_tabelle(["ganze Messung"], zeilen, text)
 
 
-def _nichtlinear_tabelle(n: dict[str, Any], optisch: bool, atem_hinweis: str = "") -> ft.Control:
+def _nichtlinear_tabelle(
+    n: dict[str, Any], optisch: bool, atem_hinweis: str = "", atemlage: str = ""
+) -> ft.Control:
+    """``atemlage`` (B2b, `hrv_core.atmung.atemlage`): steht als Einordnung unter DFA α1
+    („Atmung 9–15/min, spontan“) — Vergleiche nur innerhalb derselben Lage."""
     zeilen = [
         ("SD1", [f"{zahl(n.get('sd1'), 1)} ms"]),
         ("SD2", [f"{zahl(n.get('sd2'), 1)} ms"]),
@@ -4273,6 +4332,9 @@ def _nichtlinear_tabelle(n: dict[str, Any], optisch: bool, atem_hinweis: str = "
         ("SampEn", [zahl(n.get("sampen"), 2)]),
     ]
     text = "Bei optischen Pulsintervallen nicht belastbar." if optisch else ""
+    lage = aa.atemlage_text(atemlage)
+    if lage:
+        text = " ".join(t for t in (text, f"DFA α1: {lage}.") if t)
     if atem_hinweis:
         text = " ".join(t for t in (text, f"DFA α1: {atem_hinweis}.") if t)
     return _zeilen_tabelle(["ganze Messung"], zeilen, text)

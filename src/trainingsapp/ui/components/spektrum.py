@@ -14,12 +14,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from itertools import pairwise
+from typing import Any
 
 import flet as ft
 import numpy as np
 from hrv_core.constants import FREQ_BANDS
 from hrv_core.frequency import Fensterspektrum
 
+from trainingsapp.core.atem_auswertung import atemband_text
 from trainingsapp.ui.components.kacheln import zahl
 from trainingsapp.ui.components.kurve import Reihe, kurve
 from trainingsapp.ui.components.verlauf import FARBEN
@@ -48,7 +50,8 @@ def hz_text(f: float) -> str:
 
 
 def spektrum_kurve(fs: Fensterspektrum | None, *, hoehe: int = 150) -> ft.Control:
-    """Leistungsdichte über der Frequenz, Bänder getönt, der Gipfel markiert."""
+    """Leistungsdichte über der Frequenz, Bänder getönt, der Gipfel markiert; das Atemband
+    (``werte["atem_band_hz"]``, B2b) als zwei gestrichelte Kanten in der Farbe der Atmung."""
     if fs is None:
         return ft.Container(
             height=60,
@@ -88,6 +91,22 @@ def spektrum_kurve(fs: Fensterspektrum | None, *, hoehe: int = 150) -> ft.Contro
         reihen.append(
             Reihe([(float(freqs[i]), float(psd[i]))], farbe=ft.Colors.PRIMARY, nur_punkte=True)
         )
+    # ``werte`` ist für Zahlen erklärt — das Band ist ein Paar (von, bis)
+    band: Any = fs.werte.get("atem_band_hz")
+    if band is not None:
+        # so hoch wie das Höchste in LF und HF — die Marke bestimmt die Achse nicht
+        im = freqs >= FREQ_BANDS["lf"][0]
+        oben = float(np.nanmax(psd[im])) if im.any() else 0.0
+        for kante in band:
+            reihen.append(
+                Reihe(
+                    [(float(kante), 0.0), (float(kante), oben)],
+                    farbe=FARBEN["atemfrequenz"],
+                    breite=1,
+                    gestrichelt=True,
+                    marke=True,
+                )
+            )
     return kurve(
         reihen,
         einheit="ms²/Hz",
@@ -105,7 +124,9 @@ def band_leiste(
 ) -> ft.Control:
     """LF, HF, LF/HF und Gipfel des Ausschnitts in einer Zeile — mit Vorbehalt bei kurzer
     Dauer. ``atem_hinweis`` („Atmung < 9/min — liegt im LF-Band“, Plan Beschleunigung §7.1):
-    HF-Power wird dann nicht ausgewiesen, LF/HF bekommt den Hinweis — wie die Kachel."""
+    HF-Power wird dann nicht ausgewiesen, LF/HF bekommt den Hinweis — wie die Kachel. Trägt
+    das Spektrum ein Atemband (B2b, `core.atem_auswertung.mit_atemband`), stehen „HF
+    (Atemband)“ und „LF/HF (Atemband)“ dahinter und das Band als Zeile darunter."""
     if fs is None:
         return ft.Container()
     w = fs.werte
@@ -114,6 +135,12 @@ def band_leiste(
         ("HF", "–" if atem_hinweis else zahl(w.get("hf")), "ms²", FARBEN["hf_power"]),
         ("LF/HF", zahl(w.get("lf_hf"), 2), "", FARBEN["lf_hf"]),
     ]
+    band: Any = w.get("atem_band_hz")
+    if band is not None:
+        teile += [
+            ("HF (Atemband)", zahl(w.get("hf_atem")), "ms²", FARBEN["atemfrequenz"]),
+            ("LF/HF (Atemband)", zahl(w.get("lf_hf_atem"), 2), "", FARBEN["atemfrequenz"]),
+        ]
     gipfel = w.get("gipfel_hz")
     if gipfel:
         teile.append(
@@ -145,6 +172,8 @@ def band_leiste(
         )
     ]
     vorbehalt = []
+    if band is not None:
+        vorbehalt.append(f"Atemband {atemband_text(band)} um die gemessene Atemfrequenz.")
     if not fs.reif["lf"]:
         minuten = f"{round(fs.dauer_s / 60, 1):g}".replace(".", ",")
         vorbehalt.append(

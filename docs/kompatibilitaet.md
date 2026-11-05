@@ -758,6 +758,13 @@ Zeitgesteuert: sampen (–) · resp_rate (1/min) · rsa_amp (ms)
 
 Diese Schlüssel gelten auch in unserem `hrv_metrics_cache` und in `measurement`.
 
+Die Felder des **Atembands** aus hrv-core 0.12.0 (`hf_atem`, `lf_atem`, `lf_hf_atem`,
+`atem_band_hz`; hrv-core `docs/formate.md`, „Kennzahlen-Schlüssel“) sind **keine**
+Cache-Schlüssel: Die App rechnet sie beim Anzeigen mit der Atemrate nach Regel F6
+(`docs/plan_beschleunigung.md` §13, B2b) und speichert sie nirgends — `hrv_metrics_cache`
+wird bisher nicht befüllt (`docs/offene_fragen.md` H7). `ALGO_VERSION` blieb bei 8, ein Cache
+ohne die Felder wäre unvollständig, nicht veraltet (die Apps ergänzen ihn beim Anzeigen).
+
 ---
 
 ## 11. Verlaufswerte: `Dokumentation_Skalen`

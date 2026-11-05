@@ -43,6 +43,19 @@ und die Live-Schattierung (`views/live_vollbild.py`) zeigen:
   `phasenlage_text`, `rr_phasen_text`, `gueltig_text`, `atem_hrv_kurz`) und die Zeile
   „Kennzahlen im Licht der Atmung“ (`licht_text`: Rate mit Quelle, Ein:Aus, Protokollfeld).
 
+- **B2b** (hrv-core 0.12.0, Entscheidung 27 in hrv-research): die Rate nach F6 geht an
+  `hrv_core.frequency.frequenzbereich(..., atemrate_pro_min=)`; für Fenster- und
+  Abschnittsspektren rechnet `mit_atemband` die vier Felder ``hf_atem``, ``lf_atem``,
+  ``lf_hf_atem``, ``atem_band_hz`` nach (`bandleistung_atem`), `atemband_text` schreibt das
+  Band („0,07–0,15 Hz“). Die **Atemlage** zu DFA α1 (`hrv_core.atmung.atemlage`: unter 9,
+  9–15, über 15 je Minute, spontan oder getaktet nach dem Protokollfeld) liefert
+  `atemlage_aus`/`atemlage_der_messung`, `atemlage_text` schreibt sie als Untertitel.
+  Schwellen und Vergleiche aus α1 (Entscheidung 20, `core.hf_auswertung`) gelten nur bei
+  **spontaner Atmung ab 9/min** — oder wenn die Lage unbekannt ist (`schwellen_erlaubt`;
+  bei einem Training ist die Atmung aus RR meist nicht lesbar, und ohne Hinweis auf
+  langsames oder getaktetes Atmen bleibt die Regel von Entscheidung 20): sonst steht der
+  Grund da (`schwellen_hinweis`), keine Wertung.
+
 Was hier herauskommt, wird nie gespeichert (§7.4) und ist beschreibend: keine Bewertung,
 keine Empfehlung (`docs/recht/00_zweckbestimmung.md`). Die Atem-HRV ist ein Prototyp
 (`hrv_core.prototyp`, Eingang mit Ausnahme, P134): eine Sitzung mit Takt, eine unter Störung;
@@ -54,15 +67,19 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from statistics import mean, median, pstdev
 from typing import Any, Final
 
 import numpy as np
+from hrv_core import herzfrequenz as hz
 from hrv_core.atem import PHASEN, Atem
-from hrv_core.atmung import ATEMUEBUNG, RUHE
+from hrv_core.atmung import ATEMLAGE_UNBEKANNT, ATEMUEBUNG, RUHE, atemlage
+from hrv_core.frequency import ATEM_FELDER, Fensterspektrum, bandleistung_atem
 from hrv_core.prototyp import atem_hrv as ah
 from hrv_core.prototyp import atemzuege as prototyp_atemzuege
+from hrv_core.recording import Recording
+from hrv_core.referenz import atemrate
 
 from trainingsapp.core.atem_protokoll import ART_GETAKTET, ART_SPONTAN, ART_UEBUNG
 from trainingsapp.core.laufend import minuten
@@ -829,12 +846,229 @@ def lf_hinweis(rate: float | None) -> str:
     return LF_HINWEIS if im_lf_band(rate) else ""
 
 
+# ---------------------------------------------------------------------------
+# B2b: Atemband und Atemlage (hrv-core 0.12.0, Entscheidung 27 in hrv-research)
+# ---------------------------------------------------------------------------
+
+#: Was die Kacheln „HF (Atemband)“ und „LF/HF (Atemband)“ ohne Rate als Grund zeigen
+KEINE_RATE: Final[str] = "keine Atemrate"
+#: Atemlagen, in denen Schwellen und Vergleiche aus DFA α1 gelten (spontan ab 9/min) —
+#: und ``unbekannt``: ohne Hinweis auf langsames oder getaktetes Atmen bleibt Entscheidung 20
+SCHWELLEN_LAGEN: Final[frozenset[str]] = frozenset({"9_bis_15", "ueber_15", ATEMLAGE_UNBEKANNT})
+#: Die Lage in Worten (ohne „Atmung“ davor)
+_LAGE_TEXTE: Final[dict[str, str]] = {
+    "unter_9": "< 9/min",
+    "9_bis_15": "9–15/min",
+    "ueber_15": "> 15/min",
+}
+
+
+def rate_wert(rate: tuple[float, str] | None) -> float | None:
+    """Die Zahl aus ``(rate, Quelle)`` von `hinweis_rate` — ``None`` ohne Rate.
+
+    >>> rate_wert((6.1, "sensor")), rate_wert(None)
+    (6.1, None)
+    """
+    return None if rate is None else float(rate[0])
+
+
+def getaktet_laut_feld(feld: Mapping[str, Any] | None) -> bool:
+    """Ob das Protokollfeld ``atmung`` getaktete Atmung nennt (Übung oder Takt).
+
+    >>> getaktet_laut_feld({"art": "uebung", "uebung": "ATEMATEM"}), getaktet_laut_feld(None)
+    (True, False)
+    >>> getaktet_laut_feld({"art": "spontan"}), getaktet_laut_feld({"art": "getaktet"})
+    (False, True)
+    """
+    return feld is not None and feld.get("art") in (ART_UEBUNG, ART_GETAKTET)
+
+
+def atemlage_aus(rate: tuple[float, str] | None, feld: Mapping[str, Any] | None) -> str:
+    """Die Atemlage aus der Rate nach F6 und dem Protokollfeld (`hrv_core.atmung.atemlage`).
+
+    >>> atemlage_aus((6.1, "sensor"), {"art": "uebung", "uebung": "X"})
+    'unter_9_getaktet'
+    >>> atemlage_aus((12.0, "rr"), {"art": "spontan"}), atemlage_aus(None, None)
+    ('9_bis_15', 'unbekannt')
+    """
+    return atemlage(rate_wert(rate), getaktet_laut_feld(feld))
+
+
+def atemlage_der_messung(rec: Recording) -> str:
+    """Die Atemlage einer Messdatei ohne Beiwerk — die Vorgabe der Bibliothek
+    (`hrv_core.referenz.atemrate`: Atmung aus RR im Modus des Protokollfelds, auf der
+    Wanduhr) — für Auswertungen, die keinen Sensor kennen (HF-Auswertung im Stapel, Ausdauer).
+    Mit Beiwerk gilt die Rate nach F6 (`atemlage_aus`), die der Aufrufer kennt.
+
+    >>> from hrv_core.recording import Beat
+    >>> rec = Recording(beats=[Beat(i * 0.8, 800, 75, i * 0.8) for i in range(1, 30)])
+    >>> atemlage_der_messung(rec), atemlage_der_messung(Recording(beats=[]))
+    ('unbekannt', 'unbekannt')
+    """
+    if not rec.beats:
+        return ATEMLAGE_UNBEKANNT
+    return str(atemrate(rec, [float(x) for x in hz.wanduhr(rec.beats)])["atemlage"])
+
+
+def atemlage_text(lage: str) -> str:
+    """Die Atemlage als Untertitel der Kachel DFA α1 — leer, wenn unbekannt.
+
+    >>> atemlage_text("9_bis_15"), atemlage_text("unter_9_getaktet")
+    ('Atmung 9–15/min, spontan', 'Atmung < 9/min, getaktet')
+    >>> atemlage_text("ueber_15"), atemlage_text("unbekannt")
+    ('Atmung > 15/min, spontan', '')
+    """
+    getaktet = lage.endswith("_getaktet")
+    kern = lage.removesuffix("_getaktet")
+    if kern not in _LAGE_TEXTE:
+        return ""
+    return f"Atmung {_LAGE_TEXTE[kern]}, {'getaktet' if getaktet else 'spontan'}"
+
+
+def alpha1_untertitel(lage: str, hinweis: str = "") -> str:
+    """Untertitel der Kachel DFA α1: die Atemlage, dazu der Hinweis „liegt im LF-Band“, wenn
+    er gilt (B1 bleibt). Ohne Lage nur der Hinweis.
+
+    >>> alpha1_untertitel("unter_9", LF_HINWEIS)
+    'Atmung < 9/min, spontan — liegt im LF-Band'
+    >>> alpha1_untertitel("9_bis_15"), alpha1_untertitel("unbekannt", LF_HINWEIS)
+    ('Atmung 9–15/min, spontan', 'Atmung < 9/min — liegt im LF-Band')
+    """
+    text = atemlage_text(lage)
+    if not text:
+        return hinweis
+    if hinweis:
+        return f"{text} — {hinweis.split(' — ', 1)[-1]}"
+    return text
+
+
+def schwellen_erlaubt(lage: str) -> bool:
+    """Ob Schwellen und Vergleiche aus DFA α1 (Entscheidung 20) in dieser Lage gelten:
+    spontan ab 9/min — oder unbekannt (Modulkopf).
+
+    >>> schwellen_erlaubt("9_bis_15"), schwellen_erlaubt("ueber_15"), schwellen_erlaubt("unbekannt")
+    (True, True, True)
+    >>> schwellen_erlaubt("unter_9"), schwellen_erlaubt("ueber_15_getaktet")
+    (False, False)
+    """
+    return lage in SCHWELLEN_LAGEN
+
+
+def schwellen_hinweis(lage: str) -> str:
+    """Warum eine Schwelle aus α1 nicht gilt — leer, wenn sie gilt. Eine Einordnung, keine
+    Wertung: bei langsamer oder getakteter Atmung liegt α1 allein durch die Atmung höher
+    (Plan §7.1), die Schwellen aus Entscheidung 20 gelten für spontane Atmung.
+
+    >>> schwellen_hinweis("unter_9_getaktet")
+    'Atmung < 9/min, getaktet — Schwellen aus α1 nur bei spontaner Atmung ab 9/min'
+    >>> schwellen_hinweis("9_bis_15")
+    ''
+    """
+    if schwellen_erlaubt(lage):
+        return ""
+    return f"{atemlage_text(lage)} — Schwellen aus α1 nur bei spontaner Atmung ab 9/min"
+
+
+def dfa_lage_hinweis(lage: str) -> str:
+    """Die Zeile unter einem DFA-α1-Überblick (Ausdauer), wenn die Lage nicht spontan ab
+    9/min ist — leer sonst.
+
+    >>> dfa_lage_hinweis("unter_9").split(":")[0], dfa_lage_hinweis("unter_9").endswith("Atemlage.")
+    ('Atmung < 9/min, spontan', True)
+    >>> dfa_lage_hinweis("ueber_15"), dfa_lage_hinweis("unbekannt")
+    ('', '')
+    """
+    if schwellen_erlaubt(lage):
+        return ""
+    return (
+        f"{atemlage_text(lage)}: DFA α1 liegt dann allein durch die Atmung höher — "
+        "Vergleiche nur innerhalb derselben Atemlage."
+    )
+
+
+def hz_text(f: float) -> str:
+    """Frequenz mit deutschem Komma, zwei Nachkommastellen.
+
+    >>> hz_text(0.065), hz_text(0.15), hz_text(0.3)
+    ('0,07', '0,15', '0,30')
+    """
+    return f"{f:.2f}".replace(".", ",")
+
+
+def atemband_text(band: Sequence[float] | None) -> str:
+    """Das Atemband als Untertitel („0,07–0,15 Hz“) — leer ohne Band.
+
+    >>> atemband_text((0.065, 0.15)), atemband_text(None)
+    ('0,07–0,15 Hz', '')
+    """
+    if band is None:
+        return ""
+    return f"{hz_text(float(band[0]))}–{hz_text(float(band[1]))} Hz"
+
+
+def puls_hz(rr_ms: Sequence[float] | np.ndarray) -> float | None:
+    """Mittlere Schlagfrequenz (Hz) aus RR-Werten (NaN übergangen) — die Obergrenze des
+    Atembands ist die halbe Schlagfrequenz.
+
+    >>> puls_hz([800.0, float("nan"), 1200.0]), puls_hz([])
+    (1.0, None)
+    """
+    rr = np.asarray(rr_ms, dtype=float)
+    rr = rr[np.isfinite(rr) & (rr > 0)]
+    return float(1000.0 * rr.size / rr.sum()) if rr.size else None
+
+
+def mit_atemband(
+    fs: Fensterspektrum | None, rate: float | None, puls: float | None = None
+) -> Fensterspektrum | None:
+    """Ein Fenster- oder Abschnittsspektrum um die Felder des Atembands ergänzen
+    (`hrv_core.frequency.bandleistung_atem` auf Kurve und Rate; ``puls`` in Hz). Trägt es
+    die Felder schon (`spektrum_der_messung`), bleiben sie.
+
+    >>> import numpy as np
+    >>> from hrv_core.frequency import fensterspektrum
+    >>> t = np.cumsum(np.full(150, 800.0)) / 1000
+    >>> fs = mit_atemband(fensterspektrum(t, 800 + 30 * np.sin(2 * np.pi * 0.25 * t), 0, 120), 15.0)
+    >>> fs.werte["atem_band_hz"], fs.werte["hf_atem"] > 0
+    ((0.1625, 0.375), True)
+    >>> mit_atemband(fs, None) is fs, mit_atemband(None, 6.0) is None
+    (True, True)
+    """
+    if fs is None or "atem_band_hz" in fs.werte:
+        return fs
+    if rate is None:
+        return fs
+    atem = bandleistung_atem(fs.freqs, fs.psd, rate / 60.0, puls)
+    return replace(fs, werte={**fs.werte, **atem})
+
+
+def spektrum_der_messung(f: Mapping[str, Any] | None) -> Fensterspektrum | None:
+    """Das Spektrum der ganzen Messung (`frequenzbereich`) für die Analysekarte — mit den
+    Feldern des Atembands, die `Fensterspektrum.aus_frequenzbereich` nicht mitnimmt; fehlen
+    sie (Ergebnis ohne Rate), bleiben sie weg und `mit_atemband` rechnet nach.
+
+    >>> import numpy as np
+    >>> from hrv_core.frequency import frequenzbereich
+    >>> t = np.cumsum(np.full(400, 800.0)) / 1000
+    >>> f = frequenzbereich(800 + 30 * np.sin(2 * np.pi * 0.25 * t), t, atemrate_pro_min=15.0)
+    >>> spektrum_der_messung(f).werte["atem_band_hz"]
+    (0.1625, 0.375)
+    >>> spektrum_der_messung(None) is None
+    True
+    """
+    fs = Fensterspektrum.aus_frequenzbereich(dict(f) if f is not None else None)
+    if fs is None or f is None or f.get("atem_band_hz") is None:
+        return fs
+    return replace(fs, werte={**fs.werte, **{k: f.get(k) for k in ATEM_FELDER}})
+
+
 __all__ = [
     "ATEM_FENSTER_S",
     "AUS",
     "EIN",
     "FENSTER_S",
     "GRUND_TEXTE",
+    "KEINE_RATE",
     "LF_GRENZE_PRO_MIN",
     "LF_HINWEIS",
     "LF_HINWEIS_KURZ",
@@ -845,34 +1079,49 @@ __all__ = [
     "NICHT_AUSGEWIESEN",
     "QUELLE_RR",
     "QUELLE_SENSOR",
+    "SCHWELLEN_LAGEN",
     "VERGLEICH_ABWEICHUNG_PRO_MIN",
     "AtemHrvBereich",
     "AtemKennzahlen",
     "Atemzug",
+    "alpha1_untertitel",
     "atem_hrv",
     "atem_hrv_kurz",
     "atem_hrv_zuege",
+    "atemband_text",
+    "atemlage_aus",
+    "atemlage_der_messung",
+    "atemlage_text",
     "atemzuege",
+    "dfa_lage_hinweis",
     "ein_aus_text",
     "einatem_bereiche",
     "erfasst_bereiche",
     "fenster_bereiche",
+    "getaktet_laut_feld",
     "gleichmaessigkeit_text",
     "gruende_text",
     "gueltig_text",
     "hinweis_rate",
+    "hz_text",
     "im_lf_band",
     "je_lauf",
     "kennzahlen",
     "lf_hinweis",
     "licht_text",
+    "mit_atemband",
     "phasenlage_text",
+    "puls_hz",
     "quelle_text",
     "rate_text",
+    "rate_wert",
     "rr_modus",
     "rr_phasen_text",
+    "schwellen_erlaubt",
+    "schwellen_hinweis",
     "sensor_rate_gilt",
     "spanne_text",
+    "spektrum_der_messung",
     "vergleich_text",
     "winkel_text",
     "zeile_text",

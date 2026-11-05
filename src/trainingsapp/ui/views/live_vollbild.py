@@ -21,8 +21,9 @@ Seit dem 16.10.2026 (Ben) gebaut wie das Vollbild der Aufzeichnung
   Stelle ziehen (`Notizfeld.greifen`).
 - **Atmung** (Plan Beschleunigung §7.3, B1): Erfasst ein Zähl-Teil der Einheit gerade die
   Atmung (`zaehl_stand.atem_teil`), liegt das Einatmen der letzten 60 s als
-  Schatten hinter den Kurven (`components.atem_live`), und der Kopf nennt Rate und Phase
-  („Atmung 12/min ▲“) — nur Zahlen, keine Wertung (P124). Nachgezogen über die vorhandenen
+  Schatten hinter den Kurven (`components.atem_live`), und der Kopf nennt Rate, Phase und mit
+  Aufnahme die Atemspanne des letzten Atemzugs („Atmung 12/min ▲ · Spanne 58 ms“, B2) — nur
+  Zahlen, keine Wertung (P124). Nachgezogen über die vorhandenen
   Beobachter (Messlauf je Schlag, Einheit je Takt), nur Reihen und Texte.
 
 Die Größe der Kurvenfläche wird gemessen (``on_size_change``), weil die Ansicht
@@ -597,8 +598,15 @@ def _vollbild(
 
         return BreitenSatz(state.hrv_einstellungen, state.hrv_einstellungen_setzen, geaendert)
 
-    #: Rate und Phase der Atmung, solange ein Zähl-Teil sie erfasst („Atmung 12/min ▲“)
-    atem_text = ft.Text(size=13, weight=ft.FontWeight.W_600, color=FARBEN["atemfrequenz"])
+    #: Rate und Phase der Atmung, solange ein Zähl-Teil sie erfasst („Atmung 12/min ▲“), mit
+    #: Aufnahme die Atemspanne des letzten Atemzugs („· Spanne 58 ms“, B2)
+    atem_text = ft.Text(
+        size=13,
+        weight=ft.FontWeight.W_600,
+        color=FARBEN["atemfrequenz"],
+        tooltip="Atmung aus dem Beschleunigungssensor: Rate, Phase (▲ ein, ▼ aus) und die "
+        "Atemspanne des letzten Atemzugs — sie kommt nach dem nächsten Prüffenster (Prototyp)",
+    )
     kopf = ft.Row(
         spacing=2,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,

@@ -257,7 +257,12 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `core/atem_auswertung.py`, nichts gespeichert, keine Wertung), live liegt das Einatmen der
   letzten 60 s hinter den Kurven (`components/atem_live.py`), und die Messdatei bekommt das
   Protokollfeld `atmung` (`core/atem_protokoll.py`: Atemübung → `uebung`, keine Übung →
-  `spontan`, sonst kein Feld; Vertrag §5).
+  `spontan`, sonst kein Feld; Vertrag §5). **B2** (5.11.2026, hrv-core 0.10.0): die Atem-HRV je
+  Atemzug aus `hrv_core.prototyp.atem_hrv` — Atemspanne, **Phasenlage als Sekunden ab
+  Einatembeginn** (P135), RR je Phase — rechnet `core/atem_auswertung.py` beim Anzeigen je
+  Messung und Abschnitt (korrigierte Reihe, Wanduhr) und der `ZaehlBaustein` live („Spanne 58
+  ms“, nur mit Aufnahme); Regel F6 nach P136 (Sensor ab 3 gültigen Fenstern und 25 %, sonst
+  RR-Atmung im Modus aus dem Protokollfeld, `rr_modus`), nichts gespeichert.
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`

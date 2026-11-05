@@ -122,6 +122,27 @@ def wand_zu_achse(achse: Sequence[float], wand: Sequence[float], t: float) -> fl
     return float(np.interp(t, w, a))
 
 
+def achse_zu_wand_reihe(
+    achse: Sequence[float], wand: Sequence[float], xs: Sequence[float] | np.ndarray
+) -> np.ndarray:
+    """`achse_zu_wand` für eine ganze Reihe auf einmal (für die Atem-HRV: Schlagzeiten der
+    korrigierten Reihe auf der Wanduhr, B2) — dieselbe Regel, vektorisiert.
+
+    >>> achse_zu_wand_reihe([1.0, 2.0, 3.0], [1.0, 2.5, 4.0], [0.0, 2.5, 4.0]).tolist()
+    [0.0, 3.25, 5.0]
+    >>> achse_zu_wand_reihe([], [], [7.0]).tolist()
+    [7.0]
+    """
+    x = np.asarray(xs, dtype=float)
+    if not len(achse):
+        return x.copy()
+    a = np.asarray(achse, dtype=float)
+    w = np.asarray(wand, dtype=float)
+    out = np.interp(x, a, w)
+    out = np.where(x <= a[0], w[0] - (a[0] - x), out)
+    return np.where(x >= a[-1], w[-1] + (x - a[-1]), out)
+
+
 #: Talk-Test: die HF der 30 s vor der Marke „Sprechen wird schwer“ ist der Marker für VT1
 TALK_FENSTER_S: Final[float] = 30.0
 
@@ -511,6 +532,7 @@ __all__ = [
     "AbschnittWand",
     "HfAuswertung",
     "achse_zu_wand",
+    "achse_zu_wand_reihe",
     "auswerten",
     "erholungs_marken",
     "ist_schlafabschnitt",

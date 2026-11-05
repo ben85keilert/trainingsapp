@@ -18,7 +18,7 @@ Laufleiste und der Reiter „Einheit“ ihn ohne Sonderweg.
   Ereignisse der Einheit (`beobachten`). „Anhalten“ der Uhr hält auch das Zählen an: die Zeit
   dazwischen zählt weder im Satz noch für „keine Bewegung“.
 - **Live:** jede Sekunde (`ZAEHL_TAKT_S`; der Takt der Einheit ist 0,25 s) zählt der
-  Prototyp ``hrv_core.prototyp.wiederholungen.zaehlen`` das Satzfenster neu — dauert das
+  Prototyp ``hrv_core.prototyp.wiederholungen.zaehlen_fenster`` das Satzfenster neu — dauert das
   länger als `ZIEL_MS`, seltener (`takt_nach`, bis `MAX_TAKT_S`). Läuft ein Satz länger, als
   der Puffer hält, endet er (``zu_lang``), statt still nur sein Ende zu zählen. Unter 2 s Daten
   oder ohne erkennbare Periode steht dort „…“, bis die ersten Proben kommen „Sensor startet …“.
@@ -60,6 +60,13 @@ Laufleiste und der Reiter „Einheit“ ihn ohne Sonderweg.
   `ZWISCHENSTAND_S`, es gilt die letzte): Atemzüge, Korrektur, Wert, ``rate``, die
   Einatemzeiten (``zeiten_s``), Gerät, Prototyp — **nichts ins Tagebuch** (P120,
   `core.zaehlen_eintrag` übergeht sie). Im Diagnosemodus eine Kontextzeile ``atem`` am Ende.
+- **Atem-HRV live** (B2, Plan §7.3): Läuft eine **Aufnahme**, rechnet daneben
+  ``hrv_core.prototyp.atem_hrv.AtemHrvLive`` aus den bestätigten Phasen, den Prüffenstern und
+  den Schlägen des Messlaufs (`Messlauf.live`: korrigiertes RR, Verworfenes als NaN) die
+  Atemspanne je vollständigem Atemzug — `atem_spanne_ms` ist die des letzten (``None``, wenn
+  er ungültig war, vor dem ersten, ohne Aufnahme). Ein Atemzug ist fertig, sobald das erste
+  Prüffenster nach ihm da ist — bis zu einem Prüffenster Verzug (Entscheidung 25 in
+  hrv-research, Frage 6 offen). Nur angezeigt, nie gespeichert (§7.4).
 - **Zeitleiste** (Vertrag ``docs/plan_einheit.md`` §4): ``zaehlen/zaehlung`` je Satz,
   ``person/korrektur`` je ±1, ``zaehlen/zaehlen_ende`` mit Grund — Ergebnisse mit Zeiten, keine
   Rohdaten (P123). Eingetragen wird daraus am Ende der Einheit (`core.zaehlen_eintrag`).
@@ -97,6 +104,7 @@ from typing import Any
 
 import hrv_core
 import numpy as np
+from hrv_core.prototyp import atem_hrv as prototyp_atem_hrv
 from hrv_core.prototyp import atemzuege as prototyp_atem
 from hrv_core.prototyp import wiederholungen as prototyp_wdh
 
@@ -358,6 +366,17 @@ class ZaehlBaustein:
         self._atem_rate: float | None = None
         #: was zuletzt als ``zaehlung`` der Atem-Spur ging: (Sensor, Korrektur, ``t_s``)
         self._atem_geschrieben: tuple[int | None, int, float] | None = None
+        #: Atem-HRV live (B2, Modultext): der Prototyp, die Achse (`Messlauf.start_mono`, mit
+        #: der er begann), wie viele Phasen und Fenster er hat, bis wohin die Schläge reichen
+        self._atem_hrv: prototyp_atem_hrv.AtemHrvLive | None = None
+        self._atem_hrv_achse: float | None = None
+        self._atem_hrv_phasen = 0
+        self._atem_hrv_fenster = 0
+        self._atem_hrv_bis: float | None = None
+        #: die Prüffenster des Laufs ``(Ende auf der Uhr der Quelle, gültig)``
+        self._atem_fenster_quelle: list[tuple[float, bool]] = []
+        #: die Atemspanne des letzten gerechneten Atemzugs (ms) — `atem_spanne_ms`
+        self._atem_spanne: float | None = None
         self._uhr: Callable[[], float] = messlauf.uhr
         #: (Uhr der Einheit, Uhr der Quelle) beim Start — für `_auf_quelle`
         self._anker: tuple[float, float] | None = None
@@ -461,6 +480,13 @@ class ZaehlBaustein:
     def atem_phase(self) -> str | None:
         """Die Phase jetzt: ``"ein"`` (▲), ``"aus"`` (▼) oder ``None`` (bewegt, unbekannt)."""
         return self._atem_stand.phase if self._atem_stand is not None else None
+
+    @property
+    def atem_spanne_ms(self) -> float | None:
+        """Die Atemspanne (längstes − kürzestes RR nach Trendbereinigung, ms) des letzten
+        vollständigen Atemzugs — ``None`` ohne Aufnahme, vor dem ersten oder wenn der letzte
+        ungültig war (B2, `hrv_core.prototyp.atem_hrv`; bis zu einem Prüffenster Verzug)."""
+        return self._atem_spanne
 
     @property
     def phase(self) -> str:
@@ -977,7 +1003,7 @@ class ZaehlBaustein:
         zeit = np.concatenate([r.t for r in stuecke])
         if xyz.shape[0] < rate * MIN_DATEN_S:
             return
-        z = prototyp_wdh.zaehlen(xyz, float(rate), 0.0)
+        z = prototyp_wdh.zaehlen_fenster(xyz, float(rate), 0.0)
         if z.periode_s is None:
             return  # noch keine Periode — die letzte Zahl bleibt
         letzte = zeit.shape[0] - 1
@@ -1039,6 +1065,7 @@ class ZaehlBaustein:
             self._atem_neu_beginnen()
         finally:
             self.atem_laufzeit_ms = (time.perf_counter() - beginn) * 1000.0
+        self._atem_hrv_fuettern()
         self._atem_zwischenstand(t)
 
     def _atem_neu_beginnen(self) -> None:
@@ -1072,8 +1099,60 @@ class ZaehlBaustein:
             else:
                 grund = e.gruende[0] if e.gruende else ""
                 self._messlauf_atem("atem_fenster", e.bis_s, e.rate_pro_min, e.gueltig, grund)
+                self._atem_fenster_quelle.append((float(e.bis_s), bool(e.gueltig)))
                 if e.gueltig and e.rate_pro_min is not None:
                     self._atem_rate = float(e.rate_pro_min)
+
+    def _atem_hrv_fuettern(self, schluss: bool = False) -> None:
+        """Die Atem-HRV live (B2, Modultext): neue Phasen, Prüffenster und Schläge an
+        `hrv_core.prototyp.atem_hrv.AtemHrvLive` — die Phasen von der Achse der Einheit
+        (`auf_messlauf`), die Fenster von der Uhr der Quelle, die Schläge aus `Messlauf.live`
+        (korrigiertes RR; Verworfenes als NaN), alles auf der Achse des Messlaufs. Nur mit
+        Aufnahme (ohne gibt es keine Spanne); beginnt eine Aufnahme, wechselt die Achse
+        (`Messlauf.start_mono`) und der Prototyp fängt neu an. ``schluss``: rechnet, was noch
+        auf ein Fenster wartet. Ein Fehler stoppt das Zählen nie (`atem_fehler`)."""
+        lauf = self.messlauf
+        live = getattr(lauf, "live", None)
+        start = getattr(lauf, "start_mono", None)
+        if (
+            getattr(lauf, "aufnahme", None) is None
+            or live is None
+            or start is None
+            or self._t0 is None
+        ):
+            self._atem_spanne = None
+            return
+        try:
+            if self._atem_hrv is None or self._atem_hrv_achse != float(start):
+                self._atem_hrv = prototyp_atem_hrv.AtemHrvLive()
+                self._atem_hrv_achse = float(start)
+                self._atem_hrv_phasen = self._atem_hrv_fenster = 0
+                self._atem_hrv_bis = None
+                self._atem_spanne = None
+            hrv = self._atem_hrv
+            fertig: list[prototyp_atem_hrv.Atemzug] = []
+            for t_e, art in self._atem_phasen[self._atem_hrv_phasen :]:
+                fertig += hrv.phase(self.auf_messlauf(t_e), art)
+            self._atem_hrv_phasen = len(self._atem_phasen)
+            for bis_q, gueltig in self._atem_fenster_quelle[self._atem_hrv_fenster :]:
+                bis = bis_q - float(start)
+                fertig += hrv.fenster(bis - float(prototyp_atem.FENSTER_S), bis, gueltig)
+            self._atem_hrv_fenster = len(self._atem_fenster_quelle)
+            for p in live.punkte(self._atem_hrv_bis):
+                if self._atem_hrv_bis is not None and p.t_s <= self._atem_hrv_bis:
+                    continue
+                rr = p.rr_korr if p.rr_korr is not None and not p.verworfen else math.nan
+                fertig += hrv.schlag(p.t_s, rr)
+                self._atem_hrv_bis = p.t_s
+            if schluss:
+                fertig += hrv.abschluss()
+            if fertig:
+                letzter = fertig[-1]
+                self._atem_spanne = letzter.spanne_ms if letzter.gueltig else None
+        except Exception as fehler:  # der Prototyp darf das Zählen nie stoppen
+            self.atem_fehler = f"{type(fehler).__name__}: {fehler}"
+            self._atem_hrv = None
+            self._atem_spanne = None
 
     def _atem_enden(self, t: float) -> None:
         """Die Atem-Spur endet mit dem Lauf: offene Wendepunkte bestätigen (es kommt keine
@@ -1085,6 +1164,8 @@ class ZaehlBaustein:
         self._atem_fuettern(t)  # was bis jetzt kam
         self._atem_ereignisse(live.abschluss())
         self._atem_stand = live.stand()
+        self._atem_hrv_fuettern(schluss=True)
+        self._atem_hrv = None
         if self._atem_erfasst():
             self._atem_zaehlung_schreiben(t)
             self._kontext(

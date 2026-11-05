@@ -1,7 +1,10 @@
 """Atmung in Auswertung und Live-Kurven (Plan Beschleunigung §7.3, B1), ohne Fenster: die
 Ebene „Atmung“ mit Schatten des Einatmens, die Karte „Atmung (Prototyp)“, der Hinweis „Atmung
 < 9/min“ an HF-Power, LF/HF und DFA α1 — und live der Schatten der letzten 60 s samt Rate und
-Phase im Kopf des Vollbilds, solange ein Zähl-Teil die Atmung erfasst. Nur mit flet."""
+Phase im Kopf des Vollbilds, solange ein Zähl-Teil die Atmung erfasst. B2: die Atem-HRV je
+Atemzug in der Karte (Atemspanne, Phasenlage in Sekunden ab Einatembeginn, RR je Phase,
+gültige Atemzüge), die Zeile „Kennzahlen im Licht der Atmung“, der Modus der RR-Atmung aus dem
+Protokollfeld, und live die Spanne des letzten Atemzugs — nur mit Aufnahme. Nur mit flet."""
 
 from __future__ import annotations
 
@@ -282,6 +285,136 @@ async def test_hinweis_gilt_je_bereich(page, state, tmp_path) -> None:
     assert vergleich.startswith("Atmung aus RR: 6,") and "weicht" not in vergleich
 
 
+def _messung_rsa(state, tmp_path, *, art: str, atemuebung: bool, dauer_s: float = 300.0):
+    """RSA ±50 ms bei 6/min (Gipfel 3 s nach Einatembeginn), ein Beiwerk über die ganze Dauer
+    (Einatmen ab 2 s je 10 s, Fenster alle 5 s gültig), ein eigener Abschnitt „Atmen“ über
+    30–90 s und das Protokollfeld ``art`` (``uebung``: die erste Übung des Katalogs)."""
+    beats, t = [], 0.0
+    while t < dauer_s:
+        rr = 1000.0 - 50.0 * math.cos(2 * math.pi * (t + 0.5 - 5.0) / 10.0)
+        t += rr / 1000.0
+        beats.append(Beat(t_s=round(t, 3), rr_ms=round(rr), hf_bpm=60, t_wall_s=round(t, 3)))
+    rec = Recording(beats=beats, geraet="Polar H10 TEST", geraet_profil="polar_h10")
+    for t_s, marke in (
+        (30.0, start_marke("seg-atem", "Atmen")),
+        (90.0, ende_marke("seg-atem", "Atmen")),
+    ):
+        i = next(i for i, b in enumerate(beats) if b.t_s >= t_s)
+        rec.ereignisse.append(
+            {
+                "beat_index": i,
+                "dt_s": 0.0,
+                "t_wall_s": beats[i].t_s,
+                "t_s": beats[i].t_s,
+                "wall_time": "06:00:00",
+                "text": "Atmen",
+                "marke": marke,
+            }
+        )
+    pfad = speichern(rec, tmp_path / "Messungen" / "PolarH10")
+    s = AtemSammler("sensor", "polar_h10", 50, prototyp="hrv_core.prototyp.atemzuege")
+    s.lauf_beginn(0.0)
+    k = 0
+    while 2.0 + 10 * k + 4.0 < dauer_s:
+        s.phase(2.0 + 10 * k, "ein")
+        s.phase(6.0 + 10 * k, "aus")
+        k += 1
+    for ende in range(30, int(dauer_s) + 1, 5):
+        s.fenster(float(ende), 6.0, True)
+    s.lauf_ende(dauer_s)
+    s.schreiben(pfad)
+    uebung = state.uebungen.alle()[0]
+    feld = {"art": "uebung", "uebung": kurzcode(uebung.id)} if art == "uebung" else {"art": art}
+    kopffeld_schreiben(pfad, feld)
+    einst = state.hrv_einstellungen()
+    einst.kacheln = [*einst.kacheln, "hf_power", "lf_hf", "dfa_alpha1"]
+    einst.frequenz = True
+    einst.atemuebung = atemuebung
+    state.hrv_einstellungen_setzen(einst)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet="Polar H10 TEST",
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    return eintrag, uebung.name
+
+
+def _kacheln_mitlesen(monkeypatch) -> list:
+    """Die `KachelWert`-Listen, die die Ansicht zeichnet (der letzte Aufbau zuletzt)."""
+    from trainingsapp.ui.views import messung_detail as md
+
+    gesehen: list = []
+    echt = md.anzeige
+
+    def anzeige(werte, darstellung):
+        gesehen.append(list(werte))
+        return echt(werte, darstellung)
+
+    monkeypatch.setattr(md, "anzeige", anzeige)
+    return gesehen
+
+
+async def test_karte_zeigt_atem_hrv_je_messung_und_abschnitt(
+    page, state, tmp_path, monkeypatch
+) -> None:
+    """B2: vier Zeilen je Messung — Atemspanne nahe 100 ms, HF-Gipfel ≈ 3 s **nach
+    Einatembeginn** (Winkel im Tooltip), RR ein < aus, alle Atemzüge gültig —, eine Kurzzeile je
+    Abschnitt, die Zeile „im Licht der Atmung“ unter den Kacheln; LF/HF und DFA α1 bleiben
+    Zahlen mit Hinweis, HF-Power ist nicht ausgewiesen."""
+    kacheln = _kacheln_mitlesen(monkeypatch)
+    eintrag, name = _messung_rsa(state, tmp_path, art="uebung", atemuebung=False)
+    ansicht = messung_detail_view(page, state, eintrag)
+    await warten(page)
+    alles = texte(ansicht)
+    assert "ATMUNG (PROTOTYP)" in alles
+    spanne = next(t for t in alles if t.startswith("Atemspanne "))
+    ms = int(spanne.split()[1])
+    assert 85 <= ms <= 100 and " ms (IQR " in spanne and spanne.endswith(" bpm")
+    gipfel = next(
+        c for c in alle(ansicht) if isinstance(c, ft.Text) and str(c.value).startswith("HF-Gipfel ")
+    )
+    sekunden = float(str(gipfel.value).split()[1].replace(",", "."))
+    assert 2.4 <= sekunden <= 3.6 and str(gipfel.value).endswith(" s nach Einatembeginn")
+    assert isinstance(gipfel.tooltip, str) and gipfel.tooltip.endswith("°")
+    assert 80 <= int(gipfel.tooltip[:-1]) <= 135
+    rr = next(t for t in alles if t.startswith("RR ein "))
+    ein, aus = int(rr.split()[2]), int(rr.split()[5])
+    assert ein < 1000 < aus and "(Δ +" in rr
+    assert any(t.endswith(" Atemzügen gültig") and t.startswith("29 von 29") for t in alles)
+    # Der Abschnitt „Atmen“ (30–90 s): eine Kurzzeile mit seiner Atem-HRV
+    kurz = next(t for t in alles if t.startswith("Spanne ") and "HF-Gipfel" in t)
+    assert kurz.endswith(" von 6 gültig") and "RR ein " in kurz
+    # „Kennzahlen im Licht der Atmung“: Rate (Sensor), Ein:Aus, das Protokollfeld mit Namen
+    assert f"Atmung 6,0/min (Sensor) · Ein:Aus 1 : 1,5 · Atemübung {name}" in alles
+    # Der Modus aus dem Protokollfeld (Übung → Atemübung): die Atmung aus RR findet die 6/min,
+    # obwohl die Einstellung „Atemübung“ aus ist — kein Widerspruch zum Sensor
+    vergleich = next(t for t in alles if t.startswith("Atmung aus RR"))
+    assert vergleich.startswith("Atmung aus RR: 6,") and "weicht" not in vergleich
+    # LF/HF und DFA α1: Zahl **mit** Hinweis, HF-Power nicht ausgewiesen
+    nach_titel = {k.titel: k for k in kacheln[-1]}
+    lf_hf = next(k for t, k in nach_titel.items() if t.startswith("LF/HF"))
+    a1 = next(k for t, k in nach_titel.items() if "α1" in t)
+    hf = next(k for t, k in nach_titel.items() if t.startswith("HF"))
+    assert lf_hf.wert != "–" and lf_hf.grund == aa.LF_HINWEIS
+    assert a1.wert != "–" and a1.grund == aa.LF_HINWEIS
+    assert hf.wert == "–" and hf.grund.startswith(aa.NICHT_AUSGEWIESEN)
+    assert "nicht bewertet, nichts davon gespeichert." in " ".join(alles)
+
+
+async def test_modus_spontan_geht_vor_der_einstellung(page, state, tmp_path) -> None:
+    """P136: ``spontan`` im Protokollfeld heißt Ruhe — die Atmung aus RR sieht die 6/min nicht,
+    obwohl die Einstellung „Atemübung“ an ist; der Sensor gilt trotzdem (alle Fenster gültig)."""
+    eintrag, _ = _messung_rsa(state, tmp_path, art="spontan", atemuebung=True, dauer_s=150.0)
+    ansicht = messung_detail_view(page, state, eintrag)
+    await warten(page)
+    alles = texte(ansicht)
+    assert "Atmung aus RR: –" in alles
+    assert "Atmung 6,0/min (Sensor) · Ein:Aus 1 : 1,5 · spontan geatmet" in alles
+    assert alles.count(aa.LF_HINWEIS) == 2
+
+
 async def test_auswertung_ohne_beiwerk_ohne_ebene_und_karte(page, state, tmp_path) -> None:
     """Ohne ``_atem.json`` gibt es weder die Ebene noch die Karte — und keinen Hinweis, wenn
     auch die Atmung aus RR nichts sagt."""
@@ -355,6 +488,54 @@ async def test_einatem_schatten_live_auch_ohne_aufnahme(tmp_path) -> None:
         z.fertig()
         e.takt()
         assert einatem_schatten(state, a.lauf.jetzt_s(), 0.0, jetzt) == []
+        assert zaehl_stand.atem_kopf_text(state) == ""
+    finally:
+        await a.abbauen()
+
+
+async def _sekunden_rsa(a: Aufbau, n: float, e: Einheitslauf) -> None:
+    """Schläge mit RSA passend zur Atemwelle der Gurt-Attrappe (Einatmen ab t ≡ 7,5 mod 10):
+    RR am längsten zu Beginn des Einatmens, am kürzesten an dessen Ende — ±40 ms."""
+    ende = a.uhr.t + n
+    while a.uhr.t < ende:
+        rr = 1000.0 - 40.0 * math.sin(2 * math.pi * (a.uhr.t + 0.5) / 10.0)
+        a.uhr.t = round(a.uhr.t + rr / 1000.0, 6)
+        a.gurt.schlag(round(rr))
+        a.gurt.beschleunigung()
+        await ruhe()
+        if e.laeuft:
+            e.takt()
+
+
+async def test_live_spanne_des_letzten_atemzugs_nur_mit_aufnahme(tmp_path) -> None:
+    """B2: Ohne Aufnahme gibt es keine Spanne; läuft eine, rechnet der Zähl-Teil mit
+    `AtemHrvLive` aus Phasen und den Schlägen des Messlaufs die Spanne des letzten Atemzugs
+    (±40 ms → nahe 80 ms), und der Kopf des Vollbilds nennt sie neben Rate und Phase."""
+    a = await aufbauen(tmp_path)
+    a.gurt.bewegung = False
+    try:
+        state = SimpleNamespace(einheit=None)
+        e, z = _atemlauf(a)
+        state.einheit = e
+        e.starten()
+        await ruhe()
+        await _sekunden_rsa(a, 60, e)
+        assert z.atem_sensor is not None and z.atem_spanne_ms is None
+        kopf = zaehl_stand.atem_kopf_text(state)
+        assert kopf.startswith("Atmung 6/min") and "Spanne" not in kopf
+        a.lauf.aufnahme_starten()
+        await _sekunden_rsa(a, 90, e)
+        spanne = z.atem_spanne_ms
+        assert spanne is not None and 55.0 <= spanne <= 90.0 and z.atem_fehler == ""
+        kopf = zaehl_stand.atem_kopf_text(state)
+        assert kopf.startswith("Atmung 6/min") and kopf.endswith(f" · Spanne {round(spanne)} ms")
+        assert zaehl_stand.atem_zeile(z).endswith(f"Spanne {round(spanne)} ms")
+        # Nur Atmung: die kleine Zeile der Zählzeile nennt sie; die Laufleiste bleibt kurz
+        assert f"Spanne {round(spanne)} ms · Prototyp" in zaehl_stand.klein_text(z)
+        assert "Spanne" not in zaehl_stand.kurz_text(z)
+        # Ende des Laufs: kein Kopftext mehr
+        z.fertig()
+        e.takt()
         assert zaehl_stand.atem_kopf_text(state) == ""
     finally:
         await a.abbauen()

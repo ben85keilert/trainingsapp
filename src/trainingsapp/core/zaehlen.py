@@ -395,13 +395,28 @@ def phase_pfeil(phase: str | None) -> str:
     return PHASE_PFEILE.get(phase or "", "")
 
 
-def atem_text(rate: float | None, phase: str | None) -> str:
-    """Rate und Phase in einem: „12/min ▲“, ohne Phase „12/min“, ohne Rate „– ▼“.
+def spanne_text(spanne_ms: float | None) -> str:
+    """Die Atemspanne des letzten Atemzugs live (B2, `hrv_core.prototyp.atem_hrv`): „Spanne
+    58 ms“ — leer, solange es keine gibt (ohne Aufnahme, vor dem ersten vollständigen Atemzug,
+    letzter ungültig).
+
+    >>> spanne_text(58.4), spanne_text(None)
+    ('Spanne 58 ms', '')
+    """
+    return f"Spanne {round(spanne_ms)} ms" if spanne_ms is not None else ""
+
+
+def atem_text(rate: float | None, phase: str | None, spanne_ms: float | None = None) -> str:
+    """Rate und Phase in einem: „12/min ▲“, ohne Phase „12/min“, ohne Rate „– ▼“ — mit der
+    Atemspanne des letzten Atemzugs „12/min ▲ · Spanne 58 ms“.
 
     >>> atem_text(12.0, "ein"), atem_text(12.0, None), atem_text(None, "aus")
     ('12/min ▲', '12/min', '– ▼')
+    >>> atem_text(12.0, "ein", 58.4)
+    '12/min ▲ · Spanne 58 ms'
     """
-    return f"{rate_text(rate)} {phase_pfeil(phase)}".rstrip()
+    text = f"{rate_text(rate)} {phase_pfeil(phase)}".rstrip()
+    return f"{text} · {spanne_text(spanne_ms)}" if spanne_ms is not None else text
 
 
 def rate_waehlen(raten_hz: Iterable[int]) -> int:

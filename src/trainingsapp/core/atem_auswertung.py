@@ -17,30 +17,54 @@ und die Live-Schattierung (`views/live_vollbild.py`) zeigen:
   Schattierung über dem Tachogramm und live; ein letztes „ein“ ohne „aus“ reicht bis zum Ende
   seines Laufs.
 - `hinweis_rate` und `lf_hinweis` — welche Atemrate für den Hinweis „Atmung < 9/min — liegt im
-  LF-Band“ gilt (§7.1): **Startregel F6** (in hrv-research offen): die Rate des Sensors, wenn
-  mindestens die Hälfte der Prüffenster gültig war **und** die Läufe mindestens die Hälfte
-  des Bereichs abdecken (`MIN_ABDECKUNG`; sonst spräche ein 60-s-Lauf für 20 min), sonst die
-  Atmung aus den RR-Abständen desselben Bereichs (`hrv_core.atmung`), sonst keine. Die Regel
-  gilt **je Bereich** — ganze Messung, Abschnitt, Analysefenster — mit den Kennzahlen dieses
-  Bereichs. Unter `LF_GRENZE_PRO_MIN` liegen die Atemzüge selbst im LF-Band (0,04–0,15 Hz);
-  LF/HF und DFA α1 bekommen den Hinweis, HF-Power wird nicht ausgewiesen.
+  LF-Band“ gilt (§7.1): **Regel F6** (Entscheidung 25 in hrv-research, P136, Ben 5.11.2026):
+  die Rate des Sensors, wenn mindestens `MIN_FENSTER` Prüffenster gültig waren **und**
+  mindestens `MIN_FENSTER_ANTEIL` aller Fenster **und** die Läufe mindestens `MIN_ABDECKUNG`
+  des Bereichs abdecken (sonst spräche ein 60-s-Lauf für 20 min); sonst die Atmung aus den
+  RR-Abständen desselben Bereichs (`hrv_core.atmung`) — im Modus **Atemübung, wenn das
+  Protokollfeld ``atmung`` der Messung eine Übung oder getaktet nennt**, bei ``spontan`` in
+  Ruhe, und nur ohne Feld nach der Benutzereinstellung (`rr_modus`); sonst keine. Weichen
+  Sensor und RR um mehr als `VERGLEICH_ABWEICHUNG_PRO_MIN` voneinander ab, gilt der Sensor, die
+  Abweichung wird genannt (`vergleich_text`). Die Regel gilt **je Bereich** — ganze Messung,
+  Abschnitt, Analysefenster — mit den Kennzahlen dieses Bereichs. Unter `LF_GRENZE_PRO_MIN`
+  liegen die Atemzüge selbst im LF-Band (0,04–0,15 Hz); LF/HF und DFA α1 bleiben **als Zahl
+  mit Hinweis** stehen, HF-Power wird nicht ausgewiesen.
 - `vergleich_text` — die Atmung aus RR neben der des Sensors: eine Abweichung über
   `VERGLEICH_ABWEICHUNG_PRO_MIN` wird genannt, nicht gewertet.
+- `atem_hrv_zuege` und `atem_hrv` (B2) — die **Atem-HRV je Atemzug** aus
+  `hrv_core.prototyp.atem_hrv` auf den Phasen des Beiwerks (nur innerhalb der Läufe
+  `erfasst`, je Lauf ein Prototyp) und den RR-Abständen der Messung — die korrigierte Reihe
+  wie die übrigen Kennzahlen, Schlagzeiten auf der Wanduhr —, zusammengefasst je Bereich
+  (`AtemHrvBereich`): Atemspanne (Median und Quartile in ms, Median in bpm, Mittel von
+  ``ln``), **Phasenlage als Sekunden ab Beginn des Einatmens** bis zum HF-Gipfel (P135;
+  Median je gültigem Atemzug aus dem Winkel des angepassten Sinus, der Winkel 0–360° dazu),
+  RR je Phase (Mediane ein/aus und der Differenz), Ein:Aus, Anteil gültiger Atemzüge und die
+  Gründe der ungültigen mit Anzahl (`GRUND_TEXTE`). Texte dazu (`spanne_text`,
+  `phasenlage_text`, `rr_phasen_text`, `gueltig_text`, `atem_hrv_kurz`) und die Zeile
+  „Kennzahlen im Licht der Atmung“ (`licht_text`: Rate mit Quelle, Ein:Aus, Protokollfeld).
 
 Was hier herauskommt, wird nie gespeichert (§7.4) und ist beschreibend: keine Bewertung,
-keine Empfehlung (`docs/recht/00_zweckbestimmung.md`). Die Größen je Atemzug aus den
-RR-Abständen (Atemspanne, Phasenlage) kommen mit `hrv_core.prototyp.atem_hrv` (B2).
+keine Empfehlung (`docs/recht/00_zweckbestimmung.md`). Die Atem-HRV ist ein Prototyp
+(`hrv_core.prototyp`, Eingang mit Ausnahme, P134): eine Sitzung mit Takt, eine unter Störung;
+bei 15–20/min sind es nur vier Schläge je Atemzug, die Spanne je Atemzug ist dann grob — der
+Median über den Bereich trägt.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from statistics import mean, median, pstdev
-from typing import Final
+from typing import Any, Final
 
+import numpy as np
 from hrv_core.atem import PHASEN, Atem
+from hrv_core.atmung import ATEMUEBUNG, RUHE
+from hrv_core.prototyp import atem_hrv as ah
+from hrv_core.prototyp import atemzuege as prototyp_atemzuege
 
+from trainingsapp.core.atem_protokoll import ART_GETAKTET, ART_SPONTAN, ART_UEBUNG
 from trainingsapp.core.laufend import minuten
 
 #: Die beiden Phasen, wie das Beiwerk sie schreibt
@@ -59,10 +83,25 @@ NICHT_AUSGEWIESEN: Final[str] = "nicht ausgewiesen"
 ATEM_FENSTER_S: Final[float] = 60.0
 #: Die Kennzahlen, die den Hinweis bekommen (HF-Power wird dann nicht ausgewiesen)
 LF_KENNZAHLEN: Final[tuple[str, ...]] = ("hf_power", "lf_hf", "dfa_alpha1")
-#: Startregel F6: so viele Prüffenster müssen gültig sein, damit die Sensor-Rate gilt …
-MIN_FENSTER_ANTEIL: Final[float] = 0.5
+#: Regel F6 (P136): so viele Prüffenster müssen gültig sein, damit die Sensor-Rate gilt …
+MIN_FENSTER: Final[int] = 3
+#: … und dieser Anteil aller Fenster im Bereich …
+MIN_FENSTER_ANTEIL: Final[float] = 0.25
 #: … und so viel des Bereichs müssen die Läufe „Atmung erfassen“ abdecken
 MIN_ABDECKUNG: Final[float] = 0.5
+#: Länge eines Prüffensters des Phasen-Prototyps (s) — das Beiwerk nennt nur sein Ende
+FENSTER_S: Final[float] = float(prototyp_atemzuege.FENSTER_S)
+#: Die Gründe des Atem-HRV-Prototyps in Worten (kurz, nie wertend)
+GRUND_TEXTE: Final[dict[str, str]] = {
+    ah.ZU_KURZ: "zu kurz",
+    ah.ZU_LANG: "zu lang",
+    ah.ARTEFAKT: "Artefakt",
+    ah.LUECKE: "Lücke",
+    ah.ZU_WENIG_SCHLAEGE: "zu wenig Schläge",
+    ah.PHASE_OHNE_SCHLAG: "Phase ohne Schlag",
+    ah.DAUER_UNTYPISCH: "Dauer untypisch",
+    ah.FENSTER_UNGUELTIG: "Fenster ungültig",
+}
 #: Zeitgleich heißt: bis auf Rundung (3 Nachkommastellen im Beiwerk)
 _EPS: Final[float] = 1e-6
 #: Ab dieser Abweichung nennt der Vergleich die Atmung aus RR gesondert (Bauvorgabe B1)
@@ -129,6 +168,41 @@ class AtemKennzahlen:
         if self.bereich_s is None or self.bereich_s <= 0:
             return None
         return min(1.0, self.dauer_erfasst_s / self.bereich_s)
+
+
+@dataclass(frozen=True, slots=True)
+class AtemHrvBereich:
+    """Die Atem-HRV eines Bereichs (`atem_hrv`): Zusammenfassung über die gültigen Atemzüge
+    aus `hrv_core.prototyp.atem_hrv` — ``None``, wo es keinen gültigen gibt."""
+
+    #: Atemzüge im Bereich (vollständige ``ein → aus → ein`` eines Laufs) und gültige davon
+    n: int
+    n_gueltig: int
+    #: Atemspanne (Gipfel − Tal nach Trendbereinigung): Median und Quartile in ms, Median bpm
+    spanne_ms: float | None
+    spanne_ms_q25: float | None
+    spanne_ms_q75: float | None
+    spanne_bpm: float | None
+    #: Mittel von ``ln(spanne_ms)`` — die Skala für Verläufe
+    ln_spanne_ms: float | None
+    #: Phasenlage: Sekunden ab Beginn des Einatmens bis zum HF-Gipfel (Median, P135) …
+    gipfel_ab_ein_s: float | None
+    #: … und der Winkel des Gipfels ab Beginn „ein“ (zirkuläres Mittel, 0–360°)
+    winkel_grad: float | None
+    #: Mittleres RR je Phase (Mediane) und die Differenz ``aus − ein``
+    rr_ein_ms: float | None
+    rr_aus_ms: float | None
+    rr_differenz_ms: float | None
+    #: Dauer des Ausatmens je Dauer des Einatmens (Median)
+    ein_aus: float | None
+    #: 60 / Median der Dauern der gültigen Atemzüge
+    rate_pro_min: float | None
+    #: Gründe der ungültigen Atemzüge mit Anzahl, häufigste zuerst
+    gruende: tuple[tuple[str, int], ...] = ()
+
+    @property
+    def anteil_gueltig(self) -> float | None:
+        return self.n_gueltig / self.n if self.n else None
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +384,113 @@ def kennzahlen(
 
 
 # ---------------------------------------------------------------------------
+# Atem-HRV je Atemzug (hrv_core.prototyp.atem_hrv, B2)
+# ---------------------------------------------------------------------------
+
+
+def fenster_bereiche(atem: Atem) -> list[tuple[float, float, bool]]:
+    """Die Prüffenster des Beiwerks als ``(von, bis, gültig)`` — `FENSTER_S` lang bis zu ihrem
+    Ende, wie `hrv_core.prototyp.atem_hrv` sie braucht.
+
+    >>> fenster_bereiche(Atem(fenster=[(30.0, 6.0, True, ""), (35.0, None, False, "bewegung")]))
+    [(0.0, 30.0, True), (5.0, 35.0, False)]
+    """
+    return [(bis - FENSTER_S, bis, bool(gueltig)) for bis, _, gueltig, _ in atem.fenster]
+
+
+def atem_hrv_zuege(
+    atem: Atem, t_wand: Sequence[float] | np.ndarray, rr_ms: Sequence[float] | np.ndarray
+) -> list[ah.Atemzug]:
+    """Alle Atemzüge der Messung mit ihren Größen (`hrv_core.prototyp.atem_hrv.atem_hrv`):
+    die Phasen **je Lauf** „Atmung erfassen“ (nie über die Pause zwischen zwei Läufen, je Lauf
+    ein frischer Prototyp), die Schläge ``(t_wand, rr_ms)`` der korrigierten Reihe auf der
+    Wanduhr (Zeit = Ende des Intervalls; NaN = ausgeschlossen), die Prüffenster des Laufs.
+    Zeitlich sortiert; Zahlen auch für ungültige (zur Diagnose), `atem_hrv` fasst die
+    gültigen zusammen.
+
+    >>> t = np.cumsum(np.full(80, 0.8))
+    >>> rr = 800 - 40 * np.cos(2 * np.pi * (t - 0.4 - 1.0) / 5.0)
+    >>> phasen = [(5.0 * k + p, art) for k in range(10) for p, art in ((0.0, "ein"), (2.0, "aus"))]
+    >>> a = Atem(erfasst=[(0.0, 50.0)], phasen=phasen)
+    >>> zuege = atem_hrv_zuege(a, t, rr)
+    >>> len(zuege), all(z.gueltig for z in zuege), zuege[0].art
+    (9, True, 'prototyp')
+    >>> atem_hrv_zuege(Atem(), t, rr), atem_hrv_zuege(a, [], [])
+    ([], [])
+    """
+    t = np.asarray(t_wand, dtype=float)
+    rr = np.asarray(rr_ms, dtype=float)
+    if not t.size:
+        return []
+    fenster = fenster_bereiche(atem)
+    out: list[ah.Atemzug] = []
+    for gruppe, ende in je_lauf(atem.phasen, atem.erfasst):
+        if not gruppe:
+            continue
+        von = gruppe[0][0]
+        bis = ende if ende is not None else gruppe[-1][0]
+        # Ein Schlag vor dem Lauf für die Lückenprüfung, einer danach schließt den letzten
+        # Atemzug ab (`AtemHrvLive`: ein Schlag muss bis zum Ende reichen)
+        im = (t >= von - ah.MAX_LUECKE_S) & (t <= bis + ah.MAX_LUECKE_S)
+        if not im.any():
+            continue
+        im_lauf = [f for f in fenster if von - _EPS <= f[1] <= bis + _EPS]
+        out.extend(ah.atem_hrv(gruppe, t[im], rr[im], im_lauf or None))
+    return sorted(out, key=lambda z: z.ein_s)
+
+
+def atem_hrv(
+    zuege: Sequence[ah.Atemzug], von_s: float | None = None, bis_s: float | None = None
+) -> AtemHrvBereich:
+    """Die Zusammenfassung über die Atemzüge, die im Bereich ``[von_s, bis_s]`` (Wanduhr)
+    **beginnen** — wie `kennzahlen`: ganze Messung ohne Grenzen. Die Phasenlage ist der Median
+    von ``winkel/360 · Dauer`` je gültigem Atemzug (Sekunden ab Beginn des Einatmens, P135).
+
+    >>> t = np.cumsum(np.full(80, 0.8))
+    >>> rr = 800 - 40 * np.cos(2 * np.pi * (t - 0.4 - 1.0) / 5.0)
+    >>> phasen = [(5.0 * k + p, art) for k in range(10) for p, art in ((0.0, "ein"), (2.0, "aus"))]
+    >>> a = Atem(erfasst=[(0.0, 50.0)], phasen=phasen)
+    >>> h = atem_hrv(atem_hrv_zuege(a, t, rr))
+    >>> h.n, h.n_gueltig, h.rate_pro_min, h.ein_aus, h.gruende
+    (9, 9, 12.0, 1.5, ())
+    >>> 60 < h.spanne_ms < 85 and h.spanne_ms_q25 <= h.spanne_ms <= h.spanne_ms_q75
+    True
+    >>> 0.0 <= h.gipfel_ab_ein_s < 5.0 and 0.0 <= h.winkel_grad < 360.0
+    True
+    >>> atem_hrv(atem_hrv_zuege(a, t, rr), 20.0, 30.0).n  # beginnen bei 20, 25 und 30 s
+    3
+    >>> atem_hrv([]).n, atem_hrv([]).spanne_ms, atem_hrv([]).anteil_gueltig
+    (0, None, None)
+    """
+    lo = -float("inf") if von_s is None else von_s
+    hi = float("inf") if bis_s is None else bis_s
+    drin = [z for z in zuege if lo <= z.ein_s <= hi]
+    s = ah.zusammenfassen(drin)
+    gueltig = [z for z in drin if z.gueltig]
+    gipfel = [z.winkel_grad / 360.0 * z.dauer_s for z in gueltig if z.winkel_grad is not None]
+    ein = [z.rr_ein_ms for z in gueltig if z.rr_ein_ms is not None]
+    aus = [z.rr_aus_ms for z in gueltig if z.rr_aus_ms is not None]
+    zaehlung = Counter(g for z in drin for g in z.gruende)
+    return AtemHrvBereich(
+        n=s.n,
+        n_gueltig=s.n_gueltig,
+        spanne_ms=s.spanne_ms_median,
+        spanne_ms_q25=s.spanne_ms_q25,
+        spanne_ms_q75=s.spanne_ms_q75,
+        spanne_bpm=s.spanne_bpm_median,
+        ln_spanne_ms=s.ln_spanne_ms,
+        gipfel_ab_ein_s=round(float(median(gipfel)), 2) if gipfel else None,
+        winkel_grad=s.winkel_grad,
+        rr_ein_ms=round(float(median(ein)), 1) if ein else None,
+        rr_aus_ms=round(float(median(aus)), 1) if aus else None,
+        rr_differenz_ms=s.rr_differenz_ms_median,
+        ein_aus=round(s.ein_aus_median, 2) if s.ein_aus_median is not None else None,
+        rate_pro_min=s.rate_pro_min,
+        gruende=tuple(sorted(zaehlung.items(), key=lambda g: (-g[1], g[0]))),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Texte
 # ---------------------------------------------------------------------------
 
@@ -401,39 +582,219 @@ def vergleich_text(sensor_rate: float | None, rr_rate: float | None) -> str:
     return text
 
 
+def _ms(wert: float | None) -> str:
+    return f"{round(wert)}" if wert is not None else "–"
+
+
+def _beispiel() -> AtemHrvBereich:
+    """Für die Doctests der Texte: 12 von 15 Atemzügen gültig."""
+    return AtemHrvBereich(
+        15,
+        12,
+        62.4,
+        50.1,
+        74.6,
+        5.08,
+        4.1,
+        4.0,
+        290.4,
+        905.0,
+        950.0,
+        45.0,
+        1.4,
+        6.1,
+        gruende=(("zu_wenig_schlaege", 2), ("luecke", 1)),
+    )
+
+
+def spanne_text(h: AtemHrvBereich, *, lang: bool = True) -> str:
+    """„Atemspanne 62 ms (IQR 50–75) · 5,1 bpm“ — „Atemspanne –“ ohne gültigen Atemzug;
+    kurz (``lang=False``) „Spanne 62 ms (IQR 50–75)“.
+
+    >>> h = _beispiel()
+    >>> spanne_text(h), spanne_text(h, lang=False)
+    ('Atemspanne 62 ms (IQR 50–75) · 5,1 bpm', 'Spanne 62 ms (IQR 50–75)')
+    >>> spanne_text(atem_hrv([])), spanne_text(atem_hrv([]), lang=False)
+    ('Atemspanne –', 'Spanne –')
+    """
+    name = "Atemspanne" if lang else "Spanne"
+    if h.spanne_ms is None:
+        return f"{name} –"
+    text = f"{name} {_ms(h.spanne_ms)} ms (IQR {_ms(h.spanne_ms_q25)}–{_ms(h.spanne_ms_q75)})"
+    if lang and h.spanne_bpm is not None:
+        text += f" · {_zahl(h.spanne_bpm)} bpm"
+    return text
+
+
+def phasenlage_text(h: AtemHrvBereich, *, lang: bool = True) -> str:
+    """„HF-Gipfel 4,0 s nach Einatembeginn“ (P135: Sekunden ab Beginn des Einatmens) — „HF-Gipfel
+    –“ ohne gültigen Atemzug; kurz „HF-Gipfel 4,0 s“.
+
+    >>> h = _beispiel()
+    >>> phasenlage_text(h), phasenlage_text(h, lang=False), phasenlage_text(atem_hrv([]))
+    ('HF-Gipfel 4,0 s nach Einatembeginn', 'HF-Gipfel 4,0 s', 'HF-Gipfel –')
+    """
+    if h.gipfel_ab_ein_s is None:
+        return "HF-Gipfel –"
+    return f"HF-Gipfel {_zahl(h.gipfel_ab_ein_s)} s" + (" nach Einatembeginn" if lang else "")
+
+
+def winkel_text(h: AtemHrvBereich) -> str:
+    """Der Winkel des HF-Gipfels ab Beginn „ein“ für den Tooltip: „290°“ — leer ohne.
+
+    >>> h = _beispiel()
+    >>> winkel_text(h), winkel_text(atem_hrv([]))
+    ('290°', '')
+    """
+    return f"{round(h.winkel_grad)}°" if h.winkel_grad is not None else ""
+
+
+def rr_phasen_text(h: AtemHrvBereich, *, lang: bool = True) -> str:
+    """„RR ein 905 · aus 950 ms (Δ +45)“ — „RR je Phase –“ ohne; kurz ohne „ms“.
+
+    >>> h = _beispiel()
+    >>> rr_phasen_text(h), rr_phasen_text(h, lang=False), rr_phasen_text(atem_hrv([]))
+    ('RR ein 905 · aus 950 ms (Δ +45)', 'RR ein 905 · aus 950 (Δ +45)', 'RR je Phase –')
+    """
+    if h.rr_ein_ms is None or h.rr_aus_ms is None:
+        return "RR je Phase –"
+    text = f"RR ein {_ms(h.rr_ein_ms)} · aus {_ms(h.rr_aus_ms)}" + (" ms" if lang else "")
+    if h.rr_differenz_ms is not None:
+        text += f" (Δ {round(h.rr_differenz_ms):+d})"
+    return text
+
+
+def gruende_text(h: AtemHrvBereich) -> str:
+    """Die Gründe der ungültigen Atemzüge kurz: „2 zu wenig Schläge, 1 Lücke“ — leer ohne.
+
+    >>> gruende_text(_beispiel())
+    '2 zu wenig Schläge, 1 Lücke'
+    >>> gruende_text(atem_hrv([]))
+    ''
+    """
+    return ", ".join(f"{n} {GRUND_TEXTE.get(g, g)}" for g, n in h.gruende)
+
+
+def gueltig_text(h: AtemHrvBereich, *, lang: bool = True) -> str:
+    """„12 von 15 Atemzügen gültig — 2 zu wenig Schläge, 1 Lücke“; kurz „12 von 15 gültig“.
+
+    >>> h = _beispiel()
+    >>> gueltig_text(h), gueltig_text(h, lang=False)
+    ('12 von 15 Atemzügen gültig — 2 zu wenig Schläge, 1 Lücke', '12 von 15 gültig')
+    >>> gueltig_text(atem_hrv([])), gueltig_text(AtemHrvBereich(1, 1, *([None] * 12)))
+    ('0 von 0 Atemzügen gültig', '1 von 1 Atemzug gültig')
+    """
+    was = "Atemzug" if h.n == 1 else "Atemzügen"
+    text = f"{h.n_gueltig} von {h.n} {was} gültig" if lang else f"{h.n_gueltig} von {h.n} gültig"
+    gruende = gruende_text(h) if lang else ""
+    return f"{text} — {gruende}" if gruende else text
+
+
+def atem_hrv_kurz(h: AtemHrvBereich) -> str:
+    """Die Atem-HRV in einer Zeile (Abschnitt): „Spanne 62 ms (IQR 50–75) · HF-Gipfel 4,0 s ·
+    RR ein 905 · aus 950 (Δ +45) · 12 von 15 gültig“.
+
+    >>> h = _beispiel()
+    >>> atem_hrv_kurz(h)
+    'Spanne 62 ms (IQR 50–75) · HF-Gipfel 4,0 s · RR ein 905 · aus 950 (Δ +45) · 12 von 15 gültig'
+    """
+    return " · ".join(
+        [
+            spanne_text(h, lang=False),
+            phasenlage_text(h, lang=False),
+            rr_phasen_text(h, lang=False),
+            gueltig_text(h, lang=False),
+        ]
+    )
+
+
+def licht_text(rate: tuple[float, str] | None, ein_aus: float | None, protokoll: str) -> str:
+    """„Kennzahlen im Licht der Atmung“ (Plan §7.1) unter den Kacheln: die Rate, die für den
+    Bereich gilt (mit Quelle), Ein:Aus und das Protokollfeld — leer, wenn nichts davon da ist.
+
+    >>> licht_text((6.1, "sensor"), 1.4, "Atemübung Box Breathing")
+    'Atmung 6,1/min (Sensor) · Ein:Aus 1 : 1,4 · Atemübung Box Breathing'
+    >>> licht_text((9.3, "rr"), None, ""), licht_text(None, None, "spontan geatmet")
+    ('Atmung 9,3/min (aus RR)', 'Atmung – · spontan geatmet')
+    >>> licht_text(None, None, "")
+    ''
+    """
+    if rate is None and ein_aus is None and not protokoll:
+        return ""
+    quelle = {QUELLE_SENSOR: "Sensor", QUELLE_RR: "aus RR"}
+    teile = [
+        f"Atmung {rate_text(rate[0])} ({quelle.get(rate[1], rate[1])})" if rate else "Atmung –"
+    ]
+    if ein_aus is not None:
+        teile.append(f"Ein:Aus {ein_aus_text(ein_aus)}")
+    if protokoll:
+        teile.append(protokoll)
+    return " · ".join(teile)
+
+
 # ---------------------------------------------------------------------------
 # Hinweis „Atmung im LF-Band“ (Plan §7.1)
 # ---------------------------------------------------------------------------
 
 
 def sensor_rate_gilt(sensor: AtemKennzahlen | None) -> bool:
-    """Ob die Rate des Sensors für ihren Bereich spricht (Startregel F6): mindestens
-    `MIN_FENSTER_ANTEIL` der Prüffenster gültig und — wo der Bereich bekannt ist — die Läufe
-    decken mindestens `MIN_ABDECKUNG` davon ab.
+    """Ob die Rate des Sensors für ihren Bereich spricht (Regel F6, P136): mindestens
+    `MIN_FENSTER` Prüffenster gültig **und** mindestens `MIN_FENSTER_ANTEIL` aller Fenster
+    **und** — wo der Bereich bekannt ist — die Läufe decken mindestens `MIN_ABDECKUNG` davon ab.
 
     >>> sensor_rate_gilt(AtemKennzahlen(6, 6.0, 7, 7, 60.0, 1.5, 0.0, bereich_s=1200.0))
     False
     >>> sensor_rate_gilt(AtemKennzahlen(6, 6.0, 7, 7, 60.0, 1.5, 0.0, bereich_s=90.0))
     True
+    >>> sensor_rate_gilt(AtemKennzahlen(24, 6.1, 3, 12, 150.0, 1.4, 0.08))  # 3 von 12 = 25 %
+    True
+    >>> sensor_rate_gilt(AtemKennzahlen(24, 6.1, 2, 2, 150.0, 1.4, 0.08))  # alle, aber nur 2
+    False
+    >>> sensor_rate_gilt(AtemKennzahlen(24, 6.1, 3, 13, 150.0, 1.4, 0.08))  # 3 von 13 < 25 %
+    False
     """
     if sensor is None or sensor.rate is None:
         return False
     anteil, abdeckung = sensor.anteil_gueltig, sensor.abdeckung
-    return (anteil is not None and anteil >= MIN_FENSTER_ANTEIL) and (
-        abdeckung is None or abdeckung >= MIN_ABDECKUNG
+    return (
+        sensor.gueltig >= MIN_FENSTER
+        and (anteil is not None and anteil >= MIN_FENSTER_ANTEIL)
+        and (abdeckung is None or abdeckung >= MIN_ABDECKUNG)
     )
 
 
+def rr_modus(feld: Mapping[str, Any] | None, atemuebung: bool) -> str:
+    """Der Modus der Atmung aus RR (`hrv_core.atmung`) für einen Bereich der Messung: nennt das
+    Protokollfeld ``atmung`` (`core.atem_protokoll.feld_lesen`) eine Übung oder getaktet, ist es
+    `ATEMUEBUNG` (langsames Atmen gilt), bei ``spontan`` `RUHE`; nur ohne Feld entscheidet die
+    Benutzereinstellung ``atemuebung`` (P136: das Feld geht vor).
+
+    >>> rr_modus({"art": "uebung", "uebung": "ATEMATEM"}, False)
+    'atemuebung'
+    >>> rr_modus({"art": "getaktet", "takt_pro_min": 6.0}, False)
+    'atemuebung'
+    >>> rr_modus({"art": "spontan"}, True), rr_modus(None, True), rr_modus(None, False)
+    ('ruhe', 'atemuebung', 'ruhe')
+    """
+    art = feld.get("art") if feld else None
+    if art in (ART_UEBUNG, ART_GETAKTET):
+        return ATEMUEBUNG
+    if art == ART_SPONTAN:
+        return RUHE
+    return ATEMUEBUNG if atemuebung else RUHE
+
+
 def hinweis_rate(sensor: AtemKennzahlen | None, rr_rate: float | None) -> tuple[float, str] | None:
-    """Welche Atemrate für den Hinweis gilt — Startregel F6 (hrv-research, offen), **je
-    Bereich**: die Rate des Sensors, wenn sie für den Bereich spricht (`sensor_rate_gilt`:
-    genug Fenster gültig, genug abgedeckt), sonst die Atmung aus RR **desselben Bereichs**,
-    sonst keine. ``(rate, Quelle)``.
+    """Welche Atemrate für den Hinweis gilt — Regel F6 (P136), **je Bereich**: die Rate des
+    Sensors, wenn sie für den Bereich spricht (`sensor_rate_gilt`: genug Fenster gültig, genug
+    abgedeckt), sonst die Atmung aus RR **desselben Bereichs** (im Modus nach `rr_modus`),
+    sonst keine. ``(rate, Quelle)``. Widersprechen sich beide, gilt der Sensor — der Vergleich
+    (`vergleich_text`) nennt die Abweichung.
 
     >>> k = AtemKennzahlen(24, 6.1, 10, 12, 150.0, 1.4, 0.08)
     >>> hinweis_rate(k, 9.5)
     (6.1, 'sensor')
-    >>> wenig = AtemKennzahlen(24, 6.1, 3, 12, 150.0, 1.4, 0.08)
+    >>> wenig = AtemKennzahlen(24, 6.1, 2, 12, 150.0, 1.4, 0.08)
     >>> hinweis_rate(wenig, 9.5), hinweis_rate(None, 9.5)
     ((9.5, 'rr'), (9.5, 'rr'))
     >>> hinweis_rate(wenig, None) is None
@@ -472,31 +833,47 @@ __all__ = [
     "ATEM_FENSTER_S",
     "AUS",
     "EIN",
+    "FENSTER_S",
+    "GRUND_TEXTE",
     "LF_GRENZE_PRO_MIN",
     "LF_HINWEIS",
     "LF_HINWEIS_KURZ",
     "LF_KENNZAHLEN",
     "MIN_ABDECKUNG",
+    "MIN_FENSTER",
     "MIN_FENSTER_ANTEIL",
     "NICHT_AUSGEWIESEN",
     "QUELLE_RR",
     "QUELLE_SENSOR",
     "VERGLEICH_ABWEICHUNG_PRO_MIN",
+    "AtemHrvBereich",
     "AtemKennzahlen",
     "Atemzug",
+    "atem_hrv",
+    "atem_hrv_kurz",
+    "atem_hrv_zuege",
     "atemzuege",
     "ein_aus_text",
     "einatem_bereiche",
     "erfasst_bereiche",
+    "fenster_bereiche",
     "gleichmaessigkeit_text",
+    "gruende_text",
+    "gueltig_text",
     "hinweis_rate",
     "im_lf_band",
     "je_lauf",
     "kennzahlen",
     "lf_hinweis",
+    "licht_text",
+    "phasenlage_text",
     "quelle_text",
     "rate_text",
+    "rr_modus",
+    "rr_phasen_text",
     "sensor_rate_gilt",
+    "spanne_text",
     "vergleich_text",
+    "winkel_text",
     "zeile_text",
 ]

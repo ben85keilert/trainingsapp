@@ -378,7 +378,7 @@ Biofeedback, dazu die Einordnung von DFA α1, LF/HF und den übrigen Kennzahlen.
 | Rate und Gleichmäßigkeit | Atemzüge je Minute, Streuung ihrer Dauer | Einordnung jeder Kennzahl; wie gut ein Takt eingehalten wird |
 | Ein:Aus | Dauer des Einatmens zu der des Ausatmens | RMSSD und SD1 ändern sich damit |
 | Atemspanne je Atemzug | Gipfel–Tal: höchste minus tiefste Herzfrequenz (bpm) bzw. längster minus kürzester RR (ms) im Atemzug, nach Trendbereinigung | die anschaulichste Größe der RSA; sie braucht Atemgrenzen, und die liefert der Sensor |
-| Phasenlage | Zeit (oder Winkel) vom Ende des Einatmens bis zum Gipfel der Herzfrequenz | wandert mit der Dauer des Atemzugs; bei Resonanzatmung das wichtigste Kriterium |
+| Phasenlage | **Sekunden ab Beginn des Einatmens** bis zum Gipfel der Herzfrequenz (P135, Ben 5.11.2026; der Gipfel ist der eines an den Atemzug angepassten Sinus, der Winkel 0–360° steht im Tooltip) | wandert mit der Dauer des Atemzugs; bei Resonanzatmung das wichtigste Kriterium |
 | RR je Phase | mittlerer RR beim Ein- und beim Ausatmen | die Differenz als einfache Zahl |
 
 **Kennzahlen im Licht der Atmung** (P124, Ben: „Auswertung von DFA a1, LF/HF und co“):
@@ -566,7 +566,7 @@ einer APK.
 
 P117 bestätigt (Ben): die Schalter sitzen an jeder Übung, nicht einer für alle.
 
-## 13. Umsetzungsstand (5.11.2026, Version 0.3.46)
+## 13. Umsetzungsstand (5.11.2026, Version 0.3.47)
 
 A1 und A2 sind gebaut, ohne Änderung an hrv-core (0.8.0): Der Zähler ist
 `hrv_core.prototyp.wiederholungen`, die Kontextzeilen nutzen nur Felder, die `hrv_core.deid`
@@ -605,13 +605,31 @@ Wiederherstellen, Haken ohne und mit Fehler), `test_ui_atmung.py` (Auswertung: E
 Hinweis, Schatten-Reihen, Chip; live: Schatten und Kopf mit der Gurt-Attrappe ohne Aufnahme,
 Live-Vollbild), dazu die Doctests der beiden Kernmodule.
 
-**Bis B2 fehlt** (`prototyp.atem_hrv`, Entscheidung in hrv-research): die Atemspanne je
-Atemzug (Gipfel–Tal der Herzfrequenz nach Trendbereinigung), die Phasenlage (Ende des
-Einatmens bis zum HF-Gipfel), RR je Phase — alles, was Phasen **und** RR-Abstände zusammen
-braucht; damit auch die Atemspanne des letzten Atemzugs live (7.3) und die Kennzahlen je
-Abschnitt „im Licht der Atmung“ über den Hinweis hinaus. Die Startregel F6 bleibt bis zu
-einem Befund in hrv-research eine Setzung im Code (`MIN_FENSTER_ANTEIL`). Takt (Soll gegen
-Ist) und `getaktet` kommen mit T.
+**B2** (5.11.2026, 0.3.47, hrv-core 0.10.0 — `hrv-core.ref` angehoben; Entscheidung 25 in
+hrv-research, P134–P136): die **Atem-HRV je Atemzug** aus `hrv_core.prototyp.atem_hrv`.
+
+| Stufe | Gebaut | Wo |
+|---|---|---|
+| B2 Auswertung | `atem_hrv_zuege` rechnet je Lauf „Atmung erfassen“ (nie über die Pause, je Lauf ein Prototyp) auf den Phasen des Beiwerks, den Prüffenstern (`FENSTER_S` lang bis zu ihrem Ende) und den RR-Abständen der **korrigierten Reihe** (wie die übrigen Kennzahlen; Schlagzeiten auf der Wanduhr, `hf_auswertung.achse_zu_wand_reihe`) alle Atemzüge; `atem_hrv` fasst je Bereich zusammen (`AtemHrvBereich`): Atemspanne (Median, Quartile ms; Median bpm; `ln`-Mittel), **Phasenlage als Sekunden ab Beginn des Einatmens** (P135: Median von Winkel/360 · Dauer je gültigem Atemzug; der Winkel als zirkuläres Mittel), RR je Phase (Mediane ein/aus, Differenz), Ein:Aus, Rate, Anteil gültig, Gründe mit Anzahl (`GRUND_TEXTE`). Die Karte „Atmung (Prototyp)“ zeigt je Messung vier Zeilen — „Atemspanne 62 ms (IQR 50–75) · 5,1 bpm“, „HF-Gipfel 4,0 s nach Einatembeginn“ (Tooltip „290°“), „RR ein 905 · aus 950 ms (Δ +45)“, „12 von 15 Atemzügen gültig — 2 zu wenig Schläge, 1 Lücke“ — und je Abschnitt eine Kurzzeile (`atem_hrv_kurz`); gemerkt je Korrektur-Auswahl (`z.merken("atem_hrv")`), nichts gespeichert (§7.4), keine Wertung | `core/atem_auswertung.py`, `core/hf_auswertung.py`, `views/messung_detail.py` |
+| B2 Licht | **„Kennzahlen im Licht der Atmung“** (7.1): unter den Kacheln die Zeile „Atmung 6,1/min (Sensor) · Ein:Aus 1 : 1,4 · Atemübung Box Breathing“ (`licht_text`: Rate nach F6 mit Quelle, Ein:Aus aus dem Beiwerk, Protokollfeld in Worten) — nur mit Beiwerk oder Protokollfeld | `core/atem_auswertung.py`, `views/messung_detail.py` |
+| B2 Regel F6 | **nach P136**: die Sensor-Rate gilt, wenn mindestens `MIN_FENSTER` = 3 Prüffenster gültig sind **und** mindestens `MIN_FENSTER_ANTEIL` = 25 % aller Fenster **und** die Läufe die Hälfte des Bereichs abdecken (`MIN_ABDECKUNG`); sonst die Atmung aus RR desselben Bereichs — im Modus **Atemübung, wenn das Protokollfeld `atmung` eine Übung oder getaktet nennt**, bei `spontan` Ruhe, die Benutzereinstellung nur ohne Feld (`rr_modus`; `messung_detail.atem_modus` für Kacheln, Abschnitte, Vergleich und Vollbild); Widerspruch über 2/min: der Sensor gilt, die Abweichung steht im Vergleich; unter 9/min bleiben LF/HF und α1 **als Zahl mit Hinweis** stehen, HF-Power wird nicht ausgewiesen (wie B1) | `core/atem_auswertung.py`, `views/messung_detail.py` |
+| B2 Live | Läuft eine **Aufnahme**, rechnet der `ZaehlBaustein` neben der Atem-Spur `AtemHrvLive` (Phasen von der Achse der Einheit über `auf_messlauf`, Prüffenster von der Uhr der Quelle, Schläge aus `Messlauf.live` — korrigiertes RR, Verworfenes als NaN; beginnt eine Aufnahme, wechselt die Achse und der Prototyp fängt neu an); `atem_spanne_ms` ist die Spanne des letzten vollständigen Atemzugs (``None`` ohne Aufnahme, vor dem ersten, wenn er ungültig war). Angezeigt als „Spanne 58 ms“ neben Rate und Phase (`core.zaehlen.atem_text`, `zaehl_stand.atem_zeile`) — im Kopf des Live-Vollbilds (Tooltip: nach dem nächsten Prüffenster), in der Zählzeile und im Timer „Während“ (nur Atmung die kleine Zeile, Wdh + Atmung die dritte Zeile); Laufleiste und Benachrichtigung bleiben ohne. Ohne Aufnahme keine Spanne. Verzug bis zu einem Prüffenster (Entscheidung 25, Frage 6 offen — so gelassen) | `devices/zaehlen.py`, `core/zaehlen.py`, `components/zaehl_stand.py`, `views/live_vollbild.py` |
+
+Tests B2: `test_atem_auswertung.py` (Abschnitt „Atem-HRV“: synthetische RR mit RSA und Phasen —
+Spanne und Phasenlage bekannt, je Lauf, Lücke; Regel F6 in allen Fällen: 3 Fenster und 25 %,
+Abdeckung, Modus aus dem Protokollfeld, Widerspruch; Texte), `test_ui_atmung.py` (Karte mit
+den vier Zeilen, Phasenlage in Sekunden mit Winkel im Tooltip, Abschnittszeile, Licht-Zeile,
+Modus aus dem Protokollfeld; LF/HF und α1 bleiben als Zahl mit Hinweis; live: Spanne mit der
+Gurt-Attrappe und laufender Aufnahme, ohne Aufnahme keine), Doctests in
+`core/atem_auswertung.py`, `core/zaehlen.py`, `core/hf_auswertung.py`.
+
+**Grenzen von B2** (Entscheidung 25 in hrv-research, Eingang mit Ausnahme): geprüft an **einer
+Sitzung mit Takt** (Simulator und Mensch) und einer unter Störung — nicht an zwei unabhängigen;
+bei 15–20/min sind es nur etwa vier Schläge je Atemzug, die Spanne je Atemzug ist dann grob (der
+Sinus ist die zweite Zahl) — **der Median über den Bereich trägt**, nicht der Einzelwert; ein
+verpasster oder gespaltener Atemzug fällt über `dauer_untypisch` heraus; live hinkt die Spanne
+bis zu einem Prüffenster nach, und der erste Atemzug einer Aufnahme fehlt meist (seine Schläge
+kamen vor seiner Phase). Takt (Soll gegen Ist) und `getaktet` kommen mit T.
 
 **Grenzen von A3** (Entscheidung 24 in hrv-research, `hrv_core.prototyp.atemzuege`): Der
 Prototyp ist an **zwei Sitzungen eines Menschen** mit dem H10 am unteren Brustbein eingestellt
@@ -628,10 +646,9 @@ einem konstanten Signal (Rundung der laufenden Summe unter 0 vor `sqrt`) — die
 
 **Bewusst noch nicht gebaut** (Abschnitt 11):
 
-- **B1 Rest** Biofeedback mit Atemspanne (braucht B2) und das Resonanzprotokoll (nur Praxis,
-  `physiologische_steuerung`, 7.1 b).
+- **B1 Rest** das Resonanzprotokoll (nur Praxis, `physiologische_steuerung`, 7.1 b); die
+  Atemspanne live ist mit B2 da.
 - **T** Taktgeber im Timer (A18, eigener Plan).
-- **B2** Atem-HRV (`prototyp.atem_hrv`), Kennzahlen im Licht der Atmung.
 - **A5** Live-Zähler je Wiederholung, Vorlagen (heute nur „Automatisch“), Umkehrpunkt; bis dahin
   zählt der Prototyp jede Sekunde das ganze Satzfenster neu.
 - **A6** die Karte in „Im Plan einstellen“ und praxis_gui. Die Planübung folgt der Übung;

@@ -1821,7 +1821,7 @@ class Messlauf:
             fenster = self.acc_fenster(von, t_satz)
             if fenster is not None:
                 with contextlib.suppress(Exception):
-                    sensor = wiederholungen.zaehlen(fenster[0], fenster[1]).anzahl
+                    sensor = wiederholungen.zaehlen_fenster(fenster[0], fenster[1]).anzahl
         # Übung und Satz, wie die Leiste sie sah — die Notiz dieses Satzes steht noch nicht drin;
         # die Nummer seiner Zeile ``satz`` (eben geschrieben), zählt der Sensor dieselbe Übung,
         # die seines Satzes — wie die Marken (`marken_satz`)

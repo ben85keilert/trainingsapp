@@ -64,10 +64,11 @@ from pathlib import Path
 from typing import Any
 
 import flet as ft
+import hrv_core
 import numpy as np
 from hrv_core import mitschnitt as mt
 from hrv_core.atem import atem_laden, atem_pfad
-from hrv_core.atmung import ATEMUEBUNG, RUHE, atemfrequenz, kurzgrund
+from hrv_core.atmung import atemfrequenz, kurzgrund
 from hrv_core.ausschnitte import FARBEN as ABSCHNITT_FARBEN
 from hrv_core.ausschnitte import (
     Abschnitt,
@@ -113,7 +114,12 @@ from trainingsapp.core import atem_auswertung as aa
 from trainingsapp.core import atem_protokoll
 from trainingsapp.core import diagnose as dg
 from trainingsapp.core.aufnahme_bezug import RAND_S, Bezug
-from trainingsapp.core.hf_auswertung import AbschnittWand, achse_zu_wand, wand_zu_achse
+from trainingsapp.core.hf_auswertung import (
+    AbschnittWand,
+    achse_zu_wand,
+    achse_zu_wand_reihe,
+    wand_zu_achse,
+)
 from trainingsapp.core.hrv_ansicht import (
     HF_SPANNE_MIN_BPM,
     LINKS,
@@ -758,6 +764,9 @@ def _aufbauen(
         state.hrv.titel_setzen(eintrag.id, rec.titel)
     beschreibung = rec.notiz or eintrag.note
     kacheln_box = ft.Container()
+    #: „Kennzahlen im Licht der Atmung“ (Plan §7.1, B2): Rate nach F6 mit Quelle, Ein:Aus und
+    #: das Protokollfeld — unter den Kacheln, nur mit Beiwerk oder Protokollfeld
+    licht_text = ft.Text(size=12, opacity=0.8, visible=False)
     rr_box = ft.Container()
     ketten_box = ft.Column(spacing=0)
     # Dieselben vier Knöpfe wie live (Ben, 21.10.2026); ein Abschnitt, die ganze Messung
@@ -836,12 +845,20 @@ def _aufbauen(
 
         return z.merken("nichtlinear", rechnen)
 
+    def atem_modus() -> str:
+        """Der Modus der Atmung aus RR (`hrv_core.atmung`): das Protokollfeld „Atmung“ der
+        Messung geht vor (Übung oder getaktet → Atemübung, spontan → Ruhe), die Einstellung
+        „Atemübung“ gilt nur ohne Feld (`core.atem_auswertung.rr_modus`, P136)."""
+        return aa.rr_modus(
+            atem_protokoll.feld_lesen(rec.extra), state.hrv_einstellungen().atemuebung
+        )
+
     def atmung() -> dict[str, Any]:
         """Atemfrequenz der ganzen Messung: Median der gültigen 60-s-Fenster."""
 
         def rechnen() -> dict[str, Any]:
             t, rr, _ = analyse_reihe()
-            modus = ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE
+            modus = atem_modus()
             # Alle 15 s ein Minutenfenster — über Stunden höchstens 2000 Fenster
             schritt = max(15.0, float(t[-1] - t[0]) / 2000.0) if t.size else 15.0
             fenster = [
@@ -858,16 +875,14 @@ def _aufbauen(
                 "grund": kurzgrund([gruende.most_common(1)[0][0]]) if gruende else "",
             }
 
-        return z.merken(
-            "atmung" + ("_uebung" if state.hrv_einstellungen().atemuebung else ""), rechnen
-        )
+        return z.merken(f"atmung:{atem_modus()}", rechnen)
 
     def rr_atmung_in(bereiche: Sequence[tuple[float, float]]) -> float | None:
         """Die Atmung aus RR in Bereichen der Achse: Median der gültigen Minutenfenster
         (alle 15 s, über Stunden höchstens 2000 je Bereich), die ganz in einem Bereich
         liegen — für den Vergleich und den Hinweis **im selben Bereich** (fünfte Prüfrunde,
         C2), nicht über die ganze Messung."""
-        modus = ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE
+        modus = atem_modus()
         schluessel = ";".join(f"{a:.3f}-{b:.3f}" for a, b in bereiche)
 
         def rechnen() -> float | None:
@@ -896,6 +911,41 @@ def _aufbauen(
         return aa.kennzahlen(
             atem, achse_zu_wand(zeilen_achse, wand, von), achse_zu_wand(zeilen_achse, wand, bis)
         )
+
+    def atem_hrv_zuege() -> list[Any]:
+        """Alle Atemzüge der Messung mit ihrer Atem-HRV (B2, `core.atem_auswertung.atem_hrv_zuege`,
+        `hrv_core.prototyp.atem_hrv`): die korrigierte Reihe wie die übrigen Kennzahlen, die
+        Schlagzeiten auf der Wanduhr des Beiwerks — gemerkt je Auswahl der Korrektur; leer ohne
+        Beiwerk oder ohne Intervalle. Nichts davon wird gespeichert (Plan §7.4)."""
+        atem = atem_stand["atem"]
+        if atem is None or z.nur_puls:
+            return []
+
+        def rechnen() -> list[Any]:
+            korr = z.korrigiert()
+            t_wand = achse_zu_wand_reihe(zeilen_achse, wand, zeiten_korr())
+            return aa.atem_hrv_zuege(atem, t_wand, korr.rr_ms)
+
+        return z.merken("atem_hrv", rechnen)
+
+    def atem_hrv_bereich(von: float, bis: float) -> aa.AtemHrvBereich:
+        """Die Atem-HRV der Atemzüge, die im Bereich ``[von, bis]`` der Achse beginnen."""
+        return aa.atem_hrv(
+            atem_hrv_zuege(),
+            achse_zu_wand(zeilen_achse, wand, von),
+            achse_zu_wand(zeilen_achse, wand, bis),
+        )
+
+    def atem_hrv_zeilen(h: aa.AtemHrvBereich, size: int) -> list[ft.Control]:
+        """Die vier Zeilen der Atem-HRV (B2): Atemspanne, Phasenlage in Sekunden ab
+        Einatembeginn (P135; der Winkel im Tooltip), RR je Phase, gültige Atemzüge mit
+        Gründen — nur Zahlen, keine Wertung."""
+        return [
+            ft.Text(aa.spanne_text(h), size=size),
+            ft.Text(aa.phasenlage_text(h), size=size, tooltip=aa.winkel_text(h) or None),
+            ft.Text(aa.rr_phasen_text(h), size=size),
+            ft.Text(aa.gueltig_text(h), size=size, opacity=0.8),
+        ]
 
     def atem_hinweis_aus(
         sensor: aa.AtemKennzahlen | None, rr_rate: Callable[[], float | None]
@@ -1457,9 +1507,9 @@ def _aufbauen(
         von, bis = a.rechenbereich(*grenzen())
         korr = z.korrigiert()
         pnn_ms = state.ansicht().pnn_ms
-        atem_modus = ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE
+        modus = atem_modus()
         return z.merken(
-            f"abschnitt:{a.id}:{von:.3f}:{bis:.3f}:{pnn_ms:g}:{atem_modus}:{int(einst.frequenz)}",
+            f"abschnitt:{a.id}:{von:.3f}:{bis:.3f}:{pnn_ms:g}:{modus}:{int(einst.frequenz)}",
             lambda: abschnitt_werte(
                 korr,
                 korr_zeiten(korr, z.achse),
@@ -1467,7 +1517,7 @@ def _aufbauen(
                 bis,
                 pnn_ms=pnn_ms,
                 frequenz=einst.frequenz,
-                atem_modus=atem_modus,
+                atem_modus=modus,
             ),
         )
 
@@ -2004,10 +2054,29 @@ def _aufbauen(
         zusatz_sichern()
         editor_schliessen()
 
+    def licht_zeichnen() -> None:
+        """Die Zeile „Kennzahlen im Licht der Atmung“ (`core.atem_auswertung.licht_text`):
+        die Rate, die für die Messung gilt (Regel F6, mit Quelle), Ein:Aus aus dem Beiwerk und
+        das Protokollfeld — ohne beides bleibt sie weg."""
+        k = atem_stand["kennzahlen"]
+        protokoll = atem_protokoll.text(
+            atem_protokoll.feld_lesen(rec.extra), uebung_name(rec.extra)
+        )
+        if k is None and not protokoll:
+            licht_text.visible = False
+            return
+        rate = None
+        if not z.nur_puls:
+            # Die Atmung aus RR erst rechnen, wenn der Sensor nicht reicht (über Stunden teuer)
+            rate = aa.hinweis_rate(k, None) or aa.hinweis_rate(k, atmung()["rate"])
+        licht_text.value = aa.licht_text(rate, k.ein_aus if k is not None else None, protokoll)
+        licht_text.visible = bool(licht_text.value)
+
     def zeichnen(aktualisieren: bool = True) -> None:
         kopf()
         abschnitte_zeichnen()
         kacheln_box.content = anzeige(kachel_werte(), einst.darstellung)
+        licht_zeichnen()
         analyse.aufbauen()
         kurven()
         ketten_box.controls = [ketten_zeile(i, k) for i, k in enumerate(z.ketten)] or [
@@ -2929,9 +2998,8 @@ def _aufbauen(
         m.angebot = kurven_angebot()
         m.rechts = rechts_px(ansicht_, m.angebot)
         kopf_zeichnen()
-        atem_modus = ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE
         daten = verlaufsdaten(
-            analyse_reihe(), hf_geraet(), ansicht_, atem_modus, vb_speicher, x_von, x_bis
+            analyse_reihe(), hf_geraet(), ansicht_, atem_modus(), vb_speicher, x_von, x_bis
         )
         m.gesehen = {}
         x_text, x_null = zeitachse(x_von, x_bis)
@@ -3754,21 +3822,26 @@ def _aufbauen(
             )
             if k.dauer_erfasst_s <= 0:
                 continue  # dort wurde nicht erfasst
+            texte: list[ft.Control] = [
+                ft.Text(a.name, size=12, weight=ft.FontWeight.W_600, max_lines=1),
+                ft.Text(aa.zeile_text(k), size=12, opacity=0.8),
+            ]
+            if not z.nur_puls:  # die Atem-HRV des Abschnitts (B2), eine Zeile
+                h = atem_hrv_bereich(von, bis)
+                texte.append(
+                    ft.Text(
+                        aa.atem_hrv_kurz(h), size=12, opacity=0.8, tooltip=aa.winkel_text(h) or None
+                    )
+                )
             zeilen.append(
                 ft.Row(
                     spacing=8,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
-                        ft.Container(width=4, height=28, border_radius=2, bgcolor=a.farbe),
-                        ft.Column(
-                            spacing=0,
-                            tight=True,
-                            expand=True,
-                            controls=[
-                                ft.Text(a.name, size=12, weight=ft.FontWeight.W_600, max_lines=1),
-                                ft.Text(aa.zeile_text(k), size=12, opacity=0.8),
-                            ],
+                        ft.Container(
+                            width=4, height=14 * len(texte), border_radius=2, bgcolor=a.farbe
                         ),
+                        ft.Column(spacing=0, tight=True, expand=True, controls=texte),
                     ],
                 )
             )
@@ -3804,6 +3877,8 @@ def _aufbauen(
             ),
             ft.Text(aa.vergleich_text(k.rate, rr_rate), size=12, opacity=0.8),
         ]
+        if not z.nur_puls:  # die Atem-HRV der Messung (B2): vier Zeilen
+            zeilen.extend(atem_hrv_zeilen(atem_hrv_bereich(*grenzen()), 12))
         if hinweis_lf:
             zeilen.append(
                 ft.Text(
@@ -3816,8 +3891,10 @@ def _aufbauen(
         zeilen.append(
             hinweis(
                 "Atemphasen aus dem Beschleunigungssensor, gefunden von "
-                f"{atem.prototyp or 'einem Prototyp'} (hrv-core {atem.hrv_core or '–'}) — nur "
-                "beschrieben, nicht bewertet. Atemspanne und Phasenlage je Atemzug folgen."
+                f"{atem.prototyp or 'einem Prototyp'} (hrv-core {atem.hrv_core or '–'}); "
+                "Atemspanne, Phasenlage (Sekunden ab Einatembeginn) und RR je Phase aus "
+                f"hrv_core.prototyp.atem_hrv (hrv-core {hrv_core.__version__}) — nur "
+                "beschrieben, nicht bewertet, nichts davon gespeichert."
             )
         )
         atem_box.controls = [karte(*zeilen)]
@@ -3941,6 +4018,7 @@ def _aufbauen(
         spacing=12,
         controls=[
             kacheln_box,
+            licht_text,
             karte(
                 # Wie live (Ben, 21.10.2026): Ablesen, Vollbild, Fenster & Darstellung
                 # zweiter von rechts, Menü ⋮ mit Info (was die Farben heißen), Korrektur

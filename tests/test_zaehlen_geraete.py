@@ -194,13 +194,13 @@ async def test_zaehlt_hoechstens_jede_sekunde_und_schnell(aufbau, monkeypatch) -
     120 s bei 50 Hz in unter 50 ms (am Rechner; Ziel am Handy 20 ms, Plan §5.2)."""
     a = aufbau
     aufrufe: list[int] = []
-    echt = prototyp_wdh.zaehlen
+    echt = prototyp_wdh.zaehlen_fenster
 
     def gezaehlt(xyz, rate_hz, t0_s=0.0):
         aufrufe.append(len(xyz))
         return echt(xyz, rate_hz, t0_s)
 
-    monkeypatch.setattr(zaehlen_modul.prototyp_wdh, "zaehlen", gezaehlt)
+    monkeypatch.setattr(zaehlen_modul.prototyp_wdh, "zaehlen_fenster", gezaehlt)
     e, z = _zaehllauf(a)
     e.starten()
     await ruhe()
@@ -1663,14 +1663,14 @@ async def test_lange_rechnung_rechnet_seltener(aufbau, monkeypatch) -> None:
 
     a = aufbau
     aufrufe: list[int] = []
-    echt = prototyp_wdh.zaehlen
+    echt = prototyp_wdh.zaehlen_fenster
 
     def gezaehlt(xyz, rate_hz, t0_s=0.0):
         aufrufe.append(len(xyz))
         return echt(xyz, rate_hz, t0_s)
 
     uhr = itertools.count(step=0.06)  # zwei Ablesungen je Rechnung: sie dauert 60 ms
-    monkeypatch.setattr(zaehlen_modul.prototyp_wdh, "zaehlen", gezaehlt)
+    monkeypatch.setattr(zaehlen_modul.prototyp_wdh, "zaehlen_fenster", gezaehlt)
     monkeypatch.setattr(zaehlen_modul, "time", SimpleNamespace(perf_counter=lambda: next(uhr)))
     e, z = _zaehllauf(a)
     e.starten()

@@ -264,14 +264,20 @@ def atem_phase(z: ZaehlBaustein) -> str:
     return zl.phase_pfeil(z.atem_phase)
 
 
+def atem_zeile(z: ZaehlBaustein) -> str:
+    """„12/min ▲ · Spanne 58 ms“ — Rate, Phase und, mit Aufnahme, die Atemspanne des letzten
+    Atemzugs (B2, `ZaehlBaustein.atem_spanne_ms`; `core.zaehlen.atem_text`)."""
+    return zl.atem_text(z.atem_rate, z.atem_phase, getattr(z, "atem_spanne_ms", None))
+
+
 def atem_text(z: ZaehlBaustein) -> str:
-    """Die Zeile der Atem-Spur bei Wdh + Atmung: „Atmung 12/min ▲“ — leer ohne „Atmung“ oder
-    solange keine Proben kamen; nach dem Ende die Atemzüge."""
+    """Die Zeile der Atem-Spur bei Wdh + Atmung: „Atmung 12/min ▲ · Spanne 58 ms“ — leer ohne
+    „Atmung“ oder solange keine Proben kamen; nach dem Ende die Atemzüge."""
     if not (z.wdh and z.atem) or z.atem_sensor is None:
         return ""
     if z.phase == PHASE_ENDE:
         return f"Atmung {z.atemzuege} · {atem_rate_text(z)}"
-    return f"Atmung {zl.atem_text(z.atem_rate, z.atem_phase)}"
+    return f"Atmung {atem_zeile(z)}"
 
 
 def _atem_klein(z: ZaehlBaustein) -> str:
@@ -283,7 +289,7 @@ def _atem_klein(z: ZaehlBaustein) -> str:
     zahl = f"Atmung {'…' if sensor is None else sensor}"
     if korrektur:
         zahl = f"{zahl} · {zl.mit_vorzeichen(korrektur)}"
-    return f"{zahl} · {zl.atem_text(z.atem_rate, z.atem_phase)} · Prototyp"
+    return f"{zahl} · {atem_zeile(z)} · Prototyp"
 
 
 def klein_text(z: ZaehlBaustein) -> str:
@@ -365,12 +371,12 @@ def atem_phasen_live(state: Any) -> list[tuple[float, str]]:
 
 
 def atem_kopf_text(state: Any) -> str:
-    """Für den Kopf des Live-Vollbilds: „Atmung 12/min ▲“ — leer ohne Atem-Lauf oder
-    solange keine Proben kamen."""
+    """Für den Kopf des Live-Vollbilds: „Atmung 12/min ▲ · Spanne 58 ms“ (die Spanne nur mit
+    Aufnahme, B2) — leer ohne Atem-Lauf oder solange keine Proben kamen."""
     z = atem_teil(state)
     if z is None or z.atem_sensor is None:
         return ""
-    return f"Atmung {zl.atem_text(z.atem_rate, z.atem_phase)}"
+    return f"Atmung {atem_zeile(z)}"
 
 
 def atmung_protokoll(state: Any) -> Callable[[list[dict[str, Any]]], dict[str, Any] | None]:
@@ -485,6 +491,7 @@ __all__ = [
     "atem_rate_text",
     "atem_teil",
     "atem_text",
+    "atem_zeile",
     "atemzuege",
     "atmung_protokoll",
     "bereitgestellt",

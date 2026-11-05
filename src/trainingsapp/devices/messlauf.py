@@ -93,7 +93,8 @@ from .profiles import GeraeteProfil, profil_fuer_namen
 PROBE_S = 30.0
 #: Längste Dauer des Vorabtests im Sensorblatt (s)
 VORABTEST_S = 20.0
-#: So viele ACC-Rahmen hält der Puffer (200 Hz, 36 Proben je Rahmen: gut 10 min)
+#: So viele ACC-Rahmen hält der Puffer (200 Hz, 36 Proben je Rahmen: gut 10 min) — ein Satz,
+#: der länger läuft, endet (`devices.zaehlen`: ``zu_lang``), statt still zu wenig zu zählen
 ACC_PUFFER_RAHMEN = 3600
 #: Rate, wenn die Quelle keine nennt (Vorgabe des H10 in hrv-core)
 ACC_RATE_VORGABE_HZ = 200
@@ -379,9 +380,14 @@ class Messlauf:
         self._acc_versatz: float | None = None
         #: Ankunft des letzten ACC-Rahmens (Uhr der Quelle) — ``None``: noch keiner
         self.acc_zuletzt: float | None = None
+        #: Die letzte Probe, die aus dem vollen Puffer fiel (Uhr der Quelle) — ``None``: keine,
+        #: seit er zuletzt leer war. Ein Fenster, das davor beginnt, ist nicht mehr ganz da
+        self.acc_verloren_bis: float | None = None
         #: Die Ströme der Quelle werden eines nach dem anderen umgeschaltet (der Steuerpunkt
         #: beantwortet ein Kommando nach dem anderen) — jeder Auftrag stellt den neuesten Stand
         self._stroeme_lock = asyncio.Lock()
+        #: Nummer des jüngsten Auftrags (`_stroeme_anwenden`) — nur er räumt danach auf
+        self._stroeme_nr = 0
         #: Vorgemerkt im Sensorblatt: (EKG, Beschleunigung, Kopf) — beginnt mit der Aufnahme
         self._diagnose_wunsch: tuple[bool, tuple[int, int] | None, dict[str, Any]] | None = None
         self._probe_task: asyncio.Task[None] | None = None
@@ -400,6 +406,9 @@ class Messlauf:
         self._diagnose_marken: list[tuple[float, str, int]] = []
         #: Beginn des laufenden Satzes (Uhr): Start der Übung bzw. der letzte eingetragene Satz
         self._satz_beginn: float | None = None
+        #: Sätze, die der Zähl-Teil schon verglich und die eingetragen werden: (Kurzcode,
+        #: Wert) — ihre Notiz zum Satz (`ui.uebung_lauf`) vergleicht nicht noch einmal
+        self._gezaehlt_verglichen: deque[tuple[str | None, int]] = deque(maxlen=32)
         #: Wer den Vergleich nach dem Satz zeigt (Oberfläche) — Fehler darin stoppen nichts
         self.diagnose_satz_beobachter: Callable[[dict[str, Any]], None] | None = None
         #: Der letzte Vergleich (Übung, Satz, Marken, Sensor, Korrektur, eingetragen)
@@ -788,7 +797,8 @@ class Messlauf:
                     self.mitschnitt.kontext(was, t=round((self.start_mono + x) * 1e9), **felder)
                     if was == "uebung_start":
                         self._satz_beginn = self.start_mono + x
-                    elif was == "satz":
+                        self._gezaehlt_verglichen.clear()
+                    elif was == "satz" and not self._schon_verglichen(felder):
                         self._satz_vergleichen(felder, self.start_mono + x)
         return eintrag
 
@@ -1346,6 +1356,7 @@ class Messlauf:
         self._acc_puffer.clear()
         self._acc_versatz = None
         self.acc_zuletzt = None
+        self.acc_verloren_bis = None
 
     def _stroeme_anwenden(self) -> asyncio.Task[None] | None:
         """Die Ströme der Quelle auf den neuesten Stand bringen — ein Auftrag im Hintergrund
@@ -1353,15 +1364,22 @@ class Messlauf:
         if getattr(self.quelle, "stroeme_setzen", None) is None:
             return None
         with contextlib.suppress(RuntimeError):  # ohne Ereignisschleife
-            self._stroeme_task = asyncio.get_running_loop().create_task(
-                self._stroeme_stellen(), name="messlauf-stroeme"
+            loop = asyncio.get_running_loop()
+            self._stroeme_nr += 1
+            self._stroeme_task = loop.create_task(
+                self._stroeme_stellen(self._stroeme_nr), name="messlauf-stroeme"
             )
             return self._stroeme_task
         return None
 
-    async def _stroeme_stellen(self) -> None:
+    async def _stroeme_stellen(self, nr: int = 0) -> None:
         """Unter dem Schloss: EKG und Beschleunigung, wie sie *jetzt* sein sollen — ein
-        späterer Auftrag findet so nichts Veraltetes vor. Wirft nie."""
+        späterer Auftrag findet so nichts Veraltetes vor. Aufgeräumt (der Stand von vorher
+        gilt als wiederhergestellt, das EKG gehört wieder der Quelle) wird nur nach dem
+        jüngsten Auftrag (``nr``): Kam während ``stroeme_setzen`` ein neuer (das Sensorblatt
+        geht zu, „Zählen abbrechen“ gleich nach dem Tipp), stellt er den neuesten Stand — mit
+        dem, was er zurückstellen soll. Räumte der ältere auf, läse der neue den Stand, den
+        der ältere eben gesetzt hat, und ließe EKG und Beschleunigung an. Wirft nie."""
         async with self._stroeme_lock:
             setzen = getattr(self.quelle, "stroeme_setzen", None)
             if setzen is None:
@@ -1372,6 +1390,8 @@ class Messlauf:
                 ekg = bool(getattr(quelle, "ekg_wunsch", False))
             with contextlib.suppress(Exception):
                 await setzen(ekg=ekg, acc=self.acc_soll)
+            if nr and nr != self._stroeme_nr:
+                return  # ein jüngerer Auftrag wartet — er räumt auf
             if not self._acc_anforderungen:
                 self._acc_vorher = _UNGESETZT  # wiederhergestellt
             if self._diagnose_vorher is None:
@@ -1408,6 +1428,9 @@ class Messlauf:
         else:
             self._acc_versatz = min(self._acc_versatz, verspaetung)
         werte = np.asarray(proben, dtype=np.float64).reshape(-1, 3)
+        if self._acc_puffer.maxlen and len(self._acc_puffer) >= self._acc_puffer.maxlen:
+            # Voll: der älteste Rahmen fällt heraus — ein Fenster bis zu ihm ist nicht mehr ganz
+            self.acc_verloren_bis = float(self._acc_puffer[0][4])
         self._acc_puffer.append(
             (t_capture, int(zeitstempel_ns), rate, werte, geraet_s + self._acc_versatz)
         )
@@ -1472,6 +1495,17 @@ class Messlauf:
         return reihe.xyz, reihe.rate_hz, float(reihe.t[0])
 
     # -- Zähler-Prototyp nach dem Satz (Stufe 8) ----------------------------------------
+
+    def _schon_verglichen(self, felder: dict[str, Any]) -> bool:
+        """Ist die Notiz zum Satz die eines Satzes, den der Zähl-Teil schon verglich
+        (`zaehlsatz_vergleichen`)? Dann kein zweiter Vergleich — sonst ersetzte einer ohne
+        Marken und ohne Sensor den richtigen. Nimmt ihn aus der Liste."""
+        code, wert = felder.get("uebung_id"), felder.get("wert")
+        for i, (c, w) in enumerate(self._gezaehlt_verglichen):
+            if w == wert and (c is None or code is None or c == code):
+                del self._gezaehlt_verglichen[i]
+                return True
+        return False
 
     def _satz_vergleichen(self, felder: dict[str, Any], t_satz: float) -> None:
         """Nach einem eingetragenen Satz: Marken, Sensor (Prototyp), Korrektur und Eingabe
@@ -1538,12 +1572,14 @@ class Messlauf:
         sensor: int | None,
         korrektur: int,
         eingetragen: int | None,
+        uebung_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Nach einem Satz, den der Sensor zählte (A2, Plan Beschleunigung §6): die Tipps der
         Marken-Leiste in [von, bis] (Uhr der Quelle) neben Sensor, Korrektur und dem, was
         eingetragen wird — wie `_satz_vergleichen` nach einem Satz von Hand, an denselben
         Beobachter. Der Zähl-Teil schreibt seine Kontextzeilen selbst (``zaehler``,
-        ``zaehlung``). Nur im Diagnosemodus; sonst ``None``."""
+        ``zaehlung``). Nur im Diagnosemodus; sonst ``None``. ``uebung_id``: der Kurzcode — die
+        Notiz zum Satz, die beim Eintragen folgt, vergleicht dann nicht noch einmal."""
         if not self.diagnose_aktiv or self.mitschnitt is None:
             return None
         marken = sum(
@@ -1561,6 +1597,8 @@ class Messlauf:
             "art": "prototyp",
         }
         self.letzter_satz = vergleich
+        if eingetragen is not None:
+            self._gezaehlt_verglichen.append((uebung_id, int(eingetragen)))
         if self._satz_beginn is not None and self._satz_beginn < bis:
             self._satz_beginn = bis  # ein Satz von Hand danach zählt diese Tipps nicht noch einmal
         if self.diagnose_satz_beobachter is not None:
@@ -1669,6 +1707,7 @@ class Messlauf:
         # ein laufendes Zählen braucht sie weiter
         self._diagnose_marken.clear()
         self._satz_beginn = None
+        self._gezaehlt_verglichen.clear()
         if self._probe_task is not None:
             self._probe_task.cancel()
             self._probe_task = None

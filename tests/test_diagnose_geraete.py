@@ -424,3 +424,43 @@ async def test_nach_dem_satz_marken_zaehler_und_eingabe(tmp_path) -> None:
     assert quelle.acc_beobachter is None
     lauf.aufnahme = None
     await lauf.trennen()
+
+
+async def test_zurueck_mitten_im_umschalten_stellt_den_stand_von_vorher_her(tmp_path) -> None:
+    """Das Schloss arbeitet die Aufträge nacheinander ab, jeder mit dem neuesten Stand — auch
+    wenn ein Zurück kommt, während der ältere Auftrag noch auf die Quelle wartet (ACC-Start,
+    PMD-Pause). Vorher räumte der ältere danach auf und machte dem jüngeren das Ziel zunichte:
+    Blatt des Vorabtests sofort zu → EKG und 200 Hz liefen weiter (ohne ECG_STOP/ACC_STOP);
+    „Zählen abbrechen“ gleich nach „Wdh. zählen“ → 50 Hz ohne Anforderung."""
+    zeit = FakeZeit()
+    lauf, quelle, innen = await _messlauf(tmp_path, zeit)
+    vorher = len(_writes(innen))
+    test = asyncio.create_task(lauf.vorabtest_beginnen(ekg=True, acc=(200, 8)))
+    await _ruhe()
+    zu = asyncio.create_task(lauf.vorabtest_abbrechen())  # das Blatt geht sofort zu
+    await zeit.vorspulen(5.0)
+    await asyncio.wait_for(test, 2)
+    await asyncio.wait_for(zu, 2)
+    await zeit.vorspulen(2.0)
+    assert (quelle.ekg_wunsch, quelle.acc_wunsch) == (False, None)  # vorher: (True, (200, 8))
+    assert not quelle.ekg_modus and not quelle.acc_modus
+    assert _writes(innen)[vorher:][-2:] == [pmd.ECG_STOP, pmd.ACC_STOP]
+
+    # Dasselbe beim Zählen: angefordert und gleich wieder freigegeben
+    vorher = len(_writes(innen))
+    lauf.acc_anfordern("zaehlen", 50, 8)
+    await _ruhe()
+    lauf.acc_freigeben("zaehlen")
+    await zeit.vorspulen(3.0)
+    await _ruhe()
+    assert lauf.acc_anforderungen == {}
+    assert quelle.acc_wunsch is None and not quelle.acc_modus  # vorher: (50, 8), an
+    assert _writes(innen)[vorher:][-1] == pmd.ACC_STOP
+    # Danach gilt wieder, was die Quelle will — ein neuer Zweck merkt sich „aus“
+    lauf.acc_anfordern("zaehlen", 50, 8)
+    await zeit.vorspulen(2.0)
+    assert quelle.acc_modus
+    lauf.acc_freigeben("zaehlen")
+    await zeit.vorspulen(2.0)
+    assert quelle.acc_wunsch is None and not quelle.acc_modus
+    await quelle.disconnect()

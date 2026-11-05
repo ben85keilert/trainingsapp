@@ -18,7 +18,9 @@ Laufleiste und der Reiter „Einheit“ ihn ohne Sonderweg.
   Ereignisse der Einheit (`beobachten`). „Anhalten“ der Uhr hält auch das Zählen an: die Zeit
   dazwischen zählt weder im Satz noch für „keine Bewegung“.
 - **Live:** jede Sekunde (`ZAEHL_TAKT_S`; der Takt der Einheit ist 0,25 s) zählt der
-  Prototyp ``hrv_core.prototyp.wiederholungen.zaehlen`` das Satzfenster neu. Unter 2 s Daten
+  Prototyp ``hrv_core.prototyp.wiederholungen.zaehlen`` das Satzfenster neu — dauert das
+  länger als `ZIEL_MS`, seltener (`takt_nach`, bis `MAX_TAKT_S`). Läuft ein Satz länger, als
+  der Puffer hält, endet er (``zu_lang``), statt still nur sein Ende zu zählen. Unter 2 s Daten
   oder ohne erkennbare Periode steht dort „…“, bis die ersten Proben kommen „Sensor startet …“.
   Wechselt die Rate mitten im Satz (Diagnosemodus, Vorabtest), zählt alles in der jüngsten
   Rate (`Messlauf.acc_reihe` taktet um); die Zeit jeder Probe kommt mit, auch über eine Lücke
@@ -26,16 +28,22 @@ Laufleiste und der Reiter „Einheit“ ihn ohne Sonderweg.
   ``tempo`` neben einer Uhr auf ``time.monotonic``), rechnet `_auf_quelle` um.
 - **Korrektur** ±1 je Satz (`korrigieren`): angezeigt und eingetragen wird Sensor plus
   Korrektur, nie weniger als 0 (`core.zaehlen.anzeige`). Ein abgeschlossener Satz bleibt
-  korrigierbar, bis der nächste beginnt oder der Lauf endet — erst dann steht seine
-  ``zaehlung`` in der Zeitleiste.
+  korrigierbar, bis der nächste beginnt oder der Lauf endet.
+- **Gegen den Absturz** steht ein Satz als ``zaehlung`` in der Zeitleiste, sobald er endet —
+  ein laufender alle `ZWISCHENSTAND_S`, wenn sich sein Stand änderte, und eine Korrektur in
+  der Pause schreibt ihn neu; es gilt die letzte je Satz (`core.zaehlen_eintrag.zaehlungen`).
+  Stirbt die App, lässt sich so unter „Läufe heute“ nachtragen, was gezählt war, passend zur
+  Zeit der Uhr. Die Kontextzeilen des Mitschnitts kommen einmal, wenn der Satz feststeht.
 - **Ende** (`core.zaehlen.ENDE_*`): „Fertig“ (`fertig`), mit dem Timer (durch oder „Fertig“
   der Uhr) und mit ⏹ (`beenden`) → ``fertig``; „Abbrechen“ und alles, was die Oberfläche
   auslöst (`abbrechen` mit ``abgehakt``, ``andere_uebung`` …); `KEINE_BEWEGUNG_S` ohne neu
   gezählte Wiederholung → ``keine_bewegung``. Bricht der Timer ab, gilt der ganze Lauf als
   abgebrochen (``abbruch``), ebenso, wenn das Gerät getrennt wird (`Messlauf.trennen` nimmt
-  die Anforderung zurück). Nur Atmung: in A1 gibt es noch keinen Atem-Prototyp — der Dienst
-  zeigt „Atmung: Prototyp folgt“ und endet nur von außen. `von_aussen` sagt, ob ein Aufruf
-  (`abbrechen`) das Ende auslöste — dann zeichnet der Aufrufer die Oberfläche neu.
+  die Anforderung zurück, oder ein Funkabriss: nicht mehr „verbunden“) oder `KEINE_DATEN_S`
+  lang keine Beschleunigung kommt (``ohne_daten``). Nur Atmung: in A1 gibt es noch keinen
+  Atem-Prototyp — der Dienst zeigt „Atmung: Prototyp folgt“ und endet nur von außen.
+  `von_aussen` sagt, ob ein Aufruf (`abbrechen`) das Ende auslöste — dann zeichnet der
+  Aufrufer die Oberfläche neu.
 - **Zeitleiste** (Vertrag ``docs/plan_einheit.md`` §4): ``zaehlen/zaehlung`` je Satz,
   ``person/korrektur`` je ±1, ``zaehlen/zaehlen_ende`` mit Grund — Ergebnisse mit Zeiten, keine
   Rohdaten (P123). Eingetragen wird daraus am Ende der Einheit (`core.zaehlen_eintrag`).
@@ -72,6 +80,7 @@ from ..core.zaehlen import (
     ENDE_GRUENDE,
     ENDE_KEINE_BEWEGUNG,
     KEINE_BEWEGUNG_S,
+    KEINE_DATEN_S,
     VORLAGE_AUTO,
     ZAEHLART_ATEM,
     ZAEHLART_WDH,
@@ -87,8 +96,17 @@ from .profiles import GeraeteProfil
 
 #: So oft zählt der Prototyp das Satzfenster neu (s) — der Takt der Einheit ist 0,25 s
 ZAEHL_TAKT_S = 1.0
+#: Ziel je Rechnung (ms, Plan §5.2: die Ereignisschleife trägt auch Bluetooth) — dauert eine
+#: länger, wird seltener gerechnet: je angefangene 20 ms eine Sekunde mehr (`takt_nach`)
+ZIEL_MS = 20.0
+#: … höchstens so selten (s)
+MAX_TAKT_S = 5.0
 #: So viele Sekunden Daten braucht eine Zahl (darunter „…“)
 MIN_DATEN_S = 2.0
+#: So oft steht der Stand eines laufenden Satzes in der Zeitleiste, wenn er sich änderte (s) —
+#: stirbt die App mitten im Satz (Akku, das System beendet sie), bleibt er unter „Läufe
+#: heute“ nachtragbar; es gilt die letzte ``zaehlung`` je Satz
+ZWISCHENSTAND_S = 15.0
 #: Ein Satz, der kürzer lief und nicht korrigiert wurde, war keiner (ein Fehlstart, ein
 #: Abschnitt, der sofort endete) — so kurz zählt der Prototyp ohnehin nicht verlässlich
 MIN_SATZ_S = MIN_MARKE_S
@@ -104,6 +122,18 @@ PHASE_ZAEHLT = "zaehlt"  # der Sensor hat eine Zahl
 PHASE_PAUSE = "pause"  # Pause des Timers oder angehalten
 PHASE_ATMUNG = "atmung"  # nur Atmung: in A1 noch ohne Prototyp
 PHASE_ENDE = "ende"
+
+
+def takt_nach(laufzeit_ms: float) -> float:
+    """Wann nach einer Rechnung, die so lange dauerte, die nächste kommt (s) — der Ausweg aus
+    Plan §5.2 („sonst alle 2 s“): Ein langer Satz (das ganze Fenster jede Sekunde neu, im
+    Diagnosemodus mit 200 Hz) hielte die Schleife sonst jede Sekunde auf.
+
+    >>> [takt_nach(ms) for ms in (2.0, 20.0, 26.0, 57.0, 259.0)]
+    [1.0, 1.0, 2.0, 3.0, 5.0]
+    """
+    stufen = max(1, math.ceil(laufzeit_ms / ZIEL_MS))
+    return min(MAX_TAKT_S, ZAEHL_TAKT_S * stufen)
 
 
 def zaehl_rate(profil: GeraeteProfil | None) -> int:
@@ -142,8 +172,11 @@ class ZaehlSatz:
     ruhe_seit_s: float = 0.0
     #: höchste bisher gezählte Zahl
     hoechst: int = 0
-    #: steht als ``zaehlung`` in der Zeitleiste
+    #: steht fest (der nächste Satz begann oder der Lauf endete) — danach keine Korrektur
+    #: mehr, die Kontextzeilen des Mitschnitts sind geschrieben
     gemeldet: bool = False
+    #: was zuletzt als ``zaehlung`` in die Zeitleiste ging: (Sensor, Korrektur, ``t_s``)
+    geschrieben: tuple[int | None, int, float] | None = None
 
     @property
     def wert(self) -> int:
@@ -221,9 +254,19 @@ class ZaehlBaustein:
         #: der Aufrufer neu (`ui.einheit`); ``False``: es endete von selbst (keine Bewegung,
         #: Timer, getrennt)
         self.von_aussen = False
-        #: ob es endete, weil die Verbindung zum Gerät abriss (`Messlauf.trennen`) — Grund
-        #: ``abbruch``; die Meldung „… nicht eingetragen“ nennt es (`ui.einheit`)
+        #: ob es endete, weil die Verbindung zum Gerät abriss (`Messlauf.trennen` oder ein
+        #: Funkabriss, den die Quelle selbst neu verbindet) — Grund ``abbruch``; die Meldung
+        #: „… nicht eingetragen“ nennt es (`ui.einheit`)
         self.getrennt = False
+        #: ob es endete, weil `KEINE_DATEN_S` lang keine Beschleunigung kam — Grund ``abbruch``
+        self.ohne_daten = False
+        #: ob es endete, weil der Satz länger lief, als der Puffer der Beschleunigung hält
+        #: (`Messlauf.acc_verloren_bis`) — Grund ``abbruch``: sein Anfang fehlte, der Prototyp
+        #: zählte nur noch das Ende (lieber eine Lücke als ein falscher Wert); die Zahl davor
+        #: bleibt nachtragbar
+        self.zu_lang = False
+        #: wann nach der letzten Rechnung die nächste kommt (`takt_nach`)
+        self._takt_s = ZAEHL_TAKT_S
         self._uhr: Callable[[], float] = messlauf.uhr
         #: (Uhr der Einheit, Uhr der Quelle) beim Start — für `_auf_quelle`
         self._anker: tuple[float, float] | None = None
@@ -359,15 +402,23 @@ class ZaehlBaustein:
             if self._vorgemerkt is not None:
                 grund, bei = self._vorgemerkt
                 self._enden(bei, grund)
-            elif self._getrennt():
-                # Getrennt (`Messlauf.trennen`): es kommen keine Proben mehr — abgebrochen,
-                # die Wiederholungen bleiben unter „Läufe heute“ nachtragbar
-                self.getrennt = True
-                self._enden(max(t, self._start_s), ENDE_ABBRUCH)
             else:
-                self._rechnen(t)
-                if self._keine_bewegung(t):
+                self._rechnen(t)  # was bis jetzt kam, zählt noch
+                if self.zu_lang:
+                    self._enden(t, ENDE_ABBRUCH)
+                elif self._keine_bewegung(t):
                     self._enden(t, ENDE_KEINE_BEWEGUNG)
+                elif self._getrennt():
+                    # Getrennt (`Messlauf.trennen`, ein Funkabriss): es kommen keine Proben
+                    # mehr — sofort abgebrochen, nicht 60 s später als „keine Bewegung“; die
+                    # Wiederholungen bleiben unter „Läufe heute“ nachtragbar
+                    self.getrennt = True
+                    self._enden(max(t, self._start_s), ENDE_ABBRUCH)
+                elif self._ohne_daten():
+                    # Verbunden, aber keine Beschleunigung: gemessen hat niemand — „keine
+                    # Bewegung“ wäre falsch (die Verity Sense ist nicht erprobt, §4.1)
+                    self.ohne_daten = True
+                    self._enden(t, ENDE_ABBRUCH)
         return self._abholen()
 
     def beenden(self, jetzt: float) -> list[Ereignis]:
@@ -459,6 +510,8 @@ class ZaehlBaustein:
             )
         )
         self._kontext("korrektur", wert=delta, satz=satz.nr, feld=self.feld)
+        if satz is not self._offen and satz.bis_s is not None:
+            self._zaehlung_schreiben(satz, satz.bis_s)  # in der Pause: der Satz neu
         return True
 
     # -- Sätze ---------------------------------------------------------------------------
@@ -478,8 +531,10 @@ class ZaehlBaustein:
         if satz.stuecke and satz.stuecke[-1][1] is None:
             satz.stuecke[-1][1] = t
         satz.bis_s = t
-        if self._fehlstart(satz, t):
+        if self._fehlstart(satz, t) and satz.geschrieben is None:
             self.saetze.remove(satz)  # kein Satz — bekommt auch keine Nummer
+        else:  # was schon in der Zeitleiste steht, bleibt ein Satz
+            self._zaehlung_schreiben(satz, t)  # gleich, nicht erst mit dem nächsten Satz
 
     @staticmethod
     def _fehlstart(satz: ZaehlSatz, t: float) -> bool:
@@ -491,7 +546,11 @@ class ZaehlBaustein:
         nichts gezählt oder war er ein Fehlstart, beginnt er nur neu (Zählen getippt, dann
         die Uhr gestartet)."""
         satz = self._offen
-        if satz is not None and (satz.leer or self._fehlstart(satz, t)):
+        if (
+            satz is not None
+            and satz.geschrieben is None
+            and (satz.leer or self._fehlstart(satz, t))
+        ):
             satz.von_s = satz.ruhe_seit_s = t
             satz.stuecke = [[t, None]]
             satz.zeiten_s = []
@@ -547,11 +606,24 @@ class ZaehlBaustein:
         )
 
     def _getrennt(self) -> bool:
-        """Nahm jemand anders die Anforderung zurück (`Messlauf.trennen`)?"""
+        """Nahm jemand anders die Anforderung zurück (`Messlauf.trennen`) — oder riss die
+        Verbindung ab (die Quelle verbindet neu, Status nicht mehr „verbunden“)?"""
+        if not self.bereit:
+            return True
         anforderungen = getattr(self.messlauf, "acc_anforderungen", None)
         return (
             isinstance(anforderungen, dict) and not self._freigegeben and ZWECK not in anforderungen
         )
+
+    def _ohne_daten(self) -> bool:
+        """Kam `KEINE_DATEN_S` lang kein Rahmen der Beschleunigung (seit dem Tipp bzw. seit
+        dem letzten)? Nur beim Zählen der Wiederholungen — „Anhalten“ und Pausen des Timers
+        halten den Strom nicht an."""
+        if not self.wdh or self._anker is None:
+            return False
+        zuletzt = self.messlauf.acc_zuletzt  # Uhr der Quelle
+        seit = self._anker[1] if zuletzt is None else max(zuletzt, self._anker[1])
+        return self.messlauf.uhr() - seit >= KEINE_DATEN_S
 
     # -- Uhren ---------------------------------------------------------------------------
 
@@ -586,7 +658,7 @@ class ZaehlBaustein:
         satz = self._offen
         if satz is None or self._angehalten_seit is not None or not self.wdh or self._t0 is None:
             return
-        if not erzwingen and self._gerechnet is not None and t - self._gerechnet < ZAEHL_TAKT_S:
+        if not erzwingen and self._gerechnet is not None and t - self._gerechnet < self._takt_s:
             return
         self._gerechnet = t
         beginn = time.perf_counter()
@@ -594,6 +666,21 @@ class ZaehlBaustein:
             self._zaehlen(satz, t)
         finally:
             self.laufzeit_ms = (time.perf_counter() - beginn) * 1000.0
+            self._takt_s = takt_nach(self.laufzeit_ms)
+        self._zwischenstand(satz, t)
+
+    def _zwischenstand(self, satz: ZaehlSatz, t: float) -> None:
+        """Den laufenden Satz in die Zeitleiste, wenn sich sein Stand änderte und seit dem
+        letzten Mal `ZWISCHENSTAND_S` vergingen (ab seinem Beginn)."""
+        if satz.leer or self._fehlstart(satz, t):
+            return
+        alt = satz.geschrieben
+        seit = alt[2] if alt is not None else satz.von_s
+        if t - seit < ZWISCHENSTAND_S or (
+            alt is not None and alt[:2] == (satz.sensor, satz.korrektur)
+        ):
+            return
+        self._zaehlung_schreiben(satz, t)
 
     def _zaehlen(self, satz: ZaehlSatz, t: float) -> None:
         assert self._t0 is not None
@@ -601,6 +688,13 @@ class ZaehlBaustein:
         # Diagnose beginnt), taktet der Messlauf um — sonst fehlten diese Wiederholungen
         rate = getattr(self.messlauf, "acc_rate_hz", None)
         if not rate:
+            return
+        anfang = next((von for von, _ in satz.stuecke if von is not None), None)
+        verloren = getattr(self.messlauf, "acc_verloren_bis", None)
+        if anfang is not None and verloren is not None and verloren >= self._auf_quelle(anfang):
+            # Der Anfang des Satzes ist aus dem vollen Puffer gefallen: neu gezählt käme zu
+            # wenig heraus — die letzte Zahl bleibt, und der Satz endet (`takt`)
+            self.zu_lang = True
             return
         stuecke = []
         for von, bis in satz.stuecke:
@@ -681,33 +775,46 @@ class ZaehlBaustein:
                     sensor=satz.sensor,
                     korrektur=satz.korrektur,
                     eingetragen=eingetragen,
+                    uebung_id=kurzcode(self.kontext.uebung_id),
                 )
 
+    def _zaehlung_schreiben(self, satz: ZaehlSatz, t_s: float) -> None:
+        """Den Satz als ``zaehlung`` in die Zeitleiste — wenn sich seit dem letzten Mal etwas
+        änderte (Stand oder Stelle). ``t_s``: sein Ende bzw. jetzt (Zwischenstand)."""
+        if not self.wdh:
+            return
+        stand = (satz.sensor, satz.korrektur, round(t_s, 3))
+        if satz.geschrieben == stand:
+            return
+        satz.geschrieben = stand
+        daten: dict[str, Any] = {
+            "satz": satz.nr,
+            "zaehlart": self.zaehlart,
+            "sensor": satz.sensor,
+            "korrektur": satz.korrektur,
+            "wert": satz.wert,
+            "vorlage": self.vorlage,
+            "zeiten_s": list(satz.zeiten_s),
+            "prototyp": PROTOTYP,
+        }
+        if self.feld:
+            daten["feld"] = self.feld
+        if self.geraet:
+            daten["geraet"] = self.geraet
+        self._neu.append(
+            Ereignis(t_s, "zaehlen", "zaehlung", f"{self.name}: {satz.wert} Wdh.", daten)
+        )
+
     def _melden(self) -> None:
-        """Abgeschlossene Sätze in die Zeitleiste (``zaehlung``) — und in den Mitschnitt."""
+        """Abgeschlossene Sätze stehen fest: zuletzt in die Zeitleiste (``zaehlung``, nur was
+        sich änderte) — und einmal in den Mitschnitt."""
         for satz in self.saetze:
             if satz.gemeldet or satz.bis_s is None:
                 continue
             satz.gemeldet = True
             if not self.wdh:
                 continue
-            daten: dict[str, Any] = {
-                "satz": satz.nr,
-                "zaehlart": self.zaehlart,
-                "sensor": satz.sensor,
-                "korrektur": satz.korrektur,
-                "wert": satz.wert,
-                "vorlage": self.vorlage,
-                "zeiten_s": satz.zeiten_s,
-                "prototyp": PROTOTYP,
-            }
-            if self.feld:
-                daten["feld"] = self.feld
-            if self.geraet:
-                daten["geraet"] = self.geraet
-            self._neu.append(
-                Ereignis(satz.bis_s, "zaehlen", "zaehlung", f"{self.name}: {satz.wert} Wdh.", daten)
-            )
+            self._zaehlung_schreiben(satz, satz.bis_s)
             t_ns = self._quelle_ns(satz.bis_s)
             if satz.sensor is not None:
                 self._kontext(
@@ -771,6 +878,7 @@ class ZaehlBaustein:
 
 
 __all__ = [
+    "MAX_TAKT_S",
     "MIN_DATEN_S",
     "MIN_SATZ_S",
     "PHASE_ATMUNG",
@@ -781,9 +889,12 @@ __all__ = [
     "PHASE_ZAEHLT",
     "PROTOTYP",
     "ZAEHL_TAKT_S",
+    "ZIEL_MS",
     "ZWECK",
+    "ZWISCHENSTAND_S",
     "Gezaehlt",
     "ZaehlBaustein",
     "ZaehlSatz",
+    "takt_nach",
     "zaehl_rate",
 ]

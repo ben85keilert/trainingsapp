@@ -954,3 +954,71 @@ async def test_von_selbst_beendet_zeigt_die_meldung_einmal(umgebung) -> None:
     assert len(seite.dialoge) == vorher and state.zaehl_meldung is not None
     assert zaehlen.meldung_zeigen(seite, state) and state.zaehl_meldung is None
     assert seite.dialoge[-1].content.value.endswith("— 60 s ohne Bewegung")
+
+
+# -- Befunde der dritten Runde (5.11.2026) -----------------------------------------------------
+
+
+async def test_waehrend_der_sensor_zaehlt_keine_menge_von_hand(umgebung, monkeypatch) -> None:
+    """P122 (Plan §4.4): Mit dem Knopf zählt der Sensor, die Person korrigiert höchstens mit
+    ±1. Solange er in „Wdh.“ zählt, hat die Zeile weder „+10“ noch den eigenen Wert, und ein
+    Knopf aus der Ansicht von vorher hängt keinen zweiten Satz an — vorher stand nach „+10“
+    und „Fertig“ ``[10.0, 9]`` für einen Satz im Eintrag. Nach dem Zählen ist alles wieder
+    da, und im Diagnosemodus zählen beide (Prüfung, Abschnitt 6)."""
+    state, uhr, gurt = umgebung
+    seite = Seite()
+    u = _kniebeuge(state)
+    vorher = _ansicht(seite, state, u)
+    plus_zehn = _knopf(vorher, "+10")
+    _knopf(vorher, "Wdh. zählen").on_click()
+    await _sekunden(state, uhr, gurt, 20)
+    ansicht = _ansicht(seite, state, u)
+    assert not _knoepfe(ansicht, "+10")  # vorher: ein Knopf „+10“ neben der Zahl
+    assert "Der Sensor zählt — korrigieren mit −1/+1" in _texte(ansicht)
+    assert _flaechen(ansicht, MEHR)  # ±1 bleibt
+    plus_zehn.on_click()  # ein Knopf von vor dem Tipp
+    assert _eintraege(state) == []
+    z = _zaehl_teil(state)
+    assert z.aktiv
+    _knopf(ansicht, "Fertig").on_click()
+    await _bis_vorbei(state, uhr, gurt)
+    (eintrag,) = _eintraege(state)
+    assert eintrag.result == {"reps": [z.wert]}  # vorher: [10.0, z.wert]
+    assert _knoepfe(_ansicht(seite, state, u), "+10")  # nach dem Zählen wieder da
+
+    # Im Diagnosemodus zählen Person und Sensor zugleich (Prüfung)
+    monkeypatch.setattr(Messlauf, "diagnose_aktiv", property(lambda self: True))
+    _knopf(_ansicht(seite, state, u), "Wdh. zählen").on_click()
+    await _sekunden(state, uhr, gurt, 5)
+    assert _knoepfe(_ansicht(seite, state, u), "+10")
+    uebung_lauf.zaehlen_beenden(state, u.id, None, ENDE_ABBRUCH)
+    await _bis_vorbei(state, uhr, gurt)
+
+
+async def test_im_plan_ablauf_gibt_es_keinen_knopf_der_nie_zaehlt(umgebung) -> None:
+    """Im Plan-Ablauf zählt der Sensor noch nicht (Plan §13) — darum steht dort kein Knopf
+    „Wdh. zählen“, der nur „Es läuft schon eine Einheit“ meldete; der Start sagt, warum.
+    Nach dem Ablauf ist der Knopf wieder da."""
+    from trainingsapp.ui import plan_ablauf
+
+    state, uhr, gurt = umgebung
+    seite = Seite()
+    u = _kniebeuge(state)
+    plan = Plan(name="Beine", subject_id=state.profil.id, items=[PlanItem(exercise_id=u.id)])
+    state.plaene.speichern(plan)
+    plan = state.plaene.laden(plan.id)
+    item = plan.items[0]
+    assert _knoepfe(plan_view(seite, state, plan), "Wdh. zählen")
+    e = plan_ablauf.starten(seite, state, plan)
+    await _sekunden(state, uhr, gurt, 3)
+    assert e.laeuft and zaehl_stand.im_plan_ablauf(state)
+    assert not zaehl_stand.sichtbar(state, u, item=item)
+    assert not _knoepfe(plan_view(seite, state, plan), "Wdh. zählen")  # vorher: ein Knopf
+    with pytest.raises(RuntimeError, match="Im Plan-Ablauf zählt der Sensor noch nicht"):
+        uebung_lauf.zaehlen_starten(
+            seite, state, uebung_lauf.kontext_fuer(u, plan, item), uebung=u, item=item
+        )
+    assert e.teil("zaehlen") is None and state.messlauf.acc_anforderungen == {}
+    einheit_ui.alle_beenden(state)
+    await _bis_vorbei(state, uhr, gurt)
+    assert _knoepfe(plan_view(seite, state, plan), "Wdh. zählen")

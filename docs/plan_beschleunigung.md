@@ -186,9 +186,13 @@ Wiederholungen noch fehlen, mit „Eintragen“ (`components/laeufe_heute.py`, d
 zeigt der Start, der das Zählen beendete, oder der nächste Aufbau der Ansicht, nie über einem
 Dialog. Auf „Heute“ hakt der Chip mit den gezählten Wiederholungen ab, ohne „Rückgängig“.
 Den Knopf gibt es in einer Planübung nur, wenn sie ein Wiederholungsfeld anbietet (P79: keiner =
-nur abhaken; auch eines, das nur der Plan hat). Endet nur das Zählen und die Uhr läuft weiter,
-bleibt dort die Zahl ohne −1/+1 stehen. Die Zählläufe von heute, deren Wiederholungen fehlen,
-lassen sich auch ohne verbundenes Gerät eintragen.
+nur abhaken; auch eines, das nur der Plan hat) — und Uhr und Zählen kommen nur zusammen, wenn
+die (Plan-)Übung der Uhr eines anbietet, denn eingetragen wird, wo die Uhr läuft; sonst macht
+das Zählen Platz wie für eine andere Übung. Endet nur das Zählen und die Uhr läuft weiter,
+bleibt dort die Zahl ohne −1/+1 stehen; „Eintragen“ der Meldung trägt dann nur die
+Wiederholungen ein, die Zeit kommt mit dem Ende der Uhr. Solange der Sensor in ein Feld zählt,
+hat dessen Zeile weder Chips noch eigenen Wert (4.4; im Diagnosemodus beides). Die Zählläufe
+von heute, deren Wiederholungen fehlen, lassen sich auch ohne verbundenes Gerät eintragen.
 
 ### 4.3 Ablauf
 
@@ -221,7 +225,9 @@ lassen sich auch ohne verbundenes Gerät eintragen.
    | Eine andere Übung startet (ihr Zählen, ihre Uhr, ihr Timer) | abgebrochen wie oben; dazu 5 s lang die Meldung „Kniebeuge · 12 Wdh. nicht eingetragen“ mit „Eintragen“ |
    | **Keine Bewegung:** 60 s ohne gezählte Wiederholung (Ben: „evtl. mit Timer“) | abgebrochen wie oben; dazu die Meldung „Kniebeuge · 12 Wdh. nicht eingetragen — 60 s ohne Bewegung“ (5 s, „Eintragen“). Die 60 s sind ein Startwert; reicht das bei langen Pausen im Satz nicht, wird er einstellbar |
    | Nur Atmung: das Gerät liefert 2 min lang keinen erkennbaren Atemzug (abgelegt, verrutscht) | abgebrochen wie oben. „Keine Bewegung“ gilt hier nicht, denn bei einer Atemübung ist Stille gewollt |
-   | Das Gerät wird getrennt (Umsetzung A1) | abgebrochen wie oben, sofort, mit dem Grund `abbruch` — nicht erst 60 s später als „keine Bewegung“; die Meldung endet auf „— Sensor getrennt“ |
+   | Das Gerät wird getrennt (Umsetzung A1), auch ein Funkabriss, den die Quelle selbst neu verbindet | abgebrochen wie oben, sofort, mit dem Grund `abbruch` — nicht erst 60 s später als „keine Bewegung“; die Meldung endet auf „— Sensor getrennt“ |
+   | Verbunden, aber 15 s keine Beschleunigung (`KEINE_DATEN_S`; abgelehnt, nicht erprobt) | abgebrochen wie oben (`abbruch`), „— keine Daten vom Sensor“ |
+   | Der Satz läuft länger, als der Puffer hält (gut 10 min, `ACC_PUFFER_RAHMEN`) | abgebrochen wie oben (`abbruch`) mit der letzten ganzen Zahl, „— Satz zu lang für den Sensor“ — sonst zählte der Prototyp still nur das Ende |
 
    Abgehakt wird auch mit einem Chip, der einen Wert einträgt (Zeit, Strecke, Seite): Der Wert
    kommt zu den Wiederholungen in denselben Eintrag, der dann schließt — nicht noch das Ziel.
@@ -272,8 +278,11 @@ Ist „Atmung“ an, erfasst derselbe Dienst die Atemzüge (ab A3; das braucht
   sendet (`PolarQuelle.acc_gestartet`), nicht der neue Wunsch — bis zum Neustart kommen noch
   Rahmen der alten. Ein Fenster über einen Wechsel kommt in der jüngsten Rate: die übrigen
   Rahmen umgetaktet (`Messlauf.acc_reihe`, `umtakten`; herunter vorher gemittelt), nicht
-  weggelassen, mit der Zeit jeder Probe — auch über eine Lücke im Strom hinweg. Statt eines
-  Beobachters gibt es eine Liste, damit Mitschnitt und Zähler nicht um den Platz streiten.
+  weggelassen, mit der Zeit jeder Probe — auch über eine Lücke im Strom hinweg. Umsetzung A1:
+  ein Beobachter der Quelle (`Messlauf._acc_empfangen`) füllt den gemeinsamen Puffer, die
+  Abnehmer melden sich über `acc_anfordern` an; den Mitschnitt schreibt der Transport
+  (`devices/mitschnitt.MitschnittTransport`) aus den Rohbytes — so streitet niemand um den
+  Platz, eine Liste von Beobachtern braucht es nicht.
   **Gespeichert wird aus dem Puffer im Alltag nichts** (P123).
 - Der Simulator (`devices/simulated.py`) bekommt eine synthetische Beschleunigung:
   Wiederholungen als Sinus mit Streuung, dazu Atmung und Rauschen. Sie dient den Tests und der
@@ -305,9 +314,12 @@ Ist „Atmung“ an, erfasst derselbe Dienst die Atemzüge (ab A3; das braucht
 
 - **Zeitleiste** (Vertrag `docs/plan_einheit.md` §4, **zuerst** dort eintragen): Teil und
   Quelle `zaehlen` mit drei neuen Arten.
-  - `zaehlung` steht einmal je Satz, mit `satz`, `art` (wdh oder atem), `sensor`, `korrektur`,
-    `wert`, `feld`, `vorlage`, `zeiten_s` (die gezählten Umkehrpunkte), `geraet` (Profil, von
-    dem die Beschleunigung kam) und `prototyp` (Modul und hrv-core-Version).
+  - `zaehlung` steht je Satz, mit `satz`, `zaehlart` (wdh oder atem — `art` ist ein Feld des
+    Ereignisses), `sensor`, `korrektur`, `wert`, `feld`, `vorlage`, `zeiten_s` (die gezählten
+    Umkehrpunkte), `geraet` (Profil, von dem die Beschleunigung kam) und `prototyp` (Modul und
+    hrv-core-Version). Umsetzung A1, gegen den Absturz: Ein Satz steht da, sobald er endet, ein
+    laufender alle 15 s als Zwischenstand, wenn er sich änderte, und eine Korrektur in der
+    Pause schreibt ihn neu — es gilt die letzte je Satz (`core.zaehlen_eintrag.zaehlungen`).
   - `korrektur` kommt von der Quelle `person`, mit `delta` (±1) und `satz`.
   - `zaehlen_ende` trägt den Grund: `fertig`, `abgehakt`, `abbruch`, `andere_uebung`,
     `keine_bewegung`, `kein_atem`.
@@ -317,7 +329,8 @@ Ist „Atmung“ an, erfasst derselbe Dienst die Atemzüge (ab A3; das braucht
   je Satz aus den `zaehlung`-Ereignissen; `lauf_eintragen` nimmt `reps` mit. Ein abgebrochener
   Zähllauf lässt sich unter „Läufe heute“ nachträglich eintragen.
 - **Messdatei:** In die Notizen kommt nichts Neues; die Notiz zum Satz entsteht wie bisher beim
-  Eintragen, eine Marke je Wiederholung gibt es nicht. Die Atemphasen kommen als Ergebnis neben
+  Eintragen (Umsetzung A1: `person/leistung` wie nach einem Chip, an der Stelle, an der der Satz
+  endete), eine Marke je Wiederholung gibt es nicht. Die Atemphasen kommen als Ergebnis neben
   die Messdatei (Abschnitt 8).
 - **Diagnosemodus:** Zusätzlich stehen `zaehlung` und `korrektur` als Kontextzeilen im
   Mitschnitt. Damit liegen Sensor, Korrektur, die Tipps der Leiste und die Rohdaten auf einer
@@ -580,9 +593,14 @@ dazu Migration 037 und die Paket-Rundreise in `test_repositories.py`, `test_pake
   zählt der Prototyp jede Sekunde das ganze Satzfenster neu.
 - **A6** die Karte in „Im Plan einstellen“ und praxis_gui. Die Planübung folgt der Übung;
   den Knopf gibt es in einer Planübung nur, wenn sie ein Wiederholungsfeld anbietet.
+- **Zählen im Plan-Ablauf** (4.3 Punkt 6, „automatisch weiter“): Der Ablauf trägt je Übung
+  selbst ein (`ui.plan_ablauf.nach_der_uebung`); solange er läuft, gibt es keinen Knopf
+  (`zaehl_stand.im_plan_ablauf`), der Start sagt „Im Plan-Ablauf zählt der Sensor noch nicht“.
 
 **Nicht am Gerät geprüft:** Laufzeit je Rechnung am Handy (Ziel unter 20 ms; am Rechner etwa
-2–11 ms), STOP/START der ACC beim Ratenwechsel am echten H10 und an der Verity Sense (nur gegen
+2–11 ms bei kurzen Sätzen, bei 10 min mit 200 Hz bis gut 250 ms — dann rechnet der Teil seltener,
+bis alle 5 s, `devices.zaehlen.takt_nach`; eine Rechnung selbst hält die Schleife so lange auf),
+STOP/START der ACC beim Ratenwechsel am echten H10 und an der Verity Sense (nur gegen
 den Fake-Transport), Größe der Flächen ±1 und die Breite der Zählzeile, die Meldung nach einem
 Blatt. Ob das Umtakten 200 → 50 Hz den Prototyp verfälscht, prüft hrv-research an den
 200-Hz-Mitschnitten.
@@ -626,3 +644,32 @@ ohne die Änderung scheitert):
   Die App liest weiter tolerant. Test:
   `test_paket_werkzeug.py::test_pruefen_meldet_unsinn_in_beschleunigung`, Doctests in
   `core/zaehlen.py`.
+
+**Dritte Prüfrunde** (5.11.2026; jede Korrektur mit einem Test, der ohne sie scheitert):
+
+- „Eintragen“ der Meldung, während die Uhr derselben Einheit weiterläuft, trägt nur die
+  Wiederholungen ein; die Zeit kommt mit dem Ende der Uhr in denselben Eintrag
+  (`uebung_lauf._laufende_teile`).
+- P122 in der Karte „Eintragen“: Solange der Sensor in ein Feld zählt, hat dessen Zeile weder
+  Chips noch eigenen Wert, ein alter Knopf hängt nichts an (`zaehl_stand.zaehlt_der_sensor`);
+  im Diagnosemodus zählen beide.
+- P79 auch, wenn Uhr und Zählen zusammenkommen: Eingetragen wird, wo die Uhr läuft — bietet ihre
+  (Plan-)Übung kein Wiederholungsfeld an, tritt das Zählen nicht bei bzw. macht Platz
+  (`_zaehllauf_von`, `zaehlen_starten`).
+- Zählen im Plan-Ablauf: kein Knopf mehr, der nie zählte (oben unter „noch nicht gebaut“).
+- Notiz zum Satz: Mit laufender Aufnahme bekommt jeder eingetragene Satz `person/leistung`
+  (`uebung_lauf._satz_notizen`); im Diagnosemodus vergleicht sie nicht noch einmal
+  (`Messlauf._schon_verglichen`).
+- Ströme: Kommt ein Zurück, während der ältere Auftrag noch umschaltet, räumt nur der jüngste
+  auf (`Messlauf._stroeme_nr`) — vorher liefen EKG und Beschleunigung nach dem Vorabtest bzw.
+  nach „Zählen abbrechen“ gleich nach dem Tipp weiter.
+- Ende: ein Funkabriss sofort als „Sensor getrennt“, 15 s ohne Beschleunigung als „keine Daten
+  vom Sensor“ (`KEINE_DATEN_S`), ein Satz länger als der Puffer als „Satz zu lang für den
+  Sensor“ (`Messlauf.acc_verloren_bis`) — jeweils `abbruch`, nachtragbar.
+- Absturz: Die `zaehlung` steht mit dem Ende des Satzes in der Zeitleiste (ein laufender alle
+  15 s, `ZWISCHENSTAND_S`) — passend zur Zeit der Uhr nachtragbar.
+- Laufzeit: Dauert eine Rechnung länger als 20 ms, wird seltener gerechnet (§5.2, `takt_nach`).
+
+**Offen (Ben):** §10 verlangt „Prototyp“ an jeder Zahl eines Prototyps; die Texte aus 4.2/4.3
+(„Zählen · Kniebeuge · 12“, „Satz 1 · 12 Wdh. (Sensor 11, +1)“, „… nicht eingetragen“, in der
+Marken-Leiste „Sensor 11“) tragen es nicht — so gebaut wie in 4.2/4.3, bis Ben entscheidet.

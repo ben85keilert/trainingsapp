@@ -104,6 +104,33 @@ def wiederholungen(ereignisse: Iterable[Ereignis], feld: str | None = None) -> l
     return out
 
 
+def satz_zeiten(ereignisse: Iterable[Ereignis], feld: str | None = None) -> list[float]:
+    """Wann die Sätze von `wiederholungen` endeten (``t_s`` ihrer ``zaehlung``, Achse der
+    Einheit) — in derselben Folge, je Satz eine Zeit: Dort steht beim Eintragen die Notiz zum
+    Satz in der Aufnahme (Plan §5.3, `ui.uebung_lauf`).
+
+    >>> ev = [Ereignis(20.0, "zaehlen", "zaehlung", "", {"satz": 1, "wert": 12, "feld": "reps"}),
+    ...       Ereignis(50.0, "zaehlen", "zaehlung", "", {"satz": 2, "wert": 0}),
+    ...       Ereignis(80.0, "zaehlen", "zaehlung", "", {"satz": 3, "wert": 11, "feld": "reps"})]
+    >>> satz_zeiten(ev), satz_zeiten(ev, "reps_2")
+    ([20.0, 80.0], [])
+    """
+    je_satz: dict[int, tuple[float, dict[str, Any]]] = {}
+    for e in ereignisse:
+        if e.quelle == "zaehlen" and e.art == "zaehlung":
+            je_satz[ganzzahl_lesen(e.daten.get("satz"), len(je_satz) + 1)] = (e.t_s, e.daten)
+    out: list[float] = []
+    for k in sorted(je_satz):
+        t_s, z = je_satz[k]
+        if z.get("zaehlart", ZAEHLART_WDH) != ZAEHLART_WDH:
+            continue
+        if feld is not None and z.get("feld") not in (None, feld):
+            continue
+        if max(0, ganzzahl_lesen(z.get("wert"))):
+            out.append(float(t_s))
+    return out
+
+
 def zaehl_ende(ereignisse: Iterable[Ereignis]) -> str | None:
     """Der Grund, mit dem das Zählen endete — ``None``: es endete nicht (läuft, oder die App
     starb mitten im Lauf).
@@ -200,16 +227,22 @@ def nicht_eingetragen_text(name: str, wdh: int, warum: str = "") -> str:
     return f"{text} — {warum}" if warum else text
 
 
-def von_selbst_text(grund: str | None, *, getrennt: bool = False) -> str:
+def von_selbst_text(
+    grund: str | None, *, getrennt: bool = False, ohne_daten: bool = False, zu_lang: bool = False
+) -> str:
     """Warum das Zählen von selbst endete und abgebrochen bleibt — für die Meldung „… nicht
-    eingetragen“: `KEINE_BEWEGUNG_S` ohne neue Wiederholung, `KEIN_ATEM_S` ohne Atemzug, oder
-    das Gerät ist getrennt (``abbruch`` mit ``getrennt``). Leer, wenn es nicht von selbst endete
-    (ein Tipp, die Uhr brach ab) oder eingetragen wird.
+    eingetragen“: `KEINE_BEWEGUNG_S` ohne neue Wiederholung, `KEIN_ATEM_S` ohne Atemzug, das
+    Gerät ist getrennt (``abbruch`` mit ``getrennt``, auch ein Funkabriss) oder es kam
+    `KEINE_DATEN_S` lang keine Beschleunigung (``abbruch`` mit ``ohne_daten``), oder der Satz
+    lief länger, als der Puffer der Beschleunigung hält (``abbruch`` mit ``zu_lang``). Leer,
+    wenn es nicht von selbst endete (ein Tipp, die Uhr brach ab) oder eingetragen wird.
 
     >>> von_selbst_text("keine_bewegung"), von_selbst_text("kein_atem")
     ('60 s ohne Bewegung', '120 s ohne Atemzug')
     >>> von_selbst_text("abbruch", getrennt=True), von_selbst_text("abbruch")
     ('Sensor getrennt', '')
+    >>> von_selbst_text("abbruch", ohne_daten=True), von_selbst_text("abbruch", zu_lang=True)
+    ('keine Daten vom Sensor', 'Satz zu lang für den Sensor')
     >>> von_selbst_text("fertig", getrennt=True), von_selbst_text(None)
     ('', '')
     """
@@ -219,6 +252,10 @@ def von_selbst_text(grund: str | None, *, getrennt: bool = False) -> str:
         return f"{KEIN_ATEM_S:.0f} s ohne Atemzug"
     if grund == ENDE_ABBRUCH and getrennt:
         return "Sensor getrennt"
+    if grund == ENDE_ABBRUCH and ohne_daten:
+        return "keine Daten vom Sensor"
+    if grund == ENDE_ABBRUCH and zu_lang:
+        return "Satz zu lang für den Sensor"
     return ""
 
 
@@ -228,6 +265,7 @@ __all__ = [
     "eingetragen",
     "ende_text",
     "nicht_eingetragen_text",
+    "satz_zeiten",
     "von_selbst_text",
     "wiederholungen",
     "zaehl_abgebrochen",

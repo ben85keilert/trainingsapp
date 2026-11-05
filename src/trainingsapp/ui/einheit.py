@@ -631,10 +631,12 @@ def _ereignisse(page: Any, state: Any, e: Einheitslauf, neu: list[Ereignis]) -> 
 
 def _von_selbst_melden(state: Any, e: Einheitslauf, neu: list[Ereignis]) -> None:
     """Endete das Zählen eben von selbst (`core.zaehlen.KEINE_BEWEGUNG_S` ohne Wiederholung,
-    das Gerät getrennt) und bleibt abgebrochen, sagt es dieselbe Meldung wie bei einer anderen
-    Übung — mit Grund und „Eintragen“: „Kniebeuge · 12 Wdh. nicht eingetragen — 60 s ohne
-    Bewegung“ (`ZaehlMeldung`). Nichts gezählt: nichts einzutragen, keine Meldung; endete es auf
-    einen Tipp, sieht die Person es selbst.
+    das Gerät getrennt, keine Daten, der Satz zu lang für den Puffer) und bleibt abgebrochen,
+    sagt es dieselbe Meldung wie bei einer anderen Übung — mit Grund und „Eintragen“:
+    „Kniebeuge · 12 Wdh. nicht eingetragen — 60 s ohne Bewegung“ bzw. „— Sensor getrennt“,
+    „— keine Daten vom Sensor“ (`ZaehlMeldung`, `core.zaehlen_eintrag.von_selbst_text`).
+    Nichts gezählt: nichts einzutragen, keine Meldung; endete es auf einen Tipp, sieht die
+    Person es selbst.
 
     Sie liegt in ``state.zaehl_meldung``; gezeigt wird sie mit dem nächsten Aufbau der
     Ansicht (`ui.app`: nie über einem Dialog) — ohne Uhr endet die Einheit und zeichnet neu
@@ -645,7 +647,9 @@ def _von_selbst_melden(state: Any, e: Einheitslauf, neu: list[Ereignis]) -> None
     z = e.teil("zaehlen")
     if not isinstance(z, ZaehlBaustein) or z.von_aussen or not z.wdh:
         return
-    warum = von_selbst_text(z.grund, getrennt=z.getrennt)
+    warum = von_selbst_text(
+        z.grund, getrennt=z.getrennt, ohne_daten=z.ohne_daten, zu_lang=z.zu_lang
+    )
     wdh = sum(s.wert for s in z.saetze)
     if warum and wdh > 0:
         state.zaehl_meldung = ZaehlMeldung(e.id, z.kontext.uebung_id, z.name, wdh, warum)

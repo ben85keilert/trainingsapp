@@ -20,6 +20,8 @@ gelaufenen Zeiten, und ``person/eintrag`` hält fest, was eingetragen wurde.
 - **Uhr und Zählen derselben Übung teilen eine Einheit:** Läuft die Uhr, tritt das Zählen ihr
   bei; zählt es schon, tritt die Uhr dem Zähllauf bei (`starten`) — die Einheit endet dann mit
   der Uhr, das Zählen gilt als ``fertig``. Bricht die Uhr ab, ist der ganze Lauf abgebrochen.
+  Eingetragen wird, wo die Uhr läuft; bietet ihre Planübung kein Wiederholungsfeld an (P79),
+  tritt keines dem anderen bei (`_zaehllauf_von`, `zaehlen_starten`).
 - **Eine andere Übung** (ihr Zählen, ihre Uhr) beendet ein Zählen ohne Uhr mit
   ``andere_uebung`` (`ui.einheit.platz_machen`) — die Meldung „Kniebeuge · 12 Wdh. nicht
   eingetragen“ mit „Eintragen“ holt `meldung_abholen`. Eine laufende Uhr wird nie still beendet.
@@ -53,7 +55,7 @@ from trainingsapp.core.models import (
 )
 from trainingsapp.core.parameter import kontextfelder
 from trainingsapp.core.plaene import auspraegung_vorgabe, einzel_plan
-from trainingsapp.core.result_spec import basis_key, ist_leer
+from trainingsapp.core.result_spec import basis_key, format_wert, ist_leer
 from trainingsapp.core.standards import aktive_felder, mit_plan_spec
 from trainingsapp.core.timer import TimerLauf, TimerProfil
 from trainingsapp.core.timer_eintrag import (
@@ -217,7 +219,12 @@ def starten(page: Any, state: Any, kontext: UebungKontext, profil: TimerProfil) 
 
 
 def _zaehllauf_von(state: Any, kontext: UebungKontext) -> Einheitslauf | None:
-    """Der laufende Zähllauf ohne Uhr, wenn er diese Übung ist."""
+    """Der laufende Zähllauf ohne Uhr, wenn er diese Übung ist — und die Uhr ihn mitnehmen
+    kann: Eingetragen wird mit ihrem Kontext (`_uhr_beitreten`), und bietet ihre Planübung
+    kein Wiederholungsfeld an (P79: keiner = nur abhaken, nur Haltezeit …), gehörten die
+    Wiederholungen nicht hinein. Dann tritt sie nicht bei: Das Zählen macht Platz wie für eine
+    andere Übung (``andere_uebung``, die Meldung „… nicht eingetragen“) und bleibt dort
+    nachtragbar, wo es begann (wie `_ort_uebernehmen`)."""
     e = einheit_ui.laeuft(state)
     if e is None or not einheit_ui.nur_zaehlen(e):
         return None
@@ -226,7 +233,20 @@ def _zaehllauf_von(state: Any, kontext: UebungKontext) -> Einheitslauf | None:
         u.kontext, kontext.uebung_id, kontext.item_id
     ):
         return None
+    z = e.teil("zaehlen")
+    if isinstance(z, ZaehlBaustein) and z.wdh and not _nimmt_wiederholungen(state, kontext):
+        return None
     return e
+
+
+def _nimmt_wiederholungen(state: Any, kontext: UebungKontext) -> bool:
+    """Bietet die (Plan-)Übung dieses Kontexts ein Wiederholungsfeld an (P79)? Ohne Übung im
+    Katalog: ja (dann entscheidet das Eintragen)."""
+    uebung = state.uebungen.laden(kontext.uebung_id)
+    if uebung is None:
+        return True
+    item = state.plaene.item_laden(kontext.item_id) if kontext.item_id else None
+    return bool(zl.wdh_felder(uebung, item))
 
 
 def _uhr_beitreten(
@@ -238,6 +258,10 @@ def _uhr_beitreten(
     u = e.teil("plan")
     if isinstance(u, UebungBaustein):
         u.kontext_setzen(kontext)
+    z = e.teil("zaehlen")
+    if isinstance(z, ZaehlBaustein):
+        # Wo die Uhr läuft, wird eingetragen — die Beteiligungen nennen es (wie beim Abhaken)
+        z.kontext_setzen(replace(z.kontext, plan_id=kontext.plan_id, item_id=kontext.item_id))
     e.ende_mit_timer = True
     e.ende_mit_zaehlen = False
     einheit_ui.teil_beitreten(page, state, e, TimerBaustein(TimerLauf(profil)))
@@ -288,9 +312,10 @@ def zaehlen_starten(
 
     Raises:
         RuntimeError: kein Gerät mit Beschleunigungssensor; an der Übung ist beides aus (in
-            einer Planübung: Wiederholungen nur mit einem Wiederholungsfeld des Plans); es
-            läuft etwas anderes (die Uhr einer anderen Übung, ein Plan-Ablauf, ein Training)
-            oder steht bereit; in diesem Lauf der Uhr wurde schon gezählt.
+            einer Planübung: Wiederholungen nur mit einem Wiederholungsfeld des Plans — auch
+            in der, für die ihre Uhr läuft, P79); es läuft etwas anderes (die Uhr einer
+            anderen Übung, ein Plan-Ablauf — darin zählt der Sensor noch nicht —, ein
+            Training) oder steht bereit; in diesem Lauf der Uhr wurde schon gezählt.
     """
     if uebung is None:
         uebung = state.uebungen.laden(kontext.uebung_id)
@@ -328,12 +353,23 @@ def zaehlen_starten(
                     "In diesem Lauf der Uhr wurde schon gezählt — für neue Sätze erst die Uhr "
                     "beenden."
                 )
-            teil = zaehl_baustein(state, u.kontext, uebung, item)
+            # Eingetragen wird, wo die Uhr läuft — gezählt also, wie ihre (Plan-)Übung es will
+            # (P79): Läuft sie für eine Planübung ohne Wiederholungsfeld, zählt hier nichts,
+            # auch wenn die Übungsseite (ohne Plan) den Knopf zeigt
+            uhr_item = state.plaene.item_laden(u.kontext.item_id) if u.kontext.item_id else None
+            if not zaehl_stand.zaehlen_an(uebung, uhr_item):
+                raise RuntimeError(
+                    f"Die Uhr von „{uebung.name}“ läuft dort, wo sie keine Wiederholungen "
+                    "erfasst — erst die Uhr beenden."
+                )
+            teil = zaehl_baustein(state, u.kontext, uebung, uhr_item)
             einheit_ui.teil_beitreten(page, state, e, teil)
             state.zaehl_laeufe[uebung.id] = e.id
             return e, None
     if einheit_ui.in_vorbereitung(state) is not None:
         raise RuntimeError("Es steht eine Einheit bereit — erst oben starten oder leeren.")
+    if zaehl_stand.im_plan_ablauf(state):
+        raise RuntimeError("Im Plan-Ablauf zählt der Sensor noch nicht — erst oben mit ⏹ beenden.")
     state.zaehl_meldung = None
     if not einheit_ui.platz_machen(state):
         raise RuntimeError("Es läuft schon eine Einheit — erst oben mit ⏹ beenden.")
@@ -591,6 +627,8 @@ def _eintragen(
         if kontext.zeitfeld:
             daten["zeitfeld"] = kontext.zeitfeld
         neu.append(Ereignis(ende_s, "person", "eintrag", uebung.name, daten))
+    if wdh and feld and _lebt(einheit, einheit_id):
+        neu.extend(_satz_notizen(uebung, eintrag, feld, ereignisse, wdh, kontext.auspraegung))
     if wdh:
         neu.append(
             Ereignis(
@@ -603,6 +641,55 @@ def _eintragen(
         )
     _zeitleiste(state, einheit_id, neu, einheit)
     return eintrag
+
+
+def _lebt(einheit: Einheitslauf | None, einheit_id: str) -> bool:
+    """Ist die Einheit noch im Speicher (läuft, oder endete eben, `nach_dem_ende`)? Dann
+    schreibt sie selbst (`Einheitslauf.nachtragen`) und projiziert in ihre Aufnahme."""
+    return einheit is not None and einheit.id == einheit_id and einheit.t0 is not None
+
+
+def _satz_notizen(
+    uebung: Exercise,
+    eintrag: SessionEntry,
+    feld: str,
+    ereignisse: list[Ereignis],
+    wdh: list[int],
+    auspraegung: Mapping[str, Any],
+) -> list[Ereignis]:
+    """Die Notiz zum Satz (Plan §4.1, §5.3: „entsteht wie bisher beim Eintragen“): je
+    eingetragenem Satz ein ``person/leistung`` wie nach einem Tipp auf „+12“ (`ui.marken`) —
+    an der Stelle, an der der Satz endete, nur als Notiz (``grenze`` aus: die Übung klammert
+    ihr Start und Ende). Die Einheit projiziert sie in ihre Aufnahme, wenn eine läuft; ein
+    Nachtrag später hat keine Marke (wie dort)."""
+    zeiten = ze.satz_zeiten(ereignisse, feld)
+    if len(zeiten) != len(wdh):
+        return []  # passt nicht zusammen — lieber keine Notiz als eine falsche
+    spec = uebung.result_spec
+    zusatz = " · ".join(
+        format_wert(f, auspraegung[f.key])
+        for f in kontextfelder(spec)
+        if f.key in auspraegung and not ist_leer(auspraegung[f.key])
+    )
+    kopf = f"{uebung.name} {zusatz}" if zusatz else uebung.name
+    return [
+        Ereignis(
+            t_s,
+            "person",
+            "leistung",
+            f"{kopf}: {wert}",
+            {
+                "eintrag": eintrag.id,
+                "uebung": uebung.id,
+                "name": uebung.name,
+                "feld": feld,
+                "wert": wert,
+                "erster": False,
+                "grenze": False,
+            },
+        )
+        for t_s, wert in zip(zeiten, wdh, strict=True)
+    ]
 
 
 def _zeitleiste(
@@ -677,6 +764,21 @@ def laeufe_heute(state: Any, uebung_id: str, tag: Any = None) -> list[Lauf]:
     return laeufe
 
 
+def _laufende_teile(e: Einheitslauf | None) -> frozenset[str]:
+    """Was in einer Einheit, die noch läuft, noch nicht vorbei ist — die Uhr (``uhr``), das
+    Zählen (``zaehlen``); eingetragen wird es erst mit seinem Ende."""
+    if e is None or not e.laeuft:
+        return frozenset()
+    teile: set[str] = set()
+    timer = e.timer
+    if timer is not None and timer.aktiv:
+        teile.add(TEIL_UHR)
+    z = e.teil("zaehlen")
+    if isinstance(z, ZaehlBaustein) and z.aktiv:
+        teile.add(TEIL_ZAEHLEN)
+    return frozenset(teile)
+
+
 def lauf_eintragen(state: Any, einheit_id: str) -> SessionEntry | None:
     """Einen abgebrochenen Lauf doch eintragen — mit der Zeit, die er lief (Skizze 15), und
     den Wiederholungen, die der Sensor zählte; nur, was noch fehlt (``None``: nichts)."""
@@ -687,9 +789,15 @@ def lauf_eintragen(state: Any, einheit_id: str) -> SessionEntry | None:
     if teil is None:
         return None
     ereignisse = state.einheiten.ereignisse(einheit_id)
-    teile = einzutragen(ereignisse, nachtraeglich=True)
+    # Läuft die Einheit noch (Uhr läuft, das Zählen brach ab — die Meldung „… nicht
+    # eingetragen“ mit „Eintragen“), schreibt sie selbst, und nur, was schon vorbei ist: Die
+    # Zeit der laufenden Uhr trägt `nach_dem_ende` ein, wenn sie endet — jetzt genommen, fehlte
+    # sie später ganz (sie stünde als eingetragen da, mit der Zeit bis jetzt ohne den Abschnitt)
+    e = getattr(state, "einheit", None)
+    einheit = e if isinstance(e, Einheitslauf) and e.id == einheit_id else None
+    teile = einzutragen(ereignisse, nachtraeglich=True) - _laufende_teile(einheit)
     if not teile:
-        return None  # schon eingetragen
+        return None  # schon eingetragen (oder läuft noch)
     d = teil.daten
     kontext = UebungKontext(
         uebung_id=str(d["uebung"]),
@@ -699,9 +807,6 @@ def lauf_eintragen(state: Any, einheit_id: str) -> SessionEntry | None:
         zeitfeld=str(d["zeitfeld"]) if d.get("zeitfeld") else None,
         auspraegung={k: d[k] for k in AUSFUEHRUNG_SCHLUESSEL if k in d},
     )
-    # Läuft die Einheit noch (Uhr läuft, das Zählen brach ab), schreibt sie selbst
-    e = getattr(state, "einheit", None)
-    einheit = e if isinstance(e, Einheitslauf) and e.id == einheit_id else None
     return _eintragen(
         state,
         einheit_id,

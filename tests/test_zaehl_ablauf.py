@@ -758,3 +758,269 @@ async def test_getrennt_meldet_sich_mit_grund(tmp_path, monkeypatch) -> None:
     assert meldung.text == f"Kniebeuge · {gezaehlt} Wdh. nicht eingetragen — Sensor getrennt"
     await _warten(lambda: vorbei(state))
     state.schliessen()
+
+
+# -- Befunde der dritten Runde (5.11.2026) -----------------------------------------------------
+
+
+async def test_eintragen_aus_der_meldung_laesst_die_laufende_uhr_laufen(umgebung) -> None:
+    """Endet nur das Zählen von selbst (60 s ohne Bewegung), während die Uhr derselben Übung
+    weiterläuft, trägt „Eintragen“ der Meldung nur die Wiederholungen ein — die Zeit der Uhr
+    kommt mit ihrem Ende dazu, ganz, in denselben Eintrag. Vorher nahm „Eintragen“ die Uhr mit
+    (die Zeit bis jetzt ohne den laufenden Abschnitt), und ihre 120 s fehlten für immer."""
+    state, uhr, gurt, _ = umgebung
+    u = _uebung(state, "Wandsitz", "hold", "reps")
+    kontext = uebung_lauf.kontext_fuer(u)
+    profil = TimerProfil(name="Halten 2 min", abschnitte=[Abschnitt("Halten", 120)])
+    e = uebung_lauf.starten(Seite(), state, kontext, profil)
+    await _ticken(state, uhr, gurt, 1)
+    uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+    await _ticken(state, uhr, gurt, 15)
+    gurt.bewegung = False
+    await _ticken(state, uhr, gurt, 64)
+    assert ze.zaehl_ende(e.ereignisse) == ENDE_KEINE_BEWEGUNG and e.laeuft
+    meldung = uebung_lauf.meldung_abholen(state)
+    assert meldung is not None
+    gezaehlt = ze.wiederholungen(e.ereignisse)
+    eintrag = uebung_lauf.lauf_eintragen(state, meldung.einheit_id)
+    assert eintrag is not None and eintrag.result == {"reps": gezaehlt}
+    assert [x.daten["teil"] for x in _personen_eintraege(state, e.id)] == ["zaehlen"]
+    assert uebung_lauf.lauf_eintragen(state, e.id) is None  # die Uhr läuft noch
+    await _ticken(state, uhr, gurt, 80, bis_ende=True)
+    (fertig,) = _eintraege(state)
+    assert fertig.result == {"reps": gezaehlt, "hold": [120]}  # vorher: {"reps": [6]}
+    teile = {x.daten["teil"]: x.daten["werte"] for x in _personen_eintraege(state, e.id)}
+    assert teile == {"zaehlen": gezaehlt, "uhr": [120]}
+    (lauf,) = uebung_lauf.laeufe_heute(state, u.id)
+    assert not lauf.nachtragbar
+    _nummern_stimmen(state, e)
+
+
+async def test_uhr_einer_planuebung_ohne_wiederholungen_nimmt_kein_zaehlen_mit(umgebung) -> None:
+    """P79 auch, wenn Uhr und Zählen zusammenkommen: Läuft die Uhr für eine Planübung ohne
+    Wiederholungsfeld (Wandsitz im Plan nur mit „hold“), tritt ein Zählen von der Übungsseite
+    ihr nicht bei — eingetragen würde in diese Planübung, die keine Wiederholungen nimmt.
+    Vorher zählte es mit, nichts kam hinein, und „Läufe heute“ bot für immer „Eintragen“ an,
+    das nur „Schon eingetragen.“ meldete."""
+    state, uhr, gurt, _ = umgebung
+    u = _uebung(state, "Wandsitz", "hold", "reps")
+    plan = _plan_mit(state, u, felder=["hold"])
+    item = plan.items[0]
+    assert not zaehl_stand.sichtbar(state, u, item=item) and zaehl_stand.sichtbar(state, u)
+    profil = TimerProfil(name="Halten", abschnitte=[Abschnitt("Halten", 40)])
+    e = uebung_lauf.starten(Seite(), state, uebung_lauf.kontext_fuer(u, plan, item), profil)
+    await _ticken(state, uhr, gurt, 1)
+    with pytest.raises(RuntimeError, match="keine Wiederholungen"):
+        uebung_lauf.zaehlen_starten(Seite(), state, uebung_lauf.kontext_fuer(u), uebung=u)
+    assert e.teil("zaehlen") is None and state.messlauf.acc_anforderungen == {}
+    await _ticken(state, uhr, gurt, 60, bis_ende=True)
+    ((eintrag, plan_id),) = _mit_sitzung(state)
+    assert eintrag.result == {"hold": [40]} and plan_id == plan.id
+    (lauf,) = uebung_lauf.laeufe_heute(state, u.id)
+    assert not lauf.nachtragbar and lauf.nachzutragen == frozenset()
+
+
+async def test_zaehlen_der_uebungsseite_wird_nicht_teil_der_uhr_ohne_wiederholungen(
+    umgebung,
+) -> None:
+    """Umgekehrt: Zählt der Sensor auf der Übungsseite und startet dann die Uhr derselben
+    Übung in einem Plan, der keine Wiederholungen nimmt, tritt die Uhr nicht bei — das Zählen
+    macht Platz wie für eine andere Übung (Meldung mit „Eintragen“) und bleibt nachtragbar,
+    wo es begann (Sitzung ohne Plan). Vorher übernahm die Uhr den Lauf, und die Wiederholungen
+    ließen sich nie mehr eintragen."""
+    state, uhr, gurt, _ = umgebung
+    u = _uebung(state, "Wandsitz", "hold", "reps")
+    plan = _plan_mit(state, u, felder=["hold"])
+    item = plan.items[0]
+    zaehllauf, _ = uebung_lauf.zaehlen_starten(
+        Seite(), state, uebung_lauf.kontext_fuer(u), uebung=u
+    )
+    await _ticken(state, uhr, gurt, 20)
+    profil = TimerProfil(name="Halten", abschnitte=[Abschnitt("Halten", 40)])
+    mit_uhr = uebung_lauf.starten(Seite(), state, uebung_lauf.kontext_fuer(u, plan, item), profil)
+    assert mit_uhr is not zaehllauf and mit_uhr.teil("zaehlen") is None  # vorher: beigetreten
+    assert ze.zaehl_ende(zaehllauf.ereignisse) == ENDE_ANDERE_UEBUNG
+    gezaehlt = ze.wiederholungen(zaehllauf.ereignisse)
+    meldung = uebung_lauf.meldung_abholen(state)
+    assert gezaehlt and meldung is not None and meldung.einheit_id == zaehllauf.id
+    await _ticken(state, uhr, gurt, 60, bis_ende=True)
+    # Die Enden beider Läufe sind eigene Aufgaben — warten, bis die Uhr eingetragen hat
+    await _warten(lambda: bool(_personen_eintraege(state, mit_uhr.id)))
+    ((eintrag, plan_id),) = _mit_sitzung(state)
+    assert eintrag.result == {"hold": [40]} and plan_id == plan.id
+    nachgetragen = uebung_lauf.lauf_eintragen(state, zaehllauf.id)
+    assert nachgetragen is not None and nachgetragen.result == {"reps": gezaehlt}
+    assert {p for _, p in _mit_sitzung(state)} == {plan.id, None}
+    assert uebung_lauf.lauf_eintragen(state, zaehllauf.id) is None
+    assert not any(lauf.nachtragbar for lauf in uebung_lauf.laeufe_heute(state, u.id))
+
+
+async def test_eingetragene_saetze_bekommen_ihre_notiz_in_der_aufnahme(umgebung) -> None:
+    """Plan §4.1/§5.3: Mit laufender Aufnahme bekommt jeder Satz, den der Sensor einträgt, die
+    Notiz zum Satz („Kniebeuge: 11“, Marke ``person/leistung`` wie nach einem Chip) — an der
+    Stelle, an der er endete, beim Eintragen. Vorher standen nur „Start“ und „Ende“ da.
+    Abgebrochen gibt es keine; mit der Uhr je Satz eine."""
+    state, uhr, gurt, lauf = umgebung
+    u = _uebung(state)
+    e, _ = uebung_lauf.zaehlen_starten(Seite(), state, uebung_lauf.kontext_fuer(u))
+    await _ticken(state, uhr, gurt, 30)
+    uebung_lauf.zaehlen_beenden(state, u.id, None, ENDE_FERTIG)
+    await _ticken(state, uhr, gurt, 1, bis_ende=True)
+    await _warten(lambda: bool(_eintraege(state)))
+    ((gezaehlt,),) = [x.result["reps"] for x in _eintraege(state)]
+    notizen = [x for x in lauf.ereignisse() if (x.get("marke") or {}).get("art") == "leistung"]
+    assert [x["text"] for x in notizen] == [f"Kniebeuge: {gezaehlt}"]  # vorher: keine
+    m = notizen[0]["marke"]
+    assert (m["quelle"], m["feld"], m["wert"]) == ("person", "reps", gezaehlt)
+    (leistung,) = [x for x in state.einheiten.ereignisse(e.id) if x.art == "leistung"]
+    assert leistung.daten["eintrag"] == _eintraege(state)[0].id
+    zaehlungen = [x for x in e.ereignisse if x.art == "zaehlung"]
+    assert leistung.t_s == zaehlungen[-1].t_s  # das Ende des Satzes, nicht ein Zwischenstand
+
+    # Abgebrochen: nichts eingetragen, keine Notiz
+    uebung_lauf.zaehlen_starten(Seite(), state, uebung_lauf.kontext_fuer(u))
+    await _ticken(state, uhr, gurt, 20)
+    uebung_lauf.zaehlen_beenden(state, u.id, None, ENDE_ABBRUCH)
+    await _ticken(state, uhr, gurt, 1, bis_ende=True)
+    assert (
+        len(
+            [
+                x
+                for x in lauf.ereignisse()
+                if "Kniebeuge: " in x["text"] and (x.get("marke") or {}).get("art") == "leistung"
+            ]
+        )
+        == 1
+    )
+
+    # Mit der Uhr: je zählendem Abschnitt ein Satz, je Satz eine Notiz
+    wandsitz = _uebung(state, "Wandsitz", "hold", "reps")
+    kontext = uebung_lauf.kontext_fuer(wandsitz)
+    mit_uhr = uebung_lauf.starten(Seite(), state, kontext, _profil())
+    uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+    await _ticken(state, uhr, gurt, 80, bis_ende=True)
+    await _warten(lambda: bool(_personen_eintraege(state, mit_uhr.id)))
+    (eintrag,) = [x for x in _eintraege(state) if x.exercise_id == wandsitz.id]
+    texte = [
+        x["text"]
+        for x in lauf.ereignisse()
+        if x["text"].startswith("Wandsitz: ") and (x.get("marke") or {}).get("art") == "leistung"
+    ]
+    assert texte == [f"Wandsitz: {n}" for n in eintrag.result["reps"]]
+    _nummern_stimmen(state, mit_uhr)
+
+
+async def test_funkabriss_und_keine_daten_melden_sich_mit_grund(umgebung) -> None:
+    """Endet das Zählen, weil die Verbindung abriss (die Quelle verbindet selbst neu) oder
+    weil keine Beschleunigung kam, sagt die Meldung das — nicht „60 s ohne Bewegung“."""
+    from trainingsapp.core.zaehlen import KEINE_DATEN_S
+    from trainingsapp.devices.base import Verbindung
+
+    state, uhr, gurt, _ = umgebung
+    u = _uebung(state)
+    e, _ = uebung_lauf.zaehlen_starten(Seite(), state, uebung_lauf.kontext_fuer(u))
+    await _ticken(state, uhr, gurt, 20)
+    z1 = e.teil("zaehlen")
+    assert isinstance(z1, ZaehlBaustein)
+    gezaehlt = z1.wert
+    gurt._status_aendern(verbindung=Verbindung.VERBINDE, meldung="verbinde neu")
+    await ruhe()
+    uhr.t += 1
+    e.takt()
+    meldung = uebung_lauf.meldung_abholen(state)
+    assert meldung is not None  # vorher: nach 60 s „— 60 s ohne Bewegung“
+    assert meldung.text == f"Kniebeuge · {gezaehlt} Wdh. nicht eingetragen — Sensor getrennt"
+    gurt._status_aendern(verbindung=Verbindung.VERBUNDEN)
+    await _warten(lambda: vorbei(state))
+
+    # Verbunden, aber keine Beschleunigung: nur der Herzschlag kommt
+    e2, _ = uebung_lauf.zaehlen_starten(Seite(), state, uebung_lauf.kontext_fuer(u))
+    z = e2.teil("zaehlen")
+    assert isinstance(z, ZaehlBaustein) and z.korrigieren(+1)
+    for _ in range(int(KEINE_DATEN_S) + 2):
+        uhr.t += 1
+        gurt.schlag(1000)
+        await ruhe()
+        if e2.laeuft:
+            e2.takt()
+    meldung = uebung_lauf.meldung_abholen(state)
+    assert meldung is not None
+    assert meldung.text == "Kniebeuge · 1 Wdh. nicht eingetragen — keine Daten vom Sensor"
+    await _warten(lambda: vorbei(state))
+
+
+def _nach_dem_absturz(state, tmp_path, name: str = "absturz.db") -> AppState:
+    """Die App stirbt jetzt (Akku, das System beendet sie): die Datenbank, wie sie in diesem
+    Augenblick ist — kein ``finally``, kein Ende der Einheit —, und ein Neustart darauf."""
+    import sqlite3
+
+    pfad = tmp_path / name
+    ziel = sqlite3.connect(pfad)
+    state.einheiten.con.backup(ziel)
+    ziel.close()
+    return AppState.starten(pfad)
+
+
+async def test_absturz_in_der_pause_verliert_keinen_fertigen_satz(umgebung, tmp_path) -> None:
+    """Stirbt die App in der Pause nach Satz 2, stehen beide Sätze in der Zeitleiste — passend
+    zu den Zeiten der Uhr. Vorher kam ein Satz erst mit dem nächsten hinein: „Eintragen“ trug
+    ``{'hold': [20, 20], 'reps': [7]}`` ein."""
+    state, uhr, gurt, _ = umgebung
+    u = _uebung(state, "Wandsitz", "hold", "reps")
+    kontext = uebung_lauf.kontext_fuer(u)
+    profil = TimerProfil(
+        name="3 × 20 s",
+        abschnitte=[Abschnitt("Halten", 20), Abschnitt("Pause", 10, zaehlt=False)],
+        runden=3,
+    )
+    e = uebung_lauf.starten(Seite(), state, kontext, profil)
+    await _ticken(state, uhr, gurt, 1)
+    uebung_lauf.zaehlen_starten(Seite(), state, kontext)
+    await _ticken(state, uhr, gurt, 54)  # Satz 2 (30–50 s) ist zu, die Pause läuft
+    z = e.teil("zaehlen")
+    assert isinstance(z, ZaehlBaustein) and [s.bis_s is not None for s in z.saetze] == [True] * 2
+    gezaehlt = [s.wert for s in z.saetze]
+    neu = _nach_dem_absturz(state, tmp_path)
+    try:
+        (lauf,) = uebung_lauf.laeufe_heute(neu, u.id)
+        assert lauf.wdh == gezaehlt and lauf.nachtragbar  # vorher: nur Satz 1
+        eintrag = uebung_lauf.lauf_eintragen(neu, lauf.einheit_id)
+        assert eintrag is not None
+        assert eintrag.result == {"hold": [20, 20], "reps": gezaehlt}
+    finally:
+        neu.schliessen()
+    z.abbrechen()
+    e.timer.lauf.abbrechen()
+    await _ticken(state, uhr, gurt, 2, bis_ende=True)
+
+
+async def test_absturz_mitten_im_zaehllauf_laesst_den_stand_nachtragen(umgebung, tmp_path) -> None:
+    """Ein Zähllauf ohne Uhr ist ein Satz — stirbt die App mitten darin, steht sein Stand der
+    letzten `ZWISCHENSTAND_S` in der Zeitleiste und lässt sich nachtragen. Vorher stand dort
+    nichts, und „Läufe heute“ bot nichts an."""
+    from trainingsapp.devices.zaehlen import ZWISCHENSTAND_S
+
+    state, uhr, gurt, _ = umgebung
+    u = _uebung(state)
+    e, _ = uebung_lauf.zaehlen_starten(Seite(), state, uebung_lauf.kontext_fuer(u))
+    await _ticken(state, uhr, gurt, 50)
+    z = e.teil("zaehlen")
+    assert isinstance(z, ZaehlBaustein) and z.aktiv
+    jetzt = z.wert
+    neu = _nach_dem_absturz(state, tmp_path)
+    try:
+        (lauf,) = uebung_lauf.laeufe_heute(neu, u.id)
+        assert lauf.nachtragbar and len(lauf.wdh) == 1  # vorher: wdh [] — nichts nachzutragen
+        # höchstens die letzten Sekunden fehlen (eine Wiederholung je 2,5 s)
+        assert jetzt - ZWISCHENSTAND_S / 2.5 - 1 <= lauf.wdh[0] <= jetzt
+        eintrag = uebung_lauf.lauf_eintragen(neu, lauf.einheit_id)
+        assert eintrag is not None and eintrag.result == {"reps": lauf.wdh}
+    finally:
+        neu.schliessen()
+    # Lebt die App weiter, gilt am Ende der eine Satz mit seinem ganzen Wert
+    uebung_lauf.zaehlen_beenden(state, u.id, None, ENDE_FERTIG)
+    await _ticken(state, uhr, gurt, 1, bis_ende=True)
+    await _warten(lambda: bool(_eintraege(state)))
+    ((eintrag, _),) = _mit_sitzung(state)
+    assert eintrag.result == {"reps": [z.saetze[0].wert]}
+    assert ze.wiederholungen(state.einheiten.ereignisse(e.id)) == [z.saetze[0].wert]

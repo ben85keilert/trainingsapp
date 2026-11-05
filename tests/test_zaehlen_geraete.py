@@ -100,6 +100,14 @@ def _arten(e: Einheitslauf, art: str) -> list[Ereignis]:
     return [x for x in e.ereignisse if x.art == art]
 
 
+def _saetze(e: Einheitslauf | list[Ereignis]) -> list[Ereignis]:
+    """Je Satz die letzte ``zaehlung`` — sie gilt (`core.zaehlen_eintrag.zaehlungen`); davor
+    stehen Zwischenstände und der Stand vor einer Korrektur in der Pause (gegen den Absturz)."""
+    liste = e.ereignisse if isinstance(e, Einheitslauf) else e
+    je_satz = {x.daten["satz"]: x for x in liste if x.art == "zaehlung"}
+    return [je_satz[k] for k in sorted(je_satz)]
+
+
 # -- Zählen ---------------------------------------------------------------------------------
 
 
@@ -148,7 +156,7 @@ async def test_zaehlt_ab_dem_tipp_mit_korrektur_und_traegt_den_satz_in_die_zeitl
     assert e.zustand is Zustand.BEENDET
     await ruhe()
     assert a.gurt.stroeme[-1] == (False, None)
-    (zaehlung,) = _arten(e, "zaehlung")
+    (zaehlung,) = _saetze(e)
     d = zaehlung.daten
     assert d["satz"] == 1 and d["sensor"] == sensor and d["korrektur"] == 1
     assert d["wert"] == sensor + 1 and d["feld"] == "reps" and d["zaehlart"] == "wdh"
@@ -161,7 +169,7 @@ async def test_zaehlt_ab_dem_tipp_mit_korrektur_und_traegt_den_satz_in_die_zeitl
     assert ende.daten == {"grund": ENDE_FERTIG} and ende.t_s == pytest.approx(30.0)
     # Aus der Datenbank (Migration 037: Teil ``zaehlen``) — dieselbe Zeitleiste
     gelesen = a.repo.ereignisse(e.id)
-    assert [x.daten for x in gelesen if x.art == "zaehlung"] == [d]
+    assert [x.daten for x in _saetze(gelesen)] == [d]
     (teil,) = [b for b in a.repo.beteiligungen(e.id) if b.art == "zaehlen"]
     assert teil.daten["uebung"] == "u-kniebeuge" and teil.daten["feld"] == "reps"
     assert teil.bis_s == pytest.approx(30.0)
@@ -210,7 +218,7 @@ async def test_keine_bewegung_beendet_nach_60_s_ohne_neue_wiederholung(aufbau) -
     (ende,) = _arten(e, "zaehlen_ende")
     assert 77.0 <= ende.t_s <= 81.0  # 60 s nach der letzten gezählten Wiederholung
     assert ze.zaehl_abgebrochen(e.ereignisse)  # nichts eingetragen, „Läufe heute“
-    assert ze.wiederholungen(e.ereignisse) == [_arten(e, "zaehlung")[0].daten["wert"]]
+    assert ze.wiederholungen(e.ereignisse) == [_saetze(e)[0].daten["wert"]]
     assert a.lauf.acc_anforderungen == {}
 
 
@@ -222,14 +230,15 @@ async def test_ohne_bewegung_nie_eine_zahl(aufbau) -> None:
     await ruhe()
     await _sekunden(a, 61, e)
     assert z.grund == ENDE_KEINE_BEWEGUNG and z.sensor is None
-    (zaehlung,) = _arten(e, "zaehlung")
+    (zaehlung,) = _saetze(e)
     assert zaehlung.daten["sensor"] is None and zaehlung.daten["wert"] == 0
     assert ze.wiederholungen(e.ereignisse) == []  # ein Satz ohne Wiederholung kommt nicht hinein
 
 
 async def test_timer_abschnitte_sind_saetze_pausen_zaehlen_nicht(aufbau) -> None:
     """Mit Timer ist jeder zählende Abschnitt ein Satz; die Korrektur in der Pause gilt dem
-    Satz davor (er steht erst fest, wenn der nächste beginnt)."""
+    Satz davor (er steht erst fest, wenn der nächste beginnt). In der Zeitleiste steht er schon
+    mit seinem Ende — gegen den Absturz —, die Korrektur schreibt ihn neu."""
     a = aufbau
     profil = TimerProfil(
         name="Sätze",
@@ -245,15 +254,18 @@ async def test_timer_abschnitte_sind_saetze_pausen_zaehlen_nicht(aufbau) -> None
     assert z.phase == PHASE_PAUSE and z.satz is not None and z.satz.nr == 1
     erster = z.wert
     assert z.status() == f"Kniebeuge · {erster}" and abs(erster - 12) <= 1
-    assert _arten(e, "zaehlung") == []  # korrigierbar bis zum nächsten Satz
-    assert z.korrigieren(-1) and z.wert == erster - 1
+    (vorher,) = _saetze(e)  # steht schon da (vorher erst mit dem nächsten Satz) …
+    assert vorher.daten["wert"] == erster and vorher.t_s == pytest.approx(30.0)
+    assert z.korrigieren(-1) and z.wert == erster - 1  # … und bleibt korrigierbar
+    e.takt()
+    assert _saetze(e)[0].daten["wert"] == erster - 1
     await _sekunden(a, 55, e)  # zweiter Satz 45–75, Pause, Timer durch bei 90
     assert e.zustand is Zustand.BEENDET and z.grund == ENDE_FERTIG
-    saetze = [x.daten for x in _arten(e, "zaehlung")]
+    saetze = [x.daten for x in _saetze(e)]
     assert [s["satz"] for s in saetze] == [1, 2]
     assert saetze[0]["wert"] == erster - 1 and saetze[0]["korrektur"] == -1
     assert abs(saetze[1]["wert"] - 12) <= 1
-    assert [x.t_s for x in _arten(e, "zaehlung")] == pytest.approx([30.0, 75.0])
+    assert [x.t_s for x in _saetze(e)] == pytest.approx([30.0, 75.0])
     assert all(45.0 <= t <= 75.0 for t in saetze[1]["zeiten_s"])
     assert _arten(e, "zaehlen_ende")[0].t_s == pytest.approx(90.0)
     assert ze.wiederholungen(e.ereignisse) == [erster - 1, saetze[1]["wert"]]
@@ -278,7 +290,7 @@ async def test_anhalten_der_uhr_haelt_das_zaehlen_an(aufbau) -> None:
     timer.lauf.fertig_machen()
     await _sekunden(a, 1, e)
     assert e.zustand is Zustand.BEENDET and z.grund == ENDE_FERTIG
-    (zaehlung,) = _arten(e, "zaehlung")
+    (zaehlung,) = _saetze(e)
     assert abs(zaehlung.daten["wert"] - 16) <= 1  # 40 s Bewegung, die 70 s dazwischen nicht
     assert not any(20.5 < t < 90.0 for t in zaehlung.daten["zeiten_s"])
 
@@ -302,7 +314,7 @@ async def test_zaehlen_tritt_der_laufenden_uhr_bei_und_zaehlt_nicht_rueckwirkend
     timer.lauf.fertig_machen()
     await _sekunden(a, 1, e)
     assert e.zustand is Zustand.BEENDET and z.grund == ENDE_FERTIG
-    (zaehlung,) = _arten(e, "zaehlung")
+    (zaehlung,) = _saetze(e)
     assert abs(zaehlung.daten["wert"] - 8) <= 1 and min(zaehlung.daten["zeiten_s"]) >= 10.0
 
 
@@ -326,7 +338,7 @@ async def test_die_uhr_tritt_dem_zaehllauf_bei(aufbau) -> None:
     timer.lauf.fertig_machen()
     await _sekunden(a, 1, e)
     assert e.zustand is Zustand.BEENDET
-    (zaehlung,) = _arten(e, "zaehlung")
+    (zaehlung,) = _saetze(e)
     assert zaehlung.daten["satz"] == 1 and abs(zaehlung.daten["wert"] - 8) <= 1
 
 
@@ -347,7 +359,7 @@ async def test_beitreten_in_der_pause_des_timers_wartet_auf_den_satz(aufbau) -> 
     await ruhe()
     await _sekunden(a, 56, e)  # Satz 40–60, Pause, Timer durch bei 80
     assert e.zustand is Zustand.BEENDET
-    (zaehlung,) = _arten(e, "zaehlung")
+    (zaehlung,) = _saetze(e)
     assert zaehlung.daten["satz"] == 1 and abs(zaehlung.daten["wert"] - 8) <= 1
     assert zaehlung.t_s == pytest.approx(60.0)
 
@@ -366,7 +378,7 @@ async def test_abbruch_der_uhr_bricht_den_ganzen_lauf_ab(aufbau) -> None:
     timer.lauf.abbrechen()
     await _sekunden(a, 1, e)
     assert e.zustand is Zustand.BEENDET and z.grund == ENDE_ABBRUCH
-    assert ze.zaehl_abgebrochen(e.ereignisse) and len(_arten(e, "zaehlung")) == 1
+    assert ze.zaehl_abgebrochen(e.ereignisse) and len(_saetze(e)) == 1
 
 
 async def test_abbrechen_korrektur_und_falsche_eingaben(aufbau) -> None:
@@ -388,7 +400,7 @@ async def test_abbrechen_korrektur_und_falsche_eingaben(aufbau) -> None:
     e.takt()
     assert e.zustand is Zustand.BEENDET and ze.zaehl_ende(e.ereignisse) == ENDE_ANDERE_UEBUNG
     # Kurz und nichts gezählt: kein Satz — nur Korrekturen und das Ende
-    assert _arten(e, "zaehlung") == [] and len(_arten(e, "korrektur")) == 2
+    assert _saetze(e) == [] and len(_arten(e, "korrektur")) == 2
     assert _arten(e, "zaehlen_ende")[0].text == "Kniebeuge: Zählen abgebrochen (andere Übung)"
 
 
@@ -403,7 +415,7 @@ async def test_nur_atmung_zaehlt_in_a1_noch_nichts(aufbau) -> None:
     assert z.aktiv and not z.korrigieren(1)
     z.fertig()
     e.takt()
-    assert _arten(e, "zaehlung") == [] and ze.zaehl_ende(e.ereignisse) == ENDE_FERTIG
+    assert _saetze(e) == [] and ze.zaehl_ende(e.ereignisse) == ENDE_FERTIG
 
 
 async def test_beenden_mit_der_einheit_gilt_als_fertig(aufbau) -> None:
@@ -422,8 +434,9 @@ async def test_beenden_mit_der_einheit_gilt_als_fertig(aufbau) -> None:
 
 
 async def test_mit_laufender_messung_keine_neue_notiz(aufbau) -> None:
-    """Die Messung bekommt Start und Ende der Übung — vom Zählen nichts (§5.3), keine
-    Klammer der Einheit."""
+    """Die Messung bekommt Start und Ende der Übung — vom Zählen selbst nichts (§5.3), keine
+    Klammer der Einheit. Die Notiz zum Satz schreibt erst das Eintragen (`ui.uebung_lauf`,
+    ``test_zaehl_ablauf``)."""
     a = aufbau
     a.lauf.aufnahme_starten()
     await _sekunden(a, 10)
@@ -504,7 +517,7 @@ async def test_ende_mit_zaehlen_und_sonst_weiter(aufbau) -> None:
     await _sekunden(a, 12, e)
     z.fertig()
     await _sekunden(a, 3, e)
-    assert e.zustand is Zustand.LAEUFT and not z.aktiv and len(_arten(e, "zaehlung")) == 1
+    assert e.zustand is Zustand.LAEUFT and not z.aktiv and len(_saetze(e)) == 1
     assert [t.art for t in e.aktive_teile()] == ["plan", "timer"]
     e.beenden()
 
@@ -784,26 +797,28 @@ async def test_ratenwechsel_mitten_im_satz_zaehlt_weiter(aufbau) -> None:
 
 
 async def test_luecke_im_strom_verschiebt_die_zeiten_nicht(aufbau) -> None:
-    """Fehlen Rahmen (Funkabriss), stehen die Wiederholungen danach an ihrer Zeit — nicht um
-    die Lücke zu früh —, und „keine Bewegung“ zählt ab der jüngsten."""
+    """Fehlen Rahmen (eine Lücke im Strom, kürzer als `KEINE_DATEN_S`), stehen die
+    Wiederholungen danach an ihrer Zeit — nicht um die Lücke zu früh —, und „keine Bewegung“
+    zählt ab der jüngsten."""
     a = aufbau
     e, z = _zaehllauf(a)
     e.starten()
     await ruhe()
     await _sekunden(a, 30, e, schritt=0.25)
-    for _ in range(200):  # 50 s ohne Beschleunigung: die Rahmen dieser Zeit gehen verloren
+    for _ in range(48):  # 12 s ohne Beschleunigung: die Rahmen dieser Zeit gehen verloren
         a.uhr.t = round(a.uhr.t + 0.25, 6)
         a.gurt._acc_t = a.uhr.t
         await ruhe()
         e.takt()
+    assert z.aktiv
     await _sekunden(a, 30, e, schritt=0.25)
     satz = z.satz
     assert satz is not None and e.t0 is not None
     jetzt = a.uhr.t - e.t0
-    assert jetzt == pytest.approx(110.0)
-    assert satz.zeiten_s[-1] > 100.0  # vorher: 56,8 s
-    assert not [t for t in satz.zeiten_s if 31.0 < t < 80.0]  # nichts in der Lücke
-    assert jetzt - satz.ruhe_seit_s < 5.0  # vorher: 54,5 s — bald „keine Bewegung“
+    assert jetzt == pytest.approx(72.0)
+    assert satz.zeiten_s[-1] > 66.0  # mit lückenloser Zeitachse um die Lücke zu früh
+    assert not [t for t in satz.zeiten_s if 31.0 < t < 42.0]  # nichts in der Lücke
+    assert jetzt - satz.ruhe_seit_s < 5.0
     z.fertig()
 
 
@@ -853,7 +868,7 @@ async def test_zaehlen_in_einer_einheit_mit_anderer_uhr(aufbau) -> None:
         e.takt()
     assert z.fertig()  # rechnet zum Schluss noch einmal
     e.takt()
-    (zaehlung,) = _arten(e, "zaehlung")
+    (zaehlung,) = _saetze(e)
     assert abs(zaehlung.daten["sensor"] - 36) <= 1  # vorher: 6 (nur 15 s der Quelle)
     beginn = z.saetze[0].von_s
     assert all(beginn <= t <= beginn + 15.1 for t in zaehlung.daten["zeiten_s"])
@@ -1133,3 +1148,152 @@ async def test_simulator_keine_bewegung(tmp_path) -> None:
     await asyncio.wait_for(asyncio.create_task(lauf.laufen()), 10.0)
     e.takt()
     assert z.grund == ENDE_KEINE_BEWEGUNG and e.zustand is Zustand.BEENDET
+
+
+async def test_notiz_zum_gezaehlten_satz_vergleicht_nicht_noch_einmal(tmp_path) -> None:
+    """Beim Eintragen bekommt ein gezählter Satz seine Notiz (``person/leistung``,
+    `ui.uebung_lauf`) — im Diagnosemodus darf sie den Vergleich nach dem Satz nicht wiederholen:
+    Der zweite hätte weder Marken noch Sensor und ersetzte den richtigen. Ein Satz von Hand
+    danach vergleicht wie immer."""
+    zeit, lauf, innen, gemeldet = await _diagnose_mit_zaehlen(tmp_path)
+    z = ZaehlBaustein(lauf, KNIEBEUGE, feld="reps")
+    e = Einheitslauf(uhr=lauf.uhr)
+    e.hinzufuegen(UebungBaustein(KNIEBEUGE))
+    e.hinzufuegen(z)
+    e.ende_mit_zaehlen = True
+    e.starten()
+    await _ruhe()
+    k = _satz_senden(lauf, innen, zeit, e, 0, 24.0, tipps=12)
+    assert z.fertig()
+    e.takt()
+    (v,) = gemeldet
+    wert = v["eingetragen"]
+
+    def satz_notiz(n: int) -> None:
+        lauf.notiz_hinzufuegen(
+            f"Kniebeuge: {n}",
+            marke={
+                "quelle": "person",
+                "art": "leistung",
+                "name": "Kniebeuge",
+                "feld": "reps",
+                "wert": n,
+            },
+            uebungen=[KB],
+        )
+
+    satz_notiz(wert)  # die Notiz zum gezählten Satz
+    assert gemeldet == [v] and lauf.letzter_satz == v  # vorher: ein zweiter Vergleich
+    _satz_senden(lauf, innen, zeit, e, k, 10.0, tipps=5)
+    satz_notiz(wert)  # ein Satz von Hand, zufällig gleich viele
+    assert len(gemeldet) == 2 and gemeldet[-1]["marken"] == 5
+    await lauf.diagnose_beenden()
+    lauf.aufnahme = None
+    await lauf.trennen()
+
+
+async def test_funkabriss_beendet_das_zaehlen_sofort_als_getrennt(aufbau) -> None:
+    """Reißt die Funkverbindung ab, verbindet die Quelle selbst neu (Status „verbinde“) — die
+    Anforderung bleibt. Das Zählen endet trotzdem sofort als ``abbruch`` mit ``getrennt``
+    (Vertrag §4.3: „Das Gerät wird getrennt“), nicht 60 s später als „keine Bewegung“, während
+    die Zahl stehen bliebe, als zählte es weiter."""
+    from trainingsapp.devices.base import Verbindung
+
+    a = aufbau
+    e, z = _zaehllauf(a)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 20, e)
+    gezaehlt = z.wert
+    assert gezaehlt > 0 and z.aktiv
+    a.gurt._status_aendern(verbindung=Verbindung.VERBINDE, meldung="verbinde neu")
+    await ruhe()
+    assert a.lauf.acc_anforderungen  # die Quelle verbindet selbst neu — niemand gab frei
+    a.uhr.t += 1.0
+    e.takt()
+    assert z.grund == ENDE_ABBRUCH and z.getrennt and not z.von_aussen  # vorher: zählte weiter
+    assert ze.wiederholungen(e.ereignisse) == [gezaehlt]
+    assert ze.von_selbst_text(z.grund, getrennt=z.getrennt) == "Sensor getrennt"
+    assert a.lauf.acc_anforderungen == {}  # frei — der Akku geht vor
+    a.gurt._status_aendern(verbindung=Verbindung.VERBUNDEN)
+    await ruhe()
+
+
+async def test_ohne_beschleunigung_endet_es_nicht_als_keine_bewegung(aufbau) -> None:
+    """Liefert das Gerät nach dem Tipp keine Beschleunigung (abgelehnt, nicht erprobt — die
+    Verity Sense), endet das Zählen nach `KEINE_DATEN_S` als ``abbruch`` mit ``ohne_daten`` —
+    nicht nach 60 s als „keine Bewegung“, denn gemessen hat niemand. Bis dahin „Sensor
+    startet …“; die Korrektur bleibt nachtragbar."""
+    from trainingsapp.core.zaehlen import KEINE_DATEN_S
+
+    a = aufbau
+    e, z = _zaehllauf(a)
+    e.starten()
+    await ruhe()
+    assert z.korrigieren(+1)
+    phasen = set()
+    for _ in range(int(KEINE_DATEN_S) + 2):
+        a.uhr.t += 1.0
+        a.gurt.schlag(1000)  # Herzschlag ja — Beschleunigung nie
+        await ruhe()
+        if e.laeuft:
+            e.takt()
+            phasen.add(z.phase)
+    assert phasen <= {PHASE_STARTET, "ende"}
+    # vorher: erst nach 60 s, als „keine Bewegung“
+    assert z.grund == ENDE_ABBRUCH and z.ohne_daten and not z.getrennt
+    (ende,) = _arten(e, "zaehlen_ende")
+    assert ende.t_s == pytest.approx(KEINE_DATEN_S, abs=1.0)
+    assert ze.von_selbst_text(z.grund, ohne_daten=z.ohne_daten) == "keine Daten vom Sensor"
+    assert ze.wiederholungen(e.ereignisse) == [1]
+
+
+async def test_lange_rechnung_rechnet_seltener(aufbau, monkeypatch) -> None:
+    """Plan §5.2: „Ziel unter 20 ms je Takt, sonst alle 2 s“ — dauert eine Rechnung 60 ms (ein
+    langer Satz, 200 Hz im Diagnosemodus), rechnet der Teil nur noch alle 3 s statt jede
+    Sekunde; vorher hielt sie die Schleife (sie trägt auch Bluetooth) jede Sekunde auf."""
+    from types import SimpleNamespace
+
+    a = aufbau
+    aufrufe: list[int] = []
+    echt = prototyp_wdh.zaehlen
+
+    def gezaehlt(xyz, rate_hz, t0_s=0.0):
+        aufrufe.append(len(xyz))
+        return echt(xyz, rate_hz, t0_s)
+
+    uhr = itertools.count(step=0.06)  # zwei Ablesungen je Rechnung: sie dauert 60 ms
+    monkeypatch.setattr(zaehlen_modul.prototyp_wdh, "zaehlen", gezaehlt)
+    monkeypatch.setattr(zaehlen_modul, "time", SimpleNamespace(perf_counter=lambda: next(uhr)))
+    e, z = _zaehllauf(a)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 32, e, schritt=0.25)
+    assert z.laufzeit_ms == pytest.approx(60.0) and zaehlen_modul.takt_nach(60.0) == 3.0
+    assert 6 <= len(aufrufe) <= 12  # vorher: je Sekunde eine, gut 30
+    assert z.sensor is not None and abs(z.sensor - 12) <= 2
+    z.fertig()
+
+
+async def test_satz_laenger_als_der_puffer_endet_statt_zu_wenig_zu_zaehlen(aufbau) -> None:
+    """Fällt der Anfang eines Satzes aus dem vollen Puffer (`ACC_PUFFER_RAHMEN`, hier kleiner:
+    200 Rahmen zu 0,18 s), zählte der Prototyp nur noch das Ende — still zu wenig. Lieber eine
+    Lücke als ein falscher Wert: Das Zählen endet als ``abbruch`` mit ``zu_lang``, die letzte
+    ganze Zahl bleibt und lässt sich nachtragen."""
+    from collections import deque
+
+    a = aufbau
+    a.lauf._acc_puffer = deque(maxlen=200)
+    e, z = _zaehllauf(a)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 30, e)
+    vorher = z.sensor
+    assert vorher is not None and z.aktiv and a.lauf.acc_verloren_bis is None
+    await _sekunden(a, 20, e)
+    assert z.grund == ENDE_ABBRUCH and z.zu_lang  # vorher: zählte weiter, nur noch das Ende
+    assert a.lauf.acc_verloren_bis is None  # freigegeben: der Puffer ist leer
+    (satz,) = _saetze(e)
+    assert satz.daten["sensor"] >= vorher  # die letzte ganze Zahl, nicht weniger
+    assert ze.zaehl_abgebrochen(e.ereignisse) and ze.wiederholungen(e.ereignisse)
+    assert ze.von_selbst_text(z.grund, zu_lang=z.zu_lang) == "Satz zu lang für den Sensor"

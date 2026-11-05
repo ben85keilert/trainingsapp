@@ -16,7 +16,7 @@ Ben, 4.11.2026 (`docs/plan_beschleunigung.md` §3, §4, §12):
   nur die Korrektur der Messung, kein Handzähler (P118).
 - `rate_waehlen` — die Rate, die das Zählen beim Gerät anfordert (P119b: Akku vor).
 - Ende-Gründe ``ENDE_*`` (Zeitleiste, Art ``zaehlen_ende``) und die Grenzen
-  ``KEINE_BEWEGUNG_S``, ``KEIN_ATEM_S``, ``MIN_RATE_HZ``, ``BEREICH_G``.
+  ``KEINE_BEWEGUNG_S``, ``KEIN_ATEM_S``, ``KEINE_DATEN_S``, ``MIN_RATE_HZ``, ``BEREICH_G``.
 
 Rein und ohne flet. Die Übung (`core.models.Exercise`) kennt das Modul nur als Typ: `models`
 holt `SensorWahl` von hier, ein Import zur Laufzeit liefe im Kreis.
@@ -71,6 +71,11 @@ EINGETRAGEN: Final = frozenset({ENDE_FERTIG, ENDE_ABGEHAKT})
 KEINE_BEWEGUNG_S: Final = 60.0
 #: Nur Atmung: so lange ohne erkennbaren Atemzug (abgelegt, verrutscht)
 KEIN_ATEM_S: Final = 120.0
+#: So lange ohne einen Rahmen der Beschleunigung (das Gerät liefert sie nicht — abgelehnt,
+#: nicht erprobt —, oder der Strom bleibt aus), dann endet das Zählen als ``abbruch``: nicht
+#: als „keine Bewegung“, denn bewegt hat sich vielleicht die Person, nur gemessen hat niemand
+#: (Proben kommen ein bis zwei Sekunden nach dem Tipp, §4.3 Punkt 2)
+KEINE_DATEN_S: Final = 15.0
 #: Kleinste Rate, mit der gezählt wird (H10 50 Hz, Verity Sense 52 Hz)
 MIN_RATE_HZ: Final = 50
 #: Messbereich in g — Sprünge überschreiten 2 g

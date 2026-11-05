@@ -27,8 +27,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from trainingsapp.core import zaehlen as zl
+from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.zaehlen_eintrag import ende_text
 from trainingsapp.devices.base import Verbindung
+from trainingsapp.devices.plan_ablauf import PlanAblaufBaustein
 from trainingsapp.devices.profiles import CAP_PMD_ACC
 from trainingsapp.devices.zaehlen import (
     PHASE_ATMUNG,
@@ -107,16 +109,30 @@ def knopf(uebung: Exercise, item: PlanItem | None = None) -> str:
     return zl.knopf_text(zl.wiederholungen_an(uebung, item), zl.atmung_an(uebung))
 
 
+def im_plan_ablauf(state: Any) -> bool:
+    """Läuft gerade ein Plan-Ablauf? Darin zählt der Sensor noch nicht (Plan §13: der Ablauf
+    trägt je Übung selbst ein, `ui.plan_ablauf.nach_der_uebung`) — einen Knopf, der dort nur
+    „Es läuft schon eine Einheit“ meldete, gibt es darum nicht.
+
+    >>> from types import SimpleNamespace as NS
+    >>> im_plan_ablauf(NS(einheit=None))
+    False
+    """
+    e = getattr(state, "einheit", None)
+    return e is not None and e.laeuft and isinstance(e.teil("plan"), PlanAblaufBaustein)
+
+
 def sichtbar(
     state: Any, uebung: Exercise, *, item: PlanItem | None = None, nachtrag: Any = None
 ) -> bool:
-    """Ob die Karte „Eintragen“ die Zählzeile zeigt: nicht beim Nachtragen, an der (Plan-)Übung
-    ein Schalter an, ein Gerät mit Beschleunigungssensor verbunden (P118: sonst gibt es weder
-    Knopf noch ±1)."""
+    """Ob die Karte „Eintragen“ den Knopf der Zählzeile zeigt: nicht beim Nachtragen, an der
+    (Plan-)Übung ein Schalter an, ein Gerät mit Beschleunigungssensor verbunden (P118: sonst
+    gibt es weder Knopf noch ±1) und kein Plan-Ablauf im Gang (`im_plan_ablauf`)."""
     return (
         nachtrag is None
         and zaehlen_an(uebung, item)
         and geraet_kann_zaehlen(getattr(state, "messlauf", None))
+        and not im_plan_ablauf(state)
     )
 
 
@@ -155,6 +171,21 @@ def zaehl_teil(
     if nur_aktiv and not z.aktiv:
         return None
     return z
+
+
+def zaehlt_der_sensor(state: Any, uebung_id: str, item_id: str | None, feld_key: str) -> bool:
+    """Zählt der Sensor gerade in dieses Feld dieser (Plan-)Übung? Dann gibt es dafür keine
+    Eingabe von Hand (P122, Plan §4.4: entweder die Person oder der Sensor — „die Person
+    korrigiert höchstens mit ±1“); ein Chip „+10“ hängte sonst einen zweiten Satz neben den
+    gezählten. Beides zugleich gibt es nur zum Prüfen, im Diagnosemodus (Abschnitt 6) — dort
+    ``False``."""
+    z = zaehl_teil(state, uebung_id, item_id, nur_aktiv=True)
+    if z is None or not z.wdh:
+        return False
+    if z.feld != feld_key and not (z.feld is None and basis_key(feld_key) == zl.WDH_ART):
+        return False
+    lauf = getattr(state, "messlauf", None)
+    return not (lauf is not None and getattr(lauf, "diagnose_aktiv", False))
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +342,7 @@ __all__ = [
     "anmelden",
     "anzeigen",
     "geraet_kann_zaehlen",
+    "im_plan_ablauf",
     "klein_text",
     "knopf",
     "korrigieren",
@@ -323,5 +355,6 @@ __all__ = [
     "wdh_im_abschnitt",
     "zaehl_teil",
     "zaehlen_an",
+    "zaehlt_der_sensor",
     "zahl_text",
 ]

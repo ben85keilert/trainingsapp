@@ -121,6 +121,7 @@ from trainingsapp.core.uebung_timer import timer_fuer, uhr_an
 from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
 from trainingsapp.core.zaehlen import ENDE_ABGEHAKT
 from trainingsapp.ui import marken, uebung_lauf
+from trainingsapp.ui.components import zaehl_stand
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
@@ -188,6 +189,8 @@ class Nachtrag:
 LEISTUNGEN_TIPP = "Alle Einträge von heute ansehen, korrigieren oder löschen"
 #: Ein Tipp auf einen geschlossenen Eintrag (`eintrag_blatt`)
 EINTRAG_TIPP = "Wieder öffnen, bearbeiten oder löschen"
+#: Statt der Mengenzeile, solange der Sensor in dieses Feld zählt (P122)
+SENSOR_ZAEHLT = "Der Sensor zählt — korrigieren mit −1/+1"
 #: Ein Tipp auf einen offenen Eintrag mit anderer Ausführung: sie wählen
 WAEHLEN_TIPP = "Diese Ausführung wählen — die nächsten Tipps gehen hierhin"
 #: Das „i“ im Kopf von „Heute geleistet“ (Ben, 19.10.2026: die Erklärung nicht im Block)
@@ -619,7 +622,21 @@ def plan_view(
 
         return handler
 
+    def sensor_zaehlt(item: PlanItem, feld: FieldSpec) -> bool:
+        """Zählt der Sensor gerade in dieses Feld? Dann keine Eingabe von Hand (P122, Plan
+        §4.4: „die Person korrigiert höchstens mit ±1“; beides zugleich nur im Diagnosemodus,
+        `zaehl_stand.zaehlt_der_sensor`)."""
+        planuebung = None if einzel else item.id
+        return nachtrag is None and zaehl_stand.zaehlt_der_sensor(
+            state, item.exercise_id, planuebung, feld.key
+        )
+
     def anhaengen(item: PlanItem, feld: FieldSpec, werte: list[float]) -> None:
+        if sensor_zaehlt(item, feld):
+            # Ein Knopf von vor dem Tipp auf „Wdh. zählen“ — sonst stünden zwei Werte für
+            # einen Satz im Eintrag (der von Hand und der gezählte)
+            page.show_dialog(ft.SnackBar(ft.Text(SENSOR_ZAEHLT)))
+            return
         uebung = uebung_fuer(item)
         session = state.sitzungen.session_fuer(state.profil.id, sitzungsplan, heute())
         eintrag = None
@@ -1720,6 +1737,14 @@ def plan_view(
                 *([ft.Text(zusatz, size=10, opacity=0.6)] if zusatz else []),
             ],
         )
+        if sensor_zaehlt(item, feld):
+            # Entweder die Person oder der Sensor (P122): solange er in dieses Feld zählt,
+            # weder Chips noch eigener Wert — ±1 steht an der Zahl
+            return ft.Row(
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[name, ft.Text(SENSOR_ZAEHLT, size=12, opacity=0.7, expand=True)],
+            )
         # Eine Auswahl (Seite) gibt es nur über die Knöpfe
         frei = mengen_eingabe(item, feld) if feld.type != FieldType.CHOICE else None
         if not werte:

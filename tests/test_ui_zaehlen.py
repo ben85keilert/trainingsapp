@@ -208,7 +208,14 @@ def test_karte_beschleunigungssensor_speichert_nur_was_man_umlegt(formular) -> N
     texte = _texte(ansicht)
     assert texte.index("UHR UND TIMER") < texte.index("BESCHLEUNIGUNGSSENSOR")
     assert texte.index("BESCHLEUNIGUNGSSENSOR") < texte.index("VIDEOS UND LINKS")
-    assert "Prototyp" in texte and "Automatisch" in texte
+    assert "Prototyp" in texte
+    (bewegung,) = [x for x in _alle(ansicht) if isinstance(x, ft.Dropdown)]
+    assert bewegung.value == "auto" and [o.text for o in bewegung.options] == [
+        "Automatisch",
+        "Kniebeuge",
+        "Liegestütz",
+    ]
+    assert any(t.startswith("Umkehrpunkt oben — die Hauptachse") for t in texte)
     hilfen = [
         x.tooltip
         for x in _alle(ansicht)
@@ -255,6 +262,43 @@ def test_karte_beschleunigungssensor_speichert_nur_was_man_umlegt(formular) -> N
     assert state.uebungen.laden(u.id).beschleunigung.wiederholungen is True
 
 
+def test_bewegung_waehlt_die_vorlage_und_laesst_unbekannte_in_ruhe(formular) -> None:
+    """A5: „Bewegung“ bietet Automatisch, Kniebeuge, Liegestütz (`VORLAGEN_ANGEBOT`) mit dem
+    Hinweis je Vorlage; gewählt wird gespeichert, unberührt bleibt, was war — auch ein
+    Schlüssel, den diese App nicht anbietet (ein Paket, ein neueres hrv-core): er zeigt
+    „Automatisch“ und wird beim Speichern nicht überschrieben."""
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+
+    page, state = formular
+    u = _kniebeuge(state, "Kniebeuge", "reps")
+    ansicht = uebung_bearbeiten(page, state, u)
+    (bewegung,) = [x for x in _alle(ansicht) if isinstance(x, ft.Dropdown)]
+    bewegung.value = "kniebeuge"
+    bewegung.on_select()
+    assert any(t == "Umkehrpunkt oben — nur für den Brustgurt geprüft" for t in _texte(ansicht))
+    asyncio.run(_knopf(ansicht, "Speichern").on_click())
+    assert state.uebungen.laden(u.id).beschleunigung == SensorWahl(vorlage="kniebeuge")
+    # Wieder geöffnet: die Wahl steht da; zurück auf Automatisch wird gespeichert
+    ansicht = uebung_bearbeiten(page, state, state.uebungen.laden(u.id))
+    (bewegung,) = [x for x in _alle(ansicht) if isinstance(x, ft.Dropdown)]
+    assert bewegung.value == "kniebeuge"
+    bewegung.value = "auto"
+    bewegung.on_select()
+    asyncio.run(_knopf(ansicht, "Speichern").on_click())
+    assert state.uebungen.laden(u.id).beschleunigung == SensorWahl()
+    # Ein unbekannter Schlüssel bleibt, solange man nichts wählt
+    fremd = _kniebeuge(state, "Rudern", "reps", beschleunigung=SensorWahl(vorlage="rudern"))
+    ansicht = uebung_bearbeiten(page, state, fremd)
+    (bewegung,) = [x for x in _alle(ansicht) if isinstance(x, ft.Dropdown)]
+    assert bewegung.value == "auto"
+    asyncio.run(_knopf(ansicht, "Speichern").on_click())
+    assert state.uebungen.laden(fremd.id).beschleunigung == SensorWahl(vorlage="rudern")
+    bewegung.value = "liegestuetz"
+    bewegung.on_select()
+    asyncio.run(_knopf(ansicht, "Speichern").on_click())
+    assert state.uebungen.laden(fremd.id).beschleunigung == SensorWahl(vorlage="liegestuetz")
+
+
 def test_zaehlt_in_bei_zwei_feldern_und_ausgegraut_ohne_feld(formular) -> None:
     """Zwei Wiederholungsfelder (P106): „Zählt in“ unter den Namen der Karten — die Wahl des
     ersten bleibt leer. Ohne Wiederholungsfeld ist der Schalter ausgegraut; Atmung beim Typ
@@ -297,6 +341,8 @@ def test_uebungsseite_zeigt_den_sensor_nur_wenn_er_an_ist(formular) -> None:
     texte = _texte(uebung_detail(page, state, u, browser))
     assert "BESCHLEUNIGUNGSSENSOR" in texte
     assert "Wiederholungen · Atmung" in texte and "Prototyp" in texte
+    kb = _kniebeuge(state, "Kniebeuge", beschleunigung=SensorWahl(vorlage="kniebeuge"))
+    assert "Prototyp · Kniebeuge" in _texte(uebung_detail(page, state, kb, browser))
     planke = _kniebeuge(state, "Planke", "hold")
     texte = _texte(uebung_detail(page, state, planke, browser))
     assert "Wiederholungen · Atmung" not in texte and "Atmung" not in texte

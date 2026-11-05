@@ -139,8 +139,17 @@ nichts ein — der Lauf steht dann unter „Läufe heute“ und lässt sich dort
 
 **Wiederholungen** gibt es nur bei einer Übung mit einem Parameter der Art
 „Wiederholungen“ — ohne ihn ist der Schalter ausgegraut: Der Sensor wüsste nicht, wohin mit
-der Zahl. Hat die Übung mehrere, wählst du unter „Zählt in“, welches. **Bewegung:**
-zuerst nur „Automatisch“ (die Hauptachse der Bewegung); Vorlagen je Übung kommen später.
+der Zahl. Hat die Übung mehrere, wählst du unter „Zählt in“, welches.
+
+**Bewegung** ist die Vorlage, nach der der Sensor zählt: **Automatisch** nimmt die
+Hauptachse der Bewegung und passt zu jedem Gerät; **Kniebeuge** nimmt die Neigung des
+Rumpfs (geprüft nur mit dem Brustgurt — an einem anderen Gerät zählt die Übung automatisch
+und sagt es in der kleinen Zeile); **Liegestütz** ist eine Erwartung ohne Messdaten. Gezählt
+wird immer am **Umkehrpunkt oben**: Eine Wiederholung ist vollendet, wenn du in die
+Ausgangslage zurückkommst — die Zahl springt dann, nicht schon am tiefsten Punkt. Eine
+**halbe** Wiederholung (deutlich weniger Weg als sonst) steht klein daneben („2 halbe“) und
+zählt nicht; eine Wiederholung, die der Sensor zu früh meldete, nimmt er zurück (die Zahl
+sinkt einmal), deine Korrekturen bleiben.
 
 **Atmung** geht in jeder Übung, denn jede kann eine Atemkomponente haben; von selbst an ist
 sie bei Übungen vom Typ „Atmung“. Ein Prototyp (hrv-core, `prototyp.atemzuege`) erkennt aus
@@ -154,7 +163,8 @@ sitzend und liegend; langsames **und** flaches Atmen zählt der Prototyp noch un
 erste gezählte Satz zugleich die Probe. Verbunden genügt, eine Aufnahme braucht es nicht.
 
 **Prototyp:** Das Verfahren ist noch in Entwicklung (hrv-core, `prototyp.wiederholungen`);
-die Zahl kann anfangs springen und erscheint meist ab der dritten Wiederholung. Gespeichert
+es zählt jede Wiederholung, sobald sie geschieht, eingestellt bisher an wenigen Sätzen eines
+Menschen mit dem Brustgurt. Gespeichert
 werden nur Ergebnisse — Wiederholungen je Satz mit ihren Zeiten und deine Korrekturen —, nie
 die Rohdaten der Beschleunigung; die gibt es nur im Diagnosemodus. Entweder zählst du oder der
 Sensor: Beides zugleich ist nur zum Prüfen gedacht (Diagnosemodus).

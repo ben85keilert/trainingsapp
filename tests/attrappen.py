@@ -62,6 +62,11 @@ class Gurt(HeartRateSource):
         self.bewegung = True
         self.wdh_periode_s = 2.5
         self.acc_hub_mg = 300.0
+        #: Lage des Gurts in Ruhe (mG) und Richtung der Bewegung je Achse — wie bisher die
+        #: Schwerkraft auf y; für die Vorlage „Kniebeuge“ (Neigung z–x) lage (−1000, 0, 100)
+        #: und achse (0.1, 0, −1) wie im Doctest von ``hrv_core.prototyp.wiederholungen``
+        self.acc_lage = (0.0, -1000.0, 0.0)
+        self.acc_achse = (0.2, 1.0, 0.0)
         #: Atmung 6/min auf z (mG) — 0: die Person hält den Atem an (Ende ``kein_atem``)
         self.atem_mg = 25.0
         self.acc_rahmen_s = 0.18
@@ -129,7 +134,11 @@ class Gurt(HeartRateSource):
                 # Wie auf der Brust: z fällt beim Einatmen, (x − z) steigt (Prototyp
                 # ``hrv_core.prototyp.atemzuege``) — das Einatmen beginnt bei t ≡ 7,5 mod 10
                 atem = -self.atem_mg * math.sin(2 * math.pi * t / 10.0)
-                proben.append((round(0.2 * hub), round(-1000 + hub), round(atem)))
+                lx, ly, lz = self.acc_lage
+                ax, ay, az = self.acc_achse
+                proben.append(
+                    (round(lx + ax * hub), round(ly + ay * hub), round(lz + az * hub + atem))
+                )
             t_letzte = self._acc_t + (n - 1) / rate
             self._acc_t += n / rate
             k += 1

@@ -110,6 +110,13 @@ def test_standardpaket_ist_sauber_gepflegt() -> None:
     keys = [e.get("key", "") for e in eintraege]
     assert all(re.fullmatch(r"[a-z0-9_]+", k) for k in keys), "key fehlt oder hat Umlaute"
     assert len(keys) == len(set(keys)), "key doppelt"
+    # Vorlagen der Bewegung (A5): nur, was die App anbietet — Kniebeuge und Liegestützen
+    # tragen ihre; der Rest zählt automatisch
+    from trainingsapp.core.zaehlen import VORLAGEN_ANGEBOT
+
+    vorlagen = {e["key"]: e.get("beschleunigung", {}).get("vorlage") for e in eintraege}
+    assert all(v is None or v in VORLAGEN_ANGEBOT for v in vorlagen.values())
+    assert vorlagen["kniebeuge"] == "kniebeuge" and vorlagen["liegestuetzen"] == "liegestuetz"
     for e in eintraege:
         wo = f"Übung „{e['name']}“"
         assert e.get("description"), f"{wo}: Beschreibung fehlt"
@@ -860,6 +867,10 @@ def test_beschleunigung_reist_im_paket(con, tmp_path) -> None:
     u = Exercise(name="Kniebeuge", beschleunigung=wahl)
     d = stand(u)
     assert d["beschleunigung"] == {"wiederholungen": False, "atmung": True, "vorlage": "neigung_zy"}
+    # Die Vorlage reist im Paket (A5): hin und zurück derselbe Schlüssel
+    kb = Exercise(name="Kniebeuge", beschleunigung=SensorWahl(vorlage="kniebeuge"))
+    assert stand(kb)["beschleunigung"] == {"vorlage": "kniebeuge"}
+    assert aus_stand(kb.id, "p1", stand(kb)).beschleunigung == SensorWahl(vorlage="kniebeuge")
     assert "beschleunigung" not in stand(Exercise(name="Planke"))  # die Vorgabe schreibt sich nicht
     assert aus_stand(u.id, "p1", d).beschleunigung == wahl
     # Drei-Wege-Abgleich: hier geändert, im Paket unverändert → bleibt; hier unverändert, im

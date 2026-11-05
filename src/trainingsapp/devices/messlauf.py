@@ -96,7 +96,8 @@ PROBE_S = 30.0
 #: Längste Dauer des Vorabtests im Sensorblatt (s)
 VORABTEST_S = 20.0
 #: So viele ACC-Rahmen hält der Puffer (200 Hz, 36 Proben je Rahmen: gut 10 min) — ein Satz,
-#: der länger läuft, endet (`devices.zaehlen`: ``zu_lang``), statt still zu wenig zu zählen
+#: der länger läuft, zählt der Live-Zähler weiter (`devices.zaehlen`, A5: kein Fenster); nur
+#: der Rückfall im Diagnose-Vergleich (`_satz_vergleichen`, Satzfenster) sähe dann zu wenig
 ACC_PUFFER_RAHMEN = 3600
 #: Rate, wenn die Quelle keine nennt (Vorgabe des H10 in hrv-core)
 ACC_RATE_VORGABE_HZ = 200

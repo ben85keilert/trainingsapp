@@ -31,8 +31,9 @@
 #                Einseitige Übungen enden mit „Je Seite.“
 #   limit_spec   Timer: { rules = [{ type = "timer", seconds = 300 }] }
 #   media        Videos: [{ uri = "https://…", title = "Erklärvideo" }]
-#   beschleunigung { wiederholungen = false, atmung = true } — nur, was von der
-#                Vorgabe abweicht (Wdh. bei Feld reps, Atmung bei Typ Atmung)
+#   beschleunigung { wiederholungen = false, atmung = true, vorlage = "kniebeuge" } —
+#                nur, was von der Vorgabe abweicht (Wdh. bei Feld reps, Atmung bei
+#                Typ Atmung, Bewegung „auto“); Vorlagen: auto, kniebeuge, liegestuetz
 
 format = "trainingsapp-uebungspaket"
 version = 1
@@ -43,8 +44,8 @@ version = 1
 id = "2c1194ea-67ba-536d-aa7d-bf74bc3c73d4"
 name = "Standard"
 beschreibung = "Die wichtigsten Übungen zum Einstieg: Atmung, Mobilisation, Dehnung, Kräftigung, Gleichgewicht und Messwerte zum Vergleichen."
-version = 3
-neuigkeiten = "Vier Messungen für die Herzfrequenz: Ruhe-HF morgens (10 min), Submaximaltest, Talk-Test und Feld-Maximaltest — mit Timer-Stufen, ausgewertet in der Herzfrequenz-Sicht."
+version = 4
+neuigkeiten = "Kniebeuge und Liegestützen zählen mit ihrer Vorlage für den Beschleunigungssensor (Bewegung: Kniebeuge bzw. Liegestütz, Umkehrpunkt oben)."
 
 
 # ── Atmung ──────────────────────────────────────────────────────────────────
@@ -195,6 +196,7 @@ typen = ["Kräftigung"]
 regionen = ["Bein"]
 icon_key = "accessibility_new"
 description = "Füße hüftbreit, Gewicht auf den Fersen, Knie über den Zehen. So tief, wie der Rücken gerade bleibt."
+beschleunigung = { vorlage = "kniebeuge" }
 
 [[exercises]]
 key = "aufstehen_stuhl"
@@ -285,6 +287,7 @@ regionen = ["Arm", "Rumpf"]
 spec = "wdh_oder_halten"
 icon_key = "fitness_center"
 description = "Hände schulterbreit, Körper in einer Linie. Brust Richtung Boden, kontrolliert hochdrücken. Auch als Halteübung in der Stützposition möglich."
+beschleunigung = { vorlage = "liegestuetz" }
 
 [[exercises]]
 key = "wandliegestuetz"

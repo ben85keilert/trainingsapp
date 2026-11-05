@@ -159,13 +159,16 @@ def _uhr_zeile(icon: ft.IconData, name: str, text: str) -> ft.Control:
 
 def beschleunigung_zeile(uebung: Exercise) -> ft.Control | None:
     """„Beschleunigungssensor: Wiederholungen · Atmung (Prototyp)“ (Ben, 4.11.2026,
-    ``docs/plan_beschleunigung.md`` §3.4) — ``None``, wenn beides aus ist. Bei mehreren
-    Wiederholungsfeldern dazu, in welches gezählt wird."""
+    ``docs/plan_beschleunigung.md`` §3.4) — ``None``, wenn beides aus ist. Mit einer Vorlage
+    der Bewegung ihr Name (A5), bei mehreren Wiederholungsfeldern dazu, in welches gezählt
+    wird."""
     wdh, atem = zl.wiederholungen_an(uebung), zl.atmung_an(uebung)
     if not (wdh or atem):
         return None
     name = " · ".join(n for n, an in (("Wiederholungen", wdh), ("Atmung", atem)) if an)
     text = "Prototyp"
+    if wdh and uebung.beschleunigung.vorlage != zl.VORLAGE_AUTO:
+        text += f" · {zl.vorlage_name(uebung.beschleunigung.vorlage)}"
     if wdh and len(zl.wdh_felder(uebung)) > 1 and (feld := zl.zaehlt_in(uebung)):
         spec = uebung.result_spec.field_by_key(feld)
         text += f" · zählt in {spec.label if spec is not None else feld}"

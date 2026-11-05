@@ -152,7 +152,8 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         # Zählen (``zaehlen/zaehlung`` je Satz, ``person/korrektur``): Satz, was gezählt wird
         # (``zaehlart`` wdh/atem — ``art`` ist ein Feld des Ereignisses), was der Sensor zählte,
         # die Korrektur der Person (Summe bzw. ``delta`` ±1), Vorlage der Bewegung, die Zeiten
-        # der gezählten Umkehrpunkte (``t_s``), das Profil des Geräts und der Prototyp
+        # der gezählten Umkehrpunkte (``t_s``), halbe Wiederholungen (A5: gezeigt, nicht
+        # gezählt), das Profil des Geräts und der Prototyp
         # (``"hrv_core.prototyp.wiederholungen@0.8.0"``, flach) — Ergebnisse, keine Rohdaten
         "satz",
         "zaehlart",
@@ -161,6 +162,7 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         "delta",
         "vorlage",
         "zeiten_s",
+        "halbe",
         "geraet",
         "prototyp",
         # … und ob die Person den Satz von Hand eintrug (Diagnosemodus, beide zählen): dann

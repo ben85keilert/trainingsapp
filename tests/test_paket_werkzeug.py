@@ -307,7 +307,8 @@ def test_pruefen_meldet_unsinn_in_beschleunigung(tmp_path) -> None:
             'beschleunigung = {wiederholungen = "nein", atmung = 1, wiederholung = false}',
         ).replace(
             'icon_key = "self_improvement"',
-            'icon_key = "self_improvement"\nbeschleunigung = {atmung = true, feld = "reps"}',
+            'icon_key = "self_improvement"\n'
+            'beschleunigung = {atmung = true, feld = "reps", vorlage = "rudern"}',
         ),
         encoding="utf-8",
     )
@@ -318,13 +319,15 @@ def test_pruefen_meldet_unsinn_in_beschleunigung(tmp_path) -> None:
     ]
     assert [h for h in hinweise if "beschleunigung" in h] == [
         "Übung „Baum“: beschleunigung: unbekannter Schlüssel „wiederholung“ — wird überlesen "
-        "(bekannt: wiederholungen, atmung, vorlage, feld)"
+        "(bekannt: wiederholungen, atmung, vorlage, feld)",
+        "Übung „Lotus“: beschleunigung: unbekannte Vorlage „rudern“ — zählt wie "
+        "„Automatisch“ (bekannt: auto, kniebeuge, liegestuetz)",
     ]
     # Die App liest dasselbe Paket weiter — mit der Vorgabe, wo Unsinn stand
     gelesen = paket_lesen(tomllib.loads(datei.read_text("utf-8")))
     assert [u.beschleunigung for u in gelesen.uebungen] == [
         SensorWahl(),
-        SensorWahl(atmung=True, feld="reps"),
+        SensorWahl(atmung=True, feld="reps", vorlage="rudern"),
     ]
     # Keine Tabelle: ein Fehler, nichts sonst
     datei.write_text(

@@ -308,22 +308,20 @@ def nicht_eingetragen_text(name: str, wdh: int, warum: str = "") -> str:
     return f"{text} — {warum}" if warum else text
 
 
-def von_selbst_text(
-    grund: str | None, *, getrennt: bool = False, ohne_daten: bool = False, zu_lang: bool = False
-) -> str:
+def von_selbst_text(grund: str | None, *, getrennt: bool = False, ohne_daten: bool = False) -> str:
     """Warum das Zählen von selbst endete und abgebrochen bleibt — für die Meldung „… nicht
     eingetragen“: `KEINE_BEWEGUNG_S` ohne neue Wiederholung, `KEIN_ATEM_S` ohne Atemzug, das
     Gerät ist getrennt (``abbruch`` mit ``getrennt``, auch ein Funkabriss) oder es kam
-    `KEINE_DATEN_S` lang keine Beschleunigung (``abbruch`` mit ``ohne_daten``), oder der Satz
-    lief länger, als der Puffer der Beschleunigung hält (``abbruch`` mit ``zu_lang``). Leer,
-    wenn es nicht von selbst endete (ein Tipp, die Uhr brach ab) oder eingetragen wird.
+    `KEINE_DATEN_S` lang keine Beschleunigung (``abbruch`` mit ``ohne_daten``). Leer, wenn es
+    nicht von selbst endete (ein Tipp, die Uhr brach ab) oder eingetragen wird. (Bis A5 gab es
+    „Satz zu lang für den Sensor“ — der Live-Zähler braucht kein Fenster mehr.)
 
     >>> von_selbst_text("keine_bewegung"), von_selbst_text("kein_atem")
     ('60 s ohne Bewegung', '2 min kein Atemzug erkannt')
     >>> von_selbst_text("abbruch", getrennt=True), von_selbst_text("abbruch")
     ('Sensor getrennt', '')
-    >>> von_selbst_text("abbruch", ohne_daten=True), von_selbst_text("abbruch", zu_lang=True)
-    ('keine Daten vom Sensor', 'Satz zu lang für den Sensor')
+    >>> von_selbst_text("abbruch", ohne_daten=True)
+    'keine Daten vom Sensor'
     >>> von_selbst_text("fertig", getrennt=True), von_selbst_text(None)
     ('', '')
     """
@@ -335,8 +333,6 @@ def von_selbst_text(
         return "Sensor getrennt"
     if grund == ENDE_ABBRUCH and ohne_daten:
         return "keine Daten vom Sensor"
-    if grund == ENDE_ABBRUCH and zu_lang:
-        return "Satz zu lang für den Sensor"
     return ""
 
 

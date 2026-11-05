@@ -262,7 +262,12 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Einatembeginn** (P135), RR je Phase — rechnet `core/atem_auswertung.py` beim Anzeigen je
   Messung und Abschnitt (korrigierte Reihe, Wanduhr) und der `ZaehlBaustein` live („Spanne 58
   ms“, nur mit Aufnahme); Regel F6 nach P136 (Sensor ab 3 gültigen Fenstern und 25 %, sonst
-  RR-Atmung im Modus aus dem Protokollfeld, `rr_modus`), nichts gespeichert.
+  RR-Atmung im Modus aus dem Protokollfeld, `rr_modus`), nichts gespeichert. **A5** (5.11.2026,
+  hrv-core 0.11.0): je Satz zählt der Live-Zähler `prototyp.wiederholungen.WdhLive` jede
+  Wiederholung sofort, **Umkehrpunkt oben** (P143, `core.zaehlen.vorlage_waehlen` überschreibt
+  den Katalogwert), halbe daneben, nie mitgezählt; Vorlagen in der Karte nur Automatisch ·
+  Kniebeuge · Liegestütz (`VORLAGEN_ANGEBOT`), die Achsen eines anderen Geräts → Automatisch mit
+  Grund; `zaehlen_fenster` nur noch als Rückfall im Diagnose-Vergleich ohne Zähl-Teil.
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`

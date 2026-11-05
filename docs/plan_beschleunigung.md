@@ -1,6 +1,6 @@
 # Plan: Beschleunigungssensor in Übungen — Wiederholungen zählen, Atmung erfassen, Ein- und Ausatmung in der HRV
 
-Stand 5.11.2026: **A1, A2, A3 und B1 gebaut** (Version 0.3.46, Abschnitt 13); T, B2, A5 und A6
+Stand 5.11.2026: **A1, A2, A3, B1, B2 und A5 gebaut** (Version 0.3.48, Abschnitt 13); T und A6
 folgen. Der Plan ist **angenommen** — Ben: „Plane das beides durch“, danach P117–P126 entschieden
 (Abschnitt 12) und „Falls nicht [noch Fragen offen], kannst du anfangen den Plan umzusetzen“. Die Verfahren
 entstehen in hrv-research (dort `beschleunigung/docs/PLAN_ZAEHLEN_ATEMPHASEN.md`); hier steht,
@@ -103,10 +103,14 @@ Forschungsfrage (Ben: „Später wird es interessant werden, auf die Wiederholun
 tracken und herauszufinden, ob man feststellen kann, welche Atmung die beste ist“;
 hrv-research Konzept C3). Für die App gilt dabei Abschnitt 10.
 
-### 3.2 Vorlagen (später)
+### 3.2 Vorlagen (A5, gebaut 5.11.2026)
 
-Ben: „Kniebeugen für x-Achse, Liegestützen Neigung zy…“ Zuerst gibt es nur „Automatisch“
-(P126). Eine Vorlage ist später eine Signalwahl mit Parametern, kein Code in der App:
+Ben: „Kniebeugen für x-Achse, Liegestützen Neigung zy…“ Zuerst gab es nur „Automatisch“
+(P126); seit A5 wählt die Karte unter **Bewegung** aus **Automatisch · Kniebeuge · Liegestütz**
+(P144, `core.zaehlen.VORLAGEN_ANGEBOT`; Rudern und Burpee aus dem Katalog bleiben draußen —
+Rudern zählt mit freier Rollenwahl am Nachlassen, Burpee ist ein Entwurf), mit einem Hinweis je
+Vorlage („nur für den Brustgurt geprüft“, „Erwartung, noch ohne Messdaten“). Eine Vorlage ist
+eine Signalwahl mit Parametern, kein Code in der App:
 
 - **Signal:** Hauptachse (gerätefrei), Betrag, eine feste Achse (x, y, z) oder die Neigung in
   einer Ebene (z–y, z–x). Die Neigung zählt gegen die Lage zu Satzbeginn, damit der Sitz des
@@ -117,11 +121,28 @@ Ben: „Kniebeugen für x-Achse, Liegestützen Neigung zy…“ Zuerst gibt es n
 
 Der Katalog liegt in hrv-core (`prototyp.wiederholungen.VORLAGEN`, Schlüssel → Vorlage). Die
 App speichert nur den Schlüssel und bietet an, was hrv-core kennt; praxis_gui sieht dieselbe
-Liste. Ein unbekannter Schlüssel (älteres hrv-core) gilt als „Automatisch“.
+Liste. Ein unbekannter Schlüssel (älteres hrv-core, ein Paket) gilt beim Zählen als
+„Automatisch“ und bleibt gespeichert, bis man anderes wählt („Übung bearbeiten“ zeigt dann
+„Automatisch“; `trainingsapp-paket pruefen` gibt einen Hinweis).
+
+**Umkehrpunkt oben** (P143, Ben 5.11.2026): Gezählt wird mit der Rückkehr in die Ausgangslage,
+nicht am fernen Ende — die App überschreibt `Vorlage.umkehr` beim Anlegen des `WdhLive` mit
+`oben` (`core.zaehlen.vorlage_waehlen`), auch für Kniebeuge (Katalog: `tal`); die Rollen fern/nah
+legt der erste Umkehrpunkt mit genügend Hub fest (hrv-core, Modultext Punkt 6). Fällt hrv-core
+von der Neigung auf die Hauptachse zurück (keine Schwerkraft in der Ebene z–x), setzt der
+Zähl-Teil den Umkehrpunkt wieder nach oben (`ZaehlBaustein._umkehr_oben`) und die Zeile sagt
+„Kniebeuge (Hauptachse)“. Eine eigene Wahl des Umkehrpunkts je Übung gibt es nicht (nur der
+Katalogwert, überschrieben); sie käme als Feld in `SensorWahl`, wenn ein Fall sie braucht.
 
 **Achsen sind gerätebezogen:** x am H10 ist nicht x an einem Garmin-Gurt. Eine Vorlage mit
-fester Achse nennt sie darum je Geräteprofil; sonst gilt das gerätefreie Signal. Welche Vorlage
-wofür taugt, klärt hrv-research offline an den Rohdaten aus dem Diagnosemodus.
+fester Achse nennt sie darum je Geräteprofil (`Vorlage.geraet`); an einem anderen Gerät (die
+Verity Sense am Arm) zählt der Teil mit „Automatisch“ und sagt es in der kleinen Zeile
+(„Automatisch (Vorlage nur für den Brustgurt)“), in der Zeitleiste steht, womit gezählt wurde.
+Welche Vorlage wofür taugt, klärt hrv-research offline an den Rohdaten aus dem Diagnosemodus;
+die Grenzen stehen in Entscheidung 26 dort (ein Mensch, ein Tag, ein Gurt, drei Sätze; keine
+Daten für Liegestütz; halbe Wiederholungen eine Setzung). Das Standardpaket (Version 4) gibt
+Kniebeuge und Liegestützen ihre Vorlage mit; was die Person an der Übung änderte, bleibt
+(Drei-Wege-Abgleich).
 
 ### 3.3 Ablage
 
@@ -213,13 +234,17 @@ sich auch ohne verbundenes Gerät eintragen.
 3. **Satz.** Ein Zähllauf ist ein Satz. Läuft dazu ein Timer, ist jeder Abschnitt, der zählt
    (`core.timer.Abschnitt.zaehlt`), ein eigener Satz; Pausen zählen nicht. „Anhalten“ der Uhr
    hält auch das Zählen an.
-4. **Live.** Jede Sekunde zählt der Prototyp das Satzfenster neu; in Stufe A1 ist das `zaehlen`
-   auf dem wachsenden Fenster. Die Zahl erscheint, sobald eine Periode erkennbar ist, meist ab
-   der dritten Wiederholung (vorher „…“). Anfangs kann sie springen. Mit A5 kommt ein
-   Live-Zähler, der jede Wiederholung zählt, wenn sie geschieht.
+4. **Live** (A5). Je Satz zählt der Live-Zähler `hrv_core.prototyp.wiederholungen.WdhLive`
+   jede Wiederholung, wenn sie geschieht: Die Zahl springt mit der Rückkehr in die Ausgangslage
+   (Umkehrpunkt oben, P143), bestätigt kurz danach — Verzug unter einer halben Periode. Vor der
+   ersten Wiederholung steht „…“. Eine Wiederholung, die der Zähler zu früh meldete (das
+   Hinstellen vor dem Satz), nimmt er zurück — die Zahl sinkt einmal. **Halbe** Wiederholungen
+   (Hub zwischen 40 und 60 % des typischen) stehen klein daneben („· 2 halbe“) und zählen nicht
+   (Ben, 5.11.2026). In Stufe A1 zählte der Prototyp jede Sekunde das Satzfenster neu
+   (`zaehlen_fenster`); das bleibt nur als Rückfall im Diagnose-Vergleich ohne Zähl-Teil.
 5. **Korrektur.** +1 heißt eine Wiederholung mehr, −1 eine weniger; beides wird mit Zeit und
-   Satz festgehalten. Angezeigt wird Sensor plus Korrektur, nie weniger als 0. Ab A5 hängt eine
-   Korrektur an der Wiederholung, die sie meint: −1 nimmt die zuletzt gezählte weg.
+   Satz festgehalten. Angezeigt wird Sensor plus Korrektur, nie weniger als 0. Eine Rücknahme
+   des Zählers rührt die Korrekturen nicht an.
 6. **Ende** (P119). Wechselt man nur die Ansicht, etwa zu „Messung“, um etwas nachzusehen, zählt
    es weiter; die Leiste zeigt es. Sonst gilt:
 
@@ -232,7 +257,7 @@ sich auch ohne verbundenes Gerät eintragen.
    | Nur Atmung: das Gerät liefert 2 min lang keinen erkennbaren Atemzug (abgelegt, verrutscht) | abgebrochen wie oben. „Keine Bewegung“ gilt hier nicht, denn bei einer Atemübung ist Stille gewollt |
    | Das Gerät wird getrennt (Umsetzung A1), auch ein Funkabriss, den die Quelle selbst neu verbindet | abgebrochen wie oben, sofort, mit dem Grund `abbruch` — nicht erst 60 s später als „keine Bewegung“; die Meldung endet auf „— Sensor getrennt“ |
    | Verbunden, aber 15 s keine Beschleunigung (`KEINE_DATEN_S`; abgelehnt, nicht erprobt) | abgebrochen wie oben (`abbruch`), „— keine Daten vom Sensor“ |
-   | Der Satz läuft länger, als der Puffer hält (gut 10 min, `ACC_PUFFER_RAHMEN`) | abgebrochen wie oben (`abbruch`) mit der letzten ganzen Zahl, „— Satz zu lang für den Sensor“ — sonst zählte der Prototyp still nur das Ende |
+   | Der Satz läuft länger, als der Puffer hält (gut 10 min, `ACC_PUFFER_RAHMEN`) | seit A5 nichts: Der Live-Zähler braucht den Puffer nur für die Proben seit dem letzten Takt — er zählt weiter (bis A5: `abbruch` „— Satz zu lang für den Sensor“) |
 
    Abgehakt wird auch mit einem Chip, der einen Wert einträgt (Zeit, Strecke, Seite): Der Wert
    kommt zu den Wiederholungen in denselben Eintrag, der dann schließt — nicht noch das Ziel.
@@ -305,9 +330,10 @@ Ist „Atmung“ an, erfasst derselbe Dienst die Atemzüge (ab A3; das braucht
 - Satzgrenzen eines Timers sieht er nur als Ereignisse der Einheit, über eine neue, freiwillige
   Methode `beobachten(ereignisse)` am `Baustein`. Die Teile kennen einander also weiterhin
   nicht.
-- `takt` holt das Fenster aus dem Puffer, ruft den Prototyp aus hrv-core und prüft „keine
-  Bewegung“. Die Laufzeit wird am Handy gemessen: Ziel unter 20 ms je Takt, sonst alle 2 s
-  oder über `asyncio.to_thread`. Die Ereignisschleife trägt auch Bluetooth.
+- `takt` holt die seit dem letzten Takt neuen Proben aus dem Puffer, gibt sie dem Live-Zähler
+  aus hrv-core (A5; bis dahin das ganze Satzfenster jede Sekunde) und prüft „keine Bewegung“.
+  Die Rechenlast je Probe ist konstant: Ziel unter 20 ms je Sekunde Daten
+  (`ZIEL_MS_JE_S`), am Rechner etwa 1 ms. Die Ereignisschleife trägt auch Bluetooth.
 - Das Ende beim Start einer anderen Übung und beim Abhaken löst die Oberfläche aus
   (`ui/uebung_lauf.py`), der Baustein selbst kennt nur „Fertig“, „Abbrechen“ und die beiden
   Zeitgrenzen.
@@ -322,9 +348,10 @@ Ist „Atmung“ an, erfasst derselbe Dienst die Atemzüge (ab A3; das braucht
 - **Zeitleiste** (Vertrag `docs/plan_einheit.md` §4, **zuerst** dort eintragen): Teil und
   Quelle `zaehlen` mit drei neuen Arten.
   - `zaehlung` steht je Satz, mit `satz`, `zaehlart` (wdh oder atem — `art` ist ein Feld des
-    Ereignisses), `sensor`, `korrektur`, `wert`, `feld`, `vorlage`, `zeiten_s` (die gezählten
-    Umkehrpunkte), `geraet` (Profil, von dem die Beschleunigung kam) und `prototyp` (Modul und
-    hrv-core-Version). Umsetzung A1, gegen den Absturz: Ein Satz steht da, sobald er endet, ein
+    Ereignisses), `sensor`, `korrektur`, `wert`, `feld`, `vorlage` (womit gezählt wurde, nach
+    einem Rückfall `auto`), `zeiten_s` (die gezählten Umkehrpunkte der ganzen Wiederholungen),
+    `halbe` (A5: halbe daneben, nicht gezählt), `geraet` (Profil, von dem die Beschleunigung
+    kam) und `prototyp` (Modul und hrv-core-Version). Umsetzung A1, gegen den Absturz: Ein Satz steht da, sobald er endet, ein
     laufender alle 15 s als Zwischenstand, wenn er sich änderte, und eine Korrektur in der
     Pause schreibt ihn neu — es gilt die letzte je Satz (`core.zaehlen_eintrag.zaehlungen`).
   - `korrektur` kommt von der Quelle `person`, mit `delta` (±1) und `satz`.
@@ -541,7 +568,7 @@ Patientenmessungen entwickelt; Läufe darauf startet Ben selbst.
 | **B1** | Abbildung in der Auswertung (Ebene „Atmung“, Karte), Live-Anzeige und Biofeedback; Protokollfeld „Atmung“ | trainingsapp, hrv-core | M |
 | **T** | Taktgeber im Timer, Animation getakteter Übungen mit Geschwindigkeitsregler, GIFs an der Übung, Spur `atemtakt` (A18, eigener Plan) | trainingsapp | M |
 | **B2** | Atem-HRV (`prototyp.atem_hrv`); Kennzahlen im Licht der Atmung (DFA α1, LF/HF …) | hrv-research → hrv-core → trainingsapp | M |
-| **A5** | Live-Zähler, der jede Wiederholung zählt, wenn sie geschieht; Vorlagen; Umkehrpunkt | hrv-research → hrv-core → trainingsapp | L |
+| **A5** | Live-Zähler, der jede Wiederholung zählt, wenn sie geschieht; Vorlagen; Umkehrpunkt — **gebaut 5.11.2026** (hrv-core 0.11.0 `WdhLive`, Abschnitt 13) | hrv-research → hrv-core → trainingsapp | L |
 | **A6** | „Im Plan einstellen“; praxis_gui | trainingsapp, praxis_gui | M |
 | später | Atmung je Wiederholung; vergleichen, wie geatmet wurde (Konzept C3) | hrv-research | — |
 
@@ -566,7 +593,7 @@ einer APK.
 
 P117 bestätigt (Ben): die Schalter sitzen an jeder Übung, nicht einer für alle.
 
-## 13. Umsetzungsstand (5.11.2026, Version 0.3.47)
+## 13. Umsetzungsstand (5.11.2026, Version 0.3.48)
 
 A1 und A2 sind gebaut, ohne Änderung an hrv-core (0.8.0): Der Zähler ist
 `hrv_core.prototyp.wiederholungen`, die Kontextzeilen nutzen nur Felder, die `hrv_core.deid`
@@ -590,6 +617,8 @@ hebt auf 0.9.2: `deid` kennt den Backup-Schlüssel `_journal`, keine Rechenände
 | B1 Auswertung | Gibt es das Beiwerk `_atem.json`, lädt die Auswertung es im Thread (wie EKG und Diagnose): die **Ebene „Atmung“** (`EBENE_ATMUNG`, Chip in der Farbe der Atemfrequenz, Knopf im Vollbild, gemerkt wie die anderen Ebenen; nur angeboten, wenn das Beiwerk da ist) schattiert das **Einatmen** über dem Tachogramm und im Vollbild und legt die Läufe „Atmung erfassen“ als feines Band oben — außerhalb der Läufe nichts (Vertrag §15). Die **Karte „Atmung (Prototyp)“** (nach dem HRV-Teil, vor EKG und Diagnose) nennt je Messung und je Abschnitt (Rechenbereich wie `werte_von`, nur wo erfasst wurde): Atemzüge (Phasen „ein“), Rate (Median der gültigen Fenster, „–“ ohne), Ein:Aus („1 : 1,4“, Median des Ausatmens je Einatmen), Gleichmäßigkeit (CV der Atemzugdauern), gültige Fenster, Dauer erfasst, Quelle „Sensor · Prototyp · Gerät“, das Protokollfeld in Worten und daneben die **Atmung aus RR** als Vergleich — eine Abweichung über 2/min wird genannt, nicht gewertet. Alles beim Anzeigen gerechnet (`core/atem_auswertung.py`, flet-frei), nichts gespeichert (§7.4), keine Wertung (§10) | `core/atem_auswertung.py`, `core/hrv_einstellungen.py`, `views/messung_detail.py` |
 | B1 Hinweis | **„Atmung < 9/min — liegt im LF-Band“** (§7.1): Kacheln LF/HF und DFA α1 bekommen den Hinweis als Grundzeile, die Kachel HF-Power zeigt „–“ mit „nicht ausgewiesen“; in den Tabellen Frequenz und Nichtlinear steht er unter den Zeilen, die HF-Zeile als „nicht ausgewiesen“; die Karte „Atmung“ sagt es dazu. Welche Rate gilt, ist die **Startregel F6** (in hrv-research offen, `atem_auswertung.hinweis_rate`): die Rate des Sensors, wenn mindestens die Hälfte der Prüffenster gültig war, sonst die Atmung aus RR (`hrv_core.atmung`, vorhandene Kachel), sonst keine | `core/atem_auswertung.py`, `views/messung_detail.py` |
 | B1 Live | Erfasst ein Zähl-Teil die Atmung, liegt im Live-Vollbild (`doppelkurve(hinten=…)`) und in der HF-Kurve der Messung das **Einatmen der letzten 60 s** als Schatten hinter den Kurven, die laufende Einatmung bis jetzt; im Kopf des Vollbilds „Atmung 12/min ▲“. Die Phasen hält der `ZaehlBaustein` selbst (`atem_phasen_s`, Achse der Einheit; `auf_messlauf` bringt sie auf die Achse der Kurven) — das geht auch **ohne Aufnahme**; `zaehl_stand.atem_teil`/`atem_phasen_live`/`atem_kopf_text` sind flet-frei, `components/atem_live.einatem_schatten` baut die Reihen. Nachgezogen über die vorhandenen Beobachter (Messlauf je Schlag, Einheit je Takt unter `einheit_beobachter["live_vollbild"]`), nur Reihen und Texte, keine Knöpfe. Beschreibend (P124): keine Atemspanne, keine Wertung — die Atemspanne des letzten Atemzugs kommt mit B2 | `devices/zaehlen.py`, `components/zaehl_stand.py`, `components/atem_live.py`, `views/live_vollbild.py`, `views/messung.py` |
+| A5 Live-Zähler | Je Satz ein `hrv_core.prototyp.wiederholungen.WdhLive` (hrv-core 0.11.0, Entscheidung 26 in hrv-research; `hrv-core.ref` steht auf 0.13.0) in der Rate des Laufs, gefüttert wie die Atem-Spur: jeden Takt nur die neuen Proben (`Messlauf.acc_reihe`, Ratenwechsel umgetaktet, je lückenlosem Stück ein Rahmen). `Wiederholung` → Zahl und Zeit sofort (`ZaehlSatz.ereignisse`, Achse der Einheit), `Ruecknahme` streicht die Nummer (die Zahl sinkt, ±1 bleibt), `halbe` daneben (Zeitleiste `halbe`, Zeile „· 2 halbe“), `Stand.signal` als `wdh_signal`. **Umkehrpunkt oben** (P143) über `core.zaehlen.vorlage_waehlen` (`umkehr = oben`) und `_umkehr_oben` nach dem Rückfall in hrv-core. „Keine Bewegung“ = 60 s ohne gemeldete ganze Wiederholung (eine halbe verschiebt nichts — Befund beim Bau: in Ruhe abseits der Ausgangslage meldete der Prototyp nach gut 20 s eine „halbe“ aus der wandernden Hauptachse); der Abschluss des Zählers beim Satzende zählt eine noch unbestätigte Rückkehr (die letzte Wiederholung endet in Ruhe). Weg: Satzfenster-Rechnung, `takt_nach`-Drosselung, `MIN_DATEN_S`, `zu_lang` (der Puffer ist kein Ende mehr); Rechenlast je Probe konstant — am Rechner **etwa 1 ms je Sekunde Daten** (`WdhLive` allein, 50 wie 200 Hz; im Zähl-Teil mit `acc_reihe` unter 20 ms, `rechenzeit_ms`/`daten_s`). Wirft der Prototyp, zählt ein frischer weiter (`wdh_fehler`). `zaehlen_fenster` (A1) bleibt nur als Rückfall in `Messlauf._satz_vergleichen` ohne Zähl-Teil | `devices/zaehlen.py`, `core/zaehlen.py`, `core/einheit.py` (`halbe`), `devices/messlauf.py` |
+| A5 Vorlagen | Karte „Beschleunigungssensor“: Auswahl **Bewegung** Automatisch · Kniebeuge · Liegestütz (`VORLAGEN_ANGEBOT`, Namen aus hrv-core, Hinweis je Vorlage unter der Auswahl, „Umkehrpunkt oben — …“); unbekannter Schlüssel zeigt „Automatisch“ und bleibt, bis man wählt; `vorlage_waehlen`: die Achsen eines anderen Geräts (`Vorlage.geraet` ≠ Profil) oder ein Entwurf → Automatisch mit Grund, in der Zählzeile „Automatisch (Vorlage nur für den Brustgurt)“ bzw. „Kniebeuge“ / „Kniebeuge (Hauptachse)“; Übungsseite „Prototyp · Kniebeuge“; `trainingsapp-paket pruefen` nennt unbekannte Vorlagen; Standardpaket Version 4: Kniebeuge → `kniebeuge`, Liegestützen → `liegestuetz` (Drei-Wege-Abgleich, Geändertes bleibt); Hilfetext mit Absatz zu Bewegung, Umkehrpunkt und halben | `core/zaehlen.py`, `views/uebung_bearbeiten.py`, `views/uebung_detail.py`, `components/zaehl_stand.py`, `components/hilfe.py`, `data/seed/standard.toml`, `paket_werkzeug.py` |
 | B1 Protokollfeld | **`atmung`** im Kopf der Messdatei (Vertrag §5, P125), direkt hinter `datenqualitaet`: `Messlauf.atmung_protokoll` ist ein Haken (Ereignisse der Aufnahme → Feld), den die Oberfläche mit dem Übungskatalog belegt (`zaehl_stand.atmung_protokoll`: Kurzcodes aus `uebungen` der Notizen, `core.zaehlen.atmung_an`); die Regel in `core/atem_protokoll.py`: Atemübung gelaufen → `uebung` mit Kurzcode, gar keine Übung → `spontan`, nur andere Übungen → kein Feld (unbekannt, es wird nicht geraten); `getaktet` erst mit dem Taktgeber (A18). Bestimmt im Loop (Backup alle 15 s im Block `_wiederherstellung`, vor dem Speichern), geschrieben nach `Aufnahme.speichern` an seinen Platz (`kopffeld_schreiben`); `backup_wiederherstellen` nimmt es aus dem Backup. `Recording.extra` hält es, `deid` behält es; Altdateien ohne Feld bleiben lesbar | `core/atem_protokoll.py`, `devices/messlauf.py`, `components/zaehl_stand.py`, `views/messung.py` |
 
 Tests (ohne flet, wo es geht; die flet-freien laufen auch im gesperrten Kindprozess von
@@ -649,17 +678,20 @@ einem konstanten Signal (Rundung der laufenden Summe unter 0 vor `sqrt`) — die
 - **B1 Rest** das Resonanzprotokoll (nur Praxis, `physiologische_steuerung`, 7.1 b); die
   Atemspanne live ist mit B2 da.
 - **T** Taktgeber im Timer (A18, eigener Plan).
-- **A5** Live-Zähler je Wiederholung, Vorlagen (heute nur „Automatisch“), Umkehrpunkt; bis dahin
-  zählt der Prototyp jede Sekunde das ganze Satzfenster neu.
+- **A5 Rest:** eine eigene Wahl des Umkehrpunkts je Übung (heute nur oben, Katalogwert
+  überschrieben), Rudern und Burpee als Vorlagen (Entscheidung 26: Rudern zählt mit freier
+  Rollenwahl am Nachlassen, Burpee ist ein Entwurf).
 - **A6** die Karte in „Im Plan einstellen“ und praxis_gui. Die Planübung folgt der Übung;
   den Knopf gibt es in einer Planübung nur, wenn sie ein Wiederholungsfeld anbietet.
 - **Zählen im Plan-Ablauf** (4.3 Punkt 6, „automatisch weiter“): Der Ablauf trägt je Übung
   selbst ein (`ui.plan_ablauf.nach_der_uebung`); solange er läuft, gibt es keinen Knopf
   (`zaehl_stand.im_plan_ablauf`), der Start sagt „Im Plan-Ablauf zählt der Sensor noch nicht“.
 
-**Nicht am Gerät geprüft:** Laufzeit je Rechnung am Handy (Ziel unter 20 ms; am Rechner etwa
-2–11 ms bei kurzen Sätzen, bei 10 min mit 200 Hz bis gut 250 ms — dann rechnet der Teil seltener,
-bis alle 5 s, `devices.zaehlen.takt_nach`; eine Rechnung selbst hält die Schleife so lange auf),
+**Nicht am Gerät geprüft:** Rechenlast des Live-Zählers am Handy (Ziel unter 20 ms je Sekunde
+Daten, `ZIEL_MS_JE_S`; am Rechner etwa 1 ms, unabhängig von der Satzlänge — bis A5: 2–11 ms je
+Rechnung bei kurzen Sätzen, bei 10 min mit 200 Hz bis gut 250 ms mit Drosselung), der Live-Zähler
+und die Vorlagen „Kniebeuge“/„Liegestütz“ an echten Sätzen (hrv-research hat eine Sitzung,
+Entscheidung 26; Diagnose-Sätze der trainingsapp mit dem Live-Zähler fehlen noch),
 STOP/START der ACC beim Ratenwechsel am echten H10 und an der Verity Sense (nur gegen
 den Fake-Transport), Größe der Flächen ±1 und die Breite der Zählzeile, die Meldung nach einem
 Blatt. Ob das Umtakten 200 → 50 Hz den Prototyp verfälscht, prüft hrv-research an den
@@ -839,6 +871,6 @@ Korrektur mit einem Test, der ohne sie scheitert):
 | P128 | Zählen im Plan-Ablauf | **später** (Katalog A19); der Knopf bleibt dort ausgeblendet |
 | P129 | Zwischenstände der `zaehlung` alle 15 s, es gilt die letzte je Satz | **ja** |
 | P130 | Funkabriss oder 15 s ohne Daten: sofort abgebrochen, Meldung mit „Eintragen“, keine Schonfrist | **passt** |
-| P131 | Lange Sätze: Rechnung gedrosselt bis alle 5 s, dauerhaft der Live-Zähler (A5) | **gut** |
+| P131 | Lange Sätze: Rechnung gedrosselt bis alle 5 s, dauerhaft der Live-Zähler (A5) | **gut** — seit A5 (5.11.2026) der Live-Zähler, keine Drosselung mehr |
 | P132 | Chip im Diagnosemodus neben dem Sensor | **„Chip und Satz sollen sich ergänzen“**: der Chip ist der eingetragene Wert des Satzes, den der Sensor zählte (`von_hand`), das Zählen läuft weiter. Wer von Hand eintragen oder nachtragen will, bricht das Sensorzählen ab und macht es direkt in den Leistungen — der Sensor und die Chips teilen sich außerhalb der Diagnose nie ein Feld (P122) |
 | P133 | Mit der Uhr beendet ein Chip den Satz seines Abschnitts; der Rest des Abschnitts zählt nicht mehr | **genau** — **außer die Atmung**: Wird sie für die HRV erfasst, läuft sie nebenbei weiter, unabhängig von Sätzen, Chips und Abschnitten (ein Chip rührt einen Atem-Lauf nicht an, `von_hand` gilt nur für Wiederholungen; für A3 verbindlich) |

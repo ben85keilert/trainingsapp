@@ -4,6 +4,11 @@ Ohne flet und ohne Gerät: Der Brustgurt der Attrappen (`attrappen.Gurt`) schick
 ACC-Rahmen mit einer Wiederholung je 2,5 s, die Uhr dreht der Test. Dazu der Simulator mit
 seiner synthetischen Beschleunigung und die Polar-Quelle über den `DiagnoseTransport` aus
 ``test_diagnose_geraete`` (Ratenwechsel, Diagnosemodus neben dem Zählen).
+
+Seit A5 (5.11.2026) zählt der Live-Zähler ``WdhLive`` aus hrv-core je Wiederholung, oben
+(Rückkehr in die Ausgangslage, P143): Die Sinusbewegung des Gurts beginnt in der Ausgangslage
+und läuft zuerst weg (Fernpunkt bei 0,625 s + k · 2,5 s), die Rückkehr (Nahpunkt) liegt bei
+1,875 s + k · 2,5 s — dort zählt es, bestätigt kurz danach (Hysterese).
 """
 
 from __future__ import annotations
@@ -160,6 +165,11 @@ async def test_zaehlt_ab_dem_tipp_mit_korrektur_und_traegt_den_satz_in_die_zeitl
         "offen": True,  # er zählt gerade: Übung und Phase gelten in der Leiste
     }
     assert z.fertig() and not z.aktiv and not z.fertig()
+    # Der Abschluss des Live-Zählers zählt eine Rückkehr, die noch nicht bestätigt war (die
+    # letzte endet in Ruhe): höchstens eine mehr als vor dem Tipp
+    ende_sensor = z.sensor
+    assert ende_sensor in (sensor, sensor + 1)
+    sensor = ende_sensor
     # Aus mit dem Ende, sofort und synchron — kein Nachlauf
     assert a.lauf.acc_anforderungen == {} and a.gurt.acc_beobachter is None
     assert a.lauf.zaehl_satz is None
@@ -172,6 +182,7 @@ async def test_zaehlt_ab_dem_tipp_mit_korrektur_und_traegt_den_satz_in_die_zeitl
     assert d["satz"] == 1 and d["sensor"] == sensor and d["korrektur"] == 1
     assert d["wert"] == sensor + 1 and d["feld"] == "reps" and d["zaehlart"] == "wdh"
     assert d["vorlage"] == "auto" and d["geraet"] == POLAR_H10.id and d["prototyp"] == PROTOTYP
+    assert d["halbe"] == 0  # A5: halbe Wiederholungen daneben, nie mitgezählt
     assert PROTOTYP.startswith("hrv_core.prototyp.wiederholungen@")
     assert len(d["zeiten_s"]) == sensor and all(0.0 <= t <= 30.0 for t in d["zeiten_s"])
     (korrektur,) = _arten(e, "korrektur")
@@ -189,27 +200,40 @@ async def test_zaehlt_ab_dem_tipp_mit_korrektur_und_traegt_den_satz_in_die_zeitl
     assert ze.zaehl_texte(gelesen) == [f"Satz 1 · {sensor + 1} Wdh. (Sensor {sensor}, +1)"]
 
 
-async def test_zaehlt_hoechstens_jede_sekunde_und_schnell(aufbau, monkeypatch) -> None:
-    """Der Takt der Einheit ist 0,25 s, der Prototyp rechnet höchstens jede Sekunde — und
-    120 s bei 50 Hz in unter 50 ms (am Rechner; Ziel am Handy 20 ms, Plan §5.2)."""
+async def test_zaehlt_jede_wiederholung_sofort_und_billig(aufbau, monkeypatch) -> None:
+    """A5: Die Zahl steigt je Wiederholung, wenn sie geschieht — mit Verzug unter einer halben
+    Periode nach der Rückkehr (Modultext: Glättung plus der Weg um die Hysterese) —, nie mehr
+    über das Satzfenster (``zaehlen_fenster`` wird nicht gerufen); und die Rechenlast bleibt
+    unter `ZIEL_MS_JE_S` je Sekunde Daten, auch bei 120 s (am Rechner weit darunter)."""
+
+    def nie(*_a, **_k):
+        raise AssertionError("Satzfenster-Zähler im Live-Pfad")
+
+    monkeypatch.setattr(zaehlen_modul.prototyp_wdh, "zaehlen_fenster", nie)
     a = aufbau
-    aufrufe: list[int] = []
-    echt = prototyp_wdh.zaehlen_fenster
-
-    def gezaehlt(xyz, rate_hz, t0_s=0.0):
-        aufrufe.append(len(xyz))
-        return echt(xyz, rate_hz, t0_s)
-
-    monkeypatch.setattr(zaehlen_modul.prototyp_wdh, "zaehlen_fenster", gezaehlt)
     e, z = _zaehllauf(a)
     e.starten()
     await ruhe()
-    await _sekunden(a, 10, e, schritt=0.25)
-    assert 7 <= len(aufrufe) <= 10  # ab 2 s Daten, je Sekunde einmal
-    await _sekunden(a, 110)  # ohne Takt: nur Daten
-    e.takt()
-    assert aufrufe[-1] >= 119 * 50 and abs(z.sensor - 48) <= 1
-    assert z.laufzeit_ms < 50.0
+    assert z.vorlage == "auto" and z.vorlage_wahl.vorlage.umkehr == prototyp_wdh.UMKEHR_OBEN
+    assert e.t0 is not None
+    verlauf: list[tuple[float, int | None]] = []
+    for _ in range(4 * 30):
+        await _sekunden(a, 0.25, e, schritt=0.25)
+        verlauf.append((round(a.uhr.t - e.t0, 2), z.sensor))
+    spruenge = [t2 for (_t, v), (t2, v2) in itertools.pairwise(verlauf) if (v2 or 0) > (v or 0)]
+    assert 11 <= len(spruenge) <= 12 and z.sensor == len(spruenge)
+    # Jede Zahl kommt kurz nach ihrer Rückkehr (1,875 s + k · 2,5 s), nie eine halbe Periode später
+    for k, t in enumerate(spruenge):
+        rueckkehr = 1.875 + k * 2.5
+        assert rueckkehr < t <= rueckkehr + 1.25, (k, t)
+    assert all(t2 - t1 == pytest.approx(2.5, abs=0.3) for t1, t2 in itertools.pairwise(spruenge))
+    assert z.satz is not None and z.satz.zeiten_s == pytest.approx(
+        [1.875 + k * 2.5 for k in range(len(spruenge))], abs=0.15
+    )
+    assert z.wdh_signal == prototyp_wdh.SIGNAL_HAUPTACHSE and z.wdh_fehler == ""
+    await _sekunden(a, 90, e, schritt=0.25)
+    assert z.daten_s > 115.0 and z.rechenzeit_ms / z.daten_s < zaehlen_modul.ZIEL_MS_JE_S
+    assert z.sensor is not None and abs(z.sensor - 48) <= 1
     z.fertig()
 
 
@@ -580,16 +604,18 @@ async def test_wdh_und_atmung_laufen_nebeneinander(aufbau) -> None:
     a.gurt.bewegung = False
     await _sekunden(a, 35, e)
     assert z.aktiv and z.atem_sensor is not None and z.atem_sensor >= 2
-    assert z.status().startswith(f"Kniebeuge · {wdh + 1} · Atmung ")
+    # Die letzte Rückkehr (bei 19,375 s) bestätigt die Ruhe danach — höchstens eine mehr
+    assert z.wert in (wdh + 1, wdh + 2)
+    assert z.status().startswith(f"Kniebeuge · {z.wert} · Atmung ")
     await _sekunden(a, 30, e)  # 60 s nach der letzten Wiederholung (bei ~20 s)
     assert z.grund == ENDE_KEINE_BEWEGUNG and e.zustand is Zustand.BEENDET
     (satz,) = _saetze(e)
     assert satz.daten["satz"] == 1 and satz.daten["zaehlart"] == ZAEHLART_WDH
-    assert satz.daten["wert"] == wdh + 1 and satz.daten["prototyp"] == PROTOTYP
+    assert satz.daten["wert"] == z.wert and satz.daten["prototyp"] == PROTOTYP
     atem = _atem(e)
     assert atem is not None and atem.daten["satz"] == 0 and atem.daten["sensor"] >= 3
     assert atem.daten["korrektur"] == 0 and all(t >= 20.0 for t in atem.daten["zeiten_s"])
-    assert ze.wiederholungen(e.ereignisse) == [wdh + 1]  # die Atmung nicht
+    assert ze.wiederholungen(e.ereignisse) == [z.wert]  # die Atmung nicht
     assert len(ze.zaehl_texte(e.ereignisse)) == 1
 
 
@@ -1098,6 +1124,8 @@ async def test_im_diagnosemodus_zaehlt_ein_zaehler_und_steht_im_mitschnitt(tmp_p
     z.fertig()
     e.takt()
     assert e.zustand is Zustand.BEENDET
+    assert z.sensor in (sensor, sensor + 1)  # der Abschluss zählt die offene Rückkehr
+    sensor = z.sensor
     # Die Diagnose braucht die Beschleunigung weiter
     assert lauf.acc_anforderungen == {"diagnose": (200, 8)}
     assert quelle.acc_beobachter == lauf._acc_empfangen
@@ -1208,7 +1236,8 @@ async def test_trennen_beendet_das_zaehlen(aufbau) -> None:
     assert e.zustand is Zustand.BEENDET  # ein Zähllauf endet mit dem Zählen
     (ende,) = _arten(e, "zaehlen_ende")
     assert ende.daten == {"grund": ENDE_ABBRUCH}
-    assert ze.wiederholungen(e.ereignisse) == [gezaehlt] and ze.zaehl_abgebrochen(e.ereignisse)
+    assert z.wert in (gezaehlt, gezaehlt + 1)  # der Abschluss zählt die offene Rückkehr
+    assert ze.wiederholungen(e.ereignisse) == [z.wert] and ze.zaehl_abgebrochen(e.ereignisse)
     assert a.lauf.zaehl_satz is None
 
 
@@ -1340,6 +1369,8 @@ async def test_im_diagnosemodus_vergleich_nach_dem_gezaehlten_satz(tmp_path) -> 
     assert gemeldet == []  # vor dem Ende noch nichts
     assert z.fertig()
     e.takt()
+    assert z.sensor in (sensor, sensor + 1)  # der Abschluss zählt die offene Rückkehr
+    sensor = z.sensor
     (v,) = gemeldet
     assert v["marken"] == 12 and v["sensor"] == sensor and v["korrektur"] == 1
     assert v["eingetragen"] == sensor + 1 and v["satz"] == 1 and v["feld"] == "reps"
@@ -1619,7 +1650,7 @@ async def test_funkabriss_beendet_das_zaehlen_sofort_als_getrennt(aufbau) -> Non
     a.uhr.t += 1.0
     e.takt()
     assert z.grund == ENDE_ABBRUCH and z.getrennt and not z.von_aussen  # vorher: zählte weiter
-    assert ze.wiederholungen(e.ereignisse) == [gezaehlt]
+    assert z.wert in (gezaehlt, gezaehlt + 1) and ze.wiederholungen(e.ereignisse) == [z.wert]
     assert ze.von_selbst_text(z.grund, getrennt=z.getrennt) == "Sensor getrennt"
     assert a.lauf.acc_anforderungen == {}  # frei — der Akku geht vor
     a.gurt._status_aendern(verbindung=Verbindung.VERBUNDEN)
@@ -1655,13 +1686,192 @@ async def test_ohne_beschleunigung_endet_es_nicht_als_keine_bewegung(aufbau) -> 
     assert ze.wiederholungen(e.ereignisse) == [1]
 
 
-async def test_lange_rechnung_rechnet_seltener(aufbau, monkeypatch) -> None:
-    """Plan §5.2: „Ziel unter 20 ms je Takt, sonst alle 2 s“ — dauert eine Rechnung 60 ms (ein
-    langer Satz, 200 Hz im Diagnosemodus), rechnet der Teil nur noch alle 3 s statt jede
-    Sekunde; vorher hielt sie die Schleife (sie trägt auch Bluetooth) jede Sekunde auf."""
-    from types import SimpleNamespace
+async def test_satz_laenger_als_der_puffer_zaehlt_weiter(aufbau) -> None:
+    """Bis A5 endete ein Satz, dessen Anfang aus dem vollen Puffer fiel (``zu_lang``): Der
+    Satzfenster-Zähler hätte nur noch das Ende gesehen. Der Live-Zähler braucht den Puffer nur
+    für die Proben seit dem letzten Takt — der Satz läuft weiter, die Zahl wächst."""
+    from collections import deque
 
     a = aufbau
+    a.lauf._acc_puffer = deque(maxlen=200)  # 200 Rahmen zu 0,18 s: 36 s
+    e, z = _zaehllauf(a)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 30, e)
+    vorher = z.sensor
+    assert vorher is not None and abs(vorher - 12) <= 1
+    await _sekunden(a, 60, e)
+    assert z.aktiv and z.grund is None and a.lauf.acc_verloren_bis is not None
+    assert z.sensor is not None and abs(z.sensor - 36) <= 1  # 90 s, nicht nur das Ende
+    assert not hasattr(z, "zu_lang")
+    z.fertig()
+    e.takt()
+    (satz,) = _saetze(e)
+    assert satz.daten["sensor"] == z.sensor and len(satz.daten["zeiten_s"]) == z.sensor
+
+
+# -- A5: Live-Zähler, Vorlagen, Umkehrpunkt (5.11.2026) -------------------------------------
+
+
+def _ereignisse_einspielen(monkeypatch, z: ZaehlBaustein, je_rahmen: list) -> None:
+    """Den Live-Zähler des Satzes durch eine Folge vorgegebener Ereignisse je Rahmen ersetzen
+    — so lassen sich Rücknahme und halbe Wiederholungen prüfen, die das Sinussignal des Gurts
+    nie hervorbringt."""
+    folge = iter(je_rahmen)
+
+    class Attrappe:
+        vorlage = prototyp_wdh.VORLAGEN["auto"]
+
+        def rahmen(self, xyz, t0_s):
+            return list(next(folge, []))
+
+        def abschluss(self):
+            return []
+
+        def stand(self):
+            return prototyp_wdh.Stand(0.0, 0, 0, None, None, False, "hauptachse", "oben")
+
+    monkeypatch.setattr(z, "_wdh_live", Attrappe())
+
+
+async def test_ruecknahme_senkt_die_zahl_und_halbe_zaehlen_nicht(aufbau, monkeypatch) -> None:
+    """Eine `Ruecknahme` nimmt die zuletzt gemeldete Wiederholung mit ihrer Nummer zurück (die
+    Zahl sinkt, Zeiten und Korrektur bleiben); eine halbe steht daneben („· 1 halbe“), zählt
+    nicht und kommt nicht in ``zeiten_s`` — in der Zeitleiste als ``halbe``."""
+    W, R = prototyp_wdh.Wiederholung, prototyp_wdh.Ruecknahme
+    a = aufbau
+    e, z = _zaehllauf(a)
+    e.starten()
+    await ruhe()
+    t0 = a.uhr.t
+    _ereignisse_einspielen(
+        monkeypatch,
+        z,
+        [
+            [W(t0 + 1.0, 1, "ganz", 300.0, None, t0 + 1.2)],
+            [W(t0 + 2.0, 2, "ganz", 300.0, 1.0, t0 + 2.2)],
+            [W(t0 + 3.0, 3, "halb", 150.0, 1.0, t0 + 3.2)],
+            [R(t0 + 3.5, 2, prototyp_wdh.GRUND_UEBERGANG)],
+            [W(t0 + 4.0, 4, "ganz", 300.0, 1.0, t0 + 4.2)],
+        ],
+    )
+    await _sekunden(a, 1, e)
+    assert z.sensor == 1 and z.halbe == 0
+    assert z.korrigieren(+1) and z.wert == 2
+    await _sekunden(a, 1, e)
+    assert z.sensor == 2 and z.wert == 3
+    await _sekunden(a, 1, e)
+    assert z.sensor == 2 and z.halbe == 1 and z.wert == 3  # die halbe zählt nicht
+    await _sekunden(a, 1, e)
+    assert z.sensor == 1 and z.halbe == 1 and z.wert == 2  # Nr. 2 zurückgenommen, +1 bleibt
+    satz = z.satz
+    assert satz is not None and satz.zeiten_s == [1.0] and [w[0] for w in satz.wdh] == [1, 3]
+    await _sekunden(a, 1, e)
+    assert z.sensor == 2 and satz.zeiten_s == [1.0, 4.0] and satz.ruhe_seit_s == pytest.approx(4.0)
+    from trainingsapp.core.zaehlen import sensor_zeile
+
+    assert sensor_zeile(z.sensor, z.korrektur, z.halbe, z.vorlage_text) == "Sensor 2 · +1 · 1 halbe"
+    z.fertig()
+    e.takt()
+    (d,) = [x.daten for x in _saetze(e)]
+    assert d["sensor"] == 2 and d["halbe"] == 1 and d["zeiten_s"] == [1.0, 4.0] and d["wert"] == 3
+    assert ze.wiederholungen(e.ereignisse) == [3]
+
+
+async def test_vorlage_kniebeuge_am_gurt_und_rueckfall_auf_die_hauptachse(aufbau) -> None:
+    """Die Vorlage „Kniebeuge“ (Neigung z–x, am Brustgurt) zählt mit Umkehrpunkt oben (P143):
+    Liegt der Gurt so, dass die Ebene z–x Schwerkraft trägt, bleibt das Signal die Neigung;
+    liegt die Schwerkraft auf y (wie die Gurt-Attrappe bisher), fällt hrv-core auf die
+    Hauptachse zurück — der Umkehrpunkt bleibt oben, die Zahl stimmt, die Zeile sagt es."""
+    a = aufbau
+    a.gurt.acc_lage, a.gurt.acc_achse = (-1000.0, 0.0, 100.0), (0.1, 0.0, -1.0)
+    a.gurt.acc_hub_mg = 400.0
+    e, z = _zaehllauf(a, vorlage="kniebeuge")
+    assert z.vorlage == "kniebeuge" and z.vorlage_wahl.rueckfall == ""
+    v = z.vorlage_wahl.vorlage
+    assert v.signal == prototyp_wdh.SIGNAL_NEIGUNG_ZX and v.umkehr == prototyp_wdh.UMKEHR_OBEN
+    assert z.vorlage_text == "Kniebeuge"
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 30, e, schritt=0.25)
+    assert z.wdh_signal == prototyp_wdh.SIGNAL_NEIGUNG_ZX and z.vorlage_text == "Kniebeuge"
+    assert z._wdh_live is not None and z._wdh_live.vorlage.umkehr == prototyp_wdh.UMKEHR_OBEN
+    assert z.sensor is not None and abs(z.sensor - 12) <= 1
+    assert z.satz is not None and z.satz.zeiten_s[0] == pytest.approx(1.875, abs=0.2)
+    z.fertig()
+    e.takt()
+    (d,) = [x.daten for x in _saetze(e)]
+    assert d["vorlage"] == "kniebeuge" and d["sensor"] == z.sensor and abs(d["sensor"] - 12) <= 1
+    # Schwerkraft auf y: Rückfall in hrv-core — Hauptachse, Umkehr trotzdem oben
+    a.gurt.acc_lage, a.gurt.acc_achse = (0.0, -1000.0, 0.0), (0.2, 1.0, 0.0)
+    a.uhr.t = round(a.uhr.t + 5.0, 6)
+    e2, z2 = _zaehllauf(a, vorlage="kniebeuge")
+    e2.starten()
+    await ruhe()
+    await _sekunden(a, 30, e2, schritt=0.25)
+    assert z2.wdh_signal == prototyp_wdh.SIGNAL_HAUPTACHSE
+    assert z2._wdh_live is not None and z2._wdh_live.vorlage.umkehr == prototyp_wdh.UMKEHR_OBEN
+    assert z2.vorlage_text == "Kniebeuge (Hauptachse)"
+    assert z2.sensor is not None and abs(z2.sensor - 12) <= 1
+    assert z2.satz is not None and z2.satz.zeiten_s[0] == pytest.approx(1.875, abs=0.3)
+    z2.fertig()
+    e2.takt()
+
+
+async def test_vorlage_eines_anderen_geraets_faellt_auf_automatisch_zurueck(aufbau) -> None:
+    """„Kniebeuge“ meint die Achsen des Brustgurts — an der Verity Sense (am Arm) zählt der
+    Teil mit „Automatisch“ und sagt es in der kleinen Zeile; in der Zeitleiste steht, womit
+    gezählt wurde. Unbekannte und Entwurfs-Vorlagen ebenso."""
+    a = aufbau
+    a.lauf.profil = VERITY_SENSE  # wie nach dem Verbinden mit ihr
+    e, z = _zaehllauf(a, vorlage="kniebeuge")
+    assert z.geraet == "verity_sense" and z.rate_hz == 52
+    assert z.vorlage == "auto" and z.vorlage_wahl.rueckfall == "Vorlage nur für den Brustgurt"
+    assert z.vorlage_text == "Automatisch (Vorlage nur für den Brustgurt)"
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 30, e, schritt=0.25)
+    assert z.sensor is not None and abs(z.sensor - 12) <= 1
+    z.fertig()
+    e.takt()
+    (d,) = [x.daten for x in _saetze(e)]
+    assert d["vorlage"] == "auto" and d["geraet"] == "verity_sense"
+    z3 = ZaehlBaustein(a.lauf, KNIEBEUGE, feld="reps", vorlage="burpee")
+    assert z3.vorlage == "auto" and z3.vorlage_wahl.rueckfall == "Vorlage noch ein Entwurf"
+    z4 = ZaehlBaustein(a.lauf, KNIEBEUGE, feld="reps", vorlage="gibt_es_nicht")
+    assert z4.vorlage == "auto" and z4.vorlage_text == ""
+    z5 = ZaehlBaustein(a.lauf, KNIEBEUGE, feld="reps", vorlage="liegestuetz")
+    assert z5.vorlage == "liegestuetz" and z5.vorlage_text == "Liegestütz"
+    assert z5.vorlage_wahl.vorlage.umkehr == prototyp_wdh.UMKEHR_OBEN
+
+
+async def test_fehler_im_live_zaehler_stoppt_nichts(aufbau, monkeypatch) -> None:
+    """Wirft der Prototyp, zählt ein frischer weiter — das Gezählte bleibt im Satz."""
+    a = aufbau
+    e, z = _zaehllauf(a)
+    e.starten()
+    await ruhe()
+    await _sekunden(a, 10, e)
+    vorher = z.sensor
+    assert vorher is not None and vorher >= 3
+
+    def kaputt(_xyz, _t0):
+        raise ValueError("kaputt")
+
+    assert z._wdh_live is not None
+    monkeypatch.setattr(z._wdh_live, "rahmen", kaputt)
+    await _sekunden(a, 1, e)
+    assert z.wdh_fehler == "ValueError: kaputt" and z.aktiv and z.sensor == vorher
+    await _sekunden(a, 20, e)
+    assert z.sensor is not None and z.sensor >= vorher + 6  # der frische zählt weiter
+    z.fertig()
+
+
+async def test_diagnose_vergleich_ohne_zaehlteil_nimmt_das_satzfenster(
+    tmp_path, monkeypatch
+) -> None:
+    """Ohne Zähl-Teil zählt der Vergleich nach dem Satz den Puffer mit dem alten
+    Satzfenster-Zähler ``zaehlen_fenster`` (Rückfall, A1) — nicht mit dem Live-Zähler."""
     aufrufe: list[int] = []
     echt = prototyp_wdh.zaehlen_fenster
 
@@ -1669,64 +1879,25 @@ async def test_lange_rechnung_rechnet_seltener(aufbau, monkeypatch) -> None:
         aufrufe.append(len(xyz))
         return echt(xyz, rate_hz, t0_s)
 
-    uhr = itertools.count(step=0.06)  # zwei Ablesungen je Rechnung: sie dauert 60 ms
-    monkeypatch.setattr(zaehlen_modul.prototyp_wdh, "zaehlen_fenster", gezaehlt)
-    monkeypatch.setattr(zaehlen_modul, "time", SimpleNamespace(perf_counter=lambda: next(uhr)))
-    e, z = _zaehllauf(a)
-    e.starten()
-    await ruhe()
-    await _sekunden(a, 32, e, schritt=0.25)
-    assert z.laufzeit_ms == pytest.approx(60.0) and zaehlen_modul.takt_nach(60.0) == 3.0
-    assert 6 <= len(aufrufe) <= 12  # vorher: je Sekunde eine, gut 30
-    assert z.sensor is not None and abs(z.sensor - 12) <= 2
-    z.fertig()
-
-
-async def test_gedrosselt_urteilt_keine_bewegung_erst_nach_einer_rechnung(
-    aufbau, monkeypatch
-) -> None:
-    """Rechnet der Teil seltener (`takt_nach`, bis 5 s), ist sein Stand so alt — „keine
-    Bewegung“ urteilte damit: Ein Lauf brach ab, obwohl die Person schon wieder übte, und am
-    Anfang der Ruhe fehlten die letzten Wiederholungen (aus 60 s wurden gut 55). Vor dem Urteil
-    zählt der Prototyp jetzt bis jetzt (Runde 3, Befund 4)."""
-    a = aufbau
-    monkeypatch.setattr(zaehlen_modul, "takt_nach", lambda _ms: 5.0)
-    e, z = _zaehllauf(a)
-    e.starten()
-    await ruhe()
-    await _sekunden(a, 20, e, schritt=0.25)
-    a.gurt.bewegung = False
-    await _sekunden(a, 56, e, schritt=0.25)  # bis t = 76 s; gerechnet zuletzt bei 75,25 s
-    assert z.aktiv and z.satz is not None and z.satz.ruhe_seit_s < 20.5
-    a.gurt.bewegung = True  # wieder Kniebeugen — keine 60 s nach der letzten
-    await _sekunden(a, 9, e, schritt=0.25)
-    assert z.aktiv and z.grund is None  # vorher: keine_bewegung bei t = 79,5 s
-    assert z.satz.ruhe_seit_s > 76.0
-    z.fertig()
-
-
-async def test_satz_laenger_als_der_puffer_endet_statt_zu_wenig_zu_zaehlen(aufbau) -> None:
-    """Fällt der Anfang eines Satzes aus dem vollen Puffer (`ACC_PUFFER_RAHMEN`, hier kleiner:
-    200 Rahmen zu 0,18 s), zählte der Prototyp nur noch das Ende — still zu wenig. Lieber eine
-    Lücke als ein falscher Wert: Das Zählen endet als ``abbruch`` mit ``zu_lang``, die letzte
-    ganze Zahl bleibt und lässt sich nachtragen."""
-    from collections import deque
-
-    a = aufbau
-    a.lauf._acc_puffer = deque(maxlen=200)
-    e, z = _zaehllauf(a)
-    e.starten()
-    await ruhe()
-    await _sekunden(a, 30, e)
-    vorher = z.sensor
-    assert vorher is not None and z.aktiv and a.lauf.acc_verloren_bis is None
-    await _sekunden(a, 20, e)
-    assert z.grund == ENDE_ABBRUCH and z.zu_lang  # vorher: zählte weiter, nur noch das Ende
-    assert a.lauf.acc_verloren_bis is None  # freigegeben: der Puffer ist leer
-    (satz,) = _saetze(e)
-    assert satz.daten["sensor"] >= vorher  # die letzte ganze Zahl, nicht weniger
-    assert ze.zaehl_abgebrochen(e.ereignisse) and ze.wiederholungen(e.ereignisse)
-    assert ze.von_selbst_text(z.grund, zu_lang=z.zu_lang) == "Satz zu lang für den Sensor"
+    monkeypatch.setattr(prototyp_wdh, "zaehlen_fenster", gezaehlt)
+    zeit, lauf, innen, gemeldet = await _diagnose_mit_zaehlen(tmp_path)
+    assert lauf.zaehl_satz is None
+    t0, t_geraet = zeit.t, 10**12
+    for k in range(int(24 / 0.18)):
+        t_geraet += 180_000_000
+        zeit.t = t0 + (k + 1) * 0.18
+        innen.senden(pmd.PMD_DATA_UUID, _wdh_rahmen(innen, k, t_geraet), zeit.t)
+    lauf.notiz_hinzufuegen(
+        "Kniebeuge: 12",
+        marke={"quelle": "person", "art": "leistung", "feld": "reps", "wert": 12},
+        uebungen=[KB],
+    )
+    (v,) = gemeldet
+    assert aufrufe and aufrufe[0] >= 23 * 200
+    assert v["sensor"] is not None and abs(v["sensor"] - 12) <= 1
+    await lauf.diagnose_beenden()
+    lauf.aufnahme = None
+    await lauf.trennen()
 
 
 async def test_atem_lauf_erst_mit_dem_ersten_rahmen(aufbau) -> None:

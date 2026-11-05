@@ -652,9 +652,7 @@ def _von_selbst_melden(state: Any, e: Einheitslauf, neu: list[Ereignis]) -> None
     z = e.teil("zaehlen")
     if not isinstance(z, ZaehlBaustein) or z.von_aussen:
         return
-    warum = von_selbst_text(
-        z.grund, getrennt=z.getrennt, ohne_daten=z.ohne_daten, zu_lang=z.zu_lang
-    )
+    warum = von_selbst_text(z.grund, getrennt=z.getrennt, ohne_daten=z.ohne_daten)
     if not warum:
         return
     if not z.wdh:

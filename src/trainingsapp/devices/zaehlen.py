@@ -17,15 +17,25 @@ Laufleiste und der Reiter „Einheit“ ihn ohne Sonderweg.
   (``timer/abschnitt`` ohne ``zaehlt = False``). Die Satzgrenzen sieht der Teil nur als
   Ereignisse der Einheit (`beobachten`). „Anhalten“ der Uhr hält auch das Zählen an: die Zeit
   dazwischen zählt weder im Satz noch für „keine Bewegung“.
-- **Live:** jede Sekunde (`ZAEHL_TAKT_S`; der Takt der Einheit ist 0,25 s) zählt der
-  Prototyp ``hrv_core.prototyp.wiederholungen.zaehlen_fenster`` das Satzfenster neu — dauert das
-  länger als `ZIEL_MS`, seltener (`takt_nach`, bis `MAX_TAKT_S`). Läuft ein Satz länger, als
-  der Puffer hält, endet er (``zu_lang``), statt still nur sein Ende zu zählen. Unter 2 s Daten
-  oder ohne erkennbare Periode steht dort „…“, bis die ersten Proben kommen „Sensor startet …“.
-  Wechselt die Rate mitten im Satz (Diagnosemodus, Vorabtest), zählt alles in der jüngsten
-  Rate (`Messlauf.acc_reihe` taktet um); die Zeit jeder Probe kommt mit, auch über eine Lücke
-  im Strom hinweg. Läuft die Einheit auf einer anderen Uhr als die Quelle (Simulator mit
-  ``tempo`` neben einer Uhr auf ``time.monotonic``), rechnet `_auf_quelle` um.
+- **Live** (A5, Ben 5.11.2026): je Satz ein Live-Zähler ``hrv_core.prototyp.wiederholungen.
+  WdhLive`` in der Rate des Laufs, gefüttert wie die Atem-Spur — in jedem Takt der Einheit
+  (0,25 s) nur die seit dem letzten Takt neu angekommenen Proben (`Messlauf.acc_reihe`;
+  wechselt die Rate mitten im Satz, Diagnosemodus oder Vorabtest, taktet der Messlauf um), je
+  lückenlosem Stück ein Rahmen. Jede Wiederholung ist ein Ereignis, sobald ihr Umkehrpunkt
+  bestätigt ist: Zahl und Zeit (`ZaehlSatz.zeiten_s`, Achse der Einheit) sofort; eine
+  `Ruecknahme` nimmt die zuletzt gemeldete zurück (die Zahl sinkt, ±1-Korrekturen bleiben).
+  **Halbe** Wiederholungen (`Stand.halbe`, `ZaehlSatz.halbe`) stehen daneben, zählen nicht.
+  Die **Vorlage** der Übung (`core.zaehlen.vorlage_waehlen`: Automatisch, Kniebeuge,
+  Liegestütz; die Achsen eines anderen Geräts → Automatisch mit Grund) zählt **oben** (P143):
+  ``umkehr = oben`` — die Wiederholung zählt mit der Rückkehr in die Ausgangslage; fällt
+  hrv-core von einer Neigung auf die Hauptachse zurück (keine Schwerkraft in der Ebene), setzt
+  `_umkehr_oben` den Umkehrpunkt wieder nach oben. Kein Fenster, kein Puffer-Ende, keine
+  Drosselung mehr: die Rechenlast je Probe ist konstant (`laufzeit_ms` je Takt,
+  `rechenzeit_ms`/`daten_s` für das Maß „ms je Sekunde Daten“, Ziel unter 20). Bis die ersten
+  Proben kommen „Sensor startet …“, bis zur ersten Wiederholung „…“. Läuft die Einheit auf
+  einer anderen Uhr als die Quelle (Simulator mit ``tempo`` neben einer Uhr auf
+  ``time.monotonic``), rechnet `_auf_quelle` um. Wirft der Prototyp, zählt ein frischer weiter
+  (`wdh_fehler`; das Gezählte bleibt im Satz).
 - **Korrektur** ±1 je Satz (`korrigieren`): angezeigt und eingetragen wird Sensor plus
   Korrektur, nie weniger als 0 (`core.zaehlen.anzeige`). Ein abgeschlossener Satz bleibt
   korrigierbar, bis der nächste beginnt oder der Lauf endet.
@@ -72,7 +82,9 @@ Laufleiste und der Reiter „Einheit“ ihn ohne Sonderweg.
   Rohdaten (P123). Eingetragen wird daraus am Ende der Einheit (`core.zaehlen_eintrag`).
 - **Diagnosemodus** (A2): Kontextzeilen im Mitschnitt (``zaehler`` und ``zaehlung`` je Satz,
   ``korrektur``, ``zaehlen_ende``) und der Haken `Messlauf.zaehl_satz` — der Vergleich nach dem
-  Satz nimmt diesen Zähler statt eines zweiten. Am Ende des Laufs je Satz der Vergleich
+  Satz nimmt diesen Zähler statt eines zweiten (ohne Zähl-Teil zählt dort der alte
+  Satzfenster-Zähler ``zaehlen_fenster`` den Puffer, als Rückfall — sonst nirgends mehr). Am
+  Ende des Laufs je Satz der Vergleich
   „Marken · Sensor · Korrektur · eingetragen“ (`Messlauf.zaehlsatz_vergleichen`) — eingetragen
   ist der Satzwert, wenn das Zählen so endet, dass er in den Eintrag kommt. Der Haken gibt
   der Marken-Leiste auch die **Satznummer** und, solange ein Satz zählt, Übung und Phase
@@ -99,7 +111,7 @@ import itertools
 import math
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import hrv_core
@@ -132,10 +144,12 @@ from ..core.zaehlen import (
     VORLAGE_AUTO,
     ZAEHLART_ATEM,
     ZAEHLART_WDH,
+    VorlageWahl,
     anzeige,
     atem_text,
     mit_vorzeichen,
     rate_waehlen,
+    vorlage_waehlen,
 )
 from ..core.zaehlen_eintrag import ende_text
 from .base import Verbindung
@@ -143,15 +157,9 @@ from .einheit import UebungKontext, kontext_daten
 from .messlauf import ACC_LUECKE_PROBEN, Messlauf
 from .profiles import GeraeteProfil
 
-#: So oft zählt der Prototyp das Satzfenster neu (s) — der Takt der Einheit ist 0,25 s
-ZAEHL_TAKT_S = 1.0
-#: Ziel je Rechnung (ms, Plan §5.2: die Ereignisschleife trägt auch Bluetooth) — dauert eine
-#: länger, wird seltener gerechnet: je angefangene 20 ms eine Sekunde mehr (`takt_nach`)
-ZIEL_MS = 20.0
-#: … höchstens so selten (s)
-MAX_TAKT_S = 5.0
-#: So viele Sekunden Daten braucht eine Zahl (darunter „…“)
-MIN_DATEN_S = 2.0
+#: Ziel der Rechenlast (ms je Sekunde Daten, Plan §5.2: die Ereignisschleife trägt auch
+#: Bluetooth) — der Live-Zähler rechnet je Probe gleich viel, egal wie lang der Satz ist
+ZIEL_MS_JE_S = 20.0
 #: So oft steht der Stand eines laufenden Satzes in der Zeitleiste, wenn er sich änderte (s) —
 #: stirbt die App mitten im Satz (Akku, das System beendet sie), bleibt er unter „Läufe
 #: heute“ nachtragbar; es gilt die letzte ``zaehlung`` je Satz
@@ -168,26 +176,16 @@ PROTOTYP_ATEM = f"hrv_core.prototyp.atemzuege@{hrv_core.__version__}"
 
 #: Was der Atem-Prototyp je Rahmen liefert
 AtemEreignis = prototyp_atem.Phase | prototyp_atem.Fenster
+#: … und der Live-Zähler
+WdhEreignis = prototyp_wdh.Wiederholung | prototyp_wdh.Ruecknahme
 
 #: Phasen der Anzeige (`ZaehlBaustein.phase`)
 PHASE_STARTET = "startet"  # noch kein ACC-Rahmen seit dem Tipp — „Sensor startet …“
-PHASE_SAMMELT = "sammelt"  # Daten kommen, noch keine Zahl — „…“
+PHASE_SAMMELT = "sammelt"  # Daten kommen, noch keine Wiederholung — „…“
 PHASE_ZAEHLT = "zaehlt"  # der Sensor hat eine Zahl
 PHASE_PAUSE = "pause"  # Pause des Timers oder angehalten
 PHASE_ATMUNG = "atmung"  # nur Atmung: der Prototyp erfasst Atemzüge
 PHASE_ENDE = "ende"
-
-
-def takt_nach(laufzeit_ms: float) -> float:
-    """Wann nach einer Rechnung, die so lange dauerte, die nächste kommt (s) — der Ausweg aus
-    Plan §5.2 („sonst alle 2 s“): Ein langer Satz (das ganze Fenster jede Sekunde neu, im
-    Diagnosemodus mit 200 Hz) hielte die Schleife sonst jede Sekunde auf.
-
-    >>> [takt_nach(ms) for ms in (2.0, 20.0, 26.0, 57.0, 259.0)]
-    [1.0, 1.0, 2.0, 3.0, 5.0]
-    """
-    stufen = max(1, math.ceil(laufzeit_ms / ZIEL_MS))
-    return min(MAX_TAKT_S, ZAEHL_TAKT_S * stufen)
 
 
 def zaehl_rate(profil: GeraeteProfil | None) -> int:
@@ -212,20 +210,23 @@ class ZaehlSatz:
     nr: int
     von_s: float
     bis_s: float | None = None
-    #: was der Prototyp zählte — ``None``: noch keine Periode erkannt
+    #: was der Prototyp zählte (ganze Wiederholungen) — ``None``: noch keine
     sensor: int | None = None
     #: Summe der ±1 der Person
     korrektur: int = 0
-    #: die gezählten Umkehrpunkte
+    #: die gezählten Umkehrpunkte der ganzen Wiederholungen
     zeiten_s: list[float] = field(default_factory=list)
+    #: halbe Wiederholungen (gezeigt, nicht gezählt)
+    halbe: int = 0
+    #: die gültigen Wiederholungen des Live-Zählers: (Nummer, Zeit, Art) — eine `Ruecknahme`
+    #: streicht ihre Nummer
+    wdh: list[tuple[int, float, str]] = field(default_factory=list)
     #: Stücke, in denen gezählt wurde: [von, bis] — ``bis`` ``None`` solange es läuft.
     #: „Anhalten“ der Uhr schließt eines, „Weiter“ beginnt das nächste
     stuecke: list[list[float | None]] = field(default_factory=list)
     #: seit wann sich nichts Neues tat (für „keine Bewegung“; Pausen verschieben es) — die
-    #: jüngste gezählte Wiederholung, auch wenn die Zahl beim Neuzählen kurz sank
+    #: jüngste gemeldete Wiederholung, auch wenn eine Rücknahme die Zahl danach senkte
     ruhe_seit_s: float = 0.0
-    #: höchste bisher gezählte Zahl
-    hoechst: int = 0
     #: steht fest (der nächste Satz begann oder der Lauf endete) — danach keine Korrektur
     #: mehr, die Kontextzeilen des Mitschnitts sind geschrieben
     gemeldet: bool = False
@@ -263,6 +264,26 @@ class ZaehlSatz:
         if self.von_hand:
             d["von_hand"] = True
         return d
+
+    def ereignisse(self, ereignisse: Sequence[WdhEreignis], zeit: Callable[[float], float]) -> None:
+        """Die Ereignisse des Live-Zählers in den Satz: eine `Wiederholung` kommt dazu (``zeit``
+        bringt ihren Umkehrpunkt auf die Achse der Einheit), eine `Ruecknahme` streicht die
+        zuletzt gemeldete mit ihrer Nummer. Danach Zahl, Zeiten und halbe neu — ``sensor`` wird
+        mit der ersten Meldung eine Zahl und bleibt eine; ohne Ereignis ändert sich nichts."""
+        for e in ereignisse:
+            if isinstance(e, prototyp_wdh.Wiederholung):
+                self.wdh.append((e.nr, round(zeit(e.t_s), 2), e.art))
+            else:
+                for i in range(len(self.wdh) - 1, -1, -1):
+                    if self.wdh[i][0] == e.nr:
+                        del self.wdh[i]
+                        break
+        if not ereignisse:
+            return
+        ganze = [t for _, t, art in self.wdh if art == prototyp_wdh.ART_GANZ]
+        self.sensor = len(ganze)
+        self.zeiten_s = ganze
+        self.halbe = sum(1 for _, _, art in self.wdh if art != prototyp_wdh.ART_GANZ)
 
 
 @dataclass(frozen=True)
@@ -306,18 +327,37 @@ class ZaehlBaustein:
         self.atem = bool(atmung)
         #: das Feld, in das die Wiederholungen kommen (`core.zaehlen.zaehlt_in`)
         self.feld = feld
-        self.vorlage = vorlage or VORLAGE_AUTO
         self.rate_hz = int(rate_hz) if rate_hz else zaehl_rate(messlauf.profil)
         self.bereich_g = int(bereich_g)
         #: das Profil, von dem die Beschleunigung kommt
         self.geraet = messlauf.profil.id if messlauf.profil is not None else ""
+        #: womit gezählt wird (`core.zaehlen.vorlage_waehlen`): die Vorlage der Übung mit dem
+        #: Umkehrpunkt oben — oder Automatisch mit Grund (`VorlageWahl.rueckfall`), wenn sie
+        #: die Achsen eines anderen Geräts meint oder hrv-core sie nicht kennt
+        self.vorlage_wahl: VorlageWahl = vorlage_waehlen(vorlage or VORLAGE_AUTO, self.geraet)
+        #: der Schlüssel der Vorlage, mit der gezählt wird (Zeitleiste ``vorlage``)
+        self.vorlage = self.vorlage_wahl.schluessel
         self.beteiligung: Beteiligung | None = None
         #: alle Sätze dieses Laufs, der laufende zuletzt
         self.saetze: list[ZaehlSatz] = []
         #: Ende-Grund (`core.zaehlen.ENDE_*`) — ``None``, solange gezählt wird
         self.grund: str | None = None
-        #: Dauer der letzten Rechnung (ms) — Ziel am Handy unter 20 ms (Plan §5.2)
+        #: Dauer der letzten Rechnung des Live-Zählers (ms, ein Takt)
         self.laufzeit_ms = 0.0
+        #: Summe aller Rechnungen (ms) und wie viele Sekunden Daten sie bekamen — das Maß ist
+        #: ``rechenzeit_ms / daten_s``, Ziel unter `ZIEL_MS_JE_S`
+        self.rechenzeit_ms = 0.0
+        self.daten_s = 0.0
+        #: Der letzte Fehler des Live-Zählers (``"ValueError: …"``) — er darf das Zählen nie
+        #: stoppen: ein frischer zählt weiter, das Gezählte bleibt im Satz
+        self.wdh_fehler = ""
+        #: der Live-Zähler des laufenden Satzes (`_satz_beginnen`) und bis wohin (Uhr der
+        #: Quelle) er die Proben hat — nur Neues je Takt
+        self._wdh_live: prototyp_wdh.WdhLive | None = None
+        self._wdh_bis_quelle: float | None = None
+        #: das Signal, mit dem der Live-Zähler zuletzt rechnete (`Stand.signal`) — nach einem
+        #: Rückfall in hrv-core (Neigung ohne Schwerkraft in der Ebene) die Hauptachse
+        self.wdh_signal: str | None = None
         #: ob ein Aufruf von außen (`abbrechen`, `fertig`) das Zählen beendete — dann zeichnet
         #: der Aufrufer neu (`ui.einheit`); ``False``: es endete von selbst (keine Bewegung,
         #: Timer, getrennt)
@@ -328,17 +368,10 @@ class ZaehlBaustein:
         self.getrennt = False
         #: ob es endete, weil `KEINE_DATEN_S` lang keine Beschleunigung kam — Grund ``abbruch``
         self.ohne_daten = False
-        #: ob es endete, weil der Satz länger lief, als der Puffer der Beschleunigung hält
-        #: (`Messlauf.acc_verloren_bis`) — Grund ``abbruch``: sein Anfang fehlte, der Prototyp
-        #: zählte nur noch das Ende (lieber eine Lücke als ein falscher Wert); die Zahl davor
-        #: bleibt nachtragbar
-        self.zu_lang = False
         #: Dauer der letzten Rechnung der Atem-Spur (ms) — sie ist billig und nie gedrosselt
         self.atem_laufzeit_ms = 0.0
         #: Summe der ±1 an den Atemzügen (nur Atmung; bei Wdh + Atmung korrigiert ±1 die Sätze)
         self.atem_korrektur = 0
-        #: wann nach der letzten Rechnung die nächste kommt (`takt_nach`)
-        self._takt_s = ZAEHL_TAKT_S
         #: der Atem-Prototyp, solange die Atem-Spur läuft (ab `starten`, wenn „Atmung“ an)
         self._atem_live: prototyp_atem.AtemLive | None = None
         #: ob der Lauf im Beiwerk eröffnet ist — erst mit dem ersten Rahmen (`_atem_fuettern`):
@@ -384,7 +417,6 @@ class ZaehlBaustein:
         self._start_s = 0.0
         self._offen: ZaehlSatz | None = None
         self._angehalten_seit: float | None = None
-        self._gerechnet: float | None = None
         self._vorgemerkt: tuple[str, float] | None = None
         self._neu: list[Ereignis] = []
         self._freigegeben = False
@@ -425,6 +457,25 @@ class ZaehlBaustein:
     def korrektur(self) -> int:
         s = self.satz
         return s.korrektur if s is not None else 0
+
+    @property
+    def halbe(self) -> int:
+        """Halbe Wiederholungen des Satzes — daneben gezeigt, nie mitgezählt."""
+        s = self.satz
+        return s.halbe if s is not None else 0
+
+    @property
+    def vorlage_text(self) -> str:
+        """Die Vorlage für die kleine Zeile: leer bei „Automatisch“ ohne Grund, sonst ihr
+        Name — nach einem Rückfall mit dem Grund („Automatisch (Vorlage nur für den
+        Brustgurt)“), nach einem Rückfall in hrv-core „Kniebeuge (Hauptachse)“."""
+        w = self.vorlage_wahl
+        if not w.rueckfall and w.schluessel == VORLAGE_AUTO:
+            return ""
+        text = w.text
+        if self.wdh_signal is not None and self.wdh_signal != w.vorlage.signal:
+            text = f"{w.vorlage.name} (Hauptachse)"
+        return text
 
     @property
     def wert(self) -> int:
@@ -583,16 +634,9 @@ class ZaehlBaustein:
                 grund, bei = self._vorgemerkt
                 self._enden(bei, grund)
             else:
-                self._rechnen(t)  # was bis jetzt kam, zählt noch
-                self._atem_fuettern(t)  # die Atem-Spur: nur das Neue, jeden Takt
-                if not self.zu_lang and self._gerechnet != t and self._keine_bewegung(t):
-                    # Gedrosselt (`takt_nach`) ist der Stand bis zu `MAX_TAKT_S` alt — vor dem
-                    # Urteil „keine Bewegung“ zählt der Prototyp bis jetzt: Die Wiederholungen
-                    # seither verschieben die Ruhe, sonst würden aus 60 s gut 55
-                    self._rechnen(t, erzwingen=True)
-                if self.zu_lang:
-                    self._enden(t, ENDE_ABBRUCH)
-                elif self._keine_bewegung(t):
+                self._wdh_fuettern(t)  # der Live-Zähler: nur das Neue, jeden Takt
+                self._atem_fuettern(t)  # die Atem-Spur ebenso
+                if self._keine_bewegung(t):
                     self._enden(t, ENDE_KEINE_BEWEGUNG)
                 elif self._kein_atem(t):
                     # Nur Atmung: abgelegt, verrutscht — nichts zu erfassen
@@ -739,8 +783,6 @@ class ZaehlBaustein:
             return False
         satz.von_hand = True
         if satz is self._offen:
-            if self._angehalten_seit is None:
-                self._rechnen(t, erzwingen=self._gerechnet != t)
             self._satz_schliessen(t)  # ein Satz von Hand bleibt einer, auch unter 5 s
             if not self._mit_uhr and self._angehalten_seit is None:
                 self._satz_beginnen(t)  # was danach kommt, zählt der Sensor als nächsten Satz
@@ -773,12 +815,11 @@ class ZaehlBaustein:
         return werte
 
     def bis_jetzt_zaehlen(self) -> None:
-        """Den laufenden Satz jetzt zählen — vor der Notiz eines Satzes von Hand, deren
-        Vergleich den Stand nimmt (`Messlauf.zaehl_satz`): gedrosselt (`takt_nach`) wäre er bis
-        zu `MAX_TAKT_S` alt."""
+        """Dem Live-Zähler geben, was bis jetzt kam — vor der Notiz eines Satzes von Hand,
+        deren Vergleich den Stand nimmt (`Messlauf.zaehl_satz`): sonst wäre er einen Takt alt."""
         if self._t0 is None or self.grund is not None:
             return
-        self._rechnen(max(self._uhr() - self._t0, self._start_s), erzwingen=True)
+        self._wdh_fuettern(max(self._uhr() - self._t0, self._start_s))
 
     def _ziel(self) -> ZaehlSatz | None:
         """Der Satz, den ein Satz von Hand jetzt meint: der laufende — in der Pause der Uhr der
@@ -798,12 +839,13 @@ class ZaehlBaustein:
         satz.diag_nr = self._naechste_diagnose_nr()
         self.saetze.append(satz)
         self._offen = satz
-        self._gerechnet = None
+        self._wdh_neu(t)
 
     def _satz_schliessen(self, t: float) -> None:
         satz, self._offen = self._offen, None
         if satz is None:
             return
+        self._wdh_abschliessen(satz, t)
         if satz.stuecke and satz.stuecke[-1][1] is None:
             satz.stuecke[-1][1] = t
         satz.bis_s = t
@@ -837,16 +879,15 @@ class ZaehlBaustein:
             satz.von_s = satz.ruhe_seit_s = t
             satz.stuecke = [[t, None]]
             satz.zeiten_s = []
+            satz.wdh = []
             satz.sensor = None
-            satz.hoechst = 0
+            satz.halbe = 0
             self._angehalten_seit = None
-            self._gerechnet = None
+            self._wdh_neu(t)  # ein frischer Zähler: die Lage zu Satzbeginn ist jetzt
             return
         if einmal and satz is not None and self._angehalten_seit is None:
             return  # die Einmaluhr misst den Satz, der schon zählt
         if satz is not None:
-            if self._angehalten_seit is None:
-                self._rechnen(t, erzwingen=True)
             self._satz_schliessen(t)
         self._angehalten_seit = None
         self._satz_beginnen(t)
@@ -854,18 +895,17 @@ class ZaehlBaustein:
     def _abschnitt_pause(self, t: float) -> None:
         """Eine Pause des Timers beginnt (Abschnitt, der nicht zählt): der Satz ist zu."""
         if self._offen is not None:
-            if self._angehalten_seit is None:
-                self._rechnen(t, erzwingen=True)
             self._satz_schliessen(t)
         self._angehalten_seit = None
 
     def _anhalten(self, t: float) -> None:
-        """„Anhalten“ der Uhr — das Zählen hält mit an."""
+        """„Anhalten“ der Uhr — das Zählen hält mit an: was bis jetzt kam, bekommt der
+        Live-Zähler noch; was in der Pause kommt, nie."""
         if self._angehalten_seit is not None:
             return
         satz = self._offen
         if satz is not None:
-            self._rechnen(t, erzwingen=True)
+            self._wdh_fuettern(t)
             if satz.stuecke and satz.stuecke[-1][1] is None:
                 satz.stuecke[-1][1] = t
         self._angehalten_seit = t
@@ -879,7 +919,7 @@ class ZaehlBaustein:
         if satz is not None:
             satz.stuecke.append([t, None])
             satz.ruhe_seit_s += pause
-        self._gerechnet = None
+            self._wdh_bis_quelle = self._auf_quelle(t)  # die Pause sieht der Zähler nicht
 
     def _keine_bewegung(self, t: float) -> bool:
         satz = self._offen
@@ -941,23 +981,91 @@ class ZaehlBaustein:
         e0, q0, gang = self._uhren()
         return e0 + (t_quelle - q0) / gang - self._t0
 
-    # -- Rechnen -------------------------------------------------------------------------
+    # -- Live-Zähler (A5) ----------------------------------------------------------------
 
-    def _rechnen(self, t: float, *, erzwingen: bool = False) -> None:
-        """Den laufenden Satz mit dem Prototyp neu zählen — höchstens jede `ZAEHL_TAKT_S`."""
-        satz = self._offen
-        if satz is None or self._angehalten_seit is not None or not self.wdh or self._t0 is None:
+    def _wdh_neu(self, t: float) -> None:
+        """Ein frischer Live-Zähler für den Satz, der bei ``t`` (Achse der Einheit) beginnt —
+        in der Rate des Laufs, mit der Vorlage der Übung (Umkehrpunkt oben)."""
+        if not self.wdh or self._t0 is None:
             return
-        if not erzwingen and self._gerechnet is not None and t - self._gerechnet < self._takt_s:
+        self._wdh_live = prototyp_wdh.WdhLive(float(self.rate_hz), self.vorlage_wahl.vorlage)
+        self._wdh_bis_quelle = self._auf_quelle(t)
+        self.wdh_signal = None
+
+    def _wdh_fuettern(self, t: float) -> None:
+        """Die seit dem letzten Takt neu angekommenen Proben dem Live-Zähler geben — in der
+        Rate des Laufs (`Messlauf.acc_reihe` taktet andere um), je lückenlosem Stück ein Rahmen
+        (über eine Lücke hinweg sieht der Zähler den Sprung der Zeit); angehalten nichts. Die
+        Ereignisse gehen in den Satz (`ZaehlSatz.ereignisse`), die Zeiten auf die Achse der
+        Einheit; jede gemeldete Wiederholung verschiebt „keine Bewegung“."""
+        satz, live = self._offen, self._wdh_live
+        if (
+            satz is None
+            or live is None
+            or self._angehalten_seit is not None
+            or self._t0 is None
+            or self._wdh_bis_quelle is None
+        ):
             return
-        self._gerechnet = t
+        bis = self._auf_quelle(t)
+        if bis <= self._wdh_bis_quelle:
+            return
+        reihe = self.messlauf.acc_reihe(self._wdh_bis_quelle, bis, rate=self.rate_hz, min_s=0.0)
+        if reihe is None or reihe.xyz.shape[0] == 0:
+            return
+        rate = float(reihe.rate_hz)
+        self._wdh_bis_quelle = float(reihe.t[-1]) + 0.5 / rate  # ab der nächsten Probe
         beginn = time.perf_counter()
         try:
-            self._zaehlen(satz, t)
+            schnitte = np.flatnonzero(np.diff(reihe.t) > ACC_LUECKE_PROBEN / rate) + 1
+            grenzen = [0, *schnitte.tolist(), reihe.t.shape[0]]
+            for von, bis_i in itertools.pairwise(grenzen):
+                if bis_i > von:
+                    ereignisse = live.rahmen(reihe.xyz[von:bis_i], float(reihe.t[von]))
+                    self._umkehr_oben(live)
+                    self._wdh_ereignisse(satz, ereignisse, t)
+            self.wdh_signal = live.stand().signal
+        except Exception as fehler:  # der Prototyp darf das Zählen nie stoppen
+            self.wdh_fehler = f"{type(fehler).__name__}: {fehler}"
+            self._wdh_live = prototyp_wdh.WdhLive(float(self.rate_hz), self.vorlage_wahl.vorlage)
         finally:
             self.laufzeit_ms = (time.perf_counter() - beginn) * 1000.0
-            self._takt_s = takt_nach(self.laufzeit_ms)
+            self.rechenzeit_ms += self.laufzeit_ms
+            self.daten_s += reihe.xyz.shape[0] / rate
         self._zwischenstand(satz, t)
+
+    def _wdh_ereignisse(self, satz: ZaehlSatz, ereignisse: Sequence[WdhEreignis], t: float) -> None:
+        satz.ereignisse(ereignisse, self._von_quelle)
+        for e in ereignisse:
+            if isinstance(e, prototyp_wdh.Wiederholung) and e.art == prototyp_wdh.ART_GANZ:
+                # „Keine Bewegung“ zählt ab der jüngsten gemeldeten ganzen Wiederholung — eine
+                # Rücknahme danach nimmt die Zahl, nicht die Bewegung; eine halbe verschiebt
+                # nichts (Befund beim Bau: in Ruhe abseits der Ausgangslage meldete der
+                # Prototyp nach gut 20 s eine „halbe“ aus der wandernden Hauptachse)
+                satz.ruhe_seit_s = max(satz.ruhe_seit_s, min(self._von_quelle(e.t_s), t))
+
+    def _wdh_abschliessen(self, satz: ZaehlSatz, t: float) -> None:
+        """Der Satz endet: was bis jetzt kam, noch dem Zähler — dann sein Abschluss (die
+        offene Wiederholung gilt, eine unbestätigte Rückkehr mit genügend Hub zählt)."""
+        live = self._wdh_live
+        if live is None:
+            return
+        self._wdh_fuettern(t)
+        try:
+            self._wdh_ereignisse(satz, live.abschluss(), t)
+        except Exception as fehler:  # wie beim Füttern
+            self.wdh_fehler = f"{type(fehler).__name__}: {fehler}"
+        self._wdh_live = None
+        self._wdh_bis_quelle = None
+
+    @staticmethod
+    def _umkehr_oben(live: prototyp_wdh.WdhLive) -> None:
+        """Gezählt wird oben (P143) — auch nach dem Rückfall in hrv-core (eine Neigung ohne
+        Schwerkraft in ihrer Ebene wird zur Hauptachse mit Umkehr unten): Der Rückfall
+        geschieht mit der Ausgangslage, in den ersten Proben, bevor ein Umkehrpunkt mit
+        genügend Hub die Rollen festlegt — darum reicht es, nach dem Rahmen nachzusetzen."""
+        if live.vorlage.umkehr != prototyp_wdh.UMKEHR_OBEN:
+            live.vorlage = replace(live.vorlage, umkehr=prototyp_wdh.UMKEHR_OBEN)
 
     def _zwischenstand(self, satz: ZaehlSatz, t: float) -> None:
         """Den laufenden Satz in die Zeitleiste, wenn sich sein Stand änderte und seit dem
@@ -971,53 +1079,6 @@ class ZaehlBaustein:
         ):
             return
         self._zaehlung_schreiben(satz, t)
-
-    def _zaehlen(self, satz: ZaehlSatz, t: float) -> None:
-        assert self._t0 is not None
-        # Alles in der jüngsten Rate: was vor einem Wechsel kam (50 → 200 Hz, wenn die
-        # Diagnose beginnt), taktet der Messlauf um — sonst fehlten diese Wiederholungen
-        rate = getattr(self.messlauf, "acc_rate_hz", None)
-        if not rate:
-            return
-        anfang = next((von for von, _ in satz.stuecke if von is not None), None)
-        verloren = getattr(self.messlauf, "acc_verloren_bis", None)
-        if anfang is not None and verloren is not None and verloren >= self._auf_quelle(anfang):
-            # Der Anfang des Satzes ist aus dem vollen Puffer gefallen: neu gezählt käme zu
-            # wenig heraus — die letzte Zahl bleibt, und der Satz endet (`takt`)
-            self.zu_lang = True
-            return
-        stuecke = []
-        for von, bis in satz.stuecke:
-            ende = t if bis is None else bis
-            if von is None or ende <= von:
-                continue
-            reihe = self.messlauf.acc_reihe(
-                self._auf_quelle(von), self._auf_quelle(ende), rate=rate, min_s=0.0
-            )
-            if reihe is not None:
-                stuecke.append(reihe)
-        if not stuecke:
-            return
-        xyz = np.concatenate([r.xyz for r in stuecke])
-        # Die Zeit jeder Probe (Uhr der Quelle) — auch über Lücken im Strom und „Anhalten“
-        zeit = np.concatenate([r.t for r in stuecke])
-        if xyz.shape[0] < rate * MIN_DATEN_S:
-            return
-        z = prototyp_wdh.zaehlen_fenster(xyz, float(rate), 0.0)
-        if z.periode_s is None:
-            return  # noch keine Periode — die letzte Zahl bleibt
-        letzte = zeit.shape[0] - 1
-        zeiten = [
-            round(self._von_quelle(float(zeit[min(max(round(zt * rate), 0), letzte)])), 2)
-            for zt in z.zeiten_s
-        ]
-        satz.sensor = int(z.anzahl)
-        satz.zeiten_s = zeiten
-        satz.hoechst = max(satz.hoechst, satz.sensor)
-        if zeiten:
-            # „Keine Bewegung“ zählt ab der jüngsten Wiederholung — nicht ab der höchsten
-            # Zahl: zählt der Prototyp das wachsende Fenster neu, darf die Zahl kurz sinken
-            satz.ruhe_seit_s = max(satz.ruhe_seit_s, min(zeiten[-1], t))
 
     # -- Atem-Spur ----------------------------------------------------------------------
 
@@ -1260,8 +1321,6 @@ class ZaehlBaustein:
 
     def _enden(self, t: float, grund: str) -> None:
         if self._offen is not None:
-            if self._angehalten_seit is None:
-                self._rechnen(t, erzwingen=True)
             self._satz_schliessen(t)
         self._melden()
         self._atem_enden(t)
@@ -1329,6 +1388,7 @@ class ZaehlBaustein:
             "wert": satz.wert,
             "vorlage": self.vorlage,
             "zeiten_s": list(satz.zeiten_s),
+            "halbe": satz.halbe,
             "prototyp": PROTOTYP,
         }
         if self.feld:
@@ -1446,8 +1506,6 @@ class ZaehlBaustein:
 
 
 __all__ = [
-    "MAX_TAKT_S",
-    "MIN_DATEN_S",
     "MIN_SATZ_S",
     "PHASE_ATMUNG",
     "PHASE_ENDE",
@@ -1457,13 +1515,12 @@ __all__ = [
     "PHASE_ZAEHLT",
     "PROTOTYP",
     "PROTOTYP_ATEM",
-    "ZAEHL_TAKT_S",
-    "ZIEL_MS",
+    "ZIEL_MS_JE_S",
     "ZWECK",
     "ZWISCHENSTAND_S",
     "Gezaehlt",
+    "WdhEreignis",
     "ZaehlBaustein",
     "ZaehlSatz",
-    "takt_nach",
     "zaehl_rate",
 ]

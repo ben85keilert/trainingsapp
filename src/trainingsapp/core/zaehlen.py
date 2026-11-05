@@ -5,9 +5,17 @@ Ben, 4.11.2026 (`docs/plan_beschleunigung.md` §3, §4, §12):
 
 - `SensorWahl` — die Karte „Beschleunigungssensor“ an der Übung (Migration 037,
   ``exercise.acc_json``; Paketfeld ``beschleunigung``): ``wiederholungen`` und ``atmung``
-  (``None`` = Vorgabe aus der Übung), ``vorlage`` (zuerst nur „Automatisch“, P126) und
-  ``feld`` („Zählt in“ bei mehreren Wiederholungsfeldern). `wahl_pruefen` sagt, was
-  `SensorWahl.aus_dict` still überläse (``trainingsapp-paket pruefen``).
+  (``None`` = Vorgabe aus der Übung), ``vorlage`` (die Bewegung, A5) und ``feld`` („Zählt in“
+  bei mehreren Wiederholungsfeldern). `wahl_pruefen` sagt, was `SensorWahl.aus_dict` still
+  überläse (``trainingsapp-paket pruefen``).
+- **Vorlagen** (A5, Ben 5.11.2026): Der Katalog liegt in hrv-core
+  (``prototyp.wiederholungen.VORLAGEN``); die App bietet `VORLAGEN_ANGEBOT` an — Automatisch,
+  Kniebeuge, Liegestütz (`vorlagen_angebot`, Hinweis je Vorlage) — und speichert nur den
+  Schlüssel. `vorlage_waehlen` sagt, womit ein Gerät zählt: eine Vorlage, die Achsen eines
+  anderen Geräts meint (``Vorlage.geraet`` ≠ Profil, etwa Kniebeuge an der Verity Sense am
+  Arm), fällt auf Automatisch zurück; unbekannte Schlüssel ebenso. **Gezählt wird oben**
+  (P143): der Umkehrpunkt der Vorlage wird mit ``umkehr = oben`` überschrieben — die
+  Wiederholung zählt mit der Rückkehr in die Ausgangslage, nicht am fernen Ende.
 - `wiederholungen_an`, `atmung_an` — ob an dieser Übung gezählt bzw. erfasst wird;
   `hat_wdh_feld`, `wdh_felder`, `zaehlt_in` — in welches Feld die Wiederholungen kommen.
   Gefragt wird nach der *Art* des Feldes (`core.result_spec.basis_key`), nie nach dem
@@ -27,17 +35,25 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Final
+
+from hrv_core.prototyp import wiederholungen as prototyp_wdh
 
 from .result_spec import basis_key
 
 if TYPE_CHECKING:
     from .models import Exercise, PlanItem
 
-#: Bewegung „Automatisch“: die Hauptachse, wie der Prototyp in hrv-core heute zählt (P126).
+#: Bewegung „Automatisch“: die Hauptachse der Bewegung, gerätefrei (hrv-core ``VORLAGEN``).
 #: Ein Schlüssel, den hrv-core (noch) nicht kennt, gilt beim Zählen als dieser.
 VORLAGE_AUTO: Final = "auto"
+#: Die Vorlagen, die die Karte anbietet (P144, Ben 5.11.2026: nur diese drei — Rudern und
+#: Burpee aus dem Katalog nicht, Rudern zählt mit freier Rollenwahl am Nachlassen, Burpee ist
+#: ein Entwurf)
+VORLAGEN_ANGEBOT: Final = ("auto", "kniebeuge", "liegestuetz")
+#: Ein Gerät je ``Vorlage.geraet`` in Worten (hrv-core nennt das Profil)
+_GERAETE_NAMEN: Final = {"polar_h10": "den Brustgurt"}
 #: Die Art eines Wiederholungsfeldes (``reps``, ``reps_2`` …)
 WDH_ART: Final = "reps"
 #: Der Typ, an dem „Atmung“ von selbst an ist
@@ -101,7 +117,7 @@ class SensorWahl:
     wiederholungen: bool | None = None
     #: Atmung erfassen — ``None``: an bei Typ „Atmung“
     atmung: bool | None = None
-    #: Bewegung: Schlüssel einer Vorlage in hrv-core, zuerst nur ``auto`` (P126)
+    #: Bewegung: Schlüssel einer Vorlage in hrv-core (`VORLAGEN_ANGEBOT`; unbekannt = ``auto``)
     vorlage: str = VORLAGE_AUTO
     #: „Zählt in“ (nur bei mehreren Wiederholungsfeldern) — ``None``: das erste
     feld: str | None = None
@@ -177,6 +193,8 @@ def wahl_pruefen(roh: Any) -> tuple[list[str], list[str]]:
     unbekannter Schlüssel „wdh“ — wird überlesen (bekannt: wiederholungen, atmung, vorlage, feld)
     >>> wahl_pruefen({"feld": 2})[0]
     ['„feld“ muss ein Text in Anführungszeichen sein, nicht 2']
+    >>> for h in wahl_pruefen({"vorlage": "rudern"})[1]: print(h)
+    unbekannte Vorlage „rudern“ — zählt wie „Automatisch“ (bekannt: auto, kniebeuge, liegestuetz)
     >>> wahl_pruefen(True)[0]
     ['keine Tabelle (etwa { wiederholungen = true }), sondern true — alles gilt als Vorgabe']
     """
@@ -196,6 +214,15 @@ def wahl_pruefen(roh: Any) -> tuple[list[str], list[str]]:
             )
         elif not isinstance(wert, typ):
             fehler.append(f"„{schluessel}“ muss {_TYPNAME[typ]} sein, nicht {_wert_text(wert)}")
+        elif (
+            schluessel == "vorlage"
+            and isinstance(wert, str)
+            and wert.strip() not in VORLAGEN_ANGEBOT
+        ):
+            hinweise.append(
+                f"unbekannte Vorlage „{wert}“ — zählt wie „Automatisch“ "
+                f"(bekannt: {', '.join(VORLAGEN_ANGEBOT)})"
+            )
     return fehler, hinweise
 
 
@@ -205,6 +232,117 @@ def _wert_text(wert: Any) -> str:
         return json.dumps(wert, ensure_ascii=False)
     except (TypeError, ValueError):
         return repr(wert)
+
+
+# ---------------------------------------------------------------------------
+# Vorlagen der Bewegung (A5)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VorlageAngebot:
+    """Eine Vorlage, wie die Karte sie anbietet: Schlüssel, Name und ein Hinweis."""
+
+    schluessel: str
+    name: str
+    hinweis: str
+
+
+def vorlage_name(schluessel: str | None) -> str:
+    """Der Name einer Vorlage aus dem Katalog — unbekannt oder leer: „Automatisch“.
+
+    >>> vorlage_name("kniebeuge"), vorlage_name("x"), vorlage_name(None)
+    ('Kniebeuge', 'Automatisch', 'Automatisch')
+    """
+    return prototyp_wdh.vorlage(schluessel).name
+
+
+def vorlage_hinweis(v: prototyp_wdh.Vorlage) -> str:
+    """Der Hinweis zur Vorlage in der Karte: wofür sie geprüft ist.
+
+    >>> vorlage_hinweis(prototyp_wdh.VORLAGEN["kniebeuge"])
+    'nur für den Brustgurt geprüft'
+    >>> vorlage_hinweis(prototyp_wdh.VORLAGEN["liegestuetz"])
+    'Erwartung, noch ohne Messdaten'
+    >>> vorlage_hinweis(prototyp_wdh.VORLAGEN["auto"])
+    'die Hauptachse der Bewegung, gerätefrei'
+    """
+    if v.schluessel == VORLAGE_AUTO:
+        return "die Hauptachse der Bewegung, gerätefrei"
+    if v.geraet is not None:
+        return f"nur für {_GERAETE_NAMEN.get(v.geraet, v.geraet)} geprüft"
+    return "Erwartung, noch ohne Messdaten"
+
+
+def vorlagen_angebot() -> list[VorlageAngebot]:
+    """Die Vorlagen der Karte (`VORLAGEN_ANGEBOT`) mit Namen aus hrv-core — was hrv-core
+    nicht kennt (älteres), fällt weg.
+
+    >>> [v.name for v in vorlagen_angebot()]
+    ['Automatisch', 'Kniebeuge', 'Liegestütz']
+    """
+    heraus: list[VorlageAngebot] = []
+    for k in VORLAGEN_ANGEBOT:
+        v = prototyp_wdh.VORLAGEN.get(k)
+        if v is not None and v.verfuegbar:
+            heraus.append(VorlageAngebot(k, v.name, vorlage_hinweis(v)))
+    return heraus
+
+
+@dataclass(frozen=True)
+class VorlageWahl:
+    """Womit ein Gerät zählt (`vorlage_waehlen`): die Vorlage für `WdhLive` (Umkehrpunkt
+    oben), ihr Schlüssel und, wenn sie nicht die gewählte ist, warum (``rueckfall``)."""
+
+    vorlage: prototyp_wdh.Vorlage
+    rueckfall: str = ""
+
+    @property
+    def schluessel(self) -> str:
+        return self.vorlage.schluessel
+
+    @property
+    def text(self) -> str:
+        """„Kniebeuge“ — nach einem Rückfall „Automatisch (Vorlage nur für den Brustgurt)“."""
+        return f"{self.vorlage.name} ({self.rueckfall})" if self.rueckfall else self.vorlage.name
+
+
+def vorlage_waehlen(schluessel: str | None, geraet: str | None) -> VorlageWahl:
+    """Die Vorlage, mit der ``geraet`` (Profil-ID) zählt — mit ``umkehr = oben`` (P143: die
+    Wiederholung zählt mit der Rückkehr in die Ausgangslage). Unbekannt, Entwurf oder die
+    Achsen eines anderen Geräts (``Vorlage.geraet`` ≠ Profil): Automatisch, mit Grund.
+
+    >>> w = vorlage_waehlen("kniebeuge", "polar_h10")
+    >>> w.schluessel, w.vorlage.umkehr, w.rueckfall, w.text
+    ('kniebeuge', 'oben', '', 'Kniebeuge')
+    >>> w = vorlage_waehlen("kniebeuge", "verity_sense")
+    >>> w.schluessel, w.rueckfall, w.text
+    ('auto', 'Vorlage nur für den Brustgurt', 'Automatisch (Vorlage nur für den Brustgurt)')
+    >>> vorlage_waehlen("gibt_es_nicht", "polar_h10").text, vorlage_waehlen(None, None).text
+    ('Automatisch', 'Automatisch')
+    >>> vorlage_waehlen("burpee", "polar_h10").rueckfall
+    'Vorlage noch ein Entwurf'
+    """
+    auto = prototyp_wdh.VORLAGEN[VORLAGE_AUTO]
+    v = prototyp_wdh.vorlage(schluessel)
+    rueckfall = ""
+    if not v.verfuegbar:
+        v, rueckfall = auto, "Vorlage noch ein Entwurf"
+    elif v.geraet is not None and v.geraet != (geraet or ""):
+        name = _GERAETE_NAMEN.get(v.geraet, v.geraet)
+        v, rueckfall = auto, f"Vorlage nur für {name}"
+    if v.umkehr != prototyp_wdh.UMKEHR_OBEN:
+        v = replace(v, umkehr=prototyp_wdh.UMKEHR_OBEN)
+    return VorlageWahl(v, rueckfall)
+
+
+def halbe_text(halbe: int) -> str:
+    """Halbe Wiederholungen neben der Zahl — gezeigt, nie mitgezählt (Ben, 5.11.2026).
+
+    >>> halbe_text(2), halbe_text(1), halbe_text(0)
+    ('2 halbe', '1 halbe', '')
+    """
+    return f"{halbe} halbe" if halbe > 0 else ""
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +509,18 @@ def korrektur_text(sensor: int | None, korrektur: int) -> str:
     """
     text = f"Sensor {'…' if sensor is None else sensor}"
     return f"{text} · {mit_vorzeichen(korrektur)}" if korrektur else text
+
+
+def sensor_zeile(sensor: int | None, korrektur: int, halbe: int = 0, vorlage: str = "") -> str:
+    """Die kleine Zeile mit allem (A5): `korrektur_text`, dazu die halben Wiederholungen und
+    die Vorlage, wenn eine gewählt ist („Kniebeuge“ oder, nach einem Rückfall, „Automatisch
+    (Vorlage nur für den Brustgurt)“ — `VorlageWahl.text`; bei „Automatisch“ nichts).
+
+    >>> sensor_zeile(11, 1), sensor_zeile(11, 0, 2), sensor_zeile(11, -1, 1, "Kniebeuge")
+    ('Sensor 11 · +1', 'Sensor 11 · 2 halbe', 'Sensor 11 · −1 · 1 halbe · Kniebeuge')
+    """
+    teile = [korrektur_text(sensor, korrektur), halbe_text(halbe), vorlage]
+    return " · ".join(t for t in teile if t)
 
 
 #: Die Atemphase als Pfeil: Einatmen ▲, Ausatmen ▼ (Plan §4.5, §7.3)

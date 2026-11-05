@@ -154,10 +154,10 @@ async def test_zaehllauf_fertig_traegt_die_wiederholungen_ein(umgebung) -> None:
     assert isinstance(z, ZaehlBaustein) and z.sensor is not None and abs(z.sensor - 12) <= 1
     assert einheit_ui.laufzeilen(e)[0].endswith(f"{z.wert} Wdh.")
     assert zaehl_stand.korrigieren(state, u.id, None, +1)
-    sensor = z.sensor
     # „Fertig“ am Zähler: die Einheit endet, eingetragen wird an ihrem Ende
     assert uebung_lauf.zaehlen_beenden(state, u.id, None, ENDE_FERTIG) is None
     assert e.zustand is Zustand.BEENDET and messlauf.acc_anforderungen == {}
+    sensor = z.sensor  # nach dem Abschluss des Live-Zählers (die offene Rückkehr zählt)
     await _ticken(state, uhr, gurt, 1, bis_ende=True)
 
     (lauf,) = uebung_lauf.laeufe_heute(state, u.id)

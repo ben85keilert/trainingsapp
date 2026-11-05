@@ -75,7 +75,15 @@ from trainingsapp.core.result_spec import (
 from trainingsapp.core.standards import ziel_bereinigen, ziel_spec
 from trainingsapp.core.timer import TimerProfil
 from trainingsapp.core.uebung_timer import profile_der_uebung
-from trainingsapp.core.zaehlen import WDH_ART, SensorWahl, atmung_an, knopf_text
+from trainingsapp.core.zaehlen import (
+    VORLAGE_AUTO,
+    VORLAGEN_ANGEBOT,
+    WDH_ART,
+    SensorWahl,
+    atmung_an,
+    knopf_text,
+    vorlagen_angebot,
+)
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
@@ -1258,15 +1266,46 @@ def uebung_bearbeiten(
     atmung_schalter: ft.Switch = ft.Switch(label="Atmung")
     wdh_schalter.on_change = lambda: acc_umschalten("wiederholungen", wdh_schalter)
     atmung_schalter.on_change = lambda: acc_umschalten("atmung", atmung_schalter)
-    bewegung_zeile = ft.Row(
-        spacing=12,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    # „Bewegung“ (A5, Ben 5.11.2026): die Vorlagen aus hrv-core, die die App anbietet
+    # (`core.zaehlen.VORLAGEN_ANGEBOT`: Automatisch, Kniebeuge, Liegestütz), der Hinweis je
+    # Vorlage darunter. Ein unbekannter Schlüssel (neueres hrv-core, ein Paket) zeigt
+    # „Automatisch“ und bleibt gespeichert, bis man wählt — die Paketübung gälte sonst als
+    # geändert
+    angebot = vorlagen_angebot()
+    vorlage_vorher = acc_vorher.vorlage if acc_vorher.vorlage in VORLAGEN_ANGEBOT else VORLAGE_AUTO
+    bewegung_wahl = ft.Dropdown(
+        value=vorlage_vorher,
+        options=[ft.DropdownOption(key=v.schluessel, text=v.name) for v in angebot],
+        dense=True,
+        expand=True,
+        border_radius=8,
+    )
+    bewegung_hinweis = ft.Text(size=12, opacity=0.7)
+    bewegung_zeile = ft.Column(
+        spacing=4,
+        tight=True,
         controls=[
-            ft.Text("Bewegung", weight=ft.FontWeight.W_600),
-            # Vorlagen kommen später aus hrv-core (P126) — zuerst nur die Hauptachse
-            ft.Text("Automatisch", opacity=0.8),
+            ft.Row(
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[ft.Text("Bewegung", weight=ft.FontWeight.W_600), bewegung_wahl],
+            ),
+            bewegung_hinweis,
         ],
     )
+
+    def bewegung_hinweis_setzen() -> None:
+        gewaehlt = str(bewegung_wahl.value or VORLAGE_AUTO)
+        hinweis = next((v.hinweis for v in angebot if v.schluessel == gewaehlt), "")
+        bewegung_hinweis.value = f"Umkehrpunkt oben — {hinweis}" if hinweis else ""
+
+    def bewegung_gewaehlt(_e: object = None) -> None:
+        bewegung_hinweis_setzen()
+        with contextlib.suppress(Exception):  # noch nicht auf der Seite
+            bewegung_hinweis.update()
+
+    bewegung_wahl.on_select = bewegung_gewaehlt
+    bewegung_hinweis_setzen()
     zaehlt_in_wahl = ft.SegmentedButton(
         segments=[ft.Segment(value="reps", label=ft.Text("Wiederholungen"))],
         selected=[acc_vorher.feld or "reps"],
@@ -1340,11 +1379,17 @@ def uebung_bearbeiten(
         wahl = str(next(iter(zaehlt_in_wahl.selected or []), keys[0]))
         return None if wahl == keys[0] and not acc_vorher.feld else wahl
 
+    def vorlage_lesen() -> str:
+        """Die gewählte Vorlage — unberührt bleibt, was gespeichert war (auch ein Schlüssel,
+        den diese App nicht anbietet)."""
+        wahl = str(bewegung_wahl.value or VORLAGE_AUTO)
+        return acc_vorher.vorlage if wahl == vorlage_vorher else wahl
+
     def acc_lesen() -> SensorWahl:
         return SensorWahl(
             wiederholungen=acc_wahl["wiederholungen"],
             atmung=acc_wahl["atmung"],
-            vorlage=acc_vorher.vorlage,
+            vorlage=vorlage_lesen(),
             feld=zaehlt_in_lesen(),
         )
 

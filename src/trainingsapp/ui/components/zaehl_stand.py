@@ -293,9 +293,10 @@ def _atem_klein(z: ZaehlBaustein) -> str:
 
 
 def klein_text(z: ZaehlBaustein) -> str:
-    """Die kleine Zeile unter der Zahl: „Sensor 11 · +1 · Prototyp“ — bis die ersten Proben
-    kommen „Sensor startet …“, ohne erkennbare Periode „…“; in der Pause des Timers „Pause“
-    (davor, was der letzte Satz zählte), nach dem Ende der Grund. Nur Atmung: `_atem_klein`."""
+    """Die kleine Zeile unter der Zahl: „Sensor 11 · +1 · 2 halbe · Kniebeuge · Prototyp“ —
+    bis die ersten Proben kommen „Sensor startet …“, bis zur ersten Wiederholung „…“; in der
+    Pause des Timers „Pause“ (davor, was der letzte Satz zählte), nach dem Ende der Grund. Nur
+    Atmung: `_atem_klein`."""
     phase = z.phase
     if phase == PHASE_ENDE:
         return f"{'Zählen' if z.wdh else 'Atmung'} {ende_text(z.grund)}"
@@ -306,10 +307,16 @@ def klein_text(z: ZaehlBaustein) -> str:
     if phase == PHASE_PAUSE:
         if z.satz is None:
             return "Pause"
-        return f"Pause · {zl.korrektur_text(z.sensor, z.korrektur)} · Prototyp"
+        return f"Pause · {_sensor_zeile(z)} · Prototyp"
     if z.sensor is None and not z.korrektur:
         return "…"
-    return f"{zl.korrektur_text(z.sensor, z.korrektur)} · Prototyp"
+    return f"{_sensor_zeile(z)} · Prototyp"
+
+
+def _sensor_zeile(z: ZaehlBaustein) -> str:
+    """„Sensor 11 · +1 · 2 halbe · Kniebeuge“ (A5, `core.zaehlen.sensor_zeile`): die halben
+    Wiederholungen daneben, nicht mitgezählt, und die Vorlage, wenn eine gewählt ist."""
+    return zl.sensor_zeile(z.sensor, z.korrektur, z.halbe, z.vorlage_text)
 
 
 def kurz_text(z: ZaehlBaustein) -> str:

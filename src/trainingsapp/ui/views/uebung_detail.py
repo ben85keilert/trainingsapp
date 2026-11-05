@@ -43,6 +43,7 @@ from trainingsapp.core.standards import (
 from trainingsapp.core.uebung_timer import (
     TimerWahl,
     profile_der_uebung,
+    takt_der_uebung,
     timer_fuer,
     uhr_an,
     zaehlt_als,
@@ -98,16 +99,16 @@ def uhr_und_timer(uebung: Exercise, item: PlanItem | None = None) -> ft.Control:
     for k, p in enumerate(profile_der_uebung(uebung)):
         name = p.name + (" · Vorgabe" if k == 0 and len(uebung.timer) > 1 else "")
         zeilen.append(_uhr_zeile(ft.Icons.TIMER_OUTLINED, name, p.kurztext()))
-    if uebung.takt is not None and not uebung.takt.leer:
+    takt = takt_der_uebung(uebung, item)
+    if takt is not None and not takt.leer:
         # Der Takt der Übung (`docs/plan_taktgeber.md`): Phasen und Rate — gilt überall, wo sie
-        # geübt wird; ein Timer-Abschnitt oder die Uhr „für jetzt“ gehen vor
+        # geübt wird; in einer Planübung ihr eigener (A6), ein Timer-Abschnitt oder die Uhr
+        # „für jetzt“ gehen vor
         zeilen.append(
             _uhr_zeile(
                 ft.Icons.GRAPHIC_EQ,
-                f"Takt: {uebung.takt.anzeigename}",
-                uebung.takt.kurztext()
-                + " · "
-                + " · ".join(p.anzeigename for p in uebung.takt.phasen),
+                f"Takt: {takt.anzeigename}",
+                takt.kurztext() + " · " + " · ".join(p.anzeigename for p in takt.phasen),
             )
         )
     if not an:
@@ -169,22 +170,33 @@ def _uhr_zeile(icon: ft.IconData, name: str, text: str) -> ft.Control:
     )
 
 
-def beschleunigung_zeile(uebung: Exercise) -> ft.Control | None:
-    """„Beschleunigungssensor: Wiederholungen · Atmung (Prototyp)“ (Ben, 4.11.2026,
-    ``docs/plan_beschleunigung.md`` §3.4) — ``None``, wenn beides aus ist. Mit einer Vorlage
-    der Bewegung ihr Name (A5), bei mehreren Wiederholungsfeldern dazu, in welches gezählt
-    wird."""
-    wdh, atem = zl.wiederholungen_an(uebung), zl.atmung_an(uebung)
+def sensor_text(uebung: Exercise, item: PlanItem | None = None) -> tuple[str, str] | None:
+    """„Wiederholungen · Atmung“ und „Prototyp · Kniebeuge · zählt in …“ — ``None``, wenn
+    beides aus ist. Mit ``item`` so, wie die Planübung es einstellt (A6)."""
+    wdh, atem = zl.wiederholungen_an(uebung, item), zl.atmung_an(uebung, item)
     if not (wdh or atem):
         return None
     name = " · ".join(n for n, an in (("Wiederholungen", wdh), ("Atmung", atem)) if an)
     text = "Prototyp"
-    if wdh and uebung.beschleunigung.vorlage != zl.VORLAGE_AUTO:
-        text += f" · {zl.vorlage_name(uebung.beschleunigung.vorlage)}"
-    if wdh and len(zl.wdh_felder(uebung)) > 1 and (feld := zl.zaehlt_in(uebung)):
-        spec = uebung.result_spec.field_by_key(feld)
+    wahl = zl.wirksame_wahl(uebung, item)
+    if wdh and wahl.vorlage != zl.VORLAGE_AUTO:
+        text += f" · {zl.vorlage_name(wahl.vorlage)}"
+    if wdh and len(zl.wdh_felder(uebung, item)) > 1 and (feld := zl.zaehlt_in(uebung, item)):
+        spec = plan_spec(item, uebung).field_by_key(feld) if item else None
+        spec = spec or uebung.result_spec.field_by_key(feld)
         text += f" · zählt in {spec.label if spec is not None else feld}"
-    return _uhr_zeile(ft.Icons.SENSORS, name, text)
+    return name, text
+
+
+def beschleunigung_zeile(uebung: Exercise, item: PlanItem | None = None) -> ft.Control | None:
+    """„Beschleunigungssensor: Wiederholungen · Atmung (Prototyp)“ (Ben, 4.11.2026,
+    ``docs/plan_beschleunigung.md`` §3.4) — ``None``, wenn beides aus ist. Mit einer Vorlage
+    der Bewegung ihr Name (A5), bei mehreren Wiederholungsfeldern dazu, in welches gezählt
+    wird. Mit ``item`` so, wie die Planübung es einstellt (A6)."""
+    paar = sensor_text(uebung, item)
+    if paar is None:
+        return None
+    return _uhr_zeile(ft.Icons.SENSORS, *paar)
 
 
 def aufnahmen_liste(page: Any, state: AppState, uebung: Exercise) -> ft.Control:
@@ -351,6 +363,23 @@ def _plan_karte(
             "Uhr" in unterschiede or "Timer" in unterschiede,
         )
     )
+    # Sensor-Karte und Takt der Planübung (A6) — nur, wenn etwas gilt oder nur hier abweicht
+    sensor = sensor_text(uebung, item)
+    if sensor is not None or "Beschleunigungssensor" in unterschiede:
+        zeilen.append(
+            stand_zeile(
+                "Sensor", sensor[0] if sensor else "aus", "Beschleunigungssensor" in unterschiede
+            )
+        )
+    takt = takt_der_uebung(uebung, item)
+    if takt is not None or "Takt" in unterschiede:
+        zeilen.append(
+            stand_zeile(
+                "Takt",
+                f"{takt.anzeigename} · {takt.kurztext()}" if takt is not None else "keiner",
+                "Takt" in unterschiede,
+            )
+        )
     return ft.Container(
         padding=ft.Padding.only(left=14, top=10, right=14, bottom=10),
         border_radius=16,
@@ -689,7 +718,7 @@ def uebung_detail(
         _abschnitt("Uhr und Timer", uhr_und_timer(uebung, item)),
         *(
             [_abschnitt("Beschleunigungssensor", zeile)]
-            if (zeile := beschleunigung_zeile(uebung)) is not None
+            if (zeile := beschleunigung_zeile(uebung, item)) is not None
             else []
         ),
         _abschnitt("In Plänen", ft.Column(spacing=0, controls=verwendungen)),

@@ -59,7 +59,7 @@ from ..core.models import (
 from ..core.pakete import stand_tag_nachziehen
 from ..core.parameter import kontextfelder, modus_aus_felder
 from ..core.result_spec import FieldType, ResultSpec, basis_key, werte_modernisieren
-from ..core.takt import Takt
+from ..core.takt import AUS, Takt
 from ..core.zaehlen import SensorWahl
 from .db import transaktion
 
@@ -526,6 +526,41 @@ class ExerciseRepo:
 def _felder_json(felder: list[str] | None) -> str | None:
     """Parameter einer Planübung bzw. Standard der Übung → Spalte (NULL = wie die Übung)."""
     return None if felder is None else json.dumps(list(felder), ensure_ascii=False)
+
+
+def _sensor_json(acc: SensorWahl | None) -> str | None:
+    """``plan_item.acc_json`` (Migration 039): NULL = wie die Übung."""
+    return None if acc is None else json.dumps(acc.als_dict(), ensure_ascii=False)
+
+
+def _sensor_lesen(text: str | None) -> SensorWahl | None:
+    """NULL = wie die Übung; Kaputtes gilt als eigene Wahl mit den Vorgaben (das Schild sagt
+    „nur hier“, ↺ holt die Übung zurück).
+
+    >>> _sensor_lesen(None), _sensor_lesen('{"atmung": true}').atmung
+    (None, True)
+    >>> _sensor_lesen("{kaputt") == SensorWahl()
+    True
+    """
+    return None if text is None else SensorWahl.aus_dict(_json_lesen(text, {}))
+
+
+def _takt_json(takt: Takt | None) -> str | None:
+    """``plan_item.takt_json`` (Migration 039): NULL = wie die Übung, ``{}`` = keiner."""
+    if takt is None:
+        return None
+    return json.dumps({} if takt.leer else takt.als_dict(), ensure_ascii=False)
+
+
+def _takt_lesen(text: str | None) -> Takt | None:
+    """NULL = wie die Übung; ``{}`` oder Kaputtes = ausdrücklich kein Takt (`core.takt.AUS`).
+
+    >>> _takt_lesen(None), _takt_lesen("{}").leer, _takt_lesen("{kaputt").leer
+    (None, True, True)
+    """
+    if text is None:
+        return None
+    return Takt.aus_dict(_json_lesen(text, {})) or AUS
 
 
 def _json_lesen(text: str | None, vorgabe: Any) -> Any:
@@ -1043,13 +1078,29 @@ class PlanRepo:
             )
             self._beruehrt(plan_id)
 
+    def sensor_takt_setzen(self, item_id: str, acc: SensorWahl | None, takt: Takt | None) -> None:
+        """Karte „Beschleunigungssensor“ und Takt einer Planübung (Migration 039, A6) —
+        ``None``: wie die Übung (NULL); ein leerer Takt: ausdrücklich keiner (``{}``)."""
+        zeile = self.con.execute(
+            "SELECT plan_id FROM plan_item WHERE id = ?", (item_id,)
+        ).fetchone()
+        if zeile is None:
+            return
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE plan_item SET acc_json = ?, takt_json = ? WHERE id = ?",
+                (_sensor_json(acc), _takt_json(takt), item_id),
+            )
+            self._beruehrt(zeile["plan_id"])
+
     def item_speichern(self, item: PlanItem) -> None:
-        """Ziel, Parameter, Chips und Timer einer Planübung auf einmal („Im Plan einstellen“,
-        „Alles wie die Übung“ — P79)."""
+        """Ziel, Parameter, Chips, Timer, Sensor und Takt einer Planübung auf einmal („Im Plan
+        einstellen“, „Alles wie die Übung“ — P79)."""
         with transaktion(self.con):
             self.ziel_setzen(item.id, item.target)
             self.eingabe_setzen(item.id, item.input_mode, item.quick, item.felder)
             self.timer_setzen(item.id, item.timer)
+            self.sensor_takt_setzen(item.id, item.acc, item.takt)
 
     def verwendungen(
         self, exercise_id: str, subject_id: str | None = None
@@ -1086,8 +1137,8 @@ class PlanRepo:
     def _item_schreiben(self, item: PlanItem) -> None:
         self.con.execute(
             "INSERT INTO plan_item (id, plan_id, exercise_id, sort_order, target_json, note, "
-            "input_mode, quick_json, fields_json, timer_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "input_mode, quick_json, fields_json, timer_json, acc_json, takt_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 item.id,
                 item.plan_id,
@@ -1099,6 +1150,8 @@ class PlanRepo:
                 json.dumps(item.quick, ensure_ascii=False),
                 _felder_json(item.felder),
                 json.dumps(item.timer, ensure_ascii=False),
+                _sensor_json(item.acc),
+                _takt_json(item.takt),
             ),
         )
 
@@ -1136,6 +1189,8 @@ class PlanRepo:
             quick=json.loads(r["quick_json"]),
             felder=_felder_lesen(r["fields_json"]),
             timer=_json_lesen(r["timer_json"], {}),
+            acc=_sensor_lesen(r["acc_json"]),
+            takt=_takt_lesen(r["takt_json"]),
         )
 
     @staticmethod

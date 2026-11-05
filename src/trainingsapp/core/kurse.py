@@ -50,6 +50,8 @@ from .models import (
 )
 from .result_spec import FieldSpec, FieldType, vorrat_feld
 from .tagesbilanz import menge_text, mengen
+from .takt import AUS, Takt
+from .zaehlen import SensorWahl
 
 # -- Freischaltung (Spalte `course.unlock_mode`) --------------------------------
 FREI = "frei"
@@ -139,6 +141,62 @@ class VorlageItem:
     target: dict[str, Any] = field(default_factory=dict)
     #: Angebotene Parameter — ``None`` = wie die Übung, ``[]`` = nur abhaken
     felder: list[str] | None = None
+    #: Karte „Beschleunigungssensor“ nur hier (A6, Paketfeld ``beschleunigung`` je Planübung)
+    #: — ``None`` = wie die Übung
+    beschleunigung: SensorWahl | None = None
+    #: Takt nur hier (A6, Paketfeld ``takt`` je Planübung) — ``None`` = wie die Übung, ein
+    #: leerer Takt (``takt = {}``) = ausdrücklich keiner
+    takt: Takt | None = None
+
+    @classmethod
+    def aus_planitem(cls, item: PlanItem) -> VorlageItem:
+        """Die Planübung der App als Vorlage: Ziel, Felder, Sensor und Takt nur, wo sie eigene
+        hat (sonst folgt sie der Übung, P79) — Export, `paket_werkzeug uebernehmen`."""
+        return cls(
+            exercise_id=item.exercise_id,
+            target=dict(item.target) if item.target else {},
+            felder=None if item.felder is None else list(item.felder),
+            beschleunigung=item.acc,
+            takt=item.takt,
+        )
+
+    def to_dict(self, uebung: str | None = None) -> dict[str, Any]:
+        """Der Eintrag in ``uebungen[]`` — ``uebung`` ersetzt die ID (Paketschlüssel).
+
+        >>> VorlageItem("a", takt=AUS).to_dict()
+        {'uebung': 'a', 'takt': {}}
+        >>> VorlageItem("a", felder=[], beschleunigung=SensorWahl(atmung=True)).to_dict("k")
+        {'uebung': 'k', 'felder': [], 'beschleunigung': {'atmung': True}}
+        """
+        d: dict[str, Any] = {"uebung": uebung or self.exercise_id}
+        if self.target:
+            d["ziel"] = dict(self.target)
+        if self.felder is not None:
+            d["felder"] = list(self.felder)
+        if self.beschleunigung is not None:
+            d["beschleunigung"] = self.beschleunigung.als_dict()
+        if self.takt is not None:
+            d["takt"] = {} if self.takt.leer else self.takt.als_dict()
+        return d
+
+    @classmethod
+    def from_dict(cls, e: Mapping[str, Any]) -> VorlageItem:
+        """Liest, was `to_dict` schreibt — tolerant: ``beschleunigung``/``takt`` nur als
+        Tabelle (sonst wie die Übung), ``takt = {}`` ist ausdrücklich keiner.
+
+        >>> i = VorlageItem.from_dict({"uebung": "a", "takt": {}, "beschleunigung": "x"})
+        >>> i.takt.leer, i.beschleunigung
+        (True, None)
+        """
+        felder = e.get("felder")
+        acc, takt = e.get("beschleunigung"), e.get("takt")
+        return cls(
+            exercise_id=str(e["uebung"]),
+            target=dict(e.get("ziel") or {}),
+            felder=None if felder is None else [str(k) for k in felder],
+            beschleunigung=SensorWahl.aus_dict(acc) if isinstance(acc, Mapping) else None,
+            takt=(Takt.aus_dict(takt) or AUS) if isinstance(takt, Mapping) else None,
+        )
 
 
 @dataclass(slots=True)
@@ -151,14 +209,7 @@ class PlanVorlage:
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"name": self.name, "wochentage": list(self.wochentage)}
-        d["uebungen"] = [
-            {
-                "uebung": i.exercise_id,
-                **({"ziel": i.target} if i.target else {}),
-                **({"felder": list(i.felder)} if i.felder is not None else {}),
-            }
-            for i in self.items
-        ]
+        d["uebungen"] = [i.to_dict() for i in self.items]
         return d
 
     @classmethod
@@ -175,18 +226,11 @@ class PlanVorlage:
             if isinstance(tage, list)
             else list(range(7))
         )
-        items: list[VorlageItem] = []
-        for e in roh.get("uebungen", []) or []:
-            if not isinstance(e, Mapping) or not e.get("uebung"):
-                continue
-            felder = e.get("felder")
-            items.append(
-                VorlageItem(
-                    exercise_id=str(e["uebung"]),
-                    target=dict(e.get("ziel") or {}),
-                    felder=None if felder is None else [str(k) for k in felder],
-                )
-            )
+        items = [
+            VorlageItem.from_dict(e)
+            for e in roh.get("uebungen", []) or []
+            if isinstance(e, Mapping) and e.get("uebung")
+        ]
         return cls(name=str(roh.get("name") or "Plan"), wochentage=wochentage, items=items)
 
 
@@ -495,6 +539,8 @@ def plan_aus_vorlage(
                 # Ohne Ziel in der Vorlage folgt die Planübung der Übung (P79)
                 target=dict(item.target) if item.target else None,
                 felder=None if item.felder is None else list(item.felder),
+                acc=item.beschleunigung,
+                takt=item.takt,
             )
         )
     return plan

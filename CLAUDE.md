@@ -307,7 +307,11 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `takt`, `takt_zeiten_s`; nur der Sensor im Eintrag). Das **Bild der Bewegung** ist ein Medium
   der Übung (`core/bewegungsbild.py`, Ablage `Medien/Bewegung/`, `BewegungsbildRepo`, Weg
   `bewegung/<id>`), läuft als `ft.Image`-Schleife neben der Takt-Anzeige im „Während“ — nie in
-  Paket, Export oder Sync.
+  Paket, Export oder Sync. **Planübung folgt der Übung auch hier** (A6, 5.11.2026):
+  `PlanItem.acc`/`PlanItem.takt` (Migration 039, NULL = wie die Übung, `takt_json = '{}'` =
+  keiner), aufgelöst nur in `core.zaehlen.wirksame_wahl` und `core.uebung_timer.takt_der_uebung`
+  (Uhr für jetzt > Abschnitt > Planübung > Übung) — „Im Plan einstellen“ hat Karte und Takt-Zeile
+  mit ↺, den Knopf „Wdh. zählen“ nur mit Wiederholungsfeld; Paketfeld je Planübung.
 
 - **Geräte-Port pull-basiert.** `devices/base.py`: alle Quellen (bleak/Desktop,
   spätere Flet-Extension/Mobil, Simulator) *pushen*; der Konsument *pullt* per `async for`

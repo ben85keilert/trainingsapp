@@ -420,6 +420,12 @@ class PlanItem:
     #: Timer der Planübung (Migration 020): `core.uebung_timer.TimerWahl.als_dict` —
     #: leer = wie der Plan, sonst wie die Übung
     timer: dict[str, Any] = field(default_factory=dict)
+    #: Die Karte „Beschleunigungssensor“ nur hier (Migration 039, A6) — ``None`` = wie die
+    #: Übung (`core.zaehlen.wirksame_wahl`)
+    acc: SensorWahl | None = None
+    #: Der Takt nur hier (Migration 039, A6) — ``None`` = wie die Übung, ein leerer Takt
+    #: (`core.takt.AUS`) = ausdrücklich keiner (`core.uebung_timer.takt_der_uebung`)
+    takt: Takt | None = None
 
 
 @dataclass(slots=True)

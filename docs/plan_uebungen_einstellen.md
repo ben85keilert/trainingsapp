@@ -65,6 +65,18 @@ https://claude.ai/artifact/SLbHne6zrpNDYosNKy9fnm (Reihen A–D, Konfliktliste E
   - Danach wird `default_fields_json` geleert.
   - Ein Ziel, das wörtlich gleich dem der Übung ist, wird zu `null`.
   - Dazu kommt die Spalte `clock_counts`.
+- **Beschleunigungssensor und Takt** (A6, 5.11.2026; `docs/plan_beschleunigung.md` §13,
+  `docs/plan_taktgeber.md` §11): `PlanItem.acc: SensorWahl | None` und `PlanItem.takt: Takt |
+  None` — ``None`` = wie die Übung. **Migration 039** `plan_item.acc_json TEXT` /
+  `plan_item.takt_json TEXT`, NULL = wie die Übung (eigene Spalten wie `timer_json`, nicht im
+  Timer-JSON: die Karte und der Takt sind keine Timer-Wahl, und „wie die Übung“ braucht ein
+  eigenes NULL); `takt_json = '{}'` = ausdrücklich kein Takt. Aufgelöst wird an einer Stelle im
+  Kern: `core.zaehlen.wirksame_wahl(uebung, item)` (Planübung > Übung) und
+  `core.uebung_timer.takt_der_uebung(uebung, item)`; beim Takt gilt Uhr für jetzt >
+  Timer-Abschnitt > Planübung > Übung (`takt_fuer`). `core.standards`: `sensor_von`/`takt_von`,
+  `sensor_eigen`/`takt_eigen` (am Wert gemessen), `abweichungen` nennt „Beschleunigungssensor“
+  und „Takt“, `bereinigt`, `vom_standard`, `als_standard` und `uebernehmen_vorschau` nehmen
+  beide mit. Im Paket je Planübung `beschleunigung`/`takt` (`docs/uebungspakete.md`).
 
 ## Schritte
 
@@ -97,5 +109,12 @@ https://claude.ai/artifact/SLbHne6zrpNDYosNKy9fnm (Reihen A–D, Konfliktliste E
    - Zeit antippen → Räder plus Tippfeld (Leiste, Timer der Übung, Reiter Timer).
    - Der Verlauf rechnet Timerzeit wie getippte; dabei werden die Befunde aus dem Überblick
      behoben (▶ ohne Plan, veralteter Hinweis, Kurve).
+
+**Nachtrag 5.11.2026 (A6):** „Im Plan einstellen“ hat in „Uhr und Timer“ die Zeile „Takt: …“
+(Stift → Takt-Blatt „In diesen Plan“, ✕ = ausdrücklich keiner, Schild mit ↺) und danach die
+Karte „Beschleunigungssensor“ wie in „Übung bearbeiten“ (Wiederholungen, Bewegung, Zählt in,
+Atmung; Schild mit ↺, Rahmen bei „nur hier“). Der Knopf „Wdh. zählen“ in einer Planübung nur,
+wenn sie ein Wiederholungsfeld anbietet. Beim Üben aus dem Plan gilt die Wahl der Planübung,
+„für jetzt“ bleibt obenauf; „Alles wie die Übung“ und „In die Übung übernehmen …“ kennen beides.
 
 **Nachtrag 2.11.2026:** „Übung bearbeiten“ ist aufgeräumt — Symbol oder Bild oben, Beschreibung als Editor, Parameter als Knöpfe mit einer Karte je Parameter (Name, Chips, Sätze, Ziel), Erklärtexte im (i). Vertrag: `docs/plan_uebung_bearbeiten.md`.

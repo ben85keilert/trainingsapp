@@ -43,7 +43,12 @@ from trainingsapp.core.models import Exercise, Plan, PlanItem
 from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import TimerProfil, dauer_text, einmal_timer, stoppuhr
-from trainingsapp.core.uebung_timer import profile_zur_wahl, timer_fuer, zaehlt_als
+from trainingsapp.core.uebung_timer import (
+    profile_zur_wahl,
+    takt_der_uebung,
+    timer_fuer,
+    zaehlt_als,
+)
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
@@ -146,7 +151,7 @@ def uhr_teile(
         und „Takt zählt“ (P138) als Zähl-Teil mit Quelle „takt“
         (`uebung_lauf.takt_zaehlen_anbringen`)."""
         if e.timer is not None:
-            takt_anbringen(state, e.timer.lauf, key, uebung.takt)
+            takt_anbringen(state, e.timer.lauf, key, takt_der_uebung(uebung, item))
             with contextlib.suppress(Exception):  # der Zähler darf die Uhr nie aufhalten
                 uebung_lauf.takt_zaehlen_anbringen(page, state, e, uebung, item)
 
@@ -160,7 +165,7 @@ def uhr_teile(
         page,
         state,
         key=key,
-        takt=uebung.takt,
+        takt=takt_der_uebung(uebung, item),
         starten=takt_starten,
         titel=f"Takt · {uebung.name}",
         klein=True,

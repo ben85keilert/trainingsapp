@@ -155,7 +155,11 @@ Kniebeuge und Liegestützen ihre Vorlage mit; was die Person an der Übung ände
   Drei-Wege-Abgleich ist es ein Feld (`core/pakete.zusammenfuehren`), Eintrag in
   `docs/uebungspakete.md`. Ältere Apps übergehen es, denn der Leser nimmt nur bekannte
   Schlüssel (`core/pakete._uebung_lesen`). Eine neue Formatversion braucht es nicht.
-- Die Planübung folgt der Übung (P79). „Im Plan einstellen“ bekommt die Karte erst in A6.
+- Die Planübung folgt der Übung (P79). Seit A6 (5.11.2026) hat „Im Plan einstellen“ dieselbe
+  Karte: `PlanItem.acc: SensorWahl | None` (Migration 039 `plan_item.acc_json TEXT`, NULL = wie
+  die Übung; eigene Spalte wie `timer_json`), wirksam über `core.zaehlen.wirksame_wahl(uebung,
+  item)` — `wiederholungen_an`, `atmung_an`, `zaehlt_in` und die Vorlage nehmen sie. Im Paket
+  je Planübung das Feld `beschleunigung` in `plaene[].uebungen[]` (`docs/uebungspakete.md`).
 
 ### 3.4 Oberfläche
 
@@ -569,7 +573,7 @@ Patientenmessungen entwickelt; Läufe darauf startet Ben selbst.
 | **T** | Taktgeber im Timer, Animation getakteter Übungen mit Geschwindigkeitsregler, GIFs an der Übung, Spur `atemtakt` (A18, eigener Plan) | trainingsapp | M |
 | **B2** | Atem-HRV (`prototyp.atem_hrv`); Kennzahlen im Licht der Atmung (DFA α1, LF/HF …) | hrv-research → hrv-core → trainingsapp | M |
 | **A5** | Live-Zähler, der jede Wiederholung zählt, wenn sie geschieht; Vorlagen; Umkehrpunkt — **gebaut 5.11.2026** (hrv-core 0.11.0 `WdhLive`, Abschnitt 13) | hrv-research → hrv-core → trainingsapp | L |
-| **A6** | „Im Plan einstellen“; praxis_gui | trainingsapp, praxis_gui | M |
+| **A6** | „Im Plan einstellen“ — **App-Teil gebaut 5.11.2026** (0.3.53, Abschnitt 13); praxis_gui später | trainingsapp, praxis_gui | M |
 | später | Atmung je Wiederholung; vergleichen, wie geatmet wurde (Konzept C3) | hrv-research | — |
 
 A1 und A2 brauchen nichts Neues aus hrv-core. Damit lässt sich sofort prüfen, wie gut der Sensor
@@ -706,11 +710,32 @@ einem konstanten Signal (Rundung der laufenden Summe unter 0 vor `sqrt`) — die
 - **A5 Rest:** eine eigene Wahl des Umkehrpunkts je Übung (heute nur oben, Katalogwert
   überschrieben), Rudern und Burpee als Vorlagen (Entscheidung 26: Rudern zählt mit freier
   Rollenwahl am Nachlassen, Burpee ist ein Entwurf).
-- **A6** die Karte in „Im Plan einstellen“ und praxis_gui. Die Planübung folgt der Übung;
-  den Knopf gibt es in einer Planübung nur, wenn sie ein Wiederholungsfeld anbietet.
+- **A6 praxis_gui** (eigene Sitzung). Der App-Teil ist gebaut (unten, 0.3.53).
 - **Zählen im Plan-Ablauf** (4.3 Punkt 6, „automatisch weiter“): Der Ablauf trägt je Übung
   selbst ein (`ui.plan_ablauf.nach_der_uebung`); solange er läuft, gibt es keinen Knopf
   (`zaehl_stand.im_plan_ablauf`), der Start sagt „Im Plan-Ablauf zählt der Sensor noch nicht“.
+
+**A6 App-Teil (5.11.2026, 0.3.53):** „Im Plan einstellen“ (`views/plan_einstellen.py`) hat
+nach „Uhr und Timer“ die Karte „Beschleunigungssensor“ in derselben Ordnung wie „Übung
+bearbeiten“ (P107): Schalter „Wiederholungen“ und „Atmung“, „Bewegung“ (Vorlage), „Zählt in“
+(nur bei mehreren Wiederholungsfeldern, unter den Namen der Planübung), „Prototyp“ und das (i),
+mit dem Schild „wie die Übung“ / „nur hier“ ↺ und Rahmen. Die Planübung folgt der Übung
+(`PlanItem.acc = None`); ein umgelegter Schalter macht aus der Karte der Übung eine eigene —
+legt man ihn zurück auf das, was die Übung ergäbe, folgt die Karte wieder (`core.standards.
+sensor_eigen`, `bereinigt`; am Wert gemessen wie das Ziel). **Den Knopf „Wdh. zählen“ gibt es
+in einer Planübung nur, wenn sie ein Wiederholungsfeld anbietet** — ohne eins ist der Schalter
+ausgegraut und aus, auch wenn die Karte Wiederholungen will; ein aus dem Vorrat geholtes
+Wiederholungsfeld schaltet ihn frei. „Alles wie die Übung“ setzt die Karte zurück, „In die Übung
+übernehmen …“ trägt sie in die Übung (`als_standard`, „Beschleunigungssensor wie im Plan“).
+Beim Üben nehmen Knopf, Zähl-Teil (`uebung_lauf.zaehl_baustein`: Wiederholungen, Atmung, Feld,
+Vorlage), Zählzeile (`components/zaehl_stand.zaehlen_an`/`knopf`) und Übungsseite („In diesem
+Plan“: Zeile „Sensor“) die Wahl der Planübung über `core.zaehlen.wirksame_wahl`. Dazu der Takt
+je Planübung (`docs/plan_taktgeber.md` §11). Paket: `beschleunigung` je Planübung in
+`plaene[].uebungen[]`, tolerant gelesen, nur geschrieben, wo die Planübung eine eigene Karte
+hat. Der Plan-Ablauf bleibt ohne Zählen (A19, P128). Tests: `tests/test_planuebung_sensor_takt.py`
+(flet-frei: Auflösung, Standards, Rundreise, Migration 039, Paket),
+`tests/test_ui_plan_sensor_takt.py` (Karte mit ↺, Knopf nur mit Wiederholungsfeld, „Zählt in“,
+Takt-Zeile, Übungsseite, Üben nimmt den Plan-Wert, Uhr mit Takt der Planübung).
 
 **Nicht am Gerät geprüft:** Rechenlast des Live-Zählers am Handy (Ziel unter 20 ms je Sekunde
 Daten, `ZIEL_MS_JE_S`; am Rechner etwa 1 ms, unabhängig von der Satzlänge — bis A5: 2–11 ms je

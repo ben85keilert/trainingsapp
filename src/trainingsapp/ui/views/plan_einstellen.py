@@ -13,7 +13,13 @@ im Plan-Editor und über die Übungsseite (Karte „In diesem Plan“, „In Pl�
 2. **Varianten** (P58) — beim Eintragen zeigen oder nicht; sie gehören der Übung. Dazu die
    Ziel-Variante.
 3. **Uhr und Timer** — Uhr wie die Übung, an oder aus; Timer wie die Übung oder ein anderer nur
-   hier. Ob Timerzeit zählt, legt die Übung fest (D2).
+   hier. Ob Timerzeit zählt, legt die Übung fest (D2). Dazu seit A6 (5.11.2026) die Zeile
+   „Takt: …“ mit Stift (Takt-Blatt → „In diesen Plan“) und ✕ (ausdrücklich keiner) —
+   `PlanItem.takt`, ``None`` = wie die Übung (`docs/plan_taktgeber.md` §5).
+4. **Beschleunigungssensor** (A6, `docs/plan_beschleunigung.md` §13) — dieselbe Karte wie in
+   „Übung bearbeiten“: Wiederholungen, Bewegung, Zählt in, Atmung; `PlanItem.acc`, ``None`` =
+   wie die Übung. Den Knopf „Wdh. zählen“ gibt es in einer Planübung nur, wenn sie ein
+   Wiederholungsfeld anbietet — der Schalter ist sonst ausgegraut.
 
 Jede Einstellung trägt „wie die Übung“ oder „nur hier“ mit ↺ (`components/planstand.py`).
 Unten „Alles wie die Übung“ (setzt die Seite zurück; gespeichert wird mit Speichern) und „In
@@ -34,6 +40,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import varianten as var
+from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.models import Exercise, Plan, PlanItem, new_id
 from trainingsapp.core.parameter import chips_sortiert
 from trainingsapp.core.result_spec import (
@@ -49,6 +56,9 @@ from trainingsapp.core.standards import (
     chips_fuer,
     parameter_keys,
     plan_spec,
+    sensor_eigen,
+    takt_eigen,
+    takt_von,
     uebernehmen_vorschau,
     varianten_an,
     varianten_schalten,
@@ -58,8 +68,10 @@ from trainingsapp.core.standards import (
     ziel_spec,
     ziel_von,
 )
+from trainingsapp.core.takt import AUS, Takt
 from trainingsapp.core.timer import STOPPUHR, TimerProfil
 from trainingsapp.core.uebung_timer import TimerWahl, plan_timer, profile_der_uebung, timer_fuer
+from trainingsapp.core.zaehlen import VORLAGE_AUTO, VORLAGEN_ANGEBOT, SensorWahl, vorlagen_angebot
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
@@ -67,6 +79,8 @@ from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.planstand import schild
 from trainingsapp.ui.components.spec_form import SpecForm
+from trainingsapp.ui.components.takt_blatt import SYMBOL as TAKT_SYMBOL
+from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile_text
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
 
@@ -138,6 +152,11 @@ def plan_einstellen(
     def uhr_wert() -> str:
         return str(next(iter(uhr_wahl.selected or []), "uebung"))
 
+    #: Sensor-Karte und Takt der Planübung (A6) — ``None`` = wie die Übung; der leere Takt
+    #: `AUS` = ausdrücklich keiner
+    acc_stand: dict[str, SensorWahl | None] = {"acc": item.acc}
+    takt_stand: dict[str, Takt | None] = {"takt": item.takt}
+
     #: Das Ziel je Parameter — ein kleines Formular je Karte (P107 wie „Übung bearbeiten“),
     #: die Werte gemerkt über ein Aus- und wieder Einschalten
     ziel_formulare: dict[str, SpecForm] = {}
@@ -176,6 +195,8 @@ def plan_einstellen(
             felder=felder_jetzt(),
             quick=quick,
             timer=TimerWahl(timer.profil_id, timer.eigen, uhr=timer.uhr).als_dict(),
+            acc=acc_stand["acc"],
+            takt=takt_stand["takt"],
         )
         an = bool(varianten_schalter.value) or not varianten_liste
         return bereinigt(varianten_schalten(neu, an), uebung)
@@ -407,6 +428,198 @@ def plan_einstellen(
         )
         page.show_dialog(dialog)
 
+    # -- Takt (A6, `docs/plan_taktgeber.md` §5): die Zeile wie in „Übung bearbeiten“, der Stift
+    # öffnet das Takt-Blatt mit „In diesen Plan“, ✕ heißt ausdrücklich keiner, ↺ wie die Übung —
+    # im Formular gehalten, gespeichert mit Speichern oder Zurück ----------------------------
+
+    def item_jetzt() -> PlanItem:
+        """Die Planübung, wie sie gerade steht — für alles, was von den Parametern abhängt."""
+        return replace(item, felder=felder_jetzt(), acc=acc_stand["acc"], takt=takt_stand["takt"])
+
+    def takt_setzen(neu: Takt | None) -> None:
+        """Aus dem Blatt („In diesen Plan“) oder ✕: ``None`` aus dem Blatt heißt keiner."""
+        takt_stand["takt"] = AUS if neu is None or neu.leer else neu
+        neu_zeichnen()
+
+    def takt_zurueck() -> None:
+        takt_stand["takt"] = None
+        neu_zeichnen()
+
+    def takt_bearbeiten() -> None:
+        page.show_dialog(
+            takt_blatt(
+                page,
+                state,
+                takt=takt_von(item_jetzt(), uebung),
+                titel=f"Takt · {uebung.name} in „{plan.name}“",
+                in_den_plan=takt_setzen,
+            )
+        )
+
+    def takt_teil() -> ft.Control:
+        takt = takt_von(item_jetzt(), uebung)
+        eigen = takt_eigen(item_jetzt(), uebung)
+        return ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(TAKT_SYMBOL, size=18, opacity=0.8),
+                ft.Text(takt_zeile_text(takt), expand=True, size=13),
+                schild(eigen, takt_zurueck if eigen else None),
+                ft.IconButton(
+                    ft.Icons.EDIT_OUTLINED,
+                    tooltip="Takt nur hier einstellen: Phasen, Tempo, Klang",
+                    icon_size=20,
+                    on_click=takt_bearbeiten,
+                ),
+                ft.IconButton(
+                    ft.Icons.CLOSE,
+                    tooltip="In diesem Plan kein Takt",
+                    icon_size=20,
+                    on_click=lambda: takt_setzen(None),
+                    visible=takt is not None,
+                ),
+            ],
+        )
+
+    # -- Beschleunigungssensor (A6, `docs/plan_beschleunigung.md` §13): dieselbe Karte wie in
+    # „Übung bearbeiten“ (Wiederholungen, Bewegung, Zählt in, Atmung), mit Schild und ↺. Die
+    # Schalter zeigen, was gilt; umgelegt wird eine eigene Wahl aus der der Übung heraus — legt
+    # man zurück auf das, was ``None`` ergäbe, folgt der Schalter wieder der Übung -------------
+    angebot = vorlagen_angebot()
+
+    def acc_basis() -> SensorWahl:
+        gewaehlt = acc_stand["acc"]
+        return gewaehlt if gewaehlt is not None else uebung.beschleunigung
+
+    def acc_vorgabe(schluessel: str) -> bool:
+        """Was ``None`` in dieser Planübung ergäbe — Wiederholungen mit einem Wiederholungsfeld
+        hier, Atmung beim Typ „Atmung“."""
+        if schluessel == "wiederholungen":
+            return zl.hat_wdh_feld(uebung, item_jetzt())
+        return zl.atmung_an(Exercise(typen=list(uebung.typen)))
+
+    def acc_umschalten(schluessel: str, wert: bool) -> None:
+        vorher = getattr(uebung.beschleunigung, schluessel)
+        neu = None if vorher is None and wert == acc_vorgabe(schluessel) else wert
+        basis = acc_basis()
+        acc_stand["acc"] = (
+            replace(basis, wiederholungen=neu)
+            if schluessel == "wiederholungen"
+            else replace(basis, atmung=neu)
+        )
+        neu_zeichnen()
+
+    def acc_zurueck() -> None:
+        acc_stand["acc"] = None
+        neu_zeichnen()
+
+    def bewegung_setzen(wert: str) -> None:
+        acc_stand["acc"] = replace(acc_basis(), vorlage=wert or VORLAGE_AUTO)
+        neu_zeichnen()
+
+    def zaehlt_in_setzen(wert: str, keys: list[str]) -> None:
+        feld = None if wert == keys[0] and not uebung.beschleunigung.feld else wert
+        acc_stand["acc"] = replace(acc_basis(), feld=feld)
+        neu_zeichnen()
+
+    def sensor_karte() -> ft.Control:
+        jetzt = item_jetzt()
+        keys = zl.wdh_felder(uebung, jetzt)
+        wdh, atem = zl.wiederholungen_an(uebung, jetzt), zl.atmung_an(uebung, jetzt)
+        eigen = sensor_eigen(jetzt, uebung)
+        basis = acc_basis()
+        wdh_schalter = ft.Switch(
+            label="Wiederholungen",
+            value=wdh,
+            disabled=not keys,
+            on_change=lambda e: acc_umschalten("wiederholungen", bool(e.control.value)),
+        )
+        atmung_schalter = ft.Switch(
+            label="Atmung",
+            value=atem,
+            on_change=lambda e: acc_umschalten("atmung", bool(e.control.value)),
+        )
+        vorlage = basis.vorlage if basis.vorlage in VORLAGEN_ANGEBOT else VORLAGE_AUTO
+        bewegung_wahl = ft.Dropdown(
+            value=vorlage,
+            options=[ft.DropdownOption(key=v.schluessel, text=v.name) for v in angebot],
+            dense=True,
+            expand=True,
+            border_radius=8,
+            on_select=lambda e: bewegung_setzen(str(e.control.value or VORLAGE_AUTO)),
+        )
+        hinweis = next((v.hinweis for v in angebot if v.schluessel == vorlage), "")
+        teile: list[ft.Control] = [
+            ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Container(expand=True, content=wdh_schalter),
+                    schild(eigen, acc_zurueck if eigen else None),
+                ],
+            )
+        ]
+        if wdh:
+            teile.append(
+                ft.Row(
+                    spacing=12,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[ft.Text("Bewegung", weight=ft.FontWeight.W_600), bewegung_wahl],
+                )
+            )
+            if hinweis:
+                teile.append(ft.Text(f"Umkehrpunkt oben — {hinweis}", size=12, opacity=0.7))
+        if wdh and len(keys) > 1:
+            spec = plan_spec(jetzt, uebung)
+
+            def beschriftung(k: str) -> str:
+                f = spec.field_by_key(k)
+                return f.label if f is not None else k
+
+            gewaehlt = zl.zaehlt_in(uebung, jetzt) or keys[0]
+            zaehlt_in_wahl = ft.SegmentedButton(
+                segments=[ft.Segment(value=k, label=ft.Text(beschriftung(k))) for k in keys],
+                selected=[gewaehlt],
+                allow_empty_selection=False,
+                show_selected_icon=False,
+                on_change=lambda e: zaehlt_in_setzen(
+                    str(next(iter(e.control.selected or []), keys[0])), keys
+                ),
+            )
+            teile.append(
+                ft.Row(
+                    spacing=12,
+                    wrap=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[ft.Text("Zählt in", weight=ft.FontWeight.W_600), zaehlt_in_wahl],
+                )
+            )
+        teile.append(atmung_schalter)
+        knopf = zl.knopf_text(wdh, atem)
+        if not keys:
+            stand = (
+                "Kein Wiederholungsfeld in diesem Plan — der Sensor zählt hier keine "
+                "Wiederholungen (Parameter oben)."
+            )
+            if knopf:
+                stand += f" Beim Üben der Knopf „{knopf}“."
+        elif knopf:
+            stand = (
+                f"Beim Üben der Knopf „{knopf}“, wenn ein Gerät mit Beschleunigungssensor "
+                "verbunden ist."
+            )
+        else:
+            stand = "Aus — in diesem Plan zählt der Sensor nicht."
+        teile.append(ft.Text(stand, size=12, opacity=0.7))
+        return ft.Container(
+            bgcolor=KARTE,
+            border_radius=14,
+            padding=ft.Padding.only(left=12, right=10, top=6, bottom=10),
+            border=ft.Border.all(1, ft.Colors.TERTIARY) if eigen else None,
+            content=ft.Column(spacing=8, tight=True, controls=teile),
+        )
+
     def uhr_und_timer() -> list[ft.Control]:
         eigen_uhr = uhr_wert() != "uebung"
         eigen_timer = bool(wahl.profil_id) or wahl.eigen is not None
@@ -433,6 +646,7 @@ def plan_einstellen(
             ft.TextButton(
                 "Anderen Timer nur hier …", icon=ft.Icons.TIMER_OUTLINED, on_click=timer_waehlen
             ),
+            takt_teil(),
         ]
 
     # -- Ziel-Variante -----------------------------------------------------------------------
@@ -543,8 +757,31 @@ def plan_einstellen(
             if not aus and (ziel_variante := ziel_variante_teil()) is not None:
                 teile.append(ziel_variante)
         teile += [
-            abschnitt("UHR UND TIMER", hilfe_knopf(page, thema="uhr")),
+            abschnitt(
+                "UHR UND TIMER",
+                ft.Row(
+                    spacing=0,
+                    tight=True,
+                    controls=[
+                        hilfe_knopf(page, thema="takt"),
+                        hilfe_knopf(page, thema="uhr"),
+                    ],
+                ),
+            ),
             *uhr_und_timer(),
+            abschnitt(
+                "BESCHLEUNIGUNGSSENSOR",
+                ft.Row(
+                    spacing=6,
+                    tight=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text("Prototyp", size=11, opacity=0.6),
+                        hilfe_knopf(page, thema="beschleunigung"),
+                    ],
+                ),
+            ),
+            sensor_karte(),
             ft.Divider(),
             ft.Row(
                 wrap=True,
@@ -605,6 +842,7 @@ def plan_einstellen(
         varianten_schalter.value = True
         wahl.profil_id, wahl.eigen = "", None
         uhr_wahl.selected = ["uebung"]
+        acc_stand["acc"], takt_stand["takt"] = None, None
         ziel_formulare.clear()
         ziel_gemerkt.clear()
         ziel_gemerkt.update(uebung.default_target)

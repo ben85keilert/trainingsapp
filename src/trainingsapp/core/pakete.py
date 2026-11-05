@@ -196,19 +196,13 @@ def plan_stand(p: PaketPlan) -> dict[str, Any]:
 
 
 def paketplan_aus(plan: Plan, key: str | None = None) -> PaketPlan:
-    """Ein Plan der App als Paketplan (Export; `paket_werkzeug uebernehmen`): Ziel und Felder
-    nur, wo der Plan eigene hat (sonst folgt die Planübung der Übung, P79)."""
+    """Ein Plan der App als Paketplan (Export; `paket_werkzeug uebernehmen`): Ziel, Felder,
+    Sensor-Karte und Takt nur, wo der Plan eigene hat (sonst folgt die Planübung der Übung,
+    P79)."""
     vorlage = PlanVorlage(
         name=plan.name,
         wochentage=list(plan.wochentage),
-        items=[
-            VorlageItem(
-                exercise_id=i.exercise_id,
-                target=dict(i.target) if i.target else {},
-                felder=None if i.felder is None else list(i.felder),
-            )
-            for i in sorted(plan.items, key=lambda i: i.order)
-        ],
+        items=[VorlageItem.aus_planitem(i) for i in sorted(plan.items, key=lambda i: i.order)],
     )
     return PaketPlan(
         key=key or plan.package_key or plan.name.strip().casefold(),

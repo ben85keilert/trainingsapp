@@ -479,19 +479,12 @@ def _uebungen_uebernehmen(
 
 
 def _vorlage_aus_plan(plan: Plan) -> PlanVorlage:
-    """Der Plan, wie ihn ein Kapitel anlegen würde — Ziel und Felder nur, wo der Plan
-    eigene hat (sonst folgt die Planübung der Übung, P79)."""
+    """Der Plan, wie ihn ein Kapitel anlegen würde — Ziel, Felder, Sensor-Karte und Takt nur,
+    wo der Plan eigene hat (sonst folgt die Planübung der Übung, P79)."""
     return PlanVorlage(
         name=plan.name,
         wochentage=list(plan.wochentage),
-        items=[
-            VorlageItem(
-                exercise_id=i.exercise_id,
-                target=dict(i.target) if i.target else {},
-                felder=None if i.felder is None else list(i.felder),
-            )
-            for i in sorted(plan.items, key=lambda i: i.order)
-        ],
+        items=[VorlageItem.aus_planitem(i) for i in sorted(plan.items, key=lambda i: i.order)],
     )
 
 
@@ -528,12 +521,7 @@ def _plaene_uebernehmen(
         block = kap_block["plaene"][nr]
         block["wochentage"] = _toml_wert(neu.wochentage)
         block["uebungen"] = _toml_wert(
-            [
-                {"uebung": schluessel.get(i.exercise_id, i.exercise_id)}
-                | ({"ziel": i.target} if i.target else {})
-                | ({"felder": i.felder} if i.felder is not None else {})
-                for i in neu.items
-            ]
+            [i.to_dict(schluessel.get(i.exercise_id, i.exercise_id)) for i in neu.items]
         )
         zeilen.append(f"{wo}, Plan „{plan.name}“: " + ", ".join(geaendert))
     return zeilen, hinweise

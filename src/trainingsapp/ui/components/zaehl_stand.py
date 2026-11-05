@@ -102,7 +102,7 @@ def zaehlen_an(uebung: Exercise, item: PlanItem | None = None) -> bool:
     >>> zaehlen_an(kniebeuge, PlanItem(felder=[]))  # nur abhaken
     False
     """
-    return zl.wiederholungen_an(uebung, item) or zl.atmung_an(uebung)
+    return zl.wiederholungen_an(uebung, item) or zl.atmung_an(uebung, item)
 
 
 def knopf(uebung: Exercise, item: PlanItem | None = None) -> str:
@@ -113,7 +113,7 @@ def knopf(uebung: Exercise, item: PlanItem | None = None) -> str:
     >>> knopf(Exercise(typen=["Atmung"]))
     'Atmung erfassen'
     """
-    return zl.knopf_text(zl.wiederholungen_an(uebung, item), zl.atmung_an(uebung))
+    return zl.knopf_text(zl.wiederholungen_an(uebung, item), zl.atmung_an(uebung, item))
 
 
 def im_plan_ablauf(state: Any) -> bool:

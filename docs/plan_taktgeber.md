@@ -67,8 +67,11 @@ Soll-Phasen im Beiwerk `atem-v1`, damit die Auswertung Soll gegen Ist (Sensor) l
 und `als_dict` nehmen ihn mit — Rundreisen in Kopie, Paketimport und Editor). `core/models.py`:
 `Exercise.takt: Takt | None` (Migration 038 `exercise.takt_json TEXT NOT NULL DEFAULT '{}'`),
 Paketfeld `takt` (`docs/uebungspakete.md`, Drei-Wege-Abgleich ein Feld, ältere Apps übergehen
-es), `FELDNAMEN["takt"] = "Takt"`. `core/uebung_timer.takt_fuer(uebung, abschnitt, wahl)`:
-Vorrang Uhr-für-jetzt > Abschnitt > Übung > keiner.
+es), `FELDNAMEN["takt"] = "Takt"`. `core/uebung_timer.takt_fuer(uebung, abschnitt, wahl,
+item)`: Vorrang Uhr-für-jetzt > Abschnitt > **Planübung** > Übung > keiner — die Planübung
+(`PlanItem.takt`, Migration 039 `plan_item.takt_json`, NULL = wie die Übung, `{}` = ausdrücklich
+keiner; A6, 5.11.2026) ist die Stufe „Übung“ aus Sicht des Laufs
+(`core.uebung_timer.takt_der_uebung(uebung, item)` → `TimerLauf.takt_uebung`).
 
 ## 3. Lauf: Klang, Vibration, Zeitleiste
 
@@ -140,7 +143,12 @@ Live-Vollbild der Messung (neben Phase ▲/▼ des Sensors: Soll und Ist).
 
 **Übung bearbeiten:** in „Uhr und Timer“ die Zeile „Takt: 4-7-8-Atmung · 4/min“ mit Stift
 (öffnet das Takt-Blatt) und ✕; im Timer-Editor je Abschnitt dieselbe Zeile. Das (i) erklärt
-Takt, Tempo und „Takt zählt“.
+Takt, Tempo und „Takt zählt“. **Im Plan einstellen** (A6, 5.11.2026): dieselbe Zeile in „Uhr
+und Timer“ mit dem Schild „wie die Übung“ / „nur hier“ ↺ — der Stift öffnet das Blatt mit dem
+Knopf „In diesen Plan“, ✕ heißt in diesem Plan ausdrücklich kein Takt (auch wenn die Übung
+einen hat), ↺ holt die Übung zurück; „In die Übung übernehmen …“ nimmt den Takt mit. Beim
+Üben aus dem Plan (Uhr, Timer der Übung) gilt der Takt der Planübung, die Wahl für jetzt bleibt
+obenauf. Im Plan-Ablauf gibt es wie beim Sensor noch keinen Takt (A19).
 
 **GIFs und Bilder der Bewegung** (Ben: „gehen auf die Übung, nicht den Timer“): ein Medium der
 Art `bild`/`gif` an der Übung (`core/models.Media`, Ablage wie die eigenen Symbole unter
@@ -210,9 +218,9 @@ nächste Runde beginnt ihn von vorn. (7) Material kennt kein Metronom-Symbol —
 steht für den Takt.
 
 **Offen aus Teil 1:** P140 (Vibration am Phasenwechsel — gebaut mit Schalter, Vorgabe an;
-nicht entschieden); die Zeile in „Im Plan einstellen“ (ein Takt je Planübung) ist nicht gebaut —
-der Vertrag sieht Übung, Abschnitt und Uhr für jetzt vor; das Querformat/Live-Vollbild zeigt
-den Takt nur als Kopfzeile, nicht als Animation (Platz). Teil 2 steht in Abschnitt 10.
+nicht entschieden); die Zeile in „Im Plan einstellen“ (ein Takt je Planübung) kam mit A6 in
+0.3.53 (Abschnitt 11); das Querformat/Live-Vollbild zeigt den Takt nur als Kopfzeile, nicht als
+Animation (Platz). Teil 2 steht in Abschnitt 10.
 
 ## 10. Umsetzungsstand (5.11.2026, Version 0.3.51) — Teil 2: T4–T6
 
@@ -284,3 +292,26 @@ Format. (9) Anzeigen zeigen den wirksamen Takt (`TimerLauf.takt_effektiv`): „3
 (11) Ein abgebrochener Timer schließt seinen Takt-Lauf sofort (`TimerBaustein.takt`). (13)
 `TaktNeu.ende_danach`: ⏹ im Tick eines Abschnittsbeginns hält Ende · Beginn · Ende. (14)
 `takt_pruefen` nennt `bild`.
+
+## 11. Umsetzungsstand (5.11.2026, Version 0.3.53) — Takt je Planübung (A6)
+
+Die Planübung folgt der Übung auch beim Takt (P79, `docs/plan_uebungen_einstellen.md`):
+`PlanItem.takt: Takt | None` (Migration 039 `plan_item.takt_json TEXT`, NULL = wie die Übung,
+`{}` = ausdrücklich keiner, eigene Spalte wie `timer_json` — kein Versteck im Timer-JSON, denn
+der Takt ist keine Timer-Wahl und „wie die Übung“ braucht ein eigenes NULL),
+`core.uebung_timer.takt_der_uebung(uebung, item)` (Planübung > Übung; ein leerer Takt im Plan
+heißt keiner), `takt_fuer(…, item=)` (Uhr für jetzt > Abschnitt > Planübung > Übung),
+`core.standards.takt_von`/`takt_eigen` (am Wert gemessen, „keiner“ gleicht „keiner“),
+`abweichungen` nennt „Takt“, `bereinigt` lässt einen Takt wie den der Übung wieder folgen,
+`vom_standard` setzt ihn zurück, `als_standard` trägt ihn in die Übung (auch „kein Takt mehr“),
+`uebernehmen_vorschau` nennt ihn. Oberfläche: die Zeile in „Im Plan einstellen“ (§5), die
+Übungsseite nennt unter „Uhr und Timer“ und in der Karte „In diesem Plan“ den Takt der Planübung.
+Beim Üben: `components/uhr.py` und `views/uebung_timer.py` hängen `takt_der_uebung(uebung,
+item)` als `TimerLauf.takt_uebung` an den Lauf (`takt_anbringen`), der Takt-Knopf zeigt ihn als
+Vorgabe; „Takt zählt“ tritt damit auch mit einem Takt der Planübung an. Paket: je Planübung in
+`plaene[].uebungen[]` das Feld `takt` (wie an der Übung; `{}` = keiner; `docs/uebungspakete.md`),
+tolerant gelesen, nur geschrieben, wo die Planübung einen eigenen hat. Tests:
+`tests/test_planuebung_sensor_takt.py` (flet-frei), `tests/test_ui_plan_sensor_takt.py`.
+**Nicht gebaut:** der Takt im Plan-Ablauf (dort läuft auch der Sensor noch nicht, A19); das
+Takt-Blatt aus „Im Plan einstellen“ kennt „In diesen Plan“ und „In die Bibliothek“, nicht
+„Für jetzt“ (das gehört an die Uhr).

@@ -4,7 +4,9 @@ Ben, 22.10.2026 (`docs/plan_uebungen_einstellen.md`): Beim Aufnehmen wird nichts
 die Planübung nicht selbst festlegt, gilt **wie die Übung** — Ziel (``target is None``,
 `ziel_von`), Parameter (``felder is None`` = alle der Übung; Ben: „Was in der Orginalübung steht
 wird überall angeboten, sonst muss Planübung geändert werden“), Chips (fehlender Schlüssel in
-``quick``), Varianten, Uhr und Timer (leere `TimerWahl`). Was sie festlegt, gilt **nur hier**.
+``quick``), Varianten, Uhr und Timer (leere `TimerWahl`), seit A6 (5.11.2026) auch die Karte
+„Beschleunigungssensor“ (``acc is None``, `sensor_von`) und der Takt (``takt is None``,
+`takt_von`; ein leerer Takt heißt ausdrücklich keiner). Was sie festlegt, gilt **nur hier**.
 
 Zwei ausdrückliche Wege bleiben, weil sich Übung und Plan gegenseitig befruchten:
 
@@ -48,10 +50,12 @@ from .result_spec import (
     skala_werte,
     vorrat_feld,
 )
+from .takt import Takt
 from .timer import STOPPUHR
-from .uebung_timer import TimerWahl, profile_der_uebung
+from .uebung_timer import TimerWahl, profile_der_uebung, takt_der_uebung
 from .varianten import VARIANTE, ist_variante
 from .varianten import feld as varianten_feld
+from .zaehlen import SensorWahl, wirksame_wahl
 
 
 def ziel_spec(spec: ResultSpec) -> ResultSpec:
@@ -92,6 +96,63 @@ def ziel_von(item: PlanItem, uebung: Exercise) -> dict[str, Any]:
     {}
     """
     return dict(uebung.default_target if item.target is None else item.target)
+
+
+def sensor_von(item: PlanItem, uebung: Exercise) -> SensorWahl:
+    """Die Karte „Beschleunigungssensor“, die in der Planübung gilt: ihre eigene, sonst die der
+    Übung (A6, wie `ziel_von`; `core.zaehlen.wirksame_wahl`).
+
+    >>> u = Exercise(beschleunigung=SensorWahl(vorlage="kniebeuge"))
+    >>> sensor_von(PlanItem(), u).vorlage, sensor_von(PlanItem(acc=SensorWahl()), u).vorlage
+    ('kniebeuge', 'auto')
+    """
+    return wirksame_wahl(uebung, item)
+
+
+def takt_von(item: PlanItem, uebung: Exercise) -> Takt | None:
+    """Der Takt, der in der Planübung gilt: ihr eigener, sonst der der Übung — ``None`` = keiner
+    (A6, `core.uebung_timer.takt_der_uebung`; ein leerer Takt im Plan heißt ausdrücklich keiner).
+
+    >>> from trainingsapp.core.takt import AUS, VORLAGEN
+    >>> u = Exercise(takt=VORLAGEN["atmung_4_6"])
+    >>> takt_von(PlanItem(), u).name, takt_von(PlanItem(takt=AUS), u)
+    ('Atmung 4-6', None)
+    """
+    return takt_der_uebung(uebung, item)
+
+
+def sensor_eigen(item: PlanItem, uebung: Exercise) -> bool:
+    """Weicht die Karte „Beschleunigungssensor“ der Planübung von der Übung ab? Am Wert
+    gemessen (`SensorWahl.als_dict`): eine eigene Wahl, die der Übung gleicht, weicht nicht ab.
+
+    >>> u = Exercise(beschleunigung=SensorWahl(atmung=True))
+    >>> sensor_eigen(PlanItem(), u), sensor_eigen(PlanItem(acc=SensorWahl(atmung=True)), u)
+    (False, False)
+    >>> sensor_eigen(PlanItem(acc=SensorWahl(atmung=False)), u)
+    True
+    """
+    return item.acc is not None and item.acc.als_dict() != uebung.beschleunigung.als_dict()
+
+
+def takt_eigen(item: PlanItem, uebung: Exercise) -> bool:
+    """Weicht der Takt der Planübung von dem der Übung ab? Am Wert gemessen; „keiner“ gleicht
+    „keiner“.
+
+    >>> from trainingsapp.core.takt import AUS, VORLAGEN
+    >>> takt_eigen(PlanItem(takt=AUS), Exercise()), takt_eigen(PlanItem(), Exercise())
+    (False, False)
+    >>> takt_eigen(PlanItem(takt=AUS), Exercise(takt=VORLAGEN["box_4"]))
+    True
+    >>> takt_eigen(PlanItem(takt=VORLAGEN["box_4"]), Exercise(takt=VORLAGEN["box_4"]))
+    False
+    """
+    if item.takt is None:
+        return False
+    return _takt_dict(item.takt) != _takt_dict(uebung.takt)
+
+
+def _takt_dict(takt: Takt | None) -> dict[str, Any]:
+    return {} if takt is None or takt.leer else takt.als_dict()
 
 
 def zusatzfelder(item: PlanItem, uebung: Exercise) -> list[FieldSpec]:
@@ -263,6 +324,9 @@ def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
     ['Parameter']
     >>> abweichungen(PlanItem(timer={"uhr": False, "profil": "p1"}), u)
     ['Uhr', 'Timer']
+    >>> from trainingsapp.core.takt import AUS
+    >>> abweichungen(PlanItem(acc=SensorWahl(atmung=True), takt=AUS), u)
+    ['Beschleunigungssensor']
     >>> from trainingsapp.core.varianten import Variante, mit_varianten
     >>> v = replace(u, result_spec=mit_varianten(u.result_spec, [Variante("kurz")]))
     >>> abweichungen(PlanItem(), v), abweichungen(varianten_schalten(PlanItem(), False), v)
@@ -286,6 +350,10 @@ def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
         teile.append("Uhr")
     if wahl.profil_id or wahl.eigen is not None:
         teile.append("Timer")
+    if sensor_eigen(item, uebung):
+        teile.append("Beschleunigungssensor")
+    if takt_eigen(item, uebung):
+        teile.append("Takt")
     return teile
 
 
@@ -293,7 +361,8 @@ def bereinigt(item: PlanItem, uebung: Exercise) -> PlanItem:
     """Was der Übung gleicht, folgt ihr wieder — so speichert „Im Plan einstellen“ (P79).
 
     Ein Ziel wie das der Übung wird ``None``, alle Parameter der Übung werden ``None``, Chips
-    wie die der Übung fallen aus ``quick``. Der Variantenschalter und die Timer-Wahl bleiben.
+    wie die der Übung fallen aus ``quick``, eine Sensor-Karte und ein Takt wie die der Übung
+    werden ``None`` (A6). Der Variantenschalter und die Timer-Wahl bleiben.
 
     >>> from trainingsapp.core.result_spec import vorrat_feld
     >>> u = Exercise(default_target={"reps": [15]},
@@ -304,6 +373,10 @@ def bereinigt(item: PlanItem, uebung: Exercise) -> PlanItem:
     (None, None, {})
     >>> bereinigt(PlanItem(target={"reps": [20]}, felder=[]), u).target
     {'reps': [20]}
+    >>> from trainingsapp.core.takt import AUS
+    >>> b = bereinigt(PlanItem(acc=SensorWahl(), takt=AUS), u)
+    >>> b.acc, b.takt
+    (None, None)
     """
     ziel = (
         None
@@ -315,7 +388,13 @@ def bereinigt(item: PlanItem, uebung: Exercise) -> PlanItem:
     chips = eigene_chips(item, uebung)
     quick = {k: list(v) for k, v in item.quick.items() if k in chips or k == VARIANTE}
     return replace(
-        item, target=ziel, felder=felder, input_mode=modus_aus_felder(felder), quick=quick
+        item,
+        target=ziel,
+        felder=felder,
+        input_mode=modus_aus_felder(felder),
+        quick=quick,
+        acc=item.acc if sensor_eigen(item, uebung) else None,
+        takt=item.takt if takt_eigen(item, uebung) else None,
     )
 
 
@@ -325,8 +404,8 @@ def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
 
     Es wandern: das Ziel, die Parameter (geholte werden Felder der Übung, abgeschaltete fallen
     weg — was die Übung hat, bieten alle Pläne an), die Chips, die Uhr und ein im Plan gewählter
-    Timer (wird Vorgabe, eine eigene Kopie kommt dazu). Die Varianten bleiben, wie sie sind:
-    Sie gehören der Übung.
+    Timer (wird Vorgabe, eine eigene Kopie kommt dazu), die Karte „Beschleunigungssensor“ und
+    der Takt (A6). Die Varianten bleiben, wie sie sind: Sie gehören der Übung.
 
     >>> u0 = Exercise(result_spec=ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("hold")]))
     >>> u = als_standard(PlanItem(target={"reps": [20]}, felder=["reps"], quick={"reps": [5]}), u0)
@@ -337,6 +416,12 @@ def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
     [('reps', [10, 15, 20]), ('hold', [15, 30, 45, 60]), ('weight', [8])]
     >>> als_standard(PlanItem(timer={"uhr": False}), u0).uhr
     False
+    >>> from trainingsapp.core.takt import AUS, VORLAGEN
+    >>> u = als_standard(PlanItem(acc=SensorWahl(atmung=True), takt=VORLAGEN["box_4"]), u0)
+    >>> u.beschleunigung.atmung, u.takt.name
+    (True, 'Box 4-4-4-4')
+    >>> als_standard(PlanItem(takt=AUS), replace(u0, takt=VORLAGEN["box_4"])).takt is None
+    True
     """
     chips = eigene_chips(item, uebung)
     spec = plan_spec(item, uebung)
@@ -368,22 +453,32 @@ def als_standard(item: PlanItem, uebung: Exercise) -> Exercise:
         regionen=list(uebung.regionen),
         timer=profile,
         uhr=uebung.uhr if wahl.uhr is None else wahl.uhr,
+        beschleunigung=sensor_von(item, uebung),
+        takt=takt_von(item, uebung),
     )
 
 
 def vom_standard(uebung: Exercise, item: PlanItem) -> PlanItem:
     """Alles wie die Übung („Alles wie die Übung“, P79): Ziel, Parameter, Chips, Varianten,
-    Uhr und Timer folgen wieder der Übung. Zusatzfelder fallen dabei weg — sie stehen nur in
-    ``felder``.
+    Uhr, Timer, Sensor-Karte und Takt folgen wieder der Übung. Zusatzfelder fallen dabei weg —
+    sie stehen nur in ``felder``.
 
+    >>> from trainingsapp.core.takt import AUS
     >>> alt = PlanItem(target={"hold": [60]}, quick={"hold": [10]}, felder=["hold"],
-    ...                timer={"uhr": False})
+    ...                timer={"uhr": False}, acc=SensorWahl(atmung=True), takt=AUS)
     >>> neu = vom_standard(Exercise(default_target={"hold": [30]}), alt)
-    >>> neu.target, neu.felder, neu.quick, neu.timer, neu.input_mode
-    (None, None, {}, {}, 'chips')
+    >>> neu.target, neu.felder, neu.quick, neu.timer, neu.input_mode, neu.acc, neu.takt
+    (None, None, {}, {}, 'chips', None, None)
     """
     return replace(
-        item, target=None, felder=None, input_mode=modus_aus_felder(None), quick={}, timer={}
+        item,
+        target=None,
+        felder=None,
+        input_mode=modus_aus_felder(None),
+        quick={},
+        timer={},
+        acc=None,
+        takt=None,
     )
 
 
@@ -431,6 +526,11 @@ def uebernehmen_vorschau(
         aenderungen.append("Uhr an" if neu.uhr else "Uhr aus")
     if neu.timer[:1] != list(uebung.timer)[:1] and (erstes := profile_der_uebung(neu)):
         aenderungen.append(f"Timer „{erstes[0].name}“ wird Vorgabe")
+    if sensor_eigen(item, uebung):
+        aenderungen.append("Beschleunigungssensor wie im Plan")
+    if takt_eigen(item, uebung):
+        takt = takt_von(item, uebung)
+        aenderungen.append("kein Takt mehr" if takt is None else f"Takt „{takt.anzeigename}“")
     folgen: list[str] = []
     eigene: list[str] = []
     for name, anderes in andere:
@@ -452,6 +552,10 @@ __all__ = [
     "mit_plan_spec",
     "parameter_keys",
     "plan_spec",
+    "sensor_eigen",
+    "sensor_von",
+    "takt_eigen",
+    "takt_von",
     "uebernehmen_vorschau",
     "varianten_an",
     "varianten_schalten",

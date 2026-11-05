@@ -284,7 +284,8 @@ def _uhr_beitreten(
 def zaehl_baustein(
     state: Any, kontext: UebungKontext, uebung: Exercise, item: PlanItem | None = None
 ) -> ZaehlBaustein:
-    """Der Zähl-Teil, wie die Übung ihn will (Karte „Beschleunigungssensor“): Wiederholungen
+    """Der Zähl-Teil, wie die Übung ihn will (Karte „Beschleunigungssensor“ — in einer
+    Planübung ihre, wenn sie eine eigene hat, A6: `core.zaehlen.wirksame_wahl`): Wiederholungen
     (in einer Planübung nur, wenn sie ein Wiederholungsfeld anbietet), Atmung, das Feld, in das
     gezählt wird (`core.zaehlen.zaehlt_in` — in einer Planübung eines, das sie anbietet), die
     Vorlage der Bewegung."""
@@ -292,9 +293,9 @@ def zaehl_baustein(
         state.messlauf,
         kontext,
         wiederholungen=zl.wiederholungen_an(uebung, item),
-        atmung=zl.atmung_an(uebung),
+        atmung=zl.atmung_an(uebung, item),
         feld=zl.zaehlt_in(uebung, item),
-        vorlage=uebung.beschleunigung.vorlage,
+        vorlage=zl.wirksame_wahl(uebung, item).vorlage,
     )
 
 

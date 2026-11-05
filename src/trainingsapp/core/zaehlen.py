@@ -396,10 +396,28 @@ def wdh_felder(uebung: Exercise, item: PlanItem | None = None) -> list[str]:
     return [f.key for f in felder if basis_key(f.key) == WDH_ART]
 
 
+def wirksame_wahl(uebung: Exercise, item: PlanItem | None = None) -> SensorWahl:
+    """Die Karte „Beschleunigungssensor“, die gilt: die der Planübung, wenn sie eine eigene hat
+    (``PlanItem.acc``, A6), sonst die der Übung — die Planübung folgt der Übung (P79). Eine
+    Wahl „für jetzt“ gibt es hier nicht: Der Knopf ist die Messung.
+
+    >>> from trainingsapp.core.models import Exercise, PlanItem
+    >>> u = Exercise(beschleunigung=SensorWahl(atmung=True))
+    >>> wirksame_wahl(u).atmung, wirksame_wahl(u, PlanItem()).atmung
+    (True, True)
+    >>> wirksame_wahl(u, PlanItem(acc=SensorWahl(atmung=False))).atmung
+    False
+    """
+    if item is not None and item.acc is not None:
+        return item.acc
+    return uebung.beschleunigung
+
+
 def wiederholungen_an(uebung: Exercise, item: PlanItem | None = None) -> bool:
     """Ob an der Übung Wiederholungen gezählt werden — nie ohne Wiederholungsfeld, sonst wie
     gewählt; ohne Wahl an. Mit ``item`` zählt, was die Planübung anbietet (P79: keiner = nur
-    abhaken): ohne Wiederholungsfeld dort nie, mit einem, das nur der Plan hat, wie gewählt.
+    abhaken): ohne Wiederholungsfeld dort nie, mit einem, das nur der Plan hat, wie gewählt —
+    und gewählt ist, was die Planübung einstellt (`wirksame_wahl`, A6).
 
     >>> from trainingsapp.core.models import Exercise, PlanItem
     >>> from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
@@ -416,13 +434,16 @@ def wiederholungen_an(uebung: Exercise, item: PlanItem | None = None) -> bool:
     (False, False)
     >>> wiederholungen_an(Exercise(result_spec=halten), PlanItem(felder=["hold", "reps"]))
     True
+    >>> wiederholungen_an(u, PlanItem(acc=SensorWahl(wiederholungen=False)))
+    False
     """
-    return hat_wdh_feld(uebung, item) and uebung.beschleunigung.wiederholungen is not False
+    return hat_wdh_feld(uebung, item) and wirksame_wahl(uebung, item).wiederholungen is not False
 
 
-def atmung_an(uebung: Exercise) -> bool:
+def atmung_an(uebung: Exercise, item: PlanItem | None = None) -> bool:
     """Ob an der Übung die Atmung erfasst wird — wie gewählt; ohne Wahl an bei Typ „Atmung“
-    (groß/klein egal, wie Tags sonst auch).
+    (groß/klein egal, wie Tags sonst auch). Mit ``item``: wie die Planübung es einstellt
+    (`wirksame_wahl`, A6), die Vorgabe bleibt die der Übung.
 
     >>> from trainingsapp.core.models import Exercise
     >>> atmung_an(Exercise(typen=["Entspannung", "Atmung"])), atmung_an(Exercise(typen=["atmung"]))
@@ -433,16 +454,20 @@ def atmung_an(uebung: Exercise) -> bool:
     True
     >>> atmung_an(Exercise(typen=["Atmung"], beschleunigung=SensorWahl(atmung=False)))
     False
+    >>> from trainingsapp.core.models import PlanItem
+    >>> atmung_an(Exercise(typen=["Atmung"]), PlanItem(acc=SensorWahl(atmung=False)))
+    False
     """
-    gewaehlt = uebung.beschleunigung.atmung
+    gewaehlt = wirksame_wahl(uebung, item).atmung
     if gewaehlt is not None:
         return gewaehlt
     return any(t.casefold() == TYP_ATMUNG.casefold() for t in uebung.typen)
 
 
 def zaehlt_in(uebung: Exercise, item: PlanItem | None = None) -> str | None:
-    """Das Feld, in das die Wiederholungen kommen: das gewählte, wenn es (in der Planübung)
-    angeboten wird, sonst das erste Wiederholungsfeld — ``None`` ohne eins.
+    """Das Feld, in das die Wiederholungen kommen: das gewählte (in der Planübung ihres, sonst
+    das der Übung — `wirksame_wahl`), wenn es (in der Planübung) angeboten wird, sonst das
+    erste Wiederholungsfeld — ``None`` ohne eins.
 
     >>> from trainingsapp.core.models import Exercise, PlanItem
     >>> from trainingsapp.core.result_spec import ResultSpec, vorrat_feld
@@ -450,11 +475,13 @@ def zaehlt_in(uebung: Exercise, item: PlanItem | None = None) -> str | None:
     >>> u = Exercise(result_spec=spec, beschleunigung=SensorWahl(feld="reps_2"))
     >>> zaehlt_in(u), zaehlt_in(u, PlanItem(felder=["reps"])), zaehlt_in(Exercise(name="Planke"))
     ('reps_2', 'reps', None)
+    >>> zaehlt_in(Exercise(result_spec=spec), PlanItem(acc=SensorWahl(feld="reps_2")))
+    'reps_2'
     """
     felder = wdh_felder(uebung, item)
     if not felder:
         return None
-    gewaehlt = uebung.beschleunigung.feld
+    gewaehlt = wirksame_wahl(uebung, item).feld
     return gewaehlt if gewaehlt in felder else felder[0]
 
 

@@ -115,7 +115,9 @@ def test_uhrkanal_laeuft_ohne_flet() -> None:
     dazu die Atmung in der Auswertung (`core.atem_auswertung`) und das Protokollfeld
     (`core.atem_protokoll`, B1) und der Taktgeber (`core.takt`, Zeitleiste, der Ticker in
     `ui.timer_takt` — Klang und Vibration je Phase ohne Bildschirm), sein Teil 2 (Atemtakt in
-    der Messung, „Takt zählt“, `devices.takt_lauf`) und das Bild der Bewegung (Kern, Ablage)."""
+    der Messung, „Takt zählt“, `devices.takt_lauf`), das Bild der Bewegung (Kern, Ablage) und
+    die Planübung mit eigener Sensor-Karte und eigenem Takt (A6: Auflösung, Repository,
+    Migration 039, Paketfeld)."""
     import os
     import subprocess
     import sys
@@ -133,6 +135,7 @@ def test_uhrkanal_laeuft_ohne_flet() -> None:
             "test_takt.py",
             "test_takt_messung.py",
             "test_bewegungsbild.py",
+            "test_planuebung_sensor_takt.py",
         )
     ]
     # Ein Finder, der flet nicht findet — wie in der CI, wo es nicht installiert ist. Plugins

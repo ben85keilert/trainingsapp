@@ -70,15 +70,17 @@ def takt_blatt(
     fuer_jetzt: Callable[[Takt | None], Any] | None = None,
     in_die_uebung: Callable[[Takt | None], Any] | None = None,
     in_den_abschnitt: Callable[[Takt | None], Any] | None = None,
+    in_den_plan: Callable[[Takt | None], Any] | None = None,
     starten: Callable[[Takt], Any] | None = None,
     zuruecksetzen: Callable[[], Any] | None = None,
     uebung_name: str = "",
 ) -> ft.BottomSheet:
     """Das Blatt. ``takt`` ist der Ausgangspunkt (``None`` = die erste Vorlage); jeder Knopf
     bekommt den gebauten Takt — oder ``None`` für „kein Takt“ (✕ „Kein Takt“). ``fuer_jetzt``:
-    nur für diese Sitzung (P139); ``in_die_uebung`` / ``in_den_abschnitt``: speichern dort;
-    ``starten``: „Takt starten“ — eine Uhr mit diesem Takt für jetzt; ``zuruecksetzen``: „Wie
-    eingestellt“ — die Wahl für jetzt fällt weg, Abschnitt und Übung gelten wieder."""
+    nur für diese Sitzung (P139); ``in_die_uebung`` / ``in_den_abschnitt`` / ``in_den_plan``
+    („Im Plan einstellen“, A6: nur in dieser Planübung): speichern dort; ``starten``: „Takt
+    starten“ — eine Uhr mit diesem Takt für jetzt; ``zuruecksetzen``: „Wie eingestellt“ — die
+    Wahl für jetzt fällt weg, Abschnitt und Übung gelten wieder."""
     nachher = Nachher()
     blatt: ft.BottomSheet
     zeilen: list[_Zeile] = []
@@ -419,7 +421,7 @@ def takt_blatt(
         return handler
 
     def kein_takt() -> None:
-        ziel = fuer_jetzt or in_den_abschnitt or in_die_uebung
+        ziel = fuer_jetzt or in_den_abschnitt or in_den_plan or in_die_uebung
         if ziel is not None:
             weg(lambda: ziel(None))
 
@@ -465,6 +467,15 @@ def takt_blatt(
                 "In den Abschnitt", icon=ft.Icons.CHECK, on_click=mit_takt(in_den_abschnitt)
             )
         )
+    if in_den_plan is not None:
+        knoepfe.append(
+            ft.OutlinedButton(
+                "In diesen Plan",
+                icon=ft.Icons.SAVE_OUTLINED,
+                tooltip="Gilt nur in dieser Planübung — die Übung bleibt, wie sie ist",
+                on_click=mit_takt(in_den_plan),
+            )
+        )
     if in_die_uebung is not None:
         knoepfe.append(
             ft.OutlinedButton(
@@ -478,7 +489,7 @@ def takt_blatt(
             "In die Bibliothek", icon=ft.Icons.BOOKMARK_ADD_OUTLINED, on_click=in_bibliothek_legen
         )
     )
-    if fuer_jetzt is not None or in_den_abschnitt is not None or in_die_uebung is not None:
+    if any(z is not None for z in (fuer_jetzt, in_den_abschnitt, in_den_plan, in_die_uebung)):
         knoepfe.append(
             ft.TextButton("Kein Takt", icon=ft.Icons.CLOSE, on_click=kein_takt, tooltip="Takt aus")
         )

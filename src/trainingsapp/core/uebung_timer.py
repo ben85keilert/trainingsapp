@@ -230,11 +230,36 @@ def zaehlt_als(felder: Sequence[str], uebung: Exercise) -> str:
     return halten[0]
 
 
+def takt_der_uebung(uebung: Exercise | None, item: PlanItem | None = None) -> Takt | None:
+    """Der Takt, den die Übung vorgibt — in einer Planübung ihrer, wenn sie einen eigenen hat
+    (``PlanItem.takt``, A6: die Planübung folgt der Übung, P79; ein leerer Takt heißt dort
+    ausdrücklich keiner), sonst der der Übung. Das ist die Stufe „Übung“ in `takt_fuer` und
+    `TimerLauf.takt_uebung`.
+
+    >>> from trainingsapp.core.takt import AUS, VORLAGEN
+    >>> u = Exercise(name="Atmen", takt=VORLAGEN["atmung_4_6"])
+    >>> takt_der_uebung(u).name, takt_der_uebung(u, PlanItem()).name
+    ('Atmung 4-6', 'Atmung 4-6')
+    >>> takt_der_uebung(u, PlanItem(takt=VORLAGEN["box_4"])).name
+    'Box 4-4-4-4'
+    >>> takt_der_uebung(u, PlanItem(takt=AUS)) is None, takt_der_uebung(None) is None
+    (True, True)
+    """
+    if uebung is None:
+        return None
+    if item is not None and item.takt is not None:
+        return None if item.takt.leer else item.takt
+    return uebung.takt
+
+
 def takt_fuer(
-    uebung: Exercise | None, abschnitt: Abschnitt | None = None, wahl: Takt | None = None
+    uebung: Exercise | None,
+    abschnitt: Abschnitt | None = None,
+    wahl: Takt | None = None,
+    item: PlanItem | None = None,
 ) -> Takt | None:
     """Welcher Takt gilt (`docs/plan_taktgeber.md` §2): Uhr für jetzt (``wahl``; `takt.AUS` =
-    keiner) > Abschnitt des Timers > Übung > keiner.
+    keiner) > Abschnitt des Timers > Planübung (``item``, A6) > Übung > keiner.
 
     >>> from trainingsapp.core.takt import AUS, VORLAGEN
     >>> u = Exercise(name="Atmen", takt=VORLAGEN["atmung_4_6"])
@@ -244,9 +269,14 @@ def takt_fuer(
     'Box 4-4-4-4'
     >>> takt_fuer(u, None, VORLAGEN["metronom_1"]).name, takt_fuer(u, None, AUS)
     ('Metronom 1 s', None)
+    >>> im_plan = PlanItem(takt=VORLAGEN["metronom_1"])
+    >>> takt_fuer(u, item=im_plan).name, takt_fuer(u, item=PlanItem(takt=AUS))
+    ('Metronom 1 s', None)
+    >>> takt_fuer(u, Abschnitt("Box", 60, takt=VORLAGEN["box_4"]), item=im_plan).name
+    'Box 4-4-4-4'
     """
     return takt_waehlen(
-        wahl, abschnitt.takt if abschnitt is not None else None, uebung.takt if uebung else None
+        wahl, abschnitt.takt if abschnitt is not None else None, takt_der_uebung(uebung, item)
     )
 
 
@@ -343,6 +373,7 @@ __all__ = [
     "plan_timer",
     "profile_der_uebung",
     "profile_zur_wahl",
+    "takt_der_uebung",
     "takt_fuer",
     "timer_fuer",
     "uhr_an",

@@ -188,6 +188,8 @@ class Analyse:
             die Ansicht selbst ein (live, siehe Modulbeschreibung).
         menue_oben: die ersten Einträge des Menüs (Info, Korrektur) — neu je Aufbau.
         menue_im_kopf: das Menü im Kopf der eigenen Karte (sonst baut die Ansicht es ein).
+        atem_hinweis: der Hinweis „Atmung < 9/min“ für ein Analysefenster (Aufzeichnung,
+            ``None`` = der sichtbare Ausschnitt) — leer, wenn er nicht gilt.
     """
 
     def __init__(
@@ -212,8 +214,12 @@ class Analyse:
         eingebettet: bool = False,
         menue_oben: Callable[[], list[ft.PopupMenuItem]] | None = None,
         menue_im_kopf: bool = True,
+        atem_hinweis: Callable[[Analysefenster | None], str] | None = None,
     ) -> None:
         self._page = page
+        #: „Atmung < 9/min — liegt im LF-Band“ für das Analysefenster (Plan Beschleunigung
+        #: §7.1): die Bandleiste weist HF-Power dann nicht aus — ``None`` live
+        self._atem_hinweis = atem_hinweis
         self._menue_oben = menue_oben
         self._menue_im_kopf = menue_im_kopf and not eingebettet
         self._state = state
@@ -461,7 +467,8 @@ class Analyse:
                 )
             )
         if bereich == "frequenz":
-            teile += [spektrum_kurve(ergebnis), band_leiste(ergebnis, self._optisch)]
+            hinweis = self._atem_hinweis(fenster) if self._atem_hinweis is not None else ""
+            teile += [spektrum_kurve(ergebnis), band_leiste(ergebnis, self._optisch, hinweis)]
         else:
             nl: _Nichtlinear = ergebnis
             teile += [

@@ -146,12 +146,17 @@ def uhr_bis(ereignisse: Iterable[Ereignis]) -> float | None:
     offene Abschnitt hat noch keinen Zwischenstand (dann fehlt er in beiden). Endete das
     Zählen in diesem Abschnitt (``zaehlen_ende``: abgebrochen, keine Bewegung, getrennt) und
     die Uhr lief weiter, ist seine letzte ``zaehlung`` nur das Ende des Zählens, nicht das der
-    Uhr — dann auch ``None``: lieber eine Lücke als eine zu kurze Zeit.
+    Uhr — dann auch ``None``: lieber eine Lücke als eine zu kurze Zeit. Nur die ``zaehlung``
+    eines Satzes zählt (``zaehlart`` wdh); der Zwischenstand der Atem-Spur (``zaehlart``
+    atem, ``satz`` 0) läuft nebenbei und sagt nichts über den Satz (fünfte Prüfrunde, B3).
 
     >>> ab = lambda t, **d: Ereignis(t, "timer", "abschnitt", "", {"name": "Halten", **d})
     >>> satz = lambda t, n: Ereignis(t, "zaehlen", "zaehlung", "", {"satz": n, "wert": 9})
     >>> uhr_bis([ab(0.0), satz(30.0, 1), ab(30.0, zaehlt=False), ab(40.0), satz(55.0, 2)])
     55.0
+    >>> atem = lambda t: Ereignis(t, "zaehlen", "zaehlung", "", {"satz": 0, "zaehlart": "atem"})
+    >>> uhr_bis([ab(0.0), satz(30.0, 1), ab(30.0, zaehlt=False), ab(40.0), atem(55.0)]) is None
+    True
     >>> uhr_bis([ab(0.0), satz(30.0, 1), ab(30.0, zaehlt=False)]) is None  # in der Pause
     True
     >>> uhr_bis([ab(0.0), satz(15.0, 1), Ereignis(20.0, "timer", "ende", "")]) is None
@@ -168,7 +173,12 @@ def uhr_bis(ereignisse: Iterable[Ereignis]) -> float | None:
         if e.quelle == "timer" and e.art == "abschnitt":
             beginn = e.t_s if e.daten.get("zaehlt") is not False else None
             bis = None
-        elif beginn is not None and e.quelle == "zaehlen" and e.art == "zaehlung":
+        elif (
+            beginn is not None
+            and e.quelle == "zaehlen"
+            and e.art == "zaehlung"
+            and e.daten.get("zaehlart", ZAEHLART_WDH) == ZAEHLART_WDH
+        ):
             if e.t_s > beginn:  # die ``zaehlung`` des Satzes davor steht an der Grenze
                 bis = e.t_s if bis is None else max(bis, e.t_s)
         elif e.quelle == "zaehlen" and e.art == "zaehlen_ende":

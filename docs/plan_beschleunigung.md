@@ -573,7 +573,8 @@ A1 und A2 sind gebaut, ohne Änderung an hrv-core (0.8.0): Der Zähler ist
 schon kennt. **A3** (5.11.2026) nimmt hrv-core 0.9.1 (`hrv-core.ref` angehoben; 0.9.1 behebt den Rechenfehler nach Stillstand):
 `prototyp.atemzuege` (Entscheidung 24 in hrv-research) und das Beiwerk `atem-v1`. **B1**
 (5.11.2026, 0.3.46) zeigt das Beiwerk in Auswertung und live und schreibt das Protokollfeld
-„Atmung“ — ohne neue Rechenvorschrift (hrv-core bleibt 0.9.1).
+„Atmung“ — ohne neue Rechenvorschrift (hrv-core bleibt 0.9.1; die fünfte Prüfrunde zu A3/B1
+hebt auf 0.9.2: `deid` kennt den Backup-Schlüssel `_journal`, keine Rechenänderung).
 
 | Stufe | Gebaut | Wo |
 |---|---|---|
@@ -583,7 +584,7 @@ schon kennt. **A3** (5.11.2026) nimmt hrv-core 0.9.1 (`hrv-core.ref` angehoben; 
 | A1 Eintrag | Wiederholungen je Satz in den offenen Eintrag (bei `saetze=False` die Summe), Zeit und Wiederholungen in **einen** Eintrag, `person/eintrag` je Teil mit `teil` (nie doppelt); „Abhaken“ trägt sofort ein und schließt den Eintrag; eine andere Übung beendet ein Zählen ohne Uhr mit `andere_uebung` und der Meldung „… nicht eingetragen“ (5 s, „Eintragen“), eine laufende Uhr nie still; „Läufe heute“ mit „Satz 1 · 12 Wdh. (Sensor 11, +1)“ trägt abgebrochene Zählläufe nach, auch ohne Uhr an der Übung und ohne Gerät | `core/zaehlen_eintrag.py`, `SessionRepo.lauf_eintragen`, `ui/uebung_lauf.py`, `ui/einheit.py`, `components/laeufe_heute.py` |
 | A1 Oberfläche | Zählzeile in der Karte „Eintragen“ unter der Uhr (Knopf `knopf_text`, große Zahl, −1/+1 als Flächen, „Sensor 11 · +1 · Prototyp“, „Fertig“, „Zählen abbrechen“), Zustand ohne flet; Zahl mit ±1 in der laufenden Uhr und im Timer „Während“, „Sätze“ mit Zeit und Wiederholungen; Zähl-Dienst in Info- und Laufleiste und in der Benachrichtigung (`docs/plan_einheit.md` §9); Abhaken in Plan und auf „Heute“ | `components/zaehlen.py`, `components/zaehl_stand.py`, `components/uhr.py`, `views/uebung_timer.py`, `components/startleiste.py`, `views/plan.py`, `views/tag.py`, `ui/app.py` |
 | A2 | „Sensor 11“ live in der Marken-Leiste; nach dem Satz „Marken 12 · Sensor 11 · Korrektur +1 · eingetragen 12“ mit dem Wert des Zähl-Teils (nur dieselbe Übung), nach einem Zähllauf je Satz (`zaehlsatz_vergleichen`); Kontextzeilen `zaehler`, `zaehlung`, `korrektur`, `zaehlen_ende` (`docs/kompatibilitaet.md` §14) | `components/marken_leiste.py`, `marken_stand.py`, `devices/messlauf.py`, `core/diagnose.py` |
-| A3 Atem-Spur | Ist „Atmung“ an, läuft im `ZaehlBaustein` neben den Sätzen die **Atem-Spur**: `hrv_core.prototyp.atemzuege.AtemLive` in der Rate des Laufs (50/52 Hz; wechselt die Rate, taktet `Messlauf.acc_reihe` um), jeden Takt nur die neuen Proben (nie gedrosselt — unter 1 ms, das Prüffenster alle 5 s einige ms), je lückenlosem Stück ein Rahmen. Phasen „ein“/„aus“ und Fenster gehen ans Beiwerk `_atem.json` der laufenden Messung (`Messlauf.atem_sammler`, `atem_lauf_beginn/ende`, `atem_phase`, `atem_fenster`, Vertrag §15; ohne Aufnahme fehlen nur sie). Stand: `atemzuege` (Sensor + Korrektur), `atem_sensor`, `atem_rate` (letztes gültiges Fenster), `atem_phase` (▲/▼/–). **Läuft nebenbei** (P133): Sätze, Chips, Abschnitte, „Anhalten“ berühren sie nicht; das Ende des Laufs beendet beide Spuren (`AtemLive.abschluss`). Nur Atmung: ±1 korrigiert die Atemzüge (`person/korrektur` mit `zaehlart` atem, `satz` 0), `KEIN_ATEM_S` ohne Atemzug → `kein_atem` mit Meldung „— 2 min kein Atemzug erkannt“ (ohne „Eintragen“); `ohne_daten`/`getrennt` für beide Spuren. Zeitleiste: `zaehlung` mit `zaehlart` atem, `satz` 0 (= der ganze Lauf), `sensor`, `korrektur`, `wert`, `rate`, `zeiten_s` (Einatemzeiten), `geraet`, `prototyp` `hrv_core.prototyp.atemzuege@0.9.0` — am Ende und alle 15 s; `core.zaehlen_eintrag` übergeht sie (nichts ins Tagebuch, P120). Diagnosemodus: eine Kontextzeile `atem` (Atemzüge, `satz` 0, Rate als `phase`) am Ende, keine je Atemzug. Wirft der Prototyp, zählt ein frischer weiter (`atem_fehler`, die Zahl bleibt). Simulator und Gurt-Attrappe mit dem Vorzeichen der Brust: z fällt beim Einatmen, (x − z) steigt; RSA dazu konsistent (RR zu Beginn des Einatmens am längsten, an dessen Ende am kürzesten) | `devices/zaehlen.py`, `devices/messlauf.py`, `core/zaehlen.py` (`rate_text`, `phase_pfeil`, `atem_text`), `core/einheit.py` (`rate`), `core/zaehlen_eintrag.py`, `devices/simulated.py`, `tests/attrappen.py` |
+| A3 Atem-Spur | Ist „Atmung“ an, läuft im `ZaehlBaustein` neben den Sätzen die **Atem-Spur**: `hrv_core.prototyp.atemzuege.AtemLive` in der Rate des Laufs (50/52 Hz; wechselt die Rate, taktet `Messlauf.acc_reihe` um), jeden Takt nur die neuen Proben (nie gedrosselt — unter 1 ms, das Prüffenster alle 5 s einige ms), je lückenlosem Stück ein Rahmen. Phasen „ein“/„aus“ und Fenster gehen ans Beiwerk `_atem.json` der laufenden Messung (`Messlauf.atem_sammler`, `atem_lauf_beginn/ende`, `atem_phase`, `atem_fenster`, Vertrag §15; ohne Aufnahme fehlen nur sie). Stand: `atemzuege` (Sensor + Korrektur), `atem_sensor`, `atem_rate` (letztes gültiges Fenster), `atem_phase` (▲/▼/–). **Läuft nebenbei** (P133): Sätze, Chips, Abschnitte, „Anhalten“ berühren sie nicht; das Ende des Laufs beendet beide Spuren (`AtemLive.abschluss`). Nur Atmung: ±1 korrigiert die Atemzüge (`person/korrektur` mit `zaehlart` atem, `satz` 0), `KEIN_ATEM_S` ohne Atemzug → `kein_atem` mit Meldung „— 2 min kein Atemzug erkannt“ (ohne „Eintragen“); `ohne_daten`/`getrennt` für beide Spuren. Zeitleiste: `zaehlung` mit `zaehlart` atem, `satz` 0 (= der ganze Lauf), `sensor`, `korrektur`, `wert`, `rate`, `zeiten_s` (Einatemzeiten), `geraet`, `prototyp` `hrv_core.prototyp.atemzuege@<hrv_core.__version__>` — am Ende und alle 15 s; `core.zaehlen_eintrag` übergeht sie (nichts ins Tagebuch, P120). Diagnosemodus: eine Kontextzeile `atem` (Atemzüge, `satz` 0, Rate als `phase`) am Ende, keine je Atemzug. Wirft der Prototyp, zählt ein frischer weiter (`atem_fehler`, die Zahl bleibt). Simulator und Gurt-Attrappe mit dem Vorzeichen der Brust: z fällt beim Einatmen, (x − z) steigt; RSA dazu konsistent (RR zu Beginn des Einatmens am längsten, an dessen Ende am kürzesten) | `devices/zaehlen.py`, `devices/messlauf.py`, `core/zaehlen.py` (`rate_text`, `phase_pfeil`, `atem_text`), `core/einheit.py` (`rate`), `core/zaehlen_eintrag.py`, `devices/simulated.py`, `tests/attrappen.py` |
 | A3 Oberfläche | Nur Atmung: große Zahl = Atemzüge mit ±1-Flächen („Ein Atemzug mehr“), darunter „Atmung 14 · 12/min ▲ · Prototyp“; Wdh + Atmung: Zahl = Wiederholungen, dritte Zeile „Atmung 12/min ▲“ (`ZaehlAnzeige.atem`, nur Texte nachgezogen); Status „Box Breathing · Atmung · 14 · 12/min ▲“ bzw. „Kniebeuge · 12 · Atmung 12/min ▲“ in Info-, Laufleiste und Benachrichtigung; Hilfetext „Beschleunigungssensor“ mit einem Absatz zur Atmung | `components/zaehl_stand.py`, `components/zaehlen.py`, `components/hilfe.py`, `ui/einheit.py` (`ZaehlMeldung.atmung`) |
 
 | B1 Auswertung | Gibt es das Beiwerk `_atem.json`, lädt die Auswertung es im Thread (wie EKG und Diagnose): die **Ebene „Atmung“** (`EBENE_ATMUNG`, Chip in der Farbe der Atemfrequenz, Knopf im Vollbild, gemerkt wie die anderen Ebenen; nur angeboten, wenn das Beiwerk da ist) schattiert das **Einatmen** über dem Tachogramm und im Vollbild und legt die Läufe „Atmung erfassen“ als feines Band oben — außerhalb der Läufe nichts (Vertrag §15). Die **Karte „Atmung (Prototyp)“** (nach dem HRV-Teil, vor EKG und Diagnose) nennt je Messung und je Abschnitt (Rechenbereich wie `werte_von`, nur wo erfasst wurde): Atemzüge (Phasen „ein“), Rate (Median der gültigen Fenster, „–“ ohne), Ein:Aus („1 : 1,4“, Median des Ausatmens je Einatmen), Gleichmäßigkeit (CV der Atemzugdauern), gültige Fenster, Dauer erfasst, Quelle „Sensor · Prototyp · Gerät“, das Protokollfeld in Worten und daneben die **Atmung aus RR** als Vergleich — eine Abweichung über 2/min wird genannt, nicht gewertet. Alles beim Anzeigen gerechnet (`core/atem_auswertung.py`, flet-frei), nichts gespeichert (§7.4), keine Wertung (§10) | `core/atem_auswertung.py`, `core/hrv_einstellungen.py`, `views/messung_detail.py` |
@@ -774,6 +775,44 @@ der ohne sie scheitert):
 - Absturz, nachdem das Zählen mitten im Abschnitt endete und die Uhr weiterlief: keine Haltezeit
   bis zum Ende des Zählens mehr (`core.zaehlen_eintrag.uhr_bis`), lieber eine Lücke.
 - Der Einmal-Timer (eine Runde) misst wie die Stoppuhr den Satz, der schon zählt.
+
+**Fünfte Prüfrunde zu A3/B1** (5.11.2026, drei Prüfer: Atem-Spur, Auswertung, Vertrag — jede
+Korrektur mit einem Test, der ohne sie scheitert):
+
+- Beiwerk auch, wenn die Aufnahme erst nach dem Start der Atem-Spur beginnt oder eine zweite
+  folgt: `Messlauf.atem_aktiv` merkt die laufende Spur, jede Aufnahme legt ihren Sammler mit
+  einem Lauf ab 0 an (`_atem_laufend_anlegen` — Start, Teil 2, zweite Aufnahme); Stopp schließt
+  den offenen Lauf am Stopp (vorher am letzten Fenster, bis 5 s früher). Tests:
+  `test_messlauf.py::test_aufnahme_waehrend_laufender_atem_spur_bekommt_beiwerk`,
+  `::test_stopp_schliesst_den_atem_lauf_am_stopp`.
+- Keine negativen Zeiten: Eine Phase, deren Ansatz vor der Naht lag und die danach bestätigt
+  wurde, fällt in Teil 2 weg (`Messlauf.atem_phase`/`atem_fenster`); Lauf-Grenzen von davor liegen
+  bei 0 (`::test_phasen_von_vor_dem_aufnahmestart_fallen_weg`).
+- Der Lauf im Beiwerk beginnt mit der ersten Probe, nicht mit dem Tipp (`ZaehlBaustein._atem_begonnen`);
+  ohne eine Probe kein Lauf, kein Beiwerk und keine ``zaehlung`` der Atem-Spur
+  (`test_zaehlen_geraete.py::test_atem_lauf_erst_mit_dem_ersten_rahmen`).
+- `core.zaehlen_eintrag.uhr_bis` nimmt nur die ``zaehlung`` eines Satzes (``zaehlart`` wdh), nie den
+  Zwischenstand der Atem-Spur (`test_zaehlen_eintrag.py::test_uhr_bis_uebergeht_den_zwischenstand_der_atem_spur`).
+- Auswertung: Phasen werden nur innerhalb eines Laufs gepaart (`atem_auswertung.je_lauf`; kein
+  Atemzug, kein Schatten über die Pause, ein letztes „ein“ schattiert bis zum Laufende); die
+  Startregel F6 gilt **je Bereich** — Sensor-Rate nur, wenn die Läufe mindestens die Hälfte des
+  Bereichs abdecken (`MIN_ABDECKUNG`, `AtemKennzahlen.abdeckung`) und die Hälfte der Fenster gültig
+  ist, sonst die Atmung aus RR desselben Bereichs (`messung_detail.rr_atmung_in`); der Hinweis steht
+  auch in der Zeile eines Abschnitts („Atmung im LF-Band“), die Bandleiste des Analysefensters
+  (`components.spektrum.band_leiste`, `Analyse(atem_hinweis=…)`) und „HF n.u.“ in der Frequenztabelle
+  folgen ihm; der Vergleich in der Karte nimmt die Atmung aus RR der erfassten Läufe; die Karte
+  nennt die Atemübung mit Namen. Die Ebene „Atmung“ ist auch bei bestehenden Installationen an
+  (`hrv_einstellungen.ebenen_lesen`, Merkliste ``ebenen_bekannt``). Tests: `test_atem_auswertung.py`,
+  `test_ui_atmung.py`, `test_hrv_einstellungen.py::test_neue_ebene_ist_bei_alter_installation_an`.
+- Vertrag: §15 nennt die Grund-Codes wie der Prototyp sie schreibt (`ungleichmaessig`,
+  `gipfel_undeutlich`, `zyklen_passen_nicht`; der erste der Prüfreihenfolge), `rate_hz` als
+  int/float/null, den Laufbeginn mit der ersten Probe, die deid-Kopie als inhaltlich gleich;
+  §3/§5 den Platz von `atmung` nach `Recording.to_dict`; hrv-core 0.9.2 (`deid` entfernt
+  `_journal` wie `_wiederherstellung`, `docs/formate.md`); `test_atem_auswertung.py` und
+  `test_atem_protokoll.py` laufen im flet-gesperrten Kindprozess mit.
+- Nicht geändert (Vorbestand, hier nur genannt): Die Verlaufskurve `hf_power` und der
+  Kennzahlen-Cache kennen den Hinweis nicht (nicht Teil von B1); ein zweiter Lauf mit anderer
+  Rate behält im Kopf des Beiwerks `rate_hz` des ersten (die Rate steht je Messung, nicht je Lauf).
 
 **Entschieden (Ben, 5.11.2026)** zu den Fragen aus den Prüfrunden:
 

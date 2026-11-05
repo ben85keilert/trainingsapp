@@ -111,7 +111,9 @@ def test_uhrkanal_laeuft_ohne_flet() -> None:
     gesperrt, damit ein Verstoß schon lokal auffällt, wo flet installiert ist. Ebenso die
     Tests des Zählens mit dem Beschleunigungssensor (Geräte, Zeitleiste, Eintrag) und seiner
     Abläufe in der Oberfläche: `components.zaehl_stand` (Texte, ±1, Nachziehen) und
-    `ui.uebung_lauf`/`ui.einheit` (Uhr und Zählen, andere Übung, abgehakt, Läufe heute)."""
+    `ui.uebung_lauf`/`ui.einheit` (Uhr und Zählen, andere Übung, abgehakt, Läufe heute),
+    dazu die Atmung in der Auswertung (`core.atem_auswertung`) und das Protokollfeld
+    (`core.atem_protokoll`, B1)."""
     import os
     import subprocess
     import sys
@@ -124,6 +126,8 @@ def test_uhrkanal_laeuft_ohne_flet() -> None:
             "test_zaehlen_eintrag.py",
             "test_zaehl_stand.py",
             "test_zaehl_ablauf.py",
+            "test_atem_auswertung.py",
+            "test_atem_protokoll.py",
         )
     ]
     # Ein Finder, der flet nicht findet — wie in der CI, wo es nicht installiert ist. Plugins

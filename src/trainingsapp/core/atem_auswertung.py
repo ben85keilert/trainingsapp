@@ -10,15 +10,20 @@ und die Live-Schattierung (`views/live_vollbild.py`) zeigen:
   (Median der Dauer des Ausatmens zur Dauer des Einatmens je Atemzug, als „1 : 1,4“) und die
   Gleichmäßigkeit (Variationskoeffizient der Atemzugdauern). Quelle und Gerät kommen aus dem
   Beiwerk. Außerhalb der Läufe `erfasst` gibt es nichts — „keine Phase“ heißt dort *nicht
-  gemessen*, nicht *kein Atemzug* (Vertrag §15).
+  gemessen*, nicht *kein Atemzug* (Vertrag §15); darum werden **Phasen nur innerhalb eines
+  Laufs gepaart**: Ein Atemzug reicht nie über die Pause zwischen zwei Läufen (fünfte
+  Prüfrunde, C1).
 - `einatem_bereiche` — die Zeitspannen des Einatmens (Beginn „ein“ bis Beginn „aus“) für die
-  Schattierung über dem Tachogramm und live.
+  Schattierung über dem Tachogramm und live; ein letztes „ein“ ohne „aus“ reicht bis zum Ende
+  seines Laufs.
 - `hinweis_rate` und `lf_hinweis` — welche Atemrate für den Hinweis „Atmung < 9/min — liegt im
   LF-Band“ gilt (§7.1): **Startregel F6** (in hrv-research offen): die Rate des Sensors, wenn
-  mindestens die Hälfte der Prüffenster gültig war, sonst die Atmung aus den RR-Abständen
-  (`hrv_core.atmung`), sonst keine. Unter `LF_GRENZE_PRO_MIN` liegen die Atemzüge selbst im
-  LF-Band (0,04–0,15 Hz); LF/HF und DFA α1 bekommen den Hinweis, HF-Power wird nicht
-  ausgewiesen.
+  mindestens die Hälfte der Prüffenster gültig war **und** die Läufe mindestens die Hälfte
+  des Bereichs abdecken (`MIN_ABDECKUNG`; sonst spräche ein 60-s-Lauf für 20 min), sonst die
+  Atmung aus den RR-Abständen desselben Bereichs (`hrv_core.atmung`), sonst keine. Die Regel
+  gilt **je Bereich** — ganze Messung, Abschnitt, Analysefenster — mit den Kennzahlen dieses
+  Bereichs. Unter `LF_GRENZE_PRO_MIN` liegen die Atemzüge selbst im LF-Band (0,04–0,15 Hz);
+  LF/HF und DFA α1 bekommen den Hinweis, HF-Power wird nicht ausgewiesen.
 - `vergleich_text` — die Atmung aus RR neben der des Sensors: eine Abweichung über
   `VERGLEICH_ABWEICHUNG_PRO_MIN` wird genannt, nicht gewertet.
 
@@ -46,14 +51,20 @@ AUS: Final[str] = PHASEN[1]
 LF_GRENZE_PRO_MIN: Final[float] = 9.0
 #: Der Hinweis an LF/HF und DFA α1 (Tooltip bzw. Untertitel) …
 LF_HINWEIS: Final[str] = "Atmung < 9/min — liegt im LF-Band"
+#: … kurz, wo wenig Platz ist (Zeile eines Abschnitts) …
+LF_HINWEIS_KURZ: Final[str] = "Atmung im LF-Band"
 #: … und was statt HF-Power steht
 NICHT_AUSGEWIESEN: Final[str] = "nicht ausgewiesen"
 #: Live: so weit zurück wird das Einatmen schattiert (s; Plan §7.3: „die letzten 60 s“)
 ATEM_FENSTER_S: Final[float] = 60.0
 #: Die Kennzahlen, die den Hinweis bekommen (HF-Power wird dann nicht ausgewiesen)
 LF_KENNZAHLEN: Final[tuple[str, ...]] = ("hf_power", "lf_hf", "dfa_alpha1")
-#: Startregel F6: so viele Prüffenster müssen gültig sein, damit die Sensor-Rate gilt
+#: Startregel F6: so viele Prüffenster müssen gültig sein, damit die Sensor-Rate gilt …
 MIN_FENSTER_ANTEIL: Final[float] = 0.5
+#: … und so viel des Bereichs müssen die Läufe „Atmung erfassen“ abdecken
+MIN_ABDECKUNG: Final[float] = 0.5
+#: Zeitgleich heißt: bis auf Rundung (3 Nachkommastellen im Beiwerk)
+_EPS: Final[float] = 1e-6
 #: Ab dieser Abweichung nennt der Vergleich die Atmung aus RR gesondert (Bauvorgabe B1)
 VERGLEICH_ABWEICHUNG_PRO_MIN: Final[float] = 2.0
 #: Quelle der Rate für den Hinweis
@@ -104,10 +115,20 @@ class AtemKennzahlen:
     quelle: str = ""
     geraet: str = ""
     prototyp: str = ""
+    #: Länge des Bereichs, für den gerechnet wurde (s) — ``None``, wenn unbekannt
+    bereich_s: float | None = None
 
     @property
     def anteil_gueltig(self) -> float | None:
         return self.gueltig / self.fenster if self.fenster else None
+
+    @property
+    def abdeckung(self) -> float | None:
+        """Anteil des Bereichs, den die Läufe „Atmung erfassen“ abdecken — ``None`` ohne
+        bekannten Bereich."""
+        if self.bereich_s is None or self.bereich_s <= 0:
+            return None
+        return min(1.0, self.dauer_erfasst_s / self.bereich_s)
 
 
 # ---------------------------------------------------------------------------
@@ -115,9 +136,37 @@ class AtemKennzahlen:
 # ---------------------------------------------------------------------------
 
 
-def atemzuege(phasen: Sequence[tuple[float, str]]) -> list[Atemzug]:
-    """Die vollständigen Atemzüge ``ein → aus → ein`` einer sortierten Phasenliste; was nicht
-    in dieses Muster passt (zwei „ein“ hintereinander, ein „aus“ am Anfang), fällt weg.
+Phasen = Sequence[tuple[float, str]]
+Laeufe = Sequence[tuple[float, float]]
+
+
+def je_lauf(
+    phasen: Phasen, erfasst: Laeufe | None
+) -> list[tuple[list[tuple[float, str]], float | None]]:
+    """Die Phasen je Lauf „Atmung erfassen“, zeitlich sortiert, mit dem Ende des Laufs — ohne
+    Läufe (``None`` oder leer) alle in einem, ohne Ende. Was in keinem Lauf liegt, fällt weg:
+    dort wurde nicht gemessen (Vertrag §15).
+
+    >>> p = [(2.0, "ein"), (6.0, "aus"), (50.0, "ein"), (103.0, "aus"), (106.0, "ein")]
+    >>> je_lauf(p, [(0.0, 30.0), (100.0, 130.0)])
+    [([(2.0, 'ein'), (6.0, 'aus')], 30.0), ([(103.0, 'aus'), (106.0, 'ein')], 130.0)]
+    >>> je_lauf(p, None)[0][1] is None and len(je_lauf(p, [])[0][0]) == 5
+    True
+    """
+    sortiert = sorted(phasen, key=lambda p: p[0])
+    if not erfasst:
+        return [(sortiert, None)]
+    out: list[tuple[list[tuple[float, str]], float | None]] = []
+    for von, bis in sorted(erfasst):
+        drin = [(t, art) for t, art in sortiert if von - _EPS <= t <= bis + _EPS]
+        out.append((drin, bis))
+    return out
+
+
+def atemzuege(phasen: Phasen, erfasst: Laeufe | None = None) -> list[Atemzug]:
+    """Die vollständigen Atemzüge ``ein → aus → ein`` einer Phasenliste; was nicht in dieses
+    Muster passt (zwei „ein“ hintereinander, ein „aus“ am Anfang), fällt weg. Mit ``erfasst``
+    nur innerhalb eines Laufs — nie über die Pause zwischen zwei Läufen hinweg.
 
     >>> z = atemzuege([(1.0, "aus"), (2.0, "ein"), (4.0, "aus"), (7.0, "ein"), (9.5, "aus")])
     >>> [(a.ein_s, a.aus_s, a.ende_s) for a in z]
@@ -126,30 +175,37 @@ def atemzuege(phasen: Sequence[tuple[float, str]]) -> list[Atemzug]:
     (5.0, 2.0, 3.0)
     >>> atemzuege([(2.0, "ein"), (3.0, "ein"), (5.0, "aus"), (8.0, "ein")])
     [Atemzug(ein_s=3.0, aus_s=5.0, ende_s=8.0)]
+    >>> p = [(2.0, "ein"), (6.0, "aus"), (22.0, "ein"), (103.0, "aus"), (106.0, "ein")]
+    >>> [a.dauer_s for a in atemzuege(p)], atemzuege(p, [(0.0, 30.0), (100.0, 130.0)])
+    ([20.0, 84.0], [Atemzug(ein_s=2.0, aus_s=6.0, ende_s=22.0)])
     """
     out: list[Atemzug] = []
-    ein: float | None = None
-    aus: float | None = None
-    for t, art in sorted(phasen, key=lambda p: p[0]):
-        if art == EIN:
-            if ein is not None and aus is not None and t > aus:
-                out.append(Atemzug(ein, aus, t))
-            ein, aus = t, None
-        elif art == AUS and ein is not None and aus is None and t > ein:
-            aus = t
+    for gruppe, _ende in je_lauf(phasen, erfasst):
+        ein: float | None = None
+        aus: float | None = None
+        for t, art in gruppe:
+            if art == EIN:
+                if ein is not None and aus is not None and t > aus:
+                    out.append(Atemzug(ein, aus, t))
+                ein, aus = t, None
+            elif art == AUS and ein is not None and aus is None and t > ein:
+                aus = t
     return out
 
 
 def einatem_bereiche(
-    phasen: Sequence[tuple[float, str]],
+    phasen: Phasen,
     von_s: float,
     bis_s: float,
     *,
     offen_bis_s: float | None = None,
+    erfasst: Laeufe | None = None,
 ) -> list[tuple[float, float]]:
     """Die Spannen des Einatmens (Beginn „ein“ bis Beginn „aus“), auf ``[von_s, bis_s]``
-    beschnitten — für die Schattierung. ``offen_bis_s``: ein letztes „ein“ ohne „aus“ (live:
-    es wird gerade eingeatmet) reicht bis dorthin; sonst fällt es weg.
+    beschnitten — für die Schattierung. Mit ``erfasst`` werden Phasen nur innerhalb eines
+    Laufs gepaart; ein letztes „ein“ ohne „aus“ reicht bis zum Ende seines Laufs.
+    ``offen_bis_s``: ohne Läufe (live) reicht ein letztes „ein“ ohne „aus“ (es wird gerade
+    eingeatmet) bis dorthin; sonst fällt es weg.
 
     >>> p = [(2.0, "ein"), (4.0, "aus"), (7.0, "ein"), (9.5, "aus"), (12.0, "ein")]
     >>> einatem_bereiche(p, 0.0, 20.0)
@@ -160,18 +216,22 @@ def einatem_bereiche(
     [(2.0, 4.0), (7.0, 9.5), (12.0, 13.5)]
     >>> einatem_bereiche([(1.0, "aus")], 0.0, 5.0)
     []
+    >>> einatem_bereiche(p + [(103.0, "aus")], 0.0, 200.0, erfasst=[(0.0, 15.0), (100.0, 130.0)])
+    [(2.0, 4.0), (7.0, 9.5), (12.0, 15.0)]
     """
     out: list[tuple[float, float]] = []
-    ein: float | None = None
-    for t, art in sorted(phasen, key=lambda p: p[0]):
-        if art == EIN:
-            ein = t
-        elif art == AUS and ein is not None:
-            if t > ein:
-                out.append((ein, t))
-            ein = None
-    if ein is not None and offen_bis_s is not None and offen_bis_s > ein:
-        out.append((ein, offen_bis_s))
+    for gruppe, ende in je_lauf(phasen, erfasst):
+        ein: float | None = None
+        for t, art in gruppe:
+            if art == EIN:
+                ein = t
+            elif art == AUS and ein is not None:
+                if t > ein:
+                    out.append((ein, t))
+                ein = None
+        offen = ende if ende is not None else offen_bis_s
+        if ein is not None and offen is not None and offen > ein:
+            out.append((ein, offen))
     return [(max(a, von_s), min(b, bis_s)) for a, b in out if b > von_s and a < bis_s and b > a]
 
 
@@ -190,11 +250,17 @@ def erfasst_bereiche(atem: Atem, von_s: float, bis_s: float) -> list[tuple[float
 
 
 def kennzahlen(
-    atem: Atem, von_s: float | None = None, bis_s: float | None = None
+    atem: Atem,
+    von_s: float | None = None,
+    bis_s: float | None = None,
+    *,
+    dauer_s: float | None = None,
 ) -> AtemKennzahlen:
     """Die Größen aus Abschnitt 7.1 für die ganze Messung oder den Bereich ``[von_s, bis_s]``
-    (Wanduhr der Messung). Atemzüge sind die Phasen „ein“ im Bereich; Ein:Aus und
-    Gleichmäßigkeit rechnen nur mit vollständigen Atemzügen, die im Bereich beginnen.
+    (Wanduhr der Messung). Atemzüge sind die Phasen „ein“ im Bereich — innerhalb der Läufe
+    `erfasst`; Ein:Aus und Gleichmäßigkeit rechnen nur mit vollständigen Atemzügen eines
+    Laufs, die im Bereich beginnen. ``bereich_s`` (für `abdeckung`) ist die Länge des Bereichs,
+    für die ganze Messung ``dauer_s``.
 
     >>> from hrv_core.atem import Atem
     >>> a = Atem(geraet="polar_h10", erfasst=[(0.0, 30.0)],
@@ -211,11 +277,17 @@ def kennzahlen(
     (2, 1)
     >>> kennzahlen(Atem()).rate is None and kennzahlen(Atem()).ein_aus is None
     True
+    >>> k.abdeckung is None, kennzahlen(a, 0.0, 60.0).abdeckung
+    (True, 0.5)
+    >>> kennzahlen(a, dauer_s=40.0).abdeckung
+    0.75
     """
     lo = -float("inf") if von_s is None else von_s
     hi = float("inf") if bis_s is None else bis_s
-    phasen = [(t, art) for t, art in atem.phasen if lo <= t <= hi]
-    zuege = [z for z in atemzuege(atem.phasen) if lo <= z.ein_s <= hi]
+    phasen = [
+        (t, art) for g, _ in je_lauf(atem.phasen, atem.erfasst) for t, art in g if lo <= t <= hi
+    ]
+    zuege = [z for z in atemzuege(atem.phasen, atem.erfasst) if lo <= z.ein_s <= hi]
     fenster = [f for f in atem.fenster if lo <= f[0] <= hi]
     raten = [rate for _, rate, gueltig, _ in fenster if gueltig and rate is not None]
     dauern = [z.dauer_s for z in zuege]
@@ -233,6 +305,7 @@ def kennzahlen(
         quelle=atem.quelle,
         geraet=atem.geraet,
         prototyp=atem.prototyp,
+        bereich_s=(hi - lo) if von_s is not None and bis_s is not None else dauer_s,
     )
 
 
@@ -333,10 +406,29 @@ def vergleich_text(sensor_rate: float | None, rr_rate: float | None) -> str:
 # ---------------------------------------------------------------------------
 
 
+def sensor_rate_gilt(sensor: AtemKennzahlen | None) -> bool:
+    """Ob die Rate des Sensors für ihren Bereich spricht (Startregel F6): mindestens
+    `MIN_FENSTER_ANTEIL` der Prüffenster gültig und — wo der Bereich bekannt ist — die Läufe
+    decken mindestens `MIN_ABDECKUNG` davon ab.
+
+    >>> sensor_rate_gilt(AtemKennzahlen(6, 6.0, 7, 7, 60.0, 1.5, 0.0, bereich_s=1200.0))
+    False
+    >>> sensor_rate_gilt(AtemKennzahlen(6, 6.0, 7, 7, 60.0, 1.5, 0.0, bereich_s=90.0))
+    True
+    """
+    if sensor is None or sensor.rate is None:
+        return False
+    anteil, abdeckung = sensor.anteil_gueltig, sensor.abdeckung
+    return (anteil is not None and anteil >= MIN_FENSTER_ANTEIL) and (
+        abdeckung is None or abdeckung >= MIN_ABDECKUNG
+    )
+
+
 def hinweis_rate(sensor: AtemKennzahlen | None, rr_rate: float | None) -> tuple[float, str] | None:
-    """Welche Atemrate für den Hinweis gilt — Startregel F6 (hrv-research, offen): die Rate
-    des Sensors, wenn mindestens `MIN_FENSTER_ANTEIL` der Prüffenster gültig war, sonst die
-    Atmung aus RR, sonst keine. ``(rate, Quelle)``.
+    """Welche Atemrate für den Hinweis gilt — Startregel F6 (hrv-research, offen), **je
+    Bereich**: die Rate des Sensors, wenn sie für den Bereich spricht (`sensor_rate_gilt`:
+    genug Fenster gültig, genug abgedeckt), sonst die Atmung aus RR **desselben Bereichs**,
+    sonst keine. ``(rate, Quelle)``.
 
     >>> k = AtemKennzahlen(24, 6.1, 10, 12, 150.0, 1.4, 0.08)
     >>> hinweis_rate(k, 9.5)
@@ -346,13 +438,12 @@ def hinweis_rate(sensor: AtemKennzahlen | None, rr_rate: float | None) -> tuple[
     ((9.5, 'rr'), (9.5, 'rr'))
     >>> hinweis_rate(wenig, None) is None
     True
+    >>> kurz = AtemKennzahlen(6, 6.0, 7, 7, 60.0, 1.5, 0.0, bereich_s=1200.0)  # 60 s von 20 min
+    >>> hinweis_rate(kurz, 15.0)
+    (15.0, 'rr')
     """
-    if (
-        sensor is not None
-        and sensor.rate is not None
-        and sensor.anteil_gueltig is not None
-        and sensor.anteil_gueltig >= MIN_FENSTER_ANTEIL
-    ):
+    if sensor_rate_gilt(sensor):
+        assert sensor is not None and sensor.rate is not None
         return sensor.rate, QUELLE_SENSOR
     if rr_rate is not None:
         return float(rr_rate), QUELLE_RR
@@ -383,7 +474,9 @@ __all__ = [
     "EIN",
     "LF_GRENZE_PRO_MIN",
     "LF_HINWEIS",
+    "LF_HINWEIS_KURZ",
     "LF_KENNZAHLEN",
+    "MIN_ABDECKUNG",
     "MIN_FENSTER_ANTEIL",
     "NICHT_AUSGEWIESEN",
     "QUELLE_RR",
@@ -398,10 +491,12 @@ __all__ = [
     "gleichmaessigkeit_text",
     "hinweis_rate",
     "im_lf_band",
+    "je_lauf",
     "kennzahlen",
     "lf_hinweis",
     "quelle_text",
     "rate_text",
+    "sensor_rate_gilt",
     "vergleich_text",
     "zeile_text",
 ]

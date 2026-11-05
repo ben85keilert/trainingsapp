@@ -440,11 +440,12 @@ async def test_nur_atmung_zaehlt_atemzuege_rate_und_phase(aufbau) -> None:
     assert a.lauf.acc_anforderungen == {"zaehlen": (50, 8)}
     assert z.phase == PHASE_STARTET and z.status() == "Kniebeuge · Atmung · Sensor startet …"
     assert z.zaehlart == ZAEHLART_ATEM and z.atem_sensor is None and z.atemzuege == 0
-    assert a.lauf.atem is not None and a.lauf.atem.offen  # der Lauf im Beiwerk begann
+    assert a.lauf.atem is not None and not a.lauf.atem.offen  # der Lauf erst mit Proben (B4)
     phasen: set[str | None] = set()
     for _ in range(130):
         await _sekunden(a, 1, e)
         phasen.add(z.atem_phase)
+    assert a.lauf.atem.offen and 0.0 <= a.lauf.atem.laeufe[0][0] <= 1.1  # erste Probe
     assert z.phase == PHASE_ATMUNG and z.aktiv and z.grund is None
     assert abs(z.atemzuege - 13) <= 1 and z.atem_sensor == z.atemzuege  # 130 s · 6/min
     assert z.atem_rate is not None and abs(z.atem_rate - 6.0) <= 0.3
@@ -1726,3 +1727,46 @@ async def test_satz_laenger_als_der_puffer_endet_statt_zu_wenig_zu_zaehlen(aufba
     assert satz.daten["sensor"] >= vorher  # die letzte ganze Zahl, nicht weniger
     assert ze.zaehl_abgebrochen(e.ereignisse) and ze.wiederholungen(e.ereignisse)
     assert ze.von_selbst_text(z.grund, zu_lang=z.zu_lang) == "Satz zu lang für den Sensor"
+
+
+async def test_atem_lauf_erst_mit_dem_ersten_rahmen(aufbau) -> None:
+    """Fünfte Prüfrunde, B4: Der Lauf im Beiwerk beginnt mit der ersten Probe — die Anlaufzeit
+    bis dahin ist nicht „erfasst“; kommt gar kein Rahmen, gibt es keinen Lauf und kein
+    Beiwerk (statt ``erfasst = [[0, 15]]`` mit null Phasen)."""
+    from hrv_core.atem import atem_pfad
+
+    a = aufbau
+    a.gurt.beschleunigung = lambda: 0  # nichts kommt
+    a.lauf.aufnahme_starten()
+    e, z = _zaehllauf(a, wiederholungen=False, atmung=True)
+    e.starten()
+    await ruhe()
+    sammler = a.lauf.atem
+    assert sammler is not None and sammler.laeufe == [] and sammler.leer
+    await _sekunden(a, 20, e)
+    assert z.grund == ENDE_ABBRUCH and z.ohne_daten
+    assert sammler.laeufe == [] and sammler.leer and _atem(e) is None
+    ergebnis = a.lauf.aufnahme_stoppen(a.pfad)
+    assert ergebnis is not None and not atem_pfad(ergebnis.pfad).exists()
+    # Mit Proben: der Lauf beginnt bei der ersten Probe des ersten Rahmens, nicht beim Tipp
+    a.gurt.beschleunigung = type(a.gurt).beschleunigung.__get__(a.gurt)
+    a.gurt.bewegung = False
+    a.uhr.t = round(a.uhr.t + 3.0, 6)
+    a.lauf.aufnahme_starten()
+    e2, z2 = _zaehllauf(a, wiederholungen=False, atmung=True)
+    e2.starten()
+    await ruhe()
+    assert a.lauf.atem is not None and a.lauf.atem.laeufe == []
+    start = a.uhr.t
+    a.gurt._acc_t = round(start + 2.5, 6)  # der Gurt liefert erst ab hier (Anlauf)
+    a.uhr.t = round(start + 2.5, 6)
+    await ruhe()
+    e2.takt()
+    assert a.lauf.atem.laeufe == []
+    await _sekunden(a, 1, e2)  # der erste Rahmen: Proben ab 2,5 s
+    assert a.lauf.atem.offen
+    (von, _bis) = a.lauf.atem.laeufe[0]
+    assert von == pytest.approx(2.5, abs=0.05)  # nicht 0: die Anlaufzeit ist nicht erfasst
+    z2.fertig()
+    e2.takt()
+    assert not a.lauf.atem.offen

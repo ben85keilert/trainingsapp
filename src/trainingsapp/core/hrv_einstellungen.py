@@ -19,6 +19,7 @@ Schichten.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -122,6 +123,10 @@ EBENE_ABSCHNITTE: Final[str] = "abschnitte"
 #: Messung ein Atem-Beiwerk hat (`docs/plan_beschleunigung.md` §7.3, B1)
 EBENE_ATMUNG: Final[str] = "atmung"
 EBENEN: Final[tuple[str, ...]] = (EBENE_NOTIZEN, EBENE_LEISTUNGEN, EBENE_ABSCHNITTE, EBENE_ATMUNG)
+#: Die Ebenen, die es vor der Merkliste ``ebenen_bekannt`` gab (bis 0.3.46): Eine gespeicherte
+#: Liste ohne Merkliste kannte nur diese — jede spätere Ebene ist dann an, wie bei einer
+#: frischen Installation (fünfte Prüfrunde, C4)
+EBENEN_ALT: Final[frozenset[str]] = frozenset({EBENE_NOTIZEN, EBENE_LEISTUNGEN, EBENE_ABSCHNITTE})
 
 #: Erweitert — Latenz, nach der ein losgelassenes Analysefenster neu rechnet (ms).
 #: Kommt in dieser Zeit noch eine Bewegung nach, wird erst danach gerechnet.
@@ -145,6 +150,34 @@ SICHTEN: Final[tuple[str, ...]] = (SICHT_HF, SICHT_HRV)
 BEREICH_ZEIT: Final[str] = "zeit"
 BEREICH_FREQUENZ: Final[str] = "frequenz"
 BEREICH_NICHTLINEAR: Final[str] = "nichtlinear"
+
+
+def ebenen_lesen(d: Mapping[str, Any]) -> list[str]:
+    """Die eingeblendeten Ebenen aus einer gespeicherten Einstellung: die gespeicherte Wahl
+    (Unbekanntes fällt weg), dazu **an** jede Ebene, die es beim Speichern noch nicht gab —
+    nach der Merkliste ``ebenen_bekannt``; fehlt sie, galten nur `EBENEN_ALT` als bekannt.
+    Ohne gespeicherte Liste alle.
+
+    >>> ebenen_lesen({})
+    ['notizen', 'leistungen', 'abschnitte', 'atmung']
+    >>> ebenen_lesen({"ebenen": ["notizen", "abschnitte"]})  # vor der Ebene „Atmung“ gespeichert
+    ['notizen', 'abschnitte', 'atmung']
+    >>> ebenen_lesen({"ebenen": ["notizen"], "ebenen_bekannt": list(EBENEN)})  # abgewählt
+    ['notizen']
+    >>> ebenen_lesen({"ebenen": ["notizen", "fremd"], "ebenen_bekannt": ["notizen", "fremd"]})
+    ['notizen', 'leistungen', 'abschnitte', 'atmung']
+    """
+    gespeichert = d.get("ebenen")
+    if not isinstance(gespeichert, list) or not all(isinstance(k, str) for k in gespeichert):
+        return list(EBENEN)
+    bekannt_roh = d.get("ebenen_bekannt")
+    bekannt = (
+        set(bekannt_roh)
+        if isinstance(bekannt_roh, list) and all(isinstance(k, str) for k in bekannt_roh)
+        else set(EBENEN_ALT)
+    )
+    ebenen = [k for k in dict.fromkeys(gespeichert) if k in EBENEN]
+    return ebenen + [k for k in EBENEN if k not in bekannt and k not in ebenen]
 
 
 @dataclass
@@ -324,6 +357,9 @@ class HrvEinstellungen:
             "analyse_laenge_s": self.analyse_laenge_s,
             "analyse_schritt": self.analyse_schritt,
             "ebenen": list(self.ebenen),
+            # Welche Ebenen diese Liste kannte — eine neue Ebene einer späteren Version
+            # ist beim Lesen an, eine hier abgewählte bleibt aus (`ebenen_lesen`)
+            "ebenen_bekannt": list(EBENEN),
             "uhr_medien": self.uhr_medien,
             "uhr_seiten": list(self.uhr_seiten),
             "standard_sicht": self.standard_sicht,
@@ -400,7 +436,7 @@ class HrvEinstellungen:
             analyse_schritt=schritt
             if (schritt := d.get("analyse_schritt")) in ANALYSE_SCHRITTE
             else vorgabe.analyse_schritt,
-            ebenen=[k for k in liste("ebenen") if k in EBENEN],
+            ebenen=ebenen_lesen(d),
             uhr_medien=schalter("uhr_medien"),
             uhr_seiten=[k for k in liste("uhr_seiten") if k in UHR_SEITEN],
             standard_sicht=sicht

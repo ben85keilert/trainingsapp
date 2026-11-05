@@ -99,3 +99,61 @@ def test_leeres_und_unvollstaendiges_beiwerk() -> None:
     k = aa.kennzahlen(einer)
     assert k.atemzuege == 2 and k.ein_aus == 1.5 and k.gleichmaessigkeit is None
     assert aa.ein_aus_text(k.ein_aus) == "1 : 1,5" and aa.gleichmaessigkeit_text(None) == "–"
+
+
+def test_phasen_werden_nur_innerhalb_eines_laufs_gepaart() -> None:
+    """Fünfte Prüfrunde, C1: Lauf 1 endet mit „ein“, Lauf 2 beginnt mit „aus“ — kein Atemzug
+    und kein Schatten über die Pause (22–103 s); das letzte „ein“ schattiert bis zum Ende
+    seines Laufs; Phasen außerhalb der Läufe zählen nicht."""
+    atem = Atem(
+        erfasst=[(0.0, 30.0), (100.0, 130.0)],
+        phasen=[
+            (2.0, "ein"),
+            (6.0, "aus"),
+            (12.0, "ein"),
+            (16.0, "aus"),
+            (22.0, "ein"),
+            (50.0, "ein"),  # außerhalb: dort wurde nicht gemessen
+            (103.0, "aus"),
+            (106.0, "ein"),
+            (110.0, "aus"),
+            (116.0, "ein"),
+            (120.0, "aus"),
+        ],
+        fenster=[(30.0, 6.0, True, ""), (130.0, 6.0, True, "")],
+    )
+    zuege = aa.atemzuege(atem.phasen, atem.erfasst)
+    assert [(z.ein_s, z.ende_s) for z in zuege] == [(2.0, 12.0), (12.0, 22.0), (106.0, 116.0)]
+    assert aa.einatem_bereiche(atem.phasen, 0.0, 130.0, erfasst=atem.erfasst) == [
+        (2.0, 6.0),
+        (12.0, 16.0),
+        (22.0, 30.0),
+        (106.0, 110.0),
+        (116.0, 120.0),
+    ]
+    k = aa.kennzahlen(atem)
+    assert k.atemzuege == 5 and k.gleichmaessigkeit == pytest.approx(0.0) and k.ein_aus == 1.5
+    assert aa.kennzahlen(atem, 40.0, 60.0).atemzuege == 0
+    # Ohne Läufe (live) wie bisher: alles in einem
+    assert len(aa.atemzuege(atem.phasen)) == 4  # auch 50 → 103 → 106
+
+
+def test_sensor_rate_gilt_nur_mit_abdeckung_des_bereichs(tmp_path) -> None:
+    """Fünfte Prüfrunde, C2: 60 s Sensor bei 6/min sprechen nicht für 20 min Messung — die
+    Sensor-Rate gilt nur, wenn die Läufe mindestens die Hälfte des Bereichs abdecken; sonst
+    die Atmung aus RR desselben Bereichs. Je Bereich entschieden."""
+    atem = _beiwerk(tmp_path, dauer_s=60.0)
+    ganz = aa.kennzahlen(atem, 0.0, 1200.0)
+    assert ganz.bereich_s == 1200.0 and ganz.abdeckung == pytest.approx(0.05)
+    assert ganz.anteil_gueltig == 1.0 and not aa.sensor_rate_gilt(ganz)
+    assert aa.hinweis_rate(ganz, 15.0) == (15.0, aa.QUELLE_RR) and aa.lf_hinweis(15.0) == ""
+    assert aa.hinweis_rate(ganz, None) is None
+    assert aa.hinweis_rate(aa.kennzahlen(atem, dauer_s=1200.0), 15.0) == (15.0, aa.QUELLE_RR)
+    # Der Abschnitt, in dem erfasst wurde: dort gilt der Sensor
+    teil = aa.kennzahlen(atem, 0.0, 90.0)
+    assert teil.abdeckung == pytest.approx(60 / 90) and aa.sensor_rate_gilt(teil)
+    assert aa.hinweis_rate(teil, 15.0) == (6.0, aa.QUELLE_SENSOR)
+    # Ohne bekannten Bereich entscheidet nur der Fensteranteil (wie bisher)
+    assert aa.kennzahlen(atem).abdeckung is None
+    assert aa.hinweis_rate(aa.kennzahlen(atem), 15.0) == (6.0, aa.QUELLE_SENSOR)
+    assert aa.LF_HINWEIS_KURZ and aa.MIN_ABDECKUNG == 0.5

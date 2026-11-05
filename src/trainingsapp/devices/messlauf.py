@@ -387,6 +387,12 @@ class Messlauf:
         #: `docs/plan_beschleunigung.md` §7.4) — legt `atem_sammler` an, sobald eine Einheit
         #: „Atmung erfassen“ einschaltet; gespeichert als Beiwerk ``_atem.json`` (Vertrag §15)
         self.atem: AtemSammler | None = None
+        #: Ob gerade eine Atem-Spur läuft (`atem_lauf_beginn` bis `atem_lauf_ende`) — auch
+        #: ohne Aufnahme gemerkt: Beginnt eine Aufnahme mittendrin oder folgt eine zweite,
+        #: bekommt sie ihren Sammler mit einem Lauf ab ihrem Start (fünfte Prüfrunde, B1)
+        self.atem_aktiv = False
+        #: Gerät (Profil-ID) und Rate der Atem-Spur, wie `atem_sammler` sie zuletzt nannte
+        self._atem_vorgabe: tuple[str, int | float | None] = ("", None)
         #: Protokollfeld „Atmung“ der Messdatei (`core.atem_protokoll`, Vertrag §5, P125): die
         #: Oberfläche belegt den Haken mit dem Übungskatalog (Ereignisse der Aufnahme → Feld
         #: oder ``None`` = unbekannt); gerufen im Loop beim Backup und vor dem Speichern
@@ -730,6 +736,7 @@ class Messlauf:
         self.aufnahme.batterie_prozent = self.status.batterie_prozent
         self.ekg = None
         self.atem = None
+        self._atem_laufend_anlegen()
         self._grenzen = {}
         self._letztes_backup = start
         self.live.leeren()
@@ -1110,41 +1117,66 @@ class Messlauf:
         ``None`` ohne Aufnahme: Phasen gibt es nur als Beiwerk einer Messdatei (Plan §4.1 —
         ohne Aufnahme fehlen nur die Atemphasen an der Messdatei, das Zählen läuft trotzdem).
         """
+        self._atem_vorgabe = (geraet, rate_hz)
+        return self._atem_anlegen()
+
+    def _atem_anlegen(self) -> AtemSammler | None:
+        """Der Sammler der laufenden Aufnahme nach `_atem_vorgabe` — angelegt, wenn er fehlt;
+        ``None`` ohne Aufnahme."""
         if self.aufnahme is None:
             return None
         if self.atem is None:
+            geraet, rate_hz = self._atem_vorgabe
             self.atem = AtemSammler(QUELLE_SENSOR, geraet, rate_hz, prototyp=ATEM_PROTOTYP)
         return self.atem
 
+    def _atem_laufend_anlegen(self) -> None:
+        """Läuft gerade eine Atem-Spur (`atem_aktiv`), bekommt eine Aufnahme, die jetzt
+        beginnt (Start, zweite Aufnahme, Teil 2 nach dem Teilen), ihren Sammler mit einem
+        Lauf ab ihrem Start — die Spur war die ganze Zeit an, nur das Beiwerk fehlte."""
+        if self.atem_aktiv and self.atem is None and (s := self._atem_anlegen()) is not None:
+            s.lauf_beginn(0.0)
+
     def _atem_wand(self, t_quelle_s: float) -> tuple[AtemSammler, float] | None:
         """Sammler und Wanduhr der Aufnahme (``t − start_mono``, wie beim EKG) — ``None``
-        ohne Aufnahme oder ohne Sammler (`atem_sammler` zuerst)."""
-        aufnahme, sammler = self.aufnahme, self.atem
-        if aufnahme is None or sammler is None:
+        ohne Aufnahme oder ohne Sammler (`atem_sammler` oder eine laufende Spur zuerst)."""
+        aufnahme = self.aufnahme
+        if aufnahme is None:
             return None
-        return sammler, t_quelle_s - aufnahme.start_mono
+        self._atem_laufend_anlegen()
+        if self.atem is None:
+            return None
+        return self.atem, t_quelle_s - aufnahme.start_mono
 
     def atem_lauf_beginn(self, t_quelle_s: float) -> None:
-        """„Atmung erfassen“ beginnt (Uhr der Quelle); ohne Aufnahme passiert nichts."""
+        """„Atmung erfassen“ beginnt (Uhr der Quelle) — gemerkt auch ohne Aufnahme
+        (`atem_aktiv`); ins Beiwerk kommt der Lauf nur mit Aufnahme, nie vor ihrem Start."""
+        self._atem_anlegen()  # erst der Sammler, dann die Spur — sonst begänne ein Lauf bei 0
+        self.atem_aktiv = True
         if (w := self._atem_wand(t_quelle_s)) is not None:
-            w[0].lauf_beginn(w[1])
+            w[0].lauf_beginn(max(w[1], 0.0))
 
     def atem_lauf_ende(self, t_quelle_s: float) -> None:
-        """„Atmung erfassen“ endet (Uhr der Quelle); ohne Aufnahme passiert nichts."""
+        """„Atmung erfassen“ endet (Uhr der Quelle); ohne Aufnahme passiert nichts weiter."""
+        self.atem_aktiv = False
         if (w := self._atem_wand(t_quelle_s)) is not None:
-            w[0].lauf_ende(w[1])
+            w[0].lauf_ende(max(w[1], 0.0))
 
     def atem_phase(self, t_quelle_s: float, art: str) -> None:
-        """Beginn des Ein- (``"ein"``) oder Ausatmens (``"aus"``) auf der Uhr der Quelle."""
-        if (w := self._atem_wand(t_quelle_s)) is not None:
+        """Beginn des Ein- (``"ein"``) oder Ausatmens (``"aus"``) auf der Uhr der Quelle.
+        Eine Phase von vor dem Start der Aufnahme (ihr Ansatz lag vor der Naht beim Teilen,
+        bestätigt wurde sie danach) gehört nicht in diese Datei — keine negativen Zeiten
+        (fünfte Prüfrunde, B2)."""
+        if (w := self._atem_wand(t_quelle_s)) is not None and w[1] >= 0.0:
             w[0].phase(w[1], art)
 
     def atem_fenster(
         self, t_ende_quelle_s: float, rate: float | None, gueltig: bool, grund: str = ""
     ) -> None:
         """Ergebnis eines Prüffensters (Ende auf der Uhr der Quelle, Rate je Minute, gültig,
-        Grund als snake_case-Code des Prototyps); ohne Aufnahme passiert nichts."""
-        if (w := self._atem_wand(t_ende_quelle_s)) is not None:
+        Grund als snake_case-Code des Prototyps); ohne Aufnahme oder von vor ihrem Start
+        passiert nichts."""
+        if (w := self._atem_wand(t_ende_quelle_s)) is not None and w[1] >= 0.0:
             w[0].fenster(w[1], rate, gueltig, grund)
 
     def aufnahme_stoppen(self, basis: Path) -> Gespeichert | None:
@@ -1225,19 +1257,18 @@ class Messlauf:
         # bekam Teil 1 kein `_ecg.json`, und alles landete neben dem letzten Teil (V4)
         ekg_alt, self.ekg = self.ekg, None
         # Die Atemphasen bis hier ebenso: ein offener Lauf „Atmung erfassen“ endet in Teil 1
-        # an der Naht und beginnt in Teil 2 bei 0 neu — jeder Teil trägt seine Läufe
+        # an der Naht; läuft die Spur weiter, beginnt sie in Teil 2 bei 0 neu
+        # (`_atem_laufend_anlegen`, sobald ``self.aufnahme`` die neue ist) — jeder Teil trägt
+        # seine Läufe
         atem_alt, self.atem = self.atem, None
         if atem_alt is not None and atem_alt.offen:
             atem_alt.lauf_ende(jetzt - alt.start_mono)
-            self.atem = AtemSammler(
-                atem_alt.quelle, atem_alt.geraet, atem_alt.rate_hz, prototyp=atem_alt.prototyp
-            )
-            self.atem.lauf_beginn(jetzt - neu.start_mono)
         # Ebenso der Rohmitschnitt: Teil 1 behält seinen, Teil 2 schreibt ohne Lücke einen
         # neuen weiter, solange der Diagnosemodus läuft
         mitschnitt_alt, self.mitschnitt = self.mitschnitt, None
         self._dateiname_fest = None
         self.aufnahme = neu
+        self._atem_laufend_anlegen()
         self._letztes_backup = jetzt
         if mitschnitt_alt is not None and mitschnitt_alt.offen:
             self._mitschnitt_oeffnen(mitschnitt_alt.pfad.name)
@@ -1259,6 +1290,11 @@ class Messlauf:
         if self._wird_gespeichert:
             return None
         self._wird_gespeichert = True
+        # Ein offener Lauf „Atmung erfassen“ endet mit der Aufnahme am Stopp, nicht mit dem
+        # letzten Fenster (bis 5 s früher); die Spur der Einheit läuft ohne Sammler weiter
+        # und bekommt mit der nächsten Aufnahme einen neuen (fünfte Prüfrunde, B5)
+        if self.atem is not None and self.atem.offen:
+            self.atem.lauf_ende(max(self._uhr() - aufnahme.start_mono, 0.0))
         return aufnahme
 
     def _stopp_beenden(self, *, gespeichert: bool) -> None:

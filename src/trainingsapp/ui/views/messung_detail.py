@@ -56,7 +56,7 @@ import contextlib
 import logging
 from bisect import bisect_left
 from collections import Counter
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from functools import partial
@@ -135,6 +135,7 @@ from trainingsapp.core.hrv_einstellungen import (
     HrvEinstellungen,
 )
 from trainingsapp.core.hrv_export import export_zip, zugehoerige_dateien
+from trainingsapp.core.kurzcode import katalog_aufloesen
 from trainingsapp.core.laufend import minuten
 from trainingsapp.core.models import HrvRecording
 from trainingsapp.core.tagesbilanz import buendeln
@@ -861,16 +862,65 @@ def _aufbauen(
             "atmung" + ("_uebung" if state.hrv_einstellungen().atemuebung else ""), rechnen
         )
 
-    def atem_hinweis() -> str:
+    def rr_atmung_in(bereiche: Sequence[tuple[float, float]]) -> float | None:
+        """Die Atmung aus RR in Bereichen der Achse: Median der gültigen Minutenfenster
+        (alle 15 s, über Stunden höchstens 2000 je Bereich), die ganz in einem Bereich
+        liegen — für den Vergleich und den Hinweis **im selben Bereich** (fünfte Prüfrunde,
+        C2), nicht über die ganze Messung."""
+        modus = ATEMUEBUNG if state.hrv_einstellungen().atemuebung else RUHE
+        schluessel = ";".join(f"{a:.3f}-{b:.3f}" for a, b in bereiche)
+
+        def rechnen() -> float | None:
+            t, rr, _ = analyse_reihe()
+            if not t.size:
+                return None
+            raten: list[float] = []
+            for von, bis in bereiche:
+                lo, hi = von, min(bis, float(t[-1]))  # das erste Fenster darf am Anfang liegen
+                if hi - lo < 60.0:
+                    continue
+                schritt = max(15.0, (hi - lo) / 2000.0)
+                for ende in np.arange(lo + 60.0, hi + 1e-9, schritt):
+                    a = atemfrequenz(t, rr, ende - 60.0, ende, modus=modus)
+                    if a.gueltig and a.rate_pro_min is not None:
+                        raten.append(float(a.rate_pro_min))
+            return float(np.median(raten)) if raten else None
+
+        return z.merken(f"atmung_in:{modus}:{schluessel}", rechnen)
+
+    def atem_kennzahlen(von: float, bis: float) -> aa.AtemKennzahlen | None:
+        """Die Größen des Beiwerks für einen Bereich der Achse — ``None`` ohne Beiwerk."""
+        atem = atem_stand["atem"]
+        if atem is None:
+            return None
+        return aa.kennzahlen(
+            atem, achse_zu_wand(zeilen_achse, wand, von), achse_zu_wand(zeilen_achse, wand, bis)
+        )
+
+    def atem_hinweis_aus(
+        sensor: aa.AtemKennzahlen | None, rr_rate: Callable[[], float | None]
+    ) -> str:
         """„Atmung < 9/min — liegt im LF-Band“ (Plan Beschleunigung §7.1) für HF-Power, LF/HF
         und DFA α1 — die Rate nach der Startregel F6 (`core.atem_auswertung.hinweis_rate`:
-        Sensor, wenn genug Fenster gültig, sonst die Atmung aus RR); leer, wenn er nicht gilt."""
+        Sensor, wenn genug Fenster gültig und genug des Bereichs erfasst, sonst die Atmung aus
+        RR desselben Bereichs); leer, wenn er nicht gilt."""
         if z.nur_puls:
             return ""
-        sensor = atem_stand["kennzahlen"]
         # Die Atmung aus RR erst rechnen, wenn der Sensor nicht reicht (über Stunden teuer)
-        rate = aa.hinweis_rate(sensor, None) or aa.hinweis_rate(sensor, atmung()["rate"])
+        rate = aa.hinweis_rate(sensor, None) or aa.hinweis_rate(sensor, rr_rate())
         return aa.lf_hinweis(rate[0] if rate is not None else None)
+
+    def atem_hinweis() -> str:
+        """Der Hinweis für die ganze Messung (bzw. den Zuschnitt)."""
+        return atem_hinweis_aus(atem_stand["kennzahlen"], lambda: atmung()["rate"])
+
+    def atem_hinweis_bereich(von: float, bis: float, rr_rate: float | None = None) -> str:
+        """Der Hinweis für einen Bereich der Achse (Abschnitt, Analysefenster) mit den
+        Kennzahlen dieses Bereichs; ``rr_rate``: seine Atmung aus RR, wenn schon gerechnet."""
+        return atem_hinweis_aus(
+            atem_kennzahlen(von, bis),
+            lambda: rr_atmung_in([(von, bis)]) if rr_rate is None else rr_rate,
+        )
 
     def kachel_werte() -> list[KachelWert]:
         """Dieselben Werte wie live, für die ganze Messung."""
@@ -1138,7 +1188,7 @@ def _aufbauen(
         schatten_farbe = ft.Colors.with_opacity(0.16, farbe)
         out.extend(
             schatten(x(a), x(b), schatten_farbe)
-            for a, b in aa.einatem_bereiche(atem.phasen, von_w, bis_w)
+            for a, b in aa.einatem_bereiche(atem.phasen, von_w, bis_w, erfasst=atem.erfasst)
         )
         return out
 
@@ -1424,6 +1474,7 @@ def _aufbauen(
     def abschnitt_teile(a: Abschnitt) -> list[str]:
         """„Ø HF 72", „RMSSD 35" … — die Werte eines Abschnitts in Kurzform."""
         w = werte_von(a)
+        von, bis = a.rechenbereich(*grenzen())
         teile = [f"Ø HF {zahl(w['mean_bpm'])}", f"RMSSD {zahl(w['rmssd'])}"]
         teile.append(f"SDNN {zahl(w['sdnn'])}")
         if w["atem"] is not None:
@@ -1432,6 +1483,8 @@ def _aufbauen(
             teile.append(f"LF/HF {zahl(w['lf_hf'], 2)}")
         elif einst.frequenz and w["dauer_s"] < 120:
             teile.append("LF/HF ab 2 min")  # zu kurz: sagen, nicht verstecken (Ben, 27.10.)
+        if einst.frequenz and atem_hinweis_bereich(von, bis, w["atem"]):
+            teile.append(aa.LF_HINWEIS_KURZ)  # der Hinweis gilt je Bereich (Plan §7.1)
         return teile
 
     def abschnitt_zeile(a: Abschnitt) -> ft.Control:
@@ -2623,6 +2676,12 @@ def _aufbauen(
         fenster_kopf=None if z.nur_puls else fenster_kopf,  # ohne Intervalle keine Analyse
         warten=lambda: aw.griff is not None or aw.wartet,
         info_zusatz=lambda bereich: "" if z.nur_puls else _verlauf_info(bereich),
+        # „Atmung < 9/min“ für die Bandleiste — im Bereich des Analysefensters (C3)
+        atem_hinweis=lambda f: (
+            atem_hinweis()
+            if f is None or f.schluessel == AW_ALLES
+            else atem_hinweis_bereich(f.von, f.bis)
+        ),
         # Das Menü steht wie live an der Hauptkurve (Ben, 21.10.2026); Bereich und Chips
         # über der Hauptkurve, Spektrum und Verlaufskurven unter den Notizen (26.10.2026)
         menue_oben=lambda: menue_oben(),
@@ -3672,6 +3731,17 @@ def _aufbauen(
     atem_box = ft.Column(spacing=6, visible=False)
     atem_datei = atem_pfad(pfad)
 
+    def uebung_name(extra: Mapping[str, Any]) -> str:
+        """Der Name der Atemübung aus dem Protokollfeld (Kurzcode → Katalog, auch archivierte
+        Übungen); leer, wenn unbekannt — dann steht der Kurzcode."""
+        feld = atem_protokoll.feld_lesen(extra)
+        code = feld.get("uebung") if feld is not None else None
+        if not isinstance(code, str) or not code:
+            return ""
+        nach_id = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
+        ids = katalog_aufloesen([code], nach_id)
+        return nach_id[ids[0]].name if ids else ""
+
     def atem_abschnitt_zeilen() -> list[ft.Control]:
         atem = atem_stand["atem"]
         if atem is None:
@@ -3709,9 +3779,21 @@ def _aufbauen(
         if atem is None or k is None:
             atem_box.visible = False
             return
-        rr_rate = None if z.nur_puls else atmung()["rate"]
+        # Die Atmung aus RR dort, wo der Sensor erfasste — nicht über die ganze Messung
+        rr_rate = (
+            None
+            if z.nur_puls
+            else rr_atmung_in(
+                [
+                    (wand_zu_achse(zeilen_achse, wand, a), wand_zu_achse(zeilen_achse, wand, b))
+                    for a, b in atem.erfasst
+                ]
+            )
+        )
         hinweis_lf = atem_hinweis()
-        protokoll = atem_protokoll.text(atem_protokoll.feld_lesen(rec.extra))
+        protokoll = atem_protokoll.text(
+            atem_protokoll.feld_lesen(rec.extra), uebung_name(rec.extra)
+        )
         zeilen: list[ft.Control] = [
             kartentitel("Atmung (Prototyp)"),
             ft.Text(aa.zeile_text(k), size=13),
@@ -3753,7 +3835,8 @@ def _aufbauen(
         if state.route_nummer != ansicht_nummer:
             return
         atem_stand["atem"] = atem
-        atem_stand["kennzahlen"] = aa.kennzahlen(atem)
+        lo, hi = grenzen()
+        atem_stand["kennzahlen"] = atem_kennzahlen(lo, hi)  # mit Abdeckung des Bereichs
         atem_karte_zeichnen()
         with contextlib.suppress(Exception):
             ebenen_zeichnen()  # der Chip „Atmung“ gibt es erst jetzt
@@ -4074,7 +4157,15 @@ def _frequenz_tabelle(f: dict[str, Any] | None, atem_hinweis: str = "") -> ft.Co
         ("LF 0,04–0,15 Hz", [band("lf")]),
         ("HF 0,15–0,40 Hz", [aa.NICHT_AUSGEWIESEN if atem_hinweis else band("hf")]),
         ("LF/HF", [zahl(f.get("lf_hf"), 2)]),
-        ("LF n.u. / HF n.u.", [f"{zahl(f.get('lf_n'))} / {zahl(f.get('hf_n'))} %"]),
+        (
+            "LF n.u. / HF n.u.",
+            [
+                # HF n.u. folgt der HF-Power: nicht ausgewiesen, wenn der Hinweis greift (C3)
+                f"{zahl(f.get('lf_n'))} % / {aa.NICHT_AUSGEWIESEN}"
+                if atem_hinweis
+                else f"{zahl(f.get('lf_n'))} / {zahl(f.get('hf_n'))} %"
+            ],
+        ),
         ("Gipfel", [f"{zahl(gipfel, 2)} Hz · {zahl(gipfel * 60)}/min" if gipfel else "–"]),
     ]
     gruende = [
@@ -4086,7 +4177,10 @@ def _frequenz_tabelle(f: dict[str, Any] | None, atem_hinweis: str = "") -> ft.Co
     if atem_hinweis:
         text = " ".join(
             t
-            for t in (text, f"{atem_hinweis}: HF-Power nicht ausgewiesen, LF/HF mit Hinweis.")
+            for t in (
+                text,
+                f"{atem_hinweis}: HF-Power und HF n.u. nicht ausgewiesen, LF/HF mit Hinweis.",
+            )
             if t
         )
     return _zeilen_tabelle(["ganze Messung"], zeilen, text)

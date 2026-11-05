@@ -6,6 +6,7 @@ Phase im Kopf des Vollbilds, solange ein Zähl-Teil die Atmung erfasst. Nur mit 
 from __future__ import annotations
 
 import asyncio
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -18,7 +19,10 @@ from hrv_core.recording import Beat, Recording, speichern  # noqa: E402
 
 from attrappen import Aufbau, aufbauen, ruhe  # noqa: E402
 from trainingsapp.core import atem_auswertung as aa  # noqa: E402
+from trainingsapp.core.abschnitte import ende_marke, start_marke  # noqa: E402
+from trainingsapp.core.atem_protokoll import kopffeld_schreiben  # noqa: E402
 from trainingsapp.core.hrv_einstellungen import EBENE_ATMUNG  # noqa: E402
+from trainingsapp.core.kurzcode import kurzcode  # noqa: E402
 from trainingsapp.core.models import HrvRecording  # noqa: E402
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext  # noqa: E402
 from trainingsapp.devices.zaehlen import ZaehlBaustein  # noqa: E402
@@ -161,6 +165,121 @@ async def test_auswertung_zeigt_atmung_als_ebene_karte_und_hinweis(page, state, 
     chip.on_click()
     assert EBENE_ATMUNG not in state.hrv_einstellungen().ebenen
     assert schatten_reihen(ansicht) == []
+
+
+def _bandleiste(wurzel) -> dict[str, str]:
+    """Name → Wert der Bandleiste des Analysefensters (`components.spektrum.band_leiste`)."""
+    out: dict[str, str] = {}
+    for c in alle(wurzel):
+        if (
+            isinstance(c, ft.Row)
+            and len(c.controls) == 4
+            and isinstance(c.controls[1], ft.Text)
+            and c.controls[1].value in ("LF", "HF", "LF/HF")
+        ):
+            out[str(c.controls[1].value)] = str(c.controls[2].value)
+    return out
+
+
+def _frequenz_an(state) -> None:
+    einst = state.hrv_einstellungen()
+    einst.kacheln = [*einst.kacheln, "hf_power", "lf_hf", "dfa_alpha1"]
+    einst.frequenz = True
+    einst.atemuebung = True  # die Atmung aus RR auch unter 8/min (`hrv_core.atmung.ATEMUEBUNG`)
+    state.hrv_einstellungen_setzen(einst)
+    a = state.ansicht()
+    a.bereich = "frequenz"
+    state.ansicht_setzen(a)
+
+
+async def test_hinweis_folgt_in_bandleiste_und_tabelle_karte_nennt_die_uebung(
+    page, state, tmp_path
+) -> None:
+    """Fünfte Prüfrunde, C3 und C6: Greift der Hinweis, zeigt auch die Bandleiste des
+    Analysefensters HF nicht mehr in ms², und in der Frequenztabelle folgt HF n.u. der
+    HF-Power; die Karte nennt die Atemübung mit Namen, nicht mit Kurzcode."""
+    _frequenz_an(state)
+    eintrag = _messung(state, tmp_path)
+    uebung = state.uebungen.alle()[0]
+    kopffeld_schreiben(
+        tmp_path / "Messungen" / eintrag.file_path, {"art": "uebung", "uebung": kurzcode(uebung.id)}
+    )
+    ansicht = messung_detail_view(page, state, eintrag)
+    await warten(page)
+    alles = texte(ansicht)
+    assert aa.LF_HINWEIS in alles  # Lauf 90 s von 96 s, alle Fenster gültig: der Sensor gilt
+    assert _bandleiste(ansicht)["HF"] == "–"
+    assert any(aa.LF_HINWEIS + ": HF-Power nicht ausgewiesen" in t for t in alles)  # Bandleiste
+    assert any(t.endswith(f"% / {aa.NICHT_AUSGEWIESEN}") for t in alles)  # LF n.u. / HF n.u.
+    assert any(f"Atemübung {uebung.name}" in t for t in alles)
+    assert not any(kurzcode(uebung.id) in t for t in alles)
+
+
+def _messung_lang(state, tmp_path) -> HrvRecording:
+    """20 min: RSA 6/min in den ersten 60 s, danach 15/min; der Sensor erfasste nur die ersten
+    60 s (6/min, alle Fenster gültig); ein eigener Abschnitt „Atmen“ liegt über diesen 60 s."""
+    beats, t = [], 0.0
+    while t < 1200:
+        rr = 800 + 60 * math.sin(2 * math.pi * (0.1 if t < 60 else 0.25) * t)
+        t += rr / 1000
+        beats.append(Beat(t_s=round(t, 3), rr_ms=round(rr), hf_bpm=75, t_wall_s=round(t, 3)))
+    rec = Recording(beats=beats, geraet="Polar H10 TEST", geraet_profil="polar_h10")
+    for t_s, marke in (
+        (0.8, start_marke("seg-atem", "Atmen")),
+        (60.0, ende_marke("seg-atem", "Atmen")),
+    ):
+        i = next(i for i, b in enumerate(beats) if b.t_s >= t_s)
+        rec.ereignisse.append(
+            {
+                "beat_index": i,
+                "dt_s": 0.0,
+                "t_wall_s": beats[i].t_s,
+                "t_s": beats[i].t_s,
+                "wall_time": "06:00:00",
+                "text": "Atmen",
+                "marke": marke,
+            }
+        )
+    pfad = speichern(rec, tmp_path / "Messungen" / "PolarH10")
+    s = AtemSammler("sensor", "polar_h10", 50, prototyp="hrv_core.prototyp.atemzuege")
+    s.lauf_beginn(0.0)
+    for k in range(6):
+        s.phase(1.0 + 10 * k, "ein")
+        s.phase(5.0 + 10 * k, "aus")
+    for ende in range(30, 61, 5):
+        s.fenster(float(ende), 6.0, True)
+    s.lauf_ende(60.0)
+    s.schreiben(pfad)
+    eintrag = HrvRecording(
+        subject_id=state.profil.id,
+        file_path=pfad.relative_to(tmp_path / "Messungen").as_posix(),
+        geraet="Polar H10 TEST",
+        geraet_profil="polar_h10",
+    )
+    state.hrv.anlegen(eintrag)
+    return eintrag
+
+
+async def test_hinweis_gilt_je_bereich(page, state, tmp_path) -> None:
+    """Fünfte Prüfrunde, C2: 60 s Sensor bei 6/min sprechen nicht für 20 min — für die ganze
+    Messung gilt die Atmung aus RR (15/min, kein Hinweis, HF in der Bandleiste), für den
+    Abschnitt über die 60 s der Sensor (Hinweis in seiner Zeile); der Vergleich in der Karte
+    nimmt die Atmung aus RR der erfassten Läufe, nicht die der ganzen Messung."""
+    _frequenz_an(state)
+    eintrag = _messung_lang(state, tmp_path)
+    ansicht = messung_detail_view(page, state, eintrag)
+    await warten(page)
+    alles = texte(ansicht)
+    assert "ATMUNG (PROTOTYP)" in alles and aa.LF_HINWEIS not in alles
+    assert (
+        "6 Atemzüge · 6,0/min · Ein:Aus 1 : 1,5 · CV 0 % · 7 von 7 Fenstern gültig · 1:00 erfasst"
+        in alles
+    )
+    assert _bandleiste(ansicht)["HF"] != "–"
+    assert any(aa.LF_HINWEIS_KURZ in t and "Ø HF" in t for t in alles)  # die Zeile des Abschnitts
+    # Der Vergleich: die Atmung aus RR in 0–60 s (6/min) — nicht die 15/min über 20 min
+    vergleich = next(t for t in alles if t.startswith("Atmung aus RR"))
+    assert vergleich.startswith("Atmung aus RR: 6,") and "weicht" not in vergleich
 
 
 async def test_auswertung_ohne_beiwerk_ohne_ebene_und_karte(page, state, tmp_path) -> None:

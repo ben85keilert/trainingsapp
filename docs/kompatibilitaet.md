@@ -180,7 +180,7 @@ gelesenen Datei bleiben beim Schreiben erhalten und stehen am Ende.
 | `adresse` | str | **optional**, seit 19.10.2026: BLE-Adresse des Geräts (Android/Linux MAC, macOS/iOS UUID), nie bei Simulation. Pseudo-Identifikator — `hrv_core.deid` leert das Feld; praxis_gui erhält es als unbekanntes Feld. Dateien ohne Adresse haben den Schlüssel nicht. **Der Export entfernt das Feld** (seit 20.10.2026, S10): nur die Originaldatei auf dem Gerät trägt es, keine Kopie, die das Gerät verlässt (Abschnitt 2, „Export“) |
 | `intervall_quelle` | str | **Pflicht** — `ekg_rr` oder `ppg_ppi` |
 | `datenqualitaet` | str | **unsere Erweiterung**, direkt hinter `intervall_quelle`: `rr_ekg`, `ppi_optisch`, `bpm_only` (Abschnitt 5) |
-| `atmung` | dict | **unsere Erweiterung**, seit 5.11.2026 (geschrieben seit 0.3.46): Protokollfeld „Atmung“ — wie geatmet wurde (`spontan`, `getaktet`, `uebung`), direkt hinter `datenqualitaet`; fehlt = unbekannt (Abschnitt 5) |
+| `atmung` | dict | **unsere Erweiterung**, seit 5.11.2026 (geschrieben seit 0.3.46): Protokollfeld „Atmung“ — wie geatmet wurde (`spontan`, `getaktet`, `uebung`), beim Schreiben der App direkt hinter `datenqualitaet`, nach `Recording.to_dict` (Zusammenfügen, Zuschneiden) am Ende; fehlt = unbekannt (Abschnitt 5) |
 | `simulation` | bool | `true` ⇒ Ablage unter `Messungen/Generator/` |
 | `generator_config` | dict \| null | Syntheseparameter, nur bei Simulation |
 | `schema` | str | `"raw-v1"` |
@@ -470,7 +470,10 @@ Notifications ohne RR-Feld selbst schreibt.
 ### Unsere Erweiterung: `atmung` (seit 5.11.2026)
 
 Das **Protokollfeld „Atmung“** (`docs/plan_beschleunigung.md` §7.4, P125): zusätzlicher
-Schlüssel im Kopf, direkt hinter `datenqualitaet`. Es sagt, **wie** während der Messung
+Schlüssel im Kopf, beim Schreiben der App direkt hinter `datenqualitaet`
+(`core.atem_protokoll.einordnen`); schreibt `hrv_core.recording.Recording.to_dict` die Datei
+neu (Zusammenfügen, Zuschneiden, Notizen), steht es als unbekanntes Feld am Ende — lesbar
+bleibt es an jeder Stelle. Es sagt, **wie** während der Messung
 geatmet wurde — nicht wann (das steht im Beiwerk `atem-v1`, Abschnitt 15). `praxis_gui`
 liest defensiv, behält das Feld als unbekanntes Feld (`extra`) und schreibt es unverändert
 zurück — der Vertrag bleibt unverletzt.
@@ -909,10 +912,10 @@ Schreiber in hrv-core liegen, kann es die Datei später ohne eigene Übersetzung
   | `hrv_core` | str | Version der Bibliothek beim Schreiben (`hrv_core.__version__`) |
   | `quelle` | str | `"sensor"` (Beschleunigung des Gurts). `"takt"` ist für den Taktgeber reserviert (A18) |
   | `geraet` | str | Profil-ID (`polar_h10`, `verity_sense`, Abschnitt 5) — nie Name, Adresse oder Seriennummer |
-  | `rate_hz` | int | Abtastrate der Beschleunigung, aus der gerechnet wurde (nur zur Einordnung; Proben enthält die Datei nicht) |
-  | `erfasst` | list | Läufe von „Atmung erfassen“: `[[von_s, bis_s], …]`, ein Eintrag je Lauf, beim Schreiben alle geschlossen |
-  | `phasen` | list | `[[t_s, "ein"], [t_s, "aus"], …]` — Beginn von Ein- bzw. Ausatmen, zeitlich sortiert |
-  | `fenster` | list | `[[t_ende_s, rate_pro_min, gueltig, grund], …]` — laufende Rate je Prüffenster (alle 5 s, 30 s lang, Zeit = Fensterende); `rate_pro_min` `null`, wenn ungültig; `gueltig` bool; `grund` leer oder ein snake_case-Code des Prototyps (`bewegung`, `amplitude_klein`, `unregelmaessig`, `zu_wenig_zyklen`, `kein_gipfel`, …) |
+  | `rate_hz` | int \| float \| null | Abtastrate der Beschleunigung, aus der gerechnet wurde (nur zur Einordnung; Proben enthält die Datei nicht): ganzzahlig als int, sonst float, `null` ohne Rate |
+  | `erfasst` | list | Läufe von „Atmung erfassen“: `[[von_s, bis_s], …]`, ein Eintrag je Lauf, beim Schreiben alle geschlossen. Ein Lauf beginnt mit der **ersten Probe** des Sensors (nicht mit dem Tipp — die Anlaufzeit ist nicht erfasst; ohne eine Probe kein Lauf) bzw. bei 0, wenn die Aufnahme während der laufenden Erfassung beginnt (auch eine zweite Aufnahme, auch Teil 2 nach dem Teilen); er endet mit dem Ende der Erfassung, am Stopp der Aufnahme oder an der Naht beim Teilen |
+  | `phasen` | list | `[[t_s, "ein"], [t_s, "aus"], …]` — Beginn von Ein- bzw. Ausatmen, zeitlich sortiert; nie vor 0 (eine Phase, deren Ansatz vor dem Start der Aufnahme lag, gehört nicht in diese Datei) |
+  | `fenster` | list | `[[t_ende_s, rate_pro_min, gueltig, grund], …]` — laufende Rate je Prüffenster (alle 5 s, 30 s lang, Zeit = Fensterende); `rate_pro_min` `null`, wenn ungültig; `gueltig` bool; `grund` leer oder ein snake_case-Code des Prototyps — der **erste** Grund seiner Prüfreihenfolge (`hrv_core.prototyp.atemzuege`): `bewegung` → `amplitude_klein` → `kein_gipfel` / `gipfel_undeutlich` → `zu_wenig_zyklen` → `ungleichmaessig` / `zyklen_passen_nicht` (`devices/zaehlen.py` schreibt `gruende[0]`) |
 
   Alle Zeiten in **Sekunden auf der Wanduhr der Messung** (`t_wall_s` wie die Schläge,
   Abschnitt 4), 3 Nachkommastellen — so legt die Auswertung Phasen und RR-Abstände ohne
@@ -937,7 +940,9 @@ Schreiber in hrv-core liegen, kann es die Datei später ohne eigene Übersetzung
     geschrieben.
   - **`erfasst` unterscheidet gemessen von Lücke:** Ohne einen Lauf, der eine Zeit abdeckt,
     heißt „keine Phase“ *nicht gemessen*, nicht *kein Atemzug*. Die Auswertung zeigt
-    außerhalb der Läufe nichts, auch keine Rate.
+    außerhalb der Läufe nichts, auch keine Rate, und paart Phasen nur innerhalb eines Laufs
+    (`core.atem_auswertung.je_lauf`): kein Atemzug und kein Schatten über die Pause zwischen
+    zwei Läufen.
   - **Keine Korrekturen:** Die Datei wird nach dem Schreiben nicht verändert, keine ±1, kein
     Verschieben einer Phase. Was die Person am Zählen korrigiert, steht in der Zeitleiste
     der Einheit (`korrektur`, `docs/plan_beschleunigung.md` §5.3), nie hier.
@@ -945,7 +950,9 @@ Schreiber in hrv-core liegen, kann es die Datei später ohne eigene Übersetzung
     zur Richtung; `geraet` ist nur die Profil-ID, die Bluetooth-Adresse steht nirgends.
 - **deid und Export:** `hrv_core.deid` kennt die Endung als Beiwerk (`BEIWERK_SUFFIXE`),
   erkennt das Format am `schema` und am Suffix (`format_erkennen`) und behält alle Felder
-  (`REGELN["atem-v1"]`, Listen als Ganzes) — es gibt nichts zu bereinigen. Export-ZIP,
+  (`REGELN["atem-v1"]`, Listen als Ganzes) — es gibt nichts zu bereinigen; die deid-Kopie ist
+  inhaltlich gleich, aber eingerückt geschrieben (wie beim EKG), die Export-Kopie byteidentisch
+  (Dateikopie). Export-ZIP,
   Forschungsexport einer Einheit und Teilen nehmen die Datei als **Dateikopie** am Stamm mit
   (Abschnitt 2, Export; `core.hrv_export.zugehoerige_dateien`), wie das EKG-Beiwerk.
 - **Messdatei unverändert:** `raw-v1` bekommt für die Phasen kein neues Feld; die Messung ist

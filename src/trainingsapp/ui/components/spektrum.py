@@ -100,14 +100,18 @@ def spektrum_kurve(fs: Fensterspektrum | None, *, hoehe: int = 150) -> ft.Contro
     )
 
 
-def band_leiste(fs: Fensterspektrum | None, optisch: bool = False) -> ft.Control:
-    """LF, HF, LF/HF und Gipfel des Ausschnitts in einer Zeile — mit Vorbehalt bei kurzer Dauer."""
+def band_leiste(
+    fs: Fensterspektrum | None, optisch: bool = False, atem_hinweis: str = ""
+) -> ft.Control:
+    """LF, HF, LF/HF und Gipfel des Ausschnitts in einer Zeile — mit Vorbehalt bei kurzer
+    Dauer. ``atem_hinweis`` („Atmung < 9/min — liegt im LF-Band“, Plan Beschleunigung §7.1):
+    HF-Power wird dann nicht ausgewiesen, LF/HF bekommt den Hinweis — wie die Kachel."""
     if fs is None:
         return ft.Container()
     w = fs.werte
     teile = [
         ("LF", zahl(w.get("lf")), "ms²", FARBEN["lf_power"]),
-        ("HF", zahl(w.get("hf")), "ms²", FARBEN["hf_power"]),
+        ("HF", "–" if atem_hinweis else zahl(w.get("hf")), "ms²", FARBEN["hf_power"]),
         ("LF/HF", zahl(w.get("lf_hf"), 2), "", FARBEN["lf_hf"]),
     ]
     gipfel = w.get("gipfel_hz")
@@ -151,6 +155,8 @@ def band_leiste(fs: Fensterspektrum | None, optisch: bool = False) -> ft.Control
         )
     if optisch:
         vorbehalt.append("Optische Pulsintervalle: Frequenzwerte mit Vorbehalt.")
+    if atem_hinweis:
+        vorbehalt.append(f"{atem_hinweis}: HF-Power nicht ausgewiesen, LF/HF mit Hinweis.")
     if vorbehalt:
         zeilen.append(ft.Text(" ".join(vorbehalt), size=11, opacity=0.6))
     return ft.Column(spacing=4, tight=True, controls=zeilen)

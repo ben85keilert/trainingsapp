@@ -159,3 +159,26 @@ def test_zeit_und_wiederholungen_zusammen_und_ein_zweites_wdh_feld(repos) -> Non
     eintrag = sitzungen.lauf_eintragen(sitzung, u, {"hold": [30], "reps_2": [15]}, tag)
     eintrag = sitzungen.lauf_eintragen(sitzung, u, {"hold": [28], "reps_2": [14]}, tag)
     assert eintrag.result == {"hold": [30, 28], "reps_2": [15, 14]}
+
+
+def test_uhr_bis_uebergeht_den_zwischenstand_der_atem_spur() -> None:
+    """Fünfte Prüfrunde, B3: Wdh + Atmung mit Uhr, Absturz mitten im zweiten Abschnitt — der
+    Satz hat noch keinen Zwischenstand, die Atem-Spur schon (``zaehlart`` atem, ``satz`` 0):
+    der Abschnitt bleibt offen (keine Zeit ohne Wiederholungen), die Atem-Spur sagt nichts
+    über den Satz."""
+    ab = lambda t, **d: Ereignis(t, "timer", "abschnitt", "", {"name": "Halten", **d})  # noqa: E731
+    wdh = lambda t, n, w: Ereignis(  # noqa: E731
+        t, "zaehlen", "zaehlung", "", {"satz": n, "wert": w, "zaehlart": "wdh", "feld": "reps"}
+    )
+    atem = lambda t, w: Ereignis(  # noqa: E731
+        t, "zaehlen", "zaehlung", "", {"satz": 0, "wert": w, "zaehlart": "atem"}
+    )
+    ev = [ab(0.0), wdh(30.0, 1, 9), atem(30.0, 3), ab(30.0, zaehlt=False), ab(40.0), atem(45.0, 4)]
+    assert ze.uhr_bis(ev) is None
+    assert [(g.sekunden, g.laeuft) for g in ze.zeiten_der_uhr(ev) if g.zaehlt and not g.laeuft] == [
+        (30.0, False)
+    ]
+    # Nur Atmung mit Uhr: kein Satz, also nie ein Stand der Uhr aus der Atem-Spur
+    assert ze.uhr_bis([ab(0.0), atem(15.0, 2), atem(30.0, 4)]) is None
+    # Mit Zwischenstand des Satzes wie bisher
+    assert ze.uhr_bis([*ev, wdh(50.0, 2, 4), atem(60.0, 6)]) == 50.0

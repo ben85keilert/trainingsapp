@@ -981,3 +981,113 @@ async def test_leerer_atem_sammler_schreibt_nichts(tmp_path) -> None:
     assert leer.aufnahme_stoppen(tmp_path) is None and leer.atem is None
     await leer.trennen()
     assert not list(tmp_path.rglob("*_atem.*"))
+
+
+async def test_aufnahme_waehrend_laufender_atem_spur_bekommt_beiwerk(tmp_path) -> None:
+    """Fünfte Prüfrunde, B1: Beginnt die Aufnahme erst, nachdem „Atmung erfassen“ lief, oder
+    folgt eine zweite Aufnahme, bekommt jede ihren Sammler mit einem Lauf ab ihrem Start —
+    die Spur war die ganze Zeit an (`Messlauf.atem_aktiv`), nur das Beiwerk fehlte."""
+    from hrv_core.atem import atem_laden, atem_pfad
+
+    lauf = Messlauf(SimulatedSource(tempo=60.0, seed=7), backup_basis=tmp_path)
+    await lauf.verbinden(SIM_SYNTH, None)
+    task = asyncio.create_task(lauf.laufen())
+    # Die Spur beginnt ohne Aufnahme: kein Sammler, aber gemerkt
+    assert lauf.atem_sammler(geraet="polar_h10", rate_hz=50) is None
+    lauf.atem_lauf_beginn(lauf.start_mono + 1.0)
+    lauf.atem_phase(lauf.start_mono + 2.0, "ein")
+    assert lauf.atem is None and lauf.atem_aktiv
+    lauf.aufnahme_starten()
+    aufnahme = lauf.aufnahme
+    assert aufnahme is not None
+    start = aufnahme.start_mono
+    assert lauf.atem is not None and lauf.atem.offen and lauf.atem.laeufe == [[0.0, None]]
+    assert lauf.atem.geraet == "polar_h10" and lauf.atem.rate_hz == 50
+    lauf.atem_phase(start + 3.0, "aus")
+    lauf.atem_fenster(start + 30.0, 6.0, True)
+    await _bis(lauf, 35)
+    erste = lauf.aufnahme_stoppen(tmp_path)
+    assert erste is not None
+    a1 = atem_laden(atem_pfad(erste.pfad))
+    assert a1.phasen == [(3.0, "aus")] and a1.fenster == [(30.0, 6.0, True, "")]
+    assert len(a1.erfasst) == 1 and a1.erfasst[0][0] == 0.0 and a1.erfasst[0][1] >= 35.0
+    # Die Spur läuft weiter — die zweite Aufnahme bekommt wieder einen Lauf ab 0
+    assert lauf.atem is None and lauf.atem_aktiv
+    lauf.aufnahme_starten()
+    aufnahme2 = lauf.aufnahme
+    assert aufnahme2 is not None and lauf.atem is not None and lauf.atem.laeufe == [[0.0, None]]
+    lauf.atem_phase(aufnahme2.start_mono + 4.0, "ein")
+    lauf.atem_lauf_ende(aufnahme2.start_mono + 9.0)
+    assert not lauf.atem_aktiv and not lauf.atem.offen
+    await _bis(lauf, 12)
+    zweite = lauf.aufnahme_stoppen(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert zweite is not None and zweite.pfad != erste.pfad
+    a2 = atem_laden(atem_pfad(zweite.pfad))
+    assert a2.erfasst == [(0.0, 9.0)] and a2.phasen == [(4.0, "ein")]
+    # Ohne laufende Spur legt eine Aufnahme keinen Sammler an; ein Lauf, der während der
+    # Aufnahme beginnt, beginnt an seiner Stelle — nicht bei 0
+    lauf2 = Messlauf(SimulatedSource(tempo=60.0, seed=7), backup_basis=tmp_path)
+    await lauf2.verbinden(SIM_SYNTH, None)
+    task2 = asyncio.create_task(lauf2.laufen())
+    lauf2.aufnahme_starten()
+    assert lauf2.atem is None
+    assert lauf2.atem_sammler(geraet="polar_h10", rate_hz=50) is not None
+    assert lauf2.aufnahme is not None
+    lauf2.atem_lauf_beginn(lauf2.aufnahme.start_mono + 5.0)
+    assert lauf2.atem is not None and lauf2.atem.laeufe == [[5.0, None]]
+    await lauf2.trennen()
+    await asyncio.wait_for(task2, 5)
+
+
+async def test_phasen_von_vor_dem_aufnahmestart_fallen_weg(tmp_path) -> None:
+    """Fünfte Prüfrunde, B2: Beim Teilen liegt der Ansatz einer Phase vor der Naht, bestätigt
+    wird sie danach — sie gehört nicht in Teil 2 und bekommt dort keine negative Zeit; ebenso
+    ein Fenster, das vor dem Start endete. Lauf-Grenzen von davor liegen bei 0."""
+    from hrv_core.atem import atem_laden, atem_pfad
+
+    lauf, task = await _laufend(tmp_path)
+    alt = lauf.aufnahme
+    assert alt is not None
+    assert lauf.atem_sammler(geraet="polar_h10", rate_hz=50) is not None
+    lauf.atem_lauf_beginn(alt.start_mono - 2.0)  # von vor dem Start: ab 0
+    assert lauf.atem is not None and lauf.atem.laeufe == [[0.0, None]]
+    lauf.atem_phase(alt.start_mono - 0.3, "ein")
+    lauf.atem_fenster(alt.start_mono - 1.0, 6.0, True)
+    lauf.atem_phase(alt.start_mono + 0.0, "aus")
+    assert lauf.atem.phasen == [(0.0, "aus")] and lauf.atem.fenster_liste == []
+    await _bis(lauf, 12)
+    teil1 = await lauf.aufnahme_teilen_async(tmp_path)
+    neu = lauf.aufnahme
+    assert teil1 is not None and neu is not None
+    lauf.atem_phase(neu.start_mono - 0.31, "ein")  # Ansatz vor der Naht, bestätigt danach
+    lauf.atem_phase(neu.start_mono + 4.69, "aus")
+    await _bis(lauf, 8)
+    teil2 = await lauf.aufnahme_stoppen_async(tmp_path)
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)
+    assert teil2 is not None
+    a2 = atem_laden(atem_pfad(teil2.pfad))
+    assert a2.phasen == [(4.69, "aus")] and all(t >= 0.0 for t, _ in a2.phasen)
+    assert a2.erfasst[0][0] == 0.0
+
+
+async def test_stopp_schliesst_den_atem_lauf_am_stopp(tmp_path) -> None:
+    """Fünfte Prüfrunde, B5: Stoppt die Aufnahme, während die Spur läuft, endet der Lauf im
+    Beiwerk am Stopp — nicht am letzten Fenster (bis 5 s früher); die Spur bleibt an."""
+    from hrv_core.atem import atem_laden, atem_pfad
+
+    lauf, task = await _laufend(tmp_path)
+    aufnahme = lauf.aufnahme
+    assert aufnahme is not None
+    assert lauf.atem_sammler(geraet="polar_h10", rate_hz=50) is not None
+    lauf.atem_lauf_beginn(aufnahme.start_mono + 2.0)
+    lauf.atem_fenster(aufnahme.start_mono + 10.0, 6.0, True)
+    await _bis(lauf, 20)
+    ergebnis = lauf.aufnahme_stoppen(tmp_path)
+    assert ergebnis is not None and lauf.atem_aktiv and lauf.atem is None
+    a = atem_laden(atem_pfad(ergebnis.pfad))
+    assert len(a.erfasst) == 1 and a.erfasst[0][0] == 2.0 and a.erfasst[0][1] >= 20.0
+    await lauf.trennen()
+    await asyncio.wait_for(task, 5)

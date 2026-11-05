@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -285,3 +286,22 @@ def test_werteachsen_standard_in_den_einstellungen(tmp_path) -> None:
         assert (von.value, bis.value) == ("300", "1500") and not von.error
     finally:
         state.schliessen()
+
+
+def test_neue_ebene_ist_bei_alter_installation_an() -> None:
+    """Fünfte Prüfrunde, C4: Eine vor der Ebene „Atmung“ gespeicherte Liste kennt sie nicht —
+    beim Lesen ist sie an wie bei einer frischen Installation; abgewählt bleibt abgewählt,
+    sobald die Merkliste ``ebenen_bekannt`` sie kennt."""
+    from trainingsapp.core.hrv_einstellungen import EBENE_ATMUNG, EBENEN, ebenen_lesen
+
+    alt = HrvEinstellungen.aus_dict({"ebenen": ["notizen", "leistungen", "abschnitte"]})
+    assert alt.ebenen == ["notizen", "leistungen", "abschnitte", EBENE_ATMUNG]
+    assert HrvEinstellungen.aus_dict({"ebenen": ["notizen"]}).ebenen == ["notizen", EBENE_ATMUNG]
+    e = HrvEinstellungen()
+    e.ebenen = ["notizen", "leistungen"]  # Atmung und Abschnitte abgewählt
+    d = e.als_dict()
+    assert d["ebenen_bekannt"] == list(EBENEN)
+    assert HrvEinstellungen.aus_dict(d).ebenen == ["notizen", "leistungen"]
+    assert einstellungen_lesen(json.dumps(d)).ebenen == ["notizen", "leistungen"]
+    assert ebenen_lesen({"ebenen": "kaputt"}) == list(EBENEN)
+    assert ebenen_lesen({"ebenen": [], "ebenen_bekannt": list(EBENEN)}) == []

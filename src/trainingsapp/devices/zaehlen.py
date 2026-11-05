@@ -333,6 +333,10 @@ class ZaehlBaustein:
         self._takt_s = ZAEHL_TAKT_S
         #: der Atem-Prototyp, solange die Atem-Spur läuft (ab `starten`, wenn „Atmung“ an)
         self._atem_live: prototyp_atem.AtemLive | None = None
+        #: ob der Lauf im Beiwerk eröffnet ist — erst mit dem ersten Rahmen (`_atem_fuettern`):
+        #: die Anlaufzeit bis dahin ist nicht „erfasst“, und ohne einen Rahmen gibt es
+        #: keinen Lauf (fünfte Prüfrunde, B4)
+        self._atem_begonnen = False
         #: bis wohin (Uhr der Quelle) die Proben dem Prototyp gefüttert sind — nur Neues
         self._atem_bis_quelle: float | None = None
         #: Einatemzeiten (Achse der Einheit) — bestätigte Phasen „ein“
@@ -992,14 +996,15 @@ class ZaehlBaustein:
     # -- Atem-Spur ----------------------------------------------------------------------
 
     def _atem_beginnen(self) -> None:
-        """Die Atem-Spur beginnt mit dem Lauf: Prototyp in der Rate des Laufs, Sammler und
-        Lauf am Messlauf (ohne Aufnahme tut der nichts)."""
+        """Die Atem-Spur beginnt mit dem Lauf: Prototyp in der Rate des Laufs, Sammler am
+        Messlauf (ohne Aufnahme tut der nichts); der Lauf im Beiwerk beginnt mit dem ersten
+        Rahmen (`_atem_fuettern`)."""
         self._atem_live = prototyp_atem.AtemLive(float(self.rate_hz))
         quelle_s = self._auf_quelle(self._start_s)
         self._atem_bis_quelle = quelle_s
         self._atem_letztes_ein_s = self._start_s
+        self._atem_begonnen = False
         self._messlauf_atem("atem_sammler", geraet=self.geraet, rate_hz=self.rate_hz)
-        self._messlauf_atem("atem_lauf_beginn", quelle_s)
 
     def _atem_fuettern(self, t: float) -> None:
         """Die seit dem letzten Takt neu angekommenen Proben dem Prototyp geben — in der
@@ -1017,6 +1022,9 @@ class ZaehlBaustein:
             return
         rate = float(reihe.rate_hz)
         self._atem_bis_quelle = float(reihe.t[-1]) + 0.5 / rate  # ab der nächsten Probe
+        if not self._atem_begonnen:  # erfasst ab der ersten Probe, nicht ab dem Tipp (B4)
+            self._atem_begonnen = True
+            self._messlauf_atem("atem_lauf_beginn", float(reihe.t[0]))
         beginn = time.perf_counter()
         try:
             schnitte = np.flatnonzero(np.diff(reihe.t) > ACC_LUECKE_PROBEN / rate) + 1
@@ -1086,12 +1094,14 @@ class ZaehlBaustein:
                 phase=self._atem_rate if self._atem_rate is not None else "",
                 t=self._quelle_ns(t),
             )
-        self._messlauf_atem("atem_lauf_ende", self._auf_quelle(t))
+        if self._atem_begonnen:  # ohne einen Rahmen gab es keinen Lauf
+            self._messlauf_atem("atem_lauf_ende", self._auf_quelle(t))
         self._atem_live = None
 
     def _atem_erfasst(self) -> bool:
-        """Gab es etwas zu melden — Proben kamen, oder die Person korrigierte?"""
-        return self.atem and (self.atem_sensor is not None or bool(self.atem_korrektur))
+        """Gab es etwas zu melden — Proben kamen (`_atem_begonnen`; der Abschluss des Prototyps
+        allein macht noch keinen Stand), oder die Person korrigierte?"""
+        return self.atem and (self._atem_begonnen or bool(self.atem_korrektur))
 
     def _atem_korrigieren(self, delta: int) -> bool:
         """±1 an den Atemzügen (nur Atmung): ``person/korrektur`` mit ``zaehlart`` atem und

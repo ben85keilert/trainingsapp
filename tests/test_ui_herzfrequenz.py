@@ -455,7 +455,7 @@ async def test_hf_blatt_mittel_bereiche_und_signal(daten) -> None:
         schalter = next(
             c
             for c in _alle(blatt)
-            if isinstance(c, ft.Switch) and c.label == "Signal über einer Grenze"
+            if isinstance(c, ft.Switch) and c.label == "Ton außerhalb des Zielbereichs"
         )
         schalter.on_change(SimpleNamespace(control=SimpleNamespace(value=False)))
         assert state.hf_einstellungen().alarm_grenze() is None
@@ -473,7 +473,7 @@ def test_einstellungen_herzfrequenz_signal_karte(daten) -> None:
     seite = _seite()
     view = einstellungen_herzfrequenz(seite, state)
     assert "SIGNAL ÜBER EINER GRENZE" in _texte(view)
-    klang = next(c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "Klang")
+    klang = next(c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "Klang darüber")
     assert [o.key for o in klang.options][:2] == ["wechsel", "glocke1"]
     assert "schale" in [o.key for o in klang.options]
     klang.on_select(SimpleNamespace(control=SimpleNamespace(value="holz")))

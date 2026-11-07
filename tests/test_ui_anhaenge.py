@@ -3,6 +3,7 @@ Tagebuch, Übung, Einstellungen, Ansicht und Aufnahmeseite (am Rechner: „Datei
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -627,6 +628,46 @@ async def test_audio_verwerfen_verlassen_und_ohne_berechtigung(welt, page) -> No
     im_browser = _Ton(page, welt.state, _ziel(welt))
     await im_browser.starten()
     assert "Browser" in im_browser.status.value
+
+
+class _StummerSpieler:
+    """flet-audio am Rechner: Anhalten und Freigeben antworten nie (Flet wartet ohne Limit)."""
+
+    async def pause(self) -> None:
+        await asyncio.Event().wait()
+
+    async def release(self) -> None:
+        await asyncio.Event().wait()
+
+
+async def test_audio_behalten_wenn_der_spieler_nie_antwortet(welt, page, monkeypatch) -> None:
+    """Am Rechner (7.11.2026): „Behalten“ wartete ewig auf den Spieler, das Verlassen der
+    Seite dazwischen löschte die Datei — danach AttributeError auf ``None``. Jetzt wartet
+    `anhalten` höchstens kurz, ein Doppeltipp zählt einmal, und Zurück oder „Verwerfen“
+    während des Speicherns warten auf „Behalten“, das danach selbst zurückgeht."""
+    from trainingsapp.ui.components import tonspieler
+    from trainingsapp.ui.views.anhang_ton import _Ton
+
+    monkeypatch.setattr(tonspieler, "ANHALTEN_S", 0.01)
+    vorher = len(welt.state.anhaenge.je_eintrag(welt.eintrag.id))
+
+    t = _Ton(page, welt.state, _ziel(welt))
+    t.rekorder = _Rekorder()
+    await t.starten()
+    await t.stoppen()
+    t.spieler.audio = _StummerSpieler()
+    await asyncio.gather(t.behalten(), t.behalten())  # Doppeltipp
+    assert len(welt.state.anhaenge.je_eintrag(welt.eintrag.id)) == vorher + 1
+
+    weg = _Ton(page, welt.state, _ziel(welt))  # Zurück und Verwerfen dazwischen
+    weg.rekorder = _Rekorder()
+    await weg.starten()
+    await weg.stoppen()
+    weg.spieler.audio = _StummerSpieler()
+    page.routen.clear()
+    await asyncio.gather(weg.behalten(), weg.zurueck(), weg.verwerfen())
+    assert len(welt.state.anhaenge.je_eintrag(welt.eintrag.id)) == vorher + 2
+    assert page.routen == ["/"] and not list(welt.state.anhaenge.aufnahme_ordner().iterdir())
 
 
 async def test_audio_ohne_aac_wird_wav(welt, page) -> None:

@@ -11,6 +11,7 @@ verlässt, hält ihn mit `anhalten` an, sonst spielte er weiter.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,10 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.anhaenge import dauer_text
+
+#: Wie lange `anhalten` je Aufruf auf den Dienst wartet (s) — Flet wartet ohne Zeitlimit, und
+#: am Rechner (Demo) antwortet flet-audio mitunter nie; „Behalten“ hing dann (7.11.2026)
+ANHALTEN_S = 2.0
 
 
 class Tonspieler:
@@ -120,10 +125,9 @@ class Tonspieler:
         """Beim Verlassen der Seite: anhalten und freigeben."""
         if self.audio is None:
             return
-        with contextlib.suppress(Exception):
-            await self.audio.pause()
-        with contextlib.suppress(Exception):
-            await self.audio.release()
+        for methode in (self.audio.pause, self.audio.release):
+            with contextlib.suppress(Exception):  # auch TimeoutError
+                await asyncio.wait_for(methode(), ANHALTEN_S)
         self.spielt = False
 
     # -- Ereignisse des Dienstes -----------------------------------------------------------

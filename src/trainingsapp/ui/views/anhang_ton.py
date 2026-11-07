@@ -72,6 +72,8 @@ class _Ton:
         self.dauer_s: float | None = None
         #: Beendet und bereit zum Behalten
         self.fertig = False
+        #: „Behalten“ läuft — ein zweiter Tipp und „Verwerfen“ warten nicht dazwischen
+        self.speichert = False
         self.spieler: Tonspieler | None = None
         self.ticker: Any = None
         self.notiz = ft.TextField(
@@ -237,33 +239,40 @@ class _Ton:
     # -- Ergebnis ------------------------------------------------------------------------
 
     async def behalten(self) -> None:
-        if not self.fertig or self.datei is None:
+        datei = self.datei
+        if not self.fertig or datei is None or self.speichert:
             return
-        if self.spieler is not None:
-            await self.spieler.anhalten()
-        a = neuer_anhang(
-            self.ziel,
-            AUDIO,
-            self.qualitaet,
-            self.beginn or jetzt(),
-            dauer_s=self.dauer_s,
-            note=self.notiz.value or "",
-            endung=self.endung,
-        )
+        self.speichert = True
         try:
-            # Verschieben im Thread, die Zeile im Event-Loop (die Verbindung gehört ihm)
-            await asyncio.to_thread(self.state.anhaenge.dateien_uebernehmen, a, self.datei)
-            self.state.anhaenge.eintragen(a)
-        except (OSError, sqlite3.Error) as fehler:
-            self.melden(f"Nicht gespeichert: {fehler}")
-            return
-        self.datei = None
-        self.fertig = False
+            if self.spieler is not None:
+                await self.spieler.anhalten()
+            a = neuer_anhang(
+                self.ziel,
+                AUDIO,
+                self.qualitaet,
+                self.beginn or jetzt(),
+                dauer_s=self.dauer_s,
+                note=self.notiz.value or "",
+                endung=self.endung,
+            )
+            try:
+                # Verschieben im Thread, die Zeile im Event-Loop (die Verbindung gehört ihm)
+                await asyncio.to_thread(self.state.anhaenge.dateien_uebernehmen, a, datei)
+                self.state.anhaenge.eintragen(a)
+            except (OSError, sqlite3.Error) as fehler:
+                self.melden(f"Nicht gespeichert: {fehler}")
+                return
+            self.datei = None
+            self.fertig = False
+        finally:
+            self.speichert = False
         self.page.show_dialog(ft.SnackBar(ft.Text("Audioaufnahme gespeichert")))
         await self.zurueck()
 
     async def verwerfen(self) -> None:
         """Weg damit — und gleich bereit für einen neuen Versuch."""
+        if self.speichert:
+            return
         if self.spieler is not None:
             await self.spieler.anhalten()
             self.spieler = None
@@ -275,6 +284,8 @@ class _Ton:
         self.zeichnen()
 
     async def zurueck(self) -> None:
+        if self.speichert:  # „Behalten“ geht gleich selbst zurück
+            return
         await self.aufraeumen()
         # Eine Notiz zum Tag, die nur für diesen Anhang entstand, verschwindet wieder, wenn
         # nichts behalten wurde (`components/tagesnotiz.py`)

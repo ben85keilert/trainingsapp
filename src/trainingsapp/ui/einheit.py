@@ -894,24 +894,23 @@ def teil_route(teil: Any) -> str | None:
 
 def ziel_merken(state: Any, teil: Any) -> None:
     """Vor dem Weg nach `teil_route`: Führt er in einen Plan (das Zählen einer Planübung,
-    ``/plan/<id>``), beginnt die Planliste bei dieser Übung, aufgeklappt — wie „Weiter mit …“
-    auf „Heute“ (`AppState.plan_ziel`, `plan_offen`). Die Uhr einer Planübung braucht das
+    ``/plan/<id>``), zeigt der Plan diese Übung — wie „Weiter mit …“ auf „Heute“
+    (`AppState.plan_ziel`). Die Uhr einer Planübung braucht das
     nicht, ihre Route nennt die Planübung (der Timer liegt über dem Plan). Erst beim Tipp
     aufrufen: Das Ziel gilt für den nächsten Aufbau des Plans, einmal.
 
     >>> from types import SimpleNamespace as NS
     >>> from trainingsapp.devices.einheit import UebungKontext
-    >>> state, lauf = NS(plan_ziel=None, plan_offen=None), NS(profil=None, uhr=lambda: 0.0)
+    >>> state, lauf = NS(plan_ziel=None), NS(profil=None, uhr=lambda: 0.0)
     >>> ziel_merken(state, ZaehlBaustein(lauf, UebungKontext("u1", "Kniebeuge", "p1", "i1")))
-    >>> state.plan_ziel, state.plan_offen
-    ('i1', 'i1')
-    >>> state = NS(plan_ziel=None, plan_offen=None)
+    >>> state.plan_ziel
+    'i1'
+    >>> state = NS(plan_ziel=None)
     >>> ziel_merken(state, ZaehlBaustein(lauf, UebungKontext("u1", "Kniebeuge")))
     >>> state.plan_ziel is None
     True
     """
     if isinstance(teil, ZaehlBaustein) and teil.kontext.plan_id and teil.kontext.item_id:
-        state.plan_offen = teil.kontext.item_id
         state.plan_ziel = teil.kontext.item_id
 
 

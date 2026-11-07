@@ -6,11 +6,13 @@ Drei Spalten, die neueste oben, unter jeder Kachel das Datum; Filter „4 Wochen
 einer Familie zählen mit, wie im Verlauf der Mengen. Ein Tipp öffnet die Ansicht
 (`views/anhang.py`) unter ``/uebung/<id>`` — dort blättern die Pfeile chronologisch durch
 alle Aufnahmen dieser Übung: das „wie schaut die Übung im Verlauf aus“. Die App zeigt,
-sie bewertet nicht.
+sie bewertet nicht. Der Filter füllt nur das Raster neu — ein Neuaufbau der Seite sprang
+nach oben (Ben, 7.11.2026).
 """
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import Any
 
@@ -29,7 +31,6 @@ def aufnahmen_raster(page: Any, state: AppState, uebung: Exercise) -> ft.Control
     if not alle:
         return None
     heute = state.heute()
-    gezeigt = im_zeitraum(alle, state.anhaenge_zeitraum, heute)
     basis = f"/uebung/{uebung.id}"
 
     def oeffner(a: Anhang) -> Callable[[], Any]:
@@ -39,9 +40,12 @@ def aufnahmen_raster(page: Any, state: AppState, uebung: Exercise) -> ft.Control
         return handler
 
     def zeitraum_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
-        if e.control.selected:
-            state.anhaenge_zeitraum = str(e.control.selected[0])
-            state.neu_zeichnen()
+        if not e.control.selected:
+            return
+        state.anhaenge_zeitraum = str(e.control.selected[0])
+        huelle.content = raster_bauen()
+        with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
+            huelle.update()
 
     def unterschrift(a: Anhang) -> str:
         t = a.tag
@@ -69,8 +73,12 @@ def aufnahmen_raster(page: Any, state: AppState, uebung: Exercise) -> ft.Control
             ),
         ],
     )
-    raster: ft.Control = (
-        ft.Row(
+
+    def raster_bauen() -> ft.Control:
+        gezeigt = im_zeitraum(alle, state.anhaenge_zeitraum, heute)
+        if not gezeigt:
+            return ft.Text("In diesem Zeitraum keine Aufnahmen.", size=13, opacity=0.6)
+        return ft.Row(
             wrap=True,
             spacing=8,
             run_spacing=10,
@@ -85,10 +93,9 @@ def aufnahmen_raster(page: Any, state: AppState, uebung: Exercise) -> ft.Control
                 for a in gezeigt
             ],
         )
-        if gezeigt
-        else ft.Text("In diesem Zeitraum keine Aufnahmen.", size=13, opacity=0.6)
-    )
-    return ft.Column(spacing=10, controls=[kopf, raster])
+
+    huelle = ft.Container(content=raster_bauen())
+    return ft.Column(spacing=10, controls=[kopf, huelle])
 
 
 __all__ = ["aufnahmen_raster"]

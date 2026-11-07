@@ -310,15 +310,28 @@ def test_uebung_zeigt_geaendert_und_setzt_zurueck(page, state) -> None:
 
     ansicht = uebung_detail(page, state, wade, ft.UrlLauncher())
     assert "  (Paket „Standard“, geändert)" in texte(ansicht)
+    assert any(t.startswith("Weicht vom Paket „Standard“ ab") for t in texte(ansicht))
+    # Zurückgesetzt wird nur unter „Übung bearbeiten“ (Ben, 7.11.2026)
+    assert not any(
+        isinstance(c, ft.TextButton) and c.content == "Auf Paketstand zurücksetzen"
+        for v in ansicht.controls
+        for c in alle(v)
+    )
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+
+    editor = uebung_bearbeiten(page, state, wade)
+    assert "PAKET" in texte(editor)
     knopf = next(
         c
-        for v in ansicht.controls
+        for v in editor.controls
         for c in alle(v)
         if isinstance(c, ft.TextButton) and c.content == "Auf Paketstand zurücksetzen"
     )
     knopf.on_click()
     dialoge[-1].actions[1].on_click()
     assert state.pakete.abweichungen(state.uebungen.laden(wade.id)) == []
+    # Eine Übung auf Paketstand hat den Abschnitt nicht
+    assert "PAKET" not in texte(uebung_bearbeiten(page, state, state.uebungen.laden(wade.id)))
 
 
 def test_paket_deaktivieren_und_groesse(page, state) -> None:

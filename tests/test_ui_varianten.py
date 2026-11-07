@@ -21,7 +21,7 @@ from trainingsapp.core import varianten as var  # noqa: E402
 from trainingsapp.core.models import Exercise, Plan, PlanItem  # noqa: E402
 from trainingsapp.core.result_spec import ResultSpec, vorrat_feld  # noqa: E402
 from trainingsapp.core.standards import varianten_an  # noqa: E402
-from trainingsapp.ui.state import UNTEREINANDER, AppState  # noqa: E402
+from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.plan import plan_view  # noqa: E402
 
 KURZ_LANG = [var.Variante("kurz", kuerzel="K"), var.Variante("lang", text="Brust bis zum Boden")]
@@ -95,7 +95,6 @@ def _plan(state: AppState, uebung: Exercise) -> tuple[Plan, PlanItem]:
     plan = Plan(name="Kraft", subject_id=state.profil.id)
     state.plaene.speichern(plan)
     item = state.plaene.uebung_hinzufuegen(plan.id, uebung.id)
-    state.plan_darstellung_setzen(UNTEREINANDER)
     return state.plaene.laden(plan.id), item
 
 

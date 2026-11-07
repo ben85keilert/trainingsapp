@@ -320,7 +320,7 @@ def einstellungen_hrv(page: Any, state: AppState) -> ft.View:
             value=achsen_zahl_text(wert),
             dense=True,
             width=96,
-            border_radius=8,
+            border=ft.OutlineInputBorder(border_radius=8),
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.RIGHT,
             on_submit=achse_uebernehmen(k),

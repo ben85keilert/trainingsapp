@@ -149,27 +149,22 @@ def test_uebungsseite_aus_dem_plan_zeigt_was_dort_gilt(page, state) -> None:
     assert page.routen[-1] == f"/plaene/{plan.id}/ziel/{item.id}"
 
 
-def test_in_einen_plan_aufnehmen_und_wiederherstellen(page, state) -> None:
+def test_uebungsseite_ohne_plan_aufnehmen_und_wiederherstellen(page, state) -> None:
+    """Ben, 7.11.2026: „In einen Plan aufnehmen“ gehört zu den Plänen, nicht auf die
+    Übungsseite — dort steht nur, in welchen Plänen die Übung ist."""
     from trainingsapp.ui.views.uebung_detail import uebung_detail
 
     uebung = _uebung(state)
     plan = Plan(name="Morgens", subject_id=state.profil.id)
     state.plaene.speichern(plan)
     seite = uebung_detail(page, state, uebung, None)
-    aufnehmen = next(
-        x
+    assert not any(
+        isinstance(x, ft.TextButton) and x.content == "In einen Plan aufnehmen"
         for x in _alle(seite)
-        if isinstance(x, ft.TextButton) and x.content == "In einen Plan aufnehmen"
     )
-    _klick(aufnehmen)
-    (dialog,) = page.dialoge
-    page.dialoge.clear()
-    zeile = next(x for x in _alle(dialog) if isinstance(x, ft.ListTile))
-    dialog.open = True
-    _klick(zeile)
-    asyncio.run(dialog.on_dismiss(None))
-    (neu,) = state.plaene.laden(plan.id).items
-    assert neu.exercise_id == uebung.id and neu.target is None  # folgt der Übung
+    assert "In keinem Plan." in _texte(seite)
+    state.plaene.uebung_hinzufuegen(plan.id, uebung.id)
+    assert "Morgens" in _texte(uebung_detail(page, state, uebung, None))
 
     # Archiviert: oben „Wiederherstellen“ — die Zeile im Archiv führt hierher
     state.uebungen.archivieren(uebung.id)

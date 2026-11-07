@@ -18,7 +18,7 @@ from trainingsapp.core.models import Exercise, Plan  # noqa: E402
 from trainingsapp.core.result_spec import FieldType, ResultSpec, vorrat_feld  # noqa: E402
 from trainingsapp.core.verlauf import kennzahlen  # noqa: E402
 from trainingsapp.ui.components.spec_form import SpecForm  # noqa: E402
-from trainingsapp.ui.state import UNTEREINANDER, AppState  # noqa: E402
+from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.plan import plan_view  # noqa: E402
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten  # noqa: E402
 
@@ -156,7 +156,6 @@ def test_ohne_saetze_eine_zahl_im_plan_und_im_formular(page, state) -> None:
     plan = Plan(name="Zählen", subject_id=state.profil.id)
     state.plaene.speichern(plan)
     state.plaene.uebung_hinzufuegen(plan.id, u.id)
-    state.plan_darstellung_setzen(UNTEREINANDER)
     ansicht = plan_view(page, state, state.plaene.laden(plan.id))
     felder = [x for x in _alle(ansicht) if isinstance(x, ft.TextField)]
     assert not [f for f in felder if f.label == "Sätze"]  # keine Sätze …
@@ -190,8 +189,9 @@ def test_spaetere_stelle_sammelt_ihre_saetze_in_einem_eintrag(page, state) -> No
     state.plaene.speichern(plan)
     for uebung_id in (a.id, x.id, a.id):
         state.plaene.uebung_hinzufuegen(plan.id, uebung_id)
-    state.plan_darstellung_setzen(UNTEREINANDER)
-    ansicht = plan_view(page, state, state.plaene.laden(plan.id))
+    plan = state.plaene.laden(plan.id)
+    state.plan_gezeigt[plan.id] = plan.items[2].id  # die spätere Stelle von A (eine je Bild)
+    ansicht = plan_view(page, state, plan)
     # Die Werte sind gefüllte „+“-Knöpfe (Skizze C1, 21.10.2026)
     zehner = [
         c
@@ -200,7 +200,7 @@ def test_spaetere_stelle_sammelt_ihre_saetze_in_einem_eintrag(page, state) -> No
         and isinstance(c.content, ft.Control)
         and [t.lstrip("+") for t in _texte(c.content)] == ["10"]
     ]
-    assert len(zehner) == 2  # je A-Block ein Knopf „+10“
+    assert len(zehner) == 1  # der gezeigte A-Block hat den Knopf „+10“
     for _ in range(3):
         ergebnis = zehner[-1].on_click()
         if inspect.isawaitable(ergebnis):

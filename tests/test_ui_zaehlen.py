@@ -697,12 +697,10 @@ async def test_marken_leiste_zeigt_den_sensor(umgebung, monkeypatch) -> None:
     zaehl_stand.anzeigen(state).clear()
 
 
-async def test_ohne_mengen_und_zugeklappt(umgebung) -> None:
+async def test_ohne_mengen_und_andere_uebung_gezeigt(umgebung) -> None:
     """Eine Übung nur mit „Atmung“ und ohne Mengen bekommt die Zeile allein unter der
-    Ausführung; in der Darstellung „Aufklappen“ steht das laufende Zählen auch im
-    zugeklappten Block — der Knopf dort nicht."""
-    from trainingsapp.ui.state import AUFKLAPPEN
-
+    Ausführung; zeigt der Plan eine andere Übung (7.11.2026: eine je Bild), steht dort weder
+    das laufende Zählen noch der Knopf — zurück führt der Gesamtplan."""
     state, uhr, gurt = umgebung
     seite = Seite()
     atem = Exercise(name="Box Breathing", typen=["Atmung"], uhr=False)
@@ -718,7 +716,6 @@ async def test_ohne_mengen_und_zugeklappt(umgebung) -> None:
     await _bis_vorbei(state, uhr, gurt)
     assert _eintraege(state) == []  # nur Atmung: nichts einzutragen
 
-    state.plan_darstellung_setzen(AUFKLAPPEN)
     kniebeuge = _kniebeuge(state)
     ausfall = _kniebeuge(state, "Ausfallschritt")
     plan = Plan(
@@ -728,14 +725,16 @@ async def test_ohne_mengen_und_zugeklappt(umgebung) -> None:
     )
     state.plaene.speichern(plan)
     plan = state.plaene.laden(plan.id)
-    state.plan_offen = plan.items[0].id
+    state.plan_gezeigt[plan.id] = plan.items[0].id
     ansicht = plan_view(seite, state, plan)
-    (knopf,) = _knoepfe(ansicht, "Wdh. zählen")  # nur im offenen Block
+    (knopf,) = _knoepfe(ansicht, "Wdh. zählen")  # nur im gezeigten Block
     knopf.on_click()
-    state.plan_offen = plan.items[1].id  # die andere aufklappen
+    state.plan_gezeigt[plan.id] = plan.items[1].id  # die andere zeigen
     ansicht = plan_view(seite, state, plan)
-    assert len(_flaechen(ansicht, MEHR)) == 1  # das Zählen steht zugeklappt weiter da
-    assert len(_knoepfe(ansicht, "Wdh. zählen")) == 1  # der Knopf nur im offenen Block
+    assert not _flaechen(ansicht, MEHR)  # das Zählen der Kniebeuge steht nicht hier
+    assert len(_knoepfe(ansicht, "Wdh. zählen")) == 1  # nur der Knopf des Ausfallschritts
+    state.plan_gezeigt[plan.id] = plan.items[0].id
+    assert len(_flaechen(plan_view(seite, state, plan), MEHR)) == 1
     uebung_lauf.zaehlen_beenden(state, kniebeuge.id, plan.items[0].id)
     await _bis_vorbei(state, uhr, gurt)
 
@@ -901,6 +900,7 @@ async def test_knopf_folgt_der_planuebung(umgebung) -> None:
     )
     state.plaene.speichern(plan)
     plan = state.plaene.laden(plan.id)
+    state.plan_gezeigt[plan.id] = plan.items[1].id  # die Planke (eine Übung je Bild)
     (knopf,) = _knoepfe(plan_view(seite, state, plan), "Wdh. zählen")  # vorher: Liegestütz
     knopf.on_click()
     z = _zaehl_teil(state)
@@ -944,8 +944,8 @@ async def test_chip_mit_wert_beendet_das_zaehlen_und_schliesst_einen_eintrag(umg
 
 
 async def test_laufleiste_fuehrt_im_plan_zur_uebung(umgebung) -> None:
-    """Ein Tipp auf das Zählen im Reiter „Einheit“ führt in den Plan — und die Liste beginnt
-    bei der Übung, aufgeklappt (`AppState.plan_ziel`, wie „Weiter mit …“ auf „Heute“)."""
+    """Ein Tipp auf das Zählen im Reiter „Einheit“ führt in den Plan — und der zeigt die
+    Übung (`AppState.plan_ziel`, wie „Weiter mit …“ auf „Heute“)."""
     from trainingsapp.ui.components import startleiste as sl
 
     state, uhr, gurt = umgebung
@@ -965,12 +965,12 @@ async def test_laufleiste_fuehrt_im_plan_zur_uebung(umgebung) -> None:
     z = _zaehl_teil(state)
     oeffnen = sl._oeffner(seite, state, z)
     assert oeffnen is not None
-    state.plan_ziel = state.plan_offen = None
+    state.plan_ziel = None
     await oeffnen()
     assert seite.route == f"/plan/{plan.id}"
-    assert state.plan_ziel == item.id and state.plan_offen == item.id  # vorher: None
-    plan_view(seite, state, plan)  # beginnt bei der Übung — einmal
-    assert state.plan_ziel is None
+    assert state.plan_ziel == item.id  # vorher: None
+    plan_view(seite, state, plan)  # zeigt die Übung — einmal
+    assert state.plan_ziel is None and state.plan_gezeigt[plan.id] == item.id
     uebung_lauf.zaehlen_beenden(state, u.id, item.id, ENDE_ABBRUCH)
     await _bis_vorbei(state, uhr, gurt)
 

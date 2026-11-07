@@ -546,7 +546,7 @@ def plan_einstellen(
             options=[ft.DropdownOption(key=v.schluessel, text=v.name) for v in angebot],
             dense=True,
             expand=True,
-            border_radius=8,
+            border=ft.OutlineInputBorder(border_radius=8),
             on_select=lambda e: bewegung_setzen(str(e.control.value or VORLAGE_AUTO)),
         )
         hinweis = next((v.hinweis for v in angebot if v.schluessel == vorlage), "")

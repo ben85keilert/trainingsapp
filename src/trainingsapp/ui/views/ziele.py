@@ -55,7 +55,6 @@ def ueben_ziele(
             continue
 
         def oeffnen(plan_id: str = plan.id, item_id: str = item.id) -> Any:
-            state.plan_offen = item_id
             state.plan_ziel = item_id
             return page.push_route(f"/plan/{plan_id}")
 

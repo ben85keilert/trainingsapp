@@ -30,7 +30,6 @@ from trainingsapp.ui.views.pakete import (  # noqa: E402
     import_rueckfrage,
     paket_view,
 )
-from trainingsapp.ui.views.uebung_detail import uebung_detail  # noqa: E402
 
 
 @pytest.fixture
@@ -78,10 +77,13 @@ def test_paketdialoge_haben_einen_koroutinen_handler(page, state) -> None:
     wade.description = "Meine Fassung"
     state.uebungen.speichern(wade)
 
-    detail = uebung_detail(page, state, wade, ft.UrlLauncher())
+    # „Auf Paketstand zurücksetzen“ steht seit dem 7.11.2026 unter „Übung bearbeiten“
+    from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
+
+    editor = uebung_bearbeiten(page, state, wade)
     knopf = next(
         c
-        for v in detail.controls
+        for v in editor.controls
         for c in _alle(v)
         if isinstance(c, ft.TextButton) and c.content == "Auf Paketstand zurücksetzen"
     )

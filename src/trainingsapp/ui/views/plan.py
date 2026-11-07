@@ -33,9 +33,8 @@ Anzeige und die Eingabemöglichkeiten besser ab“):
     Eintrag; der Freitext einmal je Tag: Er ersetzt den, der heute schon dasteht
     (`SessionRepo.text_setzen`), statt nach einem neuen Satz einen zweiten anzulegen.
 
-  Wie die Abschnitte stehen, bestimmt die Darstellung (`ui.state.PLAN_DARSTELLUNGEN`,
-  umschaltbar oben im Plan): alle untereinander, einer zum Umschalten,
-  oder aufgeklappt nur in einer Übung.
+  Alle Mengen stehen untereinander (die drei Darstellungen vom 14.10. — umschalten,
+  aufklappen — entfielen am 7.11.2026 mit „eine Übung je Bild“, P1).
 - „Notiz“ — ein Satz ins Erfahrungstagebuch: eine Notiz je Übung und Tag, die der
   Knopf immer wieder öffnet (`SessionRepo.notiz_eintrag`) — auch nach einem neuen
   Satz oder „Gemacht“. Daneben das **Etikett-Symbol** ohne Text (Ben, 21.10.2026): die
@@ -55,12 +54,21 @@ am Ende); die k-te Stelle ist erledigt, wenn die Übung heute k-mal dran war
 früheren Stelle an. Der Modus liegt im `AppState`, weil die Ansicht beim
 Routenwechsel neu gebaut wird.
 
-Ein Eintrag (Gemacht, Chip, Zahlenfeld) baut dagegen nur die Blöcke in der
-bestehenden Liste neu (`auffrischen`) — so bleibt die Scrollposition, und man
-verliert in einem langen Plan nicht die Orientierung. Kommt man aus einem
-Formular zurück, stellt `scroll_merken` die Position wieder her. Kommt man über
-„Weiter“ von „Heute“, beginnt die Liste bei der nächsten offenen Übung
-(`AppState.plan_ziel`, Ben 18.10.2026).
+**Beim Üben zeigt der Plan eine Übung** (Ben, 7.11.2026: „Die Übungen sollen links-rechts
+angeordnet sein“): oben die Zeile „x von n heute“ — ein Tipp öffnet den **Gesamtplan** als
+Blatt (`components/planblatt.py`), ein Tipp dort wechselt die Übung —, daneben das i mit der
+Legende der Knöpfe; darunter die Pfeile, benannt nach der vorigen und der nächsten Übung
+(„‹ Nacken dehnen“, „Kniebeuge ›“), und der Block. Wischen über den Block wechselt ebenso
+(`ft.GestureDetector`, nur das Ende der waagerechten Bewegung, Schwelle wie im Verlauf). Kein
+Umlauf an den Enden; nach „Gemacht“ bleibt der Block stehen — das Tempo bestimmt die Person,
+der nächste Pfeil ist nur betont. Welche Übung gezeigt wird, merkt `AppState.plan_gezeigt`
+je Plan für die Sitzung (überlebt `neu_zeichnen`); `AppState.plan_ziel` („Weiter mit …“ auf
+„Heute“, Ziele, Laufleiste) hat einmal Vorrang, sonst gilt die erste heute offene Übung.
+Einzelübung (`einzel`) und Nachtrag haben nur einen Block, ohne Pfeile.
+
+Ein Eintrag (Gemacht, Chip, Zahlenfeld) baut nur den Block in der bestehenden Liste neu
+(`auffrischen`) — so bleibt die Scrollposition. Kommt man aus einem Formular zurück, stellt
+`scroll_merken` die Position wieder her; ein Wechsel der Übung rollt nach oben.
 """
 
 from __future__ import annotations
@@ -124,7 +132,9 @@ from trainingsapp.ui import marken, uebung_lauf
 from trainingsapp.ui.components import zaehl_stand
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
+from trainingsapp.ui.components.karte import info_knopf
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.planblatt import PlanZeile, gesamtplan_blatt
 from trainingsapp.ui.components.planstand import nur_hier, wie_die_uebung
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.skala_regler import skala_regler
@@ -134,7 +144,7 @@ from trainingsapp.ui.components.varianten import Variantenwahl, varianten_blatt,
 from trainingsapp.ui.components.werte import wert_leiste
 from trainingsapp.ui.components.zaehlen import laeuft_hier, zaehl_zeile
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
-from trainingsapp.ui.state import AUFKLAPPEN, PLAN_DARSTELLUNGEN, UMSCHALTEN, AppState
+from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.plan_ablauf import plan_timer_karte
 from trainingsapp.ui.views.timer import timer_knopf
@@ -313,29 +323,6 @@ def _vom_timer(state: AppState, eintraege: list[SessionEntry]) -> set[str]:
     return state.einheiten.eintraege_vom_timer([e.id for e in eintraege])
 
 
-def _zum_ziel(page: Any, state: AppState, route: str, liste: ft.ListView, index: int) -> None:
-    """Die Liste beginnt bei ``liste.controls[index]`` statt oben (Ben, 18.10.2026: „Weiter“
-    setzt die Ansicht zur nächsten Übung, „nicht ganz nach oben in den Plan“).
-
-    Flutter rollt per ``ScrollKey`` dorthin (`Scrollable.ensureVisible`: Block oben im Bild).
-    Das geht nur, wenn die Liste alle Blöcke baut, nicht erst beim Hinscrollen. Der Schlüssel
-    ist je Aufbau neu: Gleiche Schlüssel an ersetzten Blöcken friert Flet 1.0 ein
-    (`auffrischen`, cb06ee9).
-    """
-    state.scroll_offsets.pop(route, None)  # die gemerkte Stelle gilt diesmal nicht
-    liste.build_controls_on_demand = False
-    schluessel: Any = ft.ScrollKey(f"plan-ziel-{state.route_nummer}-{index}")  # type: ignore[call-arg]
-    liste.controls[index].key = schluessel
-
-    async def rollen() -> None:
-        await asyncio.sleep(0.1)  # erst nach dem Aufbau hängt der Block in Flutter
-        with contextlib.suppress(Exception):  # Ansicht schon wieder ersetzt
-            await liste.scroll_to(scroll_key=schluessel, duration=0)
-
-    if hasattr(page, "run_task"):
-        page.run_task(rollen)
-
-
 def plan_view(
     page: ft.Page,
     state: AppState,
@@ -407,18 +394,21 @@ def plan_view(
     fertig_ids = erledigte(plan.items, anzahl)
     gemacht = len(fertig_ids)
     mehrfach = {i.exercise_id for i in plan.items if stelle[i.id] > 1}
-    darstellung = state.plan_darstellung()
-    # Aufklappen: Ist keine Übung dieses Plans offen, die erste, die heute noch fehlt (der
-    # Nachtrag hat nur einen Block und lässt die Wahl des Plans in Ruhe)
-    if nachtrag is None and state.plan_offen not in {item.id for item in plan.items}:
-        state.plan_offen = next((item.id for item in plan.items if item.id not in fertig_ids), None)
-    # „Weiter“ auf „Heute“: einmal bei dieser Planübung beginnen (`_zum_ziel`)
-    ziel_index = (
-        next((i for i, item in enumerate(plan.items) if item.id == state.plan_ziel), None)
-        if not bearbeiten
-        else None
-    )
-    state.plan_ziel = None
+    # Welche Übung der Block zeigt (7.11.2026): das einmalige Ziel („Weiter mit …“), sonst die
+    # zuletzt gezeigte dieses Plans, sonst die erste heute offene, sonst die erste. Einzelübung
+    # und Nachtrag haben genau einen Block und lassen die Wahl des Plans in Ruhe.
+    ids = [item.id for item in plan.items]
+    navigierbar = nachtrag is None and not einzel and not bearbeiten and len(ids) > 1
+    if state.plan_ziel in ids and not bearbeiten and nachtrag is None:
+        gezeigt_id: str | None = state.plan_ziel
+        state.scroll_offsets.pop(route, None)  # die gemerkte Stelle gilt diesmal nicht
+    elif navigierbar and state.plan_gezeigt.get(plan.id) in ids:
+        gezeigt_id = state.plan_gezeigt[plan.id]
+    else:
+        gezeigt_id = next((i for i in ids if i not in fertig_ids), ids[0] if ids else None)
+    state.plan_ziel = None  # gilt einmal
+    if navigierbar and gezeigt_id is not None:
+        state.plan_gezeigt[plan.id] = gezeigt_id
 
     # -- Handler ---------------------------------------------------------------
 
@@ -743,22 +733,6 @@ def plan_view(
 
         return handler
 
-    def parameter_waehler(item: PlanItem, key: str) -> Callable[[], None]:
-        def handler() -> None:
-            state.parameter_wahl[item.id] = key
-            auffrischen()
-
-        return handler
-
-    def parameter_geaendert(item: PlanItem) -> Callable[[ft.Event[ft.SegmentedButton]], None]:
-        """Das Segment „Parameter“ in der Ausführung (Darstellung „umschalten“)."""
-
-        def handler(e: ft.Event[ft.SegmentedButton]) -> None:
-            if e.control.selected:
-                parameter_waehler(item, str(e.control.selected[0]))()
-
-        return handler
-
     def auspraegung_setzen(item: PlanItem, key: str, wert: Any) -> None:
         """Eine Ausprägung wählen — ``None`` hebt die Wahl auf."""
         gewaehlt = state.auspraegung_wahl.setdefault(item.id, {})
@@ -946,27 +920,6 @@ def plan_view(
                 return
             zusatz = kontext(item, uebung_fuer(item))
             eintragen(item, {**ziel_frei(item), **zusatz, feld.key: wert})
-
-        return handler
-
-    def aufklapper(item: PlanItem) -> Callable[[], None]:
-        """Darstellung „Aufklappen“: diese Übung öffnen — oder wieder schließen."""
-
-        def handler() -> None:
-            state.plan_offen = None if state.plan_offen == item.id else item.id
-            auffrischen()
-
-        return handler
-
-    def darstellung_waehler(wert: str) -> Callable[[], None]:
-        def handler() -> None:
-            nonlocal darstellung
-            state.plan_darstellung_setzen(wert)
-            darstellung = wert
-            for eintrag in menue.items:
-                eintrag.checked = eintrag.data == wert
-            menue_text.value = PLAN_DARSTELLUNGEN[wert]
-            auffrischen()
 
         return handler
 
@@ -1946,26 +1899,7 @@ def plan_view(
         Übung nur mit „Atmung“."""
         oben = oben or []
         teile = parameter_abschnitte(item, uebung)
-        gewaehlt: str | None = None
-        schalter: ft.Control | None = None
-        if darstellung == UMSCHALTEN and len(teile) > 1:
-            keys = [key for key, _, _ in teile]
-            haupt = hauptfeld(uebung)
-            gewaehlt = state.parameter_wahl.get(item.id)
-            if gewaehlt not in keys:
-                gewaehlt = haupt.key if haupt is not None and haupt.key in keys else keys[0]
-            # Welcher Parameter gerade eingetragen wird, ist eine Einstellung — ein Segment
-            schalter = einstellungs_zeile(
-                ft.Text("Parameter", size=12, width=62, opacity=0.8),
-                ft.SegmentedButton(
-                    segments=[ft.Segment(value=key, label=ft.Text(name)) for key, name, _ in teile],
-                    selected=[gewaehlt],
-                    show_selected_icon=False,
-                    expand=True,
-                    on_change=parameter_geaendert(item),
-                ),
-            )
-        ausfuehrung = ausfuehrung_abschnitt(item, uebung, st, schalter)
+        ausfuehrung = ausfuehrung_abschnitt(item, uebung, st, None)
         if not teile and ausfuehrung is None:
             return list(oben)
         bereich: list[ft.Control] = []
@@ -1973,11 +1907,7 @@ def plan_view(
             bereich.append(ausfuehrung)
         if teile:
             # Eine Karte für alle Mengen, je Feld eine Zeile (P70 = Skizze E2)
-            zeilen = (
-                [next(bauen() for key, _, bauen in teile if key == gewaehlt)]
-                if gewaehlt is not None
-                else [bauen() for _, _, bauen in teile]
-            )
+            zeilen = [bauen() for _, _, bauen in teile]
             zeilen[0:0] = oben
             bereich.append(eintragen_karte(zeilen, ziel_hinweis(item, uebung, st)))
         else:  # nur Ausführung (Skala & Co.): wohin der nächste Wert geht
@@ -2190,14 +2120,6 @@ def plan_view(
                 )
             )
         else:
-            # Aufklappen lohnt nur bei mehreren Übungen und wenn es etwas einzutragen gibt
-            klappbar = (
-                darstellung == AUFKLAPPEN
-                and not einzel
-                and len(plan.items) > 1
-                and bool(aktive_felder(item, uebung))
-            )
-            offen = not klappbar or state.plan_offen == item.id
             st = stand_fuer(item, uebung)
             # „Abschließen“ fixiert den markierten Eintrag; ohne markierten heißt der Knopf
             # „Gemacht“ und legt einen fertigen an (Ben, 19.10.2026, Skizzen A1–A3)
@@ -2225,18 +2147,6 @@ def plan_view(
                 knoepfe.append(
                     _knopf(
                         f"Wie geplant · {ziel}", ft.Icons.FLAG, ziel_erlediger(item), betont=True
-                    )
-                )
-            if klappbar:
-                # „Werte“ statt „Eintragen“ (Ben, 21.10.2026): das Wort hatte drei Bedeutungen
-                knoepfe.append(
-                    ft.TextButton(
-                        "Zuklappen" if offen else "Werte",
-                        icon=ft.Icons.EXPAND_LESS if offen else ft.Icons.EXPAND_MORE,
-                        tooltip="Eingabe dieser Übung schließen"
-                        if offen
-                        else "Eingabe dieser Übung öffnen",
-                        on_click=aufklapper(item),
                     )
                 )
             # Stoppuhr und Timer (Ben, 18.10.2026): als Knöpfe zwischen „Gemacht“ und „Notiz“
@@ -2278,14 +2188,7 @@ def plan_view(
                 neben_uhr=uhr_laeuft,
             )
             oben = [z for z in (uhr.zeile, zaehl) if z is not None]
-            if offen:
-                inhalt.extend(eingabe_bereich(item, uebung, st, oben))
-            else:
-                # Zugeklappt nur, was läuft — die Uhr und das Zählen
-                if uhr.zeile is not None and uhr_laeuft:
-                    inhalt.append(uhr.zeile)
-                if zaehl is not None and laeuft_hier(state, aus_katalog, planuebung):
-                    inhalt.append(zaehl)
+            inhalt.extend(eingabe_bereich(item, uebung, st, oben))
 
         return ft.Container(
             padding=ft.Padding.only(left=14, right=10, top=12, bottom=12),
@@ -2307,28 +2210,196 @@ def plan_view(
 
     stand = ft.Text(stand_text(), size=13, opacity=0.7)
 
-    # Darstellung der Übungen umschalten — zum Vergleichen gleich oben im Plan
-    menue_text = ft.Text(PLAN_DARSTELLUNGEN[darstellung], size=12)
-    menue = ft.PopupMenuButton(
-        tooltip="Darstellung der Übungen",
+    # -- Eine Übung je Bild (7.11.2026): gezeigte Übung, Wechseln, Gesamtplan ---------------
+
+    def gezeigt() -> tuple[int, PlanItem] | None:
+        """Die gezeigte Planübung mit ihrem Index — ``None`` ohne Übungen."""
+        if not plan.items:
+            return None
+        gesucht = state.plan_gezeigt.get(plan.id) if navigierbar else gezeigt_id
+        for i, item in enumerate(plan.items):
+            if item.id == gesucht:
+                return i, item
+        return 0, plan.items[0]
+
+    def wechseln(item_id: str) -> None:
+        """Zu dieser Planübung — der Block wird in derselben Liste ersetzt, die Beobachter
+        der alten Uhr- und Zählzeile verfallen, die Liste rollt nach oben."""
+        if item_id not in ids or item_id == state.plan_gezeigt.get(plan.id):
+            return
+        state.plan_gezeigt[plan.id] = item_id
+        state.timer_beobachter.pop("uhr_in_der_uebung", None)
+        state.scroll_offsets.pop(route, None)
+        auffrischen()
+        if hasattr(page, "run_task"):
+
+            async def nach_oben() -> None:
+                await asyncio.sleep(0.05)  # erst nach dem Aufbau hängt die Liste in Flutter
+                with contextlib.suppress(Exception):
+                    await liste.scroll_to(offset=0, duration=0)
+
+            page.run_task(nach_oben)
+
+    def wechsler(item_id: str) -> Callable[[], None]:
+        return lambda: wechseln(item_id)
+
+    def gewischt(e: Any) -> None:
+        """Waagerecht gewischt (Ende der Bewegung): nach links = nächste, nach rechts =
+        vorige — Schwelle wie im Verlauf; am Rand passiert nichts."""
+        paar = gezeigt()
+        if paar is None:
+            return
+        v = getattr(e, "primary_velocity", None) or 0
+        i = paar[0]
+        if v < -WISCH_SCHWELLE and i < len(ids) - 1:
+            wechseln(ids[i + 1])
+        elif v > WISCH_SCHWELLE and i > 0:
+            wechseln(ids[i - 1])
+
+    def name_von(item: PlanItem) -> str:
+        u = katalog.get(item.exercise_id)
+        return u.name if u is not None else "(Übung nicht mehr vorhanden)"
+
+    def navigation_zeile(index: int) -> ft.Control:
+        """‹ vorige · k/n · nächste › — die Pfeile heißen wie die Nachbarn (Ben, 7.11.2026:
+        „Der Übungsname wird in der Übung an sich angezeigt“); nach einer erledigten Übung
+        ist der nächste Pfeil betont."""
+        n = len(plan.items)
+        vorige = plan.items[index - 1] if index > 0 else None
+        naechste = plan.items[index + 1] if index < n - 1 else None
+        betont = plan.items[index].id in fertig_ids and naechste is not None
+        links: ft.Control = (
+            ft.TextButton(
+                content=ft.Row(
+                    tight=True,
+                    spacing=2,
+                    controls=[
+                        ft.Icon(ft.Icons.CHEVRON_LEFT, size=22),
+                        ft.Text(
+                            name_von(vorige),
+                            size=13,
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                    ],
+                ),
+                tooltip="Vorige Übung",
+                on_click=wechsler(vorige.id),
+            )
+            if vorige is not None
+            else ft.Container()
+        )
+        rechts: ft.Control = (
+            ft.FilledTonalButton(
+                content=ft.Row(
+                    tight=True,
+                    spacing=2,
+                    controls=[
+                        ft.Text(
+                            name_von(naechste),
+                            size=13,
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Icon(ft.Icons.CHEVRON_RIGHT, size=22),
+                    ],
+                ),
+                tooltip="Nächste Übung",
+                on_click=wechsler(naechste.id),
+            )
+            if naechste is not None and betont
+            else ft.TextButton(
+                content=ft.Row(
+                    tight=True,
+                    spacing=2,
+                    controls=[
+                        ft.Text(
+                            name_von(naechste),
+                            size=13,
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Icon(ft.Icons.CHEVRON_RIGHT, size=22),
+                    ],
+                ),
+                tooltip="Nächste Übung",
+                on_click=wechsler(naechste.id),
+            )
+            if naechste is not None
+            else ft.Container()
+        )
+        return ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Container(content=links, expand=True, alignment=ft.Alignment.CENTER_LEFT),
+                ft.Text(f"{index + 1}/{n}", size=12, opacity=0.6),
+                ft.Container(content=rechts, expand=True, alignment=ft.Alignment.CENTER_RIGHT),
+            ],
+        )
+
+    def uebungsteil() -> ft.Control:
+        """Der eine Block beim Üben — mit Pfeilen und Wischen, wenn der Plan mehrere hat."""
+        paar = gezeigt()
+        if paar is None:
+            return ft.Container()
+        index, item = paar
+        teile: list[ft.Control] = [block(index, item)]
+        if navigierbar:
+            teile.insert(
+                0,
+                ft.Container(
+                    padding=ft.Padding.symmetric(horizontal=8), content=navigation_zeile(index)
+                ),
+            )
+        return ft.GestureDetector(
+            on_horizontal_drag_end=gewischt if navigierbar else None,
+            content=ft.Column(
+                spacing=4, horizontal_alignment=ft.CrossAxisAlignment.STRETCH, controls=teile
+            ),
+        )
+
+    def gesamtplan_zeigen() -> None:
+        """Der Tipp auf „x von n heute“: alle Übungen als Blatt, ein Tipp wechselt."""
+        paar = gezeigt()
+        zeilen: list[PlanZeile] = []
+        for item in plan.items:
+            u = katalog.get(item.exercise_id)
+            if u is None:
+                zeilen.append(PlanZeile(item.id, "(Übung nicht mehr vorhanden)", fehlt=True))
+                continue
+            mit_spec = uebung_fuer(item)
+            e = laufende(state, u, item)
+            zeilen.append(
+                PlanZeile(
+                    item.id,
+                    u.name,
+                    ziel_text(mit_spec, ziel_von(item, mit_spec)),
+                    f"{stelle[item.id]}. Mal im Plan" if u.id in mehrfach else "",
+                    erledigt=item.id in fertig_ids,
+                    uhr_laeuft=e is not None and e.timer is not None,
+                    zaehlt=laeuft_hier(state, u, item),
+                    bild=uebungsbild(state, u.icon_key, u.image_path, groesse=28),
+                )
+            )
+        page.show_dialog(
+            gesamtplan_blatt(
+                plan.name,
+                stand_text(),
+                zeilen,
+                paar[1].id if paar is not None else None,
+                wechseln,
+            )
+        )
+
+    gesamtplan_knopf = ft.TextButton(
         content=ft.Row(
             tight=True,
             spacing=4,
-            controls=[
-                ft.Icon(ft.Icons.VIEW_AGENDA_OUTLINED, size=16, opacity=0.7),
-                menue_text,
-                ft.Icon(ft.Icons.ARROW_DROP_DOWN, size=18, opacity=0.7),
-            ],
+            controls=[stand, ft.Icon(ft.Icons.EXPAND_MORE, size=18, opacity=0.7)],
         ),
-        items=[
-            ft.PopupMenuItem(
-                content=text,
-                checked=key == darstellung,
-                data=key,
-                on_click=darstellung_waehler(key),
-            )
-            for key, text in PLAN_DARSTELLUNGEN.items()
-        ],
+        tooltip="Gesamtplan",
+        on_click=gesamtplan_zeigen,
     )
 
     kopf: list[ft.Control]
@@ -2373,22 +2444,34 @@ def plan_view(
         kopf = list(nachtrag.kopf)
     elif einzel:
         kopf = [
-            ft.Text(
-                "Ohne Plan — der Eintrag erscheint auf „Heute“ unter „Ohne Plan“.",
-                size=13,
-                opacity=0.7,
+            ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text(
+                        "Ohne Plan — der Eintrag erscheint auf „Heute“ unter „Ohne Plan“.",
+                        size=13,
+                        opacity=0.7,
+                        expand=True,
+                    ),
+                    info_knopf(page, "Was die Knöpfe tun", KNOPF_LEGENDE),
+                ],
             ),
-            menue,
-            _knopf_legende(),
         ]
     else:
+        # „x von n heute“ öffnet den Gesamtplan; die Legende der Knöpfe steht hinter dem i
+        # statt als grauer Text (Ben, 7.11.2026: „Erklärtexte alle in i's“)
         kopf = [
             ft.Row(
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[ft.Container(content=stand, expand=True), menue],
+                controls=[
+                    ft.Container(
+                        content=gesamtplan_knopf, expand=True, alignment=ft.Alignment.CENTER_LEFT
+                    ),
+                    info_knopf(page, "Was die Knöpfe tun", KNOPF_LEGENDE),
+                ],
             ),
-            _knopf_legende(),
         ]
 
     fuss: list[ft.Control] = []
@@ -2414,9 +2497,10 @@ def plan_view(
     fuss_box = ft.Container(padding=16, content=ft.Row(spacing=8, wrap=True, controls=fuss))
 
     def listeninhalt() -> list[ft.Control]:
-        bloecke = [block(i, item) for i, item in enumerate(plan.items)]
         if bearbeiten:
-            return bloecke  # Kopf und Fuß sind Kopf- und Fußzeile der ziehbaren Liste
+            # Kopf und Fuß sind Kopf- und Fußzeile der ziehbaren Liste — alle Blöcke
+            return [block(i, item) for i, item in enumerate(plan.items)]
+        bloecke = [uebungsteil()] if plan.items else []
         if nachtrag is not None:  # unter dem Block, wohin die Tipps gehen (Skizze G1)
             hinweis = ft.Text(nachtrag.hinweis(), size=12, opacity=0.7)
             return [
@@ -2440,10 +2524,6 @@ def plan_view(
         )
     else:
         liste = ft.ListView(expand=True, controls=listeninhalt())
-        if ziel_index == 0:
-            state.scroll_offsets.pop(route, None)  # die erste steht oben, unter dem Kopf
-        elif ziel_index is not None:
-            _zum_ziel(page, state, route, liste, ziel_index + 1)  # 0 ist der Kopf
     liste = scroll_merken(page, state, route, liste)
 
     # -- Nachtrag: „Fertig“ und Zurück schließen, was hier offen ist ------------------
@@ -2515,12 +2595,18 @@ def plan_view(
 __all__ = ["Nachtrag", "einzel_plan", "hauptfeld", "plan_view", "ziel_text"]
 
 
-def _knopf_legende() -> ft.Control:
-    """Was die Knöpfe einer Planübung tun — im Plan und bei der Einzelübung derselbe Text."""
-    return ft.Text(
-        "Gemacht = nur abhaken · Wie geplant = Ziel übernehmen · Uhr = Zeit stoppen · "
-        "+Zahl = Satz anhängen · Eintragen = Sätze × Wert · Notiz = ins Tagebuch · "
-        "Etikett = Variante · i = Übung ansehen",
-        size=11,
-        opacity=0.55,
-    )
+#: Was die Knöpfe einer Planübung tun — hinter dem i oben im Plan und bei der Einzelübung
+#: (Ben, 7.11.2026: nicht mehr als grauer Text unter dem Kopf)
+KNOPF_LEGENDE = """\
+- **Gemacht** hakt nur ab.
+- **Wie geplant** übernimmt das Ziel der Übung (oder des Plans).
+- **Uhr** (Stoppuhr, Timer) stoppt die Zeit; „zählt“ heißt, sie geht als Satz in den Eintrag.
+- **+Zahl** hängt einen Satz an, **Eintragen** nimmt Sätze × Wert.
+- **Notiz** schreibt einen Satz ins Tagebuch, das **Etikett** setzt die Variante.
+- **i** öffnet die Übungsseite; der **Timer** oben rechts den Timer dieser Übung.
+- **‹ ›** oder Wischen wechselt die Übung; „x von n heute“ zeigt den Gesamtplan.
+"""
+
+#: Ab dieser Geschwindigkeit (px/s, Ende der waagerechten Bewegung) zählt ein Wisch — wie im
+#: Verlauf (`views/verlauf.py`)
+WISCH_SCHWELLE = 300

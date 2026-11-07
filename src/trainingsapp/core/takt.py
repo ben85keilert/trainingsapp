@@ -144,13 +144,36 @@ def tempo_lesen(roh: Any) -> float:
     return round(min(max(wert, TEMPO_MIN), TEMPO_MAX), 2)
 
 
+def geschwindigkeit(faktor: Any) -> float:
+    """Was die Person als Tempo sieht: die Geschwindigkeit ``1 / Faktor`` (Ben, 7.11.2026:
+    „kleineres Tempo verlangsamt den Takt … eine kleinere Geschwindigkeit ist auch ein
+    langsamerer Ablauf“). Gespeichert bleibt der Faktor auf die Dauern (`Takt.tempo`).
+
+    >>> geschwindigkeit(2.0), geschwindigkeit(0.5), geschwindigkeit(1.5), geschwindigkeit("x")
+    (0.5, 2.0, 0.67, 1.0)
+    """
+    faktor = tempo_lesen(faktor)
+    return round(1.0 / faktor, 2)
+
+
+def faktor_von(geschwindigkeit: Any) -> float:
+    """Der Faktor auf die Dauern zu einer Geschwindigkeit (Regler) — begrenzt wie `tempo_lesen`.
+
+    >>> faktor_von(2.0), faktor_von(0.5), faktor_von(0.75), faktor_von("x")
+    (0.5, 2.0, 1.33, 1.0)
+    """
+    g = tempo_lesen(geschwindigkeit)
+    return tempo_lesen(1.0 / g)
+
+
 def tempo_text(faktor: float) -> str:
-    """„1,0×“, „0,75×“.
+    """„1,0×“, „1,33×“, „0,5×“ — die **Geschwindigkeit** zum Faktor (`geschwindigkeit`):
+    2× heißt doppelt so schnell, also halbe Dauern.
 
     >>> tempo_text(1.0), tempo_text(0.75), tempo_text(2)
-    ('1,0×', '0,75×', '2,0×')
+    ('1,0×', '1,33×', '0,5×')
     """
-    text = f"{faktor:.2f}".rstrip("0")
+    text = f"{geschwindigkeit(faktor):.2f}".rstrip("0")
     if text.endswith("."):
         text += "0"
     return text.replace(".", ",") + "×"
@@ -259,7 +282,8 @@ class Takt:
 
     phasen: tuple[Phase, ...]
     name: str = ""
-    #: Faktor auf alle Dauern (der Geschwindigkeitsregler), 1,0 = wie eingestellt
+    #: Faktor auf alle Dauern, 1,0 = wie eingestellt — gezeigt und geregelt wird die
+    #: Geschwindigkeit 1/Faktor (`geschwindigkeit`, `tempo_text`; Ben, 7.11.2026)
     tempo: float = 1.0
     #: Rundenzahl — ``None``: endlos bis zum Ende des Abschnitts bzw. der Uhr
     runden: int | None = None
@@ -868,6 +892,8 @@ __all__ = [
     "animation_fuer",
     "dauer_lesen",
     "dauer_text",
+    "faktor_von",
+    "geschwindigkeit",
     "in_bibliothek",
     "lage",
     "rate_text",

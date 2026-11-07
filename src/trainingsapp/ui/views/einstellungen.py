@@ -34,7 +34,7 @@ from trainingsapp.ui.components.hilfe import hilfe_oeffner
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.scroll import scroll_merken
-from trainingsapp.ui.state import PLAN_DARSTELLUNGEN, UHR_DARSTELLUNGEN, AppState
+from trainingsapp.ui.state import UHR_DARSTELLUNGEN, AppState
 from trainingsapp.ui.views.einstellungen_darstellung import darstellung_karte
 
 
@@ -81,8 +81,8 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
             for p in state.profile.alle()
         ]
 
-    def darstellung_setzen(e: ft.Event[ft.Dropdown]) -> None:
-        state.plan_darstellung_setzen(str(e.control.value))
+    def fokus_auto_setzen(e: ft.Event[ft.Switch]) -> None:
+        state.fokus_auto_setzen(bool(e.control.value))
 
     def offen_setzen(e: ft.Event[ft.Dropdown]) -> None:
         state.eintrag_offen_min_setzen(int(e.control.value or OFFEN_MIN_VORGABE))
@@ -287,20 +287,6 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
                             ft.Dropdown(
-                                label="Übungen im Plan",
-                                value=state.plan_darstellung(),
-                                options=[
-                                    ft.DropdownOption(key=key, text=text)
-                                    for key, text in PLAN_DARSTELLUNGEN.items()
-                                ],
-                                on_select=darstellung_setzen,
-                                expand=True,
-                            ),
-                            hinweis(
-                                "Wie die Eingabe beim Training aussieht — auch oben im Plan "
-                                "umschaltbar."
-                            ),
-                            ft.Dropdown(
                                 label="Eintrag bleibt offen",
                                 value=str(state.eintrag_offen_min()),
                                 options=[
@@ -328,6 +314,16 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                             hinweis(
                                 "Ob und wie die Zeit zählt, steht an jeder Übung (Übung "
                                 "bearbeiten → Timer: Uhr an/aus, „Zählt als“)."
+                            ),
+                            ft.Switch(
+                                label="Fokus beim Start der Uhr öffnen",
+                                value=state.fokus_auto(),
+                                on_change=fokus_auto_setzen,
+                            ),
+                            hinweis(
+                                "Der Fokus ist die Trainingsansicht zur laufenden Uhr: große "
+                                "Zeit, Takt, Bild der Bewegung, Herzfrequenz. Aus heißt: Die "
+                                "Uhr bleibt in der Übung, „Fokus“ daneben öffnet ihn bei Bedarf."
                             ),
                             ft.Switch(
                                 label="Vibration am Phasenwechsel",

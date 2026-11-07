@@ -738,3 +738,59 @@ def test_audio_in_leistungen_tagebuch_und_einstellungen(welt, page) -> None:
     assert any("0:12" in t for t in texte)
     einstellungen = _texte(einstellungen_anhaenge(page, welt.state))
     assert any("1 Foto, 1 Video, 1 Audioaufnahme" in t for t in einstellungen)
+
+
+# -- Übungsseite übersichtlicher (Ben, 7.11.2026) -------------------------------------------
+
+
+def test_uebungsseite_kopf_videos_nur_mit_inhalt_und_ein_i(welt, page) -> None:
+    """Regionen ohne Überschrift unter dem Typ, das Bild groß, „Videos und Links“ und „Aufnahmen
+    mit dieser Übung“ nur mit Inhalt; die Erklärung zu „Zählt als“ steht im einen „i“ oben."""
+    from trainingsapp.core.models import Exercise, Media
+    from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld
+    from trainingsapp.ui.views.uebung_detail import KOPF_BILD
+
+    u = Exercise(
+        name="Brücke",
+        typen=["Kräftigung"],
+        regionen=["Bein", "Hüfte"],
+        result_spec=ResultSpec(layout=Layout.TIMED, fields=[vorrat_feld("hold")]),
+    )
+    welt.state.uebungen.speichern(u)
+    ansicht = uebung_detail(page, welt.state, u, SimpleNamespace())
+    texte = _texte(ansicht)
+    assert "Kräftigung" in texte and "Bein, Hüfte" in texte
+    assert texte.index("Bein, Hüfte") == texte.index("Kräftigung") + 1  # gleich darunter
+    assert "REGIONEN" not in texte and "VIDEOS UND LINKS" not in texte
+    assert "AUFNAHMEN MIT DIESER ÜBUNG" not in texte  # keine HRV-Aufnahme
+    assert "Zählt als" in texte and not any("„Fertig“ trägt" in t for t in texte)
+    assert any(isinstance(c, ft.Container) and c.width == KOPF_BILD for c in _alle(ansicht))
+
+    info, *_ = ansicht.appbar.actions
+    assert info.icon == ft.Icons.INFO_OUTLINE
+    info.on_click()
+    hilfe = page.dialoge[-1].content.content.value
+    assert "Zählt als: Haltezeit je Satz." in hilfe and "„Fertig“ trägt" in hilfe
+
+    u.media = [Media(uri="https://example.org/bruecke", title="Anleitung")]
+    welt.state.uebungen.speichern(u)
+    mit_link = _texte(uebung_detail(page, welt.state, u, SimpleNamespace()))
+    assert "VIDEOS UND LINKS" in mit_link and "Anleitung" in mit_link
+
+
+def test_zeitraum_der_aufnahmen_baut_die_seite_nicht_neu(welt, page, monkeypatch) -> None:
+    """Ben, 7.11.2026: Durchklicken von 4 Wochen · 3 Monate · Alle ließ die Seite nach oben
+    springen — der Filter füllt jetzt nur das Raster neu, statt die Seite neu aufzubauen."""
+    from trainingsapp.ui.views.anhang_verlauf import aufnahmen_raster
+
+    neu: list[bool] = []
+    monkeypatch.setattr(welt.state, "neu_zeichnen", lambda *a, **k: neu.append(True))
+    abschnitt = aufnahmen_raster(page, welt.state, welt.uebung)
+    assert abschnitt is not None
+    filter_ = next(c for c in _alle(abschnitt) if isinstance(c, ft.SegmentedButton))
+    huelle = abschnitt.controls[1]
+    vorher = huelle.content
+    filter_.selected = ["alle"]
+    filter_.on_change(SimpleNamespace(control=filter_))
+    assert welt.state.anhaenge_zeitraum == "alle" and not neu
+    assert huelle.content is not vorher and len(huelle.content.controls) == 2

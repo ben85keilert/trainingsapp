@@ -461,7 +461,8 @@ def _symbole(wurzel, symbol) -> list:
 
 def test_karte_ohne_pfeil_weiter_springt_zur_offenen_uebung(page, state) -> None:
     """Der Pfeil war ein dritter Weg in den Plan — weg. „Weiter“ öffnet den Plan bei der
-    nächsten offenen Übung (`AppState.plan_ziel`), der Plan rollt einmal dorthin."""
+    nächsten offenen Übung (`AppState.plan_ziel`): der Plan zeigt sie — einmal, danach die
+    zuletzt gezeigte (`plan_gezeigt`, 7.11.2026)."""
     from trainingsapp.ui.views.plan import plan_view
 
     plan = _plan(state, "liegestuetzen", "kniebeuge", "wandsitz")
@@ -477,15 +478,16 @@ def test_karte_ohne_pfeil_weiter_springt_zur_offenen_uebung(page, state) -> None
     asyncio.run(weiter.on_click())
     assert page.routen == [f"/plan/{plan.id}"]
     assert state.plan_ziel == plan.items[1].id
-    aufgaben: list = []
-    page.run_task = lambda f, *a: aufgaben.append(f)
+    state.plan_gezeigt[plan.id] = plan.items[2].id  # zuletzt gezeigt — das Ziel geht vor
     ansicht = plan_view(page, state, state.plaene.laden(plan.id))
     liste = next(x for x in _alle(ansicht) if isinstance(x, ft.ListView))
-    assert liste.build_controls_on_demand is False and len(aufgaben) == 1
-    assert isinstance(liste.controls[2].key, ft.ScrollKey)  # Kopf, 1. Übung, 2. Übung
+    assert len(liste.controls) == 2  # Kopf und der eine Block
+    block = liste.controls[1].content.controls[-1]  # unter der Zeile der Pfeile
+    assert "Kniebeuge" in _texte(block) and "Wandsitz" not in _texte(block)
+    assert "2/3" in _texte(liste.controls[1])  # die Pfeile heißen wie die Nachbarn
     assert state.plan_ziel is None  # nur einmal
-    wieder = plan_view(page, state, state.plaene.laden(plan.id))
-    assert next(x for x in _alle(wieder) if isinstance(x, ft.ListView)).build_controls_on_demand
+    assert state.plan_gezeigt[plan.id] == plan.items[1].id
+    assert not any(isinstance(getattr(x, "key", None), ft.ScrollKey) for x in _alle(ansicht))
 
 
 def test_anderer_plan_kommt_nur_auf_heute_und_x_mit_rueckgaengig(page, state) -> None:

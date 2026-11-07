@@ -2074,7 +2074,7 @@ def _live_teil(
                         options=[ft.DropdownOption(key=str(x), text=f"{x} s") for x in HF_MITTEL_S],
                         on_select=mittel_gewaehlt,
                         dense=True,
-                        border_radius=ECKIG_RADIUS,
+                        border=ft.OutlineInputBorder(border_radius=ECKIG_RADIUS),
                     ),
                     ft.Row(
                         spacing=8,

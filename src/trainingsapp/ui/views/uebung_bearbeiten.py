@@ -36,6 +36,7 @@ Plan. Zurück speichert (Ben, 16.10.2026, `components/zurueck.py`); „Abbrechen
 from __future__ import annotations
 
 import contextlib
+import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -1415,7 +1416,7 @@ def uebung_bearbeiten(
         options=[ft.DropdownOption(key=v.schluessel, text=v.name) for v in angebot],
         dense=True,
         expand=True,
-        border_radius=8,
+        border=ft.OutlineInputBorder(border_radius=8),
     )
     bewegung_hinweis = ft.Text(size=12, opacity=0.7)
     bewegung_zeile = ft.Column(
@@ -1785,6 +1786,56 @@ def uebung_bearbeiten(
             ],
         )
 
+    # -- Paket: „Auf Paketstand zurücksetzen“ (Ben, 7.11.2026: nur hier, die Übungsseite zeigt
+    # nur, was abweicht) — setzt die gespeicherte Übung zurück und öffnet ihre Seite
+    paket_bereich: list[ft.Control] = []
+    paket = (
+        state.pakete.laden(uebung.package_id) if uebung is not None and uebung.package_id else None
+    )
+    geaendert = (
+        state.pakete.abweichungen(uebung) if paket is not None and uebung is not None else []
+    )
+    if paket is not None and uebung is not None and geaendert:
+        zurueckgesetzt = Nachher()
+
+        def zuruecksetzen() -> None:
+            assert uebung is not None
+            try:
+                state.pakete.zuruecksetzen([uebung.id])
+            except sqlite3.Error as fehler:
+                page.pop_dialog()
+                page.show_dialog(ft.SnackBar(ft.Text(f"Nicht zurückgesetzt: {fehler}")))
+                return
+            zurueckgesetzt.danach(lambda: page.run_task(page.push_route, f"/uebung/{uebung.id}"))
+            page.pop_dialog()
+            page.show_dialog(ft.SnackBar(ft.Text("Auf den Paketstand gesetzt")))
+
+        def zuruecksetzen_fragen() -> None:
+            page.show_dialog(
+                ft.AlertDialog(
+                    modal=True,
+                    on_dismiss=zurueckgesetzt.bei_schliessen,
+                    title=ft.Text("Auf Paketstand zurücksetzen?"),
+                    content=ft.Text(
+                        f"„{uebung.name}“ bekommt wieder den Stand aus dem Paket. Verloren geht "
+                        f"deine Änderung an: {', '.join(geaendert)} — und was hier noch nicht "
+                        "gespeichert ist. Einträge bleiben."
+                    ),
+                    actions=[
+                        ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
+                        ft.FilledButton("Zurücksetzen", on_click=zuruecksetzen),
+                    ],
+                )
+            )
+
+        paket_bereich = [
+            abschnitt("PAKET"),
+            ft.Text(f"Weicht vom Paket „{paket.name}“ ab: {', '.join(geaendert)}.", size=13),
+            ft.TextButton(
+                "Auf Paketstand zurücksetzen", icon=ft.Icons.RESTORE, on_click=zuruecksetzen_fragen
+            ),
+        ]
+
     anfang = stand()
     ansicht = ft.View(
         route=route,
@@ -1884,6 +1935,7 @@ def uebung_bearbeiten(
                                 ),
                             ],
                         ),
+                        *paket_bereich,
                     ],
                 ),
                 expand=False,

@@ -14,7 +14,7 @@ ft = pytest.importorskip("flet")
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem  # noqa: E402
 from trainingsapp.core.result_spec import ResultSpec, vorrat_feld  # noqa: E402
-from trainingsapp.ui.state import UNTEREINANDER, AppState  # noqa: E402
+from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.plan import plan_view  # noqa: E402
 
 
@@ -70,7 +70,6 @@ def _plan(state: AppState, *keys: str) -> tuple[Plan, PlanItem, Exercise]:
     state.plaene.speichern(plan)
     item = state.plaene.uebung_hinzufuegen(plan.id, u.id)
     state.plaene.eingabe_setzen(item.id, "", {}, list(keys))
-    state.plan_darstellung_setzen(UNTEREINANDER)
     return state.plaene.laden(plan.id), item, state.uebungen.laden(u.id)
 
 

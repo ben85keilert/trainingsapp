@@ -35,6 +35,8 @@ from trainingsapp.core.takt import (
     TaktLauf,
     dauer_lesen,
     dauer_text,
+    faktor_von,
+    geschwindigkeit,
     in_bibliothek,
     rate_text,
     tempo_lesen,
@@ -173,7 +175,7 @@ def takt_blatt(
             options=[ft.DropdownOption(key=k, text=v) for k, v in ARTEN.items()],
             dense=True,
             expand=True,
-            border_radius=8,
+            border=ft.OutlineInputBorder(border_radius=8),
             text_size=13,
         )
         klang = ft.Dropdown(
@@ -181,7 +183,7 @@ def takt_blatt(
             options=_klang_optionen(p.art),
             dense=True,
             expand=True,
-            border_radius=8,
+            border=ft.OutlineInputBorder(border_radius=8),
             text_size=13,
         )
         z = _Zeile(
@@ -271,7 +273,7 @@ def takt_blatt(
         stand["animation"] = t.animation
         stand["zaehlt"] = t.zaehlt
         zaehlt_schalter.value = t.zaehlt
-        regler.value = t.tempo
+        regler.value = geschwindigkeit(t.tempo)
         animation_wahl.value = t.animation
         zeichnen()
         tempo_zeigen()
@@ -317,18 +319,21 @@ def takt_blatt(
 
     def tempo_gezogen(e: ft.Event[ft.Slider]) -> None:
         ohne_auto_update()  # beim Ziehen dauernd — nur die Texte nachziehen (V1)
-        stand["tempo"] = tempo_lesen(e.control.value)
+        stand["tempo"] = faktor_von(e.control.value)  # der Regler zeigt die Geschwindigkeit
         tempo_zeigen()
         vorschau_tempo()
         auffrischen(tempo_text_ctl, rate_text_ctl)
 
+    # Der Regler stellt die Geschwindigkeit (rechts = schneller, 2× = halbe Dauern; Ben,
+    # 7.11.2026), gespeichert wird der Faktor auf die Dauern (`core.takt.faktor_von`)
     regler = ft.Slider(
         min=TEMPO_MIN,
         max=TEMPO_MAX,
         divisions=int((TEMPO_MAX - TEMPO_MIN) / 0.05),
-        value=stand["tempo"],
+        value=geschwindigkeit(stand["tempo"]),
         round=2,
         expand=True,
+        tooltip="Tempo: links langsamer, rechts schneller",
         on_change=tempo_gezogen,
     )
 
@@ -360,7 +365,7 @@ def takt_blatt(
         ],
         dense=True,
         expand=True,
-        border_radius=8,
+        border=ft.OutlineInputBorder(border_radius=8),
         text_size=13,
         on_select=animation_gewaehlt,
     )
@@ -572,11 +577,12 @@ class TempoRegler:
     def __init__(self, state: Any, key: str, lauf: Any) -> None:
         self.state, self.key, self.lauf = state, key, lauf
         self.text = ft.Text(size=12, weight=ft.FontWeight.W_600, width=52)
+        # Geschwindigkeit am Regler, Faktor im Lauf (`core.takt.faktor_von`)
         self.regler = ft.Slider(
             min=TEMPO_MIN,
             max=TEMPO_MAX,
             divisions=int((TEMPO_MAX - TEMPO_MIN) / 0.05),
-            value=tempo_lesen(getattr(lauf, "tempo_faktor", 1.0)),
+            value=geschwindigkeit(getattr(lauf, "tempo_faktor", 1.0)),
             round=2,
             expand=True,
             on_change=self._gezogen,
@@ -587,7 +593,12 @@ class TempoRegler:
             visible=False,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
-                ft.Icon(ft.Icons.SPEED, size=18, opacity=0.8, tooltip="Tempo — für jetzt"),
+                ft.Icon(
+                    ft.Icons.SPEED,
+                    size=18,
+                    opacity=0.8,
+                    tooltip="Tempo — für jetzt (rechts schneller, 2× = halbe Dauern)",
+                ),
                 self.text,
                 self.regler,
             ],
@@ -596,7 +607,7 @@ class TempoRegler:
 
     def _zeigen(self, faktor: float | None = None) -> None:
         if faktor is None:
-            faktor = tempo_lesen(self.regler.value or 1.0)
+            faktor = faktor_von(self.regler.value or 1.0)
         self.text.value = tempo_text(faktor)
 
     def _gezogen(self, e: ft.Event[ft.Slider]) -> None:
@@ -604,14 +615,14 @@ class TempoRegler:
         erst beim Loslassen (`_losgelassen`), sonst wäre jeder Zwischenwert ein ``timer/takt``,
         ein Takt-Lauf und ein Notizpaar (Prüfrunde 1, Befund 3)."""
         ohne_auto_update()  # beim Ziehen dauernd (V1)
-        self._zeigen(tempo_lesen(e.control.value))
+        self._zeigen(faktor_von(e.control.value))
         with contextlib.suppress(Exception):
             self.text.update()
 
     def _losgelassen(self, e: ft.Event[ft.Slider]) -> None:
         """Losgelassen: eine abgeschlossene Änderung — ein Tempo für den Lauf und die Sitzung."""
         ohne_auto_update()
-        faktor = tempo_lesen(e.control.value)
+        faktor = faktor_von(e.control.value)
         self.lauf.tempo_setzen(faktor)
         with contextlib.suppress(Exception):
             self.state.uhr_tempo[self.key] = faktor

@@ -328,6 +328,12 @@ THEMEN: dict[str, tuple[str, str, str]] = {
 
 def hilfe_dialog(thema: str = "notation") -> ft.AlertDialog:
     titel, text, _ = THEMEN[thema]
+    return text_dialog(titel, text)
+
+
+def text_dialog(titel: str, text: str) -> ft.AlertDialog:
+    """Ein Hilfefenster mit Markdown — für Themen (`hilfe_dialog`) und Texte, die eine Seite
+    selbst zusammenstellt (das „i“ der Übungsseite)."""
     return ft.AlertDialog(
         title=ft.Text(titel),
         content=ft.Container(width=420, content=ft.Markdown(text)),
@@ -368,4 +374,5 @@ __all__ = [
     "hilfe_knopf",
     "hilfe_oeffner",
     "notation_dialog",
+    "text_dialog",
 ]

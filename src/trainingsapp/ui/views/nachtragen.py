@@ -213,7 +213,7 @@ def nachtragen_blatt(page: Any, state: AppState, tag: date, basis: str) -> ft.Bo
         hint_text="Übung suchen",
         prefix_icon=ft.Icons.SEARCH,
         dense=True,
-        border_radius=24,
+        border=ft.OutlineInputBorder(border_radius=24),
         on_change=gesucht,
     )
     titel = "Übung nachtragen" if tag == heute else f"Nachtragen · {tag:%d.%m.}"

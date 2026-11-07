@@ -247,7 +247,9 @@ Nutzerrechten, hier nicht zu aggressiv sein.“ Videos höchstens zehn Minuten. 
   bei 720p 3,9 Mbit/s ≈ 30 MB je Minute) und schreibt den Ort des Originals ins Ergebnis;
   light_compressor kennt nur ganze Mbit/s und lädt seine Bibliothek von JitPack.
 - **Netz darunter:** Was die Erweiterung liefert, prüft die App noch einmal:
-  `core.anhaenge.jpeg_ohne_metadaten` (APP1/APP13/Kommentare weg, Bilddaten unverändert)
+  `core.anhaenge.jpeg_ohne_metadaten` (APP1/APP13/Kommentare weg, Bilddaten unverändert;
+  nur die Exif-Ausrichtung kommt als eigenes 34-Byte-Exif zurück — sonst stand ein
+  Kamerafoto als Übungsbild 90° gekippt, Ben 7.11.2026)
   und `data.anhaenge.mp4_ort_entfernen` (``©xyz``, ``loci``, ``meta`` im ``moov`` werden zu
   ``free`` — gleiche Größe, alle Versätze bleiben gültig). Die Kopie der Auswahl wird gleich
   nach dem Verkleinern gelöscht.

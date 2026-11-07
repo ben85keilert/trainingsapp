@@ -33,6 +33,7 @@ anderen Übung, kommt dessen Meldung mit „Eintragen“ (`components.zaehlen.me
 from __future__ import annotations
 
 import contextlib
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -129,7 +130,7 @@ def uhr_teile(
     """
     e = laufende(state, uebung, item)
     if e is not None and e.timer is not None:
-        return UhrTeile(zeile=_laufend(page, state, e))
+        return UhrTeile(zeile=_laufend(page, state, e, fokus=timer_oeffnen))
     key = schluessel(uebung, item)
     #: „zählt“ — für jetzt, sonst wie die Übung (P79 D2)
     zaehlt = state.uhr_zaehlt.get(key, uebung.zeit_zaehlt)
@@ -199,8 +200,23 @@ def uhr_teile(
             state.uebung_laeufe[uebung.id] = lauf.id
             zaehlen.meldung_zeigen(page, state)  # ein Zählen einer anderen Übung endete
             state.neu_zeichnen()
+            fokus_oeffnen()
 
         return handler
+
+    def fokus_oeffnen() -> None:
+        """Einstellungen → „Fokus beim Start der Uhr öffnen“ (7.11.2026): die Trainingsansicht
+        zur laufenden Uhr — der Timer dieser Übung, der bei laufender Uhr das „Während“ zeigt.
+        Kein Zwang: aus heißt, die Uhr bleibt in der Übung."""
+        if not state.fokus_auto() or not hasattr(page, "run_task"):
+            return
+
+        async def gehen() -> None:
+            ergebnis = timer_oeffnen()
+            if inspect.isawaitable(ergebnis):
+                await ergebnis
+
+        page.run_task(gehen)
 
     def bereitstellen(profil: TimerProfil) -> Callable[[], None]:
         def handler() -> None:
@@ -388,10 +404,14 @@ def _knoepfe(
     return [uhr, auswahl]
 
 
-def _laufend(page: Any, state: Any, e: Einheitslauf) -> ft.Control:
+def _laufend(
+    page: Any, state: Any, e: Einheitslauf, fokus: Callable[[], object] | None = None
+) -> ft.Control:
     """Die laufende Uhr der Übung: Zeit, Anhalten bzw. Weiter, Fertig, Abbrechen — sie
     zählt im Takt des Tickers mit (`AppState.timer_beobachter`). Zählt der Sensor mit, steht
-    darunter die Zahl mit ±1 (`components.zaehlen.neben_der_uhr`, im Takt der Einheit)."""
+    darunter die Zahl mit ±1 (`components.zaehlen.neben_der_uhr`, im Takt der Einheit).
+    ``fokus`` öffnet den **Fokus** (7.11.2026): die Trainingsansicht zur laufenden Uhr — ein
+    Knopf oben rechts in der Karte, kein Zwang."""
     assert e.timer is not None
     lauf = e.timer.lauf
     teil = e.teil("plan")
@@ -468,11 +488,24 @@ def _laufend(page: Any, state: Any, e: Einheitslauf) -> ft.Control:
             controls=[
                 ft.Row(
                     spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
                         ft.Icon(_symbol(lauf.profil), size=18, opacity=0.85),
                         oben,
                         # Ob die Zeit zählt, steht auch beim Laufen da (P79 D1)
                         ft.Text("zählt" if zaehlt else "zählt nicht", size=12, opacity=0.75),
+                        *(
+                            [
+                                ft.IconButton(
+                                    ft.Icons.OPEN_IN_FULL,
+                                    icon_size=20,
+                                    tooltip="Fokus — Trainingsansicht zur laufenden Uhr",
+                                    on_click=fokus,
+                                )
+                            ]
+                            if fokus is not None
+                            else []
+                        ),
                     ],
                 ),
                 zeit,

@@ -163,8 +163,8 @@ async def test_takt_blatt_vorlagen_phasen_tempo_und_knoepfe(state) -> None:
     # Der Tempo-Regler: 0,5×–2×, Rate und Rundendauer ziehen nach
     regler = _regler(blatt)
     assert (regler.min, regler.max) == (0.5, 2.0)
-    regler.on_change(_ereignis(regler, 2.0))
-    assert "Tempo 2,0×" in _texte(blatt) and "1,9/min · Runde 32 s" in " ".join(_texte(blatt))
+    regler.on_change(_ereignis(regler, 2.0))  # 2× = doppelt so schnell (7.11.2026)
+    assert "Tempo 2,0×" in _texte(blatt) and "7,5/min · Runde 8 s" in " ".join(_texte(blatt))
     # Eine unlesbare Dauer: kein Knopf greift, das Feld ist markiert
     sekunden = _felder(blatt, "s")
     sekunden[1].value = "x"
@@ -175,7 +175,7 @@ async def test_takt_blatt_vorlagen_phasen_tempo_und_knoepfe(state) -> None:
     await blatt.on_dismiss(None)  # das Blatt ist zu — jetzt läuft die Aktion
     (t,) = jetzt
     assert (
-        isinstance(t, Takt) and t.tempo == 2.0 and [p.dauer_s for p in t.phasen] == [4, 2.5, 4, 4]
+        isinstance(t, Takt) and t.tempo == 0.5 and [p.dauer_s for p in t.phasen] == [4, 2.5, 4, 4]
     )
     assert [p.art for p in t.phasen] == ["ein", "halten", "aus", "halten"]
     # Die Vorschau läuft im Blatt: eine Anzeige mit dem Namen der ersten Phase
@@ -217,7 +217,7 @@ def test_takt_zeile_text() -> None:
     assert takt_zeile_text(None) == "Takt: keiner"
     assert takt_zeile_text(AUS) == "Takt: keiner"
     assert takt_zeile_text(VORLAGEN["box_4"].mit_tempo(1.5)) == (
-        "Takt: Box 4-4-4-4 · 4-4-4-4 · 1,5× · 2,5/min"
+        "Takt: Box 4-4-4-4 · 4-4-4-4 · 0,67× · 2,5/min"
     )
 
 
@@ -388,7 +388,7 @@ def test_takt_knopf_fuer_jetzt_und_am_lauf(state) -> None:
     assert neu.tempo_faktor == 1.5 and neu.tempo_aenderungen == []
     # Der Regler im Lauf
     regler = TempoRegler(state, "u1", neu)
-    assert regler.text.value == "1,5×" and regler.control.visible is False
+    assert regler.text.value == "0,67×" and regler.control.visible is False  # Geschwindigkeit
     regler.nachziehen(True)
     assert regler.control.visible
     # Beim Ziehen nur der Text (Befund 3), beim Loslassen das Tempo — eine Änderung im Lauf
@@ -399,7 +399,7 @@ def test_takt_knopf_fuer_jetzt_und_am_lauf(state) -> None:
     assert "u1" not in state.uhr_tempo or state.uhr_tempo["u1"] == 1.5
     assert neu.tempo_aenderungen == []
     regler.regler.on_change_end(_ereignis(regler.regler, 0.75))
-    assert neu.tempo_faktor == 0.75 and state.uhr_tempo["u1"] == 0.75
+    assert neu.tempo_faktor == 1.33 and state.uhr_tempo["u1"] == 1.33  # 0,75× = längere Dauern
     assert regler.text.value == "0,75×" and len(neu.tempo_aenderungen) == 1
 
 
@@ -555,14 +555,14 @@ def test_laufende_uhr_zeigt_rate_und_tempo_des_wirksamen_takts(state) -> None:
     assert "Runde 1 · 6,0/min" in _texte(anzeige)
     lauf.tempo_setzen(2.0)
     state.timer_beobachter["uhr_in_der_uebung"]()
-    assert "Runde 1 · 3,0/min · 2,0×" in _texte(anzeige)
+    assert "Runde 1 · 3,0/min · 0,5×" in _texte(anzeige)  # halb so schnell
     # Groß ebenso — und „Schließen“ trifft genau diesen Dialog (Befund 10)
     gross = next(
         k for k in _alle(anzeige) if isinstance(k, ft.Container) and k.on_click and _texte(k)
     )
     gross.on_click()
     dialog = page.dialoge[-1]
-    assert isinstance(dialog, ft.AlertDialog) and "Runde 1 · 3,0/min · 2,0×" in _texte(dialog)
+    assert isinstance(dialog, ft.AlertDialog) and "Runde 1 · 3,0/min · 0,5×" in _texte(dialog)
     dialog.open = True
     page.dialoge.append("meldung")  # eine SnackBar obenauf
     _knopf(dialog, "Schließen").on_click()

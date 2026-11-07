@@ -719,10 +719,15 @@ class SettingRepo:
     TIMER_BIBLIOTHEK_AKTIV = "timer_bibliothek_aktiv"
     #: Bluetooth: Geräte, mit denen die App schon verbunden war (JSON, `devices.bekannte`)
     BEKANNTE_GERAETE = "bekannte_geraete"
-    #: Plan: wie die Übungen beim Training aussehen (`ui.state.PLAN_DARSTELLUNGEN`)
-    PLAN_DARSTELLUNG = "plan_darstellung"
+    # ``plan_darstellung`` (drei Darstellungen des Planblocks) entfiel am 7.11.2026 — eine
+    # alte Zeile in ``setting`` bleibt ungelesen liegen
     #: Wo Stoppuhr und Timer in der Übung stehen (`ui.state.UHR_DARSTELLUNGEN`)
     UHR_DARSTELLUNG = "uhr_darstellung"
+    #: Fokus (7.11.2026): die Trainingsansicht öffnet sich von selbst, wenn die Uhr einer
+    #: Übung startet („1“) — Vorgabe aus, kein Zwang
+    FOKUS_AUTO = "fokus_auto"
+    #: Fokus: welche Ebenen gezeigt werden (`ui.state.FOKUS_EBENEN`, Komma-Liste)
+    FOKUS_EBENEN = "fokus_ebenen"
     #: Taktgeber (`core.takt`): eigene Takte (JSON-Liste, `takte_lesen`) und ob am
     #: Phasenwechsel vibriert wird ("1" = ja, Vorgabe; P140 offen, so gebaut)
     TAKT_BIBLIOTHEK = "takt_bibliothek"

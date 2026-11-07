@@ -489,7 +489,7 @@ class _YZeile:
             hint_text="auto",
             dense=True,
             width=96,
-            border_radius=ECKIG_RADIUS,
+            border=ft.OutlineInputBorder(border_radius=ECKIG_RADIUS),
             disabled=not an,
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.RIGHT,
@@ -633,7 +633,7 @@ def darstellung_blatt(
             hint_text="z. B. 45, 2 min, 1 h — 3 s bis 24 h",
             dense=True,
             visible=False,
-            border_radius=ECKIG_RADIUS,
+            border=ft.OutlineInputBorder(border_radius=ECKIG_RADIUS),
             keyboard_type=ft.KeyboardType.DATETIME,
         )
         wahl = ft.Dropdown(
@@ -641,7 +641,7 @@ def darstellung_blatt(
             options=fenster_optionen(kz, jetzt),
             dense=True,
             expand=True,
-            border_radius=ECKIG_RADIUS,
+            border=ft.OutlineInputBorder(border_radius=ECKIG_RADIUS),
         )
 
         def gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
@@ -736,7 +736,7 @@ def darstellung_blatt(
                 options=[ft.DropdownOption(key=str(x), text=f"{x} ms") for x in PNN_WAHL],
                 on_select=pnn_setzen,
                 dense=True,
-                border_radius=ECKIG_RADIUS,
+                border=ft.OutlineInputBorder(border_radius=ECKIG_RADIUS),
             )
         )
     if kurven_teil:
@@ -794,7 +794,7 @@ def darstellung_blatt(
                     ],
                     on_select=puffer_gewaehlt,
                     dense=True,
-                    border_radius=ECKIG_RADIUS,
+                    border=ft.OutlineInputBorder(border_radius=ECKIG_RADIUS),
                     tooltip="Gilt ab der nächsten Verbindung; so lang darf die Zeitachse sein",
                 )
             )

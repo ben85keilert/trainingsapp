@@ -187,14 +187,19 @@ async def test_uhr_neben_dem_i_im_plan(umgebung) -> None:
     state.plaene.speichern(plan)
     gespeichert = state.plaene.laden(plan.id)
     assert gespeichert is not None
-    ansicht = plan_view(Seite(), state, gespeichert)
-    uhren = [
-        x
-        for x in _alle(ansicht)
-        if isinstance(x, ft.IconButton) and x.icon in (ft.Icons.TIMER, ft.Icons.TIMER_OUTLINED)
-    ]
-    assert [u.tooltip for u in uhren] == ["Timer dieser Übung", "Timer festlegen"]
-    assert any("Timer: Halten 3 × 10 s" in t for t in _texte(ansicht))
+    tipps = []
+    for item in gespeichert.items:  # eine Übung je Bild (7.11.2026): je Block eine Uhr
+        state.plan_gezeigt[gespeichert.id] = item.id
+        ansicht = plan_view(Seite(), state, gespeichert)
+        uhren = [
+            x
+            for x in _alle(ansicht)
+            if isinstance(x, ft.IconButton) and x.icon in (ft.Icons.TIMER, ft.Icons.TIMER_OUTLINED)
+        ]
+        tipps += [u.tooltip for u in uhren]
+        if item is gespeichert.items[0]:
+            assert any("Timer: Halten 3 × 10 s" in t for t in _texte(ansicht))
+    assert tipps == ["Timer dieser Übung", "Timer festlegen"]
 
 
 async def test_editor_baut_eine_folge_mit_zaehlt(umgebung) -> None:

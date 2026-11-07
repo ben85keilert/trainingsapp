@@ -328,7 +328,7 @@ def alarm_zeilen(
         value=f"{e.alarm_bpm:g}" if e.alarm_bpm else "",
         dense=True,
         width=130,
-        border_radius=8,
+        border=ft.OutlineInputBorder(border_radius=8),
         keyboard_type=ft.KeyboardType.NUMBER,
         text_align=ft.TextAlign.RIGHT,
     )
@@ -389,7 +389,7 @@ def alarm_zeilen(
                     on_select=takt_gewaehlt,
                     dense=True,
                     width=130,
-                    border_radius=8,
+                    border=ft.OutlineInputBorder(border_radius=8),
                 ),
                 ft.Dropdown(
                     label="Klang",
@@ -400,7 +400,7 @@ def alarm_zeilen(
                     on_select=klang_gewaehlt,
                     dense=True,
                     width=190,
-                    border_radius=8,
+                    border=ft.OutlineInputBorder(border_radius=8),
                 ),
             ],
         ),

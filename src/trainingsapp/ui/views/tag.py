@@ -468,10 +468,9 @@ def tagesansicht(
 
     def weiter(plan: Plan, item: PlanItem) -> Callable[[], Any]:
         """„Weiter mit …“: den Plan öffnen, bei dieser Übung (Ben, 18.10.2026: „nicht ganz
-        nach oben in den Plan“) — oben im Bild und aufgeklappt."""
+        nach oben in den Plan“) — der Plan zeigt sie (`AppState.plan_ziel`)."""
 
         async def handler() -> None:
-            state.plan_offen = item.id
             state.plan_ziel = item.id
             await page.push_route(f"/plan/{plan.id}")
 

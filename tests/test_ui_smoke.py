@@ -429,7 +429,6 @@ def test_planansicht_mit_mehreren_parametern(page, welt) -> None:
     plan = state.plaene.laden(plan.id)
     for stufe in ("chips", "frei"):
         state.plaene.eingabe_setzen(item.id, stufe)
-        state.parameter_wahl[item.id] = "hold"
         assert plan_view(page, state, state.plaene.laden(plan.id)) is not None
     assert state.auspraegung_wahl[item.id] == {"angle": 45}  # aus dem Ziel vorgewählt
 
@@ -694,13 +693,11 @@ def _block(ansicht, name: str):
 
 
 def test_planblock_geleistet_oben_zahlentastatur_und_saetze(page, beinachse) -> None:
-    """Alle Parameter untereinander: eine Karte „Eintragen“, je Menge eine Zeile (P70 = E2),
+    """Eine Karte „Eintragen“, je Menge eine Zeile (P70 = E2),
     nur Zahlenfelder, Sätze × Wert; die Skala steht in der Ausführung (P71)."""
-    from trainingsapp.ui.state import UNTEREINANDER
     from trainingsapp.ui.views.plan import plan_view
 
     state, plan, _item, u = beinachse
-    state.plan_darstellung_setzen(UNTEREINANDER)
     block = _block(plan_view(page, state, plan), "Beinachsentraining")
     texte = _texte(block)
     assert "Heute noch nichts eingetragen" in texte and "EINTRAGEN" in texte
@@ -761,7 +758,6 @@ def test_planblock_nach_dem_auffrischen_nicht_eingefroren(page, beinachse) -> No
     from flet.controls.object_patch import ObjectPatch
     from flet.messaging.protocol import configure_encode_object_for_msgpack
 
-    from trainingsapp.ui.state import UNTEREINANDER
     from trainingsapp.ui.views.plan import plan_view
 
     kodierer = configure_encode_object_for_msgpack(BaseControl)
@@ -771,7 +767,6 @@ def test_planblock_nach_dem_auffrischen_nicht_eingefroren(page, beinachse) -> No
         msgpack.packb(patch.to_message(), default=kodierer)
 
     state, plan, _item, _u = beinachse
-    state.plan_darstellung_setzen(UNTEREINANDER)
     ansicht = plan_view(page, state, plan)
     senden(None, ansicht)  # das erste Zeichnen
     page.update = lambda: senden(ansicht, ansicht)
@@ -822,63 +817,6 @@ def test_planblock_skala_ist_der_schiebebalken_fuer_den_offenen_eintrag(page, be
     regler.value = 6.0
     regler.on_change_end(None)
     assert [e.result.get("scale") for e in eigene()] == [6]  # derselbe Eintrag, korrigiert
-
-
-def test_planblock_umschalten_und_aufklappen(page, beinachse) -> None:
-    from trainingsapp.ui.state import AUFKLAPPEN, PLAN_DARSTELLUNGEN, UMSCHALTEN
-    from trainingsapp.ui.views.plan import plan_view
-
-    state, plan, item, _u = beinachse
-
-    # Umschalten: ein Segment je Parameter in der Ausführung (Skizze C1), nur einer zu sehen
-    state.plan_darstellung_setzen(UMSCHALTEN)
-    block = _block(plan_view(page, state, plan), "Beinachsentraining")
-    schalter = next(
-        c
-        for c in _alle(block)
-        if isinstance(c, ft.SegmentedButton)
-        and "Wiederholungen" in [s.label.value for s in c.segments]
-    )
-    namen = [s.label.value for s in schalter.segments]
-    assert {"Wiederholungen", "Haltezeit"} <= set(namen)
-    # Die Skala steht immer in der Ausführung (P71), sie ist kein Parameter zum Umschalten
-    assert "Stabilität" not in namen
-    assert sum(isinstance(c, ft.Slider) for c in _alle(block)) == 1
-    schalter.selected = [next(s.value for s in schalter.segments if s.label.value == "Haltezeit")]
-    schalter.on_change(SimpleNamespace(control=schalter))
-    block = _block(plan_view(page, state, plan), "Beinachsentraining")
-    assert state.parameter_wahl[item.id] == "hold"
-    assert "Haltezeit" in _texte(block) and "Wdh." not in _texte(block)  # nur die gewählte
-
-    # Aufklappen: Die erste Übung ohne Eintrag ist offen, die anderen zu
-    state.plan_darstellung_setzen(AUFKLAPPEN)
-    state.plan_offen = None
-    ansicht = plan_view(page, state, plan)
-    offen = [
-        b
-        for b in next(
-            c for c in ansicht.controls[0].content.controls if isinstance(c, ft.ListView)
-        ).controls
-        if "EINTRAGEN" in _texte(b)
-    ]
-    assert len(offen) <= 1
-    block = _block(ansicht, "Beinachsentraining")
-    if "EINTRAGEN" not in _texte(block):
-        # „Werte“ statt „Eintragen“ (Ben, 21.10.2026): das Wort hatte drei Bedeutungen
-        _knopf_mit_text(block, "Werte").on_click()
-        block = _block(plan_view(page, state, plan), "Beinachsentraining")
-    assert state.plan_offen == item.id and "EINTRAGEN" in _texte(block)
-    _knopf_mit_text(block, "Zuklappen").on_click()
-    assert state.plan_offen is None
-
-    # Das Menü oben im Plan schaltet um und merkt es sich
-    ansicht = plan_view(page, state, plan)
-    menue = next(c for v in ansicht.controls for c in _alle(v) if isinstance(c, ft.PopupMenuButton))
-    assert [i.data for i in menue.items] == list(PLAN_DARSTELLUNGEN)
-    next(i for i in menue.items if i.data == UMSCHALTEN).on_click()
-    assert state.plan_darstellung() == UMSCHALTEN
-    assert [i.checked for i in menue.items] == [k == UMSCHALTEN for k in PLAN_DARSTELLUNGEN]
-    assert PLAN_DARSTELLUNGEN[UMSCHALTEN] in _texte(menue.content)
 
 
 def test_editor_typ_mit_plus_und_skala_mit_namen(page, welt) -> None:

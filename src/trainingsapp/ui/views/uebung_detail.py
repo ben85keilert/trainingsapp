@@ -8,14 +8,19 @@ einem Plan, über „Im Plan einstellen“ (Karte „In diesem Plan“ oben, Abs
 Aus welchem Paket die Übung kommt, steht unscheinbar in Klammern hinter der
 Beschreibung (Ben, 14.10.2026) — „eigene Übung“, wenn sie hier angelegt oder
 kopiert wurde. Weicht eine Paketübung von ihrem Paketstand ab, steht dort
-„geändert“, und ganz unten führt „Auf Paketstand zurücksetzen“ zurück
-(`PaketRepo.zuruecksetzen`). Die Erklärung der Varianten stand früher in jeder
-Übung; sie steht jetzt allgemein in der Hilfe (`ui/components/hilfe.UEBUNGEN_MD`).
+„geändert“ und unten, was abweicht; zurück führt „Auf Paketstand zurücksetzen“ unter
+„Übung bearbeiten“ (Ben, 7.11.2026, `PaketRepo.zuruecksetzen`). Die Erklärung der Varianten
+stand früher in jeder Übung; sie steht jetzt allgemein in der Hilfe
+(`ui/components/hilfe.UEBUNGEN_MD`).
+
+Übersichtlicher (Ben, 7.11.2026): Die Regionen stehen ohne Überschrift unter dem Typ, das Bild
+ist groß (`KOPF_BILD`), „Videos und Links“ und „Aufnahmen mit dieser Übung“ erscheinen nur mit
+Inhalt, und Erklärtexte stehen nicht mehr auf der Seite, sondern hinter **einem** „i“ oben
+(`seitenhilfe`) — auch die zu „Zählt als“.
 """
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -48,15 +53,20 @@ from trainingsapp.core.uebung_timer import (
     uhr_an,
     zaehlt_als,
 )
-from trainingsapp.ui.components.dialoge import Nachher, meldung, schliessen
+from trainingsapp.ui.components.dialoge import Nachher, meldung
+from trainingsapp.ui.components.hilfe import text_dialog
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.components.planstand import stand_zeile
 from trainingsapp.ui.components.uebungsbild import uebungsbild
-from trainingsapp.ui.components.varianten import plakette
+from trainingsapp.ui.components.varianten import etikett
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang_verlauf import aufnahmen_raster
 from trainingsapp.ui.views.uebung_timer import uebung_timer_route
+
+#: Kantenlänge des Übungsbilds im Kopf (Ben, 7.11.2026: „deutlich größer, dass man
+#: Symbole/Grafiken usw. gut erkennen könnte“ — vorher 64)
+KOPF_BILD = 128
 
 
 def _beschreibung(uebung: Exercise, herkunft: str) -> ft.Control:
@@ -111,7 +121,31 @@ def uhr_und_timer(uebung: Exercise, item: PlanItem | None = None) -> ft.Control:
                 takt.kurztext() + " · " + " · ".join(p.anzeigename for p in takt.phasen),
             )
         )
-    if not an:
+    zaehlt, _erklaerung = zaehlt_als_text(uebung, item)
+    zeilen.append(
+        ft.Container(
+            padding=12,
+            border_radius=12,
+            bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
+            content=ft.Column(
+                spacing=2,
+                controls=[
+                    ft.Text("Zählt als", size=12, opacity=0.7),
+                    ft.Text(zaehlt, size=17, weight=ft.FontWeight.W_600),
+                ],
+            ),
+        )
+    )
+    wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
+    if item is not None and (wahl.uhr is not None or wahl.profil_id or wahl.eigen):
+        zeilen.append(ft.Text("In diesem Plan eingestellt (Einstellen).", size=12, opacity=0.6))
+    return ft.Column(spacing=8, controls=zeilen)
+
+
+def zaehlt_als_text(uebung: Exercise, item: PlanItem | None = None) -> tuple[str, str]:
+    """Was die Uhr einträgt — („Zeit“, Erklärung). Die Erklärung steht im „i“ der Seite
+    (`seitenhilfe`), nicht mehr unter dem Kasten (Ben, 7.11.2026)."""
+    if not uhr_an(uebung, item):
         zaehlt, erklaerung = "nichts (Uhr aus)", "Keine Uhr in der Übung — „Gemacht“ hakt nur ab."
     elif not uebung.zeit_zaehlt:
         zaehlt = "nichts — nur „gemacht“"
@@ -134,25 +168,45 @@ def uhr_und_timer(uebung: Exercise, item: PlanItem | None = None) -> ft.Control:
             )
             + ". Pausen zählen nicht, unter 5 s fällt weg; „Abbrechen“ trägt nichts ein."
         )
-    zeilen.append(
-        ft.Container(
-            padding=12,
-            border_radius=12,
-            bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
-            content=ft.Column(
-                spacing=2,
-                controls=[
-                    ft.Text("Zählt als", size=12, opacity=0.7),
-                    ft.Text(zaehlt, size=17, weight=ft.FontWeight.W_600),
-                    ft.Text(erklaerung, size=12, opacity=0.75),
-                ],
-            ),
-        )
+    return zaehlt, erklaerung
+
+
+def seitenhilfe(uebung: Exercise, item: PlanItem | None = None) -> str:
+    """Das eine „i“ der Übungsseite (Ben, 7.11.2026: „In dieser View reicht ein ‚i‘ für die
+    ganze Seite“) — was die Abschnitte bedeuten, samt der Erklärung zu „Zählt als“."""
+    zaehlt, erklaerung = zaehlt_als_text(uebung, item)
+    aendern = "Geändert wird über den Stift („Übung bearbeiten“, gilt überall)" + (
+        " oder über „Im Plan einstellen“ (gilt nur in diesem Plan)." if item is not None else "."
     )
-    wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
-    if item is not None and (wahl.uhr is not None or wahl.profil_id or wahl.eigen):
-        zeilen.append(ft.Text("In diesem Plan eingestellt (Einstellen).", size=12, opacity=0.6))
-    return ft.Column(spacing=8, controls=zeilen)
+    teile = [
+        f"**Diese Seite zeigt die Übung und ändert nichts.** {aendern}",
+        "**Oben** stehen Typ und Regionen, darunter die Beschreibung — in Klammern, woher die "
+        "Übung kommt (Paket oder eigene Übung).",
+        "**Parameter**: was beim Üben eingetragen wird. Die Kästchen sind die Chips zum "
+        "schnellen Tippen, „z. B.“ der Vorschlag im Feld.",
+    ]
+    if var.varianten(uebung.result_spec):
+        teile.append(
+            "**Varianten** werden jede für sich gezählt; ein langer Druck auf ein Schild zeigt "
+            "die Beschreibung, angelegt werden sie unter „Übung bearbeiten“."
+        )
+    teile.append(f"**Zählt als: {zaehlt}.** {erklaerung}")
+    if sensor_text(uebung, item) is not None:
+        teile.append(
+            "**Beschleunigungssensor** (Prototyp): Hat das verbundene Gerät einen, zählt er "
+            "beim Üben mit — „Wdh. zählen“ startet, ±1 korrigiert."
+        )
+    teile += [
+        "**In Plänen**: wo die Übung steht — „nur hier“ heißt, der Plan stellt etwas anders "
+        "ein als die Übung; ein Tipp öffnet „Im Plan einstellen“. In einen Plan kommt sie über "
+        "den Plan selbst (Bearbeiten → Hinzufügen).",
+        "**Aufnahmen mit dieser Übung** (erscheint, sobald es welche gibt): HRV-Messungen, in "
+        "denen Sätze dieser Übung liegen. Läuft beim Üben eine Aufnahme, bekommt jeder Satz "
+        "dort eine Marke; ein Tipp öffnet die Messung.",
+        "**Fotos und Videos**: eigene Aufnahmen aus den Einträgen dieser Übung — sie bleiben "
+        "auf diesem Gerät.",
+    ]
+    return "\n\n".join(teile)
 
 
 def _uhr_zeile(icon: ft.IconData, name: str, text: str) -> ft.Control:
@@ -199,19 +253,16 @@ def beschleunigung_zeile(uebung: Exercise, item: PlanItem | None = None) -> ft.C
     return _uhr_zeile(ft.Icons.SENSORS, *paar)
 
 
-def aufnahmen_liste(page: Any, state: AppState, uebung: Exercise) -> ft.Control:
+def aufnahmen_liste(page: Any, state: AppState, uebung: Exercise) -> ft.Control | None:
     """HRV-Aufnahmen, in denen Einträge dieser Übung liegen (Skizze D3, Plan C) — nur die
     Liste; Kurven und Kennzahlen stehen in der Aufnahme. Ein Tipp öffnet sie, gezoomt auf
-    die Einträge. Die HRV bleibt aus dem Verlauf der Übung (Katalog P39)."""
+    die Einträge. Die HRV bleibt aus dem Verlauf der Übung (Katalog P39). ``None`` ohne
+    Aufnahmen — dann fehlt der Abschnitt (Ben, 7.11.2026), der Hinweis steht im „i“."""
     if state.bezuege is None:
-        return ft.Text("—", opacity=0.6)
+        return None
     je_aufnahme = state.bezuege.zur_uebung(state.profil.id, uebung.id)
     if not je_aufnahme:
-        return ft.Text(
-            "Noch keine — läuft eine Aufnahme, bekommt jeder Satz dort eine Marke.",
-            size=13,
-            opacity=0.6,
-        )
+        return None
     heute = state.heute()
     zeilen: list[ft.Control] = []
     for aufnahme, bezuege in je_aufnahme[:12]:
@@ -303,30 +354,10 @@ def _notation(uebung: Exercise) -> ft.Control:
 
 
 def _varianten(liste: list[var.Variante]) -> ft.Control:
-    """Je Variante Zeichen, Name und Beschreibung (Ben, 21.10.2026, Skizze D3) — gezählt wird
-    jede für sich; angelegt und beschrieben unter „Bearbeiten“."""
-    return ft.Column(
-        spacing=8,
-        controls=[
-            ft.Row(
-                spacing=10,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-                controls=[
-                    plakette(v),
-                    ft.Column(
-                        spacing=1,
-                        tight=True,
-                        expand=True,
-                        controls=[
-                            ft.Text(v.name, weight=ft.FontWeight.W_600),
-                            *([ft.Text(v.text, size=12, opacity=0.75)] if v.text else []),
-                        ],
-                    ),
-                ],
-            )
-            for v in liste
-        ],
-    )
+    """Die Varianten als Schilder nebeneinander (Ben, 7.11.2026: „als Tag-Labels
+    nebeneinander“ — vorher je eine Zeile mit Beschreibung); die Beschreibung ist der Tipp
+    des Schilds. Gezählt wird jede für sich; angelegt werden sie unter „Bearbeiten“."""
+    return ft.Row(wrap=True, spacing=6, run_spacing=6, controls=[etikett(v) for v in liste])
 
 
 def _plan_karte(
@@ -411,6 +442,44 @@ def _plan_karte(
                 ),
             ],
         ),
+    )
+
+
+def _kopf(state: AppState, uebung: Exercise) -> ft.Control:
+    """Bild groß links, rechts Name, Typ und darunter die Regionen ohne Überschrift (Ben,
+    7.11.2026: „Bein/Hüfte würde unter Kräftigung gesetzt“)."""
+    mit_bild = state.uebungsbilder.vorhanden(uebung.image_path)
+    return ft.Row(
+        spacing=16,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[
+            ft.Container(
+                width=KOPF_BILD,
+                height=KOPF_BILD,
+                border_radius=KOPF_BILD * 0.22,
+                bgcolor=None if mit_bild else ft.Colors.SECONDARY_CONTAINER,
+                alignment=ft.Alignment.CENTER,
+                content=uebungsbild(
+                    state,
+                    uebung.icon_key,
+                    uebung.image_path,
+                    groesse=KOPF_BILD if mit_bild else KOPF_BILD * 0.55,
+                ),
+            ),
+            ft.Column(
+                spacing=2,
+                expand=True,
+                controls=[
+                    ft.Text(uebung.name, size=22, weight=ft.FontWeight.BOLD),
+                    ft.Text(", ".join(uebung.typen) or "ohne Typ", opacity=0.7),
+                    *(
+                        [ft.Text(", ".join(uebung.regionen), size=13, opacity=0.6)]
+                        if uebung.regionen
+                        else []
+                    ),
+                ],
+            ),
+        ],
     )
 
 
@@ -530,77 +599,7 @@ def uebung_detail(
         else "eigene Übung"
     )
 
-    nachher = Nachher()  # neu zeichnen erst, wenn der Dialog zu ist (`components/dialoge.py`)
-
-    def zuruecksetzen() -> None:
-        try:
-            state.pakete.zuruecksetzen([uebung.id])
-        except sqlite3.Error as fehler:
-            page.pop_dialog()
-            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht zurückgesetzt: {fehler}")))
-            return
-        nachher.danach(state.neu_zeichnen)
-        page.pop_dialog()
-        page.show_dialog(ft.SnackBar(ft.Text("Auf den Paketstand gesetzt")))
-
-    def zuruecksetzen_fragen() -> None:
-        page.show_dialog(
-            ft.AlertDialog(
-                modal=True,
-                on_dismiss=nachher.bei_schliessen,
-                title=ft.Text("Auf Paketstand zurücksetzen?"),
-                content=ft.Text(
-                    f"„{uebung.name}“ bekommt wieder den Stand aus dem Paket. Verloren geht "
-                    f"deine Änderung an: {', '.join(geaendert or [])}. Einträge bleiben."
-                ),
-                actions=[
-                    ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
-                    ft.FilledButton("Zurücksetzen", on_click=zuruecksetzen),
-                ],
-            )
-        )
-
     # -- In Plänen (P79): jede Zeile öffnet „Im Plan einstellen“ dieses Plans --------------
-
-    aufgenommen = Nachher()
-    auswahl: ft.AlertDialog
-
-    def aufnehmer(ziel: Plan) -> Callable[[], None]:
-        def handler() -> None:
-            state.plaene.uebung_hinzufuegen(ziel.id, uebung.id)
-            aufgenommen.danach(
-                lambda: page.show_dialog(
-                    ft.SnackBar(ft.Text(f"„{uebung.name}“ steht jetzt in „{ziel.name}“"))
-                )
-            )
-            aufgenommen.danach(state.neu_zeichnen)
-            schliessen(auswahl)
-
-        return handler
-
-    auswahl = ft.AlertDialog(
-        title=ft.Text("In einen Plan aufnehmen"),
-        on_dismiss=aufgenommen.bei_schliessen,
-        actions=[ft.TextButton("Abbrechen", on_click=lambda: schliessen(auswahl))],
-    )
-
-    def aufnehmen_fragen() -> None:
-        plaene = sorted(state.plaene.alle(state.profil.id), key=lambda p: (not p.aktiv, p.name))
-        auswahl.content = ft.Column(
-            tight=True,
-            scroll=ft.ScrollMode.AUTO,
-            controls=[
-                ft.ListTile(
-                    leading=ft.Icon(ft.Icons.LIST_ALT_OUTLINED),
-                    title=ft.Text(p.name),
-                    subtitle=None if p.aktiv else ft.Text("deaktiviert", size=12),
-                    on_click=aufnehmer(p),
-                )
-                for p in plaene
-            ]
-            or [ft.Text("Noch kein Plan — unter Übungen → Pläne anlegen.")],
-        )
-        page.show_dialog(auswahl)
 
     verwendungen: list[ft.Control] = []
     for p, it in state.plaene.verwendungen(uebung.id, state.profil.id):
@@ -620,13 +619,12 @@ def uebung_detail(
                 content_padding=ft.Padding.only(left=0, right=0),
             )
         )
+    if not verwendungen:
+        # Aufgenommen wird im Plan selbst (Ben, 7.11.2026: „gehört zu den Plänen“)
+        verwendungen.append(ft.Text("In keinem Plan.", size=13, opacity=0.6))
     if uebung.default_target:
         vorgabe = uebung.result_spec.format_shorthand(uebung.default_target)
         verwendungen.append(ft.Text(f"Vorgabe für Pläne: Ziel {vorgabe}", size=12, opacity=0.7))
-    if not geloescht:
-        verwendungen.append(
-            ft.TextButton("In einen Plan aufnehmen", icon=ft.Icons.ADD, on_click=aufnehmen_fragen)
-        )
 
     videos: list[ft.Control] = [
         ft.ListTile(
@@ -668,46 +666,13 @@ def uebung_detail(
             _plan_karte(uebung, plan, item, gehe_zu(einstellen) if einstellen else None)
         )
     abschnitte += [
-        ft.Row(
-            spacing=16,
-            controls=[
-                ft.Container(
-                    width=64,
-                    height=64,
-                    border_radius=16,
-                    bgcolor=None if uebung.image_path else ft.Colors.SECONDARY_CONTAINER,
-                    alignment=ft.Alignment.CENTER,
-                    content=uebungsbild(
-                        state,
-                        uebung.icon_key,
-                        uebung.image_path,
-                        groesse=64 if uebung.image_path else 36,
-                    ),
-                ),
-                ft.Column(
-                    spacing=2,
-                    expand=True,
-                    controls=[
-                        ft.Text(uebung.name, size=22, weight=ft.FontWeight.BOLD),
-                        ft.Text(", ".join(uebung.typen) or "ohne Typ", opacity=0.7),
-                    ],
-                ),
-            ],
-        ),
+        _kopf(state, uebung),
         _abschnitt("Beschreibung", _beschreibung(uebung, herkunft)),
-        _abschnitt(
-            "Videos und Links",
-            ft.Column(spacing=0, controls=videos)
+        # Nur mit Inhalt (Ben, 7.11.2026: „spart Platz und verwirrt weniger“)
+        *(
+            [_abschnitt("Videos und Links", ft.Column(spacing=0, controls=videos))]
             if videos
-            else ft.Text("Noch keine Videos oder Links hinterlegt.", opacity=0.6),
-        ),
-        _abschnitt(
-            "Regionen",
-            ft.Row(
-                wrap=True, spacing=6, controls=[ft.Chip(label=ft.Text(t)) for t in uebung.regionen]
-            )
-            if uebung.regionen
-            else ft.Text("—"),
+            else []
         ),
         _abschnitt("Parameter", _notation(uebung)),
         *(
@@ -722,7 +687,11 @@ def uebung_detail(
             else []
         ),
         _abschnitt("In Plänen", ft.Column(spacing=0, controls=verwendungen)),
-        _abschnitt("Aufnahmen mit dieser Übung", aufnahmen_liste(page, state, uebung)),
+        *(
+            [_abschnitt("Aufnahmen mit dieser Übung", liste_hrv)]
+            if (liste_hrv := aufnahmen_liste(page, state, uebung)) is not None
+            else []
+        ),
         # Eigene Fotos und Videos (Ben, 19.10.2026; `views/anhang_verlauf.py`) — nur mit Aufnahmen
         *(
             [_abschnitt("Fotos und Videos", raster)]
@@ -741,18 +710,22 @@ def uebung_detail(
                             f"Weicht vom Paket „{paket.name}“ ab: {', '.join(geaendert)}.",
                             size=13,
                         ),
-                        ft.TextButton(
-                            "Auf Paketstand zurücksetzen",
-                            icon=ft.Icons.RESTORE,
-                            on_click=zuruecksetzen_fragen,
-                        ),
+                        # Zurückgesetzt wird unter „Übung bearbeiten“ (Ben, 7.11.2026)
                     ],
                 ),
             )
         )
 
-    # Oben nur Timer, Stift und ⋮ (P79, Skizze C1) — im Papierkorb nichts davon
-    aktionen: list[ft.Control] = (
+    # Oben das i (die ganze Seite, 7.11.2026), Timer, Stift und ⋮ (P79, Skizze C1) — im
+    # Papierkorb nur das i
+    info = ft.IconButton(
+        ft.Icons.INFO_OUTLINE,
+        tooltip="Zu dieser Seite",
+        on_click=lambda: page.show_dialog(
+            text_dialog("Zu dieser Seite", seitenhilfe(uebung, item))
+        ),
+    )
+    aktionen: list[ft.Control] = [info] + (
         []
         if geloescht
         else [

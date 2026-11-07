@@ -118,8 +118,10 @@ keiner; A6, 5.11.2026) ist die Stufe „Übung“ aus Sicht des Laufs
 **Takt-Knopf an der Uhr** (Zeile und Knöpfe, `components/uhr.py`): ein Metronom-Symbol neben
 „zählt“; der Tipp öffnet das **Takt-Blatt** (`components/takt_blatt.py`, `blatt_spalte`):
 Vorlagen als Chips, darunter die Phasen des gewählten Takts als Zeilen (Name, Sekunden, Art,
-Klang), „+ Phase“, „Phase entfernen“, der **Tempo-Regler** (0,5×–2×, mit Rate/min und
-Rundendauer als Text), Vorschau (die Animation läuft im Blatt), „Für jetzt“ / „In die Übung“ /
+Klang), „+ Phase“, „Phase entfernen“, der **Tempo-Regler** (0,5×–2× als **Geschwindigkeit**:
+rechts schneller, 2× = halbe Dauern — gespeichert bleibt der Faktor auf die Dauern,
+`core.takt.geschwindigkeit`/`faktor_von`; Ben, 7.11.2026: „kleineres Tempo … langsamerer
+Ablauf“; mit Rate/min und Rundendauer als Text; eine **Bildfolge** — der Hinweg als Streifen quadratischer Bilder — läuft seit dem 7.11.2026 im Fokus je Takt-Lage vor und zurück, `core.bewegungsbild.bild_fuer_lage`, `docs/plan_planblock.md` §B), Vorschau (die Animation läuft im Blatt), „Für jetzt“ / „In die Übung“ /
 „In die Bibliothek“. Während die Uhr läuft, wirkt der Tempo-Regler sofort (die Lage springt
 nicht: die gelaufene Rundenzeit bleibt, die Phase wird neu skaliert).
 

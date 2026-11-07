@@ -118,23 +118,22 @@ from trainingsapp.devices.bekannte import (
 
 STANDARD_PROFILNAME = "Ich"
 
-#: Wie die Übungen im Plan beim Training aussehen (Ben, 14.10.2026: „Mache
-#: Vorschläge für verschiedene Layouts“). Umschalten unter Einstellungen →
-#: Übungen oder oben im Plan; gilt für dieses Gerät.
-UNTEREINANDER = "untereinander"
-UMSCHALTEN = "umschalten"
-AUFKLAPPEN = "aufklappen"
-PLAN_DARSTELLUNGEN: dict[str, str] = {
-    UNTEREINANDER: "Alle Parameter untereinander",
-    UMSCHALTEN: "Ein Parameter, umschaltbar",
-    AUFKLAPPEN: "Aufklappen: eine Übung offen",
-}
-
 
 #: Wo Stoppuhr und Timer in der Übung stehen (Ben, 18.10.2026: „Kannst du Variante A und
 #: B2 einbauen. In den Haupt-Einstellungen kann man beides umstellen, Standard ist A.“)
 UHR_ZEILE = "zeile"
 UHR_KNOEPFE = "knoepfe"
+#: Die Ebenen des Fokus (Trainingsansicht, 7.11.2026): Takt-Animation, Bild der Bewegung,
+#: Herzfrequenz — als Chips oben umschaltbar, gemerkt je Gerät
+FOKUS_TAKT = "takt"
+FOKUS_BEWEGUNG = "bewegung"
+FOKUS_HF = "hf"
+FOKUS_EBENEN: dict[str, str] = {
+    FOKUS_TAKT: "Takt",
+    FOKUS_BEWEGUNG: "Bewegung",
+    FOKUS_HF: "HF",
+}
+
 UHR_DARSTELLUNGEN: dict[str, str] = {
     UHR_ZEILE: "Eigene Zeile: links die Wahl, rechts Start",
     UHR_KNOEPFE: "Knöpfe „Uhr“ und „Timer“ neben „Gemacht“",
@@ -298,14 +297,15 @@ class AppState:
     #: Diese Route ersetzt beim nächsten Wechsel die oberste, statt dazuzukommen (Training
     #: beendet → Auswertung, die nächste Übung im Timer) — gilt nur für genau diese Route
     ersetzen_bei: str | None = None
-    #: Planansicht: je Planübung der gewählte Parameter („reps", „hold" …) und
-    #: die gewählten Ausprägungen ({"angle": 45}) — nur für diese Sitzung
-    parameter_wahl: dict[str, str] = field(default_factory=dict)
+    #: Planansicht: je Planübung die gewählten Ausprägungen ({"angle": 45}) — nur für
+    #: diese Sitzung
     auspraegung_wahl: dict[str, dict[str, Any]] = field(default_factory=dict)
-    #: Darstellung „Aufklappen": die Planübung, deren Eingabe offen ist
-    plan_offen: str | None = None
-    #: „Weiter“ auf „Heute“ (Ben, 18.10.2026): die Planübung, bei der der Plan beim
-    #: nächsten Öffnen steht — einmal, dann gilt wieder die gemerkte Scrollposition
+    #: Planansicht beim Üben (Ben, 7.11.2026: eine Übung je Bild): je Plan-ID die Planübung
+    #: (Item-ID), die gerade gezeigt wird — nur für diese Sitzung; überlebt `neu_zeichnen`
+    #: (Start der Uhr, Takt der Einheit)
+    plan_gezeigt: dict[str, str] = field(default_factory=dict)
+    #: „Weiter“ auf „Heute“ (Ben, 18.10.2026): die Planübung, die der Plan beim nächsten
+    #: Öffnen zeigt — einmal
     plan_ziel: str | None = None
     #: Nachtragen als Trainingsblock (P72, `views/nachtragen.py`): je Tag und Übung die Zeit,
     #: um die nachgetragen wird (``None`` = jetzt) — überlebt den Neubau der Ansicht und den
@@ -677,14 +677,25 @@ class AppState:
         rest = [a for a in self.ansichten() if a.name != name]
         self.einstellungen.setzen(SettingRepo.HRV_ANSICHTEN, ansichten_schreiben(rest))
 
-    def plan_darstellung(self) -> str:
-        """Wie die Übungen im Plan aussehen — ein Schlüssel aus `PLAN_DARSTELLUNGEN`."""
-        wert = self.einstellungen.lesen(SettingRepo.PLAN_DARSTELLUNG, UNTEREINANDER)
-        return wert if wert in PLAN_DARSTELLUNGEN else UNTEREINANDER
+    def fokus_auto(self) -> bool:
+        """Ob der Fokus (Trainingsansicht) beim Start der Uhr von selbst aufgeht (7.11.2026:
+        „Der Wechsel der Bildfläche ist kein Zwang“ — Vorgabe aus)."""
+        return self.einstellungen.lesen(SettingRepo.FOKUS_AUTO, "0") == "1"
 
-    def plan_darstellung_setzen(self, wert: str) -> None:
-        if wert in PLAN_DARSTELLUNGEN:
-            self.einstellungen.setzen(SettingRepo.PLAN_DARSTELLUNG, wert)
+    def fokus_auto_setzen(self, an: bool) -> None:
+        self.einstellungen.setzen(SettingRepo.FOKUS_AUTO, "1" if an else "0")
+
+    def fokus_ebenen(self) -> set[str]:
+        """Welche Ebenen der Fokus zeigt (`FOKUS_EBENEN`) — die Chips oben, je Gerät."""
+        roh = self.einstellungen.lesen(SettingRepo.FOKUS_EBENEN, "")
+        if not roh:
+            return set(FOKUS_EBENEN)
+        return {e for e in roh.split(",") if e in FOKUS_EBENEN}
+
+    def fokus_ebenen_setzen(self, ebenen: set[str]) -> None:
+        self.einstellungen.setzen(
+            SettingRepo.FOKUS_EBENEN, ",".join(e for e in FOKUS_EBENEN if e in ebenen) or "-"
+        )
 
     def uhr_darstellung(self) -> str:
         """Wo Stoppuhr und Timer in der Übung stehen — `UHR_ZEILE` (Vorgabe) oder
@@ -986,10 +997,10 @@ class AppState:
 
 
 __all__ = [
-    "AUFKLAPPEN",
-    "PLAN_DARSTELLUNGEN",
+    "FOKUS_BEWEGUNG",
+    "FOKUS_EBENEN",
+    "FOKUS_HF",
+    "FOKUS_TAKT",
     "STANDARD_PROFILNAME",
-    "UMSCHALTEN",
-    "UNTEREINANDER",
     "AppState",
 ]

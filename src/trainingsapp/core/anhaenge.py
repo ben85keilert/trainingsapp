@@ -32,6 +32,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import StrEnum
+from typing import Literal
 
 from .models import jetzt, lokaler_tag, new_id
 
@@ -559,7 +560,11 @@ def jpeg_ohne_metadaten(daten: bytes) -> bytes:
     r"""Ein JPEG ohne Exif, XMP, IPTC und Kommentare — die Bilddaten bleiben Byte für Byte.
 
     Die Erweiterung schreibt schon ohne Exif; das hier ist das Netz darunter (Regel wie GPS:
-    kein Ort in Anhängen). Kein JPEG → unverändert.
+    kein Ort in Anhängen). Kein JPEG → unverändert. Nur die **Ausrichtung** bleibt (Ben,
+    7.11.2026: „Aufnahmen von eigenen Bildern werden 90° verkippt“): Die Kamera speichert
+    das Bild so, wie der Sensor liegt, und die Drehung nur im Exif-Tag 0x0112 — ohne ihn
+    stand ein Hochkantfoto quer. Er kommt als eigenes, winziges Exif zurück
+    (`exif_nur_ausrichtung`), ohne Ort, Gerät oder Zeit.
 
     >>> jfif = b"\xff\xe0\x00\x06JFIF"
     >>> exif = b"\xff\xe1\x00\x0eExif\x00\x00GPS!!!"
@@ -570,10 +575,21 @@ def jpeg_ohne_metadaten(daten: bytes) -> bytes:
     (False, True)
     >>> jpeg_ohne_metadaten(b"kein jpeg")
     b'kein jpeg'
+
+    Ein Handyfoto, hochkant gehalten (Ausrichtung 6) — Ort weg, Drehung da, und ein zweiter
+    Durchlauf ändert nichts mehr:
+
+    >>> kamera = _exif_testsegment(6, b"GPS!!!")
+    >>> ohne = jpeg_ohne_metadaten(b"\xff\xd8" + jfif + kamera + scan)
+    >>> b"GPS" in ohne, ohne == b"\xff\xd8" + jfif + exif_nur_ausrichtung(6) + scan
+    (False, True)
+    >>> jpeg_ohne_metadaten(ohne) == ohne
+    True
     """
     if not daten.startswith(b"\xff\xd8"):
         return daten
     teile = [daten[:2]]
+    ausrichtung_da = False
     i = 2
     while i + 4 <= len(daten) and daten[i] == 0xFF:
         marker = daten[i + 1]
@@ -589,9 +605,75 @@ def jpeg_ohne_metadaten(daten: bytes) -> bytes:
         ende = i + 2 + int.from_bytes(daten[i + 2 : i + 4], "big")
         if marker not in _JPEG_WEG:
             teile.append(daten[i:ende])
+        elif marker == 0xE1 and not ausrichtung_da:
+            wert = exif_ausrichtung(daten[i + 4 : ende])
+            if wert is not None and wert != 1:  # 1 = aufrecht, braucht keinen Tag
+                teile.append(exif_nur_ausrichtung(wert))
+                ausrichtung_da = True
         i = ende
     teile.append(daten[i:])
     return b"".join(teile)
+
+
+def exif_ausrichtung(inhalt: bytes) -> int | None:
+    r"""Die Ausrichtung (Exif-Tag 0x0112, 1–8) aus dem Inhalt eines APP1-Segments (ab
+    ``Exif\0\0``) — ``None`` ohne Exif, ohne den Tag oder bei kaputten Versätzen.
+
+    >>> exif_ausrichtung(_exif_testsegment(6)[4:]), exif_ausrichtung(b"Exif\x00\x00GPS")
+    (6, None)
+    >>> exif_ausrichtung(exif_nur_ausrichtung(8)[4:]), exif_ausrichtung(b"http://ns.adobe")
+    (8, None)
+    """
+    if not inhalt.startswith(b"Exif\x00\x00"):
+        return None
+    tiff = inhalt[6:]
+    folge: Literal["little", "big"]
+    if tiff[:4] == b"II*\x00":
+        folge = "little"
+    elif tiff[:4] == b"MM\x00*":
+        folge = "big"
+    else:
+        return None
+    ifd = int.from_bytes(tiff[4:8], folge)
+    if len(tiff) < 8 or ifd + 2 > len(tiff):
+        return None
+    for k in range(int.from_bytes(tiff[ifd : ifd + 2], folge)):
+        e = ifd + 2 + 12 * k
+        if e + 12 > len(tiff):
+            return None
+        if int.from_bytes(tiff[e : e + 2], folge) == 0x0112:
+            wert = int.from_bytes(tiff[e + 8 : e + 10], folge)  # SHORT, linksbündig
+            return wert if 1 <= wert <= 8 else None
+    return None
+
+
+def exif_nur_ausrichtung(wert: int) -> bytes:
+    """Ein APP1-Segment, das nur die Ausrichtung trägt (`jpeg_ohne_metadaten`) — ein IFD mit
+    einem Eintrag, Big Endian, 34 Bytes."""
+    tiff = (
+        b"MM\x00*"
+        + (8).to_bytes(4, "big")  # IFD0 gleich hinter dem Kopf
+        + (1).to_bytes(2, "big")  # ein Eintrag
+        + (0x0112).to_bytes(2, "big")
+        + (3).to_bytes(2, "big")  # SHORT
+        + (1).to_bytes(4, "big")
+        + wert.to_bytes(2, "big")
+        + b"\x00\x00"
+        + (0).to_bytes(4, "big")  # kein weiteres IFD
+    )
+    inhalt = b"Exif\x00\x00" + tiff
+    return b"\xff\xe1" + (len(inhalt) + 2).to_bytes(2, "big") + inhalt
+
+
+def _exif_testsegment(wert: int, rest: bytes = b"") -> bytes:
+    """Für die Doctests: ein Exif wie aus einer Kamera (Little Endian, zwei Einträge vor dem
+    Ort), die Ausrichtung als zweiter Eintrag."""
+    eintraege = [(0x010F, 2, 4, b"Cam\x00"), (0x0112, 3, 1, wert.to_bytes(2, "little") + b"\0\0")]
+    tiff = b"II*\x00" + (8).to_bytes(4, "little") + len(eintraege).to_bytes(2, "little")
+    for tag, typ, n, w in eintraege:
+        tiff += tag.to_bytes(2, "little") + typ.to_bytes(2, "little") + n.to_bytes(4, "little") + w
+    inhalt = b"Exif\x00\x00" + tiff + (0).to_bytes(4, "little") + rest
+    return b"\xff\xe1" + (len(inhalt) + 2).to_bytes(2, "big") + inhalt
 
 
 #: Boxen, in denen ein MP4/MOV den Ort trägt: ``©xyz`` (Android, QuickTime), ``loci``
@@ -888,6 +970,8 @@ __all__ = [
     "countdown_text",
     "dateiname",
     "dauer_text",
+    "exif_ausrichtung",
+    "exif_nur_ausrichtung",
     "fehlende",
     "geschaetzte_bytes",
     "groesse_text",

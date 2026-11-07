@@ -5,6 +5,9 @@
 - `bewegungsbild_control` — das Bild als Schleife neben der Takt-Anzeige im „Während“ des
   Timers: ``ft.Image`` (Flutter spielt ein GIF von selbst, als Schleife — nicht synchron zum
   Takt); ``None``, wenn die Übung keins hat oder die Datei fehlt (anderes Gerät).
+- `Bildfolge` und `bewegung_im_fokus` (7.11.2026) — im Fokus: ein Streifen quadratischer Bilder
+  (der Hinweg, `core.bewegungsbild`) läuft im Takt vor und zurück, ein GIF als Schleife; ohne
+  eigenes Bild die mitgelieferte Folge zur Sensor-Vorlage (`ASSETS`, Kniebeuge).
 - `bewegungsbild_blatt` — das Blatt „Bild der Bewegung“ in „Übung bearbeiten“: „Foto
   hochladen“ und „Foto aufnehmen“ (dieselben Wege wie beim Symbol, `Ziel.fuer_bewegung`), die
   **Ablage** ``Medien/Bewegung/`` als Kacheln (Tipp wählt, ✕ löscht — Rückfrage, wenn eine andere
@@ -16,12 +19,22 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.bewegungsbild import bewegungsbild
-from trainingsapp.core.models import Exercise
+from trainingsapp.core import zaehlen as zl
+from trainingsapp.core.bewegungsbild import (
+    EINGEBAUT,
+    bewegungsbild,
+    bild_fuer_lage,
+    bild_fuer_zeit,
+    bilder_in,
+    png_masse,
+)
+from trainingsapp.core.models import Exercise, PlanItem
+from trainingsapp.core.takt import Lage, Takt
 from trainingsapp.data.uebungsbilder import Uebungsbild
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import schliessen
@@ -54,6 +67,88 @@ def bewegungsbild_control(
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         content=ft.Image(src=pfad, height=hoehe, fit=ft.BoxFit.CONTAIN, gapless_playback=True),
     )
+
+
+#: Wo die mitgelieferten Bildfolgen liegen (`core.bewegungsbild.EINGEBAUT`)
+ASSETS = Path(__file__).resolve().parent.parent / "assets" / "bewegung"
+
+
+class Bildfolge:
+    """Eine Bildfolge (der Hinweg der Bewegung) im Fokus — ein Bild des Streifens ist zu sehen,
+    `nachziehen` wählt es je Takt-Lage (`core.bewegungsbild.bild_fuer_lage`) oder, ohne Takt,
+    als Pendel über die Zeit. Einmal gebaut; je Tick ändert sich nur ``left`` des Streifens."""
+
+    def __init__(self, pfad: str, anzahl: int, *, hoehe: float = HOEHE_WAEHREND) -> None:
+        self.anzahl, self.hoehe = max(anzahl, 1), hoehe
+        self.bild = ft.Image(
+            src=pfad,
+            width=hoehe * self.anzahl,
+            height=hoehe,
+            fit=ft.BoxFit.FILL,
+            gapless_playback=True,
+            left=0,
+            top=0,
+        )
+        self.index = 0
+        self.control = ft.Container(
+            width=hoehe,
+            height=hoehe,
+            border_radius=16,
+            clip_behavior=ft.ClipBehavior.HARD_EDGE,
+            content=ft.Stack(width=hoehe, height=hoehe, controls=[self.bild]),
+        )
+
+    def zeigen(self, index: int) -> None:
+        index = min(max(index, 0), self.anzahl - 1)
+        if index == self.index:
+            return
+        self.index = index
+        self.bild.left = -index * self.hoehe
+        with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
+            self.bild.update()
+
+    def nachziehen(self, takt: Takt | None, lage: Lage | None, t_s: float) -> None:
+        if takt is not None and lage is not None:
+            self.zeigen(bild_fuer_lage(self.anzahl, takt, lage))
+        else:
+            self.zeigen(bild_fuer_zeit(self.anzahl, t_s))
+
+
+def bewegung_im_fokus(
+    state: AppState,
+    uebung: Exercise,
+    item: PlanItem | None = None,
+    *,
+    hoehe: float = HOEHE_WAEHREND,
+) -> tuple[ft.Control, Bildfolge | None] | None:
+    """Was der Fokus als Bewegung zeigt: die eigene Bildfolge (Streifen) mit `Bildfolge`, ein
+    eigenes GIF als Schleife, sonst die mitgelieferte Folge zur Sensor-Vorlage (Kniebeuge) —
+    ``None`` ohne alles. Zweites Glied: die Folge zum Nachziehen, ``None`` bei einer Schleife."""
+    pfad = bewegungsbild_pfad(state, uebung)
+    if pfad is None:
+        vorlage = zl.wirksame_wahl(uebung, item).vorlage
+        datei = EINGEBAUT.get(vorlage)
+        if datei is None or not (ASSETS / datei).is_file():
+            return None
+        pfad = str(ASSETS / datei)
+    anzahl = 1
+    with contextlib.suppress(OSError):
+        with open(pfad, "rb") as f:
+            masse = png_masse(f.read(64 * 1024))
+        if masse is not None:
+            anzahl = bilder_in(*masse)
+    if anzahl < 2:
+        c = bewegungsbild_control(state, uebung, hoehe=hoehe)
+        if c is None:  # eingebaute Datei ohne Streifen: einfach zeigen
+            c = ft.Container(
+                height=hoehe,
+                border_radius=16,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                content=ft.Image(src=pfad, height=hoehe, fit=ft.BoxFit.CONTAIN),
+            )
+        return c, None
+    folge = Bildfolge(pfad, anzahl, hoehe=hoehe)
+    return folge.control, folge
 
 
 def bewegungsbild_blatt(
@@ -231,6 +326,8 @@ def bewegungsbild_blatt(
 __all__ = [
     "HOEHE_WAEHREND",
     "KACHEL",
+    "Bildfolge",
+    "bewegung_im_fokus",
     "bewegungsbild_blatt",
     "bewegungsbild_control",
     "bewegungsbild_pfad",

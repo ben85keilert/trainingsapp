@@ -46,3 +46,19 @@ def test_ablage_schreiben_uebernehmen_listen_loeschen(tmp_path: Path) -> None:
     assert [x.pfad for x in repo.alle()] == [erstes]
     assert repo.loeschen(erstes) == 0 and repo.alle() == []
     con.close()
+
+
+def test_kamerabild_behaelt_die_ausrichtung(tmp_path: Path) -> None:
+    """Ben, 7.11.2026: „Aufnahmen von eigenen Bildern werden 90° verkippt“ — die Kamera legt
+    die Drehung nur in Exif ab; die Ablage nimmt den Ort, behält aber die Ausrichtung."""
+    from trainingsapp.core.anhaenge import _exif_testsegment, exif_ausrichtung, exif_nur_ausrichtung
+
+    con = verbinden(tmp_path / "a.db")
+    migrieren(con)
+    repo = UebungsbildRepo(con, tmp_path / "Medien")
+    scan = b"\xff\xda\x00\x02DATEN\xff\xd9"
+    rel = repo.schreiben(b"\xff\xd8" + _exif_testsegment(6, b"GPS!!!") + scan)
+    gespeichert = repo.datei(rel).read_bytes()
+    assert b"GPS" not in gespeichert and b"Cam" not in gespeichert
+    assert gespeichert == b"\xff\xd8" + exif_nur_ausrichtung(6) + scan
+    assert exif_ausrichtung(gespeichert[6:]) == 6

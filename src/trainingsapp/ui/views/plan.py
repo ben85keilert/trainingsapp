@@ -2345,19 +2345,20 @@ def plan_view(
             return ft.Container()
         index, item = paar
         teile: list[ft.Control] = [block(index, item)]
-        if navigierbar:
-            teile.insert(
-                0,
-                ft.Container(
-                    padding=ft.Padding.symmetric(horizontal=8), content=navigation_zeile(index)
-                ),
-            )
-        return ft.GestureDetector(
-            on_horizontal_drag_end=gewischt if navigierbar else None,
-            content=ft.Column(
-                spacing=4, horizontal_alignment=ft.CrossAxisAlignment.STRETCH, controls=teile
+        spalte = ft.Column(
+            spacing=4, horizontal_alignment=ft.CrossAxisAlignment.STRETCH, controls=teile
+        )
+        if not navigierbar:
+            # Ohne Handler zeigt Flutter statt des Blocks „GestureDetector should have at least
+            # one event handler defined“ (Ben, 7.11.2026) — also nur mit Wischen ein Mantel
+            return spalte
+        teile.insert(
+            0,
+            ft.Container(
+                padding=ft.Padding.symmetric(horizontal=8), content=navigation_zeile(index)
             ),
         )
+        return ft.GestureDetector(on_horizontal_drag_end=gewischt, content=spalte)
 
     def gesamtplan_zeigen() -> None:
         """Der Tipp auf „x von n heute“: alle Übungen als Blatt, ein Tipp wechselt."""

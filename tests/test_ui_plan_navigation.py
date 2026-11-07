@@ -72,14 +72,17 @@ def _teil(ansicht) -> ft.GestureDetector:
 
 
 def _block(ansicht) -> ft.Control:
-    return _teil(ansicht).content.controls[-1]
+    teil = _liste(ansicht).controls[1]  # nach dem Kopf; mit oder ohne Mantel
+    spalte = teil.content if isinstance(teil, ft.GestureDetector) else teil
+    return spalte.controls[-1]
 
 
 def _pfeile(ansicht) -> list:
-    teile = _teil(ansicht).content.controls
-    if len(teile) < 2:  # ohne Navigation nur der Block
+    teil = _liste(ansicht).controls[1]
+    if not isinstance(teil, ft.GestureDetector):  # ohne Navigation kein Mantel, keine Pfeile
         return []
-    return [x for x in _alle(teile[0]) if isinstance(x, ft.TextButton | ft.FilledTonalButton)]
+    zeile = teil.content.controls[0]
+    return [x for x in _alle(zeile) if isinstance(x, ft.TextButton | ft.FilledTonalButton)]
 
 
 def _knopf(wurzel, text: str):
@@ -217,9 +220,8 @@ def test_blatt_zeile_ohne_uebung_ist_nicht_antippbar() -> None:
 def test_einzel_und_ein_uebungs_plan_ohne_navigation(page, state) -> None:
     uebung = state.uebungen.laden(seed_id("kniebeuge"))
     einzel = plan_view(page, state, einzel_plan(uebung), einzel=True)
-    assert not any(
-        isinstance(x, ft.GestureDetector) and x.on_horizontal_drag_end for x in _alle(einzel)
-    )
+    # Kein Mantel ohne Handler — Flutter zeigte sonst eine rote Fehlermeldung statt des Blocks
+    assert not any(isinstance(x, ft.GestureDetector) for x in _alle(einzel))
     assert not _pfeile(einzel) and "EINTRAGEN" in _texte(einzel)
     assert state.plan_gezeigt == {}
     plan = _plan(state, "kniebeuge")

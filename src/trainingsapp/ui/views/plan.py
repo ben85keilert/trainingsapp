@@ -55,10 +55,11 @@ früheren Stelle an. Der Modus liegt im `AppState`, weil die Ansicht beim
 Routenwechsel neu gebaut wird.
 
 **Beim Üben zeigt der Plan eine Übung** (Ben, 7.11.2026: „Die Übungen sollen links-rechts
-angeordnet sein“): oben die Zeile „x von n heute“ — ein Tipp öffnet den **Gesamtplan** als
-Blatt (`components/planblatt.py`), ein Tipp dort wechselt die Übung —, daneben das i mit der
-Legende der Knöpfe; darunter die Pfeile, benannt nach der vorigen und der nächsten Übung
-(„‹ Nacken dehnen“, „Kniebeuge ›“), und der Block. Wischen über den Block wechselt ebenso
+angeordnet sein“): eine Zeile mit den Pfeilen, benannt nach der vorigen und der nächsten
+Übung („‹ Nacken dehnen“, „Kniebeuge ›“), in der Mitte „2/6 ▾“ — ein Tipp öffnet den
+**Gesamtplan** als Blatt (`components/planblatt.py`), ein Tipp dort wechselt die Übung —,
+darunter der Block; die Legende der Knöpfe steht im „?“ oben (`hilfe.PLAN_MD`). Wischen über
+den Block wechselt ebenso
 (`ft.GestureDetector`, nur das Ende der waagerechten Bewegung, Schwelle wie im Verlauf). Kein
 Umlauf an den Enden; nach „Gemacht“ bleibt der Block stehen — das Tempo bestimmt die Person,
 der nächste Pfeil ist nur betont. Welche Übung gezeigt wird, merkt `AppState.plan_gezeigt`
@@ -132,7 +133,6 @@ from trainingsapp.ui import marken, uebung_lauf
 from trainingsapp.ui.components import zaehl_stand
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
-from trainingsapp.ui.components.karte import info_knopf
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.planblatt import PlanZeile, gesamtplan_blatt
 from trainingsapp.ui.components.planstand import nur_hier, wie_die_uebung
@@ -1510,7 +1510,9 @@ def plan_view(
                 segments=segmente,
                 selected=[str(gewaehlt)] if gewaehlt is not None else [],
                 allow_empty_selection=True,
-                show_selected_icon=True,
+                # Kein Haken: Er brach „60°“ in drei Zeilen um (Ben, 7.11.2026) — die Farbe
+                # des gewählten Segments reicht
+                show_selected_icon=False,
                 expand=True,
                 on_change=geaendert,
             )
@@ -1615,7 +1617,7 @@ def plan_view(
                     ],
                     selected=["ja"] if wert is True else ["nein"] if wert is False else [],
                     allow_empty_selection=True,
-                    show_selected_icon=True,
+                    show_selected_icon=False,
                     expand=True,
                     on_change=gewaehlt,
                 ),
@@ -2328,12 +2330,26 @@ def plan_view(
             if naechste is not None
             else ft.Container()
         )
+        # In der Mitte „2/6 ▾“ — der Tipp öffnet den Gesamtplan (Ben, 7.11.2026: „1 von 6 in
+        # die Mitte der links/rechts-Buttons … 2/6, das müsste reichen“)
+        mitte = ft.TextButton(
+            content=ft.Row(
+                tight=True,
+                spacing=2,
+                controls=[
+                    ft.Text(f"{index + 1}/{n}", size=13, weight=ft.FontWeight.W_600),
+                    ft.Icon(ft.Icons.EXPAND_MORE, size=16, opacity=0.7),
+                ],
+            ),
+            tooltip="Gesamtplan",
+            on_click=gesamtplan_zeigen,
+        )
         return ft.Row(
-            spacing=4,
+            spacing=0,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Container(content=links, expand=True, alignment=ft.Alignment.CENTER_LEFT),
-                ft.Text(f"{index + 1}/{n}", size=12, opacity=0.6),
+                mitte,
                 ft.Container(content=rechts, expand=True, alignment=ft.Alignment.CENTER_RIGHT),
             ],
         )
@@ -2393,16 +2409,6 @@ def plan_view(
             )
         )
 
-    gesamtplan_knopf = ft.TextButton(
-        content=ft.Row(
-            tight=True,
-            spacing=4,
-            controls=[stand, ft.Icon(ft.Icons.EXPAND_MORE, size=18, opacity=0.7)],
-        ),
-        tooltip="Gesamtplan",
-        on_click=gesamtplan_zeigen,
-    )
-
     kopf: list[ft.Control]
     if bearbeiten:
         tage = ft.Row(
@@ -2445,35 +2451,16 @@ def plan_view(
         kopf = list(nachtrag.kopf)
     elif einzel:
         kopf = [
-            ft.Row(
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Text(
-                        "Ohne Plan — der Eintrag erscheint auf „Heute“ unter „Ohne Plan“.",
-                        size=13,
-                        opacity=0.7,
-                        expand=True,
-                    ),
-                    info_knopf(page, "Was die Knöpfe tun", KNOPF_LEGENDE),
-                ],
-            ),
+            ft.Text(
+                "Ohne Plan — der Eintrag erscheint auf „Heute“ unter „Ohne Plan“.",
+                size=13,
+                opacity=0.7,
+            )
         ]
     else:
-        # „x von n heute“ öffnet den Gesamtplan; die Legende der Knöpfe steht hinter dem i
-        # statt als grauer Text (Ben, 7.11.2026: „Erklärtexte alle in i's“)
-        kopf = [
-            ft.Row(
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Container(
-                        content=gesamtplan_knopf, expand=True, alignment=ft.Alignment.CENTER_LEFT
-                    ),
-                    info_knopf(page, "Was die Knöpfe tun", KNOPF_LEGENDE),
-                ],
-            ),
-        ]
+        # Kein Kopf mehr (Ben, 7.11.2026): „2/6“ in der Mitte der Pfeile öffnet den
+        # Gesamtplan, die Legende der Knöpfe steht im „?“ oben (`hilfe.PLAN_MD`)
+        kopf = []
 
     fuss: list[ft.Control] = []
     if bearbeiten:
@@ -2502,16 +2489,17 @@ def plan_view(
             # Kopf und Fuß sind Kopf- und Fußzeile der ziehbaren Liste — alle Blöcke
             return [block(i, item) for i, item in enumerate(plan.items)]
         bloecke = [uebungsteil()] if plan.items else []
+        oben = [kopf_box] if kopf else [ft.Container(height=8)]
         if nachtrag is not None:  # unter dem Block, wohin die Tipps gehen (Skizze G1)
             hinweis = ft.Text(nachtrag.hinweis(), size=12, opacity=0.7)
             return [
-                kopf_box,
+                *oben,
                 *bloecke,
                 ft.Container(
                     padding=ft.Padding.only(left=20, right=20, top=4, bottom=24), content=hinweis
                 ),
             ]
-        return [kopf_box, *bloecke, *([fuss_box] if fuss else [])]
+        return [*oben, *bloecke, *([fuss_box] if fuss else [])]
 
     liste: ft.ListView
     if bearbeiten:
@@ -2562,11 +2550,11 @@ def plan_view(
         nachtrag.auffrischen = auffrischen
         aktionen = [hilfe_knopf(page), ft.TextButton("Fertig", on_click=nachtrag_fertig)]
     elif einzel:
-        aktionen = [timer_knopf(page, state, "plan"), hilfe_knopf(page)]
+        aktionen = [timer_knopf(page, state, "plan"), hilfe_knopf(page, thema="plan")]
     else:
         aktionen = [
             *([] if bearbeiten else [timer_knopf(page, state, "plan")]),
-            hilfe_knopf(page),
+            hilfe_knopf(page, thema="notation" if bearbeiten else "plan"),
             ft.IconButton(
                 ft.Icons.CHECK if bearbeiten else ft.Icons.EDIT_OUTLINED,
                 tooltip="Fertig" if bearbeiten else "Plan bearbeiten",
@@ -2595,18 +2583,6 @@ def plan_view(
 #: `einzel_plan` kommt aus `core.plaene` und bleibt hier erreichbar (`app.py`, Tests)
 __all__ = ["Nachtrag", "einzel_plan", "hauptfeld", "plan_view", "ziel_text"]
 
-
-#: Was die Knöpfe einer Planübung tun — hinter dem i oben im Plan und bei der Einzelübung
-#: (Ben, 7.11.2026: nicht mehr als grauer Text unter dem Kopf)
-KNOPF_LEGENDE = """\
-- **Gemacht** hakt nur ab.
-- **Wie geplant** übernimmt das Ziel der Übung (oder des Plans).
-- **Uhr** (Stoppuhr, Timer) stoppt die Zeit; „zählt“ heißt, sie geht als Satz in den Eintrag.
-- **+Zahl** hängt einen Satz an, **Eintragen** nimmt Sätze × Wert.
-- **Notiz** schreibt einen Satz ins Tagebuch, das **Etikett** setzt die Variante.
-- **i** öffnet die Übungsseite; der **Timer** oben rechts den Timer dieser Übung.
-- **‹ ›** oder Wischen wechselt die Übung; „x von n heute“ zeigt den Gesamtplan.
-"""
 
 #: Ab dieser Geschwindigkeit (px/s, Ende der waagerechten Bewegung) zählt ein Wisch — wie im
 #: Verlauf (`views/verlauf.py`)

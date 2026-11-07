@@ -13,13 +13,16 @@ Vorher standen alle Planübungen untereinander, mit drei umschaltbaren Darstellu
 (untereinander · ein Parameter · aufklappen) und einem grauen Erklärtext unter dem Kopf.
 Jetzt (`ui/views/plan.py`, Üben-Zweig):
 
-- **Kopf:** nur noch „x von n heute ▾“ — ein Tipp öffnet den **Gesamtplan** als Blatt
-  (`ui/components/planblatt.py`: je Übung Bild, Name, Ziel, „k. Mal im Plan“, Haken wenn
-  heute erledigt, Uhr- bzw. Sensor-Symbol wenn dort etwas läuft; die gezeigte ist markiert;
-  ein Tipp wechselt nach dem Schließen) — und daneben **ein i** mit der Legende der Knöpfe
-  (`KNOPF_LEGENDE`, `components/karte.info_knopf`). Kein Darstellungsmenü, kein Erklärtext.
-- **Navigation:** darunter die Pfeile, **benannt nach den Nachbarn** („‹ Nacken dehnen“ ·
-  „2/6“ · „Kniebeuge ›“ — der Name der gezeigten Übung steht im Block selbst), und **Wischen**
+- **Eine Zeile** (Korrektur Ben, 7.11.2026 abends): die Pfeile, **benannt nach den Nachbarn**
+  („‹ Nacken dehnen“ · **2/6 ▾** · „Kniebeuge ›“ — der Name der gezeigten Übung steht im
+  Block selbst; abgeschnittene Nachbarnamen stören nicht), in der Mitte **2/6 ▾** — ein Tipp
+  öffnet den **Gesamtplan** als Blatt (`ui/components/planblatt.py`: je Übung Bild, Name,
+  Ziel, „k. Mal im Plan“, Haken wenn heute erledigt, Uhr- bzw. Sensor-Symbol wenn dort
+  etwas läuft; die gezeigte ist markiert; ein Tipp wechselt nach dem Schließen; der Kopf
+  nennt „x von n heute“). Kein eigener Kopf, kein i: die Legende der Knöpfe steht im „?“ oben
+  (`components/hilfe.PLAN_MD` = `KNOPF_LEGENDE` + Notation). Kein Darstellungsmenü.
+- **Ausprägungen** (Gewicht, Winkel): das gewählte Segment ist nur farbig, ohne Haken — der
+  Haken brach „60°“ in drei Zeilen um. **Wischen**
   über den Block (`ft.GestureDetector`, nur `on_horizontal_drag_end`, Schwelle
   `WISCH_SCHWELLE` = 300 px/s wie im Verlauf; Slider und scrollende Variantenreihe gewinnen
   als Kinder). Kein Umlauf an den Enden.

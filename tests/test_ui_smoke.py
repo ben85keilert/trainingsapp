@@ -1001,8 +1001,14 @@ def test_zweite_stelle_wartet_auf_den_zweiten_eintrag(page, welt) -> None:
     state, plan, _item, uebung, _ = welt
     state.plaene.uebung_hinzufuegen(plan.id, uebung.id)
     plan = state.plaene.laden(plan.id)
-    stand = next(t for t in _texte(plan_view(page, state, plan)) if " von " in t)
-    assert stand == "2 von 3 heute"  # Nackendehnung (1. Stelle) und Unterarmstütz
+    dialoge: list = []
+    page.show_dialog = dialoge.append
+    ansicht = plan_view(page, state, plan)
+    # „x von n heute“ steht seit dem 7.11.2026 im Gesamtplan-Blatt (Tipp auf „k/n“ in der Mitte)
+    next(
+        x for x in _alle(ansicht) if isinstance(x, ft.TextButton) and x.tooltip == "Gesamtplan"
+    ).on_click()
+    assert "2 von 3 heute" in _texte(dialoge[-1])  # Nackendehnung (1. Stelle) und Unterarmstütz
 
 
 def test_timer_signale_eigene_seite(page, state) -> None:

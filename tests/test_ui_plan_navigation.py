@@ -12,9 +12,10 @@ ft = pytest.importorskip("flet")
 
 from trainingsapp.core.models import Plan  # noqa: E402
 from trainingsapp.data.seed import seed_id  # noqa: E402
+from trainingsapp.ui.components.hilfe import KNOPF_LEGENDE  # noqa: E402
 from trainingsapp.ui.components.planblatt import PlanZeile, gesamtplan_blatt  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
-from trainingsapp.ui.views.plan import KNOPF_LEGENDE, einzel_plan, plan_view  # noqa: E402
+from trainingsapp.ui.views.plan import einzel_plan, plan_view  # noqa: E402
 
 
 @pytest.fixture
@@ -71,18 +72,39 @@ def _teil(ansicht) -> ft.GestureDetector:
     return next(x for x in _alle(ansicht) if isinstance(x, ft.GestureDetector))
 
 
+def _uebungsteil(ansicht) -> ft.Control:
+    """Der Übungsteil: der Mantel mit Pfeilen und Block — ohne Navigation die Spalte."""
+    return next(
+        c
+        for c in _liste(ansicht).controls
+        if isinstance(c, ft.GestureDetector) or (isinstance(c, ft.Column) and c.controls)
+    )
+
+
 def _block(ansicht) -> ft.Control:
-    teil = _liste(ansicht).controls[1]  # nach dem Kopf; mit oder ohne Mantel
+    teil = _uebungsteil(ansicht)
     spalte = teil.content if isinstance(teil, ft.GestureDetector) else teil
     return spalte.controls[-1]
 
 
 def _pfeile(ansicht) -> list:
-    teil = _liste(ansicht).controls[1]
+    teil = _uebungsteil(ansicht)
     if not isinstance(teil, ft.GestureDetector):  # ohne Navigation kein Mantel, keine Pfeile
         return []
     zeile = teil.content.controls[0]
-    return [x for x in _alle(zeile) if isinstance(x, ft.TextButton | ft.FilledTonalButton)]
+    return [
+        x
+        for x in _alle(zeile)
+        if isinstance(x, ft.TextButton | ft.FilledTonalButton) and x.tooltip != "Gesamtplan"
+    ]
+
+
+def _mitte(ansicht) -> ft.TextButton:
+    teil = _uebungsteil(ansicht)
+    zeile = teil.content.controls[0]
+    return next(
+        x for x in _alle(zeile) if isinstance(x, ft.TextButton) and x.tooltip == "Gesamtplan"
+    )
 
 
 def _knopf(wurzel, text: str):
@@ -116,22 +138,21 @@ def test_plan_zeigt_die_erste_offene_uebung_mit_pfeilen_der_nachbarn(page, state
     _eintragen(state, plan, "liegestuetzen")
     ansicht = plan_view(page, state, plan)
     liste = _liste(ansicht)
-    assert len(liste.controls) == 2  # Kopf und ein Block
     assert "Kniebeuge" in _texte(_block(ansicht)) and "Wandsitz" not in _texte(_block(ansicht))
     assert _texte(ansicht).count("EINTRAGEN") == 1
     links, rechts = _pfeile(ansicht)
     assert _texte(links.content) == ["Liegestützen"] and _texte(rechts.content) == ["Wandsitz"]
-    assert "2/3" in _texte(ansicht) and "1 von 3 heute" in _texte(ansicht)
+    assert "2/3" in _texte(_mitte(ansicht).content) and "1 von 3 heute" not in _texte(ansicht)
     assert state.plan_gezeigt[plan.id] == plan.items[1].id
-    # Kein Darstellungsmenü, kein grauer Erklärtext — die Legende steht hinter dem i
-    assert not any(isinstance(x, ft.PopupMenuButton) for x in _alle(liste.controls[0]))
+    # Kein Darstellungsmenü, kein grauer Erklärtext, kein Kopf — die Legende steht im „?“
+    zeile = _uebungsteil(ansicht).content.controls[0]
+    assert not any(isinstance(x, ft.PopupMenuButton) for x in _alle(zeile))
     assert not any("Gemacht = nur abhaken" in t for t in _texte(ansicht))
-    info = next(
-        x
-        for x in _alle(liste.controls[0])
-        if isinstance(x, ft.IconButton) and x.icon == ft.Icons.INFO_OUTLINE
+    hilfe = next(
+        a for a in ansicht.appbar.actions if getattr(a, "icon", None) == ft.Icons.HELP_OUTLINE
     )
-    assert "Knöpfe" in info.tooltip and "Gesamtplan" in KNOPF_LEGENDE
+    assert hilfe.tooltip == "Knöpfe und Eingabe" and "Gesamtplan" in KNOPF_LEGENDE
+    assert len(liste.controls) == 2  # Abstand und der eine Block
 
 
 def test_pfeile_und_wischen_wechseln_ohne_umlauf(page, state) -> None:
@@ -178,7 +199,7 @@ def test_nach_gemacht_bleibt_der_block_und_der_naechste_pfeil_ist_betont(page, s
     if inspect.isawaitable(ergebnis):
         asyncio.run(ergebnis)
     assert state.plan_gezeigt[plan.id] == plan.items[0].id  # kein Weiterblättern
-    assert "Liegestützen" in _texte(_block(ansicht)) and "1 von 2 heute" in _texte(ansicht)
+    assert "Liegestützen" in _texte(_block(ansicht)) and "1/2" in _texte(_mitte(ansicht).content)
     (rechts,) = _pfeile(ansicht)
     assert isinstance(rechts, ft.FilledTonalButton) and _texte(rechts.content) == ["Kniebeuge"]
     assert not any(t.startswith("Weiter:") for t in _texte(ansicht))
@@ -188,8 +209,8 @@ def test_gesamtplan_blatt_zeigt_alle_und_wechselt(page, state) -> None:
     plan = _plan(state, "liegestuetzen", "kniebeuge", "wandsitz")
     _eintragen(state, plan, "liegestuetzen")
     ansicht = plan_view(page, state, plan)
-    knopf = next(x for x in _alle(_liste(ansicht).controls[0]) if isinstance(x, ft.TextButton))
-    assert knopf.tooltip == "Gesamtplan" and "1 von 3 heute" in _texte(knopf.content)
+    knopf = _mitte(ansicht)
+    assert "2/3" in _texte(knopf.content)
     knopf.on_click()
     (blatt,) = page.dialoge
     zeilen = [x for x in _alle(blatt) if isinstance(x, ft.ListTile)]

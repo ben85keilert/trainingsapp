@@ -308,8 +308,23 @@ und das Signal sind deine Werte wie ein Timer. Einstellungen → Herzfrequenz.
 """
 
 #: Thema → (Titel, Text, Tooltip des Knopfs)
+#: Was die Knöpfe einer Planübung tun — im „?“ des Plans und der Einzelübung (Ben,
+#: 7.11.2026: nicht mehr als grauer Text, kein eigenes i)
+KNOPF_LEGENDE = """\
+- **Gemacht** hakt nur ab.
+- **Wie geplant** übernimmt das Ziel der Übung (oder des Plans).
+- **Uhr** (Stoppuhr, Timer) stoppt die Zeit; „zählt“ heißt, sie geht als Satz in den Eintrag.
+- **+Zahl** hängt einen Satz an, **Eintragen** nimmt Sätze × Wert.
+- **Notiz** schreibt einen Satz ins Tagebuch, das **Etikett** setzt die Variante.
+- **i** öffnet die Übungsseite; der **Timer** oben rechts den Timer dieser Übung.
+- **‹ ›** oder Wischen wechselt die Übung; **2/6** in der Mitte zeigt den Gesamtplan.
+"""
+
+PLAN_MD = KNOPF_LEGENDE + "\n**So wird eingegeben**\n\n" + NOTATION_MD
+
 THEMEN: dict[str, tuple[str, str, str]] = {
     "notation": ("So wird eingegeben", NOTATION_MD, "Wie gebe ich ein?"),
+    "plan": ("Üben im Plan", PLAN_MD, "Knöpfe und Eingabe"),
     "varianten": ("Varianten", VARIANTEN_MD, "Was sind Varianten?"),
     "parameter": ("Parameter, Chips und Ziel", PARAMETER_MD, "Parameter, Chips und Ziel"),
     "uhr": ("Uhr und Timer", UHR_MD, "Uhr, Timerzeit, zählt als"),

@@ -481,7 +481,7 @@ def test_karte_ohne_pfeil_weiter_springt_zur_offenen_uebung(page, state) -> None
     state.plan_gezeigt[plan.id] = plan.items[2].id  # zuletzt gezeigt — das Ziel geht vor
     ansicht = plan_view(page, state, state.plaene.laden(plan.id))
     liste = next(x for x in _alle(ansicht) if isinstance(x, ft.ListView))
-    assert len(liste.controls) == 2  # Kopf und der eine Block
+    assert len(liste.controls) == 2  # Abstand und der eine Block
     block = liste.controls[1].content.controls[-1]  # unter der Zeile der Pfeile
     assert "Kniebeuge" in _texte(block) and "Wandsitz" not in _texte(block)
     assert "2/3" in _texte(liste.controls[1])  # die Pfeile heißen wie die Nachbarn

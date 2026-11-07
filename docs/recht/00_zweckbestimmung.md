@@ -59,6 +59,18 @@ Der Unterschied liegt an einer feinen, aber entscheidenden Stelle:
 | „Puls 132" | „Puls zu hoch — Pause machen" |
 | „RMSSD 28 ms" | „Deine Erholung ist unzureichend" |
 | „Timer abgelaufen" | „Weiter, dein Puls hat sich erholt" |
+| Ton „über deinem Zielbereich (150)“ — Bereich selbst gesetzt (Entscheidung C, 7.11.2026) | „Puls zu hoch“, „Grenze“, „Warnung“; der Ablauf hält an oder geht weiter wegen des Pulses |
+
+**Zielbereich-Ton** (Ben, 7.11.2026, Entscheidung **C**): Die Person darf sich in Solo zwei
+Pulsgrenzen setzen und bekommt beim Über- bzw. Unterschreiten einen hohen bzw. tiefen Ton —
+wie jede Sportuhr. Bedingungen: die Grenzen setzt die Person selbst (ein Vorschlag aus den
+Fitness-Zonen ist erlaubt, nie eine „sichere“ Grenze aus Alter oder Messdaten); der Ton ist
+Information, keine Steuerung (kein Pausieren, kein „weiter, wenn im Bereich“, kein Eintrag);
+Fitness-Sprache („Zielbereich“, „Intensität“, „darüber/darunter“ — nie „Grenze“, „Warnung“,
+„Schonung“, „Herz“); im Patientenmodus aus. Damit teilt sich `core/limits.py` künftig in
+**Zielbereich-Ton** (Solo erlaubt) und **Steuerung** (`rest_until_hr_below`, Bedingungen aus der
+Herzfrequenz — gesperrt, `physiologische_steuerung`). HF-Zonen als **Workout-Bedingung**
+(„x Minuten in Zone y“) bleiben Steuerung und damit gesperrt (Variante B abgelehnt).
 
 **Tagesfelder** (Ben, 21.10.2026, `docs/plan_tagesfelder.md`): Die Person hält je Tag
 selbst Werte fest — frei benannt, etwa Schmerz auf einer Skala, Einnahmen eines
@@ -105,8 +117,13 @@ Zu prüfen ist jede einzelne Funktion. Kritisch sind insbesondere:
    `hr_above` und `rest_until_hr_below` steuern das Training anhand des Pulses.
    Eingebettet in einen Behandlungskontext ist das eine medizinische Aussage.
 2. **Bewertung von Messwerten** — jede Einordnung als auffällig oder unauffällig.
-3. **Therapieanpassung auf Grundlage der App-Daten** — wenn der Therapeut
-   Entscheidungen auf die App stützt, wird sie Teil der Behandlung.
+3. **Therapieanpassung als Zweck der App** — wenn die App dafür gebaut und beworben
+   wird, dem Therapeuten die Entscheidungsgrundlage zu liefern (Überwachungsfunktion,
+   Rückkanal physiologischer Werte „um den Verlauf zu verfolgen“). *Nicht* gemeint
+   (präzisiert 7.11.2026): dass eine Therapeutin beurteilt, was die Patientin ihr aus einer
+   App zeigt oder schickt — das ist Heilkunde, kein Softwaremerkmal; eine Pulsuhr wird nicht
+   zum Medizinprodukt, weil ein Arzt ihren Ausdruck liest (MDCG 2019-11: Speichern,
+   Übertragen, Anzeigen ohne Verarbeitung ist keine Medizinprodukte-Software).
 4. **Screening-artige Auswertungen** — z. B. Hinweise auf Rhythmusstörungen aus
    den RR-Intervallen.
 
@@ -127,6 +144,51 @@ Es gibt drei gangbare Wege. Die Wahl bestimmt Aufwand und Zeitplan erheblich:
 Empfehlung für den Start: **Weg A**, konsequent durchgehalten. Die App liefert
 Daten und Kommunikation, jede Bewertung bleibt beim Therapeuten. Sollte später
 mehr gewünscht sein, ist der Schritt bewusst zu gehen — nicht versehentlich.
+
+### Entscheidung 7.11.2026: Weg A (Ben)
+
+Ben: „Weg A nehmen“ — die App als **Hausaufgabenbetreuung** für Patient:innen bleibt
+Dokumentations- und Kommunikationswerkzeug. Was die Diskussion ergab, verbindlich:
+
+**Faustregel in drei Sätzen.** (1) *Die App* darf erheben, speichern, zeigen, exportieren und
+**Selbstauskünfte und Leistungen** (Einträge, Skalen, Notizen, Fotos) an die Praxis
+übertragen. (2) *Die App* darf nicht deuten, warnen oder steuern — im Patientenmodus auch
+nicht lokal. (3) *Die Therapeutin* darf alles beurteilen, was die Patientin ihr gibt — im
+Gespräch, als Export, über den Rückkanel für Selbstauskünfte — und den Plan danach anpassen.
+Physiologische Messwerte kommen über den Weg „die Patientin gibt sie“, nie über eine
+eingebaute Überwachungsfunktion.
+
+**Die Grenze des Patientenmodus** (ein Profil, dessen Pläne von der Praxis kommen):
+
+| Funktion | Solo (Fitness) | Patientenmodus (Weg A) | Fließt zur Praxis |
+|---|---|---|---|
+| Pläne, Kurse, Workouts; Bedingungen Zeit · Wiederholungen · X-in-Y · Freischaltung | ja | ja | **ja** — Einträge, Häkchen, Skalen, Notizen, Fotos (der Übungszettel mit Rückkanal) |
+| HF/HRV live und als Kurve, Rohwerte (HF, RR, RMSSD) | ja | ja — Zahlen und Kurven | nein (nur, wenn die Person selbst exportiert und schickt) |
+| HF-Zonen anzeigen (HRR %, Zeit in Zone) | ja | ja, als Anzeige | nein |
+| Zielbereich-Ton (selbst gesetzt, Entscheidung C) | ja | **nein** | — |
+| HF-Zone als Alarm der App oder Workout-Bedingung | nein (Steuerung) | nein | — |
+| HRV-Auswertung mit Schwellen und Hinweisen (DFA-α1-Schwellen, Atemlage-Hinweis, HF-Auswertung) | ja, als Fitness-Information formuliert, keine Gesundheitsurteile | **nein** — ausblenden, nur Rohwerte (`config.ist_aktiv("hrv_bewertung")`) | nein |
+| Diagnosemodus, Mitschnitt, Export der Messdatei | ja | ja | nur als bewusste Handlung der Person, nicht über die Anbindung |
+| „Praxis sieht den Verlauf der Patientin“ als Funktion | — | **nein** | — |
+
+**Die zweite App (Praxisanbindung)** darf Daten übertragen, auch physiologische, unter drei
+Bedingungen (MDCG 2019-11: Übertragen ohne Verarbeitung ist keine Medizinprodukte-Software):
+(a) **die Person wählt und sendet** — je Sendung sichtbar bestätigt, keine Abos, keine
+Hintergrund-Übertragung, keine Anforderung durch die Praxis; (b) **die App deutet nichts** —
+Kurven zeichnen und zusammenfassen ja, Schwellen, Ampeln, bewertete Trends nein, auch nicht
+auf der Empfängerseite; (c) **was bei der Praxis damit geschieht:** Wer übermittelte
+Messdateien dort mit eigener Software durchrechnet (HRV-Kennzahlen) und das in die
+Behandlung einfließen lässt, hat Medizinprodukte-Software auf der Praxisseite (Regel 11,
+IIa) — für `praxis_gui` kommt dann nur die **Eigenherstellung nach Art. 5 Abs. 5 MDR**
+in Frage (nur in der eigenen Praxis, QMS, Begründung, Dokumentation, öffentliche Erklärung)
+oder der Verzicht auf die Analyse übermittelter Dateien. Ein Einnahme-**Protokoll**
+(„habe genommen“) ist Tagebuch; Erinnerung, Dosierung, Wechselwirkung wären Medizinprodukt.
+Empfangenes wird Teil der Patientenakte (§ 630f BGB; Art. 9 DSGVO, Ende-zu-Ende, AVV).
+Details: `docs/plan_praxisanbindung.md`.
+
+**Nicht gemeint ist**, dass die Patientin in der Solo-App nicht frei arbeiten dürfte: In Solo
+gilt die Wellness-Ausnahme, die Person darf alles sehen. Die Grenze ist, was die App
+**behauptet und urteilt** — und im therapeutischen Kontext auch, was sie lokal deutet.
 
 Orientierungshilfe für die Einstufung bietet das BfArM.
 

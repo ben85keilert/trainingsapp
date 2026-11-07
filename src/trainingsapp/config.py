@@ -67,6 +67,12 @@ _FUNKTIONEN: dict[str, set[Edition]] = {
     "physiologische_steuerung": {Edition.PRAXIS},
     # Zugriff auf die Rohdaten einer HRV-Messung
     "hrv_rohdaten": {Edition.SOLO, Edition.PRAXIS},
+    # Deutungen der HRV-Auswertung (Schwellen aus DFA α1, Atemlage-Hinweis, HF-Auswertung) —
+    # in Solo als Fitness-Information erlaubt; im **Patientenmodus** (Profil mit Plänen
+    # von der Praxis, Weg A, 7.11.2026) aus: dort zeigt die App nur Rohwerte und Kurven.
+    # Der Modus selbst ist noch nicht gebaut — der Schalter benennt die Stelle, an der er
+    # greift (docs/recht/00_zweckbestimmung.md, „Entscheidung 7.11.2026“).
+    "hrv_bewertung": {Edition.SOLO, Edition.PRAXIS},
     "export": {Edition.SOLO, Edition.PRAXIS},
     # Geräte-Backup (Android Auto Backup) einschaltbar — Vorgabe aus (`core/sicherung.py`,
     # Sicherheitsdurchsicht S4). In der Praxis-Edition nie: fremde Gesundheitsdaten

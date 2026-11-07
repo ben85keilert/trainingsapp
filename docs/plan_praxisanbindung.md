@@ -22,6 +22,28 @@ Edition `praxis` im Code bleibt vorerst stehen, wird aber nicht weiter ausgebaut
   `zugewiesene_plaene`, `zugewiesene_kurse`, `profil_sperre`, `physiologische_steuerung`)
   ist entweder ungebaut oder nur ein Schalter. Mit der zweiten App entfällt das.
 
+## Rechtliche Linie: Weg A (Ben, 7.11.2026)
+
+Festgelegt in `docs/recht/00_zweckbestimmung.md` („Entscheidung 7.11.2026“). Für diese App
+heißt das:
+
+- **Zweckbestimmung der zweiten App:** „überträgt die Angaben, die Sie auswählen, an Ihre
+  Praxis; sie bewertet nichts und sendet nichts von selbst.“ Die Person wählt je Sendung
+  (Parameter, Übungsverlauf, Schmerzkurve, Einnahme-Protokoll, auf Wunsch auch eine
+  Messdatei), sieht die Auswahl, bestätigt — keine Abos, keine Hintergrund-Übertragung,
+  keine Anforderung durch die Praxis. Eine gemerkte Auswahl („wie beim letzten Mal“) ist in
+  Ordnung, gesendet wird trotzdem jedes Mal von Hand.
+- **Keine Deutung**, weder hier noch auf der Empfängerseite: Kurven und Summen ja,
+  Schwellen, Ampeln, bewertete Trends nein.
+- **Patientenmodus in der Solo-App** (Profil mit zugewiesenen Plänen): HRV-Bewertungen aus
+  (`config.ist_aktiv("hrv_bewertung")`), Zielbereich-Ton aus, Messdateien bleiben beim
+  Patienten; Rückkanal nur für Leistungen und Selbstauskünfte.
+- **Praxisseite:** anzeigen und ablegen (Patientenakte, § 630f BGB). Die HRV-**Analyse**
+  übermittelter Dateien mit `praxis_gui` wäre Medizinprodukte-Software (Regel 11) — nur als
+  Eigenherstellung nach Art. 5 Abs. 5 MDR innerhalb der Praxis oder gar nicht.
+- Gesundheitsdaten (Art. 9 DSGVO): Ende-zu-Ende verschlüsselt, AVV mit dem Hoster, TOMs
+  (`docs/recht/40_toms.md`).
+
 ## Was die Solo-App dafür kann (und was fehlt)
 
 | Richtung | Weg | Stand |

@@ -24,6 +24,11 @@ Deshalb:
   Pulsschwellen dürfen dort ausschließlich angezeigt werden.
 - Regeln, die auf Puls oder HRV **steuern**, sind über
   `EDITION_B_ONLY` markiert und in Edition A nicht auswählbar.
+- **Entscheidung C** (Ben, 7.11.2026): Ein selbst gesetzter **Zielbereich** mit hohem/tiefem
+  Ton beim Über-/Unterschreiten ist Information wie bei einer Sportuhr und in Solo erlaubt —
+  solange nichts pausiert oder weitergeht und die Sprache Fitness bleibt („Zielbereich“,
+  nie „Grenze“/„Warnung“); im Patientenmodus aus. Wird er gebaut, ist er **keine** Regel
+  dieses Moduls (hier steht nur, was den Ablauf steuert), sondern ein Ton am Live-Wert.
 
 Siehe `docs/recht/00_zweckbestimmung.md`.
 """

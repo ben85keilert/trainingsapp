@@ -103,5 +103,14 @@ wie Takt · HF. Offen: Video-Download (P14), Sicherheit von Medien aus Paketen (
 - P93: HF-Kachel wählbar (Atemfrequenz, RMSSD, andere Sensoren).
 - P94: Medienrollen (Tabelle C) und Paket-Medien.
 - P95: Fokus-Name endgültig („Fokus“ · „Bühne“ · „Mitmachen“).
+- Workouts (P83, Modell nach Bens Antworten 7.11.2026, Vertrag folgt als
+  `docs/plan_workout.md`): Start per Schalter am Plan **und** ▶ für heute; Übergang vor dem
+  Start **hart** (rauscht durch) oder **weich** (Timer zählt ins Minus, „Weiter“ von Hand);
+  Bedingungen `keine | zeit | wdh(n) | wdh_in_zeit(n, s) | gemacht`, Härte = Freischaltung von
+  Inhalten (Abbrechen immer); benannte Zweige A/B/C mit „erfüllt →“ / „nicht erfüllt →“
+  auf jeden Schritt; Workout-Abschnitt in der HRV mit den Übungen darin; HF-Zone nur als
+  Anzeige (Zeit in Zone), Zielbereich-Ton nach Entscheidung C — nie als Bedingung
+  (`docs/recht/00_zweckbestimmung.md`). Stufen W1 Grundmodus · W2 Bedingungen · W3 Zweige ·
+  W4 Zonen-Anzeige/Ton. Skizzen Reihe C auf Kommando.
 - Gerätetest T94: Pfeile, Wischen, Gesamtplan, Fokus-Knopf, Auto-Fokus, Kniebeuge-Bildfolge
   im Takt (Vorlage Kniebeuge, Takt ab/auf), Tempo-Regler rechts = schneller.

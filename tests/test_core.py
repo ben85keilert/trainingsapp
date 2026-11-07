@@ -258,6 +258,16 @@ def test_physiologische_steuerung_nur_in_der_praxis(monkeypatch) -> None:
     assert ist_aktiv("physiologische_steuerung")
 
 
+def test_hrv_bewertung_ist_ein_benannter_schalter(monkeypatch) -> None:
+    """Weg A (7.11.2026): Deutungen der HRV-Auswertung haben einen Schalter — in beiden
+    Editionen an; der Patientenmodus wird ihn später ausschalten."""
+    from trainingsapp.config import ist_aktiv
+
+    for edition in ("solo", "praxis"):
+        monkeypatch.setenv("TRAININGSAPP_EDITION", edition)
+        assert ist_aktiv("hrv_bewertung")
+
+
 def test_migration_erzeugt_das_schema(tmp_path) -> None:
     con = oeffnen(tmp_path / "test.db")
     assert schema_version(con) == 39

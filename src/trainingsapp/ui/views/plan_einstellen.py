@@ -39,8 +39,10 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import bedingung as bd
 from trainingsapp.core import varianten as var
 from trainingsapp.core import zaehlen as zl
+from trainingsapp.core.bedingung import Bedingung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, new_id
 from trainingsapp.core.parameter import chips_sortiert
 from trainingsapp.core.result_spec import (
@@ -156,6 +158,8 @@ def plan_einstellen(
     #: `AUS` = ausdrücklich keiner
     acc_stand: dict[str, SensorWahl | None] = {"acc": item.acc}
     takt_stand: dict[str, Takt | None] = {"takt": item.takt}
+    #: Bedingung fürs Weiterkommen und Zweig im Workout (W2/W3, `core.bedingung`)
+    bed_stand: dict[str, Bedingung] = {"b": item.bedingung}
 
     #: Das Ziel je Parameter — ein kleines Formular je Karte (P107 wie „Übung bearbeiten“),
     #: die Werte gemerkt über ein Aus- und wieder Einschalten
@@ -197,9 +201,180 @@ def plan_einstellen(
             timer=TimerWahl(timer.profil_id, timer.eigen, uhr=timer.uhr).als_dict(),
             acc=acc_stand["acc"],
             takt=takt_stand["takt"],
+            bedingung=bed_stand["b"],
         )
         an = bool(varianten_schalter.value) or not varianten_liste
         return bereinigt(varianten_schalten(neu, an), uebung)
+
+    # -- Bedingung und Zweig (Workout W2/W3, `docs/plan_workout.md` §1) --------------------
+
+    def bed_setzen(**felder: Any) -> None:
+        bed_stand["b"] = replace(bed_stand["b"], **felder)
+
+    def bed_art_gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
+        art = str(e.control.value or bd.KEINE)
+        b = bed_stand["b"]
+        n = b.n or (12 if art in (bd.WDH, bd.WDH_IN_ZEIT) else 0)
+        sekunden = b.sekunden or (60.0 if art == bd.WDH_IN_ZEIT else 0.0)
+        bed_setzen(art=art, n=n if art in (bd.WDH, bd.WDH_IN_ZEIT) else 0, sekunden=sekunden)
+        neu_zeichnen()
+
+    def bed_zahl(feld: str) -> Callable[[ft.Event[ft.TextField]], None]:
+        def handler(e: ft.Event[ft.TextField]) -> None:
+            roh = (e.control.value or "").replace(",", ".").strip()
+            try:
+                wert = float(roh) if roh else 0.0
+            except ValueError:
+                e.control.error = "Zahl"
+                return
+            e.control.error = None
+            bed_setzen(**{feld: int(wert) if feld == "n" else wert})
+
+        return handler
+
+    def bed_text(feld: str) -> Callable[[ft.Event[ft.TextField]], None]:
+        def handler(e: ft.Event[ft.TextField]) -> None:
+            inhalt = replace(bed_stand["b"].inhalt, **{feld: (e.control.value or "").strip()})
+            bed_setzen(inhalt=inhalt)
+
+        return handler
+
+    def bed_hart(e: ft.Event[ft.Switch]) -> None:
+        bed_setzen(hart=bool(e.control.value))
+        neu_zeichnen()
+
+    def bed_wahl(feld: str) -> Callable[[ft.Event[ft.Dropdown]], None]:
+        def handler(e: ft.Event[ft.Dropdown]) -> None:
+            wert = str(e.control.value or "")
+            bed_setzen(**{feld: "" if wert == "-" else wert})
+            neu_zeichnen()
+
+        return handler
+
+    def andere_planuebungen(leer: str) -> list[ft.DropdownOption]:
+        """Die anderen Planübungen als Ziel für „erfüllt →“ / „nicht erfüllt →“."""
+        out = [ft.DropdownOption(key="-", text=leer)]
+        for n, it in enumerate(plan.items, start=1):
+            if it.id == item.id:
+                continue
+            u = state.uebungen.laden(it.exercise_id, mit_geloeschten=True)
+            name = u.name if u is not None else "?"
+            out.append(ft.DropdownOption(key=it.id, text=f"{n} · {name} ({it.bedingung.zweig})"))
+        return out
+
+    def bedingung_karte() -> ft.Control:
+        b = bed_stand["b"]
+        zeilen: list[ft.Control] = [
+            ft.Dropdown(
+                label="Weiter, wenn",
+                value=b.art,
+                options=[ft.DropdownOption(key=k, text=t) for k, t in bd.ARTEN_TEXT.items()],
+                dense=True,
+                on_select=bed_art_gewaehlt,
+            )
+        ]
+        if b.art in (bd.WDH, bd.WDH_IN_ZEIT):
+            felder: list[ft.Control] = [
+                ft.TextField(
+                    label="Wiederholungen",
+                    value=str(b.n) if b.n else "",
+                    dense=True,
+                    width=140,
+                    keyboard_type=ft.KeyboardType.NUMBER,
+                    on_change=bed_zahl("n"),
+                )
+            ]
+            if b.art == bd.WDH_IN_ZEIT:
+                felder.append(
+                    ft.TextField(
+                        label="in Sekunden",
+                        value=f"{b.sekunden:g}" if b.sekunden else "",
+                        dense=True,
+                        width=140,
+                        keyboard_type=ft.KeyboardType.NUMBER,
+                        on_change=bed_zahl("sekunden"),
+                    )
+                )
+            zeilen.append(ft.Row(spacing=8, wrap=True, controls=felder))
+            zeilen.append(
+                ft.Text(
+                    "Gezählt wird mit dem Beschleunigungssensor oder dem Takt — sonst von Hand "
+                    "bestätigen.",
+                    size=12,
+                    opacity=0.6,
+                )
+            )
+        zeilen.append(
+            ft.Switch(
+                label="Hart — „Weiter“ erst, wenn erfüllt (Freischaltung)",
+                value=b.hart,
+                on_change=bed_hart,
+            )
+        )
+        if b.hart or not b.inhalt.leer:
+            zeilen.append(
+                ft.TextField(
+                    label="Inhalt bei Erfüllung (Text, Auftrag)",
+                    value=b.inhalt.text,
+                    dense=True,
+                    multiline=True,
+                    min_lines=1,
+                    max_lines=3,
+                    on_change=bed_text("text"),
+                )
+            )
+            zeilen.append(
+                ft.TextField(
+                    label="Link bei Erfüllung (Video, https://…)",
+                    value=b.inhalt.url,
+                    dense=True,
+                    keyboard_type=ft.KeyboardType.URL,
+                    on_change=bed_text("url"),
+                )
+            )
+        zeilen.append(
+            ft.Row(
+                spacing=8,
+                wrap=True,
+                controls=[
+                    ft.Dropdown(
+                        label="Zweig",
+                        value=b.zweig,
+                        width=130,
+                        dense=True,
+                        options=[
+                            ft.DropdownOption(key=z, text=z + (" · Haupt" if z == "A" else ""))
+                            for z in bd.ZWEIGE
+                        ],
+                        on_select=bed_wahl("zweig"),
+                    ),
+                    ft.Dropdown(
+                        label="erfüllt →",
+                        value=b.dann or "-",
+                        dense=True,
+                        expand=True,
+                        options=andere_planuebungen("— (nächste im Zweig)"),
+                        on_select=bed_wahl("dann"),
+                    ),
+                ],
+            )
+        )
+        zeilen.append(
+            ft.Dropdown(
+                label="nicht erfüllt →",
+                value=b.sonst or "-",
+                dense=True,
+                options=andere_planuebungen("— (kein Zweig)"),
+                on_select=bed_wahl("sonst"),
+            )
+        )
+        return ft.Container(
+            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            border_radius=14,
+            bgcolor=KARTE,
+            border=ft.Border.all(1.5, ft.Colors.TERTIARY) if not b.leer else None,
+            content=ft.Column(spacing=10, tight=True, controls=zeilen),
+        )
 
     # -- Aufbau --------------------------------------------------------------------------
 
@@ -782,6 +957,8 @@ def plan_einstellen(
                 ),
             ),
             sensor_karte(),
+            abschnitt("WEITER, WENN …", hilfe_knopf(page, thema="workout")),
+            bedingung_karte(),
             ft.Divider(),
             ft.Row(
                 wrap=True,
@@ -843,6 +1020,7 @@ def plan_einstellen(
         wahl.profil_id, wahl.eigen = "", None
         uhr_wahl.selected = ["uebung"]
         acc_stand["acc"], takt_stand["takt"] = None, None
+        bed_stand["b"] = Bedingung()
         ziel_formulare.clear()
         ziel_gemerkt.clear()
         ziel_gemerkt.update(uebung.default_target)

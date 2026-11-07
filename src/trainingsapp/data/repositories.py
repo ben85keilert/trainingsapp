@@ -28,6 +28,7 @@ from typing import Any
 
 from ..core import eintraege as offene
 from ..core import varianten
+from ..core.bedingung import Bedingung
 from ..core.models import (
     EINGABE_CHIPS,
     EINGABE_HAKEN,
@@ -569,6 +570,11 @@ def _takt_lesen(text: str | None) -> Takt | None:
     if tabelle is None:
         return None
     return AUS if not tabelle else Takt.aus_dict(tabelle)
+
+
+def _bedingung_json(b: Bedingung) -> str | None:
+    """`Bedingung.als_dict` als Text — ``None``, wenn nichts eingestellt ist."""
+    return None if b.leer else json.dumps(b.als_dict(), ensure_ascii=False, sort_keys=True)
 
 
 def _tabelle_lesen(text: str | None) -> dict[str, Any] | None:
@@ -1139,14 +1145,30 @@ class PlanRepo:
             )
             self._beruehrt(zeile["plan_id"])
 
+    def bedingung_setzen(self, item_id: str, bedingung: Bedingung) -> None:
+        """Bedingung fürs Weiterkommen und Zweig einer Planübung (Migration 041, Workout
+        W2/W3) — leer: NULL."""
+        zeile = self.con.execute(
+            "SELECT plan_id FROM plan_item WHERE id = ?", (item_id,)
+        ).fetchone()
+        if zeile is None:
+            return
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE plan_item SET bedingung_json = ? WHERE id = ?",
+                (_bedingung_json(bedingung), item_id),
+            )
+            self._beruehrt(zeile["plan_id"])
+
     def item_speichern(self, item: PlanItem) -> None:
-        """Ziel, Parameter, Chips, Timer, Sensor und Takt einer Planübung auf einmal („Im Plan
-        einstellen“, „Alles wie die Übung“ — P79)."""
+        """Ziel, Parameter, Chips, Timer, Sensor, Takt und Bedingung einer Planübung auf einmal
+        („Im Plan einstellen“, „Alles wie die Übung“ — P79)."""
         with transaktion(self.con):
             self.ziel_setzen(item.id, item.target)
             self.eingabe_setzen(item.id, item.input_mode, item.quick, item.felder)
             self.timer_setzen(item.id, item.timer)
             self.sensor_takt_setzen(item.id, item.acc, item.takt)
+            self.bedingung_setzen(item.id, item.bedingung)
 
     def verwendungen(
         self, exercise_id: str, subject_id: str | None = None
@@ -1183,8 +1205,8 @@ class PlanRepo:
     def _item_schreiben(self, item: PlanItem) -> None:
         self.con.execute(
             "INSERT INTO plan_item (id, plan_id, exercise_id, sort_order, target_json, note, "
-            "input_mode, quick_json, fields_json, timer_json, acc_json, takt_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "input_mode, quick_json, fields_json, timer_json, acc_json, takt_json, "
+            "bedingung_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 item.id,
                 item.plan_id,
@@ -1198,6 +1220,7 @@ class PlanRepo:
                 json.dumps(item.timer, ensure_ascii=False),
                 _sensor_json(item.acc),
                 _takt_json(item.takt),
+                _bedingung_json(item.bedingung),
             ),
         )
 
@@ -1237,6 +1260,7 @@ class PlanRepo:
             timer=_json_lesen(r["timer_json"], {}),
             acc=_sensor_lesen(r["acc_json"]),
             takt=_takt_lesen(r["takt_json"]),
+            bedingung=Bedingung.aus_dict(_tabelle_lesen(r["bedingung_json"])),
         )
 
     @staticmethod

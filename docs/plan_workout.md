@@ -88,9 +88,9 @@ HF-Zonen nur als Anzeige, der Zielbereich-Ton (Entscheidung C) ist Information.
 | Stufe | Inhalt | Stand |
 |---|---|---|
 | W1 | Schalter und ▶, Start-Bild mit hart/weich, Fokus je Übung (Komponente), Minus-Timer, Workout-Abschnitt, Ende-Bild, Kurven-Einblendung HF/RR/RMSSD/SDNN/Atemfrequenz/RSA | **gebaut 7.11.2026 (0.3.60)** — Ende-Bild ohne Kurve der Aufnahme (Hinweis statt Karte, P98) |
-| W2 | Bedingungen `wdh`, `wdh_in_zeit`, Härte als Freischaltung mit Inhalt, Karte „Weiter, wenn …“ in „Im Plan einstellen“; Kurse bekommen „hart“ | offen |
-| W3 | Zweige A/B/C, „nicht erfüllt →“, Editor als Listen mit zwei Pfeilen, Schleifenprüfung | offen |
-| W4 | HF-Zone als Anzeige (Zeit in Zone) im Fokus; Zielbereich-Ton (Entscheidung C) | offen |
+| W2 | Bedingungen `zeit` · `wdh` · `wdh_in_zeit` · `gemacht`, Härte als Freischaltung mit Inhalt (Text, Link), Karte „Weiter, wenn …“ in „Im Plan einstellen“ | **gebaut 7.11.2026 (0.3.61)** — Kurse unverändert (hart = `zugewiesene_kurse`, P97) |
+| W3 | Zweige A–D je Planübung, „erfüllt →“/„nicht erfüllt →“ auf jede Planübung, C3-Wahl in der Ansicht, Schleifenprüfung (`core.bedingung.schleifen`, noch ohne Hinweis im Editor) | **gebaut 7.11.2026 (0.3.61)** |
+| W4 | HF-Zone als Anzeige (Zone · % HRR · Zeit in Zone) in der HF-Kachel des Fokus; Zielbereich-Ton oben/unten (Entscheidung C, Einstellungen → Herzfrequenz) | **gebaut 7.11.2026 (0.3.61)** — Patientenmodus (Ton aus) folgt mit dem Modus |
 
 ## 4a. Umsetzungsstand W1 (7.11.2026)
 
@@ -108,9 +108,35 @@ HF-Zonen nur als Anzeige, der Zielbereich-Ton (Entscheidung C) ist Information.
 - Der alte Ablauf (`/plan/<id>/timer/ablauf`) bleibt bis W2 bestehen — gleicher Motor.
 - Tests: `tests/test_workout.py`, `tests/test_ui_workout.py`, `tests/test_ui_fokus.py`.
 
+## 4b. Umsetzungsstand W2–W4 (7.11.2026, 0.3.61)
+
+- `core/bedingung.py`: `Bedingung` (art, n, sekunden, hart, inhalt, zweig, dann, sonst),
+  `pruefen(Bedingung, Stand) → Erfuellung` (erfüllt · verfehlt · unprüfbar), `naechster_im_zweig`,
+  `schleifen`; `PlanItem.bedingung`, Migration 041 (`plan_item.bedingung_json`),
+  `PlanRepo.bedingung_setzen`/`item_speichern`; `Schritt.bedingung`.
+- `devices/plan_ablauf.py`: `naechster` folgt ``dann`` → Zweig → Hauptzweig (`ziel_index`);
+  `weiter(ziel)` auch mitten in der Übung (Zweig, „trotzdem weiter“), `wiederholen()`; „Fertig“
+  im weichen Übergang endet die Übung (keine Überzeit, `_fertig_gewollt`).
+- „Im Plan einstellen“: Karte „Weiter, wenn …“ (Art, Zahl, Sekunden, hart, Inhalt, Zweig,
+  erfüllt →, nicht erfüllt →); „Alles wie die Übung“ setzt sie zurück. Hilfethema `workout`.
+- `views/workout.py`: Bedingungskarte je Tick (Wiederholungen aus dem Zähl-Teil der Planübung,
+  sonst „niemand zählt — von Hand bestätigen“), harte Bedingung sperrt „Weiter“ (Abbrechen
+  bleibt), Inhalt „Freigeschaltet“ bei Erfüllung, C3: „Zweig B: …“ · „Trotzdem weiter“ (nur
+  weich) · „Noch einmal versuchen“; Start-Bild und Schrittliste zeigen Bedingung, Zweig,
+  Schloss. **P98:** Ende-Bild findet die Aufnahme der Einheit (`EinheitRepo.beteiligungen`,
+  `HrvRepo.zur_datei`) und öffnet sie mit Zoom auf den Workout-Abschnitt.
+- Fokus: HF-Kachel „Zone · % · Zeit“ (`core.hf_profil.bereiche_fuer`/`bereich_von`, Bereiche
+  einmal beim Bauen), Zielbereich-Ton hoch/tief gedrosselt (`HfEinstellungen.ziel_unten_bpm`,
+  `alarm_klang_tief`; `components/hf_sicht.alarm_zeilen` mit „darunter“).
+- Nicht gebaut: Bedingungen im Paket (P97), Zähl-Teil startet im Workout nicht von selbst —
+  „Wdh. zählen“ bzw. Takt-Zählen wie beim Übungs-Timer anbringen (P99); Hinweis auf Schleifen
+  im Editor (P100).
+
 ## 5. Offen
 
 - P83 (Workouts) → dieses Dokument. P96: welche Kurven im Fokus, je Gerät/Übung/Workout,
   Skalen. P97: Bedingungen in Paketen (Formatversion?). P95: Name „Fokus“. P98: Aufnahme-Karte
   im Ende-Bild mit der Kurve des Workout-Abschnitts (C4) — braucht die gespeicherte Messung.
 - Gerätetest T95: Workout hart/weich am Gerät, Minus-Timer, Abschnitt in der Aufnahme.
+- P99: Zählen im Workout (Sensor/Takt) automatisch anbringen, damit `wdh`-Bedingungen ohne Tipp
+  prüfbar sind. P100: Schleifenhinweis in „Im Plan einstellen“. Gerätetest T96 (W2–W4).

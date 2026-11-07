@@ -18,6 +18,7 @@ from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
+from .bedingung import Bedingung
 from .result_spec import ResultSpec
 from .takt import Takt
 from .zaehlen import SensorWahl
@@ -423,6 +424,9 @@ class PlanItem:
     #: Die Karte „Beschleunigungssensor“ nur hier (Migration 039, A6) — ``None`` = wie die
     #: Übung (`core.zaehlen.wirksame_wahl`)
     acc: SensorWahl | None = None
+    #: Bedingung fürs Weiterkommen im Workout und Zweig (Migration 041, W2/W3,
+    #: `core.bedingung`) — Vorgabe: nichts eingestellt
+    bedingung: Bedingung = field(default_factory=Bedingung)
     #: Der Takt nur hier (Migration 039, A6) — ``None`` = wie die Übung, ein leerer Takt
     #: (`core.takt.AUS`) = ausdrücklich keiner (`core.uebung_timer.takt_der_uebung`)
     takt: Takt | None = None

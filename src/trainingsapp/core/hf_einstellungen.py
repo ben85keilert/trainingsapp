@@ -67,6 +67,8 @@ EIGENE_MAX: Final[int] = 8
 #: Sekunden, wenn man über einer bestimmten HF ist … nicht aufdringlich“): so oft höchstens (s)
 ALARM_TAKT_S: Final[tuple[int, ...]] = (3, 4, 5, 10)
 ALARM_KLANG: Final[str] = "schale"
+#: Klang unter dem Zielbereich — tiefer als der obere (`core.klang.KLAENGE`)
+ALARM_KLANG_TIEF: Final[str] = "glocke3"
 ALARM_MIN_BPM: Final[float] = 40.0
 ALARM_MAX_BPM: Final[float] = 230.0
 
@@ -117,6 +119,10 @@ class HfEinstellungen:
     alarm_bpm: float | None = None
     alarm_klang: str = ALARM_KLANG
     alarm_takt_s: int = 4
+    #: Zielbereich (Entscheidung C, 7.11.2026): auch eine **untere** Grenze mit eigenem,
+    #: tieferem Klang — ein Ton als Information, keine Steuerung
+    ziel_unten_bpm: float | None = None
+    alarm_klang_tief: str = ALARM_KLANG_TIEF
 
     def alarm_grenze(self) -> float | None:
         """Die wirksame Grenze — nur mit Schalter und Wert.
@@ -128,6 +134,14 @@ class HfEinstellungen:
         """
         return float(self.alarm_bpm) if self.alarm_an and self.alarm_bpm else None
 
+    def ziel_unten(self) -> float | None:
+        """Die wirksame untere Grenze des Zielbereichs — nur mit Schalter und Wert.
+
+        >>> HfEinstellungen(alarm_an=True, ziel_unten_bpm=110).ziel_unten()
+        110.0
+        """
+        return float(self.ziel_unten_bpm) if self.alarm_an and self.ziel_unten_bpm else None
+
     def als_dict(self) -> dict[str, Any]:
         return {
             "modell": self.modell,
@@ -138,6 +152,8 @@ class HfEinstellungen:
             "alarm_bpm": self.alarm_bpm,
             "alarm_klang": self.alarm_klang,
             "alarm_takt_s": self.alarm_takt_s,
+            "ziel_unten_bpm": self.ziel_unten_bpm,
+            "alarm_klang_tief": self.alarm_klang_tief,
         }
 
     @classmethod
@@ -162,6 +178,8 @@ class HfEinstellungen:
         bpm = _zahl(d.get("alarm_bpm"))
         takt = d.get("alarm_takt_s")
         klang = d.get("alarm_klang")
+        unten = _zahl(d.get("ziel_unten_bpm"))
+        klang_tief = d.get("alarm_klang_tief")
         return cls(
             modell=modell if modell in MODELLE else vorgabe.modell,
             eigene=eigene[:EIGENE_MAX],
@@ -169,6 +187,12 @@ class HfEinstellungen:
             formel=formel if formel in FORMELN else vorgabe.formel,
             alarm_an=d.get("alarm_an") is True,
             alarm_bpm=bpm if bpm is not None and ALARM_MIN_BPM <= bpm <= ALARM_MAX_BPM else None,
+            ziel_unten_bpm=(
+                unten if unten is not None and ALARM_MIN_BPM <= unten <= ALARM_MAX_BPM else None
+            ),
+            alarm_klang_tief=(
+                str(klang_tief) if isinstance(klang_tief, str) and klang_tief else ALARM_KLANG_TIEF
+            ),
             alarm_klang=klang if isinstance(klang, str) and klang else vorgabe.alarm_klang,
             alarm_takt_s=takt
             if isinstance(takt, int) and not isinstance(takt, bool) and takt in ALARM_TAKT_S

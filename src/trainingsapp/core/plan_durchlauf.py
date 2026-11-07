@@ -12,8 +12,9 @@ Rein: Der Ablauf selbst läuft in ``devices/plan_ablauf.py``.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from .bedingung import Bedingung
 from .models import Exercise, Plan
 from .standards import aktive_felder
 from .timer import TimerProfil, dauer_text
@@ -32,6 +33,8 @@ class Schritt:
     #: welches Feld die Zeit bekommt — ``None``: nur „gemacht“. Mit Timer immer eins (Ben,
     #: 18.10.2026: Zeit auch ohne den Parameter), ohne Timer nur mit eingeschalteter Uhr
     zeitfeld: str | None = None
+    #: Bedingung fürs Weiterkommen und Zweig (W2/W3, `core.bedingung`)
+    bedingung: Bedingung = field(default_factory=Bedingung)
 
     def kurztext(self) -> str:
         """„Halten 3 × 1:00“ — oder „ohne Timer“."""
@@ -73,7 +76,7 @@ def schritte_fuer(plan: Plan, katalog: Mapping[str, Exercise]) -> list[Schritt]:
         # Ob die Zeit zählt, legt die Übung fest (P79 D2)
         zaehlt = uebung.zeit_zaehlt and (profil is not None or uhr_an(uebung, item))
         feld = zaehlt_als(felder, uebung) if zaehlt else None
-        schritte.append(Schritt(item.id, uebung.id, uebung.name, profil, feld))
+        schritte.append(Schritt(item.id, uebung.id, uebung.name, profil, feld, item.bedingung))
     return schritte
 
 

@@ -25,6 +25,7 @@ from typing import Any
 import flet as ft
 from hrv_core.trends import KENNZAHLEN, verlauf
 
+from trainingsapp.core.hf_profil import bereich_von, bereiche_fuer
 from trainingsapp.core.timer import Abschnitt, dauer_text
 from trainingsapp.core.timer_eintrag import gelaufene_zeiten
 from trainingsapp.devices.einheit import Einheitslauf
@@ -217,6 +218,13 @@ class Fokus:
         self._kurven_zuletzt = 0.0
         self._kurven_speicher: dict[Any, Any] = {}
         self._saetze_schluessel: Any = None
+        #: HF-Zonen (W4, nur Anzeige): Bereiche und Profil einmal beim Bauen, Zeit je Zone
+        self._bereiche: list[Any] = []
+        self._profil: Any = None
+        self._einst: Any = None
+        self._zone_sekunden: dict[str, float] = {}
+        self._zone_zuletzt: float | None = None
+        self._ton_zuletzt = 0.0
 
     # -- Ebenen ----------------------------------------------------------------------------
 
@@ -297,6 +305,7 @@ class Fokus:
         from trainingsapp.ui.components.karte import karte
 
         self.tempo_platz.content = TempoRegler(self.state, self.key, lauf).control
+        self._zonen_laden()
         bewegung = bewegung_im_fokus(self.state, self.uebung, self.item)
         self.bild_platz.content, self.bildfolge = bewegung if bewegung is not None else (None, None)
         self.ebenen_anwenden()
@@ -391,6 +400,15 @@ class Fokus:
         except Exception:
             return None
 
+    def _zonen_laden(self) -> None:
+        """Profil und Bereiche einmal (die Datenbank fragt man nicht je Tick)."""
+        try:
+            self._profil = self.state.hf_profil()
+            self._einst = self.state.hf_einstellungen()
+            self._bereiche = list(bereiche_fuer(self._profil, self._einst))
+        except Exception:
+            self._profil, self._einst, self._bereiche = None, None, []
+
     def _hf_nachziehen(self) -> None:
         paar = self._live()
         kennzahlen = None
@@ -399,9 +417,55 @@ class Fokus:
                 kennzahlen = paar[0].kennzahlen()
         hf = getattr(kennzahlen, "hf_bpm", None) if kennzahlen is not None else None
         self.hf_wert.value = str(hf) if hf is not None else "—"
-        self.hf_unten.value = (
-            "Gurt" if hf is not None else ("verbindet …" if paar is not None else "kein Gurt")
-        )
+        if hf is None:
+            self.hf_unten.value = "verbindet …" if paar is not None else "kein Gurt"
+            self._zone_zuletzt = None
+            return
+        self.hf_unten.value = self._zonen_text(float(hf))
+        self._ton_pruefen(float(hf))
+
+    def _zonen_text(self, hf: float) -> str:
+        """„Zone 3 · 72 % · 1:40“ — die Zone (Einstellungen → Herzfrequenz), der Anteil der
+        Herzfrequenzreserve und die Zeit in dieser Zone seit dem Aufbau. Nur Anzeige (W4)."""
+        jetzt = time.monotonic()
+        bereich = bereich_von(hf, self._bereiche) if self._bereiche else None
+        if bereich is None:
+            self._zone_zuletzt = jetzt
+            return "Gurt"
+        if self._zone_zuletzt is not None:
+            dt = min(max(jetzt - self._zone_zuletzt, 0.0), 5.0)
+            self._zone_sekunden[bereich.name] = self._zone_sekunden.get(bereich.name, 0.0) + dt
+        self._zone_zuletzt = jetzt
+        teile = [bereich.name]
+        prozent = self._profil.prozent(hf) if self._profil is not None else None
+        if prozent is not None:
+            teile.append(f"{prozent:.0f} %")
+        teile.append(dauer_text(int(self._zone_sekunden.get(bereich.name, 0.0))))
+        return " · ".join(teile)
+
+    def _ton_pruefen(self, hf: float) -> None:
+        """Zielbereich-Ton (Entscheidung C): hoch über, tief unter dem selbst gesetzten
+        Bereich — gedrosselt wie in der Messansicht, nur Information."""
+        e = self._einst
+        if e is None or not getattr(e, "alarm_an", False):
+            return
+        oben, unten = e.alarm_grenze(), e.ziel_unten()
+        klang = None
+        if oben is not None and hf > oben:
+            klang = e.alarm_klang
+        elif unten is not None and hf < unten:
+            klang = e.alarm_klang_tief
+        if klang is None:
+            return
+        jetzt = time.monotonic()
+        if jetzt - self._ton_zuletzt < e.alarm_takt_s:
+            return
+        self._ton_zuletzt = jetzt
+        if hasattr(self.page, "run_task"):
+            from trainingsapp.ui.timer_takt import ton_spielen
+
+            with contextlib.suppress(Exception):
+                self.page.run_task(ton_spielen, self.state, klang)
 
     def _kurven_nachziehen(self) -> None:
         if FOKUS_KURVE not in self.ebenen:

@@ -316,10 +316,12 @@ def alarm_zeilen(
     vorspielen: Callable[[str], None] | None = None,
     geaendert: Callable[[], None] | None = None,
 ) -> list[ft.Control]:
-    """Signal über einer selbst gesetzten Grenze (Ben, 30.10.2026: „piepen alle 3–5 Sekunden,
-    wenn man über einer bestimmten HF ist … nicht aufdringlich“): Schalter, Grenze in bpm,
-    Takt und Klang — je Profil (`HfEinstellungen`). Steht im Blatt der Live-Sicht und unter
-    Einstellungen → Herzfrequenz; ``vorspielen`` spielt den gewählten Klang zur Probe.
+    """Ton außerhalb eines selbst gesetzten Zielbereichs (Ben, 30.10.2026: „piepen alle 3–5
+    Sekunden, wenn man über einer bestimmten HF ist … nicht aufdringlich“; 7.11.2026,
+    Entscheidung C: auch darunter, mit tieferem Klang): Schalter, Grenzen in bpm, Takt und
+    Klänge — je Profil (`HfEinstellungen`). Steht im Blatt der Live-Sicht und unter
+    Einstellungen → Herzfrequenz; ``vorspielen`` spielt den gewählten Klang zur Probe. Nur
+    Information, keine Steuerung (`docs/recht/00_zweckbestimmung.md`).
     """
     e = state.hf_einstellungen()
     feld = ft.TextField(
@@ -374,8 +376,48 @@ def alarm_zeilen(
 
     feld.on_submit = grenze_uebernehmen
     feld.on_blur = grenze_uebernehmen
+
+    # Zielbereich nach unten (Entscheidung C, 7.11.2026): ein tieferer Ton darunter
+    unten = ft.TextField(
+        label="darunter",
+        suffix=ft.Text("bpm"),
+        value=f"{e.ziel_unten_bpm:g}" if e.ziel_unten_bpm else "",
+        dense=True,
+        width=130,
+        border=ft.OutlineInputBorder(border_radius=8),
+        keyboard_type=ft.KeyboardType.NUMBER,
+        text_align=ft.TextAlign.RIGHT,
+        tooltip="Untere Grenze des Zielbereichs — leer: nur die obere",
+    )
+
+    def unten_uebernehmen(_ev: object = None) -> None:
+        roh = (unten.value or "").strip().replace(",", ".")
+        if not roh:
+            e.ziel_unten_bpm, unten.error = None, None
+        else:
+            try:
+                wert = float(roh)
+            except ValueError:
+                wert = -1.0
+            if ALARM_MIN_BPM <= wert <= ALARM_MAX_BPM:
+                e.ziel_unten_bpm, unten.error = wert, None
+            else:
+                unten.error = f"{ALARM_MIN_BPM:.0f} bis {ALARM_MAX_BPM:.0f} bpm"
+        speichern()
+        with contextlib.suppress(Exception):
+            unten.update()
+
+    def klang_tief_gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
+        if ev.control.value:
+            e.alarm_klang_tief = str(ev.control.value)
+            speichern()
+            if vorspielen is not None:
+                vorspielen(e.alarm_klang_tief)
+
+    unten.on_submit = unten_uebernehmen
+    unten.on_blur = unten_uebernehmen
     return [
-        ft.Switch(label="Signal über einer Grenze", value=e.alarm_an, on_change=umgeschaltet),
+        ft.Switch(label="Ton außerhalb des Zielbereichs", value=e.alarm_an, on_change=umgeschaltet),
         ft.Row(
             spacing=8,
             wrap=True,
@@ -392,7 +434,7 @@ def alarm_zeilen(
                     border=ft.OutlineInputBorder(border_radius=8),
                 ),
                 ft.Dropdown(
-                    label="Klang",
+                    label="Klang darüber",
                     value=e.alarm_klang,
                     options=[
                         ft.DropdownOption(key=k, text=t) for k, t in KLAENGE.items() if k != "ende"
@@ -404,9 +446,29 @@ def alarm_zeilen(
                 ),
             ],
         ),
+        ft.Row(
+            spacing=8,
+            wrap=True,
+            run_spacing=6,
+            controls=[
+                unten,
+                ft.Dropdown(
+                    label="Klang darunter",
+                    value=e.alarm_klang_tief,
+                    options=[
+                        ft.DropdownOption(key=k, text=t) for k, t in KLAENGE.items() if k != "ende"
+                    ],
+                    on_select=klang_tief_gewaehlt,
+                    dense=True,
+                    width=190,
+                    border=ft.OutlineInputBorder(border_radius=8),
+                ),
+            ],
+        ),
         ft.Text(
-            "Ein leiser Klang, solange die Herzfrequenz über deiner Grenze liegt — wie ein "
-            "Timer, keine Bewertung. Töne gibt es nur in der installierten App.",
+            "Ein leiser Klang, solange die Herzfrequenz über oder unter deinem Zielbereich "
+            "liegt — wie ein Timer, keine Bewertung; die Grenzen setzt du selbst. Töne gibt es "
+            "nur in der installierten App.",
             size=11,
             opacity=0.65,
         ),

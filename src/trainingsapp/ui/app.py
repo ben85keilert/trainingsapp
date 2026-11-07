@@ -554,11 +554,17 @@ def main(page: ft.Page) -> None:
         # Üben — ein Workout-Plan öffnet mit dem Start-Bild, bis „Als Plan üben“ (7.11.2026,
         # `docs/plan_workout.md`); `…/workout` legt das Workout über den Plan
         if plan.workout and plan.id not in state.plan_als_plan and len(teile) == 2:
-            ablegen(lambda: workout_view(page, state, plan, route=f"/plan/{plan.id}"))
+            ablegen(
+                lambda: workout_view(page, state, plan, route=f"/plan/{plan.id}", browser=browser)
+            )
             return
         ablegen(lambda: plan_view(page, state, plan))  # üben
         if teile[2:3] == ["workout"]:
-            ablegen(lambda: workout_view(page, state, plan, route=f"/plan/{plan.id}/workout"))
+            ablegen(
+                lambda: workout_view(
+                    page, state, plan, route=f"/plan/{plan.id}/workout", browser=browser
+                )
+            )
         elif teile[2:3] == ["bearbeiten"]:
             basis = f"/plan/{plan.id}/bearbeiten"
             bearbeiten_routen(plan, basis, f"/plan/{plan.id}", teile[3:])

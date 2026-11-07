@@ -322,7 +322,29 @@ KNOPF_LEGENDE = """\
 
 PLAN_MD = KNOPF_LEGENDE + "\n**So wird eingegeben**\n\n" + NOTATION_MD
 
+WORKOUT_MD = """\
+**Workout** heißt: Der Plan läuft von vorn bis hinten durch, Übung für Übung mit ihrem Timer.
+
+**Übergang** — vor dem Start wählbar:
+- **hart · läuft durch**: Ist der Timer ab, geht es sofort weiter. Nur Pause oder Abbrechen
+  halten an. Übungen ohne Timer warten auf „Weiter“.
+- **weich · nachtrainieren**: Nach Ablauf zählt der Timer ins Minus („−0:23“), du trainierst
+  weiter; „Weiter“ tippst du. Eingetragen wird die tatsächliche Zeit.
+
+**Weiter, wenn …** steht an jedem Schritt („Im Plan einstellen“): *Zeit ab*, *Wiederholungen*
+(Sensor oder Takt zählen), *Wiederholungen in einer Zeit* oder *Abhaken*. **Hart** heißt
+Freischaltung: „Weiter“ erst, wenn erfüllt — ein Inhalt (Text, Link) erscheint erst dann.
+Abbrechen geht immer.
+
+**Zweige:** Jeder Schritt gehört zu einem Zweig (A = Hauptzweig, B, C, D). „Erfüllt →“ führt
+zur nächsten Übung im Zweig oder zu einer gewählten; „nicht erfüllt →“ bietet eine andere an —
+zurück nach A, weiter in B, wohin du willst.
+
+Läuft eine Aufnahme, wird das Workout ein Abschnitt in ihr — die Übungen liegen darin.
+"""
+
 THEMEN: dict[str, tuple[str, str, str]] = {
+    "workout": ("Workout", WORKOUT_MD, "Workout: Übergang, Bedingungen, Zweige"),
     "notation": ("So wird eingegeben", NOTATION_MD, "Wie gebe ich ein?"),
     "plan": ("Üben im Plan", PLAN_MD, "Knöpfe und Eingabe"),
     "varianten": ("Varianten", VARIANTEN_MD, "Was sind Varianten?"),
@@ -385,6 +407,7 @@ __all__ = [
     "THEMEN",
     "UEBUNGEN_MD",
     "VARIANTEN_MD",
+    "WORKOUT_MD",
     "hilfe_dialog",
     "hilfe_knopf",
     "hilfe_oeffner",

@@ -71,6 +71,10 @@ Fitness-Sprache („Zielbereich“, „Intensität“, „darüber/darunter“ �
 **Zielbereich-Ton** (Solo erlaubt) und **Steuerung** (`rest_until_hr_below`, Bedingungen aus der
 Herzfrequenz — gesperrt, `physiologische_steuerung`). HF-Zonen als **Workout-Bedingung**
 („x Minuten in Zone y“) bleiben Steuerung und damit gesperrt (Variante B abgelehnt).
+**Gebaut (7.11.2026, 0.3.61):** Einstellungen → Herzfrequenz „Ton außerhalb des Zielbereichs“
+mit oberer und unterer Grenze und zwei Klängen (`HfEinstellungen.ziel_unten_bpm`,
+`alarm_klang_tief`), gespielt im Fokus (`components/fokus.py`) und in der Live-Sicht; die
+HF-Kachel des Fokus zeigt Zone, Anteil der Reserve und Zeit in der Zone — nur Anzeige.
 
 **Tagesfelder** (Ben, 21.10.2026, `docs/plan_tagesfelder.md`): Die Person hält je Tag
 selbst Werte fest — frei benannt, etwa Schmerz auf einer Skala, Einnahmen eines

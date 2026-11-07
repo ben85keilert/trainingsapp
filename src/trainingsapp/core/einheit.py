@@ -98,6 +98,9 @@ SPUR_EINHEIT = "einheit"
 SPUR_TIMER = "timer"
 SPUR_UEBUNG = "uebung"
 SPUR_KM = "km"
+#: Workout (7.11.2026, `docs/plan_workout.md`): ``plan/start`` … ``plan/ende`` eines Plans,
+#: der als Workout durchläuft — die Übungen (Spur ``uebung``) liegen darin
+SPUR_WORKOUT = "workout"
 
 #: Teile einer Einheit — ``zaehlen``: Wiederholungen mit dem Beschleunigungssensor
 #: (``devices/zaehlen.ZaehlBaustein``, Migration 037)
@@ -112,6 +115,10 @@ AUSFUEHRUNG_SCHLUESSEL: tuple[str, ...] = ("variant", "weight", "angle", "side")
 #: Was ein Ereignis an Daten tragen darf — ortsfrei, ohne Messwerte. Alles andere fällt weg.
 DATEN_SCHLUESSEL: frozenset[str] = frozenset(
     {
+        # Workout (7.11.2026): der Plan läuft als Workout (``plan/start``, ``plan/ende``);
+        # ``ueber_s``: Sekunden über dem Timer-Ende beim weichen Übergang (``plan/uebung_ende``)
+        "workout",
+        "ueber_s",
         # Timer (`profil` ist der Name; `profil_id`, `soll_s` und `still` seit 18.10.2026, P54)
         "profil",
         "profil_id",
@@ -368,6 +375,9 @@ def projektion(
     False
     >>> projektion(Ereignis(9.0, "person", "eintrag")) is None
     True
+    >>> w = projektion(Ereignis(0.0, "plan", "start", "Beine", {"plan": "p1", "workout": True}))
+    >>> w.spur, w.text, w.name, projektion(Ereignis(0.0, "plan", "start", "Beine")) is None
+    ('workout', 'Workout Beine: Start', 'Workout Beine', True)
 
     Das Zählen bleibt in der Zeitleiste — in die Notizen kommt nichts Neues (§5.3):
 
@@ -462,6 +472,13 @@ def projektion(
             return Projektion(
                 SPUR_KM, "Ende der Strecke", "", True, marke(SPUR_KM), als_notiz=False
             )
+        case ("plan", "start") if d.get("workout"):
+            # Workout (7.11.2026): die Klammer um alle Übungen — „Workout Beine: Start“
+            name = f"Workout {e.text}" if e.text else "Workout"
+            return Projektion(SPUR_WORKOUT, f"{name}: Start", name, False, marke(SPUR_WORKOUT))
+        case ("plan", "ende") if d.get("workout"):
+            name = f"Workout {e.text}" if e.text else "Workout"
+            return Projektion(SPUR_WORKOUT, f"{name}: Ende", "", True, marke(SPUR_WORKOUT))
         case ("plan", "uebung_start"):
             # Mit den Angaben der Uhr der Übung (`profil`, `soll_s`) — ihr Anfang ist still
             name = str(d.get("name") or e.text)
@@ -760,6 +777,7 @@ __all__ = [
     "SPUR_KM",
     "SPUR_TIMER",
     "SPUR_UEBUNG",
+    "SPUR_WORKOUT",
     "TEILE",
     "Baustein",
     "Beteiligung",

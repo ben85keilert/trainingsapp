@@ -40,8 +40,12 @@ from ..core.plan_durchlauf import Schritt
 from ..core.timer import TimerLauf, TimerProfil
 from .einheit import TimerBaustein, uhr_angaben
 
-#: Wo der Ablauf steht
-UEBUNG, PAUSE, FERTIG = "uebung", "pause", "fertig"
+#: Wo der Ablauf steht — ``UEBERZEIT``: der Timer ist ab, läuft aber weiter (weicher
+#: Übergang, `docs/plan_workout.md`), bis „Weiter“
+UEBUNG, PAUSE, FERTIG, UEBERZEIT = "uebung", "pause", "fertig", "ueberzeit"
+#: Übergang im Workout: ``HART`` = nach dem Timer sofort weiter, ``WEICH`` = Überzeit bis
+#: „Weiter“; ``None`` = der Ablauf wie bisher (Pause oder `weiter_automatisch`)
+HART, WEICH = "hart", "weich"
 #: Mit diesem Grund endet eine Übung, die offen bleibt — sie kommt später noch dran
 GEWECHSELT = "gewechselt"
 
@@ -60,17 +64,29 @@ class PlanAblaufBaustein:
         weiter_automatisch: bool = False,
         pause_ohne_timer: bool = True,
         erste: str | None = None,
+        uebergang: str | None = None,
+        workout: bool = False,
     ) -> None:
         """``pause_ohne_timer``: nach einer Übung ohne Timer auf „Weiter“ warten (sonst gleich
         die nächste) — gilt nur, wenn nicht ohnehin ``weiter_automatisch``. ``erste``: die
-        Planübung, mit der der Ablauf beginnt (sonst die erste)."""
+        Planübung, mit der der Ablauf beginnt (sonst die erste).
+
+        ``uebergang`` (Workout, 7.11.2026): `HART` — ist der Timer ab, beginnt sofort die
+        nächste Übung (Schritte ohne Timer warten auf „Weiter“); `WEICH` — der Timer läuft
+        über (`UEBERZEIT`, `TimerLauf.ueber_s`), die Übung endet erst mit „Weiter“, die
+        Überzeit geht in den Eintrag (``ueber_s``). ``workout``: die Einheit bekommt die
+        Klammer ``plan/start`` … ``plan/ende`` (Spur ``workout`` in der Messung)."""
         if not schritte:
             raise ValueError("Ein Ablauf ohne Übung")
+        if uebergang not in (None, HART, WEICH):
+            raise ValueError(f"Unbekannter Übergang: {uebergang!r}")
         self.plan_id = plan_id
         self.name = name
         self.schritte = schritte
-        self.weiter_automatisch = weiter_automatisch
-        self.pause_ohne_timer = pause_ohne_timer
+        self.uebergang = uebergang
+        self.workout = workout
+        self.weiter_automatisch = weiter_automatisch or uebergang == HART
+        self.pause_ohne_timer = pause_ohne_timer if uebergang is None else False
         #: die laufende (oder zuletzt gelaufene) Übung
         self.k = next((i for i, s in enumerate(schritte) if s.item_id == erste), 0)
         self.phase = UEBUNG
@@ -126,11 +142,22 @@ class PlanAblaufBaustein:
             return 0.0
         return max(0.0, self._uhr() - self._seit)
 
+    def ueber_s(self) -> float:
+        """Sekunden über dem Timer-Ende in der Überzeit (weicher Übergang) — sonst 0."""
+        if self.phase != UEBERZEIT or self.timer is None:
+            return 0.0
+        return self.timer.lauf.ueber_s()
+
     async def vorbereiten(self) -> None:
         return None
 
     def starten(self, t0: float) -> Beteiligung:
         self._t0 = t0
+        if self.workout:
+            # Die Klammer des Workouts — vor der ersten Übung (`core.einheit.projektion`)
+            self._ausstehend.append(
+                Ereignis(0.0, "plan", "start", self.name, {"plan": self.plan_id, "workout": True})
+            )
         self._beginnen(self.k, t0)
         return Beteiligung(
             "plan", Rolle.MITSTARTEN, daten={"plan": self.plan_id, "name": self.name}
@@ -143,20 +170,35 @@ class PlanAblaufBaustein:
             out += neu
             ende = next((x for x in neu if x.quelle == "timer" and x.art == "ende"), None)
             if ende is not None and self._t0 is not None:
-                grund = "abgebrochen" if ende.daten.get("grund") == "abgebrochen" else "fertig"
-                self._beenden(self._t0 + ende.t_s, grund)
+                if ende.daten.get("grund") == "abgebrochen":
+                    self._beenden(self._t0 + ende.t_s, "abgebrochen")
+                elif self.uebergang == WEICH and self._weiter_trainierbar():
+                    # Weich: der Timer läuft über, die Übung endet erst mit „Weiter“
+                    self.phase = UEBERZEIT
+                else:
+                    self._beenden(self._t0 + ende.t_s, "fertig")
                 out += self._abholen()
         return out
+
+    def _weiter_trainierbar(self) -> bool:
+        """Überzeit lohnt nur, wenn der Timer noch läuft (nicht „Gemacht“ oder angehalten)."""
+        return self.timer is not None and self.timer.lauf.laeuft_roh
 
     def beenden(self, jetzt: float) -> list[Ereignis]:
         """Die Einheit endet mitten im Ablauf: die laufende Übung endet ohne Eintrag."""
         out = self.takt(jetzt)
-        if self.phase == UEBUNG and self._t0 is not None:
+        if self.phase == UEBERZEIT and self._t0 is not None:
+            # Weich und die Einheit endet: die Übung war fertig — eintragen, mit Überzeit
+            self._ende_eintragen(jetzt, "fertig")
+        elif self.phase == UEBUNG and self._t0 is not None:
             if self.timer is not None:
                 out += self._uebungs_timer(self.timer.beenden(jetzt))
             self._ausstehend.append(self._ende_ereignis(jetzt, "beendet"))
             self.ergebnisse.setdefault(self.schritt.item_id, "beendet")
             self.phase = FERTIG
+        if self.phase != FERTIG and self._t0 is not None:
+            self.phase = FERTIG
+            self._ausstehend.append(self._plan_ende(jetzt))
         return out + self._abholen()
 
     async def abschliessen_async(self, stoppen: bool = True) -> PlanAblaufBaustein:
@@ -165,8 +207,14 @@ class PlanAblaufBaustein:
     # -- Bedienung (Oberfläche) -----------------------------------------------------------
 
     def weiter(self) -> None:
-        """In der Pause: die nächste Übung beginnt jetzt."""
-        if self.phase == PAUSE and self._t0 is not None and (n := self.naechster) is not None:
+        """In der Pause: die nächste Übung beginnt jetzt. In der Überzeit (weich): die
+        laufende Übung endet als fertig — mit Überzeit —, die nächste beginnt."""
+        if self._t0 is None:
+            return
+        if self.phase == UEBERZEIT:
+            self._beenden(self._uhr(), "fertig")
+            return
+        if self.phase == PAUSE and (n := self.naechster) is not None:
             self._beginnen(n, self._uhr())
 
     def waehlen(self, item_id: str) -> bool:
@@ -190,9 +238,12 @@ class PlanAblaufBaustein:
             if self.phase == FERTIG:
                 return False
         k = next((i for i, s in enumerate(self.schritte) if s.item_id == item_id), None)
-        if k is None or not self.offen(item_id) or (self.phase == UEBUNG and k == self.k):
+        if k is None or not self.offen(item_id) or (self.phase != PAUSE and k == self.k):
             return False
-        if self.phase == UEBUNG:
+        if self.phase == UEBERZEIT:
+            # Weich: die laufende war fertig — eintragen, dann die gewählte
+            self._ende_eintragen(jetzt, "fertig")
+        elif self.phase == UEBUNG:
             if self.timer is not None:
                 self._ausstehend += self._uebungs_timer(self.timer.beenden(jetzt))
             self._ausstehend.append(self._ende_ereignis(jetzt, GEWECHSELT))
@@ -203,19 +254,21 @@ class PlanAblaufBaustein:
     def gemacht(self) -> None:
         """Die laufende Übung ist fertig — mit Timer: jetzt ans Ende (die gelaufene Zeit
         zählt), ohne Timer: abgehakt."""
-        if self.phase != UEBUNG or self._t0 is None:
+        if self._t0 is None:
             return
-        if self.timer is not None:
+        if self.phase == UEBERZEIT:
+            self._beenden(self._uhr(), "fertig")
+        elif self.phase == UEBUNG and self.timer is not None:
             self.timer.lauf.fertig_machen()
-        else:
+        elif self.phase == UEBUNG:
             self._beenden(self._uhr(), "gemacht")
 
     def ueberspringen(self) -> None:
         """Die laufende Übung endet ohne Eintrag; die nächste beginnt (wie nach dem Timer)."""
-        if self.phase != UEBUNG or self._t0 is None:
+        if self.phase not in (UEBUNG, UEBERZEIT) or self._t0 is None:
             return
         jetzt = self._uhr()
-        if self.timer is not None:
+        if self.phase == UEBUNG and self.timer is not None:
             self._ausstehend += self._uebungs_timer(self.timer.beenden(jetzt))
         self._beenden(jetzt, "uebersprungen")
 
@@ -242,13 +295,25 @@ class PlanAblaufBaustein:
     def _ende_ereignis(self, jetzt: float, grund: str) -> Ereignis:
         assert self._t0 is not None
         s = self.schritt
-        return Ereignis(
-            jetzt - self._t0,
-            "plan",
-            "uebung_ende",
-            uebung_ende_text(s.name),
-            {**self._daten(s), "grund": grund},
-        )
+        daten = {**self._daten(s), "grund": grund}
+        if (ueber := self.ueber_s()) > 0:
+            daten["ueber_s"] = round(ueber, 1)  # weich: die Überzeit geht in den Eintrag
+        return Ereignis(jetzt - self._t0, "plan", "uebung_ende", uebung_ende_text(s.name), daten)
+
+    def _plan_ende(self, jetzt: float) -> Ereignis:
+        assert self._t0 is not None
+        daten: dict[str, Any] = {"plan": self.plan_id}
+        if self.workout:
+            daten["workout"] = True
+        return Ereignis(jetzt - self._t0, "plan", "ende", self.name, daten)
+
+    def _ende_eintragen(self, jetzt: float, grund: str) -> None:
+        """Die laufende Übung endet mit ``grund``, ohne dass der Ablauf weitergeht (die
+        nächste Übung bestimmt der Aufrufer — `waehlen`)."""
+        self._ausstehend.append(self._ende_ereignis(jetzt, grund))
+        self.ergebnisse[self.schritt.item_id] = grund
+        self.unterbrochen.discard(self.schritt.item_id)
+        self.timer = None
 
     def _beginnen(self, k: int, bei: float) -> None:
         assert self._t0 is not None
@@ -271,18 +336,17 @@ class PlanAblaufBaustein:
 
     def _beenden(self, jetzt: float, grund: str) -> None:
         assert self._t0 is not None
-        self._ausstehend.append(self._ende_ereignis(jetzt, grund))
-        self.ergebnisse[self.schritt.item_id] = grund
-        self.unterbrochen.discard(self.schritt.item_id)
         ohne_timer = self.schritt.profil is None
-        self.timer = None  # in der Pause gibt es keinen Timer (Laufleiste, ⏸)
+        self._ende_eintragen(jetzt, grund)  # in der Pause gibt es keinen Timer (Laufleiste, ⏸)
         naechster = self.naechster
         if naechster is None:
             self.phase = FERTIG
-            self._ausstehend.append(
-                Ereignis(jetzt - self._t0, "plan", "ende", self.name, {"plan": self.plan_id})
-            )
-        elif self.weiter_automatisch or (ohne_timer and not self.pause_ohne_timer):
+            self._ausstehend.append(self._plan_ende(jetzt))
+        elif (
+            self.weiter_automatisch
+            or self.uebergang is not None  # Workout: weich wartet in der Überzeit, nie in der Pause
+            or (ohne_timer and not self.pause_ohne_timer)
+        ):
             self._beginnen(naechster, jetzt)
         else:
             self.phase = PAUSE
@@ -296,4 +360,13 @@ class PlanAblaufBaustein:
         return out
 
 
-__all__ = ["FERTIG", "GEWECHSELT", "PAUSE", "UEBUNG", "PlanAblaufBaustein"]
+__all__ = [
+    "FERTIG",
+    "GEWECHSELT",
+    "HART",
+    "PAUSE",
+    "UEBERZEIT",
+    "UEBUNG",
+    "WEICH",
+    "PlanAblaufBaustein",
+]

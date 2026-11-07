@@ -14,6 +14,7 @@ wieder mitgenommen (``ohne``); begonnen werden kann mit jeder Übung (``erste``)
 from __future__ import annotations
 
 from collections.abc import Collection
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -65,8 +66,13 @@ def bereitstellen(
     hrv_beenden: bool | None = None,
     ohne: Collection[str] = (),
     erste: str | None = None,
+    uebergang: str | None = None,
+    workout: bool = False,
 ) -> Einheitslauf:
     """Den Ablauf in die Startleiste — die HRV kommt mit, wenn gewünscht und möglich.
+
+    ``uebergang``/``workout`` (7.11.2026, `docs/plan_workout.md`): der Plan läuft als Workout
+    — `HART` oder `WEICH` statt Pause/„automatisch weiter“, mit der Klammer in der Messung.
 
     ``hrv_beenden``: wenn der Ablauf fertig ist, die HRV-Messung beenden (``True``) oder
     weiterlaufen lassen; ``None`` = Vorgabe (endet, wenn sie mit dem Ablauf begann).
@@ -86,6 +92,8 @@ def bereitstellen(
         weiter_automatisch=plan.weiter_automatisch,
         pause_ohne_timer=plan.pause_ohne_timer,
         erste=erste,
+        uebergang=uebergang,
+        workout=workout,
     )
     e = einheit_ui.teil_bereitstellen(page, state, teil)
     state.plan_ablaeufe[plan.id] = e.id
@@ -148,6 +156,17 @@ def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry
         uebung = mit_plan_spec(item, uebung)
     zeitfeld = str(d["zeitfeld"]) if d.get("zeitfeld") else None
     zeiten = gelaufene_zeiten(e.ereignisse[nr_start : nr_ende + 1])
+    ueber = float(d.get("ueber_s") or 0.0)
+    if ueber > 0 and zeiten:
+        # Weicher Übergang (Workout): die Zeit über dem Timer-Ende gehört zum letzten
+        # zählenden Abschnitt — eingetragen wird, was wirklich trainiert wurde
+        letzte = max((n for n, z in enumerate(zeiten) if z.zaehlt), default=len(zeiten) - 1)
+        z = zeiten[letzte]
+        zeiten = [
+            *zeiten[:letzte],
+            replace(z, sekunden=z.sekunden + ueber, bis_s=z.bis_s + ueber),
+            *zeiten[letzte + 1 :],
+        ]
     if zeiten:
         werte = ergebnis(zeiten, zeitfeld)
     else:  # ohne Timer: die Uhr lief von Anfang bis „Gemacht“

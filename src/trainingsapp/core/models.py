@@ -452,6 +452,12 @@ class Plan:
     #: Wartet der Ablauf auf einen Tipp: auch nach einer Übung ohne Timer (Migration 021,
     #: Vorgabe) — sonst beginnt nach „Gemacht“ gleich die nächste
     pause_ohne_timer: bool = True
+    #: Workout (Migration 040, `docs/plan_workout.md`): der Plan öffnet mit dem Start-Bild
+    #: des Workouts — jeder Plan geht trotzdem für heute „Als Workout“
+    workout: bool = False
+    #: Vorgabe des Übergangs im Workout: hart (nach dem Timer sofort weiter) oder weich (der
+    #: Timer zählt ins Minus, „Weiter“ von Hand); vor dem Start umstellbar
+    uebergang_hart: bool = False
     #: Aus einem Paket (Migration 033, `docs/plan_import_links_plaene.md` §3): das Paket, der
     #: Schlüssel des Plans darin und der Paketstand, mit dem ein Update Geändertes erkennt
     package_id: str | None = None

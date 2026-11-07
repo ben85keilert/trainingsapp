@@ -112,8 +112,23 @@ async def test_fokus_chips_hf_und_bildfolge_im_takt(umgebung) -> None:
     fokus = uebung_timer_view(seite, state, basis, u)
     assert fokus.appbar.title.value == "Fokus · Kniebeuge"
     chips = [c for c in _alle(fokus) if isinstance(c, ft.Chip)]
-    assert [c.label.value for c in chips] == ["Takt", "Bewegung", "HF"]
-    assert all(c.selected for c in chips)
+    assert [c.label.value for c in chips[:4]] == ["Takt", "Bewegung", "HF", "Kurve"]
+    assert all(c.selected for c in chips[:4])
+    # Die Kurven-Einblendung (Ben: „HF, RR, RMSSD, SDNN, Atemfrequenz, RSA“): Reihen als
+    # Chips, Vorgabe HF und RMSSD, je gewählter Reihe ein Streifen mit dem letzten Wert
+    assert [c.label.value for c in chips[4:]] == [
+        "HF",
+        "RR",
+        "RMSSD",
+        "SDNN",
+        "Atemfrequenz",
+        "RSA",
+    ]
+    assert [c.selected for c in chips[4:]] == [True, False, True, False, False, False]
+    assert "RMSSD" in _texte(fokus) and any(t.endswith(" bpm") for t in _texte(fokus))
+    rr_chip = chips[5]
+    rr_chip.on_select(SimpleNamespace(control=rr_chip))
+    assert state.fokus_kurven() == ["hf", "rr", "rmssd"]
     assert "HF" in _texte(fokus) and "60" in _texte(fokus)  # der Gurt schlägt im Sekundentakt
     # Die eigene Bildfolge: ein Streifen aus 4 Bildern, im Takt vor und zurück
     streifen = [

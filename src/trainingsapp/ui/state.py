@@ -128,11 +128,26 @@ UHR_KNOEPFE = "knoepfe"
 FOKUS_TAKT = "takt"
 FOKUS_BEWEGUNG = "bewegung"
 FOKUS_HF = "hf"
+FOKUS_KURVE = "kurve"
 FOKUS_EBENEN: dict[str, str] = {
     FOKUS_TAKT: "Takt",
     FOKUS_BEWEGUNG: "Bewegung",
     FOKUS_HF: "HF",
+    FOKUS_KURVE: "Kurve",
 }
+#: Die Reihen der Kurven-Einblendung im Fokus (Ben, 7.11.2026: „HF, RR, RMSSD, SDNN,
+#: Atemfrequenz, RSA usw.“) — Live-Reihen des Messlaufs, nur Anzeige; Schlüssel wie
+#: `hrv_core.trends.KENNZAHLEN` (``hf``/``rr`` sind die Rohreihen). Welche stehen, merkt das
+#: Gerät (`AppState.fokus_kurven`); die feinere Regelung ist P96
+FOKUS_KURVEN: dict[str, str] = {
+    "hf": "HF",
+    "rr": "RR",
+    "rmssd": "RMSSD",
+    "sdnn": "SDNN",
+    "atemfrequenz": "Atemfrequenz",
+    "rsa": "RSA",
+}
+FOKUS_KURVEN_VORGABE: tuple[str, ...] = ("hf", "rmssd")
 
 UHR_DARSTELLUNGEN: dict[str, str] = {
     UHR_ZEILE: "Eigene Zeile: links die Wahl, rechts Start",
@@ -307,6 +322,11 @@ class AppState:
     #: „Weiter“ auf „Heute“ (Ben, 18.10.2026): die Planübung, die der Plan beim nächsten
     #: Öffnen zeigt — einmal
     plan_ziel: str | None = None
+    #: Workout (7.11.2026, `docs/plan_workout.md`): je Plan der Übergang für heute
+    #: (`devices.plan_ablauf.HART`/`WEICH`, sonst die Vorgabe des Plans) …
+    workout_uebergang: dict[str, str] = field(default_factory=dict)
+    #: … und Workout-Pläne, die für diese Sitzung „als Plan“ geöffnet werden („Als Plan üben“)
+    plan_als_plan: set[str] = field(default_factory=set)
     #: Nachtragen als Trainingsblock (P72, `views/nachtragen.py`): je Tag und Übung die Zeit,
     #: um die nachgetragen wird (``None`` = jetzt) — überlebt den Neubau der Ansicht und den
     #: Wechsel des Plans, fällt beim Verlassen weg
@@ -697,6 +717,20 @@ class AppState:
             SettingRepo.FOKUS_EBENEN, ",".join(e for e in FOKUS_EBENEN if e in ebenen) or "-"
         )
 
+    def fokus_kurven(self) -> list[str]:
+        """Welche Reihen die Kurven-Einblendung im Fokus zeigt (`FOKUS_KURVEN`), in deren
+        Reihenfolge — Vorgabe HF und RMSSD."""
+        roh = self.einstellungen.lesen(SettingRepo.FOKUS_KURVEN, "")
+        if not roh:
+            return list(FOKUS_KURVEN_VORGABE)
+        gewaehlt = {k for k in roh.split(",") if k in FOKUS_KURVEN}
+        return [k for k in FOKUS_KURVEN if k in gewaehlt]
+
+    def fokus_kurven_setzen(self, kurven: set[str] | list[str]) -> None:
+        self.einstellungen.setzen(
+            SettingRepo.FOKUS_KURVEN, ",".join(k for k in FOKUS_KURVEN if k in kurven) or "-"
+        )
+
     def uhr_darstellung(self) -> str:
         """Wo Stoppuhr und Timer in der Übung stehen — `UHR_ZEILE` (Vorgabe) oder
         `UHR_KNOEPFE`."""
@@ -1000,6 +1034,8 @@ __all__ = [
     "FOKUS_BEWEGUNG",
     "FOKUS_EBENEN",
     "FOKUS_HF",
+    "FOKUS_KURVE",
+    "FOKUS_KURVEN",
     "FOKUS_TAKT",
     "STANDARD_PROFILNAME",
     "AppState",

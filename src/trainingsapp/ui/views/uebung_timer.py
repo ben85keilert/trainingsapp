@@ -35,8 +35,7 @@ import flet as ft
 from trainingsapp.core.models import Exercise, Plan, PlanItem
 from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.takt import Takt
-from trainingsapp.core.timer import Abschnitt, TimerProfil, dauer_text, einmal_timer
-from trainingsapp.core.timer_eintrag import gelaufene_zeiten
+from trainingsapp.core.timer import TimerProfil, dauer_text, einmal_timer
 from trainingsapp.core.uebung_timer import (
     TimerWahl,
     profile_der_uebung,
@@ -46,20 +45,18 @@ from trainingsapp.core.uebung_timer import (
     zaehlt_als,
 )
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein
-from trainingsapp.devices.zaehlen import ZaehlBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
-from trainingsapp.ui.components import zaehl_stand, zaehlen
-from trainingsapp.ui.components.bewegungsbild import Bildfolge, bewegung_im_fokus
+from trainingsapp.ui.components import zaehlen
+from trainingsapp.ui.components.fokus import Fokus, balken
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.laeufe_heute import eintragen_handler, laeufe_karte, werte_text
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
-from trainingsapp.ui.components.takt_blatt import TempoRegler, takt_anbringen, takt_knopf
+from trainingsapp.ui.components.takt_blatt import takt_anbringen, takt_knopf
 from trainingsapp.ui.components.uhr import schluessel
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
-from trainingsapp.ui.state import FOKUS_BEWEGUNG, FOKUS_EBENEN, FOKUS_HF, FOKUS_TAKT, AppState
+from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.timer import Profilziel
 
 #: Feldnamen im Tagebuch — nach der Art des Zeitfelds (`feldname`)
@@ -78,6 +75,11 @@ def feldname(feld: str | None) -> str:
 def uebung_timer_route(basis: str, uebung: Exercise, item: PlanItem | None = None) -> str:
     """``…/timer/uebung/<Übung>[/<Planübung>]`` — über der Ansicht ``basis``."""
     return f"{basis}/timer/uebung/{uebung.id}" + (f"/{item.id}" if item is not None else "")
+
+
+def _spalte_auffrischen(spalte: ft.Column) -> None:
+    with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
+        spalte.update()
 
 
 def _laufende(state: AppState, uebung_id: str) -> Einheitslauf | None:
@@ -196,44 +198,6 @@ def _kopie(p: TimerProfil) -> TimerProfil:
 def _werte_text(werte: Sequence[float]) -> str:
     """„1:00 · 1:00 · 0:45“ — leer heißt „gemacht“ (`components.laeufe_heute.werte_text`)."""
     return werte_text(werte)
-
-
-def _balken(folge: list[tuple[Abschnitt, float]], hoehe: int = 10) -> ft.Control:
-    """Farbige Leiste: je Abschnitt ein Stück nach seiner Dauer — gefüllt, wenn er zählt.
-
-    ``folge``: Abschnitt und wie viel von ihm vorbei ist (0…1); -1 = noch nicht dran.
-    """
-    stuecke: list[ft.Control] = []
-    for a, anteil in folge:
-        farbe = ft.Colors.PRIMARY if a.zaehlt else ft.Colors.OUTLINE
-        rahmen = ft.Border.all(1.5, farbe)
-        if anteil < 0:  # noch nicht dran: nur der Umriss
-            stuecke.append(
-                ft.Container(expand=a.dauer_s, height=hoehe, border=rahmen, border_radius=3)
-            )
-        elif anteil >= 1:
-            voll = farbe if a.zaehlt else ft.Colors.with_opacity(0.35, farbe)
-            stuecke.append(
-                ft.Container(expand=a.dauer_s, height=hoehe, bgcolor=voll, border_radius=3)
-            )
-        else:  # läuft: zum Teil gefüllt
-            gelaufen = max(round(anteil * 1000), 1)
-            stuecke.append(
-                ft.Container(
-                    expand=a.dauer_s,
-                    height=hoehe,
-                    border=rahmen,
-                    border_radius=3,
-                    content=ft.Row(
-                        spacing=0,
-                        controls=[
-                            ft.Container(expand=gelaufen, height=hoehe, bgcolor=farbe),
-                            ft.Container(expand=max(1000 - gelaufen, 1), height=hoehe),
-                        ],
-                    ),
-                )
-            )
-    return ft.Row(spacing=3, controls=stuecke)
 
 
 def uebung_timer_view(
@@ -520,7 +484,7 @@ def uebung_timer_view(
         zaehlt_s = sum(a.dauer_s for *_, a in folge if a.zaehlt)
         zeilen.extend(
             [
-                _balken([(a, 1.0) for *_, a in folge]),
+                balken([(a, 1.0) for *_, a in folge]),
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     controls=[
@@ -668,89 +632,16 @@ def uebung_timer_view(
 
     # -- Während des Laufs ----------------------------------------------------------------------
 
-    zeit_text = ft.Text(size=72, weight=ft.FontWeight.W_600, text_align=ft.TextAlign.CENTER)
-    stand_text = ft.Text(size=15, opacity=0.8, text_align=ft.TextAlign.CENTER)
-    balken_platz = ft.Container()
-    # Taktgeber (§5): die Animation unter der Leiste, der Tempo-Regler für jetzt — einmal
-    # gebaut, der Ticker zieht nur Werte nach
-    takt_anzeige = TaktAnzeige(groesse=180)
-    tempo_platz = ft.Container()
-    saetze_spalte = ft.Column(spacing=0)
-    halt_knopf = ft.FilledTonalButton(expand=True)
-    # Fokus (7.11.2026, `docs/plan_planblock.md` §B): die Ebenen Takt · Bewegung · HF als Chips,
-    # gemerkt je Gerät (`AppState.fokus_ebenen`); die Bildfolge läuft im Takt vor und zurück,
-    # die HF-Kachel zeigt die Herzfrequenz des Gurts (vorläufig nur HF — später wählbar, P93)
-    ebenen = state.fokus_ebenen()
-    bild_platz = ft.Container()
-    bildfolge: list[Bildfolge | None] = [None]
-    hf_wert = ft.Text("—", size=28, weight=ft.FontWeight.W_600)
-    hf_unten = ft.Text("kein Gurt", size=11, opacity=0.65)
-    hf_karte = ft.Container(
-        padding=ft.Padding.symmetric(horizontal=12, vertical=8),
-        border_radius=12,
-        bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-        content=ft.Column(
-            spacing=0,
-            tight=True,
-            controls=[
-                ft.Text("HF", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                ft.Row(
-                    spacing=4,
-                    vertical_alignment=ft.CrossAxisAlignment.END,
-                    controls=[hf_wert, ft.Text("bpm", size=12, opacity=0.65)],
-                ),
-                hf_unten,
-            ],
-        ),
+    # Der Fokus (7.11.2026): Zeit, Stand, Takt, Bewegung, HF, Kurven, Sätze — eine Komponente
+    # (`components/fokus.py`), hier mit den Knöpfen des Übungs-Timers darunter
+    fokus = Fokus(
+        page,
+        state,
+        uebung=uebung,
+        item=item,
+        key=key,
+        neu_zeichnen=lambda: _spalte_auffrischen(inhalt),
     )
-    takt_spalte = ft.Column(spacing=8, tight=True, controls=[takt_anzeige.control, tempo_platz])
-
-    def ebenen_anwenden() -> None:
-        takt_spalte.visible = FOKUS_TAKT in ebenen
-        bild_platz.visible = FOKUS_BEWEGUNG in ebenen and bild_platz.content is not None
-        hf_karte.visible = FOKUS_HF in ebenen
-
-    def ebene_umschalten(name: str) -> Callable[[ft.Event[ft.Chip]], None]:
-        def handler(_e: ft.Event[ft.Chip]) -> None:
-            if name in ebenen:
-                ebenen.discard(name)
-            else:
-                ebenen.add(name)
-            state.fokus_ebenen_setzen(ebenen)
-            ebenen_anwenden()
-            with contextlib.suppress(Exception):
-                inhalt.update()
-
-        return handler
-
-    def ebenen_chips() -> ft.Control:
-        return ft.Row(
-            spacing=6,
-            wrap=True,
-            controls=[
-                ft.Chip(
-                    label=ft.Text(text, size=12),
-                    selected=name in ebenen,
-                    show_checkmark=True,
-                    tooltip=f"{text} im Fokus zeigen — gemerkt",
-                    on_select=ebene_umschalten(name),
-                )
-                for name, text in FOKUS_EBENEN.items()
-            ],
-        )
-
-    def hf_nachziehen() -> None:
-        lauf_hrv = getattr(state, "messlauf", None)
-        live = getattr(lauf_hrv, "live", None) if lauf_hrv is not None else None
-        try:
-            kennzahlen = live.kennzahlen() if live is not None else None
-        except Exception:
-            kennzahlen = None
-        hf = getattr(kennzahlen, "hf_bpm", None) if kennzahlen is not None else None
-        hf_wert.value = str(hf) if hf is not None else "—"
-        hf_unten.value = (
-            "Gurt" if hf is not None else ("verbindet …" if live is not None else "kein Gurt")
-        )
 
     def waehrend(e: Einheitslauf) -> list[ft.Control]:
         assert e.timer is not None
@@ -773,37 +664,13 @@ def uebung_timer_view(
             einheit_ui.anhalten_oder_weiter(page, state)
             auffrischen()
 
-        halt_knopf.on_click = anhalten
-        tempo_platz.content = TempoRegler(state, key, lauf).control
-        # Das Bild der Bewegung (T6) neben der Takt-Anzeige: die Bildfolge im Takt vor und
-        # zurück, ein GIF als Schleife, sonst die mitgelieferte Folge (Kniebeuge)
-        bewegung = bewegung_im_fokus(state, uebung, item)
-        bild_platz.content, bildfolge[0] = bewegung if bewegung is not None else (None, None)
-        ebenen_anwenden()
-        anzeigen(e)
-        # Zählt der Sensor mit: die Zahl mit ±1 — einmal gebaut, die Einheit zieht nur Texte nach
-        zaehl = zaehlen.neben_der_uhr(
-            page, state, e, uebung.id, item.id if item is not None else None, name="timer"
-        )
+        fokus.halt_knopf.on_click = anhalten
         return [
-            ebenen_chips(),
-            ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[zeit_text]),
-            ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[stand_text]),
-            balken_platz,
-            ft.Row(
-                alignment=ft.MainAxisAlignment.CENTER,
-                wrap=True,
-                spacing=12,
-                run_spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[takt_spalte, bild_platz, hf_karte],
-            ),
-            *([karte(*zaehl, abstand=4, padding=10)] if zaehl else []),
-            karte(saetze_spalte, abstand=0, padding=10),
+            *fokus.bauen(e, lauf),
             ft.Row(
                 spacing=8,
                 controls=[
-                    halt_knopf,
+                    fokus.halt_knopf,
                     ft.OutlinedButton(
                         "Weiter", icon=ft.Icons.SKIP_NEXT, on_click=weiter, expand=True
                     ),
@@ -832,92 +699,9 @@ def uebung_timer_view(
         ]
 
     def anzeigen(e: Einheitslauf) -> None:
-        """Restzeit, Satz, Leiste und Sätze — jede Abfrage des Tickers."""
-        if e.timer is None:
-            return
-        lauf = e.timer.lauf
-        stand = lauf.stand()
-        folge = lauf.profil.folge()
-        zaehlend = [n for n, (*_, a) in enumerate(folge) if a.zaehlt]
-        zeit_text.value = lauf.anzeige()  # bei der Stoppuhr vorwärts (18.10.2026)
-        teile = [stand.name or "Abschnitt"]
-        if stand.nummer in zaehlend:
-            teile.append(f"Satz {zaehlend.index(stand.nummer) + 1} von {len(zaehlend)}")
-        teile.append("zählt" if stand.zaehlt else "zählt nicht")
-        if lauf.begonnen and not stand.laeuft and not stand.fertig:
-            teile.append("angehalten")
-        stand_text.value = " · ".join(teile)
-        anteile: list[tuple[Abschnitt, float]] = []
-        for n, (*_, a) in enumerate(folge):
-            if n < stand.nummer:
-                anteile.append((a, 1.0))
-            elif n == stand.nummer and not stand.fertig:
-                anteile.append((a, stand.anteil))
-            else:
-                anteile.append((a, -1.0 if not stand.fertig else 1.0))
-        balken_platz.content = None if lauf.vorwaerts else _balken(anteile, hoehe=12)
-        lage = lauf.takt_lage()
-        takt_anzeige.nachziehen(lauf.takt_effektiv() if lage else None, lage)  # mit Tempo
-        if isinstance(tempo_platz.content, ft.Row):
-            tempo_platz.content.visible = lage is not None
-        if bildfolge[0] is not None:
-            bildfolge[0].nachziehen(
-                lauf.takt_effektiv() if lage else None, lage, stand.abschnitt_s - stand.rest_s
-            )
-        hf_nachziehen()
-        # Sätze: was zählt, mit der gelaufenen Zeit aus der Zeitleiste — und, zählt der Sensor
-        # mit, den Wiederholungen je Satz (4.11.2026)
-        fertig = {(z.name, z.runde): z for z in gelaufene_zeiten(e.ereignisse)}
-        gezaehlt = e.teil("zaehlen")
-        zaehl = gezaehlt if isinstance(gezaehlt, ZaehlBaustein) and gezaehlt.wdh else None
-        zeilen: list[ft.Control] = []
-        for k, n in enumerate(zaehlend):
-            _, runde, _, a = folge[n]
-            wdh: int | None = None
-            if n < stand.nummer or stand.fertig:
-                g = fertig.get((a.name, runde))
-                wert = dauer_text(g.sekunden if g is not None else 0)
-                if g is not None:
-                    wdh = zaehl_stand.wdh_im_abschnitt(zaehl, g.von_s, g.bis_s)
-                text, fett = f"Satz {k + 1}", False
-            elif n == stand.nummer:
-                wert = dauer_text(stand.abschnitt_s - stand.rest_s)
-                satz = zaehl.satz if zaehl is not None else None
-                if satz is not None and satz.bis_s is None:
-                    wdh = satz.wert  # der laufende Satz des Zählens
-                text, fett = f"Satz {k + 1} · läuft", True
-            else:
-                wert, text, fett = "–", f"Satz {k + 1}", False
-            if wdh is not None:
-                wert = f"{wert} · {wdh} Wdh."
-            zeilen.append(
-                ft.Container(
-                    padding=ft.Padding.symmetric(horizontal=4, vertical=8),
-                    content=ft.Row(
-                        controls=[
-                            ft.Text(
-                                text,
-                                expand=True,
-                                weight=ft.FontWeight.W_700 if fett else None,
-                                color=ft.Colors.PRIMARY if fett else None,
-                            ),
-                            ft.Text(wert, weight=ft.FontWeight.W_600),
-                        ]
-                    ),
-                )
-            )
-        saetze_spalte.controls = zeilen or [
-            hinweis("Kein Abschnitt zählt — eingetragen wird „gemacht“.")
-        ]
-        halt_knopf.content = ft.Row(
-            tight=True,
-            spacing=6,
-            controls=[
-                ft.Icon(ft.Icons.PLAY_ARROW if not stand.laeuft else ft.Icons.PAUSE, size=18),
-                ft.Text("Fortsetzen" if not stand.laeuft else "Anhalten"),
-            ],
-        )
-        halt_knopf.disabled = stand.fertig or lauf.abgebrochen
+        """Jede Abfrage des Tickers: der Fokus zieht nach."""
+        if e.timer is not None:
+            fokus.nachziehen(e, e.timer.lauf)
 
     def auffrischen() -> None:
         e = _laufende(state, uebung.id)

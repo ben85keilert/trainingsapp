@@ -70,7 +70,7 @@ from trainingsapp.devices.einheit import (
     UebungKontext,
 )
 from trainingsapp.devices.gps import GpsQuelle
-from trainingsapp.devices.plan_ablauf import PAUSE, PlanAblaufBaustein
+from trainingsapp.devices.plan_ablauf import PAUSE, UEBERZEIT, PlanAblaufBaustein
 from trainingsapp.devices.strecke_baustein import StreckeBaustein
 from trainingsapp.devices.zaehlen import ZaehlBaustein
 from trainingsapp.ui.components import zaehl_stand
@@ -944,6 +944,9 @@ def laufzeilen(e: Einheitslauf) -> tuple[str, str]:
     if isinstance(ablauf := e.teil("plan"), PlanAblaufBaustein):
         if ablauf.phase == PAUSE and (n := ablauf.naechster) is not None:
             oben.append(f"Pause — dann {ablauf.schritte[n].name}")
+        elif ablauf.phase == UEBERZEIT:
+            # Weicher Übergang im Workout: der Timer ist ab, die Übung läuft weiter
+            oben.append(f"{ablauf.schritt.name} · über der Zeit — „Weiter“ wenn fertig")
         elif ablauf.phase != PAUSE:
             oben.append(ablauf.schritt.name)
     if timer := timer_text(e):

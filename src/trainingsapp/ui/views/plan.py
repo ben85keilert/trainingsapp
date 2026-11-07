@@ -2406,8 +2406,15 @@ def plan_view(
                 zeilen,
                 paar[1].id if paar is not None else None,
                 wechseln,
+                workout=zum_workout if navigierbar else None,
             )
         )
+
+    def zum_workout() -> None:
+        """▶ „Als Workout“ (7.11.2026, `docs/plan_workout.md`): der Plan läuft von vorn bis
+        hinten — für heute, auch ohne den Schalter am Plan."""
+        state.plan_als_plan.discard(plan.id)
+        page.run_task(page.push_route, f"/plan/{plan.id}/workout")
 
     kopf: list[ft.Control]
     if bearbeiten:
@@ -2553,7 +2560,18 @@ def plan_view(
         aktionen = [timer_knopf(page, state, "plan"), hilfe_knopf(page, thema="plan")]
     else:
         aktionen = [
-            *([] if bearbeiten else [timer_knopf(page, state, "plan")]),
+            *(
+                []
+                if bearbeiten
+                else [
+                    ft.IconButton(
+                        ft.Icons.PLAYLIST_PLAY,
+                        tooltip="Als Workout — von vorn bis hinten",
+                        on_click=zum_workout,
+                    ),
+                    timer_knopf(page, state, "plan"),
+                ]
+            ),
             hilfe_knopf(page, thema="notation" if bearbeiten else "plan"),
             ft.IconButton(
                 ft.Icons.CHECK if bearbeiten else ft.Icons.EDIT_OUTLINED,

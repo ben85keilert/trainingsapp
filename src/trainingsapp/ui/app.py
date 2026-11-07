@@ -163,6 +163,7 @@ from trainingsapp.ui.views.verlauf import verlauf
 from trainingsapp.ui.views.verlauf_herzfrequenz import verlauf_herzfrequenz_view
 from trainingsapp.ui.views.verlauf_kachel import verlauf_kachel_view
 from trainingsapp.ui.views.verlauf_tagesfeld import verlauf_tagesfeld_view
+from trainingsapp.ui.views.workout import workout_view
 
 #: Reiter der Navigationsleiste: Schlüssel, Beschriftung, Symbol
 REITER = [
@@ -550,8 +551,15 @@ def main(page: ft.Page) -> None:
         if teile[0] == "plaene":  # aus der Planverwaltung: nur bearbeiten
             bearbeiten_routen(plan, f"/plaene/{plan.id}", "/", teile[2:])
             return
+        # Üben — ein Workout-Plan öffnet mit dem Start-Bild, bis „Als Plan üben“ (7.11.2026,
+        # `docs/plan_workout.md`); `…/workout` legt das Workout über den Plan
+        if plan.workout and plan.id not in state.plan_als_plan and len(teile) == 2:
+            ablegen(lambda: workout_view(page, state, plan, route=f"/plan/{plan.id}"))
+            return
         ablegen(lambda: plan_view(page, state, plan))  # üben
-        if teile[2:3] == ["bearbeiten"]:
+        if teile[2:3] == ["workout"]:
+            ablegen(lambda: workout_view(page, state, plan, route=f"/plan/{plan.id}/workout"))
+        elif teile[2:3] == ["bearbeiten"]:
             basis = f"/plan/{plan.id}/bearbeiten"
             bearbeiten_routen(plan, basis, f"/plan/{plan.id}", teile[3:])
         elif teile[2:3] == ["info"] and (paar := planuebung(teile, 3)) is not None:

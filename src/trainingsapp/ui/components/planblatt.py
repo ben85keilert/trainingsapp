@@ -42,8 +42,11 @@ def gesamtplan_blatt(
     zeilen: Sequence[PlanZeile],
     gezeigt: str | None,
     auf_wahl: Callable[[str], None],
+    *,
+    workout: Callable[[], object] | None = None,
 ) -> ft.BottomSheet:
-    """Das Blatt — ``auf_wahl(item_id)`` läuft nach dem Schließen."""
+    """Das Blatt — ``auf_wahl(item_id)`` läuft nach dem Schließen; ``workout``: ▶ „Als
+    Workout“ unten (`docs/plan_workout.md`), läuft ebenfalls nach dem Schließen."""
     nachher = Nachher()
     blatt: ft.BottomSheet
 
@@ -53,6 +56,11 @@ def gesamtplan_blatt(
             schliessen(blatt)
 
         return handler
+
+    def workout_waehlen() -> None:
+        if workout is not None:
+            nachher.danach(workout)
+        schliessen(blatt)
 
     kacheln: list[ft.Control] = []
     for z in zeilen:
@@ -111,7 +119,21 @@ def gesamtplan_blatt(
             fuss=[
                 ft.Row(
                     alignment=ft.MainAxisAlignment.END,
-                    controls=[ft.TextButton("Schließen", on_click=lambda: schliessen(blatt))],
+                    spacing=8,
+                    controls=[
+                        *(
+                            [
+                                ft.FilledTonalButton(
+                                    "Als Workout",
+                                    icon=ft.Icons.PLAYLIST_PLAY,
+                                    on_click=workout_waehlen,
+                                )
+                            ]
+                            if workout is not None
+                            else []
+                        ),
+                        ft.TextButton("Schließen", on_click=lambda: schliessen(blatt)),
+                    ],
                 )
             ],
         ),

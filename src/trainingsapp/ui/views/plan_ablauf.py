@@ -708,8 +708,38 @@ def plan_timer_karte(page: Any, state: AppState, plan: Plan) -> ft.Control:
         plan.pause_ohne_timer = bool(e.control.selected) and e.control.selected[0] == "pause"
         speichern()
 
+    def workout_geschaltet(e: ft.Event[ft.Switch]) -> None:
+        plan.workout = bool(e.control.value)
+        state.plaene.workout_setzen(plan.id, plan.workout, plan.uebergang_hart)
+
+    def uebergang_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+        plan.uebergang_hart = bool(e.control.selected) and e.control.selected[0] == "hart"
+        state.plaene.workout_setzen(plan.id, plan.workout, plan.uebergang_hart)
+
     return karte(
-        kartentitel("Ablauf"),
+        kartentitel("Workout und Ablauf"),
+        # Workout (7.11.2026, `docs/plan_workout.md`): der Plan öffnet mit dem Start-Bild;
+        # der Übergang ist die Vorgabe, vor dem Start umstellbar
+        ft.Switch(
+            label="Workout — der Plan läuft von vorn bis hinten",
+            value=plan.workout,
+            on_change=workout_geschaltet,
+        ),
+        ft.Text("Übergang im Workout (Vorgabe)", size=12, opacity=0.75),
+        ft.SegmentedButton(
+            selected=["hart" if plan.uebergang_hart else "weich"],
+            show_selected_icon=False,
+            segments=[
+                ft.Segment(value="weich", label=ft.Text("weich · nachtrainieren")),
+                ft.Segment(value="hart", label=ft.Text("hart · läuft durch")),
+            ],
+            on_change=uebergang_gewaehlt,
+        ),
+        hinweis(
+            "Weich: Nach Ablauf zählt der Timer ins Minus, „Weiter“ tippst du. Hart: Nach der "
+            "Zeit geht es sofort weiter — nur Pause oder Abbrechen halten an. Jeder Plan lässt "
+            "sich auch ohne Schalter für heute „Als Workout“ starten (▶ oben)."
+        ),
         ft.Dropdown(
             label="Timer für alle Übungen",
             value=str(aktuell) if aktuell else _KEINER,

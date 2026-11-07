@@ -728,6 +728,8 @@ class SettingRepo:
     FOKUS_AUTO = "fokus_auto"
     #: Fokus: welche Ebenen gezeigt werden (`ui.state.FOKUS_EBENEN`, Komma-Liste)
     FOKUS_EBENEN = "fokus_ebenen"
+    #: Fokus: welche Reihen die Kurven-Einblendung zeigt (`ui.state.FOKUS_KURVEN`)
+    FOKUS_KURVEN = "fokus_kurven"
     #: Taktgeber (`core.takt`): eigene Takte (JSON-Liste, `takte_lesen`) und ob am
     #: Phasenwechsel vibriert wird ("1" = ja, Vorgabe; P140 offen, so gebaut)
     TAKT_BIBLIOTHEK = "takt_bibliothek"
@@ -802,8 +804,8 @@ class PlanRepo:
                 INSERT INTO plan (id, name, description, subject_id, created_at, updated_at,
                                   active, weekdays_json, course_chapter_id, timer_json,
                                   auto_next, pause_no_timer, package_id, package_key,
-                                  package_standard_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  package_standard_json, workout, uebergang_hart)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -818,6 +820,8 @@ class PlanRepo:
                     package_id = excluded.package_id,
                     package_key = excluded.package_key,
                     package_standard_json = excluded.package_standard_json,
+                    workout = excluded.workout,
+                    uebergang_hart = excluded.uebergang_hart,
                     revision = revision + 1
                 """,
                 (
@@ -838,6 +842,8 @@ class PlanRepo:
                     json.dumps(plan.package_standard, ensure_ascii=False, sort_keys=True)
                     if plan.package_standard is not None
                     else None,
+                    int(plan.workout),
+                    int(plan.uebergang_hart),
                 ),
             )
             # Versteckte bleiben stehen: Übungen im Papierkorb und aus deaktivierten
@@ -1086,6 +1092,16 @@ class PlanRepo:
             )
             self._beruehrt(zeile["plan_id"])
 
+    def workout_setzen(self, plan_id: str, workout: bool, uebergang_hart: bool) -> None:
+        """Workout-Schalter und Übergangs-Vorgabe des Plans (Migration 040,
+        `docs/plan_workout.md`) — nur diese beiden Spalten, wie `plan_timer_setzen`."""
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE plan SET workout = ?, uebergang_hart = ?, updated_at = ?, "
+                "revision = revision + 1 WHERE id = ?",
+                (int(workout), int(uebergang_hart), jetzt().isoformat(), plan_id),
+            )
+
     def plan_timer_setzen(
         self,
         plan_id: str,
@@ -1238,6 +1254,8 @@ class PlanRepo:
             timer=_json_lesen(r["timer_json"], {}) or None,
             weiter_automatisch=bool(r["auto_next"]),
             pause_ohne_timer=bool(r["pause_no_timer"]),
+            workout=bool(r["workout"]),
+            uebergang_hart=bool(r["uebergang_hart"]),
             package_id=r["package_id"],
             package_key=r["package_key"],
             package_standard=_json_lesen(r["package_standard_json"], {}) or None,

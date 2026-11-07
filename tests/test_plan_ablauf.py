@@ -268,7 +268,12 @@ def test_plan_editor_timer_fuer_alle_und_weiter(umgebung) -> None:
     vorlage = state.timer_profile()[0]
     auswahl.value = vorlage.id
     auswahl.on_select(type("E", (), {"control": auswahl})())
-    weiter = next(x for x in _alle(karte) if isinstance(x, ft.SegmentedButton))
+    # Seit dem Workout-Schalter (7.11.2026) steht davor der Übergang — nach den Werten suchen
+    weiter = next(
+        x
+        for x in _alle(karte)
+        if isinstance(x, ft.SegmentedButton) and any(s.value == "auto" for s in x.segments)
+    )
     weiter.selected = ["auto"]
     weiter.on_change(type("E", (), {"control": weiter})())
     gespeichert = state.plaene.laden(plan.id)
@@ -444,7 +449,11 @@ def test_plan_editor_pause_ohne_timer(umgebung) -> None:
     state, _, _, _ = umgebung
     plan = _plan(state)
     karte = plan_timer_karte(Seite(), state, plan)
-    _, pause = [x for x in _alle(karte) if isinstance(x, ft.SegmentedButton)]
+    pause = next(
+        x
+        for x in _alle(karte)
+        if isinstance(x, ft.SegmentedButton) and any(s.value == "pause" for s in x.segments)
+    )
     assert pause.selected == ["pause"]
     pause.selected = ["gleich"]
     pause.on_change(type("E", (), {"control": pause})())

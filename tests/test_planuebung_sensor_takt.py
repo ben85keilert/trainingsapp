@@ -194,7 +194,7 @@ def test_migration_039_alte_planuebungen_folgen_der_uebung(tmp_path) -> None:
         "VALUES ('i', 'p', 'u', 0, 'null')"
     )
     con.commit()
-    assert migrieren(con) == 39
+    assert migrieren(con) == 40
     zeile = con.execute("SELECT acc_json, takt_json FROM plan_item WHERE id = 'i'").fetchone()
     assert tuple(zeile) == (None, None)
     item = PlanRepo(con).item_laden("i")

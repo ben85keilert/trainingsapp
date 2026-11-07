@@ -946,6 +946,12 @@ class TimerLauf:
         return self._start is not None and not self.fertig
 
     @property
+    def laeuft_roh(self) -> bool:
+        """Die Uhr läuft — auch über das Ende hinaus (`ueber_s`); angehalten oder abgebrochen
+        nicht."""
+        return self._start is not None and not self.abgebrochen
+
+    @property
     def vorwaerts(self) -> bool:
         """Zählt vorwärts (`stoppuhr`) — Anzeigen zeigen dann die gelaufene Zeit."""
         return self.profil.ist_stoppuhr
@@ -978,6 +984,22 @@ class TimerLauf:
     def vergangen_s(self) -> float:
         lauf = self._uhr() - self._start if self._start is not None else 0.0
         return min(self._basis_s + lauf, self.gesamt_s)
+
+    def ueber_s(self) -> float:
+        """Sekunden **über** dem Ende — der Timer läuft nach Ablauf weiter, wenn niemand ihn
+        anhält (Workout mit weichem Übergang, `docs/plan_workout.md`: „Timer zählt runter und
+        dann in den Negativbereich“). 0 vor dem Ende, bei der Stoppuhr und angehalten; die
+        gelaufene Zeit (`vergangen_s`, `stand`, Marken) bleibt auf `gesamt_s` begrenzt.
+
+        >>> lauf = TimerLauf(TimerProfil(abschnitte=[Abschnitt("A", 10)]), uhr=lambda: uhr[0])
+        >>> uhr = [0.0]; lauf.start(); uhr[0] = 7.0; lauf.ueber_s(), lauf.fertig
+        (0.0, False)
+        >>> uhr[0] = 13.5; lauf.fertig, lauf.ueber_s(), lauf.vergangen_s()
+        (True, 3.5, 10.0)
+        """
+        if self._start is None or self.vorwaerts:
+            return 0.0
+        return max(self._basis_s + (self._uhr() - self._start) - self.gesamt_s, 0.0)
 
     # -- Bedienung -------------------------------------------------------------
 

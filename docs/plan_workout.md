@@ -1,0 +1,116 @@
+# Workout: der Plan läuft von vorn bis hinten
+
+Ben, 7.11.2026 („Abläufe sollen zu Workouts werden, d. h. man gibt einen Plan vor, der …
+durchgeht“). Vertrag für den **Modus Workout** — der zweite Trainingsmodus neben
+„Standard“ (`docs/plan_planblock.md` §A). Der heutige **Ablauf** (`core/plan_durchlauf.py`,
+`devices/plan_ablauf.py`, `ui/plan_ablauf.py`, `views/plan_ablauf.py`, `docs/plan_einheit.md`
+§7) ist der Kern; das Workout gibt ihm Start-Bild, Fokus, Übergang, Klammer in der Messung und
+Bedingungen. Skizzen: https://claude.ai/artifact/THG2KrMi4jET9N2XkHRk3J, Reihe C.
+
+Rechtlicher Rahmen: Weg A (`docs/recht/00_zweckbestimmung.md`, Entscheidung 7.11.2026).
+Bedingungen rechnen aus **Leistungen** (Zeit, Wiederholungen, Abhaken), nie aus Messwerten;
+HF-Zonen nur als Anzeige, der Zielbereich-Ton (Entscheidung C) ist Information.
+
+## 1. Begriffe
+
+- **Workout** = ein Plan, der als Folge durchläuft. Zwei Wege hinein: der Schalter
+  **„Workout“ am Plan** (Vorgabe: der Plan öffnet mit dem Start-Bild) und **▶ „Als Workout“**
+  in jedem Plan für heute (Gesamtplan-Blatt und Plan-Menü).
+- **Schritt** = eine Planübung im Workout, mit Timer (Profil der Planübung/des Plans/der
+  Übung) oder ohne (dann „Weiter“ von Hand). `core/plan_durchlauf.Schritt`.
+- **Übergang** (vor dem Start wählbar, Vorgabe am Plan):
+  - **hart — läuft durch:** Ist der Timer ab (oder die Bedingung erfüllt), geht es sofort
+    weiter; nur Pause oder Abbrechen halten an. Schritte ohne Timer warten auf „Weiter“.
+  - **weich — nachtrainieren:** Nach Ablauf zählt der Timer **ins Minus** („−0:23 · über der
+    Zeit“), man trainiert weiter; „Weiter“ tippt man. Eingetragen wird die tatsächliche Zeit.
+- **Bedingung** je Schritt (W2): `keine` · `zeit` (Timer ab) · `wdh(n)` · `wdh_in_zeit(n, s)`
+  · `gemacht`. **Härte**: weich = „Weiter“ geht immer, die Bedingung ist nur Vorschlag und
+  Auto-Weiter; hart = Freischaltung: „Weiter“ erst bei Erfüllung, ein **Inhalt** (Video,
+  Auftrag, Text) erscheint erst dann. **Abbrechen immer** — eine App hält niemanden fest.
+- **Zweig** (W3): benannte Listen A (Hauptzweig), B, C …; jeder Schritt sagt „erfüllt →“
+  (Vorgabe: nächster im eigenen Zweig) und optional „nicht erfüllt →“ auf jeden Schritt —
+  zurück nach A, weiter in B, woanders in C. Kein freier Graph im Editor, nur Listen mit zwei
+  Pfeilen; die Prüfung beim Speichern warnt vor Schleifen ohne Ausgang.
+
+## 2. Bilder (Reihe C)
+
+- **C1 Start:** Titel „Plan · Workout“, „n Schritte · etwa x min“; Hinweis, wenn eine
+  Aufnahme läuft („das Workout wird ein Abschnitt“); Umschalter **hart · läuft durch /
+  weich · nachtrainieren** mit Erklärsatz; die Schritte mit Bedingung („Timer 2 × 30 s ·
+  weiter, wenn Zeit ab“, „15 Wdh. (Sensor)“, „12 in 40 s · sonst → B“, Schloss am
+  freigeschalteten Inhalt, „nur abhaken“); „Workout starten“, „Bereitstellen“, „Als Plan
+  üben“. Was heute schon gemacht ist, ist abgehakt und kommt nicht dran (wie der Ablauf);
+  „Noch einmal“, wenn alles abgehakt ist.
+- **C2 Fokus je Übung:** wie der Fokus der Übung (`docs/plan_planblock.md` §B) mit
+  Fortschrittsbalken „Schritt k von n“, Chips Takt · Bewegung · HF; weich zeigt nach Ablauf
+  **−m:ss** in Warnfarbe; Bedingungskarte (grün „erfüllt“, mit ±1 des Sensors); Schrittliste
+  (erledigt · läuft · offen); großer Knopf „Weiter: <nächster>“, darunter Pause ·
+  Überspringen · Abbrechen. **Kurven** (Ben, 7.11.2026): neben dem HF-Wert eine
+  Kurven-Einblendung der letzten 2 Minuten mit wählbaren Reihen — HF, RR, RMSSD, SDNN,
+  Atemfrequenz, RSA/Atemspanne (die Live-Reihen des Messlaufs, nur Anzeige); welche Reihen
+  stehen, merkt das Gerät (`AppState.fokus_kurven`), die feinere Regelung (je Übung? je
+  Workout? Skalen?) ist **P96**.
+- **C3 Bedingung nicht erfüllt:** Zeit ab, „9 von 12“; Karte „nicht erfüllt … Du
+  entscheidest“; Wege: **Zweig B** (gefüllt, „danach zurück nach A“), **„Trotzdem weiter“**
+  (nur weich), „Noch einmal versuchen“; der gesperrte Inhalt mit Schloss. Bei **hart** nur
+  Zweig B, Noch einmal, Abbrechen.
+- **C4 Ende:** „Workout fertig · Dauer · n Schritte, k eingetragen, j über Zweig“; Ergebnis je
+  Schritt (Zweig markiert, „Inhalt freigeschaltet“); **Aufnahme-Karte** mit dem Abschnitt
+  „Workout <Plan>“ und den Übungen als Abschnitte darin (HF, RMSSD), „Öffnen ›“ zur Messung;
+  sRPE wie heute; „Zum Plan“ / „Noch einmal“.
+
+## 3. Technik
+
+- **Daten:** `plan.workout` (Schalter), `plan.uebergang_hart` (Vorgabe), Migration 040; für
+  heute `AppState.workout_uebergang[plan_id]`. W2/W3 ergänzen je Planübung `bedingung_json`
+  (Art, Zahl, Sekunden, hart, Inhalt, dann, sonst) und `zweig`; Paketfelder entsprechend
+  (`docs/uebungspakete.md`, Drei-Wege-Abgleich je Feld).
+- **Lauf:** `PlanAblaufBaustein` bleibt der Motor (je Schritt ein `TimerBaustein` auf einer
+  Achse, `plan/uebung_start|ende`, `plan/pause`, `plan/ende`). Neu: `uebergang`
+  (`hart`/`weich`): hart = nach `timer/ende` sofort `_beginnen(nächster)`; weich = der Timer
+  läuft **über** (`TimerLauf.ueber_s()`), kein Pausenbild, `weiter()` von Hand. Eingetragen
+  wird je Schritt beim Ende wie heute (`ui/plan_ablauf.nach_der_uebung`); die Überzeit zählt
+  zur gelaufenen Zeit.
+- **Fokus:** der „Während“-Teil des Übungs-Timers wird eine Komponente
+  (`ui/components/fokus.py`, einmal gebaut, je Tick nachgezogen) und dient dem Übungs-Timer
+  wie dem Workout (`views/workout.py`, Route `/plan/<id>/workout`). Kurven aus
+  `Messlauf.live` über `components/kurve.kurve` (keine Rechnung in `ui/`, nur Reihen des
+  Live-Fensters).
+- **Messung:** Beginnt das Workout, setzt es ein Paar Grenz-Notizen „Workout: Start/Ende“
+  (Spur `einheit`, wie Kopf-/Endteil-Abschnitte, `docs/plan_abschnitte.md`); die Übungen
+  behalten ihre Marken (`ui/marken`), so liegen sie als Abschnitte **im** Workout-Abschnitt.
+  Die Auswertung zeigt beides (Chip „Workout <Plan>“, darunter die Übungen).
+- **Ende-Bild:** `views/workout.py` `danach` aus `ergebnis_der_einheit`, sRPE
+  (`components/srpe.py`), Aufnahme-Karte mit Kurve des Abschnitts.
+
+## 4. Stufen
+
+| Stufe | Inhalt | Stand |
+|---|---|---|
+| W1 | Schalter und ▶, Start-Bild mit hart/weich, Fokus je Übung (Komponente), Minus-Timer, Workout-Abschnitt, Ende-Bild, Kurven-Einblendung HF/RR/RMSSD/SDNN/Atemfrequenz/RSA | **gebaut 7.11.2026 (0.3.60)** — Ende-Bild ohne Kurve der Aufnahme (Hinweis statt Karte, P98) |
+| W2 | Bedingungen `wdh`, `wdh_in_zeit`, Härte als Freischaltung mit Inhalt, Karte „Weiter, wenn …“ in „Im Plan einstellen“; Kurse bekommen „hart“ | offen |
+| W3 | Zweige A/B/C, „nicht erfüllt →“, Editor als Listen mit zwei Pfeilen, Schleifenprüfung | offen |
+| W4 | HF-Zone als Anzeige (Zeit in Zone) im Fokus; Zielbereich-Ton (Entscheidung C) | offen |
+
+## 4a. Umsetzungsstand W1 (7.11.2026)
+
+- `core/timer.py`: `TimerLauf.ueber_s()`, `laeuft_roh`; `devices/plan_ablauf.py`: Phase
+  `UEBERZEIT`, `uebergang=HART|WEICH`, `workout=True` → `plan/start`/`plan/ende` mit
+  ``workout``; `core/einheit.py`: Spur `workout`, Daten ``ueber_s``/``workout``, Projektion;
+  `ui/plan_ablauf.nach_der_uebung` addiert die Überzeit auf den letzten zählenden Abschnitt.
+- `ui/components/fokus.py`: Klasse `Fokus` (Übungs-Timer und Workout), Kurven-Einblendung
+  (`kurven_reihen` über `hrv_core.trends.verlauf`, 2 min, 1 Hz), `AppState.fokus_kurven`.
+- `ui/views/workout.py`: Vorher/Während/Danach, Route `/plan/<id>/workout`; ein Plan mit
+  `workout` öffnet so (`/plan/<id>`), bis „Als Plan üben“ (`AppState.plan_als_plan`);
+  ▶ „Als Workout“ in der Planleiste und im Gesamtplan-Blatt; Übergang für heute
+  `AppState.workout_uebergang`. Migration 040 (`plan.workout`, `plan.uebergang_hart`), Karte
+  „Workout und Ablauf“ im Plan-Editor (`views/plan_ablauf.plan_timer_karte`).
+- Der alte Ablauf (`/plan/<id>/timer/ablauf`) bleibt bis W2 bestehen — gleicher Motor.
+- Tests: `tests/test_workout.py`, `tests/test_ui_workout.py`, `tests/test_ui_fokus.py`.
+
+## 5. Offen
+
+- P83 (Workouts) → dieses Dokument. P96: welche Kurven im Fokus, je Gerät/Übung/Workout,
+  Skalen. P97: Bedingungen in Paketen (Formatversion?). P95: Name „Fokus“. P98: Aufnahme-Karte
+  im Ende-Bild mit der Kurve des Workout-Abschnitts (C4) — braucht die gespeicherte Messung.
+- Gerätetest T95: Workout hart/weich am Gerät, Minus-Timer, Abschnitt in der Aufnahme.

@@ -27,8 +27,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
+from .einheit import AUSFUEHRUNG_SCHLUESSEL
 from .models import Exercise, Plan, PlanItem
-from .result_spec import FieldSpec, FieldType, basis_key, vorrat_feld
+from .parameter import kontextfelder
+from .result_spec import FieldSpec, FieldType, ResultSpec, basis_key, vorrat_feld, wert_text
 from .takt import Takt, takt_waehlen
 from .timer import MAX_ABSCHNITT_S, STOPPUHR, Abschnitt, TimerProfil, stoppuhr
 from .timer_eintrag import ZEITFELDER
@@ -397,8 +399,153 @@ def mit_zeitfeldern(uebung: Exercise, werte: Mapping[str, Any]) -> Exercise:
     return replace(uebung, result_spec=spec)
 
 
+def ausfuehrungsfelder(spec: ResultSpec) -> list[FieldSpec]:
+    """Was eine Runde des Timers festlegen kann (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §3):
+    die Ausprägungen, die man im Block vor dem Eintragen wählt (`core.parameter.kontextfelder`
+    — Variante, Gewicht, Winkel, Seite), soweit die Zeitleiste sie trägt
+    (`core.einheit.AUSFUEHRUNG_SCHLUESSEL`). ``spec``: die der Planübung, wenn es eine gibt.
+
+    >>> from trainingsapp.core.varianten import Variante, mit_varianten
+    >>> basis = ResultSpec(fields=[vorrat_feld(k) for k in ("hold", "weight", "weight_2")])
+    >>> [f.key for f in ausfuehrungsfelder(mit_varianten(basis, [Variante("links")]))]
+    ['variant', 'weight']
+    """
+    return [f for f in kontextfelder(spec) if f.key in AUSFUEHRUNG_SCHLUESSEL]
+
+
+def ausfuehrung_text(aus: Mapping[str, Any], felder: Sequence[FieldSpec] = ()) -> str:
+    """„Rechts · 10 kg“ — die Ausführung einer Runde, in der Folge der Felder; leer = wie im
+    Block gewählt.
+
+    >>> ausfuehrung_text({"weight": 10, "variant": "rechts"}, [vorrat_feld("weight")])
+    'rechts · 10 kg'
+    """
+    nach_feld = {f.key: f for f in felder}
+    reihe = sorted(
+        aus, key=lambda k: (k != "variant", list(nach_feld).index(k) if k in nach_feld else 99)
+    )
+    teile = [
+        wert_text(nach_feld[k], aus[k]) if k in nach_feld else str(aus[k])
+        for k in reihe
+        if aus.get(k) not in (None, "")
+    ]
+    return " · ".join(t for t in teile if t)
+
+
+def ausfuehrungs_vorschau(profil: TimerProfil) -> list[tuple[dict[str, Any], int]]:
+    """Was der Timer je Ausführung einträgt: die zählende Zeit je Ausführung, in der Folge
+    ihres ersten Auftretens — leer, wenn keine Runde eine Ausführung hat (dann ein Eintrag wie
+    bisher).
+
+    >>> p = TimerProfil(abschnitte=[Abschnitt("L", 60, ausfuehrung={"side": "links"}),
+    ...     Abschnitt("P", 15, zaehlt=False), Abschnitt("R", 120, ausfuehrung={"side": "rechts"})],
+    ...     runden=2)
+    >>> ausfuehrungs_vorschau(p)
+    [({'side': 'links'}, 120), ({'side': 'rechts'}, 240)]
+    """
+    folge = [a for *_, a in profil.folge()]
+    if not any(a.ausfuehrung for a in folge):
+        return []
+    summen: dict[tuple[tuple[str, Any], ...], int] = {}
+    for a in folge:
+        if a.zaehlt:
+            schluessel = tuple(sorted(a.ausfuehrung.items()))
+            summen[schluessel] = summen.get(schluessel, 0) + a.dauer_s
+    return [(dict(k), v) for k, v in summen.items()]
+
+
+#: Wo ein Timer liegt — für die Übersicht „Alle Timer“ (`docs/plan_uhr_fokus.md` §5)
+VORLAGE, AN_UEBUNG, IN_PLANUEBUNG, IM_PLAN = "vorlage", "uebung", "planuebung", "plan"
+
+
+@dataclass(frozen=True)
+class TimerOrt:
+    """Ein Timer und sein Ort: Vorlage, an einer Übung, nur in einer Planübung (eigene Kopie)
+    oder „für alle Übungen“ eines Plans — mit den Plänen, in denen er tatsächlich gilt."""
+
+    art: str
+    profil: TimerProfil
+    uebung_id: str = ""
+    uebung_name: str = ""
+    plan_id: str = ""
+    plan_name: str = ""
+    item_id: str = ""
+    #: die Pläne, in denen er gilt (`timer_fuer` ergibt ihn) — Namen, ohne Doppelte
+    benutzt: tuple[str, ...] = ()
+
+
+def alle_timer(
+    vorlagen: Sequence[TimerProfil], uebungen: Sequence[Exercise], plaene: Sequence[Plan]
+) -> list[TimerOrt]:
+    """Alle Timer an einem Ort (Ben, 8.11.2026: „Letztendlich entwickelt man sich eine Handvoll
+    Timer, das muss leicht editierbar sein“): die Vorlagen, die Timer der Übungen (ohne die aus
+    einer Timer-Regel — die stehen nicht in der Übung), die eigenen Kopien der Planübungen und
+    die Timer „für alle Übungen“. ``benutzt``: wo `timer_fuer` ihn ergibt.
+
+    >>> h = TimerProfil(id="h", name="Halten", abschnitte=[Abschnitt("Halten", 30)])
+    >>> u = Exercise(id="u", name="Planke", timer=[h.als_dict()])
+    >>> plan = Plan(id="p", name="Rumpf", items=[PlanItem(id="i", exercise_id="u")])
+    >>> eigen = TimerProfil(id="k", name="Kopie", abschnitte=[Abschnitt("H", 20)])
+    >>> plan2 = Plan(id="q", name="Rücken", items=[PlanItem(id="j", exercise_id="u",
+    ...     timer=TimerWahl("", eigen).als_dict())])
+    >>> [(o.art, o.profil.name, o.benutzt) for o in alle_timer([], [u], [plan, plan2])]
+    [('uebung', 'Halten', ('Rumpf',)), ('planuebung', 'Kopie', ('Rücken',))]
+    """
+    nach_id = {u.id: u for u in uebungen}
+    out: list[TimerOrt] = [TimerOrt(VORLAGE, v) for v in vorlagen]
+    for u in uebungen:
+        for p in profile_der_uebung(u):
+            if not u.timer:  # aus einer Timer-Regel — nicht in der Übung gespeichert
+                continue
+            benutzt = tuple(
+                dict.fromkeys(
+                    plan.name
+                    for plan in plaene
+                    for item in plan.items
+                    if item.exercise_id == u.id
+                    and (wirksam := timer_fuer(u, plan, item)) is not None
+                    and wirksam.id == p.id
+                )
+            )
+            out.append(TimerOrt(AN_UEBUNG, p, u.id, u.name, benutzt=benutzt))
+    for plan in plaene:
+        for item in plan.items:
+            eigen = TimerWahl.aus_dict(item.timer).eigen
+            if eigen is None:
+                continue
+            zu = nach_id.get(item.exercise_id)
+            out.append(
+                TimerOrt(
+                    IN_PLANUEBUNG,
+                    eigen,
+                    item.exercise_id,
+                    zu.name if zu is not None else "",
+                    plan.id,
+                    plan.name,
+                    item.id,
+                    (plan.name,),
+                )
+            )
+        if (fuer_alle := plan_timer(plan)) is not None:
+            out.append(
+                TimerOrt(
+                    IM_PLAN, fuer_alle, plan_id=plan.id, plan_name=plan.name, benutzt=(plan.name,)
+                )
+            )
+    return out
+
+
 __all__ = [
+    "AN_UEBUNG",
+    "IM_PLAN",
+    "IN_PLANUEBUNG",
+    "VORLAGE",
+    "TimerOrt",
     "TimerWahl",
+    "alle_timer",
+    "ausfuehrung_text",
+    "ausfuehrungs_vorschau",
+    "ausfuehrungsfelder",
     "mit_zeitfeldern",
     "plan_timer",
     "profile_der_uebung",

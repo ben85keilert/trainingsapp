@@ -1,0 +1,394 @@
+"""Einstellungen → Timer → „Alle“ (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §5, Skizze F5):
+alle Timer an einem Ort — „Letztendlich entwickelt man sich eine Handvoll Timer, das muss leicht
+editierbar sein“.
+
+Route ``<basis>/timer/alle`` (über der Timer-Seite). Gruppen: **Vorlagen**, **An Übungen**
+(gelten überall) und **Nur in Plänen** (eigene Kopien der Planübungen und der Timer „für alle
+Übungen“ eines Plans); Suche und Chips filtern. Je Zeile Name, Kurztext, **„gilt in …“**, ✎ (der
+Editor an seinem Ort) und ⋮: Kopieren · Als Vorlage speichern · In andere Übung kopieren … ·
+Löschen. **Löschen fragt** und nennt die Pläne, in denen er gilt — dort gilt danach der nächste
+Timer (Planübung > Plan > Übung). Wo er gilt, rechnet `core.uebung_timer.alle_timer`.
+"""
+
+from __future__ import annotations
+
+import contextlib
+from collections.abc import Callable
+from typing import Any
+
+import flet as ft
+
+from trainingsapp.core.models import new_id
+from trainingsapp.core.timer import TimerProfil
+from trainingsapp.core.uebung_timer import (
+    AN_UEBUNG,
+    IM_PLAN,
+    IN_PLANUEBUNG,
+    VORLAGE,
+    TimerOrt,
+    TimerWahl,
+    alle_timer,
+    profile_der_uebung,
+)
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
+from trainingsapp.ui.components.karte import hinweis
+from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.state import AppState
+
+#: Die Filter-Chips: Schlüssel → Beschriftung
+FILTER = {"": "Alle", VORLAGE: "Vorlagen", AN_UEBUNG: "An Übungen", "plaene": "In Plänen"}
+
+
+def _ohne_ausfuehrung(p: TimerProfil, name: str | None = None) -> TimerProfil:
+    """Eine Kopie mit neuer ID — ohne Ausführungen (die gehören zur Übung, §3)."""
+    kopie = TimerProfil.aus_dict(p.als_dict())
+    assert kopie is not None
+    kopie.id = new_id()
+    if name is not None:
+        kopie.name = name
+    for a in [*kopie.abschnitte, *(a for t in kopie.teile for a in t.abschnitte)]:
+        a.ausfuehrung = {}
+    return kopie
+
+
+def alle_timer_view(page: Any, state: AppState, basis: str) -> ft.View:
+    """Die Übersicht — ``basis``: die Route unter dem Timer (meist ``/einstellungen``)."""
+    stand: dict[str, Any] = {"suche": "", "filter": ""}
+    liste = ft.Column(spacing=6)
+
+    def orte() -> list[TimerOrt]:
+        return alle_timer(
+            state.timer_profile(),
+            state.uebungen.alle(),
+            state.plaene.alle(state.profil.id),
+        )
+
+    def neu_zeichnen() -> None:
+        zeichnen()
+        with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
+            liste.update()
+
+    def gehe(route: str) -> Callable[..., Any]:
+        async def handler(_e: Any = None) -> None:
+            await page.push_route(route)
+
+        return handler
+
+    def editor_route(o: TimerOrt) -> str:
+        if o.art == VORLAGE:
+            return f"{basis}/timer/bearbeiten/{o.profil.id}"
+        if o.art == AN_UEBUNG:
+            return f"{basis}/timer/uebung/{o.uebung_id}/bearbeiten/{o.profil.id}"
+        if o.art == IN_PLANUEBUNG:
+            return f"{basis}/timer/uebung/{o.uebung_id}/{o.item_id}/bearbeiten/{o.profil.id}"
+        return f"/plan/{o.plan_id}/bearbeiten/uhren"  # „für alle Übungen“: im Uhrenplan
+
+    # -- Ändern ----------------------------------------------------------------------------
+
+    def vorlage_anhaengen(p: TimerProfil) -> None:
+        state.timer_profile_setzen([*state.timer_profile(), p])
+
+    def in_uebung_anhaengen(uebung_id: str, p: TimerProfil) -> None:
+        u = state.uebungen.laden(uebung_id)
+        if u is None:
+            return
+        u.timer = [*(x.als_dict() for x in profile_der_uebung(u) if u.timer), p.als_dict()]
+        state.uebungen.speichern(u)
+
+    def kopieren(o: TimerOrt) -> Callable[..., None]:
+        def handler(_e: Any = None) -> None:
+            kopie = TimerProfil.aus_dict(o.profil.als_dict())
+            assert kopie is not None
+            kopie.id, kopie.name = new_id(), f"{o.profil.anzeigename} (Kopie)"
+            if o.art == VORLAGE:
+                vorlage_anhaengen(kopie)
+            elif o.art == AN_UEBUNG:
+                in_uebung_anhaengen(o.uebung_id, kopie)
+            neu_zeichnen()
+
+        return handler
+
+    def als_vorlage(o: TimerOrt) -> Callable[..., None]:
+        def handler(_e: Any = None) -> None:
+            vorlage_anhaengen(_ohne_ausfuehrung(o.profil))
+            neu_zeichnen()
+
+        return handler
+
+    def in_andere_uebung(o: TimerOrt) -> Callable[..., None]:
+        """Eine Übung wählen — der Timer kommt als Kopie dazu (ohne Ausführungen)."""
+
+        def handler(_e: Any = None) -> None:
+            nachher = Nachher()
+            dialog: ft.AlertDialog
+            treffer = ft.Column(spacing=0, scroll=ft.ScrollMode.AUTO, height=320)
+            alle = sorted(state.uebungen.alle(), key=lambda u: u.name.lower())
+
+            def waehlen(uebung_id: str) -> Callable[..., None]:
+                def gewaehlt(_e: Any = None) -> None:
+                    in_uebung_anhaengen(uebung_id, _ohne_ausfuehrung(o.profil))
+                    nachher.danach(neu_zeichnen)
+                    schliessen(dialog)
+
+                return gewaehlt
+
+            def filtern(e: Any = None) -> None:
+                text = str(getattr(getattr(e, "control", None), "value", "") or "").lower()
+                zeilen: list[ft.Control] = [
+                    ft.ListTile(title=ft.Text(u.name), on_click=waehlen(u.id))
+                    for u in alle
+                    if text in u.name.lower() and u.id != o.uebung_id
+                ]
+                treffer.controls = zeilen[:60]
+                with contextlib.suppress(Exception):
+                    treffer.update()
+
+            filtern()
+            dialog = ft.AlertDialog(
+                title=ft.Text(f"„{o.profil.anzeigename}“ in welche Übung?"),
+                content=ft.Column(
+                    tight=True,
+                    width=360,
+                    controls=[
+                        ft.TextField(
+                            hint_text="Übung suchen",
+                            prefix_icon=ft.Icons.SEARCH,
+                            on_change=filtern,
+                            dense=True,
+                        ),
+                        treffer,
+                    ],
+                ),
+                actions=[ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog))],
+                on_dismiss=nachher.bei_schliessen,
+            )
+            page.show_dialog(dialog)
+
+        return handler
+
+    def loeschen_fragen(o: TimerOrt) -> Callable[..., None]:
+        def handler(_e: Any = None) -> None:
+            nachher = Nachher()
+            dialog: ft.AlertDialog
+
+            def loeschen(_e: Any = None) -> None:
+                if o.art == VORLAGE:
+                    state.timer_profile_setzen(
+                        [p for p in state.timer_profile() if p.id != o.profil.id]
+                    )
+                elif o.art == AN_UEBUNG:
+                    u = state.uebungen.laden(o.uebung_id)
+                    if u is not None:
+                        u.timer = [
+                            p.als_dict() for p in profile_der_uebung(u) if p.id != o.profil.id
+                        ]
+                        state.uebungen.speichern(u)
+                elif o.art == IN_PLANUEBUNG:
+                    item = state.plaene.item_laden(o.item_id)
+                    if item is not None:
+                        alt = TimerWahl.aus_dict(item.timer)
+                        neu = TimerWahl(alt.profil_id, None, uhr=alt.uhr, zaehlt=alt.zaehlt)
+                        state.plaene.timer_setzen(item.id, neu.als_dict())
+                elif o.art == IM_PLAN:
+                    plan = state.plaene.laden(o.plan_id)
+                    if plan is not None:
+                        state.plaene.plan_timer_setzen(plan.id, None, plan.weiter_automatisch)
+                nachher.danach(neu_zeichnen)
+                schliessen(dialog)
+
+            gilt = (
+                f"Er gilt in: {', '.join(o.benutzt)} — dort gilt danach der nächste Timer "
+                "(Planübung, dann Plan, dann Übung)."
+                if o.benutzt
+                else "Er gilt in keinem Plan."
+            )
+            dialog = ft.AlertDialog(
+                title=ft.Text(f"„{o.profil.anzeigename}“ löschen?"),
+                content=ft.Text(gilt),
+                actions=[
+                    ft.TextButton("Abbrechen", on_click=lambda _e=None: schliessen(dialog)),
+                    ft.TextButton(
+                        "Löschen",
+                        style=ft.ButtonStyle(color=ft.Colors.ERROR),
+                        on_click=loeschen,
+                    ),
+                ],
+                on_dismiss=nachher.bei_schliessen,
+            )
+            page.show_dialog(dialog)
+
+        return handler
+
+    # -- Zeichnen --------------------------------------------------------------------------
+
+    def ort_text(o: TimerOrt) -> str:
+        if o.art == AN_UEBUNG:
+            return o.uebung_name
+        if o.art == IN_PLANUEBUNG:
+            return f"{o.plan_name} › {o.uebung_name}"
+        if o.art == IM_PLAN:
+            return f"für alle Übungen · {o.plan_name}"
+        return ""
+
+    def zeile(o: TimerOrt) -> ft.Control:
+        unter = o.profil.kurztext()
+        if o.art == AN_UEBUNG:
+            unter += " · " + (f"gilt in {', '.join(o.benutzt)}" if o.benutzt else "in keinem Plan")
+        menue: list[ft.PopupMenuItem] = []
+        if o.art in (VORLAGE, AN_UEBUNG):
+            menue.append(ft.PopupMenuItem(content=ft.Text("Kopieren"), on_click=kopieren(o)))
+        if o.art != VORLAGE:
+            menue.append(
+                ft.PopupMenuItem(content=ft.Text("Als Vorlage speichern"), on_click=als_vorlage(o))
+            )
+        menue.extend(
+            [
+                ft.PopupMenuItem(
+                    content=ft.Text("In andere Übung kopieren …"), on_click=in_andere_uebung(o)
+                ),
+                ft.PopupMenuItem(),
+                ft.PopupMenuItem(
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    content=ft.Text("Löschen …"),
+                    on_click=loeschen_fragen(o),
+                ),
+            ]
+        )
+        ort = ort_text(o)
+        return ft.Container(
+            data=("timer", o.art, o.profil.id, o.item_id or o.uebung_id or o.plan_id),
+            border_radius=12,
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            padding=ft.Padding.only(left=12, right=0, top=4, bottom=4),
+            content=ft.Row(
+                spacing=0,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Column(
+                        spacing=0,
+                        expand=True,
+                        tight=True,
+                        controls=[
+                            ft.Text(
+                                o.profil.anzeigename + (f"  ·  {ort}" if ort else ""),
+                                weight=ft.FontWeight.W_600,
+                            ),
+                            ft.Text(unter, size=12, opacity=0.7),
+                        ],
+                    ),
+                    ft.IconButton(
+                        ft.Icons.EDIT_OUTLINED,
+                        tooltip=f"„{o.profil.anzeigename}“ bearbeiten",
+                        on_click=gehe(editor_route(o)),
+                    ),
+                    ft.PopupMenuButton(tooltip="Mehr", items=menue),
+                ],
+            ),
+        )
+
+    def passt(o: TimerOrt) -> bool:
+        f = stand["filter"]
+        if f == VORLAGE and o.art != VORLAGE:
+            return False
+        if f == AN_UEBUNG and o.art != AN_UEBUNG:
+            return False
+        if f == "plaene" and o.art not in (IN_PLANUEBUNG, IM_PLAN):
+            return False
+        text = stand["suche"].lower()
+        heu = " ".join((o.profil.anzeigename, o.uebung_name, o.plan_name)).lower()
+        return not text or text in heu
+
+    def filter_setzen(schluessel: str) -> Callable[..., None]:
+        def handler(_e: Any = None) -> None:
+            stand["filter"] = schluessel
+            neu_zeichnen()
+
+        return handler
+
+    def suche_geaendert(e: Any) -> None:
+        stand["suche"] = str(e.control.value or "")
+        neu_zeichnen()
+
+    def zeichnen() -> None:
+        alle = orte()
+        zahl = {
+            "": len(alle),
+            VORLAGE: sum(o.art == VORLAGE for o in alle),
+            AN_UEBUNG: sum(o.art == AN_UEBUNG for o in alle),
+            "plaene": sum(o.art in (IN_PLANUEBUNG, IM_PLAN) for o in alle),
+        }
+        chips = ft.Row(
+            wrap=True,
+            spacing=6,
+            run_spacing=6,
+            controls=[
+                ft.Chip(
+                    label=ft.Text(f"{text} {zahl[k]}"),
+                    selected=stand["filter"] == k,
+                    show_checkmark=False,
+                    on_select=filter_setzen(k),
+                )
+                for k, text in FILTER.items()
+            ],
+        )
+        sichtbar = [o for o in alle if passt(o)]
+        gruppen = [
+            ("VORLAGEN", [o for o in sichtbar if o.art == VORLAGE]),
+            ("AN ÜBUNGEN · GELTEN ÜBERALL", [o for o in sichtbar if o.art == AN_UEBUNG]),
+            ("NUR IN PLÄNEN", [o for o in sichtbar if o.art in (IN_PLANUEBUNG, IM_PLAN)]),
+        ]
+        inhalt: list[ft.Control] = [chips]
+        for titel, gruppe in gruppen:
+            if not gruppe:
+                continue
+            inhalt.append(ft.Text(titel, size=11, weight=ft.FontWeight.W_700, opacity=0.65))
+            inhalt.extend(zeile(o) for o in gruppe)
+        if not sichtbar:
+            inhalt.append(hinweis("Kein Timer passt — Suche oder Filter ändern."))
+        liste.controls = inhalt
+
+    zeichnen()
+    reiter = ft.SegmentedButton(
+        selected=["alle"],
+        show_selected_icon=False,
+        segments=[
+            ft.Segment(value="uhr", label=ft.Text("Stoppuhr · Zeit · Vorlagen")),
+            ft.Segment(value="alle", label=ft.Text("Alle")),
+        ],
+        on_change=lambda e: (
+            page.run_task(gehe(f"{basis}/timer"))
+            if "alle" not in (e.control.selected or [])
+            else None
+        ),
+    )
+    return ft.View(
+        route=f"{basis}/timer/alle",
+        appbar=ft.AppBar(title=ft.Text("Alle Timer")),
+        scroll=ft.ScrollMode.AUTO,
+        padding=16,
+        controls=[
+            sicher(
+                ft.Column(
+                    spacing=12,
+                    controls=[
+                        reiter,
+                        ft.TextField(
+                            hint_text="Timer, Übung oder Plan suchen",
+                            prefix_icon=ft.Icons.SEARCH,
+                            on_change=suche_geaendert,
+                            dense=True,
+                        ),
+                        liste,
+                        hinweis(
+                            "✎ öffnet den Timer dort, wo er liegt. Löschen fragt und nennt die "
+                            "Pläne, in denen er gilt — dort gilt danach der nächste Timer."
+                        ),
+                    ],
+                ),
+                expand=False,
+            )
+        ],
+    )
+
+
+__all__ = ["alle_timer_view"]

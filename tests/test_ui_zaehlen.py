@@ -464,7 +464,8 @@ async def test_zaehlen_abbrechen_bleibt_unter_laeufe_heute(umgebung) -> None:
     seite = Seite()
     u = _kniebeuge(state, uhr=False)  # ohne Uhr: die Zählzeile zeigt die Läufe selbst
     ansicht = _ansicht(seite, state, u)
-    assert "Stoppuhr" not in _texte(ansicht)
+    # „Uhr aus“ heißt seit 8.11.2026 „Ohne Uhr“ — die Zeile steht schmal da (P146)
+    assert "Ohne Uhr" in _texte(ansicht)
     _knopf(ansicht, "Wdh. zählen").on_click()
     await _sekunden(state, uhr, gurt, 20)
     ansicht = _ansicht(seite, state, u)

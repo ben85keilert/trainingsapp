@@ -99,6 +99,7 @@ from trainingsapp.ui.laufend import takt as laufend_takt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
 from trainingsapp.ui.views.ablauf import ablauf_view
+from trainingsapp.ui.views.alle_timer import alle_timer_view
 from trainingsapp.ui.views.anhang import anhang_view
 from trainingsapp.ui.views.anhang_aufnahme import ARTEN, anhang_aufnahme_view, aufnahme_route
 from trainingsapp.ui.views.anhang_hochladen import (
@@ -740,6 +741,8 @@ def main(page: ft.Page) -> None:
                     ablegen(lambda: timer_bearbeiten_view(page, state, profil_id, basis))
                 elif teile[i + 1 : i + 2] == ["signale"]:
                     ablegen(lambda: timer_signale_view(page, state, basis))
+                elif teile[i + 1 : i + 2] == ["alle"]:  # alle Timer (`docs/plan_uhr_fokus.md` §5)
+                    ablegen(lambda: alle_timer_view(page, state, basis))
                 elif teile[i + 1 : i + 2] == ["ablauf"] and teile[:1] == ["plan"] and i == 2:
                     # Die alte Ablauf-Route (bis 8.11.2026) zeigt das Workout — ein Motor, ein
                     # Einstieg (K4, `docs/plan_uhren.md` §4.7)

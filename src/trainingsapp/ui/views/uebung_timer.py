@@ -33,11 +33,15 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
+from trainingsapp.core.plaene import anzahl_je_uebung, erledigte
 from trainingsapp.core.result_spec import basis_key
+from trainingsapp.core.standards import mit_plan_spec
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import TimerProfil, dauer_text, einmal_timer, stoppuhr
 from trainingsapp.core.uebung_timer import (
     TimerWahl,
+    ausfuehrung_text,
+    ausfuehrungsfelder,
     profile_der_uebung,
     profile_zur_wahl,
     takt_der_uebung,
@@ -50,12 +54,17 @@ from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import zaehlen
 from trainingsapp.ui.components.fokus import Fokus, balken
+from trainingsapp.ui.components.fokus_eintragen import EintragenKarte
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.laeufe_heute import eintragen_handler, laeufe_karte, werte_text
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.planblatt import PlanZeile, gesamtplan_blatt
+from trainingsapp.ui.components.planpfeile import halter as pfeile_platz
+from trainingsapp.ui.components.planpfeile import pfeilzeile
 from trainingsapp.ui.components.takt_blatt import takt_anbringen, takt_knopf
 from trainingsapp.ui.components.uhr import schluessel
+from trainingsapp.ui.components.uhr_blatt import uhr_blatt
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.timer import Profilziel
@@ -122,6 +131,7 @@ def uebung_profilziel(
             f"{zurueck}/bearbeiten",
             "Timer der Planübung",
             "Neuer Timer der Planübung",
+            spec=mit_plan_spec(item, uebung).result_spec,
         )
 
     return Profilziel(
@@ -132,6 +142,7 @@ def uebung_profilziel(
         f"{zurueck}/bearbeiten",
         "Timer der Übung",
         "Neuer Timer der Übung",
+        spec=uebung.result_spec,
     )
 
 
@@ -181,6 +192,7 @@ def formular_profilziel(state: AppState, formular: str, uebung: Exercise) -> Pro
         formular_profil_route(formular),
         "Timer der Übung",
         "Neuer Timer der Übung",
+        spec=uebung.result_spec,
     )
 
 
@@ -359,26 +371,43 @@ def uebung_timer_view(
             ende = f" um {lauf.ende.astimezone():%H:%M}" if lauf.ende else ""
             kopf = f"{uebung.name} gemacht"
             feld = kontext().zeitfeld
+            # Je Ausführung ein Eintrag (`docs/plan_uhr_fokus.md` §3, Skizze F6)
+            je = lauf.je_ausfuehrung or [({}, lauf.werte)]
+            felder_aus = ausfuehrungsfelder(uebung.result_spec)
             mitte = [
                 ft.Text(f"Timer fertig{ende}", size=13),
-                ft.Container(
-                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
-                    border_radius=12,
-                    bgcolor=ft.Colors.SURFACE,
-                    content=ft.Column(
-                        spacing=0,
-                        controls=[
-                            ft.Text(
-                                f"Eingetragen · {feldname(feld)}",
-                                size=12,
-                                weight=ft.FontWeight.W_600,
-                                opacity=0.75,
-                            ),
-                            ft.Text(_werte_text(lauf.werte), size=22, weight=ft.FontWeight.W_700),
-                        ],
-                    ),
+                *(
+                    ft.Container(
+                        padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                        border_radius=12,
+                        bgcolor=ft.Colors.SURFACE,
+                        content=ft.Column(
+                            spacing=0,
+                            controls=[
+                                ft.Text(
+                                    " · ".join(
+                                        t
+                                        for t in (
+                                            "Eingetragen",
+                                            ausfuehrung_text(aus, felder_aus),
+                                            feldname(feld),
+                                        )
+                                        if t
+                                    ),
+                                    size=12,
+                                    weight=ft.FontWeight.W_600,
+                                    opacity=0.75,
+                                ),
+                                ft.Text(_werte_text(werte), size=22, weight=ft.FontWeight.W_700),
+                            ],
+                        ),
+                    )
+                    for aus, werte in je
                 ),
-                hinweis("Ändern oder löschen: später unter „Heute geleistet“."),
+                hinweis(
+                    ("Je Ausführung ein Eintrag. " if len(je) > 1 else "")
+                    + "Ändern oder löschen: später unter „Heute geleistet“."
+                ),
             ]
         return ft.Container(
             padding=16,
@@ -407,10 +436,17 @@ def uebung_timer_view(
                                 on_click=lambda: starten(),
                                 expand=True,
                             ),
-                            ft.FilledTonalButton(
-                                "Nächste Übung" if item is not None else "Zurück",
-                                on_click=naechste_uebung,
-                                expand=True,
+                            # Im Plan führen die Pfeile oben weiter (P147); einzeln „Zurück“
+                            *(
+                                []
+                                if pfeile_da
+                                else [
+                                    ft.FilledTonalButton(
+                                        "Nächste Übung" if item is not None else "Zurück",
+                                        on_click=naechste_uebung,
+                                        expand=True,
+                                    )
+                                ]
                             ),
                         ],
                     ),
@@ -713,6 +749,9 @@ def uebung_timer_view(
         neu_zeichnen=lambda: _spalte_auffrischen(inhalt),
     )
 
+    # Die Karte „Eintragen“ (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §1) — wie im Workout
+    eintragen_karte = EintragenKarte(page, state, uebung=uebung, item=item)
+
     def waehrend(e: Einheitslauf) -> list[ft.Control]:
         assert e.timer is not None
         lauf = e.timer.lauf
@@ -739,6 +778,7 @@ def uebung_timer_view(
         # Pause · Nächster · Fertig, darunter Abbrechen
         return [
             *fokus.bauen(e, lauf),
+            *([] if eintragen_karte.leer else [eintragen_karte.bauen(e)]),
             ft.Row(
                 spacing=8,
                 controls=[
@@ -775,6 +815,7 @@ def uebung_timer_view(
         """Jede Abfrage des Tickers: der Fokus zieht nach."""
         if e.timer is not None:
             fokus.nachziehen(e, e.timer.lauf)
+            eintragen_karte.nachziehen(e)
 
     def auffrischen() -> None:
         e = _laufende(state, uebung.id)
@@ -784,9 +825,87 @@ def uebung_timer_view(
         with contextlib.suppress(Exception):
             inhalt.update()
 
-    # -- Zusammensetzen ---------------------------------------------------------------------------
+    # -- Die Pfeilzeile (§6, Skizze F6): vor und nach dem Lauf fest oben — › bleibt im Fokus ----
 
     laufend = _laufende(state, uebung.id)
+    pfeile_da = laufend is None and plan is not None and item is not None and len(plan.items) > 1
+    pfeile = pfeile_platz()
+
+    def fokus_von(ziel: PlanItem) -> Callable[[], Any]:
+        """Zur Planübung ``ziel`` im Fokus — ihr Timer ersetzt diesen, Zurück führt in den
+        Plan zu ihr (P147)."""
+
+        async def handler() -> None:
+            u = state.uebungen.laden(ziel.exercise_id)
+            if plan is None or u is None:
+                return
+            state.plan_gezeigt[plan.id] = ziel.id
+            state.ersetzen_bei = uebung_timer_route(basis, u, ziel)
+            await page.push_route(state.ersetzen_bei)
+
+        return handler
+
+    def gesamtplan() -> None:
+        """Die Mitte „k/n ▾“: der Gesamtplan als Blatt, ein Tipp wechselt im Fokus."""
+        if plan is None:
+            return
+        fertig = erledigte(
+            plan.items,
+            anzahl_je_uebung(
+                e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+            ),
+        )
+        zeilen = []
+        for it in plan.items:
+            u = state.uebungen.laden(it.exercise_id)
+            zeilen.append(
+                PlanZeile(it.id, u.name if u is not None else "(fehlt)", erledigt=it.id in fertig)
+                if u is not None
+                else PlanZeile(it.id, "(Übung nicht mehr vorhanden)", fehlt=True)
+            )
+
+        def gewaehlt(item_id: str) -> None:
+            ziel = next((x for x in plan.items if x.id == item_id), None)
+            if ziel is not None and (item is None or ziel.id != item.id):
+                page.run_task(fokus_von(ziel))
+
+        page.show_dialog(
+            gesamtplan_blatt(
+                plan.name,
+                f"{len(fertig)} von {len(plan.items)} heute",
+                zeilen,
+                item.id if item is not None else None,
+                gewaehlt,
+            )
+        )
+
+    if pfeile_da and plan is not None and item is not None:
+        ids = [x.id for x in plan.items]
+        if item.id in ids:
+            nummer = ids.index(item.id)
+            erledigt = item.id in erledigte(
+                plan.items,
+                anzahl_je_uebung(
+                    e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+                ),
+            )
+
+            def name_von(x: PlanItem) -> str:
+                u = state.uebungen.laden(x.exercise_id)
+                return u.name if u is not None else "(Übung nicht mehr vorhanden)"
+
+            pfeile.content = pfeilzeile(
+                plan.items,
+                nummer,
+                name_von=name_von,
+                betont=erledigt and nummer < len(ids) - 1,
+                wechsler=fokus_von,
+                gesamtplan=gesamtplan,
+            )
+            pfeile.visible = True
+
+    # -- Zusammensetzen ---------------------------------------------------------------------------
+
     inhalt = ft.Column(spacing=12)
     if laufend is not None:
         inhalt.controls = waehrend(laufend)
@@ -801,14 +920,47 @@ def uebung_timer_view(
         inhalt.controls.append(
             ft.TextButton("Zum Plan", icon=ft.Icons.ARROW_BACK, on_click=zum_plan)
         )
+    # „zählt“ im Kopf des Fokus (P148) — umschalten geht vorher und im Uhr-Blatt
+    zaehlt_chip = ft.Chip(
+        label=ft.Text("zählt" if zaehlt else "zählt nicht", size=12),
+        selected=zaehlt,
+        show_checkmark=False,
+        disabled=True,
+        tooltip="Ob die Zeit der Uhr ins Tagebuch kommt — für diesen Lauf",
+    )
     return ft.View(
         route=route,
         appbar=ft.AppBar(
-            title=ft.Text(("Fokus · " if laufend is not None else "Timer · ") + uebung.name)
+            title=ft.Text(("Fokus · " if laufend is not None else "Timer · ") + uebung.name),
+            actions=[
+                *([zaehlt_chip] if laufend is not None else []),
+                # Das Uhr-Blatt (§4) — gilt für den nächsten Start, der Lauf bleibt, wie er ist
+                ft.IconButton(
+                    ft.Icons.TUNE,
+                    tooltip="Uhr einstellen",
+                    on_click=lambda: page.show_dialog(
+                        uhr_blatt(page, state, uebung=uebung, plan=plan, item=item, basis=basis)
+                    ),
+                ),
+            ],
         ),
-        scroll=ft.ScrollMode.AUTO,
-        padding=16,
-        controls=[sicher(inhalt, expand=False)],
+        padding=0,
+        controls=[
+            sicher(
+                ft.Column(
+                    expand=True,
+                    spacing=0,
+                    controls=[
+                        pfeile,
+                        ft.Column(
+                            expand=True,
+                            scroll=ft.ScrollMode.AUTO,
+                            controls=[ft.Container(padding=16, content=inhalt)],
+                        ),
+                    ],
+                )
+            )
+        ],
     )
 
 

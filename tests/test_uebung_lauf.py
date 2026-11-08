@@ -242,3 +242,47 @@ async def test_timer_traegt_die_gewaehlte_variante_ein(umgebung) -> None:
     spaeter = uebung_lauf.lauf_eintragen(state, abgebrochen.einheit_id)
     assert spaeter is not None
     assert spaeter.result == {"variant": "gestreckt", "hold": [10, 10, 10, 10]}
+
+
+async def test_ausfuehrung_je_runde_traegt_je_ausfuehrung_ein(umgebung) -> None:
+    """Ben, 8.11.2026 (`docs/plan_uhr_fokus.md` §3): „1 min links, Runde 2 2 min rechts,
+    Runde 3 30 s beide“ — jede Runde mit ihrer Ausführung; eingetragen wird je Ausführung ein
+    Eintrag, und die Eingaben im Fokus gehören zu ihrer Runde."""
+    from trainingsapp.core import varianten as var
+    from trainingsapp.core.einheit import Ereignis
+
+    state, uhr, gurt, _ = umgebung
+    uebung = _planke(state, "hold", "reps")
+    uebung.result_spec = var.mit_varianten(
+        uebung.result_spec, [var.Variante("links"), var.Variante("rechts"), var.Variante("beide")]
+    )
+    state.uebungen.speichern(uebung)
+    profil = TimerProfil(
+        name="Seiten L·R·B",
+        abschnitte=[
+            Abschnitt("Links", 10, ausfuehrung={"variant": "links"}),
+            Abschnitt("Pause", 3, zaehlt=False),
+            Abschnitt("Rechts", 20, ausfuehrung={"variant": "rechts"}),
+            Abschnitt("Beide", 5, ausfuehrung={"variant": "beide"}),
+        ],
+    )
+    e = uebung_lauf.starten(Seite(), state, uebung_lauf.kontext_fuer(uebung), profil)
+    await _ticken(state, uhr, gurt, e, 18)
+    # Im Fokus von Hand: 12 Wiederholungen in der Runde „rechts“
+    e.nachtragen(Ereignis(e.uhr() - e.t0, "person", "wdh", "", {"feld": "reps", "wert": 12}))
+    await _ticken(state, uhr, gurt, e, 30, bis_ende=True)
+    (lauf,) = uebung_lauf.laeufe_heute(state, uebung.id)
+    assert [(a, w) for a, w in lauf.je_ausfuehrung] == [
+        ({"variant": "links"}, [10]),
+        ({"variant": "rechts"}, [20]),
+        ({"variant": "beide"}, [5]),
+    ]
+    eintraege = {
+        x.result.get("variant"): x.result
+        for x, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())
+    }
+    assert eintraege == {
+        "links": {"variant": "links", "hold": [10]},
+        "rechts": {"variant": "rechts", "hold": [20], "reps": [12]},
+        "beide": {"variant": "beide", "hold": [5]},
+    }

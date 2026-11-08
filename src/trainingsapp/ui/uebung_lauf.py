@@ -64,9 +64,12 @@ from trainingsapp.core.timer_eintrag import (
     ZEITFELDER,
     Gelaufen,
     abgebrochen,
+    ausfuehrung_bei,
     ergebnis,
     gelaufene_zeiten,
+    nach_ausfuehrung,
 )
+from trainingsapp.core.timer_eintrag import eingaben as person_eingaben
 from trainingsapp.core.uebung_timer import (
     mit_zeitfeldern,
     zaehlt_als,
@@ -122,6 +125,9 @@ class Lauf:
     mit_uhr: bool = True
     #: was gezählt wurde (`core.zaehlen.ZAEHLART_*`) — ``None``: kein Zählen
     zaehlart: str | None = None
+    #: je Ausführung ihr Eintrag der Uhr (Ausführung, Werte) — leer, wenn die Runden keine
+    #: eigene Ausführung hatten (`docs/plan_uhr_fokus.md` §3)
+    je_ausfuehrung: list[tuple[dict[str, Any], list[float]]] = field(default_factory=list)
 
     @property
     def dauer_s(self) -> float:
@@ -694,83 +700,120 @@ def _eintragen(
     einheit: Einheitslauf | None = None,
 ) -> SessionEntry | None:
     """``teile``: was eingetragen wird — die Zeit der Uhr (``uhr``), die Wiederholungen
-    (``zaehlen``) oder beides in einen Eintrag. ``einheit``: die Einheit, wenn sie noch im
-    Speicher ist — dann schreibt sie ``person/eintrag`` selbst (`Einheitslauf.nachtragen`; ihre
-    Nummern liefen sonst mit einer eigenen zusammen)."""
-    uebung = state.uebungen.laden(kontext.uebung_id, mit_geloeschten=True)
-    if uebung is None:
+    (``zaehlen``) oder beides. ``einheit``: die Einheit, wenn sie noch im Speicher ist — dann
+    schreibt sie ``person/eintrag`` selbst (`Einheitslauf.nachtragen`; ihre Nummern liefen sonst
+    mit einer eigenen zusammen).
+
+    **Je Ausführung ein Eintrag** (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §3): Tragen die
+    Abschnitte des Timers eine Ausführung („1 min links, 2 min rechts, 30 s beide“), kommt jede
+    in den offenen Eintrag ihrer Ausführung — mit ihren Zeiten, den Wiederholungen ihrer Sätze
+    und dem, was die Person im Fokus dazu eintrug (`core.timer_eintrag.Eingaben`). Ohne
+    Ausführung an den Abschnitten ein Eintrag wie bisher. Zurück kommt der erste."""
+    uebung0 = state.uebungen.laden(kontext.uebung_id, mit_geloeschten=True)
+    if uebung0 is None:
         return None
     item = state.plaene.item_laden(kontext.item_id) if kontext.item_id else None
     if item is not None:
-        uebung = mit_plan_spec(item, uebung)
-    werte: dict[str, Any] = dict(ausfuehrung(uebung, kontext.auspraegung))
+        uebung0 = mit_plan_spec(item, uebung0)
     # Die Planübung entscheidet, welches Wiederholungsfeld es gibt (vor `mit_zeitfeldern`)
-    feld = _zaehl_feld(uebung, item, ereignisse) if TEIL_ZAEHLEN in teile else None
-    if TEIL_UHR in teile:
-        # Nach einem Absturz mitten im Satz, mit seinen Wiederholungen: die Zeit bis zum
-        # Zwischenstand — sonst hätte er Wiederholungen, aber keine Haltezeit
-        zeiten = (
-            ze.zeiten_der_uhr(ereignisse) if TEIL_ZAEHLEN in teile else gelaufene_zeiten(ereignisse)
-        )
-        werte.update(ergebnis(zeiten, kontext.zeitfeld))
-        werte = zeit_zusammenlegen(uebung, werte)  # ins Zeitfeld der Übung (27.10.2026)
-        uebung = mit_zeitfeldern(uebung, werte)  # Zeit auch ohne den Parameter (18.10.2026)
-    wdh = ze.wiederholungen(ereignisse, feld) if feld else []
-    if wdh and feld:
-        werte[feld] = list(wdh)  # ein Wert je Satz; ohne Sätze die Summe (`lauf_eintragen`)
-    if TEIL_UHR not in teile and not wdh:
-        return None  # nichts gezählt — und keine Uhr, die „gemacht“ eintrüge
+    feld = _zaehl_feld(uebung0, item, ereignisse) if TEIL_ZAEHLEN in teile else None
+    # Nach einem Absturz mitten im Satz, mit seinen Wiederholungen: die Zeit bis zum
+    # Zwischenstand — sonst hätte er Wiederholungen, aber keine Haltezeit
+    zeiten = (
+        ze.zeiten_der_uhr(ereignisse) if TEIL_ZAEHLEN in teile else gelaufene_zeiten(ereignisse)
+    )
+    eingaben = person_eingaben(ereignisse, zeiten)
+    # Im Fokus gewählt geht vor dem, was der Block beim Start zeigte (P150: gilt mit dem Ende)
+    basis = eingaben.auspraegung if eingaben.auspraegung is not None else kontext.auspraegung
+    gruppen = nach_ausfuehrung(zeiten) if TEIL_UHR in teile else [({}, list(zeiten))]
+    getrennt = any(a for a, _ in gruppen)
+    sensor = ze.wiederholungen(ereignisse, feld) if feld else []
+    sensor_t = ze.satz_zeiten(ereignisse, feld) if feld and getrennt else []
     ende_s = max(
         (x.t_s for x in ereignisse if x.quelle in ("timer", "plan", "einheit", "zaehlen")),
         default=0.0,
     )
-    beginn = anker_utc
-    tag = lokaler_tag(beginn)
+    tag = lokaler_tag(anker_utc)
     sitzung = state.sitzungen.session_fuer(subject_id or state.profil.id, kontext.plan_id, tag)
-    # In den offenen Eintrag wie ein Tipp (P79 D1) — die Ausführung trennt wie dort
-    eintrag: SessionEntry = state.sitzungen.lauf_eintragen(
-        sitzung,
-        uebung,
-        werte,
-        tag,
-        ausfuehrung(uebung, kontext.auspraegung),
-        beginn=beginn,
-        ende=beginn + timedelta(seconds=ende_s),
-    )
-    # In die Zeitleiste, was eingetragen wurde — „Läufe heute“ liest es zurück, und nichts
-    # kommt zweimal hinein (``teil``)
+    erster: SessionEntry | None = None
     neu: list[Ereignis] = []
-    if TEIL_UHR in teile:
-        daten: dict[str, Any] = {
-            "eintrag": eintrag.id,
-            "werte": zeit_werte(uebung, werte),
-            "teil": TEIL_UHR,
-        }
-        if kontext.zeitfeld:
-            daten["zeitfeld"] = kontext.zeitfeld
-        neu.append(Ereignis(ende_s, "person", "eintrag", uebung.name, daten))
     notizen = False
-    if wdh and feld and _lebt(einheit, einheit_id):
-        satz_notizen = _satz_notizen(uebung, eintrag, feld, ereignisse, wdh, kontext.auspraegung)
-        neu.extend(satz_notizen)
-        notizen = bool(satz_notizen)
-    if wdh:
-        neu.append(
-            Ereignis(
-                ende_s,
-                "person",
-                "eintrag",
-                uebung.name,
-                {"eintrag": eintrag.id, "werte": list(wdh), "feld": feld, "teil": TEIL_ZAEHLEN},
-            )
+    for gruppe, gruppen_zeiten in gruppen:
+        aus = {**basis, **gruppe}
+        uebung = uebung0
+        werte: dict[str, Any] = dict(ausfuehrung(uebung, aus))
+        if TEIL_UHR in teile:
+            werte.update(ergebnis(gruppen_zeiten, kontext.zeitfeld))
+            werte = zeit_zusammenlegen(uebung, werte)  # ins Zeitfeld der Übung (27.10.2026)
+            uebung = mit_zeitfeldern(uebung, werte)  # Zeit auch ohne den Parameter (18.10.2026)
+        # Der Sensor: je Satz der Gruppe, deren Ausführung zur Zeit des Satzes lief
+        wdh = (
+            [
+                w
+                for w, t in zip(sensor, sensor_t, strict=False)
+                if ausfuehrung_bei(zeiten, t) == gruppe
+            ]
+            if getrennt
+            else list(sensor)
         )
+        if wdh and feld:
+            werte[feld] = list(wdh)  # ein Wert je Satz; ohne Sätze die Summe (`lauf_eintragen`)
+        # Von Hand im Fokus (Karte „Eintragen“): nur, wo der Sensor nicht zählte (P122)
+        hand = eingaben.werte(zeiten, gruppe if getrennt else None)
+        for k, v in hand.items():
+            if k in werte or (k == feld and wdh):
+                continue
+            werte[k] = v
+        if TEIL_UHR not in teile and not wdh:
+            continue  # nichts gezählt — und keine Uhr, die „gemacht“ eintrüge
+        von_s = min((z.von_s for z in gruppen_zeiten), default=0.0) if getrennt else 0.0
+        bis_s = max((z.bis_s for z in gruppen_zeiten), default=ende_s) if getrennt else ende_s
+        # In den offenen Eintrag wie ein Tipp (P79 D1) — die Ausführung trennt wie dort
+        eintrag: SessionEntry = state.sitzungen.lauf_eintragen(
+            sitzung,
+            uebung,
+            werte,
+            tag,
+            ausfuehrung(uebung, aus),
+            beginn=anker_utc + timedelta(seconds=von_s),
+            ende=anker_utc + timedelta(seconds=bis_s),
+        )
+        erster = erster or eintrag
+        # In die Zeitleiste, was eingetragen wurde — „Läufe heute“ liest es zurück, und nichts
+        # kommt zweimal hinein (``teil``)
+        if TEIL_UHR in teile:
+            daten: dict[str, Any] = {
+                "eintrag": eintrag.id,
+                "werte": zeit_werte(uebung, werte),
+                "teil": TEIL_UHR,
+                **{k: v for k, v in gruppe.items() if k in AUSFUEHRUNG_SCHLUESSEL},
+            }
+            if kontext.zeitfeld:
+                daten["zeitfeld"] = kontext.zeitfeld
+            neu.append(Ereignis(ende_s, "person", "eintrag", uebung.name, daten))
+        if wdh and feld and not getrennt and _lebt(einheit, einheit_id):
+            satz_notizen = _satz_notizen(uebung, eintrag, feld, ereignisse, wdh, aus)
+            neu.extend(satz_notizen)
+            notizen = bool(satz_notizen)
+        if wdh:
+            neu.append(
+                Ereignis(
+                    ende_s,
+                    "person",
+                    "eintrag",
+                    uebung.name,
+                    {"eintrag": eintrag.id, "werte": list(wdh), "feld": feld, "teil": TEIL_ZAEHLEN},
+                )
+            )
+    if erster is None:
+        return None
     # Die Notizen zu den gezählten Sätzen: Im Diagnosemodus stehen ihre Zeilen ``satz`` und
     # Vergleiche schon im Mitschnitt (`Messlauf.zaehl_notizen`)
     lauf = getattr(getattr(einheit, "hrv", None), "messlauf", None) if notizen else None
     haken = getattr(lauf, "zaehl_notizen", None)
     with haken() if callable(haken) else contextlib.nullcontext():
         _zeitleiste(state, einheit_id, neu, einheit)
-    return eintrag
+    return erster
 
 
 def _lebt(einheit: Einheitslauf | None, einheit_id: str) -> bool:
@@ -869,9 +912,15 @@ def laeufe_heute(state: Any, uebung_id: str, tag: Any = None) -> list[Lauf]:
             continue
         ereignisse = state.einheiten.ereignisse(kopf.id)
         eintraege = [x for x in ereignisse if x.quelle == "person" and x.art == "eintrag"]
-        uhr_eintrag = next(
-            (x for x in eintraege if (x.daten.get("teil") or TEIL_UHR) == TEIL_UHR), None
-        )
+        uhr_eintraege = [x for x in eintraege if (x.daten.get("teil") or TEIL_UHR) == TEIL_UHR]
+        uhr_eintrag = uhr_eintraege[0] if uhr_eintraege else None
+        je = [
+            (
+                {k: x.daten[k] for k in AUSFUEHRUNG_SCHLUESSEL if k in x.daten},
+                list(x.daten.get("werte") or []),
+            )
+            for x in uhr_eintraege
+        ]
         uhr = any(b.art == "timer" for b in teile) or any(x.quelle == "timer" for x in ereignisse)
         zaehl_abgebrochen = ze.zaehl_abgebrochen(ereignisse)
         zaehlart = next(
@@ -899,6 +948,7 @@ def laeufe_heute(state: Any, uebung_id: str, tag: Any = None) -> list[Lauf]:
                 nachzutragen=nachzutragen,
                 mit_uhr=uhr,
                 zaehlart=zaehlart,
+                je_ausfuehrung=je if any(a for a, _ in je) else [],
             )
         )
     return laeufe

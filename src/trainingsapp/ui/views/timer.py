@@ -53,6 +53,7 @@ import flet as ft
 
 from trainingsapp.core.klang import KLAENGE
 from trainingsapp.core.models import new_id
+from trainingsapp.core.result_spec import FieldType, ResultSpec
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import (
     EINMAL,
@@ -70,7 +71,12 @@ from trainingsapp.core.timer import (
     signale_kurz,
     stoppuhr,
 )
-from trainingsapp.core.uebung_timer import timer_fuer
+from trainingsapp.core.uebung_timer import (
+    ausfuehrung_text,
+    ausfuehrungs_vorschau,
+    ausfuehrungsfelder,
+    timer_fuer,
+)
 from trainingsapp.devices.einheit import TimerBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -96,6 +102,8 @@ from trainingsapp.ui.timer_takt import ticker_starten, toene_laden, ton_spielen,
 
 #: Der dritte Reiter neben Stoppuhr und Timer — die Bibliothek der Profile
 PROFILE = "profile"
+#: Der vierte Reiter: alle Timer an einem Ort (`views/alle_timer.py`)
+ALLE = "alle"
 
 
 def timer_route(basis: str) -> str:
@@ -434,6 +442,14 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         neu = next(iter(e.control.selected or []), reiter)
         if neu == reiter:
             return
+        if neu == ALLE:  # eine eigene Seite über dem Timer — der Reiter bleibt, wie er war
+            e.control.selected = [reiter]
+
+            async def gehen() -> None:
+                await page.push_route(f"{route}/alle")
+
+            page.run_task(gehen)
+            return
         umschalten(state.timer_profil_bibliothek().id if neu == PROFILE else neu)
 
     async def neu() -> None:
@@ -565,6 +581,8 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 label=ft.Text("Vorlagen"),
                 icon=ft.Icon(ft.Icons.FORMAT_LIST_BULLETED),
             ),
+            # Alle Timer an einem Ort (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §5)
+            ft.Segment(value=ALLE, label=ft.Text("Alle"), icon=ft.Icon(ft.Icons.APPS)),
         ],
         on_change=reiter_gewaehlt,
     )
@@ -1144,6 +1162,9 @@ class Profilziel:
     ohne_name: bool = False
     #: „Als Profil speichern“: legt eine Kopie mit Namen in die Bibliothek — ``None``: nicht
     als_profil: Callable[[TimerProfil], None] | None = None
+    #: Die Felder der (Plan-)Übung, deren Timer hier entsteht — je Abschnitt lässt sich ihre
+    #: Ausführung festlegen (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §3); ``None``: Vorlage
+    spec: ResultSpec | None = None
 
 
 def bibliothek(state: AppState, basis: str) -> Profilziel:
@@ -1199,6 +1220,8 @@ class _Zeile:
     zaehlt: bool = True
     #: Der Takt dieses Abschnitts (`docs/plan_taktgeber.md`) — ``None``: wie die Übung
     takt: Takt | None = None
+    #: Die Ausführung dieser Runde (Feld → Wert) — leer: wie im Block gewählt
+    ausfuehrung: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -1249,6 +1272,33 @@ def timer_bearbeiten_view(
     def gesamt() -> None:
         summe = sum(sum(z.dauer_s for z in t.zeilen) * t.runden for t in teile_ed)
         gesamt_text.value = f"Gesamt {dauer_text(summe)}"
+        # Je Ausführung ein Eintrag — was der Timer einträgt (`ausfuehrungs_vorschau`)
+        teile = [
+            Teil(
+                [
+                    Abschnitt("", z.dauer_s, zaehlt=z.zaehlt, ausfuehrung=dict(z.ausfuehrung))
+                    for z in t.zeilen
+                    if z.dauer_s
+                ],
+                t.runden,
+            )
+            for t in teile_ed
+        ]
+        je = (
+            ausfuehrungs_vorschau(
+                TimerProfil(abschnitte=teile[0].abschnitte, runden=teile[0].runden, teile=teile[1:])
+            )
+            if teile and teile[0].abschnitte
+            else []
+        )
+        vorschau.visible = bool(je)
+        vorschau.value = "Eingetragen wird je Ausführung ein Eintrag: " + " · ".join(
+            f"{ausfuehrung_text(a, felder_aus) or 'wie gewählt'} {dauer_text(sek)}" for a, sek in je
+        )
+
+    #: Was eine Runde festlegen kann — nur am Timer einer Übung (§3)
+    felder_aus = ausfuehrungsfelder(ziel.spec) if ziel.spec is not None else []
+    vorschau = ft.Text(size=13, visible=False)
 
     def zeile(a: Abschnitt) -> _Zeile:
         return _Zeile(
@@ -1257,6 +1307,7 @@ def timer_bearbeiten_view(
             _klang_wahl(page, state, a.klang, "Standardklang"),
             a.zaehlt,
             a.takt,
+            {k: v for k, v in a.ausfuehrung.items() if any(f.key == k for f in felder_aus)},
         )
 
     def teil_felder(teil: Teil) -> _TeilFelder:
@@ -1341,6 +1392,84 @@ def timer_bearbeiten_view(
 
         return handler
 
+    def ausfuehrung_setzen(k: int, i: int, key: str, wert: Any) -> None:
+        """Ein Wert der Ausführung — derselbe noch einmal oder ``None`` nimmt ihn heraus. Der
+        Name folgt („Links“), solange er leer ist oder dem alten Vorschlag entspricht."""
+        z = teile_ed[k].zeilen[i]
+        alt = dict(z.ausfuehrung)
+        if wert is None or alt.get(key) == wert:
+            z.ausfuehrung.pop(key, None)
+        else:
+            z.ausfuehrung[key] = wert
+        jetzt = (z.name.value or "").strip()
+        if not jetzt or jetzt == ausfuehrung_text(alt, felder_aus):
+            z.name.value = ausfuehrung_text(z.ausfuehrung, felder_aus).capitalize()
+        neu_zeichnen()
+
+    def ausfuehrung_waehler(k: int, i: int, key: str, wert: Any) -> Callable[[], None]:
+        return lambda: ausfuehrung_setzen(k, i, key, wert)
+
+    def ausfuehrung_zahl(k: int, i: int, key: str) -> Callable[[Any], None]:
+        """Gewicht oder Winkel getippt — leer heißt „wie gewählt“."""
+
+        def handler(e: Any) -> None:
+            text = str(getattr(e.control, "value", "") or "").strip().replace(",", ".")
+            try:
+                zahl = float(text) if text else None
+            except ValueError:
+                zahl = None
+            z = teile_ed[k].zeilen[i]
+            if zahl is None and key not in z.ausfuehrung:
+                return
+            wert = None if zahl is None else (int(zahl) if zahl.is_integer() else zahl)
+            if z.ausfuehrung.get(key) != wert:
+                z.ausfuehrung.pop(key, None)
+                ausfuehrung_setzen(k, i, key, wert)
+
+        return handler
+
+    def ausfuehrung_zeile(k: int, i: int) -> ft.Control:
+        """„Ausführung“ je Runde: die Chips der Variante bzw. Seite, Felder für Gewicht und
+        Winkel — nichts gewählt heißt „wie gewählt“ (der Block)."""
+        z = teile_ed[k].zeilen[i]
+        teile: list[ft.Control] = [ft.Text("Ausführung", size=12, opacity=0.7)]
+        for f in felder_aus:
+            if f.type == FieldType.CHOICE:
+                teile.extend(
+                    ft.Chip(
+                        label=ft.Text(str(o), size=12),
+                        selected=z.ausfuehrung.get(f.key) == o,
+                        show_checkmark=False,
+                        tooltip=f"{f.label}: {o} — noch einmal tippen: wie gewählt",
+                        on_select=ausfuehrung_waehler(k, i, f.key, o),
+                    )
+                    for o in f.quick
+                )
+            else:
+                wert = z.ausfuehrung.get(f.key)
+                teile.append(
+                    ft.TextField(
+                        label=f.label,
+                        value="" if wert is None else str(wert).replace(".", ","),
+                        hint_text="wie gewählt",
+                        suffix=f.unit or None,
+                        dense=True,
+                        width=120,
+                        keyboard_type=ft.KeyboardType.NUMBER,
+                        on_blur=ausfuehrung_zahl(k, i, f.key),
+                        on_submit=ausfuehrung_zahl(k, i, f.key),
+                    )
+                )
+        if not z.ausfuehrung:
+            teile.append(ft.Text("wie gewählt", size=12, italic=True, opacity=0.6))
+        return ft.Row(
+            wrap=True,
+            spacing=6,
+            run_spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=teile,
+        )
+
     def runden_aendern(k: int, delta: int) -> Callable[[], None]:
         def handler() -> None:
             t = teile_ed[k]
@@ -1386,6 +1515,12 @@ def timer_bearbeiten_view(
                     "dem er beginnt — etwa Glocke 1 für Belastung, Glocke 3 für die Pause. "
                     "„zählt“: seine Zeit wird als Übungszeit eingetragen. Ein Takt (Phasen "
                     "für Atmung oder Bewegung) gilt nur in seinem Abschnitt."
+                    + (
+                        " Die Ausführung (Variante, Seite, Gewicht, Winkel) gilt für ihre Runde "
+                        "— je Ausführung entsteht ein eigener Eintrag."
+                        if felder_aus
+                        else ""
+                    )
                 )
             )
         zeilen: list[ft.Control] = [
@@ -1428,6 +1563,15 @@ def timer_bearbeiten_view(
                             bearbeiten=takt_bearbeiter(k, i),
                             entfernen=takt_entferner(k, i),
                         ),
+                    ),
+                    *(
+                        [
+                            ft.Container(
+                                padding=ft.Padding.only(left=4), content=ausfuehrung_zeile(k, i)
+                            )
+                        ]
+                        if felder_aus
+                        else []
                     ),
                 ],
             )
@@ -1473,6 +1617,7 @@ def timer_bearbeiten_view(
                             z.klang.value,
                             z.zaehlt,
                             z.takt.als_dict() if z.takt is not None else None,
+                            sorted(z.ausfuehrung.items()),
                         )
                         for z in t.zeilen
                     ],
@@ -1500,6 +1645,7 @@ def timer_bearbeiten_view(
                             _klang_wert(z.klang),
                             z.zaehlt,
                             takt=z.takt,
+                            ausfuehrung=dict(z.ausfuehrung),
                         )
                     )
             teile_neu.append(Teil(abschnitte, t.runden, (t.name.value or "").strip()))
@@ -1669,6 +1815,7 @@ def timer_bearbeiten_view(
                                 gesamt_text,
                             ]
                         ),
+                        vorschau,
                         hinweis(
                             "Ein Teil läuft so viele Runden, wie bei ihm steht; dann kommt der "
                             "nächste — etwa Vorbereitung 1 ×, Halten und Pause 3 ×, Cooldown 1 ×."

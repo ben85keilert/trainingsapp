@@ -387,6 +387,12 @@ class Fokus:
             ],
         )
         self.halt_knopf.disabled = (stand.fertig and ueber <= 0) or lauf.abgebrochen
+        # „Ohne Uhr — nur Fokus“ (P146): keine Zeit, keine Pause — Kurven und Eintragen bleiben
+        ohne = bool(getattr(lauf.profil, "ohne_uhr", False))
+        self.zeit_text.visible = not ohne
+        self.halt_knopf.visible = not ohne
+        if ohne:
+            self.stand_text.value = "Ohne Uhr — keine Zeit im Tagebuch"
 
     def _live(self) -> tuple[Any, float] | None:
         lauf_hrv: Any = getattr(self.state, "messlauf", None)

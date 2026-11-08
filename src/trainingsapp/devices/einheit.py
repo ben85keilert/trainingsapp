@@ -202,6 +202,9 @@ class TimerBaustein:
                 daten["soll_s"] = m.soll_s
             if not m.zaehlt:
                 daten["zaehlt"] = False
+            # Die Ausführung dieser Runde (`docs/plan_uhr_fokus.md` §3) — flach wie an der
+            # Beteiligung (`kontext_daten`), die Zeitleiste nimmt nur einfache Werte
+            daten.update({k: v for k, v in m.ausfuehrung if k in AUSFUEHRUNG_SCHLUESSEL})
             out.append(Ereignis(t, "timer", "abschnitt", m.text, daten))
         out.extend(self._takt_melden(jetzt, marken))
         self._takt_sammeln(self.verfolger.nachziehen(jetzt))

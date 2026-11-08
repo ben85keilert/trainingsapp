@@ -127,7 +127,7 @@ from trainingsapp.core.standards import (
 )
 from trainingsapp.core.tagesbilanz import buendeln, ist_leistung, je_variante, mengen
 from trainingsapp.core.timer_eintrag import vom_timer_text
-from trainingsapp.core.uebung_timer import timer_fuer, uhr_an
+from trainingsapp.core.uebung_timer import timer_fuer
 from trainingsapp.core.units import MAX_SAETZE, parse_anzahl
 from trainingsapp.core.zaehlen import ENDE_ABGEHAKT
 from trainingsapp.ui import marken, uebung_lauf
@@ -137,11 +137,14 @@ from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.plan_reiter import plan_reiter
 from trainingsapp.ui.components.planblatt import PlanZeile, gesamtplan_blatt
+from trainingsapp.ui.components.planpfeile import halter as pfeile_platz
+from trainingsapp.ui.components.planpfeile import pfeilzeile
 from trainingsapp.ui.components.planstand import nur_hier, wie_die_uebung
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.components.skala_regler import skala_regler
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import UhrTeile, laufende, uhr_teile
+from trainingsapp.ui.components.uhr_blatt import uhr_blatt
 from trainingsapp.ui.components.varianten import Variantenwahl, varianten_blatt, zeilenbreite
 from trainingsapp.ui.components.werte import wert_leiste
 from trainingsapp.ui.components.zaehlen import laeuft_hier, zaehl_zeile
@@ -1343,6 +1346,40 @@ def plan_view(
         )
         return blatt
 
+    def uhr_blatt_oeffner(uebung: Exercise, item: PlanItem) -> Callable[[], None]:
+        """Das ⏱ am Block: das Uhr-Blatt dieser (Plan-)Übung (`components/uhr_blatt.py`)."""
+
+        def handler() -> None:
+            page.show_dialog(
+                uhr_blatt(
+                    page,
+                    state,
+                    uebung=katalog.get(item.exercise_id, uebung),
+                    plan=None if einzel else plan,
+                    item=None if einzel else item,
+                    basis=route,
+                )
+            )
+
+        return handler
+
+    def fokus_schalter() -> ft.Control:
+        """▶ öffnet den Fokus — an/aus, für alle Übungen (`AppState.fokus_auto`, P145)."""
+        an = state.fokus_auto()
+
+        def umschalten() -> None:
+            state.fokus_auto_setzen(not an)
+            state.neu_zeichnen()
+
+        return ft.IconButton(
+            ft.Icons.CENTER_FOCUS_STRONG if an else ft.Icons.CENTER_FOCUS_WEAK,
+            selected=an,
+            tooltip="▶ öffnet den Fokus — tippen: ▶ bleibt in der Übung"
+            if an
+            else "▶ bleibt in der Übung — tippen: ▶ öffnet den Fokus",
+            on_click=umschalten,
+        )
+
     def kopfzeile(uebung: Exercise, item: PlanItem) -> ft.Control:
         teile = [", ".join(uebung.typen), ", ".join(uebung.regionen)]
         if uebung.id in mehrfach:
@@ -1362,8 +1399,10 @@ def plan_view(
             else [
                 ft.IconButton(
                     ft.Icons.TIMER if profil is not None else ft.Icons.TIMER_OUTLINED,
-                    tooltip="Timer dieser Übung" if profil is not None else "Timer festlegen",
-                    on_click=oeffner(uebung_timer_route(route, uebung, None if einzel else item)),
+                    # Das Uhr-Blatt (Ben, 8.11.2026, §4): die Uhr direkt einstellen — mit
+                    # Geltung und „+ Neuer Timer“ (früher die Timer-Seite)
+                    tooltip="Uhr einstellen",
+                    on_click=uhr_blatt_oeffner(uebung, item),
                 )
             ]
         )
@@ -2197,8 +2236,11 @@ def plan_view(
                     plan=None if einzel else plan,
                     item=planuebung,
                     timer_oeffnen=oeffner(uebung_timer_route(route, aus_katalog, planuebung)),
+                    basis=route,
                 )
-                if nachtrag is None and uhr_an(aus_katalog, planuebung)
+                # Die Zeile steht immer — „Uhr aus“ heißt „Ohne Uhr“, ▶ öffnet dann nur den
+                # Fokus (P146, `docs/plan_uhr_fokus.md` §2)
+                if nachtrag is None
                 else UhrTeile()
             )
             knoepfe.extend(uhr.knoepfe)
@@ -2206,7 +2248,19 @@ def plan_view(
             if varianten_an(item):
                 knoepfe.append(etikett_knopf(item, st))
             inhalt.append(geleistet_tafel(uebung, item, st))
-            inhalt.append(ft.Row(wrap=True, spacing=8, run_spacing=6, controls=knoepfe))
+            # Ganz rechts in der Zeile von Gemacht · Notiz · Variante: ob ▶ in den Fokus wechselt
+            # (Ben, 8.11.2026 — derselbe Schalter wie in den Einstellungen, P145)
+            rechts = [fokus_schalter()] if uhr.zeile is not None else []
+            inhalt.append(
+                ft.Row(
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                    controls=[
+                        ft.Row(wrap=True, spacing=8, run_spacing=6, controls=knoepfe, expand=True),
+                        *rechts,
+                    ],
+                )
+            )
             # Wiederholungen zählen (Ben, 4.11.2026): direkt unter der Zeile der Uhr. Zeigt
             # die Karte die laufende Uhr und zählt der Sensor in ihrer Einheit, steht die Zahl
             # dort — die Zählzeile wiederholt sie nicht
@@ -2296,102 +2350,21 @@ def plan_view(
         return u.name if u is not None else "(Übung nicht mehr vorhanden)"
 
     def navigation_zeile(index: int) -> ft.Control:
-        """‹ vorige · k/n · nächste › — die Pfeile heißen wie die Nachbarn (Ben, 7.11.2026:
-        „Der Übungsname wird in der Übung an sich angezeigt“); nach einer erledigten Übung
-        ist der nächste Pfeil betont."""
-        n = len(plan.items)
-        vorige = plan.items[index - 1] if index > 0 else None
-        naechste = plan.items[index + 1] if index < n - 1 else None
-        betont = plan.items[index].id in fertig_ids and naechste is not None
-        links: ft.Control = (
-            ft.TextButton(
-                content=ft.Row(
-                    tight=True,
-                    spacing=2,
-                    controls=[
-                        ft.Icon(ft.Icons.CHEVRON_LEFT, size=22),
-                        ft.Text(
-                            name_von(vorige),
-                            size=13,
-                            max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                    ],
-                ),
-                tooltip="Vorige Übung",
-                on_click=wechsler(vorige.id),
-            )
-            if vorige is not None
-            else ft.Container()
-        )
-        rechts: ft.Control = (
-            ft.FilledTonalButton(
-                content=ft.Row(
-                    tight=True,
-                    spacing=2,
-                    controls=[
-                        ft.Text(
-                            name_von(naechste),
-                            size=13,
-                            max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                        ft.Icon(ft.Icons.CHEVRON_RIGHT, size=22),
-                    ],
-                ),
-                tooltip="Nächste Übung",
-                on_click=wechsler(naechste.id),
-            )
-            if naechste is not None and betont
-            else ft.TextButton(
-                content=ft.Row(
-                    tight=True,
-                    spacing=2,
-                    controls=[
-                        ft.Text(
-                            name_von(naechste),
-                            size=13,
-                            max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                        ft.Icon(ft.Icons.CHEVRON_RIGHT, size=22),
-                    ],
-                ),
-                tooltip="Nächste Übung",
-                on_click=wechsler(naechste.id),
-            )
-            if naechste is not None
-            else ft.Container()
-        )
-        # In der Mitte „2/6 ▾“ — der Tipp öffnet den Gesamtplan (Ben, 7.11.2026: „1 von 6 in
-        # die Mitte der links/rechts-Buttons … 2/6, das müsste reichen“)
-        mitte = ft.TextButton(
-            content=ft.Row(
-                tight=True,
-                spacing=2,
-                controls=[
-                    ft.Text(f"{index + 1}/{n}", size=13, weight=ft.FontWeight.W_600),
-                    ft.Icon(ft.Icons.EXPAND_MORE, size=16, opacity=0.7),
-                ],
-            ),
-            tooltip="Gesamtplan",
-            on_click=gesamtplan_zeigen,
-        )
-        return ft.Row(
-            spacing=0,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Container(content=links, expand=True, alignment=ft.Alignment.CENTER_LEFT),
-                mitte,
-                ft.Container(content=rechts, expand=True, alignment=ft.Alignment.CENTER_RIGHT),
-            ],
+        """‹ vorige · k/n · nächste › (`components/planpfeile.py`) — nach einer erledigten
+        Übung ist der nächste Pfeil betont."""
+        naechste_da = index < len(plan.items) - 1
+        return pfeilzeile(
+            plan.items,
+            index,
+            name_von=name_von,
+            betont=plan.items[index].id in fertig_ids and naechste_da,
+            wechsler=lambda it: wechsler(it.id),
+            gesamtplan=gesamtplan_zeigen,
         )
 
     # Die Pfeile stehen fest über der Liste (Ben, 8.11.2026: „Die Pfeile links-rechts scrollen
     # mit, so dass man von überall aus durch die Übungen kommt“) — nur der Block scrollt
-    pfeile_halter = ft.Container(
-        data="pfeile", visible=False, padding=ft.Padding.only(left=8, right=8, top=4)
-    )
+    pfeile_halter = pfeile_platz()
 
     def pfeile_auffrischen() -> None:
         """Die feste Pfeilzeile zur gezeigten Übung — neu bei jedem Wechsel und Eintrag (der

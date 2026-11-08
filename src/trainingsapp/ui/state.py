@@ -705,9 +705,11 @@ class AppState:
         self.einstellungen.setzen(SettingRepo.HRV_ANSICHTEN, ansichten_schreiben(rest))
 
     def fokus_auto(self) -> bool:
-        """Ob der Fokus (Trainingsansicht) beim Start der Uhr von selbst aufgeht (7.11.2026:
-        „Der Wechsel der Bildfläche ist kein Zwang“ — Vorgabe aus)."""
-        return self.einstellungen.lesen(SettingRepo.FOKUS_AUTO, "0") == "1"
+        """Ob ▶ in den Fokus (Trainingsansicht) wechselt — Vorgabe **an** (Ben, 8.11.2026, P145:
+        „wenn man auf Play klickt kommt automatisch das Fokusfenster“); abschaltbar in den
+        Einstellungen und mit dem Schalter rechts in der Zeile von „Gemacht“ (7.11.2026: „Der
+        Wechsel der Bildfläche ist kein Zwang“)."""
+        return self.einstellungen.lesen(SettingRepo.FOKUS_AUTO, "1") == "1"
 
     def fokus_auto_setzen(self, an: bool) -> None:
         self.einstellungen.setzen(SettingRepo.FOKUS_AUTO, "1" if an else "0")

@@ -266,13 +266,29 @@ def test_lauf_sammelt_zeit_im_zeitfeld_der_uebung(state) -> None:
 
 def test_leiste_zaehlt_fuer_jetzt_und_zeit_antippen(page, state) -> None:
     from trainingsapp.ui.components.uhr import uhr_teile
+    from trainingsapp.ui.components.uhr_blatt import JETZT
     from trainingsapp.ui.components.zeit_stellen import zeit_lesen
 
     uebung = _uebung(state, zeit_zaehlt=False)
     teile = uhr_teile(page, state, uebung=uebung, plan=None, item=None, timer_oeffnen=lambda: None)
-    chip = next(x for x in _alle(teile.zeile) if isinstance(x, ft.Chip))
-    assert chip.selected is False and "zählt nicht" in _texte(chip)  # Vorgabe aus der Übung
-    _klick(chip)
+    # „zählt“ steht seit P148 im Uhr-Blatt (Geltung „Für jetzt“) — nicht mehr in der Zeile
+    assert not any(isinstance(x, ft.Chip) for x in _alle(teile.zeile))
+    menue = next(x for x in _alle(teile.zeile) if isinstance(x, ft.PopupMenuButton))
+    einstellen = next(
+        x
+        for x in menue.items
+        if isinstance(x.content, ft.Text) and x.content.value == "Uhr einstellen …"
+    )
+    _klick(einstellen)
+    blatt = page.dialoge[-1]
+    geltung = next(x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton))
+    geltung.selected = [JETZT]
+    geltung.on_change(SimpleNamespace(control=geltung))
+    schalter = next(x for x in _alle(blatt) if isinstance(x, ft.Switch))
+    assert schalter.value is False  # Vorgabe aus der Übung
+    schalter.value = True
+    schalter.on_change(SimpleNamespace(control=schalter))
+    _klick(next(x for x in _alle(blatt) if isinstance(x, ft.FilledButton)))
     assert state.uhr_zaehlt[uebung.id] is True
     assert state.uebungen.laden(uebung.id).zeit_zaehlt is False
     zeit = next(

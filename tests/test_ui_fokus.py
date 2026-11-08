@@ -111,7 +111,12 @@ async def test_fokus_chips_hf_und_bildfolge_im_takt(umgebung) -> None:
     await _sekunden(state, uhr, gurt, 3)
     fokus = uebung_timer_view(seite, state, basis, u)
     assert fokus.appbar.title.value == "Fokus · Kniebeuge"
-    chips = [c for c in _alle(fokus) if isinstance(c, ft.Chip)]
+    # Ohne den Chip „zählt“ im Kopf (P148) — der ist Anzeige, keine Ebene
+    chips = [
+        c
+        for c in _alle(fokus)
+        if isinstance(c, ft.Chip) and c.label.value not in ("zählt", "zählt nicht")
+    ]
     assert [c.label.value for c in chips[:4]] == ["Takt", "Bewegung", "HF", "Kurve"]
     assert all(c.selected for c in chips[:4])
     # Die Kurven-Einblendung (Ben: „HF, RR, RMSSD, SDNN, Atemfrequenz, RSA“): Reihen als
@@ -212,17 +217,17 @@ def test_fokus_knopf_an_der_laufenden_uhr_und_einstellung(tmp_path, monkeypatch)
             isinstance(x, ft.IconButton) and x.icon == ft.Icons.OPEN_IN_FULL
             for x in _alle(_laufend(page, state, e))
         )
-        # Die Einstellung: Vorgabe aus, der Schalter stellt sie
-        assert state.fokus_auto() is False
+        # Die Einstellung: Vorgabe an (P145, 8.11.2026), der Schalter stellt sie
+        assert state.fokus_auto() is True
         ansicht = einstellungen(page, state, SimpleNamespace())
         schalter = next(
             x
             for x in _alle(ansicht)
-            if isinstance(x, ft.Switch) and x.label == "Fokus beim Start der Uhr öffnen"
+            if isinstance(x, ft.Switch) and x.label == "▶ öffnet den Fokus"
         )
-        assert schalter.value is False
-        schalter.value = True
+        assert schalter.value is True
+        schalter.value = False
         schalter.on_change(SimpleNamespace(control=schalter))
-        assert state.fokus_auto() is True
+        assert state.fokus_auto() is False
     finally:
         state.schliessen()

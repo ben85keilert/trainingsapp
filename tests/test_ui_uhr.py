@@ -83,7 +83,8 @@ def _uhr_menue(c):
     return next(
         x
         for x in _alle(c)
-        if isinstance(x, ft.PopupMenuButton) and x.tooltip == "Stoppuhr oder Timer wählen"
+        if isinstance(x, ft.PopupMenuButton)
+        and x.tooltip == "Uhr wählen — Stoppuhr, Timer oder ohne Uhr"
     )
 
 
@@ -179,16 +180,17 @@ async def test_ohne_haltezeit_zaehlt_die_uhr_als_zeit(umgebung) -> None:
     assert [f.label for f in eintrag.spec_snapshot.fields] == ["Zeit"]
 
 
-def test_uhr_aus_keine_uhr_in_der_uebung(umgebung) -> None:
+def test_uhr_aus_heisst_ohne_uhr(umgebung) -> None:
+    """P146 (Ben, 8.11.2026): „Uhr aus“ heißt „Ohne Uhr“ — die Zeile bleibt schmal stehen,
+    ▶ öffnet nur den Fokus, nichts startet eine Zeit."""
     state, _, _ = umgebung
     uebung = _wandsitz(state, uhr=False)
-    texte = _texte(_ansicht(state, uebung))
-    assert "Stoppuhr" not in texte
-    assert not [
-        x
-        for x in _alle(_ansicht(state, uebung))
-        if isinstance(x, ft.IconButton) and "starten" in (x.tooltip or "")
+    ansicht = _ansicht(state, uebung)
+    assert "Ohne Uhr" in _texte(ansicht)
+    (play,) = [
+        x for x in _alle(ansicht) if isinstance(x, ft.IconButton) and x.icon == ft.Icons.PLAY_ARROW
     ]
+    assert play.tooltip == "Fokus öffnen — ohne Uhr"
 
 
 def test_die_wahl_im_menue_aendert_keine_einstellung(umgebung) -> None:
@@ -215,7 +217,8 @@ async def test_stoppuhr_im_timer_menue(umgebung) -> None:
     state, _, _ = umgebung
     ansicht = timer_view(Seite(), state, "/")
     reiter = next(x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton))
-    assert [s.value for s in reiter.segments] == ["stoppuhr", "einmal", "profile"]
+    # Der vierte Reiter „Alle“ öffnet die Übersicht aller Timer (8.11.2026)
+    assert [s.value for s in reiter.segments] == ["stoppuhr", "einmal", "profile", "alle"]
     assert reiter.selected == ["stoppuhr"] and state.timer_profil().ist_stoppuhr
     texte = _texte(ansicht)
     assert "zählt vorwärts, bis du „Fertig“ tippst" in texte and "SO ZÄHLT SIE" in [

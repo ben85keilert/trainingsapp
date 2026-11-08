@@ -174,3 +174,37 @@ Kern), Doku und Gerätetest-Eintrag.
   *Vorschlag: erst nur Ausprägungen.*
 - **P150** Eingaben im Fokus: erst mit „Fertig“ gespeichert oder sofort in den offenen
   Eintrag? *Vorschlag: mit „Fertig“; Abbrechen verwirft, „Läufe heute“ holt nach.*
+
+## 9. Stand: gebaut (8.11.2026 spät, 0.3.68)
+
+Ben: „Vorschläge passen alle, bau das alles“ — P145–P150 wie vorgeschlagen, dazu **ein
+Schalter rechts in der Zeile von „Gemacht“ · Notiz · Variante**, ob ▶ in den Fokus wechselt
+(derselbe wie Einstellungen → „▶ öffnet den Fokus“, Vorgabe an).
+
+- **U1** `components/fokus_eintragen.py`: `EintragenKarte` im Fokus des Übungs-Timers (einmal
+  gebaut, `nachziehen` je Tick), dieselben Bausteine (`karte`, `auspraegung_zeilen`,
+  `wdh_zeile`) im Workout. Eingaben als ``person/wdh`` · ``person/skala`` ·
+  ``person/auspraegung`` (flach, `core.einheit.AUSFUEHRUNG_SCHLUESSEL`); welchem Satz sie
+  gehören, sagt `core.timer_eintrag.stelle` (in einer Pause der Satz davor). Die Pfeilzeile ist
+  `components/planpfeile.py` — im Plan und im Fokus vorher/nachher (`ersetzen_bei`).
+- **U2** `components/uhr.py`: Zeile `Uhr ▾ · Zeit · Takt · ▶`; Menü mit „Ohne Uhr — nur
+  Fokus“ (`core.timer.ohne_uhr`, ID ``ohne-uhr``: eine Stoppuhr, die nicht zählt), „Uhr
+  einstellen …“, „Fokus öffnen, ohne zu starten“, „Bereitstellen“. „Uhr aus“ = „Ohne Uhr“,
+  die Zeile steht immer (P146). Der Fokus blendet bei „Ohne Uhr“ Zeit und Pause aus.
+- **U3** `components/uhr_blatt.py` vom ⏱ am Block, aus dem Menü und aus dem Fokus (⚙); „Im
+  Plan einstellen“ hat „Neuer Timer — nur hier“ (speichert erst, dann der Editor). Der
+  Uhrenplan behält seinen Dialog (`components/timer_wahl.py`) — dort ist „Abschnitte nur hier
+  ändern“ schon der neue Timer.
+- **U4** `Abschnitt.ausfuehrung` (Profil-JSON und Paketfeld), `timer/abschnitt` trägt sie
+  flach, `core.timer_eintrag.nach_ausfuehrung`/`ausfuehrung_bei`/`Eingaben`; eingetragen je
+  Ausführung beim Üben (`ui.uebung_lauf._eintragen`) **und im Workout**
+  (`ui.plan_ablauf.nach_der_uebung`). Der Editor zeigt die Zeile „Ausführung“ nur am Timer
+  einer Übung bzw. Planübung (`Profilziel.spec`), mit Vorschau. Grenze: nur die Schlüssel der
+  Zeitleiste (``variant``, ``weight``, ``angle``, ``side``) — Mehrfachfelder (``weight_2``)
+  nicht. Satz-Notizen in der Messung gibt es bei Ausführung je Runde nicht (nur ohne).
+- **U5** `views/alle_timer.py` (Route ``…/timer/alle``, Reiter „Alle“ auf der Timer-Seite,
+  Einstellungen → „Alle Timer“), `core.uebung_timer.alle_timer`/`TimerOrt`.
+
+Tests: `tests/test_ui_uhr_fokus.py`, `tests/test_uebung_lauf.py`
+(`test_ausfuehrung_je_runde_traegt_je_ausfuehrung_ein`), Doctests im Kern. Gerätetest T101.
+

@@ -197,10 +197,14 @@ async def test_uhr_neben_dem_i_im_plan(umgebung) -> None:
             for x in _alle(ansicht)
             if isinstance(x, ft.IconButton) and x.icon in (ft.Icons.TIMER, ft.Icons.TIMER_OUTLINED)
         ]
-        tipps += [u.tooltip for u in uhren]
+        tipps += [(u.icon, u.tooltip) for u in uhren]
         if item is gespeichert.items[0]:
             assert any("Timer: Halten 3 × 10 s" in t for t in _texte(ansicht))
-    assert tipps == ["Timer dieser Übung", "Timer festlegen"]
+    # Das ⏱ öffnet das Uhr-Blatt (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §4)
+    assert tipps == [
+        (ft.Icons.TIMER, "Uhr einstellen"),
+        (ft.Icons.TIMER_OUTLINED, "Uhr einstellen"),
+    ]
 
 
 async def test_editor_baut_eine_folge_mit_zaehlt(umgebung) -> None:

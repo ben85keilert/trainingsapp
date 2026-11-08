@@ -44,7 +44,7 @@ from trainingsapp.core import bedingung as bd
 from trainingsapp.core import varianten as var
 from trainingsapp.core import zaehlen as zl
 from trainingsapp.core.bedingung import Bedingung
-from trainingsapp.core.models import Exercise, Plan, PlanItem
+from trainingsapp.core.models import Exercise, Plan, PlanItem, new_id
 from trainingsapp.core.parameter import chips_sortiert
 from trainingsapp.core.result_spec import (
     FieldSpec,
@@ -72,7 +72,7 @@ from trainingsapp.core.standards import (
     ziel_von,
 )
 from trainingsapp.core.takt import AUS, Takt
-from trainingsapp.core.timer import TimerProfil
+from trainingsapp.core.timer import Abschnitt, TimerProfil
 from trainingsapp.core.uebung_timer import TimerWahl, timer_fuer
 from trainingsapp.core.zaehlen import VORLAGE_AUTO, VORLAGEN_ANGEBOT, SensorWahl, vorlagen_angebot
 from trainingsapp.ui.components.bedingung_form import bedingung_karte as bedingungs_karte
@@ -713,10 +713,21 @@ def plan_einstellen(
                     schild(eigen_timer, timer_zurueck if eigen_timer else None),
                 ],
             ),
-            ft.TextButton(
-                "Anderen Timer nur hier …",
-                icon=ft.Icons.TIMER_OUTLINED,
-                on_click=timer_waehlen_dialog,
+            ft.Row(
+                wrap=True,
+                spacing=4,
+                controls=[
+                    ft.TextButton(
+                        "Anderen Timer nur hier …",
+                        icon=ft.Icons.TIMER_OUTLINED,
+                        on_click=timer_waehlen_dialog,
+                    ),
+                    # Ben, 8.11.2026 (`docs/plan_uhr_fokus.md` §4): „Timer hinzufügen geht in
+                    # der Übung im Plan nicht wirklich. Das muss schnell möglich sein“
+                    ft.TextButton(
+                        "Neuer Timer — nur hier", icon=ft.Icons.ADD, on_click=neuer_timer_hier
+                    ),
+                ],
             ),
             takt_teil(),
             zaehlt_teil(),
@@ -914,6 +925,17 @@ def plan_einstellen(
 
     async def abbrechen() -> None:
         await zurueckgehen()
+
+    async def neuer_timer_hier() -> None:
+        """„Neuer Timer — nur hier“: eine eigene Kopie für diese Planübung anlegen, das Formular
+        speichern (die Ansichten werden beim Wechsel neu gebaut) und gleich in den Editor."""
+        neu = TimerProfil(
+            id=new_id(), name="", abschnitte=[Abschnitt("Belastung", 30), Abschnitt("Pause", 15)]
+        )
+        wahl.profil_id, wahl.eigen = "", neu
+        if sichern() is None:
+            ziel = f"{basis}/ziel/{item.id}/timer/uebung/{uebung.id}/{item.id}"
+            await page.push_route(f"{ziel}/bearbeiten/{neu.id}")
 
     async def uebung_ansehen() -> None:
         if sichern() is None:

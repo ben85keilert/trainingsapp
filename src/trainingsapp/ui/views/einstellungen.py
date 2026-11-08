@@ -324,14 +324,15 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 "bearbeiten → Uhr: Uhr an/aus, „zählt“, „Zählt als“)."
                             ),
                             ft.Switch(
-                                label="Fokus beim Start der Uhr öffnen",
+                                label="▶ öffnet den Fokus",
                                 value=state.fokus_auto(),
                                 on_change=fokus_auto_setzen,
                             ),
                             hinweis(
                                 "Der Fokus ist die Trainingsansicht zur laufenden Uhr: große "
-                                "Zeit, Takt, Bild der Bewegung, Herzfrequenz. Aus heißt: Die "
-                                "Uhr bleibt in der Übung, „Fokus“ daneben öffnet ihn bei Bedarf."
+                                "Zeit, Takt, Bild der Bewegung, Herzfrequenz, Eintragen. Aus "
+                                "heißt: Die Uhr bleibt in der Übung, „Fokus“ daneben öffnet ihn "
+                                "bei Bedarf. Derselbe Schalter steht rechts neben „Gemacht“."
                             ),
                             ft.Switch(
                                 label="Vibration am Phasenwechsel",
@@ -379,6 +380,19 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 ),
                                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
                                 on_click=oeffner("/einstellungen/timer"),
+                                content_padding=ft.Padding.only(left=0, right=0),
+                            ),
+                            # Alle Timer an einem Ort (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §5)
+                            ft.ListTile(
+                                leading=ft.Icon(ft.Icons.APPS),
+                                title=ft.Text("Alle Timer"),
+                                subtitle=ft.Text(
+                                    "Vorlagen, Timer der Übungen und der Pläne — bearbeiten, "
+                                    "kopieren, löschen",
+                                    size=12,
+                                ),
+                                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
+                                on_click=oeffner("/einstellungen/timer/alle"),
                                 content_padding=ft.Padding.only(left=0, right=0),
                             ),
                             schnellzeiten_feld,

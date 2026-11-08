@@ -20,12 +20,19 @@ from typing import Any
 
 from trainingsapp.core import zaehlen as zl
 from trainingsapp.core import zaehlen_eintrag as ze
-from trainingsapp.core.einheit import Ereignis
+from trainingsapp.core.einheit import AUSFUEHRUNG_SCHLUESSEL, Ereignis
 from trainingsapp.core.models import Plan, SessionEntry, lokaler_tag
 from trainingsapp.core.plan_durchlauf import schritte_fuer
 from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.standards import mit_plan_spec
-from trainingsapp.core.timer_eintrag import ergebnis, gelaufene_zeiten, ohne_timer
+from trainingsapp.core.timer_eintrag import (
+    ausfuehrung_bei,
+    ergebnis,
+    gelaufene_zeiten,
+    nach_ausfuehrung,
+    ohne_timer,
+)
+from trainingsapp.core.timer_eintrag import eingaben as person_eingaben
 from trainingsapp.core.uebung_timer import mit_zeitfeldern, zeit_werte, zeit_zusammenlegen
 from trainingsapp.devices.base import Verbindung
 from trainingsapp.devices.einheit import Einheitslauf
@@ -171,58 +178,73 @@ def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry
             replace(z, sekunden=z.sekunden + ueber, bis_s=z.bis_s + ueber),
             *zeiten[letzte + 1 :],
         ]
-    if zeiten:
-        werte = ergebnis(zeiten, zeitfeld)
-    else:  # ohne Timer: die Uhr lief von Anfang bis „Gemacht“
-        werte = ohne_timer(ende.t_s - start.t_s, zeitfeld) if zeitfeld else {}
+    schritt = e.ereignisse[nr_start : nr_ende + 1]
     # P99 Teil 2: was der Sensor (oder der Takt) in diesem Schritt zählte — die Sätze des
     # Zähl-Teils ab dem Start der Übung (nach `>`: die letzten Zeilen des vorigen Schritts
     # liegen genau auf seinem Ende = diesem Start); im Feld, in das die Planübung zählt
     feld = zl.zaehlt_in(uebung, item)
-    if feld is not None:
-        wdh = ze.wiederholungen(
-            [x for x in e.ereignisse[nr_start : nr_ende + 1] if x.t_s > start.t_s], feld
-        )
-        if wdh:
-            werte[feld] = wdh
-    # Wiederholungen von Hand (``person/wdh``, 8.11.2026 abends): wo niemand zählte, die letzte
-    # Angabe der Person im Schritt — in ihr Feld, sonst ins erste Wiederholungsfeld der Übung
-    for x in reversed(e.ereignisse[nr_start : nr_ende + 1]):
-        if (x.quelle, x.art) == ("person", "wdh") and x.daten.get("planuebung") == item_id:
-            ziel_feld = str(x.daten.get("feld") or "") or wdh_feld(uebung)
-            if ziel_feld and ziel_feld not in werte and x.daten.get("wert") is not None:
-                werte[ziel_feld] = [x.daten["wert"]]
-            break
-    # Die Selbsteinschätzung des Schritts (Bedingung „Skala“, 8.11.2026): die letzte Wahl in
-    # das Skalenfeld der Übung
-    for x in reversed(e.ereignisse[nr_start : nr_ende + 1]):
-        if (x.quelle, x.art) == ("person", "skala") and x.daten.get("planuebung") == item_id:
-            if x.daten.get("feld") and x.daten.get("wert") is not None:
-                werte[str(x.daten["feld"])] = x.daten["wert"]
-            break
-    werte = zeit_zusammenlegen(uebung, {**ausfuehrung(uebung, gewaehlt), **werte})
-    uebung = mit_zeitfeldern(uebung, werte)
+    gezaehlt = [x for x in schritt if x.t_s > start.t_s]
+    sensor = ze.wiederholungen(gezaehlt, feld) if feld is not None else []
+    sensor_t = ze.satz_zeiten(gezaehlt, feld) if feld is not None else []
+    # Was die Person im Schritt eintrug (Karte „Eintragen“ bzw. Wdh. von Hand, Skala) — nur
+    # die Angaben zu dieser Planübung
+    eigene = [x for x in schritt if x.quelle != "person" or x.daten.get("planuebung") == item_id]
+    eingaben = person_eingaben(eigene, zeiten)
+    # Je Ausführung ein Eintrag (`docs/plan_uhr_fokus.md` §3): Tragen die Runden des Timers
+    # eine, kommt jede in ihren eigenen Eintrag — sonst einer wie bisher
+    gruppen = nach_ausfuehrung(zeiten) if zeiten else [({}, [])]
+    getrennt = any(a for a, _ in gruppen)
     anker = e.zeitbasis.anker_utc
     beginn = anker + timedelta(seconds=start.t_s)
     sitzung = state.sitzungen.session_fuer(
         e.subject_id or state.profil.id, str(d.get("plan") or "") or None, lokaler_tag(beginn)
     )
-    eintrag: SessionEntry = state.sitzungen.eintrag_anlegen(
-        sitzung,
-        uebung,
-        werte,
-        started_at=beginn,
-        ended_at=anker + timedelta(seconds=ende.t_s),
-    )
-    daten: dict[str, Any] = {
-        "eintrag": eintrag.id,
-        "planuebung": item_id,
-        "werte": zeit_werte(uebung, werte),
-    }
-    if zeitfeld:
-        daten["zeitfeld"] = zeitfeld
-    e.nachtragen(Ereignis(ende.t_s, "person", "eintrag", uebung.name, daten))
-    return eintrag
+    erster: SessionEntry | None = None
+    for gruppe, gruppen_zeiten in gruppen:
+        if gruppen_zeiten:
+            werte = ergebnis(gruppen_zeiten, zeitfeld)
+        else:  # ohne Timer: die Uhr lief von Anfang bis „Gemacht“
+            werte = ohne_timer(ende.t_s - start.t_s, zeitfeld) if zeitfeld else {}
+        wdh = (
+            [
+                w
+                for w, t in zip(sensor, sensor_t, strict=False)
+                if ausfuehrung_bei(zeiten, t) == gruppe
+            ]
+            if getrennt
+            else list(sensor)
+        )
+        if wdh and feld is not None:
+            werte[feld] = wdh
+        # Von Hand (``person/wdh``, Skala): wo niemand zählte — ohne eigenes Feld ins erste
+        # Wiederholungsfeld der Übung
+        for k, v in eingaben.werte(zeiten, gruppe if getrennt else None).items():
+            ziel_feld = k or wdh_feld(uebung)
+            if ziel_feld and ziel_feld not in werte:
+                werte[ziel_feld] = v
+        aus = {**gewaehlt, **gruppe}
+        werte = zeit_zusammenlegen(uebung, {**ausfuehrung(uebung, aus), **werte})
+        u = mit_zeitfeldern(uebung, werte)
+        von_s = min((z.von_s for z in gruppen_zeiten), default=start.t_s) if getrennt else start.t_s
+        bis_s = max((z.bis_s for z in gruppen_zeiten), default=ende.t_s) if getrennt else ende.t_s
+        eintrag: SessionEntry = state.sitzungen.eintrag_anlegen(
+            sitzung,
+            u,
+            werte,
+            started_at=anker + timedelta(seconds=von_s),
+            ended_at=anker + timedelta(seconds=bis_s),
+        )
+        erster = erster or eintrag
+        daten: dict[str, Any] = {
+            "eintrag": eintrag.id,
+            "planuebung": item_id,
+            "werte": zeit_werte(u, werte),
+            **{k: v for k, v in gruppe.items() if k in AUSFUEHRUNG_SCHLUESSEL},
+        }
+        if zeitfeld:
+            daten["zeitfeld"] = zeitfeld
+        e.nachtragen(Ereignis(ende.t_s, "person", "eintrag", u.name, daten))
+    return erster
 
 
 def ergebnis_der_einheit(state: Any, einheit_id: str) -> dict[str, tuple[str, list[float]]] | None:

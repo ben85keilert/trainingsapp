@@ -61,7 +61,7 @@ import math
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Any, Final
 
 from hrv_core.ausschnitte import FARBEN
@@ -80,6 +80,9 @@ STOPPUHR: Final[str] = "stoppuhr"
 STOPPUHR_MAX_S: Final[int] = 12 * 3600
 #: Der Einmal-Timer (Ben, 19.10.2026): ID des eingebauten Profils, das rückwärts zählt
 EINMAL: Final[str] = "einmal"
+#: „Ohne Uhr — nur Fokus“ (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §2, P146): eine Stoppuhr,
+#: die nicht zählt und im Fokus nicht steht — Marken, „Läufe heute“ und Pfeile bleiben gleich
+OHNE_UHR: Final[str] = "ohne-uhr"
 #: Vorgabe des Einmal-Timers (s)
 EINMAL_DAUER_S: Final[int] = 5 * 60
 #: Dauern zur schnellen Wahl im Einmal-Timer (s)
@@ -176,13 +179,20 @@ class Abschnitt:
     #: Ein Takt für diesen Abschnitt (`docs/plan_taktgeber.md`): Phasen, die hier laufen —
     #: überschreibt die Vorgabe der Übung; ``None`` = wie die Übung
     takt: Takt | None = None
+    #: Die Ausführung dieser Runde (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §3): Ausprägungen
+    #: der Übung — Variante, Gewicht, Winkel, Seite — als Feld → Wert; leer = wie im Block
+    #: gewählt. Eingetragen wird je Ausführung ein Eintrag (`core.timer_eintrag`).
+    ausfuehrung: dict[str, Any] = field(default_factory=dict)
 
     def als_dict(self) -> dict[str, Any]:
-        """Klang, „zählt nicht“ und Takt nur, wenn gesetzt — ältere Profile bleiben gleich.
+        """Klang, „zählt nicht“, Takt und Ausführung nur, wenn gesetzt — ältere Profile bleiben
+        gleich.
 
         >>> from trainingsapp.core.takt import Phase
         >>> Abschnitt("Atmen", 180, takt=Takt((Phase("ein", 4, "ein"),))).als_dict()["takt"]
         {'name': '', 'phasen': [{'name': 'ein', 'dauer_s': 4.0, 'art': 'ein'}]}
+        >>> Abschnitt("Links", 60, ausfuehrung={"variant": "links"}).als_dict()
+        {'name': 'Links', 'dauer_s': 60, 'ausfuehrung': {'variant': 'links'}}
         """
         d: dict[str, Any] = {"name": self.name, "dauer_s": self.dauer_s}
         if self.klang:
@@ -191,6 +201,8 @@ class Abschnitt:
             d["zaehlt"] = False
         if self.takt is not None and not self.takt.leer:
             d["takt"] = self.takt.als_dict()
+        if self.ausfuehrung:
+            d["ausfuehrung"] = dict(self.ausfuehrung)
         return d
 
 
@@ -262,6 +274,11 @@ class TimerProfil:
     @property
     def ist_stoppuhr(self) -> bool:
         return self.art == STOPPUHR
+
+    @property
+    def ohne_uhr(self) -> bool:
+        """„Ohne Uhr — nur Fokus“ (`ohne_uhr`): keine Zeit, nur Fokus und Eintragen."""
+        return self.id == OHNE_UHR
 
     @property
     def ist_einmal(self) -> bool:
@@ -387,6 +404,8 @@ class TimerProfil:
             return None
         in_marken = d.get("name_in_marken") is not False
         if d.get("art") == STOPPUHR:
+            if d.get("id") == OHNE_UHR:  # „Ohne Uhr“ bleibt, was sie ist (P146)
+                return ohne_uhr()
             return stoppuhr(str(d.get("name") or ""), name_in_marken=in_marken)
         abschnitte = _abschnitte_lesen(d.get("abschnitte"))
         if not abschnitte:
@@ -422,6 +441,9 @@ def _abschnitte_lesen(roh: Any) -> list[Abschnitt]:
     'ein'
     >>> _abschnitte_lesen([{"name": "A", "dauer_s": 60, "takt": "kaputt"}])[0].takt is None
     True
+    >>> roh = {"variant": "links", "weight": 10, "kaputt": [1], 3: "x"}
+    >>> _abschnitte_lesen([{"name": "L", "dauer_s": 60, "ausfuehrung": roh}])[0].ausfuehrung
+    {'variant': 'links', 'weight': 10}
     """
     abschnitte: list[Abschnitt] = []
     for a in roh if isinstance(roh, list) else []:
@@ -439,9 +461,28 @@ def _abschnitte_lesen(roh: Any) -> list[Abschnitt]:
                     _klang_lesen(a.get("klang")),
                     zaehlt=a.get("zaehlt") is not False,
                     takt=Takt.aus_dict(a.get("takt")),
+                    ausfuehrung=ausfuehrung_lesen(a.get("ausfuehrung")),
                 )
             )
     return abschnitte
+
+
+def ausfuehrung_lesen(roh: Any) -> dict[str, Any]:
+    """Eine Ausführung aus JSON — Feldnamen als Text, Werte nur Text, Zahl oder Wahrheitswert;
+    alles andere fällt weg, nie eine Ausnahme.
+
+    >>> ausfuehrung_lesen({"variant": "beide", "degrees": 45.0, "x": None, "y": {}})
+    {'variant': 'beide', 'degrees': 45.0}
+    >>> ausfuehrung_lesen("kaputt")
+    {}
+    """
+    if not isinstance(roh, dict):
+        return {}
+    return {
+        k: v
+        for k, v in roh.items()
+        if isinstance(k, str) and k and isinstance(v, str | int | float | bool) and v != ""
+    }
 
 
 def _runden_lesen(roh: Any) -> int:
@@ -484,6 +525,19 @@ def stoppuhr(name: str = "", *, name_in_marken: bool = True) -> TimerProfil:
         art=STOPPUHR,
         name_in_marken=name_in_marken,
     )
+
+
+def ohne_uhr() -> TimerProfil:
+    """„Ohne Uhr — nur Fokus“ (P146): intern eine Stoppuhr, die nicht zählt — ins Tagebuch
+    kommt keine Zeit, der Fokus zeigt keine.
+
+    >>> p = ohne_uhr(); p.ohne_uhr, p.ist_stoppuhr, p.abschnitte[0].zaehlt, p.anzeigename
+    (True, True, False, 'Ohne Uhr')
+    """
+    p = stoppuhr("Ohne Uhr", name_in_marken=False)
+    p.id = OHNE_UHR
+    p.abschnitte = [replace(a, zaehlt=False) for a in p.abschnitte]
+    return p
 
 
 def schnellzeiten_lesen(text: str | None) -> tuple[int, ...]:
@@ -879,6 +933,8 @@ class Marke:
     zaehlt: bool = True
     #: Die geplante Dauer des Abschnitts (s) — 0 bei der Stoppuhr und fürs Ende (P54)
     soll_s: float = 0.0
+    #: Die Ausführung des Abschnitts (`Abschnitt.ausfuehrung`) als Paare — leer = wie gewählt
+    ausfuehrung: tuple[tuple[str, Any], ...] = ()
 
 
 def name_aus_notiz(text: str) -> str:
@@ -1291,6 +1347,7 @@ class TimerLauf:
                     von=von,
                     zaehlt=a.zaehlt if a is not None else True,
                     soll_s=float(a.dauer_s) if a is not None and not self.vorwaerts else 0.0,
+                    ausfuehrung=tuple(a.ausfuehrung.items()) if a is not None else (),
                 )
             )
         return marken

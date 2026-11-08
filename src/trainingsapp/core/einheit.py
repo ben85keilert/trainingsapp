@@ -100,8 +100,12 @@ ARTEN: frozenset[str] = frozenset(
         "frage",
         "antwort",
         # Wiederholungen von Hand in einem Workout-Schritt (``person/wdh``, 8.11.2026 abends):
-        # wo niemand zählt, trägt die Person sie ein — für die Bedingung und den Eintrag
+        # wo niemand zählt, trägt die Person sie ein — für die Bedingung und den Eintrag; seit
+        # der Karte „Eintragen“ im Fokus auch beim Üben (`docs/plan_uhr_fokus.md` §1)
         "wdh",
+        # Die im Fokus gewählten Ausprägungen (``person/auspraegung``, ``werte`` = Feld → Wert,
+        # 8.11.2026 spät): die letzte Wahl gilt für den Eintrag — nur Zeitleiste
+        "auspraegung",
     }
 )
 

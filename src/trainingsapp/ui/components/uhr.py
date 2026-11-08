@@ -42,14 +42,13 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
-from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.takt import Takt
-from trainingsapp.core.timer import TimerProfil, dauer_text, einmal_timer, stoppuhr
+from trainingsapp.core.timer import TimerProfil, dauer_text, einmal_timer, ohne_uhr, stoppuhr
 from trainingsapp.core.uebung_timer import (
     profile_zur_wahl,
     takt_der_uebung,
     timer_fuer,
-    zaehlt_als,
+    uhr_an,
     zeit_zaehlt_fuer,
 )
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein, UebungKontext
@@ -87,7 +86,8 @@ def angebot(
     profile = profile_zur_wahl(uebung, plan, item, mit_stoppuhr=True)
     if einmal_s:
         profile.insert(1, einmal_timer(einmal_s))
-    return profile
+    # „Ohne Uhr — nur Fokus“ als letzte Wahl (Ben, 8.11.2026, P146)
+    return [*profile, ohne_uhr()]
 
 
 def gesetzt(state: Any, uebung: Exercise, plan: Plan | None, item: PlanItem | None) -> TimerProfil:
@@ -100,6 +100,9 @@ def gesetzt(state: Any, uebung: Exercise, plan: Plan | None, item: PlanItem | No
         treffer = next((p for p in auswahl if p.id == gewaehlt), None)
         if treffer is not None:
             return treffer
+    # „Uhr aus“ an Übung bzw. Planübung heißt „Ohne Uhr“ (P146): ▶ öffnet nur den Fokus
+    if not uhr_an(uebung, item):
+        return ohne_uhr()
     return timer_fuer(uebung, plan, item) or stoppuhr()
 
 
@@ -122,6 +125,7 @@ def uhr_teile(
     plan: Plan | None,
     item: PlanItem | None,
     timer_oeffnen: Callable[[], object],
+    basis: str = "",
 ) -> UhrTeile:
     """Knöpfe und Zeile der Uhr für eine Übung — ``plan``/``item`` ``None`` ohne Plan.
 
@@ -140,13 +144,13 @@ def uhr_teile(
         with contextlib.suppress(Exception):
             page.show_dialog(ft.SnackBar(ft.Text(text)))
 
-    def kontext() -> UebungKontext:
+    def kontext(profil: TimerProfil | None = None) -> UebungKontext:
         wahl = uebung_lauf.gewaehlte_ausfuehrung(state, uebung, item)
-        return uebung_lauf.kontext_fuer(uebung, plan, item, zeit_eintragen=zaehlt, auspraegung=wahl)
-
-    def zaehlt_umschalten() -> None:
-        state.uhr_zaehlt[key] = not zaehlt
-        state.neu_zeichnen()
+        # „Ohne Uhr“: keine Zeit ins Tagebuch (P146)
+        eintragen = zaehlt and not (profil is not None and profil.ohne_uhr)
+        return uebung_lauf.kontext_fuer(
+            uebung, plan, item, zeit_eintragen=eintragen, auspraegung=wahl
+        )
 
     def takt_an_den_lauf(e: Einheitslauf) -> None:
         """Takt für jetzt, Vorgabe der Übung und Tempo an den Timer der Einheit (Taktgeber) —
@@ -175,27 +179,11 @@ def uhr_teile(
         item=item,
     )
 
-    als = (
-        "Haltezeit"
-        if basis_key(zaehlt_als(uebung_lauf.felder_der_uebung(uebung, item), uebung)) == "hold"
-        else "Zeit"
-    )
-    zaehlt_knopf = ft.Chip(
-        label=ft.Text("zählt" if zaehlt else "zählt nicht", size=12),
-        selected=zaehlt,
-        # Ohne Haken: Das Wort sagt es, und in der Karte „Eintragen“ ist die Zeile schmal
-        show_checkmark=False,
-        tooltip=f"Timerzeit zählt als {als} im offenen Eintrag — gilt für jetzt"
-        if zaehlt
-        else "Timerzeit zählt nicht — nur „gemacht“; gilt für jetzt",
-        on_select=zaehlt_umschalten,
-    )
-
     def starten(profil: TimerProfil) -> Callable[[], None]:
         def handler() -> None:
             state.uhr_wahl[schluessel(uebung, item)] = profil.id  # zuletzt gestartet
             try:
-                lauf = uebung_lauf.starten(page, state, kontext(), _kopie(profil))
+                lauf = uebung_lauf.starten(page, state, kontext(profil), _kopie(profil))
             except RuntimeError as fehler:
                 melden(str(fehler))
                 return
@@ -224,7 +212,7 @@ def uhr_teile(
     def bereitstellen(profil: TimerProfil) -> Callable[[], None]:
         def handler() -> None:
             try:
-                lauf = uebung_lauf.bereitstellen(page, state, kontext(), _kopie(profil))
+                lauf = uebung_lauf.bereitstellen(page, state, kontext(profil), _kopie(profil))
             except RuntimeError as fehler:
                 melden(str(fehler))
                 return
@@ -255,21 +243,42 @@ def uhr_teile(
 
         return handler
 
+    def blatt_oeffnen() -> None:
+        """„Uhr einstellen …“ — das Uhr-Blatt mit Geltung (§4, Skizze F3)."""
+        from trainingsapp.ui.components.uhr_blatt import uhr_blatt
+
+        page.show_dialog(uhr_blatt(page, state, uebung=uebung, plan=plan, item=item, basis=basis))
+
+    def menue_eintrag(p: TimerProfil) -> ft.PopupMenuItem:
+        titel = "Ohne Uhr — nur Fokus" if p.ohne_uhr else p.anzeigename
+        unter = "Kurven, Takt, Eintragen · keine Zeit" if p.ohne_uhr else p.kurztext()
+        return ft.PopupMenuItem(
+            icon=_symbol(p),
+            checked=p.id == profil.id,
+            content=ft.Column(
+                spacing=0,
+                tight=True,
+                controls=[
+                    ft.Text(titel, weight=ft.FontWeight.W_600),
+                    ft.Text(unter, size=12, opacity=0.7),
+                ],
+            ),
+            on_click=waehlen(p),
+        )
+
     menue = ft.PopupMenuButton(
-        tooltip="Stoppuhr oder Timer wählen",
+        tooltip="Uhr wählen — Stoppuhr, Timer oder ohne Uhr",
         content=ft.Container(
             padding=ft.Padding.only(left=10, right=6, top=6, bottom=6),
             border_radius=20,
             border=ft.Border.all(1, ft.Colors.OUTLINE),
-            # Der Name kürzt sich mit „…“, der Pfeil bleibt — das Menü füllt den Platz
-            # links der Zeit, dann liest es sich wie ein Auswahlfeld. Ohne Symbol davor
-            # (Skizze A1: „Stoppuhr ▾“): in der Karte „Eintragen“ ist die Zeile schmaler,
-            # das Symbol steht in den Menüpunkten und an der laufenden Anzeige
+            # Der Name kürzt sich mit „…“, der Pfeil bleibt — das Menü füllt den Platz links
+            # der Zeit; seit „zählt“ und ⧗ ins Blatt bzw. Menü zogen (P148), passt er
             content=ft.Row(
                 spacing=6,
                 controls=[
                     ft.Text(
-                        profil.anzeigename,
+                        "Ohne Uhr" if profil.ohne_uhr else profil.anzeigename,
                         weight=ft.FontWeight.W_600,
                         max_lines=1,
                         overflow=ft.TextOverflow.ELLIPSIS,
@@ -280,33 +289,26 @@ def uhr_teile(
             ),
         ),
         items=[
-            *(
-                ft.PopupMenuItem(
-                    icon=_symbol(p),
-                    checked=p.id == profil.id,
-                    content=ft.Column(
-                        spacing=0,
-                        tight=True,
-                        controls=[
-                            ft.Text(p.anzeigename, weight=ft.FontWeight.W_600),
-                            ft.Text(p.kurztext(), size=12, opacity=0.7),
-                        ],
-                    ),
-                    on_click=waehlen(p),
-                )
-                for p in angebot(uebung, plan, item, state.uhr_einmal.get(key))
-            ),
+            *(menue_eintrag(p) for p in angebot(uebung, plan, item, state.uhr_einmal.get(key))),
             ft.PopupMenuItem(),  # Trennlinie
             ft.PopupMenuItem(
-                icon=ft.Icons.TUNE,
-                content=ft.Text("Timer der Übung …"),
+                icon=ft.Icons.TUNE, content=ft.Text("Uhr einstellen …"), on_click=blatt_oeffnen
+            ),
+            ft.PopupMenuItem(
+                icon=ft.Icons.CENTER_FOCUS_STRONG,
+                content=ft.Text("Fokus öffnen, ohne zu starten"),
                 on_click=timer_oeffnen,
+            ),
+            ft.PopupMenuItem(
+                icon=ft.Icons.HOURGLASS_TOP,
+                content=ft.Text("Bereitstellen für „Alle starten“"),
+                on_click=bereitstellen(profil),
             ),
         ],
     )
-    zeit = "0:00" if profil.ist_stoppuhr else dauer_text(profil.gesamt_s())
-    # Die Zeile steht in der Karte „Eintragen“ (27.10.2026) — 22 px schmaler als auf dem
-    # Block; enger gesetzt, damit „Stoppuhr ▾“ auf 412 px noch ganz dasteht
+    zeit = (
+        "—" if profil.ohne_uhr else "0:00" if profil.ist_stoppuhr else dauer_text(profil.gesamt_s())
+    )
     zeile = ft.Container(
         padding=ft.Padding.only(left=6, right=4, top=6, bottom=6),
         border_radius=16,
@@ -322,19 +324,15 @@ def uhr_teile(
                     style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=4)),
                     on_click=zeit_stellen,
                 ),
-                zaehlt_knopf,
                 takt_wahl,
                 ft.IconButton(
-                    ft.Icons.HOURGLASS_TOP,
-                    tooltip="Bereitstellen — startet mit „Alle starten“",
-                    icon_size=22,
-                    padding=ft.Padding.all(4),
-                    size_constraints=ft.BoxConstraints(min_width=40, min_height=40),
-                    on_click=bereitstellen(profil),
-                ),
-                ft.IconButton(
                     ft.Icons.PLAY_ARROW,
-                    tooltip=f"{profil.anzeigename} starten",
+                    tooltip=(
+                        "Fokus öffnen — ohne Uhr"
+                        if profil.ohne_uhr
+                        else f"{profil.anzeigename} starten"
+                        + (" — im Fokus" if state.fokus_auto() else "")
+                    ),
                     icon_size=28,
                     padding=ft.Padding.all(6),
                     size_constraints=ft.BoxConstraints(min_width=44, min_height=44),
@@ -540,6 +538,8 @@ def takt_gross(page: Any, state: Any, lauf: Any) -> None:
 
 
 def _symbol(p: TimerProfil) -> ft.IconData:
+    if p.ohne_uhr:
+        return ft.Icons.MONITOR_HEART_OUTLINED
     return ft.Icons.AV_TIMER if p.ist_stoppuhr else ft.Icons.TIMER_OUTLINED
 
 

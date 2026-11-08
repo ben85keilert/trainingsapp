@@ -24,13 +24,14 @@ import flet as ft
 
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core import bedingung as bd
-from trainingsapp.core.einheit import Ereignis
+from trainingsapp.core.einheit import AUSFUEHRUNG_SCHLUESSEL, Ereignis
 from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.plaene import erledigte
 from trainingsapp.core.plan_durchlauf import Schritt, schritte_fuer
 from trainingsapp.core.result_spec import FieldSpec, FieldType
+from trainingsapp.core.standards import mit_plan_spec
 from trainingsapp.core.timer import dauer_text
-from trainingsapp.core.uebung_timer import takt_der_uebung
+from trainingsapp.core.uebung_timer import ausfuehrungsfelder, takt_der_uebung
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.devices.plan_ablauf import (
     FERTIG,
@@ -43,6 +44,7 @@ from trainingsapp.devices.plan_ablauf import (
 )
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import plan_ablauf, uebung_lauf
+from trainingsapp.ui.components import fokus_eintragen as fe
 from trainingsapp.ui.components import links, zaehl_stand
 from trainingsapp.ui.components.ablaufbild import ablaufbild, abspielen
 from trainingsapp.ui.components.fokus import Fokus
@@ -56,6 +58,7 @@ from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import schluessel as uhr_schluessel
 from trainingsapp.ui.plan_ablauf import GRUENDE
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.uebung_lauf import gewaehlte_ausfuehrung
 from trainingsapp.ui.views.timer import timer_knopf
 
 
@@ -641,56 +644,45 @@ def workout_view(
 
             return handler
 
-        chips = sorted({c for c in (ziel, 5, 10, 12, 15, 20) if c})
-        return ft.Container(
-            padding=ft.Padding.symmetric(horizontal=12, vertical=8),
-            border_radius=12,
-            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-            content=ft.Column(
-                spacing=6,
-                controls=[
-                    ft.Text(
-                        "Wiederholungen — niemand zählt, trag sie hier ein",
-                        size=12,
-                        opacity=0.75,
-                    ),
-                    ft.Row(
-                        spacing=4,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        controls=[
-                            ft.IconButton(
-                                ft.Icons.REMOVE, tooltip="Eine weniger", on_click=setzen(wert - 1)
-                            ),
-                            ft.Text(
-                                str(wert),
-                                size=26,
-                                weight=ft.FontWeight.W_600,
-                                width=56,
-                                text_align=ft.TextAlign.CENTER,
-                            ),
-                            ft.IconButton(
-                                ft.Icons.ADD, tooltip="Eine mehr", on_click=setzen(wert + 1)
-                            ),
-                            ft.Row(
-                                wrap=True,
-                                spacing=4,
-                                run_spacing=4,
-                                expand=True,
-                                controls=[
-                                    ft.Chip(
-                                        label=ft.Text(str(c)),
-                                        selected=wert == c,
-                                        show_checkmark=False,
-                                        on_select=setzen(c),
-                                    )
-                                    for c in chips
-                                ],
-                            ),
-                        ],
-                    ),
-                ],
-            ),
-        )
+        return fe.wdh_zeile(wert, ziel, setzen)
+
+    def ausfuehrung_zeilen(
+        e: Einheitslauf, teil: PlanAblaufBaustein, u: Exercise | None
+    ) -> list[ft.Control]:
+        """Die Ausprägungen der Planübung in der Karte „Eintragen“ (`docs/plan_uhr_fokus.md` §1):
+        wie im Block gewählt, hier änderbar — die Wahl gilt für den Eintrag des Schritts
+        (`gewaehlte_ausfuehrung`) und steht als ``person/auspraegung`` in der Zeitleiste."""
+        item = next((x for x in plan.items if x.id == teil.schritt.item_id), None)
+        if u is None or item is None:
+            return []
+        felder = ausfuehrungsfelder(mit_plan_spec(item, u).result_spec)
+        if not felder:
+            return []
+        wahl = gewaehlte_ausfuehrung(state, u, item)
+
+        def setzen(key: str, wert: Any) -> Callable[..., None]:
+            def handler(_e: Any = None) -> None:
+                neu = fe.ausfuehrung_waehlen(state, u, item, key, wert)
+                if e.t0 is not None:
+                    e.nachtragen(
+                        Ereignis(
+                            max(0.0, e.uhr() - e.t0),
+                            "person",
+                            "auspraegung",
+                            f"{teil.schritt.name}: "
+                            + (" · ".join(str(v) for v in neu.values() if v) or "ohne"),
+                            {
+                                "planuebung": item.id,
+                                **{k: neu.get(k) for k in AUSFUEHRUNG_SCHLUESSEL},
+                            },
+                        )
+                    )
+                einheit_ui.melden(state)
+                auffrischen()
+
+            return handler
+
+        return fe.auspraegung_zeilen(felder, wahl, {}, setzen)
 
     def kanten_text(teil: PlanAblaufBaustein, st: ab.KanteStand) -> str:
         k = st.kante
@@ -1113,8 +1105,12 @@ def workout_view(
                 )
             )
             wdh_gefragt = wdh_ziel is not None or plan_ablauf.wdh_feld(u) is not None
+            # Die Karte „Eintragen“ — dieselbe wie im Fokus des Übungs-Timers (§1)
+            eintragen = ausfuehrung_zeilen(e, teil, u)
             if wdh_gefragt and wdh_jetzt(teil) is None:
-                teile.append(wdh_eintrag(e, teil, u, wdh_ziel))
+                eintragen.append(wdh_eintrag(e, teil, u, wdh_ziel))
+            if eintragen:
+                teile.append(fe.karte(*eintragen))
         teile.append(ablauf_schrittliste(teil) if gez else schrittliste(teil))
 
         # -- Knöpfe ------------------------------------------------------------------------

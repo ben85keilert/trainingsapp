@@ -100,6 +100,9 @@ class TimerWahl:
     eigen: TimerProfil | None = None
     #: Die Uhr in dieser Planübung — ``None``: wie die Übung (`uhr_an`)
     uhr: bool | None = None
+    #: „Zeit der Uhr zählt“ in dieser Planübung (P104, 8.11.2026) — ``None``: wie die Übung
+    #: (`zeit_zaehlt_fuer`); hebt D2 („nur für jetzt“) für die Planübung auf
+    zaehlt: bool | None = None
 
     def als_dict(self) -> dict[str, Any]:
         """Nur, was von der Vorgabe abweicht — eine Planübung ohne Wahl bleibt ``{}``."""
@@ -110,6 +113,8 @@ class TimerWahl:
             d["eigen"] = self.eigen.als_dict()
         if self.uhr is not None:
             d["uhr"] = self.uhr
+        if self.zaehlt is not None:
+            d["zaehlt"] = self.zaehlt
         return d
 
     @classmethod
@@ -121,6 +126,7 @@ class TimerWahl:
             profil_id=str(d.get("profil") or ""),
             eigen=TimerProfil.aus_dict(d.get("eigen")) if d.get("eigen") else None,
             uhr=d["uhr"] if isinstance(d.get("uhr"), bool) else None,
+            zaehlt=d["zaehlt"] if isinstance(d.get("zaehlt"), bool) else None,
         )
 
 
@@ -187,6 +193,19 @@ def profile_zur_wahl(
     return eindeutig
 
 
+def zeit_zaehlt_fuer(uebung: Exercise, item: PlanItem | None = None) -> bool:
+    """Zählt die Zeit der Uhr (Vorgabe, bevor die Zeile „für jetzt“ umschaltet)? Planübung
+    (P104) > Übung.
+
+    >>> zeit_zaehlt_fuer(Exercise()), zeit_zaehlt_fuer(Exercise(zeit_zaehlt=False))
+    (True, False)
+    >>> zeit_zaehlt_fuer(Exercise(zeit_zaehlt=False), PlanItem(timer={"zaehlt": True}))
+    True
+    """
+    wahl = TimerWahl.aus_dict(item.timer) if item is not None else TimerWahl()
+    return uebung.zeit_zaehlt if wahl.zaehlt is None else wahl.zaehlt
+
+
 def uhr_an(uebung: Exercise, item: PlanItem | None = None) -> bool:
     """Stehen Stoppuhr und Timer in der Übung bereit? Planübung > Übung (Vorgabe: an).
 
@@ -230,11 +249,19 @@ def zaehlt_als(felder: Sequence[str], uebung: Exercise) -> str:
     return halten[0]
 
 
-def takt_der_uebung(uebung: Exercise | None, item: PlanItem | None = None) -> Takt | None:
+def takt_der_uebung(
+    uebung: Exercise | None, item: PlanItem | None = None, plan: Plan | None = None
+) -> Takt | None:
     """Der Takt, den die Übung vorgibt — in einer Planübung ihrer, wenn sie einen eigenen hat
     (``PlanItem.takt``, A6: die Planübung folgt der Übung, P79; ein leerer Takt heißt dort
-    ausdrücklich keiner), sonst der der Übung. Das ist die Stufe „Übung“ in `takt_fuer` und
-    `TimerLauf.takt_uebung`.
+    ausdrücklich keiner), sonst der des Plans („Takt für alle“, P105, 8.11.2026), sonst der der
+    Übung. Das ist die Stufe „Übung“ in `takt_fuer` und `TimerLauf.takt_uebung`.
+
+    >>> from trainingsapp.core.takt import VORLAGEN as V
+    >>> takt_der_uebung(Exercise(), PlanItem(), Plan(takt=V["metronom_1"])).name
+    'Metronom 1 s'
+    >>> takt_der_uebung(Exercise(takt=V["box_4"]), PlanItem(), Plan(takt=V["metronom_1"])).name
+    'Metronom 1 s'
 
     >>> from trainingsapp.core.takt import AUS, VORLAGEN
     >>> u = Exercise(name="Atmen", takt=VORLAGEN["atmung_4_6"])
@@ -249,6 +276,8 @@ def takt_der_uebung(uebung: Exercise | None, item: PlanItem | None = None) -> Ta
         return None
     if item is not None and item.takt is not None:
         return None if item.takt.leer else item.takt
+    if plan is not None and plan.takt is not None and not plan.takt.leer:
+        return plan.takt
     return uebung.takt
 
 
@@ -257,9 +286,10 @@ def takt_fuer(
     abschnitt: Abschnitt | None = None,
     wahl: Takt | None = None,
     item: PlanItem | None = None,
+    plan: Plan | None = None,
 ) -> Takt | None:
     """Welcher Takt gilt (`docs/plan_taktgeber.md` §2): Uhr für jetzt (``wahl``; `takt.AUS` =
-    keiner) > Abschnitt des Timers > Planübung (``item``, A6) > Übung > keiner.
+    keiner) > Abschnitt des Timers > Planübung (``item``, A6) > Plan (P105) > Übung > keiner.
 
     >>> from trainingsapp.core.takt import AUS, VORLAGEN
     >>> u = Exercise(name="Atmen", takt=VORLAGEN["atmung_4_6"])
@@ -276,7 +306,7 @@ def takt_fuer(
     'Box 4-4-4-4'
     """
     return takt_waehlen(
-        wahl, abschnitt.takt if abschnitt is not None else None, takt_der_uebung(uebung, item)
+        wahl, abschnitt.takt if abschnitt is not None else None, takt_der_uebung(uebung, item, plan)
     )
 
 
@@ -379,6 +409,7 @@ __all__ = [
     "uhr_an",
     "zaehlt_als",
     "zeit_werte",
+    "zeit_zaehlt_fuer",
     "zeit_zusammenlegen",
     "zeitfeld_der_uebung",
 ]

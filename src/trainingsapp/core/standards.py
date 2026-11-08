@@ -350,6 +350,10 @@ def abweichungen(item: PlanItem, uebung: Exercise) -> list[str]:
         teile.append("Uhr")
     if wahl.profil_id or wahl.eigen is not None:
         teile.append("Timer")
+    if wahl.zaehlt is not None and wahl.zaehlt != uebung.zeit_zaehlt:
+        teile.append("zählt")
+    if not item.bedingung.leer:
+        teile.append("Weiter, wenn")
     if sensor_eigen(item, uebung):
         teile.append("Beschleunigungssensor")
     if takt_eigen(item, uebung):

@@ -179,6 +179,9 @@ class Exercise:
     #: `docs/plan_taktgeber.md`): Phasen für Atmung oder Bewegung, die überall gelten, wo die
     #: Übung geübt wird — ein Timer-Abschnitt und die Uhr „für jetzt“ gehen vor
     takt: Takt | None = None
+    #: „Weiter, wenn …“ der Übung (Migration 042, ``bedingung_json``, P107): Bedingung fürs
+    #: Weiterkommen im Workout, ohne Zweig — die Planübung folgt ihr (`core.bedingung.wirksame`)
+    bedingung: Bedingung = field(default_factory=Bedingung)
 
     def __post_init__(self) -> None:
         # Wer nur `category` angibt (Altbestand, Tutorial), bekommt sie als Typ.
@@ -462,6 +465,9 @@ class Plan:
     #: Vorgabe des Übergangs im Workout: hart (nach dem Timer sofort weiter) oder weich (der
     #: Timer zählt ins Minus, „Weiter“ von Hand); vor dem Start umstellbar
     uebergang_hart: bool = False
+    #: „Takt für alle Übungen“ (Migration 042, P105): gilt für Planübungen ohne eigenen Takt,
+    #: eine Stufe über der Übung — wie der Plan-Timer; ``None`` = keiner
+    takt: Takt | None = None
     #: Aus einem Paket (Migration 033, `docs/plan_import_links_plaene.md` §3): das Paket, der
     #: Schlüssel des Plans darin und der Paketstand, mit dem ein Update Geändertes erkennt
     package_id: str | None = None

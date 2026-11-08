@@ -138,8 +138,8 @@ class ExerciseRepo:
                      is_builtin, result_spec_json, limit_spec_json,
                      default_target_json, default_input_mode, archived, created_at, updated_at,
                      default_fields_json, package_id, timer_json, clock_on,
-                     clock_counts_as, clock_counts, acc_json, takt_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
+                     clock_counts_as, clock_counts, acc_json, takt_json, bedingung_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -159,6 +159,7 @@ class ExerciseRepo:
                     clock_counts = excluded.clock_counts,
                     acc_json = excluded.acc_json,
                     takt_json = excluded.takt_json,
+                    bedingung_json = excluded.bedingung_json,
                     updated_at = excluded.updated_at,
                     revision = revision + 1
                 """,
@@ -184,6 +185,7 @@ class ExerciseRepo:
                     int(uebung.zeit_zaehlt),
                     json.dumps(uebung.beschleunigung.als_dict(), ensure_ascii=False),
                     json.dumps(uebung.takt.als_dict() if uebung.takt else {}, ensure_ascii=False),
+                    _bedingung_json(uebung.bedingung),
                 ),
             )
             # Medien: alle Verweise neu schreiben. Einfacher als Abgleich, und
@@ -516,6 +518,7 @@ class ExerciseRepo:
             zeit_zaehlt=bool(r["clock_counts"]),
             beschleunigung=SensorWahl.aus_dict(_json_lesen(r["acc_json"], {})),
             takt=Takt.aus_dict(_json_lesen(r["takt_json"], {})),
+            bedingung=Bedingung.aus_dict(_tabelle_lesen(r["bedingung_json"])),
         )
 
 
@@ -810,8 +813,8 @@ class PlanRepo:
                 INSERT INTO plan (id, name, description, subject_id, created_at, updated_at,
                                   active, weekdays_json, course_chapter_id, timer_json,
                                   auto_next, pause_no_timer, package_id, package_key,
-                                  package_standard_json, workout, uebergang_hart)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  package_standard_json, workout, uebergang_hart, takt_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -828,6 +831,7 @@ class PlanRepo:
                     package_standard_json = excluded.package_standard_json,
                     workout = excluded.workout,
                     uebergang_hart = excluded.uebergang_hart,
+                    takt_json = excluded.takt_json,
                     revision = revision + 1
                 """,
                 (
@@ -850,6 +854,7 @@ class PlanRepo:
                     else None,
                     int(plan.workout),
                     int(plan.uebergang_hart),
+                    _takt_json(plan.takt) if plan.takt is not None else None,
                 ),
             )
             # Versteckte bleiben stehen: Übungen im Papierkorb und aus deaktivierten
@@ -1108,6 +1113,20 @@ class PlanRepo:
                 (int(workout), int(uebergang_hart), jetzt().isoformat(), plan_id),
             )
 
+    def plan_takt_setzen(self, plan_id: str, takt: Takt | None) -> None:
+        """„Takt für alle Übungen“ (Migration 042, P105) — ``None`` = keiner."""
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE plan SET takt_json = ?, updated_at = ?, revision = revision + 1 "
+                "WHERE id = ?",
+                (
+                    _takt_json(takt) if takt is not None and not takt.leer else None,
+                    jetzt().isoformat(),
+                    plan_id,
+                ),
+            )
+            self._beruehrt(plan_id)
+
     def plan_timer_setzen(
         self,
         plan_id: str,
@@ -1280,6 +1299,7 @@ class PlanRepo:
             pause_ohne_timer=bool(r["pause_no_timer"]),
             workout=bool(r["workout"]),
             uebergang_hart=bool(r["uebergang_hart"]),
+            takt=_takt_lesen(r["takt_json"]),
             package_id=r["package_id"],
             package_key=r["package_key"],
             package_standard=_json_lesen(r["package_standard_json"], {}) or None,

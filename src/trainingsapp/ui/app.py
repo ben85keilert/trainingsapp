@@ -138,6 +138,7 @@ from trainingsapp.ui.views.plan import einzel_plan, plan_view
 from trainingsapp.ui.views.plan_ablauf import plan_ablauf_view
 from trainingsapp.ui.views.plan_einstellen import plan_einstellen
 from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
+from trainingsapp.ui.views.plan_uhren import plan_uhren_view
 from trainingsapp.ui.views.profile import profile_view
 from trainingsapp.ui.views.tag import tag_view
 from trainingsapp.ui.views.tagesfelder import tagesfeld_formular_view, tagesfelder_view
@@ -543,6 +544,8 @@ def main(page: ft.Page) -> None:
             )
         elif rest[:1] == ["info"] and (info := planuebung(rest, 1)) is not None:
             uebungsseite_im_plan(plan, basis, f"{basis}/ziel/{info[0].id}", info)
+        elif rest[:1] == ["uhren"]:  # der Uhrenplan (K3, `docs/plan_uhren.md` §4.6)
+            ablegen(lambda: plan_uhren_view(page, state, plan, basis))
 
     def plan_routen(teile: list[str]) -> None:
         plan = state.plaene.laden(teile[1])

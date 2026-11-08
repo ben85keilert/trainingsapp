@@ -43,6 +43,7 @@ from trainingsapp.core.uebung_timer import (
     takt_der_uebung,
     timer_fuer,
     zaehlt_als,
+    zeit_zaehlt_fuer,
 )
 from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein
 from trainingsapp.ui import einheit as einheit_ui
@@ -221,7 +222,7 @@ def uebung_timer_view(
         profil = next((p for p in auswahl if p.id == gemerkt), profil)
     eigene_kopie = TimerWahl.aus_dict(item.timer).eigen if item is not None else None
     #: „zählt“ — für jetzt, sonst wie die Übung (P79 D2/D3)
-    zaehlt = state.uhr_zaehlt.get(key, uebung.zeit_zaehlt)
+    zaehlt = state.uhr_zaehlt.get(key, zeit_zaehlt_fuer(uebung, item))
     felder = uebung_lauf.felder_der_uebung(uebung, item)
 
     def kontext() -> Any:
@@ -271,7 +272,7 @@ def uebung_timer_view(
         """Takt für jetzt, Vorgabe der Übung und Tempo an den Timer der Einheit (Taktgeber) —
         und „Takt zählt“ (P138) als Zähl-Teil mit Quelle „takt“."""
         if e.timer is not None:
-            takt_anbringen(state, e.timer.lauf, key, takt_der_uebung(uebung, item))
+            takt_anbringen(state, e.timer.lauf, key, takt_der_uebung(uebung, item, plan))
             with contextlib.suppress(Exception):  # der Zähler darf die Uhr nie aufhalten
                 uebung_lauf.takt_zaehlen_anbringen(page, state, e, uebung, item)
 
@@ -586,7 +587,7 @@ def uebung_timer_view(
         """Welcher Takt beim Start gilt (für jetzt > Planübung > Übung) und der Knopf zum
         Blatt."""
         gewaehlt = state.uhr_takt.get(key)
-        takt = gewaehlt if gewaehlt is not None else takt_der_uebung(uebung, item)
+        takt = gewaehlt if gewaehlt is not None else takt_der_uebung(uebung, item, plan)
         an = takt is not None and not takt.leer
         text = (
             f"Takt: {takt.anzeigename} · {takt.kurztext()}"
@@ -604,7 +605,7 @@ def uebung_timer_view(
                     page,
                     state,
                     key=key,
-                    takt=takt_der_uebung(uebung, item),
+                    takt=takt_der_uebung(uebung, item, plan),
                     starten=takt_starten,
                     titel=f"Takt · {uebung.name}",
                     klein=True,

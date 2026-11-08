@@ -71,6 +71,7 @@ from trainingsapp.core.uebung_timer import (
     mit_zeitfeldern,
     zaehlt_als,
     zeit_werte,
+    zeit_zaehlt_fuer,
     zeit_zusammenlegen,
 )
 from trainingsapp.devices.einheit import (
@@ -160,7 +161,7 @@ def kontext_fuer(
     `AppState.uhr_zaehlt`). „Zählt als“ (Ben, 18.10.2026): mit Haltezeit nach der Übung, ohne
     immer Zeit — auch ohne den Parameter (`zaehlt_als`). ``auspraegung``: die Ausführung, die
     im Block gewählt ist (Variante, Gewicht …) — sie kommt mit in den Eintrag (21.10.2026)."""
-    eintragen = uebung.zeit_zaehlt if zeit_eintragen is None else zeit_eintragen
+    eintragen = zeit_zaehlt_fuer(uebung, item) if zeit_eintragen is None else zeit_eintragen
     felder = felder_der_uebung(uebung, item)
     if feld and basis_key(feld) in ZEITFELDER and (feld == "duration" or feld in felder):
         gewaehlt: str = feld

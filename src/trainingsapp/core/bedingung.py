@@ -257,6 +257,38 @@ def pruefen(b: Bedingung, st: Stand) -> Erfuellung:
     return Erfuellung(False, f"noch {b.n - st.wdh} in {sekunden_text(rest)}")
 
 
+def nur_verweise(b: Bedingung) -> bool:
+    """Hat die Planübung nur Zweig und Verweise gesetzt — keine eigene Bedingung?
+
+    >>> nur_verweise(Bedingung()), nur_verweise(Bedingung(zweig="B"))
+    (True, True)
+    >>> nur_verweise(Bedingung(ZEIT)), nur_verweise(Bedingung(hart=True))
+    (False, False)
+    """
+    return b.art == KEINE and not b.hart and b.inhalt.leer
+
+
+def wirksame(uebung: Bedingung, plan: Bedingung | None) -> Bedingung:
+    """Die Bedingung, die im Workout gilt (P107, `docs/plan_uhren.md` §4.6b): die der Planübung,
+    wenn sie eine eigene hat — sonst die der Übung mit Zweig und Verweisen der Planübung
+    (die Planübung folgt der Übung und setzt nur den Zweig dazu).
+
+    >>> u = Bedingung(WDH, 15, hart=True)
+    >>> wirksame(u, None) == u, wirksame(u, Bedingung()) == u
+    (True, True)
+    >>> w = wirksame(u, Bedingung(zweig="B", sonst="i3"))
+    >>> w.art, w.n, w.hart, w.zweig, w.sonst
+    ('wdh', 15, True, 'B', 'i3')
+    >>> wirksame(u, Bedingung(ZEIT)).art
+    'zeit'
+    """
+    if plan is None or plan.leer:
+        return uebung
+    if nur_verweise(plan):
+        return replace(uebung, zweig=plan.zweig, dann=plan.dann, sonst=plan.sonst)
+    return plan
+
+
 def naechster_im_zweig(
     reihenfolge: Iterable[tuple[str, str]], aktuell: str, offen: Iterable[str]
 ) -> str | None:
@@ -340,7 +372,9 @@ __all__ = [
     "Stand",
     "mit_zweig",
     "naechster_im_zweig",
+    "nur_verweise",
     "pruefen",
     "schleifen",
     "sekunden_text",
+    "wirksame",
 ]

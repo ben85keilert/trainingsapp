@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from .bedingung import Bedingung
+from .bedingung import Bedingung, wirksame
 from .models import Exercise, Plan
 from .standards import aktive_felder
 from .timer import TimerProfil, dauer_text
@@ -76,7 +76,16 @@ def schritte_fuer(plan: Plan, katalog: Mapping[str, Exercise]) -> list[Schritt]:
         # Ob die Zeit zählt, legt die Übung fest (P79 D2)
         zaehlt = uebung.zeit_zaehlt and (profil is not None or uhr_an(uebung, item))
         feld = zaehlt_als(felder, uebung) if zaehlt else None
-        schritte.append(Schritt(item.id, uebung.id, uebung.name, profil, feld, item.bedingung))
+        schritte.append(
+            Schritt(
+                item.id,
+                uebung.id,
+                uebung.name,
+                profil,
+                feld,
+                wirksame(uebung.bedingung, item.bedingung),
+            )
+        )
     return schritte
 
 

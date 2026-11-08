@@ -428,6 +428,7 @@ def plan_view(
         gemacht = len(fertig_ids)
         stand.value = stand_text()
         liste.controls = listeninhalt()
+        pfeile_auffrischen()
         page.update()
 
     def melden(uebung: Exercise, eintrag: SessionEntry) -> None:
@@ -2386,26 +2387,35 @@ def plan_view(
             ],
         )
 
+    # Die Pfeile stehen fest über der Liste (Ben, 8.11.2026: „Die Pfeile links-rechts scrollen
+    # mit, so dass man von überall aus durch die Übungen kommt“) — nur der Block scrollt
+    pfeile_halter = ft.Container(
+        data="pfeile", visible=False, padding=ft.Padding.only(left=8, right=8, top=4)
+    )
+
+    def pfeile_auffrischen() -> None:
+        """Die feste Pfeilzeile zur gezeigten Übung — neu bei jedem Wechsel und Eintrag (der
+        nächste Pfeil wird nach einer erledigten Übung betont)."""
+        paar = gezeigt() if navigierbar else None
+        pfeile_halter.visible = paar is not None
+        pfeile_halter.content = navigation_zeile(paar[0]) if paar is not None else None
+
     def uebungsteil() -> ft.Control:
-        """Der eine Block beim Üben — mit Pfeilen und Wischen, wenn der Plan mehrere hat."""
+        """Der eine Block beim Üben — mit Wischen, wenn der Plan mehrere hat; die Pfeile
+        stehen fest darüber (`pfeile_halter`)."""
         paar = gezeigt()
         if paar is None:
             return ft.Container()
         index, item = paar
-        teile: list[ft.Control] = [block(index, item)]
         spalte = ft.Column(
-            spacing=4, horizontal_alignment=ft.CrossAxisAlignment.STRETCH, controls=teile
+            spacing=4,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            controls=[block(index, item)],
         )
         if not navigierbar:
             # Ohne Handler zeigt Flutter statt des Blocks „GestureDetector should have at least
             # one event handler defined“ (Ben, 7.11.2026) — also nur mit Wischen ein Mantel
             return spalte
-        teile.insert(
-            0,
-            ft.Container(
-                padding=ft.Padding.symmetric(horizontal=8), content=navigation_zeile(index)
-            ),
-        )
         return ft.GestureDetector(on_horizontal_drag_end=gewischt, content=spalte)
 
     def gesamtplan_zeigen() -> None:
@@ -2532,7 +2542,8 @@ def plan_view(
             # Kopf und Fuß sind Kopf- und Fußzeile der ziehbaren Liste — alle Blöcke
             return [block(i, item) for i, item in enumerate(plan.items)]
         bloecke = [uebungsteil()] if plan.items else []
-        oben = [kopf_box] if kopf else [ft.Container(height=8)]
+        # Unter der festen Pfeilzeile reicht ein kleiner Abstand
+        oben = [kopf_box] if kopf else [ft.Container(height=4 if navigierbar else 8)]
         if nachtrag is not None:  # unter dem Block, wohin die Tipps gehen (Skizze G1)
             hinweis = ft.Text(nachtrag.hinweis(), size=12, opacity=0.7)
             return [
@@ -2557,6 +2568,7 @@ def plan_view(
     else:
         liste = ft.ListView(expand=True, controls=listeninhalt())
     liste = scroll_merken(page, state, route, liste)
+    pfeile_auffrischen()
 
     # -- Nachtrag: „Fertig“ und Zurück schließen, was hier offen ist ------------------
 
@@ -2623,7 +2635,7 @@ def plan_view(
             actions=aktionen,
         ),
         padding=0,
-        controls=[sicher(ft.Column(expand=True, spacing=0, controls=[liste]))],
+        controls=[sicher(ft.Column(expand=True, spacing=0, controls=[pfeile_halter, liste]))],
     )
     ansicht_halter.append(ansicht)
     if nachtrag is not None:

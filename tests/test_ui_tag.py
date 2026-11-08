@@ -482,9 +482,11 @@ def test_karte_ohne_pfeil_weiter_springt_zur_offenen_uebung(page, state) -> None
     ansicht = plan_view(page, state, state.plaene.laden(plan.id))
     liste = next(x for x in _alle(ansicht) if isinstance(x, ft.ListView))
     assert len(liste.controls) == 2  # Abstand und der eine Block
-    block = liste.controls[1].content.controls[-1]  # unter der Zeile der Pfeile
+    block = liste.controls[1].content.controls[-1]
     assert "Kniebeuge" in _texte(block) and "Wandsitz" not in _texte(block)
-    assert "2/3" in _texte(liste.controls[1])  # die Pfeile heißen wie die Nachbarn
+    # Die Pfeile stehen fest über der Liste (8.11.2026) und heißen wie die Nachbarn
+    pfeile = next(x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.data == "pfeile")
+    assert "2/3" in _texte(pfeile) and "2/3" not in _texte(liste)
     assert state.plan_ziel is None  # nur einmal
     assert state.plan_gezeigt[plan.id] == plan.items[1].id
     assert not any(isinstance(getattr(x, "key", None), ft.ScrollKey) for x in _alle(ansicht))

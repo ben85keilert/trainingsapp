@@ -21,6 +21,9 @@ Jetzt (`ui/views/plan.py`, Üben-Zweig):
   etwas läuft; die gezeigte ist markiert; ein Tipp wechselt nach dem Schließen; der Kopf
   nennt „x von n heute“). Kein eigener Kopf, kein i: die Legende der Knöpfe steht im „?“ oben
   (`components/hilfe.PLAN_MD` = `KNOPF_LEGENDE` + Notation). Kein Darstellungsmenü.
+  Die Zeile **steht fest** über der Liste (Ben, 8.11.2026: „Die Pfeile links-rechts scrollen
+  mit, so dass man von überall aus durch die Übungen kommt“) — nur der Block scrollt darunter
+  (`pfeile_halter`, neu bei jedem Wechsel und Eintrag).
 - **Ausprägungen** (Gewicht, Winkel): das gewählte Segment ist nur farbig, ohne Haken — der
   Haken brach „60°“ in drei Zeilen um. **Wischen**
   über den Block (`ft.GestureDetector`, nur `on_horizontal_drag_end`, Schwelle

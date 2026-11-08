@@ -68,12 +68,12 @@ def _liste(ansicht) -> ft.ListView:
 
 
 def _teil(ansicht) -> ft.GestureDetector:
-    """Der Übungsteil: Pfeile und Block in einem Mantel."""
+    """Der Übungsteil: der Block im Mantel fürs Wischen."""
     return next(x for x in _alle(ansicht) if isinstance(x, ft.GestureDetector))
 
 
 def _uebungsteil(ansicht) -> ft.Control:
-    """Der Übungsteil: der Mantel mit Pfeilen und Block — ohne Navigation die Spalte."""
+    """Der Übungsteil: der Mantel mit dem Block — ohne Navigation die Spalte."""
     return next(
         c
         for c in _liste(ansicht).controls
@@ -87,11 +87,15 @@ def _block(ansicht) -> ft.Control:
     return spalte.controls[-1]
 
 
+def _zeile(ansicht) -> ft.Container:
+    """Die feste Pfeilzeile über der Liste (Ben, 8.11.2026: sie scrollt nicht mit weg)."""
+    return next(x for x in _alle(ansicht) if isinstance(x, ft.Container) and x.data == "pfeile")
+
+
 def _pfeile(ansicht) -> list:
-    teil = _uebungsteil(ansicht)
-    if not isinstance(teil, ft.GestureDetector):  # ohne Navigation kein Mantel, keine Pfeile
+    zeile = _zeile(ansicht)
+    if not zeile.visible:  # ohne Navigation keine Pfeile
         return []
-    zeile = teil.content.controls[0]
     return [
         x
         for x in _alle(zeile)
@@ -100,8 +104,7 @@ def _pfeile(ansicht) -> list:
 
 
 def _mitte(ansicht) -> ft.TextButton:
-    teil = _uebungsteil(ansicht)
-    zeile = teil.content.controls[0]
+    zeile = _zeile(ansicht)
     return next(
         x for x in _alle(zeile) if isinstance(x, ft.TextButton) and x.tooltip == "Gesamtplan"
     )
@@ -145,7 +148,7 @@ def test_plan_zeigt_die_erste_offene_uebung_mit_pfeilen_der_nachbarn(page, state
     assert "2/3" in _texte(_mitte(ansicht).content) and "1 von 3 heute" not in _texte(ansicht)
     assert state.plan_gezeigt[plan.id] == plan.items[1].id
     # Kein Darstellungsmenü, kein grauer Erklärtext, kein Kopf — die Legende steht im „?“
-    zeile = _uebungsteil(ansicht).content.controls[0]
+    zeile = _zeile(ansicht)
     assert not any(isinstance(x, ft.PopupMenuButton) for x in _alle(zeile))
     assert not any("Gemacht = nur abhaken" in t for t in _texte(ansicht))
     hilfe = next(
@@ -153,6 +156,9 @@ def test_plan_zeigt_die_erste_offene_uebung_mit_pfeilen_der_nachbarn(page, state
     )
     assert hilfe.tooltip == "Knöpfe und Eingabe" and "Gesamtplan" in KNOPF_LEGENDE
     assert len(liste.controls) == 2  # Abstand und der eine Block
+    # Die Pfeile stehen außerhalb der scrollenden Liste, darüber
+    spalte = next(x for x in _alle(ansicht) if isinstance(x, ft.Column) and liste in x.controls)
+    assert spalte.controls.index(_zeile(ansicht)) < spalte.controls.index(liste)
 
 
 def test_pfeile_und_wischen_wechseln_ohne_umlauf(page, state) -> None:

@@ -107,7 +107,7 @@ from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang import anhang_route
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.nachtragen import nachtragen_knopf, nachtragen_route
-from trainingsapp.ui.views.plan_ablauf import plan_ablauf_route
+from trainingsapp.ui.views.workout import workout_route
 from trainingsapp.ui.views.ziele import plan_ziele, ziele_fuer
 
 WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
@@ -744,7 +744,7 @@ def tagesansicht(
             n = len(plan.items)
             teile = [f"{n} {'Übung' if n == 1 else 'Übungen'}"]
             if mit_ablauf:
-                teile.append(f"mit Ablauf, {dauer_text_gesamt(schritte)}")
+                teile.append(f"mit Timer, {dauer_text_gesamt(schritte)}")
         else:
             teile = [k.stand_text()]
             if k.beginn is not None:
@@ -780,7 +780,7 @@ def tagesansicht(
             )
         ]
         if k.zustand == NEU:
-            start = plan_ablauf_route(f"/plan/{plan.id}") if mit_ablauf else f"/plan/{plan.id}"
+            start = workout_route(plan) if mit_ablauf else f"/plan/{plan.id}"
             inhalt.append(
                 ft.Row(
                     spacing=4,
@@ -1348,7 +1348,7 @@ def tagesansicht(
         plan = k.plan
         if k.zustand == NEU:
             mit_ablauf = any(s.profil is not None for s in schritte_fuer(plan, daten().katalog))
-            start = plan_ablauf_route(f"/plan/{plan.id}") if mit_ablauf else f"/plan/{plan.id}"
+            start = workout_route(plan) if mit_ablauf else f"/plan/{plan.id}"
             knopf = ft.FilledButton("Start", icon=ft.Icons.PLAY_ARROW, on_click=oeffner(start))
         else:
             knopf = ft.FilledButton(

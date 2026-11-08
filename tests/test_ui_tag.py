@@ -167,9 +167,9 @@ def test_start_oeffnet_plan_oder_ablauf_und_fertig_ist_eine_zeile(page, state) -
     assert len(starts) == 2
     for knopf in starts:
         asyncio.run(knopf.on_click())
-    assert page.routen == [f"/plan/{ohne.id}", f"/plan/{mit.id}/timer/ablauf"]
+    assert page.routen == [f"/plan/{ohne.id}", f"/plan/{mit.id}/workout"]
     texte = _texte(ansicht)
-    assert any("mit Ablauf" in t for t in texte)
+    assert any("mit Timer" in t for t in texte)
     assert any(t.startswith("1 von 1 erledigt") for t in texte)
 
 
@@ -530,7 +530,7 @@ def test_einheit_zeilen_fuehren_zu_ihrem_teil(page, state) -> None:
         x for x in _alle(karte) if isinstance(x, ft.Container) and x.on_click and titel in _texte(x)
     )
     asyncio.run(zeile.on_click())
-    assert page.routen == [f"/plan/{plan.id}/timer/ablauf"]
+    assert page.routen == [f"/plan/{plan.id}/workout"]
 
 
 def test_rueckgaengig_holt_dieselbe_session_und_eintraege_halten_den_plan(page, state) -> None:

@@ -230,8 +230,19 @@ def eingetragen(e: Einheitslauf) -> dict[str, list[float]]:
     }
 
 
+#: Wie eine Übung des Workouts ausging — die Beschriftung in Ansicht und Zeitleiste
+GRUENDE = {
+    "fertig": "im Tagebuch",
+    "gemacht": "gemacht · im Tagebuch",
+    "uebersprungen": "übersprungen",
+    "abgebrochen": "abgebrochen · nicht eingetragen",
+    "beendet": "beendet · nicht eingetragen",
+    "gewechselt": "angefangen, dann gewechselt · nicht eingetragen",
+}
+
 __all__ = [
     "EINTRAGEN",
+    "GRUENDE",
     "ablauf_teil",
     "bereitstellen",
     "eingetragen",

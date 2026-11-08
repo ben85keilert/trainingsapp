@@ -27,6 +27,7 @@ from trainingsapp.core.models import Plan
 from trainingsapp.core.plaene import erledigte
 from trainingsapp.core.plan_durchlauf import Schritt, schritte_fuer
 from trainingsapp.core.timer import dauer_text
+from trainingsapp.core.uebung_timer import takt_der_uebung
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.devices.plan_ablauf import (
     FERTIG,
@@ -46,10 +47,11 @@ from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.srpe import srpe_zeile
+from trainingsapp.ui.components.takt_blatt import takt_anbringen
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import schluessel as uhr_schluessel
+from trainingsapp.ui.plan_ablauf import GRUENDE
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.views.plan_ablauf import GRUENDE
 from trainingsapp.ui.views.timer import timer_knopf
 
 
@@ -97,9 +99,10 @@ def workout_view(
     katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
     schritte = schritte_fuer(plan, katalog)
     inhalt = ft.Column(spacing=12)
-    wahl: dict[str, Any] = {"ohne": None, "noch_einmal": False}
+    wahl: dict[str, Any] = {"ohne": None, "noch_einmal": False, "hrv": True, "hrv_beenden": True}
     stand: dict[str, Any] = {
         "schluessel": None,
+        "takt_fuer": None,
         "fokus": None,
         "ohne_timer": None,
         "bed_text": None,
@@ -127,7 +130,37 @@ def workout_view(
             "ohne": ohne() if offen() else set(),
             "uebergang": uebergang_fuer(state, plan),
             "workout": True,
+            "hrv": wahl["hrv"],
+            "hrv_beenden": wahl["hrv_beenden"],
         }
+
+    def hrv_umschalten(e: ft.Event[ft.Switch]) -> None:
+        wahl["hrv"] = bool(e.control.value)
+        neu_bauen()
+
+    def hrv_ende_umschalten(e: ft.Event[ft.SegmentedButton]) -> None:
+        wahl["hrv_beenden"] = bool(e.control.selected) and e.control.selected[0] == "beenden"
+
+    def takt_je_schritt(e: Any, teil: PlanAblaufBaustein) -> None:
+        """P99 (Teil 1): Der Takt der Planübung (für jetzt > Planübung > Plan > Übung) kommt an
+        den Timer des laufenden Schritts — einmal je Schritt, wie beim Übungs-Timer."""
+        marke = (e.id, teil.k)
+        if (
+            stand["takt_fuer"] == marke
+            or teil.timer is None
+            or teil.phase not in (UEBUNG, UEBERZEIT)
+        ):
+            return
+        stand["takt_fuer"] = marke
+        s = teil.schritt
+        u = katalog.get(s.uebung_id)
+        if u is None:
+            return
+        item = state.plaene.item_laden(s.item_id)
+        with contextlib.suppress(Exception):
+            takt_anbringen(
+                state, teil.timer.lauf, uhr_schluessel(u, item), takt_der_uebung(u, item, plan)
+            )
 
     def starten() -> None:
         try:
@@ -226,25 +259,80 @@ def workout_view(
                     ),
                 )
             )
+        # Eine Haltung, drei Folgen — in einem Satz (P106, Ben 8.11.2026: hart/weich trägt eine
+        # Doppelbedeutung; `docs/plan_uhren.md` §4.7)
+        hart = uebergang == HART
+        folgen = (
+            (
+                "Timer läuft ab",
+                "die nächste beginnt sofort" if hart else "zählt ins Minus, bis du tippst",
+            ),
+            ("Übung ohne Timer", "„Fertig“ von Hand"),
+            (
+                "Bedingung verfehlt",
+                "Zweig oder noch einmal" if hart else "Zweig · noch einmal · trotzdem weiter",
+            ),
+        )
         teile.append(
             karte(
-                kartentitel("Übergang"),
+                kartentitel("Heute"),
                 ft.SegmentedButton(
                     selected=[uebergang],
                     show_selected_icon=False,
                     segments=[
-                        ft.Segment(value=HART, label=ft.Text("hart · läuft durch")),
-                        ft.Segment(value=WEICH, label=ft.Text("weich · nachtrainieren")),
+                        ft.Segment(value=HART, label=ft.Text("Hart")),
+                        ft.Segment(value=WEICH, label=ft.Text("Weich")),
                     ],
                     on_change=uebergang_gewaehlt,
                 ),
-                hinweis(
-                    "Weich: Der Timer zählt nach Ablauf ins Minus, „Weiter“ tippst du. Hart: "
-                    "Nach der Zeit geht es sofort weiter — nur Pause oder Abbrechen halten an."
+                ft.Text(
+                    "Hart: Übungen folgen von selbst, Bedingungen gelten."
+                    if hart
+                    else "Weich: Du gibst das Tempo — der Timer zählt ins Minus, Bedingungen "
+                    "sind Vorschläge.",
+                    size=14,
+                ),
+                ft.Column(
+                    spacing=2,
+                    controls=[
+                        ft.Row(
+                            spacing=8,
+                            controls=[
+                                ft.Text(was, size=12, opacity=0.6, width=130),
+                                ft.Text(folge, size=12, expand=True),
+                            ],
+                        )
+                        for was, folge in folgen
+                    ],
                 ),
                 abstand=8,
             )
         )
+        if plan_ablauf.hrv_moeglich(state):
+            teile.append(
+                karte(
+                    ft.Switch(
+                        label="HRV-Aufnahme mit dabei", value=wahl["hrv"], on_change=hrv_umschalten
+                    ),
+                    *(
+                        [
+                            ft.Text("Wenn das Workout fertig ist", size=12, opacity=0.75),
+                            ft.SegmentedButton(
+                                selected=["beenden" if wahl["hrv_beenden"] else "weiter"],
+                                show_selected_icon=False,
+                                segments=[
+                                    ft.Segment(value="beenden", label=ft.Text("Messung beenden")),
+                                    ft.Segment(value="weiter", label=ft.Text("Weiterlaufen")),
+                                ],
+                                on_change=hrv_ende_umschalten,
+                            ),
+                        ]
+                        if wahl["hrv"]
+                        else []
+                    ),
+                    abstand=8,
+                )
+            )
         if not schritte:
             teile.append(hinweis("Der Plan hat keine Übung — im Plan-Editor hinzufügen."))
         else:
@@ -738,6 +826,7 @@ def workout_view(
         if k[0] == "lauf":
             paar = plan_ablauf.laufender(state, plan.id)
             assert paar is not None
+            takt_je_schritt(*paar)
             inhalt.controls = waehrend(*paar)
         elif k[0] == "danach":
             einheit_id = state.plan_ablaeufe.get(plan.id)

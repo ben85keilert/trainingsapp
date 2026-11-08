@@ -1084,6 +1084,7 @@ def _plan_aus_paketplan(pp: PaketPlan, paket_id: str, subject_id: str, da: set[s
         timer=dict(pp.timer) if pp.timer else None,
         weiter_automatisch=pp.weiter_automatisch,
         pause_ohne_timer=pp.pause_ohne_timer,
+        uebergang_hart=pp.weiter_automatisch,  # K4: „automatisch weiter“ ist der harte Übergang
         package_id=paket_id,
         package_key=pp.key,
         package_standard=plan_stand(pp),

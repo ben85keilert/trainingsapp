@@ -850,12 +850,12 @@ def teil_route(teil: Any) -> str | None:
     """Wo man einen Teil bedient — ``None`` für die HRV: Sie hat den Reiter „Messung“.
 
     Ben, 18.10.2026: „Klick auf den Plan öffnet aber nicht das entsprechende Menü“ — im
-    Reiter „Einheit“ führt jede Zeile dorthin, wo ihr Teil gestartet wird: der Plan-Ablauf
-    in seine Ablaufansicht, eine Übung in ihren Timer, das Training nach „Ausdauer“.
+    Reiter „Einheit“ führt jede Zeile dorthin, wo ihr Teil gestartet wird: der Plan ins
+    Workout, eine Übung in ihren Timer, das Training nach „Ausdauer“.
 
     >>> from trainingsapp.core.plan_durchlauf import Schritt
     >>> teil_route(PlanAblaufBaustein("p1", "Kräftigung", [Schritt("i1", "u1", "Planke")]))
-    '/plan/p1/timer/ablauf'
+    '/plan/p1/workout'
     >>> from trainingsapp.devices.einheit import UebungKontext
     >>> teil_route(UebungBaustein(UebungKontext("u1", "Planke", "p1", "i1")))
     '/plan/p1/timer/uebung/u1/i1'
@@ -879,10 +879,8 @@ def teil_route(teil: Any) -> str | None:
         k = teil.kontext
         return f"/plan/{k.plan_id}" if k.plan_id else f"/training/{k.uebung_id}"
     if isinstance(teil, PlanAblaufBaustein):
-        # Ein Workout führt ins Workout, nicht in die alte Ablauf-Ansicht (K0, 8.11.2026)
-        if teil.workout:
-            return f"/plan/{teil.plan_id}/workout"
-        return f"/plan/{teil.plan_id}/timer/ablauf"
+        # Seit K4 (8.11.2026) gibt es nur das Workout — die Ablauf-Ansicht ist weg
+        return f"/plan/{teil.plan_id}/workout"
     if isinstance(teil, UebungBaustein):
         k = teil.kontext
         if k.plan_id and k.item_id:

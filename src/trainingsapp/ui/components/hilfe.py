@@ -334,16 +334,18 @@ PLAN_MD = KNOPF_LEGENDE + "\n**So wird eingegeben**\n\n" + NOTATION_MD
 WORKOUT_MD = """\
 **Workout** heißt: Der Plan läuft von vorn bis hinten durch, Übung für Übung mit ihrem Timer.
 
-**Übergang** — vor dem Start wählbar:
-- **hart · läuft durch**: Ist der Timer ab, geht es sofort weiter. Nur Pause oder Abbrechen
-  halten an. Übungen ohne Timer warten auf „Weiter“.
-- **weich · nachtrainieren**: Nach Ablauf zählt der Timer ins Minus („−0:23“), du trainierst
-  weiter; „Weiter“ tippst du. Eingetragen wird die tatsächliche Zeit.
+**Hart oder weich** — eine Haltung, vor dem Start wählbar, mit drei Folgen:
+- **Hart**: Übungen folgen von selbst, Bedingungen gelten. Ist der Timer ab, beginnt sofort die
+  nächste; eine verfehlte Bedingung führt in den Zweig oder zu „Noch einmal“.
+- **Weich**: Du gibst das Tempo — der Timer zählt ins Minus („−0:23“), bis du tippst;
+  Bedingungen sind Vorschläge („Trotzdem weiter“ steht offen). Eingetragen wird die
+  tatsächliche Zeit.
+- Übungen ohne Timer warten in beiden Fällen auf „Fertig“.
 
-**Weiter, wenn …** steht an jedem Schritt („Im Plan einstellen“): *Zeit ab*, *Wiederholungen*
-(Sensor oder Takt zählen), *Wiederholungen in einer Zeit* oder *Abhaken*. **Hart** heißt
-Freischaltung: „Weiter“ erst, wenn erfüllt — ein Inhalt (Text, Link) erscheint erst dann.
-Abbrechen geht immer.
+**Weiter, wenn …** steht an der Übung („Übung bearbeiten“) und je Plan („Im Plan einstellen“,
+Uhrenplan): *Zeit ab*, *Wiederholungen* (Sensor oder Takt zählen), *Wiederholungen in einer
+Zeit* oder *Abhaken*. **Pflicht** heißt: „Weiter“ erst, wenn erfüllt — ein Inhalt (Text, Link)
+erscheint erst dann. Abbrechen geht immer.
 
 **Zweige:** Jeder Schritt gehört zu einem Zweig (A = Hauptzweig, B, C, D). „Erfüllt →“ führt
 zur nächsten Übung im Zweig oder zu einer gewählten; „nicht erfüllt →“ bietet eine andere an —

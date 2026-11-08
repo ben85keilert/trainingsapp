@@ -36,6 +36,7 @@ from trainingsapp.core.uebung_timer import (
 from trainingsapp.ui.components.karte import hinweis, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.plan_reiter import plan_reiter
 from trainingsapp.ui.components.planstand import nur_hier, wie_die_uebung
 from trainingsapp.ui.components.takt_blatt import SYMBOL as TAKT_SYMBOL
 from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile_text
@@ -576,7 +577,10 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
         neu_zeichnen()
 
     def zeichnen(p: Plan) -> None:
-        karten: list[ft.Control] = [plan_karte(p)]
+        karten: list[ft.Control] = [
+            plan_reiter(page, basis, "uhren", ablauf_an=p.ablauf.an),
+            plan_karte(p),
+        ]
         gesamt = 0
         for n, it in enumerate(p.items, start=1):
             u = state.uebungen.laden(it.exercise_id)

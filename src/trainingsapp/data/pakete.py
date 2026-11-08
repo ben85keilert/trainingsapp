@@ -59,7 +59,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from ..core.kurse import Kurs, verweise_aufloesen
+from ..core.kurse import Kurs, ablauf_aufloesen, verweise_aufloesen
 from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, PlanItem, jetzt, new_id
 from ..core.pakete import (
     Paket,
@@ -1098,6 +1098,7 @@ def _plan_aus_paketplan(pp: PaketPlan, paket_id: str, subject_id: str, da: set[s
             plan.items.append(item.als_planitem(plan.id, len(plan.items)))
             positionen.append(pos)
     verweise_aufloesen(plan.items, positionen)  # P97: „#n“ → ID der Planübung
+    ablauf_aufloesen(plan, pp.vorlage, positionen)  # G4: der gezeichnete Ablauf
     return plan
 
 

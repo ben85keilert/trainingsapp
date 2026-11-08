@@ -35,6 +35,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any
 
+from . import ablauf as ab
 from . import links
 from .bedingung import Bedingung as Weiterbedingung
 from .models import (
@@ -152,6 +153,8 @@ class VorlageItem:
     #: ``None`` = wie die Übung; ``dann``/``sonst`` zeigen im Paket auf die **Position** der
     #: Planübung (``"#3"``), in der App auf ihre ID (`verweise_als_position`, `verweise_aufloesen`)
     bedingung: Weiterbedingung | None = None
+    #: Beiname im Ablaufbild (G4, Paketfeld ``beiname`` je Planübung) — leer = keiner
+    beiname: str = ""
 
     @classmethod
     def aus_planitem(cls, item: PlanItem) -> VorlageItem:
@@ -164,6 +167,7 @@ class VorlageItem:
             beschleunigung=item.acc,
             takt=item.takt,
             bedingung=None if item.bedingung.leer else item.bedingung,
+            beiname=item.beiname,
         )
 
     def als_planitem(self, plan_id: str, order: int) -> PlanItem:
@@ -187,6 +191,7 @@ class VorlageItem:
             acc=self.beschleunigung,
             takt=self.takt,
             bedingung=self.bedingung if self.bedingung is not None else Weiterbedingung(),
+            beiname=self.beiname,
         )
 
     def to_dict(self, uebung: str | None = None) -> dict[str, Any]:
@@ -208,6 +213,8 @@ class VorlageItem:
             d["takt"] = {} if self.takt.leer else self.takt.als_dict()
         if self.bedingung is not None and not self.bedingung.leer:
             d["bedingung"] = self.bedingung.als_dict()
+        if self.beiname:
+            d["beiname"] = self.beiname
         return d
 
     @classmethod
@@ -234,6 +241,7 @@ class VorlageItem:
             beschleunigung=SensorWahl.aus_dict(acc) if isinstance(acc, Mapping) else None,
             takt=_takt_lesen(takt),
             bedingung=Weiterbedingung.aus_dict(bed) if isinstance(bed, Mapping) and bed else None,
+            beiname=str(e.get("beiname") or "").strip(),
         )
 
 
@@ -310,10 +318,15 @@ class PlanVorlage:
     name: str
     wochentage: list[int] = field(default_factory=lambda: list(range(7)))
     items: list[VorlageItem] = field(default_factory=list)
+    #: Der gezeichnete Ablauf (G4, `docs/plan_verzweigungen.md` §8): `core.ablauf.als_position`
+    #: — Planübungen als ``"#n"``, Fragen als ``"?n"``; ``None`` = Kette
+    ablauf: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"name": self.name, "wochentage": list(self.wochentage)}
         d["uebungen"] = [i.to_dict() for i in self.items]
+        if self.ablauf:
+            d["ablauf"] = dict(self.ablauf)
         return d
 
     @classmethod
@@ -335,7 +348,13 @@ class PlanVorlage:
             for e in roh.get("uebungen", []) or []
             if isinstance(e, Mapping) and e.get("uebung")
         ]
-        return cls(name=str(roh.get("name") or "Plan"), wochentage=wochentage, items=items)
+        ablauf = roh.get("ablauf")
+        return cls(
+            name=str(roh.get("name") or "Plan"),
+            wochentage=wochentage,
+            items=items,
+            ablauf=dict(ablauf) if isinstance(ablauf, Mapping) and ablauf else None,
+        )
 
 
 @dataclass(slots=True)
@@ -640,7 +659,14 @@ def plan_aus_vorlage(
             plan.items.append(item.als_planitem(plan.id, len(plan.items)))
             positionen.append(pos)
     verweise_aufloesen(plan.items, positionen)
+    ablauf_aufloesen(plan, vorlage, positionen)
     return plan
+
+
+def ablauf_aufloesen(plan: Plan, vorlage: PlanVorlage, positionen: Sequence[int]) -> None:
+    """Import: der gezeichnete Ablauf der Vorlage (Positionen) wird der des Plans (IDs)."""
+    if vorlage.ablauf:
+        plan.ablauf = ab.aus_position(vorlage.ablauf, [it.id for it in plan.items], positionen)
 
 
 # ---------------------------------------------------------------------------

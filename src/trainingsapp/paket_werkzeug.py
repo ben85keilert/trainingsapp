@@ -42,6 +42,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from trainingsapp.core.ablauf import ablauf_pruefen
 from trainingsapp.core.bedingung import bedingung_pruefen
 from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
 from trainingsapp.core.models import Exercise, Plan
@@ -246,6 +247,10 @@ def pruefen(
             fehler.extend(f"{wo}: bedingung: {x}" for x in f_bed)
             hinweise.extend(f"{wo}: bedingung: {x}" for x in h_bed)
     for wo, pl in _plaene_mit_ort(roh):
+        if "ablauf" in pl:
+            f_ab, h_ab = ablauf_pruefen(pl["ablauf"])
+            fehler.extend(f"{wo}: ablauf: {x}" for x in f_ab)
+            hinweise.extend(f"{wo}: ablauf: {x}" for x in h_ab)
         for pe in pl.get("uebungen") or []:
             if not isinstance(pe, dict):
                 continue

@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from .ablauf import Frage
 from .bedingung import Bedingung
 from .models import Exercise, Plan
 from .standards import aktive_felder
@@ -35,6 +36,15 @@ class Schritt:
     zeitfeld: str | None = None
     #: Bedingung fürs Weiterkommen und Zweig (W2/W3, `core.bedingung`)
     bedingung: Bedingung = field(default_factory=Bedingung)
+    #: Ein Entscheidungsknoten des Ablaufs (`core.ablauf.Frage`, P115) statt einer Übung —
+    #: ``uebung_id`` ist dann leer, ``name`` die Frage; nichts wird eingetragen
+    frage: Frage | None = None
+    #: Beiname der Planübung im Ablaufbild („2. Durchgang“)
+    beiname: str = ""
+
+    @property
+    def anzeigename(self) -> str:
+        return f"{self.name} · {self.beiname}" if self.beiname else self.name
 
     def kurztext(self) -> str:
         """„Halten 3 × 1:00“ — oder „ohne Timer“."""
@@ -84,8 +94,12 @@ def schritte_fuer(plan: Plan, katalog: Mapping[str, Exercise]) -> list[Schritt]:
                 profil,
                 feld,
                 item.bedingung,
+                beiname=item.beiname,
             )
         )
+    if plan.ablauf.an:
+        # Die Fragen des gezeichneten Ablaufs sind Schritte ohne Übung (P115)
+        schritte.extend(Schritt(f.id, "", f.text, frage=f) for f in plan.ablauf.fragen)
     return schritte
 
 

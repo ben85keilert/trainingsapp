@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -164,6 +165,21 @@ class EinheitRepo:
                 "SELECT * FROM einheit_ereignis WHERE einheit_id = ? ORDER BY nr", (einheit_id,)
             )
         ]
+
+    def kanten_gezaehlt(self, subject_id: str, plan_id: str) -> Counter[tuple[str, str]]:
+        """Wie oft jede Kante eines Plans gegangen wurde — aus ``plan/kante`` aller Einheiten
+        des Profils (Auswertung im Ablaufbild, `docs/plan_verzweigungen.md` §8.3)."""
+        paare: list[tuple[str, str]] = []
+        for r in self.con.execute(
+            "SELECT x.daten_json FROM einheit_ereignis x JOIN einheit e ON e.id = x.einheit_id "
+            "WHERE e.subject_id = ? AND e.deleted_at IS NULL AND x.quelle = 'plan' "
+            "AND x.art = 'kante'",
+            (subject_id,),
+        ):
+            d = json.loads(r["daten_json"] or "{}")
+            if d.get("plan") == plan_id and d.get("von") and d.get("nach"):
+                paare.append((str(d["von"]), str(d["nach"])))
+        return Counter(paare)
 
     def beteiligungen(self, einheit_id: str) -> list[Beteiligung]:
         return [

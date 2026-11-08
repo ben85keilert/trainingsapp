@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from . import ablauf as ab
 from . import links
 from .kurse import (
     BEDINGUNGEN,
@@ -207,6 +208,10 @@ def paketplan_aus(plan: Plan, key: str | None = None) -> PaketPlan:
         items=verweise_als_position(
             [VorlageItem.aus_planitem(i) for i in geordnet], [i.id for i in geordnet]
         ),
+        # G4: der gezeichnete Ablauf mit Positionen statt IDs
+        ablauf=ab.als_position(plan.ablauf, [i.id for i in geordnet]) or None
+        if not plan.ablauf.leer
+        else None,
     )
     return PaketPlan(
         key=key or plan.package_key or plan.name.strip().casefold(),

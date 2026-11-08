@@ -93,6 +93,12 @@ ARTEN: frozenset[str] = frozenset(
         # Workout, Bedingung „Skala“ (``person/skala``, 8.11.2026, `docs/plan_workout.md` §1): die
         # Selbsteinschätzung der Person in einem Schritt — nur Zeitleiste, in den Eintrag
         "skala",
+        # Gezeichneter Ablauf (``plan/kante``, ``plan/frage``, ``plan/antwort``, 8.11.2026,
+        # `docs/plan_verzweigungen.md` §8): welche Kante genommen wurde (``von``, ``nach``,
+        # ``kante`` = Beschriftung), eine Frage beginnt, ihre Antwort — nur Zeitleiste
+        "kante",
+        "frage",
+        "antwort",
     }
 )
 
@@ -195,6 +201,11 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         "quelle",
         "takt",
         "takt_zeiten_s",
+        # Gezeichneter Ablauf (``plan/kante``): Ziel der Kante und ihre Beschriftung — ``von``
+        # gibt es schon; ``frage``: die Frage eines Entscheidungsknotens (``plan/frage``)
+        "nach",
+        "kante",
+        "frage",
         # Teile
         "teil",
         "rolle",

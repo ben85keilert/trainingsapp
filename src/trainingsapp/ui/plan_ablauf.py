@@ -96,6 +96,7 @@ def bereitstellen(
         erste=erste,
         uebergang=uebergang,
         workout=workout,
+        ablauf=plan.ablauf,  # G2: der gezeichnete Ablauf, wenn eingeschaltet
     )
     e = einheit_ui.teil_bereitstellen(page, state, teil)
     state.plan_ablaeufe[plan.id] = e.id
@@ -257,6 +258,7 @@ GRUENDE = {
     "abgebrochen": "abgebrochen · nicht eingetragen",
     "beendet": "beendet · nicht eingetragen",
     "gewechselt": "angefangen, dann gewechselt · nicht eingetragen",
+    "beantwortet": "beantwortet",
 }
 
 __all__ = [

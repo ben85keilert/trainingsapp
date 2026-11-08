@@ -351,6 +351,14 @@ erscheint erst dann. Abbrechen geht immer.
 zur nächsten Übung im Zweig oder zu einer gewählten; „nicht erfüllt →“ bietet eine andere an —
 zurück nach A, weiter in B, wohin du willst.
 
+**Gezeichneter Ablauf** (Plan bearbeiten → Ablauf): Statt der Kette folgt das Workout den
+**Kanten** der Zeichnung. Jede Kante sagt, wann es diesen Weg geht — frei (Knopf), Zeit ab,
+Wiederholungen, Skala ab einem Wert — und ob sie nur **angeboten** (Knopf betont) oder von
+selbst **ausgeführt** wird. **Pflicht** sperrt die anderen Wege, bis sie erfüllt ist. „◀ zurück“
+führt dorthin, wo du herkamst (Einschub: Dehnung bei Krämpfen, danach weiter). Eine **Frage**
+ist ein Knoten ohne Übung: Skala wählen, es geht nach dem Wert weiter. Übungen, die nur über
+einen Abzweig erreichbar sind, stehen unter „Bei Bedarf“ — sie kommen nie von selbst dran.
+
 Läuft eine Aufnahme, wird das Workout ein Abschnitt in ihr — die Übungen liegen darin.
 """
 

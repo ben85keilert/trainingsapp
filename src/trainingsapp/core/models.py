@@ -18,6 +18,7 @@ from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
+from .ablauf import Ablauf
 from .bedingung import Bedingung
 from .result_spec import ResultSpec
 from .takt import Takt
@@ -430,6 +431,9 @@ class PlanItem:
     #: Der Takt nur hier (Migration 039, A6) — ``None`` = wie die Übung, ein leerer Takt
     #: (`core.takt.AUS`) = ausdrücklich keiner (`core.uebung_timer.takt_der_uebung`)
     takt: Takt | None = None
+    #: Beiname im Ablaufbild (Migration 044, `docs/plan_verzweigungen.md` §8.1): unterscheidet
+    #: zwei gleiche Übungen („2. Durchgang“) — leer = keiner
+    beiname: str = ""
 
 
 @dataclass(slots=True)
@@ -465,6 +469,9 @@ class Plan:
     #: „Takt für alle Übungen“ (Migration 042, P105): gilt für Planübungen ohne eigenen Takt,
     #: eine Stufe über der Übung — wie der Plan-Timer; ``None`` = keiner
     takt: Takt | None = None
+    #: Der gezeichnete Ablauf (Migration 044, `core.ablauf`): Start, Kanten, Fragen; ``an`` =
+    #: der Reiter „Ablauf“ ist eingeschaltet, sonst läuft der Plan als Kette
+    ablauf: Ablauf = field(default_factory=Ablauf)
     #: Aus einem Paket (Migration 033, `docs/plan_import_links_plaene.md` §3): das Paket, der
     #: Schlüssel des Plans darin und der Paketstand, mit dem ein Update Geändertes erkennt
     package_id: str | None = None

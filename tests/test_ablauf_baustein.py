@@ -1,0 +1,214 @@
+"""Gezeichneter Ablauf (Ben, 8.11.2026 spät, `docs/plan_verzweigungen.md` §8, G1/G2): der
+Baustein folgt Kanten — Start, reguläre Kante, Einschub mit „◀ zurück“, Schleife, Pflicht,
+Skala-Kante mit „ausführen“, Frage als Entscheidungsknoten, Ende über eine Kante."""
+
+from __future__ import annotations
+
+from trainingsapp.core import ablauf as ab
+from trainingsapp.core.ablauf import Ablauf, Frage, Kante
+from trainingsapp.core.plan_durchlauf import Schritt
+from trainingsapp.core.timer import Abschnitt, TimerProfil
+from trainingsapp.devices.plan_ablauf import (
+    FERTIG,
+    HART,
+    PAUSE,
+    UEBERZEIT,
+    UEBUNG,
+    WEICH,
+    PlanAblaufBaustein,
+)
+
+
+def _profil(sekunden: float) -> TimerProfil:
+    return TimerProfil(id="p", name="Halten", abschnitte=[Abschnitt("Halten", sekunden)])
+
+
+def _schritte(frage: Frage | None = None) -> list[Schritt]:
+    s = [
+        Schritt("w", "u1", "Wandsitz", _profil(10), "hold"),
+        Schritt("k", "u2", "Kniebeuge", None, None),
+        Schritt("p", "u3", "Planke", _profil(10), "hold"),
+        Schritt("d", "u4", "Dehnung Beine", None, None),
+    ]
+    if frage is not None:
+        s.append(Schritt(frage.id, "", frage.text, frage=frage))
+    return s
+
+
+def _baustein(ablauf: Ablauf, uebergang: str = HART, frage: Frage | None = None):
+    uhr = [0.0]
+    teil = PlanAblaufBaustein(
+        "p1", "Rumpf", _schritte(frage), uebergang=uebergang, workout=True, ablauf=ablauf
+    )
+    teil.uhr_uebernehmen(lambda: uhr[0])
+    teil.starten(0.0)
+    return teil, uhr
+
+
+def _lauf(teil, uhr, sekunden: float) -> list:
+    out = []
+    for _ in range(int(sekunden)):
+        uhr[0] += 1
+        out += teil.takt(uhr[0])
+    return out
+
+
+def _paare(ereignisse) -> list[tuple[str, str]]:
+    return [(e.quelle, e.art) for e in ereignisse]
+
+
+def test_kette_folgt_den_kanten_und_endet_ohne_kante() -> None:
+    a = ab.kette(["w", "k", "p"])
+    teil, uhr = _baustein(a)
+    assert teil.schritt.item_id == "w" and teil.durchlauf == 1
+    _lauf(teil, uhr, 10)
+    assert teil.schritt.item_id == "k" and teil.phase == UEBUNG  # hart: sofort weiter
+    teil.gemacht()
+    assert teil.schritt.item_id == "p"
+    _lauf(teil, uhr, 10)
+    assert teil.phase == FERTIG  # Planke hat keine Kante → Ende
+    assert ab.bedarf(a, ["w", "k", "p", "d"]) == ["d"]
+
+
+def test_einschub_mit_zurueck_geht_zur_naechsten_des_ursprungs() -> None:
+    a = Ablauf(
+        True,
+        "w",
+        (
+            Kante("w", "k"),
+            Kante("w", "d", ab.SKALA, 7, text="Beine krampfen"),
+            Kante("d", ab.ZURUECK),
+            Kante("k", "p"),
+        ),
+    )
+    teil, uhr = _baustein(a, WEICH)
+    _lauf(teil, uhr, 10)
+    assert teil.phase == UEBERZEIT
+    staende = teil.kanten_stand()
+    assert [s.kante.nach for s in staende] == ["k", "d"]
+    assert staende[0].gangbar and not staende[1].erfuellt and staende[1].unpruefbar
+    teil.antworten(7)
+    staende = teil.kanten_stand()
+    assert staende[1].angeboten and teil.naechster == 3  # die Dehnung ist jetzt die reguläre
+    ereignisse = []
+    teil.kante_gehen(staende[1].kante)
+    ereignisse += teil.takt(uhr[0])
+    assert teil.schritt.item_id == "d"
+    kante = next(e for e in ereignisse if (e.quelle, e.art) == ("plan", "kante"))
+    assert kante.daten["von"] == "w" and kante.daten["nach"] == "d"
+    assert kante.daten["kante"] == "Beine krampfen"
+    # ◀ zurück: nicht zum Wandsitz, sondern zu dessen nächster Kante — der Kniebeuge
+    zurueck = teil.kanten_stand()[0]
+    assert zurueck.kante.zurueck and teil.kante_ziel(zurueck.kante) == 1
+    teil.kante_gehen(zurueck.kante)
+    assert teil.schritt.item_id == "k" and teil.verlauf == [0, 3, 1]
+
+
+def test_zurueck_mit_wiederholen_laesst_die_unterbrochene_noch_einmal_laufen() -> None:
+    a = Ablauf(
+        True, "w", (Kante("w", "k"), Kante("w", "d"), Kante("d", ab.ZURUECK, wiederholen=True))
+    )
+    teil, _uhr = _baustein(a)
+    teil.kante_gehen(teil.kanten_stand()[1].kante)
+    assert teil.schritt.item_id == "d"
+    teil.kante_gehen(teil.kanten_stand()[0].kante)
+    assert teil.schritt.item_id == "w" and teil.durchlauf == 2
+
+
+def test_schleife_bis_skala_und_pflicht_sperrt_die_anderen() -> None:
+    a = Ablauf(
+        True,
+        "p",
+        (
+            Kante("p", "k", ab.SKALA, 6, pflicht=True),
+            Kante("p", "p", text="noch einmal"),
+        ),
+    )
+    teil, uhr = _baustein(a)
+    _lauf(teil, uhr, 10)
+    # Hart, Timer ab, aber keine Kante gangbar: der Baustein wartet in der Pause
+    assert teil.phase == PAUSE
+    staende = teil.kanten_stand()
+    assert not staende[0].gangbar and staende[1].gesperrt
+    teil.antworten(4)
+    staende = teil.kanten_stand()
+    assert not staende[0].erfuellt and staende[1].gesperrt  # Pflicht sperrt weiter
+    teil.antworten(6)
+    staende = teil.kanten_stand()
+    assert staende[0].gangbar and staende[1].gangbar
+    teil.kante_gehen(staende[1].kante)
+    assert teil.schritt.item_id == "p" and teil.durchlauf == 2 and teil.skala_wert is None
+
+
+def test_ausfuehren_geht_von_selbst_sobald_der_timer_ab_ist() -> None:
+    a = Ablauf(True, "w", (Kante("w", "k"), Kante("w", "d", ab.SKALA, 7, ausfuehren=True)))
+    teil, uhr = _baustein(a, WEICH)
+    _lauf(teil, uhr, 3)
+    teil.antworten(8)  # der Timer läuft noch: nichts passiert (weich schubst nicht)
+    assert teil.schritt.item_id == "w"
+    _lauf(teil, uhr, 8)
+    assert teil.schritt.item_id == "d"  # Zeit ab → die erfüllte Kante geht von selbst
+
+
+def test_frage_verzweigt_nach_dem_wert_und_ende_ueber_kante() -> None:
+    frage = Frage("f", "Wie fühlt es sich an?")
+    a = Ablauf(
+        True,
+        "w",
+        (
+            Kante("w", "f", ab.ZEIT),
+            Kante("f", "k", ab.SKALA, 0, 6),
+            Kante("f", "d", ab.SKALA, 7),
+            Kante("d", ab.ENDE),
+        ),
+        (frage,),
+    )
+    teil, uhr = _baustein(a, frage=frage)
+    ereignisse = _lauf(teil, uhr, 10)
+    assert teil.schritt.frage is frage and ("plan", "frage") in _paare(ereignisse)
+    assert teil.status() == "4 Übungen · 2 mit Timer"
+    teil.antworten(8)
+    ereignisse = teil.takt(uhr[0])
+    antwort = next(e for e in ereignisse if (e.quelle, e.art) == ("plan", "antwort"))
+    assert antwort.daten["wert"] == 8 and ("plan", "uebung_ende") not in _paare(ereignisse)
+    assert teil.schritt.item_id == "d"
+    ende = teil.kanten_stand()[0]
+    assert ende.kante.zum_ende
+    teil.kante_gehen(ende.kante)
+    ereignisse = teil.takt(uhr[0])
+    assert teil.phase == FERTIG and ("plan", "ende") in _paare(ereignisse)
+
+
+def test_ohne_an_bleibt_die_planfolge() -> None:
+    a = Ablauf(False, "p", (Kante("p", "w"),))
+    teil, _uhr = _baustein(a)
+    assert teil.ablauf is None and teil.schritt.item_id == "w"
+
+
+def test_hart_fuehrt_eine_erfuellte_kante_sofort_aus_auch_mitten_im_timer() -> None:
+    a = Ablauf(True, "w", (Kante("w", "k"), Kante("w", "d", ab.SKALA, 7, ausfuehren=True)))
+    teil, uhr = _baustein(a, HART)
+    _lauf(teil, uhr, 3)
+    teil.antworten(8)
+    assert teil.schritt.item_id == "d" and teil.ergebnisse["w"] == "fertig"
+
+
+def test_ausgelassene_knoten_werden_durchlaufen() -> None:
+    """Heute schon gemacht (abgewählt) oder im Papierkorb: der Knoten fehlt unter den
+    Schritten — Start und Kanten gehen durch ihn hindurch, statt das Workout zu beenden."""
+    a = Ablauf(True, "x", (Kante("x", "w"), Kante("w", "y"), Kante("y", "p")))
+    teil, uhr = _baustein(a)  # „x“ und „y“ gibt es nicht unter den Schritten
+    assert teil.schritt.item_id == "w" and not teil.hat("x") and teil.hat("w")
+    assert teil.kante_ziel(teil.kanten_stand()[0].kante) == 2  # durch „y“ zur Planke
+    _lauf(teil, uhr, 10)
+    assert teil.schritt.item_id == "p" and teil.phase == UEBUNG
+
+
+def test_schleife_zaehlt_die_durchlaeufe_im_verlauf() -> None:
+    a = Ablauf(True, "w", (Kante("w", "w", text="noch einmal"), Kante("w", "k")))
+    teil, uhr = _baustein(a)
+    _lauf(teil, uhr, 10)  # hart: die erste Kante ist die reguläre — die Schleife
+    _lauf(teil, uhr, 10)
+    assert teil.schritt.item_id == "w" and teil.durchlauf == 3 and teil.verlauf == [0, 0, 0]
+    teil.kante_gehen(teil.kanten_stand()[1].kante)
+    assert teil.schritt.item_id == "k"

@@ -302,10 +302,10 @@ in Dropdowns (P108 wird damit „ja“).
 | Stufe | Inhalt | Aufwand | Braucht |
 |---|---|---|---|
 | **G0 Skizzen** | Reiter „Ablauf“ mit Palette, Start-Slot, Knoten, Kanten-Etikett, Blatt der Kante, Entscheidungsknoten, Workout mit Kanten-Knöpfen — **gezeichnet 8.11.2026**, Reihe E (E1–E6) auf dem Canvas <https://claude.ai/artifact/THG2KrMi4jET9N2XkHRk3J>, Erläuterung §8.6 | klein | P113–P115 |
-| **G1 Modell** | `Kante(von, nach, bedingung, eingabe, rueckkehr)`, `Plan.start`, `PlanItem.beiname`, Migration; heutige Bedingungen → Kante „erfüllt →“; `schleifen`/Prüfung auf Kanten | mittel | G0 |
-| **G2 Baustein + Workout** | `PlanAblaufBaustein` folgt Kanten (Start, frei/Auslöser/Pflicht, zurück), Fokus zeigt Kanten als Knöpfe, Entscheidungsknoten als Frage | mittel | G1 |
-| **G3 Reiter „Ablauf“** | Palette (Draggable), Slots (DragTarget), Zeichnung (InteractiveViewer + Canvas, Auto-Layout), „+“/„Bestehende wählen“, Kanten-Blatt, Vernebeln, „Pfad abspielen“; Knopf „Ablauf zeichnen“ am Plan | groß | G2 |
-| **G4 Paket + Auswertung** | `kanten[]` im Paket, Kurse; Kantenstärke nach Häufigkeit | mittel | G3 |
+| **G1 Modell** | `Kante(von, nach, bedingung, eingabe, rueckkehr)`, `Plan.start`, `PlanItem.beiname`, Migration; heutige Bedingungen → Kante „erfüllt →“; `schleifen`/Prüfung auf Kanten — **gebaut 8.11.2026** (§8.7) | mittel | G0 |
+| **G2 Baustein + Workout** | `PlanAblaufBaustein` folgt Kanten (Start, frei/Auslöser/Pflicht, zurück), Fokus zeigt Kanten als Knöpfe, Entscheidungsknoten als Frage — **gebaut 8.11.2026** (§8.7) | mittel | G1 |
+| **G3 Reiter „Ablauf“** | Palette (Draggable), Slots (DragTarget), Zeichnung (InteractiveViewer + Canvas, Auto-Layout), „+“/„Bestehende wählen“, Kanten-Blatt, Vernebeln, „Pfad abspielen“; Knopf „Ablauf zeichnen“ am Plan — **gebaut 8.11.2026** (§8.7) | groß | G2 |
+| **G4 Paket + Auswertung** | `kanten[]` im Paket, Kurse; Kantenstärke nach Häufigkeit — **gebaut 8.11.2026** (§8.7) | mittel | G3 |
 
 ### 8.6 Skizzen Reihe E (G0, 8.11.2026)
 
@@ -320,9 +320,64 @@ Sechs Handy-Bilder auf dem Design-Canvas (Reihe E, unter Reihe D):
 | **E5** Ablaufbild im Workout | Dieselbe Zeichnung gezoomt und geschoben; laufender Knoten pulsiert; Einschub-Weg und Dehnung auf 25 % vernebelt | Tipp auf Linie oder Knoten = vernebeln, lang drücken = nur dieser Weg, „Alles zeigen“ hebt auf; nur Anzeige (P112) |
 | **E6** Fokus mit Kanten | Timer ins Minus (weich), die Frage des Entscheidungsknotens als Chips 0–10, die Kanten als Knöpfe: der von der Antwort **angebotene** Weg betont und mit „· danach Kniebeuge“, der reguläre Weg darunter, dann Noch einmal · Pause · Abbrechen | Bis drei Wege nebeneinander, ab vier gestapelt (P114) |
 
+### 8.7 Umsetzungsstand (G1–G4, 8.11.2026, Ben: „bau das alles“)
+
+**Gebaut** in einer Sitzung, Migration 044 (`plan.ablauf_json`, `plan_item.beiname`):
+
+- **G1 Modell** — `core/ablauf.py`: `Kante(von, nach, ausloeser frei|zeit|wdh|skala, n, bis,
+  pflicht, ausfuehren, wiederholen, text, inhalt)`, `Frage(id, text, min, max)`,
+  `Ablauf(an, start, kanten, fragen)`; `kette`, `aus_bedingungen` (die heutigen Zweige,
+  dann/sonst und Wege werden beim Einschalten einmal zu Kanten), `kanten_pruefen`/`regulaere`
+  (Pflicht sperrt die anderen; die reguläre Kante ist die erste angebotene, sonst die erste
+  freie), `von_selbst`/`bedarf` (Bedarfsübung = nicht über erste Kanten erreichbar),
+  `hauptpfad`, `ohne_ausweg`, `pruefung`, `weg_durch`, `layout` (Spalte/Ebene), Paket
+  `als_position`/`aus_position`/`ablauf_pruefen`. `Schritt.frage`/`beiname`,
+  `PlanRepo.ablauf_setzen`/`beiname_setzen`, Entfernen einer Planübung nimmt ihre Kanten mit.
+- **G2 Baustein + Workout** — `PlanAblaufBaustein(ablauf=)`: Start = Startknoten, nach jeder
+  Übung die reguläre Kante; keine gangbar → Pause bis zur Wahl; `kante_gehen` (``plan/kante``
+  mit `von`/`nach`/`kante`), `antworten` (Skala; eine **Frage** verzweigt sofort), `_auto_kanten`
+  (``ausfuehren``: hart sofort, auch mitten im Timer; weich erst bei Zeit ab — P109: die App
+  schubst niemanden), `◀ zurück` über den `verlauf` (zur unterbrochenen Übung oder zu deren
+  nächster Kante, auch verschachtelt), `durchlauf`. Fragen sind Schritte ohne Übung
+  (``plan/frage``, ``plan/antwort``, kein Eintrag). **Ausgelassene Knoten** (heute schon
+  gemacht und abgewählt, Übung im Papierkorb) werden durchlaufen: Start und Kanten gehen über
+  ihre erste Kante weiter, statt das Workout zu beenden (`_ziel`). Takt und Zähler hängen sich
+  je Durchlauf neu an (auch in Schleifen).
+  `views/workout.py`: Start-Bild mit Ablauf / **Bei Bedarf** („kommt dran: Skala ≥ 7 nach
+  Wandsitz“) und Knopf „Ablaufbild“; im Fokus die Kanten als Knöpfe (angeboten = betont, frei
+  = Weg, nicht erfüllt/gesperrt ausgegraut mit Grund), die Skala-Chips der Kanten bzw. der
+  Frage, freigeschalteter Inhalt der angebotenen Kante, Schrittliste als Verlauf + Hauptpfad.
+- **G3 Reiter „Ablauf“** — `views/ablauf.py` (Route `<Plan bearbeiten>/ablauf`) mit
+  `components/plan_reiter.py` (Übungen · Uhren · Ablauf, der dritte erst mit eingeschaltetem
+  Ablauf), Palette (`ft.Draggable`, Suche; antippen = in den ersten Slot bzw. unter den
+  gewählten Knoten), `components/ablaufbild.py` (`ft.InteractiveViewer` + `ft.Canvas`: Start-
+  Pille, Knoten mit Übungsbild/Nummer/Beiname, Fragen blau, Kanten mit Pfeil — Bedarf
+  gestrichelt, ◀ zurück gepunktet, Schleife als Bogen —, Etiketten als Tipp-Punkt, Slots als
+  `ft.DragTarget`, Vernebeln 25 %, Kantenstärke nach Häufigkeit), „+“-Menü (E2 + Übung
+  einstellen, Beiname, Frage ändern, Als Start, Aus dem Plan nehmen), „Bestehende wählen“
+  → Zielknoten antippen, Kanten-Blatt (E3), Fragen-Blatt, Beiname-Blatt, lang drücken = nur
+  dieser Weg, „Alles zeigen“, „Pfad abspielen“ am Start. Zeile „Ablauf“ im Plan-Editor,
+  Einführung mit „Ablauf zeichnen“, „Als Kette“ schaltet ab (Kanten bleiben). Die Seite
+  **scrollt nicht** — in einer scrollenden Seite gewönne das senkrechte Scrollen gegen das
+  Schieben der Zeichnung (Flutter-Gestenarena); die Zeichnung füllt den Platz unter der
+  Palette. Die Palette scrollt waagerecht, eine Übung greift man mit einem Zug nach unten
+  (`Draggable.affinity` senkrecht); ein Slot leuchtet, solange eine Übung über ihm schwebt.
+  Im Workout öffnet „Ablaufbild“ ein hohes Blatt (``scrollable``, nicht ziehbar) mit „Pfad
+  abspielen“ ab dem laufenden Knoten.
+- **G4 Paket + Auswertung** — `plaene[].ablauf` (Positionen „#n“, Fragen „?n“, Kurse frei
+  Haus) und `beiname` je Planübung, `trainingsapp-paket pruefen`;
+  `EinheitRepo.kanten_gezaehlt` → dickere Kanten und „3×“ am Etikett im Editor und im Workout.
+
+**Nicht gebaut / offen:** Tipp auf einen Knoten im Workout wechselt nicht dorthin (P112, nur
+Anzeige); Ablaufbild klein im Fokus (P112); Kanten ziehen im Bild (V5 — bewusst nicht, §8.2);
+`PlanItem.bedingung` (W2–W4) gilt weiter nur ohne Ablauf; Gerätetest **T98** (Ziehen aus der
+Palette, Zoomen, Etiketten treffen, lang drücken).
+
 ## 9. Entscheidungen (Ergänzung)
 
 - **P113** Name des Reiters: „Ablauf“ (Vorschlag) statt „Verlauf“ (belegt durch Kurven/Tagebuch)?
-- **P114** Kanten je Knoten: keine harte Grenze, Hinweis ab vier?
+  **Gebaut mit „Ablauf“ (Ben, 8.11.2026: „bau das alles“).**
+- **P114** Kanten je Knoten: keine harte Grenze, Hinweis ab vier? **Gebaut: kein Limit,
+  `pruefung` sagt „4 Wege ab X — im Workout wird die Wahl länger“.**
 - **P115** „Eingabe davor“ als eigener **Entscheidungsknoten** (Frage im Bild) statt Sonderfall
-  an der Kante?
+  an der Kante? **Gebaut als `Frage`.**

@@ -145,6 +145,7 @@ from trainingsapp.ui.components.werte import wert_leiste
 from trainingsapp.ui.components.zaehlen import laeuft_hier, zaehl_zeile
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.ablauf import ablauf_zeile
 from trainingsapp.ui.views.leistungen import leistungen_blatt
 from trainingsapp.ui.views.plan_uhren import uhren_zeile
 from trainingsapp.ui.views.timer import timer_knopf
@@ -2449,6 +2450,8 @@ def plan_view(
             # Die Uhren aller Planübungen in einer Ansicht (K3) — statt der Karte
             # „Workout und Ablauf“
             uhren_zeile(state, plan, oeffner(f"{route}/uhren")),
+            # Der gezeichnete Ablauf (G3): Kanten, Bedarfsübungen, Fragen
+            ablauf_zeile(plan, oeffner(f"{route}/ablauf")),
             ft.Text(
                 "„Einstellen“ legt Ziel und Eingabe je Übung fest. Reihenfolge: am Griff ziehen "
                 "oder mit den Pfeilen. Eine Übung darf mehrmals im Plan stehen.",

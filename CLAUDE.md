@@ -275,6 +275,21 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   steht unter DFA α1, und Schwellen aus α1 (`core/hf_auswertung`, `AUSWERTUNG_VERSION` 4) gelten
   nur bei spontaner Atmung ab 9/min oder unbekannter Lage — sonst Grund statt Schwelle.
 
+- **Gezeichneter Ablauf** (Ben, 8.11.2026 spät, Vertrag `docs/plan_verzweigungen.md` §8; G1–G4
+  gebaut, Migration 044): Ein Plan ist eine Liste; der **Ablauf** (`core/ablauf.py`:
+  `Ablauf(an, start, kanten, fragen)`, `plan.ablauf_json`) legt darüber, wie es weitergeht —
+  **Knoten** sind Planübungen (mit `beiname`) und **Fragen** (Entscheidungsknoten ohne Übung),
+  **Kanten** tragen den Auslöser (frei · Zeit ab · Wdh. · Skala ≥ n bis m), **Pflicht**
+  (sperrt die anderen), **ausführen** (geht von selbst, nie bei laufendem Timer), Ziel auch
+  `ENDE` oder `ZURUECK` (Einschub: zur unterbrochenen Übung oder deren nächster Kante). Ohne
+  ``an`` läuft der Plan als **Kette** mit den Bedingungen (W2–W4) — nichts Bestehendes ändert
+  sich; „Ablauf zeichnen“ übersetzt sie einmal (`aus_bedingungen`). **Bedarfsübung** = nicht
+  über erste Kanten erreichbar (`von_selbst`). Die Rechnung lebt nur in `core/ablauf.py` und
+  `devices/plan_ablauf.py` (`kante_gehen`, `antworten`, `verlauf`); `ui/` zeichnet
+  (`components/ablaufbild.py`: InteractiveViewer + Canvas, Knoten nie frei verschoben, gezogen
+  wird nur **in** Slots; `views/ablauf.py` mit Palette, „+“-Menü, Kanten-Blatt). Zeitleiste
+  `plan/kante`, `plan/frage`, `plan/antwort`; Paket `plaene[].ablauf` mit Positionen.
+
 - **Taktgeber** (Ben, 5.11.2026, Vertrag `docs/plan_taktgeber.md`; Teil 1 T1–T3 gebaut): ein
   **Takt** ist eine Folge von Phasen (Name, Sekunden, Art `ein`/`aus`/`halten`/`ab`/`auf`/`frei`,
   Klang) mit Tempo, als Schleife, solange die Uhr läuft. Die Rechnung lebt **nur** in `core/takt.py`

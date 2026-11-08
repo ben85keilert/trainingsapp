@@ -28,6 +28,7 @@ from typing import Any
 
 from ..core import eintraege as offene
 from ..core import varianten
+from ..core.ablauf import Ablauf
 from ..core.bedingung import Bedingung
 from ..core.models import (
     EINGABE_CHIPS,
@@ -572,6 +573,11 @@ def _takt_lesen(text: str | None) -> Takt | None:
     return AUS if not tabelle else Takt.aus_dict(tabelle)
 
 
+def _ablauf_json(a: Ablauf) -> str | None:
+    """``plan.ablauf_json`` (Migration 044): NULL = kein Ablauf (Kette)."""
+    return None if a.leer else json.dumps(a.als_dict(), ensure_ascii=False)
+
+
 def _bedingung_json(b: Bedingung) -> str | None:
     """`Bedingung.als_dict` als Text — ``None``, wenn nichts eingestellt ist."""
     return None if b.leer else json.dumps(b.als_dict(), ensure_ascii=False, sort_keys=True)
@@ -810,8 +816,9 @@ class PlanRepo:
                 INSERT INTO plan (id, name, description, subject_id, created_at, updated_at,
                                   active, weekdays_json, course_chapter_id, timer_json,
                                   auto_next, pause_no_timer, package_id, package_key,
-                                  package_standard_json, workout, uebergang_hart, takt_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  package_standard_json, workout, uebergang_hart, takt_json,
+                                  ablauf_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -829,6 +836,7 @@ class PlanRepo:
                     workout = excluded.workout,
                     uebergang_hart = excluded.uebergang_hart,
                     takt_json = excluded.takt_json,
+                    ablauf_json = excluded.ablauf_json,
                     revision = revision + 1
                 """,
                 (
@@ -852,6 +860,7 @@ class PlanRepo:
                     int(plan.workout),
                     int(plan.uebergang_hart),
                     _takt_json(plan.takt) if plan.takt is not None else None,
+                    _ablauf_json(plan.ablauf),
                 ),
             )
             # Versteckte bleiben stehen: Übungen im Papierkorb und aus deaktivierten
@@ -910,6 +919,7 @@ class PlanRepo:
         return item
 
     def uebung_entfernen(self, item_id: str) -> None:
+        """Hart löschen — mit den Kanten des Ablaufs von und zu ihr (Migration 044)."""
         zeile = self.con.execute(
             "SELECT plan_id FROM plan_item WHERE id = ?", (item_id,)
         ).fetchone()
@@ -917,6 +927,38 @@ class PlanRepo:
             return
         with transaktion(self.con):
             self.con.execute("DELETE FROM plan_item WHERE id = ?", (item_id,))
+            ablauf = self.ablauf_laden(zeile["plan_id"])
+            if not ablauf.leer:
+                self._ablauf_schreiben(zeile["plan_id"], ablauf.ohne_knoten(item_id))
+            self._beruehrt(zeile["plan_id"])
+
+    def ablauf_laden(self, plan_id: str) -> Ablauf:
+        r = self.con.execute("SELECT ablauf_json FROM plan WHERE id = ?", (plan_id,)).fetchone()
+        return Ablauf.aus_dict(_tabelle_lesen(r["ablauf_json"])) if r else Ablauf()
+
+    def ablauf_setzen(self, plan_id: str, ablauf: Ablauf) -> None:
+        """Der gezeichnete Ablauf eines Plans (`core.ablauf`, Migration 044) — nur diese Spalte,
+        wie `plan_timer_setzen`; ein leerer Ablauf wird NULL."""
+        with transaktion(self.con):
+            self._ablauf_schreiben(plan_id, ablauf)
+            self._beruehrt(plan_id)
+
+    def _ablauf_schreiben(self, plan_id: str, ablauf: Ablauf) -> None:
+        self.con.execute(
+            "UPDATE plan SET ablauf_json = ? WHERE id = ?", (_ablauf_json(ablauf), plan_id)
+        )
+
+    def beiname_setzen(self, item_id: str, beiname: str) -> None:
+        """Der Beiname einer Planübung im Ablaufbild (Migration 044)."""
+        zeile = self.con.execute(
+            "SELECT plan_id FROM plan_item WHERE id = ?", (item_id,)
+        ).fetchone()
+        if zeile is None:
+            return
+        with transaktion(self.con):
+            self.con.execute(
+                "UPDATE plan_item SET beiname = ? WHERE id = ?", (beiname.strip(), item_id)
+            )
             self._beruehrt(zeile["plan_id"])
 
     def reihenfolge_setzen(self, plan_id: str, item_ids: list[str]) -> None:
@@ -1185,6 +1227,9 @@ class PlanRepo:
             self.timer_setzen(item.id, item.timer)
             self.sensor_takt_setzen(item.id, item.acc, item.takt)
             self.bedingung_setzen(item.id, item.bedingung)
+            self.con.execute(
+                "UPDATE plan_item SET beiname = ? WHERE id = ?", (item.beiname.strip(), item.id)
+            )
 
     def verwendungen(
         self, exercise_id: str, subject_id: str | None = None
@@ -1222,7 +1267,7 @@ class PlanRepo:
         self.con.execute(
             "INSERT INTO plan_item (id, plan_id, exercise_id, sort_order, target_json, note, "
             "input_mode, quick_json, fields_json, timer_json, acc_json, takt_json, "
-            "bedingung_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "bedingung_json, beiname) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 item.id,
                 item.plan_id,
@@ -1237,6 +1282,7 @@ class PlanRepo:
                 _sensor_json(item.acc),
                 _takt_json(item.takt),
                 _bedingung_json(item.bedingung),
+                item.beiname.strip(),
             ),
         )
 
@@ -1277,6 +1323,7 @@ class PlanRepo:
             acc=_sensor_lesen(r["acc_json"]),
             takt=_takt_lesen(r["takt_json"]),
             bedingung=Bedingung.aus_dict(_tabelle_lesen(r["bedingung_json"])),
+            beiname=r["beiname"] or "",
         )
 
     @staticmethod
@@ -1297,6 +1344,7 @@ class PlanRepo:
             workout=bool(r["workout"]),
             uebergang_hart=bool(r["uebergang_hart"]),
             takt=_takt_lesen(r["takt_json"]),
+            ablauf=Ablauf.aus_dict(_tabelle_lesen(r["ablauf_json"])),
             package_id=r["package_id"],
             package_key=r["package_key"],
             package_standard=_json_lesen(r["package_standard_json"], {}) or None,

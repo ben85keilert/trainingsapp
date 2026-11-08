@@ -233,6 +233,18 @@ zweig = "A"…"D", dann, sonst, wege = [{ ziel, text }] }` — `dann`, `sonst` u
 in IDs; `skala` ist eine Selbsteinschätzung ab `n`; P97), dazu `timer` (Plan-Timer),
 `weiter_automatisch` (seit Migration 043 = Übergang **hart**), `pause_ohne_timer`.
 
+**Gezeichneter Ablauf** (8.11.2026 spät, `docs/plan_verzweigungen.md` §8, G4): je Plan — auch
+in Kurskapiteln — wahlweise `ablauf = { an = true, start = "#1", kanten = [{ von, nach, ausloeser
+= "frei" | "zeit" | "wdh" | "skala", n, bis, pflicht, ausfuehren, wiederholen, text, inhalt = {
+text, url } }], fragen = [{ id = "?1", text, min, max }] }`. Knoten sind **Positionen**:
+Planübungen `"#n"`, Fragen (Entscheidungsknoten) `"?n"`, dazu `"__ende__"` (Ende des Workouts)
+und `"__zurueck__"` (dorthin, wo man herkam — Einschub; `wiederholen` = die unterbrochene noch
+einmal). Der Import übersetzt in IDs (eine fehlende Übung nimmt ihre Kanten mit), der Export
+schreibt den Ablauf nur, wenn der Plan einen hat; ohne `an` läuft der Plan als Kette mit den
+`bedingung`-Feldern. `trainingsapp-paket pruefen` meldet eine Kante ohne Position als Fehler,
+einen unbekannten Auslöser als Hinweis; ältere Apps übergehen das Feld. Je Planübung dazu
+`beiname` (Text, unterscheidet zwei gleiche Übungen im Bild: „2. Durchgang“).
+
 Import: Ein Paketplan wird **im aktiven Profil** angelegt; andere Profile bekommen ihn beim
 nächsten Start (`PaketRepo.plaene_nachlegen`). Ein neuer Stand gilt nur für einen Plan, den
 die Person nicht geändert hat (Vergleich mit `plan.package_standard_json`); im Papierkorb

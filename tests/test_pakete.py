@@ -1332,3 +1332,55 @@ def test_quelle_art_datei(con) -> None:
     assert p.quelle == "https://x/q.json" and p.quelle_art == "datei"
     pakete.quelle_setzen(inhalt.paket.id, None)
     assert pakete.laden(inhalt.paket.id).quelle_art == "index"
+
+
+def test_ablauf_reist_im_paket_mit_positionen_und_kommt_als_graph_zurueck(con) -> None:
+    """G4 (`docs/plan_verzweigungen.md` §8): der gezeichnete Ablauf eines Plans steht im Paket
+    als ``ablauf`` mit Positionen („#n“, Fragen „?n“) und Beinamen je Planübung; der Import
+    macht daraus wieder Kanten mit den IDs der neuen Planübungen, der Plan stimmt mit seinem
+    Paketstand überein."""
+    from trainingsapp.core import ablauf as ab
+    from trainingsapp.core.ablauf import Ablauf, Frage, Kante
+    from trainingsapp.core.pakete import paketplan_aus, plan_stand
+
+    pakete, plaene = PaketRepo(con), PlanRepo(con)
+    ich = _profil(con, "Ich")
+    roh = qigong_mit_plan(version=1)
+    roh["plaene"][0]["uebungen"][1]["beiname"] = "2. Durchgang"
+    roh["plaene"][0]["ablauf"] = {
+        "an": True,
+        "start": "#1",
+        "fragen": [{"id": "?1", "text": "Druck?"}],
+        "kanten": [
+            {"von": "#1", "nach": "?1", "ausloeser": "zeit"},
+            {"von": "?1", "nach": "#2", "ausloeser": "skala", "n": 0, "bis": 6},
+            {"von": "?1", "nach": "#1", "ausloeser": "skala", "n": 7, "text": "noch einmal"},
+            {"von": "#2", "nach": ab.ENDE},
+        ],
+    }
+    inhalt = paket_lesen(roh)
+    pakete.importieren(inhalt, subject_id=ich.id)
+    (plan,) = plaene.des_pakets(inhalt.paket.id, ich.id)
+    a, b = plan.items
+    assert b.beiname == "2. Durchgang" and plan.ablauf.an and plan.ablauf.start == a.id
+    (frage,) = plan.ablauf.fragen
+    assert frage.text == "Druck?" and frage.id != "?1"
+    assert [(k.von, k.nach) for k in plan.ablauf.kanten] == [
+        (a.id, frage.id),
+        (frage.id, b.id),
+        (frage.id, a.id),
+        (b.id, ab.ENDE),
+    ]
+    assert plan.ablauf.kanten[1].bis == 6 and plan.ablauf.kanten[2].text == "noch einmal"
+    assert plan_stand(paketplan_aus(plan, "morgen")) == plan.package_standard
+    # Export eines eigenen Plans: Positionen statt IDs
+    eigen = plaene.laden(plan.id)
+    eigen.ablauf = Ablauf(True, b.id, (Kante(b.id, a.id, ab.WDH, 12),), (Frage("x", "F"),))
+    d = paketplan_aus(eigen, "k").to_dict()
+    assert d["ablauf"]["start"] == "#2" and d["ablauf"]["kanten"][0] == {
+        "von": "#2",
+        "nach": "#1",
+        "ausloeser": "wdh",
+        "n": 12,
+    }
+    assert d["ablauf"]["fragen"][0]["id"] == "?1" and d["uebungen"][1]["beiname"] == "2. Durchgang"

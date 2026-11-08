@@ -325,6 +325,12 @@ class AppState:
     #: Workout, Bedingung „Skala“: die Selbsteinschätzung je Schritt-Durchlauf
     #: (``(item_id, start_t_s)`` → Wert), `views/workout.py`
     workout_skala: dict[tuple[str, float], float] = field(default_factory=dict)
+    #: Ablaufbild (`components/ablaufbild.py`): je Plan die vernebelten Knoten — für diese
+    #: Sitzung, im Editor wie im Workout
+    ablauf_vernebelt: dict[str, set[str]] = field(default_factory=dict)
+    #: Reiter „Ablauf“ (`views/ablauf.py`): je Plan der gewählte Knoten und die leeren Slots
+    ablauf_wahl: dict[str, str | None] = field(default_factory=dict)
+    ablauf_slots: dict[str, list[str]] = field(default_factory=dict)
     #: Nachtragen als Trainingsblock (P72, `views/nachtragen.py`): je Tag und Übung die Zeit,
     #: um die nachgetragen wird (``None`` = jetzt) — überlebt den Neubau der Ansicht und den
     #: Wechsel des Plans, fällt beim Verlassen weg

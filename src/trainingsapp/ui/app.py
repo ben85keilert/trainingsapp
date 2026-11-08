@@ -98,6 +98,7 @@ from trainingsapp.ui.flet_absicherung import methodenantworten_absichern, snackb
 from trainingsapp.ui.laufend import takt as laufend_takt
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.theme import anwenden, hintergrund_setzen
+from trainingsapp.ui.views.ablauf import ablauf_view
 from trainingsapp.ui.views.anhang import anhang_view
 from trainingsapp.ui.views.anhang_aufnahme import ARTEN, anhang_aufnahme_view, aufnahme_route
 from trainingsapp.ui.views.anhang_hochladen import (
@@ -545,6 +546,8 @@ def main(page: ft.Page) -> None:
             uebungsseite_im_plan(plan, basis, f"{basis}/ziel/{info[0].id}", info)
         elif rest[:1] == ["uhren"]:  # der Uhrenplan (K3, `docs/plan_uhren.md` §4.6)
             ablegen(lambda: plan_uhren_view(page, state, plan, basis))
+        elif rest[:1] == ["ablauf"]:  # der Reiter „Ablauf“ (G3, `docs/plan_verzweigungen.md` §8)
+            ablegen(lambda: ablauf_view(page, state, plan, basis))
 
     def plan_routen(teile: list[str]) -> None:
         plan = state.plaene.laden(teile[1])

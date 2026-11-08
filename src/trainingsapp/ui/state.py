@@ -121,10 +121,6 @@ from trainingsapp.devices.bekannte import (
 STANDARD_PROFILNAME = "Ich"
 
 
-#: Wo Stoppuhr und Timer in der Übung stehen (Ben, 18.10.2026: „Kannst du Variante A und
-#: B2 einbauen. In den Haupt-Einstellungen kann man beides umstellen, Standard ist A.“)
-UHR_ZEILE = "zeile"
-UHR_KNOEPFE = "knoepfe"
 #: Die Ebenen des Fokus (Trainingsansicht, 7.11.2026): Takt-Animation, Bild der Bewegung,
 #: Herzfrequenz — als Chips oben umschaltbar, gemerkt je Gerät
 FOKUS_TAKT = "takt"
@@ -150,11 +146,6 @@ FOKUS_KURVEN: dict[str, str] = {
     "rsa": "RSA",
 }
 FOKUS_KURVEN_VORGABE: tuple[str, ...] = ("hf", "rmssd")
-
-UHR_DARSTELLUNGEN: dict[str, str] = {
-    UHR_ZEILE: "Eigene Zeile: links die Wahl, rechts Start",
-    UHR_KNOEPFE: "Knöpfe „Uhr“ und „Timer“ neben „Gemacht“",
-}
 
 
 #: Benachrichtigung über Updates (Label unter dem Zahnrad): Schlüssel → Anzeige
@@ -732,16 +723,6 @@ class AppState:
         self.einstellungen.setzen(
             SettingRepo.FOKUS_KURVEN, ",".join(k for k in FOKUS_KURVEN if k in kurven) or "-"
         )
-
-    def uhr_darstellung(self) -> str:
-        """Wo Stoppuhr und Timer in der Übung stehen — `UHR_ZEILE` (Vorgabe) oder
-        `UHR_KNOEPFE`."""
-        wert = self.einstellungen.lesen(SettingRepo.UHR_DARSTELLUNG, UHR_ZEILE)
-        return wert if wert in UHR_DARSTELLUNGEN else UHR_ZEILE
-
-    def uhr_darstellung_setzen(self, wert: str) -> None:
-        if wert in UHR_DARSTELLUNGEN:
-            self.einstellungen.setzen(SettingRepo.UHR_DARSTELLUNG, wert)
 
     def eintrag_offen_min(self) -> int:
         """Minuten ohne Satz, nach denen ein Eintrag als geschlossen gilt (`core.eintraege`;

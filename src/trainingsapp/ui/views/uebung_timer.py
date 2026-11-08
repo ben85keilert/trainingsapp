@@ -35,7 +35,7 @@ import flet as ft
 from trainingsapp.core.models import Exercise, Plan, PlanItem
 from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.takt import Takt
-from trainingsapp.core.timer import TimerProfil, dauer_text, einmal_timer
+from trainingsapp.core.timer import TimerProfil, dauer_text, einmal_timer, stoppuhr
 from trainingsapp.core.uebung_timer import (
     TimerWahl,
     profile_der_uebung,
@@ -210,12 +210,16 @@ def uebung_timer_view(
 ) -> ft.View:
     route = uebung_timer_route(basis, uebung, item)
     key = schluessel(uebung, item)
-    auswahl = profile_zur_wahl(uebung, plan, item)
+    # Dieselbe Wahl wie das ▾ der Zeile — mit der Stoppuhr (K2, Ben 8.11.2026)
+    auswahl = profile_zur_wahl(uebung, plan, item, mit_stoppuhr=True)
     if einmal := state.uhr_einmal.get(key):
-        auswahl = [einmal_timer(einmal), *auswahl]
-    profil = timer_fuer(uebung, plan, item)
+        auswahl.insert(1, einmal_timer(einmal))
+    eingestellt = timer_fuer(uebung, plan, item)
+    #: ohne Timer die Stoppuhr — es gibt immer eine Uhr (§4)
+    profil: TimerProfil | None = eingestellt or stoppuhr()
     if gemerkt := state.uhr_wahl.get(key):
         profil = next((p for p in auswahl if p.id == gemerkt), profil)
+    eigene_kopie = TimerWahl.aus_dict(item.timer).eigen if item is not None else None
     #: „zählt“ — für jetzt, sonst wie die Übung (P79 D2/D3)
     zaehlt = state.uhr_zaehlt.get(key, uebung.zeit_zaehlt)
     felder = uebung_lauf.felder_der_uebung(uebung, item)
@@ -413,6 +417,51 @@ def uebung_timer_view(
             ),
         )
 
+    def gehe_zu(ziel: str) -> Callable[[], Any]:
+        async def handler() -> None:
+            await page.push_route(ziel)
+
+        return handler
+
+    def festlegen_knoepfe() -> list[ft.Control]:
+        """Dauerhaft festlegen — die Links statt des alten Hinweistexts (K2): die Übung
+        (überall), der Plan (nur hier); die eigene Kopie der Planübung hat den Stift."""
+        assert profil is not None
+        knoepfe: list[ft.Control] = []
+        if eigene_kopie is not None and profil.id == eigene_kopie.id:
+            knoepfe.append(
+                ft.IconButton(
+                    ft.Icons.EDIT_OUTLINED,
+                    icon_size=18,
+                    tooltip="Abschnitte nur hier ändern",
+                    on_click=gehe_zu(f"{route}/bearbeiten/{profil.id}"),
+                )
+            )
+        elif item is None and not profil.ist_einmal:
+            knoepfe.append(
+                ft.IconButton(
+                    ft.Icons.EDIT_OUTLINED,
+                    icon_size=18,
+                    tooltip="Timer der Übung bearbeiten",
+                    on_click=gehe_zu(
+                        formular_profil_route(f"/uebung/{uebung.id}/bearbeiten", profil.id)
+                    ),
+                )
+            )
+        if item is not None and plan is not None:
+            knoepfe.append(
+                ft.TextButton(
+                    "Im Plan einstellen",
+                    on_click=gehe_zu(f"/plan/{plan.id}/bearbeiten/ziel/{item.id}"),
+                )
+            )
+        knoepfe.append(
+            ft.TextButton(
+                "In der Übung festlegen", on_click=gehe_zu(f"/uebung/{uebung.id}/bearbeiten")
+            )
+        )
+        return knoepfe
+
     def profil_karte() -> ft.Control:
         assert profil is not None
         zeilen: list[ft.Control] = [
@@ -440,13 +489,8 @@ def uebung_timer_view(
                             ft.Text("zählt nicht", size=12),
                         ],
                     ),
-                    ft.Text(
-                        "ändern: in „Übung bearbeiten“",
-                        size=12,
-                        opacity=0.7,
-                        expand=True,
-                        text_align=ft.TextAlign.RIGHT,
-                    ),
+                    ft.Container(expand=True),
+                    *festlegen_knoepfe(),
                 ],
             )
         ]
@@ -599,21 +643,31 @@ def uebung_timer_view(
             ft.Row(wrap=True, spacing=8, run_spacing=8, controls=chips),
             takt_zeile_vorher(),
         ]
-        if profil is None:
-            teile += [
-                hinweis(
-                    "Noch kein Timer für diese Übung — tippe auf die Zeit und stell einen ohne "
-                    "Ablauf. Profile mit Abschnitten legst du in „Übung bearbeiten“ an."
-                ),
-                zaehlt_teil(),
-            ]
+        if profil is None:  # pragma: no cover — es gibt immer eine Uhr (Stoppuhr)
             return teile
+        if eingestellt is None and profil.ist_stoppuhr:
+            teile.append(
+                ft.Row(
+                    wrap=True,
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text(
+                            "Kein Timer für diese Übung — die Stoppuhr zählt vorwärts. Eine "
+                            "Zeit stellst du oben am Etikett.",
+                            size=12,
+                            opacity=0.7,
+                        ),
+                        *festlegen_knoepfe(),
+                    ],
+                )
+            )
         bereit = _bereitgestellt(state, uebung.id)
         # Eine für sich laufende Messung blockiert nicht — sie kommt mit (`platz_machen`)
         andere = None if einheit_ui.platz_frei(state) else einheit_ui.laeuft(state)
         teile.extend(
             [
-                profil_karte(),
+                *([] if profil.ist_stoppuhr else [profil_karte()]),
                 zaehlt_teil(),
                 ft.Row(
                     spacing=8,
@@ -678,6 +732,8 @@ def uebung_timer_view(
             auffrischen()
 
         fokus.halt_knopf.on_click = anhalten
+        # Dieselben Knöpfe in derselben Reihenfolge wie die Karte in der Übung (K2):
+        # Pause · Nächster · Fertig, darunter Abbrechen
         return [
             *fokus.bauen(e, lauf),
             ft.Row(
@@ -685,22 +741,23 @@ def uebung_timer_view(
                 controls=[
                     fokus.halt_knopf,
                     ft.OutlinedButton(
-                        "Nächster", icon=ft.Icons.SKIP_NEXT, on_click=weiter, expand=True
+                        "Nächster",
+                        icon=ft.Icons.SKIP_NEXT,
+                        on_click=weiter,
+                        visible=not lauf.vorwaerts and lauf.stand().abschnitte > 1,
                     ),
+                    ft.FilledButton("Fertig", icon=ft.Icons.CHECK, on_click=fertig, expand=True),
                 ],
             ),
             ft.Row(
-                spacing=8,
+                alignment=ft.MainAxisAlignment.CENTER,
                 controls=[
-                    ft.FilledButton("Fertig", icon=ft.Icons.CHECK, on_click=fertig, expand=True),
-                    ft.OutlinedButton(
+                    ft.TextButton(
                         "Abbrechen",
                         icon=ft.Icons.CLOSE,
+                        tooltip="Beenden ohne Eintrag",
+                        style=ft.ButtonStyle(color=ft.Colors.ERROR),
                         on_click=abbrechen,
-                        expand=True,
-                        style=ft.ButtonStyle(
-                            color=ft.Colors.ERROR, side=ft.BorderSide(1, ft.Colors.ERROR)
-                        ),
                     ),
                 ],
             ),

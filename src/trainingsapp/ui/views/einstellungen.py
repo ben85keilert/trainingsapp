@@ -36,7 +36,7 @@ from trainingsapp.ui.components.hilfe import hilfe_oeffner
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.scroll import scroll_merken
-from trainingsapp.ui.state import UHR_DARSTELLUNGEN, AppState
+from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.einstellungen_darstellung import darstellung_karte
 from trainingsapp.ui.views.timer import timer_knopf
 
@@ -89,9 +89,6 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
 
     def offen_setzen(e: ft.Event[ft.Dropdown]) -> None:
         state.eintrag_offen_min_setzen(int(e.control.value or OFFEN_MIN_VORGABE))
-
-    def uhr_setzen(e: ft.Event[ft.Dropdown]) -> None:
-        state.uhr_darstellung_setzen(str(e.control.value))
 
     def takt_vibration_setzen(e: ft.Event[ft.Switch]) -> None:
         state.takt_vibration_setzen(bool(e.control.value))
@@ -321,18 +318,9 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 "Nach dieser Zeit ohne neuen Satz gilt er als abgeschlossen — "
                                 "der nächste Wert beginnt einen neuen Eintrag."
                             ),
-                            ft.Dropdown(
-                                label="Stoppuhr und Timer in der Übung",
-                                value=state.uhr_darstellung(),
-                                options=[
-                                    ft.DropdownOption(key=key, text=text)
-                                    for key, text in UHR_DARSTELLUNGEN.items()
-                                ],
-                                on_select=uhr_setzen,
-                                expand=True,
-                            ),
                             hinweis(
-                                "Ob und wie die Zeit zählt, steht an jeder Übung (Übung "
+                                "Die Uhr steht als erste Zeile der Karte „Eintragen“ jeder "
+                                "Übung. Ob und wie ihre Zeit zählt, steht an der Übung (Übung "
                                 "bearbeiten → Uhr: Uhr an/aus, „zählt“, „Zählt als“)."
                             ),
                             ft.Switch(

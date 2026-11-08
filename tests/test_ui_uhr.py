@@ -17,7 +17,7 @@ from trainingsapp.core.models import Exercise, Plan, PlanItem  # noqa: E402
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld  # noqa: E402
 from trainingsapp.core.uebung_timer import TimerWahl  # noqa: E402
 from trainingsapp.devices.messlauf import Messlauf  # noqa: E402
-from trainingsapp.ui.state import UHR_KNOEPFE, AppState  # noqa: E402
+from trainingsapp.ui.state import AppState  # noqa: E402
 from trainingsapp.ui.views.plan import einzel_plan, plan_view  # noqa: E402
 
 
@@ -157,7 +157,7 @@ async def test_abbrechen_ohne_rueckfrage_traegt_nichts_ein(umgebung) -> None:
     ansicht = plan_view(seite, state, einzel_plan(uebung), einzel=True)
     _symbol(ansicht, ft.Icons.PLAY_ARROW, "starten").on_click()
     await _sekunden(state, uhr, gurt, 15)
-    _symbol(_ansicht(state, uebung), ft.Icons.CLOSE, "Abbrechen").on_click()
+    _knopf(_ansicht(state, uebung), "Abbrechen").on_click()
     assert seite.dialoge == []  # keine Rückfrage
     await _sekunden(state, uhr, gurt, 1)
     await _bis_vorbei(state)
@@ -177,24 +177,6 @@ async def test_ohne_haltezeit_zaehlt_die_uhr_als_zeit(umgebung) -> None:
     (eintrag,) = _eintraege(state)
     assert eintrag.result == {"duration": 75}
     assert [f.label for f in eintrag.spec_snapshot.fields] == ["Zeit"]
-
-
-async def test_knoepfe_uhr_und_timer_neben_gemacht(umgebung) -> None:
-    """Darstellung „Knöpfe“ (B2): „Uhr“ startet die Stoppuhr; „Timer“ ohne Timer der Übung
-    führt zu ihm, mit einem startet er ihn."""
-    state, uhr, gurt = umgebung
-    state.uhr_darstellung_setzen(UHR_KNOEPFE)
-    uebung = _wandsitz(state)
-    ansicht = _ansicht(state, uebung)
-    assert "Stoppuhr" not in _texte(ansicht)  # keine Zeile
-    _knopf(ansicht, "Timer")
-    _knopf(ansicht, "Uhr").on_click()
-    e = state.einheit
-    assert e is not None and e.timer.lauf.vorwaerts
-    assert "Stoppuhr läuft" in _texte(_ansicht(state, uebung))  # dieselbe Anzeige
-    e.timer.lauf.abbrechen()
-    await _sekunden(state, uhr, gurt, 1)
-    await _bis_vorbei(state)
 
 
 def test_uhr_aus_keine_uhr_in_der_uebung(umgebung) -> None:

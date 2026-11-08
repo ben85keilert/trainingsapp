@@ -1890,11 +1890,6 @@ def uebung_bearbeiten(
                                     icon=ft.Icons.MORE_TIME,
                                     on_click=timer_hinzufuegen,
                                 ),
-                                ft.TextButton(
-                                    "Darstellung der Uhr",
-                                    icon=ft.Icons.CHEVRON_RIGHT,
-                                    on_click=gehe_zu("/einstellungen"),
-                                ),
                             ],
                         ),
                         abschnitt(

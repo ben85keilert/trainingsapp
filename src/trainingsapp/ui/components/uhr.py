@@ -1,7 +1,7 @@
 """Stoppuhr und Timer in der Übung (Ben, 18.10.2026; `docs/plan_stoppuhr.md` §5).
 
-Zwei Darstellungen, umschaltbar unter Einstellungen → Übungen
-(`AppState.uhr_darstellung`, Vorgabe die Zeile):
+Eine Darstellung (P103, Ben 8.11.2026 — die „Knöpfe“ neben „Gemacht“ sind weg, die Zeile
+kann alles):
 
 - **Zeile** (Skizzen A1–A4): links als Text, was startet — die Stoppuhr oder ein Timer der
   Übung, ▾ wählt um —, daneben die Zeit, rechts „Bereitstellen“ und ein einziger ▶. So liest
@@ -9,11 +9,12 @@ Zwei Darstellungen, umschaltbar unter Einstellungen → Übungen
   der Karte „Eintragen“**, vor Wiederholungen und Zeit (Ben, 27.10.2026: die Stoppuhr zählt
   als Zeit, also unter die Einstellungen zu dem, was gesammelt wird); ohne Mengen allein unter
   der Ausführung, in einem zugeklappten Block nur die laufende Anzeige (`views/plan.py`).
-- **Knöpfe** (Skizze B2): „Uhr“ und „Timer“ zwischen „Gemacht“ und „Notiz“.
 
-Läuft die Uhr dieser Übung, zeigen beide dieselbe Anzeige: die Zeit, Anhalten bzw. Weiter
-(„Pause pausiert und beendet nicht“), **Fertig** (trägt ein, wie die Übung zählt) und
-**Abbrechen** — ohne Rückfrage, trägt nichts ein. Die Wahl im ▾ gilt für diese Sitzung der
+Läuft die Uhr dieser Übung, zeigt die Karte die Zeit und **dieselben Knöpfe wie der Fokus
+und die Timer-Seite** (`docs/plan_uhren.md` §2): **Pause · Weiter** („Pause pausiert und
+beendet nicht“), **Nächster** (Abschnitt), **Fertig** (trägt ein, wie die Übung zählt) und
+**Abbrechen** — ohne Rückfrage, trägt nichts ein; dazu der Takt-Knopf für jetzt und ⤢ Fokus.
+Die Wahl im ▾ gilt für diese Sitzung der
 App und ändert keine Einstellung (Ben: „wenn im Übungsfeld ein anderer Timer ausgewählt
 wurde, ändert sich keine Einstellung“); gespeichert wird nur in Übung bzw. Planübung.
 Ob die Uhr überhaupt dasteht, sagt `core.uebung_timer.uhr_an`.
@@ -58,7 +59,6 @@ from trainingsapp.ui.components.dialoge import schliessen
 from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
 from trainingsapp.ui.components.takt_blatt import TempoRegler, takt_anbringen, takt_knopf
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
-from trainingsapp.ui.state import UHR_KNOEPFE
 
 #: Eckenradius wie die Knöpfe im Plan
 ECKEN = ft.RoundedRectangleBorder(radius=14)
@@ -233,9 +233,6 @@ def uhr_teile(
 
         return handler
 
-    if state.uhr_darstellung() == UHR_KNOEPFE:
-        knoepfe = _knoepfe(uebung, plan, item, starten, timer_oeffnen)
-        return UhrTeile(knoepfe=[*knoepfe, zaehlt_knopf, takt_wahl])
     profil = gesetzt(state, uebung, plan, item)
 
     def zeit_stellen() -> None:
@@ -347,67 +344,10 @@ def uhr_teile(
     return UhrTeile(zeile=zeile)
 
 
-def _knoepfe(
-    uebung: Exercise,
-    plan: Plan | None,
-    item: PlanItem | None,
-    starten: Callable[[TimerProfil], Callable[[], None]],
-    timer_oeffnen: Callable[[], object],
-) -> list[ft.Control]:
-    """Darstellung „Knöpfe“ (Skizze B2): „Uhr“ startet die Stoppuhr; „Timer“ startet den
-    Timer der Übung — bei mehreren mit Auswahl, ohne einen führt er zum Timer der Übung."""
-    uhr = _knopf("Uhr", ft.Icons.PLAY_ARROW, starten(stoppuhr()))
-    timer = [p for p in angebot(uebung, plan, item) if not p.ist_stoppuhr]
-    if not timer:
-        return [uhr, _knopf("Timer", ft.Icons.TIMER_OUTLINED, timer_oeffnen)]
-    if len(timer) == 1:
-        return [uhr, _knopf("Timer", ft.Icons.TIMER_OUTLINED, starten(timer[0]))]
-    auswahl = ft.PopupMenuButton(
-        tooltip="Timer wählen und starten",
-        content=ft.Container(
-            height=48,
-            padding=ft.Padding.symmetric(horizontal=14),
-            border_radius=14,
-            bgcolor=ft.Colors.SECONDARY_CONTAINER,
-            content=ft.Row(
-                tight=True,
-                spacing=6,
-                controls=[
-                    ft.Icon(ft.Icons.TIMER_OUTLINED, size=18),
-                    ft.Text("Timer"),
-                    ft.Icon(ft.Icons.ARROW_DROP_DOWN, size=18),
-                ],
-            ),
-        ),
-        items=[
-            *(
-                ft.PopupMenuItem(
-                    icon=ft.Icons.PLAY_ARROW,
-                    content=ft.Column(
-                        spacing=0,
-                        tight=True,
-                        controls=[
-                            ft.Text(p.anzeigename, weight=ft.FontWeight.W_600),
-                            ft.Text(p.kurztext(), size=12, opacity=0.7),
-                        ],
-                    ),
-                    on_click=starten(p),
-                )
-                for p in timer
-            ),
-            ft.PopupMenuItem(),
-            ft.PopupMenuItem(
-                icon=ft.Icons.TUNE, content=ft.Text("Timer der Übung …"), on_click=timer_oeffnen
-            ),
-        ],
-    )
-    return [uhr, auswahl]
-
-
 def _laufend(
     page: Any, state: Any, e: Einheitslauf, fokus: Callable[[], object] | None = None
 ) -> ft.Control:
-    """Die laufende Uhr der Übung: Zeit, Anhalten bzw. Weiter, Fertig, Abbrechen — sie
+    """Die laufende Uhr der Übung: Zeit, Pause bzw. Weiter, Nächster, Fertig, Abbrechen — sie
     zählt im Takt des Tickers mit (`AppState.timer_beobachter`). Zählt der Sensor mit, steht
     darunter die Zahl mit ±1 (`components.zaehlen.neben_der_uhr`, im Takt der Einheit).
     ``fokus`` öffnet den **Fokus** (7.11.2026): die Trainingsansicht zur laufenden Uhr — ein
@@ -425,7 +365,7 @@ def _laufend(
     )
     zeit = ft.Text(size=40, weight=ft.FontWeight.BOLD)
     oben = ft.Text(size=14, opacity=0.85, expand=True)
-    pause = ft.OutlinedButton(height=48, style=ft.ButtonStyle(shape=ECKEN), expand=True)
+    pause = ft.OutlinedButton(height=48, style=ft.ButtonStyle(shape=ECKEN))
     # Taktgeber (§5): klein neben der Zeit, antippen → groß; der Tempo-Regler für jetzt
     key = (
         schluessel_fuer(teil.kontext.uebung_id, teil.kontext.item_id)
@@ -434,6 +374,21 @@ def _laufend(
     )
     takt_klein = TaktAnzeige(groesse=56, klein=True, on_click=lambda: takt_gross(page, state, lauf))
     tempo_regler = TempoRegler(state, key, lauf)
+    # Takt für jetzt auch im Lauf — wie auf der Timer-Seite (K2)
+    takt_wahl = takt_knopf(
+        page,
+        state,
+        key=key,
+        takt=lauf.takt_aktuell(),
+        lauf=lauf,
+        titel="Takt für jetzt",
+        klein=True,
+    )
+    naechster = ft.IconButton(
+        ft.Icons.SKIP_NEXT,
+        tooltip="Nächster Abschnitt",
+        visible=not lauf.vorwaerts and lauf.stand().abschnitte > 1,
+    )
 
     def beschriften() -> None:
         stand = lauf.stand()
@@ -475,7 +430,13 @@ def _laufend(
         lauf.abbrechen()  # ohne Rückfrage (Ben, 18.10.2026) — trägt nichts ein
         auffrischen()
 
+    def weiter_abschnitt() -> None:
+        lauf.weiter()
+        einheit_ui.melden(state)
+        auffrischen()
+
     pause.on_click = anhalten_oder_weiter
+    naechster.on_click = weiter_abschnitt
     beschriften()
     anzeige = ft.Container(
         padding=ft.Padding.only(left=12, right=8, top=8, bottom=10),
@@ -494,6 +455,7 @@ def _laufend(
                         oben,
                         # Ob die Zeit zählt, steht auch beim Laufen da (P79 D1)
                         ft.Text("zählt" if zaehlt else "zählt nicht", size=12, opacity=0.75),
+                        takt_wahl,
                         *(
                             [
                                 ft.IconButton(
@@ -517,11 +479,12 @@ def _laufend(
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
                         pause,
+                        naechster,
                         ft.FilledButton(
                             content=ft.Row(
                                 tight=True,
                                 spacing=6,
-                                controls=[ft.Icon(ft.Icons.STOP, size=18), ft.Text("Fertig")],
+                                controls=[ft.Icon(ft.Icons.CHECK, size=18), ft.Text("Fertig")],
                             ),
                             height=48,
                             expand=True,
@@ -529,9 +492,10 @@ def _laufend(
                             tooltip="Beenden und eintragen",
                             on_click=fertig,
                         ),
-                        ft.IconButton(
-                            ft.Icons.CLOSE,
-                            tooltip="Abbrechen — trägt nichts ein",
+                        ft.TextButton(
+                            "Abbrechen",
+                            tooltip="Beenden ohne Eintrag",
+                            style=ft.ButtonStyle(color=ft.Colors.ERROR),
                             on_click=abbrechen,
                         ),
                     ],
@@ -570,16 +534,6 @@ def takt_gross(page: Any, state: Any, lauf: Any) -> None:
         actions=[ft.TextButton("Schließen", on_click=lambda: schliessen(dialog))],
     )
     page.show_dialog(dialog)
-
-
-def _knopf(text: str, icon: ft.IconData, on_click: Callable[[], object]) -> ft.Control:
-    """Wie „Gemacht“ im Plan, nur nicht betont."""
-    return ft.FilledTonalButton(
-        content=ft.Row(tight=True, spacing=6, controls=[ft.Icon(icon, size=18), ft.Text(text)]),
-        height=48,
-        style=ft.ButtonStyle(shape=ECKEN, padding=ft.Padding.symmetric(horizontal=14)),
-        on_click=on_click,
-    )
 
 
 def _symbol(p: TimerProfil) -> ft.IconData:

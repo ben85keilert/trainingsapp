@@ -729,8 +729,6 @@ class SettingRepo:
     BEKANNTE_GERAETE = "bekannte_geraete"
     # ``plan_darstellung`` (drei Darstellungen des Planblocks) entfiel am 7.11.2026 — eine
     # alte Zeile in ``setting`` bleibt ungelesen liegen
-    #: Wo Stoppuhr und Timer in der Übung stehen (`ui.state.UHR_DARSTELLUNGEN`)
-    UHR_DARSTELLUNG = "uhr_darstellung"
     #: Fokus (7.11.2026): die Trainingsansicht öffnet sich von selbst, wenn die Uhr einer
     #: Übung startet („1“) — Vorgabe aus, kein Zwang
     FOKUS_AUTO = "fokus_auto"

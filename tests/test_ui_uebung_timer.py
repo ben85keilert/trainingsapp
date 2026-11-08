@@ -106,7 +106,8 @@ async def test_vorher_zeigt_abschnitte_und_zaehlt_fuer_jetzt(umgebung) -> None:
     texte = _texte(ansicht)
     assert ansicht.appbar.title.value == "Timer · Planke" and "Halten 3 × 10 s" in texte
     assert "zählt: 0:45" in texte and "Laufzeit 0:45" in texte  # erst einmal zählt alles
-    assert "Zählt für Planke" in texte and "ändern: in „Übung bearbeiten“" in texte
+    assert "Zählt für Planke" in texte
+    _knopf(ansicht, "In der Übung festlegen")  # K2: Link statt Hinweistext
     assert not [
         x for x in _alle(ansicht) if isinstance(x, ft.FilledButton) and x.content == "zählt"
     ]

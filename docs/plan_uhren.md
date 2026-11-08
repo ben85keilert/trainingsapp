@@ -144,6 +144,19 @@ Gesamt etwa 14 min · 3 mit Timer · 2 mit Takt                     [Alles wie d
 - „Pause auch nach Übungen ohne Timer“ und „Auf Tipp warten/automatisch“ gehen im Übergang
   hart/weich auf ▶ P106 (weich = Tipp, hart = automatisch; ohne Timer immer Tipp).
 - Takt und Sensor werden je Schritt angebracht wie beim Übungs-Timer (P99).
+- **Hart/weich hat dann drei Folgen** (Ben, 8.11.: „Doppelbedeutung nicht vergessen“) — eine
+  Haltung des Workouts, in Hilfe und Start-Bild in **einem Satz** erklärt:
+
+  | | hart | weich |
+  |---|---|---|
+  | Timer der Übung läuft ab | die nächste beginnt sofort | die Zeit zählt ins Minus, bis man tippt |
+  | Übung ohne Timer | — (immer Tipp) | Tipp |
+  | Bedingung nicht erfüllt | Zweig oder noch einmal, kein „Trotzdem weiter“ | „Trotzdem weiter“ steht offen |
+
+  Start-Bild: „Hart: Übungen folgen von selbst, Bedingungen gelten. Weich: Du gibst das Tempo,
+  Bedingungen sind Vorschläge.“ Die Bedingung selbst behält ihr eigenes „hart“ (Freischaltung,
+  Schloss) — das ist die Stufe darunter und wird dort „Pflicht“ genannt, damit das Wort nur
+  einmal vorkommt ▶ gehört zu P101.
 
 ### 4.8 Takt — ein Blatt, vier Geltungen
 - Das Takt-Blatt bekommt oben **Reiter nach Geltung**, je nach Ort vorbelegt: *Für jetzt* ·
@@ -187,7 +200,12 @@ im Katalog, `hilfe.UHR_MD`/`TAKT_MD`/`KNOPF_LEGENDE`.
 
 Skizzen (Handy-Bilder) lohnen für K2 (laufende Karte/Fokus) und K3 (Uhrenplan) — vor dem Bau.
 
-## 7. Entscheidungen für Ben (Katalog)
+## 7. Entscheidungen (Katalog) — **alle entschieden 8.11.2026**
+
+P101 übernehmen · P102–P105 ja · P106 ja, mit der Doppelbedeutung aus §4.7. Nächster Schritt:
+Skizzen für K2 (laufende Uhr/Fokus) und K3 (Uhrenplan), dann K0.
+
+Fragen, wie sie gestellt waren:
 
 - **P101** Glossar §3 — so übernehmen? Insbesondere: „Vorlage“ statt „Timer-Profil“, „Zeit
   stellen“ statt „Einmal-Timer“, „Pause/Weiter/Nächster“, „Workout“ statt „Ablauf“.

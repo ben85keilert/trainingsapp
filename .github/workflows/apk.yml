@@ -122,6 +122,51 @@ jobs:
             echo "FLET_ANDROID_SIGNING_KEY_ALIAS=${KEY_ALIAS:-upload}"
           } >> "$GITHUB_ENV"
 
+      - name: Flet-Version lesen
+        id: flet
+        run: |
+          version="$(uv run python -c 'import flet.version; print(flet.version.flet_version)')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Flet-Vorlage aus dem Cache
+        # Die Build-Vorlage (`flet-build-template.zip`) lag am 8.11.2026 dreimal hinter einem
+        # „504 Gateway Time-out“ von github.com/…/releases/download — darum liegt sie je
+        # Flet-Version im Cache und kommt sonst über die GitHub-API (`gh release download`,
+        # anderer Weg als der Browser-Link), mit Wiederholungen. `scripts/apk_bauen.py` nimmt
+        # sie über TRAININGSAPP_VORLAGE_ZIP und lädt nur ohne sie selbst.
+        id: vorlage_cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ github.workspace }}/flet-vorlage
+          key: flet-build-template-${{ steps.flet.outputs.version }}
+
+      - name: Flet-Vorlage über die GitHub-API laden
+        if: steps.vorlage_cache.outputs.cache-hit != 'true'
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLET_VERSION: ${{ steps.flet.outputs.version }}
+        run: |
+          mkdir -p flet-vorlage
+          for anlauf in 1 2 3 4 5 6; do
+            if gh release download "v$FLET_VERSION" -R flet-dev/flet \
+                 -p flet-build-template.zip -D flet-vorlage --clobber; then
+              break
+            fi
+            echo "Anlauf $anlauf fehlgeschlagen — warte 45 s"
+            sleep 45
+          done
+          ls -l flet-vorlage || true
+
+      - name: Flet-Vorlage dem Build geben
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [ -s flet-vorlage/flet-build-template.zip ]; then
+            echo "TRAININGSAPP_VORLAGE_ZIP=$GITHUB_WORKSPACE/flet-vorlage/flet-build-template.zip" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Keine Vorlage vorab — das Skript lädt sie selbst (mit Wiederholungen)."
+          fi
+
       - name: APK bauen
         # Flutter lädt `flet build` beim ersten Lauf selbst (--yes im Skript).
         run: uv run python scripts/apk_bauen.py $APK_OPTIONEN

@@ -317,6 +317,12 @@ def vorlage_bauen() -> Path:
 
     version = flet.version.flet_version
     url = DEFAULT_TEMPLATE_URL.format(version=version)
+    # Die CI legt die Vorlage vorab hin (`.github/workflows/apk.yml`, über die GitHub-API mit
+    # Cache) — dann kein Download hier
+    eigene = os.environ.get("TRAININGSAPP_VORLAGE_ZIP")
+    if eigene and Path(eigene).is_file() and Path(eigene).stat().st_size > 0:
+        quelle: Path | str = Path(eigene)
+        return _vorlage_patchen_in(Path(quelle), version)
     # GitHub antwortet beim Download der Vorlage gelegentlich mit 504 (v0.3.59, v0.3.63) —
     # ein paar Anläufe mit Pause, bevor der ganze Lauf scheitert
     import time
@@ -333,10 +339,14 @@ def vorlage_bauen() -> Path:
                 f"Vorlage: {fehler} — Anlauf {anlauf}/{VORLAGE_ANLAEUFE}, warte {VORLAGE_PAUSE_S} s"
             )
             time.sleep(VORLAGE_PAUSE_S)
+    return _vorlage_patchen_in(Path(quelle), version)
+
+
+def _vorlage_patchen_in(quelle: Path, version: str) -> Path:
     pruefsumme = hashlib.sha256((MAIN_ACTIVITY + SICHERUNG).encode("utf-8")).hexdigest()[:8]
     ziel = VORLAGE_ORDNER / f"flet-build-template-{version}-{pruefsumme}.zip"
     if not ziel.exists():
-        vorlage_patchen(Path(quelle), ziel)
+        vorlage_patchen(quelle, ziel)
     return ziel
 
 

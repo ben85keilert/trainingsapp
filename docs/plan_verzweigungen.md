@@ -301,11 +301,24 @@ in Dropdowns (P108 wird damit „ja“).
 
 | Stufe | Inhalt | Aufwand | Braucht |
 |---|---|---|---|
-| **G0 Skizzen** | Reiter „Ablauf“ mit Palette, Start-Slot, Knoten, Kanten-Etikett, Blatt der Kante, Entscheidungsknoten, Workout mit Kanten-Knöpfen | klein | P113–P115 |
+| **G0 Skizzen** | Reiter „Ablauf“ mit Palette, Start-Slot, Knoten, Kanten-Etikett, Blatt der Kante, Entscheidungsknoten, Workout mit Kanten-Knöpfen — **gezeichnet 8.11.2026**, Reihe E (E1–E6) auf dem Canvas <https://claude.ai/artifact/THG2KrMi4jET9N2XkHRk3J>, Erläuterung §8.6 | klein | P113–P115 |
 | **G1 Modell** | `Kante(von, nach, bedingung, eingabe, rueckkehr)`, `Plan.start`, `PlanItem.beiname`, Migration; heutige Bedingungen → Kante „erfüllt →“; `schleifen`/Prüfung auf Kanten | mittel | G0 |
 | **G2 Baustein + Workout** | `PlanAblaufBaustein` folgt Kanten (Start, frei/Auslöser/Pflicht, zurück), Fokus zeigt Kanten als Knöpfe, Entscheidungsknoten als Frage | mittel | G1 |
 | **G3 Reiter „Ablauf“** | Palette (Draggable), Slots (DragTarget), Zeichnung (InteractiveViewer + Canvas, Auto-Layout), „+“/„Bestehende wählen“, Kanten-Blatt, Vernebeln, „Pfad abspielen“; Knopf „Ablauf zeichnen“ am Plan | groß | G2 |
 | **G4 Paket + Auswertung** | `kanten[]` im Paket, Kurse; Kantenstärke nach Häufigkeit | mittel | G3 |
+
+### 8.6 Skizzen Reihe E (G0, 8.11.2026)
+
+Sechs Handy-Bilder auf dem Design-Canvas (Reihe E, unter Reihe D):
+
+| Bild | Zeigt | Festlegungen im Bild |
+|---|---|---|
+| **E1** Reiter „Ablauf“ | Dritter Reiter neben Übungen · Uhren; oben die Palette (Katalog mit Suche, eine Übung darf mehrmals stehen), unten die Zeichnung | Start-Slot schwarz oben; Hauptpfad als Spalte, Knoten nummeriert; Bedarfsübung rechts, gestrichelt, „bei Bedarf“; Einschub gestrichelt, Rückkehr gepunktet; Schleife als Bogen am Knoten; leerer Slot gestrichelt. Übungen werden **nur in Slots** gezogen, nie frei verschoben (kein Streit mit dem Schieben der Fläche). Etikett an der Kante = Auslöser, Tipp öffnet E3. Ohne Reiter läuft der Plan als Kette |
+| **E2** „+“ am Knoten | Menü am gewählten Knoten | Neuer Slot · Bestehende Übung wählen (dann Zielknoten antippen — Rück- und Querkanten ohne Kanten-Ziehen) · Frage (Entscheidungsknoten) · Noch einmal (Schleife) · ◀ Zurück, wo ich herkam (Einschub); getrennt: Übung einstellen |
+| **E3** Blatt der Kante | Von → Nach (Ziel ändern), **Wann**: Frei (Knopf) · Zeit ab · Wiederholungen · Skala ≥ n; **Anbieten** (Knopf betont) oder **Ausführen** (von selbst); Schalter **Pflicht**; **Danach**: ◀ zurück: weiter mit … / Übung noch einmal / ohne Rückkehr = Abzweig; Beschriftung („Beine krampfen“) und Inhalt; Kante löschen | Die Frage (Skala) stellt der Knoten davor, die Kante trägt nur die Schwelle |
+| **E4** Entscheidungsknoten | Frage „Wie fühlt es sich an?“ als eigener Knoten (blau) zwischen Wandsitz und Kniebeuge; Kanten 0–6 → weiter, 7–10 → Einschub Dehnung, danach weiter | Legende unten: Ablauf · Einschub · zurück · Frage; „Pfad abspielen“ oben |
+| **E5** Ablaufbild im Workout | Dieselbe Zeichnung gezoomt und geschoben; laufender Knoten pulsiert; Einschub-Weg und Dehnung auf 25 % vernebelt | Tipp auf Linie oder Knoten = vernebeln, lang drücken = nur dieser Weg, „Alles zeigen“ hebt auf; nur Anzeige (P112) |
+| **E6** Fokus mit Kanten | Timer ins Minus (weich), die Frage des Entscheidungsknotens als Chips 0–10, die Kanten als Knöpfe: der von der Antwort **angebotene** Weg betont und mit „· danach Kniebeuge“, der reguläre Weg darunter, dann Noch einmal · Pause · Abbrechen | Bis drei Wege nebeneinander, ab vier gestapelt (P114) |
 
 ## 9. Entscheidungen (Ergänzung)
 

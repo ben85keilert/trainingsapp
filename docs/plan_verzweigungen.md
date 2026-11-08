@@ -205,3 +205,111 @@ zwei Blöcken sind Bedienung, die man sehen muss.
   Wege)? Oder Felder behalten und nur den Block „Bei Bedarf“ ergänzen?
 - **P112** Ablaufbild: auch klein im Fokus („wo bin ich“)? Tipp auf einen Knoten im Workout =
   dorthin wechseln (wie die Kachel heute) oder nur Anzeige?
+
+## 8. Bens Gegenentwurf: der Reiter „Ablauf“ im Plan-Editor (8.11., spät)
+
+Ben: „Am liebsten wäre es mir, wenn im Planedit ein Button aktivierbar ist, der oben einen
+zusätzlichen Reiter öffnet. Im Verlauf sind die Übungen angegeben, evtl. auch mehrfach … Man kann
+per Drag-and-Drop aus den Übungen oben unten den Pfad erweitern. Es gibt einen Startslot … Klicken
+auf die Startübung ermöglicht über ein ‚+‘ einen zusätzlichen Pfad … mehrere Pfade, vermutlich
+max so 3 … Übungen, die bei gleicher Benennung unterscheidbar sein müssen. Bedingungen: freie
+Entscheidung · harte, weiche Bedingung · Texte/Skala einblenden/eingeben lassen, danach erst
+neue Übung … Pfad zurück oder ganz woanders hin … Die App ist vor allem eine Tagebuch-App, die
+User sollen … im besten Fall eigene Programme entwickeln.“
+
+### 8.1 Bewertung
+
+**Das ist der bessere Entwurf.** Er ersetzt die Muster-Karte aus §4.2 als Hauptweg: Die
+Verzweigung wird **gezeichnet**, nicht in Dropdowns beschrieben. Drei Dinge ändern sich am
+Modell, der Rest aus §3 bleibt:
+
+1. **Die Bedingung wandert auf die Kante.** Heute hängt „Weiter, wenn“ am Schritt (Knoten) und
+   verweist mit dann/sonst/Wegen weiter. Im gezeichneten Ablauf ist es umgekehrt natürlich:
+   ein Knoten ist die Übung mit ihren Parametern und ihrem Timer, **jede Kante trägt ihre
+   Bedingung** — frei (Knopf), Zeit ab, n Wiederholungen, Skala ≥ n, Pflicht (hart/weich) — und
+   wahlweise eine **Eingabe davor** (Text zeigen, Skala abfragen, Notiz). Rückkehr ist dann
+   einfach eine Kante zurück; „Einschub“ aus §2 braucht keinen Stapel mehr, wenn die Kante
+   explizit zurückführt (der Stapel bleibt als Komfort: „zurück, wo ich war“ als Kantenziel).
+2. **Knoten = Planübung** (`PlanItem`), das gibt es schon: Eine Übung darf mehrmals im Plan
+   stehen, jede Instanz mit eigenen Parametern (Ziel, Timer, Takt). Neu ist nur ein **Beiname**
+   je Planübung („Wandsitz · leicht“, „Wandsitz · 2. Durchgang“), damit zwei gleiche Übungen im
+   Bild unterscheidbar sind — Vorgabe automatisch „(2)“, „(3)“.
+3. **Der Start** ist ein ausgezeichneter Knoten (`Plan.start` = Planübung); ohne Angabe die
+   erste. Der lineare Plan von heute ist der Graph „Kette“ — jeder bestehende Plan ist damit
+   schon ein gültiger Ablauf.
+
+### 8.2 Machbarkeit in Flet
+
+- **Ziehen aus der Palette:** `ft.Draggable` / `ft.DragTarget` gibt es in Flet 1.0 und sie laufen
+  am Handy. Die Palette (alle Übungen des Katalogs, Suche, zuletzt genutzt) steht oben als
+  waagerechte Reihe, die **Slots** unten sind `DragTarget`s. Das ist der sichere Teil.
+- **Zoomen und Schieben:** `ft.InteractiveViewer` um die Zeichnung (`ft.Canvas` für die Kanten,
+  darüber die Knoten mit `uebungsbild` und Label — wie §4.5). Konflikt: Ziehen *innerhalb* der
+  Zeichnung (Knoten verschieben, Kante ziehen) streitet mit dem Schieben der Fläche. Darum:
+  **keine freien Positionen.** Die Zeichnung ordnet sich selbst — der Start oben, jede Kante
+  führt eine Ebene tiefer, Abzweige nebeneinander, Rückkanten als Bogen links. Gezogen wird nur
+  *in* einen Slot (Übung einsetzen), nie der Slot selbst. Das hält das Bild aufgeräumt, auch
+  wenn jemand zwölf Übungen und acht Kanten baut.
+- **Kanten anlegen:** „+“ am Knoten legt einen **leeren Slot** darunter an, verbunden; eine
+  Übung hineinziehen füllt ihn. „Zu einer vorhandenen Übung“: „+“ → „Bestehende wählen“ → Tipp
+  auf den Zielknoten (oder Liste) — so entstehen Rück- und Querkanten ohne Kanten-Ziehen, das
+  am Touchscreen unzuverlässig ist.
+- **Kante einstellen:** Tipp auf das Kanten-Etikett öffnet ein Blatt (`blatt_spalte`):
+  Auslöser (frei · Zeit ab · n Wdh. · Skala ≥ n), Härte (Pflicht), **Eingabe davor** (Text
+  zeigen · Skala abfragen · Notiz), Inhalt bei Erfüllung (Text, Link). Dasselbe Blatt für
+  Kanten aus einem Knoten, der mehrere hat.
+- **Aufwand:** Modell und Baustein (Kanten statt dann/sonst/Wege, Start, Beiname, Wanderung
+  der heutigen Bedingungen auf die Kante „erfüllt →“) etwa zwei Sitzungen; der Reiter mit
+  Palette, Slots, Zeichnung und Blatt zwei bis drei; Workout-Fokus (Kanten als Knöpfe, Eingabe
+  davor) eine. Der Reiter ist nur sichtbar, wenn am Plan „Ablauf“ eingeschaltet ist (Bens
+  Knopf) — Anfänger sehen die Liste, wie heute.
+
+### 8.3 Verbesserungen am Entwurf
+
+- **Name:** nicht „Verlauf“ — das Wort gehört in der App schon den Kurven und dem Tagebuch
+  (Reiter „Verlauf“ unten). Der Reiter heißt **„Ablauf“**, der Knopf im Plan-Editor „Ablauf
+  zeichnen“ (Glossar `docs/plan_uhren.md` §3; ▶ P113).
+- **Begrenzung:** keine harte Grenze für Kanten je Knoten. Bis drei liegen die Knöpfe im
+  Workout nebeneinander, ab vier stapeln sie sich und ein Hinweis sagt „viele Wege — im Workout
+  wird die Wahl länger“; Kurse dürfen reich verzweigen, das Bild trägt es. (▶ P114)
+- **Eingabe davor** ist eigentlich ein **Zwischenschritt**: „Skala abfragen, dann entscheiden“.
+  Vorschlag: nicht als Sonderfall an der Kante, sondern als **Entscheidungsknoten** („Wie fühlt
+  es sich an? 0–10“, „Lies das“, „Notiz“) — ein Knoten ohne Übung, der nur fragt und nach dem
+  Wert verzweigt. So bleibt die Kante einfach (Auslöser), und die Frage ist im Bild sichtbar.
+  Gleiches Element wie heute die Skala-Chips im Schritt. (▶ P115)
+- **Pfad zurück:** jede Kante darf zu jedem Knoten, auch zum eigenen (Schleife) und zum Start.
+  Eine Kante „zurück, wo ich herkam“ (dynamisch) ist der Einschub aus §2 — als Kantenziel
+  „◀ zurück“ anbieten, der Baustein merkt sich den Ursprung.
+- **Lesbarkeit:** die Vernebelung aus §4.5 (Tipp dimmt einen Pfad, lang = nur dieser) gehört
+  auch in den Editor; dazu „Pfad abspielen“: ein Tipp auf den Start lässt den Hauptpfad
+  aufleuchten, Knoten für Knoten — so sieht man, was ohne jede Entscheidung passiert.
+- **Lernziel Tagebuch:** die Zeichnung ist später auch **Auswertung**: welche Kanten wurden
+  wie oft gegangen („Krämpfe nach Wandsitz: 3 von 5“, dicke Kante = oft) — das kann die App
+  zeigen, ohne zu werten (Weg A).
+- **Pakete:** der Ablauf reist als `kanten[]` je Plan mit (Positionen „#n“, Beiname), Kurse
+  bekommen damit Verzweigungen frei Haus.
+
+### 8.4 Was aus §3–§4 bleibt, was fällt
+
+Bleibt: Bedarfsübung (= Knoten ohne eingehende Kante aus dem Hauptpfad, ergibt sich aus dem
+Bild), Schleife, Auslöser Skala, Rückkehr-Stapel (als Kantenziel „zurück“), Ablaufbild (§4.5 =
+die Zeichnung des Reiters, im Workout schreibgeschützt), Ausweg-Prüfung. **Fällt:** die
+Muster-Karte (§4.2) als Hauptweg — sie wird zum Blatt der Kante; Zweige A–D, dann/sonst/Wege
+in Dropdowns (P108 wird damit „ja“).
+
+### 8.5 Stufen (ersetzt §6)
+
+| Stufe | Inhalt | Aufwand | Braucht |
+|---|---|---|---|
+| **G0 Skizzen** | Reiter „Ablauf“ mit Palette, Start-Slot, Knoten, Kanten-Etikett, Blatt der Kante, Entscheidungsknoten, Workout mit Kanten-Knöpfen | klein | P113–P115 |
+| **G1 Modell** | `Kante(von, nach, bedingung, eingabe, rueckkehr)`, `Plan.start`, `PlanItem.beiname`, Migration; heutige Bedingungen → Kante „erfüllt →“; `schleifen`/Prüfung auf Kanten | mittel | G0 |
+| **G2 Baustein + Workout** | `PlanAblaufBaustein` folgt Kanten (Start, frei/Auslöser/Pflicht, zurück), Fokus zeigt Kanten als Knöpfe, Entscheidungsknoten als Frage | mittel | G1 |
+| **G3 Reiter „Ablauf“** | Palette (Draggable), Slots (DragTarget), Zeichnung (InteractiveViewer + Canvas, Auto-Layout), „+“/„Bestehende wählen“, Kanten-Blatt, Vernebeln, „Pfad abspielen“; Knopf „Ablauf zeichnen“ am Plan | groß | G2 |
+| **G4 Paket + Auswertung** | `kanten[]` im Paket, Kurse; Kantenstärke nach Häufigkeit | mittel | G3 |
+
+## 9. Entscheidungen (Ergänzung)
+
+- **P113** Name des Reiters: „Ablauf“ (Vorschlag) statt „Verlauf“ (belegt durch Kurven/Tagebuch)?
+- **P114** Kanten je Knoten: keine harte Grenze, Hinweis ab vier?
+- **P115** „Eingabe davor“ als eigener **Entscheidungsknoten** (Frage im Bild) statt Sonderfall
+  an der Kante?

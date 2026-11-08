@@ -41,6 +41,9 @@ Schönheit, Wartung.
 | P110 | Verzweigungen, 8.11. | Rückkehr nach einem Einschub: **weiter mit der nächsten** (Vorschlag) oder die unterbrochene Übung noch einmal? | offen |
 | P111 | Verzweigungen, 8.11. | Karte „Weiter“ als **Sätze mit Mustern** (Einschub bei Bedarf · Noch einmal, bis … · Pflicht mit Inhalt · Abzweig) statt der Felder Zweig / erfüllt → / nicht erfüllt → / Wege? | offen |
 | P112 | Verzweigungen, 8.11. (`docs/plan_verzweigungen.md` §4.5) | **Ablaufbild** (scroll- und zoombar, Übungsbilder, Wege als Linien, Vernebeln): auch klein im Fokus? Tipp auf einen Knoten im Workout = dorthin wechseln oder nur Anzeige? | offen |
+| P113 | Verzweigungen, 8.11. spät (`docs/plan_verzweigungen.md` §8) | Reiter im Plan-Editor für den gezeichneten Ablauf: **„Ablauf“** (Vorschlag) statt „Verlauf“ — das Wort gehört den Kurven und dem Tagebuch. | offen |
+| P114 | Verzweigungen, 8.11. spät | Kanten je Knoten: **keine harte Grenze**, Hinweis ab vier (im Workout stapeln sich die Knöpfe)? | offen |
+| P115 | Verzweigungen, 8.11. spät | „Texte/Skala einblenden, dann erst die nächste Übung“: als eigener **Entscheidungsknoten** (Frage im Bild, verzweigt nach dem Wert) statt Sonderfall an der Kante? | offen |
 | P1 | Plan, 14.10. | **Planblock: welche der drei Darstellungen** (untereinander = Vorgabe, umschalten, aufklappen) bleibt? | **Entschieden 7.11.2026:** keine — der Plan zeigt beim Üben **eine Übung je Bild** (Pfeile, Wischen, Gesamtplan als Blatt); die drei Darstellungen, `plan_offen`, `parameter_wahl` und das Setting sind entfernt (`docs/plan_planblock.md` §A). |
 | P2 | Paket „Standard“, 15.10. | **Auswahl der 33 Übungen** in `data/seed/standard.toml` durchsehen (16 alte, 17 neue, neuer Typ „Mobilisation“, Katze-Kuh dorthin). | Erster Entwurf, ungeprüft. |
 | P3 | Pakete | Weitere mitgelieferte Pakete (Dehnung, Kräftigung …): je Paket eine TOML neben `standard.toml` — welche zuerst, wer pflegt sie? | Offen. |

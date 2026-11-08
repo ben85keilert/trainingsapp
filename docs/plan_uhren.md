@@ -198,7 +198,11 @@ im Katalog, `hilfe.UHR_MD`/`TAKT_MD`/`KNOPF_LEGENDE`.
 | **K4** | Workout und Ablauf eins; Takt/Sensor im Workout (P99) | mittel | **P106** |
 | **K5** | Takt-Blatt mit Geltungs-Reitern, Takt-Bibliothek verwalten | mittel | — |
 
-Skizzen (Handy-Bilder) lohnen für K2 (laufende Karte/Fokus) und K3 (Uhrenplan) — vor dem Bau.
+Skizzen (8.11.2026): Reihe D auf dem Canvas https://claude.ai/artifact/THG2KrMi4jET9N2XkHRk3J —
+D1/D2 Uhrenplan und Timer-Wahl (K3), D3/D4 laufende Uhr und Fokus mit denselben fünf Knöpfen
+(K2), D5 Timer-Seite mit Reitern Stoppuhr · Zeit · Vorlagen (K1, P102), D6 Workout-Start mit
+hart/weich in einem Satz (K4, P106), D7 „Im Plan einstellen → Uhr“ mit zählt und „Pflicht“ (P104),
+D8 Takt-Blatt mit Geltung (K5).
 
 ## 7. Entscheidungen (Katalog) — **alle entschieden 8.11.2026**
 

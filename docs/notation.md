@@ -18,13 +18,18 @@ Gespeichert wird immer eine Liste je Satz: `[15, 15, 20]`. Angezeigt wird
 kompakt: gleiche Werte als `3x15`, ein Satz als `30`, sonst `15/15/20`.
 Daneben die Summe, etwa „50 Wdh. in 3 Sätzen".
 
-**Zahlentastatur** (Ben, 14.10.2026: „wenn ohnehin Zahlen eingegeben werden,
+**Tastatur** (Ben, 14.10.2026: „wenn ohnehin Zahlen eingegeben werden,
 braucht es die Zahlentastatur“): Zahlenfelder öffnen am Handy die
-Zahlentastatur, Zeiten die für Uhrzeiten (Ziffern und `:`); Text gibt es nur
-in Textfeldern. Auf diesen Tastaturen fehlt das `x` — im Formular (Eintrag
-korrigieren) trennt dann das Komma die Sätze (`15,15,20`), im Plan gibt es
-dafür zwei Felder „Sätze × Wert“ (siehe unten). Wer `3x15` tippen kann (Desktop), darf es
-weiterhin.
+Zahlentastatur, Zeiten die für Uhrzeiten (Ziffern und `:`). **Satzfelder mit
+Sätzen** öffnen seit 8.11.2026 die Texttastatur ohne Wortvorschläge — sie lässt sich auf
+Ziffern umschalten und kennt `x` und `/`, sodass `3x15` und `15/15/20` auch am Handy gehen
+(Ben: „Nur die Sätze lassen sich nicht eintragen, weil die Tastatur im Zahlenmodus gesperrt
+ist“). Das Komma trennt weiterhin (`15,15,20`), im Plan gibt es die zwei Felder „Sätze ×
+Wert“ (siehe unten).
+
+**Sätze aus als Vorgabe** (Ben, 8.11.2026): Ein neu angelegtes Satzfeld (neue Übung oder
+Parameter dazu) hat „Sätze“ **aus** — eine Zahl je Eintrag; wer je Satz eingeben will,
+schaltet es in „Übung bearbeiten“ an. Vorhandene Übungen behalten ihren Stand.
 
 **Grenzen** (Ben, 15.10.2026): höchstens **100 Sätze** je Eintrag, Zeiten bis
 **48 h** (`48:00:00`), Zahlenwerte bis **100 000**. Darüber — und bei `inf`,

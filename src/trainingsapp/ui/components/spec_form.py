@@ -143,11 +143,16 @@ class SpecForm:
             # tragen ihre Schreibweise selbst („45s", „1:30") — ein „s" dahinter
             # war doppelt („1:30 s" sind keine 90 Sekunden-Sekunden).
             zeit = f.unit == "s"
+            # Satzfelder nehmen die Notation (3x15, 15/15/20) — die Zahlentastatur kennt kein
+            # „x“ und keinen „/“, darum die Texttastatur, die sich auf Ziffern umschalten
+            # lässt (Ben, 8.11.2026), ohne Wortvorschläge; Zeiten behalten die Uhrzeit-Tastatur
             return ft.TextField(
                 label=f"{f.label} je Satz",
                 value=self._anzeige(f, wert),
-                hint_text="45 · 1:30 · Sätze mit Komma: 45,60" if zeit else "15 · 15,15,20",
-                keyboard_type=ft.KeyboardType.DATETIME if zeit else ft.KeyboardType.NUMBER,
+                hint_text="45 · 1:30 · Sätze mit Komma: 45,60" if zeit else "15 · 3x15 · 15/15/20",
+                keyboard_type=ft.KeyboardType.DATETIME if zeit else ft.KeyboardType.TEXT,
+                autocorrect=False,
+                enable_suggestions=False,
             )
         return ft.TextField(
             label=f.label,

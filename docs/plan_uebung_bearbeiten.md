@@ -80,7 +80,8 @@ hier“ wie heute. Jetzt bleibt es, wie es ist — es hat schon Karten je Parame
 
 **Was heute gilt.** Zehn feste Felder mit festen Schlüsseln (`reps`, `hold`, `weight`,
 `distance`, `duration`, `angle`, `scale`, `side`, `done`, `note`). Eine Übung wählt eine
-Teilmenge, gibt jedem Feld Chips, bei Satzfeldern „Sätze an/aus“, bei der Skala Name und
+Teilmenge, gibt jedem Feld Chips, bei Satzfeldern „Sätze an/aus“ (neu dazu: aus, Ben 8.11.2026,
+`docs/notation.md`), bei der Skala Name und
 Bereich; der Name (`label`) ist schon heute je Übung frei. Die Schlüssel sind kein Zufall:
 An ihnen hängt die ganze Rechnung dahinter —
 

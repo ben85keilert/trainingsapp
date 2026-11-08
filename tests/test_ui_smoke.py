@@ -508,7 +508,10 @@ def test_ziel_folgt_den_parametern_vor_dem_speichern(page, welt) -> None:
     )
     assert not schalter.selected
     schalter.on_select()
-    assert schalter.selected and [z.value for z in zielfelder()] == ["", "2x30s"]  # alt bleibt
+    # Neu dazu: „Sätze“ aus (8.11.2026) — das Ziel ist eine Zahl, die Haltezeit bleibt je Satz
+    ziele = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Ziel"]
+    assert schalter.selected and [z.value for z in ziele] == [""]
+    assert [z.value for z in zielfelder()] == ["2x30s"]  # alt bleibt
     schalter.on_select()
     assert [z.value for z in zielfelder()] == ["2x30s"]
 
@@ -950,7 +953,9 @@ def test_spec_form_skala_mit_zahlenfeld_und_tastaturen() -> None:
     spec = ResultSpec(fields=[vorrat_feld("reps"), vorrat_feld("hold"), skala])
     form = SpecForm(spec)
     assert "scale" not in form.werte()  # leer heißt ohne Wert, auch wenn der Regler steht
-    assert form._widgets["reps"].keyboard_type == ft.KeyboardType.NUMBER
+    # Satzfelder: Texttastatur, umschaltbar auf Ziffern — für „3x15“ (Ben, 8.11.2026)
+    assert form._widgets["reps"].keyboard_type == ft.KeyboardType.TEXT
+    assert form._widgets["reps"].autocorrect is False
     assert form._widgets["hold"].keyboard_type == ft.KeyboardType.DATETIME
     assert form._widgets["scale"].keyboard_type == ft.KeyboardType.NUMBER
 
@@ -1199,10 +1204,9 @@ def test_was_die_uebung_hat_bieten_alle_plaene_an(page, welt) -> None:
     assert ansicht.route == f"{basis}/hinzufuegen/neu"
     texte = _texte(ansicht)
     assert "STANDARD FÜR PLÄNE" not in texte and "VORGABE FÜR PLÄNE" not in texte
-    # Das Ziel steht auf der Karte des Parameters (2.11.2026)
-    assert [x.label for x in _alle(ansicht) if isinstance(x, ft.TextField)].count(
-        "Ziel je Satz"
-    ) == 1
+    # Das Ziel steht auf der Karte des Parameters (2.11.2026) — neu angelegt ohne Sätze
+    # (8.11.2026): „Ziel“ statt „Ziel je Satz“
+    assert [x.label for x in _alle(ansicht) if isinstance(x, ft.TextField)].count("Ziel") == 1
     name = next(c for c in _alle(ansicht) if isinstance(c, ft.TextField) and c.label == "Name")
     name.value = "Kniebeuge tief"
     asyncio.run(_knopf_mit_text(ansicht, "Speichern").on_click())

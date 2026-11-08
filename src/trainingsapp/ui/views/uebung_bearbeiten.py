@@ -638,7 +638,9 @@ def uebung_bearbeiten(
             chips_wahl[key] = chips_sortiert(list((quelle or vorlage).quick))
             chips_reihen[key] = ft.Container()
         if vorlage.type == FieldType.SET_LIST:
-            saetze_an[key] = quelle.saetze if quelle is not None else True
+            # Neu dazu: „Sätze“ aus (Ben, 8.11.2026) — eine Zahl je Eintrag; an schaltet, wer
+            # je Satz eingeben will. Vorhandene Felder behalten ihren Stand.
+            saetze_an[key] = quelle.saetze if quelle is not None else False
 
     # (``basis`` ist der Weg zum Plan — die Art heißt hier ``art``)
     for key in vorhanden:

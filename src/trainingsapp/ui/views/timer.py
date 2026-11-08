@@ -80,6 +80,9 @@ from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.takt_anzeige import TaktAnzeige
 from trainingsapp.ui.components.takt_blatt import (
+    SYMBOL as TAKT_SYMBOL,
+)
+from trainingsapp.ui.components.takt_blatt import (
     TempoRegler,
     takt_anbringen,
     takt_blatt,
@@ -638,6 +641,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 ft.IconButton(ft.Icons.ADD, tooltip="Neue Vorlage", on_click=neu),
             ),
             profil_chips,
+            _takte_karte(page, state),
         ]
     else:
         wahl = [einmal_karte()]
@@ -761,6 +765,66 @@ def _plan_ablauf_karte(page: Any, state: AppState, basis: str) -> ft.Control | N
         ),
         ft.FilledTonalButton("Als Workout starten", icon=ft.Icons.PLAYLIST_PLAY, on_click=oeffnen),
     )
+
+
+def _takte_karte(page: Any, state: AppState) -> ft.Control:
+    """Die Takt-Bibliothek (K5, `docs/plan_uhren.md` §4.8): die gesicherten Takte als Liste —
+    Stift öffnet das Takt-Blatt mit der Geltung „Vorlage“, ✕ löscht."""
+    takte = state.takt_bibliothek()
+
+    def ersetzer(i: int) -> Callable[[Takt | None], None]:
+        def handler(neu: Takt | None) -> None:
+            liste = state.takt_bibliothek()
+            if i >= len(liste):
+                return
+            if neu is None or neu.leer:
+                del liste[i]
+            else:
+                liste[i] = neu
+            state.takt_bibliothek_setzen(liste)
+            state.neu_zeichnen()
+
+        return handler
+
+    def bearbeiter(i: int, t: Takt) -> Callable[[], None]:
+        def handler() -> None:
+            page.show_dialog(
+                takt_blatt(page, state, takt=t, titel="Takt-Vorlage", in_die_bibliothek=ersetzer(i))
+            )
+
+        return handler
+
+    def loescher(i: int) -> Callable[[], None]:
+        return lambda: ersetzer(i)(None)
+
+    zeilen: list[ft.Control] = [
+        ft.Row(
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(TAKT_SYMBOL, size=18, opacity=0.8),
+                ft.Text(f"{t.anzeigename} · {t.kurztext()}", size=13, expand=True),
+                ft.IconButton(
+                    ft.Icons.EDIT_OUTLINED,
+                    icon_size=20,
+                    tooltip="Takt-Vorlage bearbeiten",
+                    on_click=bearbeiter(i, t),
+                ),
+                ft.IconButton(
+                    ft.Icons.CLOSE,
+                    icon_size=20,
+                    tooltip="Takt-Vorlage löschen",
+                    on_click=loescher(i),
+                ),
+            ],
+        )
+        for i, t in enumerate(takte)
+    ]
+    if not zeilen:
+        zeilen.append(
+            hinweis("Noch keine Takt-Vorlage — im Takt-Blatt „Als Vorlage sichern“ legt eine an.")
+        )
+    return karte(kartentitel("Takte"), *zeilen, abstand=6)
 
 
 def _signale_vermerk(state: AppState, oeffnen: Callable[[], object]) -> ft.Control:

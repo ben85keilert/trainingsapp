@@ -171,6 +171,8 @@ def uhr_teile(
         starten=takt_starten,
         titel=f"Takt · {uebung.name}",
         klein=True,
+        uebung=uebung,
+        item=item,
     )
 
     als = (

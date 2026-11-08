@@ -315,10 +315,11 @@ def test_takt_zeile_mit_stift_kreuz_und_zurueck(page, state) -> None:
     # Stift → Blatt → Metronom „In diesen Plan“
     _symbol(zeile, ft.Icons.EDIT_OUTLINED, "Takt nur hier").on_click()
     blatt = page.dialoge[-1]
-    assert "In diesen Plan" in [k.content for k in _knoepfe(blatt, "In diesen Plan")]
+    # K5: ein Blatt, die Geltung steht oben — hier nur „In diesem Plan“
+    assert "Gilt: In diesem Plan" in _texte(blatt)
     assert not _knoepfe(blatt, "In die Übung") and not _knoepfe(blatt, "Für jetzt")
     _chip(blatt, "Metronom 1 s").on_click()
-    _knopf(blatt, "In diesen Plan").on_click()
+    _knopf(blatt, "Übernehmen").on_click()
     asyncio.run(blatt.on_dismiss(None))
     zeile = _takt_zeile(ansicht)
     assert any(t.startswith("Takt: Metronom 1 s") for t in _texte(zeile))
@@ -346,7 +347,7 @@ def test_takt_zeile_mit_stift_kreuz_und_zurueck(page, state) -> None:
     _symbol(_takt_zeile(ansicht), ft.Icons.EDIT_OUTLINED, "Takt nur hier").on_click()
     blatt = page.dialoge[-1]
     _chip(blatt, "Box 4-4-4-4").on_click()
-    _knopf(blatt, "In diesen Plan").on_click()
+    _knopf(blatt, "Übernehmen").on_click()
     asyncio.run(blatt.on_dismiss(None))
     _klick(_knopf(ansicht, "In die Übung übernehmen …"))
     dialog = page.dialoge[-1]

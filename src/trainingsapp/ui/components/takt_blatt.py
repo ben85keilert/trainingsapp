@@ -73,6 +73,7 @@ def takt_blatt(
     in_die_uebung: Callable[[Takt | None], Any] | None = None,
     in_den_abschnitt: Callable[[Takt | None], Any] | None = None,
     in_den_plan: Callable[[Takt | None], Any] | None = None,
+    in_die_bibliothek: Callable[[Takt | None], Any] | None = None,
     starten: Callable[[Takt], Any] | None = None,
     zuruecksetzen: Callable[[], Any] | None = None,
     uebung_name: str = "",
@@ -82,7 +83,12 @@ def takt_blatt(
     nur für diese Sitzung (P139); ``in_die_uebung`` / ``in_den_abschnitt`` / ``in_den_plan``
     („Im Plan einstellen“, A6: nur in dieser Planübung): speichern dort; ``starten``: „Takt
     starten“ — eine Uhr mit diesem Takt für jetzt; ``zuruecksetzen``: „Wie eingestellt“ — die
-    Wahl für jetzt fällt weg, Abschnitt und Übung gelten wieder."""
+    Wahl für jetzt fällt weg, Abschnitt und Übung gelten wieder.
+
+    **Ein Blatt für alle Orte** (K5, Ben 8.11.2026, `docs/plan_uhren.md` §4.8): Oben steht die
+    **Geltung** — Für jetzt · Abschnitt · In diesem Plan · Übung (· Vorlage) —, vorbelegt nach dem
+    Ort, der das Blatt öffnete; unten ein einziges „Übernehmen“. ``in_die_bibliothek``: ein
+    Eintrag der Takt-Bibliothek (Timer → Vorlagen → Takte), ``None`` = löschen."""
     nachher = Nachher()
     blatt: ft.BottomSheet
     zeilen: list[_Zeile] = []
@@ -425,11 +431,6 @@ def takt_blatt(
 
         return handler
 
-    def kein_takt() -> None:
-        ziel = fuer_jetzt or in_den_abschnitt or in_den_plan or in_die_uebung
-        if ziel is not None:
-            weg(lambda: ziel(None))
-
     def in_bibliothek_legen() -> None:
         t = pruefen()
         if t is None:
@@ -441,7 +442,7 @@ def takt_blatt(
         name_feld.error = None
         state.takt_bibliothek_setzen(in_bibliothek(state.takt_bibliothek(), t))
         nachher.danach(
-            lambda: page.show_dialog(ft.SnackBar(ft.Text(f"„{t.name}“ in der Takt-Bibliothek")))
+            lambda: page.show_dialog(ft.SnackBar(ft.Text(f"„{t.name}“ als Takt-Vorlage gesichert")))
         )
         stand["laeuft"] = False
         schliessen(blatt)
@@ -452,51 +453,86 @@ def takt_blatt(
             return
         weg(lambda: starten(t))
 
+    # -- Geltung (K5): wo der Takt gilt — ein Segment, vorbelegt nach dem Ort --------------------
+    ziele: list[tuple[str, str, Callable[[Takt | None], Any]]] = []
+    if fuer_jetzt is not None:
+        ziele.append(("jetzt", "Für jetzt", fuer_jetzt))
+    if in_den_abschnitt is not None:
+        ziele.append(("abschnitt", "Abschnitt", in_den_abschnitt))
+    if in_den_plan is not None:
+        ziele.append(("plan", "In diesem Plan", in_den_plan))
+    if in_die_uebung is not None:
+        ziele.append(
+            ("uebung", f"Übung{' „' + uebung_name + '“' if uebung_name else ''}", in_die_uebung)
+        )
+    if in_die_bibliothek is not None:
+        ziele.append(("vorlage", "Vorlage", in_die_bibliothek))
+    stand["geltung"] = ziele[0][0] if ziele else ""
+    GELTUNG_TIPPS = {
+        "jetzt": "Gilt für diese Sitzung — Übung und Plan bleiben, wie sie sind",
+        "abschnitt": "Gilt in diesem Abschnitt des Timers",
+        "plan": "Gilt nur in dieser Planübung — die Übung bleibt, wie sie ist",
+        "uebung": "Gilt überall, wo die Übung geübt wird",
+        "vorlage": "Ändert den Eintrag der Takt-Bibliothek",
+    }
+
+    def geltung_gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+        if e.control.selected:
+            stand["geltung"] = str(e.control.selected[0])
+            geltung_tipp.value = GELTUNG_TIPPS.get(stand["geltung"], "")
+            auffrischen(geltung_tipp)
+
+    def ziel_jetzt() -> Callable[[Takt | None], Any] | None:
+        return next((z for k, _, z in ziele if k == stand["geltung"]), None)
+
+    def uebernehmen_knopf() -> None:
+        ziel = ziel_jetzt()
+        if ziel is not None:
+            mit_takt(ziel)()
+
+    def kein_takt_knopf() -> None:
+        ziel = ziel_jetzt()
+        if ziel is not None:
+            weg(lambda: ziel(None))
+
+    geltung_tipp = ft.Text(GELTUNG_TIPPS.get(stand["geltung"], ""), size=12, opacity=0.65)
+    geltung: list[ft.Control] = []
+    if len(ziele) > 1:
+        geltung = [
+            ft.Text("GILT", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
+            ft.SegmentedButton(
+                selected=[stand["geltung"]],
+                show_selected_icon=False,
+                segments=[ft.Segment(value=k, label=ft.Text(text)) for k, text, _ in ziele],
+                on_change=geltung_gewaehlt,
+            ),
+            geltung_tipp,
+        ]
+    elif ziele:
+        geltung = [ft.Text(f"Gilt: {ziele[0][1]}", size=12, opacity=0.65)]
+
     knoepfe: list[ft.Control] = []
     if starten is not None:
         knoepfe.append(
             ft.FilledButton("Takt starten", icon=ft.Icons.PLAY_ARROW, on_click=takt_starten)
         )
-    if fuer_jetzt is not None:
+    if ziele:
         knoepfe.append(
-            ft.FilledTonalButton(
-                "Für jetzt",
-                icon=ft.Icons.CHECK,
-                tooltip="Gilt für diese Sitzung — die Übung bleibt, wie sie ist",
-                on_click=mit_takt(fuer_jetzt),
-            )
-        )
-    if in_den_abschnitt is not None:
-        knoepfe.append(
-            ft.FilledTonalButton(
-                "In den Abschnitt", icon=ft.Icons.CHECK, on_click=mit_takt(in_den_abschnitt)
-            )
-        )
-    if in_den_plan is not None:
-        knoepfe.append(
-            ft.OutlinedButton(
-                "In diesen Plan",
-                icon=ft.Icons.SAVE_OUTLINED,
-                tooltip="Gilt nur in dieser Planübung — die Übung bleibt, wie sie ist",
-                on_click=mit_takt(in_den_plan),
-            )
-        )
-    if in_die_uebung is not None:
-        knoepfe.append(
-            ft.OutlinedButton(
-                f"In die Übung{' „' + uebung_name + '“' if uebung_name else ''}",
-                icon=ft.Icons.SAVE_OUTLINED,
-                on_click=mit_takt(in_die_uebung),
-            )
+            ft.FilledTonalButton("Übernehmen", icon=ft.Icons.CHECK, on_click=uebernehmen_knopf)
         )
     knoepfe.append(
         ft.OutlinedButton(
-            "In die Bibliothek", icon=ft.Icons.BOOKMARK_ADD_OUTLINED, on_click=in_bibliothek_legen
+            "Als Vorlage sichern",
+            icon=ft.Icons.BOOKMARK_ADD_OUTLINED,
+            tooltip="In die Takt-Bibliothek (Timer → Vorlagen → Takte)",
+            on_click=in_bibliothek_legen,
         )
     )
-    if any(z is not None for z in (fuer_jetzt, in_den_abschnitt, in_den_plan, in_die_uebung)):
+    if ziele:
         knoepfe.append(
-            ft.TextButton("Kein Takt", icon=ft.Icons.CLOSE, on_click=kein_takt, tooltip="Takt aus")
+            ft.TextButton(
+                "Kein Takt", icon=ft.Icons.CLOSE, on_click=kein_takt_knopf, tooltip="Takt aus"
+            )
         )
     if zuruecksetzen is not None:
         knoepfe.append(
@@ -536,9 +572,10 @@ def takt_blatt(
                     controls=[
                         ft.Icon(SYMBOL, size=22),
                         ft.Text(titel, size=20, weight=ft.FontWeight.W_500),
-                        ft.Text("Phasen · Tempo · Klang", size=13, opacity=0.7),
+                        ft.Text("Phasen · Tempo · Klang", size=13, opacity=0.7, expand=True),
                     ],
                 ),
+                *geltung,
                 vorlagen,
                 ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[anzeige.control]),
                 name_feld,
@@ -657,11 +694,31 @@ def takt_knopf(
     starten: Callable[[Takt], Any] | None = None,
     titel: str = "Takt",
     klein: bool = False,
+    uebung: Any = None,
+    item: Any = None,
 ) -> ft.Control:
     """Der Takt-Knopf an der Uhr (§5): öffnet das Blatt mit „Für jetzt“ — die Wahl gilt für
-    diese Sitzung unter ``key`` und, läuft die Uhr schon, sofort im Lauf (``lauf``)."""
+    diese Sitzung unter ``key`` und, läuft die Uhr schon, sofort im Lauf (``lauf``). Mit
+    ``uebung`` (und ``item``) stehen im Blatt auch die Geltungen „Übung“ und „In diesem Plan“
+    (K5) — gespeichert in der Übung bzw. der Planübung."""
     gewaehlt = state.uhr_takt.get(key)
     aktiv = gewaehlt if gewaehlt is not None else takt
+
+    def in_die_uebung(neu: Takt | None) -> None:
+        frisch = state.uebungen.laden(uebung.id)
+        if frisch is None:
+            return
+        frisch.takt = neu if neu is not None and not neu.leer else None
+        state.uebungen.speichern(frisch)
+        if lauf is not None:
+            lauf.takt_uebung = frisch.takt
+        state.neu_zeichnen()
+
+    def in_den_plan(neu: Takt | None) -> None:
+        state.plaene.sensor_takt_setzen(item.id, item.acc, AUS if neu is None or neu.leer else neu)
+        if lauf is not None and state.uhr_takt.get(key) is None:
+            lauf.takt_uebung = None if neu is None or neu.leer else neu
+        state.neu_zeichnen()
 
     def fuer_jetzt(neu: Takt | None) -> None:
         state.uhr_takt[key] = neu if neu is not None else AUS
@@ -683,6 +740,9 @@ def takt_knopf(
                 takt=aktiv,
                 titel=titel,
                 fuer_jetzt=fuer_jetzt,
+                in_den_plan=in_den_plan if item is not None else None,
+                in_die_uebung=in_die_uebung if uebung is not None else None,
+                uebung_name=uebung.name if uebung is not None else "",
                 zuruecksetzen=wie_eingestellt if key in state.uhr_takt else None,
                 starten=starten,
             )

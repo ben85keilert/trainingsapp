@@ -609,6 +609,8 @@ def uebung_timer_view(
                     starten=takt_starten,
                     titel=f"Takt · {uebung.name}",
                     klein=True,
+                    uebung=uebung,
+                    item=item,
                 ),
             ],
         )

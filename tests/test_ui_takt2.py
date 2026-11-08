@@ -126,7 +126,7 @@ async def test_takt_blatt_schalter_takt_zaehlt(state) -> None:
     assert schalter.label == "Takt zählt Wiederholungen" and schalter.value is False
     schalter.value = True
     schalter.on_change(SimpleNamespace(control=schalter))
-    knopf(blatt, "Für jetzt").on_click()
+    knopf(blatt, "Übernehmen").on_click()  # Geltung „Für jetzt“ ist vorbelegt (K5)
     await blatt.on_dismiss(None)  # das Blatt ist zu — jetzt läuft die Aktion
     assert gewaehlt and gewaehlt[0].zaehlt is True
     # Die Bewegungs-Vorlage bringt den Schalter an mit

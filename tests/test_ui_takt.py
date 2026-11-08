@@ -168,10 +168,10 @@ async def test_takt_blatt_vorlagen_phasen_tempo_und_knoepfe(state) -> None:
     # Eine unlesbare Dauer: kein Knopf greift, das Feld ist markiert
     sekunden = _felder(blatt, "s")
     sekunden[1].value = "x"
-    _knopf(blatt, "Für jetzt").on_click()
+    _knopf(blatt, "Übernehmen").on_click()  # Geltung „Für jetzt“ vorbelegt (K5)
     assert jetzt == [] and sekunden[1].error == "0,1–600"
     sekunden[1].value = "2,5"
-    _knopf(blatt, "Für jetzt").on_click()
+    _knopf(blatt, "Übernehmen").on_click()  # Geltung „Für jetzt“ vorbelegt (K5)
     await blatt.on_dismiss(None)  # das Blatt ist zu — jetzt läuft die Aktion
     (t,) = jetzt
     assert (
@@ -181,7 +181,9 @@ async def test_takt_blatt_vorlagen_phasen_tempo_und_knoepfe(state) -> None:
     # Die Vorschau läuft im Blatt: eine Anzeige mit dem Namen der ersten Phase
     assert "ein" in _texte(blatt)
     # „In die Übung“ trägt den Namen der Übung; „Takt starten“ gibt den Takt an die Uhr
-    assert _knopf(blatt, "In die Übung „Atmen“")
+    # K5: die Geltungen stehen oben als Segmente — „Übung „Atmen““ mit dem Namen der Übung
+    geltung = next(x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton))
+    assert [s.label.value for s in geltung.segments] == ["Für jetzt", "Übung „Atmen“"]
     _knopf(blatt, "Takt starten").on_click()
     await blatt.on_dismiss(None)
     assert len(gestartet) == 1 and gestartet[0].phasen == t.phasen
@@ -197,10 +199,10 @@ async def test_takt_blatt_bibliothek_und_eigener_takt(state) -> None:
     assert _chip(blatt, "4-7-8").selected and len(_felder(blatt, "Phase")) == 3
     name = _felder(blatt, "Name")[0]
     name.value = ""
-    _knopf(blatt, "In die Bibliothek").on_click()
+    _knopf(blatt, "Als Vorlage sichern").on_click()
     assert name.error == "Ein Name, bitte." and state.takt_bibliothek() == []
     name.value = "Mein Abend"
-    _knopf(blatt, "In die Bibliothek").on_click()
+    _knopf(blatt, "Als Vorlage sichern").on_click()
     (eigen,) = state.takt_bibliothek()
     assert eigen.name == "Mein Abend" and eigen.phasen == VORLAGEN["atmung_4_7_8"].phasen
     # Beim nächsten Öffnen steht er als Chip neben den Vorlagen und lässt sich wählen
@@ -240,7 +242,7 @@ async def test_formular_zeile_takt_mit_stift_und_x(state) -> None:
     blatt = page.dialoge[-1]
     assert isinstance(blatt, ft.BottomSheet) and "Takt der Übung" in _texte(blatt)
     _chip(blatt, "4-7-8").on_click()
-    _knopf(blatt, "In die Übung „Atmen“").on_click()
+    _knopf(blatt, "Übernehmen").on_click()  # einzige Geltung: die Übung (K5)
     await blatt.on_dismiss(None)
     assert "Takt: 4-7-8 · 4-7-8 · 3,2/min" in _texte(ansicht)
     await _knopf(ansicht, "Speichern").on_click()
@@ -276,7 +278,7 @@ async def test_timer_editor_takt_je_abschnitt(state) -> None:
     blatt = page.dialoge[-1]
     assert "Takt: Belastung" in _texte(blatt)
     _chip(blatt, "Kniebeuge 2-1-2").on_click()
-    _knopf(blatt, "In den Abschnitt").on_click()
+    _knopf(blatt, "Übernehmen").on_click()  # einzige Geltung: der Abschnitt (K5)
     await blatt.on_dismiss(None)
     assert "Takt: Kniebeuge 2-1-2 · 2-1-2 · 12,0/min" in _texte(ansicht)
     name = next(x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Name")
@@ -363,7 +365,7 @@ def test_takt_knopf_fuer_jetzt_und_am_lauf(state) -> None:
     knopf.on_click()
     blatt = page.dialoge[-1]
     _chip(blatt, "Metronom 1 s").on_click()
-    _knopf(blatt, "Für jetzt").on_click()
+    _knopf(blatt, "Übernehmen").on_click()  # Geltung „Für jetzt“ vorbelegt (K5)
     asyncio.run(blatt.on_dismiss(None))
     assert state.uhr_takt["u1"].name == "Metronom 1 s" and lauf.takt_jetzt is state.uhr_takt["u1"]
     # Kein Takt → AUS (auch nicht der der Übung); „Wie eingestellt“ nimmt die Wahl zurück

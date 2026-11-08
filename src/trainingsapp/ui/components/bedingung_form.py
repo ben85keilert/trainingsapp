@@ -165,31 +165,28 @@ def bedingung_karte(
             ft.DropdownOption(key="-", text=leer),
             *(ft.DropdownOption(key=i, text=n) for i, n in ziele),
         ]
+        # Kein `expand` in einer umbrechenden Zeile (Flutter: unbegrenzte Breite → graue
+        # Fläche, Ben 8.11.2026) — Zweig und Verweise untereinander
         zeilen.append(
-            ft.Row(
-                spacing=8,
-                wrap=True,
-                controls=[
-                    ft.Dropdown(
-                        label="Zweig",
-                        value=b.zweig,
-                        width=130,
-                        dense=True,
-                        options=[
-                            ft.DropdownOption(key=z, text=z + (" · Haupt" if z == "A" else ""))
-                            for z in bd.ZWEIGE
-                        ],
-                        on_select=wahl("zweig"),
-                    ),
-                    ft.Dropdown(
-                        label="erfüllt →",
-                        value=b.dann or "-",
-                        dense=True,
-                        expand=True,
-                        options=optionen("— (nächste im Zweig)"),
-                        on_select=wahl("dann"),
-                    ),
+            ft.Dropdown(
+                label="Zweig",
+                value=b.zweig,
+                width=160,
+                dense=True,
+                options=[
+                    ft.DropdownOption(key=z, text=z + (" · Hauptzweig" if z == "A" else ""))
+                    for z in bd.ZWEIGE
                 ],
+                on_select=wahl("zweig"),
+            )
+        )
+        zeilen.append(
+            ft.Dropdown(
+                label="erfüllt →",
+                value=b.dann or "-",
+                dense=True,
+                options=optionen("— (nächste im Zweig)"),
+                on_select=wahl("dann"),
             )
         )
         zeilen.append(

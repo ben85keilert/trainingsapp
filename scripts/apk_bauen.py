@@ -74,6 +74,9 @@ ARCHITEKTUR = "arm64-v8a"
 
 #: Hier liegt die Vorlage mit eigener MainActivity (`vorlage_bauen`); ``build/`` ist ignoriert
 VORLAGE_ORDNER = PROJEKT / "build" / "vorlage"
+#: Anläufe und Pause beim Download der Flet-Vorlage (GitHub-Aussetzer, 8.11.2026)
+VORLAGE_ANLAEUFE = 6
+VORLAGE_PAUSE_S = 45
 #: Die MainActivity in Flets Vorlage (cookiecutter) — und wie sie dort aussehen muss
 MAIN_ACTIVITY_PFAD = (
     "build/{{cookiecutter.out_dir}}/android/app/src/main/kotlin/"
@@ -313,7 +316,23 @@ def vorlage_bauen() -> Path:
     from flet_cli.utils.template_cache import get_cached_template_zip
 
     version = flet.version.flet_version
-    quelle = get_cached_template_zip(DEFAULT_TEMPLATE_URL.format(version=version), version)
+    url = DEFAULT_TEMPLATE_URL.format(version=version)
+    # GitHub antwortet beim Download der Vorlage gelegentlich mit 504 (v0.3.59, v0.3.63) —
+    # ein paar Anläufe mit Pause, bevor der ganze Lauf scheitert
+    import time
+    import urllib.error
+
+    for anlauf in range(1, VORLAGE_ANLAEUFE + 1):
+        try:
+            quelle = get_cached_template_zip(url, version)
+            break
+        except (urllib.error.URLError, TimeoutError, OSError) as fehler:
+            if anlauf == VORLAGE_ANLAEUFE:
+                raise
+            print(
+                f"Vorlage: {fehler} — Anlauf {anlauf}/{VORLAGE_ANLAEUFE}, warte {VORLAGE_PAUSE_S} s"
+            )
+            time.sleep(VORLAGE_PAUSE_S)
     pruefsumme = hashlib.sha256((MAIN_ACTIVITY + SICHERUNG).encode("utf-8")).hexdigest()[:8]
     ziel = VORLAGE_ORDNER / f"flet-build-template-{version}-{pruefsumme}.zip"
     if not ziel.exists():

@@ -54,7 +54,9 @@ gezeigt).
 **Beim Bauen entschieden:** Das ✕ an einem Chip nimmt ihn aus der Wahl — ein eigener Chip
 ist damit weg, ein Vorschlag des Vorrats (10, 15, 20) steht beim nächsten Öffnen wieder zur
 Wahl (Ben, 18.10.2026: „leer heißt leer“ — die Vorschläge bleiben Vorschläge, gespeichert
-wird nur, was gewählt ist). Das Zielfeld je Karte heißt „Ziel“ bzw. „Ziel je Satz“; die
+wird nur, was gewählt ist). Das Zielfeld je Karte heißt „Ziel“ bzw. „Ziel je Satz“ — seit
+8.11.2026 (Ben: „Ziel ist nur optional und für eine Standardübung eher selten“) ist es ohne
+Wert **zu** und öffnet erst mit „Ziel setzen …“; die
 Ziel-Variante steht unter den Varianten. Am Rechner nimmt „Foto hochladen“ den Dateidialog
 (JPEG, ohne Verkleinern, Metadaten werden entfernt); am Handy die Fotoauswahl der App.
 

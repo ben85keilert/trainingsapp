@@ -816,7 +816,9 @@ def uebung_bearbeiten(
                 ft.Text("Ein Textfeld beim Üben — für den offenen Eintrag.", size=12, opacity=0.6)
             )
         ziel_feld = ziel_feld_fuer(key)
-        if ziel_feld is not None:
+        if ziel_feld is not None and (
+            ziel_gemerkt.get(key) not in (None, "", []) or key in ziel_offen
+        ):
             form = SpecForm(
                 ResultSpec(fields=[replace(ziel_feld, label="Ziel")]),
                 {key: ziel_gemerkt.get(key)},
@@ -831,12 +833,38 @@ def uebung_bearbeiten(
                     tooltip="Was „Wie geplant“ beim Üben einträgt — in jedem Plan ohne eigenes",
                 )
             )
+        elif ziel_feld is not None:
+            # Das Ziel ist die Ausnahme (Ben, 8.11.2026): erst ein Tipp öffnet das Feld — so
+            # bleibt die Karte übersichtlich
+            teile.append(
+                ft.Row(
+                    controls=[
+                        ft.TextButton(
+                            "Ziel setzen …",
+                            icon=ft.Icons.FLAG_OUTLINED,
+                            tooltip="Was „Wie geplant“ beim Üben einträgt — in jedem Plan "
+                            "ohne eigenes; ohne Ziel trägt „Wie geplant“ nichts vor",
+                            on_click=ziel_oeffner(key),
+                        )
+                    ]
+                )
+            )
         return ft.Container(
             bgcolor=KARTE,
             border_radius=14,
             padding=ft.Padding.only(left=12, right=10, top=6, bottom=10),
             content=ft.Column(spacing=8, tight=True, controls=teile),
         )
+
+    #: Karten, auf denen das Zielfeld aufgeklappt ist (ohne Wert bleibt es zu, 8.11.2026)
+    ziel_offen: set[str] = set()
+
+    def ziel_oeffner(key: str) -> Callable[[], None]:
+        def handler() -> None:
+            ziel_offen.add(key)
+            karten_neu()
+
+        return handler
 
     def karten_zeichnen() -> None:
         ziel_werte()  # die Werte der alten Formulare merken, bevor sie ersetzt werden

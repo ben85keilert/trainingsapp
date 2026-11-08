@@ -270,17 +270,26 @@ def test_parameter_als_knoepfe_mit_karten_namen_chips_und_ziel(page, state) -> N
     # Die Karte: Name und Ziel
     namen = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Name"]
     assert [n.value for n in namen[1:]] == ["Wiederholungen"]  # [0] ist der Name der Übung
+    # Ohne Wert ist das Ziel zu — „Ziel setzen …“ öffnet es (8.11.2026)
+    ziel_knoepfe = [
+        x for x in _alle(ansicht) if isinstance(x, ft.TextButton) and x.content == "Ziel setzen …"
+    ]
+    assert len(ziel_knoepfe) == 1
+    ziel_knoepfe[0].on_click()
     ziel = next(
         x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Ziel je Satz"
     )
     ziel.value = "3x12"
-    # Gewicht einschalten: eine zweite Karte mit Chips 5 10 20 und Ziel
+    # Gewicht einschalten: eine zweite Karte mit Chips 5 10 20 — das Ziel dort zu, ein Knopf
     knoepfe["Gewicht"].on_select()
     texte = _texte(ansicht)
     assert "kg" in texte
     assert [
         x.label for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Ziel"
-    ] == ["Ziel"]
+    ] == []
+    assert [
+        x for x in _alle(ansicht) if isinstance(x, ft.TextButton) and x.content == "Ziel setzen …"
+    ]
     # Ein ungenutzter Chip trägt ✕ — gewählte nicht
     assert _chip(ansicht, "5kg").on_delete is None  # gewählt (aus dem Vorrat)
     _chip(ansicht, "5kg").on_select()  # abwählen

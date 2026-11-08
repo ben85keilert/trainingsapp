@@ -123,7 +123,13 @@ Timer für alle: — ▾        Takt für alle: — ▾        [Signale ⚙]
 └────────────────────────────────────────────────────────────────────┘
 Gesamt etwa 14 min · 3 mit Timer · 2 mit Takt                     [Alles wie die Übung ↺]
 ```
-- Je Zeile: **Uhr** (an/aus/wie Übung), **Timer** (▾: wie Übung · Stoppuhr · Timer der Übung ·
+- **Fassung 2 (Ben, 8.11.: „listenartiger — die Abschnitte müssen von außen einsehbar sein“):**
+  jede Planübung ist eine **aufklappbare Karte**. Zu: eine Zeile mit allem („Halten 2 × 30 s ·
+  kein Takt · zählt · weiter: Zeit ab“). Auf: der Timer als **Liste** — Kopfzeile (Name ▾,
+  Gesamtdauer), je Abschnitt Beschriftung · Dauer (antippen → Zeit-Blatt) · Takt (antippen →
+  Takt-Blatt) · zählt, „+ Abschnitt“, Runden −/+; darunter Chips Uhr an · Sensor zählt ·
+  Weiter-Bedingung. Knöpfe und Beschriftungen gemischt, keine Formularfelder. Skizze D1.
+- Je Zeile (Fassung 1, überholt): **Uhr** (an/aus/wie Übung), **Timer** (▾: wie Übung · Stoppuhr · Timer der Übung ·
   Plan-Timer · Vorlage als Kopie · Stift = Editor der Kopie), **Takt** (▾: wie Übung · Vorlagen ·
   Bibliothek · keiner · Stift = Takt-Blatt), **zählt** (Schalter, P104), **Bedingung**
   (Kurztext, Tipp → Karte „Weiter, wenn …“ als Blatt). Schild „nur hier“ je Zelle wie heute,
@@ -135,6 +141,22 @@ Gesamt etwa 14 min · 3 mit Timer · 2 mit Takt                     [Alles wie d
   `plan_timer_setzen`); Zurück ist nur Zurück. Die Karte „Workout und Ablauf“ im Plan-Editor
   wird zur Zeile „Uhren: 3 Timer · 2 Takte · Workout weich ›“.
 - Im Planblock (Üben) bleibt alles, wie es ist; der Untertitel nennt **Timer und Takt**.
+
+### 4.6a Zeit stellen — ein Blatt überall (Ben, 8.11.)
+- Das bestehende Blatt `components/zeit_stellen.zeit_blatt` (Räder Minuten/Sekunden, Tippfeld)
+  ist **das** Blatt für jede Zeit: Timer-Seite, Abschnitte im Uhrenplan und im Timer-Editor
+  (heute `mm:ss`-Textfelder), Uhr-Zeile, Messdauer. Die Zeit steht überall als **antippbares
+  Etikett**, nie als Eingabefeld.
+- **Schnellzeiten** (heute fest 1 · 2 · 5 · 10 · 15 min auf der Timer-Seite, 5 · 10 · 15 bei der
+  Messdauer) werden eine Einstellung (Einstellungen → Timer, Liste in Sekunden, z. B. 30 s · 45 s ·
+  1 · 2 · 5 · 10 min) und stehen als Chips im Blatt. Skizze D9.
+
+### 4.6b „Weiter, wenn …“ auch an der Übung (Ben, 8.11., **P107 entschieden**)
+- Die Bedingung bekommt eine Stufe darunter: `Exercise.bedingung` (Migration, Paketfeld
+  `bedingung` später mit P97). „Übung bearbeiten“ zeigt die Karte „Weiter, wenn …“ ohne Zweig;
+  die Planübung **folgt der Übung** (`PlanItem.bedingung` ``None`` = wie die Übung, ↺), setzt nur
+  den Zweig (`zweig`, `dann`, `sonst`) oder überschreibt. Auflösung an einer Stelle
+  (`core.bedingung.wirksame_bedingung`), wie `wirksame_wahl` beim Sensor.
 
 ### 4.7 Workout und Ablauf werden eins
 - `views/plan_ablauf.py` (Ansicht) entfällt; der Motor bleibt. Einstiege („Ablauf öffnen“ auf
@@ -192,9 +214,9 @@ im Katalog, `hilfe.UHR_MD`/`TAKT_MD`/`KNOPF_LEGENDE`.
 | Stufe | Inhalt | Aufwand | Braucht |
 |---|---|---|---|
 | **K0** | Fehler aus 4.9, Pille überall (4.1 ohne Reiter-Umbenennung), Doku-Nachzug | klein | — |
-| **K1** | Glossar in der Oberfläche: Knopfworte, Reiter „Zeit/Vorlagen“, „Abschnitte“, „zählt“ als Chip/Schalter, Hilfetexte | mittel | **P101** |
+| **K1** | Glossar in der Oberfläche: Knopfworte, Reiter „Zeit/Vorlagen“, „Abschnitte“, „zählt“ als Chip/Schalter, Hilfetexte; **Zeit-Blatt überall + Schnellzeiten-Einstellung** (4.6a) | mittel | **P101** |
 | **K2** | Uhr in der Übung: eine Darstellung, ⏭ und Takt in der laufenden Karte, Fokus mit denselben Knöpfen; Übungs-Timer mit Stoppuhr-Chip, Links, Stift für die Kopie | mittel | **P103** |
-| **K3** | **Uhrenplan** `/plan/<id>/bearbeiten/uhren` mit Takt für alle, zählt je Planübung | groß | **P104, P105** |
+| **K3** | **Uhrenplan** `/plan/<id>/bearbeiten/uhren` (aufklappbare Karten, Abschnitte als Liste) mit Takt für alle, zählt je Planübung; **Bedingung an der Übung** (4.6b) | groß | **P104, P105, P107** |
 | **K4** | Workout und Ablauf eins; Takt/Sensor im Workout (P99) | mittel | **P106** |
 | **K5** | Takt-Blatt mit Geltungs-Reitern, Takt-Bibliothek verwalten | mittel | — |
 
@@ -206,7 +228,8 @@ D8 Takt-Blatt mit Geltung (K5).
 
 ## 7. Entscheidungen (Katalog) — **alle entschieden 8.11.2026**
 
-P101 übernehmen · P102–P105 ja · P106 ja, mit der Doppelbedeutung aus §4.7. Nächster Schritt:
+P101 übernehmen · P102–P105 ja · P106 ja, mit der Doppelbedeutung aus §4.7 · P107 (Bedingung an der
+Übung) ja. Skizzen D1–D9 abgenommen am 8.11. (D1 in Fassung 2, D5 mit Zeit-Blatt D9); K5 „bauen“. Nächster Schritt:
 Skizzen für K2 (laufende Uhr/Fokus) und K3 (Uhrenplan), dann K0.
 
 Fragen, wie sie gestellt waren:

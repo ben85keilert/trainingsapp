@@ -9,6 +9,15 @@ der Schritt als erfüllt gilt:
 - ``wdh`` — ``n`` Wiederholungen (Sensor oder Takt zählen).
 - ``wdh_in_zeit`` — ``n`` Wiederholungen innerhalb von ``sekunden``.
 - ``gemacht`` — ein Tipp auf „Weiter“ (Abhaken).
+- ``skala`` — die Person bewertet im Schritt auf einer Skala (etwa 0–10); erreicht der Wert
+  ``n``, ist die Bedingung erfüllt („bis es unangenehm wird, Skala 6/10 — dann Wechsel“, Ben
+  8.11.2026). Eine Selbsteinschätzung, kein Messwert.
+
+**Wege** (Ben, 8.11.2026): Neben der Bedingung bietet ein Schritt **alternative Pfade** an —
+„Weiter mit B: Dehnung — Beine krampfen“, „Weiter mit C: Planke“ —, vorher gesetzt, im Workout
+als Knöpfe; ein Weg darf zu einer schon gemachten Übung oder zur laufenden selbst führen
+(Schleife: Wandsitz, Pause, Wandsitz …). Eine Endlosschleife ist nur ein Problem, wenn es
+keinen Weg hinaus gibt — das prüft `schleifen`.
 
 **Härte:** weich = „Weiter“ geht immer, die Bedingung ist nur der Vorschlag und das
 Auto-Weiter (Übergang hart); hart = Freischaltung: „Weiter“ erst, wenn erfüllt, ein **Inhalt**
@@ -35,14 +44,19 @@ ZEIT: Final = "zeit"
 WDH: Final = "wdh"
 WDH_IN_ZEIT: Final = "wdh_in_zeit"
 GEMACHT: Final = "gemacht"
-ARTEN: Final[tuple[str, ...]] = (KEINE, ZEIT, WDH, WDH_IN_ZEIT, GEMACHT)
+SKALA: Final = "skala"
+ARTEN: Final[tuple[str, ...]] = (KEINE, ZEIT, WDH, WDH_IN_ZEIT, GEMACHT, SKALA)
 ARTEN_TEXT: Final[dict[str, str]] = {
     KEINE: "keine — Zeit ab oder „Weiter“",
     ZEIT: "Zeit ab",
     WDH: "Wiederholungen",
     WDH_IN_ZEIT: "Wiederholungen in einer Zeit",
     GEMACHT: "Abhaken",
+    SKALA: "Skala erreicht (Selbsteinschätzung)",
 }
+#: Skala-Bedingung: Spanne der Chips, wenn die Übung kein Skalenfeld hat
+SKALA_MIN: Final = 0
+SKALA_MAX: Final = 10
 #: Zweige: A ist der Hauptzweig
 ZWEIGE: Final[tuple[str, ...]] = ("A", "B", "C", "D")
 HAUPTZWEIG: Final = "A"
@@ -61,9 +75,24 @@ class Inhalt:
 
 
 @dataclass(frozen=True, slots=True)
+class Weg:
+    """Ein alternativer Pfad aus einem Schritt: zu dieser Planübung (``ziel``), mit einem Wort,
+    wann er gemeint ist (``text``: „Beine krampfen“)."""
+
+    ziel: str
+    text: str = ""
+
+    def als_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"ziel": self.ziel}
+        if self.text:
+            d["text"] = self.text
+        return d
+
+
+@dataclass(frozen=True, slots=True)
 class Bedingung:
     art: str = KEINE
-    #: Wiederholungen (``wdh``, ``wdh_in_zeit``)
+    #: Wiederholungen (``wdh``, ``wdh_in_zeit``) bzw. der Skalenwert, der erreicht sein muss
     n: int = 0
     #: Sekunden (``wdh_in_zeit``)
     sekunden: float = 0.0
@@ -76,6 +105,8 @@ class Bedingung:
     dann: str = ""
     #: nicht erfüllt → diese Planübung (leer: kein Zweig)
     sonst: str = ""
+    #: alternative Pfade, im Workout als Knöpfe (Ben, 8.11.2026)
+    wege: tuple[Weg, ...] = ()
 
     @property
     def leer(self) -> bool:
@@ -87,6 +118,7 @@ class Bedingung:
             and self.zweig == HAUPTZWEIG
             and not self.dann
             and not self.sonst
+            and not self.wege
         )
 
     def kurztext(self) -> str:
@@ -108,15 +140,19 @@ class Bedingung:
             teile.append("Zeit ab")
         elif self.art == GEMACHT:
             teile.append("abhaken")
+        elif self.art == SKALA:
+            teile.append(f"Skala {self.n}")
         if self.hart:
             teile.append("Pflicht")  # in der Oberfläche „Pflicht“ — „hart“ ist der Übergang
         if self.sonst:
             teile.append("sonst →")
+        if self.wege:
+            teile.append(f"{len(self.wege)} {'Weg' if len(self.wege) == 1 else 'Wege'}")
         return " · ".join(teile)
 
     def als_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"art": self.art}
-        if self.art in (WDH, WDH_IN_ZEIT):
+        if self.art in (WDH, WDH_IN_ZEIT, SKALA):
             d["n"] = self.n
         if self.art == WDH_IN_ZEIT:
             d["sekunden"] = self.sekunden
@@ -131,6 +167,8 @@ class Bedingung:
             d["dann"] = self.dann
         if self.sonst:
             d["sonst"] = self.sonst
+        if self.wege:
+            d["wege"] = [w.als_dict() for w in self.wege]
         return d
 
     @classmethod
@@ -145,6 +183,10 @@ class Bedingung:
         True
         >>> Bedingung.aus_dict(None).leer, Bedingung.aus_dict({"art": "wdh"}).art
         (True, 'keine')
+        >>> roh = {"art": "skala", "n": 6, "wege": [{"ziel": "i2", "text": "krampft"}, 3]}
+        >>> w = Bedingung.aus_dict(roh)
+        >>> w.art, w.n, w.wege
+        ('skala', 6, (Weg(ziel='i2', text='krampft'),))
         """
         if not isinstance(roh, Mapping):
             return cls()
@@ -153,10 +195,15 @@ class Bedingung:
             art = KEINE
         n = _ganzzahl(roh.get("n"))
         sekunden = _zahl(roh.get("sekunden"))
-        if art in (WDH, WDH_IN_ZEIT) and n <= 0:
+        if art in (WDH, WDH_IN_ZEIT, SKALA) and n <= 0:
             art = KEINE
         if art == WDH_IN_ZEIT and sekunden <= 0:
             art = WDH
+        wege = tuple(
+            Weg(str(w["ziel"]), str(w.get("text") or "").strip())
+            for w in (roh.get("wege") or [])
+            if isinstance(w, Mapping) and w.get("ziel")
+        )
         inhalt_roh = roh.get("inhalt")
         inhalt = (
             Inhalt(str(inhalt_roh.get("text") or ""), str(inhalt_roh.get("url") or ""))
@@ -168,13 +215,14 @@ class Bedingung:
             zweig = HAUPTZWEIG
         return cls(
             art,
-            n if art in (WDH, WDH_IN_ZEIT) else 0,
+            n if art in (WDH, WDH_IN_ZEIT, SKALA) else 0,
             sekunden if art == WDH_IN_ZEIT else 0.0,
             bool(roh.get("hart")),
             inhalt,
             zweig,
             str(roh.get("dann") or ""),
             str(roh.get("sonst") or ""),
+            wege,
         )
 
 
@@ -200,6 +248,8 @@ class Stand:
     gelaufen_s: float = 0.0
     #: Wiederholungen bisher — ``None``: niemand zählt (kein Sensor, kein Takt)
     wdh: int | None = None
+    #: die Selbsteinschätzung im Schritt (``skala``) — ``None``: noch nicht gewählt
+    skala: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,11 +281,21 @@ def pruefen(b: Bedingung, st: Stand) -> Erfuellung:
     True
     >>> pruefen(Bedingung(), Stand()).erfuellt
     True
+    >>> pruefen(Bedingung(SKALA, 6), Stand(skala=7)).erfuellt
+    True
+    >>> pruefen(Bedingung(SKALA, 6), Stand()).text
+    'Skala wählen — erreicht bei 6'
     """
     if b.art in (KEINE, GEMACHT):
         return Erfuellung(True, "")
     if b.art == ZEIT:
         return Erfuellung(st.zeit_ab, "Zeit ab" if st.zeit_ab else "Zeit läuft")
+    if b.art == SKALA:
+        if st.skala is None:
+            return Erfuellung(False, f"Skala wählen — erreicht bei {b.n}", unpruefbar=True)
+        if st.skala >= b.n:
+            return Erfuellung(True, f"Skala {st.skala:g} — erreicht")
+        return Erfuellung(False, f"Skala {st.skala:g} von {b.n} — noch nicht erreicht")
     if st.wdh is None:
         return Erfuellung(
             False, "niemand zählt — Wiederholungen von Hand bestätigen", unpruefbar=True
@@ -255,38 +315,6 @@ def pruefen(b: Bedingung, st: Stand) -> Erfuellung:
         )
     rest = b.sekunden - st.gelaufen_s
     return Erfuellung(False, f"noch {b.n - st.wdh} in {sekunden_text(rest)}")
-
-
-def nur_verweise(b: Bedingung) -> bool:
-    """Hat die Planübung nur Zweig und Verweise gesetzt — keine eigene Bedingung?
-
-    >>> nur_verweise(Bedingung()), nur_verweise(Bedingung(zweig="B"))
-    (True, True)
-    >>> nur_verweise(Bedingung(ZEIT)), nur_verweise(Bedingung(hart=True))
-    (False, False)
-    """
-    return b.art == KEINE and not b.hart and b.inhalt.leer
-
-
-def wirksame(uebung: Bedingung, plan: Bedingung | None) -> Bedingung:
-    """Die Bedingung, die im Workout gilt (P107, `docs/plan_uhren.md` §4.6b): die der Planübung,
-    wenn sie eine eigene hat — sonst die der Übung mit Zweig und Verweisen der Planübung
-    (die Planübung folgt der Übung und setzt nur den Zweig dazu).
-
-    >>> u = Bedingung(WDH, 15, hart=True)
-    >>> wirksame(u, None) == u, wirksame(u, Bedingung()) == u
-    (True, True)
-    >>> w = wirksame(u, Bedingung(zweig="B", sonst="i3"))
-    >>> w.art, w.n, w.hart, w.zweig, w.sonst
-    ('wdh', 15, True, 'B', 'i3')
-    >>> wirksame(u, Bedingung(ZEIT)).art
-    'zeit'
-    """
-    if plan is None or plan.leer:
-        return uebung
-    if nur_verweise(plan):
-        return replace(uebung, zweig=plan.zweig, dann=plan.dann, sonst=plan.sonst)
-    return plan
 
 
 def naechster_im_zweig(
@@ -314,27 +342,47 @@ def naechster_im_zweig(
     return None
 
 
-def schleifen(bedingungen: Mapping[str, Bedingung], reihenfolge: Iterable[str]) -> list[str]:
-    """Schritte, von denen aus man über ``dann``/``sonst`` im Kreis läuft, ohne je einen
-    Schritt ohne Verweis zu erreichen — ein Hinweis beim Speichern, kein Verbot.
+ENDE: Final = "__ende__"
 
-    >>> b = {"x": Bedingung(WDH, 5, sonst="y"), "y": Bedingung(WDH, 5, sonst="x")}
+
+def ausgaenge(b: Bedingung, naechster: str | None) -> set[str]:
+    """Wohin es von einem Schritt gehen kann: ``dann`` (sonst der nächste in der Folge, sonst
+    das Ende), ``sonst`` und alle Wege."""
+    out = {b.dann or naechster or ENDE}
+    if b.sonst:
+        out.add(b.sonst)
+    out.update(w.ziel for w in b.wege)
+    return out
+
+
+def schleifen(bedingungen: Mapping[str, Bedingung], reihenfolge: Iterable[str]) -> list[str]:
+    """Schritte **ohne Ausweg**: Von dort erreicht man über ``dann``, ``sonst``, die Wege und
+    die Planfolge nie das Ende des Workouts — ein Hinweis beim Speichern, kein Verbot (Ben,
+    8.11.2026: „Endlosschleife ist nur dann ein Problem, wenn es keinen Weg raus gibt“).
+    Schleifen mit einem Weg hinaus sind gewollt (Wandsitz, Pause, Wandsitz … bis Skala 6).
+
+    >>> b = {"x": Bedingung(WDH, 5, dann="y"), "y": Bedingung(WDH, 5, dann="x")}
     >>> schleifen(b, ["x", "y"])
     ['x', 'y']
+    >>> b["y"] = Bedingung(WDH, 5, dann="x", wege=(Weg("z"),))  # ein Weg hinaus
+    >>> schleifen(b, ["x", "y", "z"])
+    []
     >>> schleifen({"x": Bedingung(WDH, 5, sonst="y")}, ["x", "y"])
     []
     """
-    out: list[str] = []
-    for start in reihenfolge:
-        gesehen: set[str] = set()
-        aktuell: str | None = start
-        while aktuell and aktuell not in gesehen:
-            gesehen.add(aktuell)
-            b = bedingungen.get(aktuell, Bedingung())
-            aktuell = b.sonst or b.dann or None
-        if aktuell is not None:  # ein Verweis führte auf einen schon besuchten Schritt
-            out.append(start)
-    return out
+    folge = list(reihenfolge)
+    naechste = {i: (folge[k + 1] if k + 1 < len(folge) else None) for k, i in enumerate(folge)}
+    kanten = {i: ausgaenge(bedingungen.get(i, Bedingung()), naechste[i]) for i in folge}
+    # Rückwärts vom Ende: wer erreicht es?
+    erreicht = {ENDE}
+    geaendert = True
+    while geaendert:
+        geaendert = False
+        for i, ziele in kanten.items():
+            if i not in erreicht and ziele & erreicht:
+                erreicht.add(i)
+                geaendert = True
+    return [i for i in folge if i not in erreicht]
 
 
 def bedingung_pruefen(roh: Any, *, im_plan: bool = False) -> tuple[list[str], list[str]]:
@@ -369,6 +417,15 @@ def bedingung_pruefen(roh: Any, *, im_plan: bool = False) -> tuple[list[str], li
             hinweise.append(f"„{k}“ gilt nur je Planübung — an der Übung übergangen")
         elif not (isinstance(roh[k], str) and roh[k].startswith("#") and roh[k][1:].isdigit()):
             fehler.append(f"„{k}“ muss eine Position sein („#2“)")
+    if "wege" in roh:
+        wege = roh["wege"]
+        if not isinstance(wege, list):
+            fehler.append("wege ist keine Liste")
+        else:
+            for w in wege:
+                ziel = w.get("ziel") if isinstance(w, Mapping) else None
+                if not (isinstance(ziel, str) and ziel.startswith("#") and ziel[1:].isdigit()):
+                    fehler.append("jeder Weg braucht ein Ziel als Position („#2“)")
     return fehler, hinweise
 
 
@@ -407,9 +464,7 @@ __all__ = [
     "Stand",
     "mit_zweig",
     "naechster_im_zweig",
-    "nur_verweise",
     "pruefen",
     "schleifen",
     "sekunden_text",
-    "wirksame",
 ]

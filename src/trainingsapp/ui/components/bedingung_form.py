@@ -27,27 +27,26 @@ def bedingung_karte(
     neu_zeichnen: Callable[[], None],
     *,
     ziele: Sequence[tuple[str, str]] | None = None,
-    vorgabe: Bedingung | None = None,
+    selbst: str | None = None,
     kopf: Sequence[ft.Control] = (),
 ) -> ft.Control:
-    """Die Karte. ``ziele``: die anderen Planübungen als (ID, Name) für Zweig und Verweise —
-    ``None`` an der Übung (dort gibt es keinen Zweig). ``vorgabe``: was die Übung mitbringt
-    (grau, solange die Planübung ihr folgt). ``kopf``: Schild und ↺ rechts oben."""
+    """Die Karte. ``ziele``: alle Planübungen als (ID, Name) für Zweig, Verweise und Wege —
+    ``selbst`` ist die eigene (ein Verweis dorthin heißt „noch einmal“, Schleife). ``kopf``:
+    Schild und ↺ rechts oben."""
     b = lesen()
-    folgt = vorgabe is not None and bd.nur_verweise(b)
-    gezeigt = vorgabe if folgt and vorgabe is not None else b
+    gezeigt = b
 
     def aendern(**felder: Any) -> None:
-        # Die erste Änderung an der Planübung übernimmt die Werte der Übung in die eigene
-        # Bedingung (sonst wäre „15 Wdh. · Pflicht“ plötzlich weg)
-        basis = replace(gezeigt, zweig=b.zweig, dann=b.dann, sonst=b.sonst) if folgt else b
-        setzen(replace(basis, **felder))
+        setzen(replace(b, **felder))
 
     def art_gewaehlt(e: ft.Event[ft.Dropdown]) -> None:
         art = str(e.control.value or bd.KEINE)
-        n = gezeigt.n or (12 if art in (bd.WDH, bd.WDH_IN_ZEIT) else 0)
+        if art == bd.SKALA:
+            n = gezeigt.n if 0 < gezeigt.n <= bd.SKALA_MAX else 6
+        else:
+            n = gezeigt.n or (12 if art in (bd.WDH, bd.WDH_IN_ZEIT) else 0)
         sekunden = gezeigt.sekunden or (60.0 if art == bd.WDH_IN_ZEIT else 0.0)
-        aendern(art=art, n=n if art in (bd.WDH, bd.WDH_IN_ZEIT) else 0, sekunden=sekunden)
+        aendern(art=art, n=n if art in (bd.WDH, bd.WDH_IN_ZEIT, bd.SKALA) else 0, sekunden=sekunden)
         neu_zeichnen()
 
     def zahl(feld: str) -> Callable[[ft.Event[ft.TextField]], None]:
@@ -132,6 +131,26 @@ def bedingung_karte(
                 opacity=0.6,
             )
         )
+    if gezeigt.art == bd.SKALA:
+        zeilen.append(
+            ft.TextField(
+                label="Erreicht ab (Skala)",
+                value=str(gezeigt.n) if gezeigt.n else "",
+                dense=True,
+                width=160,
+                keyboard_type=ft.KeyboardType.NUMBER,
+                on_change=zahl("n"),
+            )
+        )
+        zeilen.append(
+            ft.Text(
+                "Die Person wählt im Schritt einen Wert (Chips über die Skala der Übung, sonst "
+                "0–10). Ab diesem Wert ist die Bedingung erfüllt — etwa „bis es unangenehm "
+                "wird, 6/10“. Eine Selbsteinschätzung, kein Messwert.",
+                size=12,
+                opacity=0.6,
+            )
+        )
     zeilen.append(
         ft.Switch(
             label="Pflicht — „Weiter“ erst, wenn erfüllt",
@@ -161,9 +180,13 @@ def bedingung_karte(
             )
         )
     if ziele is not None:
+
+        def name_von(i: str, n: str) -> str:
+            return f"↺ noch einmal: {n}" if i == selbst else n
+
         optionen = lambda leer: [  # noqa: E731
             ft.DropdownOption(key="-", text=leer),
-            *(ft.DropdownOption(key=i, text=n) for i, n in ziele),
+            *(ft.DropdownOption(key=i, text=name_von(i, n)) for i, n in ziele),
         ]
         # Kein `expand` in einer umbrechenden Zeile (Flutter: unbegrenzte Breite → graue
         # Fläche, Ben 8.11.2026) — Zweig und Verweise untereinander
@@ -198,6 +221,79 @@ def bedingung_karte(
                 on_select=wahl("sonst"),
             )
         )
+        # Wege (Ben, 8.11.2026): alternative Pfade, im Workout als Knöpfe — Ziel und ein Wort,
+        # wann er gemeint ist; Ziel darf die eigene Übung sein (Schleife)
+        zeilen.append(ft.Text("WEGE", size=11, weight=ft.FontWeight.BOLD, opacity=0.6))
+
+        def weg_setzen(k: int, **felder: Any) -> None:
+            wege = list(b.wege)
+            wege[k] = replace(wege[k], **felder)
+            setzen(replace(b, wege=tuple(wege)))
+
+        def weg_ziel(k: int) -> Callable[[ft.Event[ft.Dropdown]], None]:
+            def handler(e: ft.Event[ft.Dropdown]) -> None:
+                weg_setzen(k, ziel=str(e.control.value or ""))
+                neu_zeichnen()
+
+            return handler
+
+        def weg_text(k: int) -> Callable[[ft.Event[ft.TextField]], None]:
+            def handler(e: ft.Event[ft.TextField]) -> None:
+                weg_setzen(k, text=(e.control.value or "").strip())
+
+            return handler
+
+        def weg_weg(k: int) -> Callable[[], None]:
+            def handler() -> None:
+                wege = list(b.wege)
+                del wege[k]
+                setzen(replace(b, wege=tuple(wege)))
+                neu_zeichnen()
+
+            return handler
+
+        def weg_dazu() -> None:
+            ziel = next((i for i, _ in ziele if i != selbst), selbst or "")
+            setzen(replace(b, wege=(*b.wege, bd.Weg(ziel))))
+            neu_zeichnen()
+
+        for k, weg in enumerate(b.wege):
+            zeilen.append(
+                ft.Column(
+                    spacing=6,
+                    controls=[
+                        ft.Dropdown(
+                            label=f"Weg {k + 1} →",
+                            value=weg.ziel if any(i == weg.ziel for i, _ in ziele) else None,
+                            dense=True,
+                            options=[
+                                ft.DropdownOption(key=i, text=name_von(i, n)) for i, n in ziele
+                            ],
+                            on_select=weg_ziel(k),
+                        ),
+                        ft.Row(
+                            spacing=6,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            controls=[
+                                ft.TextField(
+                                    label="Wann? (z. B. „Beine krampfen“)",
+                                    value=weg.text,
+                                    dense=True,
+                                    expand=True,
+                                    on_change=weg_text(k),
+                                ),
+                                ft.IconButton(
+                                    ft.Icons.CLOSE,
+                                    icon_size=18,
+                                    tooltip="Weg entfernen",
+                                    on_click=weg_weg(k),
+                                ),
+                            ],
+                        ),
+                    ],
+                )
+            )
+        zeilen.append(ft.TextButton("+ Weg", icon=ft.Icons.ADD, on_click=weg_dazu))
     return ft.Container(
         padding=ft.Padding.symmetric(horizontal=12, vertical=10),
         border_radius=14,

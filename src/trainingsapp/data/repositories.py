@@ -138,8 +138,8 @@ class ExerciseRepo:
                      is_builtin, result_spec_json, limit_spec_json,
                      default_target_json, default_input_mode, archived, created_at, updated_at,
                      default_fields_json, package_id, timer_json, clock_on,
-                     clock_counts_as, clock_counts, acc_json, takt_json, bedingung_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+                     clock_counts_as, clock_counts, acc_json, takt_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
@@ -159,7 +159,6 @@ class ExerciseRepo:
                     clock_counts = excluded.clock_counts,
                     acc_json = excluded.acc_json,
                     takt_json = excluded.takt_json,
-                    bedingung_json = excluded.bedingung_json,
                     updated_at = excluded.updated_at,
                     revision = revision + 1
                 """,
@@ -185,7 +184,6 @@ class ExerciseRepo:
                     int(uebung.zeit_zaehlt),
                     json.dumps(uebung.beschleunigung.als_dict(), ensure_ascii=False),
                     json.dumps(uebung.takt.als_dict() if uebung.takt else {}, ensure_ascii=False),
-                    _bedingung_json(uebung.bedingung),
                 ),
             )
             # Medien: alle Verweise neu schreiben. Einfacher als Abgleich, und
@@ -518,7 +516,6 @@ class ExerciseRepo:
             zeit_zaehlt=bool(r["clock_counts"]),
             beschleunigung=SensorWahl.aus_dict(_json_lesen(r["acc_json"], {})),
             takt=Takt.aus_dict(_json_lesen(r["takt_json"], {})),
-            bedingung=Bedingung.aus_dict(_tabelle_lesen(r["bedingung_json"])),
         )
 
 

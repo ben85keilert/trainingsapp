@@ -47,7 +47,6 @@ from datetime import datetime
 from typing import Any
 
 from . import links
-from .bedingung import Bedingung as Weiterbedingung
 from .kurse import (
     BEDINGUNGEN,
     FREISCHALTUNGEN,
@@ -569,8 +568,6 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             beschleunigung=SensorWahl.aus_dict(eintrag.get("beschleunigung")),
             # Ebenso tolerant: ohne brauchbare Phase kein Takt (`core.takt.Takt.aus_dict`)
             takt=Takt.aus_dict(eintrag.get("takt")),
-            # „Weiter, wenn …“ der Übung (P107/P97, 8.11.2026) — ohne Zweig; nachsichtig
-            bedingung=Weiterbedingung.aus_dict(eintrag.get("bedingung")),
         ),
         key,
     )
@@ -772,8 +769,6 @@ def stand(u: Exercise) -> dict[str, Any]:
         d["beschleunigung"] = beschleunigung
     if u.takt is not None and not u.takt.leer:
         d["takt"] = u.takt.als_dict()
-    if not u.bedingung.leer:
-        d["bedingung"] = u.bedingung.als_dict()
     if u.default_target:
         d["default_target"] = u.default_target
     medien = [
@@ -821,7 +816,6 @@ FELDNAMEN: dict[str, str] = {
     "zaehlt_als": "Zählt als",
     "beschleunigung": "Beschleunigungssensor",
     "takt": "Takt",
-    "bedingung": "Weiter, wenn",
     "media": "Videos",
 }
 

@@ -183,6 +183,13 @@ def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry
         )
         if wdh:
             werte[feld] = wdh
+    # Die Selbsteinschätzung des Schritts (Bedingung „Skala“, 8.11.2026): die letzte Wahl in
+    # das Skalenfeld der Übung
+    for x in reversed(e.ereignisse[nr_start : nr_ende + 1]):
+        if (x.quelle, x.art) == ("person", "skala") and x.daten.get("planuebung") == item_id:
+            if x.daten.get("feld") and x.daten.get("wert") is not None:
+                werte[str(x.daten["feld"])] = x.daten["wert"]
+            break
     werte = zeit_zusammenlegen(uebung, {**ausfuehrung(uebung, gewaehlt), **werte})
     uebung = mit_zeitfeldern(uebung, werte)
     anker = e.zeitbasis.anker_utc

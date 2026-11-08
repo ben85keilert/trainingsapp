@@ -137,15 +137,22 @@ class PlanAblaufBaustein:
         return self.ziel_index(self.schritt.bedingung.dann)
 
     def ziel_index(self, item_id: str | None) -> int | None:
-        """Der Index von ``item_id``, wenn die Planübung offen ist — sonst der Weg der Zweige."""
+        """Der Index von ``item_id`` — ein ausdrücklicher Verweis (``dann``, ``sonst``, ein Weg)
+        gilt auch zu einer schon gemachten Übung und zum laufenden Schritt selbst (Schleife:
+        Wandsitz, Pause, Wandsitz … — Ben, 8.11.2026); ohne Verweis der Weg der Zweige."""
         if item_id:
             k = next((i for i, s in enumerate(self.schritte) if s.item_id == item_id), None)
-            if k is not None and k != self.k and self.offen(self.schritte[k].item_id):
+            if k is not None:
                 return k
         folge = [(s.item_id, s.bedingung.zweig) for s in self.schritte]
         offen = {s.item_id for s in self.schritte if self.offen(s.item_id)} - {self.schritt.item_id}
         ziel = naechster_im_zweig(folge, self.schritt.item_id, offen)
         return next((i for i, s in enumerate(self.schritte) if s.item_id == ziel), None)
+
+    @property
+    def start_t_s(self) -> float | None:
+        """Beginn der laufenden Übung auf der Achse der Einheit — je Durchlauf neu (Schleifen)."""
+        return self._start_t_s
 
     def seit_s(self) -> float:
         """Wie lange die laufende Übung (oder die Pause) schon dauert — ohne Timer läuft

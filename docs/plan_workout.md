@@ -31,6 +31,21 @@ HF-Zonen nur als Anzeige, der Zielbereich-Ton (Entscheidung C) ist Information.
   (Vorgabe: nächster im eigenen Zweig) und optional „nicht erfüllt →“ auf jeden Schritt —
   zurück nach A, weiter in B, woanders in C. Kein freier Graph im Editor, nur Listen mit zwei
   Pfeilen; die Prüfung beim Speichern warnt vor Schleifen ohne Ausgang.
+- **Wege** (Ben, 8.11.2026): Neben der Bedingung bietet ein Schritt **alternative Pfade** an,
+  vorher gesetzt („Weiter mit B: Dehnung — Beine krampfen“, „Weiter mit C: Planke“), im Workout
+  als Knöpfe; ein Weg darf zu einer schon gemachten Übung oder zur laufenden selbst führen
+  („Noch einmal“). So entstehen **Schleifen**: Wandsitz 60 s, Pause, Wandsitz … Eine
+  Endlosschleife ist nur ein Problem, wenn es keinen Weg hinaus gibt — `core.bedingung.schleifen`
+  warnt dann (Start-Bild, „Im Plan einstellen“); Abbrechen geht immer. Verweise (`dann`,
+  `sonst`, Wege) gelten auch zu gemachten Übungen und zum Schritt selbst
+  (`PlanAblaufBaustein.ziel_index`).
+- **Bedingung „Skala“** (Ben, 8.11.2026): „bis es unangenehm wird, 6/10 — dann Wechsel“. Die
+  Person wählt im Schritt einen Wert (Chips über die Skala der Übung, sonst 0–10, je Durchlauf
+  neu); ab `n` ist die Bedingung erfüllt. Eine **Selbsteinschätzung**, kein Messwert (Weg A);
+  die Wahl steht als ``person/skala`` in der Zeitleiste und geht in das Skalenfeld des Eintrags.
+- **„Weiter, wenn …“ gehört allein dem Plan** (Ben, 8.11.2026: „in Einzelübungen macht das
+  keinen Sinn“ — P107 vom Vortag zurückgenommen): kein Abschnitt in „Übung bearbeiten“, kein
+  Paketfeld an der Übung; `exercise.bedingung_json` (Migration 042) bleibt als leere Spalte.
 
 ## 2. Bilder (Reihe C)
 
@@ -141,6 +156,12 @@ Start-Bild in einem Satz, dazu die HRV-Schalter. „Auf Tipp warten/automatisch�
 Timer“ sind darin aufgegangen (Migration 043: `auto_next` → `uebergang_hart`). Die harte
 Bedingung heißt in der Oberfläche **Pflicht**. Je Schritt kommt der Takt der Planübung an den
 Timer (P99 Teil 1). Vertrag und Stand: `docs/plan_uhren.md` §4.7, §6a.
+
+## 4d. Verzweigungen, zweiter Anlauf (8.11.2026 abends)
+
+Ben: lineare Pläne mit Abweichungen zur Seite (Einschub mit Rückkehr), Übungen nur bei Bedarf,
+Schleifen — die Zweige A–D sind dafür zu abstrakt. Plan: `docs/plan_verzweigungen.md`
+(Ablauf · Bedarfsübung · Einschub · Abzweig · Schleife · Auslöser; Stufen V1–V3; P108–P111).
 
 ## 5. Offen
 

@@ -90,6 +90,9 @@ ARTEN: frozenset[str] = frozenset(
         # Taktgeber (``timer/takt``, 5.11.2026, `docs/plan_taktgeber.md` §3): ein Takt beginnt
         # mit einem Abschnitt, oder sein Tempo ändert sich — nur Zeitleiste
         "takt",
+        # Workout, Bedingung „Skala“ (``person/skala``, 8.11.2026, `docs/plan_workout.md` §1): die
+        # Selbsteinschätzung der Person in einem Schritt — nur Zeitleiste, in den Eintrag
+        "skala",
     }
 )
 

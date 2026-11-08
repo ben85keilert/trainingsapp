@@ -46,7 +46,6 @@ import flet as ft
 
 from trainingsapp.core import varianten as var
 from trainingsapp.core.anhaenge import BILD, Ziel
-from trainingsapp.core.bedingung import Bedingung
 from trainingsapp.core.beschreibung import Abschnitt, abschnitte, zusammen
 from trainingsapp.core.bewegungsbild import bewegungsbild, mit_bewegungsbild
 from trainingsapp.core.models import (
@@ -88,7 +87,6 @@ from trainingsapp.core.zaehlen import (
     knopf_text,
     vorlagen_angebot,
 )
-from trainingsapp.ui.components.bedingung_form import bedingung_karte
 from trainingsapp.ui.components.bewegungsbild import bewegungsbild_blatt
 from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -1276,22 +1274,6 @@ def uebung_bearbeiten(
     # mit Stift (Takt-Blatt → „In die Übung“) und ✕ — im Formular gehalten, gespeichert mit
     # der Übung; „Abbrechen“ verwirft auch hier ----------------------------------------------
     takt_stand: dict[str, Takt | None] = {"takt": uebung.takt if uebung is not None else None}
-    #: „Weiter, wenn …“ der Übung (P107, `docs/plan_uhren.md` §4.6b) — ohne Zweig
-    bed_stand: dict[str, Bedingung] = {"b": uebung.bedingung if uebung is not None else Bedingung()}
-    bedingung_platz = ft.Container()
-
-    def bedingung_setzen(neu: Bedingung) -> None:
-        bed_stand["b"] = neu
-
-    def bedingung_neu() -> None:
-        bedingung_zeichnen()
-        page.update()
-
-    def bedingung_zeichnen() -> None:
-        bedingung_platz.content = bedingung_karte(
-            lambda: bed_stand["b"], bedingung_setzen, bedingung_neu
-        )
-
     takt_platz = ft.Container()
 
     def takt_setzen(neu: Takt | None) -> None:
@@ -1318,7 +1300,6 @@ def uebung_bearbeiten(
         )
 
     takt_zeichnen()
-    bedingung_zeichnen()
 
     def timer_nach_oben(k: int) -> Callable[[], None]:
         def handler() -> None:
@@ -1736,7 +1717,6 @@ def uebung_bearbeiten(
         ziel.zaehlt_als = zaehlt_als_lesen()
         ziel.beschleunigung = acc_lesen()
         ziel.takt = takt_stand["takt"]
-        ziel.bedingung = bed_stand["b"]
         videos = [
             Media(
                 kind=MediaKind.VIDEO,
@@ -1778,7 +1758,6 @@ def uebung_bearbeiten(
             zaehlt_als_lesen(),
             acc_lesen().als_dict(),
             takt_stand["takt"].als_dict() if takt_stand["takt"] is not None else None,
-            bed_stand["b"].als_dict(),
             bewegung_stand["bild"],
             [(v.name, v.symbol, v.kuerzel, v.text) for v in varianten_liste],
             list(umbenennen),
@@ -1956,8 +1935,6 @@ def uebung_bearbeiten(
                             ),
                         ),
                         acc_karte,
-                        abschnitt("WEITER, WENN …", hilfe_knopf(page, thema="workout")),
-                        bedingung_platz,
                         abschnitt("VIDEOS UND LINKS"),
                         medien_spalte,
                         ft.TextButton(

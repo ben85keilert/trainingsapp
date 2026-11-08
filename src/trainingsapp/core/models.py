@@ -179,9 +179,6 @@ class Exercise:
     #: `docs/plan_taktgeber.md`): Phasen für Atmung oder Bewegung, die überall gelten, wo die
     #: Übung geübt wird — ein Timer-Abschnitt und die Uhr „für jetzt“ gehen vor
     takt: Takt | None = None
-    #: „Weiter, wenn …“ der Übung (Migration 042, ``bedingung_json``, P107): Bedingung fürs
-    #: Weiterkommen im Workout, ohne Zweig — die Planübung folgt ihr (`core.bedingung.wirksame`)
-    bedingung: Bedingung = field(default_factory=Bedingung)
 
     def __post_init__(self) -> None:
         # Wer nur `category` angibt (Altbestand, Tutorial), bekommt sie als Typ.

@@ -322,6 +322,9 @@ class AppState:
     plan_als_plan: set[str] = field(default_factory=set)
     #: Uhrenplan (K3, `views/plan_uhren.py`): je Plan die aufgeklappten Planübungen
     uhren_offen: dict[str, set[str]] = field(default_factory=dict)
+    #: Workout, Bedingung „Skala“: die Selbsteinschätzung je Schritt-Durchlauf
+    #: (``(item_id, start_t_s)`` → Wert), `views/workout.py`
+    workout_skala: dict[tuple[str, float], float] = field(default_factory=dict)
     #: Nachtragen als Trainingsblock (P72, `views/nachtragen.py`): je Tag und Übung die Zeit,
     #: um die nachgetragen wird (``None`` = jetzt) — überlebt den Neubau der Ansicht und den
     #: Wechsel des Plans, fällt beim Verlassen weg

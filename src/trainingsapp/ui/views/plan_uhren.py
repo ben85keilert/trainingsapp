@@ -90,7 +90,7 @@ def _zeile_text(uebung: Exercise, item: PlanItem, plan: Plan) -> str:
         takt = takt_der_uebung(uebung, item, plan)
         teile.append(f"Takt {takt.anzeigename}" if takt is not None else "kein Takt")
         teile.append("zählt" if zeit_zaehlt_fuer(uebung, item) else "zählt nicht")
-    b = item.bedingung if not item.bedingung.leer else uebung.bedingung
+    b = item.bedingung
     teile.append(f"weiter: {b.kurztext()}" if not b.leer else "weiter: abhaken")
     return " · ".join(teile)
 
@@ -507,13 +507,7 @@ def plan_uhren_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.Vi
                         zaehlt_wechseln,
                     ),
                     chip(
-                        "Weiter: "
-                        + (
-                            (
-                                item.bedingung if not item.bedingung.leer else uebung.bedingung
-                            ).kurztext()
-                            or "abhaken"
-                        ),
+                        "Weiter: " + (item.bedingung.kurztext() or "abhaken"),
                         not item.bedingung.leer,
                         "Weiter, wenn … — in „Im Plan einstellen“",
                         gehe_zu(f"{basis}/ziel/{item.id}"),

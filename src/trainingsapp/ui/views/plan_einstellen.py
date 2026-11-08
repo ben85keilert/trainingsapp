@@ -268,8 +268,8 @@ def plan_einstellen(
         )
 
     def bedingung_karte() -> ft.Control:
-        """„Weiter, wenn …“ (W2/W3) — die gemeinsame Karte; die Planübung folgt der Übung
-        (P107), setzt den Zweig dazu oder überschreibt."""
+        """„Weiter, wenn …“ (W2/W3) — die gemeinsame Karte mit Zweig, Verweisen und Wegen; sie
+        gehört allein dem Plan (Ben, 8.11.2026: in der Übung macht sie keinen Sinn)."""
         eigen = not bed_stand["b"].leer
 
         def zurueck() -> None:
@@ -286,10 +286,9 @@ def plan_einstellen(
             ziele=[
                 (it.id, f"{n}. {u.name if u is not None else '?'}")
                 for n, it in enumerate(plan.items, start=1)
-                if it.id != item.id
                 for u in [state.uebungen.laden(it.exercise_id, mit_geloeschten=True)]
             ],
-            vorgabe=uebung.bedingung,
+            selbst=item.id,
             kopf=[schild(eigen, zurueck if eigen else None)],
         )
 

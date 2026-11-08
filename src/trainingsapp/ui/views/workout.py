@@ -23,9 +23,11 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import bedingung as bd
-from trainingsapp.core.models import Plan
+from trainingsapp.core.einheit import Ereignis
+from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.plaene import erledigte
 from trainingsapp.core.plan_durchlauf import Schritt, schritte_fuer
+from trainingsapp.core.result_spec import FieldSpec, FieldType
 from trainingsapp.core.timer import dauer_text
 from trainingsapp.core.uebung_timer import takt_der_uebung
 from trainingsapp.devices.einheit import Einheitslauf
@@ -346,12 +348,12 @@ def workout_view(
         kreis = bd.schleifen(
             {s.item_id: s.bedingung for s in schritte}, [s.item_id for s in schritte]
         )
-        if kreis:  # P100: Verweise im Kreis — Hinweis, kein Verbot
+        if kreis:  # P100: kein Weg hinaus — Hinweis, kein Verbot
             namen = ", ".join(s.name for s in schritte if s.item_id in kreis)
             teile.append(
                 hinweis(
-                    f"Verweise im Kreis bei: {namen}. Von dort erreicht das Workout keinen "
-                    "Schritt ohne „erfüllt →“/„nicht erfüllt →“ — Abbrechen geht immer."
+                    f"Kein Weg hinaus ab: {namen}. Von dort erreicht das Workout sein Ende "
+                    "nicht — Abbrechen geht immer."
                 )
             )
         if not schritte:
@@ -449,7 +451,78 @@ def workout_view(
         gelaufen = (lauf.vergangen_s() + lauf.ueber_s()) if lauf is not None else teil.seit_s()
         z = zaehl_stand.zaehl_teil(state, s.uebung_id, s.item_id)
         wdh = z.wert if (z is not None and z.wdh) else None
-        return bd.pruefen(b, bd.Stand(zeit_ab, gelaufen, wdh))
+        return bd.pruefen(b, bd.Stand(zeit_ab, gelaufen, wdh, skala=skala_wert(teil)))
+
+    def skala_schluessel(teil: PlanAblaufBaustein) -> tuple[str, float]:
+        """Je Durchlauf eines Schritts eine eigene Wahl (Schleifen)."""
+        return (teil.schritt.item_id, round(teil.start_t_s or 0.0, 1))
+
+    def skala_wert(teil: PlanAblaufBaustein) -> float | None:
+        return state.workout_skala.get(skala_schluessel(teil))
+
+    def skala_feld(u: Exercise | None) -> FieldSpec | None:
+        if u is None:
+            return None
+        return next((f for f in u.result_spec.fields if f.type == FieldType.SCALE), None)
+
+    def skala_chips(
+        e: Any, teil: PlanAblaufBaustein, u: Exercise | None, b: bd.Bedingung
+    ) -> ft.Control:
+        """Die Selbsteinschätzung im Schritt (``skala``): Chips über die Spanne des Skalenfelds
+        der Übung (sonst 0–10); die Wahl geht als ``person/skala`` in die Zeitleiste und mit
+        dem Schritt in den Eintrag (`ui.plan_ablauf.nach_der_uebung`)."""
+        feld = skala_feld(u)
+        lo = int(feld.min) if feld is not None and feld.min is not None else bd.SKALA_MIN
+        hi = int(feld.max) if feld is not None and feld.max is not None else bd.SKALA_MAX
+        if hi - lo > 20:
+            lo, hi = bd.SKALA_MIN, bd.SKALA_MAX
+        gewaehlt = skala_wert(teil)
+
+        def waehler(wert: int) -> Callable[[], None]:
+            def handler() -> None:
+                state.workout_skala[skala_schluessel(teil)] = float(wert)
+                if e.t0 is not None:
+                    e.nachtragen(
+                        Ereignis(
+                            max(0.0, e.uhr() - e.t0),
+                            "person",
+                            "skala",
+                            f"{teil.schritt.name}: Skala {wert}",
+                            {
+                                "planuebung": teil.schritt.item_id,
+                                "feld": feld.key if feld is not None else "",
+                                "wert": wert,
+                            },
+                        )
+                    )
+                neu_bauen()
+
+            return handler
+
+        return ft.Column(
+            spacing=6,
+            controls=[
+                ft.Text(
+                    (feld.label if feld is not None else "Skala") + f" — ab {b.n} geht es weiter",
+                    size=12,
+                    opacity=0.7,
+                ),
+                ft.Row(
+                    wrap=True,
+                    spacing=6,
+                    run_spacing=6,
+                    controls=[
+                        ft.Chip(
+                            label=ft.Text(str(w)),
+                            selected=gewaehlt is not None and int(gewaehlt) == w,
+                            show_checkmark=False,
+                            on_select=waehler(w),
+                        )
+                        for w in range(lo, hi + 1)
+                    ],
+                ),
+            ],
+        )
 
     def bedingung_karte(erf: bd.Erfuellung, b: bd.Bedingung) -> ft.Control:
         text = ft.Text(erf.text or b.kurztext() or "erfüllt", size=14, weight=ft.FontWeight.W_600)
@@ -628,8 +701,35 @@ def workout_view(
             )
         if erf is not None and teil.phase != PAUSE:
             teile.append(bedingung_karte(erf, b))
+            if b.art == bd.SKALA:
+                teile.append(skala_chips(e, teil, u, b))
             if erf.erfuellt and not b.inhalt.leer:
                 teile.append(inhalt_karte(b))
+        # Wege (Ben, 8.11.2026): alternative Pfade als Knöpfe — auch zur laufenden Übung selbst
+        # (noch einmal) oder zu einer schon gemachten (Schleife)
+        if b.wege and teil.phase != PAUSE:
+            for weg in b.wege:
+                ziel_schritt = next((x for x in teil.schritte if x.item_id == weg.ziel), None)
+                if ziel_schritt is None:
+                    continue
+
+                def den_weg(ziel: str = weg.ziel) -> None:
+                    teil.weiter(ziel)
+                    einheit_ui.melden(state)
+                    auffrischen()
+
+                selbst = weg.ziel == teil.schritt.item_id
+                teile.append(
+                    ft.FilledTonalButton(
+                        ("Noch einmal: " if selbst else "Weiter mit ")
+                        + ziel_schritt.name
+                        + (f" — {weg.text}" if weg.text else ""),
+                        icon=ft.Icons.REPLAY if selbst else ft.Icons.ALT_ROUTE,
+                        height=48,
+                        on_click=den_weg,
+                        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=24)),
+                    )
+                )
         teile.append(schrittliste(teil))
         # Weiter: gesperrt, solange eine harte Bedingung nicht erfüllt ist (Freischaltung) —
         # Abbrechen bleibt immer (`docs/plan_workout.md` §1)
@@ -647,7 +747,7 @@ def workout_view(
         if nicht_geschafft and b.sonst:
             # C3: der Zweig für „nicht erfüllt“ — gefüllt, der erfüllt-Weg darunter
             ziel_schritt = next((x for x in teil.schritte if x.item_id == b.sonst), None)
-            if ziel_schritt is not None and teil.offen(b.sonst):
+            if ziel_schritt is not None:
 
                 def zum_zweig(ziel: str = b.sonst) -> None:
                     teil.weiter(ziel)

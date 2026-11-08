@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from .bedingung import Bedingung, wirksame
+from .bedingung import Bedingung
 from .models import Exercise, Plan
 from .standards import aktive_felder
 from .timer import TimerProfil, dauer_text
@@ -83,7 +83,7 @@ def schritte_fuer(plan: Plan, katalog: Mapping[str, Exercise]) -> list[Schritt]:
                 uebung.name,
                 profil,
                 feld,
-                wirksame(uebung.bedingung, item.bedingung),
+                item.bedingung,
             )
         )
     return schritte

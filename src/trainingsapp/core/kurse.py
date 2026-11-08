@@ -250,8 +250,13 @@ def verweise_als_position(items: list[VorlageItem], ids: Sequence[str]) -> list[
     out: list[VorlageItem] = []
     for it in items:
         b = it.bedingung
-        if b is not None and (b.dann or b.sonst):
-            b = replace(b, dann=stelle.get(b.dann, ""), sonst=stelle.get(b.sonst, ""))
+        if b is not None and (b.dann or b.sonst or b.wege):
+            b = replace(
+                b,
+                dann=stelle.get(b.dann, ""),
+                sonst=stelle.get(b.sonst, ""),
+                wege=tuple(replace(w, ziel=stelle[w.ziel]) for w in b.wege if w.ziel in stelle),
+            )
         out.append(replace(it, bedingung=b))
     return out
 
@@ -270,11 +275,17 @@ def verweise_aufloesen(items: list[PlanItem], positionen: Sequence[int]) -> None
     ziel = {f"#{pos}": it.id for it, pos in zip(items, positionen, strict=False)}
     for it in items:
         b = it.bedingung
-        if b.dann.startswith("#") or b.sonst.startswith("#"):
+        offen = b.dann.startswith("#") or b.sonst.startswith("#")
+        if offen or any(w.ziel.startswith("#") for w in b.wege):
             it.bedingung = replace(
                 b,
                 dann=ziel.get(b.dann, "") if b.dann.startswith("#") else b.dann,
                 sonst=ziel.get(b.sonst, "") if b.sonst.startswith("#") else b.sonst,
+                wege=tuple(
+                    replace(w, ziel=ziel[w.ziel]) if w.ziel.startswith("#") else w
+                    for w in b.wege
+                    if not w.ziel.startswith("#") or w.ziel in ziel
+                ),
             )
 
 

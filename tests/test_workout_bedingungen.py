@@ -13,7 +13,7 @@ ft = pytest.importorskip("flet")
 
 from attrappen import Gurt, Seite, Uhr, ruhe  # noqa: E402
 from trainingsapp.core import bedingung as bd  # noqa: E402
-from trainingsapp.core.bedingung import Bedingung, Inhalt  # noqa: E402
+from trainingsapp.core.bedingung import Bedingung, Inhalt, Weg  # noqa: E402
 from trainingsapp.core.hf_einstellungen import HfEinstellungen  # noqa: E402
 from trainingsapp.core.models import Exercise, Plan, PlanItem  # noqa: E402
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld  # noqa: E402
@@ -237,3 +237,73 @@ def test_zielbereich_unten_und_zone_im_fokus(tmp_path, monkeypatch) -> None:
         assert text  # ohne HF-Daten des Profils „Gurt“, sonst „Zone · Anteil · Zeit“
     finally:
         state.schliessen()
+
+
+async def test_wege_schleife_und_skala(umgebung) -> None:
+    """Ben, 8.11.2026: Neben der Bedingung bietet ein Schritt **Wege** an — „Noch einmal“ auf sich
+    selbst (Schleife) und „Weiter mit …“ zu einer anderen Übung; die Bedingung „Skala“ ist eine
+    Selbsteinschätzung im Schritt, die Wahl steht in der Zeitleiste."""
+    state, uhr, gurt = umgebung
+    plan = _plan(state)
+    a, b_item, c = plan.items
+    state.plaene.bedingung_setzen(
+        a.id,
+        Bedingung(
+            bd.SKALA,
+            6,
+            wege=(Weg(a.id, "noch einmal"), Weg(b_item.id, "Beine krampfen")),
+            dann=c.id,
+        ),
+    )
+    plan = state.plaene.laden(plan.id)
+    alle = {it.id: it.bedingung for it in plan.items}
+    assert bd.schleifen(alle, [it.id for it in plan.items]) == []
+    seite = Seite()
+    route = f"/plan/{plan.id}/workout"
+    vorher = workout_view(seite, state, plan, route=route)
+    assert any("Skala 6" in t and "2 Wege" in t for t in _texte(vorher))
+    state.workout_uebergang[plan.id] = WEICH
+    _knopf(vorher, "Workout starten").on_click()
+    paar = plan_ablauf.laufender(state, plan.id)
+    assert paar is not None
+    e, teil = paar
+    await _sekunden(state, uhr, gurt, 2)
+    laufend = workout_view(seite, state, plan, route=route)
+    assert any("Skala wählen" in t for t in _texte(laufend))
+    _knopf(laufend, "Noch einmal: Ausfallschritt — noch einmal")
+    _knopf(laufend, "Weiter mit Ausfallschritt gestützt — Beine krampfen")
+    # Skala 4 gewählt: noch nicht erreicht — Weg „Noch einmal“: der Schritt beginnt von vorn
+    chip4 = next(
+        x
+        for x in _alle(laufend)
+        if isinstance(x, ft.Chip) and isinstance(x.label, ft.Text) and x.label.value == "4"
+    )
+    chip4.on_select()
+    await _sekunden(state, uhr, gurt, 1)
+    laufend = workout_view(seite, state, plan, route=route)
+    assert any("Skala 4 von 6" in t for t in _texte(laufend))
+    _knopf(laufend, "Noch einmal: Ausfallschritt — noch einmal").on_click()
+    await _sekunden(state, uhr, gurt, 1)
+    assert teil.k == 0 and teil.ergebnisse[a.id] == "fertig"
+    starts = [x for x in e.ereignisse if (x.quelle, x.art) == ("plan", "uebung_start")]
+    assert len(starts) == 2  # derselbe Schritt zum zweiten Mal
+    # Zweiter Durchlauf: Skala 7 → erfüllt → „dann“ führt zur Planke (c), nicht zu b
+    laufend = workout_view(seite, state, plan, route=route)
+    assert any("Skala wählen" in t for t in _texte(laufend))  # je Durchlauf neu
+    chip7 = next(
+        x
+        for x in _alle(laufend)
+        if isinstance(x, ft.Chip) and isinstance(x.label, ft.Text) and x.label.value == "7"
+    )
+    chip7.on_select()
+    await _sekunden(state, uhr, gurt, 1)
+    laufend = workout_view(seite, state, plan, route=route)
+    assert any("Skala 7 — erreicht" in t for t in _texte(laufend))
+    await _sekunden(state, uhr, gurt, 10)  # Timer ab → weich: Überzeit, „Weiter: Planke“
+    _knopf(workout_view(seite, state, plan, route=route), "Weiter: Planke").on_click()
+    await _sekunden(state, uhr, gurt, 1)
+    assert teil.k == 2
+    skalen = [x for x in e.ereignisse if (x.quelle, x.art) == ("person", "skala")]
+    assert [x.daten["wert"] for x in skalen] == [4, 7]
+    _knopf(workout_view(seite, state, plan, route=route), "Workout beenden").on_click()
+    await _sekunden(state, uhr, gurt, 3)

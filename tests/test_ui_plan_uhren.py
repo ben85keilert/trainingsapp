@@ -1,6 +1,6 @@
 """Der Uhrenplan (K3, Ben 8.11.2026, `docs/plan_uhren.md` §4.6): alle Uhren eines Plans in
 einer Ansicht — Zeile im Plan-Editor, aufklappbare Karten, Abschnitte als Liste mit eigener
-Kopie, Chips Uhr / Zeit zählt (P104), Takt für alle (P105), Bedingung an der Übung (P107)."""
+Kopie, Chips Uhr / Zeit zählt (P104), Takt für alle (P105), Bedingung mit Wegen je Planübung."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ ft = pytest.importorskip("flet")
 
 from attrappen import Seite  # noqa: E402
 from trainingsapp.core import bedingung as bd  # noqa: E402
-from trainingsapp.core.bedingung import Bedingung  # noqa: E402
+from trainingsapp.core.bedingung import Bedingung, Weg  # noqa: E402
 from trainingsapp.core.models import Exercise, Plan, PlanItem  # noqa: E402
 from trainingsapp.core.plan_durchlauf import schritte_fuer  # noqa: E402
 from trainingsapp.core.result_spec import Layout, ResultSpec, vorrat_feld  # noqa: E402
@@ -87,7 +87,6 @@ def umgebung(tmp_path, monkeypatch):
                 runden=3,
             ).als_dict()
         ],
-        bedingung=Bedingung(bd.WDH, 15, hart=True),
     )
     katze = Exercise(name="Katze–Kuh", uhr=False)
     state.uebungen.speichern(kniebeuge)
@@ -119,10 +118,8 @@ def test_uhrenplan_zeigt_jede_planuebung_als_zeile_und_liste(umgebung) -> None:
     ansicht = plan_uhren_view(Seite(), state, plan, basis)
     assert ansicht.route == f"{basis}/uhren"
     texte = _texte(ansicht)
-    # Zugeklappt sagt eine Zeile alles — auch die Bedingung der Übung (P107)
-    assert any(
-        t.startswith("Satz · 2:30 · kein Takt · zählt · weiter: 15 Wdh. · Pflicht") for t in texte
-    )
+    # Zugeklappt sagt eine Zeile alles — die Bedingung gehört der Planübung (hier keine)
+    assert any(t.startswith("Satz · 2:30 · kein Takt · zählt · weiter: abhaken") for t in texte)
     assert "Uhr aus · weiter: abhaken" in texte
     # Aufgeklappt: die Abschnitte als Liste mit Dauer und „zählt“
     kacheln = [x for x in _alle(ansicht) if isinstance(x, ft.ExpansionTile)]
@@ -191,13 +188,25 @@ def test_takt_fuer_alle_und_bedingung_der_uebung_im_workout(umgebung) -> None:
     assert uhren_zusammenfassung(state, plan) == "1 Timer · 2 Takte"
     state.plaene.plan_takt_setzen(plan.id, None)
     assert state.plaene.laden(plan.id).takt is None
-    # Bedingung an der Übung (P107): die Planübung folgt ihr und setzt nur den Zweig
-    state.plaene.bedingung_setzen(plan.items[0].id, Bedingung(sonst=plan.items[1].id))
+    # Die Bedingung gehört allein der Planübung (8.11.2026: „Weiter, wenn“ aus der Übung raus);
+    # Wege und Verweise dürfen zur eigenen Übung zeigen (Schleife)
+    state.plaene.bedingung_setzen(
+        plan.items[0].id,
+        Bedingung(
+            bd.SKALA, 6, wege=(Weg(plan.items[0].id, "noch einmal"),), sonst=plan.items[1].id
+        ),
+    )
     plan = state.plaene.laden(plan.id)
     katalog = {u.id: u for u in (state.uebungen.laden(it.exercise_id) for it in plan.items) if u}
     schritte = schritte_fuer(plan, katalog)
     b = schritte[0].bedingung
-    assert (b.art, b.n, b.hart, b.sonst) == (bd.WDH, 15, True, plan.items[1].id)
+    assert (b.art, b.n, b.sonst, b.wege[0].ziel) == (
+        bd.SKALA,
+        6,
+        plan.items[1].id,
+        plan.items[0].id,
+    )
+    assert b.kurztext() == "Skala 6 · sonst → · 1 Weg"
     assert timer_fuer(kniebeuge, plan, plan.items[0]).name == "Satz"
 
 

@@ -151,7 +151,7 @@ Gesamt etwa 14 min · 3 mit Timer · 2 mit Takt                     [Alles wie d
   Messdauer) werden eine Einstellung (Einstellungen → Timer, Liste in Sekunden, z. B. 30 s · 45 s ·
   1 · 2 · 5 · 10 min) und stehen als Chips im Blatt. Skizze D9.
 
-### 4.6b „Weiter, wenn …“ auch an der Übung (Ben, 8.11., **P107 entschieden**)
+### 4.6b „Weiter, wenn …“ auch an der Übung (Ben, 8.11., P107 — **zurückgenommen am 8.11. abends**: „Nimm ‚Weiter, wenn‘ in Übung raus“; die Karte gehört allein dem Plan, dazu **Wege**, Schleifen und die Bedingung „Skala“, `docs/plan_workout.md` §1)
 - Die Bedingung bekommt eine Stufe darunter: `Exercise.bedingung` (Migration, Paketfeld
   `bedingung` später mit P97). „Übung bearbeiten“ zeigt die Karte „Weiter, wenn …“ ohne Zweig;
   die Planübung **folgt der Übung** (`PlanItem.bedingung` ``None`` = wie die Übung, ↺), setzt nur

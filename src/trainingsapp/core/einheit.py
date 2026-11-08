@@ -208,6 +208,9 @@ DATEN_SCHLUESSEL: frozenset[str] = frozenset(
         "quelle",
         "takt",
         "takt_zeiten_s",
+        # Sätze von Hand im Fokus (``person/wdh``, 8.11.2026 spät): ``dazu`` = ein Satz kommt
+        # dazu (``wert`` ``None``: der letzte geht weg) — ohne war ``wert`` der Stand
+        "dazu",
         # Gezeichneter Ablauf (``plan/kante``): Ziel der Kante und ihre Beschriftung — ``von``
         # gibt es schon; ``frage``: die Frage eines Entscheidungsknotens (``plan/frage``)
         "nach",

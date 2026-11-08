@@ -31,6 +31,7 @@ from trainingsapp.core.plan_durchlauf import Schritt, schritte_fuer
 from trainingsapp.core.result_spec import FieldSpec, FieldType
 from trainingsapp.core.standards import mit_plan_spec
 from trainingsapp.core.timer import dauer_text
+from trainingsapp.core.timer_eintrag import eingaben as person_eingaben
 from trainingsapp.core.uebung_timer import ausfuehrungsfelder, takt_der_uebung
 from trainingsapp.devices.einheit import Einheitslauf
 from trainingsapp.devices.plan_ablauf import (
@@ -621,30 +622,63 @@ def workout_view(
     ) -> ft.Control:
         """Wiederholungen von Hand (Ben, 8.11.2026: „Sollte es Bedingungen geben, muss man
         mindestens in der Lage sein, diese auch einzutragen“) — wo weder Sensor noch Takt zählen.
-        Jede Änderung geht als ``person/wdh`` in die Zeitleiste und von dort in den Eintrag."""
+        Wie im Block (8.11.2026 spät): jeder „+N“ ein Satz dazu, „−“ nimmt den letzten zurück;
+        die Summe zählt für die Bedingung. Jede Eingabe geht als ``person/wdh`` in die
+        Zeitleiste und von dort in den Eintrag."""
         feld = plan_ablauf.wdh_feld(u) if u is not None else None
-        wert = teil.wdh_hand or 0
+        item = next((x for x in plan.items if x.id == teil.schritt.item_id), None)
 
-        def setzen(n: int) -> Callable[[Any], None]:
-            def handler(_e: Any = None) -> None:
-                neu = max(0, n)
-                if e.t0 is not None:
-                    e.nachtragen(
-                        Ereignis(
-                            max(0.0, e.uhr() - e.t0),
-                            "person",
-                            "wdh",
-                            f"{teil.schritt.name}: {neu} Wdh.",
-                            {"planuebung": teil.schritt.item_id, "feld": feld or "", "wert": neu},
-                        )
+        def bisher() -> list[int]:
+            """Die Sätze dieses Schritts — ab seinem Beginn, nur seine Eingaben."""
+            beginn = max(
+                (
+                    n
+                    for n, x in enumerate(e.ereignisse)
+                    if (x.quelle, x.art) == ("plan", "uebung_start")
+                    and x.daten.get("planuebung") == teil.schritt.item_id
+                ),
+                default=len(e.ereignisse),
+            )
+            eigene = [
+                x
+                for x in e.ereignisse[beginn:]
+                if x.quelle == "person" and x.daten.get("planuebung") == teil.schritt.item_id
+            ]
+            return person_eingaben(eigene, []).saetze(feld)
+
+        def schreiben(wert: int | None) -> None:
+            if e.t0 is not None:
+                e.nachtragen(
+                    Ereignis(
+                        max(0.0, e.uhr() - e.t0),
+                        "person",
+                        "wdh",
+                        f"{teil.schritt.name}: "
+                        + (f"+{wert} Wdh." if wert is not None else "letzter Satz zurück"),
+                        {
+                            "planuebung": teil.schritt.item_id,
+                            "feld": feld or "",
+                            "wert": wert,
+                            "dazu": True,
+                        },
                     )
-                teil.wdh_von_hand(neu)
-                einheit_ui.melden(state)
-                auffrischen()
+                )
+            teil.wdh_von_hand(sum(bisher()))
+            einheit_ui.melden(state)
+            auffrischen()
+
+        def dazu(n: int) -> Callable[..., None]:
+            def handler(_e: Any = None) -> None:
+                schreiben(max(0, n))
 
             return handler
 
-        return fe.wdh_zeile(wert, ziel, setzen)
+        werte = (
+            fe.wdh_werte(item, u, feld, ziel)
+            if item is not None and u is not None
+            else sorted({c for c in (ziel, 5, 10, 12, 15, 20) if c})
+        )
+        return fe.saetze_zeile(bisher(), werte, dazu, lambda _e=None: schreiben(None))
 
     def ausfuehrung_zeilen(
         e: Einheitslauf, teil: PlanAblaufBaustein, u: Exercise | None
@@ -1110,7 +1144,7 @@ def workout_view(
             if wdh_gefragt and wdh_jetzt(teil) is None:
                 eintragen.append(wdh_eintrag(e, teil, u, wdh_ziel))
             if eintragen:
-                teile.append(fe.karte(*eintragen))
+                teile.append(fe.karte(*eintragen, page=page))
         teile.append(ablauf_schrittliste(teil) if gez else schrittliste(teil))
 
         # -- Knöpfe ------------------------------------------------------------------------

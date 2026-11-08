@@ -29,7 +29,7 @@ from trainingsapp.core.einheit import AUSFUEHRUNG_SCHLUESSEL, Ereignis
 from trainingsapp.core.models import Exercise, PlanItem
 from trainingsapp.core.plaene import einzel_plan
 from trainingsapp.core.result_spec import FieldSpec, FieldType, wert_text
-from trainingsapp.core.standards import mit_plan_spec, ziel_von
+from trainingsapp.core.standards import chips_fuer, mit_plan_spec, ziel_von
 from trainingsapp.core.timer_eintrag import eingaben, gelaufene_zeiten, satz_nummer, stelle
 from trainingsapp.core.uebung_timer import ausfuehrungsfelder
 from trainingsapp.devices.einheit import Einheitslauf
@@ -39,69 +39,123 @@ from trainingsapp.ui.components import zaehl_stand
 WDH_TITEL = "Wiederholungen — niemand zählt, trag sie hier ein"
 
 
-def karte(*zeilen: ft.Control, titel: str = "EINTRAGEN") -> ft.Container:
-    """Der Rahmen der Karte — Kopf in Großbuchstaben, darunter die Zeilen."""
+#: Was im „i“ der Karte steht (Ben, 8.11.2026 spät: „Infotext unten kommt in ein i“)
+INFO = (
+    "**Eintragen im Fokus.** Jeder Knopf „+12“ trägt einen Satz ein — wie im Block; „−“ nimmt "
+    "den letzten zurück, alles Weitere geht später unter „Heute geleistet“.\n\n"
+    "Die Zeit kommt von der Uhr. Eingetragen wird mit „Fertig“ — „Abbrechen“ verwirft auch "
+    "diese Eingaben."
+)
+
+
+def kopf(page: Any, titel: str = "EINTRAGEN") -> ft.Control:
+    """Der Kopf der Karte: Titel in Großbuchstaben und das „i“."""
+    from trainingsapp.ui.components.karte import info_knopf
+
+    return ft.Row(
+        spacing=0,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        controls=[
+            ft.Text(titel, size=11, weight=ft.FontWeight.W_700, opacity=0.65, expand=True),
+            info_knopf(page, "Eintragen im Fokus", INFO),
+        ],
+    )
+
+
+def karte(*zeilen: ft.Control, page: Any = None, titel: str = "EINTRAGEN") -> ft.Container:
+    """Der Rahmen der Karte — Kopf (mit „i“, wenn ``page``), darunter die Zeilen."""
+    oben: ft.Control = (
+        kopf(page, titel)
+        if page is not None
+        else ft.Text(titel, size=11, weight=ft.FontWeight.W_700, opacity=0.65)
+    )
     return ft.Container(
         padding=ft.Padding.symmetric(horizontal=12, vertical=10),
         border_radius=12,
         bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-        content=ft.Column(
-            spacing=8,
-            controls=[
-                ft.Text(titel, size=11, weight=ft.FontWeight.W_700, opacity=0.65),
-                *zeilen,
-            ],
-        ),
+        content=ft.Column(spacing=8, controls=[oben, *zeilen]),
     )
 
 
-def wdh_zeile(
-    wert: int,
-    ziel: int | None,
-    setzen: Callable[[int], Callable[..., None]],
+def saetze_zeile(
+    saetze: Sequence[int],
+    werte: Sequence[int],
+    dazu: Callable[[int], Callable[..., None]],
+    weg: Callable[..., None],
     *,
     titel: str = WDH_TITEL,
 ) -> ft.Control:
-    """−/+ und Schnell-Chips (Ziel, 5, 10, 12, 15, 20) — ``setzen(n)`` liefert den Handler."""
-    chips = sorted({c for c in (ziel, 5, 10, 12, 15, 20) if c})
+    """Die Wiederholungen wie im Block (Ben, 8.11.2026 spät: „Einträge müssen erweitert werden
+    können … Dort die Buttons rein, die man auch in der Normalansicht hat“): die Sätze bisher,
+    „+N“-Knöpfe — jeder Tipp ein Satz dazu —, ein eigener Wert und „−“ für den letzten."""
+    stand = " · ".join(str(w) for w in saetze) if saetze else "noch kein Satz"
+    if len(saetze) > 1:
+        stand += f"  = {sum(saetze)}"
+
+    def eigen_eintragen(e: Any) -> None:
+        text = str(getattr(e.control, "value", "") or "").strip()
+        if text.isdigit() and int(text) > 0:
+            dazu(int(text))()
+
     return ft.Column(
-        spacing=4,
+        spacing=6,
         controls=[
             ft.Text(titel, size=12, opacity=0.75),
             ft.Row(
                 spacing=4,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
+                    ft.Text(stand, size=18, weight=ft.FontWeight.W_600, expand=True),
                     ft.IconButton(
-                        ft.Icons.REMOVE, tooltip="Eine weniger", on_click=setzen(wert - 1)
+                        ft.Icons.REMOVE,
+                        tooltip="Letzten Satz zurücknehmen",
+                        disabled=not saetze,
+                        on_click=weg,
                     ),
-                    ft.Text(
-                        str(wert),
-                        size=26,
-                        weight=ft.FontWeight.W_600,
-                        width=56,
-                        text_align=ft.TextAlign.CENTER,
+                ],
+            ),
+            ft.Row(
+                wrap=True,
+                spacing=6,
+                run_spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    *(
+                        ft.FilledButton(
+                            content=ft.Text(
+                                f"+{w}", size=15, weight=ft.FontWeight.W_700, no_wrap=True
+                            ),
+                            height=44,
+                            style=ft.ButtonStyle(
+                                shape=ft.RoundedRectangleBorder(radius=22),
+                                padding=ft.Padding.symmetric(horizontal=12),
+                            ),
+                            on_click=dazu(w),
+                        )
+                        for w in werte
                     ),
-                    ft.IconButton(ft.Icons.ADD, tooltip="Eine mehr", on_click=setzen(wert + 1)),
-                    ft.Row(
-                        wrap=True,
-                        spacing=4,
-                        run_spacing=4,
-                        expand=True,
-                        controls=[
-                            ft.Chip(
-                                label=ft.Text(str(c)),
-                                selected=wert == c,
-                                show_checkmark=False,
-                                on_select=setzen(c),
-                            )
-                            for c in chips
-                        ],
+                    ft.TextField(
+                        width=80,
+                        height=44,
+                        dense=True,
+                        hint_text="Wert",
+                        keyboard_type=ft.KeyboardType.NUMBER,
+                        tooltip="Eigener Wert — Eingabe schickt ihn als Satz ab",
+                        on_submit=eigen_eintragen,
                     ),
                 ],
             ),
         ],
     )
+
+
+def wdh_werte(planuebung: PlanItem, u: Exercise, feld: str | None, ziel: int | None) -> list[int]:
+    """Die Knöpfe wie im Block (`core.standards.chips_fuer`) — ohne eigene die Vorgabe."""
+    spec = next((f for f in u.result_spec.fields if f.key == feld), None)
+    werte = (
+        [int(w) for w in chips_fuer(planuebung, spec) if isinstance(w, int | float)] if spec else []
+    )
+    return werte or sorted({w for w in (ziel, 5, 10, 12, 15, 20) if w})
 
 
 def _schritt(f: FieldSpec) -> float:
@@ -287,6 +341,7 @@ class EintragenKarte:
         ziel = ziel_von(planuebung, self.u).get(self.wdh_feld or "")
         erstes = ziel[0] if isinstance(ziel, list) and ziel else ziel
         self.ziel: int | None = int(erstes) if isinstance(erstes, int | float) else None
+        self.werte = wdh_werte(planuebung, self.u, self.wdh_feld, self.ziel)
         self.skala = next((f for f in self.u.result_spec.fields if f.type == FieldType.SCALE), None)
         self.spalte = ft.Column(spacing=8)
         self.control = ft.Container(
@@ -330,7 +385,12 @@ class EintragenKarte:
             "satz": satz_nummer(zeiten, i),
             "fest": fest,
             "wahl": {k: v for k, v in wahl.items() if k in AUSFUEHRUNG_SCHLUESSEL},
-            "wdh": eing.wdh.get(self.wdh_feld or "", {}).get(i),
+            # Die Sätze dieser Ausführung (je Runde), sonst alle des Laufs
+            "saetze": tuple(
+                eing.werte(zeiten, fest if any(z.ausfuehrung for z in zeiten) else None).get(
+                    self.wdh_feld or "", []
+                )
+            ),
             "skala": eing.skala.get(self.skala.key, {}).get(i) if self.skala else None,
             "zaehlt": zaehlt,
         }
@@ -349,13 +409,24 @@ class EintragenKarte:
             self.aendern()
 
     def _wdh(self, n: int) -> Callable[..., None]:
+        """„+N“: ein Satz dazu (Ben: erweitern statt ersetzen)."""
+
         def handler(_e: Any = None) -> None:
-            neu = max(0, n)
             self._schreiben(
-                "wdh", f"{self.uebung.name}: {neu} Wdh.", {"feld": self.wdh_feld or "", "wert": neu}
+                "wdh",
+                f"{self.uebung.name}: +{n} Wdh.",
+                {"feld": self.wdh_feld or "", "wert": max(0, n), "dazu": True},
             )
 
         return handler
+
+    def _weg(self, _e: Any = None) -> None:
+        """„−“: den letzten Satz zurücknehmen."""
+        self._schreiben(
+            "wdh",
+            f"{self.uebung.name}: letzter Satz zurück",
+            {"feld": self.wdh_feld or "", "wert": None, "dazu": True},
+        )
 
     def _skala(self, wert: int) -> Callable[..., None]:
         def handler(_e: Any = None) -> None:
@@ -378,36 +449,22 @@ class EintragenKarte:
     # -- Zeichnen --------------------------------------------------------------------------
 
     def _zeilen(self, lage: Mapping[str, Any]) -> list[ft.Control]:
-        zeilen: list[ft.Control] = [
-            ft.Text(
-                f"EINTRAGEN · SATZ {lage['satz']}" if self.wdh_feld else "EINTRAGEN",
-                size=11,
-                weight=ft.FontWeight.W_700,
-                opacity=0.65,
-            )
-        ]
+        zeilen: list[ft.Control] = [kopf(self.page)]
         zeilen.extend(
             auspraegung_zeilen(self.felder, lage["wahl"], lage["fest"], self._auspraegung)
         )
         if self.wdh_feld and not lage["zaehlt"]:
             zeilen.append(
-                wdh_zeile(
-                    int(lage["wdh"] or 0),
-                    self.ziel,
+                saetze_zeile(
+                    list(lage["saetze"]),
+                    self.werte,
                     self._wdh,
-                    titel=f"Wiederholungen · Satz {lage['satz']} — niemand zählt",
+                    self._weg,
+                    titel="Wiederholungen — niemand zählt",
                 )
             )
         if self.skala is not None:
             zeilen.append(skala_zeile(self.skala, lage["skala"], self._skala))
-        zeilen.append(
-            ft.Text(
-                "Die Zeit kommt von der Uhr. Eingetragen wird mit „Fertig“ — „Abbrechen“ "
-                "verwirft auch diese Eingaben.",
-                size=12,
-                opacity=0.6,
-            )
-        )
         return zeilen
 
     def bauen(self, e: Einheitslauf) -> ft.Control:
@@ -442,7 +499,8 @@ __all__ = [
     "ausfuehrung_waehlen",
     "auspraegung_zeilen",
     "karte",
+    "saetze_zeile",
     "skala_zeile",
     "wahl_schluessel",
-    "wdh_zeile",
+    "wdh_werte",
 ]

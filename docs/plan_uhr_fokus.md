@@ -208,3 +208,22 @@ Schalter rechts in der Zeile von „Gemacht“ · Notiz · Variante**, ob ▶ in
 Tests: `tests/test_ui_uhr_fokus.py`, `tests/test_uebung_lauf.py`
 (`test_ausfuehrung_je_runde_traegt_je_ausfuehrung_ein`), Doctests im Kern. Gerätetest T101.
 
+### 9.1 Nach dem ersten Blick (8.11.2026 spät, 0.3.69)
+
+Ben zu 0.3.68: „Im Fokus braucht es die gemachten Leistungen nicht … Fokus ist die ganze
+Aufmerksamkeit auf dem, was gerade passiert“; Platz besser nutzen; Infotexte in ein „i“;
+„Einträge müssen erweitert werden können. Bisher ersetzt Buttonklick. Für Korrektur gibt es das
+Minus oder Nachbearbeitung. Dort die Buttons rein, die man auch in der Normalansicht hat.“
+
+- **Läufe heute** stehen nur vor und nach dem Lauf, nicht im laufenden Fokus.
+- **Kopf des Fokus:** Takt-Anzeige (kleiner) · Zeit mit Stand · **Ebenen-Knopf** (ein Menü mit
+  Haken statt der Chips Takt · Bewegung · HF · Kurve) in einer Zeile; der Tempo-Regler darunter
+  (`components/fokus.py`).
+- **Infotexte** im „i“: unter den Knöpfen (Nächster, Fertig, Abbrechen) und im Kopf der Karte
+  „Eintragen“.
+- **Sätze erweitern:** Die Karte zeigt die Knöpfe des Blocks („+10“, „+15“ … aus
+  `core.standards.chips_fuer`) und einen eigenen Wert — jeder Tipp ein Satz dazu; „−“ nimmt den
+  letzten zurück. In der Zeitleiste ``person/wdh`` mit ``dazu`` (``wert`` ``None`` = zurück);
+  ältere Ereignisse ohne ``dazu`` gelten als Stand (`core.timer_eintrag.eingaben`). Im Workout
+  zählt die Summe der Sätze für die Bedingung.
+

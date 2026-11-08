@@ -235,16 +235,21 @@ async def test_ohne_uhr_oeffnet_den_fokus_ohne_zeit(umgebung) -> None:
     await _ticken(state, uhr, gurt, 8)
     fokus = uebung_timer_view(seite, state, f"/uebung/{u.id}", u)
     assert "Ohne Uhr — keine Zeit im Tagebuch" in _texte(fokus)
-    chip = next(
+    # Erweitern statt ersetzen (8.11.2026 spät): die Knöpfe wie im Block (+10, +15, +20);
+    # +15, +10, dann nimmt „−“ den letzten zurück
+    _knopf(fokus, "+15").on_click()
+    _knopf(fokus, "+10").on_click()
+    assert "15 · 10  = 25" in _texte(fokus)
+    next(
         x
         for x in _alle(fokus)
-        if isinstance(x, ft.Chip) and isinstance(x.label, ft.Text) and x.label.value == "12"
-    )
-    chip.on_select()
+        if isinstance(x, ft.IconButton) and x.tooltip == "Letzten Satz zurücknehmen"
+    ).on_click()
+    assert "15" in _texte(fokus)
     _knopf(fokus, "Fertig").on_click()
     await _bis_zum_ende(state, uhr, gurt)
     (eintrag,) = [e for e, _ in state.sitzungen.eintraege_am_tag(state.profil.id, state.heute())]
-    assert eintrag.result == {"reps": [12]}  # keine Haltezeit
+    assert eintrag.result == {"reps": [15]}  # keine Haltezeit
 
 
 async def test_fokus_karte_eintragen_und_pfeile_danach(umgebung) -> None:
@@ -269,14 +274,10 @@ async def test_fokus_karte_eintragen_und_pfeile_danach(umgebung) -> None:
     fokus = uebung_timer_view(seite, state, basis, u, plan, item)
     texte = _texte(fokus)
     assert "aus der Runde" in texte and "links" in texte
-    assert "Wiederholungen · Satz 1 — niemand zählt" in texte
+    assert "Wiederholungen — niemand zählt" in texte
     pfeile = next(x for x in _alle(fokus) if isinstance(x, ft.Container) and x.data == "pfeile")
     assert not pfeile.visible  # während die Uhr läuft, keine Pfeile
-    next(
-        x
-        for x in _alle(fokus)
-        if isinstance(x, ft.Chip) and isinstance(x.label, ft.Text) and x.label.value == "10"
-    ).on_select()
+    _knopf(fokus, "+10").on_click()
     await _bis_zum_ende(state, uhr, gurt)
     eintraege = {
         e.result.get("variant"): e.result

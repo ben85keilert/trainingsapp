@@ -52,6 +52,16 @@ def _texte(c) -> list[str]:
     return [x.value for x in _alle(c) if isinstance(x, ft.Text) and isinstance(x.value, str)]
 
 
+def _ebenen(ansicht) -> list[str]:
+    """Die Ebenen des Fokus — ein Menü neben der Zeit (8.11.2026 spät)."""
+    knopf = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.PopupMenuButton) and x.icon == ft.Icons.LAYERS_OUTLINED
+    )
+    return [i.content.value for i in knopf.items]
+
+
 def _knopf(c, text: str):
     knoepfe = ft.FilledButton | ft.OutlinedButton | ft.FilledTonalButton | ft.TextButton
     for x in _alle(c):
@@ -119,8 +129,7 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
     texte = _texte(laufend)
     assert "Schritt 1 von 2 · weich" in texte and "Kniebeuge" in texte
     assert any("Katze-Kuh" in t for t in texte) and _knopf(laufend, "Fertig")
-    chips = [c.label.value for c in _alle(laufend) if isinstance(c, ft.Chip)]
-    assert chips[:4] == ["Takt", "Bewegung", "HF", "Kurve"]
+    assert _ebenen(laufend) == ["Takt", "Bewegung", "HF", "Kurve"]
     # Zeit ab → Überzeit: die Zeit zählt ins Minus, „Weiter: Katze-Kuh“
     await _sekunden(state, uhr, gurt, 10)
     assert paar[1].phase == UEBERZEIT
@@ -133,8 +142,7 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
     ohne_timer = workout_view(seite, state, plan, route=route)
     # Ohne Timer: keine „veraltete Ansicht“ mehr (Ben, 8.11.2026) — der Fokus mit Kurven wie
     # bei jedem Schritt, eine Stoppuhr läuft; „Fertig“ beendet hier das Workout
-    chips = [c.label.value for c in _alle(ohne_timer) if isinstance(c, ft.Chip)]
-    assert chips[:4] == ["Takt", "Bewegung", "HF", "Kurve"]
+    assert _ebenen(ohne_timer) == ["Takt", "Bewegung", "HF", "Kurve"]
     assert paar[1].timer is not None and paar[1].timer.lauf.profil.ist_stoppuhr
     _knopf(ohne_timer, "Fertig — Workout beenden").on_click()
     await _sekunden(state, uhr, gurt, 3)

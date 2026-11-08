@@ -168,12 +168,16 @@ class Fokus:
         umgeschaltet); ``key``: Schlüssel der Uhr für den Tempo-Regler (`uhr.schluessel`)."""
         self.page, self.state, self.uebung, self.item, self.key = page, state, uebung, item, key
         self.neu_zeichnen = neu_zeichnen
+        # Zeit und Takt in einer Zeile (Ben, 8.11.2026 spät) — die Zeit etwas kleiner
         self.zeit_text = ft.Text(
-            size=72, weight=ft.FontWeight.W_600, text_align=ft.TextAlign.CENTER
+            size=64, weight=ft.FontWeight.W_600, text_align=ft.TextAlign.CENTER
         )
         self.stand_text = ft.Text(size=15, opacity=0.8, text_align=ft.TextAlign.CENTER)
         self.balken_platz = ft.Container()
-        self.takt_anzeige = TaktAnzeige(groesse=180)
+        self.takt_anzeige = TaktAnzeige(groesse=120)
+        self.takt_platz = ft.Container(content=self.takt_anzeige.control)
+        #: Die Ebenen als Menü neben der Zeit (statt vier Chips) — je Eintrag ein Haken
+        self._ebenen_eintraege: dict[str, ft.PopupMenuItem] = {}
         self.tempo_platz = ft.Container()
         self.saetze_spalte = ft.Column(spacing=0)
         #: Anhalten/Fortsetzen — der Aufrufer setzt ``on_click``
@@ -202,9 +206,6 @@ class Fokus:
                 ],
             ),
         )
-        self.takt_spalte = ft.Column(
-            spacing=8, tight=True, controls=[self.takt_anzeige.control, self.tempo_platz]
-        )
         #: Die Kurven-Einblendung: Auswahl der Reihen und je Reihe ein Streifen
         self.kurven_platz = ft.Column(spacing=6, tight=True)
         self.kurven_karte = ft.Container(
@@ -229,15 +230,18 @@ class Fokus:
     # -- Ebenen ----------------------------------------------------------------------------
 
     def ebenen_anwenden(self) -> None:
-        self.takt_spalte.visible = FOKUS_TAKT in self.ebenen
+        self.takt_platz.visible = FOKUS_TAKT in self.ebenen
+        self.tempo_platz.visible = FOKUS_TAKT in self.ebenen
+        for name, eintrag in self._ebenen_eintraege.items():
+            eintrag.checked = name in self.ebenen
         self.bild_platz.visible = (
             FOKUS_BEWEGUNG in self.ebenen and self.bild_platz.content is not None
         )
         self.hf_karte.visible = FOKUS_HF in self.ebenen
         self.kurven_karte.visible = FOKUS_KURVE in self.ebenen
 
-    def _ebene_umschalten(self, name: str) -> Callable[[ft.Event[ft.Chip]], None]:
-        def handler(_e: ft.Event[ft.Chip]) -> None:
+    def _ebene_umschalten(self, name: str) -> Callable[[Any], None]:
+        def handler(_e: Any = None) -> None:
             if name in self.ebenen:
                 self.ebenen.discard(name)
             else:
@@ -250,20 +254,22 @@ class Fokus:
 
         return handler
 
-    def ebenen_chips(self) -> ft.Control:
-        return ft.Row(
-            spacing=6,
-            wrap=True,
-            controls=[
-                ft.Chip(
-                    label=ft.Text(text, size=12),
-                    selected=name in self.ebenen,
-                    show_checkmark=True,
-                    tooltip=f"{text} im Fokus zeigen — gemerkt",
-                    on_select=self._ebene_umschalten(name),
-                )
-                for name, text in FOKUS_EBENEN.items()
-            ],
+    def ebenen_knopf(self) -> ft.Control:
+        """Was der Fokus zeigt — Takt · Bewegung · HF · Kurve — als ein Knopf neben der Zeit
+        (Ben, 8.11.2026 spät: „Die Buttons Takt-Bewegung … in einen Button auslagern, der in die
+        gleiche Zeile wie die Zeit kommt“); gemerkt je Gerät."""
+        self._ebenen_eintraege = {
+            name: ft.PopupMenuItem(
+                content=ft.Text(text),
+                checked=name in self.ebenen,
+                on_click=self._ebene_umschalten(name),
+            )
+            for name, text in FOKUS_EBENEN.items()
+        }
+        return ft.PopupMenuButton(
+            icon=ft.Icons.LAYERS_OUTLINED,
+            tooltip="Was der Fokus zeigt: Takt · Bewegung · HF · Kurve",
+            items=list(self._ebenen_eintraege.values()),
         )
 
     def _kurve_umschalten(self, k: str) -> Callable[[ft.Event[ft.Chip]], None]:
@@ -318,18 +324,34 @@ class Fokus:
             self.item.id if self.item is not None else None,
             name="timer",
         )
+        knopf = self.ebenen_knopf()
+        self.ebenen_anwenden()
         return [
-            self.ebenen_chips(),
-            ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[self.zeit_text]),
-            ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[self.stand_text]),
+            # Takt · Zeit (mit Stand) · Ebenen — eine Zeile (8.11.2026 spät)
+            ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    self.takt_platz,
+                    ft.Column(
+                        expand=True,
+                        spacing=0,
+                        tight=True,
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[self.zeit_text, self.stand_text],
+                    ),
+                    knopf,
+                ],
+            ),
             self.balken_platz,
+            self.tempo_platz,
             ft.Row(
                 alignment=ft.MainAxisAlignment.CENTER,
                 wrap=True,
                 spacing=12,
                 run_spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[self.takt_spalte, self.bild_platz, self.hf_karte],
+                controls=[self.bild_platz, self.hf_karte],
             ),
             self.kurven_karte,
             *([karte(*zaehl, abstand=4, padding=10)] if zaehl else []),

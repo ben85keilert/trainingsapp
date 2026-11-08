@@ -259,30 +259,39 @@ def satz_nummer(zeiten: Sequence[Gelaufen], i: int) -> int:
 @dataclass
 class Eingaben:
     """Was die Person im Fokus eintrug (Karte „Eintragen“, `docs/plan_uhr_fokus.md` §1) — aus
-    der Zeitleiste: ``person/wdh`` (Wiederholungen, je Abschnitt der letzte Wert),
-    ``person/skala`` (der letzte Wert je Abschnitt) und ``person/auspraegung`` (die letzte Wahl
-    der Ausprägungen). Gespeichert wird erst mit dem Ende des Laufs (P150)."""
+    der Zeitleiste: ``person/wdh`` (Sätze von Hand), ``person/skala`` (der letzte Wert je
+    Abschnitt) und ``person/auspraegung`` (die letzte Wahl der Ausprägungen). Gespeichert wird
+    erst mit dem Ende des Laufs (P150).
 
-    #: Feld → {Abschnitt (Index in den Zeiten): Wiederholungen}
-    wdh: dict[str, dict[int, int]] = field(default_factory=dict)
+    **Sätze erweitern** (Ben, 8.11.2026 spät: „Einträge müssen erweitert werden können. Bisher
+    ersetzt Buttonklick. Für Korrektur gibt es das Minus“): ein ``person/wdh`` mit ``dazu``
+    hängt einen Satz an — wie „+12“ im Block —, mit ``wert`` ``None`` nimmt es den letzten
+    zurück. Ohne ``dazu`` (bis 0.3.68) war ``wert`` der Stand des Abschnitts: der letzte gilt."""
+
+    #: Feld → die Sätze von Hand in ihrer Folge: (Abschnitt, Wiederholungen)
+    wdh: dict[str, list[tuple[int, int]]] = field(default_factory=dict)
     #: Feld → {Abschnitt: Wert}
     skala: dict[str, dict[int, Any]] = field(default_factory=dict)
     #: die zuletzt im Fokus gewählten Ausprägungen — ``None``: keine Wahl im Fokus
     auspraegung: dict[str, Any] | None = None
 
+    def saetze(self, feld: str | None) -> list[int]:
+        """Die Sätze eines Felds, wie eingetragen."""
+        return [w for _, w in self.wdh.get(feld or "", [])]
+
     def werte(
         self, zeiten: Sequence[Gelaufen], ausfuehrung: Mapping[str, Any] | None = None
     ) -> dict[str, Any]:
-        """Die Werte für einen Eintrag: Wiederholungen je Satz (Abschnitt) und die letzte
-        Skala — mit ``ausfuehrung`` nur aus deren zählenden Abschnitten (je Ausführung ein
-        Eintrag), sonst aus allen.
+        """Die Werte für einen Eintrag: die Sätze von Hand und die letzte Skala — mit
+        ``ausfuehrung`` nur aus deren zählenden Abschnitten (je Ausführung ein Eintrag), sonst
+        aus allen.
 
         >>> L, R = (("variant", "links"),), (("variant", "rechts"),)
         >>> zeiten = [Gelaufen("L", 1, 60.0, True, 0, 60, ausfuehrung=L),
         ...           Gelaufen("R", 1, 60.0, True, 60, 120, ausfuehrung=R)]
-        >>> e = Eingaben(wdh={"reps": {0: 10, 1: 12}}, skala={"scale": {1: 7}})
+        >>> e = Eingaben(wdh={"reps": [(0, 10), (0, 5), (1, 12)]}, skala={"scale": {1: 7}})
         >>> e.werte(zeiten), e.werte(zeiten, {"variant": "links"})
-        ({'reps': [10, 12], 'scale': 7}, {'reps': [10]})
+        ({'reps': [10, 5, 12], 'scale': 7}, {'reps': [10, 5]})
         """
         if ausfuehrung is None:
             stellen = set(range(len(zeiten))) or {0}
@@ -293,8 +302,8 @@ class Eingaben:
                 if z.zaehlt and dict(z.ausfuehrung) == dict(ausfuehrung)
             }
         out: dict[str, Any] = {}
-        for feld, je in self.wdh.items():
-            liste = [je[i] for i in sorted(je) if i in stellen]
+        for feld, saetze in self.wdh.items():
+            liste = [w for i, w in saetze if i in stellen]
             if liste:
                 out[feld] = liste
         for feld, je in self.skala.items():
@@ -307,14 +316,22 @@ class Eingaben:
 def eingaben(ereignisse: Iterable[Ereignis], zeiten: Sequence[Gelaufen]) -> Eingaben:
     """Die Eingaben der Person aus der Zeitleiste, den Abschnitten zugeordnet (`Eingaben`).
 
-    >>> ev = [Ereignis(10.0, "person", "wdh", "", {"feld": "reps", "wert": 8}),
-    ...       Ereignis(50.0, "person", "wdh", "", {"feld": "reps", "wert": 10}),
+    >>> ev = [Ereignis(10.0, "person", "wdh", "", {"feld": "reps", "wert": 12, "dazu": True}),
+    ...       Ereignis(20.0, "person", "wdh", "", {"feld": "reps", "wert": 10, "dazu": True}),
+    ...       Ereignis(25.0, "person", "wdh", "", {"feld": "reps", "wert": None, "dazu": True}),
+    ...       Ereignis(50.0, "person", "wdh", "", {"feld": "reps", "wert": 8, "dazu": True}),
     ...       Ereignis(70.0, "person", "skala", "", {"feld": "scale", "wert": 6}),
     ...       Ereignis(80.0, "person", "auspraegung", "", {"weight": 12, "side": None})]
     >>> zeiten = [Gelaufen("H", 1, 60.0, True, 0, 60), Gelaufen("H", 2, 60.0, True, 60, 120)]
     >>> e = eingaben(ev, zeiten)
     >>> e.wdh, e.skala, e.auspraegung
-    ({'reps': {0: 10}}, {'scale': {1: 6}}, {'weight': 12})
+    ({'reps': [(0, 12), (0, 8)]}, {'scale': {1: 6}}, {'weight': 12})
+
+    Bis 0.3.68 (ohne ``dazu``) war der Wert der Stand des Abschnitts — der letzte gilt:
+
+    >>> alt = [Ereignis(10.0, "person", "wdh", "", {"feld": "reps", "wert": w}) for w in (1, 2, 3)]
+    >>> eingaben(alt, zeiten).wdh
+    {'reps': [(0, 3)]}
     """
     e = Eingaben()
     for x in ereignisse:
@@ -325,11 +342,20 @@ def eingaben(ereignisse: Iterable[Ereignis], zeiten: Sequence[Gelaufen]) -> Eing
             e.auspraegung = {k: d[k] for k in AUSFUEHRUNG_SCHLUESSEL if d.get(k) not in (None, "")}
             continue
         feld = str(d.get("feld") or "")
-        if not feld or d.get("wert") is None:
-            continue
-        if x.art == "wdh":
-            e.wdh.setdefault(feld, {})[stelle(zeiten, x.t_s)] = max(0, ganzzahl_lesen(d["wert"]))
-        elif x.art == "skala":
+        if x.art == "wdh":  # ohne Feld unter "" — zählt für eine Bedingung, nicht im Eintrag
+            saetze = e.wdh.setdefault(feld, [])
+            if d.get("dazu"):
+                if d.get("wert") is None:  # „−“: den letzten Satz zurücknehmen
+                    if saetze:
+                        saetze.pop()
+                else:
+                    saetze.append((stelle(zeiten, x.t_s), max(0, ganzzahl_lesen(d["wert"]))))
+            elif d.get("wert") is not None:  # bis 0.3.68: der Stand des Abschnitts
+                i = stelle(zeiten, x.t_s)
+                saetze[:] = sorted(
+                    [(j, w) for j, w in saetze if j != i] + [(i, max(0, ganzzahl_lesen(d["wert"])))]
+                )
+        elif x.art == "skala" and feld and d.get("wert") is not None:
             e.skala.setdefault(feld, {})[stelle(zeiten, x.t_s)] = d["wert"]
     return e
 

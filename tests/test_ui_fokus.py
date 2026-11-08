@@ -111,17 +111,23 @@ async def test_fokus_chips_hf_und_bildfolge_im_takt(umgebung) -> None:
     await _sekunden(state, uhr, gurt, 3)
     fokus = uebung_timer_view(seite, state, basis, u)
     assert fokus.appbar.title.value == "Fokus · Kniebeuge"
-    # Ohne den Chip „zählt“ im Kopf (P148) — der ist Anzeige, keine Ebene
+    # Die Ebenen als ein Knopf neben der Zeit (Ben, 8.11.2026 spät) — ein Menü mit Haken
+    ebenen = next(
+        x
+        for x in _alle(fokus)
+        if isinstance(x, ft.PopupMenuButton) and x.icon == ft.Icons.LAYERS_OUTLINED
+    )
+    assert [i.content.value for i in ebenen.items] == ["Takt", "Bewegung", "HF", "Kurve"]
+    assert all(i.checked for i in ebenen.items)
+    # Ohne den Chip „zählt“ im Kopf (P148) — der ist Anzeige, keine Kurve
     chips = [
         c
         for c in _alle(fokus)
         if isinstance(c, ft.Chip) and c.label.value not in ("zählt", "zählt nicht")
     ]
-    assert [c.label.value for c in chips[:4]] == ["Takt", "Bewegung", "HF", "Kurve"]
-    assert all(c.selected for c in chips[:4])
     # Die Kurven-Einblendung (Ben: „HF, RR, RMSSD, SDNN, Atemfrequenz, RSA“): Reihen als
     # Chips, Vorgabe HF und RMSSD, je gewählter Reihe ein Streifen mit dem letzten Wert
-    assert [c.label.value for c in chips[4:]] == [
+    assert [c.label.value for c in chips] == [
         "HF",
         "RR",
         "RMSSD",
@@ -129,9 +135,9 @@ async def test_fokus_chips_hf_und_bildfolge_im_takt(umgebung) -> None:
         "Atemfrequenz",
         "RSA",
     ]
-    assert [c.selected for c in chips[4:]] == [True, False, True, False, False, False]
+    assert [c.selected for c in chips] == [True, False, True, False, False, False]
     assert "RMSSD" in _texte(fokus) and any(t.endswith(" bpm") for t in _texte(fokus))
-    rr_chip = chips[5]
+    rr_chip = chips[1]
     rr_chip.on_select(SimpleNamespace(control=rr_chip))
     assert state.fokus_kurven() == ["hf", "rr", "rmssd"]
     assert "HF" in _texte(fokus) and "60" in _texte(fokus)  # der Gurt schlägt im Sekundentakt
@@ -142,10 +148,10 @@ async def test_fokus_chips_hf_und_bildfolge_im_takt(umgebung) -> None:
         if isinstance(x, ft.Stack) and x.controls and isinstance(x.controls[0], ft.Image)
     ]
     assert streifen and streifen[0].controls[0].width == 4 * streifen[0].controls[0].height
-    # Der Chip „HF“ nimmt die Kachel weg — gemerkt
-    hf = next(c for c in chips if c.label.value == "HF")
-    hf.on_select(SimpleNamespace(control=hf))
-    assert FOKUS_HF not in state.fokus_ebenen()
+    # „HF“ im Ebenen-Menü nimmt die Kachel weg — gemerkt, der Haken geht mit
+    hf = next(i for i in ebenen.items if i.content.value == "HF")
+    hf.on_click(None)
+    assert FOKUS_HF not in state.fokus_ebenen() and hf.checked is False
     karte = next(x for x in _alle(fokus) if isinstance(x, ft.Container) and "HF" in _texte(x)[:1])
     assert karte.visible is False
     state.einheit.timer.lauf.abbrechen()

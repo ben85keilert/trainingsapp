@@ -55,7 +55,7 @@ from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import zaehlen
 from trainingsapp.ui.components.fokus import Fokus, balken
 from trainingsapp.ui.components.fokus_eintragen import EintragenKarte
-from trainingsapp.ui.components.karte import hinweis, karte
+from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.laeufe_heute import eintragen_handler, laeufe_karte, werte_text
 from trainingsapp.ui.components.layout import sicher
@@ -794,6 +794,7 @@ def uebung_timer_view(
             ),
             ft.Row(
                 alignment=ft.MainAxisAlignment.CENTER,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     ft.TextButton(
                         "Abbrechen",
@@ -802,12 +803,15 @@ def uebung_timer_view(
                         style=ft.ButtonStyle(color=ft.Colors.ERROR),
                         on_click=abbrechen,
                     ),
+                    # Die Erklärung im „i“ (Ben, 8.11.2026 spät: „Infotext unten kommt in ein i“)
+                    info_knopf(
+                        page,
+                        "Pause, Nächster, Fertig, Abbrechen",
+                        "„Nächster“ und „Fertig“ nehmen die gelaufene Zeit, der Satz wird kürzer. "
+                        "„Abbrechen“ trägt nichts ein. Was kürzer als 5 s war, bekommt keine "
+                        "Marke und keinen Abschnitt.",
+                    ),
                 ],
-            ),
-            hinweis(
-                "„Weiter“ und „Fertig“ nehmen die gelaufene Zeit, der Satz wird kürzer. "
-                "„Abbrechen“ trägt nichts ein. Was kürzer als 5 s war, bekommt keine Marke und "
-                "keinen Abschnitt."
             ),
         ]
 
@@ -914,7 +918,9 @@ def uebung_timer_view(
         state.timer_beobachter.pop("uebung", None)
         oben = ergebnis_karte()
         inhalt.controls = [*([oben] if oben is not None else []), *vorher()]
-    if (laeufe := laeufe_karte(page, state, uebung, neu_zeichnen)) is not None:
+    # Im laufenden Fokus nur, was gerade passiert (Ben, 8.11.2026 spät: „die gemachten Leistungen
+    # … sieht man sowieso hinterher“) — „Läufe heute“ vorher und danach
+    if laufend is None and (laeufe := laeufe_karte(page, state, uebung, neu_zeichnen)) is not None:
         inhalt.controls.append(laeufe)
     if plan is not None and laufend is None:
         inhalt.controls.append(

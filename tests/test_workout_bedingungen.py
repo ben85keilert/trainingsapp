@@ -194,21 +194,18 @@ async def test_pflicht_bleibt_bei_der_uebung_und_wird_von_hand_erfuellt(umgebung
     with pytest.raises(AssertionError):
         _knopf(ueber, "Trotzdem weiter: Ausfallschritt gestützt")  # Pflicht
     _knopf(ueber, "Noch einmal versuchen")
-    # Von Hand 12 → erfüllt: „Weiter“ (weich, von Hand)
-    chip = next(
-        x
-        for x in _alle(ueber)
-        if isinstance(x, ft.Chip) and isinstance(x.label, ft.Text) and x.label.value == "12"
-    )
-    chip.on_select()
-    assert teil.wdh_hand == 12 and teil.k == 0
+    # Von Hand „+10“ und „+15“ → 25, erfüllt: „Weiter“ (weich) — Sätze dazu wie im Block
+    _knopf(ueber, "+10").on_click()
+    _knopf(workout_view(seite, state, plan, route=route), "+15").on_click()
+    assert teil.wdh_hand == 25 and teil.k == 0
     _knopf(
         workout_view(seite, state, plan, route=route), "Weiter: Ausfallschritt gestützt"
     ).on_click()
     await _sekunden(state, uhr, gurt, 1)
     assert teil.k == 1 and teil.ergebnisse[a.id] == "fertig"
     hand = [x for x in e.ereignisse if (x.quelle, x.art) == ("person", "wdh")]
-    assert hand and hand[-1].daten["wert"] == 12
+    # Zwei Sätze von Hand: +10 und +15 — je ein Ereignis mit „dazu“
+    assert [(x.daten["wert"], x.daten.get("dazu")) for x in hand] == [(10, True), (15, True)]
     # Ohne Bedingung: Zeit ab → „Weiter“; die Planke hat „abhaken“ mit Inhalt
     await _sekunden(state, uhr, gurt, 11)
     _knopf(workout_view(seite, state, plan, route=route), "Weiter: Planke").on_click()
@@ -333,12 +330,18 @@ async def test_wiederholungen_von_hand_kommen_in_den_eintrag(umgebung) -> None:
     await _sekunden(state, uhr, gurt, 2)
     laufend = workout_view(seite, state, plan, route=route)
     assert "Wiederholungen — niemand zählt, trag sie hier ein" in _texte(laufend)
-    chip = next(
+    # Erweitern statt ersetzen (Ben, 8.11.2026 spät): +10, +5, „−“ nimmt den letzten zurück
+    _knopf(laufend, "+10").on_click()
+    laufend = workout_view(seite, state, plan, route=route)
+    _knopf(laufend, "+15").on_click()
+    assert teil.wdh_hand == 25
+    laufend = workout_view(seite, state, plan, route=route)
+    assert "10 · 15  = 25" in _texte(laufend)
+    next(
         x
         for x in _alle(laufend)
-        if isinstance(x, ft.Chip) and isinstance(x.label, ft.Text) and x.label.value == "10"
-    )
-    chip.on_select()
+        if isinstance(x, ft.IconButton) and x.tooltip == "Letzten Satz zurücknehmen"
+    ).on_click()
     assert teil.wdh_hand == 10
     _knopf(workout_view(seite, state, plan, route=route), "Fertig").on_click()
     await _sekunden(state, uhr, gurt, 1)

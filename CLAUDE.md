@@ -302,7 +302,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   heißt **„Ohne Uhr“** (`core.timer.ohne_uhr`: Stoppuhr, die nicht zählt). Das ⏱ öffnet das
   **Uhr-Blatt** mit Geltung Für jetzt · In „Plan“ · Übung (`components/uhr_blatt.py`). Der Fokus
   hat die Karte **„Eintragen“** (`components/fokus_eintragen.py`, auch im Workout): Eingaben als
-  `person/wdh|skala|auspraegung`, eingetragen erst mit dem Ende des Laufs. Ein Timer-Abschnitt
+  `person/wdh|skala|auspraegung`, eingetragen erst mit dem Ende des Laufs; Wiederholungen mit
+  den Knöpfen des Blocks — **jeder Tipp ein Satz dazu**, „−“ nimmt den letzten zurück
+  (`person/wdh` mit `dazu`). Im laufenden Fokus nur, was gerade passiert: keine „Läufe heute“,
+  Erklärungen im „i“, Takt · Zeit · Ebenen-Knopf in einer Zeile. Ein Timer-Abschnitt
   kann eine **Ausführung** tragen (`Abschnitt.ausfuehrung`, flach in `timer/abschnitt`) —
   eingetragen wird **je Ausführung ein Eintrag** (`core.timer_eintrag.nach_ausfuehrung`,
   `Eingaben`; beim Üben und im Workout). Pfeilzeile `components/planpfeile.py` im Plan und im

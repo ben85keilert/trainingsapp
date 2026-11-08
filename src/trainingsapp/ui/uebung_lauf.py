@@ -761,8 +761,8 @@ def _eintragen(
         # Von Hand im Fokus (Karte „Eintragen“): nur, wo der Sensor nicht zählte (P122)
         hand = eingaben.werte(zeiten, gruppe if getrennt else None)
         for k, v in hand.items():
-            if k in werte or (k == feld and wdh):
-                continue
+            if not k or k in werte or (k == feld and wdh):
+                continue  # ohne Feld nichts — die Übung hat keins für Wiederholungen
             werte[k] = v
         if TEIL_UHR not in teile and not wdh:
             continue  # nichts gezählt — und keine Uhr, die „gemacht“ eintrüge

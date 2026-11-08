@@ -273,7 +273,7 @@ Ben: „ok, bau alles“. Sechs Commits (`e7fcd93` K0 … `b1fa398` K5), Migrati
   Geltungen an die Uhr; Timer → Vorlagen → Karte **Takte** (`views/timer._takte_karte`: Stift,
   ✕).
 
-## 8. Nachgezogen (8.11.2026, 0.3.63) — Ben: „erledige gleich die offenen Punkte“
+## 8. Nachgezogen (8.11.2026, 0.3.63 — Tag v0.3.64: der APK-Lauf für v0.3.63 scheiterte dreimal am Vorlagen-Download, 504) — Ben: „erledige gleich die offenen Punkte“
 
 - **P99 Teil 2 — Zählen im Workout:** `ZaehlBaustein.im_plan` — das Zählen gehört zu einem
   Schritt und endet mit ``plan/uebung_ende`` seiner Planübung (fertig/gemacht → fertig, sonst

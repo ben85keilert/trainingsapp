@@ -50,6 +50,7 @@ from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.uhr import schluessel as uhr_schluessel
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.plan_ablauf import GRUENDE
+from trainingsapp.ui.views.timer import timer_knopf
 
 
 def workout_route(plan: Plan) -> str:
@@ -774,7 +775,7 @@ def workout_view(
         route=route,
         appbar=ft.AppBar(
             title=ft.Text(f"{plan.name} · Workout"),
-            actions=[info_knopf(page, "Workout", WORKOUT_MD)],
+            actions=[timer_knopf(page, state, "workout"), info_knopf(page, "Workout", WORKOUT_MD)],
         ),
         scroll=ft.ScrollMode.AUTO,
         padding=16,

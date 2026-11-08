@@ -1338,8 +1338,8 @@ def plan_view(
         if uebung.id in mehrfach:
             teile.append(f"{stelle[item.id]}. Mal im Plan")
         # Die Uhr neben dem i (Ben, 17.10.2026): der Timer dieser Übung — an der
-        # Planübung, am Plan oder an der Übung; ohne einen legt die Uhr einen fest. Auch
-        # beim Bearbeiten: dort wählt man den Timer der Planübung (Skizze 7).
+        # Planübung, am Plan oder an der Übung. Beim Bearbeiten nur der Untertitel; die Uhr
+        # der Planübung wird in „Im Plan einstellen“ und im Uhrenplan gewählt (P79, K3).
         mit_plan = None if einzel else plan
         profil = timer_fuer(uebung, mit_plan, None if einzel else item)
         if profil is not None:
@@ -2569,9 +2569,9 @@ def plan_view(
                         tooltip="Als Workout — von vorn bis hinten",
                         on_click=zum_workout,
                     ),
-                    timer_knopf(page, state, "plan"),
                 ]
             ),
+            timer_knopf(page, state, "plan"),
             hilfe_knopf(page, thema="notation" if bearbeiten else "plan"),
             ft.IconButton(
                 ft.Icons.CHECK if bearbeiten else ft.Icons.EDIT_OUTLINED,

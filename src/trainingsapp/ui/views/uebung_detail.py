@@ -62,6 +62,7 @@ from trainingsapp.ui.components.uebungsbild import uebungsbild
 from trainingsapp.ui.components.varianten import etikett
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.anhang_verlauf import aufnahmen_raster
+from trainingsapp.ui.views.timer import timer_knopf
 from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 
 #: Kantenlänge des Übungsbilds im Kopf (Ben, 7.11.2026: „deutlich größer, dass man
@@ -729,9 +730,13 @@ def uebung_detail(
         []
         if geloescht
         else [
+            timer_knopf(page, state, "uebung"),
             ft.IconButton(
-                ft.Icons.TIMER if profile_der_uebung(uebung) else ft.Icons.TIMER_OUTLINED,
-                tooltip="Timer dieser Übung",
+                # Gefüllt, wenn hier ein Timer gilt — wie im Planblock (`timer_fuer`), K0
+                ft.Icons.TIMER
+                if timer_fuer(uebung, plan, item) is not None
+                else ft.Icons.TIMER_OUTLINED,
+                tooltip="Uhr dieser Übung",
                 # Aus dem Plan der Timer der Planübung (Takt, Profil der Planübung), wie die
                 # Uhr im Plan (`views/plan.py`) — über dieser Seite, Zurück führt hierher
                 on_click=gehe_zu(uebung_timer_route(route or f"/uebung/{uebung.id}", uebung, item)),

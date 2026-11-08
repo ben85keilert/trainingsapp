@@ -489,7 +489,12 @@ def uebung_timer_view(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     controls=[
                         ft.Text(f"zählt: {dauer_text(zaehlt_s)}", size=12),
-                        ft.Text(f"Laufzeit {dauer_text(profil.gesamt_s())}", size=12),
+                        ft.Text(
+                            "zählt vorwärts"
+                            if profil.ist_stoppuhr
+                            else f"Laufzeit {dauer_text(profil.gesamt_s())}",
+                            size=12,
+                        ),
                     ],
                 ),
                 hinweis(
@@ -573,7 +578,9 @@ def uebung_timer_view(
                 controls=[
                     ft.TextButton(
                         content=ft.Text(
-                            dauer_text(profil.gesamt_s()) if profil is not None else "0:00",
+                            dauer_text(profil.gesamt_s())
+                            if profil is not None and not profil.ist_stoppuhr
+                            else "0:00",
                             size=56,
                             weight=ft.FontWeight.W_300,
                         ),

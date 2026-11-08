@@ -473,7 +473,9 @@ def test_einstellungen_herzfrequenz_signal_karte(daten) -> None:
     seite = _seite()
     view = einstellungen_herzfrequenz(seite, state)
     assert "SIGNAL ÜBER EINER GRENZE" in _texte(view)
-    klang = next(c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "Klang darüber")
+    klang = next(
+        c for c in _alle(view) if isinstance(c, ft.Dropdown) and c.label == "Klang darüber"
+    )
     assert [o.key for o in klang.options][:2] == ["wechsel", "glocke1"]
     assert "schale" in [o.key for o in klang.options]
     klang.on_select(SimpleNamespace(control=SimpleNamespace(value="holz")))

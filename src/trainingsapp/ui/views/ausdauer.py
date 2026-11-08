@@ -144,6 +144,7 @@ from trainingsapp.ui.training import (
     verwaiste_uebernehmen,
     zeitleiste_und_versatz,
 )
+from trainingsapp.ui.views.timer import timer_knopf
 
 #: Live-DFA α1 so oft neu rechnen (s)
 DFA_ALLE_S = 5.0
@@ -321,19 +322,6 @@ def _beenden_text(e: Einheitslauf, teil: StreckeBaustein) -> str:
     if (t := e.timer) is not None and not t.lauf.fertig:
         saetze.append("Der Timer endet mit.")
     return " ".join(saetze)
-
-
-def _timer_knopf(page: ft.Page) -> ft.Control:
-    """⏱ — den Timer öffnen, um Intervalle bereitzustellen."""
-
-    async def timer_oeffnen() -> None:
-        await page.push_route("/timer")
-
-    return ft.IconButton(
-        ft.Icons.TIMER_OUTLINED,
-        tooltip="Timer — Intervalle bereitstellen",
-        on_click=timer_oeffnen,
-    )
 
 
 def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False) -> ft.Control:
@@ -742,7 +730,7 @@ def ausdauer_inhalt(page: ft.Page, state: AppState, *, eingebettet: bool = False
             )
         inhalt.controls = [
             karte(
-                titel("Training", *([_timer_knopf(page)] if eingebettet else [])),
+                titel("Training", *([timer_knopf(page, state, "ausdauer")] if eingebettet else [])),
                 sportwahl,
                 gps_schalter,
                 karte_schalter,
@@ -852,7 +840,7 @@ def ausdauer_view(page: ft.Page, state: AppState) -> ft.View:
         route="/ausdauer",
         appbar=ft.AppBar(
             title=ft.Text(SPORT_NAMEN[jetzt[1].sportart] if jetzt is not None else "Ausdauer"),
-            actions=[_timer_knopf(page)],
+            actions=[timer_knopf(page, state, "ausdauer_seite")],
         ),
         scroll=ft.ScrollMode.AUTO,
         padding=16,

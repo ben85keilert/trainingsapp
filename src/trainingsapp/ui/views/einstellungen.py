@@ -36,6 +36,7 @@ from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.scroll import scroll_merken
 from trainingsapp.ui.state import UHR_DARSTELLUNGEN, AppState
 from trainingsapp.ui.views.einstellungen_darstellung import darstellung_karte
+from trainingsapp.ui.views.timer import timer_knopf
 
 
 def _messung_laeuft(state: AppState) -> bool:
@@ -200,7 +201,9 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
 
     ansicht = ft.View(
         route="/einstellungen",
-        appbar=ft.AppBar(title=ft.Text("Einstellungen")),
+        appbar=ft.AppBar(
+            title=ft.Text("Einstellungen"), actions=[timer_knopf(page, state, "einstellungen")]
+        ),
         scroll=ft.ScrollMode.AUTO,
         padding=16,
         controls=[
@@ -313,7 +316,7 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                             ),
                             hinweis(
                                 "Ob und wie die Zeit zählt, steht an jeder Übung (Übung "
-                                "bearbeiten → Timer: Uhr an/aus, „Zählt als“)."
+                                "bearbeiten → Uhr: Uhr an/aus, „zählt“, „Zählt als“)."
                             ),
                             ft.Switch(
                                 label="Fokus beim Start der Uhr öffnen",

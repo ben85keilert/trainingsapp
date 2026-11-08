@@ -879,6 +879,9 @@ def teil_route(teil: Any) -> str | None:
         k = teil.kontext
         return f"/plan/{k.plan_id}" if k.plan_id else f"/training/{k.uebung_id}"
     if isinstance(teil, PlanAblaufBaustein):
+        # Ein Workout führt ins Workout, nicht in die alte Ablauf-Ansicht (K0, 8.11.2026)
+        if teil.workout:
+            return f"/plan/{teil.plan_id}/workout"
         return f"/plan/{teil.plan_id}/timer/ablauf"
     if isinstance(teil, UebungBaustein):
         k = teil.kontext

@@ -235,13 +235,16 @@ in IDs; `skala` ist eine Selbsteinschätzung ab `n`; P97), dazu `timer` (Plan-Ti
 
 **Gezeichneter Ablauf** (8.11.2026 spät, `docs/plan_verzweigungen.md` §8, G4): je Plan — auch
 in Kurskapiteln — wahlweise `ablauf = { an = true, start = "#1", kanten = [{ von, nach, ausloeser
-= "frei" | "zeit" | "wdh" | "skala", n, bis, pflicht, ausfuehren, wiederholen, text, inhalt = {
-text, url } }], fragen = [{ id = "?1", text, min, max }] }`. Knoten sind **Positionen**:
+= "frei" | "zeit" | "wdh" | "wdh_in_zeit" | "skala", n, sekunden, bis, pflicht, ausfuehren,
+wiederholen, text, inhalt = { text, url } }], fragen = [{ id = "?1", text, min, max }] }`
+(`sekunden` nur bei `wdh_in_zeit`, seit 8.11.2026 abends). Knoten sind **Positionen**:
 Planübungen `"#n"`, Fragen (Entscheidungsknoten) `"?n"`, dazu `"__ende__"` (Ende des Workouts)
 und `"__zurueck__"` (dorthin, wo man herkam — Einschub; `wiederholen` = die unterbrochene noch
 einmal). Der Import übersetzt in IDs (eine fehlende Übung nimmt ihre Kanten mit), der Export
 schreibt den Ablauf nur, wenn der Plan einen hat; ohne `an` läuft der Plan als Kette mit den
-`bedingung`-Feldern. `trainingsapp-paket pruefen` meldet eine Kante ohne Position als Fehler,
+`bedingung`-Feldern. Eine ältere Fassung mit `zweig`, `dann`, `sonst` oder `wege` an der
+Planübung liest die App als diesen Ablauf (P108, `PlanVorlage.zweige_als_ablauf`; die Prüfung
+gibt einen Hinweis). `trainingsapp-paket pruefen` meldet eine Kante ohne Position als Fehler,
 einen unbekannten Auslöser als Hinweis; ältere Apps übergehen das Feld. Je Planübung dazu
 `beiname` (Text, unterscheidet zwei gleiche Übungen im Bild: „2. Durchgang“).
 

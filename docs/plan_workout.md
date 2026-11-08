@@ -27,10 +27,19 @@ HF-Zonen nur als Anzeige, der Zielbereich-Ton (Entscheidung C) ist Information.
   · `gemacht`. **Härte**: weich = „Weiter“ geht immer, die Bedingung ist nur Vorschlag und
   Auto-Weiter; hart = Freischaltung: „Weiter“ erst bei Erfüllung, ein **Inhalt** (Video,
   Auftrag, Text) erscheint erst dann. **Abbrechen immer** — eine App hält niemanden fest.
-- **Zweig** (W3): benannte Listen A (Hauptzweig), B, C …; jeder Schritt sagt „erfüllt →“
-  (Vorgabe: nächster im eigenen Zweig) und optional „nicht erfüllt →“ auf jeden Schritt —
-  zurück nach A, weiter in B, woanders in C. Kein freier Graph im Editor, nur Listen mit zwei
-  Pfeilen; die Prüfung beim Speichern warnt vor Schleifen ohne Ausgang.
+- **Bleiben** (Ben, 8.11.2026 abends: „auch bei einem linearen Ablauf kann man Bedingungen
+  setzen, um weiterzumachen — Standard: bei der Übung bleiben“): Ist die Zeit ab (oder „Fertig“
+  getippt) und die Bedingung nicht erfüllt, endet der Schritt nicht — die Person bleibt bei der
+  Übung (`PlanAblaufBaustein.wartet`, mit Timer in der Überzeit): eintragen, „Noch einmal
+  versuchen“, weich „Trotzdem weiter“ (nie gegen eine Pflicht), Abbrechen. Hart geht es von
+  selbst weiter, sobald es reicht. Keine Pause mehr im Workout.
+- **Eintragen im Schritt**: Wo weder Sensor noch Takt zählen, trägt man Wiederholungen von Hand
+  ein (``person/wdh`` → Bedingung und Eintrag); die Skala per Chips. Jeder Schritt zeigt den
+  **Fokus** mit Kurven — ohne Timer läuft eine Stoppuhr mit („Zeit ab“ heißt dort: „Fertig“).
+- ~~**Zweig** (W3)~~ und ~~**Wege**~~ (bis 8.11.2026 abends): Zweige A–D, „erfüllt →“, „nicht
+  erfüllt →“ und Wege sind seit P108 **Kanten im gezeichneten Ablauf**
+  (`docs/plan_verzweigungen.md` §8); Altbestand übersetzt Datenschritt 6. Der Reihe nach gibt es
+  nur die Bedingung. Was bis dahin galt:
 - **Wege** (Ben, 8.11.2026): Neben der Bedingung bietet ein Schritt **alternative Pfade** an,
   vorher gesetzt („Weiter mit B: Dehnung — Beine krampfen“, „Weiter mit C: Planke“), im Workout
   als Knöpfe; ein Weg darf zu einer schon gemachten Übung oder zur laufenden selbst führen

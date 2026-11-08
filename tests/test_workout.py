@@ -76,12 +76,15 @@ def test_hart_geht_nach_dem_timer_sofort_weiter_und_ohne_timer_wartet() -> None:
     assert teil.phase == UEBUNG and teil.k == 1 and "ueber_s" not in neu[-2].daten
     uhr[0] = 31.0
     teil.takt(31.0)
-    assert teil.k == 2 and teil.timer is None and teil.phase == UEBUNG  # ohne Timer: warten
+    # Ohne Timer: im Workout eine Stoppuhr (Fokus mit Kurven, 8.11.2026) — sie wartet auf „Fertig“
+    assert teil.k == 2 and teil.timer is not None and teil.timer.lauf.profil.ist_stoppuhr
     uhr[0] = 40.0
-    assert teil.takt(40.0) == [] and teil.phase == UEBUNG
+    assert [x for x in _arten(teil.takt(40.0)) if x[0] == "plan"] == [] and teil.phase == UEBUNG
     teil.gemacht()
     neu = teil.takt(40.0)
-    assert _arten(neu) == [("plan", "uebung_ende"), ("plan", "ende")] and teil.phase == FERTIG
+    plan = [x for x in _arten(neu) if x[0] == "plan"]
+    assert plan == [("plan", "uebung_ende"), ("plan", "ende")] and teil.phase == FERTIG
+    assert next(x for x in neu if x.art == "uebung_ende").daten["grund"] == "gemacht"
 
 
 def test_workout_klammer_und_ende_in_der_ueberzeit() -> None:
@@ -204,3 +207,63 @@ def test_ueberzeit_geht_in_den_eintrag(tmp_path, monkeypatch) -> None:
         assert eintrag is not None and eintrag.result["hold"] == [14.0]
     finally:
         state.schliessen()
+
+
+def _linear(bedingung, profil_s: float | None = 10.0, **mehr):
+    """Ein linearer Plan aus zwei Schritten — der erste mit ``bedingung``."""
+    uhr = [0.0]
+    schritte = [
+        Schritt("i1", "u1", "Kniebeuge", _profil(profil_s) if profil_s else None, None, bedingung),
+        Schritt("i2", "u2", "Planke", _profil(20), "hold"),
+    ]
+    teil = PlanAblaufBaustein("p1", "Beine", schritte, **mehr)
+    teil.uhr_uebernehmen(lambda: uhr[0])
+    teil.starten(0.0)
+    teil.takt(0.0)
+    return teil, uhr
+
+
+def test_linear_hart_bleibt_bis_die_bedingung_erfuellt_ist_auch_von_hand() -> None:
+    """Linear (Ben, 8.11.2026): „Bedingungen setzen, um weiterzumachen — Standard: bei der Übung
+    bleiben“. Hart läuft der Timer über, bis es reicht; wo niemand zählt, trägt man von Hand ein."""
+    from trainingsapp.core.bedingung import WDH, Bedingung
+
+    teil, uhr = _linear(Bedingung(WDH, 12), uebergang=HART)
+    uhr[0] = 10.5
+    teil.takt(10.5)
+    assert teil.phase == UEBERZEIT and teil.wartet and teil.k == 0
+    erf = teil.bedingung_stand()
+    assert erf is not None and not erf.erfuellt and erf.unpruefbar  # niemand zählt
+    teil.wdh_von_hand(8)
+    assert teil.wartet and teil.k == 0
+    teil.wdh_von_hand(12)
+    neu = teil.takt(12.0)
+    assert teil.k == 1 and not teil.wartet and teil.ergebnisse["i1"] == "fertig"
+    assert _arten(neu)[:2] == [("plan", "uebung_ende"), ("plan", "uebung_start")]
+
+
+def test_linear_weich_fertig_ohne_erfuellung_wartet_und_trotzdem_weiter() -> None:
+    from trainingsapp.core.bedingung import SKALA, Bedingung
+
+    teil, uhr = _linear(Bedingung(SKALA, 6), uebergang=WEICH)
+    uhr[0] = 3.0
+    teil.gemacht()
+    teil.takt(3.0)
+    assert teil.wartet and teil.k == 0 and "i1" not in teil.ergebnisse
+    teil.weiter()  # „Trotzdem weiter“ (weich, keine Pflicht)
+    assert teil.k == 1 and teil.ergebnisse["i1"] == "fertig"
+
+
+def test_zeit_ab_ohne_timer_gilt_mit_fertig_und_zweige_zaehlen_nicht() -> None:
+    """„Zeit ab“ an einer Übung ohne Timer ist mit „Fertig“ erfüllt — sonst hinge der Ablauf
+    (Ben: „prüfen, ob Bedingungen erfüllbar sind“). Alte Zweige und Verweise lenken linear nicht
+    mehr um (P108: das ist jetzt der Ablauf)."""
+    from trainingsapp.core.bedingung import ZEIT, Bedingung
+
+    teil, _uhr = _linear(Bedingung(ZEIT, zweig="B", dann="i9"), profil_s=None, uebergang=HART)
+    assert teil.timer is not None and teil.timer.lauf.profil.ist_stoppuhr
+    erf = teil.bedingung_stand()
+    assert erf is not None and not erf.erfuellt  # vor „Fertig“ läuft die Zeit
+    teil.gemacht()
+    teil.takt(5.0)
+    assert teil.k == 1 and teil.ergebnisse["i1"] == "gemacht"

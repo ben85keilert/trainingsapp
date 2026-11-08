@@ -1,35 +1,37 @@
-"""Der Reiter **„Ablauf“** im Plan-Editor — Workouts zeichnen (Ben, 8.11.2026 spät,
-`docs/plan_verzweigungen.md` §8, Skizzen Reihe E; G3).
+"""Der Reiter **„Ablauf“** im Plan-Editor — Workouts zeichnen (Ben, 8.11.2026,
+`docs/plan_verzweigungen.md` §8, Skizzen Reihe E; überarbeitet nach dem ersten Test am Abend).
 
-Route ``<Plan bearbeiten>/ablauf``. Oben die Reiterzeile (Übungen · Uhren · Ablauf) und die
-**Palette**: alle Übungen des Katalogs mit Suche, jede ein `ft.Draggable` — man zieht sie in
-einen **Slot** der Zeichnung. Darunter das **Ablaufbild** (`components/ablaufbild.py`):
-Start-Slot, Knoten, Kanten mit Etikett, leere Slots.
+Ein Plan läuft **der Reihe nach** (Planliste, je Übung „Weiter, wenn …“) oder **mit Abzweigen**
+(gezeichnet). Der Schalter dafür steht im Reiter „Plan“ (`modus_zeile`); erst „Mit Abzweigen“
+bringt den dritten Reiter. Route ``<Plan bearbeiten>/ablauf``.
 
-- Ein Tipp auf einen Knoten **wählt** ihn (Rahmen, „+“); lang drücken vernebelt alles außer
-  seinem Weg (Sitzung, `AppState.ablauf_vernebelt`).
-- **„+“** öffnet das Menü (E2): Neuer Slot · Bestehende Übung wählen (dann den Zielknoten
-  antippen — so entstehen Rück- und Querkanten ohne Kanten-Ziehen) · Frage · Noch einmal ·
-  ◀ Zurück · Ende; darunter Übung einstellen, Beiname, Als Start, Aus dem Plan nehmen.
-- Ein Tipp auf ein **Etikett** öffnet das Blatt der Kante (E3): Ziel, Wann (frei · Zeit ab ·
-  Wiederholungen · Skala), Anbieten/Ausführen, Pflicht, Danach (bei ◀ zurück), Beschriftung,
-  Inhalt, Löschen.
-- Der Start („Pfad abspielen“) lässt den Hauptpfad Knoten für Knoten aufleuchten.
+Die Seite **scrollt nicht** — die Zeichnung füllt den Platz unter der Palette (in einer scrollenden
+Seite gewönne das senkrechte Scrollen gegen das Schieben der Zeichnung). Sie wird **einmal
+gebaut**: bei Änderungen tauscht sie nur Inhalte, so bleiben Zoom und Lage der Zeichnung stehen;
+die Knoten liegen fest, bis jemand **„Neu anordnen“** tippt (dann richtet sich auch die Ansicht
+neu aus — Ben: „Ansicht neu ausrichten nur mit dem Button“).
 
-Die Seite **scrollt nicht**: Die Zeichnung füllt den Platz unter der Palette. In einer
-scrollenden Seite gewönne das senkrechte Scrollen gegen das Schieben der Zeichnung, und ein
-senkrechtes Ziehen aus der Palette stritte mit ihm. Die Palette scrollt waagerecht; eine Übung
-greift man mit einem Zug **nach unten** (``affinity`` senkrecht).
+- **Palette**: die Übungen des Plans mit ihrer Nummer (Frage 5: die Nummer ist die Stelle in der
+  Liste, ein Alias der festen ID) — eine Übung darf mehrmals im Plan stehen. „+“ daneben fügt eine
+  weitere hinzu (wie im Reiter „Plan“), „i“ erklärt alles Übrige. Waagerecht scrollt die Palette,
+  nach unten zieht man eine Übung in einen **Slot** (oder auf „Start“).
+- **Zeichnung** (`components/ablaufbild.py`): ein Tipp wählt einen Knoten, lang drücken zeigt nur
+  seinen Weg (vernebelt den Rest).
+- **Unter dem Bild** die Knöpfe zum gewählten Knoten (Ben: „Man könnte ein Symbol anklicken und die
+  verschiedenen Buttontypen anbieten“): **Routing ▾** (Wege einstellen — alle Wege des Knotens in
+  einem Blatt, „Kommt von“ und „Weiter zu“, wie in „Im Plan einstellen“ —, Weg zu einer
+  bestehenden Übung, Frage, Schleife, ◀ zurück, Ende, Start, Übung einstellen), **Neuer Slot**,
+  **Beiname**, **Aus Plan nehmen** (fragt: Lücke schließen oder ganze Nachfolgereihe löschen);
+  daneben **Neu anordnen**, **Pfad abspielen**, Hinweise.
 
-Ohne eingeschalteten Ablauf zeigt die Seite, was er kann, und den Knopf **„Ablauf zeichnen“**:
-Die Bedingungen von heute (Zweige, dann/sonst, Wege) werden einmal in Kanten übersetzt
-(`core.ablauf.aus_bedingungen`), ein Plan ohne sie wird die Kette. „Als Kette“ schaltet ab —
-die Kanten bleiben gespeichert. Jede Änderung speichert sofort (`PlanRepo.ablauf_setzen`).
+Gespeichert wird sofort (`ablauf_speichern`): der Ablauf und, gespiegelt, die Hauptwege als
+Bedingungen der Planübungen — so stimmt auch „Der Reihe nach“.
 """
 
 from __future__ import annotations
 
 import contextlib
+import inspect
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -38,56 +40,264 @@ import flet as ft
 
 from trainingsapp.core import ablauf as ab
 from trainingsapp.core.ablauf import Ablauf, Frage, Kante
-from trainingsapp.core.models import Exercise, Plan
-from trainingsapp.ui.components.ablaufbild import Slot, ablaufbild, abspielen
+from trainingsapp.core.models import Plan
+from trainingsapp.core.uebung_timer import timer_fuer
+from trainingsapp.ui.components import ablaufbild as abbild
+from trainingsapp.ui.components.ablaufbild import Slot
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
-from trainingsapp.ui.components.karte import hinweis, karte
+from trainingsapp.ui.components.hilfe import hilfe_knopf
+from trainingsapp.ui.components.karte import karte
 from trainingsapp.ui.components.karte import titel as kartentitel
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.plan_reiter import plan_reiter
 from trainingsapp.ui.components.uebungsbild import uebungsbild
+from trainingsapp.ui.components.wege_form import wege_karte
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.timer import timer_knopf
 
-#: Dauer je Knoten beim „Pfad abspielen“ (s)
-ABSPIELEN_S = 0.5
+LINEAR, VERZWEIGT = "linear", "verzweigt"
+
+
+# -- Gemeinsam mit „Plan“ und „Im Plan einstellen“ ------------------------------------------------
+
+
+def knoten_namen(state: AppState, plan: Plan) -> dict[str, str]:
+    """Jeder Knoten mit Nummer: „3 · Planke“ (mit Beiname „3 · Planke · leicht“), Fragen „? · …“
+    — in Planfolge, Fragen dahinter."""
+    nummer = ab.nummern([it.id for it in plan.items])
+    out: dict[str, str] = {}
+    for it in plan.items:
+        u = state.uebungen.laden(it.exercise_id, mit_geloeschten=True)
+        name = u.name if u is not None else "?"
+        out[it.id] = f"{nummer[it.id]} · {name}" + (f" · {it.beiname}" if it.beiname else "")
+    out.update({f.id: f"? · {f.text}" for f in plan.ablauf.fragen})
+    return out
 
 
 def ablauf_zusammenfassung(plan: Plan) -> str:
-    """„5 Kanten · 2 bei Bedarf · 1 Frage“ — oder „aus — der Plan läuft als Kette“."""
+    """„Mit Abzweigen: 5 Wege · 2 bei Bedarf · 1 Frage“ — oder der Reihe nach."""
     if not plan.ablauf.an:
-        return "aus — der Plan läuft als Kette"
+        return (
+            "Der Reihe nach: Übung für Übung in der Reihenfolge der Liste — „Weiter, wenn …“ je "
+            "Übung unter „Einstellen“."
+        )
     ids = [it.id for it in plan.items]
-    teile = [f"{len(plan.ablauf.kanten)} Kanten"]
+    teile = [f"{len(plan.ablauf.kanten)} Wege"]
     if n := len(ab.bedarf(plan.ablauf, ids)):
         teile.append(f"{n} bei Bedarf")
     if plan.ablauf.fragen:
         f = len(plan.ablauf.fragen)
         teile.append(f"{f} Frage" if f == 1 else f"{f} Fragen")
-    return " · ".join(teile)
+    return "Mit Abzweigen: " + " · ".join(teile) + " — gezeichnet im Reiter „Ablauf“."
 
 
-def ablauf_zeile(plan: Plan, oeffnen: Callable[[], Any]) -> ft.Control:
-    """Die Zeile „Ablauf“ im Plan-Editor — unter „Uhren“."""
-    return ft.ListTile(
-        leading=ft.Icon(ft.Icons.ACCOUNT_TREE_OUTLINED),
-        title=ft.Text("Ablauf"),
-        subtitle=ft.Text(ablauf_zusammenfassung(plan), size=12),
-        trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
-        on_click=oeffnen,
-        content_padding=ft.Padding.only(left=0, right=0),
+def ablauf_speichern(state: AppState, plan_id: str, ablauf: Ablauf) -> None:
+    """Speichert den Ablauf und spiegelt die Hauptwege in die Bedingungen der Planübungen (P108:
+    dieselben Einstellungen bei Übung und Ablauf) — so stimmt auch „Der Reihe nach“."""
+    p = state.plaene.laden(plan_id)
+    if p is None:
+        return
+    a = ablauf.bereinigt([it.id for it in p.items])
+    state.plaene.ablauf_setzen(plan_id, a)
+    if not a.an:
+        return
+    for it in p.items:
+        raus = [k for k in a.von(it.id) if not k.schleife]
+        if not raus:
+            continue
+        neu = ab.bedingung_aus_kante(raus[0], it.bedingung)
+        if neu != it.bedingung:
+            state.plaene.bedingung_setzen(it.id, neu)
+
+
+def ablauf_einschalten(state: AppState, plan_id: str) -> None:
+    """„Mit Abzweigen“: eine Zeichnung von früher kommt zurück (ihre Hauptwege mit den
+    Bedingungen von jetzt), sonst wird die Liste zur Kette mit ihren Bedingungen."""
+    p = state.plaene.laden(plan_id)
+    if p is None:
+        return
+    bedingungen = {it.id: it.bedingung for it in p.items}
+    if p.ablauf.kanten:
+        neu = ab.hauptwege_spiegeln(replace(p.ablauf, an=True), bedingungen)
+    else:
+        neu = ab.aus_bedingungen([(it.id, it.bedingung) for it in p.items])
+    state.plaene.ablauf_setzen(plan_id, neu.bereinigt(list(bedingungen)))
+    state.ablauf_lagen.pop(plan_id, None)
+
+
+def ablauf_ausschalten(state: AppState, plan_id: str) -> None:
+    """„Der Reihe nach“: die Zeichnung bleibt gespeichert, gilt aber nicht."""
+    p = state.plaene.laden(plan_id)
+    if p is not None:
+        state.plaene.ablauf_setzen(plan_id, replace(p.ablauf, an=False))
+
+
+def modus_zeile(page: Any, state: AppState, plan: Plan) -> ft.Control:
+    """Der Schalter im Reiter „Plan“: der Reihe nach oder mit Abzweigen (Ben, 8.11.2026: „ein
+    Switch-Button … erstellt einen dritten Reiter“), darunter die Zusammenfassung."""
+
+    def gewaehlt(e: ft.Event[ft.SegmentedButton]) -> None:
+        wert = str(e.control.selected[0]) if e.control.selected else LINEAR
+        if wert == VERZWEIGT:
+            ablauf_einschalten(state, plan.id)
+            text = "Reiter „Ablauf“ ist da — dort zeichnest du die Wege"
+        else:
+            ablauf_ausschalten(state, plan.id)
+            text = "Der Plan läuft der Reihe nach — die Zeichnung bleibt gespeichert"
+        with contextlib.suppress(Exception):
+            page.show_dialog(ft.SnackBar(ft.Text(text)))
+        state.neu_zeichnen()
+
+    return ft.Column(
+        spacing=6,
+        controls=[
+            ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text("Ablauf", size=15, weight=ft.FontWeight.W_600, expand=True),
+                    hilfe_knopf(page, thema="ablauf"),
+                ],
+            ),
+            ft.SegmentedButton(
+                selected=[VERZWEIGT if plan.ablauf.an else LINEAR],
+                show_selected_icon=False,
+                segments=[
+                    ft.Segment(
+                        value=LINEAR,
+                        label=ft.Text("Der Reihe nach"),
+                        icon=ft.Icon(ft.Icons.LINEAR_SCALE),
+                    ),
+                    ft.Segment(
+                        value=VERZWEIGT,
+                        label=ft.Text("Mit Abzweigen"),
+                        icon=ft.Icon(ft.Icons.ACCOUNT_TREE_OUTLINED),
+                    ),
+                ],
+                on_change=gewaehlt,
+            ),
+            ft.Text(ablauf_zusammenfassung(plan), size=12, opacity=0.7),
+        ],
     )
+
+
+def entfernen_fragen(
+    page: Any, state: AppState, plan_id: str, knoten: str, danach: Callable[[], Any]
+) -> None:
+    """Eine Übung (oder Frage) aus dem Plan nehmen — steht sie mitten in einer Reihe, fragt es
+    (Ben, 8.11.2026, Frage 4): **Lücke schließen** (Vorgänger mit dem Nachfolger verbinden) oder
+    **mit der ganzen Nachfolgereihe** löschen (was nur über sie erreichbar ist)."""
+    p = state.plaene.laden(plan_id)
+    if p is None:
+        return
+    ids = [it.id for it in p.items]
+    namen = knoten_namen(state, p)
+    a = p.ablauf
+    ist_frage = a.frage(knoten) is not None
+    rein = [k for k in a.zu(knoten) if k.von != knoten]
+    raus = [k for k in a.von(knoten) if not k.schleife]
+    reihe = ab.nachfolgereihe(a, ids, knoten) if a.an else []
+    name = namen.get(knoten, "?")
+    nachher = Nachher()
+
+    def weg(k: str) -> None:
+        if a.frage(k) is not None or k not in ids:
+            jetzt = state.plaene.laden(plan_id)
+            if jetzt is not None:
+                ablauf_speichern(state, plan_id, jetzt.ablauf.ohne_knoten(k))
+        else:
+            state.plaene.uebung_entfernen(k)  # nimmt die Kanten von und zu ihr mit
+        if state.ablauf_wahl.get(plan_id) == k:
+            state.ablauf_wahl[plan_id] = None
+
+    def melden(text: str) -> None:
+        with contextlib.suppress(Exception):
+            page.show_dialog(ft.SnackBar(ft.Text(text)))
+
+    if not a.an or not ((rein and raus) or reihe):
+        weg(knoten)
+        melden(f"„{name}“ entfernt — Einträge bleiben.")
+        danach()
+        return
+
+    dialog: ft.AlertDialog
+
+    def fertig(text: str) -> None:
+        nachher.danach(danach)
+        nachher.danach(lambda: melden(text))
+        schliessen(dialog)
+
+    def luecke(_e: Any = None) -> None:
+        ablauf_speichern(state, plan_id, ab.luecke_schliessen(a, knoten))
+        if not ist_frage:
+            state.plaene.uebung_entfernen(knoten)
+        if state.ablauf_wahl.get(plan_id) == knoten:
+            state.ablauf_wahl[plan_id] = None
+        fertig(f"„{name}“ entfernt, die Lücke ist geschlossen.")
+
+    def mit_reihe(_e: Any = None) -> None:
+        for k in [knoten, *reihe]:
+            weg(k)
+        fertig(f"„{name}“ und {len(reihe)} danach entfernt — Einträge bleiben.")
+
+    def nur(_e: Any = None) -> None:
+        weg(knoten)
+        fertig(f"„{name}“ entfernt — Einträge bleiben.")
+
+    def zeile(
+        titel: str, unter: str, aktion: Callable[[Any], None], gefahr: bool = False
+    ) -> ft.Control:
+        return ft.ListTile(
+            title=ft.Text(titel, color=ft.Colors.ERROR if gefahr else None),
+            subtitle=ft.Text(unter, size=12),
+            on_click=aktion,
+            content_padding=ft.Padding.symmetric(horizontal=8),
+        )
+
+    zeilen: list[ft.Control] = []
+    if rein and raus and not raus[0].zurueck:
+        vorher = ", ".join(dict.fromkeys(namen.get(k.von, "?") for k in rein))
+        nachfolger = "Ende" if raus[0].zum_ende else namen.get(raus[0].nach, "?")
+        zeilen.append(zeile("Lücke schließen", f"{vorher} → {nachfolger} verbinden", luecke))
+    if reihe:
+        zeilen.append(
+            zeile(
+                "Mit der Nachfolgereihe löschen",
+                "auch: " + ", ".join(namen.get(k, "?") for k in reihe),
+                mit_reihe,
+                gefahr=True,
+            )
+        )
+    zeilen.append(zeile("Nur diese entfernen", "Wege hierher und weiter fallen weg", nur))
+    dialog = ft.AlertDialog(
+        title=ft.Text(f"„{name}“ aus dem Plan nehmen"),
+        content=ft.Column(
+            tight=True,
+            spacing=0,
+            controls=[
+                ft.Text("Sie steht mitten in einer Reihe.", size=13, opacity=0.8),
+                *zeilen,
+            ],
+        ),
+        actions=[ft.TextButton("Abbrechen", on_click=lambda _e: schliessen(dialog))],
+        on_dismiss=nachher.bei_schliessen,
+    )
+    with contextlib.suppress(Exception):
+        page.show_dialog(dialog)
+
+
+# -- Die Ansicht -----------------------------------------------------------------------------
 
 
 def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
     """Die Ansicht; ``basis`` ist die Bearbeiten-Route des Plans."""
     route = f"{basis}/ablauf"
-    inhalt = ft.Column(spacing=10, expand=True)
-    katalog = {u.id: u for u in state.uebungen.alle()}
-    lokal: dict[str, Any] = {"suche": "", "ziel_von": None, "bild": None}
+    katalog = {u.id: u for u in state.uebungen.alle(mit_archivierten=True)}
+    lokal: dict[str, Any] = {"suche": "", "ziel_von": None}
     vernebelt = state.ablauf_vernebelt.setdefault(plan.id, set())
     slots: list[str] = state.ablauf_slots.setdefault(plan.id, [])
+    lagen: dict[str, Any] = state.ablauf_lagen.setdefault(plan.id, {})
 
     def melden(text: str) -> None:
         with contextlib.suppress(Exception):
@@ -96,44 +306,14 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
     def frisch() -> Plan:
         return state.plaene.laden(plan.id) or plan
 
-    def neu_zeichnen() -> None:
-        zeichnen(frisch())
-        with contextlib.suppress(Exception):
-            page.update()
+    def speichern(a: Ablauf) -> None:
+        ablauf_speichern(state, plan.id, a)
 
-    def speichern(p: Plan, ablauf: Ablauf) -> None:
-        state.plaene.ablauf_setzen(p.id, ablauf.bereinigt([it.id for it in p.items]))
-
-    def namen(p: Plan) -> dict[str, str]:
-        out = {
-            it.id: katalog[it.exercise_id].name + (f" · {it.beiname}" if it.beiname else "")
-            for it in p.items
-            if it.exercise_id in katalog
-        }
-        out.update({f.id: f"Frage: {f.text}" for f in p.ablauf.fragen})
-        return out
-
-    # -- Ein- und Ausschalten -------------------------------------------------------------
-
-    def einschalten() -> None:
-        p = frisch()
-        ids = [it.id for it in p.items]
-        bedingungen = [(it.id, it.bedingung) for it in p.items]
-        hat = any(not b.leer for _, b in bedingungen)
-        neu = ab.aus_bedingungen(bedingungen) if hat else ab.kette(ids)
-        if not p.ablauf.leer and p.ablauf.kanten:
-            neu = replace(p.ablauf, an=True)  # ein früherer Ablauf kommt zurück
-        speichern(p, neu)
-        melden("Ablauf eingeschaltet — ziehe Übungen in die Slots, „+“ legt Pfade an")
-        neu_zeichnen()
-
-    def ausschalten() -> None:
-        p = frisch()
-        speichern(p, replace(p.ablauf, an=False))
-        melden("Der Plan läuft wieder als Kette — die Zeichnung bleibt gespeichert")
-        neu_zeichnen()
+    def gewaehlt() -> str | None:
+        return state.ablauf_wahl.get(plan.id)
 
     # -- Palette ------------------------------------------------------------------------------
+    reihe = ft.Row(spacing=6, scroll=ft.ScrollMode.AUTO)
 
     def gesucht(e: ft.Event[ft.TextField]) -> None:
         lokal["suche"] = (e.control.value or "").strip().casefold()
@@ -141,27 +321,30 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         with contextlib.suppress(Exception):
             reihe.update()
 
-    # Die Palette wird einmal gebaut und bleibt (das Suchfeld behält so Fokus und Eingabe —
-    # ein neu eingehängtes Textfeld nähme keine Eingaben mehr an); neu sind nur die Kacheln
-    such_feld = ft.TextField(
-        hint_text="Suche", dense=True, width=140, on_submit=gesucht, on_blur=gesucht
-    )
-    reihe = ft.Row(spacing=6, scroll=ft.ScrollMode.AUTO)
-    palette_spalte = ft.Column(
+    async def hinzufuegen(_e: Any = None) -> None:
+        await page.push_route(f"{basis}/hinzufuegen")
+
+    palette = ft.Column(
         spacing=6,
         controls=[
             ft.Row(
-                spacing=8,
+                spacing=4,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
-                    ft.Text(
-                        "ÜBUNGEN · NACH UNTEN IN EINEN SLOT ZIEHEN",
-                        size=11,
-                        weight=ft.FontWeight.BOLD,
-                        opacity=0.6,
+                    ft.TextField(
+                        hint_text="Übungen des Plans suchen",
+                        dense=True,
                         expand=True,
+                        prefix_icon=ft.Icons.SEARCH,
+                        on_submit=gesucht,
+                        on_blur=gesucht,
                     ),
-                    such_feld,
+                    ft.IconButton(
+                        ft.Icons.ADD_CIRCLE_OUTLINE,
+                        tooltip="Übung hinzufügen",
+                        on_click=hinzufuegen,
+                    ),
+                    hilfe_knopf(page, thema="ablauf"),
                 ],
             ),
             reihe,
@@ -169,45 +352,71 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
     )
 
     def palette_fuellen(p: Plan) -> None:
+        nummer = ab.nummern([it.id for it in p.items])
+        im_bild = set(ab.im_bild(p.ablauf, [it.id for it in p.items]))
         suche = lokal["suche"]
-        uebungen = sorted(
-            (u for u in katalog.values() if not suche or suche in u.name.casefold()),
-            key=lambda u: u.name.casefold(),
-        )
-        im_plan = {it.exercise_id for it in p.items}
         kacheln: list[ft.Control] = []
-        for u in uebungen[:60]:
-            bild = ft.Column(
-                spacing=3,
-                tight=True,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        for it in p.items:
+            u = katalog.get(it.exercise_id)
+            if u is None or (suche and suche not in u.name.casefold()):
+                continue
+            frei = it.id not in im_bild
+            bild = ft.Stack(
+                width=56,
+                height=56,
+                clip_behavior=ft.ClipBehavior.NONE,
                 controls=[
                     ft.Container(
                         width=56,
                         height=56,
                         border_radius=12,
                         bgcolor=ft.Colors.PRIMARY_CONTAINER,
+                        border=ft.Border.all(2, ft.Colors.OUTLINE) if frei else None,
                         alignment=ft.Alignment.CENTER,
                         content=uebungsbild(state, u.icon_key, u.image_path, groesse=30),
                     ),
-                    ft.Text(
-                        u.name,
-                        size=10,
-                        text_align=ft.TextAlign.CENTER,
-                        max_lines=2,
-                        width=64,
-                        opacity=0.75 if u.id in im_plan else 1.0,
+                    ft.Container(
+                        left=-6,
+                        top=-6,
+                        width=20,
+                        height=20,
+                        border_radius=10,
+                        bgcolor=ft.Colors.ON_SURFACE,
+                        alignment=ft.Alignment.CENTER,
+                        content=ft.Text(
+                            str(nummer[it.id]),
+                            size=10,
+                            weight=ft.FontWeight.BOLD,
+                            color=ft.Colors.SURFACE,
+                        ),
                     ),
                 ],
             )
             kacheln.append(
                 ft.Draggable(
                     group="uebung",
-                    data=u.id,
-                    # Waagerecht scrollt die Palette, senkrecht greift man die Übung
+                    data=it.id,
+                    # Waagerecht scrollt die Palette, nach unten greift man die Übung
                     affinity=ft.Axis.VERTICAL,
                     content=ft.Container(
-                        width=68, content=bild, on_click=lambda _e, uu=u: antippen_palette(uu)
+                        width=70,
+                        on_click=lambda _e, i=it.id: palette_getippt(i),
+                        content=ft.Column(
+                            spacing=3,
+                            tight=True,
+                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                            controls=[
+                                bild,
+                                ft.Text(
+                                    u.name + (f" · {it.beiname}" if it.beiname else ""),
+                                    size=10,
+                                    text_align=ft.TextAlign.CENTER,
+                                    max_lines=2,
+                                    width=68,
+                                ),
+                                *([ft.Text("frei", size=9, opacity=0.6)] if frei else []),
+                            ],
+                        ),
                     ),
                     content_feedback=ft.Container(
                         width=56,
@@ -222,54 +431,63 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                 )
             )
         if not kacheln:
-            kacheln.append(ft.Text("Keine Übung passt zur Suche.", size=12, opacity=0.6))
+            kacheln.append(
+                ft.Text(
+                    "Keine Übung passt." if suche else "Noch keine Übung — „+“ fügt eine hinzu.",
+                    size=12,
+                    opacity=0.6,
+                )
+            )
         reihe.controls = kacheln
 
-    def antippen_palette(u: Exercise) -> None:
-        """Ohne Ziehen (Desktop, Test): die Übung kommt in den ersten leeren Slot, sonst unter
-        den gewählten Knoten, sonst ans Ende des Hauptpfads."""
+    def palette_getippt(item_id: str) -> None:
+        """Ohne Ziehen: mit gewähltem Knoten ein Weg dorthin, sonst in den ersten Slot."""
         p = frisch()
+        von = gewaehlt()
+        namen = knoten_namen(state, p)
+        if von is not None and von in namen:
+            if any(k.von == von and k.nach == item_id for k in p.ablauf.kanten):
+                melden("Diesen Weg gibt es schon.")
+                return
+            speichern(p.ablauf.mit_kante(Kante(von, item_id)))
+            melden(f"Weg {namen[von]} → {namen.get(item_id, '?')}")
+            neu_zeichnen()
+            return
         if slots:
-            einsetzen(Slot(slots[0]), u.id)
+            einsetzen(Slot(slots[0]), item_id)
             return
-        von = state.ablauf_wahl.get(p.id)
-        if von is None:
-            pfad = ab.hauptpfad(p.ablauf, [it.id for it in p.items])
-            von = pfad[-1] if pfad else None
-        item = state.plaene.uebung_hinzufuegen(p.id, u.id)
-        p = frisch()
-        neu = p.ablauf.mit_kante(Kante(von, item.id)) if von else replace(p.ablauf, start=item.id)
-        speichern(p, neu)
-        state.ablauf_wahl[p.id] = item.id
-        neu_zeichnen()
+        melden("Erst eine Übung im Bild antippen — oder nach unten in einen Slot ziehen.")
 
-    # -- Zeichnung und Rückrufe -----------------------------------------------------------
+    # -- Zeichnung ------------------------------------------------------------------------------
 
-    def einsetzen(slot: Slot, exercise_id: str) -> None:
-        """Eine Übung fällt in einen Slot: neue Planübung, Kante vom Knoten des Slots."""
+    def einsetzen(slot: Slot, item_id: str) -> None:
         p = frisch()
-        if exercise_id not in katalog:
+        if item_id not in {it.id for it in p.items}:
             return
-        item = state.plaene.uebung_hinzufuegen(p.id, exercise_id)
-        p = frisch()
-        speichern(p, p.ablauf.mit_kante(Kante(slot.von, item.id)))
+        if not any(k.von == slot.von and k.nach == item_id for k in p.ablauf.kanten):
+            speichern(p.ablauf.mit_kante(Kante(slot.von, item_id)))
         with contextlib.suppress(ValueError):
             slots.remove(slot.von)
-        state.ablauf_wahl[p.id] = item.id
+        state.ablauf_wahl[plan.id] = item_id
+        neu_zeichnen()
+
+    def start_ablegen(item_id: str) -> None:
+        p = frisch()
+        speichern(replace(p.ablauf, start=item_id))
+        melden("Neuer Start")
         neu_zeichnen()
 
     def knoten_getippt(knoten: str) -> None:
-        p = frisch()
         von = lokal["ziel_von"]
         if von is not None:
-            # „Bestehende wählen“: die Kante von dort hierher — auch zurück oder quer
             lokal["ziel_von"] = None
-            if von in namen(p) and knoten in namen(p):
-                speichern(p, p.ablauf.mit_kante(Kante(von, knoten)))
-                melden("Kante angelegt — Tipp auf ihr Etikett stellt sie ein")
+            p = frisch()
+            if not any(k.von == von and k.nach == knoten for k in p.ablauf.kanten):
+                speichern(p.ablauf.mit_kante(Kante(von, knoten)))
+                melden("Weg angelegt — unter „Routing“ einstellen")
             neu_zeichnen()
             return
-        state.ablauf_wahl[p.id] = None if state.ablauf_wahl.get(p.id) == knoten else knoten
+        state.ablauf_wahl[plan.id] = None if gewaehlt() == knoten else knoten
         neu_zeichnen()
 
     def knoten_lang(knoten: str) -> None:
@@ -277,190 +495,315 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
         ids = [it.id for it in p.items]
         weg = ab.weg_durch(p.ablauf, ids, knoten)
         alle = [*ids, *(f.id for f in p.ablauf.fragen)]
-        if vernebelt == {i for i in alle if i not in weg}:
-            vernebelt.clear()
-        else:
-            vernebelt.clear()
-            vernebelt.update(i for i in alle if i not in weg)
-        neu_zeichnen()
-
-    def alles_zeigen() -> None:
+        rest = {i for i in alle if i not in weg}
+        aus = vernebelt == rest
         vernebelt.clear()
+        if not aus:
+            vernebelt.update(rest)
         neu_zeichnen()
 
-    def ziel_abbrechen() -> None:
-        lokal["ziel_von"] = None
+    def kante_getippt(k: Kante) -> None:
+        state.ablauf_wahl[plan.id] = k.von
         neu_zeichnen()
+        wege_blatt(k.von)
 
     def pfad_abspielen() -> None:
-        """„Pfad abspielen“: der Hauptpfad leuchtet Knoten für Knoten auf."""
-        bild = lokal["bild"]
-        if bild is None or not hasattr(page, "run_task"):
-            return
         p = frisch()
-        page.run_task(abspielen, page, bild, ab.hauptpfad(p.ablauf, [it.id for it in p.items]))
+        if hasattr(page, "run_task"):
+            pfad = ab.hauptpfad(p.ablauf, [it.id for it in p.items])
+            page.run_task(abbild.abspielen, page, bild, pfad)
 
-    # -- „+“ am Knoten (E2) ------------------------------------------------------------------
-
-    def plus_menue(knoten: str) -> None:
+    def neu_anordnen(_e: Any = None) -> None:
         p = frisch()
-        name = namen(p).get(knoten, "?")
-        nachher = Nachher()
-        dialog: ft.AlertDialog
+        lagen.clear()
+        lagen.update(ab.layout(p.ablauf, [it.id for it in p.items]))
+        neu_zeichnen()
+        if hasattr(page, "run_task"):
+            with contextlib.suppress(Exception):
+                page.run_task(bild.control.reset)
 
-        def tu(aktion: Callable[[], Any]) -> Callable[[Any], None]:
-            def handler(_e: Any = None) -> None:
-                nachher.danach(aktion)
-                schliessen(dialog)
+    def zeichnung_jetzt(p: Plan) -> abbild.Zeichnung:
+        ids = [it.id for it in p.items]
+        neu = ab.lagen_ergaenzen(lagen, p.ablauf, ids)
+        lagen.clear()
+        lagen.update(neu)
+        namen = knoten_namen(state, p)
+        slots[:] = [s for s in slots if s in namen]
+        return abbild.zeichnung(
+            state,
+            p.ablauf,
+            p.items,
+            katalog,
+            lagen=lagen,
+            vernebelt=sorted(vernebelt),
+            gewaehlt=gewaehlt(),
+            slots=[Slot(v) for v in slots],
+            zaehlung=state.einheiten.kanten_gezaehlt(state.profil.id, p.id) or None,
+            on_knoten=knoten_getippt,
+            on_knoten_lang=knoten_lang,
+            on_kante=kante_getippt,
+            on_slot=einsetzen,
+            on_start=pfad_abspielen,
+            on_start_ablegen=start_ablegen,
+        )
+
+    erste = zeichnung_jetzt(frisch())
+    flaeche = abbild.flaeche_neu(erste)
+    bild = abbild.Bild(abbild.ansicht(flaeche), flaeche, erste.mitten, erste.knoten)
+    rahmen = ft.Container(
+        expand=True,  # die Zeichnung füllt, was unter der Palette frei ist
+        border_radius=14,
+        border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
+        bgcolor=ft.Colors.SURFACE,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        content=bild.control,
+    )
+
+    # -- Knöpfe unter dem Bild -----------------------------------------------------------------
+
+    def routing(knoten: str, p: Plan) -> ft.Control:
+        ist_frage = p.ablauf.frage(knoten) is not None
+
+        def tu(aktion: Callable[[], Any]) -> Callable[[Any], Any]:
+            async def handler(_e: Any = None) -> None:
+                ergebnis = aktion()
+                if inspect.isawaitable(ergebnis):
+                    await ergebnis
 
             return handler
 
-        def neuer_slot() -> None:
-            slots.append(knoten)
-            neu_zeichnen()
+        def kante_dazu(nach: str, **felder: Any) -> Callable[[], None]:
+            def handler() -> None:
+                jetzt = frisch()
+                speichern(jetzt.ablauf.mit_kante(Kante(knoten, nach, **felder)))
+                neu_zeichnen()
+
+            return handler
 
         def bestehende() -> None:
             lokal["ziel_von"] = knoten
-            melden("Jetzt den Zielknoten antippen — auch zurück oder quer")
             neu_zeichnen()
 
-        def frage() -> None:
-            pp = frisch()
+        def frage_dahinter() -> None:
+            jetzt = frisch()
             f = Frage()
-            speichern(
-                pp,
-                replace(pp.ablauf, fragen=(*pp.ablauf.fragen, f)).mit_kante(Kante(knoten, f.id)),
-            )
-            state.ablauf_wahl[pp.id] = f.id
+            neu = replace(jetzt.ablauf, fragen=(*jetzt.ablauf.fragen, f))
+            speichern(neu.mit_kante(Kante(knoten, f.id)))
+            state.ablauf_wahl[plan.id] = f.id
             neu_zeichnen()
             frage_blatt(f)
 
-        def noch_einmal() -> None:
-            pp = frisch()
-            speichern(pp, pp.ablauf.mit_kante(Kante(knoten, knoten, text="noch einmal")))
-            neu_zeichnen()
-
-        def zurueck() -> None:
-            pp = frisch()
-            speichern(pp, pp.ablauf.mit_kante(Kante(knoten, ab.ZURUECK)))
-            neu_zeichnen()
-
-        def ende() -> None:
-            pp = frisch()
-            speichern(pp, pp.ablauf.mit_kante(Kante(knoten, ab.ENDE)))
-            neu_zeichnen()
-
         def als_start() -> None:
-            pp = frisch()
-            speichern(pp, replace(pp.ablauf, start=knoten))
-            neu_zeichnen()
-
-        def entfernen() -> None:
-            pp = frisch()
-            if pp.ablauf.frage(knoten) is not None:
-                speichern(pp, pp.ablauf.ohne_knoten(knoten))
-            else:
-                state.plaene.uebung_entfernen(knoten)  # nimmt die Kanten mit
-                melden("Aus dem Plan entfernt — Einträge bleiben.")
-            if state.ablauf_wahl.get(pp.id) == knoten:
-                state.ablauf_wahl[pp.id] = None
+            speichern(replace(frisch().ablauf, start=knoten))
             neu_zeichnen()
 
         async def einstellen() -> None:
             await page.push_route(f"{basis}/ziel/{knoten}")
 
-        def zeile(
-            symbol: ft.IconData, text: str, unter: str, aktion: Callable[[], Any]
-        ) -> ft.Control:
-            return ft.ListTile(
-                leading=ft.Icon(symbol),
-                title=ft.Text(text, size=14),
-                subtitle=ft.Text(unter, size=12) if unter else None,
-                on_click=tu(aktion),
-                dense=True,
-                content_padding=ft.Padding.symmetric(horizontal=8),
+        eintraege: list[tuple[ft.IconData, str, Callable[[], Any]]] = [
+            (ft.Icons.TUNE, "Wege einstellen …", lambda: wege_blatt(knoten)),
+            (ft.Icons.CALL_SPLIT, "Weg zu einer Übung im Bild …", bestehende),
+            (ft.Icons.HELP_OUTLINE, "Frage dahinter", frage_dahinter),
+        ]
+        if not ist_frage:
+            eintraege.append(
+                (ft.Icons.REPLAY, "Noch einmal (Schleife)", kante_dazu(knoten, text="noch einmal"))
             )
+        eintraege += [
+            (ft.Icons.UNDO, "◀ Zurück, wo ich herkam", kante_dazu(ab.ZURUECK)),
+            (ft.Icons.STOP_CIRCLE_OUTLINED, "Hier endet es", kante_dazu(ab.ENDE)),
+            (ft.Icons.PLAY_ARROW_OUTLINED, "Als Start", als_start),
+        ]
+        if not ist_frage:
+            eintraege.append((ft.Icons.SETTINGS_OUTLINED, "Übung einstellen …", einstellen))
+        return ft.PopupMenuButton(
+            content=ft.Container(
+                padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+                border_radius=20,
+                bgcolor=ft.Colors.SECONDARY_CONTAINER,
+                content=ft.Row(
+                    tight=True,
+                    spacing=4,
+                    controls=[
+                        ft.Icon(ft.Icons.ALT_ROUTE, size=18),
+                        ft.Text("Routing", size=14),
+                        ft.Icon(ft.Icons.ARROW_DROP_DOWN, size=18),
+                    ],
+                ),
+            ),
+            tooltip="Wege dieses Knotens",
+            items=[
+                ft.PopupMenuItem(content=text, icon=symbol, on_click=tu(aktion))
+                for symbol, text, aktion in eintraege
+            ],
+        )
 
-        ist_frage = p.ablauf.frage(knoten) is not None
-        zeilen: list[ft.Control] = [
-            zeile(
-                ft.Icons.ADD_BOX_OUTLINED,
-                "Neuer Slot",
-                "eine Übung aus der Palette hineinziehen",
-                neuer_slot,
-            ),
-            zeile(
-                ft.Icons.CALL_SPLIT,
-                "Bestehende Übung wählen",
-                "dann auf den Zielknoten tippen — auch zurück oder quer",
-                bestehende,
-            ),
-            zeile(
-                ft.Icons.HELP_OUTLINE,
-                "Frage (Entscheidung)",
-                "„Wie fühlt es sich an? 0–10“ — verzweigt nach dem Wert",
-                frage,
-            ),
-        ]
-        if not ist_frage:
-            zeilen.append(
-                zeile(
-                    ft.Icons.REPLAY,
-                    "Noch einmal (Schleife)",
-                    "dieselbe Übung erneut — bis eine Kante greift",
-                    noch_einmal,
+    def knoten_knoepfe(p: Plan) -> list[ft.Control]:
+        knoten = gewaehlt()
+        namen = knoten_namen(state, p)
+        if knoten is None or knoten not in namen:
+            return [
+                ft.Text(
+                    "Tipp auf eine Übung im Bild — dann stehen hier Routing, Slot, Beiname und "
+                    "Entfernen.",
+                    size=12,
+                    opacity=0.65,
                 )
-            )
-        zeilen += [
-            zeile(
-                ft.Icons.UNDO,
-                "◀ Zurück, wo ich herkam",
-                "für Einschübe: danach dort weiter",
-                zurueck,
-            ),
-            zeile(ft.Icons.STOP_CIRCLE_OUTLINED, "Ende", "hier endet das Workout", ende),
-            ft.Divider(height=1),
+            ]
+        ist_frage = p.ablauf.frage(knoten) is not None
+
+        def neuer_slot(_e: Any = None) -> None:
+            slots.append(knoten)
+            neu_zeichnen()
+
+        def entfernen(_e: Any = None) -> None:
+            entfernen_fragen(page, state, plan.id, knoten, neu_zeichnen)
+
+        knoepfe: list[ft.Control] = [
+            ft.Text(namen[knoten], size=13, weight=ft.FontWeight.W_600),
+            routing(knoten, p),
+            ft.TextButton("Neuer Slot", icon=ft.Icons.ADD_BOX_OUTLINED, on_click=neuer_slot),
         ]
-        if not ist_frage:
-            zeilen.append(
-                zeile(ft.Icons.TUNE, "Übung einstellen", "Parameter, Uhr, Weiter", einstellen)
-            )
-            zeilen.append(
-                zeile(
-                    ft.Icons.LABEL_OUTLINE,
-                    "Beiname",
-                    "unterscheidet gleiche Übungen im Bild",
-                    lambda: beiname_blatt(knoten),
+        if ist_frage:
+            frage = p.ablauf.frage(knoten)
+            knoepfe.append(
+                ft.TextButton(
+                    "Frage ändern",
+                    icon=ft.Icons.EDIT_OUTLINED,
+                    on_click=lambda _e: frage_blatt(frage),
                 )
             )
         else:
-            zeilen.append(
-                zeile(
-                    ft.Icons.EDIT_OUTLINED,
-                    "Frage ändern",
-                    "",
-                    lambda: frage_blatt(p.ablauf.frage(knoten)),
+            knoepfe.append(
+                ft.TextButton(
+                    "Beiname",
+                    icon=ft.Icons.LABEL_OUTLINE,
+                    on_click=lambda _e: beiname_blatt(knoten),
                 )
             )
-        zeilen.append(zeile(ft.Icons.PLAY_ARROW_OUTLINED, "Als Start", "", als_start))
-        zeilen.append(
-            zeile(
-                ft.Icons.DELETE_OUTLINE,
-                "Frage löschen" if ist_frage else "Aus dem Plan nehmen",
-                "mit allen Kanten" if ist_frage else "mit allen Kanten — Einträge bleiben",
-                entfernen,
+        knoepfe.append(
+            ft.TextButton(
+                "Frage löschen" if ist_frage else "Aus Plan nehmen",
+                icon=ft.Icons.DELETE_OUTLINE,
+                style=ft.ButtonStyle(color=ft.Colors.ERROR),
+                on_click=entfernen,
             )
         )
-        dialog = ft.AlertDialog(
-            title=ft.Text(f"Von „{name}“ weiter …", size=16),
-            content=ft.Column(tight=True, spacing=0, scroll=ft.ScrollMode.AUTO, controls=zeilen),
-            actions=[ft.TextButton("Abbrechen", on_click=lambda _e: schliessen(dialog))],
-            on_dismiss=nachher.bei_schliessen,
+        return knoepfe
+
+    def hinweise_zeigen(hinweise: list[str]) -> None:
+        dialog: ft.AlertDialog = ft.AlertDialog(
+            title=ft.Text("Hinweise zum Ablauf"),
+            content=ft.Column(
+                tight=True,
+                spacing=8,
+                scroll=ft.ScrollMode.AUTO,
+                controls=[ft.Text(h, size=13) for h in hinweise],
+            ),
+            actions=[ft.TextButton("Schließen", on_click=lambda _e: schliessen(dialog))],
         )
         with contextlib.suppress(Exception):
             page.show_dialog(dialog)
 
-    # -- Blätter ------------------------------------------------------------------------------
+    def alles_zeigen(_e: Any = None) -> None:
+        vernebelt.clear()
+        neu_zeichnen()
+
+    def werkzeuge(p: Plan) -> list[ft.Control]:
+        ids = [it.id for it in p.items]
+        hinweise = ab.pruefung(p.ablauf, ids, knoten_namen(state, p))
+        teile: list[ft.Control] = [
+            ft.OutlinedButton("Neu anordnen", icon=ft.Icons.AUTO_FIX_HIGH, on_click=neu_anordnen),
+            ft.TextButton(
+                "Pfad abspielen",
+                icon=ft.Icons.PLAY_CIRCLE_OUTLINE,
+                on_click=lambda _e: pfad_abspielen(),
+            ),
+        ]
+        if vernebelt:
+            teile.append(ft.TextButton("Alles zeigen", on_click=alles_zeigen))
+        if hinweise:
+            teile.append(
+                ft.TextButton(
+                    f"{len(hinweise)} Hinweis" + ("e" if len(hinweise) > 1 else ""),
+                    icon=ft.Icons.INFO_OUTLINE,
+                    style=ft.ButtonStyle(color=ft.Colors.TERTIARY),
+                    on_click=lambda _e: hinweise_zeigen(hinweise),
+                )
+            )
+        return teile
+
+    # -- Blätter ---------------------------------------------------------------------------------
+
+    def wege_blatt(knoten: str) -> None:
+        """Alle Wege eines Knotens auf einmal (Ben: „wenn eine Übung mehrere Folgewege hat, dann
+        diese gleichzeitig einstellen können … die verschiedenen Pfade einfach scrollbar“) — das
+        Formular aus „Im Plan einstellen“. Gespeichert wird beim Schließen."""
+        p = frisch()
+        stand: dict[str, Any] = {"a": p.ablauf, "verworfen": False}
+        merken: dict[str, Any] = {}
+        namen = knoten_namen(state, p)
+        item = next((it for it in p.items if it.id == knoten), None)
+        uebung = katalog.get(item.exercise_id) if item is not None else None
+        ohne = item is not None and uebung is not None and timer_fuer(uebung, p, item) is None
+        innen = ft.Column(
+            spacing=10, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH
+        )
+        blatt: ft.BottomSheet
+
+        def setzen(a: Ablauf) -> None:
+            stand["a"] = a
+
+        def aufbauen() -> None:
+            innen.controls = [
+                ft.Text(namen.get(knoten, "?"), size=18, weight=ft.FontWeight.W_600),
+                wege_karte(
+                    knoten,
+                    lambda: stand["a"],
+                    setzen,
+                    neu_innen,
+                    namen=namen,
+                    ohne_timer=ohne,
+                    merken=merken,
+                ),
+            ]
+
+        def neu_innen() -> None:
+            aufbauen()
+            with contextlib.suppress(Exception):
+                innen.update()
+
+        async def geschlossen(_e: Any = None) -> None:
+            """Blätter speichern beim Schließen (CLAUDE.md) — außer nach „Abbrechen“."""
+            if not stand["verworfen"] and stand["a"] != p.ablauf:
+                speichern(stand["a"])
+            neu_zeichnen()
+
+        def abbrechen(_e: Any = None) -> None:
+            stand["verworfen"] = True
+            schliessen(blatt)
+
+        aufbauen()
+        blatt = ft.BottomSheet(
+            show_drag_handle=True,
+            scrollable=True,
+            on_dismiss=geschlossen,
+            content=blatt_spalte(
+                innen,
+                [
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.END,
+                        controls=[
+                            ft.TextButton("Abbrechen", on_click=abbrechen),
+                            ft.FilledButton("Fertig", on_click=lambda _e: schliessen(blatt)),
+                        ],
+                    )
+                ],
+                geschaetzt=560,
+            ),
+        )
+        with contextlib.suppress(Exception):
+            page.show_dialog(blatt)
 
     def beiname_blatt(knoten: str) -> None:
         item = state.plaene.item_laden(knoten)
@@ -480,7 +823,16 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             scrollable=True,
             on_dismiss=nachher.bei_schliessen,
             content=blatt_spalte(
-                [ft.Text("Beiname", size=18, weight=ft.FontWeight.W_600), feld],
+                [
+                    ft.Text("Beiname", size=18, weight=ft.FontWeight.W_600),
+                    ft.Text(
+                        "Unterscheidet gleiche Übungen im Bild — die Nummer bleibt die Stelle in "
+                        "der Liste.",
+                        size=12,
+                        opacity=0.7,
+                    ),
+                    feld,
+                ],
                 [
                     ft.Row(
                         alignment=ft.MainAxisAlignment.END,
@@ -490,7 +842,7 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                         ],
                     )
                 ],
-                geschaetzt=160,
+                geschaetzt=200,
             ),
         )
         with contextlib.suppress(Exception):
@@ -518,12 +870,8 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
             if b <= a or b - a > 20:
                 a, b = ab.FRAGE_MIN, ab.FRAGE_MAX
             neu = Frage(f.id, (text.value or "").strip() or f.text, a, b)
-            speichern(
-                p,
-                replace(
-                    p.ablauf, fragen=tuple(neu if x.id == f.id else x for x in p.ablauf.fragen)
-                ),
-            )
+            fragen = tuple(neu if x.id == f.id else x for x in p.ablauf.fragen)
+            speichern(replace(p.ablauf, fragen=fragen))
             nachher.danach(neu_zeichnen)
             schliessen(blatt)
 
@@ -536,7 +884,8 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                     ft.Text("Frage", size=18, weight=ft.FontWeight.W_600),
                     ft.Text(
                         "Ein Entscheidungsknoten fragt nach einer Skala und verzweigt nach dem "
-                        "Wert — die Kanten von ihm tragen die Bereiche (0–6, 7–10).",
+                        "Wert — die Wege von ihm tragen die Bereiche (0–6, 7–10), eingestellt "
+                        "unter „Routing → Wege einstellen“.",
                         size=12,
                         opacity=0.7,
                     ),
@@ -552,474 +901,122 @@ def ablauf_view(page: Any, state: AppState, plan: Plan, basis: str) -> ft.View:
                         ],
                     )
                 ],
-                geschaetzt=280,
+                geschaetzt=300,
             ),
         )
         with contextlib.suppress(Exception):
             page.show_dialog(blatt)
 
-    def kanten_blatt(kante: Kante) -> None:
-        """Das Blatt der Kante (E3)."""
+    # -- Aufbau -----------------------------------------------------------------------------------
+
+    reiter_platz = ft.Container()
+    einfuehrung = ft.Container(visible=False)
+    hinweis_ziel = ft.Container(visible=False)
+    knoten_leiste = ft.Row(
+        wrap=True, spacing=6, run_spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER
+    )
+    werkzeug_leiste = ft.Row(
+        wrap=True, spacing=6, run_spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER
+    )
+
+    def einschalten(_e: Any = None) -> None:
+        ablauf_einschalten(state, plan.id)
+        lagen.clear()
+        neu_zeichnen()
+
+    def zeichnen() -> None:
         p = frisch()
-        alle_namen = namen(p)
-        stand: dict[str, Any] = {"k": kante}
-        nachher = Nachher()
-        blatt: ft.BottomSheet
-
-        def k() -> Kante:
-            return stand["k"]
-
-        def setzen(**felder: Any) -> None:
-            stand["k"] = replace(k(), **felder)
-            zeichnen_blatt()
-
-        ziel_optionen = [
-            ft.DropdownOption(key=i, text=t) for i, t in alle_namen.items() if i != kante.von
-        ]
-        ziel_optionen.append(
-            ft.DropdownOption(
-                key=kante.von, text=f"↺ noch einmal: {alle_namen.get(kante.von, '?')}"
-            )
-        )
-        ziel_optionen.append(ft.DropdownOption(key=ab.ZURUECK, text="◀ zurück, wo ich herkam"))
-        ziel_optionen.append(ft.DropdownOption(key=ab.ENDE, text="Ende des Workouts"))
-        ziel = ft.Dropdown(
-            label="Ziel",
-            value=kante.nach,
-            options=ziel_optionen,
-            on_select=lambda e: setzen(nach=str(e.control.value)),
-        )
-        n_feld = ft.TextField(
-            label="Anzahl",
-            width=90,
-            keyboard_type=ft.KeyboardType.NUMBER,
-            on_blur=lambda e: setzen(n=_zahl(e.control.value, k().n)),
-        )
-        bis_feld = ft.TextField(
-            label="bis",
-            width=90,
-            hint_text="offen",
-            keyboard_type=ft.KeyboardType.NUMBER,
-            on_blur=lambda e: setzen(bis=_zahl_oder_leer(e.control.value)),
-        )
-        text_feld = ft.TextField(
-            label="Beschriftung — wann ist dieser Weg gemeint?",
-            value=kante.text,
-            hint_text="Beine krampfen / unter Druck",
-            on_blur=lambda e: setzen(text=(e.control.value or "").strip()),
-        )
-        inhalt_text = ft.TextField(
-            label="Text, der bei diesem Weg aufgeht",
-            value=kante.inhalt.text,
-            multiline=True,
-            min_lines=1,
-            max_lines=3,
-            on_blur=lambda e: setzen(
-                inhalt=replace(k().inhalt, text=(e.control.value or "").strip())
-            ),
-        )
-        inhalt_url = ft.TextField(
-            label="Link (optional)",
-            value=kante.inhalt.url,
-            hint_text="https://…",
-            on_blur=lambda e: setzen(
-                inhalt=replace(k().inhalt, url=(e.control.value or "").strip())
-            ),
-        )
-        innen = ft.Column(
-            spacing=12, tight=True, horizontal_alignment=ft.CrossAxisAlignment.STRETCH
-        )
-
-        def zeichnen_blatt() -> None:
-            kk = k()
-            n_feld.value = str(kk.n) if kk.n else ""
-            bis_feld.value = str(kk.bis) if kk.bis is not None else ""
-            ausloeser = ft.Row(
-                wrap=True,
-                spacing=6,
-                run_spacing=6,
-                controls=[
-                    ft.Chip(
-                        label=ft.Text(t),
-                        selected=kk.ausloeser == a,
-                        show_checkmark=False,
-                        on_select=lambda _e, aa=a: setzen(
-                            ausloeser=aa,
-                            n=kk.n
-                            if kk.n
-                            else (12 if aa == ab.WDH else 7 if aa == ab.SKALA else 0),
-                        ),
-                    )
-                    for a, t in ab.AUSLOESER_TEXT.items()
-                ],
-            )
-            teile: list[ft.Control] = [
-                ft.Row(
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Text(alle_namen.get(kk.von, "?"), size=14, weight=ft.FontWeight.W_600),
-                        ft.Icon(ft.Icons.ARROW_FORWARD, size=18),
-                        ft.Text(
-                            alle_namen.get(
-                                kk.nach,
-                                "Ende" if kk.zum_ende else "◀ zurück" if kk.zurueck else "?",
-                            ),
-                            size=14,
-                            weight=ft.FontWeight.W_600,
-                            color=ft.Colors.TERTIARY,
-                            expand=True,
-                        ),
-                    ],
-                ),
-                ziel,
+        an = p.ablauf.an
+        reiter_platz.content = plan_reiter(page, basis, "ablauf", ablauf_an=an)
+        einfuehrung.visible = not an
+        for teil in (palette, rahmen, knoten_leiste, werkzeug_leiste):
+            teil.visible = an
+        if not an:
+            einfuehrung.content = karte(
+                kartentitel("Mit Abzweigen"),
                 ft.Text(
-                    "WANN GEHT ES DIESEN WEG?", size=11, weight=ft.FontWeight.BOLD, opacity=0.6
-                ),
-                ausloeser,
-            ]
-            if kk.ausloeser == ab.WDH:
-                teile.append(
-                    ft.Row(
-                        spacing=8,
-                        controls=[
-                            n_feld,
-                            ft.Text(
-                                "Wiederholungen (Sensor oder Takt zählen)",
-                                size=12,
-                                opacity=0.7,
-                                expand=True,
-                            ),
-                        ],
-                    )
-                )
-            elif kk.ausloeser == ab.SKALA:
-                teile.append(
-                    ft.Row(
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        controls=[
-                            ft.Text("Skala ab", size=13, opacity=0.7),
-                            n_feld,
-                            bis_feld,
-                            ft.Text(
-                                "die Frage stellt der Knoten davor",
-                                size=12,
-                                opacity=0.6,
-                                expand=True,
-                            ),
-                        ],
-                    )
-                )
-            if kk.ausloeser != ab.FREI:
-                teile.append(
-                    ft.SegmentedButton(
-                        selected=["ausfuehren" if kk.ausfuehren else "anbieten"],
-                        show_selected_icon=False,
-                        segments=[
-                            ft.Segment(value="anbieten", label=ft.Text("Anbieten (Knopf betont)")),
-                            ft.Segment(value="ausfuehren", label=ft.Text("Ausführen (von selbst)")),
-                        ],
-                        on_change=lambda e: setzen(
-                            ausfuehren=bool(e.control.selected)
-                            and e.control.selected[0] == "ausfuehren"
-                        ),
-                    )
-                )
-            teile.append(
-                ft.Row(
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Column(
-                            spacing=0,
-                            expand=True,
-                            controls=[
-                                ft.Text("Pflicht", size=14),
-                                ft.Text(
-                                    "andere Wege gesperrt, bis dieser erfüllt ist",
-                                    size=12,
-                                    opacity=0.6,
-                                ),
-                            ],
-                        ),
-                        ft.Switch(
-                            value=kk.pflicht,
-                            on_change=lambda e: setzen(pflicht=bool(e.control.value)),
-                        ),
-                    ],
-                )
-            )
-            if kk.zurueck:
-                teile.append(ft.Text("DANACH", size=11, weight=ft.FontWeight.BOLD, opacity=0.6))
-                teile.append(
-                    ft.SegmentedButton(
-                        selected=["wiederholen" if kk.wiederholen else "weiter"],
-                        show_selected_icon=False,
-                        segments=[
-                            ft.Segment(value="weiter", label=ft.Text("weiter mit der nächsten")),
-                            ft.Segment(
-                                value="wiederholen", label=ft.Text("die unterbrochene noch einmal")
-                            ),
-                        ],
-                        on_change=lambda e: setzen(
-                            wiederholen=bool(e.control.selected)
-                            and e.control.selected[0] == "wiederholen"
-                        ),
-                    )
-                )
-            teile += [
-                ft.Text("BESCHRIFTUNG UND INHALT", size=11, weight=ft.FontWeight.BOLD, opacity=0.6),
-                text_feld,
-                inhalt_text,
-                inhalt_url,
-            ]
-            innen.controls = teile
-            with contextlib.suppress(Exception):
-                innen.update()
-
-        def uebernehmen(_e: Any = None) -> None:
-            pp = frisch()
-            neu = k()
-            if neu.ausloeser == ab.WDH and neu.n <= 0:
-                neu = replace(neu, ausloeser=ab.FREI, n=0)
-            if neu.bis is not None and neu.bis < neu.n:
-                neu = replace(neu, bis=None)
-            speichern(
-                pp,
-                pp.ablauf.kante_ersetzen(kante, neu)
-                if kante in pp.ablauf.kanten
-                else pp.ablauf.mit_kante(neu),
-            )
-            nachher.danach(neu_zeichnen)
-            schliessen(blatt)
-
-        def loeschen(_e: Any = None) -> None:
-            pp = frisch()
-            speichern(pp, pp.ablauf.ohne_kante(kante))
-            nachher.danach(neu_zeichnen)
-            schliessen(blatt)
-
-        zeichnen_blatt()
-        blatt = ft.BottomSheet(
-            show_drag_handle=True,
-            scrollable=True,
-            on_dismiss=nachher.bei_schliessen,
-            content=blatt_spalte(
-                innen,
-                [
-                    ft.Row(
-                        spacing=8,
-                        controls=[
-                            ft.TextButton(
-                                "Kante löschen",
-                                on_click=loeschen,
-                                style=ft.ButtonStyle(color=ft.Colors.ERROR),
-                            ),
-                            ft.Container(expand=True),
-                            ft.TextButton("Abbrechen", on_click=lambda _e: schliessen(blatt)),
-                            ft.FilledButton("Übernehmen", on_click=uebernehmen),
-                        ],
-                    )
-                ],
-                geschaetzt=560,
-            ),
-        )
-        with contextlib.suppress(Exception):
-            page.show_dialog(blatt)
-
-    # -- Aufbau ---------------------------------------------------------------------------------
-
-    def einfuehrung(p: Plan) -> list[ft.Control]:
-        hat = any(not it.bedingung.leer for it in p.items)
-        return [
-            karte(
-                kartentitel("Ablauf zeichnen"),
-                ft.Text(
-                    "Heute läuft der Plan als Kette: eine Übung nach der anderen. Mit dem Ablauf "
-                    "zeichnest du, wie es weitergeht — Abzweige zur Seite (Dehnung bei Krämpfen, "
-                    "danach zurück), Übungen nur bei Bedarf, Schleifen, bis eine Skala erreicht "
-                    "ist, Fragen, die nach dem Wert verzweigen.",
+                    "Dieser Plan läuft der Reihe nach. Mit Abzweigen zeichnest du Wege: zur "
+                    "Seite und zurück (Dehnung bei Krämpfen), nur bei Bedarf, Schleifen bis eine "
+                    "Skala erreicht ist, Fragen, die nach dem Wert verzweigen.",
                     size=14,
                 ),
-                ft.Text(
-                    "Oben die Übungen, unten die Zeichnung: Start-Slot, Knoten, „+“ für weitere "
-                    "Pfade, ein Tipp auf das Etikett einer Kante stellt sie ein.",
-                    size=13,
-                    opacity=0.75,
-                ),
-                *(
-                    [
-                        hinweis(
-                            "Die Bedingungen und Wege von heute werden dabei in Kanten übersetzt."
-                        )
-                    ]
-                    if hat
-                    else []
-                ),
                 ft.FilledButton(
-                    "Ablauf zeichnen",
+                    "Mit Abzweigen zeichnen",
                     icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
-                    on_click=lambda _e: einschalten(),
+                    on_click=einschalten,
                 ),
                 abstand=10,
             )
-        ]
-
-    def zeichnen(p: Plan) -> None:
-        ids = [it.id for it in p.items]
-        teile: list[ft.Control] = [plan_reiter(page, basis, "ablauf", ablauf_an=p.ablauf.an)]
-        if not p.ablauf.an:
-            teile += einfuehrung(p)
-            inhalt.controls = teile
-            lokal["bild"] = None
+            hinweis_ziel.visible = False
             return
         palette_fuellen(p)
-        teile.append(palette_spalte)
-        if lokal["ziel_von"] is not None:
-            teile.append(
-                ft.Container(
-                    padding=ft.Padding.symmetric(horizontal=12, vertical=8),
-                    border_radius=10,
-                    bgcolor=ft.Colors.TERTIARY_CONTAINER,
-                    content=ft.Row(
-                        spacing=8,
-                        controls=[
-                            ft.Icon(ft.Icons.TOUCH_APP, size=18),
-                            ft.Text(
-                                "Zielknoten antippen — Kante von "
-                                f"„{namen(p).get(lokal['ziel_von'], '?')}“",
-                                size=13,
-                                expand=True,
-                            ),
-                            ft.TextButton("Abbrechen", on_click=lambda _e: ziel_abbrechen()),
-                        ],
-                    ),
-                )
-            )
-        bild = ablaufbild(
-            state,
-            p.ablauf,
-            p.items,
-            katalog,
-            vernebelt=sorted(vernebelt),
-            gewaehlt=state.ablauf_wahl.get(p.id),
-            slots=[Slot(v) for v in slots if v in namen(p)],
-            zaehlung=state.einheiten.kanten_gezaehlt(state.profil.id, p.id) or None,
-            on_knoten=knoten_getippt,
-            on_knoten_lang=knoten_lang,
-            on_kante=kanten_blatt,
-            on_plus=plus_menue,
-            on_slot=einsetzen,
-            on_start=pfad_abspielen,
-            hoehe=None,
-        )
-        lokal["bild"] = bild
-        teile.append(
-            ft.Container(
-                expand=True,  # die Zeichnung füllt, was unter der Palette frei ist
-                border_radius=14,
-                border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
-                bgcolor=ft.Colors.SURFACE,
-                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-                content=bild.control,
-            )
-        )
-        teile.append(
-            ft.Row(
-                spacing=8,
-                controls=[
-                    ft.Text(
-                        "ziehen · zoomen · Tipp auf Knoten = wählen · lang = nur dieser Weg · "
-                        "Tipp auf Etikett = Kante",
-                        size=11,
-                        opacity=0.55,
-                        expand=True,
-                    ),
-                    *(
-                        [ft.TextButton("Alles zeigen", on_click=lambda _e: alles_zeigen())]
-                        if vernebelt
-                        else []
-                    ),
-                ],
-            )
-        )
-        hinweise = ab.pruefung(p.ablauf, ids, namen(p))
-        if not p.items:
-            hinweise.insert(0, "Noch keine Übung — eine aus der Palette antippen oder ziehen.")
-        if hinweise:
-            teile.append(hinweis_zeile(hinweise))
-        teile.append(
-            ft.Row(
-                spacing=8,
-                controls=[
-                    ft.Text(ablauf_zusammenfassung(p), size=12, opacity=0.65, expand=True),
-                    ft.OutlinedButton(
-                        "Als Kette", icon=ft.Icons.LINEAR_SCALE, on_click=lambda _e: ausschalten()
-                    ),
-                ],
-            )
-        )
-        inhalt.controls = teile
-
-    def hinweis_zeile(hinweise: list[str]) -> ft.Control:
-        """Die Hinweise der Prüfung knapp: der erste in zwei Zeilen, die übrigen hinter „+n“ —
-        die Zeichnung behält ihren Platz."""
-
-        def alle_zeigen(_e: Any = None) -> None:
-            dialog: ft.AlertDialog = ft.AlertDialog(
-                title=ft.Text("Hinweise zum Ablauf"),
-                content=ft.Column(
-                    tight=True,
+        von = lokal["ziel_von"]
+        hinweis_ziel.visible = von is not None
+        if von is not None:
+            hinweis_ziel.content = ft.Container(
+                padding=ft.Padding.symmetric(horizontal=12, vertical=6),
+                border_radius=10,
+                bgcolor=ft.Colors.TERTIARY_CONTAINER,
+                content=ft.Row(
                     spacing=8,
-                    scroll=ft.ScrollMode.AUTO,
-                    controls=[ft.Text(h, size=13) for h in hinweise],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Icon(ft.Icons.TOUCH_APP, size=18),
+                        ft.Text(
+                            "Ziel im Bild antippen — Weg von "
+                            + knoten_namen(state, p).get(von, "?"),
+                            size=13,
+                            expand=True,
+                        ),
+                        ft.TextButton("Abbrechen", on_click=lambda _e: ziel_abbrechen()),
+                    ],
                 ),
-                actions=[ft.TextButton("Schließen", on_click=lambda _e: schliessen(dialog))],
             )
-            with contextlib.suppress(Exception):
-                page.show_dialog(dialog)
+        abbild.aktualisieren(bild, zeichnung_jetzt(p))
+        knoten_leiste.controls = knoten_knoepfe(p)
+        werkzeug_leiste.controls = werkzeuge(p)
 
-        return ft.Row(
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=ft.Colors.TERTIARY),
-                ft.Text(hinweise[0], size=12, max_lines=2, expand=True),
-                *(
-                    [ft.TextButton(f"+{len(hinweise) - 1}", on_click=alle_zeigen)]
-                    if len(hinweise) > 1
-                    else []
-                ),
-            ],
-        )
+    def ziel_abbrechen() -> None:
+        lokal["ziel_von"] = None
+        neu_zeichnen()
 
-    zeichnen(frisch())
+    def neu_zeichnen() -> None:
+        zeichnen()
+        with contextlib.suppress(Exception):
+            page.update()
+
+    inhalt = ft.Column(
+        spacing=8,
+        expand=True,
+        controls=[
+            reiter_platz,
+            einfuehrung,
+            palette,
+            hinweis_ziel,
+            rahmen,
+            knoten_leiste,
+            werkzeug_leiste,
+        ],
+    )
+    zeichnen()
     return ft.View(
         route=route,
         appbar=ft.AppBar(
             title=ft.Text(f"Ablauf · {plan.name}"),
             actions=[timer_knopf(page, state, "ablauf")],
         ),
-        padding=16,
+        padding=ft.Padding.only(left=12, right=12, top=8, bottom=8),
         controls=[sicher(inhalt, expand=True)],
     )
 
 
-def _zahl(roh: str | None, sonst: int) -> int:
-    try:
-        return max(0, int(float((roh or "").replace(",", "."))))
-    except ValueError:
-        return sonst
-
-
-def _zahl_oder_leer(roh: str | None) -> int | None:
-    if not (roh or "").strip():
-        return None
-    try:
-        return int(float((roh or "").replace(",", ".")))
-    except ValueError:
-        return None
-
-
-__all__ = ["ablauf_view", "ablauf_zeile", "ablauf_zusammenfassung"]
+__all__ = [
+    "ablauf_ausschalten",
+    "ablauf_einschalten",
+    "ablauf_speichern",
+    "ablauf_view",
+    "ablauf_zusammenfassung",
+    "entfernen_fragen",
+    "knoten_namen",
+    "modus_zeile",
+]

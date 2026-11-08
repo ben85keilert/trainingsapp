@@ -391,8 +391,9 @@ def bedingung_pruefen(roh: Any, *, im_plan: bool = False) -> tuple[list[str], li
 
     >>> bedingung_pruefen({"art": "wdh", "n": 12})
     ([], [])
-    >>> bedingung_pruefen({"art": "zeit", "n": "x", "zweig": "E"}, im_plan=True)
-    (['n ist keine Zahl'], ['Zweig „E“ unbekannt — A gilt'])
+    >>> f, h = bedingung_pruefen({"art": "zeit", "n": "x", "zweig": "E"}, im_plan=True)
+    >>> f, h[0], h[1].startswith("zweig/dann/sonst/wege sind veraltet")
+    (['n ist keine Zahl'], 'Zweig „E“ unbekannt — A gilt', True)
     >>> bedingung_pruefen({"art": "wdh", "sonst": "#2"})
     ([], ['„sonst“ gilt nur je Planübung — an der Übung übergangen'])
     """
@@ -410,6 +411,11 @@ def bedingung_pruefen(roh: Any, *, im_plan: bool = False) -> tuple[list[str], li
         hinweise.append("hart ist kein Wahrheitswert")
     if "zweig" in roh and roh["zweig"] not in ZWEIGE:
         hinweise.append(f"Zweig „{roh['zweig']}“ unbekannt — A gilt")
+    if im_plan and any(k in roh for k in ("zweig", "dann", "sonst", "wege")):
+        hinweise.append(
+            "zweig/dann/sonst/wege sind veraltet — die App liest sie als Kanten im Ablauf "
+            "(Feld `ablauf` am Plan, P108)"
+        )
     for k in ("dann", "sonst"):
         if k not in roh:
             continue

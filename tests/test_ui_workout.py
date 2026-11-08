@@ -131,8 +131,12 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
     await _sekunden(state, uhr, gurt, 1)
     assert paar[1].k == 1 and paar[1].ergebnisse[plan.items[0].id] == "fertig"
     ohne_timer = workout_view(seite, state, plan, route=route)
-    assert "Kein Timer — „Weiter“ hakt ab, wenn du fertig bist" in _texte(ohne_timer)
-    _knopf(ohne_timer, "Workout beenden").on_click()
+    # Ohne Timer: keine „veraltete Ansicht“ mehr (Ben, 8.11.2026) — der Fokus mit Kurven wie
+    # bei jedem Schritt, eine Stoppuhr läuft; „Fertig“ beendet hier das Workout
+    chips = [c.label.value for c in _alle(ohne_timer) if isinstance(c, ft.Chip)]
+    assert chips[:4] == ["Takt", "Bewegung", "HF", "Kurve"]
+    assert paar[1].timer is not None and paar[1].timer.lauf.profil.ist_stoppuhr
+    _knopf(ohne_timer, "Fertig — Workout beenden").on_click()
     await _sekunden(state, uhr, gurt, 3)
     assert plan_ablauf.laufender(state, plan.id) is None
     ende = workout_view(seite, state, plan, route=route)

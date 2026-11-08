@@ -23,6 +23,7 @@ from trainingsapp.core import zaehlen_eintrag as ze
 from trainingsapp.core.einheit import Ereignis
 from trainingsapp.core.models import Plan, SessionEntry, lokaler_tag
 from trainingsapp.core.plan_durchlauf import schritte_fuer
+from trainingsapp.core.result_spec import basis_key
 from trainingsapp.core.standards import mit_plan_spec
 from trainingsapp.core.timer_eintrag import ergebnis, gelaufene_zeiten, ohne_timer
 from trainingsapp.core.uebung_timer import mit_zeitfeldern, zeit_werte, zeit_zusammenlegen
@@ -184,6 +185,14 @@ def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry
         )
         if wdh:
             werte[feld] = wdh
+    # Wiederholungen von Hand (``person/wdh``, 8.11.2026 abends): wo niemand zählte, die letzte
+    # Angabe der Person im Schritt — in ihr Feld, sonst ins erste Wiederholungsfeld der Übung
+    for x in reversed(e.ereignisse[nr_start : nr_ende + 1]):
+        if (x.quelle, x.art) == ("person", "wdh") and x.daten.get("planuebung") == item_id:
+            ziel_feld = str(x.daten.get("feld") or "") or wdh_feld(uebung)
+            if ziel_feld and ziel_feld not in werte and x.daten.get("wert") is not None:
+                werte[ziel_feld] = [x.daten["wert"]]
+            break
     # Die Selbsteinschätzung des Schritts (Bedingung „Skala“, 8.11.2026): die letzte Wahl in
     # das Skalenfeld der Übung
     for x in reversed(e.ereignisse[nr_start : nr_ende + 1]):
@@ -248,6 +257,11 @@ def eingetragen(e: Einheitslauf) -> dict[str, list[float]]:
         for x in e.ereignisse
         if x.quelle == "person" and x.art == "eintrag" and x.daten.get("planuebung")
     }
+
+
+def wdh_feld(uebung: Any) -> str | None:
+    """Das erste Wiederholungsfeld einer Übung (``reps``, ``reps_2`` …) — ``None`` ohne."""
+    return next((f.key for f in uebung.result_spec.fields if basis_key(f.key) == "reps"), None)
 
 
 #: Wie eine Übung des Workouts ausging — die Beschriftung in Ansicht und Zeitleiste

@@ -105,10 +105,13 @@ def test_zeile_im_plan_editor_und_zusammenfassung(umgebung) -> None:
     state, plan, _kniebeuge, _katze = umgebung
     assert uhren_zusammenfassung(state, plan) == "1 Timer · 0 Takte"
     editor = plan_view(Seite(), state, plan, bearbeiten=True, basis=f"/plan/{plan.id}/bearbeiten")
-    zeile = next(
-        x for x in _alle(editor) if isinstance(x, ft.ListTile) and x.title.value == "Uhren"
-    )
-    assert zeile.subtitle.value == "1 Timer · 0 Takte"
+    # Reiter Plan · Uhren sind immer da (Ben, 8.11.2026) — „Ablauf“ erst mit Abzweigen
+    reiter = [
+        x.data
+        for x in _alle(editor)
+        if isinstance(x, ft.Container) and isinstance(x.data, tuple) and x.data[:1] == ("reiter",)
+    ]
+    assert reiter == [("reiter", ""), ("reiter", "uhren")]
     assert "Workout und Ablauf" not in [t.upper() for t in _texte(editor)]
 
 

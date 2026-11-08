@@ -11,7 +11,6 @@ from trainingsapp.core.timer import Abschnitt, TimerProfil
 from trainingsapp.devices.plan_ablauf import (
     FERTIG,
     HART,
-    PAUSE,
     UEBERZEIT,
     UEBUNG,
     WEICH,
@@ -63,8 +62,11 @@ def test_kette_folgt_den_kanten_und_endet_ohne_kante() -> None:
     assert teil.schritt.item_id == "w" and teil.durchlauf == 1
     _lauf(teil, uhr, 10)
     assert teil.schritt.item_id == "k" and teil.phase == UEBUNG  # hart: sofort weiter
+    # Ohne Timer läuft im Workout eine Stoppuhr (Fokus mit Kurven) — „Fertig“ beendet sie
+    assert teil.timer is not None and teil.timer.lauf.profil.ist_stoppuhr
     teil.gemacht()
-    assert teil.schritt.item_id == "p"
+    teil.takt(uhr[0])
+    assert teil.schritt.item_id == "p" and teil.ergebnisse["k"] == "gemacht"
     _lauf(teil, uhr, 10)
     assert teil.phase == FERTIG  # Planke hat keine Kante → Ende
     assert ab.bedarf(a, ["w", "k", "p", "d"]) == ["d"]
@@ -124,20 +126,35 @@ def test_schleife_bis_skala_und_pflicht_sperrt_die_anderen() -> None:
             Kante("p", "p", text="noch einmal"),
         ),
     )
-    teil, uhr = _baustein(a)
+    teil, uhr = _baustein(a, WEICH)
     _lauf(teil, uhr, 10)
-    # Hart, Timer ab, aber keine Kante gangbar: der Baustein wartet in der Pause
-    assert teil.phase == PAUSE
+    # Weich, Zeit ab: Überzeit — die Pflicht sperrt den anderen Weg, bis die Skala reicht
+    assert teil.phase == UEBERZEIT
     staende = teil.kanten_stand()
     assert not staende[0].gangbar and staende[1].gesperrt
+    assert not staende[1].waehlbar(weich=True)  # auch weich nie gegen eine Pflicht
     teil.antworten(4)
     staende = teil.kanten_stand()
-    assert not staende[0].erfuellt and staende[1].gesperrt  # Pflicht sperrt weiter
+    assert not staende[0].erfuellt and staende[1].gesperrt
     teil.antworten(6)
     staende = teil.kanten_stand()
     assert staende[0].gangbar and staende[1].gangbar
     teil.kante_gehen(staende[1].kante)
     assert teil.schritt.item_id == "p" and teil.durchlauf == 2 and teil.skala_wert is None
+
+
+def test_hart_bleibt_bei_der_uebung_bis_ein_weg_frei_ist() -> None:
+    """Ben, 8.11.2026: keine Pause mehr — ist die Zeit ab und kein Weg frei, bleibt die Person bei
+    der Übung (der Timer zählt über); hart geht es von selbst weiter, sobald es reicht."""
+    a = Ablauf(True, "p", (Kante("p", "k", ab.SKALA, 6, pflicht=True), Kante("p", "p")))
+    teil, uhr = _baustein(a, HART)
+    _lauf(teil, uhr, 10)
+    assert teil.phase == UEBERZEIT and teil.wartet and teil.schritt.item_id == "p"
+    assert "p" not in teil.ergebnisse  # noch nichts eingetragen — man kann noch eintragen
+    teil.antworten(4)
+    assert teil.wartet and teil.schritt.item_id == "p"
+    teil.antworten(7)
+    assert teil.schritt.item_id == "k" and not teil.wartet and teil.ergebnisse["p"] == "fertig"
 
 
 def test_ausfuehren_geht_von_selbst_sobald_der_timer_ab_ist() -> None:

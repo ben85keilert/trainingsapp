@@ -31,6 +31,17 @@ führt dorthin, wo man herkam (`verlauf`): zur unterbrochenen Übung noch einmal
 nächster Kante. **Fragen** (Entscheidungsknoten) sind Schritte ohne Übung: ``plan/frage``,
 die Antwort (`antworten`) ``plan/antwort``, dann die passende Kante von selbst. Jede genommene
 Kante steht als ``plan/kante`` in der Zeitleiste (Auswertung). Ohne Ablauf ändert sich nichts.
+
+**Bei der Übung bleiben** (Ben, 8.11.2026 abends): Ist die Uhr eines Schritts ab (Timer durch
+oder „Fertig“), geht es nur weiter, wenn die Bedingung erfüllt ist (linear) bzw. ein Weg frei
+ist (gezeichnet) — sonst **wartet** der Schritt (`wartet`), statt in eine Pause zu fallen: die
+Person kann noch eintragen (Wiederholungen von Hand, Skala), „Noch einmal“ üben, weich
+„Trotzdem weiter“ (nie gegen eine Pflicht) oder abbrechen. Hart geht es von selbst weiter,
+sobald es reicht (`_weiter_wenn_frei`). Linear gibt es nur noch die Bedingung — Zweige A–D,
+„erfüllt →“, „nicht erfüllt →“ und Wege sind Kanten im Ablauf (P108); der lineare Weg ist die
+Planfolge. Im Workout bekommt jeder Schritt ohne Timer eine **Stoppuhr** (`core.timer.stoppuhr`):
+so zeigt er den Fokus mit Kurven wie jeder andere — eingetragen wird wie bisher (die Zeit nur
+mit Zeitfeld, sonst „gemacht“); „Zeit ab“ heißt dort: „Fertig“ ist getippt.
 """
 
 from __future__ import annotations
@@ -40,7 +51,8 @@ from collections.abc import Callable
 from typing import Any
 
 from ..core import ablauf as ab
-from ..core.bedingung import naechster_im_zweig
+from ..core import bedingung as bd
+from ..core.bedingung import HAUPTZWEIG, naechster_im_zweig
 from ..core.einheit import (
     Beteiligung,
     Ereignis,
@@ -50,7 +62,7 @@ from ..core.einheit import (
     uebung_start_text,
 )
 from ..core.plan_durchlauf import Schritt
-from ..core.timer import TimerLauf, TimerProfil
+from ..core.timer import TimerLauf, TimerProfil, stoppuhr
 from .einheit import TimerBaustein, uhr_angaben
 
 #: Wo der Ablauf steht — ``UEBERZEIT``: der Timer ist ab, läuft aber weiter (weicher
@@ -120,6 +132,13 @@ class PlanAblaufBaustein:
         self.skala_wert: float | None = None
         #: was der Zähl-Teil im laufenden Schritt zählte — setzt die Ansicht (`wdh_setzen`)
         self._wdh: int | None = None
+        #: Wiederholungen von Hand im laufenden Schritt (`wdh_von_hand`) — wo niemand zählt
+        self.wdh_hand: int | None = None
+        #: die Uhr des Schritts ist ab, aber die Bedingung nicht erfüllt bzw. kein Weg frei —
+        #: die Person bleibt bei der Übung (Ben, 8.11.2026)
+        self.wartet = False
+        #: mit diesem Grund endet der wartende Schritt, wenn es weitergeht
+        self._grund_wartend = "fertig"
         #: das Ende des Workouts ist über eine Kante gewählt
         self._ende_gewollt = False
         self.phase = UEBUNG
@@ -162,24 +181,96 @@ class PlanAblaufBaustein:
         return sum(1 for k in self.verlauf if k == self.k)
 
     def wdh_setzen(self, wdh: int | None) -> None:
-        """Die Ansicht sagt je Takt, was der Zähl-Teil im Schritt zählte (für ``wdh``-Kanten)."""
-        self._wdh = wdh
+        """Was der Zähl-Teil im Schritt zählte — die Ansicht sagt es je Takt; hart geht es
+        weiter, sobald es reicht."""
+        if wdh != self._wdh:
+            self._wdh = wdh
+            self._weiter_wenn_frei()
+
+    def wdh_von_hand(self, wdh: int | None) -> None:
+        """Wiederholungen von Hand (Ben, 8.11.2026: „Sollte es Bedingungen geben, muss man
+        mindestens in der Lage sein, diese auch einzutragen“) — gilt, wo niemand zählt."""
+        self.wdh_hand = wdh
+        self._weiter_wenn_frei()
+
+    @property
+    def wdh(self) -> int | None:
+        """Die Wiederholungen des Schritts: was gezählt wurde, sonst was von Hand kam."""
+        return self._wdh if self._wdh is not None else self.wdh_hand
+
+    @property
+    def ohne_timer(self) -> bool:
+        """Der Schritt hat keinen eigenen Timer (im Workout läuft eine Stoppuhr mit)."""
+        return self.schritt.profil is None
 
     def _zeit_ab(self) -> bool:
-        if self.phase in (UEBERZEIT, PAUSE):
+        if self.phase in (UEBERZEIT, PAUSE) or self.wartet:
             return True
+        if self.ohne_timer:
+            return self._fertig_gewollt  # ohne Timer heißt „Zeit ab“: „Fertig“ ist getippt
         return self.timer is not None and self.timer.lauf.fertig
+
+    def gelaufen_s(self) -> float:
+        """Wie lange der Schritt schon läuft — mit Timer seine Zeit samt Überzeit."""
+        if self.timer is None or self.ohne_timer:
+            return self.seit_s()
+        lauf = self.timer.lauf
+        return lauf.vergangen_s() + lauf.ueber_s()
+
+    def stand(self) -> bd.Stand:
+        """Was der Schritt bisher geleistet hat — für Bedingung und Kanten."""
+        return bd.Stand(self._zeit_ab(), self.gelaufen_s(), self.wdh, self.skala_wert)
+
+    def bedingung_stand(self) -> bd.Erfuellung | None:
+        """Linear: die Bedingung des Schritts gegen den Stand — ``None`` ohne Bedingung (und im
+        gezeichneten Ablauf, dort gelten die Kanten)."""
+        s = self.schritt
+        b = s.bedingung
+        if self.ablauf is not None or s.frage is not None or (b.art == bd.KEINE and not b.hart):
+            return None
+        return bd.pruefen(b, self.stand())
 
     def kanten_stand(self) -> list[ab.KanteStand]:
         """Die Kanten aus dem laufenden Knoten gegen den Stand — leer ohne Ablauf."""
         if self.ablauf is None:
             return []
+        st = self.stand()
         return ab.kanten_pruefen(
             self.ablauf.von(self.schritt.item_id),
-            zeit_ab=self._zeit_ab(),
-            wdh=self._wdh,
-            skala=self.skala_wert,
+            zeit_ab=st.zeit_ab,
+            wdh=st.wdh,
+            skala=st.skala,
+            gelaufen_s=st.gelaufen_s,
         )
+
+    def _weg_frei(self) -> bool:
+        """Darf der Schritt jetzt von selbst enden? Linear: die Bedingung ist erfüllt (oder es
+        gibt keine); gezeichnet: eine Kante ist frei — oder er hat keine (dann ist es das Ende)."""
+        if self.ablauf is not None:
+            if self.schritt.frage is None and not self.ablauf.von(self.schritt.item_id):
+                return True
+            return self._regulaere_kante() is not None
+        erf = self.bedingung_stand()
+        return erf is None or erf.erfuellt
+
+    def _ende_versuchen(self, jetzt: float, grund: str) -> None:
+        """Die Uhr des Schritts ist ab: weiter, wenn es reicht — sonst bleibt die Person bei der
+        Übung (`wartet`), bis es reicht oder sie anders entscheidet."""
+        if self._weg_frei():
+            self._beenden(jetzt, grund)
+        else:
+            self.wartet = True
+            self._grund_wartend = grund
+
+    def _weiter_wenn_frei(self) -> None:
+        """Hart: wartet der Schritt und reicht es jetzt, geht es von selbst weiter; Kanten mit
+        „ausführen“ gehen von selbst (weich erst, wenn die Zeit ab ist)."""
+        if self._t0 is None or self.phase == FERTIG:
+            return
+        if self.wartet and self.weiter_automatisch and self._weg_frei():
+            self._beenden(self._uhr(), self._grund_wartend)
+            return
+        self._auto_kanten()
 
     def kante_ziel(self, kante: ab.Kante) -> int | None:
         """Wohin eine Kante führt — der Index des Schritts, ``None`` fürs Ende. ``◀ zurück``
@@ -258,14 +349,14 @@ class PlanAblaufBaustein:
         es danach von selbst die passende Kante; eine Kante mit ``ausfuehren`` ebenso, sobald
         der Timer ab ist (`takt`)."""
         self.skala_wert = wert
-        if self._t0 is None or self.ablauf is None or self.phase == FERTIG:
+        if self._t0 is None or self.phase == FERTIG:
             return
-        if self.schritt.frage is not None:
+        if self.ablauf is not None and self.schritt.frage is not None:
             stand = self._regulaere_kante()
             if stand is not None:
                 self.kante_gehen(stand.kante)
             return
-        self._auto_kanten()
+        self._weiter_wenn_frei()
 
     def kante_gehen(self, kante: ab.Kante) -> None:
         """Diese Kante nehmen — aus der Übung (sie endet als fertig), der Überzeit oder der
@@ -310,7 +401,10 @@ class PlanAblaufBaustein:
         if self.ablauf is None or self.phase not in (UEBUNG, UEBERZEIT, PAUSE):
             return
         timer_laeuft = (
-            self.phase == UEBUNG and self.timer is not None and not self.timer.lauf.fertig
+            self.phase == UEBUNG
+            and not self.wartet
+            and self.timer is not None
+            and not self.timer.lauf.fertig
         )
         if timer_laeuft and not self.weiter_automatisch:
             return
@@ -329,13 +423,13 @@ class PlanAblaufBaustein:
 
     @property
     def naechster(self) -> int | None:
-        """Die Übung nach der laufenden auf dem **erfüllt**-Weg: ``dann`` der Bedingung, sonst
-        die nächste offene im eigenen Zweig, sonst die erste offene im Hauptzweig (W3,
-        `core.bedingung.naechster_im_zweig`) — ``None``, wenn keine mehr offen ist."""
+        """Die Übung nach der laufenden: gezeichnet über die reguläre Kante, linear die nächste
+        offene in der Planfolge, sonst die erste noch offene davor — ``None``, wenn keine mehr
+        offen ist. Zweige und Verweise der alten Bedingung zählen nicht mehr (P108)."""
         if self.ablauf is not None:
             st = self._regulaere_kante()
             return self.kante_ziel(st.kante) if st is not None else None
-        return self.ziel_index(self.schritt.bedingung.dann)
+        return self.ziel_index(None)
 
     def ziel_index(self, item_id: str | None) -> int | None:
         """Der Index von ``item_id`` — ein ausdrücklicher Verweis (``dann``, ``sonst``, ein Weg)
@@ -345,7 +439,7 @@ class PlanAblaufBaustein:
             k = next((i for i, s in enumerate(self.schritte) if s.item_id == item_id), None)
             if k is not None:
                 return k
-        folge = [(s.item_id, s.bedingung.zweig) for s in self.schritte]
+        folge = [(s.item_id, HAUPTZWEIG) for s in self.schritte]  # linear: nur die Planfolge
         offen = {s.item_id for s in self.schritte if self.offen(s.item_id)} - {self.schritt.item_id}
         ziel = naechster_im_zweig(folge, self.schritt.item_id, offen)
         return next((i for i, s in enumerate(self.schritte) if s.item_id == ziel), None)
@@ -390,8 +484,10 @@ class PlanAblaufBaustein:
             out += neu
             ende = next((x for x in neu if x.quelle == "timer" and x.art == "ende"), None)
             if ende is not None and self._t0 is not None:
+                t_ende = self._t0 + ende.t_s
+                grund = "gemacht" if self.ohne_timer else "fertig"
                 if ende.daten.get("grund") == "abgebrochen":
-                    self._beenden(self._t0 + ende.t_s, "abgebrochen")
+                    self._beenden(t_ende, "abgebrochen")
                 elif (
                     self.uebergang == WEICH
                     and not self._fertig_gewollt
@@ -399,10 +495,20 @@ class PlanAblaufBaustein:
                 ):
                     # Weich: der Timer läuft über, die Übung endet erst mit „Weiter“
                     self.phase = UEBERZEIT
+                elif self.uebergang is None:
+                    self._beenden(t_ende, grund)
+                elif (
+                    not self._fertig_gewollt and self._weiter_trainierbar() and not self._weg_frei()
+                ):
+                    # Hart, aber noch nicht erfüllt: der Timer läuft über, die Person bleibt bei
+                    # der Übung — es geht von selbst weiter, sobald es reicht
+                    self.phase = UEBERZEIT
+                    self.wartet = True
+                    self._grund_wartend = grund
                 else:
-                    self._beenden(self._t0 + ende.t_s, "fertig")
+                    self._ende_versuchen(t_ende, grund)
                 out += self._abholen()
-        self._auto_kanten()
+        self._weiter_wenn_frei()
         return out + self._abholen()
 
     def _weiter_trainierbar(self) -> bool:
@@ -439,8 +545,10 @@ class PlanAblaufBaustein:
         if self._t0 is None:
             return
         jetzt = self._uhr()
-        if self.phase == UEBERZEIT:
-            self._beenden(jetzt, "fertig", ziel)
+        if self.phase == UEBERZEIT or self.wartet:
+            # Weiter aus der Überzeit oder dem Warten — linear auch „Trotzdem weiter“
+            grund = self._grund_wartend if self.wartet else "fertig"
+            self._beenden(jetzt, grund, ziel, zwingend=self.ablauf is None)
             return
         if self.phase == UEBUNG and ziel:
             # Zweig oder „trotzdem weiter“ mitten in der Übung (W3): sie endet als fertig
@@ -506,12 +614,15 @@ class PlanAblaufBaustein:
         if self._t0 is None:
             return
         if self.phase == UEBERZEIT:
-            self._beenden(self._uhr(), "fertig")
-        elif self.phase == UEBUNG and self.timer is not None:
+            self._ende_versuchen(self._uhr(), "fertig")
+        elif self.phase == UEBUNG and self.timer is not None and not self.timer.lauf.fertig:
             self._fertig_gewollt = True
             self.timer.lauf.fertig_machen()
-        elif self.phase == UEBUNG:
+        elif self.phase == UEBUNG and self.uebergang is None:
             self._beenden(self._uhr(), "gemacht")
+        elif self.phase == UEBUNG:
+            self._fertig_gewollt = True
+            self._ende_versuchen(self._uhr(), "gemacht" if self.ohne_timer else "fertig")
 
     def ueberspringen(self) -> None:
         """Die laufende Übung endet ohne Eintrag; die nächste beginnt (wie nach dem Timer)."""
@@ -520,7 +631,22 @@ class PlanAblaufBaustein:
         jetzt = self._uhr()
         if self.phase == UEBUNG and self.timer is not None:
             self._ausstehend += self._uebungs_timer(self.timer.beenden(jetzt))
-        self._beenden(jetzt, "uebersprungen")
+        if self.ablauf is None:
+            self._beenden(jetzt, "uebersprungen", zwingend=True)
+            return
+        # Gezeichnet: die reguläre Kante, sonst die erste — ohne Kante ist es das Ende
+        st = self._regulaere_kante()
+        kanten = [k for k in self.ablauf.von(self.schritt.item_id) if not k.schleife]
+        kante = st.kante if st is not None else (kanten[0] if kanten else None)
+        ziel = self.kante_ziel(kante) if kante is not None else None
+        if ziel is None:
+            self._ende_gewollt = True
+        self._beenden(
+            jetzt,
+            "uebersprungen",
+            self.schritte[ziel].item_id if ziel is not None else None,
+            zwingend=True,
+        )
 
     # -- intern ---------------------------------------------------------------------------
 
@@ -581,6 +707,9 @@ class PlanAblaufBaustein:
         self.verlauf.append(k)
         self.skala_wert = None
         self._wdh = None
+        self.wdh_hand = None
+        self.wartet = False
+        self._grund_wartend = "fertig"
         s = self.schritt
         self.timer = None
         daten = self._daten(s)
@@ -589,8 +718,13 @@ class PlanAblaufBaustein:
             daten["frage"] = s.frage.text
             self._ausstehend.append(Ereignis(self._start_t_s, "plan", "frage", s.frage.text, daten))
             return
-        if s.profil is not None:
-            kopie = TimerProfil.aus_dict(s.profil.als_dict())
+        profil = s.profil
+        if profil is None and self.uebergang is not None:
+            # Workout: jeder Schritt hat eine Uhr — ohne Timer eine Stoppuhr, damit der Fokus
+            # mit Kurven und Eintragen erscheint (Ben, 8.11.2026: keine „veraltete Ansicht“)
+            profil = stoppuhr()
+        if profil is not None:
+            kopie = TimerProfil.aus_dict(profil.als_dict())
             assert kopie is not None
             self.timer = TimerBaustein(TimerLauf(kopie, uhr=self._uhr))
             self.timer.starten(self._t0, bei=bei)
@@ -600,31 +734,32 @@ class PlanAblaufBaustein:
             Ereignis(self._start_t_s, "plan", "uebung_start", uebung_start_text(s.name), daten)
         )
 
-    def _beenden(self, jetzt: float, grund: str, ziel: str | None = None) -> None:
+    def _beenden(
+        self, jetzt: float, grund: str, ziel: str | None = None, *, zwingend: bool = False
+    ) -> None:
+        """Der Schritt endet mit ``grund`` und es geht weiter: zu ``ziel`` (eine Planübung), sonst
+        linear zur nächsten, gezeichnet über die reguläre Kante. Ist im gezeichneten Ablauf kein
+        Weg frei, endet nichts — der Schritt wartet (``zwingend``: trotzdem enden, Überspringen)."""
         assert self._t0 is not None
         ohne_timer = self.schritt.profil is None
-        warten = False
         if self.ablauf is None:
             naechster = self.ziel_index(ziel) if ziel else self.naechster
         elif self._ende_gewollt:
             naechster = None
         elif ziel:
-            naechster = self._index(ziel)
+            naechster = self._ziel(ziel)
         else:
-            # Gezeichneter Ablauf: die reguläre Kante — gibt es Kanten, aber keine gangbare
-            # (Pflicht offen, Skala nicht gewählt), wartet der Baustein in der Pause auf die Wahl
             st = self._regulaere_kante()
+            if st is None and self.ablauf.von(self.schritt.item_id) and not zwingend:
+                # Kanten, aber keine frei (Pflicht offen, Skala nicht gewählt): bleiben
+                self.wartet = True
+                self._grund_wartend = grund
+                return
             naechster = self.kante_ziel(st.kante) if st is not None else None
-            warten = st is None and bool(self.ablauf.von(self.schritt.item_id))
         self._ende_eintragen(jetzt, grund)  # in der Pause gibt es keinen Timer (Laufleiste, ⏸)
         self._ende_gewollt = False
-        if warten:
-            self.phase = PAUSE
-            self._seit = jetzt
-            self._ausstehend.append(
-                Ereignis(jetzt - self._t0, "plan", "pause", "Pause", {"plan": self.plan_id})
-            )
-        elif naechster is None:
+        self.wartet = False
+        if naechster is None:
             self.phase = FERTIG
             self._ausstehend.append(self._plan_ende(jetzt))
         elif (

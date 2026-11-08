@@ -83,18 +83,6 @@ def bedingung_text(s: Schritt) -> str:
     return f"{s.kurztext()} · weiter, wenn Zeit ab"
 
 
-def zweig_chip(zweig: str) -> ft.Control | None:
-    """„Zweig B“ als kleines Schild — im Hauptzweig nichts."""
-    if zweig == bd.HAUPTZWEIG:
-        return None
-    return ft.Container(
-        padding=ft.Padding.symmetric(horizontal=8, vertical=2),
-        border_radius=8,
-        bgcolor=ft.Colors.TERTIARY_CONTAINER,
-        content=ft.Text(f"Zweig {zweig}", size=11, color=ft.Colors.ON_TERTIARY_CONTAINER),
-    )
-
-
 def workout_view(
     page: Any, state: AppState, plan: Plan, *, route: str, browser: Any = None
 ) -> ft.View:
@@ -105,6 +93,8 @@ def workout_view(
     #: der gezeichnete Ablauf (G2, `docs/plan_verzweigungen.md` §8): Kanten statt Planfolge
     gezeichnet = plan.ablauf.an
     ids = [it.id for it in plan.items]
+    #: die Nummer einer Planübung = ihre Stelle in der Liste, wie im Ablauf (Frage 5)
+    nummern = ab.nummern(ids)
     inhalt = ft.Column(spacing=12)
     wahl: dict[str, Any] = {"ohne": None, "noch_einmal": False, "hrv": True, "hrv_beenden": True}
     stand: dict[str, Any] = {
@@ -227,7 +217,7 @@ def workout_view(
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     ft.Checkbox(value=weg, on_change=umschalten(s), tooltip="Heute erledigt"),
-                    ft.Text(str(n), size=12, opacity=0.55, width=18),
+                    ft.Text(str(nummern.get(s.item_id, n)), size=12, opacity=0.55, width=18),
                     uebungsbild(
                         state, u.icon_key if u else None, u.image_path if u else None, groesse=28
                     ),
@@ -244,7 +234,6 @@ def workout_view(
                             ft.Text(bedingung_text(s), size=12, opacity=0.6),
                         ],
                     ),
-                    *([c] if (c := zweig_chip(s.bedingung.zweig)) is not None else []),
                     *(
                         [ft.Icon(ft.Icons.LOCK_OUTLINE, size=18, opacity=0.6, tooltip="Pflicht")]
                         if s.bedingung.hart
@@ -285,10 +274,12 @@ def workout_view(
                 "Timer läuft ab",
                 "die nächste beginnt sofort" if hart else "zählt ins Minus, bis du tippst",
             ),
-            ("Übung ohne Timer", "„Fertig“ von Hand"),
+            ("Übung ohne Timer", "eine Stoppuhr läuft · „Fertig“ von Hand"),
             (
                 "Bedingung verfehlt",
-                "Zweig oder noch einmal" if hart else "Zweig · noch einmal · trotzdem weiter",
+                "du bleibst, bis es reicht · noch einmal"
+                if hart
+                else "du bleibst · noch einmal · trotzdem weiter",
             ),
         )
         teile.append(
@@ -351,21 +342,9 @@ def workout_view(
                     abstand=8,
                 )
             )
-        if gezeichnet:
+        if gezeichnet:  # P100: Wege ohne Ausgang — Hinweis, kein Verbot
             namen = {s.item_id: s.name for s in schritte}
             teile.extend(hinweis(t) for t in ab.pruefung(plan.ablauf, ids, namen))
-        else:
-            kreis = bd.schleifen(
-                {s.item_id: s.bedingung for s in schritte}, [s.item_id for s in schritte]
-            )
-            if kreis:  # P100: kein Weg hinaus — Hinweis, kein Verbot
-                namen_ = ", ".join(s.name for s in schritte if s.item_id in kreis)
-                teile.append(
-                    hinweis(
-                        f"Kein Weg hinaus ab: {namen_}. Von dort erreicht das Workout sein Ende "
-                        "nicht — Abbrechen geht immer."
-                    )
-                )
         uebungen = [s for s in schritte if s.frage is None]
         if not uebungen:
             teile.append(hinweis("Der Plan hat keine Übung — im Plan-Editor hinzufügen."))
@@ -559,23 +538,30 @@ def workout_view(
             page.show_dialog(blatt)
 
     def wdh_jetzt(teil: PlanAblaufBaustein) -> int | None:
+        """Was der Zähl-Teil (Sensor oder „Takt zählt“) im Schritt gezählt hat — ``None``, wenn
+        niemand zählt."""
         s = teil.schritt
         z = zaehl_stand.zaehl_teil(state, s.uebung_id, s.item_id) if s.uebung_id else None
         return z.wert if (z is not None and z.wdh) else None
 
-    def antwort_chips(
+    def skala_feld(u: Exercise | None) -> FieldSpec | None:
+        if u is None:
+            return None
+        return next((f for f in u.result_spec.fields if f.type == FieldType.SCALE), None)
+
+    def skala_auswahl(
         e: Einheitslauf, teil: PlanAblaufBaustein, u: Exercise | None, titel: str, lo: int, hi: int
     ) -> ft.Control:
-        """Die Skala im Schritt (E6): Frage eines Entscheidungsknotens oder die Skala-Kanten der
-        Übung. Die Wahl geht an den Baustein (`antworten`) und — bei einer Übung — als
-        ``person/skala`` in die Zeitleiste und mit dem Schritt in den Eintrag."""
+        """Die Skala im Schritt (E6): die Frage eines Entscheidungsknotens, eine Skala-Bedingung
+        oder -Kante, sonst das Skalenfeld der Übung. Die Wahl geht an den Baustein (`antworten`)
+        und — bei einer Übung — als ``person/skala`` in die Zeitleiste und mit dem Schritt in
+        den Eintrag."""
         feld = skala_feld(u)
         gewaehlt = teil.skala_wert
 
         def waehler(wert: int) -> Callable[[], None]:
             def handler() -> None:
                 if u is not None and e.t0 is not None:
-                    state.workout_skala[skala_schluessel(teil)] = float(wert)
                     e.nachtragen(
                         Ereignis(
                             max(0.0, e.uhr() - e.t0),
@@ -627,6 +613,85 @@ def workout_view(
             ),
         )
 
+    def wdh_eintrag(
+        e: Einheitslauf, teil: PlanAblaufBaustein, u: Exercise | None, ziel: int | None
+    ) -> ft.Control:
+        """Wiederholungen von Hand (Ben, 8.11.2026: „Sollte es Bedingungen geben, muss man
+        mindestens in der Lage sein, diese auch einzutragen“) — wo weder Sensor noch Takt zählen.
+        Jede Änderung geht als ``person/wdh`` in die Zeitleiste und von dort in den Eintrag."""
+        feld = plan_ablauf.wdh_feld(u) if u is not None else None
+        wert = teil.wdh_hand or 0
+
+        def setzen(n: int) -> Callable[[Any], None]:
+            def handler(_e: Any = None) -> None:
+                neu = max(0, n)
+                if e.t0 is not None:
+                    e.nachtragen(
+                        Ereignis(
+                            max(0.0, e.uhr() - e.t0),
+                            "person",
+                            "wdh",
+                            f"{teil.schritt.name}: {neu} Wdh.",
+                            {"planuebung": teil.schritt.item_id, "feld": feld or "", "wert": neu},
+                        )
+                    )
+                teil.wdh_von_hand(neu)
+                einheit_ui.melden(state)
+                auffrischen()
+
+            return handler
+
+        chips = sorted({c for c in (ziel, 5, 10, 12, 15, 20) if c})
+        return ft.Container(
+            padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+            border_radius=12,
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            content=ft.Column(
+                spacing=6,
+                controls=[
+                    ft.Text(
+                        "Wiederholungen — niemand zählt, trag sie hier ein",
+                        size=12,
+                        opacity=0.75,
+                    ),
+                    ft.Row(
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[
+                            ft.IconButton(
+                                ft.Icons.REMOVE, tooltip="Eine weniger", on_click=setzen(wert - 1)
+                            ),
+                            ft.Text(
+                                str(wert),
+                                size=26,
+                                weight=ft.FontWeight.W_600,
+                                width=56,
+                                text_align=ft.TextAlign.CENTER,
+                            ),
+                            ft.IconButton(
+                                ft.Icons.ADD, tooltip="Eine mehr", on_click=setzen(wert + 1)
+                            ),
+                            ft.Row(
+                                wrap=True,
+                                spacing=4,
+                                run_spacing=4,
+                                expand=True,
+                                controls=[
+                                    ft.Chip(
+                                        label=ft.Text(str(c)),
+                                        selected=wert == c,
+                                        show_checkmark=False,
+                                        on_select=setzen(c),
+                                    )
+                                    for c in chips
+                                ],
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        )
+
     def kanten_text(teil: PlanAblaufBaustein, st: ab.KanteStand) -> str:
         k = st.kante
         if k.zum_ende:
@@ -645,27 +710,30 @@ def workout_view(
             zusatz += f" ({k.ausloeser_text()})"
         return f"Weiter: {name}{zusatz}"
 
-    def kanten_knoepfe(teil: PlanAblaufBaustein) -> list[ft.Control]:
-        """Die Kanten des laufenden Knotens als Knöpfe (E6): die angebotene betont, freie als
-        Weg, nicht erfüllte oder gesperrte ausgegraut mit Grund — bis drei einzeln, danach
-        ebenso (P114: kein Limit, nur ein Hinweis beim Zeichnen)."""
+    def kanten_knoepfe(teil: PlanAblaufBaustein, weich: bool) -> list[ft.Control]:
+        """Die Wege des laufenden Knotens als Knöpfe (E6): der angebotene betont; im harten
+        Übergang nur erfüllte wählbar, im weichen auch unerfüllte (Bedingungen sind dort
+        Vorschläge) — nie gegen eine Pflicht, und eine Frage verzweigt nur nach der Antwort."""
         out: list[ft.Control] = []
         staende = teil.kanten_stand()
-        if not staende:
-            return out
+        frage = teil.schritt.frage is not None
         regulaer = ab.regulaere(staende)
-        for st in staende:
-            k = st.kante
 
-            def gehen(kk: ab.Kante = k) -> None:
+        def gehe(kk: ab.Kante) -> Callable[[], None]:
+            def handler() -> None:
                 teil.kante_gehen(kk)
                 einheit_ui.melden(state)
                 auffrischen()
 
+            return handler
+
+        for st in staende:
+            k = st.kante
+
             text = kanten_text(teil, st)
             if st.gesperrt:
                 text += " · gesperrt (Pflicht)"
-            betont = st.angeboten or (regulaer is st and teil.phase in (UEBERZEIT, PAUSE))
+            betont = st.angeboten or (regulaer is st and (teil.phase == UEBERZEIT or teil.wartet))
             symbol = (
                 ft.Icons.REPLAY
                 if k.schleife or (k.zurueck and k.wiederholen)
@@ -683,140 +751,14 @@ def workout_view(
                     text,
                     icon=symbol,
                     height=50 if betont else 46,
-                    disabled=not st.gangbar,
-                    on_click=lambda _e, g=gehen: g(),
+                    disabled=not st.waehlbar(weich and not frage),
+                    on_click=gehe(k),
                     style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=25)),
                 )
             )
         return out
 
     bedarf_ids = set(ab.bedarf(plan.ablauf, ids)) if gezeichnet else set()
-
-    def waehrend_ablauf(e: Einheitslauf, teil: PlanAblaufBaustein) -> list[ft.Control]:
-        """Das Bild „Während“ mit gezeichnetem Ablauf: Uhr wie gehabt, dann die Frage oder die
-        Skala der Kanten, die Kanten als Knöpfe, die Schrittliste nach dem Ablauf."""
-        s = teil.schritt
-        u = katalog.get(s.uebung_id) if s.uebung_id else None
-        item = state.plaene.item_laden(s.item_id) if s.frage is None else None
-        teil.wdh_setzen(wdh_jetzt(teil))
-        stand["bed_text"], stand["bed_karte"] = None, None
-        uebergang = teil.uebergang or (HART if teil.weiter_automatisch else WEICH)
-        durchlauf = f" · {teil.durchlauf}. Durchlauf" if teil.durchlauf > 1 else ""
-        kopf = ft.Row(
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Column(
-                    spacing=0,
-                    expand=True,
-                    controls=[
-                        ft.Text(s.anzeigename, size=18, weight=ft.FontWeight.W_600),
-                        ft.Text(
-                            f"Workout {plan.name}{durchlauf} · {uebergang}", size=12, opacity=0.6
-                        ),
-                    ],
-                ),
-                ft.IconButton(
-                    ft.Icons.ACCOUNT_TREE_OUTLINED,
-                    tooltip="Ablaufbild",
-                    on_click=lambda _e: ablaufbild_zeigen(teil),
-                ),
-                info_knopf(page, "Workout", WORKOUT_MD),
-            ],
-        )
-        teile: list[ft.Control] = [kopf, fortschritt(teil)]
-
-        def anhalten() -> None:
-            einheit_ui.anhalten_oder_weiter(page, state)
-            auffrischen()
-
-        def abbrechen() -> None:
-            einheit_ui.alle_beenden(state)
-            auffrischen()
-
-        def fertig() -> None:
-            teil.gemacht()
-            einheit_ui.melden(state)
-            auffrischen()
-
-        if s.frage is not None:
-            stand["fokus"], stand["ohne_timer"] = None, None
-            teile.append(antwort_chips(e, teil, None, s.frage.text, s.frage.min, s.frage.max))
-        elif teil.phase == PAUSE:
-            stand["fokus"], stand["ohne_timer"] = None, None
-            teile.append(
-                karte(
-                    ft.Text("Wie geht es weiter?", size=15, weight=ft.FontWeight.W_600),
-                    ft.Text(
-                        f"{s.anzeigename} ist zu Ende — wähle einen Weg.", size=13, opacity=0.75
-                    ),
-                    abstand=4,
-                )
-            )
-        else:
-            teile.extend(uhr_teile(e, teil, u, item, anhalten))
-        skala_kanten = [k for k in teil.kanten_stand() if k.kante.ausloeser == ab.SKALA]
-        if s.frage is None and skala_kanten:
-            feld = skala_feld(u)
-            lo = int(feld.min) if feld is not None and feld.min is not None else bd.SKALA_MIN
-            hi = int(feld.max) if feld is not None and feld.max is not None else bd.SKALA_MAX
-            if hi - lo > 20:
-                lo, hi = bd.SKALA_MIN, bd.SKALA_MAX
-            titel = (feld.label if feld is not None else "Wie fühlt es sich an?") + " — "
-            titel += ", ".join(dict.fromkeys(k.kante.ausloeser_text() for k in skala_kanten))
-            teile.append(antwort_chips(e, teil, u, titel, lo, hi))
-        # Freigeschalteter Inhalt der angebotenen Kante
-        for st in teil.kanten_stand():
-            if st.angeboten and not st.kante.inhalt.leer:
-                teile.append(inhalt_karte(bd.Bedingung(inhalt=st.kante.inhalt)))
-        teile.append(ablauf_schrittliste(teil))
-        knoepfe = kanten_knoepfe(teil)
-        laeuft = teil.phase == UEBUNG and s.frage is None
-        if laeuft:
-            # Die Übung läuft: „Fertig“ beendet sie (mit Timer: die Zeit ans Ende), dann
-            # kommt die reguläre Kante — oder die Wahl unten
-            teile.append(
-                ft.FilledButton(
-                    "Fertig" if knoepfe else "Workout beenden",
-                    icon=ft.Icons.CHECK,
-                    height=52,
-                    on_click=lambda _e: fertig(),
-                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
-                )
-            )
-        elif not knoepfe and s.frage is None:
-            teile.append(
-                ft.FilledButton(
-                    "Workout beenden",
-                    icon=ft.Icons.CHECK,
-                    height=52,
-                    on_click=lambda _e: fertig(),
-                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
-                )
-            )
-        teile.extend(knoepfe)
-        unten: list[ft.Control] = []
-        if teil.timer is not None and teil.phase == UEBUNG:
-            unten.append(stand["fokus"].halt_knopf if stand["fokus"] else ft.Container())
-        if teil.phase != PAUSE and s.frage is None:
-
-            def ueberspringen() -> None:
-                teil.ueberspringen()
-                einheit_ui.melden(state)
-                auffrischen()
-
-            unten.append(
-                ft.OutlinedButton("Überspringen", on_click=lambda _e: ueberspringen(), expand=True)
-            )
-        unten.append(
-            ft.TextButton(
-                "Abbrechen",
-                on_click=lambda _e: abbrechen(),
-                style=ft.ButtonStyle(color=ft.Colors.ERROR),
-            )
-        )
-        teile.append(ft.Row(spacing=8, controls=unten))
-        return teile
 
     def ablauf_schrittliste(teil: PlanAblaufBaustein) -> ft.Control:
         """Die Schrittliste nach dem Ablauf: der Verlauf bisher, der laufende Schritt, dann
@@ -901,14 +843,13 @@ def workout_view(
             else:
                 symbol = ft.Icon(ft.Icons.CIRCLE_OUTLINED, size=16, opacity=0.5)
                 rechts = bedingung_text(s)
-            zweig = f" · {s.bedingung.zweig}" if s.bedingung.zweig != bd.HAUPTZWEIG else ""
             zeilen.append(
                 ft.Row(
                     spacing=8,
                     controls=[
                         symbol,
                         ft.Text(
-                            f"{i + 1}{zweig} · {s.name}",
+                            f"{nummern.get(s.item_id, i + 1)} · {s.anzeigename}",
                             size=13,
                             expand=True,
                             weight=ft.FontWeight.W_600 if laeuft else None,
@@ -919,91 +860,6 @@ def workout_view(
                 )
             )
         return karte(ft.Column(spacing=4, controls=zeilen), abstand=0, padding=10)
-
-    def bedingung_stand(teil: PlanAblaufBaustein) -> bd.Erfuellung | None:
-        """Die Bedingung des laufenden Schritts gegen das Geleistete (W2) — ``None``, wenn
-        nichts eingestellt ist (W1: Zeit ab oder von Hand)."""
-        s = teil.schritt
-        b = s.bedingung
-        if b.art == bd.KEINE and not b.hart:
-            return None
-        lauf = teil.timer.lauf if teil.timer is not None else None
-        zeit_ab = teil.phase == UEBERZEIT or (lauf is not None and lauf.fertig)
-        gelaufen = (lauf.vergangen_s() + lauf.ueber_s()) if lauf is not None else teil.seit_s()
-        z = zaehl_stand.zaehl_teil(state, s.uebung_id, s.item_id)
-        wdh = z.wert if (z is not None and z.wdh) else None
-        return bd.pruefen(b, bd.Stand(zeit_ab, gelaufen, wdh, skala=skala_wert(teil)))
-
-    def skala_schluessel(teil: PlanAblaufBaustein) -> tuple[str, float]:
-        """Je Durchlauf eines Schritts eine eigene Wahl (Schleifen)."""
-        return (teil.schritt.item_id, round(teil.start_t_s or 0.0, 1))
-
-    def skala_wert(teil: PlanAblaufBaustein) -> float | None:
-        return state.workout_skala.get(skala_schluessel(teil))
-
-    def skala_feld(u: Exercise | None) -> FieldSpec | None:
-        if u is None:
-            return None
-        return next((f for f in u.result_spec.fields if f.type == FieldType.SCALE), None)
-
-    def skala_chips(
-        e: Any, teil: PlanAblaufBaustein, u: Exercise | None, b: bd.Bedingung
-    ) -> ft.Control:
-        """Die Selbsteinschätzung im Schritt (``skala``): Chips über die Spanne des Skalenfelds
-        der Übung (sonst 0–10); die Wahl geht als ``person/skala`` in die Zeitleiste und mit
-        dem Schritt in den Eintrag (`ui.plan_ablauf.nach_der_uebung`)."""
-        feld = skala_feld(u)
-        lo = int(feld.min) if feld is not None and feld.min is not None else bd.SKALA_MIN
-        hi = int(feld.max) if feld is not None and feld.max is not None else bd.SKALA_MAX
-        if hi - lo > 20:
-            lo, hi = bd.SKALA_MIN, bd.SKALA_MAX
-        gewaehlt = skala_wert(teil)
-
-        def waehler(wert: int) -> Callable[[], None]:
-            def handler() -> None:
-                state.workout_skala[skala_schluessel(teil)] = float(wert)
-                if e.t0 is not None:
-                    e.nachtragen(
-                        Ereignis(
-                            max(0.0, e.uhr() - e.t0),
-                            "person",
-                            "skala",
-                            f"{teil.schritt.name}: Skala {wert}",
-                            {
-                                "planuebung": teil.schritt.item_id,
-                                "feld": feld.key if feld is not None else "",
-                                "wert": wert,
-                            },
-                        )
-                    )
-                neu_bauen()
-
-            return handler
-
-        return ft.Column(
-            spacing=6,
-            controls=[
-                ft.Text(
-                    (feld.label if feld is not None else "Skala") + f" — ab {b.n} geht es weiter",
-                    size=12,
-                    opacity=0.7,
-                ),
-                ft.Row(
-                    wrap=True,
-                    spacing=6,
-                    run_spacing=6,
-                    controls=[
-                        ft.Chip(
-                            label=ft.Text(str(w)),
-                            selected=gewaehlt is not None and int(gewaehlt) == w,
-                            show_checkmark=False,
-                            on_select=waehler(w),
-                        )
-                        for w in range(lo, hi + 1)
-                    ],
-                ),
-            ],
-        )
 
     def bedingung_karte(erf: bd.Erfuellung, b: bd.Bedingung) -> ft.Control:
         text = ft.Text(erf.text or b.kurztext() or "erfüllt", size=14, weight=ft.FontWeight.W_600)
@@ -1063,30 +919,95 @@ def workout_view(
             )
         return karte(*teile, abstand=4)
 
-    def uhr_teile(
-        e: Einheitslauf,
-        teil: PlanAblaufBaustein,
-        u: Exercise | None,
-        item: Any,
-        anhalten: Callable[[], None],
-        naechster_name: str | None = None,
-    ) -> list[ft.Control]:
-        """Pause-Karte, Fokus der Uhr (mit Überzeit-Hinweis) oder die Uhr ohne Timer."""
-        teile: list[ft.Control] = []
-        if teil.phase == PAUSE:
-            teile.append(
-                karte(
-                    ft.Text("Pause", size=15, weight=ft.FontWeight.W_600),
-                    ft.Text(
-                        f"Weiter mit {naechster_name}" if naechster_name else "Alles gemacht",
-                        size=13,
-                        opacity=0.75,
-                    ),
-                    abstand=4,
-                )
-            )
-            stand["fokus"] = None
-            stand["ohne_timer"] = None
+    def waehrend(e: Einheitslauf, teil: PlanAblaufBaustein) -> list[ft.Control]:
+        """Das Bild „Während“ für beide Arten (Ben, 8.11.2026 abends): jeder Schritt mit dem Fokus
+        (ohne Timer läuft eine Stoppuhr — keine „veraltete Ansicht“ mehr), darunter, was die
+        Bedingung braucht (Skala, Wiederholungen von Hand), der Reihe nach die Bedingung und
+        „Weiter“, mit Abzweigen die Wege als Knöpfe; ist die Zeit ab und es reicht nicht, bleibt
+        man bei der Übung."""
+        s = teil.schritt
+        gez = teil.ablauf is not None
+        u = katalog.get(s.uebung_id) if s.uebung_id else None
+        item = state.plaene.item_laden(s.item_id) if s.frage is None else None
+        teil.wdh_setzen(wdh_jetzt(teil))
+        stand["bed_text"], stand["bed_karte"] = None, None
+        uebergang = teil.uebergang or (HART if teil.weiter_automatisch else WEICH)
+        weich = uebergang == WEICH
+        b = s.bedingung
+        erf = teil.bedingung_stand()
+        nr = nummern.get(s.item_id)
+        durchlauf = f" · {teil.durchlauf}. Durchlauf" if teil.durchlauf > 1 else ""
+        unter = (
+            f"Workout {plan.name}{durchlauf} · {uebergang}"
+            if gez
+            else f"Schritt {teil.k + 1} von {len(teil.schritte)} · {uebergang}{durchlauf}"
+        )
+        kopf = ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Column(
+                    spacing=0,
+                    expand=True,
+                    controls=[
+                        ft.Text(
+                            f"{nr} · {s.anzeigename}" if nr and gez else s.anzeigename,
+                            size=18,
+                            weight=ft.FontWeight.W_600,
+                        ),
+                        ft.Text(unter, size=12, opacity=0.6),
+                    ],
+                ),
+                *(
+                    [
+                        ft.IconButton(
+                            ft.Icons.ACCOUNT_TREE_OUTLINED,
+                            tooltip="Ablaufbild",
+                            on_click=lambda _e: ablaufbild_zeigen(teil),
+                        )
+                    ]
+                    if gez
+                    else []
+                ),
+                info_knopf(page, "Workout", WORKOUT_MD),
+            ],
+        )
+        teile: list[ft.Control] = [kopf, fortschritt(teil)]
+
+        def anhalten() -> None:
+            einheit_ui.anhalten_oder_weiter(page, state)
+            auffrischen()
+
+        def abbrechen() -> None:
+            einheit_ui.alle_beenden(state)
+            auffrischen()
+
+        def fertig() -> None:
+            teil.gemacht()
+            einheit_ui.melden(state)
+            auffrischen()
+
+        def weiter() -> None:
+            teil.weiter()
+            einheit_ui.melden(state)
+            auffrischen()
+
+        def noch_einmal() -> None:
+            teil.wiederholen()
+            einheit_ui.melden(state)
+            auffrischen()
+
+        def ueberspringen() -> None:
+            teil.ueberspringen()
+            einheit_ui.melden(state)
+            auffrischen()
+
+        # -- Uhr, Frage oder Pause ---------------------------------------------------------
+        stand["fokus"], stand["ohne_timer"] = None, None
+        if s.frage is not None:
+            teile.append(skala_auswahl(e, teil, None, s.frage.text, s.frage.min, s.frage.max))
+        elif teil.phase == PAUSE:
+            teile.append(karte(ft.Text("Pause", size=15, weight=ft.FontWeight.W_600), abstand=4))
         elif teil.timer is not None and u is not None:
             fokus = Fokus(
                 page,
@@ -1098,202 +1019,192 @@ def workout_view(
             )
             fokus.halt_knopf.on_click = anhalten
             stand["fokus"] = fokus
-            stand["ohne_timer"] = None
             teile.extend(fokus.bauen(e, teil.timer.lauf))
-            if teil.phase == UEBERZEIT:
-                teile.append(
-                    ft.Container(
-                        padding=ft.Padding.symmetric(horizontal=12, vertical=10),
-                        border_radius=12,
-                        bgcolor=ft.Colors.PRIMARY_CONTAINER,
-                        content=ft.Row(
-                            spacing=10,
-                            controls=[
-                                ft.Icon(ft.Icons.CHECK, color=ft.Colors.PRIMARY),
-                                ft.Text(
-                                    "Zeit ab — erfüllt. Du trainierst nach (weich); „Weiter“ "
-                                    "trägt die tatsächliche Zeit ein.",
-                                    size=13,
-                                    expand=True,
-                                ),
-                            ],
-                        ),
-                    )
-                )
         else:
             zeit = ft.Text(dauer_text(int(teil.seit_s())), size=56, weight=ft.FontWeight.W_600)
-            stand["fokus"] = None
             stand["ohne_timer"] = zeit
             teile.append(
-                karte(
-                    ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[zeit]),
-                    ft.Text(
-                        "Kein Timer — „Weiter“ hakt ab, wenn du fertig bist",
-                        size=13,
-                        opacity=0.7,
-                        text_align=ft.TextAlign.CENTER,
+                karte(ft.Row(alignment=ft.MainAxisAlignment.CENTER, controls=[zeit]), abstand=4)
+            )
+        wartend = teil.phase == UEBERZEIT or teil.wartet
+        if wartend and s.frage is None:
+            frei = teil._weg_frei()
+            if frei:
+                text = (
+                    "Zeit ab — erfüllt. Du trainierst nach (weich); „Weiter“ trägt die "
+                    "tatsächliche Zeit ein."
+                )
+            elif weich and not (b.hart and not gez):
+                text = (
+                    "Noch nicht erfüllt — du bleibst bei der Übung: eintragen, noch einmal "
+                    "oder trotzdem weiter."
+                )
+            else:
+                text = (
+                    "Noch nicht erfüllt — du bleibst bei der Übung. Es geht weiter, sobald es "
+                    "reicht."
+                )
+            teile.append(
+                ft.Container(
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    border_radius=12,
+                    bgcolor=ft.Colors.PRIMARY_CONTAINER if frei else ft.Colors.TERTIARY_CONTAINER,
+                    content=ft.Row(
+                        spacing=10,
+                        controls=[
+                            ft.Icon(
+                                ft.Icons.CHECK if frei else ft.Icons.HOURGLASS_TOP,
+                                color=ft.Colors.PRIMARY if frei else ft.Colors.TERTIARY,
+                            ),
+                            ft.Text(text, size=13, expand=True),
+                        ],
                     ),
-                    abstand=4,
                 )
             )
-        return teile
 
-    def waehrend(e: Einheitslauf, teil: PlanAblaufBaustein) -> list[ft.Control]:
-        if teil.ablauf is not None:
-            return waehrend_ablauf(e, teil)
-        s = teil.schritt
-        u = katalog.get(s.uebung_id)
-        item = state.plaene.item_laden(s.item_id)
-        n = len(teil.schritte)
-        b = s.bedingung
-        erf = bedingung_stand(teil)
-        stand["bed_text"], stand["bed_karte"] = None, None
-        uebergang = teil.uebergang or (HART if teil.weiter_automatisch else WEICH)
-        kopf = ft.Row(
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.Column(
-                    spacing=0,
-                    expand=True,
-                    controls=[
-                        ft.Text(s.name, size=18, weight=ft.FontWeight.W_600),
-                        ft.Text(
-                            f"Schritt {teil.k + 1} von {n} · {uebergang}",
-                            size=12,
-                            opacity=0.6,
-                        ),
-                    ],
-                ),
-                *([c] if (c := zweig_chip(b.zweig)) is not None else []),
-                info_knopf(page, "Workout", WORKOUT_MD),
-            ],
-        )
-        teile: list[ft.Control] = [kopf, fortschritt(teil)]
-        naechster = teil.naechster
-        naechster_name = teil.schritte[naechster].name if naechster is not None else None
-
-        def weiter() -> None:
-            if teil.phase in (UEBERZEIT, PAUSE):
-                teil.weiter()
-            else:
-                teil.gemacht()
-            einheit_ui.melden(state)
-            auffrischen()
-
-        def ueberspringen() -> None:
-            teil.ueberspringen()
-            einheit_ui.melden(state)
-            auffrischen()
-
-        def anhalten() -> None:
-            einheit_ui.anhalten_oder_weiter(page, state)
-            auffrischen()
-
-        def abbrechen() -> None:
-            einheit_ui.alle_beenden(state)
-            auffrischen()
-
-        teile.extend(uhr_teile(e, teil, u, item, anhalten, naechster_name))
-        if erf is not None and teil.phase != PAUSE:
+        # -- Bedingung und Eintragen -------------------------------------------------------
+        staende = teil.kanten_stand() if gez else []
+        if not gez and erf is not None:
             teile.append(bedingung_karte(erf, b))
-            if b.art == bd.SKALA:
-                teile.append(skala_chips(e, teil, u, b))
             if erf.erfuellt and not b.inhalt.leer:
                 teile.append(inhalt_karte(b))
-        # Wege (Ben, 8.11.2026): alternative Pfade als Knöpfe — auch zur laufenden Übung selbst
-        # (noch einmal) oder zu einer schon gemachten (Schleife)
-        if b.wege and teil.phase != PAUSE:
-            for weg in b.wege:
-                ziel_schritt = next((x for x in teil.schritte if x.item_id == weg.ziel), None)
-                if ziel_schritt is None:
-                    continue
-
-                def den_weg(ziel: str = weg.ziel) -> None:
-                    teil.weiter(ziel)
-                    einheit_ui.melden(state)
-                    auffrischen()
-
-                selbst = weg.ziel == teil.schritt.item_id
-                teile.append(
-                    ft.FilledTonalButton(
-                        ("Noch einmal: " if selbst else "Weiter mit ")
-                        + ziel_schritt.name
-                        + (f" — {weg.text}" if weg.text else ""),
-                        icon=ft.Icons.REPLAY if selbst else ft.Icons.ALT_ROUTE,
-                        height=48,
-                        on_click=den_weg,
-                        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=24)),
+        if gez:
+            for st in staende:
+                if st.angeboten and not st.kante.inhalt.leer:
+                    teile.append(inhalt_karte(bd.Bedingung(inhalt=st.kante.inhalt)))
+        if s.frage is None and u is not None:
+            feld = skala_feld(u)
+            skala_gefragt = (not gez and b.art == bd.SKALA) or any(
+                st.kante.ausloeser == ab.SKALA for st in staende
+            )
+            if skala_gefragt or feld is not None:
+                lo = int(feld.min) if feld is not None and feld.min is not None else bd.SKALA_MIN
+                hi = int(feld.max) if feld is not None and feld.max is not None else bd.SKALA_MAX
+                if hi - lo > 20:
+                    lo, hi = bd.SKALA_MIN, bd.SKALA_MAX
+                if gez and skala_gefragt:
+                    schwellen = ", ".join(
+                        dict.fromkeys(
+                            st.kante.ausloeser_text()
+                            for st in staende
+                            if st.kante.ausloeser == ab.SKALA
+                        )
                     )
+                    frage_text = feld.label if feld is not None else "Wie fühlt es sich an?"
+                    titel = f"{frage_text} — {schwellen}"
+                elif skala_gefragt:
+                    titel = (
+                        feld.label if feld is not None else "Skala"
+                    ) + f" — ab {b.n} geht es weiter"
+                else:
+                    titel = feld.label if feld is not None else "Skala"
+                teile.append(skala_auswahl(e, teil, u, titel, lo, hi))
+            wdh_arten = (bd.WDH, bd.WDH_IN_ZEIT)
+            wdh_ziel = (
+                b.n
+                if (not gez and b.art in wdh_arten)
+                else next(
+                    (
+                        st.kante.n
+                        for st in staende
+                        if st.kante.ausloeser in (ab.WDH, ab.WDH_IN_ZEIT)
+                    ),
+                    None,
                 )
-        teile.append(schrittliste(teil))
-        # Weiter: gesperrt, solange eine harte Bedingung nicht erfüllt ist (Freischaltung) —
-        # Abbrechen bleibt immer (`docs/plan_workout.md` §1)
-        gesperrt = erf is not None and b.hart and not erf.erfuellt and not erf.unpruefbar
-        nicht_geschafft = (
-            erf is not None and not erf.erfuellt and (erf.verfehlt or teil.phase == UEBERZEIT)
-        )
-        weiter_text = (
-            f"Weiter: {naechster_name}"
-            if naechster_name and teil.phase in (UEBERZEIT, PAUSE)
-            else ("Workout beenden" if naechster_name is None else "Fertig")
-        )
-        if nicht_geschafft and not gesperrt and naechster_name:
-            weiter_text = f"Trotzdem weiter: {naechster_name}"
-        if nicht_geschafft and b.sonst:
-            # C3: der Zweig für „nicht erfüllt“ — gefüllt, der erfüllt-Weg darunter
-            ziel_schritt = next((x for x in teil.schritte if x.item_id == b.sonst), None)
-            if ziel_schritt is not None:
+            )
+            wdh_gefragt = wdh_ziel is not None or plan_ablauf.wdh_feld(u) is not None
+            if wdh_gefragt and wdh_jetzt(teil) is None:
+                teile.append(wdh_eintrag(e, teil, u, wdh_ziel))
+        teile.append(ablauf_schrittliste(teil) if gez else schrittliste(teil))
 
-                def zum_zweig(ziel: str = b.sonst) -> None:
-                    teil.weiter(ziel)
-                    einheit_ui.melden(state)
-                    auffrischen()
-
+        # -- Knöpfe ------------------------------------------------------------------------
+        if s.frage is not None:
+            teile.extend(kanten_knoepfe(teil, weich))
+        elif gez:
+            knoepfe = kanten_knoepfe(teil, weich)
+            if teil.phase == UEBUNG and not teil.wartet:
                 teile.append(
                     ft.FilledButton(
-                        f"Zweig {ziel_schritt.bedingung.zweig}: {ziel_schritt.name}",
-                        icon=ft.Icons.ALT_ROUTE,
+                        "Fertig" if knoepfe else "Fertig — Workout beenden",
+                        icon=ft.Icons.CHECK,
                         height=52,
-                        on_click=zum_zweig,
+                        on_click=fertig,
                         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
                     )
                 )
-        teile.append(
-            (ft.OutlinedButton if nicht_geschafft and b.sonst else ft.FilledButton)(
-                weiter_text if not gesperrt else f"Weiter — {erf.text}" if erf else weiter_text,
-                icon=ft.Icons.SKIP_NEXT,
-                height=52,
-                disabled=gesperrt,
-                on_click=weiter,
-                style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
-            )
-        )
-        if nicht_geschafft:
-
-            def noch_einmal_versuchen() -> None:
-                teil.wiederholen()
-                einheit_ui.melden(state)
-                auffrischen()
-
-            teile.append(
-                ft.OutlinedButton(
-                    "Noch einmal versuchen", icon=ft.Icons.REPLAY, on_click=noch_einmal_versuchen
+            elif not knoepfe:
+                teile.append(
+                    ft.FilledButton(
+                        "Workout beenden",
+                        icon=ft.Icons.CHECK,
+                        height=52,
+                        on_click=weiter,
+                        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
+                    )
                 )
-            )
-        knoepfe: list[ft.Control] = []
-        if teil.timer is not None and teil.phase != PAUSE:
-            knoepfe.append(stand["fokus"].halt_knopf if stand["fokus"] else ft.Container())
-        if teil.phase != PAUSE:
-            knoepfe.append(ft.OutlinedButton("Überspringen", on_click=ueberspringen, expand=True))
-        knoepfe.append(
+            teile.extend(knoepfe)
+            if wartend:
+                teile.append(
+                    ft.OutlinedButton("Noch einmal", icon=ft.Icons.REPLAY, on_click=noch_einmal)
+                )
+        else:
+            naechster = teil.naechster
+            naechster_name = teil.schritte[naechster].anzeigename if naechster is not None else None
+            if teil.phase == UEBUNG and not teil.wartet:
+                teile.append(
+                    ft.FilledButton(
+                        "Fertig" if naechster_name else "Fertig — Workout beenden",
+                        icon=ft.Icons.CHECK,
+                        height=52,
+                        on_click=fertig,
+                        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
+                    )
+                )
+            elif wartend:
+                erfuellt = erf is None or erf.erfuellt
+                ziel_text = f"Weiter: {naechster_name}" if naechster_name else "Workout beenden"
+                if erfuellt:
+                    teile.append(
+                        ft.FilledButton(
+                            ziel_text,
+                            icon=ft.Icons.SKIP_NEXT,
+                            height=52,
+                            on_click=weiter,
+                            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=26)),
+                        )
+                    )
+                elif weich and not b.hart:
+                    teile.append(
+                        ft.OutlinedButton(
+                            f"Trotzdem weiter: {naechster_name}"
+                            if naechster_name
+                            else "Trotzdem beenden",
+                            icon=ft.Icons.SKIP_NEXT,
+                            height=48,
+                            on_click=weiter,
+                        )
+                    )
+                if not erfuellt:
+                    teile.append(
+                        ft.OutlinedButton(
+                            "Noch einmal versuchen",
+                            icon=ft.Icons.REPLAY,
+                            on_click=noch_einmal,
+                        )
+                    )
+        unten: list[ft.Control] = []
+        if stand["fokus"] is not None and teil.phase == UEBUNG and not teil.wartet:
+            unten.append(stand["fokus"].halt_knopf)
+        if s.frage is None:
+            unten.append(ft.OutlinedButton("Überspringen", on_click=ueberspringen, expand=True))
+        unten.append(
             ft.TextButton(
                 "Abbrechen",
                 on_click=abbrechen,
                 style=ft.ButtonStyle(color=ft.Colors.ERROR),
             )
         )
-        teile.append(ft.Row(spacing=8, controls=knoepfe))
+        teile.append(ft.Row(spacing=8, controls=unten))
         return teile
 
     # -- Danach (C4) -------------------------------------------------------------------------
@@ -1418,21 +1329,23 @@ def workout_view(
         paar = plan_ablauf.laufender(state, plan.id)
         if paar is not None:
             e, teil = paar
-            if teil.ablauf is not None:
-                teil.wdh_setzen(wdh_jetzt(teil))
-                kanten = tuple((st.gangbar, st.erfuellt) for st in teil.kanten_stand())
-                return (
-                    "lauf",
-                    e.id,
-                    teil.k,
-                    teil.phase,
-                    len(teil.verlauf),
-                    kanten,
-                    teil.skala_wert,
-                )
-            erf = bedingung_stand(teil)
+            teil.wdh_setzen(wdh_jetzt(teil))
+            kanten = tuple((st.gangbar, st.erfuellt) for st in teil.kanten_stand())
+            erf = teil.bedingung_stand()
             flags = (erf.erfuellt, erf.verfehlt, erf.unpruefbar) if erf is not None else None
-            return ("lauf", e.id, teil.k, teil.phase, tuple(sorted(teil.ergebnisse)), flags)
+            return (
+                "lauf",
+                e.id,
+                teil.k,
+                teil.phase,
+                len(teil.verlauf),
+                teil.wartet,
+                kanten,
+                flags,
+                teil.skala_wert,
+                teil.wdh_hand,
+                wdh_jetzt(teil) is None,
+            )
         einheit_id = state.plan_ablaeufe.get(plan.id)
         fertig = (
             plan_ablauf.ergebnis_der_einheit(state, einheit_id)
@@ -1480,7 +1393,7 @@ def workout_view(
         zeit = stand["ohne_timer"]
         if zeit is not None:
             zeit.value = dauer_text(int(teil.seit_s()))
-        erf = bedingung_stand(teil) if teil.ablauf is None else None
+        erf = teil.bedingung_stand()
         if erf is not None and stand["bed_text"] is not None:
             stand["bed_text"].value = erf.text or stand["bed_text"].value
             stand["bed_karte"].bgcolor = _bed_farbe(erf)

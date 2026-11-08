@@ -1,6 +1,11 @@
-"""Die Karte „Weiter, wenn …“ — an der Übung (ohne Zweig, P107) und an der Planübung (mit
-Zweig und Verweisen), ein Formular für beide Orte (Ben, 8.11.2026, `docs/plan_uhren.md`
-§4.6b; Workout W2/W3, `docs/plan_workout.md` §1).
+"""Die Karte „Weiter, wenn …“ einer Planübung im linearen Ablauf (Ben, 8.11.2026,
+`docs/plan_uhren.md` §4.6b; Workout W2, `docs/plan_workout.md` §1).
+
+Linear heißt: es geht in der Reihenfolge des Plans weiter, und die Bedingung sagt, wann — sonst
+bleibt man bei der Übung (Ben, 8.11.2026 abends). Zweige A–D, „erfüllt →“, „nicht erfüllt →“ und
+Wege gibt es hier nicht mehr (P108): alles, was abzweigt, auch kurz und zurück, ist ein Weg im
+gezeichneten Ablauf (`components/wege_form.py`). Über der Bedingung stehen Herkunft und Ziel mit
+Nummer (``kopf_zeilen``), damit Übung und Ablauf dasselbe zeigen.
 
 Das Formular hält nichts selbst: ``lesen`` liefert die Bedingung, wie sie gerade steht,
 ``setzen`` nimmt die geänderte entgegen, ``neu_zeichnen`` baut die Seite neu — so wie die
@@ -26,13 +31,12 @@ def bedingung_karte(
     setzen: Callable[[Bedingung], None],
     neu_zeichnen: Callable[[], None],
     *,
-    ziele: Sequence[tuple[str, str]] | None = None,
-    selbst: str | None = None,
     kopf: Sequence[ft.Control] = (),
+    kopf_zeilen: Sequence[ft.Control] = (),
+    hinweise: Sequence[str] = (),
 ) -> ft.Control:
-    """Die Karte. ``ziele``: alle Planübungen als (ID, Name) für Zweig, Verweise und Wege —
-    ``selbst`` ist die eigene (ein Verweis dorthin heißt „noch einmal“, Schleife). ``kopf``:
-    Schild und ↺ rechts oben."""
+    """Die Karte. ``kopf``: Schild und ↺ rechts oben; ``kopf_zeilen``: „Kommt von …“ und
+    „Weiter zu …“; ``hinweise``: was die Bedingung unerfüllbar machen könnte (`erfuellbar`)."""
     b = lesen()
     gezeigt = b
 
@@ -73,15 +77,6 @@ def bedingung_karte(
         aendern(hart=bool(e.control.value))
         neu_zeichnen()
 
-    def wahl(feld: str) -> Callable[[ft.Event[ft.Dropdown]], None]:
-        def handler(e: ft.Event[ft.Dropdown]) -> None:
-            wert = str(e.control.value or "")
-            felder: dict[str, Any] = {feld: "" if wert == "-" else wert}
-            setzen(replace(b, **felder))
-            neu_zeichnen()
-
-        return handler
-
     zeilen: list[ft.Control] = []
     if kopf:
         zeilen.append(
@@ -91,6 +86,7 @@ def bedingung_karte(
                 controls=[ft.Container(expand=True), *kopf],
             )
         )
+    zeilen.extend(kopf_zeilen)
     zeilen.append(
         ft.Dropdown(
             label="Weiter, wenn",
@@ -125,8 +121,8 @@ def bedingung_karte(
         zeilen.append(ft.Row(spacing=8, wrap=True, controls=felder))
         zeilen.append(
             ft.Text(
-                "Gezählt wird mit dem Beschleunigungssensor oder dem Takt — sonst von Hand "
-                "bestätigen.",
+                "Gezählt wird mit dem Beschleunigungssensor oder dem Takt — sonst trägst du die "
+                "Wiederholungen im Workout von Hand ein.",
                 size=12,
                 opacity=0.6,
             )
@@ -179,121 +175,16 @@ def bedingung_karte(
                 on_change=text("url"),
             )
         )
-    if ziele is not None:
-
-        def name_von(i: str, n: str) -> str:
-            return f"↺ noch einmal: {n}" if i == selbst else n
-
-        optionen = lambda leer: [  # noqa: E731
-            ft.DropdownOption(key="-", text=leer),
-            *(ft.DropdownOption(key=i, text=name_von(i, n)) for i, n in ziele),
-        ]
-        # Kein `expand` in einer umbrechenden Zeile (Flutter: unbegrenzte Breite → graue
-        # Fläche, Ben 8.11.2026) — Zweig und Verweise untereinander
-        zeilen.append(
-            ft.Dropdown(
-                label="Zweig",
-                value=b.zweig,
-                width=160,
-                dense=True,
-                options=[
-                    ft.DropdownOption(key=z, text=z + (" · Hauptzweig" if z == "A" else ""))
-                    for z in bd.ZWEIGE
-                ],
-                on_select=wahl("zweig"),
-            )
+    zeilen.extend(
+        ft.Row(
+            spacing=6,
+            controls=[
+                ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color=ft.Colors.TERTIARY),
+                ft.Text(h, size=12, expand=True),
+            ],
         )
-        zeilen.append(
-            ft.Dropdown(
-                label="erfüllt →",
-                value=b.dann or "-",
-                dense=True,
-                options=optionen("— (nächste im Zweig)"),
-                on_select=wahl("dann"),
-            )
-        )
-        zeilen.append(
-            ft.Dropdown(
-                label="nicht erfüllt →",
-                value=b.sonst or "-",
-                dense=True,
-                options=optionen("— (kein Zweig)"),
-                on_select=wahl("sonst"),
-            )
-        )
-        # Wege (Ben, 8.11.2026): alternative Pfade, im Workout als Knöpfe — Ziel und ein Wort,
-        # wann er gemeint ist; Ziel darf die eigene Übung sein (Schleife)
-        zeilen.append(ft.Text("WEGE", size=11, weight=ft.FontWeight.BOLD, opacity=0.6))
-
-        def weg_setzen(k: int, **felder: Any) -> None:
-            wege = list(b.wege)
-            wege[k] = replace(wege[k], **felder)
-            setzen(replace(b, wege=tuple(wege)))
-
-        def weg_ziel(k: int) -> Callable[[ft.Event[ft.Dropdown]], None]:
-            def handler(e: ft.Event[ft.Dropdown]) -> None:
-                weg_setzen(k, ziel=str(e.control.value or ""))
-                neu_zeichnen()
-
-            return handler
-
-        def weg_text(k: int) -> Callable[[ft.Event[ft.TextField]], None]:
-            def handler(e: ft.Event[ft.TextField]) -> None:
-                weg_setzen(k, text=(e.control.value or "").strip())
-
-            return handler
-
-        def weg_weg(k: int) -> Callable[[], None]:
-            def handler() -> None:
-                wege = list(b.wege)
-                del wege[k]
-                setzen(replace(b, wege=tuple(wege)))
-                neu_zeichnen()
-
-            return handler
-
-        def weg_dazu() -> None:
-            ziel = next((i for i, _ in ziele if i != selbst), selbst or "")
-            setzen(replace(b, wege=(*b.wege, bd.Weg(ziel))))
-            neu_zeichnen()
-
-        for k, weg in enumerate(b.wege):
-            zeilen.append(
-                ft.Column(
-                    spacing=6,
-                    controls=[
-                        ft.Dropdown(
-                            label=f"Weg {k + 1} →",
-                            value=weg.ziel if any(i == weg.ziel for i, _ in ziele) else None,
-                            dense=True,
-                            options=[
-                                ft.DropdownOption(key=i, text=name_von(i, n)) for i, n in ziele
-                            ],
-                            on_select=weg_ziel(k),
-                        ),
-                        ft.Row(
-                            spacing=6,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            controls=[
-                                ft.TextField(
-                                    label="Wann? (z. B. „Beine krampfen“)",
-                                    value=weg.text,
-                                    dense=True,
-                                    expand=True,
-                                    on_change=weg_text(k),
-                                ),
-                                ft.IconButton(
-                                    ft.Icons.CLOSE,
-                                    icon_size=18,
-                                    tooltip="Weg entfernen",
-                                    on_click=weg_weg(k),
-                                ),
-                            ],
-                        ),
-                    ],
-                )
-            )
-        zeilen.append(ft.TextButton("+ Weg", icon=ft.Icons.ADD, on_click=weg_dazu))
+        for h in hinweise
+    )
     return ft.Container(
         padding=ft.Padding.symmetric(horizontal=12, vertical=10),
         border_radius=14,

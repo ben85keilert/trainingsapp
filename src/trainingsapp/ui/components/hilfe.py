@@ -336,20 +336,22 @@ WORKOUT_MD = """\
 
 **Hart oder weich** — eine Haltung, vor dem Start wählbar, mit drei Folgen:
 - **Hart**: Übungen folgen von selbst, Bedingungen gelten. Ist der Timer ab, beginnt sofort die
-  nächste; eine verfehlte Bedingung führt in den Zweig oder zu „Noch einmal“.
+  nächste; fehlt die Bedingung, bleibst du bei der Übung (siehe „Bleiben“).
 - **Weich**: Du gibst das Tempo — der Timer zählt ins Minus („−0:23“), bis du tippst;
   Bedingungen sind Vorschläge („Trotzdem weiter“ steht offen). Eingetragen wird die
   tatsächliche Zeit.
 - Übungen ohne Timer warten in beiden Fällen auf „Fertig“.
 
-**Weiter, wenn …** steht an der Übung („Übung bearbeiten“) und je Plan („Im Plan einstellen“,
-Uhrenplan): *Zeit ab*, *Wiederholungen* (Sensor oder Takt zählen), *Wiederholungen in einer
-Zeit* oder *Abhaken*. **Pflicht** heißt: „Weiter“ erst, wenn erfüllt — ein Inhalt (Text, Link)
-erscheint erst dann. Abbrechen geht immer.
+**Weiter, wenn …** steht je Planübung („Im Plan einstellen“, Uhrenplan): *Zeit ab*,
+*Wiederholungen* (Sensor, Takt oder von Hand eingetragen), *Wiederholungen in einer Zeit*,
+*Skala* oder *Abhaken*. **Pflicht** heißt: „Weiter“ erst, wenn erfüllt — ein Inhalt (Text, Link)
+erscheint erst dann. Abbrechen geht immer. Verzweigt der Plan (Reiter „Ablauf“), tragen die
+**Wege** diese Bedingungen.
 
-**Zweige:** Jeder Schritt gehört zu einem Zweig (A = Hauptzweig, B, C, D). „Erfüllt →“ führt
-zur nächsten Übung im Zweig oder zu einer gewählten; „nicht erfüllt →“ bietet eine andere an —
-zurück nach A, weiter in B, wohin du willst.
+**Bleiben:** Ist die Zeit ab, aber die Bedingung nicht erfüllt, bleibst du bei der Übung — du
+kannst noch eintragen (Wiederholungen von Hand, Skala), „Noch einmal“ üben, weich „Trotzdem
+weiter“ (nie gegen eine Pflicht) oder abbrechen. Hart geht es von selbst weiter, sobald es reicht.
+Übungen ohne Timer haben im Workout eine Stoppuhr — „Zeit ab“ heißt dort: „Fertig“ ist getippt.
 
 **Gezeichneter Ablauf** (Plan bearbeiten → Ablauf): Statt der Kette folgt das Workout den
 **Kanten** der Zeichnung. Jede Kante sagt, wann es diesen Weg geht — frei (Knopf), Zeit ab,
@@ -362,8 +364,33 @@ einen Abzweig erreichbar sind, stehen unter „Bei Bedarf“ — sie kommen nie 
 Läuft eine Aufnahme, wird das Workout ein Abschnitt in ihr — die Übungen liegen darin.
 """
 
+ABLAUF_MD = """\
+**Der Reihe nach** (Reiter „Plan“): Die Übungen kommen in der Reihenfolge der Liste. Je Übung
+sagt „Weiter, wenn …“ unter „Einstellen“, wann es weitergeht — sonst bleibst du bei der Übung.
+
+**Mit Abzweigen** bringt den Reiter **„Ablauf“**: Du zeichnest, wie es weitergeht.
+
+- **Palette** oben: die Übungen des Plans mit ihrer **Nummer** (die Stelle in der Liste). Eine
+  Übung darf mehrmals im Plan stehen — „+“ fügt eine hinzu. Die Palette scrollt waagerecht;
+  **nach unten ziehen** legt eine Übung in einen **Slot** (oder auf „Start“).
+- **Tipp auf eine Übung im Bild** wählt sie. Darunter: **Routing** (Wege einstellen, Weg zu
+  einer Übung im Bild, Frage, Schleife, ◀ zurück, Ende, Start, Übung einstellen), **Neuer
+  Slot**, **Beiname**, **Aus Plan nehmen** (Lücke schließen oder die Reihe danach mitnehmen).
+- **Wege einstellen** zeigt alle Wege der Übung untereinander: *Kommt von* und *Weiter zu* —
+  je Weg das Ziel, *wann* (frei, Zeit ab, Wiederholungen, in einer Zeit, Skala), anbieten oder
+  von selbst, Pflicht, Beschriftung („Rücken tut weh“). Dasselbe steht in „Im Plan einstellen“.
+  Der erste Weg ist der **Hauptweg** — der ohne Entscheidung.
+- **Lang drücken** zeigt nur den Weg durch diese Übung, „Alles zeigen“ holt den Rest zurück.
+- **Neu anordnen** räumt die Zeichnung auf und richtet die Ansicht aus — sonst bleibt alles,
+  wo es ist. Zwei Finger zoomen, ein Finger schiebt.
+- **Start** antippen spielt den Hauptweg ab.
+
+Übungen, die nur über einen Abzweig erreichbar sind, kommen **bei Bedarf** dran — nie von selbst.
+"""
+
 THEMEN: dict[str, tuple[str, str, str]] = {
-    "workout": ("Workout", WORKOUT_MD, "Workout: Übergang, Bedingungen, Zweige"),
+    "ablauf": ("Ablauf", ABLAUF_MD, "Der Reihe nach oder mit Abzweigen"),
+    "workout": ("Workout", WORKOUT_MD, "Workout: Übergang, Bedingungen, Wege"),
     "notation": ("So wird eingegeben", NOTATION_MD, "Wie gebe ich ein?"),
     "plan": ("Üben im Plan", PLAN_MD, "Knöpfe und Eingabe"),
     "varianten": ("Varianten", VARIANTEN_MD, "Was sind Varianten?"),

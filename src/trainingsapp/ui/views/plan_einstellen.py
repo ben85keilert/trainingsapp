@@ -39,9 +39,11 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import ablauf as ab
+from trainingsapp.core import bedingung as bd
 from trainingsapp.core import varianten as var
 from trainingsapp.core import zaehlen as zl
-from trainingsapp.core.bedingung import Bedingung, schleifen
+from trainingsapp.core.bedingung import Bedingung
 from trainingsapp.core.models import Exercise, Plan, PlanItem
 from trainingsapp.core.parameter import chips_sortiert
 from trainingsapp.core.result_spec import (
@@ -78,13 +80,13 @@ from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
-from trainingsapp.ui.components.karte import hinweis
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.planstand import schild
 from trainingsapp.ui.components.spec_form import SpecForm
 from trainingsapp.ui.components.takt_blatt import SYMBOL as TAKT_SYMBOL
 from trainingsapp.ui.components.takt_blatt import takt_blatt, takt_zeile_text
 from trainingsapp.ui.components.timer_wahl import timer_waehlen
+from trainingsapp.ui.components.wege_form import wege_karte
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
 
@@ -202,8 +204,14 @@ def plan_einstellen(
     #: `AUS` = ausdrücklich keiner
     acc_stand: dict[str, SensorWahl | None] = {"acc": item.acc}
     takt_stand: dict[str, Takt | None] = {"takt": item.takt}
-    #: Bedingung fürs Weiterkommen und Zweig im Workout (W2/W3, `core.bedingung`)
+    #: Bedingung fürs Weiterkommen im Workout (W2, `core.bedingung`) — linear
     bed_stand: dict[str, Bedingung] = {"b": item.bedingung}
+    #: Verzweigt der Plan, gelten die Wege im Ablauf — dasselbe wie im Reiter „Ablauf“ (P108:
+    #: gespiegelt); gespeichert wird mit der Seite
+    plan_jetzt = state.plaene.laden(plan.id) or plan
+    ablauf_anfang = plan_jetzt.ablauf
+    ablauf_stand: dict[str, Any] = {"a": plan_jetzt.ablauf}
+    wege_merken: dict[str, Any] = {}
 
     #: Das Ziel je Parameter — ein kleines Formular je Karte (P107 wie „Übung bearbeiten“),
     #: die Werte gemerkt über ein Aus- und wieder Einschalten
@@ -254,22 +262,35 @@ def plan_einstellen(
         an = bool(varianten_schalter.value) or not varianten_liste
         return bereinigt(varianten_schalten(neu, an), uebung)
 
-    # -- Bedingung und Zweig (Workout W2/W3, `docs/plan_workout.md` §1) --------------------
+    # -- Bedingung und Wege (Workout W2, `docs/plan_verzweigungen.md` §8.8) -----------------
 
-    def schleifen_hinweis() -> ft.Control | None:
-        """P100: Laufen „erfüllt →“/„nicht erfüllt →“ von hier aus im Kreis, sagt es die Seite —
-        ein Hinweis, kein Verbot (`core.bedingung.schleifen`)."""
-        alle = {it.id: (bed_stand["b"] if it.id == item.id else it.bedingung) for it in plan.items}
-        if item.id not in schleifen(alle, [it.id for it in plan.items]):
-            return None
-        return hinweis(
-            "Die Verweise laufen im Kreis: Von dieser Übung aus erreicht das Workout keinen "
-            "Schritt ohne „erfüllt →“/„nicht erfüllt →“. Es läuft trotzdem — prüfe die Ziele."
-        )
+    def namen() -> dict[str, str]:
+        from trainingsapp.ui.views.ablauf import knoten_namen
+
+        return knoten_namen(state, plan_jetzt)
+
+    def ohne_timer() -> bool:
+        """Hat die Planübung keinen Timer, gilt „Zeit ab“ mit „Fertig“ (erfüllbar, Frage 6)."""
+        return timer_fuer(uebung, plan_jetzt, eingestellt()) is None
 
     def bedingung_karte() -> ft.Control:
-        """„Weiter, wenn …“ (W2/W3) — die gemeinsame Karte mit Zweig, Verweisen und Wegen; sie
-        gehört allein dem Plan (Ben, 8.11.2026: in der Übung macht sie keinen Sinn)."""
+        """„Weiter, wenn …“ — der Reihe nach: Herkunft und Ziel mit Nummer, darunter die
+        Bedingung; mit Abzweigen: alle Wege der Übung wie im Reiter „Ablauf“ (P108)."""
+        if plan_jetzt.ablauf.an:
+            return ft.Container(
+                padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                border_radius=14,
+                bgcolor=KARTE,
+                content=wege_karte(
+                    item.id,
+                    lambda: ablauf_stand["a"],
+                    lambda a: ablauf_stand.__setitem__("a", a),
+                    neu_zeichnen,
+                    namen=namen(),
+                    ohne_timer=ohne_timer(),
+                    merken=wege_merken,
+                ),
+            )
         eigen = not bed_stand["b"].leer
 
         def zurueck() -> None:
@@ -279,17 +300,28 @@ def plan_einstellen(
         def setzen(neu: Bedingung) -> None:
             bed_stand["b"] = neu
 
+        ids = [it.id for it in plan_jetzt.items]
+        n = ab.nummern(ids)
+        stelle = n.get(item.id, 0) - 1
+        alle = namen()
+        vorher = alle.get(ids[stelle - 1]) if 0 < stelle < len(ids) else None
+        danach = alle.get(ids[stelle + 1]) if 0 <= stelle < len(ids) - 1 else None
+        zeilen = [
+            ft.Text(f"Kommt von: {vorher}" if vorher else "Kommt von: Start des Workouts", size=13),
+            ft.Text(f"Weiter zu: {danach}" if danach else "Danach: Ende des Workouts", size=13),
+        ]
+        hinweise = []
+        if bed_stand["b"].art == bd.ZEIT and ohne_timer():
+            hinweise.append(
+                "Die Übung hat keinen Timer — „Zeit ab“ gilt, sobald „Fertig“ getippt ist."
+            )
         return bedingungs_karte(
             lambda: bed_stand["b"],
             setzen,
             neu_zeichnen,
-            ziele=[
-                (it.id, f"{n}. {u.name if u is not None else '?'}")
-                for n, it in enumerate(plan.items, start=1)
-                for u in [state.uebungen.laden(it.exercise_id, mit_geloeschten=True)]
-            ],
-            selbst=item.id,
             kopf=[schild(eigen, zurueck if eigen else None)],
+            kopf_zeilen=zeilen,
+            hinweise=hinweise,
         )
 
     # -- Aufbau --------------------------------------------------------------------------
@@ -719,12 +751,16 @@ def plan_einstellen(
     def zeichnen() -> None:
         ziel_werte()
         ziel_formulare.clear()
+        nummer = ab.nummern([it.id for it in plan_jetzt.items]).get(item.id, "?")
         geholte = [f for f in vorrat if f.key in aktiv]
         teile: list[ft.Control] = [
             ft.Text(
                 spans=[
                     ft.TextSpan("Im Plan einstellen", ft.TextStyle(weight=ft.FontWeight.BOLD)),
-                    ft.TextSpan(f"  ·  Plan „{plan.name}“", ft.TextStyle(size=14)),
+                    ft.TextSpan(
+                        f"  ·  Nr. {nummer}  ·  Plan „{plan.name}“",
+                        ft.TextStyle(size=14),
+                    ),
                 ],
                 size=18,
             ),
@@ -823,9 +859,11 @@ def plan_einstellen(
                 ),
             ),
             sensor_karte(),
-            abschnitt("WEITER, WENN …", hilfe_knopf(page, thema="workout")),
+            abschnitt(
+                "WEGE IM ABLAUF" if plan_jetzt.ablauf.an else "WEITER, WENN …",
+                hilfe_knopf(page, thema="ablauf" if plan_jetzt.ablauf.an else "workout"),
+            ),
             bedingung_karte(),
-            *([h] if (h := schleifen_hinweis()) is not None else []),
             ft.Divider(),
             ft.Row(
                 wrap=True,
@@ -857,6 +895,11 @@ def plan_einstellen(
             page.update()
             return "Im Ziel ist etwas unlesbar: " + ", ".join(probleme) + "."
         state.plaene.item_speichern(eingestellt())
+        if ablauf_stand["a"] != ablauf_anfang:
+            # Dieselben Wege wie im Reiter „Ablauf“ — gespiegelt auch in die Bedingungen
+            from trainingsapp.ui.views.ablauf import ablauf_speichern
+
+            ablauf_speichern(state, plan.id, ablauf_stand["a"])
         return None
 
     async def zurueckgehen() -> None:
@@ -961,7 +1004,10 @@ def plan_einstellen(
         controls=[sicher(inhalt, expand=False)],
     )
     return zurueck_speichert(
-        page, ansicht, geaendert=lambda: eingestellt() != anfang, speichern=sichern
+        page,
+        ansicht,
+        geaendert=lambda: eingestellt() != anfang or ablauf_stand["a"] != ablauf_anfang,
+        speichern=sichern,
     )
 
 

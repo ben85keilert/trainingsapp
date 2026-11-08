@@ -1,19 +1,23 @@
-"""Das **Ablaufbild** — der gezeichnete Ablauf eines Plans (Ben, 8.11.2026 spät,
-`docs/plan_verzweigungen.md` §4.5 und §8, Skizzen E1/E4/E5).
+"""Das **Ablaufbild** — der gezeichnete Ablauf eines Plans (Ben, 8.11.2026,
+`docs/plan_verzweigungen.md` §4.5 und §8, Skizzen E1/E4/E5; Rückmeldung vom Abend).
 
 Eine schieb- und zoombare Fläche (`ft.InteractiveViewer`) über einem `ft.Stack`: unten eine
-`ft.Canvas` mit den Kanten, darüber je Knoten ein Bild der Übung (`uebungsbild`) mit Beschriftung,
-der Start als dunkle Pille, Fragen als blaue Karte, leere Slots gestrichelt. Die Knoten ordnen
-sich selbst (`core.ablauf.layout`): der Start oben, jede Kante eine Ebene tiefer, Abzweige
-rechts, Bedarfsübungen ganz rechts. Niemand zieht einen Knoten — gezogen wird nur *in* einen
-Slot (`ft.DragTarget`, Reiter „Ablauf“).
+`ft.Canvas` mit den Kanten, darüber je Knoten das Bild der Übung (`uebungsbild`) mit Nummer und
+Namen, der Start als dunkle Pille (auch Ablagefläche: eine Übung darauf = neuer Start), Fragen als
+blaue Karte, leere Slots gestrichelt (`ft.DragTarget`).
 
-Kanten sind Linien mit Pfeil: der Ablauf kräftig, Wege zu Bedarfsübungen gestrichelt, ``◀
-zurück`` gepunktet als Bogen nach links, Schleifen als Bogen am Knoten. Am Mittelpunkt sitzt das
-**Etikett** (Auslöser, Beschriftung) — es ist der Tipp-Punkt der Kante (Linien treffen am
-Handy niemanden). **Vernebeln**: Knoten in ``vernebelt`` und ihre Kanten stehen auf 25 %.
+**Lagen** (`core.ablauf.Lage`) bekommt das Bild von außen: Der Reiter hält sie fest, bis jemand
+„Neu anordnen“ tippt (`core.ablauf.lagen_ergaenzen`) — die Zeichnung springt beim Bearbeiten
+nicht. Ein Knoten steht mittig über seinen Kindern (`core.ablauf.layout`). Die **Nummer** am
+Knoten ist seine Stelle in der Planliste (Frage 5: nur ein Alias der festen ID).
 
-Nur Zeichnen; was ein Tipp bedeutet, sagt der Aufrufer über die Rückrufe.
+Kanten sind Linien mit Pfeil: der Ablauf kräftig, Wege zu Bedarfsübungen gestrichelt, ``◀ zurück``
+gepunktet als Bogen, Schleifen als Bogen am Knoten. Das **Etikett** (Auslöser, Beschriftung,
+Pflicht) sitzt nahe am Ziel, wo die Linien auseinanderlaufen; ein freier Weg ohne Beschriftung hat
+keins. **Vernebeln**: Knoten in ``vernebelt`` und ihre Kanten stehen auf 25 %.
+
+Für den Reiter, der die Fläche einmal baut und dann nur ihren Inhalt tauscht (die Ansicht behält
+Zoom und Lage): `zeichnung` + `aktualisieren`; für ein Blatt (Workout): `ablaufbild`.
 """
 
 from __future__ import annotations
@@ -30,20 +34,21 @@ import flet as ft
 import flet.canvas as cv
 
 from trainingsapp.core import ablauf as ab
-from trainingsapp.core.ablauf import Ablauf, Kante
+from trainingsapp.core.ablauf import Ablauf, Kante, Lage
 from trainingsapp.core.models import Exercise, PlanItem
 from trainingsapp.ui.components.uebungsbild import uebungsbild
 
 #: Maße der Zeichnung (px, vor dem Zoom)
 KNOTEN = 64
-SPALTE = 132
-EBENE = 128
+SPALTE = 140
+EBENE = 156
 RAND = 24
 #: links mehr Platz: Schleifen und „◀ zurück“ zeichnen ihren Bogen links am Knoten
-RAND_X = 70
+RAND_X = 76
 START_H = 36
 FRAGE_B = 120
 FRAGE_H = 66
+ETIKETT_B = 120
 #: so durchsichtig wird Vernebeltes
 NEBEL = 0.25
 
@@ -56,22 +61,58 @@ class Slot:
 
 
 @dataclass(slots=True)
-class Bild:
-    """Die gezeichnete Fläche samt dem, was der Aufrufer nachträglich braucht."""
+class Zeichnung:
+    """Der Inhalt der Fläche — die Schichten und was der Aufrufer nachträglich braucht."""
 
-    control: ft.Control
-    #: Pixelmitte je Knoten (für Tests und „Pfad abspielen“)
+    controls: list[ft.Control]
+    breite: float
+    hoehe: float
+    #: Pixelmitte je Knoten (Tests, „Pfad abspielen“)
     mitten: dict[str, tuple[float, float]]
     #: die Knoten-Controls je ID (Deckkraft fürs Abspielen)
     knoten: dict[str, ft.Control]
 
 
-def ablaufbild(
+@dataclass(slots=True)
+class Bild:
+    """Die schiebbare Fläche — ``control`` ist der `ft.InteractiveViewer`."""
+
+    control: ft.InteractiveViewer
+    flaeche: ft.Stack
+    mitten: dict[str, tuple[float, float]]
+    knoten: dict[str, ft.Control]
+
+
+def etikett_text(k: Kante, zaehlung: Counter[tuple[str, str]] | None = None) -> str:
+    """Was an der Kante steht — leer bei einem freien Weg ohne Beschriftung.
+
+    >>> etikett_text(Kante("a", "b")), etikett_text(Kante("a", "b", ab.SKALA, 7, text="Rücken"))
+    ('', 'Skala ≥ 7 · Rücken')
+    >>> etikett_text(Kante("a", ab.ZURUECK, wiederholen=True))
+    '◀ zurück · noch einmal'
+    """
+    if k.zurueck:
+        teile = ["◀ zurück"] + (["noch einmal"] if k.wiederholen else [])
+    elif k.zum_ende:
+        teile = ["Ende"]
+    else:
+        teile = [k.ausloeser_text()] if k.ausloeser != ab.FREI else []
+    if k.text:
+        teile.append(k.text)
+    if k.pflicht:
+        teile.append("Pflicht")
+    if zaehlung is not None and (z := zaehlung.get((k.von, k.nach), 0)) > 0:
+        teile.append(f"{z}×")
+    return " · ".join(teile)
+
+
+def zeichnung(
     state: Any,
     ablauf: Ablauf,
     items: Sequence[PlanItem],
     katalog: Mapping[str, Exercise],
     *,
+    lagen: Mapping[str, Lage] | None = None,
     laufend: str | None = None,
     erledigt: Sequence[str] = (),
     vernebelt: Sequence[str] = (),
@@ -81,48 +122,45 @@ def ablaufbild(
     on_knoten: Callable[[str], Any] | None = None,
     on_knoten_lang: Callable[[str], Any] | None = None,
     on_kante: Callable[[Kante], Any] | None = None,
-    on_plus: Callable[[str], Any] | None = None,
     on_slot: Callable[[Slot, str], Any] | None = None,
     on_start: Callable[[], Any] | None = None,
-    hoehe: float | None = 420,
-) -> Bild:
-    """Die Zeichnung. ``laufend`` pulsiert, ``erledigt`` sind grau, ``vernebelt`` auf 25 %;
-    ``gewaehlt`` bekommt Rahmen und „+“ (``on_plus``); ``zaehlung`` macht oft gegangene Kanten
-    dicker (Auswertung); ``slots`` sind leere Plätze — ``on_slot(slot, exercise_id)`` läuft,
-    wenn eine Übung aus der Palette (Draggable mit ``data`` = Übungs-ID) hineinfällt."""
+    on_start_ablegen: Callable[[str], Any] | None = None,
+) -> Zeichnung:
+    """Die Schichten der Fläche. ``lagen``: wo jeder Knoten liegt (sonst `core.ablauf.layout`);
+    ``laufend`` leuchtet, ``erledigt`` ist blass, ``vernebelt`` auf 25 %, ``gewaehlt`` hat einen
+    Rahmen; ``zaehlung`` macht oft gegangene Kanten dicker; ``slots`` sind leere Plätze —
+    ``on_slot(slot, item_id)`` läuft, wenn eine Planübung aus der Palette (Draggable mit ``data``
+    = ID) hineinfällt, ``on_start_ablegen(item_id)`` beim Ablegen auf „Start“."""
     ids = [it.id for it in items]
+    nummer = ab.nummern(ids)
     namen = {it.id: katalog[it.exercise_id].name for it in items if it.exercise_id in katalog}
     namen.update({f.id: f.text for f in ablauf.fragen})
-    lage = ab.layout(ablauf, ids)
-    # Slots hängen unter ihrem Knoten, rechts neben dem, was dort schon liegt
-    slot_lage: dict[int, ab.Lage] = {}
-    belegt = {(v.spalte, v.ebene) for v in lage.values()}
+    lage = dict(lagen) if lagen is not None else ab.layout(ablauf, ids)
+    lage = {k: v for k, v in lage.items() if k in namen}
+    slot_lage: dict[int, Lage] = {}
     for n, slot in enumerate(slots):
         oben = lage.get(slot.von)
-        if oben is None:
-            continue
-        spalte, ebene = oben.spalte, oben.ebene + 1
-        while (spalte, ebene) in belegt:
-            spalte += 1
-        belegt.add((spalte, ebene))
-        slot_lage[n] = ab.Lage(spalte, ebene)
+        if oben is not None:
+            belegt = [*lage.values(), *slot_lage.values()]
+            slot_lage[n] = ab.freie_lage(belegt, oben.x, oben.ebene + 1)
+    alle = [*lage.values(), *slot_lage.values()]
+    x_min = min((v.x for v in alle), default=0.0)
+    x_max = max((v.x for v in alle), default=0.0)
+    ebene_max = max((v.ebene for v in alle), default=0)
     nebel = set(vernebelt)
     fertig = set(erledigt)
+    bedarf = set(ab.bedarf(ablauf, ids))
 
-    def mitte(lg: ab.Lage) -> tuple[float, float]:
+    def mitte(lg: Lage) -> tuple[float, float]:
         return (
-            RAND_X + lg.spalte * SPALTE + KNOTEN / 2,
-            RAND + START_H + 18 + lg.ebene * EBENE + KNOTEN / 2,
+            RAND_X + (lg.x - x_min) * SPALTE + KNOTEN / 2,
+            RAND + START_H + 22 + lg.ebene * EBENE + KNOTEN / 2,
         )
 
     mitten = {k: mitte(v) for k, v in lage.items()}
-    spalten = max([v.spalte for v in lage.values()] + [v.spalte for v in slot_lage.values()] + [0])
-    ebenen = max([v.ebene for v in lage.values()] + [v.ebene for v in slot_lage.values()] + [0])
-    breite = RAND_X + RAND + spalten * SPALTE + max(KNOTEN, FRAGE_B) + 40
-    hoch = RAND * 2 + START_H + 18 + (ebenen + 1) * EBENE + 40
-    bedarf = set(ab.bedarf(ablauf, ids))
+    breite = RAND_X + (x_max - x_min) * SPALTE + max(KNOTEN, FRAGE_B) + RAND + 80
+    hoehe = RAND + START_H + 22 + (ebene_max + 1) * EBENE + 40
 
-    # -- Kanten --------------------------------------------------------------------------
     formen: list[cv.Shape] = []
     etiketten: list[ft.Control] = []
 
@@ -165,38 +203,49 @@ def ablaufbild(
         )
 
     def etikett(k: Kante, x: float, y: float, dimm: bool) -> None:
-        text = "weiter" if k.ausloeser == ab.FREI and not k.text and not k.pflicht else k.kurztext()
-        if k.zurueck:
-            text = (
-                "◀ zurück"
-                + (" · noch einmal" if k.wiederholen else "")
-                + (f" · {k.text}" if k.text else "")
-            )
-        if k.zum_ende:
-            text = "Ende" + (f" · {k.text}" if k.text else "")
-        if zaehlung is not None and (z := zaehlung.get((k.von, k.nach), 0)) > 0:
-            text = f"{text} · {z}×" if text else f"{z}×"
+        """Das Etikett mittig bei (x, y) — feste Breite, Text in der Mitte, höchstens zwei
+        Zeilen."""
+        text = etikett_text(k, zaehlung)
         if not text:
-            text = "weiter"
+            return
         warm = k.nach in bedarf or k.zurueck
         etiketten.append(
             ft.Container(
-                left=x - 6,
-                top=y - 11,
-                padding=ft.Padding.symmetric(horizontal=7, vertical=3),
-                border_radius=9,
-                bgcolor=ft.Colors.TERTIARY_CONTAINER if warm else ft.Colors.SURFACE_CONTAINER_HIGH,
+                left=x - ETIKETT_B / 2,
+                top=y - 12,
+                width=ETIKETT_B,
+                alignment=ft.Alignment.CENTER,
                 opacity=NEBEL if dimm else 1.0,
                 on_click=(lambda _e, kk=k: on_kante(kk)) if on_kante is not None else None,
-                tooltip="Kante einstellen" if on_kante is not None else None,
-                content=ft.Text(
-                    text,
-                    size=10,
-                    color=ft.Colors.ON_TERTIARY_CONTAINER if warm else None,
-                    no_wrap=True,
+                content=ft.Container(
+                    padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                    border_radius=8,
+                    bgcolor=ft.Colors.TERTIARY_CONTAINER
+                    if warm
+                    else ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                    content=ft.Text(
+                        text,
+                        size=10,
+                        max_lines=2,
+                        text_align=ft.TextAlign.CENTER,
+                        color=ft.Colors.ON_TERTIARY_CONTAINER if warm else None,
+                    ),
                 ),
                 data=("kante", k.von, k.nach),
             )
+        )
+
+    def bezier(
+        p0: tuple[float, float],
+        p1: tuple[float, float],
+        p2: tuple[float, float],
+        p3: tuple[float, float],
+        t: float,
+    ) -> tuple[float, float]:
+        u = 1 - t
+        return (
+            u**3 * p0[0] + 3 * u**2 * t * p1[0] + 3 * u * t**2 * p2[0] + t**3 * p3[0],
+            u**3 * p0[1] + 3 * u**2 * t * p1[1] + 3 * u * t**2 * p2[1] + t**3 * p3[1],
         )
 
     for k in ablauf.kanten:
@@ -205,70 +254,69 @@ def ablaufbild(
         dimm = k.von in nebel or k.nach in nebel
         x0, y0 = mitten[k.von]
         farbe = farbe_fuer(k)
+        breit = FRAGE_B / 2 if ablauf.frage(k.von) is not None else KNOTEN / 2
         if k.schleife:
-            # Bogen links am Knoten
             r = KNOTEN / 2 + 14
             formen.append(
                 cv.Path(
                     [
-                        cv.Path.MoveTo(x0 - KNOTEN / 2, y0 + 14),
+                        cv.Path.MoveTo(x0 - breit, y0 + 14),
                         cv.Path.CubicTo(
-                            x0 - r - 22, y0 + 14, x0 - r - 22, y0 - 14, x0 - KNOTEN / 2, y0 - 14
+                            x0 - r - 24, y0 + 14, x0 - r - 24, y0 - 14, x0 - breit, y0 - 14
                         ),
                     ],
                     paint=paint(k, dimm),
                 )
             )
-            formen.append(pfeil(x0 - KNOTEN / 2, y0 - 14, 0.0, farbe, dimm))
-            etikett(k, x0 - r - 40, y0 - 24, dimm)
+            formen.append(pfeil(x0 - breit, y0 - 14, 0.0, farbe, dimm))
+            etikett(k, x0 - r - 12, y0 + 34, dimm)
             continue
         if k.zurueck:
-            # gepunkteter Bogen nach links oben — „dorthin, wo ich herkam“
             formen.append(
                 cv.Path(
                     [
-                        cv.Path.MoveTo(x0 - KNOTEN / 2, y0),
-                        cv.Path.CubicTo(x0 - 40, y0, x0 - 40, y0 - 60, x0 - 24, y0 - 70),
+                        cv.Path.MoveTo(x0 - breit, y0),
+                        cv.Path.CubicTo(x0 - 44, y0, x0 - 44, y0 - 64, x0 - 26, y0 - 74),
                     ],
                     paint=paint(k, dimm),
                 )
             )
-            formen.append(pfeil(x0 - 24, y0 - 70, -math.radians(60), farbe, dimm))
-            etikett(k, x0 - 60, y0 - 50, dimm)
+            formen.append(pfeil(x0 - 26, y0 - 74, -math.radians(60), farbe, dimm))
+            etikett(k, x0 - 40, y0 - 40, dimm)
             continue
         if k.zum_ende:
+            unten = y0 + KNOTEN / 2 + 40
             formen.append(
                 cv.Path(
-                    [cv.Path.MoveTo(x0, y0 + KNOTEN / 2), cv.Path.LineTo(x0, y0 + KNOTEN / 2 + 36)],
+                    [cv.Path.MoveTo(x0, y0 + KNOTEN / 2), cv.Path.LineTo(x0, unten)],
                     paint=paint(k, dimm),
                 )
             )
-            formen.append(pfeil(x0, y0 + KNOTEN / 2 + 36, math.radians(90), farbe, dimm))
-            etikett(k, x0 + 10, y0 + KNOTEN / 2 + 14, dimm)
+            formen.append(pfeil(x0, unten, math.radians(90), farbe, dimm))
+            etikett(k, x0, unten + 16, dimm)
             continue
         if k.nach not in mitten:
             continue
         x1, y1 = mitten[k.nach]
         if y1 > y0:
-            # abwärts: von der Unterkante zur Oberkante, als weiche Kurve
+            # abwärts: Unterkante zur Oberkante als weiche Kurve; das Etikett nahe am Ziel
             a = (x0, y0 + KNOTEN / 2)
-            b = (x1, y1 - KNOTEN / 2 - 4)
+            b = (x1, y1 - KNOTEN / 2 - 6)
+            c1, c2 = (a[0], a[1] + 50), (b[0], b[1] - 50)
             formen.append(
                 cv.Path(
-                    [
-                        cv.Path.MoveTo(*a),
-                        cv.Path.CubicTo(a[0], a[1] + 40, b[0], b[1] - 40, b[0], b[1]),
-                    ],
+                    [cv.Path.MoveTo(*a), cv.Path.CubicTo(*c1, *c2, *b)],
                     paint=paint(k, dimm),
                 )
             )
             formen.append(pfeil(b[0], b[1], math.radians(90), farbe, dimm))
-            etikett(k, (a[0] + b[0]) / 2 + (14 if x1 >= x0 else -60), (a[1] + b[1]) / 2 - 10, dimm)
+            ex, ey = bezier(a, c1, c2, b, 0.62)
+            etikett(k, ex, ey, dimm)
         else:
             # aufwärts oder gleiche Ebene: rechts herum zurück
-            a = (x0 + KNOTEN / 2, y0)
-            b = (x1 + KNOTEN / 2 + 4, y1)
-            aus = max(x0, x1) + KNOTEN / 2 + 44
+            a = (x0 + breit, y0)
+            b = (x1 + KNOTEN / 2 + 6, y1)
+            aus = max(x0, x1) + KNOTEN / 2 + 48
             formen.append(
                 cv.Path(
                     [cv.Path.MoveTo(*a), cv.Path.CubicTo(aus, a[1], aus, b[1], b[0], b[1])],
@@ -276,26 +324,49 @@ def ablaufbild(
                 )
             )
             formen.append(pfeil(b[0], b[1], math.radians(180), farbe, dimm))
-            etikett(k, aus - 20, (a[1] + b[1]) / 2 - 10, dimm)
+            etikett(k, aus, (a[1] + b[1]) / 2, dimm)
 
     # Start → Startknoten
     start = ablauf.startknoten(ids)
     if start is not None and start in mitten:
         sx, sy = mitten[start]
+        oben_y = sy - (FRAGE_H if ablauf.frage(start) is not None else KNOTEN) / 2 - 6
         formen.append(
             cv.Path(
-                [cv.Path.MoveTo(sx, RAND + START_H), cv.Path.LineTo(sx, sy - KNOTEN / 2 - 4)],
+                [cv.Path.MoveTo(sx, RAND + START_H), cv.Path.LineTo(sx, oben_y)],
                 paint=ft.Paint(
                     color=ft.Colors.PRIMARY, stroke_width=2.5, style=ft.PaintingStyle.STROKE
                 ),
             )
         )
-        formen.append(pfeil(sx, sy - KNOTEN / 2 - 4, math.radians(90), ft.Colors.PRIMARY, False))
+        formen.append(pfeil(sx, oben_y, math.radians(90), ft.Colors.PRIMARY, False))
+    else:
+        sx = RAND_X + KNOTEN / 2
 
-    # -- Knoten -------------------------------------------------------------------------
+    # Slots: Linie vom Knoten, gestricheltes Feld
+    for n, slot in enumerate(slots):
+        lg = slot_lage.get(n)
+        if lg is None or slot.von not in mitten:
+            continue
+        x, y = mitte(lg)
+        x0, y0 = mitten[slot.von]
+        formen.append(
+            cv.Path(
+                [
+                    cv.Path.MoveTo(x0, y0 + KNOTEN / 2),
+                    cv.Path.CubicTo(x0, y0 + 50, x, y - 54, x, y - 24),
+                ],
+                paint=ft.Paint(
+                    color=ft.Colors.OUTLINE,
+                    stroke_width=2,
+                    style=ft.PaintingStyle.STROKE,
+                    stroke_dash_pattern=[4, 4],
+                ),
+            )
+        )
+
     knoten_controls: dict[str, ft.Control] = {}
-    schichten: list[ft.Control] = [cv.Canvas(shapes=formen, width=breite, height=hoch)]
-    nummer = {k: n for n, k in enumerate(ab.hauptpfad(ablauf, ids), start=1)}
+    schichten: list[ft.Control] = [cv.Canvas(shapes=formen, width=breite, height=hoehe)]
 
     def gesten(knoten: str, inhalt: ft.Control) -> ft.Control:
         if on_knoten is None and on_knoten_lang is None:
@@ -308,24 +379,52 @@ def ablaufbild(
             ),
         )
 
-    if start is not None and start in mitten:
-        sx, _sy = mitten[start]
-        schichten.append(
-            ft.Container(
-                left=sx - 36,
-                top=RAND,
-                width=72,
-                height=START_H,
-                border_radius=18,
-                bgcolor=ft.Colors.ON_SURFACE,
-                alignment=ft.Alignment.CENTER,
-                on_click=(lambda _e: on_start()) if on_start is not None else None,
-                tooltip="Pfad abspielen" if on_start is not None else None,
-                content=ft.Text(
-                    "Start", size=12, weight=ft.FontWeight.W_600, color=ft.Colors.SURFACE
+    def ablage(inhalt: ft.Control, wenn: Callable[[str], Any] | None) -> ft.Control:
+        """Eine Fläche, auf die man eine Planübung aus der Palette ziehen kann."""
+        if wenn is None:
+            return inhalt
+
+        def fallen(e: ft.DragTargetEvent) -> None:
+            item_id = getattr(getattr(e, "src", None), "data", None)
+            if isinstance(item_id, str) and item_id:
+                wenn(item_id)
+
+        return ft.DragTarget(group="uebung", content=inhalt, on_accept=fallen)
+
+    # Start-Pille: tippen = Pfad abspielen, eine Übung darauf = neuer Start
+    schichten.append(
+        ft.Container(
+            left=sx - 40,
+            top=RAND,
+            content=ablage(
+                ft.Container(
+                    width=80,
+                    height=START_H,
+                    border_radius=18,
+                    bgcolor=ft.Colors.ON_SURFACE,
+                    alignment=ft.Alignment.CENTER,
+                    on_click=(lambda _e: on_start()) if on_start is not None else None,
+                    tooltip="Pfad abspielen" if on_start is not None else None,
+                    content=ft.Text(
+                        "Start", size=12, weight=ft.FontWeight.W_600, color=ft.Colors.SURFACE
+                    ),
                 ),
-                data=("start",),
-            )
+                on_start_ablegen,
+            ),
+            data=("start",),
+        )
+    )
+
+    def badge(text: str, farbe: str = ft.Colors.ON_SURFACE) -> ft.Control:
+        return ft.Container(
+            left=-7,
+            top=-7,
+            width=20,
+            height=20,
+            border_radius=10,
+            bgcolor=farbe,
+            alignment=ft.Alignment.CENTER,
+            content=ft.Text(text, size=10, weight=ft.FontWeight.BOLD, color=ft.Colors.SURFACE),
         )
 
     for it in items:
@@ -336,52 +435,42 @@ def ablaufbild(
         dimm = it.id in nebel
         ist_bedarf = it.id in bedarf
         rahmen = None
+        schatten = None
         if it.id == gewaehlt:
-            rahmen = ft.Border.all(2.5, ft.Colors.PRIMARY)
+            rahmen = ft.Border.all(3, ft.Colors.PRIMARY)
+            schatten = ft.BoxShadow(
+                blur_radius=12,
+                spread_radius=3,
+                color=ft.Colors.with_opacity(0.35, ft.Colors.PRIMARY),
+            )
         elif it.id == laufend:
             rahmen = ft.Border.all(3, ft.Colors.PRIMARY)
+            schatten = ft.BoxShadow(
+                blur_radius=14,
+                spread_radius=4,
+                color=ft.Colors.with_opacity(0.25, ft.Colors.PRIMARY),
+            )
         elif ist_bedarf:
             rahmen = ft.Border.all(2, ft.Colors.TERTIARY)
-        bild = ft.Container(
-            width=KNOTEN,
-            height=KNOTEN,
-            border_radius=14,
-            border=rahmen,
-            bgcolor=ft.Colors.TERTIARY_CONTAINER if ist_bedarf else ft.Colors.PRIMARY_CONTAINER,
-            alignment=ft.Alignment.CENTER,
-            shadow=(
-                ft.BoxShadow(
-                    blur_radius=14,
-                    spread_radius=4,
-                    color=ft.Colors.with_opacity(0.25, ft.Colors.PRIMARY),
-                )
-                if it.id == laufend
-                else None
+        zeichen: list[ft.Control] = [
+            ft.Container(
+                width=KNOTEN,
+                height=KNOTEN,
+                border_radius=14,
+                border=rahmen,
+                shadow=schatten,
+                bgcolor=ft.Colors.TERTIARY_CONTAINER if ist_bedarf else ft.Colors.PRIMARY_CONTAINER,
+                alignment=ft.Alignment.CENTER,
+                content=uebungsbild(
+                    state,
+                    u.icon_key if u else None,
+                    u.image_path if u else None,
+                    groesse=34,
+                    color=ft.Colors.TERTIARY if ist_bedarf else ft.Colors.PRIMARY,
+                ),
             ),
-            content=uebungsbild(
-                state,
-                u.icon_key if u else None,
-                u.image_path if u else None,
-                groesse=34,
-                color=ft.Colors.TERTIARY if ist_bedarf else ft.Colors.PRIMARY,
-            ),
-        )
-        zeichen: list[ft.Control] = [bild]
-        if (nr := nummer.get(it.id)) is not None:
-            zeichen.append(
-                ft.Container(
-                    left=-6,
-                    top=-6,
-                    width=18,
-                    height=18,
-                    border_radius=9,
-                    bgcolor=ft.Colors.ON_SURFACE,
-                    alignment=ft.Alignment.CENTER,
-                    content=ft.Text(
-                        str(nr), size=10, weight=ft.FontWeight.BOLD, color=ft.Colors.SURFACE
-                    ),
-                )
-            )
+            badge(str(nummer.get(it.id, "?"))),
+        ]
         if it.id in fertig:
             zeichen.append(
                 ft.Container(
@@ -390,25 +479,9 @@ def ablaufbild(
                     content=ft.Icon(ft.Icons.CHECK_CIRCLE, size=18, color=ft.Colors.PRIMARY),
                 )
             )
-        if it.id == gewaehlt and on_plus is not None:
-            zeichen.append(
-                ft.Container(
-                    right=-14,
-                    bottom=-14,
-                    width=30,
-                    height=30,
-                    border_radius=15,
-                    bgcolor=ft.Colors.PRIMARY,
-                    alignment=ft.Alignment.CENTER,
-                    on_click=lambda _e, kk=it.id: on_plus(kk),
-                    tooltip="Pfad hinzufügen",
-                    content=ft.Icon(ft.Icons.ADD, size=20, color=ft.Colors.ON_PRIMARY),
-                    data=("plus", it.id),
-                )
-            )
-        unterzeile = []
+        unterzeile: list[ft.Control] = []
         if it.beiname:
-            unterzeile.append(ft.Text(it.beiname, size=10, opacity=0.65, no_wrap=True))
+            unterzeile.append(ft.Text(it.beiname, size=10, opacity=0.65, max_lines=1))
         if ist_bedarf:
             unterzeile.append(ft.Text("bei Bedarf", size=10, opacity=0.6))
         inhalt = ft.Column(
@@ -428,15 +501,15 @@ def ablaufbild(
                     weight=ft.FontWeight.W_600,
                     text_align=ft.TextAlign.CENTER,
                     max_lines=2,
-                    width=SPALTE - 16,
+                    width=SPALTE - 24,
                 ),
                 *unterzeile,
             ],
         )
         knoten = ft.Container(
-            left=x - (SPALTE - 16) / 2,
+            left=x - (SPALTE - 24) / 2,
             top=y - KNOTEN / 2,
-            width=SPALTE - 16,
+            width=SPALTE - 24,
             opacity=NEBEL if dimm else (0.55 if it.id in fertig and it.id != laufend else 1.0),
             animate_opacity=ft.Animation(400, ft.AnimationCurve.EASE_IN_OUT),
             content=gesten(it.id, inhalt),
@@ -450,13 +523,13 @@ def ablaufbild(
             continue
         x, y = mitten[f.id]
         dimm = f.id in nebel
-        rahmen = ft.Border.all(2.5 if f.id in (gewaehlt, laufend) else 1.5, ft.Colors.SECONDARY)
+        dick = 3 if f.id in (gewaehlt, laufend) else 1.5
         zeichen = [
             ft.Container(
                 width=FRAGE_B,
                 height=FRAGE_H,
                 border_radius=14,
-                border=rahmen,
+                border=ft.Border.all(dick, ft.Colors.SECONDARY),
                 bgcolor=ft.Colors.SECONDARY_CONTAINER,
                 padding=8,
                 content=ft.Column(
@@ -480,24 +553,8 @@ def ablaufbild(
                         ft.Text(f"Skala {f.min}–{f.max}", size=10, opacity=0.65),
                     ],
                 ),
-            )
+            ),
         ]
-        if f.id == gewaehlt and on_plus is not None:
-            zeichen.append(
-                ft.Container(
-                    right=-14,
-                    bottom=-14,
-                    width=30,
-                    height=30,
-                    border_radius=15,
-                    bgcolor=ft.Colors.SECONDARY,
-                    alignment=ft.Alignment.CENTER,
-                    on_click=lambda _e, kk=f.id: on_plus(kk),
-                    tooltip="Pfad hinzufügen",
-                    content=ft.Icon(ft.Icons.ADD, size=20, color=ft.Colors.ON_SECONDARY),
-                    data=("plus", f.id),
-                )
-            )
         knoten = ft.Container(
             left=x - FRAGE_B / 2,
             top=y - FRAGE_H / 2,
@@ -518,36 +575,11 @@ def ablaufbild(
         knoten_controls[f.id] = knoten
         schichten.append(knoten)
 
-    # leere Slots: Linie vom Knoten, gestricheltes Feld, Ziel fürs Ziehen
     for n, slot in enumerate(slots):
         lg = slot_lage.get(n)
         if lg is None or slot.von not in mitten:
             continue
         x, y = mitte(lg)
-        x0, y0 = mitten[slot.von]
-        formen.append(
-            cv.Path(
-                [
-                    cv.Path.MoveTo(x0, y0 + KNOTEN / 2),
-                    cv.Path.CubicTo(x0, y0 + 40, x, y - 44, x, y - 24),
-                ],
-                paint=ft.Paint(
-                    color=ft.Colors.OUTLINE,
-                    stroke_width=2,
-                    style=ft.PaintingStyle.STROKE,
-                    stroke_dash_pattern=[4, 4],
-                ),
-            )
-        )
-
-        def fallen(e: ft.DragTargetEvent, s: Slot = slot) -> None:
-            if on_slot is None:
-                return
-            quelle = getattr(e, "src", None)
-            exercise_id = getattr(quelle, "data", None)
-            if isinstance(exercise_id, str) and exercise_id:
-                on_slot(s, exercise_id)
-
         feld = ft.Container(
             width=KNOTEN,
             height=44,
@@ -566,6 +598,11 @@ def ablaufbild(
             with contextlib.suppress(Exception):  # noch nicht auf der Seite
                 f.update()
 
+        def fallen(e: ft.DragTargetEvent, s: Slot = slot) -> None:
+            item_id = getattr(getattr(e, "src", None), "data", None)
+            if on_slot is not None and isinstance(item_id, str) and item_id:
+                on_slot(s, item_id)
+
         schichten.append(
             ft.Container(
                 left=x - KNOTEN / 2,
@@ -580,23 +617,50 @@ def ablaufbild(
                 data=("slot", slot.von),
             )
         )
-    # Etiketten über allem, damit sie antippbar bleiben
-    schichten.extend(etiketten)
+    schichten.extend(etiketten)  # über allem, damit sie antippbar bleiben
+    return Zeichnung(schichten, breite, hoehe, mitten, knoten_controls)
 
-    flaeche = ft.Stack(
-        width=breite, height=hoch, controls=schichten, clip_behavior=ft.ClipBehavior.NONE
+
+def flaeche_neu(z: Zeichnung) -> ft.Stack:
+    return ft.Stack(
+        width=z.breite, height=z.hoehe, controls=z.controls, clip_behavior=ft.ClipBehavior.NONE
     )
-    # Ohne ``hoehe`` füllt die Fläche, was ihr Elternteil ihr gibt (ein Container mit
-    # ``expand`` in einer Spalte) — kein ``expand`` hier, das gälte nur in Row/Column
-    viewer = ft.InteractiveViewer(
+
+
+def ansicht(flaeche: ft.Stack, hoehe: float | None = None) -> ft.InteractiveViewer:
+    """Die schieb- und zoombare Fläche — ohne ``hoehe`` so hoch, wie das Elternteil sie lässt."""
+    return ft.InteractiveViewer(
         content=ft.Container(content=flaeche, padding=0),
-        min_scale=0.5,
+        min_scale=0.4,
         max_scale=3,
-        boundary_margin=ft.Margin.all(200),
+        boundary_margin=ft.Margin.all(240),
         constrained=False,
         height=hoehe,
     )
-    return Bild(viewer, mitten, knoten_controls)
+
+
+def ablaufbild(
+    state: Any,
+    ablauf: Ablauf,
+    items: Sequence[PlanItem],
+    katalog: Mapping[str, Exercise],
+    *,
+    hoehe: float | None = 420,
+    **optionen: Any,
+) -> Bild:
+    """Bild und Fläche auf einmal (Blatt im Workout) — ``optionen`` wie `zeichnung`."""
+    z = zeichnung(state, ablauf, items, katalog, **optionen)
+    flaeche = flaeche_neu(z)
+    return Bild(ansicht(flaeche, hoehe), flaeche, z.mitten, z.knoten)
+
+
+def aktualisieren(bild: Bild, z: Zeichnung) -> None:
+    """Neuer Inhalt in derselben Fläche — die Ansicht behält Zoom und Lage."""
+    bild.flaeche.controls = z.controls
+    bild.flaeche.width, bild.flaeche.height = z.breite, z.hoehe
+    bild.mitten, bild.knoten = z.mitten, z.knoten
+    with contextlib.suppress(Exception):  # noch nicht auf der Seite
+        bild.flaeche.update()
 
 
 async def abspielen(page: Any, bild: Bild, pfad: Sequence[str], schritt_s: float = 0.5) -> None:
@@ -622,4 +686,19 @@ async def abspielen(page: Any, bild: Bild, pfad: Sequence[str], schritt_s: float
         page.update()
 
 
-__all__ = ["EBENE", "KNOTEN", "NEBEL", "SPALTE", "Bild", "Slot", "ablaufbild", "abspielen"]
+__all__ = [
+    "EBENE",
+    "KNOTEN",
+    "NEBEL",
+    "SPALTE",
+    "Bild",
+    "Slot",
+    "Zeichnung",
+    "ablaufbild",
+    "abspielen",
+    "aktualisieren",
+    "ansicht",
+    "etikett_text",
+    "flaeche_neu",
+    "zeichnung",
+]

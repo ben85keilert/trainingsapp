@@ -275,20 +275,26 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   steht unter DFA α1, und Schwellen aus α1 (`core/hf_auswertung`, `AUSWERTUNG_VERSION` 4) gelten
   nur bei spontaner Atmung ab 9/min oder unbekannter Lage — sonst Grund statt Schwelle.
 
-- **Gezeichneter Ablauf** (Ben, 8.11.2026 spät, Vertrag `docs/plan_verzweigungen.md` §8; G1–G4
-  gebaut, Migration 044): Ein Plan ist eine Liste; der **Ablauf** (`core/ablauf.py`:
-  `Ablauf(an, start, kanten, fragen)`, `plan.ablauf_json`) legt darüber, wie es weitergeht —
-  **Knoten** sind Planübungen (mit `beiname`) und **Fragen** (Entscheidungsknoten ohne Übung),
-  **Kanten** tragen den Auslöser (frei · Zeit ab · Wdh. · Skala ≥ n bis m), **Pflicht**
-  (sperrt die anderen), **ausführen** (geht von selbst, nie bei laufendem Timer), Ziel auch
-  `ENDE` oder `ZURUECK` (Einschub: zur unterbrochenen Übung oder deren nächster Kante). Ohne
-  ``an`` läuft der Plan als **Kette** mit den Bedingungen (W2–W4) — nichts Bestehendes ändert
-  sich; „Ablauf zeichnen“ übersetzt sie einmal (`aus_bedingungen`). **Bedarfsübung** = nicht
-  über erste Kanten erreichbar (`von_selbst`). Die Rechnung lebt nur in `core/ablauf.py` und
-  `devices/plan_ablauf.py` (`kante_gehen`, `antworten`, `verlauf`); `ui/` zeichnet
-  (`components/ablaufbild.py`: InteractiveViewer + Canvas, Knoten nie frei verschoben, gezogen
-  wird nur **in** Slots; `views/ablauf.py` mit Palette, „+“-Menü, Kanten-Blatt). Zeitleiste
-  `plan/kante`, `plan/frage`, `plan/antwort`; Paket `plaene[].ablauf` mit Positionen.
+- **Gezeichneter Ablauf** (Ben, 8.11.2026, Vertrag `docs/plan_verzweigungen.md` §8, Stand
+  §8.8; Migration 044, Datenschritt 6): Der Plan-Editor hat die Reiter **Plan · Uhren**, der
+  Schalter **„Der Reihe nach | Mit Abzweigen“** (`views/ablauf.modus_zeile`) bringt **„Ablauf“**.
+  *Der Reihe nach* = Planfolge, je Übung nur die Bedingung (`PlanItem.bedingung`); **Zweige
+  A–D, dann/sonst/Wege sind veraltet** (P108) — Altbestand wird zum Ablauf. *Mit Abzweigen* =
+  `core/ablauf.py`: `Ablauf(an, start, kanten, fragen)`, `plan.ablauf_json`; **Knoten** sind
+  Planübungen (Nummer = Stelle in der Liste, `nummern`; `beiname`) und **Fragen**, **Kanten**
+  tragen den Auslöser (frei · Zeit ab · Wdh. · Wdh. in einer Zeit · Skala ≥ n bis m), Pflicht,
+  „von selbst“ (hart sofort, weich erst bei Zeit ab), Ziel auch `ENDE`/`ZURUECK`. Bedingung und
+  Hauptweg werden **gespiegelt** (`views/ablauf.ablauf_speichern`, `hauptwege_spiegeln`); „Im
+  Plan einstellen“ zeigt dasselbe Wege-Formular (`components/wege_form.py`) mit „Kommt von“.
+  Im Workout **bleibt** man bei der Übung, solange die Bedingung fehlt bzw. kein Weg frei ist
+  (`PlanAblaufBaustein.wartet`, keine Pause), hart geht es von selbst weiter, sobald es reicht;
+  jeder Schritt hat eine Uhr (ohne Timer `core.timer.stoppuhr`, „Zeit ab“ = „Fertig“) und damit
+  den Fokus; Wiederholungen von Hand (`person/wdh`), wo niemand zählt. Rechnung nur in
+  `core/ablauf.py` und `devices/plan_ablauf.py`; `ui/` zeichnet (`components/ablaufbild.py`:
+  Fläche einmal bauen, Inhalt tauschen, Lagen bleiben bis „Neu anordnen“, Eltern mittig;
+  `views/ablauf.py`: Seite scrollt nicht, Palette = Planübungen mit `Draggable.affinity`
+  senkrecht, Knöpfe unter dem Bild). Zeitleiste `plan/kante|frage|antwort`, `person/wdh`;
+  Paket `plaene[].ablauf` mit Positionen.
 
 - **Taktgeber** (Ben, 5.11.2026, Vertrag `docs/plan_taktgeber.md`; Teil 1 T1–T3 gebaut): ein
   **Takt** ist eine Folge von Phasen (Name, Sekunden, Art `ein`/`aus`/`halten`/`ab`/`auf`/`frei`,

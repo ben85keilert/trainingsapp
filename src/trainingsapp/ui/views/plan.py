@@ -84,6 +84,7 @@ from typing import Any
 
 import flet as ft
 
+from trainingsapp.core import ablauf as ab
 from trainingsapp.core import eintraege as offene
 from trainingsapp.core import varianten as var
 from trainingsapp.core.models import (
@@ -134,6 +135,7 @@ from trainingsapp.ui.components import zaehl_stand
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.layout import sicher
+from trainingsapp.ui.components.plan_reiter import plan_reiter
 from trainingsapp.ui.components.planblatt import PlanZeile, gesamtplan_blatt
 from trainingsapp.ui.components.planstand import nur_hier, wie_die_uebung
 from trainingsapp.ui.components.scroll import scroll_merken
@@ -145,9 +147,8 @@ from trainingsapp.ui.components.werte import wert_leiste
 from trainingsapp.ui.components.zaehlen import laeuft_hier, zaehl_zeile
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.views.ablauf import ablauf_zeile
+from trainingsapp.ui.views.ablauf import entfernen_fragen, modus_zeile
 from trainingsapp.ui.views.leistungen import leistungen_blatt
-from trainingsapp.ui.views.plan_uhren import uhren_zeile
 from trainingsapp.ui.views.timer import timer_knopf
 from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 
@@ -395,6 +396,8 @@ def plan_view(
     fertig_ids = erledigte(plan.items, anzahl)
     gemacht = len(fertig_ids)
     mehrfach = {i.exercise_id for i in plan.items if stelle[i.id] > 1}
+    #: Die Nummer einer Planübung = ihre Stelle in der Liste, wie im Ablauf (Frage 5)
+    nummern = ab.nummern([it.id for it in plan.items])
     # Welche Übung der Block zeigt (7.11.2026): das einmalige Ziel („Weiter mit …“), sonst die
     # zuletzt gezeigte dieses Plans, sonst die erste heute offene, sonst die erste. Einzelübung
     # und Nachtrag haben genau einen Block und lassen die Wahl des Plans in Ruhe.
@@ -932,6 +935,11 @@ def plan_view(
 
     def entferner(item: PlanItem) -> Callable[[], None]:
         def handler() -> None:
+            jetzt = state.plaene.laden(plan.id)
+            if jetzt is not None and jetzt.ablauf.an:
+                # Mitten in einer Reihe des Ablaufs: Lücke schließen oder Nachfolgereihe (Frage 4)
+                entfernen_fragen(page, state, plan.id, item.id, state.neu_zeichnen)
+                return
             state.plaene.uebung_entfernen(item.id)
             page.show_dialog(ft.SnackBar(ft.Text("Aus dem Plan entfernt — Einträge bleiben.")))
             state.neu_zeichnen()
@@ -1370,11 +1378,34 @@ def plan_view(
             if bearbeiten
             else []
         )
+        # Die Nummer ist die Stelle in der Liste — dieselbe wie im Ablauf (Frage 5)
+        nummer: list[ft.Control] = (
+            [
+                ft.Container(
+                    width=22,
+                    height=22,
+                    border_radius=11,
+                    bgcolor=ft.Colors.ON_SURFACE,
+                    alignment=ft.Alignment.CENTER,
+                    content=ft.Text(
+                        str(nummern.get(item.id, "?")),
+                        size=11,
+                        weight=ft.FontWeight.BOLD,
+                        color=ft.Colors.SURFACE,
+                    ),
+                )
+            ]
+            if bearbeiten
+            else []
+        )
+        if bearbeiten and item.beiname:
+            untertitel = "  ·  ".join(t for t in (item.beiname, untertitel) if t)
         return ft.Row(
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.START,
             controls=[
                 *griff,
+                *nummer,
                 uebungsbild(state, uebung.icon_key, uebung.image_path, groesse=24, opacity=0.8),
                 ft.Column(
                     spacing=0,
@@ -2434,6 +2465,9 @@ def plan_view(
             ],
         )
         kopf = [
+            # Reiter Plan · Uhren (· Ablauf) — immer da, nicht nur in den Unteransichten (Ben,
+            # 8.11.2026: „Geht man zurück, sind die Reiter weg“)
+            plan_reiter(page, route, "", ablauf_an=plan.ablauf.an),
             ft.TextField(label="Name des Plans", value=plan.name, on_blur=umbenennen),
             ft.Switch(
                 label="Aktiv — erscheint auf „Heute“" if plan.aktiv else "Deaktiviert",
@@ -2447,11 +2481,8 @@ def plan_view(
                 size=12,
                 opacity=0.7,
             ),
-            # Die Uhren aller Planübungen in einer Ansicht (K3) — statt der Karte
-            # „Workout und Ablauf“
-            uhren_zeile(state, plan, oeffner(f"{route}/uhren")),
-            # Der gezeichnete Ablauf (G3): Kanten, Bedarfsübungen, Fragen
-            ablauf_zeile(plan, oeffner(f"{route}/ablauf")),
+            # Der Reihe nach oder mit Abzweigen — „Mit Abzweigen“ bringt den Reiter „Ablauf“
+            modus_zeile(page, state, plan),
             ft.Text(
                 "„Einstellen“ legt Ziel und Eingabe je Übung fest. Reihenfolge: am Griff ziehen "
                 "oder mit den Pfeilen. Eine Übung darf mehrmals im Plan stehen.",

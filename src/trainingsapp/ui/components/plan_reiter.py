@@ -1,9 +1,9 @@
-"""Die Reiter des Plan-Editors — Übungen · Uhren · Ablauf (Ben, 8.11.2026 spät, Skizze E1).
+"""Die Reiter des Plan-Editors — Plan · Uhren · Ablauf (Ben, 8.11.2026, Skizze E1).
 
-Der Plan-Editor ist die Liste der Übungen; der Uhrenplan (K3) und der Reiter „Ablauf“ (G3)
-sind eigene Ansichten unter seiner Route. Oben zeigen sie dieselbe Reiterzeile, ein Tipp
-wechselt. „Ablauf“ erscheint erst, wenn der Ablauf am Plan eingeschaltet ist — Anfänger sehen
-die Liste wie heute (`docs/plan_verzweigungen.md` §8.2).
+Der Plan-Editor („Plan“: Name, Tage, Liste der Übungen, der Schalter „Der Reihe nach | Mit
+Abzweigen“), der Uhrenplan (K3) und der Reiter „Ablauf“ (G3) sind eigene Ansichten unter seiner
+Route — alle drei zeigen oben dieselbe Reiterzeile, ein Tipp wechselt (Ben, 8.11.2026: „setze
+automatisch zwei Reiter Plan – Uhren“). „Ablauf“ erscheint erst mit „Mit Abzweigen“.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 
 import flet as ft
 
-REITER: tuple[tuple[str, str], ...] = (("", "Übungen"), ("uhren", "Uhren"), ("ablauf", "Ablauf"))
+REITER: tuple[tuple[str, str], ...] = (("", "Plan"), ("uhren", "Uhren"), ("ablauf", "Ablauf"))
 
 
 def plan_reiter(

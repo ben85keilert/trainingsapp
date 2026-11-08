@@ -33,6 +33,11 @@ einmal, in Reihenfolge.
   vorhandenen Stempel in `session`, `session_entry`, `einheit` und
   `hrv_recording` einmal nach UTC umgeschrieben. Der Zeitpunkt bleibt derselbe,
   nur die Schreibweise ändert sich.
+- **Schritt 6** — Zweige als Ablauf (P108, Ben 8.11.2026 abends: „A bis D ist veraltet und
+  verschwindet“): Planübungen, deren Bedingung Zweig, „erfüllt →“, „nicht erfüllt →“ oder Wege
+  trägt (W3, 7./8.11.2026), sind jetzt Kanten im gezeichneten Ablauf. Ein Plan ohne Ablauf
+  bekommt ihn (`core.ablauf.aus_bedingungen`, eingeschaltet), die Bedingungen behalten Art,
+  Zahl, Pflicht und Inhalt — so läuft jeder Plan wie zuvor.
 """
 
 from __future__ import annotations
@@ -54,7 +59,7 @@ from .db import transaktion
 from .repositories import SettingRepo
 
 SCHLUESSEL = "datenformat"
-AKTUELL = 5
+AKTUELL = 6
 
 #: Alte Seed-Kategorien (Region) → Typ und Region als Tag
 _KATEGORIEN_ALT: dict[str, tuple[str, str | None]] = {
@@ -88,7 +93,46 @@ def datenformat_aktualisieren(con: sqlite3.Connection) -> int:
             geaendert += _schritt_4_tag_arten(con)
         if stand < 5:
             geaendert += _schritt_5_zeitstempel_utc(con)
+        if stand < 6:
+            geaendert += _schritt_6_zweige_als_ablauf(con)
         einstellungen.setzen(SCHLUESSEL, str(AKTUELL))
+    return geaendert
+
+
+def _schritt_6_zweige_als_ablauf(con: sqlite3.Connection) -> int:
+    """Alte Zweige und Verweise → Kanten im Ablauf (siehe Modulkopf)."""
+    from ..core.ablauf import Ablauf, aus_bedingungen, hat_verzweigung, ohne_verzweigung
+    from ..core.bedingung import Bedingung
+
+    geaendert = 0
+    for plan in con.execute("SELECT id, ablauf_json FROM plan").fetchall():
+        zeilen = con.execute(
+            "SELECT id, bedingung_json FROM plan_item WHERE plan_id = ? ORDER BY sort_order, rowid",
+            (plan["id"],),
+        ).fetchall()
+        items = [
+            (r["id"], Bedingung.aus_dict(json.loads(r["bedingung_json"] or "null"))) for r in zeilen
+        ]
+        if not any(hat_verzweigung(b) for _, b in items):
+            continue
+        vorhanden = Ablauf.aus_dict(json.loads(plan["ablauf_json"] or "null"))
+        if vorhanden.leer:
+            neu = aus_bedingungen(items)
+            con.execute(
+                "UPDATE plan SET ablauf_json = ? WHERE id = ?",
+                (json.dumps(neu.als_dict(), ensure_ascii=False), plan["id"]),
+            )
+        for item_id, b in items:
+            if hat_verzweigung(b):
+                rest = ohne_verzweigung(b)
+                con.execute(
+                    "UPDATE plan_item SET bedingung_json = ? WHERE id = ?",
+                    (
+                        None if rest.leer else json.dumps(rest.als_dict(), ensure_ascii=False),
+                        item_id,
+                    ),
+                )
+                geaendert += 1
     return geaendert
 
 

@@ -35,25 +35,29 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
-from .bedingung import ENDE, Bedingung, Inhalt, sekunden_text
+from .bedingung import ENDE, HAUPTZWEIG, Bedingung, Inhalt, Stand, sekunden_text
 from .bedingung import GEMACHT as B_GEMACHT
 from .bedingung import KEINE as B_KEINE
 from .bedingung import SKALA as B_SKALA
 from .bedingung import WDH as B_WDH
 from .bedingung import WDH_IN_ZEIT as B_WDH_IN_ZEIT
 from .bedingung import ZEIT as B_ZEIT
+from .bedingung import pruefen as b_pruefen
 
 #: Auslöser einer Kante
 FREI: Final = "frei"
 ZEIT: Final = "zeit"
 WDH: Final = "wdh"
+#: ``n`` Wiederholungen innerhalb von ``sekunden`` — wie die Bedingung der Planübung
+WDH_IN_ZEIT: Final = "wdh_in_zeit"
 SKALA: Final = "skala"
-AUSLOESER: Final[tuple[str, ...]] = (FREI, ZEIT, WDH, SKALA)
+AUSLOESER: Final[tuple[str, ...]] = (FREI, ZEIT, WDH, WDH_IN_ZEIT, SKALA)
 AUSLOESER_TEXT: Final[dict[str, str]] = {
     FREI: "Frei (Knopf)",
     ZEIT: "Zeit ab",
     WDH: "Wiederholungen",
-    SKALA: "Skala ≥ …",
+    WDH_IN_ZEIT: "Wdh. in einer Zeit",
+    SKALA: "Skala",
 }
 #: Kantenziel: dorthin zurück, wo man herkam (Einschub)
 ZURUECK: Final = "__zurueck__"
@@ -85,6 +89,8 @@ class Kante:
     text: str = ""
     #: was bei diesem Weg aufgeht (Text, Link)
     inhalt: Inhalt = field(default_factory=Inhalt)
+    #: Sekunden (``wdh_in_zeit``)
+    sekunden: float = 0.0
 
     @property
     def zum_ende(self) -> bool:
@@ -112,6 +118,8 @@ class Kante:
             return "Zeit ab"
         if self.ausloeser == WDH:
             return f"{self.n} Wdh."
+        if self.ausloeser == WDH_IN_ZEIT:
+            return f"{self.n} Wdh. in {sekunden_text(self.sekunden)}"
         if self.ausloeser == SKALA:
             if self.bis is not None:
                 return f"Skala {self.n}–{self.bis}"
@@ -137,8 +145,10 @@ class Kante:
         d: dict[str, Any] = {"von": self.von, "nach": self.nach}
         if self.ausloeser != FREI:
             d["ausloeser"] = self.ausloeser
-        if self.ausloeser in (WDH, SKALA):
+        if self.ausloeser in (WDH, WDH_IN_ZEIT, SKALA):
             d["n"] = self.n
+        if self.ausloeser == WDH_IN_ZEIT:
+            d["sekunden"] = self.sekunden
         if self.ausloeser == SKALA and self.bis is not None:
             d["bis"] = self.bis
         for k in ("pflicht", "ausfuehren", "wiederholen"):
@@ -171,8 +181,11 @@ class Kante:
         n = _ganzzahl(roh.get("n"))
         bis_roh = roh.get("bis")
         bis = _ganzzahl(bis_roh) if bis_roh is not None and ausloeser == SKALA else None
-        if ausloeser == WDH and n <= 0:
+        sekunden = _zahl(roh.get("sekunden"))
+        if ausloeser in (WDH, WDH_IN_ZEIT) and n <= 0:
             ausloeser = FREI
+        if ausloeser == WDH_IN_ZEIT and sekunden <= 0:
+            ausloeser = WDH
         if bis is not None and bis < n:
             bis = None
         inhalt_roh = roh.get("inhalt")
@@ -185,13 +198,14 @@ class Kante:
             str(roh["von"]),
             str(roh["nach"]),
             ausloeser,
-            n if ausloeser in (WDH, SKALA) else 0,
+            n if ausloeser in (WDH, WDH_IN_ZEIT, SKALA) else 0,
             bis,
             bool(roh.get("pflicht")),
             bool(roh.get("ausfuehren")),
             bool(roh.get("wiederholen")),
             str(roh.get("text") or "").strip(),
             inhalt,
+            sekunden if ausloeser == WDH_IN_ZEIT else 0.0,
         )
 
 
@@ -342,12 +356,101 @@ def kette(items: Sequence[str], *, an: bool = True) -> Ablauf:
     return Ablauf(an, items[0] if items else "", kanten)
 
 
+def kante_aus_bedingung(b: Bedingung, von: str, nach: str) -> Kante:
+    """Die Bedingung einer Planübung als Kante zu ihrer nächsten — „die Einstellungen werden bei
+    Übung und Ablauf gespiegelt“ (Ben, 8.11.2026, P108): Art → Auslöser, Pflicht, Inhalt.
+
+    >>> k = kante_aus_bedingung(Bedingung(B_WDH_IN_ZEIT, 12, 40, hart=True), "a", "b")
+    >>> k.ausloeser, k.n, k.sekunden, k.pflicht
+    ('wdh_in_zeit', 12, 40.0, True)
+    >>> kante_aus_bedingung(Bedingung(B_GEMACHT), "a", "b").ausloeser
+    'frei'
+    """
+    art = {B_ZEIT: ZEIT, B_WDH: WDH, B_WDH_IN_ZEIT: WDH_IN_ZEIT, B_SKALA: SKALA}.get(b.art, FREI)
+    return Kante(
+        von,
+        nach,
+        art,
+        b.n if art in (WDH, WDH_IN_ZEIT, SKALA) else 0,
+        pflicht=b.hart,
+        inhalt=b.inhalt,
+        sekunden=float(b.sekunden) if art == WDH_IN_ZEIT else 0.0,
+    )
+
+
+def bedingung_aus_kante(k: Kante, alt: Bedingung | None = None) -> Bedingung:
+    """Gegenstück zu `kante_aus_bedingung` — ohne Zweig und Verweise; ein freier Weg heißt
+    „keine“ (oder „Abhaken“, wenn die alte Bedingung das sagte).
+
+    >>> b = bedingung_aus_kante(Kante("a", "b", SKALA, 7, pflicht=True))
+    >>> b.art, b.n, b.hart
+    ('skala', 7, True)
+    >>> bedingung_aus_kante(Kante("a", "b"), Bedingung(B_GEMACHT)).art
+    'gemacht'
+    """
+    art = {ZEIT: B_ZEIT, WDH: B_WDH, WDH_IN_ZEIT: B_WDH_IN_ZEIT, SKALA: B_SKALA}.get(k.ausloeser)
+    if art is None:
+        art = B_GEMACHT if alt is not None and alt.art == B_GEMACHT else B_KEINE
+    return Bedingung(
+        art,
+        k.n if art in (B_WDH, B_WDH_IN_ZEIT, B_SKALA) else 0,
+        k.sekunden if art == B_WDH_IN_ZEIT else 0.0,
+        k.pflicht,
+        k.inhalt,
+    )
+
+
+def hat_verzweigung(b: Bedingung) -> bool:
+    """Trägt die Bedingung Teile der alten Zweige (A–D, „erfüllt →“, „nicht erfüllt →“, Wege)?
+    Die gibt es seit 8.11.2026 nur noch als Kanten im Ablauf (P108).
+
+    >>> hat_verzweigung(Bedingung(zweig="B")), hat_verzweigung(Bedingung(B_WDH, 5))
+    (True, False)
+    """
+    return b.zweig != HAUPTZWEIG or bool(b.dann or b.sonst or b.wege)
+
+
+def ohne_verzweigung(b: Bedingung) -> Bedingung:
+    """Die Bedingung ohne Zweig und Verweise — was davon bleibt, gilt linear."""
+    return replace(b, zweig=HAUPTZWEIG, dann="", sonst="", wege=())
+
+
+def hauptwege_spiegeln(ablauf: Ablauf, bedingungen: Mapping[str, Bedingung]) -> Ablauf:
+    """Die Bedingungen der Planübungen auf ihre Hauptwege (erste Kante, keine Schleife) — Ziel,
+    Beschriftung und „von selbst“ bleiben, Auslöser, Pflicht und Inhalt kommen aus der Übung.
+    Beim Umschalten auf „Mit Abzweigen“ mit einer Zeichnung von früher: was linear eingestellt
+    wurde, gilt auch dort (P108, gespiegelt).
+
+    >>> a = Ablauf(True, "a", (Kante("a", "b", text="weiter"), Kante("a", "c")))
+    >>> neu = hauptwege_spiegeln(a, {"a": Bedingung(B_WDH, 10)})
+    >>> [(k.nach, k.ausloeser, k.n, k.text) for k in neu.kanten]
+    [('b', 'wdh', 10, 'weiter'), ('c', 'frei', 0, '')]
+    """
+    kanten = list(ablauf.kanten)
+    gesehen: set[str] = set()
+    for i, k in enumerate(kanten):
+        if k.von in gesehen or k.schleife or k.von not in bedingungen:
+            continue
+        gesehen.add(k.von)
+        b = kante_aus_bedingung(bedingungen[k.von], k.von, k.nach)
+        kanten[i] = replace(
+            k,
+            ausloeser=b.ausloeser,
+            n=b.n,
+            sekunden=b.sekunden,
+            bis=None,
+            pflicht=b.pflicht,
+            inhalt=b.inhalt,
+        )
+    return replace(ablauf, kanten=tuple(kanten))
+
+
 def aus_bedingungen(items: Sequence[tuple[str, Bedingung]]) -> Ablauf:
-    """Der Graph, den die Bedingungen von heute (W2–W4: Zweige, dann/sonst, Wege) beschreiben —
-    einmal beim Einschalten des Reiters. Hauptzweig A in Planfolge; ``dann`` wird die reguläre
-    Kante mit dem Auslöser der Bedingung (Pflicht = hart, Inhalt kommt mit), ``sonst`` eine freie
-    Kante „nicht erfüllt“, Wege freie Kanten mit ihrem Text; Zweige B–D hängen nur an ihren
-    Verweisen (Bedarfsübungen).
+    """Der Graph, den die Bedingungen beschreiben — beim Umschalten auf „Mit Abzweigen“ und für
+    Altbestand mit Zweigen (Datenschritt 6). Hauptzweig A in Planfolge; die Bedingung wird die
+    reguläre Kante zur nächsten (`kante_aus_bedingung`), ``dann`` lenkt sie um, ``sonst`` wird
+    eine freie Kante „nicht erfüllt“, Wege freie Kanten mit ihrem Text; Zweige B–D hängen nur an
+    ihren Verweisen (Bedarfsübungen).
 
     >>> from .bedingung import Weg
     >>> b = [("a", Bedingung(B_WDH, 12, hart=True, sonst="c")), ("b", Bedingung()),
@@ -363,39 +466,19 @@ def aus_bedingungen(items: Sequence[tuple[str, Bedingung]]) -> Ablauf:
     kanten: list[Kante] = []
     ids = [i for i, _ in items]
     for n, (item_id, b) in enumerate(items):
-        if b.zweig == "A":
-            naechste = next((i for i, bb in items[n + 1 :] if bb.zweig == "A"), None)
+        if b.zweig == HAUPTZWEIG:
+            naechste = next((i for i, bb in items[n + 1 :] if bb.zweig == HAUPTZWEIG), None)
         else:
             naechste = next((i for i, bb in items[n + 1 :] if bb.zweig == b.zweig), None)
         regulaer = b.dann if b.dann in ids else naechste
         if regulaer is not None:
-            kanten.append(
-                Kante(
-                    item_id,
-                    regulaer,
-                    *_ausloeser_aus(b),
-                    pflicht=b.hart,
-                    inhalt=b.inhalt,
-                )
-            )
+            kanten.append(kante_aus_bedingung(b, item_id, regulaer))
         if b.sonst in ids and b.sonst != regulaer:
             kanten.append(Kante(item_id, b.sonst, text="nicht erfüllt"))
         for w in b.wege:
             if w.ziel in ids:
                 kanten.append(Kante(item_id, w.ziel, text=w.text))
     return Ablauf(True, ids[0] if ids else "", tuple(kanten))
-
-
-def _ausloeser_aus(b: Bedingung) -> tuple[str, int]:
-    if b.art == B_ZEIT:
-        return ZEIT, 0
-    if b.art in (B_WDH, B_WDH_IN_ZEIT):
-        return WDH, b.n
-    if b.art == B_SKALA:
-        return SKALA, b.n
-    if b.art in (B_KEINE, B_GEMACHT):
-        return FREI, 0
-    return FREI, 0
 
 
 # -- Prüfen ------------------------------------------------------------------------------------
@@ -410,9 +493,11 @@ class KanteStand:
     erfuellt: bool
     #: gesperrt durch eine Pflicht-Kante, die noch nicht erfüllt ist
     gesperrt: bool
-    #: der Auslöser braucht etwas, das niemand liefert (Skala nicht gewählt, niemand zählt)
+    #: der Auslöser braucht etwas, das noch fehlt (Skala nicht gewählt, nichts gezählt)
     unpruefbar: bool
     text: str
+    #: nicht mehr erfüllbar (die Zeit für „Wdh. in einer Zeit“ ist um)
+    verfehlt: bool = False
 
     @property
     def gangbar(self) -> bool:
@@ -423,41 +508,57 @@ class KanteStand:
         """Erfüllt durch einen echten Auslöser — der Knopf wird betont."""
         return self.gangbar and self.kante.ausloeser != FREI
 
+    def waehlbar(self, weich: bool) -> bool:
+        """Darf die Person diesen Weg jetzt nehmen? Erfüllt immer (außer gesperrt); im weichen
+        Übergang auch unerfüllt — Bedingungen sind dort Vorschläge —, nie gegen eine Pflicht.
 
-def kante_pruefen(k: Kante, *, zeit_ab: bool, wdh: int | None, skala: float | None) -> KanteStand:
-    """Ob der Stand den Auslöser der Kante erfüllt.
+        >>> s = kante_pruefen(Kante("a", "b", WDH, 12), zeit_ab=True, wdh=3, skala=None)
+        >>> s.waehlbar(weich=False), s.waehlbar(weich=True)
+        (False, True)
+        """
+        return not self.gesperrt and (self.erfuellt or (weich and not self.kante.pflicht))
+
+
+def kante_pruefen(
+    k: Kante, *, zeit_ab: bool, wdh: int | None, skala: float | None, gelaufen_s: float = 0.0
+) -> KanteStand:
+    """Ob der Stand den Auslöser der Kante erfüllt — dieselbe Rechnung wie die Bedingung der
+    Planübung (`core.bedingung.pruefen`), dazu Skala-Bereiche (``bis``).
 
     >>> kante_pruefen(Kante("a", "b", SKALA, 7), zeit_ab=False, wdh=None, skala=7).erfuellt
     True
     >>> kante_pruefen(Kante("a", "b", SKALA, 0, 6), zeit_ab=False, wdh=None, skala=7).erfuellt
     False
     >>> s = kante_pruefen(Kante("a", "b", WDH, 12), zeit_ab=False, wdh=None, skala=None)
-    >>> s.erfuellt, s.unpruefbar, s.text
-    (False, True, 'niemand zählt — 12 Wdh. von Hand')
+    >>> s.erfuellt, s.unpruefbar
+    (False, True)
     >>> kante_pruefen(Kante("a", "b", ZEIT), zeit_ab=True, wdh=None, skala=None).text
     'Zeit ab'
+    >>> k = Kante("a", "b", WDH_IN_ZEIT, 12, sekunden=40)
+    >>> kante_pruefen(k, zeit_ab=False, wdh=12, skala=None, gelaufen_s=30).erfuellt
+    True
+    >>> kante_pruefen(k, zeit_ab=True, wdh=9, skala=None, gelaufen_s=40).verfehlt
+    True
     """
     if k.ausloeser == FREI:
         return KanteStand(k, True, False, False, k.text or "Weiter")
-    if k.ausloeser == ZEIT:
-        return KanteStand(k, zeit_ab, False, False, "Zeit ab" if zeit_ab else "Zeit läuft")
-    if k.ausloeser == WDH:
-        if wdh is None:
-            return KanteStand(k, False, False, True, f"niemand zählt — {k.n} Wdh. von Hand")
-        if wdh >= k.n:
-            return KanteStand(k, True, False, False, f"{k.n} Wdh. — erfüllt")
-        return KanteStand(k, False, False, False, f"noch {k.n - wdh} Wdh.")
-    # Skala
-    if skala is None:
-        return KanteStand(k, False, False, True, f"Skala wählen — {k.ausloeser_text()}")
-    passt = skala >= k.n and (k.bis is None or skala <= k.bis)
-    return KanteStand(
-        k, passt, False, False, f"Skala {skala:g} — {'erfüllt' if passt else 'nicht erfüllt'}"
-    )
+    if k.ausloeser == SKALA and k.bis is not None:
+        if skala is None:
+            return KanteStand(k, False, False, True, f"Skala wählen — {k.ausloeser_text()}")
+        passt = k.n <= skala <= k.bis
+        text = f"Skala {skala:g} — {'erfüllt' if passt else 'nicht erfüllt'}"
+        return KanteStand(k, passt, False, False, text)
+    e = b_pruefen(bedingung_aus_kante(k), Stand(zeit_ab, gelaufen_s, wdh, skala))
+    return KanteStand(k, e.erfuellt, False, e.unpruefbar, e.text, e.verfehlt)
 
 
 def kanten_pruefen(
-    kanten: Sequence[Kante], *, zeit_ab: bool, wdh: int | None, skala: float | None
+    kanten: Sequence[Kante],
+    *,
+    zeit_ab: bool,
+    wdh: int | None,
+    skala: float | None,
+    gelaufen_s: float = 0.0,
 ) -> list[KanteStand]:
     """Alle Kanten eines Knotens — mit der Sperre: eine unerfüllte **Pflicht**-Kante sperrt
     die anderen (nicht sich selbst; sie ist erst gangbar, wenn erfüllt).
@@ -468,7 +569,10 @@ def kanten_pruefen(
     >>> [s.gangbar for s in kanten_pruefen(ks, zeit_ab=False, wdh=12, skala=None)]
     [True, True]
     """
-    staende = [kante_pruefen(k, zeit_ab=zeit_ab, wdh=wdh, skala=skala) for k in kanten]
+    staende = [
+        kante_pruefen(k, zeit_ab=zeit_ab, wdh=wdh, skala=skala, gelaufen_s=gelaufen_s)
+        for k in kanten
+    ]
     sperre = any(s.kante.pflicht and not s.erfuellt for s in staende)
     if sperre:
         staende = [s if s.kante.pflicht else replace(s, gesperrt=True) for s in staende]
@@ -652,61 +756,245 @@ def pruefung(ablauf: Ablauf, items: Sequence[str], namen: Mapping[str, str]) -> 
 
 @dataclass(frozen=True, slots=True)
 class Lage:
-    """Wo ein Knoten im Bild liegt: Spalte (0 = Hauptspalte) und Ebene (0 = oben)."""
+    """Wo ein Knoten im Bild liegt: ``x`` in Spaltenbreiten (0 = links, auch halbe Schritte —
+    ein Knoten steht mittig über seinen Kindern) und die Ebene (0 = oben)."""
 
-    spalte: int
+    x: float
     ebene: int
 
 
-def layout(ablauf: Ablauf, items: Sequence[str]) -> dict[str, Lage]:
-    """Die Zeichnung ordnet sich selbst (§8.2): der Start oben in Spalte 0, jede Kante eine
-    Ebene tiefer; die erste Kante eines Knotens bleibt in seiner Spalte, weitere Ziele rücken
-    nach rechts; Rückkanten und Schleifen verschieben nichts. Bedarfsübungen (unerreichbar)
-    stehen rechts auf der Ebene ihres ersten Rufers, sonst unten.
+def im_bild(ablauf: Ablauf, items: Sequence[str]) -> list[str]:
+    """Was gezeichnet wird: der Start, jede Planübung mit einer Kante und jede Frage — eine
+    Planübung ohne Kante steht nur in der Palette (Ben, 8.11.2026: „zur Auswahl die Übungen,
+    die in ‚Übungen‘ ausgewählt wurden“).
 
-    >>> a = Ablauf(True, "a", (Kante("a", "b"), Kante("a", "d"), Kante("b", "c"), Kante("d", "c")))
-    >>> lage = layout(a, ["a", "b", "c", "d"])
-    >>> [(k, v.spalte, v.ebene) for k, v in sorted(lage.items())]
-    [('a', 0, 0), ('b', 0, 1), ('c', 0, 2), ('d', 1, 1)]
-    >>> layout(Ablauf(True, "a", (Kante("a", "b"),)), ["a", "b", "x"])["x"]
-    Lage(spalte=1, ebene=2)
+    >>> a = Ablauf(True, "a", (Kante("a", "b"),), (Frage("f"),))
+    >>> im_bild(a, ["a", "b", "c"])
+    ['a', 'b', 'f']
     """
-    lage: dict[str, Lage] = {}
     start = ablauf.startknoten(items)
-    if start is None:
-        return lage
-    belegt: dict[int, set[int]] = {}
+    mit_kante = {k.von for k in ablauf.kanten} | {k.nach for k in ablauf.kanten}
+    return [i for i in items if i == start or i in mit_kante] + [f.id for f in ablauf.fragen]
 
-    def setzen(k: str, spalte: int, ebene: int) -> None:
-        while ebene in belegt.get(spalte, set()):
-            spalte += 1
-        belegt.setdefault(spalte, set()).add(ebene)
-        lage[k] = Lage(spalte, ebene)
 
-    setzen(start, 0, 0)
-    warte = deque([start])
-    while warte:
-        k = warte.popleft()
-        hier = lage[k]
-        neu = [
-            x.nach for x in ablauf.von(k) if x.nach not in lage and x.nach not in (ENDE, ZURUECK)
-        ]
-        for n, ziel in enumerate(dict.fromkeys(neu)):
-            if ziel in lage:
-                continue
-            setzen(ziel, hier.spalte + n, hier.ebene + 1)
-            warte.append(ziel)
-    # Bedarfsübungen und Fragen ohne Weg vom Start: rechts, auf der Ebene des ersten Rufers
-    rechts = max((v.spalte for v in lage.values()), default=0) + 1
-    unten = max((v.ebene for v in lage.values()), default=-1) + 1
-    for k in [*items, *(f.id for f in ablauf.fragen)]:
+def _kinder_ordnen(kinder: list[str]) -> list[str]:
+    """Das erste Kind (der Hauptweg) in die Mitte, die übrigen abwechselnd rechts und links.
+
+    >>> _kinder_ordnen(["m", "a", "b"]), _kinder_ordnen(["m", "a"]), _kinder_ordnen(["m"])
+    (['b', 'm', 'a'], ['m', 'a'], ['m'])
+    """
+    if len(kinder) <= 1:
+        return list(kinder)
+    links: list[str] = []
+    rechts: list[str] = []
+    for n, k in enumerate(kinder[1:]):
+        (rechts if n % 2 == 0 else links).append(k)
+    return [*reversed(links), kinder[0], *rechts]
+
+
+def layout(ablauf: Ablauf, items: Sequence[str]) -> dict[str, Lage]:
+    """Die Zeichnung ordnet sich selbst („Neu anordnen“, §8.2): ein Baum vom Start, jede Kante
+    eine Ebene tiefer; die Kinder eines Knotens nebeneinander, der Hauptweg (erste Kante) in der
+    Mitte und der Knoten **mittig über ihnen** (Ben, 8.11.2026). Rück-, Quer- und
+    Schleifenkanten verschieben nichts. Was vom Start nicht erreichbar ist, steht als eigener
+    Baum rechts daneben.
+
+    >>> a = Ablauf(True, "p", (Kante("p", "k"), Kante("p", "r"), Kante("p", "d")))
+    >>> lage = layout(a, ["p", "k", "r", "d"])
+    >>> [(k, lage[k].x, lage[k].ebene) for k in ("d", "k", "r", "p")]
+    [('d', 0.0, 1), ('k', 1.0, 1), ('r', 2.0, 1), ('p', 1.0, 0)]
+    >>> a = Ablauf(True, "a", (Kante("a", "b"), Kante("b", "c"), Kante("c", "a")))
+    >>> [(k, v.x, v.ebene) for k, v in layout(a, ["a", "b", "c"]).items()]
+    [('a', 0.0, 0), ('b', 0.0, 1), ('c', 0.0, 2)]
+    """
+    knoten = im_bild(ablauf, items)
+    if not knoten:
+        return {}
+    erlaubt = set(knoten)
+    kinder: dict[str, list[str]] = {}
+    ebene: dict[str, int] = {}
+    wurzeln: list[str] = []
+
+    def baum(wurzel: str) -> None:
+        ebene[wurzel] = 0
+        wurzeln.append(wurzel)
+        warte = deque([wurzel])
+        while warte:
+            k = warte.popleft()
+            neu: list[str] = []
+            for kante in ablauf.von(k):
+                if kante.nach in erlaubt and kante.nach not in ebene:
+                    ebene[kante.nach] = ebene[k] + 1
+                    neu.append(kante.nach)
+                    warte.append(kante.nach)
+            kinder[k] = _kinder_ordnen(neu)
+
+    start = ablauf.startknoten(items)
+    if start is not None and start in erlaubt:
+        baum(start)
+    for k in knoten:
+        if k not in ebene:
+            baum(k)
+    breite: dict[str, float] = {}
+
+    def messen(k: str) -> float:
+        breite[k] = max(1.0, sum(messen(c) for c in kinder.get(k, [])))
+        return breite[k]
+
+    lage: dict[str, Lage] = {}
+
+    def setzen(k: str, links: float) -> None:
+        ks = kinder.get(k, [])
+        if not ks:
+            lage[k] = Lage(links, ebene[k])
+            return
+        pos = links
+        for c in ks:
+            setzen(c, pos)
+            pos += breite[c]
+        lage[k] = Lage((lage[ks[0]].x + lage[ks[-1]].x) / 2, ebene[k])
+
+    links = 0.0
+    for w in wurzeln:
+        messen(w)
+        setzen(w, links)
+        links += breite[w] + 0.5
+    return {k: lage[k] for k in knoten}
+
+
+def freie_lage(belegt: Iterable[Lage], x: float, ebene: int) -> Lage:
+    """Der nächste freie Platz auf ``ebene`` bei ``x`` — erst dort, dann abwechselnd rechts
+    und links in ganzen Spalten.
+
+    >>> freie_lage([Lage(0.0, 1), Lage(1.0, 1)], 0.0, 1)
+    Lage(x=-1.0, ebene=1)
+    """
+    besetzt = [b.x for b in belegt if b.ebene == ebene]
+    for schritt in range(0, 200):
+        for kandidat in (x + schritt, x - schritt) if schritt else (x,):
+            if all(abs(kandidat - b) >= 0.75 for b in besetzt):
+                return Lage(kandidat, ebene)
+    return Lage(x + 200, ebene)
+
+
+def lagen_ergaenzen(
+    alt: Mapping[str, Lage], ablauf: Ablauf, items: Sequence[str]
+) -> dict[str, Lage]:
+    """Die Lagen bleiben stehen, bis jemand „Neu anordnen“ tippt (Ben, 8.11.2026: „Ansicht neu
+    ausrichten nur mit dem Button“): bekannte Knoten behalten ihre Lage, neue kommen unter ihren
+    ersten Vorgänger auf den nächsten freien Platz (ohne Vorgänger rechts oben), weggefallene
+    verschwinden. Ohne alte Lagen gilt `layout`.
+
+    >>> a = Ablauf(True, "a", (Kante("a", "b"),))
+    >>> neu = lagen_ergaenzen({"a": Lage(3.0, 0)}, a.mit_kante(Kante("a", "c")), ["a", "b", "c"])
+    >>> neu["a"], neu["b"], neu["c"]
+    (Lage(x=3.0, ebene=0), Lage(x=3.0, ebene=1), Lage(x=4.0, ebene=1))
+    """
+    knoten = im_bild(ablauf, items)
+    lage = {k: v for k, v in alt.items() if k in knoten}
+    if not lage:
+        return layout(ablauf, items)
+    # Vorgänger vor Nachfolgern: in Breitensuche vom Start, der Rest in Planfolge
+    reihe: list[str] = []
+    start = ablauf.startknoten(items)
+    if start is not None and start in knoten:
+        reihe.append(start)
+        warte = deque([start])
+        while warte:
+            k = warte.popleft()
+            for kante in ablauf.von(k):
+                if kante.nach in knoten and kante.nach not in reihe:
+                    reihe.append(kante.nach)
+                    warte.append(kante.nach)
+    reihe += [k for k in knoten if k not in reihe]
+    for k in reihe:
         if k in lage:
             continue
-        rufer = [lage[x.von] for x in ablauf.zu(k) if x.von in lage]
-        ebene = min((r.ebene for r in rufer), default=unten) + (1 if rufer else 0)
-        setzen(k, rechts, ebene)
-        unten = max(unten, ebene + 1)
-    return lage
+        vorher = [x.von for x in ablauf.zu(k) if x.von in lage and x.von != k]
+        if vorher:
+            oben = lage[vorher[0]]
+            lage[k] = freie_lage(lage.values(), oben.x, oben.ebene + 1)
+        else:
+            rechts = max((v.x for v in lage.values()), default=-1.0) + 1.5
+            lage[k] = Lage(rechts, 0)
+    return {k: lage[k] for k in knoten}
+
+
+# -- Bearbeiten ------------------------------------------------------------------------------------
+
+
+def nummern(items: Sequence[str]) -> dict[str, int]:
+    """Die Nummer einer Planübung ist ihre Stelle in der Liste — nur ein Alias für ihre feste
+    ID (Ben, 8.11.2026, Frage 5: dieselbe Übung darf 2–n-mal im Plan stehen). Verschieben oder
+    Löschen nummeriert neu, die Kanten hängen an der ID und gehen mit.
+
+    >>> nummern(["x", "y"])
+    {'x': 1, 'y': 2}
+    """
+    return {i: n for n, i in enumerate(items, start=1)}
+
+
+def luecke_schliessen(ablauf: Ablauf, knoten: str) -> Ablauf:
+    """Eine Übung fällt aus der Reihe, die Lücke schließt sich (Ben, 8.11.2026, Frage 4): jede
+    Kante, die zu ihr führte, führt jetzt dorthin, wohin ihr Hauptweg (erste Kante) ging — mit
+    ihren eigenen Bedingungen; die übrigen Wege der Übung fallen mit ihr weg. War sie der Start,
+    wird es ihr Nachfolger.
+
+    >>> ks = (Kante("a", "x", WDH, 5), Kante("x", "b"), Kante("x", "d"), Kante("b", "c"))
+    >>> neu = luecke_schliessen(Ablauf(True, "a", ks), "x")
+    >>> [(k.von, k.nach, k.ausloeser) for k in neu.kanten]
+    [('a', 'b', 'wdh'), ('b', 'c', 'frei')]
+    >>> luecke_schliessen(Ablauf(True, "x", (Kante("x", "b"),)), "x").start
+    'b'
+    """
+    raus = [k for k in ablauf.von(knoten) if not k.schleife]
+    haupt = raus[0] if raus else None
+    ziel = haupt.nach if haupt is not None and not haupt.zurueck else None
+    schon = {(k.von, k.nach) for k in ablauf.kanten if knoten not in (k.von, k.nach)}
+    kanten: list[Kante] = []
+    for k in ablauf.kanten:
+        if k.von == knoten:
+            continue
+        if k.nach == knoten:
+            if ziel is None or k.von == ziel or (k.von, ziel) in schon:
+                continue
+            schon.add((k.von, ziel))
+            kanten.append(replace(k, nach=ziel))
+            continue
+        kanten.append(k)
+    start = ablauf.start
+    if start == knoten:
+        start = ziel if ziel is not None and ziel != ENDE else ""
+    fragen = tuple(f for f in ablauf.fragen if f.id != knoten)
+    return replace(ablauf, start=start, kanten=tuple(kanten), fragen=fragen)
+
+
+def nachfolgereihe(ablauf: Ablauf, items: Sequence[str], knoten: str) -> list[str]:
+    """Was mit einer Übung ginge, wenn ihre ganze Nachfolgereihe gelöscht wird (Frage 4): alle
+    Knoten, die man nur über sie erreicht — vom Start aus ohne sie nicht mehr.
+
+    >>> ks = (Kante("a", "x"), Kante("x", "b"), Kante("b", "c"), Kante("a", "d"), Kante("d", "c"))
+    >>> nachfolgereihe(Ablauf(True, "a", ks), ["a", "x", "b", "c", "d"], "x")
+    ['b']
+    """
+
+    def von_aus(a: Ablauf, wurzel: str) -> set[str]:
+        gesehen = {wurzel}
+        warte = deque([wurzel])
+        while warte:
+            k = warte.popleft()
+            for kante in a.von(k):
+                if kante.nach not in gesehen and kante.nach not in (ENDE, ZURUECK):
+                    gesehen.add(kante.nach)
+                    warte.append(kante.nach)
+        return gesehen
+
+    hinter = von_aus(ablauf, knoten) - {knoten}
+    start = ablauf.startknoten(items)
+    ohne = ablauf.ohne_knoten(knoten)
+    bleibt = von_aus(ohne, start) if start is not None and start != knoten else set()
+    reihe = [*items, *(f.id for f in ablauf.fragen)]
+    return [k for k in reihe if k in hinter and k not in bleibt]
 
 
 # -- Pakete --------------------------------------------------------------------------------------
@@ -828,6 +1116,14 @@ def _ganzzahl(roh: Any) -> int:
         return 0
 
 
+def _zahl(roh: Any) -> float:
+    try:
+        wert = float(roh)
+    except (TypeError, ValueError):
+        return 0.0
+    return wert if wert == wert and wert > 0 else 0.0
+
+
 __all__ = [
     "AUSLOESER",
     "AUSLOESER_TEXT",
@@ -836,6 +1132,7 @@ __all__ = [
     "SKALA",
     "VIELE_WEGE",
     "WDH",
+    "WDH_IN_ZEIT",
     "ZEIT",
     "ZURUECK",
     "Ablauf",
@@ -848,14 +1145,25 @@ __all__ = [
     "aus_bedingungen",
     "aus_position",
     "bedarf",
+    "bedingung_aus_kante",
     "erreichbar",
+    "freie_lage",
+    "hat_verzweigung",
     "hauptpfad",
+    "hauptwege_spiegeln",
+    "im_bild",
+    "kante_aus_bedingung",
     "kante_pruefen",
     "kanten_pruefen",
     "kanten_zaehlen",
     "kette",
+    "lagen_ergaenzen",
     "layout",
+    "luecke_schliessen",
+    "nachfolgereihe",
+    "nummern",
     "ohne_ausweg",
+    "ohne_verzweigung",
     "pruefung",
     "regulaere",
     "sekunden_text",

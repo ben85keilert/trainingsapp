@@ -373,6 +373,48 @@ Anzeige); Ablaufbild klein im Fokus (P112); Kanten ziehen im Bild (V5 — bewuss
 `PlanItem.bedingung` (W2–W4) gilt weiter nur ohne Ablauf; Gerätetest **T98** (Ziehen aus der
 Palette, Zoomen, Etiketten treffen, lang drücken).
 
+### 8.8 Nach dem ersten Test (8.11.2026 abends)
+
+Ben, nach dem ersten Gerätetest — sechs Punkte und zwei Nachträge, alle gebaut (0.3.67):
+
+1. **Reiter:** Der Plan-Editor hat immer die Reiter **Plan · Uhren**; der Schalter **„Der Reihe
+   nach | Mit Abzweigen“** im Reiter „Plan“ bringt den dritten, **„Ablauf“**
+   (`components/plan_reiter.py`, `views/ablauf.modus_zeile`). „Der Reihe nach“ kennt nur die
+   Bedingung je Übung — Standard: **bei der Übung bleiben**, bis sie erfüllt ist; alles, was
+   abzweigt (auch kurz und zurück), ist ein Weg im Ablauf. Die Zeichnung bleibt beim Umschalten
+   gespeichert; ihre Hauptwege übernehmen die Bedingungen von jetzt (`hauptwege_spiegeln`).
+2. **Ablauf-Reiter:** Die Palette zeigt nur die **Übungen des Plans** mit Nummer („+“ = Übung
+   hinzufügen wie im Reiter „Plan“; frei = noch ohne Weg). Erklärungen im **„i“** (Thema
+   „ablauf“). **„Neu anordnen“** ordnet die Knoten neu und richtet die Ansicht aus — sonst bleiben
+   Lagen und Zoom stehen (`core.ablauf.lagen_ergaenzen`, die Fläche wird nur befüllt,
+   `ablaufbild.aktualisieren`). Ein Knoten steht **mittig über seinen Kindern**, der Hauptweg in
+   der Mitte (`layout`). Das kleine „+“ ist weg: ein Tipp **wählt** den Knoten, darunter
+   **Routing ▾** (Wege einstellen, Weg zu einer Übung im Bild, Frage, Schleife, ◀ zurück, Ende,
+   Start, Übung einstellen), **Neuer Slot**, **Beiname**, **Aus Plan nehmen** und der Block
+   **Neu anordnen · Pfad abspielen · Hinweise**. Etiketten sitzen nahe am Ziel, freie Wege ohne
+   Beschriftung haben keins. **Wege einstellen** zeigt alle Wege einer Übung untereinander in
+   einem Blatt (`components/wege_form.py`).
+3. **Herkunft:** Das Blatt zeigt **„Kommt von“** (mit Nummer, entfernen, „+ Herkunft“) und
+   **„Weiter zu“**.
+4. **Löschen:** Steht eine Übung mitten in einer Reihe, fragt es: **Lücke schließen**
+   (`luecke_schliessen`), **mit der Nachfolgereihe löschen** (`nachfolgereihe`) oder nur diese —
+   im Ablauf-Reiter wie in der Planliste (`views/ablauf.entfernen_fragen`).
+5. **Nummern:** Die Nummer ist die Stelle in der Planliste — ein Alias der festen ID
+   (`core.ablauf.nummern`), überall gleich: Liste, Palette, Bild, Blätter, „Im Plan
+   einstellen“, Workout. Verschieben und Löschen nummerieren neu, Kanten gehen mit der ID.
+6. **Workout-Schritt:** Die „veraltete Ansicht“ war die Karte „Kein Timer“ — jetzt hat jeder
+   Schritt den **Fokus** mit Kurven (ohne Timer eine Stoppuhr), **Wiederholungen von Hand**, wo
+   niemand zählt (``person/wdh``), und hängt nie fest: „Zeit ab“ ohne Timer gilt mit „Fertig“,
+   fehlt etwas, bleibt man bei der Übung statt in einer Pause (`wartet`); hart geht es von
+   selbst weiter, sobald es reicht, weich sind auch unerfüllte Wege wählbar (nie gegen eine
+   Pflicht).
+
+Nachträge: Die Zusammenfassung steht unter dem Schalter im Reiter „Plan“; „Als Kette“ ist dort
+der Schalter. **P108**: Zweige A–D verschwinden; „Weiter, wenn …“ in „Im Plan einstellen“ und
+die Wege im Ablauf sind **dasselbe** — linear mit „Kommt von / Weiter zu“ (Nummer), verzweigt
+dasselbe Wege-Formular wie im Reiter; der Hauptweg spiegelt sich in die Bedingung
+(`ablauf_speichern`). Kanten kennen dafür auch „Wdh. in einer Zeit“ (`WDH_IN_ZEIT`).
+
 ## 9. Entscheidungen (Ergänzung)
 
 - **P113** Name des Reiters: „Ablauf“ (Vorschlag) statt „Verlauf“ (belegt durch Kurven/Tagebuch)?

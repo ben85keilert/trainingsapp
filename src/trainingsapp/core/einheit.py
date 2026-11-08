@@ -99,6 +99,9 @@ ARTEN: frozenset[str] = frozenset(
         "kante",
         "frage",
         "antwort",
+        # Wiederholungen von Hand in einem Workout-Schritt (``person/wdh``, 8.11.2026 abends):
+        # wo niemand zählt, trägt die Person sie ein — für die Bedingung und den Eintrag
+        "wdh",
     }
 )
 

@@ -683,6 +683,48 @@ def test_datenformat_schritt_4_trennt_typen_und_regionen(con) -> None:
     assert datenformat_aktualisieren(con) == 0
 
 
+def test_datenformat_schritt_6_zweige_werden_ablauf(con) -> None:
+    """P108 (Ben, 8.11.2026 abends: „A bis D ist veraltet und verschwindet“): Planübungen mit
+    Zweig, Verweisen oder Wegen bekommen einen gezeichneten Ablauf, der dasselbe tut; die
+    Bedingungen behalten nur Art, Zahl, Pflicht und Inhalt."""
+    import json
+
+    from trainingsapp.core import ablauf as ab
+    from trainingsapp.core.bedingung import WDH, Bedingung, Weg
+    from trainingsapp.data.upgrade import datenformat_aktualisieren
+
+    uebungen = ExerciseRepo(con)
+    a, b, c = Exercise(name="A"), Exercise(name="B"), Exercise(name="C")
+    for u in (a, b, c):
+        uebungen.speichern(u)
+    plaene = PlanRepo(con)
+    plan = Plan(name="Alt")
+    plan.items = [PlanItem(exercise_id=u.id) for u in (a, b, c)]
+    ia, ib, ic = (it.id for it in plan.items)
+    plan.items[0].bedingung = Bedingung(WDH, 12, hart=True, sonst=ic)
+    plan.items[2].bedingung = Bedingung(zweig="B", wege=(Weg(ia, "noch einmal"),))
+    plaene.speichern(plan)
+    # Stand vor dem Schritt: kein Ablauf, Datenformat 5
+    con.execute("UPDATE plan SET ablauf_json = NULL WHERE id = ?", (plan.id,))
+    SettingRepo(con).setzen("datenformat", "5")
+    assert datenformat_aktualisieren(con) == 2
+    neu = plaene.laden(plan.id)
+    assert neu.ablauf.an and neu.ablauf.start == ia
+    assert [(k.von, k.nach, k.ausloeser) for k in neu.ablauf.kanten] == [
+        (ia, ib, ab.WDH),
+        (ia, ic, ab.FREI),
+        (ic, ia, ab.FREI),
+    ]
+    assert [ab.hat_verzweigung(it.bedingung) for it in neu.items] == [False, False, False]
+    assert neu.items[0].bedingung.art == WDH and neu.items[0].bedingung.hart
+    assert (
+        json.loads(
+            con.execute("SELECT value FROM app_setting WHERE key = 'datenformat'").fetchone()[0]
+        )
+        == 6
+    )
+
+
 def test_plan_item_parameter_und_chips(con) -> None:
     """Parameter der Planübung (Migration 010): keiner = nur abhaken, Stufe folgt."""
     seed_einspielen(con)

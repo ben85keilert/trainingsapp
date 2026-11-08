@@ -331,6 +331,9 @@ class AppState:
     #: Reiter „Ablauf“ (`views/ablauf.py`): je Plan der gewählte Knoten und die leeren Slots
     ablauf_wahl: dict[str, str | None] = field(default_factory=dict)
     ablauf_slots: dict[str, list[str]] = field(default_factory=dict)
+    #: … und wo die Knoten liegen (`core.ablauf.Lage`) — sie bleiben stehen, bis „Neu anordnen“
+    #: (Ben, 8.11.2026: „Ansicht neu ausrichten nur mit dem Button“)
+    ablauf_lagen: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: Nachtragen als Trainingsblock (P72, `views/nachtragen.py`): je Tag und Übung die Zeit,
     #: um die nachgetragen wird (``None`` = jetzt) — überlebt den Neubau der Ansicht und den
     #: Wechsel des Plans, fällt beim Verlassen weg

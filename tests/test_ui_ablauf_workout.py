@@ -134,7 +134,8 @@ async def test_workout_folgt_den_kanten_mit_einschub_und_zurueck(umgebung) -> No
         knoepfe["Weiter: Kniebeuge"], ft.FilledButton
     )
     dehnung = knoepfe["Weiter: Dehnung Beine — Beine krampfen (Skala ≥ 7)"]
-    assert dehnung.disabled  # die Skala ist nicht gewählt
+    # Weich: auch ein unerfüllter Weg ist wählbar (Bedingungen sind Vorschläge) — nur nicht betont
+    assert isinstance(dehnung, ft.FilledTonalButton) and not dehnung.disabled
     # Skala 7 wählen → die Dehnung wird angeboten (betont), die Kniebeuge bleibt als Weg
     chips = [c for c in _alle(laufend) if isinstance(c, ft.Chip) and c.label.value == "7"]
     assert chips, "die Skala-Chips der Kante fehlen"
@@ -145,7 +146,7 @@ async def test_workout_folgt_den_kanten_mit_einschub_und_zurueck(umgebung) -> No
     dehnung = knoepfe["Weiter: Dehnung Beine — Beine krampfen"]
     assert isinstance(dehnung, ft.FilledButton) and not dehnung.disabled
     assert isinstance(knoepfe["Weiter: Kniebeuge"], ft.FilledTonalButton)
-    dehnung.on_click(None)
+    dehnung.on_click()
     await _sekunden(state, uhr, gurt, 1)
     assert teil.schritt.name == "Dehnung Beine"
     # Der Wandsitz ist eingetragen — mit der Skala
@@ -155,14 +156,14 @@ async def test_workout_folgt_den_kanten_mit_einschub_und_zurueck(umgebung) -> No
     einschub = workout_view(seite, state, plan, route=route)
     knoepfe = _knoepfe(einschub)
     zurueck = knoepfe["◀ zurück: weiter mit Kniebeuge"]
-    zurueck.on_click(None)
+    zurueck.on_click()
     await _sekunden(state, uhr, gurt, 1)
     assert teil.schritt.name == "Kniebeuge"
     kanten = [x for x in state.einheit.ereignisse if (x.quelle, x.art) == ("plan", "kante")]
     assert [x.daten["kante"] for x in kanten] == ["Beine krampfen", ""]
-    # Die Kniebeuge hat keine Kante: „Workout beenden“
+    # Die Kniebeuge hat keine Kante: „Fertig“ beendet das Workout (eine Stoppuhr läuft mit)
     ende = workout_view(seite, state, plan, route=route)
-    _knoepfe(ende)["Workout beenden"].on_click(None)
+    _knoepfe(ende)["Fertig — Workout beenden"].on_click()
     await _sekunden(state, uhr, gurt, 2)
     assert plan_ablauf.laufender(state, plan.id) is None
     danach = workout_view(seite, state, plan, route=route)
@@ -192,7 +193,7 @@ async def test_frage_im_workout_und_pflicht_wartet(umgebung) -> None:
     await _sekunden(state, uhr, gurt, 10)
     assert teil.phase == UEBERZEIT
     laufend = workout_view(seite, state, plan, route=route)
-    _knoepfe(laufend)["Weiter: Wie viel Druck?"].on_click(None)
+    _knoepfe(laufend)["Weiter: Wie viel Druck?"].on_click()
     await _sekunden(state, uhr, gurt, 1)
     assert teil.schritt.frage == frage
     frage_bild = workout_view(seite, state, plan, route=route)
@@ -233,18 +234,19 @@ def test_ablaufbild_zeichnet_knoten_etiketten_und_nebel(tmp_path, monkeypatch) -
             slots=[Slot(ik)],
             on_knoten=lambda k: getippt.append(("knoten", k)),
             on_kante=lambda k: getippt.append(("kante", k.nach)),
-            on_plus=lambda k: getippt.append(("plus", k)),
             on_slot=lambda s, e: getippt.append(("slot", s.von, e)),
         )
         assert set(bild.mitten) == {iw, ik, id_}
-        # Hauptspalte: Wandsitz über Kniebeuge; die Dehnung rechts
-        assert bild.mitten[iw][0] == bild.mitten[ik][0] < bild.mitten[id_][0]
+        # Der Wandsitz steht mittig über seinen Kindern (Kniebeuge, Dehnung) und darüber
+        assert bild.mitten[ik][0] < bild.mitten[iw][0] < bild.mitten[id_][0]
         assert bild.mitten[iw][1] < bild.mitten[ik][1]
         daten = [c.data for c in _alle(bild.control) if isinstance(c, ft.Container) and c.data]
-        assert ("start",) in daten and ("plus", iw) in daten and ("slot", ik) in daten
+        assert ("start",) in daten and ("slot", ik) in daten
         texte = _texte(bild.control)
         assert "Skala ≥ 7 · Beine krampfen · 3×" in texte and "◀ zurück" in texte
-        assert "weiter" in texte and "bei Bedarf" in texte and "1" in texte and "2" in texte
+        # Ein freier Weg ohne Beschriftung hat kein Etikett; die Nummer ist die Stelle in der Liste
+        assert "weiter" not in texte and "bei Bedarf" in texte
+        assert {"1", "2", "3"} <= set(texte)
         assert bild.knoten[id_].opacity == NEBEL and bild.knoten[iw].opacity == 1.0
         etikett = next(
             c
@@ -252,13 +254,11 @@ def test_ablaufbild_zeichnet_knoten_etiketten_und_nebel(tmp_path, monkeypatch) -
             if isinstance(c, ft.Container) and c.data == ("kante", iw, id_)
         )
         etikett.on_click(None)
-        plus = next(
-            c for c in _alle(bild.control) if isinstance(c, ft.Container) and c.data == ("plus", iw)
+        ziel = next(
+            x for x in _alle(bild.control) if isinstance(x, ft.DragTarget) and x.on_will_accept
         )
-        plus.on_click(None)
-        ziel = next(x for x in _alle(bild.control) if isinstance(x, ft.DragTarget))
         ziel.on_accept(type("E", (), {"src": type("D", (), {"data": "u9"})()})())
-        assert getippt == [("kante", id_), ("plus", iw), ("slot", ik, "u9")]
+        assert getippt == [("kante", id_), ("slot", ik, "u9")]
         assert isinstance(bild.control, ft.InteractiveViewer)
     finally:
         state.schliessen()

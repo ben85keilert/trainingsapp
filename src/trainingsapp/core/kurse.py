@@ -349,12 +349,39 @@ class PlanVorlage:
             if isinstance(e, Mapping) and e.get("uebung")
         ]
         ablauf = roh.get("ablauf")
-        return cls(
+        vorlage = cls(
             name=str(roh.get("name") or "Plan"),
             wochentage=wochentage,
             items=items,
             ablauf=dict(ablauf) if isinstance(ablauf, Mapping) and ablauf else None,
         )
+        vorlage.zweige_als_ablauf()
+        return vorlage
+
+    def zweige_als_ablauf(self) -> None:
+        """Alte Zweige und Verweise einer Paketfassung (``zweig``, ``dann``, ``sonst``, ``wege``,
+        Positionen „#n“) werden Kanten im Ablauf (P108, Datenschritt 6 für Pakete) — die
+        Bedingungen behalten Art, Zahl, Pflicht und Inhalt.
+
+        >>> from trainingsapp.core.bedingung import WDH, Weg
+        >>> v = PlanVorlage("P", items=[VorlageItem("a", bedingung=Weiterbedingung(
+        ...     WDH, 5, wege=(Weg("#1", "noch mal"),))), VorlageItem("b")])
+        >>> v.zweige_als_ablauf()
+        >>> v.ablauf["start"], [(k["von"], k["nach"]) for k in v.ablauf["kanten"]]
+        ('#1', [('#1', '#2'), ('#1', '#1')])
+        >>> v.items[0].bedingung.wege
+        ()
+        """
+        paare = [
+            (f"#{n}", it.bedingung or Weiterbedingung()) for n, it in enumerate(self.items, start=1)
+        ]
+        if self.ablauf or not any(ab.hat_verzweigung(b) for _, b in paare):
+            return
+        self.ablauf = ab.aus_bedingungen(paare).als_dict()
+        for it in self.items:
+            if it.bedingung is not None and ab.hat_verzweigung(it.bedingung):
+                rest = ab.ohne_verzweigung(it.bedingung)
+                it.bedingung = None if rest.leer else rest
 
 
 @dataclass(slots=True)

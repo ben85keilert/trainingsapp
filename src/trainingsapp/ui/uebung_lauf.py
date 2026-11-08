@@ -80,6 +80,7 @@ from trainingsapp.devices.einheit import (
     UebungBaustein,
     UebungKontext,
 )
+from trainingsapp.devices.plan_ablauf import PlanAblaufBaustein
 from trainingsapp.devices.zaehlen import ZaehlBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components import zaehl_stand
@@ -387,10 +388,35 @@ def zaehlen_starten(
             einheit_ui.teil_beitreten(page, state, e, teil)
             state.zaehl_laeufe[uebung.id] = e.id
             return e, None
+        p = e.teil("plan")
+        if isinstance(p, PlanAblaufBaustein) and p.phase in ("uebung", "ueberzeit"):
+            # Workout (P99 Teil 2): der Sensor zählt für den laufenden Schritt — das Zählen
+            # endet mit ihm (`ZaehlBaustein.im_plan`); der Zähl-Teil des vorigen Schritts ist
+            # zu Ende und geht (`Einheitslauf.entlassen`)
+            s = p.schritt
+            if s.uebung_id != kontext.uebung_id or (
+                kontext.item_id and s.item_id != kontext.item_id
+            ):
+                raise RuntimeError("Im Workout zählt der Sensor nur für die laufende Übung.")
+            if isinstance(z, ZaehlBaustein) and not z.aktiv:
+                e.entlassen(z)
+                z = None
+            if z is not None:
+                raise RuntimeError("In diesem Schritt wurde schon gezählt.")
+            schritt_item = state.plaene.item_laden(s.item_id)
+            if not zaehl_stand.zaehlen_an(uebung, schritt_item):
+                raise RuntimeError(f"„{uebung.name}“ erfasst in diesem Plan keine Wiederholungen.")
+            teil = zaehl_baustein(
+                state, kontext_fuer(uebung, None, schritt_item), uebung, schritt_item
+            )
+            teil.im_plan = True
+            einheit_ui.teil_beitreten(page, state, e, teil)
+            state.zaehl_laeufe[uebung.id] = e.id
+            return e, None
     if einheit_ui.in_vorbereitung(state) is not None:
         raise RuntimeError("Es steht eine Einheit bereit — erst oben starten oder leeren.")
     if zaehl_stand.im_plan_ablauf(state):
-        raise RuntimeError("Im Plan-Ablauf zählt der Sensor noch nicht — erst oben mit ⏹ beenden.")
+        raise RuntimeError("Im Workout zählt der Sensor nur, solange eine Übung läuft.")
     state.zaehl_meldung = None
     if not einheit_ui.platz_machen(state):
         raise RuntimeError("Es läuft schon eine Einheit — erst oben mit ⏹ beenden.")
@@ -429,6 +455,9 @@ def takt_zaehlen_anbringen(
     ):
         return None
     z = e.teil("zaehlen")
+    if isinstance(z, ZaehlBaustein) and not z.aktiv and e.laeuft:
+        e.entlassen(z)  # der Zähl-Teil des vorigen Workout-Schritts (P99 Teil 2)
+        z = None
     if isinstance(z, ZaehlBaustein):
         z.takt_zaehlt = True
         return z
@@ -438,6 +467,7 @@ def takt_zaehlen_anbringen(
     u = e.teil("plan")
     kontext = u.kontext if isinstance(u, UebungBaustein) else kontext_fuer(uebung, None, item)
     teil = ZaehlBaustein(state.messlauf, kontext, feld=feld, quelle=zl.QUELLE_TAKT, atmung=False)
+    teil.im_plan = isinstance(u, PlanAblaufBaustein)
     if e.laeuft:
         einheit_ui.teil_beitreten(page, state, e, teil)
     elif e.zustand in (Zustand.VORBEREITUNG, Zustand.BEREIT):

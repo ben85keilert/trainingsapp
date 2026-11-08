@@ -42,6 +42,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from trainingsapp.core.bedingung import bedingung_pruefen
 from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
 from trainingsapp.core.models import Exercise, Plan
 from trainingsapp.core.pakete import (
@@ -240,6 +241,10 @@ def pruefen(
             f_takt, h_takt = takt_pruefen(e["takt"])
             fehler.extend(f"{wo}: takt: {x}" for x in f_takt)
             hinweise.extend(f"{wo}: takt: {x}" for x in h_takt)
+        if "bedingung" in e:
+            f_bed, h_bed = bedingung_pruefen(e["bedingung"])
+            fehler.extend(f"{wo}: bedingung: {x}" for x in f_bed)
+            hinweise.extend(f"{wo}: bedingung: {x}" for x in h_bed)
     for wo, pl in _plaene_mit_ort(roh):
         for pe in pl.get("uebungen") or []:
             if not isinstance(pe, dict):
@@ -253,6 +258,10 @@ def pruefen(
                 f_takt, h_takt = takt_pruefen(pe["takt"], ohne="die Planübung folgt der Übung")
                 fehler.extend(f"{wo_pe}: takt: {x}" for x in f_takt)
                 hinweise.extend(f"{wo_pe}: takt: {x}" for x in h_takt)
+            if "bedingung" in pe:
+                f_bed, h_bed = bedingung_pruefen(pe["bedingung"], im_plan=True)
+                fehler.extend(f"{wo_pe}: bedingung: {x}" for x in f_bed)
+                hinweise.extend(f"{wo_pe}: bedingung: {x}" for x in h_bed)
     if inhalt.paket.version is None:
         hinweise.append("Kopf ohne `version` — ohne sie erkennt kein Gerät ein Update")
     for treffer in wortliste_pruefen(roh, wortliste):

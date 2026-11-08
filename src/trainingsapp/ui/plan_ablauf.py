@@ -18,6 +18,8 @@ from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
+from trainingsapp.core import zaehlen as zl
+from trainingsapp.core import zaehlen_eintrag as ze
 from trainingsapp.core.einheit import Ereignis
 from trainingsapp.core.models import Plan, SessionEntry, lokaler_tag
 from trainingsapp.core.plan_durchlauf import schritte_fuer
@@ -171,6 +173,16 @@ def nach_der_uebung(state: Any, e: Einheitslauf, ende: Ereignis) -> SessionEntry
         werte = ergebnis(zeiten, zeitfeld)
     else:  # ohne Timer: die Uhr lief von Anfang bis „Gemacht“
         werte = ohne_timer(ende.t_s - start.t_s, zeitfeld) if zeitfeld else {}
+    # P99 Teil 2: was der Sensor (oder der Takt) in diesem Schritt zählte — die Sätze des
+    # Zähl-Teils ab dem Start der Übung (nach `>`: die letzten Zeilen des vorigen Schritts
+    # liegen genau auf seinem Ende = diesem Start); im Feld, in das die Planübung zählt
+    feld = zl.zaehlt_in(uebung, item)
+    if feld is not None:
+        wdh = ze.wiederholungen(
+            [x for x in e.ereignisse[nr_start : nr_ende + 1] if x.t_s > start.t_s], feld
+        )
+        if wdh:
+            werte[feld] = wdh
     werte = zeit_zusammenlegen(uebung, {**ausfuehrung(uebung, gewaehlt), **werte})
     uebung = mit_zeitfeldern(uebung, werte)
     anker = e.zeitbasis.anker_utc

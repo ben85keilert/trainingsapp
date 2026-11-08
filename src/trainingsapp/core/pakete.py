@@ -47,6 +47,7 @@ from datetime import datetime
 from typing import Any
 
 from . import links
+from .bedingung import Bedingung as Weiterbedingung
 from .kurse import (
     BEDINGUNGEN,
     FREISCHALTUNGEN,
@@ -58,6 +59,7 @@ from .kurse import (
     VorlageItem,
     medien_from_list,
     medien_to_list,
+    verweise_als_position,
 )
 from .models import Exercise, Media, MediaKind, MediaSource, Plan, jetzt
 from .result_spec import VORLAGEN, ResultSpec, basis_key
@@ -199,10 +201,13 @@ def paketplan_aus(plan: Plan, key: str | None = None) -> PaketPlan:
     """Ein Plan der App als Paketplan (Export; `paket_werkzeug uebernehmen`): Ziel, Felder,
     Sensor-Karte und Takt nur, wo der Plan eigene hat (sonst folgt die Planübung der Übung,
     P79)."""
+    geordnet = sorted(plan.items, key=lambda i: i.order)
     vorlage = PlanVorlage(
         name=plan.name,
         wochentage=list(plan.wochentage),
-        items=[VorlageItem.aus_planitem(i) for i in sorted(plan.items, key=lambda i: i.order)],
+        items=verweise_als_position(
+            [VorlageItem.aus_planitem(i) for i in geordnet], [i.id for i in geordnet]
+        ),
     )
     return PaketPlan(
         key=key or plan.package_key or plan.name.strip().casefold(),
@@ -564,6 +569,8 @@ def _uebung_lesen(eintrag: Any, paket: str) -> tuple[Exercise, str]:
             beschleunigung=SensorWahl.aus_dict(eintrag.get("beschleunigung")),
             # Ebenso tolerant: ohne brauchbare Phase kein Takt (`core.takt.Takt.aus_dict`)
             takt=Takt.aus_dict(eintrag.get("takt")),
+            # „Weiter, wenn …“ der Übung (P107/P97, 8.11.2026) — ohne Zweig; nachsichtig
+            bedingung=Weiterbedingung.aus_dict(eintrag.get("bedingung")),
         ),
         key,
     )
@@ -765,6 +772,8 @@ def stand(u: Exercise) -> dict[str, Any]:
         d["beschleunigung"] = beschleunigung
     if u.takt is not None and not u.takt.leer:
         d["takt"] = u.takt.als_dict()
+    if not u.bedingung.leer:
+        d["bedingung"] = u.bedingung.als_dict()
     if u.default_target:
         d["default_target"] = u.default_target
     medien = [
@@ -812,6 +821,7 @@ FELDNAMEN: dict[str, str] = {
     "zaehlt_als": "Zählt als",
     "beschleunigung": "Beschleunigungssensor",
     "takt": "Takt",
+    "bedingung": "Weiter, wenn",
     "media": "Videos",
 }
 

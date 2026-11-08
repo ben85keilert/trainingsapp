@@ -1283,10 +1283,11 @@ async def test_laeufe_heute_nennt_einen_leeren_zaehllauf_nicht_gemacht(umgebung)
     assert any(t.endswith(" · Atmung") for t in texte) and _eintraege(state) == []
 
 
-async def test_im_plan_ablauf_gibt_es_keinen_knopf_der_nie_zaehlt(umgebung) -> None:
-    """Im Plan-Ablauf zählt der Sensor noch nicht (Plan §13) — darum steht dort kein Knopf
-    „Wdh. zählen“, der nur „Es läuft schon eine Einheit“ meldete; der Start sagt, warum.
-    Nach dem Ablauf ist der Knopf wieder da."""
+async def test_im_workout_zaehlt_der_sensor_fuer_den_laufenden_schritt(umgebung) -> None:
+    """P99 Teil 2 (8.11.2026): Im Workout zählt der Sensor für die laufende Übung — der Knopf
+    „Wdh. zählen“ steht nur bei ihr, das Zählen tritt der Einheit bei (`im_plan`) und endet mit
+    dem Schritt; ein zweiter Tipp im selben Schritt ändert nichts."""
+    from trainingsapp.core import zaehlen as zl
     from trainingsapp.ui import plan_ablauf
 
     state, uhr, gurt = umgebung
@@ -1300,13 +1301,24 @@ async def test_im_plan_ablauf_gibt_es_keinen_knopf_der_nie_zaehlt(umgebung) -> N
     e = plan_ablauf.starten(seite, state, plan)
     await _sekunden(state, uhr, gurt, 3)
     assert e.laeuft and zaehl_stand.im_plan_ablauf(state)
-    assert not zaehl_stand.sichtbar(state, u, item=item)
-    assert not _knoepfe(plan_view(seite, state, plan), "Wdh. zählen")  # vorher: ein Knopf
-    with pytest.raises(RuntimeError, match="Im Plan-Ablauf zählt der Sensor noch nicht"):
-        uebung_lauf.zaehlen_starten(
-            seite, state, uebung_lauf.kontext_fuer(u, plan, item), uebung=u, item=item
-        )
-    assert e.teil("zaehlen") is None and state.messlauf.acc_anforderungen == {}
+    assert zaehl_stand.sichtbar(state, u, item=item)  # die laufende Übung
+    assert _knoepfe(plan_view(seite, state, plan), "Wdh. zählen")
+    uebung_lauf.zaehlen_starten(
+        seite, state, uebung_lauf.kontext_fuer(u, plan, item), uebung=u, item=item
+    )
+    z = e.teil("zaehlen")
+    assert z is not None and z.im_plan and z.aktiv and state.messlauf.acc_anforderungen
+    # Noch einmal: zählt hier schon — bleibt dabei, kein zweiter Zähl-Teil
+    e2, _ = uebung_lauf.zaehlen_starten(
+        seite, state, uebung_lauf.kontext_fuer(u, plan, item), uebung=u, item=item
+    )
+    assert e2 is e and e.teil("zaehlen") is z
+    await _sekunden(state, uhr, gurt, 2)
+    teil = plan_ablauf.ablauf_teil(e)
+    assert teil is not None
+    teil.gemacht()  # der Schritt endet — das Zählen mit ihm
+    await _sekunden(state, uhr, gurt, 2)
+    assert z.grund == zl.ENDE_FERTIG
     einheit_ui.alle_beenden(state)
     await _bis_vorbei(state, uhr, gurt)
     assert _knoepfe(plan_view(seite, state, plan), "Wdh. zählen")

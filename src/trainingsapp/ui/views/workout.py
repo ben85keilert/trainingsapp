@@ -39,7 +39,7 @@ from trainingsapp.devices.plan_ablauf import (
     PlanAblaufBaustein,
 )
 from trainingsapp.ui import einheit as einheit_ui
-from trainingsapp.ui import plan_ablauf
+from trainingsapp.ui import plan_ablauf, uebung_lauf
 from trainingsapp.ui.components import links, zaehl_stand
 from trainingsapp.ui.components.fokus import Fokus
 from trainingsapp.ui.components.hilfe import WORKOUT_MD
@@ -142,8 +142,11 @@ def workout_view(
         wahl["hrv_beenden"] = bool(e.control.selected) and e.control.selected[0] == "beenden"
 
     def takt_je_schritt(e: Any, teil: PlanAblaufBaustein) -> None:
-        """P99 (Teil 1): Der Takt der Planübung (für jetzt > Planübung > Plan > Übung) kommt an
-        den Timer des laufenden Schritts — einmal je Schritt, wie beim Übungs-Timer."""
+        """P99: Je Schritt kommt der Takt der Planübung (für jetzt > Planübung > Plan > Übung)
+        an den Timer, „Takt zählt“ tritt als Zähl-Teil an (`takt_zaehlen_anbringen`), und hat
+        das Gerät einen Beschleunigungssensor und die Planübung ihn an, zählt er
+        (`zaehlen_starten`) — alles einmal je Schritt, wie beim Übungs-Timer; das Zählen endet
+        mit dem Schritt (`ZaehlBaustein.im_plan`)."""
         marke = (e.id, teil.k)
         if (
             stand["takt_fuer"] == marke
@@ -161,6 +164,13 @@ def workout_view(
             takt_anbringen(
                 state, teil.timer.lauf, uhr_schluessel(u, item), takt_der_uebung(u, item, plan)
             )
+        with contextlib.suppress(Exception):  # der Zähler darf das Workout nie aufhalten
+            uebung_lauf.takt_zaehlen_anbringen(page, state, e, u, item)
+        if zaehl_stand.geraet_kann_zaehlen(state.messlauf) and zaehl_stand.zaehlen_an(u, item):
+            with contextlib.suppress(Exception):
+                uebung_lauf.zaehlen_starten(
+                    page, state, uebung_lauf.kontext_fuer(u, plan, item), uebung=u, item=item
+                )
 
     def starten() -> None:
         try:
@@ -331,6 +341,17 @@ def workout_view(
                         else []
                     ),
                     abstand=8,
+                )
+            )
+        kreis = bd.schleifen(
+            {s.item_id: s.bedingung for s in schritte}, [s.item_id for s in schritte]
+        )
+        if kreis:  # P100: Verweise im Kreis — Hinweis, kein Verbot
+            namen = ", ".join(s.name for s in schritte if s.item_id in kreis)
+            teile.append(
+                hinweis(
+                    f"Verweise im Kreis bei: {namen}. Von dort erreicht das Workout keinen "
+                    "Schritt ohne „erfüllt →“/„nicht erfüllt →“ — Abbrechen geht immer."
                 )
             )
         if not schritte:

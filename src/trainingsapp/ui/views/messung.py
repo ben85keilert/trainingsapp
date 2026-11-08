@@ -177,6 +177,7 @@ from trainingsapp.ui.components.vollbild import (
 )
 from trainingsapp.ui.components.vollbild import achse as werteachse
 from trainingsapp.ui.components.weitergeben import weitergeben, zeitstempel
+from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.components.zeitachse import achse, achsen_knopf
 from trainingsapp.ui.components.zeitfenster import (
     BreitenSatz,
@@ -1231,9 +1232,29 @@ def _live_teil(
         state.neu_zeichnen()
 
     def dauer_waehlen(e: ft.Event[ft.SegmentedButton]) -> None:
-        if e.control.selected:
-            state.messung_dauer = str(e.control.selected[0])
-            aktualisieren(erzwingen=True)
+        if not e.control.selected:
+            return
+        wahl = str(e.control.selected[0])
+        if wahl == "andere":
+            # Eine andere Dauer über das Zeit-Blatt (Räder, Schnellzeiten) — in Minuten
+            def gestellt(sekunden: int) -> None:
+                state.messung_dauer = str(max(1, round(sekunden / 60)))
+                aktualisieren(erzwingen=True)
+
+            vorher = int(state.messung_dauer) * 60 if state.messung_dauer.isdigit() else 300
+            page.show_dialog(
+                zeit_blatt(
+                    vorher,
+                    starten=gestellt,
+                    titel="Dauer der Messung",
+                    untertitel="volle Minuten",
+                    start_text="Übernehmen",
+                    schnell=state.schnellzeiten(),
+                )
+            )
+            return
+        state.messung_dauer = wahl
+        aktualisieren(erzwingen=True)
 
     def ablauf_waehlen(e: Any) -> None:
         state.messung_ablauf = e.control.value
@@ -1258,6 +1279,12 @@ def _live_teil(
                 segments=[
                     ft.Segment(value="offen", label=ft.Text("offen")),
                     *(ft.Segment(value=str(m), label=ft.Text(f"{m} min")) for m in MESSDAUERN_MIN),
+                    *(
+                        [ft.Segment(value=wahl, label=ft.Text(f"{wahl} min"))]
+                        if wahl.isdigit() and int(wahl) not in MESSDAUERN_MIN
+                        else []
+                    ),
+                    ft.Segment(value="andere", label=ft.Text("andere …")),
                     ft.Segment(value="ablauf", label=ft.Text("Timer")),
                 ],
                 on_change=dauer_waehlen,

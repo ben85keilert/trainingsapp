@@ -59,7 +59,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from ..core.kurse import Kurs
+from ..core.kurse import Kurs, verweise_aufloesen
 from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, PlanItem, jetzt, new_id
 from ..core.pakete import (
     Paket,
@@ -1092,8 +1092,12 @@ def _plan_aus_paketplan(pp: PaketPlan, paket_id: str, subject_id: str, da: set[s
     # Dieselbe Umwandlung wie im Kurskapitel (`VorlageItem.als_planitem`): Ziel, Felder,
     # Sensor-Karte und Takt — fehlte eins, stimmte der Plan nie mit seinem Paketstand überein
     # und galt bei der nächsten Fassung als von der Person geändert (Prüfrunde A6, Befund 1)
-    for nr, item in enumerate(i for i in pp.vorlage.items if i.exercise_id in da):
-        plan.items.append(item.als_planitem(plan.id, nr))
+    positionen: list[int] = []
+    for pos, item in enumerate(pp.vorlage.items, start=1):
+        if item.exercise_id in da:
+            plan.items.append(item.als_planitem(plan.id, len(plan.items)))
+            positionen.append(pos)
+    verweise_aufloesen(plan.items, positionen)  # P97: „#n“ → ID der Planübung
     return plan
 
 

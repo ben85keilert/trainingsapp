@@ -41,7 +41,7 @@ import flet as ft
 
 from trainingsapp.core import varianten as var
 from trainingsapp.core import zaehlen as zl
-from trainingsapp.core.bedingung import Bedingung
+from trainingsapp.core.bedingung import Bedingung, schleifen
 from trainingsapp.core.models import Exercise, Plan, PlanItem
 from trainingsapp.core.parameter import chips_sortiert
 from trainingsapp.core.result_spec import (
@@ -78,6 +78,7 @@ from trainingsapp.ui.components.chips_wahl import chips_zeile
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.hilfe import hilfe_knopf
+from trainingsapp.ui.components.karte import hinweis
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.planstand import schild
 from trainingsapp.ui.components.spec_form import SpecForm
@@ -254,6 +255,17 @@ def plan_einstellen(
         return bereinigt(varianten_schalten(neu, an), uebung)
 
     # -- Bedingung und Zweig (Workout W2/W3, `docs/plan_workout.md` §1) --------------------
+
+    def schleifen_hinweis() -> ft.Control | None:
+        """P100: Laufen „erfüllt →“/„nicht erfüllt →“ von hier aus im Kreis, sagt es die Seite —
+        ein Hinweis, kein Verbot (`core.bedingung.schleifen`)."""
+        alle = {it.id: (bed_stand["b"] if it.id == item.id else it.bedingung) for it in plan.items}
+        if item.id not in schleifen(alle, [it.id for it in plan.items]):
+            return None
+        return hinweis(
+            "Die Verweise laufen im Kreis: Von dieser Übung aus erreicht das Workout keinen "
+            "Schritt ohne „erfüllt →“/„nicht erfüllt →“. Es läuft trotzdem — prüfe die Ziele."
+        )
 
     def bedingung_karte() -> ft.Control:
         """„Weiter, wenn …“ (W2/W3) — die gemeinsame Karte; die Planübung folgt der Übung
@@ -814,6 +826,7 @@ def plan_einstellen(
             sensor_karte(),
             abschnitt("WEITER, WENN …", hilfe_knopf(page, thema="workout")),
             bedingung_karte(),
+            *([h] if (h := schleifen_hinweis()) is not None else []),
             ft.Divider(),
             ft.Row(
                 wrap=True,

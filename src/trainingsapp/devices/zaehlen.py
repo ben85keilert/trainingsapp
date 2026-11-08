@@ -449,6 +449,10 @@ class ZaehlBaustein:
         self.getrennt = False
         #: ob es endete, weil `KEINE_DATEN_S` lang keine Beschleunigung kam — Grund ``abbruch``
         self.ohne_daten = False
+        #: Im Workout (P99 Teil 2, 8.11.2026): das Zählen gehört zu einem Schritt des
+        #: Plan-Ablaufs und endet mit ihm (``plan/uebung_ende`` seiner Planübung) — nicht mit
+        #: dem Ende des Timers (weich: die Überzeit zählt noch mit)
+        self.im_plan = False
         #: Dauer der letzten Rechnung der Atem-Spur (ms) — sie ist billig und nie gedrosselt
         self.atem_laufzeit_ms = 0.0
         #: Summe der ±1 an den Atemzügen (nur Atmung; bei Wdh + Atmung korrigiert ±1 die Sätze)
@@ -852,9 +856,22 @@ class ZaehlBaustein:
         if self._t0 is None or self.grund is not None:
             return
         for e in ereignisse:
+            if self.im_plan and (e.quelle, e.art) == ("plan", "uebung_ende"):
+                # Der Schritt des Workouts endet: das Zählen mit ihm — eingetragen oder
+                # übersprungen/abgebrochen wie er (`ui.plan_ablauf.nach_der_uebung`)
+                if (
+                    e.daten.get("planuebung") == self.kontext.item_id
+                    and e.t_s >= self._start_s
+                    and self._vorgemerkt is None
+                ):
+                    gut = e.daten.get("grund") in ("fertig", "gemacht")
+                    self._vorgemerkt = (ENDE_FERTIG if gut else ENDE_ABBRUCH, e.t_s)
+                continue
             if e.quelle != "timer":
                 continue
             if e.art == "ende":
+                if self.im_plan:
+                    continue  # im Workout endet das Zählen mit dem Schritt, nicht mit dem Timer
                 # Der Timer ist durch (oder „Fertig“ der Uhr): Zählen fertig — brach er ab,
                 # gilt der ganze Lauf als abgebrochen (Leitentscheidung 6)
                 if e.t_s >= self._start_s and self._vorgemerkt is None:

@@ -148,5 +148,5 @@ Timer (P99 Teil 1). Vertrag und Stand: `docs/plan_uhren.md` §4.7, §6a.
   Skalen. P97: Bedingungen in Paketen (Formatversion?). P95: Name „Fokus“. P98: Aufnahme-Karte
   im Ende-Bild mit der Kurve des Workout-Abschnitts (C4) — braucht die gespeicherte Messung.
 - Gerätetest T95: Workout hart/weich am Gerät, Minus-Timer, Abschnitt in der Aufnahme.
-- P99: Zählen im Workout (Sensor/Takt) automatisch anbringen, damit `wdh`-Bedingungen ohne Tipp
-  prüfbar sind. P100: Schleifenhinweis in „Im Plan einstellen“. Gerätetest T96 (W2–W4).
+- P97, P99 und P100 sind am 8.11.2026 gebaut (0.3.63, `docs/plan_uhren.md` §8): Bedingungen im
+  Paket, Zählen je Schritt im Workout, Schleifenhinweis. Gerätetests T96 (W2–W4), T97.

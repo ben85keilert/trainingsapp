@@ -273,15 +273,28 @@ Ben: „ok, bau alles“. Sechs Commits (`e7fcd93` K0 … `b1fa398` K5), Migrati
   Geltungen an die Uhr; Timer → Vorlagen → Karte **Takte** (`views/timer._takte_karte`: Stift,
   ✕).
 
-## 8. Offen nach K0–K5
+## 8. Nachgezogen (8.11.2026, 0.3.63) — Ben: „erledige gleich die offenen Punkte“
 
-- **P99 Teil 2:** Sensor und „Takt zählt“ im Workout (`uebung_lauf.zaehlen_starten` erlaubt den
-  Plan-Ablauf nicht; `takt_zaehlen_anbringen` braucht die `UebungBaustein`-Semantik je Schritt).
-- Schleifenhinweis im Editor (P100); Bedingungen und `Exercise.bedingung` im Paket (P97).
-- Messdauer: die Segmente 5 · 10 · 15 min bleiben (kein Zeit-Blatt) — die Schnellzeiten gelten
-  dort nicht.
-- Doku-Nachzug in `plan_stoppuhr.md` §3/§6 und `plan_einheit.md` §7: nur Verweise hierher.
-- Gerätetest **T97**.
+- **P99 Teil 2 — Zählen im Workout:** `ZaehlBaustein.im_plan` — das Zählen gehört zu einem
+  Schritt und endet mit ``plan/uebung_ende`` seiner Planübung (fertig/gemacht → fertig, sonst
+  Abbruch), nicht mit dem Timer (weich: die Überzeit zählt mit); `Einheitslauf.entlassen`
+  nimmt den beendeten Zähl-Teil, damit der nächste Schritt einen neuen bekommt.
+  `workout_view` bringt je Schritt Takt, „Takt zählt“ (`takt_zaehlen_anbringen`) und — mit
+  Gerät und eingeschalteter Karte — den Sensor an (`zaehlen_starten`, neuer Zweig für den
+  Plan-Ablauf: nur die laufende Übung, einmal je Schritt); der Knopf „Wdh. zählen“ steht im
+  Plan nur an der laufenden Übung (`zaehl_stand.sichtbar`). `nach_der_uebung` trägt die
+  Wiederholungen des Schritts ein (`zaehlen_eintrag.wiederholungen` ab dem Start der Übung, im
+  Feld `zaehlt_in`). Die Bedingung „12 Wdh. in 40 s“ wird damit ohne Tipp prüfbar.
+- **P100:** Hinweis „Verweise im Kreis“ in „Im Plan einstellen“ (unter der Karte) und im
+  Start-Bild des Workouts — Hinweis, kein Verbot (`core.bedingung.schleifen`).
+- **P97:** Paketfeld `bedingung` an der Übung (`stand`/`_uebung_lesen`, FELDNAMEN „Weiter,
+  wenn“) und je Planübung (`VorlageItem.bedingung`, mit `zweig`, `dann`/`sonst` als **Position**
+  ``"#n"`` — `verweise_als_position` beim Export, `verweise_aufloesen` beim Import in Kursen und
+  Paketplänen); `trainingsapp-paket pruefen` prüft es (`core.bedingung.bedingung_pruefen`).
+  Keine neue Formatversion. Vertrag `docs/uebungspakete.md`.
+- **Messdauer:** Segment „andere …“ öffnet das Zeit-Blatt (volle Minuten, Schnellzeiten als
+  Chips); die gewählte Dauer steht als eigenes Segment.
+- Offen bleibt nur der Gerätetest **T97** (ergänzt um Zählen im Workout).
 
 ## 7. Entscheidungen (Katalog) — **alle entschieden 8.11.2026**
 

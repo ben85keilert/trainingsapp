@@ -658,6 +658,16 @@ class Einheitslauf:
             raise RuntimeError("Teile gehen nur vor dem Start")
         self.teile = [t for t in self.teile if t.art != art]
 
+    def entlassen(self, teil: Baustein) -> bool:
+        """Einen **beendeten** Teil aus der laufenden Einheit nehmen, damit ein neuer seiner Art
+        beitreten kann — das Zählen je Schritt eines Workouts (P99 Teil 2, 8.11.2026). Seine
+        Ereignisse bleiben in der Zeitleiste. ``False``, wenn er noch läuft oder nicht dabei ist."""
+        if teil not in self.teile or self._aktiv(teil):
+            return False
+        self.teile = [t for t in self.teile if t is not teil]
+        self._gestartet.discard(id(teil))
+        return True
+
     def beitreten(self, teil: Baustein) -> None:
         """Ein einzeln gestarteter Teil kommt in die laufende Einheit — er beginnt jetzt, auf
         ihrer Achse: der Timer von vorn, die HRV mit einer neuen Aufnahme (läuft schon eine,

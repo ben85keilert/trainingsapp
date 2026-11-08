@@ -117,9 +117,9 @@ def knopf(uebung: Exercise, item: PlanItem | None = None) -> str:
 
 
 def im_plan_ablauf(state: Any) -> bool:
-    """Läuft gerade ein Plan-Ablauf? Darin zählt der Sensor noch nicht (Plan §13: der Ablauf
-    trägt je Übung selbst ein, `ui.plan_ablauf.nach_der_uebung`) — einen Knopf, der dort nur
-    „Es läuft schon eine Einheit“ meldete, gibt es darum nicht.
+    """Läuft gerade ein Workout (Plan-Ablauf)? Seit P99 Teil 2 (8.11.2026) zählt der Sensor
+    darin für den laufenden Schritt (`ui.uebung_lauf.zaehlen_starten`); diese Frage bleibt für
+    den Fall ohne Timer-Schritt.
 
     >>> from types import SimpleNamespace as NS
     >>> im_plan_ablauf(NS(einheit=None))
@@ -147,15 +147,20 @@ def sichtbar(
 ) -> bool:
     """Ob die Karte „Eintragen“ den Knopf der Zählzeile zeigt: nicht beim Nachtragen, an der
     (Plan-)Übung ein Schalter an, ein Gerät mit Beschleunigungssensor verbunden (P118: sonst
-    gibt es weder Knopf noch ±1), kein Plan-Ablauf im Gang (`im_plan_ablauf`) und nichts
-    bereitgestellt (`bereitgestellt`)."""
-    return (
-        nachtrag is None
-        and zaehlen_an(uebung, item)
-        and geraet_kann_zaehlen(getattr(state, "messlauf", None))
-        and not im_plan_ablauf(state)
-        and not bereitgestellt(state)
-    )
+    gibt es weder Knopf noch ±1), nichts bereitgestellt (`bereitgestellt`) — und läuft ein
+    Workout, nur für dessen laufende Übung (P99 Teil 2, 8.11.2026; vorher gar nicht)."""
+    if nachtrag is not None or not zaehlen_an(uebung, item):
+        return False
+    if not geraet_kann_zaehlen(getattr(state, "messlauf", None)) or bereitgestellt(state):
+        return False
+    if im_plan_ablauf(state):
+        e = state.einheit
+        p = e.teil("plan") if e is not None else None
+        if not isinstance(p, PlanAblaufBaustein) or p.phase not in ("uebung", "ueberzeit"):
+            return False
+        s = p.schritt
+        return s.uebung_id == uebung.id and (item is None or s.item_id == item.id)
+    return True
 
 
 # ---------------------------------------------------------------------------

@@ -30,12 +30,13 @@ das Paketformat `core/pakete.py`.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any
 
 from . import links
+from .bedingung import Bedingung as Weiterbedingung
 from .models import (
     Exercise,
     HrvRecording,
@@ -147,6 +148,10 @@ class VorlageItem:
     #: Takt nur hier (A6, Paketfeld ``takt`` je Planübung) — ``None`` = wie die Übung, ein
     #: leerer Takt (``takt = {}``) = ausdrücklich keiner
     takt: Takt | None = None
+    #: „Weiter, wenn …“ nur hier (P97, 8.11.2026; Paketfeld ``bedingung`` je Planübung) —
+    #: ``None`` = wie die Übung; ``dann``/``sonst`` zeigen im Paket auf die **Position** der
+    #: Planübung (``"#3"``), in der App auf ihre ID (`verweise_als_position`, `verweise_aufloesen`)
+    bedingung: Weiterbedingung | None = None
 
     @classmethod
     def aus_planitem(cls, item: PlanItem) -> VorlageItem:
@@ -158,6 +163,7 @@ class VorlageItem:
             felder=None if item.felder is None else list(item.felder),
             beschleunigung=item.acc,
             takt=item.takt,
+            bedingung=None if item.bedingung.leer else item.bedingung,
         )
 
     def als_planitem(self, plan_id: str, order: int) -> PlanItem:
@@ -180,6 +186,7 @@ class VorlageItem:
             felder=None if self.felder is None else list(self.felder),
             acc=self.beschleunigung,
             takt=self.takt,
+            bedingung=self.bedingung if self.bedingung is not None else Weiterbedingung(),
         )
 
     def to_dict(self, uebung: str | None = None) -> dict[str, Any]:
@@ -199,6 +206,8 @@ class VorlageItem:
             d["beschleunigung"] = self.beschleunigung.als_dict()
         if self.takt is not None:
             d["takt"] = {} if self.takt.leer else self.takt.als_dict()
+        if self.bedingung is not None and not self.bedingung.leer:
+            d["bedingung"] = self.bedingung.als_dict()
         return d
 
     @classmethod
@@ -217,14 +226,56 @@ class VorlageItem:
         True
         """
         felder = e.get("felder")
-        acc, takt = e.get("beschleunigung"), e.get("takt")
+        acc, takt, bed = e.get("beschleunigung"), e.get("takt"), e.get("bedingung")
         return cls(
             exercise_id=str(e["uebung"]),
             target=dict(e.get("ziel") or {}),
             felder=None if felder is None else [str(k) for k in felder],
             beschleunigung=SensorWahl.aus_dict(acc) if isinstance(acc, Mapping) else None,
             takt=_takt_lesen(takt),
+            bedingung=Weiterbedingung.aus_dict(bed) if isinstance(bed, Mapping) and bed else None,
         )
+
+
+def verweise_als_position(items: list[VorlageItem], ids: Sequence[str]) -> list[VorlageItem]:
+    """Export: ``dann``/``sonst`` der Bedingungen von Planübungs-IDs auf Positionen (``"#2"``,
+    1-basiert) — ein Paket kennt keine IDs. Unbekannte Verweise fallen weg.
+
+    >>> from trainingsapp.core.bedingung import WDH
+    >>> v = [VorlageItem("a", bedingung=Weiterbedingung(WDH, 5, sonst="i2")), VorlageItem("b")]
+    >>> verweise_als_position(v, ["i1", "i2"])[0].bedingung.sonst
+    '#2'
+    """
+    stelle = {i: f"#{n}" for n, i in enumerate(ids, start=1)}
+    out: list[VorlageItem] = []
+    for it in items:
+        b = it.bedingung
+        if b is not None and (b.dann or b.sonst):
+            b = replace(b, dann=stelle.get(b.dann, ""), sonst=stelle.get(b.sonst, ""))
+        out.append(replace(it, bedingung=b))
+    return out
+
+
+def verweise_aufloesen(items: list[PlanItem], positionen: Sequence[int]) -> None:
+    """Import: ``"#n"`` → die ID der Planübung, die aus Position n entstand (``positionen[k]``
+    = Position der k-ten Planübung in der Vorlage, 1-basiert); fehlt sie (Übung nicht da),
+    fällt der Verweis weg.
+
+    >>> from trainingsapp.core.bedingung import WDH
+    >>> a = PlanItem(id="i1", bedingung=Weiterbedingung(WDH, 5, sonst="#2"))
+    >>> b = PlanItem(id="i2")
+    >>> verweise_aufloesen([a, b], [1, 2]); a.bedingung.sonst
+    'i2'
+    """
+    ziel = {f"#{pos}": it.id for it, pos in zip(items, positionen, strict=False)}
+    for it in items:
+        b = it.bedingung
+        if b.dann.startswith("#") or b.sonst.startswith("#"):
+            it.bedingung = replace(
+                b,
+                dann=ziel.get(b.dann, "") if b.dann.startswith("#") else b.dann,
+                sonst=ziel.get(b.sonst, "") if b.sonst.startswith("#") else b.sonst,
+            )
 
 
 def _takt_lesen(roh: Any) -> Takt | None:
@@ -572,8 +623,12 @@ def plan_aus_vorlage(
         wochentage=list(vorlage.wochentage),
         kurs_kapitel_id=kapitel.id,
     )
-    for nr, item in enumerate(i for i in vorlage.items if i.exercise_id in da):
-        plan.items.append(item.als_planitem(plan.id, nr))
+    positionen: list[int] = []
+    for pos, item in enumerate(vorlage.items, start=1):
+        if item.exercise_id in da:
+            plan.items.append(item.als_planitem(plan.id, len(plan.items)))
+            positionen.append(pos)
+    verweise_aufloesen(plan.items, positionen)
     return plan
 
 

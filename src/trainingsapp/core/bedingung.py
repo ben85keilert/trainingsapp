@@ -337,6 +337,41 @@ def schleifen(bedingungen: Mapping[str, Bedingung], reihenfolge: Iterable[str]) 
     return out
 
 
+def bedingung_pruefen(roh: Any, *, im_plan: bool = False) -> tuple[list[str], list[str]]:
+    """Das Paketfeld ``bedingung`` prüfen (`trainingsapp-paket pruefen`): Fehler = die App läse
+    etwas anderes, als gemeint; Hinweis = Unbekanntes, das sie übergeht.
+
+    >>> bedingung_pruefen({"art": "wdh", "n": 12})
+    ([], [])
+    >>> bedingung_pruefen({"art": "zeit", "n": "x", "zweig": "E"}, im_plan=True)
+    (['n ist keine Zahl'], ['Zweig „E“ unbekannt — A gilt'])
+    >>> bedingung_pruefen({"art": "wdh", "sonst": "#2"})
+    ([], ['„sonst“ gilt nur je Planübung — an der Übung übergangen'])
+    """
+    fehler: list[str] = []
+    hinweise: list[str] = []
+    if not isinstance(roh, Mapping):
+        return ["keine Tabelle"], []
+    art = roh.get("art", KEINE)
+    if art not in ARTEN_TEXT:
+        hinweise.append(f"Art „{art}“ unbekannt — „keine“ gilt")
+    for k in ("n", "sekunden"):
+        if k in roh and not isinstance(roh[k], int | float):
+            fehler.append(f"{k} ist keine Zahl")
+    if "hart" in roh and not isinstance(roh["hart"], bool):
+        hinweise.append("hart ist kein Wahrheitswert")
+    if "zweig" in roh and roh["zweig"] not in ZWEIGE:
+        hinweise.append(f"Zweig „{roh['zweig']}“ unbekannt — A gilt")
+    for k in ("dann", "sonst"):
+        if k not in roh:
+            continue
+        if not im_plan:
+            hinweise.append(f"„{k}“ gilt nur je Planübung — an der Übung übergangen")
+        elif not (isinstance(roh[k], str) and roh[k].startswith("#") and roh[k][1:].isdigit()):
+            fehler.append(f"„{k}“ muss eine Position sein („#2“)")
+    return fehler, hinweise
+
+
 def mit_zweig(b: Bedingung, zweig: str) -> Bedingung:
     return replace(b, zweig=zweig if zweig in ZWEIGE else HAUPTZWEIG)
 

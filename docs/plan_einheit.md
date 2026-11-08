@@ -150,6 +150,10 @@ geschrieben, unveränderlich, `nr` fortlaufend (`data/einheiten.py`). Daraus wer
 
 ## 7. Timer an der Übung und Plan-Ablauf (Stufe 3)
 
+> **Stand 8.11.2026:** Der Plan-Ablauf ist im **Workout** aufgegangen (`docs/plan_workout.md`,
+> `docs/plan_uhren.md` §4.7); die Uhren eines Plans stehen im Uhrenplan (§4.6). Der Abschnitt
+> im Übungsformular heißt „Uhr“. Die Absätze unten beschreiben den Stand vom Oktober.
+
 Ben, 17.10.2026: „Grundsätzlich sollte man dem Plan auch einen Timer geben können oder der
 einzelnen Übung“ — und: „Aus dem Text heraus weiß die App nicht, was Übungszeit ist.“
 

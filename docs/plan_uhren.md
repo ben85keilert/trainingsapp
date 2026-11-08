@@ -226,11 +226,68 @@ D1/D2 Uhrenplan und Timer-Wahl (K3), D3/D4 laufende Uhr und Fokus mit denselben 
 hart/weich in einem Satz (K4, P106), D7 „Im Plan einstellen → Uhr“ mit zählt und „Pflicht“ (P104),
 D8 Takt-Blatt mit Geltung (K5).
 
+## 6a. Umsetzungsstand (8.11.2026, 0.3.62) — **K0–K5 gebaut**
+
+Ben: „ok, bau alles“. Sechs Commits (`e7fcd93` K0 … `b1fa398` K5), Migrationen 042 und 043.
+
+- **K0:** Laufleiste/Einheit-Karte → Workout; Timer-Pille in jeder AppBar (`views/timer.timer_knopf`,
+  auch Ausdauer, Plan-Editor, Workout, Übungsseite, Einstellungen); Stoppuhr an der Planübung
+  ohne „720:00“; Uhr-Symbol der Übungsseite gefüllt nach `timer_fuer`. Die zwei Einmal-Timer
+  behalten ihre ID — geprüft: Sie treffen sich in keiner Liste, ein Konflikt entsteht nicht.
+- **K1:** Reiter **Stoppuhr · Zeit · Vorlagen**, Karte „Abschnitte“, Knopfworte Pause · Weiter ·
+  Nächster · Fertig · Abbrechen, „Noch einmal“, „Pflicht“ (`Bedingung.kurztext`), „Workout“ statt
+  „Ablauf“ (Ziele, Timer-Karte, Messdauer „Timer“); **Zeit-Blatt überall** (`zeit_blatt(schnell=)`:
+  Timer-Seite als Etikett, Timer-Editor je Abschnitt als Knopf, Uhr-Zeile, Übungs-Timer) mit
+  **Schnellzeiten** aus den Einstellungen (`core.timer.schnellzeiten_lesen`,
+  `SettingRepo.SCHNELLZEITEN`, Feld in Einstellungen → Messung und Werkzeuge); untere Leiste auch
+  auf `/timer`, Editor und Signalen (`navigation.uebungsseite`, P102); `hilfe.UHR_MD` neu.
+- **K2:** nur die Zeile (P103; `UHR_DARSTELLUNGEN`, Einstellung und `_knoepfe` entfernt); laufende
+  Karte mit **Nächster** (⏭) und **Takt-Knopf**, Knöpfe Pause · Nächster · Fertig · Abbrechen; der
+  Fokus mit denselben Knöpfen in derselben Reihenfolge; Übungs-Timer: Stoppuhr zur Wahl, Starten
+  auch ohne Timer, Links „In der Übung festlegen“/„Im Plan einstellen“, Stift für die eigene Kopie
+  (`…/bearbeiten/<id>` — die Route gab es, jetzt hat sie einen Knopf).
+- **K3:** `views/plan_uhren.py` — der **Uhrenplan** (`<Plan bearbeiten>/uhren`, Zeile „Uhren“ im
+  Plan-Editor statt der Karte „Workout und Ablauf“): Kopf „Für den ganzen Plan“ (Workout, hart/
+  weich, Timer für alle, **Takt für alle** — Migration 042 `plan.takt_json`,
+  `PlanRepo.plan_takt_setzen`, `takt_der_uebung(…, plan)` —, Signale), je Planübung eine
+  aufklappbare Karte (`ft.ExpansionTile`, offen gemerkt in `AppState.uhren_offen`): Zeile mit
+  allem, aufgeklappt der Timer als Liste (Name ▾ → `components/timer_wahl.timer_waehlen`, je
+  Abschnitt Dauer → Zeit-Blatt, Takt → Takt-Blatt, zählt; + Abschnitt, Runden — jede Änderung
+  macht eine **eigene Kopie** `TimerWahl.eigen`), Chips Uhr · Zeit zählt (**P104**:
+  `TimerWahl.zaehlt`, `zeit_zaehlt_fuer`) · Weiter-Bedingung, Takt-Zeile, ↺ je Karte, „Alles wie
+  die Übung“. **P107:** `Exercise.bedingung` (Migration 042 `exercise.bedingung_json`), Karte
+  „Weiter, wenn …“ in „Übung bearbeiten“ (ohne Zweig) — `components/bedingung_form.py` ist die
+  gemeinsame Karte, `core.bedingung.wirksame` löst Übung + Planübung auf (`schritte_fuer`).
+  „Im Plan einstellen“: Abschnitt UHR mit „Zeit der Uhr zählt“ (wie die Übung · zählt · zählt
+  nicht), gemeinsamer Timer-Dialog.
+- **K4:** `views/plan_ablauf.py` **entfernt**; `…/timer/ablauf` zeigt das Workout; Heute → „Start“,
+  Ziele, Laufleiste, Einheit-Karte → `/plan/<id>/workout`; Start-Bild „Heute: Hart · Weich“ mit
+  dem einen Satz und den drei Folgen, HRV-Schalter („mit dabei“, „Messung beenden / Weiterlaufen“)
+  aus der alten Ansicht; Migration 043 `auto_next → uebergang_hart`; Paket-Pläne mit
+  „automatisch weiter“ sind hart. **P99 Teil 1:** je Schritt kommt der Takt der Planübung an den
+  Timer (`takt_anbringen` in `workout_view`). Offen bleibt das Zählen (Sensor, Takt zählt) im
+  Workout — `zaehlen_starten` sperrt den Plan-Ablauf noch (A19), siehe §8.
+- **K5:** `takt_blatt(in_die_bibliothek=)` mit **Geltung** oben (Für jetzt · Abschnitt · In diesem
+  Plan · Übung · Vorlage, vorbelegt nach dem Ort), ein „Übernehmen“, „Als Vorlage sichern“, „Kein
+  Takt“ für die gewählte Geltung; `takt_knopf(uebung=, item=)` bringt Übung und Planübung als
+  Geltungen an die Uhr; Timer → Vorlagen → Karte **Takte** (`views/timer._takte_karte`: Stift,
+  ✕).
+
+## 8. Offen nach K0–K5
+
+- **P99 Teil 2:** Sensor und „Takt zählt“ im Workout (`uebung_lauf.zaehlen_starten` erlaubt den
+  Plan-Ablauf nicht; `takt_zaehlen_anbringen` braucht die `UebungBaustein`-Semantik je Schritt).
+- Schleifenhinweis im Editor (P100); Bedingungen und `Exercise.bedingung` im Paket (P97).
+- Messdauer: die Segmente 5 · 10 · 15 min bleiben (kein Zeit-Blatt) — die Schnellzeiten gelten
+  dort nicht.
+- Doku-Nachzug in `plan_stoppuhr.md` §3/§6 und `plan_einheit.md` §7: nur Verweise hierher.
+- Gerätetest **T97**.
+
 ## 7. Entscheidungen (Katalog) — **alle entschieden 8.11.2026**
 
 P101 übernehmen · P102–P105 ja · P106 ja, mit der Doppelbedeutung aus §4.7 · P107 (Bedingung an der
-Übung) ja. Skizzen D1–D9 abgenommen am 8.11. (D1 in Fassung 2, D5 mit Zeit-Blatt D9); K5 „bauen“. Nächster Schritt:
-Skizzen für K2 (laufende Uhr/Fokus) und K3 (Uhrenplan), dann K0.
+Übung) ja. Skizzen D1–D9 abgenommen am 8.11. (D1 in Fassung 2, D5 mit Zeit-Blatt D9); K5 „bauen“.
+Gebaut am 8.11.2026 (§6a).
 
 Fragen, wie sie gestellt waren:
 

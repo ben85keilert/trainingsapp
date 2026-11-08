@@ -132,6 +132,16 @@ HF-Zonen nur als Anzeige, der Zielbereich-Ton (Entscheidung C) ist Information.
   „Wdh. zählen“ bzw. Takt-Zählen wie beim Übungs-Timer anbringen (P99); Hinweis auf Schleifen
   im Editor (P100).
 
+## 4c. Uhren K4 (8.11.2026, 0.3.62)
+
+Die alte Ablauf-Ansicht (`views/plan_ablauf.py`) ist weg — das Workout ist der eine Einstieg
+(Heute → „Start“, Ziele, Timer-Karte, Laufleiste; `…/timer/ablauf` zeigt es). Hart/weich ist
+**eine Haltung mit drei Folgen** (Timer läuft ab · Übung ohne Timer · Bedingung verfehlt), im
+Start-Bild in einem Satz, dazu die HRV-Schalter. „Auf Tipp warten/automatisch“ und „Pause ohne
+Timer“ sind darin aufgegangen (Migration 043: `auto_next` → `uebergang_hart`). Die harte
+Bedingung heißt in der Oberfläche **Pflicht**. Je Schritt kommt der Takt der Planübung an den
+Timer (P99 Teil 1). Vertrag und Stand: `docs/plan_uhren.md` §4.7, §6a.
+
 ## 5. Offen
 
 - P83 (Workouts) → dieses Dokument. P96: welche Kurven im Fokus, je Gerät/Übung/Workout,

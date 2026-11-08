@@ -44,6 +44,11 @@ Skizzen „Pause beendet den Satz“ oder vier Stufen zeigen, gilt, was hier ste
 
 ## 3. Uhr an der Übung und „Zählt als“
 
+> **Stand 8.11.2026:** Die Bedienorte und Begriffe stehen seit K0–K5 in `docs/plan_uhren.md`
+> (Abschnitt „Uhr“ in „Übung bearbeiten“ und „Im Plan einstellen“, Uhrenplan des Plans, Reiter
+> Stoppuhr · Zeit · Vorlagen, Knöpfe Pause · Weiter · Nächster · Fertig · Abbrechen). Die
+> Absätze unten beschreiben den Stand vom Oktober.
+
 Ben: „Der Parameter Gesamtzeit wird programmweit zu Zeit. Es soll geben Zeit+Haltezeit.
 Wenn Haltezeit aktiviert ist, gibt es eine Auswahl. Wenn Haltezeit nicht aktiviert ist,
 automatisch ‚Zeit‘. Parameter Zeit muss auch nicht aktiviert sein … die Uhr kann mit dem

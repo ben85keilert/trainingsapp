@@ -161,7 +161,7 @@ async def test_starten_laufen_fertig_gemacht(umgebung) -> None:
     texte = _texte(laufend)
     assert "Pause · zählt nicht" in texte
     assert texte.count("Satz 1") == 1 and "Satz 2" in texte and "Satz 3" in texte
-    for text in ("Weiter", "Fertig", "Abbrechen"):
+    for text in ("Nächster", "Fertig", "Abbrechen"):
         _knopf(laufend, text)
     _knopf(laufend, "Fertig").on_click()
     await _bis_zum_ende(state, uhr, gurt)
@@ -323,7 +323,7 @@ async def test_formular_timer_reihenfolge_bibliothek_entfernen(formular) -> None
     seite = Seite()
     ansicht = uebung_bearbeiten(seite, state, uebung)
     texte = _texte(ansicht)
-    assert "UHR UND TIMER" in texte and "Halten · Vorgabe" in texte and "Kurz" in texte
+    assert "UHR" in texte and "Halten · Vorgabe" in texte and "Kurz" in texte
     _symbolknopf(ansicht, ft.Icons.ARROW_UPWARD).on_click()  # „Kurz“ nach oben
     assert "Kurz · Vorgabe" in _texte(ansicht)
     _knopf(ansicht, "Timer hinzufügen").on_click()
@@ -379,7 +379,7 @@ async def test_formular_timer_editor_speichert_vorher(formular) -> None:
     neues_profil = next(
         z
         for z in dialog.content.controls
-        if isinstance(z, ft.ListTile) and z.title.value == "Neues Profil"
+        if isinstance(z, ft.ListTile) and z.title.value == "Neuer Timer"
     )
     neues_profil.on_click()
     await dialog.on_dismiss(None)
@@ -392,7 +392,7 @@ async def test_formular_timer_editor_speichert_vorher(formular) -> None:
     next(
         z
         for z in dialog.content.controls
-        if isinstance(z, ft.ListTile) and z.title.value == "Neues Profil"
+        if isinstance(z, ft.ListTile) and z.title.value == "Neuer Timer"
     ).on_click()
     await dialog.on_dismiss(None)
     (seitstuetz,) = [u for u in state.uebungen.alle() if u.name == "Seitstütz mit Timer"]

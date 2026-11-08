@@ -84,6 +84,9 @@ EINMAL: Final[str] = "einmal"
 EINMAL_DAUER_S: Final[int] = 5 * 60
 #: Dauern zur schnellen Wahl im Einmal-Timer (s)
 EINMAL_DAUERN_S: Final[tuple[int, ...]] = (60, 120, 300, 600, 900)
+#: Schnellzeiten beim Stellen einer Zeit (Chips unter den Rädern) — Vorgabe; einstellbar unter
+#: Einstellungen → Timer (Ben, 8.11.2026, `docs/plan_uhren.md` §4.6a)
+SCHNELLZEITEN_S: Final[tuple[int, ...]] = (30, 60, 120, 300, 600, 900)
 
 #: Höchstens so viele Runden
 MAX_RUNDEN: Final[int] = 99
@@ -481,6 +484,58 @@ def stoppuhr(name: str = "", *, name_in_marken: bool = True) -> TimerProfil:
         art=STOPPUHR,
         name_in_marken=name_in_marken,
     )
+
+
+def schnellzeiten_lesen(text: str | None) -> tuple[int, ...]:
+    """Die Schnellzeiten aus der Einstellung — Sekunden oder Minuten, durch Komma getrennt;
+    leer oder unlesbar → Vorgabe. Doppelte fallen weg, sortiert aufsteigend.
+
+    >>> schnellzeiten_lesen("30 s, 1 min, 2, 5 min, 1:30")
+    (30, 60, 90, 120, 300)
+    >>> schnellzeiten_lesen(None) == SCHNELLZEITEN_S, schnellzeiten_lesen("x") == SCHNELLZEITEN_S
+    (True, True)
+    """
+    if not text or not text.strip():
+        return SCHNELLZEITEN_S
+    zeiten: set[int] = set()
+    for teil in text.replace(";", ",").split(","):
+        t = teil.strip().lower()
+        if not t:
+            continue
+        if t.endswith("min"):
+            wert = dauer_lesen(t[:-3].strip())
+            sek = None if wert is None else wert * 60
+        elif t.endswith("s") and ":" not in t:
+            sek = dauer_lesen(t[:-1].strip())
+        else:
+            wert = dauer_lesen(t)
+            # eine nackte Zahl bis 20 meint Minuten („1, 2, 5“), sonst Sekunden
+            sek = None if wert is None else (wert * 60 if ":" not in t and wert <= 20 else wert)
+        if sek is not None and 0 < sek <= MAX_ABSCHNITT_S:
+            zeiten.add(round(sek))
+    return tuple(sorted(zeiten)) if zeiten else SCHNELLZEITEN_S
+
+
+def schnellzeit_text(sekunden: int) -> str:
+    """„30 s“, „1 min“, „1:30“.
+
+    >>> schnellzeit_text(30), schnellzeit_text(60), schnellzeit_text(90), schnellzeit_text(600)
+    ('30 s', '1 min', '1:30', '10 min')
+    """
+    if sekunden < 60:
+        return f"{sekunden} s"
+    if sekunden % 60 == 0:
+        return f"{sekunden // 60} min"
+    return dauer_text(sekunden)
+
+
+def schnellzeiten_text(zeiten: tuple[int, ...]) -> str:
+    """Für das Eingabefeld der Einstellung.
+
+    >>> schnellzeiten_text((30, 60, 300))
+    '30 s, 1 min, 5 min'
+    """
+    return ", ".join(schnellzeit_text(s) for s in zeiten)
 
 
 def einmal_timer(
@@ -1403,6 +1458,7 @@ __all__ = [
     "MAX_RUNDEN",
     "MESSDAUERN_MIN",
     "QUELLEN",
+    "SCHNELLZEITEN_S",
     "STANDARD_KLANG",
     "STOPPUHR",
     "STOPPUHR_MAX_S",
@@ -1423,6 +1479,9 @@ __all__ = [
     "ende_frage",
     "klang_fuer",
     "messdauer",
+    "schnellzeit_text",
+    "schnellzeiten_lesen",
+    "schnellzeiten_text",
     "signal",
     "signale_kurz",
     "standard_profile",

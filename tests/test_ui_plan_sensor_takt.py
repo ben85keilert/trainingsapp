@@ -228,7 +228,7 @@ def test_karte_wie_die_uebung_nur_hier_und_zurueck(page, state) -> None:
     plan, item = _plan(state, u)
     ansicht = plan_einstellen(page, state, plan, item, u)
     texte = _texte(ansicht)
-    assert "BESCHLEUNIGUNGSSENSOR" in texte and texte.index("UHR UND TIMER") < texte.index(
+    assert "BESCHLEUNIGUNGSSENSOR" in texte and texte.index("UHR") < texte.index(
         "BESCHLEUNIGUNGSSENSOR"
     )
     karte = _sensor_karte(ansicht)
@@ -381,7 +381,7 @@ def test_timer_knopf_der_uebungsseite_im_plan_oeffnet_den_timer_der_planuebung(p
     browser = SimpleNamespace(launch_url=None)
     route = f"/plan/{plan.id}/info/{item.id}"
     ansicht = uebung_detail(page, state, u, browser, item=item, plan=plan, route=route)
-    _klick(_symbol(ansicht.appbar, ft.Icons.TIMER_OUTLINED, "Timer dieser Übung"))
+    _klick(_symbol(ansicht.appbar, ft.Icons.TIMER_OUTLINED, "Uhr dieser Übung"))
     assert page.routen == [f"{route}/timer/uebung/{u.id}/{item.id}"]
     page.routen.clear()
     _klick(_symbol(uebung_detail(page, state, u, browser).appbar, ft.Icons.TIMER_OUTLINED))

@@ -73,6 +73,8 @@ from trainingsapp.core.timer import (
     TimerSignale,
     einmaluhren_lesen,
     einmaluhren_schreiben,
+    schnellzeiten_lesen,
+    schnellzeiten_text,
     timer_profile_lesen,
     timer_profile_schreiben,
     timer_signale_lesen,
@@ -1002,6 +1004,15 @@ class AppState:
 
     def takt_vibration_setzen(self, an: bool) -> None:
         self.einstellungen.setzen(SettingRepo.TAKT_VIBRATION, "1" if an else "0")
+
+    def schnellzeiten(self) -> tuple[int, ...]:
+        """Die Chips unter den Rädern beim Stellen einer Zeit (Einstellungen → Timer)."""
+        return schnellzeiten_lesen(self.einstellungen.lesen(SettingRepo.SCHNELLZEITEN))
+
+    def schnellzeiten_setzen(self, text: str) -> tuple[int, ...]:
+        zeiten = schnellzeiten_lesen(text)
+        self.einstellungen.setzen(SettingRepo.SCHNELLZEITEN, schnellzeiten_text(zeiten))
+        return zeiten
 
     def timer_signale(self) -> TimerSignale:
         """Ton, Countdown, Vibration, Bildschirm an, Notizen — alles an, wenn nichts gespeichert."""

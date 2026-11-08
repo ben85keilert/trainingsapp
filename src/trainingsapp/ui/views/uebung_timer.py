@@ -286,7 +286,13 @@ def uebung_timer_view(
             state.uhr_wahl[key] = neu.id
             starten(neu)
 
-        page.show_dialog(zeit_blatt(profil.gesamt_s() if profil is not None else 60, starten=los))
+        page.show_dialog(
+            zeit_blatt(
+                profil.gesamt_s() if profil is not None else 60,
+                starten=los,
+                schnell=state.schnellzeiten(),
+            )
+        )
 
     def bereitstellen() -> None:
         if _bereitgestellt(state, uebung.id):
@@ -391,7 +397,7 @@ def uebung_timer_view(
                         spacing=8,
                         controls=[
                             ft.OutlinedButton(
-                                "Nochmal",
+                                "Noch einmal",
                                 icon=ft.Icons.REPLAY,
                                 on_click=lambda: starten(),
                                 expand=True,
@@ -584,7 +590,7 @@ def uebung_timer_view(
                             size=56,
                             weight=ft.FontWeight.W_300,
                         ),
-                        tooltip="Zeit stellen — Timer ohne Ablauf",
+                        tooltip="Zeit stellen",
                         on_click=zeit_stellen,
                     )
                 ],
@@ -679,7 +685,7 @@ def uebung_timer_view(
                 controls=[
                     fokus.halt_knopf,
                     ft.OutlinedButton(
-                        "Weiter", icon=ft.Icons.SKIP_NEXT, on_click=weiter, expand=True
+                        "Nächster", icon=ft.Icons.SKIP_NEXT, on_click=weiter, expand=True
                     ),
                 ],
             ),

@@ -171,7 +171,7 @@ def plan_ziele(
     ueben: Callable[[], Any] | None = None,
 ) -> list[z.Ziel]:
     """Die Wege zu einem Plan: Üben (``ueben``: nimmt den Plan für heute auf, sonst nur
-    öffnen) · Bearbeiten · Ablauf starten."""
+    öffnen) · Bearbeiten · Workout starten."""
     weg = set(hier)
     out: list[z.Ziel] = []
     if z.UEBEN not in weg:
@@ -179,7 +179,7 @@ def plan_ziele(
     if z.BEARBEITEN not in weg:
         out.append(z.Ziel(z.BEARBEITEN, _route(page, f"/plaene/{plan.id}")))
     if z.ABLAUF not in weg and plan.items:
-        out.append(z.Ziel(z.ABLAUF, _route(page, f"/plan/{plan.id}/timer/ablauf")))
+        out.append(z.Ziel(z.ABLAUF, _route(page, f"/plan/{plan.id}/workout")))
     return out
 
 

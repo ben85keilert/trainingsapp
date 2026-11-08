@@ -306,7 +306,7 @@ def plan_einstellen(
             )
         zeilen.append(
             ft.Switch(
-                label="Hart — „Weiter“ erst, wenn erfüllt (Freischaltung)",
+                label="Pflicht — „Weiter“ erst, wenn erfüllt",
                 value=b.hart,
                 on_change=bed_hart,
             )
@@ -933,7 +933,7 @@ def plan_einstellen(
                 teile.append(ziel_variante)
         teile += [
             abschnitt(
-                "UHR UND TIMER",
+                "UHR",
                 ft.Row(
                     spacing=0,
                     tight=True,

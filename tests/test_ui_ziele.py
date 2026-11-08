@@ -270,10 +270,10 @@ def test_katalog_und_plaene_mit_zielblatt(page, state) -> None:
     assert [z[0] for z in _blatt_zeilen(page.dialoge[-1])] == [
         "Bearbeiten",
         "Üben",
-        "Ablauf starten",
+        "Workout starten",
     ]
-    _waehlen(page, page.dialoge[-1], "Ablauf starten")
-    assert page.routen[-1] == f"/plan/{plan.id}/timer/ablauf"
+    _waehlen(page, page.dialoge[-1], "Workout starten")
+    assert page.routen[-1] == f"/plan/{plan.id}/workout"
 
 
 def test_chip_und_planblock_mit_zielblatt(page, state) -> None:
@@ -311,7 +311,7 @@ def test_chip_und_planblock_mit_zielblatt(page, state) -> None:
     assert [z[0] for z in _blatt_zeilen(page.dialoge[-1])] == [
         "Üben",
         "Bearbeiten",
-        "Ablauf starten",
+        "Workout starten",
     ]
 
 

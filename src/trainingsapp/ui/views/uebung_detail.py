@@ -681,7 +681,7 @@ def uebung_detail(
             if (liste := var.varianten(uebung.result_spec))
             else []
         ),
-        _abschnitt("Uhr und Timer", uhr_und_timer(uebung, item)),
+        _abschnitt("Uhr", uhr_und_timer(uebung, item)),
         *(
             [_abschnitt("Beschleunigungssensor", zeile)]
             if (zeile := beschleunigung_zeile(uebung, item)) is not None

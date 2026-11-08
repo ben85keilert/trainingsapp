@@ -195,7 +195,7 @@ def workout_view(
                     ),
                     *([c] if (c := zweig_chip(s.bedingung.zweig)) is not None else []),
                     *(
-                        [ft.Icon(ft.Icons.LOCK_OUTLINE, size=18, opacity=0.6, tooltip="hart")]
+                        [ft.Icon(ft.Icons.LOCK_OUTLINE, size=18, opacity=0.6, tooltip="Pflicht")]
                         if s.bedingung.hart
                         else []
                     ),
@@ -365,7 +365,7 @@ def workout_view(
                             ft.Text(
                                 "Weiter, wenn "
                                 + (b.kurztext() or "abhaken")
-                                + (" · hart: Weiter erst dann" if b.hart else ""),
+                                + (" · Pflicht: Weiter erst dann" if b.hart else ""),
                                 size=12,
                                 opacity=0.7,
                             ),

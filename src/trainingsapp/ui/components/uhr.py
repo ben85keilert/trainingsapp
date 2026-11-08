@@ -246,7 +246,7 @@ def uhr_teile(
             starten(einmal_timer(sekunden))()
 
         vorher = 60 if profil.ist_stoppuhr else profil.gesamt_s()
-        page.show_dialog(zeit_blatt(vorher, starten=los))
+        page.show_dialog(zeit_blatt(vorher, starten=los, schnell=state.schnellzeiten()))
 
     def waehlen(p: TimerProfil) -> Callable[[], None]:
         def handler() -> None:
@@ -318,7 +318,7 @@ def uhr_teile(
                 ft.Container(content=menue, expand=True, alignment=ft.Alignment.CENTER_LEFT),
                 ft.TextButton(
                     content=ft.Text(zeit, size=20, weight=ft.FontWeight.W_500),
-                    tooltip="Zeit stellen — Timer ohne Ablauf",
+                    tooltip="Zeit stellen",
                     style=ft.ButtonStyle(padding=ft.Padding.symmetric(horizontal=4)),
                     on_click=zeit_stellen,
                 ),
@@ -454,7 +454,7 @@ def _laufend(
             spacing=6,
             controls=[
                 ft.Icon(ft.Icons.PAUSE if laeuft else ft.Icons.PLAY_ARROW, size=18),
-                ft.Text("Anhalten" if laeuft else "Weiter"),
+                ft.Text("Pause" if laeuft else "Weiter"),
             ],
         )
 

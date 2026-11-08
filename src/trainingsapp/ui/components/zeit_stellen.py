@@ -15,20 +15,20 @@ wie sie sind.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.timer import EINMAL_DAUERN_S, MAX_ABSCHNITT_S
+from trainingsapp.core.timer import MAX_ABSCHNITT_S, SCHNELLZEITEN_S, schnellzeit_text
 from trainingsapp.core.zeitangabe import dauer_lesen, dauer_text
 from trainingsapp.ui.components.blatt import blatt_spalte
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 
 #: Die Räder reichen bis 59:59 — darüber hinaus tippt man (bis `MAX_ABSCHNITT_S`)
 RAD_MAX_S = 59 * 60 + 59
-#: Schnellwahl unter den Rädern (wie im Reiter „Timer“, dazu 30 s)
-SCHNELL_S: tuple[int, ...] = (30, *EINMAL_DAUERN_S[:4])
+#: Schnellwahl unter den Rädern — Vorgabe; die App gibt `AppState.schnellzeiten` mit
+SCHNELL_S: tuple[int, ...] = SCHNELLZEITEN_S
 
 
 def zeit_lesen(text: str) -> int | None:
@@ -47,11 +47,14 @@ def zeit_blatt(
     sekunden: float,
     *,
     starten: Callable[[int], Any],
-    titel: str = "Timer stellen",
-    untertitel: str = "ohne Ablauf · für jetzt",
+    titel: str = "Zeit stellen",
+    untertitel: str = "für jetzt",
     start_text: str = "Start",
+    schnell: Sequence[int] | None = None,
 ) -> ft.BottomSheet:
-    """Das Blatt zum Stellen; ``starten`` bekommt die Sekunden, wenn das Blatt zu ist."""
+    """Das Blatt zum Stellen; ``starten`` bekommt die Sekunden, wenn das Blatt zu ist. Es ist
+    **das** Blatt für jede Zeit (Ben, 8.11.2026): Timer-Seite, Uhr der Übung, Abschnitte im
+    Editor und im Uhrenplan — ``schnell`` sind die Schnellzeiten aus den Einstellungen."""
     stand = {"s": min(max(1, round(sekunden)), MAX_ABSCHNITT_S)}
     nachher = Nachher()
     blatt: ft.BottomSheet
@@ -82,7 +85,7 @@ def zeit_blatt(
                 rad.update()
         return True
 
-    def schnell(s: int) -> Callable[[], None]:
+    def schnell_waehler(s: int) -> Callable[[], None]:
         def handler() -> None:
             stand["s"] = s
             rad.value = s
@@ -135,10 +138,8 @@ def zeit_blatt(
                     run_spacing=6,
                     alignment=ft.MainAxisAlignment.CENTER,
                     controls=[
-                        ft.OutlinedButton(
-                            f"{s} s" if s < 60 else f"{s // 60} min", on_click=schnell(s)
-                        )
-                        for s in SCHNELL_S
+                        ft.OutlinedButton(schnellzeit_text(s), on_click=schnell_waehler(s))
+                        for s in (schnell if schnell is not None else SCHNELL_S)
                     ],
                 ),
             ],

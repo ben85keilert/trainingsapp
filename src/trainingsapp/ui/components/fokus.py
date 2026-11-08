@@ -383,7 +383,7 @@ class Fokus:
             spacing=6,
             controls=[
                 ft.Icon(ft.Icons.PLAY_ARROW if not stand.laeuft else ft.Icons.PAUSE, size=18),
-                ft.Text("Fortsetzen" if not stand.laeuft else "Anhalten"),
+                ft.Text("Weiter" if not stand.laeuft else "Pause"),
             ],
         )
         self.halt_knopf.disabled = (stand.fertig and ueber <= 0) or lauf.abgebrochen

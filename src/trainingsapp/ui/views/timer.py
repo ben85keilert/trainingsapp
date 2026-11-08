@@ -56,7 +56,6 @@ from trainingsapp.core.models import new_id
 from trainingsapp.core.takt import Takt
 from trainingsapp.core.timer import (
     EINMAL,
-    EINMAL_DAUERN_S,
     MAX_RUNDEN,
     QUELLEN,
     STOPPUHR,
@@ -65,12 +64,13 @@ from trainingsapp.core.timer import (
     TimerLauf,
     TimerProfil,
     TimerStand,
-    dauer_lesen,
     dauer_text,
     einmal_timer,
+    schnellzeit_text,
     signale_kurz,
     stoppuhr,
 )
+from trainingsapp.core.uebung_timer import timer_fuer
 from trainingsapp.devices.einheit import TimerBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
@@ -316,7 +316,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             haupt_knopf.content = _knopf_inhalt(ft.Icons.PAUSE, "Pause")
             haupt_knopf.on_click = anhalten
         else:
-            text = "Nochmal" if stand.fertig else ("Weiter" if lauf.begonnen else "Start")
+            text = "Noch einmal" if stand.fertig else ("Weiter" if lauf.begonnen else "Start")
             haupt_knopf.content = _knopf_inhalt(ft.Icons.PLAY_ARROW, text)
             haupt_knopf.on_click = starten
         ablauf.controls = [] if lauf.vorwaerts else ablauf_zeilen(stand)
@@ -368,7 +368,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         if laufend:
             return
         vorher = 60 if profil.ist_stoppuhr else profil.gesamt_s()
-        page.show_dialog(zeit_blatt(vorher, starten=zeit_gestellt, untertitel="ohne Ablauf"))
+        page.show_dialog(zeit_blatt(vorher, starten=zeit_gestellt, schnell=state.schnellzeiten()))
 
     def bereitstellen() -> None:
         """Auf den gemeinsamen Start warten (Ben, 17.10.2026) — oder wieder heraus."""
@@ -470,16 +470,6 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         einmal_merken(einmal_timer(sekunden, profil.name, name_in_marken=profil.name_in_marken))
         state.neu_zeichnen()
 
-    def dauer_gelesen(_e: object = None) -> None:
-        sekunden = dauer_lesen(dauer_feld.value or "")
-        if sekunden is None:
-            dauer_feld.error = "z. B. 5:00"
-            with contextlib.suppress(Exception):
-                dauer_feld.update()
-            return
-        if sekunden != profil.gesamt_s():
-            dauer_setzen(sekunden)
-
     def dauer_waehler(sekunden: int) -> Callable[[], None]:
         return lambda: dauer_setzen(sekunden)
 
@@ -502,44 +492,27 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         value=profil.name_in_marken,
         on_change=name_geaendert,
     )
-    dauer_feld = ft.TextField(
-        label="Dauer",
-        value=dauer_text(profil.gesamt_s()),
-        width=110,
-        dense=True,
-        keyboard_type=ft.KeyboardType.DATETIME,
-        text_align=ft.TextAlign.END,
-        disabled=laufend,
-        on_submit=dauer_gelesen,
-        on_blur=dauer_gelesen,
-    )
 
     def einmal_karte() -> ft.Control:
         """Name und Schalter — beim Timer davor die Dauer oder die Abschnitte."""
         zeilen: list[ft.Control] = []
         if profil.id == EINMAL and profil.einfach:
+            # Die Zeit stellt man oben am Etikett (Zeit-Blatt); hier nur die Schnellzeiten
+            # aus den Einstellungen (Ben, 8.11.2026: kein Eingabefeld)
             zeilen += [
                 ft.Row(
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    wrap=True,
+                    spacing=6,
+                    run_spacing=6,
                     controls=[
-                        dauer_feld,
-                        ft.Row(
-                            wrap=True,
-                            spacing=6,
-                            run_spacing=6,
-                            expand=True,
-                            controls=[
-                                ft.Chip(
-                                    label=ft.Text(dauer_text(s)),
-                                    selected=s == profil.gesamt_s(),
-                                    show_checkmark=False,
-                                    disabled=laufend,
-                                    on_select=dauer_waehler(s),
-                                )
-                                for s in EINMAL_DAUERN_S
-                            ],
-                        ),
+                        ft.Chip(
+                            label=ft.Text(schnellzeit_text(s)),
+                            selected=s == profil.gesamt_s(),
+                            show_checkmark=False,
+                            disabled=laufend,
+                            on_select=dauer_waehler(s),
+                        )
+                        for s in state.schnellzeiten()
                     ],
                 ),
                 ft.TextButton(
@@ -582,10 +555,12 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
         segments=[
             ft.Segment(value=STOPPUHR, label=ft.Text("Stoppuhr"), icon=ft.Icon(ft.Icons.AV_TIMER)),
             ft.Segment(
-                value=EINMAL, label=ft.Text("Timer"), icon=ft.Icon(ft.Icons.HOURGLASS_BOTTOM)
+                value=EINMAL, label=ft.Text("Zeit"), icon=ft.Icon(ft.Icons.HOURGLASS_BOTTOM)
             ),
             ft.Segment(
-                value=PROFILE, label=ft.Text("Profile"), icon=ft.Icon(ft.Icons.FORMAT_LIST_BULLETED)
+                value=PROFILE,
+                label=ft.Text("Vorlagen"),
+                icon=ft.Icon(ft.Icons.FORMAT_LIST_BULLETED),
             ),
         ],
         on_change=reiter_gewaehlt,
@@ -656,11 +631,11 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
     if reiter == PROFILE:
         wahl: list[ft.Control] = [
             kartentitel(
-                "Profil",
+                "Vorlage",
                 ft.IconButton(
-                    ft.Icons.EDIT_OUTLINED, tooltip="Profil bearbeiten", on_click=bearbeiten
+                    ft.Icons.EDIT_OUTLINED, tooltip="Vorlage bearbeiten", on_click=bearbeiten
                 ),
-                ft.IconButton(ft.Icons.ADD, tooltip="Neues Profil", on_click=neu),
+                ft.IconButton(ft.Icons.ADD, tooltip="Neue Vorlage", on_click=neu),
             ),
             profil_chips,
         ]
@@ -685,7 +660,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
             ),
         )
     else:
-        ablauf_karte = karte(kartentitel("Ablauf"), ablauf, abstand=6)
+        ablauf_karte = karte(kartentitel("Abschnitte"), ablauf, abstand=6)
     inhalt = ft.Column(
         spacing=14,
         controls=[
@@ -697,7 +672,7 @@ def timer_view(page: Any, state: AppState, basis: str) -> ft.View:
                 ft.Container(
                     content=zeit_text,
                     on_click=None if laufend else zeit_stellen,
-                    tooltip=None if laufend else "Zeit stellen — Timer ohne Ablauf",
+                    tooltip=None if laufend else "Zeit stellen",
                     border_radius=16,
                 ),
                 fortschritt,
@@ -760,7 +735,8 @@ SIGNAL_SCHALTER: list[tuple[str, str, str]] = [
 
 
 def _plan_ablauf_karte(page: Any, state: AppState, basis: str) -> ft.Control | None:
-    """Über einem Plan: den Plan als Ablauf — jede Übung mit ihrem Timer (Skizze 8)."""
+    """Über einem Plan: den Plan als Workout — jede Übung mit ihrem Timer (Skizze 8; seit
+    K1 heißt es überall Workout, `docs/plan_uhren.md` §3)."""
     teile = [t for t in basis.split("/") if t]
     if teile[:1] != ["plan"] or len(teile) != 2:
         return None
@@ -769,15 +745,21 @@ def _plan_ablauf_karte(page: Any, state: AppState, basis: str) -> ft.Control | N
         return None
 
     async def oeffnen() -> None:
-        await page.push_route(f"{timer_route(basis)}/ablauf")
+        await page.push_route(f"/plan/{plan.id}/workout")
 
+    mit_timer = sum(
+        1
+        for it in plan.items
+        if (u := state.uebungen.laden(it.exercise_id)) and timer_fuer(u, plan, it)
+    )
     return karte(
         kartentitel(f"Plan „{plan.name}“"),
         hinweis(
-            "Als Ablauf: jede Übung mit ihrem Timer, nacheinander — eingetragen wird je "
-            "Übung, sobald sie endet."
+            f"{mit_timer} von {len(plan.items)} Übungen mit Timer. Als Workout läuft der Plan "
+            "von vorn bis hinten — eingetragen wird je Übung, sobald sie endet. Die Uhren "
+            "aller Übungen: Plan bearbeiten → Uhren."
         ),
-        ft.FilledTonalButton("Ablauf öffnen", icon=ft.Icons.PLAYLIST_PLAY, on_click=oeffnen),
+        ft.FilledTonalButton("Als Workout starten", icon=ft.Icons.PLAYLIST_PLAY, on_click=oeffnen),
     )
 
 
@@ -817,7 +799,7 @@ def timer_signale_view(page: Any, state: AppState, basis: str) -> ft.View:
                         _klang_karte(page, state),
                         _lautstaerke_karte(page, state),
                         _signale_karte(page, state),
-                        hinweis("Gilt für alle Timer-Profile auf diesem Gerät."),
+                        hinweis("Gilt für alle Timer auf diesem Gerät."),
                     ],
                 ),
                 expand=False,
@@ -873,7 +855,7 @@ def _klang_karte(page: Any, state: AppState) -> ft.Control:
         reihe,
         hinweis(
             "Antippen wählt und spielt vor. Eigene Klänge je Abschnitt, für jede neue Runde "
-            "und fürs Ende stellst du im Timer-Profil ein (Stift beim Profil)."
+            "und fürs Ende stellst du in der Vorlage ein (Stift bei der Vorlage)."
         ),
         abstand=10,
     )
@@ -1092,8 +1074,8 @@ class Profilziel:
     zurueck: str
     #: Route des Editors ohne Profil-ID (``…/bearbeiten``)
     route: str
-    titel: str = "Timer-Profil"
-    titel_neu: str = "Neues Timer-Profil"
+    titel: str = "Vorlage"
+    titel_neu: str = "Neue Vorlage"
     #: ohne Namensfeld — der Einmal-Timer heißt auf der Timer-Seite (Ben, 19.10.2026)
     ohne_name: bool = False
     #: „Als Profil speichern“: legt eine Kopie mit Namen in die Bibliothek — ``None``: nicht
@@ -1136,7 +1118,7 @@ def einmaluhr(state: AppState, basis: str) -> Profilziel:
         None,
         zurueck,
         f"{zurueck}/bearbeiten",
-        titel="Timer: Abschnitte und Runden",
+        titel="Zeit: Abschnitte und Runden",
         ohne_name=True,
         als_profil=bibliothek(state, basis).speichern,
     )
@@ -1147,7 +1129,8 @@ class _Zeile:
     """Ein Abschnitt im Editor."""
 
     name: ft.TextField
-    dauer: ft.TextField
+    #: die Dauer in Sekunden — gestellt über das Zeit-Blatt (Ben, 8.11.2026: kein Eingabefeld)
+    dauer_s: int
     klang: ft.Dropdown
     zaehlt: bool = True
     #: Der Takt dieses Abschnitts (`docs/plan_taktgeber.md`) — ``None``: wie die Übung
@@ -1200,28 +1183,13 @@ def timer_bearbeiten_view(
     gesamt_text = ft.Text(size=13, opacity=0.75)
 
     def gesamt() -> None:
-        summe = sum(
-            sum(dauer_lesen(z.dauer.value or "") or 0 for z in t.zeilen) * t.runden
-            for t in teile_ed
-        )
+        summe = sum(sum(z.dauer_s for z in t.zeilen) * t.runden for t in teile_ed)
         gesamt_text.value = f"Gesamt {dauer_text(summe)}"
-
-    def dauer_geaendert() -> None:
-        gesamt()
-        with contextlib.suppress(Exception):
-            gesamt_text.update()
 
     def zeile(a: Abschnitt) -> _Zeile:
         return _Zeile(
             ft.TextField(label="Abschnitt", value=a.name, dense=True),
-            ft.TextField(
-                label="mm:ss",
-                value=dauer_text(a.dauer_s),
-                dense=True,
-                keyboard_type=ft.KeyboardType.DATETIME,
-                text_align=ft.TextAlign.END,
-                on_change=lambda _: dauer_geaendert(),
-            ),
+            max(1, int(a.dauer_s)),
             _klang_wahl(page, state, a.klang, "Standardklang"),
             a.zaehlt,
             a.takt,
@@ -1253,6 +1221,29 @@ def timer_bearbeiten_view(
             neu_zeichnen()
 
         return handler
+
+    def dauer_knopf(k: int, i: int) -> ft.Control:
+        """Die Dauer als antippbares Etikett — ein Tipp öffnet das Zeit-Blatt (§4.6a)."""
+        z = teile_ed[k].zeilen[i]
+
+        def gestellt(sekunden: int) -> None:
+            teile_ed[k].zeilen[i].dauer_s = sekunden
+            neu_zeichnen()
+
+        def stellen() -> None:
+            page.show_dialog(
+                zeit_blatt(
+                    z.dauer_s,
+                    starten=gestellt,
+                    untertitel=(z.name.value or "").strip() or f"Abschnitt {i + 1}",
+                    start_text="Übernehmen",
+                    schnell=state.schnellzeiten(),
+                )
+            )
+
+        return ft.OutlinedButton(
+            dauer_text(z.dauer_s), icon=ft.Icons.SCHEDULE, tooltip="Zeit stellen", on_click=stellen
+        )
 
     def takt_setzer(k: int, i: int) -> Callable[[Takt | None], None]:
         def handler(takt: Takt | None) -> None:
@@ -1342,7 +1333,7 @@ def timer_bearbeiten_view(
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
                             ft.Container(expand=True, content=z.name),
-                            ft.Container(width=96, content=z.dauer),
+                            dauer_knopf(k, i),
                             ft.IconButton(
                                 ft.Icons.REMOVE_CIRCLE_OUTLINE,
                                 tooltip="Abschnitt entfernen",
@@ -1414,7 +1405,7 @@ def timer_bearbeiten_view(
                     [
                         (
                             z.name.value or "",
-                            z.dauer.value or "",
+                            z.dauer_s,
                             z.klang.value,
                             z.zaehlt,
                             z.takt.als_dict() if z.takt is not None else None,
@@ -1436,9 +1427,7 @@ def timer_bearbeiten_view(
         for t in teile_ed:
             abschnitte: list[Abschnitt] = []
             for z in t.zeilen:
-                dauer = dauer_lesen(z.dauer.value or "")
-                z.dauer.error = None if dauer else "z. B. 0:30"
-                fehler = fehler or dauer is None
+                dauer = z.dauer_s
                 if dauer:
                     abschnitte.append(
                         Abschnitt(
@@ -1502,7 +1491,7 @@ def timer_bearbeiten_view(
 
         dialog: ft.AlertDialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text("Als Profil speichern"),
+            title=ft.Text("Als Vorlage speichern"),
             content=feld,
             on_dismiss=nachher_profil.bei_schliessen,
             actions=[
@@ -1537,11 +1526,11 @@ def timer_bearbeiten_view(
             ft.AlertDialog(
                 modal=True,
                 on_dismiss=nachher.bei_schliessen,
-                title=ft.Text("Profil löschen?"),
+                title=ft.Text("Löschen?"),
                 content=ft.Text(
-                    "Gibt es danach kein eigenes Profil mehr, kommen die zwei Vorlagen zurück."
-                    if ziel.titel == "Timer-Profil"
-                    else "Das Profil verschwindet aus dieser Übung."
+                    "Gibt es danach keine eigene Vorlage mehr, kommen die zwei Beispiele zurück."
+                    if ziel.titel == "Vorlage"
+                    else "Der Timer verschwindet aus dieser Übung."
                 ),
                 actions=[
                     ft.TextButton("Abbrechen", on_click=lambda: page.pop_dialog()),
@@ -1598,8 +1587,8 @@ def timer_bearbeiten_view(
                     controls=[
                         name,
                         hinweis(
-                            "Gilt für den Einmal-Timer — ohne Namen, ohne Profil. Das Lesezeichen "
-                            "oben legt ihn mit Namen in die Bibliothek."
+                            "Gilt für die gestellte Zeit — ohne Namen. Das Lesezeichen oben "
+                            "legt sie mit Namen als Vorlage ab."
                         )
                         if ziel.ohne_name
                         else ft.Container(height=0),
@@ -1643,7 +1632,7 @@ def timer_bearbeiten_view(
         ansicht,
         geaendert=lambda: stand() != anfang,
         speichern=sichern,
-        meldung="Übernommen" if ziel.ohne_name else "Timer-Profil gespeichert",
+        meldung="Übernommen" if ziel.ohne_name else "Vorlage gespeichert",
     )
 
 

@@ -38,7 +38,7 @@ EINTRAGEN = "eintragen"  # Tagesfeld: Wert eintragen (Blatt)
 FELD = "feld"  # Tagesfeld bearbeiten (Einstellungen)
 AUSWERTUNG = "auswertung"  # Messung oder Strecke auswerten
 BEARBEITEN = "bearbeiten"  # Übung oder Plan bearbeiten
-ABLAUF = "ablauf"  # Plan als Ablauf starten
+ABLAUF = "ablauf"  # Plan als Workout starten (hieß bis 8.11.2026 „Ablauf“)
 AUSNAHME = "ausnahme"  # Messung, Strecke oder Tag „nicht mitrechnen“ (Ben, 29.10.2026)
 
 #: Ein Symbol je Ziel — nach dem Vokabular, das die App schon hat: die Reiter Heute und
@@ -73,7 +73,7 @@ TEXTE: dict[str, str] = {
     AUSWERTUNG: "Auswertung",
     AUSNAHME: "Nicht mitrechnen",
     BEARBEITEN: "Bearbeiten",
-    ABLAUF: "Ablauf starten",
+    ABLAUF: "Workout starten",
 }
 #: Die Hilfezeile unter einer Liste mit Zielsymbolen
 HILFE = "Das Symbol sagt, wohin der Tipp führt · Symbol antippen oder gedrückt halten = alle Wege"

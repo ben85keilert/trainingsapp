@@ -126,7 +126,7 @@ def test_bedingung_wird_an_der_planuebung_gespeichert(tmp_path, monkeypatch) -> 
         state.plaene.bedingung_setzen(item.id, b)
         geladen = state.plaene.item_laden(item.id)
         assert geladen.bedingung == b and geladen.bedingung.kurztext() == (
-            "12 Wdh. in 40 s · hart · sonst →"
+            "12 Wdh. in 40 s · Pflicht · sonst →"
         )
         # Die Karte „Weiter, wenn …“ in „Im Plan einstellen“ zeigt und ändert sie
         page = SimpleNamespace(
@@ -145,7 +145,7 @@ def test_bedingung_wird_an_der_planuebung_gespeichert(tmp_path, monkeypatch) -> 
             x for x in _alle(seite) if isinstance(x, ft.Dropdown) and x.label == "Weiter, wenn"
         )
         assert art.value == bd.WDH_IN_ZEIT
-        hart = next(x for x in _alle(seite) if isinstance(x, ft.Switch) and "Hart" in x.label)
+        hart = next(x for x in _alle(seite) if isinstance(x, ft.Switch) and "Pflicht" in x.label)
         assert hart.value is True
         hart.value = False
         hart.on_change(SimpleNamespace(control=hart))
@@ -177,7 +177,7 @@ async def test_harte_bedingung_sperrt_weiter_und_zweig_bei_nicht_erfuellt(umgebu
     route = f"/plan/{plan.id}/workout"
     vorher = workout_view(seite, state, plan, route=route)
     texte = _texte(vorher)
-    assert any("weiter, wenn 12 Wdh. in 10 s · hart · sonst →" in t for t in texte)
+    assert any("weiter, wenn 12 Wdh. in 10 s · Pflicht · sonst →" in t for t in texte)
     assert any(t == "Zweig B" for t in texte)
     state.workout_uebergang[plan.id] = WEICH
     _knopf(vorher, "Workout starten").on_click()

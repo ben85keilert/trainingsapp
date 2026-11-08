@@ -90,12 +90,12 @@ class Bedingung:
         )
 
     def kurztext(self) -> str:
-        """„15 Wdh.“, „12 Wdh. in 40 s“, „Zeit ab“, „abhaken“ — mit „· hart“ und „· sonst → B“.
+        """„15 Wdh.“, „12 Wdh. in 40 s“, „Zeit ab“, „abhaken“ — mit „· Pflicht“ und „· sonst → B“.
 
         >>> Bedingung(WDH, 15).kurztext()
         '15 Wdh.'
         >>> Bedingung(WDH_IN_ZEIT, 12, 40, hart=True, sonst="x").kurztext()
-        '12 Wdh. in 40 s · hart · sonst →'
+        '12 Wdh. in 40 s · Pflicht · sonst →'
         >>> Bedingung().kurztext(), Bedingung(GEMACHT).kurztext()
         ('', 'abhaken')
         """
@@ -109,7 +109,7 @@ class Bedingung:
         elif self.art == GEMACHT:
             teile.append("abhaken")
         if self.hart:
-            teile.append("hart")
+            teile.append("Pflicht")  # in der Oberfläche „Pflicht“ — „hart“ ist der Übergang
         if self.sonst:
             teile.append("sonst →")
         return " · ".join(teile)

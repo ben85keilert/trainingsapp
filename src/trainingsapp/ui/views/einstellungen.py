@@ -22,6 +22,7 @@ Gerätebesitzer nicht ohnehin sieht.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 
 import flet as ft
@@ -30,6 +31,7 @@ from trainingsapp.config import app_version, edition, ist_aktiv
 from trainingsapp.core.anhaenge import groesse_text
 from trainingsapp.core.eintraege import OFFEN_MIN_VORGABE, OFFEN_WAHL
 from trainingsapp.core.sicherung import Sicherung
+from trainingsapp.core.timer import schnellzeiten_text
 from trainingsapp.ui.components.hilfe import hilfe_oeffner
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
@@ -197,6 +199,21 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
         + (" (geschätzt)" if hf.hfmax_geschaetzt else "")
         if hf.vollstaendig
         else "Ruhe-HF und HFmax fehlen"
+    )
+
+    def schnellzeiten_setzen(e: ft.Event[ft.TextField]) -> None:
+        zeiten = state.schnellzeiten_setzen(e.control.value or "")
+        e.control.value = schnellzeiten_text(zeiten)
+        with contextlib.suppress(Exception):
+            e.control.update()
+
+    schnellzeiten_feld = ft.TextField(
+        label="Schnellzeiten",
+        value=schnellzeiten_text(state.schnellzeiten()),
+        hint_text="30 s, 1 min, 2 min, 5 min, 10 min, 15 min",
+        dense=True,
+        on_blur=schnellzeiten_setzen,
+        on_submit=schnellzeiten_setzen,
     )
 
     ansicht = ft.View(
@@ -368,13 +385,18 @@ def einstellungen(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft
                                 leading=ft.Icon(ft.Icons.TIMER_OUTLINED),
                                 title=ft.Text("Timer"),
                                 subtitle=ft.Text(
-                                    "Stoppuhr, Timer, Profile · zuletzt "
+                                    "Stoppuhr, Zeit, Vorlagen, Signale · zuletzt "
                                     f"„{state.timer_profil().anzeigename}“",
                                     size=12,
                                 ),
                                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.5),
                                 on_click=oeffner("/einstellungen/timer"),
                                 content_padding=ft.Padding.only(left=0, right=0),
+                            ),
+                            schnellzeiten_feld,
+                            hinweis(
+                                "Die Chips, wenn du eine Zeit stellst — Sekunden oder Minuten, "
+                                "durch Komma getrennt (z. B. 30 s, 1 min, 2, 5, 10)."
                             ),
                             ft.ListTile(
                                 leading=ft.Icon(ft.Icons.DIRECTIONS_RUN),

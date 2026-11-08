@@ -119,9 +119,8 @@ def test_messung_ohne_geraet(daten) -> None:
     assert _knopf(gps, "Training starten") is not None
     wahl = next(c for c in _alle_controls(gps) if isinstance(c, ft.SegmentedButton))
     assert [s.value for s in wahl.segments] == ["gehen", "laufen", "rad"]
-    assert any(  # der Timer-Knopf steht in der Karte — der Reiter hat keine Titelleiste
-        isinstance(c, ft.IconButton) and c.icon == ft.Icons.TIMER_OUTLINED
-        for c in _alle_controls(gps)
+    assert any(  # die Timer-Pille steht in der Karte — der Reiter hat keine Titelleiste
+        isinstance(c, ft.Container) and c.tooltip == "Timer öffnen" for c in _alle_controls(gps)
     )
 
 

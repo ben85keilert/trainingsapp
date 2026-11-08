@@ -1258,7 +1258,7 @@ def _live_teil(
                 segments=[
                     ft.Segment(value="offen", label=ft.Text("offen")),
                     *(ft.Segment(value=str(m), label=ft.Text(f"{m} min")) for m in MESSDAUERN_MIN),
-                    ft.Segment(value="ablauf", label=ft.Text("Ablauf")),
+                    ft.Segment(value="ablauf", label=ft.Text("Timer")),
                 ],
                 on_change=dauer_waehlen,
             ),
@@ -1267,11 +1267,11 @@ def _live_teil(
         if wahl == "ablauf":
             profile = state.timer_profile()
             if not profile or profil is None:
-                zeilen.append(ft.Text("Im Timer ein Profil anlegen.", size=12, opacity=0.7))
+                zeilen.append(ft.Text("Im Timer eine Vorlage anlegen.", size=12, opacity=0.7))
                 return ft.Column(spacing=8, controls=zeilen)
             zeilen.append(
                 ft.Dropdown(
-                    label="Ablauf",
+                    label="Timer",
                     value=profil.id,
                     options=[ft.DropdownOption(key=p.id, text=p.name) for p in profile],
                     on_select=ablauf_waehlen,
@@ -1321,8 +1321,8 @@ def _live_teil(
                 ft.Text(
                     "Die Restzeit steht oben in der Leiste und in der Benachrichtigung; "
                     + (
-                        "die Abschnitte des Ablaufs werden Abschnitte der Messung. Abläufe "
-                        "sind Timer-Profile — angelegt und geändert im Timer."
+                        "die Abschnitte des Timers werden Abschnitte der Messung. Die "
+                        "Vorlagen legst du im Timer an."
                         if wahl == "ablauf"
                         else f"die {wahl} min werden ein Abschnitt der Messung."
                     ),

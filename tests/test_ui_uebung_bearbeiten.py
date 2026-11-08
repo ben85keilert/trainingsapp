@@ -254,7 +254,10 @@ def test_parameter_als_knoepfe_mit_karten_namen_chips_und_ziel(page, state) -> N
         for x in _alle(ansicht)
         if isinstance(x, ft.IconButton) and x.icon == ft.Icons.HELP_OUTLINE
     ]
-    assert "Parameter, Chips und Ziel" in hilfen and "Uhr, Timerzeit, zählt als" in hilfen
+    assert (
+        "Parameter, Chips und Ziel" in hilfen
+        and "Uhr: Stoppuhr, Timer, zählt, Zeit stellen" in hilfen
+    )
     knoepfe = {
         x.label.value: x
         for x in _alle(ansicht)
@@ -320,9 +323,7 @@ def test_mehrfachfelder_einer_art_und_zaehlt_als(page, state) -> None:
     # Zählt als: Haltezeit, Pause, Zeit — gewählt wird die Pause
     wahl = next(x for x in _alle(ansicht) if isinstance(x, ft.SegmentedButton))
     uhr_an = next(
-        x
-        for x in _alle(ansicht)
-        if isinstance(x, ft.Switch) and x.label == "Stoppuhr und Timer beim Üben"
+        x for x in _alle(ansicht) if isinstance(x, ft.Switch) and x.label == "Uhr beim Üben"
     )
     uhr_an.on_change()  # zeichnet die Wahl mit den Namen neu
     assert [s.value for s in wahl.segments] == ["hold", "hold_2", "duration"]

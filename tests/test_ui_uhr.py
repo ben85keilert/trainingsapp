@@ -136,7 +136,7 @@ async def test_stoppuhr_in_der_zeile_pause_haelt_nur_an(umgebung) -> None:
     await _sekunden(state, uhr, gurt, 30)
     ansicht = _ansicht(state, uebung)
     assert "Stoppuhr läuft" in _texte(ansicht) and "0:30" in _texte(ansicht)
-    _knopf(ansicht, "Anhalten").on_click()
+    _knopf(ansicht, "Pause").on_click()
     await _sekunden(state, uhr, gurt, 20)
     ansicht = _ansicht(state, uebung)
     assert "Stoppuhr · angehalten" in _texte(ansicht) and "0:30" in _texte(ansicht)
@@ -274,10 +274,14 @@ async def test_einmaluhren_name_marken_dauer_und_profile(umgebung) -> None:
     reiter.on_change(SimpleNamespace(control=SimpleNamespace(selected=[EINMAL])))
     assert state.timer_profil().id == EINMAL and state.timer_profil().gesamt_s() == 300
     ansicht = timer_view(Seite(), state, "/")
-    dauer = _feld(ansicht, "Dauer")
-    dauer.value = "2:30"
-    dauer.on_blur()
-    assert state.timer_profil().gesamt_s() == 150 and state.timer_profil().einfach
+    # Kein Eingabefeld mehr (K1): die Zeit stellt das Blatt, die Chips sind die Schnellzeiten
+    chip = next(
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.Chip) and isinstance(x.label, ft.Text) and x.label.value == "2 min"
+    )
+    chip.on_select()
+    assert state.timer_profil().gesamt_s() == 120 and state.timer_profil().einfach
     ansicht = timer_view(Seite(), state, "/")
     assert "Abschnitte und Runden …" in _texte(ansicht) or any(
         isinstance(x, ft.TextButton) and x.content == "Abschnitte und Runden …"
@@ -340,13 +344,11 @@ async def test_formular_uhr_und_zaehlt_als(umgebung) -> None:
     wahl = _wahl(ansicht, {"hold", "duration"})
     wahl.selected = ["duration"]
     schalter = next(
-        x
-        for x in _alle(ansicht)
-        if isinstance(x, ft.Switch) and "Stoppuhr und Timer beim Üben" in str(x.label)
+        x for x in _alle(ansicht) if isinstance(x, ft.Switch) and "Uhr beim Üben" in str(x.label)
     )
     schalter.value = False
     zaehlt = next(
-        x for x in _alle(ansicht) if isinstance(x, ft.Switch) and x.label == "Timerzeit zählt"
+        x for x in _alle(ansicht) if isinstance(x, ft.Switch) and x.label == "Zeit der Uhr zählt"
     )
     assert zaehlt.value is True  # Vorgabe an (P79, D2)
     zaehlt.value = False
@@ -387,4 +389,4 @@ def test_info_ansicht_zeigt_uhr_und_timer(umgebung) -> None:
     uebung = _wandsitz(state)
     browser = SimpleNamespace(launch_url=None)
     texte = _texte(uebung_detail(Seite(), state, uebung, browser))
-    assert "UHR UND TIMER" in texte and "Zählt als" in texte and "Haltezeit je Satz" in texte
+    assert "UHR" in texte and "Zählt als" in texte and "Haltezeit je Satz" in texte

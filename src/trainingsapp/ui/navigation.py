@@ -146,28 +146,33 @@ def uebungsseite(route: str) -> bool:
     >>> uebungsseite("/plan/p1/timer/uebung/u1/i1"), uebungsseite("/training/u1/timer/uebung/u1")
     (True, True)
     >>> uebungsseite("/plan/p1/timer/uebung/u1/i1/bearbeiten")
-    False
+    True
     >>> uebungsseite("/plan/p1/timer/bearbeiten"), uebungsseite("/plan/p1/timer/signale")
-    (False, False)
+    (True, True)
     >>> uebungsseite("/plan/p1/bearbeiten"), uebungsseite("/plan/p1/eintrag/e1"), uebungsseite("/")
     (False, False, False)
     >>> uebungsseite("/plan/p1/info/i1"), uebungsseite("/training/u1/info")
     (False, False)
-    >>> uebungsseite("/uebung/u1"), uebungsseite("/timer")
-    (False, False)
+    >>> uebungsseite("/uebung/u1"), uebungsseite("/timer"), uebungsseite("/timer/signale")
+    (False, True, True)
+    >>> uebungsseite("/plan/p1/workout"), uebungsseite("/plan/p1/bearbeiten/uhren")
+    (True, False)
     """
     t = teile(route)
+    # Die Timer-Seite, ihr Editor und die Signale behalten die Leiste (P102, Ben 8.11.2026)
+    if t[:1] == ["timer"]:
+        return True
     if t[:1] not in (["plan"], ["training"]) or len(t) < 2:
         return False
     rest = t[2:]
-    if not rest:
+    if not rest or rest == ["workout"]:
         return True
     if rest[:1] != ["timer"]:
         return False
     uhr = rest[1:]
-    if uhr in ([], ["ablauf"]):
+    if uhr in ([], ["ablauf"], ["signale"]) or uhr[:1] == ["bearbeiten"]:
         return True
-    return uhr[:1] == ["uebung"] and 2 <= len(uhr) <= 3
+    return uhr[:1] == ["uebung"] and 2 <= len(uhr) <= 5
 
 
 __all__ = [

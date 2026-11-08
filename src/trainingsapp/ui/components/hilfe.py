@@ -114,18 +114,26 @@ kann ein Plan abweichen. Leer heißt: kein Ziel.
 """
 
 UHR_MD = """\
-**Stoppuhr und Timer beim Üben**: aus heißt keine Uhr in der Übung — „Gemacht“ hakt nur ab.
+**Uhr** heißt Stoppuhr (zählt vorwärts) oder Timer (zählt herunter, ein oder mehrere
+Abschnitte). **Uhr beim Üben** aus: keine Uhr in der Übung — „Gemacht“ hakt nur ab.
 
-**Timerzeit zählt**: Jeder Lauf von Stoppuhr oder Timer ist ein Satz im offenen Eintrag —
-als **Haltezeit** (je Satz) oder als **Zeit** (gesamt), das stellst du unter „Zählt als“ ein,
-sobald die Übung Haltezeit hat; ohne Haltezeit zählt die Uhr immer als Zeit. Beim Üben
-schaltest du „zählt“ in der Leiste für jetzt um. Aus: Läufe tragen nur „gemacht“ ein.
+**Zeit der Uhr zählt**: Jeder Lauf ist ein Satz im offenen Eintrag — als **Haltezeit** (je
+Satz) oder als **Zeit** (gesamt), das stellst du unter „Zählt als“ ein, sobald die Übung
+Haltezeit hat; ohne Haltezeit zählt die Uhr immer als Zeit. Beim Üben schaltest du „zählt“
+in der Zeile für jetzt um. Aus: Läufe tragen nur „gemacht“ ein.
 
-**Timer**: Das erste Profil ist die Vorgabe; ein Plan kann in „Im Plan einstellen“ ein
-anderes nehmen. Teile (Vorbereitung, Training, Cooldown) und „zählt“ je Abschnitt stellst
-du im Timer-Editor ein — er speichert vorher die Übung. „Timer hinzufügen“ legt ein neues
-Profil an oder übernimmt eine Kopie aus der Timer-Bibliothek. Ohne eigenes Profil gilt die
-Timer-Regel der Übung.
+**Timer**: Der erste Timer der Übung ist die Vorgabe; ein Plan kann in „Im Plan einstellen“
+oder im Uhrenplan (Plan bearbeiten → Uhren) einen anderen nehmen. Teile (Vorbereitung,
+Training, Cooldown), „zählt“ und Takt je Abschnitt stellst du im Timer-Editor ein — er
+speichert vorher die Übung. „Timer hinzufügen“ legt einen neuen an oder übernimmt eine
+**Vorlage** aus dem Timer-Werkzeug (Pille „Timer“ oben) als Kopie.
+
+**Zeit stellen**: Ein Tipp auf eine Zeit öffnet überall dasselbe Blatt — Räder für Minuten
+und Sekunden, Tippfeld und die Schnellzeiten aus den Einstellungen.
+
+**Knöpfe** einer laufenden Uhr, überall gleich: **Pause · Weiter** halten an und setzen fort,
+**Nächster** springt zum nächsten Abschnitt, **Fertig** beendet und trägt ein, **Abbrechen**
+beendet ohne Eintrag.
 """
 
 TAKT_MD = """\
@@ -316,7 +324,8 @@ KNOPF_LEGENDE = """\
 - **Uhr** (Stoppuhr, Timer) stoppt die Zeit; „zählt“ heißt, sie geht als Satz in den Eintrag.
 - **+Zahl** hängt einen Satz an, **Eintragen** nimmt Sätze × Wert.
 - **Notiz** schreibt einen Satz ins Tagebuch, das **Etikett** setzt die Variante.
-- **i** öffnet die Übungsseite; der **Timer** oben rechts den Timer dieser Übung.
+- **i** öffnet die Übungsseite; die **Uhr** am Block die Uhr dieser Übung — die Pille
+  **Timer** oben rechts ist das Werkzeug (Stoppuhr, Zeit, Vorlagen).
 - **‹ ›** oder Wischen wechselt die Übung; **2/6** in der Mitte zeigt den Gesamtplan.
 """
 
@@ -349,7 +358,7 @@ THEMEN: dict[str, tuple[str, str, str]] = {
     "plan": ("Üben im Plan", PLAN_MD, "Knöpfe und Eingabe"),
     "varianten": ("Varianten", VARIANTEN_MD, "Was sind Varianten?"),
     "parameter": ("Parameter, Chips und Ziel", PARAMETER_MD, "Parameter, Chips und Ziel"),
-    "uhr": ("Uhr und Timer", UHR_MD, "Uhr, Timerzeit, zählt als"),
+    "uhr": ("Uhr", UHR_MD, "Uhr: Stoppuhr, Timer, zählt, Zeit stellen"),
     "takt": ("Takt", TAKT_MD, "Takt, Tempo und „Takt zählt“"),
     "beschleunigung": (
         "Beschleunigungssensor",

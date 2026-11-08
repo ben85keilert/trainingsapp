@@ -1289,14 +1289,14 @@ def uebung_bearbeiten(
     # werden. Ist die Uhr ein, hat man automatisch Zeit mit dabei“) ----------------------
     uhr_vorher = uebung.zaehlt_als if uebung is not None else ""
     uhr_schalter = ft.Switch(
-        label="Stoppuhr und Timer beim Üben",
+        label="Uhr beim Üben",
         value=uebung.uhr if uebung is not None else True,
         on_change=lambda: uhr_zeichnen(),
     )
     # Ob Timerzeit zählt (Ben, 22.10.2026, P79 D2): hier die Vorgabe, beim Üben in der Leiste
     # für jetzt umschaltbar
     zaehlt_schalter = ft.Switch(
-        label="Timerzeit zählt",
+        label="Zeit der Uhr zählt",
         value=uebung.zeit_zaehlt if uebung is not None else True,
         on_change=lambda: uhr_zeichnen(),
     )
@@ -1596,15 +1596,15 @@ def uebung_bearbeiten(
                 controls=[
                     ft.ListTile(
                         leading=ft.Icon(ft.Icons.ADD),
-                        title=ft.Text("Neues Profil"),
+                        title=ft.Text("Neuer Timer"),
                         subtitle=ft.Text(
-                            "Einzeltimer oder Folge mit Teilen — speichert vorher die Übung",
+                            "Ein Abschnitt oder Teile mit Runden — speichert vorher die Übung",
                             size=12,
                         ),
                         on_click=neues,
                     ),
                     ft.Text(
-                        "Oder aus der Timer-Bibliothek — die Übung bekommt eine eigene Kopie.",
+                        "Oder eine Vorlage — die Übung bekommt eine eigene Kopie.",
                         size=12,
                         opacity=0.7,
                     ),
@@ -1869,7 +1869,7 @@ def uebung_bearbeiten(
                             icon=ft.Icons.SELL_OUTLINED,
                             on_click=varianten_bearbeiter(None),
                         ),
-                        abschnitt("UHR UND TIMER", hilfe_knopf(page, thema="uhr")),
+                        abschnitt("UHR", hilfe_knopf(page, thema="uhr")),
                         uhr_spalte,
                         timer_spalte,
                         ft.Row(

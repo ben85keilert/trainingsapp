@@ -288,7 +288,7 @@ def test_timer_ueber_dem_plan_bietet_den_ablauf_an(umgebung) -> None:
     state, _, _, _ = umgebung
     plan = _plan(state)
     ansicht = timer_view(Seite(), state, f"/plan/{plan.id}")
-    assert "Ablauf öffnen" in [getattr(x, "content", None) for x in _alle(ansicht)]
+    assert "Als Workout starten" in [getattr(x, "content", None) for x in _alle(ansicht)]
 
 
 async def test_in_der_pause_kein_timer(umgebung) -> None:

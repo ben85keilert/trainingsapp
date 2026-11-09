@@ -423,11 +423,25 @@ def quelle_pruefen(
     return zeilen, fehler
 
 
+ZUGANG_ENDUNG = ".zugang.json"
+
+
+def zugangsdatei(datei: Path) -> bool:
+    """``<name>.zugang.json`` neben einer privaten TOML (U7) ist kein Paket. Wer
+    ``pakete/*.json`` einsammelt (``veroeffentlichen.sh``, CI des Inhalte-Repos), bekommt sie
+    mit — ``pruefen``, ``bauen`` und ``index`` lassen sie aus.
+
+    >>> zugangsdatei(Path("pakete/max.zugang.json")), zugangsdatei(Path("pakete/max.json"))
+    (True, False)
+    """
+    return datei.name.endswith(ZUGANG_ENDUNG)
+
+
 def _zugang(datei: Path) -> dict[str, str]:
     """Ordner und Code eines privaten Pakets (U7) — beim ersten Bauen angelegt und neben der
     TOML gemerkt (``<name>.zugang.json``, nur im privaten Inhalte-Repo!); danach dieselben:
     derselbe Link, derselbe Code für jede neue Fassung."""
-    pfad = datei.with_name(datei.stem + ".zugang.json")
+    pfad = datei.with_name(datei.stem + ZUGANG_ENDUNG)
     if pfad.is_file():
         try:
             wert = json.loads(pfad.read_text("utf-8"))
@@ -537,6 +551,8 @@ def index(
             bekannt[str(e["sha256"])] = str(e["veroeffentlicht"])
     pakete: list[dict[str, Any]] = []
     for datei in dateien:
+        if zugangsdatei(datei):
+            continue
         daten = datei.read_bytes()
         if ist_privat(daten[:8]):
             continue  # private Pakete (U7) stehen nie im öffentlichen Index
@@ -872,7 +888,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--ziel", type=Path, default=Path("dist"))
     b.add_argument("--basis-url", default="", help="für die Zugangskarte privater Pakete")
     i = sub.add_parser("index", help="Index einer Paketquelle schreiben")
-    i.add_argument("dateien", nargs="+", type=Path)
+    i.add_argument("dateien", nargs="*", type=Path, help="keine = leerer Index (nur Privates)")
     i.add_argument("--ziel", type=Path, default=Path("dist/index.json"))
     i.add_argument("--basis-url", default="", help="Adresse, unter der die Dateien liegen")
     i.add_argument("--quelle", default="", help="Name der Quelle, wie die App ihn zeigt")
@@ -891,6 +907,9 @@ def main(argv: list[str] | None = None) -> int:
         begriffe = wortliste_lesen(args.wortliste) if args.wortliste else []
         schlecht = 0
         for datei in args.dateien:
+            if zugangsdatei(datei):
+                print(f"{datei}: übersprungen — Zugang eines privaten Pakets, kein Paket")
+                continue
             fehler, hinweise = pruefen(datei, symbole, begriffe, args.streng)
             if args.gegen and not fehler:
                 f_gegen, h_gegen = gegen_pruefen(datei, args.gegen)
@@ -907,6 +926,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if schlecht else 0
     if args.befehl == "bauen":
         for datei in args.dateien:
+            if zugangsdatei(datei):
+                continue
             fehler, _ = pruefen(datei)
             if fehler:
                 print(f"{datei}: nicht gebaut — " + "; ".join(fehler))

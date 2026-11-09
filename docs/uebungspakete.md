@@ -173,8 +173,9 @@ PDFs mitbringen — an Übungen (`media`), Planübungen (`medien`) und Kurskapit
   `.zip` und TOML mit Dateien ebenso.
 - **Quellen:** ein Index darf `.zip`-Pakete nennen (Download bis 300 MB, Prüfsumme wie immer);
   die Liste zeigt die Größe, und Pakete über 20 MB spielt die App **nicht von selbst** ein — sie
-  bleiben vorgemerkt, bis man sie lädt. *Am Server* (Homepage, Caddy) gehen bisher nur `*.json`
-  durch — `.zip` freizugeben braucht Bens Zustimmung dort (P164).
+  bleiben vorgemerkt, bis man sie lädt. *Am Server* (Homepage, Caddy) gehen seit 9.11.2026 `*.json`
+  und `*.zip` durch, mit `noindex` (P164/P165, Homepage ADR-0022 Nachtrag) — wirksam, sobald der Stand
+  dort eingespielt ist (Runbook `trainingsapp-pakete.md`, Teil G).
 
 ## Private Pakete (U7, Ben 9.11.2026, F9)
 
@@ -194,7 +195,9 @@ betreffen … vor allem gegen Bots und andere absichern.“ Zwei Schlösser:
   (`<name>.zugang.json` — **nur im privaten Inhalte-Repo**), verschlüsselt nach
   `dist/p/<ordner>/paket.json` und gibt die **Zugangskarte** aus (Link + Code; auch als
   `<name>.zugangskarte.txt`, mit `segno` am Rechner zusätzlich ein QR-Code des Links als SVG).
-  Jede neue Fassung: derselbe Link, derselbe Code.
+  Jede neue Fassung: derselbe Link, derselbe Code. `pruefen`, `bauen` und `index` übergehen die
+  `.zugang.json` (`pakete/*.json` sammelt sie mit ein); `index` ohne Dateien schreibt einen leeren
+  Index. `veroeffentlichen.sh` lädt `dist/p/…` mit hoch.
 - **App:** Datei oder Link importieren → „Privates Paket — Code?“ (klein, mit Leerzeichen oder
   Bindestrich geht) → die Rückfrage wie immer. Die App merkt sich Code und „für wen“
   (`package.access_json`, Migration 050) und **entschlüsselt Updates aus dem Link von selbst**.
@@ -205,9 +208,11 @@ betreffen … vor allem gegen Bots und andere absichern.“ Zwei Schlösser:
   öffnen“; der Code bleibt für jede Fassung (`own_package.access_code`) und steht nach dem
   Export da.
 - **Grenze:** Wer die Datei hat und gezielt Rechenzeit einsetzt, braucht für 8 Zeichen
-  (32⁸ ≈ 10¹² Möglichkeiten, je Versuch ein scrypt) Jahre — ein Bot tut das nicht. Am Server
-  wäre `X-Robots-Tag: noindex` für `/pakete/` gut, damit ein durchgesickerter Link in keiner
-  Suchmaschine landet — Änderung im Homepage-Repo nur mit Bens Zustimmung (P165).
+  (32⁸ ≈ 10¹² Möglichkeiten, je Versuch ein scrypt) Jahre — ein Bot tut das nicht. Darum gilt
+  auch hier „keine Personendaten in Paketen“ (Homepage ADR-0022): Übungen für eine Person, aber
+  keine Diagnose und kein voller Name — „für“ ist ein Vorname oder Kürzel. Der Server schickt für
+  `/pakete/` `X-Robots-Tag: noindex`, damit ein durchgesickerter Link in keiner Suchmaschine
+  landet (P165).
 
 ## Ergänzungen (U5, Ben 9.11.2026, Formatversion 5)
 

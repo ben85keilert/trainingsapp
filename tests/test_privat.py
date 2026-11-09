@@ -132,3 +132,29 @@ def test_werkzeug_baut_privat_und_laesst_es_aus_dem_index(tmp_path, capsys) -> N
     )
     assert [e["name"] for e in index([pfad, offen])["pakete"]] == ["Offen"]
     assert paket_lesen(json.loads(offen.read_text("utf-8"))).paket.name == "Offen"
+
+
+def test_werkzeug_laesst_die_zugangsdatei_aus(tmp_path, capsys) -> None:
+    """``pakete/*.json`` sammelt neben der TOML auch ``<name>.zugang.json`` ein
+    (``veroeffentlichen.sh``, CI des Inhalte-Repos) — pruefen, bauen und index lassen sie aus,
+    sonst bräche jede Veröffentlichung nach dem ersten privaten Paket ab."""
+    from trainingsapp.paket_werkzeug import main
+
+    toml = tmp_path / "max.toml"
+    toml.write_text(
+        '[paket]\nname = "Für Max"\nversion = "1.0.0"\n\n[privat]\nfuer = "Max"\n\n'
+        '[[exercises]]\nkey = "a"\nname = "Übung für Max"\ndescription = "Langsam."\n',
+        encoding="utf-8",
+    )
+    ziel = tmp_path / "dist"
+    assert main(["bauen", str(toml), "--ziel", str(ziel)]) == 0
+    zugang = tmp_path / "max.zugang.json"
+    assert zugang.is_file()
+    capsys.readouterr()
+    assert main(["pruefen", str(zugang)]) == 0
+    assert f"{zugang}: übersprungen" in capsys.readouterr().out
+    assert main(["bauen", str(toml), str(zugang), "--ziel", str(ziel)]) == 0
+    assert sorted(p.name for p in ziel.iterdir()) == ["p"]
+    # Nur Privates: der Index ist leer, aber da (sonst fehlte er nach rsync --delete)
+    assert main(["index", "--ziel", str(ziel / "index.json")]) == 0
+    assert json.loads((ziel / "index.json").read_text("utf-8"))["pakete"] == []

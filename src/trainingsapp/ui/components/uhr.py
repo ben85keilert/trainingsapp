@@ -79,15 +79,41 @@ def schluessel(uebung: Exercise, item: PlanItem | None) -> str:
 
 
 def angebot(
-    uebung: Exercise, plan: Plan | None, item: PlanItem | None, einmal_s: int | None = None
+    uebung: Exercise, plan: Plan | None, item: PlanItem | None, einmal: TimerProfil | None = None
 ) -> list[TimerProfil]:
-    """Zur Wahl: die Stoppuhr, ein schnell gestellter Timer ohne Ablauf (``einmal_s``, P79
-    D4), dann die Timer der Planübung, der Übung und des Plans."""
+    """Zur Wahl: die Stoppuhr, die Uhr für jetzt (``einmal``: eine gestellte Zeit, P79 D4, oder
+    ein Timer mit Abschnitten), dann die Timer der Planübung, der Übung und des Plans."""
     profile = profile_zur_wahl(uebung, plan, item, mit_stoppuhr=True)
-    if einmal_s:
-        profile.insert(1, einmal_timer(einmal_s))
+    if einmal is not None:
+        profile.insert(1, einmal)
     # „Ohne Uhr — nur Fokus“ als letzte Wahl (Ben, 8.11.2026, P146)
     return [*profile, ohne_uhr()]
+
+
+def fuer_jetzt_oeffnen(
+    page: Any,
+    state: Any,
+    uebung: Exercise,
+    item: PlanItem | None,
+    basis: str,
+    vorher_s: int,
+) -> Callable[[int], Any]:
+    """„Mit Abschnitten …“ im Zeit-Blatt (Ben, 9.11.2026, Skizze G1): das erweiterte Fenster
+    für die Uhr dieser Übung — für jetzt, gespeichert nur per Knopf (`views.uebung_timer.
+    jetzt_profilziel`). Die gestellte Zeit wird der erste Abschnitt."""
+    from trainingsapp.core.timer import EINMAL
+    from trainingsapp.ui.components.uhr_blatt import uebung_timer_route
+
+    def oeffnen(sekunden: int) -> None:
+        state.uhr_einmal_start[schluessel(uebung, item)] = sekunden or vorher_s
+
+        async def gehen() -> None:
+            await page.push_route(f"{uebung_timer_route(basis, uebung, item)}/bearbeiten/{EINMAL}")
+
+        with contextlib.suppress(Exception):
+            page.run_task(gehen)
+
+    return oeffnen
 
 
 def gesetzt(state: Any, uebung: Exercise, plan: Plan | None, item: PlanItem | None) -> TimerProfil:
@@ -227,14 +253,22 @@ def uhr_teile(
     profil = gesetzt(state, uebung, plan, item)
 
     def zeit_stellen() -> None:
-        """Ein Tipp auf die Zeit: Timer ohne Ablauf stellen und gleich starten (P79 D4)."""
+        """Ein Tipp auf die Zeit: Timer ohne Ablauf stellen und gleich starten (P79 D4) — oder
+        „Mit Abschnitten …“ ins erweiterte Fenster (P153, Ben 9.11.2026)."""
 
         def los(sekunden: int) -> None:
-            state.uhr_einmal[key] = sekunden
-            starten(einmal_timer(sekunden))()
+            state.uhr_einmal[key] = einmal_timer(sekunden)
+            starten(state.uhr_einmal[key])()
 
         vorher = 60 if profil.ist_stoppuhr else profil.gesamt_s()
-        page.show_dialog(zeit_blatt(vorher, starten=los, schnell=state.schnellzeiten()))
+        page.show_dialog(
+            zeit_blatt(
+                vorher,
+                starten=los,
+                schnell=state.schnellzeiten(),
+                erweitert=fuer_jetzt_oeffnen(page, state, uebung, item, basis, vorher),
+            )
+        )
 
     def waehlen(p: TimerProfil) -> Callable[[], None]:
         def handler() -> None:

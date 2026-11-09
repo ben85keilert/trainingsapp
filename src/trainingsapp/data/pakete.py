@@ -75,6 +75,7 @@ from ..core.pakete import (
     zusammenfuehren,
 )
 from ..core.pakete import abweichungen as _abweichungen
+from ..core.paketversion import AUTO, UPDATE_MODI
 from .db import transaktion
 from .kurse import KursRepo
 from .repositories import ExerciseRepo, PlanRepo
@@ -224,6 +225,9 @@ class PaketRepo:
 
     def __init__(self, con: sqlite3.Connection) -> None:
         self.con = con
+        #: Update-Modus neu installierter Pakete — „Für alle Pakete“ in Updates
+        #: (`core/paketversion.py`); die App setzt ihn aus den Einstellungen
+        self.update_vorgabe: str = AUTO
 
     # -- Lesen ---------------------------------------------------------------
 
@@ -441,10 +445,19 @@ class PaketRepo:
         )
 
     def update_modus_setzen(self, paket_id: str, modus: str) -> None:
-        """``"auto"`` (beim Start einspielen) oder ``"manuell"`` (nur vormerken)."""
-        if modus not in ("auto", "manuell"):
+        """``"auto"`` (beim Start einspielen), ``"klein"`` (nur, wenn bloß die letzte Stelle
+        steigt, Ben 9.11.2026) oder ``"manuell"`` (nur vormerken)."""
+        if modus not in UPDATE_MODI:
             raise ValueError(f"Unbekannter Update-Modus: {modus!r}")
         self.con.execute("UPDATE package SET update_mode = ? WHERE id = ?", (modus, paket_id))
+
+    def alle_update_modus_setzen(self, modus: str) -> None:
+        """„Für alle Pakete“: jedes installierte Paket bekommt ``modus`` — und neu installierte
+        ebenso (`update_vorgabe`)."""
+        if modus not in UPDATE_MODI:
+            raise ValueError(f"Unbekannter Update-Modus: {modus!r}")
+        self.con.execute("UPDATE package SET update_mode = ? WHERE removed_at IS NULL", (modus,))
+        self.update_vorgabe = modus
 
     def quelle_setzen(self, paket_id: str, url: str | None, art: str = "index") -> None:
         """Woher das Paket zuletzt kam (Adresse der Quelle: ihr Index, oder ``art="datei"``
@@ -1040,13 +1053,24 @@ class PaketRepo:
         stempel = jetzt().isoformat()
         p = paket
         self.con.execute(
-            "INSERT INTO package (id, name, description, version, installed_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
+            "INSERT INTO package "
+            "(id, name, description, version, installed_at, updated_at, update_mode) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
             "name = excluded.name, description = excluded.description, "
             "version = COALESCE(excluded.version, package.version), "
             "removed_at = CASE WHEN ? THEN NULL ELSE package.removed_at END, "
             "updated_at = CASE WHEN ? THEN excluded.updated_at ELSE package.updated_at END",
-            (p.id, p.name, p.beschreibung, p.version, stempel, stempel, installieren, geschrieben),
+            (
+                p.id,
+                p.name,
+                p.beschreibung,
+                p.version,
+                stempel,
+                stempel,
+                self.update_vorgabe,  # nur beim Anlegen — ein Update lässt den Modus stehen
+                installieren,
+                geschrieben,
+            ),
         )
         if plaene_json is not None:  # nur, wenn das Paket Pläne bringt (Migration 033)
             self.con.execute("UPDATE package SET plans_json = ? WHERE id = ?", (plaene_json, p.id))

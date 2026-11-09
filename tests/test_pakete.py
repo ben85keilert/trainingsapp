@@ -1384,3 +1384,21 @@ def test_ablauf_reist_im_paket_mit_positionen_und_kommt_als_graph_zurueck(con) -
         "n": 12,
     }
     assert d["ablauf"]["fragen"][0]["id"] == "?1" and d["uebungen"][1]["beiname"] == "2. Durchgang"
+
+
+def test_paketversion_x_y_z_wird_zur_zahl() -> None:
+    """Ben, 9.11.2026: Versionen mit Stellen — gespeichert als X·10000 + Y·100 + Z, damit ältere
+    Apps weiter vergleichen; eine ganze Zahl bleibt, was sie war (4 = 0.0.4)."""
+    roh = {
+        "paket": {"name": "Qigong", "version": "0.1.2"},
+        "exercises": [{"key": "baum", "name": "Baum", "spec": "halten"}],
+    }
+    inhalt = paket_lesen(roh)
+    assert inhalt.paket.version == 102
+    assert paket_bauen(inhalt.paket, inhalt.uebungen)["paket"]["version"] == 102  # die Zahl
+    roh["paket"]["version"] = 4
+    assert paket_lesen(roh).paket.version == 4
+    for falsch in ("1.2", "1.100.0", "eins", 2.5, True):
+        roh["paket"]["version"] = falsch
+        with pytest.raises(PaketFehler, match=r"X\.Y\.Z"):
+            paket_lesen(roh)

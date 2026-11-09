@@ -43,6 +43,7 @@ from .pakete import (
     Paketinhalt,
     paket_lesen,
 )
+from .paketversion import version_zahl
 
 #: Kennung und Version des Index — `paket_werkzeug.index` schreibt genau das
 INDEX_FORMAT: Final[str] = "trainingsapp-paketindex"
@@ -135,6 +136,9 @@ def index_lesen(daten: Any, quelle_url: str) -> tuple[str, list[IndexEintrag]]:
     >>> name, eintraege = index_lesen(roh, "https://x/index.json")
     >>> name, eintraege[0].name, eintraege[0].version
     ('Q', 'Dehnung', 2)
+    >>> roh["pakete"][0]["version"] = "0.1.0"  # „X.Y.Z“ wird zur Zahl
+    >>> index_lesen(roh, "https://x/index.json")[1][0].version
+    100
     """
     if not isinstance(daten, dict) or daten.get("format") != INDEX_FORMAT:
         raise QuellenFehler("Unter der Adresse liegt kein Paketindex.")
@@ -153,9 +157,11 @@ def index_lesen(daten: Any, quelle_url: str) -> tuple[str, list[IndexEintrag]]:
             continue
         paket_id = str(e.get("id") or "").strip()
         url = str(e.get("url") or "").strip()
-        version = e.get("version")
+        # „X.Y.Z“ oder die ganze Zahl wie bisher (`core/paketversion.py`)
+        version_roh = e.get("version")
+        version = version_zahl(version_roh) if version_roh is not None else None
         sha256 = str(e.get("sha256") or "").lower()
-        if not paket_id or not url or (version is not None and not _ganzzahl(version)):
+        if not paket_id or not url or (version_roh is not None and version is None):
             continue  # unvollständige Einträge überspringen, nicht die ganze Quelle
         # Die Paketdatei kommt nur verschlüsselt und nur mit Prüfsumme — ein Index, der
         # http:// oder keine Prüfsumme nennt, lieferte sonst ungeprüften Inhalt (K14)

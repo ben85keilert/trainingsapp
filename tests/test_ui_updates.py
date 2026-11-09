@@ -112,7 +112,7 @@ def test_pruefung_auto_und_manuell(page, state, monkeypatch) -> None:
     assert "Lotus v2" in [u.name for u in state.uebungen.alle()]
     assert state.updates_label() == "Updates verfügbar: aktualisiert: Qigong"
     ansicht = updates.updates_view(page, state, ft.UrlLauncher())
-    assert any("Qigong auf Version 2 aktualisiert" in t for t in texte(ansicht))
+    assert any("Qigong auf Version 0.0.2 aktualisiert" in t for t in texte(ansicht))
     assert state.updates_label() is None  # Seite geöffnet = gesehen
 
     # manuell: nur vorgemerkt
@@ -141,7 +141,7 @@ def test_pruefung_auto_und_manuell(page, state, monkeypatch) -> None:
     assert state.pakete.laden(pid).verfuegbar == 3 and state.pakete.laden(pid).version == 2
     assert state.updates_label() == "Updates verfügbar: 1 Paket"
     ansicht = updates.updates_view(page, state, ft.UrlLauncher())
-    assert any("verfügbar: Version 3" in t for t in texte(ansicht))
+    assert any("verfügbar: Version 0.0.3" in t for t in texte(ansicht))
     assert any("Neu: Kranich" in t for t in texte(ansicht))
     pfeil = next(
         c
@@ -255,3 +255,68 @@ def test_label_unter_dem_zahnrad(page, state) -> None:
         if isinstance(c, ft.TextButton) and c.icon == ft.Icons.SYSTEM_UPDATE
     )
     assert knopf.content == "Updates verfügbar: 1 Paket"
+
+
+def test_kleine_updates_von_selbst_groessere_vorgemerkt(page, state, monkeypatch) -> None:
+    """Ben, 9.11.2026: automatisch nur, „wenn die Version nur im 0.0.X-Bereich angehoben
+    wurde“ — 0.0.4 → 0.0.5 kommt von selbst, 0.0.5 → 0.1.0 bleibt vorgemerkt."""
+    inhalt = paket_lesen(qigong(4))
+    state.pakete.importieren(inhalt)
+    pid = inhalt.paket.id
+    state.pakete.update_modus_setzen(pid, "klein")
+    monkeypatch.setattr(updates, "neuestes_release", lambda: None)
+    state.paketquellen_setzen(["https://x/i"])
+
+    def anbieten(version, datei: str) -> None:
+        eintrag = IndexEintrag(pid, "Qigong", version, f"https://x/{datei}", "", 0, "https://x/i")
+        jetzt = state.pakete.laden(pid)  # vorher laden: im Thread kein SQLite
+        monkeypatch.setattr(
+            updates,
+            "pruefen",
+            lambda q, i, laden=None: Pruefung(updates=[PaketUpdate(eintrag, jetzt)]),
+        )
+        monkeypatch.setattr(
+            updates, "paket_laden", lambda e, laden=None: paket_lesen(qigong(version))
+        )
+
+    anbieten(5, "q5.json")  # nur die letzte Stelle
+    stand = asyncio.run(updates.pruefung_ausfuehren(state))
+    assert [v for _, _, v in stand.eingespielt] == [5] and state.pakete.laden(pid).version == 5
+    anbieten(100, "q100.json")  # 0.1.0 — größer
+    stand = asyncio.run(updates.pruefung_ausfuehren(state))
+    assert stand.eingespielt == [] and [u.eintrag.version for u in stand.pruefung.updates] == [100]
+    p = state.pakete.laden(pid)
+    assert p.version == 5 and p.verfuegbar == 100
+    ansicht = updates.updates_view(page, state, ft.UrlLauncher())
+    assert any("verfügbar: Version 0.1.0" in t for t in texte(ansicht))
+
+
+def test_fuer_alle_pakete_und_neue(page, state) -> None:
+    """„Für alle Pakete“: jedes installierte bekommt den Modus, ein neues ebenso."""
+    erstes = paket_lesen(qigong(1))
+    state.pakete.importieren(erstes)
+    ansicht = updates.updates_view(page, state, ft.UrlLauncher())
+    wahl = next(
+        c
+        for v in ansicht.controls
+        for c in alle(v)
+        if isinstance(c, ft.SegmentedButton) and c.data == "paket_updates_alle"
+    )
+    assert wahl.selected == ["auto"]
+    wahl.selected = ["klein"]
+    wahl.on_change(SimpleNamespace(control=wahl))
+    assert state.paket_updates() == "klein"
+    assert {p.update_modus for p, _ in state.pakete.alle()} == {"klein"}
+    neu = paket_lesen(
+        {
+            "paket": {"name": "Dehnung", "version": "1.0.0"},
+            "exercises": [{"key": "katze", "name": "Katze", "spec": "halten"}],
+        }
+    )
+    state.pakete.importieren(neu)
+    p = state.pakete.laden(neu.paket.id)
+    assert p.update_modus == "klein" and p.version == 10000
+    # ein Update lässt den Modus stehen, den die Person je Paket gewählt hat
+    state.pakete.update_modus_setzen(neu.paket.id, "manuell")
+    state.pakete.importieren(neu)
+    assert state.pakete.laden(neu.paket.id).update_modus == "manuell"

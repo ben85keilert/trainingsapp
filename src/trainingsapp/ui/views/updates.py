@@ -37,6 +37,7 @@ from trainingsapp.core.paketquelle import (
     pruefen,
     url_pruefen,
 )
+from trainingsapp.core.paketversion import UPDATE_MODI, version_text, von_selbst
 from trainingsapp.core.update import UpdateFehler, ist_neuer, neuestes_release
 from trainingsapp.data.repositories import SettingRepo
 from trainingsapp.ui import app_update
@@ -45,7 +46,12 @@ from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.links import oeffnen as link_oeffnen
 from trainingsapp.ui.components.paket_link import link_importieren
 from trainingsapp.ui.state import BENACHRICHTIGUNGEN, AppState, UpdateStand
-from trainingsapp.ui.views.pakete import entfallene_dialog, import_rueckfrage, uebungen_zahl
+from trainingsapp.ui.views.pakete import (
+    entfallene_dialog,
+    import_rueckfrage,
+    uebungen_zahl,
+    update_modus_wahl,
+)
 
 ROUTE = "/einstellungen/updates"
 
@@ -87,7 +93,9 @@ async def pruefung_ausfuehren(state: AppState) -> UpdateStand:
         state.pakete.verfuegbar_setzen(ei.id, ei.version or 0, ei.url, ei.sha256, ei.neuigkeiten)
     offen: list = []
     for u in ergebnis.updates:
-        if u.installiert.update_modus != "auto":
+        # „auto“ spielt alles ein, „klein“ nur, wenn bloß die letzte Stelle steigt (Ben,
+        # 9.11.2026), sonst und bei „manuell“ bleibt es vorgemerkt
+        if not von_selbst(u.installiert.update_modus, u.installiert.version, u.eintrag.version):
             offen.append(u)
             continue
         try:
@@ -164,7 +172,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
     state.updates_gesehen_markieren()  # geöffnet = gesehen; das Label verschwindet
     stand = state.updates
     version, build = app_version()
-    version_text = f"Version {version}" + (f" (Build {build})" if build is not None else "")
+    app_text = f"Version {version}" + (f" (Build {build})" if build is not None else "")
 
     def melden(text: str) -> None:
         page.show_dialog(ft.SnackBar(ft.Text(text)))
@@ -241,7 +249,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
         return handler
 
     # -- App -------------------------------------------------------------------------
-    app_zeilen: list[ft.Control] = [ft.Text(version_text)]
+    app_zeilen: list[ft.Control] = [ft.Text(app_text)]
     if not ist_aktiv("update_pruefung"):
         app_zeilen.append(hinweis("Updates der App kommen in dieser Edition von der Praxis."))
     elif stand is not None and stand.app is not None:
@@ -287,38 +295,40 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
         app_zeilen.append(hinweis("Noch nicht geprüft."))
 
     # -- Pakete ----------------------------------------------------------------------
-    def modus_setzer(paket_id: str) -> Callable[[ft.Event[ft.Dropdown]], None]:
-        def handler(ev: ft.Event[ft.Dropdown]) -> None:
-            if ev.control.value in ("auto", "manuell"):
-                state.pakete.update_modus_setzen(paket_id, str(ev.control.value))
+    def fuer_alle(ev: ft.Event[ft.SegmentedButton]) -> None:
+        """„Für alle Pakete“ (Ben, 9.11.2026): jedes installierte und jedes neue Paket."""
+        wahl = ev.control.selected[0] if ev.control.selected else None
+        if wahl in UPDATE_MODI:
+            state.paket_updates_setzen(str(wahl))
+            state.neu_zeichnen()
 
-        return handler
+    fuer_alle_wahl = ft.SegmentedButton(
+        selected=[state.paket_updates()],
+        segments=[
+            ft.Segment(value="auto", label=ft.Text("Alle")),
+            ft.Segment(value="klein", label=ft.Text("Kleine")),
+            ft.Segment(value="manuell", label=ft.Text("Manuell")),
+        ],
+        on_change=fuer_alle,
+        data="paket_updates_alle",
+    )
 
     def paket_zeile(p: Paket) -> ft.Control:
         teile = ["deaktiviert"] if p.deaktiviert else []
-        teile.append(f"Version {p.version}" if p.version is not None else "ohne Version")
+        teile.append(
+            f"Version {version_text(p.version)}" if p.version is not None else "ohne Version"
+        )
         if p.verfuegbar is not None:
-            teile.append(f"verfügbar: Version {p.verfuegbar}")
+            teile.append(f"verfügbar: Version {version_text(p.verfuegbar)}")
         elif p.geprueft is not None:
             teile.append("aktuell")
         eintrag = _eintrag_aus_paket(p)
-        rechts: list[ft.Control] = [
-            ft.Dropdown(
-                value=p.update_modus,
-                width=130,
-                dense=True,
-                options=[
-                    ft.DropdownOption(key="auto", text="automatisch"),
-                    ft.DropdownOption(key="manuell", text="manuell"),
-                ],
-                on_select=modus_setzer(p.id),
-            )
-        ]
+        rechts: list[ft.Control] = [update_modus_wahl(state, p, breite=170)]
         if eintrag is not None and p.aktiv:
             rechts.append(
                 ft.IconButton(
                     ft.Icons.DOWNLOAD,
-                    tooltip=f"Version {p.verfuegbar} einspielen",
+                    tooltip=f"Version {version_text(p.verfuegbar)} einspielen",
                     on_click=installierer(eintrag),
                 )
             )
@@ -351,7 +361,7 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
         if e.kurse:
             teile.append("1 Kurs" if e.kurse == 1 else f"{e.kurse} Kurse")
         if e.version is not None:
-            teile.append(f"Version {e.version}")
+            teile.append(f"Version {version_text(e.version)}")
         if e.quelle_name:
             teile.append(e.quelle_name)
         return ft.Row(
@@ -383,11 +393,16 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
     for p in installierte:
         if p.verfuegbar is not None and p.verfuegbar_neuigkeiten:
             neuigkeiten.append(
-                ft.Text(f"{p.name}, Version {p.verfuegbar}: {p.verfuegbar_neuigkeiten}", size=13)
+                ft.Text(
+                    f"{p.name}, Version {version_text(p.verfuegbar)}: {p.verfuegbar_neuigkeiten}",
+                    size=13,
+                )
             )
     if stand is not None:
         for _, name, v in stand.eingespielt:
-            neuigkeiten.append(ft.Text(f"{name} auf Version {v} aktualisiert.", size=13))
+            neuigkeiten.append(
+                ft.Text(f"{name} auf Version {version_text(v)} aktualisiert.", size=13)
+            )
         if stand.app is not None and stand.app.notizen:
             text = stand.app.notizen[:600] + ("…" if len(stand.app.notizen) > 600 else "")
             neuigkeiten.append(
@@ -475,10 +490,14 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
                         karte(titel("App"), *app_zeilen),
                         karte(
                             titel("Pakete"),
+                            ft.Text("Updates von selbst einspielen — für alle Pakete", size=13),
+                            fuer_alle_wahl,
                             hinweis(
-                                "„automatisch“ spielt ein Update beim Start ein, „manuell“ "
-                                "merkt es nur vor — der Pfeil holt es mit Vorschau. Was du an "
-                                "Übungen geändert hast, bleibt bei jedem Update."
+                                "„Alle“ spielt jedes Update beim Start ein, „Kleine“ nur, wenn "
+                                "bloß die letzte Stelle der Version steigt (0.0.4 → 0.0.5) — "
+                                "größere und „Manuell“ merkt die App vor, der Pfeil holt sie "
+                                "mit Vorschau. Je Paket lässt es sich unten anders einstellen. "
+                                "Was du an Übungen geändert hast, bleibt bei jedem Update."
                             ),
                             *([paket_zeile(p) for p in installierte] or [hinweis("Kein Paket.")]),
                         ),

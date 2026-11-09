@@ -129,7 +129,9 @@ speichert vorher die Übung. „Timer hinzufügen“ legt einen neuen an oder ü
 **Vorlage** aus dem Timer-Werkzeug (Pille „Timer“ oben) als Kopie.
 
 **Zeit stellen**: Ein Tipp auf eine Zeit öffnet überall dasselbe Blatt — Räder für Minuten
-und Sekunden, Tippfeld und die Schnellzeiten aus den Einstellungen.
+und Sekunden, Tippfeld und die Schnellzeiten aus den Einstellungen. **Mit Abschnitten …** führt
+für jetzt ins erweiterte Fenster: Abschnitte, Runden, Takt — gespeichert wird nur mit „Als Timer
+der Übung speichern …“.
 
 **Knöpfe** einer laufenden Uhr, überall gleich: **Pause · Weiter** halten an und setzen fort,
 **Nächster** springt zum nächsten Abschnitt, **Fertig** beendet und trägt ein, **Abbrechen**
@@ -399,8 +401,30 @@ sagt „Weiter, wenn …“ unter „Einstellen“, wann es weitergeht — sonst
 Übungen, die nur über einen Abzweig erreichbar sind, kommen **bei Bedarf** dran — nie von selbst.
 """
 
+TIMER_EDITOR_MD = """\
+**Zeiten**: Je Abschnitt eine Zeile — der Name, der **Takt** (Phasen für Atmung oder Bewegung;
+gilt nur in diesem Abschnitt, steht dann darunter), die **Zeit** (antippen stellt sie), **zählt**
+(seine Zeit wird als Übungszeit eingetragen; durchgestrichen = zählt nicht) und ⊖ entfernen.
+**Lange drücken** auf eine Zeile: kopieren oder entfernen.
+
+Ein **Teil** sind Abschnitte, die so viele **Runden** laufen, wie unten steht — dann kommt der
+nächste, etwa Vorbereitung 1 ×, Halten und Pause 3 ×, Cooldown 1 ×. Kopieren hängt eine Kopie
+des Teils dahinter. Oben rechts steht die Gesamtzeit des ganzen Timers.
+
+**Ausführung** (Timer einer Übung mit Variante, Seite, Gewicht oder Winkel): gilt für ihre
+Runde — je Ausführung entsteht ein eigener Eintrag.
+
+**Klänge**: dieselben Zeilen auf derselben Höhe — je Abschnitt der Klang, mit dem er beginnt
+(etwa Glocke 1 für Belastung, Glocke 3 für die Pause); ▶ spielt vor. Unten der Klang zu Beginn
+jeder neuen Runde und am Ende; **Signale** stellen Countdown, Vibration und Lautstärke für alle
+Timer.
+
+**Wischen** wechselt zwischen Zeiten und Klängen.
+"""
+
 THEMEN: dict[str, tuple[str, str, str]] = {
     "ablauf": ("Ablauf", ABLAUF_MD, "Der Reihe nach oder mit Abzweigen"),
+    "timer_editor": ("Timer bearbeiten", TIMER_EDITOR_MD, "Zeiten, Klänge, Teile, Runden"),
     "workout": ("Workout", WORKOUT_MD, "Workout: Übergang, Bedingungen, Wege"),
     "notation": ("So wird eingegeben", NOTATION_MD, "Wie gebe ich ein?"),
     "plan": ("Üben im Plan", PLAN_MD, "Knöpfe und Eingabe"),
@@ -462,6 +486,7 @@ __all__ = [
     "NOTATION_MD",
     "TAKT_MD",
     "THEMEN",
+    "TIMER_EDITOR_MD",
     "UEBUNGEN_MD",
     "VARIANTEN_MD",
     "WORKOUT_MD",

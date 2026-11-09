@@ -215,7 +215,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `_build.py`, die `scripts/apk_bauen.py` schreibt, aus dem Quelltext aus `pyproject.toml`;
   APK-Link im Browser, nur Android). `core/paketquelle.py`
   fragt **Paketquellen** (Index-JSON per HTTPS, Format von `trainingsapp-paket index`,
-  SHA-256 geprüft, Signaturfeld reserviert). `ui/views/updates.py` macht beides beim Start
+  SHA-256 geprüft, Signaturfeld reserviert). Paketversionen „X.Y.Z“ reisen als Zahl
+  X·10000 + Y·100 + Z (`core/paketversion.py`, ältere Apps vergleichen weiter); Modus je Paket
+  Alle · **Kleine** (nur die letzte Stelle steigt, Ben 9.11.2026) · Manuell, „Für alle Pakete“
+  unter Updates. `ui/views/updates.py` macht beides beim Start
   (abschaltbar, einmaliger Hinweis — jede neue Netzverbindung in Solo braucht Schalter,
   Hinweis und einen Nachtrag in `docs/recht/40_toms.md`, `80_store_freigaben.md`,
   `build/solo.toml`), spielt Pakete im Modus „auto“ ein und hängt das Label unter das
@@ -325,7 +328,14 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   eingetragen wird **je Ausführung ein Eintrag** (`core.timer_eintrag.nach_ausfuehrung`,
   `Eingaben`; beim Üben und im Workout). Pfeilzeile `components/planpfeile.py` im Plan und im
   Fokus; alle Timer unter Einstellungen → Timer → „Alle“ (`views/alle_timer.py`,
-  `core.uebung_timer.alle_timer`).
+  `core.uebung_timer.alle_timer`). **Timer-Editor** (Ben, 9.11.2026, `docs/plan_timer_editor.md`,
+  Skizzen G1–G5): fest oben Name und Gesamtzeit, Reiter **Zeiten · Klänge** (Wischen: eine
+  Scrollfläche, die Namen bleiben stehen, nur die rechte Spalte gleitet — feste Zeilenhöhen),
+  je Abschnitt eine Zeile, Teile ⧉ kopieren, Abschnitte per langem Druck; die Felder halten
+  Werte, nicht Controls (jeder Aufbau legt sie neu an). **Für jetzt mit Abschnitten**: das
+  Zeit-Blatt hat „Mit Abschnitten …“ (`zeit_blatt(erweitert=)`), `…/bearbeiten/einmal` mit
+  `views.uebung_timer.jetzt_profilziel` — `AppState.uhr_einmal` hält Profile, gespeichert wird nur
+  per „Als Timer der Übung speichern …“.
 
 - **Taktgeber** (Ben, 5.11.2026, Vertrag `docs/plan_taktgeber.md`; Teil 1 T1–T3 gebaut): ein
   **Takt** ist eine Folge von Phasen (Name, Sekunden, Art `ein`/`aus`/`halten`/`ab`/`auf`/`frei`,

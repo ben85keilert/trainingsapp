@@ -2469,7 +2469,7 @@ wheels = [
 
 [[package]]
 name = "trainingsapp"
-version = "0.3.72"
+version = "0.3.73"
 source = { editable = "." }
 default-groups = ["dev", "flet-dev"]
 dependencies = [

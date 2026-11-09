@@ -337,7 +337,11 @@ async def test_editor_ausfuehrung_je_runde(umgebung) -> None:
     ]
     assert len(chips) == 2
     chips[1].on_select()  # der neue Abschnitt: rechts
-    namen = [x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Abschnitt"]
+    namen = [
+        x
+        for x in _alle(ansicht)
+        if isinstance(x, ft.TextField) and isinstance(x.data, tuple) and x.data[:1] == ("name",)
+    ]
     assert namen[1].value == "Rechts"
     assert any(t.startswith("Eingetragen wird je Ausführung ein Eintrag") for t in _texte(ansicht))
     await _knopf(ansicht, "Speichern").on_click()
@@ -387,3 +391,72 @@ async def test_alle_timer_gruppen_und_loeschen(umgebung) -> None:
     assert "Er gilt in: Rumpf" in _texte(seite.dialoge[-1])[0]
     _knopf(seite.dialoge[-1], "Löschen").on_click()
     assert TimerWahl.aus_dict(state.plaene.item_laden(item.id).timer).eigen is None
+
+
+async def test_fuer_jetzt_mit_abschnitten(umgebung) -> None:
+    """Ben, 9.11.2026 (Skizzen G1/G2): Für jetzt → Zeit stellen → „Mit Abschnitten …“ — der
+    Editor stellt die Uhr für jetzt, nichts kommt in die Übung; nur „Als Timer der Übung
+    speichern …“ hängt sie mit Namen an."""
+    from trainingsapp.core.timer import EINMAL
+    from trainingsapp.ui.components.uhr_blatt import JETZT, uhr_blatt
+    from trainingsapp.ui.views.timer import timer_bearbeiten_view
+    from trainingsapp.ui.views.uebung_timer import jetzt_profilziel
+
+    state, _, _ = umgebung
+    u = _seitstuetz(state)
+    plan = _plan(state, u)
+    item = plan.items[0]
+    basis = f"/plan/{plan.id}"
+    seite = Seite()
+    blatt = uhr_blatt(seite, state, uebung=u, plan=plan, item=item, basis=basis)
+    segment = next(x for x in _alle(blatt) if isinstance(x, ft.SegmentedButton))
+    segment.selected = [JETZT]
+    segment.on_change(SimpleNamespace(control=segment))
+    await _aklick(_knopf(blatt, "Zeit stellen …").on_click)
+    await _aklick(blatt.on_dismiss, None)
+    zeit = seite.dialoge[-1]
+    weiter = next(
+        x for x in _alle(zeit) if isinstance(x, ft.Container) and x.data == "mit_abschnitten"
+    )
+    weiter.on_click(None)
+    await _aklick(zeit.on_dismiss, None)
+    await ruhe()
+    route = f"{basis}/timer/uebung/{u.id}/{item.id}/bearbeiten/{EINMAL}"
+    assert seite.route == route and state.uhr_einmal_start[item.id] == 60
+    vorher = [p.id for p in profile_der_uebung(state.uebungen.laden(u.id))]
+
+    # Das erweiterte Fenster: der erste Abschnitt hat die gestellte Zeit, einer kommt dazu
+    editor = timer_bearbeiten_view(
+        seite, state, EINMAL, basis, jetzt_profilziel(state, basis, u, plan, item)
+    )
+    assert editor.route == route and editor.appbar.title.value == "Für jetzt"
+    assert "Gilt nur jetzt — bis die App neu startet" in _texte(editor)
+    _knopf(editor, "Abschnitt hinzufügen").on_click()
+    await _aklick(_knopf(editor, "Übernehmen").on_click)
+    jetzt = state.uhr_einmal[item.id]
+    assert jetzt.id == EINMAL and [a.dauer_s for a in jetzt.abschnitte] == [60, 60]
+    assert state.uhr_wahl[item.id] == EINMAL
+    assert [p.id for p in profile_der_uebung(state.uebungen.laden(u.id))] == vorher
+
+    # Im Uhr-Blatt steht sie mit ✎ — gilt nur für jetzt
+    blatt = uhr_blatt(seite, state, uebung=u, plan=plan, item=item, basis=basis)
+    assert any(isinstance(x, ft.Container) and x.data == ("uhr", EINMAL) for x in _alle(blatt))
+    assert "Für jetzt" in _texte(blatt)
+
+    # Wieder geöffnet: die Abschnitte sind da; nur der Knopf speichert in die Übung
+    editor = timer_bearbeiten_view(
+        seite, state, EINMAL, basis, jetzt_profilziel(state, basis, u, plan, item)
+    )
+    assert len([x for x in _alle(editor) if isinstance(x, ft.Stack)]) == 2
+    speichern = next(
+        x for x in _alle(editor) if isinstance(x, ft.FilledTonalButton) and x.data == "als_profil"
+    )
+    assert speichern.content == "Als Timer der Übung speichern …"
+    await _aklick(speichern.on_click)
+    dialog = seite.dialoge[-1]
+    feld = next(x for x in _alle(dialog) if isinstance(x, ft.TextField))
+    feld.value = "L-R für jetzt"
+    _knopf(dialog, "Speichern").on_click()
+    profile = profile_der_uebung(state.uebungen.laden(u.id))
+    neu = next(p for p in profile if p.name == "L-R für jetzt")
+    assert len(neu.abschnitte) == 2 and state.uhr_wahl[item.id] == neu.id

@@ -429,3 +429,19 @@ def test_aus_dem_workout_fokus_zurueck_in_den_plan(umgebung) -> None:
     assert plan_ablauf.laufender(state, plan.id) is not None  # die Uhr läuft weiter
     asyncio.run(hinweis.on_click())
     assert seite.routen() == ["/", start, fokus]
+
+
+def test_fuer_jetzt_mit_abschnitten_liegt_ueber_dem_timer_der_uebung(umgebung) -> None:
+    """„Mit Abschnitten …“ (Ben, 9.11.2026): ``…/bearbeiten/einmal`` ist der Editor für jetzt —
+    über dem Timer der Übung, Zurück führt dorthin."""
+    seite, state = umgebung()
+    plan = _plan(state)
+    item = plan.items[0]
+    timer = f"/plan/{plan.id}/timer/uebung/{item.exercise_id}/{item.id}"
+    seite.gehe(f"/plan/{plan.id}")
+    seite.gehe(timer)
+    seite.gehe(f"{timer}/bearbeiten/einmal")
+    assert seite.routen()[-2:] == [timer, f"{timer}/bearbeiten/einmal"]
+    assert seite.views[-1].appbar.title.value == "Für jetzt"
+    seite.zurueck()
+    assert seite.routen()[-1] == timer

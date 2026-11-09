@@ -62,6 +62,7 @@ from .kurse import (
     verweise_als_position,
 )
 from .models import Exercise, Media, MediaKind, MediaSource, Plan, jetzt
+from .paketversion import version_zahl
 from .result_spec import VORLAGEN, ResultSpec, basis_key
 from .takt import Takt
 from .timer import TimerProfil
@@ -356,9 +357,13 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
     name = " ".join(str(kopf.get("name") or name_vorgabe).split())
     if (fehler := name_pruefen(name)) is not None:
         raise PaketFehler(fehler)
-    pversion = kopf.get("version")
-    if pversion is not None and not _ganzzahl(pversion):
-        raise PaketFehler("Die Paketversion muss eine ganze Zahl sein.")
+    # „X.Y.Z“ oder die ganze Zahl wie bisher — gespeichert als Zahl (`core/paketversion.py`)
+    pversion_roh = kopf.get("version")
+    pversion = version_zahl(pversion_roh) if pversion_roh is not None else None
+    if pversion_roh is not None and pversion is None:
+        raise PaketFehler(
+            "Die Paketversion muss eine ganze Zahl oder „X.Y.Z“ sein (Y und Z unter 100)."
+        )
     try:
         pid = _id_lesen(kopf.get("id"), "des Pakets")
     except ValueError as grund:

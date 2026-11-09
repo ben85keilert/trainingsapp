@@ -51,10 +51,16 @@ def zeit_blatt(
     untertitel: str = "für jetzt",
     start_text: str = "Start",
     schnell: Sequence[int] | None = None,
+    erweitert: Callable[[int], Any] | None = None,
 ) -> ft.BottomSheet:
     """Das Blatt zum Stellen; ``starten`` bekommt die Sekunden, wenn das Blatt zu ist. Es ist
     **das** Blatt für jede Zeit (Ben, 8.11.2026): Timer-Seite, Uhr der Übung, Abschnitte im
-    Editor und im Uhrenplan — ``schnell`` sind die Schnellzeiten aus den Einstellungen."""
+    Editor und im Uhrenplan — ``schnell`` sind die Schnellzeiten aus den Einstellungen.
+
+    ``erweitert`` (Ben, 9.11.2026, `docs/plan_timer_editor.md` §1, Skizze G1): die Zeile **„Mit
+    Abschnitten …“** — ins erweiterte Fenster, wo eine Uhr für jetzt Abschnitte, Runden und
+    Takt bekommt; aufgerufen mit der gestellten Zeit, wenn das Blatt zu ist. Nicht im Editor
+    selbst (P153)."""
     stand = {"s": min(max(1, round(sekunden)), MAX_ABSCHNITT_S)}
     nachher = Nachher()
     blatt: ft.BottomSheet
@@ -102,6 +108,51 @@ def zeit_blatt(
         nachher.danach(lambda: starten(s))
         schliessen(blatt)
 
+    def mit_abschnitten(_e: Any = None) -> None:
+        assert erweitert is not None
+        s = stand["s"]
+        nachher.danach(lambda: erweitert(s))
+        schliessen(blatt)
+
+    weiter: list[ft.Control] = (
+        [
+            ft.Container(
+                padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+                border=ft.Border.all(1, ft.Colors.PRIMARY),
+                border_radius=14,
+                on_click=mit_abschnitten,
+                data="mit_abschnitten",
+                content=ft.Row(
+                    spacing=12,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Icon(ft.Icons.TUNE, color=ft.Colors.PRIMARY),
+                        ft.Column(
+                            spacing=0,
+                            expand=True,
+                            controls=[
+                                ft.Text(
+                                    "Mit Abschnitten …",
+                                    size=14,
+                                    weight=ft.FontWeight.W_600,
+                                    color=ft.Colors.PRIMARY,
+                                ),
+                                ft.Text(
+                                    "Links, Pause, Rechts · Runden · Takt — für jetzt",
+                                    size=12,
+                                    opacity=0.75,
+                                ),
+                            ],
+                        ),
+                        ft.Icon(ft.Icons.CHEVRON_RIGHT),
+                    ],
+                ),
+            )
+        ]
+        if erweitert is not None
+        else []
+    )
+
     rad = ft.CupertinoTimerPicker(
         value=min(stand["s"], RAD_MAX_S),
         mode=ft.CupertinoTimerPickerMode.MINUTE_SECONDS,
@@ -142,6 +193,7 @@ def zeit_blatt(
                         for s in (schnell if schnell is not None else SCHNELL_S)
                     ],
                 ),
+                *weiter,
             ],
             [
                 ft.Row(

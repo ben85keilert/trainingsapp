@@ -221,17 +221,19 @@ async def test_editor_baut_eine_folge_mit_zaehlt(umgebung) -> None:
     assert ansicht.appbar.title.value == "Timer der Übung"
     _knopf(ansicht, "Teil anhängen").on_click()
     felder = [x for x in _alle(ansicht) if isinstance(x, ft.TextField)]
-    teile = [f for f in felder if f.label == "Teil"]
+    teile = [f for f in felder if isinstance(f.data, tuple) and f.data[:1] == ("teil_name",)]
     assert len(teile) == 2
     teile[0].value = "Training"
-    # Der Cooldown zählt von sich aus nicht; die Pause des Trainings schalten wir aus
+    teile[0].on_change(SimpleNamespace(control=teile[0]))
+    # Der Cooldown zählt von sich aus nicht; die Pause des Trainings schalten wir aus — „zählt“
+    # ist ein Chip, durchgestrichen = zählt nicht (P154)
     zaehlt = [
         x
         for x in _alle(ansicht)
-        if isinstance(x, ft.TextButton) and x.content in ("zählt", "zählt nicht")
+        if isinstance(x, ft.Container) and isinstance(x.data, tuple) and x.data[:1] == ("zaehlt",)
     ]
-    assert [x.content for x in zaehlt] == ["zählt", "zählt", "zählt nicht"]
-    zaehlt[1].on_click()
+    assert [x.bgcolor is not None for x in zaehlt] == [True, True, False]
+    zaehlt[1].on_click(None)
     await _knopf(ansicht, "Speichern").on_click()
     gespeichert = state.uebungen.laden(uebung.id)
     assert gespeichert is not None

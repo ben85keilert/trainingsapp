@@ -22,7 +22,7 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core.models import Exercise, Plan, PlanItem
-from trainingsapp.core.timer import OHNE_UHR, STOPPUHR, TimerProfil
+from trainingsapp.core.timer import EINMAL, OHNE_UHR, STOPPUHR, TimerProfil
 from trainingsapp.core.uebung_timer import (
     TimerWahl,
     plan_timer,
@@ -79,6 +79,11 @@ def uhr_blatt(
         out: list[tuple[str, str, str, str, str | None]] = [
             (STOPPUHR, "Stoppuhr", "", "zählt vorwärts", None)
         ]
+        # Die Uhr für jetzt (gestellte Zeit oder mit Abschnitten, Ben 9.11.2026) — ✎ öffnet das
+        # erweiterte Fenster wieder
+        if (jetzt := state.uhr_einmal.get(key)) is not None:
+            route = f"{uebung_timer_route(basis, uebung, item)}/bearbeiten/{EINMAL}"
+            out.append((EINMAL, "Für jetzt", "gestellt", jetzt.kurztext(), route))
         if eigene is not None:
             route = f"{uebung_timer_route(basis, uebung, item)}/bearbeiten/{eigene.id}"
             out.append((eigene.id, eigene.anzeigename, "nur hier", eigene.kurztext(), route))
@@ -97,6 +102,8 @@ def uhr_blatt(
     def gesperrt(profil_id: str) -> str:
         """Warum eine Wahl in dieser Geltung nicht geht — leer, wenn sie geht."""
         g = stand["geltung"]
+        if g != JETZT and profil_id == EINMAL:
+            return "Gilt nur für jetzt — mit ✎ als Timer der Übung speichern."
         if g == UEBUNG and profil_id == STOPPUHR and profile_der_uebung(uebung):
             return (
                 "Die Übung hat Timer — als Vorgabe gilt ihr erster. Die Stoppuhr geht für jetzt "
@@ -143,19 +150,25 @@ def uhr_blatt(
         jetzt das Zeit-Blatt (ein Timer ohne Ablauf)."""
         g = stand["geltung"]
         if g == JETZT:
+            from trainingsapp.ui.components.uhr import fuer_jetzt_oeffnen
             from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 
             def gestellt(sekunden: int) -> None:
-                from trainingsapp.core.timer import EINMAL
+                from trainingsapp.core.timer import EINMAL, einmal_timer
 
-                state.uhr_einmal[key] = sekunden
+                state.uhr_einmal[key] = einmal_timer(sekunden)
                 state.uhr_wahl[key] = EINMAL
                 state.neu_zeichnen()
 
             nachher.danach(
                 lambda: page.show_dialog(
                     zeit_blatt(
-                        60, starten=gestellt, start_text="Übernehmen", schnell=state.schnellzeiten()
+                        60,
+                        starten=gestellt,
+                        start_text="Übernehmen",
+                        schnell=state.schnellzeiten(),
+                        # „Mit Abschnitten …“ (Ben, 9.11.2026, Skizze G1)
+                        erweitert=fuer_jetzt_oeffnen(page, state, uebung, item, basis, 60),
                     )
                 )
             )

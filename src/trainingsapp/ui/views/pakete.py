@@ -54,6 +54,7 @@ from trainingsapp.core.pakete import (
     paketplan_aus,
 )
 from trainingsapp.core.paketquelle import DATEI, fremde_identitaet
+from trainingsapp.core.paketversion import MODUS_TEXT, UPDATE_MODI, version_text
 from trainingsapp.data.pakete import ARCHIV, KATALOG, PAPIERKORB, Status, Uebungsstand, Vorschau
 from trainingsapp.ui.components.dialoge import Nachher
 from trainingsapp.ui.components.hilfe import hilfe_knopf
@@ -164,15 +165,38 @@ def entfallene_dialog(
     )
 
 
+def update_modus_wahl(state: AppState, paket: Paket, *, breite: int = 190) -> ft.Dropdown:
+    """Wie Updates dieses Pakets kommen: alle automatisch, kleine automatisch (nur die letzte
+    Stelle steigt — 0.0.4 → 0.0.5, Ben 9.11.2026) oder manuell — `core/paketversion.py`."""
+
+    def gewaehlt(ev: ft.Event[ft.Dropdown]) -> None:
+        if ev.control.value in UPDATE_MODI:
+            state.pakete.update_modus_setzen(paket.id, str(ev.control.value))
+            paket.update_modus = str(ev.control.value)
+
+    return ft.Dropdown(
+        value=paket.update_modus if paket.update_modus in UPDATE_MODI else UPDATE_MODI[0],
+        width=breite,
+        dense=True,
+        options=[ft.DropdownOption(key=m, text=MODUS_TEXT[m]) for m in UPDATE_MODI],
+        on_select=gewaehlt,
+    )
+
+
 def _versionstext(vorschau: Vorschau) -> str:
     """„Neues Paket“, „Version 2 — installiert ist Version 1“, „war entfernt“ …"""
     neu, alt = vorschau.paket, vorschau.installiert
     if vorschau.entfernt is not None:
         return "War entfernt — wird wieder installiert"
     if alt is None:
-        return f"Neues Paket · Version {neu.version}" if neu.version else "Neues Paket"
+        return (
+            f"Neues Paket · Version {version_text(neu.version)}" if neu.version else "Neues Paket"
+        )
     if neu.version is not None and alt.version is not None and neu.version != alt.version:
-        return f"Version {neu.version} — installiert ist Version {alt.version}"
+        return (
+            f"Version {version_text(neu.version)} — installiert ist Version "
+            f"{version_text(alt.version)}"
+        )
     return "Schon installiert — der Import aktualisiert es"
 
 
@@ -382,9 +406,9 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
         if entfallen:
             teile.append(f"{entfallen} nicht mehr im Paket")
         if paket.version is not None:
-            teile.append(f"Version {paket.version}")
+            teile.append(f"Version {version_text(paket.version)}")
         if paket.verfuegbar is not None:
-            teile.append(f"verfügbar: Version {paket.verfuegbar}")
+            teile.append(f"verfügbar: Version {version_text(paket.verfuegbar)}")
         teile.append(groesse_text(*state.pakete.groesse(paket.id, medienverzeichnis())))
         texte: list[ft.Control] = [
             ft.Text(paket.name, size=15),
@@ -754,7 +778,7 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
     if paketplaene:
         teile.append("1 Plan" if len(paketplaene) == 1 else f"{len(paketplaene)} Pläne")
     if paket.version is not None:
-        teile.append(f"Version {paket.version}")
+        teile.append(f"Version {version_text(paket.version)}")
     teile.append(groesse_text(*state.pakete.groesse(paket.id, medienverzeichnis())))
     teile.append(f"installiert {_datum(paket.installiert)}")
     if paket.aktualisiert is not None and paket.aktualisiert != paket.installiert:
@@ -765,13 +789,22 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
     kopf.append(ft.Text("  ·  ".join(teile), size=12, opacity=0.7))
     # Woher das Paket kommt — zur Sicherheit (Ben, 28.10.2026), auswählbar zum Kopieren
     quelle_zeile = [quelle_text(paket)]
-    if paket.quelle:
-        quelle_zeile.append(
-            "Updates automatisch" if paket.update_modus == "auto" else "Updates manuell"
-        )
-        if paket.geprueft is not None:
-            quelle_zeile.append(f"zuletzt geprüft {_datum(paket.geprueft)}")
+    if paket.quelle and paket.geprueft is not None:
+        quelle_zeile.append(f"zuletzt geprüft {_datum(paket.geprueft)}")
     kopf.append(ft.Text("  ·  ".join(quelle_zeile), size=12, opacity=0.7, selectable=True))
+    if paket.quelle:
+        # Wie Updates aus der Quelle kommen — auch hier einstellbar (Ben, 9.11.2026: „Im
+        # Paketmanager/Update fehlt ein Button …“), dieselbe Wahl wie unter Updates
+        kopf.append(
+            ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text("Updates", size=14, expand=True),
+                    update_modus_wahl(state, paket),
+                ],
+            )
+        )
     if paketplaene:
         kopf.append(
             ft.Text(

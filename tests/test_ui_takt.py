@@ -262,25 +262,25 @@ async def test_formular_zeile_takt_mit_stift_und_x(state) -> None:
 
 
 async def test_timer_editor_takt_je_abschnitt(state) -> None:
-    """Der Timer-Editor: je Abschnitt die Zeile „Takt“ — der Takt reist mit dem Profil."""
+    """Der Timer-Editor: je Abschnitt der Takt-Knopf in der Zeile (Ben, 9.11.2026, G3) — ein
+    Takt steht dann in einer zweiten Zeile darunter und reist mit dem Profil."""
     from trainingsapp.ui.views.timer import timer_bearbeiten_view
 
     page = Seite()
     ansicht = timer_bearbeiten_view(page, state, None, "/")
-    zeilen = [x for x in _alle(ansicht) if isinstance(x, ft.Text) and x.value == "Takt: keiner"]
-    assert len(zeilen) == 2  # Belastung, Pause
-    stifte = [
+    knoepfe = [
         x
         for x in _alle(ansicht)
-        if isinstance(x, ft.IconButton) and (x.tooltip or "").startswith("Takt einstellen")
+        if isinstance(x, ft.IconButton) and isinstance(x.data, tuple) and x.data[:1] == ("takt",)
     ]
-    stifte[0].on_click()
+    assert [x.tooltip for x in knoepfe] == ["Takt: keiner", "Takt: keiner"]  # Belastung, Pause
+    knoepfe[0].on_click()
     blatt = page.dialoge[-1]
     assert "Takt: Belastung" in _texte(blatt)
     _chip(blatt, "Kniebeuge 2-1-2").on_click()
     _knopf(blatt, "Übernehmen").on_click()  # einzige Geltung: der Abschnitt (K5)
     await blatt.on_dismiss(None)
-    assert "Takt: Kniebeuge 2-1-2 · 2-1-2 · 12,0/min" in _texte(ansicht)
+    assert "Kniebeuge 2-1-2 · 2-1-2 · 12,0/min" in _texte(ansicht)
     name = next(x for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Name")
     name.value = "Kniebeugen"
     await _knopf(ansicht, "Speichern").on_click()
@@ -289,7 +289,7 @@ async def test_timer_editor_takt_je_abschnitt(state) -> None:
     assert profil.abschnitte[1].takt is None
     # Wieder geöffnet steht er da; ✕ nimmt ihn
     ansicht = timer_bearbeiten_view(page, state, profil.id, "/")
-    assert "Takt: Kniebeuge 2-1-2 · 2-1-2 · 12,0/min" in _texte(ansicht)
+    assert "Kniebeuge 2-1-2 · 2-1-2 · 12,0/min" in _texte(ansicht)
     _symbol(ansicht, ft.Icons.CLOSE, "Takt entfernen").on_click()
     await _knopf(ansicht, "Speichern").on_click()
     profil = next(p for p in state.timer_profile() if p.name == "Kniebeugen")

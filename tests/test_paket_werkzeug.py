@@ -357,7 +357,7 @@ def test_uebernehmen_probe_version_und_fremde(tmp_path, capsys) -> None:
     # andere Version desselben Pakets: nichts übernehmen
     datei.write_text(vorher.replace("version = 2", "version = 3"), encoding="utf-8")
     assert main(["uebernehmen", str(export), str(datei)]) == 1
-    assert "Version 2" in capsys.readouterr().out
+    assert "Version 0.0.2" in capsys.readouterr().out
     # anderer Paketname (eigener Export unter neuem Namen): Zuordnung über die IDs trotzdem
     roh = json.loads(export.read_text("utf-8"))
     roh["paket"] = {"id": "anderes", "name": "Meins"}
@@ -441,7 +441,7 @@ def test_uebernehmen_aus_der_datenbank_mit_kapitelplan(tmp_path) -> None:
     # Datei inzwischen weiter: andere Version als in der Datenbank → nichts
     datei.write_text(text.replace("version = 2", "version = 3"), encoding="utf-8")
     zeilen, fehler = uebernehmen(db, datei)
-    assert zeilen == [] and "Version 2" in fehler[0]
+    assert zeilen == [] and "Version 0.0.2" in fehler[0]
 
 
 def test_pruefen_sieht_takt_und_beschleunigung_je_planuebung(tmp_path) -> None:

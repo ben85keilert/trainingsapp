@@ -1078,7 +1078,9 @@ def test_timer_klang_und_lautstaerke(page, state) -> None:
     wahlen = [c for c in _alle(ansicht) if isinstance(c, ft.Dropdown)]
     assert len(wahlen) == len(profil.abschnitte) + 2
     wahlen[0].value = "glocke2"
+    wahlen[0].on_select(SimpleNamespace(control=wahlen[0]))  # gewählt = gemerkt
     wahlen[-1].value = "gong"
+    wahlen[-1].on_select(SimpleNamespace(control=wahlen[-1]))
     page.push_route = lambda _r: asyncio.sleep(0)
     asyncio.run(_knopf_mit_text(ansicht, "Speichern").on_click())
     gespeichert = state.timer_profil()

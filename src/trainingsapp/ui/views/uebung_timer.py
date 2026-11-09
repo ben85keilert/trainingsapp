@@ -64,7 +64,7 @@ from trainingsapp.ui.components.planblatt import PlanZeile, gesamtplan_blatt
 from trainingsapp.ui.components.planpfeile import halter as pfeile_platz
 from trainingsapp.ui.components.planpfeile import pfeilzeile
 from trainingsapp.ui.components.takt_blatt import takt_anbringen, takt_knopf
-from trainingsapp.ui.components.uhr import schluessel
+from trainingsapp.ui.components.uhr import fuer_jetzt_oeffnen, schluessel
 from trainingsapp.ui.components.uhr_blatt import uhr_blatt
 from trainingsapp.ui.components.zeit_stellen import zeit_blatt
 from trainingsapp.ui.state import AppState
@@ -148,6 +148,53 @@ def uebung_profilziel(
     )
 
 
+def jetzt_profilziel(
+    state: AppState,
+    basis: str,
+    uebung: Exercise,
+    plan: Plan | None = None,
+    item: PlanItem | None = None,
+) -> Profilziel:
+    """„Für jetzt“ mit Abschnitten (Ben, 9.11.2026, `docs/plan_timer_editor.md` §1, Skizze G2):
+    der Editor stellt die Uhr dieser (Plan-)Übung für jetzt — nichts kommt in die Datenbank,
+    bis „Als Timer der Übung speichern …“ sie mit Namen an die Übung hängt."""
+    zurueck = uebung_timer_route(basis, uebung, item)
+    key = schluessel(uebung, item)
+
+    def profile() -> list[TimerProfil]:
+        jetzt = state.uhr_einmal.get(key)
+        if jetzt is not None and not jetzt.einfach:
+            return [jetzt]  # schon mit Abschnitten — weiter daran arbeiten
+        start = state.uhr_einmal_start.get(key)
+        dauer = start or (jetzt.gesamt_s() if jetzt is not None else 60)
+        return [einmal_timer(dauer)]
+
+    def speichern(neu: TimerProfil) -> None:
+        state.uhr_einmal[key] = neu
+        state.uhr_wahl[key] = neu.id
+        state.uhr_einmal_start.pop(key, None)
+
+    def als_timer_der_uebung(neu: TimerProfil) -> None:
+        _in_uebung(state, uebung)(neu)
+        state.uhr_wahl[key] = neu.id
+        state.uhr_einmal_start.pop(key, None)
+
+    return Profilziel(
+        profile,
+        speichern,
+        None,
+        zurueck,
+        f"{zurueck}/bearbeiten",
+        "Für jetzt",
+        "Für jetzt",
+        ohne_name=True,
+        als_profil=als_timer_der_uebung,
+        spec=(mit_plan_spec(item, uebung) if item is not None else uebung).result_spec,
+        hinweis="Gilt nur jetzt — bis die App neu startet",
+        als_profil_text="Als Timer der Übung speichern …",
+    )
+
+
 def _in_uebung(state: AppState, uebung: Exercise) -> Callable[[TimerProfil], None]:
     """Ein Profil in die Übung speichern — ein vorhandenes ersetzen, ein neues anhängen."""
 
@@ -227,8 +274,8 @@ def uebung_timer_view(
     key = schluessel(uebung, item)
     # Dieselbe Wahl wie das ▾ der Zeile — mit der Stoppuhr (K2, Ben 8.11.2026)
     auswahl = profile_zur_wahl(uebung, plan, item, mit_stoppuhr=True)
-    if einmal := state.uhr_einmal.get(key):
-        auswahl.insert(1, einmal_timer(einmal))
+    if (einmal := state.uhr_einmal.get(key)) is not None:
+        auswahl.insert(1, einmal)
     eingestellt = timer_fuer(uebung, plan, item)
     #: ohne Timer die Stoppuhr — es gibt immer eine Uhr (§4)
     profil: TimerProfil | None = eingestellt or stoppuhr()
@@ -294,22 +341,25 @@ def uebung_timer_view(
         """„Takt starten“ aus dem Blatt: für jetzt, und die gewählte Uhr läuft los — ohne
         Timer ein Timer ohne Ablauf (§4: es gibt immer eine Uhr)."""
         state.uhr_takt[key] = takt
-        starten(profil or einmal_timer(state.uhr_einmal.get(key, 300)))
+        starten(profil or state.uhr_einmal.get(key) or einmal_timer(300))
 
     def zeit_stellen() -> None:
         """Ein Tipp auf die Zeit: Timer ohne Ablauf stellen und gleich starten (P79 D4)."""
 
         def los(sekunden: int) -> None:
-            state.uhr_einmal[key] = sekunden
             neu = einmal_timer(sekunden)
+            state.uhr_einmal[key] = neu
             state.uhr_wahl[key] = neu.id
             starten(neu)
 
+        vorher = profil.gesamt_s() if profil is not None else 60
         page.show_dialog(
             zeit_blatt(
-                profil.gesamt_s() if profil is not None else 60,
+                vorher,
                 starten=los,
                 schnell=state.schnellzeiten(),
+                # „Mit Abschnitten …“ auch hier (P153, Ben 9.11.2026)
+                erweitert=fuer_jetzt_oeffnen(page, state, uebung, item, basis, vorher),
             )
         )
 

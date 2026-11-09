@@ -165,7 +165,7 @@ geschrieben, ohne Pläne als Version 2; ältere Apps lesen sie:
 | `paket.name` | ja* | Anzeigename. *Fehlt der Kopf, gilt der Dateiname |
 | `paket.id` | nein | sonst aus dem Namen (UUIDv5, Groß/klein egal) |
 | `paket.beschreibung` | nein | ein Satz, erscheint in der Paketliste und beim Import |
-| `paket.version` | nein | ganze Zahl, vom Autor gepflegt |
+| `paket.version` | nein | vom Autor gepflegt: **„X.Y.Z“** (Y und Z unter 100) oder eine ganze Zahl wie bisher. Gespeichert und in Paketdatei und Index geschrieben wird immer die Zahl X·10000 + Y·100 + Z — ältere Apps vergleichen so weiter richtig; eine bisherige Version 4 ist 0.0.4. Angezeigt wird „X.Y.Z“ (Ben, 9.11.2026, `core/paketversion.py`). Text nur in der vollen Form („3“ wäre sonst 3.0.0, die Zahl 3 aber 0.0.3) |
 | `paket.neuigkeiten` | nein | kurzer Text: was in dieser Version neu ist — die App zeigt ihn unter „Updates“ |
 | `exportiert` | nein | Zeitpunkt des Exports, nur zur Information |
 | `exercises[]` | ja* | Übungen — *darf fehlen, wenn `kurse[]` da ist |
@@ -352,10 +352,14 @@ kann (`core/paketquelle.py`).
   zwei Quellen dasselbe Paket, zählt die erste; nur aktive Pakete bekommen Updates,
   nie nach unten. Ein Paket, das es hier nicht gibt, erscheint unter „Neu in den
   Quellen“ zum Installieren.
-- **Modus je Paket:** `automatisch` (Vorgabe) spielt ein Update beim Start ein,
-  `manuell` merkt es nur vor (`package.available_*`) — der Pfeil holt es mit der
-  Vorschau des Datei-Imports. Was man an Übungen geändert hat, bleibt (Drei-Wege-
-  Abgleich); Entfallenes fragt nach wie immer.
+- **Modus je Paket:** **Alle automatisch** (`auto`, Vorgabe) spielt ein Update beim Start
+  ein, **Kleine automatisch** (`klein`, Ben 9.11.2026) nur, wenn bloß die letzte Stelle der
+  Version steigt (0.0.4 → 0.0.5, `core.paketversion.nur_klein`), **Manuell** merkt es nur vor
+  (`package.available_*`) — der Pfeil holt Vorgemerktes mit der Vorschau des Datei-Imports.
+  Unter Updates setzt **„Für alle Pakete“** (Alle · Kleine · Manuell) jedes installierte Paket
+  und die Vorgabe für neu installierte (Einstellung `paket_update_modus`); je Paket lässt es
+  sich dort und im Paketmanager anders wählen, ein Update lässt den Modus stehen. Was man an
+  Übungen geändert hat, bleibt (Drei-Wege-Abgleich); Entfallenes fragt nach wie immer.
 - **Sicherheit:** HTTPS sichert die Herkunft, die Prüfsumme den Download (stimmt sie
   nicht, wird nichts geschrieben), die Datei muss zur ID im Index passen, maximal
   5 MB. Eine Signatur kommt, wenn Pakete von Dritten kommen.

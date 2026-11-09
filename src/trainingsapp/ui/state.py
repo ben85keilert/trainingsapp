@@ -60,6 +60,7 @@ from trainingsapp.core.kurse import Kurs
 from trainingsapp.core.models import Exercise, Subject, jetzt, lokaler_tag
 from trainingsapp.core.pakete import Paket
 from trainingsapp.core.paketquelle import QUELLE_VORGABE, Pruefung, url_pruefen
+from trainingsapp.core.paketversion import AUTO, UPDATE_MODI
 from trainingsapp.core.sicherung import Sicherung
 from trainingsapp.core.sicherung import setzen as sicherung_setzen
 from trainingsapp.core.sicherung import stand as sicherung_stand
@@ -470,9 +471,14 @@ class AppState:
     #: Zählt die Timerzeit — je Planübung bzw. Übung, nur für diese Sitzung (P79 D2: der Knopf
     #: „zählt“ in der Leiste; fehlt er, gilt `Exercise.zeit_zaehlt`)
     uhr_zaehlt: dict[str, bool] = field(default_factory=dict)
-    #: Ein schnell gestellter Timer ohne Ablauf in Sekunden — je Planübung bzw. Übung, nur für
-    #: diese Sitzung (P79 D3/D4, `components/zeit_stellen.py`)
-    uhr_einmal: dict[str, int] = field(default_factory=dict)
+    #: Die Uhr „für jetzt“ — je Planübung bzw. Übung, nur für diese Sitzung: eine schnell
+    #: gestellte Zeit (P79 D3/D4, `components/zeit_stellen.py`) oder, seit 9.11.2026, ein
+    #: Timer mit Abschnitten aus dem erweiterten Fenster (`docs/plan_timer_editor.md` §1) —
+    #: immer mit der ID `core.timer.EINMAL`
+    uhr_einmal: dict[str, TimerProfil] = field(default_factory=dict)
+    #: Die Zeit, die das Zeit-Blatt zeigte, als „Mit Abschnitten …“ getippt wurde — der erste
+    #: Abschnitt im erweiterten Fenster
+    uhr_einmal_start: dict[str, int] = field(default_factory=dict)
     #: Taktgeber (`docs/plan_taktgeber.md` §5): der Takt „für jetzt“ je Planübung bzw. Übung
     #: (Takt-Knopf an der Uhr; `core.takt.AUS` = keiner, auch nicht der der Übung; fehlt =
     #: Abschnitt > Übung) und der Tempo-Regler für jetzt (P139) — nur für diese Sitzung;
@@ -571,6 +577,9 @@ class AppState:
         einheiten = EinheitRepo(con)
         with contextlib.suppress(sqlite3.Error):
             einheiten.abgebrochene_schliessen()  # Prozess-Tod in einer Einheit
+        pakete = PaketRepo(con)
+        vorgabe = einstellungen.lesen(SettingRepo.PAKET_UPDATES, AUTO)
+        pakete.update_vorgabe = vorgabe if vorgabe in UPDATE_MODI else AUTO
         return cls(
             con=con,
             uebungen=ExerciseRepo(con),
@@ -587,7 +596,7 @@ class AppState:
             einheiten=einheiten,
             bezuege=BezugRepo(con),
             tags=TagRepo(con),
-            pakete=PaketRepo(con),
+            pakete=pakete,
             kurse=KursRepo(con),
             anhaenge=AnhangRepo(con, anhaengeverzeichnis()),
             uebungsbilder=UebungsbildRepo(con, medienverzeichnis()),
@@ -789,6 +798,17 @@ class AppState:
 
     def update_pruefung_setzen(self, an: bool) -> None:
         self.einstellungen.setzen(SettingRepo.UPDATE_PRUEFUNG, "1" if an else "0")
+
+    def paket_updates(self) -> str:
+        """„Für alle Pakete“ in Updates (Ben, 9.11.2026): ``auto`` (Vorgabe), ``klein`` (nur,
+        wenn bloß die letzte Stelle steigt) oder ``manuell`` — `core/paketversion.py`."""
+        wert = self.einstellungen.lesen(SettingRepo.PAKET_UPDATES, AUTO)
+        return wert if wert in UPDATE_MODI else AUTO
+
+    def paket_updates_setzen(self, modus: str) -> None:
+        """Für alle installierten Pakete und jedes, das neu dazukommt."""
+        self.pakete.alle_update_modus_setzen(modus)
+        self.einstellungen.setzen(SettingRepo.PAKET_UPDATES, modus)
 
     def kapitel_bilder(self) -> bool:
         """Bilder in Kapiteltexten aus dem Netz laden? Vorgabe aus — sie werden Links, die

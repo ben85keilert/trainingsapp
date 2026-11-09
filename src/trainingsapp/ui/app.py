@@ -84,6 +84,7 @@ from trainingsapp.core.anhaenge import AUDIO, Ziel, ziel_lesen
 from trainingsapp.core.darstellung import Darstellung
 from trainingsapp.core.models import Exercise, Plan, PlanItem, SessionEntry, lokaler_tag
 from trainingsapp.core.result_spec import ResultSpec
+from trainingsapp.core.timer import EINMAL
 from trainingsapp.ui import app_update, ausrichtung, navigation
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import plan_ablauf as plan_ablauf_ui
@@ -156,6 +157,7 @@ from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten
 from trainingsapp.ui.views.uebung_detail import uebung_detail
 from trainingsapp.ui.views.uebung_timer import (
     formular_profilziel,
+    jetzt_profilziel,
     uebung_profilziel,
     uebung_timer_view,
 )
@@ -706,15 +708,13 @@ def main(page: ft.Page) -> None:
         ablegen(lambda: uebung_timer_view(page, state, basis, uebung, plan, item))
         if bearbeiten < len(rest):  # …/bearbeiten[/<Profil>]: der Editor, gespeichert dort
             profil_id = rest[bearbeiten + 1] if len(rest) > bearbeiten + 1 else None
-            ablegen(
-                lambda: timer_bearbeiten_view(
-                    page,
-                    state,
-                    profil_id,
-                    basis,
-                    uebung_profilziel(state, basis, uebung, plan, item),
-                )
+            # …/bearbeiten/einmal: die Uhr für jetzt mit Abschnitten (Ben, 9.11.2026, G2)
+            ziel = (
+                jetzt_profilziel(state, basis, uebung, plan, item)
+                if profil_id == EINMAL
+                else uebung_profilziel(state, basis, uebung, plan, item)
             )
+            ablegen(lambda: timer_bearbeiten_view(page, state, profil_id, basis, ziel))
 
     def formular_profil(basis: str, unten: list[str], rest: list[str]) -> None:
         """Der Profil-Editor über dem Übungsformular (Ben, 17.10.2026) —

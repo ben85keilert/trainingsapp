@@ -753,6 +753,9 @@ class SettingRepo:
     PAKETQUELLEN = "paketquellen"
     #: "1" (Vorgabe) = beim Start Paketquellen (und das App-Release) prüfen
     UPDATE_PRUEFUNG = "update_pruefung_beim_start"
+    #: „Für alle Pakete“ (Ben, 9.11.2026): "auto" (Vorgabe) | "klein" | "manuell" — gilt für
+    #: neu installierte Pakete (`core/paketversion.py`)
+    PAKET_UPDATES = "paket_update_modus"
     #: "1" = Bilder in Kapiteltexten aus dem Netz laden; Vorgabe "0": Bilder werden
     #: Links, die erst auf Tipp öffnen (`core.kapiteltext`, Sicherheitsdurchsicht S2)
     KAPITEL_BILDER = "kapitel_bilder_aus_dem_netz"

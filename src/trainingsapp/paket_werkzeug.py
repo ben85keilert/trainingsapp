@@ -65,6 +65,7 @@ from trainingsapp.core.paketquelle import (
     paket_laden,
 )
 from trainingsapp.core.paketquelle import _laden as netz_laden
+from trainingsapp.core.paketversion import version_text
 from trainingsapp.core.result_spec import VORLAGEN
 from trainingsapp.core.takt import takt_pruefen
 from trainingsapp.core.zaehlen import wahl_pruefen
@@ -293,7 +294,8 @@ def quelle_pruefen(
             fehler.append(f"{eintrag.name} ({eintrag.url}): {f}")
             continue
         zeilen.append(
-            f"  {eintrag.name} Version {eintrag.version}: {len(inhalt.uebungen)} Übungen, "
+            f"  {eintrag.name} Version {version_text(eintrag.version)}: "
+            f"{len(inhalt.uebungen)} Übungen, "
             f"{len(inhalt.kurse)} Kurs(e), {len(inhalt.plaene)} Plan/Pläne, {eintrag.bytes} B, "
             "Prüfsumme in Ordnung"
         )
@@ -606,8 +608,9 @@ def uebernehmen(quelle: Path, datei: Path, schreiben: bool = True) -> tuple[list
         and inhalt_quelle.paket.version != inhalt_datei.paket.version
     ):
         return [], [
-            f"{quelle.name} hat Version {inhalt_quelle.paket.version}, {datei.name} Version "
-            f"{inhalt_datei.paket.version} — erst die App mit diesem Stand starten "
+            f"{quelle.name} hat Version {version_text(inhalt_quelle.paket.version)}, "
+            f"{datei.name} Version {version_text(inhalt_datei.paket.version)} — erst die App "
+            "mit diesem Stand starten "
             "(`version` heben), dann übernehmen"
         ]
     dokument = tomlkit.parse(text)

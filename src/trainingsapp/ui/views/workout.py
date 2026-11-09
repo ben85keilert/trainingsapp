@@ -48,7 +48,8 @@ from trainingsapp.ui import plan_ablauf, uebung_lauf
 from trainingsapp.ui.components import fokus_eintragen as fe
 from trainingsapp.ui.components import links, zaehl_stand
 from trainingsapp.ui.components.ablaufbild import ablaufbild, abspielen
-from trainingsapp.ui.components.fokus import Fokus
+from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, Fokus
+from trainingsapp.ui.components.fokus import OBEN as FOKUS_OBEN
 from trainingsapp.ui.components.hilfe import WORKOUT_MD
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
@@ -100,7 +101,11 @@ def workout_view(
     #: die Nummer einer Planübung = ihre Stelle in der Liste, wie im Ablauf (Frage 5)
     nummern = ab.nummern(ids)
     inhalt = ft.Column(spacing=12)
-    wahl: dict[str, Any] = {"ohne": None, "noch_einmal": False, "hrv": True, "hrv_beenden": True}
+    # Im Lauf steht oben fest, was jetzt zählt: Übung, Fortschritt und die Uhr des Fokus (Ben,
+    # 8.11.2026 spät: „beim Runterscrollen soll die Uhr oben fixiert bleiben“)
+    fest = ft.Column(spacing=8)
+    # „Messung läuft weiter“ ist überall die Vorgabe (Ben, 8.11.2026 spät)
+    wahl: dict[str, Any] = {"ohne": None, "noch_einmal": False, "hrv": True, "hrv_beenden": False}
     stand: dict[str, Any] = {
         "schluessel": None,
         "takt_fuer": None,
@@ -108,7 +113,14 @@ def workout_view(
         "ohne_timer": None,
         "bed_text": None,
         "bed_karte": None,
+        #: wie viele der ersten Teile von `waehrend` fest oben stehen
+        "oben": 0,
     }
+
+    def beide_auffrischen() -> None:
+        """Der feste Kopf (Uhr) und der scrollende Rest."""
+        _auffrischen(fest)
+        _auffrischen(inhalt)
 
     def melden(text: str) -> None:
         with contextlib.suppress(Exception):
@@ -999,6 +1011,7 @@ def workout_view(
             ],
         )
         teile: list[ft.Control] = [kopf, fortschritt(teil)]
+        stand["oben"] = len(teile)
 
         def anhalten() -> None:
             einheit_ui.anhalten_oder_weiter(page, state)
@@ -1041,11 +1054,12 @@ def workout_view(
                 uebung=u,
                 item=item,
                 key=uhr_schluessel(u, item),
-                neu_zeichnen=lambda: _auffrischen(inhalt),
+                neu_zeichnen=beide_auffrischen,
             )
             fokus.halt_knopf.on_click = anhalten
             stand["fokus"] = fokus
             teile.extend(fokus.bauen(e, teil.timer.lauf))
+            stand["oben"] += FOKUS_OBEN  # die Zeile Takt · Zeit · Ebenen und der Balken
         else:
             zeit = ft.Text(dauer_text(int(teil.seit_s())), size=56, weight=ft.FontWeight.W_600)
             stand["ohne_timer"] = zeit
@@ -1395,17 +1409,21 @@ def workout_view(
     def neu_bauen() -> None:
         k = schluessel()
         stand["schluessel"] = k
+        fest.controls = []
         if k[0] == "lauf":
             paar = plan_ablauf.laufender(state, plan.id)
             assert paar is not None
             takt_je_schritt(*paar)
-            inhalt.controls = waehrend(*paar)
+            alle = waehrend(*paar)
+            fest.controls = alle[: stand["oben"]]
+            inhalt.controls = alle[stand["oben"] :]
         elif k[0] == "danach":
             einheit_id = state.plan_ablaeufe.get(plan.id)
             ergebnis = plan_ablauf.ergebnis_der_einheit(state, einheit_id) if einheit_id else None
             inhalt.controls = danach(ergebnis or {})
         else:
             inhalt.controls = vorher()
+        _auffrischen(fest)
         _auffrischen(inhalt)
 
     def auffrischen() -> None:
@@ -1427,20 +1445,44 @@ def workout_view(
         if erf is not None and stand["bed_text"] is not None:
             stand["bed_text"].value = erf.text or stand["bed_text"].value
             stand["bed_karte"].bgcolor = _bed_farbe(erf)
+        _auffrischen(fest)
         _auffrischen(inhalt)
 
     neu_bauen()
     state.einheit_beobachter["workout"] = auffrischen
     state.timer_beobachter["workout"] = auffrischen
+    im_lauf = stand["schluessel"] is not None and stand["schluessel"][0] == "lauf"
     return ft.View(
         route=route,
+        # Im Lauf ein Fokus: keine Laufleiste, keine Uhr in der Titelleiste — was sonst läuft,
+        # kommt nach dem Fokus wieder (Ben, 8.11.2026 spät)
+        data=FOKUS_ANSICHT if im_lauf else None,
         appbar=ft.AppBar(
             title=ft.Text(f"{plan.name} · Workout"),
-            actions=[timer_knopf(page, state, "workout"), info_knopf(page, "Workout", WORKOUT_MD)],
+            actions=[
+                *([] if im_lauf else [timer_knopf(page, state, "workout")]),
+                info_knopf(page, "Workout", WORKOUT_MD),
+            ],
         ),
-        scroll=ft.ScrollMode.AUTO,
-        padding=16,
-        controls=[sicher(inhalt, expand=False)],
+        padding=0,
+        controls=[
+            sicher(
+                ft.Column(
+                    expand=True,
+                    spacing=0,
+                    controls=[
+                        ft.Container(
+                            padding=ft.Padding.only(left=16, right=16, top=8), content=fest
+                        ),
+                        ft.Column(
+                            expand=True,
+                            scroll=ft.ScrollMode.AUTO,
+                            controls=[ft.Container(padding=16, content=inhalt)],
+                        ),
+                    ],
+                )
+            )
+        ],
     )
 
 

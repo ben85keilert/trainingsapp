@@ -123,7 +123,9 @@ async def test_hrv_laeuft_schon_timer_startet_auf_die_sekunde(aufbau) -> None:
 
 
 async def test_countdown_hrv_startet_mit_und_endet_mit_dem_timer(aufbau) -> None:
-    """„Messung 15 min“ im Kleinen: HRV und Timer starten nach 3-2-1, Ende mit dem Timer."""
+    """„Messung 15 min“ im Kleinen: HRV und Timer starten nach 3-2-1, Ende mit dem Timer —
+    mit der Wahl „Messung beenden“. Ohne Wahl läuft die Messung weiter (Ben, 8.11.2026 spät:
+    „Messung läuft weiter überall standardmäßig“)."""
     uhr, gurt, lauf, repo, profil, tmp_path = aufbau
     await _sekunden(uhr, gurt, 5)  # verbunden, keine Aufnahme
     e = _einheit(lauf, uhr, repo, profil, "Messung")
@@ -133,6 +135,8 @@ async def test_countdown_hrv_startet_mit_und_endet_mit_dem_timer(aufbau) -> None
             TimerLauf(TimerProfil(name="Messung 1 min", abschnitte=[Abschnitt("Messung", 60)]))
         )
     )
+    assert e.stoppt_am_ende("hrv") is False  # die Vorgabe: weiterlaufen
+    e.am_ende_stoppen["hrv"] = True  # „Messung beenden“ gewählt
     e.ende_mit_timer = True
     await e.vorbereiten()
     t0 = e.starten(countdown_s=3.0)
@@ -232,6 +236,7 @@ async def test_neue_aufnahme_mitten_in_der_einheit(aufbau) -> None:
             TimerLauf(TimerProfil(name="L", abschnitte=[Abschnitt("A", 999)]), uhr=lauf.uhr)
         )
     )
+    e.am_ende_stoppen["hrv"] = True  # „Messung beenden“ — die Vorgabe wäre weiterlaufen
     e.starten()
     await _sekunden(uhr, gurt, 30, e)
     erste = lauf.aufnahme_stoppen(tmp_path)
@@ -292,6 +297,7 @@ async def test_simulator_laeuft_mit_echten_takten(tmp_path) -> None:
     e.hinzufuegen(HrvBaustein(lauf, basis=tmp_path))
     e.hinzufuegen(TimerBaustein(TimerLauf(_intervall())))  # bekommt die Uhr der Einheit
     e.ende_mit_timer = True
+    e.am_ende_stoppen["hrv"] = True  # „Messung beenden“ — die Vorgabe wäre weiterlaufen
     e.starten()
     await asyncio.wait_for(e.laufen(takt_s=0.005), 10)
     abschluss = await e.abschliessen()

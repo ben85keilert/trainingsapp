@@ -130,6 +130,16 @@ async def test_workout_start_weich_ueberzeit_weiter_und_ende(umgebung) -> None:
     assert "Schritt 1 von 2 · weich" in texte and "Kniebeuge" in texte
     assert any("Katze-Kuh" in t for t in texte) and _knopf(laufend, "Fertig")
     assert _ebenen(laufend) == ["Takt", "Bewegung", "HF", "Kurve"]
+    # Fokus (Ben, 8.11.2026 spät): keine Laufleiste, keine Uhr in der Titelleiste — und die Uhr
+    # des Fokus steht fest oben, außerhalb der scrollenden Spalte
+    from trainingsapp.ui.components.fokus import FOKUS_ANSICHT
+
+    assert laufend.data == FOKUS_ANSICHT and len(laufend.appbar.actions) == 1
+    scroll = next(
+        x for x in _alle(laufend) if isinstance(x, ft.Column) and x.scroll == ft.ScrollMode.AUTO
+    )
+    uhren = [x for x in _alle(laufend) if isinstance(x, ft.Text) and x.size == 64]
+    assert uhren and not any(u in list(_alle(scroll)) for u in uhren)
     # Zeit ab → Überzeit: die Zeit zählt ins Minus, „Weiter: Katze-Kuh“
     await _sekunden(state, uhr, gurt, 10)
     assert paar[1].phase == UEBERZEIT

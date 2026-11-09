@@ -693,6 +693,11 @@ class Einheitslauf:
             raise ValueError(f"{teil.art} ist schon dabei")
         jetzt = self.uhr()
         t = max(jetzt - self.t0, 0.0)
+        # War die Einheit bis eben nur eine Messung, gehört sie ihr: ⏹ beendet weiter alles
+        # (die Vorgabe „Messung läuft weiter“ gilt für Einheiten, die mit mehr begannen)
+        nur_messung = bool(self.teile) and all(x.art == "hrv" for x in self.teile)
+        if nur_messung and not isinstance(teil, HrvBaustein):
+            self.am_ende_stoppen.setdefault("hrv", True)
         uebernehmen = getattr(teil, "uhr_uebernehmen", None)
         if callable(uebernehmen):
             uebernehmen(self.uhr)
@@ -1129,12 +1134,24 @@ class Einheitslauf:
     # -- Ende -----------------------------------------------------------------------
 
     def stoppt_am_ende(self, art: str) -> bool:
-        """Endet der Teil mit der Einheit? Vorgabe: was mit ihr begann."""
+        """Endet der Teil mit der Einheit? Vorgabe: was mit ihr begann — die **Messung** aber
+        läuft nach Timer, Übung und Workout weiter (Ben, 8.11.2026 spät: „Messung läuft weiter
+        überall standardmäßig“). Sie endet mit, wenn sie die ganze Einheit ist (⏹ beendet eben
+        die Messung) oder zu einem Training mit Strecke gehört (``gps``: Strecke und Aufnahme
+        hängen zusammen — Kürzen, Export, Tagebuch). Eine Wahl (`am_ende_stoppen`) geht vor.
+
+        >>> e = Einheitslauf(uhr=lambda: 0.0)
+        >>> e.stoppt_am_ende("timer"), e.stoppt_am_ende("hrv")
+        (True, False)
+        """
         if art in self.am_ende_stoppen:
             return self.am_ende_stoppen[art]
         if art == "hrv":
             hrv = self.hrv
-            return hrv is not None and hrv.rolle is Rolle.MITSTARTEN
+            if hrv is None or hrv.rolle is not Rolle.MITSTARTEN:
+                return False
+            arten = {t.art for t in self.teile}
+            return arten <= {"hrv"} or "gps" in arten
         return True
 
     def beenden(self) -> list[Ereignis]:

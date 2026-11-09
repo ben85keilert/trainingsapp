@@ -97,8 +97,9 @@ async def _bis_einheit_weg(state) -> None:
 
 
 async def test_messung_mit_dauer_endet_nach_der_zeit(umgebung) -> None:
-    """5 min, „Messung beenden“: Aufnahme und Timer starten als Einheit; nach 5 min ist die
-    Messung gespeichert und eingetragen, die 5 min sind ein Abschnitt der Messung."""
+    """5 min, „Messung beenden“ gewählt (Vorgabe ist seit 9.11.2026 „Weiterlaufen“): Aufnahme
+    und Timer starten als Einheit; nach 5 min ist die Messung gespeichert und eingetragen, die
+    5 min sind ein Abschnitt der Messung."""
     state, uhr, gurt, lauf = umgebung
     seite = _seite()
     ansicht = messung(seite, state)
@@ -108,7 +109,11 @@ async def test_messung_mit_dauer_endet_nach_der_zeit(umgebung) -> None:
     ansicht = messung(seite, state)
     texte = _texte(ansicht)
     ende = _wahl(ansicht, "beenden")  # „Messung beenden | Weiterlaufen“
-    assert "Wenn die 5 min um sind" in texte and ende.selected == ["beenden"]
+    # Ben, 9.11.2026: „Messung läuft weiter überall standardmäßig aktivieren“
+    assert "Wenn die 5 min um sind" in texte and ende.selected == ["weiter"]
+    _waehlen(ende, "beenden")
+    assert state.messung_ende_beenden is True
+    ansicht = messung(seite, state)
     await _knopf(ansicht, "Aufnahme starten").on_click()
     e = state.einheit
     assert e is not None and e.laeuft and lauf.aufnahme is not None
@@ -155,7 +160,8 @@ async def test_ablauf_bereitstellen_und_zuruecknehmen(umgebung) -> None:
     _knopf(ansicht, "Bereitstellen").on_click()
     e = einheit_ui.in_vorbereitung(state)
     assert e is not None and {t.art for t in e.teile} == {"hrv", "timer"}
-    assert e.ende_mit_timer and e.am_ende_stoppen["hrv"] is True
+    # „Weiterlaufen“ ist die Vorgabe (Ben, 9.11.2026)
+    assert e.ende_mit_timer and e.am_ende_stoppen["hrv"] is False
     assert e.timer is not None and e.timer.lauf.profil.name == vorlage.name
     assert lauf.aufnahme is None  # erst „Alle starten“ startet
     _knopf(messung(seite, state), "Bereitgestellt").on_click()
@@ -164,8 +170,9 @@ async def test_ablauf_bereitstellen_und_zuruecknehmen(umgebung) -> None:
 
 
 async def test_ende_der_messung_laesst_sich_im_lauf_aendern(umgebung) -> None:
-    """Auch im Lauf noch änderbar (Ben, 17.10.2026): gestartet mit „Messung beenden“, in der
-    laufenden Messung „Weiterlaufen“ — nach 5 min endet die Einheit, die Aufnahme läuft."""
+    """Auch im Lauf noch änderbar (Ben, 17.10.2026): gestartet mit „Weiterlaufen“ (Vorgabe
+    seit 9.11.2026), in der laufenden Messung „Messung beenden“ — nach 5 min endet die Einheit
+    samt Aufnahme."""
     state, uhr, gurt, lauf = umgebung
     seite = _seite()
     _waehlen(_wahl(messung(seite, state), "offen"), "5")
@@ -175,17 +182,12 @@ async def test_ende_der_messung_laesst_sich_im_lauf_aendern(umgebung) -> None:
     ansicht = messung(seite, state)
     assert "Wenn die 5 min um sind – auch jetzt noch änderbar" in _texte(ansicht)
     wahl = _wahl(ansicht, "weiter")
-    assert wahl.selected == ["beenden"]
-    _waehlen(wahl, "weiter")
-    assert e.ende_mit_timer and e.am_ende_stoppen["hrv"] is False
+    assert wahl.selected == ["weiter"]
+    _waehlen(wahl, "beenden")
+    assert e.ende_mit_timer and e.am_ende_stoppen["hrv"] is True
     await _sekunden(state, uhr, gurt, 310)
-    await _bis_neue_einheit(state, e)  # die Messung steht wieder für sich da
-    assert [t.art for t in state.einheit.teile] == ["hrv"]
-    assert lauf.aufnahme is not None and lauf.aufnahme_dauer_s() > 300  # läuft weiter
-    assert not any("auch jetzt noch änderbar" in t for t in _texte(messung(seite, state)))
-    lauf.aufnahme_stoppen(messungenverzeichnis().parent)
-    await _sekunden(state, uhr, gurt, 1)
-    await _bis_einheit_weg(state)  # ohne Aufnahme endet ihre Einheit von selbst
+    await _bis_einheit_weg(state)
+    assert lauf.aufnahme is None  # beendet und gespeichert
 
 
 # ---------------------------------------------------------------------------

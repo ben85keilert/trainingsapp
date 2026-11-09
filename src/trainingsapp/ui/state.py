@@ -364,8 +364,9 @@ class AppState:
     #: („5“, „10“, „15“) oder „ablauf“ (ein Profil der Timer-Bibliothek)
     messung_dauer: str = "offen"
     messung_ablauf: str | None = None
-    #: Wenn die Dauer um ist: die Messung beenden (sonst läuft sie weiter)
-    messung_ende_beenden: bool = True
+    #: „Wenn die Messdauer um ist: Messung beenden | Weiterlaufen“ — Vorgabe weiterlaufen (Ben,
+    #: 8.11.2026 spät: „Messung läuft weiter überall standardmäßig“)
+    messung_ende_beenden: bool = False
     #: Zuletzt gesetzte Bildschirmausrichtung (`ui.ausrichtung`), None = noch keine
     ausrichtung: str | None = None
     #: Wer erfährt, dass sich die Bildschirmgröße geändert hat (Drehen, Fenster);

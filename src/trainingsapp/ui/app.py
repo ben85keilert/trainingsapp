@@ -88,6 +88,7 @@ from trainingsapp.ui import ausrichtung, navigation
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui.components import diagnose_punkt, marken_leiste
 from trainingsapp.ui.components.dialoge import dialog_offen
+from trainingsapp.ui.components.fokus import FOKUS_ANSICHT
 from trainingsapp.ui.components.startleiste import (
     leiste_auffrischen,
     leiste_einsetzen,
@@ -860,7 +861,14 @@ def main(page: ft.Page) -> None:
         # bleibt jede Ansicht, wie sie ist; auf „Heute“ steht es im Reiter „Einheit“
         haupt = len(page.views) == 1
         live = str(page.views[-1].route) == "/live" if page.views else False
-        if page.views and (leiste := startleiste(page, state, haupt=haupt, live=live)) is not None:
+        # Im Fokus nicht (Ben, 8.11.2026 spät): Er zeigt, was jetzt wichtig ist — die Leiste kommt
+        # danach wieder (`components.fokus.FOKUS_ANSICHT`)
+        im_fokus = bool(page.views) and getattr(page.views[-1], "data", None) == FOKUS_ANSICHT
+        if (
+            page.views
+            and not im_fokus
+            and (leiste := startleiste(page, state, haupt=haupt, live=live)) is not None
+        ):
             leiste_einsetzen(page.views[-1], leiste)
         # Übungsseiten behalten die Leiste unten (Ben, 27.10.2026, Moduldocstring)
         if not haupt and navigation.uebungsseite(oben := str(page.views[-1].route)):

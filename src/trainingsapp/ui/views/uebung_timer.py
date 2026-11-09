@@ -53,7 +53,8 @@ from trainingsapp.devices.einheit import Einheitslauf, UebungBaustein
 from trainingsapp.ui import einheit as einheit_ui
 from trainingsapp.ui import uebung_lauf
 from trainingsapp.ui.components import zaehlen
-from trainingsapp.ui.components.fokus import Fokus, balken
+from trainingsapp.ui.components.fokus import FOKUS_ANSICHT, Fokus, balken
+from trainingsapp.ui.components.fokus import OBEN as FOKUS_OBEN
 from trainingsapp.ui.components.fokus_eintragen import EintragenKarte
 from trainingsapp.ui.components.karte import hinweis, info_knopf, karte
 from trainingsapp.ui.components.karte import titel as kartentitel
@@ -87,9 +88,10 @@ def uebung_timer_route(basis: str, uebung: Exercise, item: PlanItem | None = Non
     return f"{basis}/timer/uebung/{uebung.id}" + (f"/{item.id}" if item is not None else "")
 
 
-def _spalte_auffrischen(spalte: ft.Column) -> None:
-    with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
-        spalte.update()
+def _spalte_auffrischen(*teile: ft.Control) -> None:
+    for teil in teile:
+        with contextlib.suppress(Exception):  # vor dem ersten Anzeigen
+            teil.update()
 
 
 def _laufende(state: AppState, uebung_id: str) -> Einheitslauf | None:
@@ -746,7 +748,8 @@ def uebung_timer_view(
         uebung=uebung,
         item=item,
         key=key,
-        neu_zeichnen=lambda: _spalte_auffrischen(inhalt),
+        # Der Kopf steht im Lauf fest oben (`fest`) — beide auffrischen
+        neu_zeichnen=lambda: _spalte_auffrischen(fest, inhalt),
     )
 
     # Die Karte „Eintragen“ (Ben, 8.11.2026, `docs/plan_uhr_fokus.md` §1) — wie im Workout
@@ -826,8 +829,9 @@ def uebung_timer_view(
         if e is None:
             return
         anzeigen(e)
-        with contextlib.suppress(Exception):
-            inhalt.update()
+        for teil in (fest, inhalt):  # der feste Kopf mit der Uhr und der scrollende Rest
+            with contextlib.suppress(Exception):
+                teil.update()
 
     # -- Die Pfeilzeile (§6, Skizze F6): vor und nach dem Lauf fest oben — › bleibt im Fokus ----
 
@@ -911,8 +915,14 @@ def uebung_timer_view(
     # -- Zusammensetzen ---------------------------------------------------------------------------
 
     inhalt = ft.Column(spacing=12)
+    # Im Lauf steht der Kopf des Fokus fest oben — Takt · Zeit · Ebenen und der Balken (Ben,
+    # 8.11.2026 spät: „beim Runterscrollen soll die Uhr oben fixiert bleiben“)
+    fest = ft.Container(padding=ft.Padding.only(left=16, right=16, top=8), visible=False)
     if laufend is not None:
-        inhalt.controls = waehrend(laufend)
+        alle = waehrend(laufend)
+        fest.content = ft.Column(spacing=8, controls=alle[:FOKUS_OBEN])
+        fest.visible = True
+        inhalt.controls = alle[FOKUS_OBEN:]
         state.timer_beobachter["uebung"] = auffrischen
     else:
         state.timer_beobachter.pop("uebung", None)
@@ -936,6 +946,8 @@ def uebung_timer_view(
     )
     return ft.View(
         route=route,
+        # Im Lauf ein Fokus: keine Laufleiste (Ben, 8.11.2026 spät)
+        data=FOKUS_ANSICHT if laufend is not None else None,
         appbar=ft.AppBar(
             title=ft.Text(("Fokus · " if laufend is not None else "Timer · ") + uebung.name),
             actions=[
@@ -958,6 +970,7 @@ def uebung_timer_view(
                     spacing=0,
                     controls=[
                         pfeile,
+                        fest,
                         ft.Column(
                             expand=True,
                             scroll=ft.ScrollMode.AUTO,

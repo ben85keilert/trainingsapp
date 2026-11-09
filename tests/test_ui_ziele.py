@@ -183,6 +183,9 @@ def test_verlauf_und_tagebuch_zeigen_ihr_ziel(page, state) -> None:
     _eintragen(state, None, "kniebeuge", {"reps": [8]}, "lief gut", started_at=um, ended_at=um)
     state.reiter = "verlauf"
     state.verlauf_tab = 0
+    # Die Woche von gestern — montags liegt gestern in der Vorwoche (der Test scheiterte
+    # an jedem Montag)
+    state.verlauf_woche = gestern - timedelta(days=gestern.weekday())
     state.verlauf_tag = gestern
     ansicht = verlauf(page, state)
     zeile = _zeile(ansicht, "Kniebeuge")

@@ -274,6 +274,17 @@ async def test_fokus_karte_eintragen_und_pfeile_danach(umgebung) -> None:
     fokus = uebung_timer_view(seite, state, basis, u, plan, item)
     texte = _texte(fokus)
     assert "aus der Runde" in texte and "links" in texte
+    # Im Lauf ein Fokus: keine Laufleiste; die Uhr fest oben, nicht in der scrollenden Spalte
+    from trainingsapp.ui.components.fokus import FOKUS_ANSICHT
+
+    assert fokus.data == FOKUS_ANSICHT
+    scroll = next(
+        x for x in _alle(fokus) if isinstance(x, ft.Column) and x.scroll == ft.ScrollMode.AUTO
+    )
+    uhren = [x for x in _alle(fokus) if isinstance(x, ft.Text) and x.size == 64]
+    assert uhren and not any(u in list(_alle(scroll)) for u in uhren)
+    # „Messung läuft weiter“ ist überall die Vorgabe (Ben, 8.11.2026 spät)
+    assert state.messung_ende_beenden is False
     assert "Wiederholungen — niemand zählt" in texte
     pfeile = next(x for x in _alle(fokus) if isinstance(x, ft.Container) and x.data == "pfeile")
     assert not pfeile.visible  # während die Uhr läuft, keine Pfeile

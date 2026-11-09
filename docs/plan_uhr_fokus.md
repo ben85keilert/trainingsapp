@@ -227,3 +227,24 @@ Minus oder Nachbearbeitung. Dort die Buttons rein, die man auch in der Normalans
   ältere Ereignisse ohne ``dazu`` gelten als Stand (`core.timer_eintrag.eingaben`). Im Workout
   zählt die Summe der Sätze für die Bedingung.
 
+### 9.2 Platz im Fokus, Messung läuft weiter (9.11.2026, 0.3.70)
+
+Ben: „Die Anzeige von dem, was gerade alles läuft, muss im Fokus ausgeblendet sein … Die
+übergeordneten Läufe braucht es nicht, die kommen nach dem Fokus wieder rein“; „beim
+Runterscrollen soll die Uhr oben fixiert bleiben“; „Messung läuft weiter überall standardmäßig
+aktivieren“.
+
+- **Keine Laufleiste im Fokus:** Fokus-Ansichten tragen ``data = FOKUS_ANSICHT``
+  (`components/fokus.py`) — die App setzt dort keine Laufleiste ein (`ui/app.py`); das Workout
+  zeigt im Lauf auch keine Uhr in der Titelleiste. Nach dem Fokus ist beides wieder da.
+- **Die Uhr steht fest:** Die ersten `fokus.OBEN` Teile (Zeile Takt · Zeit · Ebenen und der
+  Balken) stehen über der scrollenden Spalte — im Timer der Übung und im Workout (dort mit
+  Übung und Fortschritt darüber). Beide frischen je Takt den festen Kopf und den Rest auf.
+- **Messung läuft weiter:** `Einheitslauf.stoppt_am_ende("hrv")` — eine mitgestartete Messung
+  endet nur noch mit, wenn sie die ganze Einheit ist (⏹ beendet die Messung) oder zu einem
+  Training mit Strecke gehört (``gps``: Kürzen, Export und Tagebuch hängen an der Aufnahme);
+  nach Timer, Übung und Workout läuft sie weiter. Begann die Einheit als reine Messung und kam
+  erst später ein Timer dazu (`Einheitslauf.beitreten`), gehört sie der Messung — ⏹ beendet
+  dann weiter alles. Die Wahlen „Wenn das Workout fertig ist“ und „Wenn die Messdauer um ist“
+  stehen auf „Weiterlaufen“.
+

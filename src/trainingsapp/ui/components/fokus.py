@@ -47,6 +47,15 @@ from trainingsapp.ui.state import (
     AppState,
 )
 
+#: Kennung einer Fokus-Ansicht (``ft.View.data``): Dort setzt die App keine Laufleiste ein —
+#: der Fokus zeigt, was jetzt wichtig ist (Ben, 8.11.2026 spät: „Die übergeordneten Läufe
+#: braucht es nicht, die kommen nach dem Fokus wieder rein“)
+FOKUS_ANSICHT = "fokus"
+#: So viele Controls vorn in `Fokus.bauen` gehören in den festen Kopf: die Zeile Takt · Zeit ·
+#: Ebenen und der Balken — sie scrollen nicht mit (Ben: „beim Runterscrollen soll die Uhr oben
+#: fixiert bleiben“)
+OBEN = 2
+
 #: Die Kurven zeigen die letzten zwei Minuten
 KURVEN_FENSTER_S = 120.0
 #: Raster der gerechneten Reihen (s) — fein genug für zwei Minuten, billig je Sekunde

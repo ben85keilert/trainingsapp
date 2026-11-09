@@ -173,6 +173,7 @@ async def _training(
     timer=None,
     punkte=None,
     seite=None,
+    messung_beenden=False,
 ):
     """Ein Training wie in der App — als Einheit (Startleiste, „Training starten“), auf
     einer Uhr-Attrappe: Gurt und GPS ticken im Takt, ohne zu warten.
@@ -208,6 +209,8 @@ async def _training(
     await ruhe()
     e = einheit_ui.alle_starten(seite, state, 0.0)
     assert e is not None and state.ausdauer is teil
+    if messung_beenden:  # „Messung beenden“ gewählt — die Vorgabe ist weiterlaufen (9.11.2026)
+        e.am_ende_stoppen["hrv"] = True
     if punkte is None:
         punkte = _gang(1200, 2.5, rauschen_m=1.5)  # 3 km
     for i, p in enumerate(punkte):
@@ -229,7 +232,22 @@ async def _training(
     assert state.ausdauer is None and teil.fertig and not gps.laeuft
     if vor_dem_stopp is not None:
         vor_dem_stopp(strecke)
-    if messlauf.aufnahme is not None and hrv_vorher:
+    # Die Messung läuft nach dem Training weiter (Ben, 9.11.2026: „GPS-Training soll die Messung
+    # auch weiterlaufen lassen“) — wie eine vorher gestartete; hier stoppen und speichern
+    if messlauf.aufnahme is not None and state.einheit is not None:
+        # Wie ⏹ an der weiterlaufenden Messung: ihre Einheit endet, die Aufnahme wird
+        # gespeichert — mit dem Profil der Einheit
+        einheit_ui.alle_beenden(state)
+        for _ in range(300):
+            if state.einheit is None and messlauf.aufnahme is None:
+                break
+            uhr.t += 1
+            gurt.schlag(1000)
+            await ruhe()
+            if state.einheit is not None and state.einheit.laeuft:
+                state.einheit.takt()
+            await asyncio.sleep(0.01)
+    if messlauf.aufnahme is not None:  # ohne eigene Einheit: direkt
         from trainingsapp.config import datenverzeichnis
         from trainingsapp.ui.views.messung import aufnahme_eintragen
 
@@ -250,7 +268,11 @@ async def test_profilwechsel_waehrend_des_trainings_haengt_nichts_um(daten) -> N
     )
     assert state.profil.id == zweites.id
     assert strecke.subject_id == start
-    assert state.hrv.laden(strecke.hrv_recording_id).subject_id == start
+    # Die Messung lief nach dem Training weiter (9.11.2026) — sie gehört trotzdem dem Profil
+    # beim Start; die Strecke findet sie über die Einheit
+    (aufnahme,) = state.hrv.alle(start)
+    assert aufnahme.subject_id == start and state.strecken.zur_hrv(aufnahme.id).id == strecke.id
+    assert state.hrv.alle(zweites.id) == []
     sitzung = state.sitzungen.session_laden(
         state.sitzungen.eintrag_laden(strecke.session_entry_id).session_id
     )
@@ -298,7 +320,10 @@ async def test_nachlauf_fragt_beim_speichern_und_kuerzt_alles(daten) -> None:
 
     state, tmp_path = daten
     seite = Seite()
-    strecke, _ = await _training(state, tmp_path, punkte=_mit_nachlauf(), seite=seite)
+    # Die Messung endet hier mit dem Training — nur dann schneidet „Kürzen“ sie zu
+    strecke, _ = await _training(
+        state, tmp_path, punkte=_mit_nachlauf(), seite=seite, messung_beenden=True
+    )
     await asyncio.gather(*seite.aufgaben)
     import flet as ft
 
@@ -511,9 +536,14 @@ async def test_training_speichert_strecke_hrv_und_tagebuch(daten) -> None:
     assert strecke.distanz_m == pytest.approx(2997, rel=0.03)
     assert strecke.file_path.startswith("strecke_") and strecke.file_path.endswith(".jsonl")
     assert (tmp_path / "Strecken" / strecke.file_path).exists()
-    assert strecke.hrv_recording_id is not None
-    hrv = state.hrv.laden(strecke.hrv_recording_id)
-    assert hrv is not None
+    # Die Messung lief nach dem Training weiter (Ben, 9.11.2026) — die Strecke findet sie über
+    # die Einheit, nicht über ``hrv_recording_id``
+    assert strecke.hrv_recording_id is None
+    from trainingsapp.ui.training import hrv_bezug
+
+    bezug = hrv_bezug(state, strecke)
+    hrv = bezug.aufnahme if bezug is not None else None
+    assert hrv is not None and state.strecken.zur_hrv(hrv.id).id == strecke.id
     # Tagebuch: Übung „Gehen" mit Strecke und Zeit
     eintrag = state.sitzungen.eintrag_laden(strecke.session_entry_id)
     assert eintrag is not None
@@ -706,7 +736,9 @@ async def test_regel_0_keine_koordinate_in_hrv_export_tagebuch_und_sync(daten) -
 
     state, tmp_path = daten
     strecke, punkte = await _training(state, tmp_path)
-    hrv = state.hrv.laden(strecke.hrv_recording_id)
+    from trainingsapp.ui.training import hrv_bezug
+
+    hrv = hrv_bezug(state, strecke).aufnahme  # die Messung lief weiter (9.11.2026)
     pfad = messungenverzeichnis() / hrv.file_path
     breiten = {f"{p.lat:.4f}" for p in punkte[::50]} | {f"{LAT0:.3f}", f"{LON0:.3f}"}
 
@@ -1098,7 +1130,9 @@ async def test_forschungsexport_ohne_ort(daten) -> None:
     assert knopf.visible
     name, archiv = forschung_export(state, strecke.einheit_id)
     assert name.startswith("einheit_") and name.endswith(".zip")
-    hrv = state.hrv.laden(strecke.hrv_recording_id)
+    from trainingsapp.ui.training import hrv_bezug
+
+    hrv = hrv_bezug(state, strecke).aufnahme  # die Messung lief weiter (9.11.2026)
     with zipfile.ZipFile(BytesIO(archiv)) as z:
         namen = z.namelist()
         dok = json.loads(z.read("einheit-v1.json"))

@@ -241,9 +241,12 @@ aktivieren“.
   Balken) stehen über der scrollenden Spalte — im Timer der Übung und im Workout (dort mit
   Übung und Fortschritt darüber). Beide frischen je Takt den festen Kopf und den Rest auf.
 - **Messung läuft weiter:** `Einheitslauf.stoppt_am_ende("hrv")` — eine mitgestartete Messung
-  endet nur noch mit, wenn sie die ganze Einheit ist (⏹ beendet die Messung) oder zu einem
-  Training mit Strecke gehört (``gps``: Kürzen, Export und Tagebuch hängen an der Aufnahme);
-  nach Timer, Übung und Workout läuft sie weiter. Begann die Einheit als reine Messung und kam
+  endet nur noch mit, wenn sie die ganze Einheit ist (⏹ beendet die Messung); nach Timer, Übung,
+  Workout **und GPS-Training** (Ben, 9.11.2026: „GPS-Training soll die Messung auch
+  weiterlaufen lassen“) läuft sie weiter. Die Strecke findet ihre Aufnahme dann über die
+  Einheit (`ui.training.hrv_bezug`, ``hrv_recording_id`` bleibt leer), „Ende kürzen“
+  verschiebt nur die Notizen; die weiterlaufende Messung gehört dem Profil der Einheit
+  (`ui.einheit._messung_weiter_zeigen`). Begann die Einheit als reine Messung und kam
   erst später ein Timer dazu (`Einheitslauf.beitreten`), gehört sie der Messung — ⏹ beendet
   dann weiter alles. Die Wahlen „Wenn das Workout fertig ist“ und „Wenn die Messdauer um ist“
   stehen auf „Weiterlaufen“.

@@ -1135,10 +1135,11 @@ class Einheitslauf:
 
     def stoppt_am_ende(self, art: str) -> bool:
         """Endet der Teil mit der Einheit? Vorgabe: was mit ihr begann — die **Messung** aber
-        läuft nach Timer, Übung und Workout weiter (Ben, 8.11.2026 spät: „Messung läuft weiter
-        überall standardmäßig“). Sie endet mit, wenn sie die ganze Einheit ist (⏹ beendet eben
-        die Messung) oder zu einem Training mit Strecke gehört (``gps``: Strecke und Aufnahme
-        hängen zusammen — Kürzen, Export, Tagebuch). Eine Wahl (`am_ende_stoppen`) geht vor.
+        läuft nach Timer, Übung, Workout und Training weiter (Ben, 8.11.2026 spät: „Messung läuft
+        weiter überall standardmäßig“; 9.11.2026: „GPS-Training soll die Messung auch
+        weiterlaufen lassen“ — die Strecke findet ihre Aufnahme dann über die Einheit). Sie endet
+        mit, wenn sie die ganze Einheit ist (⏹ beendet eben die Messung). Eine Wahl
+        (`am_ende_stoppen`) geht vor.
 
         >>> e = Einheitslauf(uhr=lambda: 0.0)
         >>> e.stoppt_am_ende("timer"), e.stoppt_am_ende("hrv")
@@ -1150,8 +1151,7 @@ class Einheitslauf:
             hrv = self.hrv
             if hrv is None or hrv.rolle is not Rolle.MITSTARTEN:
                 return False
-            arten = {t.art for t in self.teile}
-            return arten <= {"hrv"} or "gps" in arten
+            return all(t.art == "hrv" for t in self.teile)
         return True
 
     def beenden(self) -> list[Ereignis]:

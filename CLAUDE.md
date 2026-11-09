@@ -308,8 +308,9 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Erklärungen im „i“, Takt · Zeit · Ebenen-Knopf in einer Zeile, die **beim Scrollen oben stehen
   bleibt** (`fokus.OBEN`); Fokus-Ansichten (``data = FOKUS_ANSICHT``) bekommen **keine
   Laufleiste**. **Messung läuft weiter** ist Vorgabe (`Einheitslauf.stoppt_am_ende`): nach Timer,
-  Übung und Workout läuft eine mitgestartete Messung weiter — außer sie ist allein, die Einheit
-  begann als reine Messung (`beitreten`) oder sie gehört zu einem Training mit Strecke. Ein Timer-Abschnitt
+  Übung, Workout und GPS-Training läuft eine mitgestartete Messung weiter — außer sie ist allein
+  oder die Einheit begann als reine Messung (`beitreten`); die Strecke findet sie dann über die
+  Einheit (`hrv_bezug`). Ein Timer-Abschnitt
   kann eine **Ausführung** tragen (`Abschnitt.ausfuehrung`, flach in `timer/abschnitt`) —
   eingetragen wird **je Ausführung ein Eintrag** (`core.timer_eintrag.nach_ausfuehrung`,
   `Eingaben`; beim Üben und im Workout). Pfeilzeile `components/planpfeile.py` im Plan und im

@@ -210,8 +210,9 @@ def _zaehlen_platz_machen(state: Any, e: Einheitslauf) -> None:
     melden(state)
 
 
-def _neue(state: Any) -> Einheitslauf:
-    """Die Einheit zum Bereitstellen — eine neue, wenn keine vorbereitet wird."""
+def _neue(state: Any, subject_id: str | None = None) -> Einheitslauf:
+    """Die Einheit zum Bereitstellen — eine neue, wenn keine vorbereitet wird. ``subject_id``:
+    das Profil, dem sie gehört (Vorgabe das aktive)."""
     e = in_vorbereitung(state)
     if e is not None:
         return e
@@ -220,7 +221,7 @@ def _neue(state: Any) -> Einheitslauf:
     e = Einheitslauf(
         uhr=time.monotonic,
         senke=getattr(state, "einheiten", None),
-        subject_id=state.profil.id,
+        subject_id=subject_id or state.profil.id,
     )
     state.einheit = e
     return e
@@ -314,7 +315,9 @@ def hrv_bereitstellen(
     return teil
 
 
-def einzeln_starten(page: Any, state: Any, teil: Any) -> Einheitslauf | None:
+def einzeln_starten(
+    page: Any, state: Any, teil: Any, *, subject_id: str | None = None
+) -> Einheitslauf | None:
     """Ein Dienst, der für sich startet (Timer, HRV-Messung), kommt in die Leiste und in den
     Reiter „Einheit“ (Ben, 18.10.2026: „auch wenn die Dienste nicht direkt verbunden
     wurden. Ohne die manuelle Verbindung kann man die ja trotzdem noch verketten“).
@@ -339,7 +342,7 @@ def einzeln_starten(page: Any, state: Any, teil: Any) -> Einheitslauf | None:
         return e
     if in_vorbereitung(state) is not None:
         return None
-    e = _neue(state)
+    e = _neue(state, subject_id)
     e.hinzufuegen(teil)
     e.ende_wenn_alles_fertig = True
     return alle_starten(page, state, 0.0)
@@ -741,7 +744,7 @@ async def _laufen(
         if state.einheit is e:
             state.einheit = None
         with contextlib.suppress(Exception):
-            _messung_weiter_zeigen(page, state)
+            _messung_weiter_zeigen(page, state, e.subject_id)
         melden(state)
         with contextlib.suppress(Exception):
             state.neu_zeichnen()
@@ -775,11 +778,14 @@ def _nachlauf_fragen(page: Any, state: Any, strecke: Any) -> None:
     page.run_task(zeigen)
 
 
-def _messung_weiter_zeigen(page: Any, state: Any) -> bool:
+def _messung_weiter_zeigen(page: Any, state: Any, subject_id: str | None = None) -> bool:
     """Läuft die HRV-Aufnahme nach dem Ende einer Einheit weiter (sie lief schon vorher,
     oder „Weiterlaufen“), steht sie wieder für sich in Leiste und Reiter „Einheit“ — wie
     eine einzeln gestartete Messung (Ben, 18.10.2026). ⏹ beendet und speichert sie dann.
-    ``True``, wenn sie dafür eine eigene Einheit bekam (die ist dann schon gezeichnet)."""
+    ``subject_id``: das Profil der beendeten Einheit — die Aufnahme gehört weiter ihm, auch
+    wenn inzwischen ein anderes aktiv ist (15.10.2026: Training und Messung gehören dem Profil
+    beim Start). ``True``, wenn sie dafür eine eigene Einheit bekam (die ist dann schon
+    gezeichnet)."""
     lauf = getattr(state, "messlauf", None)
     if lauf is None or lauf.aufnahme is None:
         return False
@@ -787,7 +793,9 @@ def _messung_weiter_zeigen(page: Any, state: Any) -> bool:
         if not e.laeuft and e.hrv is None:
             hrv_bereitstellen(page, state)  # steht etwas bereit, kommt die Messung dorthin (H30)
         return False
-    e = einzeln_starten(page, state, HrvBaustein(lauf, basis=datenverzeichnis()))
+    e = einzeln_starten(
+        page, state, HrvBaustein(lauf, basis=datenverzeichnis()), subject_id=subject_id
+    )
     if e is None:
         return False
     e.am_ende_stoppen["hrv"] = True

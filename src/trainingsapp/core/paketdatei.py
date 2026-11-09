@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import IO, Any, Final
 
 from .bereinigen import NichtBereinigbar, datei_bereinigen
+from .ergaenzungen import Ergaenzung
 from .kurse import Kurs
 from .models import Exercise, Media, MediaSource
 from .pakete import (
@@ -199,6 +200,9 @@ def medienlisten(roh: Mapping[str, Any]) -> Iterator[list[Any]]:
         if isinstance(e, dict) and isinstance(e.get("media"), list):
             yield e["media"]
     yield from aus_plaenen(roh.get("plaene"))
+    for e in roh.get("ergaenzungen") or []:  # U5
+        if isinstance(e, dict) and isinstance(e.get("media"), list):
+            yield e["media"]
     for k in roh.get("kurse") or []:
         for kap in (k.get("kapitel") if isinstance(k, dict) else None) or []:
             if not isinstance(kap, dict):
@@ -337,6 +341,7 @@ def export_schreiben(
     *,
     plaene: list[PaketPlan] | None = None,
     kurse: list[Kurs] | None = None,
+    ergaenzungen: list[Ergaenzung] | None = None,
     quelle: Callable[[str], Path | None],
     mit_zeitstempel: bool = True,
 ) -> tuple[Path, list[str]]:
@@ -345,8 +350,9 @@ def export_schreiben(
     blieb. ``quelle``: wo eine Paketdatei auf dem Gerät liegt. ``(Datei, Meldungen)``."""
     plaene = plaene or []
     kurse = kurse or []
+    ergaenzungen = ergaenzungen or []
     ordner.mkdir(parents=True, exist_ok=True)
-    namen = paketmedien_in(uebungen, kurse, plaene)
+    namen = paketmedien_in(uebungen, kurse, plaene, ergaenzungen)
     if not namen:
         ziel = ordner / dateiname(paket)
         ziel.write_bytes(
@@ -355,6 +361,7 @@ def export_schreiben(
                 uebungen,
                 kurse or None,
                 plaene=plaene or None,
+                ergaenzungen=ergaenzungen or None,
                 mit_zeitstempel=mit_zeitstempel,
             )
         )
@@ -388,11 +395,28 @@ def export_schreiben(
             )
             for k in kurse
         ]
+
+        def erg_neu(e: Ergaenzung) -> Ergaenzung:
+            medien = [
+                roh
+                for roh in (e.daten.get("media") or [])
+                if not (isinstance(roh, dict) and umbenennung.get(roh.get("uri", ""), "") is None)
+            ]
+            medien = [
+                {**roh, "uri": umbenennung.get(roh.get("uri", ""), roh.get("uri"))}
+                if isinstance(roh, dict) and roh.get("uri") in umbenennung
+                else roh
+                for roh in medien
+            ]
+            daten = {**e.daten, "media": medien} if "media" in e.daten else dict(e.daten)
+            return replace(e, daten=daten)
+
         json_daten = paket_json(
             paket,
             [replace(u, media=medien_umbenennen(u.media, umbenennung)) for u in uebungen],
             kurse_neu or None,
             plaene=[plan_neu(pp) for pp in plaene] or None,
+            ergaenzungen=[erg_neu(e) for e in ergaenzungen] or None,
             mit_zeitstempel=mit_zeitstempel,
         )
         if not dateien:

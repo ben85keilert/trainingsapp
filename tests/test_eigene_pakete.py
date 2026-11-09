@@ -73,9 +73,9 @@ def test_eigenes_paket_exportieren_und_beim_empfaenger_aktualisieren(tmp_path, u
     ep = EigenesPaket(name="Knie für Anna", uebungen=[beuge.id], plaene=[plan.id])
     repo.speichern(ep)
     assert [e.name for e in repo.alle()] == ["Knie für Anna"]
-    _paket, liste, paketplaene, _kurse = repo.inhalt(ep)
-    assert [u.name for u in liste] == ["Meine Beuge", "Mein Stütz"]  # der Plan braucht Stütz
-    assert paketplaene[0].key == plan.id  # fester Schlüssel über alle Fassungen
+    a = repo.inhalt(ep)
+    assert [u.name for u in a.uebungen] == ["Meine Beuge", "Mein Stütz"]  # Plan braucht Stütz
+    assert a.plaene[0].key == plan.id  # fester Schlüssel über alle Fassungen
     # Erste Fassung: 1.0.0, eine ZIP mit der bereinigten Datei
     version = naechste_version(ep.version)
     datei, meldungen, sha = repo.exportieren(ep, version, tmp_path / "Export", ablage.pfad)

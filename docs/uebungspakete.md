@@ -176,6 +176,43 @@ PDFs mitbringen — an Übungen (`media`), Planübungen (`medien`) und Kurskapit
   bleiben vorgemerkt, bis man sie lädt. *Am Server* (Homepage, Caddy) gehen bisher nur `*.json`
   durch — `.zip` freizugeben braucht Bens Zustimmung dort (P164).
 
+## Ergänzungen (U5, Ben 9.11.2026, Formatversion 5)
+
+`docs/plan_paketinhalte.md` §8, F2 („auch Parameter, Ziel, Timer, Takt — hier wird
+individualisiert“). Ein Paket ergänzt **Übungen anderer Pakete**, ohne sie zu übernehmen:
+
+```toml
+[[ergaenzungen]]
+uebung = "kniebeuge"            # Schlüssel — ohne `paket` aus „Standard“; oder eine ID
+# paket = "Qigong"              # Name oder ID des Pakets der Übung
+description = """
+## Reha
+Langsam, Knie über dem Fuß."""
+default_target = { reps = [8, 8] }
+media = [{ uri = "https://…", title = "Reha-Video" }]   # auch datei = "…" (ZIP)
+```
+
+- **Was sie darf** (`core/ergaenzungen.py`, `ERGAENZBAR`): `description` — ein benannter
+  Abschnitt ersetzt den gleichnamigen, sonst kommt er hinten dazu, einer ohne Namen immer dazu;
+  `media` — was die Übung (nach Adresse) nicht hat, kommt dazu; `result_spec`,
+  `default_target`, `timer`, `takt` — ersetzen. Alles andere (Name, Typen …) fällt weg
+  (`trainingsapp-paket pruefen` gibt einen Hinweis). Eine Ergänzung einer Übung desselben Pakets
+  gibt es nicht (dann schreibt man die Übung).
+- **Schichten:** Grundpaket → Ergänzungen in der Reihenfolge ihrer Installation (die spätere
+  gewinnt je Feld) → Eigenes. Der **wirksame Paketstand** (`package_standard_json`) ist Grund +
+  Ergänzungen, der Grund liegt daneben (`package_base_json`, Migration 049); kommt, ändert oder
+  geht eine Ergänzung, gleicht die App ab wie bei einem Update — **Eigenes bleibt** (U1),
+  „Auf Paketstand“ nimmt die Ergänzungen mit, „Wieder installieren“ den Grund.
+- **Gespeichert** je Paket und Übung (`exercise_addon`): Deaktivieren und Entfernen nehmen die
+  Ergänzungen heraus, Aktivieren bringt sie zurück; ein Update ersetzt nur die eigenen.
+  **Fehlt die Übung** (ihr Paket ist nicht installiert), wartet die Ergänzung und greift, sobald
+  es kommt; die Rückfrage beim Import sagt es, der Paketmanager zeigt die Karte **„Ergänzt“**.
+- **Anzeige:** Die Übungsseite nennt „ergänzt von „Knie-Reha““ und je Abschnitt klein „aus
+  „Knie-Reha““.
+- **Eigene Pakete (U4):** Was man an Übungen **anderer** Pakete geändert hat, reist als
+  Ergänzung (`core.ergaenzungen.ergaenzung_aus` gegen den wirksamen Paketstand) — eine ganze
+  fremde Übung bliebe beim Empfänger, wie sie ist; unveränderte fremde Übungen reisen gar nicht.
+
 ## Eigene Pakete (U4, Ben 9.11.2026)
 
 `docs/plan_paketinhalte.md` §7, F5 („Übungen, Pläne und Kurse sollen exportiert werden

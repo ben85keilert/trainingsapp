@@ -158,7 +158,7 @@ def eigenes_paket_view(page: Any, state: AppState, basis: str, paket_id: str) ->
 
     def info_neu() -> None:
         s = stand()
-        _paket, alle_uebungen, paketplaene, paketkurse = repo.inhalt(s)
+        a = repo.inhalt(s)
         noetig = (
             set(
                 noetige_uebungen(
@@ -168,13 +168,16 @@ def eigenes_paket_view(page: Any, state: AppState, basis: str, paket_id: str) ->
             )
             - gewaehlt["uebungen"]
         )
-        namen = paketmedien_in(alle_uebungen, paketkurse, paketplaene)
+        namen = paketmedien_in(a.uebungen, a.kurse, a.plaene, a.ergaenzungen)
         ablage = state.pakete.ablage
         groesse = sum(ablage.groesse(n) for n in namen) if ablage is not None else 0
         teile = [
-            f"{len(alle_uebungen)} Übungen"
+            f"{len(a.uebungen)} Übungen"
             + (f" (davon {len(noetig)} für Pläne/Kurse)" if noetig else "")
         ]
+        if a.ergaenzungen:  # geänderte Übungen anderer Pakete (U5)
+            n = len(a.ergaenzungen)
+            teile.append("1 Ergänzung" if n == 1 else f"{n} Ergänzungen")
         if namen:
             teile.append(f"{len(namen)} Dateien · {groesse_text(groesse)}")
         info.value = "  ·  ".join(teile)
@@ -241,16 +244,17 @@ def eigenes_paket_view(page: Any, state: AppState, basis: str, paket_id: str) ->
 
         ablage = state.pakete.ablage
         # Die Datenbank im Event-Loop (die Verbindung gehört ihm), nur die Dateien im Thread
-        paket, uebungen_, plaene_, kurse_ = repo.inhalt(ep, version)
+        a = repo.inhalt(ep, version)
         sha = repo.sha(ep)
         try:
             datei, meldungen = await asyncio.to_thread(
                 export_schreiben,
                 export_ordner(),
-                paket,
-                uebungen_,
-                plaene=plaene_,
-                kurse=kurse_,
+                a.paket,
+                a.uebungen,
+                plaene=a.plaene,
+                kurse=a.kurse,
+                ergaenzungen=a.ergaenzungen,
                 quelle=ablage.pfad if ablage is not None else (lambda _n: None),
             )
         except (OSError, ValueError) as fehler:
@@ -387,7 +391,11 @@ def eigenes_paket_view(page: Any, state: AppState, basis: str, paket_id: str) ->
     inhalt_karten: list[ft.Control] = [
         karte(
             titel("Übungen"),
-            hinweis("Übungen, die ein gewählter Plan oder Kurs braucht, kommen von selbst mit."),
+            hinweis(
+                "Übungen, die ein gewählter Plan oder Kurs braucht, kommen von selbst mit. Was "
+                "du an Übungen anderer Pakete geändert hast, reist als Ergänzung — wer das "
+                "Paket bekommt, sieht es an seiner Übung."
+            ),
             *[uebungsgruppe(t, m) for t, m in gruppen],
         )
     ]

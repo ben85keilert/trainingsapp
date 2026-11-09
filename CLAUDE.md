@@ -196,7 +196,11 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   Paketmanager (`views/eigene_pakete.py`, Migration 048 `own_package`, feste ID, Version
   vorschlagen nach Inhalts-Prüfsumme), „Datei fürs Paket“ in beiden Editoren (sofort bereinigt,
   `ui/paketdatei.py`, Ziel `paketdatei/…` für Kamera und Fotoauswahl). Datenbank nie in
-  `asyncio.to_thread` — dort nur Dateien (SQLite gehört dem Event-Loop). Paketmanager: Jede
+  `asyncio.to_thread` — dort nur Dateien (SQLite gehört dem Event-Loop). **Ergänzungen**
+  (U5): `ergaenzungen[]` (Formatversion 5) ergänzen Übungen anderer Pakete — Abschnitte, Medien,
+  Parameter, Ziel, Timer, Takt (`core/ergaenzungen.py`); wirksamer Paketstand = Grund
+  (`package_base_json`) + Ergänzungen (`exercise_addon`, Migration 049), abgeglichen wie ein
+  Update (`PaketRepo.ergaenzungen_anwenden`) — Eigenes bleibt. Paketmanager: Jede
   Paketübung trägt ihren Paketstand (`package_standard_json`) für „Auf Paketstand setzen“;
   Entfernen legt die Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück;
   **Deaktivieren** (Migration 017) versteckt alles, ohne zu löschen; was beim Update aus

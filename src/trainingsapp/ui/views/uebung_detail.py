@@ -29,7 +29,9 @@ import flet as ft
 
 from trainingsapp.core import varianten as var
 from trainingsapp.core import zaehlen as zl
+from trainingsapp.core.abgleich import schluessel_abschnitte
 from trainingsapp.core.beschreibung import abschnitte
+from trainingsapp.core.ergaenzungen import herkunft as ergaenzungs_herkunft
 from trainingsapp.core.models import (
     Exercise,
     MediaSource,
@@ -71,10 +73,15 @@ from trainingsapp.ui.views.uebung_timer import uebung_timer_route
 KOPF_BILD = 128
 
 
-def _beschreibung(uebung: Exercise, herkunft: str) -> ft.Control:
+def _beschreibung(
+    uebung: Exercise, herkunft: str, abschnitt_herkunft: dict[str, str] | None = None
+) -> ft.Control:
     """Die Beschreibung in ihren Abschnitten (Name fett, darunter der Inhalt — Ben,
-    2.11.2026, P108), dahinter leise die Herkunft: „(Paket „Standard“)“."""
-    teile = abschnitte(uebung.description)
+    2.11.2026, P108), dahinter leise die Herkunft: „(Paket „Standard“)“. Ein Abschnitt aus
+    einer Ergänzung (U5) trägt neben dem Namen klein „aus Knie-Reha“."""
+    abschnitt_herkunft = abschnitt_herkunft or {}
+    mit_schluessel = schluessel_abschnitte(uebung.description)
+    teile = [a for _k, a in mit_schluessel]
     herkunft_span = ft.TextSpan(
         f"  ({herkunft})",
         style=ft.TextStyle(size=12, color=ft.Colors.with_opacity(0.55, ft.Colors.ON_SURFACE)),
@@ -82,8 +89,19 @@ def _beschreibung(uebung: Exercise, herkunft: str) -> ft.Control:
     if not teile:
         return ft.Text("—", spans=[herkunft_span])
     zeilen: list[ft.Control] = []
-    for k, a in enumerate(teile):
-        if a.name:
+    for k, (schluessel, a) in enumerate(mit_schluessel):
+        if a.name and (von := abschnitt_herkunft.get(schluessel)):
+            zeilen.append(
+                ft.Row(
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.END,
+                    controls=[
+                        ft.Text(a.name, size=13, weight=ft.FontWeight.W_600, opacity=0.8),
+                        ft.Text(f"aus {von}", size=11, opacity=0.55, italic=True),
+                    ],
+                )
+            )
+        elif a.name:
             zeilen.append(ft.Text(a.name, size=13, weight=ft.FontWeight.W_600, opacity=0.8))
         zeilen.append(ft.Text(a.text or "—", spans=[herkunft_span] if k == len(teile) - 1 else []))
     return ft.Column(spacing=2, tight=True, controls=zeilen)
@@ -615,11 +633,16 @@ def uebung_detail(
 
     paket = state.pakete.laden(uebung.package_id) if uebung.package_id else None
     geaendert = state.pakete.abweichungen(uebung) if paket is not None else None
+    # Ergänzungen anderer Pakete (U5): wer ergänzt — und welcher Abschnitt woher kommt
+    ergaenzt = state.pakete.ergaenzungen_fuer(uebung.id) if paket is not None else []
     herkunft = (
-        f"Paket „{paket.name}“" + (", geändert" if geaendert else "")
+        f"Paket „{paket.name}“"
+        + (", ergänzt von " + ", ".join(f"„{p.name}“" for p, _ in ergaenzt) if ergaenzt else "")
+        + (", geändert" if geaendert else "")
         if paket is not None
         else "eigene Übung"
     )
+    abschnitt_herkunft = ergaenzungs_herkunft([(f"„{p.name}“", d) for p, d in ergaenzt])
 
     # -- In Plänen (P79): jede Zeile öffnet „Im Plan einstellen“ dieses Plans --------------
 
@@ -690,7 +713,7 @@ def uebung_detail(
         )
     abschnitte += [
         _kopf(state, uebung),
-        _abschnitt("Beschreibung", _beschreibung(uebung, herkunft)),
+        _abschnitt("Beschreibung", _beschreibung(uebung, herkunft, abschnitt_herkunft)),
         # Nur mit Inhalt (Ben, 7.11.2026: „spart Platz und verwirrt weniger“)
         *(
             [_abschnitt("Videos und Links", ft.Column(spacing=0, controls=videos))]

@@ -255,6 +255,11 @@ Planübung legt Videos, Fotos, Töne oder PDFs dazu — sie verlassen das Gerät
 Ortsangaben. „Exportieren und teilen“ schlägt die Version vor: die erste 1.0.0, danach je
 nach Änderung klein, mittel oder groß. Wer das Paket hat, bekommt jede neue Fassung als
 Update — was er selbst geändert hat, bleibt.
+
+**Ergänzungen** — Ein Paket kann Übungen anderer Pakete ergänzen: Abschnitte, Videos,
+Parameter, Ziel, Timer, Takt. Die Übung bleibt die ihres Pakets; neben einem ergänzten
+Abschnitt steht klein, woher er kommt. Deaktivieren oder Entfernen nimmt die Ergänzung heraus
+— was du selbst geändert hast, bleibt immer.
 """
 
 ATMUNG_MD = """\

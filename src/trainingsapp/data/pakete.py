@@ -60,6 +60,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.abgleich import Hinweis, Unterschied, hinweise_lesen, uebernehmen, unterschiede
+from ..core.ergaenzungen import Ergaenzung, mit_ergaenzungen
 from ..core.kurse import Kurs, ablauf_aufloesen, ids_uebernehmen, verweise_aufloesen
 from ..core.models import TAG_REGION, TAG_TYP, Exercise, MediaSource, Plan, PlanItem, jetzt, new_id
 from ..core.pakete import (
@@ -140,6 +141,11 @@ class Vorschau:
     medien_neu: int = 0
     medien_bytes: int = 0
     medien_fehlen: list[str] = field(default_factory=list)
+    #: Ergänzungen (U5): zu Übungen, die es hier gibt — und welche warten (Übung fehlt)
+    ergaenzt: list[str] = field(default_factory=list)
+    ergaenzung_wartet: list[str] = field(default_factory=list)
+    #: Übung → Paketstand des Grundpakets, wo Ergänzungen anderer Pakete wirken (intern)
+    basis_staende: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def anzahl(self, *stati: Status) -> int:
         return sum(1 for s in self.status.values() if s in stati)
@@ -223,6 +229,12 @@ class Vorschau:
         if n := len(self.medien_fehlen):
             dateien = "1 Datei fehlt" if n == 1 else f"{n} Dateien fehlen"
             zeilen.append(f"{dateien} — sie kommen mit der ZIP-Datei des Pakets")
+        if n := len(self.ergaenzt):
+            was = "1 Übung eines anderen Pakets" if n == 1 else f"{n} Übungen anderer Pakete"
+            zeilen.append(f"ergänzt {was} — was du daran geändert hast, bleibt")
+        if n := len(self.ergaenzung_wartet):
+            was = "1 Ergänzung wartet" if n == 1 else f"{n} Ergänzungen warten"
+            zeilen.append(f"{was} — die Übung fehlt hier (ihr Paket ist nicht installiert)")
         return zeilen
 
 
@@ -364,7 +376,8 @@ class PaketRepo:
             return None
         uebungen: list[Exercise] = []
         for r in self.con.execute(
-            "SELECT id, package_standard_json FROM exercise "
+            # Der Grundstand — ohne Ergänzungen anderer Pakete (U5)
+            "SELECT id, COALESCE(package_base_json, package_standard_json) FROM exercise "
             "WHERE package_id = ? AND package_standard_json IS NOT NULL "
             "AND package_dropped_at IS NULL ORDER BY created_at",
             (paket_id,),
@@ -385,9 +398,13 @@ class PaketRepo:
             except (KeyError, TypeError, ValueError):
                 continue
         plaene = self.paketplaene(paket_id)
-        if not (uebungen or kurse or plaene):
+        ergaenzungen = [
+            Ergaenzung(paket_id, uid, daten)
+            for uid, daten in self.ergaenzungen_des_pakets(paket_id)
+        ]
+        if not (uebungen or kurse or plaene or ergaenzungen):
             return None
-        return Paketinhalt(paket, uebungen, kurse, plaene)
+        return Paketinhalt(paket, uebungen, kurse, plaene, ergaenzungen=ergaenzungen)
 
     def kurse(self, paket_id: str) -> list[Kurs]:
         """Die Kurse eines Pakets, die in der Liste stehen (nicht entfernt)."""
@@ -436,14 +453,17 @@ class PaketRepo:
     # -- Deaktivieren (Migration 017) ---------------------------------------
 
     def deaktivieren(self, paket_id: str) -> None:
-        """Nichts davon sichtbar, alles bleibt — `aktivieren` stellt es her."""
+        """Nichts davon sichtbar, alles bleibt — `aktivieren` stellt es her. Seine Ergänzungen
+        an anderen Übungen ruhen solange (U5)."""
         self.con.execute(
             "UPDATE package SET disabled_at = ? WHERE id = ? AND disabled_at IS NULL",
             (jetzt().isoformat(), paket_id),
         )
+        self._ergaenzungen_nachziehen(paket_id)
 
     def aktivieren(self, paket_id: str) -> None:
         self.con.execute("UPDATE package SET disabled_at = NULL WHERE id = ?", (paket_id,))
+        self._ergaenzungen_nachziehen(paket_id)
 
     # -- Paketquellen (Migration 017) ----------------------------------------
 
@@ -678,6 +698,7 @@ class PaketRepo:
             self.con.execute(
                 "UPDATE package SET removed_at = ? WHERE id = ?", (jetzt().isoformat(), paket_id)
             )
+        self._ergaenzungen_nachziehen(paket_id)  # seine Ergänzungen gehen mit (U5)
         return len(ids)
 
     def zuruecksetzen(self, uebung_ids: Iterable[str]) -> int:
@@ -722,7 +743,155 @@ class PaketRepo:
         Profil, in dem die Pläne des Pakets landen (ohne: Pläne bleiben außen vor)."""
         vorschau = self._planen(inhalt, aktualisieren=True, subject_id=subject_id)[0]
         self._medien_planen(inhalt, vorschau)
+        self._ergaenzungen_zaehlen(inhalt, vorschau)
         return vorschau
+
+    # -- Ergänzungen (U5, Migration 049, `core/ergaenzungen.py`) ----------------------------
+
+    def _ergaenzungen_zaehlen(self, inhalt: Paketinhalt, vorschau: Vorschau) -> None:
+        for e in inhalt.ergaenzungen:
+            r = self.con.execute(
+                "SELECT package_id FROM exercise WHERE id = ? AND purged_at IS NULL",
+                (e.uebung_id,),
+            ).fetchone()
+            ziel = vorschau.ergaenzt if r is not None and r[0] else vorschau.ergaenzung_wartet
+            ziel.append(e.uebung_id)
+
+    def ergaenzungen_fuer(self, uebung_id: str) -> list[tuple[Paket, dict[str, Any]]]:
+        """Die wirksamen Ergänzungen einer Übung — aus installierten, aktiven Paketen, in der
+        Reihenfolge ihrer Installation (die spätere gewinnt je Feld)."""
+        out: list[tuple[Paket, dict[str, Any]]] = []
+        for r in self.con.execute(
+            "SELECT a.package_id, a.data_json FROM exercise_addon a "
+            "JOIN package p ON p.id = a.package_id "
+            "WHERE a.exercise_id = ? AND p.removed_at IS NULL AND p.disabled_at IS NULL "
+            "ORDER BY a.position",
+            (uebung_id,),
+        ).fetchall():
+            paket = self.laden(r["package_id"])
+            try:
+                daten = json.loads(r["data_json"])
+            except ValueError:
+                continue
+            if paket is not None and isinstance(daten, dict):
+                out.append((paket, daten))
+        return out
+
+    def ergaenzungen_des_pakets(self, paket_id: str) -> list[tuple[str, dict[str, Any]]]:
+        """Was ein Paket ergänzt: (Übung, Felder) — auch zu Übungen, die hier fehlen."""
+        out: list[tuple[str, dict[str, Any]]] = []
+        for r in self.con.execute(
+            "SELECT exercise_id, data_json FROM exercise_addon WHERE package_id = ? "
+            "ORDER BY position",
+            (paket_id,),
+        ).fetchall():
+            try:
+                daten = json.loads(r["data_json"])
+            except ValueError:
+                continue
+            if isinstance(daten, dict):
+                out.append((r["exercise_id"], daten))
+        return out
+
+    def _basis(self, uebung_id: str) -> dict[str, Any] | None:
+        """Der Paketstand des Grundpakets — ohne Ergänzungen."""
+        r = self.con.execute(
+            "SELECT package_base_json FROM exercise WHERE id = ?", (uebung_id,)
+        ).fetchone()
+        if r is not None and r[0]:
+            try:
+                wert = json.loads(r[0])
+            except ValueError:
+                wert = None
+            if isinstance(wert, dict):
+                return wert
+        return self.standard(uebung_id)
+
+    def _basis_setzen(self, uebung_id: str, basis: dict[str, Any] | None) -> None:
+        text = json.dumps(basis, ensure_ascii=False, sort_keys=True) if basis is not None else None
+        self.con.execute(
+            "UPDATE exercise SET package_base_json = ? WHERE id = ?", (text, uebung_id)
+        )
+
+    def ergaenzungen_anwenden(self, uebung_id: str) -> bool:
+        """Den wirksamen Paketstand einer Übung neu bilden — Grundpaket + Ergänzungen — und wie
+        bei einem Update abgleichen: was die Person geändert hat, bleibt. ``True``, wenn sich
+        der Stand änderte."""
+        repo = ExerciseRepo(self.con)
+        alt = repo.laden(uebung_id, mit_geloeschten=True)
+        if alt is None or alt.package_id is None:
+            return False
+        bisher, basis = self.standard(uebung_id), self._basis(uebung_id)
+        if bisher is None or basis is None:
+            return False
+        ergs = [d for _p, d in self.ergaenzungen_fuer(uebung_id)]
+        soll = mit_ergaenzungen(basis, ergs)
+        if soll == bisher:
+            return False
+        gemischt, hinweise = zusammenfuehren_mit_hinweisen(bisher, stand(alt), soll)
+        try:
+            ziel: Exercise | None = aus_stand(uebung_id, alt.package_id, gemischt)
+        except (KeyError, TypeError, ValueError):
+            ziel = None  # unlesbar: nur der Stand wandert
+        with transaktion(self.con):
+            if ziel is not None:
+                _tags_angleichen(ziel, self._bekannte_tags())
+                _lokales_behalten(ziel, alt)
+                ziel.archived = alt.archived
+                if stand(ziel) != stand(alt):
+                    repo.speichern(ziel)
+            self._standard_setzen(uebung_id, soll)
+            self._basis_setzen(uebung_id, basis if ergs else None)
+            self._hinweise_nachziehen(uebung_id, hinweise)
+        return True
+
+    def _ergaenzungen_einspielen(self, inhalt: Paketinhalt) -> list[str]:
+        """Die Ergänzungen des Pakets speichern (neue hinten, vorhandene behalten ihren Platz,
+        weggefallene gehen) und jede betroffene Übung neu abgleichen."""
+        paket_id = inhalt.paket.id
+        alt = {
+            r["exercise_id"]: r["data_json"]
+            for r in self.con.execute(
+                "SELECT exercise_id, data_json FROM exercise_addon WHERE package_id = ?",
+                (paket_id,),
+            ).fetchall()
+        }
+        neu = {
+            e.uebung_id: json.dumps(e.daten, ensure_ascii=False, sort_keys=True)
+            for e in inhalt.ergaenzungen
+        }
+        with transaktion(self.con):
+            naechste = self.con.execute(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM exercise_addon"
+            ).fetchone()[0]
+            for uid, text in neu.items():
+                if uid in alt:
+                    self.con.execute(
+                        "UPDATE exercise_addon SET data_json = ? "
+                        "WHERE package_id = ? AND exercise_id = ?",
+                        (text, paket_id, uid),
+                    )
+                else:
+                    self.con.execute(
+                        "INSERT INTO exercise_addon (package_id, exercise_id, data_json, "
+                        "position) VALUES (?, ?, ?, ?)",
+                        (paket_id, uid, text, naechste),
+                    )
+                    naechste += 1
+            for uid in alt.keys() - neu.keys():
+                self.con.execute(
+                    "DELETE FROM exercise_addon WHERE package_id = ? AND exercise_id = ?",
+                    (paket_id, uid),
+                )
+        betroffen = sorted(alt.keys() | neu.keys())
+        for uid in betroffen:
+            self.ergaenzungen_anwenden(uid)
+        return betroffen
+
+    def _ergaenzungen_nachziehen(self, paket_id: str) -> None:
+        """Nach Entfernen, Deaktivieren oder Aktivieren: die Übungen, die das Paket ergänzt."""
+        for uid, _daten in self.ergaenzungen_des_pakets(paket_id):
+            self.ergaenzungen_anwenden(uid)
 
     def _medien_planen(self, inhalt: Paketinhalt, vorschau: Vorschau) -> list[str]:
         """Welche Dateien der Import in die Ablage legt (U3) — und in der Vorschau, wie viele,
@@ -765,9 +934,11 @@ class PaketRepo:
         vorschau, ziele, staende, kurs_ziele, plan_ziele = self._planen(
             inhalt, aktualisieren=aktualisieren, subject_id=subject_id
         )
-        if vorschau.installiert is None and not vorschau.zu_tun:
+        # Ein Paket nur mit Ergänzungen (U5) schreibt keine eigene Übung — es zählt trotzdem
+        if vorschau.installiert is None and not vorschau.zu_tun and not inhalt.ergaenzungen:
             return vorschau
         # Erst die Dateien (U3): Scheitert eine (Prüfsumme), bleibt die Datenbank, wie sie war
+        self._ergaenzungen_zaehlen(inhalt, vorschau)
         if self.ablage is not None:
             for name in self._medien_planen(inhalt, vorschau):
                 try:
@@ -781,7 +952,7 @@ class PaketRepo:
         with transaktion(self.con):
             self._eintragen(
                 inhalt.paket,
-                geschrieben=vorschau.zu_tun,
+                geschrieben=vorschau.zu_tun or bool(inhalt.ergaenzungen),
                 installieren=True,
                 plaene_json=json.dumps([p.to_dict() for p in inhalt.plaene], ensure_ascii=False)
                 if inhalt.plaene
@@ -809,6 +980,7 @@ class PaketRepo:
                     )
             for uebung_id, standard in staende.items():
                 self._standard_setzen(uebung_id, standard)
+                self._basis_setzen(uebung_id, vorschau.basis_staende.get(uebung_id))
                 self._hinweise_nachziehen(uebung_id, vorschau.hinweise.get(uebung_id, []))
             # Nicht mehr im Paket: markieren, nicht löschen — die Person entscheidet
             for uebung_id in vorschau.entfallen:
@@ -833,6 +1005,7 @@ class PaketRepo:
                     "WHERE id = ? AND package_id = ? AND package_dropped_at IS NOT NULL",
                     (k.id, inhalt.paket.id),
                 )
+        self._ergaenzungen_einspielen(inhalt)  # nach den Übungen: sie ergänzen fremde (U5)
         self.aufraeumen()  # Dateien alter Fassungen, die nichts mehr nennt
         return vorschau
 
@@ -1125,6 +1298,25 @@ class PaketRepo:
             if r is not None and vorschau.status[u.id] != Status.ZURUECK:
                 ziel.archived = bool(r["archived"])
             soll = stand(ziel)
+            # Ergänzungen anderer Pakete liegen darüber (U5): der wirksame Stand ist Grund +
+            # Ergänzungen; den Grund merkt sich die Übung daneben
+            if ergs := [d for _p, d in self.ergaenzungen_fuer(u.id)]:
+                vorschau.basis_staende[u.id] = soll
+                soll = mit_ergaenzungen(soll, ergs)
+                try:
+                    ziel_mit = aus_stand(u.id, paket.id, soll)
+                except (KeyError, TypeError, ValueError):
+                    ziel_mit = None
+                if ziel_mit is not None:  # nur, was eine Ergänzung setzen darf
+                    ziel = replace(
+                        ziel,
+                        description=ziel_mit.description,
+                        media=ziel_mit.media,
+                        result_spec=ziel_mit.result_spec,
+                        default_target=ziel_mit.default_target,
+                        timer=ziel_mit.timer,
+                        takt=ziel_mit.takt,
+                    )
             # Den Stand schreiben, was geschrieben wird oder noch keinen hat; ohne
             # ``aktualisieren`` (Seed) bleibt ein vorhandener Stand, wie er ist.
             if aktualisieren or schreibt or r is None or r["ohne_stand"]:

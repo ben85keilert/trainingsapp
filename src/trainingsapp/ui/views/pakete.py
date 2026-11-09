@@ -831,6 +831,38 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
             ],
         )
 
+    # -- Ergänzungen an Übungen anderer Pakete (U5) ---------------------------------------
+
+    ergaenzt = state.pakete.ergaenzungen_des_pakets(paket.id)
+    felder_text = {
+        "description": "Abschnitte",
+        "media": "Medien",
+        "result_spec": "Parameter",
+        "default_target": "Ziel",
+        "timer": "Timer",
+        "takt": "Takt",
+    }
+
+    def ergaenzung_zeile(uebung_id: str, daten: dict[str, Any]) -> ft.Control:
+        u = state.uebungen.laden(uebung_id)
+        was = ", ".join(felder_text[f] for f in felder_text if f in daten)
+
+        async def oeffnen(_e: Any = None) -> None:
+            await page.push_route(f"/uebung/{uebung_id}")
+
+        return ft.ListTile(
+            leading=ft.Icon(ft.Icons.EXTENSION_OUTLINED, opacity=1.0 if u else 0.5),
+            title=ft.Text(u.name if u is not None else "Eine Übung, die hier fehlt"),
+            subtitle=ft.Text(
+                was + ("" if u is not None else " — wartet, bis ihr Paket installiert ist"),
+                size=12,
+            ),
+            trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, opacity=0.4) if u is not None else None,
+            on_click=oeffnen if u is not None else None,
+            content_padding=ft.Padding.only(left=0, right=0),
+            data=("ergaenzt", uebung_id),
+        )
+
     def kurs_zeile(k: Kurs) -> ft.Control:
         weg = any(e.id == k.id for e in entfallene_kurse)
         return ft.Row(
@@ -984,6 +1016,21 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
                         *(
                             [karte(titel("Pläne"), *[paketplan_zeile(*e) for e in plaene_hier])]
                             if plaene_hier
+                            else []
+                        ),
+                        *(
+                            [
+                                karte(
+                                    titel("Ergänzt"),
+                                    hinweis(
+                                        "Das Paket ergänzt Übungen anderer Pakete. Was du an "
+                                        "ihnen geändert hast, bleibt; deaktivieren oder "
+                                        "entfernen nimmt die Ergänzungen wieder heraus."
+                                    ),
+                                    *[ergaenzung_zeile(u, d) for u, d in ergaenzt],
+                                )
+                            ]
+                            if ergaenzt
                             else []
                         ),
                         *(

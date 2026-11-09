@@ -14,15 +14,28 @@ import sqlite3
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 from ..core.eigenes_paket import EigenesPaket, inhalt_sha, noetige_uebungen
+from ..core.ergaenzungen import Ergaenzung, ergaenzung_aus
 from ..core.kurse import Kurs
 from ..core.models import Exercise, Plan, jetzt
 from ..core.paketdatei import export_schreiben
-from ..core.pakete import Paket, PaketPlan, paket_bauen, paketplan_aus
+from ..core.pakete import Paket, PaketPlan, paket_bauen, paketplan_aus, stand
 from .db import transaktion
 from .kurse import KursRepo
+from .pakete import PaketRepo
 from .repositories import ExerciseRepo, PlanRepo
+
+
+class Ausgabe(NamedTuple):
+    """Was ein eigenes Paket hinausgibt (`EigenesPaketRepo.inhalt`)."""
+
+    paket: Paket
+    uebungen: list[Exercise]
+    plaene: list[PaketPlan]
+    kurse: list[Kurs]
+    ergaenzungen: list[Ergaenzung]
 
 
 def _liste(roh: str | None) -> list[str]:
@@ -118,15 +131,14 @@ class EigenesPaketRepo:
 
     # -- Inhalt --------------------------------------------------------------------------
 
-    def inhalt(
-        self, ep: EigenesPaket, version: int | None = None
-    ) -> tuple[Paket, list[Exercise], list[PaketPlan], list[Kurs]]:
-        """Kopf, Übungen (gewählt + nötig), Pläne und Kurse — wie der Export sie schreibt."""
-        plaene_repo, kurse_repo, uebungen_repo = (
-            PlanRepo(self.con),
-            KursRepo(self.con),
-            ExerciseRepo(self.con),
-        )
+    def inhalt(self, ep: EigenesPaket, version: int | None = None) -> Ausgabe:
+        """Was der Export schreibt: Kopf, Übungen (gewählt + nötig), Pläne, Kurse — und für
+        Übungen **anderer Pakete** statt der Übung eine **Ergänzung** mit dem, was hier an ihr
+        anders ist (U5: eine fremde Übung bliebe beim Empfänger, wie sie ist; eine Ergänzung
+        kommt an). Unveränderte fremde Übungen reisen gar nicht — Pläne nennen sie, und wer das
+        Paket bekommt, hat sie aus ihrem Paket."""
+        plaene_repo, kurse_repo = PlanRepo(self.con), KursRepo(self.con)
+        uebungen_repo, pakete = ExerciseRepo(self.con), PaketRepo(self.con)
         plaene: list[Plan] = [
             p for p in (plaene_repo.laden(i) for i in ep.plaene) if p is not None and p.items
         ]
@@ -135,7 +147,16 @@ class EigenesPaketRepo:
         for i in [*ep.uebungen, *noetige_uebungen(plaene, kurse)]:
             if i not in ids:
                 ids.append(i)
-        uebungen = [u for u in (uebungen_repo.laden(i) for i in ids) if u is not None]
+        eigene: list[Exercise] = []
+        ergaenzungen: list[Ergaenzung] = []
+        for u in (uebungen_repo.laden(i) for i in ids):
+            if u is None:
+                continue
+            standard = pakete.standard(u.id) if u.package_id not in (None, ep.id) else None
+            if standard is None:
+                eigene.append(u)
+            elif daten := ergaenzung_aus(standard, stand(u)):
+                ergaenzungen.append(Ergaenzung(ep.id, u.id, daten))
         paket = Paket(
             id=ep.id,
             name=ep.name.strip(),
@@ -144,13 +165,18 @@ class EigenesPaketRepo:
             neuigkeiten=ep.neuigkeiten.strip(),
         )
         paketplaene = [paketplan_aus(p, key=p.id) for p in plaene]
-        return paket, uebungen, paketplaene, kurse
+        return Ausgabe(paket, eigene, paketplaene, kurse, ergaenzungen)
 
     def sha(self, ep: EigenesPaket) -> str:
         """Die Prüfsumme des Inhalts — gleich, solange sich nichts geändert hat."""
-        paket, uebungen, plaene, kurse = self.inhalt(ep)
+        a = self.inhalt(ep)
         roh = paket_bauen(
-            paket, uebungen, kurse=kurse or None, plaene=plaene or None, mit_zeitstempel=False
+            a.paket,
+            a.uebungen,
+            kurse=a.kurse or None,
+            plaene=a.plaene or None,
+            ergaenzungen=a.ergaenzungen or None,
+            mit_zeitstempel=False,
         )
         return inhalt_sha(roh)
 
@@ -165,11 +191,17 @@ class EigenesPaketRepo:
         Gemerkt wird sie erst mit `exportiert` (wenn das Weitergeben begann). Nicht in einem
         anderen Thread aufrufen (die SQLite-Verbindung) — die Oberfläche holt `inhalt` selbst
         und schreibt nur die Datei im Hintergrund."""
-        paket, uebungen, plaene, kurse = self.inhalt(ep, version)
+        a = self.inhalt(ep, version)
         datei, meldungen = export_schreiben(
-            ordner, paket, uebungen, plaene=plaene, kurse=kurse, quelle=quelle
+            ordner,
+            a.paket,
+            a.uebungen,
+            plaene=a.plaene,
+            kurse=a.kurse,
+            ergaenzungen=a.ergaenzungen,
+            quelle=quelle,
         )
         return datei, meldungen, self.sha(ep)
 
 
-__all__ = ["EigenesPaketRepo"]
+__all__ = ["Ausgabe", "EigenesPaketRepo"]

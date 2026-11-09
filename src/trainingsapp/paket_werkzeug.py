@@ -45,6 +45,7 @@ from typing import Any
 
 from trainingsapp.core.ablauf import ablauf_pruefen
 from trainingsapp.core.bedingung import bedingung_pruefen
+from trainingsapp.core.ergaenzungen import ERGAENZBAR
 from trainingsapp.core.kurse import Kapitel, Kurs, PlanVorlage, VorlageItem
 from trainingsapp.core.links import erlaubt as links_erlaubt
 from trainingsapp.core.models import Exercise, Plan
@@ -291,6 +292,14 @@ def pruefen(
                     f"{len(dateien)} Datei(en), bereinigt {groesse / 1e6:.1f} MB — "
                     "`bauen` schreibt eine ZIP (Formatversion 4)"
                 )
+    for x in roh.get("ergaenzungen") or []:  # U5: was eine Ergänzung nicht darf, fällt weg
+        if isinstance(x, dict):
+            fremd = sorted(k for k in x if k not in ("uebung", "paket", *ERGAENZBAR))
+            if fremd:
+                hinweise.append(
+                    f"Ergänzung „{x.get('uebung')}“: {', '.join(fremd)} — darf eine Ergänzung "
+                    "nicht setzen, fällt weg"
+                )
     if inhalt.paket.version is None:
         hinweise.append("Kopf ohne `version` — ohne sie erkennt kein Gerät ein Update")
     for treffer in wortliste_pruefen(roh, wortliste):
@@ -378,6 +387,7 @@ def bauen(datei: Path, ziel: Path) -> Path:
             inhalt.kurse,
             mit_zeitstempel=False,
             plaene=inhalt.plaene or None,
+            ergaenzungen=inhalt.ergaenzungen or None,
         )
         namen = inhalt.medien_namen()
         if not namen:
@@ -438,7 +448,9 @@ def index(
                 "plaene": len(inhalt.plaene),
                 "neuigkeiten": inhalt.paket.neuigkeiten,
                 "veroeffentlicht": bekannt.get(sha256) or datetime.now(UTC).date().isoformat(),
-                "format_version": 4
+                "format_version": 5
+                if inhalt.ergaenzungen
+                else 4
                 if inhalt.medien
                 else 3
                 if inhalt.plaene

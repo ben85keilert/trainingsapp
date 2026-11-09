@@ -49,6 +49,7 @@ from typing import Any
 from . import ablauf as ab
 from . import links
 from .abgleich import Hinweis, abgleichen, liste_abgleichen
+from .ergaenzungen import ERGAENZBAR, Ergaenzung
 from .kurse import (
     BEDINGUNGEN,
     FREISCHALTUNGEN,
@@ -73,8 +74,9 @@ from .zaehlen import SensorWahl
 #: Kennung im Feld ``format`` — andere JSON-Dateien (Messungen) sind kein Paket
 FORMAT = "trainingsapp-uebungspaket"
 #: Höchste Formatversion, die diese App liest — 2 seit es Kurse gibt (``kurse``), 3 mit
-#: Plänen, 4 mit Dateien (ZIP, U3); eine Datei ohne Kurse wird weiter als Version 1 geschrieben
-FORMAT_VERSION = 4
+#: Plänen, 4 mit Dateien (ZIP, U3), 5 mit Ergänzungen (U5); eine Datei ohne Kurse wird weiter
+#: als Version 1 geschrieben
+FORMAT_VERSION = 5
 
 #: Namensraum der UUIDv5-IDs — derselbe wie für den Seed vor den Paketen.
 #: Einmal gewählt, nie ändern, sonst bekäme jede Übung eine neue ID.
@@ -324,10 +326,12 @@ class Paketinhalt:
     #: Dateien der Paketdatei (ZIP, Formatversion 4, U3): Name ``medien/<sha256>.<endung>`` →
     #: Datei — leer bei JSON und TOML (`core/paketdatei.py`)
     medien: dict[str, Paketmedium] = field(default_factory=dict)
+    #: Ergänzungen zu Übungen anderer Pakete (Formatversion 5, U5, `core/ergaenzungen.py`)
+    ergaenzungen: list[Ergaenzung] = field(default_factory=list)
 
     def medien_namen(self) -> set[str]:
-        """Die Paketdateien, die Übungen, Pläne und Kurse nennen (U3)."""
-        return paketmedien_in(self.uebungen, self.kurse, self.plaene)
+        """Die Paketdateien, die Übungen, Pläne, Kurse und Ergänzungen nennen (U3, U5)."""
+        return paketmedien_in(self.uebungen, self.kurse, self.plaene, self.ergaenzungen)
 
 
 def paket_id(name: str) -> str:
@@ -439,7 +443,10 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
     plan_eintraege = roh.get("plaene", [])
     if not isinstance(plan_eintraege, list):
         raise PaketFehler("Das ist keine Paketdatei (Planliste unlesbar).")
-    if not eintraege and not kurs_eintraege and not plan_eintraege:
+    ergaenzungs_eintraege = roh.get("ergaenzungen", [])
+    if not isinstance(ergaenzungs_eintraege, list):
+        raise PaketFehler("Das ist keine Paketdatei (Ergänzungen unlesbar).")
+    if not eintraege and not kurs_eintraege and not plan_eintraege and not ergaenzungs_eintraege:
         raise PaketFehler("Das Paket enthält keine Übungen.")
 
     kopf = roh.get("paket", {})
@@ -519,10 +526,103 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
             continue
         plan_keys.add(plan.key)
         plaene.append(plan)
+    ergaenzungen: list[Ergaenzung] = []
+    for nr, eintrag in enumerate(ergaenzungs_eintraege, start=1):
+        try:
+            erg = ergaenzung_lesen(eintrag, paket.id)
+        except (KeyError, TypeError, ValueError, AttributeError) as grund:
+            probleme.append(f"Ergänzung {nr}: {grund}")
+            continue
+        if erg.uebung_id in ids:
+            continue  # eine Übung dieses Pakets ergänzt man nicht — man schreibt sie
+        if any(e.uebung_id == erg.uebung_id for e in ergaenzungen):
+            probleme.append(f"Ergänzung {nr}: dieselbe Übung steht doppelt.")
+            continue
+        if erg.daten:
+            ergaenzungen.append(erg)
     if probleme:
         rest = len(probleme) - 3
         raise PaketFehler("\n".join(probleme[:3]) + (f"\n… und {rest} weitere" if rest > 0 else ""))
-    return Paketinhalt(paket, uebungen, kurse, plaene)
+    return Paketinhalt(paket, uebungen, kurse, plaene, ergaenzungen=ergaenzungen)
+
+
+_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def ergaenzung_ziel(uebung: str, paket: str = "") -> str:
+    """Die ID der ergänzten Übung: eine ID, oder ein Schlüssel im Paket ``paket`` (Name oder
+    ID; ohne Angabe „Standard“).
+
+    >>> ergaenzung_ziel("kniebeuge") == uebung_id(GRUNDAUSSTATTUNG, "kniebeuge")
+    True
+    >>> ergaenzung_ziel("baum", "Qigong") == uebung_id(paket_id("Qigong"), "baum")
+    True
+    """
+    uebung = uebung.strip()
+    if _UUID.fullmatch(uebung):
+        return uebung.lower()
+    paket = paket.strip()
+    if not paket or paket.casefold() in ("standard", "grundausstattung"):
+        pid = GRUNDAUSSTATTUNG
+    elif _UUID.fullmatch(paket):
+        pid = paket.lower()
+    else:
+        pid = paket_id(paket)
+    return uebung_id(pid, uebung)
+
+
+def ergaenzung_lesen(eintrag: Any, paket: str) -> Ergaenzung:
+    """Eine Ergänzung aus ``ergaenzungen[]`` (U5): ``uebung`` (ID oder Schlüssel, dazu wahlweise
+    ``paket``) und die Felder aus `ERGAENZBAR` — Medien wie an Übungen geprüft (nur https,
+    Paketdateien), der Rest wie im Paketstand.
+
+    >>> e = ergaenzung_lesen({"uebung": "kniebeuge", "description": "## Reha\\nLangsam.",
+    ...                      "media": [{"uri": "intent://x"}, {"uri": "https://v"}],
+    ...                      "name": "geht nicht"}, "p1")
+    >>> sorted(e.daten), [m["uri"] for m in e.daten["media"]]
+    (['description', 'media'], ['https://v'])
+    """
+    if not isinstance(eintrag, dict):
+        raise ValueError("kein Eintrag mit Feldern")
+    ziel = str(eintrag.get("uebung") or "").strip()
+    if not ziel:
+        raise ValueError("„uebung“ fehlt")
+    daten: dict[str, Any] = {}
+    for feld in ERGAENZBAR:
+        if feld not in eintrag or eintrag[feld] is None:
+            continue
+        wert = eintrag[feld]
+        if feld == "description":
+            if not isinstance(wert, str):
+                raise ValueError("description ist kein Text")
+            if wert.strip():
+                daten[feld] = wert.strip()
+        elif feld == "media":
+            medien = [m for m in (_medium(d) for d in _liste(wert, "media")) if m is not None]
+            if medien:
+                daten[feld] = [
+                    {
+                        "kind": str(m.kind),
+                        "source": str(m.source),
+                        "uri": m.uri,
+                        "title": m.title,
+                        **({"license": m.license} if m.license else {}),
+                    }
+                    for m in medien
+                ]
+        elif feld == "result_spec":
+            if not isinstance(wert, dict):
+                raise ValueError("result_spec ist keine Tabelle")
+            daten[feld] = ResultSpec.from_dict(wert).to_dict()
+        elif feld == "timer":
+            if not isinstance(wert, list):
+                raise ValueError("timer ist keine Liste")
+            daten[feld] = json.loads(json.dumps(wert, ensure_ascii=False))
+        else:  # default_target, takt
+            if not isinstance(wert, dict):
+                raise ValueError(f"{feld} ist keine Tabelle")
+            daten[feld] = json.loads(json.dumps(wert, ensure_ascii=False))
+    return Ergaenzung(paket, ergaenzung_ziel(ziel, str(eintrag.get("paket") or "")), daten)
 
 
 def _plan_lesen(eintrag: Any, schluessel: Mapping[str, str]) -> PaketPlan:
@@ -1085,6 +1185,7 @@ def paketmedien_in(
     uebungen: Iterable[Exercise],
     kurse: Iterable[Kurs] = (),
     plaene: Iterable[PaketPlan] = (),
+    ergaenzungen: Iterable[Ergaenzung] = (),
 ) -> set[str]:
     """Die Paketdateien (``medien/<sha256>.<endung>``), die Übungen, Kapitel und Planübungen
     nennen — auch die Planübungen in Kapiteln.
@@ -1100,7 +1201,16 @@ def paketmedien_in(
             medien.extend(kap.media)
             vorlagen.extend(kap.plaene)
     medien.extend(m for v in vorlagen for item in v.items for m in item.medien)
-    return {m.uri for m in medien if ist_paketmedium(m)}
+    namen = {m.uri for m in medien if ist_paketmedium(m)}
+    for e in ergaenzungen:  # Ergänzungen tragen Medien als Wörterbücher (U5)
+        for roh in e.daten.get("media") or []:
+            if (
+                isinstance(roh, dict)
+                and roh.get("source") == "paket"
+                and (m := medium_aus_paket(roh)) is not None
+            ):
+                namen.add(m.uri)
+    return namen
 
 
 def paket_bauen(
@@ -1111,6 +1221,7 @@ def paket_bauen(
     *,
     mit_zeitstempel: bool = True,
     plaene: list[PaketPlan] | None = None,
+    ergaenzungen: list[Ergaenzung] | None = None,
 ) -> dict[str, Any]:
     """Die Paketdatei als Wörterbuch — `paket_json` macht Bytes daraus.
 
@@ -1140,7 +1251,9 @@ def paket_bauen(
         kopf["neuigkeiten"] = paket.neuigkeiten
     roh: dict[str, Any] = {
         "format": FORMAT,
-        "version": 4
+        "version": 5
+        if ergaenzungen
+        else 4
         if paketmedien_in(uebungen, kurse or [], plaene or [])
         else 3
         if plaene
@@ -1158,6 +1271,8 @@ def paket_bauen(
         roh["kurse"] = [{"id": k.id, **kurs_stand(k)} for k in kurse]
     if plaene:
         roh["plaene"] = [p.to_dict() for p in plaene]
+    if ergaenzungen:
+        roh["ergaenzungen"] = [e.to_dict() for e in ergaenzungen]
     return roh
 
 
@@ -1168,11 +1283,19 @@ def paket_json(
     *,
     mit_zeitstempel: bool = True,
     plaene: list[PaketPlan] | None = None,
+    ergaenzungen: list[Ergaenzung] | None = None,
 ) -> bytes:
     """Die Datei zum Weitergeben: lesbar eingerückt, Umlaute im Klartext.
 
     ``mit_zeitstempel=False`` (Werkzeug): ohne ``exportiert`` — reproduzierbar (K28)."""
-    roh = paket_bauen(paket, uebungen, kurse=kurse, mit_zeitstempel=mit_zeitstempel, plaene=plaene)
+    roh = paket_bauen(
+        paket,
+        uebungen,
+        kurse=kurse,
+        mit_zeitstempel=mit_zeitstempel,
+        plaene=plaene,
+        ergaenzungen=ergaenzungen,
+    )
     return (json.dumps(roh, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 

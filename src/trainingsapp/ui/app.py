@@ -112,6 +112,8 @@ from trainingsapp.ui.views.anhang_hochladen import (
 )
 from trainingsapp.ui.views.anhang_ton import anhang_ton_view
 from trainingsapp.ui.views.ausdauer import ausdauer_detail_view, ausdauer_view, verwaiste_dialog
+from trainingsapp.ui.views.eigene_pakete import SEGMENT as EIGEN_SEGMENT
+from trainingsapp.ui.views.eigene_pakete import eigenes_paket_view
 from trainingsapp.ui.views.einstellungen import einstellungen
 from trainingsapp.ui.views.einstellungen_anhaenge import einstellungen_anhaenge
 from trainingsapp.ui.views.einstellungen_herzfrequenz import einstellungen_herzfrequenz
@@ -659,11 +661,24 @@ def main(page: ft.Page) -> None:
         if gelesen is None:
             return None
         ziel, rest = gelesen
-        if ziel.uebung_id is not None:
-            # Das Bild einer Übung (2.11.2026) — nur Fotos, und nur eine, die es gibt
+        if ziel.uebung_id is not None or ziel.bewegung_id is not None:
+            # Das Bild einer Übung (2.11.2026) oder das Bild der Bewegung (5.11.2026; bis
+            # 9.11.2026 fiel es hier durch) — nur Fotos, und nur an einer, die es gibt
             if rest[:1] not in (["foto"], []) and rest:
                 return None
-            return gelesen if state.uebungen.laden(ziel.uebung_id) is not None else None
+            uebung_id = ziel.uebung_id or ziel.bewegung_id or ""
+            return gelesen if state.uebungen.laden(uebung_id) is not None else None
+        if ziel.ist_paketdatei:
+            # Eine Datei fürs Paket (U4, 9.11.2026): Foto oder Video, an einer Übung bzw.
+            # Planübung, die es gibt
+            if rest[:1] not in (["foto"], ["video"], []) and rest:
+                return None
+            da = (
+                state.uebungen.laden(ziel.paket_uebung_id) is not None
+                if ziel.paket_uebung_id is not None
+                else state.plaene.item_laden(ziel.paket_item_id or "") is not None
+            )
+            return gelesen if da else None
         if ziel.notiz_id is not None:
             notiz = state.tagesnotizen.laden(ziel.notiz_id)
             if notiz is None or notiz.subject_id != state.profil.id:
@@ -740,6 +755,9 @@ def main(page: ft.Page) -> None:
         if rest[:1] == ["export"]:
             auswahl = rest[1] if len(rest) > 1 else None
             ablegen(lambda: paket_export_view(page, state, basis, auswahl))
+        elif rest[:1] == [EIGEN_SEGMENT] and len(rest) > 1:  # ein eigenes Paket (U4)
+            eigen_id = rest[1]
+            ablegen(lambda: eigenes_paket_view(page, state, basis, eigen_id))
         elif rest and (paket := state.pakete.laden(rest[0])) is not None and not paket.entfernt:
             ablegen(lambda: paket_view(page, state, basis, paket))  # auch deaktivierte
 

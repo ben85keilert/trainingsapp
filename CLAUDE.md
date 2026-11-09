@@ -192,7 +192,11 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   `Medien/Pakete/` neben der Datenbank (`data/paketmedien.py`, räumt auf), Lesen/Schreiben
   `core/paketdatei.py` (auch TOML mit `datei = "…"`), **jede Datei vor dem Weitergeben ohne
   Ortsangaben** (`core/bereinigen.py` — was nicht sicher geht, kommt nicht ins Paket), Anzeige
-  `components/medienliste.py` und `…/paketmedium/<datei>`. Paketmanager: Jede
+  `components/medienliste.py` und `…/paketmedium/<datei>`. **Eigene Pakete** (U4): Karte im
+  Paketmanager (`views/eigene_pakete.py`, Migration 048 `own_package`, feste ID, Version
+  vorschlagen nach Inhalts-Prüfsumme), „Datei fürs Paket“ in beiden Editoren (sofort bereinigt,
+  `ui/paketdatei.py`, Ziel `paketdatei/…` für Kamera und Fotoauswahl). Datenbank nie in
+  `asyncio.to_thread` — dort nur Dateien (SQLite gehört dem Event-Loop). Paketmanager: Jede
   Paketübung trägt ihren Paketstand (`package_standard_json`) für „Auf Paketstand setzen“;
   Entfernen legt die Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück;
   **Deaktivieren** (Migration 017) versteckt alles, ohne zu löschen; was beim Update aus

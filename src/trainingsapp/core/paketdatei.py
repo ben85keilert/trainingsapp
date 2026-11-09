@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import io
 import shutil
+import tempfile
 import tomllib
 import zipfile
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -30,8 +31,19 @@ from pathlib import Path
 from typing import IO, Any, Final
 
 from .bereinigen import NichtBereinigbar, datei_bereinigen
-from .models import Media, MediaSource
-from .pakete import MAX_PAKET_BYTES, PaketFehler, Paketinhalt, paket_lesen
+from .kurse import Kurs
+from .models import Exercise, Media, MediaSource
+from .pakete import (
+    MAX_PAKET_BYTES,
+    Paket,
+    PaketFehler,
+    Paketinhalt,
+    PaketPlan,
+    dateiname,
+    paket_json,
+    paket_lesen,
+    paketmedien_in,
+)
 from .paketmedien import (
     MAX_EINTRAEGE,
     MAX_ENTPACKT_BYTES,
@@ -196,7 +208,8 @@ def medienlisten(roh: Mapping[str, Any]) -> Iterator[list[Any]]:
             yield from aus_plaenen(kap.get("plaene"))
 
 
-def _sha256(pfad: Path) -> str:
+def sha256_datei(pfad: Path) -> str:
+    """Die Prüfsumme einer Datei, ohne sie ganz zu lesen."""
     h = hashlib.sha256()
     with pfad.open("rb") as f:
         while block := f.read(1 << 20):
@@ -233,7 +246,7 @@ def dateien_einbinden(roh: dict[str, Any], basis: Path, arbeit: Path) -> dict[st
                 datei_bereinigen(quelle, zwischen, endung)
             except NichtBereinigbar as fehler:
                 raise PaketFehler(f"Datei „{rel}“: {fehler}") from None
-            name = name_fuer(_sha256(zwischen), endung)
+            name = name_fuer(sha256_datei(zwischen), endung)
             ziel = arbeit / name.removeprefix("medien/")
             zwischen.replace(ziel)
             dateien[name] = ziel
@@ -289,7 +302,7 @@ def medien_fuer_export(
             umbenennung[name] = None
             meldungen.append(f"Eine Datei bleibt draußen: {fehler}.")
             continue
-        neu = name_fuer(_sha256(zwischen), teile[1])
+        neu = name_fuer(sha256_datei(zwischen), teile[1])
         dateien[neu] = zwischen
         umbenennung[name] = neu
     return dateien, umbenennung, meldungen
@@ -315,6 +328,80 @@ def medien_umbenennen(
             m = replace(m, uri=neu)
         out.append(m)
     return out
+
+
+def export_schreiben(
+    ordner: Path,
+    paket: Paket,
+    uebungen: list[Exercise],
+    *,
+    plaene: list[PaketPlan] | None = None,
+    kurse: list[Kurs] | None = None,
+    quelle: Callable[[str], Path | None],
+    mit_zeitstempel: bool = True,
+) -> tuple[Path, list[str]]:
+    """Die Paketdatei zum Weitergeben in ``ordner`` — eine ZIP mit den Paketdateien, jede noch
+    einmal bereinigt (`medien_fuer_export`), oder JSON, wenn keine Datei dabei ist bzw. übrig
+    blieb. ``quelle``: wo eine Paketdatei auf dem Gerät liegt. ``(Datei, Meldungen)``."""
+    plaene = plaene or []
+    kurse = kurse or []
+    ordner.mkdir(parents=True, exist_ok=True)
+    namen = paketmedien_in(uebungen, kurse, plaene)
+    if not namen:
+        ziel = ordner / dateiname(paket)
+        ziel.write_bytes(
+            paket_json(
+                paket,
+                uebungen,
+                kurse or None,
+                plaene=plaene or None,
+                mit_zeitstempel=mit_zeitstempel,
+            )
+        )
+        return ziel, []
+    with tempfile.TemporaryDirectory() as arbeit:
+        dateien, umbenennung, meldungen = medien_fuer_export(namen, quelle, Path(arbeit))
+
+        def plan_neu(pp: PaketPlan) -> PaketPlan:
+            return replace(
+                pp,
+                vorlage=replace(
+                    pp.vorlage,
+                    items=[
+                        replace(i, medien=medien_umbenennen(i.medien, umbenennung))
+                        for i in pp.vorlage.items
+                    ],
+                ),
+            )
+
+        kurse_neu = [
+            replace(
+                k,
+                kapitel=[
+                    replace(
+                        kap,
+                        media=medien_umbenennen(kap.media, umbenennung),
+                        plaene=[plan_neu(PaketPlan("k", v)).vorlage for v in kap.plaene],
+                    )
+                    for kap in k.kapitel
+                ],
+            )
+            for k in kurse
+        ]
+        json_daten = paket_json(
+            paket,
+            [replace(u, media=medien_umbenennen(u.media, umbenennung)) for u in uebungen],
+            kurse_neu or None,
+            plaene=[plan_neu(pp) for pp in plaene] or None,
+            mit_zeitstempel=mit_zeitstempel,
+        )
+        if not dateien:
+            ziel = ordner / dateiname(paket)
+            ziel.write_bytes(json_daten)
+            return ziel, meldungen
+        ziel = ordner / dateiname(paket, "zip")
+        paket_zip(ziel, json_daten, dateien)
+        return ziel, meldungen
 
 
 def paket_zip(ziel: Path, json_daten: bytes, medien: Mapping[str, Path]) -> None:
@@ -346,10 +433,12 @@ __all__ = [
     "PAKET_JSON",
     "ZIP_KOPF",
     "dateien_einbinden",
+    "export_schreiben",
     "medien_fuer_export",
     "medien_umbenennen",
     "medienlisten",
     "paket_oeffnen",
     "paket_zip",
+    "sha256_datei",
     "toml_oeffnen",
 ]

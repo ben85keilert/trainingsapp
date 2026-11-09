@@ -45,7 +45,8 @@ from typing import Any
 import flet as ft
 
 from trainingsapp.core import varianten as var
-from trainingsapp.core.anhaenge import BILD, Ziel
+from trainingsapp.core.anhaenge import BILD, VIDEO, Ziel
+from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.bewegungsbild import bewegungsbild, mit_bewegungsbild
 from trainingsapp.core.models import (
     TAG_REGION,
@@ -86,6 +87,7 @@ from trainingsapp.core.zaehlen import (
     knopf_text,
     vorlagen_angebot,
 )
+from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.bewegungsbild import bewegungsbild_blatt
 from trainingsapp.ui.components.chips_wahl import chips_zeile
@@ -104,7 +106,7 @@ from trainingsapp.ui.components.varianten import plakette
 from trainingsapp.ui.components.varianten import symbol as varianten_symbol
 from trainingsapp.ui.components.zurueck import zurueck_speichert
 from trainingsapp.ui.state import AppState
-from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route
+from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route, kamera_moeglich
 from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 from trainingsapp.ui.views.uebung_timer import formular_profil_route
 
@@ -984,6 +986,84 @@ def uebung_bearbeiten(
     paket_medien: list[Media] = [
         m for m in (uebung.media if uebung else []) if m.source == MediaSource.PAKET
     ]
+    #: Je Paketdatei ihr Titelfeld — einmal angelegt, wie die Felder der Links
+    paket_titel: dict[str, ft.TextField] = {}
+
+    def paket_titelfeld(m: Media) -> ft.TextField:
+        if m.uri not in paket_titel:
+            paket_titel[m.uri] = ft.TextField(label="Titel", value=m.title, dense=True)
+        return paket_titel[m.uri]
+
+    def paket_medien_lesen() -> list[Media]:
+        return [replace(m, title=(paket_titelfeld(m).value or "").strip()) for m in paket_medien]
+
+    async def datei_fuers_paket() -> None:
+        """Eine Datei vom Gerät (U4): bereinigt in die Ablage, gespeichert mit dem Formular."""
+        pfad = await paketdatei.datei_waehlen(page)
+        if pfad is None:
+            return
+        try:
+            name = await paketdatei.ablegen(state, pfad, pfad.suffix)
+        except (NichtBereinigbar, OSError) as fehler:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht übernommen: {fehler}")))
+            return
+        if all(m.uri != name for m in paket_medien):
+            paket_medien.append(paketdatei.medium_fuer(name, pfad.stem))
+        medien_zeichnen()
+        page.update()
+
+    async def paketdatei_aufnehmen(art: str) -> None:
+        """Kamera (U4): das Formular speichert, die Aufnahme hängt sich an die Übung."""
+        await wechseln(
+            lambda formular: aufnahme_route(formular, Ziel.fuer_paketdatei(gespeichert["id"]), art)
+        )
+
+    async def paketdatei_hochladen() -> None:
+        await wechseln(
+            lambda formular: hochladen_route(formular, Ziel.fuer_paketdatei(gespeichert["id"]))
+        )
+
+    def datei_menue() -> ft.Control:
+        """„Datei fürs Paket“ — wählen, Foto, Video, Fotoauswahl (was das Gerät kann)."""
+        eintraege = [
+            ft.PopupMenuItem(
+                content="Datei wählen …",
+                icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+                on_click=datei_fuers_paket,
+            )
+        ]
+        if kamera_moeglich(page):
+            eintraege += [
+                ft.PopupMenuItem(
+                    content="Foto aufnehmen",
+                    icon=ft.Icons.PHOTO_CAMERA_OUTLINED,
+                    on_click=lambda _e=None: page.run_task(paketdatei_aufnehmen, BILD),
+                ),
+                ft.PopupMenuItem(
+                    content="Video aufnehmen",
+                    icon=ft.Icons.VIDEOCAM_OUTLINED,
+                    on_click=lambda _e=None: page.run_task(paketdatei_aufnehmen, VIDEO),
+                ),
+            ]
+        if state.hochladen is not None:
+            eintraege.append(
+                ft.PopupMenuItem(
+                    content="Aus der Fotoauswahl",
+                    icon=ft.Icons.PHOTO_LIBRARY_OUTLINED,
+                    on_click=paketdatei_hochladen,
+                )
+            )
+        return ft.PopupMenuButton(
+            content=ft.Row(
+                tight=True,
+                spacing=6,
+                controls=[ft.Icon(ft.Icons.ATTACH_FILE, size=18), ft.Text("Datei fürs Paket")],
+            ),
+            tooltip="Bild, Video, Ton oder PDF — reist mit, wenn du die Übung als Paket "
+            "weitergibst; Ortsangaben fallen weg",
+            items=eintraege,
+            data="datei_fuers_paket",
+        )
 
     def paket_entferner(m: Media) -> Callable[[], None]:
         def handler() -> None:
@@ -1009,8 +1089,8 @@ def uebung_bearbeiten(
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
                         ft.Icon(MEDIEN_SYMBOLE.get(m.kind, ft.Icons.ATTACH_FILE), size=20),
-                        ft.Text(m.title or "Datei aus dem Paket", expand=True),
-                        ft.Text("aus dem Paket", size=11, opacity=0.6),
+                        ft.Container(content=paket_titelfeld(m), expand=True),
+                        ft.Text("Datei", size=11, opacity=0.6),
                         ft.IconButton(
                             ft.Icons.CLOSE,
                             tooltip="Aus der Übung nehmen",
@@ -1594,7 +1674,7 @@ def uebung_bearbeiten(
             if (adresse.value or "").strip()
         ]
         # Das Bild der Bewegung (T6) bleibt als Medium neben den Videos
-        ziel.media = mit_bewegungsbild([*paket_medien, *videos], bewegung_stand["bild"])
+        ziel.media = mit_bewegungsbild([*paket_medien_lesen(), *videos], bewegung_stand["bild"])
         return ziel
 
     def stand() -> tuple[Any, ...]:
@@ -1618,7 +1698,7 @@ def uebung_bearbeiten(
             bild_stand["key"],
             bild_stand["bild"],
             [(t.value or "", a.value or "") for t, a in medien_zeilen],
-            [m.uri for m in paket_medien],
+            [(m.uri, m.title) for m in paket_medien_lesen()],
             [p.als_dict() for p in timer_liste],
             bool(uhr_schalter.value),
             bool(zaehlt_schalter.value),
@@ -1802,12 +1882,19 @@ def uebung_bearbeiten(
                             ),
                         ),
                         acc_karte,
-                        abschnitt("VIDEOS UND LINKS"),
+                        abschnitt("VIDEOS, LINKS UND DATEIEN"),
                         medien_spalte,
-                        ft.TextButton(
-                            "Link hinzufügen",
-                            icon=ft.Icons.ADD_LINK,
-                            on_click=link_hinzufuegen,
+                        ft.Row(
+                            wrap=True,
+                            spacing=8,
+                            controls=[
+                                ft.TextButton(
+                                    "Link hinzufügen",
+                                    icon=ft.Icons.ADD_LINK,
+                                    on_click=link_hinzufuegen,
+                                ),
+                                datei_menue(),
+                            ],
                         ),
                         abschnitt("ORDNEN", hilfe_knopf(page, thema="uebungen")),
                         tagwahl.control,

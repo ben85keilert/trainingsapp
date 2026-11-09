@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, Final
 
-from .models import Media, MediaKind, MediaSource
+from .models import Media, MediaKind, MediaSource, jetzt, lokaler_tag
 
 #: Der Ordner der Medien in der ZIP-Datei
 ORDNER: Final = "medien/"
@@ -140,6 +140,33 @@ def medium_aus_paket(roh: Mapping[str, Any]) -> Media | None:
     )
 
 
+#: Titel einer neuen eigenen Datei, bis man ihn ändert (U4)
+_TITEL: Final[dict[MediaKind, str]] = {
+    MediaKind.IMAGE: "Foto",
+    MediaKind.VIDEO: "Video",
+    MediaKind.AUDIO: "Ton",
+    MediaKind.PDF: "PDF",
+}
+
+
+def medium_fuer(name: str, titel: str = "") -> Media:
+    """Das Medium zu einer abgelegten Paketdatei (U4) — die Art nach der Endung, ohne Titel
+    „Video vom 09.11.“.
+
+    >>> m = medium_fuer("medien/" + "a" * 64 + ".mp4")
+    >>> m.kind, m.source, m.title.startswith("Video vom ")
+    (<MediaKind.VIDEO: 'video'>, <MediaSource.PAKET: 'paket'>, True)
+    """
+    teile = name_lesen(name)
+    art = (art_fuer(teile[1]) if teile is not None else None) or MediaKind.VIDEO
+    return Media(
+        kind=art,
+        source=MediaSource.PAKET,
+        uri=name,
+        title=titel or f"{_TITEL.get(art, 'Datei')} vom {lokaler_tag(jetzt()):%d.%m.}",
+    )
+
+
 def groesse_text(n: int) -> str:
     """„850 kB“, „12 MB“, „1,2 GB“.
 
@@ -213,6 +240,7 @@ __all__ = [
     "groesse_text",
     "ist_paketmedium",
     "medium_aus_paket",
+    "medium_fuer",
     "name_fuer",
     "name_lesen",
     "namen",

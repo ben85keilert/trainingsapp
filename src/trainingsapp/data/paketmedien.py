@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import uuid
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Final
 
-from ..core.paketmedien import Paketmedium, dateiname, name_lesen
+from ..core.bereinigen import NichtBereinigbar, datei_bereinigen
+from ..core.paketdatei import sha256_datei
+from ..core.paketmedien import Paketmedium, art_fuer, dateiname, name_fuer, name_lesen
 
 #: Wo die Datenbank Paketdateien nennen kann — je Spalte eine feste Abfrage
 _ABFRAGEN: Final = (
@@ -68,6 +71,40 @@ class Paketablage:
         self.ordner.mkdir(parents=True, exist_ok=True)
         medium.kopieren(ziel)
         return True
+
+    def aufnehmen(self, quelle: Path, endung: str) -> str:
+        """Eine eigene Datei wird Paketdatei (U4, Ben 9.11.2026: „Paket erstellen, darin Videos
+        reinladen“): **ohne Ortsangaben** (`core/bereinigen.py`), benannt nach ihrer
+        Prüfsumme, abgelegt — der Name ``medien/<sha256>.<endung>``. Wirft `NichtBereinigbar`
+        (dann bleibt nichts liegen) oder `OSError`."""
+        endung = endung.lower().lstrip(".")
+        if art_fuer(endung) is None:
+            raise NichtBereinigbar(f"Dateiart „{endung}“ geht nicht in ein Paket")
+        self.ordner.mkdir(parents=True, exist_ok=True)
+        zwischen = self.ordner / f"neu_{uuid.uuid4().hex}.{endung}.teil"
+        try:
+            datei_bereinigen(quelle, zwischen, endung)
+            name = name_fuer(sha256_datei(zwischen), endung)
+            ziel = self.pfad(name)
+            assert ziel is not None
+            if ziel.is_file():
+                zwischen.unlink()
+            else:
+                zwischen.replace(ziel)
+        except BaseException:
+            zwischen.unlink(missing_ok=True)
+            raise
+        return name
+
+    def aufnehmen_daten(self, daten: bytes, endung: str) -> str:
+        """Wie `aufnehmen`, aus Bytes (Kamera)."""
+        self.ordner.mkdir(parents=True, exist_ok=True)
+        roh = self.ordner / f"roh_{uuid.uuid4().hex}.{endung.lower().lstrip('.')}.teil"
+        try:
+            roh.write_bytes(daten)
+            return self.aufnehmen(roh, endung)
+        finally:
+            roh.unlink(missing_ok=True)
 
     def fehlende(self, namen: Iterable[str], im_paket: Iterable[str] = ()) -> list[str]:
         """Welche der ``namen`` weder hier liegen noch in der Paketdatei stecken."""

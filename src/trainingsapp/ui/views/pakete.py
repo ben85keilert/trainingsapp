@@ -34,9 +34,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sqlite3
-import tempfile
 from collections.abc import Callable, Iterable
-from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -46,12 +44,7 @@ import flet as ft
 from trainingsapp.config import datenverzeichnis, medienverzeichnis
 from trainingsapp.core.kurse import Kurs
 from trainingsapp.core.models import Exercise, Plan
-from trainingsapp.core.paketdatei import (
-    medien_fuer_export,
-    medien_umbenennen,
-    paket_oeffnen,
-    paket_zip,
-)
+from trainingsapp.core.paketdatei import export_schreiben, paket_oeffnen
 from trainingsapp.core.pakete import (
     GRUNDAUSSTATTUNG,
     Paket,
@@ -506,6 +499,10 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
             ),
         ),
     ]
+    # Eigene Pakete bauen und teilen (U4, Ben 9.11.2026)
+    from trainingsapp.ui.views.eigene_pakete import eigene_pakete_karte
+
+    karten.append(eigene_pakete_karte(state, basis, oeffner))
     if entfernt:
         karten.append(karte(titel("Entfernt"), *[entfernt_zeile(p, n) for p, n in entfernt]))
 
@@ -1011,42 +1008,27 @@ def export_zip(
     state: AppState, paket: Paket, uebungen: list[Exercise], plaene: list[PaketPlan]
 ) -> tuple[Path, list[str]]:
     """Die Exportdatei mit den Paketdateien (U3) unter ``Export/`` — ZIP, oder JSON, wenn
-    keine Datei übrig blieb. Läuft im Hintergrund (`asyncio.to_thread`); ältere Exporte im
-    Ordner fallen weg. ``(Datei, Meldungen)``."""
+    keine Datei übrig blieb (`core.paketdatei.export_schreiben`). Läuft im Hintergrund
+    (`asyncio.to_thread`); ältere Exporte im Ordner fallen weg. ``(Datei, Meldungen)``."""
     ablage = state.pakete.ablage
+    ordner = export_ordner()
+    return export_schreiben(
+        ordner,
+        paket,
+        uebungen,
+        plaene=plaene,
+        quelle=ablage.pfad if ablage is not None else (lambda _n: None),
+    )
+
+
+def export_ordner() -> Path:
+    """``<Daten>/Export`` — leer bis auf den letzten Export (die Teilen-Apps lesen die Datei
+    erst nach dem Tipp, darum bleibt sie bis zum nächsten Export liegen)."""
     ordner = datenverzeichnis() / "Export"
     ordner.mkdir(parents=True, exist_ok=True)
-    for alt in ordner.glob("uebungspaket_*.zip"):
+    for alt in ordner.glob("uebungspaket_*"):
         alt.unlink(missing_ok=True)
-    namen = paketmedien_in(uebungen, [], plaene)
-    with tempfile.TemporaryDirectory() as arbeit:
-        dateien, umbenennung, meldungen = medien_fuer_export(
-            namen,
-            (lambda n: ablage.pfad(n)) if ablage is not None else (lambda _n: None),
-            Path(arbeit),
-        )
-        uebungen_neu = [replace(u, media=medien_umbenennen(u.media, umbenennung)) for u in uebungen]
-        plaene_neu = [
-            replace(
-                pp,
-                vorlage=replace(
-                    pp.vorlage,
-                    items=[
-                        replace(i, medien=medien_umbenennen(i.medien, umbenennung))
-                        for i in pp.vorlage.items
-                    ],
-                ),
-            )
-            for pp in plaene
-        ]
-        json_daten = paket_json(paket, uebungen_neu, plaene=plaene_neu or None)
-        if not dateien:
-            ziel = ordner / dateiname(paket)
-            ziel.write_bytes(json_daten)
-            return ziel, meldungen
-        ziel = ordner / dateiname(paket, "zip")
-        paket_zip(ziel, json_daten, dateien)
-        return ziel, meldungen
+    return ordner
 
 
 def paket_export_view(

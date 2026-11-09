@@ -43,6 +43,7 @@ import flet as ft
 from trainingsapp.core.anhaenge import (
     AUDIO,
     BILD,
+    ENDUNG,
     VIDEO,
     Anhang,
     Qualitaet,
@@ -56,9 +57,11 @@ from trainingsapp.core.anhaenge import (
     timer_text,
     timer_weiter,
 )
+from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.models import jetzt
 from trainingsapp.core.timer import COUNTDOWN
 from trainingsapp.data.anhaenge import qualitaet_lesen, video_max_s
+from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.zurueck import zurueck_ziel
 from trainingsapp.ui.state import AppState
@@ -95,6 +98,12 @@ def ziel_name(state: AppState, ziel: Ziel) -> str:
     if ziel.bewegung_id is not None:
         u = state.uebungen.laden(ziel.bewegung_id, mit_geloeschten=True)
         return f"Bewegung: {u.name if u is not None else 'Übung'}"
+    if ziel.ist_paketdatei:
+        uebung_id = ziel.paket_uebung_id
+        if uebung_id is None and (item := state.plaene.item_laden(ziel.paket_item_id or "")):
+            uebung_id = item.exercise_id
+        u = state.uebungen.laden(uebung_id, mit_geloeschten=True) if uebung_id else None
+        return f"Fürs Paket: {u.name if u is not None else 'Übung'}"
     if ziel.zum_tag is not None:
         return f"Zum Tag · {ziel.zum_tag:%d.%m.}"
     eintrag = state.sitzungen.eintrag_laden(ziel.eintrag_id) if ziel.eintrag_id else None
@@ -106,7 +115,7 @@ def ziel_name(state: AppState, ziel: Ziel) -> str:
     return uebung.name if uebung is not None else "Übung"
 
 
-def _kamera_moeglich(page: Any) -> bool:
+def kamera_moeglich(page: Any) -> bool:
     """Nur Android, iOS und Web haben die Kamera-Erweiterung (flet-camera `before_update`)."""
     plattform = getattr(page, "platform", None)
     return bool(getattr(page, "web", False)) or plattform in (
@@ -478,6 +487,20 @@ class _Aufnahme:
     async def behalten(self) -> None:
         if self.daten is None:
             return
+        if self.ziel.ist_paketdatei:
+            # Eine Datei fürs Paket (U4): bereinigt in die Ablage, als Medium an die Übung
+            try:
+                name = await paketdatei.ablegen(self.state, self.daten, ENDUNG[self.art])
+                if not paketdatei.anhaengen(self.state, self.ziel, paketdatei.medium_fuer(name)):
+                    self.melden("Die Übung gibt es nicht mehr.")
+                    return
+            except (NichtBereinigbar, OSError, sqlite3.Error) as fehler:
+                self.melden(f"Nicht gespeichert: {fehler}")
+                return
+            self.daten = None
+            self.page.show_dialog(ft.SnackBar(ft.Text("Fürs Paket gespeichert — ohne Ortsangabe")))
+            await self.zurueck()
+            return
         bild_von = self.ziel.uebung_id or self.ziel.bewegung_id
         if bild_von is not None:
             # Das Bild einer Übung (2.11.2026) oder das Bild der Bewegung (5.11.2026, T6): in
@@ -583,7 +606,7 @@ class _Aufnahme:
                 ),
                 ft.FilledButton("Behalten", icon=ft.Icons.CHECK, on_click=self.behalten),
             ]
-        if not _kamera_moeglich(self.page):
+        if not kamera_moeglich(self.page):
             return [
                 ft.FilledButton(
                     "Datei wählen", icon=ft.Icons.FOLDER_OPEN, on_click=self.datei_waehlen
@@ -706,7 +729,7 @@ def anhang_aufnahme_view(page: Any, state: AppState, route: str, ziel: Ziel, art
         if art == VIDEO
         else "Vorgabe der Qualität: Einstellungen → Anhänge"
     )
-    if _kamera_moeglich(page):
+    if kamera_moeglich(page):
         a.status.value = "Kamera wird geöffnet …"
         a.flaeche.content = ft.ProgressRing()
         page.run_task(a.kamera_starten)

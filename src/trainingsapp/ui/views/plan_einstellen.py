@@ -43,7 +43,9 @@ from trainingsapp.core import ablauf as ab
 from trainingsapp.core import bedingung as bd
 from trainingsapp.core import varianten as var
 from trainingsapp.core import zaehlen as zl
+from trainingsapp.core.anhaenge import BILD, VIDEO, Ziel
 from trainingsapp.core.bedingung import Bedingung
+from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.links import erlaubt as link_erlaubt
 from trainingsapp.core.models import (
     Exercise,
@@ -84,6 +86,7 @@ from trainingsapp.core.takt import AUS, Takt
 from trainingsapp.core.timer import Abschnitt, TimerProfil
 from trainingsapp.core.uebung_timer import TimerWahl, timer_fuer
 from trainingsapp.core.zaehlen import VORLAGE_AUTO, VORLAGEN_ANGEBOT, SensorWahl, vorlagen_angebot
+from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components.abschnitt_editor import AbschnittEditor
 from trainingsapp.ui.components.bedingung_form import bedingung_karte as bedingungs_karte
 from trainingsapp.ui.components.chips_wahl import chips_zeile
@@ -100,6 +103,8 @@ from trainingsapp.ui.components.timer_wahl import timer_waehlen
 from trainingsapp.ui.components.wege_form import wege_karte
 from trainingsapp.ui.components.zurueck import zurueck_speichert, zurueck_ziel
 from trainingsapp.ui.state import AppState
+from trainingsapp.ui.views.anhang_aufnahme import aufnahme_route, kamera_moeglich
+from trainingsapp.ui.views.anhang_hochladen import hochladen_route
 
 #: Die Karte eines Parameters
 KARTE = ft.Colors.SURFACE_CONTAINER_HIGHEST
@@ -272,15 +277,27 @@ def plan_einstellen(
         for z in links_stand:
             medium = z["medium"]
             if isinstance(medium, Media) and medium.source == MediaSource.PAKET:
-                # Eine Datei aus dem Paket (U3): ohne Adressfeld, nur herausnehmen
+                # Eine Datei fürs Paket (U3/U4): Titel, kein Adressfeld, nur herausnehmen
+
+                def paket_titel(e: Any, z: dict[str, Any] = z) -> None:
+                    z["titel"] = e.control.value or ""
+
                 zeilen.append(
                     ft.Row(
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
                             ft.Icon(MEDIEN_SYMBOLE.get(medium.kind, ft.Icons.ATTACH_FILE), size=20),
-                            ft.Text(medium.title or "Datei aus dem Paket", expand=True),
-                            ft.Text("aus dem Paket", size=11, opacity=0.6),
+                            ft.Container(
+                                expand=True,
+                                content=ft.TextField(
+                                    label="Titel",
+                                    value=z["titel"],
+                                    dense=True,
+                                    on_change=paket_titel,
+                                ),
+                            ),
+                            ft.Text("Datei", size=11, opacity=0.6),
                             ft.IconButton(
                                 ft.Icons.CLOSE,
                                 tooltip="Aus der Planübung nehmen",
@@ -326,6 +343,8 @@ def plan_einstellen(
         zeilen += [
             links_fehler,
             ft.Row(
+                wrap=True,
+                spacing=8,
                 controls=[
                     ft.TextButton(
                         "Link hinzufügen",
@@ -333,11 +352,81 @@ def plan_einstellen(
                         tooltip="Video, Text oder PDF — eine https-Adresse",
                         on_click=link_hinzufuegen,
                         data="link_hinzufuegen",
-                    )
-                ]
+                    ),
+                    datei_menue(),
+                ],
             ),
         ]
         links_spalte.controls = zeilen
+
+    async def datei_fuers_paket() -> None:
+        """Eine Datei vom Gerät (U4): bereinigt in die Ablage, gespeichert mit dem Formular."""
+        pfad = await paketdatei.datei_waehlen(page)
+        if pfad is None:
+            return
+        try:
+            name = await paketdatei.ablegen(state, pfad, pfad.suffix)
+        except (NichtBereinigbar, OSError) as fehler:
+            page.show_dialog(ft.SnackBar(ft.Text(f"Nicht übernommen: {fehler}")))
+            return
+        if all(z["uri"] != name for z in links_stand):
+            m = paketdatei.medium_fuer(name, pfad.stem)
+            links_stand.append({"medium": m, "titel": m.title, "uri": name, "id": m.id})
+        links_neu()
+
+    async def paketdatei_aufnehmen(art: str) -> None:
+        """Kamera (U4): erst speichern — die Aufnahme hängt sich an die Planübung, und die
+        Seite entsteht beim Zurückkommen aus der Datenbank neu."""
+        if sichern() is None:
+            await page.push_route(
+                aufnahme_route(ansicht.route, Ziel.fuer_paketdatei(item_id=item.id), art)
+            )
+
+    async def paketdatei_hochladen() -> None:
+        if sichern() is None:
+            await page.push_route(
+                hochladen_route(ansicht.route, Ziel.fuer_paketdatei(item_id=item.id))
+            )
+
+    def datei_menue() -> ft.Control:
+        eintraege = [
+            ft.PopupMenuItem(
+                content="Datei wählen …",
+                icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+                on_click=datei_fuers_paket,
+            )
+        ]
+        if kamera_moeglich(page):
+            eintraege += [
+                ft.PopupMenuItem(
+                    content="Foto aufnehmen",
+                    icon=ft.Icons.PHOTO_CAMERA_OUTLINED,
+                    on_click=lambda _e=None: page.run_task(paketdatei_aufnehmen, BILD),
+                ),
+                ft.PopupMenuItem(
+                    content="Video aufnehmen",
+                    icon=ft.Icons.VIDEOCAM_OUTLINED,
+                    on_click=lambda _e=None: page.run_task(paketdatei_aufnehmen, VIDEO),
+                ),
+            ]
+        if state.hochladen is not None:
+            eintraege.append(
+                ft.PopupMenuItem(
+                    content="Aus der Fotoauswahl",
+                    icon=ft.Icons.PHOTO_LIBRARY_OUTLINED,
+                    on_click=paketdatei_hochladen,
+                )
+            )
+        return ft.PopupMenuButton(
+            content=ft.Row(
+                tight=True,
+                spacing=6,
+                controls=[ft.Icon(ft.Icons.ATTACH_FILE, size=18), ft.Text("Datei fürs Paket")],
+            ),
+            tooltip="Bild, Video, Ton oder PDF für diese Planübung — Ortsangaben fallen weg",
+            items=eintraege,
+            data="datei_fuers_paket",
+        )
 
     def links_lesen() -> list[Media]:
         """Die Links, wie sie dastehen — bisherige behalten ID, Art und Quelle."""

@@ -184,7 +184,8 @@ def test_editoren_behalten_paketdateien(tmp_path, page, state) -> None:
         if isinstance(x, ft.TextField) and x.label == "Adresse (https://…)"
     ]
     assert adressen == ["https://x.org/beuge"]
-    assert _texte(ansicht).count("aus dem Paket") == 2
+    titel = [x.value for x in _alle(ansicht) if isinstance(x, ft.TextField) and x.label == "Titel"]
+    assert "So sieht es aus" in titel and "Übungsblatt" in titel  # Paketdateien: nur der Titel
     speichern = next(
         x
         for x in _alle(ansicht.appbar)
@@ -208,7 +209,9 @@ def test_editoren_behalten_paketdateien(tmp_path, page, state) -> None:
     state.plaene.item_speichern(item)
     item = state.plaene.item_laden(item.id)
     einstellen = plan_einstellen(page, state, state.plaene.laden(plan.id), item, neu)
-    assert "Blatt" in _texte(einstellen)
+    assert "Blatt" in [
+        x.value for x in _alle(einstellen) if isinstance(x, ft.TextField) and x.label == "Titel"
+    ]
     item.target = {"reps": [10]}
     speichern = next(
         x

@@ -41,12 +41,14 @@ from trainingsapp.core.anhaenge import (
     groesse_text,
     neuer_anhang,
 )
+from trainingsapp.core.bereinigen import NichtBereinigbar
 from trainingsapp.core.models import jetzt, new_id
 from trainingsapp.data.anhaenge import (
     jpeg_datei_ohne_metadaten,
     mp4_ort_entfernen,
     qualitaet_lesen,
 )
+from trainingsapp.ui import paketdatei
 from trainingsapp.ui.components.anhang_reihe import bild_laden
 from trainingsapp.ui.components.layout import sicher
 from trainingsapp.ui.components.zurueck import zurueck_ziel
@@ -243,6 +245,26 @@ class _Hochladen:
 
     async def behalten(self) -> None:
         if not self.fertig or self.ziel is None or self.art is None:
+            return
+        if self.woran.ist_paketdatei:
+            # Eine Datei fürs Paket (U4): bereinigt in die Ablage, als Medium an die Übung
+            datei, bild = self.ziel, self.frontbild
+            try:
+                name = await paketdatei.ablegen(self.state, datei, datei.suffix)
+                if not paketdatei.anhaengen(self.state, self.woran, paketdatei.medium_fuer(name)):
+                    self.melden("Die Übung gibt es nicht mehr.")
+                    return
+            except (NichtBereinigbar, OSError, sqlite3.Error) as fehler:
+                self.melden(f"Nicht gespeichert: {fehler}")
+                return
+            for rest in (datei, bild):  # die verkleinerte Zwischendatei und ihr Frontbild
+                if rest is not None:
+                    with contextlib.suppress(OSError):
+                        rest.unlink()
+            self.fertig = False
+            self.ziel = self.frontbild = None
+            self.page.show_dialog(ft.SnackBar(ft.Text("Fürs Paket gespeichert — ohne Ortsangabe")))
+            await self.zurueck()
             return
         bild_von = self.woran.uebung_id or self.woran.bewegung_id
         if bild_von is not None:

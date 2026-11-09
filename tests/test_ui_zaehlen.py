@@ -207,7 +207,7 @@ def test_karte_beschleunigungssensor_speichert_nur_was_man_umlegt(formular) -> N
     ansicht = uebung_bearbeiten(page, state, u)
     texte = _texte(ansicht)
     assert texte.index("UHR") < texte.index("BESCHLEUNIGUNGSSENSOR")
-    assert texte.index("BESCHLEUNIGUNGSSENSOR") < texte.index("VIDEOS UND LINKS")
+    assert texte.index("BESCHLEUNIGUNGSSENSOR") < texte.index("VIDEOS, LINKS UND DATEIEN")
     assert "Prototyp" in texte
     (bewegung,) = [
         x for x in _alle(ansicht) if isinstance(x, ft.Dropdown) and x.label != "Weiter, wenn"

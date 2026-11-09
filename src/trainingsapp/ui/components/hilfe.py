@@ -248,6 +248,13 @@ kommen in den Papierkorb und verschwinden aus den Plänen, Einträge bleiben.
 
 Ein **Export** schreibt ausgewählte Übungen in eine Paketdatei zum Teilen — ohne
 Einträge, Messungen oder Strecken.
+
+**Eigene Pakete** — Im Paketmanager stellst du ein eigenes Paket zusammen: Übungen,
+Pläne, Kurse (was ein Plan braucht, kommt mit). **Datei fürs Paket** an einer Übung oder
+Planübung legt Videos, Fotos, Töne oder PDFs dazu — sie verlassen das Gerät nur ohne
+Ortsangaben. „Exportieren und teilen“ schlägt die Version vor: die erste 1.0.0, danach je
+nach Änderung klein, mittel oder groß. Wer das Paket hat, bekommt jede neue Fassung als
+Update — was er selbst geändert hat, bleibt.
 """
 
 ATMUNG_MD = """\

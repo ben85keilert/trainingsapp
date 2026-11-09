@@ -355,6 +355,16 @@ class ExerciseRepo:
 
     # -- Lesen -------------------------------------------------------------
 
+    def medium_anhaengen(self, uebung_id: str, medium: Media) -> bool:
+        """Ein Medium hinten an die Übung (U4: eine Datei fürs Paket aus Kamera oder
+        Fotoauswahl) — ``False``, wenn es die Übung nicht gibt oder es schon dranhängt."""
+        u = self.laden(uebung_id)
+        if u is None or any(m.uri == medium.uri for m in u.media):
+            return False
+        u.media = [*u.media, medium]
+        self.speichern(u)
+        return True
+
     def laden(self, uebung_id: str, mit_geloeschten: bool = False) -> Exercise | None:
         """``None`` statt Ausnahme — die Ansicht soll das behandeln können.
 
@@ -1250,6 +1260,15 @@ class PlanRepo:
                 (_bedingung_json(bedingung), item_id),
             )
             self._beruehrt(zeile["plan_id"])
+
+    def item_medium_anhaengen(self, item_id: str, medium: Media) -> bool:
+        """Ein Medium hinten an die Planübung (U4) — ``False`` ohne Planübung oder doppelt."""
+        item = self.item_laden(item_id)
+        if item is None or any(m.uri == medium.uri for m in item.media):
+            return False
+        item.media = [*item.media, medium]
+        self.item_speichern(item)
+        return True
 
     def item_speichern(self, item: PlanItem) -> None:
         """Ziel, Parameter, Chips, Timer, Sensor, Takt, Bedingung und Anweisungen (Abschnitte und

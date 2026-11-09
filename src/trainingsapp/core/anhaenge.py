@@ -262,6 +262,13 @@ class Ziel:
 
     >>> Ziel.fuer_bewegung("u1").teil, Ziel.fuer_bewegung("u1").ist_bewegung
     ('bewegung/u1', True)
+
+    Seit 9.11.2026 (U4) **eine Datei fürs Paket** an einer Übung (`paket_uebung_id`) oder einer
+    Planübung (`paket_item_id`): kein Anhang — bereinigt in die Ablage der Paketdateien
+    (`data/paketmedien.py`) und als Medium an die Übung bzw. Planübung; reist im Paket mit.
+
+    >>> Ziel.fuer_paketdatei("u1").teil, Ziel.fuer_paketdatei(item_id="i1").teil
+    ('paketdatei/u1', 'planpaketdatei/i1')
     """
 
     eintrag_id: str | None = None
@@ -270,6 +277,8 @@ class Ziel:
     notiz_id: str | None = None
     uebung_id: str | None = None
     bewegung_id: str | None = None
+    paket_uebung_id: str | None = None
+    paket_item_id: str | None = None
 
     @classmethod
     def fuer_eintrag(cls, eintrag_id: str) -> Ziel:
@@ -286,6 +295,14 @@ class Ziel:
     @classmethod
     def fuer_bewegung(cls, uebung_id: str) -> Ziel:
         return cls(bewegung_id=uebung_id)
+
+    @classmethod
+    def fuer_paketdatei(cls, uebung_id: str | None = None, item_id: str | None = None) -> Ziel:
+        return cls(paket_uebung_id=uebung_id, paket_item_id=item_id)
+
+    @property
+    def ist_paketdatei(self) -> bool:
+        return self.paket_uebung_id is not None or self.paket_item_id is not None
 
     @property
     def ist_bewegung(self) -> bool:
@@ -309,6 +326,10 @@ class Ziel:
             return f"{UEBUNG_TEIL}/{self.uebung_id}"
         if self.bewegung_id is not None:
             return f"{BEWEGUNG_TEIL}/{self.bewegung_id}"
+        if self.paket_uebung_id is not None:
+            return f"{PAKETDATEI_TEIL}/{self.paket_uebung_id}"
+        if self.paket_item_id is not None:
+            return f"{PLANPAKETDATEI_TEIL}/{self.paket_item_id}"
         return self.eintrag_id or ""
 
 
@@ -317,6 +338,9 @@ class Ziel:
 NOTIZ_TEIL = "notiz"
 UEBUNG_TEIL = "uebung"
 BEWEGUNG_TEIL = "bewegung"
+#: Eine Datei fürs Paket an einer Übung bzw. einer Planübung (U4)
+PAKETDATEI_TEIL = "paketdatei"
+PLANPAKETDATEI_TEIL = "planpaketdatei"
 
 
 def ziel_lesen(teile: list[str], profil_id: str) -> tuple[Ziel, list[str]] | None:
@@ -336,16 +360,22 @@ def ziel_lesen(teile: list[str], profil_id: str) -> tuple[Ziel, list[str]] | Non
     'u1'
     >>> ziel_lesen(["bewegung", "u1", "foto"], "p1")[0].bewegung_id
     'u1'
+    >>> ziel_lesen(["planpaketdatei", "i1", "video"], "p1")[0].paket_item_id
+    'i1'
     """
     if not teile:
         return None
-    if teile[0] in (NOTIZ_TEIL, UEBUNG_TEIL, BEWEGUNG_TEIL):
+    if teile[0] in (NOTIZ_TEIL, UEBUNG_TEIL, BEWEGUNG_TEIL, PAKETDATEI_TEIL, PLANPAKETDATEI_TEIL):
         if len(teile) < 2 or not teile[1]:
             return None
         if teile[0] == UEBUNG_TEIL:
             return Ziel.fuer_uebung(teile[1]), teile[2:]
         if teile[0] == BEWEGUNG_TEIL:
             return Ziel.fuer_bewegung(teile[1]), teile[2:]
+        if teile[0] == PAKETDATEI_TEIL:
+            return Ziel.fuer_paketdatei(uebung_id=teile[1]), teile[2:]
+        if teile[0] == PLANPAKETDATEI_TEIL:
+            return Ziel.fuer_paketdatei(item_id=teile[1]), teile[2:]
         return Ziel(profil_id=profil_id, notiz_id=teile[1]), teile[2:]
     return Ziel.fuer_eintrag(teile[0]), teile[1:]
 
@@ -946,6 +976,8 @@ __all__ = [
     "MIME",
     "NAMEN",
     "NOTIZ_TEIL",
+    "PAKETDATEI_TEIL",
+    "PLANPAKETDATEI_TEIL",
     "REIHE_MAX",
     "SETTING_QUALITAET",
     "SETTING_VIDEO_MAX",

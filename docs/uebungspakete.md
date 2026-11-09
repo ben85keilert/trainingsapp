@@ -176,6 +176,33 @@ PDFs mitbringen — an Übungen (`media`), Planübungen (`medien`) und Kurskapit
   bleiben vorgemerkt, bis man sie lädt. *Am Server* (Homepage, Caddy) gehen bisher nur `*.json`
   durch — `.zip` freizugeben braucht Bens Zustimmung dort (P164).
 
+## Eigene Pakete (U4, Ben 9.11.2026)
+
+`docs/plan_paketinhalte.md` §7, F5 („Übungen, Pläne und Kurse sollen exportiert werden
+können“). Im Paketmanager die Karte **Eigene Pakete** (`views/eigene_pakete.py`, Route
+`<basis>/eigen/<id>` bzw. `…/eigen/neu`): Kopf (Name, Beschreibung, „Was ist neu?“) und Inhalt —
+Übungen (eigene und aus Paketen), Pläne des Profils, Kurse; was ein Plan oder Kurs braucht,
+kommt von selbst mit (`core.eigenes_paket.noetige_uebungen`). Gespeichert in `own_package`
+(Migration 048, `data/eigene_pakete.py`) mit **fester, zufälliger ID** — jede neue Fassung ist
+bei allen, die das Paket haben, ein Update desselben Pakets; Pläne reisen mit ihrer ID als
+Schlüssel, beim Empfänger bleibt es derselbe Plan.
+
+- **Dateien:** „Datei fürs Paket“ in „Übung bearbeiten“ (Karte „Videos, Links und Dateien“) und
+  in „Im Plan einstellen“ (Karte „Anweisungen“): Datei wählen (Bild, Video, Ton, PDF), Foto oder
+  Video aufnehmen, aus der Fotoauswahl — jede Datei wird **sofort bereinigt** (keine
+  Ortsangaben, `Paketablage.aufnehmen`) und als Paketdatei (`source = "paket"`) angehängt;
+  der Titel lässt sich ändern. Kamera und Fotoauswahl nehmen das Ziel
+  `paketdatei/<Übung>` bzw. `planpaketdatei/<Planübung>` (`core.anhaenge.Ziel`).
+- **Exportieren und teilen:** Die App schlägt die Version vor — die erste 1.0.0; ist der
+  Inhalt seit der letzten Fassung gleich (`inhalt_sha`, ohne Version, Neuigkeiten,
+  Zeitstempel), dieselbe; sonst eine Stufe höher: **klein** (letzte Stelle — Empfänger mit
+  „Kleine automatisch“ holen sie von selbst), **mittel** oder **groß**. Geschrieben wird JSON
+  oder, mit Dateien, eine ZIP (`core.paketdatei.export_schreiben`, Dateien im Hintergrund, die
+  Datenbank im Event-Loop), weitergegeben über das Teilen-Menü; gemerkt werden Version und
+  Prüfsumme der Fassung.
+- **Löschen** nimmt nur die Zusammenstellung weg — Übungen, Pläne, Kurse bleiben, und wer das
+  Paket hat, behält es.
+
 ## Dateiformat
 
 JSON, UTF-8. Version 1 (Übungen); **Version 2** fügt `kurse[]` hinzu, **Version 3**

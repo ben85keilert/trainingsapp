@@ -90,6 +90,7 @@ from trainingsapp.core.verlauf import MODUS_ZEIT, ZEITRAUM_VORGABE
 from trainingsapp.data.anhaenge import AnhangRepo
 from trainingsapp.data.bezuege import BezugRepo
 from trainingsapp.data.db import oeffnen
+from trainingsapp.data.eigene_pakete import EigenesPaketRepo
 from trainingsapp.data.einheiten import EinheitRepo
 from trainingsapp.data.hf_cache import HfCacheRepo
 from trainingsapp.data.hf_profil import ProfilwertRepo, RechenAusnahmeRepo
@@ -551,6 +552,11 @@ class AppState:
     neu_zeichnen: Callable[[], None] = field(default=lambda: None)
 
     # -- Lebenszyklus --------------------------------------------------------
+
+    @property
+    def eigene_pakete(self) -> EigenesPaketRepo:
+        """Die eigenen Pakete dieses Geräts (U4, `data/eigene_pakete.py`)."""
+        return EigenesPaketRepo(self.con)
 
     @classmethod
     def starten(cls, db_pfad: Path | str | None = None) -> AppState:

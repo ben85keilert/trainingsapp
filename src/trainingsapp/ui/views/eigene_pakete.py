@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import flet as ft
@@ -32,6 +33,7 @@ from trainingsapp.core.paketdatei import export_schreiben
 from trainingsapp.core.pakete import name_pruefen, paketmedien_in
 from trainingsapp.core.paketmedien import groesse_text
 from trainingsapp.core.paketversion import version_text
+from trainingsapp.core.privat import code_neu, code_text, datei_verschluesseln
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.formular import formular_leiste
 from trainingsapp.ui.components.karte import hinweis, karte, titel
@@ -94,6 +96,41 @@ def eigene_pakete_karte(
     return karte(*zeilen)
 
 
+def _verschluesseln(datei: Path, code: str) -> None:
+    """Die Exportdatei verschlüsselt an ihrem Platz (im Hintergrund)."""
+    teil = datei.with_name(datei.name + ".teil")
+    datei_verschluesseln(datei, teil, code)
+    teil.replace(datei)
+
+
+def code_gezeigt(name: str, code: str, text: str) -> ft.AlertDialog:
+    """Nach dem Teilen eines privaten Pakets: der Code — getrennt weitergeben."""
+    dialog: ft.AlertDialog = ft.AlertDialog(
+        title=ft.Text(f"„{name}“ ist privat"),
+        content=ft.Column(
+            tight=True,
+            spacing=10,
+            controls=[
+                ft.Text(text, size=13),
+                ft.Text("Code", size=12, opacity=0.7),
+                ft.Text(
+                    code_text(code),
+                    size=26,
+                    weight=ft.FontWeight.W_600,
+                    font_family="monospace",
+                    selectable=True,
+                ),
+                hinweis(
+                    "Den Code getrennt vom Paket weitergeben (mündlich, eigene Nachricht). Wer "
+                    "die Datei ohne Code hat, sieht nur Zeichensalat."
+                ),
+            ],
+        ),
+        actions=[ft.TextButton("OK", on_click=lambda _e=None: schliessen(dialog))],
+    )
+    return dialog
+
+
 def eigenes_paket_view(page: Any, state: AppState, basis: str, paket_id: str) -> ft.View:
     """Ein eigenes Paket bearbeiten, exportieren und teilen."""
     repo = state.eigene_pakete
@@ -124,6 +161,31 @@ def eigenes_paket_view(page: Any, state: AppState, basis: str, paket_id: str) ->
         max_lines=4,
         capitalization=ft.TextCapitalization.SENTENCES,
     )
+    # Privat weitergeben (U7): verschlüsselt, der Code bleibt für jede Fassung
+    zugang = {"code": ep.code}
+    privat_text = ft.Text(size=12, opacity=0.75)
+
+    def privat_text_neu() -> None:
+        privat_text.value = (
+            f"Code: {code_text(zugang['code'])} — getrennt vom Paket weitergeben; er bleibt für "
+            "jede Fassung."
+            if zugang["code"]
+            else "Offen: Wer die Datei hat, kann sie öffnen."
+        )
+
+    def privat_umschalten(e: Any) -> None:
+        zugang["code"] = (zugang["code"] or code_neu()) if e.control.value else None
+        privat_text_neu()
+        with contextlib.suppress(Exception):
+            privat_text.update()
+
+    privat_schalter = ft.Switch(
+        label="Privat — nur mit Code zu öffnen",
+        value=zugang["code"] is not None,
+        on_change=privat_umschalten,
+        data="privat",
+    )
+    privat_text_neu()
     gewaehlt: dict[str, set[str]] = {
         "uebungen": set(ep.uebungen),
         "plaene": set(ep.plaene),
@@ -141,12 +203,16 @@ def eigenes_paket_view(page: Any, state: AppState, basis: str, paket_id: str) ->
         ep.uebungen = [u.id for u in uebungen if u.id in gewaehlt["uebungen"]]
         ep.plaene = [p.id for p in plaene if p.id in gewaehlt["plaene"]]
         ep.kurse = [k.id for k in kurse if k.id in gewaehlt["kurse"]]
+        ep.code = zugang["code"]
         return ep
 
     anfang = (ep.name, ep.beschreibung, ep.neuigkeiten, *(sorted(v) for v in gewaehlt.values()))
+    code_anfang = ep.code
 
     def geaendert() -> bool:
         s = stand()
+        if s.code != code_anfang:
+            return True
         return (s.name, s.beschreibung, s.neuigkeiten, s.uebungen, s.plaene, s.kurse) != (
             anfang[0],
             anfang[1],
@@ -260,13 +326,17 @@ def eigenes_paket_view(page: Any, state: AppState, basis: str, paket_id: str) ->
         except (OSError, ValueError) as fehler:
             melden(f"Export fehlgeschlagen: {fehler}")
             return
+        if ep.code:  # privat (U7): verschlüsselt mit dem Code des Pakets
+            await asyncio.to_thread(_verschluesseln, datei, ep.code)
         mime = "application/zip" if datei.suffix == ".zip" else "application/json"
         await datei_weitergeben(page, datei, datei.name, mime)
         repo.exportiert(ep.id, version, sha)
         ep.version, ep.exportiert_sha = version, sha
-        melden(
-            " ".join([f"„{ep.name}“ Version {version_text(version)} weitergegeben.", *meldungen])
-        )
+        text = " ".join([f"„{ep.name}“ Version {version_text(version)} weitergegeben.", *meldungen])
+        if ep.code:
+            page.show_dialog(code_gezeigt(ep.name, ep.code, text))
+        else:
+            melden(text)
         state.neu_zeichnen()
 
     def exportieren_fragen(_e: Any = None) -> None:
@@ -419,6 +489,8 @@ def eigenes_paket_view(page: Any, state: AppState, basis: str, paket_id: str) ->
                         beschreibung,
                         neuigkeiten,
                         ft.Text(stand_text, size=12, opacity=0.75),
+                        privat_schalter,
+                        privat_text,
                         *inhalt_karten,
                         info,
                         hinweis(

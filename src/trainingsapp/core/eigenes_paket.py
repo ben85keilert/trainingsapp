@@ -54,6 +54,9 @@ class EigenesPaket:
     kurse: list[str] = field(default_factory=list)
     exportiert_sha: str | None = None
     exportiert_am: datetime | None = None
+    #: Privat weitergeben (U7): der Code, mit dem jede Fassung verschlüsselt wird — ``None`` =
+    #: offen
+    code: str | None = None
 
     @property
     def leer(self) -> bool:

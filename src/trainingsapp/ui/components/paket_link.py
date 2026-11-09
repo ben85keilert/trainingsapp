@@ -22,13 +22,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import flet as ft
 
-from trainingsapp.core.paketquelle import DATEI, QuellenFehler, link_lesen, url_pruefen
+from trainingsapp.core.paketquelle import (
+    DATEI,
+    QuellenFehler,
+    ZugangNoetig,
+    link_lesen,
+    url_pruefen,
+)
 from trainingsapp.ui.components.blatt import blatt_spalte
+from trainingsapp.ui.components.code_dialog import code_dialog
 from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.state import AppState
 
@@ -36,8 +44,11 @@ ORT_QUELLEN = "Einstellungen → Updates → Quellen"
 ORT_PAKETE = "Einstellungen → Übungspakete"
 
 
-async def link_importieren(page: Any, state: AppState, url: str, *, laden: Any = None) -> None:
-    """Den Link laden und je nach Inhalt fragen — Fehler als Meldung."""
+async def link_importieren(
+    page: Any, state: AppState, url: str, *, laden: Any = None, code: str | None = None
+) -> None:
+    """Den Link laden und je nach Inhalt fragen — Fehler als Meldung. Ein privates Paket (U7)
+    fragt erst nach seinem Code."""
     from trainingsapp.ui.views.pakete import import_rueckfrage
 
     url = url.strip()
@@ -45,9 +56,19 @@ async def link_importieren(page: Any, state: AppState, url: str, *, laden: Any =
         page.show_dialog(ft.SnackBar(ft.Text(fehler)))
         return
     try:
-        art, daten = await asyncio.to_thread(
-            link_lesen, url, *([laden] if laden is not None else [])
+        lesen = (
+            functools.partial(link_lesen, url, laden, code)
+            if laden is not None
+            else functools.partial(link_lesen, url, code=code)
         )
+        art, daten = await asyncio.to_thread(lesen)
+    except ZugangNoetig:
+
+        async def nochmal(eingegeben: str) -> None:
+            await link_importieren(page, state, url, laden=laden, code=eingegeben)
+
+        page.show_dialog(code_dialog(page, nochmal))
+        return
     except QuellenFehler as e:
         page.show_dialog(ft.SnackBar(ft.Text(f"Nicht geladen: {e}")))
         return

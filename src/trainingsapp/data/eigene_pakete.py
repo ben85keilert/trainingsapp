@@ -65,6 +65,7 @@ class EigenesPaketRepo:
             kurse=_liste(r["courses_json"]),
             exportiert_sha=r["exported_sha"],
             exportiert_am=datetime.fromisoformat(r["exported_at"]) if r["exported_at"] else None,
+            code=r["access_code"],
         )
 
     def alle(self) -> list[EigenesPaket]:
@@ -88,8 +89,8 @@ class EigenesPaketRepo:
                 """
                 INSERT INTO own_package (id, name, description, news, version, exercises_json,
                                          plans_json, courses_json, exported_sha, exported_at,
-                                         created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                         created_at, updated_at, access_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -98,6 +99,7 @@ class EigenesPaketRepo:
                     plans_json = excluded.plans_json,
                     courses_json = excluded.courses_json,
                     updated_at = excluded.updated_at,
+                    access_code = excluded.access_code,
                     deleted_at = NULL
                 """,
                 (
@@ -113,6 +115,7 @@ class EigenesPaketRepo:
                     ep.exportiert_am.isoformat() if ep.exportiert_am else None,
                     stempel,
                     stempel,
+                    ep.code,
                 ),
             )
 

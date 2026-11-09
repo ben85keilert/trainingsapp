@@ -44,7 +44,7 @@ import flet as ft
 from trainingsapp.config import datenverzeichnis, medienverzeichnis
 from trainingsapp.core.kurse import Kurs
 from trainingsapp.core.models import Exercise, Plan
-from trainingsapp.core.paketdatei import export_schreiben, paket_oeffnen
+from trainingsapp.core.paketdatei import CodeNoetig, export_schreiben, paket_oeffnen
 from trainingsapp.core.pakete import (
     GRUNDAUSSTATTUNG,
     Paket,
@@ -61,8 +61,10 @@ from trainingsapp.core.pakete import (
 from trainingsapp.core.paketquelle import DATEI, fremde_identitaet
 from trainingsapp.core.paketstufe import GROSS, KEINE, STUFE_TEXT, stufen_text
 from trainingsapp.core.paketversion import MODUS_TEXT, UPDATE_MODI, version_text
+from trainingsapp.core.privat import code_text
 from trainingsapp.data.pakete import ARCHIV, KATALOG, PAPIERKORB, Status, Uebungsstand, Vorschau
-from trainingsapp.ui.components.dialoge import Nachher
+from trainingsapp.ui.components.code_dialog import code_dialog
+from trainingsapp.ui.components.dialoge import Nachher, schliessen
 from trainingsapp.ui.components.hilfe import hilfe_knopf
 from trainingsapp.ui.components.karte import hinweis, karte, titel
 from trainingsapp.ui.components.layout import sicher
@@ -340,10 +342,52 @@ def quelle_text(paket: Paket) -> str:
     >>> quelle_text(Paket(id="p", name="Q")), quelle_text(Paket(id=GRUNDAUSSTATTUNG, name="S"))
     ('aus Datei importiert', 'mitgeliefert')
     """
+    if paket.privat:  # U7: der Link nur gekürzt — „Zugang anzeigen“ zeigt ihn ganz
+        fuer = f" · für {paket.fuer}" if paket.fuer else ""
+        return f"privat{fuer}" + (f" · {link_kurz(paket.quelle)}" if paket.quelle else "")
     if paket.quelle:
         art = " (Paketdatei)" if paket.quelle_art == DATEI else ""
         return f"Quelle{art}: {paket.quelle}"
     return "mitgeliefert" if paket.id == GRUNDAUSSTATTUNG else "aus Datei importiert"
+
+
+def link_kurz(url: str) -> str:
+    """Der Link eines privaten Pakets gekürzt — lange Zufallsteile nur angedeutet.
+
+    >>> link_kurz("https://x.de/pakete/p/7Hq3vX9aBcDeFgHiJkLmNo/paket.json")
+    'x.de/pakete/p/7Hq3…/paket.json'
+    """
+    teile = url.split("://", 1)[-1].split("/")
+    return "/".join(t[:4] + "…" if len(t) > 16 else t for t in teile)
+
+
+def zugang_dialog(page: Any, paket: Paket) -> ft.AlertDialog:
+    """Link und Code eines privaten Pakets (U7) — zum Abschreiben für ein zweites Gerät."""
+    dialog: ft.AlertDialog = ft.AlertDialog(
+        title=ft.Text(f"Zugang zu „{paket.name}“"),
+        content=ft.Column(
+            tight=True,
+            spacing=10,
+            controls=[
+                ft.Text("Link", size=12, opacity=0.7),
+                ft.Text(paket.quelle or "— (aus einer Datei)", selectable=True),
+                ft.Text("Code", size=12, opacity=0.7),
+                ft.Text(
+                    code_text(paket.zugangscode or ""),
+                    size=26,
+                    weight=ft.FontWeight.W_600,
+                    font_family="monospace",
+                    selectable=True,
+                ),
+                hinweis(
+                    "Für ein zweites Gerät: dort den Link importieren und den Code eingeben. "
+                    "Link und Code getrennt weitergeben — wer beides hat, kann das Paket öffnen."
+                ),
+            ],
+        ),
+        actions=[ft.TextButton("Schließen", on_click=lambda _e=None: schliessen(dialog))],
+    )
+    return dialog
 
 
 def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.View:
@@ -378,15 +422,31 @@ def pakete_view(page: ft.Page, state: AppState, basis: str = "/pakete") -> ft.Vi
         if not dateien:
             return  # abgebrochen
         datei = dateien[0]
-        name = Path(datei.name)
+        await datei_oeffnen(datei.path, datei.bytes, Path(datei.name))
+
+    async def datei_oeffnen(
+        pfad: str | None, daten: bytes | None, name: Path, code: str | None = None
+    ) -> None:
+        """Die gewählte Datei lesen — ein privates Paket (U7) fragt erst nach dem Code."""
+        # Der Klartext eines großen privaten Pakets liegt bis zum Import hier
+        arbeit = datenverzeichnis() / "Import"
         try:
-            if datei.path:
-                inhalt = paket_oeffnen(Path(datei.path), name.stem, endung=name.suffix)
-            elif datei.bytes is not None:
-                inhalt = paket_oeffnen(datei.bytes, name.stem, endung=name.suffix)
+            if pfad:
+                inhalt = paket_oeffnen(
+                    Path(pfad), name.stem, endung=name.suffix, code=code, arbeit=arbeit
+                )
+            elif daten is not None:
+                inhalt = paket_oeffnen(daten, name.stem, endung=name.suffix, code=code)
             else:
                 melden("Die Datei ließ sich nicht lesen.")
                 return
+        except CodeNoetig:
+
+            async def nochmal(eingegeben: str) -> None:
+                await datei_oeffnen(pfad, daten, name, eingegeben)
+
+            page.show_dialog(code_dialog(page, nochmal))
+            return
         except PaketFehler as fehler:
             page.show_dialog(
                 ft.AlertDialog(
@@ -924,6 +984,19 @@ def paket_view(page: ft.Page, state: AppState, basis: str, paket: Paket) -> ft.V
     if paket.quelle and paket.geprueft is not None:
         quelle_zeile.append(f"zuletzt geprüft {_datum(paket.geprueft)}")
     kopf.append(ft.Text("  ·  ".join(quelle_zeile), size=12, opacity=0.7, selectable=True))
+    if paket.privat:  # U7: Link und Code für ein zweites Gerät
+        kopf.append(
+            ft.Row(
+                controls=[
+                    ft.TextButton(
+                        "Zugang anzeigen",
+                        icon=ft.Icons.KEY_OUTLINED,
+                        on_click=lambda _e=None: page.show_dialog(zugang_dialog(page, paket)),
+                        data="zugang",
+                    )
+                ]
+            )
+        )
     if paket.quelle:
         # Wie Updates aus der Quelle kommen — auch hier einstellbar (Ben, 9.11.2026: „Im
         # Paketmanager/Update fehlt ein Button …“), dieselbe Wahl wie unter Updates

@@ -35,7 +35,7 @@ from typing import Any, Final
 
 from .models import jetzt
 from .netz import OEFFNER, verschluesselt
-from .paketdatei import paket_oeffnen
+from .paketdatei import CodeNoetig, paket_oeffnen
 from .pakete import (
     FORMAT,
     GRUNDAUSSTATTUNG,
@@ -46,6 +46,7 @@ from .pakete import (
 )
 from .paketmedien import MAX_ZIP_BYTES
 from .paketversion import version_zahl
+from .privat import ist_privat
 
 #: Kennung und Version des Index — `paket_werkzeug.index` schreibt genau das
 INDEX_FORMAT: Final[str] = "trainingsapp-paketindex"
@@ -61,6 +62,14 @@ _ZEITLIMIT_S: Final[float] = 10.0
 
 class QuellenFehler(Exception):
     """Quelle nicht erreichbar, Index oder Paket unlesbar, Prüfsumme falsch."""
+
+
+class ZugangNoetig(QuellenFehler):
+    """Unter dem Link liegt ein privates Paket (U7) — es braucht seinen Code."""
+
+    def __init__(self, url: str) -> None:
+        super().__init__("Ein privates Paket — es braucht seinen Code.")
+        self.url = url
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,20 +373,26 @@ def updates_finden(
 INDEX, DATEI = "index", "datei"
 
 
+def _oeffnen(daten: bytes, url: str, code: str | None) -> Paketinhalt:
+    try:
+        return paket_oeffnen(daten, code=code)
+    except CodeNoetig:
+        raise ZugangNoetig(url) from None
+    except PaketFehler as e:
+        raise QuellenFehler(str(e)) from e
+
+
 def datei_eintrag(
-    url: str, laden: Callable[[str], bytes] = _laden
+    url: str, laden: Callable[[str], bytes] = _laden, code: str | None = None
 ) -> tuple[IndexEintrag, Paketinhalt]:
     """Ein direkter Link auf eine Paketdatei als Eintrag wie aus einem Index (Ben,
     28.10.2026: „eine URL importieren, die updatefähig ist“) — Prüfsumme der geladenen
     Datei, ``quelle_url`` = der Link selbst. Wirft `QuellenFehler`."""
     gross = ist_zip(url)
     daten = _holen(url, _holer(url, laden, gross))
-    if len(daten) > (MAX_ZIP_BYTES if gross else MAX_PAKET_BYTES):
+    if len(daten) > (MAX_ZIP_BYTES if gross else MAX_PAKET_BYTES) + 1024:
         raise QuellenFehler("Die Paketdatei ist zu groß.")
-    try:
-        inhalt = paket_oeffnen(daten)
-    except PaketFehler as e:
-        raise QuellenFehler(str(e)) from e
+    inhalt = _oeffnen(daten, url, code)
     eintrag = IndexEintrag(
         id=inhalt.paket.id,
         name=inhalt.paket.name,
@@ -394,7 +409,9 @@ def datei_eintrag(
     return eintrag, inhalt
 
 
-def link_lesen(url: str, laden: Callable[[str], bytes] = _laden) -> tuple[str, Any]:
+def link_lesen(
+    url: str, laden: Callable[[str], bytes] = _laden, code: str | None = None
+) -> tuple[str, Any]:
     """Was unter einem Link liegt: ``("index", (Name, Einträge))`` für einen Paketindex,
     ``("paket", (Eintrag, Inhalt))`` für eine Paketdatei — sonst `QuellenFehler`.
 
@@ -414,8 +431,10 @@ def link_lesen(url: str, laden: Callable[[str], bytes] = _laden) -> tuple[str, A
     if (fehler := url_pruefen(url)) is not None:
         raise QuellenFehler(fehler)
     if ist_zip(url):  # ein Paket mit Dateien (U3) — kein Index
-        return "paket", datei_eintrag(url, laden)
+        return "paket", datei_eintrag(url, laden, code)
     daten = _holen(url, laden)
+    if ist_privat(daten[:8]):  # ein privates Paket (U7) — `ZugangNoetig` ohne Code
+        return "paket", datei_eintrag(url, lambda _u: daten, code)
     try:
         roh = json.loads(daten) if len(daten) <= MAX_PAKET_BYTES else None
     except ValueError:
@@ -431,7 +450,9 @@ def link_lesen(url: str, laden: Callable[[str], bytes] = _laden) -> tuple[str, A
     raise QuellenFehler("Unter dieser Adresse liegt weder ein Übungspaket noch ein Paketindex.")
 
 
-def paket_laden(eintrag: IndexEintrag, laden: Callable[[str], bytes] = _laden) -> Paketinhalt:
+def paket_laden(
+    eintrag: IndexEintrag, laden: Callable[[str], bytes] = _laden, code: str | None = None
+) -> Paketinhalt:
     """Die Paketdatei eines Eintrags holen, Prüfsumme und Inhalt prüfen — JSON oder ZIP mit
     Dateien (U3, bis `MAX_ZIP_BYTES`)."""
     gross = ist_zip(eintrag.url) or eintrag.bytes > MAX_PAKET_BYTES
@@ -440,10 +461,7 @@ def paket_laden(eintrag: IndexEintrag, laden: Callable[[str], bytes] = _laden) -
         raise QuellenFehler("Die Paketdatei ist zu groß.")
     if hashlib.sha256(daten).hexdigest() != eintrag.sha256:
         raise QuellenFehler("Die Prüfsumme stimmt nicht — die Datei ist nicht die aus dem Index.")
-    try:
-        inhalt = paket_oeffnen(daten)
-    except PaketFehler as e:
-        raise QuellenFehler(str(e)) from e
+    inhalt = _oeffnen(daten, eintrag.url, code)
     if inhalt.paket.id != eintrag.id:
         raise QuellenFehler("Die Datei gehört zu einem anderen Paket als im Index angegeben.")
     if (
@@ -476,7 +494,7 @@ def pruefen(
     for p in installierte:
         if p.quelle and p.quelle_art == DATEI and p.aktiv:
             try:
-                eintrag, _ = datei_eintrag(p.quelle, laden)
+                eintrag, _ = datei_eintrag(p.quelle, laden, p.zugangscode)
             except QuellenFehler as e:
                 ergebnis.fehler.append(f"{p.name} ({p.quelle}): {e}")
                 continue
@@ -496,6 +514,7 @@ __all__ = [
     "PaketUpdate",
     "Pruefung",
     "QuellenFehler",
+    "ZugangNoetig",
     "datei_eintrag",
     "fremde_identitaet",
     "gebundene_quelle",

@@ -20,13 +20,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import sqlite3
 from collections.abc import Callable
 
 import flet as ft
 
 from trainingsapp.config import app_version, ist_aktiv
-from trainingsapp.core.pakete import MAX_PAKET_BYTES, Paket, PaketFehler
+from trainingsapp.core.pakete import MAX_PAKET_BYTES, Paket, PaketFehler, Paketinhalt
 from trainingsapp.core.paketmedien import groesse_text
 from trainingsapp.core.paketquelle import (
     INDEX,
@@ -61,6 +62,14 @@ ROUTE = "/einstellungen/updates"
 #: Größere Pakete (mit Videos, U3) lädt die App nicht von selbst — sie bleiben vorgemerkt, mit
 #: Größe, bis man selbst lädt (Ben, 9.11.2026: „Quelle zeigt die Größe vorher“)
 GROSS_VON_SELBST = 20_000_000
+
+
+def _lader(eintrag: IndexEintrag, code: str | None) -> Callable[[], Paketinhalt]:
+    """`paket_laden` für den Hintergrund — den Code eines privaten Pakets (U7) nur, wenn es
+    einen gibt."""
+    if code is None:
+        return functools.partial(paket_laden, eintrag)
+    return functools.partial(paket_laden, eintrag, code=code)
 
 
 def _eintrag_aus_paket(p: Paket) -> IndexEintrag | None:
@@ -108,7 +117,7 @@ async def pruefung_ausfuehren(state: AppState) -> UpdateStand:
             offen.append(u)
             continue
         try:
-            inhalt = await asyncio.to_thread(paket_laden, u.eintrag)
+            inhalt = await asyncio.to_thread(_lader(u.eintrag, u.installiert.zugangscode))
         except QuellenFehler as e:
             ergebnis.fehler.append(f"{u.eintrag.name}: {e}")
             offen.append(u)
@@ -235,8 +244,10 @@ def updates_view(page: ft.Page, state: AppState, browser: ft.UrlLauncher) -> ft.
     # -- Ein Paket aus der Quelle holen und mit Vorschau einspielen ----------------
     def installierer(eintrag: IndexEintrag) -> Callable[[], object]:
         async def handler() -> None:
+            vorhanden = state.pakete.laden(eintrag.id)  # privat (U7): mit dem gemerkten Code
+            code = vorhanden.zugangscode if vorhanden is not None else None
             try:
-                inhalt = await asyncio.to_thread(paket_laden, eintrag)
+                inhalt = await asyncio.to_thread(_lader(eintrag, code))
             except QuellenFehler as e:
                 melden(f"„{eintrag.name}“ nicht geladen: {e}")
                 return

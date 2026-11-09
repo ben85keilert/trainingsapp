@@ -134,6 +134,14 @@ class Paket:
     verfuegbar_neuigkeiten: str = ""
     #: Wann zuletzt eine Quelle gefragt wurde
     geprueft: datetime | None = None
+    #: Für wen ein privates Paket ist (U7) — aus dem Paketkopf, nur zum Anzeigen
+    fuer: str = ""
+    #: Der Code eines privaten Pakets (U7, Migration 050) — ``None`` = öffentlich
+    zugangscode: str | None = None
+
+    @property
+    def privat(self) -> bool:
+        return self.zugangscode is not None
 
     @property
     def aktiv(self) -> bool:
@@ -328,6 +336,9 @@ class Paketinhalt:
     medien: dict[str, Paketmedium] = field(default_factory=dict)
     #: Ergänzungen zu Übungen anderer Pakete (Formatversion 5, U5, `core/ergaenzungen.py`)
     ergaenzungen: list[Ergaenzung] = field(default_factory=list)
+    #: Der Code, mit dem die Datei entschlüsselt wurde (privates Paket, U7) — die App merkt
+    #: ihn sich beim Import
+    code: str | None = None
 
     def medien_namen(self) -> set[str]:
         """Die Paketdateien, die Übungen, Pläne, Kurse und Ergänzungen nennen (U3, U5)."""
@@ -472,6 +483,7 @@ def paket_lesen(daten: bytes | str | dict[str, Any], name_vorgabe: str = "") -> 
         beschreibung=str(kopf.get("beschreibung") or "").strip(),
         version=pversion,
         neuigkeiten=str(kopf.get("neuigkeiten") or "").strip(),
+        fuer=" ".join(str(kopf.get("fuer") or "").split())[:80],
     )
 
     uebungen: list[Exercise] = []
@@ -1249,6 +1261,8 @@ def paket_bauen(
         kopf["version"] = paket.version
     if paket.neuigkeiten:
         kopf["neuigkeiten"] = paket.neuigkeiten
+    if paket.fuer:  # privates Paket (U7): für wen
+        kopf["fuer"] = paket.fuer
     roh: dict[str, Any] = {
         "format": FORMAT,
         "version": 5

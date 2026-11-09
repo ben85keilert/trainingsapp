@@ -260,6 +260,11 @@ Update — was er selbst geändert hat, bleibt.
 Parameter, Ziel, Timer, Takt. Die Übung bleibt die ihres Pakets; neben einem ergänzten
 Abschnitt steht klein, woher er kommt. Deaktivieren oder Entfernen nimmt die Ergänzung heraus
 — was du selbst geändert hast, bleibt immer.
+
+**Private Pakete** — Ein Paket kann verschlüsselt sein: Beim Import fragt die App nach dem
+Code (8 Zeichen, du bekommst ihn getrennt vom Link). Danach merkt sie ihn sich und holt Updates
+selbst; „Zugang anzeigen“ im Paketmanager zeigt Link und Code für ein zweites Gerät. Ein
+eigenes Paket teilst du privat mit dem Schalter „Privat — nur mit Code zu öffnen“.
 """
 
 ATMUNG_MD = """\

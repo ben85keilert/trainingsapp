@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import secrets
 import shutil
 import tempfile
 import tomllib
@@ -54,6 +55,13 @@ from .paketmedien import (
     name_fuer,
     name_lesen,
 )
+from .privat import (
+    CodeFalsch,
+    PrivatNichtMoeglich,
+    datei_entschluesseln,
+    entschluesseln,
+    ist_privat,
+)
 
 #: Der Paketinhalt in der ZIP
 PAKET_JSON: Final = "paket.json"
@@ -61,6 +69,13 @@ PAKET_JSON: Final = "paket.json"
 ZIP_KOPF: Final = b"PK\x03\x04"
 #: Fester Zeitstempel der Einträge (reproduzierbar)
 _ZEIT: Final = (1980, 1, 1, 0, 0, 0)
+
+
+class CodeNoetig(PaketFehler):
+    """Ein privates Paket (U7) — ohne seinen Code nicht zu lesen."""
+
+    def __init__(self) -> None:
+        super().__init__("Ein privates Paket — es braucht seinen Code.")
 
 
 class _Strom(io.RawIOBase):
@@ -140,9 +155,42 @@ def _zip(oeffner: Callable[[], zipfile.ZipFile], groesse: int, name_vorgabe: str
     return inhalt
 
 
-def paket_oeffnen(quelle: bytes | Path, name_vorgabe: str = "", *, endung: str = "") -> Paketinhalt:
+def _entschluesselt(
+    quelle: bytes | Path, code: str | None, arbeit: Path | None, name_vorgabe: str, endung: str
+) -> Paketinhalt:
+    """Ein privates Paket (U7) entschlüsseln und lesen — ohne Code `CodeNoetig`, mit falschem
+    `PaketFehler`. Große Dateien gehen über ``arbeit`` (der Klartext liegt dort, bis der Import
+    fertig ist), sonst im Speicher."""
+    if code is None:
+        raise CodeNoetig()
+    try:
+        if isinstance(quelle, Path) and arbeit is not None:
+            arbeit.mkdir(parents=True, exist_ok=True)
+            ziel = arbeit / f"klartext_{secrets.token_hex(6)}{endung or '.paket'}"
+            datei_entschluesseln(quelle, ziel, code)
+            inhalt = paket_oeffnen(ziel, name_vorgabe, endung=endung)
+        else:
+            daten = quelle.read_bytes() if isinstance(quelle, Path) else quelle
+            inhalt = paket_oeffnen(entschluesseln(daten, code), name_vorgabe, endung=endung)
+    except CodeFalsch:
+        raise PaketFehler("Der Code passt nicht.") from None
+    except PrivatNichtMoeglich as fehler:
+        raise PaketFehler(str(fehler)) from None
+    inhalt.code = code
+    return inhalt
+
+
+def paket_oeffnen(
+    quelle: bytes | Path,
+    name_vorgabe: str = "",
+    *,
+    endung: str = "",
+    code: str | None = None,
+    arbeit: Path | None = None,
+) -> Paketinhalt:
     """Eine Paketdatei lesen — ZIP (am Kopf erkannt), TOML (Endung ``.toml``, sonst wenn kein
-    JSON) oder JSON. Wirft `PaketFehler` mit einem Satz für Menschen.
+    JSON) oder JSON; ein privates Paket (U7) mit ``code`` (sonst `CodeNoetig`). Wirft
+    `PaketFehler` mit einem Satz für Menschen.
 
     >>> paket_oeffnen(b'{"paket": {"name": "T"}, "exercises": [{"name": "A"}]}').paket.name
     'T'
@@ -153,12 +201,16 @@ def paket_oeffnen(quelle: bytes | Path, name_vorgabe: str = "", *, endung: str =
         try:
             groesse = quelle.stat().st_size
             with quelle.open("rb") as f:
-                kopf = f.read(4)
+                kopf = f.read(8)
         except OSError as fehler:
             raise PaketFehler(f"Die Datei ließ sich nicht lesen: {fehler}") from None
         name_vorgabe = name_vorgabe or quelle.stem
         endung = endung or quelle.suffix
-        if kopf == ZIP_KOPF:
+        if ist_privat(kopf):
+            if groesse > MAX_ZIP_BYTES + 1024:
+                raise PaketFehler("Die Datei ist zu groß für ein Übungspaket.")
+            return _entschluesselt(quelle, code, arbeit, name_vorgabe, endung)
+        if kopf[:4] == ZIP_KOPF:
             pfad = quelle
             return _zip(lambda: zipfile.ZipFile(pfad), groesse, name_vorgabe)
         if groesse > MAX_PAKET_BYTES:
@@ -168,6 +220,8 @@ def paket_oeffnen(quelle: bytes | Path, name_vorgabe: str = "", *, endung: str =
         daten = quelle.read_bytes()
     else:
         daten = quelle
+        if ist_privat(daten[:8]):
+            return _entschluesselt(daten, code, None, name_vorgabe, endung)
         if daten[:4] == ZIP_KOPF:
             gepuffert = daten
             return _zip(
@@ -456,6 +510,7 @@ def paket_zip(ziel: Path, json_daten: bytes, medien: Mapping[str, Path]) -> None
 __all__ = [
     "PAKET_JSON",
     "ZIP_KOPF",
+    "CodeNoetig",
     "dateien_einbinden",
     "export_schreiben",
     "medien_fuer_export",

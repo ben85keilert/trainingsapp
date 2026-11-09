@@ -1018,9 +1018,19 @@ class PaketRepo:
                     "WHERE id = ? AND package_id = ? AND package_dropped_at IS NOT NULL",
                     (k.id, inhalt.paket.id),
                 )
+        if inhalt.code is not None:  # ein privates Paket (U7): den Code merken — für Updates
+            self.zugang_setzen(inhalt.paket.id, inhalt.code, inhalt.paket.fuer)
         self._ergaenzungen_einspielen(inhalt)  # nach den Übungen: sie ergänzen fremde (U5)
         self.aufraeumen()  # Dateien alter Fassungen, die nichts mehr nennt
         return vorschau
+
+    def zugang_setzen(self, paket_id: str, code: str, fuer: str = "") -> None:
+        """Code und Empfänger eines privaten Pakets (U7) — Updates entschlüsselt die App damit,
+        „Zugang anzeigen“ zeigt ihn."""
+        self.con.execute(
+            "UPDATE package SET access_json = ? WHERE id = ?",
+            (json.dumps({"code": code, "fuer": fuer}, ensure_ascii=False), paket_id),
+        )
 
     def aufraeumen(self) -> int:
         """Paketdateien löschen, die nichts mehr nennt (U3) — wie viele."""
@@ -1566,7 +1576,19 @@ class PaketRepo:
             verfuegbar_sha256=r["available_sha256"],
             verfuegbar_neuigkeiten=r["available_news"] or "",
             geprueft=datetime.fromisoformat(r["checked_at"]) if r["checked_at"] else None,
+            **_zugang_lesen(r["access_json"]),
         )
+
+
+def _zugang_lesen(roh: str | None) -> dict[str, Any]:
+    """``fuer`` und ``zugangscode`` aus ``package.access_json`` (Migration 050, U7)."""
+    try:
+        wert = json.loads(roh) if roh else None
+    except ValueError:
+        wert = None
+    if not isinstance(wert, dict) or not wert.get("code"):
+        return {}
+    return {"zugangscode": str(wert["code"]), "fuer": str(wert.get("fuer") or "")}
 
 
 def _plan_aus_paketplan(

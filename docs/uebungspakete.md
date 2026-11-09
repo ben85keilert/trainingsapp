@@ -176,6 +176,39 @@ PDFs mitbringen — an Übungen (`media`), Planübungen (`medien`) und Kurskapit
   bleiben vorgemerkt, bis man sie lädt. *Am Server* (Homepage, Caddy) gehen bisher nur `*.json`
   durch — `.zip` freizugeben braucht Bens Zustimmung dort (P164).
 
+## Private Pakete (U7, Ben 9.11.2026, F9)
+
+`docs/plan_paketinhalte.md` §11. „Ich möchte für User Pakete bereithalten, die nur diese Person
+betreffen … vor allem gegen Bots und andere absichern.“ Zwei Schlösser:
+
+- **Link** — ein Ordner mit langem Zufallsnamen (22 Zeichen, ~130 Bit, `privat.ordner_neu`):
+  `…/pakete/p/<ordner>/paket.json` (mit Dateien `paket.zip`); nicht im öffentlichen Index
+  (`trainingsapp-paket index` lässt private Dateien aus), keine Ordnerliste.
+- **Code** — 8 Zeichen ohne Verwechsler (`K7QM-9XA2`, Alphabet ohne 0/O/1/I), getrennt vom
+  Link weitergeben. Die Datei liegt **verschlüsselt** (`core/privat.py`: scrypt N=2¹⁵ → Schlüssel,
+  SHAKE-256 je MiB als Schlüsselstrom, HMAC-SHA256 über alles; Kopf `TAPRIV`): ohne Code
+  Zeichensalat, falscher Code oder verfälschte Datei → „Der Code passt nicht“. Der Server prüft
+  nichts.
+- **Werkzeug:** In der TOML `[privat]` mit `fuer = "Max"`; `trainingsapp-paket bauen
+  [--basis-url …]` legt beim ersten Mal Ordner und Code an und merkt sie sich neben der TOML
+  (`<name>.zugang.json` — **nur im privaten Inhalte-Repo**), verschlüsselt nach
+  `dist/p/<ordner>/paket.json` und gibt die **Zugangskarte** aus (Link + Code; auch als
+  `<name>.zugangskarte.txt`, mit `segno` am Rechner zusätzlich ein QR-Code des Links als SVG).
+  Jede neue Fassung: derselbe Link, derselbe Code.
+- **App:** Datei oder Link importieren → „Privates Paket — Code?“ (klein, mit Leerzeichen oder
+  Bindestrich geht) → die Rückfrage wie immer. Die App merkt sich Code und „für wen“
+  (`package.access_json`, Migration 050) und **entschlüsselt Updates aus dem Link von selbst**.
+  Der Paketmanager zeigt „privat · für Max · x.de/pakete/p/7Hq3…/paket.json“ und **„Zugang
+  anzeigen“** (Link und Code für ein zweites Gerät). Große private ZIPs entschlüsselt die App
+  über `<Daten>/Import/`.
+- **Eigene Pakete** (U4) lassen sich ebenso privat teilen: Schalter „Privat — nur mit Code zu
+  öffnen“; der Code bleibt für jede Fassung (`own_package.access_code`) und steht nach dem
+  Export da.
+- **Grenze:** Wer die Datei hat und gezielt Rechenzeit einsetzt, braucht für 8 Zeichen
+  (32⁸ ≈ 10¹² Möglichkeiten, je Versuch ein scrypt) Jahre — ein Bot tut das nicht. Am Server
+  wäre `X-Robots-Tag: noindex` für `/pakete/` gut, damit ein durchgesickerter Link in keiner
+  Suchmaschine landet — Änderung im Homepage-Repo nur mit Bens Zustimmung (P165).
+
 ## Ergänzungen (U5, Ben 9.11.2026, Formatversion 5)
 
 `docs/plan_paketinhalte.md` §8, F2 („auch Parameter, Ziel, Timer, Takt — hier wird

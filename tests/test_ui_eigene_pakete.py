@@ -192,3 +192,44 @@ def test_datei_fuers_paket_in_uebung_bearbeiten(tmp_path, page, state, monkeypat
     (m,) = state.uebungen.laden(u.id).media
     assert (m.source, m.title) == (MediaSource.PAKET, "So geht es")
     assert GPS not in state.pakete.ablage.pfad(m.uri).read_bytes()
+
+
+def test_eigenes_paket_privat_teilen(page, state, monkeypatch) -> None:
+    """U7: Ein eigenes Paket privat weitergeben — die Datei ist verschlüsselt, der Code steht
+    danach da und bleibt für jede Fassung."""
+    import trainingsapp.ui.views.eigene_pakete as modul
+    from trainingsapp.core.paketdatei import CodeNoetig, paket_oeffnen
+    from trainingsapp.core.privat import code_normieren, ist_privat
+    from trainingsapp.ui.views.eigene_pakete import NEU, eigenes_paket_view
+
+    u = Exercise(name="Nur für Anna")
+    state.uebungen.speichern(u)
+    geteilt: list[bytes] = []
+
+    async def datei_weitergeben(_page, pfad, name, mime):
+        geteilt.append(pfad.read_bytes())
+
+    monkeypatch.setattr(modul, "datei_weitergeben", datei_weitergeben)
+    ansicht = eigenes_paket_view(page, state, "/pakete", NEU)
+    next(x for x in _alle(ansicht) if isinstance(x, ft.TextField)).value = "Für Anna"
+    haken = _daten(ansicht, ("uebungen", u.id))
+    haken.value = True
+    haken.on_change(SimpleNamespace(control=haken))
+    schalter = _daten(ansicht, "privat")
+    schalter.value = True
+    schalter.on_change(SimpleNamespace(control=schalter))
+    _klick(page, _daten(ansicht, "exportieren"))
+    dialog = page.dialoge[-1]
+    dialog.open = True
+    _daten(dialog, "los").on_click()
+    _dialog_zu(page, dialog)
+    (daten,) = geteilt
+    assert ist_privat(daten)
+    gezeigt = page.dialoge[-1]
+    code_anzeige = next(t for t in _texte(gezeigt) if len(t) == 9 and t[4] == "-")
+    code = code_normieren(code_anzeige)
+    with pytest.raises(CodeNoetig):
+        paket_oeffnen(daten)
+    assert paket_oeffnen(daten, code=code).uebungen[0].name == "Nur für Anna"
+    (ep,) = state.eigene_pakete.alle()
+    assert ep.code == code  # bleibt für jede Fassung

@@ -36,6 +36,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import tomllib
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -80,6 +81,13 @@ from trainingsapp.core.paketquelle import _laden as netz_laden
 from trainingsapp.core.paketstufe import STUFE_TEXT, mindestens, stufen_text, version_reicht
 from trainingsapp.core.paketstufe import stufe as paket_stufe
 from trainingsapp.core.paketversion import version_text
+from trainingsapp.core.privat import (
+    code_neu,
+    code_text,
+    datei_verschluesseln,
+    ist_privat,
+    ordner_neu,
+)
 from trainingsapp.core.result_spec import VORLAGEN
 from trainingsapp.core.takt import takt_pruefen
 from trainingsapp.core.zaehlen import wahl_pruefen
@@ -415,7 +423,58 @@ def quelle_pruefen(
     return zeilen, fehler
 
 
-def bauen(datei: Path, ziel: Path) -> Path:
+def _zugang(datei: Path) -> dict[str, str]:
+    """Ordner und Code eines privaten Pakets (U7) — beim ersten Bauen angelegt und neben der
+    TOML gemerkt (``<name>.zugang.json``, nur im privaten Inhalte-Repo!); danach dieselben:
+    derselbe Link, derselbe Code für jede neue Fassung."""
+    pfad = datei.with_name(datei.stem + ".zugang.json")
+    if pfad.is_file():
+        try:
+            wert = json.loads(pfad.read_text("utf-8"))
+        except ValueError:
+            wert = None
+        if isinstance(wert, dict) and wert.get("ordner") and wert.get("code"):
+            return {"ordner": str(wert["ordner"]), "code": str(wert["code"])}
+    zugang = {"ordner": ordner_neu(), "code": code_neu()}
+    pfad.write_text(json.dumps(zugang, indent=2) + "\n", "utf-8")
+    return zugang
+
+
+def privat_bauen(datei: Path, ziel: Path, basis_url: str = "") -> tuple[Path, str]:
+    """Ein privates Paket (U7, TOML mit ``[privat] fuer = "…"``): bauen wie immer, dann
+    verschlüsselt nach ``<ziel>/p/<ordner>/paket.json`` (bzw. ``.zip``) — ``(Datei,
+    Zugangskarte)``. Die Karte (Link + Code) steht zusätzlich neben der TOML."""
+    roh = tomllib.loads(datei.read_text("utf-8"))
+    fuer = " ".join(str((roh.get("privat") or {}).get("fuer") or "").split())
+    zugang = _zugang(datei)
+    with tempfile.TemporaryDirectory() as arbeit:
+        klar = bauen(datei, Path(arbeit), fuer=fuer)
+        ordner = ziel / "p" / zugang["ordner"]
+        ordner.mkdir(parents=True, exist_ok=True)
+        pfad = ordner / ("paket" + klar.suffix)
+        datei_verschluesseln(klar, pfad, zugang["code"])
+    rel = f"p/{zugang['ordner']}/{pfad.name}"
+    link = basis_url.rstrip("/") + "/" + rel if basis_url else rel
+    name = paket_oeffnen(pfad, code=zugang["code"]).paket.name
+    karte = "\n".join(
+        [
+            f"Privates Paket „{name}“" + (f" für {fuer}" if fuer else ""),
+            f"Link: {link}",
+            f"Code: {code_text(zugang['code'])}",
+            "Link und Code getrennt weitergeben (z. B. Link per Nachricht, Code mündlich).",
+        ]
+    )
+    datei.with_name(datei.stem + ".zugangskarte.txt").write_text(karte + "\n", "utf-8")
+    try:  # QR-Code des Links, wenn `segno` da ist — nur am Rechner, nie in der App
+        import segno
+
+        segno.make(link).save(str(datei.with_name(datei.stem + ".zugang.svg")), scale=6)
+    except ImportError:
+        pass
+    return pfad, karte
+
+
+def bauen(datei: Path, ziel: Path, *, fuer: str = "") -> Path:
     """Schreibt die Paketdatei nach ``ziel`` und gibt den Pfad zurück — JSON, oder eine ZIP
     (Formatversion 4), wenn die TOML Dateien nennt (``datei = "…"``, U3): jede bereinigt
     (`core/bereinigen.py`), benannt nach ihrer Prüfsumme. Wirft `PaketFehler`."""
@@ -425,6 +484,8 @@ def bauen(datei: Path, ziel: Path) -> Path:
             inhalt: Paketinhalt = toml_oeffnen(datei, Path(arbeit))
         else:
             inhalt = paket_oeffnen(datei)
+        if fuer:  # privates Paket (U7): für wen — die App zeigt es
+            inhalt.paket.fuer = fuer
         # ohne Zeitstempel: derselbe Quelltext ergibt dieselbe Datei und Prüfsumme (K28)
         json_daten = paket_json(
             inhalt.paket,
@@ -477,6 +538,8 @@ def index(
     pakete: list[dict[str, Any]] = []
     for datei in dateien:
         daten = datei.read_bytes()
+        if ist_privat(daten[:8]):
+            continue  # private Pakete (U7) stehen nie im öffentlichen Index
         inhalt = paket_oeffnen(datei)  # JSON, TOML oder ZIP (U3)
         sha256 = hashlib.sha256(daten).hexdigest()
         pakete.append(
@@ -807,6 +870,7 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("bauen", help="Paketdateien schreiben (JSON, mit Dateien ZIP)")
     b.add_argument("dateien", nargs="+", type=Path)
     b.add_argument("--ziel", type=Path, default=Path("dist"))
+    b.add_argument("--basis-url", default="", help="für die Zugangskarte privater Pakete")
     i = sub.add_parser("index", help="Index einer Paketquelle schreiben")
     i.add_argument("dateien", nargs="+", type=Path)
     i.add_argument("--ziel", type=Path, default=Path("dist/index.json"))
@@ -848,7 +912,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{datei}: nicht gebaut — " + "; ".join(fehler))
                 return 1
             try:
-                print(bauen(datei, args.ziel))
+                if datei.suffix == ".toml" and "privat" in tomllib.loads(datei.read_text("utf-8")):
+                    pfad, karte = privat_bauen(datei, args.ziel, args.basis_url)
+                    print(pfad)
+                    print(karte)
+                else:
+                    print(bauen(datei, args.ziel))
             except PaketFehler as bau_fehler:
                 print(f"{datei}: nicht gebaut — {bau_fehler}")
                 return 1

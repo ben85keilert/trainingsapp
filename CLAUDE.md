@@ -200,7 +200,11 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   (U5): `ergaenzungen[]` (Formatversion 5) ergänzen Übungen anderer Pakete — Abschnitte, Medien,
   Parameter, Ziel, Timer, Takt (`core/ergaenzungen.py`); wirksamer Paketstand = Grund
   (`package_base_json`) + Ergänzungen (`exercise_addon`, Migration 049), abgeglichen wie ein
-  Update (`PaketRepo.ergaenzungen_anwenden`) — Eigenes bleibt. Paketmanager: Jede
+  Update (`PaketRepo.ergaenzungen_anwenden`) — Eigenes bleibt. **Private Pakete** (U7):
+  verschlüsselt mit einem 8-stelligen Code (`core/privat.py`, nur stdlib: scrypt, SHAKE-256,
+  HMAC), Link in einem Ordner mit Zufallsnamen; die App fragt beim Import nach dem Code
+  (`CodeNoetig`/`ZugangNoetig`), merkt ihn sich (`package.access_json`, Migration 050) und
+  öffnet Updates selbst; das Werkzeug legt Ordner und Code einmal an (`[privat]`, Zugangskarte). Paketmanager: Jede
   Paketübung trägt ihren Paketstand (`package_standard_json`) für „Auf Paketstand setzen“;
   Entfernen legt die Übungen in den Papierkorb, „Wieder installieren“ holt sie zurück;
   **Deaktivieren** (Migration 017) versteckt alles, ohne zu löschen; was beim Update aus

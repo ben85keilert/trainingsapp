@@ -85,6 +85,7 @@ from trainingsapp.core.timer import (
 from trainingsapp.core.training_einstellungen import TrainingEinstellungen
 from trainingsapp.core.training_einstellungen import einstellungen_lesen as training_lesen
 from trainingsapp.core.training_einstellungen import einstellungen_schreiben as training_schreiben
+from trainingsapp.core.uebungsfilter import Uebungsfilter
 from trainingsapp.core.update import Release
 from trainingsapp.core.verlauf import MODUS_ZEIT, ZEITRAUM_VORGABE
 from trainingsapp.data.anhaenge import AnhangRepo
@@ -235,15 +236,13 @@ class AppState:
     #: Welcher Reiter der Navigationsleiste aktiv ist — als Schlüssel, nicht als
     #: Index: der Reiter „Messung" lässt sich ausblenden (`app.REITER`)
     reiter: str = "heute"
-    #: Suchtext und Tag-Filter des Katalogs — überleben den Ansichtswechsel.
-    #: Innerhalb einer Art genügt ein Treffer (oder), zwischen den Arten müssen
-    #: beide passen (und). Leer = kein Filter.
+    #: Suchtext und Filter des Katalogs (Typ, Region, Paket — `core/uebungsfilter.py`,
+    #: Ben 9.11.2026) — überleben den Ansichtswechsel. Innerhalb eines Bereichs genügt ein
+    #: Treffer (oder), zwischen den Bereichen müssen alle passen (und). Leer = kein Filter.
     suchtext: str = ""
-    typ_filter: set[str] = field(default_factory=set)  # Kräftigung, Dehnung, …
-    region_filter: set[str] = field(default_factory=set)  # Nacken, Bein, …
-    #: „Übung hinzufügen“ im Plan: Typ- und Region-Filter (`ui/components/tagwahl.py`)
-    hinzufuegen_typen: set[str] = field(default_factory=set)
-    hinzufuegen_regionen: set[str] = field(default_factory=set)
+    katalog_filter: Uebungsfilter = field(default_factory=Uebungsfilter)
+    #: „Übung hinzufügen“ im Plan: derselbe Filter, eigene Wahl
+    hinzufuegen_filter: Uebungsfilter = field(default_factory=Uebungsfilter)
     #: Wie viele Übungen der letzte Start neu angelegt hat (für den Startbildschirm)
     neu_eingespielt: int = field(default=0)
     #: Je Paket, was beim Update aus dem Paket fiel und auf „übernehmen oder löschen“

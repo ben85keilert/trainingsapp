@@ -434,8 +434,10 @@ Diese ergeben sich erst aus mehreren Dateien zusammen — hier verdichtet:
   — `components/scroll.py` meldet Ziehen, der Gestenfänger in `views/tag.py` den kurzen Tipp;
   der runde Knopf verschwindet beim Schreiben); die Tastatur schließt `Notizfeld.blur` — nie
   den Fokus an einen Knopf geben, der danach verschwindet (Flutter gibt ihn dem Feld zurück). Flutter-Menüs
-  reichen den Tipp, der sie schließt, an das Darunter weiter — Filter schirmen ihre Liste ab
-  (`TagWahl.abschirmen`). **Dialoge exakt schließen:** `page.pop_dialog()`
+  reichen den Tipp, der sie schließt, an das Darunter weiter — darum filtern Katalog und „Übung
+  hinzufügen“ mit einem modalen Blatt: Knopf in der Suchzeile, Labels darunter, Typ · Region ·
+  Paket und „Alles leeren“ (`components/uebungsfilter.py`, `core/uebungsfilter.py`, Ben
+  9.11.2026). **Dialoge exakt schließen:** `page.pop_dialog()`
   trifft den obersten Eintrag — auch eine SnackBar —, darum `components/dialoge.schliessen`
   und keine SnackBar, solange ein Dialog offen ist (`Nachher`, `reste_dialog`).
   **Meldungen gehen nach 5 s** (Ben, 22.10.2026), auch mit „Rückgängig“ — zentral in

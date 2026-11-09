@@ -1,8 +1,7 @@
-"""Die Tag-Auswahl Typ | Region — an allen drei Stellen dieselbe (Ben, 15.10.2026).
+"""Die Tag-Auswahl Typ | Region im Übungs-Editor (`ui/components/tagwahl.TagWahl`).
 
-Katalogfilter, „Übung hinzufügen“ und Übungs-Editor nutzen
-`ui/components/tagwahl.TagWahl`. Die Auswahl wirkt sofort beim Ankreuzen,
-nicht erst beim Schließen der Liste.
+Die Auswahl wirkt sofort beim Ankreuzen, nicht erst beim Schließen der Liste. Gefiltert
+wird seit 9.11.2026 mit der Filterleiste (`tests/test_ui_uebungsfilter.py`).
 """
 
 from __future__ import annotations
@@ -17,7 +16,6 @@ ft = pytest.importorskip("flet")
 from trainingsapp.core.models import Exercise  # noqa: E402
 from trainingsapp.ui.components.tagwahl import TagWahl  # noqa: E402
 from trainingsapp.ui.state import AppState  # noqa: E402
-from trainingsapp.ui.views.katalog import katalog  # noqa: E402
 from trainingsapp.ui.views.uebung_bearbeiten import uebung_bearbeiten  # noqa: E402
 
 
@@ -124,58 +122,6 @@ def test_neuen_tag_anlegen(page) -> None:
     anlegen("Qigong")
     assert gemeldet[-1] == (["Dehnung", "Qigong"], [])
     assert [c.content.value for c in alle(typ) if isinstance(c, ft.MenuItemButton)][2] == "Qigong"
-
-
-def test_katalog_filtert_beim_ankreuzen(page, state) -> None:
-    ansicht = katalog(page, state)
-    typ, _ = kaesten(ansicht)
-    zeile(typ, "Atmung").on_click()
-    assert state.typ_filter == {"Atmung"}
-    liste = next(c for c in alle(ansicht) if isinstance(c, ft.ListView))
-    namen = [  # Übungszeilen haben das Zielblatt (Langdruck) — nicht die Zeile „Paketmanager“
-        z.title.value for z in liste.controls if isinstance(z, ft.ListTile) and z.on_long_press
-    ]
-    erwartet = [u.name for u in state.uebungen.alle() if "Atmung" in u.typen]
-    assert namen and sorted(namen) == sorted(erwartet)
-
-
-def _schirm(ansicht) -> tuple[ft.ListView, ft.Container]:
-    stapel = next(c for c in alle(ansicht) if isinstance(c, ft.Stack))
-    liste, schirm = stapel.controls
-    assert isinstance(liste, ft.ListView) and stapel.expand
-    return liste, schirm
-
-
-def test_tipp_neben_den_offenen_filter_waehlt_keine_uebung(page, state) -> None:
-    """Ben, 22.10.2026: „der Klick aus dem Filter soll bestätigen, ohne dass Übungen
-    ausgewählt werden“. Flutter schließt das Menü beim Tipp daneben, reicht den Tipp aber
-    weiter — solange eine Liste offen ist, liegt darum ein durchsichtiger Schirm über der
-    Übungsliste und nimmt ihn."""
-    ansicht = katalog(page, state)
-    typ, region = kaesten(ansicht)
-    _, schirm = _schirm(ansicht)
-    assert not schirm.visible and schirm.bgcolor == ft.Colors.TRANSPARENT
-    typ.on_open()
-    assert schirm.visible
-    region.on_open()  # ein Tipp auf den anderen Kasten: Typ schließt erst danach
-    typ.on_close()
-    assert schirm.visible
-    region.on_close()
-    assert not schirm.visible
-
-
-def test_uebung_hinzufuegen_hat_den_schirm(page, state) -> None:
-    from trainingsapp.core.models import Plan
-    from trainingsapp.ui.views.plan_hinzufuegen import plan_hinzufuegen_view
-
-    plan = Plan(name="Kraft", subject_id=state.profil.id)
-    state.plaene.speichern(plan)
-    ansicht = plan_hinzufuegen_view(page, state, plan)
-    typ, _ = kaesten(ansicht)
-    liste, schirm = _schirm(ansicht)
-    assert liste.controls and not schirm.visible
-    typ.on_open()
-    assert schirm.visible
 
 
 def test_editor_speichert_die_auswahl(page, state) -> None:

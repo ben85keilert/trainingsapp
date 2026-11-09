@@ -14,10 +14,11 @@ from collections.abc import Callable
 
 import flet as ft
 
-from trainingsapp.core.models import Exercise, Plan, passt_zum_filter
+from trainingsapp.core.models import Exercise, Plan
+from trainingsapp.core.uebungsfilter import paket_wahl
 from trainingsapp.ui.components.layout import sicher
-from trainingsapp.ui.components.tagwahl import TagWahl
 from trainingsapp.ui.components.uebungsbild import uebungsbild
+from trainingsapp.ui.components.uebungsfilter import FilterLeiste
 from trainingsapp.ui.state import AppState
 
 
@@ -51,12 +52,10 @@ def plan_hinzufuegen_view(
         zeichnen()
         page.update()
 
+    def treffer() -> list[Exercise]:
+        return [u for u in state.uebungen.suchen(suchtext) if state.hinzufuegen_filter.passt(u)]
+
     def zeichnen() -> None:
-        treffer = [
-            u
-            for u in state.uebungen.suchen(suchtext)
-            if passt_zum_filter(u, state.hinzufuegen_typen, state.hinzufuegen_regionen)
-        ]
         liste.controls = [
             ft.ListTile(
                 leading=uebungsbild(state, u.icon_key, u.image_path),
@@ -65,7 +64,7 @@ def plan_hinzufuegen_view(
                 trailing=_anzahl_marke(enthalten[u.id]),
                 on_click=hinzufueger(u.id, u.name),
             )
-            for u in treffer
+            for u in treffer()
         ] or [
             ft.Container(
                 padding=32,
@@ -81,22 +80,22 @@ def plan_hinzufuegen_view(
         """„Neue Übung anlegen“ (Ben, 22.10.2026, P79) — danach steht sie gleich im Plan."""
         await page.push_route(f"{basis}/hinzufuegen/neu")
 
-    # Typ | Region (Ben, 14.10.2026): zwei Kästen unter der Suche, Mehrfachauswahl
-    # mit „Akzeptieren“ / „Liste leeren“ (`ui/components/tagwahl.py`). Die Wahl
-    # liegt im AppState und übersteht so das Hin und Her zwischen Plan und Liste.
-    def filtern(typen: list[str], regionen: list[str]) -> None:
-        state.hinzufuegen_typen, state.hinzufuegen_regionen = set(typen), set(regionen)
-        zeichnen()  # nur die Liste — ein neu gebauter Kasten schlösse das offene Menü
+    # Typ · Region · Paket wie im Katalog (`ui/components/uebungsfilter.py`, Ben 9.11.2026):
+    # Knopf in der Suchzeile, Labels darunter, Blatt. Die Wahl liegt im AppState und übersteht
+    # so das Hin und Her zwischen Plan und Liste.
+    def gefiltert() -> None:
+        zeichnen()  # nur die Liste — die Leiste zieht sich selbst nach
         page.update()
 
-    tagwahl = TagWahl(
+    leiste = FilterLeiste(
+        page,
+        state.hinzufuegen_filter,
         state.uebungen.typen(),
         state.uebungen.regionen(),
-        state.hinzufuegen_typen,
-        state.hinzufuegen_regionen,
-        on_change=filtern,
+        paket_wahl(state.uebungen.alle(), [p for p, _ in state.pakete.alle()]),
+        on_change=gefiltert,
+        zaehlen=lambda: len(treffer()),
     )
-    state.hinzufuegen_typen, state.hinzufuegen_regionen = set(tagwahl.typen), set(tagwahl.regionen)
     zeichnen()
     return ft.View(
         route=f"{basis}/hinzufuegen",
@@ -110,24 +109,21 @@ def plan_hinzufuegen_view(
                 ft.Column(
                     expand=True,
                     spacing=8,
-                    # Gestreckt: die Suche so breit wie die beiden Kästen darunter
                     horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                     controls=[
                         ft.Container(
-                            padding=ft.Padding.only(left=16, right=16, top=12),
-                            content=ft.TextField(
-                                hint_text="Übung suchen",
-                                prefix_icon=ft.Icons.SEARCH,
-                                border=ft.OutlineInputBorder(border_radius=12),
-                                on_change=suchen,
+                            padding=ft.Padding.only(left=16, right=8, top=12),
+                            content=leiste.suchzeile(
+                                ft.TextField(
+                                    hint_text="Übung suchen",
+                                    prefix_icon=ft.Icons.SEARCH,
+                                    border=ft.OutlineInputBorder(border_radius=12),
+                                    on_change=suchen,
+                                )
                             ),
                         ),
-                        ft.Container(
-                            padding=ft.Padding.symmetric(horizontal=16),
-                            content=tagwahl.control,
-                        ),
-                        # Der Tipp, der den Filter schließt, nimmt keine Übung auf
-                        tagwahl.abschirmen(liste),
+                        leiste.labels,  # nur, wenn ein Filter wirkt
+                        liste,  # das Blatt ist modal: der Tipp daneben nimmt keine Übung auf
                         ft.Container(
                             padding=ft.Padding.only(left=8, right=16, bottom=8),
                             content=ft.TextButton(

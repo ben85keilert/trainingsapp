@@ -1,20 +1,16 @@
 """Platzsparende Tag-Auswahl: zwei Kästen nebeneinander — Typ | Region.
 
-Eine Komponente für alle Stellen, an denen Typen und Regionen gewählt werden
-(Ben, 15.10.2026: „Übertrage die Tag-Auswahl auf die anderen Bereiche“):
-Katalogfilter, „Übung hinzufügen“ im Plan und der Übungs-Editor. Wer sie
-ändert, ändert sie überall.
+Hier ordnet der Übungs-Editor einer Übung ihre Typen und Regionen zu. Gefiltert wird nicht
+mehr mit diesen Kästen: Katalog und „Übung hinzufügen“ haben seit 9.11.2026 den Filterknopf
+in der Suchzeile mit Labels und einem Blatt Typ · Region · Paket
+(`ui/components/uebungsfilter.py`).
 
 Jeder Kasten zeigt, was gewählt ist („alle“ oder „Dehnung, Kräftigung“), ein
 Tipp klappt die Liste darunter auf. Ankreuzen lässt sie offen, mehrere gehen,
-und **die Auswahl wirkt sofort** — die Liste dahinter reagiert schon beim
-Ankreuzen (Ben, 15.10.2026). Oben in der Liste stehen fest — sie scrollen nicht
-mit — „Akzeptieren“ (schließt) und „Liste leeren“. Ein Tipp daneben schließt
-ebenso — und **wählt nichts darunter** (Ben, 22.10.2026: „der Klick aus dem Filter
-soll bestätigen, ohne dass Übungen ausgewählt werden“): Flutter reicht den Tipp, der
-ein Menü schließt, sonst weiter (``consumeOutsideTap`` ist aus, Flet bietet es nicht
-an). Darum legt `TagWahl.abschirmen` über die Liste dahinter einen durchsichtigen
-Schirm, solange eine Liste offen ist.
+und **die Auswahl wirkt sofort** (Ben, 15.10.2026). Oben in der Liste stehen fest —
+sie scrollen nicht mit — „Akzeptieren“ (schließt) und „Liste leeren“. Ein Tipp daneben
+schließt ebenso; Flutter reicht diesen Tipp an das Darunter weiter (``consumeOutsideTap``
+ist aus, Flet bietet es nicht an) — darum filtern die Listen mit einem Blatt, das modal ist.
 
 Die Reihenfolge des Antippens bleibt: Im Editor ist der erste Typ die
 Kategorie der Übung. Mit ``neu_anlegen`` steht am Ende der Liste „Neuer Typ …“
@@ -103,9 +99,6 @@ class TagWahl:
         self._on_change = on_change
         self._page = page
         self._neu_anlegen = neu_anlegen and page is not None
-        #: Die Schirme aus `abschirmen` und welche Kästen gerade offen sind
-        self._schirme: list[ft.Container] = []
-        self._offen: set[str] = set()
         self.control = ft.Row(
             spacing=10,
             controls=[self._kasten(TYP, self.typen), self._kasten(REGION, self.regionen)],
@@ -113,34 +106,6 @@ class TagWahl:
 
     def _melden(self) -> None:
         self._on_change(list(self.typen), list(self.regionen))
-
-    def abschirmen(self, inhalt: ft.Control) -> ft.Control:
-        """``inhalt`` (die Liste hinter den Kästen) mit dem Schirm: Solange eine Liste offen
-        ist, fängt er den Tipp, der sie schließt (Moduldocstring)."""
-        schirm = ft.Container(
-            left=0,
-            top=0,
-            right=0,
-            bottom=0,
-            bgcolor=ft.Colors.TRANSPARENT,  # ohne Farbe ginge der Tipp hindurch
-            visible=bool(self._offen),
-        )
-        self._schirme.append(schirm)
-        return ft.Stack(expand=inhalt.expand, fit=ft.StackFit.EXPAND, controls=[inhalt, schirm])
-
-    def _offen_melden(self, titel: str, offen: bool) -> Callable[[], None]:
-        def handler() -> None:
-            if offen:
-                self._offen.add(titel)
-            else:
-                self._offen.discard(titel)
-            for schirm in self._schirme:
-                if schirm.visible != bool(self._offen):
-                    schirm.visible = bool(self._offen)
-                    with contextlib.suppress(RuntimeError):  # vor dem ersten Anzeigen
-                        schirm.update()
-
-        return handler
 
     def _kasten(self, titel: str, wahl: list[str]) -> ft.Control:
         namen = self._namen[titel]
@@ -253,8 +218,6 @@ class TagWahl:
             width=150,  # bis die Messung unten die echte Breite liefert
             content=ft.Column(spacing=0, tight=True, controls=[beschriftung, wert]),
             trailing=ft.Icon(ft.Icons.ARROW_DROP_DOWN),
-            on_open=self._offen_melden(titel, True),
-            on_close=self._offen_melden(titel, False),
             style=ft.ButtonStyle(
                 shape=ft.RoundedRectangleBorder(radius=10),
                 side=ft.BorderSide(1, ft.Colors.OUTLINE),

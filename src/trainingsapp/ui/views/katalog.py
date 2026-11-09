@@ -1,11 +1,10 @@
-"""Übungskatalog: Suche, Filter nach Typ und Region, Liste.
+"""Übungskatalog: Suche, Filter nach Typ, Region und Paket, Liste.
 
-Die Daten kommen aus dem Repository, gefiltert wird mit
-`core.models.passt_zum_filter`. Unter der Suche stehen die zwei Kästen
-Typ | Region (`ui/components/tagwahl.py`, dieselbe Auswahl wie in „Übung
-hinzufügen“ und im Editor); die Liste reagiert schon beim Ankreuzen. Suchtext
-und Filter liegen im `AppState`, damit sie den Wechsel auf einen anderen Reiter
-überleben.
+Die Daten kommen aus dem Repository, gefiltert wird mit `core.uebungsfilter`. Rechts neben
+der Suche sitzt der Filterknopf, darunter stehen die wirkenden Filter als Labels
+(`ui/components/uebungsfilter.py`, dieselbe Leiste wie in „Übung hinzufügen“, Ben
+9.11.2026); die Liste reagiert schon beim Antippen im Blatt. Suchtext und Filter liegen im
+`AppState`, damit sie den Wechsel auf einen anderen Reiter überleben.
 """
 
 from __future__ import annotations
@@ -14,11 +13,12 @@ from collections.abc import Callable
 
 import flet as ft
 
-from trainingsapp.core.models import Exercise, passt_zum_filter
+from trainingsapp.core.models import Exercise
+from trainingsapp.core.uebungsfilter import paket_wahl
 from trainingsapp.ui.components import ziele as zl
 from trainingsapp.ui.components.scroll import scroll_merken
-from trainingsapp.ui.components.tagwahl import TagWahl
 from trainingsapp.ui.components.uebungsbild import uebungsbild
+from trainingsapp.ui.components.uebungsfilter import FilterLeiste
 from trainingsapp.ui.state import AppState
 from trainingsapp.ui.views.ziele import ziele_fuer
 
@@ -97,14 +97,13 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
 
     # -- Anzeige aus dem Zustand ableiten -------------------------------------
 
+    def treffer() -> list[Exercise]:
+        return [u for u in state.uebungen.suchen(state.suchtext) if state.katalog_filter.passt(u)]
+
     def zeichnen() -> None:
-        treffer = [
-            u
-            for u in state.uebungen.suchen(state.suchtext)
-            if passt_zum_filter(u, state.typ_filter, state.region_filter)
-        ]
-        if treffer:
-            liste.controls = [uebungs_zeile(u) for u in treffer]
+        gefunden = treffer()
+        if gefunden:
+            liste.controls = [uebungs_zeile(u) for u in gefunden]
         else:
             liste.controls = [
                 ft.Container(
@@ -172,42 +171,44 @@ def katalog(page: ft.Page, state: AppState) -> ft.Control:
                 )
         return zeilen
 
-    # -- Filter: zwei Kästen Typ | Region, sofort wirksam ----------------------
-    # Nur die Liste wird neu gezeichnet, nie die Kästen — sonst schlösse das
-    # offene Menü. Filter auf Tags, die es nicht mehr gibt, fallen weg.
+    # -- Filter: Knopf in der Suchzeile, Labels, Blatt — sofort wirksam -------
+    # Die Leiste zieht Knopf, Labels und Blatt selbst nach; hier nur die Liste. Filter auf
+    # Tags oder Pakete, die es nicht mehr gibt, fallen weg.
 
-    def filtern(typen: list[str], regionen: list[str]) -> None:
-        state.typ_filter, state.region_filter = set(typen), set(regionen)
+    def gefiltert() -> None:
         zeichnen()
         page.update()
 
-    tagwahl = TagWahl(
+    leiste = FilterLeiste(
+        page,
+        state.katalog_filter,
         state.uebungen.typen(),
         state.uebungen.regionen(),
-        sorted(state.typ_filter),
-        sorted(state.region_filter),
-        on_change=filtern,
+        paket_wahl(state.uebungen.alle(), [p for p, _ in state.pakete.alle()]),
+        on_change=gefiltert,
+        zaehlen=lambda: len(treffer()),
     )
-    state.typ_filter, state.region_filter = set(tagwahl.typen), set(tagwahl.regionen)
     zeichnen()
 
     return ft.Column(
         expand=True,
         spacing=8,
-        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,  # Suche so breit wie die Kästen
+        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         controls=[
             ft.Container(
-                padding=ft.Padding.only(left=16, right=16, top=12),
-                content=ft.TextField(
-                    value=state.suchtext,
-                    hint_text="Übung suchen",
-                    prefix_icon=ft.Icons.SEARCH,
-                    border=ft.OutlineInputBorder(border_radius=12),
-                    on_change=suchen,
+                padding=ft.Padding.only(left=16, right=8, top=12),
+                content=leiste.suchzeile(
+                    ft.TextField(
+                        value=state.suchtext,
+                        hint_text="Übung suchen",
+                        prefix_icon=ft.Icons.SEARCH,
+                        border=ft.OutlineInputBorder(border_radius=12),
+                        on_change=suchen,
+                    )
                 ),
             ),
-            ft.Container(padding=ft.Padding.symmetric(horizontal=16), content=tagwahl.control),
-            tagwahl.abschirmen(liste),  # der Tipp, der den Filter schließt, öffnet keine Übung
+            leiste.labels,  # nur, wenn ein Filter wirkt
+            liste,  # das Blatt ist modal: der Tipp daneben öffnet keine Übung
         ],
     )
 

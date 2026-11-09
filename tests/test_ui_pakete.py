@@ -86,14 +86,19 @@ def test_herkunft_steht_klein_hinter_der_beschreibung(page, state) -> None:
 def test_hinzufuegen_filtert_nach_typ(page, state) -> None:
     plan = Plan(name="Test", subject_id=state.profil.id)
     state.plaene.speichern(plan)
-    state.hinzufuegen_typen = {"Atmung", "gibt es nicht mehr"}
+    state.hinzufuegen_filter.typen = {"Atmung", "gibt es nicht mehr"}
     ansicht = plan_hinzufuegen_view(page, state, plan)
-    assert state.hinzufuegen_typen == {"Atmung"}
+    assert state.hinzufuegen_filter.typen == {"Atmung"}
     liste = next(c for v in ansicht.controls for c in alle(v) if isinstance(c, ft.ListView))
     namen = [z.title.value for z in liste.controls if isinstance(z, ft.ListTile)]
     erwartet = [u.name for u in state.uebungen.alle() if "Atmung" in u.typen]
     assert namen and sorted(namen) == sorted(erwartet)
-    assert any(isinstance(c, ft.SubmenuButton) for v in ansicht.controls for c in alle(v))
+    # Der Filterknopf sitzt in der Suchzeile (Ben, 9.11.2026: `components/uebungsfilter.py`)
+    assert any(
+        isinstance(c, ft.IconButton) and c.icon == ft.Icons.FILTER_LIST
+        for v in ansicht.controls
+        for c in alle(v)
+    )
 
 
 def test_import_ueber_die_oberflaeche(page, state, monkeypatch) -> None:
